@@ -1,0 +1,9 @@
+{
+  "name": "dsh-plugin-multi-root-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "docs:check": "node scripts/check-docs.mjs"
+  }
+}
