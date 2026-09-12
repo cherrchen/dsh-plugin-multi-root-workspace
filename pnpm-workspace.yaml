@@ -1,0 +1,37 @@
+packages:
+  - .
+
+# Native dependency build scripts this repository's toolchain needs to run.
+# Keep the list explicit: pnpm blocks unlisted build scripts by default.
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': true
+  '@deepseek-ai/node-addon-system': true
+  '@google/genai': false
+  koffi: true
+  node-pty: true
+  protobufjs: false
+
+# The pinned runtime is a pre-release published minutes before use; the release
+# age gate must not reject it (see docs/decisions/ADR-0002-upstream-coupling-policy.md).
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/cordis@4.0.2'
+  - '@deepseek-ai/dsh@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-app-boot@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-base@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-bash-local@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-bash-sandbox@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-fs@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-fs-local@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-fs-sandbox@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-sandbox@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-sandbox-local@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-sandbox-policy@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-sandbox-windows-acl@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-session@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-session-projection@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-shell@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-subprocess@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-subprocess-local@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-llm@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-util-values@0.1.5-rc.2'
+  - '@deepseek-ai/schemastery@3.18.2'

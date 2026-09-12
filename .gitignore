@@ -141,3 +141,10 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Plugin build output (produced by `pnpm build`, shipped via package.json `files`).
+# Root-anchored: `scripts/lib/` is source and must stay tracked.
+/lib/
+
+# Local smoke scratch directories (overridable via DSH_SMOKE_HOME)
+.dsh-smoke/

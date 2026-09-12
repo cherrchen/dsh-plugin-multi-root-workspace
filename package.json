@@ -1,9 +1,85 @@
 {
-  "name": "dsh-plugin-multi-root-workspace",
-  "version": "0.0.0",
+  "name": "@dsh-electron/dsh-plugin-multi-root-workspace",
+  "description": "Multi-root Workspace for DeepSeek Harness: adds N additional roots to the workspace sandbox scope as an out-of-tree bundle",
+  "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@11.25.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./fs": {
+      "types": "./lib/types/fs.d.ts",
+      "default": "./lib/fs.js"
+    },
+    "./sandbox": {
+      "types": "./lib/types/sandbox.d.ts",
+      "default": "./lib/sandbox.js"
+    },
+    "./scope": {
+      "types": "./lib/types/scope.d.ts",
+      "default": "./lib/scope.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/*.js",
+    "lib/types/**/*.d.ts",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "docs:check": "node scripts/check-docs.mjs"
+    "build": "pnpm run build:types && pnpm run bundle",
+    "build:types": "tsc -p tsconfig.host.json",
+    "bundle": "tsdown",
+    "docs:check": "node scripts/check-docs.mjs",
+    "lint": "oxlint",
+    "smoke": "pnpm smoke:compose && pnpm smoke:behavior",
+    "smoke:behavior": "node scripts/smoke-behavior.mjs",
+    "smoke:compose": "node scripts/smoke-compose.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.host.json --noEmit"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "packageManager": "pnpm@11.25.0",
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1 <5.0.0",
+    "@deepseek-ai/dsh-fs": ">=0.1.2-alpha.4 <0.2.0",
+    "@deepseek-ai/dsh-fs-local": ">=0.1.2-alpha.4 <0.2.0",
+    "@deepseek-ai/dsh-sandbox": ">=0.1.2-alpha.4 <0.2.0",
+    "@deepseek-ai/dsh-sandbox-local": ">=0.1.2-alpha.4 <0.2.0",
+    "@deepseek-ai/dsh-sandbox-policy": ">=0.1.2-alpha.4 <0.2.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-app-boot": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-base": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-fs": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-fs-local": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-fs-sandbox": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-sandbox": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-sandbox-local": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-sandbox-policy": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.1.5-rc.2",
+    "@types/node": "^22.0.0",
+    "oxlint": "^1.76.0",
+    "tsdown": "^0.22.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8",
+    "yaml": "^2.9.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   }
 }
