@@ -36,7 +36,7 @@ import { writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { isPathUnder } from './containment.ts'
-import type {} from './scope.ts'
+import type { FilesystemScope } from './scope.ts'
 
 /** Plugin config: the local backend's knobs verbatim (see `dsh-fs-local`). */
 export type Config = LocalConfig
@@ -109,12 +109,13 @@ export class MultiRootFileSystem extends LocalFileSystem {
    * (primary root plus the platform temp areas, canonical and deduplicated)
    * widened by the scope's additional roots, in scope order.
    * @param policy - the per-call policy.
+   * @param scope - the scope resolved once for this call; both the fence and
+   *   the denial message below share it instead of re-resolving.
    * @returns the canonical writable roots; empty under `read-only`.
    */
-  private rootsFor(policy: SandboxExecutionPolicy): string[] {
+  private rootsFor(policy: SandboxExecutionPolicy, scope: FilesystemScope): string[] {
     const roots = writableRoots(policy)
     if (roots.length === 0) return roots
-    const scope = this.ctx.multiRootScope.resolve(policy)
     for (const root of scope.additionalRoots) {
       if (!roots.includes(root)) roots.push(root)
     }
@@ -140,7 +141,10 @@ export class MultiRootFileSystem extends LocalFileSystem {
       throw new FsError(`cannot write "${target.displayPath}": file access denied under read-only mode`, 'FS_SANDBOX_DENIED')
     }
     const fresh = await this.resolve(target.displayPath)
-    const roots = this.rootsFor(policy)
+    // One resolution per call: the fence and (on denial) the message below
+    // share this scope rather than each paying for its own re-realpath pass.
+    const scope = this.ctx.multiRootScope.resolve(policy)
+    const roots = this.rootsFor(policy, scope)
     let contained = false
     for (const root of roots) {
       if (await isPathUnder(fresh.targetKey, root)) {
@@ -150,7 +154,6 @@ export class MultiRootFileSystem extends LocalFileSystem {
     }
     if (!contained) {
       const denial = `cannot write "${target.displayPath}": file access denied under workspace-write mode`
-      const scope = this.ctx.multiRootScope.resolve(policy)
       throw new FsError(
         scope.additionalRoots.length === 0 ? denial : `${denial}; allowed roots: ${roots.join(', ')}`,
         'FS_SANDBOX_DENIED',

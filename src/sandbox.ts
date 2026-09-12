@@ -63,8 +63,13 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
    */
   override confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv {
     const confined = super.confine(argv, policy)
+    // The mode check comes BEFORE the scope is resolved: `resolve` re-realpaths
+    // the workspace root and every registered root, and no mode other than
+    // `workspace-write` can use that answer — the empty-root and read-only
+    // passthrough cases must stay free of the extra synchronous IO.
+    if (policy.mode !== 'workspace-write') return confined
     const scope = this.ctx.multiRootScope.resolve(policy)
-    if (policy.mode !== 'workspace-write' || scope.additionalRoots.length === 0) return confined
+    if (scope.additionalRoots.length === 0) return confined
 
     try {
       const shape = splitConfined(confined.argv, argv)
