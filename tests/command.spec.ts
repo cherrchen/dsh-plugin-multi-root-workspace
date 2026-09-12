@@ -9,7 +9,7 @@
  * browser panel — belongs to `smoke:behavior` and the client spec.
  */
 
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
@@ -102,14 +102,17 @@ async function run(rawInput: string): Promise<{ kind: string; text?: string }> {
   return result as { kind: string; text?: string }
 }
 
+/** What one channel call answered. The value is shaped per endpoint. */
+interface PanelAnswer {
+  readonly ok: boolean
+  readonly value?: Partial<RootsView> & Partial<{ revealed: string }>
+  readonly error?: { code: string }
+}
+
 /** Call one panel endpoint through the registered channel handler. */
-async function callPanel(endpoint: string, payload: PanelRequest = {}): Promise<{ ok: boolean; value?: RootsView; error?: { code: string } }> {
+async function callPanel(endpoint: string, payload: PanelRequest = {}): Promise<PanelAnswer> {
   if (handler === undefined) throw new Error('the module registered no panel channel')
-  return await handler(endpoint, payload, new AbortController().signal) as {
-    ok: boolean
-    value?: RootsView
-    error?: { code: string }
-  }
+  return await handler(endpoint, payload, new AbortController().signal) as PanelAnswer
 }
 
 beforeEach(() => {
@@ -280,6 +283,24 @@ describe('the /workspace-folders command', () => {
     expect(withoutPicker.text).toContain('no directory was selected')
   })
 
+  it('re-checks the directories on every list, so a vanished root stops being writable', async () => {
+    const stack = await mount()
+    const extra = join(fixture.base, 'extra')
+    mkdirSync(extra)
+    await run(`add ${extra}`)
+    expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+
+    rmSync(extra, { recursive: true, force: true })
+    const gone = await run('list')
+    expect(gone.text).toContain('missing')
+    expect(stack.scope.scopeOf(primary)).toEqual([])
+
+    mkdirSync(extra)
+    const back = await run('list')
+    expect(back.text).not.toContain('missing')
+    expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+  })
+
   it('explains itself on help', async () => {
     await mount()
     const text = (await run('help')).text ?? ''
@@ -322,6 +343,10 @@ describe('the panel channel', () => {
 
     const revealed = await callPanel('reveal', { ...payload, id: firstId })
     expect(revealed.ok).toBe(true)
+    // This endpoint answers with the revealed path, NOT with a roots view: the
+    // panel parses the two differently, so the host must not blur them.
+    expect(revealed.value).toEqual({ revealed: canonicalPath(first) })
+    expect(revealed.value?.roots).toBeUndefined()
     expect(spawned).toHaveLength(1)
 
     const removed = await callPanel('remove', { ...payload, id: firstId })
@@ -359,6 +384,93 @@ describe('the panel channel', () => {
 
     const noId = await callPanel('remove', { primaryRoot: primary })
     expect(noId.error?.code).toBe('invalid-ref')
+  })
+
+  it('re-checks the directories on every list, exactly like the command does', async () => {
+    const stack = await mount({ withConnection: true })
+    const extra = join(fixture.base, 'extra')
+    mkdirSync(extra)
+    await callPanel('add', { primaryRoot: primary, path: extra })
+
+    rmSync(extra, { recursive: true, force: true })
+    const gone = await callPanel('list', { primaryRoot: primary })
+    expect(gone.value?.roots?.[0]?.state).toBe('missing')
+    expect(stack.scope.scopeOf(primary)).toEqual([])
+
+    mkdirSync(extra)
+    const back = await callPanel('list', { primaryRoot: primary })
+    expect(back.value?.roots?.[0]?.state).toBe('available')
+    expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+  })
+
+  it('withholds a root whose directory was swapped for a symlink', async () => {
+    const stack = await mount({ withConnection: true, withSubprocess: true })
+    // Canonical spellings up front: after the swap, `canonicalPath(granted)`
+    // IS `elsewhere`, so the test must compare against the pre-swap names.
+    const granted = canonicalPath(join(fixture.base, 'granted'))
+    const elsewhere = canonicalPath(join(fixture.base, 'elsewhere'))
+    mkdirSync(granted)
+    mkdirSync(elsewhere)
+    const added = await callPanel('add', { primaryRoot: primary, path: granted })
+    const id = added.value?.roots?.[0]?.id ?? ''
+
+    rmSync(granted, { recursive: true, force: true })
+    symlinkSync(elsewhere, granted)
+
+    const view = await callPanel('list', { primaryRoot: primary })
+    expect(view.value?.roots?.[0]?.state).toBe('redirected')
+    // The registration still names the directory the operator gave; where it
+    // resolves now is reported as the reason, not as the path.
+    expect(view.value?.roots?.[0]?.path).toBe(granted)
+    expect(view.value?.roots?.[0]?.detail).toContain(elsewhere)
+    expect(stack.scope.scopeOf(primary)).toEqual([])
+    // Revealing reports what it revealed, and revealing is still allowed: it is
+    // an operator action, not a grant.
+    const revealed = await callPanel('reveal', { primaryRoot: primary, id })
+    expect(revealed.value?.revealed).toBe(granted)
+  })
+
+  it('removes exactly one record when two records share an id', async () => {
+    const stack = await mount({ withConnection: true })
+    const extra = join(fixture.base, 'extra')
+    const twinned = join(fixture.base, 'twinned')
+    mkdirSync(extra)
+    mkdirSync(twinned)
+    await callPanel('add', { primaryRoot: primary, path: extra })
+
+    // Hand-write the duplicate into the store, then restart the registry.
+    const storeFile = join(storeRoot, 'multi_root_workspace.json')
+    const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+      tables: { roots: Record<string, { roots: { id: string; path: string; recordedPath: string; addedAt: string }[] }> }
+    }
+    const record = document.tables.roots[primary]!
+    const [entry] = record.roots
+    record.roots.push({ ...entry!, path: twinned, recordedPath: canonicalPath(twinned) })
+    writeFileSync(storeFile, JSON.stringify(document))
+    await stack.dispose()
+    stacks = stacks.filter(candidate => candidate !== stack)
+    const restarted = await mount({ withConnection: true })
+
+    const listed = await callPanel('list', { primaryRoot: primary })
+    expect(listed.value?.roots?.map(root => root.state)).toEqual(['invalid', 'invalid'])
+    expect(restarted.scope.scopeOf(primary)).toEqual([])
+
+    const removed = await callPanel('remove', { primaryRoot: primary, id: entry!.id })
+    expect(removed.value?.roots).toHaveLength(1)
+    expect(removed.value?.roots?.[0]?.path).toBe(canonicalPath(twinned))
+  })
+
+  it('rejects a payload that is not a request body', async () => {
+    await mount({ withConnection: true })
+
+    const notAnObject = await callPanel('list', 'primary' as never)
+    expect(notAnObject.error?.code).toBe('panel/bad-request')
+
+    const unknownKey = await handler!('list', { primaryRoot: primary, sneaky: true }, new AbortController().signal) as PanelAnswer
+    expect(unknownKey.error?.code).toBe('panel/bad-request')
+
+    const wrongType = await handler!('list', { primaryRoot: 7 }, new AbortController().signal) as PanelAnswer
+    expect(wrongType.error?.code).toBe('panel/bad-request')
   })
 
   it('surfaces registry failures as errors rather than an empty list', async () => {

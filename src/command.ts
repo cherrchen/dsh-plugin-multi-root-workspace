@@ -8,6 +8,14 @@
  * both resolve the same canonical workspace root, call the same registry, and
  * report the same `RootValidationCode` values.
  *
+ * Both are also the two places a READ happens, so both go through the same
+ * revalidation entry point: `registry.refresh()` re-stats every registered
+ * directory, re-resolves it against the directory it was granted for, and
+ * republishes the scope BEFORE the list is rendered. Listing is therefore
+ * enough to notice that a directory disappeared (and enough to bring a
+ * restored one back) — which is what the panel's "Retry" button and the
+ * command's `list` both promise.
+ *
  * Both halves are SOFT: the command registers only where a command registry is
  * composed, and the channel only where a host Connection exists (web), so a
  * headless profile mounts this row with zero effect on the providers.
@@ -29,7 +37,14 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subprocess'
-import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from './contract.ts'
+import {
+  PANEL_CHANNEL,
+  parsePanelCall,
+  type PanelCall,
+  type RevealedView,
+  type RootView,
+  type RootsView,
+} from './contract.ts'
 import type { MultiRootRegistry } from './registry.ts'
 import { availableRoots, canonicalRoot, expandRootInput, RootValidationError, resolveRootRef, type RootStatus } from './roots.ts'
 
@@ -161,7 +176,7 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
       case 'help':
         return { kind: 'success', text: helpText() }
       case 'list':
-        return { kind: 'success', text: report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot) }
       case 'add': {
         const typed = unquote(parsed.rest)
         const path = typed === '' ? await pickRootPath(ctx, invocation.signal) : typed
@@ -172,20 +187,21 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
           }
         }
         await registry.add(primaryRoot, { path })
-        return { kind: 'success', text: report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot) }
       }
       case 'remove': {
-        await registry.remove(primaryRoot, { kind: 'id', id: targetOf(registry, primaryRoot, parsed.rest).id })
-        return { kind: 'success', text: report(registry, primaryRoot) }
+        const target = await targetOf(registry, primaryRoot, parsed.rest)
+        await registry.removeAt(primaryRoot, { kind: 'id', id: target.id })
+        return { kind: 'success', text: await report(registry, primaryRoot) }
       }
       case 'alias': {
         const { text: reference, rest: alias } = splitReference(parsed.rest)
-        const target = targetOf(registry, primaryRoot, reference)
+        const target = await targetOf(registry, primaryRoot, reference)
         await registry.setAlias(primaryRoot, { kind: 'id', id: target.id }, alias === '' ? undefined : unquote(alias))
-        return { kind: 'success', text: report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot) }
       }
       case 'reveal': {
-        const target = targetOf(registry, primaryRoot, parsed.rest)
+        const target = await targetOf(registry, primaryRoot, parsed.rest)
         await revealRoot(ctx, target.path)
         return { kind: 'success', text: `revealed ${target.path}` }
       }
@@ -195,9 +211,14 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
   }
 }
 
-/** The current report for one primary root. */
-function report(registry: MultiRootRegistry, primaryRoot: string): string {
-  return renderRootsReport(canonicalRoot(primaryRoot), registry.list(primaryRoot), registry.unavailable)
+/**
+ * The current report for one primary root, after re-checking every registered
+ * directory. The refresh is what makes the report describe the present rather
+ * than the moment the process started.
+ */
+async function report(registry: MultiRootRegistry, primaryRoot: string): Promise<string> {
+  const statuses = await registry.refresh(primaryRoot)
+  return renderRootsReport(canonicalRoot(primaryRoot), statuses, registry.unavailable)
 }
 
 /** Render a failure the way the composer displays it. */
@@ -246,13 +267,15 @@ function splitReference(text: string): { text: string; rest: string } {
  * @param registry - the registry to read.
  * @param primaryRoot - the workspace root the registrations belong to.
  * @param text - the operator's text.
- * @returns the matched status.
+ * @returns the matched status, after re-checking the registered directories.
  * @throws {RootValidationError} `invalid-ref` for empty text, `not-found` when nothing matches.
  */
-function targetOf(registry: MultiRootRegistry, primaryRoot: string, text: string): RootStatus {
+async function targetOf(registry: MultiRootRegistry, primaryRoot: string, text: string): Promise<RootStatus> {
   const trimmed = text.trim()
   if (trimmed === '') throw new RootValidationError('invalid-ref', 'a root reference is required')
-  const statuses = registry.list(primaryRoot)
+  // A reference must name a root that exists RIGHT NOW: an ordinal points at a
+  // position, and a path is resolved against the current canonical spelling.
+  const statuses = await registry.refresh(primaryRoot)
   if (/^\d+$/.test(trimmed)) {
     return resolveRootRef(statuses, { kind: 'ordinal', ordinal: Number(trimmed) })
   }
@@ -271,7 +294,7 @@ function targetOf(registry: MultiRootRegistry, primaryRoot: string, text: string
  * an existing directory. Otherwise the session's immutable cwd, then the
  * deployment fallback, decides.
  */
-function primaryRootOf(ctx: Context, request: PanelRequest): string {
+function primaryRootOf(ctx: Context, request: PanelCall): string {
   if (request.primaryRoot !== undefined && request.primaryRoot !== '') {
     const canonical = canonicalRoot(expandRootInput(request.primaryRoot))
     let isDirectory = false
@@ -307,30 +330,48 @@ function toRootView(status: RootStatus): RootView {
   }
 }
 
-/** Build the panel's view of one primary root. */
-function rootsViewOf(registry: MultiRootRegistry, primaryRoot: string): RootsView {
+/**
+ * Build the panel's view of one primary root, after re-checking every
+ * registered directory — the panel's read path is the same revalidation the
+ * command uses, so "the list the operator sees" is always the list the scope
+ * currently enforces.
+ */
+async function rootsViewOf(registry: MultiRootRegistry, primaryRoot: string): Promise<RootsView> {
+  const statuses = await registry.refresh(primaryRoot)
   const unavailable = registry.unavailable
   return {
     primaryRoot: canonicalRoot(primaryRoot),
-    roots: registry.list(primaryRoot).map(toRootView),
+    roots: statuses.map(toRootView),
     ...(unavailable === undefined ? {} : { unavailable }),
   }
 }
 
-/** Serve one panel endpoint. */
+/**
+ * Serve one panel endpoint.
+ *
+ * The payload is validated before anything acts on it: it arrived from a
+ * browser, and the host is the side that must not be surprised by a shape it
+ * did not expect (see `contract.ts`, which owns the schema both halves share).
+ * A malformed request is reported as `panel/bad-request` rather than throwing
+ * through the channel.
+ */
 async function dispatchPanelRequest(
   ctx: Context,
   endpoint: string,
   payload: unknown,
   _signal: AbortSignal,
 ): Promise<ConnectionRpcResult<unknown>> {
-  const request = (payload ?? {}) as PanelRequest
   try {
+    const parsed = parsePanelCall(endpoint, payload)
+    if (!parsed.ok) {
+      return { ok: false, error: { code: 'panel/bad-request', message: parsed.message, details: {} } }
+    }
+    const request = parsed.value
     const registry = ctx.multiRootRegistry
     const primaryRoot = primaryRootOf(ctx, request)
-    switch (endpoint) {
+    switch (request.endpoint) {
       case 'list':
-        return { ok: true, value: rootsViewOf(registry, primaryRoot) }
+        return { ok: true, value: await rootsViewOf(registry, primaryRoot) }
       case 'add': {
         if (request.path === undefined || request.path === '') {
           throw new RootValidationError('missing', 'a directory path is required')
@@ -339,32 +380,35 @@ async function dispatchPanelRequest(
           path: request.path,
           ...(request.alias === undefined ? {} : { alias: request.alias }),
         })
-        return { ok: true, value: rootsViewOf(registry, primaryRoot) }
+        return { ok: true, value: await rootsViewOf(registry, primaryRoot) }
       }
       case 'remove':
-        await registry.remove(primaryRoot, { kind: 'id', id: requireId(request) })
-        return { ok: true, value: rootsViewOf(registry, primaryRoot) }
+        await registry.removeAt(primaryRoot, { kind: 'id', id: requireId(request) })
+        return { ok: true, value: await rootsViewOf(registry, primaryRoot) }
       case 'alias':
         await registry.setAlias(primaryRoot, { kind: 'id', id: requireId(request) }, request.alias)
-        return { ok: true, value: rootsViewOf(registry, primaryRoot) }
+        return { ok: true, value: await rootsViewOf(registry, primaryRoot) }
       case 'move':
         await registry.move(
           primaryRoot,
           { kind: 'id', id: requireId(request) },
           request.beforeId === undefined ? undefined : { kind: 'id', id: request.beforeId },
         )
-        return { ok: true, value: rootsViewOf(registry, primaryRoot) }
+        return { ok: true, value: await rootsViewOf(registry, primaryRoot) }
       case 'reveal': {
         const id = requireId(request)
-        const target = registry.list(primaryRoot).find(status => status.id === id)
+        // The reference is resolved against the re-checked list, so revealing a
+        // root whose directory changed still targets the current spelling.
+        const target = (await registry.refresh(primaryRoot)).find(status => status.id === id)
         if (target === undefined) {
           throw new RootValidationError('not-found', `no registered root with id "${id}"`)
         }
         await revealRoot(ctx, target.path)
-        return { ok: true, value: { revealed: target.path } }
+        // The ONE endpoint that does not answer with a roots view: it reports
+        // what it revealed, and the panel leaves its list as it is.
+        const value: RevealedView = { revealed: target.path }
+        return { ok: true, value }
       }
-      default:
-        return { ok: false, error: { code: 'panel/bad-request', message: `unknown endpoint "${endpoint}"`, details: {} } }
     }
   } catch (error: unknown) {
     if (error instanceof RootValidationError) {
@@ -378,7 +422,7 @@ async function dispatchPanelRequest(
 }
 
 /** Require the identity a mutating panel request must carry. */
-function requireId(request: PanelRequest): string {
+function requireId(request: PanelCall): string {
   if (request.id === undefined || request.id === '') {
     throw new RootValidationError('invalid-ref', 'a root id is required')
   }
