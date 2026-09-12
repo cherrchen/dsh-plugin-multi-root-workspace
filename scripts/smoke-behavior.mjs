@@ -168,18 +168,33 @@ function markerProbe(path) {
 }
 
 /**
- * The facts one recorded confined-write outcome carries, as a plain object.
+ * The `wrote` / `present` facts one recorded confined-write outcome carries.
+ *
+ * Read from the SERIALIZED record, because that is what travels out of the battery
+ * and what appears in a failure message: whether the value is a boolean or the
+ * string `"true"` depends on how the child serialized it, and §either way the
+ * question being asked — did the confined command write? — has the same answer.
  * @param outcome - the recorded value (an object, or the battery's failure text).
- * @returns the outcome itself, or `{ failure }` when the command never ran.
+ * @returns the two facts, plus whether the command ran at all.
  */
 function confinedFacts(outcome) {
-  if (outcome !== null && typeof outcome === 'object') return outcome
-  return { failure: String(outcome) }
-}
-
-/** Render one facts object for a failure message. */
-function describeFacts(facts) {
-  return JSON.stringify(facts)
+  const text = typeof outcome === 'string' ? outcome : JSON.stringify(outcome)
+  const fact = (name) => {
+    const match = new RegExp(`"${name}":(true|false)`).exec(text)
+    return match === null ? undefined : match[1] === 'true'
+  }
+  const wrote = fact('wrote')
+  const refused = text.includes('"failure"') || text.includes('SANDBOX_UNAVAILABLE')
+  return {
+    text,
+    wrote,
+    present: fact('present'),
+    denied: fact('denied'),
+    // The command ran only if it reported its own redirect AND the host did not
+    // refuse to confine at all (a refusal outcome also carries `wrote: false`,
+    // which is why the failure has to be excluded explicitly).
+    ran: !refused && wrote !== undefined,
+  }
 }
 
 /**
@@ -544,7 +559,7 @@ try {
       // recorded objects carry host-level fields (`failure`, `denied`) that have
       // nothing to do with whether THIS command ran, which is how a successful
       // `wrote: true` run got reported as an unusable runner.
-      const runnerRefused = bashInside.wrote !== true && bashInside.wrote !== false
+      const runnerRefused = !bashInside.ran
 
       if (mode === 'workspace-write') {
         check.ok(insideWrite.startsWith('undefined'), `${mode}: fs write inside the primary root succeeded`, insideWrite)
@@ -560,19 +575,19 @@ try {
       // One decision per mode, then the facts about what the confined command did.
       if (runnerRefused) {
         check.skip(`${mode}: confined bash execution (${requireKernelRunner(hostDialect(), String(bashInside.failure).slice(0, 120))})`)
-      } else if (bashInside.wrote === true) {
+      } else if (bashInside.wrote) {
         if (mode === 'workspace-write') {
-          check.equal(bashOutside.wrote, false, 'bash cannot write outside every root', describeFacts(bashOutside))
-          check.equal(bashOutside.denied, true, 'bash reports the denial as a sandbox denial fact', describeFacts(bashOutside))
+          check.equal(bashOutside.wrote, false, 'bash cannot write outside every root', bashOutside.text)
+          check.equal(bashOutside.denied, true, 'bash reports the denial as a sandbox denial fact', bashOutside.text)
         }
       } else if (mode === 'workspace-write') {
-        check.ok(false, `${mode}: bash wrote inside the primary root as expected`, describeFacts(bashInside))
+        check.ok(false, `${mode}: bash wrote inside the primary root as expected`, bashInside.text)
       } else {
         // Read-only: the command ran and its own redirect failed, and nothing was
         // left on disk. Both are facts about THIS run (see `confinedWrite`).
-        check.equal(bashInside.present, false, 'read-only leaves no file behind from bash', describeFacts(bashInside))
+        check.equal(bashInside.present, false, 'read-only leaves no file behind from bash', bashInside.text)
         check.ok(!existsSync(join(primaryRoot, 'bash-inside.txt')),
-          'read-only leaves no bash-inside.txt on disk either', describeFacts(bashInside))
+          'read-only leaves no bash-inside.txt on disk either', bashInside.text)
       }
     }
 
@@ -613,14 +628,14 @@ try {
         check.equal(dialectGrant, String(mode === 'workspace-write'), `${mode}: host dialect grant matches the mode`, dialectGrant)
       }
 
-      if (bashExtra.wrote !== true && bashExtra.wrote !== false) {
+      if (!bashExtra.ran) {
         check.skip(`${mode}: confined bash against the additional root (${requireKernelRunner(hostDialect(), String(bashExtra.failure).slice(0, 120))})`)
       } else if (mode === 'workspace-write') {
-        check.equal(bashExtra.wrote, true, `${mode}: bash writes the additional root`, describeFacts(bashExtra))
-        check.equal(bashThird.wrote, false, `${mode}: bash cannot write outside every root`, describeFacts(bashThird))
-        check.equal(bashThird.denied, true, `${mode}: bash reports the outside denial`, describeFacts(bashThird))
+        check.equal(bashExtra.wrote, true, `${mode}: bash writes the additional root`, bashExtra.text)
+        check.equal(bashThird.wrote, false, `${mode}: bash cannot write outside every root`, bashThird.text)
+        check.equal(bashThird.denied, true, `${mode}: bash reports the outside denial`, bashThird.text)
       } else {
-        check.equal(bashExtra.wrote, false, `${mode}: read-only leaves the additional root untouched`, describeFacts(bashExtra))
+        check.equal(bashExtra.wrote, false, `${mode}: read-only leaves the additional root untouched`, bashExtra.text)
       }
     }
     // --- the M3 path: roots registered by the command, not by the smoke --------
