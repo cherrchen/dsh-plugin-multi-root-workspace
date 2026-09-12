@@ -1,0 +1,36 @@
+name: exp
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/zz-exp.yml']
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            kernel: posix
+          - os: windows-latest
+            kernel: none
+    if: vars.DSH_WINDOWS_CI == '1' || matrix.kernel == 'posix'
+    runs-on: ${{ matrix.os }}
+    env:
+      CI: 'true'
+      FORCE_COLOR: '0'
+      TERM: dumb
+    steps:
+      - uses: actions/checkout@v4
+      - name: probe
+        run: echo probe
+      - name: Upload
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp-${{ matrix.os }}
+          path: |
+            probe.log
+            *.log
+          if-no-files-found: ignore
+          retention-days: 1
