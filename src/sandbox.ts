@@ -8,11 +8,21 @@
  * and the fs fence one and the same root set (requirement §13). The bash
  * executor itself is therefore left upstream: it never computes roots.
  *
- * M1 (this milestone) ships the empty-root path only: with no additional roots
- * registered, `confine` returns the upstream provider's result untouched, which
- * is what "installed plugin behaves exactly like no plugin" means for this
- * service. Widening the grants for non-empty scopes lands in M2 and must keep
- * the three invariants documented on {@link MultiRootSandboxProvider.confine}.
+ * The widening itself lives in `./dialects.ts`: the upstream profile builders
+ * are unreachable in the published package, so the additional roots are grafted
+ * onto the profile `super.confine` actually produced (recognize the dialect
+ * structurally, clone its grant spelling, fail loudly when the shape is not
+ * known). This class owns only the policy that decides WHEN to graft:
+ *
+ * 1. with no additional roots, or under any mode other than `workspace-write`,
+ *    the upstream result is returned ELEMENT FOR ELEMENT — same argv, same
+ *    `enforcement`, same `denialSignatures`, same `runnerFailureRules`;
+ * 2. `enforcement`, `denialSignatures`, and `runnerFailureRules` are NEVER
+ *    recomputed here, even when the argv is widened — the bash executor derives
+ *    its denial and enforcement reporting from them;
+ * 3. only `argv` may differ, and a dialect whose shape cannot be extended fails
+ *    loudly (`SandboxUnavailableError`) instead of silently confining to the
+ *    primary root alone.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/sandbox
  */
@@ -22,6 +32,7 @@ import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { Config } from '@deepseek-ai/dsh-sandbox-local'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import { DialectUnrecognizedError, splitConfined, widenProfileArgs } from './dialects.ts'
 import type {} from './scope.ts'
 
 export type { Config }
@@ -34,30 +45,59 @@ export type { Config }
 export class MultiRootSandboxProvider extends LocalSandboxProvider {
   static inject = ['sandboxPolicy', 'multiRootScope']
 
+  /** Whether the Windows ACL limitation has already been reported (once per provider). */
+  private warnedAboutWindowsAcl = false
+
   /**
-   * Wrap `argv` so it executes confined under `policy` on this host.
+   * Wrap `argv` so it executes confined under `policy` on this host, granting
+   * the scope's additional roots inside the SAME dialect profile.
    *
-   * Three invariants M1 fixes for every later milestone:
-   * 1. with an empty additional-root set the upstream result is returned
-   *    ELEMENT FOR ELEMENT — same argv, same `enforcement`, same
-   *    `denialSignatures`, same `runnerFailureRules`;
-   * 2. `enforcement`, `denialSignatures`, and `runnerFailureRules` are NEVER
-   *    recomputed here, even once additional roots widen the argv — the bash
-   *    executor derives its denial and enforcement reporting from them;
-   * 3. only `argv` may differ, and a dialect whose shape cannot be extended
-   *    fails loudly instead of silently confining to the primary root alone.
-   *
+   * Under `read-only` nothing is added (the mode denies every write, additional
+   * roots included), and `danger-full-access` never reaches here at all: the
+   * bash executor and the PTY backend both hand their argv straight to the local
+   * runtime in that mode. Widening therefore only ever ADDS the scope's
+   * additional roots to an upstream `workspace-write` profile.
    * @param argv - the exact argv the caller is about to spawn.
    * @param policy - the file-effect policy this execution runs under.
    * @returns the argv to spawn instead, plus the selected backend's facts.
    */
   override confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv {
+    const confined = super.confine(argv, policy)
     const scope = this.ctx.multiRootScope.resolve(policy)
-    if (scope.additionalRoots.length === 0) return super.confine(argv, policy)
-    throw new SandboxUnavailableError(
-      policy.mode,
-      `multi-root additional grants are not implemented yet (M1): ${scope.additionalRoots.join(', ')} `
-      + `under primary root ${scope.primaryRoot} cannot be granted (see the M1 plan, docs/plans/completed/2026-09-12-m1-composition-and-passthrough.md)`,
+    if (policy.mode !== 'workspace-write' || scope.additionalRoots.length === 0) return confined
+
+    try {
+      const shape = splitConfined(confined.argv, argv)
+      if (shape.dialect === 'windows-acl') {
+        this.warnAboutWindowsAcl(scope.additionalRoots.length)
+        return confined
+      }
+      const profileArgs = widenProfileArgs(shape.dialect, shape.profileArgs, policy, scope.additionalRoots)
+      return { ...confined, argv: [...profileArgs, '--', ...argv] }
+    } catch (error: unknown) {
+      if (!(error instanceof DialectUnrecognizedError)) throw error
+      throw new SandboxUnavailableError(
+        policy.mode,
+        `multi-root workspace: cannot grant the additional workspace roots [${scope.additionalRoots.join(', ')}] `
+        + `under the primary root ${scope.primaryRoot} — ${error.message}`,
+      )
+    }
+  }
+
+  /**
+   * Report the documented first-release limitation exactly once: the Windows ACL
+   * rung grants through per-workspace write SIDs rather than argv paths, so
+   * additional roots stay unenforced for confined commands there while the
+   * in-process filesystem fence still allows them.
+   * @param rootCount - how many additional roots the scope carries.
+   */
+  private warnAboutWindowsAcl(rootCount: number): void {
+    if (this.warnedAboutWindowsAcl) return
+    this.warnedAboutWindowsAcl = true
+    this.ctx.logger.warn(
+      `multi-root workspace: this scope carries ${rootCount} additional workspace root(s), but the Windows ACL runner `
+      + 'grants write access per workspace SID and cannot express them; confined bash/PTY runs will not be able to write '
+      + 'them, while ctx.fs still can. Kernel-level multi-root on Windows is out of scope for the first release.',
     )
   }
 }

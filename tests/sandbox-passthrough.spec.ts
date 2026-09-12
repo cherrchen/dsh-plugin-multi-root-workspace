@@ -1,7 +1,7 @@
 /**
  * Passthrough parity for the kernel-sandbox provider.
  *
- * M1's contract is that `MultiRootSandboxProvider.confine` returns the upstream
+ * The contract is that `MultiRootSandboxProvider.confine` returns the upstream
  * result ELEMENT FOR ELEMENT while the scope carries no additional roots: same
  * argv, same `enforcement`, same denial dialect, same runner-failure rules. The
  * bash executor derives its denial and enforcement reporting from exactly those
@@ -9,12 +9,13 @@
  *
  * Each dialect is forced through the provider's public `internals` hook, which
  * selects a sole candidate and therefore skips probing — the assertions are
- * about the profile each dialect builds, not about running a sandbox.
+ * about the profile each dialect builds, not about running a sandbox. The
+ * populated-scope half of the contract (each dialect widened, and still
+ * transparent under `read-only`) lives in `tests/sandbox-multi-root.spec.ts`.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { SandboxInternals } from '@deepseek-ai/dsh-sandbox-local'
@@ -113,18 +114,5 @@ describe('empty-root passthrough', () => {
     const separator = confined.argv.indexOf('--')
     expect(separator).toBeGreaterThan(0)
     expect(confined.argv.slice(separator + 1)).toEqual(['bash', '-c', 'true'])
-  })
-})
-
-describe('M1 scope boundary', () => {
-  it('fails loudly instead of silently confining to the primary root alone', async () => {
-    const ours = await mountProvider(MultiRootSandboxProvider, 'workspace-write')
-    ours.internals = { chain: ['bwrap'] }
-    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside }])
-
-    expect(() => ours.confine(['bash', '-c', 'true'], policy('workspace-write')))
-      .toThrow(SandboxUnavailableError)
-    expect(() => ours.confine(['bash', '-c', 'true'], policy('workspace-write')))
-      .toThrow(/not implemented yet \(M1\)/)
   })
 })
