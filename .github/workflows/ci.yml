@@ -34,17 +34,21 @@ jobs:
           # reason printed.
           - os: windows-latest
             kernel: none
-    # Parked, not deleted: this job is ready to run on a Windows machine as soon
-    # as one is set up to receive it — a self-hosted runner labelled `dsh-win`, or
-    # by making the repository public (standard Windows runners bill minutes on
-    # private repositories). Enable by flipping this single flag.
-    if: vars.DSH_WINDOWS_CI == '1' || matrix.kernel == 'posix'
     runs-on: ${{ matrix.os }}
     env:
       # Readable, non-interactive failures: no TTY to wrap, no spinner rewrites.
       CI: 'true'
       FORCE_COLOR: '0'
       TERM: dumb
+      # The Windows lane is parked, not deleted: this job is ready to run there as
+      # soon as a Windows machine is set up to receive it — a self-hosted runner,
+      # or making the repository public, since standard Windows runners bill
+      # minutes on private repositories. Set the repository variable
+      # DSH_WINDOWS_CI=1 to enable it; every POSIX-only step below carries the same
+      # condition, and it is checked per STEP because a job-level `if` that reads
+      # `matrix` makes GitHub reject the whole file (the run then reports a failure
+      # with zero jobs).
+      DSH_WINDOWS_CI: ${{ vars.DSH_WINDOWS_CI }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -86,12 +90,15 @@ jobs:
       # dialect, and the kernel assertions for exactly those dialects must RUN
       # (a skip becomes a failure) while a dialect this host does not have is
       # never required. See scripts/check-kernel-runner.mjs.
-      - if: matrix.kernel == 'posix'
+      - if: matrix.kernel == 'posix' || env.DSH_WINDOWS_CI == '1'
+        name: Probe which kernel dialects this host can really run
         run: pnpm kernel:probe
 
       - if: matrix.kernel == 'posix'
+        name: Composition gate
         run: pnpm smoke:compose
       - if: matrix.kernel == 'posix'
+        name: Behavior battery
         run: pnpm smoke:behavior > smoke-behavior.log 2>&1
       - name: Upload the behavior smoke log when it failed
         if: failure() && matrix.kernel == 'posix'
@@ -104,6 +111,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - if: matrix.kernel == 'posix'
+        name: Cross-repository journey
         run: pnpm smoke:journey
 
       - run: pnpm docs:check
