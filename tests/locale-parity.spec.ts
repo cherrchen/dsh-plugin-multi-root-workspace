@@ -51,6 +51,7 @@ describe('panel dictionaries', () => {
       'storage-unavailable',
       'reveal-unavailable',
       'unavailable',
+      'copy-failed',
       'fallback',
     ]) {
       expect(Object.keys(zh), `error.${code} must be translated`).toContain(`error.${code}`)

@@ -46,6 +46,10 @@ interface Harness {
   setFailure: (failure: { code: string; message: string } | undefined) => void
   /** What the next `reveal` answers (the real host answers a `RevealedView`). */
   setRevealed: (value: unknown) => void
+  /** Make the NEXT channel call hang until `release` is called. */
+  holdNextCall: () => void
+  /** Release a call held by `holdNextCall`. */
+  release: () => void
 }
 
 const ROOT_A: RootView = { id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', alias: 'payments' }
@@ -66,12 +70,19 @@ function mount(): Harness {
   let view: RootsView = { primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B] }
   let failure: { code: string; message: string } | undefined
   let revealed: unknown = { revealed: '/repos/payments' } satisfies RevealedView
+  let gate: Promise<void> | undefined
+  let releaseGate: (() => void) | undefined
   const picked: string | null = '/repos/picked'
 
   const connection = {
     rpc: {
       call: async (channel: string, endpoint: string, payload: PanelRequest) => {
         calls.push({ channel, endpoint, payload })
+        if (gate !== undefined) {
+          const held = gate
+          gate = undefined
+          await held
+        }
         if (failure !== undefined) return { ok: false, error: failure }
         // One shape per endpoint, exactly as the host sends them: `reveal`
         // answers with the revealed path, everything else with the whole view.
@@ -121,6 +132,8 @@ function mount(): Harness {
     setView: next => { view = next },
     setFailure: next => { failure = next },
     setRevealed: next => { revealed = next },
+    holdNextCall: () => { gate = new Promise<void>(resolve => { releaseGate = resolve }) },
+    release: () => { releaseGate?.(); releaseGate = undefined },
   }
 }
 
@@ -338,6 +351,37 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]!)
 
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.fallback`) })
+  })
+
+  it('reports a clipboard that refuses the copy', async () => {
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'))
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.copyPath` })[0]!)
+
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.copy-failed`) })
+  })
+
+  it('disables the row actions while a mutation is in flight', async () => {
+    // The hold gate keeps the remove's channel call pending, which is the only
+    // way to observe the busy window deterministically.
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    harness.holdNextCall()
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]!)
+    expect(harness.calls.some(call => call.endpoint === 'remove')).toBe(true)
+    expect(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]).toHaveProperty('disabled', true)
+
+    harness.release()
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]).toHaveProperty('disabled', false)
+    })
   })
 
   it('renders a redirected root as its own state', async () => {

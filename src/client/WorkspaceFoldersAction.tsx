@@ -247,9 +247,16 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     try {
       await navigator.clipboard.writeText(root.path)
       setCopiedId(root.id)
+      setState(previous => ({ ...previous, error: undefined }))
       window.setTimeout(() => { setCopiedId(current => (current === root.id ? undefined : current)) }, 1500)
-    } catch {
+    } catch (error: unknown) {
+      // A clipboard refusal is the browser environment's, not the host's, so it
+      // is reported here with its own code rather than left silent.
       setCopiedId(undefined)
+      setState(previous => ({
+        ...previous,
+        error: new PanelError('copy-failed', error instanceof Error ? error.message : String(error)),
+      }))
     }
   }, [])
 
@@ -305,20 +312,21 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                 </span>
               )}
               <Action onClick={() => { void copyPath(root) }}>{copiedId === root.id ? t('panel.copied') : t('panel.copyPath')}</Action>
-              <Action onClick={() => { void reveal(root) }}>{t('panel.reveal')}</Action>
+              <Action disabled={state.busy} onClick={() => { void reveal(root) }}>{t('panel.reveal')}</Action>
               <Action
-                disabled={index === 0}
+                disabled={state.busy || index === 0}
                 onClick={() => { void move(root, roots[index - 1]?.id) }}
               >
                 {t('panel.moveUp')}
               </Action>
               <Action
-                disabled={index === roots.length - 1}
+                disabled={state.busy || index === roots.length - 1}
                 onClick={() => { void move(root, roots[index + 2]?.id) }}
               >
                 {t('panel.moveDown')}
               </Action>
               <Action
+                disabled={state.busy}
                 onClick={() => {
                   setAliasFor(current => (current === root.id ? undefined : root.id))
                   setAliasDraft(root.alias ?? '')
@@ -326,7 +334,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
               >
                 {t('panel.alias')}
               </Action>
-              <Action onClick={() => { void mutate('remove', { id: root.id }) }}>{t('panel.remove')}</Action>
+              <Action disabled={state.busy} onClick={() => { void mutate('remove', { id: root.id }) }}>{t('panel.remove')}</Action>
               {aliasFor === root.id ? (
                 <span style={{ display: 'flex', gap: '6px', flexBasis: '100%' }}>
                   <input
@@ -336,7 +344,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                     onChange={event => { setAliasDraft(event.target.value) }}
                     style={{ flex: '1 1 auto', padding: '3px 6px' }}
                   />
-                  <Action onClick={() => { void mutate('alias', { id: root.id, alias: aliasDraft }); setAliasFor(undefined) }}>
+                  <Action disabled={state.busy} onClick={() => { void mutate('alias', { id: root.id, alias: aliasDraft }); setAliasFor(undefined) }}>
                     {t('panel.aliasSave')}
                   </Action>
                   <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
