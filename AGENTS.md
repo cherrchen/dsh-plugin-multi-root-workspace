@@ -89,6 +89,8 @@ The project is an out-of-tree DSH plugin bundle (`@dsh-electron/dsh-plugin-multi
 
 Milestone M1 (bundle composition and empty-root pass-through) is complete and verified: the plugin installs through `dsh plugin`, replaces the two provider rows, and behaves exactly like an uninstalled harness while no additional root is configured. See `docs/plans/completed/2026-09-12-m1-composition-and-passthrough.md` for the evidence and for the T0 findings.
 
+Milestone M2 (additional roots and dialect grants) is complete and verified: a registered additional root is enforced both by the in-process fence and by the host kernel dialect (Seatbelt / bwrap / Landlock) through one shared scope, the cross-provider allow matrix is pinned by tests, the workspace topology reaches the model through a runtime-context contribution, and the empty-root behavior stays byte-identical to an uninstalled harness. See `docs/plans/completed/2026-09-12-m2-additional-roots-and-dialect-grants.md`. Dialect grants are widened by recognizing the profile `super.confine` produced and cloning its grant spelling — never by deep-importing upstream internals (`docs/decisions/ADR-0003-dialect-grant-widening.md`).
+
 Development environment, toolchain, commands, and the smoke mechanism are documented in `docs/development/plugin-development-workflow.md`. Requirements, design, upstream facts, and decisions live in `docs/requirements/`, `docs/architecture/`, `docs/reference/`, and `docs/decisions/`.
 
-Additional roots, their registration, the kernel-dialect grants, and the client UI are M2/M3 work. Do not invent constraints that are not written down.
+The root registry (persistence, validation, the `/workspace-folders` command), the client UI, and the e2e journey are M3 work. Additional roots are registered today through `ctx.multiRootScope.setAdditionalRoots()` from tests and smoke scripts — do not build a second data source before M3. Do not invent constraints that are not written down.

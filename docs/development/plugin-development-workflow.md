@@ -1,7 +1,7 @@
 # 插件开发工作流：构建、测试与冒烟
 
-> 状态：M1 已落地。本文记录本仓库当前**真实存在**的命令、运行时约束与验证机制；未实现的流程不要写在这里。
-> 相关：[需求](../requirements/multi-root-workspace.md)、[架构](../architecture/multi-root-workspace.md)、[ADR-0002 上游耦合策略](../decisions/ADR-0002-upstream-coupling-policy.md)
+> 状态：M1 与 M2 已落地。本文记录本仓库当前**真实存在**的命令、运行时约束与验证机制；未实现的流程不要写在这里。
+> 相关：[需求](../requirements/multi-root-workspace.md)、[架构](../architecture/multi-root-workspace.md)、[ADR-0002 上游耦合策略](../decisions/ADR-0002-upstream-coupling-policy.md)、[ADR-0003 方言 grant 拼接](../decisions/ADR-0003-dialect-grant-widening.md)
 
 ## 1. 目标运行时与版本策略
 
@@ -32,10 +32,10 @@
 pnpm install            # 安装（首次或改依赖后）
 pnpm lint               # oxlint
 pnpm typecheck          # tsc --noEmit
-pnpm test               # vitest run：单测 + 差分 parity + patch 不变量
-pnpm build              # tsc 出 lib/types/*.d.ts + tsdown 出 lib/*.js
+pnpm test               # vitest run：单测 + 空根差分 parity + 方言 grant 矩阵 + patch 不变量
+pnpm build              # tsc 出 lib/types/*.d.ts + tsdown 出 lib/*.js（含共享 chunk）
 pnpm smoke:compose      # 组合门禁（需要先 build）
-pnpm smoke:behavior     # 空根直通行为门禁（需要先 build）
+pnpm smoke:behavior     # 空根直通 + 多根 battery 行为门禁（需要先 build）
 pnpm smoke              # compose + behavior
 pnpm docs:check         # 文档结构检查
 ```
@@ -62,6 +62,11 @@ pnpm docs:check         # 文档结构检查
 3. 对 `ctx.fs` / `ctx.shell` 跑同一组操作：主根内写、主根外写、临时区写、根内编辑、根外读、bash `pwd`、bash 根内写、bash 根外写。
 4. 在 `workspace-write` 与 `read-only` 两种模式下各跑一轮，并把 `mr-plugin` 的结果与 `mr-baseline` 的结果逐项比较：**空附加根时两者必须完全一致**，而 provider 身份必须不同。
 5. 额外断言身份：`ctx.fs` 是本插件的类且与宿主的 `FileSystem` 同一份定义、`ctx.sandbox` 继承上游 `LocalSandboxProvider`、`ctx.shell` 仍是上游 `SandboxBashExecutor`。
+6. **多根 battery（M2）**：在同一个插件 profile 上再 boot 一次，用 `ctx.multiRootScope.setAdditionalRoots()` 注册一个附加根，然后断言——
+   - fs 写附加根成功；写「第三个目录」（根外）被 `FS_SANDBOX_DENIED` 拒绝，且文案含 `allowed roots:` 并同时列出主根与附加根；根外不留文件；
+   - **宿主真实方言**（不注入 `internals`）的 `ctx.sandbox.confine` argv 含该附加根，`read-only` 下不含；
+   - 受限 bash：可用时能写附加根、不能写根外；不可用时显式 skip 并打印原因。
+   多根 battery 只断言 plugin profile，不与 baseline 比较（baseline 没有多根能力，这正是被测差异）。
 
 夹具目录放在仓库内被忽略的 `.dsh-smoke/` 下，而不是系统临时目录：`writableRoots()` 自动授予 `/tmp` 与 `tmpdir()`，放在那里的工作区永远无法演示"根外被拒"。
 
@@ -79,11 +84,12 @@ pnpm docs:check         # 文档结构检查
 
 在被外层内核沙箱约束的进程里（例如 Coding Agent 自己的受控 shell 中）**无法嵌套** macOS Seatbelt：`sandbox-exec` 会以 `sandbox_apply: Operation not permitted` 失败，`SandboxBashExecutor` 随即 fail-closed 抛出 `SANDBOX_UNAVAILABLE`。此时：
 
-- `smoke:behavior` 会把"受限 bash 实际执行"的断言显式标记为 **skipped**（并在输出里说明原因），而不是静默通过或误报失败；
+- `smoke:behavior` 会把"受限 bash 实际执行"（含多根 battery 的两项）显式标记为 **skipped**（并在输出里说明原因），而不是静默通过或误报失败；
 - 两个 profile 面对的失败完全相同，因此"插件与未装插件行为一致"的比对仍然成立；
-- 内核方言的 argv 等价性由 `tests/sandbox-passthrough.spec.ts` 在每个环境下覆盖（用 `internals.chain` 强制 seatbelt / bwrap / landlock 三种方言，不执行 runner）。
+- 内核方言的 argv 等价性由 `tests/sandbox-passthrough.spec.ts` / `tests/sandbox-multi-root.spec.ts` 在每个环境下覆盖（用 `internals.chain` 强制 seatbelt / bwrap / landlock 三种方言，不执行 runner）；
+- `tests/parity-matrix.spec.ts` 的"真实受限执行"用例同样按宿主能力 skip（`unavailable` / `runner-failed` 都算不可用），并且只有在 runner 真的跑起来、却仍然写不进附加根时才判失败。
 
-在没有外层约束的终端（或 CI runner）中，同样的冒烟会真实执行受限 bash。
+在没有外层约束的终端（或 CI runner）中，同样的冒烟与用例会真实执行受限 bash。
 
 ## 5. 安装到真实运行时
 
@@ -106,15 +112,15 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 三行 insert
 ## 6. 上游耦合与升级流程
 
 - **只允许包入口导入**。发布包里没有 `src/`，`pkg/src/*` 在安装形态下不存在；需要上游内部实现时改为本地实现 + 注明出处 + 差分测试钉住（见 `src/containment.ts`）。
-- 子类只使用上游公开方法面（不碰 TS-private、不做原型替换）。
-- **升级流程**：改 pin → `pnpm install` → `pnpm test`（差分 parity + patch 不变量）→ `pnpm build` → `pnpm smoke:compose` → `pnpm smoke:behavior`。任一差异即视为破坏性变更，先定位再改 pin。
+- 子类只使用上游公开方法面（不碰 TS-private、不做原型替换）。`dsh-sandbox-local` 公开面只有 `confine` + `internals`，因此方言适配是**观测克隆 + 结构识别 + 识别失败即抛错**（`src/dialects.ts`，见 [ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；新增或改变方言必须同时更新调研 §10 与本文件的测试清单。
+- **升级流程**：改 pin → `pnpm install` → `pnpm test`（差分 parity + 方言矩阵 + patch 不变量）→ `pnpm build` → `pnpm smoke:compose` → `pnpm smoke:behavior`。任一差异即视为破坏性变更，先定位再改 pin。
 - 双运行时回归：`DSH_CLI=<另一运行时的 dsh 入口> pnpm smoke`。
 
 ## 7. CI
 
 `.github/workflows/ci.yml` 在 `ubuntu-latest` 与 `macos-latest` 上执行：`lint` → `typecheck` → `test` → `build` → `smoke:compose` → `smoke:behavior` → `docs:check`。
 
-Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seatbelt；Windows 内核级多根不在第一期范围（Windows 写路径由 fs fence 覆盖，见需求文档）。
+Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seatbelt；`tests/parity-matrix.spec.ts` 与 `smoke:behavior` 的真实受限执行用例会在 runner 可用时真实执行（Linux 至少 bwrap 或 Landlock 之一，macOS 为 Seatbelt），不可用时显式 skip 并打印原因——CI 不会把"没跑"记成通过。Windows 内核级多根不在第一期范围（Windows 写路径由 fs fence 覆盖，见需求文档），因此没有 `windows-latest` 腿。
 
 ## 8. 常见失败与处置
 
@@ -122,6 +128,9 @@ Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seat
 | --- | --- | --- |
 | `smoke:compose` 报某行差异多于预期 | 上游 base patch 行 id 或名字变了 | 对照 `@deepseek-ai/dsh-base` 的 `cordis.patch.yml` 更新 `cordis.patch.yml`，并同步 `tests/patch.spec.ts` |
 | boot 抛出 "service ... has been registered" | disable 行未生效（id 不匹配） | 同上；这是插件刻意的 fail-loud 设计 |
+| bash 报 `SANDBOX_UNAVAILABLE` 且文案含 "cannot grant the additional workspace roots" | 上游改了方言 profile 形状，插件拒绝静默降级 | 按调研 §10 核对新形状并更新 `src/dialects.ts` 的识别/克隆逻辑与 `tests/dialects.spec.ts` |
+| 多根 session 里 fs 能写附加根、bash 不能 | win32 的 ACL rung 无法表达附加根（第一期限制） | 查看是否已输出一次性告警；这是已知限制，需求文档已明示 |
 | `smoke:*` 提示 `lib/ is missing` | 未构建 | 先跑 `pnpm build` |
 | bash 断言整体 skipped | 当前进程已被内核沙箱约束，无法嵌套 | 在不被约束的终端或 CI 中运行以覆盖该项 |
+| `pnpm <script>` 报 `EPERM ... /Library/pnpm/.tools` | 仓库 pin 的 pnpm 版本需要写用户级 pnpm 目录 | 在可写该目录的终端（或提权）执行；仅跑门禁时可用 `sh node_modules/.bin/<tool>` 绕过 pnpm |
 | `ERR_PNPM_IGNORED_BUILDS` | 有构建脚本的依赖未在 `pnpm-workspace.yaml` 声明 | 把该依赖加入 `allowBuilds`（需要构建）或 `allowBuilds: false`（明确不需要） |

@@ -1,7 +1,7 @@
 # 现状调研：官方仓库 Workspace / Sandbox / 插件体系
 
 > 本文是对上游官方仓库（deepseek-harness）在 master `c291e7961a`（2026-09-12）的现状快照调研；所有路径相对该仓库根，事实以该提交为准，后续如上游演进需重新核对。本文是 [multi-root-workspace.md](../requirements/multi-root-workspace.md) 与 [multi-root-workspace.md](../architecture/multi-root-workspace.md) 的事实依据。
-> §8 为"不改上游"约束下的补充调研（2026-09-12 第二轮）；§9 为发布形态与运行时解析的补充调研（2026-09-12 第三轮，安装形态下必须遵守的事实）。
+> §8 为"不改上游"约束下的补充调研（2026-09-12 第二轮）；§9 为发布形态与运行时解析的补充调研（2026-09-12 第三轮，安装形态下必须遵守的事实）；§10 为 M2 期实测的方言形状与子类可用面（2026-09-12 第四轮，是 [ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md) 的依据）。
 
 ## 1. Workspace 模型：单目录注册表
 
@@ -211,3 +211,57 @@ package/lib/types/containment.d.ts
 | `fs-local/src/index.ts` | 新增 `readByteRange`（纯增量） |
 
 推论：双运行时矩阵是必要的，但插件的相关假设（类方法面、patch 行 id、policy 语义）在两个版本间是稳定的；不一致项集中在方言 runner 的导入细节，也正是"不要引用上游内部实现"的理由。
+
+## 10. 方言形状与子类可用面（2026-09-12 第四轮，M2 实测）
+
+> 本节是 M2「在单根 profile 上追加附加根」的实测依据（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）。全部结论来自在 pin 的 `0.1.5-rc.2` 上强制 `internals.chain` 后打印 `confine` 输出。
+
+### 10.1 子类可用面：只有 `confine` 与 `internals`
+
+`@deepseek-ai/dsh-sandbox-local` 发布 `.d.ts` 中 `runnerArgv`、`landlockLauncher`、`seatbeltExec`、`windowsAclRunnerArgv`、`windowsAclRunnerInvocation`、`selectRunner` **均为 TS-private**；`LocalSandboxProvider` 的公开成员只有：
+
+| 成员 | 用途 |
+| --- | --- |
+| `confine(argv, policy): ConfinedArgv` | 唯一的包装入口 |
+| `internals: SandboxInternals` | 公开测试钩子（`chain` / `platform` / `landlockLauncher` / `seatbeltExec` / `windowsAclRunnerArgs` / `probe*`） |
+| `static Config` / `internals.rmTempDir` | 配置与清理钩子 |
+
+因此子类只能从 `confine` 的**输入输出**推断方言；这是"识别失败即抛错"设计的直接原因。
+
+### 10.2 `confine` 的输出结构
+
+```text
+argv = [...profileArgs, '--', ...callerArgv]
+```
+
+- profile 段**不含**裸 `--`（四种方言与 `runnerCommand` 都是如此），所以分隔符可由 `argv.length - callerArgv.length - 1` 精确算出；用法见 §10.3 的实测输出。
+- `enforcement` / `denialSignatures` / `runnerFailureRules` 由所选 rung 决定，与 profile 段无关。
+
+### 10.3 四种方言的 profile 段（workdir 用 `<ws>` 表示 policy 根）
+
+```text
+seatbelt     ['sandbox-exec', '-p',
+              '(version 1) (allow default) (deny file-write*) (allow file-write* (literal "/dev/null"))
+               (allow file-write* (subpath "<ws>") (subpath "/private/tmp") (subpath "<tmpdir>"))']
+             read-only 时**没有** subpath form（roots 为空）
+bwrap        ['bwrap', '--ro-bind','/','/', '--dev','/dev', '--unshare-pid', '--proc','/proc',
+              '--die-with-parent', '--tmpfs','/tmp', '--bind','<ws>','<ws>']
+             read-only 时没有 --tmpfs / --bind
+landlock     ['<launcher>', '--ro','/', '--rw','/dev/null', '--rw','/tmp', '--rw','<ws>']
+             read-only 时只到 '--rw','/dev/null'
+windows-acl  ['node', '<runner>', '--workspace','<ws>', '--temp','<temp>', '--mode','workspace-write']
+runnerCommand ['<operator runner>', ...bwrap 的 profile 段]（上游契约：追加 bwrap 兼容参数）
+```
+
+要点：
+
+- **Seatbelt 的 roots 来自共享的 `writableRoots(policy)`**（canonical、去重），所以 `/tmp` 在 darwin 上是 `/private/tmp`，`tmpdir()` 是 `/var/folders/...`。多根追加只要在同一个 allow form 里再加 `(subpath "…")`。
+- **bwrap 与 Landlock 使用各自的字面拼写**：bwrap 是挂 `--tmpfs /tmp` + `--bind <ws> <ws>`，Landlock 是 `--rw /dev/null,/tmp,<ws>`；两者都**不**授予 `tmpdir()`（除非它等于 `/tmp`）。这就是上游 `roots.ts` 注释里"honest per-runner differences"的具体形态，也是 parity 断言只对"附加根集合与模式"成立的原因。
+- 字面 `/tmp` 与 darwin 的 `/private/tmp` 不是一个字符串：把 Linux 方言强制到 darwin 上跑时，临时区一行不可比（生产环境不会出现这种组合）。
+- win32 的 ACL rung 用 workspace SID 授权、argv 里没有可追加的路径，因此第一期不能表达附加根。
+
+### 10.4 哪些调用根本不会到达 `confine`
+
+- `SandboxBashExecutor.run` / `.start`：`mode === 'danger-full-access'` 时直接走本地执行，不调用 `confine`。
+- `terminal-bash` 的 `spawnArgv`：同一判断，`danger-full-access` 直接返回原始 argv。
+- 因此 `confine` 只会看到 `read-only` / `workspace-write`；多根 grant 只需按 `workspace-write` 表达即可，`read-only` 必须保持原样。

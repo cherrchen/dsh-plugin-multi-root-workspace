@@ -1,9 +1,9 @@
 # 架构文档：Multi-root Workspace（不改上游：provider 替换 + 子类化）
 
-> 状态：Target Architecture 设计稿（待评审；本文描述的是尚未实现的目标设计，不是当前已实现的系统事实）
+> 状态：**§4、§5.1、§5.3、§6 已实现（M1/M2）；§7（Root 注册表、命令、client 半部）仍为 Target 设计（M3）**。已实现部分可按当前仓库代码验证；未实现部分明确标注为设计。
 > 硬约束：不修改上游仓库（deepseek-harness）任何包；产物是外部 bundle，经 `dsh plugin add` 或 profile patch 组合。
-> 事实依据：[multi-root-workspace-research.md](../reference/multi-root-workspace-research.md)（§1-7 上游现状，§8 不改上游机制，§9 发布形态与运行时解析）；需求边界：[multi-root-workspace.md](../requirements/multi-root-workspace.md)；排期：[M1 计划](../plans/completed/2026-09-12-m1-composition-and-passthrough.md)
-> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)。
+> 事实依据：[multi-root-workspace-research.md](../reference/multi-root-workspace-research.md)（§1-7 上游现状，§8 不改上游机制，§9 发布形态与运行时解析，§10 方言形状与子类可用面）；需求边界：[multi-root-workspace.md](../requirements/multi-root-workspace.md)；排期：[M1 计划](../plans/completed/2026-09-12-m1-composition-and-passthrough.md)、[M2 计划](../plans/completed/2026-09-12-m2-additional-roots-and-dialect-grants.md)
+> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)；M2 实施后 §5.3 与 §6 改写为已实现的机制（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）。
 
 ## 1. 总览
 
@@ -78,26 +78,28 @@ dsh-plugin-multi-root-workspace/
 ## 4. Scope 解析（插件的单一权限世界）
 
 ```ts
-// 多根语义在插件内的唯一 home（对应上游 roots.ts 的角色）
+// 多根语义在插件内的唯一 home（对应上游 roots.ts 的角色）——已实现的公开面
 export interface FilesystemScope {
-  primaryRoot: string          // = session.header.cwd canonical（沿用上游 resolve 结果）
+  primaryRoot: string          // = policy.workspaceRoot canonical（上游 resolve 的结果）
   additionalRoots: readonly string[]   // canonical、去重、≠primary、可为空
 }
 
 class MultiRootScopeService extends Service {         // ctx.multiRootScope
-  /** 每次受限调用解析一次；无 session 时空根。 */
-  resolve(request: { session?: Session }): FilesystemScope
-  /** 供其他 workspace-scoped 插件查询（需求 §19 的代位）。 */
-  scopeOf(primaryRoot: string): readonly AdditionalWorkspaceRoot[]
+  /** 每次受限调用解析一次。 */
+  resolve(policy: SandboxExecutionPolicy): FilesystemScope
+  /** 某一 canonical 主根已登记的附加根（需求 §19 的代位）。 */
+  scopeOf(primaryRoot: string): readonly string[]
+  /** 登记表写入口：M2 由测试与冒烟注入，M3 由插件存储喂养。 */
+  setAdditionalRoots(primaryRoot: string, roots: readonly AdditionalWorkspaceRoot[]): void
 }
 ```
 
-- **数据源**：`dsh-storage-domain` 插件命名空间 KvTable，key = workspaceId；记录 `AdditionalWorkspaceRoot { id: Branded<'AdditionalRootId'>, path, alias?, addedAt }`。不存 primaryRoot（WorkspaceRegistry 拥有）。
-- **解析链**：`session.header.cwd` → `realpathSync.native` → workspaceId（或直接以 canonical 主根为 key 查根表）→ 附加根集合（激活时 re-check 存在性，缺根按 config 跳过并通知）。
+- **数据源（当前）**：`setAdditionalRoots(root, roots)` 的进程内登记表；写入者是测试与冒烟脚本。**M3 目标**：换成 `dsh-storage-domain` 插件命名空间 KvTable（key = canonical 主根 / workspaceId，记录 `AdditionalWorkspaceRoot { id: Branded<'AdditionalRootId'>, path, alias?, addedAt }`，不存 primaryRoot）。provider 结构不随数据源改变——它们只经 `resolve()` / `scopeOf()` 取根。
+- **解析链**：`policy.workspaceRoot` → `canonicalPath`（= `realpathSync.native`）→ 登记表查找 → `sanitizeAdditionalRoots`（canonical 化、去重、剔除等于主根的项、保持登记顺序）。M3 追加"激活时 re-check 存在性，缺根按 config 跳过并通知"。
 - **为什么用插件存储而不是 session 事件**：out-of-tree 插件 append 自有事件类型会给会话日志引入"未装插件的 dsh 拒绝打开"风险（session-format 的 required-on-read 规则，除非信封 `ignorable: true`）；存储按不可变的 header cwd 索引，fork/resume/重启行为同样确定。模型可见性由 §6 的 context 快照落 log 满足。
 - **空根直通**：`additionalRoots.length === 0` 时，两个 provider 都走与上游等价的代码路径（sandbox provider 逐元素返回上游 `confine` 的结果；fs provider 的 containment 语义与上游 `SandboxedFileSystem` 逐项一致，由差分测试钉住）——验收标准 2。
 
-两个 provider 一律从 `MultiRootScopeService.resolve()` 取根，**不允许任何一个 provider 自行判断路径**（需求 §13）。scope 服务在 M1 即落地（数据源为空表），M2 只把数据源换成附加根集合，provider 结构不变。
+两个 provider 一律从 `MultiRootScopeService.resolve()` 取根，**不允许任何一个 provider 自行判断路径**（需求 §13）。
 
 ## 5. 两个 Provider 子类（外加一个 scope 服务）
 
@@ -123,14 +125,19 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 
 ### 5.3 `MultiRootSandboxProvider` — 提供 `ctx.sandbox`（内核方言，同时覆盖 bash 工具与 terminal/PTY）
 
-- `extends LocalSandboxProvider`（`confine(argv, policy)` 是 public，可直接扩展；`internals` public）。
-- override `confine`：先 `super.confine(argv, policy)` 得到上游单根 argv/profile，再按方言**追加**附加根 grant：
-  - **Seatbelt (darwin)**：向 profile 字符串追加 `(allow file-write* (subpath "<root>"))` 形式（每附加根一条）。
-  - **bwrap (linux)**：在 runner argv 的 `--` 分隔符前为每个附加根插入等价的可写 bind 参数（与上游临时 `/tmp` mount 的既有差异保持一致）。
-  - **Landlock (linux)**：为每个附加根追加与上游同形的 launcher rw flag。
-  - **Windows ACL**：第一期不扩展（fs fence 已覆盖 Windows 写路径；pwsh 内核级多根列入后续阶段），`confine` 在 win32 上保持 super 行为并输出一次显式告警，文档明示限制。
-- 方言实现不调用上游 builder（`dsh-sandbox-local/src/profiles.ts` 在发布形态下不可达），改为从 `super.confine` 的输出中识别并克隆 grant 模板；识别失败时抛错，绝不静默退回单根（见 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)）。
-- 三条不变量：空附加根时**逐元素**返回 super 的结果；`enforcement` / `denialSignatures` / `runnerFailureRules` 原样透传（否则 bash 的 denial / enforcement 上报会失真）；只有 `argv` 可以变化。
+- `extends LocalSandboxProvider`。上游发布形态的公开面只有 `confine(argv, policy)` 与测试钩子 `internals`（`runnerArgv` / `landlockLauncher` / `seatbeltExec` 均为 TS-private，见调研 §10.1），因此实现方式是从 `super.confine` 的**输出**识别方言并克隆 grant 模板（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）。
+- `override confine(argv, policy)` 的决策顺序（已实现）：
+  1. 先 `super.confine(argv, policy)`：上游结果是 argv 与三个 fact 的唯一来源；
+  2. `ctx.multiRootScope.resolve(policy)`；**非 `workspace-write` 或附加根为空 ⇒ 原样返回上游结果**（`read-only` 不授予任何附加根；`danger-full-access` 下 bash 与 PTY 根本不调用 `confine`，见调研 §10.4）；
+  3. 校验 `[...profileArgs, '--', ...callerArgv]` 结构，按结构标记识别方言（seatbelt `[…, -p, <SBPL>]` / windows-acl `--mode` / landlock `--rw` / bwrap `--ro-bind`）；
+  4. 按方言克隆观测到的 grant 拼写并追加附加根：
+     - **Seatbelt (darwin)**：在既有的 `(allow file-write* (subpath …))` allow form 内追加 `(subpath "…")`（字面量转义与上游 `sbplString` 同实现）。
+     - **bwrap (linux，含 `runnerCommand` 配置情形)**：从 `<workspaceRoot>` 的 bind 三元组克隆 flag，在分隔符前追加 `[flag, root, root]`。
+     - **Landlock (linux)**：取 `<workspaceRoot>` 前一位的 rw flag，追加 `[flag, root]`。
+     - **已授予即跳过**：语言方已授予同一路径时不再重复授予（与 fs fence 的去重一致，并避免 bwrap 上真实 `/tmp` 覆盖 `--tmpfs /tmp`）。
+     - **Windows ACL**：第一期不扩展（argv 里没有可追加的路径，授权按 workspace SID 进行），保持上游 wrap 并输出**一次**显式告警；fs fence 仍覆盖 Windows 写路径。
+  5. 识别或克隆失败 ⇒ 抛 `SandboxUnavailableError`（fail closed），绝不退化为"只授予主根"的静默执行。
+- 三条不变量：空附加根或非 `workspace-write` 时**逐元素**返回 super 的结果；`enforcement` / `denialSignatures` / `runnerFailureRules` 原样透传（否则 bash 的 denial / enforcement 上报会失真）；只有 `argv` 可以变化。
 
 ### 5.4 上游 `sandbox-policy` 行不动
 
@@ -138,8 +145,9 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 
 ## 6. Agent 认知与单一权限世界
 
-- **拓扑注入**：插件注册自己的 `ctx.systemPrompt.context({ name: 'multi-root:scope', ... })`，workspace-write 且有附加根时输出稳定拓扑（只列根，不列文件，满足需求 §8）；快照随请求落 model history（上游 `sandbox:policy` 同机制），满足 model-visible ⟺ logged。空根时不输出任何内容（不影响 prompt cache 与既有快照）。
-- **单一权限世界**：fs fence 与内核方言（sandbox provider）消费 §4 的同一份 `FilesystemScope`；bash 与 terminal/PTY 通过 `ctx.sandbox` 间接消费同一份，因此它们的根集合与 fs fence **由构造相同**。插件自带 **parity 测试**——同一 scope 下，进程内 fence 与三种内核方言对"根内/根间外/临时区"的允许矩阵一致（接替上游 `writableRoots()` 测试的角色）。
+- **拓扑注入（已实现）**：`MultiRootScopeService` 注册 `ctx.systemPrompt.context({ name: 'multi-root:scope', order: getContextOrder('SANDBOX_POLICY') + 1, … })`：workspace-write 且有附加根时输出一段稳定拓扑（只列根，不列文件，满足需求 §8），其中声明附加根属于同一 workspace 且 session cwd 不变；空根、`read-only`、以及没有 agent 的诊断装配下都不输出任何内容（空段被 `renderContextSections` 过滤，快照与未装插件逐字节相同）。注册是软依赖：宿主没有 `systemPrompt` seam 时不贡献拓扑也不报错。快照随请求落 model history（上游 `sandbox:policy` 同机制），满足 model-visible ⟺ logged。
+- **单一权限世界（已实现）**：fs fence 与内核方言（sandbox provider）消费 §4 的同一份 `FilesystemScope`；bash 与 terminal/PTY 通过 `ctx.sandbox` 间接消费同一份，因此它们的根集合与 fs fence **由构造相同**。插件自带 **parity 矩阵测试**（接替上游 `writableRoots()` 测试的角色）：同一 scope 下，对「主根内 / 主根嵌套 / 附加根内 / 附加根嵌套 / 根外 / 共享词法前缀的兄弟目录 / 经附加根内符号链接逃逸 / 平台临时区」逐类比较 fs fence 的真实写判定与各方言 argv 的授予集合，并在两端模式（workspace-write / read-only）各跑一轮；解析 argv 的代码由测试侧独立实现。宿主能真正执行 runner 时（Linux CI 的 bwrap/Landlock、macOS 的 Seatbelt）另加真实受限执行用例，不能执行时显式 skip 并说明原因。
+- 已知不对称（上游既有，非插件引入）：bwrap 与 Landlock 只授予字面 `/tmp`，不授予 `tmpdir()`（调研 §10.3），因此 parity 断言的语义限定为「附加根集合与模式」；Windows 上内核级多根缺失，fs 可写而 bash 不可写（第一期已知限制）。
 
 ## 7. Root 管理与 UI（与上游约束无关，全部走公开 API）
 
