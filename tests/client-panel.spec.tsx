@@ -421,6 +421,17 @@ describe('the panel dialog', () => {
     expect(screen.queryByText(/host prose/)).toBeNull()
   })
 
+  it('shows internal host error details for diagnosis', async () => {
+    const harness = mount()
+    harness.setFailure({ code: 'panel/internal', message: 'cannot get property "sessions" without inject' })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('cannot get property "sessions" without inject')
+    })
+  })
+
   it('falls back to the generic message for a code this build does not know', async () => {
     const harness = mount()
     harness.setFailure({ code: 'brand/new-code', message: 'unexpected' })

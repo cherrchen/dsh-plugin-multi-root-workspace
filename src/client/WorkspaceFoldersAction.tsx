@@ -316,7 +316,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
           {state.error === undefined ? null : (
             <p role="alert" className="mrfw-alert">
               {t(errorKeyOf(state.error.code))}
-              {state.error.code === 'unavailable' ? ` (${state.error.message})` : ''}
+              {(state.error.code === 'unavailable' || state.error.code === 'panel/internal') ? ` (${state.error.message})` : ''}
             </p>
           )}
           {state.view?.unavailable === undefined ? null : (

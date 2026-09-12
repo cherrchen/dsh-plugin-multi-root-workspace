@@ -359,15 +359,33 @@ describe('the panel channel', () => {
 
   it('resolves the workspace root from the session when the client omits it', async () => {
     const stack = await mount({ withConnection: true })
-    stack.ctx.provide('sessions', {
-      get: (id: string) => (id === 's-1' ? { header: { cwd: primary } } : undefined),
-    } as never)
+    const sessionRoot = canonicalPath(join(fixture.base, 'session-workspace'))
+    mkdirSync(sessionRoot)
+    await stack.ctx.plugin({
+      name: 'sibling-sessions',
+      apply(ctx: Context) {
+        ctx.provide('sessions', {
+          get: (id: string) => (id === 's-1' ? { header: { cwd: sessionRoot } } : undefined),
+        } as never)
+      },
+    })
 
     const view = await callPanel('list', { sessionId: 's-1' })
-    expect(view.value?.primaryRoot).toBe(primary)
+    expect(view.ok).toBe(true)
+    expect(view.value?.primaryRoot).toBe(sessionRoot)
+
+    const unknown = await callPanel('list', { sessionId: 'unknown' })
+    expect(unknown.value?.primaryRoot).toBe(primary)
 
     const fallback = await callPanel('list', {})
     expect(fallback.value?.primaryRoot).toBe(primary)
+  })
+
+  it('uses the deployment root when the optional sessions service is absent', async () => {
+    await mount({ withConnection: true })
+    const result = await callPanel('list', { sessionId: 'unknown' })
+    expect(result.ok).toBe(true)
+    expect(result.value?.primaryRoot).toBe(primary)
   })
 
   it('reports contract failures with codes instead of throwing', async () => {

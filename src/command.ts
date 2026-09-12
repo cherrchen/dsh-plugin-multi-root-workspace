@@ -324,7 +324,9 @@ function primaryRootOf(ctx: Context, request: PanelCall): string {
     return canonical
   }
   if (request.sessionId !== undefined && request.sessionId !== '') {
-    const cwd = ctx.sessions.get(request.sessionId as SessionId)?.header.cwd
+    // Optional sibling service: property access requires an injected dependency.
+    // Use the explicit lookup, as for directoryPicker/subprocess below.
+    const cwd = ctx.get('sessions')?.get(request.sessionId as SessionId)?.header.cwd
     if (cwd !== undefined && cwd !== '') return canonicalPath(cwd)
   }
   const policy: SandboxExecutionPolicy = ctx.sandboxPolicy.resolve()

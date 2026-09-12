@@ -296,7 +296,7 @@ async function runWebLeg() {
           type: 'client-request',
           rpcId: 'journey-list',
           method: 'list',
-          payload: { primaryRoot: primaryRepo },
+          payload: { sessionId: 'journey-web' },
         }),
       })
       observed.channelList = listed.status
