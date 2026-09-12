@@ -222,8 +222,10 @@ describe('the /workspace-folders command', () => {
 
     const revealed = await run('reveal 1')
     expect(revealed.kind).toBe('success')
-    expect(spawned[0]?.[0]).toBe('/usr/bin/open')
-    expect(spawned[0]?.[2]).toBe(canonicalPath(extra))
+    // The file manager is the platform's (open / explorer / xdg-open): the argv
+    // under test is compared with the argv the plugin computes for THIS host.
+    const argvUnderTest = revealArgv(process.platform, canonicalPath(extra))
+    expect(spawned[0]?.slice(1)).toEqual([...argvUnderTest.slice(1)])
 
     const removed = await run('remove 1')
     expect(removed.text).toContain('No additional roots')

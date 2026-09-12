@@ -9,7 +9,7 @@
 
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import {
@@ -55,14 +55,16 @@ beforeAll(() => {
 afterAll(() => { fixture.dispose() })
 
 /** Run one candidate against the primary root and the given existing roots. */
-function check(raw: string, existing: readonly string[] = []): string {
-  return validateRootCandidate(raw, { primaryRoot: primary, existing })
+function check(raw: string, existing: readonly string[] = [], home?: string): string {
+  return home === undefined
+    ? validateRootCandidate(raw, { primaryRoot: primary, existing })
+    : validateRootCandidate(raw, { primaryRoot: primary, existing, home })
 }
 
 /** Capture the failure code of one candidate. */
-function codeOf(raw: string, existing: readonly string[] = []): string {
+function codeOf(raw: string, existing: readonly string[] = [], home?: string): string {
   try {
-    check(raw, existing)
+    check(raw, existing, home)
   } catch (error: unknown) {
     if (error instanceof RootValidationError) return error.code
     throw error
@@ -72,8 +74,9 @@ function codeOf(raw: string, existing: readonly string[] = []): string {
 
 describe('expandRootInput', () => {
   it('expands a bare tilde and a tilde-prefixed path against the given home', () => {
-    expect(expandRootInput('~', '/home/op')).toBe('/home/op')
-    expect(expandRootInput('~/projects', '/home/op')).toBe(join('/home/op', 'projects'))
+    const home = join(sep, 'home', 'op')
+    expect(expandRootInput('~', home)).toBe(home)
+    expect(expandRootInput('~/projects', home)).toBe(join(home, 'projects'))
   })
 
   it('leaves every other spelling untouched, so validation can reject it', () => {
@@ -89,10 +92,13 @@ describe('expandRootInput', () => {
 
 describe('isCanonicallyUnder', () => {
   it('accepts the root itself and its descendants, and nothing spelled alike', () => {
-    expect(isCanonicallyUnder('/a/b', '/a/b')).toBe(true)
-    expect(isCanonicallyUnder('/a/b/c', '/a/b')).toBe(true)
-    expect(isCanonicallyUnder('/a/bc', '/a/b')).toBe(false)
-    expect(isCanonicallyUnder('/a', '/a/b')).toBe(false)
+    // Platform separators: the predicate is lexical, so a POSIX literal would ask
+    // the wrong question on Windows (where `/a/b/c` is not under `/a/b`).
+    const root = ['', 'a', 'b'].join(sep)
+    expect(isCanonicallyUnder(root, root)).toBe(true)
+    expect(isCanonicallyUnder(join(root, 'c'), root)).toBe(true)
+    expect(isCanonicallyUnder(`${root}c`, root)).toBe(false)
+    expect(isCanonicallyUnder(['', 'a'].join(sep), root)).toBe(false)
   })
 })
 
@@ -101,9 +107,25 @@ describe('validateRootCandidate', () => {
     expect(check(sibling)).toBe(canonicalPath(sibling))
   })
 
-  it('accepts a `~`-prefixed candidate that resolves to a real directory', () => {
-    // The home directory itself exists on every host this suite runs on.
-    expect(check('~')).toBe(canonicalPath(homedir()))
+  it('expands `~` against a home directory and accepts it', () => {
+    // Run against a home that is plainly a sibling of the fixture. On a CI runner
+    // the real home IS an ancestor of the checkout, where the primary-overlap rule
+    // correctly refuses the whole home tree — that is the case below, and mixing
+    // the two would make this assertion depend on where the runner keeps $HOME.
+    const expandedHome = join(fixture.outside, 'home')
+    mkdirSync(expandedHome, { recursive: true })
+    expect(check('~', [], expandedHome)).toBe(canonicalPath(expandedHome))
+  })
+
+  it('rejects a home directory that contains the workspace, with the overlap rule', () => {
+    // The other side of the same coin, and the reason the case above takes a home
+    // of its own: on a runner whose home holds the checkout, `~` overlaps the
+    // primary root and is refused — as a configuration, not as a path bug.
+    const ancestor = join(primary, 'ancestor-home')
+    mkdirSync(ancestor, { recursive: true })
+    expect(() => check('~', [], fixture.base)).toThrow(RootValidationError)
+    expect(codeOf(primary, [])).toBe('equals-primary')
+    expect(codeOf(ancestor, [])).toBe('primary-overlap')
   })
 
   it('resolves a spelling with `..` to the same canonical root', () => {

@@ -30,6 +30,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileSystem } from '@deepseek-ai/dsh-fs'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
@@ -111,7 +112,9 @@ async function battery(ctx) {
 
   await record('capability fact (ctx.fs.sandboxMode)', async () => ctx.fs.sandboxMode)
   await record('fs writes inside the primary root', () => write(join(primaryRoot, 'fs-inside.txt'), 'payload'))
-  await record('fs writes to the platform temp area', () => write(join('/tmp', `dsh-mr-behavior-${process.pid}.txt`), 'payload'))
+  // `os.tmpdir()` is what the policy grants on this platform; a literal `/tmp` is
+  // a POSIX spelling that would ask the wrong question elsewhere.
+  await record('fs writes to the platform temp area', () => write(join(tmpdir(), `dsh-mr-behavior-${process.pid}.txt`), 'payload'))
   await record('fs writes outside every root', () => write(join(outsideRoot, 'fs-outside.txt'), 'payload'))
   await record('fs edits inside the primary root', async () => {
     const path = join(primaryRoot, 'fs-edited.txt')
@@ -607,7 +610,7 @@ try {
 
   check.finish()
 } finally {
-  rmSync(join('/tmp', `dsh-mr-behavior-${process.pid}.txt`), { force: true })
+  rmSync(join(tmpdir(), `dsh-mr-behavior-${process.pid}.txt`), { force: true })
   if (keep) {
     console.log(`[smoke:behavior] kept scratch home at ${home} and fixture at ${fixtureRoot}`)
   } else {

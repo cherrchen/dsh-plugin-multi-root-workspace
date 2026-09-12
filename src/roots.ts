@@ -198,6 +198,12 @@ export interface RootCandidateContext {
   /** The session's workspace root; the candidate may not equal or overlap it. */
   readonly primaryRoot: string
   /**
+   * The home directory a leading `~` expands against. Defaults to `os.homedir()`;
+   * a caller that knows which home it means (a test, a probe) may say so instead
+   * of depending on where the host's home directory happens to sit.
+   */
+  readonly home?: string
+  /**
    * Canonical paths already granted. Missing and invalid registrations are
    * deliberately excluded: a withheld root grants nothing, so a candidate may
    * legitimately sit under it, and an unusable record must not block a store
@@ -214,7 +220,7 @@ export interface RootCandidateContext {
  * @throws {RootValidationError} with the first rule that failed.
  */
 export function validateRootCandidate(raw: string, context: RootCandidateContext): string {
-  const expanded = expandRootInput(raw)
+  const expanded = expandRootInput(raw, context.home)
   if (expanded === '') {
     throw new RootValidationError('not-absolute', 'a root path is required')
   }

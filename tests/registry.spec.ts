@@ -24,6 +24,20 @@ let storeFile: string
 let primary: string
 let stacks: RegistryStack[] = []
 
+/**
+ * The `path` values one primary root's records hold, read back from the store.
+ *
+ * Read as JSON rather than matched as text: a Windows path is written with
+ * escaped separators, so a substring test asks about the JSON encoding instead of
+ * about what the registry stored.
+ */
+function storedPaths(root: string = primary): string[] {
+  const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+    tables: { roots: Record<string, { roots: { path: string }[] } | undefined> }
+  }
+  return (document.tables.roots[canonicalPath(root)]?.roots ?? []).map(entry => entry.path)
+}
+
 /** Create a sibling directory usable as an additional root. */
 function makeRoot(name: string): string {
   const path = join(fixture.base, name)
@@ -70,7 +84,7 @@ describe('registration lifecycle', () => {
     expect(statuses[0]?.path).toBe(extra)
     expect(scope.scopeOf(primary)).toEqual([extra])
     expect(registry.granted(primary)).toEqual([extra])
-    expect(readFileSync(storeFile, 'utf8')).toContain(extra)
+    expect(storedPaths()).toEqual([extra])
   })
 
   it('keeps registry order and reorders on move', async () => {
@@ -131,7 +145,7 @@ describe('registration lifecycle', () => {
     const empty = await registry.remove(primary, { kind: 'id', id: afterFirst[0]!.id })
     expect(empty).toEqual([])
     expect(scope.scopeOf(primary)).toEqual([])
-    expect(readFileSync(storeFile, 'utf8')).not.toContain(second)
+    expect(storedPaths()).toEqual([])
   })
 
   it('refuses a duplicate, the primary root itself, a nested root, and a relative path', async () => {
@@ -275,7 +289,7 @@ describe('concurrent operations', () => {
     expect(registry.list(primary).map(status => status.path)).toEqual([fresh])
     expect(registry.granted(primary)).toEqual([fresh])
     expect(scope.scopeOf(primary)).toEqual([fresh])
-    expect(readFileSync(storeFile, 'utf8')).not.toContain('doomed')
+    expect(storedPaths()).toEqual([fresh])
   })
 
   it('applies a burst of concurrent mutations in order, losing none of them', async () => {

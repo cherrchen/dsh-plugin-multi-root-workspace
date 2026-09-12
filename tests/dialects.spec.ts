@@ -73,7 +73,7 @@ describe('confined argv splitting', () => {
   })
 })
 
-describe('seatbelt widening', () => {
+describe('seatbelt widening (POSIX argv)', () => {
   it('extends the observed subpath form with each additional root', () => {
     const widened = widenProfileArgs('seatbelt', SEATBELT, policy(), [EXTRA, EXTRA_TWO])
     expect(widened).toEqual([
@@ -102,7 +102,7 @@ describe('seatbelt widening', () => {
     expect(() => widenProfileArgs('seatbelt', ['sandbox-exec', '-p'], policy(), [EXTRA])).toThrow(DialectUnrecognizedError)
   })})
 
-describe('bwrap widening', () => {
+describe('bwrap widening (POSIX argv)', () => {
   it('binds each additional root after the upstream root bind', () => {
     expect(widenProfileArgs('bwrap', BWRAP, policy(), [EXTRA, EXTRA_TWO]))
       .toEqual([...BWRAP, '--bind', EXTRA, EXTRA, '--bind', EXTRA_TWO, EXTRA_TWO])
@@ -130,7 +130,7 @@ describe('bwrap widening', () => {
   })
 })
 
-describe('landlock widening', () => {
+describe('landlock widening (POSIX argv)', () => {
   it('clones the observed read-write flag per additional root', () => {
     expect(widenProfileArgs('landlock', LANDLOCK, policy(), [EXTRA, EXTRA_TWO]))
       .toEqual([...LANDLOCK, '--rw', EXTRA, '--rw', EXTRA_TWO])
