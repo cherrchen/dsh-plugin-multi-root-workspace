@@ -46,6 +46,7 @@ import {
 import { bootProfile } from './lib/profile-boot.mjs'
 
 const DOMAIN = 'multi_root_workspace'
+const PLUGIN_NAME = '@dsh-electron/dsh-plugin-multi-root-workspace'
 const PRIMARY_README = 'primary repository readme\n'
 const SEED_README = 'seed readme for repo-b\n'
 const EDITED_README = 'seed readme for repo-b\nedited by the agent through the additional root\n'
@@ -222,6 +223,12 @@ async function runWebLeg() {
   })
   const observed = { events: [] }
   try {
+    // The bundle patch must carry a bare-package-name row, or the web
+    // client-module scan never reads this package's `dsh.client` declaration
+    // and the browser is never served `lib/client.js` — the footer action then
+    // silently never registers (see docs/troubleshooting/).
+    const clientModules = ctx.get('clientModules')
+    observed.clientEntryServed = clientModules?.graph().entries.some(entry => entry.id === PLUGIN_NAME) === true
     const { installModelSelection } = await loadRuntimeModule('@deepseek-ai/dsh-agent')
     const selection = ctx.agentDefaultModel.currentSelection()
     const selected = { current: selection, assembled: undefined }
@@ -333,6 +340,7 @@ try {
     check.contains(String(web.registration?.text), additionalRepo, 'web: the command reports the registered root')
     check.equal(web.granted, [canonical(additionalRepo)], 'web: the scope grants exactly the registered root')
     check.ok(web.hasConnection, 'web: the browser composition carries the host Connection the panel needs')
+    check.ok(web.clientEntryServed, 'web: the composed boot graph serves the plugin client bundle to the browser')
     check.equal(readFileSync(join(additionalRepo, 'README.md'), 'utf8'), EDITED_README, 'web: the additional root carries the agent\'s write')
     check.equal(readFileSync(join(primaryRepo, 'README.md'), 'utf8'), PRIMARY_README, 'web: the primary repository is byte-identical')
     check.equal(readFileSync(join(outsideRoot, 'keep.txt'), 'utf8'), 'untouched\n', 'web: a file outside every root is byte-identical')

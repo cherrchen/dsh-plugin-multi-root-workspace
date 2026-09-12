@@ -1,11 +1,16 @@
 /**
  * Barrel for the multi-root workspace bundle's host half.
  *
- * This entry is a plain re-export surface with no side effects: the loader
- * mounts the plugin through the subpath entries declared in `package.json` and
- * `cordis.patch.yml` (`./fs`, `./sandbox`, `./scope`, `./registry`,
- * `./command`), never through this one. It exists so the package root resolves
- * and so tests can import the whole public surface from a single specifier.
+ * The loader mounts the plugin's responsibilities through the subpath entries
+ * declared in `package.json` and `cordis.patch.yml` (`./fs`, `./sandbox`,
+ * `./scope`, `./registry`, `./command`); this entry carries only the no-op
+ * `apply` below. The patch still inserts a row with THIS specifier (the bare
+ * package name) because the web client-module scan reads a package's
+ * `dsh.client` declaration solely from a loader row mounted at its package
+ * root — subpath rows are never client rows — so without that row the browser
+ * is never served `lib/client.js` and the sidebar footer action never
+ * registers. The barrel itself stays side-effect free so tests can import the
+ * whole public surface from a single specifier.
  *
  * The two facts worth remembering about this surface: a registration carries the
  * canonical directory it was GRANTED for (`recordedPath`), and the panel channel
@@ -56,3 +61,13 @@ export type {
   RootView,
   RootsView,
 } from './contract.ts'
+
+/**
+ * Carrier plugin face for the bare-package-name loader row (see the module
+ * doc). It deliberately provides nothing: every host responsibility is owned
+ * by a subpath entry, and this row exists only so the web client-module scan
+ * can locate the package root and read its `dsh.client` declaration.
+ */
+export const inject: string[] = []
+
+export function apply(): void {}

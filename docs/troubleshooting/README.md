@@ -19,7 +19,7 @@ English: [README.en.md](./README.en.md)
 
 ## 当前状态
 
-尚无排查记录。
+- [client bundle 不进 web 启动图：bundle patch 只挂子路径行](./client-bundle-not-in-boot-graph.md) — footer 槽位注册静默失效的根因与修复。
 
 ## 推荐命名
 

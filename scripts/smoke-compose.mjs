@@ -34,6 +34,9 @@ const INSERTED = [
   'multi-root-scope',
   'multi-root-registry',
   'multi-root-command',
+  // The client-graph anchor: mounted at the bare package name so the web
+  // client-module scan reads this package's `dsh.client` declaration.
+  'multi-root-client',
 ]
 const UPSTREAM_STANDALONE = ['bash-sandbox', 'sandbox-policy', 'tool-fs', 'tool-bash', 'terminal-bash']
 
@@ -96,10 +99,14 @@ try {
   const insertedIds = composed.rows
     .filter(row => typeof row?.id === 'string' && row.id.startsWith('multi-root-'))
     .map(row => row.id)
-  check.equal(insertedIds, INSERTED, 'exactly the five plugin rows were inserted')
+  check.equal(insertedIds, INSERTED, 'exactly the six plugin rows were inserted')
   for (const id of INSERTED) {
     const row = composedRows.get(id)
-    check.ok(row?.name?.startsWith(`${PLUGIN_NAME}/`) === true, `${id} resolves inside ${PLUGIN_NAME}`, String(row?.name))
+    check.ok(
+      row?.name === PLUGIN_NAME || row?.name?.startsWith(`${PLUGIN_NAME}/`) === true,
+      `${id} resolves inside ${PLUGIN_NAME}`,
+      String(row?.name),
+    )
     check.ok(row?.disabled !== true, `${id} is enabled`)
   }
 
@@ -114,7 +121,7 @@ try {
 
   // 4. Every other row is untouched, in the same order.
   const composedWithoutInserted = composed.rows.filter(row => !(typeof row?.id === 'string' && row.id.startsWith('multi-root-')))
-  check.equal(composedWithoutInserted.length, baseline.rows.length, 'the composed tree adds no rows beyond the five')
+  check.equal(composedWithoutInserted.length, baseline.rows.length, 'the composed tree adds no rows beyond the plugin rows')
   check.equal(
     composedWithoutInserted.map(row => row?.id),
     baseline.rows.map(row => row?.id),

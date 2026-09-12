@@ -107,13 +107,14 @@ describe('provider replacement rows', () => {
 describe('inserted rows', () => {
   const inserted = patchRows.flatMap(row => row.insert ?? [])
 
-  it('inserts the scope service, the two providers, the registry, and the user surface', () => {
+  it('inserts the scope service, the two providers, the registry, the user surface, and the client-graph anchor', () => {
     expect(inserted.map(row => row.id)).toEqual([
       'multi-root-fs',
       'multi-root-sandbox',
       'multi-root-scope',
       'multi-root-registry',
       'multi-root-command',
+      'multi-root-client',
     ])
   })
 
@@ -121,9 +122,21 @@ describe('inserted rows', () => {
     for (const row of inserted) {
       expect(typeof row.name).toBe('string')
       const name = row.name as string
+      // The client-graph anchor mounts the package root itself: the web
+      // client-module scan reads `dsh.client` only from a bare-package-name
+      // row, so `multi-root-client` must NOT be a subpath.
+      if (name === manifest.name) {
+        expect(Object.keys(manifest.exports)).toContain('.')
+        continue
+      }
       expect(name.startsWith(`${manifest.name}/`), `${name} must be a subpath of this package`).toBe(true)
       const subpath = `.${name.slice(manifest.name.length)}`
       expect(Object.keys(manifest.exports), `${subpath} must be declared in package.json exports`).toContain(subpath)
     }
+  })
+
+  it('anchors the client graph with a bare-package-name row', () => {
+    const anchor = inserted.find(row => row.id === 'multi-root-client')
+    expect(anchor?.name).toBe(manifest.name)
   })
 })

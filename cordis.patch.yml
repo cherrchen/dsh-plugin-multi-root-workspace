@@ -16,6 +16,12 @@
 # all), and `multi-root-command` registers the `/workspace-folders` command
 # wherever a command registry exists and the browser panel channel wherever a
 # host Connection exists — a headless profile mounts it with no visible effect.
+#
+# The final row is the client-graph anchor: the web client-module scan reads a
+# package's `dsh.client` declaration only from a loader row mounted at the bare
+# package name (subpath rows are never client rows), so this no-op carrier row
+# is what gets `lib/client.js` served to the browser. See
+# docs/troubleshooting/client-bundle-not-in-boot-graph.md.
 - id: fs-sandbox
   disabled: true
 - id: sandbox
@@ -31,3 +37,5 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
     - id: multi-root-command
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
+    - id: multi-root-client
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace'

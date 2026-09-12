@@ -120,10 +120,12 @@ client 测试分两层：`tests/client-bundle.spec.ts` 断言**制品字节**（
 
 ```sh
 dsh plugin --profile web add <本仓库路径>
-dsh --profile web --dump-config     # 应看到两行 disabled + 三行 insert
+dsh --profile web --dump-config     # 应看到两行 disabled + 六行 insert
 ```
 
-`dsh plugin` 是 pnpm 的转发器：它在 profile 目录里执行 pnpm，并把解析到 `dsh.bundle` 声明的依赖回填进 `dsh.profile.bundles`。桌面端（Electron）保留自己的 `$DSH_HOME/profiles/desktop`，安装方式同源；本插件当前不声明 `dsh.client`（客户端半部属于 M3），因此不会影响 Web client graph。
+`dsh plugin` 是 pnpm 的转发器：它在 profile 目录里执行 pnpm，并把解析到 `dsh.bundle` 声明的依赖回填进 `dsh.profile.bundles`。桌面端（Electron）保留自己的 `$DSH_HOME/profiles/desktop`，安装方式同源。
+
+**client 扫描锚点（不变量）**：web 的 client-module 扫描只从挂在**裸包名**上的 loader 行读取 `dsh.client` 声明——子路径行永远不是 client 行（上游 `locatePkgJson` 对子路径 specifier 短路，见 [troubleshooting 记录](../troubleshooting/client-bundle-not-in-boot-graph.md)）。因此 patch 必须始终包含 `id: multi-root-client`、`name: '@dsh-electron/dsh-plugin-multi-root-workspace'` 这一行（载体插件，`apply` 有意为空）；少了它，`lib/client.js` 不会进启动图，`sidebar.footer.action` 的注册静默失效。
 
 发布形态的 `files` 现在包含 `lib/*.js`（含 `lib/client.js`）与两面的 `lib/types/**/*.d.ts`；client 制品必须在 `pnpm pack` 之前构建好（宿主直接读盘，不做编译）。
 
