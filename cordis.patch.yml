@@ -1,0 +1,22 @@
+# Multi-root Workspace bundle: replace the single-root fs and sandbox providers
+# with multi-root subclasses, and mount the plugin's scope service.
+#
+# Disable-before-insert is mandatory: cordis throws when a second plugin
+# provides an already-registered service key, so the upstream rows must be gone
+# before ours activate (this is also the natural fail-loud signal if an upstream
+# row id ever stops matching — see docs/decisions/ADR-0001-provider-replacement-scope.md).
+#
+# `bash-sandbox` stays upstream: the bash executor and the PTY backend delegate
+# all confinement to ctx.sandbox, so they inherit multi-root grants from the
+# provider below without any plugin-side executor.
+- id: fs-sandbox
+  disabled: true
+- id: sandbox
+  disabled: true
+- insert:
+    - id: multi-root-fs
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
+    - id: multi-root-sandbox
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
+    - id: multi-root-scope
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/scope'
