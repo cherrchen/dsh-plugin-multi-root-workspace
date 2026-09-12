@@ -125,6 +125,12 @@ dist
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
 
+# macOS Finder metadata.
+# A slash-free pattern already matches at every depth; the explicit `**/` form
+# is kept so ignore consumers that anchor patterns to the root are equally strict.
+.DS_Store
+**/.DS_Store
+
 # pnpm
 .pnpm-store
 
