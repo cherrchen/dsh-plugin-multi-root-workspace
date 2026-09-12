@@ -1,38 +1,131 @@
 # dsh-plugin-multi-root-workspace
 
-An out-of-tree plugin bundle for DSH (DeepSeek Harness) that widens the Workspace write scope from a single directory to one primary root plus N additional roots — **without modifying any package in the upstream repository**.
+## What & Why
 
-The plugin answers exactly one question: "which directories belong to this workspace". It then opens them through the same mechanisms the harness already uses (the in-process fence and the kernel-runner dialects), so the agent keeps using the native `read` / `write` / `edit` / `bash` tools.
+An out-of-tree plugin bundle for DSH (DeepSeek Harness) that widens the Workspace write scope from a single canonical directory to "**one primary root + N additional roots**" — **without modifying any package in the upstream repository**.
 
-## Project Status
+The problem it solves: a real development project is usually several independent Git repositories, while DSH natively treats only the session working directory as the writable root, so working across repositories means juggling sessions.
 
-- **M1 (composition and empty-root pass-through) is complete and verified**: the plugin installs through `dsh plugin`, replaces the `fs-sandbox` and `sandbox` provider rows, and with no additional root configured behaves item-for-item like an uninstalled harness. Evidence: the [completed M1 plan](./docs/plans/completed/2026-09-12-m1-composition-and-passthrough.md).
-- **M2 (multi-root capability) is complete and verified**: additional roots reach the in-process fence and the kernel-dialect grants (Seatbelt / bwrap / Landlock) through one and the same scope, pinned by the parity matrix, the dialect unit suite, the topology snapshot, and the multi-root smoke battery. Under `read-only` an additional root is writable no more than anything else, and the empty-root behavior stays byte-identical to an uninstalled harness. Evidence: the [completed M2 plan](./docs/plans/completed/2026-09-12-m2-additional-roots-and-dialect-grants.md).
-- **M3 (root management and UI) is implemented and re-accepted after an external review**: the root registry persists under `$DSH_HOME/storages/multi_root_workspace.json`, the `/workspace-folders` command and the sidebar Workspace Folders panel both add and remove roots, and a real session journey across two Git repositories is covered by `pnpm smoke:journey`. All eight findings of that review (a replaced root transferring its grant, concurrent writes losing an operation, the CI step order, a refresh that never re-checked, the manual add path, the reveal contract, duplicated ids, and primary-root nesting) are fixed, each with a regression test. Evidence: the "external review rework" section of the [M3 plan](./docs/plans/completed/2026-09-12-m3-root-registry-command-and-ui.md).
+Three things make this plugin worth looking at:
 
-## How To Use It
+- **Zero learning cost for the agent**: it keeps using the native `read` / `write` / `edit` / `bash` tools. The plugin adds no `workspace_*` tools at all; it only widens the answer to the one question "which directories belong to this workspace".
+- **Security does not degrade**: the additional roots are granted through the same mechanisms the harness already uses — the in-process fs fence plus kernel-level runners (Seatbelt on macOS, bwrap / Landlock on Linux) — with the fs side and bash/PTY sharing one and the same scope. It never degenerates into danger-full-access or prompt-level constraints.
+- **Absent when absent**: it replaces the upstream `fs-sandbox` and `sandbox` provider rows through a bundle patch; with no additional root configured its behavior is item-for-item identical to an uninstalled harness, and every misconfiguration fails loudly instead of silently degrading.
 
-In a session:
+The first release (MVP) is complete and accepted: M1 composition and empty-root pass-through, M2 multi-root capability and dialect grants, M3 root registry / the `/workspace-folders` command / the Workspace Folders panel / a cross-repository journey e2e. Evidence lives in the [completed plans](./docs/plans/README.md).
 
-```text
-/workspace-folders                     # list the primary root and the additional roots
-/workspace-folders add <absolute path> # with no path, opens the OS directory chooser
-/workspace-folders alias 1 payments    # name the first additional root
-/workspace-folders remove 1
+## Quick Start
+
+With a DSH runtime at hand (web / Electron desktop / headless all work), the shortest path is three commands:
+
+```sh
+git clone https://github.com/cherrchen/dsh-plugin-multi-root-workspace.git
+dsh plugin --profile web add ./dsh-plugin-multi-root-workspace
+dsh --profile web
 ```
 
-In the Web GUI: the **Folders** action at the sidebar foot lists the primary root and the additional roots, and offers add (through the composed directory picker), remove, alias, copy path, reveal in the file manager, and reordering. Its copy follows the interface language (English and Chinese).
+Once it is up, the **Folders** action (`🗂`) appears at the sidebar foot — or, straight in a session:
 
-Rules: a directory is canonicalized before it is stored (`~` expands, symlinks resolve) together with **the canonical directory it was granted for at registration time**. A candidate that duplicates a root, nests inside or around one (the workspace root included), equals the session's own workspace root, is missing, or is not a directory is rejected with a reason.
+```text
+/workspace-folders add ~/code/another-repo
+```
 
-A registration is granted only while its path still resolves to the directory it was granted for, so:
+The agent can now read, write, and run bash in that directory, with the same rights as this session's workspace.
 
-- a directory that disappears keeps its registration but is **not granted** — reported as `missing`;
-- a registered directory replaced by a symlink pointing elsewhere is reported as `redirected` and **not granted**, and the grant is never transferred to the new target;
-- once the directory is back, `/workspace-folders list` (or a refresh in the panel) grants it again, with **no restart**;
-- the panel's refresh and the command's `list` are the same revalidation path: they re-`stat` and re-resolve every registered directory and republish it to the fs fence and the kernel dialects, without writing the store.
+## Requirements
 
-Records whose id is duplicated, or that predate the granted-directory field, are reported as `invalid`, grant nothing, and can be removed one at a time (removal is positional, so one action never deletes several records).
+- **Node.js** `^22.19.0 || >=24` (pinned by the repository's `engines`) and **Git**
+- **pnpm 11** (`packageManager` pins `pnpm@11.25.0`; corepack recommended)
+- **DSH runtime `0.1.5-rc.2`** (exact dev pin; the upgrade procedure lives in the [development workflow](./docs/development/plugin-development-workflow.md))
+- **Platforms**: kernel-level multi-root is complete on macOS (Seatbelt) and Linux (bwrap or Landlock); on Windows only the `fs` write path covers additional roots (confined bash/PTY does not — see [known limitations](#known-limitations-first-release))
+- Running the smoke tests needs **no model credentials**: the e2e model turns are served by an inline scripted OpenAI-compatible endpoint
+
+## Installation
+
+Prepare a development environment from source:
+
+```sh
+git clone https://github.com/cherrchen/dsh-plugin-multi-root-workspace.git
+cd dsh-plugin-multi-root-workspace
+export CI=true    # without a TTY, pnpm's dependency self-check aborts; see the development workflow §8
+pnpm install
+pnpm build        # produces lib/ (not tracked by Git); the artifact test and installation both need it
+```
+
+## Running
+
+Development gates, with the result each step should produce:
+
+```sh
+pnpm lint && pnpm typecheck   # expect: 0 warnings, 0 errors; both tsconfigs pass
+pnpm test                     # expect: all pass; dialect cases without a local kernel runner skip explicitly, with a reason
+pnpm kernel:probe             # expect: reports the kernel runners this host has (seatbelt / bwrap / landlock)
+pnpm smoke                    # expect: compose 34/34, behavior 99/99, journey 28/28
+pnpm docs:check               # expect: 0 errors, 0 warnings
+```
+
+Install into a DSH runtime and verify the composition:
+
+```sh
+dsh plugin --profile web add "$PWD"
+dsh --profile web --dump-config
+```
+
+Expected: **only** the `fs-sandbox` and `sandbox` rows are replaced by the plugin's `multi-root-fs` / `multi-root-sandbox`, with three rows inserted (scope / registry / command); `bash-sandbox` stays upstream (bash and the PTY backend take their roots from `ctx.sandbox`). After starting `dsh --profile web`, the Folders action appears at the sidebar foot.
+
+## Usage
+
+**The command** (the text entry point; also available headless):
+
+```text
+/workspace-folders                       # list the primary root and the additional roots
+/workspace-folders add <absolute path>   # with no path, opens the OS directory chooser
+/workspace-folders alias 1 payments      # name the first additional root
+/workspace-folders remove 1              # by ordinal or by path
+/workspace-folders reveal 1              # show it in the file manager
+```
+
+After an `add`, `list` prints:
+
+```text
+Workspace root (primary, always writable): /home/me/monorepo
+  1 /home/me/payments-service [payments]
+  2 /home/me/website
+Writable additional roots: 2 of 2.
+```
+
+**The panel** (Web GUI): the **Folders** dialog at the sidebar foot lists the primary root and the additional roots, and offers add (through the composed directory picker or a typed path), remove, alias, copy path, reveal in the file manager, and move up/down. Its copy is bilingual and follows the interface language. A root's state is shown honestly: `missing` (absent right now) and `redirected` (replaced by a symlink pointing elsewhere) keep their registration but are **not granted**; once the directory is back, a `list` or a panel refresh grants it again — no restart.
+
+**The model side**: the additional-root topology reaches the model through a `systemPrompt.context` snapshot attached to every request (same workspace, cwd unchanged) — no introspection tool needed. The full authorization semantics (canonicalization, `recordedPath` against symlink transplants, conflict rejection) live in the [architecture document](./docs/architecture/multi-root-workspace.md).
+
+## Project Structure
+
+```text
+src/
+  roots.ts        pure rules: canonicalization, conflict validation, record classification (available/missing/redirected/invalid)
+  registry.ts     the root registry: dsh-storage-domain persistence, mutations of one primary root serialized in one queue
+  scope.ts        ctx.multiRootScope: the single authorization source, plus the model-visible topology snapshot
+  fs.ts           the multi-root filesystem provider (in-process fence, extends the upstream LocalFileSystem)
+  sandbox.ts      the multi-root kernel-sandbox provider (extends the upstream LocalSandboxProvider)
+  dialects.ts     Seatbelt / bwrap / Landlock profile recognition and additional-grant assembly (unrecognized shapes fail loudly)
+  containment.ts  path containment (lexical fast path plus a dev/ino alias fallback)
+  command.ts      the /workspace-folders command and the host half of the panel RPC
+  contract.ts     the panel wire protocol (zod-validated on both ends, inlinable into the browser bundle)
+  client/         the browser half: sidebar action, dialog, bilingual dictionaries
+tests/            differential parity, real-execution dialect matrix, contract round-trips, component and locale gates
+scripts/          smoke batteries (compose / behavior / journey) plus the docs and kernel-runner checks
+docs/             requirements, architecture, decision records (ADRs), plans, development workflow
+```
+
+## Contributing
+
+Issues and PRs are welcome:
+
+1. Read [`AGENTS.md`](./AGENTS.md) (repository-wide rules) and the [development workflow](./docs/development/plugin-development-workflow.md) (environment, commands, the two-runtime matrix, the upgrade procedure) first.
+2. Branch from `main`; follow conventional commits (`feat` / `fix` / `perf` / `refactor` + scope) — see the existing history.
+3. All of these must pass locally before a PR: `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm test`, `pnpm docs:check`, `pnpm smoke` (CI runs the same order, build before test).
+4. Behavior changes update the matching document under `docs/` in the same change; keep the README bilingual pair in sync; record engineering decisions that involve trade-offs as ADRs.
+5. Hard constraint: **never modify any package of the upstream repository (deepseek-harness)**; the plugin stays an out-of-tree extension.
 
 ## Known Limitations (first release)
 
@@ -42,28 +135,6 @@ Records whose id is duplicated, or that predate the granted-directory field, are
 - The command's own output text is English (a host-side handler has no active locale to consult); the panel is bilingual.
 - The Workspace Folders panel is a sidebar footer action plus a dialog rather than a full panel: the `sidebar.panellist` / `main` slots exist only in 0.1.5, while the installed 0.1.2 desktop runtime has neither, and one implementation keeps both runtimes supported.
 
-## Quick Start
-
-```sh
-pnpm install
-export CI=true            # see the development workflow §8: without a TTY pnpm's dependency self-check aborts
-pnpm lint && pnpm typecheck
-pnpm build                # must precede test: the artifact test reads lib/, which Git does not track
-pnpm test
-pnpm kernel:probe         # can this host really confine a process? if so, the kernel assertions must RUN
-pnpm smoke                # composition gate + behavior gates + the cross-repository journey
-pnpm docs:check
-```
-
-Install into a runtime:
-
-```sh
-dsh plugin --profile web add <path to this repository>
-dsh --profile web --dump-config
-```
-
-Commands, the smoke mechanism, the two-runtime matrix, and the upgrade procedure live in [`docs/development/plugin-development-workflow.md`](./docs/development/plugin-development-workflow.md).
-
 ## Documentation
 
 Long-term project documentation lives in [`docs/`](./docs/README.md):
@@ -71,9 +142,15 @@ Long-term project documentation lives in [`docs/`](./docs/README.md):
 - [Requirements](./docs/requirements/multi-root-workspace.md)
 - [Target architecture](./docs/architecture/multi-root-workspace.md)
 - [Upstream research](./docs/reference/multi-root-workspace-research.md)
-- [Decision records](./docs/decisions/README.md)
+- [Decision records (ADRs)](./docs/decisions/README.md)
 - [Plans](./docs/plans/README.md)
+- [Development workflow](./docs/development/plugin-development-workflow.md)
+- [Troubleshooting](./docs/troubleshooting/README.md)
 
 Repository-wide rules for Coding Agents are defined in [`AGENTS.md`](./AGENTS.md).
 
 Chinese documentation: [`README.md`](./README.md)
+
+## License
+
+[MIT](./LICENSE)
