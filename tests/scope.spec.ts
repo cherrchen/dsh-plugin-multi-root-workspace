@@ -1,17 +1,23 @@
 /**
  * Unit tests for the plugin's single permission-source: the multi-root scope
- * service. M1 has no additional-root data source yet, so these tests pin the
- * resolution contract the providers already depend on — canonical keys,
- * deduplication, primary-root exclusion, and the empty answer for anything
- * unregistered.
+ * service. These pin the resolution contract the providers depend on —
+ * canonical keys, deduplication, primary-root exclusion, and the empty answer
+ * for anything unregistered — plus the model-facing topology contribution, which
+ * must be silent exactly when there is nothing to say (no additional root, a
+ * non-writable mode, or no agent at all).
  */
 
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
-import { MultiRootScopeService, sanitizeAdditionalRoots } from '../src/scope.ts'
+import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
+import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SystemPrompt, { renderContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
+import { MULTI_ROOT_CONTEXT_NAME, MultiRootScopeService, sanitizeAdditionalRoots } from '../src/scope.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -98,5 +104,100 @@ describe('root sanitization', () => {
     const before = structuredClone(roots)
     expect(sanitizeAdditionalRoots(fixture.workspace, roots)).toEqual([fixture.outside])
     expect(roots).toEqual(before)
+  })
+})
+
+describe('workspace topology context', () => {
+  let promptCtx: Context
+  let promptFibers: Array<Awaited<ReturnType<Context['plugin']>>>
+  let session: Session
+
+  beforeEach(async () => {
+    promptCtx = new Context()
+    promptFibers = [
+      await promptCtx.plugin(SystemPrompt),
+      await promptCtx.plugin(SessionProjectionRegistry),
+      await promptCtx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace }),
+      await promptCtx.plugin(MultiRootScopeService),
+    ]
+    const sessionId = SessionId('sess-topology')
+    session = Session.create(sessionId, undefined, {
+      version: SESSION_FORMAT_VERSION,
+      id: sessionId,
+      createdAt: 0,
+      isSeeded: false,
+      cwd: fixture.workspace,
+    })
+  })
+
+  afterEach(async () => {
+    while (promptFibers.length > 0) await promptFibers.pop()?.dispose()
+  })
+
+  const agent = (): Agent => ({ session }) as unknown as Agent
+
+  async function topology(): Promise<string | undefined> {
+    const assembly = await promptCtx.systemPrompt.assemble({ agent: agent() })
+    return assembly.contexts.find(context => context.name === MULTI_ROOT_CONTEXT_NAME)?.text
+  }
+
+  it('states the additional roots next to the sandbox policy sentence', async () => {
+    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside }])
+    expect(await topology()).toBe(
+      `Current DSH workspace roots: ${JSON.stringify([fixture.outside])} are additional roots of this session's workspace. `
+      + `Under workspace-write they may be modified like the session workspace; the session cwd remains the primary root `
+      + `(${JSON.stringify(fixture.workspace)}).`,
+    )
+    const snapshot = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))
+    expect(snapshot.indexOf('Current DSH file policy')).toBeLessThan(snapshot.indexOf('Current DSH workspace roots'))
+  })
+
+  it('contributes nothing while the scope holds no additional root', async () => {
+    expect(await topology()).toBe('')
+    const snapshot = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))
+    expect(snapshot).not.toContain('workspace roots')
+  })
+
+  it('contributes nothing without an agent (diagnostics assemblies)', async () => {
+    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside }])
+    const assembly = await promptCtx.systemPrompt.assemble()
+    expect(assembly.contexts.find(context => context.name === MULTI_ROOT_CONTEXT_NAME)?.text).toBe('')
+  })
+
+  it('contributes nothing while the policy is read-only, even with additional roots', async () => {
+    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside }])
+    const readOnly = new Context()
+    const fibers = [
+      await readOnly.plugin(SystemPrompt),
+      await readOnly.plugin(SessionProjectionRegistry),
+      await readOnly.plugin(SandboxPolicyService, { mode: 'read-only', workspaceRoot: fixture.workspace }),
+      await readOnly.plugin(MultiRootScopeService),
+    ]
+    try {
+      readOnly.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside }])
+      const assembly = await readOnly.systemPrompt.assemble({ agent: agent() })
+      expect(assembly.contexts.find(context => context.name === MULTI_ROOT_CONTEXT_NAME)?.text).toBe('')
+      expect(renderContextSnapshot(assembly)).not.toContain('workspace roots')
+    } finally {
+      while (fibers.length > 0) await fibers.pop()?.dispose()
+    }
+  })
+
+  it('is byte-stable across assemblies and lists roots in scope order', async () => {
+    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { id: 'a', path: fixture.outside },
+      { id: 'b', path: `${fixture.base}/third` },
+    ])
+    const first = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))
+    const second = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))
+    expect(second).toBe(first)
+    expect(first).toContain(JSON.stringify([fixture.outside, `${fixture.base}/third`]))
+  })
+
+  it('mounts without a system-prompt seam at all (soft dependency)', async () => {
+    const bare = new Context()
+    const fiber = await bare.plugin(MultiRootScopeService)
+    expect(bare.multiRootScope.resolve(policy(fixture.workspace)).additionalRoots).toEqual([])
+    await fiber.dispose()
   })
 })
