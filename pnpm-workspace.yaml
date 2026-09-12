@@ -16,6 +16,7 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - '@deepseek-ai/cordis@4.0.2'
   - '@deepseek-ai/dsh@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-agent@0.1.5-rc.2'
   - '@deepseek-ai/dsh-app-boot@0.1.5-rc.2'
   - '@deepseek-ai/dsh-base@0.1.5-rc.2'
   - '@deepseek-ai/dsh-bash-local@0.1.5-rc.2'
@@ -32,6 +33,7 @@ minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-shell@0.1.5-rc.2'
   - '@deepseek-ai/dsh-subprocess@0.1.5-rc.2'
   - '@deepseek-ai/dsh-subprocess-local@0.1.5-rc.2'
+  - '@deepseek-ai/dsh-system-prompt@0.1.5-rc.2'
   - '@deepseek-ai/dsh-llm@0.1.5-rc.2'
   - '@deepseek-ai/dsh-util-values@0.1.5-rc.2'
   - '@deepseek-ai/schemastery@3.18.2'
