@@ -35,11 +35,9 @@ type PanelHandler = (endpoint: string, payload: unknown, signal: AbortSignal) =>
 let handler: PanelHandler | undefined
 /** Every argv the stub subprocess was asked to run. */
 let spawned: string[][] = []
-/** The code the stub subprocess reports. */
-const exitCode: number | null = 0
 
 /** Mount a stack plus the stub registries the module needs. */
-async function mount(options: { withPicker?: boolean; withConnection?: boolean; withSubprocess?: boolean } = {}): Promise<RegistryStack> {
+async function mount(options: { withPicker?: boolean; withConnection?: boolean; withSubprocess?: boolean; spawnExitCode?: number } = {}): Promise<RegistryStack> {
   const stack = await mountRegistryStack(storeRoot)
   stacks.push(stack)
   const ctx = stack.ctx
@@ -77,7 +75,7 @@ async function mount(options: { withPicker?: boolean; withConnection?: boolean; 
       spawn: (spec: { argv: readonly string[] }) => {
         spawned.push([...spec.argv])
         return {
-          done: Promise.resolve({ exitCode, signal: null }),
+          done: Promise.resolve({ exitCode: options.spawnExitCode ?? 0, signal: null }),
           waitForExit: async () => true,
         }
       },
@@ -432,6 +430,40 @@ describe('the panel channel', () => {
     // an operator action, not a grant.
     const revealed = await callPanel('reveal', { primaryRoot: primary, id })
     expect(revealed.value?.revealed).toBe(granted)
+  })
+
+  it('reports a reveal that cannot run as reveal-unavailable, not a storage failure', async () => {
+    // Reveal has nothing to do with the root registry's store; its failures get
+    // their own code so the panel cannot render the storage-repair guidance.
+    await mount({ withConnection: true })
+    const extra = join(fixture.base, 'extra')
+    mkdirSync(extra)
+    await callPanel('add', { primaryRoot: primary, path: extra })
+
+    const withoutRuntime = await callPanel('reveal', { primaryRoot: primary })
+    expect(withoutRuntime.ok).toBe(false)
+    expect(withoutRuntime.error?.code).toBe('invalid-ref')
+
+    const added = await callPanel('list', { primaryRoot: primary })
+    const id = added.value?.roots?.[0]?.id ?? ''
+    const noSubprocess = await callPanel('reveal', { primaryRoot: primary, id })
+    expect(noSubprocess.ok).toBe(false)
+    expect(noSubprocess.error?.code).toBe('reveal-unavailable')
+    expect((await run('reveal 1')).text).toContain('reveal-unavailable')
+  })
+
+  it('reports a failing file manager as reveal-unavailable', async () => {
+    await mount({ withConnection: true, withSubprocess: true, spawnExitCode: 1 })
+    const extra = join(fixture.base, 'extra')
+    mkdirSync(extra)
+    await callPanel('add', { primaryRoot: primary, path: extra })
+    const added = await callPanel('list', { primaryRoot: primary })
+    const id = added.value?.roots?.[0]?.id ?? ''
+
+    const failed = await callPanel('reveal', { primaryRoot: primary, id })
+    expect(failed.ok).toBe(false)
+    expect(failed.error?.code).toBe('reveal-unavailable')
+    expect(spawned).toHaveLength(1)
   })
 
   it('removes exactly one record when two records share an id', async () => {

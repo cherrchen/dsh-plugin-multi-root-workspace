@@ -468,7 +468,7 @@ async function revealRoot(ctx: Context, path: string): Promise<void> {
   const subprocess = ctx.get('subprocess')
   if (subprocess === undefined) {
     throw new RootValidationError(
-      'storage-unavailable',
+      'reveal-unavailable',
       'revealing a root needs a process runtime, which this composition does not mount',
     )
   }
@@ -486,6 +486,6 @@ async function revealRoot(ctx: Context, path: string): Promise<void> {
   const outcome = await handle.done
   await handle.waitForExit()
   if (outcome.exitCode !== 0) {
-    throw new RootValidationError('storage-unavailable', `the file manager exited with ${String(outcome.exitCode)}`)
+    throw new RootValidationError('reveal-unavailable', `the file manager exited with ${String(outcome.exitCode)}`)
   }
 }

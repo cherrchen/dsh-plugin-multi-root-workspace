@@ -55,6 +55,7 @@ export const zh = {
   'error.not-found': '没有找到对应的登记项。',
   'error.invalid-ref': '请求缺少必要的标识。',
   'error.storage-unavailable': '根目录登记的存储不可用，请检查 $DSH_HOME/storages 下的文件。',
+  'error.reveal-unavailable': '无法打开系统的文件管理器；登记项不受影响，路径仍可复制。',
   'error.unavailable': '无法连接到 dsh 主进程。',
   'error.fallback': '操作失败。',
 } satisfies Record<string, string>
@@ -105,6 +106,7 @@ export const en = {
   'error.not-found': 'No registration matches that reference.',
   'error.invalid-ref': 'The request is missing a required identity.',
   'error.storage-unavailable': 'The root registry store is unavailable; check the files under $DSH_HOME/storages.',
+  'error.reveal-unavailable': 'Could not open the system file manager; the registration is untouched, and the path can still be copied.',
   'error.unavailable': 'Could not reach the dsh host process.',
   'error.fallback': 'The operation failed.',
 } satisfies Record<Key, string>
