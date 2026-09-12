@@ -7,10 +7,11 @@
  * non-writable mode, or no agent at all).
  */
 
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
@@ -43,6 +44,11 @@ function policy(workspaceRoot: string, mode: SandboxExecutionPolicy['mode'] = 'w
   return { mode, workspaceRoot }
 }
 
+/** Register one additional root the way the registry does: canonical, with its granted directory. */
+function root(id: string, path: string): { id: string; path: string; recordedPath: string } {
+  return { id, path, recordedPath: canonicalPath(path) }
+}
+
 describe('scope resolution', () => {
   it('reports the policy root as primary and no additional roots when none are registered', () => {
     const scope = ctx.multiRootScope.resolve(policy(fixture.workspace))
@@ -64,8 +70,8 @@ describe('scope resolution', () => {
 
   it('returns registered roots in registry order', () => {
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
-      { id: 'b', path: fixture.outside },
-      { id: 'a', path: `${fixture.base}/third` },
+      root('b', fixture.outside),
+      root('a', `${fixture.base}/third`),
     ])
     expect(ctx.multiRootScope.resolve(policy(fixture.workspace)).additionalRoots)
       .toEqual([fixture.outside, `${fixture.base}/third`])
@@ -73,37 +79,63 @@ describe('scope resolution', () => {
 
   it('drops duplicates, the primary root itself, and non-canonical spellings of the same directory', () => {
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
-      { id: 'dup', path: fixture.outside },
-      { id: 'dup-alias', path: `${fixture.outside}/.` },
-      { id: 'primary', path: fixture.workspace },
+      root('dup', fixture.outside),
+      root('dup-alias', `${fixture.outside}/.`),
+      root('primary', fixture.workspace),
       { id: 'primary-alias', path: `${fixture.workspace}/sub/..` },
     ])
     expect(ctx.multiRootScope.resolve(policy(fixture.workspace)).additionalRoots).toEqual([fixture.outside])
   })
 
   it('answers empty for a primary root that has no registration', () => {
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside }])
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
     expect(ctx.multiRootScope.scopeOf(fixture.base)).toEqual([])
   })
 
   it('clears the registration when an empty list is set', () => {
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside }])
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
     expect(ctx.multiRootScope.scopeOf(fixture.workspace)).toEqual([])
   })
 
   it('indexes by canonical key, so an aliased primary root still finds its roots', () => {
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside }])
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
     expect(ctx.multiRootScope.scopeOf(`${fixture.workspace}/sub/..`)).toEqual([fixture.outside])
   })
 })
 
 describe('root sanitization', () => {
   it('is pure and never mutates its input', () => {
-    const roots = [{ id: 'x', path: fixture.outside }]
+    const roots = [root('x', fixture.outside)]
     const before = structuredClone(roots)
     expect(sanitizeAdditionalRoots(fixture.workspace, roots)).toEqual([fixture.outside])
     expect(roots).toEqual(before)
+  })
+
+  it('withholds a registration whose path was replaced after it was granted', () => {
+    // The audited hole: `canonicalPath` is `realpath`, so a registered directory
+    // swapped for a symlink resolves to whatever that symlink points at. The
+    // grant is keyed to the directory that was granted, so the replacement must
+    // grant NOTHING — not the new target, and not the old path either.
+    const granted = join(fixture.base, 'granted')
+    const elsewhere = join(fixture.base, 'elsewhere')
+    mkdirSync(granted)
+    mkdirSync(elsewhere)
+    const registration = root('x', granted)
+    expect(sanitizeAdditionalRoots(fixture.workspace, [registration])).toEqual([canonicalPath(granted)])
+
+    rmSync(granted, { recursive: true, force: true })
+    symlinkSync(elsewhere, granted)
+
+    expect(sanitizeAdditionalRoots(fixture.workspace, [registration])).toEqual([])
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [registration])
+    expect(ctx.multiRootScope.scopeOf(fixture.workspace)).toEqual([])
+    expect(ctx.multiRootScope.resolve(policy(fixture.workspace)).additionalRoots).toEqual([])
+  })
+
+  it('withholds a registration that does not say which directory it was granted for', () => {
+    const incomplete = { id: 'x', path: fixture.outside, recordedPath: '' }
+    expect(sanitizeAdditionalRoots(fixture.workspace, [incomplete])).toEqual([])
   })
 })
 
@@ -142,7 +174,7 @@ describe('workspace topology context', () => {
   }
 
   it('states the additional roots next to the sandbox policy sentence', async () => {
-    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside }])
+    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
     expect(await topology()).toBe(
       `Current DSH workspace roots: ${JSON.stringify([fixture.outside])} are additional roots of this session's workspace. `
       + `Under workspace-write they may be modified like the session workspace; the session cwd remains the primary root `
@@ -159,13 +191,13 @@ describe('workspace topology context', () => {
   })
 
   it('contributes nothing without an agent (diagnostics assemblies)', async () => {
-    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside }])
+    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
     const assembly = await promptCtx.systemPrompt.assemble()
     expect(assembly.contexts.find(context => context.name === MULTI_ROOT_CONTEXT_NAME)?.text).toBe('')
   })
 
   it('contributes nothing while the policy is read-only, even with additional roots', async () => {
-    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside }])
+    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
     const readOnly = new Context()
     const fibers = [
       await readOnly.plugin(SystemPrompt),
@@ -174,7 +206,7 @@ describe('workspace topology context', () => {
       await readOnly.plugin(MultiRootScopeService),
     ]
     try {
-      readOnly.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside }])
+      readOnly.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
       const assembly = await readOnly.systemPrompt.assemble({ agent: agent() })
       expect(assembly.contexts.find(context => context.name === MULTI_ROOT_CONTEXT_NAME)?.text).toBe('')
       expect(renderContextSnapshot(assembly)).not.toContain('workspace roots')
@@ -185,8 +217,8 @@ describe('workspace topology context', () => {
 
   it('is byte-stable across assemblies and lists roots in scope order', async () => {
     promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [
-      { id: 'a', path: fixture.outside },
-      { id: 'b', path: `${fixture.base}/third` },
+      root('a', fixture.outside),
+      root('b', `${fixture.base}/third`),
     ])
     const first = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))
     const second = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))

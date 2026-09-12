@@ -13,6 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { SandboxInternals } from '@deepseek-ai/dsh-sandbox-local'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
@@ -76,7 +77,7 @@ async function confineBoth(
 ): Promise<{ upstream: ReturnType<LocalSandboxProvider['confine']>; ours: ReturnType<LocalSandboxProvider['confine']>; ctx: Context }> {
   const upstream = await mount(LocalSandboxProvider, mode, internalsFor(dialect))
   const ours = await mount(MultiRootSandboxProvider, mode, internalsFor(dialect))
-  ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, additionalRoots.map((path, index) => ({ id: `root-${index}`, path })))
+  ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, additionalRoots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path) })))
   const policy: SandboxPolicy = { mode, workspaceRoot: fixture.workspace }
   return {
     upstream: upstream.provider.confine(COMMAND, policy),
@@ -175,7 +176,7 @@ describe('the Windows ACL rung keeps the upstream wrap and warns once', () => {
     const upstream = await mount(LocalSandboxProvider, 'workspace-write', internalsFor('windows-acl'))
     const ours = await mount(MultiRootSandboxProvider, 'workspace-write', internalsFor('windows-acl'))
     const warn = vi.spyOn(ours.ctx.logger, 'warn').mockImplementation(() => {})
-    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'root-0', path: fixture.outside }])
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'root-0', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
 
     const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: fixture.workspace }
     const expected = upstream.provider.confine(COMMAND, policy)

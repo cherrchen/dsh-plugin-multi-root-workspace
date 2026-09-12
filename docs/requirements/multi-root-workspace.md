@@ -46,7 +46,7 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 | 需求（原文节号） | 不改上游下的机制 | 结论 |
 |---|---|---|
 | §4 不重实现原生设施；不造 `workspace_*` 工具 | 原生工具链（tool-fs / tool-bash / terminal）不动；插件零工具（可选一个内省工具）。注意：插件会**子类化**上游 fs 与 sandbox provider——这是"扩展"，不是重实现；文件 IO、进程、内核 runner 全部复用上游 | 满足（含澄清） |
-| §5.1 Root 管理 | 插件注册表 + `dsh-storage-domain` 持久化 + `canonicalPath` 校验 | 插件职责 |
+| §5.1 Root 管理 | 插件注册表 + `dsh-storage-domain` 持久化 + `canonicalPath` 校验；登记项带 `recordedPath`，授权需"当前解析 == 登记时授予的目录"；同一主根的变更整体串行；读取侧 `refresh` 重新校验但不写存储 | 插件职责 |
 | §5.2 Workspace Folders UI | slot 洞 + `directoryPicker` + locale 字典 | 插件 client 半部 |
 | §6 保留 Workspace.path 为 Primary Root | 现状即如此，不碰 | 零改动 |
 | §7 不改 Session cwd 语义 | `header.cwd` 不可变 | 零改动 |
@@ -56,7 +56,7 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 | §11/§12 通用 seam、Core 不认识插件 | **不受约束时的理想形态**（架构文档 §9）；不改上游时以"多根 provider 子类"代位，seam 词汇（附加可写根贡献者）保留在插件内部接口上 | 部分满足，见 §2 代价 |
 | §13 单一权限世界 | fs 直接取插件 scope；bash / terminal / PTY 经插件的 sandbox provider 取同一份 scope；插件自带 parity 测试钉住 | 满足，责任在插件 |
 | §14 数据模型：插件只存 Additional Roots | `AdditionalWorkspaceRoot { id, path, alias?, addedAt }` per workspaceId | 插件职责 |
-| §15 Root Path 规则 | `realpathSync.native` canonical 化 + 五类冲突校验 | 插件职责 |
+| §15 Root Path 规则 | `realpathSync.native` canonical 化 + 冲突校验（非绝对 / 不存在 / 非目录 / 等于主根 / 与主根双向重叠 / 与附加根重复或双向重叠）；读取侧另判 `recordedPath` 变化与重复 id | 插件职责 |
 | §16 初版附加根继承 workspace-write | 附加根与主根同权，无 per-root mode | 第一期范围 |
 | §17 `*.dsh-workspace.json` | 第一期不做；storage 为唯一数据源 | 后续阶段 |
 | §18 兼容性：不装/无根 = 单目录行为 | 未安装：组合零变化。安装且根列表为空：子类行为与上游 byte-identical（子类在空附加根时直通上游实现路径） | 验收标准 |
@@ -89,7 +89,10 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 4. **单一权限世界**：插件自建 parity 测试——同一 scope 下 fs fence 与内核 runner 对附加根内外的写行为一致；不存在任一工具能写附加根而另一工具不能的组合。
 5. **cwd 不变**：多根 Session 的 `header.cwd`、`workspace.path`、transcript cwd 显示均为主根；无虚拟 cwd。
 6. **模型可见 ⟺ 已记录**：拓扑文案经 `systemPrompt.context` 快照落 log；快照回放能重建相同拓扑。
-7. **Path 规则**：`~/p`、`/abs/p`、`/abs/../abs/p`、symlink 别名 canonical 化后判重；与主根相同的附加根被拒绝并给出明确错误；缺失目录添加时拒绝、启动时降级为"跳过 + 用户可见通知"，不静默。
+7. **Path 规则**：`~/p`、`/abs/p`、`/abs/../abs/p`、symlink 别名 canonical 化后判重；与主根相同（`equals-primary`）或与主根互相包含（`primary-overlap`）的候选被拒绝并给出明确错误；与其他根重复或互相包含同样拒绝；缺失目录添加时拒绝、启动时降级为"保留登记 + 不授予 + 用户可见通知"，不静默；同一条主根下重复 id 的记录全部报 `invalid` 且不授予，并可逐条移除。
+7.1 **授权不可被本地替换转移**：登记目录（或其链接链）在登记后被替换成指向别处的符号链接时，该根变为 `redirected`、撤销授予，且**绝不**把写权限交给新目标；恢复原目录后由一次重新校验自动复原。
+7.2 **刷新即重新校验**：命令 `list` 与面板刷新是同一条路径——重新 `stat`、重新解析、重新裁决并同步 scope，且只读刷新不写存储；目录删除后列表必须显示不可用并撤销授予，目录恢复后必须重新授予（不需要重启）。
+7.3 **并发不丢操作**：同一主根上并发发起的增删改必须全部生效，且不得复活已删除的记录。
 8. **失败要响亮**：misconfiguration（非绝对路径、重复 id、patch 行未按预期生效）在装载或首次 resolve 时抛错。
 9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias/排序可用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制。
 10. **升级韧性**：`package.json` pin dsh 精确版本；仓库 CI 含"升级 smoke"脚本（对上游 demo 行为差异报警）；provider 子类只依赖上游公开方法面（不触碰 TS-private、不做原型替换）。
@@ -101,6 +104,8 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 - 面板是"侧栏底部动作 + 对话框"：`sidebar.panellist` / keyed `main` 全屏面板在 0.1.5 才有，而已安装的桌面运行时是 0.1.2-rc.1（其侧栏只有 brand/workspaces/settings/footer.action）。二者不可兼得，选择保住双运行时。
 - 未接入 `sidebar.workspaces.directoryFlow` / `conversation.hero.workspace.directoryFlow`：那是"创建工作区"的洞，默认组合已有占用者（ADR-0005）。
 - e2e 的模型轮次由脚本驱动（用于断言世界状态），不能替代"真实模型能否自行发现附加根"的观察；拓扑快照的模型可见性由请求体断言覆盖。
+- 重新校验与内核调用之间仍存在 TOCTOU 窗口：本插件保证"按当前可见的解析结果授权"，不保证一个目录在 `stat` 之后被原子替换时内核仍按旧目标执行（那需要内核侧 fd 语义）。
+- 主根自身被解析到别处（例如 `policy.workspaceRoot` 指向的路径被替换）属于上游 `sandboxPolicy` 的行为，不在本插件的重新授权范围内。
 
 ## 6. 非目标（明确不做）
 

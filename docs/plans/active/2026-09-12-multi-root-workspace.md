@@ -1,6 +1,6 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（里程碑概览；M1/M2/M3 均已实施完成，详细计划在 `completed/`）
+> 状态：active（里程碑概览；M1/M2 已实施完成，M3 已实施并按外部审查返工后重新验收，详细计划在 `completed/`）
 > 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5；M1 详细计划（已完成）：[2026-09-12-m1-composition-and-passthrough.md](../completed/2026-09-12-m1-composition-and-passthrough.md)；M2 详细计划（已完成）：[2026-09-12-m2-additional-roots-and-dialect-grants.md](../completed/2026-09-12-m2-additional-roots-and-dialect-grants.md)；M3 详细计划（已完成）：[2026-09-12-m3-root-registry-command-and-ui.md](../completed/2026-09-12-m3-root-registry-command-and-ui.md)。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
@@ -39,7 +39,7 @@
 
 验证（已完成）：`pnpm lint` / `typecheck` / `test`（79 项：3 项真实受限执行按宿主能力显式 skip）、`pnpm build`、`pnpm smoke:compose`（30/30）、`pnpm smoke:behavior`（69/69，4 项显式 skip）、`pnpm docs:check`；两个冒烟在 `0.1.5-rc.2` 与 `0.1.2-rc.1` 双运行时上均通过。
 
-## M3 — Root 注册表、命令、client UI、e2e（已实施）
+## M3 — Root 注册表、命令、client UI、e2e（已实施，且按外部审查返工后重新验收）
 
 > 任务清单、设计决定、修正依据、验证判据与实施结果见 **[M3 开发计划（completed）](../completed/2026-09-12-m3-root-registry-command-and-ui.md)**；本文件只保留里程碑概览，不重复其内容。
 
@@ -51,13 +51,15 @@
 - 注册表以 **canonical 主根** 为存储键（`ctx.workspaceRegistry` 在 headless 不存在）；nested roots **拍板拒绝**。
 - e2e 用真实组合 + 无凭据脚本化模型在进程内驱动真实 agent turn（web 与 headless 各一轮），不引入 Playwright/Electron 车道。
 
+**外部审查返工（2026-09-12）**：审查提出 8 项发现（3 项发布阻断）——登记根被替换为符号链接后授权转移、并发改注册表丢写/复活已撤销授权、CI 先测后构建、刷新不重查目录、手输路径被 picker 覆盖、Reveal 应答契约不一致、重复 id 未校验、主根未纳入嵌套校验。已全部修复并各带回归测试，取舍与语义写入 [ADR-0004](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)（返工补充第 9–15 条）与 [架构 §4/§7](../../architecture/multi-root-workspace.md)；逐项证据见 M3 计划「外部审查返工」章节。
+
 ## 里程碑与仓库状态对照
 
 | 里程碑 | 完成时状态 |
 |---|---|
 | M1 ✅ | 插件可安装、行为与未装一致；组合结构性风险清零（2026-09-12 完成） |
 | M2 ✅ | 多根在 macOS/Linux 端到端可用（配置暂用测试/冒烟注入的静态根）（2026-09-12 完成） |
-| M3 ✅ | 完整用户旅程（命令/面板增删根 → 会话 → Agent 跨 repo 工作）（2026-09-12 实施） |
+| M3 ✅ | 完整用户旅程（命令/面板增删根 → 会话 → Agent 跨 repo 工作）（2026-09-12 实施；同日按外部审查返工后重新验收：8 项发现全部修复并带回归测试） |
 
 ## 测试与检查指引
 

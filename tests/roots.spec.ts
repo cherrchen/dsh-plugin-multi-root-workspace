@@ -18,7 +18,9 @@ import {
   canonicalRoot,
   classifyStoredRoots,
   expandRootInput,
+  indexedStatuses,
   isCanonicallyUnder,
+  removeStatusAt,
   resolveRootRef,
   RootValidationError,
   validateRootCandidate,
@@ -134,7 +136,51 @@ describe('validateRootCandidate', () => {
   })
 
   it('rejects a candidate that contains a registered root', () => {
-    expect(codeOf(fixture.base, [sibling])).toBe('nested')
+    // A parent of the workspace root overlaps the primary root first, which is
+    // the same refusal for a sharper reason; the pure additional-root case is
+    // covered below with a sibling that does not contain the primary root.
+    expect(codeOf(fixture.base, [sibling])).toBe('primary-overlap')
+    expect(codeOf(join(fixture.base, 'parent'), [canonicalPath(join(fixture.base, 'parent/child'))])).toBe('missing')
+  })
+
+  it('rejects a candidate inside the primary root, even with nothing registered', () => {
+    // The primary root takes part in the overlap rule like any other root: a
+    // child of it adds no writable range. Checking it only against `existing`
+    // used to let this through on an empty registration list.
+    const sub = join(primary, 'sub')
+    mkdirSync(sub)
+    expect(codeOf(sub, [])).toBe('primary-overlap')
+    expect(codeOf(sub, [sibling])).toBe('primary-overlap')
+  })
+
+  it('rejects a candidate that contains the primary root, even with nothing registered', () => {
+    expect(codeOf(fixture.base, [])).toBe('primary-overlap')
+  })
+
+  it('keeps equals-primary distinct from primary-overlap', () => {
+    expect(codeOf(primary)).toBe('equals-primary')
+    expect(codeOf(join(primary, '.'))).toBe('equals-primary')
+  })
+
+  it('names the primary root in the primary-overlap detail', () => {
+    const sub = join(primary, 'sub')
+    mkdirSync(sub, { recursive: true })
+    try {
+      check(sub)
+      expect.unreachable('a child of the primary root must be rejected')
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(RootValidationError)
+      expect((error as RootValidationError).code).toBe('primary-overlap')
+      expect((error as RootValidationError).detail?.conflict).toBe(primary)
+    }
+  })
+
+  it('still reports a nested additional root as nested, not as a primary overlap', () => {
+    const outer = join(fixture.base, 'outer')
+    const inner = join(outer, 'inner')
+    mkdirSync(inner, { recursive: true })
+    expect(codeOf(inner, [outer])).toBe('nested')
+    expect(codeOf(outer, [inner])).toBe('nested')
   })
 
   it('names the conflicting root in the failure detail', () => {
@@ -154,14 +200,16 @@ describe('validateRootCandidate', () => {
 })
 
 describe('classifyStoredRoots', () => {
-  const record = (path: string, id = path): RegisteredRoot => ({
+  /** One stored record: `path` as spelled, `recordedPath` as granted. */
+  const stored = (path: string, id = path, recordedPath = path): RegisteredRoot => ({
     id: additionalRootId(id),
     path,
+    recordedPath,
     addedAt: '2026-09-12T00:00:00.000Z',
   })
 
   it('marks an existing root available and keeps registry order', () => {
-    const statuses = classifyStoredRoots(primary, [record(sibling), record(nested, 'n2')])
+    const statuses = classifyStoredRoots(primary, [stored(sibling), stored(nested, 'n2')])
     expect(statuses.map(status => status.state)).toEqual(['available', 'invalid'])
     expect(statuses[0]?.path).toBe(canonicalPath(sibling))
     expect(availableRoots(statuses)).toEqual([canonicalPath(sibling)])
@@ -169,46 +217,98 @@ describe('classifyStoredRoots', () => {
 
   it('keeps a registration whose directory vanished, as missing rather than invalid', () => {
     const gone = join(fixture.base, 'vanished')
-    const statuses = classifyStoredRoots(primary, [record(gone)])
+    const statuses = classifyStoredRoots(primary, [stored(gone)])
     expect(statuses[0]?.state).toBe('missing')
     expect(statuses[0]?.path).toBe(gone)
     expect(availableRoots(statuses)).toEqual([])
   })
 
   it('flags a record equal to the primary root as invalid', () => {
-    expect(classifyStoredRoots(primary, [record(primary)])[0]?.state).toBe('invalid')
+    expect(classifyStoredRoots(primary, [stored(primary)])[0]?.state).toBe('invalid')
   })
 
   it('flags the second of two equal records as invalid (first one wins)', () => {
-    const statuses = classifyStoredRoots(primary, [record(sibling), record(join(sibling, '.'), 'other')])
+    const statuses = classifyStoredRoots(primary, [stored(sibling), stored(join(sibling, '.'), 'other')])
     expect(statuses.map(status => status.state)).toEqual(['available', 'invalid'])
   })
 
   it('flags overlapping records in either direction as invalid', () => {
-    const outerFirst = classifyStoredRoots(primary, [record(sibling), record(nested, 'n2')])
+    const outerFirst = classifyStoredRoots(primary, [stored(sibling), stored(nested, 'n2')])
     expect(outerFirst[1]?.state).toBe('invalid')
-    const innerFirst = classifyStoredRoots(primary, [record(nested), record(sibling, 'n2')])
+    const innerFirst = classifyStoredRoots(primary, [stored(nested), stored(sibling, 'n2')])
     expect(innerFirst[1]?.state).toBe('invalid')
   })
 
   it('flags a relative stored path as invalid', () => {
-    expect(classifyStoredRoots(primary, [record('relative/dir')])[0]?.state).toBe('invalid')
+    expect(classifyStoredRoots(primary, [stored('relative/dir')])[0]?.state).toBe('invalid')
   })
 
   it('flags a record with no usable identity as invalid', () => {
-    expect(classifyStoredRoots(primary, [{ ...record(sibling), id: additionalRootId('') }])[0]?.state).toBe('invalid')
+    expect(classifyStoredRoots(primary, [{ ...stored(sibling), id: additionalRootId('') }])[0]?.state).toBe('invalid')
   })
 
-  it('canonicalizes a stored symlink spelling', () => {
-    expect(classifyStoredRoots(primary, [record(alias)])[0]?.path).toBe(canonicalPath(sibling))
+  it('canonicalizes a stored symlink spelling that was granted as that symlink', () => {
+    // The operator registered the alias itself: the recorded directory IS the
+    // resolved one, so the record is granted under its canonical spelling.
+    const statuses = classifyStoredRoots(primary, [stored(alias, 'alias', canonicalPath(sibling))])
+    expect(statuses[0]?.state).toBe('available')
+    expect(statuses[0]?.path).toBe(canonicalPath(sibling))
+  })
+
+  it('flags a record whose path now resolves elsewhere as redirected, not granted', () => {
+    // Granted for `nested` but now resolving to its parent `sibling`: the
+    // directory that would be handed to the providers is not the one the
+    // record was granted for, so it is withheld and reported.
+    const statuses = classifyStoredRoots(primary, [stored(sibling, 'moved', nested)])
+    expect(statuses[0]?.state).toBe('redirected')
+    expect(statuses[0]?.detail).toContain(canonicalPath(sibling))
+    expect(availableRoots(statuses)).toEqual([])
+  })
+
+  it('grants a record that is spelled through a symlink but resolves to its recorded directory', () => {
+    // The alias resolves to `sibling`, which is the directory this record was
+    // granted for. Authorization follows the resolved directory, so the
+    // spelling does not matter here.
+    const statuses = classifyStoredRoots(primary, [stored(alias, 'alias', canonicalPath(sibling))])
+    expect(statuses[0]?.state).toBe('available')
+    expect(statuses[0]?.path).toBe(canonicalPath(sibling))
+  })
+
+  it('flags a record that does not say what it was granted for as invalid', () => {
+    expect(classifyStoredRoots(primary, [stored(sibling, 'legacy', '')])[0]?.state).toBe('invalid')
+  })
+
+  it('flags every record of a duplicated id as invalid, and grants none of them', () => {
+    const statuses = classifyStoredRoots(primary, [
+      stored(sibling, 'shared'),
+      stored(join(fixture.base, 'gone'), 'shared'),
+    ])
+    expect(statuses.map(status => status.state)).toEqual(['invalid', 'invalid'])
+    expect(statuses[0]?.detail).toBeDefined()
+    expect(availableRoots(statuses)).toEqual([])
+  })
+
+  it('flags a record nested under the primary root as invalid', () => {
+    const inside = join(primary, 'inside')
+    mkdirSync(inside, { recursive: true })
+    expect(classifyStoredRoots(primary, [stored(inside)])[0]?.state).toBe('invalid')
+  })
+
+  it('flags a record containing the primary root as invalid', () => {
+    expect(classifyStoredRoots(primary, [stored(fixture.base)])[0]?.state).toBe('invalid')
   })
 })
 
 describe('resolveRootRef', () => {
   /** Built per test: the fixture tree only exists once `beforeAll` has run. */
   const statusesOf = (): ReturnType<typeof classifyStoredRoots> => classifyStoredRoots(primary, [
-    { id: additionalRootId('a'), path: sibling, addedAt: '2026-09-12T00:00:00.000Z' },
-    { id: additionalRootId('b'), path: join(fixture.base, 'gone'), addedAt: '2026-09-12T00:00:00.000Z' },
+    { id: additionalRootId('a'), path: sibling, recordedPath: sibling, addedAt: '2026-09-12T00:00:00.000Z' },
+    {
+      id: additionalRootId('b'),
+      path: join(fixture.base, 'gone'),
+      recordedPath: join(fixture.base, 'gone'),
+      addedAt: '2026-09-12T00:00:00.000Z',
+    },
   ])
 
   it('resolves by id, ordinal, and path spelling', () => {
@@ -233,6 +333,49 @@ describe('resolveRootRef', () => {
     } catch (error: unknown) {
       expect((error as RootValidationError).code).toBe('not-found')
     }
+  })
+})
+
+describe('indexedStatuses and removeStatusAt', () => {
+  /** Two records that share one id — the case a removal by id cannot address. */
+  const duplicateId = (): ReturnType<typeof classifyStoredRoots> => classifyStoredRoots(primary, [
+    { id: additionalRootId('same'), path: sibling, recordedPath: sibling, addedAt: '2026-09-12T00:00:00.000Z' },
+    {
+      id: additionalRootId('same'),
+      path: join(fixture.base, 'gone'),
+      recordedPath: join(fixture.base, 'gone'),
+      addedAt: '2026-09-12T00:00:00.000Z',
+    },
+  ])
+
+  it('numbers the positions from 1, independently of the ids', () => {
+    expect(indexedStatuses(duplicateId()).map(entry => entry.ordinal)).toEqual([1, 2])
+  })
+
+  it('removes exactly one record by ordinal, even when two share an id', () => {
+    const statuses = duplicateId()
+    const afterFirst = removeStatusAt(statuses, { kind: 'ordinal', ordinal: 1 })
+    expect(afterFirst).toHaveLength(1)
+    expect(afterFirst[0]?.path).toBe(join(fixture.base, 'gone'))
+    const afterSecond = removeStatusAt(statuses, { kind: 'ordinal', ordinal: 2 })
+    expect(afterSecond).toHaveLength(1)
+    expect(afterSecond[0]?.path).toBe(sibling)
+  })
+
+  it('removes exactly one record by id (the first match), not every match', () => {
+    const after = removeStatusAt(duplicateId(), { kind: 'id', id: 'same' })
+    expect(after).toHaveLength(1)
+    expect(after[0]?.path).toBe(join(fixture.base, 'gone'))
+  })
+
+  it('removes by canonical path spelling', () => {
+    const after = removeStatusAt(duplicateId(), { kind: 'path', path: join(sibling, '.') })
+    expect(after).toHaveLength(1)
+    expect(after[0]?.path).toBe(join(fixture.base, 'gone'))
+  })
+
+  it('reports not-found for an ordinal outside the list', () => {
+    expect(() => removeStatusAt(duplicateId(), { kind: 'ordinal', ordinal: 3 })).toThrow(RootValidationError)
   })
 })
 

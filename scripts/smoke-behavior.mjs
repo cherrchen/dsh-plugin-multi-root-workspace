@@ -29,13 +29,14 @@
  * @module scripts/smoke-behavior
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { FileSystem } from '@deepseek-ai/dsh-fs'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import MultiRootFileSystem from '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
 import MultiRootSandboxProvider from '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
 import { createChecker } from './lib/check.mjs'
+import { requireKernelRunner } from '../tests/support/kernel-runner.ts'
 import { assertIsolatedHome, pluginPackageDir, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
 
@@ -148,7 +149,13 @@ async function multiRootBattery(ctx) {
   const results = new Map()
   const policy = ctx.sandboxPolicy.resolve({})
   const scope = ctx.get('multiRootScope')
-  scope.setAdditionalRoots(policy.workspaceRoot, [{ id: 'extra', path: extraRoot }])
+  // A registration always carries the canonical directory it is granted for
+  // (see src/scope.ts): the smoke plays the registry's role, so it records it.
+  scope.setAdditionalRoots(policy.workspaceRoot, [{
+    id: 'extra',
+    path: extraRoot,
+    recordedPath: canonical(extraRoot),
+  }])
   const resolved = scope.resolve(policy)
   const canonicalExtra = resolved.additionalRoots[0]
   results.set('scope resolves the additional root', String(canonicalExtra))
@@ -262,6 +269,42 @@ async function registryBattery(ctx) {
 
     const duplicate = await run(`/workspace-folders add ${primaryRoot}`)
     results.set('adding the workspace root is refused loudly', String(duplicate?.result?.text?.includes('equals-primary')))
+
+    // --- the read path re-checks the directory, without a restart -------------
+    // A registered directory that disappears must stop being writable the moment
+    // a listing notices, and must come back the same way.
+    const moved = `${extraRoot}-moved`
+    rmSync(moved, { recursive: true, force: true })
+    renameSync(extraRoot, moved)
+    const whileGone = await run('/workspace-folders list')
+    results.set('list reports a vanished root as missing', String(whileGone?.result?.text?.includes('missing')))
+    results.set('a vanished root loses its grant', String(!ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
+
+    renameSync(moved, extraRoot)
+    const whenBack = await run('/workspace-folders list')
+    results.set('list re-grants a restored root', String(!whenBack?.result?.text?.includes('missing')))
+    results.set('a restored root is writable again', String(ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
+
+    // --- a replaced directory must NOT transfer the grant --------------------
+    // Swapping the registered directory for a symlink used to move the writable
+    // root to whatever the link pointed at, with the registry still reporting the
+    // original path. It must now revoke instead.
+    const swapped = `${extraRoot}-swapped`
+    rmSync(swapped, { recursive: true, force: true })
+    mkdirSync(swapped, { recursive: true })
+    rmSync(extraRoot, { recursive: true, force: true })
+    symlinkSync(swapped, extraRoot)
+    const afterSwap = await run('/workspace-folders list')
+    results.set('list reports a replaced root as redirected', String(afterSwap?.result?.text?.includes('redirected')))
+    results.set('a replaced root loses its grant', String(!ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
+    results.set('a replaced root does not grant the new target', String(!ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(swapped))))
+
+    rmSync(extraRoot, { force: true })
+    mkdirSync(extraRoot)
+    rmSync(swapped, { recursive: true, force: true })
+    const afterRestore = await run('/workspace-folders list')
+    results.set('restoring the directory restores the grant', String(ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
+    results.set('the restored root is reported available', String(!afterRestore?.result?.text?.includes('redirected')))
 
     const removed = await run('/workspace-folders remove 1')
     results.set('the command removes the root', String(removed?.result?.kind))
@@ -443,7 +486,7 @@ try {
           check.equal(JSON.parse(bashOutside).denied, true, 'bash reports the denial as a sandbox denial fact')
         }
       } else if (runnerRefused) {
-        check.skip(`${mode}: confined bash execution (no usable kernel runner in this process: ${bashInside.slice(0, 120)}…)`)
+        check.skip(`${mode}: confined bash execution (${requireKernelRunner(bashInside.slice(0, 120))})`)
       } else {
         check.ok(false, `${mode}: bash wrote inside the primary root as expected`, bashInside)
       }
@@ -487,7 +530,7 @@ try {
       }
 
       if (bashExtra.includes('SANDBOX_UNAVAILABLE')) {
-        check.skip(`${mode}: confined bash against the additional root (no usable kernel runner in this process: ${bashExtra.slice(0, 120)}…)`)
+        check.skip(`${mode}: confined bash against the additional root (${requireKernelRunner(bashExtra.slice(0, 120))})`)
       } else if (mode === 'workspace-write') {
         check.ok(bashExtra.includes('"wroteExtra":true'), `${mode}: bash writes the additional root`, bashExtra)
         check.ok(bashThird.includes('"wroteThird":false'), `${mode}: bash cannot write outside every root`, bashThird)

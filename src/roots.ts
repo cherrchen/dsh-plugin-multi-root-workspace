@@ -16,11 +16,16 @@
  * 3. `not-a-directory` — it exists but is not a directory.
  * 4. `equals-primary` — the canonical candidate IS the session's workspace
  *    root, which is already granted by the upstream policy.
- * 5. `duplicate` — another registered root canonicalizes to the same path.
- * 6. `nested` — the candidate lies under a registered root, or contains one.
- *    A nested entry grants nothing the union did not already grant, while
- *    making the displayed list disagree with the enforced root set; M3
- *    therefore rejects it (see docs/decisions/ADR-0004).
+ * 5. `primary-overlap` — the candidate lies under the workspace root, or
+ *    contains it. The union grants nothing new, and the displayed list would
+ *    stop matching the enforced root set.
+ * 6. `duplicate` — another registered root canonicalizes to the same path.
+ * 7. `nested` — the candidate lies under a registered root, or contains one.
+ *    Same reasoning as rule 5, applied to the additional roots.
+ *
+ * The stored side of the same rules lives in {@link classifyStoredRoots}, which
+ * must never throw: a registration that stopped being usable is REPORTED, not
+ * deleted, so the operator can see it and remove it deliberately.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/roots
  */
@@ -53,6 +58,14 @@ export interface RegisteredRoot {
   readonly id: AdditionalRootId
   /** Canonical absolute directory (the `realpath` captured at registration). */
   readonly path: string
+  /**
+   * The canonical directory this registration was GRANTED for: the `realpath`
+   * observed when the operator registered it (or the last time the operator
+   * restored it). Authorization is `canonicalPath(path) === recordedPath` — a
+   * root whose current resolution moved somewhere else is reported as
+   * `redirected` and withheld, never silently granted elsewhere.
+   */
+  readonly recordedPath: string
   /** Optional display alias; absent when the operator cleared it. */
   readonly alias?: string
   /** ISO-8601 instant of registration. */
@@ -60,11 +73,18 @@ export interface RegisteredRoot {
 }
 
 /**
- * How one stored record currently stands. `missing` keeps the registration
- * (the directory may come back) while withholding the grant; `invalid` marks a
- * record that violates a rule and can only be removed.
+ * How one stored record currently stands.
+ *
+ * - `available` — the directory is there, resolves to the recorded canonical
+ *   directory, and is granted.
+ * - `missing` — the directory is not there right now; kept, withheld.
+ * - `redirected` — the path no longer resolves to the directory it was
+ *   registered for (it was replaced by a symlink, or a symlink in the chain
+ *   changed); kept, withheld, and `recheck` restores it once the original
+ *   directory is back.
+ * - `invalid` — the record violates a rule and can only be removed.
  */
-export type RootState = 'available' | 'missing' | 'invalid'
+export type RootState = 'available' | 'missing' | 'redirected' | 'invalid'
 
 /** One registered root as the surfaces report it. */
 export interface RootStatus extends RegisteredRoot {
@@ -72,6 +92,14 @@ export interface RootStatus extends RegisteredRoot {
   readonly state: RootState
   /** Why the root is not `available`; absent otherwise. */
   readonly detail?: string
+}
+
+/** One status together with the 1-based ordinal the surfaces accept for it. */
+export interface IndexedRootStatus {
+  /** The 1-based position in the registration list. */
+  readonly ordinal: number
+  /** The record at that position. */
+  readonly status: RootStatus
 }
 
 /** How a caller names one registered root: by id, by path, or by 1-based ordinal. */
@@ -86,6 +114,7 @@ export type RootValidationCode =
   | 'missing'
   | 'not-a-directory'
   | 'equals-primary'
+  | 'primary-overlap'
   | 'duplicate'
   | 'nested'
   | 'invalid-alias'
@@ -134,6 +163,11 @@ function comparable(path: string): string {
   return CASE_SENSITIVE ? path : path.toLowerCase()
 }
 
+/** Whether two canonical paths name the same directory on this platform. */
+function samePath(left: string, right: string): boolean {
+  return comparable(left) === comparable(right)
+}
+
 /**
  * Whether `candidate` is `root` itself or lies beneath it. Both sides must
  * already be canonical: symlinks are resolved by then, so the lexical test is
@@ -161,7 +195,7 @@ export function canonicalRoot(path: string): string {
 
 /** Caller-supplied facts one candidate is judged against. */
 export interface RootCandidateContext {
-  /** The session's workspace root; the candidate may not equal it. */
+  /** The session's workspace root; the candidate may not equal or overlap it. */
   readonly primaryRoot: string
   /**
    * Canonical paths already granted. Missing and invalid registrations are
@@ -176,7 +210,7 @@ export interface RootCandidateContext {
  * Judge one candidate root and return its canonical spelling.
  * @param raw - the raw operator input (a path, possibly `~`-prefixed).
  * @param context - the primary root and the currently granted roots.
- * @returns the canonical path the caller must store.
+ * @returns the canonical path the caller must store (and record as `recordedPath`).
  * @throws {RootValidationError} with the first rule that failed.
  */
 export function validateRootCandidate(raw: string, context: RootCandidateContext): string {
@@ -194,15 +228,27 @@ export function validateRootCandidate(raw: string, context: RootCandidateContext
   const canonical = canonicalRoot(expanded)
   assertDirectory(canonical, expanded)
   const primaryRoot = canonicalRoot(context.primaryRoot)
-  if (comparable(canonical) === comparable(primaryRoot)) {
+  if (samePath(canonical, primaryRoot)) {
     throw new RootValidationError(
       'equals-primary',
       `"${canonical}" is this session's workspace root and is already writable`,
       { conflict: primaryRoot, reference: canonical },
     )
   }
+  // The primary root takes part in the overlap rule exactly like an additional
+  // root does: a child of the workspace root (or an ancestor of it) adds no
+  // writable range and would make the listed roots disagree with the enforced
+  // set. Checking it here — not only against `existing` — is what makes the
+  // rule hold on an empty registration list.
+  if (isCanonicallyUnder(canonical, primaryRoot) || isCanonicallyUnder(primaryRoot, canonical)) {
+    throw new RootValidationError(
+      'primary-overlap',
+      `"${canonical}" overlaps this session's workspace root "${primaryRoot}"`,
+      { conflict: primaryRoot, reference: canonical },
+    )
+  }
   for (const existing of context.existing) {
-    if (comparable(canonical) === comparable(existing)) {
+    if (samePath(canonical, existing)) {
       throw new RootValidationError('duplicate', `"${canonical}" is already registered`, {
         conflict: existing,
         reference: canonical,
@@ -242,12 +288,13 @@ function assertDirectory(canonical: string, asTyped: string): void {
 }
 
 /**
- * Re-judge every stored record of one primary root — the startup path, which
- * must never throw: a registration that stopped being usable is REPORTED, not
- * deleted, so the operator can see it and remove it deliberately.
+ * Re-judge every stored record of one primary root — the startup and refresh
+ * path, which must never throw: a registration that stopped being usable is
+ * REPORTED, not deleted, so the operator can see it and remove it deliberately.
  *
- * Existence is the only rule a record may recover from on its own, hence
- * `missing` (kept, withheld) rather than `invalid` (kept, unusable).
+ * Existence and reachability are the only rules a record may recover from on
+ * its own, hence `missing` and `redirected` (kept, withheld) rather than
+ * `invalid` (kept, unusable).
  * @param primaryRoot - the session workspace root the records belong to.
  * @param records - the stored records, in registry order.
  * @returns one status per record, in the same order.
@@ -258,26 +305,84 @@ export function classifyStoredRoots(
 ): RootStatus[] {
   const primary = canonicalRoot(primaryRoot)
   const claimed: string[] = []
+  const duplicated = duplicatedIds(records)
   const statuses: RootStatus[] = []
-  for (const record of records) {
-    statuses.push(classifyStoredRoot(record, primary, claimed))
-    const status = statuses[statuses.length - 1]
-    if (status !== undefined && status.state === 'available') claimed.push(status.path)
+  for (const [index, record] of records.entries()) {
+    const status = classifyStoredRoot(record, primary, claimed, duplicated.has(record.id), index)
+    statuses.push(status)
+    if (status.state === 'available') claimed.push(status.path)
   }
   return statuses
 }
 
-/** Judge one stored record against the primary root and the roots claimed before it. */
-function classifyStoredRoot(record: RegisteredRoot, primary: string, claimed: readonly string[]): RootStatus {
+/**
+ * The ids that more than one record claims. Computed for the whole list up
+ * front, because "this id is duplicated" is a property of the SET: deciding it
+ * while walking would make the first occurrence look fine and only the later
+ * ones broken, and the first match is precisely the ambiguity being reported.
+ */
+function duplicatedIds(records: readonly RegisteredRoot[]): Set<string> {
+  const seen = new Set<string>()
+  const duplicated = new Set<string>()
+  for (const record of records) {
+    if (seen.has(record.id)) duplicated.add(record.id)
+    else seen.add(record.id)
+  }
+  return duplicated
+}
+
+/**
+ * Judge one stored record against the primary root and the roots claimed before
+ * it.
+ *
+ * Identity and the recorded directory are checked BEFORE the current
+ * resolution is used for anything: a record whose path now resolves elsewhere
+ * must not have its new (attacker-influenced) target participate in the
+ * overlap rules.
+ */
+function classifyStoredRoot(
+  record: RegisteredRoot,
+  primary: string,
+  claimed: readonly string[],
+  duplicatedId: boolean,
+  position: number,
+): RootStatus {
   const invalid = (detail: string): RootStatus => ({ ...record, state: 'invalid', detail })
   if (typeof record.path !== 'string' || record.path === '') return invalid('the record has no path')
   if (typeof record.id !== 'string' || record.id === '') return invalid('the record has no id')
+  if (duplicatedId) {
+    // Two records sharing one id cannot be told apart by an operator or by a
+    // surface: a removal by id would delete both, and the panel would show one
+    // row twice. EVERY record of that id is reported unusable — including the
+    // first one — because "the first match wins" is exactly the ambiguity that
+    // makes such a store unreadable. Nothing is granted for it, and `removeAt`
+    // (a positional removal) deletes them one at a time.
+    return invalid(`the id "${record.id}" is used by more than one record (entry ${position + 1})`)
+  }
   if (!isAbsolute(record.path)) return invalid(`"${record.path}" is not an absolute path`)
+  const recorded = record.recordedPath
+  if (typeof recorded !== 'string' || recorded === '') {
+    return invalid('the record does not say which directory it was granted for')
+  }
   const canonical = canonicalRoot(record.path)
-  if (comparable(canonical) === comparable(primary)) {
+  if (!samePath(canonical, recorded)) {
+    // The reported path stays the REGISTERED spelling. Substituting the new
+    // resolution would show the operator a directory they never registered, and
+    // every surface — the list, the report, the panel row — should keep naming
+    // the registration they have to fix. Where it resolves now goes in `detail`.
+    return {
+      ...record,
+      state: 'redirected',
+      detail: `the path now resolves to "${canonical}" instead of the registered "${recorded}"`,
+    }
+  }
+  if (samePath(canonical, primary)) {
     return invalid(`"${canonical}" is this session's workspace root`)
   }
-  if (claimed.some(existing => comparable(existing) === comparable(canonical))) {
+  if (isCanonicallyUnder(canonical, primary) || isCanonicallyUnder(primary, canonical)) {
+    return invalid(`"${canonical}" overlaps this session's workspace root`)
+  }
+  if (claimed.some(existing => samePath(existing, canonical))) {
     return invalid(`"${canonical}" is registered twice`)
   }
   for (const existing of claimed) {
@@ -307,6 +412,18 @@ export function availableRoots(statuses: readonly RootStatus[]): string[] {
 }
 
 /**
+ * Pair every status with the 1-based ordinal the surfaces accept for it. The
+ * ordinal belongs to the POSITION, so it stays correct even for records whose
+ * id is duplicated or missing — which is exactly the case where a positional
+ * removal is the only unambiguous way to delete one of them.
+ * @param statuses - the statuses to index.
+ * @returns one entry per status, in the same order.
+ */
+export function indexedStatuses(statuses: readonly RootStatus[]): IndexedRootStatus[] {
+  return statuses.map((status, index) => ({ ordinal: index + 1, status }))
+}
+
+/**
  * Resolve one operator-supplied reference against a status list.
  * @param statuses - the statuses to search, in registry order.
  * @param ref - the reference to resolve.
@@ -323,7 +440,7 @@ export function resolveRootRef(statuses: readonly RootStatus[], ref: RootRef): R
         return ref.ordinal >= 1 && ref.ordinal <= statuses.length ? statuses[ref.ordinal - 1] : undefined
       case 'path': {
         const canonical = canonicalRoot(expandRootInput(ref.path))
-        return statuses.find(status => comparable(status.path) === comparable(canonical))
+        return statuses.find(status => samePath(status.path, canonical))
       }
     }
   })()
@@ -331,6 +448,38 @@ export function resolveRootRef(statuses: readonly RootStatus[], ref: RootRef): R
     throw new RootValidationError('not-found', `no registered root matches ${reference}`, { reference })
   }
   return matched
+}
+
+/**
+ * Remove exactly ONE record — the one the reference names — from a status list.
+ *
+ * Removing by id would delete every record that shares the id, which is how a
+ * corrupted store turns one operator action into several; this function
+ * addresses the record, not the id, so a duplicate-id pair can be cleaned up
+ * one entry at a time.
+ * @param statuses - the statuses to remove from.
+ * @param ref - which record to remove.
+ * @returns a new list without that record, order preserved.
+ * @throws {RootValidationError} `not-found` when the reference matches nothing.
+ */
+export function removeStatusAt(statuses: readonly RootStatus[], ref: RootRef): RootStatus[] {
+  const reference = describeRef(ref)
+  const index = ((): number => {
+    switch (ref.kind) {
+      case 'id':
+        return statuses.findIndex(status => status.id === ref.id)
+      case 'ordinal':
+        return ref.ordinal >= 1 && ref.ordinal <= statuses.length ? ref.ordinal - 1 : -1
+      case 'path': {
+        const canonical = canonicalRoot(expandRootInput(ref.path))
+        return statuses.findIndex(status => samePath(status.path, canonical))
+      }
+    }
+  })()
+  if (index < 0) {
+    throw new RootValidationError('not-found', `no registered root matches ${reference}`, { reference })
+  }
+  return statuses.filter((_status, position) => position !== index)
 }
 
 /** Render one reference for messages. */

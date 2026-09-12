@@ -18,6 +18,7 @@ import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FileSystem, FsTarget } from '@deepseek-ai/dsh-fs'
 import { SandboxedFileSystem } from '@deepseek-ai/dsh-fs-sandbox'
@@ -63,7 +64,7 @@ async function mount(plugin: unknown, fixture: FixtureWorkspace, mode: SandboxMo
   }
   fibers.push(await ctx.plugin(plugin as never, { cwd: fixture.workspace }))
   if (plugin === MultiRootFileSystem) {
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, roots.map((path, index) => ({ id: `root-${index}`, path })))
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, roots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path) })))
   }
   return { ctx, fs: ctx.fs, fixture }
 }

@@ -8,17 +8,31 @@
  * (`ctx.multiRootScope`). Neither provider learns that a registry exists —
  * `setAdditionalRoots()` stays the scope's only write port.
  *
- * Two deliberate properties:
+ * Four deliberate properties:
  *
  * - **Only usable roots are granted.** A registered directory that is absent
  *   right now stays registered and is reported as `missing`, but is withheld
  *   from the scope: handing a nonexistent root to bwrap or Landlock would fail
- *   the confined command instead of merely not granting it.
+ *   the confined command instead of merely not granting it. A registration
+ *   whose path now resolves to a DIFFERENT directory is `redirected` and is
+ *   withheld for the same reason it was never granted: re-resolving a path is
+ *   not re-authorizing it (see `src/scope.ts`).
  * - **Nothing is deleted on the operator's behalf.** A record that violates a
  *   rule is reported as `invalid` and excluded from the scope; it disappears
  *   only when the operator removes it (or when the store is repaired). Storage
  *   that cannot be parsed at all is backed up and skipped by the domain layer,
  *   with a warning.
+ * - **Mutations are serialized per primary root.** Every mutation runs its
+ *   whole read → validate → persist sequence inside one queue per key. The
+ *   storage domain serializes individual `put()`/`delete()` calls, which is not
+ *   enough: two concurrent `add()` calls would both read the same snapshot and
+ *   the later write would drop the earlier one, and a removal racing an add
+ *   could write a deleted record back.
+ * - **Reads re-check, but never write.** {@link MultiRootRegistry.refresh} is
+ *   the one revalidation entry point the command and the panel both call: it
+ *   re-stats and re-canonicalizes every record, republishes the scope, and
+ *   leaves storage untouched — a read must not rewrite the store, and a
+ *   read-only refresh must not resurrect anything.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/registry
  */
@@ -33,6 +47,7 @@ import {
   availableRoots,
   canonicalRoot,
   classifyStoredRoots,
+  removeStatusAt,
   resolveRootRef,
   RootValidationError,
   validateRootCandidate,
@@ -62,6 +77,10 @@ declare module '@deepseek-ai/cordis' {
 const persistedRoot = z.object({
   id: z.string().min(1),
   path: z.string().min(1),
+  // Absent only in records written before the field existed (or by hand). Such a
+  // record is reported `invalid` rather than granted on a guess — see
+  // classifyStoredRoots.
+  recordedPath: z.string().min(1).optional(),
   alias: z.string().optional(),
   addedAt: z.string().min(1),
 })
@@ -110,6 +129,10 @@ export class MultiRootRegistry extends Service {
   private failure?: string
   /** Last classified status list per canonical primary root. */
   private readonly cache = new Map<string, readonly RootStatus[]>()
+  /** Signature of the last published grant per key, so a no-op refresh stays a no-op. */
+  private readonly published = new Map<string, string>()
+  /** One promise chain per canonical primary root: mutations never interleave. */
+  private readonly chains = new Map<string, Promise<unknown>>()
   /** Change listeners, keyed by their own disposer identity. */
   private readonly listeners = new Set<(primaryRoot: string) => void>()
 
@@ -161,7 +184,10 @@ export class MultiRootRegistry extends Service {
   }
 
   /**
-   * Every registration of one primary root, in registry order.
+   * Every registration of one primary root, in registry order, as last
+   * classified. A READ of the in-memory state: it never touches the filesystem
+   * and never writes. Surfaces that must re-check the directories first call
+   * {@link MultiRootRegistry.refresh}.
    * @param primaryRoot - the session workspace root (any spelling).
    * @returns the statuses; empty when nothing is registered.
    */
@@ -170,16 +196,29 @@ export class MultiRootRegistry extends Service {
   }
 
   /**
-   * The canonical paths granted right now — the projection the scope receives.
-   * @param primaryRoot - the session workspace root (any spelling).
-   * @returns the canonical paths of every `available` root.
+   * Re-examine every registration of one primary root WITHOUT writing storage:
+   * re-`stat` every directory, re-resolve every path against its recorded
+   * directory, re-judge every rule, then republish the scope and notify
+   * listeners.
+   *
+   * This is the one revalidation entry point the command (`/workspace-folders
+   * list`) and the panel (`list` endpoint) both call, so "what the list shows"
+   * and "what is granted" cannot drift: a directory deleted after registration
+   * becomes `missing` and loses its grant, and a directory that came back is
+   * granted again — without either surface asking for a restart.
+   *
+   * The serialized queue is shared with the mutations, so a refresh never
+   * interleaves with a write that is mid-flight.
+   * @param primaryRoot - the session workspace root to re-check.
+   * @returns the refreshed status list.
    */
-  granted(primaryRoot: string): readonly string[] {
-    return availableRoots(this.statusesOf(canonicalRoot(primaryRoot)))
+  async refresh(primaryRoot: string): Promise<readonly RootStatus[]> {
+    const key = canonicalRoot(primaryRoot)
+    return await this.serialize(key, () => this.reclassify(key))
   }
 
   /**
-   * Register one additional root.
+   * Registers one additional root.
    * @param primaryRoot - the session workspace root the root belongs to.
    * @param input - the directory and optional alias.
    * @returns the updated status list.
@@ -187,32 +226,45 @@ export class MultiRootRegistry extends Service {
    */
   async add(primaryRoot: string, input: AddRootInput): Promise<readonly RootStatus[]> {
     const key = canonicalRoot(primaryRoot)
-    const statuses = this.statusesOf(key)
-    const canonical = validateRootCandidate(input.path, {
-      primaryRoot: key,
-      // A withheld or unusable registration grants nothing, so it may not block
-      // re-registering the very directory the operator is trying to restore.
-      existing: availableRoots(statuses),
-    })
-    const alias = normalizeAlias(input.alias)
-    const revived = statuses.findIndex(status => canonicalRoot(status.path) === canonical)
-    const next = revived === -1
-      ? [...statuses, {
-        id: additionalRootId(randomUUID()),
-        path: canonical,
-        state: 'available',
-        ...(alias === undefined ? {} : { alias }),
-        addedAt: new Date().toISOString(),
-      } satisfies RootStatus]
-      : statuses.map((status, index) => index === revived
-        ? {
-          ...status,
+    return await this.serialize(key, async () => {
+      const statuses = this.statusesOf(key)
+      const canonical = validateRootCandidate(input.path, {
+        primaryRoot: key,
+        // A withheld or unusable registration grants nothing, so it may not block
+        // re-registering the very directory the operator is trying to restore.
+        existing: availableRoots(statuses),
+      })
+      const alias = normalizeAlias(input.alias)
+      // Reviving looks at BOTH spellings of an existing registration: the
+      // canonical path it is stored under, and the path it currently resolves
+      // to. Re-adding a directory that was replaced by a symlink therefore
+      // updates the existing registration (re-recording what it is granted for)
+      // instead of piling a second record for the same operator-given path on
+      // top of it.
+      const revived = statuses.findIndex(status =>
+        status.path === canonical || canonicalRoot(status.path) === canonical)
+      const next = revived === -1
+        ? [...statuses, {
+          id: additionalRootId(randomUUID()),
           path: canonical,
-          addedAt: new Date().toISOString(),
+          recordedPath: canonical,
+          state: 'available',
           ...(alias === undefined ? {} : { alias }),
-        }
-        : status)
-    return await this.commit(key, next)
+          addedAt: new Date().toISOString(),
+        } satisfies RootStatus]
+        : statuses.map((status, index) => index === revived
+          ? {
+            ...status,
+            path: canonical,
+            // Re-registering a withheld root is the operator confirming THIS
+            // directory again, which is exactly what re-records the grant.
+            recordedPath: canonical,
+            addedAt: new Date().toISOString(),
+            ...(alias === undefined ? {} : { alias }),
+          }
+          : status)
+      return await this.persist(key, next)
+    })
   }
 
   /**
@@ -223,10 +275,23 @@ export class MultiRootRegistry extends Service {
    * @throws {RootValidationError} `not-found` when the reference matches nothing.
    */
   async remove(primaryRoot: string, ref: RootRef): Promise<readonly RootStatus[]> {
+    return await this.removeAt(primaryRoot, ref)
+  }
+
+  /**
+   * Remove exactly one registration — the one the reference names.
+   *
+   * Unlike a filter by id, this removes a single record, so a store holding two
+   * records that share an id can be cleaned up one entry at a time instead of
+   * losing both to one click.
+   * @param primaryRoot - the session workspace root the root belongs to.
+   * @param ref - which registered root to remove.
+   * @returns the updated status list.
+   * @throws {RootValidationError} `not-found` when the reference matches nothing.
+   */
+  async removeAt(primaryRoot: string, ref: RootRef): Promise<readonly RootStatus[]> {
     const key = canonicalRoot(primaryRoot)
-    const target = resolveRootRef(this.statusesOf(key), ref)
-    const next = this.statusesOf(key).filter(status => status.id !== target.id)
-    return await this.commit(key, next)
+    return await this.serialize(key, async () => await this.persist(key, removeStatusAt(this.statusesOf(key), ref)))
   }
 
   /**
@@ -239,14 +304,17 @@ export class MultiRootRegistry extends Service {
    */
   async setAlias(primaryRoot: string, ref: RootRef, alias: string | undefined): Promise<readonly RootStatus[]> {
     const key = canonicalRoot(primaryRoot)
-    const target = resolveRootRef(this.statusesOf(key), ref)
-    const normalized = normalizeAlias(alias)
-    const next = this.statusesOf(key).map((status) => {
-      if (status.id !== target.id) return status
-      const { alias: _dropped, ...rest } = status
-      return normalized === undefined ? rest : { ...rest, alias: normalized }
+    return await this.serialize(key, async () => {
+      const statuses = this.statusesOf(key)
+      const target = resolveRootRef(statuses, ref)
+      const normalized = normalizeAlias(alias)
+      const next = statuses.map((status) => {
+        if (status.id !== target.id) return status
+        const { alias: _dropped, ...rest } = status
+        return normalized === undefined ? rest : { ...rest, alias: normalized }
+      })
+      return await this.persist(key, next)
     })
-    return await this.commit(key, next)
   }
 
   /**
@@ -259,25 +327,29 @@ export class MultiRootRegistry extends Service {
    */
   async move(primaryRoot: string, ref: RootRef, beforeRef?: RootRef): Promise<readonly RootStatus[]> {
     const key = canonicalRoot(primaryRoot)
-    const statuses = this.statusesOf(key)
-    const target = resolveRootRef(statuses, ref)
-    const anchor = beforeRef === undefined ? undefined : resolveRootRef(statuses, beforeRef)
-    if (anchor !== undefined && anchor.id === target.id) return statuses
-    const without = statuses.filter(status => status.id !== target.id)
-    const index = anchor === undefined ? without.length : without.findIndex(status => status.id === anchor.id)
-    const next = [...without.slice(0, index), target, ...without.slice(index)]
-    return await this.commit(key, next)
+    return await this.serialize(key, async () => {
+      const statuses = this.statusesOf(key)
+      const target = resolveRootRef(statuses, ref)
+      const anchor = beforeRef === undefined ? undefined : resolveRootRef(statuses, beforeRef)
+      if (anchor !== undefined && anchor.id === target.id) return statuses
+      const without = statuses.filter(status => status.id !== target.id)
+      const index = anchor === undefined ? without.length : without.findIndex(status => status.id === anchor.id)
+      const next = [...without.slice(0, index), target, ...without.slice(index)]
+      return await this.persist(key, next)
+    })
   }
 
   /**
-   * Re-examine every registration of one primary root — the recovery path
-   * after a directory was restored by hand.
+   * Re-examine every registration of one primary root and persist what the
+   * re-examination produced — {@link MultiRootRegistry.refresh} plus one durable
+   * write. The recovery path after a directory was restored by hand, and the
+   * only read-shaped operation that is allowed to touch the store.
    * @param primaryRoot - the session workspace root to re-check.
    * @returns the refreshed status list.
    */
   async recheck(primaryRoot: string): Promise<readonly RootStatus[]> {
     const key = canonicalRoot(primaryRoot)
-    return await this.commit(key, this.statusesOf(key))
+    return await this.serialize(key, async () => await this.persist(key, this.reclassify(key)))
   }
 
   /**
@@ -288,6 +360,15 @@ export class MultiRootRegistry extends Service {
   onChange(listener: (primaryRoot: string) => void): () => void {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
+  }
+
+  /**
+   * The scope the registry publishes: only usable roots, in registry order.
+   * @param primaryRoot - the session workspace root (any spelling).
+   * @returns the canonical paths of every `available` root.
+   */
+  granted(primaryRoot: string): readonly string[] {
+    return availableRoots(this.statusesOf(canonicalRoot(primaryRoot)))
   }
 
   /**
@@ -308,16 +389,44 @@ export class MultiRootRegistry extends Service {
     return statuses
   }
 
-  /** The statuses of one key: the cache, else what storage holds, else empty. */
+  /**
+   * The statuses of one key, from memory where possible: the cache, else what
+   * storage holds, else empty. A cached answer is never re-checked here — that
+   * is {@link MultiRootRegistry.reclassify}, which the read surfaces and
+   * {@link MultiRootRegistry.refresh} call deliberately.
+   */
   private statusesOf(key: string): readonly RootStatus[] {
     const cached = this.cache.get(key)
     if (cached !== undefined) return cached
-    // An unusable store reads as "nothing registered": reads stay answerable so
-    // the surfaces can explain the situation, while every write fails loudly in
-    // requireTable().
-    if (this.failure !== undefined) return []
-    const record = this.requireTable().get(key)
+    const record = this.lookupRecords(key)
     if (record === undefined) return []
+    return this.accept(key, record)
+  }
+
+  /**
+   * The stored record set of one key, or `undefined` when there is none (or
+   * when the store itself could not be read: an unusable store reads as
+   * "nothing registered" so reads stay answerable and the surfaces can explain
+   * the situation, while every write fails loudly in `requireTable()`).
+   */
+  private lookupRecords(key: string): PersistedPrimaryRoot | undefined {
+    if (this.failure !== undefined) return undefined
+    return this.requireTable().get(key)
+  }
+
+  /**
+   * Re-classify one key from its stored records: every directory is `stat`ed
+   * again and every path is resolved again against its recorded canonical
+   * directory. Updates the cache, republishes the scope, and returns the new
+   * list — the shared body of the read-path re-checks.
+   */
+  private reclassify(key: string): readonly RootStatus[] {
+    const record = this.lookupRecords(key)
+    if (record === undefined) {
+      this.cache.set(key, [])
+      this.publish(key, [])
+      return []
+    }
     return this.accept(key, record)
   }
 
@@ -326,7 +435,7 @@ export class MultiRootRegistry extends Service {
    * The durable write happens first: a failed write must not leave the running
    * scope granting something storage does not hold.
    */
-  private async commit(key: string, statuses: readonly RootStatus[]): Promise<readonly RootStatus[]> {
+  private async persist(key: string, statuses: readonly RootStatus[]): Promise<readonly RootStatus[]> {
     const table = this.requireTable()
     if (statuses.length === 0) await table.delete(key)
     else await table.put(key, { roots: statuses.map(toPersistedRoot) })
@@ -336,13 +445,51 @@ export class MultiRootRegistry extends Service {
     return classified
   }
 
-  /** Push one status list into the scope and notify listeners. */
+  /**
+   * Run one job for one primary root after every job already queued for that
+   * root. The whole read → validate → write sequence belongs inside the job:
+   * the storage domain serializes individual writes, so without this the loser
+   * of a race reads a snapshot that is already stale and writes it back.
+   */
+  private async serialize<T>(key: string, job: () => T | Promise<T>): Promise<T> {
+    const previous = this.chains.get(key) ?? Promise.resolve()
+    const run = previous.then(job)
+    // The tail must never reject: a failed operation must not poison the queue
+    // for the operations behind it.
+    const tail = run.then(() => undefined, () => undefined)
+    this.chains.set(key, tail)
+    try {
+      return await run
+    } finally {
+      // Drop the chain once it is idle, so a long-lived process does not keep
+      // one entry per workspace it ever touched.
+      if (this.chains.get(key) === tail) this.chains.delete(key)
+    }
+  }
+
+  /**
+   * Push one status list into the scope and notify listeners.
+   *
+   * What is published is the effective GRANT — only `available` roots, so a
+   * withheld registration can never reach a provider. When the grant and the
+   * withheld set are unchanged (the common case for a read-path refresh on a
+   * healthy workspace) the scope is left alone and no listener fires: a refresh
+   * exists to keep the two in sync, not to churn on every listing — and, since
+   * the scope rebuilds its root table on each call, skipping the no-op write is
+   * also what keeps the read path cheap.
+   */
   private publish(key: string, statuses: readonly RootStatus[]): void {
+    const withheld = statuses.filter(status => status.state !== 'available')
+    const signature = [
+      ...statuses.filter(status => status.state === 'available').map(status => `available:${status.recordedPath}`),
+      ...withheld.map(status => `${status.state}:${status.path}`),
+    ].join('\n')
+    if (this.published.get(key) === signature) return
+    this.published.set(key, signature)
     const effective: RegisteredRoot[] = statuses
       .filter(status => status.state === 'available')
       .map(status => toRegisteredRoot(status))
     this.ctx.multiRootScope.setAdditionalRoots(key, effective)
-    const withheld = statuses.filter(status => status.state !== 'available')
     if (withheld.length > 0) {
       this.ctx.logger.warn(
         `multi-root-workspace: ${withheld.length} registered root(s) of ${key} are not writable right now`
@@ -373,10 +520,11 @@ export class MultiRootRegistry extends Service {
 }
 
 /** Project one status back to the durable record shape. */
-function toPersistedRoot(status: RootStatus): RegisteredRoot {
+function toPersistedRoot(status: RootStatus): PersistedRoot {
   return {
     id: status.id,
     path: status.path,
+    recordedPath: status.recordedPath,
     ...(status.alias === undefined ? {} : { alias: status.alias }),
     addedAt: status.addedAt,
   }
@@ -387,6 +535,10 @@ function toRegisteredRoot(entry: PersistedRoot): RegisteredRoot {
   return {
     id: additionalRootId(entry.id),
     path: entry.path,
+    // A record written before this field existed (or by hand) keeps whatever it
+    // has: classification needs to SEE the absence to report it as invalid,
+    // rather than have it papered over here.
+    recordedPath: entry.recordedPath ?? '',
     ...(entry.alias === undefined ? {} : { alias: entry.alias }),
     addedAt: entry.addedAt,
   }

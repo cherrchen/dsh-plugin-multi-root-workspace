@@ -23,6 +23,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { existsSync } from 'node:fs'
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -93,7 +94,11 @@ async function mountWorld(dialect: Dialect): Promise<World> {
     await ctx.plugin(MultiRootScopeService),
     await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace }),
   )
-  ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside }])
+  ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{
+    id: 'extra',
+    path: fixture.outside,
+    recordedPath: canonicalPath(fixture.outside),
+  }])
   fibers.push(await ctx.plugin(MultiRootSandboxProvider, {}))
   const provider = ctx.sandbox as LocalSandboxProvider
   provider.internals = { ...internalsFor(dialect) }

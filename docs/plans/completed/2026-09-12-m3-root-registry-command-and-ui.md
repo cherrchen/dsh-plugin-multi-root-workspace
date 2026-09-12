@@ -265,3 +265,55 @@ SSOT 分工：设计事实 → 架构文档；验收判定 → 需求文档；�
 - Electron 车道的自动化验证（当前为人工步骤），以及 0.1.5 专属的 `sidebar.panellist` + `main` 全屏面板形态。
 - 若上游提供出树 remote 贡献注册表，把 Connection 通道迁移到 Typert（ADR-0005 已记录迁移路径）。
 
+
+---
+
+## 外部审查返工（2026-09-12，重新验收）
+
+M3 首次实施完成后，一次外部审查提出 **8 项可定位问题（3 项建议作为发布阻断项）**，并在本机复现验证。本节记录根因、修复与重新验收证据；决策层面的变更已写入 [ADR-0004](../../decisions/ADR-0004-root-registry-persistence-and-validation.md) 的「返工补充」与 [架构文档 §4/§7](../../architecture/multi-root-workspace.md)，需求侧新增验收条款 §5.7.1–§5.7.3。
+
+### 逐项修复与证据
+
+复现基线：本机 `./node_modules/.bin/vitest`、node v22.23.1；每个问题先以临时探针复现（探针已删除），再写成常驻回归测试。
+
+| # | 审查发现（复现结论） | 根因 | 修复 | 回归测试 |
+| --- | --- | --- | --- | --- |
+| 1 (P1) | 登记 A 后删除 A 并建立 `A → B`，`registry.list` 仍报 `A: available`，而 `scope.scopeOf()`/`resolve()` 返回 **B**——授权被转移到未登记目录 | `sanitizeAdditionalRoots` 每次解析都重新 `canonicalPath(root.path)`（`realpath`），把"重新解析"当成"重新授权" | 登记项新增 `recordedPath`（登记时授予的 canonical 目录）；`scope` 与 `roots` 都只在 `canonicalPath(path) === recordedPath` 时授予，否则报 `redirected` 并撤销；恢复原目录后重新校验自动复原 | `tests/scope.spec.ts`「withholds a registration whose path was replaced…」、`tests/roots.spec.ts`「flags a record whose path now resolves elsewhere as redirected」、`tests/registry.spec.ts`「withholds a root whose directory was replaced, then restores it the same way」、`tests/command.spec.ts` 通道用例、`smoke:behavior` 三条换链断言 |
+| 2 (P1) | `Promise.all([add(A), add(B)])` 两次都返回成功但只留下一条；`remove(A)` 与 `add(B)` 并发后**已删除的 A 复活** | `add/remove/setAlias/move` 在异步提交前读取快照，`commit` 只保证单次写入落盘；存储域的串行链只覆盖 `put()`，不覆盖读—改—写。**计划风险表第 3 条"domain 层按域串行化写入链即可"的结论是错的** | 新增 `serialize(key, job)`：同一 canonical 主根的"读快照 → 校验 → 落盘"整段入队；链尾吞掉 rejection，前序失败不阻塞后序 | `tests/registry.spec.ts` 新增 `describe('concurrent operations')` 四条（两个 add 并存、删除不被复活、四条并发按序生效、队列前序失败后仍可用） |
+| 3 (P1) | 干净 checkout 上 CI 先跑 `test` 后跑 `build`，而 `tests/client-bundle.spec.ts` 读 `lib/client.js`（`/lib/` 被 gitignore，且无安装时构建钩子）→ 未构建即失败；本地残留 `lib/` 掩盖该问题 | 工作流步骤顺序错误 | `ci.yml` 与 `upgrade.yml` 统一为 `lint → typecheck → build → test → …`；新增 `kernel:probe` 步骤（见第 8 条相关的变化） | 本地等价验证：`rm -rf lib` 后跑制品 spec 得到 5 个 `ENOENT` 失败；`pnpm build` 后 8/8 通过；CI 顺序修正为静态核对 + 本地按序实跑 |
+| 4 (P2) | 删除已登记目录后 `list`/面板仍显示 `available` 且仍授予；启动时缺失的目录恢复后，"刷新"也无法恢复授权 | 命令 `list` 与 RPC `list` 命中缓存直接返回，从不重查目录；文档承诺的"刷新即可恢复"实际不成立 | 新增 `registry.refresh(primaryRoot)`：重新 `stat` + 重新解析 + 重新裁决 + 重播种 scope + 通知监听者，**不写存储**；命令 `list` 与所有子命令、RPC `list` 都先走它；`publish` 改为幂等（授予集合或不可用集合未变则不动 scope、不重复告警） | `tests/registry.spec.ts`「revalidation without a restart」三条（消失→恢复、只读刷新不重写存储、仅在授予变化时通知监听者）、`tests/command.spec.ts` 命令与通道各一条重查用例、`smoke:behavior` 删除/恢复目录断言 |
+| 5 (P2) | 输入 `/repos/typed` 后点"添加"，实际提交的是 picker 返回的 `/repos/picked` | 选择器按钮、手输确认与 Enter 共用 `addDirectory`，且 `picked ?? manualPath` 让 picker 结果优先 | 拆成 `addViaPicker()`（只提交 picker 结果，取消/无 picker 时什么也不做）与 `addManualPath()`（只提交手输内容，提交后清空输入）；Enter 与确认按钮绑后者。无 picker 时不再渲染 picker 按钮 | `tests/client-panel.spec.tsx`：确认按钮 payload 为 `/repos/typed`、Enter 同样、打开 picker 不改写也不清空手输框 |
+| 6 (P2) | Reveal 成功后仍出现错误提示（使用真实返回形状替换 mock 后稳定复现） | host `reveal` 返回 `{ revealed: path }`，客户端把所有端点应答都按 `RootsView` 解析；原 mock 对所有端点返回列表，掩盖了契约不一致 | 契约显式化：`contract.ts` 的 `PanelResponseMap` 规定每个端点的应答类型，`reveal → RevealedView`、其余 `→ RootsView`；`PanelClient.call` 按端点返回相应类型，面板对 Reveal 单独处理（成功不动列表、不写错误） | `tests/client-panel.spec.tsx`：桩按端点返回真实形状（`reveal` 返回 `{ revealed }`）、Reveal 成功无 `role="alert"` 且列表不变、Reveal 应答形状不对时显示本地化错误；`tests/command.spec.ts` 断言 reveal 的 value 恰为 `{ revealed }` |
+| 7 (P2) | 手写两条同 id 记录后两条都是 `available` 且都被授予；`remove(id)` 一次删掉两条 | `classifyStoredRoots` 只检查 id 非空，不检查唯一性；删除按 id 过滤 | 读取时若同一 id 出现在多条记录中，这些记录**全部** `invalid` 且不授予；新增按位置/路径/首次匹配删除**一条**的 `removeStatusAt` + `registry.removeAt()`，命令与面板的 remove 都走它 | `tests/roots.spec.ts`（重复 id 全部 invalid、`removeStatusAt` 只删一条）、`tests/registry.spec.ts`「a store with records that cannot be told apart」两条（含缺少 `recordedPath` 的旧记录）、`tests/command.spec.ts` 重复 id 逐条删除 |
+| 8 (P2) | 空登记表时主根的子目录、以及包含主根的祖先目录都能登记 | `validateRootCandidate` 只把主根与候选做"相等"比较，重叠判断只针对 `existing` | 主根纳入双向重叠校验，错误码 `primary-overlap`（与 `equals-primary` 区分）；存储读取侧同样适用；`validateRootCandidate` 的注释同步说明规则顺序 | `tests/roots.spec.ts` 四条（主根子目录、包含主根、detail 点名主根、nested 仍报 nested）、`tests/registry.spec.ts` 校验用例 |
+
+### 代码质量意见的处置
+
+- **契约与状态生命周期**：`PanelResponseMap` 建立端点到应答类型的映射；请求体与应答两端都做运行时 `zod` 校验（同一份 schema 在 `src/contract.ts`，不新增依赖），host 把非法请求回报为 `panel/bad-request`；`refresh` 统一了"声明 / 缓存 / 实际授予"的更新时机（唯一入口，且只读刷新不落盘）。
+- **测试不再只覆盖顺序成功流程**：新增并发增删、删除后复活、根目录替换、缺失恢复、重复 id、主根嵌套、真实 RPC 应答形状、面板手输路径、Reveal 契约、严格内核 runner 等用例（总数 164 → 204，skip 仍为 3 且仅因本机无法嵌套内核沙箱）。
+- **文档过期承诺已修正**：「每次读取校验」现在是事实（`refresh`），「刷新即可恢复」也在 README 与开发流程里按真实语义重写；计划风险表第 3 条的错误结论在本节显式更正。
+- **内核测试的 skip**：新增 `DSH_REQUIRE_KERNEL_RUNNER` 严格模式与 `pnpm kernel:probe`，并在 CI 中作为独立步骤——宿主确实能受限执行时，parity 矩阵与 behavior 冒烟的内核断言**必须真跑**，skip 即失败；宿主不能执行时打印原因并继续（CI 不会被受限镜像打死）。本地已验证两种路径：正常跑 3 skip，`DSH_REQUIRE_KERNEL_RUNNER=1` 时 3 条转为失败并给出原因。
+
+### 重新验收证据（2026-09-12）
+
+```sh
+export PATH="$HOME/.nvm/versions/node/v22.23.1/bin:/opt/homebrew/bin:$PATH"
+export CI=true                                  # 见开发流程 §8（pnpm 依赖自检在无 TTY 下会中止）
+pnpm lint          # 0 warnings, 0 errors（37 files）
+pnpm typecheck     # host + client 两面通过
+pnpm build         # lib/*.js + lib/client.js（含内联的契约校验）
+pnpm test          # 13 files / 204 passed | 3 skipped（基线 164 passed | 3 skipped）
+pnpm kernel:probe  # seatbelt runner-failed（宿主沙箱禁止嵌套）、bwrap/landlock 不可用 → 内核断言显式 skip
+pnpm smoke:compose # 34/34
+pnpm smoke:behavior# 92/92（含新增的删除/恢复/替换目录断言），4 项内核受限 skip
+pnpm smoke:journey # 25/25（web + headless 两 profile），2 项内核受限 skip
+pnpm docs:check    # 0 errors
+```
+
+干净构建验证（针对第 3 项）：`rm -rf lib` 后制品 spec 5 项 `ENOENT` 失败；按修正后的顺序 `pnpm build && pnpm test` 全绿。
+
+**未在本机验证的项（如实记录，不计为通过）**：GitHub Actions 真机执行（顺序为静态核对 + 本地等价序列实跑）、真实受限内核执行（本机 `sandbox-exec: sandbox_apply: Operation not permitted`，由 CI 严格模式覆盖）、`0.1.2-rc.1` 桌面运行时的双运行时矩阵（本次未重跑 `DSH_CLI=… pnpm smoke`）。
+
+### 返工交付物
+
+`src/contract.ts`、`src/roots.ts`、`src/scope.ts`、`src/registry.ts`、`src/command.ts`、`src/client/panel-client.ts`、`src/client/WorkspaceFoldersAction.tsx`、`src/client/locales.ts`；`tests/{roots,scope,registry,command,client-panel,parity-matrix,sandbox-multi-root,fs-parity}.spec.*`、`tests/support/kernel-runner.ts`（新）；`scripts/check-kernel-runner.mjs`（新）、`scripts/smoke-behavior.mjs`、`scripts/smoke-journey.mjs`、`package.json`、`.github/workflows/{ci,upgrade}.yml`；以及本文件、ADR-0004、架构 §4/§7、需求 §3/§5、开发流程、README（中英）。上游仓库零改动。

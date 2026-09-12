@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { createElement } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from '../src/contract.ts'
+import { PANEL_CHANNEL, type PanelRequest, type RevealedView, type RootView, type RootsView } from '../src/contract.ts'
 import * as client from '../src/client/index.ts'
 import { en, NS, zh } from '../src/client/locales.ts'
 
@@ -44,6 +44,8 @@ interface Harness {
   readonly dictionaries: { ns: string; dicts: Record<string, unknown> }[]
   setView: (view: RootsView) => void
   setFailure: (failure: { code: string; message: string } | undefined) => void
+  /** What the next `reveal` answers (the real host answers a `RevealedView`). */
+  setRevealed: (value: unknown) => void
 }
 
 const ROOT_A: RootView = { id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', alias: 'payments' }
@@ -56,6 +58,7 @@ function mount(): Harness {
   const dictionaries: { ns: string; dicts: Record<string, unknown> }[] = []
   let view: RootsView = { primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B] }
   let failure: { code: string; message: string } | undefined
+  let revealed: unknown = { revealed: '/repos/payments' } satisfies RevealedView
   const picked: string | null = '/repos/picked'
 
   const connection = {
@@ -63,7 +66,9 @@ function mount(): Harness {
       call: async (channel: string, endpoint: string, payload: PanelRequest) => {
         calls.push({ channel, endpoint, payload })
         if (failure !== undefined) return { ok: false, error: failure }
-        return { ok: true, value: view }
+        // One shape per endpoint, exactly as the host sends them: `reveal`
+        // answers with the revealed path, everything else with the whole view.
+        return { ok: true, value: endpoint === 'reveal' ? revealed : view }
       },
     },
   }
@@ -107,6 +112,7 @@ function mount(): Harness {
     dictionaries,
     setView: next => { view = next },
     setFailure: next => { failure = next },
+    setRevealed: next => { revealed = next },
   }
 }
 

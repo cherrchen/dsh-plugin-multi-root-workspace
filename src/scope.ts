@@ -28,12 +28,21 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** One configured additional root, as the registry will persist it in M3. */
+/** One configured additional root, as the registry persists it. */
 export interface AdditionalWorkspaceRoot {
   /** Stable registry identity (opaque; M3 brands it). */
   id: string
-  /** Canonical absolute directory. */
+  /** Canonical absolute directory, as spelled in the registration. */
   path: string
+  /**
+   * The canonical directory this registration was granted for (the `realpath`
+   * captured when the operator registered it). The root is granted only while
+   * `canonicalPath(path)` still equals this value: re-resolving a path is NOT
+   * re-authorizing it, because whoever can replace the directory (or a symlink
+   * in its chain) could otherwise move the grant to a directory no operator
+   * ever registered.
+   */
+  recordedPath: string
   /** Optional display alias. */
   alias?: string
 }
@@ -52,7 +61,18 @@ export interface FilesystemScope {
 
 /**
  * Canonicalize and sanitize one root list against a primary root: drop the
- * primary itself, drop duplicates, and preserve registry order.
+ * primary itself, drop duplicates, drop any root whose current resolution no
+ * longer matches the directory it was registered for, and preserve registry
+ * order.
+ *
+ * The last rule is the security-relevant one. `canonicalPath` is `realpath`, so
+ * a registered directory that has since been replaced by a symlink resolves to
+ * a different directory — granting that would hand out a directory nobody
+ * registered, on nothing more than a local replace. A registration whose
+ * resolution moved is therefore withheld here (the registry reports it as
+ * `redirected`), and it comes back only when the path resolves to the recorded
+ * directory again.
+ *
  * @param primaryRoot - the canonical primary root to exclude.
  * @param roots - candidate roots, in registry order.
  * @returns the sanitized additional roots.
@@ -64,7 +84,10 @@ export function sanitizeAdditionalRoots(
   const seen = new Set<string>([primaryRoot])
   const result: string[] = []
   for (const root of roots) {
+    const recorded = root.recordedPath
+    if (typeof recorded !== 'string' || recorded === '') continue
     const canonical = canonicalPath(root.path)
+    if (canonical !== recorded) continue
     if (seen.has(canonical)) continue
     seen.add(canonical)
     result.push(canonical)

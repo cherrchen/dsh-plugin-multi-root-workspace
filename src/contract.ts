@@ -27,7 +27,7 @@ export interface RootView {
   /** ISO-8601 registration instant. */
   readonly addedAt: string
   /** Whether the directory is writable right now, withheld, or unusable. */
-  readonly state: 'available' | 'missing' | 'invalid'
+  readonly state: 'available' | 'missing' | 'redirected' | 'invalid'
   /** Why the root is not `available`; a code the panel localizes. */
   readonly detail?: string
 }

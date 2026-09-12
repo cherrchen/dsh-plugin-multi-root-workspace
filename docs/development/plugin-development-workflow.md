@@ -1,6 +1,6 @@
 # 插件开发工作流：构建、测试与冒烟
 
-> 状态：M1、M2 与 M3 已落地。本文记录本仓库当前**真实存在**的命令、运行时约束与验证机制；未实现的流程不要写在这里。
+> 状态：M1、M2 已落地；M3 已落地并按外部审查返工后重新验收。本文记录本仓库当前**真实存在**的命令、运行时约束与验证机制；未实现的流程不要写在这里。
 > 相关：[需求](../requirements/multi-root-workspace.md)、[架构](../architecture/multi-root-workspace.md)、[ADR-0002 上游耦合策略](../decisions/ADR-0002-upstream-coupling-policy.md)、[ADR-0003 方言 grant 拼接](../decisions/ADR-0003-dialect-grant-widening.md)
 
 ## 1. 目标运行时与版本策略
@@ -32,8 +32,9 @@
 pnpm install            # 安装（首次或改依赖后）
 pnpm lint               # oxlint（host 与 client 半部都扫）
 pnpm typecheck          # tsc -p tsconfig.host.json 与 -p tsconfig.client.json 各一次
-pnpm test               # vitest run：单测 + 校验规则 + 注册表 + 命令/通道 + 空根差分 parity + 方言 grant 矩阵 + client 制品/面板 + 词典 parity + patch 不变量
 pnpm build              # tsc 出两面 lib/types/**/*.d.ts + tsdown 出 lib/*.js（host ESM）与 lib/client.js（浏览器闭包工厂）
+pnpm test               # vitest run：单测 + 校验规则 + 注册表（含并发/替换/恢复）+ 命令/通道 + 空根差分 parity + 方言 grant 矩阵 + client 制品/面板 + 词典 parity + patch 不变量
+pnpm kernel:probe       # 本机是否真能受限执行；能则导出 DSH_REQUIRE_KERNEL_RUNNER=1，使内核断言必须真跑
 pnpm smoke:compose      # 组合门禁（需要先 build）
 pnpm smoke:behavior     # 空根直通 + 多根 battery + 注册表/命令 battery（需要先 build）
 pnpm smoke:journey      # 跨两个 git repo 的 web/headless 双 profile 旅程（需要先 build）
@@ -42,6 +43,8 @@ pnpm docs:check         # 文档结构检查
 ```
 
 三个冒烟都要求 `lib/` 已构建（冒烟脚本会检查并提示 `pnpm build`）。
+
+**`pnpm test` 必须在 `pnpm build` 之后**：`tests/client-bundle.spec.ts` 断言的是**构建产物** `lib/client.js`（浏览器闭包工厂形态、模块表依赖清单），而 `/lib/` 被 gitignore、也没有安装时构建钩子。干净 checkout 上先跑测试会得到 `ENOENT` 失败——CI 与升级工作流都按 `lint → typecheck → build → test` 排序。
 
 ## 4. 冒烟机制
 
@@ -142,9 +145,14 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 三行 insert
 
 ## 7. CI
 
-`.github/workflows/ci.yml` 在 `ubuntu-latest` 与 `macos-latest` 上执行：`lint` → `typecheck` → `test` → `build` → `smoke:compose` → `smoke:behavior` → `docs:check`。
+`.github/workflows/ci.yml` 在 `ubuntu-latest` 与 `macos-latest` 上执行：`lint` → `typecheck` → **`build`** → `test` → `kernel:probe` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `docs:check`。升级工作流（`upgrade.yml`）同样把 `build` 放在 `test` 之前。
 
-Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seatbelt；`tests/parity-matrix.spec.ts` 与 `smoke:behavior` 的真实受限执行用例会在 runner 可用时真实执行（Linux 至少 bwrap 或 Landlock 之一，macOS 为 Seatbelt），不可用时显式 skip 并打印原因——CI 不会把"没跑"记成通过。Windows 内核级多根不在第一期范围（Windows 写路径由 fs fence 覆盖，见需求文档），因此没有 `windows-latest` 腿。
+Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seatbelt。**"没跑"不会被记成通过**，机制有两层：
+
+1. `pnpm kernel:probe`（`scripts/check-kernel-runner.mjs`）直接用原始机制探测宿主能否受限执行（`sandbox-exec` + allow profile / `bwrap` 绑定 flags / Landlock launcher）。能 → 向 `$GITHUB_ENV` 写入 `DSH_REQUIRE_KERNEL_RUNNER=1`；不能 → 打印每条机制的原因。
+2. `tests/parity-matrix.spec.ts` 与 `smoke:behavior` 的内核断言在 runner 不可用时，要么显式 skip 并打印原因（普通开发机），要么**直接失败**（`DSH_REQUIRE_KERNEL_RUNNER=1` 时）。判定逻辑集中在 `tests/support/kernel-runner.ts`。
+
+Windows 内核级多根不在第一期范围（Windows 写路径由 fs fence 覆盖，见需求文档），因此没有 `windows-latest` 腿。
 
 ## 8. 常见失败与处置
 
@@ -157,8 +165,11 @@ Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seat
 | `smoke:*` 提示 `lib/ is missing` | 未构建 | 先跑 `pnpm build` |
 | bash 断言整体 skipped | 当前进程已被内核沙箱约束，无法嵌套 | 在不被约束的终端或 CI 中运行以覆盖该项 |
 | `pnpm <script>` 报 `EPERM ... /Library/pnpm/.tools` | 仓库 pin 的 pnpm 版本需要写用户级 pnpm 目录 | 在可写该目录的终端（或提权）执行；仅跑门禁时可用 `sh node_modules/.bin/<tool>` 绕过 pnpm |
-| `pnpm <script>` 报 `ERR_PNPM_UNEXPECTED_STORE` 或 `ABORTED_REMOVE_MODULES_DIR_NO_TTY` | checkout 里存在一个陈旧的 `.pnpm-store/`（被 gitignore），而 `node_modules` 是从磁盘级 store（如 `<挂载点>/.pnpm-store/v11`）链接的；pnpm 运行脚本前的依赖自检因此想重装 | 三种等价处置：删掉陈旧的仓库内 `.pnpm-store/`；或 `pnpm config set store-dir <node_modules 实际链接的 store>`；或直接用 `sh node_modules/.bin/<tool>` / `node scripts/<smoke>.mjs` 跑门禁（CI 不受影响，它用默认 store 安装） |
+| `pnpm <script>` 报 `ERR_PNPM_UNEXPECTED_STORE` 或 `ABORTED_REMOVE_MODULES_DIR_NO_TTY` | checkout 里存在一个陈旧的 `.pnpm-store/`（被 gitignore），而 `node_modules` 是从磁盘级 store（如 `<挂载点>/.pnpm-store/v11`）链接的；pnpm 运行脚本前的依赖自检因此想重装，而在没有 TTY 时无法确认删除 | 最快解除：`CI=true pnpm <script>`（pnpm 只在 CI 下继续而不交互确认）。根治：删掉陈旧的仓库内 `.pnpm-store/`；或 `pnpm config set store-dir <node_modules 实际链接的 store>`；或直接用 `sh node_modules/.bin/<tool>` / `node scripts/<smoke>.mjs` 跑门禁（CI 不受影响，它本来就有 `CI=true`） |
 | `ERR_PNPM_IGNORED_BUILDS` | 有构建脚本的依赖未在 `pnpm-workspace.yaml` 声明 | 把该依赖加入 `allowBuilds`（需要构建）或 `allowBuilds: false`（明确不需要）；当前 `esbuild`（经 vite/vitest 引入）声明为 `false` |
 | 面板在 Web GUI 里看不到 | 组合里没有声明 `sidebar.footer.action` 的侧栏，或该面没有 host `connection`（headless 组合） | 面板是软注册（`slots.inject` 不触发即不出现）；用 `/workspace-folders list` 确认注册表本身可用 |
 | 面板报 "根目录登记的存储不可用" | `$DSH_HOME/storages/multi_root_workspace.json` 损坏或版本不符 | 按提示修复或删除该文件后重启 dsh；插件不会因此拒绝启动（ADR-0004） |
-| 注册的根标着 `missing` 且写不进去 | 目录当前不存在（或不是目录） | 恢复目录后 `/workspace-folders list` 或面板刷新即可；`missing` 的根不会被授予 |
+| 注册的根标着 `missing` 且写不进去 | 目录当前不存在（或不是目录） | 恢复目录后执行 `/workspace-folders list`（或在面板里刷新/重试）即可重新授予——这正是 `registry.refresh()` 的作用，不需要重启；`missing` 的根在被重新校验前不会被授予 |
+| 注册的根标着 `redirected` 且写不进去 | 该路径现在解析到的目录与登记时授予的目录不同（常见原因：登记目录被替换成指向别处的符号链接，或链接链中某一段改了） | 这是刻意行为：重新解析不等于重新授权，授权不会被转移到新目标。把目录恢复成登记时那个（或删掉那层符号链接）后执行 `/workspace-folders list` 即可复原；若确实想改到新目录，先 `remove` 再 `add` 一次，等于重新确认 |
+| 列表里有一条 `invalid`，说明写着"重复的 id"或"没有说明授予目录" | 存储被手工改过，或来自缺少 `recordedPath` 字段的旧记录 | 该记录不授予任何权限，可用 `/workspace-folders remove <n>` 或面板里的"移除"逐条删除（删除是按位置/单条进行的，不会一次删掉多条） |
+| 内核断言在本地/CI 被 skip | 宿主不能受限执行（外层沙箱禁止嵌套，或缺 bwrap/Landlock launcher） | 本地属正常；CI 里 `pnpm kernel:probe` 会在能执行的宿主上导出 `DSH_REQUIRE_KERNEL_RUNNER=1`，此时 skip 会变成失败。要在本地强制检查，可自行 `DSH_REQUIRE_KERNEL_RUNNER=1 pnpm test`（预期在看到各条原因后失败） |
