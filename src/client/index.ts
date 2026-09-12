@@ -25,10 +25,14 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { createElement } from 'react'
 import { createPanelClient, currentSessionIdOf, type PanelClient } from './panel-client.ts'
 import { NS, en, zh } from './locales.ts'
+import { STYLES } from './styles.ts'
 import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction.tsx'
 
 /** The footer-action cell this plugin owns. */
 export const SLOT_ID = 'multi-root-folders'
+
+/** The id of the `<style>` element carrying this plugin's sheet. */
+const STYLE_ELEMENT_ID = 'multi-root-workspace-styles'
 
 /** Services the client half needs before it may activate. */
 export const inject = ['slots', 'locale', 'connection']
@@ -39,6 +43,19 @@ export const inject = ['slots', 'locale', 'connection']
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'multi-root-workspace: dictionaries')
+
+  // The panel's classes resolve against this sheet; removing it on unload keeps
+  // a hot-unplugged plugin from leaving dead rules behind.
+  ctx.effect(() => {
+    let element = document.getElementById(STYLE_ELEMENT_ID)
+    if (element === null) {
+      element = document.createElement('style')
+      element.id = STYLE_ELEMENT_ID
+      element.textContent = STYLES
+      document.head.append(element)
+    }
+    return () => { element?.remove() }
+  }, 'multi-root-workspace: styles')
 
   // Cordis binds `this.ctx` to the *caller's* fiber for the registry methods, so
   // reading the injected services here keeps them owned by this plugin.
@@ -63,7 +80,18 @@ export function apply(ctx: ClientContext): void {
     // active locale without re-registering.
     label: () => t('action.label'),
     locale: NS,
-  }, () => createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId, t })))
+    // The composed props include the owner share (`{ wide }`): forwarding it
+    // lets the trigger render its rail form when the sidebar collapses.
+  }, owner => {
+    const wide = (owner as { readonly wide?: boolean } | undefined)?.wide
+    return createElement(WorkspaceFoldersAction, {
+      panel,
+      pickDirectory,
+      sessionId,
+      t,
+      ...(wide === undefined ? {} : { wide }),
+    })
+  }))
 }
 
 /**

@@ -9,9 +9,12 @@
  * panel) exist only in the pinned 0.1.5 surface, while `sidebar.footer.action`
  * exists in both supported runtimes — and `sidebar.workspaces` is a single slot
  * already owned by the workspace browser, so it cannot be extended in place.
- * Keeping the panel self-contained also keeps it style-independent: it renders
- * plain elements with inline styles, so it needs no CSS pipeline and no
- * component-library identity to be shared with the host.
+ *
+ * Styling is the host's, not this file's: the elements carry `mrfw-*` classes
+ * resolved by the stylesheet the client entry injects (`styles.ts`), and every
+ * color in that sheet is a host `--dsw-*` token, so the panel inherits the
+ * native look — sidebar trigger, modal card, capsule buttons — in both themes
+ * without naming a single color here (see ADR-0006).
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/WorkspaceFoldersAction
  */
@@ -41,70 +44,51 @@ export interface WorkspaceFoldersActionProps {
   readonly wide?: boolean
 }
 
-const BUTTON_STYLE = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  width: '100%',
-  padding: '6px 10px',
-  border: '1px solid rgba(127, 127, 127, 0.35)',
-  borderRadius: '6px',
-  background: 'transparent',
-  color: 'inherit',
-  cursor: 'pointer',
-  font: 'inherit',
-  textAlign: 'left',
-} as const
+/** The visual family of one capsule button, mirroring the host Button kit. */
+type ActionVariant = 'ghost' | 'outline' | 'primary' | 'danger'
 
-const OVERLAY_STYLE = {
-  position: 'fixed',
-  inset: '0',
-  zIndex: '40',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  background: 'rgba(0, 0, 0, 0.35)',
-} as const
+const VARIANT_CLASS: Record<ActionVariant, string> = {
+  ghost: 'mrfw-btnGhost',
+  outline: 'mrfw-btnOutline',
+  primary: 'mrfw-btnPrimary',
+  danger: 'mrfw-btnDanger',
+}
 
-const DIALOG_STYLE = {
-  width: 'min(640px, 92vw)',
-  maxHeight: '80vh',
-  overflowY: 'auto',
-  padding: '16px 18px',
-  borderRadius: '10px',
-  background: 'canvas',
-  color: 'canvastext',
-  border: '1px solid rgba(127, 127, 127, 0.35)',
-  font: 'inherit',
-} as const
-
-const ROW_STYLE = {
-  display: 'flex',
-  flexWrap: 'wrap',
-  alignItems: 'center',
-  gap: '8px',
-  padding: '8px 0',
-  borderTop: '1px solid rgba(127, 127, 127, 0.2)',
-} as const
-
-const PATH_STYLE = {
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-  fontSize: '0.92em',
-  wordBreak: 'break-all',
-  flex: '1 1 240px',
-} as const
-
-/** One small button matching the panel's own styling. */
-function Action(props: { onClick: () => void; children: ReactNode; disabled?: boolean }): ReactNode {
+/** One small capsule button matching the panel's own styling. */
+function Action(props: {
+  onClick: () => void
+  children: ReactNode
+  disabled?: boolean
+  variant?: ActionVariant
+}): ReactNode {
+  const variant = props.variant ?? 'ghost'
   return (
     <button
       type="button"
+      className={`mrfw-btn ${VARIANT_CLASS[variant]}`}
       onClick={props.onClick}
       disabled={props.disabled === true}
-      style={{ ...BUTTON_STYLE, width: 'auto', padding: '3px 8px' }}
     >
       {props.children}
     </button>
+  )
+}
+
+/** The 16px outline folder glyph of the sidebar trigger. */
+function FolderIcon(): ReactNode {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 4.5c0-.83.67-1.5 1.5-1.5h2.17c.4 0 .78.16 1.06.44l.89.89c.28.28.66.44 1.06.44H12c.83 0 1.5.67 1.5 1.5v5.23c0 .83-.67 1.5-1.5 1.5H4c-.83 0-1.5-.67-1.5-1.5V4.5Z" />
+    </svg>
+  )
+}
+
+/** The 16px close glyph of the dialog's header button. */
+function CloseIcon(): ReactNode {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
+      <path d="M4 4l8 8M12 4l-8 8" />
+    </svg>
   )
 }
 
@@ -121,18 +105,19 @@ function stateKey(state: RootState): Key {
 /** The sidebar footer action plus the dialog it opens. */
 export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): ReactNode {
   const [open, setOpen] = useState(false)
+  const rail = props.wide === false
   return (
     <>
       <button
         type="button"
+        className={rail ? 'mrfw-trigger mrfw-triggerRail' : 'mrfw-trigger'}
         title={props.t('action.title')}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => { setOpen(value => !value) }}
-        style={BUTTON_STYLE}
       >
-        <span aria-hidden="true">🗂</span>
-        {props.wide === false ? null : <span>{props.t('action.label')}</span>}
+        <span className="mrfw-triggerIcon" aria-hidden="true"><FolderIcon /></span>
+        {rail ? null : <span>{props.t('action.label')}</span>}
       </button>
       {open ? <WorkspaceFoldersDialog {...props} onClose={() => { setOpen(false) }} /> : null}
     </>
@@ -298,120 +283,131 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
 
   const roots = state.view?.roots ?? []
   return (
-    <div style={OVERLAY_STYLE} role="presentation" onClick={event => { if (event.target === event.currentTarget) props.onClose() }}>
+    <div className="mrfw-overlay" role="presentation">
+      <div
+        className="mrfw-mask"
+        role="presentation"
+        onClick={event => { if (event.target === event.currentTarget) props.onClose() }}
+      />
       <div
         ref={dialogRef}
         tabIndex={-1}
         onKeyDown={onDialogKeyDown}
-        style={{ ...DIALOG_STYLE, outline: 'none' }}
+        className="mrfw-dialog"
         role="dialog"
         aria-modal="true"
         aria-label={t('panel.title')}
       >
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px' }}>
-          <h2 style={{ margin: '0 0 4px', fontSize: '1.05em' }}>{t('panel.title')}</h2>
-          <span style={{ marginLeft: 'auto' }}>
-            <Action onClick={props.onClose}>{t('panel.close')}</Action>
-          </span>
+        <div className="mrfw-header">
+          <h2 className="mrfw-title">{t('panel.title')}</h2>
+          <button
+            type="button"
+            className="mrfw-close"
+            title={t('panel.close')}
+            aria-label={t('panel.close')}
+            onClick={props.onClose}
+          >
+            <CloseIcon />
+          </button>
         </div>
-        <p style={{ margin: '0 0 10px', opacity: 0.75 }}>{t('panel.subtitle')}</p>
+        <div className="mrfw-body">
+          <p className="mrfw-description">{t('panel.subtitle')}</p>
 
-        {state.error === undefined ? null : (
-          <p role="alert" style={{ color: 'crimson', margin: '0 0 10px' }}>
-            {t(errorKeyOf(state.error.code))}
-            {state.error.code === 'unavailable' ? ` (${state.error.message})` : ''}
-          </p>
-        )}
-        {state.view?.unavailable === undefined ? null : (
-          <p role="alert" style={{ color: 'crimson', margin: '0 0 10px' }}>{state.view.unavailable}</p>
-        )}
-
-        <section>
-          <strong>{t('panel.primary')}</strong>
-          <div style={{ ...ROW_STYLE, borderTop: 'none' }}>
-            <span style={PATH_STYLE}>{state.view?.primaryRoot ?? '…'}</span>
-            <span style={{ opacity: 0.7 }}>{t('panel.primaryNote')}</span>
-          </div>
-        </section>
-
-        <section>
-          <strong>{t('panel.additional')}</strong>
-          {state.view === undefined ? <p>{t('panel.loading')}</p> : null}
-          {state.view !== undefined && roots.length === 0 ? (
-            <p style={{ opacity: 0.8 }}>
-              {t('panel.empty')} {t('panel.emptyHint')}
+          {state.error === undefined ? null : (
+            <p role="alert" className="mrfw-alert">
+              {t(errorKeyOf(state.error.code))}
+              {state.error.code === 'unavailable' ? ` (${state.error.message})` : ''}
             </p>
-          ) : null}
-          {roots.map((root, index) => (
-            <div key={root.id} style={ROW_STYLE}>
-              <span style={PATH_STYLE}>{root.path}</span>
-              {root.alias === undefined ? null : <em>{root.alias}</em>}
-              {root.state === 'available' ? null : (
-                <span title={root.detail} style={{ color: 'darkorange' }}>
-                  {t(stateKey(root.state))}
-                </span>
-              )}
-              <Action onClick={() => { void copyPath(root) }}>{copiedId === root.id ? t('panel.copied') : t('panel.copyPath')}</Action>
-              <Action disabled={state.busy} onClick={() => { void reveal(root) }}>{t('panel.reveal')}</Action>
-              <Action
-                disabled={state.busy || index === 0}
-                onClick={() => { void move(root, roots[index - 1]?.id) }}
-              >
-                {t('panel.moveUp')}
-              </Action>
-              <Action
-                disabled={state.busy || index === roots.length - 1}
-                onClick={() => { void move(root, roots[index + 2]?.id) }}
-              >
-                {t('panel.moveDown')}
-              </Action>
-              <Action
-                disabled={state.busy}
-                onClick={() => {
-                  setAliasFor(current => (current === root.id ? undefined : root.id))
-                  setAliasDraft(root.alias ?? '')
-                }}
-              >
-                {t('panel.alias')}
-              </Action>
-              <Action disabled={state.busy} onClick={() => { void mutate('remove', { id: root.id }) }}>{t('panel.remove')}</Action>
-              {aliasFor === root.id ? (
-                <span style={{ display: 'flex', gap: '6px', flexBasis: '100%' }}>
-                  <input
-                    autoFocus
-                    value={aliasDraft}
-                    placeholder={t('panel.aliasPlaceholder')}
-                    onChange={event => { setAliasDraft(event.target.value) }}
-                    style={{ flex: '1 1 auto', padding: '3px 6px' }}
-                  />
-                  <Action disabled={state.busy} onClick={() => { void mutate('alias', { id: root.id, alias: aliasDraft }); setAliasFor(undefined) }}>
-                    {t('panel.aliasSave')}
-                  </Action>
-                  <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
-                </span>
-              ) : null}
-            </div>
-          ))}
-        </section>
+          )}
+          {state.view?.unavailable === undefined ? null : (
+            <p role="alert" className="mrfw-alert">{state.view.unavailable}</p>
+          )}
 
-        <section style={{ marginTop: '12px' }}>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <section className="mrfw-section">
+            <div className="mrfw-sectionTitle">{t('panel.primary')}</div>
+            <div className="mrfw-row mrfw-rowBare">
+              <span className="mrfw-path">{state.view?.primaryRoot ?? '…'}</span>
+              <span className="mrfw-note">{t('panel.primaryNote')}</span>
+            </div>
+          </section>
+
+          <section className="mrfw-section">
+            <div className="mrfw-sectionTitle">{t('panel.additional')}</div>
+            {state.view === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null}
+            {state.view !== undefined && roots.length === 0 ? (
+              <p className="mrfw-note">
+                {t('panel.empty')} {t('panel.emptyHint')}
+              </p>
+            ) : null}
+            {roots.map((root, index) => (
+              <div key={root.id} className="mrfw-row">
+                <span className="mrfw-path">{root.path}</span>
+                {root.alias === undefined ? null : <em className="mrfw-alias">{root.alias}</em>}
+                {root.state === 'available' ? null : (
+                  <span title={root.detail} className="mrfw-stateWarn">
+                    {t(stateKey(root.state))}
+                  </span>
+                )}
+                <Action onClick={() => { void copyPath(root) }}>{copiedId === root.id ? t('panel.copied') : t('panel.copyPath')}</Action>
+                <Action disabled={state.busy} onClick={() => { void reveal(root) }}>{t('panel.reveal')}</Action>
+                <Action
+                  disabled={state.busy || index === 0}
+                  onClick={() => { void move(root, roots[index - 1]?.id) }}
+                >
+                  {t('panel.moveUp')}
+                </Action>
+                <Action
+                  disabled={state.busy || index === roots.length - 1}
+                  onClick={() => { void move(root, roots[index + 2]?.id) }}
+                >
+                  {t('panel.moveDown')}
+                </Action>
+                <Action
+                  disabled={state.busy}
+                  onClick={() => {
+                    setAliasFor(current => (current === root.id ? undefined : root.id))
+                    setAliasDraft(root.alias ?? '')
+                  }}
+                >
+                  {t('panel.alias')}
+                </Action>
+                <Action disabled={state.busy} variant="danger" onClick={() => { void mutate('remove', { id: root.id }) }}>{t('panel.remove')}</Action>
+                {aliasFor === root.id ? (
+                  <span className="mrfw-aliasEditor">
+                    <input
+                      autoFocus
+                      className="mrfw-input mrfw-inputInline"
+                      value={aliasDraft}
+                      placeholder={t('panel.aliasPlaceholder')}
+                      onChange={event => { setAliasDraft(event.target.value) }}
+                    />
+                    <Action disabled={state.busy} onClick={() => { void mutate('alias', { id: root.id, alias: aliasDraft }); setAliasFor(undefined) }}>
+                      {t('panel.aliasSave')}
+                    </Action>
+                    <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </section>
+
+          <div className="mrfw-actions">
             {props.pickDirectory === undefined ? null : (
-              <Action onClick={() => { void addViaPicker() }} disabled={state.busy}>{t('panel.add')}</Action>
+              <Action onClick={() => { void addViaPicker() }} disabled={state.busy} variant="outline">{t('panel.add')}</Action>
             )}
             <input
+              className="mrfw-input"
               value={manualPath}
               placeholder={t('panel.addManual')}
               onChange={event => { setManualPath(event.target.value) }}
               onKeyDown={event => { if (event.key === 'Enter') void addManualPath() }}
-              style={{ flex: '1 1 220px', padding: '3px 6px' }}
             />
-            <Action onClick={() => { void addManualPath() }} disabled={state.busy || manualPath.trim() === ''}>
+            <Action onClick={() => { void addManualPath() }} disabled={state.busy || manualPath.trim() === ''} variant="primary">
               {t('panel.addConfirm')}
             </Action>
-            <Action onClick={() => { void refresh() }} disabled={state.busy}>{t('panel.retry')}</Action>
+            <Action onClick={() => { void refresh() }} disabled={state.busy} variant="outline">{t('panel.retry')}</Action>
           </div>
-        </section>
+        </div>
       </div>
     </div>
   )
@@ -422,5 +418,3 @@ function asPanelError(error: unknown): PanelError {
   if (error instanceof PanelError) return error
   return new PanelError('fallback', error instanceof Error ? error.message : String(error))
 }
-
-
