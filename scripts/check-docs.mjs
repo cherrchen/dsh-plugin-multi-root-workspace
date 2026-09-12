@@ -17,6 +17,9 @@ const IGNORED_DIRECTORIES = new Set([
   "coverage",
   ".next",
   "out",
+  // Smoke fixtures (kept only when DSH_SMOKE_KEEP=1) are scratch trees: they
+  // contain seeded repositories whose README files are not project documents.
+  ".dsh-smoke",
 ]);
 
 // Directories managed by the bilingual documentation rules.

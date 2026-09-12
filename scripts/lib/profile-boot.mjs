@@ -45,10 +45,11 @@ export async function composeProfile(profileName, home) {
  * Boot one profile's tree in-process on an isolated home.
  * @param profileName - profile under the scratch home.
  * @param home - scratch `$DSH_HOME`.
+ * @param prepare - pre-tree host setup (launcher facts an app profile requires).
  * @returns the settled root context plus the composition facts.
  */
-export async function bootProfile(profileName, home) {
+export async function bootProfile(profileName, home, prepare) {
   const { appBoot, installAnchor, profile, patches } = await composeProfile(profileName, home)
-  const ctx = await appBoot.boot(BIN_NAME, join(profile.dir, 'cordis.yml'), patches)
+  const ctx = await appBoot.boot(BIN_NAME, join(profile.dir, 'cordis.yml'), patches, prepare)
   return { ctx, appBoot, installAnchor, profile }
 }

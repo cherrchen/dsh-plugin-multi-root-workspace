@@ -69,6 +69,20 @@ export async function loadAppBoot() {
 }
 
 /**
+ * Import one module from the runtime under test.
+ *
+ * A smoke that drives an Agent uses the RUNTIME's own copies (message
+ * constructors, event types) rather than this repository's: the objects it
+ * builds must satisfy the very schemas the runtime validates them against.
+ * @param name - the module specifier, resolved from the runtime installation.
+ * @returns the module namespace.
+ */
+export async function loadRuntimeModule(name) {
+  const entry = runtimeRequire().resolve(name)
+  return await import(pathToFileURL(entry).href)
+}
+
+/**
  * The profile home a smoke run drives. Always isolated: a smoke must never touch
  * the operator's real `$DSH_HOME`.
  * @param label - short directory label for this smoke run.
