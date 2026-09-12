@@ -128,8 +128,14 @@ async function battery(ctx) {
     return await ctx.fs.readText(await ctx.fs.resolve(path))
   })
   await record('bash reports the primary root as its cwd', () => bash('pwd'))
-  await record('bash writes inside the primary root', () => bash('echo payload > bash-inside.txt'))
-  await record('bash writes outside every root', () => bash('echo payload > ../out/bash-outside.txt'))
+  await record('bash writes inside the primary root', async () => {
+    const inside = await confinedWrite(bash, join(primaryRoot, 'bash-inside.txt'))
+    return { ...inside, artifactRemoved: markerProbe(join(primaryRoot, 'bash-inside.txt')).cleanUp() }
+  })
+  await record('bash writes outside every root', async () => {
+    const outside = await confinedWrite(bash, join(outsideRoot, 'bash-outside.txt'))
+    return { ...outside, artifactRemoved: markerProbe(join(outsideRoot, 'bash-outside.txt')).cleanUp() }
+  })
 
   return results
 }
@@ -142,22 +148,37 @@ function compare(label, expected, actual) {
 }
 
 /**
- * Remove the marker files every battery watches.
+ * Remove one marker file and report whether a confined command recreated it.
  *
- * `wroteInside` / `wroteOutside` are observations of the FILESYSTEM, so a file
- * left by an earlier battery answers for a later one: the read-only pass saw the
- * file the workspace-write pass had written and reported a write the confined
- * command never made. Resetting before each battery is what makes those two
- * facts ("the command ran" and "the file is there") independent — a smoke that
- * only passes when run in the order it was written is not evidence.
+ * The marker is deleted BEFORE the confined run and read immediately after, so
+ * the answer describes that run only. Watching a shared file across a whole
+ * battery cannot work: a file left by an earlier run (the fixture directory is
+ * keyed on the process id, and a CI runner restarts at the same id) or by an
+ * earlier probe would answer for the command being measured, in either direction.
+ * @param path - the marker file the confined command is expected to create.
+ * @returns whether the file exists after the run, and whether it does now.
  */
-function resetProbeFiles() {
-  for (const name of ['fs-inside.txt', 'fs-edited.txt', 'bash-inside.txt']) {
-    rmSync(join(primaryRoot, name), { force: true })
+function markerProbe(path) {
+  rmSync(path, { force: true })
+  return {
+    present: () => existsSync(path),
+    /** Remove it again and report whether it was removed. */
+    cleanUp: () => { const existed = existsSync(path); rmSync(path, { force: true }); return existed },
   }
-  for (const name of ['fs-outside.txt', 'bash-outside.txt', 'readable.txt']) {
-    rmSync(join(outsideRoot, name), { force: true })
-  }
+}
+
+/**
+ * A confined write of `target`, reported by the COMMAND itself: it prints the
+ * outcome of its own `>` redirect, so "the command ran and wrote" comes from
+ * inside the confined process rather than from a file the host then inspects.
+ * @param bash - the battery's confined bash runner.
+ * @param target - the path the command tries to write.
+ * @returns the battery outcome plus what the command said about its own write.
+ */
+async function confinedWrite(bash, target) {
+  const marker = markerProbe(target)
+  const outcome = await bash(`if echo payload > ${JSON.stringify(target)}; then echo wrote=yes; else echo wrote=no; fi`)
+  return { ...outcome, wrote: String(outcome.stdout ?? '').includes('wrote=yes'), present: marker.present() }
 }
 
 /**
@@ -228,8 +249,8 @@ async function multiRootBattery(ctx) {
       return { failure: describe(error) }
     }
   }
-  results.set('bash writes into the additional root', JSON.stringify(await bash(`echo payload > '${join(extraRoot, 'bash-extra.txt')}'`)))
-  results.set('bash writes outside every root', JSON.stringify(await bash(`echo payload > '${join(thirdRoot, 'bash-third.txt')}'`)))
+  results.set('bash writes into the additional root', JSON.stringify(await confinedWrite(bash, join(extraRoot, 'bash-extra.txt'))))
+  results.set('bash writes outside every root', JSON.stringify(await confinedWrite(bash, join(thirdRoot, 'bash-third.txt'))))
 
   return results
 }
@@ -497,8 +518,8 @@ try {
       // write, a real denial, and (when the host allows a nested runner) a real
       // confined shell run.
       const insideWrite = String(plugin.outcomes.get('fs writes inside the primary root'))
-      const bashInside = String(plugin.outcomes.get('bash writes inside the primary root'))
-      const bashOutside = String(plugin.outcomes.get('bash writes outside every root'))
+      const bashInside = JSON.stringify(plugin.outcomes.get('bash writes inside the primary root'))
+      const bashOutside = JSON.stringify(plugin.outcomes.get('bash writes outside every root'))
       const runnerRefused = bashInside.includes('SANDBOX_UNAVAILABLE') || bashInside.includes('SANDBOX_UNAVAILABLE')
 
       if (mode === 'workspace-write') {
@@ -508,22 +529,26 @@ try {
         check.ok(insideWrite.includes('undefined') || insideWrite.length > 0, 'the inside write produced an outcome')
       } else {
         check.contains(insideWrite, 'FS_SANDBOX_DENIED', 'read-only denies the inside write too')
-        check.ok(bashInside.includes('"wroteInside":false'), 'read-only leaves no file behind from bash', bashInside)
-        check.ok(!existsSync(join(primaryRoot, 'bash-inside.txt')),
-          'read-only leaves no bash-inside.txt on disk either', bashInside)
         check.ok(!String(plugin.outcomes.get('fs writes to the platform temp area')).startsWith('undefined'),
           'read-only denies the temp-area write too')
       }
 
-      if (bashInside.includes('"wroteInside":true')) {
+      // One decision per mode, then the facts about what the confined command did.
+      if (runnerRefused) {
+        check.skip(`${mode}: confined bash execution (${requireKernelRunner(hostDialect(), bashInside.slice(0, 120))})`)
+      } else if (bashInside.includes('"wrote":true')) {
         if (mode === 'workspace-write') {
-          check.ok(bashOutside.includes('"wroteOutside":false'), 'bash cannot write outside every root', bashOutside)
+          check.ok(bashOutside.includes('"wrote":false'), 'bash cannot write outside every root', bashOutside)
           check.equal(JSON.parse(bashOutside).denied, true, 'bash reports the denial as a sandbox denial fact')
         }
-      } else if (runnerRefused) {
-        check.skip(`${mode}: confined bash execution (${requireKernelRunner(hostDialect(), bashInside.slice(0, 120))})`)
-      } else {
+      } else if (mode === 'workspace-write') {
         check.ok(false, `${mode}: bash wrote inside the primary root as expected`, bashInside)
+      } else {
+        // Read-only: the command ran and its own redirect failed, and nothing was
+        // left on disk. Both are facts about THIS run (see `confinedWrite`).
+        check.ok(bashInside.includes('"present":false'), 'read-only leaves no file behind from bash', bashInside)
+        check.ok(!existsSync(join(primaryRoot, 'bash-inside.txt')),
+          'read-only leaves no bash-inside.txt on disk either', bashInside)
       }
     }
 
@@ -532,7 +557,6 @@ try {
       for (const name of ['fs-extra.txt', 'bash-extra.txt']) rmSync(join(extraRoot, name), { force: true })
       for (const name of ['fs-third.txt', 'bash-third.txt']) rmSync(join(thirdRoot, name), { force: true })
 
-      resetProbeFiles()
       const outcomes = await runMultiRootProfile(PLUGIN_PROFILE, mode)
       const extraWrite = String(outcomes.get('fs writes into the additional root'))
       const thirdWrite = String(outcomes.get('fs writes outside every root'))
@@ -568,11 +592,11 @@ try {
       if (bashExtra.includes('SANDBOX_UNAVAILABLE')) {
         check.skip(`${mode}: confined bash against the additional root (${requireKernelRunner(hostDialect(), bashExtra.slice(0, 120))})`)
       } else if (mode === 'workspace-write') {
-        check.ok(bashExtra.includes('"wroteExtra":true'), `${mode}: bash writes the additional root`, bashExtra)
-        check.ok(bashThird.includes('"wroteThird":false'), `${mode}: bash cannot write outside every root`, bashThird)
+        check.ok(bashExtra.includes('"wrote":true'), `${mode}: bash writes the additional root`, bashExtra)
+        check.ok(bashThird.includes('"wrote":false'), `${mode}: bash cannot write outside every root`, bashThird)
         if (bashThird.includes('"denied"')) check.equal(JSON.parse(bashThird).denied, true, `${mode}: bash reports the outside denial`)
       } else {
-        check.ok(bashExtra.includes('"wroteExtra":false'), `${mode}: read-only leaves the additional root untouched`, bashExtra)
+        check.ok(bashExtra.includes('"wrote":false'), `${mode}: read-only leaves the additional root untouched`, bashExtra)
       }
     }
     // --- the M3 path: roots registered by the command, not by the smoke --------
