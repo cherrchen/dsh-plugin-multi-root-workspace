@@ -1,16 +1,26 @@
 /**
- * smoke:behavior — the empty-root pass-through acceptance test.
+ * smoke:behavior — the empty-root pass-through acceptance test plus the
+ * additional-root behavior matrix.
  *
  * It boots a real composed profile in-process (no model call, no credentials),
  * runs one battery of filesystem and bash operations against the mounted
  * services, and does so twice: once with `mr-plugin` (this bundle installed) and
  * once with `mr-baseline` (the same composition without it). Every recorded
  * outcome must be identical — that is what "installed plugin behaves exactly
- * like no plugin" means for M1 — while the provider IDENTITY must differ.
+ * like no plugin" means for the empty-root case — while the provider IDENTITY
+ * must differ.
  *
  * It then repeats both batteries under `read-only`, which is the other half of
  * the requirement: the mode must keep denying writes through `ctx.fs` and
  * through `ctx.shell`, with the upstream denial facts intact.
+ *
+ * Finally it registers an additional root on the plugin's scope service and
+ * asserts the multi-root behavior end to end: the fence grants that root, the
+ * HOST dialect's own profile gains it (read straight out of `ctx.sandbox.confine`,
+ * so the assertion holds even where a confined process cannot be spawned), the
+ * denial names every allowed root, and — when this process can actually run a
+ * confined command — bash writes the additional root while the outside tree
+ * stays denied. `read-only` must leave the additional root ungranted.
  *
  * The run is isolated: a scratch `$DSH_HOME` and a fixture tree under the
  * repository's ignored `.dsh-smoke/` directory (outside `/tmp`, so containment
@@ -33,6 +43,10 @@ const home = resolveScratchHome(`behavior-${process.pid}`)
 const fixtureRoot = join(REPO_ROOT, '.dsh-smoke', `behavior-${process.pid}`)
 const primaryRoot = join(fixtureRoot, 'ws')
 const outsideRoot = join(fixtureRoot, 'out')
+/** The additional root a multi-root session registers. */
+const extraRoot = join(fixtureRoot, 'extra')
+/** A tree outside every root, used to prove the denial is still enforced. */
+const thirdRoot = join(fixtureRoot, 'third')
 const keep = process.env.DSH_SMOKE_KEEP === '1'
 const check = createChecker('behavior')
 
@@ -123,6 +137,85 @@ function compare(label, expected, actual) {
   }
 }
 
+/**
+ * One battery of operations against a booted tree that carries an ADDITIONAL
+ * root: the scope is populated before anything is asked of the providers, so the
+ * fs fence and the kernel dialect must both answer with the widened root set.
+ * @param ctx - the settled root context.
+ * @returns a map of case name to outcome.
+ */
+async function multiRootBattery(ctx) {
+  const results = new Map()
+  const policy = ctx.sandboxPolicy.resolve({})
+  const scope = ctx.get('multiRootScope')
+  scope.setAdditionalRoots(policy.workspaceRoot, [{ id: 'extra', path: extraRoot }])
+  const resolved = scope.resolve(policy)
+  const canonicalExtra = resolved.additionalRoots[0]
+  results.set('scope resolves the additional root', String(canonicalExtra))
+  results.set('scope resolves the canonical primary root', resolved.primaryRoot)
+
+  const write = async (path) => {
+    try {
+      await ctx.fs.writeText(await ctx.fs.resolve(path), 'payload', undefined, undefined, policy)
+      return 'ok'
+    } catch (error) {
+      return describe(error)
+    }
+  }
+
+  results.set('fs writes into the additional root', await write(join(extraRoot, 'fs-extra.txt')))
+  const denial = await write(join(thirdRoot, 'fs-third.txt'))
+  results.set('fs writes outside every root', denial)
+  results.set('fs denial names every allowed root', String(
+    denial.includes(resolved.primaryRoot) && denial.includes(String(canonicalExtra)),
+  ))
+  results.set('fs leaves no file behind outside every root', String(!existsSync(join(thirdRoot, 'fs-third.txt'))))
+
+  // The HOST dialect's own profile, read without executing anything: this is the
+  // assertion that still holds in a process that cannot nest a kernel sandbox.
+  try {
+    const confined = ctx.sandbox.confine(['bash', '-c', 'true'], policy)
+    results.set('the host dialect grants the additional root', String(
+      confined.argv.some(argument => argument.includes(String(canonicalExtra))),
+    ))
+    results.set('the host dialect keeps its enforcement facts', `${confined.enforcement}/${confined.denialSignatures.length}`)
+  } catch (error) {
+    results.set('the host dialect grants the additional root', describe(error))
+    results.set('the host dialect keeps its enforcement facts', describe(error))
+  }
+
+  const bash = async (command) => {
+    try {
+      const spec = ctx.shell.resolve({ command, workdir: primaryRoot, sandboxPolicy: policy })
+      const result = await ctx.shell.run(spec)
+      return {
+        exitCode: result.exitCode,
+        denied: result.sandbox?.denied ?? null,
+        enforcement: result.sandbox?.enforcement ?? null,
+        wroteExtra: existsSync(join(extraRoot, 'bash-extra.txt')),
+        wroteThird: existsSync(join(thirdRoot, 'bash-third.txt')),
+      }
+    } catch (error) {
+      return { failure: describe(error) }
+    }
+  }
+  results.set('bash writes into the additional root', JSON.stringify(await bash(`echo payload > '${join(extraRoot, 'bash-extra.txt')}'`)))
+  results.set('bash writes outside every root', JSON.stringify(await bash(`echo payload > '${join(thirdRoot, 'bash-third.txt')}'`)))
+
+  return results
+}
+
+/** The plugin profile booted with an additional root registered. */
+async function runMultiRootProfile(profile, mode) {
+  process.env.DSH_PERMISSION_MODE = mode
+  const { ctx } = await bootProfile(profile, home)
+  try {
+    return await multiRootBattery(ctx)
+  } finally {
+    await ctx.fiber.dispose()
+  }
+}
+
 async function runProfile(profile, mode) {
   process.env.DSH_PERMISSION_MODE = mode
   const { ctx } = await bootProfile(profile, home)
@@ -169,6 +262,8 @@ try {
   mkdirSync(home, { recursive: true })
   mkdirSync(primaryRoot, { recursive: true })
   mkdirSync(outsideRoot, { recursive: true })
+  mkdirSync(extraRoot, { recursive: true })
+  mkdirSync(thirdRoot, { recursive: true })
   assertIsolatedHome(home)
 
   console.log(`[smoke:behavior] scratch home: ${home}`)
@@ -217,6 +312,54 @@ try {
         check.skip(`${mode}: confined bash execution (no usable kernel runner in this process: ${bashInside.slice(0, 120)}…)`)
       } else {
         check.ok(false, `${mode}: bash wrote inside the primary root as expected`, bashInside)
+      }
+    }
+
+    // --- additional roots: the same composition, one root wider -----------------
+    for (const mode of ['workspace-write', 'read-only']) {
+      for (const name of ['fs-extra.txt', 'bash-extra.txt']) rmSync(join(extraRoot, name), { force: true })
+      for (const name of ['fs-third.txt', 'bash-third.txt']) rmSync(join(thirdRoot, name), { force: true })
+
+      const outcomes = await runMultiRootProfile(PLUGIN_PROFILE, mode)
+      const extraWrite = String(outcomes.get('fs writes into the additional root'))
+      const thirdWrite = String(outcomes.get('fs writes outside every root'))
+      const dialectGrant = String(outcomes.get('the host dialect grants the additional root'))
+      const bashExtra = String(outcomes.get('bash writes into the additional root'))
+      const bashThird = String(outcomes.get('bash writes outside every root'))
+
+      check.equal(String(outcomes.get('scope resolves the additional root')).length > 0, true,
+        `${mode}: the scope resolves the registered additional root`)
+      check.equal(String(outcomes.get('scope resolves the canonical primary root')).length > 0, true,
+        `${mode}: the scope resolves the primary root`)
+      check.equal(String(outcomes.get('fs leaves no file behind outside every root')), 'true',
+        `${mode}: no file was created outside every root`)
+      check.equal(String(outcomes.get('the host dialect keeps its enforcement facts')).includes('/'), true,
+        `${mode}: the host dialect still reports enforcement facts`, String(outcomes.get('the host dialect keeps its enforcement facts')))
+
+      if (mode === 'workspace-write') {
+        check.equal(extraWrite, 'ok', `${mode}: fs writes into the additional root`, extraWrite)
+        check.contains(thirdWrite, 'FS_SANDBOX_DENIED', `${mode}: fs denies a write outside every root`)
+        check.contains(thirdWrite, 'allowed roots:', `${mode}: the denial names the allowed roots`)
+        check.equal(String(outcomes.get('fs denial names every allowed root')), 'true',
+          `${mode}: the denial lists both the primary and the additional root`, thirdWrite)
+      } else {
+        check.contains(extraWrite, 'FS_SANDBOX_DENIED', `${mode}: read-only denies the additional root too`, extraWrite)
+      }
+
+      if (process.platform === 'win32') {
+        check.skip(`${mode}: the host dialect grants the additional root (Windows ACL kernel multi-root is out of first-release scope)`)
+      } else {
+        check.equal(dialectGrant, String(mode === 'workspace-write'), `${mode}: host dialect grant matches the mode`, dialectGrant)
+      }
+
+      if (bashExtra.includes('SANDBOX_UNAVAILABLE')) {
+        check.skip(`${mode}: confined bash against the additional root (no usable kernel runner in this process: ${bashExtra.slice(0, 120)}…)`)
+      } else if (mode === 'workspace-write') {
+        check.ok(bashExtra.includes('"wroteExtra":true'), `${mode}: bash writes the additional root`, bashExtra)
+        check.ok(bashThird.includes('"wroteThird":false'), `${mode}: bash cannot write outside every root`, bashThird)
+        if (bashThird.includes('"denied"')) check.equal(JSON.parse(bashThird).denied, true, `${mode}: bash reports the outside denial`)
+      } else {
+        check.ok(bashExtra.includes('"wroteExtra":false'), `${mode}: read-only leaves the additional root untouched`, bashExtra)
       }
     }
   } finally {
