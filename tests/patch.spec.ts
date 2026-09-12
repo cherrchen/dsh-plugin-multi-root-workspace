@@ -107,8 +107,14 @@ describe('provider replacement rows', () => {
 describe('inserted rows', () => {
   const inserted = patchRows.flatMap(row => row.insert ?? [])
 
-  it('inserts the scope service plus the two providers', () => {
-    expect(inserted.map(row => row.id)).toEqual(['multi-root-fs', 'multi-root-sandbox', 'multi-root-scope'])
+  it('inserts the scope service, the two providers, the registry, and the user surface', () => {
+    expect(inserted.map(row => row.id)).toEqual([
+      'multi-root-fs',
+      'multi-root-sandbox',
+      'multi-root-scope',
+      'multi-root-registry',
+      'multi-root-command',
+    ])
   })
 
   it('names entries that this package actually exports', () => {

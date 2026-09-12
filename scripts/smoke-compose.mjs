@@ -28,7 +28,13 @@ const REPLACED = new Map([
   ['fs-sandbox', '@deepseek-ai/dsh-fs-sandbox'],
   ['sandbox', '@deepseek-ai/dsh-sandbox-local'],
 ])
-const INSERTED = ['multi-root-fs', 'multi-root-sandbox', 'multi-root-scope']
+const INSERTED = [
+  'multi-root-fs',
+  'multi-root-sandbox',
+  'multi-root-scope',
+  'multi-root-registry',
+  'multi-root-command',
+]
 const UPSTREAM_STANDALONE = ['bash-sandbox', 'sandbox-policy', 'tool-fs', 'tool-bash', 'terminal-bash']
 
 const check = createChecker('compose')
@@ -90,7 +96,7 @@ try {
   const insertedIds = composed.rows
     .filter(row => typeof row?.id === 'string' && row.id.startsWith('multi-root-'))
     .map(row => row.id)
-  check.equal(insertedIds, INSERTED, 'exactly the three plugin rows were inserted')
+  check.equal(insertedIds, INSERTED, 'exactly the five plugin rows were inserted')
   for (const id of INSERTED) {
     const row = composedRows.get(id)
     check.ok(row?.name?.startsWith(`${PLUGIN_NAME}/`) === true, `${id} resolves inside ${PLUGIN_NAME}`, String(row?.name))
@@ -108,7 +114,7 @@ try {
 
   // 4. Every other row is untouched, in the same order.
   const composedWithoutInserted = composed.rows.filter(row => !(typeof row?.id === 'string' && row.id.startsWith('multi-root-')))
-  check.equal(composedWithoutInserted.length, baseline.rows.length, 'the composed tree adds no rows beyond the three')
+  check.equal(composedWithoutInserted.length, baseline.rows.length, 'the composed tree adds no rows beyond the five')
   check.equal(
     composedWithoutInserted.map(row => row?.id),
     baseline.rows.map(row => row?.id),

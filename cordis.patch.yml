@@ -1,5 +1,6 @@
 # Multi-root Workspace bundle: replace the single-root fs and sandbox providers
-# with multi-root subclasses, and mount the plugin's scope service.
+# with multi-root subclasses, and mount the plugin's scope service plus the
+# registry and user-facing surface that feed it.
 #
 # Disable-before-insert is mandatory: cordis throws when a second plugin
 # provides an already-registered service key, so the upstream rows must be gone
@@ -9,6 +10,12 @@
 # `bash-sandbox` stays upstream: the bash executor and the PTY backend delegate
 # all confinement to ctx.sandbox, so they inherit multi-root grants from the
 # provider below without any plugin-side executor.
+#
+# The last two rows are additive and self-softening: `multi-root-registry` waits
+# for the storage domain (absent only in compositions that mount no storage at
+# all), and `multi-root-command` registers the `/workspace-folders` command
+# wherever a command registry exists and the browser panel channel wherever a
+# host Connection exists — a headless profile mounts it with no visible effect.
 - id: fs-sandbox
   disabled: true
 - id: sandbox
@@ -20,3 +27,7 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
     - id: multi-root-scope
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/scope'
+    - id: multi-root-registry
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
+    - id: multi-root-command
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
