@@ -50,6 +50,13 @@ interface Harness {
 
 const ROOT_A: RootView = { id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', alias: 'payments' }
 const ROOT_B: RootView = { id: 'b', path: '/repos/website', addedAt: '2026-09-12T00:00:00.000Z', state: 'missing', detail: 'gone' }
+const ROOT_C: RootView = {
+  id: 'c',
+  path: '/repos/swapped',
+  addedAt: '2026-09-12T00:00:00.000Z',
+  state: 'redirected',
+  detail: 'the path now resolves to "/repos/other"',
+}
 
 /** Apply the real client entry to a recording stub context. */
 function mount(): Harness {
@@ -68,6 +75,7 @@ function mount(): Harness {
         if (failure !== undefined) return { ok: false, error: failure }
         // One shape per endpoint, exactly as the host sends them: `reveal`
         // answers with the revealed path, everything else with the whole view.
+        // Answering a list for every endpoint is what used to hide the mismatch.
         return { ok: true, value: endpoint === 'reveal' ? revealed : view }
       },
     },
@@ -228,6 +236,64 @@ describe('the panel dialog', () => {
     fireEvent.change(manual, { target: { value: '/repos/typed' } })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.addConfirm` }))
     await waitFor(() => { expect(harness.calls.filter(call => call.endpoint === 'add')).toHaveLength(2) })
+    // The confirm button submits the TYPED path. It used to submit whatever the
+    // picker had returned, because both entry points shared one function.
+    expect(harness.calls.filter(call => call.endpoint === 'add')[1]?.payload).toEqual({
+      sessionId: 'session-1',
+      path: '/repos/typed',
+    })
+    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('value', '')
+  })
+
+  it('keeps a rejected manual path in the field', async () => {
+    const harness = mount()
+    harness.setFailure({ code: 'missing', message: 'host prose' })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.missing`) })
+
+    const manual = screen.getByPlaceholderText(`${NS}.panel.addManual`)
+    fireEvent.change(manual, { target: { value: '/repos/typo' } })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.addConfirm` }))
+
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
+    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('value', '/repos/typo')
+  })
+
+  it('submits the typed path from the Enter key too', async () => {
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    const manual = screen.getByPlaceholderText(`${NS}.panel.addManual`)
+    fireEvent.change(manual, { target: { value: '/repos/entered' } })
+    fireEvent.keyDown(manual, { key: 'Enter' })
+
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
+    expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
+      sessionId: 'session-1',
+      path: '/repos/entered',
+    })
+  })
+
+  it('leaves the manual field alone when the operator opens the picker', async () => {
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    fireEvent.change(screen.getByPlaceholderText(`${NS}.panel.addManual`), { target: { value: '/repos/typed' } })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
+    expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
+      sessionId: 'session-1',
+      path: '/repos/picked',
+    })
+    // The picker path and the typed path are two different actions; the typed
+    // text is neither submitted nor cleared by the picker.
+    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('value', '/repos/typed')
   })
 
   it('reveals and copies a path from the row actions', async () => {
@@ -238,10 +304,49 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]!)
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'reveal')).toBe(true) })
+    expect(harness.calls.find(call => call.endpoint === 'reveal')?.payload).toEqual({ sessionId: 'session-1', id: 'a' })
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.copyPath` })[0]!)
     await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repos/payments') })
     await waitFor(() => { expect(screen.getByText(`${NS}.panel.copied`)).toBeTruthy() })
+  })
+
+  it('does not report an error when a reveal succeeds', async () => {
+    // The host answers `{ revealed }` for this endpoint. Parsing that as a roots
+    // view is what made every successful reveal paint a failure.
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]!)
+
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'reveal')).toBe(true) })
+    // No failure is painted, and the list survives a reveal untouched.
+    await waitFor(() => { expect(screen.queryByRole('alert')).toBeNull() })
+    expect(screen.getByText('/repos/payments')).toBeTruthy()
+    expect(harness.calls.filter(call => call.endpoint === 'list')).toHaveLength(1)
+  })
+
+  it('reports a reveal whose answer is not a reveal result', async () => {
+    const harness = mount()
+    harness.setRevealed({ primaryRoot: '/repos/primary', roots: [] })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]!)
+
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.fallback`) })
+  })
+
+  it('renders a redirected root as its own state', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_C] })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+
+    await waitFor(() => { expect(screen.getByText(`${NS}.state.redirected`)).toBeTruthy() })
   })
 
   it('localizes a failure by its code instead of showing host prose', async () => {

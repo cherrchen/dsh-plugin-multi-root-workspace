@@ -17,9 +17,9 @@
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { asRootsView, errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
+import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { Key } from './locales.ts'
-import type { RootView, RootsView } from '../contract.ts'
+import type { RootState, RootView, RootsView } from '../contract.ts'
 
 /** Translate one key of this plugin's namespace. */
 export type Translate = (key: Key, params?: Record<string, unknown>) => string
@@ -108,6 +108,16 @@ function Action(props: { onClick: () => void; children: ReactNode; disabled?: bo
   )
 }
 
+/** The locale key for one reported root state. */
+function stateKey(state: RootState): Key {
+  switch (state) {
+    case 'available': return 'state.available'
+    case 'missing': return 'state.missing'
+    case 'redirected': return 'state.redirected'
+    case 'invalid': return 'state.invalid'
+  }
+}
+
 /** The sidebar footer action plus the dialog it opens. */
 export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): ReactNode {
   const [open, setOpen] = useState(false)
@@ -136,7 +146,15 @@ interface DialogState {
   readonly busy: boolean
 }
 
-/** The dialog: reads the view once per open, then after every mutation. */
+/**
+ * The dialog: reads the view once per open, then after every mutation.
+ *
+ * Two shapes travel back over the channel, and they are handled separately on
+ * purpose: every mutating endpoint answers with the whole refreshed view, while
+ * `reveal` answers with the path it revealed and leaves the list untouched
+ * (see `contract.ts`). Treating a reveal answer as a roots view is exactly the
+ * contract mismatch this split removes.
+ */
 function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: () => void }): ReactNode {
   const { panel, t } = props
   const [state, setState] = useState<DialogState>({ view: undefined, error: undefined, busy: false })
@@ -154,7 +172,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     }
     setState(previous => ({ ...previous, busy: true }))
     try {
-      const view = asRootsView(await panel.call('list', { ...(sessionId === undefined ? {} : { sessionId }) }))
+      const view = await panel.call('list', { ...(sessionId === undefined ? {} : { sessionId }) })
       setState({ view, error: undefined, busy: false })
     } catch (error: unknown) {
       setState({ view: undefined, error: asPanelError(error), busy: false })
@@ -163,30 +181,67 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
 
   useEffect(() => { void refresh() }, [refresh])
 
-  const mutate = useCallback(async (endpoint: Parameters<PanelClient['call']>[0], payload: Record<string, unknown>) => {
-    if (panel === undefined) return
+  /**
+   * Submit one change to the host and adopt the view it answers with.
+   * @returns whether the host accepted it (the caller decides whether to clear
+   *   the input it came from).
+   */
+  const mutate = useCallback(async (endpoint: 'add' | 'remove' | 'alias' | 'move', payload: Record<string, unknown>): Promise<boolean> => {
+    if (panel === undefined) return false
     setState(previous => ({ ...previous, busy: true }))
     try {
-      const view = asRootsView(await panel.call(endpoint, { ...(sessionId === undefined ? {} : { sessionId }), ...payload }))
+      const view = await panel.call(endpoint, { ...(sessionId === undefined ? {} : { sessionId }), ...payload })
       setState({ view, error: undefined, busy: false })
+      return true
     } catch (error: unknown) {
       setState(previous => ({ ...previous, error: asPanelError(error), busy: false }))
+      return false
     }
   }, [panel, sessionId])
 
-  const addDirectory = useCallback(async () => {
+  /**
+   * Open the composed picker and add whatever it returns. A picker that is not
+   * composed, or a dialog the operator dismissed, adds nothing — it never falls
+   * back to the manual field, because the operator who clicked "Add folder…"
+   * asked for the picker, not for the text they may have typed earlier.
+   */
+  const addViaPicker = useCallback(async () => {
+    if (props.pickDirectory === undefined) return
     let picked: string | null = null
     try {
-      picked = props.pickDirectory === undefined ? null : await props.pickDirectory()
+      picked = await props.pickDirectory()
     } catch (error: unknown) {
       setState(previous => ({ ...previous, error: asPanelError(error) }))
       return
     }
-    const path = picked ?? manualPath.trim()
+    if (picked === null || picked.trim() === '') return
+    await mutate('add', { path: picked })
+  }, [mutate, props])
+
+  /**
+   * Add the path in the manual field — the one the operator typed. The picker
+   * plays no part here: this is the entry point the confirm button and the
+   * Enter key use.
+   */
+  const addManualPath = useCallback(async () => {
+    const path = manualPath.trim()
     if (path === '') return
-    await mutate('add', { path })
-    setManualPath('')
-  }, [manualPath, mutate, props])
+    // Cleared only on success: a rejected path stays in the field so the operator
+    // can fix it instead of retyping it.
+    if (await mutate('add', { path })) setManualPath('')
+  }, [manualPath, mutate])
+
+  /** Reveal one root: the answer is the revealed path, not a new view. */
+  const reveal = useCallback(async (root: RootView) => {
+    if (panel === undefined) return
+    setState(previous => ({ ...previous, busy: true }))
+    try {
+      await panel.call('reveal', { ...(sessionId === undefined ? {} : { sessionId }), id: root.id })
+      setState(previous => ({ ...previous, error: undefined, busy: false }))
+    } catch (error: unknown) {
+      setState(previous => ({ ...previous, error: asPanelError(error), busy: false }))
+    }
+  }, [panel, sessionId])
 
   const copyPath = useCallback(async (root: RootView) => {
     try {
@@ -246,11 +301,11 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
               {root.alias === undefined ? null : <em>{root.alias}</em>}
               {root.state === 'available' ? null : (
                 <span title={root.detail} style={{ color: 'darkorange' }}>
-                  {t(root.state === 'missing' ? 'state.missing' : 'state.invalid')}
+                  {t(stateKey(root.state))}
                 </span>
               )}
               <Action onClick={() => { void copyPath(root) }}>{copiedId === root.id ? t('panel.copied') : t('panel.copyPath')}</Action>
-              <Action onClick={() => { void mutate('reveal', { id: root.id }) }}>{t('panel.reveal')}</Action>
+              <Action onClick={() => { void reveal(root) }}>{t('panel.reveal')}</Action>
               <Action
                 disabled={index === 0}
                 onClick={() => { void move(root, roots[index - 1]?.id) }}
@@ -293,17 +348,17 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
 
         <section style={{ marginTop: '12px' }}>
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            <Action onClick={() => { void addDirectory() }} disabled={state.busy}>
-              {props.pickDirectory === undefined ? t('panel.addManual') : t('panel.add')}
-            </Action>
+            {props.pickDirectory === undefined ? null : (
+              <Action onClick={() => { void addViaPicker() }} disabled={state.busy}>{t('panel.add')}</Action>
+            )}
             <input
               value={manualPath}
               placeholder={t('panel.addManual')}
               onChange={event => { setManualPath(event.target.value) }}
-              onKeyDown={event => { if (event.key === 'Enter') void addDirectory() }}
+              onKeyDown={event => { if (event.key === 'Enter') void addManualPath() }}
               style={{ flex: '1 1 220px', padding: '3px 6px' }}
             />
-            <Action onClick={() => { void addDirectory() }} disabled={state.busy || manualPath.trim() === ''}>
+            <Action onClick={() => { void addManualPath() }} disabled={state.busy || manualPath.trim() === ''}>
               {t('panel.addConfirm')}
             </Action>
             <Action onClick={() => { void refresh() }} disabled={state.busy}>{t('panel.retry')}</Action>
