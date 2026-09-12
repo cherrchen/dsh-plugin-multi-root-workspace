@@ -142,6 +142,25 @@ function compare(label, expected, actual) {
 }
 
 /**
+ * Remove the marker files every battery watches.
+ *
+ * `wroteInside` / `wroteOutside` are observations of the FILESYSTEM, so a file
+ * left by an earlier battery answers for a later one: the read-only pass saw the
+ * file the workspace-write pass had written and reported a write the confined
+ * command never made. Resetting before each battery is what makes those two
+ * facts ("the command ran" and "the file is there") independent — a smoke that
+ * only passes when run in the order it was written is not evidence.
+ */
+function resetProbeFiles() {
+  for (const name of ['fs-inside.txt', 'fs-edited.txt', 'bash-inside.txt']) {
+    rmSync(join(primaryRoot, name), { force: true })
+  }
+  for (const name of ['fs-outside.txt', 'bash-outside.txt', 'readable.txt']) {
+    rmSync(join(outsideRoot, name), { force: true })
+  }
+}
+
+/**
  * One battery of operations against a booted tree that carries an ADDITIONAL
  * root: the scope is populated before anything is asked of the providers, so the
  * fs fence and the kernel dialect must both answer with the widened root set.
@@ -490,6 +509,8 @@ try {
       } else {
         check.contains(insideWrite, 'FS_SANDBOX_DENIED', 'read-only denies the inside write too')
         check.ok(bashInside.includes('"wroteInside":false'), 'read-only leaves no file behind from bash', bashInside)
+        check.ok(!existsSync(join(primaryRoot, 'bash-inside.txt')),
+          'read-only leaves no bash-inside.txt on disk either', bashInside)
         check.ok(!String(plugin.outcomes.get('fs writes to the platform temp area')).startsWith('undefined'),
           'read-only denies the temp-area write too')
       }
@@ -511,6 +532,7 @@ try {
       for (const name of ['fs-extra.txt', 'bash-extra.txt']) rmSync(join(extraRoot, name), { force: true })
       for (const name of ['fs-third.txt', 'bash-third.txt']) rmSync(join(thirdRoot, name), { force: true })
 
+      resetProbeFiles()
       const outcomes = await runMultiRootProfile(PLUGIN_PROFILE, mode)
       const extraWrite = String(outcomes.get('fs writes into the additional root'))
       const thirdWrite = String(outcomes.get('fs writes outside every root'))
