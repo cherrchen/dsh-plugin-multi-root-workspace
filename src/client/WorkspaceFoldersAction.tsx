@@ -20,6 +20,17 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import {
+  IconChevronDownOutline14,
+  IconChevronUpOutline14,
+  IconCopyOutline16,
+  IconEditOutline16,
+  IconEllipsisOutline16,
+  IconFolderOpenOutline16,
+  IconPlusOutline16,
+  IconTrashOutline16,
+  Menu,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { Key } from './locales.ts'
 import type { RootState, RootView, RootsView } from '../contract.ts'
@@ -74,6 +85,32 @@ function Action(props: {
   )
 }
 
+/**
+ * One icon-only button (a host "iconButton"): a fixed square of the capsule
+ * family whose meaning travels in `title`/`aria-label` instead of text.
+ */
+function IconButton(props: {
+  onClick: () => void
+  icon: ReactNode
+  label: string
+  disabled?: boolean
+  variant?: ActionVariant
+}): ReactNode {
+  const variant = props.variant ?? 'ghost'
+  return (
+    <button
+      type="button"
+      className={`mrfw-btn mrfw-iconBtn ${VARIANT_CLASS[variant]}`}
+      title={props.label}
+      aria-label={props.label}
+      onClick={props.onClick}
+      disabled={props.disabled === true}
+    >
+      {props.icon}
+    </button>
+  )
+}
+
 /** The 16px outline folder glyph of the sidebar trigger. */
 function FolderIcon(): ReactNode {
   return (
@@ -100,6 +137,20 @@ function stateKey(state: RootState): Key {
     case 'redirected': return 'state.redirected'
     case 'invalid': return 'state.invalid'
   }
+}
+
+/** The final segment of an absolute path, on either platform separator. */
+function basename(path: string): string {
+  const segments = path.split(/[\\/]/).filter(segment => segment !== '')
+  return segments[segments.length - 1] ?? path
+}
+
+/**
+ * The primary text of one row: the stored alias when set, otherwise the
+ * directory's own name — the display the registration was added with.
+ */
+function displayNameOf(root: RootView): string {
+  return root.alias ?? basename(root.path)
 }
 
 /** The sidebar footer action plus the dialog it opens. */
@@ -147,6 +198,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
+  const [menuFor, setMenuFor] = useState<string | undefined>(undefined)
   const dialogRef = useRef<HTMLDivElement | null>(null)
 
   const sessionId = props.sessionId?.()
@@ -156,6 +208,9 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   useEffect(() => { dialogRef.current?.focus() }, [])
   const onDialogKeyDown = (event: ReactKeyboardEvent): void => {
     if (event.key === 'Escape') {
+      // A row menu owns Escape while it is open: its own listener closes just
+      // the menu, and this handler must not close the dialog underneath it.
+      if (menuFor !== undefined) return
       event.stopPropagation()
       props.onClose()
       return
@@ -324,15 +379,24 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
           )}
 
           <section className="mrfw-section">
-            <div className="mrfw-sectionTitle">{t('panel.primary')}</div>
+            <div className="mrfw-sectionTitleRow">
+              <span className="mrfw-sectionTitle">{t('panel.primary')}</span>
+              <span className="mrfw-sectionNote">{t('panel.primaryNote')}</span>
+            </div>
             <div className="mrfw-row mrfw-rowBare">
-              <span className="mrfw-path">{state.view?.primaryRoot ?? '…'}</span>
-              <span className="mrfw-note">{t('panel.primaryNote')}</span>
+              <div className="mrfw-rootText">
+                <span className="mrfw-rootName">
+                  {state.view === undefined ? '…' : (state.view.primaryName ?? basename(state.view.primaryRoot))}
+                </span>
+                <span className="mrfw-rootPath">{state.view?.primaryRoot ?? '…'}</span>
+              </div>
             </div>
           </section>
 
           <section className="mrfw-section">
-            <div className="mrfw-sectionTitle">{t('panel.additional')}</div>
+            <div className="mrfw-sectionTitleRow">
+              <span className="mrfw-sectionTitle">{t('panel.additional')}</span>
+            </div>
             {state.view === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null}
             {state.view !== undefined && roots.length === 0 ? (
               <p className="mrfw-note">
@@ -341,37 +405,65 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
             ) : null}
             {roots.map((root, index) => (
               <div key={root.id} className="mrfw-row">
-                <span className="mrfw-path">{root.path}</span>
-                {root.alias === undefined ? null : <em className="mrfw-alias">{root.alias}</em>}
+                <div className="mrfw-rootText">
+                  <span className="mrfw-rootName">{displayNameOf(root)}</span>
+                  <span className="mrfw-rootPath">{root.path}</span>
+                </div>
                 {root.state === 'available' ? null : (
                   <span title={root.detail} className="mrfw-stateWarn">
                     {t(stateKey(root.state))}
                   </span>
                 )}
-                <Action onClick={() => { void copyPath(root) }}>{copiedId === root.id ? t('panel.copied') : t('panel.copyPath')}</Action>
-                <Action disabled={state.busy} onClick={() => { void reveal(root) }}>{t('panel.reveal')}</Action>
-                <Action
+                <IconButton
+                  onClick={() => { void copyPath(root) }}
+                  icon={<IconCopyOutline16 />}
+                  label={copiedId === root.id ? t('panel.copied') : t('panel.copyPath')}
+                />
+                <IconButton
+                  disabled={state.busy}
+                  onClick={() => { void reveal(root) }}
+                  icon={<IconFolderOpenOutline16 />}
+                  label={t('panel.reveal')}
+                />
+                <IconButton
                   disabled={state.busy || index === 0}
                   onClick={() => { void move(root, roots[index - 1]?.id) }}
-                >
-                  {t('panel.moveUp')}
-                </Action>
-                <Action
+                  icon={<IconChevronUpOutline14 />}
+                  label={t('panel.moveUp')}
+                />
+                <IconButton
                   disabled={state.busy || index === roots.length - 1}
-                  onClick={() => { void move(root, roots[index + 2]?.id) }}
-                >
-                  {t('panel.moveDown')}
-                </Action>
-                <Action
-                  disabled={state.busy}
-                  onClick={() => {
-                    setAliasFor(current => (current === root.id ? undefined : root.id))
-                    setAliasDraft(root.alias ?? '')
+                  onClick={() => { void move(root, roots[index + 1]?.id) }}
+                  icon={<IconChevronDownOutline14 />}
+                  label={t('panel.moveDown')}
+                />
+                <Menu
+                  open={menuFor === root.id}
+                  onClose={() => { setMenuFor(undefined) }}
+                  items={[
+                    { id: 'rename', label: t('panel.rename'), icon: <IconEditOutline16 /> },
+                    { id: 'remove', label: t('panel.remove'), icon: <IconTrashOutline16 />, danger: true, disabled: state.busy },
+                  ]}
+                  onSelect={(id) => {
+                    setMenuFor(undefined)
+                    if (id === 'rename') {
+                      setAliasFor(root.id)
+                      setAliasDraft(root.alias ?? '')
+                    }
+                    if (id === 'remove') void mutate('remove', { id: root.id })
                   }}
-                >
-                  {t('panel.alias')}
-                </Action>
-                <Action disabled={state.busy} variant="danger" onClick={() => { void mutate('remove', { id: root.id }) }}>{t('panel.remove')}</Action>
+                  portal
+                  align="end"
+                  closeOnPointerLeave
+                  anchor={(
+                    <IconButton
+                      disabled={state.busy}
+                      onClick={() => { setMenuFor(current => (current === root.id ? undefined : root.id)) }}
+                      icon={<IconEllipsisOutline16 />}
+                      label={t('panel.more')}
+                    />
+                  )}
+                />
                 {aliasFor === root.id ? (
                   <span className="mrfw-aliasEditor">
                     <input
@@ -393,7 +485,13 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
 
           <div className="mrfw-actions">
             {props.pickDirectory === undefined ? null : (
-              <Action onClick={() => { void addViaPicker() }} disabled={state.busy} variant="outline">{t('panel.add')}</Action>
+              <IconButton
+                variant="outline"
+                disabled={state.busy}
+                onClick={() => { void addViaPicker() }}
+                icon={<IconPlusOutline16 />}
+                label={t('panel.add')}
+              />
             )}
             <input
               className="mrfw-input"

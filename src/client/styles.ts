@@ -150,12 +150,24 @@ export const STYLES = /* css */ `
   margin-top: 8px;
 }
 
-.mrfw-sectionTitle {
+.mrfw-sectionTitleRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   padding: 8px 0 4px;
+}
+
+.mrfw-sectionTitle {
   font-size: 14px;
   line-height: 22px;
   font-weight: 500;
   color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-sectionNote {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .mrfw-row {
@@ -171,13 +183,32 @@ export const STYLES = /* css */ `
   border-bottom: none;
 }
 
-.mrfw-path {
+/* A root entry's two lines: the display name on top, the absolute path under
+   it in the tertiary voice (the workspace rows recipe of the host sidebar). */
+.mrfw-rootText {
+  display: flex;
   flex: 1 1 240px;
-  font-family: var(--ds-font-family-code);
-  font-size: 13px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mrfw-rootName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
   line-height: 20px;
-  word-break: break-all;
+  font-weight: 500;
   color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-rootPath {
+  font-family: var(--ds-font-family-code);
+  font-size: 12px;
+  line-height: 18px;
+  word-break: break-all;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .mrfw-note {
@@ -185,16 +216,6 @@ export const STYLES = /* css */ `
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
-}
-
-.mrfw-alias {
-  padding: 0 8px;
-  border-radius: 11px;
-  background: var(--dsw-alias-bg-module-platform);
-  font-size: 12px;
-  font-style: normal;
-  line-height: 22px;
-  color: var(--dsw-alias-label-secondary);
 }
 
 .mrfw-stateWarn {
@@ -257,6 +278,15 @@ export const STYLES = /* css */ `
   background: var(--dsw-alias-button-primary-hover);
 }
 
+/* One icon-only action: a square of the capsule family, meaning in title.
+   Declared after the .mrfw-btn family so its padding wins the cascade tie:
+   the capsule's 0 10px padding would otherwise squeeze the icon glyph. */
+.mrfw-iconBtn {
+  width: 28px;
+  padding: 0;
+  border-radius: 8px;
+}
+
 .mrfw-input {
   flex: 1 1 220px;
   min-width: 0;
@@ -300,5 +330,15 @@ export const STYLES = /* css */ `
   margin-top: 16px;
   padding-top: 16px;
   border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+/* One control row, one height: the capsule buttons match the 32px input. */
+.mrfw-actions .mrfw-btn {
+  height: 32px;
+  border-radius: 16px;
+}
+
+.mrfw-actions .mrfw-iconBtn {
+  width: 32px;
 }
 `

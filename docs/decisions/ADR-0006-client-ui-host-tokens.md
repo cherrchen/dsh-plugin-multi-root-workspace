@@ -2,11 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted（2026-09-13 修订：放开 ui-primitives 展示型组件的直接 import，见决策 6）
 
 ## Date
 
-2026-09-12
+2026-09-12（修订 2026-09-13）
 
 ## Context
 
@@ -29,7 +29,8 @@ M3 交付的面板 UI（侧栏 footer 触发器 + 工作区目录对话框）最
    - 输入框 ← `ui-primitives/Input.module.css`（32px 高、0.5px `border-l4`、r8、`bg-layer-1`、`:focus` 边框 `brand-primary`、placeholder `label-dimmed`）；
    - 文字层级：分区标题 14px/22px/500 `label-primary`，说明/提示 12px/18px `label-tertiary`，路径 `var(--ds-font-family-code)` 13px/20px，错误 `state-error-primary`，不可用徽标 `state-warn-primary`。
 4. **转发 owner prop `wide`**：`register` 的组件参数即框架组合后的 props（含侧栏的 `{ wide }` owner share），插件此前忽略了它。现在转发给触发器，侧栏折叠成图标栏时触发器渲染为原生一致的 36px 圆形图标钮。
-5. **图标用 16px 内联 SVG**（`stroke: currentColor`）替换 emoji，与原生线性图标一致，颜色跟随文字 token。
+5. **图标用 16px 内联 SVG**（`stroke: currentColor`）替换 emoji，与原生线性图标一致，颜色跟随文字 token。（2026-09-13 起被决策 6 取代：面板自带的两枚小图标保留内联 SVG，其余图标改用宿主组件。）
+6. **（2026-09-13 修订）展示型组件直接 import ui-primitives**：面板行内图标（`IconCopyOutline16`、`IconFolderOpenOutline16`、`IconChevronUpOutline14`、`IconChevronDownOutline14`、`IconEllipsisOutline16`、`IconPlusOutline16`、`IconEditOutline16`、`IconTrashOutline16`）与行菜单（`Menu`）从 `@deepseek-ai/dsh-client-ui-primitives` import，字形与交互行为跟宿主完全一致。依据：该包本就在 `tsdown.config.ts` 的 `CLIENT_EXTERNALS` 白名单里，且是 web shell 种子模块表的平台词（`packages/client/web/src/platform.ts` 的 `PLATFORM_MODULES`，另见 ui-renderer README 的 Identity 一节）——运行时浏览器解析到的是 shell 打包的单一身份，`require` 不会引入第二份 React 树或样式。**边界**：仅限无状态的展示型组件（图标、Menu 这类局部弹层）；Button/Modal 等结构组件仍按本 ADR 决策 3 自绘（已验证的配方，且避免出树包假设宿主的组件级上下文）。jsdom 测试经 `vitest.config.ts` 的 alias 指到 `tests/stubs/ui-primitives.tsx` 替身（发布包的 barrel 带宿主侧裸依赖，测试环境不可解析），真实组件由 journey smoke 的 web 腿覆盖。
 
 ## Alternatives Considered
 
@@ -38,7 +39,8 @@ M3 交付的面板 UI（侧栏 footer 触发器 + 工作区目录对话框）最
 | 继续内联样式，仅把颜色换成 `var(...)` 字符串 | 表达不了 `:hover` / `:focus` / `backdrop-filter`，原生观感的核心状态全部缺失 |
 | 引入 CSS Modules / Tailwind / 组件库 | 为一张样式表引入构建管线与依赖，破坏出树包的零管线形态；上游文档明确反对 Tailwind |
 | 带 `rgb(...)` fallback 的 `var()` | 复制静态调色板值，违反上游 web-styling 规则，且会在主题演进时悄悄漂移 |
-| 深引 `ui-primitives` 的 Button/Modal 组件 | 外部依赖白名单只允许两个运行时都 seed 的平台词（ADR-0005 决策 6）；且组件库身份不是出树包可假设的运行时服务 |
+| 深引 `ui-primitives` 的 Button/Modal 组件 | 组件库身份不是出树包可假设的运行时服务；结构组件的上下文依赖（portal 容器、主题 provider）无法逐值核实。2026-09-13 起收窄为"仅结构组件"——展示型组件（图标、Menu）已由决策 6 放开 |
+| 自绘下拉菜单与逐个复制图标 SVG path | 与宿主的字形/交互随时间漂移，且 Menu 的定位、pointer grace、键盘导航属可观察行为，复刻成本高于直接 import 一个已 seed 的平台词 |
 
 ## Consequences
 

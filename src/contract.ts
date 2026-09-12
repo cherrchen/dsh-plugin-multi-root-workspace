@@ -67,6 +67,12 @@ export interface RootView {
 export interface RootsView {
   /** The canonical workspace root these registrations belong to. */
   readonly primaryRoot: string
+  /**
+   * Display name of the primary root: the workspace's upstream title when the
+   * host could resolve one; absent means the panel falls back to the path's
+   * basename.
+   */
+  readonly primaryName?: string
   /** The additional roots, in registry order. */
   readonly roots: readonly RootView[]
   /** Set when the store itself could not be read; the panel shows this verbatim. */
@@ -160,6 +166,7 @@ const rootViewSchema = z.object({
 
 const rootsViewSchema = z.object({
   primaryRoot: z.string(),
+  primaryName: z.string().optional(),
   roots: z.array(rootViewSchema),
   unavailable: z.string().optional(),
 })
@@ -199,6 +206,7 @@ export function parseRootsView(value: unknown): Parsed<RootsView> {
     ok: true,
     value: {
       primaryRoot: view.primaryRoot,
+      ...(view.primaryName === undefined ? {} : { primaryName: view.primaryName }),
       roots: view.roots.map(narrowRootView),
       ...(view.unavailable === undefined ? {} : { unavailable: view.unavailable }),
     },

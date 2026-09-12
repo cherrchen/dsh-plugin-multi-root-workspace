@@ -381,6 +381,54 @@ describe('the panel channel', () => {
     expect(fallback.value?.primaryRoot).toBe(primary)
   })
 
+  it('carries the workspace title as primaryName when the registry knows it', async () => {
+    // Membership wins: the session belongs to a workspace, and its upstream
+    // title is what the primary row displays.
+    const memberStack = await mount({ withConnection: true })
+    await memberStack.ctx.plugin({
+      name: 'sibling-workspace-registry',
+      apply(ctx: Context) {
+        ctx.provide('workspaceRegistry', {
+          list: () => [{ title: 'Payments Platform', sessionIds: ['s-1'] }],
+          resolveByPath: async () => {
+            throw new Error('membership must resolve the name before the path does')
+          },
+        } as never)
+      },
+    })
+    const member = await callPanel('list', { sessionId: 's-1' })
+    expect(member.value?.primaryName).toBe('Payments Platform')
+
+    // No membership: the cwd (here the deployment root) resolves by path.
+    const pathStack = await mount({ withConnection: true })
+    await pathStack.ctx.plugin({
+      name: 'sibling-workspace-registry-path',
+      apply(ctx: Context) {
+        ctx.provide('workspaceRegistry', {
+          list: () => [],
+          resolveByPath: async (path: string) => (path === primary ? { title: 'Path Match' } : undefined),
+        } as never)
+      },
+    })
+    const byPath = await callPanel('list', { primaryRoot: primary })
+    expect(byPath.value?.primaryName).toBe('Path Match')
+
+    // Neither resolves: the field stays absent and the panel falls back to the
+    // path basename.
+    const emptyStack = await mount({ withConnection: true })
+    await emptyStack.ctx.plugin({
+      name: 'sibling-workspace-registry-empty',
+      apply(ctx: Context) {
+        ctx.provide('workspaceRegistry', {
+          list: () => [],
+          resolveByPath: async () => undefined,
+        } as never)
+      },
+    })
+    const absent = await callPanel('list', { primaryRoot: primary })
+    expect(absent.value?.primaryName).toBeUndefined()
+  })
+
   it('uses the deployment root when the optional sessions service is absent', async () => {
     await mount({ withConnection: true })
     const result = await callPanel('list', { sessionId: 'unknown' })

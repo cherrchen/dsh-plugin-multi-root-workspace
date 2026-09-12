@@ -38,6 +38,9 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subprocess'
+// Type-only: loads the `workspaceRegistry` Context augmentation this module's
+// optional lookup is typed against (the service itself stays a sibling lookup).
+import type {} from '@deepseek-ai/dsh-workspace'
 import {
   PANEL_CHANNEL,
   parsePanelCall,
@@ -346,16 +349,47 @@ function toRootView(status: RootStatus): RootView {
 }
 
 /**
+ * Resolve the display name of the primary root from the host's workspace
+ * registry — the title the operator set in the workspace browser, falling back
+ * to nothing (the panel then shows the path's basename).
+ *
+ * The registry is an optional sibling service, read through the explicit
+ * lookup like `sessions`/`subprocess`: property access would demand an
+ * injected dependency this row does not name. Membership wins over cwd, which
+ * mirrors the host's own session→workspace resolution.
+ */
+async function primaryNameOf(ctx: Context, primaryRoot: string, request: PanelCall): Promise<string | undefined> {
+  const registry = ctx.get('workspaceRegistry')
+  if (registry === undefined) return undefined
+  try {
+    const sessionId = request.sessionId
+    if (sessionId !== undefined && sessionId !== '') {
+      const member = registry.list().find(workspace => workspace.sessionIds.includes(sessionId as SessionId))
+      if (member !== undefined) return member.title
+    }
+    const resolved = await registry.resolveByPath(primaryRoot)
+    return resolved?.title
+  } catch (error: unknown) {
+    // A name is decoration, never a reason to fail the endpoint: an unreadable
+    // registry leaves the panel on the basename fallback.
+    ctx.logger.warn('multi-root: workspace title lookup failed; the panel falls back to the path basename', error)
+    return undefined
+  }
+}
+
+/**
  * Build the panel's view of one primary root, after re-checking every
  * registered directory — the panel's read path is the same revalidation the
  * command uses, so "the list the operator sees" is always the list the scope
  * currently enforces.
  */
-async function rootsViewOf(registry: MultiRootRegistry, primaryRoot: string): Promise<RootsView> {
+async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoot: string, request: PanelCall): Promise<RootsView> {
   const statuses = await registry.refresh(primaryRoot)
   const unavailable = registry.unavailable
+  const primaryName = await primaryNameOf(ctx, primaryRoot, request)
   return {
     primaryRoot: canonicalRoot(primaryRoot),
+    ...(primaryName === undefined ? {} : { primaryName }),
     roots: statuses.map(toRootView),
     ...(unavailable === undefined ? {} : { unavailable }),
   }
@@ -386,7 +420,7 @@ async function dispatchPanelRequest(
     const primaryRoot = primaryRootOf(ctx, request)
     switch (request.endpoint) {
       case 'list':
-        return { ok: true, value: await rootsViewOf(registry, primaryRoot) }
+        return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       case 'add': {
         if (request.path === undefined || request.path === '') {
           throw new RootValidationError('missing', 'a directory path is required')
@@ -395,21 +429,21 @@ async function dispatchPanelRequest(
           path: request.path,
           ...(request.alias === undefined ? {} : { alias: request.alias }),
         })
-        return { ok: true, value: await rootsViewOf(registry, primaryRoot) }
+        return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       }
       case 'remove':
         await registry.removeAt(primaryRoot, { kind: 'id', id: requireId(request) })
-        return { ok: true, value: await rootsViewOf(registry, primaryRoot) }
+        return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       case 'alias':
         await registry.setAlias(primaryRoot, { kind: 'id', id: requireId(request) }, request.alias)
-        return { ok: true, value: await rootsViewOf(registry, primaryRoot) }
+        return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       case 'move':
         await registry.move(
           primaryRoot,
           { kind: 'id', id: requireId(request) },
           request.beforeId === undefined ? undefined : { kind: 'id', id: request.beforeId },
         )
-        return { ok: true, value: await rootsViewOf(registry, primaryRoot) }
+        return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       case 'reveal': {
         const id = requireId(request)
         // The reference is resolved against the re-checked list, so revealing a

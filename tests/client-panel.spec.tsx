@@ -201,9 +201,22 @@ describe('the panel dialog', () => {
 
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
     expect(harness.calls[0]).toEqual({ channel: PANEL_CHANNEL, endpoint: 'list', payload: { sessionId: 'session-1' } })
+    // The primary row is two lines: the workspace's upstream title when the host
+    // resolved one, the path basename otherwise, and the path underneath.
     expect(screen.getByText('/repos/primary')).toBeTruthy()
+    expect(screen.getByText('primary')).toBeTruthy()
     expect(screen.getByText('payments')).toBeTruthy()
     expect(screen.getByText(`${NS}.state.missing`)).toBeTruthy()
+  })
+
+  it('shows the upstream workspace title as the primary row name', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'Payments Platform', roots: [ROOT_A] })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+
+    await waitFor(() => { expect(screen.getByText('Payments Platform')).toBeTruthy() })
+    expect(screen.getByText('/repos/primary')).toBeTruthy()
   })
 
   it('removes, reorders, and re-aliases a root through the channel', async () => {
@@ -214,9 +227,17 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.moveDown` })[0]!)
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'move')).toBe(true) })
-    expect(harness.calls.find(call => call.endpoint === 'move')?.payload).toEqual({ sessionId: 'session-1', id: 'a' })
+    // Down moves BEFORE the next root: the payload carries `beforeId` (the
+    // off-by-one that used to skip it is pinned here).
+    expect(harness.calls.find(call => call.endpoint === 'move')?.payload).toEqual({
+      sessionId: 'session-1',
+      id: 'a',
+      beforeId: 'b',
+    })
 
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.alias` })[0]!)
+    // Rename and remove live in the row's ellipsis menu.
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.rename` }))
     const input = screen.getByPlaceholderText(`${NS}.panel.aliasPlaceholder`)
     fireEvent.change(input, { target: { value: 'renamed' } })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.aliasSave` }))
@@ -227,6 +248,7 @@ describe('the panel dialog', () => {
       alias: 'renamed',
     })
 
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]!)
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remove')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'remove')?.payload).toEqual({ sessionId: 'session-1', id: 'a' })
@@ -321,7 +343,8 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.copyPath` })[0]!)
     await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repos/payments') })
-    await waitFor(() => { expect(screen.getByText(`${NS}.panel.copied`)).toBeTruthy() })
+    // The action is an icon button: the success swaps the accessible name.
+    await waitFor(() => { expect(screen.getAllByRole('button', { name: `${NS}.panel.copied` })[0]).toBeTruthy() })
   })
 
   it('does not report an error when a reveal succeeds', async () => {
@@ -374,13 +397,15 @@ describe('the panel dialog', () => {
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
     harness.holdNextCall()
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]!)
     expect(harness.calls.some(call => call.endpoint === 'remove')).toBe(true)
-    expect(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]).toHaveProperty('disabled', true)
+    // The menu closed on selection; the row's icon actions carry the busy state.
+    expect(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]).toHaveProperty('disabled', true)
 
     harness.release()
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]).toHaveProperty('disabled', false)
+      expect(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]).toHaveProperty('disabled', false)
     })
   })
 
