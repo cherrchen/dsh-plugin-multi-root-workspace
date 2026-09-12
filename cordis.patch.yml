@@ -15,7 +15,10 @@
 # for the storage domain (absent only in compositions that mount no storage at
 # all), and `multi-root-command` registers the `/workspace-folders` command
 # wherever a command registry exists and the browser panel channel wherever a
-# host Connection exists — a headless profile mounts it with no visible effect.
+# host Connection and web server exist (see
+# docs/troubleshooting/panel-channel-http-405.md for why both must be declared
+# and the service read at the root) — a headless profile mounts it with no
+# visible effect.
 #
 # The final row is the client-graph anchor: the web client-module scan reads a
 # package's `dsh.client` declaration only from a loader row mounted at the bare

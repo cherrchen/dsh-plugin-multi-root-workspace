@@ -16,8 +16,10 @@
  * Two compositions, two shapes of the same journey:
  *
  * - `web` is booted IN PROCESS with the launcher facts its app rows need, so the
- *   browser composition is assembled for real and the command is dispatched by
- *   `ctx.commands.execute`;
+ *   browser composition is assembled for real, the command is dispatched by
+ *   `ctx.commands.execute`, and the panel's RPC channel is exercised over real
+ *   HTTP against the bound web server (401 unauthenticated, an ok envelope
+ *   authenticated) — the browser→HTTP→channel hop no other test covers;
  * - `headless` runs as a REAL `dsh --profile headless "<task>"` subprocess, with
  *   the registration pre-seeded in the registry store (the one path that process
  *   has to a registration) and its own one-shot turn.
@@ -272,6 +274,33 @@ async function runWebLeg() {
         dispose()
       }
       observed.granted = ctx.multiRootScope.scopeOf(primaryRepo)
+
+      // The panel's own path: real HTTP against the bound web server. An
+      // unauthenticated POST must answer 401 — 405 would mean the channel
+      // route never registered and the request fell through to the static
+      // SPA fallback (the silent failure this probe exists to catch).
+      const webServer = ctx.get('webServer')
+      const base = `http://127.0.0.1:${webServer.port}/`
+      const unauthenticated = await fetch(new URL('/multi-root-workspace/list', base), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId: 'journey-unauth', method: 'list', payload: {} }),
+      })
+      observed.channelUnauthenticated = unauthenticated.status
+      const authResponse = await fetch(ctx.get('connection').authenticatedUrl(base), { redirect: 'manual' })
+      const cookie = authResponse.headers.get('set-cookie')?.split(';', 1)[0]
+      const listed = await fetch(new URL('/multi-root-workspace/list', base), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(cookie === undefined ? {} : { cookie }) },
+        body: JSON.stringify({
+          type: 'client-request',
+          rpcId: 'journey-list',
+          method: 'list',
+          payload: { primaryRoot: primaryRepo },
+        }),
+      })
+      observed.channelList = listed.status
+      observed.channelView = listed.status === 200 ? (await listed.json())?.result : undefined
     } finally {
       await handle.dispose()
     }
@@ -341,6 +370,11 @@ try {
     check.equal(web.granted, [canonical(additionalRepo)], 'web: the scope grants exactly the registered root')
     check.ok(web.hasConnection, 'web: the browser composition carries the host Connection the panel needs')
     check.ok(web.clientEntryServed, 'web: the composed boot graph serves the plugin client bundle to the browser')
+    check.equal(web.channelUnauthenticated, 401, 'web: an unauthenticated panel POST reaches the channel route (401, not the SPA fallback 405)', `status ${String(web.channelUnauthenticated)}`)
+    check.equal(web.channelList, 200, 'web: the panel channel answers an authenticated list over real HTTP', `status ${String(web.channelList)}`)
+    check.ok(web.channelView?.ok === true, 'web: the channel answers with an ok envelope', JSON.stringify(web.channelView)?.slice(0, 400))
+    check.contains(JSON.stringify(web.channelView?.value), canonical(additionalRepo), 'web: the channel view lists the registered additional root', JSON.stringify(web.channelView)?.slice(0, 400))
+    check.contains(JSON.stringify(web.channelView?.value), canonical(primaryRepo), 'web: the channel view names the primary root', JSON.stringify(web.channelView)?.slice(0, 400))
     check.equal(readFileSync(join(additionalRepo, 'README.md'), 'utf8'), EDITED_README, 'web: the additional root carries the agent\'s write')
     check.equal(readFileSync(join(primaryRepo, 'README.md'), 'utf8'), PRIMARY_README, 'web: the primary repository is byte-identical')
     check.equal(readFileSync(join(outsideRoot, 'keep.txt'), 'utf8'), 'untouched\n', 'web: a file outside every root is byte-identical')

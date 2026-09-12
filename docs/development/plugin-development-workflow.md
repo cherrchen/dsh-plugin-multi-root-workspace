@@ -177,6 +177,7 @@ Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seat
 | `ERR_PNPM_IGNORED_BUILDS` | 有构建脚本的依赖未在 `pnpm-workspace.yaml` 声明 | 把该依赖加入 `allowBuilds`（需要构建）或 `allowBuilds: false`（明确不需要）；当前 `esbuild`（经 vite/vitest 引入）声明为 `false` |
 | 面板在 Web GUI 里看不到 | 组合里没有声明 `sidebar.footer.action` 的侧栏，或该面没有 host `connection`（headless 组合） | 面板是软注册（`slots.inject` 不触发即不出现）；用 `/workspace-folders list` 确认注册表本身可用 |
 | 面板报 "根目录登记的存储不可用" | `$DSH_HOME/storages/multi_root_workspace.json` 损坏或版本不符 | 按提示修复或删除该文件后重启 dsh；插件不会因此拒绝启动（ADR-0004） |
+| 面板报 "无法连接到 dsh 主进程" 且括号里是 **HTTP 405** | 通道前缀路由未注册，请求落到了 SPA 静态回退——典型根因是 `rpc.handle` 的调用形态违反 cordis 属性解析纪律（服务必须从根上下文读取，依赖必须同时声明 `connection` 与 `webServer`） | 用 `curl -X POST http://127.0.0.1:<port>/multi-root-workspace/list` 区分：401 = 路由在（只是 curl 未认证），405 = 路由缺；详见[故障排查：面板 HTTP 405](../troubleshooting/panel-channel-http-405.md) |
 | 注册的根标着 `missing` 且写不进去 | 目录当前不存在（或不是目录） | 恢复目录后执行 `/workspace-folders list`（或在面板里刷新/重试）即可重新授予——这正是 `registry.refresh()` 的作用，不需要重启；`missing` 的根在被重新校验前不会被授予 |
 | 注册的根标着 `redirected` 且写不进去 | 该路径现在解析到的目录与登记时授予的目录不同（常见原因：登记目录被替换成指向别处的符号链接，或链接链中某一段改了） | 这是刻意行为：重新解析不等于重新授权，授权不会被转移到新目标。把目录恢复成登记时那个（或删掉那层符号链接）后执行 `/workspace-folders list` 即可复原；若确实想改到新目录，先 `remove` 再 `add` 一次，等于重新确认 |
 | 列表里有一条 `invalid`，说明写着"重复的 id"或"没有说明授予目录" | 存储被手工改过，或来自缺少 `recordedPath` 字段的旧记录 | 该记录不授予任何权限，可用 `/workspace-folders remove <n>` 或面板里的"移除"逐条删除（删除是按位置/单条进行的，不会一次删掉多条） |

@@ -20,7 +20,7 @@ M3 要给插件加浏览器半部（Workspace Folders 面板），它必须和 h
 
 ## Decision
 
-1. **通道 = Connection RPC 通道**，channel 固定 `/multi-root-workspace`，端点为 `list` / `add` / `remove` / `alias` / `move` / `reveal`。host 侧只在组合里存在 `connection` 时挂载（软注入），client 侧通过 `ctx.get('connection')` 取用。**不使用 Typert 远程命名空间**：它的契约生成与 client 装配都要求上游参与，出树形态下会退化成本地手写 wire 描述符，违反 ADR-0002 的"只依赖公开面"。
+1. **通道 = Connection RPC 通道**，channel 固定 `/multi-root-workspace`，端点为 `list` / `add` / `remove` / `alias` / `move` / `reveal`。host 侧只在组合里同时存在 `connection` 与 `webServer` 时挂载（软注入），且服务必须从**根上下文**读取——cordis 的属性访问从插件 fiber 只能看到该 fiber 自己注入的服务，`rpc.handle` 内部解析 `webServer` 需要共享服务 store（详见 [故障排查：面板 HTTP 405](../troubleshooting/panel-channel-http-405.md)）；client 侧通过 `ctx.get('connection')` 取用。**不使用 Typert 远程命名空间**：它的契约生成与 client 装配都要求上游参与，出树形态下会退化成本地手写 wire 描述符，违反 ADR-0002 的"只依赖公开面"。
 2. **面板落点 = `sidebar.footer.action`（list/root）+ 自绘对话框**。理由是两个运行时的交集只有一个 additive 的侧栏座位；面板是纯 React 组件，不引组件库、不新增 CSS 管线，因此不需要与宿主共享任何运行时身份。`sidebar.panellist` + `main` 的"全屏面板"升级留待只支持 0.1.5 时再做。（样式机制后续由 [ADR-0006](./ADR-0006-client-ui-host-tokens.md) 修订：内联样式改为注入样式表、消费宿主 `--dsw-*` token。）
 3. **目录选择复用上游已组合的能力，而不是自己占洞**：命令侧（host）在 `directoryPicker` seam 存在且 capability 为 `native` 时直接 `pick(signal)`；面板侧调用 `ctx.uiWorkspace.pickDirectory()`（上游自己的入口，会正确选择 native 或 browse）。seam 或服务缺失时，命令返回明确错误、面板降级为手输绝对路径。
 4. **主根由客户端指名、host 校验**：面板把当前会话 id（来自 client Session Controller，读不到时留空）与可选的主根路径一起发给 host；host 优先用客户端给的路径（必须是已存在的目录），否则用会话 header cwd，最后回落到 `sandboxPolicy.resolve()`。面板顶部始终显示它正在管理哪个主根。
@@ -43,6 +43,7 @@ M3 要给插件加浏览器半部（Workspace Folders 面板），它必须和 h
 
 - 面板与 host 之间是一份**本地契约**（`src/contract.ts`），双方各自编译、客户端内联。上游若将来提供出树的 remote 贡献注册表，迁移路径是"把 `command.ts` 里的 `rpc.handle` 换成 `TypertRemoteService` + 生成的 `/remote`，客户端换成 `ctx.remote.$mount`"，面板组件与端点语义不变。
 - 面板只在组合里有 `connection`（web profile）时出现；headless 上该行仍然挂载，但只注册命令。
+- 通道注册的调用形态是硬约束：嵌套 inject 必须同时声明 `connection` 与 `webServer`，服务必须经 `ctx.root` 读取。违反时不报显眼错误，只表现为面板一律 HTTP 405（见 Related Documents 的故障排查记录）；上游连接测试从根 ctx 调用，所以该坑在测试面不可见。
 - Connection 通道的授权就是浏览器的 loopback/Host/Origin 信任栅栏（无令牌）；这与上游所有 client 插件一致，插件不额外引入鉴权。
 - client 半部因此必须自带双语词典与自己的词典 parity 测试（上游的 i18n 门禁只扫它自己的目录）。
 
@@ -52,3 +53,4 @@ M3 要给插件加浏览器半部（Workspace Folders 面板），它必须和 h
 - [架构文档 §7](../architecture/multi-root-workspace.md)
 - [ADR-0002 上游耦合策略](./ADR-0002-upstream-coupling-policy.md)
 - [开发流程 §7](../development/plugin-development-workflow.md)
+- [故障排查：面板 HTTP 405](../troubleshooting/panel-channel-http-405.md)

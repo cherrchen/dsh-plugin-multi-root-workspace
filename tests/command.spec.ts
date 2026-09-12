@@ -59,6 +59,10 @@ async function mount(options: { withPicker?: boolean; withConnection?: boolean; 
     } as never)
   }
   if (options.withConnection === true) {
+    // The channel registration waits for both services and reads the service
+    // off the root context (see src/command.ts); both stubs land here because
+    // this spec's context IS the root.
+    ctx.provide('webServer', {} as never)
     ctx.provide('connection', {
       rpc: {
         handle: (channel: string, registeredHandler: PanelHandler) => {

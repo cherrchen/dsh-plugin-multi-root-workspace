@@ -20,6 +20,7 @@ English: [README.en.md](./README.en.md)
 ## 当前状态
 
 - [client bundle 不进 web 启动图：bundle patch 只挂子路径行](./client-bundle-not-in-boot-graph.md) — footer 槽位注册静默失效的根因与修复。
+- [面板报"无法连接到 dsh 主进程"（HTTP 405）](./panel-channel-http-405.md) — 通道注册被 cordis 服务解析静默吞掉的根因与修复。
 
 ## 推荐命名
 

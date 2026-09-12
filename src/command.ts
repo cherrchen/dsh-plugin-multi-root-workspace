@@ -17,8 +17,9 @@
  * command's `list` both promise.
  *
  * Both halves are SOFT: the command registers only where a command registry is
- * composed, and the channel only where a host Connection exists (web), so a
- * headless profile mounts this row with zero effect on the providers.
+ * composed, and the channel only where a host Connection and web server exist
+ * (web), so a headless profile mounts this row with zero effect on the
+ * providers.
  *
  * The command's own text is English: a host-side command handler has no active
  * locale to consult (the browser owns locale state). The panel is bilingual.
@@ -150,9 +151,22 @@ export function apply(ctx: Context): void {
 
   // Soft: a profile without the browser host half (headless, sdk) simply has no
   // panel to serve, and the registry is unaffected.
-  ctx.inject(['connection'], (connectionCtx) => {
-    const connection = connectionCtx.get('connection')
-    if (connection === undefined) return
+  //
+  // `webServer` MUST be in the dependency list so this callback only runs once
+  // the route table exists, and the service MUST be read off `ctx.root`:
+  // `connection.rpc.handle` resolves `webServer` as a property of the context
+  // the service was READ from, and cordis property resolution from a plugin
+  // fiber can only see that fiber's own injected services — a sibling row's
+  // `webServer` is invisible, the registration dies with `cannot get property
+  // "webServer" without inject`, and every panel request then falls through to
+  // the static SPA fallback as HTTP 405. Reading at the root (what the upstream
+  // connection tests do) resolves against the shared service store instead.
+  ctx.inject(['connection', 'webServer'], (connectionCtx) => {
+    const connection = connectionCtx.root.get('connection')
+    if (connection === undefined) {
+      ctx.logger.warn('multi-root: connection resolved without the service; the panel channel is not mounted')
+      return
+    }
     const dispose = connection.rpc.handle(PANEL_CHANNEL, async (endpoint, payload, signal) =>
       await dispatchPanelRequest(ctx, endpoint, payload, signal))
     return () => { void dispose() }

@@ -20,6 +20,7 @@ Only issues that are expected to recur and are costly to diagnose are worth reco
 ## Current State
 
 - [Client bundle missing from the web boot graph: bundle patch mounts only subpath rows](./client-bundle-not-in-boot-graph.md) (Chinese) — root cause and fix for the silently absent footer slot registration.
+- [Panel reports "cannot connect to the dsh main process" (HTTP 405)](./panel-channel-http-405.md) (Chinese) — root cause and fix for the channel registration silently swallowed by cordis service resolution.
 
 ## Naming Convention
 
