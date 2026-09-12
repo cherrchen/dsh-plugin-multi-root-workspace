@@ -1,9 +1,9 @@
 # 架构文档：Multi-root Workspace（不改上游：provider 替换 + 子类化）
 
-> 状态：**§4、§5.1、§5.3、§6 已实现（M1/M2）；§7（Root 注册表、命令、client 半部）仍为 Target 设计（M3）**。已实现部分可按当前仓库代码验证；未实现部分明确标注为设计。
+> 状态：**§4、§5.1、§5.3、§6、§7 均已实现（M1/M2/M3）**。已实现部分可按当前仓库代码与 M3 计划中的实施结果验证；§8 的长期演进形态、§9 的上游 seam 附录仍是设计。
 > 硬约束：不修改上游仓库（deepseek-harness）任何包；产物是外部 bundle，经 `dsh plugin add` 或 profile patch 组合。
 > 事实依据：[multi-root-workspace-research.md](../reference/multi-root-workspace-research.md)（§1-7 上游现状，§8 不改上游机制，§9 发布形态与运行时解析，§10 方言形状与子类可用面）；需求边界：[multi-root-workspace.md](../requirements/multi-root-workspace.md)；排期：[M1 计划](../plans/completed/2026-09-12-m1-composition-and-passthrough.md)、[M2 计划](../plans/completed/2026-09-12-m2-additional-roots-and-dialect-grants.md)
-> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)；M2 实施后 §5.3 与 §6 改写为已实现的机制（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）。
+> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)；M2 实施后 §5.3 与 §6 改写为已实现的机制（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；M3 实施后 §7 改写为已实现的机制（[ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)）。
 
 ## 1. 总览
 
@@ -68,9 +68,10 @@ dsh-plugin-multi-root-workspace/
     inject: [sandboxPolicy, multiRootScope]
   - id: multi-root-scope
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/scope'
-  - id: multi-root-command
+  - id: multi-root-registry                                # 已实现（M3）
+    name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
+  - id: multi-root-command                                 # 已实现（M3）
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
-    inject: [commands, multiRootScope, workspaceRegistry]   # M3
 ```
 
 要点：上游 `sandbox-policy`、`bash-sandbox`、`tool-fs`、`tool-bash`、`terminal-bash` 行**全部不动**——它们继续向 `ctx.fs`/`ctx.shell`/`ctx.sandbox` 要能力。同 key 重复 provide 会抛错（调研 §8.2），所以 disable 必须先于 insert 生效（同一 patch 文档内顺序保证；并在插件 apply 期断言 `ctx.fs`/`ctx.sandbox` 是自己的实例，否则 fail loud）。`inject` 既可写在 patch 行上（patch 的任意键都会覆盖目标行），也可由子类的 `static inject` 提供——实现期二选一，不重复声明。
@@ -94,8 +95,8 @@ class MultiRootScopeService extends Service {         // ctx.multiRootScope
 }
 ```
 
-- **数据源（当前）**：`setAdditionalRoots(root, roots)` 的进程内登记表；写入者是测试与冒烟脚本。**M3 目标**：换成 `dsh-storage-domain` 插件命名空间 KvTable（key = canonical 主根 / workspaceId，记录 `AdditionalWorkspaceRoot { id: Branded<'AdditionalRootId'>, path, alias?, addedAt }`，不存 primaryRoot）。provider 结构不随数据源改变——它们只经 `resolve()` / `scopeOf()` 取根。
-- **解析链**：`policy.workspaceRoot` → `canonicalPath`（= `realpathSync.native`）→ 登记表查找 → `sanitizeAdditionalRoots`（canonical 化、去重、剔除等于主根的项、保持登记顺序）。M3 追加"激活时 re-check 存在性，缺根按 config 跳过并通知"。
+- **数据源（已实现）**：§7 的注册表（`dsh-storage-domain` domain `multi_root_workspace`，键 = canonical 主根，记录 `RegisteredRoot { id, path, alias?, addedAt }`）在每次变更后调用 `setAdditionalRoots(root, roots)`；该方法仍是 scope 的公开写口，测试与冒烟脚本可直接使用。provider 结构不随数据源改变——它们只经 `resolve()` / `scopeOf()` 取根。
+- **解析链**：`policy.workspaceRoot` → `canonicalPath`（= `realpathSync.native`）→ 登记表查找 → `sanitizeAdditionalRoots`（canonical 化、去重、剔除等于主根的项、保持登记顺序）。存在性 re-check 在注册表侧完成：`available` 才进入登记表，`missing` / `invalid` 保留但不授予（ADR-0004）。
 - **为什么用插件存储而不是 session 事件**：out-of-tree 插件 append 自有事件类型会给会话日志引入"未装插件的 dsh 拒绝打开"风险（session-format 的 required-on-read 规则，除非信封 `ignorable: true`）；存储按不可变的 header cwd 索引，fork/resume/重启行为同样确定。模型可见性由 §6 的 context 快照落 log 满足。
 - **空根直通**：`additionalRoots.length === 0` 时，两个 provider 都走与上游等价的代码路径（sandbox provider 逐元素返回上游 `confine` 的结果；fs provider 的 containment 语义与上游 `SandboxedFileSystem` 逐项一致，由差分测试钉住）——验收标准 2。
 
@@ -149,13 +150,17 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 - **单一权限世界（已实现）**：fs fence 与内核方言（sandbox provider）消费 §4 的同一份 `FilesystemScope`；bash 与 terminal/PTY 通过 `ctx.sandbox` 间接消费同一份，因此它们的根集合与 fs fence **由构造相同**。插件自带 **parity 矩阵测试**（接替上游 `writableRoots()` 测试的角色）：同一 scope 下，对「主根内 / 主根嵌套 / 附加根内 / 附加根嵌套 / 根外 / 共享词法前缀的兄弟目录 / 经附加根内符号链接逃逸 / 平台临时区」逐类比较 fs fence 的真实写判定与各方言 argv 的授予集合，并在两端模式（workspace-write / read-only）各跑一轮；解析 argv 的代码由测试侧独立实现。宿主能真正执行 runner 时（Linux CI 的 bwrap/Landlock、macOS 的 Seatbelt）另加真实受限执行用例，不能执行时显式 skip 并说明原因。
 - 已知不对称（上游既有，非插件引入）：bwrap 与 Landlock 只授予字面 `/tmp`，不授予 `tmpdir()`（调研 §10.3），因此 parity 断言的语义限定为「附加根集合与模式」；Windows 上内核级多根缺失，fs 可写而 bash 不可写（第一期已知限制）。
 
-## 7. Root 管理与 UI（与上游约束无关，全部走公开 API）
+## 7. Root 管理与 UI（已实现，M3）
 
-- **校验规则**（`resolve(request): Spec` 显式步骤，fail loud）：输入存在且是目录 → `canonicalPath` → 判重（duplicate / ==primary 默认拒绝 / nested 默认允许并记录）→ 入库；启动与每次播种前 re-check 存在性，缺根按 config 跳过 + 用户可见通知。
-- **命令** `/workspace-folders`（list/add/remove/alias/reveal）：`ctx.commands.register`；add 经 `directoryPicker.pick`（Typert 远程命名空间，桌面原生对话框 / 浏览器内浏览）。
-- **可选内省工具** `workspace_roots`：零参数只读；先验证 §6 拓扑文案是否已满足 Agent 认知，够用则不做（需求 §9 预留删除条件）。
-- **Client 半部**：`ctx.slots.inject` 挂进 `ui-workspace` 既有结构，Folders 面板（主根/附加根标记、Add/Remove/Reveal/Copy Path/Alias）；占据 `sidebar.workspaces.directoryFlow` / `conversation.hero.workspace.directoryFlow` picker 洞；文案走 `ctx.locale.register(ns, { zh, en })`。桌面端（apps/desktop）与 web 共用 client graph，零专属代码。
-- **远程通道**：插件新增自己的 Typert 命名空间（如 `multiRootWorkspace`）承载 UI ↔ host 的 CRUD；不直读其他插件存储。
+三行插件行之外新增两行：`multi-root-registry`（服务）与 `multi-root-command`（用户表面）。前者把注册表喂给 §4 的 scope，后者把命令与面板接到注册表上；两个 provider 完全不知道它们存在。
+
+- **注册表（`MultiRootRegistry`，`ctx.multiRootRegistry`）**：`dsh-storage-domain` 的 domain `multi_root_workspace`（version 1，`single` layout，单表 `roots`），**键 = canonical 主根**，值 = 有序记录 `{ id, path, alias?, addedAt }`。`[Service.init]` 读取全部记录、用与写入相同的规则重新判定、只把可用的根播种进 `ctx.multiRootScope`，并对 `missing` / `invalid` 项各输出一次告警。每次变更先落盘再改内存，成功后重播种 scope 并通知监听者。存储整体打不开时降级为"没有附加根 + 所有写操作抛 `storage-unavailable`"，不阻断 harness 启动。取舍见 [ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md)。
+- **校验（`src/roots.ts` 纯函数，fail loud）**：`~` 展开（只限前导 `~`）→ 必须绝对 → 必须存在且是目录 → `canonicalPath` → 不等于主根 → 不与其他根重复 → 不与任何根互相包含（nested 双向拒绝）。失败返回稳定 code（`not-absolute` / `missing` / `not-a-directory` / `equals-primary` / `duplicate` / `nested` / `invalid-alias` / `not-found` / `invalid-ref` / `storage-unavailable`），三类表面（命令、面板、内部 API）共用同一词汇。
+- **命令 `/workspace-folders`**：`ctx.commands.register`，语法 `list | add [path] | remove <n|path> | alias <n|path> [name] | reveal <n|path> | help`。无路径的 `add` 软注入 `directoryPicker`，capability 为 `native` 时直接 `pick(signal)`；`browse` 或 seam 缺失时返回明确错误（提示改用面板或传路径）。输出是英文文本（host 侧没有活动语言信息，见需求文档第一期限制）。
+- **Client 半部**：`sidebar.footer.action`（list/root，两个受支持运行时都存在）+ 自绘对话框；`ctx.locale.register('multiRootWorkspace', { zh, en })` 双语。动作包含 Add（`ctx.uiWorkspace.pickDirectory()`，退化为手输路径）、Remove、Alias、Copy Path、Reveal、上移/下移。文案按 host 返回的 code 本地化。落点与通道的取舍见 [ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)。
+- **通道**：插件自有 Connection RPC channel `/multi-root-workspace`（`connection.rpc.handle` / `connection.rpc.call`），端点为 `list` / `add` / `remove` / `alias` / `move` / `reveal`，返回 `{ ok, value } | { ok, error: { code, message, details } }`。host 侧只在组合里有 `connection`（web profile）时挂载；headless 上该行只注册命令。
+- **不做 Typert 远程命名空间**：出树包的契约生成与 client 装配都没有上游支持路径（ADR-0005）。将来上游提供出树 remote 注册表时，迁移是把 `rpc.handle` 换成 `TypertRemoteService` + 生成的 `/remote`，面板组件与端点语义不变。
+- **复用而不占用 picker 洞**：`sidebar.workspaces.directoryFlow` / `conversation.hero.workspace.directoryFlow` 属于 ui-workspace 的"创建工作区"流程且默认已被 picker 包占满，插件不接入；它复用同一套底层能力（host seam 与 `uiWorkspace` 服务）。
 
 ## 8. 演进形态
 

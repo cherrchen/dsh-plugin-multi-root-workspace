@@ -265,3 +265,54 @@ runnerCommand ['<operator runner>', ...bwrap 的 profile 段]（上游契约：�
 - `SandboxBashExecutor.run` / `.start`：`mode === 'danger-full-access'` 时直接走本地执行，不调用 `confine`。
 - `terminal-bash` 的 `spawnArgv`：同一判断，`danger-full-access` 直接返回原始 argv。
 - 因此 `confine` 只会看到 `read-only` / `workspace-write`；多根 grant 只需按 `workspace-write` 表达即可，`read-only` 必须保持原样。
+
+## 11. M3 实测：注册表、命令与 client 半部（2026-09-12 第五轮）
+
+> 本节记录 M3 实施前对上游与两个运行时的实测结论；它们决定了 [ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md) 与 [ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)。
+
+### 11.1 存储（`dsh-storage-domain`）在 `0.1.5-rc.2` 与 `0.1.2-rc.1` 上同形
+
+`defineDomain` / `domainTable(schema)` / `DomainSpec{ name, version, layout?, compatibleVersions?, invalidRecords?, global?, tables }` / `KvTable{ get, entries, keys, size, put, delete, update }` 在两个已安装运行时里逐项一致（0.1.2 的 `storage-domain/src/spec.ts` 与 pin 版逐行可比）。因此注册表行可以用同一份代码在两者上激活。
+
+两条会影响设计的细节：
+
+- **写入不做 schema 校验**，`open` 时才对已存记录做 zod 校验；`single` layout 下没有可备份的独立文档，`invalidRecords: 'backup-and-skip'` 实际退化为"整次 open 拒绝"。
+- **`per-record` layout 的键必须匹配 `/^[a-zA-Z0-9_-]+$/`**，路径不能当键；`single` layout 下键是任意字符串，路径可以当键。
+
+### 11.2 组合位置与命名空间
+
+- `storage` / `storage-json` / `storage-domain` / `commands` / `typert` 都在 **base** 层（`packages/bundle/base/cordis.patch.yml:145-156`、`:286-287`、`:39-46`），web 与 headless 都继承；`@deepseek-ai/dsh-workspace`（`ctx.workspaceRegistry`）只在 **web-app** 层（`packages/bundle/web-app/cordis.patch.yml:75-76`），headless 没有。
+- domain 名是进程级独占的：base 已用 `session_projcache`，web-app 已用 `workspace`；重名 `open` 抛 `already-open`。插件用 `multi_root_workspace`。
+
+### 11.3 命令运行时
+
+`ctx.commands.register({ name, description, input?, recordInput?, handler })`；`handler` 返回 `{ kind: 'success', text? } | { kind: 'error', text }`，注册表把 `command/run` / `command/done` 写进会话日志。**没有 argv / 子命令设施**：`execute(agent, line, …)` 只用 `parseCommand` 切出 `name` 与逐字 `rawInput`，子命令语法由 handler 自己解析（上游 `/goal` 是同一个模式）。headless 组合有注册表但**没有派发方**（派发方只有浏览器），所以 headless 侧只能进程内 `ctx.commands.execute(...)`。
+
+### 11.4 目录选择
+
+- host seam：`ctx.directoryPicker.capability()` 返回 `{ kind: 'native', pick(signal) }` 或 `{ kind: 'browse', list, createDirectory }`（`packages/host/directory-picker/src/index.ts:20-59,103-113`）；web-app 的 `host-directory-picker-auto` 行在启动时挑一个后端并把 host/client 两面都挂上。
+- client：`ctx.uiWorkspace.pickDirectory() / listDirectory() / createDirectory()`（`packages/client/ui-workspace/src/client/navigation.ts:179-193`）。
+- `sidebar.workspaces.directoryFlow` / `conversation.hero.workspace.directoryFlow` 是 ui-workspace 为「创建工作区」声明的 `single` 洞，默认已被 `ui-directory-picker-native`/`-browse` 的 client 半部占用；owner 收到路径后调用 `createWorkspace`，与"给当前工作区加一个附加根"不是一回事。
+
+### 11.5 出树 client 半部的现实
+
+- `@deepseek-ai/dsh-typert-generator` 虽是公开包，但以 **workspace** 为单位分析：向上寻找 `tsconfig.host.json`、只接受 `<root>/packages` 下的工程引用，并要求包 manifest 预先声明 `./typert` / `./remote` 导出与 `files`（`packages/typert/generator/src/tsdown-plugin.ts:154-162`、`analyzer.ts:482-488`、`workspace.ts:96-145`）。单包出树仓库跑不通。
+- client 侧 `@deepseek-ai/dsh-api-remotes/client` 按**固定清单** `$mount` 15 个第一方贡献（`packages/api/remotes/src/client/index.ts:3-30`）；`ctx.remote.$mount` 能挂任意贡献，但前提仍是"有生成好的贡献制品"。
+- **公开且两个运行时都有的通道是 Connection RPC**：host `ctx.connection.rpc.handle(channel, handler)`、client `connection.rpc.call(channel, endpoint, payload)`（`packages/client/connection/src/rpc.ts:140-152,217-237`；`0.1.2-rc.1` 的同名文件同样导出）。已发布的出树插件 `@dsh-electron/dsh-plugin-git@0.2.0` 用的就是它。
+- 模块加载器只接受一种 client 制品形状：CJS 闭包工厂（`window.__ModuleLoader__.load({ id, factory: (require) => … })`）+ `exports.apply` / `exports.inject`；发现路径是"已挂载 Loader 行所属包的 `exports['./client']` + `dsh.client.platform === 'web'`"（`packages/client/modules/src/index.ts:710-745`）。两个运行时的平台词交集是 `react`、`react/jsx-runtime`、`react-dom`、`react-dom/client`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-store`、`@deepseek-ai/dsh-client-ui-slots`、`@deepseek-ai/dsh-client-ui-primitives`（0.1.5 另加 `ui-dockkit`）。
+
+### 11.6 slot 面在两个运行时不同
+
+| 运行时 | 侧栏可见的根级座位 |
+| --- | --- |
+| `0.1.5-rc.2` | `sidebar.brand.mark/name`、`sidebar.panellist`（list，**0 个占用者**）、`sidebar.workspaces`（single，被 WorkspaceBrowser 占用）、`sidebar.settings`、`sidebar.footer.action`（list）；另有 keyed `main` 面板 |
+| `0.1.2-rc.1` | `sidebar.brand.mark/name`、`sidebar.workspaces`、`sidebar.settings`、`sidebar.footer.action`（list）；**没有** `sidebar.panellist` / `main` |
+
+`sidebar.footer.action` 是两个运行时的交集，`kind: 'list'` 且 additive（0.1.2 里 `ui-cordis` 就注册在它上面，注册形态 `{ name, id, locale, inject }`）。插件因此把面板放在这里，并用自绘对话框承载面板本体。
+
+### 11.7 在进程内驱动一轮真实 agent turn（验收与冒烟用）
+
+- web 组合进程内启动需要 launcher 事实：`provideCmdline(ctx, { args: ['--no-open','--port','0'], exit })`（`packages/boot/cmdline/src/index.ts:70-88`），否则 `web-startup` 行永远不会激活。
+- 手工 `agents.create(...)` 的 agent **必须**自己装模型选择，否则装配 persona 时会以 `prompt variable "{{model}}" has no value` 失败（`installModelSelection`，`packages/core/agent/src/model-selection.ts:76-102`）。
+- web 组合把模型可见的工具行放在 **agent preset realm** 里（`tool-fs` / `tool-bash` / `tool-fs-search` / `tool-jobs` 在 web-app 层被 `disabled: true`），未加入 preset 的 agent 解析工具时面对空层，会得到 `unknown tool "read"`；正确做法是照 `packages/api/session-controller/src/agent.ts:374-387` 在 `setup` 里 `agentPresets.mount(agentCtx, presetId)`。
+- headless 组合没有 preset realm，工具在全局层，一次性 `dsh --profile headless "<task>"` 子进程即可驱动完整轮次；模型端点由 `DEEPSEEK_BASE_URL` 指向脚本化的 OpenAI 兼容服务（`packages/llm/llm-deepseek/src/index.ts:137,213,395`），无需凭据。

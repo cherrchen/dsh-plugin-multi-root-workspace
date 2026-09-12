@@ -21,6 +21,8 @@ Architecture Decision Records (ADRs), capturing important architecture and engin
 - [ADR-0001-provider-replacement-scope.md](./ADR-0001-provider-replacement-scope.md) — Replace only the `fs-sandbox` and `sandbox` provider rows (Accepted).
 - [ADR-0002-upstream-coupling-policy.md](./ADR-0002-upstream-coupling-policy.md) — Upstream coupling policy: entry-point imports only, exact version pins, upgrade smoke tests (Accepted).
 - [ADR-0003-dialect-grant-widening.md](./ADR-0003-dialect-grant-widening.md) — Dialect grant widening: structural recognition, observed cloning, skip-already-granted, fail loudly when unrecognized (Accepted).
+- [ADR-0004-root-registry-persistence-and-validation.md](./ADR-0004-root-registry-persistence-and-validation.md) — The root registry: a canonical-primary-root-keyed domain KV, the validation order, nested roots rejected, missing roots withheld, an unreadable store degrading instead of blocking boot (Accepted).
+- [ADR-0005-out-of-tree-client-transport.md](./ADR-0005-out-of-tree-client-transport.md) — The out-of-tree client half: a Connection RPC channel, a `sidebar.footer.action` panel, and the composed directory-picking capabilities — no Typert Remote namespace (Accepted).
 
 Do not pre-create empty ADR files; add one only when a real decision is made.
 
