@@ -182,7 +182,16 @@ function seedRegistryStore(primaryRoot) {
     tables: {
       roots: {
         [canonical(primaryRoot)]: {
-          roots: [{ id: 'journey-seed', path: canonical(additionalRepo), alias: 'other-repo', addedAt: new Date().toISOString() }],
+          roots: [{
+            id: 'journey-seed',
+            path: canonical(additionalRepo),
+            // The directory this registration is granted for. A record without it
+            // is reported as unusable rather than granted on a guess (the plugin
+            // never writes such a record itself; this seeding plays the registry).
+            recordedPath: canonical(additionalRepo),
+            alias: 'other-repo',
+            addedAt: new Date().toISOString(),
+          }],
         },
       },
     },

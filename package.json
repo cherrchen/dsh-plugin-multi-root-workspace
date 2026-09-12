@@ -51,6 +51,7 @@
     "build:types": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
     "bundle": "tsdown",
     "docs:check": "node scripts/check-docs.mjs",
+    "kernel:probe": "node scripts/check-kernel-runner.mjs",
     "lint": "oxlint",
     "smoke": "pnpm smoke:compose && pnpm smoke:behavior && pnpm smoke:journey",
     "smoke:behavior": "node scripts/smoke-behavior.mjs",

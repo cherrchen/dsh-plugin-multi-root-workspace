@@ -8,7 +8,7 @@ The plugin answers exactly one question: "which directories belong to this works
 
 - **M1 (composition and empty-root pass-through) is complete and verified**: the plugin installs through `dsh plugin`, replaces the `fs-sandbox` and `sandbox` provider rows, and with no additional root configured behaves item-for-item like an uninstalled harness. Evidence: the [completed M1 plan](./docs/plans/completed/2026-09-12-m1-composition-and-passthrough.md).
 - **M2 (multi-root capability) is complete and verified**: additional roots reach the in-process fence and the kernel-dialect grants (Seatbelt / bwrap / Landlock) through one and the same scope, pinned by the parity matrix, the dialect unit suite, the topology snapshot, and the multi-root smoke battery. Under `read-only` an additional root is writable no more than anything else, and the empty-root behavior stays byte-identical to an uninstalled harness. Evidence: the [completed M2 plan](./docs/plans/completed/2026-09-12-m2-additional-roots-and-dialect-grants.md).
-- **M3 (root management and UI) is implemented**: the root registry persists under `$DSH_HOME/storages/multi_root_workspace.json`, the `/workspace-folders` command and the sidebar Workspace Folders panel both add and remove roots, and a real session journey across two Git repositories is covered by `pnpm smoke:journey`. Evidence: the [M3 plan](./docs/plans/completed/2026-09-12-m3-root-registry-command-and-ui.md).
+- **M3 (root management and UI) is implemented and re-accepted after an external review**: the root registry persists under `$DSH_HOME/storages/multi_root_workspace.json`, the `/workspace-folders` command and the sidebar Workspace Folders panel both add and remove roots, and a real session journey across two Git repositories is covered by `pnpm smoke:journey`. All eight findings of that review (a replaced root transferring its grant, concurrent writes losing an operation, the CI step order, a refresh that never re-checked, the manual add path, the reveal contract, duplicated ids, and primary-root nesting) are fixed, each with a regression test. Evidence: the "external review rework" section of the [M3 plan](./docs/plans/completed/2026-09-12-m3-root-registry-command-and-ui.md).
 
 ## How To Use It
 
@@ -23,7 +23,16 @@ In a session:
 
 In the Web GUI: the **Folders** action at the sidebar foot lists the primary root and the additional roots, and offers add (through the composed directory picker), remove, alias, copy path, reveal in the file manager, and reordering. Its copy follows the interface language (English and Chinese).
 
-Rules: a directory is canonicalized before it is stored (`~` expands, symlinks resolve); a candidate that duplicates a root, nests inside or around one, equals the session's own workspace root, is missing, or is not a directory is rejected with a reason. A directory that disappears later keeps its registration but is **not granted** until it comes back — both surfaces say so.
+Rules: a directory is canonicalized before it is stored (`~` expands, symlinks resolve) together with **the canonical directory it was granted for at registration time**. A candidate that duplicates a root, nests inside or around one (the workspace root included), equals the session's own workspace root, is missing, or is not a directory is rejected with a reason.
+
+A registration is granted only while its path still resolves to the directory it was granted for, so:
+
+- a directory that disappears keeps its registration but is **not granted** — reported as `missing`;
+- a registered directory replaced by a symlink pointing elsewhere is reported as `redirected` and **not granted**, and the grant is never transferred to the new target;
+- once the directory is back, `/workspace-folders list` (or a refresh in the panel) grants it again, with **no restart**;
+- the panel's refresh and the command's `list` are the same revalidation path: they re-`stat` and re-resolve every registered directory and republish it to the fs fence and the kernel dialects, without writing the store.
+
+Records whose id is duplicated, or that predate the granted-directory field, are reported as `invalid`, grant nothing, and can be removed one at a time (removal is positional, so one action never deletes several records).
 
 ## Known Limitations (first release)
 
@@ -37,9 +46,12 @@ Rules: a directory is canonicalized before it is stored (`~` expands, symlinks r
 
 ```sh
 pnpm install
-pnpm lint && pnpm typecheck && pnpm test
-pnpm build
-pnpm smoke            # composition gate + behavior gates + the cross-repository journey
+export CI=true            # see the development workflow §8: without a TTY pnpm's dependency self-check aborts
+pnpm lint && pnpm typecheck
+pnpm build                # must precede test: the artifact test reads lib/, which Git does not track
+pnpm test
+pnpm kernel:probe         # can this host really confine a process? if so, the kernel assertions must RUN
+pnpm smoke                # composition gate + behavior gates + the cross-repository journey
 pnpm docs:check
 ```
 

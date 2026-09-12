@@ -34,8 +34,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm test
+      # Build BEFORE the tests: `tests/client-bundle.spec.ts` asserts the BUILT
+      # browser artifact, and `lib/` is not in Git (see .gitignore), so a clean
+      # checkout has nothing to assert until this step has run.
       - run: pnpm build
+      - run: pnpm test
+      # Decide whether this machine can really confine a process. If it can, the
+      # kernel assertions in the matrix and the behavior smoke must EXECUTE
+      # (a skip becomes a failure); if it cannot, they skip loudly with a reason
+      # instead of pretending to pass. See scripts/check-kernel-runner.mjs.
+      - run: pnpm kernel:probe
       - run: pnpm smoke:compose
       - run: pnpm smoke:behavior
       - run: pnpm smoke:journey

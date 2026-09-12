@@ -12,8 +12,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { SandboxInternals } from '@deepseek-ai/dsh-sandbox-local'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'

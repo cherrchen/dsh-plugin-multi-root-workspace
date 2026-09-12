@@ -70,8 +70,10 @@ jobs:
       - name: Report the versions under test
         run: node -e "const p=require('./package.json');console.log(JSON.stringify({dsh:p.devDependencies['@deepseek-ai/dsh'],scope:'host+client'},null,1))"
       - run: pnpm typecheck
-      - run: pnpm test
+      # Build first: the artifact test reads lib/, which a clean checkout lacks.
       - run: pnpm build
+      - run: pnpm test
+      - run: pnpm kernel:probe
       - run: pnpm smoke:compose
       - run: pnpm smoke:behavior
       - run: pnpm smoke:journey

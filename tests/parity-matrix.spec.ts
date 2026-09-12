@@ -19,7 +19,10 @@
  * backend cannot execute (macOS has no bwrap, a confined process cannot nest
  * `sandbox-exec`). The real-execution cases at the bottom then spawn the wrapped
  * argv itself wherever the host CAN run it — Linux CI for bwrap/Landlock, macOS
- * for Seatbelt — and skip explicitly, with the reason, where it cannot.
+ * for Seatbelt — and skip explicitly, with the reason, where it cannot. A run
+ * with `DSH_REQUIRE_KERNEL_RUNNER=1` (exported by `scripts/check-kernel-runner.mjs`
+ * when the host demonstrably CAN confine) turns that skip into a failure, so a
+ * CI leg cannot report a green matrix that never executed anything.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -39,6 +42,7 @@ import { MultiRootFileSystem } from '../src/fs.ts'
 import { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { allowsWrite, parseConfined, runConfined } from './support/dialect-grants.ts'
+import { requireKernelRunner } from './support/kernel-runner.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -210,7 +214,9 @@ describe('real confined execution of the widened profile', () => {
 
       const writeInside = runConfined(world.provider.confine(['bash', '-c', `echo payload > ${JSON.stringify(inside)}`], policy), fixture.workspace)
       if (writeInside.kind === 'unavailable' || writeInside.kind === 'runner-failed') {
-        context.skip(`no usable ${dialect} runner on this host: ${writeInside.detail.slice(0, 200)}`)
+        // Skipping is only allowed when this run did not REQUIRE a real confined
+        // execution (see tests/support/kernel-runner.ts).
+        context.skip(`${dialect}: ${requireKernelRunner(writeInside.detail)}`)
         return
       }
       expect(writeInside.kind, `write into the additional root: ${writeInside.kind === 'denied' ? writeInside.detail : ''}`).toBe('ok')

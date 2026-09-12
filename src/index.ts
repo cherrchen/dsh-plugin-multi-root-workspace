@@ -7,6 +7,10 @@
  * `./command`), never through this one. It exists so the package root resolves
  * and so tests can import the whole public surface from a single specifier.
  *
+ * The two facts worth remembering about this surface: a registration carries the
+ * canonical directory it was GRANTED for (`recordedPath`), and the panel channel
+ * has one declared response shape per endpoint (`PanelResponseMap`).
+ *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace
  */
 
@@ -23,8 +27,10 @@ export {
   canonicalRoot,
   classifyStoredRoots,
   expandRootInput,
+  indexedStatuses,
   isCanonicallyUnder,
   additionalRootId,
+  removeStatusAt,
   resolveRootRef,
   RootValidationError,
   validateRootCandidate,
@@ -39,5 +45,14 @@ export type {
 } from './roots.ts'
 export { COMMAND_NAME, parseFoldersCommand, renderRootsReport, revealArgv } from './command.ts'
 export type { FoldersCommand } from './command.ts'
-export { PANEL_CHANNEL } from './contract.ts'
-export type { PanelEndpoint, PanelFailure, PanelRequest, RootView, RootsView } from './contract.ts'
+export { PANEL_CHANNEL, PANEL_ENDPOINTS, parsePanelCall, parseRevealedView, parseRootsView } from './contract.ts'
+export type {
+  PanelCall,
+  PanelEndpoint,
+  PanelFailure,
+  PanelRequest,
+  PanelResponseMap,
+  RevealedView,
+  RootView,
+  RootsView,
+} from './contract.ts'
