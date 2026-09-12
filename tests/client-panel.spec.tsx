@@ -384,6 +384,24 @@ describe('the panel dialog', () => {
     })
   })
 
+  it('closes on Escape and keeps Tab cycling inside the dialog', async () => {
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    // Shift-Tab from the first focusable element wraps to the last one: the
+    // dialog is modal, so Tab must not escape into the sidebar behind it.
+    const dialog = screen.getByRole('dialog')
+    const focusable = dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input')
+    focusable[0]!.focus()
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(focusable[focusable.length - 1])
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('renders a redirected root as its own state', async () => {
     const harness = mount()
     harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_C] })

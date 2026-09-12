@@ -16,7 +16,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/WorkspaceFoldersAction
  */
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { Key } from './locales.ts'
 import type { RootState, RootView, RootsView } from '../contract.ts'
@@ -162,8 +162,40 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
 
   const sessionId = props.sessionId?.()
+
+  // The dialog is modal: it takes focus when it opens, Escape closes it, and
+  // Tab cycles within it instead of escaping into the sidebar behind it.
+  useEffect(() => { dialogRef.current?.focus() }, [])
+  const onDialogKeyDown = (event: ReactKeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      event.stopPropagation()
+      props.onClose()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const dialog = dialogRef.current
+    if (dialog === null) return
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>('button, input, [href], [tabindex]:not([tabindex="-1"])'),
+    ).filter(element => !element.hasAttribute('disabled'))
+    if (focusable.length === 0) {
+      event.preventDefault()
+      return
+    }
+    const first = focusable[0]!
+    const last = focusable[focusable.length - 1]!
+    const active = dialog.ownerDocument.activeElement
+    if (event.shiftKey && (active === first || !(active instanceof HTMLElement) || !dialog.contains(active))) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && (active === last || !(active instanceof HTMLElement) || !dialog.contains(active))) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
 
   const refresh = useCallback(async () => {
     if (panel === undefined) {
@@ -267,7 +299,15 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   const roots = state.view?.roots ?? []
   return (
     <div style={OVERLAY_STYLE} role="presentation" onClick={event => { if (event.target === event.currentTarget) props.onClose() }}>
-      <div style={DIALOG_STYLE} role="dialog" aria-modal="true" aria-label={t('panel.title')}>
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={onDialogKeyDown}
+        style={{ ...DIALOG_STYLE, outline: 'none' }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('panel.title')}
+      >
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px' }}>
           <h2 style={{ margin: '0 0 4px', fontSize: '1.05em' }}>{t('panel.title')}</h2>
           <span style={{ marginLeft: 'auto' }}>
