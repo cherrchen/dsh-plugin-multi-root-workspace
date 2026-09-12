@@ -20,13 +20,15 @@ English: [README.en.md](./README.en.md)
 
 ## 当前状态
 
-项目技术栈尚未定义。
+开发环境、工具链与验证流程已确定，见：
 
-不要在本目录生成任何尚未存在的命令或工具说明；待开发环境与流程确定后再补充。
+- [plugin-development-workflow.md](./plugin-development-workflow.md) — 构建、测试、冒烟、双运行时矩阵、上游耦合与升级流程。
 
 ## 已确定的工具链事实
 
-- 包管理器：pnpm。
+- 包管理器：pnpm（`11.25.0`）。
+- 语言与构建：TypeScript（strict，独立 host face）+ tsdown（逐入口 ESM bundle）。
+- 门禁：oxlint、`tsc --noEmit`、vitest、两个冒烟脚本、文档检查。
 
 ## 文档检查
 

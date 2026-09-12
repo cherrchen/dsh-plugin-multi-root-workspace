@@ -1,7 +1,7 @@
 # 现状调研：官方仓库 Workspace / Sandbox / 插件体系
 
 > 本文是对上游官方仓库（deepseek-harness）在 master `c291e7961a`（2026-09-12）的现状快照调研；所有路径相对该仓库根，事实以该提交为准，后续如上游演进需重新核对。本文是 [multi-root-workspace.md](../requirements/multi-root-workspace.md) 与 [multi-root-workspace.md](../architecture/multi-root-workspace.md) 的事实依据。
-> §8 为"不改上游"约束下的补充调研（2026-09-12 第二轮）。
+> §8 为"不改上游"约束下的补充调研（2026-09-12 第二轮）；§9 为发布形态与运行时解析的补充调研（2026-09-12 第三轮，安装形态下必须遵守的事实）。
 
 ## 1. Workspace 模型：单目录注册表
 
@@ -131,8 +131,83 @@ if (this.store[key]) {
 
 ### 8.6 结论排序（不改上游实现"多根 workspace-write"）
 
-- **路径 A（唯一语义正确、推荐）：patch disable + insert + 子类化**。disable `fs-sandbox` / `bash-sandbox` / `sandbox` 三行，insert 自己的 provider（fs、shell、sandbox 三个 key），子类实现多根 containment 与多根方言 grant。代价：方言 parity（fs fence vs 内核 runner 的根集合一致）从上游测试转移到插件自己维护；上游 pre-stable（AGENTS.md 明言 "Public APIs are pre-stable"），升级可能破坏子类，必须 pin 版本 + 升级 smoke。
+- **路径 A（唯一语义正确、推荐）：patch disable + insert + 子类化**。disable 上游的 fs 与 sandbox provider 行，insert 自己的同 key provider（外加插件自有 scope 服务），子类实现多根 containment 与多根方言 grant。代价：方言 parity（fs fence vs 内核 runner 的根集合一致）从上游测试转移到插件自己维护；上游 pre-stable（AGENTS.md 明言 "Public APIs are pre-stable"），升级可能破坏子类，必须 pin 版本 + 升级 smoke。
+  - 收窄说明（见 §9.3）：bash 侧的 confinement 全部经 `ctx.sandbox`（`SandboxBashExecutor.confine` → `ctx.sandbox.confine`；PTY 同理），执行器不掌握根集合，因此 `bash-sandbox` 不必替换，替换集合由三行收窄为两行（[ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md)）。
 - **路径 B（fs/* 事件放行）：不可行**（8.4）。
 - **路径 C（tools/pre-execute 改写）：不可行**（8.4）。
 - **路径 D（`extends FileSystem` 自带完整 provider）：长期形态**。升级韧性最好（只依赖 Service Definition 抽象类），但要重做原子写、edit 临界区、锁等（参考 `fs-local/src/fsio.ts`），内核方言问题同样要解；可作为 A 稳定后的演进方向。
 - **辅助（不独立成立）**：`ctx.sandboxPolicy` 子类无法表达多根；`runnerCommand` 换 runner 不换语义；`dsh plugin add` 载体无障碍。
+
+## 9. 发布形态与运行时解析（2026-09-12 第三轮补充）
+
+> 本节记录"不改上游"插件在**安装形态**下必须遵守的事实。§9.3 的取根路径是收窄替换集合的依据（[ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md)），§9.1/§9.2 是"只允许包入口导入 + 精确 pin"的依据（[ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)）。
+
+### 9.1 发布包里没有源码
+
+对 `@deepseek-ai/dsh-fs-sandbox@0.1.5-rc.2` 的发布 tarball 实测，包内只有 8 个文件：
+
+```text
+package/LICENSE
+package/README.md
+package/README.zh.md
+package/README.i18n.yaml
+package/package.json
+package/lib/index.js
+package/lib/types/index.d.ts
+package/lib/types/containment.d.ts
+```
+
+- `package.json` 的 `files` 只声明 `lib/index.js` 与 `lib/types/**/*.d.ts`，**没有 `src/`**。
+- 该包 `exports` 里确实声明了 `"./src/*": "./src/*"`，但在安装形态下这是**死路径**：目标文件不存在。
+- `lib/index.js` 是打包后的单文件（内部 `containment` 已被内联，`lib/` 下没有独立的 `containment.js`），因此**包入口导入可用、深导入不可用**。
+- 本机 profile 的 `node_modules` 中同名包带 `src/`，是指向应用内副本的符号链接造成的假象，不能作为"深导入可用"的依据。
+- 推论：`pkg/src/*` 一律不得进入插件的运行时与构建依赖面；需要上游内部实现时改为本地实现 + 注明出处 + 差分测试钉住。
+
+### 9.2 dist-tag 与可用版本（`@deepseek-ai/dsh-*`）
+
+| tag | 版本 |
+|---|---|
+| `latest` | `0.0.1-rc.1`（陈旧，**不能使用**） |
+| `alpha` | `0.1.5-alpha.2` |
+| `next` | `0.1.5-rc.2`（最新） |
+
+已发布序列包含 `0.1.2-alpha.2` … `0.1.2-alpha.5`、`0.1.2-rc.1`、`0.1.3-alpha.2`、`0.1.5-alpha.1/2`、`0.1.5-rc.1/2`。本机已安装桌面运行时的包版本为 `0.1.2-rc.1`。
+
+推论：任何范围依赖（`^0.1`、`latest`）都会解析到错误版本；插件必须以**精确版本**声明开发/CI 目标，并用范围声明 `peerDependencies` 以兼容宿主已有副本。
+
+### 9.3 bash 与 PTY 的取根路径
+
+| 消费方 | 取根方式 | 出处 |
+|---|---|---|
+| 一次性 bash（`ctx.shell`） | `SandboxBashExecutor.confine` → `this.ctx.sandbox.confine(['bash','-c',command], policy)` | `packages/shell/bash-sandbox/src/index.ts` 约 177-179 行 |
+| 交互式 PTY（terminal） | `spawnArgv` → `ctx.get('sandbox').confine(argv, policy)`；cwd 取 `policy.workspaceRoot` | `packages/terminal/terminal-bash/src/index.ts` 约 105-108 行 |
+| 上游 `sandbox-policy` | `resolve()` 返回单值 `workspaceRoot`（会话则为 canonical cwd） | `packages/sandbox/sandbox-policy/src/index.ts` |
+
+执行器与 PTY 都不计算根集合，因此多根只需在 `ctx.sandbox` 一处表达；替换 `bash-sandbox` 只是重复上游的 mode / escalation / process-facts 语义。
+
+### 9.4 运行时解析锚点与 profile 机制
+
+- profile 目录为 `$DSH_HOME/profiles/<name>`，其 `pnpm-workspace.yaml` 使用 `nodeLinker: hoisted` 且 `autoInstallPeers: false`：本地目录插件会被 pnpm 链接进来，而 peer 依赖不会被自动安装。
+- `dsh plugin ...` 是 pnpm 的转发器：在 profile 目录里执行 pnpm，然后把"解析到 `dsh.bundle` 声明的依赖"回填进 `dsh.profile.bundles`。
+- 启动时 `resolveBundleDir` 用"dsh 安装锚点 / profile 目录"双锚解析 bundle 包目录；`app-boot` 还会为 bundle 的依赖闭包建立 profile 级链接与模块回退目录，使包代码里的裸标识符（含 `@deepseek-ai/*`）能解析到宿主副本。
+- 结论：插件的运行时应把上游包声明为 `peerDependencies`（由宿主提供单一份实例），并在冒烟中用 `instanceof` 断言"同一份服务定义与 cordis 实例"，而不是自带副本。
+
+### 9.5 无凭据可用的验证面
+
+- `dsh --profile <name> --dump-config`：输出合成后的配置树，按 `# == <bundle>` 分组，行内保留 `disabled: true` 与 `config`，可在隔离 `$DSH_HOME` 下离线运行，适合做"只差预期行"的组合断言。
+- `boot(binName, absoluteConfigPath, patches, prepare?)`（`@deepseek-ai/dsh-app-boot`）：上游自身测试即在进程内挂载整棵配置树；据此可对 `ctx.fs` / `ctx.shell` / `ctx.sandbox` 直接做行为断言，**不需要 LLM 凭据**。
+- 两者都只写隔离的 `$DSH_HOME`，不会污染用户真实 profile。
+
+### 9.6 版本差异清单（`0.1.2-rc.1` vs `0.1.5-rc.2`）
+
+逐字节相同：`fs-sandbox/src/index.ts`、`fs-sandbox/src/containment.ts`、`sandbox/src/roots.ts`、`sandbox-policy/src/index.ts`、`terminal-bash/src/index.ts`。
+
+有差异：
+
+| 文件 | 差异 |
+|---|---|
+| `sandbox-local/src/index.ts`、`sandbox-local/src/profiles.ts` | landlock 导入路径由 `@deepseek-ai/node-addon-landlock-run` 变为 `@deepseek-ai/node-addon-system/landlock-run` |
+| `bash-sandbox/src/index.ts`、`bash-local/src/index.ts` | provider rejection 的表述与 `onProcessDone` 参数名改为 spawn failure（公开签名兼容） |
+| `fs-local/src/index.ts` | 新增 `readByteRange`（纯增量） |
+
+推论：双运行时矩阵是必要的，但插件的相关假设（类方法面、patch 行 id、policy 语义）在两个版本间是稳定的；不一致项集中在方言 runner 的导入细节，也正是"不要引用上游内部实现"的理由。

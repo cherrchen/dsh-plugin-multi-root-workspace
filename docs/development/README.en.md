@@ -20,13 +20,15 @@
 
 ## Current State
 
-The project's technology stack has not been defined yet.
+The development environment, toolchain, and verification workflow are defined:
 
-Do not generate commands or tooling instructions for things that do not exist yet; add them once the development environment and workflow are established.
+- [plugin-development-workflow.md](./plugin-development-workflow.md) — build, test, smokes, the two-runtime matrix, upstream coupling, and the upgrade procedure.
 
 ## Established Tooling Facts
 
-- Package manager: pnpm.
+- Package manager: pnpm (`11.25.0`).
+- Language and build: TypeScript (strict, standalone host face) + tsdown (per-entry ESM bundles).
+- Gates: oxlint, `tsc --noEmit`, vitest, two smoke scripts, and the documentation check.
 
 ## Documentation Check
 

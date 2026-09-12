@@ -85,8 +85,10 @@ All README documents and formal documents under `.agent/note/` must follow this 
 
 ## Current Project State
 
-The project is currently in its initialization phase.
+The project is an out-of-tree DSH plugin bundle (`@dsh-electron/dsh-plugin-multi-root-workspace`) that widens the workspace sandbox scope from one root to a primary root plus N additional roots, without modifying any upstream package.
 
-Architecture, requirements, technology choices, testing rules, build commands, and module-specific conventions will be added as they are defined.
+Milestone M1 (bundle composition and empty-root pass-through) is complete and verified: the plugin installs through `dsh plugin`, replaces the two provider rows, and behaves exactly like an uninstalled harness while no additional root is configured. See `docs/plans/completed/2026-09-12-m1-composition-and-passthrough.md` for the evidence and for the T0 findings.
 
-Do not invent missing project constraints.
+Development environment, toolchain, commands, and the smoke mechanism are documented in `docs/development/plugin-development-workflow.md`. Requirements, design, upstream facts, and decisions live in `docs/requirements/`, `docs/architecture/`, `docs/reference/`, and `docs/decisions/`.
+
+Additional roots, their registration, the kernel-dialect grants, and the client UI are M2/M3 work. Do not invent constraints that are not written down.

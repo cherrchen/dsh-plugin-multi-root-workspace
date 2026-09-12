@@ -18,7 +18,8 @@ Architecture Decision Records (ADRs), capturing important architecture and engin
 
 ## Current State
 
-There are no ADRs yet.
+- [ADR-0001-provider-replacement-scope.md](./ADR-0001-provider-replacement-scope.md) — Replace only the `fs-sandbox` and `sandbox` provider rows (Accepted).
+- [ADR-0002-upstream-coupling-policy.md](./ADR-0002-upstream-coupling-policy.md) — Upstream coupling policy: entry-point imports only, exact version pins, upgrade smoke tests (Accepted).
 
 Do not pre-create empty ADR files; add one only when a real decision is made.
 

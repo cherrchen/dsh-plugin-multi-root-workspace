@@ -18,7 +18,8 @@ Architecture Decision Records（ADR），用于记录重要架构与工程决策
 
 ## 当前状态
 
-尚未有任何 ADR。
+- [ADR-0001-provider-replacement-scope.md](./ADR-0001-provider-replacement-scope.md) — 只替换 `fs-sandbox` 与 `sandbox` 两个 provider 行（Accepted）。
+- [ADR-0002-upstream-coupling-policy.md](./ADR-0002-upstream-coupling-policy.md) — 上游耦合策略：只允许包入口导入、精确 pin 版本、升级 smoke（Accepted）。
 
 不要提前创建空的 ADR 文件；仅在做出真实决策时新增。
 
