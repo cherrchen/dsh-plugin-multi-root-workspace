@@ -154,3 +154,6 @@ vite.config.ts.timestamp-*
 
 # Local smoke scratch directories (overridable via DSH_SMOKE_HOME)
 .dsh-smoke/
+
+# ZCode session-local workspace state
+.zcode/
