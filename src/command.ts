@@ -242,9 +242,11 @@ function helpText(): string {
 }
 
 /**
- * Split `alias`'s argument into a reference and the alias text. A quoted or
- * path-shaped first argument may contain spaces, so it is kept whole; an id
- * cannot, so the remainder is the alias.
+ * Split `alias`'s argument into a reference and the alias text.
+ *
+ * The reference is the first whitespace-delimited token, except when it opens
+ * with a quote: a quoted path may contain spaces, so the whole quoted span is
+ * the reference and the remainder is the alias.
  */
 function splitReference(text: string): { text: string; rest: string } {
   const trimmed = text.trim()
@@ -255,10 +257,7 @@ function splitReference(text: string): { text: string; rest: string } {
     if (end > 0) return { text: trimmed.slice(0, end + 1), rest: trimmed.slice(end + 1).trim() }
   }
   const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(trimmed)
-  const head = match?.[1] ?? ''
-  const tail = (match?.[2] ?? '').trim()
-  if (/^\d+$/.test(head) || head.includes('/') || head.startsWith('~')) return { text: head, rest: tail }
-  return { text: head, rest: tail }
+  return { text: match?.[1] ?? '', rest: (match?.[2] ?? '').trim() }
 }
 
 /**
