@@ -91,10 +91,13 @@ if (usable.length === 0) {
   process.exit(0)
 }
 
-console.log(`[kernel:probe] usable: ${usable.map(result => result.dialect).join(', ')}`
-  + ' — the kernel assertions must RUN, not skip.')
+const names = usable.map(result => result.dialect).join(',')
+console.log(`[kernel:probe] usable: ${names}`
+  + ' — the assertions for THESE dialects must run; the others are not required here.')
+// Per dialect, never "something works": requiring bwrap on a macOS runner (or
+// Seatbelt on a Linux one) would fail a run for a reason this plugin cannot fix.
 if (process.env.GITHUB_ENV !== undefined && process.env.GITHUB_ENV !== '') {
   const { appendFileSync } = await import('node:fs')
-  appendFileSync(process.env.GITHUB_ENV, 'DSH_REQUIRE_KERNEL_RUNNER=1\n')
-  console.log('[kernel:probe] exported DSH_REQUIRE_KERNEL_RUNNER=1 for the remaining steps.')
+  appendFileSync(process.env.GITHUB_ENV, `DSH_PROBE_VERIFIED_DIALECTS=${names}\n`)
+  console.log(`[kernel:probe] exported DSH_PROBE_VERIFIED_DIALECTS=${names} for the remaining steps.`)
 }

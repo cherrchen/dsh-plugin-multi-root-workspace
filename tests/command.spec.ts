@@ -20,7 +20,7 @@ import { parseFoldersCommand, renderRootsReport, revealArgv } from '../src/comma
 import { PANEL_CHANNEL, type PanelRequest, type RootsView } from '../src/contract.ts'
 import type { RootStatus } from '../src/roots.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
-import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
+import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
 
 let fixture: FixtureWorkspace
 let storeRoot: string
@@ -403,7 +403,9 @@ describe('the panel channel', () => {
     expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
   })
 
-  it('withholds a root whose directory was swapped for a symlink', async () => {
+  it('withholds a root whose directory was swapped for a symlink', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
     const stack = await mount({ withConnection: true, withSubprocess: true })
     // Canonical spellings up front: after the swap, `canonicalPath(granted)`
     // IS `elsewhere`, so the test must compare against the pre-swap names.

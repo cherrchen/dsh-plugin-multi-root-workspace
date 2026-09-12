@@ -19,10 +19,11 @@
  * backend cannot execute (macOS has no bwrap, a confined process cannot nest
  * `sandbox-exec`). The real-execution cases at the bottom then spawn the wrapped
  * argv itself wherever the host CAN run it — Linux CI for bwrap/Landlock, macOS
- * for Seatbelt — and skip explicitly, with the reason, where it cannot. A run
- * with `DSH_REQUIRE_KERNEL_RUNNER=1` (exported by `scripts/check-kernel-runner.mjs`
- * when the host demonstrably CAN confine) turns that skip into a failure, so a
- * CI leg cannot report a green matrix that never executed anything.
+ * for Seatbelt — and skip explicitly, with the reason, where it cannot. A dialect
+ * the PLATFORM provides is required, so its skip becomes a failure: macOS must run
+ * the Seatbelt case, Linux must run bwrap or Landlock, and neither is asked for
+ * the runner it does not have (see `tests/support/kernel-runner.ts`). Windows has
+ * no kernel rung here at all, so the suite skips there with that reason.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -30,6 +31,7 @@ import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { existsSync } from 'node:fs'
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FsTarget } from '@deepseek-ai/dsh-fs'
@@ -43,17 +45,20 @@ import { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { allowsWrite, parseConfined, runConfined } from './support/dialect-grants.ts'
 import { requireKernelRunner } from './support/kernel-runner.ts'
+import { symlinkUnsupportedReason } from './support/temp-workspace.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
 const DIALECTS = ['seatbelt', 'bwrap', 'landlock'] as const
 type Dialect = (typeof DIALECTS)[number]
 const COMMAND = ['bash', '-c', 'true']
-const TEMP_FILE = join('/tmp', `dsh-mr-matrix-${process.pid}.txt`)
+const TEMP_FILE = join(tmpdir(), `dsh-mr-matrix-${process.pid}.txt`)
 
 const fibers: Array<Awaited<ReturnType<Context['plugin']>>> = []
 let fixture: FixtureWorkspace
 let siblings = { third: '', shared: '' }
+/** Why the symlink rows cannot run here, when the host refuses directory links. */
+let symlinkReason: string | undefined
 
 beforeEach(async () => {
   fixture = createFixtureWorkspace('matrix')
@@ -62,8 +67,13 @@ beforeEach(async () => {
   await mkdir(siblings.shared, { recursive: true })
   await mkdir(join(fixture.workspace, 'nested'), { recursive: true })
   await mkdir(join(fixture.outside, 'nested'), { recursive: true })
-  await mkdir(join(fixture.outside, 'link'), { recursive: true })
-  await symlink(siblings.third, join(fixture.outside, 'link', 'escape'), 'dir')
+  // A host that refuses directory symlinks (Windows without Developer Mode) still
+  // gets the whole matrix minus the one row that needs the escape to exist.
+  symlinkReason = symlinkUnsupportedReason()
+  if (symlinkReason === undefined) {
+    await mkdir(join(fixture.outside, 'link'), { recursive: true })
+    await symlink(siblings.third, join(fixture.outside, 'link', 'escape'), 'dir')
+  }
 })
 
 afterEach(async () => {
@@ -140,6 +150,8 @@ interface MatrixCase {
    * run for every dialect.
    */
   nativeOnly?: boolean
+  /** Set for rows that need a directory symlink the host may refuse to create. */
+  needsSymlink?: boolean
 }
 
 /** Whether the product runtime on THIS host can select this dialect at all. */
@@ -156,7 +168,7 @@ function matrix(): MatrixCase[] {
     { name: 'a file nested in an additional root', path: join(fixture.outside, 'nested', 'deep.txt'), expected: 'allow' },
     { name: 'a file outside every root', path: join(siblings.third, 'matrix-outside.txt'), expected: 'deny' },
     { name: 'a sibling sharing the primary root prefix', path: join(siblings.shared, 'matrix-prefix.txt'), expected: 'deny' },
-    { name: 'a file through a symlink escaping an additional root', path: join(fixture.outside, 'link', 'escape', 'matrix-symlink.txt'), expected: 'deny' },
+    { name: 'a file through a symlink escaping an additional root', path: join(fixture.outside, 'link', 'escape', 'matrix-symlink.txt'), expected: 'deny', needsSymlink: true },
     { name: 'a file in the platform temp area', path: TEMP_FILE, expected: 'allow', nativeOnly: true },
   ]
 }
@@ -168,6 +180,7 @@ describe('the fs fence and every kernel dialect agree on one scope', () => {
       const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: fixture.workspace }
       for (const entry of matrix()) {
         if (entry.nativeOnly === true && !isNativeDialect(dialect)) continue
+        if (entry.needsSymlink === true && symlinkReason !== undefined) continue
         const target = await world.ctx.fs.resolve(entry.path)
         const fence = await fenceVerdict(world, policy, target)
         const dialectAnswer = dialectVerdict(world, policy, String(target.targetKey))
@@ -214,9 +227,10 @@ describe('real confined execution of the widened profile', () => {
 
       const writeInside = runConfined(world.provider.confine(['bash', '-c', `echo payload > ${JSON.stringify(inside)}`], policy), fixture.workspace)
       if (writeInside.kind === 'unavailable' || writeInside.kind === 'runner-failed') {
-        // Skipping is only allowed when this run did not REQUIRE a real confined
-        // execution (see tests/support/kernel-runner.ts).
-        context.skip(`${dialect}: ${requireKernelRunner(writeInside.detail)}`)
+        // Skipping is only allowed when this DIALECT is not required for this
+        // run (see tests/support/kernel-runner.ts): a host that can confine with
+        // Seatbelt cannot necessarily run bwrap, and vice versa.
+        context.skip(requireKernelRunner(dialect, writeInside.detail))
         return
       }
       expect(writeInside.kind, `write into the additional root: ${writeInside.kind === 'denied' ? writeInside.detail : ''}`).toBe('ok')

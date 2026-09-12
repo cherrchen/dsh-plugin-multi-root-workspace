@@ -26,13 +26,15 @@ import {
   validateRootCandidate,
   type RegisteredRoot,
 } from '../src/roots.ts'
-import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
+import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
 
 let fixture: FixtureWorkspace
 let primary: string
 let sibling: string
 let nested: string
 let alias: string
+/** Why the symlink cases cannot run here, when the host refuses directory links. */
+let symlinkReason: string | undefined
 
 beforeAll(() => {
   fixture = createFixtureWorkspace('roots')
@@ -43,7 +45,11 @@ beforeAll(() => {
   mkdirSync(sibling)
   mkdirSync(nested)
   writeFileSync(join(fixture.base, 'a-file'), 'not a directory')
-  symlinkSync(sibling, alias)
+  // Windows refuses a directory symlink without Developer Mode or elevation: the
+  // alias cases then skip with the reason instead of failing for a privilege this
+  // suite cannot grant itself.
+  symlinkReason = symlinkUnsupportedReason()
+  if (symlinkReason === undefined) symlinkSync(sibling, alias)
 })
 
 afterAll(() => { fixture.dispose() })
@@ -193,7 +199,8 @@ describe('validateRootCandidate', () => {
     }
   })
 
-  it('treats a symlink alias as the same root', () => {
+  it('treats a symlink alias as the same root', (context) => {
+    if (symlinkReason !== undefined) context.skip(symlinkReason)
     expect(codeOf(alias, [canonicalPath(sibling)])).toBe('duplicate')
     expect(check(alias)).toBe(canonicalPath(sibling))
   })
@@ -247,7 +254,8 @@ describe('classifyStoredRoots', () => {
     expect(classifyStoredRoots(primary, [{ ...stored(sibling), id: additionalRootId('') }])[0]?.state).toBe('invalid')
   })
 
-  it('canonicalizes a stored symlink spelling that was granted as that symlink', () => {
+  it('canonicalizes a stored symlink spelling that was granted as that symlink', (context) => {
+    if (symlinkReason !== undefined) context.skip(symlinkReason)
     // The operator registered the alias itself: the recorded directory IS the
     // resolved one, so the record is granted under its canonical spelling.
     const statuses = classifyStoredRoots(primary, [stored(alias, 'alias', canonicalPath(sibling))])
@@ -265,7 +273,8 @@ describe('classifyStoredRoots', () => {
     expect(availableRoots(statuses)).toEqual([])
   })
 
-  it('grants a record that is spelled through a symlink but resolves to its recorded directory', () => {
+  it('grants a record that is spelled through a symlink but resolves to its recorded directory', (context) => {
+    if (symlinkReason !== undefined) context.skip(symlinkReason)
     // The alias resolves to `sibling`, which is the directory this record was
     // granted for. Authorization follows the resolved directory, so the
     // spelling does not matter here.

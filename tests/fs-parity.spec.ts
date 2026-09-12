@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { FsError } from '@deepseek-ai/dsh-fs'
@@ -28,6 +29,7 @@ import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { MultiRootFileSystem } from '../src/fs.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
+import { symlinkUnsupportedReason } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
 const fixtures: FixtureWorkspace[] = []
@@ -40,7 +42,7 @@ beforeEach(() => {
 afterEach(async () => {
   while (fibers.length > 0) await fibers.pop()?.dispose()
   for (const fixture of fixtures) {
-    await rm(join('/tmp', `dsh-mr-parity-${basename(fixture.base)}.txt`), { force: true })
+    await rm(join(tmpdir(), `dsh-mr-parity-${basename(fixture.base)}.txt`), { force: true })
     fixture.dispose()
   }
   fixtures.length = 0
@@ -92,6 +94,8 @@ async function outcome(run: () => Promise<unknown>, path: string): Promise<strin
 type Case = {
   name: string
   run: (backend: Backend) => Promise<string>
+  /** Why this case cannot run here; it is then recorded as skipped for BOTH backends. */
+  skip?: string
 }
 
 function mutationCases(mode: SandboxMode): Case[] {
@@ -147,6 +151,7 @@ function mutationCases(mode: SandboxMode): Case[] {
     },
     {
       name: 'denies a write through a symlinked directory inside the root',
+      skip: symlinkUnsupportedReason(),
       run: async backend => {
         await mkdir(join(backend.fixture.workspace, 'link'), { recursive: true })
         await symlink(backend.fixture.outside, join(backend.fixture.workspace, 'link', 'escape'), 'dir')
@@ -157,9 +162,9 @@ function mutationCases(mode: SandboxMode): Case[] {
       },
     },
     {
-      name: 'allows the platform /tmp area',
+      name: 'allows the platform temp area',
       run: async backend => {
-        const path = join('/tmp', `dsh-mr-parity-${basename(backend.fixture.base)}.txt`)
+        const path = join(tmpdir(), `dsh-mr-parity-${basename(backend.fixture.base)}.txt`)
         return await outcome(async () => {
           await backend.fs.writeText(await target(backend, path), 'payload')
         }, path)
@@ -209,7 +214,9 @@ function mutationCases(mode: SandboxMode): Case[] {
 async function record(backend: Backend, cases: readonly Case[]): Promise<Map<string, string>> {
   const recorded = new Map<string, string>()
   for (const entry of cases) {
-    const raw = await entry.run(backend)
+    // A case this host cannot set up is skipped for both backends at once, so the
+    // comparison keeps its meaning instead of comparing a failure with a pass.
+    const raw = entry.skip === undefined ? await entry.run(backend) : `skipped: ${entry.skip}`
     recorded.set(entry.name, raw
       .replaceAll(backend.fixture.base, '<base>')
       .replaceAll(basename(backend.fixture.base), '<base>'))
@@ -245,7 +252,9 @@ describe('parity with the upstream single-root fence (empty additional roots)', 
 })
 
 describe('multi-root extension', () => {
-  it('makes an additional root writable while unrelated trees stay denied', async () => {
+  it('makes an additional root writable while unrelated trees stay denied', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
     const fixture = createFixtureWorkspace('fs-multi')
     fixtures.push(fixture)
     const ours = await mount(MultiRootFileSystem, fixture, 'workspace-write', [fixture.outside])

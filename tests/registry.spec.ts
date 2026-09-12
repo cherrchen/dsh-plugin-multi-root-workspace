@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DOMAIN_NAME, MAX_ALIAS_LENGTH } from '../src/registry.ts'
 import { RootValidationError } from '../src/roots.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
-import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
+import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
 
 let fixture: FixtureWorkspace
 let storeRoot: string
@@ -334,7 +334,9 @@ describe('revalidation without a restart', () => {
     expect(statSync(storeFile).mtimeMs).toBe(stamp)
   })
 
-  it('withholds a root whose directory was replaced, then restores it the same way', async () => {
+  it('withholds a root whose directory was replaced, then restores it the same way', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
     const { registry, scope } = await mount()
     const granted = makeRoot('granted')
     const elsewhere = makeRoot('elsewhere')
@@ -356,7 +358,9 @@ describe('revalidation without a restart', () => {
     expect(scope.scopeOf(primary)).toEqual([canonicalPath(granted)])
   })
 
-  it('re-registering a path that was replaced updates the one registration instead of duplicating it', async () => {
+  it('re-registering a path that was replaced updates the one registration instead of duplicating it', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
     const { registry, scope } = await mount()
     const granted = makeRoot('granted')
     const elsewhere = makeRoot('elsewhere')

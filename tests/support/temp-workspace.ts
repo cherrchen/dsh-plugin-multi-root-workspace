@@ -10,7 +10,7 @@
  * @module tests/support/temp-workspace
  */
 
-import { accessSync, constants, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { accessSync, constants, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,8 +27,11 @@ function contains(root: string, path: string): boolean {
 /**
  * A writable parent outside the automatic temporary write grants.
  *
- * Prefers the repository (always writable here and never a temp grant), then
- * the temp directory's parent, then home.
+ * Prefers the repository (always writable here and never a temp grant), then the
+ * temp directory's parent, then home. A candidate is skipped when it is itself
+ * covered by a temporary grant, so the choice stays correct on a host whose temp
+ * area is the parent of another candidate — the guard below would otherwise
+ * reject a fixture the sibling-denial cases depend on.
  * @returns an existing directory that can host fixture siblings.
  */
 function fixtureParent(): string {
@@ -38,6 +41,7 @@ function fixtureParent(): string {
     try {
       mkdirSync(candidate, { recursive: true })
       accessSync(candidate, constants.W_OK)
+      assertOutsideTempGrants(candidate)
       return candidate
     } catch {
       continue
@@ -57,6 +61,29 @@ export function assertOutsideTempGrants(workspace: string): void {
       throw new Error(`fixture workspace ${workspace} must be outside temporary writable root ${root}`)
     }
   }
+}
+
+/**
+ * Whether this host can create a directory symlink in the fixture area.
+ *
+ * Windows refuses `symlink()` without Developer Mode or an elevated process, so
+ * the cases that need one must skip there with a reason instead of failing for a
+ * privilege the suite cannot grant itself. The probe is cached: it is asked once
+ * per process, by several suites.
+ */
+let symlinkSupport: string | undefined
+export function symlinkUnsupportedReason(): string | undefined {
+  if (symlinkSupport !== undefined) return symlinkSupport === '' ? undefined : symlinkSupport
+  const base = mkdtempSync(join(fixtureParent(), 'dsh-mr-symlink-'))
+  try {
+    symlinkSync(join(base, 'target'), join(base, 'link'), 'dir')
+    symlinkSupport = ''
+  } catch (error) {
+    symlinkSupport = `this host cannot create a directory symlink (${error instanceof Error ? error.message : String(error)})`
+  } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
+  return symlinkSupport === '' ? undefined : symlinkSupport
 }
 
 /** One allocated fixture tree: a primary root and a sibling outside it. */

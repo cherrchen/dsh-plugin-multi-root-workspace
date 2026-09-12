@@ -91,7 +91,15 @@ function separator(argv: readonly string[]): number {
   return argv.length - COMMAND.length - 1
 }
 
-describe('additional-root grants per dialect', () => {
+/**
+ * The dialect suites below drive the POSIX runner argv (Seatbelt / bwrap /
+ * Landlock). Windows has no kernel rung for additional roots in this release, so
+ * they skip there with this reason instead of failing for a platform the plugin
+ * does not claim; the Windows ACL rung keeps its own upstream shape.
+ */
+const posixRunner = process.platform === 'darwin' || process.platform === 'linux'
+
+describe.skipIf(!posixRunner)('additional-root grants per dialect (POSIX runner argv only)', () => {
   const extra = (): string[] => [fixture.outside, `${fixture.base}/third`]
 
   it('extends the Seatbelt allow form inside the profile the upstream provider built', async () => {
@@ -154,7 +162,7 @@ describe('additional-root grants per dialect', () => {
   })
 })
 
-describe('mode and scope gating', () => {
+describe.skipIf(!posixRunner)('mode and scope gating (POSIX runner argv only)', () => {
   it('grants nothing under read-only, even with a populated scope', async () => {
     for (const dialect of DIALECTS) {
       const { upstream, ours } = await confineBoth(dialect, 'read-only', [fixture.outside])

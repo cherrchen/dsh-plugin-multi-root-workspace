@@ -19,7 +19,7 @@ import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-ses
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt, { renderContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import { MULTI_ROOT_CONTEXT_NAME, MultiRootScopeService, sanitizeAdditionalRoots } from '../src/scope.ts'
-import { createFixtureWorkspace } from './support/temp-workspace.ts'
+import { createFixtureWorkspace, symlinkUnsupportedReason } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
 let fixture: FixtureWorkspace
@@ -112,7 +112,9 @@ describe('root sanitization', () => {
     expect(roots).toEqual(before)
   })
 
-  it('withholds a registration whose path was replaced after it was granted', () => {
+  it('withholds a registration whose path was replaced after it was granted', (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
     // The audited hole: `canonicalPath` is `realpath`, so a registered directory
     // swapped for a symlink resolves to whatever that symlink points at. The
     // grant is keyed to the directory that was granted, so the replacement must

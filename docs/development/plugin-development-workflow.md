@@ -147,12 +147,18 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 三行 insert
 
 `.github/workflows/ci.yml` 在 `ubuntu-latest` 与 `macos-latest` 上执行：`lint` → `typecheck` → **`build`** → `test` → `kernel:probe` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `docs:check`。升级工作流（`upgrade.yml`）同样把 `build` 放在 `test` 之前。
 
-Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seatbelt。**"没跑"不会被记成通过**，机制有两层：
+Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seatbelt。**"没跑"不会被记成通过**，机制分两层，而且**按方言**判定：
 
-1. `pnpm kernel:probe`（`scripts/check-kernel-runner.mjs`）直接用原始机制探测宿主能否受限执行（`sandbox-exec` + allow profile / `bwrap` 绑定 flags / Landlock launcher）。能 → 向 `$GITHUB_ENV` 写入 `DSH_REQUIRE_KERNEL_RUNNER=1`；不能 → 打印每条机制的原因。
-2. `tests/parity-matrix.spec.ts` 与 `smoke:behavior` 的内核断言在 runner 不可用时，要么显式 skip 并打印原因（普通开发机），要么**直接失败**（`DSH_REQUIRE_KERNEL_RUNNER=1` 时）。判定逻辑集中在 `tests/support/kernel-runner.ts`。
+1. `pnpm kernel:probe`（`scripts/check-kernel-runner.mjs`）用原始机制逐个探测本机能否受限执行（`sandbox-exec` + allow profile / `bwrap` 绑定 flags / Landlock launcher），把**确实跑通的那几个方言**写进 `$GITHUB_ENV` 的 `DSH_PROBE_VERIFIED_DIALECTS`；一个都跑不通时打印每条机制的原因。
+2. `tests/parity-matrix.spec.ts` 与 `smoke:behavior` 的内核断言：**探针证明本机跑得通的方言必须真跑**（runner 不可用即失败），本机没有的方言永不要求（在 macOS 上要求 bwrap、或在 Linux 上要求 Seatbelt，都只会制造与本插件无关的红灯），未跑探针时一律不要求（开发机照旧打印原因后 skip）。判定集中在 `tests/support/kernel-runner.ts`；`DSH_REQUIRE_KERNEL_RUNNER=1` 可强制要求全部方言，用来检查 skip 本身是否诚实。
 
-Windows 内核级多根不在第一期范围（Windows 写路径由 fs fence 覆盖，见需求文档），因此没有 `windows-latest` 腿。
+### Windows 验证腿
+
+`ci.yml` 的矩阵含 `windows-latest`（`kernel: none` 标记），用于验证"fs fence 覆盖 Windows 写路径"这一承诺所依赖的**平台无关代码**：校验规则、注册表、命令与 RPC 通道、面板、client 制品。它在 Windows 上**不跑**需要 POSIX shell 的冒烟（`smoke:compose/behavior/journey`）与 `kernel:probe`（Windows 没有内核多根档位，第一期范围，见需求文档）；驱动 POSIX runner argv 的套件（`parity-matrix`、`fs-parity`、`sandbox-multi-root` 的方言部分）在该平台**显式 skip 并打印原因**，而不是把"平台没有这个能力"记成失败。
+
+该腿受仓库变量 `DSH_WINDOWS_CI` 控制：设为 `1` 时启用。这样做是因为标准 Windows runner 在**私有**仓库上消耗计费分钟，而本仓库当前没有可用的计费/额度；一旦仓库公开或配置了自托管 runner，只需把这个变量置 `1`，无需改工作流（矩阵与条件都已就位）。
+
+失败可诊断：`test` 与 `smoke:behavior` 的输出会同时写入 `vitest.log` / `smoke-behavior.log`，步骤失败时由 `actions/upload-artifact@v4` 上传，公共仓库无需管理员权限即可下载——"红但看不到日志"的运行等于没人能修。
 
 ## 8. 常见失败与处置
 

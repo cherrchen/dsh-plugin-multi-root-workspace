@@ -14,14 +14,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS exercises the Seatbelt dialect; Linux exercises bwrap/Landlock
-        # selection, and both run the confined bash steps of the journey for
-        # real. The Windows kernel path is out of scope (the fs fence covers
-        # Windows writes; see the requirements document).
-        os:
-          - ubuntu-latest
-          - macos-latest
+        include:
+          # macOS drives the Seatbelt dialect, Linux drives bwrap/Landlock, and
+          # both run the confined steps of the journey and the behavior battery
+          # for real.
+          - os: ubuntu-latest
+            kernel: posix
+          - os: macos-latest
+            kernel: posix
+          # Windows is verified too, because "the fs fence covers Windows" is a
+          # claim this repository makes and nothing else checks it: the fence,
+          # the registry, the validation rules, the command, the channel and the
+          # panel are all platform-independent code that must keep working there.
+          # What Windows does NOT have is a kernel rung for additional roots
+          # (first-release scope, see the requirements document), and its smoke
+          # batteries need a POSIX shell — so those steps run on the POSIX lanes
+          # and the suites that drive POSIX runner argv skip on Windows with the
+          # reason printed.
+          - os: windows-latest
+            kernel: none
+    # Parked, not deleted: this job is ready to run on a Windows machine as soon
+    # as one is set up to receive it — a self-hosted runner labelled `dsh-win`, or
+    # by making the repository public (standard Windows runners bill minutes on
+    # private repositories). Enable by flipping this single flag.
+    if: vars.DSH_WINDOWS_CI == '1' || matrix.kernel == 'posix'
     runs-on: ${{ matrix.os }}
+    env:
+      # Readable, non-interactive failures: no TTY to wrap, no spinner rewrites.
+      CI: 'true'
+      FORCE_COLOR: '0'
+      TERM: dumb
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -31,20 +53,56 @@ jobs:
         with:
           node-version: 22.19.0
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm typecheck
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck both faces
+        run: pnpm typecheck
       # Build BEFORE the tests: `tests/client-bundle.spec.ts` asserts the BUILT
       # browser artifact, and `lib/` is not in Git (see .gitignore), so a clean
       # checkout has nothing to assert until this step has run.
-      - run: pnpm build
-      - run: pnpm test
-      # Decide whether this machine can really confine a process. If it can, the
-      # kernel assertions in the matrix and the behavior smoke must EXECUTE
-      # (a skip becomes a failure); if it cannot, they skip loudly with a reason
-      # instead of pretending to pass. See scripts/check-kernel-runner.mjs.
-      - run: pnpm kernel:probe
-      - run: pnpm smoke:compose
-      - run: pnpm smoke:behavior
-      - run: pnpm smoke:journey
+      - name: Build the package (before the tests that read lib/)
+        run: pnpm build
+
+      # The test log is captured as well as streamed, and uploaded when the step
+      # fails. A red run has to be diagnosable from the run page alone — an
+      # unreproducible failure with no log is a failure nobody can fix.
+      - name: Run the unit suite
+        run: pnpm test > vitest.log 2>&1
+      - name: Upload the test log when the suite failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-log-${{ matrix.os }}
+          path: |
+            vitest.log
+            *.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Which dialects can this machine really execute? The probe answers per
+      # dialect, and the kernel assertions for exactly those dialects must RUN
+      # (a skip becomes a failure) while a dialect this host does not have is
+      # never required. See scripts/check-kernel-runner.mjs.
+      - if: matrix.kernel == 'posix'
+        run: pnpm kernel:probe
+
+      - if: matrix.kernel == 'posix'
+        run: pnpm smoke:compose
+      - if: matrix.kernel == 'posix'
+        run: pnpm smoke:behavior > smoke-behavior.log 2>&1
+      - name: Upload the behavior smoke log when it failed
+        if: failure() && matrix.kernel == 'posix'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-log-${{ matrix.os }}
+          path: |
+            smoke-behavior.log
+            vitest.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - if: matrix.kernel == 'posix'
+        run: pnpm smoke:journey
+
       - run: pnpm docs:check

@@ -355,6 +355,17 @@ async function registryRestartBattery(ctx) {
   return results
 }
 
+/**
+ * The kernel dialect this host would use, as far as the assertions care: the
+ * per-dialect requirement rule needs a name even when confinement is impossible
+ * (Windows has no kernel rung for additional roots at all).
+ */
+function hostDialect() {
+  if (process.platform === 'darwin') return 'seatbelt'
+  if (process.platform === 'linux') return 'bwrap'
+  return 'none'
+}
+
 /** The canonical spelling of a path, resolved the way the plugin resolves it. */
 function canonical(path) {
   try {
@@ -486,7 +497,7 @@ try {
           check.equal(JSON.parse(bashOutside).denied, true, 'bash reports the denial as a sandbox denial fact')
         }
       } else if (runnerRefused) {
-        check.skip(`${mode}: confined bash execution (${requireKernelRunner(bashInside.slice(0, 120))})`)
+        check.skip(`${mode}: confined bash execution (${requireKernelRunner(hostDialect(), bashInside.slice(0, 120))})`)
       } else {
         check.ok(false, `${mode}: bash wrote inside the primary root as expected`, bashInside)
       }
@@ -530,7 +541,7 @@ try {
       }
 
       if (bashExtra.includes('SANDBOX_UNAVAILABLE')) {
-        check.skip(`${mode}: confined bash against the additional root (${requireKernelRunner(bashExtra.slice(0, 120))})`)
+        check.skip(`${mode}: confined bash against the additional root (${requireKernelRunner(hostDialect(), bashExtra.slice(0, 120))})`)
       } else if (mode === 'workspace-write') {
         check.ok(bashExtra.includes('"wroteExtra":true'), `${mode}: bash writes the additional root`, bashExtra)
         check.ok(bashThird.includes('"wroteThird":false'), `${mode}: bash cannot write outside every root`, bashThird)
