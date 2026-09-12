@@ -29,7 +29,7 @@
  * @module scripts/smoke-behavior
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { FileSystem } from '@deepseek-ai/dsh-fs'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
@@ -205,6 +205,140 @@ async function multiRootBattery(ctx) {
   return results
 }
 
+/**
+ * One battery of operations driven the way a USER drives them: through
+ * `/workspace-folders` and the registry, with nothing injected by hand. It
+ * proves the M3 path end to end inside a real composed profile — the command
+ * reaches the store, the store feeds the scope, and the scope decides what the
+ * fs fence grants right now.
+ * @param ctx - the settled root context.
+ * @returns a map of case name to outcome.
+ */
+async function registryBattery(ctx) {
+  const results = new Map()
+  const policy = ctx.sandboxPolicy.resolve({})
+  const registry = ctx.get('multiRootRegistry')
+  results.set('the registry service is mounted', registry === undefined ? 'undefined' : registry.constructor.name)
+
+  // A root agent is what a command needs: the dispatch surface is per agent, and
+  // this profile boots without a session until something asks for one.
+  const handle = await ctx.agents.create({
+    sessionId: `mr-smoke-${process.pid}`,
+    meta: { cwd: primaryRoot },
+  })
+  const agent = handle.agent
+  try {
+    const run = async (line) => await ctx.commands.execute(agent, line, [], new AbortController().signal)
+    results.set('the command is registered', String(ctx.commands.find(agent, 'workspace-folders') !== undefined))
+
+    const write = async (path) => {
+      try {
+        await ctx.fs.writeText(await ctx.fs.resolve(path), 'payload', undefined, undefined, policy)
+        return 'ok'
+      } catch (error) {
+        return describe(error)
+      }
+    }
+
+    const deniedBefore = await write(join(extraRoot, 'registry-before.txt'))
+    results.set('fs denies the extra root before it is registered', deniedBefore)
+
+    const added = await run(`/workspace-folders add ${extraRoot}`)
+    results.set('the command reports success', String(added?.result?.kind))
+    results.set('the command names the workspace root', String(added?.result?.text?.includes(canonical(primaryRoot))))
+    const granted = ctx.multiRootScope.scopeOf(policy.workspaceRoot)
+    results.set('the scope grants the command-registered root', String(granted.includes(canonical(extraRoot))))
+
+    const writeAfter = await write(join(extraRoot, 'registry-after.txt'))
+    results.set('fs writes the command-registered root', writeAfter)
+    results.set('the file is really on disk', String(existsSync(join(extraRoot, 'registry-after.txt'))))
+
+    const listed = await run('/workspace-folders list')
+    results.set('list reports the registered root', String(listed?.result?.text?.includes(extraRoot)))
+    results.set('list reports only the workspace root as primary', String(listed?.result?.text?.includes('primary, always writable')))
+
+    const aliased = await run('/workspace-folders alias 1 payments')
+    results.set('alias is stored and reported', String(aliased?.result?.text?.includes('[payments]')))
+
+    const duplicate = await run(`/workspace-folders add ${primaryRoot}`)
+    results.set('adding the workspace root is refused loudly', String(duplicate?.result?.text?.includes('equals-primary')))
+
+    const removed = await run('/workspace-folders remove 1')
+    results.set('the command removes the root', String(removed?.result?.kind))
+    results.set('the removal revokes the grant', String(!ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
+    const writeAfterRemoval = await write(join(extraRoot, 'registry-removed.txt'))
+    results.set('fs denies the removed root again', writeAfterRemoval)
+
+    // Leave one root registered — with an alias, so the NEXT boot can prove
+    // durability of both the registration and its display alias.
+    const readded = await run(`/workspace-folders add ${extraRoot}`)
+    results.set('the root can be registered again after removal', String(readded?.result?.kind))
+    const realiased = await run('/workspace-folders alias 1 payments')
+    results.set('the alias is set on the re-registered root', String(realiased?.result?.text?.includes('[payments]')))
+    results.set('the root is registered for the restart check', String(ctx.multiRootScope.scopeOf(policy.workspaceRoot).length))
+  } finally {
+    await handle.dispose()
+  }
+  return results
+}
+
+/**
+ * The restart half of the registry battery: a fresh boot must grant the root
+ * that the previous boot persisted, without any command running this time.
+ * @param ctx - the settled root context of the second boot.
+ * @returns a map of case name to outcome.
+ */
+async function registryRestartBattery(ctx) {
+  const results = new Map()
+  const policy = ctx.sandboxPolicy.resolve({})
+  const registry = ctx.get('multiRootRegistry')
+  const statuses = registry.list(policy.workspaceRoot)
+  results.set('the persisted root survives the restart', String(statuses.length))
+  results.set('the persisted root is available', String(statuses[0]?.state))
+  results.set('the alias survives the restart', String(statuses[0]?.alias))
+  results.set('the scope grants the persisted root', String(
+    ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot)),
+  ))
+  try {
+    await ctx.fs.writeText(await ctx.fs.resolve(join(extraRoot, 'registry-restart.txt')), 'payload', undefined, undefined, policy)
+    results.set('fs writes the persisted root after a restart', 'ok')
+  } catch (error) {
+    results.set('fs writes the persisted root after a restart', describe(error))
+  }
+  // Leave the store as it was found so the pass-through comparisons that ran
+  // earlier in this script keep their meaning on a re-run.
+  await registry.remove(policy.workspaceRoot, { kind: 'ordinal', ordinal: 1 })
+  results.set('the battery cleans up after itself', String(registry.list(policy.workspaceRoot).length))
+  return results
+}
+
+/** The canonical spelling of a path, resolved the way the plugin resolves it. */
+function canonical(path) {
+  try {
+    return realpathSync.native(path)
+  } catch {
+    return path
+  }
+}
+
+/** Boot one profile and run the registry battery, then the restart battery. */
+async function runRegistryProfile(profile) {
+  process.env.DSH_PERMISSION_MODE = 'workspace-write'
+  const first = await bootProfile(profile, home)
+  let outcomes
+  try {
+    outcomes = await registryBattery(first.ctx)
+  } finally {
+    await first.ctx.fiber.dispose()
+  }
+  const second = await bootProfile(profile, home)
+  try {
+    return { outcomes, restart: await registryRestartBattery(second.ctx) }
+  } finally {
+    await second.ctx.fiber.dispose()
+  }
+}
+
 /** The plugin profile booted with an additional root registered. */
 async function runMultiRootProfile(profile, mode) {
   process.env.DSH_PERMISSION_MODE = mode
@@ -362,6 +496,56 @@ try {
         check.ok(bashExtra.includes('"wroteExtra":false'), `${mode}: read-only leaves the additional root untouched`, bashExtra)
       }
     }
+    // --- the M3 path: roots registered by the command, not by the smoke --------
+    for (const name of ['registry-before.txt', 'registry-after.txt', 'registry-removed.txt', 'registry-restart.txt']) {
+      rmSync(join(extraRoot, name), { force: true })
+    }
+    const registry = await runRegistryProfile(PLUGIN_PROFILE)
+
+    check.equal(String(registry.outcomes.get('the registry service is mounted')), 'MultiRootRegistry',
+      'the plugin profile mounts the root registry service')
+    check.equal(String(registry.outcomes.get('the command is registered')), 'true',
+      'the plugin profile registers /workspace-folders')
+    check.contains(String(registry.outcomes.get('fs denies the extra root before it is registered')), 'FS_SANDBOX_DENIED',
+      'the extra root is denied before the command registers it')
+    check.equal(String(registry.outcomes.get('the command reports success')), 'success',
+      'the command adds the root', String(registry.outcomes.get('the command reports success')))
+    check.equal(String(registry.outcomes.get('the command names the workspace root')), 'true',
+      'the command output names the session workspace root')
+    check.equal(String(registry.outcomes.get('the scope grants the command-registered root')), 'true',
+      'the registry feeds the scope the command-registered root')
+    check.equal(String(registry.outcomes.get('fs writes the command-registered root')), 'ok',
+      'fs writes the command-registered root', String(registry.outcomes.get('fs writes the command-registered root')))
+    check.equal(String(registry.outcomes.get('the file is really on disk')), 'true',
+      'the write really landed on disk')
+    check.equal(String(registry.outcomes.get('list reports the registered root')), 'true', 'list reports the root')
+    check.equal(String(registry.outcomes.get('list reports only the workspace root as primary')), 'true',
+      'list distinguishes the primary root')
+    check.equal(String(registry.outcomes.get('alias is stored and reported')), 'true', 'an alias round-trips')
+    check.equal(String(registry.outcomes.get('adding the workspace root is refused loudly')), 'true',
+      'adding the workspace root itself fails with equals-primary')
+    check.equal(String(registry.outcomes.get('the command removes the root')), 'success', 'the command removes the root')
+    check.equal(String(registry.outcomes.get('the removal revokes the grant')), 'true',
+      'removal revokes the grant immediately')
+    check.equal(String(registry.outcomes.get('the root can be registered again after removal')), 'success',
+      'the same directory can be registered again after removal')
+    check.equal(String(registry.outcomes.get('the alias is set on the re-registered root')), 'true',
+      'the alias is set on the re-registered root')
+    check.contains(String(registry.outcomes.get('fs denies the removed root again')), 'FS_SANDBOX_DENIED',
+      'the removed root is denied again')
+
+    check.equal(String(registry.restart.get('the persisted root survives the restart')), '1',
+      'the registered root survives a restart')
+    check.equal(String(registry.restart.get('the persisted root is available')), 'available',
+      'the persisted root is available after the restart')
+    check.equal(String(registry.restart.get('the alias survives the restart')), 'payments',
+      'the alias survives the restart')
+    check.equal(String(registry.restart.get('the scope grants the persisted root')), 'true',
+      'the persisted root is granted without any command running')
+    check.equal(String(registry.restart.get('fs writes the persisted root after a restart')), 'ok',
+      'fs writes the persisted root after a restart')
+    check.equal(String(registry.restart.get('the battery cleans up after itself')), '0',
+      'the registry battery leaves the store empty')
   } finally {
     process.chdir(originalCwd)
     delete process.env.DSH_PERMISSION_MODE
