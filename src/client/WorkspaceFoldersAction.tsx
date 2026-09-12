@@ -26,6 +26,7 @@ import {
   IconCopyOutline16,
   IconEditOutline16,
   IconEllipsisOutline16,
+  IconFolderClose16,
   IconFolderOpenOutline16,
   IconPlusOutline16,
   IconTrashOutline16,
@@ -111,15 +112,6 @@ function IconButton(props: {
   )
 }
 
-/** The 16px outline folder glyph of the sidebar trigger. */
-function FolderIcon(): ReactNode {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M2.5 4.5c0-.83.67-1.5 1.5-1.5h2.17c.4 0 .78.16 1.06.44l.89.89c.28.28.66.44 1.06.44H12c.83 0 1.5.67 1.5 1.5v5.23c0 .83-.67 1.5-1.5 1.5H4c-.83 0-1.5-.67-1.5-1.5V4.5Z" />
-    </svg>
-  )
-}
-
 /** The 16px close glyph of the dialog's header button. */
 function CloseIcon(): ReactNode {
   return (
@@ -159,17 +151,22 @@ export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): Reac
   const rail = props.wide === false
   return (
     <>
-      <button
-        type="button"
-        className={rail ? 'mrfw-trigger mrfw-triggerRail' : 'mrfw-trigger'}
-        title={props.t('action.title')}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => { setOpen(value => !value) }}
-      >
-        <span className="mrfw-triggerIcon" aria-hidden="true"><FolderIcon /></span>
-        {rail ? null : <span>{props.t('action.label')}</span>}
-      </button>
+      {/* The row wrapper mirrors the host `.triggerRow`: its 2px side overhang
+          (`calc(100% + 4px)` + negative margins) is what puts this row's icon
+          on the same 18px ink line as the Settings gear below it. */}
+      <div className={rail ? 'mrfw-triggerRow mrfw-railRow' : 'mrfw-triggerRow'}>
+        <button
+          type="button"
+          className={rail ? 'mrfw-trigger mrfw-triggerRail' : 'mrfw-trigger'}
+          title={props.t('action.title')}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onClick={() => { setOpen(value => !value) }}
+        >
+          <span className="mrfw-triggerIcon" aria-hidden="true"><IconFolderClose16 size={rail ? 18 : 16} /></span>
+          {rail ? null : <span className="mrfw-triggerLabel">{props.t('action.label')}</span>}
+        </button>
+      </div>
       {open ? <WorkspaceFoldersDialog {...props} onClose={() => { setOpen(false) }} /> : null}
     </>
   )

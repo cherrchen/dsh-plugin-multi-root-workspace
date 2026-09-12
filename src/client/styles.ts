@@ -13,12 +13,34 @@
 
 /** The stylesheet text; every class is prefixed `mrfw-` to stay collision-free. */
 export const STYLES = /* css */ `
-.mrfw-trigger {
+/* Sidebar footer row, mirroring the host ui-settings-general trigger: the row
+ * wrapper overhangs each side by 2px (width calc(100% + 4px) against the
+ * shell's 12px inline padding) so the icon's ink line lands at 18px from the
+ * column edge — exactly where the Settings gear below sits. */
+.mrfw-triggerRow {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  width: calc(100% + 4px);
+  margin: 4px -2px;
+}
+
+.mrfw-triggerRow.mrfw-railRow {
+  width: 36px;
+  margin: 8px 0 10px;
+}
+
+.mrfw-trigger {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
   height: 42px;
+  margin: 0;
   padding: 0 10px 0 8px;
   border: none;
   border-radius: 12px;
@@ -29,6 +51,7 @@ export const STYLES = /* css */ `
   line-height: 22px;
   text-align: left;
   cursor: pointer;
+  overflow: hidden;
   transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
@@ -41,10 +64,18 @@ export const STYLES = /* css */ `
   display: inline-flex;
 }
 
+.mrfw-triggerLabel {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 .mrfw-triggerRail {
+  flex: none;
   width: 36px;
   height: 36px;
+  margin: 0;
   padding: 0;
+  gap: 0;
   border-radius: 50%;
   justify-content: center;
 }
