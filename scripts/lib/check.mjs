@@ -32,15 +32,24 @@ export function createChecker(label) {
     ok(condition, message, detail) {
       record(condition === true, message, detail)
     },
-    /** Assert deep equality through JSON comparison. */
-    equal(actual, expected, message) {
+    /**
+     * Assert deep equality through JSON comparison.
+     * @param detail - optional caller-supplied evidence (e.g. the recorded
+     *   outcome the assertion read); printed on failure so a red run is
+     *   diagnosable from its log alone.
+     */
+    equal(actual, expected, message, detail) {
       const left = JSON.stringify(actual)
       const right = JSON.stringify(expected)
-      record(left === right, message, left === right ? undefined : `expected ${right}\n  actual   ${left}`)
+      record(left === right, message, left === right ? undefined : `expected ${right}\n  actual   ${left}${detail === undefined ? '' : `\n  evidence ${JSON.stringify(detail)}`}`)
     },
-    /** Assert a substring is present. */
-    contains(haystack, needle, message) {
-      record(typeof haystack === 'string' && haystack.includes(needle), message, `missing ${JSON.stringify(needle)} in ${JSON.stringify(haystack)}`)
+    /** Assert a substring is present, with the same optional evidence line. */
+    contains(haystack, needle, message, detail) {
+      record(
+        typeof haystack === 'string' && haystack.includes(needle),
+        message,
+        `missing ${JSON.stringify(needle)} in ${JSON.stringify(haystack)}${detail === undefined ? '' : `\n  evidence ${JSON.stringify(detail)}`}`,
+      )
     },
     /**
      * Record an assertion this environment cannot make.

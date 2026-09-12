@@ -103,6 +103,10 @@ async function battery(ctx) {
         denied: result.sandbox?.denied ?? null,
         enforcement: result.sandbox?.enforcement ?? null,
         stdout: result.stdout.text.trim(),
+        // Recorded so a failed assertion prints WHY a confined write failed —
+        // the denial dialect's own message (an `Operation not permitted` for
+        // Seatbelt, `read-only file system` for bwrap) or a non-sandbox error.
+        stderr: result.stderr.text.trim(),
         ...wrote(),
       }
     } catch (error) {
@@ -190,25 +194,32 @@ function confinedFacts(outcome) {
     wrote,
     present: fact('present'),
     denied: fact('denied'),
-    // The command ran only if it reported its own redirect AND the host did not
-    // refuse to confine at all (a refusal outcome also carries `wrote: false`,
-    // which is why the failure has to be excluded explicitly).
+    // The command ran only if the host did not refuse to confine at all (a
+    // refusal outcome also carries `wrote: false`, which is why the failure has
+    // to be excluded explicitly); `wrote` is defined exactly when the confined
+    // command settled, so a refusal reads as "ran: false" either way.
     ran: !refused && wrote !== undefined,
   }
 }
 
 /**
- * A confined write of `target`, reported by the COMMAND itself: it prints the
- * outcome of its own `>` redirect, so "the command ran and wrote" comes from
- * inside the confined process rather than from a file the host then inspects.
+ * A confined write of `target`, reported by the COMMAND's own settlement: a
+ * plain `echo payload > <target>` redirect, so "the command ran and wrote" and
+ * "the kernel denied it" are both facts the sandbox seam can classify — a
+ * successful redirect exits 0, a denied one exits non-zero with the dialect's
+ * denial message on stderr. The outcome must NOT swallow the redirect failure
+ * (no `if/else` around it): a command that recovers from the denial exits 0,
+ * and a zero exit is never classified as a sandbox denial, so `denied` could
+ * never become true and the assertions would argue about a fact the shape
+ * made impossible.
  * @param bash - the battery's confined bash runner.
  * @param target - the path the command tries to write.
- * @returns the battery outcome plus what the command said about its own write.
+ * @returns the battery outcome plus what the command's settlement said.
  */
 async function confinedWrite(bash, target) {
   const marker = markerProbe(target)
-  const outcome = await bash(`if echo payload > ${JSON.stringify(target)}; then echo wrote=yes; else echo wrote=no; fi`)
-  return { ...outcome, wrote: String(outcome.stdout ?? '').includes('wrote=yes'), present: marker.present() }
+  const outcome = await bash(`echo payload > ${JSON.stringify(target)}`)
+  return { ...outcome, wrote: outcome.exitCode === 0, present: marker.present() }
 }
 
 /**
@@ -272,6 +283,9 @@ async function multiRootBattery(ctx) {
         exitCode: result.exitCode,
         denied: result.sandbox?.denied ?? null,
         enforcement: result.sandbox?.enforcement ?? null,
+        // Same evidence rule as the pass-through battery's bash(): a denied
+        // write carries the kernel dialect's own denial message here.
+        stderr: result.stderr.text.trim(),
         wroteExtra: existsSync(join(extraRoot, 'bash-extra.txt')),
         wroteThird: existsSync(join(thirdRoot, 'bash-third.txt')),
       }
