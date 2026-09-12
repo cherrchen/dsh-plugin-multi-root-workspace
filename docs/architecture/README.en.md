@@ -25,9 +25,9 @@ Documents describing future designs must clearly state their status.
 
 ## Current State
 
-Architecture design has not started yet.
+A Target Architecture draft exists (not yet implemented; see each document's header for its status):
 
-Do not pre-create placeholder documents such as `current.md` or `target.md` here; create them only when architecture design actually begins.
+- [multi-root-workspace.md](./multi-root-workspace.md) — upstream-unmodified design for Multi-root Workspace: provider replacement + subclassing (status: under review).
 
 ## Naming Convention
 

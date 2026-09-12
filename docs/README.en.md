@@ -16,6 +16,17 @@ This directory holds the project's long-term documentation and engineering knowl
 | [`reference/`](./reference/README.md) | Stable technical reference |
 | [`troubleshooting/`](./troubleshooting/README.md) | Known issues, diagnostics, and solutions |
 
+## Current Documents
+
+The project currently focuses on the DSH Multi-root Workspace plugin under one hard constraint: **no package in the upstream repository (deepseek-harness) may be modified** — all deliverables are an external plugin/bundle installed via `dsh plugin add` or profile patch composition. The four core documents are:
+
+| Document | Location |
+| --- | --- |
+| Requirements | [`requirements/multi-root-workspace.md`](./requirements/multi-root-workspace.md) |
+| Architecture design (target) | [`architecture/multi-root-workspace.md`](./architecture/multi-root-workspace.md) |
+| Development path (plan) | [`plans/active/2026-09-12-multi-root-workspace.md`](./plans/active/2026-09-12-multi-root-workspace.md) |
+| Upstream repository research (reference) | [`reference/multi-root-workspace-research.md`](./reference/multi-root-workspace-research.md) |
+
 ## Core Principles
 
 ### Single Source of Truth

@@ -23,7 +23,7 @@ Only established, relatively stable factual reference content belongs here.
 
 ## Current State
 
-There are no reference documents yet.
+- [multi-root-workspace-research.md](./multi-root-workspace-research.md) — Snapshot research of the upstream repository's Workspace / Sandbox / plugin system (master `c291e7961a`; §8 covers the supplementary research on the no-upstream-changes mechanism).
 
 ## Naming Convention
 

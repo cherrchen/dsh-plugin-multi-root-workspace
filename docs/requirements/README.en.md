@@ -18,9 +18,9 @@
 
 ## Current State
 
-No requirements have been formally defined yet.
+The first requirements document is in place:
 
-Documents will be placed here once requirements work starts.
+- [multi-root-workspace.md](./multi-root-workspace.md) — DSH Multi-root Workspace requirements (status: under review).
 
 ## Naming Convention
 

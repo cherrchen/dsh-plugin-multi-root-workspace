@@ -18,9 +18,9 @@ English: [README.en.md](./README.en.md)
 
 ## 当前状态
 
-项目尚未正式定义任何需求。
+已定义第一份需求文档：
 
-待需求开始定义后，文档将放置在本目录下。
+- [multi-root-workspace.md](./multi-root-workspace.md) — DSH Multi-root Workspace 开发需求（状态：待评审）。
 
 ## 推荐命名
 

@@ -16,6 +16,17 @@ English: [README.en.md](./README.en.md)
 | [`reference/`](./reference/README.md) | 稳定技术参考 |
 | [`troubleshooting/`](./troubleshooting/README.md) | 已知问题、诊断方法和解决方案 |
 
+## 当前文档
+
+当前项目围绕 DSH Multi-root Workspace 插件展开，硬约束为**不修改上游仓库（deepseek-harness）任何包**——全部产物是外部插件/bundle，经 `dsh plugin add` 或 profile patch 组合安装。四份核心文档如下：
+
+| 文档 | 位置 |
+| --- | --- |
+| 开发需求 | [`requirements/multi-root-workspace.md`](./requirements/multi-root-workspace.md) |
+| 架构设计（Target） | [`architecture/multi-root-workspace.md`](./architecture/multi-root-workspace.md) |
+| 开发路径（Plan） | [`plans/active/2026-09-12-multi-root-workspace.md`](./plans/active/2026-09-12-multi-root-workspace.md) |
+| 上游仓库现状调研（Reference） | [`reference/multi-root-workspace-research.md`](./reference/multi-root-workspace-research.md) |
+
 ## 基本原则
 
 ### Single Source of Truth

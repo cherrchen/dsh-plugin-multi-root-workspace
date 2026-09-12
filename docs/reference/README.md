@@ -23,7 +23,7 @@ English: [README.en.md](./README.en.md)
 
 ## 当前状态
 
-尚无参考文档。
+- [multi-root-workspace-research.md](./multi-root-workspace-research.md) — 上游官方仓库 Workspace / Sandbox / 插件体系现状调研快照（master `c291e7961a`；§8 为"不改上游"机制的补充调研）。
 
 ## 推荐命名
 

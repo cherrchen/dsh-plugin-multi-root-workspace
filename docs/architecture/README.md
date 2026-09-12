@@ -25,9 +25,9 @@ English: [README.en.md](./README.en.md)
 
 ## 当前状态
 
-项目尚未开始架构设计。
+已有 Target Architecture 设计稿（尚未实现，状态以文档头部标注为准）：
 
-不要在本目录预先创建 `current.md` 或 `target.md` 等占位文档，等真正开始架构设计以后再创建。
+- [multi-root-workspace.md](./multi-root-workspace.md) — Multi-root Workspace 的不改上游设计：provider 替换 + 子类化（状态：待评审）。
 
 ## 推荐命名
 

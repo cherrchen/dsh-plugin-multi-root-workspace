@@ -36,7 +36,9 @@ Plans with long-term reference value should not be deleted.
 
 ## Current State
 
-There are no plans yet.
+active:
+
+- [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace development path (not started yet; under review; M1 composition & pass-through → M2 multi-root capability → M3 root management & UI).
 
 ## Naming Convention
 
