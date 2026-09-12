@@ -538,7 +538,13 @@ try {
       // encoding rather than about the run (it silently never matched).
       const bashInside = confinedFacts(plugin.outcomes.get('bash writes inside the primary root'))
       const bashOutside = confinedFacts(plugin.outcomes.get('bash writes outside every root'))
-      const runnerRefused = bashInside.failure !== undefined
+      // `wrote` is the fact that says whether the confined command ran at all: when
+      // the host cannot nest a kernel sandbox the plugin's confined bash returns a
+      // failure outcome instead of a boolean. Not `failure !== undefined` — the raw
+      // recorded objects carry host-level fields (`failure`, `denied`) that have
+      // nothing to do with whether THIS command ran, which is how a successful
+      // `wrote: true` run got reported as an unusable runner.
+      const runnerRefused = bashInside.wrote !== true && bashInside.wrote !== false
 
       if (mode === 'workspace-write') {
         check.ok(insideWrite.startsWith('undefined'), `${mode}: fs write inside the primary root succeeded`, insideWrite)
@@ -607,7 +613,7 @@ try {
         check.equal(dialectGrant, String(mode === 'workspace-write'), `${mode}: host dialect grant matches the mode`, dialectGrant)
       }
 
-      if (bashExtra.failure !== undefined) {
+      if (bashExtra.wrote !== true && bashExtra.wrote !== false) {
         check.skip(`${mode}: confined bash against the additional root (${requireKernelRunner(hostDialect(), String(bashExtra.failure).slice(0, 120))})`)
       } else if (mode === 'workspace-write') {
         check.equal(bashExtra.wrote, true, `${mode}: bash writes the additional root`, describeFacts(bashExtra))
