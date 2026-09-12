@@ -15,8 +15,9 @@ jobs:
       fail-fast: false
       matrix:
         # macOS exercises the Seatbelt dialect; Linux exercises bwrap/Landlock
-        # selection. The Windows kernel path is out of scope for M1 (the fs
-        # fence covers Windows writes; see the requirements document).
+        # selection, and both run the confined bash steps of the journey for
+        # real. The Windows kernel path is out of scope (the fs fence covers
+        # Windows writes; see the requirements document).
         os:
           - ubuntu-latest
           - macos-latest
@@ -37,4 +38,5 @@ jobs:
       - run: pnpm build
       - run: pnpm smoke:compose
       - run: pnpm smoke:behavior
+      - run: pnpm smoke:journey
       - run: pnpm docs:check

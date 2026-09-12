@@ -1,0 +1,77 @@
+# Upgrade smoke: check whether a different dsh release still composes and still
+# behaves, WITHOUT touching the pinned versions in this repository.
+#
+# The plugin depends on pre-stable upstream APIs (ADR-0002), so "does a newer
+# dsh break us" is a real question with a mechanical answer: install the
+# requested version family, run the minimal behavior matrix, and report. A
+# difference is the signal to investigate before moving the pin.
+name: Upgrade smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'dsh version to test (e.g. 0.1.5-rc.2). Empty re-tests the current pin.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Move the whole @deepseek-ai family to the requested release. The
+      # `latest` dist-tag points at an old build, so the version is explicit.
+      - name: Move the pin
+        if: ${{ inputs.version != '' }}
+        run: |
+          pnpm add -D -E \
+            "@deepseek-ai/dsh@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-agent@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-app-boot@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-base@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-client-connection@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-client-locale@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-client-ui-renderer@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-client-ui-sidebar@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-client-ui-slots@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-client-ui-workspace@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-commands@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-fs@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-fs-local@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-fs-sandbox@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-sandbox@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-sandbox-local@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-sandbox-policy@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-session@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-session-projection@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-storage@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-storage-domain@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-storage-json@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-subprocess@${{ inputs.version }}" \
+            "@deepseek-ai/dsh-system-prompt@${{ inputs.version }}"
+      - name: Report the versions under test
+        run: node -e "const p=require('./package.json');console.log(JSON.stringify({dsh:p.devDependencies['@deepseek-ai/dsh'],scope:'host+client'},null,1))"
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm smoke:compose
+      - run: pnpm smoke:behavior
+      - run: pnpm smoke:journey
