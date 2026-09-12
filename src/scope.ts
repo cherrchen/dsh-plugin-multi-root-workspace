@@ -3,22 +3,24 @@
  * "which directories belong to this workspace".
  *
  * The primary root is never stored here — it is the session's immutable cwd as
- * resolved by the upstream `ctx.sandboxPolicy` service. This service owns only
- * the additional roots and the canonical key that indexes them, so every
- * enforcing provider (fs fence, kernel-sandbox dialects) resolves the same
- * scope exactly once per confined call.
+ * resolved by the upstream `ctx.sandboxPolicy` service. This service owns the
+ * additional roots, the canonical key that indexes them, and the one model-facing
+ * statement of that topology, so every enforcing provider (fs fence,
+ * kernel-sandbox dialects) and the prompt snapshot all resolve the same scope.
  *
- * M1 ships the resolution path with an empty root table: additional roots
- * arrive in M2 (static injection) and M3 (plugin storage). Keeping the empty
- * case on the same code path is deliberate — the pass-through safety net must
+ * The root table is still filled by the registry's own API (tests and smoke
+ * scripts today; plugin storage in M3). Keeping the empty case on the same code
+ * path as the populated one is deliberate — the pass-through safety net must
  * exercise the real provider wiring, not a stub that later gets replaced.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/scope
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-agent'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
+import type {} from '@deepseek-ai/dsh-system-prompt'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -71,16 +73,62 @@ export function sanitizeAdditionalRoots(
 }
 
 /**
+ * The name of the runtime-context contribution that tells the model which extra
+ * roots belong to this session's workspace.
+ */
+export const MULTI_ROOT_CONTEXT_NAME = 'multi-root:scope'
+
+/**
+ * Render the workspace topology the model is told about. Only roots are listed
+ * (never files), and the sentence states the two facts a denied write would
+ * otherwise have to teach: that the additional roots are part of the SAME
+ * workspace, and that the session cwd is unchanged (requirement §5, §8).
+ * @param primaryRoot - the canonical session workspace root.
+ * @param additionalRoots - canonical additional roots, in scope order.
+ * @returns the stable topology sentence.
+ */
+export function renderWorkspaceRootsContext(primaryRoot: string, additionalRoots: readonly string[]): string {
+  return `Current DSH workspace roots: ${JSON.stringify(additionalRoots)} are additional roots of this session's `
+    + `workspace. Under workspace-write they may be modified like the session workspace; `
+    + `the session cwd remains the primary root (${JSON.stringify(primaryRoot)}).`
+}
+
+/**
  * The `ctx.multiRootScope` service. Providers ask it — never the filesystem —
  * what the current scope is, which is what keeps the fs fence and every kernel
  * dialect on one permission world (requirement §13).
  */
 export class MultiRootScopeService extends Service {
-  /** Additional roots keyed by canonical primary root; empty in M1. */
+  /** Additional roots keyed by canonical primary root; empty until roots are registered. */
   private readonly rootsByPrimary = new Map<string, readonly AdditionalWorkspaceRoot[]>()
 
   constructor(ctx: Context) {
     super(ctx, 'multiRootScope')
+
+    // The prompt contribution is a SOFT dependency: a composition without a
+    // system-prompt seam (bare test contexts, headless probes) simply never
+    // contributes topology instead of failing to load. The callback's own scoped
+    // context is the one that may read the injected services — the service's own
+    // ctx has no inject map for them.
+    ctx.inject(['systemPrompt', 'sandboxPolicy'], (scope: Context) => {
+      scope.systemPrompt.context({
+        name: MULTI_ROOT_CONTEXT_NAME,
+        // Immediately after the sandbox policy sentence this topology extends.
+        order: scope.systemPrompt.getContextOrder('SANDBOX_POLICY') + 1,
+        text: (assembly) => {
+          const session = assembly.agent?.session
+          if (session === undefined) return ''
+          const policy = scope.sandboxPolicy.resolve({ session })
+          // `read-only` mentions no writable root at all (upstream's policy
+          // sentence stays silent about the workspace root too), and with no
+          // additional root there is nothing to add.
+          if (policy.mode !== 'workspace-write') return ''
+          const resolved = this.resolve(policy)
+          if (resolved.additionalRoots.length === 0) return ''
+          return renderWorkspaceRootsContext(resolved.primaryRoot, resolved.additionalRoots)
+        },
+      })
+    })
   }
 
   /**
