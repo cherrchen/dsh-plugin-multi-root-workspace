@@ -41,39 +41,16 @@ jobs:
       # `latest` dist-tag points at an old build, so the version is explicit.
       - name: Move the pin
         if: ${{ inputs.version != '' }}
-        run: |
-          pnpm add -D -E \
-            "@deepseek-ai/dsh@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-agent@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-app-boot@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-base@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-client-connection@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-client-locale@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-client-ui-renderer@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-client-ui-sidebar@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-client-ui-slots@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-client-ui-workspace@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-commands@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-fs@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-fs-local@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-fs-sandbox@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-sandbox@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-sandbox-local@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-sandbox-policy@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-session@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-session-projection@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-storage@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-storage-domain@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-storage-json@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-subprocess@${{ inputs.version }}" \
-            "@deepseek-ai/dsh-system-prompt@${{ inputs.version }}"
+        env:
+          DSH_UPGRADE_VERSION: ${{ inputs.version }}
+        run: node scripts/upgrade-dsh-dependencies.mjs --apply
       - name: Report the versions under test
-        run: node -e "const p=require('./package.json');console.log(JSON.stringify({dsh:p.devDependencies['@deepseek-ai/dsh'],scope:'host+client'},null,1))"
+        run: node scripts/upgrade-dsh-dependencies.mjs
       - run: pnpm typecheck
       # Build first: the artifact test reads lib/, which a clean checkout lacks.
       - run: pnpm build
-      - run: pnpm test
       - run: pnpm kernel:probe
+      - run: pnpm test
       - run: pnpm smoke:compose
       - run: pnpm smoke:behavior
       - run: pnpm smoke:journey

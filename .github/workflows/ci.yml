@@ -15,40 +15,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # macOS drives the Seatbelt dialect, Linux drives bwrap/Landlock, and
-          # both run the confined steps of the journey and the behavior battery
-          # for real.
-          - os: ubuntu-latest
-            kernel: posix
-          - os: macos-latest
-            kernel: posix
-          # Windows is verified too, because "the fs fence covers Windows" is a
-          # claim this repository makes and nothing else checks it: the fence,
-          # the registry, the validation rules, the command, the channel and the
-          # panel are all platform-independent code that must keep working there.
-          # What Windows does NOT have is a kernel rung for additional roots
-          # (first-release scope, see the requirements document), and its smoke
-          # batteries need a POSIX shell — so those steps run on the POSIX lanes
-          # and the suites that drive POSIX runner argv skip on Windows with the
-          # reason printed.
-          - os: windows-latest
-            kernel: none
+        # Do not create a Windows job at all while the paid lane is parked.
+        # Repository variables are available while expanding a matrix, unlike
+        # `matrix.*` in a job-level condition.
+        os: ${{ fromJSON(vars.DSH_WINDOWS_CI == '1' && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest","macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     env:
       # Readable, non-interactive failures: no TTY to wrap, no spinner rewrites.
       CI: 'true'
       FORCE_COLOR: '0'
       TERM: dumb
-      # The Windows lane is parked, not deleted: this job is ready to run there as
-      # soon as a Windows machine is set up to receive it — a self-hosted runner,
-      # or making the repository public, since standard Windows runners bill
-      # minutes on private repositories. Set the repository variable
-      # DSH_WINDOWS_CI=1 to enable it; every POSIX-only step below carries the same
-      # condition, and it is checked per STEP because a job-level `if` that reads
-      # `matrix` makes GitHub reject the whole file (the run then reports a failure
-      # with zero jobs).
-      DSH_WINDOWS_CI: ${{ vars.DSH_WINDOWS_CI }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -70,6 +46,12 @@ jobs:
       - name: Build the package (before the tests that read lib/)
         run: pnpm build
 
+      # Export the verified dialect set BEFORE unit tests decide whether their
+      # real-runner cases may skip.
+      - if: matrix.os != 'windows-latest'
+        name: Probe which kernel dialects this host can really run
+        run: pnpm kernel:probe
+
       # The test log is captured as well as streamed, and uploaded when the step
       # fails. A red run has to be diagnosable from the run page alone — an
       # unreproducible failure with no log is a failure nobody can fix.
@@ -86,22 +68,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # Which dialects can this machine really execute? The probe answers per
-      # dialect, and the kernel assertions for exactly those dialects must RUN
-      # (a skip becomes a failure) while a dialect this host does not have is
-      # never required. See scripts/check-kernel-runner.mjs.
-      - if: matrix.kernel == 'posix' || env.DSH_WINDOWS_CI == '1'
-        name: Probe which kernel dialects this host can really run
-        run: pnpm kernel:probe
-
-      - if: matrix.kernel == 'posix'
+      - if: matrix.os != 'windows-latest'
         name: Composition gate
         run: pnpm smoke:compose
-      - if: matrix.kernel == 'posix'
+      - if: matrix.os != 'windows-latest'
         name: Behavior battery
         run: pnpm smoke:behavior > smoke-behavior.log 2>&1
       - name: Upload the behavior smoke log when it failed
-        if: failure() && matrix.kernel == 'posix'
+        if: failure() && matrix.os != 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: smoke-log-${{ matrix.os }}
@@ -110,7 +84,7 @@ jobs:
             vitest.log
           if-no-files-found: ignore
           retention-days: 7
-      - if: matrix.kernel == 'posix'
+      - if: matrix.os != 'windows-latest'
         name: Cross-repository journey
         run: pnpm smoke:journey
 
