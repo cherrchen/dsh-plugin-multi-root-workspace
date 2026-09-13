@@ -2,7 +2,6 @@
   "name": "@dsh-electron/dsh-plugin-multi-root-workspace",
   "description": "Multi-root Workspace for DeepSeek Harness: adds N additional roots to the workspace sandbox scope as an out-of-tree bundle",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -46,6 +45,13 @@
     "README.en.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cherrchen/dsh-plugin-multi-root-workspace.git"
+  },
   "scripts": {
     "build": "pnpm run build:types && pnpm run bundle",
     "build:types": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
@@ -53,6 +59,7 @@
     "docs:check": "node scripts/check-docs.mjs",
     "kernel:probe": "node scripts/check-kernel-runner.mjs",
     "lint": "oxlint",
+    "release": "node scripts/bump-version.mjs",
     "smoke": "pnpm smoke:compose && pnpm smoke:behavior && pnpm smoke:journey",
     "smoke:behavior": "node scripts/smoke-behavior.mjs",
     "smoke:compose": "node scripts/smoke-compose.mjs",

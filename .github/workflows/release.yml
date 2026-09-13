@@ -1,0 +1,76 @@
+name: Release
+
+# Tag-driven release: pushing an annotated tag `v*` runs the full CI gates
+# (via the reusable verify job in ci.yml), then publishes the exact tagged
+# version to npm and creates the GitHub Release with generated notes.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      # Full history so release-notes.mjs can find the previous tag.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Check that the tag matches package.json
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag $tag does not match the package.json version $version"
+            exit 1
+          fi
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build the package
+        run: pnpm build
+
+      - name: Pack and verify the tarball contents
+        run: |
+          pnpm pack --pack-destination dist
+          tarball="$(ls dist/*.tgz)"
+          echo "TARBALL=$tarball" >> "$GITHUB_ENV"
+          tar -tzf "$tarball" | tee packed-files.txt
+          for required in package/cordis.patch.yml package/lib/index.js package/lib/client.js package/package.json; do
+            grep -qx "$required" packed-files.txt || {
+              echo "::error::The tarball is missing $required — the host or client boot graph would break."
+              exit 1
+            }
+          done
+
+      - name: Publish to npm
+        run: pnpm publish --no-git-checks --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Generate the release notes
+        run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > release-notes.md
+
+      - name: Create the GitHub release
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md "$TARBALL"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

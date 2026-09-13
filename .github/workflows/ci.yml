@@ -1,6 +1,9 @@
 name: CI
 
 on:
+  # Reusable-verify entry point for release.yml: the tag build must pass the
+  # same gates (lint, typecheck, build, probe, tests, smokes, docs) as main.
+  workflow_call:
   workflow_dispatch:
   pull_request:
   push:

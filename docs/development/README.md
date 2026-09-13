@@ -23,6 +23,7 @@ English: [README.en.md](./README.en.md)
 开发环境、工具链与验证流程已确定，见：
 
 - [plugin-development-workflow.md](./plugin-development-workflow.md) — 构建、测试、冒烟、双运行时矩阵、上游耦合与升级流程。
+- [release-workflow.md](./release-workflow.md) — 发版流程：版本号变更脚本、tag 规范、npm 发布与 GitHub Release。
 
 ## 已确定的工具链事实
 
