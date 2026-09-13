@@ -15,8 +15,9 @@ verify（复用 ci.yml 全部门禁） → publish（npm publish + GitHub Releas
 
 ## 一次性配置
 
-1. **npm token**：在 npmjs.com 生成 Granular Access Token，授权 `@dsh-electron` scope 的发布权限，添加到 GitHub 仓库 Secret `NPM_TOKEN`。
-2. **scope 已存在**：`@dsh-electron` 组织必须已在 npm 上注册且你有发布权限（scoped 包首次公开发布前确认）。
+- **scope 已存在**：`@dsh-electron` 组织必须已在 npm 上注册且你有发布权限。
+- **Trusted publishing（OIDC，当前形态）**：包在 npm 上存在后，已在其 Publish settings → Trusted publisher 中登记本仓库与 `release.yml`。此后发布凭 GitHub Actions 的 OIDC 身份完成（`id-token: write` 权限），仓库不保存任何 npm 凭证，也无需配置 Secret。若在 npm 侧登记了 environment 名，还需给 publish job 声明同名 `environment:`。
+- （历史）v0.1.0 是通过带 2FA-bypass 的 Granular Access Token（Secret `NPM_TOKEN`）发布的；npm 正逐步淘汰 2FA-bypass token，首个版本发出后即切换为 trusted publishing 并删除了该 Secret。
 
 ## 版本号变更：`scripts/bump-version.mjs`
 
@@ -55,10 +56,10 @@ node scripts/release-notes.mjs v0.1.0   # 本地预览，输出 markdown
    - 校验 tag 与 `package.json` 版本一致；
    - `pnpm install --frozen-lockfile && pnpm build`（`lib/` 不进 git，tarball 必须现构建；client 制品须在 pack 前就绪）；
    - `pnpm pack` 后校验 tarball 内容包含 `cordis.patch.yml`、`lib/index.js`、`lib/client.js`——缺任何一个都会破坏宿主 patch 或 client 启动图（见 [client-bundle-not-in-boot-graph](../troubleshooting/client-bundle-not-in-boot-graph.md)）；
-   - `pnpm publish --no-git-checks --provenance` 发布（`--no-git-checks` 是因为 Actions 中处于 detached HEAD）；provenance 依赖 `id-token: write` 权限与 `package.json` 的 `repository` 字段；
+   - `pnpm publish --no-git-checks --provenance` 发布（`--no-git-checks` 是因为 Actions 中处于 detached HEAD）；认证走 npm trusted publishing（OIDC），`package.json` 的 `repository` 字段与 job 的 `id-token: write` 权限是它的前提；
    - 用 `gh release create` 创建 GitHub Release：正文来自 release-notes 脚本，tarball 作为 Release 资产。
 
-`pnpm publish` 的公共访问由 `package.json` 的 `publishConfig.access: "public"` 保证（scoped 包必需），认证走 `setup-node` 的 `registry-url` + `NODE_AUTH_TOKEN`（来自 `NPM_TOKEN` Secret）。
+`pnpm publish` 的公共访问由 `package.json` 的 `publishConfig.access: "public"` 保证（scoped 包必需）。认证完全依赖 trusted publishing：npm 侧登记的仓库 + workflow 与本次运行必须一致，否则 OIDC 换取发布凭证会被 registry 拒绝（404/403）。
 
 ## 首次发版
 

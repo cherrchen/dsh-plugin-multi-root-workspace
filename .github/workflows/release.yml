@@ -33,7 +33,6 @@ jobs:
         with:
           node-version: 22.19.0
           cache: pnpm
-          registry-url: https://registry.npmjs.org
 
       - name: Check that the tag matches package.json
         run: |
@@ -62,10 +61,13 @@ jobs:
             }
           done
 
+      # npm trusted publishing (OIDC): no static token exists in this repo.
+      # The package's Publish settings on npmjs.com list this repository and
+      # workflow; `id-token: write` above grants the OIDC claim, and pnpm
+      # exchanges it for a short-lived publish credential itself (no
+      # registry-url/npmrc auth needed).
       - name: Publish to npm
         run: pnpm publish --no-git-checks --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Generate the release notes
         run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > release-notes.md
