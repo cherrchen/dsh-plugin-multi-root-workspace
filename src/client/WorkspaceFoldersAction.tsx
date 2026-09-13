@@ -34,7 +34,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { Key } from './locales.ts'
-import type { RootState, RootView, RootsView } from '../contract.ts'
+import type { RootEntryView, RootState, RootView, RootsView } from '../contract.ts'
 
 /** Translate one key of this plugin's namespace. */
 export type Translate = (key: Key, params?: Record<string, unknown>) => string
@@ -179,6 +179,14 @@ interface DialogState {
   readonly busy: boolean
 }
 
+function entryOf(root: RootView): RootEntryView {
+  return { ordinal: root.ordinal, id: root.id, path: root.path, addedAt: root.addedAt }
+}
+
+function rowKey(root: RootView): string {
+  return `${root.ordinal}\u0000${root.id}\u0000${root.path}\u0000${root.addedAt}`
+}
+
 /**
  * The dialog: reads the view once per open, then after every mutation.
  *
@@ -197,8 +205,18 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
   const [menuFor, setMenuFor] = useState<string | undefined>(undefined)
   const dialogRef = useRef<HTMLDivElement | null>(null)
+  const requestEpoch = useRef(0)
+  const mounted = useRef(true)
 
-  const sessionId = props.sessionId?.()
+  useEffect(() => () => {
+    mounted.current = false
+    requestEpoch.current += 1
+  }, [])
+
+  const requestBase = useCallback((): { sessionId?: string } => {
+    const current = props.sessionId?.()
+    return current === undefined ? {} : { sessionId: current }
+  }, [props.sessionId])
 
   // The dialog is modal: it takes focus when it opens, Escape closes it, and
   // Tab cycles within it instead of escaping into the sidebar behind it.
@@ -239,14 +257,17 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
       setState({ view: undefined, error: new PanelError('unavailable', 'no connection'), busy: false })
       return
     }
+    const epoch = ++requestEpoch.current
     setState(previous => ({ ...previous, busy: true }))
     try {
-      const view = await panel.call('list', { ...(sessionId === undefined ? {} : { sessionId }) })
+      const view = await panel.call('list', requestBase())
+      if (!mounted.current || epoch !== requestEpoch.current) return
       setState({ view, error: undefined, busy: false })
     } catch (error: unknown) {
+      if (!mounted.current || epoch !== requestEpoch.current) return
       setState({ view: undefined, error: asPanelError(error), busy: false })
     }
-  }, [panel, sessionId])
+  }, [panel, requestBase])
 
   useEffect(() => { void refresh() }, [refresh])
 
@@ -257,16 +278,19 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
    */
   const mutate = useCallback(async (endpoint: 'add' | 'remove' | 'alias' | 'move', payload: Record<string, unknown>): Promise<boolean> => {
     if (panel === undefined) return false
+    const epoch = ++requestEpoch.current
     setState(previous => ({ ...previous, busy: true }))
     try {
-      const view = await panel.call(endpoint, { ...(sessionId === undefined ? {} : { sessionId }), ...payload })
+      const view = await panel.call(endpoint, { ...requestBase(), ...payload })
+      if (!mounted.current || epoch !== requestEpoch.current) return false
       setState({ view, error: undefined, busy: false })
       return true
     } catch (error: unknown) {
+      if (!mounted.current || epoch !== requestEpoch.current) return false
       setState(previous => ({ ...previous, error: asPanelError(error), busy: false }))
       return false
     }
-  }, [panel, sessionId])
+  }, [panel, requestBase])
 
   /**
    * Open the composed picker and add whatever it returns. A picker that is not
@@ -303,21 +327,25 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   /** Reveal one root: the answer is the revealed path, not a new view. */
   const reveal = useCallback(async (root: RootView) => {
     if (panel === undefined) return
+    const epoch = ++requestEpoch.current
     setState(previous => ({ ...previous, busy: true }))
     try {
-      await panel.call('reveal', { ...(sessionId === undefined ? {} : { sessionId }), id: root.id })
+      await panel.call('reveal', { ...requestBase(), entry: entryOf(root) })
+      if (!mounted.current || epoch !== requestEpoch.current) return
       setState(previous => ({ ...previous, error: undefined, busy: false }))
     } catch (error: unknown) {
+      if (!mounted.current || epoch !== requestEpoch.current) return
       setState(previous => ({ ...previous, error: asPanelError(error), busy: false }))
     }
-  }, [panel, sessionId])
+  }, [panel, requestBase])
 
   const copyPath = useCallback(async (root: RootView) => {
     try {
       await navigator.clipboard.writeText(root.path)
-      setCopiedId(root.id)
+      const key = rowKey(root)
+      setCopiedId(key)
       setState(previous => ({ ...previous, error: undefined }))
-      window.setTimeout(() => { setCopiedId(current => (current === root.id ? undefined : current)) }, 1500)
+      window.setTimeout(() => { setCopiedId(current => (current === key ? undefined : current)) }, 1500)
     } catch (error: unknown) {
       // A clipboard refusal is the browser environment's, not the host's, so it
       // is reported here with its own code rather than left silent.
@@ -329,8 +357,10 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     }
   }, [])
 
-  const move = useCallback(async (root: RootView, beforeId: string | undefined) => {
-    await mutate('move', beforeId === undefined ? { id: root.id } : { id: root.id, beforeId })
+  const move = useCallback(async (root: RootView, before: RootView | undefined) => {
+    await mutate('move', before === undefined
+      ? { entry: entryOf(root) }
+      : { entry: entryOf(root), beforeEntry: entryOf(before) })
   }, [mutate])
 
   const roots = state.view?.roots ?? []
@@ -400,8 +430,9 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                 {t('panel.empty')} {t('panel.emptyHint')}
               </p>
             ) : null}
-            {roots.map((root, index) => (
-              <div key={root.id} className="mrfw-row">
+            {roots.map((root, index) => {
+              const key = rowKey(root)
+              return <div key={key} className="mrfw-row">
                 <div className="mrfw-rootText">
                   <span className="mrfw-rootName">{displayNameOf(root)}</span>
                   <span className="mrfw-rootPath">{root.path}</span>
@@ -414,7 +445,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                 <IconButton
                   onClick={() => { void copyPath(root) }}
                   icon={<IconCopyOutline16 />}
-                  label={copiedId === root.id ? t('panel.copied') : t('panel.copyPath')}
+                  label={copiedId === key ? t('panel.copied') : t('panel.copyPath')}
                 />
                 <IconButton
                   disabled={state.busy}
@@ -424,18 +455,18 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                 />
                 <IconButton
                   disabled={state.busy || index === 0}
-                  onClick={() => { void move(root, roots[index - 1]?.id) }}
+                  onClick={() => { void move(root, roots[index - 1]) }}
                   icon={<IconChevronUpOutline14 />}
                   label={t('panel.moveUp')}
                 />
                 <IconButton
                   disabled={state.busy || index === roots.length - 1}
-                  onClick={() => { void move(root, roots[index + 1]?.id) }}
+                  onClick={() => { void move(root, roots[index + 2]) }}
                   icon={<IconChevronDownOutline14 />}
                   label={t('panel.moveDown')}
                 />
                 <Menu
-                  open={menuFor === root.id}
+                  open={menuFor === key}
                   onClose={() => { setMenuFor(undefined) }}
                   items={[
                     { id: 'rename', label: t('panel.rename'), icon: <IconEditOutline16 /> },
@@ -444,10 +475,10 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                   onSelect={(id) => {
                     setMenuFor(undefined)
                     if (id === 'rename') {
-                      setAliasFor(root.id)
+                      setAliasFor(key)
                       setAliasDraft(root.alias ?? '')
                     }
-                    if (id === 'remove') void mutate('remove', { id: root.id })
+                    if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
                   }}
                   portal
                   align="end"
@@ -455,13 +486,13 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                   anchor={(
                     <IconButton
                       disabled={state.busy}
-                      onClick={() => { setMenuFor(current => (current === root.id ? undefined : root.id)) }}
+                      onClick={() => { setMenuFor(current => (current === key ? undefined : key)) }}
                       icon={<IconEllipsisOutline16 />}
                       label={t('panel.more')}
                     />
                   )}
                 />
-                {aliasFor === root.id ? (
+                {aliasFor === key ? (
                   <span className="mrfw-aliasEditor">
                     <input
                       autoFocus
@@ -470,14 +501,14 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                       placeholder={t('panel.aliasPlaceholder')}
                       onChange={event => { setAliasDraft(event.target.value) }}
                     />
-                    <Action disabled={state.busy} onClick={() => { void mutate('alias', { id: root.id, alias: aliasDraft }); setAliasFor(undefined) }}>
+                    <Action disabled={state.busy} onClick={() => { void mutate('alias', { entry: entryOf(root), alias: aliasDraft }); setAliasFor(undefined) }}>
                       {t('panel.aliasSave')}
                     </Action>
                     <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
                   </span>
                 ) : null}
               </div>
-            ))}
+            })}
           </section>
 
           <div className="mrfw-actions">

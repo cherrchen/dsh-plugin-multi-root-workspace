@@ -49,6 +49,8 @@ export type RootState = 'available' | 'missing' | 'redirected' | 'invalid'
 
 /** One root as the panel renders it. */
 export interface RootView {
+  /** 1-based position in the returned snapshot. */
+  readonly ordinal: number
   /** Stable identity, used by every mutating endpoint. */
   readonly id: string
   /** Canonical absolute directory. */
@@ -61,6 +63,14 @@ export interface RootView {
   readonly state: RootState
   /** Why the root is not `available`; a code the panel localizes. */
   readonly detail?: string
+}
+
+/** Exact identity of one row in a returned list snapshot. */
+export interface RootEntryView {
+  readonly ordinal: number
+  readonly id: string
+  readonly path: string
+  readonly addedAt: string
 }
 
 /** The panel's whole view of one workspace root; every endpoint but `reveal` answers with this. */
@@ -106,13 +116,17 @@ export interface PanelRequest {
   readonly primaryRoot?: string
   /** The session whose workspace root should be used when `primaryRoot` is absent. */
   readonly sessionId?: string
-  /** Target root identity (mutations). */
+  /** Exact target row from the most recent list snapshot. */
+  readonly entry?: RootEntryView
+  /** Compatibility reference; accepted only when the id is unique. */
   readonly id?: string
   /** Candidate directory (add). */
   readonly path?: string
   /** Display alias (add/alias); empty clears it. */
   readonly alias?: string
-  /** Anchor identity (move): the target is placed in front of it; absent moves it last. */
+  /** Exact anchor row (move): the target is placed in front of it; absent moves it last. */
+  readonly beforeEntry?: RootEntryView
+  /** Compatibility anchor; accepted only when the id is unique. */
   readonly beforeId?: string
 }
 
@@ -144,9 +158,21 @@ export type Parsed<T> = { readonly ok: true; readonly value: T } | { readonly ok
 const panelRequestSchema = z.object({
   primaryRoot: z.string().optional(),
   sessionId: z.string().optional(),
+  entry: z.object({
+    ordinal: z.number().int().positive(),
+    id: z.string(),
+    path: z.string(),
+    addedAt: z.string(),
+  }).strict().optional(),
   id: z.string().optional(),
   path: z.string().optional(),
   alias: z.string().optional(),
+  beforeEntry: z.object({
+    ordinal: z.number().int().positive(),
+    id: z.string(),
+    path: z.string(),
+    addedAt: z.string(),
+  }).strict().optional(),
   beforeId: z.string().optional(),
 }).strict()
 
@@ -156,6 +182,7 @@ const panelRequestSchema = z.object({
  * the field that matters is the state it reports.
  */
 const rootViewSchema = z.object({
+  ordinal: z.number().int().positive(),
   id: z.string(),
   path: z.string(),
   alias: z.string().optional(),
@@ -245,9 +272,11 @@ function narrowCall(endpoint: PanelEndpoint, value: z.infer<typeof panelRequestS
     endpoint,
     ...(value.primaryRoot === undefined ? {} : { primaryRoot: value.primaryRoot }),
     ...(value.sessionId === undefined ? {} : { sessionId: value.sessionId }),
+    ...(value.entry === undefined ? {} : { entry: value.entry }),
     ...(value.id === undefined ? {} : { id: value.id }),
     ...(value.path === undefined ? {} : { path: value.path }),
     ...(value.alias === undefined ? {} : { alias: value.alias }),
+    ...(value.beforeEntry === undefined ? {} : { beforeEntry: value.beforeEntry }),
     ...(value.beforeId === undefined ? {} : { beforeId: value.beforeId }),
   }
 }
@@ -255,6 +284,7 @@ function narrowCall(endpoint: PanelEndpoint, value: z.infer<typeof panelRequestS
 /** Rebuild one parsed root as the declared `RootView`. */
 function narrowRootView(value: z.infer<typeof rootViewSchema>): RootView {
   return {
+    ordinal: value.ordinal,
     id: value.id,
     path: value.path,
     addedAt: value.addedAt,

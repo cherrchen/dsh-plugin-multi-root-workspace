@@ -88,7 +88,7 @@ Expected: **only** the `fs-sandbox` and `sandbox` rows are replaced by the plugi
 After an `add`, `list` prints:
 
 ```text
-Workspace root (primary, always writable): /home/me/monorepo
+Workspace root (primary; access follows the current sandbox mode): /home/me/monorepo
   1 /home/me/payments-service [payments]
   2 /home/me/website
 Writable additional roots: 2 of 2.

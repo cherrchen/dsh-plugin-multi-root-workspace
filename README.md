@@ -88,7 +88,7 @@ dsh --profile web --dump-config
 `add` 后执行 `list` 的预期输出：
 
 ```text
-Workspace root (primary, always writable): /home/me/monorepo
+Workspace root (primary; access follows the current sandbox mode): /home/me/monorepo
   1 /home/me/payments-service [支付]
   2 /home/me/website
 Writable additional roots: 2 of 2.

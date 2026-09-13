@@ -349,7 +349,9 @@ async function registryBattery(ctx) {
 
     const listed = await run('/workspace-folders list')
     results.set('list reports the registered root', String(listed?.result?.text?.includes(extraRoot)))
-    results.set('list reports only the workspace root as primary', String(listed?.result?.text?.includes('primary, always writable')))
+    results.set('list reports only the workspace root as primary', String(
+      listed?.result?.text?.includes('primary; access follows the current sandbox mode'),
+    ))
 
     const aliased = await run('/workspace-folders alias 1 payments')
     results.set('alias is stored and reported', String(aliased?.result?.text?.includes('[payments]')))

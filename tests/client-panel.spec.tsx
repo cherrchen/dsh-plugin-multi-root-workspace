@@ -43,6 +43,7 @@ interface Harness {
   readonly registrations: Registration[]
   readonly dictionaries: { ns: string; dicts: Record<string, unknown> }[]
   setView: (view: RootsView) => void
+  setSession: (sessionId: string | undefined) => void
   setFailure: (failure: { code: string; message: string } | undefined) => void
   /** What the next `reveal` answers (the real host answers a `RevealedView`). */
   setRevealed: (value: unknown) => void
@@ -52,9 +53,10 @@ interface Harness {
   release: () => void
 }
 
-const ROOT_A: RootView = { id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', alias: 'payments' }
-const ROOT_B: RootView = { id: 'b', path: '/repos/website', addedAt: '2026-09-12T00:00:00.000Z', state: 'missing', detail: 'gone' }
+const ROOT_A: RootView = { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', alias: 'payments' }
+const ROOT_B: RootView = { ordinal: 2, id: 'b', path: '/repos/website', addedAt: '2026-09-12T00:00:00.000Z', state: 'missing', detail: 'gone' }
 const ROOT_C: RootView = {
+  ordinal: 3,
   id: 'c',
   path: '/repos/swapped',
   addedAt: '2026-09-12T00:00:00.000Z',
@@ -68,6 +70,7 @@ function mount(): Harness {
   const registrations: Registration[] = []
   const dictionaries: { ns: string; dicts: Record<string, unknown> }[] = []
   let view: RootsView = { primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B] }
+  let currentSession: string | undefined = 'session-1'
   let failure: { code: string; message: string } | undefined
   let revealed: unknown = { revealed: '/repos/payments' } satisfies RevealedView
   let gate: Promise<void> | undefined
@@ -84,6 +87,18 @@ function mount(): Harness {
           await held
         }
         if (failure !== undefined) return { ok: false, error: failure }
+        if (endpoint === 'move' && payload.entry !== undefined) {
+          const target = view.roots.find(root => root.ordinal === payload.entry!.ordinal)
+          const without = view.roots.filter(root => root !== target)
+          const before = payload.beforeEntry === undefined
+            ? undefined
+            : without.find(root => root.ordinal === payload.beforeEntry!.ordinal)
+          const at = before === undefined ? without.length : without.indexOf(before)
+          const reordered = target === undefined
+            ? without
+            : [...without.slice(0, at), target, ...without.slice(at)]
+          view = { ...view, roots: reordered.map((root, index) => ({ ...root, ordinal: index + 1 })) }
+        }
         // One shape per endpoint, exactly as the host sends them: `reveal`
         // answers with the revealed path, everything else with the whole view.
         // Answering a list for every endpoint is what used to hide the mismatch.
@@ -119,7 +134,7 @@ function mount(): Harness {
     get: (name: string) => {
       if (name === 'connection') return connection
       if (name === 'uiWorkspace') return { pickDirectory: async () => picked }
-      if (name === 'sessions') return { list: { getSnapshot: () => ({ current: 'session-1' }) } }
+      if (name === 'sessions') return { list: { getSnapshot: () => ({ current: currentSession }) } }
       return undefined
     },
   }
@@ -130,6 +145,7 @@ function mount(): Harness {
     registrations,
     dictionaries,
     setView: next => { view = next },
+    setSession: next => { currentSession = next },
     setFailure: next => { failure = next },
     setRevealed: next => { revealed = next },
     holdNextCall: () => { gate = new Promise<void>(resolve => { releaseGate = resolve }) },
@@ -209,6 +225,19 @@ describe('the panel dialog', () => {
     expect(screen.getByText(`${NS}.state.missing`)).toBeTruthy()
   })
 
+  it('reads the current session again for each request', async () => {
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+
+    harness.setSession('session-2')
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
+
+    await waitFor(() => { expect(harness.calls).toHaveLength(2) })
+    expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-2' })
+  })
+
   it('shows the upstream workspace title as the primary row name', async () => {
     const harness = mount()
     harness.setView({ primaryRoot: '/repos/primary', primaryName: 'Payments Platform', roots: [ROOT_A] })
@@ -227,16 +256,19 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.moveDown` })[0]!)
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'move')).toBe(true) })
-    // Down moves BEFORE the next root: the payload carries `beforeId` (the
-    // off-by-one that used to skip it is pinned here).
+    // Moving down by one means placing A before the item AFTER B. With only two
+    // rows there is no anchor, so A moves to the end.
     expect(harness.calls.find(call => call.endpoint === 'move')?.payload).toEqual({
       sessionId: 'session-1',
-      id: 'a',
-      beforeId: 'b',
+      entry: { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
+    })
+    await waitFor(() => {
+      expect(Array.from(document.querySelectorAll('.mrfw-rootPath')).map(node => node.textContent))
+        .toEqual(['/repos/primary', '/repos/website', '/repos/payments'])
     })
 
     // Rename and remove live in the row's ellipsis menu.
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.rename` }))
     const input = screen.getByPlaceholderText(`${NS}.panel.aliasPlaceholder`)
     fireEvent.change(input, { target: { value: 'renamed' } })
@@ -244,14 +276,17 @@ describe('the panel dialog', () => {
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'alias')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'alias')?.payload).toEqual({
       sessionId: 'session-1',
-      id: 'a',
+      entry: { ordinal: 2, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
       alias: 'renamed',
     })
 
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]!)
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remove')).toBe(true) })
-    expect(harness.calls.find(call => call.endpoint === 'remove')?.payload).toEqual({ sessionId: 'session-1', id: 'a' })
+    expect(harness.calls.find(call => call.endpoint === 'remove')?.payload).toEqual({
+      sessionId: 'session-1',
+      entry: { ordinal: 2, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
+    })
   })
 
   it('adds through the composed picker, then through the manual path field', async () => {
@@ -339,7 +374,10 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]!)
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'reveal')).toBe(true) })
-    expect(harness.calls.find(call => call.endpoint === 'reveal')?.payload).toEqual({ sessionId: 'session-1', id: 'a' })
+    expect(harness.calls.find(call => call.endpoint === 'reveal')?.payload).toEqual({
+      sessionId: 'session-1',
+      entry: { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
+    })
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.copyPath` })[0]!)
     await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repos/payments') })

@@ -165,7 +165,7 @@ describe('renderRootsReport', () => {
 
   it('reports the primary root, an empty list, and how to add one', () => {
     const text = renderRootsReport('/ws', [])
-    expect(text).toContain('Workspace root (primary, always writable): /ws')
+    expect(text).toContain('Workspace root (primary; access follows the current sandbox mode): /ws')
     expect(text).toContain('No additional roots')
   })
 
@@ -561,9 +561,43 @@ describe('the panel channel', () => {
     expect(listed.value?.roots?.map(root => root.state)).toEqual(['invalid', 'invalid'])
     expect(restarted.scope.scopeOf(primary)).toEqual([])
 
-    const removed = await callPanel('remove', { primaryRoot: primary, id: entry!.id })
+    const listedEntry = listed.value!.roots![1]!
+    const removed = await callPanel('remove', {
+      primaryRoot: primary,
+      entry: {
+        ordinal: listedEntry.ordinal,
+        id: listedEntry.id,
+        path: listedEntry.path,
+        addedAt: listedEntry.addedAt,
+      },
+    })
     expect(removed.value?.roots).toHaveLength(1)
-    expect(removed.value?.roots?.[0]?.path).toBe(canonicalPath(twinned))
+    expect(removed.value?.roots?.[0]?.path).toBe(canonicalPath(extra))
+  })
+
+  it('keeps the command ordinal when duplicate ids make id lookup ambiguous', async () => {
+    const stack = await mount()
+    const first = join(fixture.base, 'first')
+    const second = join(fixture.base, 'second')
+    mkdirSync(first)
+    mkdirSync(second)
+    await stack.registry.add(primary, { path: first })
+    const storeFile = join(storeRoot, 'multi_root_workspace.json')
+    const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+      tables: { roots: Record<string, { roots: { id: string; path: string; recordedPath: string; addedAt: string }[] }> }
+    }
+    const entry = document.tables.roots[primary]!.roots[0]!
+    document.tables.roots[primary]!.roots.push({ ...entry, path: second, recordedPath: canonicalPath(second) })
+    writeFileSync(storeFile, JSON.stringify(document))
+    await stack.dispose()
+    stacks = stacks.filter(candidate => candidate !== stack)
+    await mount()
+
+    const result = await run('remove 2')
+
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain(canonicalPath(first))
+    expect(result.text).not.toContain(canonicalPath(second))
   })
 
   it('rejects a payload that is not a request body', async () => {

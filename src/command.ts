@@ -46,11 +46,21 @@ import {
   parsePanelCall,
   type PanelCall,
   type RevealedView,
+  type RootEntryView,
   type RootView,
   type RootsView,
 } from './contract.ts'
 import type { MultiRootRegistry } from './registry.ts'
-import { availableRoots, canonicalRoot, expandRootInput, RootValidationError, resolveRootRef, type RootStatus } from './roots.ts'
+import {
+  availableRoots,
+  canonicalRoot,
+  entryRootRef,
+  expandRootInput,
+  RootValidationError,
+  resolveRootRef,
+  type RootRef,
+  type RootStatus,
+} from './roots.ts'
 
 /** Services this row needs before it may activate. */
 export const inject = ['commands', 'sandboxPolicy', 'multiRootRegistry']
@@ -115,7 +125,7 @@ export function renderRootsReport(
   statuses: readonly RootStatus[],
   unavailable?: string,
 ): string {
-  const lines = [`Workspace root (primary, always writable): ${primaryRoot}`]
+  const lines = [`Workspace root (primary; access follows the current sandbox mode): ${primaryRoot}`]
   if (unavailable !== undefined) {
     lines.push(`Root registry unavailable: ${unavailable}`)
     return lines.join('\n')
@@ -207,18 +217,18 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
         return { kind: 'success', text: await report(registry, primaryRoot) }
       }
       case 'remove': {
-        const target = await targetOf(registry, primaryRoot, parsed.rest)
-        await registry.removeAt(primaryRoot, { kind: 'id', id: target.id })
+        const { ref } = await targetOf(registry, primaryRoot, parsed.rest)
+        await registry.removeAt(primaryRoot, ref)
         return { kind: 'success', text: await report(registry, primaryRoot) }
       }
       case 'alias': {
         const { text: reference, rest: alias } = splitReference(parsed.rest)
-        const target = await targetOf(registry, primaryRoot, reference)
-        await registry.setAlias(primaryRoot, { kind: 'id', id: target.id }, alias === '' ? undefined : unquote(alias))
+        const { ref } = await targetOf(registry, primaryRoot, reference)
+        await registry.setAlias(primaryRoot, ref, alias === '' ? undefined : unquote(alias))
         return { kind: 'success', text: await report(registry, primaryRoot) }
       }
       case 'reveal': {
-        const target = await targetOf(registry, primaryRoot, parsed.rest)
+        const { status: target } = await targetOf(registry, primaryRoot, parsed.rest)
         await revealRoot(ctx, target.path)
         return { kind: 'success', text: `revealed ${target.path}` }
       }
@@ -286,20 +296,30 @@ function splitReference(text: string): { text: string; rest: string } {
  * @returns the matched status, after re-checking the registered directories.
  * @throws {RootValidationError} `invalid-ref` for empty text, `not-found` when nothing matches.
  */
-async function targetOf(registry: MultiRootRegistry, primaryRoot: string, text: string): Promise<RootStatus> {
+async function targetOf(
+  registry: MultiRootRegistry,
+  primaryRoot: string,
+  text: string,
+): Promise<{ readonly status: RootStatus; readonly ref: RootRef }> {
   const trimmed = text.trim()
   if (trimmed === '') throw new RootValidationError('invalid-ref', 'a root reference is required')
   // A reference must name a root that exists RIGHT NOW: an ordinal points at a
   // position, and a path is resolved against the current canonical spelling.
   const statuses = await registry.refresh(primaryRoot)
+  let status: RootStatus
   if (/^\d+$/.test(trimmed)) {
-    return resolveRootRef(statuses, { kind: 'ordinal', ordinal: Number(trimmed) })
+    const ordinal = Number(trimmed)
+    status = resolveRootRef(statuses, { kind: 'ordinal', ordinal })
+    return { status, ref: entryRootRef(status, ordinal) }
   }
   const asPath = unquote(trimmed)
   if (asPath === '~' || asPath.startsWith('~') || asPath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(asPath)) {
-    return resolveRootRef(statuses, { kind: 'path', path: asPath })
+    status = resolveRootRef(statuses, { kind: 'path', path: asPath })
+  } else {
+    status = resolveRootRef(statuses, { kind: 'id', id: trimmed })
   }
-  return resolveRootRef(statuses, { kind: 'id', id: trimmed })
+  const ordinal = statuses.indexOf(status) + 1
+  return { status, ref: entryRootRef(status, ordinal) }
 }
 
 /**
@@ -337,8 +357,9 @@ function primaryRootOf(ctx: Context, request: PanelCall): string {
 }
 
 /** Project one status into the panel's view. */
-function toRootView(status: RootStatus): RootView {
+function toRootView(status: RootStatus, index: number): RootView {
   return {
+    ordinal: index + 1,
     id: status.id,
     path: status.path,
     ...(status.alias === undefined ? {} : { alias: status.alias }),
@@ -432,26 +453,25 @@ async function dispatchPanelRequest(
         return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       }
       case 'remove':
-        await registry.removeAt(primaryRoot, { kind: 'id', id: requireId(request) })
+        await registry.removeAt(primaryRoot, requireEntry(request))
         return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       case 'alias':
-        await registry.setAlias(primaryRoot, { kind: 'id', id: requireId(request) }, request.alias)
+        await registry.setAlias(primaryRoot, requireEntry(request), request.alias)
         return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       case 'move':
         await registry.move(
           primaryRoot,
-          { kind: 'id', id: requireId(request) },
-          request.beforeId === undefined ? undefined : { kind: 'id', id: request.beforeId },
+          requireEntry(request),
+          request.beforeEntry !== undefined
+            ? entryRefOf(request.beforeEntry)
+            : request.beforeId === undefined ? undefined : { kind: 'id', id: request.beforeId },
         )
         return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       case 'reveal': {
-        const id = requireId(request)
+        const ref = requireEntry(request)
         // The reference is resolved against the re-checked list, so revealing a
         // root whose directory changed still targets the current spelling.
-        const target = (await registry.refresh(primaryRoot)).find(status => status.id === id)
-        if (target === undefined) {
-          throw new RootValidationError('not-found', `no registered root with id "${id}"`)
-        }
+        const target = resolveRootRef(await registry.refresh(primaryRoot), ref)
         await revealRoot(ctx, target.path)
         // The ONE endpoint that does not answer with a roots view: it reports
         // what it revealed, and the panel leaves its list as it is.
@@ -470,12 +490,16 @@ async function dispatchPanelRequest(
   }
 }
 
-/** Require the identity a mutating panel request must carry. */
-function requireId(request: PanelCall): string {
-  if (request.id === undefined || request.id === '') {
-    throw new RootValidationError('invalid-ref', 'a root id is required')
-  }
-  return request.id
+/** Convert a validated wire snapshot to the registry's exact-entry reference. */
+function entryRefOf(entry: RootEntryView): RootRef {
+  return { kind: 'entry', ...entry }
+}
+
+/** Require the exact list row a mutating panel request must carry. */
+function requireEntry(request: PanelCall): RootRef {
+  if (request.entry !== undefined) return entryRefOf(request.entry)
+  if (request.id !== undefined && request.id !== '') return { kind: 'id', id: request.id }
+  throw new RootValidationError('invalid-ref', 'an exact root entry is required')
 }
 
 /**
