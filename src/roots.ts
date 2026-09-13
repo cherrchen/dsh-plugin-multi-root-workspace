@@ -65,7 +65,7 @@ export interface RegisteredRoot {
    * root whose current resolution moved somewhere else is reported as
    * `redirected` and withheld, never silently granted elsewhere.
    */
-  readonly recordedPath: string
+  readonly recordedPath?: string
   /** Optional display alias; absent when the operator cleared it. */
   readonly alias?: string
   /** ISO-8601 instant of registration. */
@@ -102,11 +102,18 @@ export interface IndexedRootStatus {
   readonly status: RootStatus
 }
 
-/** How a caller names one registered root: by id, by path, or by 1-based ordinal. */
+/** How a caller names one registered root, including a verified surface snapshot. */
 export type RootRef =
   | { readonly kind: 'id'; readonly id: string }
   | { readonly kind: 'path'; readonly path: string }
   | { readonly kind: 'ordinal'; readonly ordinal: number }
+  | {
+    readonly kind: 'entry'
+    readonly ordinal: number
+    readonly id: string
+    readonly path: string
+    readonly addedAt: string
+  }
 
 /** Every way root handling can fail, as a stable code the surfaces localize. */
 export type RootValidationCode =
@@ -362,8 +369,8 @@ function classifyStoredRoot(
     // surface: a removal by id would delete both, and the panel would show one
     // row twice. EVERY record of that id is reported unusable — including the
     // first one — because "the first match wins" is exactly the ambiguity that
-    // makes such a store unreadable. Nothing is granted for it, and `removeAt`
-    // (a positional removal) deletes them one at a time.
+    // makes such a store unreadable. Nothing is granted for it; an exact entry
+    // reference lets the operator delete distinguishable rows one at a time.
     return invalid(`the id "${record.id}" is used by more than one record (entry ${position + 1})`)
   }
   if (!isAbsolute(record.path)) return invalid(`"${record.path}" is not an absolute path`)
@@ -438,54 +445,75 @@ export function indexedStatuses(statuses: readonly RootStatus[]): IndexedRootSta
  * @throws {RootValidationError} `not-found` when nothing matches.
  */
 export function resolveRootRef(statuses: readonly RootStatus[], ref: RootRef): RootStatus {
+  return statuses[resolveRootIndex(statuses, ref)]!
+}
+
+/**
+ * Resolve one reference to its exact position.
+ *
+ * Id/path references are accepted only when unique. An `entry` reference also
+ * verifies the row identity captured by the surface, so a concurrent reorder
+ * cannot turn a click into an operation on a different record.
+ */
+export function resolveRootIndex(statuses: readonly RootStatus[], ref: RootRef): number {
   const reference = describeRef(ref)
-  const matched = ((): RootStatus | undefined => {
+  const matches = (predicate: (status: RootStatus) => boolean): number[] => {
+    const result: number[] = []
+    for (const [index, status] of statuses.entries()) if (predicate(status)) result.push(index)
+    return result
+  }
+  const indices = ((): number[] => {
     switch (ref.kind) {
       case 'id':
-        return statuses.find(status => status.id === ref.id)
+        return matches(status => status.id === ref.id)
       case 'ordinal':
-        return ref.ordinal >= 1 && ref.ordinal <= statuses.length ? statuses[ref.ordinal - 1] : undefined
+        return ref.ordinal >= 1 && ref.ordinal <= statuses.length ? [ref.ordinal - 1] : []
       case 'path': {
         const canonical = canonicalRoot(expandRootInput(ref.path))
-        return statuses.find(status => samePath(status.path, canonical))
+        return matches(status => samePath(status.path, canonical))
+      }
+      case 'entry': {
+        const sameEntry = (status: RootStatus): boolean => status.id === ref.id
+          && samePath(status.path, ref.path)
+          && status.addedAt === ref.addedAt
+        const found = matches(sameEntry)
+        if (found.length !== 1) return found
+        const expected = ref.ordinal - 1
+        return expected === found[0] ? [expected] : found
       }
     }
   })()
-  if (matched === undefined) {
+  if (indices.length === 0) {
     throw new RootValidationError('not-found', `no registered root matches ${reference}`, { reference })
   }
-  return matched
+  if (indices.length > 1) {
+    throw new RootValidationError(
+      'invalid-ref',
+      `${reference} matches more than one registered root; use its displayed number`,
+      { reference },
+    )
+  }
+  return indices[0]!
+}
+
+/** Capture a list row as a mutation-safe reference. */
+export function entryRootRef(status: RootStatus, ordinal: number): RootRef {
+  return { kind: 'entry', ordinal, id: status.id, path: status.path, addedAt: status.addedAt }
 }
 
 /**
  * Remove exactly ONE record — the one the reference names — from a status list.
  *
- * Removing by id would delete every record that shares the id, which is how a
- * corrupted store turns one operator action into several; this function
- * addresses the record, not the id, so a duplicate-id pair can be cleaned up
- * one entry at a time.
+ * Removing by id is rejected when it is ambiguous. Exact entry or ordinal
+ * references address one record, so a duplicate-id pair can be cleaned up one
+ * entry at a time without turning one operation into several.
  * @param statuses - the statuses to remove from.
  * @param ref - which record to remove.
  * @returns a new list without that record, order preserved.
  * @throws {RootValidationError} `not-found` when the reference matches nothing.
  */
 export function removeStatusAt(statuses: readonly RootStatus[], ref: RootRef): RootStatus[] {
-  const reference = describeRef(ref)
-  const index = ((): number => {
-    switch (ref.kind) {
-      case 'id':
-        return statuses.findIndex(status => status.id === ref.id)
-      case 'ordinal':
-        return ref.ordinal >= 1 && ref.ordinal <= statuses.length ? ref.ordinal - 1 : -1
-      case 'path': {
-        const canonical = canonicalRoot(expandRootInput(ref.path))
-        return statuses.findIndex(status => samePath(status.path, canonical))
-      }
-    }
-  })()
-  if (index < 0) {
-    throw new RootValidationError('not-found', `no registered root matches ${reference}`, { reference })
-  }
+  const index = resolveRootIndex(statuses, ref)
   return statuses.filter((_status, position) => position !== index)
 }
 
@@ -498,5 +526,7 @@ function describeRef(ref: RootRef): string {
       return `#${ref.ordinal}`
     case 'path':
       return `"${ref.path}"`
+    case 'entry':
+      return `entry #${ref.ordinal} (${ref.path})`
   }
 }

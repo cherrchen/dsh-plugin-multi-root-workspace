@@ -48,7 +48,7 @@ import {
   canonicalRoot,
   classifyStoredRoots,
   removeStatusAt,
-  resolveRootRef,
+  resolveRootIndex,
   RootValidationError,
   validateRootCandidate,
   type AdditionalRootId,
@@ -306,10 +306,10 @@ export class MultiRootRegistry extends Service {
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
       const statuses = this.statusesOf(key)
-      const target = resolveRootRef(statuses, ref)
+      const targetIndex = resolveRootIndex(statuses, ref)
       const normalized = normalizeAlias(alias)
-      const next = statuses.map((status) => {
-        if (status.id !== target.id) return status
+      const next = statuses.map((status, index) => {
+        if (index !== targetIndex) return status
         const { alias: _dropped, ...rest } = status
         return normalized === undefined ? rest : { ...rest, alias: normalized }
       })
@@ -329,12 +329,15 @@ export class MultiRootRegistry extends Service {
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
       const statuses = this.statusesOf(key)
-      const target = resolveRootRef(statuses, ref)
-      const anchor = beforeRef === undefined ? undefined : resolveRootRef(statuses, beforeRef)
-      if (anchor !== undefined && anchor.id === target.id) return statuses
-      const without = statuses.filter(status => status.id !== target.id)
-      const index = anchor === undefined ? without.length : without.findIndex(status => status.id === anchor.id)
-      const next = [...without.slice(0, index), target, ...without.slice(index)]
+      const targetIndex = resolveRootIndex(statuses, ref)
+      const anchorIndex = beforeRef === undefined ? undefined : resolveRootIndex(statuses, beforeRef)
+      if (anchorIndex === targetIndex) return statuses
+      const target = statuses[targetIndex]!
+      const without = statuses.filter((_status, index) => index !== targetIndex)
+      const adjustedAnchor = anchorIndex === undefined
+        ? without.length
+        : anchorIndex - (targetIndex < anchorIndex ? 1 : 0)
+      const next = [...without.slice(0, adjustedAnchor), target, ...without.slice(adjustedAnchor)]
       return await this.persist(key, next)
     })
   }
@@ -438,7 +441,13 @@ export class MultiRootRegistry extends Service {
   private async persist(key: string, statuses: readonly RootStatus[]): Promise<readonly RootStatus[]> {
     const table = this.requireTable()
     if (statuses.length === 0) await table.delete(key)
-    else await table.put(key, { roots: statuses.map(toPersistedRoot) })
+    else {
+      // Validate the COMPLETE document before crossing the durable boundary.
+      // In particular, legacy records keep an absent `recordedPath` absent;
+      // they must never be rewritten as the schema-invalid empty string.
+      const durable = persistedPrimaryRoot.parse({ roots: statuses.map(toPersistedRoot) })
+      await table.put(key, durable)
+    }
     const classified = statuses.length === 0 ? [] : classifyStoredRoots(key, statuses.map(toRegisteredRoot))
     this.cache.set(key, classified)
     this.publish(key, classified)
@@ -486,9 +495,15 @@ export class MultiRootRegistry extends Service {
     ].join('\n')
     if (this.published.get(key) === signature) return
     this.published.set(key, signature)
-    const effective: RegisteredRoot[] = statuses
-      .filter(status => status.state === 'available')
-      .map(status => toRegisteredRoot(status))
+    const effective = statuses.flatMap(status => {
+      if (status.state !== 'available' || status.recordedPath === undefined) return []
+      return [{
+        id: status.id,
+        path: status.path,
+        recordedPath: status.recordedPath,
+        ...(status.alias === undefined ? {} : { alias: status.alias }),
+      }]
+    })
     this.ctx.multiRootScope.setAdditionalRoots(key, effective)
     if (withheld.length > 0) {
       this.ctx.logger.warn(
@@ -524,7 +539,7 @@ function toPersistedRoot(status: RootStatus): PersistedRoot {
   return {
     id: status.id,
     path: status.path,
-    recordedPath: status.recordedPath,
+    ...(status.recordedPath === undefined || status.recordedPath === '' ? {} : { recordedPath: status.recordedPath }),
     ...(status.alias === undefined ? {} : { alias: status.alias }),
     addedAt: status.addedAt,
   }
@@ -538,7 +553,7 @@ function toRegisteredRoot(entry: PersistedRoot): RegisteredRoot {
     // A record written before this field existed (or by hand) keeps whatever it
     // has: classification needs to SEE the absence to report it as invalid,
     // rather than have it papered over here.
-    recordedPath: entry.recordedPath ?? '',
+    ...(entry.recordedPath === undefined ? {} : { recordedPath: entry.recordedPath }),
     ...(entry.alias === undefined ? {} : { alias: entry.alias }),
     addedAt: entry.addedAt,
   }

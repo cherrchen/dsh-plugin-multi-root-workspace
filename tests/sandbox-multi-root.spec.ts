@@ -10,6 +10,7 @@
  * lives in `tests/support/dialect-grants.ts`.
  */
 
+import { mkdirSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
@@ -29,6 +30,7 @@ const fibers: Array<Awaited<ReturnType<Context['plugin']>>> = []
 
 beforeEach(() => {
   fixture = createFixtureWorkspace('sandbox-multi')
+  mkdirSync(`${fixture.base}/third`)
 })
 
 afterEach(async () => {

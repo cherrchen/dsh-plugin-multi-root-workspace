@@ -69,6 +69,7 @@ describe('scope resolution', () => {
   })
 
   it('returns registered roots in registry order', () => {
+    mkdirSync(`${fixture.base}/third`)
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
       root('b', fixture.outside),
       root('a', `${fixture.base}/third`),
@@ -131,6 +132,19 @@ describe('root sanitization', () => {
 
     expect(sanitizeAdditionalRoots(fixture.workspace, [registration])).toEqual([])
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [registration])
+    expect(ctx.multiRootScope.scopeOf(fixture.workspace)).toEqual([])
+    expect(ctx.multiRootScope.resolve(policy(fixture.workspace)).additionalRoots).toEqual([])
+  })
+
+  it('withholds a registered directory immediately after it is deleted', () => {
+    const granted = join(fixture.base, 'ephemeral')
+    mkdirSync(granted)
+    const registration = root('x', granted)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [registration])
+    expect(ctx.multiRootScope.scopeOf(fixture.workspace)).toEqual([canonicalPath(granted)])
+
+    rmSync(granted, { recursive: true, force: true })
+
     expect(ctx.multiRootScope.scopeOf(fixture.workspace)).toEqual([])
     expect(ctx.multiRootScope.resolve(policy(fixture.workspace)).additionalRoots).toEqual([])
   })
@@ -218,6 +232,7 @@ describe('workspace topology context', () => {
   })
 
   it('is byte-stable across assemblies and lists roots in scope order', async () => {
+    mkdirSync(`${fixture.base}/third`)
     promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [
       root('a', fixture.outside),
       root('b', `${fixture.base}/third`),

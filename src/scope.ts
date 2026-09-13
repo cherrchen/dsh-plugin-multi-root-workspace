@@ -16,6 +16,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/scope
  */
 
+import { statSync } from 'node:fs'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
@@ -61,9 +62,9 @@ export interface FilesystemScope {
 
 /**
  * Canonicalize and sanitize one root list against a primary root: drop the
- * primary itself, drop duplicates, drop any root whose current resolution no
- * longer matches the directory it was registered for, and preserve registry
- * order.
+ * primary itself, duplicates, missing/non-directory paths, and any root whose
+ * current resolution no longer matches the directory it was registered for;
+ * preserve registry order.
  *
  * The last rule is the security-relevant one. `canonicalPath` is `realpath`, so
  * a registered directory that has since been replaced by a symlink resolves to
@@ -88,6 +89,11 @@ export function sanitizeAdditionalRoots(
     if (typeof recorded !== 'string' || recorded === '') continue
     const canonical = canonicalPath(root.path)
     if (canonical !== recorded) continue
+    try {
+      if (!statSync(canonical).isDirectory()) continue
+    } catch {
+      continue
+    }
     if (seen.has(canonical)) continue
     seen.add(canonical)
     result.push(canonical)

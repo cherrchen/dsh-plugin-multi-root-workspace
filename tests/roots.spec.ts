@@ -21,6 +21,7 @@ import {
   indexedStatuses,
   isCanonicallyUnder,
   removeStatusAt,
+  entryRootRef,
   resolveRootRef,
   RootValidationError,
   validateRootCandidate,
@@ -393,10 +394,15 @@ describe('indexedStatuses and removeStatusAt', () => {
     expect(afterSecond[0]?.path).toBe(sibling)
   })
 
-  it('removes exactly one record by id (the first match), not every match', () => {
-    const after = removeStatusAt(duplicateId(), { kind: 'id', id: 'same' })
-    expect(after).toHaveLength(1)
-    expect(after[0]?.path).toBe(join(fixture.base, 'gone'))
+  it('rejects an id that matches more than one record', () => {
+    expect(() => removeStatusAt(duplicateId(), { kind: 'id', id: 'same' }))
+      .toThrowError(/matches more than one/)
+  })
+
+  it('rejects an entry snapshot when the stored rows are completely indistinguishable', () => {
+    const first = duplicateId()[0]!
+    const identical = [first, { ...first }]
+    expect(() => removeStatusAt(identical, entryRootRef(first, 1))).toThrowError(/matches more than one/)
   })
 
   it('removes by canonical path spelling', () => {

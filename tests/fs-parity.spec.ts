@@ -294,6 +294,17 @@ describe('multi-root extension', () => {
     await expect(ours.fs.writeText(await target(ours, join(fixture.outside, 'x.txt')), 'x'))
       .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
   })
+
+  it('does not recreate an additional root deleted before the next registry refresh', async () => {
+    const fixture = createFixtureWorkspace('fs-missing-live')
+    fixtures.push(fixture)
+    const ours = await mount(MultiRootFileSystem, fixture, 'workspace-write', [fixture.outside])
+    await rm(fixture.outside, { recursive: true, force: true })
+
+    await expect(ours.fs.writeText(await target(ours, join(fixture.outside, 'recreated.txt')), 'x'))
+      .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(existsSync(fixture.outside)).toBe(false)
+  })
 })
 
 describe('configuration compatibility', () => {

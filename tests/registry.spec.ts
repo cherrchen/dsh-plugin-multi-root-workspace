@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DOMAIN_NAME, MAX_ALIAS_LENGTH } from '../src/registry.ts'
-import { RootValidationError } from '../src/roots.ts'
+import { entryRootRef, RootValidationError } from '../src/roots.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -439,13 +439,25 @@ describe('a store with records that cannot be told apart', () => {
     expect(second_.registry.granted(primary)).toEqual([])
     expect(second_.scope.scopeOf(primary)).toEqual([])
 
+    // Alias and move address one exact row as well; neither may fan out by id
+    // or make sorting double as implicit data cleanup.
+    const aliased = await second_.registry.setAlias(primary, entryRootRef(statuses[1]!, 2), 'twin')
+    expect(aliased.map(status => status.alias)).toEqual([undefined, 'twin'])
+    const moved = await second_.registry.move(
+      primary,
+      entryRootRef(aliased[1]!, 2),
+      entryRootRef(aliased[0]!, 1),
+    )
+    expect(moved).toHaveLength(2)
+    expect(moved.map(status => status.path)).toEqual([second, firstPath])
+
     // One record at a time: a removal by id would have taken both.
     const afterOne = await second_.registry.removeAt(primary, { kind: 'ordinal', ordinal: 1 })
     expect(afterOne).toHaveLength(1)
-    expect(afterOne[0]?.path).toBe(second)
-    const afterTwo = await second_.registry.removeAt(primary, { kind: 'path', path: second })
+    expect(afterOne[0]?.path).toBe(firstPath)
+    const afterTwo = await second_.registry.removeAt(primary, { kind: 'path', path: firstPath })
     expect(afterTwo).toEqual([])
-    expect(afterTwo.map(status => status.path)).not.toContain(firstPath)
+    expect(afterTwo.map(status => status.path)).not.toContain(second)
   })
 
   it('reports a record that predates the granted-directory field as invalid', async () => {
@@ -467,6 +479,29 @@ describe('a store with records that cannot be told apart', () => {
     // It is NOT deleted for the operator: it stays until they remove it.
     expect(second.registry.list(primary)).toHaveLength(1)
     expect(await second.registry.removeAt(primary, { kind: 'ordinal', ordinal: 1 })).toEqual([])
+  })
+
+  it('preserves a legacy missing field through an unrelated write and restart', async () => {
+    const first = await mount()
+    const legacy = makeRoot('legacy')
+    await first.registry.add(primary, { path: legacy })
+    await disposeAll()
+    const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+      tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
+    }
+    delete document.tables.roots[primary]!.roots[0]!.recordedPath
+    writeFileSync(storeFile, JSON.stringify(document))
+
+    const second = await mount()
+    const healthy = makeRoot('healthy')
+    const afterAdd = await second.registry.add(primary, { path: healthy })
+    expect(afterAdd.map(status => status.state)).toEqual(['invalid', 'available'])
+    await disposeAll()
+
+    const third = await mount()
+    expect(third.registry.unavailable).toBeUndefined()
+    expect(third.registry.list(primary).map(status => status.state)).toEqual(['invalid', 'available'])
+    expect(third.registry.granted(primary)).toEqual([healthy])
   })
 })
 
