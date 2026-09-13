@@ -1,5 +1,7 @@
 # dsh-plugin-multi-root-workspace
 
+[中文](./README.md) | English
+
 ## What & Why
 
 An out-of-tree plugin bundle for DSH (DeepSeek Harness) that widens the Workspace write scope from a single canonical directory to "**one primary root + N additional roots**" — **without modifying any package in the upstream repository**.
@@ -16,11 +18,10 @@ The first release (MVP) is complete and accepted: M1 composition and empty-root 
 
 ## Quick Start
 
-With a DSH runtime at hand (web / Electron desktop / headless all work), the shortest path is three commands:
+With a DSH runtime at hand (web / Electron desktop / headless all work), the shortest path is two commands — the plugin is published on [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace):
 
 ```sh
-git clone https://github.com/cherrchen/dsh-plugin-multi-root-workspace.git
-dsh plugin --profile web add ./dsh-plugin-multi-root-workspace
+dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 dsh --profile web
 ```
 
@@ -30,19 +31,68 @@ Once it is up, the **Folders** action (`🗂`) appears at the sidebar foot — o
 /workspace-folders add ~/code/another-repo
 ```
 
-The agent can now read, write, and run bash in that directory, with the same rights as this session's workspace.
+The agent can now read, write, and run bash in that directory, with the same rights as this session's workspace. Other install sources (the GitHub repository / a local clone) and the command differences of running DSH from a source checkout are covered under [Installation](#installation).
 
 ## Requirements
 
-- **Node.js** `^22.19.0 || >=24` (pinned by the repository's `engines`) and **Git**
-- **pnpm 11** (`packageManager` pins `pnpm@11.25.0`; corepack recommended)
+- **Using the published plugin**: a working DSH runtime (`0.1.5-rc.2` or compatible) is all you need — `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
+- **Building from source / contributing**: **Node.js** `^22.19.0 || >=24` (pinned by the repository's `engines`), **Git**, and **pnpm 11** (`packageManager` pins `pnpm@11.25.0`; corepack recommended)
 - **DSH runtime `0.1.5-rc.2`** (exact dev pin; the upgrade procedure lives in the [development workflow](./docs/development/plugin-development-workflow.md))
 - **Platforms**: kernel-level multi-root is complete on macOS (Seatbelt) and Linux (bwrap or Landlock); on Windows only the `fs` write path covers additional roots (confined bash/PTY does not — see [known limitations](#known-limitations-first-release))
 - Running the smoke tests needs **no model credentials**: the e2e model turns are served by an inline scripted OpenAI-compatible endpoint
 
 ## Installation
 
-Prepare a development environment from source:
+`dsh plugin` supports four install sources. All commands below use the web profile as the example; for the Electron desktop swap `--profile web` for `--profile desktop` — the install method is the same.
+
+| Source | Command | Notes |
+| --- | --- | --- |
+| npm registry (recommended) | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | Pre-built artifacts, ready to use, no build authorization |
+| Tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | Pre-built offline package, no build authorization |
+| Local path | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` links a local checkout — good for development |
+| GitHub / git | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | Pulls source, built on the spot by `prepare`; needs `allowBuilds` on first use, pin a tag |
+
+Treat the `allowBuilds` authorization for the GitHub / git route as **permission to execute the package's code on your machine at install time** (outside any sandbox the agent runs under) — it is pnpm ≥10's uniform requirement for dependency lifecycle scripts. The npm and tarball routes install the already-built `lib/` and have no such step.
+
+### Install from npm (recommended)
+
+```sh
+dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
+```
+
+Installs pre-built artifacts, ready to use, no build authorization needed.
+
+### Install from a tarball
+
+```sh
+pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
+# or download the tgz from the GitHub Release assets, e.g.:
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.0/dsh-electron-dsh-plugin-multi-root-workspace-0.1.0.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.0.tgz
+```
+
+Also pre-built, no build authorization needed — handy for air-gapped or offline delivery.
+
+### Install from GitHub
+
+```sh
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace
+```
+
+With pnpm ≥10 the first `add` fails: a git install pulls **source code rather than build artifacts**, so the package's self-contained `prepare` script must build it on the spot (a direct transpile of `src/`, no type-checking). Follow `dsh`'s guidance and copy the exact package key pnpm prints into the profile's `pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  '@dsh-electron/dsh-plugin-multi-root-workspace': true
+```
+
+Then run `add` again. Pinning a tag (e.g. `#v0.1.0`) is recommended so a later push cannot silently change what actually runs:
+
+```sh
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.0
+```
+
+### Install from a local clone (development & debugging)
 
 ```sh
 git clone https://github.com/cherrchen/dsh-plugin-multi-root-workspace.git
@@ -50,7 +100,10 @@ cd dsh-plugin-multi-root-workspace
 export CI=true    # without a TTY, pnpm's dependency self-check aborts; see the development workflow §8
 pnpm install
 pnpm build        # produces lib/ (not tracked by Git); the artifact test and installation both need it
+dsh plugin --profile web add "$PWD"
 ```
+
+> **Tip**: if your DSH comes from a source checkout (rather than `npm install -g @deepseek-ai/deepseek-harness`), the `dsh` binary is not on the global PATH — replace `dsh` with `pnpm dsh` in the commands above, e.g. `pnpm dsh plugin --profile web add ...` and `pnpm dsh --profile web`.
 
 ## Running
 
@@ -148,8 +201,6 @@ Long-term project documentation lives in [`docs/`](./docs/README.md):
 - [Troubleshooting](./docs/troubleshooting/README.md)
 
 Repository-wide rules for Coding Agents are defined in [`AGENTS.md`](./AGENTS.md).
-
-Chinese documentation: [`README.md`](./README.md)
 
 ## License
 

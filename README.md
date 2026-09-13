@@ -1,5 +1,7 @@
 # dsh-plugin-multi-root-workspace
 
+中文 | [English](./README.en.md)
+
 ## 项目简介（What & Why）
 
 DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围从"一个 canonical 目录"扩展为"**一个主根 + N 个附加根**"，且**不修改上游仓库任何包**。
@@ -16,13 +18,14 @@ DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围�
 
 ## 快速开始
 
-已有 DSH 运行时（web / Electron 桌面 / headless 均可）时，最短路径是三步：
+已有 DSH 运行时（web / Electron 桌面 / headless 均可）时，最短路径是两步——插件已发布到 [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace)：
 
 ```sh
-git clone https://github.com/cherrchen/dsh-plugin-multi-root-workspace.git
-dsh plugin --profile web add ./dsh-plugin-multi-root-workspace
+dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 dsh --profile web
 ```
+
+其他安装来源（GitHub 仓库 / 本地源码）与源码方式运行 DSH 的命令差异，见[安装](#安装)。
 
 启动后侧栏底部出现 **Folders**（`🗂`）动作，或直接在会话里：
 
@@ -34,15 +37,64 @@ dsh --profile web
 
 ## 环境要求
 
-- **Node.js** `^22.19.0 || >=24`（仓库 `engines` 钉住）与 **Git**
-- **pnpm 11**（`packageManager` 钉 `pnpm@11.25.0`，建议经 corepack 启用）
+- **使用已发布的插件**：只需要一个可用的 DSH 运行时（`0.1.5-rc.2` 及兼容版本），`dsh plugin` 会把包装进对应 profile，无需本地 Node 工具链
+- **从源码构建 / 参与**：**Node.js** `^22.19.0 || >=24`（仓库 `engines` 钉住）、**Git**、**pnpm 11**（`packageManager` 钉 `pnpm@11.25.0`，建议经 corepack 启用）
 - **DSH 运行时 `0.1.5-rc.2`**（开发依赖精确 pin；升级流程见[开发工作流](./docs/development/plugin-development-workflow.md)）
 - **平台支持**：macOS（Seatbelt）与 Linux（bwrap 或 Landlock）内核级多根全量；Windows 仅 `fs` 写路径覆盖附加根（受限 bash/PTY 不含，见[已知限制](#已知限制第一期)）
 - 运行冒烟测试**不需要模型凭据**：e2e 的模型轮次由内联的脚本化 OpenAI 兼容端点提供
 
-## 安装步骤
+## 安装
 
-从源码准备开发环境：
+`dsh plugin` 支持四种安装来源。以下均以 web profile 为例；桌面端（Electron）把 `--profile web` 换成 `--profile desktop`，安装方式同源。
+
+| 来源 | 命令 | 说明 |
+| --- | --- | --- |
+| npm 注册表（推荐） | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | 预构建产物，即装即用，无需构建授权 |
+| tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | 预构建离线包，无需构建授权 |
+| 本地路径 | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` 链接本地 checkout，适合开发调试 |
+| GitHub / git | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | 拉源码由 `prepare` 现场构建；首次需授权 `allowBuilds`，建议锁定 tag |
+
+从 GitHub / git 方式安装时的 `allowBuilds` 授权，请视为**允许该包的代码在安装时于你的机器上执行**（且不在 agent 运行的任何沙箱之内）——这是 pnpm ≥10 对依赖生命周期脚本的统一要求，npm 与 tarball 方式装的是构建好的 `lib/`，无此步骤。
+
+### 从 npm 安装（推荐）
+
+```sh
+dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
+```
+
+安装的是预构建产物，即装即用，无需任何构建授权。
+
+### 从 tarball 安装
+
+```sh
+pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
+# 或从 GitHub Release 资产下载，例如：
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.0/dsh-electron-dsh-plugin-multi-root-workspace-0.1.0.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.0.tgz
+```
+
+同样是预构建产物，无需构建授权，适合内网或离线环境交付。
+
+### 从 GitHub 安装
+
+```sh
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace
+```
+
+pnpm ≥10 下首次 `add` 会失败：git 安装拉取的是**源码而非构建产物**，包内自包含的 `prepare` 脚本要现场构建（直接转译 `src/`，不做类型检查）。按 `dsh` 的提示把 pnpm 打印的包键写入该 profile 的 `pnpm-workspace.yaml`：
+
+```yaml
+allowBuilds:
+  '@dsh-electron/dsh-plugin-multi-root-workspace': true
+```
+
+然后重新执行 `add` 即可。建议锁定 tag（如 `#v0.1.0`），让后续推送无法悄悄改变实际运行的内容：
+
+```sh
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.0
+```
+
+### 从本地源码安装（开发调试）
 
 ```sh
 git clone https://github.com/cherrchen/dsh-plugin-multi-root-workspace.git
@@ -50,7 +102,10 @@ cd dsh-plugin-multi-root-workspace
 export CI=true    # 无 TTY 时 pnpm 的依赖自检会中止，见开发工作流 §8
 pnpm install
 pnpm build        # 生成 lib/（未纳入 Git），制品测试与安装都依赖它
+dsh plugin --profile web add "$PWD"
 ```
+
+> **提示**：如果你的 DSH 是 clone 源码方式使用（而非 `npm install -g @deepseek-ai/deepseek-harness`），`dsh` 不在全局 PATH 里，请把上述命令中的 `dsh` 换成 `pnpm dsh`——例如 `pnpm dsh plugin --profile web add ...`、`pnpm dsh --profile web`。
 
 ## 运行方法
 
@@ -148,8 +203,6 @@ docs/             需求、架构、决策记录（ADR）、计划、开发工�
 - [常见问题排查](./docs/troubleshooting/README.md)
 
 Coding Agent 的仓库级规则定义于 [`AGENTS.md`](./AGENTS.md)。
-
-English documentation: [`README.en.md`](./README.en.md)
 
 ## 许可证
 

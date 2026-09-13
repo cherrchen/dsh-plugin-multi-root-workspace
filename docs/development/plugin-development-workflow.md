@@ -129,6 +129,8 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 六行 insert
 
 发布形态的 `files` 现在包含 `lib/*.js`（含 `lib/client.js`）与两面的 `lib/types/**/*.d.ts`；client 制品必须在 `pnpm pack` 之前构建好（宿主直接读盘，不做编译）。
 
+**`prepare` 脚本（git 安装入口）**：`package.json` 的 `prepare` 只跑 `pnpm run bundle`（tsdown 直接转译 `src/`，无项目引用、不做类型检查，配置自包含，符合上游 [publish 文档](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/user/develop/basic/publish.zh.md)对 git 安装的要求）。它的三个触发点：git 方式 `dsh plugin add` 后由 pnpm 现场构建（用户需先授权 profile 的 `allowBuilds`）；`pnpm publish` 打包前保证 `lib/*.js` 新鲜；本仓库根目录 `pnpm install` 也会顺带产出 JS 面（`.d.ts` 仍需 `pnpm build` 的 `build:types`）。CI 里 install 阶段的这次预构建是预期行为，显式 `pnpm build` 保持不变。
+
 两种安装形态都已验证（M1）：
 
 | 形态 | 依赖解析 | 验证结果 |
