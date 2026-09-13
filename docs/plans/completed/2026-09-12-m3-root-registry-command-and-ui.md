@@ -317,3 +317,18 @@ pnpm docs:check    # 0 errors
 ### 返工交付物
 
 `src/contract.ts`、`src/roots.ts`、`src/scope.ts`、`src/registry.ts`、`src/command.ts`、`src/client/panel-client.ts`、`src/client/WorkspaceFoldersAction.tsx`、`src/client/locales.ts`；`tests/{roots,scope,registry,command,client-panel,parity-matrix,sandbox-multi-root,fs-parity}.spec.*`、`tests/support/kernel-runner.ts`（新）；`scripts/check-kernel-runner.mjs`（新）、`scripts/smoke-behavior.mjs`、`scripts/smoke-journey.mjs`、`package.json`、`.github/workflows/{ci,upgrade}.yml`；以及本文件、ADR-0004、架构 §4/§7、需求 §3/§5、开发流程、README（中英）。上游仓库零改动。
+
+---
+
+## 第二轮审查修复（2026-09-13）
+
+第二轮审查暴露了旧记录写回、重复 id 定位、实时 missing scope、面板下移以及 CI 门禁的七项问题。修复后：
+
+- 缺少 `recordedPath` 的旧记录保持字段缺失，完整持久对象在写前经 zod 校验；回归测试覆盖"旧数据加载 → 无关 add → 重启"。
+- remove/alias/move 统一使用列表快照 entry ref，并在串行队列内核验；重复 id 不再误操作或在排序时丢记录。
+- scope 每次 resolve 都确认目录存在且类型正确；未 refresh 时删除的根也立即撤销。
+- 面板下移使用下下项作为 `beforeEntry`，无下下项则移到末尾；客户端测试断言真实重排后的渲染顺序。
+- `kernel:probe` 移到单测之前；Windows 开关在矩阵生成时决定是否创建 job；升级包名从 manifest 生成，不再漏掉 client primitives 或 workspace。
+- 面板权限文案明确区分 `workspace-write` / `read-only` 和 Windows 受限 bash 的已知边界；请求使用 epoch 隔离过期应答，组件关闭后不再写入状态。
+
+长期决策修订见 [ADR-0004 第 16–19 条](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)。

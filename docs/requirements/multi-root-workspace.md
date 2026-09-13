@@ -93,6 +93,10 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 7.1 **授权不可被本地替换转移**：登记目录（或其链接链）在登记后被替换成指向别处的符号链接时，该根变为 `redirected`、撤销授予，且**绝不**把写权限交给新目标；恢复原目录后由一次重新校验自动复原。
 7.2 **刷新即重新校验**：命令 `list` 与面板刷新是同一条路径——重新 `stat`、重新解析、重新裁决并同步 scope，且只读刷新不写存储；目录删除后列表必须显示不可用并撤销授予，目录恢复后必须重新授予（不需要重启）。
 7.3 **并发不丢操作**：同一主根上并发发起的增删改必须全部生效，且不得复活已删除的记录。
+7.4 **异常记录不扩散损坏**：缺少 `recordedPath` 的旧记录经无关写操作后仍可在重启时读取；一次 remove/alias/move 只能作用于一条可唯一定位的记录，不能按重复 id 批量命中或隐式删除其他记录。
+7.5 **实时 scope 不授予 missing 根**：目录在登记后被删除时，即使没有先执行 list/refresh，下一次 scope resolve 也必须排除它，不得通过写操作重建该目录。
+7.4 **异常记录不扩散损坏**：缺少 `recordedPath` 的旧记录经无关写操作后仍可在重启时读取；一次 remove/alias/move 只能作用于一条可唯一定位的记录，不能按重复 id 批量命中或隐式删除其他记录。
+7.5 **实时 scope 不授予 missing 根**：目录在登记后被删除时，即使没有先执行 list/refresh，下一次 scope resolve 也必须排除它，不得通过写操作重建该目录。
 8. **失败要响亮**：misconfiguration（非绝对路径、重复 id、patch 行未按预期生效）在装载或首次 resolve 时抛错。
 9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias/排序可用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制。
 10. **升级韧性**：`package.json` pin dsh 精确版本；仓库 CI 含"升级 smoke"脚本（对上游 demo 行为差异报警）；provider 子类只依赖上游公开方法面（不触碰 TS-private、不做原型替换）。

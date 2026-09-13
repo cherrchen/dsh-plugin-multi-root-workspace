@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-09-12 依据外部审查补充第 9–14 条决策；原 1–8 条不变）
+Accepted（2026-09-13 依据第二轮审查补充第 16–19 条决策）
 
 ## Date
 
@@ -21,7 +21,7 @@ M3 要把"哪些目录是附加根"从测试注入变成用户可管理的持久
 
 ## Decision
 
-1. **存储键 = canonical 主根（字符串）**，不用 `WorkspaceId`，也不新增"工作区实体"概念。domain 名为 `multi_root_workspace`，version 1，`single` layout，单表 `roots`，记录形态 `{ roots: [{ id, path, alias?, addedAt }] }`。键选 canonical 主根是因为它正是 `policy.workspaceRoot` 的 canonical 形式，provider、命令、面板三处解析出的键因此必然一致。
+1. **存储键 = canonical 主根（字符串）**，不用 `WorkspaceId`，也不新增"工作区实体"概念。domain 名为 `multi_root_workspace`，version 1，`single` layout，单表 `roots`，当前记录形态 `{ roots: [{ id, path, recordedPath?, alias?, addedAt }] }`；`recordedPath` 仅为兼容旧记录而可缺省，新登记必填。键选 canonical 主根是因为它正是 `policy.workspaceRoot` 的 canonical 形式，provider、命令、面板三处解析出的键因此必然一致。
 2. **`layout` 固定 `single`**：一个主根的登记表是一个整体（顺序即显示顺序），没有大记录或稀疏记录；同时 `single` 是"路径可以当键"的前提。**触发条件**：若将来必须切 `per-record`（例如记录数量或体积失控），键方案必须同时改为 id 或哈希，不能沿用路径——这条写在这里以免后人踩坑。
 3. **根 id 用生成的 uuid，brand 是本地类型**（`AdditionalRootId`，只有编译期意义）。路径会随 canonical 化变化、别名会改，引用锚点必须稳定；不为此引入 `@deepseek-ai/dsh-brand` 依赖。
 4. **校验顺序固定，首个失败即抛**：非绝对路径 → 不存在 → 不是目录 → canonical 化 → 等于主根 → 与已登记根重复 → 嵌套（双向）。前导 `~` 会被展开（`~` 与 `~/…`），其他相对路径一律拒绝，不猜测 base。
@@ -35,10 +35,17 @@ M3 要把"哪些目录是附加根"从测试注入变成用户可管理的持久
 9. **记录"授予目录"（`recordedPath`）**：每条记录除 `path` 外，另存登记当时观察到的 canonical 目录。授权条件为 `canonicalPath(path) === recordedPath`。理由是 `canonicalPath` 就是 `realpath`：登记目录被替换为符号链接（或链接链中某段被改）后，重新解析会指向**另一个**目录，而"重新解析"绝不能被当成"重新授权"。`recordedPath` 缺失的记录（旧数据或手写数据）报 `invalid`，不猜测、不静默补写，由操作者显式删除或重新登记。
 10. **状态词汇扩为四态**：`available` / `missing` / `redirected`（登记目录现在解析到别处）/ `invalid`。`missing` 与 `redirected` 都保留登记、都不授予，且都能在目录恢复后由重新校验自动复原；`invalid` 只能由操作者删除。裁决顺序固定：身份与唯一性 → `recordedPath` 是否变化 → 与主根的关系 → 与其他记录的关系 → 存在性。`redirected` **先于**重叠判定，避免用攻击者可控的新目标参与包含运算。
 11. **主根纳入重叠校验（双向）**：候选在主根之下、或包含主根，一律拒绝，错误码 `primary-overlap`（与"恰好等于主根"的 `equals-primary` 区分）。存储读取侧同样适用。此前主根只在 `existing` 列表为空时才"偶然"挡住一部分情况（见原 §5 的意图与实际实现的差距）。
-12. **重复 id 的处置**：读取时若同一 id 出现在多条记录中，**这些记录全部**报 `invalid`、全部不授予。"按 id 取第一条"正是让存储无法解读的歧义来源。清理由 `removeAt`（按位置/路径/首次匹配删除**一条**）完成，面板与命令都走它——按 id 过滤的删除会一次删掉多条，与"一次操作只影响一条记录"的预期不符。
+12. **重复 id 的处置**：读取时若同一 id 出现在多条记录中，**这些记录全部**报 `invalid`、全部不授予。"按 id 取第一条"正是让存储无法解读的歧义来源。清理由 `removeAt` 按第 17 条的 entry ref 删除**一条**；单独 id 有多个匹配时直接拒绝。
 13. **读取也重新校验，但不写存储**：`refresh(primaryRoot)` = 重新 `stat` 每个登记目录 + 重新解析 + 重新裁决 + 重播种 scope + 通知监听者，**不落盘**；命令 `list` 与面板 `list` 端点都走它。理由：没有重新校验的"刷新"会让面板列出的范围与实际授予的范围长期不一致（目录删掉后仍显示 `available`），而只读刷新若落盘又会把"看一眼列表"变成一次写入。`recheck` 保留为"refresh + 落盘一次"，仅供需要持久化重判结果的调用方使用。
 14. **写操作按主根整体串行**：每次变更的"读快照 → 校验 → 落盘"整段进入该主根的 Promise 队列。存储域只串行化单个 `put()`/`delete()`，不足以覆盖读—改—写：并发 `add(A)`/`add(B)` 会双双成功却只留一条，`remove` 与 `add` 并发会把已删除的记录写回去。这是对本文档原「风险与处置」里"domain 层串行化写入链即足够"这一判断的更正。
 15. **`publish` 幂等**：仅当"实际授予集合 + 不可用集合"发生变化时才重播种 scope 并通知监听者。重新校验因此可以随时执行而不产生抖动，也不会在每次列目录时重复告警。
+
+### 2026-09-13 第二轮审查补充
+
+16. **旧记录缺失值始终保持缺失**：展示态不得用 `''` 代替持久态中缺失的 `recordedPath`。任何写入在进入 storage 前都必须用完整 domain schema 校验；无关的 add/alias/move 操作可以保留旧记录，但不能把它改写成下次启动无法读取的空字符串。
+17. **变更指向列表快照中的具体条目**：面板回传 `{ ordinal, id, path, addedAt }`，命令也把用户参考解析成同样的 entry ref；注册表在串行队列内重新核验位置与身份后再删除、改别名或移动。单独 id/path 仅在唯一匹配时可用，有歧义必须拒绝；排序只移动一条，绝不隐式清理异常数据。
+18. **scope 的每次解析都是最后的安全门**：除了验证 `canonicalPath(path) === recordedPath`，还必须当场 `stat` 并确认是目录。因此目录在两次 registry refresh 之间被删除时，provider 的下一次 resolve 已经撤销授予，不会因写入而把目录重新创建。
+19. **CI 的能力探针必须先于依赖其结果的单测**：`kernel:probe` 在 `test` 前导出逐方言结果；Windows 开关在 matrix 生成阶段决定是否创建 runner；升级工作流从 manifest 枚举所有直接 `@deepseek-ai/dsh*` 依赖并输出完版本清单。
 
 ## Alternatives Considered
 
@@ -56,11 +63,11 @@ M3 要把"哪些目录是附加根"从测试注入变成用户可管理的持久
 | 发现解析结果变化时把记录标为 `invalid` 并永久失效 | 目录被误替换后无法通过"恢复目录"回到可用状态，操作者必须重新登记；`redirected` 保留了可恢复路径 |
 | 只串行化存储层的 `put()` | 覆盖不到读—改—写；并发 `add` 丢记录、并发 `add`/`remove` 复活已删记录（返工实测复现） |
 | 只读刷新也写回存储 | "看一眼列表"变成一次写入，且会把重新分类的结果当成新的用户意图持久化 |
-| 重复 id 时"第一条生效、其余忽略" | 删除与改别名仍会同时作用在多条记录上；面板也无法把两条区分开 |
+| 重复 id 时"第一条生效、其余忽略" | 删除、别名与排序都可能命中错记录；现在由 entry ref 精确指向，不可区分时拒绝 |
 
 ## Consequences
 
-- 注册表成为 M2 provider 的唯一数据源，`MultiRootScopeService.setAdditionalRoots()` 仍是 scope 的公开写口，但**登记的每一项都必须带 `recordedPath`**，否则 scope 侧会拒绝授予（scope 不信任"当前解析结果"）。
+- 注册表成为 M2 provider 的唯一数据源，`MultiRootScopeService.setAdditionalRoots()` 仍是 scope 的公开写口；新登记必须带 `recordedPath`，旧记录可缺省但不授予。
 - 用户可见的四种状态（`available` / `missing` / `redirected` / `invalid`）成为面板与命令的共同词汇，也被 `renderRootsReport` 直接渲染。
 - 存储 schema 的版本号仍为 1：新增字段是**追加**，读取侧对缺失字段按 `invalid` 处理，因此不需要"版本不符则拒绝打开"这条更重的路径；代价是旧记录在用户显式处置前都会显示为 `invalid`（这是刻意的：不猜测、不静默改写）。
 - `zod` 因此成为插件的运行时依赖（与 `dsh-storage-domain` 同源），同一份 `zod` 也被内联进浏览器制品用于**面板通道两端**的运行时校验；宿主侧不再新增其他依赖。

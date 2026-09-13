@@ -143,11 +143,12 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 六行 insert
 - **只允许包入口导入**。发布包里没有 `src/`，`pkg/src/*` 在安装形态下不存在；需要上游内部实现时改为本地实现 + 注明出处 + 差分测试钉住（见 `src/containment.ts`）。
 - 子类只使用上游公开方法面（不碰 TS-private、不做原型替换）。`dsh-sandbox-local` 公开面只有 `confine` + `internals`，因此方言适配是**观测克隆 + 结构识别 + 识别失败即抛错**（`src/dialects.ts`，见 [ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；新增或改变方言必须同时更新调研 §10 与本文件的测试清单。
 - **升级流程**：改 pin → `pnpm install` → `pnpm test`（差分 parity + 方言矩阵 + patch 不变量）→ `pnpm build` → `pnpm smoke:compose` → `pnpm smoke:behavior`。任一差异即视为破坏性变更，先定位再改 pin。
+- `upgrade.yml` 不维护手写包名清单：`scripts/upgrade-dsh-dependencies.mjs` 从 `package.json` 枚举所有直接 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 依赖，统一升级并输出每个包的实际版本。新增直接 DSH 依赖不需要另外修工作流。
 - 双运行时回归：`DSH_CLI=<另一运行时的 dsh 入口> pnpm smoke`。
 
 ## 7. CI
 
-`.github/workflows/ci.yml` 在 `ubuntu-latest` 与 `macos-latest` 上执行：`lint` → `typecheck` → **`build`** → `test` → `kernel:probe` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `docs:check`。升级工作流（`upgrade.yml`）同样把 `build` 放在 `test` 之前。
+`.github/workflows/ci.yml` 在 `ubuntu-latest` 与 `macos-latest` 上执行：`lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `docs:check`。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。升级工作流保持同样顺序。
 
 Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seatbelt。**"没跑"不会被记成通过**，机制分两层，而且**按方言**判定：
 
@@ -156,9 +157,9 @@ Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seat
 
 ### Windows 验证腿
 
-`ci.yml` 的矩阵含 `windows-latest`（`kernel: none` 标记），用于验证"fs fence 覆盖 Windows 写路径"这一承诺所依赖的**平台无关代码**：校验规则、注册表、命令与 RPC 通道、面板、client 制品。它在 Windows 上**不跑**需要 POSIX shell 的冒烟（`smoke:compose/behavior/journey`）与 `kernel:probe`（Windows 没有内核多根档位，第一期范围，见需求文档）；驱动 POSIX runner argv 的套件（`parity-matrix`、`fs-parity`、`sandbox-multi-root` 的方言部分）在该平台**显式 skip 并打印原因**，而不是把"平台没有这个能力"记成失败。
+`ci.yml` 在仓库变量 `DSH_WINDOWS_CI=1` 时才把 `windows-latest` 加入动态矩阵，用于验证"fs fence 覆盖 Windows 写路径"这一承诺所依赖的**平台无关代码**：校验规则、注册表、命令与 RPC 通道、面板、client 制品。它在 Windows 上**不跑**需要 POSIX shell 的冒烟（`smoke:compose/behavior/journey`）与 `kernel:probe`（Windows 没有内核多根档位，第一期范围，见需求文档）；驱动 POSIX runner argv 的套件（`parity-matrix`、`fs-parity`、`sandbox-multi-root` 的方言部分）在该平台**显式 skip 并打印原因**，而不是把"平台没有这个能力"记成失败。
 
-该腿受仓库变量 `DSH_WINDOWS_CI` 控制：设为 `1` 时启用。这样做是因为标准 Windows runner 在**私有**仓库上消耗计费分钟，而本仓库当前没有可用的计费/额度；一旦仓库公开或配置了自托管 runner，只需把这个变量置 `1`，无需改工作流（矩阵与条件都已就位）。
+开关关闭时不会创建 Windows job，因此 checkout、安装和验证也不会消耗 Windows runner。这样做是因为标准 Windows runner 在**私有**仓库上消耗计费分钟，而本仓库当前没有可用的计费/额度；将该变量置 `1` 即可启用。
 
 失败可诊断：`test` 与 `smoke:behavior` 的输出会同时写入 `vitest.log` / `smoke-behavior.log`，步骤失败时由 `actions/upload-artifact@v4` 上传，公共仓库无需管理员权限即可下载——"红但看不到日志"的运行等于没人能修。
 
