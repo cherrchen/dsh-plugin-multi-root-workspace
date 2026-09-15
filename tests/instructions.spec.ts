@@ -388,6 +388,24 @@ describe('nested instructions', () => {
     expect(after).not.toContain('# repo-b rules')
   })
 
+  it('examines every ancestor of a touched file, so an intermediate directory\'s file reaches the model', async () => {
+    seedNested()
+    mkdirSync(join(repoB, 'src', 'deep'), { recursive: true })
+    writeFileSync(join(repoB, 'src', 'deep', 'AGENTS.md'), '# repo-b deep rules')
+    writeFileSync(join(repoB, 'src', 'deep', 'entry.mjs'), 'export {}\n')
+    const world = await mountWorld({}, [repoB])
+    expect(textOf(await world.step())).toContain('# repo-b rules')
+
+    // The touch reaches `src/deep`. `src` is only an ANCESTOR of it, and its
+    // own file must still be delivered on this very step: the upward discovery
+    // walk reports it, but the exact-directory filter would discard it while
+    // `src` is never examined.
+    world.touch(join(repoB, 'src', 'deep', 'entry.mjs'))
+    const text = textOf(await world.step())
+    expect(text).toContain('# repo-b src rules')
+    expect(text).toContain('# repo-b deep rules')
+  })
+
   it('does not re-send a nested file the model already has', async () => {
     seedNested()
     const world = await mountWorld({}, [repoB])

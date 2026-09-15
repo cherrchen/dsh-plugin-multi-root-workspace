@@ -63,6 +63,7 @@ const EDITED_README = 'seed readme for repo-b\nedited by the agent through the a
 const RULE_PRIMARY = 'house rule alpha: the primary repository is authoritative'
 const RULE_ADDITIONAL = 'house rule bravo: the other repository uses four-space indentation'
 const RULE_NESTED = 'house rule echo: the other repository\'s src directory uses two-space indentation'
+const RULE_DEEP = 'house rule foxtrot: the other repository\'s src/deep directory uses one-space indentation'
 const RULE_USER_GLOBAL = 'house rule charlie: always explain the plan first'
 const RULE_ANCESTOR = 'house rule delta: this ancestor directory is not a workspace root'
 /** One scripted turn: six tool calls, then the closing assistant text. */
@@ -224,9 +225,10 @@ async function startScriptedModel() {
   const requests = []
   const steps = []
   const calls = [
-    // A read INSIDE the additional root's `src/`: reaching that subdirectory is
-    // what makes its own AGENTS.md relevant to the NEXT step (H4 phase 2).
-    { name: 'read', arguments: { file_path: join(additionalRepo, 'src', 'entry.mjs') } },
+    // A read INSIDE the additional root's `src/deep/`: H4 phase 2 must make BOTH
+    // that directory's AGENTS.md and its parent `src`'s — an ancestor of the
+    // touched file — relevant to the NEXT step.
+    { name: 'read', arguments: { file_path: join(additionalRepo, 'src', 'deep', 'entry.mjs') } },
     // The write below needs the file to have been read first — the tool layer's
     // own rule — so the README read stays exactly where it was.
     { name: 'read', arguments: { file_path: join(additionalRepo, 'README.md') } },
@@ -483,9 +485,15 @@ try {
   // A subdirectory with its own instruction file, reached by the first scripted
   // tool call: this is what H4 phase 2 has to make visible, and it must be
   // committed state like everything else here so `git status` stays clean.
-  mkdirSync(join(additionalRepo, 'src'), { recursive: true })
+  //
+  // TWO levels of it, because the touch below reaches `src/deep/entry.mjs`:
+  // `src` is then only an ANCESTOR of the touched file, and its own file has to
+  // arrive on the same step as the touched directory's — a walk of `src/deep`
+  // alone reports it but filters it out.
+  mkdirSync(join(additionalRepo, 'src', 'deep'), { recursive: true })
   writeFileSync(join(additionalRepo, 'src', 'AGENTS.md'), `# other src rules\n\n${RULE_NESTED}\n`)
-  writeFileSync(join(additionalRepo, 'src', 'entry.mjs'), 'export const entry = 1\n')
+  writeFileSync(join(additionalRepo, 'src', 'deep', 'AGENTS.md'), `# other deep rules\n\n${RULE_DEEP}\n`)
+  writeFileSync(join(additionalRepo, 'src', 'deep', 'entry.mjs'), 'export const entry = 1\n')
   seedRepo(additionalRepo, 'README.md', SEED_README)
   mkdirSync(outsideRoot, { recursive: true })
   writeFileSync(join(outsideRoot, 'keep.txt'), 'untouched\n')
@@ -553,18 +561,28 @@ try {
     check.contains(JSON.stringify(webFirstStep), canonical(additionalRepo), 'web: the instruction text names the root its rules belong to')
 
     // The nested instruction journey. The first scripted call READS a file in
-    // the additional root's `src/`, so the subdirectory's own AGENTS.md becomes
-    // relevant exactly one step later — and is injected exactly once. Later
-    // requests repeat it because the whole log travels with every request, so
-    // "once" is counted WITHIN one request, not across them.
+    // the additional root's `src/deep/`, so that directory's own AGENTS.md —
+    // and its parent `src`'s, which is only an ANCESTOR of the touched file —
+    // become relevant exactly one step later, and are injected exactly once.
+    // Later requests repeat them because the whole log travels with every
+    // request, so "once" is counted WITHIN one request, not across them.
     const webNested = webRequests.map(request => rolesCarrying(request, RULE_NESTED))
+    const webDeep = webRequests.map(request => rolesCarrying(request, RULE_DEEP))
     check.equal(webNested[0].length, 0, 'web: a nested instruction file is not injected before it is reached', webWire)
-    check.equal(webNested[1], ['user'], 'web: the touched directory\'s AGENTS.md reaches the model once, in the user role', JSON.stringify(webNested))
+    check.equal(webDeep[0].length, 0, 'web: a deeper instruction file is not injected before it is reached', webWire)
+    check.equal(webNested[1], ['user'], 'web: the touched directory\'s ANCESTOR AGENTS.md reaches the model once, in the user role', JSON.stringify(webNested))
+    check.equal(webDeep[1], ['user'], 'web: the touched directory\'s own AGENTS.md reaches the model once, in the user role', JSON.stringify(webDeep))
     check.equal(
       rolesCarrying(webRequests[webRequests.length - 1], RULE_NESTED),
       ['user'],
       'web: the nested instruction file sits in the final history exactly once, in the user role',
       JSON.stringify(webNested),
+    )
+    check.equal(
+      rolesCarrying(webRequests[webRequests.length - 1], RULE_DEEP),
+      ['user'],
+      'web: the deeper instruction file sits in the final history exactly once, in the user role',
+      JSON.stringify(webDeep),
     )
 
     // ---- the one-shot composition --------------------------------------------
@@ -604,13 +622,22 @@ try {
     check.equal(rolesCarrying(headlessFirstStep, RULE_ANCESTOR).length, 0, 'headless: an ancestor of the additional root was not injected at all', headlessWire)
 
     const headlessNested = headlessRequests.map(request => rolesCarrying(request, RULE_NESTED))
+    const headlessDeep = headlessRequests.map(request => rolesCarrying(request, RULE_DEEP))
     check.equal(headlessNested[0].length, 0, 'headless: a nested instruction file is not injected before it is reached', headlessWire)
-    check.equal(headlessNested[1], ['user'], 'headless: the touched directory\'s AGENTS.md reaches the model once, in the user role', JSON.stringify(headlessNested))
+    check.equal(headlessDeep[0].length, 0, 'headless: a deeper instruction file is not injected before it is reached', headlessWire)
+    check.equal(headlessNested[1], ['user'], 'headless: the touched directory\'s ANCESTOR AGENTS.md reaches the model once, in the user role', JSON.stringify(headlessNested))
+    check.equal(headlessDeep[1], ['user'], 'headless: the touched directory\'s own AGENTS.md reaches the model once, in the user role', JSON.stringify(headlessDeep))
     check.equal(
       rolesCarrying(headlessRequests[headlessRequests.length - 1], RULE_NESTED),
       ['user'],
       'headless: the nested instruction file sits in the final history exactly once, in the user role',
       JSON.stringify(headlessNested),
+    )
+    check.equal(
+      rolesCarrying(headlessRequests[headlessRequests.length - 1], RULE_DEEP),
+      ['user'],
+      'headless: the deeper instruction file sits in the final history exactly once, in the user role',
+      JSON.stringify(headlessDeep),
     )
   } finally {
     process.chdir(originalCwd)

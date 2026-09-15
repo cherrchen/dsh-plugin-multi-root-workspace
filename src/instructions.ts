@@ -454,7 +454,10 @@ interface DirectoryWalk {
  * so a change or a removal there is noticed every step), every directory a
  * nested file was already delivered from (so a change or a removal is noticed
  * without a new touch, like upstream's own reconcile), and the parent directory
- * of every path the session has touched since the last evaluation.
+ * of every path the session has touched since the last evaluation — plus each
+ * of that directory's ancestors up to the root, because discovery reports an
+ * intermediate directory's file but only the exact directory's candidates
+ * survive the filter below.
  * @param ctx - the row's context, for `fs` and the logger.
  * @param api - the adapted upstream instruction surface.
  * @param root - the canonical additional root.
@@ -482,8 +485,23 @@ async function planRoot(
     if (dir !== root) dirs.add(dir)
   }
   for (const touched of state.touched) {
-    const dir = parentDirectoryOf(touched, session)
-    if (dir !== undefined && isCanonicallyUnder(dir, root)) dirs.add(dir)
+    const parent = parentDirectoryOf(touched, session)
+    if (parent === undefined || !isCanonicallyUnder(parent, root)) continue
+    // Every ancestor up to the root, not just the file's own directory. The
+    // walk for `<root>/a/b` REPORTS `<root>/a/AGENTS.md` (discovery walks
+    // upward), but the exact-directory filter below keeps only the candidates
+    // of the directory being walked — so `<root>/a` has to be walked in its own
+    // right, or an intermediate directory's rules never reach the model.
+    let dir = parent
+    for (;;) {
+      dirs.add(dir)
+      if (dir === root) break
+      const up = dirname(dir)
+      // Unreachable while `parent` is canonically under `root` (a canonical
+      // path's ancestors are prefixes of it); present so this can never spin.
+      if (up === dir) break
+      dir = up
+    }
   }
 
   const walks: DirectoryWalk[] = []
