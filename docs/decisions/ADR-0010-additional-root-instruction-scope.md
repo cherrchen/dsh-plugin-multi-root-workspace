@@ -66,6 +66,14 @@ PR #1（head `507c954`）的 P1-2 指出：`planRoot()` 只把**被触碰文件�
 
 同时（P2-4）：消息构造收进 `src/compat/llm-message.ts`，`@deepseek-ai/dsh-llm` 按需加载（第 9 条）。
 
+## 第二轮返工补充（2026-09-16）
+
+- **完整投递才记完整 digest。** renderer 的 `omitted` 文件不记为已投递；`truncated` 文件保留 scope 以支持撤回，但 digest 留空，下次继续尝试完整投递。预算不足时保留本次触碰，避免未投递的 nested 目录失去发现入口；后续根即使没有剩余预算也继续检查撤回。持续小于单文件渲染所需的自定义预算会持续重试，应提高预算或缩小文件。
+- **先成功构造消息并检查取消，再提交内存状态。** 消息构造失败或此时收到取消时，不更新 digest、不消费触碰、不遗忘撤回；下一步可以重试。只消费求值开始时的触碰快照，保留 I/O 期间的新触碰。这是本插件在 pre-step 内的提交边界，并不承诺整个上游 waterfall 的事务性。
+- **调用配对按 session 隔离。** `WeakMap<session, PendingCalls>` 内再以 call id 配对，每会话最多保留 128 个未回答调用；不同会话重复使用同一个 call id 不互相覆盖。
+
+逐项复现、验证与边界见[第二轮审查报告](../plans/completed/2026-09-15-v0.1.1-review-rework.md#第二轮审查与修复2026-09-16)。
+
 ## Related Documents
 
 - [ADR-0004 Root 注册表的持久化形态与校验语义](./ADR-0004-root-registry-persistence-and-validation.md)（`missing` / `redirected` 不授予）

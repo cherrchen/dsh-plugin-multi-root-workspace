@@ -76,6 +76,10 @@ PR #1（head `507c954`）的 P1-1 指出：`releaseAuthority()` 先释放 lease�
 
 两条新回归用例在 `tests/registry-lease.spec.ts` 的 `describe('authority teardown')`：一条用记录下的事件顺序断言 `put:end` 早于 `close`（且在拆除期间不发生 `close`），并确认拆除之后继任者能 acquire 到 lease；另一条让一次 acquisition 与 disposal 重叠，确认注册表停在 `contended`、store 可被继任者接管。
 
+## 第二轮返工补充（2026-09-16）
+
+Windows semaphore 名称必须先用 `realpathSync.native` 解析已创建的父目录，再拼接锁文件名、大小写归一化并散列。锁文件本身不必存在；只用 `resolve()` 的词法归一化无法合并 junction、符号链接和短路径别名，会让同一介质产生两把锁。纯命名测试与实际 acquire 争用测试均覆盖目录别名；本次 macOS 验证不替代 Windows 原生内核验证，详见[第二轮审查报告](../plans/completed/2026-09-15-v0.1.1-review-rework.md#第二轮审查与修复2026-09-16)。
+
 ## Related Documents
 
 - [ADR-0002 上游耦合策略](./ADR-0002-upstream-coupling-policy.md)

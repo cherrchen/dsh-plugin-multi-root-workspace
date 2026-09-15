@@ -14,7 +14,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import { resolve } from 'node:path'
+import { realpathSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 
 const WAIT_OBJECT_0 = 0
 const WAIT_TIMEOUT = 258
@@ -64,16 +65,21 @@ function win32Error(syscall: string, win32Code: number, path: string, dest: stri
 }
 
 /**
- * Acquire the store-wide registry lock as a named kernel semaphore whose name
- * is derived from the canonical lease path (case-folded: Windows paths are
- * case-insensitive). A second acquirer's zero-timeout wait times out as
- * `EBUSY`.
- * @param path - the lock path the name is derived from (the file need not exist).
- * @returns the open semaphore handle.
+ * Derive the semaphore name from the physical parent directory, resolving
+ * junctions, symlinks and short path aliases before case folding and hashing.
+ * @param path - the lock path; its parent exists, but the file need not.
+ * @returns the store's kernel-object name.
  */
+export function leaseNameWin32(path: string): string {
+  const absolute = resolve(path)
+  const physical = join(realpathSync.native(dirname(absolute)), basename(absolute)).toLowerCase()
+  return `Local\\dsh-multi-root-registry-${createHash('sha256').update(physical).digest('hex')}`
+}
+
+/** Acquire the semaphore for the physical store directory. */
 export async function acquireLockHandleWin32(path: string): Promise<number> {
   const api = await kernel32()
-  const name = `Local\\dsh-multi-root-registry-${createHash('sha256').update(resolve(path).toLowerCase()).digest('hex')}`
+  const name = leaseNameWin32(path)
   const handle = api.createSemaphoreW(null, 1, 1, name)
   if (handle === 0) throw win32Error('CreateSemaphoreW', api.getLastError(), path, name)
   const wait = api.waitForSingleObject(handle, 0)

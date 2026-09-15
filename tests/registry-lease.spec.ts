@@ -4,13 +4,14 @@
  * — including process death — lets a successor take over.
  */
 
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
 import MultiRootRegistry, { DOMAIN_NAME, REGISTRY_CONTENDED_MESSAGE } from '../src/registry.ts'
 import { RegistryAuthorityLease, RegistryLeaseContendedError } from '../src/registry-lease.ts'
+import { leaseNameWin32 } from '../src/registry-lease-win32.ts'
 import { RootValidationError } from '../src/roots.ts'
 import MultiRootScopeService from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
@@ -55,6 +56,25 @@ afterEach(async () => {
 })
 
 describe('RegistryAuthorityLease', () => {
+  it('uses one Windows semaphore name for physical and aliased store directories', () => {
+    const alias = join(fixture.base, 'storage-alias')
+    symlinkSync(storeRoot, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    expect(leaseNameWin32(join(alias, `${DOMAIN_NAME}.lock`))).toBe(leaseNameWin32(leasePath))
+    expect(leaseNameWin32(join(alias, 'other.lock'))).not.toBe(leaseNameWin32(leasePath))
+  })
+
+  it('contends through a directory alias at the actual kernel boundary', async () => {
+    const alias = join(fixture.base, 'storage-alias')
+    symlinkSync(storeRoot, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    const lease = await RegistryAuthorityLease.acquire(leasePath)
+    try {
+      await expect(RegistryAuthorityLease.acquire(join(alias, `${DOMAIN_NAME}.lock`)))
+        .rejects.toBeInstanceOf(RegistryLeaseContendedError)
+    } finally {
+      await lease.release()
+    }
+  })
+
   it('lets one holder acquire and a second fail closed, then a successor take over after release', async () => {
     const first = await RegistryAuthorityLease.acquire(leasePath)
     await expect(RegistryAuthorityLease.acquire(leasePath)).rejects.toBeInstanceOf(RegistryLeaseContendedError)

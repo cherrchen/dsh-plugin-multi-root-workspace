@@ -78,7 +78,7 @@ export const DEFAULT_MAX_SOURCE_BYTES = 32768
 /** Tools whose SUCCESS makes the directories on the path to the file relevant. */
 const FILE_TOUCH_TOOL_NAMES: Record<string, true> = { read: true, write: true, edit: true }
 
-/** Cap on unanswered `tool/call` records remembered across all sessions. */
+/** Cap on unanswered `tool/call` records remembered per session. */
 const MAX_PENDING_CALLS = 128
 
 /** Cap on touched paths remembered per session; beyond it, touches are dropped. */
@@ -105,8 +105,8 @@ interface DeliveredScope {
   readonly root: string
   /** The file's absolute path. */
   readonly path: string
-  /** SHA-256 of the delivered file's content, so a change is re-sent. */
-  readonly digest: string
+  /** SHA-256 of fully delivered content; undefined means a partial delivery needs retry. */
+  readonly digest: string | undefined
 }
 
 /** One session's delivery state: what was delivered, and what is worth looking at. */
@@ -278,7 +278,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   if (maxBytes <= 0 || !Number.isFinite(maxBytes)) return
 
   const states = new WeakMap<object, SessionState>()
-  const pendingCalls: PendingCalls = new Map()
+  const callsBySession = new WeakMap<object, PendingCalls>()
   const stateOf = (session: object): SessionState => {
     const existing = states.get(session)
     if (existing !== undefined) return existing
@@ -292,6 +292,8 @@ export function apply(ctx: Context, config: Config = {}): void {
   // arguments, `tool/result` names the call it answers, and a pairing is a
   // directory the session has worked in.
   ctx.on('session/event', (session, event) => {
+    const pendingCalls = callsBySession.get(session) ?? new Map()
+    callsBySession.set(session, pendingCalls)
     if (event.type === 'tool/call') {
       if (pendingCalls.size >= MAX_PENDING_CALLS) {
         const oldest = pendingCalls.keys().next()
@@ -355,7 +357,10 @@ async function pending(
   signal: AbortSignal,
 ): Promise<UserMessage | undefined> {
   const session = agent.session
-  const state = states.get(session) ?? { scopes: new Map(), touched: new Set() }
+  const state: SessionState = states.get(session) ?? { scopes: new Map(), touched: new Set() }
+  states.set(session, state)
+  const evaluatedTouches = new Set(state.touched)
+  let retryTouches = false
   const scope = ctx.multiRootScope.resolve(ctx.sandboxPolicy.resolve({ session }))
 
   // A root the scope no longer grants — removed, missing, or redirected — must
@@ -374,26 +379,38 @@ async function pending(
     if (api !== undefined) {
       let remaining = maxBytes
       for (const root of scope.additionalRoots) {
-        if (remaining <= 0) break
         signal.throwIfAborted()
         const plan = await planRoot(ctx, api, root, config, state, session, signal)
         gone.push(...plan.gone)
         if (plan.deliveries.length === 0) continue
-        const { text } = api.render(plan.deliveries.map(entry => entry.file), { maxBytes: remaining })
+        if (remaining <= 0) {
+          retryTouches = true
+          continue
+        }
+        const { text, omitted, truncated } = api.render(plan.deliveries.map(entry => entry.file), { maxBytes: remaining })
+        const omittedPaths = new Set(omitted.map(file => file.absolutePath))
+        const truncatedPaths = new Set(truncated.map(file => file.displayPath))
+        if (omitted.length > 0 || truncated.length > 0 || text === '') retryTouches = true
         if (text === '') continue
         remaining -= Buffer.byteLength(text, 'utf8')
         rendered.push({ root, text })
         for (const entry of plan.deliveries) {
-          updates.push({ key: entry.key, scope: { root, path: entry.file.absolutePath, digest: digestOf(entry.file.content) } })
+          if (omittedPaths.has(entry.file.absolutePath)) continue
+          updates.push({ key: entry.key, scope: {
+            root, path: entry.file.absolutePath,
+            digest: truncatedPaths.has(entry.file.displayPath) ? undefined : digestOf(entry.file.content),
+          } })
         }
       }
-      // A touch is consumed by exactly one evaluation: its directory is examined
-      // on the step that follows the tool result, not on every later step.
-      state.touched.clear()
     }
   }
 
   const text = composeInstructionMessage(rendered, revoked, gone.map(entry => entry.scope))
+  const message = text === undefined ? undefined : await createInstructionMessage({ text, plugin: PLUGIN_SOURCE })
+  signal.throwIfAborted()
+  // Keep budget-deferred directories discoverable without another tool call.
+  // Delete only the evaluated snapshot, preserving new touches during I/O.
+  if (!retryTouches) for (const touch of evaluatedTouches) state.touched.delete(touch)
   if (text !== undefined) {
     // The message is built, so the bookkeeping it was built from is now the
     // recorded truth: withdrawals are forgotten and deliveries are remembered.
@@ -403,12 +420,7 @@ async function pending(
     for (const entry of gone) state.scopes.delete(entry.key)
     for (const entry of updates) state.scopes.set(entry.key, entry.scope)
   }
-  // Written back even when there is nothing to say, because the touches were
-  // consumed either way.
-  states.set(session, state)
-
-  if (text === undefined) return undefined
-  return await createInstructionMessage({ text, plugin: PLUGIN_SOURCE })
+  return message
 }
 
 /** A delivered file that vanished from a directory this step examined. */

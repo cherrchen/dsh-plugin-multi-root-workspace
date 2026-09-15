@@ -17,7 +17,7 @@
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -28,6 +28,8 @@ import { Session, SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-ses
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MultiRootFileSystem } from '../src/fs.ts'
 import * as Instructions from '../src/instructions.ts'
+import { instructionsApi } from '../src/compat/agent-instructions.ts'
+import * as LlmMessage from '../src/compat/llm-message.ts'
 import { PLUGIN_SOURCE } from '../src/instructions.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
@@ -53,6 +55,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   while (fibers.length > 0) await fibers.pop()?.dispose()
   if (previousDshHome === undefined) delete process.env.DSH_HOME
   else process.env.DSH_HOME = previousDshHome
@@ -65,14 +68,14 @@ interface World {
   /** Run one `agent/pre-step` and return the message this row injected, if any. */
   step: (claimed?: readonly UserMessage[]) => Promise<UserMessage | undefined>
   /** Run one `agent/pre-step` and return the whole decision. */
-  decide: (claimed?: readonly UserMessage[]) => Promise<PreStepDecision>
+  decide: (claimed?: readonly UserMessage[], signal?: AbortSignal) => Promise<PreStepDecision>
   /** Replace the registered additional roots. */
   roots: (paths: readonly string[]) => void
   /**
    * Append one tool call and its result, exactly as the loop's session log
    * would, so the row's touch recording sees a real event pair.
    */
-  touch: (path: string, options?: { readonly failed?: boolean; readonly tool?: string }) => void
+  touch: (path: string, options?: { readonly failed?: boolean; readonly tool?: string; readonly session?: Session; readonly callId?: string; readonly deferResult?: boolean }) => (() => void)
 }
 
 /**
@@ -113,11 +116,11 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
   }
   setRoots(roots)
 
-  const decide = async (claimed: readonly UserMessage[] = []): Promise<PreStepDecision> => {
+  const decide = async (claimed: readonly UserMessage[] = [], signal = new AbortController().signal): Promise<PreStepDecision> => {
     const messages = [...claimed]
     return await ctx.waterfall(
       'agent/pre-step',
-      { agent, messages, turn: 1, step: 1, signal: new AbortController().signal },
+      { agent, messages, turn: 1, step: 1, signal },
       async () => ({ kind: 'enter', messages: [...messages] }),
     )
   }
@@ -130,16 +133,16 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
   // log does not contain makes it refuse to advance, while 0 is the value it
   // treats as already reached, so injected events pass through untouched.
   const emit = ctx.emit.bind(ctx) as unknown as (name: string, session: object, event: unknown) => void
-  const touch = (path: string, options: { readonly failed?: boolean; readonly tool?: string } = {}): void => {
-    const callId = `call-${counter += 1}`
+  const touch = (path: string, options: { readonly failed?: boolean; readonly tool?: string; readonly session?: Session; readonly callId?: string; readonly deferResult?: boolean } = {}): (() => void) => {
+    const callId = options.callId ?? `call-${counter += 1}`
     const name = options.tool ?? 'read'
-    emit('session/event', session, {
+    emit('session/event', options.session ?? session, {
       type: 'tool/call',
       seq: 0,
       time: 0,
       data: { turn: 1, step: 1, callId, name, arguments: JSON.stringify({ file_path: path }) },
     })
-    emit('session/event', session, {
+    const result = (): void => { emit('session/event', options.session ?? session, {
       type: 'tool/result',
       seq: 0,
       time: 0,
@@ -151,7 +154,9 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
           content: [{ type: 'tool-result', toolCallId: callId, content: [], isError: options.failed === true }],
         },
       },
-    })
+    }) }
+    if (options.deferResult !== true) result()
+    return result
   }
 
   return {
@@ -561,5 +566,90 @@ describe('composeInstructionMessage', () => {
     expect(text).toContain('/r/z/AGENTS.md')
     expect(text?.indexOf('/r/a/AGENTS.md')).toBeLessThan(text?.indexOf('/r/z/AGENTS.md') ?? -1)
     expect(text).toContain('no longer apply')
+  })
+})
+
+
+describe('delivery bookkeeping under pressure', () => {
+  it.each(['omitted', 'truncated'] as const)('retries a nested file that was %s without another touch', async (kind) => {
+    const nested = join(repoB, 'src')
+    mkdirSync(nested)
+    writeFileSync(join(repoB, 'AGENTS.md'), '# root rules')
+    writeFileSync(join(nested, 'AGENTS.md'), '# nested complete rules')
+    const world = await mountWorld({}, [repoB])
+    world.touch(join(nested, 'file.ts'))
+    const api = (await instructionsApi())!
+    vi.spyOn(api, 'render').mockImplementationOnce(files => ({
+      text: '# root rules and possibly partial nested rules',
+      omitted: kind === 'omitted' ? [files[1]!] : [],
+      truncated: kind === 'truncated' ? [{ displayPath: files[1]!.displayPath, originalBytes: 100, includedBytes: 10 }] : [],
+    }))
+    await world.step()
+    expect(textOf(await world.step())).toContain('# nested complete rules')
+    expect(await world.step()).toBeUndefined()
+  })
+
+  it('withdraws a partially delivered file if it disappears', async () => {
+    writeFileSync(join(repoA, 'AGENTS.md'), '# rules')
+    const world = await mountWorld({}, [repoA])
+    const api = (await instructionsApi())!
+    vi.spyOn(api, 'render').mockImplementationOnce(files => ({
+      text: '# partial rules', omitted: [],
+      truncated: [{ displayPath: files[0]!.displayPath, originalBytes: 100, includedBytes: 10 }],
+    }))
+    await world.step()
+    rmSync(join(repoA, 'AGENTS.md'))
+    expect(textOf(await world.step())).toContain('no longer present')
+  })
+
+  it('checks withdrawals in later roots even when the first consumes the budget', async () => {
+    writeFileSync(join(repoA, 'AGENTS.md'), '# A')
+    writeFileSync(join(repoB, 'AGENTS.md'), '# B')
+    const world = await mountWorld({}, [repoA, repoB])
+    await world.step()
+    writeFileSync(join(repoA, 'AGENTS.md'), '# A changed')
+    rmSync(join(repoB, 'AGENTS.md'))
+    const api = (await instructionsApi())!
+    vi.spyOn(api, 'render').mockReturnValueOnce({ text: 'x'.repeat(Instructions.DEFAULT_MAX_BYTES), omitted: [], truncated: [] })
+    expect(textOf(await world.step())).toContain('no longer present')
+  })
+
+  it('retries delivery after the message constructor rejects', async () => {
+    mkdirSync(join(repoA, 'src'))
+    writeFileSync(join(repoA, 'src', 'AGENTS.md'), '# nested rules')
+    const world = await mountWorld({}, [repoA])
+    world.touch(join(repoA, 'src', 'file.ts'))
+    vi.spyOn(LlmMessage, 'createInstructionMessage').mockRejectedValueOnce(new Error('message unavailable'))
+    await expect(world.step()).rejects.toThrow('message unavailable')
+    expect(textOf(await world.step())).toContain('# nested rules')
+    expect(await world.step()).toBeUndefined()
+  })
+
+  it('does not commit delivery state when cancellation arrives during message construction', async () => {
+    writeFileSync(join(repoA, 'AGENTS.md'), '# rules to retry')
+    const world = await mountWorld({}, [repoA])
+    const controller = new AbortController()
+    const create = LlmMessage.createInstructionMessage
+    vi.spyOn(LlmMessage, 'createInstructionMessage').mockImplementationOnce(async input => {
+      const message = await create(input)
+      controller.abort(new Error('cancelled step'))
+      return message
+    })
+    await expect(world.decide([], controller.signal)).rejects.toThrow('cancelled step')
+    expect(textOf(await world.step())).toContain('# rules to retry')
+  })
+
+  it('isolates equal tool call ids in different sessions', async () => {
+    mkdirSync(join(repoA, 'src'))
+    writeFileSync(join(repoA, 'src', 'AGENTS.md'), '# first session nested rules')
+    const world = await mountWorld({}, [repoA])
+    const sessionId = SessionId('other-session')
+    const other = Session.create(sessionId, undefined, {
+      version: SESSION_FORMAT_VERSION, id: sessionId, createdAt: 0, isSeeded: false, cwd: fixture.workspace,
+    })
+    const complete = world.touch(join(repoA, 'src', 'file.ts'), { callId: 'same', deferResult: true })
+    world.touch(join(repoA, 'other.ts'), { callId: 'same', session: other })
+    complete()
+    expect(textOf(await world.step())).toContain('# first session nested rules')
   })
 })

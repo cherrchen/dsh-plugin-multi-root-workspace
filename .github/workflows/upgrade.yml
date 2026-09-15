@@ -59,17 +59,25 @@ jobs:
 
       - name: Resolve the candidate release
         id: candidate
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            version='${{ inputs.version }}'
+          if [ -n "$REQUESTED_VERSION" ]; then
+            version="$REQUESTED_VERSION"
           else
             version="$(node scripts/upgrade-dsh.mjs --print-latest-prerelease)"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "Invalid candidate version" >&2
+            exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "### Candidate: \`$version\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Repoint the pin at the candidate
-        run: node scripts/upgrade-dsh.mjs '${{ steps.candidate.outputs.version }}'
+        env:
+          CANDIDATE_VERSION: ${{ steps.candidate.outputs.version }}
+        run: node scripts/upgrade-dsh.mjs "$CANDIDATE_VERSION"
       # A candidate release drags in every transitive @deepseek-ai package, all
       # published minutes ago; the release-age gate is bypassed for this
       # throwaway tree rather than enumerated in pnpm-workspace.yaml (ADR-0002).
@@ -106,9 +114,12 @@ jobs:
 
       - name: State what a green run does and does not mean
         if: success()
+        env:
+          CANDIDATE_VERSION: ${{ steps.candidate.outputs.version }}
+          RUNNER_OS_NAME: ${{ matrix.os }}
         run: |
           {
-            echo "dsh \`${{ steps.candidate.outputs.version }}\` passed the full matrix on ${{ matrix.os }}."
+            echo "dsh \`$CANDIDATE_VERSION\` passed the full matrix on $RUNNER_OS_NAME."
             echo
             echo "This does NOT make it a supported release. To promote it:"
             echo

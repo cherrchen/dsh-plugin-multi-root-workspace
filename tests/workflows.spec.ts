@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process'
+import { parse } from 'yaml'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
@@ -62,5 +64,24 @@ describe('CI workflow gates', () => {
     // would refuse the tree the lane exists to exercise. Naming it in the
     // promotion instructions is fine; running it as a step is not.
     expect(read('.github/workflows/upgrade.yml')).not.toContain('run: pnpm compat:check')
+  })
+})
+
+
+describe('upgrade workflow input handling', () => {
+  const workflow = parse(read('.github/workflows/upgrade.yml'))
+  const steps = workflow.jobs.upgrade.steps as Array<{ name?: string; run?: string; env?: Record<string, string> }>
+  it('keeps GitHub expressions out of every shell program', () => {
+    for (const step of steps) expect(step.run ?? '').not.toContain('${{')
+  })
+  it('rejects shell syntax and multiline output injection before writing candidate output', () => {
+    const resolve = steps.find(step => step.name === 'Resolve the candidate release')!
+    expect(resolve.env?.REQUESTED_VERSION).toBe('${{ inputs.version }}')
+    for (const input of ["'; echo INJECTED; version='", '$(echo INJECTED)', '0.1.6-alpha.1\nother=value']) {
+      expect(() => execFileSync('bash', ['-e', '-c', resolve.run!], {
+        env: { ...process.env, REQUESTED_VERSION: input, GITHUB_OUTPUT: '/dev/null', GITHUB_STEP_SUMMARY: '/dev/null' },
+        stdio: 'pipe',
+      })).toThrow()
+    }
   })
 })
