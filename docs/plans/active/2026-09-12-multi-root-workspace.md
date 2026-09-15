@@ -1,18 +1,48 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（里程碑概览；M1/M2 已实施完成，M3 已实施并按外部审查返工后重新验收，M4 跨进程 Registry Authority Lease 已实施，面板主根改为 host session 推导；详细计划在 `completed/`）
-> 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5；M1 详细计划（已完成）：[2026-09-12-m1-composition-and-passthrough.md](../completed/2026-09-12-m1-composition-and-passthrough.md)；M2 详细计划（已完成）：[2026-09-12-m2-additional-roots-and-dialect-grants.md](../completed/2026-09-12-m2-additional-roots-and-dialect-grants.md)；M3 详细计划（已完成）：[2026-09-12-m3-root-registry-command-and-ui.md](../completed/2026-09-12-m3-root-registry-command-and-ui.md)。
+> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施并全绿，**尚未发版**；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
+> 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
 
+## 编号口径
+
+先读这一段，再读历史文档与评审材料。
+本仓库同时存在「里程碑」与「批次」两套编号，历史文档、评审材料与 commit 各用其一，因此先约定：
+
+- **M1 / M2 / M3** = MVP（`v0.1.0`）的三个里程碑（2026-09-12 实施，2026-09-13 发版）。
+- **M4** = 跨进程 Registry Authority Lease（2026-09-15 加入路线图）。它与 v0.1.1 批次的 **H1 是同一件事的两个名字**：路线图叫 M4，批次叫 H1。
+- **H1–H4** = v0.1.1 硬化批次的四项任务：H1 lease（= M4）、H2 面板主根改为 host session 推导、H3 DSH 兼容性代码契约、H4 附加根指令注入。
+- **H4 分两期**：Phase 1（附加根**顶层** `AGENTS.md` / `CLAUDE.md`）已实现；**Phase 2（nested instructions）未实现**，属第二期。
+- 外部评审材料若用「M1–M4」指 v0.1.1 的四项，对应关系为：其 M1 = H1、其 M2 = H2、其 M3 = H3、其 M4 = H4。
+
+## 进度总账
+
+本表是**进度、编号与发布状态的唯一真源**；其他文档只链接到这里，不复制。
+
+| 批次 | 编号 | 任务 | 详细计划 | ADR | commit | 发布状态 |
+|---|---|---|---|---|---|---|
+| MVP | M1 | 组合与空根直通：bundle 骨架、两行 provider 替换 | [M1 计划](../completed/2026-09-12-m1-composition-and-passthrough.md) | [0001](../../decisions/ADR-0001-provider-replacement-scope.md)、[0002](../../decisions/ADR-0002-upstream-coupling-policy.md) | `d9e5afb`…`faf0ef7` | `v0.1.0` |
+| MVP | M2 | 附加根数据源、两个 provider 的多根逻辑、方言 grant、parity 矩阵 | [M2 计划](../completed/2026-09-12-m2-additional-roots-and-dialect-grants.md) | [0003](../../decisions/ADR-0003-dialect-grant-widening.md) | `852d2d4`…`f650143` | `v0.1.0` |
+| MVP | M3 | root 注册表、`/workspace-folders`、Workspace Folders 面板、跨仓库旅程 e2e（含外部评审两轮返工） | [M3 计划](../completed/2026-09-12-m3-root-registry-command-and-ui.md) | [0004](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[0005](../../decisions/ADR-0005-out-of-tree-client-transport.md)、[0006](../../decisions/ADR-0006-client-ui-host-tokens.md) | `ff235ae`…`fd1ab18` | `v0.1.0` |
+| v0.1.1 | H1（= M4） | 跨进程 Registry Authority Lease：store-wide 内核 lease、争用 fail-closed、`refresh()` 接管 | [M4 计划](../completed/2026-09-15-m4-registry-authority-lease.md) | [0007](../../decisions/ADR-0007-registry-authority-lease.md) | `aa4b19e` | 未发版 |
+| v0.1.1 | H2 | 面板主根改为 host session 推导（删除客户端 `primaryRoot`） | [面板计划](../completed/2026-09-15-panel-session-derived-authority.md) | [0008](../../decisions/ADR-0008-panel-session-derived-authority.md) | `66375ca` | 未发版 |
+| v0.1.1 | H3 | DSH 兼容性从文档约定变成启动门禁 + `src/compat/` 适配层 + 按周升级车道 | [compat 计划](../completed/2026-09-15-dsh-compat-contract.md) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `d4b16ff` | 未发版 |
+| v0.1.1 | H4 Phase 1 | 附加根顶层 `AGENTS.md` / `CLAUDE.md` 以 `form=instructions` 注入模型上下文 | 同上 §5 | [0010](../../decisions/ADR-0010-additional-root-instruction-scope.md) | `d4b16ff` | 未发版 |
+| v0.1.1 | H4 Phase 2 | nested instructions（按 touched path 增量注入） | 同上 §5b（仅设计草案） | — | — | **未实现**（第二期） |
+| 第二期 | B 系列 | Windows 内核级多根、per-root 权限、`workspace-files` 多根、LSP 路由等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
+
 ## 总体策略
 
-三个里程碑，每个都独立可验证，且**第一步就建立"空根直通 = 上游行为"的安全网**，之后所有增量都在安全网内：
+MVP 三个里程碑加一个硬化批次，每一项都独立可验证，且**第一步就建立"空根直通 = 上游行为"的安全网**，之后所有增量都在安全网内：
 
 - **M1 组合与直通（已完成）**：bundle 骨架 + 两行替换 + 空根直通。插件已可安装，行为与未装一致；组合、disable/insert 时序与 provide 冲突这三项结构性风险已清零。
 - **M2 多根能力（已完成）**：附加根数据源 + 两个 provider 的多根逻辑 + 方言 grant + parity 测试。
-- **M3 Root 管理与 UI**：注册表、命令、client 半部、e2e。
-- **M4 跨进程 Authority**（已完成）：store-wide 内核 lease，争用 fail-closed。
+- **M3 Root 管理与 UI（已完成）**：注册表、命令、client 半部、e2e。
+- **H1（= M4）跨进程 Authority（已完成）**：store-wide 内核 lease，争用 fail-closed。
+- **H2 面板权威收紧（已完成）**：面板主根只从 host session 推导，删除客户端 `primaryRoot`。
+- **H3 兼容性代码契约（已完成）**：精确版本 allowlist + 启动门禁 + `src/compat/` 适配层 + 按周升级车道。
+- **H4 Phase 1 附加根指令（已完成）**：附加根顶层 `AGENTS.md` / `CLAUDE.md` 进入模型上下文；Phase 2（nested）未实现。
 
 ## M1 — bundle 骨架、两行替换、空根直通（已完成）
 
@@ -54,28 +84,34 @@
 
 **外部审查返工（2026-09-12）**：审查提出 8 项发现（3 项发布阻断）——登记根被替换为符号链接后授权转移、并发改注册表丢写/复活已撤销授权、CI 先测后构建、刷新不重查目录、手输路径被 picker 覆盖、Reveal 应答契约不一致、重复 id 未校验、主根未纳入嵌套校验。已全部修复并各带回归测试，取舍与语义写入 [ADR-0004](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)（返工补充第 9–15 条）与 [架构 §4/§7](../../architecture/multi-root-workspace.md)；逐项证据见 M3 计划「外部审查返工」章节。
 
+## v0.1.1 — 硬化批次（H1–H4，已实施，未发版）
+
+> 任务清单、设计决定、验证判据与实施结果见各自的 completed 计划；本文件只保留批次概览，不重复其内容。
+
+- **H1（= M4）跨进程 Registry Authority Lease**：[M4 计划](../completed/2026-09-15-m4-registry-authority-lease.md)、[ADR-0007](../../decisions/ADR-0007-registry-authority-lease.md)、commit `aa4b19e`。POSIX `flock` / Windows named semaphore 表达"同一时刻只有一个 Registry Authority Process"；争用进程 fail-closed（空 scope、mutation 抛 `registry-contended`），对方退出或崩溃后由 `refresh()` 接管。
+- **H2 面板主根 host 推导**：[面板计划](../completed/2026-09-15-panel-session-derived-authority.md)、[ADR-0008](../../decisions/ADR-0008-panel-session-derived-authority.md)、commit `66375ca`。`PanelRequest` 删除客户端 `primaryRoot`、`sessionId` 变为每个端点必填；host 唯一 resolver 是 `resolvePanelPrimaryRoot(ctx, sessionId)`。
+- **H3 DSH 兼容性代码契约**：[compat 计划](../completed/2026-09-15-dsh-compat-contract.md)、[ADR-0009](../../decisions/ADR-0009-dsh-compat-contract.md)、commit `d4b16ff`。精确版本 allowlist（`0.1.5-rc.2` / `0.1.6-alpha.1`）、`multi-root-compat` 启动门禁（四个安全相关行全部 inject `multiRootCompat`）、混装 fail loud、`src/compat/` 适配层、`upgrade.yml` 按周升级车道（不自动扩大支持矩阵）。
+- **H4 Phase 1 附加根指令注入**：同一计划 §5、[ADR-0010](../../decisions/ADR-0010-additional-root-instruction-scope.md)。附加根**顶层** `AGENTS.md` / `CLAUDE.md` 经 `agent/pre-step` 以 `{ kind: 'plugin', form: 'instructions' }`（user role）注入，共享 64 KiB 预算，根离场时显式撤销。Phase 1 的验收场景与证据见该计划 §5；**Phase 2（nested instructions）未实现**，见需求文档第二期。
+
 ## 里程碑与仓库状态对照
 
-| 里程碑 | 完成时状态 |
-|---|---|
-| M1 ✅ | 插件可安装、行为与未装一致；组合结构性风险清零（2026-09-12 完成） |
-| M2 ✅ | 多根在 macOS/Linux 端到端可用（配置暂用测试/冒烟注入的静态根）（2026-09-12 完成） |
-| M3 ✅ | 完整用户旅程（命令/面板增删根 → 会话 → Agent 跨 repo 工作）（2026-09-12 实施；同日按外部审查返工后重新验收：8 项发现全部修复并带回归测试） |
-| M4 ✅ | 跨进程 Registry Authority Lease：两 DSH 进程共用 storage root 时 fail-closed，对方退出/崩溃后 `refresh()` 接管（2026-09-15；[计划](../completed/2026-09-15-m4-registry-authority-lease.md)、[ADR-0007](../../decisions/ADR-0007-registry-authority-lease.md)） |
-| 面板权威 ✅ | Panel RPC 主根只从 `sessionId → session.header.cwd` 推导，删除客户端 `primaryRoot`（2026-09-15；[计划](../completed/2026-09-15-panel-session-derived-authority.md)、[ADR-0008](../../decisions/ADR-0008-panel-session-derived-authority.md)） |
+进度、编号与发布状态的唯一真源是本文开头的[进度总账](#进度总账)；此处不再重复维护一份对照表。
 
 ## 测试与检查指引
 
 ```sh
 # 插件仓库（自建门禁）
-pnpm typecheck && pnpm lint && pnpm test          # vitest：方言单测、方言 grant 矩阵、空根差分 parity、patch 不变量、客户端拓扑
-pnpm smoke:compose                                 # dsh --dump-config 组合差分断言（只差两行禁用 + 五行 insert）
+pnpm typecheck && pnpm lint && pnpm test          # vitest：方言单测、方言 grant 矩阵、空根差分 parity、patch 不变量、注册表/lease、契约往返、指令注入
+pnpm smoke:compose                                 # dsh --dump-config 组合差分断言（只差两行禁用 + 七行 insert）
 pnpm smoke:behavior                                # 空根直通 + 多根 battery + 注册表/命令 battery（隔离 $DSH_HOME，进程内 boot）
 pnpm smoke:journey                                 # 跨两个 git repo 的 web/headless 旅程（脚本化模型，无凭据）
+pnpm verify:all                                    # lint → typecheck → build → kernel:probe → test → smoke
 
 # 升级检查（每次上游发版手动/CI 触发）
 # 改 pin（精确版本）后重跑差分 parity + 方言矩阵 + smoke:compose + smoke:behavior；差异即报警（pre-stable API 风险）
 ```
+
+**没有** `smoke:multiprocess` / `smoke:instructions` 这两个脚本，这是刻意的：跨进程争用与指令注入的正确性由 vitest 覆盖（`tests/registry-multiprocess.e2e.ts` 真的起第二个 OS 进程、`tests/instructions.spec.ts` 覆盖注入与撤销），因为它们需要夹具级的进程编排与断言，塞进 `--dump-config` 式的冒烟只会更难定位。
 
 上游仓库（deepseek-harness）本身在此项目中的唯一用途是**阅读与对照**：不修改任何文件，不在其中跑本插件的 CI；smoke 通过环境内安装的 dsh 运行。
 
@@ -83,17 +119,18 @@ pnpm smoke:journey                                 # 跨两个 git repo 的 web/
 
 | # | 风险/问题 | 影响 | 处置 |
 |---|---|---|---|
-| 1 | 上游 pre-stable API 升级破坏子类（AGENTS.md 明言无 semver 承诺） | 插件可用性 | 精确 pin（`latest` dist-tag 陈旧，必须写死版本，见 ADR-0002）+ 升级 smoke CI；只允许包入口导入；M1 即建立差分对照测试 |
+| 1 | 上游 pre-stable API 升级破坏子类（AGENTS.md 明言无 semver 承诺） | 插件可用性 | 精确 pin（`latest` dist-tag 陈旧，必须写死版本，见 ADR-0002）+ 启动门禁（ADR-0009）+ 按周升级车道；只允许包入口导入；M1 即建立差分对照测试 |
 | 2 | 方言 parity 责任转移到插件 | 安全正确性 | 已落地：parity 矩阵测试（测试侧独立解析 argv 授予集合）+ 方言单测为核心资产；方言 grant 由 `super.confine` 输出克隆模板（上游 builder 在发布形态下不可达），识别失败即抛错（[ADR-0003](../../decisions/ADR-0003-dialect-grant-widening.md)） |
 | 3 | ~~bash 子类落点未定~~（已关闭） | — | 不替换 `bash-sandbox`：bash 与 PTY 的 confinement 全部经 `ctx.sandbox`（ADR-0001） |
 | 4 | provider 行替换影响未盘点的 Consumer | 隐藏回归 | 已盘点：`ctx.sandbox` 的消费者是 bash-sandbox / pwsh-sandbox / terminal-bash；`ctx.fs` 的消费者是 tool-fs / tool-str-replace-editor。全部只依赖 `confine`、`sandboxMode` 等结构化事实；M1 冒烟逐一实跑 |
 | 5 | disable/insert 时序或 id 变化（上游 base patch 行 id 不是稳定承诺） | 组合失败 | duplicate-provide 天然抛错 + 插件身份断言 + `smoke:compose` 组合差分断言 |
-| 6 | Windows 内核级多根缺失（pwsh 方言） | Windows bash 场景 | 第一期 fs fence 覆盖 Windows 写路径；非空 scope 下 `confine` 保持上游 wrap 并输出一次告警，文档明示限制；列入后续阶段 |
+| 6 | Windows 内核级多根缺失（pwsh 方言） | Windows bash 场景 | 第一期 fs fence 覆盖 Windows 写路径；非空 scope 下 `confine` 保持上游 wrap 并输出一次告警，文档明示限制；列入第二期（见需求 §4/§7） |
 | 7 | `isPathUnder` 等价实现的正确性 | fence 语义漂移 | 深导入不可用（发布包不含 `src/`，ADR-0002）⇒ 本地实现 + 注明出处 + M1 差分 parity 套件钉住；M2 起另由方言矩阵复验 |
 | 8 | 拓扑快照进入 context 对 prompt cache 的影响 | 长会话成本 | 已落地：空根 / 只读 / 无 agent 时零输出（逐字节快照断言）；根集变化频率 = 用户增删根频率，可接受 |
 | 9 | ~~nested roots 态度未最终拍板~~（已关闭） | — | 已拍板**拒绝**（[ADR-0004](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)） |
 | 10 | 桌面端（apps/desktop）插件安装形态与 CLI profile 的差异 | M3 e2e | 已安装桌面 app 用的是 `web` profile（其自带 runtime 0.1.2-rc.1）；M3 的面板因此落在两个运行时都有的 `sidebar.footer.action` 上，Electron 车道仍未建立（人工验证） |
 | 11 | Linux CI 上 bwrap 可能不可用（用户命名空间受限） | 真实执行用例被跳过 | 内核链有第二个 rung（Landlock）；矩阵与冒烟只在 runner 真的不可用时显式 skip，并在输出里说明原因，不把"没跑"记成通过 |
+| 12 | 附加根 nested instructions 未实现（H4 Phase 2） | 长会话里模型看不到附加根子目录的规则 | 已登记进需求 §4 第二期；恢复条件是先评估 0.1.6 起的 `SessionMessageProjection`（方案见 compat 计划 §5b），**不要**在没有该评估的情况下直接复用 primary 的 reconcile 语义 |
 
 ## 与"可改上游"路线的关系
 

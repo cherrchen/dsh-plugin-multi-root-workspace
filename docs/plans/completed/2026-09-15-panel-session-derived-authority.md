@@ -1,5 +1,7 @@
 # Panel RPC：主根由 host session 推导
 
+> 编号口径：本计划是 `v0.1.1` 硬化批次的 **H2**（路线图未给它 M 编号）；批次总账见[路线图](../active/2026-09-12-multi-root-workspace.md#进度总账)。
+
 ## Goal
 
 把面板通道从"浏览器指名 `primaryRoot`、host 校验并回退部署默认 workspace"改成真正的 host-derived authority：每个请求只带 `sessionId`，主根只来自 `sessions.get(sessionId).header.cwd`。

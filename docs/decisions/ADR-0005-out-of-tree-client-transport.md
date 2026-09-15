@@ -15,7 +15,7 @@ M3 要给插件加浏览器半部（Workspace Folders 面板），它必须和 h
 1. **Typert 契约生成不支持出树包**：`@deepseek-ai/dsh-typert-generator` 虽是公开包，但它的分析器以 workspace 为单位——向上寻找 `tsconfig.host.json`，且只接受 `<root>/packages` 下的工程引用；同时要求包自己的 manifest 预先声明 `./typert` / `./remote` 导出与 `files`。出树单包仓库跑不通这条流水线。
 2. **client 侧 remote 清单是上游静态表**：`@deepseek-ai/dsh-api-remotes/client` 按固定列表 `$mount` 各贡献（15 个第一方命名空间），出树插件的命名空间不在其中；`ctx.remote.$mount` 虽可在运行时挂载任意贡献，但前提仍是"有生成好的贡献制品"。
 3. **两个 picker 洞是"创建工作区"流程的洞**：`sidebar.workspaces.directoryFlow` / `conversation.hero.workspace.directoryFlow` 都是 `single` kind，owner（ui-workspace）收到路径后调用 `createWorkspace`，默认组合已被 `host-directory-picker-auto` 选出的 native/browse client 半部占满。插件占用它们既冲突又语义错误。
-4. **两个受支持运行时的 slot 面不同**：pin 的 `0.1.5-rc.2` 有 `sidebar.panellist`（list）与 keyed `main` 面板；已安装的桌面运行时 `0.1.2-rc.1` 只有 `sidebar.brand.*` / `sidebar.workspaces` / `sidebar.settings` / `sidebar.footer.action`。`sidebar.workspaces` 是 `single` 且已被 WorkspaceBrowser 占用，不能"加一项"。
+4. **两个上游运行时的 slot 面不同**：pin 的 `0.1.5-rc.2` 有 `sidebar.panellist`（list）与 keyed `main` 面板；当时已安装的桌面运行时 `0.1.2-rc.1` 只有 `sidebar.brand.*` / `sidebar.workspaces` / `sidebar.settings` / `sidebar.footer.action`。`sidebar.workspaces` 是 `single` 且已被 WorkspaceBrowser 占用，不能"加一项"。（**注**：`0.1.2-rc.1` 后来不在支持矩阵内，见 [ADR-0009](./ADR-0009-dsh-compat-contract.md)；本条作为当时的取证记录保留，结论不变——面板落在两个受支持版本共有的 `sidebar.footer.action` 上。）
 5. **公开且两版都有的通道确实存在**：Connection RPC——host 侧 `ctx.connection.rpc.handle(channel, handler)`，client 侧 `connection.rpc.call(channel, endpoint, payload)`。已发布的外部插件 `@dsh-electron/dsh-plugin-git@0.2.0` 用的就是它；`0.1.5-rc.2` 与 `0.1.2-rc.1` 都提供该 API。
 
 ## Decision

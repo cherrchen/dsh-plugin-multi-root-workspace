@@ -1,15 +1,16 @@
 # 插件开发工作流：构建、测试与冒烟
 
-> 状态：M1、M2 已落地；M3 已落地并按外部审查返工后重新验收。本文记录本仓库当前**真实存在**的命令、运行时约束与验证机制；未实现的流程不要写在这里。
-> 相关：[需求](../requirements/multi-root-workspace.md)、[架构](../architecture/multi-root-workspace.md)、[ADR-0002 上游耦合策略](../decisions/ADR-0002-upstream-coupling-policy.md)、[ADR-0003 方言 grant 拼接](../decisions/ADR-0003-dialect-grant-widening.md)
+> 状态：MVP（M1/M2/M3）与 `v0.1.1` 硬化批次（H1–H4）均已落地；进度、编号与发布状态的唯一真源见[路线图 §进度总账](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)。本文记录本仓库当前**真实存在**的命令、运行时约束与验证机制；未实现的流程不要写在这里。
+> 相关：[需求](../requirements/multi-root-workspace.md)、[架构](../architecture/multi-root-workspace.md)、[ADR-0002 上游耦合策略](../decisions/ADR-0002-upstream-coupling-policy.md)、[ADR-0003 方言 grant 拼接](../decisions/ADR-0003-dialect-grant-widening.md)、[ADR-0009 DSH 兼容性代码契约](../decisions/ADR-0009-dsh-compat-contract.md)
 
 ## 1. 目标运行时与版本策略
 
 | 项 | 值 | 说明 |
 | --- | --- | --- |
-| 开发/CI 目标版本 | `0.1.5-rc.2` | 精确 pin 在 `devDependencies`；与上游 checkout master `c291e7961a` 的包版本一致 |
-| 兼容下限 | `>=0.1.2-alpha.4 <0.2.0` | `peerDependencies` 范围，使插件能装进已发布的其他运行时 |
-| 已实测的第二个运行时 | `0.1.2-rc.1` | 桌面端安装的运行时；`smoke:compose` 与 `smoke:behavior` 均已在其上通过 |
+| 开发/CI 目标版本（基线） | `0.1.5-rc.2` | 精确 pin 在 `devDependencies`；本地与 CI 主 lane 都跑它 |
+| 支持矩阵 | `0.1.5-rc.2`、`0.1.6-alpha.1` | **精确版本 allowlist**（`src/compat/dsh-version.ts` 的 `SUPPORTED_DSH_RELEASES`），`peerDependencies` 逐项或 —— 不是范围 |
+| 已实测的第二个运行时 | `0.1.6-alpha.1` | 由 `upgrade.yml` 车道跑完整矩阵证明；是否进 allowlist 由人决定，CI 绿不是授权 |
+| 运行时门禁 | `multi-root-compat` 行 | 版本不在 allowlist 或核心包混装时，四个安全相关行根本不启动（ADR-0009） |
 | cordis | `4.0.2` | 与服务定义包一样必须单副本，由宿主提供 |
 
 **必须精确 pin**：`@deepseek-ai/dsh-*` 的 `latest` dist-tag 指向陈旧的 `0.0.1-rc.1`，真正的新版发布在 `next`；范围依赖会解析到错误版本。`pnpm-workspace.yaml` 里的 `minimumReleaseAgeExclude` 是为此配套的（pnpm 的发布年龄门禁会拦下刚发布的预发布版本）。
@@ -92,7 +93,7 @@ pnpm docs:check         # 文档结构检查
 
 | 变量 | 作用 |
 | --- | --- |
-| `DSH_CLI` | 指定要驱动的 `dsh` 入口；默认用 `devDependencies` 里 pin 的那份。用于双运行时矩阵 |
+| `DSH_CLI` | 指定要驱动的 `dsh` 入口；默认用 `devDependencies` 里 pin 的那份。用于支持矩阵回归 |
 | `DSH_SMOKE_HOME` | 冒烟临时根目录（默认 `tmpdir()/dsh-multi-root-smoke`） |
 | `DSH_SMOKE_KEEP=1` | 保留临时 `$DSH_HOME` 与夹具，便于事后检查；`docs:check` 已忽略 `.dsh-smoke/` |
 
@@ -167,7 +168,7 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 六行 insert
 
   全绿之后才人工把版本加入 `SUPPORTED_DSH_RELEASES` 并同步 `peerDependencies`，最后 `pnpm compat:check`。**"CI 通过"不等于"支持该版本"**：绿灯是证据，不是授权。
 - `upgrade.yml` 不维护手写包名清单：`scripts/upgrade-dsh.mjs` 从 `package.json` 枚举所有直接 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 依赖，统一重指并可输出每个包**实际解析到**的版本（`--print-installed`）。新增直接 DSH 依赖不需要另外修工作流。
-- 双运行时回归：`DSH_CLI=<另一运行时的 dsh 入口> pnpm smoke`。
+- 支持矩阵回归：`DSH_CLI=<另一受支持版本的 dsh 入口> pnpm smoke`（CI 由 `upgrade.yml` 车道按周自动跑）。
 - 跨版本编写 smoke/测试时的两处安静坑（`confine` 的 promise、journey 的 agent-step 判据）记在 [Agent Note](../../.agent/note/dsh-compat-contract.md)。
 
 ## 7. CI

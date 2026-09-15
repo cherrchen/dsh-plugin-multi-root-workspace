@@ -1,5 +1,7 @@
 # M4：跨进程 Registry Authority Lease
 
+> 编号口径：本计划是 `v0.1.1` 硬化批次的 **H1**（路线图编号 **M4**，二者指同一件事）；批次总账见[路线图](../active/2026-09-12-multi-root-workspace.md#进度总账)。
+
 ## Goal
 
 关掉「两个 DSH 进程共享同一 storage root 时，一方撤销的附加根另一方仍继续 grant」的 P0：同一时刻只允许一个 Registry Authority Process 打开 `multi_root_workspace` domain；争用 fail-closed；前一个进程退出或崩溃后，等待方通过 `refresh()` 接管并读回最后一次 durable mutation。

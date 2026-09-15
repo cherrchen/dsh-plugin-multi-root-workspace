@@ -1,5 +1,7 @@
 # DSH 兼容性代码契约与 0.1.6-alpha.1 纳入
 
+> 编号口径：本计划是 `v0.1.1` 硬化批次的 **H3（兼容性契约）+ H4 Phase 1（附加根顶层指令）**；H4 Phase 2（nested instructions）见本文 §5b，**未实现**，属第二期。批次总账见[路线图](../active/2026-09-12-multi-root-workspace.md#进度总账)。
+
 ## Goal
 
 把“本插件支持哪些 DSH release”从 npm peer metadata 的宽范围承诺，变成**启动时可执行、可测试、可审计的代码契约**：
@@ -81,7 +83,7 @@ ADR-0002 决策 4 当时选择“peerDependencies 采用生态惯例范围以兼
 - 新增 `src/instructions.ts`（Cordis row `multi-root-instructions`）。
 - 新增 `scripts/check-dsh-compat.mjs` 与 `compat:check` 包脚本。
 - `multi-root-fs` / `multi-root-sandbox` / `multi-root-registry` / `multi-root-instructions` 全部 inject `multiRootCompat`。
-- `peerDependencies` 改为显式 allowlist 析取，devDependencies 与 lockfile 移到 allowlist 中最新的一版。
+- `peerDependencies` 改为显式 allowlist 析取；**开发 pin 与 lockfile 留在基线 `0.1.5-rc.2`**（见「已决策 1」：CI 主 lane 始终验证已证明的基线，allowlist 里更新的那一版由 upgrade 车道覆盖）。
 - `upgrade.yml` 从纯手动扩展为 weekly 定时探测 + 显式版本矩阵。
 - 文档：ADR-0009、`.agent/note/dsh-compat-contract.md(.en.md)`、troubleshooting 条目、架构与开发流程文档同步。
 

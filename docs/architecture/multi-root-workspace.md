@@ -1,9 +1,9 @@
 # 架构文档：Multi-root Workspace（不改上游：provider 替换 + 子类化）
 
-> 状态：**§4、§5.1、§5.3、§6、§7 均已实现（M1/M2/M3）；§7 的跨进程 Authority Lease 为 M4（ADR-0007）**。已实现部分可按当前仓库代码与各 completed 计划中的实施结果验证；§8 的长期演进形态、§9 的上游 seam 附录仍是设计。
+> 状态：**§4、§5.1、§5.3、§6、§7 均已实现（M1/M2/M3，随 `v0.1.0` 发版）；§3 的 `multi-root-compat` 门禁、§6.1 的附加根指令行、§7 的跨进程 Authority Lease 与 host 推导的面板权威属 `v0.1.1` 硬化批次（H1–H4），已实现但尚未发版**。进度、编号与发布状态的唯一真源是[路线图 §进度总账](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)；已实现部分可按当前仓库代码与各 completed 计划中的实施结果验证；§8 的长期演进形态、§9 的上游 seam 附录仍是设计。
 > 硬约束：不修改上游仓库（deepseek-harness）任何包；产物是外部 bundle，经 `dsh plugin add` 或 profile patch 组合。
 > 事实依据：[multi-root-workspace-research.md](../reference/multi-root-workspace-research.md)（§1-7 上游现状，§8 不改上游机制，§9 发布形态与运行时解析，§10 方言形状与子类可用面）；需求边界：[multi-root-workspace.md](../requirements/multi-root-workspace.md)；排期：[M1 计划](../plans/completed/2026-09-12-m1-composition-and-passthrough.md)、[M2 计划](../plans/completed/2026-09-12-m2-additional-roots-and-dialect-grants.md)
-> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)；M2 实施后 §5.3 与 §6 改写为已实现的机制（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；M3 实施后 §7 改写为已实现的机制（[ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)）。2026-09-15：§7 增加 store-wide Registry Authority Lease（[ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)）；面板主根改为 host session 推导（[ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)）；§3 增加 `multi-root-compat` 启动门禁与 §6.1 附加根指令行（[ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)）。
+> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)；M2 实施后 §5.3 与 §6 改写为已实现的机制（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；M3 实施后 §7 改写为已实现的机制（[ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)）。2026-09-15：§7 增加 store-wide Registry Authority Lease（[ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)）；面板主根改为 host session 推导（[ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)）；§3 增加 `multi-root-compat` 启动门禁与 §6.1 附加根指令行（[ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)、[ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)）。
 
 ## 1. 总览
 
@@ -74,7 +74,7 @@ dsh-plugin-multi-root-workspace/
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
     config:
       leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
-  - id: multi-root-instructions                            # 已实现；附加根的 AGENTS.md，见 §5.4
+  - id: multi-root-instructions                            # 已实现；附加根顶层的 AGENTS.md，见 §6.1
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/instructions'
     config:
       maxBytes: 65536
@@ -162,7 +162,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 - **单一权限世界（已实现）**：fs fence 与内核方言（sandbox provider）消费 §4 的同一份 `FilesystemScope`；bash 与 terminal/PTY 通过 `ctx.sandbox` 间接消费同一份，因此它们的根集合与 fs fence **由构造相同**。插件自带 **parity 矩阵测试**（接替上游 `writableRoots()` 测试的角色）：同一 scope 下，对「主根内 / 主根嵌套 / 附加根内 / 附加根嵌套 / 根外 / 共享词法前缀的兄弟目录 / 经附加根内符号链接逃逸 / 平台临时区」逐类比较 fs fence 的真实写判定与各方言 argv 的授予集合，并在两端模式（workspace-write / read-only）各跑一轮；解析 argv 的代码由测试侧独立实现。宿主能真正执行 runner 时（Linux CI 的 bwrap/Landlock、macOS 的 Seatbelt）另加真实受限执行用例，不能执行时显式 skip 并说明原因。
 - 已知不对称（上游既有，非插件引入）：bwrap 与 Landlock 只授予字面 `/tmp`，不授予 `tmpdir()`（调研 §10.3），因此 parity 断言的语义限定为「附加根集合与模式」；Windows 上内核级多根缺失，fs 可写而 bash 不可写（第一期已知限制）。
 
-### 6.1 附加根自己的指令文件（`multi-root-instructions`，已实现）
+### 6.1 附加根自己的指令文件（`multi-root-instructions`，H4 Phase 1 已实现）
 
 上游 `agent-instructions` 是从 session cwd **向上走**发现指令文件（外加一个 user-global 文件）。在多根工作区里这条上行路径永远到不了附加根，于是 `repo-b/AGENTS.md` 对一个**被允许写 `repo-b`** 的模型是不可见的。`multi-root-instructions` 只补这一个缺口；主根的链条与 user-global 文件仍然是上游的事。
 
@@ -174,6 +174,8 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 
 其余机制：`maxBytes`（默认 65536，与上游指令行的默认预算一致）约束的是**整个附加根快照**，而不是每个根各一份预算，否则十个根会悄悄吃掉十倍 context；各根按 scope 顺序消耗。每个 session 按根记录已交付文本的摘要，内容不变就不再重复发送。根一旦离开 scope（移除 / 消失 / 被替换即 `redirected`），必须生成**显式撤销**文本——历史对话里原来的指令仍然存在，沉默不等于撤回。渲染经 `src/compat/agent-instructions.ts` 的 `renderInstructions(...)` 调用上游渲染器（该包在不同版本里改过导出名，且是 optional peer：不存在时本行贡献为空）。
 
+**范围与分期**：本行只处理附加根**顶层**的那一份指令文件；子目录里的 nested instructions（H4 Phase 2）**本版不实现**，已登记进[需求文档 §4 第二期](../requirements/multi-root-workspace.md)。恢复的前置条件是先评估 0.1.6 起的 `SessionMessageProjection`，再决定如何复用上游的 touched-path reconcile 语义——理由是那属于 tool-result 投影语义，与顶层基线发现是两个不同的问题。范围、备选方案与后果见 [ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)。
+
 ## 7. Root 管理与 UI（已实现，M3）
 
 三行插件行之外新增两行：`multi-root-registry`（服务）与 `multi-root-command`（用户表面）。前者把注册表喂给 §4 的 scope，后者把命令与面板接到注册表上；两个 provider 完全不知道它们存在。
@@ -184,7 +186,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 - **scope 实时撤销**：每次 `scopeOf`/`resolve` 除了比对 `recordedPath`，还当场确认路径存在且是目录。即使尚未调用 registry `refresh`，删除的根也不会进入 fs/内核 grant，更不会被写入重建。
 - **校验（`src/roots.ts` 纯函数，fail loud）**：`~` 展开（只限前导 `~`）→ 必须绝对 → 必须存在且是目录 → `canonicalPath` → 不等于主根 → **不与主根互相包含（`primary-overlap`，双向）** → 不与其他根重复 → 不与任何根互相包含（`nested` 双向拒绝）。失败返回稳定 code（`not-absolute` / `missing` / `not-a-directory` / `equals-primary` / `primary-overlap` / `duplicate` / `nested` / `invalid-alias` / `not-found` / `invalid-ref` / `storage-unavailable` / `registry-contended` / `reveal-unavailable` / `session-not-found`），三类表面（命令、面板、内部 API）共用同一词汇。存储读取侧用同一套规则（`classifyStoredRoots`），并额外判定 `recordedPath` 变化（`redirected`）与重复 id（全部 `invalid`）。
 - **命令 `/workspace-folders`**：`ctx.commands.register`，语法 `list | add [path] | remove <n|path> | alias <n|path> [name] | reveal <n|path> | help`。无路径的 `add` 软注入 `directoryPicker`，capability 为 `native` 时直接 `pick(signal)`；`browse` 或 seam 缺失时返回明确错误（提示改用面板或传路径）。输出是英文文本（host 侧没有活动语言信息，见需求文档第一期限制）。
-- **Client 半部**：`sidebar.footer.action`（list/root，两个受支持运行时都存在）+ 自绘对话框；`ctx.locale.register('multiRootWorkspace', { zh, en })` 双语。每个工作目录行是两行显示：第一行主文字为显示名（主根 = 宿主 workspace 的上游标题，见 `primaryName`；附属根 = 登记的 alias，缺省为目录名），第二行次要文字为绝对路径。动作：复制路径 / 在文件管理器中显示 / 上移 / 下移为图标按钮，别名编辑与移除收进行内 `…` 菜单（ui-primitives `Menu`），底部"添加目录"为仅图标按钮、整行控件高度统一 32px。Add（`ctx.uiWorkspace.pickDirectory()`，退化为手输路径）。文案按 host 返回的 code 本地化。落点与通道的取舍见 [ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)；样式与 ui-primitives 展示型组件的 import 边界见 [ADR-0006](../decisions/ADR-0006-client-ui-host-tokens.md)。
+- **Client 半部**：`sidebar.footer.action`（list/root，两个受支持版本都提供的 slot）+ 自绘对话框；`ctx.locale.register('multiRootWorkspace', { zh, en })` 双语。每个工作目录行是两行显示：第一行主文字为显示名（主根 = 宿主 workspace 的上游标题，见 `primaryName`；附属根 = 登记的 alias，缺省为目录名），第二行次要文字为绝对路径。动作：复制路径 / 在文件管理器中显示 / 上移 / 下移为图标按钮，别名编辑与移除收进行内 `…` 菜单（ui-primitives `Menu`），底部"添加目录"为仅图标按钮、整行控件高度统一 32px。Add（`ctx.uiWorkspace.pickDirectory()`，退化为手输路径）。文案按 host 返回的 code 本地化。落点与通道的取舍见 [ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)；样式与 ui-primitives 展示型组件的 import 边界见 [ADR-0006](../decisions/ADR-0006-client-ui-host-tokens.md)。
 - **主根显示名（`primaryName`）**：`RootsView` 的可选字段。面板分发时通过**可选兄弟服务查找**（同 `sessions`/`subprocess` 的模式，不进 `inject` 声明）读宿主 `workspaceRegistry`：先按会话成员关系（`list().find(w => w.sessionIds.includes(sessionId))`），未命中再 `resolveByPath(primaryRoot)`，命中即把 workspace 的 `title` 填进每个 `RootsView` 应答；查找失败只降级为"不填"，面板回退显示路径 basename，绝不因此报错。
 - **通道**：插件自有 Connection RPC channel `/multi-root-workspace`（`connection.rpc.handle` / `connection.rpc.call`），端点为 `list` / `add` / `remove` / `alias` / `move` / `reveal`，返回 `{ ok, value } | { ok, error: { code, message, details } }`。**每个端点的应答形状是显式契约**（`src/contract.ts` 的 `PanelResponseMap`）：`reveal` 返回 `{ revealed }`，其余返回完整 `RootsView`；请求体与应答都在两端做运行时校验（`zod`，与存储 schema 同源），非法请求返回 `panel/bad-request`，形状不符的应答在面板侧变成一条本地化错误而不是渲染崩溃或静默误解。**主根权威是 host-derived**：`PanelRequest.sessionId` 必填，host 唯一通过 `resolvePanelPrimaryRoot(ctx, sessionId)` → `sessions.get(sessionId).header.cwd` → `canonicalPath` 得到主根；请求体没有 `primaryRoot` 字段（`.strict()` 使旧客户端发送该字段变成 `panel/bad-request`），也没有 `sandboxPolicy.resolve()` 回退。未知或已删除的会话返回 `session-not-found`。没有活动会话时客户端显示空态、不调用 host。`/workspace-folders` 仍用 `invocation.agent.session`（可信 host context），不走这条解析器。见 [ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)。host 侧只在组合里同时有 `connection` 与 `webServer`（web profile）时挂载，且服务必须从根上下文读取（cordis 属性解析从插件 fiber 看不见兄弟行提供的 `webServer`，根上下文走共享服务 store；详见 [故障排查：面板 HTTP 405](../troubleshooting/panel-channel-http-405.md)）；headless 上该行只注册命令。
 - **不做 Typert 远程命名空间**：出树包的契约生成与 client 装配都没有上游支持路径（ADR-0005）。将来上游提供出树 remote 注册表时，迁移是把 `rpc.handle` 换成 `TypertRemoteService` + 生成的 `/remote`，面板组件与端点语义不变。

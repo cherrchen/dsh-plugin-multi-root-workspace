@@ -14,7 +14,11 @@ Three things make this plugin worth looking at:
 - **Security does not degrade**: the additional roots are granted through the same mechanisms the harness already uses — the in-process fs fence plus kernel-level runners (Seatbelt on macOS, bwrap / Landlock on Linux) — with the fs side and bash/PTY sharing one and the same scope. It never degenerates into danger-full-access or prompt-level constraints.
 - **Absent when absent**: it replaces the upstream `fs-sandbox` and `sandbox` provider rows through a bundle patch; with no additional root configured its behavior is item-for-item identical to an uninstalled harness, and every misconfiguration fails loudly instead of silently degrading.
 
-The first release (MVP) is complete and accepted: M1 composition and empty-root pass-through, M2 multi-root capability and dialect grants, M3 root registry / the `/workspace-folders` command / the Workspace Folders panel / a cross-repository journey e2e. Two things landed after it: DSH compatibility became a **code contract enforced at startup** (an exact allowlist, mixed-install detection, and an adapter layer) rather than a documented agreement, and **an additional root's own `AGENTS.md` / `CLAUDE.md` now reaches the model** — native instruction discovery walks upward from the session cwd, so it can never reach an additional root. Evidence lives in the [completed plans](./docs/plans/README.md).
+**Done and released: the MVP `v0.1.0` (milestones M1–M3)** — composition and empty-root pass-through, multi-root capability and dialect grants, the root registry / the `/workspace-folders` command / the Workspace Folders panel / a cross-repository journey e2e.
+
+**Done but not yet released: the `v0.1.1` hardening batch (H1–H4)** — a cross-process Registry Authority Lease (when two DSH processes share one `$DSH_HOME`, only the lease holder grants additional roots; the other fails closed and takes over once the holder exits), panel primary-root authority derived from the host session (a client-named root is no longer accepted), DSH compatibility turned from a documented agreement into a **code contract enforced at startup** (an exact allowlist, mixed-install detection, a `src/compat/` adapter layer), and **an additional root's top-level `AGENTS.md` / `CLAUDE.md` reaching the model** — native instruction discovery walks upward from the session cwd, so it can never reach an additional root.
+
+The single source of truth for progress, numbering, and release state is the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账) (M1–M4 are the MVP milestone numbers, H1–H4 are the `v0.1.1` batch numbers, and H1 is M4); per-item evidence lives in the [completed plans](./docs/plans/README.md).
 
 ## Quick Start
 
@@ -38,7 +42,7 @@ The agent can now read, write, and run bash in that directory, with the same rig
 - **Using the published plugin**: you need a *supported* DSH runtime — currently **`0.1.5-rc.2` and `0.1.6-alpha.1`**, and nothing else will install or run (see below). `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
 - **Building from source / contributing**: **Node.js** `^22.19.0 || >=24` (pinned by the repository's `engines`), **Git**, and **pnpm 11** (`packageManager` pins `pnpm@11.25.0`; corepack recommended)
 - **DSH runtime**: the dev pin is exactly `0.1.5-rc.2`, the baseline among the supported releases; the upgrade procedure lives in the [development workflow](./docs/development/plugin-development-workflow.md)
-- **Platforms**: kernel-level multi-root is complete on macOS (Seatbelt) and Linux (bwrap or Landlock); on Windows only the `fs` write path covers additional roots (confined bash/PTY does not — see [known limitations](#known-limitations-first-release))
+- **Platforms**: kernel-level multi-root is complete on macOS (Seatbelt) and Linux (bwrap or Landlock); on Windows only the `fs` write path covers additional roots (confined bash/PTY does not — see [known limitations](#known-limitations))
 - Running the smoke tests needs **no model credentials**: the e2e model turns are served by an inline scripted model endpoint
 
 **The supported DSH versions are an exact list, not a range.** This plugin replaces `ctx.fs` and `ctx.sandbox` — the security boundary itself — and it recognizes kernel sandbox dialects from argv shapes measured against specific upstream releases. So `peerDependencies` names only the releases that have actually been through the full verification, and startup checks again: if the host's release is not on the list, or several `@deepseek-ai/dsh-*` packages disagree about which release they are, the fs / sandbox / registry / instructions rows **do not start**, the composition degrades to "this plugin is not installed", and one explanatory line is logged. To diagnose, see [troubleshooting: unsupported DSH release](./docs/troubleshooting/unsupported-dsh-release.md); for the reasoning, [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md).
@@ -115,7 +119,7 @@ Development gates, with the result each step should produce:
 pnpm lint && pnpm typecheck   # expect: 0 warnings, 0 errors; both tsconfigs pass
 pnpm test                     # expect: all pass; dialect cases without a local kernel runner skip explicitly, with a reason
 pnpm kernel:probe             # expect: reports the kernel runners this host has (seatbelt / bwrap / landlock)
-pnpm smoke                    # expect: compose 34/34, behavior 99/99, journey 28/28
+pnpm smoke                    # expect: compose 40/40, behavior 99/99, journey 43/43
 pnpm docs:check               # expect: 0 errors, 0 warnings
 ```
 
@@ -159,16 +163,21 @@ Writable additional roots: 2 of 2.
 src/
   roots.ts        pure rules: canonicalization, conflict validation, record classification (available/missing/redirected/invalid)
   registry.ts     the root registry: dsh-storage-domain persistence, mutations of one primary root serialized in one queue
+  registry-lease.ts / registry-lease-win32.ts
+                  cross-process Registry Authority: POSIX flock and a Windows named semaphore (the kernel releases it on process death)
   scope.ts        ctx.multiRootScope: the single authorization source, plus the model-visible topology snapshot
   fs.ts           the multi-root filesystem provider (in-process fence, extends the upstream LocalFileSystem)
   sandbox.ts      the multi-root kernel-sandbox provider (extends the upstream LocalSandboxProvider)
   dialects.ts     Seatbelt / bwrap / Landlock profile recognition and additional-grant assembly (unrecognized shapes fail loudly)
   containment.ts  path containment (lexical fast path plus a dev/ino alias fallback)
+  instructions.ts discovery, budget and revocation for additional roots' top-level AGENTS.md / CLAUDE.md (injected from agent/pre-step)
+  compat.ts       the multi-root-compat startup gate (version allowlist and mixed-install detection)
+  compat/         the version-difference adapters: dsh-version / sandbox-confine / agent-instructions
   command.ts      the /workspace-folders command and the host half of the panel RPC
   contract.ts     the panel wire protocol (zod-validated on both ends, inlinable into the browser bundle)
   client/         the browser half: sidebar action, dialog, bilingual dictionaries
-tests/            differential parity, real-execution dialect matrix, contract round-trips, component and locale gates
-scripts/          smoke batteries (compose / behavior / journey) plus the docs and kernel-runner checks
+tests/            differential parity, real-execution dialect matrix, contract round-trips, component and locale gates, cross-process lease e2e, instruction injection
+scripts/          smoke batteries (compose / behavior / journey) plus the docs, kernel-runner, compatibility-contract and upgrade checks
 docs/             requirements, architecture, decision records (ADRs), plans, development workflow
 ```
 
@@ -176,20 +185,22 @@ docs/             requirements, architecture, decision records (ADRs), plans, de
 
 Issues and PRs are welcome:
 
-1. Read [`AGENTS.md`](./AGENTS.md) (repository-wide rules) and the [development workflow](./docs/development/plugin-development-workflow.md) (environment, commands, the two-runtime matrix, the upgrade procedure) first.
+1. Read [`AGENTS.md`](./AGENTS.md) (repository-wide rules) and the [development workflow](./docs/development/plugin-development-workflow.md) (environment, commands, the runtime support matrix, the upgrade procedure) first.
 2. Branch from `main`; follow conventional commits (`feat` / `fix` / `perf` / `refactor` + scope) — see the existing history.
 3. All of these must pass locally before a PR: `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm test`, `pnpm docs:check`, `pnpm smoke` (CI runs the same order, build before test).
 4. Behavior changes update the matching document under `docs/` in the same change; keep the README bilingual pair in sync; record engineering decisions that involve trade-offs as ADRs.
 5. Hard constraint: **never modify any package of the upstream repository (deepseek-harness)**; the plugin stays an out-of-tree extension.
 
-## Known Limitations (first release)
+## Known Limitations
 
+- An additional root's `AGENTS.md` / `CLAUDE.md` is read **only at the root's top level**; nested instructions in subdirectories belong to the second phase (H4 Phase 2 — rationale and the condition for revisiting it are in [ADR-0010](./docs/decisions/ADR-0010-additional-root-instruction-scope.md)). The primary root's chain and the user-global file remain upstream's job, and this plugin does not inject them a second time.
+- Single writer per store: only one DSH process at a time may hold the root registry for a given `$DSH_HOME`; another process reports the registry as unavailable (`registry-contended`) and takes over on refresh once the holder exits or crashes. That is deliberate fail-closed behavior, not a race waiting to be fixed ([ADR-0007](./docs/decisions/ADR-0007-registry-authority-lease.md)).
+- The supported matrix is an exact-version allowlist: on a host whose release is not on the list, or whose core packages disagree about the release, the `fs` / `sandbox` / `registry` / `instructions` rows **do not start** and the composition degrades to "the plugin is not installed" ([ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)).
 - Kernel-level multi-root does not exist on Windows: the `fs` write path covers additional roots, but confined bash/PTY cannot write them (the plugin emits one explicit warning for a populated scope); see the first-release scope in the [requirements document](./docs/requirements/multi-root-workspace.md).
 - An additional root has the same rights as the primary root (no per-root read-only), and cannot become the default working directory of bash/PTY (session cwd semantics are unchanged).
 - The `workspace-files` client file tree still sees the primary root only.
 - The command's own output text is English (a host-side handler has no active locale to consult); the panel is bilingual.
 - The Workspace Folders panel is a sidebar footer action plus a dialog rather than a full panel: `sidebar.footer.action` is offered by every supported release, whereas `sidebar.panellist` / `main` are not.
-- An additional root's `AGENTS.md` / `CLAUDE.md` is read **only at the root's top level**; nested instructions in subdirectories are a second-phase feature. The primary root's chain and the user-global file remain upstream's job, and this plugin does not inject them a second time.
 
 ## Documentation
 
