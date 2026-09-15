@@ -20,14 +20,17 @@
  * a structural probe also copes with upstream keeping both names for a release,
  * or reshaping within one, which a version comparison does not.
  *
- * The package is loaded LAZILY, and its absence is reported as absence rather
- * than thrown. It is an optional peer: the default DSH bundle mounts it, but a
- * minimal composition legitimately has neither it nor an agent, and in that
- * case this plugin's instruction row must simply contribute nothing.
+ * The package is loaded LAZILY, and its genuine ABSENCE is reported as absence
+ * rather than thrown. It is an optional peer: the default DSH bundle mounts it,
+ * but a minimal composition legitimately has neither it nor an agent, and in
+ * that case this plugin's instruction row must simply contribute nothing. A
+ * package that is present but cannot be evaluated is a different answer, and
+ * one this adapter reports instead of caching as absence.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/compat/agent-instructions
  */
 
+import { createRequire } from 'node:module'
 import type {
   InstructionFile,
   LoadedInstructionFile,
@@ -137,20 +140,46 @@ export function adaptInstructionsModule(module: UpstreamModule): InstructionsApi
 }
 
 /**
+ * Whether one package is installed at all, judged WITHOUT evaluating it.
+ *
+ * This is what separates "the optional peer is absent" from "the optional peer
+ * is installed but its evaluation fails" (a missing transitive dependency, a
+ * broken build). Only a genuine resolvability failure counts as absence: a
+ * resolution that fails for another reason (an `exports` map with no `require`
+ * condition, say) leaves the verdict to the `import()` below, which is the
+ * authority on whether the module can actually be loaded.
+ * @param specifier - the bare package specifier to probe.
+ * @returns whether the package resolves from this module.
+ */
+export function isPackageInstalled(specifier: string): boolean {
+  try {
+    createRequire(import.meta.url).resolve(specifier)
+    return true
+  } catch (error: unknown) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code
+    return code !== 'MODULE_NOT_FOUND' && code !== 'ERR_MODULE_NOT_FOUND'
+  }
+}
+
+/**
  * Load and adapt the upstream instruction surface, once.
  *
  * @returns the adapted surface, or `undefined` when the package is not
  *   installed. A package that IS installed but exports neither renderer throws
- *   instead: that is a compatibility break to fix, not an optional seam.
+ *   instead: that is a compatibility break to fix, not an optional seam. So
+ *   does one that is installed but cannot be evaluated at all — a missing
+ *   transitive dependency, a broken build — because reporting that as absence
+ *   would drop every additional root's instructions for the rest of the
+ *   process. See {@link isPackageInstalled} for how the two are told apart.
  */
 export async function instructionsApi(): Promise<InstructionsApi | undefined> {
   resolution ??= (async () => {
-    let module: UpstreamModule
-    try {
-      module = await import('@deepseek-ai/dsh-agent-instructions') as unknown as UpstreamModule
-    } catch {
-      return null
-    }
+    // Probe absence FIRST and separately. A package that is installed but
+    // cannot be evaluated is a compatibility break to report, not an optional
+    // seam to swallow — caching `null` for it would silently drop every
+    // additional root's instructions for the rest of the process.
+    if (!isPackageInstalled('@deepseek-ai/dsh-agent-instructions')) return null
+    const module = await import('@deepseek-ai/dsh-agent-instructions') as unknown as UpstreamModule
     return adaptInstructionsModule(module)
   })()
   return (await resolution) ?? undefined
