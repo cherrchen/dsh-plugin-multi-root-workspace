@@ -1,6 +1,6 @@
 # 开发需求文档：DSH Multi-root Workspace（out-of-tree 插件，不改上游）
 
-> 状态：M1/M2/M3 已实现（2026-09-12）；M4 跨进程 Registry Authority Lease 已实现（2026-09-15）| 日期：2026-09-15 | 上游需求：用户提供的《DSH Multi-root Workspace 插件需求总结》
+> 状态：M1/M2/M3 已实现（2026-09-12）；M4 跨进程 Registry Authority Lease 已实现（2026-09-15）；面板主根改为 host session 推导（2026-09-15）| 日期：2026-09-15 | 上游需求：用户提供的《DSH Multi-root Workspace 插件需求总结》
 > **硬约束：不得修改上游仓库（deepseek-harness）中任何包**——全部产物是外部插件/bundle，通过 `dsh plugin add` 或 profile patch 组合安装。
 > 事实依据：[multi-root-workspace-research.md](../reference/multi-root-workspace-research.md)（§8 为不改上游的补充调研）；设计：[multi-root-workspace.md](../architecture/multi-root-workspace.md)；排期：[路线图](../plans/active/2026-09-12-multi-root-workspace.md) 与 [M1 计划](../plans/completed/2026-09-12-m1-composition-and-passthrough.md)
 
@@ -96,6 +96,7 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 7.4 **异常记录不扩散损坏**：缺少 `recordedPath` 的旧记录经无关写操作后仍可在重启时读取；一次 remove/alias/move 只能作用于一条可唯一定位的记录，不能按重复 id 批量命中或隐式删除其他记录。
 7.5 **实时 scope 不授予 missing 根**：目录在登记后被删除时，即使没有先执行 list/refresh，下一次 scope resolve 也必须排除它，不得通过写操作重建该目录。
 7.6 **跨进程单写者**：两个 DSH 进程共用同一 storage root 时，只有持有 store-wide 内核 lease 的进程打开登记表并授予附加根；另一进程 fail-closed（空 scope、`registry-contended`），其 `list`/Refresh 在对方退出或崩溃后可接管并读回最后一次 durable 写。见 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。
+7.7 **面板主根由 host session 推导**：面板通道每个端点（含 `list`）只接受必填 `sessionId`；host 用 `resolvePanelPrimaryRoot` 取该 session 的 `header.cwd` canonical，不接受客户端 `primaryRoot`，也不回退部署默认 workspace。缺失或未知会话拒绝；浏览器没有当前 Session 时显示空态、不调用 host。`/workspace-folders` 仍用 `invocation.agent.session`。见 [ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)。
 8. **失败要响亮**：misconfiguration（非绝对路径、重复 id、patch 行未按预期生效）在装载或首次 resolve 时抛错。
 9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias/排序可用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制。
 10. **升级韧性**：`package.json` pin dsh 精确版本；仓库 CI 含"升级 smoke"脚本（对上游 demo 行为差异报警）；provider 子类只依赖上游公开方法面（不触碰 TS-private、不做原型替换）。

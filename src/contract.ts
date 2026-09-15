@@ -106,16 +106,14 @@ export interface PanelResponseMap {
 }
 
 /**
- * The fields a request may carry. `primaryRoot` and `sessionId` are shared by
- * every endpoint (a client may name the workspace root directly or let the host
- * resolve it from the session); the remaining fields are used per endpoint and
- * the host asserts which ones that endpoint requires.
+ * The fields a request may carry. `sessionId` is required on every endpoint:
+ * the host derives the primary root from that session's immutable cwd and
+ * never accepts a client-named path. The remaining fields are used per
+ * endpoint and the host asserts which ones that endpoint requires.
  */
 export interface PanelRequest {
-  /** The workspace root to act on; the host validates that it is an existing directory. */
-  readonly primaryRoot?: string
-  /** The session whose workspace root should be used when `primaryRoot` is absent. */
-  readonly sessionId?: string
+  /** The live host session whose cwd is the primary root this call acts on. */
+  readonly sessionId: string
   /** Exact target row from the most recent list snapshot. */
   readonly entry?: RootEntryView
   /** Compatibility reference; accepted only when the id is unique. */
@@ -156,8 +154,7 @@ export type Parsed<T> = { readonly ok: true; readonly value: T } | { readonly ok
  * would hide the drift.
  */
 const panelRequestSchema = z.object({
-  primaryRoot: z.string().optional(),
-  sessionId: z.string().optional(),
+  sessionId: z.string().min(1),
   entry: z.object({
     ordinal: z.number().int().positive(),
     id: z.string(),
@@ -270,8 +267,7 @@ export function parseErrorView(value: unknown): PanelFailure | undefined {
 function narrowCall(endpoint: PanelEndpoint, value: z.infer<typeof panelRequestSchema>): PanelCall {
   return {
     endpoint,
-    ...(value.primaryRoot === undefined ? {} : { primaryRoot: value.primaryRoot }),
-    ...(value.sessionId === undefined ? {} : { sessionId: value.sessionId }),
+    sessionId: value.sessionId,
     ...(value.entry === undefined ? {} : { entry: value.entry }),
     ...(value.id === undefined ? {} : { id: value.id }),
     ...(value.path === undefined ? {} : { path: value.path }),

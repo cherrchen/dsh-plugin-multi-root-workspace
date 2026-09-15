@@ -13,8 +13,10 @@
  * whole public surface from a single specifier.
  *
  * The two facts worth remembering about this surface: a registration carries the
- * canonical directory it was GRANTED for (`recordedPath`), and the panel channel
- * has one declared response shape per endpoint (`PanelResponseMap`).
+ * canonical directory it was GRANTED for (`recordedPath`), the panel channel
+ * has one declared response shape per endpoint (`PanelResponseMap`), and the
+ * panel primary root is derived from a live host session — never named by the
+ * browser.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace
  */
@@ -49,7 +51,7 @@ export type {
   RootStatus,
   RootValidationCode,
 } from './roots.ts'
-export { COMMAND_NAME, parseFoldersCommand, renderRootsReport, revealArgv } from './command.ts'
+export { COMMAND_NAME, parseFoldersCommand, renderRootsReport, resolvePanelPrimaryRoot, revealArgv } from './command.ts'
 export type { FoldersCommand } from './command.ts'
 export { PANEL_CHANNEL, PANEL_ENDPOINTS, parsePanelCall, parseRevealedView, parseRootsView } from './contract.ts'
 export type {
