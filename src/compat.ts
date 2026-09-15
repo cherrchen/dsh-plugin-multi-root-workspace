@@ -92,11 +92,13 @@ export const inject: string[] = []
 /**
  * Apply the gate policy to one report.
  *
- * Under `DSH_MULTI_ROOT_COMPAT=warn` an unsupported installation proceeds with
- * a loud warning. That mode exists so the upgrade smoke can run the full matrix
- * against a release that is not on the allowlist yet, which is how a release
- * earns its place there; production deployments leave it unset and get the
- * refusal.
+ * Under `DSH_MULTI_ROOT_COMPAT=warn` exactly one verdict is relaxed: an
+ * `unsupported` release that every inspected package agrees on. That is the
+ * only shape the upgrade smoke probes — a coherent tree on a release the
+ * allowlist does not name yet, which is how a release earns its place there.
+ * `mixed` and `incomplete` describe an installation the contract cannot judge
+ * at all, so they are refused in either mode; production deployments leave the
+ * variable unset and get the refusal for everything.
  * @param report - the verdict to act on.
  * @param enforcement - how to react to a non-`supported` verdict.
  * @returns the warning to log, or `undefined` when there is nothing to say.
@@ -107,7 +109,13 @@ export function assertSupportedInstallation(
   enforcement: CompatEnforcement,
 ): string | undefined {
   if (report.verdict === 'supported') return undefined
-  if (enforcement === 'enforce') throw new DshCompatUnsupportedError(report)
+  // `warn` relaxes exactly one verdict: a coherent installation on a release
+  // the allowlist does not name yet — the only thing the upgrade lane probes.
+  // `mixed` and `incomplete` describe an installation the contract cannot judge
+  // at all (one half of the sandbox may have been verified against a shape the
+  // other half no longer produces, or a required package is absent), so they
+  // are refused in either mode.
+  if (enforcement === 'enforce' || report.verdict !== 'unsupported') throw new DshCompatUnsupportedError(report)
   return `${report.message}\n\nProceeding anyway because ${COMPAT_ENFORCEMENT_ENV}=warn. `
     + 'This is an upgrade-smoke mode: additional workspace roots are about to be granted through a '
     + 'sandbox profile shape that has not been verified on this release. Supported releases: '

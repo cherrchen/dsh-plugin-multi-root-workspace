@@ -208,6 +208,24 @@ describe('the gate policy', () => {
     expect(() => assertSupportedInstallation(report, 'enforce')).toThrow(DshCompatUnsupportedError)
   })
 
+  it('still refuses a mixed installation under warn', () => {
+    const report = classifyInstallation(reader('0.1.5-rc.2', { '@deepseek-ai/dsh-fs-local': '0.1.6-alpha.1' }))
+    expect(report.verdict).toBe('mixed')
+    try {
+      assertSupportedInstallation(report, 'warn')
+      expect.unreachable('warn must not relax a mixed installation')
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(DshCompatUnsupportedError)
+      expect((error as DshCompatUnsupportedError).report).toBe(report)
+    }
+  })
+
+  it('still refuses an incomplete installation under warn', () => {
+    const report = classifyInstallation(reader('0.1.5-rc.2', { '@deepseek-ai/dsh-sandbox-local': undefined }))
+    expect(report.verdict).toBe('incomplete')
+    expect(() => assertSupportedInstallation(report, 'warn')).toThrow(DshCompatUnsupportedError)
+  })
+
   it('warns instead of refusing under warn, and says the roots are unverified', () => {
     const report = classifyInstallation(reader('0.9.9'))
     const warning = assertSupportedInstallation(report, 'warn')
