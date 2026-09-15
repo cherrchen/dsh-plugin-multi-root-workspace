@@ -48,6 +48,7 @@ completed:
 - [2026-09-15-m4-registry-authority-lease.md](./completed/2026-09-15-m4-registry-authority-lease.md) — `v0.1.1` batch H1 (roadmap M4): the cross-process Registry Authority Lease (implemented 2026-09-15, unreleased).
 - [2026-09-15-panel-session-derived-authority.md](./completed/2026-09-15-panel-session-derived-authority.md) — `v0.1.1` batch H2: panel primary root derived from the host session, the client `primaryRoot` field removed (implemented 2026-09-15, unreleased).
 - [2026-09-15-dsh-compat-contract.md](./completed/2026-09-15-dsh-compat-contract.md) — `v0.1.1` batch H3 + H4 Phase 1: DSH compatibility becomes a code contract enforced at startup, bringing `0.1.6-alpha.1` and top-level additional-root instruction injection in with it (implemented 2026-09-15, unreleased).
+- [2026-09-15-v0.1.1-review-rework.md](./completed/2026-09-15-v0.1.1-review-rework.md) — pre-release rework for PR #1 on the `v0.1.1` batch (2 P1 + 3 P2 findings): authority teardown order (drain → close → release), intermediate-directory instructions becoming reachable, `warn` relaxing `unsupported` only, both optional peers loaded on demand, and absence separated from evaluation failure (implemented 2026-09-15, unreleased).
 
 ### Batch Numbering
 

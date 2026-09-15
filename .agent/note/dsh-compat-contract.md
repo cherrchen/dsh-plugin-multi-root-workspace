@@ -81,9 +81,15 @@ await mountCompat(ctx)
 
 `agent-instructions` 是**可选 peer**：最小组合里可能既没有它也没有 agent。`instructionsApi()` 在包不存在时返回 `undefined`（贡献为空），但包存在却两个 renderer 名字都没有时**抛错**——那是需要修适配器的兼容性破坏，不是可选接缝。
 
+`@deepseek-ai/dsh-llm` **同样是可选 peer，且只能按需加载**：barrel（`src/index.ts`）正是 carrier loader 行挂载的模块，它的加载期依赖集合必须等于必需包集合，所以任何静态值导入都会让一个根本不构造消息的最小组合加载失败。消息构造统一走 `src/compat/llm-message.ts` 的 `createInstructionMessage()`，它在真正要构造消息时才 `await import('@deepseek-ai/dsh-llm')`。`tests/optional-peers.spec.ts` 钉住了这一点：加载 `src/index.ts` 与 `src/instructions.ts` 时该包不会被 resolve。
+
+`instructionsApi()` 还要把**包不存在**与**包在但求值失败**分开：先用 `isPackageInstalled()` 单独探测安装情况（`createRequire(import.meta.url).resolve`，与 `readInstalledVersion` 同一模式），只有 `MODULE_NOT_FOUND` / `ERR_MODULE_NOT_FOUND` 算"不存在"；其余失败（例如传递依赖缺失导致 `import()` 抛错）必须向上抛，绝不缓存成 `undefined`——那会让整个进程静默停止投递附加根指令。
+
 ## 5. `DSH_MULTI_ROOT_COMPAT=warn` 不是给你用的调试开关
 
 它只为升级车道存在：让完整矩阵能在一个还不在 allowlist 上的版本上跑起来。
+
+它只放宽**一个**判定：`unsupported`（版本一致、只是还没被 allowlist 点名的树——升级车道唯一会探测的形状）。`mixed` 与 `incomplete` 在 `enforce` 和 `warn` 下**都**拒绝。
 
 如果你在本地遇到门禁拒绝，**不要**用它绕过去继续开发。正确做法是确认宿主/`node_modules` 是否真的在 allowlist 上（`pnpm compat:check`）。只有在你确实在做"提升一个新上游版本"这件事时才用它，流程写在[故障排查条目](../../docs/troubleshooting/unsupported-dsh-release.md)。
 

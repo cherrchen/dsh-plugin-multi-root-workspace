@@ -96,9 +96,13 @@ compat 失败  →  该行抛错               →  四个 provider 永不启动
 
 一律用结构探测（是否 thenable、导出哪个名字）而不是比较版本号：结构探测还能应付上游在同一版本内改形状，或一个版本里同时保留两个名字。
 
+**可选 peer 一律按需加载，不得静态值导入。** barrel（`src/index.ts`，即 carrier loader 行挂载的模块）的加载期依赖集合必须等于必需包集合：`@deepseek-ai/dsh-llm`、`@deepseek-ai/dsh-agent-instructions` 这类可选 peer 一旦被业务层的静态值导入，一个“本就不需要它”的最小组合会在加载 carrier 行时就失败。`@deepseek-ai/dsh-llm` 由 `src/compat/llm-message.ts` 承载：`createInstructionMessage()` 在**真正要构造消息的那一刻**才 `await import('@deepseek-ai/dsh-llm')`，peer 缺失时抛出带原因的 `Error`（静默丢上下文比报错更糟）。同理，`src/compat/agent-instructions.ts` 必须把“包没装”（`isPackageInstalled()` 探不到，返回 `undefined`）与“包装了但求值失败”（让异常浮出）区分开：后者是兼容性故障，不是可选缝。
+
 ### 5. `DSH_MULTI_ROOT_COMPAT=warn` 只为升级车道存在
 
 升级车道必须在一个**还不在 allowlist 上**的版本上跑完整矩阵——那次运行正是该版本获得资格的方式。所以提供一个放宽开关，并且警告文本明确说明“即将在未验证的 sandbox profile 形状上授予 additional root”。生产部署不设置它。
+
+**`warn` 只放宽 `unsupported` 一个判定**：即“版本一致、只是 allowlist 还没列名”的树——升级车道探测的正是这一种形状。`mixed` 与 `incomplete` 在两种模式下都拒绝：它们描述的是契约**根本无法评判**的安装（围栏的两半可能各自对着不同的上游语义工作，或某个必需包缺失），放宽它们等于让 `apply()` 在这类树上发布 `multiRootCompat`、让授权放宽行在一棵没人能判定的树上启动。`assertSupportedInstallation()` 因此是 `if (enforcement === 'enforce' || report.verdict !== 'unsupported') throw new DshCompatUnsupportedError(report)`。
 
 单元套件也遵守同一条线：`tests/support/compat.ts` 挂载的是**真实的** compat 行（含门禁策略），因此在未列入的版本上 enforce 模式会直接让整个套件失败，而不是悄悄产出“对一个没人验证过的宿主”的证据。
 
@@ -160,6 +164,17 @@ smoke 脚本不再假定任何单一版本的形状：
 - 代价：allowlist 与 `peerDependencies` 必须同时改；`pnpm compat:check` 会在漏改时报错，但这确实是两处编辑。
 - 代价：`src/compat/` 会随着支持的版本数量增长而积累适配分支。移除一个版本时应同时清掉只为它存在的分支。
 - 代价：`peerDependencies` 使用 `a || b` 形式的精确版本或，下游若装了别的版本会得到 peer 警告——这是期望行为。
+
+## 返工补充（2026-09-15，PR #1 评审）
+
+PR #1（head `507c954`）的 P2-3 / P2-4 / P2-5 收紧了两条规则（内容见上面的第 4、5 条，此处只记落点与证据）：
+
+| 规则 | 落点 | 钉住它的测试 |
+| --- | --- | --- |
+| `warn` 只放宽 `unsupported`，`mixed` / `incomplete` 两种模式都拒绝 | `src/compat.ts` 的 `assertSupportedInstallation()` | `tests/compat.spec.ts` 的 `describe('the gate policy')` 两条新用例（混装 / 缺包在 `warn` 下仍抛 `DshCompatUnsupportedError`） |
+| 可选 peer 不得被静态值导入；“包没装”与“包装了但求值失败”必须区分 | `src/compat/llm-message.ts`（`createInstructionMessage()` 按需 `import`）、`src/compat/agent-instructions.ts`（`isPackageInstalled()` + `instructionsApi()` 只在真缺失时返回 `undefined`） | `tests/optional-peers.spec.ts`（barrel 与指令行加载时 `@deepseek-ai/dsh-llm` 未被解析；抛错的 mock peer 必须以 rejection 浮出而非被当成缺失） |
+
+`src/index.ts` 因此 export `createInstructionMessage` 与 `InstructionMessageInput`；`src/instructions.ts` 只保留 `import type { UserMessage }`（类型导入被擦除，不构成加载期依赖）。
 
 ## Related Documents
 

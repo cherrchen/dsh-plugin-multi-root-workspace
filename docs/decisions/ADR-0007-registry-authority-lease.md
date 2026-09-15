@@ -25,7 +25,7 @@ M3 把附加根登记进 `dsh-storage-domain` 的 `multi_root_workspace` domain�
 ## Decision
 
 1. **同一时刻只允许一个 Registry Authority Process。** 锁是 **store-wide**，不是 per-primary-root：介质是整份 `multi_root_workspace.json`，两个进程分别操作不同主根最终仍会重写同一文件。
-2. **生命周期固定为**：acquire lease → open domain → load records → publish scope →（运行）→ close domain → release lease。没有 lease 就绝不开 domain，因此不可能带着 stale snapshot grant。
+2. **生命周期固定为**：acquire lease → open domain → load records → publish scope →（运行）→ **排空在飞 mutation → close domain → release lease**。没有 lease 就绝不开 domain，因此不可能带着 stale snapshot grant。拆除顺序的上半截（排空）与下半截（close 先于 release）同样是不变量：lease 是本进程「这份介质归我」的唯一依据，因此它必须比本进程**最后一次写**活得更久——若在 `release` 之后、某个在飞 `table.put()` 落盘之前继任者就拿到 lease 并 open 了介质，它读到的快照会缺掉那次 mutation。
 3. **内核锁，沿用 session lease 的原则。** POSIX：`@deepseek-ai/node-addon-system/flock` 的 `tryLockExclusive(fd)`（`LOCK_EX | LOCK_NB`），并对 flock 的 inode 做「仍是路径上那个文件」的校验后重试。Windows：薄 named semaphore adapter（`Local\dsh-multi-root-registry-<sha256(canonicalPath)>`），逻辑与 `SessionWriteLease` 一致，本地实现、不深导入。无 TTL。
 4. **Fail closed。** Authority 状态是：
 
@@ -65,6 +65,16 @@ M3 把附加根登记进 `dsh-storage-domain` 的 `multi_root_workspace` domain�
 - `chains` 仍然只覆盖进程内、同一主根的 mutation；跨进程由 lease 负责。二者缺一不可。
 - 新增运行时依赖：`@deepseek-ai/node-addon-system`（POSIX flock）、`koffi`（Windows semaphore）。
 - 测试：`tests/registry-lease.spec.ts`（同进程双 stack 争用 / 接管）与 `tests/registry-multiprocess.e2e.ts`（两 OS 进程、干净退出、SIGKILL、durable 读回）。
+
+## 返工补充（2026-09-15，PR #1 评审）
+
+PR #1（head `507c954`）的 P1-1 指出：`releaseAuthority()` 先释放 lease、后 close domain，且既没走 authority 转场队列，也没与每主根 mutation 队列同步，于是有两个真实窗口——继任者在在飞 `table.put()` 落盘前拿到 lease 并 open 介质；以及一次与 disposal 重叠的在飞 acquisition（`refresh()` 已拿到 lease、正卡在 `openDomain()` 里）在拆除之后才完成，泄漏一个没人会关闭的 domain + lease。修复后，第 2 条的生命周期由以下三条不变量守住：
+
+1. **拆除整体走 authority 转场队列。** `MultiRootRegistry.releaseAuthority()` 的全部动作都在 `serializeAuthority` 里执行，与 acquisition（`ensureAuthority()`）共享同一条队列，因此拆除与竞选/接管**不交错**；与 disposal 重叠的那次在飞 acquisition 由**同一次**拆除收尾，不会留下没人关的 domain + lease。
+2. **顺序必须是「排空在飞 mutation → close domain → release lease」。** 先 fail closed（`table = undefined`、`authorityState = { kind: 'contended' }`）以拒绝新 mutation，再 `await this.drainMutations()`（`await Promise.allSettled([...this.chains.values()])`，等待每一条已入队/正在跑的每主根 mutation）→ `withdrawPublished()` → `domain.close()` → `lease.release()`。lease 必须比本进程最后一次写活得更久：继任者绝不会打开一份缺了最后一次写的快照。
+3. **disposer 一开始就置 `disposed`，之后不再 acquisition。** `releaseAuthority()` 第一件事是把新的 `private disposed` 字段设为 `true`；`ensureAuthority()` 的串行 job 首行是 `if (this.disposed) return`，因此已拆除的 fiber 不可能再打开一份新介质。
+
+两条新回归用例在 `tests/registry-lease.spec.ts` 的 `describe('authority teardown')`：一条用记录下的事件顺序断言 `put:end` 早于 `close`（且在拆除期间不发生 `close`），并确认拆除之后继任者能 acquire 到 lease；另一条让一次 acquisition 与 disposal 重叠，确认注册表停在 `contended`、store 可被继任者接管。
 
 ## Related Documents
 
