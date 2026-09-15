@@ -195,7 +195,7 @@ docs/             需求、架构、决策记录（ADR）、计划、开发工�
 
 ## 已知限制
 
-- 附加根只读**根目录顶层**的 `AGENTS.md` / `CLAUDE.md`；子目录里的 nested instructions 属第二期（H4 Phase 2，理由与恢复条件见 [ADR-0010](./docs/decisions/ADR-0010-additional-root-instruction-scope.md)）。主根与 user-global 的指令链仍由上游负责，本插件不重复注入。
+- 附加根的指令文件按需到达模型：根目录顶层的那一份在会话第一步之前注入，子目录里的那一份在本会话**成功**触碰过该目录之后注入；nested 文件只会在其目录被考察到时重新检查（根层每一步，子目录依赖已投递或有新触碰），投递状态是进程内的（resume 后可能再告知一次），也只识别 `read` / `write` / `edit` 三个工具名。主根与 user-global 的指令链仍由上游负责，本插件不重复注入（[ADR-0010](./docs/decisions/ADR-0010-additional-root-instruction-scope.md)）。
 - 跨进程单写者：同一 `$DSH_HOME` 上同时只允许一个 DSH 进程持有根登记表；另一个进程显示登记表不可用（`registry-contended`），持锁者退出或崩溃后刷新即接管——这是刻意的 fail-closed，不是待修的竞态（[ADR-0007](./docs/decisions/ADR-0007-registry-authority-lease.md)）。
 - 支持矩阵是精确版本 allowlist：宿主版本不在清单上、或核心包混装了不同版本时，`fs` / `sandbox` / `registry` / `instructions` 四行**不启动**，组合退化为"没装这个插件"（[ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)）。
 - Windows 的内核级多根未实现：`fs` 写路径覆盖附加根，但受限 bash/PTY 写不进去（非空 scope 时插件输出一次显式告警）；详见[需求文档](./docs/requirements/multi-root-workspace.md)第一期范围。

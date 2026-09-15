@@ -74,7 +74,7 @@ dsh-plugin-multi-root-workspace/
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
     config:
       leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
-  - id: multi-root-instructions                            # 已实现；附加根顶层的 AGENTS.md，见 §6.1
+  - id: multi-root-instructions                            # 已实现；附加根顶层与工作过的子目录的 AGENTS.md，见 §6.1
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/instructions'
     config:
       maxBytes: 65536
@@ -162,19 +162,19 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 - **单一权限世界（已实现）**：fs fence 与内核方言（sandbox provider）消费 §4 的同一份 `FilesystemScope`；bash 与 terminal/PTY 通过 `ctx.sandbox` 间接消费同一份，因此它们的根集合与 fs fence **由构造相同**。插件自带 **parity 矩阵测试**（接替上游 `writableRoots()` 测试的角色）：同一 scope 下，对「主根内 / 主根嵌套 / 附加根内 / 附加根嵌套 / 根外 / 共享词法前缀的兄弟目录 / 经附加根内符号链接逃逸 / 平台临时区」逐类比较 fs fence 的真实写判定与各方言 argv 的授予集合，并在两端模式（workspace-write / read-only）各跑一轮；解析 argv 的代码由测试侧独立实现。宿主能真正执行 runner 时（Linux CI 的 bwrap/Landlock、macOS 的 Seatbelt）另加真实受限执行用例，不能执行时显式 skip 并说明原因。
 - 已知不对称（上游既有，非插件引入）：bwrap 与 Landlock 只授予字面 `/tmp`，不授予 `tmpdir()`（调研 §10.3），因此 parity 断言的语义限定为「附加根集合与模式」；Windows 上内核级多根缺失，fs 可写而 bash 不可写（第一期已知限制）。
 
-### 6.1 附加根自己的指令文件（`multi-root-instructions`，H4 Phase 1 已实现）
+### 6.1 附加根自己的指令文件（`multi-root-instructions`，已实现）
 
-上游 `agent-instructions` 是从 session cwd **向上走**发现指令文件（外加一个 user-global 文件）。在多根工作区里这条上行路径永远到不了附加根，于是 `repo-b/AGENTS.md` 对一个**被允许写 `repo-b`** 的模型是不可见的。`multi-root-instructions` 只补这一个缺口；主根的链条与 user-global 文件仍然是上游的事。
+上游 `agent-instructions` 是从 session cwd **向上走**发现指令文件（外加一个 user-global 文件）。在多根工作区里这条上行路径永远到不了附加根，于是 `repo-b/AGENTS.md` 对一个**被允许写 `repo-b`** 的模型是不可见的；同理，`repo-b/src/AGENTS.md` 对一个刚在那个目录里读过文件的模型也不可见。`multi-root-instructions` 只补这一个缺口；主根（含其 nested 文件）的链条与 user-global 文件仍然是上游的事。
 
 三个刻意选择：
 
 1. **不是 system prompt 贡献**。指令文本是 producer-supplied context，不是 system authority，因此以 user-role 消息进入，标注 `{ kind: 'plugin', plugin: '@dsh-electron/dsh-plugin-multi-root-workspace', form: 'instructions' }` —— 这正是 DSH 自己的 message model 为它保留的位置。它也是唯一被记录的通道，而 model-visible 的内容必须被记录。
 2. **从 `agent/pre-step` 注入，而不是 session 生命周期事件**。`pre-step` 是 awaited waterfall，所以发现、读取、渲染都在它所服务的那一步**之前**确定性完成（含第一步）。同步的 prompt 回调无法 await，emit 模式的生命周期监听会与第一步竞争。它也是各受支持版本里形状完全一致的那个钩子，从而把这个特性挡在兼容矩阵之外。
-3. **发现被钉在根自身**。`cwd` 与 `projectRoot` 都取该附加根，随后每个候选还必须 canonical 地**位于**该根内部。这就是把 `$DSH_HOME/AGENTS.md`、主根的 `AGENTS.md`、以及任何祖先目录的文件挡在外面的机制——它们不会被本插件重复注入一遍。
+3. **发现被钉在根上**。`projectRoot` 始终是该附加根（上行走到根为止），`cwd` 是本次被考察的那个目录；随后每个候选还必须 canonical 地**位于**该根内部。这就是把 `$DSH_HOME/AGENTS.md`、主根（含其 nested 文件）、以及任何祖先目录的文件挡在外面的机制——它们不会被本插件重复注入一遍。
 
-其余机制：`maxBytes`（默认 65536，与上游指令行的默认预算一致）约束的是**整个附加根快照**，而不是每个根各一份预算，否则十个根会悄悄吃掉十倍 context；各根按 scope 顺序消耗。每个 session 按根记录已交付文本的摘要，内容不变就不再重复发送。根一旦离开 scope（移除 / 消失 / 被替换即 `redirected`），必须生成**显式撤销**文本——历史对话里原来的指令仍然存在，沉默不等于撤回。渲染经 `src/compat/agent-instructions.ts` 的 `renderInstructions(...)` 调用上游渲染器（该包在不同版本里改过导出名，且是 optional peer：不存在时本行贡献为空）。
+其余机制：被考察目录恰好三类——**根自身**（每一步都看，顶层文件的变化与消失因此总会被察觉）、**已投递 nested 文件所在目录**（不需要新触碰就能察觉变化与消失，与上游 reconcile 的语义一致）、以及本会话**成功**的 `read` / `write` / `edit` 触碰路径的**父目录**。触碰取自持久化的 `session/event`：`tool/call` 与其 `tool/result` 按 call id 配对，失败的调用从不使目录变得相关；因此本行不依赖 tool 层的包，也不使用 0.1.6 才有的 `SessionMessageProjection`。`maxBytes`（默认 65536，与上游指令行的默认预算一致）约束的是**整个附加根快照**，而不是每个根各一份预算，否则十个根会悄悄吃掉十倍 context；各根按 scope 顺序消耗，同一个根内部按「浅 → 深」渲染、同目录内保持 discovery 顺序，撤销与撤回文案不占预算。投递状态按 session、按 `(根, 相对目录, 文件名)` 记录**文件内容**的 SHA-256：内容不变不再发送，内容变化只重发那一个文件；已投递但在考察中消失的文件会被撤回（目录走查失败、或候选被体积/读取过滤掉，都不算消失）。根一旦离开 scope（移除 / 消失 / 被替换即 `redirected`），生成**显式撤销**文本——历史对话里原来的指令仍然存在，沉默不等于撤回。渲染经 `src/compat/agent-instructions.ts` 的 `renderInstructions(...)` 调用上游渲染器（该包在不同版本里改过导出名，且是 optional peer：不存在时本行贡献为空）；复用上游的**语义**，不复用它的非公开 helper。零附加根时该行一条消息都不注入，resume 语义与状态边界见 [ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)。
 
-**范围与分期**：本行只处理附加根**顶层**的那一份指令文件；子目录里的 nested instructions（H4 Phase 2）**本版不实现**，已登记进[需求文档 §4 第二期](../requirements/multi-root-workspace.md)。恢复的前置条件是先评估 0.1.6 起的 `SessionMessageProjection`，再决定如何复用上游的 touched-path reconcile 语义——理由是那属于 tool-result 投影语义，与顶层基线发现是两个不同的问题。范围、备选方案与后果见 [ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)。
+**边界**：主根（含子目录）的 nested 发现仍归上游 `agent-instructions`；本行只认 `read` / `write` / `edit` 三个工具名且只认成功的调用（`str_replace_editor` 一类不算）；投递状态是进程内的，不跨进程、不跨 resume。范围、备选方案与后果见 [ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)。
 
 ## 7. Root 管理与 UI（已实现，M3）
 

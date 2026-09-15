@@ -52,7 +52,7 @@ completed:
 ### Batch Numbering
 
 - **M1–M4** are the MVP roadmap milestones (M4 = the cross-process lease).
-- **H1–H4** are the `v0.1.1` hardening batch: H1 = M4, H2 = panel authority, H3 = the compatibility contract, H4 = additional-root instructions (Phase 1 done, Phase 2 belongs to the second phase).
+- **H1–H4** are the `v0.1.1` hardening batch: H1 = M4, H2 = panel authority, H3 = the compatibility contract, H4 = additional-root instructions (Phase 1 top-level and Phase 2 nested are both done).
 - Single source of truth: the [roadmap progress ledger](./active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Naming Convention

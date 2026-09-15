@@ -62,10 +62,11 @@ const EDITED_README = 'seed readme for repo-b\nedited by the agent through the a
  */
 const RULE_PRIMARY = 'house rule alpha: the primary repository is authoritative'
 const RULE_ADDITIONAL = 'house rule bravo: the other repository uses four-space indentation'
+const RULE_NESTED = 'house rule echo: the other repository\'s src directory uses two-space indentation'
 const RULE_USER_GLOBAL = 'house rule charlie: always explain the plan first'
 const RULE_ANCESTOR = 'house rule delta: this ancestor directory is not a workspace root'
-/** One scripted turn: five tool calls, then the closing assistant text. */
-const SCRIPT_LENGTH = 6
+/** One scripted turn: six tool calls, then the closing assistant text. */
+const SCRIPT_LENGTH = 7
 
 const home = resolveScratchHome(`journey-${process.pid}`)
 const fixtureRoot = join(REPO_ROOT, '.dsh-smoke', `journey-${process.pid}`)
@@ -223,6 +224,11 @@ async function startScriptedModel() {
   const requests = []
   const steps = []
   const calls = [
+    // A read INSIDE the additional root's `src/`: reaching that subdirectory is
+    // what makes its own AGENTS.md relevant to the NEXT step (H4 phase 2).
+    { name: 'read', arguments: { file_path: join(additionalRepo, 'src', 'entry.mjs') } },
+    // The write below needs the file to have been read first — the tool layer's
+    // own rule — so the README read stays exactly where it was.
     { name: 'read', arguments: { file_path: join(additionalRepo, 'README.md') } },
     { name: 'write', arguments: { file_path: join(additionalRepo, 'README.md'), content: EDITED_README } },
     { name: 'bash', arguments: { command: `git -C '${additionalRepo}' diff --stat`, description: 'Show the other repository diff' } },
@@ -474,6 +480,12 @@ try {
   mkdirSync(additionalRepo, { recursive: true })
   writeFileSync(join(additionalRepo, 'check.mjs'), 'console.log("repo-b check ok")\n')
   writeFileSync(join(additionalRepo, 'AGENTS.md'), `# other repository rules\n\n${RULE_ADDITIONAL}\n`)
+  // A subdirectory with its own instruction file, reached by the first scripted
+  // tool call: this is what H4 phase 2 has to make visible, and it must be
+  // committed state like everything else here so `git status` stays clean.
+  mkdirSync(join(additionalRepo, 'src'), { recursive: true })
+  writeFileSync(join(additionalRepo, 'src', 'AGENTS.md'), `# other src rules\n\n${RULE_NESTED}\n`)
+  writeFileSync(join(additionalRepo, 'src', 'entry.mjs'), 'export const entry = 1\n')
   seedRepo(additionalRepo, 'README.md', SEED_README)
   mkdirSync(outsideRoot, { recursive: true })
   writeFileSync(join(outsideRoot, 'keep.txt'), 'untouched\n')
@@ -540,6 +552,21 @@ try {
     check.equal(rolesCarrying(webFirstStep, RULE_ANCESTOR).length, 0, 'web: an ancestor of the additional root was not injected at all', webWire)
     check.contains(JSON.stringify(webFirstStep), canonical(additionalRepo), 'web: the instruction text names the root its rules belong to')
 
+    // The nested instruction journey. The first scripted call READS a file in
+    // the additional root's `src/`, so the subdirectory's own AGENTS.md becomes
+    // relevant exactly one step later — and is injected exactly once. Later
+    // requests repeat it because the whole log travels with every request, so
+    // "once" is counted WITHIN one request, not across them.
+    const webNested = webRequests.map(request => rolesCarrying(request, RULE_NESTED))
+    check.equal(webNested[0].length, 0, 'web: a nested instruction file is not injected before it is reached', webWire)
+    check.equal(webNested[1], ['user'], 'web: the touched directory\'s AGENTS.md reaches the model once, in the user role', JSON.stringify(webNested))
+    check.equal(
+      rolesCarrying(webRequests[webRequests.length - 1], RULE_NESTED),
+      ['user'],
+      'web: the nested instruction file sits in the final history exactly once, in the user role',
+      JSON.stringify(webNested),
+    )
+
     // ---- the one-shot composition --------------------------------------------
     await prepareProfile('headless')
     seedRegistryStore(primaryRepo)
@@ -575,6 +602,16 @@ try {
     check.equal(rolesCarrying(headlessFirstStep, RULE_PRIMARY).length, 1, 'headless: the primary root\'s AGENTS.md reached the model exactly once', headlessWire)
     check.equal(rolesCarrying(headlessFirstStep, RULE_USER_GLOBAL).length, 1, 'headless: the user-global AGENTS.md was not injected a second time', headlessWire)
     check.equal(rolesCarrying(headlessFirstStep, RULE_ANCESTOR).length, 0, 'headless: an ancestor of the additional root was not injected at all', headlessWire)
+
+    const headlessNested = headlessRequests.map(request => rolesCarrying(request, RULE_NESTED))
+    check.equal(headlessNested[0].length, 0, 'headless: a nested instruction file is not injected before it is reached', headlessWire)
+    check.equal(headlessNested[1], ['user'], 'headless: the touched directory\'s AGENTS.md reaches the model once, in the user role', JSON.stringify(headlessNested))
+    check.equal(
+      rolesCarrying(headlessRequests[headlessRequests.length - 1], RULE_NESTED),
+      ['user'],
+      'headless: the nested instruction file sits in the final history exactly once, in the user role',
+      JSON.stringify(headlessNested),
+    )
   } finally {
     process.chdir(originalCwd)
     delete process.env.DSH_PERMISSION_MODE

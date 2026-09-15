@@ -1,6 +1,6 @@
 # DSH 兼容性代码契约与 0.1.6-alpha.1 纳入
 
-> 编号口径：本计划是 `v0.1.1` 硬化批次的 **H3（兼容性契约）+ H4 Phase 1（附加根顶层指令）**；H4 Phase 2（nested instructions）见本文 §5b，**未实现**，属第二期。批次总账见[路线图](../active/2026-09-12-multi-root-workspace.md#进度总账)。
+> 编号口径：本计划是 `v0.1.1` 硬化批次的 **H3（兼容性契约）+ H4 Phase 1（附加根顶层指令）**；H4 Phase 2（nested instructions）在本计划实施时未做，方向记录在本文 §5b（**后续已按该方向实现**：触碰改从 `session/event` 取，因此不需要 `SessionMessageProjection`，见 [ADR-0010](../../decisions/ADR-0010-additional-root-instruction-scope.md)）。批次总账见[路线图](../active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## Goal
 
@@ -205,6 +205,8 @@ WeakMap<Session, Map<AdditionalRootId, InstructionState>>
 上游对 primary workspace 已经在做“tool result 成功 → 按 touched path 更新 nested instructions”。插件可以复用同一语义：tool result 成功 → 取 `file_path` → 判断属于哪个 additional root → 从 root 到 `dirname(file_path)` 发现 instruction → 与上次 signature 比较 → 有变化则在下一个 model step 前插入新的 `form=instructions` context。
 
 本次只做 Phase 1（顶层），Phase 2 单独排期，理由是它需要 tool-result 投影语义，而那一块在 0.1.6 引入了 `SessionMessageProjection`，需要独立评估。
+
+> 后续结果（2026-09-15）：Phase 2 已按本节方向实现，但**没有**使用 `SessionMessageProjection`——触碰改从两个受支持版本都有的 `session/event` 上取（`tool/call` + `tool/result` 按 call id 配对，只认成功的 `read` / `write` / `edit`），投递状态按 session 与 `(根, 相对目录, 文件名)` 记录文件内容摘要。语义与边界见 [ADR-0010](../../decisions/ADR-0010-additional-root-instruction-scope.md)，验收判据见[需求文档 §5 的 7.8](../../requirements/multi-root-workspace.md)，端到端证据在 `pnpm smoke:journey` 两条腿。
 
 ### 6. `scripts/check-dsh-compat.mjs`
 

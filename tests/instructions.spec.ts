@@ -15,7 +15,7 @@
  * `ctx.fs`, which are the real services here.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -68,6 +68,11 @@ interface World {
   decide: (claimed?: readonly UserMessage[]) => Promise<PreStepDecision>
   /** Replace the registered additional roots. */
   roots: (paths: readonly string[]) => void
+  /**
+   * Append one tool call and its result, exactly as the loop's session log
+   * would, so the row's touch recording sees a real event pair.
+   */
+  touch: (path: string, options?: { readonly failed?: boolean; readonly tool?: string }) => void
 }
 
 /**
@@ -117,10 +122,43 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
     )
   }
 
+  // The one cast in this suite: the row consumes the session log as a cordis
+  // event, and these events are hand-built here rather than by `Session.append`.
+  //
+  // Both carry seq 0 on purpose. They are NOT in the session log, and the
+  // mounted projection registry advances its cursor across that log — a seq the
+  // log does not contain makes it refuse to advance, while 0 is the value it
+  // treats as already reached, so injected events pass through untouched.
+  const emit = ctx.emit.bind(ctx) as unknown as (name: string, session: object, event: unknown) => void
+  const touch = (path: string, options: { readonly failed?: boolean; readonly tool?: string } = {}): void => {
+    const callId = `call-${counter += 1}`
+    const name = options.tool ?? 'read'
+    emit('session/event', session, {
+      type: 'tool/call',
+      seq: 0,
+      time: 0,
+      data: { turn: 1, step: 1, callId, name, arguments: JSON.stringify({ file_path: path }) },
+    })
+    emit('session/event', session, {
+      type: 'tool/result',
+      seq: 0,
+      time: 0,
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          source: { kind: 'tool', callId },
+          content: [{ type: 'tool-result', toolCallId: callId, content: [], isError: options.failed === true }],
+        },
+      },
+    })
+  }
+
   return {
     ctx,
     decide,
     roots: setRoots,
+    touch,
     step: async (claimed: readonly UserMessage[] = []) => {
       const decision = await decide(claimed)
       if (decision.kind !== 'enter') return undefined
@@ -327,6 +365,133 @@ describe('when a root leaves the workspace', () => {
   })
 })
 
+describe('nested instructions', () => {
+  /** A root with one top-level and one subdirectory instruction file. */
+  function seedNested(): void {
+    mkdirSync(join(repoB, 'src'), { recursive: true })
+    writeFileSync(join(repoB, 'AGENTS.md'), '# repo-b rules')
+    writeFileSync(join(repoB, 'src', 'AGENTS.md'), '# repo-b src rules')
+    writeFileSync(join(repoB, 'src', 'entry.mjs'), 'export {}\n')
+  }
+
+  it('injects a subdirectory\'s file only once a successful call has reached it', async () => {
+    seedNested()
+    const world = await mountWorld({}, [repoB])
+
+    const before = textOf(await world.step())
+    expect(before).toContain('# repo-b rules')
+    expect(before).not.toContain('# repo-b src rules')
+
+    world.touch(join(repoB, 'src', 'entry.mjs'))
+    const after = textOf(await world.step())
+    expect(after).toContain('# repo-b src rules')
+    expect(after).not.toContain('# repo-b rules')
+  })
+
+  it('does not re-send a nested file the model already has', async () => {
+    seedNested()
+    const world = await mountWorld({}, [repoB])
+    world.touch(join(repoB, 'src', 'entry.mjs'))
+    expect(textOf(await world.step())).toContain('# repo-b src rules')
+
+    world.touch(join(repoB, 'src', 'entry.mjs'))
+    expect(await world.step()).toBeUndefined()
+  })
+
+  it('re-sends a nested file whose content changed, without a new touch', async () => {
+    seedNested()
+    const world = await mountWorld({}, [repoB])
+    world.touch(join(repoB, 'src', 'entry.mjs'))
+    expect(textOf(await world.step())).toContain('# repo-b src rules')
+
+    writeFileSync(join(repoB, 'src', 'AGENTS.md'), '# repo-b src revised rules')
+    const revised = textOf(await world.step())
+    expect(revised).toContain('# repo-b src revised rules')
+    expect(revised).not.toContain('# repo-b src rules')
+  })
+
+  it('withdraws a nested file that disappeared, naming its absolute path', async () => {
+    seedNested()
+    writeFileSync(join(repoB, 'src', 'other.mjs'), 'other\n')
+    const world = await mountWorld({}, [repoB])
+    world.touch(join(repoB, 'src', 'entry.mjs'))
+    await world.step()
+
+    rmSync(join(repoB, 'src', 'AGENTS.md'))
+    world.touch(join(repoB, 'src', 'other.mjs'))
+    const text = textOf(await world.step())
+    expect(text).toContain('no longer apply')
+    expect(text).toContain(join(repoB, 'src', 'AGENTS.md'))
+  })
+
+  it('leaves a subdirectory alone when the session only touched the root', async () => {
+    seedNested()
+    const world = await mountWorld({}, [repoB])
+    await world.step()
+
+    world.touch(join(repoB, 'README.md'))
+    expect(textOf(await world.step())).not.toContain('# repo-b src rules')
+  })
+
+  it('ignores a touch outside every additional root, user-global and outside alike', async () => {
+    seedNested()
+    writeFileSync(join(dshHome, 'AGENTS.md'), '# user-global rules')
+    writeFileSync(join(fixture.outside, 'AGENTS.md'), '# outside rules')
+    const world = await mountWorld({}, [repoB])
+    await world.step()
+
+    world.touch(join(dshHome, 'AGENTS.md'))
+    world.touch(join(fixture.outside, 'AGENTS.md'))
+    expect(await world.step()).toBeUndefined()
+  })
+
+  it('ignores a touch whose tool call failed, and one made by a non-file tool', async () => {
+    seedNested()
+    const world = await mountWorld({}, [repoB])
+    // The root's own file is delivered before any touch, so what follows is only
+    // about the touches.
+    expect(textOf(await world.step())).toContain('# repo-b rules')
+
+    world.touch(join(repoB, 'src', 'entry.mjs'), { failed: true })
+    expect(await world.step()).toBeUndefined()
+
+    world.touch(join(repoB, 'src', 'entry.mjs'), { tool: 'bash' })
+    expect(await world.step()).toBeUndefined()
+  })
+
+  it('drops a delivered nested file when its root leaves the workspace', async () => {
+    seedNested()
+    const world = await mountWorld({}, [repoB])
+    world.touch(join(repoB, 'src', 'entry.mjs'))
+    await world.step()
+
+    world.roots([])
+    const text = textOf(await world.step())
+    expect(text).toContain(canonicalPath(repoB))
+    expect(text).toContain('no longer')
+    expect(text).not.toContain('# repo-b src rules')
+  })
+
+  it('stays a passthrough with no additional root, even after a touch', async () => {
+    writeFileSync(join(fixture.workspace, 'AGENTS.md'), '# primary rules')
+    const world = await mountWorld()
+    world.touch(join(fixture.workspace, 'AGENTS.md'))
+    expect(await world.step()).toBeUndefined()
+  })
+})
+
+describe('touchedPathOfToolCall', () => {
+  it('reads the path out of a raw call, and refuses everything else', () => {
+    expect(Instructions.touchedPathOfToolCall('read', '{"file_path":"/tmp/x"}')).toBe('/tmp/x')
+    expect(Instructions.touchedPathOfToolCall('write', '{"file_path":" /tmp/x "}')).toBe('/tmp/x')
+    expect(Instructions.touchedPathOfToolCall('bash', '{"file_path":"/tmp/x"}')).toBeUndefined()
+    expect(Instructions.touchedPathOfToolCall('read', 'not json')).toBeUndefined()
+    expect(Instructions.touchedPathOfToolCall('read', '{"file_path":"  "}')).toBeUndefined()
+    expect(Instructions.touchedPathOfToolCall('read', '{"file_path":7}')).toBeUndefined()
+    expect(Instructions.touchedPathOfToolCall('read', '{"content":"/tmp/x"}')).toBeUndefined()
+  })
+})
+
 describe('the byte budget', () => {
   it('is shared across every additional root rather than granted per root', async () => {
     const chunk = '# rules '.repeat(200)
@@ -336,8 +501,8 @@ describe('the byte budget', () => {
     const world = await mountWorld({ maxBytes }, [repoA, repoB])
 
     const text = textOf(await world.step())
-    const rendered = text.length - (Instructions.composeInstructionMessage([], [])?.length ?? 0)
-    expect(rendered).toBeGreaterThan(0)
+    const rendered = text.slice(text.indexOf('Instructions for additional workspace root'))
+    expect(rendered.length).toBeGreaterThan(0)
     // The framing sentence is this row's own; the rendered instruction payload
     // is what the budget bounds, and two roots must not each get `maxBytes`.
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThan(maxBytes * 2)
@@ -352,20 +517,31 @@ describe('the byte budget', () => {
 
 describe('composeInstructionMessage', () => {
   it('says nothing when there is nothing to add or retract', () => {
-    expect(Instructions.composeInstructionMessage([], [])).toBeUndefined()
+    expect(Instructions.composeInstructionMessage([], [], [])).toBeUndefined()
   })
 
   it('states that the roots are part of this workspace', () => {
-    const text = Instructions.composeInstructionMessage([{ root: '/r', text: 'rules', digest: 'd' }], [])
+    const text = Instructions.composeInstructionMessage([{ root: '/r', text: 'rules' }], [], [])
     expect(text).toContain('additional roots')
     expect(text).toContain('/r')
     expect(text).toContain('rules')
   })
 
   it('carries additions and retractions in one message', () => {
-    const text = Instructions.composeInstructionMessage([{ root: '/a', text: 'rules', digest: 'd' }], ['/b'])
+    const text = Instructions.composeInstructionMessage([{ root: '/a', text: 'rules' }], ['/b'], [])
     expect(text).toContain('/a')
     expect(text).toContain('/b')
     expect(text).toContain('no longer')
+  })
+
+  it('withdraws a removed file in the same message, in path order', () => {
+    const text = Instructions.composeInstructionMessage([], [], [
+      { root: '/r', path: '/r/z/AGENTS.md' },
+      { root: '/r', path: '/r/a/AGENTS.md' },
+    ])
+    expect(text).toContain('/r/a/AGENTS.md')
+    expect(text).toContain('/r/z/AGENTS.md')
+    expect(text?.indexOf('/r/a/AGENTS.md')).toBeLessThan(text?.indexOf('/r/z/AGENTS.md') ?? -1)
+    expect(text).toContain('no longer apply')
   })
 })
