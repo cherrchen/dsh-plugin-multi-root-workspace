@@ -41,6 +41,8 @@ export type {
 } from './compat/dsh-version.ts'
 export { instructionsApi, renderInstructions } from './compat/agent-instructions.ts'
 export type { InstructionsApi, RenderedInstructions } from './compat/agent-instructions.ts'
+export { createInstructionMessage } from './compat/llm-message.ts'
+export type { InstructionMessageInput } from './compat/llm-message.ts'
 export { widenConfined } from './compat/sandbox-confine.ts'
 export type { ConfineCall, UpstreamConfined } from './compat/sandbox-confine.ts'
 export { composeInstructionMessage, DEFAULT_MAX_BYTES, PLUGIN_SOURCE } from './instructions.ts'

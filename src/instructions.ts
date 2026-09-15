@@ -51,7 +51,6 @@ import { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { FileSystem } from '@deepseek-ai/dsh-fs'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
@@ -59,6 +58,7 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import type {} from './compat.ts'
 import { instructionsApi } from './compat/agent-instructions.ts'
 import type { InstructionFile, InstructionsApi, LoadedInstructionFile } from './compat/agent-instructions.ts'
+import { createInstructionMessage } from './compat/llm-message.ts'
 import { isCanonicallyUnder } from './roots.ts'
 import type {} from './scope.ts'
 
@@ -408,10 +408,7 @@ async function pending(
   states.set(session, state)
 
   if (text === undefined) return undefined
-  return createUserMessage({
-    content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: PLUGIN_SOURCE, form: 'instructions' },
-  })
+  return await createInstructionMessage({ text, plugin: PLUGIN_SOURCE })
 }
 
 /** A delivered file that vanished from a directory this step examined. */
