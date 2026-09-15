@@ -101,7 +101,7 @@ export function apply(ctx: ClientContext): void {
  * and the workspace UI service are composed by the surface, not by this
  * plugin, and neither is a dependency it may assume (the footer action exists
  * on surfaces where they do not). Absence is a supported state — the panel then
- * offers a manual path field and lets the host resolve the workspace root.
+ * shows "No active session" and does not ask the host to guess a workspace root.
  * @param ctx - the client context.
  * @param name - the service key to read.
  * @returns the service, or `undefined` when this composition has none.

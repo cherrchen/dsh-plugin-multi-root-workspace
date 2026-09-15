@@ -28,12 +28,11 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/command
  */
 
-import { statSync } from 'node:fs'
 import { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
-import { canonicalPath, type SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
+import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session'
@@ -55,7 +54,6 @@ import {
   availableRoots,
   canonicalRoot,
   entryRootRef,
-  expandRootInput,
   RootValidationError,
   resolveRootRef,
   type RootRef,
@@ -323,37 +321,30 @@ async function targetOf(
 }
 
 /**
- * Resolve the workspace root a panel request acts on.
+ * Derive the primary root a panel request may act on.
  *
- * A client-supplied `primaryRoot` is accepted — the browser is the operator's
- * own trusted client, and the panel names the root it displays — but it must be
- * an existing directory. Otherwise the session's immutable cwd, then the
- * deployment fallback, decides.
+ * The browser names a live session; the host looks that session up and uses
+ * its immutable cwd. There is no client-supplied path and no deployment-default
+ * fallback: a panel call without a real host session has no workspace to
+ * manage. Property access would demand an injected `sessions` dependency this
+ * row does not name, so the lookup stays an explicit sibling `get` (the same
+ * pattern as `directoryPicker` / `subprocess`).
+ *
+ * @param ctx - the host context that may carry `sessions`.
+ * @param sessionId - the id the panel sent; already required by the wire schema.
+ * @returns the canonical cwd of that session.
+ * @throws {RootValidationError} `session-not-found` when the service is absent,
+ *   the id does not name a live session, or that session has no cwd.
  */
-function primaryRootOf(ctx: Context, request: PanelCall): string {
-  if (request.primaryRoot !== undefined && request.primaryRoot !== '') {
-    const canonical = canonicalRoot(expandRootInput(request.primaryRoot))
-    let isDirectory = false
-    try {
-      isDirectory = statSync(canonical).isDirectory()
-    } catch {
-      isDirectory = false
-    }
-    if (!isDirectory) {
-      throw new RootValidationError('missing', `"${request.primaryRoot}" is not an existing directory`, {
-        reference: request.primaryRoot,
-      })
-    }
-    return canonical
+export function resolvePanelPrimaryRoot(ctx: Context, sessionId: string): string {
+  const session = ctx.get('sessions')?.get(sessionId as SessionId)
+  const cwd = session?.header.cwd
+  if (session === undefined || cwd === undefined || cwd === '') {
+    throw new RootValidationError('session-not-found', `session "${sessionId}" is not an active host session`, {
+      reference: sessionId,
+    })
   }
-  if (request.sessionId !== undefined && request.sessionId !== '') {
-    // Optional sibling service: property access requires an injected dependency.
-    // Use the explicit lookup, as for directoryPicker/subprocess below.
-    const cwd = ctx.get('sessions')?.get(request.sessionId as SessionId)?.header.cwd
-    if (cwd !== undefined && cwd !== '') return canonicalPath(cwd)
-  }
-  const policy: SandboxExecutionPolicy = ctx.sandboxPolicy.resolve()
-  return canonicalRoot(policy.workspaceRoot)
+  return canonicalPath(cwd)
 }
 
 /** Project one status into the panel's view. */
@@ -438,7 +429,7 @@ async function dispatchPanelRequest(
     }
     const request = parsed.value
     const registry = ctx.multiRootRegistry
-    const primaryRoot = primaryRootOf(ctx, request)
+    const primaryRoot = resolvePanelPrimaryRoot(ctx, request.sessionId)
     switch (request.endpoint) {
       case 'list':
         return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }

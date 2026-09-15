@@ -177,6 +177,8 @@ interface DialogState {
   readonly view: RootsView | undefined
   readonly error: PanelError | undefined
   readonly busy: boolean
+  /** True when the client has no current session and must not call the host. */
+  readonly noSession: boolean
 }
 
 function entryOf(root: RootView): RootEntryView {
@@ -198,7 +200,12 @@ function rowKey(root: RootView): string {
  */
 function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: () => void }): ReactNode {
   const { panel, t } = props
-  const [state, setState] = useState<DialogState>({ view: undefined, error: undefined, busy: false })
+  const [state, setState] = useState<DialogState>({
+    view: undefined,
+    error: undefined,
+    busy: false,
+    noSession: false,
+  })
   const [manualPath, setManualPath] = useState('')
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
@@ -213,9 +220,9 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     requestEpoch.current += 1
   }, [])
 
-  const requestBase = useCallback((): { sessionId?: string } => {
+  const requestBase = useCallback((): { sessionId: string } | undefined => {
     const current = props.sessionId?.()
-    return current === undefined ? {} : { sessionId: current }
+    return current === undefined || current === '' ? undefined : { sessionId: current }
   }, [props.sessionId])
 
   // The dialog is modal: it takes focus when it opens, Escape closes it, and
@@ -254,18 +261,28 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
 
   const refresh = useCallback(async () => {
     if (panel === undefined) {
-      setState({ view: undefined, error: new PanelError('unavailable', 'no connection'), busy: false })
+      setState({
+        view: undefined,
+        error: new PanelError('unavailable', 'no connection'),
+        busy: false,
+        noSession: false,
+      })
+      return
+    }
+    const base = requestBase()
+    if (base === undefined) {
+      setState({ view: undefined, error: undefined, busy: false, noSession: true })
       return
     }
     const epoch = ++requestEpoch.current
-    setState(previous => ({ ...previous, busy: true }))
+    setState(previous => ({ ...previous, busy: true, noSession: false }))
     try {
-      const view = await panel.call('list', requestBase())
+      const view = await panel.call('list', base)
       if (!mounted.current || epoch !== requestEpoch.current) return
-      setState({ view, error: undefined, busy: false })
+      setState({ view, error: undefined, busy: false, noSession: false })
     } catch (error: unknown) {
       if (!mounted.current || epoch !== requestEpoch.current) return
-      setState({ view: undefined, error: asPanelError(error), busy: false })
+      setState({ view: undefined, error: asPanelError(error), busy: false, noSession: false })
     }
   }, [panel, requestBase])
 
@@ -278,12 +295,17 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
    */
   const mutate = useCallback(async (endpoint: 'add' | 'remove' | 'alias' | 'move', payload: Record<string, unknown>): Promise<boolean> => {
     if (panel === undefined) return false
+    const base = requestBase()
+    if (base === undefined) {
+      setState({ view: undefined, error: undefined, busy: false, noSession: true })
+      return false
+    }
     const epoch = ++requestEpoch.current
-    setState(previous => ({ ...previous, busy: true }))
+    setState(previous => ({ ...previous, busy: true, noSession: false }))
     try {
-      const view = await panel.call(endpoint, { ...requestBase(), ...payload })
+      const view = await panel.call(endpoint, { ...base, ...payload })
       if (!mounted.current || epoch !== requestEpoch.current) return false
-      setState({ view, error: undefined, busy: false })
+      setState({ view, error: undefined, busy: false, noSession: false })
       return true
     } catch (error: unknown) {
       if (!mounted.current || epoch !== requestEpoch.current) return false
@@ -327,10 +349,15 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   /** Reveal one root: the answer is the revealed path, not a new view. */
   const reveal = useCallback(async (root: RootView) => {
     if (panel === undefined) return
+    const base = requestBase()
+    if (base === undefined) {
+      setState({ view: undefined, error: undefined, busy: false, noSession: true })
+      return
+    }
     const epoch = ++requestEpoch.current
-    setState(previous => ({ ...previous, busy: true }))
+    setState(previous => ({ ...previous, busy: true, noSession: false }))
     try {
-      await panel.call('reveal', { ...requestBase(), entry: entryOf(root) })
+      await panel.call('reveal', { ...base, entry: entryOf(root) })
       if (!mounted.current || epoch !== requestEpoch.current) return
       setState(previous => ({ ...previous, error: undefined, busy: false }))
     } catch (error: unknown) {
@@ -393,6 +420,10 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
           </button>
         </div>
         <div className="mrfw-body">
+          {state.noSession ? (
+            <p className="mrfw-note">{t('panel.noSession')}</p>
+          ) : (
+            <>
           <p className="mrfw-description">{t('panel.subtitle')}</p>
 
           {state.error === undefined ? null : (
@@ -510,9 +541,11 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
               </div>
             })}
           </section>
+            </>
+          )}
 
           <div className="mrfw-actions">
-            {props.pickDirectory === undefined ? null : (
+            {state.noSession || props.pickDirectory === undefined ? null : (
               <IconButton
                 variant="outline"
                 disabled={state.busy}
@@ -521,6 +554,8 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                 label={t('panel.add')}
               />
             )}
+            {state.noSession ? null : (
+              <>
             <input
               className="mrfw-input"
               value={manualPath}
@@ -531,6 +566,8 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
             <Action onClick={() => { void addManualPath() }} disabled={state.busy || manualPath.trim() === ''} variant="primary">
               {t('panel.addConfirm')}
             </Action>
+              </>
+            )}
             <Action onClick={() => { void refresh() }} disabled={state.busy} variant="outline">{t('panel.retry')}</Action>
           </div>
         </div>

@@ -13,20 +13,49 @@
  * whole public surface from a single specifier.
  *
  * The two facts worth remembering about this surface: a registration carries the
- * canonical directory it was GRANTED for (`recordedPath`), and the panel channel
- * has one declared response shape per endpoint (`PanelResponseMap`).
+ * canonical directory it was GRANTED for (`recordedPath`), the panel channel
+ * has one declared response shape per endpoint (`PanelResponseMap`), and the
+ * panel primary root is derived from a live host session — never named by the
+ * browser.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace
  */
 
+export { DshCompatUnsupportedError, MultiRootCompatService, assertSupportedInstallation } from './compat.ts'
+export {
+  classifyInstallation,
+  compatEnforcement,
+  CORE_PACKAGES,
+  OPTIONAL_CORE_PACKAGES,
+  readInstalledVersion,
+  REQUIRED_CORE_PACKAGES,
+  SUPPORTED_DSH_RELEASES,
+} from './compat/dsh-version.ts'
+export type {
+  CompatEnforcement,
+  CompatReport,
+  CompatVerdict,
+  InspectedPackage,
+  SupportedDshRelease,
+  VersionReader,
+} from './compat/dsh-version.ts'
+export { instructionsApi, renderInstructions } from './compat/agent-instructions.ts'
+export type { InstructionsApi, RenderedInstructions } from './compat/agent-instructions.ts'
+export { createInstructionMessage } from './compat/llm-message.ts'
+export type { InstructionMessageInput } from './compat/llm-message.ts'
+export { widenConfined } from './compat/sandbox-confine.ts'
+export type { ConfineCall, UpstreamConfined } from './compat/sandbox-confine.ts'
+export { composeInstructionMessage, DEFAULT_MAX_BYTES, PLUGIN_SOURCE } from './instructions.ts'
+export type { Config as InstructionsConfig } from './instructions.ts'
 export { MultiRootFileSystem } from './fs.ts'
 export type { Config as FileSystemConfig } from './fs.ts'
 export { MultiRootSandboxProvider } from './sandbox.ts'
 export type { Config as SandboxConfig } from './sandbox.ts'
 export { MultiRootScopeService, sanitizeAdditionalRoots, renderWorkspaceRootsContext } from './scope.ts'
 export type { AdditionalWorkspaceRoot, FilesystemScope } from './scope.ts'
-export { MultiRootRegistry, DOMAIN_NAME, MAX_ALIAS_LENGTH, multiRootDomainSpec } from './registry.ts'
-export type { AddRootInput, PersistedPrimaryRoot } from './registry.ts'
+export { MultiRootRegistry, DOMAIN_NAME, MAX_ALIAS_LENGTH, REGISTRY_CONTENDED_MESSAGE, multiRootDomainSpec } from './registry.ts'
+export type { AddRootInput, Config as RegistryConfig, PersistedPrimaryRoot, RegistryAuthorityState } from './registry.ts'
+export { RegistryAuthorityLease, RegistryLeaseContendedError } from './registry-lease.ts'
 export {
   availableRoots,
   canonicalRoot,
@@ -48,7 +77,7 @@ export type {
   RootStatus,
   RootValidationCode,
 } from './roots.ts'
-export { COMMAND_NAME, parseFoldersCommand, renderRootsReport, revealArgv } from './command.ts'
+export { COMMAND_NAME, parseFoldersCommand, renderRootsReport, resolvePanelPrimaryRoot, revealArgv } from './command.ts'
 export type { FoldersCommand } from './command.ts'
 export { PANEL_CHANNEL, PANEL_ENDPOINTS, parsePanelCall, parseRevealedView, parseRootsView } from './contract.ts'
 export type {

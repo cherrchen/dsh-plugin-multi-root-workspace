@@ -28,8 +28,8 @@ English: [README.en.md](./README.en.md)
 本项目只有一份架构文档，它同时承载**已实现部分（Current）**与**尚未实现部分（Target）**，边界在文档头部与各节内明确标注：
 
 - [multi-root-workspace.md](./multi-root-workspace.md) — Multi-root Workspace 的不改上游设计：provider 替换 + 子类化。
-  - 已实现（M1/M2）：§3 组合结构、§4 scope 解析、§5.1 fs provider、§5.2 不替换 `bash-sandbox`、§5.3 sandbox provider 的多根 grant、§6 拓扑快照与 parity 矩阵。
-  - 仍为 Target（M3）：§7 Root 注册表、校验、`/workspace-folders` 命令与 client 半部；§8 的长期形态（上游 seam）与 §9 附录为备忘。
+  - 已实现（M1/M2/M3/M4）：§3 组合结构、§4 scope 解析、§5 两个 provider、§6 拓扑快照与 parity 矩阵、§7 Root 注册表 / 命令 / 面板（主根由 session cwd 推导，ADR-0008） / 跨进程 Authority Lease。
+  - 仍为 Target：§8 的长期形态（上游 seam）与 §9 附录为备忘。
 
 ## 推荐命名
 

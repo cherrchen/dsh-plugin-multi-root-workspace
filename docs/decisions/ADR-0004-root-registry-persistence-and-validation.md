@@ -76,6 +76,8 @@ M3 要把"哪些目录是附加根"从测试注入变成用户可管理的持久
 ## Related Documents
 
 - [M3 开发计划](../plans/completed/2026-09-12-m3-root-registry-command-and-ui.md)
+- [ADR-0007 跨进程 Registry Authority Lease](./ADR-0007-registry-authority-lease.md)
+- [架构文档 §7](../architecture/multi-root-workspace.md)
 - [架构文档 §7](../architecture/multi-root-workspace.md)
 - [需求文档 §5/§15](../requirements/multi-root-workspace.md)
 - [ADR-0002 上游耦合策略](./ADR-0002-upstream-coupling-policy.md)

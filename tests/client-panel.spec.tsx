@@ -225,6 +225,32 @@ describe('the panel dialog', () => {
     expect(screen.getByText(`${NS}.state.missing`)).toBeTruthy()
   })
 
+  it('shows No active session and does not call the host when there is no current session', async () => {
+    const harness = mount()
+    harness.setSession(undefined)
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+
+    await waitFor(() => { expect(screen.getByText(`${NS}.panel.noSession`)).toBeTruthy() })
+    expect(harness.calls).toHaveLength(0)
+    expect(screen.queryByPlaceholderText(`${NS}.panel.addManual`)).toBeNull()
+    expect(screen.getByRole('button', { name: `${NS}.panel.retry` })).toBeTruthy()
+  })
+
+  it('calls the host after a session appears', async () => {
+    const harness = mount()
+    harness.setSession(undefined)
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText(`${NS}.panel.noSession`)).toBeTruthy() })
+
+    harness.setSession('session-1')
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
+
+    await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+    expect(harness.calls[0]?.payload).toEqual({ sessionId: 'session-1' })
+  })
+
   it('reads the current session again for each request', async () => {
     const harness = mount()
     renderPanel(harness)

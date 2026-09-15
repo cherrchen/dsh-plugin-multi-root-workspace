@@ -23,6 +23,8 @@ import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
+import { mountCompat } from './support/compat.ts'
+import { confined } from './support/confine.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -57,6 +59,7 @@ async function mountProvider(plugin: unknown, mode: SandboxPolicy['mode']): Prom
   )
   if (plugin === MultiRootSandboxProvider) {
     fibers.push(await ctx.plugin(MultiRootScopeService))
+    await mountCompat(ctx)
   }
   fibers.push(await ctx.plugin(plugin as never, {}))
   return ctx.sandbox as LocalSandboxProvider
@@ -77,8 +80,8 @@ describe('empty-root passthrough', () => {
         ours.internals = { ...internals }
 
         const argv = ['bash', '-c', 'echo hello']
-        const upstreamConfined = upstream.confine(argv, policy(mode))
-        const ourConfined = ours.confine(argv, policy(mode))
+        const upstreamConfined = await confined(upstream, argv, policy(mode))
+        const ourConfined = await confined(ours, argv, policy(mode))
 
         expect(ourConfined.argv).toEqual(upstreamConfined.argv)
         expect(ourConfined.enforcement).toBe(upstreamConfined.enforcement)
@@ -95,7 +98,8 @@ describe('empty-root passthrough', () => {
     ours.internals = { chain: ['bwrap'] }
 
     const argv = ['/bin/bash', '-i']
-    expect(ours.confine(argv, policy('workspace-write'))).toEqual(upstream.confine(argv, policy('workspace-write')))
+    expect(await confined(ours, argv, policy('workspace-write')))
+      .toEqual(await confined(upstream, argv, policy('workspace-write')))
   })
 
   it('honours the operator runnerCommand configuration like upstream', async () => {
@@ -104,15 +108,18 @@ describe('empty-root passthrough', () => {
       await ctx.plugin(SessionProjectionRegistry),
       await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace }),
       await ctx.plugin(MultiRootScopeService),
+    )
+    await mountCompat(ctx)
+    fibers.push(
       await ctx.plugin(MultiRootSandboxProvider, {
         runnerCommand: ['my-runner'],
         runnerFailureSignatures: ['my-runner: fatal'],
       }),
     )
-    const confined = ctx.sandbox.confine(['bash', '-c', 'true'], policy('workspace-write'))
-    expect(confined.argv[0]).toBe('my-runner')
-    const separator = confined.argv.indexOf('--')
+    const wrapped = await confined(ctx.sandbox, ['bash', '-c', 'true'], policy('workspace-write'))
+    expect(wrapped.argv[0]).toBe('my-runner')
+    const separator = wrapped.argv.indexOf('--')
     expect(separator).toBeGreaterThan(0)
-    expect(confined.argv.slice(separator + 1)).toEqual(['bash', '-c', 'true'])
+    expect(wrapped.argv.slice(separator + 1)).toEqual(['bash', '-c', 'true'])
   })
 })

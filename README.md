@@ -14,7 +14,11 @@ DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围�
 - **安全不降级**：多根授权走上游同款机制——进程内 fs fence + 内核级 runner（macOS Seatbelt / Linux bwrap / Landlock），fs 与 bash/PTY 共享同一条 scope；绝不退化为 danger-full-access 或提示词约束。
 - **不装就当不存在**：以 bundle patch 替换上游 `fs-sandbox` 与 `sandbox` 两行 provider；未配置附加根时行为与未装插件逐项一致，misconfiguration 一律响亮报错，从不静默降级。
 
-第一期（MVP）已完成并通过验收：M1 组合与空根直通、M2 多根能力与方言 grant、M3 根注册表 / `/workspace-folders` 命令 / Workspace Folders 面板 / 跨仓库旅程 e2e。证据见各[已完成计划](./docs/plans/README.md)。
+**已完成并发布：MVP `v0.1.0`（里程碑 M1–M3）**——组合与空根直通、多根能力与方言 grant、根注册表 / `/workspace-folders` 命令 / Workspace Folders 面板 / 跨仓库旅程 e2e。
+
+**已完成但尚未发版：`v0.1.1` 硬化批次（H1–H4）**——跨进程 Registry Authority Lease（两个 DSH 进程共用 `$DSH_HOME` 时只有持锁者授予附加根，另一方 fail-closed 并在对方退出后接管）、面板主根改为 host session 推导（不再接受客户端指名的根）、DSH 兼容性从文档约定变成**启动时执行的代码契约**（精确 allowlist + 混装检测 + `src/compat/` 适配层），以及**附加根顶层的 `AGENTS.md` / `CLAUDE.md` 进入模型上下文**——原生指令发现从会话 cwd 向上走，永远到不了附加根。
+
+进度、编号与发布状态的唯一真源是[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)（M1–M4 是 MVP 里程碑编号，H1–H4 是 `v0.1.1` 批次编号，其中 H1 即 M4）；逐项证据见各[已完成计划](./docs/plans/README.md)。
 
 ## 快速开始
 
@@ -37,11 +41,13 @@ dsh --profile web
 
 ## 环境要求
 
-- **使用已发布的插件**：只需要一个可用的 DSH 运行时（`0.1.5-rc.2` 及兼容版本），`dsh plugin` 会把包装进对应 profile，无需本地 Node 工具链
+- **使用已发布的插件**：需要一个受支持的 DSH 运行时 —— 当前是 **`0.1.5-rc.2` 与 `0.1.6-alpha.1`**，别的版本装不上也不会跑（见下）。`dsh plugin` 会把包装进对应 profile，无需本地 Node 工具链
 - **从源码构建 / 参与**：**Node.js** `^22.19.0 || >=24`（仓库 `engines` 钉住）、**Git**、**pnpm 11**（`packageManager` 钉 `pnpm@11.25.0`，建议经 corepack 启用）
-- **DSH 运行时 `0.1.5-rc.2`**（开发依赖精确 pin；升级流程见[开发工作流](./docs/development/plugin-development-workflow.md)）
+- **DSH 运行时**：开发依赖精确 pin 在 `0.1.5-rc.2`（受支持版本里的基线）；升级流程见[开发工作流](./docs/development/plugin-development-workflow.md)
 - **平台支持**：macOS（Seatbelt）与 Linux（bwrap 或 Landlock）内核级多根全量；Windows 仅 `fs` 写路径覆盖附加根（受限 bash/PTY 不含，见[已知限制](#已知限制第一期)）
-- 运行冒烟测试**不需要模型凭据**：e2e 的模型轮次由内联的脚本化 OpenAI 兼容端点提供
+- 运行冒烟测试**不需要模型凭据**：e2e 的模型轮次由内联的脚本化模型端点提供
+
+**受支持的 DSH 版本是一份精确清单，不是一个范围。** 因为本插件替换的是 `ctx.fs` 与 `ctx.sandbox`——安全边界本身——而它识别内核沙箱方言靠的是对具体上游版本实测出来的 argv 形状。所以 `peerDependencies` 只列真正跑过全套验证的版本，启动时也会再查一遍：宿主的版本不在清单上，或者若干个 `@deepseek-ai/dsh-*` 混装了不同版本，那么 fs / sandbox / registry / instructions 四行**不启动**，组合退化成"没装这个插件"，并打印一条说明。诊断办法见[故障排查：DSH 版本不在支持矩阵上](./docs/troubleshooting/unsupported-dsh-release.md)，理由见 [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)。
 
 ## 安装
 
@@ -115,7 +121,7 @@ dsh plugin --profile web add "$PWD"
 pnpm lint && pnpm typecheck   # 预期：0 警告 0 错误；两个 tsconfig 全部通过
 pnpm test                     # 预期：全部通过；本机没有的内核 runner 用例会显式 skip 并打印原因
 pnpm kernel:probe             # 预期：报告本机可用的内核 runner（seatbelt / bwrap / landlock）
-pnpm smoke                    # 预期：compose 34/34、behavior 99/99、journey 28/28
+pnpm smoke                    # 预期：compose 40/40、behavior 99/99、journey 43/43
 pnpm docs:check               # 预期：0 errors, 0 warnings
 ```
 
@@ -159,16 +165,21 @@ Writable additional roots: 2 of 2.
 src/
   roots.ts        纯规则层：canonical 化、冲突校验、登记状态分类（available/missing/redirected/invalid）
   registry.ts     根注册表：dsh-storage-domain 持久化，同一主根的变更在一条队列里串行
+  registry-lease.ts / registry-lease-win32.ts
+                  跨进程 Registry Authority：POSIX flock 与 Windows named semaphore（进程死亡由内核释放）
   scope.ts        ctx.multiRootScope：唯一的授权源，兼发模型可见的拓扑快照
   fs.ts           多根文件系统 provider（进程内 fence，子类自上游 LocalFileSystem）
   sandbox.ts      多根内核沙箱 provider（子类自上游 LocalSandboxProvider）
   dialects.ts     Seatbelt / bwrap / Landlock profile 的识别与附加 grant 拼装（不认识即响亮报错）
   containment.ts  路径包含判定（词法快速路径 + dev/ino 别名回退）
+  instructions.ts 附加根顶层 AGENTS.md / CLAUDE.md 的发现、预算与撤销（经 agent/pre-step 注入）
+  compat.ts       multi-root-compat 启动门禁（版本 allowlist 与混装判定）
+  compat/         版本差异适配层：dsh-version / sandbox-confine / agent-instructions
   command.ts      /workspace-folders 命令与面板 RPC 的 host 半部
   contract.ts     面板线协议（zod 双端校验，可内联进浏览器 bundle）
   client/         浏览器半部：侧栏动作、对话框、双语词典
-tests/            差分 parity、方言真实执行矩阵、契约往返、组件与 locale 门禁
-scripts/          冒烟（compose / behavior / journey）与文档、内核 runner 检查
+tests/            差分 parity、方言真实执行矩阵、契约往返、组件与 locale 门禁、跨进程 lease e2e、指令注入
+scripts/          冒烟（compose / behavior / journey）、文档与内核 runner 检查、兼容性契约检查、升级流程
 docs/             需求、架构、决策记录（ADR）、计划、开发工作流
 ```
 
@@ -176,19 +187,22 @@ docs/             需求、架构、决策记录（ADR）、计划、开发工�
 
 欢迎 Issue 与 PR：
 
-1. 先读 [`AGENTS.md`](./AGENTS.md)（仓库级规则）与[开发工作流](./docs/development/plugin-development-workflow.md)（环境、命令、双运行时矩阵、升级流程）。
+1. 先读 [`AGENTS.md`](./AGENTS.md)（仓库级规则）与[开发工作流](./docs/development/plugin-development-workflow.md)（环境、命令、运行时支持矩阵、升级流程）。
 2. 从 `main` 拉分支；提交信息遵循 conventional commits（`feat` / `fix` / `perf` / `refactor` + scope），参见现有历史。
 3. PR 前本地必须全部通过：`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm test`、`pnpm docs:check`、`pnpm smoke`（CI 按同序执行，先 build 后 test）。
 4. 影响行为的变更需同批更新 `docs/` 下的对应文档；README 保持中英双语同步；有取舍的工程决策请新增 ADR。
 5. 硬约束：**不修改上游仓库（deepseek-harness）任何包**；插件只做 out-of-tree 扩展。
 
-## 已知限制（第一期）
+## 已知限制
 
+- 附加根的指令文件按需到达模型：根目录顶层的那一份在会话第一步之前注入，子目录里的那一份在本会话**成功**触碰过该目录之后注入；nested 文件只会在其目录被考察到时重新检查（根层每一步，子目录依赖已投递或有新触碰），投递状态是进程内的（resume 后可能再告知一次），也只识别 `read` / `write` / `edit` 三个工具名。主根与 user-global 的指令链仍由上游负责，本插件不重复注入（[ADR-0010](./docs/decisions/ADR-0010-additional-root-instruction-scope.md)）。
+- 跨进程单写者：同一 `$DSH_HOME` 上同时只允许一个 DSH 进程持有根登记表；另一个进程显示登记表不可用（`registry-contended`），持锁者退出或崩溃后刷新即接管——这是刻意的 fail-closed，不是待修的竞态（[ADR-0007](./docs/decisions/ADR-0007-registry-authority-lease.md)）。
+- 支持矩阵是精确版本 allowlist：宿主版本不在清单上、或核心包混装了不同版本时，`fs` / `sandbox` / `registry` / `instructions` 四行**不启动**，组合退化为"没装这个插件"（[ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)）。
 - Windows 的内核级多根未实现：`fs` 写路径覆盖附加根，但受限 bash/PTY 写不进去（非空 scope 时插件输出一次显式告警）；详见[需求文档](./docs/requirements/multi-root-workspace.md)第一期范围。
 - 附加根与主根同权（无 per-root read-only）；附加根不能作为 bash/PTY 的默认工作目录（session cwd 语义不变）。
 - `workspace-files`（Client 文件树）仍只看主根。
 - 命令的输出文案为英文（host 侧没有活动语言信息），面板文案中英双语跟随界面语言。
-- Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：0.1.5 才有的 `sidebar.panellist`/`main` 插槽在已安装的 0.1.2 桌面运行时上不存在，这样做可以同时兼容两个运行时。
+- Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：`sidebar.footer.action` 是所有受支持版本都提供的插槽，而 `sidebar.panellist`/`main` 不是。
 
 ## 文档
 

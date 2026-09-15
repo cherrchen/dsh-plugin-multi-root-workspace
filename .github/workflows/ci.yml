@@ -39,6 +39,13 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      # Before anything else: the allowlist, peerDependencies, the development
+      # pin and the installed tree must agree. Every later step's result is only
+      # meaningful as evidence for a release the contract actually claims, so a
+      # drifted manifest is reported here rather than as a confusing test
+      # failure. See docs/decisions/ADR-0009-dsh-compat-contract.md.
+      - name: DSH compatibility contract
+        run: pnpm compat:check
       - name: Lint
         run: pnpm lint
       - name: Typecheck both faces
