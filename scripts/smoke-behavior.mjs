@@ -265,7 +265,11 @@ async function multiRootBattery(ctx) {
   // The HOST dialect's own profile, read without executing anything: this is the
   // assertion that still holds in a process that cannot nest a kernel sandbox.
   try {
-    const confined = ctx.sandbox.confine(['bash', '-c', 'true'], policy)
+    // `confine` is synchronous on some supported releases and asynchronous on
+    // others, so the result is always awaited: awaiting a plain value is a
+    // no-op, while reading a promise's `.argv` silently yields `undefined`
+    // (see src/compat/sandbox-confine.ts).
+    const confined = await ctx.sandbox.confine(['bash', '-c', 'true'], policy)
     results.set('the host dialect grants the additional root', String(
       confined.argv.some(argument => argument.includes(String(canonicalExtra))),
     ))

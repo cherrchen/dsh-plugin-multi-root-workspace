@@ -48,6 +48,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { defineDomain, domainTable, type KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
+import type {} from './compat.ts'
 import { RegistryAuthorityLease, RegistryLeaseContendedError } from './registry-lease.ts'
 import {
   additionalRootId,
@@ -155,7 +156,10 @@ export interface AddRootInput {
 
 /** The registry service: `ctx.multiRootRegistry`. */
 export class MultiRootRegistry extends Service {
-  static inject = ['storageDomain', 'multiRootScope']
+  // `multiRootCompat` is the compatibility gate, not a collaborator: this
+  // service is what decides which directories become writable roots, so it must
+  // not run on a release the contract has not verified (see src/compat.ts).
+  static inject = ['multiRootCompat', 'storageDomain', 'multiRootScope']
 
   /** Absolute lock path; absent means the row was composed without `leasePath`. */
   private readonly leasePath: string | undefined

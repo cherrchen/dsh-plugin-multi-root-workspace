@@ -29,10 +29,14 @@ const REPLACED = new Map([
   ['sandbox', '@deepseek-ai/dsh-sandbox-local'],
 ])
 const INSERTED = [
+  // The compatibility gate comes first: the rows below inject `multiRootCompat`,
+  // so a harness whose DSH release is not on the allowlist mounts none of them.
+  'multi-root-compat',
   'multi-root-fs',
   'multi-root-sandbox',
   'multi-root-scope',
   'multi-root-registry',
+  'multi-root-instructions',
   'multi-root-command',
   // The client-graph anchor: mounted at the bare package name so the web
   // client-module scan reads this package's `dsh.client` declaration.
@@ -99,7 +103,7 @@ try {
   const insertedIds = composed.rows
     .filter(row => typeof row?.id === 'string' && row.id.startsWith('multi-root-'))
     .map(row => row.id)
-  check.equal(insertedIds, INSERTED, 'exactly the six plugin rows were inserted')
+  check.equal(insertedIds, INSERTED, `exactly the ${INSERTED.length} plugin rows were inserted, in order`)
   for (const id of INSERTED) {
     const row = composedRows.get(id)
     check.ok(

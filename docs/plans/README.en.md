@@ -47,6 +47,7 @@ completed:
 - [2026-09-12-m3-root-registry-command-and-ui.md](./completed/2026-09-12-m3-root-registry-command-and-ui.md) — M3 development plan: the root registry and its persistence, the `/workspace-folders` command, the browser Folders panel, and the cross-repository journey e2e (implemented and verified 2026-09-12).
 - [2026-09-15-m4-registry-authority-lease.md](./completed/2026-09-15-m4-registry-authority-lease.md) — M4 development plan: the cross-process Registry Authority Lease (implemented 2026-09-15).
 - [2026-09-15-panel-session-derived-authority.md](./completed/2026-09-15-panel-session-derived-authority.md) — Panel primary root is derived from the host session: the client `primaryRoot` field is removed (2026-09-15).
+- [2026-09-15-dsh-compat-contract.md](./completed/2026-09-15-dsh-compat-contract.md) — DSH compatibility becomes a code contract enforced at startup rather than a documented agreement, bringing `0.1.6-alpha.1` and additional-root instruction injection in with it (2026-09-15).
 
 ## Naming Convention
 

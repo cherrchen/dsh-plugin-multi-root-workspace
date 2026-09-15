@@ -10,6 +10,10 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./compat": {
+      "types": "./lib/types/compat.d.ts",
+      "default": "./lib/compat.js"
+    },
     "./fs": {
       "types": "./lib/types/fs.d.ts",
       "default": "./lib/fs.js"
@@ -25,6 +29,10 @@
     "./registry": {
       "types": "./lib/types/registry.d.ts",
       "default": "./lib/registry.js"
+    },
+    "./instructions": {
+      "types": "./lib/types/instructions.d.ts",
+      "default": "./lib/instructions.js"
     },
     "./command": {
       "types": "./lib/types/command.d.ts",
@@ -56,6 +64,7 @@
     "build": "pnpm run build:types && pnpm run bundle",
     "build:types": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
     "bundle": "tsdown",
+    "compat:check": "node scripts/check-dsh-compat.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "kernel:probe": "node scripts/check-kernel-runner.mjs",
     "lint": "oxlint",
@@ -67,6 +76,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "verify:all": "pnpm lint && pnpm typecheck && pnpm build && pnpm kernel:probe && pnpm test && pnpm smoke",
     "prepare": "pnpm run bundle"
   },
   "engines": {
@@ -76,20 +86,52 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.1 <5.0.0",
-    "@deepseek-ai/dsh-client-connection": ">=0.1.2-alpha.4 <0.2.0",
-    "@deepseek-ai/dsh-commands": ">=0.1.2-alpha.4 <0.2.0",
-    "@deepseek-ai/dsh-fs": ">=0.1.2-alpha.4 <0.2.0",
-    "@deepseek-ai/dsh-fs-local": ">=0.1.2-alpha.4 <0.2.0",
-    "@deepseek-ai/dsh-sandbox": ">=0.1.2-alpha.4 <0.2.0",
-    "@deepseek-ai/dsh-sandbox-local": ">=0.1.2-alpha.4 <0.2.0",
-    "@deepseek-ai/dsh-sandbox-policy": ">=0.1.2-alpha.4 <0.2.0",
-    "@deepseek-ai/dsh-storage-domain": ">=0.1.2-alpha.4 <0.2.0",
-    "@deepseek-ai/dsh-subprocess": ">=0.1.2-alpha.4 <0.2.0"
+    "@deepseek-ai/dsh-agent": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-agent-instructions": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-client-connection": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-commands": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-fs": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-fs-local": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-sandbox": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-sandbox-local": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-sandbox-policy": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-session": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-storage-domain": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-subprocess": "0.1.5-rc.2 || 0.1.6-alpha.1",
+    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2 || 0.1.6-alpha.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-agent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent-instructions": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-connection": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-commands": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-subprocess": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-system-prompt": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/dsh": "0.1.5-rc.2",
     "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-instructions": "0.1.5-rc.2",
     "@deepseek-ai/dsh-app-boot": "0.1.5-rc.2",
     "@deepseek-ai/dsh-base": "0.1.5-rc.2",
     "@deepseek-ai/dsh-client-connection": "0.1.5-rc.2",
@@ -103,6 +145,7 @@
     "@deepseek-ai/dsh-fs": "0.1.5-rc.2",
     "@deepseek-ai/dsh-fs-local": "0.1.5-rc.2",
     "@deepseek-ai/dsh-fs-sandbox": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
     "@deepseek-ai/dsh-sandbox": "0.1.5-rc.2",
     "@deepseek-ai/dsh-sandbox-local": "0.1.5-rc.2",
     "@deepseek-ai/dsh-sandbox-policy": "0.1.5-rc.2",

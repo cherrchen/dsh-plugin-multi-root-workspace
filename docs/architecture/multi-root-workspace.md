@@ -3,7 +3,7 @@
 > 状态：**§4、§5.1、§5.3、§6、§7 均已实现（M1/M2/M3）；§7 的跨进程 Authority Lease 为 M4（ADR-0007）**。已实现部分可按当前仓库代码与各 completed 计划中的实施结果验证；§8 的长期演进形态、§9 的上游 seam 附录仍是设计。
 > 硬约束：不修改上游仓库（deepseek-harness）任何包；产物是外部 bundle，经 `dsh plugin add` 或 profile patch 组合。
 > 事实依据：[multi-root-workspace-research.md](../reference/multi-root-workspace-research.md)（§1-7 上游现状，§8 不改上游机制，§9 发布形态与运行时解析，§10 方言形状与子类可用面）；需求边界：[multi-root-workspace.md](../requirements/multi-root-workspace.md)；排期：[M1 计划](../plans/completed/2026-09-12-m1-composition-and-passthrough.md)、[M2 计划](../plans/completed/2026-09-12-m2-additional-roots-and-dialect-grants.md)
-> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)；M2 实施后 §5.3 与 §6 改写为已实现的机制（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；M3 实施后 §7 改写为已实现的机制（[ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)）。2026-09-15：§7 增加 store-wide Registry Authority Lease（[ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)）；面板主根改为 host session 推导（[ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)）。
+> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)；M2 实施后 §5.3 与 §6 改写为已实现的机制（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；M3 实施后 §7 改写为已实现的机制（[ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)）。2026-09-15：§7 增加 store-wide Registry Authority Lease（[ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)）；面板主根改为 host session 推导（[ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)）；§3 增加 `multi-root-compat` 启动门禁与 §6.1 附加根指令行（[ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)）。
 
 ## 1. 总览
 
@@ -16,7 +16,7 @@
         │ multi-root-workspace 外部 bundle（host+client） │
         │  root 注册表 / 校验 / UI / scope 解析            │
         └───────┬───────────────────────────────┬────────┘
-                │ systemPrompt.context（拓扑快照） │ patch: disable 上游 2 行 + insert 2 provider 行 + 1 服务行
+                │ systemPrompt.context（拓扑快照） │ patch: disable 上游 2 行 + insert 门禁/provider/服务/指令/命令各行
                 ▼                               ▼
    ctx.systemPrompt（上游）    MultiRootFileSystem          MultiRootSandboxProvider
                               (extends LocalFileSystem)    (extends LocalSandboxProvider)
@@ -60,21 +60,29 @@ dsh-plugin-multi-root-workspace/
 - id: sandbox             # 上游行 id（base patch :205）
   disabled: true
 - insert:
+  - id: multi-root-compat                                  # 已实现；启动门禁，见 ADR-0009
+    name: '@dsh-electron/dsh-plugin-multi-root-workspace/compat'
   - id: multi-root-fs
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
-    inject: [sandboxPolicy, multiRootScope]
+    inject: [multiRootCompat, sandboxPolicy, multiRootScope]
   - id: multi-root-sandbox
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
-    inject: [sandboxPolicy, multiRootScope]
+    inject: [multiRootCompat, sandboxPolicy, multiRootScope]
   - id: multi-root-scope
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/scope'
   - id: multi-root-registry                                # 已实现（M3）；lease 见 ADR-0007
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
     config:
       leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+  - id: multi-root-instructions                            # 已实现；附加根的 AGENTS.md，见 §5.4
+    name: '@dsh-electron/dsh-plugin-multi-root-workspace/instructions'
+    config:
+      maxBytes: 65536
   - id: multi-root-command                                 # 已实现（M3）
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
 ```
+
+`multi-root-compat` 是第一行，而且是**启动门禁而不只是诊断服务**：四个安全相关的行（`multi-root-fs`、`multi-root-sandbox`、`multi-root-registry`、`multi-root-instructions`）都 inject `multiRootCompat`，而 cordis 不会启动 injected service 缺失的行。所以当宿主的 DSH 版本不在精确 allowlist 上（或多个 `@deepseek-ai/dsh-*` 混装）时，这四行**根本不启动**，组合退化成"未安装本插件"，而不是"围栏可疑"。理由与判定顺序见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)。
 
 要点：上游 `sandbox-policy`、`bash-sandbox`、`tool-fs`、`tool-bash`、`terminal-bash` 行**全部不动**——它们继续向 `ctx.fs`/`ctx.shell`/`ctx.sandbox` 要能力。同 key 重复 provide 会抛错（调研 §8.2），所以 disable 必须先于 insert 生效（同一 patch 文档内顺序保证；并在插件 apply 期断言 `ctx.fs`/`ctx.sandbox` 是自己的实例，否则 fail loud）。`inject` 既可写在 patch 行上（patch 的任意键都会覆盖目标行），也可由子类的 `static inject` 提供——实现期二选一，不重复声明。
 
@@ -142,6 +150,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
      - **Windows ACL**：第一期不扩展（argv 里没有可追加的路径，授权按 workspace SID 进行），保持上游 wrap 并输出**一次**显式告警；fs fence 仍覆盖 Windows 写路径。
   5. 识别或克隆失败 ⇒ 抛 `SandboxUnavailableError`（fail closed），绝不退化为"只授予主根"的静默执行。
 - 三条不变量：空附加根或非 `workspace-write` 时**逐元素**返回 super 的结果；`enforcement` / `denialSignatures` / `runnerFailureRules` 原样透传（否则 bash 的 denial / enforcement 上报会失真）；只有 `argv` 可以变化。
+- **调用形状跨版本保形**：上游 `confine` 在不同受支持版本上分别是同步与异步的，因此整个覆盖走 `src/compat/sandbox-confine.ts` 的 `widenConfined()`：上游同步就同步返回，上游返回 promise 就返回 promise。绝不统一包成 promise——那会把 `ctx.sandbox.confine()` 对组合里每一个既有调用方（bash executor、PTY backend）变成 thenable，等于插件自己引入一次破坏性变更。见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md) 第 4 条。
 
 ### 5.4 上游 `sandbox-policy` 行不动
 
@@ -152,6 +161,18 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 - **拓扑注入（已实现）**：`MultiRootScopeService` 注册 `ctx.systemPrompt.context({ name: 'multi-root:scope', order: getContextOrder('SANDBOX_POLICY') + 1, … })`：workspace-write 且有附加根时输出一段稳定拓扑（只列根，不列文件，满足需求 §8），其中声明附加根属于同一 workspace 且 session cwd 不变；空根、`read-only`、以及没有 agent 的诊断装配下都不输出任何内容（空段被 `renderContextSections` 过滤，快照与未装插件逐字节相同）。注册是软依赖：宿主没有 `systemPrompt` seam 时不贡献拓扑也不报错。快照随请求落 model history（上游 `sandbox:policy` 同机制），满足 model-visible ⟺ logged。
 - **单一权限世界（已实现）**：fs fence 与内核方言（sandbox provider）消费 §4 的同一份 `FilesystemScope`；bash 与 terminal/PTY 通过 `ctx.sandbox` 间接消费同一份，因此它们的根集合与 fs fence **由构造相同**。插件自带 **parity 矩阵测试**（接替上游 `writableRoots()` 测试的角色）：同一 scope 下，对「主根内 / 主根嵌套 / 附加根内 / 附加根嵌套 / 根外 / 共享词法前缀的兄弟目录 / 经附加根内符号链接逃逸 / 平台临时区」逐类比较 fs fence 的真实写判定与各方言 argv 的授予集合，并在两端模式（workspace-write / read-only）各跑一轮；解析 argv 的代码由测试侧独立实现。宿主能真正执行 runner 时（Linux CI 的 bwrap/Landlock、macOS 的 Seatbelt）另加真实受限执行用例，不能执行时显式 skip 并说明原因。
 - 已知不对称（上游既有，非插件引入）：bwrap 与 Landlock 只授予字面 `/tmp`，不授予 `tmpdir()`（调研 §10.3），因此 parity 断言的语义限定为「附加根集合与模式」；Windows 上内核级多根缺失，fs 可写而 bash 不可写（第一期已知限制）。
+
+### 6.1 附加根自己的指令文件（`multi-root-instructions`，已实现）
+
+上游 `agent-instructions` 是从 session cwd **向上走**发现指令文件（外加一个 user-global 文件）。在多根工作区里这条上行路径永远到不了附加根，于是 `repo-b/AGENTS.md` 对一个**被允许写 `repo-b`** 的模型是不可见的。`multi-root-instructions` 只补这一个缺口；主根的链条与 user-global 文件仍然是上游的事。
+
+三个刻意选择：
+
+1. **不是 system prompt 贡献**。指令文本是 producer-supplied context，不是 system authority，因此以 user-role 消息进入，标注 `{ kind: 'plugin', plugin: '@dsh-electron/dsh-plugin-multi-root-workspace', form: 'instructions' }` —— 这正是 DSH 自己的 message model 为它保留的位置。它也是唯一被记录的通道，而 model-visible 的内容必须被记录。
+2. **从 `agent/pre-step` 注入，而不是 session 生命周期事件**。`pre-step` 是 awaited waterfall，所以发现、读取、渲染都在它所服务的那一步**之前**确定性完成（含第一步）。同步的 prompt 回调无法 await，emit 模式的生命周期监听会与第一步竞争。它也是各受支持版本里形状完全一致的那个钩子，从而把这个特性挡在兼容矩阵之外。
+3. **发现被钉在根自身**。`cwd` 与 `projectRoot` 都取该附加根，随后每个候选还必须 canonical 地**位于**该根内部。这就是把 `$DSH_HOME/AGENTS.md`、主根的 `AGENTS.md`、以及任何祖先目录的文件挡在外面的机制——它们不会被本插件重复注入一遍。
+
+其余机制：`maxBytes`（默认 65536，与上游指令行的默认预算一致）约束的是**整个附加根快照**，而不是每个根各一份预算，否则十个根会悄悄吃掉十倍 context；各根按 scope 顺序消耗。每个 session 按根记录已交付文本的摘要，内容不变就不再重复发送。根一旦离开 scope（移除 / 消失 / 被替换即 `redirected`），必须生成**显式撤销**文本——历史对话里原来的指令仍然存在，沉默不等于撤回。渲染经 `src/compat/agent-instructions.ts` 的 `renderInstructions(...)` 调用上游渲染器（该包在不同版本里改过导出名，且是 optional peer：不存在时本行贡献为空）。
 
 ## 7. Root 管理与 UI（已实现，M3）
 

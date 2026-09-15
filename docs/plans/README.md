@@ -47,6 +47,7 @@ completed：
 - [2026-09-12-m3-root-registry-command-and-ui.md](./completed/2026-09-12-m3-root-registry-command-and-ui.md) — M3 开发计划：root 注册表与持久化、`/workspace-folders` 命令、浏览器 Folders 面板、跨 repo 旅程 e2e（2026-09-12 实施完成并验证）。
 - [2026-09-15-m4-registry-authority-lease.md](./completed/2026-09-15-m4-registry-authority-lease.md) — M4 开发计划：跨进程 Registry Authority Lease（2026-09-15 实施完成）。
 - [2026-09-15-panel-session-derived-authority.md](./completed/2026-09-15-panel-session-derived-authority.md) — 面板主根改为 host session 推导：删除客户端 `primaryRoot`（2026-09-15）。
+- [2026-09-15-dsh-compat-contract.md](./completed/2026-09-15-dsh-compat-contract.md) — DSH 兼容性从文档约定变成启动时执行的代码契约，并把 `0.1.6-alpha.1` 与附加根指令注入一并纳入（2026-09-15）。
 
 ## 推荐命名
 

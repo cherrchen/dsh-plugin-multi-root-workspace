@@ -14,7 +14,7 @@ Three things make this plugin worth looking at:
 - **Security does not degrade**: the additional roots are granted through the same mechanisms the harness already uses — the in-process fs fence plus kernel-level runners (Seatbelt on macOS, bwrap / Landlock on Linux) — with the fs side and bash/PTY sharing one and the same scope. It never degenerates into danger-full-access or prompt-level constraints.
 - **Absent when absent**: it replaces the upstream `fs-sandbox` and `sandbox` provider rows through a bundle patch; with no additional root configured its behavior is item-for-item identical to an uninstalled harness, and every misconfiguration fails loudly instead of silently degrading.
 
-The first release (MVP) is complete and accepted: M1 composition and empty-root pass-through, M2 multi-root capability and dialect grants, M3 root registry / the `/workspace-folders` command / the Workspace Folders panel / a cross-repository journey e2e. Evidence lives in the [completed plans](./docs/plans/README.md).
+The first release (MVP) is complete and accepted: M1 composition and empty-root pass-through, M2 multi-root capability and dialect grants, M3 root registry / the `/workspace-folders` command / the Workspace Folders panel / a cross-repository journey e2e. Two things landed after it: DSH compatibility became a **code contract enforced at startup** (an exact allowlist, mixed-install detection, and an adapter layer) rather than a documented agreement, and **an additional root's own `AGENTS.md` / `CLAUDE.md` now reaches the model** — native instruction discovery walks upward from the session cwd, so it can never reach an additional root. Evidence lives in the [completed plans](./docs/plans/README.md).
 
 ## Quick Start
 
@@ -35,11 +35,13 @@ The agent can now read, write, and run bash in that directory, with the same rig
 
 ## Requirements
 
-- **Using the published plugin**: a working DSH runtime (`0.1.5-rc.2` or compatible) is all you need — `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
+- **Using the published plugin**: you need a *supported* DSH runtime — currently **`0.1.5-rc.2` and `0.1.6-alpha.1`**, and nothing else will install or run (see below). `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
 - **Building from source / contributing**: **Node.js** `^22.19.0 || >=24` (pinned by the repository's `engines`), **Git**, and **pnpm 11** (`packageManager` pins `pnpm@11.25.0`; corepack recommended)
-- **DSH runtime `0.1.5-rc.2`** (exact dev pin; the upgrade procedure lives in the [development workflow](./docs/development/plugin-development-workflow.md))
+- **DSH runtime**: the dev pin is exactly `0.1.5-rc.2`, the baseline among the supported releases; the upgrade procedure lives in the [development workflow](./docs/development/plugin-development-workflow.md)
 - **Platforms**: kernel-level multi-root is complete on macOS (Seatbelt) and Linux (bwrap or Landlock); on Windows only the `fs` write path covers additional roots (confined bash/PTY does not — see [known limitations](#known-limitations-first-release))
-- Running the smoke tests needs **no model credentials**: the e2e model turns are served by an inline scripted OpenAI-compatible endpoint
+- Running the smoke tests needs **no model credentials**: the e2e model turns are served by an inline scripted model endpoint
+
+**The supported DSH versions are an exact list, not a range.** This plugin replaces `ctx.fs` and `ctx.sandbox` — the security boundary itself — and it recognizes kernel sandbox dialects from argv shapes measured against specific upstream releases. So `peerDependencies` names only the releases that have actually been through the full verification, and startup checks again: if the host's release is not on the list, or several `@deepseek-ai/dsh-*` packages disagree about which release they are, the fs / sandbox / registry / instructions rows **do not start**, the composition degrades to "this plugin is not installed", and one explanatory line is logged. To diagnose, see [troubleshooting: unsupported DSH release](./docs/troubleshooting/unsupported-dsh-release.md); for the reasoning, [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md).
 
 ## Installation
 
@@ -186,7 +188,8 @@ Issues and PRs are welcome:
 - An additional root has the same rights as the primary root (no per-root read-only), and cannot become the default working directory of bash/PTY (session cwd semantics are unchanged).
 - The `workspace-files` client file tree still sees the primary root only.
 - The command's own output text is English (a host-side handler has no active locale to consult); the panel is bilingual.
-- The Workspace Folders panel is a sidebar footer action plus a dialog rather than a full panel: the `sidebar.panellist` / `main` slots exist only in 0.1.5, while the installed 0.1.2 desktop runtime has neither, and one implementation keeps both runtimes supported.
+- The Workspace Folders panel is a sidebar footer action plus a dialog rather than a full panel: `sidebar.footer.action` is offered by every supported release, whereas `sidebar.panellist` / `main` are not.
+- An additional root's `AGENTS.md` / `CLAUDE.md` is read **only at the root's top level**; nested instructions in subdirectories are a second-phase feature. The primary root's chain and the user-global file remain upstream's job, and this plugin does not inject them a second time.
 
 ## Documentation
 

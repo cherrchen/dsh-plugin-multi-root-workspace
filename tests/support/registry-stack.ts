@@ -18,6 +18,7 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import MultiRootRegistry, { DOMAIN_NAME } from '../../src/registry.ts'
 import MultiRootScopeService from '../../src/scope.ts'
+import { mountCompat } from './compat.ts'
 
 /** One mounted stack, with everything a spec needs to act on it. */
 export interface RegistryStack {
@@ -49,6 +50,9 @@ export async function mountRegistryStack(storeRoot: string): Promise<RegistrySta
   ctx.storage.mount('domain', facility)
   ctx.provide('storageDomain', facility)
   await ctx.plugin(MultiRootScopeService)
+  // The registry injects the compatibility gate, so a stack without it would
+  // silently never start the service under test (see src/compat.ts).
+  await mountCompat(ctx)
   await ctx.plugin(MultiRootRegistry, { leasePath: `${storeRoot}/${DOMAIN_NAME}.lock` })
   return {
     ctx,

@@ -35,6 +35,7 @@ import type { Config as LocalConfig } from '@deepseek-ai/dsh-fs-local'
 import { writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type {} from './compat.ts'
 import { isPathUnder } from './containment.ts'
 import type { FilesystemScope } from './scope.ts'
 
@@ -48,7 +49,10 @@ export type Config = LocalConfig
  * roots.
  */
 export class MultiRootFileSystem extends LocalFileSystem {
-  static inject = ['sandboxPolicy', 'multiRootScope']
+  // `multiRootCompat` is the compatibility gate, not a collaborator: this class
+  // widens the upstream write fence, so it must not run on a release the
+  // contract has not verified (see src/compat.ts).
+  static inject = ['multiRootCompat', 'sandboxPolicy', 'multiRootScope']
 
   private readonly defaultMode: SandboxMode
 

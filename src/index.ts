@@ -21,6 +21,30 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace
  */
 
+export { DshCompatUnsupportedError, MultiRootCompatService, assertSupportedInstallation } from './compat.ts'
+export {
+  classifyInstallation,
+  compatEnforcement,
+  CORE_PACKAGES,
+  OPTIONAL_CORE_PACKAGES,
+  readInstalledVersion,
+  REQUIRED_CORE_PACKAGES,
+  SUPPORTED_DSH_RELEASES,
+} from './compat/dsh-version.ts'
+export type {
+  CompatEnforcement,
+  CompatReport,
+  CompatVerdict,
+  InspectedPackage,
+  SupportedDshRelease,
+  VersionReader,
+} from './compat/dsh-version.ts'
+export { instructionsApi, renderInstructions } from './compat/agent-instructions.ts'
+export type { InstructionsApi, RenderedInstructions } from './compat/agent-instructions.ts'
+export { widenConfined } from './compat/sandbox-confine.ts'
+export type { ConfineCall, UpstreamConfined } from './compat/sandbox-confine.ts'
+export { composeInstructionMessage, DEFAULT_MAX_BYTES, PLUGIN_SOURCE } from './instructions.ts'
+export type { Config as InstructionsConfig } from './instructions.ts'
 export { MultiRootFileSystem } from './fs.ts'
 export type { Config as FileSystemConfig } from './fs.ts'
 export { MultiRootSandboxProvider } from './sandbox.ts'

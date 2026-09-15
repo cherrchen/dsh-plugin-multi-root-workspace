@@ -32,6 +32,12 @@
 - id: sandbox
   disabled: true
 - insert:
+    # The compatibility gate comes first, and every security-relevant row below
+    # injects `multiRootCompat`. If the installed DSH release is not on this
+    # plugin's allowlist, this row throws and none of them start, rather than
+    # widening a sandbox profile whose shape was never verified (ADR-0009).
+    - id: multi-root-compat
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/compat'
     - id: multi-root-fs
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
     - id: multi-root-sandbox
@@ -44,6 +50,15 @@
         # Store-wide kernel lease beside the JSON domain document. A custom
         # storage-json.root must override this path in lockstep (ADR-0007).
         leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+    # Upstream `agent-instructions` only discovers instruction files from the
+    # session cwd upward, so an additional root's own AGENTS.md is invisible to
+    # the model. This row closes that gap for the additional roots only; the
+    # primary root and the user-global file stay upstream's. The budget is the
+    # total for ALL additional roots, not per root.
+    - id: multi-root-instructions
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/instructions'
+      config:
+        maxBytes: 65536
     - id: multi-root-command
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
     - id: multi-root-client

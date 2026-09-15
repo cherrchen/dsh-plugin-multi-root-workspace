@@ -114,15 +114,26 @@ describe('provider replacement rows', () => {
 describe('inserted rows', () => {
   const inserted = patchRows.flatMap(row => row.insert ?? [])
 
-  it('inserts the scope service, the two providers, the registry, the user surface, and the client-graph anchor', () => {
+  it('inserts the compat gate, the scope service, the two providers, the registry, the instruction provider, the user surface, and the client-graph anchor', () => {
     expect(inserted.map(row => row.id)).toEqual([
+      'multi-root-compat',
       'multi-root-fs',
       'multi-root-sandbox',
       'multi-root-scope',
       'multi-root-registry',
+      'multi-root-instructions',
       'multi-root-command',
       'multi-root-client',
     ])
+  })
+
+  it('places the compat gate before every row that injects it', () => {
+    const ids = inserted.map(row => row.id)
+    const gate = ids.indexOf('multi-root-compat')
+    expect(gate).toBe(0)
+    for (const gated of ['multi-root-fs', 'multi-root-sandbox', 'multi-root-registry', 'multi-root-instructions']) {
+      expect(ids.indexOf(gated), `${gated} must come after the gate`).toBeGreaterThan(gate)
+    }
   })
 
   it('names entries that this package actually exports', () => {

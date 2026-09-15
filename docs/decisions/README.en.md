@@ -26,6 +26,7 @@ Architecture Decision Records (ADRs), capturing important architecture and engin
 - [ADR-0006-client-ui-host-tokens.md](./ADR-0006-client-ui-host-tokens.md) — The client UI replicates the host's native look: an injected stylesheet consuming the host's `--dsw-*` tokens, zero hardcoded colors in the plugin (Accepted).
 - [ADR-0007-registry-authority-lease.md](./ADR-0007-registry-authority-lease.md) — Cross-process Registry Authority: a store-wide kernel lease, fail-closed on contention, takeover via `refresh()` (Accepted).
 - [ADR-0008-panel-session-derived-authority.md](./ADR-0008-panel-session-derived-authority.md) — Panel primary root is derived from the host session cwd: no client `primaryRoot`, every endpoint requires a live `sessionId` (Accepted).
+- [ADR-0009-dsh-compat-contract.md](./ADR-0009-dsh-compat-contract.md) — DSH compatibility as a code contract: an exact-version allowlist, the `multi-root-compat` startup gate, mixed installations failing loudly, the `src/compat/` adapter layer, and a weekly upgrade lane that never widens the matrix by itself (Accepted).
 
 Do not pre-create empty ADR files; add one only when a real decision is made.
 

@@ -43,6 +43,8 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MultiRootFileSystem } from '../src/fs.ts'
 import { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
+import { mountCompat } from './support/compat.ts'
+import { confined } from './support/confine.ts'
 import { allowsWrite, parseConfined, runConfined } from './support/dialect-grants.ts'
 import { requireKernelRunner } from './support/kernel-runner.ts'
 import { symlinkUnsupportedReason } from './support/temp-workspace.ts'
@@ -106,8 +108,9 @@ async function mountWorld(dialect: Dialect): Promise<World> {
     await ctx.plugin(SessionProjectionRegistry),
     await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace }),
     await ctx.plugin(MultiRootScopeService),
-    await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace }),
   )
+  await mountCompat(ctx)
+  fibers.push(await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace }))
   ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{
     id: 'extra',
     path: fixture.outside,
@@ -131,9 +134,9 @@ async function fenceVerdict(world: World, policy: SandboxPolicy, target: FsTarge
 }
 
 /** What the kernel dialect profile grants for the same canonical path. */
-function dialectVerdict(world: World, policy: SandboxPolicy, canonical: string): 'allow' | 'deny' {
-  const confined = world.provider.confine(COMMAND, policy)
-  return allowsWrite(parseConfined(confined.argv, COMMAND), canonical) ? 'allow' : 'deny'
+async function dialectVerdict(world: World, policy: SandboxPolicy, canonical: string): Promise<'allow' | 'deny'> {
+  const wrapped = await confined(world.provider, COMMAND, policy)
+  return allowsWrite(parseConfined(wrapped.argv, COMMAND), canonical) ? 'allow' : 'deny'
 }
 
 interface MatrixCase {
@@ -183,7 +186,7 @@ describe('the fs fence and every kernel dialect agree on one scope', () => {
         if (entry.needsSymlink === true && symlinkReason !== undefined) continue
         const target = await world.ctx.fs.resolve(entry.path)
         const fence = await fenceVerdict(world, policy, target)
-        const dialectAnswer = dialectVerdict(world, policy, String(target.targetKey))
+        const dialectAnswer = await dialectVerdict(world, policy, String(target.targetKey))
         expect(fence, `${entry.name}: fs fence`).toBe(entry.expected)
         expect(dialectAnswer, `${entry.name}: ${dialect} grant`).toBe(entry.expected)
         expect(dialectAnswer, `${entry.name}: fs fence vs ${dialect}`).toBe(fence)
@@ -199,7 +202,7 @@ describe('the fs fence and every kernel dialect agree on one scope', () => {
         // must deny the mutation regardless.
         if (!existsSync(entry.path)) await writeFile(entry.path, 'existing')
         const fence = await fenceVerdict(world, policy, target)
-        const dialectAnswer = dialectVerdict(world, policy, String(target.targetKey))
+        const dialectAnswer = await dialectVerdict(world, policy, String(target.targetKey))
         expect(fence, `${entry.name}: fs fence`).toBe('deny')
         expect(dialectAnswer, `${entry.name}: ${dialect} grant`).toBe('deny')
       }
@@ -209,7 +212,8 @@ describe('the fs fence and every kernel dialect agree on one scope', () => {
   it('never grants a root the scope does not carry, in any dialect', async () => {
     for (const dialect of DIALECTS) {
       const world = await mountWorld(dialect)
-      const grants = parseConfined(world.provider.confine(COMMAND, { mode: 'workspace-write', workspaceRoot: fixture.workspace }).argv, COMMAND)
+      const wrapped = await confined(world.provider, COMMAND, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      const grants = parseConfined(wrapped.argv, COMMAND)
       expect(grants.subpaths, dialect).toContain(fixture.outside)
       expect(grants.subpaths, dialect).not.toContain(siblings.third)
       expect(grants.subpaths, dialect).not.toContain(siblings.shared)
@@ -225,7 +229,7 @@ describe('real confined execution of the widened profile', () => {
       const inside = join(fixture.outside, 'confined-inside.txt')
       const outside = join(siblings.third, 'confined-outside.txt')
 
-      const writeInside = runConfined(world.provider.confine(['bash', '-c', `echo payload > ${JSON.stringify(inside)}`], policy), fixture.workspace)
+      const writeInside = runConfined(await confined(world.provider, ['bash', '-c', `echo payload > ${JSON.stringify(inside)}`], policy), fixture.workspace)
       if (writeInside.kind === 'unavailable' || writeInside.kind === 'runner-failed') {
         // Skipping is only allowed when this DIALECT is not required for this
         // run (see tests/support/kernel-runner.ts): a host that can confine with
@@ -236,7 +240,7 @@ describe('real confined execution of the widened profile', () => {
       expect(writeInside.kind, `write into the additional root: ${writeInside.kind === 'denied' ? writeInside.detail : ''}`).toBe('ok')
       expect(existsSync(inside)).toBe(true)
 
-      const writeOutside = runConfined(world.provider.confine(['bash', '-c', `echo payload > ${JSON.stringify(outside)}`], policy), fixture.workspace)
+      const writeOutside = runConfined(await confined(world.provider, ['bash', '-c', `echo payload > ${JSON.stringify(outside)}`], policy), fixture.workspace)
       expect(writeOutside.kind, 'write outside every root must be denied').toBe('denied')
       expect(existsSync(outside)).toBe(false)
     })

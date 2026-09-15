@@ -14,7 +14,7 @@ DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围�
 - **安全不降级**：多根授权走上游同款机制——进程内 fs fence + 内核级 runner（macOS Seatbelt / Linux bwrap / Landlock），fs 与 bash/PTY 共享同一条 scope；绝不退化为 danger-full-access 或提示词约束。
 - **不装就当不存在**：以 bundle patch 替换上游 `fs-sandbox` 与 `sandbox` 两行 provider；未配置附加根时行为与未装插件逐项一致，misconfiguration 一律响亮报错，从不静默降级。
 
-第一期（MVP）已完成并通过验收：M1 组合与空根直通、M2 多根能力与方言 grant、M3 根注册表 / `/workspace-folders` 命令 / Workspace Folders 面板 / 跨仓库旅程 e2e。证据见各[已完成计划](./docs/plans/README.md)。
+第一期（MVP）已完成并通过验收：M1 组合与空根直通、M2 多根能力与方言 grant、M3 根注册表 / `/workspace-folders` 命令 / Workspace Folders 面板 / 跨仓库旅程 e2e。此后又加了两件事：DSH 兼容性从文档约定变成**启动时执行的代码契约**（精确 allowlist + 混装检测 + 适配层），以及**附加根自己的 `AGENTS.md` / `CLAUDE.md` 会进入模型上下文**——原生的指令发现是从会话 cwd 向上走的，永远到不了附加根。证据见各[已完成计划](./docs/plans/README.md)。
 
 ## 快速开始
 
@@ -37,11 +37,13 @@ dsh --profile web
 
 ## 环境要求
 
-- **使用已发布的插件**：只需要一个可用的 DSH 运行时（`0.1.5-rc.2` 及兼容版本），`dsh plugin` 会把包装进对应 profile，无需本地 Node 工具链
+- **使用已发布的插件**：需要一个受支持的 DSH 运行时 —— 当前是 **`0.1.5-rc.2` 与 `0.1.6-alpha.1`**，别的版本装不上也不会跑（见下）。`dsh plugin` 会把包装进对应 profile，无需本地 Node 工具链
 - **从源码构建 / 参与**：**Node.js** `^22.19.0 || >=24`（仓库 `engines` 钉住）、**Git**、**pnpm 11**（`packageManager` 钉 `pnpm@11.25.0`，建议经 corepack 启用）
-- **DSH 运行时 `0.1.5-rc.2`**（开发依赖精确 pin；升级流程见[开发工作流](./docs/development/plugin-development-workflow.md)）
+- **DSH 运行时**：开发依赖精确 pin 在 `0.1.5-rc.2`（受支持版本里的基线）；升级流程见[开发工作流](./docs/development/plugin-development-workflow.md)
 - **平台支持**：macOS（Seatbelt）与 Linux（bwrap 或 Landlock）内核级多根全量；Windows 仅 `fs` 写路径覆盖附加根（受限 bash/PTY 不含，见[已知限制](#已知限制第一期)）
-- 运行冒烟测试**不需要模型凭据**：e2e 的模型轮次由内联的脚本化 OpenAI 兼容端点提供
+- 运行冒烟测试**不需要模型凭据**：e2e 的模型轮次由内联的脚本化模型端点提供
+
+**受支持的 DSH 版本是一份精确清单，不是一个范围。** 因为本插件替换的是 `ctx.fs` 与 `ctx.sandbox`——安全边界本身——而它识别内核沙箱方言靠的是对具体上游版本实测出来的 argv 形状。所以 `peerDependencies` 只列真正跑过全套验证的版本，启动时也会再查一遍：宿主的版本不在清单上，或者若干个 `@deepseek-ai/dsh-*` 混装了不同版本，那么 fs / sandbox / registry / instructions 四行**不启动**，组合退化成"没装这个插件"，并打印一条说明。诊断办法见[故障排查：DSH 版本不在支持矩阵上](./docs/troubleshooting/unsupported-dsh-release.md)，理由见 [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)。
 
 ## 安装
 
@@ -188,7 +190,8 @@ docs/             需求、架构、决策记录（ADR）、计划、开发工�
 - 附加根与主根同权（无 per-root read-only）；附加根不能作为 bash/PTY 的默认工作目录（session cwd 语义不变）。
 - `workspace-files`（Client 文件树）仍只看主根。
 - 命令的输出文案为英文（host 侧没有活动语言信息），面板文案中英双语跟随界面语言。
-- Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：0.1.5 才有的 `sidebar.panellist`/`main` 插槽在已安装的 0.1.2 桌面运行时上不存在，这样做可以同时兼容两个运行时。
+- Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：`sidebar.footer.action` 是所有受支持版本都提供的插槽，而 `sidebar.panellist`/`main` 不是。
+- 附加根的 `AGENTS.md` / `CLAUDE.md` 只读**根目录顶层那一份**；子目录里的 nested instructions 属于第二期。主根与 user-global 的指令链仍由上游负责，本插件不重复注入。
 
 ## 文档
 

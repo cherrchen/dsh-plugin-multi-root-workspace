@@ -58,10 +58,12 @@ const hostConfig: UserConfig = {
   name: PACKAGE_NAME,
   entry: [
     'src/index.ts',
+    'src/compat.ts',
     'src/fs.ts',
     'src/sandbox.ts',
     'src/scope.ts',
     'src/registry.ts',
+    'src/instructions.ts',
     'src/command.ts',
   ],
   tsconfig: 'tsconfig.host.json',

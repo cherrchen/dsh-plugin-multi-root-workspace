@@ -52,6 +52,18 @@ const PLUGIN_NAME = '@dsh-electron/dsh-plugin-multi-root-workspace'
 const PRIMARY_README = 'primary repository readme\n'
 const SEED_README = 'seed readme for repo-b\n'
 const EDITED_README = 'seed readme for repo-b\nedited by the agent through the additional root\n'
+/**
+ * Instruction-file markers, one per level of the discovery hierarchy.
+ *
+ * Each is a phrase no other part of the composition produces, so finding it in a
+ * recorded model request proves WHICH file reached the model — and counting it
+ * proves the plugin did not inject a second copy of something upstream already
+ * supplies (the primary chain and the user-global file).
+ */
+const RULE_PRIMARY = 'house rule alpha: the primary repository is authoritative'
+const RULE_ADDITIONAL = 'house rule bravo: the other repository uses four-space indentation'
+const RULE_USER_GLOBAL = 'house rule charlie: always explain the plan first'
+const RULE_ANCESTOR = 'house rule delta: this ancestor directory is not a workspace root'
 /** One scripted turn: five tool calls, then the closing assistant text. */
 const SCRIPT_LENGTH = 6
 
@@ -84,9 +96,111 @@ function seedRepo(path, trackedFile, content) {
   git('commit', '--quiet', '-m', 'seed')
 }
 
+/**
+ * One recorded model request's wire messages, flattened to role and text.
+ *
+ * Reading the WIRE body is the point: it is the only place that shows what the
+ * model was actually told, in which role, after every row in the composition has
+ * had its say.
+ * @param request - one recorded request body.
+ * @returns the messages, in wire order.
+ */
+function wireMessages(request) {
+  return (request?.messages ?? []).map(message => ({
+    role: message?.role,
+    text: typeof message?.content === 'string'
+      ? message.content
+      : (Array.isArray(message?.content) ? message.content : []).map(part => part?.text ?? '').join(''),
+  }))
+}
+
+/**
+ * The roles of the wire messages carrying one marker.
+ *
+ * The length answers "how many times was this file injected" and the contents
+ * answer "with what authority" — the two questions the instruction design turns
+ * on: exactly once, and never as `system`.
+ * @param request - one recorded request body.
+ * @param marker - the phrase to look for.
+ * @returns one role per carrying message.
+ */
+function rolesCarrying(request, marker) {
+  return wireMessages(request).filter(entry => entry.text.includes(marker)).map(entry => entry.role)
+}
+
 /** Run one git command against a seeded repository and return its stdout. */
 function git(path, ...args) {
   return execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+}
+
+/**
+ * One scripted turn in the chat-completions wire dialect.
+ *
+ * Deltas carry the whole tool call in one chunk; the smoke is scripting a model,
+ * not testing the harness's stream reassembly.
+ * @param call - the tool call to emit, or `undefined` to close the turn.
+ * @param text - the assistant text used when closing the turn.
+ * @param id - the tool call id.
+ * @returns SSE frames, in order.
+ */
+function chatCompletionFrames(call, text, id) {
+  const frame = payload => `data: ${JSON.stringify(payload)}\n\n`
+  return [
+    frame({ choices: [{ delta: { role: 'assistant', content: null } }] }),
+    call === undefined
+      ? frame({ choices: [{ delta: { content: text } }] })
+      : frame({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id,
+              type: 'function',
+              function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+            }],
+          },
+        }],
+      }),
+    frame({
+      choices: [{ delta: {}, finish_reason: call === undefined ? 'stop' : 'tool_calls' }],
+      usage: { prompt_tokens: 5, completion_tokens: 2 },
+    }),
+    'data: [DONE]\n\n',
+  ]
+}
+
+/**
+ * The same scripted turn in the block-oriented Messages wire dialect.
+ *
+ * This protocol has a stricter contract than chat completions, and all of it is
+ * load-bearing here: every event names its `type`, the named SSE event must
+ * agree with it, each content block is explicitly opened and closed, and the
+ * stream must settle with a stop reason before `message_stop` or the harness
+ * rejects it as malformed.
+ * @param call - the tool call to emit, or `undefined` to close the turn.
+ * @param text - the assistant text used when closing the turn.
+ * @param id - the tool call id.
+ * @returns SSE frames, in order.
+ */
+function messagesFrames(call, text, id) {
+  const frame = payload => `event: ${payload.type}\ndata: ${JSON.stringify(payload)}\n\n`
+  const block = call === undefined
+    ? [
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
+      { type: 'content_block_stop', index: 0 },
+    ]
+    : [
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id, name: call.name, input: {} } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(call.arguments) } },
+      { type: 'content_block_stop', index: 0 },
+    ]
+  return [
+    { type: 'message_start', message: { usage: { input_tokens: 5, output_tokens: 2 } } },
+    ...block,
+    { type: 'message_delta', delta: { stop_reason: call === undefined ? 'end_turn' : 'tool_use' } },
+    { type: 'message_stop' },
+  ].map(frame)
 }
 
 /**
@@ -99,6 +213,10 @@ function git(path, ...args) {
  * closes the turn with plain text. Every body is recorded — that is how the
  * smoke reads what the model actually received, including the runtime-context
  * snapshot.
+ *
+ * It answers BOTH wire dialects the supported releases speak, selected per
+ * request by path. A journey that only spoke one of them would fail on the other
+ * release for a reason that has nothing to do with this plugin.
  * @returns the endpoint handle.
  */
 async function startScriptedModel() {
@@ -123,32 +241,27 @@ async function startScriptedModel() {
         parsed = { unparsable: body.slice(0, 200) }
       }
       requests.push(parsed)
-      const isTitle = body.includes('Create a concise title')
+      // An agent STEP is the request that offers tools; the session-title side
+      // call never does. That structural difference holds in both wire dialects,
+      // unlike matching the title prompt's wording — on some releases the whole
+      // session log travels with every request, so the title text appears in the
+      // agent's own body too and a text match classifies everything as a title.
+      const isTitle = !Array.isArray(parsed.tools) || parsed.tools.length === 0
       if (!isTitle) steps.push(parsed)
       const call = isTitle ? undefined : calls[(steps.length - 1) % SCRIPT_LENGTH]
+      const text = isTitle ? 'journey' : 'journey complete'
+      const id = `journey-${steps.length}`
       response.writeHead(200, { 'content-type': 'text/event-stream' })
-      response.write('data: {"choices":[{"delta":{"role":"assistant","content":null}}]}\n\n')
-      if (call === undefined) {
-        response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: isTitle ? 'journey' : 'journey complete' } }] })}\n\n`)
-      } else {
-        response.write(`data: ${JSON.stringify({
-          choices: [{
-            delta: {
-              tool_calls: [{
-                index: 0,
-                id: `journey-${steps.length}`,
-                type: 'function',
-                function: { name: call.name, arguments: JSON.stringify(call.arguments) },
-              }],
-            },
-          }],
-        })}\n\n`)
-      }
-      response.write(`data: ${JSON.stringify({
-        choices: [{ delta: {}, finish_reason: call === undefined ? 'stop' : 'tool_calls' }],
-        usage: { prompt_tokens: 5, completion_tokens: 2 },
-      })}\n\n`)
-      response.end('data: [DONE]\n\n')
+      // The REQUEST PATH picks the wire dialect, because that is how the
+      // harness itself distinguishes them: `/v1/messages` is the block-oriented
+      // Messages protocol, anything else the chat-completions one. Answering
+      // whichever the installed release asks for is what lets one journey
+      // script serve the whole supported matrix (ADR-0009).
+      const frames = (request.url ?? '').includes('/v1/messages')
+        ? messagesFrames(call, text, id)
+        : chatCompletionFrames(call, text, id)
+      for (const frame of frames) response.write(frame)
+      response.end()
     })
   })
   await new Promise(resolve => { server.listen(0, '127.0.0.1', resolve) })
@@ -345,9 +458,22 @@ try {
   mkdirSync(home, { recursive: true })
   assertIsolatedHome(home)
 
+  // Instruction files at all four levels: the primary root and the user-global
+  // file are upstream's to inject, the additional root is this plugin's, and the
+  // fixture's own parent is nobody's — it is an ancestor of an additional root,
+  // which is the case a naive upward walk would wrongly pick up.
+  mkdirSync(fixtureRoot, { recursive: true })
+  writeFileSync(join(home, 'AGENTS.md'), `# user rules\n\n${RULE_USER_GLOBAL}\n`)
+  writeFileSync(join(fixtureRoot, 'AGENTS.md'), `# ancestor rules\n\n${RULE_ANCESTOR}\n`)
+  // Written before the seed commit, so `git status` stays clean: the journey's
+  // strongest passthrough evidence is that the primary repository has no local
+  // changes at the end, and an untracked fixture file would mask that.
+  mkdirSync(primaryRepo, { recursive: true })
+  writeFileSync(join(primaryRepo, 'AGENTS.md'), `# primary rules\n\n${RULE_PRIMARY}\n`)
   seedRepo(primaryRepo, 'README.md', PRIMARY_README)
   mkdirSync(additionalRepo, { recursive: true })
   writeFileSync(join(additionalRepo, 'check.mjs'), 'console.log("repo-b check ok")\n')
+  writeFileSync(join(additionalRepo, 'AGENTS.md'), `# other repository rules\n\n${RULE_ADDITIONAL}\n`)
   seedRepo(additionalRepo, 'README.md', SEED_README)
   mkdirSync(outsideRoot, { recursive: true })
   writeFileSync(join(outsideRoot, 'keep.txt'), 'untouched\n')
@@ -403,6 +529,17 @@ try {
     check.contains(webRendered, 'the session cwd remains the primary root', 'web: the snapshot states that the cwd is unchanged', webExcerpt)
     check.ok(webRequests.length >= SCRIPT_LENGTH, 'web: the agent issued one request per scripted step', `requests: ${webRequests.length}`)
 
+    // The instruction journey, read off the first step's wire body: the Agent
+    // sees all three repositories' rules before it touches anything, each
+    // exactly once, and none of them with system authority.
+    const webFirstStep = webRequests[0]
+    const webWire = JSON.stringify(wireMessages(webFirstStep)).slice(0, 600)
+    check.equal(rolesCarrying(webFirstStep, RULE_ADDITIONAL), ['user'], 'web: the additional root\'s AGENTS.md reached the model once, in the user role', webWire)
+    check.equal(rolesCarrying(webFirstStep, RULE_PRIMARY).length, 1, 'web: the primary root\'s AGENTS.md reached the model exactly once', webWire)
+    check.equal(rolesCarrying(webFirstStep, RULE_USER_GLOBAL).length, 1, 'web: the user-global AGENTS.md was not injected a second time', webWire)
+    check.equal(rolesCarrying(webFirstStep, RULE_ANCESTOR).length, 0, 'web: an ancestor of the additional root was not injected at all', webWire)
+    check.contains(JSON.stringify(webFirstStep), canonical(additionalRepo), 'web: the instruction text names the root its rules belong to')
+
     // ---- the one-shot composition --------------------------------------------
     await prepareProfile('headless')
     seedRegistryStore(primaryRepo)
@@ -431,11 +568,22 @@ try {
     const headlessExcerpt = headlessRendered.slice(-800)
     check.contains(headlessRendered, canonical(additionalRepo), 'headless: the model\'s request names the additional root', headlessExcerpt)
     check.contains(headlessRendered, 'additional roots of this session\'s workspace', 'headless: the runtime-context snapshot states the topology', headlessExcerpt)
+
+    const headlessFirstStep = headlessRequests[0]
+    const headlessWire = JSON.stringify(wireMessages(headlessFirstStep)).slice(0, 600)
+    check.equal(rolesCarrying(headlessFirstStep, RULE_ADDITIONAL), ['user'], 'headless: the additional root\'s AGENTS.md reached the model once, in the user role', headlessWire)
+    check.equal(rolesCarrying(headlessFirstStep, RULE_PRIMARY).length, 1, 'headless: the primary root\'s AGENTS.md reached the model exactly once', headlessWire)
+    check.equal(rolesCarrying(headlessFirstStep, RULE_USER_GLOBAL).length, 1, 'headless: the user-global AGENTS.md was not injected a second time', headlessWire)
+    check.equal(rolesCarrying(headlessFirstStep, RULE_ANCESTOR).length, 0, 'headless: an ancestor of the additional root was not injected at all', headlessWire)
   } finally {
     process.chdir(originalCwd)
     delete process.env.DSH_PERMISSION_MODE
     delete process.env.DEEPSEEK_API_KEY
     delete process.env.DEEPSEEK_BASE_URL
+    // Under DSH_SMOKE_KEEP the recorded bodies are kept beside the fixture: when
+    // an assertion about what the model was told fails, the body is the evidence,
+    // and it is far too large to print.
+    if (keep) writeFileSync(join(fixtureRoot, 'model-requests.json'), JSON.stringify(model.requests, null, 2))
     await model.close()
   }
 
