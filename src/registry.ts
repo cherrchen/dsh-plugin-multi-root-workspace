@@ -183,6 +183,8 @@ export class MultiRootRegistry extends Service {
   private readonly listeners = new Set<(primaryRoot: string) => void>()
   /** True after a contended-lease warning has been emitted, so refresh does not spam. */
   private loggedContended = false
+  /** True once the fiber disposer has run: no further acquisition may happen. */
+  private disposed = false
 
   /**
    * @param ctx - the host context; `storageDomain` and `multiRootScope` are injected.
@@ -622,6 +624,9 @@ export class MultiRootRegistry extends Service {
    */
   private async ensureAuthority(): Promise<void> {
     await this.serializeAuthority(async () => {
+      // The teardown queues behind any acquisition, so a disposer that ran
+      // first must not be followed by a new medium nobody will ever close.
+      if (this.disposed) return
       if (this.authorityState.kind === 'active') return
       if (this.lease !== undefined) {
         await this.openDomain()
@@ -717,33 +722,60 @@ export class MultiRootRegistry extends Service {
   }
 
   /**
-   * Close the domain and release the kernel lease. The fiber disposer; also the
-   * exclusive owner of those two resources. The lease is dropped before the
-   * first `await` so a disposer that is not awaited still frees the kernel lock
-   * before the next stack mounts.
+   * Drain every queued mutation, close the domain, then release the kernel
+   * lease — in that order, and inside the authority-transition queue.
+   *
+   * The order is the invariant, not a detail. The lease is what makes "the
+   * store is mine" true, so it must outlive every write this process will ever
+   * make, including the queued writes `close()` itself drains: a successor that
+   * acquired the lease and opened the medium in the window between a release
+   * and a `put()` would read a snapshot missing that mutation. Running the
+   * whole teardown through {@link MultiRootRegistry.serializeAuthority} is the
+   * other half: a `refresh()` that is mid-flight when the fiber disposes must
+   * not finish by opening a domain and a lease that nothing will ever close.
    */
   private async releaseAuthority(): Promise<void> {
-    this.withdrawPublished()
-    this.table = undefined
-    const lease = this.lease
-    this.lease = undefined
-    this.authorityState = { kind: 'contended' }
-    if (lease !== undefined) {
-      try {
-        await lease.release()
-      } catch {
-        // Kernel release on process death is the fallback.
+    this.disposed = true
+    await this.serializeAuthority(async () => {
+      // Fail closed first, so no further mutation is admitted while teardown
+      // runs (a mutation admitted later would fail in `requireTable()`, by design).
+      this.table = undefined
+      this.authorityState = { kind: 'contended' }
+      await this.drainMutations()
+      // After the drain, so a grant a finishing mutation just published is
+      // dropped instead of outliving the teardown.
+      this.withdrawPublished()
+      const domain = this.domain
+      this.domain = undefined
+      if (domain !== undefined) {
+        try {
+          await domain.close()
+        } catch {
+          // Dispose must not throw through the fiber.
+        }
       }
-    }
-    const domain = this.domain
-    this.domain = undefined
-    if (domain !== undefined) {
-      try {
-        await domain.close()
-      } catch {
-        // Dispose must not throw through the fiber.
+      const lease = this.lease
+      this.lease = undefined
+      if (lease !== undefined) {
+        try {
+          await lease.release()
+        } catch {
+          // Kernel release on process death is the fallback.
+        }
       }
-    }
+    })
+  }
+
+  /**
+   * Wait until no per-primary-root mutation is queued or running.
+   *
+   * One pass is enough, and only because the authority state has already been
+   * flipped: no further mutation can be admitted (it would fail in
+   * `requireTable()`), and every mutation admitted earlier put its own tail in
+   * `chains` before it ran.
+   */
+  private async drainMutations(): Promise<void> {
+    await Promise.allSettled([...this.chains.values()])
   }
 
   /**
