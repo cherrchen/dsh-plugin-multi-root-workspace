@@ -1,6 +1,6 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（里程碑概览；M1/M2 已实施完成，M3 已实施并按外部审查返工后重新验收，详细计划在 `completed/`）
+> 状态：active（里程碑概览；M1/M2 已实施完成，M3 已实施并按外部审查返工后重新验收，M4 跨进程 Registry Authority Lease 已实施；详细计划在 `completed/`）
 > 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5；M1 详细计划（已完成）：[2026-09-12-m1-composition-and-passthrough.md](../completed/2026-09-12-m1-composition-and-passthrough.md)；M2 详细计划（已完成）：[2026-09-12-m2-additional-roots-and-dialect-grants.md](../completed/2026-09-12-m2-additional-roots-and-dialect-grants.md)；M3 详细计划（已完成）：[2026-09-12-m3-root-registry-command-and-ui.md](../completed/2026-09-12-m3-root-registry-command-and-ui.md)。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
@@ -12,6 +12,7 @@
 - **M1 组合与直通（已完成）**：bundle 骨架 + 两行替换 + 空根直通。插件已可安装，行为与未装一致；组合、disable/insert 时序与 provide 冲突这三项结构性风险已清零。
 - **M2 多根能力（已完成）**：附加根数据源 + 两个 provider 的多根逻辑 + 方言 grant + parity 测试。
 - **M3 Root 管理与 UI**：注册表、命令、client 半部、e2e。
+- **M4 跨进程 Authority**（已完成）：store-wide 内核 lease，争用 fail-closed。
 
 ## M1 — bundle 骨架、两行替换、空根直通（已完成）
 
@@ -60,6 +61,7 @@
 | M1 ✅ | 插件可安装、行为与未装一致；组合结构性风险清零（2026-09-12 完成） |
 | M2 ✅ | 多根在 macOS/Linux 端到端可用（配置暂用测试/冒烟注入的静态根）（2026-09-12 完成） |
 | M3 ✅ | 完整用户旅程（命令/面板增删根 → 会话 → Agent 跨 repo 工作）（2026-09-12 实施；同日按外部审查返工后重新验收：8 项发现全部修复并带回归测试） |
+| M4 ✅ | 跨进程 Registry Authority Lease：两 DSH 进程共用 storage root 时 fail-closed，对方退出/崩溃后 `refresh()` 接管（2026-09-15；[计划](../completed/2026-09-15-m4-registry-authority-lease.md)、[ADR-0007](../../decisions/ADR-0007-registry-authority-lease.md)） |
 
 ## 测试与检查指引
 

@@ -128,6 +128,7 @@ export type RootValidationCode =
   | 'not-found'
   | 'invalid-ref'
   | 'storage-unavailable'
+  | 'registry-contended'
   | 'reveal-unavailable'
 
 /** A rejected root operation; `code` is the stable contract, `message` the fallback prose. */

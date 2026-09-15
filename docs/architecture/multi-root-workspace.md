@@ -1,9 +1,9 @@
 # 架构文档：Multi-root Workspace（不改上游：provider 替换 + 子类化）
 
-> 状态：**§4、§5.1、§5.3、§6、§7 均已实现（M1/M2/M3）**。已实现部分可按当前仓库代码与 M3 计划中的实施结果验证；§8 的长期演进形态、§9 的上游 seam 附录仍是设计。
+> 状态：**§4、§5.1、§5.3、§6、§7 均已实现（M1/M2/M3）；§7 的跨进程 Authority Lease 为 M4（ADR-0007）**。已实现部分可按当前仓库代码与各 completed 计划中的实施结果验证；§8 的长期演进形态、§9 的上游 seam 附录仍是设计。
 > 硬约束：不修改上游仓库（deepseek-harness）任何包；产物是外部 bundle，经 `dsh plugin add` 或 profile patch 组合。
 > 事实依据：[multi-root-workspace-research.md](../reference/multi-root-workspace-research.md)（§1-7 上游现状，§8 不改上游机制，§9 发布形态与运行时解析，§10 方言形状与子类可用面）；需求边界：[multi-root-workspace.md](../requirements/multi-root-workspace.md)；排期：[M1 计划](../plans/completed/2026-09-12-m1-composition-and-passthrough.md)、[M2 计划](../plans/completed/2026-09-12-m2-additional-roots-and-dialect-grants.md)
-> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)；M2 实施后 §5.3 与 §6 改写为已实现的机制（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；M3 实施后 §7 改写为已实现的机制（[ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)）。
+> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)；M2 实施后 §5.3 与 §6 改写为已实现的机制（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；M3 实施后 §7 改写为已实现的机制（[ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)）。2026-09-15：§7 增加 store-wide Registry Authority Lease（[ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)）。
 
 ## 1. 总览
 
@@ -68,8 +68,10 @@ dsh-plugin-multi-root-workspace/
     inject: [sandboxPolicy, multiRootScope]
   - id: multi-root-scope
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/scope'
-  - id: multi-root-registry                                # 已实现（M3）
+  - id: multi-root-registry                                # 已实现（M3）；lease 见 ADR-0007
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
+    config:
+      leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
   - id: multi-root-command                                 # 已实现（M3）
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
 ```
@@ -155,11 +157,11 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 
 三行插件行之外新增两行：`multi-root-registry`（服务）与 `multi-root-command`（用户表面）。前者把注册表喂给 §4 的 scope，后者把命令与面板接到注册表上；两个 provider 完全不知道它们存在。
 
-- **注册表（`MultiRootRegistry`，`ctx.multiRootRegistry`）**：`dsh-storage-domain` 的 domain `multi_root_workspace`（version 1，`single` layout，单表 `roots`），**键 = canonical 主根**，值 = 有序记录 `{ id, path, recordedPath?, alias?, addedAt }`（可选仅为兼容旧数据，新登记必填）。`[Service.init]` 读取全部记录、用与写入相同的规则重新判定、只把可用的根播种进 `ctx.multiRootScope`，并对不可用项输出告警。每次变更先落盘再改内存，成功后重播种 scope 并通知监听者；**同一主根的所有变更在一条 Promise 队列里整体串行**（读快照 → 校验 → 落盘），因为存储域只串行化单个写入，覆盖不到读—改—写。存储整体打不开时降级为"没有附加根 + 所有写操作抛 `storage-unavailable`"，不阻断 harness 启动。取舍见 [ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md)。
-- **读路径的重新校验（`refresh`）**：`registry.refresh(primaryRoot)` 重新 `stat`、重新解析、重新裁决、重播种 scope 并通知监听者，**不写存储**；命令 `list` 与面板 `list` 端点都先走它，所以"列出来的范围"永远等于"此刻授予的范围"（目录消失 → `missing` 且撤销；目录回来 → 恢复授予；目录被替换 → `redirected` 且撤销）。`publish` 只在授予集合或不可用集合变化时才真正动 scope，因此刷新可以随时执行而不产生抖动。`recheck` = refresh + 落盘一次。
+- **注册表（`MultiRootRegistry`，`ctx.multiRootRegistry`）**：`dsh-storage-domain` 的 domain `multi_root_workspace`（version 1，`single` layout，单表 `roots`），**键 = canonical 主根**，值 = 有序记录 `{ id, path, recordedPath?, alias?, addedAt }`（可选仅为兼容旧数据，新登记必填）。`[Service.init]` 先拿 store-wide 内核 lease，成功后才打开 domain、用与写入相同的规则重新判定、只把可用的根播种进 `ctx.multiRootScope`。每次变更先落盘再改内存，成功后重播种 scope 并通知监听者；**同一主根的所有变更在一条 Promise 队列里整体串行**（读快照 → 校验 → 落盘），因为存储域只串行化单个写入，覆盖不到读—改—写。JSON backend 打开后内存 authoritative、没有跨进程 CAS，因此 **同一时刻只允许一个 Registry Authority Process** 打开这份介质（POSIX `flock` / Windows named semaphore，进程死亡由 kernel 释放）；争用进程 fail-closed：scope 为空、mutation 抛 `registry-contended`、`refresh()` 可重新竞选。存储整体打不开时降级为"没有附加根 + 所有写操作抛 `storage-unavailable`"，不阻断 harness 启动。取舍见 [ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md) 与 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。
+- **读路径的重新校验（`refresh`）**：`registry.refresh(primaryRoot)` 先 `ensureAuthority()`（争用方可在对方退出后接管并**从磁盘重新 open**），再重新 `stat`、重新解析、重新裁决、重播种 scope 并通知监听者，**不写存储**；命令 `list` 与面板 `list` 端点都先走它，所以"列出来的范围"永远等于"此刻授予的范围"（目录消失 → `missing` 且撤销；目录回来 → 恢复授予；目录被替换 → `redirected` 且撤销）。`publish` 只在授予集合或不可用集合变化时才真正动 scope，因此刷新可以随时执行而不产生抖动。`recheck` = refresh + 落盘一次。
 - **所有变更按具体记录**：命令和面板把列表行捕获为 `{ ordinal, id, path, addedAt }` entry ref，注册表在串行队列内重新核验后才执行 remove/alias/move。重复 id 不再会误删、批量改名或让排序隐式丢记录；无法唯一区分时明确拒绝。
 - **scope 实时撤销**：每次 `scopeOf`/`resolve` 除了比对 `recordedPath`，还当场确认路径存在且是目录。即使尚未调用 registry `refresh`，删除的根也不会进入 fs/内核 grant，更不会被写入重建。
-- **校验（`src/roots.ts` 纯函数，fail loud）**：`~` 展开（只限前导 `~`）→ 必须绝对 → 必须存在且是目录 → `canonicalPath` → 不等于主根 → **不与主根互相包含（`primary-overlap`，双向）** → 不与其他根重复 → 不与任何根互相包含（`nested` 双向拒绝）。失败返回稳定 code（`not-absolute` / `missing` / `not-a-directory` / `equals-primary` / `primary-overlap` / `duplicate` / `nested` / `invalid-alias` / `not-found` / `invalid-ref` / `storage-unavailable` / `reveal-unavailable`），三类表面（命令、面板、内部 API）共用同一词汇。存储读取侧用同一套规则（`classifyStoredRoots`），并额外判定 `recordedPath` 变化（`redirected`）与重复 id（全部 `invalid`）。
+- **校验（`src/roots.ts` 纯函数，fail loud）**：`~` 展开（只限前导 `~`）→ 必须绝对 → 必须存在且是目录 → `canonicalPath` → 不等于主根 → **不与主根互相包含（`primary-overlap`，双向）** → 不与其他根重复 → 不与任何根互相包含（`nested` 双向拒绝）。失败返回稳定 code（`not-absolute` / `missing` / `not-a-directory` / `equals-primary` / `primary-overlap` / `duplicate` / `nested` / `invalid-alias` / `not-found` / `invalid-ref` / `storage-unavailable` / `registry-contended` / `reveal-unavailable`），三类表面（命令、面板、内部 API）共用同一词汇。存储读取侧用同一套规则（`classifyStoredRoots`），并额外判定 `recordedPath` 变化（`redirected`）与重复 id（全部 `invalid`）。
 - **命令 `/workspace-folders`**：`ctx.commands.register`，语法 `list | add [path] | remove <n|path> | alias <n|path> [name] | reveal <n|path> | help`。无路径的 `add` 软注入 `directoryPicker`，capability 为 `native` 时直接 `pick(signal)`；`browse` 或 seam 缺失时返回明确错误（提示改用面板或传路径）。输出是英文文本（host 侧没有活动语言信息，见需求文档第一期限制）。
 - **Client 半部**：`sidebar.footer.action`（list/root，两个受支持运行时都存在）+ 自绘对话框；`ctx.locale.register('multiRootWorkspace', { zh, en })` 双语。每个工作目录行是两行显示：第一行主文字为显示名（主根 = 宿主 workspace 的上游标题，见 `primaryName`；附属根 = 登记的 alias，缺省为目录名），第二行次要文字为绝对路径。动作：复制路径 / 在文件管理器中显示 / 上移 / 下移为图标按钮，别名编辑与移除收进行内 `…` 菜单（ui-primitives `Menu`），底部"添加目录"为仅图标按钮、整行控件高度统一 32px。Add（`ctx.uiWorkspace.pickDirectory()`，退化为手输路径）。文案按 host 返回的 code 本地化。落点与通道的取舍见 [ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)；样式与 ui-primitives 展示型组件的 import 边界见 [ADR-0006](../decisions/ADR-0006-client-ui-host-tokens.md)。
 - **主根显示名（`primaryName`）**：`RootsView` 的可选字段。面板分发时通过**可选兄弟服务查找**（同 `sessions`/`subprocess` 的模式，不进 `inject` 声明）读宿主 `workspaceRegistry`：先按会话成员关系（`list().find(w => w.sessionIds.includes(sessionId))`），未命中再 `resolveByPath(primaryRoot)`，命中即把 workspace 的 `title` 填进每个 `RootsView` 应答；查找失败只降级为"不填"，面板回退显示路径 basename，绝不因此报错。

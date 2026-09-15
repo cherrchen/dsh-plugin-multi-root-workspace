@@ -47,7 +47,14 @@ function rowsById(value: unknown, found = new Map<string, Row>()): Map<string, R
 }
 
 function readYaml(path: string): unknown {
-  return parse(readFileSync(path, 'utf8'))
+  return parse(readFileSync(path, 'utf8'), {
+    // The production patch uses `!!js dshHomePath(...)` which the host loader
+    // evaluates; this spec only needs the expression to survive as a string.
+    customTags: [{
+      tag: 'tag:yaml.org,2002:js',
+      resolve: (value: string) => value,
+    }],
+  })
 }
 
 const manifest = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
@@ -138,5 +145,12 @@ describe('inserted rows', () => {
   it('anchors the client graph with a bare-package-name row', () => {
     const anchor = inserted.find(row => row.id === 'multi-root-client')
     expect(anchor?.name).toBe(manifest.name)
+  })
+
+  it('pins the registry lease beside the default JSON storage root', () => {
+    const registry = inserted.find(row => row.id === 'multi-root-registry')
+    expect(registry?.config).toMatchObject({
+      leasePath: "dshHomePath('storages/multi_root_workspace.lock')",
+    })
   })
 })

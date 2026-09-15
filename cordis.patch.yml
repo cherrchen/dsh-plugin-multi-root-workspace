@@ -13,7 +13,9 @@
 #
 # The last two rows are additive and self-softening: `multi-root-registry` waits
 # for the storage domain (absent only in compositions that mount no storage at
-# all), and `multi-root-command` registers the `/workspace-folders` command
+# all) and takes a store-wide kernel lease beside the JSON document so two DSH
+# processes sharing $DSH_HOME cannot each grant a stale snapshot (ADR-0007);
+# `multi-root-command` registers the `/workspace-folders` command
 # wherever a command registry exists and the browser panel channel wherever a
 # host Connection and web server exist (see
 # docs/troubleshooting/panel-channel-http-405.md for why both must be declared
@@ -38,6 +40,10 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/scope'
     - id: multi-root-registry
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
+      config:
+        # Store-wide kernel lease beside the JSON domain document. A custom
+        # storage-json.root must override this path in lockstep (ADR-0007).
+        leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
     - id: multi-root-command
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
     - id: multi-root-client

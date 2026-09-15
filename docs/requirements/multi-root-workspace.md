@@ -1,6 +1,6 @@
 # 开发需求文档：DSH Multi-root Workspace（out-of-tree 插件，不改上游）
 
-> 状态：M1/M2/M3 已实现（2026-09-12）| 日期：2026-09-12 | 上游需求：用户提供的《DSH Multi-root Workspace 插件需求总结》
+> 状态：M1/M2/M3 已实现（2026-09-12）；M4 跨进程 Registry Authority Lease 已实现（2026-09-15）| 日期：2026-09-15 | 上游需求：用户提供的《DSH Multi-root Workspace 插件需求总结》
 > **硬约束：不得修改上游仓库（deepseek-harness）中任何包**——全部产物是外部插件/bundle，通过 `dsh plugin add` 或 profile patch 组合安装。
 > 事实依据：[multi-root-workspace-research.md](../reference/multi-root-workspace-research.md)（§8 为不改上游的补充调研）；设计：[multi-root-workspace.md](../architecture/multi-root-workspace.md)；排期：[路线图](../plans/active/2026-09-12-multi-root-workspace.md) 与 [M1 计划](../plans/completed/2026-09-12-m1-composition-and-passthrough.md)
 
@@ -46,7 +46,7 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 | 需求（原文节号） | 不改上游下的机制 | 结论 |
 |---|---|---|
 | §4 不重实现原生设施；不造 `workspace_*` 工具 | 原生工具链（tool-fs / tool-bash / terminal）不动；插件零工具（可选一个内省工具）。注意：插件会**子类化**上游 fs 与 sandbox provider——这是"扩展"，不是重实现；文件 IO、进程、内核 runner 全部复用上游 | 满足（含澄清） |
-| §5.1 Root 管理 | 插件注册表 + `dsh-storage-domain` 持久化 + `canonicalPath` 校验；登记项带 `recordedPath`，授权需"当前解析 == 登记时授予的目录"；同一主根的变更整体串行；读取侧 `refresh` 重新校验但不写存储 | 插件职责 |
+| §5.1 Root 管理 | 插件注册表 + `dsh-storage-domain` 持久化 + `canonicalPath` 校验；登记项带 `recordedPath`，授权需"当前解析 == 登记时授予的目录"；同一主根的变更整体串行；读取侧 `refresh` 重新校验但不写存储；跨进程由 store-wide 内核 lease 保证单写者（ADR-0007） | 插件职责 |
 | §5.2 Workspace Folders UI | slot 洞 + `directoryPicker` + locale 字典 | 插件 client 半部 |
 | §6 保留 Workspace.path 为 Primary Root | 现状即如此，不碰 | 零改动 |
 | §7 不改 Session cwd 语义 | `header.cwd` 不可变 | 零改动 |
@@ -95,8 +95,7 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 7.3 **并发不丢操作**：同一主根上并发发起的增删改必须全部生效，且不得复活已删除的记录。
 7.4 **异常记录不扩散损坏**：缺少 `recordedPath` 的旧记录经无关写操作后仍可在重启时读取；一次 remove/alias/move 只能作用于一条可唯一定位的记录，不能按重复 id 批量命中或隐式删除其他记录。
 7.5 **实时 scope 不授予 missing 根**：目录在登记后被删除时，即使没有先执行 list/refresh，下一次 scope resolve 也必须排除它，不得通过写操作重建该目录。
-7.4 **异常记录不扩散损坏**：缺少 `recordedPath` 的旧记录经无关写操作后仍可在重启时读取；一次 remove/alias/move 只能作用于一条可唯一定位的记录，不能按重复 id 批量命中或隐式删除其他记录。
-7.5 **实时 scope 不授予 missing 根**：目录在登记后被删除时，即使没有先执行 list/refresh，下一次 scope resolve 也必须排除它，不得通过写操作重建该目录。
+7.6 **跨进程单写者**：两个 DSH 进程共用同一 storage root 时，只有持有 store-wide 内核 lease 的进程打开登记表并授予附加根；另一进程 fail-closed（空 scope、`registry-contended`），其 `list`/Refresh 在对方退出或崩溃后可接管并读回最后一次 durable 写。见 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。
 8. **失败要响亮**：misconfiguration（非绝对路径、重复 id、patch 行未按预期生效）在装载或首次 resolve 时抛错。
 9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias/排序可用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制。
 10. **升级韧性**：`package.json` pin dsh 精确版本；仓库 CI 含"升级 smoke"脚本（对上游 demo 行为差异报警）；provider 子类只依赖上游公开方法面（不触碰 TS-private、不做原型替换）。

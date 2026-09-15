@@ -33,7 +33,7 @@ pnpm install            # 安装（首次或改依赖后）
 pnpm lint               # oxlint（host 与 client 半部都扫）
 pnpm typecheck          # tsc -p tsconfig.host.json 与 -p tsconfig.client.json 各一次
 pnpm build              # tsc 出两面 lib/types/**/*.d.ts + tsdown 出 lib/*.js（host ESM）与 lib/client.js（浏览器闭包工厂）
-pnpm test               # vitest run：单测 + 校验规则 + 注册表（含并发/替换/恢复）+ 命令/通道 + 空根差分 parity + 方言 grant 矩阵 + client 制品/面板 + 词典 parity + patch 不变量
+pnpm test               # vitest run：单测 + 校验规则 + 注册表（含并发/替换/恢复/跨进程 lease）+ 命令/通道 + 空根差分 parity + 方言 grant 矩阵 + client 制品/面板 + 词典 parity + patch 不变量
 pnpm kernel:probe       # 本机是否真能受限执行；能则导出 DSH_REQUIRE_KERNEL_RUNNER=1，使内核断言必须真跑
 pnpm smoke:compose      # 组合门禁（需要先 build）
 pnpm smoke:behavior     # 空根直通 + 多根 battery + 注册表/命令 battery（需要先 build）

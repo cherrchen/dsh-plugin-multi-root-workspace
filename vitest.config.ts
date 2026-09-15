@@ -11,7 +11,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx'],
+    include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx', 'tests/**/*.e2e.ts'],
     pool: 'forks',
     testTimeout: 30_000,
   },

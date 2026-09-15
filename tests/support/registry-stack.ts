@@ -4,6 +4,10 @@
  * profile assembles them, so a spec exercises the durable path rather than a
  * double.
  *
+ * Dispose unloads the root fiber: the registry lease is a kernel lock, so a
+ * trailing sibling fiber would leave the first stack holding the lock and the
+ * next restart would start contended.
+ *
  * @module tests/support/registry-stack
  */
 
@@ -45,15 +49,13 @@ export async function mountRegistryStack(storeRoot: string): Promise<RegistrySta
   ctx.storage.mount('domain', facility)
   ctx.provide('storageDomain', facility)
   await ctx.plugin(MultiRootScopeService)
-  await ctx.plugin(MultiRootRegistry)
-  // A trivial trailing plugin supplies the disposer for everything above it.
-  const fiber = await ctx.plugin({ name: 'registry-stack-root', apply: () => {} })
+  await ctx.plugin(MultiRootRegistry, { leasePath: `${storeRoot}/${DOMAIN_NAME}.lock` })
   return {
     ctx,
     registry: ctx.multiRootRegistry,
     scope: ctx.multiRootScope,
     storeRoot,
     storeFile: `${storeRoot}/${DOMAIN_NAME}.json`,
-    dispose: async () => { await fiber.dispose() },
+    dispose: async () => { await ctx.fiber.dispose() },
   }
 }
