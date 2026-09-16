@@ -55,12 +55,19 @@ dsh --profile web
 
 | 来源 | 命令 | 说明 |
 | --- | --- | --- |
-| npm 注册表（推荐） | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | 预构建产物，即装即用，无需构建授权 |
-| tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | 预构建离线包，无需构建授权 |
-| 本地路径 | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` 链接本地 checkout，适合开发调试 |
-| GitHub / git | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | 拉源码由 `prepare` 现场构建；首次需授权 `allowBuilds`，建议锁定 tag |
+| npm 注册表（推荐） | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | 预构建产物，即装即用；首次 `add` 需要回答一次 `allowBuilds`（见下） |
+| tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | 预构建离线包，适合内网/离线；同样需要那一次 `allowBuilds` 回答 |
+| 本地路径 | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` 链接本地 checkout，依赖已在本仓库装好，适合开发调试 |
+| GitHub / git | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | 拉源码由 `prepare` 现场构建；需要两次 `allowBuilds` 回答（本包 + `koffi`），建议锁定 tag |
 
-从 GitHub / git 方式安装时的 `allowBuilds` 授权，请视为**允许该包的代码在安装时于你的机器上执行**（且不在 agent 运行的任何沙箱之内）——这是 pnpm ≥10 对依赖生命周期脚本的统一要求，npm 与 tarball 方式装的是构建好的 `lib/`，无此步骤。
+**首次安装需要回答一次 `allowBuilds`，四种来源皆然。** 本插件带一个需要构建的原生依赖 `koffi`（Windows 上 Registry Authority 用的 FFI 封装；其他平台装了不用），而 pnpm ≥10 默认不运行任何依赖的生命周期脚本。所以第一次 `dsh plugin add` 会以 `[ERR_PNPM_IGNORED_BUILDS]` 失败，并把待决项写进该 profile 的 `pnpm-workspace.yaml`：
+
+```yaml
+allowBuilds:
+  koffi: true          # dsh 留的占位是 "set this to true or false"
+```
+
+把它改成 `true` 再执行一次 `add` 即可。把这一行理解为**允许该依赖的安装脚本在你的机器上执行**（不在 agent 运行的任何沙箱之内）——`koffi` 的脚本只做本地预编译。诊断步骤见[故障排查：安装停在构建授权](./docs/troubleshooting/install-stops-at-build-approval.md)。
 
 ### 从 npm 安装（推荐）
 
@@ -68,7 +75,7 @@ dsh --profile web
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-安装的是预构建产物，即装即用，无需任何构建授权。
+安装的是预构建产物（不需要编译本插件本身），但首次仍要回答上面那一次 `allowBuilds`。
 
 ### 从 tarball 安装
 
@@ -79,7 +86,7 @@ pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.1.tgz
 ```
 
-同样是预构建产物，无需构建授权，适合内网或离线环境交付。
+同样是预构建产物（不需要编译本插件本身），适合内网或离线环境交付；首次 `add` 同样要回答那一次 `allowBuilds`。
 
 ### 从 GitHub 安装
 
@@ -87,11 +94,12 @@ dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.
 dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace
 ```
 
-pnpm ≥10 下首次 `add` 会失败：git 安装拉取的是**源码而非构建产物**，包内自包含的 `prepare` 脚本要现场构建（直接转译 `src/`，不做类型检查）。按 `dsh` 的提示把 pnpm 打印的包键写入该 profile 的 `pnpm-workspace.yaml`：
+pnpm ≥10 下首次 `add` 会失败：git 安装拉取的是**源码而非构建产物**，包内自包含的 `prepare` 脚本要现场构建（直接转译 `src/`，不做类型检查）。按 `dsh` 的提示把 pnpm 打印的包键写入该 profile 的 `pnpm-workspace.yaml`——这条来源要回答**两个**待决项：
 
 ```yaml
 allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace': true
+  koffi: true
 ```
 
 然后重新执行 `add` 即可。建议锁定 tag（如 `#v0.1.1`），让后续推送无法悄悄改变实际运行的内容：
@@ -132,7 +140,7 @@ dsh plugin --profile web add "$PWD"
 dsh --profile web --dump-config
 ```
 
-预期：组合里**仅** `fs-sandbox` 与 `sandbox` 两行被替换为插件的 `multi-root-fs` / `multi-root-sandbox`，并插入 scope / registry / command 三行；`bash-sandbox` 保持上游（bash 与 PTY 经 `ctx.sandbox` 取根）。启动 `dsh --profile web` 后，侧栏底部出现 Folders 动作。
+预期：组合里**仅** `fs-sandbox` 与 `sandbox` 两行被替换为插件的 `multi-root-fs` / `multi-root-sandbox`，并插入 8 行（`multi-root-compat` / `fs` / `sandbox` / `scope` / `registry` / `instructions` / `command` 与 client 载体行 `multi-root-client`）；`bash-sandbox` 保持上游（bash 与 PTY 经 `ctx.sandbox` 取根）。启动 `dsh --profile web` 后，侧栏底部出现 Folders 动作。
 
 ## 使用方法
 

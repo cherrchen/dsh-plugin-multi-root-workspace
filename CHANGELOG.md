@@ -18,6 +18,7 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 ### 升级注意（不兼容变更）
 
+- **首次 `dsh plugin add` 会失败一次，四种安装来源皆然**：本版本新引入原生依赖 `koffi`（Windows 上 Registry Authority 的 FFI 封装），而 pnpm ≥10 默认不运行依赖的构建脚本，因此第一次 `add` 会以 `[ERR_PNPM_IGNORED_BUILDS]` 退出、插件不会进 `dsh.profile.bundles`。`dsh` 会把待决项留在该 profile 的 `pnpm-workspace.yaml` 里（`koffi: set this to true or false`），改成 `true` 再执行一次 `add` 即完成。`v0.1.0` 的 npm / tarball 来源没有这一步。详见[故障排查：安装停在构建授权](./docs/troubleshooting/install-stops-at-build-approval.md)。
 - **支持的上游运行时收窄为精确清单 `0.1.5-rc.2`、`0.1.6-alpha.1`**（原先是 `>=0.1.2-alpha.4 <0.2.0` 范围）。宿主版本不在这两个之一，或若干 `@deepseek-ai/dsh-*` 包混装了不同版本时，`fs` / `sandbox` / `registry` / `instructions` 四行**不启动**，组合退化为"未装这个插件"并在启动时打印说明。理由是这个插件替换的是围栏本身、靠识别上游实测出的方言 argv 形状工作，而 npm 语义化范围等于对未验证版本做承诺（[ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)）。诊断步骤见[故障排查：DSH 版本不在支持矩阵上](./docs/troubleshooting/unsupported-dsh-release.md)。**若你仍在 `v0.1.0` 时代实测可用的 `0.1.2-rc.1` 运行时上（例如某些已安装的桌面端自带运行时），请先升级该运行时，否则本版本不会生效。**
 - **面板不再接受客户端指名的根**：所有面板端点必填 `sessionId`，主根只来自 host 侧的 `session.header.cwd`；客户端 `primaryRoot` 字段与 `sandboxPolicy` 回退已删除。浏览器当前没有活动会话时，面板显示"当前没有活动会话"并且不向 host 发请求（[ADR-0008](./docs/decisions/ADR-0008-panel-session-derived-authority.md)）。
 

@@ -53,12 +53,19 @@ The agent can now read, write, and run bash in that directory, with the same rig
 
 | Source | Command | Notes |
 | --- | --- | --- |
-| npm registry (recommended) | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | Pre-built artifacts, ready to use, no build authorization |
-| Tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | Pre-built offline package, no build authorization |
-| Local path | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` links a local checkout — good for development |
-| GitHub / git | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | Pulls source, built on the spot by `prepare`; needs `allowBuilds` on first use, pin a tag |
+| npm registry (recommended) | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | Pre-built artifacts, ready to use; the first `add` needs one `allowBuilds` answer (below) |
+| tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | Pre-built offline package, handy for air-gapped or offline delivery — with the same one-time `allowBuilds` answer |
+| local path | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` to a local checkout; its dependencies are already installed in this repository — best for development |
+| GitHub / git | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | Pulls source and builds it on the spot through `prepare`; needs **two** `allowBuilds` answers (this package plus `koffi`); pin a tag |
 
-Treat the `allowBuilds` authorization for the GitHub / git route as **permission to execute the package's code on your machine at install time** (outside any sandbox the agent runs under) — it is pnpm ≥10's uniform requirement for dependency lifecycle scripts. The npm and tarball routes install the already-built `lib/` and have no such step.
+**Every install source needs one `allowBuilds` answer the first time.** The plugin carries a native dependency that must be built, `koffi` (the FFI wrapper behind Registry Authority on Windows; installed but unused elsewhere), and pnpm ≥10 runs no dependency lifecycle script by default. So the first `dsh plugin add` fails with `[ERR_PNPM_IGNORED_BUILDS]` and leaves the pending decision in that profile's `pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  koffi: true          # the placeholder dsh leaves is "set this to true or false"
+```
+
+Set it to `true` and run `add` again. Read that line as **letting the dependency's install script run on your machine** (outside any sandbox the agent runs in) — `koffi`'s script only precompiles locally. Diagnosis steps: [Troubleshooting: the install stops at build approval](./docs/troubleshooting/install-stops-at-build-approval.md).
 
 ### Install from npm (recommended)
 
@@ -66,7 +73,7 @@ Treat the `allowBuilds` authorization for the GitHub / git route as **permission
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-Installs pre-built artifacts, ready to use, no build authorization needed.
+This installs pre-built artifacts (the plugin itself is never compiled), but the first install still needs the `allowBuilds` answer above.
 
 ### Install from a tarball
 
@@ -77,7 +84,7 @@ pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.1.tgz
 ```
 
-Also pre-built, no build authorization needed — handy for air-gapped or offline delivery.
+Also pre-built (the plugin itself is never compiled here), handy for air-gapped or offline delivery — and the first `add` needs the same `allowBuilds` answer.
 
 ### Install from GitHub
 
@@ -85,11 +92,12 @@ Also pre-built, no build authorization needed — handy for air-gapped or offlin
 dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace
 ```
 
-With pnpm ≥10 the first `add` fails: a git install pulls **source code rather than build artifacts**, so the package's self-contained `prepare` script must build it on the spot (a direct transpile of `src/`, no type-checking). Follow `dsh`'s guidance and copy the exact package key pnpm prints into the profile's `pnpm-workspace.yaml`:
+With pnpm ≥10 the first `add` fails: a git install pulls **source code rather than build artifacts**, so the package's self-contained `prepare` script must build it on the spot (a direct transpile of `src/`, no type-checking). Follow `dsh`'s guidance and copy the exact package keys pnpm prints into the profile's `pnpm-workspace.yaml` — this source has **two** pending decisions:
 
 ```yaml
 allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace': true
+  koffi: true
 ```
 
 Then run `add` again. Pinning a tag (e.g. `#v0.1.1`) is recommended so a later push cannot silently change what actually runs:
@@ -130,7 +138,7 @@ dsh plugin --profile web add "$PWD"
 dsh --profile web --dump-config
 ```
 
-Expected: **only** the `fs-sandbox` and `sandbox` rows are replaced by the plugin's `multi-root-fs` / `multi-root-sandbox`, with three rows inserted (scope / registry / command); `bash-sandbox` stays upstream (bash and the PTY backend take their roots from `ctx.sandbox`). After starting `dsh --profile web`, the Folders action appears at the sidebar foot.
+Expected: **only** the `fs-sandbox` and `sandbox` rows are replaced by the plugin's `multi-root-fs` / `multi-root-sandbox`, with eight rows inserted (`multi-root-compat` / `fs` / `sandbox` / `scope` / `registry` / `instructions` / `command`, plus the client carrier row `multi-root-client`); `bash-sandbox` stays upstream (bash and the PTY backend take their roots from `ctx.sandbox`). After starting `dsh --profile web`, the Folders action appears at the sidebar foot.
 
 ## Usage
 

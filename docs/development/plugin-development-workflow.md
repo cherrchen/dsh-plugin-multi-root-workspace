@@ -60,7 +60,7 @@ pnpm docs:check         # 文档结构检查
 1. 在临时 `$DSH_HOME` 下初始化一个**不含插件**的 profile（`dsh plugin --profile <name> install`）。
 2. 用 `dsh plugin --profile <name> add <本仓库>` 把插件真正装进另一个 profile（这一步包含 pnpm 安装与 `dsh.profile.bundles` 回填）。
 3. 对两个 profile 各跑一次 `dsh --profile <name> --dump-config`，解析成行集合后逐行比对。
-4. 断言：只有 `fs-sandbox` 与 `sandbox` 两行变成 `disabled: true`，只新增三个插件行，其余行逐字段相同、顺序不变；`dsh` stderr 中不出现 patch 未匹配的告警。
+4. 断言：只有 `fs-sandbox` 与 `sandbox` 两行变成 `disabled: true`，只新增插件的 8 行（`multi-root-compat` / `fs` / `sandbox` / `scope` / `registry` / `instructions` / `command` / client 载体 `multi-root-client`），其余行逐字段相同、顺序不变；`dsh` stderr 中不出现 patch 未匹配的告警。
 
 这一层专门捕捉"disable 静默失效"：上游 patch 语义在 id 匹配不到时只 warn + skip，只有与基线 dump 对照才能把它变成硬失败。
 
@@ -127,8 +127,10 @@ client 测试分两层：`tests/client-bundle.spec.ts` 断言**制品字节**（
 
 ```sh
 dsh plugin --profile web add <本仓库路径>
-dsh --profile web --dump-config     # 应看到两行 disabled + 六行 insert
+dsh --profile web --dump-config     # 应看到两行 disabled + 八行 insert
 ```
+
+`link:` 来源用的是本仓库已装好的依赖，因此不需要 `allowBuilds` 表态；npm / tarball / git 来源都需要，原因与处置见 [README §安装](../../README.md) 与[故障排查：安装停在构建授权](../troubleshooting/install-stops-at-build-approval.md)。
 
 `dsh plugin` 是 pnpm 的转发器：它在 profile 目录里执行 pnpm，并把解析到 `dsh.bundle` 声明的依赖回填进 `dsh.profile.bundles`。桌面端（Electron）保留自己的 `$DSH_HOME/profiles/desktop`，安装方式同源。
 
