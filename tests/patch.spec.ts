@@ -47,7 +47,14 @@ function rowsById(value: unknown, found = new Map<string, Row>()): Map<string, R
 }
 
 function readYaml(path: string): unknown {
-  return parse(readFileSync(path, 'utf8'))
+  return parse(readFileSync(path, 'utf8'), {
+    // The production patch uses `!!js dshHomePath(...)` which the host loader
+    // evaluates; this spec only needs the expression to survive as a string.
+    customTags: [{
+      tag: 'tag:yaml.org,2002:js',
+      resolve: (value: string) => value,
+    }],
+  })
 }
 
 const manifest = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
@@ -107,15 +114,26 @@ describe('provider replacement rows', () => {
 describe('inserted rows', () => {
   const inserted = patchRows.flatMap(row => row.insert ?? [])
 
-  it('inserts the scope service, the two providers, the registry, the user surface, and the client-graph anchor', () => {
+  it('inserts the compat gate, the scope service, the two providers, the registry, the instruction provider, the user surface, and the client-graph anchor', () => {
     expect(inserted.map(row => row.id)).toEqual([
+      'multi-root-compat',
       'multi-root-fs',
       'multi-root-sandbox',
       'multi-root-scope',
       'multi-root-registry',
+      'multi-root-instructions',
       'multi-root-command',
       'multi-root-client',
     ])
+  })
+
+  it('places the compat gate before every row that injects it', () => {
+    const ids = inserted.map(row => row.id)
+    const gate = ids.indexOf('multi-root-compat')
+    expect(gate).toBe(0)
+    for (const gated of ['multi-root-fs', 'multi-root-sandbox', 'multi-root-registry', 'multi-root-instructions']) {
+      expect(ids.indexOf(gated), `${gated} must come after the gate`).toBeGreaterThan(gate)
+    }
   })
 
   it('names entries that this package actually exports', () => {
@@ -138,5 +156,12 @@ describe('inserted rows', () => {
   it('anchors the client graph with a bare-package-name row', () => {
     const anchor = inserted.find(row => row.id === 'multi-root-client')
     expect(anchor?.name).toBe(manifest.name)
+  })
+
+  it('pins the registry lease beside the default JSON storage root', () => {
+    const registry = inserted.find(row => row.id === 'multi-root-registry')
+    expect(registry?.config).toMatchObject({
+      leasePath: "dshHomePath('storages/multi_root_workspace.lock')",
+    })
   })
 })

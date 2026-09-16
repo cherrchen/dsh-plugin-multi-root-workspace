@@ -128,7 +128,9 @@ export type RootValidationCode =
   | 'not-found'
   | 'invalid-ref'
   | 'storage-unavailable'
+  | 'registry-contended'
   | 'reveal-unavailable'
+  | 'session-not-found'
 
 /** A rejected root operation; `code` is the stable contract, `message` the fallback prose. */
 export class RootValidationError extends Error {

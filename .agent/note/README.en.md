@@ -18,6 +18,10 @@ The core test:
 
 > Only knowledge that future Agents are likely to need again, and that is costly to rediscover, belongs here.
 
+## Current State
+
+- [dsh-compat-contract.en.md](./dsh-compat-contract.en.md) — the DSH compatibility contract: the allowlist's single source of truth, how the `multiRootCompat` gate affects tests, `confine`'s shape-preserving sync/async adapter, the rules for `src/compat/`, how to use the upgrade lane, and two quiet traps already stepped in.
+
 ## What Does Not Belong Here
 
 - Chat log backups;

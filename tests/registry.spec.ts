@@ -201,6 +201,7 @@ describe('durability across a restart', () => {
     const other = makeRoot('other')
     await first.registry.add(primary, { path: extra, alias: 'payments' })
     await first.registry.add(primary, { path: other })
+    const originalId = first.registry.list(primary)[0]?.id
     await disposeAll()
 
     const second = await mount()
@@ -208,7 +209,7 @@ describe('durability across a restart', () => {
     expect(statuses.map(status => status.path)).toEqual([extra, other])
     expect(statuses.map(status => status.state)).toEqual(['available', 'available'])
     expect(statuses[0]?.alias).toBe('payments')
-    expect(statuses[0]?.id).toBe(first.registry.list(primary)[0]?.id)
+    expect(statuses[0]?.id).toBe(originalId)
     expect(second.scope.scopeOf(primary)).toEqual([extra, other])
   })
 

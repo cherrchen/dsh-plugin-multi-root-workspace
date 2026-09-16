@@ -1,17 +1,29 @@
-# Upgrade smoke: check whether a different dsh release still composes and still
-# behaves, WITHOUT touching the pinned versions in this repository.
+# Upgrade smoke: does this plugin still hold on a dsh release it has never been
+# verified against?
 #
-# The plugin depends on pre-stable upstream APIs (ADR-0002), so "does a newer
-# dsh break us" is a real question with a mechanical answer: install the
-# requested version family, run the minimal behavior matrix, and report. A
-# difference is the signal to investigate before moving the pin.
+# The plugin subclasses upstream's filesystem and sandbox providers and
+# recognizes the kernel-sandbox profile by the argv shape upstream produced
+# (ADR-0002, ADR-0003), all of which are pre-stable and carry no semver promise.
+# So this job exists to find that out EARLY, on a schedule, instead of at the
+# moment somebody upgrades their harness.
+#
+# What it does NOT do, on purpose: widen the support matrix. A green run here is
+# evidence that a release could be supported, never the authorization. Promoting
+# a release means a human edits SUPPORTED_DSH_RELEASES and peerDependencies and
+# lands it as a reviewed change — see docs/decisions/ADR-0009-dsh-compat-contract.md.
+# That is why the whole matrix runs under DSH_MULTI_ROOT_COMPAT=warn: the runtime
+# gate would otherwise (correctly) refuse to grant additional roots here.
 name: Upgrade smoke
 
 on:
+  schedule:
+    # Mondays, 04:17 UTC. Off the hour so this job is not queued behind every
+    # other repository's hourly cron.
+    - cron: '17 4 * * 1'
   workflow_dispatch:
     inputs:
       version:
-        description: 'dsh version to test (e.g. 0.1.5-rc.2). Empty re-tests the current pin.'
+        description: 'dsh version to test (e.g. 0.1.6-alpha.1). Empty resolves the newest published pre-release.'
         required: false
         default: ''
 
@@ -27,6 +39,14 @@ jobs:
           - ubuntu-latest
           - macos-latest
     runs-on: ${{ matrix.os }}
+    env:
+      CI: 'true'
+      FORCE_COLOR: '0'
+      TERM: dumb
+      # The candidate is by definition not on the allowlist yet, so the gate is
+      # asked to warn instead of refuse. This is the one supported use of the
+      # variable; production deployments leave it unset.
+      DSH_MULTI_ROOT_COMPAT: warn
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -36,21 +56,74 @@ jobs:
         with:
           node-version: 22.19.0
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      # Move the whole @deepseek-ai family to the requested release. The
-      # `latest` dist-tag points at an old build, so the version is explicit.
-      - name: Move the pin
-        if: ${{ inputs.version != '' }}
+
+      - name: Resolve the candidate release
+        id: candidate
         env:
-          DSH_UPGRADE_VERSION: ${{ inputs.version }}
-        run: node scripts/upgrade-dsh-dependencies.mjs --apply
-      - name: Report the versions under test
-        run: node scripts/upgrade-dsh-dependencies.mjs
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$REQUESTED_VERSION" ]; then
+            version="$REQUESTED_VERSION"
+          else
+            version="$(node scripts/upgrade-dsh.mjs --print-latest-prerelease)"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "Invalid candidate version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "### Candidate: \`$version\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Repoint the pin at the candidate
+        env:
+          CANDIDATE_VERSION: ${{ steps.candidate.outputs.version }}
+        run: node scripts/upgrade-dsh.mjs "$CANDIDATE_VERSION"
+      # A candidate release drags in every transitive @deepseek-ai package, all
+      # published minutes ago; the release-age gate is bypassed for this
+      # throwaway tree rather than enumerated in pnpm-workspace.yaml (ADR-0002).
+      - name: Install the candidate
+        run: pnpm install --no-frozen-lockfile --config.minimumReleaseAge=0
+      # The declared pin and the RESOLVED tree are different facts, and the
+      # second one is what everything below actually ran against.
+      - name: Report the tree under test
+        run: node scripts/upgrade-dsh.mjs --print-installed
+
+      - run: pnpm lint
       - run: pnpm typecheck
-      # Build first: the artifact test reads lib/, which a clean checkout lacks.
+      # Build first: tests/client-bundle.spec.ts asserts the BUILT browser
+      # artifact, and lib/ is not in Git.
       - run: pnpm build
+      # Export the verified dialect set before the tests decide whether their
+      # real-runner cases may skip.
       - run: pnpm kernel:probe
-      - run: pnpm test
+      - run: pnpm test > vitest.log 2>&1
       - run: pnpm smoke:compose
-      - run: pnpm smoke:behavior
+      - run: pnpm smoke:behavior > smoke-behavior.log 2>&1
       - run: pnpm smoke:journey
+
+      - name: Upload the logs when a step failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-logs-${{ matrix.os }}
+          path: |
+            vitest.log
+            smoke-behavior.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: State what a green run does and does not mean
+        if: success()
+        env:
+          CANDIDATE_VERSION: ${{ steps.candidate.outputs.version }}
+          RUNNER_OS_NAME: ${{ matrix.os }}
+        run: |
+          {
+            echo "dsh \`$CANDIDATE_VERSION\` passed the full matrix on $RUNNER_OS_NAME."
+            echo
+            echo "This does NOT make it a supported release. To promote it:"
+            echo
+            echo '1. add it to `SUPPORTED_DSH_RELEASES` in `src/compat/dsh-version.ts`;'
+            echo '2. widen every dsh `peerDependencies` range to the new allowlist;'
+            echo '3. run `pnpm compat:check` and land it as a reviewed change.'
+          } >> "$GITHUB_STEP_SUMMARY"

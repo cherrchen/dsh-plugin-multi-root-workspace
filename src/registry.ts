@@ -8,7 +8,7 @@
  * (`ctx.multiRootScope`). Neither provider learns that a registry exists —
  * `setAdditionalRoots()` stays the scope's only write port.
  *
- * Four deliberate properties:
+ * Five deliberate properties:
  *
  * - **Only usable roots are granted.** A registered directory that is absent
  *   right now stays registered and is reported as `missing`, but is withheld
@@ -33,15 +33,23 @@
  *   re-stats and re-canonicalizes every record, republishes the scope, and
  *   leaves storage untouched — a read must not rewrite the store, and a
  *   read-only refresh must not resurrect anything.
+ * - **One process is the Registry Authority.** The JSON backend is
+ *   memory-authoritative after open, so two DSH processes sharing a storage
+ *   root cannot each keep a live domain snapshot. A store-wide kernel lease
+ *   (ADR-0007) elects one authority; a contended process publishes an empty
+ *   scope, rejects mutations, and retries the lease from {@link MultiRootRegistry.refresh}.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/registry
  */
 
 import { randomUUID } from 'node:crypto'
+import { isAbsolute } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { defineDomain, domainTable, type KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
+import type {} from './compat.ts'
+import { RegistryAuthorityLease, RegistryLeaseContendedError } from './registry-lease.ts'
 import {
   additionalRootId,
   availableRoots,
@@ -66,6 +74,33 @@ export const DOMAIN_NAME = 'multi_root_workspace'
 export const TABLE_NAME = 'roots'
 /** Longest accepted display alias. */
 export const MAX_ALIAS_LENGTH = 120
+/**
+ * Operator-facing English for a contended lease. Host-side commands have no
+ * locale; the panel also shows this string verbatim via `RootsView.unavailable`.
+ */
+export const REGISTRY_CONTENDED_MESSAGE
+  = 'the root registry is owned by another DSH process; additional roots are not granted here. Close the other process, then retry.'
+
+/**
+ * Whether this process is the Registry Authority for the store-wide domain
+ * medium. Contended and storage-failed are both fail-closed: the scope stays
+ * empty and mutations reject.
+ */
+export type RegistryAuthorityState =
+  | { readonly kind: 'active' }
+  | { readonly kind: 'contended' }
+  | { readonly kind: 'storage-failed'; readonly reason: string }
+
+/**
+ * Plugin configuration for the registry row. `leasePath` must sit beside the
+ * JSON backend's domain document; the patch default is
+ * `$DSH_HOME/storages/multi_root_workspace.lock`. A custom `storage-json.root`
+ * must override this in lockstep (ADR-0007).
+ */
+export interface Config {
+  /** Absolute path of the store-wide kernel lock file. */
+  readonly leasePath?: string
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -121,66 +156,84 @@ export interface AddRootInput {
 
 /** The registry service: `ctx.multiRootRegistry`. */
 export class MultiRootRegistry extends Service {
-  static inject = ['storageDomain', 'multiRootScope']
+  // `multiRootCompat` is the compatibility gate, not a collaborator: this
+  // service is what decides which directories become writable roots, so it must
+  // not run on a release the contract has not verified (see src/compat.ts).
+  static inject = ['multiRootCompat', 'storageDomain', 'multiRootScope']
 
-  /** The open table; present once the service has started. */
-  private table?: KvTable<string, PersistedPrimaryRoot>
-  /** Why the store is unusable, when it is; every mutation then fails loudly. */
-  private failure?: string
+  /** Absolute lock path; absent means the row was composed without `leasePath`. */
+  private readonly leasePath: string | undefined
+  /** Whether this process currently owns the store. */
+  private authorityState: RegistryAuthorityState = { kind: 'contended' }
+  /** Held kernel lease; present once acquire succeeded, including after a failed open. */
+  private lease: RegistryAuthorityLease | undefined
+  /** Open domain handle; present only while {@link authority} is `active`. */
+  private domain: { close(): Promise<void> } | undefined
+  /** The open table; present once this process is the authority. */
+  private table: KvTable<string, PersistedPrimaryRoot> | undefined
   /** Last classified status list per canonical primary root. */
   private readonly cache = new Map<string, readonly RootStatus[]>()
   /** Signature of the last published grant per key, so a no-op refresh stays a no-op. */
   private readonly published = new Map<string, string>()
   /** One promise chain per canonical primary root: mutations never interleave. */
   private readonly chains = new Map<string, Promise<unknown>>()
+  /** Store-wide queue for lease acquire / open / release. */
+  private authorityChain: Promise<unknown> = Promise.resolve()
   /** Change listeners, keyed by their own disposer identity. */
   private readonly listeners = new Set<(primaryRoot: string) => void>()
+  /** True after a contended-lease warning has been emitted, so refresh does not spam. */
+  private loggedContended = false
+  /** True once the fiber disposer has run: no further acquisition may happen. */
+  private disposed = false
 
   /**
    * @param ctx - the host context; `storageDomain` and `multiRootScope` are injected.
+   * @param config - the patch row's `leasePath`.
    */
-  constructor(ctx: Context) {
+  constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'multiRootRegistry')
+    this.leasePath = config.leasePath
   }
 
   /**
-   * Open the domain and publish every stored root into the scope.
+   * Become the Registry Authority if possible: acquire the store-wide lease,
+   * then open the domain and publish every stored root into the scope.
    *
-   * A store this build cannot read (corrupt records, a version written by a
-   * different plugin version) is reported loudly and degrades to the empty
-   * root set instead of failing activation: granting nothing is the safe
-   * direction, and a broken side store must not keep the whole harness from
-   * starting. Every mutation then reports `storage-unavailable` with that
-   * reason until the file is repaired or removed.
+   * A contended lease is fail-closed rather than a stale open: this process
+   * grants nothing and every mutation reports `registry-contended`. A store
+   * this build cannot read is reported loudly and also grants nothing. Neither
+   * case fails activation — a broken or contended side store must not keep the
+   * whole harness from starting. {@link MultiRootRegistry.refresh} retries.
    */
   protected async [Service.init](): Promise<void> {
-    let domain
-    try {
-      domain = await this.ctx.storageDomain.open(multiRootDomainSpec)
-    } catch (error: unknown) {
-      this.failure = `${DOMAIN_NAME}: ${error instanceof Error ? error.message : String(error)}`
-      this.ctx.logger.error(
-        `multi-root-workspace: cannot open the root registry store (${DOMAIN_NAME});`
-        + ' no additional root is granted until it is repaired or removed:'
-        + ` ${this.failure}`,
-      )
-      return
-    }
-    this.ctx.effect(() => () => domain.close(), 'multi-root-registry: domain close')
-    this.table = domain.table(TABLE_NAME)
-    for (const [primaryRoot, record] of this.table.entries()) {
-      this.accept(primaryRoot, record)
+    this.ctx.effect(() => () => this.releaseAuthority(), 'multi-root-registry: authority release')
+    await this.ensureAuthority()
+  }
+
+  /**
+   * Why the registry is not granting, when it is not. Surfaces show this
+   * instead of a silently empty list, so an operator can tell "no roots
+   * configured" from "another DSH process owns the store" or "the file could
+   * not be read".
+   * @returns the recorded failure text, or `undefined` while this process is the authority.
+   */
+  get unavailable(): string | undefined {
+    switch (this.authorityState.kind) {
+      case 'active':
+        return undefined
+      case 'contended':
+        return REGISTRY_CONTENDED_MESSAGE
+      case 'storage-failed':
+        return this.authorityState.reason
     }
   }
 
   /**
-   * Why the store is unusable, when it is. Surfaces show this instead of a
-   * silently empty list, so an operator can tell "no roots configured" from
-   * "the configuration could not be read".
-   * @returns the recorded failure text, or `undefined` while the store is healthy.
+   * Whether this process is the Registry Authority for the store-wide medium.
+   * Tests and diagnostics read this; surfaces use {@link unavailable}.
    */
-  get unavailable(): string | undefined {
-    return this.failure
+  get authority(): RegistryAuthorityState {
+    return this.authorityState
   }
 
   /**
@@ -209,10 +262,17 @@ export class MultiRootRegistry extends Service {
    *
    * The serialized queue is shared with the mutations, so a refresh never
    * interleaves with a write that is mid-flight.
+   *
+   * Refresh is also the takeover path: it calls {@link MultiRootRegistry.ensureAuthority}
+   * first, so a process that started contended can become the authority after
+   * the previous holder exits, re-open the domain from disk, and publish the
+   * last durable state — without a restart.
    * @param primaryRoot - the session workspace root to re-check.
    * @returns the refreshed status list.
    */
   async refresh(primaryRoot: string): Promise<readonly RootStatus[]> {
+    await this.ensureAuthority()
+    if (this.authorityState.kind !== 'active') return []
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, () => this.reclassify(key))
   }
@@ -225,6 +285,8 @@ export class MultiRootRegistry extends Service {
    * @throws {RootValidationError} when the candidate violates a root rule.
    */
   async add(primaryRoot: string, input: AddRootInput): Promise<readonly RootStatus[]> {
+    await this.ensureAuthority()
+    this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
       const statuses = this.statusesOf(key)
@@ -290,6 +352,8 @@ export class MultiRootRegistry extends Service {
    * @throws {RootValidationError} `not-found` when the reference matches nothing.
    */
   async removeAt(primaryRoot: string, ref: RootRef): Promise<readonly RootStatus[]> {
+    await this.ensureAuthority()
+    this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => await this.persist(key, removeStatusAt(this.statusesOf(key), ref)))
   }
@@ -303,6 +367,8 @@ export class MultiRootRegistry extends Service {
    * @throws {RootValidationError} `not-found`/`invalid-alias`.
    */
   async setAlias(primaryRoot: string, ref: RootRef, alias: string | undefined): Promise<readonly RootStatus[]> {
+    await this.ensureAuthority()
+    this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
       const statuses = this.statusesOf(key)
@@ -326,6 +392,8 @@ export class MultiRootRegistry extends Service {
    * @throws {RootValidationError} `not-found` when either reference matches nothing.
    */
   async move(primaryRoot: string, ref: RootRef, beforeRef?: RootRef): Promise<readonly RootStatus[]> {
+    await this.ensureAuthority()
+    this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
       const statuses = this.statusesOf(key)
@@ -351,6 +419,8 @@ export class MultiRootRegistry extends Service {
    * @returns the refreshed status list.
    */
   async recheck(primaryRoot: string): Promise<readonly RootStatus[]> {
+    await this.ensureAuthority()
+    this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => await this.persist(key, this.reclassify(key)))
   }
@@ -413,8 +483,8 @@ export class MultiRootRegistry extends Service {
    * the situation, while every write fails loudly in `requireTable()`).
    */
   private lookupRecords(key: string): PersistedPrimaryRoot | undefined {
-    if (this.failure !== undefined) return undefined
-    return this.requireTable().get(key)
+    if (this.authorityState.kind !== 'active') return undefined
+    return this.table?.get(key)
   }
 
   /**
@@ -518,19 +588,205 @@ export class MultiRootRegistry extends Service {
   /**
    * The open table.
    * @returns the live table.
-   * @throws {RootValidationError} `storage-unavailable` when the store could
-   *   not be opened at activation, or the service has not started.
+   * @throws {RootValidationError} `registry-contended` when another DSH process
+   *   owns the store, `storage-unavailable` when the store could not be opened,
+   *   or an error when the service has not started.
    */
   private requireTable(): KvTable<string, PersistedPrimaryRoot> {
-    if (this.failure !== undefined) {
+    if (this.authorityState.kind === 'contended') {
+      throw new RootValidationError('registry-contended', REGISTRY_CONTENDED_MESSAGE)
+    }
+    if (this.authorityState.kind === 'storage-failed') {
       throw new RootValidationError(
         'storage-unavailable',
-        `the root registry store is unavailable (${this.failure}); `
+        `the root registry store is unavailable (${this.authorityState.reason}); `
         + 'remove or repair $DSH_HOME/storages/' + DOMAIN_NAME + '.json and restart dsh',
       )
     }
     if (this.table === undefined) throw new Error('multi-root registry is not started yet')
     return this.table
+  }
+
+  /**
+   * Reject mutations unless this process is the Registry Authority.
+   * Called before path validation so a contended process never mis-reports
+   * `missing` / `not-absolute` for a directory it is not allowed to register.
+   */
+  private requireActive(): void {
+    this.requireTable()
+  }
+
+  /**
+   * Acquire the store-wide lease if this process does not already hold it, then
+   * open the domain from disk. Idempotent while active. A contended process
+   * retries here (the command `list` and the panel Retry button both call
+   * {@link MultiRootRegistry.refresh}).
+   */
+  private async ensureAuthority(): Promise<void> {
+    await this.serializeAuthority(async () => {
+      // The teardown queues behind any acquisition, so a disposer that ran
+      // first must not be followed by a new medium nobody will ever close.
+      if (this.disposed) return
+      if (this.authorityState.kind === 'active') return
+      if (this.lease !== undefined) {
+        await this.openDomain()
+        return
+      }
+      const leasePath = this.leasePath
+      if (leasePath === undefined || leasePath === '') {
+        this.enterStorageFailed(
+          `${DOMAIN_NAME}: leasePath is not configured; set it next to storage-json.root `
+          + `(default $DSH_HOME/storages/${DOMAIN_NAME}.lock)`,
+        )
+        return
+      }
+      if (!isAbsolute(leasePath)) {
+        this.enterStorageFailed(`${DOMAIN_NAME}: leasePath must be an absolute path`)
+        return
+      }
+      try {
+        this.lease = await RegistryAuthorityLease.acquire(leasePath)
+      } catch (error: unknown) {
+        if (error instanceof RegistryLeaseContendedError) {
+          this.enterContended()
+          return
+        }
+        this.enterStorageFailed(
+          `${DOMAIN_NAME}: cannot acquire the registry lease: `
+          + `${error instanceof Error ? error.message : String(error)}`,
+        )
+        return
+      }
+      await this.openDomain()
+    })
+  }
+
+  /**
+   * Open the domain under an already-held lease and publish every stored root.
+   * On failure the lease is kept so a later refresh can retry the open without
+   * letting a second process grant from a stale snapshot.
+   */
+  private async openDomain(): Promise<void> {
+    let domain
+    try {
+      domain = await this.ctx.storageDomain.open(multiRootDomainSpec)
+    } catch (error: unknown) {
+      const reason = `${DOMAIN_NAME}: ${error instanceof Error ? error.message : String(error)}`
+      this.ctx.logger.error(
+        `multi-root-workspace: cannot open the root registry store (${DOMAIN_NAME});`
+        + ' no additional root is granted until it is repaired or removed:'
+        + ` ${reason}`,
+      )
+      this.enterStorageFailed(reason)
+      return
+    }
+    this.domain = domain
+    this.table = domain.table(TABLE_NAME)
+    this.authorityState = { kind: 'active' }
+    this.loggedContended = false
+    this.cache.clear()
+    this.published.clear()
+    for (const [primaryRoot, record] of this.table.entries()) {
+      this.accept(primaryRoot, record)
+    }
+  }
+
+  /** Fail closed: empty scope, no table, contended state. */
+  private enterContended(): void {
+    this.withdrawPublished()
+    this.table = undefined
+    this.authorityState = { kind: 'contended' }
+    if (!this.loggedContended) {
+      this.loggedContended = true
+      this.ctx.logger.warn(
+        'multi-root-workspace: registry lease is held by another DSH process;'
+        + ' additional roots are not granted here until it exits and this process refreshes',
+      )
+    }
+  }
+
+  /** Fail closed: empty scope, no table, storage-failed state. The lease, if held, stays. */
+  private enterStorageFailed(reason: string): void {
+    this.withdrawPublished()
+    this.table = undefined
+    this.authorityState = { kind: 'storage-failed', reason }
+  }
+
+  /** Drop every grant this process has published. Idempotent. */
+  private withdrawPublished(): void {
+    for (const key of this.published.keys()) {
+      this.ctx.multiRootScope.setAdditionalRoots(key, [])
+    }
+    this.published.clear()
+    this.cache.clear()
+  }
+
+  /**
+   * Drain every queued mutation, close the domain, then release the kernel
+   * lease — in that order, and inside the authority-transition queue.
+   *
+   * The order is the invariant, not a detail. The lease is what makes "the
+   * store is mine" true, so it must outlive every write this process will ever
+   * make, including the queued writes `close()` itself drains: a successor that
+   * acquired the lease and opened the medium in the window between a release
+   * and a `put()` would read a snapshot missing that mutation. Running the
+   * whole teardown through {@link MultiRootRegistry.serializeAuthority} is the
+   * other half: a `refresh()` that is mid-flight when the fiber disposes must
+   * not finish by opening a domain and a lease that nothing will ever close.
+   */
+  private async releaseAuthority(): Promise<void> {
+    this.disposed = true
+    await this.serializeAuthority(async () => {
+      // Fail closed first, so no further mutation is admitted while teardown
+      // runs (a mutation admitted later would fail in `requireTable()`, by design).
+      this.table = undefined
+      this.authorityState = { kind: 'contended' }
+      await this.drainMutations()
+      // After the drain, so a grant a finishing mutation just published is
+      // dropped instead of outliving the teardown.
+      this.withdrawPublished()
+      const domain = this.domain
+      this.domain = undefined
+      if (domain !== undefined) {
+        try {
+          await domain.close()
+        } catch {
+          // Dispose must not throw through the fiber.
+        }
+      }
+      const lease = this.lease
+      this.lease = undefined
+      if (lease !== undefined) {
+        try {
+          await lease.release()
+        } catch {
+          // Kernel release on process death is the fallback.
+        }
+      }
+    })
+  }
+
+  /**
+   * Wait until no per-primary-root mutation is queued or running.
+   *
+   * One pass is enough, and only because the authority state has already been
+   * flipped: no further mutation can be admitted (it would fail in
+   * `requireTable()`), and every mutation admitted earlier put its own tail in
+   * `chains` before it ran.
+   */
+  private async drainMutations(): Promise<void> {
+    await Promise.allSettled([...this.chains.values()])
+  }
+
+  /**
+   * Run one authority-transition job after every job already queued. Acquire,
+   * open, and release never interleave with each other.
+   */
+  private async serializeAuthority<T>(job: () => T | Promise<T>): Promise<T> {
+    const previous = this.authorityChain
+    const run = previous.then(job)
+    this.authorityChain = run.then(() => undefined, () => undefined)
+    return await run
   }
 }
 

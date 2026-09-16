@@ -18,6 +18,10 @@ English: [README.en.md](./README.en.md)
 
 > 只有后续 Agent 很可能需要重新发现，并且重新发现成本较高的知识，才值得放入本目录。
 
+## 当前状态
+
+- [dsh-compat-contract.md](./dsh-compat-contract.md) — DSH 兼容性契约：allowlist 的唯一真源、`multiRootCompat` 门禁对测试的影响、`confine` 同步/异步保形、`src/compat/` 适配层规则、升级车道用法与两处曾踩过的安静坑。
+
 ## 不应该存放什么
 
 - 聊天记录备份；

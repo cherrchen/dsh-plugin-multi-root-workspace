@@ -28,6 +28,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { MultiRootFileSystem } from '../src/fs.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
+import { mountCompat } from './support/compat.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 import { symlinkUnsupportedReason } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
@@ -63,6 +64,7 @@ async function mount(plugin: unknown, fixture: FixtureWorkspace, mode: SandboxMo
   )
   if (plugin === MultiRootFileSystem) {
     fibers.push(await ctx.plugin(MultiRootScopeService))
+    await mountCompat(ctx)
   }
   fibers.push(await ctx.plugin(plugin as never, { cwd: fixture.workspace }))
   if (plugin === MultiRootFileSystem) {
@@ -321,6 +323,7 @@ describe('configuration compatibility', () => {
       await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace }),
       await ctx.plugin(MultiRootScopeService),
     )
+    await mountCompat(ctx)
     await expect(ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace, diffBasisMaxBytes: 0 })).rejects.toThrow()
   })
 })

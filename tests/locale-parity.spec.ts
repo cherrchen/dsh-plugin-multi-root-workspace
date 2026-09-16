@@ -49,6 +49,7 @@ describe('panel dictionaries', () => {
       'not-found',
       'invalid-ref',
       'storage-unavailable',
+      'registry-contended',
       'reveal-unavailable',
       'unavailable',
       'copy-failed',

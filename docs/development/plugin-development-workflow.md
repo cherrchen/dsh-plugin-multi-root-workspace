@@ -1,15 +1,16 @@
 # 插件开发工作流：构建、测试与冒烟
 
-> 状态：M1、M2 已落地；M3 已落地并按外部审查返工后重新验收。本文记录本仓库当前**真实存在**的命令、运行时约束与验证机制；未实现的流程不要写在这里。
-> 相关：[需求](../requirements/multi-root-workspace.md)、[架构](../architecture/multi-root-workspace.md)、[ADR-0002 上游耦合策略](../decisions/ADR-0002-upstream-coupling-policy.md)、[ADR-0003 方言 grant 拼接](../decisions/ADR-0003-dialect-grant-widening.md)
+> 状态：MVP（M1/M2/M3）与 `v0.1.1` 硬化批次（H1–H4）均已落地；进度、编号与发布状态的唯一真源见[路线图 §进度总账](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)。本文记录本仓库当前**真实存在**的命令、运行时约束与验证机制；未实现的流程不要写在这里。
+> 相关：[需求](../requirements/multi-root-workspace.md)、[架构](../architecture/multi-root-workspace.md)、[ADR-0002 上游耦合策略](../decisions/ADR-0002-upstream-coupling-policy.md)、[ADR-0003 方言 grant 拼接](../decisions/ADR-0003-dialect-grant-widening.md)、[ADR-0009 DSH 兼容性代码契约](../decisions/ADR-0009-dsh-compat-contract.md)
 
 ## 1. 目标运行时与版本策略
 
 | 项 | 值 | 说明 |
 | --- | --- | --- |
-| 开发/CI 目标版本 | `0.1.5-rc.2` | 精确 pin 在 `devDependencies`；与上游 checkout master `c291e7961a` 的包版本一致 |
-| 兼容下限 | `>=0.1.2-alpha.4 <0.2.0` | `peerDependencies` 范围，使插件能装进已发布的其他运行时 |
-| 已实测的第二个运行时 | `0.1.2-rc.1` | 桌面端安装的运行时；`smoke:compose` 与 `smoke:behavior` 均已在其上通过 |
+| 开发/CI 目标版本（基线） | `0.1.5-rc.2` | 精确 pin 在 `devDependencies`；本地与 CI 主 lane 都跑它 |
+| 支持矩阵 | `0.1.5-rc.2`、`0.1.6-alpha.1` | **精确版本 allowlist**（`src/compat/dsh-version.ts` 的 `SUPPORTED_DSH_RELEASES`），`peerDependencies` 逐项或 —— 不是范围 |
+| 已实测的第二个运行时 | `0.1.6-alpha.1` | 由 `upgrade.yml` 车道跑完整矩阵证明；是否进 allowlist 由人决定，CI 绿不是授权 |
+| 运行时门禁 | `multi-root-compat` 行 | 版本不在 allowlist 或核心包混装时，四个安全相关行根本不启动（ADR-0009） |
 | cordis | `4.0.2` | 与服务定义包一样必须单副本，由宿主提供 |
 
 **必须精确 pin**：`@deepseek-ai/dsh-*` 的 `latest` dist-tag 指向陈旧的 `0.0.1-rc.1`，真正的新版发布在 `next`；范围依赖会解析到错误版本。`pnpm-workspace.yaml` 里的 `minimumReleaseAgeExclude` 是为此配套的（pnpm 的发布年龄门禁会拦下刚发布的预发布版本）。
@@ -30,19 +31,23 @@
 
 ```sh
 pnpm install            # 安装（首次或改依赖后）
+pnpm compat:check       # DSH 兼容性契约：allowlist / peerDependencies / 开发 pin / 已安装树四者一致
 pnpm lint               # oxlint（host 与 client 半部都扫）
 pnpm typecheck          # tsc -p tsconfig.host.json 与 -p tsconfig.client.json 各一次
 pnpm build              # tsc 出两面 lib/types/**/*.d.ts + tsdown 出 lib/*.js（host ESM）与 lib/client.js（浏览器闭包工厂）
-pnpm test               # vitest run：单测 + 校验规则 + 注册表（含并发/替换/恢复）+ 命令/通道 + 空根差分 parity + 方言 grant 矩阵 + client 制品/面板 + 词典 parity + patch 不变量
+pnpm test               # vitest run：单测 + 校验规则 + 注册表（含并发/替换/恢复/跨进程 lease）+ 命令/通道 + 空根差分 parity + 方言 grant 矩阵 + client 制品/面板 + 词典 parity + patch 不变量
 pnpm kernel:probe       # 本机是否真能受限执行；能则导出 DSH_REQUIRE_KERNEL_RUNNER=1，使内核断言必须真跑
 pnpm smoke:compose      # 组合门禁（需要先 build）
 pnpm smoke:behavior     # 空根直通 + 多根 battery + 注册表/命令 battery（需要先 build）
 pnpm smoke:journey      # 跨两个 git repo 的 web/headless 双 profile 旅程（需要先 build）
 pnpm smoke              # compose + behavior + journey
+pnpm verify:all         # lint → typecheck → build → test → kernel:probe → smoke
 pnpm docs:check         # 文档结构检查
 ```
 
 三个冒烟都要求 `lib/` 已构建（冒烟脚本会检查并提示 `pnpm build`）。
+
+`pnpm verify:all` **故意不含** `compat:check`：升级车道需要在一个还不在 allowlist 上的候选版本上跑完整矩阵，而静态门禁按设计会拒绝那棵树。CI 主车道单独跑 `compat:check`，位置在 lint 之前（见 §9）。
 
 **`pnpm test` 必须在 `pnpm build` 之后**：`tests/client-bundle.spec.ts` 断言的是**构建产物** `lib/client.js`（浏览器闭包工厂形态、模块表依赖清单），而 `/lib/` 被 gitignore、也没有安装时构建钩子。干净 checkout 上先跑测试会得到 `ENOENT` 失败——CI 与升级工作流都按 `lint → typecheck → build → test` 排序。
 
@@ -88,7 +93,7 @@ pnpm docs:check         # 文档结构检查
 
 | 变量 | 作用 |
 | --- | --- |
-| `DSH_CLI` | 指定要驱动的 `dsh` 入口；默认用 `devDependencies` 里 pin 的那份。用于双运行时矩阵 |
+| `DSH_CLI` | 指定要驱动的 `dsh` 入口；默认用 `devDependencies` 里 pin 的那份。用于支持矩阵回归 |
 | `DSH_SMOKE_HOME` | 冒烟临时根目录（默认 `tmpdir()/dsh-multi-root-smoke`） |
 | `DSH_SMOKE_KEEP=1` | 保留临时 `$DSH_HOME` 与夹具，便于事后检查；`docs:check` 已忽略 `.dsh-smoke/` |
 
@@ -144,13 +149,33 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 六行 insert
 
 - **只允许包入口导入**。发布包里没有 `src/`，`pkg/src/*` 在安装形态下不存在；需要上游内部实现时改为本地实现 + 注明出处 + 差分测试钉住（见 `src/containment.ts`）。
 - 子类只使用上游公开方法面（不碰 TS-private、不做原型替换）。`dsh-sandbox-local` 公开面只有 `confine` + `internals`，因此方言适配是**观测克隆 + 结构识别 + 识别失败即抛错**（`src/dialects.ts`，见 [ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；新增或改变方言必须同时更新调研 §10 与本文件的测试清单。
-- **升级流程**：改 pin → `pnpm install` → `pnpm test`（差分 parity + 方言矩阵 + patch 不变量）→ `pnpm build` → `pnpm smoke:compose` → `pnpm smoke:behavior`。任一差异即视为破坏性变更，先定位再改 pin。
-- `upgrade.yml` 不维护手写包名清单：`scripts/upgrade-dsh-dependencies.mjs` 从 `package.json` 枚举所有直接 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 依赖，统一升级并输出每个包的实际版本。新增直接 DSH 依赖不需要另外修工作流。
-- 双运行时回归：`DSH_CLI=<另一运行时的 dsh 入口> pnpm smoke`。
+- **支持矩阵是精确版本 allowlist**（`src/compat/dsh-version.ts` 的 `SUPPORTED_DSH_RELEASES`），不是 semver 范围；`peerDependencies` 声明为 allowlist 的逐项或。运行时由 `multi-root-compat` 门禁把判定变成前置条件，四个安全相关的 provider 行全部 inject `multiRootCompat`，判定失败时它们根本不启动。详见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)。
+- **版本差异只允许存在于 `src/compat/`**，且用结构探测而非版本比较（当前吸收了 `confine` 的同步/异步形状与 instruction renderer 的改名）。业务代码不写版本判断。
+- **升级流程**（提升一个候选版本）：
+
+  ```sh
+  # 先确认这三个文件没有未提交改动 —— 最后一步会把它们整体退回 HEAD
+  git status --porcelain package.json pnpm-workspace.yaml pnpm-lock.yaml
+
+  node scripts/upgrade-dsh.mjs 0.1.7-alpha.1                         # 重指 devDependencies 与 release-age 条目
+  pnpm install --no-frozen-lockfile --config.minimumReleaseAge=0     # 候选版本的整棵树都是刚发布的
+  DSH_MULTI_ROOT_COMPAT=warn pnpm verify:all                         # 候选按设计还不在 allowlist 上
+  git checkout -- package.json pnpm-workspace.yaml pnpm-lock.yaml    # 回退
+  pnpm install --frozen-lockfile                                     # 把 node_modules 也退回基线
+  ```
+
+  最后两步在 CI 里无所谓（每次都是干净 checkout），在本地则**会连同你对这三个文件的未提交修改一起抹掉**——先提交或 stash。
+
+  全绿之后才人工把版本加入 `SUPPORTED_DSH_RELEASES` 并同步 `peerDependencies`，最后 `pnpm compat:check`。**"CI 通过"不等于"支持该版本"**：绿灯是证据，不是授权。
+- `upgrade.yml` 不维护手写包名清单：`scripts/upgrade-dsh.mjs` 从 `package.json` 枚举所有直接 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 依赖，统一重指并可输出每个包**实际解析到**的版本（`--print-installed`）。新增直接 DSH 依赖不需要另外修工作流。
+- 支持矩阵回归：`DSH_CLI=<另一受支持版本的 dsh 入口> pnpm smoke`（CI 由 `upgrade.yml` 车道按周自动跑）。
+- 跨版本编写 smoke/测试时的两处安静坑（`confine` 的 promise、journey 的 agent-step 判据）记在 [Agent Note](../../.agent/note/dsh-compat-contract.md)。
 
 ## 7. CI
 
-`.github/workflows/ci.yml` 在 `ubuntu-latest` 与 `macos-latest` 上执行：`lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `docs:check`。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。升级工作流保持同样顺序。
+`.github/workflows/ci.yml` 在 `ubuntu-latest` 与 `macos-latest` 上执行：**`compat:check`** → `lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `docs:check`。`compat:check` 放在最前，因为后续每一步的结果只有对"契约真正声明的版本"才算证据。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。
+
+`.github/workflows/upgrade.yml` 是**按周**运行的升级车道（也可手动触发指定版本）：解析 `@deepseek-ai/dsh` 最新 pre-release → 重指 pin → 安装 → 与主车道同样顺序的完整矩阵，全程 `DSH_MULTI_ROOT_COMPAT=warn`。它的权限是 `contents: read`，不提交、不推送、不碰 allowlist；成功时只在 step summary 里写出人工提升的三步。它**不**跑 `compat:check`（候选按设计不在 allowlist 上）。这些性质由 `tests/workflows.spec.ts` 钉住。 手动版本输入及 candidate output 只通过 step `env` 传入 shell，禁止把 GitHub 表达式直接嵌进 `run`；写入 `$GITHUB_OUTPUT` 前校验为单行版本，避免 shell 代码执行与多行输出注入。
 
 Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seatbelt。**"没跑"不会被记成通过**，机制分两层，而且**按方言**判定：
 
@@ -174,11 +199,16 @@ Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seat
 | bash 报 `SANDBOX_UNAVAILABLE` 且文案含 "cannot grant the additional workspace roots" | 上游改了方言 profile 形状，插件拒绝静默降级 | 按调研 §10 核对新形状并更新 `src/dialects.ts` 的识别/克隆逻辑与 `tests/dialects.spec.ts` |
 | 多根 session 里 fs 能写附加根、bash 不能 | win32 的 ACL rung 无法表达附加根（第一期限制） | 查看是否已输出一次性告警；这是已知限制，需求文档已明示 |
 | `smoke:*` 提示 `lib/ is missing` | 未构建 | 先跑 `pnpm build` |
+| 一批测试报 `Cannot read properties of undefined (reading 'confine')` / `ctx.get('fs')` 为 `undefined` | 该 spec mount 了被门禁保护的 provider，但没先 mount `multiRootCompat` | 在 mount provider 之前 `await mountCompat(ctx)`（`tests/support/compat.ts`）；这是门禁在工作，不是 bug |
+| 插件装上但行为完全等同未安装，日志里有 `is not a supported release` / `mixes several DSH releases` | 宿主的 DSH 版本不在 allowlist 上，或多个 `@deepseek-ai/dsh-*` 混装 | 见[故障排查：DSH 版本不在支持矩阵上](../troubleshooting/unsupported-dsh-release.md)；`mixed` 永远按宿主问题处理，不要用 `DSH_MULTI_ROOT_COMPAT=warn` 绕过 |
+| `pnpm compat:check` 失败 | allowlist / `peerDependencies` / 开发 pin / 已安装树四者不一致 | 按报错逐条对齐；改 allowlist 必须同时改 `peerDependencies`（ADR-0009） |
+| 内核方言断言报 `Cannot read properties of undefined (reading 'some')` | 在返回 promise 的上游版本上同步读了 `confine()` 的结果 | 一律 `await ctx.sandbox.confine(...)`；单测走 `tests/support/confine.ts` |
 | bash 断言整体 skipped | 当前进程已被内核沙箱约束，无法嵌套 | 在不被约束的终端或 CI 中运行以覆盖该项 |
 | `pnpm <script>` 报 `EPERM ... /Library/pnpm/.tools` | 仓库 pin 的 pnpm 版本需要写用户级 pnpm 目录 | 在可写该目录的终端（或提权）执行；仅跑门禁时可用 `sh node_modules/.bin/<tool>` 绕过 pnpm |
 | `pnpm <script>` 报 `ERR_PNPM_UNEXPECTED_STORE` 或 `ABORTED_REMOVE_MODULES_DIR_NO_TTY` | checkout 里存在一个陈旧的 `.pnpm-store/`（被 gitignore），而 `node_modules` 是从磁盘级 store（如 `<挂载点>/.pnpm-store/v11`）链接的；pnpm 运行脚本前的依赖自检因此想重装，而在没有 TTY 时无法确认删除 | 最快解除：`CI=true pnpm <script>`（pnpm 只在 CI 下继续而不交互确认）。根治：删掉陈旧的仓库内 `.pnpm-store/`；或 `pnpm config set store-dir <node_modules 实际链接的 store>`；或直接用 `sh node_modules/.bin/<tool>` / `node scripts/<smoke>.mjs` 跑门禁（CI 不受影响，它本来就有 `CI=true`） |
 | `ERR_PNPM_IGNORED_BUILDS` | 有构建脚本的依赖未在 `pnpm-workspace.yaml` 声明 | 把该依赖加入 `allowBuilds`（需要构建）或 `allowBuilds: false`（明确不需要）；当前 `esbuild`（经 vite/vitest 引入）声明为 `false` |
 | 面板在 Web GUI 里看不到 | 组合里没有声明 `sidebar.footer.action` 的侧栏，或该面没有 host `connection`（headless 组合） | 面板是软注册（`slots.inject` 不触发即不出现）；用 `/workspace-folders list` 确认注册表本身可用 |
+| 面板显示「当前没有活动会话」 | 浏览器当前没有 Session | 打开或选中一个工作区会话后点重试；host 不会猜测主根（ADR-0008） |
 | 面板报 "根目录登记的存储不可用" | `$DSH_HOME/storages/multi_root_workspace.json` 损坏或版本不符 | 按提示修复或删除该文件后重启 dsh；插件不会因此拒绝启动（ADR-0004） |
 | 面板报 "无法连接到 dsh 主进程" 且括号里是 **HTTP 405** | 通道前缀路由未注册，请求落到了 SPA 静态回退——典型根因是 `rpc.handle` 的调用形态违反 cordis 属性解析纪律（服务必须从根上下文读取，依赖必须同时声明 `connection` 与 `webServer`） | 用 `curl -X POST http://127.0.0.1:<port>/multi-root-workspace/list` 区分：401 = 路由在（只是 curl 未认证），405 = 路由缺；详见[故障排查：面板 HTTP 405](../troubleshooting/panel-channel-http-405.md) |
 | 注册的根标着 `missing` 且写不进去 | 目录当前不存在（或不是目录） | 恢复目录后执行 `/workspace-folders list`（或在面板里刷新/重试）即可重新授予——这正是 `registry.refresh()` 的作用，不需要重启；`missing` 的根在被重新校验前不会被授予 |

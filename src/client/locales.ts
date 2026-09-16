@@ -23,6 +23,7 @@ export const zh = {
   'panel.additional': '附属工作目录',
   'panel.empty': '还没有附属工作目录。',
   'panel.emptyHint': '添加后，Agent 可在同一会话中读写该目录；macOS/Linux 的受限 bash 同步生效，Windows 当前仅覆盖 fs 写路径。',
+  'panel.noSession': '当前没有活动会话',
   'panel.loading': '正在读取…',
   'panel.retry': '重试',
   'panel.close': '关闭',
@@ -56,9 +57,11 @@ export const zh = {
   'error.not-found': '没有找到对应的登记项。',
   'error.invalid-ref': '请求缺少必要的标识。',
   'error.storage-unavailable': '根目录登记的存储不可用，请检查 $DSH_HOME/storages 下的文件。',
+  'error.registry-contended': '根目录登记正由另一个 DSH 进程占用；本进程不会授予附加根。关闭另一个进程后点重试。',
   'error.reveal-unavailable': '无法打开系统的文件管理器；登记项不受影响，路径仍可复制。',
   'error.unavailable': '无法连接到 dsh 主进程。',
   'error.copy-failed': '无法写入剪贴板，请检查浏览器的剪贴板权限。',
+  'error.session-not-found': '找不到该会话；请先打开一个工作区会话。',
   'error.fallback': '操作失败。',
 } satisfies Record<string, string>
 
@@ -76,6 +79,7 @@ export const en = {
   'panel.additional': 'Secondary working directories',
   'panel.empty': 'No secondary working directories yet.',
   'panel.emptyHint': 'Once added, the agent can use the folder in this session; confined bash follows on macOS/Linux, while Windows currently covers fs writes only.',
+  'panel.noSession': 'No active session',
   'panel.loading': 'Loading…',
   'panel.retry': 'Retry',
   'panel.close': 'Close',
@@ -109,9 +113,11 @@ export const en = {
   'error.not-found': 'No registration matches that reference.',
   'error.invalid-ref': 'The request is missing a required identity.',
   'error.storage-unavailable': 'The root registry store is unavailable; check the files under $DSH_HOME/storages.',
+  'error.registry-contended': 'The root registry is owned by another DSH process; this process grants no additional roots. Close the other process, then retry.',
   'error.reveal-unavailable': 'Could not open the system file manager; the registration is untouched, and the path can still be copied.',
   'error.unavailable': 'Could not reach the dsh host process.',
   'error.copy-failed': 'Could not write to the clipboard; check the browser\'s clipboard permission.',
+  'error.session-not-found': 'That session is not active; open a workspace session first.',
   'error.fallback': 'The operation failed.',
 } satisfies Record<Key, string>
 

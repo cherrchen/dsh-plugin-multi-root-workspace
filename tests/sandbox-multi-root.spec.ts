@@ -14,13 +14,15 @@ import { mkdirSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
-import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { SandboxInternals } from '@deepseek-ai/dsh-sandbox-local'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
+import { mountCompat } from './support/compat.ts'
+import { confined } from './support/confine.ts'
 import { parseConfined } from './support/dialect-grants.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
@@ -64,7 +66,10 @@ async function mount(plugin: unknown, mode: SandboxPolicy['mode'], internals: Sa
     await ctx.plugin(SessionProjectionRegistry),
     await ctx.plugin(SandboxPolicyService, { mode, workspaceRoot: fixture.workspace }),
   )
-  if (plugin === MultiRootSandboxProvider) fibers.push(await ctx.plugin(MultiRootScopeService))
+  if (plugin === MultiRootSandboxProvider) {
+    fibers.push(await ctx.plugin(MultiRootScopeService))
+    await mountCompat(ctx)
+  }
   fibers.push(await ctx.plugin(plugin as never, {}))
   const provider = ctx.sandbox as LocalSandboxProvider
   provider.internals = { ...internals }
@@ -76,14 +81,14 @@ async function confineBoth(
   dialect: Dialect | 'windows-acl',
   mode: SandboxPolicy['mode'],
   additionalRoots: readonly string[],
-): Promise<{ upstream: ReturnType<LocalSandboxProvider['confine']>; ours: ReturnType<LocalSandboxProvider['confine']>; ctx: Context }> {
+): Promise<{ upstream: ConfinedArgv; ours: ConfinedArgv; ctx: Context }> {
   const upstream = await mount(LocalSandboxProvider, mode, internalsFor(dialect))
   const ours = await mount(MultiRootSandboxProvider, mode, internalsFor(dialect))
   ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, additionalRoots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path) })))
   const policy: SandboxPolicy = { mode, workspaceRoot: fixture.workspace }
   return {
-    upstream: upstream.provider.confine(COMMAND, policy),
-    ours: ours.provider.confine(COMMAND, policy),
+    upstream: await confined(upstream.provider, COMMAND, policy),
+    ours: await confined(ours.provider, COMMAND, policy),
     ctx: ours.ctx,
   }
 }
@@ -189,9 +194,9 @@ describe('the Windows ACL rung keeps the upstream wrap and warns once', () => {
     ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'root-0', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
 
     const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: fixture.workspace }
-    const expected = upstream.provider.confine(COMMAND, policy)
-    expect(ours.provider.confine(COMMAND, policy).argv).toEqual(expected.argv)
-    expect(ours.provider.confine(COMMAND, policy).argv).toEqual(expected.argv)
+    const expected = await confined(upstream.provider, COMMAND, policy)
+    expect((await confined(ours.provider, COMMAND, policy)).argv).toEqual(expected.argv)
+    expect((await confined(ours.provider, COMMAND, policy)).argv).toEqual(expected.argv)
 
     expect(warn).toHaveBeenCalledTimes(1)
     expect(String(warn.mock.calls[0]?.[0])).toContain('Windows ACL runner')
@@ -200,7 +205,7 @@ describe('the Windows ACL rung keeps the upstream wrap and warns once', () => {
   it('stays silent when the scope is empty', async () => {
     const ours = await mount(MultiRootSandboxProvider, 'workspace-write', internalsFor('windows-acl'))
     const warn = vi.spyOn(ours.ctx.logger, 'warn').mockImplementation(() => {})
-    ours.provider.confine(COMMAND, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+    await confined(ours.provider, COMMAND, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
     expect(warn).not.toHaveBeenCalled()
   })
 })

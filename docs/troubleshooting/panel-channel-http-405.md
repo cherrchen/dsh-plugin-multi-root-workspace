@@ -46,10 +46,10 @@
 
 ## 路由恢复后仍报“操作失败”：会话服务未注入
 
-修复 405 后，实际面板的 `list` 请求只携带 `sessionId`，因此会进入主根解析的会话分支。旧实现通过 `ctx.sessions` 访问未声明注入的兄弟服务，在真实插件组合中抛出 `cannot get property "sessions" without inject`。通道将其包装为 `panel/internal`，HTTP 仍为 200；面板原先只显示通用的“操作失败”，掩盖了根因。
+修复 405 后，实际面板的 `list` 请求只携带 `sessionId`，因此会进入主根解析。旧实现通过 `ctx.sessions` 访问未声明注入的兄弟服务，在真实插件组合中抛出 `cannot get property "sessions" without inject`。通道将其包装为 `panel/internal`，HTTP 仍为 200；面板原先只显示通用的“操作失败”，掩盖了根因。
 
-修复使用 `ctx.get('sessions')?.get(sessionId)` 显式读取可选服务：有会话时使用其 cwd；服务不存在或会话不存在时使用既定的 sandbox policy 回退。面板同时显示 `panel/internal` 的错误详情，便于诊断。
+修复使用 `ctx.get('sessions')?.get(sessionId)` 显式读取可选服务。现行权威规则（[ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)）不再回退 sandbox policy：会话服务不存在、id 对不上、会话已被删除，一律 `session-not-found`。没有活动会话时客户端显示空态、不调用 host。
 
-此前测试漏报的原因是：单测把 sessions 直接 provide 在根 context，绕过兄弟 fiber 的访问限制；真实 HTTP 冒烟则直接传 `primaryRoot`，绕过整个会话分支。现在单测通过独立的 sessions 插件注册服务，覆盖缺失服务、未知会话；`smoke:journey` 的认证请求改为与 UI 一致的 `{ sessionId: 'journey-web' }`，仍断言实际主根和附加根。
+此前测试漏报的原因是：单测把 sessions 直接 provide 在根 context，绕过兄弟 fiber 的访问限制；真实 HTTP 冒烟则直接传 `primaryRoot`，绕过整个会话分支。现在单测通过独立的 sessions 插件注册服务，覆盖缺失服务、未知会话、请求途中删除会话；`smoke:journey` 的认证请求与 UI 一致，只带 `{ sessionId: 'journey-web' }`。
 
 本次验证：修改前兄弟服务回归用例失败，修改后通过；全套测试 213 项通过、3 项跳过，类型检查、构建、lint、文档检查通过；隔离 web/headless `smoke:journey` 的 34/34 项检查通过。

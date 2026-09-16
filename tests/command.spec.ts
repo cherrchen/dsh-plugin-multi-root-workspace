@@ -36,8 +36,18 @@ let handler: PanelHandler | undefined
 /** Every argv the stub subprocess was asked to run. */
 let spawned: string[][] = []
 
+/** The session id panel tests send unless a case names another. */
+const PANEL_SESSION = 's-1'
+
 /** Mount a stack plus the stub registries the module needs. */
-async function mount(options: { withPicker?: boolean; withConnection?: boolean; withSubprocess?: boolean; spawnExitCode?: number } = {}): Promise<RegistryStack> {
+async function mount(options: {
+  withPicker?: boolean
+  withConnection?: boolean
+  withSubprocess?: boolean
+  spawnExitCode?: number
+  /** Session id → cwd. `false` leaves the sessions service absent. */
+  sessions?: Record<string, string> | Map<string, string> | false
+} = {}): Promise<RegistryStack> {
   const stack = await mountRegistryStack(storeRoot)
   stacks.push(stack)
   const ctx = stack.ctx
@@ -88,7 +98,28 @@ async function mount(options: { withPicker?: boolean; withConnection?: boolean; 
   const fiber = await ctx.plugin(CommandModule)
   contexts.push(ctx)
   void fiber
+  if (options.withConnection === true && options.sessions !== false) {
+    await provideSessions(ctx, options.sessions ?? { [PANEL_SESSION]: primary })
+  }
   return stack
+}
+
+/** Mount sessions as a sibling plugin so the lookup matches a real composition. */
+async function provideSessions(
+  ctx: Context,
+  table: Record<string, string> | Map<string, string>,
+): Promise<void> {
+  await ctx.plugin({
+    name: 'sibling-sessions',
+    apply(fiber: Context) {
+      fiber.provide('sessions', {
+        get: (id: string) => {
+          const cwd = table instanceof Map ? table.get(id) : table[id]
+          return cwd === undefined ? undefined : { header: { cwd } }
+        },
+      } as never)
+    },
+  })
 }
 
 /** Run one command line through the registered definition. */
@@ -112,7 +143,7 @@ interface PanelAnswer {
 }
 
 /** Call one panel endpoint through the registered channel handler. */
-async function callPanel(endpoint: string, payload: PanelRequest = {}): Promise<PanelAnswer> {
+async function callPanel(endpoint: string, payload: unknown = {}): Promise<PanelAnswer> {
   if (handler === undefined) throw new Error('the module registered no panel channel')
   return await handler(endpoint, payload, new AbortController().signal) as PanelAnswer
 }
@@ -325,7 +356,7 @@ describe('the panel channel', () => {
     const second = join(fixture.base, 'second')
     mkdirSync(first)
     mkdirSync(second)
-    const payload: PanelRequest = { primaryRoot: primary }
+    const payload: PanelRequest = { sessionId: PANEL_SESSION }
 
     const empty = await callPanel('list', payload)
     expect(empty.ok).toBe(true)
@@ -357,28 +388,51 @@ describe('the panel channel', () => {
     expect(removed.value?.roots.map(root => root.path)).toEqual([canonicalPath(second)])
   })
 
-  it('resolves the workspace root from the session when the client omits it', async () => {
-    const stack = await mount({ withConnection: true })
+  it('derives the workspace root from the live session and never from a client path', async () => {
     const sessionRoot = canonicalPath(join(fixture.base, 'session-workspace'))
     mkdirSync(sessionRoot)
-    await stack.ctx.plugin({
-      name: 'sibling-sessions',
-      apply(ctx: Context) {
-        ctx.provide('sessions', {
-          get: (id: string) => (id === 's-1' ? { header: { cwd: sessionRoot } } : undefined),
-        } as never)
-      },
-    })
+    await mount({ withConnection: true, sessions: { [PANEL_SESSION]: sessionRoot } })
 
-    const view = await callPanel('list', { sessionId: 's-1' })
+    const view = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(view.ok).toBe(true)
     expect(view.value?.primaryRoot).toBe(sessionRoot)
 
-    const unknown = await callPanel('list', { sessionId: 'unknown' })
-    expect(unknown.value?.primaryRoot).toBe(primary)
+    const missing = await callPanel('list', {})
+    expect(missing.ok).toBe(false)
+    expect(missing.error?.code).toBe('panel/bad-request')
 
-    const fallback = await callPanel('list', {})
-    expect(fallback.value?.primaryRoot).toBe(primary)
+    const emptyId = await callPanel('list', { sessionId: '' })
+    expect(emptyId.ok).toBe(false)
+    expect(emptyId.error?.code).toBe('panel/bad-request')
+
+    const unknown = await callPanel('list', { sessionId: 'unknown' })
+    expect(unknown.ok).toBe(false)
+    expect(unknown.error?.code).toBe('session-not-found')
+
+    const spoof = await callPanel('list', { sessionId: PANEL_SESSION, primaryRoot: primary })
+    expect(spoof.ok).toBe(false)
+    expect(spoof.error?.code).toBe('panel/bad-request')
+  })
+
+  it('rejects a panel call when the session disappears during the request', async () => {
+    const table = new Map<string, string>([[PANEL_SESSION, primary]])
+    await mount({ withConnection: true, sessions: table })
+
+    const listed = await callPanel('list', { sessionId: PANEL_SESSION })
+    expect(listed.ok).toBe(true)
+    expect(listed.value?.primaryRoot).toBe(primary)
+
+    table.delete(PANEL_SESSION)
+    const gone = await callPanel('list', { sessionId: PANEL_SESSION })
+    expect(gone.ok).toBe(false)
+    expect(gone.error?.code).toBe('session-not-found')
+  })
+
+  it('rejects a panel call when the sessions service is absent', async () => {
+    await mount({ withConnection: true, sessions: false })
+    const result = await callPanel('list', { sessionId: PANEL_SESSION })
+    expect(result.ok).toBe(false)
+    expect(result.error?.code).toBe('session-not-found')
   })
 
   it('carries the workspace title as primaryName when the registry knows it', async () => {
@@ -389,17 +443,17 @@ describe('the panel channel', () => {
       name: 'sibling-workspace-registry',
       apply(ctx: Context) {
         ctx.provide('workspaceRegistry', {
-          list: () => [{ title: 'Payments Platform', sessionIds: ['s-1'] }],
+          list: () => [{ title: 'Payments Platform', sessionIds: [PANEL_SESSION] }],
           resolveByPath: async () => {
             throw new Error('membership must resolve the name before the path does')
           },
         } as never)
       },
     })
-    const member = await callPanel('list', { sessionId: 's-1' })
+    const member = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(member.value?.primaryName).toBe('Payments Platform')
 
-    // No membership: the cwd (here the deployment root) resolves by path.
+    // No membership: the session cwd resolves by path.
     const pathStack = await mount({ withConnection: true })
     await pathStack.ctx.plugin({
       name: 'sibling-workspace-registry-path',
@@ -410,7 +464,7 @@ describe('the panel channel', () => {
         } as never)
       },
     })
-    const byPath = await callPanel('list', { primaryRoot: primary })
+    const byPath = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(byPath.value?.primaryName).toBe('Path Match')
 
     // Neither resolves: the field stays absent and the panel falls back to the
@@ -425,34 +479,24 @@ describe('the panel channel', () => {
         } as never)
       },
     })
-    const absent = await callPanel('list', { primaryRoot: primary })
+    const absent = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(absent.value?.primaryName).toBeUndefined()
-  })
-
-  it('uses the deployment root when the optional sessions service is absent', async () => {
-    await mount({ withConnection: true })
-    const result = await callPanel('list', { sessionId: 'unknown' })
-    expect(result.ok).toBe(true)
-    expect(result.value?.primaryRoot).toBe(primary)
   })
 
   it('reports contract failures with codes instead of throwing', async () => {
     await mount({ withConnection: true })
     const extra = join(fixture.base, 'extra')
     mkdirSync(extra)
-    await callPanel('add', { primaryRoot: primary, path: extra })
+    await callPanel('add', { sessionId: PANEL_SESSION, path: extra })
 
-    const duplicate = await callPanel('add', { primaryRoot: primary, path: extra })
+    const duplicate = await callPanel('add', { sessionId: PANEL_SESSION, path: extra })
     expect(duplicate.ok).toBe(false)
     expect(duplicate.error?.code).toBe('duplicate')
 
-    const unknownEndpoint = await callPanel('frobnicate', { primaryRoot: primary })
+    const unknownEndpoint = await callPanel('frobnicate', { sessionId: PANEL_SESSION })
     expect(unknownEndpoint.error?.code).toBe('panel/bad-request')
 
-    const badRoot = await callPanel('list', { primaryRoot: join(fixture.base, 'missing') })
-    expect(badRoot.error?.code).toBe('missing')
-
-    const noId = await callPanel('remove', { primaryRoot: primary })
+    const noId = await callPanel('remove', { sessionId: PANEL_SESSION })
     expect(noId.error?.code).toBe('invalid-ref')
   })
 
@@ -460,15 +504,15 @@ describe('the panel channel', () => {
     const stack = await mount({ withConnection: true })
     const extra = join(fixture.base, 'extra')
     mkdirSync(extra)
-    await callPanel('add', { primaryRoot: primary, path: extra })
+    await callPanel('add', { sessionId: PANEL_SESSION, path: extra })
 
     rmSync(extra, { recursive: true, force: true })
-    const gone = await callPanel('list', { primaryRoot: primary })
+    const gone = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(gone.value?.roots?.[0]?.state).toBe('missing')
     expect(stack.scope.scopeOf(primary)).toEqual([])
 
     mkdirSync(extra)
-    const back = await callPanel('list', { primaryRoot: primary })
+    const back = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(back.value?.roots?.[0]?.state).toBe('available')
     expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
   })
@@ -483,13 +527,13 @@ describe('the panel channel', () => {
     const elsewhere = canonicalPath(join(fixture.base, 'elsewhere'))
     mkdirSync(granted)
     mkdirSync(elsewhere)
-    const added = await callPanel('add', { primaryRoot: primary, path: granted })
+    const added = await callPanel('add', { sessionId: PANEL_SESSION, path: granted })
     const id = added.value?.roots?.[0]?.id ?? ''
 
     rmSync(granted, { recursive: true, force: true })
     symlinkSync(elsewhere, granted)
 
-    const view = await callPanel('list', { primaryRoot: primary })
+    const view = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(view.value?.roots?.[0]?.state).toBe('redirected')
     // The registration still names the directory the operator gave; where it
     // resolves now is reported as the reason, not as the path.
@@ -498,7 +542,7 @@ describe('the panel channel', () => {
     expect(stack.scope.scopeOf(primary)).toEqual([])
     // Revealing reports what it revealed, and revealing is still allowed: it is
     // an operator action, not a grant.
-    const revealed = await callPanel('reveal', { primaryRoot: primary, id })
+    const revealed = await callPanel('reveal', { sessionId: PANEL_SESSION, id })
     expect(revealed.value?.revealed).toBe(granted)
   })
 
@@ -508,15 +552,15 @@ describe('the panel channel', () => {
     await mount({ withConnection: true })
     const extra = join(fixture.base, 'extra')
     mkdirSync(extra)
-    await callPanel('add', { primaryRoot: primary, path: extra })
+    await callPanel('add', { sessionId: PANEL_SESSION, path: extra })
 
-    const withoutRuntime = await callPanel('reveal', { primaryRoot: primary })
+    const withoutRuntime = await callPanel('reveal', { sessionId: PANEL_SESSION })
     expect(withoutRuntime.ok).toBe(false)
     expect(withoutRuntime.error?.code).toBe('invalid-ref')
 
-    const added = await callPanel('list', { primaryRoot: primary })
+    const added = await callPanel('list', { sessionId: PANEL_SESSION })
     const id = added.value?.roots?.[0]?.id ?? ''
-    const noSubprocess = await callPanel('reveal', { primaryRoot: primary, id })
+    const noSubprocess = await callPanel('reveal', { sessionId: PANEL_SESSION, id })
     expect(noSubprocess.ok).toBe(false)
     expect(noSubprocess.error?.code).toBe('reveal-unavailable')
     expect((await run('reveal 1')).text).toContain('reveal-unavailable')
@@ -526,11 +570,11 @@ describe('the panel channel', () => {
     await mount({ withConnection: true, withSubprocess: true, spawnExitCode: 1 })
     const extra = join(fixture.base, 'extra')
     mkdirSync(extra)
-    await callPanel('add', { primaryRoot: primary, path: extra })
-    const added = await callPanel('list', { primaryRoot: primary })
+    await callPanel('add', { sessionId: PANEL_SESSION, path: extra })
+    const added = await callPanel('list', { sessionId: PANEL_SESSION })
     const id = added.value?.roots?.[0]?.id ?? ''
 
-    const failed = await callPanel('reveal', { primaryRoot: primary, id })
+    const failed = await callPanel('reveal', { sessionId: PANEL_SESSION, id })
     expect(failed.ok).toBe(false)
     expect(failed.error?.code).toBe('reveal-unavailable')
     expect(spawned).toHaveLength(1)
@@ -542,7 +586,7 @@ describe('the panel channel', () => {
     const twinned = join(fixture.base, 'twinned')
     mkdirSync(extra)
     mkdirSync(twinned)
-    await callPanel('add', { primaryRoot: primary, path: extra })
+    await callPanel('add', { sessionId: PANEL_SESSION, path: extra })
 
     // Hand-write the duplicate into the store, then restart the registry.
     const storeFile = join(storeRoot, 'multi_root_workspace.json')
@@ -557,13 +601,13 @@ describe('the panel channel', () => {
     stacks = stacks.filter(candidate => candidate !== stack)
     const restarted = await mount({ withConnection: true })
 
-    const listed = await callPanel('list', { primaryRoot: primary })
+    const listed = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(listed.value?.roots?.map(root => root.state)).toEqual(['invalid', 'invalid'])
     expect(restarted.scope.scopeOf(primary)).toEqual([])
 
     const listedEntry = listed.value!.roots![1]!
     const removed = await callPanel('remove', {
-      primaryRoot: primary,
+      sessionId: PANEL_SESSION,
       entry: {
         ordinal: listedEntry.ordinal,
         id: listedEntry.id,
@@ -606,18 +650,21 @@ describe('the panel channel', () => {
     const notAnObject = await callPanel('list', 'primary' as never)
     expect(notAnObject.error?.code).toBe('panel/bad-request')
 
-    const unknownKey = await handler!('list', { primaryRoot: primary, sneaky: true }, new AbortController().signal) as PanelAnswer
+    const unknownKey = await handler!('list', { sessionId: PANEL_SESSION, sneaky: true }, new AbortController().signal) as PanelAnswer
     expect(unknownKey.error?.code).toBe('panel/bad-request')
 
-    const wrongType = await handler!('list', { primaryRoot: 7 }, new AbortController().signal) as PanelAnswer
+    const wrongType = await handler!('list', { sessionId: 7 }, new AbortController().signal) as PanelAnswer
     expect(wrongType.error?.code).toBe('panel/bad-request')
+
+    const namedRoot = await handler!('list', { sessionId: PANEL_SESSION, primaryRoot: primary }, new AbortController().signal) as PanelAnswer
+    expect(namedRoot.error?.code).toBe('panel/bad-request')
   })
 
   it('surfaces registry failures as errors rather than an empty list', async () => {
     const stack = await mount({ withConnection: true })
     // A registry that cannot read its store reports the reason on every read.
     Object.defineProperty(stack.registry, 'unavailable', { get: () => 'multi_root_workspace: file is not valid JSON' })
-    const view = await callPanel('list', { primaryRoot: primary })
+    const view = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(view.ok).toBe(true)
     expect(view.value?.unavailable).toContain('multi_root_workspace')
   })

@@ -24,6 +24,10 @@ Architecture Decision Records（ADR），用于记录重要架构与工程决策
 - [ADR-0004-root-registry-persistence-and-validation.md](./ADR-0004-root-registry-persistence-and-validation.md) — Root 注册表：以 canonical 主根为键的 domain KV、校验顺序、嵌套拒绝、missing 不授予、存储损坏降级（Accepted）。
 - [ADR-0005-out-of-tree-client-transport.md](./ADR-0005-out-of-tree-client-transport.md) — 出树 client 半部：Connection RPC 通道 + `sidebar.footer.action` 面板 + 复用上游目录选择能力，不用 Typert 远程命名空间（Accepted）。
 - [ADR-0006-client-ui-host-tokens.md](./ADR-0006-client-ui-host-tokens.md) — 客户端 UI 复刻宿主原生样式：注入样式表消费宿主 `--dsw-*` token，插件零硬编码颜色（Accepted）。
+- [ADR-0007-registry-authority-lease.md](./ADR-0007-registry-authority-lease.md) — 跨进程 Registry Authority：store-wide 内核 lease、争用 fail-closed、`refresh()` 接管（Accepted）。
+- [ADR-0008-panel-session-derived-authority.md](./ADR-0008-panel-session-derived-authority.md) — 面板主根由 host session cwd 推导：删除客户端 `primaryRoot`，每个端点要求有效 `sessionId`（Accepted）。
+- [ADR-0009-dsh-compat-contract.md](./ADR-0009-dsh-compat-contract.md) — DSH 兼容性代码契约：精确版本 allowlist、`multi-root-compat` 启动门禁、混装 fail loud、`src/compat/` 适配层、按周升级车道不自动扩大矩阵（Accepted）。
+- [ADR-0010-additional-root-instruction-scope.md](./ADR-0010-additional-root-instruction-scope.md) — 附加根指令注入：顶层 + 本会话工作过的子目录、以 user-role 的 `form=instructions` 经 `agent/pre-step` 投递、预算全局共享、根离场显式撤销、文件消失显式撤回（Accepted）。
 
 不要提前创建空的 ADR 文件；仅在做出真实决策时新增。
 
