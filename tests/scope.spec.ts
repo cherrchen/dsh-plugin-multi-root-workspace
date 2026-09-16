@@ -69,13 +69,17 @@ describe('scope resolution', () => {
   })
 
   it('returns registered roots in registry order', () => {
-    mkdirSync(`${fixture.base}/third`)
+    // Spelled with a forward slash on purpose: the scope hands back the path
+    // `canonicalPath` produced, which uses the platform's separator, so the
+    // expectation has to be canonical rather than spelled.
+    const third = `${fixture.base}/third`
+    mkdirSync(third)
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
       root('b', fixture.outside),
-      root('a', `${fixture.base}/third`),
+      root('a', third),
     ])
     expect(ctx.multiRootScope.resolve(policy(fixture.workspace)).additionalRoots)
-      .toEqual([fixture.outside, `${fixture.base}/third`])
+      .toEqual([fixture.outside, canonicalPath(third)])
   })
 
   it('drops duplicates, the primary root itself, and non-canonical spellings of the same directory', () => {
@@ -232,15 +236,16 @@ describe('workspace topology context', () => {
   })
 
   it('is byte-stable across assemblies and lists roots in scope order', async () => {
-    mkdirSync(`${fixture.base}/third`)
+    const third = `${fixture.base}/third`
+    mkdirSync(third)
     promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [
       root('a', fixture.outside),
-      root('b', `${fixture.base}/third`),
+      root('b', third),
     ])
     const first = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))
     const second = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))
     expect(second).toBe(first)
-    expect(first).toContain(JSON.stringify([fixture.outside, `${fixture.base}/third`]))
+    expect(first).toContain(JSON.stringify([fixture.outside, canonicalPath(third)]))
   })
 
   it('mounts without a system-prompt seam at all (soft dependency)', async () => {

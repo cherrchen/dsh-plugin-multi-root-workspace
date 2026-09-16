@@ -18,7 +18,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Do not create a Windows job at all while the paid lane is parked.
+        # `DSH_WINDOWS_CI=1` adds the Windows lane. It is ENABLED for this
+        # repository (the variable is set): standard runners are free on public
+        # repositories, and this lane is the only evidence for the
+        # platform-independent claims the plugin makes on Windows. Unset the
+        # variable to park it again.
         # Repository variables are available while expanding a matrix, unlike
         # `matrix.*` in a job-level condition.
         os: ${{ fromJSON(vars.DSH_WINDOWS_CI == '1' && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest","macos-latest"]') }}

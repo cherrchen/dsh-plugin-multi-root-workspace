@@ -186,7 +186,9 @@ Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seat
 
 `ci.yml` 在仓库变量 `DSH_WINDOWS_CI=1` 时才把 `windows-latest` 加入动态矩阵，用于验证"fs fence 覆盖 Windows 写路径"这一承诺所依赖的**平台无关代码**：校验规则、注册表、命令与 RPC 通道、面板、client 制品。它在 Windows 上**不跑**需要 POSIX shell 的冒烟（`smoke:compose/behavior/journey`）与 `kernel:probe`（Windows 没有内核多根档位，第一期范围，见需求文档）；驱动 POSIX runner argv 的套件（`parity-matrix`、`fs-parity`、`sandbox-multi-root` 的方言部分）在该平台**显式 skip 并打印原因**，而不是把"平台没有这个能力"记成失败。
 
-开关关闭时不会创建 Windows job，因此 checkout、安装和验证也不会消耗 Windows runner。这样做是因为标准 Windows runner 在**私有**仓库上消耗计费分钟，而本仓库当前没有可用的计费/额度；将该变量置 `1` 即可启用。
+该变量**当前已置 1**：本仓库是公开仓库，标准 runner 在公开仓库上不计费（计费的 2× 倍率只作用于私有仓库），因此这条腿没有理由停着。清掉变量即回到两 OS 矩阵。
+
+它抓的是"只在某个平台成立"的假设——最典型的一类是**期望值里的路径分隔符**：产品侧一律交回 `canonicalPath()` 的结果（Windows 是 `\`），而测试里用 `` `${base}/third` `` 拼出来的期望只在 POSIX 上等于它。写这类断言时用 `canonicalPath(...)` 或 `join(...)`，不要用字符串拼接。
 
 失败可诊断：`test` 与 `smoke:behavior` 的输出会同时写入 `vitest.log` / `smoke-behavior.log`，步骤失败时由 `actions/upload-artifact@v4` 上传，公共仓库无需管理员权限即可下载——"红但看不到日志"的运行等于没人能修。
 
