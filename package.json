@@ -1,7 +1,7 @@
 {
   "name": "@dsh-electron/dsh-plugin-multi-root-workspace",
   "description": "Multi-root Workspace for DeepSeek Harness: adds N additional roots to the workspace sandbox scope as an out-of-tree bundle",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
