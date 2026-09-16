@@ -49,6 +49,7 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - **Windows 锁命名按物理路径归一化**：经路径别名（junction / 符号链接）访问同一 store 的两个进程此前会各持一把锁，可同时成为 authority。
 - **会话事件配对按会话分隔**：不同会话使用相同 `tool/call` id 时不再互相覆盖、把目录记到另一个会话。
 - **升级工作流的 shell 输入处理**：手动版本与候选版本经 step `env` 传值并校验为单行，不再拼进 `run` 源码。
+- **本地打包不再夹带历史构建产物**：`lib/` 在 `bundle` 之前先清掉上一轮的 JS 面（tsdown 的共享 chunk 按内容哈希命名，旧名字不会自己消失）。`pnpm pack` 出的 tarball 现在只含一轮构建的制品，不再把历史 chunk 当死代码发出去（`files` 里的 `lib/*.js` 会全部进包）。
 
 ## [0.1.0] - 2026-09-13
 

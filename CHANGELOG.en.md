@@ -49,6 +49,7 @@ The **hardening batch (H1–H4)** after `v0.1.0`: no new user-facing features, b
 - **Windows lock naming is normalized by physical path**: two processes reaching one store through a path alias (junction / symlink) used to hash different names and could both become the authority.
 - **Session event pairing is scoped per session**: the same `tool/call` id in two sessions no longer overwrites the other session's pending call.
 - **Shell input handling in the upgrade workflow**: the manual version and the candidate version travel through step `env` and are validated as a single line instead of being interpolated into `run`.
+- **A local pack no longer carries earlier builds**: `lib/` is stripped of the previous build's JavaScript before `bundle` runs (tsdown's shared chunks are content-hashed, so an old name never disappears on its own). The tarball `pnpm pack` produces now contains exactly one build's artifacts instead of shipping historical chunks as dead code (`files` publishes every `lib/*.js`).
 
 ## [0.1.0] - 2026-09-13
 
