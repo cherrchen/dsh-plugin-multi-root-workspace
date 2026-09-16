@@ -65,7 +65,7 @@
   "scripts": {
     "build": "pnpm run build:types && pnpm run bundle",
     "build:types": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
-    "bundle": "tsdown",
+    "bundle": "node scripts/clean-lib.mjs && tsdown",
     "compat:check": "node scripts/check-dsh-compat.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "kernel:probe": "node scripts/check-kernel-runner.mjs",

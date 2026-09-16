@@ -119,6 +119,8 @@ pnpm docs:check         # 文档结构检查
 
 client 面**不能**复用上游的 `clientBundle` preset：它不在任何包的 `exports` 里，且以 monorepo 布局（glob `packages/*/*/package.json`）为前提。本仓库的 `tsdown.config.ts` 自己声明两个配置；client 侧的 TSX 由 `tsconfig.client.json`（`jsx: react-jsx`、DOM lib）负责类型检查，host 侧 tsconfig 用 `exclude` 把 `src/client/**` 排除在外。
 
+`bundle` 在调用 tsdown 之前先跑 `scripts/clean-lib.mjs`，删掉 `lib/` 里上一轮的 **JavaScript** 面。两个原因：两个 tsdown 配置共用 `lib/` 且都设 `clean: false`（整目录清理会让 host / client 两面互相删除，并把 `build:types` 先产出的 `lib/types/` 一起带走），而共享 chunk 的文件名带内容哈希、内容一变旧名字就永久留在原地。`files` 发布的是 `lib/*.js`，所以这一清理是"`pnpm pack` 绝不把历史 chunk 当死代码打进去"的保证——CI 在干净 checkout 上永远碰不到这个问题，**只有本地打包会**。`lib/types/**/*.d.ts` 不匹配该清理的扩展名，保持不动。
+
 client 测试分两层：`tests/client-bundle.spec.ts` 断言**制品字节**（banner、`exports.apply`/`exports.inject`、唯一 external 是 react、manifest 的 `./client` 与 `dsh.client` 声明）；`tests/client-panel.spec.tsx` 在 jsdom 里直接应用真实 client 入口、渲染注册的组件，并断言它对通道发出的 `(channel, endpoint, payload)` 三元组。
 
 ## 5. 安装到真实运行时
