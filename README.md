@@ -16,9 +16,9 @@ DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围�
 
 **已完成并发布：MVP `v0.1.0`（里程碑 M1–M3）**——组合与空根直通、多根能力与方言 grant、根注册表 / `/workspace-folders` 命令 / Workspace Folders 面板 / 跨仓库旅程 e2e。
 
-**已完成但尚未发版：`v0.1.1` 硬化批次（H1–H4）**——跨进程 Registry Authority Lease（两个 DSH 进程共用 `$DSH_HOME` 时只有持锁者授予附加根，另一方 fail-closed 并在对方退出后接管）、面板主根改为 host session 推导（不再接受客户端指名的根）、DSH 兼容性从文档约定变成**启动时执行的代码契约**（精确 allowlist + 混装检测 + `src/compat/` 适配层），以及**附加根顶层的 `AGENTS.md` / `CLAUDE.md` 进入模型上下文**——原生指令发现从会话 cwd 向上走，永远到不了附加根。
+**已完成并发布：`v0.1.1` 硬化批次（H1–H4）**——跨进程 Registry Authority Lease（两个 DSH 进程共用 `$DSH_HOME` 时只有持锁者授予附加根，另一方 fail-closed 并在对方退出后接管）、面板主根改为 host session 推导（不再接受客户端指名的根）、DSH 兼容性从文档约定变成**启动时执行的代码契约**（精确 allowlist + 混装检测 + `src/compat/` 适配层，支持范围收窄为 `0.1.5-rc.2` 与 `0.1.6-alpha.1`，见[升级注意](./CHANGELOG.md#011---2026-09-16)），以及**附加根自身的 `AGENTS.md` / `CLAUDE.md` 进入模型上下文**——原生指令发现从会话 cwd 向上走，永远到不了附加根。
 
-进度、编号与发布状态的唯一真源是[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)（M1–M4 是 MVP 里程碑编号，H1–H4 是 `v0.1.1` 批次编号，其中 H1 即 M4）；逐项证据见各[已完成计划](./docs/plans/README.md)。
+进度、编号与发布状态的唯一真源是[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)（M1–M4 是 MVP 里程碑编号，H1–H4 是 `v0.1.1` 批次编号，其中 H1 即 M4）；逐项证据见各[已完成计划](./docs/plans/README.md)，每个版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)。
 
 ## 快速开始
 
@@ -75,8 +75,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.0/dsh-electron-dsh-plugin-multi-root-workspace-0.1.0.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.0.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.1/dsh-electron-dsh-plugin-multi-root-workspace-0.1.1.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.1.tgz
 ```
 
 同样是预构建产物，无需构建授权，适合内网或离线环境交付。
@@ -94,10 +94,10 @@ allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace': true
 ```
 
-然后重新执行 `add` 即可。建议锁定 tag（如 `#v0.1.0`），让后续推送无法悄悄改变实际运行的内容：
+然后重新执行 `add` 即可。建议锁定 tag（如 `#v0.1.1`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.0
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.1
 ```
 
 ### 从本地源码安装（开发调试）
@@ -121,7 +121,7 @@ dsh plugin --profile web add "$PWD"
 pnpm lint && pnpm typecheck   # 预期：0 警告 0 错误；两个 tsconfig 全部通过
 pnpm test                     # 预期：全部通过；本机没有的内核 runner 用例会显式 skip 并打印原因
 pnpm kernel:probe             # 预期：报告本机可用的内核 runner（seatbelt / bwrap / landlock）
-pnpm smoke                    # 预期：compose 40/40、behavior 99/99、journey 43/43
+pnpm smoke                    # 预期：compose 40/40、behavior 99/99、journey 55/55
 pnpm docs:check               # 预期：0 errors, 0 warnings
 ```
 
@@ -172,9 +172,9 @@ src/
   sandbox.ts      多根内核沙箱 provider（子类自上游 LocalSandboxProvider）
   dialects.ts     Seatbelt / bwrap / Landlock profile 的识别与附加 grant 拼装（不认识即响亮报错）
   containment.ts  路径包含判定（词法快速路径 + dev/ino 别名回退）
-  instructions.ts 附加根顶层 AGENTS.md / CLAUDE.md 的发现、预算与撤销（经 agent/pre-step 注入）
+  instructions.ts 附加根 AGENTS.md / CLAUDE.md 的发现、增量投递、预算与撤回（顶层 + 本会话触碰过的子目录，经 agent/pre-step 注入）
   compat.ts       multi-root-compat 启动门禁（版本 allowlist 与混装判定）
-  compat/         版本差异适配层：dsh-version / sandbox-confine / agent-instructions
+  compat/         版本差异适配层：dsh-version / sandbox-confine / agent-instructions / llm-message（可选 peer 按需加载）
   command.ts      /workspace-folders 命令与面板 RPC 的 host 半部
   contract.ts     面板线协议（zod 双端校验，可内联进浏览器 bundle）
   client/         浏览器半部：侧栏动作、对话框、双语词典
@@ -208,6 +208,7 @@ docs/             需求、架构、决策记录（ADR）、计划、开发工�
 
 项目长期文档位于 [`docs/`](./docs/README.md)：
 
+- [版本变更记录（CHANGELOG）](./CHANGELOG.md)
 - [需求](./docs/requirements/multi-root-workspace.md)
 - [目标架构](./docs/architecture/multi-root-workspace.md)
 - [上游调研](./docs/reference/multi-root-workspace-research.md)

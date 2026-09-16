@@ -23,7 +23,7 @@
 The development environment, toolchain, and verification workflow are defined:
 
 - [plugin-development-workflow.md](./plugin-development-workflow.md) — build, test, smokes, the runtime support matrix, upstream coupling, and the upgrade procedure.
-- [release-workflow.md](./release-workflow.md) — the release process: the version-bump script, tag conventions, npm publish, and GitHub Releases. (Chinese is the canonical version.)
+- [release-workflow.md](./release-workflow.md) — the release process: pre-release preparation (release-state documents and the CHANGELOG), the version-bump script, tag conventions, npm publish, and GitHub Releases. (Chinese is the canonical version.)
 
 ## Established Tooling Facts
 

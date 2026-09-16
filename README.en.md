@@ -16,9 +16,9 @@ Three things make this plugin worth looking at:
 
 **Done and released: the MVP `v0.1.0` (milestones M1–M3)** — composition and empty-root pass-through, multi-root capability and dialect grants, the root registry / the `/workspace-folders` command / the Workspace Folders panel / a cross-repository journey e2e.
 
-**Done but not yet released: the `v0.1.1` hardening batch (H1–H4)** — a cross-process Registry Authority Lease (when two DSH processes share one `$DSH_HOME`, only the lease holder grants additional roots; the other fails closed and takes over once the holder exits), panel primary-root authority derived from the host session (a client-named root is no longer accepted), DSH compatibility turned from a documented agreement into a **code contract enforced at startup** (an exact allowlist, mixed-install detection, a `src/compat/` adapter layer), and **an additional root's top-level `AGENTS.md` / `CLAUDE.md` reaching the model** — native instruction discovery walks upward from the session cwd, so it can never reach an additional root.
+**Done and released: the `v0.1.1` hardening batch (H1–H4)** — a cross-process Registry Authority Lease (when two DSH processes share one `$DSH_HOME`, only the lease holder grants additional roots; the other fails closed and takes over once the holder exits), panel primary-root authority derived from the host session (a client-named root is no longer accepted), DSH compatibility turned from a documented agreement into a **code contract enforced at startup** (an exact allowlist, mixed-install detection, a `src/compat/` adapter layer — the supported set narrows to `0.1.5-rc.2` and `0.1.6-alpha.1`, see the [upgrade notes](./CHANGELOG.en.md#011---2026-09-16)), and **an additional root's own `AGENTS.md` / `CLAUDE.md` reaching the model** — native instruction discovery walks upward from the session cwd, so it can never reach an additional root.
 
-The single source of truth for progress, numbering, and release state is the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账) (M1–M4 are the MVP milestone numbers, H1–H4 are the `v0.1.1` batch numbers, and H1 is M4); per-item evidence lives in the [completed plans](./docs/plans/README.md).
+The single source of truth for progress, numbering, and release state is the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账) (M1–M4 are the MVP milestone numbers, H1–H4 are the `v0.1.1` batch numbers, and H1 is M4); per-item evidence lives in the [completed plans](./docs/plans/README.md), and the user-visible changes of each version are in the [CHANGELOG](./CHANGELOG.en.md).
 
 ## Quick Start
 
@@ -73,8 +73,8 @@ Installs pre-built artifacts, ready to use, no build authorization needed.
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # or download the tgz from the GitHub Release assets, e.g.:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.0/dsh-electron-dsh-plugin-multi-root-workspace-0.1.0.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.0.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.1/dsh-electron-dsh-plugin-multi-root-workspace-0.1.1.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.1.tgz
 ```
 
 Also pre-built, no build authorization needed — handy for air-gapped or offline delivery.
@@ -92,10 +92,10 @@ allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace': true
 ```
 
-Then run `add` again. Pinning a tag (e.g. `#v0.1.0`) is recommended so a later push cannot silently change what actually runs:
+Then run `add` again. Pinning a tag (e.g. `#v0.1.1`) is recommended so a later push cannot silently change what actually runs:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.0
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.1
 ```
 
 ### Install from a local clone (development & debugging)
@@ -119,7 +119,7 @@ Development gates, with the result each step should produce:
 pnpm lint && pnpm typecheck   # expect: 0 warnings, 0 errors; both tsconfigs pass
 pnpm test                     # expect: all pass; dialect cases without a local kernel runner skip explicitly, with a reason
 pnpm kernel:probe             # expect: reports the kernel runners this host has (seatbelt / bwrap / landlock)
-pnpm smoke                    # expect: compose 40/40, behavior 99/99, journey 43/43
+pnpm smoke                    # expect: compose 40/40, behavior 99/99, journey 55/55
 pnpm docs:check               # expect: 0 errors, 0 warnings
 ```
 
@@ -170,9 +170,9 @@ src/
   sandbox.ts      the multi-root kernel-sandbox provider (extends the upstream LocalSandboxProvider)
   dialects.ts     Seatbelt / bwrap / Landlock profile recognition and additional-grant assembly (unrecognized shapes fail loudly)
   containment.ts  path containment (lexical fast path plus a dev/ino alias fallback)
-  instructions.ts discovery, budget and revocation for additional roots' top-level AGENTS.md / CLAUDE.md (injected from agent/pre-step)
+  instructions.ts discovery, incremental delivery, budget and revocation for an additional root's AGENTS.md / CLAUDE.md (top level plus the subdirectories this session touched, injected from agent/pre-step)
   compat.ts       the multi-root-compat startup gate (version allowlist and mixed-install detection)
-  compat/         the version-difference adapters: dsh-version / sandbox-confine / agent-instructions
+  compat/         the version-difference adapters: dsh-version / sandbox-confine / agent-instructions / llm-message (optional peers loaded on demand)
   command.ts      the /workspace-folders command and the host half of the panel RPC
   contract.ts     the panel wire protocol (zod-validated on both ends, inlinable into the browser bundle)
   client/         the browser half: sidebar action, dialog, bilingual dictionaries
@@ -206,6 +206,7 @@ Issues and PRs are welcome:
 
 Long-term project documentation lives in [`docs/`](./docs/README.md):
 
+- [Changelog](./CHANGELOG.en.md)
 - [Requirements](./docs/requirements/multi-root-workspace.md)
 - [Target architecture](./docs/architecture/multi-root-workspace.md)
 - [Upstream research](./docs/reference/multi-root-workspace-research.md)

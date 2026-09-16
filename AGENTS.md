@@ -37,6 +37,7 @@ Do not keep important project knowledge only in chat history, issue comments, or
 - `.agent/note/` — durable Agent-oriented project knowledge
 - `.agent/templates/` — templates used by Coding Agents
 - `.agent/skills/documentation/SKILL.md` — documentation maintenance rules
+- `CHANGELOG.md` / `CHANGELOG.en.md` — the user-visible changes of every released version, one section per release. This is the only home for "what changed in version X": the roadmap progress ledger owns release *state*, the CHANGELOG owns release *content*. Each release updates it before the tag is created (see `docs/development/release-workflow.md`).
 
 ## Documentation Maintenance
 
@@ -83,6 +84,8 @@ The two files are treated as one logical document: when you update one, check wh
 
 All README documents and formal documents under `.agent/note/` must follow this convention. Do not create empty `.en.md` files for other document types unless bilingual maintenance is actually needed.
 
+The changelog is maintained as a bilingual pair too (`CHANGELOG.md` / `CHANGELOG.en.md`): it is a user-facing document that ships inside the npm tarball alongside both READMEs, so an English reader must not hit a Chinese-only release history. Other types — ADRs, plans, reference, and troubleshooting entries — stay Chinese-only unless a real need appears.
+
 ## Current Project State
 
 The project is an out-of-tree DSH plugin bundle (`@dsh-electron/dsh-plugin-multi-root-workspace`) that widens the workspace sandbox scope from one root to a primary root plus N additional roots, without modifying any upstream package.
@@ -93,7 +96,7 @@ Milestone M2 (additional roots and dialect grants) is complete and verified: a r
 
 Milestone M3 (root registry, `/workspace-folders`, browser panel, journey e2e) is implemented and re-accepted after an external review: roots are persisted in the `multi_root_workspace` storage domain keyed by the canonical primary root, validated on every write and every read, and the registry feeds the M2 scope; the command and the sidebar Workspace Folders panel both manage them, the panel talking to the host over the plugin's own Connection RPC channel; `pnpm smoke:journey` drives a real agent turn across two Git repositories in both the `web` and `headless` compositions. The review's eight findings are fixed, each with a regression test — see the "external review rework" section of `docs/plans/completed/2026-09-12-m3-root-registry-command-and-ui.md`, plus `docs/decisions/ADR-0004-root-registry-persistence-and-validation.md` (rework decisions 9–15) and `docs/decisions/ADR-0005-out-of-tree-client-transport.md`.
 
-The `v0.1.1` hardening batch (**H1–H4**) landed on 2026-09-15 on `fix/v0.1.1-hardening` and is **not yet released** (`package.json` is still `0.1.0`; the only tag is `v0.1.0`). Numbering, so that historical documents agree: **M1–M3** are the MVP milestones released as `v0.1.0`, **H1–H4** are this batch, and **H1 is the same work as M4** under its second name; H4 Phase 1 and Phase 2 are both implemented. Progress, numbering and release state have exactly one home: the progress ledger in `docs/plans/active/2026-09-12-multi-root-workspace.md`.
+The `v0.1.1` hardening batch (**H1–H4**) landed on 2026-09-15 on `fix/v0.1.1-hardening` and reached `main` through PR #1; it is **released as `v0.1.1`** (`package.json` is `0.1.1`, the tags are `v0.1.0` and `v0.1.1`). Numbering, so that historical documents agree: **M1–M3** are the MVP milestones released as `v0.1.0`, **H1–H4** are this batch, and **H1 is the same work as M4** under its second name; H4 Phase 1 and Phase 2 are both implemented. Progress, numbering and release state have exactly one home: the progress ledger in `docs/plans/active/2026-09-12-multi-root-workspace.md`. The user-visible changes of each released version have exactly one home as well: `CHANGELOG.md` / `CHANGELOG.en.md`, which every release updates in the same change.
 
 The batch's four items:
 

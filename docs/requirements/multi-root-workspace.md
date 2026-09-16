@@ -1,6 +1,6 @@
 # 开发需求文档：DSH Multi-root Workspace（out-of-tree 插件，不改上游）
 
-> 状态：MVP（M1/M2/M3）已实现并以 `v0.1.0` 发版（2026-09-13）；`v0.1.1` 硬化批次（H1–H4）已实现但**尚未发版**（2026-09-15）；第二期（B 系列）范围见 §4。编号口径见[路线图 §编号口径](../plans/active/2026-09-12-multi-root-workspace.md#编号口径)，进度与发布状态的唯一真源见[路线图 §进度总账](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)。| 日期：2026-09-15 | 上游需求：用户提供的《DSH Multi-root Workspace 插件需求总结》
+> 状态：MVP（M1/M2/M3）已实现并以 `v0.1.0` 发版（2026-09-13）；`v0.1.1` 硬化批次（H1–H4）已实现并随 `v0.1.1` 发版（2026-09-16）；第二期（B 系列）范围见 §4。编号口径见[路线图 §编号口径](../plans/active/2026-09-12-multi-root-workspace.md#编号口径)，进度与发布状态的唯一真源见[路线图 §进度总账](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)。| 日期：2026-09-15 | 上游需求：用户提供的《DSH Multi-root Workspace 插件需求总结》
 > **硬约束：不得修改上游仓库（deepseek-harness）中任何包**——全部产物是外部插件/bundle，通过 `dsh plugin add` 或 profile patch 组合安装。
 > 事实依据：[multi-root-workspace-research.md](../reference/multi-root-workspace-research.md)（§8 为不改上游的补充调研）；设计：[multi-root-workspace.md](../architecture/multi-root-workspace.md)；排期：[路线图](../plans/active/2026-09-12-multi-root-workspace.md) 与 [M1 计划](../plans/completed/2026-09-12-m1-composition-and-passthrough.md)
 
@@ -74,7 +74,7 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 - 平台范围：macOS（Seatbelt）、Linux（bwrap / Landlock）全量；Windows 的 fs fence 多根可用，内核级 bash 多根（pwsh 方言）**不在第一期**（fs 写路径已覆盖 Windows 大部分场景；文档明示）。
 - profile 覆盖：`web`（含 Electron 桌面端）与 `headless` 验证；`sdk`/`acp` 天然受益（同一组合方式）。
 
-### v0.1.1 硬化批次（H1–H4，已实现，未发版）
+### v0.1.1 硬化批次（H1–H4，已实现，已发版）
 
 MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作。它不是新功能，而是把四个已知的边界缺口补上；编号与发布状态见[路线图 §进度总账](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
