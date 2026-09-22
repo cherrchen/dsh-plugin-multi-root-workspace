@@ -3,8 +3,10 @@
  *
  * 0.1.5-rc.2 and 0.1.6-alpha.1 put that id on `list.current`. 0.1.6-alpha.2
  * removed the field and projects the main view as `retainedBy.mainView` on
- * the catalog row. Both shapes have to resolve, and a populated catalog
- * with nobody retained must stay "no session" — the panel must not guess.
+ * the catalog row; 0.1.7-alpha.1 keeps that probe (other catalog fields
+ * moved, the main-view predicate did not). Both shapes have to resolve,
+ * and a populated catalog with nobody retained must stay "no session" —
+ * the panel must not guess.
  */
 
 import { describe, expect, it } from 'vitest'

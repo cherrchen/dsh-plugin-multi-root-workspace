@@ -8,7 +8,7 @@
  * ```text
  * 0.1.5-rc.2, 0.1.6-alpha.1
  *   sessions.list.getSnapshot().current          SessionId | undefined
- * 0.1.6-alpha.2
+ * 0.1.6-alpha.2, 0.1.7-alpha.1
  *   the catalog has no `current`. The main view retains its session with
  *   source `mainView`, and that count is projected onto the list row:
  *   sessions.list.getSnapshot().byId[id].retainedBy.mainView > 0
