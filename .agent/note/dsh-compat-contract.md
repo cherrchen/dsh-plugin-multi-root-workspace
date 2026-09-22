@@ -55,7 +55,7 @@ await mountCompat(ctx)
 ```text
 0.1.5-rc.2     confine(argv, policy): ConfinedArgv
 0.1.6-alpha.1  confine(argv, policy, signal?): Promise<ConfinedArgv>
-0.1.6-alpha.2  与 0.1.6-alpha.1 相同（2026-09-22 实测，完整矩阵全绿，适配层无改动）
+0.1.6-alpha.2  confine 形状与 0.1.6-alpha.1 相同（2026-09-22 实测）。会话目录的形状不同，见下一节。
 ```
 
 **不要**在 `src/sandbox.ts` 里手写签名去迁就某一个版本。统一走 `src/compat/sandbox-confine.ts` 的 `widenConfined()`，它**保形**：上游同步就同步返回，上游返回 promise 就返回 promise。
@@ -71,14 +71,19 @@ await mountCompat(ctx)
 
 ## 4. 上游改过的 API 只能在 `src/compat/` 里分支，且用结构探测
 
-业务代码不出现任何版本判断。目前两个适配器：
+业务代码不出现任何版本判断。目前三个适配器：
 
 | 文件 | 吸收的差异 |
 | --- | --- |
 | `src/compat/sandbox-confine.ts` | `confine` 的同步/异步与 arity |
 | `src/compat/agent-instructions.ts` | renderer 改名：`renderWorkspaceContext`（0.1.5）→ `renderAgentInstructions`（0.1.6） |
+| `src/compat/client-session.ts` | 当前会话：`list.current`（0.1.5 / 0.1.6-alpha.1）→ 目录行 `retainedBy.mainView > 0`（0.1.6-alpha.2） |
 
-一律用**结构探测**（是否 thenable、导出哪个名字），不要比较版本号。上游是 pre-stable，同一版本内也会改形状；结构探测能应付，版本比较不能。
+一律用**结构探测**（是否 thenable、导出哪个名字、快照有没有 `current`），不要比较版本号。上游是 pre-stable，同一版本内也会改形状；结构探测能应付，版本比较不能。
+
+**这是一个安静的坑**：`0.1.6-alpha.2` 的 host 矩阵（`confine`、instruction renderer、journey Messages 端点）与 alpha.1 相同，所以当时按"适配层无改动"纳入 allowlist。客户端 Session Controller 却在 `6830e1460d` 把 `SessionListState.current` 删掉了，导航改由主视图 `retain(..., { source: 'mainView' })` 持有。面板仍读 `list.current` 时，已打开的对话会显示「当前没有活动会话」，并且**不向 host 发请求**。
+
+探测顺序：非空的 `current` 优先（旧形状），否则取第一条 `retainedBy.mainView` 为正数的目录行。目录有行但没有一行被主视图持有时返回 `undefined`——**绝不要**回退 `ids[0]`，那会把操作打到操作者没在看的会话。`getSnapshot` 必须按方法调用，抽出来再调会丢掉 store 的 `this`。
 
 `agent-instructions` 是**可选 peer**：最小组合里可能既没有它也没有 agent。`instructionsApi()` 在包不存在时返回 `undefined`（贡献为空），但包存在却两个 renderer 名字都没有时**抛错**——那是需要修适配器的兼容性破坏，不是可选接缝。
 

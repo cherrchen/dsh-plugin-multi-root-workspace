@@ -120,7 +120,7 @@ MVP 三个里程碑加一个硬化批次，每一项都独立可验证，且**�
 
 ### 支持矩阵提升（未发版，2026-09-22）
 
-`0.1.6-alpha.2` 按 [ADR-0009](../../decisions/ADR-0009-dsh-compat-contract.md) 的人工提升流程写入 allowlist（`peerDependencies` 同步为三项精确或）。开发 pin 与 lockfile 仍是 `0.1.5-rc.2`。适配层无改动：`confine` 仍是带可选 `signal` 的 `Promise`，instruction renderer 仍是 `renderAgentInstructions`，journey 的 Messages 端点未改。用户可见变更记在 [CHANGELOG](../../../CHANGELOG.md) 的 Unreleased。
+`0.1.6-alpha.2` 按 [ADR-0009](../../decisions/ADR-0009-dsh-compat-contract.md) 的人工提升流程写入 allowlist（`peerDependencies` 同步为三项精确或）。开发 pin 与 lockfile 仍是 `0.1.5-rc.2`。`confine` 仍是带可选 `signal` 的 `Promise`，instruction renderer 仍是 `renderAgentInstructions`，journey 的 Messages 端点未改。**客户端 Session 目录删掉了 `current`**，面板必须走 `src/compat/client-session.ts` 同时认旧的 `list.current` 与新的 `retainedBy.mainView`。用户可见变更记在 [CHANGELOG](../../../CHANGELOG.md) 的 Unreleased。
 
 | 项 | 结果 |
 |---|---|

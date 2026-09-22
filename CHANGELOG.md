@@ -12,7 +12,11 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 ### Added
 
-- **支持上游运行时 `0.1.6-alpha.2`**，与 `0.1.5-rc.2`、`0.1.6-alpha.1` 一起进 allowlist。该版本跑过完整矩阵，`confine` 的异步形状与 instruction renderer 名字都与 `0.1.6-alpha.1` 相同，适配层没有改动。开发 pin 仍是 `0.1.5-rc.2`。
+- **支持上游运行时 `0.1.6-alpha.2`**，与 `0.1.5-rc.2`、`0.1.6-alpha.1` 一起进 allowlist。该版本的 `confine` 异步形状与 instruction renderer 名字与 `0.1.6-alpha.1` 相同；客户端当前会话改从目录行的 `retainedBy.mainView` 读取（见 Fixed）。开发 pin 仍是 `0.1.5-rc.2`。
+
+### Fixed
+
+- **`0.1.6-alpha.2` 上已打开的会话被面板显示成「当前没有活动会话」**：该版本从 Session 目录快照删除了 `current`，当前会话改由主视图 `retain(..., { source: 'mainView' })` 持有，投影在目录行的 `retainedBy.mainView`。`src/compat/client-session.ts` 用结构探测同时认两种形状；目录有行但没有主视图时仍显示空态，不会把 `ids[0]` 当成当前会话。
 
 ## [0.1.1] - 2026-09-16
 

@@ -23,7 +23,8 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { createElement } from 'react'
-import { createPanelClient, currentSessionIdOf, type PanelClient } from './panel-client.ts'
+import { currentSessionIdOf } from '../compat/client-session.ts'
+import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { NS, en, zh } from './locales.ts'
 import { STYLES } from './styles.ts'
 import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction.tsx'
@@ -68,6 +69,8 @@ export function apply(ctx: ClientContext): void {
     if (workspace?.pickDirectory === undefined) return null
     return await workspace.pickDirectory()
   }
+  // The selection field moved between supported releases; the probe lives in
+  // compat so this entry never compares version strings.
   const sessionId = (): string | undefined => currentSessionIdOf(readService(ctx, 'sessions'))
   const t = ctx.locale.bind(NS) as unknown as Translate
 
