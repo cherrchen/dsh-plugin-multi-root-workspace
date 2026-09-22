@@ -176,6 +176,12 @@ PR #1（head `507c954`）的 P2-3 / P2-4 / P2-5 收紧了两条规则（内容�
 
 `src/index.ts` 因此 export `createInstructionMessage` 与 `InstructionMessageInput`；`src/instructions.ts` 只保留 `import type { UserMessage }`（类型导入被擦除，不构成加载期依赖）。
 
+## 后续提升（2026-09-22）：纳入 `0.1.6-alpha.2`
+
+按本 ADR 的人工提升流程，把 `0.1.6-alpha.2` 写入 `SUPPORTED_DSH_RELEASES`，`peerDependencies` 改为 `0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2`。开发 pin 仍是 `0.1.5-rc.2`。
+
+实测：该版本的 `confine` 仍是 `Promise<ConfinedArgv>`（可选 `signal`），instruction renderer 仍是 `renderAgentInstructions`，journey 的 Messages 协议端点无需改动。完整矩阵在 warn（纳入前）与 enforce（纳入后）下都全绿，适配层没有改动。基线 `0.1.5-rc.2` 在同一份 allowlist 上回归全绿。
+
 ## Related Documents
 
 - [ADR-0002：上游耦合策略](./ADR-0002-upstream-coupling-policy.md)（本 ADR 收紧了其中第 4 条关于 `peerDependencies` 范围的部分）

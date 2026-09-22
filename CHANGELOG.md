@@ -10,7 +10,9 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 ## [Unreleased]
 
-无。
+### Added
+
+- **支持上游运行时 `0.1.6-alpha.2`**，与 `0.1.5-rc.2`、`0.1.6-alpha.1` 一起进 allowlist。该版本跑过完整矩阵，`confine` 的异步形状与 instruction renderer 名字都与 `0.1.6-alpha.1` 相同，适配层没有改动。开发 pin 仍是 `0.1.5-rc.2`。
 
 ## [0.1.1] - 2026-09-16
 

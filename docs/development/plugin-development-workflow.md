@@ -8,8 +8,8 @@
 | 项 | 值 | 说明 |
 | --- | --- | --- |
 | 开发/CI 目标版本（基线） | `0.1.5-rc.2` | 精确 pin 在 `devDependencies`；本地与 CI 主 lane 都跑它 |
-| 支持矩阵 | `0.1.5-rc.2`、`0.1.6-alpha.1` | **精确版本 allowlist**（`src/compat/dsh-version.ts` 的 `SUPPORTED_DSH_RELEASES`），`peerDependencies` 逐项或 —— 不是范围 |
-| 已实测的第二个运行时 | `0.1.6-alpha.1` | 由 `upgrade.yml` 车道跑完整矩阵证明；是否进 allowlist 由人决定，CI 绿不是授权 |
+| 支持矩阵 | `0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2` | **精确版本 allowlist**（`src/compat/dsh-version.ts` 的 `SUPPORTED_DSH_RELEASES`），`peerDependencies` 逐项或 —— 不是范围 |
+| 已实测的其余运行时 | `0.1.6-alpha.1`、`0.1.6-alpha.2` | 提升时按升级流程跑完整矩阵后才写入 allowlist；开发 pin 仍是基线。`upgrade.yml` 按周探测最新 pre-release，不自动扩大 allowlist |
 | 运行时门禁 | `multi-root-compat` 行 | 版本不在 allowlist 或核心包混装时，四个安全相关行根本不启动（ADR-0009） |
 | cordis | `4.0.2` | 与服务定义包一样必须单副本，由宿主提供 |
 

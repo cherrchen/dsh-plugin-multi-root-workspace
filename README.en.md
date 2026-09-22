@@ -39,7 +39,7 @@ The agent can now read, write, and run bash in that directory, with the same rig
 
 ## Requirements
 
-- **Using the published plugin**: you need a *supported* DSH runtime — currently **`0.1.5-rc.2` and `0.1.6-alpha.1`**, and nothing else will install or run (see below). `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
+- **Using the published plugin**: you need a *supported* DSH runtime — currently **`0.1.5-rc.2`, `0.1.6-alpha.1`, and `0.1.6-alpha.2`**, and nothing else will install or run (see below). `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
 - **Building from source / contributing**: **Node.js** `^22.19.0 || >=24` (pinned by the repository's `engines`), **Git**, and **pnpm 11** (`packageManager` pins `pnpm@11.25.0`; corepack recommended)
 - **DSH runtime**: the dev pin is exactly `0.1.5-rc.2`, the baseline among the supported releases; the upgrade procedure lives in the [development workflow](./docs/development/plugin-development-workflow.md)
 - **Platforms**: kernel-level multi-root is complete on macOS (Seatbelt) and Linux (bwrap or Landlock); on Windows only the `fs` write path covers additional roots (confined bash/PTY does not — see [known limitations](#known-limitations))

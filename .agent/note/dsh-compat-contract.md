@@ -13,14 +13,14 @@ src/compat/dsh-version.ts  →  SUPPORTED_DSH_RELEASES
 是**精确版本数组**，不是 semver 范围。当前：
 
 ```ts
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2'] as const
 ```
 
 改它的时候，下面四处必须同时一致，否则 `pnpm compat:check` 失败：
 
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   allowlist
-package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1"
+package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2"
 package.json                devDependencies          allowlist 中的某一项（当前 0.1.5-rc.2）
 node_modules                实际解析到的版本          allowlist 中的某一项
 ```
@@ -55,6 +55,7 @@ await mountCompat(ctx)
 ```text
 0.1.5-rc.2     confine(argv, policy): ConfinedArgv
 0.1.6-alpha.1  confine(argv, policy, signal?): Promise<ConfinedArgv>
+0.1.6-alpha.2  与 0.1.6-alpha.1 相同（2026-09-22 实测，完整矩阵全绿，适配层无改动）
 ```
 
 **不要**在 `src/sandbox.ts` 里手写签名去迁就某一个版本。统一走 `src/compat/sandbox-confine.ts` 的 `widenConfined()`，它**保形**：上游同步就同步返回，上游返回 promise 就返回 promise。
@@ -127,6 +128,7 @@ pnpm install --frozen-lockfile                                     # node_module
 ```text
 0.1.5-rc.2     POST {base}/chat/completions    choices[].delta，finish_reason
 0.1.6-alpha.1  POST {base}/v1/messages         message_start / content_block_* / message_delta / message_stop
+0.1.6-alpha.2  与 0.1.6-alpha.1 相同（journey 55/55，端点未改）
 ```
 
 这个变化不经过插件代码，但会打断 `scripts/smoke-journey.mjs` 的脚本化端点。它现在**按请求路径**选择应答协议，两个构造函数分别是 `chatCompletionFrames()` 与 `messagesFrames()`。
