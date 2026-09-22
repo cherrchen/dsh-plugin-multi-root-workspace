@@ -10,7 +10,9 @@ This file records the user-visible changes of every **released** version.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Support for the upstream runtime `0.1.6-alpha.2`**, alongside `0.1.5-rc.2` and `0.1.6-alpha.1`. That release has run the full matrix; `confine` stays asynchronous and the instruction renderer keeps the `0.1.6-alpha.1` name, so the adapter layer did not change. The development pin remains `0.1.5-rc.2`.
 
 ## [0.1.1] - 2026-09-16
 

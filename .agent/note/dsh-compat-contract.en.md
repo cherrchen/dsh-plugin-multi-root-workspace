@@ -13,14 +13,14 @@ src/compat/dsh-version.ts  →  SUPPORTED_DSH_RELEASES
 It is an array of **exact versions**, not a semver range. Currently:
 
 ```ts
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2'] as const
 ```
 
 When you change it, these four must agree or `pnpm compat:check` fails:
 
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   the allowlist
-package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1"
+package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2"
 package.json                devDependencies          one entry of the allowlist (currently 0.1.5-rc.2)
 node_modules                resolved versions        one entry of the allowlist
 ```
@@ -55,6 +55,7 @@ Otherwise `ctx.get('fs')` / `ctx.get('sandbox')` are `undefined` and you will se
 ```text
 0.1.5-rc.2     confine(argv, policy): ConfinedArgv
 0.1.6-alpha.1  confine(argv, policy, signal?): Promise<ConfinedArgv>
+0.1.6-alpha.2  same shape as 0.1.6-alpha.1 (measured 2026-09-22; full matrix green, no adapter change)
 ```
 
 **Do not** hand-write a signature in `src/sandbox.ts` that suits one release. Go through `widenConfined()` in `src/compat/sandbox-confine.ts`, which **preserves the shape**: a synchronous base result stays synchronous, a promise stays a promise.
@@ -127,6 +128,7 @@ Two traps that only bite locally (CI always starts from a clean checkout):
 ```text
 0.1.5-rc.2     POST {base}/chat/completions    choices[].delta, finish_reason
 0.1.6-alpha.1  POST {base}/v1/messages         message_start / content_block_* / message_delta / message_stop
+0.1.6-alpha.2  same dialect as 0.1.6-alpha.1 (journey 55/55, endpoint unchanged)
 ```
 
 That change does not pass through plugin code, but it breaks the scripted endpoint in `scripts/smoke-journey.mjs`. The endpoint now picks its dialect **by request path**, built by `chatCompletionFrames()` and `messagesFrames()` respectively.
