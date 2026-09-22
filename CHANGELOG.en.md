@@ -10,6 +10,10 @@ This file records the user-visible changes of every **released** version.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-22
+
+With the exact allowlist contract from `v0.1.1` unchanged, the supported upstream runtimes grow to `0.1.6-alpha.2` and `0.1.7-alpha.1`; the reasoning is still [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md).
+
 ### Added
 
 - **Support for the upstream runtime `0.1.6-alpha.2`**, alongside `0.1.5-rc.2` and `0.1.6-alpha.1`. `confine` stays asynchronous and the instruction renderer keeps the `0.1.6-alpha.1` name; the client current-session id now comes from the catalog row's `retainedBy.mainView` (see Fixed). The development pin remains `0.1.5-rc.2`.
@@ -79,6 +83,7 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/tag/v0.1.0

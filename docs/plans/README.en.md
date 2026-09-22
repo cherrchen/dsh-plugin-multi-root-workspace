@@ -38,7 +38,7 @@ Plans with long-term reference value should not be deleted.
 
 active:
 
-- [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace development path and **progress ledger**: the MVP `v0.1.0` milestones M1/M2/M3 are implemented and released; the `v0.1.1` hardening batch H1–H4 is implemented and released with `v0.1.1`; the second phase (the B series) is scoped in requirements §4/§7.
+- [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace development path and **progress ledger**: the MVP `v0.1.0` milestones M1/M2/M3 are implemented and released; the `v0.1.1` hardening batch H1–H4 is implemented and released with `v0.1.1`; the `v0.1.2` support-matrix expansion is implemented and released with `v0.1.2`; the second phase (the B series) is scoped in requirements §4/§7.
 
 completed:
 

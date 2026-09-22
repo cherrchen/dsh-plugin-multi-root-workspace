@@ -10,6 +10,10 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-22
+
+在 `v0.1.1` 的精确 allowlist 契约不变的前提下，把受支持的上游运行时扩展到 `0.1.6-alpha.2` 与 `0.1.7-alpha.1`；设计取舍仍见 [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)。
+
 ### Added
 
 - **支持上游运行时 `0.1.6-alpha.2`**，与 `0.1.5-rc.2`、`0.1.6-alpha.1` 一起进 allowlist。该版本的 `confine` 异步形状与 instruction renderer 名字与 `0.1.6-alpha.1` 相同；客户端当前会话改从目录行的 `retainedBy.mainView` 读取（见 Fixed）。开发 pin 仍是 `0.1.5-rc.2`。
@@ -79,6 +83,7 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/tag/v0.1.0

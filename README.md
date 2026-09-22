@@ -16,7 +16,9 @@ DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围�
 
 **已完成并发布：MVP `v0.1.0`（里程碑 M1–M3）**——组合与空根直通、多根能力与方言 grant、根注册表 / `/workspace-folders` 命令 / Workspace Folders 面板 / 跨仓库旅程 e2e。
 
-**已完成并发布：`v0.1.1` 硬化批次（H1–H4）**——跨进程 Registry Authority Lease（两个 DSH 进程共用 `$DSH_HOME` 时只有持锁者授予附加根，另一方 fail-closed 并在对方退出后接管）、面板主根改为 host session 推导（不再接受客户端指名的根）、DSH 兼容性从文档约定变成**启动时执行的代码契约**（精确 allowlist + 混装检测 + `src/compat/` 适配层，支持范围收窄为 `0.1.5-rc.2` 与 `0.1.6-alpha.1`，见 [CHANGELOG](./CHANGELOG.md) 的「升级注意」），以及**附加根自身的 `AGENTS.md` / `CLAUDE.md` 进入模型上下文**——原生指令发现从会话 cwd 向上走，永远到不了附加根。
+**已完成并发布：`v0.1.1` 硬化批次（H1–H4）**——跨进程 Registry Authority Lease（两个 DSH 进程共用 `$DSH_HOME` 时只有持锁者授予附加根，另一方 fail-closed 并在对方退出后接管）、面板主根改为 host session 推导（不再接受客户端指名的根）、DSH 兼容性从文档约定变成**启动时执行的代码契约**（精确 allowlist + 混装检测 + `src/compat/` 适配层，见 [CHANGELOG](./CHANGELOG.md) 的「升级注意」），以及**附加根自身的 `AGENTS.md` / `CLAUDE.md` 进入模型上下文**——原生指令发现从会话 cwd 向上走，永远到不了附加根。
+
+**已完成并发布：`v0.1.2`**——在 `v0.1.1` 契约不变的前提下，受支持的上游运行时扩展到 `0.1.6-alpha.2` 与 `0.1.7-alpha.1`（后者含 session format 4、进程内 `PluginPackages`、bash `execute().result()` 等适配）；并修复 `0.1.6-alpha.2` 上 Workspace Folders 面板因 Session 目录删掉 `current` 而误显示「没有活动会话」的问题。详见 [CHANGELOG](./CHANGELOG.md)。
 
 进度、编号与发布状态的唯一真源是[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)（M1–M4 是 MVP 里程碑编号，H1–H4 是 `v0.1.1` 批次编号，其中 H1 即 M4）；逐项证据见各[已完成计划](./docs/plans/README.md)，每个版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)。
 
@@ -82,8 +84,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.1/dsh-electron-dsh-plugin-multi-root-workspace-0.1.1.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.1.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.2/dsh-electron-dsh-plugin-multi-root-workspace-0.1.2.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.2.tgz
 ```
 
 同样是预构建产物（不需要编译本插件本身），适合内网或离线环境交付；首次 `add` 同样要回答那一次 `allowBuilds`。
@@ -102,10 +104,10 @@ allowBuilds:
   koffi: true
 ```
 
-然后重新执行 `add` 即可。建议锁定 tag（如 `#v0.1.1`），让后续推送无法悄悄改变实际运行的内容：
+然后重新执行 `add` 即可。建议锁定 tag（如 `#v0.1.2`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.1
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.2
 ```
 
 ### 从本地源码安装（开发调试）
