@@ -13,9 +13,10 @@
  *
  * 1. **Not a system-prompt contribution.** Instruction text is
  *    producer-supplied context, not system authority, so it enters as a
- *    user-role message tagged `{ kind: 'plugin', form: 'instructions' }` — the
- *    position DSH's own message model reserves for it. It is also the only
- *    channel that is logged, and model-visible content must be logged.
+ *    user-role message tagged `form: 'instructions'`. Through session format 3
+ *    the source kind is `plugin`; format 4 retired that shared kind, so the
+ *    adapter persists this plugin's own (`multi-root-workspace`). It is also
+ *    the only channel that is logged, and model-visible content must be logged.
  * 2. **Injected from `agent/pre-step`, not a session lifecycle event.**
  *    `pre-step` is an awaited waterfall, so discovery, reading and rendering all
  *    complete BEFORE the step it feeds — deterministically, on the first step.
@@ -59,6 +60,7 @@ import type {} from './compat.ts'
 import { instructionsApi } from './compat/agent-instructions.ts'
 import type { InstructionFile, InstructionsApi, LoadedInstructionFile } from './compat/agent-instructions.ts'
 import { createInstructionMessage } from './compat/llm-message.ts'
+import { toolResultFailed } from './compat/tool-result.ts'
 import { isCanonicallyUnder } from './roots.ts'
 import type {} from './scope.ts'
 
@@ -308,8 +310,9 @@ export function apply(ctx: Context, config: Config = {}): void {
     pendingCalls.delete(callId)
     if (call === undefined) return
     // A failed call never makes a directory relevant: the file may not have
-    // been reached at all.
-    if (event.data.error !== undefined || event.data.message.content[0]?.isError === true) return
+    // been reached at all. The failure bit moved between releases; the adapter
+    // reads both spellings.
+    if (event.data.error !== undefined || toolResultFailed(event.data.message)) return
     const path = touchedPathOfToolCall(call.name, call.arguments)
     if (path === undefined) return
     const state = stateOf(session)

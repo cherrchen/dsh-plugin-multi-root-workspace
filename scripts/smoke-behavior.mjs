@@ -40,6 +40,7 @@ import { createChecker } from './lib/check.mjs'
 import { requireKernelRunner } from '../tests/support/kernel-runner.ts'
 import { assertIsolatedHome, pluginPackageDir, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
+import { runForeground } from './lib/shell-exec.mjs'
 
 const home = resolveScratchHome(`behavior-${process.pid}`)
 const fixtureRoot = join(REPO_ROOT, '.dsh-smoke', `behavior-${process.pid}`)
@@ -97,7 +98,7 @@ async function battery(ctx) {
     })
     try {
       const spec = ctx.shell.resolve({ command, workdir: primaryRoot, sandboxPolicy: policy })
-      const result = await ctx.shell.run(spec)
+      const result = await runForeground(ctx.shell, spec)
       return {
         exitCode: result.exitCode,
         denied: result.sandbox?.denied ?? null,
@@ -282,7 +283,7 @@ async function multiRootBattery(ctx) {
   const bash = async (command) => {
     try {
       const spec = ctx.shell.resolve({ command, workdir: primaryRoot, sandboxPolicy: policy })
-      const result = await ctx.shell.run(spec)
+      const result = await runForeground(ctx.shell, spec)
       return {
         exitCode: result.exitCode,
         denied: result.sandbox?.denied ?? null,

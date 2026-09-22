@@ -20,18 +20,18 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
-  IconChevronDownOutline14,
-  IconChevronUpOutline14,
-  IconCopyOutline16,
-  IconEditOutline16,
-  IconEllipsisOutline16,
-  IconFolderClose16,
-  IconFolderOpenOutline16,
-  IconPlusOutline16,
-  IconTrashOutline16,
-  Menu,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+  IconChevronDown,
+  IconChevronUp,
+  IconCopy,
+  IconEdit,
+  IconEllipsis,
+  IconFolderClose,
+  IconFolderOpen,
+  IconPlus,
+  IconTrash,
+} from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { Key } from './locales.ts'
 import type { RootEntryView, RootState, RootView, RootsView } from '../contract.ts'
@@ -163,7 +163,7 @@ export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): Reac
           aria-expanded={open}
           onClick={() => { setOpen(value => !value) }}
         >
-          <span className="mrfw-triggerIcon" aria-hidden="true"><IconFolderClose16 size={rail ? 18 : 16} /></span>
+          <span className="mrfw-triggerIcon" aria-hidden="true"><IconFolderClose size={rail ? 18 : 16} /></span>
           {rail ? null : <span className="mrfw-triggerLabel">{props.t('action.label')}</span>}
         </button>
       </div>
@@ -475,33 +475,33 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                 )}
                 <IconButton
                   onClick={() => { void copyPath(root) }}
-                  icon={<IconCopyOutline16 />}
+                  icon={<IconCopy />}
                   label={copiedId === key ? t('panel.copied') : t('panel.copyPath')}
                 />
                 <IconButton
                   disabled={state.busy}
                   onClick={() => { void reveal(root) }}
-                  icon={<IconFolderOpenOutline16 />}
+                  icon={<IconFolderOpen />}
                   label={t('panel.reveal')}
                 />
                 <IconButton
                   disabled={state.busy || index === 0}
                   onClick={() => { void move(root, roots[index - 1]) }}
-                  icon={<IconChevronUpOutline14 />}
+                  icon={<IconChevronUp />}
                   label={t('panel.moveUp')}
                 />
                 <IconButton
                   disabled={state.busy || index === roots.length - 1}
                   onClick={() => { void move(root, roots[index + 2]) }}
-                  icon={<IconChevronDownOutline14 />}
+                  icon={<IconChevronDown />}
                   label={t('panel.moveDown')}
                 />
                 <Menu
                   open={menuFor === key}
                   onClose={() => { setMenuFor(undefined) }}
                   items={[
-                    { id: 'rename', label: t('panel.rename'), icon: <IconEditOutline16 /> },
-                    { id: 'remove', label: t('panel.remove'), icon: <IconTrashOutline16 />, danger: true, disabled: state.busy },
+                    { id: 'rename', label: t('panel.rename'), icon: <IconEdit /> },
+                    { id: 'remove', label: t('panel.remove'), icon: <IconTrash />, danger: true, disabled: state.busy },
                   ]}
                   onSelect={(id) => {
                     setMenuFor(undefined)
@@ -518,7 +518,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                     <IconButton
                       disabled={state.busy}
                       onClick={() => { setMenuFor(current => (current === key ? undefined : key)) }}
-                      icon={<IconEllipsisOutline16 />}
+                      icon={<IconEllipsis />}
                       label={t('panel.more')}
                     />
                   )}
@@ -550,7 +550,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                 variant="outline"
                 disabled={state.busy}
                 onClick={() => { void addViaPicker() }}
-                icon={<IconPlusOutline16 />}
+                icon={<IconPlus />}
                 label={t('panel.add')}
               />
             )}

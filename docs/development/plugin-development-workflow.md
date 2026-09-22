@@ -8,10 +8,10 @@
 | 项 | 值 | 说明 |
 | --- | --- | --- |
 | 开发/CI 目标版本（基线） | `0.1.5-rc.2` | 精确 pin 在 `devDependencies`；本地与 CI 主 lane 都跑它 |
-| 支持矩阵 | `0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2` | **精确版本 allowlist**（`src/compat/dsh-version.ts` 的 `SUPPORTED_DSH_RELEASES`），`peerDependencies` 逐项或 —— 不是范围 |
-| 已实测的其余运行时 | `0.1.6-alpha.1`、`0.1.6-alpha.2` | 提升时按升级流程跑完整矩阵后才写入 allowlist；开发 pin 仍是基线。`upgrade.yml` 按周探测最新 pre-release，不自动扩大 allowlist |
+| 支持矩阵 | `0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1` | **精确版本 allowlist**（`src/compat/dsh-version.ts` 的 `SUPPORTED_DSH_RELEASES`），`peerDependencies` 逐项或 —— 不是范围 |
+| 已实测的其余运行时 | `0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1` | 提升时按升级流程跑完整矩阵后才写入 allowlist；开发 pin 仍是基线。`upgrade.yml` 按周探测最新 pre-release，不自动扩大 allowlist |
 | 运行时门禁 | `multi-root-compat` 行 | 版本不在 allowlist 或核心包混装时，四个安全相关行根本不启动（ADR-0009） |
-| cordis | `4.0.2` | 与服务定义包一样必须单副本，由宿主提供 |
+| cordis | 基线 `4.0.2`；`0.1.7-alpha.1` 探测钉 `4.0.3` | 与服务定义包一样必须单副本，由宿主提供。`upgrade-dsh.mjs` 把 cordis 钉到候选 `dsh` 所声明的那个精确版本：`0.1.7` 依赖 `^4.0.3`，与 `4.0.2` 混装会拆出两份 `dsh-tools`，工具调度用的 Symbol 对不上 |
 
 **必须精确 pin**：`@deepseek-ai/dsh-*` 的 `latest` dist-tag 指向陈旧的 `0.0.1-rc.1`，真正的新版发布在 `next`；范围依赖会解析到错误版本。`pnpm-workspace.yaml` 里的 `minimumReleaseAgeExclude` 是为此配套的（pnpm 的发布年龄门禁会拦下刚发布的预发布版本）。
 
@@ -154,7 +154,7 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 八行 insert
 - **只允许包入口导入**。发布包里没有 `src/`，`pkg/src/*` 在安装形态下不存在；需要上游内部实现时改为本地实现 + 注明出处 + 差分测试钉住（见 `src/containment.ts`）。
 - 子类只使用上游公开方法面（不碰 TS-private、不做原型替换）。`dsh-sandbox-local` 公开面只有 `confine` + `internals`，因此方言适配是**观测克隆 + 结构识别 + 识别失败即抛错**（`src/dialects.ts`，见 [ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；新增或改变方言必须同时更新调研 §10 与本文件的测试清单。
 - **支持矩阵是精确版本 allowlist**（`src/compat/dsh-version.ts` 的 `SUPPORTED_DSH_RELEASES`），不是 semver 范围；`peerDependencies` 声明为 allowlist 的逐项或。运行时由 `multi-root-compat` 门禁把判定变成前置条件，四个安全相关的 provider 行全部 inject `multiRootCompat`，判定失败时它们根本不启动。详见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)。
-- **版本差异只允许存在于 `src/compat/`**，且用结构探测而非版本比较（当前吸收了 `confine` 的同步/异步形状与 instruction renderer 的改名）。业务代码不写版本判断。
+- **版本差异只允许存在于 `src/compat/`**，且用结构探测而非版本比较（`confine` 的同步/异步、instruction renderer 改名、客户端当前会话、session format 4 的 source kind、工具失败位、面板图标）。业务代码不写版本判断。
 - **升级流程**（提升一个候选版本）：
 
   ```sh

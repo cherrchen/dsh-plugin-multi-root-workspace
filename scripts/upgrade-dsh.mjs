@@ -71,11 +71,42 @@ function latestPrerelease() {
 }
 
 /**
- * Repoint every DSH devDependency.
+ * The cordis version the pinned `dsh` package declares.
+ *
+ * `dsh` 0.1.7 depends on cordis `^4.0.3`. Leaving the repository's 4.0.2 pin
+ * in the same tree installs both, and pnpm then gives `dsh-agent-loop` and
+ * `dsh-tools` different physical copies. The tool scheduler is a module-local
+ * `Symbol`, so the loop looks the symbol up on a runtime built by the other
+ * copy and every tool call dies with `reading 'prepare'` of `undefined`.
+ * The declared range is a single caret or tilde of one exact version; that
+ * exact version is the pin. A wider range is refused rather than guessed.
+ * @param dshVersion - the exact `@deepseek-ai/dsh` release being pinned.
+ * @returns the exact cordis version to pin.
+ */
+function cordisRequiredBy(dshVersion) {
+  const raw = execFileSync(
+    'npm',
+    ['view', `@deepseek-ai/dsh@${dshVersion}`, 'dependencies.@deepseek-ai/cordis', '--json'],
+    { encoding: 'utf8' },
+  )
+  const range = JSON.parse(raw)
+  const exact = typeof range === 'string' ? /^[\^~]?(\d+\.\d+\.\d+)$/u.exec(range) : null
+  if (exact === null) {
+    throw new Error(
+      `[upgrade] @deepseek-ai/dsh@${dshVersion} depends on cordis ${JSON.stringify(range)}, `
+      + 'which is not a single caret or tilde this script can pin',
+    )
+  }
+  return exact[1]
+}
+
+/**
+ * Repoint every DSH devDependency, and cordis to the version that release requires.
  * @param version - the release to pin.
+ * @param cordisVersion - the exact cordis version {@link cordisRequiredBy} returned.
  * @returns the packages that were changed.
  */
-function repointManifest(version) {
+function repointManifest(version, cordisVersion) {
   const source = readFileSync(MANIFEST, 'utf8')
   const manifest = JSON.parse(source)
   const changed = []
@@ -84,6 +115,11 @@ function repointManifest(version) {
     if (manifest.devDependencies[name] === version) continue
     changed.push(`${name}: ${manifest.devDependencies[name]} → ${version}`)
     manifest.devDependencies[name] = version
+  }
+  const cordisName = '@deepseek-ai/cordis'
+  if (manifest.devDependencies?.[cordisName] !== cordisVersion) {
+    changed.push(`${cordisName}: ${manifest.devDependencies?.[cordisName]} → ${cordisVersion}`)
+    manifest.devDependencies[cordisName] = cordisVersion
   }
   // Re-serialize with the trailing newline the repository's manifest carries, so
   // the only diff is the versions themselves.
@@ -104,15 +140,22 @@ function repointManifest(version) {
  * Editing the YAML as TEXT is deliberate: a parse-and-dump round trip would drop
  * the comments that explain why each allowance exists.
  * @param version - the release to pin.
+ * @param cordisVersion - the exact cordis version to write into the cordis allowance.
  * @returns the number of rewritten entries.
  */
-function repointWorkspace(version) {
+function repointWorkspace(version, cordisVersion) {
   const source = readFileSync(WORKSPACE, 'utf8')
   let count = 0
-  const updated = source.replace(/^(\s*- '@deepseek-ai\/dsh(?:-[\w-]+)?)@[^']+'$/gmu, (line, prefix) => {
+  let updated = source.replace(/^(\s*- '@deepseek-ai\/dsh(?:-[\w-]+)?)@[^']+'$/gmu, (line, prefix) => {
     count += 1
     return `${prefix}@${version}'`
   })
+  const cordisLine = /^(\s*- '@deepseek-ai\/cordis@)[^']+'$/mu
+  if (!cordisLine.test(updated)) {
+    throw new Error('[upgrade] pnpm-workspace.yaml has no @deepseek-ai/cordis release-age entry to repoint')
+  }
+  updated = updated.replace(cordisLine, `$1${cordisVersion}'`)
+  count += 1
   writeFileSync(WORKSPACE, updated)
   return count
 }
@@ -161,8 +204,10 @@ if (!/^\d+\.\d+\.\d+(?:-[\w.]+)?$/u.test(target)) {
   process.exit(2)
 }
 
-const changed = repointManifest(target)
-const allowances = repointWorkspace(target)
+const cordisVersion = cordisRequiredBy(target)
+const changed = repointManifest(target, cordisVersion)
+const allowances = repointWorkspace(target, cordisVersion)
+console.log(`[upgrade] cordis pin: ${cordisVersion}`)
 console.log(`[upgrade] pinned ${target}`)
 console.log(`[upgrade] devDependencies rewritten: ${changed.length}`)
 for (const entry of changed) console.log(`           ${entry}`)

@@ -167,7 +167,8 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
     step: async (claimed: readonly UserMessage[] = []) => {
       const decision = await decide(claimed)
       if (decision.kind !== 'enter') return undefined
-      return decision.messages.find(message => message.source.kind === 'plugin')
+      const kind = LlmMessage.instructionSourceKind(SESSION_FORMAT_VERSION)
+      return decision.messages.find(message => message.source.kind === kind)
     },
   }
 }
@@ -220,7 +221,11 @@ describe('with additional roots', () => {
 
     const message = await world.step()
     expect(message?.role).toBe('user')
-    expect(message?.source).toMatchObject({ kind: 'plugin', plugin: PLUGIN_SOURCE, form: 'instructions' })
+    expect(message?.source).toMatchObject({
+      kind: LlmMessage.instructionSourceKind(SESSION_FORMAT_VERSION),
+      plugin: PLUGIN_SOURCE,
+      form: 'instructions',
+    })
   })
 
   it('lands right after the last claimed message, where upstream puts its own baseline', async () => {
@@ -233,7 +238,7 @@ describe('with additional roots', () => {
     if (decision.kind !== 'enter') return
     expect(decision.messages).toHaveLength(2)
     expect(decision.messages[0]).toBe(claimed)
-    expect(decision.messages[1]?.source.kind).toBe('plugin')
+    expect(decision.messages[1]?.source.kind).toBe(LlmMessage.instructionSourceKind(SESSION_FORMAT_VERSION))
   })
 
   it('preserves scope order across roots', async () => {
