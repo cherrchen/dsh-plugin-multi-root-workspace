@@ -55,7 +55,7 @@ Otherwise `ctx.get('fs')` / `ctx.get('sandbox')` are `undefined` and you will se
 ```text
 0.1.5-rc.2     confine(argv, policy): ConfinedArgv
 0.1.6-alpha.1  confine(argv, policy, signal?): Promise<ConfinedArgv>
-0.1.6-alpha.2  same shape as 0.1.6-alpha.1 (measured 2026-09-22; full matrix green, no adapter change)
+0.1.6-alpha.2  same `confine` shape as 0.1.6-alpha.1 (measured 2026-09-22). The session catalog is a different shape; see the next section.
 ```
 
 **Do not** hand-write a signature in `src/sandbox.ts` that suits one release. Go through `widenConfined()` in `src/compat/sandbox-confine.ts`, which **preserves the shape**: a synchronous base result stays synchronous, a promise stays a promise.
@@ -71,14 +71,19 @@ When reading the result in tests and smokes:
 
 ## 4. Upstream API changes may only branch inside `src/compat/`, and only structurally
 
-Business code contains no version checks. Two adapters today:
+Business code contains no version checks. Three adapters today:
 
 | File | Difference it absorbs |
 | --- | --- |
 | `src/compat/sandbox-confine.ts` | `confine`'s sync/async shape and arity |
 | `src/compat/agent-instructions.ts` | the renderer rename: `renderWorkspaceContext` (0.1.5) → `renderAgentInstructions` (0.1.6) |
+| `src/compat/client-session.ts` | current session: `list.current` (0.1.5 / 0.1.6-alpha.1) → catalog row `retainedBy.mainView > 0` (0.1.6-alpha.2) |
 
-Always probe **structurally** (is the value a thenable, which export name exists) rather than comparing version strings. Upstream is pre-stable and reshapes things within a release; a structural probe copes with that, a version comparison does not.
+Always probe **structurally** (is the value a thenable, which export name exists, does the snapshot carry `current`) rather than comparing version strings. Upstream is pre-stable and reshapes things within a release; a structural probe copes with that, a version comparison does not.
+
+**This is a quiet trap**: `0.1.6-alpha.2`'s host matrix (`confine`, the instruction renderer, the journey Messages endpoint) matches alpha.1, so it was promoted with "no adapter change". The client Session Controller still dropped `SessionListState.current` in `6830e1460d` and moved navigation onto the main view's `retain(..., { source: 'mainView' })`. A panel that still reads `list.current` then shows "No active session" for an open conversation and **does not call the host**.
+
+Probe order: a non-empty `current` wins (the old shape), otherwise the first catalog row whose `retainedBy.mainView` is a positive number. A populated catalog with nobody retained returns `undefined` — **never** fall back to `ids[0]`, which would act on a session the operator is not looking at. `getSnapshot` must be invoked as a method; extracting the function drops the store's `this`.
 
 `agent-instructions` is an **optional peer**: a minimal composition legitimately has neither it nor an agent. `instructionsApi()` returns `undefined` when the package is absent (contributing nothing), but **throws** when the package is present and carries neither renderer name — that is a compatibility break to fix, not an optional seam.
 

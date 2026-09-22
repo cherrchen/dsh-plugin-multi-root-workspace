@@ -44,6 +44,12 @@ interface Harness {
   readonly dictionaries: { ns: string; dicts: Record<string, unknown> }[]
   setView: (view: RootsView) => void
   setSession: (sessionId: string | undefined) => void
+  /**
+   * Present the 0.1.6-alpha.2 catalog: no `current` field, and the main view
+   * is whichever row carries `mainView`. Passing this switches the stub off
+   * the legacy selection snapshot until `setSession` is called again.
+   */
+  setCatalog: (rows: readonly { id: string; mainView?: number }[]) => void
   setFailure: (failure: { code: string; message: string } | undefined) => void
   /** What the next `reveal` answers (the real host answers a `RevealedView`). */
   setRevealed: (value: unknown) => void
@@ -64,6 +70,26 @@ const ROOT_C: RootView = {
   detail: 'the path now resolves to "/repos/other"',
 }
 
+/**
+ * The 0.1.6-alpha.2 list snapshot: catalog rows, no `current`.
+ * `retainedBy.mainView` is omitted when the row is not the main view, which
+ * is what an unselected catalog entry looks like.
+ */
+function catalogSnapshot(rows: readonly { id: string; mainView?: number }[]): {
+  ids: string[]
+  byId: Record<string, { id: string; retainedBy: { mainView?: number } }>
+  phase: 'ready'
+} {
+  const byId: Record<string, { id: string; retainedBy: { mainView?: number } }> = {}
+  for (const row of rows) {
+    byId[row.id] = {
+      id: row.id,
+      retainedBy: row.mainView === undefined ? {} : { mainView: row.mainView },
+    }
+  }
+  return { ids: rows.map(row => row.id), byId, phase: 'ready' }
+}
+
 /** Apply the real client entry to a recording stub context. */
 function mount(): Harness {
   const calls: Call[] = []
@@ -71,6 +97,8 @@ function mount(): Harness {
   const dictionaries: { ns: string; dicts: Record<string, unknown> }[] = []
   let view: RootsView = { primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B] }
   let currentSession: string | undefined = 'session-1'
+  // Undefined keeps the 0.1.5 / 0.1.6-alpha.1 selection snapshot (`current`).
+  let catalog: readonly { id: string; mainView?: number }[] | undefined
   let failure: { code: string; message: string } | undefined
   let revealed: unknown = { revealed: '/repos/payments' } satisfies RevealedView
   let gate: Promise<void> | undefined
@@ -134,7 +162,15 @@ function mount(): Harness {
     get: (name: string) => {
       if (name === 'connection') return connection
       if (name === 'uiWorkspace') return { pickDirectory: async () => picked }
-      if (name === 'sessions') return { list: { getSnapshot: () => ({ current: currentSession }) } }
+      if (name === 'sessions') {
+        return {
+          list: {
+            getSnapshot: () => catalog === undefined
+              ? { current: currentSession }
+              : catalogSnapshot(catalog),
+          },
+        }
+      }
       return undefined
     },
   }
@@ -145,7 +181,11 @@ function mount(): Harness {
     registrations,
     dictionaries,
     setView: next => { view = next },
-    setSession: next => { currentSession = next },
+    setSession: next => {
+      currentSession = next
+      catalog = undefined
+    },
+    setCatalog: rows => { catalog = rows },
     setFailure: next => { failure = next },
     setRevealed: next => { revealed = next },
     holdNextCall: () => { gate = new Promise<void>(resolve => { releaseGate = resolve }) },
@@ -249,6 +289,49 @@ describe('the panel dialog', () => {
 
     await waitFor(() => { expect(harness.calls).toHaveLength(1) })
     expect(harness.calls[0]?.payload).toEqual({ sessionId: 'session-1' })
+  })
+
+  it('reads the main-view session when the catalog has no current field', async () => {
+    const harness = mount()
+    // The unrelated row is first, so a reader that takes ids[0] names the
+    // wrong session. Only retainedBy.mainView marks the one on screen.
+    harness.setCatalog([
+      { id: 'session-other' },
+      { id: 'session-main', mainView: 1 },
+    ])
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+    expect(harness.calls[0]).toEqual({ channel: PANEL_CHANNEL, endpoint: 'list', payload: { sessionId: 'session-main' } })
+    expect(screen.queryByText(`${NS}.panel.noSession`)).toBeNull()
+  })
+
+  it('shows No active session when catalog rows exist but none is the main view', async () => {
+    const harness = mount()
+    harness.setCatalog([{ id: 'session-other' }])
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+
+    await waitFor(() => { expect(screen.getByText(`${NS}.panel.noSession`)).toBeTruthy() })
+    expect(harness.calls).toHaveLength(0)
+  })
+
+  it('follows a main-view change on retry', async () => {
+    const harness = mount()
+    harness.setCatalog([{ id: 'session-main', mainView: 1 }])
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+
+    harness.setCatalog([
+      { id: 'session-main' },
+      { id: 'session-next', mainView: 1 },
+    ])
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
+
+    await waitFor(() => { expect(harness.calls).toHaveLength(2) })
+    expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-next' })
   })
 
   it('reads the current session again for each request', async () => {

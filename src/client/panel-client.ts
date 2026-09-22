@@ -118,10 +118,3 @@ function expectShape<E extends PanelEndpoint>(endpoint: E, value: unknown): Pane
   if (!parsed.ok) throw new PanelError('panel/bad-response', parsed.message)
   return parsed.value as PanelResponseMap[E]
 }
-
-/** The current session id, when the composed client can name one. */
-export function currentSessionIdOf(sessions: unknown): string | undefined {
-  const candidate = sessions as { list?: { getSnapshot?: () => { current?: unknown } } } | undefined
-  const current = candidate?.list?.getSnapshot?.().current
-  return typeof current === 'string' && current !== '' ? current : undefined
-}

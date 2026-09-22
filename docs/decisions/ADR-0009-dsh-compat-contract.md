@@ -89,12 +89,13 @@ compat 失败  →  该行抛错               →  四个 provider 永不启动
 
 ### 4. 版本差异只允许存在于 `src/compat/`，并且用结构探测而非版本比较
 
-业务代码不出现任何版本判断。两个适配器：
+业务代码不出现任何版本判断。三个适配器：
 
 - `src/compat/sandbox-confine.ts` —— `widenConfined()` **保形**：上游同步就同步返回，上游返回 promise 就返回 promise。绝不把同步结果包成 promise，因为在 `0.1.5-rc.2` 上那会把 `ctx.sandbox.confine()` 对组合里每一个调用方（bash executor、PTY backend）都变成 thenable。返回类型用 `ReturnType<LocalSandboxProvider['confine']>` 从**已安装的**基类推导，于是一份签名同时对两个版本成立。
 - `src/compat/agent-instructions.ts` —— 业务层只调用 `renderInstructions(...)`；适配器按**导出名**挑选 `renderAgentInstructions ?? renderWorkspaceContext`。
+- `src/compat/client-session.ts` —— 业务层只调用 `currentSessionIdOf(sessions)`；适配器先认非空的 `list.current`（0.1.5 / 0.1.6-alpha.1），否则取 `retainedBy.mainView > 0` 的目录行（0.1.6-alpha.2）。绝不回退 `ids[0]`。
 
-一律用结构探测（是否 thenable、导出哪个名字）而不是比较版本号：结构探测还能应付上游在同一版本内改形状，或一个版本里同时保留两个名字。
+一律用结构探测（是否 thenable、导出哪个名字、快照有没有 `current`）而不是比较版本号：结构探测还能应付上游在同一版本内改形状，或一个版本里同时保留两个名字。
 
 **可选 peer 一律按需加载，不得静态值导入。** barrel（`src/index.ts`，即 carrier loader 行挂载的模块）的加载期依赖集合必须等于必需包集合：`@deepseek-ai/dsh-llm`、`@deepseek-ai/dsh-agent-instructions` 这类可选 peer 一旦被业务层的静态值导入，一个“本就不需要它”的最小组合会在加载 carrier 行时就失败。`@deepseek-ai/dsh-llm` 由 `src/compat/llm-message.ts` 承载：`createInstructionMessage()` 在**真正要构造消息的那一刻**才 `await import('@deepseek-ai/dsh-llm')`，peer 缺失时抛出带原因的 `Error`（静默丢上下文比报错更糟）。同理，`src/compat/agent-instructions.ts` 必须把“包没装”（`isPackageInstalled()` 探不到，返回 `undefined`）与“包装了但求值失败”（让异常浮出）区分开：后者是兼容性故障，不是可选缝。
 
@@ -180,7 +181,9 @@ PR #1（head `507c954`）的 P2-3 / P2-4 / P2-5 收紧了两条规则（内容�
 
 按本 ADR 的人工提升流程，把 `0.1.6-alpha.2` 写入 `SUPPORTED_DSH_RELEASES`，`peerDependencies` 改为 `0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2`。开发 pin 仍是 `0.1.5-rc.2`。
 
-实测：该版本的 `confine` 仍是 `Promise<ConfinedArgv>`（可选 `signal`），instruction renderer 仍是 `renderAgentInstructions`，journey 的 Messages 协议端点无需改动。完整矩阵在 warn（纳入前）与 enforce（纳入后）下都全绿，适配层没有改动。基线 `0.1.5-rc.2` 在同一份 allowlist 上回归全绿。
+实测：该版本的 `confine` 仍是 `Promise<ConfinedArgv>`（可选 `signal`），instruction renderer 仍是 `renderAgentInstructions`，journey 的 Messages 协议端点无需改动。完整矩阵在 warn（纳入前）与 enforce（纳入后）下都全绿。基线 `0.1.5-rc.2` 在同一份 allowlist 上回归全绿。
+
+**后续修正（2026-09-22）**：host 矩阵全绿不等于客户端形状没变。`0.1.6-alpha.2` 删除了 `SessionListState.current`，面板读这个字段时把已打开的会话显示成「当前没有活动会话」。结构探测落在 `src/compat/client-session.ts`：先认非空 `current`，否则取 `retainedBy.mainView > 0` 的目录行；禁止回退 `ids[0]`。`tests/client-session.spec.ts` 与 `tests/client-panel.spec.tsx` 钉住两种快照。升级车道的 journey smoke 不打开 Web 面板，这类客户端形状变化不会被 `pnpm verify:all` 抓住——纳入新版本时必须对照客户端 Session 快照，不能只看 host 矩阵。
 
 ## Related Documents
 

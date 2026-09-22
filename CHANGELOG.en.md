@@ -12,7 +12,11 @@ This file records the user-visible changes of every **released** version.
 
 ### Added
 
-- **Support for the upstream runtime `0.1.6-alpha.2`**, alongside `0.1.5-rc.2` and `0.1.6-alpha.1`. That release has run the full matrix; `confine` stays asynchronous and the instruction renderer keeps the `0.1.6-alpha.1` name, so the adapter layer did not change. The development pin remains `0.1.5-rc.2`.
+- **Support for the upstream runtime `0.1.6-alpha.2`**, alongside `0.1.5-rc.2` and `0.1.6-alpha.1`. `confine` stays asynchronous and the instruction renderer keeps the `0.1.6-alpha.1` name; the client current-session id now comes from the catalog row's `retainedBy.mainView` (see Fixed). The development pin remains `0.1.5-rc.2`.
+
+### Fixed
+
+- **An open session on `0.1.6-alpha.2` was shown as "No active session"** in the Workspace Folders panel. That release dropped `current` from the Session list snapshot; the session on screen is the catalog row whose `retainedBy.mainView` is positive, because the main view retains it with source `mainView`. `src/compat/client-session.ts` probes both shapes structurally. A populated catalog with nobody retained still shows the empty state and never falls back to `ids[0]`.
 
 ## [0.1.1] - 2026-09-16
 
