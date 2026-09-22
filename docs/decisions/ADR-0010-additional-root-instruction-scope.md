@@ -25,6 +25,8 @@ createUserMessage({
 
 它仍是 **user role** 的 producer-supplied context，不会被提升成 system authority，且随请求落 model history（满足 model-visible ⟺ logged）。这个 helper 属于**可选 peer** `@deepseek-ai/dsh-llm`，因此在本插件里只经 `src/compat/llm-message.ts` 按需加载（见第 9 条），业务层不静态导入它。
 
+session format 4（`0.1.7-alpha.1` 的 `SESSION_FORMAT_VERSION`）的编码器拒绝 `kind: 'plugin'`。适配层在 format 4 及以后改投 `{ kind: 'multi-root-workspace', plugin, form: 'instructions' }`，不用 `agent-instructions`（上游把那个 kind 的 `changes` 当作自己的协调权威）。format 3 及更早仍投上面的 `plugin` 对象。探测的是 session 包导出的格式常量，不是 renderer 的名字。
+
 ## Decision
 
 1. **范围覆盖附加根的顶层及其下「本会话工作过的」子目录。** 每个被考察目录按 `discoverBaselineInstructionFiles({ cwd: <该目录>, projectRoot: root })` 发现，再以 canonical 包含过滤，只保留位于该根内部的文件。被考察目录恰好三类：**根自身**（每一步都考察，因此顶层文件被改写或被删除都会被察觉）、**已投递过 nested 文件的目录**（无需新的触碰即可察觉变化与消失，与上游 `reconcileInstructionContext` 的语义一致）、以及**被触碰路径的父目录及其每个祖先目录（直到该附加根）**。第三类必须走满整条祖先链，因为上游的 discovery 是**向上走**的：考察 `<root>/a/b` 时它会**上报** `<root>/a/AGENTS.md` 这个候选，但下面的“候选必须精确位于本次考察目录”过滤只保留被考察目录自己的候选，于是 `<root>/a` 从未被考察、它的文件也就永远到不了模型——`<root>/a` 必须自己成为一次考察的起点。触碰来自持久化的 `session/event`：`tool/call` 与其 `tool/result` 按 call id 配对，只有**成功**的 `read` / `write` / `edit` 才算触碰（失败的调用可能根本没碰到文件）。第二期不做的事：主根的 nested 发现仍归上游；不识别 `read` / `write` / `edit` 之外的工具名（例如 `str_replace_editor`）；投递状态不跨进程、不跨 resume。
@@ -35,7 +37,7 @@ createUserMessage({
 6. **投递状态按 session、按 scope 记录。** scope 身份是 `(根, 相对目录, 文件名)` 三元组；记录的是**文件内容**的 SHA-256，内容不变就不重复注入，内容变化则重发该文件。之所以按 scope 而不是按根：同一根的不同目录必须能各自增量更新。状态在进程内存里（`WeakMap`，键为 session 对象），因此 resume 之后可能把已经给过的指令再给一次——这是与第一期相同的取舍，换来的是"不猜、不落盘"。
 7. **撤销与撤回必须显式。** 根被移除、消失（`missing`）或被替换（`redirected`，见 ADR-0004 的"不授予"语义）时，必须注入一条明确的**撤销**文案；一条已投递的指令文件在考察中被判定"不再存在"时，必须注入一条明确的**撤回**文案（点名该文件的绝对路径）。理由是同一个：历史对话里原来的指令仍然存在，沉默不等于撤回。"目录走查本身失败"不构成撤回（读不到 ≠ 不存在），"候选存在但被体积上限或读取失败过滤掉"同样不构成撤回。
 8. **零贡献是硬不变量。** 零附加根、无 `fs` seam、无 agent、或上游 `agent-instructions` 不存在时，该行一条 message 都不注入，空根组合与未装插件保持逐字节一致（`fs` 与 `agent-instructions` 都是软依赖）。
-9. **渲染走适配层。** 业务层只调用 `src/compat/agent-instructions.ts` 的 `renderInstructions(...)`；该层按**导出名**结构探测（`renderAgentInstructions ?? renderWorkspaceContext`，见 ADR-0009）。业务代码不写版本判断。**消息构造同样走适配层**：`{ kind: 'plugin', form: 'instructions' }` 的 user message 由 `src/compat/llm-message.ts` 的 `createInstructionMessage()` 构造，它在**真正要构造消息的那一刻**才 `await import('@deepseek-ai/dsh-llm')`——该包是**可选 peer**，静态值导入它会让一个从不构造任何消息的最小组合在加载 carrier loader 行时就失败（ADR-0009 第 4 条）。peer 缺失时它抛出带原因的 `Error`，而不是静默丢弃这段上下文。
+9. **渲染走适配层。** 业务层只调用 `src/compat/agent-instructions.ts` 的 `renderInstructions(...)`；该层按**导出名**结构探测（`renderAgentInstructions ?? renderWorkspaceContext`，见 ADR-0009）。业务代码不写版本判断。**消息构造同样走适配层**：`form: 'instructions'` 的 user message 由 `src/compat/llm-message.ts` 的 `createInstructionMessage()` 构造（format 3 的 kind 是 `plugin`，format 4 起是 `multi-root-workspace`），它在**真正要构造消息的那一刻**才 `await import('@deepseek-ai/dsh-llm')`——该包是**可选 peer**，静态值导入它会让一个从不构造任何消息的最小组合在加载 carrier loader 行时就失败（ADR-0009 第 4 条）。peer 缺失时它抛出带原因的 `Error`，而不是静默丢弃这段上下文。
 
 ## Alternatives Considered
 

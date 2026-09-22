@@ -13,6 +13,7 @@ This file records the user-visible changes of every **released** version.
 ### Added
 
 - **Support for the upstream runtime `0.1.6-alpha.2`**, alongside `0.1.5-rc.2` and `0.1.6-alpha.1`. `confine` stays asynchronous and the instruction renderer keeps the `0.1.6-alpha.1` name; the client current-session id now comes from the catalog row's `retainedBy.mainView` (see Fixed). The development pin remains `0.1.5-rc.2`.
+- **Support for the upstream runtime `0.1.7-alpha.1`**. `confine` and the instruction renderer keep their previous shapes, but this release needs adapters: session format 4 rejects `kind: 'plugin'`, so additional-root instructions use this plugin's own source kind `multi-root-workspace` (format 3 and earlier still use `plugin`); the tool-failure bit moved from the content block onto the message; panel icons moved from pixel names to the Regular weight; in-process boot uses `createRuntimeResolution` plus `PluginPackages`; bash execution moved from `shell.run` to `shell.execute().result()`. This release's `dsh` depends on cordis `^4.0.3`, and a probe must pin cordis to that version — two copies of `@deepseek-ai/dsh-tools` make the tool scheduler's Symbol miss, and tool calls die on the first step. The development pin remains `0.1.5-rc.2`.
 
 ### Fixed
 

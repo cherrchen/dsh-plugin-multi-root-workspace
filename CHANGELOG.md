@@ -13,6 +13,7 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 ### Added
 
 - **支持上游运行时 `0.1.6-alpha.2`**，与 `0.1.5-rc.2`、`0.1.6-alpha.1` 一起进 allowlist。该版本的 `confine` 异步形状与 instruction renderer 名字与 `0.1.6-alpha.1` 相同；客户端当前会话改从目录行的 `retainedBy.mainView` 读取（见 Fixed）。开发 pin 仍是 `0.1.5-rc.2`。
+- **支持上游运行时 `0.1.7-alpha.1`**。`confine` 与 instruction renderer 的形状没变，但这一版有几处必须适配：session format 4 不再接受 `kind: 'plugin'`，附加根指令改用本插件自己的 source kind `multi-root-workspace`（format 3 及更早仍是 `plugin`）；工具失败位从 content block 移到消息本身；面板图标从像素命名改为 Regular 线宽；进程内启动改为 `createRuntimeResolution` + `PluginPackages`；bash 执行从 `shell.run` 改为 `shell.execute().result()`。该版本的 `dsh` 依赖 cordis `^4.0.3`，探测时必须把 cordis 钉到这个版本，否则两份 `@deepseek-ai/dsh-tools` 会让工具调度用的 Symbol 对不上、工具调用在第一步失败。开发 pin 仍是 `0.1.5-rc.2`。
 
 ### Fixed
 

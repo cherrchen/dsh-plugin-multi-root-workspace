@@ -185,6 +185,22 @@ PR #1（head `507c954`）的 P2-3 / P2-4 / P2-5 收紧了两条规则（内容�
 
 **后续修正（2026-09-22）**：host 矩阵全绿不等于客户端形状没变。`0.1.6-alpha.2` 删除了 `SessionListState.current`，面板读这个字段时把已打开的会话显示成「当前没有活动会话」。结构探测落在 `src/compat/client-session.ts`：先认非空 `current`，否则取 `retainedBy.mainView > 0` 的目录行；禁止回退 `ids[0]`。`tests/client-session.spec.ts` 与 `tests/client-panel.spec.tsx` 钉住两种快照。升级车道的 journey smoke 不打开 Web 面板，这类客户端形状变化不会被 `pnpm verify:all` 抓住——纳入新版本时必须对照客户端 Session 快照，不能只看 host 矩阵。
 
+## 后续提升（2026-09-22）：纳入 `0.1.7-alpha.1`
+
+按本 ADR 的人工提升流程，把 `0.1.7-alpha.1` 写入 `SUPPORTED_DSH_RELEASES`，`peerDependencies` 改为 `0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1`。开发 pin 仍是 `0.1.5-rc.2`。
+
+`confine` 仍是带可选 `signal` 的 `Promise`，instruction renderer 仍是 `renderAgentInstructions`，journey 仍走 `/v1/messages`。这一版仍要改适配层，因为形状变了，而且不能靠比较版本字符串：
+
+- session format 4 的编码器拒绝 `kind: 'plugin'`。`createInstructionMessage` 读取 `@deepseek-ai/dsh-session` 导出的 `SESSION_FORMAT_VERSION`：小于 4 时仍投 `{ kind: 'plugin', plugin, form: 'instructions' }`，从 4 起投 `{ kind: 'multi-root-workspace', plugin, form: 'instructions' }`。不用 `agent-instructions`，上游把那个 kind 的 `changes` 当作自己的协调权威。renderer 名字不能当这个探针：`0.1.6` 已经改名却仍接受 `plugin`。
+- 工具失败位从 content block 的 `isError` 移到 `ToolResultMessage.isError`。`toolResultFailed` 两种都读。
+- 面板图标从像素名改为 Regular 线宽。`client-icons.ts` 先取像素名，没有再取 Regular。
+- `healProfilesModuleFallback` 不再导出。进程内启动在它是函数时仍调用它，否则 `createRuntimeResolution` 再在 `boot` 的 prepare 里挂 `PluginPackages`。
+- `SandboxBashExecutor.run` 改成 `execute(spec)`，结果在返回的 execution 上 `result()`。smoke 的 `runForeground` 按方法名选择。
+
+该版本的 `dsh` 依赖 cordis `^4.0.3`。探测树里若同时留下 `4.0.2`，pnpm 会给出两份 `dsh-tools`：agent-loop 持有的 `TOOL_RUNTIME_SCHEDULER` 是模块局部 `Symbol`，对不上另一份构造出来的 ToolRuntime，工具调用在第一步抛 `Cannot read properties of undefined (reading 'prepare')`。`upgrade-dsh.mjs` 因此把 cordis 开发 pin 改到候选 `dsh` 所声明范围里的那个精确版本。基线 pin 回到 `0.1.5-rc.2` 时 cordis 回到 `4.0.2`。
+
+实测（macOS，seatbelt 可用，bwrap / landlock 不可用）：纳入前 warn、纳入后 enforce，以及 pin 回到 `0.1.5-rc.2`（cordis `4.0.2`）的基线回归，都是 329 passed / 3 skipped，compose 40/40，behavior 99/99，journey 55/55。
+
 ## Related Documents
 
 - [ADR-0002：上游耦合策略](./ADR-0002-upstream-coupling-policy.md)（本 ADR 收紧了其中第 4 条关于 `peerDependencies` 范围的部分）
