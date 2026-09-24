@@ -13,14 +13,14 @@ src/compat/dsh-version.ts  →  SUPPORTED_DSH_RELEASES
 是**精确版本数组**，不是 semver 范围。当前：
 
 ```ts
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2'] as const
 ```
 
 改它的时候，下面四处必须同时一致，否则 `pnpm compat:check` 失败：
 
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   allowlist
-package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1"
+package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2"
 package.json                devDependencies          allowlist 中的某一项（当前 0.1.5-rc.2）
 node_modules                实际解析到的版本          allowlist 中的某一项
 ```
@@ -59,6 +59,7 @@ await mountCompat(ctx)
 0.1.7-alpha.1  confine 形状与 0.1.6-alpha.1 相同（2026-09-22 实测；这一版别的形状变了，见第 4 条）
 0.1.7-alpha.2  与 0.1.7-alpha.1 相同（2026-09-24 实测）
 0.1.7-rc.1     与 0.1.7-alpha.1 相同（2026-09-24 实测）。这一版新增的是安装期 peer 门禁，见第 4 条末尾
+0.1.7-rc.2     与 0.1.7-rc.1 相同（2026-09-25 对照 tag 实测）。cordis 仍是 `~4.0.4`
 ```
 
 **不要**在 `src/sandbox.ts` 里手写签名去迁就某一个版本。统一走 `src/compat/sandbox-confine.ts` 的 `widenConfined()`，它**保形**：上游同步就同步返回，上游返回 promise 就返回 promise。
@@ -80,7 +81,7 @@ await mountCompat(ctx)
 | --- | --- |
 | `src/compat/sandbox-confine.ts` | `confine` 的同步/异步与 arity |
 | `src/compat/agent-instructions.ts` | renderer 改名：`renderWorkspaceContext`（0.1.5）→ `renderAgentInstructions`（0.1.6，0.1.7 未再改） |
-| `src/compat/client-session.ts` | 当前会话：`list.current`（0.1.5 / 0.1.6-alpha.1）→ 目录行 `retainedBy.mainView > 0`（0.1.6-alpha.2 与 0.1.7-alpha.1 至 0.1.7-rc.1；0.1.7 挪走了别的目录字段，主视图谓词没变） |
+| `src/compat/client-session.ts` | 当前会话：`list.current`（0.1.5 / 0.1.6-alpha.1）→ 目录行 `retainedBy.mainView > 0`（0.1.6-alpha.2 与 0.1.7-alpha.1 至 0.1.7-rc.2；0.1.7 挪走了别的目录字段，主视图谓词没变） |
 | `src/compat/llm-message.ts` | session format 3 及更早投 `{ kind: 'plugin', plugin, form: 'instructions' }`；format 4（`0.1.7` 的 `SESSION_FORMAT_VERSION`）拒绝 `kind: 'plugin'`，改投 `{ kind: 'multi-root-workspace', plugin, form: 'instructions' }`。探针是 session 包导出的格式常量，**不是** renderer 名字——0.1.6 已经改名却仍接受 `plugin`。不要用 `agent-instructions`：上游把那个 kind 的 `changes` 当自己的协调权威 |
 | `src/compat/tool-result.ts` | 失败位：0.1.5/0.1.6 在 `content[0].isError`，0.1.7 在消息自身的 `isError`。`event.data.error` 两边都还在 |
 | `src/compat/client-icons.ts` | 面板图标：0.1.5/0.1.6 是像素名（`IconFolderClose16`），0.1.7 是线宽名。上游 UI 用的是 Regular，不是 Medium。先取像素名，没有再取 Regular |
@@ -89,7 +90,7 @@ await mountCompat(ctx)
 
 一律用**结构探测**（是否 thenable、导出哪个名字、快照有没有 `current`），不要比较版本号。上游是 pre-stable，同一版本内也会改形状；结构探测能应付，版本比较不能。
 
-`0.1.7-alpha.2` 与 `0.1.7-rc.1` 相对 `0.1.7-alpha.1` 没有改上面这张表里的形状（2026-09-24，对照 tag `dsh-v0.1.7-alpha.1` / `alpha.2` / `rc.1`）。`rc.1` 新增的是**安装期**门禁，不在 `src/compat/`：`dsh plugin add` 与 `loadProfile` 用 `semver.satisfies(runtime, peerRange, { includePrerelease: true })` 检查每一个 `@deepseek-ai/dsh*` peer，不满足就拒绝安装或跳过 bundle。因此把一个 `0.1.7-rc.1` 及以后的版本放进 allowlist 时，`peerDependencies` 必须在同一改动里带上那个精确版本，否则 smoke 的 `dsh plugin add` 会在本插件的运行时门禁之前就失败。`DSH_MULTI_ROOT_COMPAT=warn` 放宽不了这一关。
+`0.1.7-alpha.2`、`0.1.7-rc.1` 与 `0.1.7-rc.2` 相对 `0.1.7-alpha.1` 没有改上面这张表里的形状（2026-09-24 对照 `alpha.1` / `alpha.2` / `rc.1`；2026-09-25 对照 `rc.1` → `rc.2`）。`rc.1` 新增的是**安装期**门禁，不在 `src/compat/`：`dsh plugin add` 与 `loadProfile` 用 `semver.satisfies(runtime, peerRange, { includePrerelease: true })` 检查每一个 `@deepseek-ai/dsh*` peer，不满足就拒绝安装或跳过 bundle。因此把一个 `0.1.7-rc.1` 及以后的版本放进 allowlist 时，`peerDependencies` 必须在同一改动里带上那个精确版本，否则 smoke 的 `dsh plugin add` 会在本插件的运行时门禁之前就失败。`DSH_MULTI_ROOT_COMPAT=warn` 放宽不了这一关。
 
 **这是一个安静的坑**：`0.1.6-alpha.2` 的 host 矩阵（`confine`、instruction renderer、journey Messages 端点）与 alpha.1 相同，所以当时按"适配层无改动"纳入 allowlist。客户端 Session Controller 却在 `6830e1460d` 把 `SessionListState.current` 删掉了，导航改由主视图 `retain(..., { source: 'mainView' })` 持有。面板仍读 `list.current` 时，已打开的对话会显示「当前没有活动会话」，并且**不向 host 发请求**。
 
@@ -131,7 +132,7 @@ pnpm install --frozen-lockfile                                     # node_module
 
 安装候选版本时**必须**加 `--config.minimumReleaseAge=0`。否则 pnpm 会因为 release-age 门禁把整棵新树往 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` 里追加两百多行——那是一次性探测不该留下的东西。
 
-`0.1.7-alpha.1` 的 `dsh` 依赖 cordis `^4.0.3`；`0.1.7-alpha.2` 与 `0.1.7-rc.1` 依赖 `~4.0.4`。`upgrade-dsh.mjs` 会把 `@deepseek-ai/cordis` 的开发 pin 和 `pnpm-workspace.yaml` 里那一行 release-age 改到这个范围中的精确版本。不要在同一棵树里留下 `4.0.2`：pnpm 会拆出两份 `@deepseek-ai/dsh-tools`，agent-loop 持有的 `TOOL_RUNTIME_SCHEDULER` 是模块局部 `Symbol`，对不上另一份构造的 ToolRuntime，工具调用在第一步抛 `Cannot read properties of undefined (reading 'prepare')`。回基线时 cordis 随开发 pin 回到 `4.0.2`。
+`0.1.7-alpha.1` 的 `dsh` 依赖 cordis `^4.0.3`；`0.1.7-alpha.2`、`0.1.7-rc.1` 与 `0.1.7-rc.2` 依赖 `~4.0.4`。`upgrade-dsh.mjs` 会把 `@deepseek-ai/cordis` 的开发 pin 和 `pnpm-workspace.yaml` 里那一行 release-age 改到这个范围中的精确版本。不要在同一棵树里留下 `4.0.2`：pnpm 会拆出两份 `@deepseek-ai/dsh-tools`，agent-loop 持有的 `TOOL_RUNTIME_SCHEDULER` 是模块局部 `Symbol`，对不上另一份构造的 ToolRuntime，工具调用在第一步抛 `Cannot read properties of undefined (reading 'prepare')`。回基线时 cordis 随开发 pin 回到 `4.0.2`。
 
 两个只在本地咬人的坑（CI 每次都是干净 checkout，碰不到）：
 
@@ -149,6 +150,7 @@ pnpm install --frozen-lockfile                                     # node_module
 0.1.7-alpha.1  与 0.1.6-alpha.1 相同（journey 55/55，仍是 `/v1/messages`）
 0.1.7-alpha.2  与 0.1.7-alpha.1 相同（journey 55/55）
 0.1.7-rc.1     与 0.1.7-alpha.1 相同（journey 55/55）
+0.1.7-rc.2     与 0.1.7-rc.1 相同（`/v1/messages` 未改；未声明 `toolUpdate` 的路由会剥掉 developer 消息）
 ```
 
 这个变化不经过插件代码，但会打断 `scripts/smoke-journey.mjs` 的脚本化端点。它现在**按请求路径**选择应答协议，两个构造函数分别是 `chatCompletionFrames()` 与 `messagesFrames()`。

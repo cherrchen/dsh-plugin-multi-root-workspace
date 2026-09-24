@@ -3,7 +3,7 @@
  *
  * ```text
  * 0.1.5-rc.2 / 0.1.6   shell.run(spec) → ShellRunResult
- * 0.1.7-alpha.1 through 0.1.7-rc.1   shell.execute(spec) → handle, handle.result() → ShellRunResult
+ * 0.1.7-alpha.1 through 0.1.7-rc.2   shell.execute(spec) → handle, handle.result() → ShellRunResult
  * ```
  *
  * The settled object is what the behavior smoke reads (`exitCode`,

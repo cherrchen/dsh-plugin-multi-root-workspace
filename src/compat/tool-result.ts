@@ -3,7 +3,7 @@
  *
  * ```text
  * 0.1.5-rc.2 / 0.1.6   content[0].isError on the tool-result block
- * 0.1.7-alpha.1 through 0.1.7-rc.1   message.isError on the tool-role message
+ * 0.1.7-alpha.1 through 0.1.7-rc.2   message.isError on the tool-role message
  * ```
  *
  * A failed `read` / `write` / `edit` must not make a directory worth examining
@@ -17,7 +17,7 @@
 
 /** The fields either release uses to say a tool invocation failed. */
 export interface ToolResultFailureShape {
-  /** `0.1.7-alpha.1` through `0.1.7-rc.1` record the outcome on the message. */
+  /** `0.1.7-alpha.1` through `0.1.7-rc.2` record the outcome on the message. */
   readonly isError?: boolean
   /** `0.1.5-rc.2` and `0.1.6` record it on the first content block. */
   readonly content?: readonly object[]

@@ -10,6 +10,10 @@ This file records the user-visible changes of every **released** version.
 
 ## [Unreleased]
 
+### Added
+
+- **Support for the upstream runtime `0.1.7-rc.2`**. Relative to `0.1.7-rc.1`, `confine`, instruction rendering, session format 4, the tool-failure bit, panel icons, the current-session catalog, in-process boot, and bash execution keep their shapes, so the adapter layer has no new branch. cordis stays at `~4.0.4`. The install-time peer gate added in `rc.1` still requires this exact release in `peerDependencies`. The development pin remains `0.1.5-rc.2`.
+
 ## [0.1.3] - 2026-09-24
 
 With the exact allowlist contract from `v0.1.2` unchanged, the supported upstream runtimes grow to `0.1.7-alpha.2` and `0.1.7-rc.1`; the reasoning is still [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md).
