@@ -10,6 +10,10 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 ## [Unreleased]
 
+### Added
+
+- **支持上游运行时 `0.1.7-alpha.2` 与 `0.1.7-rc.1`**。相对 `0.1.7-alpha.1`，`confine`、指令渲染、session format 4、工具失败位、面板图标、当前会话目录、进程内启动和 bash 执行的形状都没变，适配层没有新分支。`0.1.7-rc.1` 起，`dsh plugin add` 会按 `peerDependencies` 拒绝不满足当前运行时的插件，所以这两项必须出现在精确 allowlist 里。开发 pin 仍是 `0.1.5-rc.2`。
+
 ## [0.1.2] - 2026-09-22
 
 在 `v0.1.1` 的精确 allowlist 契约不变的前提下，把受支持的上游运行时扩展到 `0.1.6-alpha.2` 与 `0.1.7-alpha.1`；设计取舍仍见 [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)。

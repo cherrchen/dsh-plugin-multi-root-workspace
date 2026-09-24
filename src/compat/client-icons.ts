@@ -3,7 +3,7 @@
  *
  * ```text
  * 0.1.5-rc.2 / 0.1.6   IconFolderClose16, IconChevronDownOutline14, …  (pixel size in the name)
- * 0.1.7-alpha.1        IconFolderCloseRegular, IconChevronDownOutlineRegular, …  (weight in the name)
+ * 0.1.7-alpha.1 through 0.1.7-rc.1   IconFolderCloseRegular, IconChevronDownOutlineRegular, …  (weight in the name)
  * ```
  *
  * `0.1.7-alpha.1` kept `size` as a prop and split each glyph into a Regular

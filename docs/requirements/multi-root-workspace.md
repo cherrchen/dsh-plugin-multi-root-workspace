@@ -80,7 +80,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 
 - **H1（= 路线图 M4）跨进程 Registry Authority Lease**：多个 DSH 进程共用同一 storage root 时，只允许一个进程打开登记表并授予附加根；其余进程 fail-closed 并在对方退出/崩溃后经 `refresh()` 接管。见 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。
 - **H2 面板权威收紧**：面板每个端点（含 `list`）只接受必填 `sessionId`，主根只来自 host 的 `session.header.cwd`；不再接受客户端指名的 `primaryRoot`，也不回退部署默认 workspace。见 [ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)。
-- **H3 DSH 兼容性代码契约**：支持矩阵是精确版本 allowlist（当前 `0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1`），启动时校验版本与混装，判定失败则四个安全相关行根本不启动；版本差异集中在 `src/compat/`。见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)。
+- **H3 DSH 兼容性代码契约**：支持矩阵是精确版本 allowlist（当前 `0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1`），启动时校验版本与混装，判定失败则四个安全相关行根本不启动；版本差异集中在 `src/compat/`。见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)。
 - **H4 Phase 1 附加根指令注入**：附加根**顶层** `AGENTS.md` / `CLAUDE.md` 进入模型上下文（user role 的 plugin instruction context），共享 64 KiB 预算，根离场即显式撤销。见 [ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)。
 - **H4 Phase 2 附加根 nested instructions**：本会话**成功**的 `read` / `write` / `edit` 触碰过的子目录里的 `AGENTS.md` / `CLAUDE.md`，在同一份预算下于下一步之前补投；文件内容变化即重发该文件，文件消失即显式撤回。触碰取自持久化的 `session/event`（`tool/call` 与 `tool/result` 配对），不依赖 tool 层包，也不使用 `SessionMessageProjection`。见 [ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)。
 

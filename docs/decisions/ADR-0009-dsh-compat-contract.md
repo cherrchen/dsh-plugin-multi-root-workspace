@@ -201,6 +201,22 @@ PR #1（head `507c954`）的 P2-3 / P2-4 / P2-5 收紧了两条规则（内容�
 
 实测（macOS，seatbelt 可用，bwrap / landlock 不可用）：rebase `main`（PR #4 的 `client-session` 适配器）之后，纳入后 enforce 与 pin 回到 `0.1.5-rc.2`（cordis `4.0.2`）的基线回归都是 343 passed / 3 skipped，compose 40/40，behavior 99/99，journey 55/55。相对纳入当时的 329 项，多出来的是 Session 目录探针的回归。0.1.7 的客户端目录与 alpha.2 一样没有 `current`，`retainedBy.mainView` 谓词仍成立。
 
+## 后续提升（2026-09-24）：纳入 `0.1.7-alpha.2` 与 `0.1.7-rc.1`
+
+按本 ADR 的人工提升流程，把这两项写入 `SUPPORTED_DSH_RELEASES`，`peerDependencies` 改为六项精确或。开发 pin 仍是 `0.1.5-rc.2`。
+
+对照 tag `dsh-v0.1.7-alpha.1` → `dsh-v0.1.7-alpha.2` → `dsh-v0.1.7-rc.1`：本插件依赖的 `confine`、instruction renderer、session format 4、工具失败位、面板图标、`retainedBy.mainView`、`createRuntimeResolution` / `PluginPackages`、`shell.execute().result()` 都没有改形状。`0.1.7-alpha.2` 把 cordis 从 `4.0.3` 升到 `4.0.4`（发布范围 `~4.0.4`），`rc.1` 保持 `~4.0.4`。适配层没有新分支。
+
+`0.1.7-rc.1` 新增的是安装期门禁：`dsh plugin add` 与 `loadProfile` 用 `semver.satisfies`（`includePrerelease: true`）核对每一个 `@deepseek-ai/dsh*` peer，不满足就拒绝安装或跳过 bundle。`peerDependencies` 必须在同一次提升里带上该精确版本；`DSH_MULTI_ROOT_COMPAT=warn` 放宽不了这一关。因此 `rc.1` 的 warn 探测无法在旧 peer 范围上完成 `plugin add`，纳入证据是把 peer 与 allowlist 一起加宽后的 enforce 全矩阵。
+
+实测（macOS，seatbelt 可用，bwrap / landlock 不可用）：
+
+| 项 | 结果 |
+| --- | --- |
+| `0.1.7-alpha.2` 纳入前（cordis `4.0.4`，`DSH_MULTI_ROOT_COMPAT=warn`） | lint / typecheck / build / kernel:probe 通过；343 passed / 3 skipped，compose 40/40，behavior 99/99，journey 55/55 |
+| `0.1.7-rc.1` 纳入后 enforce（cordis `4.0.4`，peer 已含该版本） | 同样 343 passed / 3 skipped，compose 40/40，behavior 99/99，journey 55/55 |
+| 基线回归（pin 回到 `0.1.5-rc.2`，cordis `4.0.2`，enforce） | `compat:check` 与 `docs:check` 通过；计数相同 |
+
 ## Related Documents
 
 - [ADR-0002：上游耦合策略](./ADR-0002-upstream-coupling-policy.md)（本 ADR 收紧了其中第 4 条关于 `peerDependencies` 范围的部分）

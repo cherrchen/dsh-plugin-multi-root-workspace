@@ -10,6 +10,10 @@ This file records the user-visible changes of every **released** version.
 
 ## [Unreleased]
 
+### Added
+
+- **Support for the upstream runtimes `0.1.7-alpha.2` and `0.1.7-rc.1`**. Relative to `0.1.7-alpha.1`, `confine`, instruction rendering, session format 4, the tool-failure bit, panel icons, the current-session catalog, in-process boot, and bash execution keep their shapes, so the adapter layer has no new branch. From `0.1.7-rc.1`, `dsh plugin add` refuses a plugin whose `peerDependencies` do not satisfy the running runtime, which is why both releases have to be on the exact allowlist. The development pin remains `0.1.5-rc.2`.
+
 ## [0.1.2] - 2026-09-22
 
 With the exact allowlist contract from `v0.1.1` unchanged, the supported upstream runtimes grow to `0.1.6-alpha.2` and `0.1.7-alpha.1`; the reasoning is still [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md).

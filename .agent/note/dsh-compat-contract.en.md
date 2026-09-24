@@ -13,14 +13,14 @@ src/compat/dsh-version.ts  →  SUPPORTED_DSH_RELEASES
 It is an array of **exact versions**, not a semver range. Currently:
 
 ```ts
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1'] as const
 ```
 
 When you change it, these four must agree or `pnpm compat:check` fails:
 
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   the allowlist
-package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1"
+package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1"
 package.json                devDependencies          one entry of the allowlist (currently 0.1.5-rc.2)
 node_modules                resolved versions        one entry of the allowlist
 ```
@@ -57,6 +57,8 @@ Otherwise `ctx.get('fs')` / `ctx.get('sandbox')` are `undefined` and you will se
 0.1.6-alpha.1  confine(argv, policy, signal?): Promise<ConfinedArgv>
 0.1.6-alpha.2  same `confine` shape as 0.1.6-alpha.1 (measured 2026-09-22). The session catalog is a different shape; see the next section.
 0.1.7-alpha.1  same `confine` shape as 0.1.6-alpha.1 (measured 2026-09-22; other shapes on this release did change, see §4)
+0.1.7-alpha.2  same shape as 0.1.7-alpha.1 (measured 2026-09-24)
+0.1.7-rc.1     same shape as 0.1.7-alpha.1 (measured 2026-09-24). This release adds an install-time peer gate; see the end of §4
 ```
 
 **Do not** hand-write a signature in `src/sandbox.ts` that suits one release. Go through `widenConfined()` in `src/compat/sandbox-confine.ts`, which **preserves the shape**: a synchronous base result stays synchronous, a promise stays a promise.
@@ -78,7 +80,7 @@ Business code contains no version checks. The adapters today:
 | --- | --- |
 | `src/compat/sandbox-confine.ts` | `confine`'s sync/async shape and arity |
 | `src/compat/agent-instructions.ts` | the renderer rename: `renderWorkspaceContext` (0.1.5) → `renderAgentInstructions` (0.1.6; unchanged on 0.1.7) |
-| `src/compat/client-session.ts` | current session: `list.current` (0.1.5 / 0.1.6-alpha.1) → catalog row `retainedBy.mainView > 0` (0.1.6-alpha.2 and 0.1.7-alpha.1; 0.1.7 moved other catalog fields, not this predicate) |
+| `src/compat/client-session.ts` | current session: `list.current` (0.1.5 / 0.1.6-alpha.1) → catalog row `retainedBy.mainView > 0` (0.1.6-alpha.2 and 0.1.7-alpha.1 through 0.1.7-rc.1; 0.1.7 moved other catalog fields, not this predicate) |
 | `src/compat/llm-message.ts` | through session format 3, emit `{ kind: 'plugin', plugin, form: 'instructions' }`; format 4 (`SESSION_FORMAT_VERSION` on `0.1.7`) rejects `kind: 'plugin'` and the adapter emits `{ kind: 'multi-root-workspace', plugin, form: 'instructions' }`. Probe the format constant the session package exports, **not** the renderer name — 0.1.6 already renamed the renderer and still accepts `plugin`. Do not use `agent-instructions`: upstream treats that kind's `changes` array as its own reconciliation authority |
 | `src/compat/tool-result.ts` | the failure bit is `content[0].isError` on 0.1.5/0.1.6 and `isError` on the message itself on 0.1.7. `event.data.error` still exists on both |
 | `src/compat/client-icons.ts` | panel icons: pixel names on 0.1.5/0.1.6 (`IconFolderClose16`), weight names on 0.1.7. Upstream UI uses Regular, not Medium. Prefer the pixel name, then Regular |
@@ -86,6 +88,8 @@ Business code contains no version checks. The adapters today:
 | `scripts/lib/shell-exec.mjs` | use `shell.run` when it exists; otherwise `shell.execute(spec)` then `execution.result()`. 0.1.7 renamed `SandboxBashExecutor.run` to `execute` |
 
 Always probe **structurally** (is the value a thenable, which export name exists, does the snapshot carry `current`) rather than comparing version strings. Upstream is pre-stable and reshapes things within a release; a structural probe copes with that, a version comparison does not.
+
+`0.1.7-alpha.2` and `0.1.7-rc.1` keep every shape in the table above relative to `0.1.7-alpha.1` (measured 2026-09-24 against tags `dsh-v0.1.7-alpha.1`, `alpha.2`, and `rc.1`). `rc.1` adds an **install-time** gate that does not live in `src/compat/`: `dsh plugin add` and `loadProfile` run `semver.satisfies(runtime, peerRange, { includePrerelease: true })` on every `@deepseek-ai/dsh*` peer, and refuse the install or skip the bundle when it fails. Promoting a `0.1.7-rc.1`-or-later release therefore has to widen `peerDependencies` in the same change, or the smoke's `dsh plugin add` fails before this plugin's runtime gate runs. `DSH_MULTI_ROOT_COMPAT=warn` does not relax that gate.
 
 **This is a quiet trap**: `0.1.6-alpha.2`'s host matrix (`confine`, the instruction renderer, the journey Messages endpoint) matches alpha.1, so it was promoted with "no adapter change". The client Session Controller still dropped `SessionListState.current` in `6830e1460d` and moved navigation onto the main view's `retain(..., { source: 'mainView' })`. A panel that still reads `list.current` then shows "No active session" for an open conversation and **does not call the host**.
 
@@ -127,7 +131,7 @@ pnpm install --frozen-lockfile                                     # bring node_
 
 Installing a candidate **requires** `--config.minimumReleaseAge=0`. Without it pnpm's release-age gate makes it append two hundred-odd lines of the fresh tree into `minimumReleaseAgeExclude` in `pnpm-workspace.yaml` — which a throwaway probe has no business leaving behind.
 
-`0.1.7-alpha.1`'s `dsh` depends on cordis `^4.0.3`. `upgrade-dsh.mjs` repoints the `@deepseek-ai/cordis` dev pin and the cordis release-age line in `pnpm-workspace.yaml` to the exact version inside that range. Do not leave `4.0.2` in the same tree: pnpm then installs two copies of `@deepseek-ai/dsh-tools`, the `TOOL_RUNTIME_SCHEDULER` symbol `dsh-agent-loop` holds is local to its module, and it misses the ToolRuntime the other copy constructed. Tool calls then die on the first step with `Cannot read properties of undefined (reading 'prepare')`. Restoring the baseline pin puts cordis back at `4.0.2`.
+`0.1.7-alpha.1`'s `dsh` depends on cordis `^4.0.3`; `0.1.7-alpha.2` and `0.1.7-rc.1` depend on `~4.0.4`. `upgrade-dsh.mjs` repoints the `@deepseek-ai/cordis` dev pin and the cordis release-age line in `pnpm-workspace.yaml` to the exact version inside that range. Do not leave `4.0.2` in the same tree: pnpm then installs two copies of `@deepseek-ai/dsh-tools`, the `TOOL_RUNTIME_SCHEDULER` symbol `dsh-agent-loop` holds is local to its module, and it misses the ToolRuntime the other copy constructed. Tool calls then die on the first step with `Cannot read properties of undefined (reading 'prepare')`. Restoring the baseline pin puts cordis back at `4.0.2`.
 
 Two traps that only bite locally (CI always starts from a clean checkout):
 
@@ -143,6 +147,8 @@ Two traps that only bite locally (CI always starts from a clean checkout):
 0.1.6-alpha.1  POST {base}/v1/messages         message_start / content_block_* / message_delta / message_stop
 0.1.6-alpha.2  same dialect as 0.1.6-alpha.1 (journey 55/55, endpoint unchanged)
 0.1.7-alpha.1  same dialect as 0.1.6-alpha.1 (journey 55/55, still `POST /v1/messages`)
+0.1.7-alpha.2  same dialect as 0.1.7-alpha.1 (journey 55/55)
+0.1.7-rc.1     same dialect as 0.1.7-alpha.1 (journey 55/55)
 ```
 
 That change does not pass through plugin code, but it breaks the scripted endpoint in `scripts/smoke-journey.mjs`. The endpoint now picks its dialect **by request path**, built by `chatCompletionFrames()` and `messagesFrames()` respectively.
