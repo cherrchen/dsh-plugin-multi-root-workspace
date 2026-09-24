@@ -8,7 +8,7 @@
  *
  * ```text
  * 0.1.5-rc.2 / 0.1.6   healProfilesModuleFallback({ installAnchor, profile })
- * 0.1.7-alpha.1        createRuntimeResolution(...) then PluginPackages
+ * 0.1.7-alpha.1 through 0.1.7-rc.1   createRuntimeResolution(...) then PluginPackages
  * ```
  *
  * `0.1.7-alpha.1` computes the resolution and installs it as a host service

@@ -20,6 +20,8 @@ Three things make this plugin worth looking at:
 
 **Done and released: `v0.1.2`** — with the `v0.1.1` contract unchanged, the supported upstream runtimes grow to `0.1.6-alpha.2` and `0.1.7-alpha.1` (the latter needs adapters for session format 4, in-process `PluginPackages`, bash `execute().result()`, and more); it also fixes the Workspace Folders panel on `0.1.6-alpha.2`, where dropping `current` from the Session catalog wrongly showed "No active session". See the [CHANGELOG](./CHANGELOG.en.md).
 
+**Implemented on `main`, not yet on npm**: the support matrix also covers `0.1.7-alpha.2` and `0.1.7-rc.1` (same shapes as `0.1.7-alpha.1`, no new adapter branch). User-visible notes live under Unreleased in the [CHANGELOG](./CHANGELOG.en.md); release state is in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+
 The single source of truth for progress, numbering, and release state is the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账) (M1–M4 are the MVP milestone numbers, H1–H4 are the `v0.1.1` batch numbers, and H1 is M4); per-item evidence lives in the [completed plans](./docs/plans/README.md), and the user-visible changes of each version are in the [CHANGELOG](./CHANGELOG.en.md).
 
 ## Quick Start
@@ -41,7 +43,7 @@ The agent can now read, write, and run bash in that directory, with the same rig
 
 ## Requirements
 
-- **Using the published plugin**: you need a *supported* DSH runtime — currently **`0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, and `0.1.7-alpha.1`**, and nothing else will install or run (see below). `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
+- **Using the published plugin**: you need a *supported* DSH runtime — currently **`0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, `0.1.7-alpha.2`, and `0.1.7-rc.1`**, and nothing else will install or run (see below). `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
 - **Building from source / contributing**: **Node.js** `^22.19.0 || >=24` (pinned by the repository's `engines`), **Git**, and **pnpm 11** (`packageManager` pins `pnpm@11.25.0`; corepack recommended)
 - **DSH runtime**: the dev pin is exactly `0.1.5-rc.2`, the baseline among the supported releases; the upgrade procedure lives in the [development workflow](./docs/development/plugin-development-workflow.md)
 - **Platforms**: kernel-level multi-root is complete on macOS (Seatbelt) and Linux (bwrap or Landlock); on Windows only the `fs` write path covers additional roots (confined bash/PTY does not — see [known limitations](#known-limitations))

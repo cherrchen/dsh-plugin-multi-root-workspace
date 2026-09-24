@@ -93,7 +93,7 @@ compat 失败  →  该行抛错               →  四个 provider 永不启动
 
 - `src/compat/sandbox-confine.ts` —— `widenConfined()` **保形**：上游同步就同步返回，上游返回 promise 就返回 promise。绝不把同步结果包成 promise，因为在 `0.1.5-rc.2` 上那会把 `ctx.sandbox.confine()` 对组合里每一个调用方（bash executor、PTY backend）都变成 thenable。返回类型用 `ReturnType<LocalSandboxProvider['confine']>` 从**已安装的**基类推导，于是一份签名同时对两个版本成立。
 - `src/compat/agent-instructions.ts` —— 业务层只调用 `renderInstructions(...)`；适配器按**导出名**挑选 `renderAgentInstructions ?? renderWorkspaceContext`。
-- `src/compat/client-session.ts` —— 业务层只调用 `currentSessionIdOf(sessions)`；适配器先认非空的 `list.current`（0.1.5 / 0.1.6-alpha.1），否则取 `retainedBy.mainView > 0` 的目录行（0.1.6-alpha.2 与 0.1.7-alpha.1）。绝不回退 `ids[0]`。
+- `src/compat/client-session.ts` —— 业务层只调用 `currentSessionIdOf(sessions)`；适配器先认非空的 `list.current`（0.1.5 / 0.1.6-alpha.1），否则取 `retainedBy.mainView > 0` 的目录行（0.1.6-alpha.2 与 0.1.7-alpha.1 至 0.1.7-rc.1；0.1.7 挪走了其它目录字段，未改这一谓词）。绝不回退 `ids[0]`。
 
 一律用结构探测（是否 thenable、导出哪个名字、快照有没有 `current`）而不是比较版本号：结构探测还能应付上游在同一版本内改形状，或一个版本里同时保留两个名字。
 
@@ -200,6 +200,22 @@ PR #1（head `507c954`）的 P2-3 / P2-4 / P2-5 收紧了两条规则（内容�
 该版本的 `dsh` 依赖 cordis `^4.0.3`。探测树里若同时留下 `4.0.2`，pnpm 会给出两份 `dsh-tools`：agent-loop 持有的 `TOOL_RUNTIME_SCHEDULER` 是模块局部 `Symbol`，对不上另一份构造出来的 ToolRuntime，工具调用在第一步抛 `Cannot read properties of undefined (reading 'prepare')`。`upgrade-dsh.mjs` 因此把 cordis 开发 pin 改到候选 `dsh` 所声明范围里的那个精确版本。基线 pin 回到 `0.1.5-rc.2` 时 cordis 回到 `4.0.2`。
 
 实测（macOS，seatbelt 可用，bwrap / landlock 不可用）：rebase `main`（PR #4 的 `client-session` 适配器）之后，纳入后 enforce 与 pin 回到 `0.1.5-rc.2`（cordis `4.0.2`）的基线回归都是 343 passed / 3 skipped，compose 40/40，behavior 99/99，journey 55/55。相对纳入当时的 329 项，多出来的是 Session 目录探针的回归。0.1.7 的客户端目录与 alpha.2 一样没有 `current`，`retainedBy.mainView` 谓词仍成立。
+
+## 后续提升（2026-09-24）：纳入 `0.1.7-alpha.2` 与 `0.1.7-rc.1`
+
+按本 ADR 的人工提升流程，把这两项写入 `SUPPORTED_DSH_RELEASES`，`peerDependencies` 改为六项精确或。开发 pin 仍是 `0.1.5-rc.2`。
+
+对照 tag `dsh-v0.1.7-alpha.1` → `dsh-v0.1.7-alpha.2` → `dsh-v0.1.7-rc.1`：本插件依赖的 `confine`、instruction renderer、session format 4、工具失败位、面板图标、`retainedBy.mainView`、`createRuntimeResolution` / `PluginPackages`、`shell.execute().result()` 都没有改形状。`0.1.7-alpha.2` 把 cordis 从 `4.0.3` 升到 `4.0.4`（发布范围 `~4.0.4`），`rc.1` 保持 `~4.0.4`。适配层没有新分支。
+
+`0.1.7-rc.1` 新增的是安装期门禁：`dsh plugin add` 与 `loadProfile` 用 `semver.satisfies`（`includePrerelease: true`）核对每一个 `@deepseek-ai/dsh*` peer，不满足就拒绝安装或跳过 bundle。`peerDependencies` 必须在同一次提升里带上该精确版本；`DSH_MULTI_ROOT_COMPAT=warn` 放宽不了这一关。因此 `rc.1` 的 warn 探测无法在旧 peer 范围上完成 `plugin add`，纳入证据是把 peer 与 allowlist 一起加宽后的 enforce 全矩阵。
+
+实测（macOS，seatbelt 可用，bwrap / landlock 不可用）：
+
+| 项 | 结果 |
+| --- | --- |
+| `0.1.7-alpha.2` 纳入前（cordis `4.0.4`，`DSH_MULTI_ROOT_COMPAT=warn`） | lint / typecheck / build / kernel:probe 通过；343 passed / 3 skipped，compose 40/40，behavior 99/99，journey 55/55 |
+| `0.1.7-rc.1` 纳入后 enforce（cordis `4.0.4`，peer 已含该版本） | 同样 343 passed / 3 skipped，compose 40/40，behavior 99/99，journey 55/55 |
+| 基线回归（pin 回到 `0.1.5-rc.2`，cordis `4.0.2`，enforce） | `compat:check` 与 `docs:check` 通过；计数相同 |
 
 ## Related Documents
 
