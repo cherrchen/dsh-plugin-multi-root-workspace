@@ -1,6 +1,6 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；`0.1.7-rc.2` 支持矩阵提升已实施、未发版（2026-09-25）；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
+> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
 > 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
@@ -32,7 +32,7 @@
 | v0.1.1 | H4 Phase 2 | 附加根 nested instructions：本会话成功触碰过的子目录增量注入、变化重发、消失撤回 | 同上 §5b（该设计草案的实现） | [0010](../../decisions/ADR-0010-additional-root-instruction-scope.md) | `507c954`…`76c6377` | `v0.1.1` |
 | v0.1.2 | compat | DSH 支持矩阵扩展至 `0.1.6-alpha.2` 与 `0.1.7-alpha.1`；`0.1.6-alpha.2` 面板 Session 目录 `retainedBy.mainView` 探针 | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `318ff52`…`6e68a0b` | `v0.1.2` |
 | v0.1.3 | compat | DSH 支持矩阵扩展至 `0.1.7-alpha.2` 与 `0.1.7-rc.1`；形状未变，`rc.1` 安装期 peer 门禁要求精确 peer | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `10381fc` | `v0.1.3` |
-| 未发版 | compat | DSH 支持矩阵扩展至 `0.1.7-rc.2`；相对 `rc.1` 形状未变，无新适配分支，cordis 仍是 `~4.0.4` | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | — | 未发版 |
+| v0.1.4 | compat | DSH 支持矩阵扩展至 `0.1.7-rc.2`；相对 `rc.1` 形状未变，无新适配分支，cordis 仍是 `~4.0.4` | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `f2a8f75` | `v0.1.4` |
 | 第二期 | B 系列 | Windows 内核级多根、per-root 权限、`workspace-files` 多根、LSP 路由等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 
 ## 总体策略
@@ -178,9 +178,11 @@ MVP 三个里程碑加一个硬化批次，每一项都独立可验证，且**�
 
 **版本号与 tag 由发版提交完成**（`pnpm release patch --tag` → `chore(release): v0.1.3` + annotated tag `v0.1.3`）；推送 tag（进而触发 npm 发布与 GitHub Release）是人工动作。
 
-## 未发版 — 支持矩阵提升：`0.1.7-rc.2`
+## v0.1.4 — 支持矩阵提升（已实施，已发版准备完成）
 
-> 用户可见变更见 [`CHANGELOG.md`](../../../CHANGELOG.md) 的 Unreleased；设计取舍仍见 [ADR-0009](../../decisions/ADR-0009-dsh-compat-contract.md)。
+> 用户可见变更见 [`CHANGELOG.md`](../../../CHANGELOG.md) 的 `0.1.4` 条目；设计取舍仍见 [ADR-0009](../../decisions/ADR-0009-dsh-compat-contract.md)。
+
+### 支持矩阵提升（随 `v0.1.4` 发版，2026-09-25）：`0.1.7-rc.2`
 
 `0.1.7-rc.2` 按 [ADR-0009](../../decisions/ADR-0009-dsh-compat-contract.md) 写入 allowlist（`peerDependencies` 同步为七项精确或）。开发 pin 与 lockfile 仍是 `0.1.5-rc.2`（cordis 仍是 `4.0.2`）。相对 `0.1.7-rc.1`，适配层没有新分支。安装期 peer 门禁与 `rc.1` 相同。探测时 cordis 钉 `4.0.4`。
 
@@ -188,6 +190,15 @@ MVP 三个里程碑加一个硬化批次，每一项都独立可验证，且**�
 |---|---|
 | `0.1.7-rc.2` 纳入后 enforce（cordis `4.0.4`，peer 已含该版本） | lint / typecheck / build / kernel:probe 通过；343 passed / 3 skipped，compose 40/40，behavior 99/99，journey 55/55。macOS，seatbelt 可用，bwrap / landlock 不可用 |
 | 基线回归（pin 回到 `0.1.5-rc.2`，cordis `4.0.2`，lockfile 保持基线，enforce） | `compat:check` 与 `docs:check` 通过；同样 343 passed / 3 skipped，compose 40/40，behavior 99/99，journey 55/55 |
+
+### 发版准备（2026-09-25）
+
+| 项 | 结果 |
+|---|---|
+| 发布状态与 CHANGELOG | 路线图、README（中英）的版本句与 tarball / tag 示例对齐 `v0.1.4`；[`CHANGELOG.md`](../../../CHANGELOG.md) / [`CHANGELOG.en.md`](../../../CHANGELOG.en.md) 新增 `0.1.4` 条目 |
+| 本地门禁 | `compat:check` + `lint` + `typecheck` + `build` + `test`（343 passed / 3 skipped）+ `smoke:compose` 40/40 + `smoke:behavior` 99/99 + `smoke:journey` 55/55 + `docs:check` 全绿（2026-09-25，macOS） |
+
+**版本号与 tag 由发版提交完成**（`pnpm release patch --tag` → `chore(release): v0.1.4` + annotated tag `v0.1.4`）；推送 tag（进而触发 npm 发布与 GitHub Release）是人工动作。
 
 ## 里程碑与仓库状态对照
 

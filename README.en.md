@@ -22,7 +22,7 @@ Three things make this plugin worth looking at:
 
 **Done and released: `v0.1.3`** — with the `v0.1.2` contract unchanged, the supported upstream runtimes grow to `0.1.7-alpha.2` and `0.1.7-rc.1` (same shapes as `0.1.7-alpha.1`, no new adapter branch; from `rc.1`, install time enforces an exact `peerDependencies` match against the host runtime). See the [CHANGELOG](./CHANGELOG.en.md).
 
-**Implemented, not yet released: support-matrix expansion** — the supported upstream runtimes grow to `0.1.7-rc.2` (same shapes as `0.1.7-rc.1`, no new adapter branch; cordis stays at `~4.0.4`). See Unreleased in the [CHANGELOG](./CHANGELOG.en.md).
+**Done and released: `v0.1.4`** — with the `v0.1.3` contract unchanged, the supported upstream runtimes grow to `0.1.7-rc.2` (same shapes as `0.1.7-rc.1`, no new adapter branch; cordis stays at `~4.0.4`). See the [CHANGELOG](./CHANGELOG.en.md).
 
 The single source of truth for progress, numbering, and release state is the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账) (M1–M4 are the MVP milestone numbers, H1–H4 are the `v0.1.1` batch numbers, and H1 is M4); per-item evidence lives in the [completed plans](./docs/plans/README.md), and the user-visible changes of each version are in the [CHANGELOG](./CHANGELOG.en.md).
 
@@ -45,7 +45,7 @@ The agent can now read, write, and run bash in that directory, with the same rig
 
 ## Requirements
 
-- **Using the published plugin**: you need a *supported* DSH runtime — currently **`0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2`**, and nothing else will install or run (see below). `0.1.7-rc.2` is on this repository's allowlist and reaches npm with the next plugin release. `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
+- **Using the published plugin**: you need a *supported* DSH runtime — currently **`0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2`**, and nothing else will install or run (see below). `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
 - **Building from source / contributing**: **Node.js** `^22.19.0 || >=24` (pinned by the repository's `engines`), **Git**, and **pnpm 11** (`packageManager` pins `pnpm@11.25.0`; corepack recommended)
 - **DSH runtime**: the dev pin is exactly `0.1.5-rc.2`, the baseline among the supported releases; the upgrade procedure lives in the [development workflow](./docs/development/plugin-development-workflow.md)
 - **Platforms**: kernel-level multi-root is complete on macOS (Seatbelt) and Linux (bwrap or Landlock); on Windows only the `fs` write path covers additional roots (confined bash/PTY does not — see [known limitations](#known-limitations))
@@ -86,8 +86,8 @@ This installs pre-built artifacts (the plugin itself is never compiled), but the
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # or download the tgz from the GitHub Release assets, e.g.:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.3/dsh-electron-dsh-plugin-multi-root-workspace-0.1.3.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.3.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.4/dsh-electron-dsh-plugin-multi-root-workspace-0.1.4.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.4.tgz
 ```
 
 Also pre-built (the plugin itself is never compiled here), handy for air-gapped or offline delivery — and the first `add` needs the same `allowBuilds` answer.
@@ -106,10 +106,10 @@ allowBuilds:
   koffi: true
 ```
 
-Then run `add` again. Pinning a tag (e.g. `#v0.1.3`) is recommended so a later push cannot silently change what actually runs:
+Then run `add` again. Pinning a tag (e.g. `#v0.1.4`) is recommended so a later push cannot silently change what actually runs:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.3
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.4
 ```
 
 ### Install from a local clone (development & debugging)
