@@ -20,7 +20,7 @@ Three things make this plugin worth looking at:
 
 **Done and released: `v0.1.2`** — with the `v0.1.1` contract unchanged, the supported upstream runtimes grow to `0.1.6-alpha.2` and `0.1.7-alpha.1` (the latter needs adapters for session format 4, in-process `PluginPackages`, bash `execute().result()`, and more); it also fixes the Workspace Folders panel on `0.1.6-alpha.2`, where dropping `current` from the Session catalog wrongly showed "No active session". See the [CHANGELOG](./CHANGELOG.en.md).
 
-**Implemented on `main`, not yet on npm**: the support matrix also covers `0.1.7-alpha.2` and `0.1.7-rc.1` (same shapes as `0.1.7-alpha.1`, no new adapter branch). User-visible notes live under Unreleased in the [CHANGELOG](./CHANGELOG.en.md); release state is in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+**Done and released: `v0.1.3`** — with the `v0.1.2` contract unchanged, the supported upstream runtimes grow to `0.1.7-alpha.2` and `0.1.7-rc.1` (same shapes as `0.1.7-alpha.1`, no new adapter branch; from `rc.1`, install time enforces an exact `peerDependencies` match against the host runtime). See the [CHANGELOG](./CHANGELOG.en.md).
 
 The single source of truth for progress, numbering, and release state is the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账) (M1–M4 are the MVP milestone numbers, H1–H4 are the `v0.1.1` batch numbers, and H1 is M4); per-item evidence lives in the [completed plans](./docs/plans/README.md), and the user-visible changes of each version are in the [CHANGELOG](./CHANGELOG.en.md).
 
@@ -84,8 +84,8 @@ This installs pre-built artifacts (the plugin itself is never compiled), but the
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # or download the tgz from the GitHub Release assets, e.g.:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.2/dsh-electron-dsh-plugin-multi-root-workspace-0.1.2.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.2.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.3/dsh-electron-dsh-plugin-multi-root-workspace-0.1.3.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.3.tgz
 ```
 
 Also pre-built (the plugin itself is never compiled here), handy for air-gapped or offline delivery — and the first `add` needs the same `allowBuilds` answer.
@@ -104,10 +104,10 @@ allowBuilds:
   koffi: true
 ```
 
-Then run `add` again. Pinning a tag (e.g. `#v0.1.2`) is recommended so a later push cannot silently change what actually runs:
+Then run `add` again. Pinning a tag (e.g. `#v0.1.3`) is recommended so a later push cannot silently change what actually runs:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.2
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.3
 ```
 
 ### Install from a local clone (development & debugging)

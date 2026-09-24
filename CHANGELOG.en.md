@@ -10,6 +10,10 @@ This file records the user-visible changes of every **released** version.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-24
+
+With the exact allowlist contract from `v0.1.2` unchanged, the supported upstream runtimes grow to `0.1.7-alpha.2` and `0.1.7-rc.1`; the reasoning is still [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md).
+
 ### Added
 
 - **Support for the upstream runtimes `0.1.7-alpha.2` and `0.1.7-rc.1`**. Relative to `0.1.7-alpha.1`, `confine`, instruction rendering, session format 4, the tool-failure bit, panel icons, the current-session catalog, in-process boot, and bash execution keep their shapes, so the adapter layer has no new branch. From `0.1.7-rc.1`, `dsh plugin add` refuses a plugin whose `peerDependencies` do not satisfy the running runtime, which is why both releases have to be on the exact allowlist. The development pin remains `0.1.5-rc.2`.
@@ -87,7 +91,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/tag/v0.1.0
