@@ -20,6 +20,8 @@ DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围�
 
 **已完成并发布：`v0.1.2`**——在 `v0.1.1` 契约不变的前提下，受支持的上游运行时扩展到 `0.1.6-alpha.2` 与 `0.1.7-alpha.1`（后者含 session format 4、进程内 `PluginPackages`、bash `execute().result()` 等适配）；并修复 `0.1.6-alpha.2` 上 Workspace Folders 面板因 Session 目录删掉 `current` 而误显示「没有活动会话」的问题。详见 [CHANGELOG](./CHANGELOG.md)。
 
+**主分支已实施、尚未随 npm 发版**：支持矩阵进一步扩展至 `0.1.7-alpha.2` 与 `0.1.7-rc.1`（形状与 `0.1.7-alpha.1` 相同，适配层无新分支）。用户可见说明见 [CHANGELOG](./CHANGELOG.md) 的 Unreleased；发版状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
+
 进度、编号与发布状态的唯一真源是[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)（M1–M4 是 MVP 里程碑编号，H1–H4 是 `v0.1.1` 批次编号，其中 H1 即 M4）；逐项证据见各[已完成计划](./docs/plans/README.md)，每个版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)。
 
 ## 快速开始
