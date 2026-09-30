@@ -8,19 +8,11 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
-## [Unreleased]
+## [0.1.5] - 2026-09-30
 
 ### Added
 
-- DSH `0.2.0-rc.1` 与 `0.2.0-rc.2` 的精确版本支持，保留原有全部支持版本。
-- CI 从兼容合同读取完整版本轴，在每个启用的 OS 上验证全部支持版本。
-
-### Changed
-
-- 开发 pin、安装树与 lockfile 升级至 DSH `0.2.0-rc.2`，cordis pin 升级至 `4.0.4`。
-- 补充工具失败位与 DSH 0.2 异常恢复事件不会发现嵌套指令的回归覆盖。
-
-- 修复 Windows 兼容探测脚本的 npm 启动方式，旧版矩阵通过 Node 运行 npm CLI。
+- 精确支持 DSH `0.2.0-rc.1` 与 `0.2.0-rc.2`，保留此前全部支持版本。CI 会在所有启用的操作系统上验证兼容合同中的每个版本。
 
 ## [0.1.4] - 2026-09-25
 
@@ -111,7 +103,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.1...v0.1.2

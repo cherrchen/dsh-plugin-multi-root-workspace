@@ -1,6 +1,6 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
+> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已完成发版准备（2026-09-30，待打 tag）；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
 > 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
@@ -33,7 +33,7 @@
 | v0.1.2 | compat | DSH 支持矩阵扩展至 `0.1.6-alpha.2` 与 `0.1.7-alpha.1`；`0.1.6-alpha.2` 面板 Session 目录 `retainedBy.mainView` 探针 | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `318ff52`…`6e68a0b` | `v0.1.2` |
 | v0.1.3 | compat | DSH 支持矩阵扩展至 `0.1.7-alpha.2` 与 `0.1.7-rc.1`；形状未变，`rc.1` 安装期 peer 门禁要求精确 peer | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `10381fc` | `v0.1.3` |
 | v0.1.4 | compat | DSH 支持矩阵扩展至 `0.1.7-rc.2`；相对 `rc.1` 形状未变，无新适配分支，cordis 仍是 `~4.0.4` | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `f2a8f75` | `v0.1.4` |
-| Unreleased | compat | DSH 0.2 兼容提升、开发 pin 升级、全部支持版本 × OS 的持续矩阵 | [本次记录](#dsh-02-兼容提升2026-09-30未发布) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | 本分支 | 未发布 |
+| v0.1.5 | compat | DSH 支持矩阵扩展至 `0.2.0-rc.1` / `0.2.0-rc.2`，开发 pin 升级，全部支持版本 × OS 的持续矩阵 | [本次记录](#dsh-02-兼容提升2026-09-30) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `135af7f` | 发版准备完成，待打 tag |
 | 第二期 | B 系列 | Windows 内核级多根、per-root 权限、`workspace-files` 多根、LSP 路由等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 
 ## 总体策略
@@ -247,9 +247,9 @@ pnpm verify:all                                    # lint → typecheck → buil
 
 若未来允许向上游贡献，按架构文档 §9 的 PR 栈提交通用 Filesystem Scope Seam；合入后本插件撤销三个替换行、provider 子类退化为 scope contributor——`FilesystemScope` 接口自 M2 起即按该 seam 目标形态设计，迁移是删除而非重写。
 
-### DSH 0.2 兼容提升（2026-09-30，未发布）
+### DSH 0.2 兼容提升（2026-09-30）
 
-用户授权范围是 `dsh-v0.1.7-rc.2` 至 `dsh-v0.2.0-rc.2` 的所有发布版本。上游本地 tag 与 npm `versions` 列表一致：这个闭区间只有起点及 `0.2.0-rc.1` / `0.2.0-rc.2`。支持合同保留全部旧版，再纳入这两个精确版本；开发 pin 与 lockfile 升到 `0.2.0-rc.2`，cordis 是 `4.0.4`。这批是 **Unreleased**，没有提升插件版本号、创建 release tag 或发布 npm 包；发布内容见双语 CHANGELOG 的 Unreleased 段。
+用户授权范围是 `dsh-v0.1.7-rc.2` 至 `dsh-v0.2.0-rc.2` 的所有发布版本。上游本地 tag 与 npm `versions` 列表一致：这个闭区间只有起点及 `0.2.0-rc.1` / `0.2.0-rc.2`。支持合同保留全部旧版，再纳入这两个精确版本；开发 pin 与 lockfile 升到 `0.2.0-rc.2`，cordis 是 `4.0.4`。这批已整理为 **v0.1.5** 发版内容并通过本地及远端门禁；当前仅完成发版准备，插件版本号仍是 `0.1.4`，尚未创建 release tag 或发布 npm 包。用户可见变更见双语 CHANGELOG 的 `0.1.5` 条目。
 
 #### 接口变更与风险
 
@@ -289,3 +289,13 @@ CI 主车道从 `SUPPORTED_DSH_RELEASES` 派生版本轴，与 Linux / macOS / �
 完整本地矩阵的计数对应 Windows npm launcher 修复之前的 349 项单测；launcher 另外新增两条回归，开发树在修复后重跑单测（348 passed / 3 skipped）。远端矩阵须以修复后的 PR head 为准。
 
 远端验证（实现提交 `187d9ad`）：[CI run 36690954880](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/36690954880) 的 releases job 与 **九个版本 × Linux / macOS / Windows 的 27 个 verify job 全部 success**。Linux/macOS 执行完整冒烟与按宿主能力验证的内核断言；Windows 按既有范围执行静态合同、lint、双面类型检查、构建、单测和文档检查，明确不运行 POSIX 冒烟或内核多根断言。前述其他 OS 的本地未覆盖现已由远端平台回归补齐，仍不把缺失的内核机制视作实际执行通过。
+
+### v0.1.5 发版准备（2026-09-30）
+
+| 项 | 结果 |
+|---|---|
+| 发布状态与 CHANGELOG | 路线账本登记为 `v0.1.5` 待打 tag；README（中英）的支持版本、tarball 与 tag 示例对齐 `v0.1.5`；[`CHANGELOG.md`](../../../CHANGELOG.md) / [`CHANGELOG.en.md`](../../../CHANGELOG.en.md) 新增 `0.1.5` 条目 |
+| 本地门禁 | frozen install、`compat:check`、lint、typecheck、build、`test`（347 passed / 4 skipped）、`smoke:compose` 40/40、`smoke:behavior` 91/91（4 项真实内核断言因宿主无可用 runner 跳过）、`smoke:journey` 52/52（2 项真实内核断言同因跳过）、`docs:check` 通过；`verify:all` 退出码 0（2026-09-30，macOS） |
+| 跨平台矩阵 | 上方 PR #6 记录的 CI run `36690954880` 已验证九个 DSH 版本 × Linux / macOS / Windows，共 27 个 verify job 全绿；Windows 车道按既有范围不运行 POSIX 冒烟或内核断言 |
+
+版本号仍为 `0.1.4`，尚无 `v0.1.5` tag；正式发版提交由 `pnpm release patch --tag` 产生。

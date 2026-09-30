@@ -24,7 +24,7 @@ Three things make this plugin worth looking at:
 
 **Done and released: `v0.1.4`** — with the `v0.1.3` contract unchanged, the supported upstream runtimes grow to `0.1.7-rc.2` (same shapes as `0.1.7-rc.1`, no new adapter branch; cordis stays at `~4.0.4`). See the [CHANGELOG](./CHANGELOG.en.md).
 
-**Unreleased changes in this checkout**: the support matrix now reaches DSH `0.2.0-rc.2`, which is also the development pin. Risk analysis and verification evidence live in the [roadmap compatibility record](./docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30未发布).
+**The `v0.1.5` release preparation is complete; the tag is pending**: support now includes DSH `0.2.0-rc.1` and `0.2.0-rc.2`, with a cross-operating-system CI matrix for every supported release. Risk analysis and verification evidence live in the [roadmap compatibility record](./docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30).
 
 The single source of truth for progress, numbering, and release state is the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账) (M1–M4 are the MVP milestone numbers, H1–H4 are the `v0.1.1` batch numbers, and H1 is M4); per-item evidence lives in the [completed plans](./docs/plans/README.md), and the user-visible changes of each version are in the [CHANGELOG](./CHANGELOG.en.md).
 
@@ -88,8 +88,8 @@ This installs pre-built artifacts (the plugin itself is never compiled), but the
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # or download the tgz from the GitHub Release assets, e.g.:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.4/dsh-electron-dsh-plugin-multi-root-workspace-0.1.4.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.4.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.5/dsh-electron-dsh-plugin-multi-root-workspace-0.1.5.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.5.tgz
 ```
 
 Also pre-built (the plugin itself is never compiled here), handy for air-gapped or offline delivery — and the first `add` needs the same `allowBuilds` answer.
@@ -108,10 +108,10 @@ allowBuilds:
   koffi: true
 ```
 
-Then run `add` again. Pinning a tag (e.g. `#v0.1.4`) is recommended so a later push cannot silently change what actually runs:
+Then run `add` again. Pinning a tag (e.g. `#v0.1.5`) is recommended so a later push cannot silently change what actually runs:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.4
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.5
 ```
 
 ### Install from a local clone (development & debugging)

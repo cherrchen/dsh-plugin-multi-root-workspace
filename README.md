@@ -24,7 +24,7 @@ DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围�
 
 **已完成并发布：`v0.1.4`**——在 `v0.1.3` 契约不变的前提下，受支持的上游运行时扩展到 `0.1.7-rc.2`（形状与 `0.1.7-rc.1` 相同，适配层无新分支；cordis 仍是 `~4.0.4`）。详见 [CHANGELOG](./CHANGELOG.md)。
 
-**当前源码尚未发布的变更**：支持矩阵延伸到 DSH `0.2.0-rc.2`，开发 pin 同步升级；完整风险与验证证据见[路线图兼容提升记录](./docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30未发布)。
+**`v0.1.5` 发版准备已完成，待打 tag**：支持矩阵延伸到 DSH `0.2.0-rc.1` 与 `0.2.0-rc.2`，并为全部支持版本建立跨操作系统 CI 矩阵；完整风险与验证证据见[路线图兼容提升记录](./docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30)。
 
 进度、编号与发布状态的唯一真源是[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)（M1–M4 是 MVP 里程碑编号，H1–H4 是 `v0.1.1` 批次编号，其中 H1 即 M4）；逐项证据见各[已完成计划](./docs/plans/README.md)，每个版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)。
 
@@ -90,8 +90,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.4/dsh-electron-dsh-plugin-multi-root-workspace-0.1.4.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.4.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.5/dsh-electron-dsh-plugin-multi-root-workspace-0.1.5.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.5.tgz
 ```
 
 同样是预构建产物（不需要编译本插件本身），适合内网或离线环境交付；首次 `add` 同样要回答那一次 `allowBuilds`。
@@ -110,10 +110,10 @@ allowBuilds:
   koffi: true
 ```
 
-然后重新执行 `add` 即可。建议锁定 tag（如 `#v0.1.4`），让后续推送无法悄悄改变实际运行的内容：
+然后重新执行 `add` 即可。建议锁定 tag（如 `#v0.1.5`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.4
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.5
 ```
 
 ### 从本地源码安装（开发调试）
