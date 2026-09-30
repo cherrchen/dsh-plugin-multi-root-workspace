@@ -2,10 +2,24 @@ import { execFileSync } from 'node:child_process'
 import { parse } from 'yaml'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { SUPPORTED_DSH_RELEASES } from '../src/compat/dsh-version.ts'
 
 const read = (path: string): string => readFileSync(path, 'utf8')
 
 describe('CI workflow gates', () => {
+  it('runs every supported exact release on every enabled OS, with distinct logs', () => {
+    const ci = parse(read('.github/workflows/ci.yml'))
+    expect(JSON.parse(execFileSync(process.execPath, ['scripts/list-dsh-releases.mjs'], { encoding: 'utf8' })))
+      .toEqual([...SUPPORTED_DSH_RELEASES])
+    expect(ci.jobs.verify.needs).toBe('releases')
+    expect(ci.jobs.verify.strategy.matrix.dsh).toBe('${{ fromJSON(needs.releases.outputs.versions) }}')
+    expect(ci.jobs.verify.env.DSH_MATRIX_VERSION).toBe('${{ matrix.dsh }}')
+    const install = ci.jobs.verify.steps.find((step: { name?: string }) => step.name === 'Install the exact matrix release')
+    expect(install.run).toContain('node scripts/upgrade-dsh.mjs "$DSH_MATRIX_VERSION"')
+    expect(install.run).not.toContain('${{')
+    expect(read('.github/workflows/ci.yml')).toContain('name: vitest-log-${{ matrix.os }}-${{ matrix.dsh }}')
+    expect(read('.github/workflows/ci.yml')).toContain('name: smoke-log-${{ matrix.os }}-${{ matrix.dsh }}')
+  })
   it('probes kernel dialects before the unit suite uses the exported result', () => {
     const ci = read('.github/workflows/ci.yml')
     expect(ci.indexOf('run: pnpm kernel:probe')).toBeLessThan(ci.indexOf('name: Run the unit suite'))

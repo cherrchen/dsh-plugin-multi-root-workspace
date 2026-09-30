@@ -65,6 +65,7 @@ afterEach(async () => {
 /** One mounted composition plus the handle a spec drives it with. */
 interface World {
   readonly ctx: Context
+  readonly session: Session
   /** Run one `agent/pre-step` and return the message this row injected, if any. */
   step: (claimed?: readonly UserMessage[]) => Promise<UserMessage | undefined>
   /** Run one `agent/pre-step` and return the whole decision. */
@@ -161,6 +162,7 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
 
   return {
     ctx,
+    session,
     decide,
     roots: setRoots,
     touch,
@@ -473,14 +475,32 @@ describe('nested instructions', () => {
     expect(await world.step()).toBeUndefined()
   })
 
-  it('ignores a touch whose tool call failed, and one made by a non-file tool', async () => {
+  it.each(['block', 'message', 'recovery'] as const)('ignores a failed touch recorded on the %s, and a non-file tool', async (failureLocation) => {
     seedNested()
     const world = await mountWorld({}, [repoB])
     // The root's own file is delivered before any touch, so what follows is only
     // about the touches.
     expect(textOf(await world.step())).toContain('# repo-b rules')
 
-    world.touch(join(repoB, 'src', 'entry.mjs'), { failed: true })
+    if (failureLocation === 'block') {
+      world.touch(join(repoB, 'src', 'entry.mjs'), { failed: true })
+    } else {
+      // 0.1.7+ failures, including 0.2's live-step recovery, put isError
+      // on the message and carry plain text rather than a tool-result block.
+      world.touch(join(repoB, 'src', 'entry.mjs'), { callId: 'recovered', deferResult: true })
+      const emit = world.ctx.emit.bind(world.ctx) as unknown as (name: string, session: object, event: unknown) => void
+      emit('session/event', world.session, {
+        type: 'tool/result', seq: 0, time: 0,
+        data: {
+          turn: 1, step: 1,
+          ...(failureLocation === 'recovery' ? { error: { name: 'ToolOutcomeUnknownError', code: 'TOOL_OUTCOME_UNKNOWN' } } : {}),
+          message: {
+            source: { kind: 'tool', callId: 'recovered' }, isError: true,
+            content: [{ type: 'text', text: 'Tool execution outcome is unknown.' }],
+          },
+        },
+      })
+    }
     expect(await world.step()).toBeUndefined()
 
     world.touch(join(repoB, 'src', 'entry.mjs'), { tool: 'bash' })

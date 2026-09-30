@@ -33,6 +33,7 @@
 | v0.1.2 | compat | DSH 支持矩阵扩展至 `0.1.6-alpha.2` 与 `0.1.7-alpha.1`；`0.1.6-alpha.2` 面板 Session 目录 `retainedBy.mainView` 探针 | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `318ff52`…`6e68a0b` | `v0.1.2` |
 | v0.1.3 | compat | DSH 支持矩阵扩展至 `0.1.7-alpha.2` 与 `0.1.7-rc.1`；形状未变，`rc.1` 安装期 peer 门禁要求精确 peer | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `10381fc` | `v0.1.3` |
 | v0.1.4 | compat | DSH 支持矩阵扩展至 `0.1.7-rc.2`；相对 `rc.1` 形状未变，无新适配分支，cordis 仍是 `~4.0.4` | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `f2a8f75` | `v0.1.4` |
+| Unreleased | compat | DSH 0.2 兼容提升、开发 pin 升级、全部支持版本 × OS 的持续矩阵 | [本次记录](#dsh-02-兼容提升2026-09-30未发布) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | 本分支 | 未发布 |
 | 第二期 | B 系列 | Windows 内核级多根、per-root 权限、`workspace-files` 多根、LSP 路由等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 
 ## 总体策略
@@ -245,3 +246,41 @@ pnpm verify:all                                    # lint → typecheck → buil
 ## 与"可改上游"路线的关系
 
 若未来允许向上游贡献，按架构文档 §9 的 PR 栈提交通用 Filesystem Scope Seam；合入后本插件撤销三个替换行、provider 子类退化为 scope contributor——`FilesystemScope` 接口自 M2 起即按该 seam 目标形态设计，迁移是删除而非重写。
+
+### DSH 0.2 兼容提升（2026-09-30，未发布）
+
+用户授权范围是 `dsh-v0.1.7-rc.2` 至 `dsh-v0.2.0-rc.2` 的所有发布版本。上游本地 tag 与 npm `versions` 列表一致：这个闭区间只有起点及 `0.2.0-rc.1` / `0.2.0-rc.2`。支持合同保留全部旧版，再纳入这两个精确版本；开发 pin 与 lockfile 升到 `0.2.0-rc.2`，cordis 是 `4.0.4`。这批是 **Unreleased**，没有提升插件版本号、创建 release tag 或发布 npm 包；发布内容见双语 CHANGELOG 的 Unreleased 段。
+
+#### 接口变更与风险
+
+对上游上述三个 tag 做源码差分，并用各自的 npm 发布包验证。版本形状判断继续集中在 `src/compat/`，没有新增版本字符串分支。
+
+| 接缝 | 上游变化与影响 | 本次处理与证据 |
+|---|---|---|
+| fs / sandbox policy / profile dialect | `writeText` / `editText`、`confine`、Seatbelt / bwrap / Landlock profile 生成形状未变。0.2 的 Windows provider 新增 ACL diagnosis skill 的可选 `skills` 注册；rc.2 改进诊断脚本 | 继承上游 provider，保留软注册和空根透传；fs / sandbox / parity 差分套件及真实 Seatbelt 写入验证。Windows 内核多根仍不在承诺内 |
+| 指令 discovery / renderer、runtime-context | 上游公开导出及本插件使用的事件接口未变 | 原适配器保留；顶层 / 嵌套发现、预算、显式撤销、空根零贡献的单测和 journey |
+| agent-loop / session | `6a6f350b94` 新增 `ToolCallRecovery`：失败 step 关闭前补 `tool/result`，含纯文本 content、message `isError` 与 `data.error`；格式常量仍为 4 | 已有失败适配器能处理，新增 provider 回归分别覆盖旧 block 位、新 message 位、恢复事件，失败不能发现子目录指令。恢复结果缺少 call 配对时也不会创造 touch |
+| 客户端 sessions / primitives / sidebar | fork 新增可选 `onCreated`；Input 改 forwardRef；sidebar 加遥测、rc.2 更新折叠布局；renderer 修复 factory ancestors 的引用稳定性 | 本插件不调用 fork；当前会话仍用 `retainedBy.mainView`，footer slot、Regular icons、Input / Modal 调用仍兼容。双面类型检查、客户端组件 / bundle 单测 |
+| boot / profile / Connection RPC / registry storage | app-boot 增加可选 schedule bundle；`createRuntimeResolution` / `PluginPackages`、peer 精确校验、RPC 和 storage domain 接口未变 | 保留 bare-package carrier 行和 host-derived session authority；compose / behavior / journey 在真实 web 与 headless profile 上验证 |
+| npm 安装树 / cordis / 升级脚本 | 旧上游的预发布范围可解析到同 minor 的更晚版本；`0.1.7-alpha.1` 首轮 boot 中 `dsh-client-connection` 被 runtime resolution 重定向到 `0.1.7-rc.2`，尽管顶层单测读到 alpha.1 | 门禁正确拒绝混装。`upgrade-dsh.mjs` 从现有精确 release-age 条目派生 workspace-only probe overrides，把整个已知 DSH 树与 cordis 固定到探测版，防止 `^4.0.3` 又解析出 `4.0.4` 并拆分调度 Symbol，拒绝覆盖自定义 overrides。probe 后恢复保存文件；生产门禁没有放宽 |
+| pnpm release age | pnpm 11 在 frozen install 和运行脚本前检查全部锁文件；0.2 传递 DSH 包及新 LibreOffice tooling 仍在年龄门禁内 | workspace 对当前开发版本逐包精确豁免，包含锁文件里的平台包；不使用跨版本包名通配。候选安装使用 `minimumReleaseAge=0`，临时重指后恢复 |
+
+#### 持续矩阵与验证范围
+
+CI 主车道从 `SUPPORTED_DSH_RELEASES` 派生版本轴，与 Linux / macOS / 启用的 Windows 做笛卡尔积；每个版本执行现有全部门禁，始终 enforce。开发 pin 验证 frozen lockfile，旧版用 upgrade 脚本重建一致安装树。日志制品同时包含版本与 OS，避免同名冲突。升级候选车道仍只给出证据，不自动扩大支持合同。
+
+本次本地矩阵在 macOS 宿主运行，先以真实内核探针确认 Seatbelt，然后对每个版本传入 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt`，因此 Seatbelt 不可执行会导致失败而非 skip。Linux bwrap / Landlock 与 Windows 本地未覆盖，由 PR 的对应 CI 腿验证；尚未完成的远端检查不得记为通过。矩阵期间逐版保存日志，结束后恢复 `0.2.0-rc.2` 的 manifest、workspace、lockfile、node_modules 与构建产物。
+
+| 运行时 | 静态合同 / lint / 双面 typecheck / build | 单测 | compose / behavior / journey | 内核 |
+|---|---|---|---|---|
+| `0.1.5-rc.2` | 通过 | 346 passed / 3 skipped | 40/40、99/99、55/55 | Seatbelt 实际执行 |
+| `0.1.6-alpha.1` | 通过 | 同上 | 同上 | 同上 |
+| `0.1.6-alpha.2` | 通过 | 同上 | 同上 | 同上 |
+| `0.1.7-alpha.1` | 通过 | 同上 | 同上 | 同上 |
+| `0.1.7-alpha.2` | 通过 | 同上 | 同上 | 同上 |
+| `0.1.7-rc.1` | 通过 | 同上 | 同上 | 同上 |
+| `0.1.7-rc.2` | 通过 | 同上 | 同上 | 同上 |
+| `0.2.0-rc.1` | 通过 | 同上 | 同上 | 同上 |
+| `0.2.0-rc.2` | 通过 | 同上 | 同上 | 同上 |
+
+单测三条 skip 是本机无 bwrap / Landlock 的两条真实执行断言，以及只适用于候选 warn 车道的一条互斥断言；没有把 macOS Seatbelt 跳过算通过。新版本不需要额外适配分支；升级风险集中在候选安装树一致性、异常恢复结果语义，以及未在本地运行的其他 OS。最终开发安装树已恢复；`pnpm install --frozen-lockfile`、`pnpm compat:check` 与 `pnpm docs:check` 均通过。

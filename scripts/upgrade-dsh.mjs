@@ -156,6 +156,23 @@ function repointWorkspace(version, cordisVersion) {
   }
   updated = updated.replace(cordisLine, `$1${cordisVersion}'`)
   count += 1
+  // Upstream prerelease dependency ranges may admit a later release in the
+  // same minor line. A direct dev pin alone does not make the runtime carried
+  // by `dsh` coherent: its resolution hook can override that direct copy with
+  // a transitive one. Pin the known DSH tree for this probe as well. Names
+  // come from the existing exact release-age entries, not a second inventory.
+  // These overrides are workspace-only and restored with the probe's files.
+  const marker = '# BEGIN DSH probe overrides'
+  updated = updated.replace(/\n# BEGIN DSH probe overrides\n[\s\S]*?# END DSH probe overrides\n?/u, '\n')
+  if (/^overrides:/mu.test(updated)) {
+    throw new Error('[upgrade] workspace has custom overrides; merge probe pins explicitly instead of replacing them')
+  }
+  const names = [...new Set([...updated.matchAll(/^\s*- '(@deepseek-ai\/dsh(?:-[\w-]+)?)@[^']+'$/gmu)]
+    .map(match => match[1]))].sort()
+  updated = updated.trimEnd() + `\n\n${marker}\noverrides:\n`
+    + `  '@deepseek-ai/cordis': '${cordisVersion}'\n`
+    + names.map(name => `  '${name}': '${version}'\n`).join('')
+    + '# END DSH probe overrides\n'
   writeFileSync(WORKSPACE, updated)
   return count
 }
@@ -205,8 +222,8 @@ if (!/^\d+\.\d+\.\d+(?:-[\w.]+)?$/u.test(target)) {
 }
 
 const cordisVersion = cordisRequiredBy(target)
-const changed = repointManifest(target, cordisVersion)
 const allowances = repointWorkspace(target, cordisVersion)
+const changed = repointManifest(target, cordisVersion)
 console.log(`[upgrade] cordis pin: ${cordisVersion}`)
 console.log(`[upgrade] pinned ${target}`)
 console.log(`[upgrade] devDependencies rewritten: ${changed.length}`)
