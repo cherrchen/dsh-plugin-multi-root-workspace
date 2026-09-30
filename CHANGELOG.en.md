@@ -20,6 +20,8 @@ This file records the user-visible changes of every **released** version.
 - The development pin, installed tree, and lockfile move to DSH `0.2.0-rc.2`, with cordis pinned to `4.0.4`.
 - Regression coverage verifies that message-level failures and DSH 0.2 recovery events do not discover nested instructions.
 
+- Fix npm invocation in Windows compatibility probes by running the npm CLI with Node.
+
 ## [0.1.4] - 2026-09-25
 
 With the exact allowlist contract from `v0.1.3` unchanged, the supported upstream runtimes grow to `0.1.7-rc.2`; the reasoning is still [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md).

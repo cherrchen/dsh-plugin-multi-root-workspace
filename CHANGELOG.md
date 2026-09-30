@@ -20,6 +20,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 开发 pin、安装树与 lockfile 升级至 DSH `0.2.0-rc.2`，cordis pin 升级至 `4.0.4`。
 - 补充工具失败位与 DSH 0.2 异常恢复事件不会发现嵌套指令的回归覆盖。
 
+- 修复 Windows 兼容探测脚本的 npm 启动方式，旧版矩阵通过 Node 运行 npm CLI。
+
 ## [0.1.4] - 2026-09-25
 
 在 `v0.1.3` 的精确 allowlist 契约不变的前提下，把受支持的上游运行时扩展到 `0.1.7-rc.2`；设计取舍仍见 [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)。

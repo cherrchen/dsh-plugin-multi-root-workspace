@@ -38,11 +38,11 @@
  * @module scripts/upgrade-dsh
  */
 
-import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { npmOutput } from './lib/npm-cli.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MANIFEST = join(REPO_ROOT, 'package.json')
@@ -62,7 +62,7 @@ function isDshPackage(name) {
  * @returns the version string.
  */
 function latestPrerelease() {
-  const raw = execFileSync('npm', ['view', '@deepseek-ai/dsh', 'versions', '--json'], { encoding: 'utf8' })
+  const raw = npmOutput(['view', '@deepseek-ai/dsh', 'versions', '--json'])
   const versions = JSON.parse(raw)
   const prereleases = versions.filter(version => version.includes('-'))
   const newest = prereleases.at(-1)
@@ -84,11 +84,7 @@ function latestPrerelease() {
  * @returns the exact cordis version to pin.
  */
 function cordisRequiredBy(dshVersion) {
-  const raw = execFileSync(
-    'npm',
-    ['view', `@deepseek-ai/dsh@${dshVersion}`, 'dependencies.@deepseek-ai/cordis', '--json'],
-    { encoding: 'utf8' },
-  )
+  const raw = npmOutput(['view', `@deepseek-ai/dsh@${dshVersion}`, 'dependencies.@deepseek-ai/cordis', '--json'])
   const range = JSON.parse(raw)
   const exact = typeof range === 'string' ? /^[\^~]?(\d+\.\d+\.\d+)$/u.exec(range) : null
   if (exact === null) {

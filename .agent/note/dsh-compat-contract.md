@@ -181,3 +181,5 @@ pnpm verify:all   # lint → typecheck → build → test → kernel:probe → s
 CI 用 `scripts/list-dsh-releases.mjs` 从 allowlist 直接读取版本轴，所有支持版本都跑所有启用的 OS，主车道始终 enforce。`pnpm-workspace.yaml` 对开发版本的传递 DSH 包与 LibreOffice host tooling 逐项使用精确发布年龄豁免：pnpm 11 不接受带版本的包名通配模式，而且运行脚本前也会校验整棵锁文件。安装候选仍使用 `--config.minimumReleaseAge=0`，临时 pin 与临时豁免必须恢复。
 
 候选重指脚本还从这些 DSH 条目派生一个 workspace-only 的 DSH / cordis `overrides` 块，确保旧版的宽预发布范围不会在 runtime resolution 下变成混装；已有自定义 overrides 时脚本拒绝覆盖。这个块是探测产物，不随插件发布，探测结束恢复保存的 workspace 文件。
+
+Windows 的 Node 不能直接 `execFileSync('npm')` 启动 `npm.cmd`，旧版矩阵会在重指前报 `spawnSync npm ENOENT`。升级脚本统一走 `scripts/lib/npm-cli.mjs`：Windows 用当前 Node 执行其安装目录的 `node_modules/npm/bin/npm-cli.js`，POSIX 继续直接执行 npm；不拼 shell 命令，带空格的路径与参数边界由回归测试覆盖。
