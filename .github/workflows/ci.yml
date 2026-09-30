@@ -14,10 +14,24 @@ permissions:
   contents: read
 
 jobs:
+  releases:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.contract.outputs.versions }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - id: contract
+        run: echo "versions=$(node scripts/list-dsh-releases.mjs)" >> "$GITHUB_OUTPUT"
+
   verify:
+    needs: releases
     strategy:
       fail-fast: false
       matrix:
+        dsh: ${{ fromJSON(needs.releases.outputs.versions) }}
         # `DSH_WINDOWS_CI=1` adds the Windows lane. It is ENABLED for this
         # repository (the variable is set): standard runners are free on public
         # repositories, and this lane is the only evidence for the
@@ -32,6 +46,7 @@ jobs:
       CI: 'true'
       FORCE_COLOR: '0'
       TERM: dumb
+      DSH_MATRIX_VERSION: ${{ matrix.dsh }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -41,8 +56,16 @@ jobs:
         with:
           node-version: 22.19.0
           cache: pnpm
-      - name: Install
-        run: pnpm install --frozen-lockfile
+      - name: Install the exact matrix release
+        run: |
+          pin=$(node -p "require('./package.json').devDependencies['@deepseek-ai/dsh']")
+          if [ "$DSH_MATRIX_VERSION" = "$pin" ]; then
+            pnpm install --frozen-lockfile
+          else
+            node scripts/upgrade-dsh.mjs "$DSH_MATRIX_VERSION"
+            pnpm install --no-frozen-lockfile --config.minimumReleaseAge=0
+          fi
+        shell: bash
       # Before anything else: the allowlist, peerDependencies, the development
       # pin and the installed tree must agree. Every later step's result is only
       # meaningful as evidence for a release the contract actually claims, so a
@@ -75,7 +98,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: vitest-log-${{ matrix.os }}
+          name: vitest-log-${{ matrix.os }}-${{ matrix.dsh }}
           path: |
             vitest.log
             *.log
@@ -92,7 +115,7 @@ jobs:
         if: failure() && matrix.os != 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: smoke-log-${{ matrix.os }}
+          name: smoke-log-${{ matrix.os }}-${{ matrix.dsh }}
           path: |
             smoke-behavior.log
             vitest.log

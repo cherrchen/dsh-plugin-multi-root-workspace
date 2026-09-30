@@ -24,6 +24,8 @@ DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围�
 
 **已完成并发布：`v0.1.4`**——在 `v0.1.3` 契约不变的前提下，受支持的上游运行时扩展到 `0.1.7-rc.2`（形状与 `0.1.7-rc.1` 相同，适配层无新分支；cordis 仍是 `~4.0.4`）。详见 [CHANGELOG](./CHANGELOG.md)。
 
+**当前源码尚未发布的变更**：支持矩阵延伸到 DSH `0.2.0-rc.2`，开发 pin 同步升级；完整风险与验证证据见[路线图兼容提升记录](./docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30未发布)。
+
 进度、编号与发布状态的唯一真源是[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)（M1–M4 是 MVP 里程碑编号，H1–H4 是 `v0.1.1` 批次编号，其中 H1 即 M4）；逐项证据见各[已完成计划](./docs/plans/README.md)，每个版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)。
 
 ## 快速开始
@@ -47,9 +49,9 @@ dsh --profile web
 
 ## 环境要求
 
-- **使用已发布的插件**：需要一个受支持的 DSH 运行时 —— 当前是 **`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1` 与 `0.1.7-rc.2`**，别的版本装不上也不会跑（见下）。`dsh plugin` 会把包装进对应 profile，无需本地 Node 工具链
+- **使用本源码构建的插件**：需要一个受支持的 DSH 运行时 —— 当前是 **`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1` 与 `0.2.0-rc.2`**，别的版本装不上也不会跑（见下）。`dsh plugin` 会把包装进对应 profile，无需本地 Node 工具链
 - **从源码构建 / 参与**：**Node.js** `^22.19.0 || >=24`（仓库 `engines` 钉住）、**Git**、**pnpm 11**（`packageManager` 钉 `pnpm@11.25.0`，建议经 corepack 启用）
-- **DSH 运行时**：开发依赖精确 pin 在 `0.1.5-rc.2`（受支持版本里的基线）；升级流程见[开发工作流](./docs/development/plugin-development-workflow.md)
+- **DSH 运行时**：开发依赖精确 pin 在 `0.2.0-rc.2`（受支持版本里的基线）；升级流程见[开发工作流](./docs/development/plugin-development-workflow.md)
 - **平台支持**：macOS（Seatbelt）与 Linux（bwrap 或 Landlock）内核级多根全量；Windows 仅 `fs` 写路径覆盖附加根（受限 bash/PTY 不含，见[已知限制](#已知限制第一期)）
 - 运行冒烟测试**不需要模型凭据**：e2e 的模型轮次由内联的脚本化模型端点提供
 

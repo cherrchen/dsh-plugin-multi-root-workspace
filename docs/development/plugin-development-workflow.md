@@ -7,13 +7,13 @@
 
 | 项 | 值 | 说明 |
 | --- | --- | --- |
-| 开发/CI 目标版本（基线） | `0.1.5-rc.2` | 精确 pin 在 `devDependencies`；本地与 CI 主 lane 都跑它 |
-| 支持矩阵 | `0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2` | **精确版本 allowlist**（`src/compat/dsh-version.ts` 的 `SUPPORTED_DSH_RELEASES`），`peerDependencies` 逐项或 —— 不是范围 |
-| 已实测的其余运行时 | `0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2` | 提升时按升级流程跑完整矩阵后才写入 allowlist；开发 pin 仍是基线。`upgrade.yml` 按周探测最新 pre-release，不自动扩大 allowlist |
+| 开发目标版本（基线） | `0.2.0-rc.2` | 精确 pin 在 `devDependencies`；CI 主车道对全部支持版本与启用的 OS 做笛卡尔积验证 |
+| 支持矩阵 | [`SUPPORTED_DSH_RELEASES`](../../src/compat/dsh-version.ts) | **精确版本 allowlist**；`peerDependencies` 逐项或，不承诺未来版本 |
+| 实测证据 | [路线图兼容提升记录](../plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30未发布) | 升级与旧版回归都运行完整矩阵；`upgrade.yml` 只探测候选，不自动扩大 allowlist |
 | 运行时门禁 | `multi-root-compat` 行 | 版本不在 allowlist 或核心包混装时，四个安全相关行根本不启动（ADR-0009） |
-| cordis | 基线 `4.0.2`；`0.1.7-alpha.1` 探测钉 `4.0.3`；`0.1.7-alpha.2`、`0.1.7-rc.1` 与 `0.1.7-rc.2` 钉 `4.0.4` | 与服务定义包一样必须单副本，由宿主提供。`upgrade-dsh.mjs` 把 cordis 钉到候选 `dsh` 所声明的那个精确版本：`0.1.7-alpha.1` 依赖 `^4.0.3`，其后三版依赖 `~4.0.4`。与 `4.0.2` 混装会拆出两份 `dsh-tools`，工具调度用的 Symbol 对不上 |
+| cordis | 基线 `4.0.4`；旧版按 `dsh` 声明的范围下限精确 pin | `upgrade-dsh.mjs` 同步重指，并从精确 release-age 条目派生 workspace-only 的 DSH probe overrides，避免预发布范围导致混装、重复副本导致工具调度 Symbol 不一致。已有自定义 overrides 时拒绝覆盖；探测后恢复保存的 workspace |
 
-**必须精确 pin**：`@deepseek-ai/dsh-*` 的 `latest` dist-tag 指向陈旧的 `0.0.1-rc.1`，真正的新版发布在 `next`；范围依赖会解析到错误版本。`pnpm-workspace.yaml` 里的 `minimumReleaseAgeExclude` 是为此配套的（pnpm 的发布年龄门禁会拦下刚发布的预发布版本）。
+**必须精确 pin**：`@deepseek-ai/dsh-*` 的 `latest` dist-tag 指向陈旧的 `0.0.1-rc.1`，真正的新版发布在 `next`；范围依赖会解析到错误版本。`pnpm-workspace.yaml` 里的 `minimumReleaseAgeExclude` 对开发版本的直接与传递 DSH 包、宿主 document tooling 都逐项列出精确版本，供 frozen install 与运行脚本前的依赖自检使用；不使用跨版本通配豁免。它是为此配套的（pnpm 的发布年龄门禁会拦下刚发布的预发布版本）。
 
 ## 2. 工具链
 
@@ -177,7 +177,7 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 八行 insert
 
 ## 7. CI
 
-`.github/workflows/ci.yml` 在 `ubuntu-latest` 与 `macos-latest` 上执行：**`compat:check`** → `lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `docs:check`。`compat:check` 放在最前，因为后续每一步的结果只有对"契约真正声明的版本"才算证据。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。
+`.github/workflows/ci.yml` 的 `releases` job 用 `scripts/list-dsh-releases.mjs` 从 `SUPPORTED_DSH_RELEASES` 读取版本轴，`verify` 将该轴与启用的 OS 做笛卡尔积。开发 pin 使用 frozen lockfile，其他版本先用 `upgrade-dsh.mjs` 重指 DSH / cordis 后重新安装；制品名同时含 OS 与 DSH 版本。主车道在 `ubuntu-latest` 与 `macos-latest` 上执行：**`compat:check`** → `lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `docs:check`。`compat:check` 放在最前，因为后续每一步的结果只有对"契约真正声明的版本"才算证据。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。
 
 `.github/workflows/upgrade.yml` 是**按周**运行的升级车道（也可手动触发指定版本）：解析 `@deepseek-ai/dsh` 最新 pre-release → 重指 pin → 安装 → 与主车道同样顺序的完整矩阵，全程 `DSH_MULTI_ROOT_COMPAT=warn`。它的权限是 `contents: read`，不提交、不推送、不碰 allowlist；成功时只在 step summary 里写出人工提升的三步。它**不**跑 `compat:check`（候选按设计不在 allowlist 上）。这些性质由 `tests/workflows.spec.ts` 钉住。 手动版本输入及 candidate output 只通过 step `env` 传入 shell，禁止把 GitHub 表达式直接嵌进 `run`；写入 `$GITHUB_OUTPUT` 前校验为单行版本，避免 shell 代码执行与多行输出注入。
 

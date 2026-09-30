@@ -13,15 +13,15 @@ src/compat/dsh-version.ts  →  SUPPORTED_DSH_RELEASES
 It is an array of **exact versions**, not a semver range. Currently:
 
 ```ts
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2'] as const
 ```
 
 When you change it, these four must agree or `pnpm compat:check` fails:
 
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   the allowlist
-package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2"
-package.json                devDependencies          one entry of the allowlist (currently 0.1.5-rc.2)
+package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2"
+package.json                devDependencies          one entry of the allowlist (currently 0.2.0-rc.2)
 node_modules                resolved versions        one entry of the allowlist
 ```
 
@@ -171,3 +171,15 @@ pnpm verify:all   # lint → typecheck → build → test → kernel:probe → s
 ```
 
 It **deliberately excludes** `compat:check`, because the upgrade lane runs it against an unlisted release. The main CI lane runs `compat:check` separately, before lint.
+
+## 9. DSH 0.2 and the new development baseline
+
+The development pin is `0.2.0-rc.2`, with cordis `4.0.4`. Restoring the baseline no longer means restoring `0.1.5-rc.2` / `4.0.2`; the earlier probes are historical records. Restore the manifest, workspace, and lockfile saved before a probe, then reinstall the tree. Never discard uncommitted support declarations by restoring HEAD.
+
+`0.2.0-rc.1` and `rc.2` retain the seams handled by the existing adapters. The 0.2 agent loop records conservative failure `tool/result` events before closing a failed step: `message.isError: true`, plain-text content, and `data.error`. These must never count as successful file touches. `tests/instructions.spec.ts` covers old block-level failures, message-level failures, and recovery events. The inherited Windows provider softly registers the new ACL diagnosis skill; this plugin still does not promise Windows kernel multi-root grants. Risk analysis and per-release evidence live in the [roadmap record](../../docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30未发布).
+
+CI reads its version axis directly from the allowlist through `scripts/list-dsh-releases.mjs`. Every supported release runs on every enabled OS, always in enforce mode. `pnpm-workspace.yaml` lists exact release-age exceptions for transitive DSH packages and LibreOffice host tooling: pnpm 11 rejects version-qualified package-name wildcards and verifies the entire lockfile before running scripts. Candidate installs still use `--config.minimumReleaseAge=0`; restore temporary pins and exceptions afterwards.
+
+The repointing script also derives workspace-only DSH / cordis `overrides` from those DSH entries, preventing old prerelease ranges from producing a mixed tree under runtime resolution. It refuses to replace custom overrides. This block belongs to the probe and is not shipped with the plugin; restore the saved workspace afterwards.
+
+On Windows, Node cannot start `npm.cmd` with `execFileSync('npm')`; old-version matrix jobs fail before repointing with `spawnSync npm ENOENT`. The upgrade script uses `scripts/lib/npm-cli.mjs`: Windows runs the installation’s `node_modules/npm/bin/npm-cli.js` through the current Node executable, while POSIX still executes npm directly. No shell command is assembled; regression tests cover paths with spaces and argument boundaries.

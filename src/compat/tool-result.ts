@@ -3,7 +3,7 @@
  *
  * ```text
  * 0.1.5-rc.2 / 0.1.6   content[0].isError on the tool-result block
- * 0.1.7-alpha.1 through 0.1.7-rc.2   message.isError on the tool-role message
+ * 0.1.7-alpha.1 through 0.2.0-rc.2   message.isError on the tool-role message
  * ```
  *
  * A failed `read` / `write` / `edit` must not make a directory worth examining
