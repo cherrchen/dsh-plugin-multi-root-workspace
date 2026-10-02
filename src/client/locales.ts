@@ -14,6 +14,11 @@ export const NS = 'multiRootWorkspace'
 
 /** Chinese copy (the canonical shape). */
 export const zh = {
+  'files.browse': '浏览文件',
+  'files.reload': '刷新文件树',
+  'files.empty': '目录为空',
+  'files.truncated': '条目过多，列表已截断',
+  'files.previewTruncated': '仅显示前 200 行',
   'action.label': '工作区目录',
   'action.title': '管理本会话的附属工作目录',
   'panel.title': '工作区目录',
@@ -22,7 +27,7 @@ export const zh = {
   'panel.primaryNote': '当前工作区主工作目录，不可移除',
   'panel.additional': '附属工作目录',
   'panel.empty': '还没有附属工作目录。',
-  'panel.emptyHint': '添加后，Agent 可在同一会话中读写该目录；macOS/Linux 的受限 bash 同步生效，Windows 当前仅覆盖 fs 写路径。',
+  'panel.emptyHint': '添加后，Agent 可在同一会话中读写该目录，受限 shell 和终端同步生效。',
   'panel.noSession': '当前没有活动会话',
   'panel.loading': '正在读取…',
   'panel.retry': '重试',
@@ -70,6 +75,11 @@ export type Key = keyof typeof zh
 
 /** English copy, pinned to the Chinese key set. */
 export const en = {
+  'files.browse': 'Browse files',
+  'files.reload': 'Refresh files',
+  'files.empty': 'Empty directory',
+  'files.truncated': 'More entries were omitted',
+  'files.previewTruncated': 'Showing the first 200 lines',
   'action.label': 'Folders',
   'action.title': 'Manage this session\'s secondary working directories',
   'panel.title': 'Workspace folders',
@@ -78,7 +88,7 @@ export const en = {
   'panel.primaryNote': 'This workspace\'s primary working directory; it cannot be removed',
   'panel.additional': 'Secondary working directories',
   'panel.empty': 'No secondary working directories yet.',
-  'panel.emptyHint': 'Once added, the agent can use the folder in this session; confined bash follows on macOS/Linux, while Windows currently covers fs writes only.',
+  'panel.emptyHint': 'Once added, the agent can use the folder in this session, including confined shells and terminals.',
   'panel.noSession': 'No active session',
   'panel.loading': 'Loading…',
   'panel.retry': 'Retry',

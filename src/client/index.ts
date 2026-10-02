@@ -1,8 +1,8 @@
 /**
  * Browser half of the multi-root workspace plugin.
  *
- * One contribution: a sidebar footer action that opens the Workspace Folders
- * dialog. Everything it needs arrives through services the composition already
+ * Sidebar footer and optional Files actions open the Workspace Folders dialog.
+ * Everything it needs arrives through services the composition already
  * provides — `slots` to contribute, `locale` for its copy, `connection` for the
  * channel to the host half, and (optionally) `uiWorkspace` for the composed
  * directory picker and the client Session Controller for the current session.
@@ -28,6 +28,16 @@ import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { NS, en, zh } from './locales.ts'
 import { STYLES } from './styles.ts'
 import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction.tsx'
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    'sidebar.right.tab.files.actions': {
+      kind: 'list'
+      scope: 'session'
+      owner: { readonly absolutePath: string }
+    }
+  }
+}
 
 /** The footer-action cell this plugin owns. */
 export const SLOT_ID = 'multi-root-folders'
@@ -95,6 +105,10 @@ export function apply(ctx: ClientContext): void {
       ...(wide === undefined ? {} : { wide }),
     })
   }))
+  // Optional: old surfaces without the Files actions slot retain the footer entry.
+  ctx.slots.inject('sidebar.right.tab.files.actions', () => ctx.slots.register({
+    name: 'sidebar.right.tab.files.actions', id: SLOT_ID, order: 50,
+  }, () => createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId, t, compact: true })))
 }
 
 /**

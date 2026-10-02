@@ -28,6 +28,7 @@ Architecture Decision Records (ADRs), capturing important architecture and engin
 - [ADR-0008-panel-session-derived-authority.md](./ADR-0008-panel-session-derived-authority.md) — Panel primary root is derived from the host session cwd: no client `primaryRoot`, every endpoint requires a live `sessionId` (Accepted).
 - [ADR-0009-dsh-compat-contract.md](./ADR-0009-dsh-compat-contract.md) — DSH compatibility as a code contract: an exact-version allowlist, the `multi-root-compat` startup gate, mixed installations failing loudly, the `src/compat/` adapter layer, and a weekly upgrade lane that never widens the matrix by itself (Accepted).
 - [ADR-0010-additional-root-instruction-scope.md](./ADR-0010-additional-root-instruction-scope.md) — Additional-root instruction injection: top-level files plus those of the subdirectories the session has worked in, delivered as a user-role `form=instructions` message from `agent/pre-step`, one shared byte budget, explicit revocation on departure and withdrawal when a delivered file disappears (Accepted).
+- [ADR-0011-multi-root-workspace-consumers.md](./ADR-0011-multi-root-workspace-consumers.md) — Public LSP routing, a Windows root-set SID runner, workspace-files isolation, and the additional-root file tree (Accepted).
 
 Do not pre-create empty ADR files; add one only when a real decision is made.
 

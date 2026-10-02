@@ -29,13 +29,15 @@ node_modules                实际解析到的版本          allowlist 中的�
 
 ## 2. 你写的测试可能因为门禁而失败——这是对的
 
-`multi-root-compat` 是 patch 第一行，这四行 inject 它：
+`multi-root-compat` 是 patch 第一行，以下行 inject 它：
 
 ```text
 multi-root-fs
 multi-root-sandbox
 multi-root-registry
 multi-root-instructions
+multi-root-lsp
+multi-root-workspace-files
 ```
 
 cordis 不会启动 injected service 缺失的行。所以在测试里 mount 上述任何 provider 之前，必须先：
@@ -183,3 +185,7 @@ CI 用 `scripts/list-dsh-releases.mjs` 从 allowlist 直接读取版本轴，所
 候选重指脚本还从这些 DSH 条目派生一个 workspace-only 的 DSH / cordis `overrides` 块，确保旧版的宽预发布范围不会在 runtime resolution 下变成混装；已有自定义 overrides 时脚本拒绝覆盖。这个块是探测产物，不随插件发布，探测结束恢复保存的 workspace 文件。
 
 Windows 的 Node 不能直接 `execFileSync('npm')` 启动 `npm.cmd`，旧版矩阵会在重指前报 `spawnSync npm ENOENT`。升级脚本统一走 `scripts/lib/npm-cli.mjs`：Windows 用当前 Node 执行其安装目录的 `node_modules/npm/bin/npm-cli.js`，POSIX 继续直接执行 npm；不拼 shell 命令，带空格的路径与参数边界由回归测试覆盖。
+
+## 10. B1–B3 的新接缝
+
+LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述符；不要比较 Cordis 代理函数的引用。旧版 `changes(scope, signal)` 与新版 `changes(scope, path, signal)` 由 `src/compat/workspace-files.ts` 按 arity 适配。Windows 非空 scope 的 runner 必须用整个根集合的 SID，不能把主根 SID 授予附加根，否则移除后仍可写。可选 peer 均纳入混装检查，carrier barrel 不得静态加载这些可选包。完整决策见 [ADR-0011](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md)，各平台验证状态只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。

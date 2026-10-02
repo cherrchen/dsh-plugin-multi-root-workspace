@@ -30,16 +30,18 @@
 
 本插件替换的是工作区围栏本身，并且 `src/dialects.ts` 是**靠观测 `super.confine` 产出的 argv 形状**识别内核 sandbox profile、再克隆它的 grant 拼法的（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）。上游 `@deepseek-ai/dsh-*` 处于 pre-stable，对这些形状没有 semver 承诺。
 
-因此插件维护一份**精确版本 allowlist**（`src/compat/dsh-version.ts` 的 `SUPPORTED_DSH_RELEASES`），并在启动时判定当前安装。`multi-root-compat` 是 patch 的第一行，四个安全相关的 provider 行都 inject 它：
+因此插件维护一份**精确版本 allowlist**（`src/compat/dsh-version.ts` 的 `SUPPORTED_DSH_RELEASES`），并在启动时判定当前安装。`multi-root-compat` 是 patch 的第一行，六个安全相关的行都 inject 它：
 
 ```text
 multi-root-fs
 multi-root-sandbox
 multi-root-registry
 multi-root-instructions
+multi-root-lsp
+multi-root-workspace-files
 ```
 
-cordis 不会启动 injected service 缺失的行。所以判定失败时这四行**根本不启动**，组合退化成“未安装本插件”——这是刻意的 fail-closed：在一个没验证过的上游版本上，宁可不授予附加根，也不要按一个可能语义不同的 profile 去授予。详见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)。
+cordis 不会启动 injected service 缺失的行。所以判定失败时这六行**根本不启动**，组合退化成“未安装本插件”——这是刻意的 fail-closed：在一个没验证过的上游版本上，宁可不授予附加根，也不要按一个可能语义不同的 profile 去授予。详见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)；新增消费方的门禁见 [ADR-0011](../decisions/ADR-0011-multi-root-workspace-consumers.md)。
 
 四种判定：
 

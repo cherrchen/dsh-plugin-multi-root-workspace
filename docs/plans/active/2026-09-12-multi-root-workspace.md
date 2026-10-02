@@ -34,7 +34,8 @@
 | v0.1.3 | compat | DSH 支持矩阵扩展至 `0.1.7-alpha.2` 与 `0.1.7-rc.1`；形状未变，`rc.1` 安装期 peer 门禁要求精确 peer | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `10381fc` | `v0.1.3` |
 | v0.1.4 | compat | DSH 支持矩阵扩展至 `0.1.7-rc.2`；相对 `rc.1` 形状未变，无新适配分支，cordis 仍是 `~4.0.4` | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `f2a8f75` | `v0.1.4` |
 | v0.1.5 | compat | DSH 支持矩阵扩展至 `0.2.0-rc.1` / `0.2.0-rc.2`，开发 pin 升级，全部支持版本 × OS 的持续矩阵 | [本次记录](#dsh-02-兼容提升2026-09-30) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `135af7f` | 发版准备完成，待打 tag |
-| 第二期 | B 系列 | Windows 内核级多根、per-root 权限、`workspace-files` 多根、LSP 路由等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
+| 第二期 | B1–B3（P1） | LSP 路由、Windows 内核级多根、`workspace-files` 与附加根文件树 | [本次记录](#b1b3第二期-p12026-10-02) | [0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md) | `feat/lsp-windows-feature` | 已实施，本地 gate 与版本矩阵通过；Windows 内核 CI 待验，未发布 |
+| 第二期 | 后续 B 项 | per-root / per-tool 权限等 P2/P3 项 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 
 ## 总体策略
 
@@ -232,7 +233,7 @@ pnpm verify:all                                    # lint → typecheck → buil
 | 3 | ~~bash 子类落点未定~~（已关闭） | — | 不替换 `bash-sandbox`：bash 与 PTY 的 confinement 全部经 `ctx.sandbox`（ADR-0001） |
 | 4 | provider 行替换影响未盘点的 Consumer | 隐藏回归 | 已盘点：`ctx.sandbox` 的消费者是 bash-sandbox / pwsh-sandbox / terminal-bash；`ctx.fs` 的消费者是 tool-fs / tool-str-replace-editor。全部只依赖 `confine`、`sandboxMode` 等结构化事实；M1 冒烟逐一实跑 |
 | 5 | disable/insert 时序或 id 变化（上游 base patch 行 id 不是稳定承诺） | 组合失败 | duplicate-provide 天然抛错 + 插件身份断言 + `smoke:compose` 组合差分断言 |
-| 6 | Windows 内核级多根缺失（pwsh 方言） | Windows bash 场景 | 第一期 fs fence 覆盖 Windows 写路径；非空 scope 下 `confine` 保持上游 wrap 并输出一次告警，文档明示限制；列入第二期（见需求 §4/§7） |
+| 6 | Windows 内核级多根缺失（pwsh 方言） | Windows bash 场景 | B2 已实现 root-set SID runner；Windows 内核实跑证据待平台 CI，见 [B1–B3 记录](#b1b3第二期-p12026-10-02) |
 | 7 | `isPathUnder` 等价实现的正确性 | fence 语义漂移 | 深导入不可用（发布包不含 `src/`，ADR-0002）⇒ 本地实现 + 注明出处 + M1 差分 parity 套件钉住；M2 起另由方言矩阵复验 |
 | 8 | 拓扑快照进入 context 对 prompt cache 的影响 | 长会话成本 | 已落地：空根 / 只读 / 无 agent 时零输出（逐字节快照断言）；根集变化频率 = 用户增删根频率，可接受 |
 | 9 | ~~nested roots 态度未最终拍板~~（已关闭） | — | 已拍板**拒绝**（[ADR-0004](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)） |
@@ -299,3 +300,31 @@ CI 主车道从 `SUPPORTED_DSH_RELEASES` 派生版本轴，与 Linux / macOS / �
 | 跨平台矩阵 | 上方 PR #6 记录的 CI run `36690954880` 已验证九个 DSH 版本 × Linux / macOS / Windows，共 27 个 verify job 全绿；Windows 车道按既有范围不运行 POSIX 冒烟或内核断言 |
 
 版本号仍为 `0.1.4`，尚无 `v0.1.5` tag；正式发版提交由 `pnpm release patch --tag` 产生。
+
+## B1–B3：第二期 P1（2026-10-02）
+
+分支为 `feat/lsp-windows-feature`，范围为用户确认的全部三项 P1；功能未发布，不改版本号。设计、接口与安全边界的唯一真源为 [ADR-0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md)。
+
+| 项 | 实现 | 验证状态 |
+|---|---|---|
+| B1 Additional Root LSP routing | additive 公共 query 包装，按 canonical file target 选择根，上游 stdio provider 负责独立初始化与池化 | 真实协议服务器 e2e、路由与撤销、取消、卸载恢复通过；九个支持版本的构建、类型与全量测试通过 |
+| B2 Windows kernel multi-root | 插件 runner 调用公开 AclSandbox，root-set capability SID、自有 private temp、保留失败签名与 payload | SID / argv / fail-closed 结构回归通过；macOS 上 Windows 内核测试明确 skip，等待 Windows CI 实跑 |
+| B3 workspace-files / client tree | 公共 list 和新版 path-watch 按根隔离；Connection 新增 files/readFile；对话框 lazy tree + preview，原生 Files actions slot 提供入口 | 真实 registry/fs 的包含性、跨主根、symlink/redirect、I/O 中撤销与 caps 回归通过；客户端 lazy tree、响应校验与可选 Files 入口通过；全量本地 gate 通过 |
+
+新增可选 peer 纳入原精确版本合同，allowlist 无变化。旧版会话级 watch 原样保留；附加根树手动刷新。已启动的 Windows/其他内核子进程使用启动时 scope，根集合变更限制后续进程。Windows 的 partial enforcement 与 caller-owned 目录条件继承上游。
+
+本地验收（macOS，2026-10-02）：
+
+| Gate | 结果 |
+|---|---|
+| `pnpm compat:check`、lint、双端 typecheck、build | 通过，开发 pin 为 `0.2.0-rc.2` |
+| `pnpm test` | 最终 29 文件、371 passed / 5 skipped；含真实 LSP stdio e2e |
+| `pnpm smoke:compose` | 44/44 |
+| `pnpm smoke:behavior` | 91/91；4 个内核执行断言因本机没有可用 Seatbelt runner 跳过 |
+| `pnpm smoke:journey` | 52/52；web/headless 的 2 个内核执行断言同因跳过 |
+| 八个旧版矩阵 | `0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1` 各通过 exact pin 安装、compat、双端 typecheck、build 与全量测试（370 passed / 5 skipped；此时尚未追加 Files actions 入口用例）；未重复计作每版 smoke 证据 |
+| 最终增补复验 | 八个旧版均再次通过双端 typecheck、build 和三文件定向测试（58 passed / 1 skipped）；Windows 原生用例另以独立 tsc 命令检查，在九个版本全部通过，四个 portable Windows 用例也复验通过 |
+| Windows 原生验证 | 已加入真实 restricted-token Node、PowerShell 与 ConPTY 用例，检查两根可写、第三根拒绝、read-only 拒绝、移除根后拒绝、PTY 退出码保留；本机明确 skip，由已有 Windows CI lane 执行，尚无实跑结论 |
+| `pnpm docs:check` / `git diff --check` | 通过，文档 0 errors / 0 warnings |
+
+矩阵发现的差异均已回归：早期 `changes(scope, signal)` 必须按实际 arity 透传；旧版目录列表会先把 symlink 报为 `not-directory`，测试保留该上游错误顺序，不要求新版的 `outside-workspace` 先出现。上述跳过项不能算作本机内核执行证据，也不代表 Windows 平台验收完成。

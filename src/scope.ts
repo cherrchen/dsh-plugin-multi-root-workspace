@@ -130,6 +130,13 @@ export function renderWorkspaceRootsContext(primaryRoot: string, additionalRoots
 export class MultiRootScopeService extends Service {
   /** Additional roots keyed by canonical primary root; empty until roots are registered. */
   private readonly rootsByPrimary = new Map<string, readonly AdditionalWorkspaceRoot[]>()
+  private readonly listeners = new Set<() => void>()
+
+  /** Observe registry publications; consumers still resolve authority from scopeOf(). */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
 
   constructor(ctx: Context) {
     super(ctx, 'multiRootScope')
@@ -194,9 +201,10 @@ export class MultiRootScopeService extends Service {
     const key = canonicalPath(primaryRoot)
     if (roots.length === 0) {
       this.rootsByPrimary.delete(key)
-      return
+    } else {
+      this.rootsByPrimary.set(key, [...roots])
     }
-    this.rootsByPrimary.set(key, [...roots])
+    for (const listener of this.listeners) listener()
   }
 }
 

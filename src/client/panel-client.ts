@@ -24,6 +24,8 @@ import {
   parseErrorView,
   parseRevealedView,
   parseRootsView,
+  parseFilesView,
+  parseFilePreview,
   type PanelEndpoint,
   type PanelRequest,
   type PanelResponseMap,
@@ -114,7 +116,9 @@ export function createPanelClient(connection: ConnectionHandle): PanelClient {
  * @throws {PanelError} `panel/bad-response` when the value is not that shape.
  */
 function expectShape<E extends PanelEndpoint>(endpoint: E, value: unknown): PanelResponseMap[E] {
-  const parsed = endpoint === 'reveal' ? parseRevealedView(value) : parseRootsView(value)
+  const parsed = endpoint === 'reveal' ? parseRevealedView(value)
+    : endpoint === 'files' ? parseFilesView(value)
+    : endpoint === 'readFile' ? parseFilePreview(value) : parseRootsView(value)
   if (!parsed.ok) throw new PanelError('panel/bad-response', parsed.message)
   return parsed.value as PanelResponseMap[E]
 }

@@ -36,6 +36,8 @@ multi-root-fs
 multi-root-sandbox
 multi-root-registry
 multi-root-instructions
+multi-root-lsp
+multi-root-workspace-files
 ```
 
 Cordis will not start a row whose injected service is absent. So before mounting any of those providers in a test you must first:
@@ -183,3 +185,7 @@ CI reads its version axis directly from the allowlist through `scripts/list-dsh-
 The repointing script also derives workspace-only DSH / cordis `overrides` from those DSH entries, preventing old prerelease ranges from producing a mixed tree under runtime resolution. It refuses to replace custom overrides. This block belongs to the probe and is not shipped with the plugin; restore the saved workspace afterwards.
 
 On Windows, Node cannot start `npm.cmd` with `execFileSync('npm')`; old-version matrix jobs fail before repointing with `spawnSync npm ENOENT`. The upgrade script uses `scripts/lib/npm-cli.mjs`: Windows runs the installation’s `node_modules/npm/bin/npm-cli.js` through the current Node executable, while POSIX still executes npm directly. No shell command is assembled; regression tests cover paths with spaces and argument boundaries.
+
+## 10. New B1–B3 seams
+
+LSP and workspace-files wrap public methods; unloading must restore original property descriptors. Do not compare Cordis proxy function references. `src/compat/workspace-files.ts` adapts old `changes(scope, signal)` and new `changes(scope, path, signal)` by arity. The Windows runner for a populated scope must use a SID for the entire root set: granting additional roots to the primary SID would retain write access after removal. Optional peers participate in mixed-tree checks and must stay out of carrier-barrel static imports. See [ADR-0011](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md) for the decision and the [roadmap](../../docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02) for platform validation.

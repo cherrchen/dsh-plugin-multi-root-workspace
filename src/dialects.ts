@@ -150,9 +150,8 @@ export function widenProfileArgs(
     case 'bwrap': return widenBwrap(profileArgs, policy.workspaceRoot, additionalRoots)
     case 'landlock': return widenLandlock(profileArgs, policy.workspaceRoot, additionalRoots)
     case 'windows-acl':
-      // The Windows ACL rung owns its grants through SIDs, not argv paths; the
-      // provider keeps the upstream wrap and warns once (first-release scope).
-      return [...profileArgs]
+      // ACL capabilities need the dedicated runner, not POSIX grant spelling.
+      throw new DialectUnrecognizedError('Windows ACL widening requires widenWindowsProfile')
   }
 }
 

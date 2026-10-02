@@ -56,6 +56,11 @@ export const REQUIRED_CORE_PACKAGES = [
  * that is the mixed-installation failure this contract exists to catch.
  */
 export const OPTIONAL_CORE_PACKAGES = [
+  '@deepseek-ai/dsh-lsp',
+  '@deepseek-ai/dsh-lsp-stdio',
+  '@deepseek-ai/dsh-api-workspace-files',
+  '@deepseek-ai/dsh-typert-protocol',
+  '@deepseek-ai/dsh-sandbox-windows-acl',
   '@deepseek-ai/dsh-agent',
   '@deepseek-ai/dsh-agent-instructions',
   '@deepseek-ai/dsh-client-connection',

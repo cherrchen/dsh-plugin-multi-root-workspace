@@ -35,6 +35,7 @@ import {
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { Key } from './locales.ts'
 import type { RootEntryView, RootState, RootView, RootsView } from '../contract.ts'
+import { RootFileTree } from './RootFileTree.tsx'
 
 /** Translate one key of this plugin's namespace. */
 export type Translate = (key: Key, params?: Record<string, unknown>) => string
@@ -54,6 +55,8 @@ export interface WorkspaceFoldersActionProps {
   readonly sessionId?: () => string | undefined
   /** Whether the sidebar renders wide content (`false` in the icon rail). */
   readonly wide?: boolean
+  /** Compact launcher in the upstream Files tab's public actions slot. */
+  readonly compact?: boolean
 }
 
 /** The visual family of one capsule button, mirroring the host Button kit. */
@@ -154,10 +157,10 @@ export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): Reac
       {/* The row wrapper mirrors the host `.triggerRow`: its 2px side overhang
           (`calc(100% + 4px)` + negative margins) is what puts this row's icon
           on the same 18px ink line as the Settings gear below it. */}
-      <div className={rail ? 'mrfw-triggerRow mrfw-railRow' : 'mrfw-triggerRow'}>
+      <div className={props.compact ? 'mrfw-fileLauncher' : rail ? 'mrfw-triggerRow mrfw-railRow' : 'mrfw-triggerRow'}>
         <button
           type="button"
-          className={rail ? 'mrfw-trigger mrfw-triggerRail' : 'mrfw-trigger'}
+          className={props.compact ? 'mrfw-btn mrfw-btnGhost' : rail ? 'mrfw-trigger mrfw-triggerRail' : 'mrfw-trigger'}
           title={props.t('action.title')}
           aria-haspopup="dialog"
           aria-expanded={open}
@@ -538,6 +541,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                     <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
                   </span>
                 ) : null}
+                {root.state === 'available' && panel !== undefined && props.sessionId !== undefined && <RootFileTree panel={panel} entry={entryOf(root)} sessionId={props.sessionId} t={t} />}
               </div>
             })}
           </section>

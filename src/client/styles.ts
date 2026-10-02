@@ -369,6 +369,11 @@ export const STYLES = /* css */ `
   border-radius: 16px;
 }
 
+.mrfw-fileTree { flex-basis: 100%; min-width: 0; }
+.mrfw-fileLevel { list-style: none; padding-left: 16px; margin: 4px 0; }
+.mrfw-fileEntry { display: block; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; text-align: left; cursor: pointer; padding: 4px; overflow-wrap: anywhere; }
+.mrfw-fileEntry:focus-visible { outline: 1px solid var(--dsw-alias-brand-primary); }
+.mrfw-filePreview { max-height: 320px; overflow: auto; padding: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; }
 .mrfw-actions .mrfw-iconBtn {
   width: 32px;
 }

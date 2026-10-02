@@ -186,26 +186,18 @@ describe.skipIf(!posixRunner)('mode and scope gating (POSIX runner argv only)', 
   })
 })
 
-describe('the Windows ACL rung keeps the upstream wrap and warns once', () => {
-  it('warns a single time for a populated scope and never touches the argv', async () => {
+describe('the Windows ACL rung', () => {
+  it('selects the plugin runner and preserves enforcement and payload', async () => {
     const upstream = await mount(LocalSandboxProvider, 'workspace-write', internalsFor('windows-acl'))
     const ours = await mount(MultiRootSandboxProvider, 'workspace-write', internalsFor('windows-acl'))
-    const warn = vi.spyOn(ours.ctx.logger, 'warn').mockImplementation(() => {})
     ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'root-0', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
-
     const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: fixture.workspace }
     const expected = await confined(upstream.provider, COMMAND, policy)
-    expect((await confined(ours.provider, COMMAND, policy)).argv).toEqual(expected.argv)
-    expect((await confined(ours.provider, COMMAND, policy)).argv).toEqual(expected.argv)
-
-    expect(warn).toHaveBeenCalledTimes(1)
-    expect(String(warn.mock.calls[0]?.[0])).toContain('Windows ACL runner')
-  })
-
-  it('stays silent when the scope is empty', async () => {
-    const ours = await mount(MultiRootSandboxProvider, 'workspace-write', internalsFor('windows-acl'))
-    const warn = vi.spyOn(ours.ctx.logger, 'warn').mockImplementation(() => {})
-    await confined(ours.provider, COMMAND, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
-    expect(warn).not.toHaveBeenCalled()
+    const result = await confined(ours.provider, COMMAND, policy)
+    expect(result.argv[1]).toMatch(/windows-runner\.js$/)
+    expect(result.argv).toContain('--additional-root')
+    expect(result.argv).toContain(canonicalPath(fixture.outside))
+    expect(result.argv.slice(-COMMAND.length)).toEqual(COMMAND)
+    expect({ ...result, argv: expected.argv }).toEqual(expected)
   })
 })

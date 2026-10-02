@@ -79,8 +79,10 @@ export type {
 } from './roots.ts'
 export { COMMAND_NAME, parseFoldersCommand, renderRootsReport, resolvePanelPrimaryRoot, revealArgv } from './command.ts'
 export type { FoldersCommand } from './command.ts'
-export { PANEL_CHANNEL, PANEL_ENDPOINTS, parsePanelCall, parseRevealedView, parseRootsView } from './contract.ts'
+export { PANEL_CHANNEL, PANEL_ENDPOINTS, parsePanelCall, parseRevealedView, parseRootsView, parseFilesView, parseFilePreview } from './contract.ts'
 export type {
+  FilesView,
+  FilePreview,
   PanelCall,
   PanelEndpoint,
   PanelFailure,
