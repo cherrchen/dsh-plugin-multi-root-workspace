@@ -90,9 +90,9 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 
 | 优先级 | 项 | 来源 / 说明 |
 |---|---|---|
-| P1 | Additional Root LSP workspace routing | 后续评审补充；LSP 仍固定使用 `session.header.cwd`，从属 repo 的 `tsconfig` / `pyproject` / rust workspace 无法成为真正的 LSP root |
-| P1 | Windows 内核级多根（pwsh 方言 / ACL） | 第一期就已登记；当前 Windows 上 `ctx.fs` 可写附加根，但受限 PowerShell/PTY 不可写 |
-| P1 | `workspace-files`（Client 文件树）多根 confine | 第一期就已登记；Client 文件浏览仍只展示主根，属已知限制 |
+| P1 | Additional Root LSP workspace routing | 后续评审补充；B1 将附加根内文件路由至该仓库 workspaceRoot，保留相对路径的主根 cwd 语义；实现与验证状态见路线账本 |
+| P1 | Windows 内核级多根（pwsh 方言 / ACL） | 第一期就已登记；B2 的受限 PowerShell/PTY 使用 root-set SID 授权；实现与平台验证状态见路线账本 |
+| P1 | `workspace-files`（Client 文件树）多根 confine | 第一期就已登记；B3 按当前会话 scope 浏览附加根，通过现有目录面板提供 lazy tree 与文本 preview；实现与验证状态见路线账本 |
 | P2 | Read-only root / per-root / per-tool 权限 | 第一期就已登记；初版附加根与主根同权（§16） |
 | P2 | Mutation 前强制 reclassify | 后续评审补充；避免缓存的 `missing` / `redirected` 状态让 `add` 后立刻 invalid |
 | P2 | Additional Root 数量上限 | 后续评审补充；防止 realpath/stat、sandbox argv 与 prompt 预算随根数量无界增长 |
@@ -174,5 +174,5 @@ v0.1.1 关闭：
 仍然开放：
 
 - 命令输出文案的 host 侧本地化（需要 host 侧的语言来源）。
-- 第二期的全部范围（LSP 路由、Windows 内核级多根、`workspace-files` 多根等）见 §4 的优先级表与[路线图 §风险](../plans/active/2026-09-12-multi-root-workspace.md#风险与开放问题)。
+- 第二期 P1 的设计与边界见 [ADR-0011](../decisions/ADR-0011-multi-root-workspace-consumers.md)；剩余范围见 §4 的优先级表与[路线图 §风险](../plans/active/2026-09-12-multi-root-workspace.md#风险与开放问题)。
 

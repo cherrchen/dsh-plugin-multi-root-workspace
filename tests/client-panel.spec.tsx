@@ -91,7 +91,7 @@ function catalogSnapshot(rows: readonly { id: string; mainView?: number }[]): {
 }
 
 /** Apply the real client entry to a recording stub context. */
-function mount(): Harness {
+function mount(withFilesActions = false): Harness {
   const calls: Call[] = []
   const registrations: Registration[] = []
   const dictionaries: { ns: string; dicts: Record<string, unknown> }[] = []
@@ -150,7 +150,8 @@ function mount(): Harness {
     },
     slots: {
       inject: (name: string, callback: () => unknown) => {
-        expect(name).toBe('sidebar.footer.action')
+        if (name === 'sidebar.right.tab.files.actions' && !withFilesActions) return () => {}
+        expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions']).toContain(name)
         callback()
         return () => {}
       },
@@ -214,6 +215,16 @@ afterEach(() => {
 })
 
 describe('the client entry', () => {
+  it('opens the same session-derived panel from the optional Files actions slot', async () => {
+    const harness = mount(true)
+    const registration = harness.registrations.find(item => item.options.name === 'sidebar.right.tab.files.actions')!
+    expect(registration).toBeDefined()
+    render(createElement(registration.component as never))
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+    expect(harness.calls[0]).toEqual({ channel: PANEL_CHANNEL, endpoint: 'list', payload: { sessionId: 'session-1' } })
+  })
+
   it('declares the services it needs', () => {
     expect(client.inject).toEqual(['slots', 'locale', 'connection'])
   })

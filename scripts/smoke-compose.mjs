@@ -37,6 +37,8 @@ const INSERTED = [
   'multi-root-scope',
   'multi-root-registry',
   'multi-root-instructions',
+  'multi-root-lsp',
+  'multi-root-workspace-files',
   'multi-root-command',
   // The client-graph anchor: mounted at the bare package name so the web
   // client-module scan reads this package's `dsh.client` declaration.

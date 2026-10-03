@@ -50,6 +50,7 @@ import {
   type RootsView,
 } from './contract.ts'
 import type { MultiRootRegistry } from './registry.ts'
+import { browseRoot } from './panel-files.ts'
 import {
   availableRoots,
   canonicalRoot,
@@ -420,7 +421,7 @@ async function dispatchPanelRequest(
   ctx: Context,
   endpoint: string,
   payload: unknown,
-  _signal: AbortSignal,
+  signal: AbortSignal,
 ): Promise<ConnectionRpcResult<unknown>> {
   try {
     const parsed = parsePanelCall(endpoint, payload)
@@ -431,6 +432,9 @@ async function dispatchPanelRequest(
     const registry = ctx.multiRootRegistry
     const primaryRoot = resolvePanelPrimaryRoot(ctx, request.sessionId)
     switch (request.endpoint) {
+      case 'files':
+      case 'readFile':
+        return { ok: true, value: await browseRoot(ctx, primaryRoot, request, signal) }
       case 'list':
         return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       case 'add': {

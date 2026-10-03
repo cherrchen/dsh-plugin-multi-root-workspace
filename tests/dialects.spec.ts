@@ -147,8 +147,8 @@ describe('landlock widening (POSIX argv)', () => {
 })
 
 describe('the windows-acl rung and mode gating', () => {
-  it('leaves the Windows ACL argv untouched (the provider warns once instead)', () => {
-    expect(widenProfileArgs('windows-acl', WINDOWS_ACL, policy(), [EXTRA])).toEqual(WINDOWS_ACL)
+  it('requires the dedicated Windows capability runner', () => {
+    expect(() => widenProfileArgs('windows-acl', WINDOWS_ACL, policy(), [EXTRA])).toThrow(/requires widenWindowsProfile/)
   })
 
   it('refuses to widen outside workspace-write', () => {

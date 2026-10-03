@@ -12,8 +12,9 @@
  * - **One shape per endpoint.** {@link PanelResponseMap} is the single mapping
  *   from endpoint to response type, so the panel cannot silently decode one
  *   endpoint's answer as another's. `reveal` answers with
- *   {@link RevealedView}; every other endpoint answers with a whole
- *   {@link RootsView}. The host builds those answers in `command.ts` and the
+ *   {@link RevealedView}; root-management endpoints answer with
+ *   {@link RootsView}, and browsing returns {@link FilesView} or {@link FilePreview}.
+ *   The host builds those answers in `command.ts` and the
  *   panel parses them here — one definition, two consumers.
  * - **Runtime validation at the boundary.** The payload arrives from a browser
  *   and the answer arrives from the host; neither is trusted to match the
@@ -34,10 +35,21 @@ import { z } from 'zod'
 export const PANEL_CHANNEL = '/multi-root-workspace'
 
 /** Endpoint names, relative to {@link PANEL_CHANNEL}. */
-export type PanelEndpoint = 'list' | 'add' | 'remove' | 'alias' | 'move' | 'reveal'
+export type PanelEndpoint = 'list' | 'add' | 'remove' | 'alias' | 'move' | 'reveal' | 'files' | 'readFile'
 
 /** Every endpoint name, for exhaustive iteration in tests and callers. */
-export const PANEL_ENDPOINTS: readonly PanelEndpoint[] = ['list', 'add', 'remove', 'alias', 'move', 'reveal']
+export const PANEL_ENDPOINTS: readonly PanelEndpoint[] = ['list', 'add', 'remove', 'alias', 'move', 'reveal', 'files', 'readFile']
+
+export interface FilesView {
+  readonly path: string
+  readonly entries: readonly { readonly name: string; readonly type: 'file' | 'directory' | 'other' }[]
+  readonly truncated: boolean
+}
+
+export interface FilePreview {
+  readonly text: string
+  readonly eof: boolean
+}
 
 /**
  * How one registered root currently stands, as the panel renders it. Kept in
@@ -73,7 +85,7 @@ export interface RootEntryView {
   readonly addedAt: string
 }
 
-/** The panel's whole view of one workspace root; every endpoint but `reveal` answers with this. */
+/** The panel's whole view, returned by root-management endpoints. */
 export interface RootsView {
   /** The canonical workspace root these registrations belong to. */
   readonly primaryRoot: string
@@ -103,6 +115,8 @@ export interface PanelResponseMap {
   readonly alias: RootsView
   readonly move: RootsView
   readonly reveal: RevealedView
+  readonly files: FilesView
+  readonly readFile: FilePreview
 }
 
 /**
@@ -118,7 +132,7 @@ export interface PanelRequest {
   readonly entry?: RootEntryView
   /** Compatibility reference; accepted only when the id is unique. */
   readonly id?: string
-  /** Candidate directory (add). */
+  /** Candidate directory (add), or root-relative browsing path (files/readFile). */
   readonly path?: string
   /** Display alias (add/alias); empty clears it. */
   readonly alias?: string
@@ -196,6 +210,22 @@ const rootsViewSchema = z.object({
 })
 
 const revealedViewSchema = z.object({ revealed: z.string() })
+const filesViewSchema = z.object({
+  path: z.string(),
+  entries: z.array(z.object({ name: z.string().min(1).refine(name => name !== '.' && name !== '..' && !/[\\/]/.test(name) && !name.includes(String.fromCharCode(0))), type: z.enum(['file', 'directory', 'other']) })),
+  truncated: z.boolean(),
+})
+const filePreviewSchema = z.object({ text: z.string(), eof: z.boolean() })
+
+export function parseFilesView(value: unknown): Parsed<FilesView> {
+  const parsed = filesViewSchema.safeParse(value)
+  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, message: firstIssue(parsed.error) }
+}
+
+export function parseFilePreview(value: unknown): Parsed<FilePreview> {
+  const parsed = filePreviewSchema.safeParse(value)
+  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, message: firstIssue(parsed.error) }
+}
 
 const errorViewSchema = z.object({
   code: z.string(),

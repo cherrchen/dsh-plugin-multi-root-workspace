@@ -82,7 +82,7 @@ dsh-plugin-multi-root-workspace/
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
 ```
 
-`multi-root-compat` 是第一行，而且是**启动门禁而不只是诊断服务**：四个安全相关的行（`multi-root-fs`、`multi-root-sandbox`、`multi-root-registry`、`multi-root-instructions`）都 inject `multiRootCompat`，而 cordis 不会启动 injected service 缺失的行。所以当宿主的 DSH 版本不在精确 allowlist 上（或多个 `@deepseek-ai/dsh-*` 混装）时，这四行**根本不启动**，组合退化成"未安装本插件"，而不是"围栏可疑"。理由与判定顺序见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)。
+`multi-root-compat` 是第一行，而且是**启动门禁而不只是诊断服务**：安全相关的行（`multi-root-fs`、`multi-root-sandbox`、`multi-root-registry`、`multi-root-instructions`，以及 B1–B3 的 `multi-root-lsp` / `multi-root-workspace-files`）都 inject `multiRootCompat`，而 cordis 不会启动 injected service 缺失的行。所以当宿主的 DSH 版本不在精确 allowlist 上（或多个 `@deepseek-ai/dsh-*` 混装）时，这些行**根本不启动**，组合退化成"未安装本插件"，而不是"围栏可疑"。理由与判定顺序见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)。
 
 要点：上游 `sandbox-policy`、`bash-sandbox`、`tool-fs`、`tool-bash`、`terminal-bash` 行**全部不动**——它们继续向 `ctx.fs`/`ctx.shell`/`ctx.sandbox` 要能力。同 key 重复 provide 会抛错（调研 §8.2），所以 disable 必须先于 insert 生效（同一 patch 文档内顺序保证；并在插件 apply 期断言 `ctx.fs`/`ctx.sandbox` 是自己的实例，否则 fail loud）。`inject` 既可写在 patch 行上（patch 的任意键都会覆盖目标行），也可由子类的 `static inject` 提供——实现期二选一，不重复声明。
 
@@ -147,7 +147,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
      - **bwrap (linux，含 `runnerCommand` 配置情形)**：从 `<workspaceRoot>` 的 bind 三元组克隆 flag，在分隔符前追加 `[flag, root, root]`。
      - **Landlock (linux)**：取 `<workspaceRoot>` 前一位的 rw flag，追加 `[flag, root]`。
      - **已授予即跳过**：语言方已授予同一路径时不再重复授予（与 fs fence 的去重一致，并避免 bwrap 上真实 `/tmp` 覆盖 `--tmpfs /tmp`）。
-     - **Windows ACL**：第一期不扩展（argv 里没有可追加的路径，授权按 workspace SID 进行），保持上游 wrap 并输出**一次**显式告警；fs fence 仍覆盖 Windows 写路径。
+     - **Windows ACL**：MVP 曾保持上游 wrap 并告警；B2 改用 root-set SID runner，授权集合、撤销语义与验证边界见 [ADR-0011](../decisions/ADR-0011-multi-root-workspace-consumers.md)。
   5. 识别或克隆失败 ⇒ 抛 `SandboxUnavailableError`（fail closed），绝不退化为"只授予主根"的静默执行。
 - 三条不变量：空附加根或非 `workspace-write` 时**逐元素**返回 super 的结果；`enforcement` / `denialSignatures` / `runnerFailureRules` 原样透传（否则 bash 的 denial / enforcement 上报会失真）；只有 `argv` 可以变化。
 - **调用形状跨版本保形**：上游 `confine` 在不同受支持版本上分别是同步与异步的，因此整个覆盖走 `src/compat/sandbox-confine.ts` 的 `widenConfined()`：上游同步就同步返回，上游返回 promise 就返回 promise。绝不统一包成 promise——那会把 `ctx.sandbox.confine()` 对组合里每一个既有调用方（bash executor、PTY backend）变成 thenable，等于插件自己引入一次破坏性变更。见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md) 第 4 条。
@@ -160,7 +160,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 
 - **拓扑注入（已实现）**：`MultiRootScopeService` 注册 `ctx.systemPrompt.context({ name: 'multi-root:scope', order: getContextOrder('SANDBOX_POLICY') + 1, … })`：workspace-write 且有附加根时输出一段稳定拓扑（只列根，不列文件，满足需求 §8），其中声明附加根属于同一 workspace 且 session cwd 不变；空根、`read-only`、以及没有 agent 的诊断装配下都不输出任何内容（空段被 `renderContextSections` 过滤，快照与未装插件逐字节相同）。注册是软依赖：宿主没有 `systemPrompt` seam 时不贡献拓扑也不报错。快照随请求落 model history（上游 `sandbox:policy` 同机制），满足 model-visible ⟺ logged。
 - **单一权限世界（已实现）**：fs fence 与内核方言（sandbox provider）消费 §4 的同一份 `FilesystemScope`；bash 与 terminal/PTY 通过 `ctx.sandbox` 间接消费同一份，因此它们的根集合与 fs fence **由构造相同**。插件自带 **parity 矩阵测试**（接替上游 `writableRoots()` 测试的角色）：同一 scope 下，对「主根内 / 主根嵌套 / 附加根内 / 附加根嵌套 / 根外 / 共享词法前缀的兄弟目录 / 经附加根内符号链接逃逸 / 平台临时区」逐类比较 fs fence 的真实写判定与各方言 argv 的授予集合，并在两端模式（workspace-write / read-only）各跑一轮；解析 argv 的代码由测试侧独立实现。宿主能真正执行 runner 时（Linux CI 的 bwrap/Landlock、macOS 的 Seatbelt）另加真实受限执行用例，不能执行时显式 skip 并说明原因。
-- 已知不对称（上游既有，非插件引入）：bwrap 与 Landlock 只授予字面 `/tmp`，不授予 `tmpdir()`（调研 §10.3），因此 parity 断言的语义限定为「附加根集合与模式」；Windows 上内核级多根缺失，fs 可写而 bash 不可写（第一期已知限制）。
+- 已知不对称（上游既有，非插件引入）：bwrap 与 Landlock 只授予字面 `/tmp`，不授予 `tmpdir()`（调研 §10.3），因此 parity 断言的语义限定为「附加根集合与模式」。Windows B2 的当前机制见 [ADR-0011](../decisions/ADR-0011-multi-root-workspace-consumers.md)。
 
 ### 6.1 附加根自己的指令文件（`multi-root-instructions`，已实现）
 
@@ -216,3 +216,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 | 深导入上游 `pkg/src/*` 复用 `isPathUnder` 与方言 builder | 发布 tarball 不含 `src/`（调研 §9），安装形态下必然失败；本机可解析只是符号链接造成的假象 |
 | 自带完整 fs/bash provider（路径 D） | 当前成本最高（重做 IO 临界区），保留为升级韧性耗尽后的长期形态 |
 | 自有 session 事件承载 scope | 未装插件的 dsh 会拒绝打开含未知事件类型的日志（required-on-read）；第一期用插件存储 + canonical cwd 索引替代 |
+
+## 10. 多根消费方扩展（B1–B3）
+
+LSP、Windows ACL 与 workspace-files 的当前接缝、客户端树、scope 变更与兼容边界见 [ADR-0011](../decisions/ADR-0011-multi-root-workspace-consumers.md)。`multi-root-lsp` / `multi-root-workspace-files` 是 additive、compat-gated 行，不禁用其他 provider。Windows 非空 scope 使用插件 runner；POSIX 方言仍按 §5 扩展上游 profile。进度与各平台的验证证据只登记在[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。

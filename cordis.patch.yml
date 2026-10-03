@@ -59,6 +59,10 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/instructions'
       config:
         maxBytes: 65536
+    - id: multi-root-lsp
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/lsp'
+    - id: multi-root-workspace-files
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/workspace-files'
     - id: multi-root-command
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
     - id: multi-root-client

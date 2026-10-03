@@ -8,7 +8,8 @@
  * and the fs fence one and the same root set (requirement §13). The bash
  * executor itself is therefore left upstream: it never computes roots.
  *
- * The widening itself lives in `./dialects.ts`: the upstream profile builders
+ * POSIX widening lives in `./dialects.ts`, Windows capabilities in
+ * `./windows-profile.ts` and `./windows-runner.ts`: the upstream profile builders
  * are unreachable in the published package, so the additional roots are grafted
  * onto the profile `super.confine` actually produced (recognize the dialect
  * structurally, clone its grant spelling, fail loudly when the shape is not
@@ -37,6 +38,7 @@ import { widenConfined } from './compat/sandbox-confine.ts'
 import type { ConfineCall, UpstreamConfined } from './compat/sandbox-confine.ts'
 import { DialectUnrecognizedError, splitConfined, widenProfileArgs } from './dialects.ts'
 import type {} from './scope.ts'
+import { widenWindowsProfile } from './windows-profile.ts'
 
 export type { Config }
 
@@ -50,9 +52,6 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
   // widening below recognizes an upstream argv shape, so it must not run on a
   // release the contract has not verified (see src/compat.ts).
   static inject = ['multiRootCompat', 'sandboxPolicy', 'multiRootScope']
-
-  /** Whether the Windows ACL limitation has already been reported (once per provider). */
-  private warnedAboutWindowsAcl = false
 
   /**
    * Wrap `argv` so it executes confined under `policy` on this host, granting
@@ -102,8 +101,7 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     try {
       const shape = splitConfined(confined.argv, argv)
       if (shape.dialect === 'windows-acl') {
-        this.warnAboutWindowsAcl(scope.additionalRoots.length)
-        return confined
+        return { ...confined, argv: [...widenWindowsProfile(shape.profileArgs, scope.additionalRoots, scope.primaryRoot), '--', ...argv] }
       }
       const profileArgs = widenProfileArgs(shape.dialect, shape.profileArgs, policy, scope.additionalRoots)
       return { ...confined, argv: [...profileArgs, '--', ...argv] }
@@ -117,22 +115,6 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     }
   }
 
-  /**
-   * Report the documented first-release limitation exactly once: the Windows ACL
-   * rung grants through per-workspace write SIDs rather than argv paths, so
-   * additional roots stay unenforced for confined commands there while the
-   * in-process filesystem fence still allows them.
-   * @param rootCount - how many additional roots the scope carries.
-   */
-  private warnAboutWindowsAcl(rootCount: number): void {
-    if (this.warnedAboutWindowsAcl) return
-    this.warnedAboutWindowsAcl = true
-    this.ctx.logger.warn(
-      `multi-root workspace: this scope carries ${rootCount} additional workspace root(s), but the Windows ACL runner `
-      + 'grants write access per workspace SID and cannot express them; confined bash/PTY runs will not be able to write '
-      + 'them, while ctx.fs still can. Kernel-level multi-root on Windows is out of scope for the first release.',
-    )
-  }
 }
 
 export default MultiRootSandboxProvider

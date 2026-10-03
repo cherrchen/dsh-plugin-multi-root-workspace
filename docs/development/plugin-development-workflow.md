@@ -49,7 +49,7 @@ pnpm docs:check         # 文档结构检查
 
 `pnpm verify:all` **故意不含** `compat:check`：升级车道需要在一个还不在 allowlist 上的候选版本上跑完整矩阵，而静态门禁按设计会拒绝那棵树。CI 主车道单独跑 `compat:check`，位置在 lint 之前（见 §9）。
 
-**`pnpm test` 必须在 `pnpm build` 之后**：`tests/client-bundle.spec.ts` 断言的是**构建产物** `lib/client.js`（浏览器闭包工厂形态、模块表依赖清单），而 `/lib/` 被 gitignore、也没有安装时构建钩子。干净 checkout 上先跑测试会得到 `ENOENT` 失败——CI 与升级工作流都按 `lint → typecheck → build → test` 排序。
+**`pnpm test` 必须在 `pnpm build` 之后**：`tests/client-bundle.spec.ts` 断言的是**构建产物** `lib/client.js`（浏览器闭包工厂形态、模块表依赖清单）；`tests/windows-multi-root.spec.ts` 的原生执行用例加载 `lib/sandbox.js`，以便 provider 的 `import.meta.url` 定位同目录的 `lib/windows-runner.js`。从源码加载 provider 会指向不存在的 `src/windows-runner.js`，不能作为发布制品的执行验证。`/lib/` 被 gitignore，`prepare` 只预构建 JS，完整类型产物仍需 `pnpm build`；CI 与升级工作流都按 `lint → typecheck → build → test` 排序。
 
 ## 4. 冒烟机制
 
@@ -60,7 +60,7 @@ pnpm docs:check         # 文档结构检查
 1. 在临时 `$DSH_HOME` 下初始化一个**不含插件**的 profile（`dsh plugin --profile <name> install`）。
 2. 用 `dsh plugin --profile <name> add <本仓库>` 把插件真正装进另一个 profile（这一步包含 pnpm 安装与 `dsh.profile.bundles` 回填）。
 3. 对两个 profile 各跑一次 `dsh --profile <name> --dump-config`，解析成行集合后逐行比对。
-4. 断言：只有 `fs-sandbox` 与 `sandbox` 两行变成 `disabled: true`，只新增插件的 8 行（`multi-root-compat` / `fs` / `sandbox` / `scope` / `registry` / `instructions` / `command` / client 载体 `multi-root-client`），其余行逐字段相同、顺序不变；`dsh` stderr 中不出现 patch 未匹配的告警。
+4. 断言：只有 `fs-sandbox` 与 `sandbox` 两行变成 `disabled: true`，只新增插件的 10 行（`multi-root-compat` / `fs` / `sandbox` / `scope` / `registry` / `instructions` / `lsp` / `workspace-files` / `command` / client 载体 `multi-root-client`），其余行逐字段相同、顺序不变；`dsh` stderr 中不出现 patch 未匹配的告警。
 
 这一层专门捕捉"disable 静默失效"：上游 patch 语义在 id 匹配不到时只 warn + skip，只有与基线 dump 对照才能把它变成硬失败。
 
@@ -127,7 +127,7 @@ client 测试分两层：`tests/client-bundle.spec.ts` 断言**制品字节**（
 
 ```sh
 dsh plugin --profile web add <本仓库路径>
-dsh --profile web --dump-config     # 应看到两行 disabled + 八行 insert
+dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 ```
 
 `link:` 来源用的是本仓库已装好的依赖，因此不需要 `allowBuilds` 表态；npm / tarball / git 来源都需要，原因与处置见 [README §安装](../../README.md) 与[故障排查：安装停在构建授权](../troubleshooting/install-stops-at-build-approval.md)。
@@ -188,11 +188,13 @@ Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seat
 
 ### Windows 验证腿
 
-`ci.yml` 在仓库变量 `DSH_WINDOWS_CI=1` 时才把 `windows-latest` 加入动态矩阵，用于验证"fs fence 覆盖 Windows 写路径"这一承诺所依赖的**平台无关代码**：校验规则、注册表、命令与 RPC 通道、面板、client 制品。它在 Windows 上**不跑**需要 POSIX shell 的冒烟（`smoke:compose/behavior/journey`）与 `kernel:probe`（Windows 没有内核多根档位，第一期范围，见需求文档）；驱动 POSIX runner argv 的套件（`parity-matrix`、`fs-parity`、`sandbox-multi-root` 的方言部分）在该平台**显式 skip 并打印原因**，而不是把"平台没有这个能力"记成失败。
+`ci.yml` 在仓库变量 `DSH_WINDOWS_CI=1` 时才把 `windows-latest` 加入动态矩阵，验证校验规则、注册表、命令与 RPC 通道、面板、client 制品，以及 B1 的真实 LSP stdio 和 B2 的原生 ACL 执行。`tests/windows-multi-root.spec.ts` 必须真实启动 restricted-token Node、PowerShell 与 ConPTY，覆盖两根可写、第三目录拒绝、read-only 拒绝、移除根后拒绝和 PTY 退出码保留；Windows 不按能力探针跳过该用例。它在 Windows 上**不跑**需要 POSIX shell 的冒烟（`smoke:compose/behavior/journey`）与只探测 POSIX 方言的 `kernel:probe`；POSIX 方言的真实执行断言在该平台显式 skip。目录 symlink 无权限时，仅省略矩阵中依赖该链接的行，workspace-write 与 read-only 使用同一条件，其余行继续验证。
 
 该变量**当前已置 1**：本仓库是公开仓库，标准 runner 在公开仓库上不计费（计费的 2× 倍率只作用于私有仓库），因此这条腿没有理由停着。清掉变量即回到两 OS 矩阵。
 
 它抓的是"只在某个平台成立"的假设——最典型的一类是**期望值里的路径分隔符**：产品侧一律交回 `canonicalPath()` 的结果（Windows 是 `\`），而测试里用 `` `${base}/third` `` 拼出来的期望只在 POSIX 上等于它。写这类断言时用 `canonicalPath(...)` 或 `join(...)`，不要用字符串拼接。
+
+LSP 源码回传断言应比较读盘得到的完整源码。夹具里的路径经 `JSON.stringify()` 写入源码时，Windows 的反斜杠已转义，不能再用未转义的原始路径作子串断言。B1–B3 各版本和平台的验收证据只记在[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
 
 失败可诊断：`test` 与 `smoke:behavior` 的输出会同时写入 `vitest.log` / `smoke-behavior.log`，步骤失败时由 `actions/upload-artifact@v4` 上传，公共仓库无需管理员权限即可下载——"红但看不到日志"的运行等于没人能修。
 

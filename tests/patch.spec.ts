@@ -122,6 +122,8 @@ describe('inserted rows', () => {
       'multi-root-scope',
       'multi-root-registry',
       'multi-root-instructions',
+      'multi-root-lsp',
+      'multi-root-workspace-files',
       'multi-root-command',
       'multi-root-client',
     ])
@@ -131,7 +133,7 @@ describe('inserted rows', () => {
     const ids = inserted.map(row => row.id)
     const gate = ids.indexOf('multi-root-compat')
     expect(gate).toBe(0)
-    for (const gated of ['multi-root-fs', 'multi-root-sandbox', 'multi-root-registry', 'multi-root-instructions']) {
+    for (const gated of ['multi-root-fs', 'multi-root-sandbox', 'multi-root-registry', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files']) {
       expect(ids.indexOf(gated), `${gated} must come after the gate`).toBeGreaterThan(gate)
     }
   })
