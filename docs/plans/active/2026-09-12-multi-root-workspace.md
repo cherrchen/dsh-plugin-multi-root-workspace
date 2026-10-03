@@ -308,7 +308,7 @@ CI 主车道从 `SUPPORTED_DSH_RELEASES` 派生版本轴，与 Linux / macOS / �
 | 项 | 实现 | 验证状态 |
 |---|---|---|
 | B1 Additional Root LSP routing | additive 公共 query 包装，按 canonical file target 选择根，上游 stdio provider 负责独立初始化与池化 | 真实协议服务器 e2e、路由与撤销、取消、卸载恢复通过；九个支持版本的构建、类型与全量测试通过 |
-| B2 Windows kernel multi-root | 插件 runner 调用公开 AclSandbox，root-set capability SID、自有 private temp、保留失败签名与 payload | SID / argv / fail-closed 结构回归通过；macOS 上 Windows 内核测试明确 skip，等待 Windows CI 实跑 |
+| B2 Windows kernel multi-root | 插件 runner 调用公开 AclSandbox，root-set capability SID、自有 private temp、保留失败签名与 payload | SID / argv / fail-closed 结构回归通过；2026-10-03 Windows 本机原生执行通过，远端矩阵状态见下方复验记录 |
 | B3 workspace-files / client tree | 公共 list 和新版 path-watch 按根隔离；Connection 新增 files/readFile；对话框 lazy tree + preview，原生 Files actions slot 提供入口 | 真实 registry/fs 的包含性、跨主根、symlink/redirect、I/O 中撤销与 caps 回归通过；客户端 lazy tree、响应校验与可选 Files 入口通过；全量本地 gate 通过 |
 
 新增可选 peer 纳入原精确版本合同，allowlist 无变化。旧版会话级 watch 原样保留；附加根树手动刷新。已启动的 Windows/其他内核子进程使用启动时 scope，根集合变更限制后续进程。Windows 的 partial enforcement 与 caller-owned 目录条件继承上游。
@@ -328,3 +328,17 @@ CI 主车道从 `SUPPORTED_DSH_RELEASES` 派生版本轴，与 Linux / macOS / �
 | `pnpm docs:check` / `git diff --check` | 通过，文档 0 errors / 0 warnings |
 
 矩阵发现的差异均已回归：早期 `changes(scope, signal)` 必须按实际 arity 透传；旧版目录列表会先把 symlink 报为 `not-directory`，测试保留该上游错误顺序，不要求新版的 `outside-workspace` 先出现。上述跳过项不能算作本机内核执行证据，也不代表 Windows 平台验收完成。
+
+### Windows 修复与复验（2026-10-03）
+
+PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/36987457760) 中，九个 Windows job 均在测试阶段失败，18 个 Linux/macOS job 通过。开发基线和最早支持版的日志均显示 LSP 源码断言错误，以及原生用例启动不存在的 `src/windows-runner.js`；前者把 JSON 转义后的源码与原始 Windows 路径比较，后者从源码加载 provider，令 `import.meta.url` 落在 `src/`。
+
+修复将 LSP 两个根的回传文本与完整磁盘源码比对，并让 Windows 原生用例加载发布产物 `lib/sandbox.js`、断言其实际启动 `lib/windows-runner.js`。本机全量复验还发现目录 symlink 无权限时，read-only 矩阵没有沿用 workspace-write 的条件，错误地访问未创建的链接；两种模式现使用同一夹具条件。未修改生产权限模型、兼容 allowlist 或 CI 的 Windows 必跑规则。
+
+| 验证范围 | 结果 |
+|---|---|
+| 本机环境 | Windows 11 x64（`10.0.26200`），Node `24.14.0`，pnpm `11.25.0`，DSH `0.2.0-rc.2`，frozen lockfile 安装 |
+| Windows 全量门禁 | `compat:check`、lint、双端 typecheck、build、`pnpm test`、`docs:check` 通过；29 文件，354 passed / 22 skipped；文档 0 errors / 0 warnings |
+| 原生执行与 LSP 定向复验 | 两文件 6/6 通过；真实 restricted-token Node 和 PowerShell 可写两根、第三目录拒绝，ConPTY 两根写入及第三目录拒绝、退出码 `23` 保留，read-only 与移除根后拒绝；真实 LSP stdio 初始化和池化隔离通过 |
+| 跳过范围 | 本机无目录 symlink 权限，以及不适用于 Windows 的 POSIX 内核执行和条件用例；Windows 原生 ACL 用例没有 skip。Windows 不运行 POSIX 冒烟和 `kernel:probe` |
+| 修复后远端矩阵 | 推送后待验；不能把原 HEAD 的 Linux/macOS 结果计作修复后证据 |

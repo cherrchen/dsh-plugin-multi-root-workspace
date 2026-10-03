@@ -197,6 +197,7 @@ describe('the fs fence and every kernel dialect agree on one scope', () => {
       const world = await mountWorld(dialect)
       const policy: SandboxPolicy = { mode: 'read-only', workspaceRoot: fixture.workspace }
       for (const entry of matrix()) {
+        if (entry.needsSymlink === true && symlinkReason !== undefined) continue
         const target = await world.ctx.fs.resolve(entry.path)
         // A file must already exist for `resolve` to have a leaf, but read-only
         // must deny the mutation regardless.

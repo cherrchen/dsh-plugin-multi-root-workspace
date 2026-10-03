@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { Context } from '@deepseek-ai/cordis'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { Lsp } from '@deepseek-ai/dsh-lsp'
@@ -35,7 +35,8 @@ it('initializes and pools real stdio servers independently for the primary and a
     expect(first.cwd).toBe(canonicalPath(fixture.workspace)); expect(second.cwd).toBe(canonicalPath(fixture.outside))
     expect(second.rootUri).toBe(pathToFileURL(canonicalPath(fixture.outside)).href)
     expect(second.workspaceFolders[0].uri).toBe(second.rootUri)
-    expect(second.document.text).toContain(fixture.outside)
+    expect(first.document.text).toBe(readFileSync(join(fixture.workspace, 'same.ts'), 'utf8'))
+    expect(second.document.text).toBe(readFileSync(join(fixture.outside, 'same.ts'), 'utf8'))
     expect(first.pid).not.toBe(second.pid)
     const repeat = await query(join(fixture.outside, 'same.ts'))
     if (repeat.kind !== 'hover') throw new Error('expected hover')

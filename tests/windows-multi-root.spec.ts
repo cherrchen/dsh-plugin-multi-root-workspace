@@ -1,13 +1,13 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
 import { describe, expect, it } from 'vitest'
-import { MultiRootSandboxProvider } from '../src/sandbox.ts'
+import type { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { parseWindowsProfile, workspaceScopeSid, widenWindowsProfile } from '../src/windows-profile.ts'
 import { mountCompat } from './support/compat.ts'
@@ -49,6 +49,9 @@ it.runIf(process.platform === 'win32')('enforces real Windows writes in both roo
   const third = join(fixture.base, 'third'); mkdirSync(third)
   const ctx = new Context()
   try {
+    // Execute the shipped provider: its import.meta.url must locate the built
+    // standalone runner, not a nonexistent src/windows-runner.js under Vitest.
+    const { MultiRootSandboxProvider } = await import(pathToFileURL(join(REPO_ROOT, 'lib/sandbox.js')).href) as typeof import('../src/sandbox.ts')
     // Select the real public Windows ACL runner; no permissive runner fallback.
     ctx.provide('sandboxPolicy', {} as never)
     await ctx.plugin(MultiRootScopeService)
@@ -61,6 +64,9 @@ it.runIf(process.platform === 'win32')('enforces real Windows writes in both roo
     const execute = async (provider: LocalSandboxProvider, roots: string[]) => {
       const payload = `const fs=require('fs'); const roots=${JSON.stringify(roots)}; for(const root of roots){try {fs.writeFileSync(root+'/probe.txt','ok');console.log('allowed')}catch(e){console.log('denied:'+e.code)}}`
       const confined = await provider.confine([process.execPath, '-e', payload], policy)
+      if (ctx.multiRootScope.scopeOf(fixture.workspace).length > 0) {
+        expect(confined.argv[1]).toBe(join(REPO_ROOT, 'lib/windows-runner.js'))
+      }
       return spawnSync(confined.argv[0]!, confined.argv.slice(1), { encoding: 'utf8', timeout: 60000 })
     }
     const result = await execute(ctx.sandbox as MultiRootSandboxProvider, [fixture.workspace, fixture.outside, third])
