@@ -341,4 +341,4 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 | Windows 全量门禁 | `compat:check`、lint、双端 typecheck、build、`pnpm test`、`docs:check` 通过；29 文件，354 passed / 22 skipped；文档 0 errors / 0 warnings |
 | 原生执行与 LSP 定向复验 | 两文件 6/6 通过；真实 restricted-token Node 和 PowerShell 可写两根、第三目录拒绝，ConPTY 两根写入及第三目录拒绝、退出码 `23` 保留，read-only 与移除根后拒绝；真实 LSP stdio 初始化和池化隔离通过 |
 | 跳过范围 | 本机无目录 symlink 权限，以及不适用于 Windows 的 POSIX 内核执行和条件用例；Windows 原生 ACL 用例没有 skip。Windows 不运行 POSIX 冒烟和 `kernel:probe` |
-| 修复后远端矩阵 | 推送后待验；不能把原 HEAD 的 Linux/macOS 结果计作修复后证据 |
+| 修复后远端矩阵 | 修复提交 `41e4d1a` 的 [CI run 37118946523](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/37118946523) 全部 success：releases job 及九个支持版本 × Linux/macOS/Windows 的 27 个 verify job；九个 Windows job 均执行原生 ACL 用例，Linux/macOS 完成各自内核探针、测试及完整冒烟 |
