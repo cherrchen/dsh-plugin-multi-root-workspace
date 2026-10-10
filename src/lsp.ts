@@ -2,6 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { LspService } from '@deepseek-ai/dsh-lsp'
 import type { Session } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { aroundTool } from './compat/tool-context.ts'
 import type {} from './compat.ts'
@@ -20,7 +21,9 @@ export function apply(ctx: Context): void {
     const service = scope.get('lsp') as LspService
     scope.effect(() => wrapMethod(service, 'query', original => async function(this: LspService, request, signal) {
         const session = callers.getStore()
-        const primary = session?.header.cwd ?? request.workspaceRoot
+        const primary = session === undefined ? request.workspaceRoot
+          : session.header.cwd ?? scope.get('sandboxPolicy')?.resolve({ session }).workspaceRoot
+        if (primary === undefined) throw new Error('multi-root workspace: LSP caller has no session origin or deployment policy')
         if (scope.multiRootScope.scopeOf(primary).length === 0 && session === undefined) {
           return original.call(this, request, signal)
         }

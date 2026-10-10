@@ -145,3 +145,14 @@ it('routes concurrent effective cwd queries using each calling session origin, n
   expect(second).toMatchObject({ hover: { contents: expect.stringContaining(`"workspaceRoot":${JSON.stringify(other)}`) } })
   expect(second).toMatchObject({ hover: { contents: expect.stringContaining(`"filePath":${JSON.stringify(join(fixture.outside, 'same.ts'))}`) } })
 })
+
+it('uses the policy fallback for a session without origin metadata instead of authorizing its effective cwd', async () => {
+  const { query } = await lsp()
+  ctx.provide('sandboxPolicy', { resolve: () => ({ mode: 'workspace-write', workspaceRoot: fixture.workspace }) } as never)
+  const waterfall = ctx.waterfall.bind(ctx) as any
+  const result = await waterfall('tools/execute', { agent: { session: { header: {} } } }, async () => query('same.ts', fixture.outside))
+  expect(result).toMatchObject({ hover: { contents: expect.stringContaining(`"workspaceRoot":${JSON.stringify(canonicalPath(fixture.outside))}`) } })
+  ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+  const removed = await waterfall('tools/execute', { agent: { session: { header: {} } } }, async () => query('same.ts', fixture.outside))
+  expect(removed).toMatchObject({ hover: { contents: expect.stringContaining(`"workspaceRoot":${JSON.stringify(fixture.workspace)}`) } })
+})
