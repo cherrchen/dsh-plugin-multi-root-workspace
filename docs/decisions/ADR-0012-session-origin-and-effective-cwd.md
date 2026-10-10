@@ -27,7 +27,7 @@ DSH `0.2.1-alpha.2` 新增 `workingDirectory` 和实验性 Worktree 服务。原
 
 ### LSP
 
-新版工具以 effective cwd 作为 query 的 `workspaceRoot`，该请求没有 Session 字段。`tools/execute` 的公开 around-dispatch waterfall 在 AsyncLocalStorage 中携带调用 Session；scope 查询用 header 原始项目，相对 filePath 用传入的执行目录，canonical target 决定所属根。不能根据 cwd 搜索任意 Session 或注册表：两个会话可以共享 cwd 而拥有不同主根。
+新版工具以 effective cwd 作为 query 的 `workspaceRoot`，该请求没有 Session 字段。`tools/execute` 的公开 around-dispatch waterfall 在 AsyncLocalStorage 中携带调用 Session；scope 查询用 header 原始项目（header 缺失时使用 sandboxPolicy 的部署 fallback；两者均缺失则拒绝），相对 filePath 用传入的执行目录，canonical target 决定所属根。不能根据 cwd 搜索任意 Session 或注册表：两个会话可以共享 cwd 而拥有不同主根。
 
 同一根的查询继续交给上游 stdio provider 池化；切换 cwd 不创建另一份项目身份。未授权路径交回上游时使用原始主根与绝对目标，避免把相对路径误解成主根内同名文件。非工具直接 query 保留原公共接口语义。旧宿主没有 around-dispatch seam 时此监听不产生行为，其原生工具本来就传 header cwd。
 

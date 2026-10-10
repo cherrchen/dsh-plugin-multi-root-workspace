@@ -352,11 +352,30 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 | 候选 `0.2.1-alpha.1` | 一致精确安装树，Cordis 4.0.4；lint、双面 typecheck、build；native Seatbelt test（381 passed / 8 skipped），compose 44/44、behavior 99/99、journey 55/55；该版本没有 workingDirectory/Worktree，所以四条新服务测试明确不适用 |
 | 候选 `0.2.1-alpha.2` | 一致精确安装树，Cordis 4.0.5-alpha.1；真实 Host composition、web/headless Agent journey 和 native Seatbelt 测试通过；上游 install-time gate 拒绝候选 peers，隔离 profile 的 exact allow-version 豁免仅用于候选 lane |
 | 正式精确合同 | allowlist 和所有 DSH peers 增加两个精确版本，开发 pin 为 alpha.2；Cordis prerelease 单独精确声明；生产仍 enforce，workingDirectory 为 optional service lookup，不成为旧 runtime 的必装模块 |
-| 本地 alpha.2 enforce | compat、lint、双面 typecheck、build、test（388 passed / 4 skipped）、compose 44/44、behavior 99/99、journey 55/55，通过；无候选豁免 |
+| 本地 alpha.2 enforce | compat、lint、双面 typecheck、build、test（389 passed / 4 skipped）、compose 44/44、behavior 99/99、journey 55/55，通过；无候选豁免 |
 | Worktree / 目录 | Git 2.53 + 真实 Seatbelt 下 Primary/Additional 内的默认 pool 创建、访问、共享 gitdir、切回原项目、删除当前 checkout 后恢复、重复名称失败、取消、未授权 repository 拒绝通过；Registry 始终不由 Worktree mutation 改变 |
 | 新旧进程 / PTY | 真实 Seatbelt 下旧 process 和 PTY 保留原 cwd 与 grant snapshot，撤销后新 confine 和 fs 写拒绝；没有修改已有 shell cwd |
 | 继承的不变量 | fs / 三个 POSIX dialect 独立 grant parity、unknown dialect、mixed/incomplete gate、lease 争用/接管/拆除、symlink redirect、missing 恢复、LSP stdio、workspace-files caps/撤销、user-context 指令与 global 排除、同批 native 去重和 I/O 中撤销均由完整套件覆盖 |
-| 本地未覆盖 | Linux bwrap/Landlock、Windows ACL/ConPTY 未在 macOS 本机原生执行；相应结构测试不算 kernel 验收；远端矩阵待执行 |
+| 本地未覆盖 | Linux bwrap/Landlock、Windows ACL/ConPTY 未在 macOS 本机原生执行；远端 Landlock 与 Windows 原生验收见下方，bwrap 仍未验证 |
 | 上游限制 | Apple Git 2.39 不认识 `--no-lazy-fetch`，明确失败且不改 Registry；不删除该安全参数。native instruction baseline 的相对 project identity 可能在同构 cwd 间复用，插件不依赖它决定 authority；见接口审查。任意敌对 rename 的原子安全与即时撤销旧 kernel snapshot 不在既有机制保证内 |
 
-支持矩阵扩大前已分别把两个版本作为候选跑过。正式 allowlist 下旧版矩阵和跨平台 CI 的最终结果补记在下方；未完成状态不计为验收通过。
+支持矩阵扩大前已分别把两个版本作为候选跑过。正式 allowlist 下旧版矩阵和跨平台 CI 的最终结果见下方；任何 skip 均不计为该机制验收通过。
+
+### 最终矩阵与平台验收
+
+实现 HEAD `b32f452` 的 [CI run 38046100174](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38046100174) 全部 success：releases job + **11 个精确 DSH 版本 × Linux / macOS / Windows 的 33 个 verify job**。没有以候选 warn 或 installation exemption 运行正式矩阵。测试日志在成功时也上传，可核对执行与 skip，不能把 job success 解释为所有方言均原生验证。
+
+| 范围 | 最终证据 |
+|---|---|
+| 本地全部旧支持版本与 alpha.1 | 十个版本分别重建一致安装树，compat/lint/typecheck/build/full test/compose/behavior/journey 全通过；该轮 382 passed / 10 skipped，44/44、99/99、55/55。六条 workingDirectory/Worktree 测试在这些版本不适用，其余 skip 为非 macOS 方言、Windows native 和候选专属断言。最终 LSP fallback 增补另由上述全部版本的 CI 全套复验覆盖 |
+| 本地最终 alpha.2 | 标准 `pnpm compat:check`、lint、typecheck、build、kernel:probe、test、smoke、docs:check 通过；最终 31 文件、389 passed / 4 skipped；compose 44/44、behavior 99/99、web/headless journey 55/55；Seatbelt 必跑 |
+| Linux alpha.2 原生 | 自带 Landlock launcher 探针实际执行并输出 `DSH_PROBE_VERIFIED_DIALECTS=landlock`；真实 grant parity 与六条 workingDirectory e2e 全执行，31 文件、389 passed / 4 skipped。包括两根 Worktree、外部 gitdir 拒绝、新旧进程和 PTY 的 cwd/grant snapshot。完整 Host/Agent 冒烟通过 |
+| macOS alpha.2 原生 | Seatbelt 探针实际执行并设为必跑；六条 workingDirectory e2e 全执行，31 文件、389 passed / 4 skipped；完整 Host/Agent 冒烟通过 |
+| Windows alpha.2 原生 | `windows-multi-root.spec.ts` 5/5 执行通过，含 restricted-token Node / PowerShell / ConPTY；workingDirectory e2e 5 passed / 1 skipped（仅 POSIX PTY 用例不适用），真实 Worktree 两根创建/失败/取消/未授权与外部 gitdir 拒绝、进程 snapshot 全通过。全套 31 文件、381 passed / 12 skipped；Windows 按既有设计不运行 POSIX smoke |
+| bwrap 明确未验证 | Linux CI 已安装 bubblewrap，但实际 probe 返回 `bwrap: setting up uid map: Permission denied`。该宿主不允许原生执行，bwrap kernel assertion 明确 skip；没有关闭宿主限制来换取通过。结构/argv/独立 grant parity 通过，但不算 bwrap kernel 验收。Linux 平台原生保证来自实际执行的 Landlock |
+| Registry / resume / 客户端 | 完整矩阵同时覆盖原 lease 争用、接管、Host stack restart、missing/redirect 恢复，native Session replay / cwd 恢复，LSP stdio pool、无 origin metadata 的 policy fallback、面板 Session 订阅/旧响应丢弃、workspace-files 隔离与指令撤销 |
+| 开发树恢复 | 已恢复 alpha.2 的 manifest、workspace、lockfile、node_modules 与 lib；frozen install 通过，无临时 probe overrides，无上游修改。版本仍为 0.1.5；迁移已实施并验证、未发布 |
+
+第一轮 `00afbce` 的 CI 虽全绿，但 Linux 探针只查 PATH，漏掉自带 Landlock；因此不采用它作为 Linux kernel 验收。改用公开 addon launcher 后 `77c0d30` 的 CI 如实暴露原生测试仍指向 inert launcher；原生组已在 `3691d00` 修正。最终上述 run 完成所有版本/平台复验。保留这段证据说明，避免未来再次把不存在 launcher 导致的 skip 当成原生安全验证。
+
+后续建议：在允许 user namespace 的 Linux runner 补做 bwrap 原生验收；向上游报告相对 instruction baseline identity 在同构 cwd 切换中的协调风险；需要撤销旧进程权限时先终止旧进程，再使用新 scope 启动。以上均不通过扩大授权、禁用 sandbox 或重实现 Worktree 绕过。
