@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse } from 'yaml'
 import { createChecker } from './lib/check.mjs'
-import { assertIsolatedHome, captureDsh, pluginPackageDir, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
+import { assertIsolatedHome, captureDsh, installPluginProfile, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
 
 const PLUGIN_NAME = '@dsh-electron/dsh-plugin-multi-root-workspace'
 const REPLACED = new Map([
@@ -84,7 +84,7 @@ try {
   const initCode = await runDsh(['plugin', '--profile', baselineProfile, 'install'], { DSH_HOME: home })
   check.ok(initCode === 0, 'baseline profile initialized without the plugin', `exit ${initCode}`)
 
-  const addCode = await runDsh(['plugin', '--profile', pluginProfile, 'add', pluginPackageDir()], { DSH_HOME: home })
+  const addCode = await installPluginProfile(pluginProfile, home)
   check.ok(addCode === 0, 'plugin installed into a profile through `dsh plugin add`', `exit ${addCode}`)
 
   const baseline = await dump(baselineProfile)

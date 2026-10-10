@@ -119,7 +119,7 @@ export const MULTI_ROOT_CONTEXT_NAME = 'multi-root:scope'
 export function renderWorkspaceRootsContext(primaryRoot: string, additionalRoots: readonly string[]): string {
   return `Current DSH workspace roots: ${JSON.stringify(additionalRoots)} are additional roots of this session's `
     + `workspace. Under workspace-write they may be modified like the session workspace; `
-    + `the session cwd remains the primary root (${JSON.stringify(primaryRoot)}).`
+    + `the session origin remains the primary root (${JSON.stringify(primaryRoot)}); changing the working directory does not change these grants.`
 }
 
 /**

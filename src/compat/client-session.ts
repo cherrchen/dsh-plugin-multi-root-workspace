@@ -44,6 +44,13 @@ export function currentSessionIdOf(sessions: unknown): string | undefined {
   return mainViewSessionId(snapshot.byId)
 }
 
+/** Observe native catalog changes when this surface provides a subscribable store. */
+export function subscribeSessions(sessions: unknown, listener: () => void): () => void {
+  if (sessions === null || typeof sessions !== 'object') return () => {}
+  const list = (sessions as { list?: { subscribe?: (listener: () => void) => () => void } }).list
+  return typeof list?.subscribe === 'function' ? list.subscribe(listener) : () => {}
+}
+
 /**
  * The list snapshot, when the service actually exposes one.
  *

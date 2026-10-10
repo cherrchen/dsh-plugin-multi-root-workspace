@@ -226,6 +226,9 @@ describe('real confined execution of the widened profile', () => {
   for (const dialect of DIALECTS) {
     it(`lets a confined command write an additional root and refuses the outside (${dialect})`, async (context) => {
       const world = await mountWorld(dialect)
+      // Structural tests use an inert launcher; this group must execute DSH's
+      // real public runner, and a verified Landlock probe makes failure fatal.
+      if (dialect === 'landlock' && process.platform === 'linux') world.provider.internals = { chain: ['landlock'] }
       const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: fixture.workspace }
       const inside = join(fixture.outside, 'confined-inside.txt')
       const outside = join(siblings.third, 'confined-outside.txt')

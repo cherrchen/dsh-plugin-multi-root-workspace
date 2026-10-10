@@ -669,3 +669,14 @@ describe('the panel channel', () => {
     expect(view.value?.unavailable).toContain('multi_root_workspace')
   })
 })
+
+it('shows effective cwd while root management stays bound to the session origin', async () => {
+  const stack = await mount({ withConnection: true })
+  await stack.ctx.plugin({ name: 'directory-display', apply(ctx: Context) {
+    ctx.provide('workingDirectory' as never, { get: () => fixture.outside } as never)
+  } })
+  const result = await callPanel('list', { sessionId: PANEL_SESSION })
+  expect(result.value?.primaryRoot).toBe(primary)
+  expect(result.value?.effectiveCwd).toBe(fixture.outside)
+  expect(result.value?.roots).toEqual([])
+})

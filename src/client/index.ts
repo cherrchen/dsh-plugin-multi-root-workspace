@@ -23,7 +23,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { createElement } from 'react'
-import { currentSessionIdOf } from '../compat/client-session.ts'
+import { currentSessionIdOf, subscribeSessions } from '../compat/client-session.ts'
 import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { NS, en, zh } from './locales.ts'
 import { STYLES } from './styles.ts'
@@ -82,6 +82,7 @@ export function apply(ctx: ClientContext): void {
   // The selection field moved between supported releases; the probe lives in
   // compat so this entry never compares version strings.
   const sessionId = (): string | undefined => currentSessionIdOf(readService(ctx, 'sessions'))
+  const subscribeSession = (listener: () => void): (() => void) => subscribeSessions(readService(ctx, 'sessions'), listener)
   const t = ctx.locale.bind(NS) as unknown as Translate
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
@@ -101,6 +102,7 @@ export function apply(ctx: ClientContext): void {
       panel,
       pickDirectory,
       sessionId,
+      subscribeSession,
       t,
       ...(wide === undefined ? {} : { wide }),
     })
@@ -108,7 +110,7 @@ export function apply(ctx: ClientContext): void {
   // Optional: old surfaces without the Files actions slot retain the footer entry.
   ctx.slots.inject('sidebar.right.tab.files.actions', () => ctx.slots.register({
     name: 'sidebar.right.tab.files.actions', id: SLOT_ID, order: 50,
-  }, () => createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId, t, compact: true })))
+  }, () => createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId, subscribeSession, t, compact: true })))
 }
 
 /**

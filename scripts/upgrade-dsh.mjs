@@ -43,6 +43,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { npmOutput } from './lib/npm-cli.mjs'
+import { cordisPin } from './lib/cordis-pin.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MANIFEST = join(REPO_ROOT, 'package.json')
@@ -86,14 +87,7 @@ function latestPrerelease() {
 function cordisRequiredBy(dshVersion) {
   const raw = npmOutput(['view', `@deepseek-ai/dsh@${dshVersion}`, 'dependencies.@deepseek-ai/cordis', '--json'])
   const range = JSON.parse(raw)
-  const exact = typeof range === 'string' ? /^[\^~]?(\d+\.\d+\.\d+)$/u.exec(range) : null
-  if (exact === null) {
-    throw new Error(
-      `[upgrade] @deepseek-ai/dsh@${dshVersion} depends on cordis ${JSON.stringify(range)}, `
-      + 'which is not a single caret or tilde this script can pin',
-    )
-  }
-  return exact[1]
+  return cordisPin(range)
 }
 
 /**

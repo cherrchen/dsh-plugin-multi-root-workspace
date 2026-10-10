@@ -32,6 +32,8 @@ Architecture Decision Records（ADR），用于记录重要架构与工程决策
 
 不要提前创建空的 ADR 文件；仅在做出真实决策时新增。
 
+- [ADR-0012-session-origin-and-effective-cwd.md](./ADR-0012-session-origin-and-effective-cwd.md) — Session 原始项目与 effective cwd 分离、LSP 调用身份、指令 touch、Worktree 与进程快照（Accepted）。
+
 ## 推荐命名
 
 ```text

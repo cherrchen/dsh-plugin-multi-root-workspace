@@ -53,6 +53,7 @@ export interface WorkspaceFoldersActionProps {
    * than a value because the selection changes while the panel stays mounted.
    */
   readonly sessionId?: () => string | undefined
+  readonly subscribeSession?: (listener: () => void) => () => void
   /** Whether the sidebar renders wide content (`false` in the icon rail). */
   readonly wide?: boolean
   /** Compact launcher in the upstream Files tab's public actions slot. */
@@ -281,15 +282,28 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     setState(previous => ({ ...previous, busy: true, noSession: false }))
     try {
       const view = await panel.call('list', base)
-      if (!mounted.current || epoch !== requestEpoch.current) return
+      if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
       setState({ view, error: undefined, busy: false, noSession: false })
     } catch (error: unknown) {
-      if (!mounted.current || epoch !== requestEpoch.current) return
+      if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
       setState({ view: undefined, error: asPanelError(error), busy: false, noSession: false })
     }
   }, [panel, requestBase])
 
   useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    let previous = props.sessionId?.()
+    return props.subscribeSession?.(() => {
+      const current = props.sessionId?.()
+      if (current === previous) return
+      previous = current
+      requestEpoch.current += 1
+      setState({ view: undefined, error: undefined, busy: false, noSession: current === undefined })
+      setMenuFor(undefined)
+      setAliasFor(undefined)
+      void refresh()
+    })
+  }, [props.subscribeSession, props.sessionId, refresh])
 
   /**
    * Submit one change to the host and adopt the view it answers with.
@@ -307,11 +321,11 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     setState(previous => ({ ...previous, busy: true, noSession: false }))
     try {
       const view = await panel.call(endpoint, { ...base, ...payload })
-      if (!mounted.current || epoch !== requestEpoch.current) return false
+      if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return false
       setState({ view, error: undefined, busy: false, noSession: false })
       return true
     } catch (error: unknown) {
-      if (!mounted.current || epoch !== requestEpoch.current) return false
+      if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return false
       setState(previous => ({ ...previous, error: asPanelError(error), busy: false }))
       return false
     }
@@ -361,10 +375,10 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     setState(previous => ({ ...previous, busy: true, noSession: false }))
     try {
       await panel.call('reveal', { ...base, entry: entryOf(root) })
-      if (!mounted.current || epoch !== requestEpoch.current) return
+      if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
       setState(previous => ({ ...previous, error: undefined, busy: false }))
     } catch (error: unknown) {
-      if (!mounted.current || epoch !== requestEpoch.current) return
+      if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
       setState(previous => ({ ...previous, error: asPanelError(error), busy: false }))
     }
   }, [panel, requestBase])
@@ -453,6 +467,16 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
               </div>
             </div>
           </section>
+
+          {state.view?.effectiveCwd !== undefined && (
+            <section className="mrfw-section">
+              <div className="mrfw-sectionTitleRow">
+                <span className="mrfw-sectionTitle">{t('panel.cwd')}</span>
+                <span className="mrfw-sectionNote">{t('panel.cwdNote')}</span>
+              </div>
+              <span className="mrfw-rootPath">{state.view.effectiveCwd}</span>
+            </section>
+          )}
 
           <section className="mrfw-section">
             <div className="mrfw-sectionTitleRow">

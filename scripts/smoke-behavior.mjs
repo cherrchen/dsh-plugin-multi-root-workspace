@@ -38,7 +38,7 @@ import MultiRootFileSystem from '@dsh-electron/dsh-plugin-multi-root-workspace/f
 import MultiRootSandboxProvider from '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
 import { createChecker } from './lib/check.mjs'
 import { requireKernelRunner } from '../tests/support/kernel-runner.ts'
-import { assertIsolatedHome, pluginPackageDir, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
+import { assertIsolatedHome, installPluginProfile, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
 import { runForeground } from './lib/shell-exec.mjs'
 
@@ -553,7 +553,7 @@ try {
 
   const initCode = await runDsh(['plugin', '--profile', BASELINE_PROFILE, 'install'], { DSH_HOME: home })
   check.ok(initCode === 0, 'baseline profile initialized without the plugin', `exit ${initCode}`)
-  const addCode = await runDsh(['plugin', '--profile', PLUGIN_PROFILE, 'add', pluginPackageDir()], { DSH_HOME: home })
+  const addCode = await installPluginProfile(PLUGIN_PROFILE, home)
   check.ok(addCode === 0, 'plugin installed into a profile', `exit ${addCode}`)
 
   const originalCwd = process.cwd()

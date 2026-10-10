@@ -13,12 +13,12 @@ export interface WorkspaceRoute {
 
 /** Resolve relative paths against the primary cwd; never search other roots by basename. */
 export async function routeWorkspacePath(
-  ctx: Context, primaryRoot: string, path: string, signal?: AbortSignal,
+  ctx: Context, primaryRoot: string, path: string, signal?: AbortSignal, cwd = primaryRoot,
 ): Promise<WorkspaceRoute | undefined> {
   signal?.throwIfAborted()
   const primary = canonicalPath(primaryRoot)
   const roots = [primary, ...ctx.multiRootScope.scopeOf(primary)]
-  const target = await ctx.fs.resolve(path, { cwd: primary, ...(signal === undefined ? {} : { signal }) })
+  const target = await ctx.fs.resolve(path, { cwd, ...(signal === undefined ? {} : { signal }) })
   for (const root of roots) {
     const rootTarget = await ctx.fs.resolve(root, signal === undefined ? {} : { signal })
     if (!ctx.fs.contains(rootTarget, target)) continue

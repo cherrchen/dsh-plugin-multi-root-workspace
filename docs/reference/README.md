@@ -32,3 +32,5 @@ English: [README.en.md](./README.en.md)
 ```text
 <topic>.md
 ```
+
+- [dsh-0.2.1-migration.md](./dsh-0.2.1-migration.md) — DSH 0.2.1 三个上游 tag 的接口、安全不变量与 Worktree 约束审查。

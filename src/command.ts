@@ -51,6 +51,7 @@ import {
 } from './contract.ts'
 import type { MultiRootRegistry } from './registry.ts'
 import { browseRoot } from './panel-files.ts'
+import { effectiveDirectory } from './compat/session-directory.ts'
 import {
   availableRoots,
   canonicalRoot,
@@ -400,9 +401,12 @@ async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoo
   const statuses = await registry.refresh(primaryRoot)
   const unavailable = registry.unavailable
   const primaryName = await primaryNameOf(ctx, primaryRoot, request)
+  const session = ctx.get('sessions')?.get(request.sessionId as SessionId)
+  const effectiveCwd = session === undefined ? undefined : effectiveDirectory(ctx, session)
   return {
     primaryRoot: canonicalRoot(primaryRoot),
     ...(primaryName === undefined ? {} : { primaryName }),
+    ...(effectiveCwd === undefined ? {} : { effectiveCwd }),
     roots: statuses.map(toRootView),
     ...(unavailable === undefined ? {} : { unavailable }),
   }

@@ -31,7 +31,7 @@ import { createRequire } from 'node:module'
  * the upgrade smoke passed on that exact version — a green CI run on an
  * unlisted release is evidence, not authorization (ADR-0009).
  */
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2'] as const
 
 /** One release this plugin claims to support. */
 export type SupportedDshRelease = typeof SUPPORTED_DSH_RELEASES[number]
@@ -56,6 +56,8 @@ export const REQUIRED_CORE_PACKAGES = [
  * that is the mixed-installation failure this contract exists to catch.
  */
 export const OPTIONAL_CORE_PACKAGES = [
+  '@deepseek-ai/dsh-tools',
+  '@deepseek-ai/dsh-working-directory',
   '@deepseek-ai/dsh-lsp',
   '@deepseek-ai/dsh-lsp-stdio',
   '@deepseek-ai/dsh-api-workspace-files',
@@ -73,6 +75,9 @@ export const OPTIONAL_CORE_PACKAGES = [
 
 /** Every package the contract inspects, required first. */
 export const CORE_PACKAGES = [...REQUIRED_CORE_PACKAGES, ...OPTIONAL_CORE_PACKAGES] as const
+
+/** Services looked up structurally; older runtimes never install these modules. */
+export const HOST_RESOLVED_PACKAGES = ['@deepseek-ai/dsh-working-directory'] as const
 
 /** How this plugin reacts to an installation it does not support. */
 export type CompatEnforcement = 'enforce' | 'warn'
@@ -129,12 +134,17 @@ export type VersionReader = (packageName: string) => string | undefined
  *   manifest cannot be resolved.
  */
 export function readInstalledVersion(packageName: string): string | undefined {
+  const require = createRequire(import.meta.url)
   try {
-    const require = createRequire(import.meta.url)
     const manifest = require(`${packageName}/package.json`) as { version?: unknown }
     return typeof manifest.version === 'string' ? manifest.version : undefined
   } catch {
-    return undefined
+    if (!(HOST_RESOLVED_PACKAGES as readonly string[]).includes(packageName)) return undefined
+    try {
+      const host = createRequire(require.resolve('@deepseek-ai/dsh/package.json'))
+      const manifest = host(`${packageName}/package.json`) as { version?: unknown }
+      return typeof manifest.version === 'string' ? manifest.version : undefined
+    } catch { return undefined }
   }
 }
 

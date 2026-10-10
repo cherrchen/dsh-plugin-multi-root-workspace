@@ -13,15 +13,15 @@ src/compat/dsh-version.ts  →  SUPPORTED_DSH_RELEASES
 It is an array of **exact versions**, not a semver range. Currently:
 
 ```ts
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2'] as const
 ```
 
 When you change it, these four must agree or `pnpm compat:check` fails:
 
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   the allowlist
-package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2"
-package.json                devDependencies          one entry of the allowlist (currently 0.2.0-rc.2)
+package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2"
+package.json                devDependencies          one entry of the allowlist (currently 0.2.1-alpha.2)
 node_modules                resolved versions        one entry of the allowlist
 ```
 
@@ -189,3 +189,9 @@ On Windows, Node cannot start `npm.cmd` with `execFileSync('npm')`; old-version 
 ## 10. New B1–B3 seams
 
 LSP and workspace-files wrap public methods; unloading must restore original property descriptors. Do not compare Cordis proxy function references. `src/compat/workspace-files.ts` adapts old `changes(scope, signal)` and new `changes(scope, path, signal)` by arity. The Windows runner for a populated scope must use a SID for the entire root set: granting additional roots to the primary SID would retain write access after removal. Optional peers participate in mixed-tree checks and must stay out of carrier-barrel static imports. See [ADR-0011](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md) for the decision and the [roadmap](../../docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02) for platform validation.
+
+## 11. DSH 0.2.1 directory semantics
+
+The development baseline is now `0.2.1-alpha.2` with Cordis `4.0.5-alpha.1`. Registry identity and grants remain tied to the immutable Session origin. Use the upstream workingDirectory service for effective cwd; never infer a session from a shared directory. Tool dispatch carries caller identity for LSP, while successful filesystem observations capture instruction touches. Exact candidates and native platform evidence are recorded only in the [roadmap ledger](../../docs/plans/active/2026-09-12-multi-root-workspace.md). See [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md) and the [interface review](../../docs/reference/dsh-0.2.1-migration.md).
+
+The upgrade tool accepts a single Cordis prerelease version as well as stable versions; it never turns the pin into a range. New install-time peer checks require an exact allow-version exemption in disposable candidate smoke profiles. This is restricted to the upgrade lane; production and the supported-version matrix use enforce. The existing installed package version is `0.1.5`, and the `v0.1.5` tag exists; the migration does not create a release.

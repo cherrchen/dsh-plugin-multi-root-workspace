@@ -95,6 +95,8 @@ export interface RootsView {
    * basename.
    */
   readonly primaryName?: string
+  /** Execution directory only; never a registry key or an authorization grant. */
+  readonly effectiveCwd?: string
   /** The additional roots, in registry order. */
   readonly roots: readonly RootView[]
   /** Set when the store itself could not be read; the panel shows this verbatim. */
@@ -205,6 +207,7 @@ const rootViewSchema = z.object({
 const rootsViewSchema = z.object({
   primaryRoot: z.string(),
   primaryName: z.string().optional(),
+  effectiveCwd: z.string().optional(),
   roots: z.array(rootViewSchema),
   unavailable: z.string().optional(),
 })
@@ -261,6 +264,7 @@ export function parseRootsView(value: unknown): Parsed<RootsView> {
     value: {
       primaryRoot: view.primaryRoot,
       ...(view.primaryName === undefined ? {} : { primaryName: view.primaryName }),
+      ...(view.effectiveCwd === undefined ? {} : { effectiveCwd: view.effectiveCwd }),
       roots: view.roots.map(narrowRootView),
       ...(view.unavailable === undefined ? {} : { unavailable: view.unavailable }),
     },
