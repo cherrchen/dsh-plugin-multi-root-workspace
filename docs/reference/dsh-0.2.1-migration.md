@@ -59,7 +59,7 @@ Worktree 的 `.git` 是指向 source repository metadata 的普通文件。check
 
 ## 验证与局限
 
-运行 lint、双面 typecheck、build、kernel probe、完整 test、compose/behavior/journey、docs check，以及精确版本矩阵。fixture 位于自动 temp grants 外，拒绝断言不会被 `/tmp` 权限掩盖。新版原生测试从被测 DSH 自身解析 workingDirectory/Worktree；旧版缺少服务明确 skip，已安装服务求值失败不伪装为缺失。
+运行 lint、双面 typecheck、build、kernel probe、完整 test、compose/behavior/journey、docs check，以及精确版本矩阵。内核探针还从公开 `node-addon-system/landlock-run` 定位 DSH 自带 launcher，真实 Landlock parity 不再使用结构测试的 inert launcher；Linux CI 安装 bubblewrap，并上传成功/失败测试日志。无法实际执行的方言仍明确记为未验证。fixture 位于自动 temp grants 外，拒绝断言不会被 `/tmp` 权限掩盖。新版原生测试从被测 DSH 自身解析 workingDirectory/Worktree；旧版缺少服务明确 skip，已安装服务求值失败不伪装为缺失。
 
 候选阶段保持 allowlist 和 peers 不变。新版 install-time peer 拒绝有独立失败证据；smoke 在 `DSH_MULTI_ROOT_COMPAT=warn` 的隔离 profile 中使用上游 `allow-version` 精确豁免。缺包/混装依然拒绝。正式提升后使用正常 enforce 安装再跑，不依赖该豁免。
 

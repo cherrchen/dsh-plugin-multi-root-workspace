@@ -25,6 +25,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { launcherPath } from '@deepseek-ai/node-addon-system/landlock-run'
 
 /** The dialects the plugin widens, in the order the probes report them. */
 const DIALECTS = ['seatbelt', 'bwrap', 'landlock']
@@ -51,6 +52,11 @@ function probeFor(dialect) {
         argv: ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp', '--', 'bash', '-c', 'true'],
       }
     case 'landlock': {
+      // DSH ships this launcher through its public addon entry point. Looking
+      // only on PATH misses the actual runner the provider uses on Linux.
+      if (process.platform === 'linux') {
+        return { program: launcherPath(), argv: ['--ro', '/', '--rw', '/tmp', '--', 'bash', '-c', 'true'] }
+      }
       for (const candidate of LANDLOCK_CANDIDATES) {
         const found = spawnSync('sh', ['-c', `command -v ${candidate}`], { encoding: 'utf8' })
         const path = found.stdout?.trim() ?? ''

@@ -181,6 +181,9 @@ describe('the fs fence and every kernel dialect agree on one scope', () => {
     it(`allows exactly the same writes with the grant widened for ${dialect}`, async () => {
       const world = await mountWorld(dialect)
       const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: fixture.workspace }
+      // Structural tests use an inert launcher; this group must execute DSH's
+      // real public runner, and a verified Landlock probe makes failure fatal.
+      if (dialect === 'landlock' && process.platform === 'linux') world.provider.internals = { chain: ['landlock'] }
       for (const entry of matrix()) {
         if (entry.nativeOnly === true && !isNativeDialect(dialect)) continue
         if (entry.needsSymlink === true && symlinkReason !== undefined) continue

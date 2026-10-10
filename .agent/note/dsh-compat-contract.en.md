@@ -21,7 +21,7 @@ When you change it, these four must agree or `pnpm compat:check` fails:
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   the allowlist
 package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2"
-package.json                devDependencies          one entry of the allowlist (currently 0.2.0-rc.2)
+package.json                devDependencies          one entry of the allowlist (currently 0.2.1-alpha.2)
 node_modules                resolved versions        one entry of the allowlist
 ```
 
