@@ -745,6 +745,54 @@ it('does not add a second copy of an identical native baseline in the same step'
   expect(textOf(await world.step())).toContain('no longer an additional root')
 })
 
+it.each(['remove', 'replacement', 'replacement-same-scope', 'retry'] as const)(
+  're-delivers a borrowed native copy after %s without another touch', async mode => {
+    const { createHash } = await import('node:crypto')
+    const nested = join(repoA, 'src')
+    mkdirSync(nested)
+    const content = '# borrowed nested rules'
+    writeFileSync(join(nested, 'AGENTS.md'), content)
+    const world = await mountWorld({}, [repoA])
+    let cwd = nested
+    await world.ctx.plugin({ name: 'directory-fixture', apply(ctx: Context) {
+      ctx.provide('workingDirectory' as never, { get: () => cwd } as never)
+    } })
+    world.touch(join(nested, 'file.ts'))
+    const native = createUserMessage({ content: [{ type: 'text', text: content }], source: {
+      kind: 'agent-instructions', form: 'instructions', baseline: true,
+      baselineIdentity: JSON.stringify({ projectRoot: '..' }),
+      changes: [{ action: 'set', scope: 'src/AGENTS.md', path: 'src/AGENTS.md', digest: createHash('sha1').update(content).digest('hex') }],
+    } } as any)
+    expect(await world.step([native])).toBeUndefined()
+    expect(await world.step()).toBeUndefined()
+    // A refreshed native baseline still representing this exact file remains
+    // deduplicated, and its borrowed state must survive for later withdrawal.
+    expect(await world.step([native])).toBeUndefined()
+    cwd = repoB
+    const replacement = mode === 'replacement' || mode === 'replacement-same-scope'
+    const withdrawal = createUserMessage({ content: [{ type: 'text', text: 'Native baseline changed' }], source: {
+      kind: 'agent-instructions', form: 'instructions',
+      ...(replacement ? { baseline: true, baselineIdentity: JSON.stringify({ projectRoot: '' }) } : {}),
+      // Native replacement can reuse the same relative scope in a different
+      // project without emitting a remove for the old project's file.
+      changes: mode === 'replacement-same-scope'
+        ? [{ action: 'set', scope: 'src/AGENTS.md', path: 'src/AGENTS.md', digest: createHash('sha1').update(content).digest('hex') }]
+        : [{ action: 'remove', scope: 'src/AGENTS.md', path: 'src/AGENTS.md' }],
+    } } as any)
+    if (mode === 'retry') {
+      const create = vi.spyOn(LlmMessage, 'createInstructionMessage').mockRejectedValueOnce(new Error('delivery failed'))
+      await expect(world.step([withdrawal])).rejects.toThrow('delivery failed')
+      create.mockRestore()
+      expect(textOf(await world.step())).toContain(content)
+    } else expect(textOf(await world.step([withdrawal]))).toContain(content)
+    expect(await world.step()).toBeUndefined()
+    // Native removal must not invalidate a copy the plugin itself delivered.
+    expect(await world.step([withdrawal])).toBeUndefined()
+    world.roots([])
+    expect(textOf(await world.step())).toContain('no longer an additional root')
+  },
+)
+
 it('discards instruction deliveries if the root is revoked during the read', async () => {
   writeFileSync(join(repoA, 'AGENTS.md'), '# revoked during I/O')
   const world = await mountWorld({}, [repoA])

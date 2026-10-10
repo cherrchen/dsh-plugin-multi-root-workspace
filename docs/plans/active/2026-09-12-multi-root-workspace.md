@@ -379,3 +379,10 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 第一轮 `00afbce` 的 CI 虽全绿，但 Linux 探针只查 PATH，漏掉自带 Landlock；因此不采用它作为 Linux kernel 验收。改用公开 addon launcher 后 `77c0d30` 的 CI 如实暴露原生测试仍指向 inert launcher；原生组已在 `3691d00` 修正。最终上述 run 完成所有版本/平台复验。保留这段证据说明，避免未来再次把不存在 launcher 导致的 skip 当成原生安全验证。
 
 后续建议：在允许 user namespace 的 Linux runner 补做 bwrap 原生验收；向上游报告相对 instruction baseline identity 在同构 cwd 切换中的协调风险；需要撤销旧进程权限时先终止旧进程，再使用新 scope 启动。以上均不通过扩大授权、禁用 sandbox 或重实现 Worktree 绕过。
+
+
+### PR #8 P1 返工（2026-10-10）
+
+[评审问题](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/8#discussion_r4237499560)指出 native 代投递的文件在 cwd 切换后被上游撤回，插件却保留完整 digest，导致仍获授权的指令不再补发。修复规则见 [ADR-0012 指令章节](../../decisions/ADR-0012-session-origin-and-effective-cwd.md#指令)。新增四条回归覆盖无 baseline identity 的 remove、baseline 替换、不同项目复用同名 scope，以及补发构造失败后无需新 touch 的重试；同时断言同批去重、插件投递不受 native remove 影响和根撤销仍生效。
+
+本机 alpha.2 enforce 下 compat、lint、双端 typecheck、build、完整 test（31 文件，388 passed / 9 skipped）、docs:check 和 diff whitespace 检查通过；指令定向测试 53/53，web/headless journey 52/52。本次受限进程没有可用 kernel runner，journey 的两条 confined bash 断言明确 skip；不更新为 native 内核验收，也未复跑其他版本和平台。此前最终矩阵证据属于上述历史 HEAD，修复后的跨版本结果由新提交 CI 另行验证。

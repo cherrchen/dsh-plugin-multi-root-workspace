@@ -110,8 +110,10 @@ interface DeliveredScope {
   readonly root: string
   /** The file's absolute path. */
   readonly path: string
-  /** SHA-256 of fully delivered content; undefined means a partial delivery needs retry. */
+  /** SHA-256 of fully delivered content; undefined means partial or withdrawn delivery needs retry. */
   readonly digest: string | undefined
+  /** Native display scope when upstream supplied the copy instead of this row. */
+  readonly nativePath?: string
 }
 
 /** One session's delivery state: what was delivered, and what is worth looking at. */
@@ -384,6 +386,15 @@ async function pending(
   // so "absent from the scope" is the single condition to react to.
   const rendered: RenderedRoot[] = []
   const nativeCopy = nativeInstructionCopies(messages, effectiveDirectory(ctx, session))
+  // Withdrawal is already model-visible in the native batch. Forget only the
+  // borrowed digest, keeping the scope for nested discovery and revocation.
+  // Persist this invalidation even if rendering is budget-deferred or fails:
+  // the native removal may occur in just this one step's batch.
+  for (const [key, entry] of state.scopes) {
+    if (entry.nativePath !== undefined && nativeCopy.withdraws(entry.nativePath)) {
+      state.scopes.set(key, { ...entry, digest: undefined })
+    }
+  }
   const gone: GoneScope[] = []
   const updates: Array<{ readonly key: string; readonly scope: DeliveredScope }> = []
 
@@ -401,8 +412,9 @@ async function pending(
           continue
         }
         const deliveries = plan.deliveries.filter(entry => {
-          if (!nativeCopy(entry.file)) return true
-          updates.push({ key: entry.key, scope: { root, path: entry.file.absolutePath, digest: digestOf(entry.file.content) } })
+          const nativePath = nativeCopy.pathOf(entry.file)
+          if (nativePath === undefined) return true
+          updates.push({ key: entry.key, scope: { root, path: entry.file.absolutePath, digest: digestOf(entry.file.content), nativePath } })
           return false
         })
         if (deliveries.length === 0) continue

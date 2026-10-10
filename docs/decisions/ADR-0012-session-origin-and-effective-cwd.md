@@ -37,7 +37,9 @@ DSH `0.2.1-alpha.2` 新增 `workingDirectory` 和实验性 Worktree 服务。原
 
 发现继续钉在附加根，global display path 不作为项目相对路径接受；即使 `$DSH_HOME` 或共享 agents home 位于已登记根内，也不由插件重复加载全局候选。解析目标与读后路径身份再校验，异步 I/O 后再次检查 scope：已撤销或 redirect 的根不投递新规则，旧规则明确撤销。
 
-插件在 native pre-step 完成后检查这一批消息的 `agent-instructions` baseline metadata；同一绝对文件、同一完整 SHA-1 content digest 已由 native 消息表示时，不再添加一份插件副本，但仍登记自己的根范围，以便后续显式撤销。没有可验证 metadata 或文本不同就正常投递，绝不从提示词 prose 推断 authority。插件自己的 scope/digest 不因 cwd 变化清空；上游主动重新呈现其 baseline 属于上游协调行为，历史文本不被修改。
+插件在 native pre-step 完成后检查这一批消息的 `agent-instructions` baseline metadata；同一绝对文件、同一完整 SHA-1 content digest 已由 native 消息表示时，不再添加一份插件副本，但仍登记自己的根范围，以便后续显式撤销。没有可验证 metadata 或文本不同就正常投递，绝不从提示词 prose 推断 authority。
+
+投递状态区分插件投递与 native 代投递；native 的 `remove` 按代投递时记录的 display scope 使对应 digest 失效，baseline 替换则使全部 native 代投递 digest 失效（新项目可能复用同名 scope 而没有 remove）。失效保留绝对 scope 和已考察 nested 目录，即使补发因预算或构造失败延后也会重试；本批消息仍表示同一绝对文件与完整内容时继续去重，否则下一步由插件补发。native 撤回不使插件自身投递的 digest 失效。插件自己的 scope/digest 不因 cwd 变化清空；上游主动重新呈现其 baseline 属于上游协调行为，历史文本不被修改。
 
 ### 面板与 Workspace Files
 
