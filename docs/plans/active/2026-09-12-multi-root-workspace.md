@@ -342,3 +342,21 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 | 原生执行与 LSP 定向复验 | 两文件 6/6 通过；真实 restricted-token Node 和 PowerShell 可写两根、第三目录拒绝，ConPTY 两根写入及第三目录拒绝、退出码 `23` 保留，read-only 与移除根后拒绝；真实 LSP stdio 初始化和池化隔离通过 |
 | 跳过范围 | 本机无目录 symlink 权限，以及不适用于 Windows 的 POSIX 内核执行和条件用例；Windows 原生 ACL 用例没有 skip。Windows 不运行 POSIX 冒烟和 `kernel:probe` |
 | 修复后远端矩阵 | 修复提交 `41e4d1a` 的 [CI run 37118946523](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/37118946523) 全部 success：releases job 及九个支持版本 × Linux/macOS/Windows 的 27 个 verify job；九个 Windows job 均执行原生 ACL 用例，Linux/macOS 完成各自内核探针、测试及完整冒烟 |
+
+## DSH 0.2.1 迁移与目录安全契约（2026-10-10，未发布）
+
+分支 `feat/dsh-0.2.1-alpha.2-compat` 从 `main` 的 `f149fa4` 创建；实际基线 package 为 `0.1.5`，`v0.1.5` 已由 `657e6d1` 发布，前述「待打 tag」是发版准备时的历史状态。本任务保持 package version，不 release、不发布 npm、不合并 main。上游差异唯一真源是[接口审查](../../reference/dsh-0.2.1-migration.md)，目录、指令、LSP 和进程快照设计是 [ADR-0012](../../decisions/ADR-0012-session-origin-and-effective-cwd.md)。
+
+| 项 | 当前证据 |
+|---|---|
+| 候选 `0.2.1-alpha.1` | 一致精确安装树，Cordis 4.0.4；lint、双面 typecheck、build；native Seatbelt test（381 passed / 8 skipped），compose 44/44、behavior 99/99、journey 55/55；该版本没有 workingDirectory/Worktree，所以四条新服务测试明确不适用 |
+| 候选 `0.2.1-alpha.2` | 一致精确安装树，Cordis 4.0.5-alpha.1；真实 Host composition、web/headless Agent journey 和 native Seatbelt 测试通过；上游 install-time gate 拒绝候选 peers，隔离 profile 的 exact allow-version 豁免仅用于候选 lane |
+| 正式精确合同 | allowlist 和所有 DSH peers 增加两个精确版本，开发 pin 为 alpha.2；Cordis prerelease 单独精确声明；生产仍 enforce，workingDirectory 为 optional service lookup，不成为旧 runtime 的必装模块 |
+| 本地 alpha.2 enforce | compat、lint、双面 typecheck、build、test（388 passed / 4 skipped）、compose 44/44、behavior 99/99、journey 55/55，通过；无候选豁免 |
+| Worktree / 目录 | Git 2.53 + 真实 Seatbelt 下 Primary/Additional 内的默认 pool 创建、访问、共享 gitdir、切回原项目、删除当前 checkout 后恢复、重复名称失败、取消、未授权 repository 拒绝通过；Registry 始终不由 Worktree mutation 改变 |
+| 新旧进程 / PTY | 真实 Seatbelt 下旧 process 和 PTY 保留原 cwd 与 grant snapshot，撤销后新 confine 和 fs 写拒绝；没有修改已有 shell cwd |
+| 继承的不变量 | fs / 三个 POSIX dialect 独立 grant parity、unknown dialect、mixed/incomplete gate、lease 争用/接管/拆除、symlink redirect、missing 恢复、LSP stdio、workspace-files caps/撤销、user-context 指令与 global 排除、同批 native 去重和 I/O 中撤销均由完整套件覆盖 |
+| 本地未覆盖 | Linux bwrap/Landlock、Windows ACL/ConPTY 未在 macOS 本机原生执行；相应结构测试不算 kernel 验收；远端矩阵待执行 |
+| 上游限制 | Apple Git 2.39 不认识 `--no-lazy-fetch`，明确失败且不改 Registry；不删除该安全参数。native instruction baseline 的相对 project identity 可能在同构 cwd 间复用，插件不依赖它决定 authority；见接口审查。任意敌对 rename 的原子安全与即时撤销旧 kernel snapshot 不在既有机制保证内 |
+
+支持矩阵扩大前已分别把两个版本作为候选跑过。正式 allowlist 下旧版矩阵和跨平台 CI 的最终结果补记在下方；未完成状态不计为验收通过。

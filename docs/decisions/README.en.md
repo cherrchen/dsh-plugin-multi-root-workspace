@@ -30,6 +30,8 @@ Architecture Decision Records (ADRs), capturing important architecture and engin
 - [ADR-0010-additional-root-instruction-scope.md](./ADR-0010-additional-root-instruction-scope.md) — Additional-root instruction injection: top-level files plus those of the subdirectories the session has worked in, delivered as a user-role `form=instructions` message from `agent/pre-step`, one shared byte budget, explicit revocation on departure and withdrawal when a delivered file disappears (Accepted).
 - [ADR-0011-multi-root-workspace-consumers.md](./ADR-0011-multi-root-workspace-consumers.md) — Public LSP routing, a Windows root-set SID runner, workspace-files isolation, and the additional-root file tree (Accepted).
 
+- [ADR-0012-session-origin-and-effective-cwd.md](./ADR-0012-session-origin-and-effective-cwd.md) — Separates session origin from effective cwd, including LSP caller identity, instruction touches, Worktrees and process snapshots (Accepted).
+
 Do not pre-create empty ADR files; add one only when a real decision is made.
 
 ## Naming Convention

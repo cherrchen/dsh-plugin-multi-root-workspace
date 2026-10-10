@@ -32,3 +32,5 @@ Use lowercase kebab-case, for example:
 ```text
 <topic>.md
 ```
+
+- [dsh-0.2.1-migration.md](./dsh-0.2.1-migration.md) — Interface and security review of three upstream tags, with Worktree constraints.

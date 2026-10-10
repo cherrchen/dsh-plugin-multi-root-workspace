@@ -197,8 +197,8 @@ describe('workspace topology context', () => {
     promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
     expect(await topology()).toBe(
       `Current DSH workspace roots: ${JSON.stringify([fixture.outside])} are additional roots of this session's workspace. `
-      + `Under workspace-write they may be modified like the session workspace; the session cwd remains the primary root `
-      + `(${JSON.stringify(fixture.workspace)}).`,
+      + `Under workspace-write they may be modified like the session workspace; the session origin remains the primary root `
+      + `(${JSON.stringify(fixture.workspace)}); changing the working directory does not change these grants.`,
     )
     const snapshot = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))
     expect(snapshot.indexOf('Current DSH file policy')).toBeLessThan(snapshot.indexOf('Current DSH workspace roots'))

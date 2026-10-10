@@ -220,3 +220,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 ## 10. 多根消费方扩展（B1–B3）
 
 LSP、Windows ACL 与 workspace-files 的当前接缝、客户端树、scope 变更与兼容边界见 [ADR-0011](../decisions/ADR-0011-multi-root-workspace-consumers.md)。`multi-root-lsp` / `multi-root-workspace-files` 是 additive、compat-gated 行，不禁用其他 provider。Windows 非空 scope 使用插件 runner；POSIX 方言仍按 §5 扩展上游 profile。进度与各平台的验证证据只登记在[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
+
+## 11. 动态执行目录与 Session 原始项目
+
+DSH `0.2.1-alpha.2` 的 `workingDirectory` 只决定新操作的执行目录，相对路径与 sandbox authority 分离。Registry、面板和 scope 始终以 header 原始项目为键；LSP 在工具执行上下文携带该身份，指令记录成功调用的实际文件路径。当前设计及 Worktree、resume、旧进程快照边界的唯一真源为 [ADR-0012](../decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../reference/dsh-0.2.1-migration.md)。

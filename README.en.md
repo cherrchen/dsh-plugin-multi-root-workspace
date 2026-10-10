@@ -6,7 +6,7 @@
 
 An out-of-tree plugin bundle for DSH (DeepSeek Harness) that widens the Workspace write scope from a single canonical directory to "**one primary root + N additional roots**" — **without modifying any package in the upstream repository**.
 
-The problem it solves: a real development project is usually several independent Git repositories, while DSH natively treats only the session working directory as the writable root, so working across repositories means juggling sessions.
+The problem it solves: a real development project is usually several independent Git repositories, while DSH natively treats only the session origin as the writable root, so working across repositories means juggling sessions.
 
 Three things make this plugin worth looking at:
 
@@ -24,7 +24,7 @@ Three things make this plugin worth looking at:
 
 **Done and released: `v0.1.4`** — with the `v0.1.3` contract unchanged, the supported upstream runtimes grow to `0.1.7-rc.2` (same shapes as `0.1.7-rc.1`, no new adapter branch; cordis stays at `~4.0.4`). See the [CHANGELOG](./CHANGELOG.en.md).
 
-**The `v0.1.5` release preparation is complete; the tag is pending**: support now includes DSH `0.2.0-rc.1` and `0.2.0-rc.2`, with a cross-operating-system CI matrix for every supported release. Risk analysis and verification evidence live in the [roadmap compatibility record](./docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30).
+**`v0.1.5` is released**: DSH 0.2 RC support and evidence are recorded in the [roadmap ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md). This development branch adds exact compatibility with DSH `0.2.1-alpha.1` / `0.2.1-alpha.2` and adapts to dynamic working directories; these changes are unreleased. See the [migration review](./docs/reference/dsh-0.2.1-migration.md).
 
 The single source of truth for progress, numbering, and release state is the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账) (M1–M4 are the MVP milestone numbers, H1–H4 are the `v0.1.1` batch numbers, and H1 is M4); per-item evidence lives in the [completed plans](./docs/plans/README.md), and the user-visible changes of each version are in the [CHANGELOG](./CHANGELOG.en.md).
 
@@ -47,9 +47,9 @@ The agent can now read, write, and run bash in that directory, with the same rig
 
 ## Requirements
 
-- **Using a plugin built from this checkout**: you need a *supported* DSH runtime — currently **`0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, and `0.2.0-rc.2`**, and nothing else will install or run (see below). `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
+- **Using a plugin built from this checkout**: you need a *supported* DSH runtime — currently **`0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-alpha.1`, and `0.2.1-alpha.2`**, and nothing else will install or run (see below). `dsh plugin` installs the package into the matching profile, and no local Node toolchain is required
 - **Building from source / contributing**: **Node.js** `^22.19.0 || >=24` (pinned by the repository's `engines`), **Git**, and **pnpm 11** (`packageManager` pins `pnpm@11.25.0`; corepack recommended)
-- **DSH runtime**: the dev pin is exactly `0.2.0-rc.2`, the baseline among the supported releases; the upgrade procedure lives in the [development workflow](./docs/development/plugin-development-workflow.md)
+- **DSH runtime**: the dev pin is exactly `0.2.1-alpha.2`, the baseline among the supported releases; the upgrade procedure lives in the [development workflow](./docs/development/plugin-development-workflow.md)
 - **Platforms**: macOS Seatbelt and Linux bwrap/Landlock; the development branch also implements a Windows root-set ACL runner. Platform validation is recorded in the [roadmap](./docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02).
 - Running the smoke tests needs **no model credentials**: the e2e model turns are served by an inline scripted model endpoint
 
@@ -236,3 +236,5 @@ Repository-wide rules for Coding Agents are defined in [`AGENTS.md`](./AGENTS.md
 ## License
 
 [MIT](./LICENSE)
+
+Dynamic working directories affect relative path resolution and new processes. They do not grant access or change the session origin that owns the root registry. See [ADR-0012](./docs/decisions/ADR-0012-session-origin-and-effective-cwd.md).

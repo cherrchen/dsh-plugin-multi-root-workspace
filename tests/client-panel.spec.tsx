@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createElement } from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PANEL_CHANNEL, type PanelRequest, type RevealedView, type RootView, type RootsView } from '../src/contract.ts'
 import * as client from '../src/client/index.ts'
@@ -96,6 +96,7 @@ function mount(withFilesActions = false): Harness {
   const registrations: Registration[] = []
   const dictionaries: { ns: string; dicts: Record<string, unknown> }[] = []
   let view: RootsView = { primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B] }
+  const sessionListeners = new Set<() => void>()
   let currentSession: string | undefined = 'session-1'
   // Undefined keeps the 0.1.5 / 0.1.6-alpha.1 selection snapshot (`current`).
   let catalog: readonly { id: string; mainView?: number }[] | undefined
@@ -109,6 +110,7 @@ function mount(withFilesActions = false): Harness {
     rpc: {
       call: async (channel: string, endpoint: string, payload: PanelRequest) => {
         calls.push({ channel, endpoint, payload })
+        const listedView = view
         if (gate !== undefined) {
           const held = gate
           gate = undefined
@@ -130,7 +132,7 @@ function mount(withFilesActions = false): Harness {
         // One shape per endpoint, exactly as the host sends them: `reveal`
         // answers with the revealed path, everything else with the whole view.
         // Answering a list for every endpoint is what used to hide the mismatch.
-        return { ok: true, value: endpoint === 'reveal' ? revealed : view }
+        return { ok: true, value: endpoint === 'reveal' ? revealed : endpoint === 'list' ? listedView : view }
       },
     },
   }
@@ -166,6 +168,7 @@ function mount(withFilesActions = false): Harness {
       if (name === 'sessions') {
         return {
           list: {
+            subscribe: (listener: () => void) => { sessionListeners.add(listener); return () => { sessionListeners.delete(listener) } },
             getSnapshot: () => catalog === undefined
               ? { current: currentSession }
               : catalogSnapshot(catalog),
@@ -185,6 +188,7 @@ function mount(withFilesActions = false): Harness {
     setSession: next => {
       currentSession = next
       catalog = undefined
+      for (const listener of sessionListeners) listener()
     },
     setCatalog: rows => { catalog = rows },
     setFailure: next => { failure = next },
@@ -295,10 +299,10 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText(`${NS}.panel.noSession`)).toBeTruthy() })
 
-    harness.setSession('session-1')
+    act(() => { harness.setSession('session-1') })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
 
-    await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+    await waitFor(() => { expect(harness.calls.length).toBeGreaterThanOrEqual(1) })
     expect(harness.calls[0]?.payload).toEqual({ sessionId: 'session-1' })
   })
 
@@ -341,7 +345,7 @@ describe('the panel dialog', () => {
     ])
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
 
-    await waitFor(() => { expect(harness.calls).toHaveLength(2) })
+    await waitFor(() => { expect(harness.calls.length).toBeGreaterThanOrEqual(2) })
     expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-next' })
   })
 
@@ -351,10 +355,10 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(harness.calls).toHaveLength(1) })
 
-    harness.setSession('session-2')
+    act(() => { harness.setSession('session-2') })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
 
-    await waitFor(() => { expect(harness.calls).toHaveLength(2) })
+    await waitFor(() => { expect(harness.calls.length).toBeGreaterThanOrEqual(2) })
     expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-2' })
   })
 
@@ -666,4 +670,30 @@ describe('the panel copy', () => {
     expect(source).toContain(en['panel.title'])
     expect(Object.keys(zh).length).toBeGreaterThan(20)
   })
+})
+
+it('displays effective cwd separately from the stable primary root', async () => {
+  const harness = mount()
+  harness.setView({ primaryRoot: '/repos/primary', effectiveCwd: '/unregistered/current', roots: [ROOT_A] })
+  renderPanel(harness)
+  fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+  await waitFor(() => { expect(screen.getByText('/unregistered/current')).toBeDefined() })
+  expect(screen.getByText('/repos/primary')).toBeDefined()
+  expect(screen.getByText(`${NS}.panel.cwdNote`)).toBeDefined()
+  expect(harness.calls[0]?.payload).toEqual({ sessionId: 'session-1' })
+})
+
+it('ignores a response belonging to the previous session after catalog selection changes', async () => {
+  const harness = mount()
+  harness.holdNextCall()
+  renderPanel(harness)
+  fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+  await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+  harness.setView({ primaryRoot: '/repos/second', effectiveCwd: '/repos/second/src', roots: [] })
+  act(() => { harness.setSession('session-2') })
+  await waitFor(() => { expect(screen.getByText('/repos/second')).toBeDefined() })
+  harness.release()
+  await waitFor(() => { expect(harness.calls).toHaveLength(2) })
+  expect(screen.queryByText('/repos/primary')).toBeNull()
+  expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-2' })
 })

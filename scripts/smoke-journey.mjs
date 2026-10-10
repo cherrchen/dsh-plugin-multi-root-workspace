@@ -39,11 +39,10 @@ import { createChecker } from './lib/check.mjs'
 import {
   assertIsolatedHome,
   loadRuntimeModule,
-  pluginPackageDir,
+  installPluginProfile,
   REPO_ROOT,
   resolveDshCliPath,
   resolveScratchHome,
-  runDsh,
 } from './lib/dsh-runtime.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
 
@@ -292,7 +291,7 @@ async function startScriptedModel() {
  * composition the journey must run in.
  */
 async function prepareProfile(profile) {
-  const added = await runDsh(['plugin', '--profile', profile, 'add', pluginPackageDir()], { DSH_HOME: home })
+  const added = await installPluginProfile(profile, home)
   check.ok(added === 0, `${profile}: plugin installed into the shipped profile`, `exit ${added}`)
 }
 
@@ -546,7 +545,7 @@ try {
     const webExcerpt = webRendered.slice(-800)
     check.contains(webRendered, canonical(additionalRepo), 'web: the model\'s request names the additional root', webExcerpt)
     check.contains(webRendered, 'additional roots of this session\'s workspace', 'web: the runtime-context snapshot states the topology', webExcerpt)
-    check.contains(webRendered, 'the session cwd remains the primary root', 'web: the snapshot states that the cwd is unchanged', webExcerpt)
+    check.contains(webRendered, 'the session origin remains the primary root', 'web: the snapshot separates session origin from cwd', webExcerpt)
     check.ok(webRequests.length >= SCRIPT_LENGTH, 'web: the agent issued one request per scripted step', `requests: ${webRequests.length}`)
 
     // The instruction journey, read off the first step's wire body: the Agent

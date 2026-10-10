@@ -9,6 +9,7 @@ on:
   push:
     branches:
       - main
+      - feat/dsh-0.2.1-alpha.2-compat
 
 permissions:
   contents: read

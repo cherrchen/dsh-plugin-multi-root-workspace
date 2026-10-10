@@ -678,3 +678,81 @@ describe('delivery bookkeeping under pressure', () => {
     expect(textOf(await world.step())).toContain('# first session nested rules')
   })
 })
+
+it('captures relative touches before a later cwd change, independently for each session', async () => {
+  for (const root of [repoA, repoB]) {
+    mkdirSync(join(root, 'src'))
+    writeFileSync(join(root, 'src', 'AGENTS.md'), `nested ${root}`)
+  }
+  const world = await mountWorld({}, [repoA, repoB])
+  let cwd = repoA
+  await world.ctx.plugin({ name: 'directory-fixture', apply(ctx: Context) {
+    ctx.provide('workingDirectory' as never, { get: (session: Session) => session === world.session ? cwd : repoB } as never)
+  } })
+  const complete = world.touch('src/file.ts', { deferResult: true })
+  cwd = repoB
+  complete()
+  const text = textOf(await world.step())
+  expect(text).toContain(`nested ${repoA}`)
+  expect(text).not.toContain(`nested ${repoB}`)
+  expect(await world.step()).toBeUndefined()
+})
+
+it('prefers the successful native observed target when cwd recovery changes the resolution base', async () => {
+  mkdirSync(join(repoB, 'src')); writeFileSync(join(repoB, 'src', 'AGENTS.md'), '# observed directory')
+  const world = await mountWorld({}, [repoA, repoB])
+  const complete = world.touch('src/file.ts', { callId: 'observed-call', deferResult: true })
+  const exec = { agent: { session: world.session }, name: 'read', callId: 'observed-call' }
+  const waterfall = world.ctx.waterfall.bind(world.ctx) as any
+  await waterfall('tools/execute', exec, async () => {
+    const target = await world.ctx.fs.resolve(join(repoB, 'src', 'file.ts'))
+    world.ctx.emit('fs/observed', target, { kind: 'absent' }, exec)
+    return {}
+  })
+  complete()
+  expect(textOf(await world.step())).toContain('# observed directory')
+})
+
+it('does not inject the shared agents global file while walking an additional root', async () => {
+  const agentsHome = join(fixture.base, 'agents-home'); mkdirSync(agentsHome)
+  writeFileSync(join(agentsHome, 'AGENTS.md'), '# shared global instructions')
+  writeFileSync(join(repoA, 'AGENTS.md'), '# additional instructions')
+  vi.stubEnv('DSH_AGENTS_HOME', agentsHome)
+  try {
+    const world = await mountWorld({}, [repoA])
+    const text = textOf(await world.step())
+    expect(text).toContain('# additional instructions')
+    expect(text).not.toContain('# shared global instructions')
+  } finally { vi.unstubAllEnvs() }
+})
+
+it('does not add a second copy of an identical native baseline in the same step', async () => {
+  const { createHash } = await import('node:crypto')
+  const content = '# native additional baseline'
+  writeFileSync(join(repoA, 'AGENTS.md'), content)
+  const world = await mountWorld({}, [repoA])
+  await world.ctx.plugin({ name: 'directory-fixture', apply(ctx: Context) {
+    ctx.provide('workingDirectory' as never, { get: () => repoA } as never)
+  } })
+  const native = createUserMessage({ content: [{ type: 'text', text: content }], source: {
+    kind: 'agent-instructions', form: 'instructions', baseline: true,
+    baselineIdentity: JSON.stringify({ projectRoot: '' }),
+    changes: [{ action: 'set', scope: 'AGENTS.md', path: 'AGENTS.md', digest: createHash('sha1').update(content).digest('hex') }],
+  } } as any)
+  expect(await world.step([native])).toBeUndefined()
+  expect(await world.step()).toBeUndefined()
+  world.roots([])
+  expect(textOf(await world.step())).toContain('no longer an additional root')
+})
+
+it('discards instruction deliveries if the root is revoked during the read', async () => {
+  writeFileSync(join(repoA, 'AGENTS.md'), '# revoked during I/O')
+  const world = await mountWorld({}, [repoA])
+  const read = world.ctx.fs.readText.bind(world.ctx.fs)
+  vi.spyOn(world.ctx.fs, 'readText').mockImplementationOnce(async (...args) => {
+    const content = await read(...args)
+    world.roots([])
+    return content
+  })
+  expect(await world.step()).toBeUndefined()
+})

@@ -152,3 +152,21 @@ export async function captureDsh(args, env = {}) {
 export function pluginPackageDir() {
   return dirname(require.resolve('@dsh-electron/dsh-plugin-multi-root-workspace/package.json'))
 }
+
+/** Candidate-only exact installation exemption, confined to a disposable smoke home. */
+export async function installPluginProfile(profile, home) {
+  assertIsolatedHome(home)
+  const args = ['plugin', '--profile', profile, 'add', pluginPackageDir()]
+  const first = await captureDsh(args, { DSH_HOME: home })
+  if (first.code === 0) return 0
+  if (process.env.DSH_MULTI_ROOT_COMPAT !== 'warn' || !first.stderr.includes('allow-version')) {
+    process.stderr.write(first.stderr)
+    return first.code
+  }
+  const plugin = require('@dsh-electron/dsh-plugin-multi-root-workspace/package.json')
+  const runtime = runtimeRequire()('@deepseek-ai/dsh/package.json').version
+  const allowed = await runDsh(['plugin', '--profile', profile, 'allow-version', `${plugin.name}@${plugin.version}`,
+    '--dsh-version', runtime, '--accept-risk'], { DSH_HOME: home })
+  if (allowed !== 0) return allowed
+  return runDsh(args, { DSH_HOME: home })
+}

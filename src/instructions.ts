@@ -47,6 +47,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
@@ -55,12 +56,14 @@ import type { FileSystem } from '@deepseek-ai/dsh-fs'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
-import type { Session } from '@deepseek-ai/dsh-session'
 import type {} from './compat.ts'
 import { instructionsApi } from './compat/agent-instructions.ts'
 import type { InstructionFile, InstructionsApi, LoadedInstructionFile } from './compat/agent-instructions.ts'
 import { createInstructionMessage } from './compat/llm-message.ts'
 import { toolResultFailed } from './compat/tool-result.ts'
+import { effectiveDirectory } from './compat/session-directory.ts'
+import { aroundTool, type ToolCaller } from './compat/tool-context.ts'
+import { nativeInstructionCopies } from './compat/instruction-overlap.ts'
 import { isCanonicallyUnder } from './roots.ts'
 import type {} from './scope.ts'
 
@@ -120,7 +123,7 @@ interface SessionState {
 }
 
 /** Unanswered `tool/call` records, by call id, so a result can name its tool. */
-type PendingCalls = Map<string, { readonly name: string; readonly arguments: string }>
+type PendingCalls = Map<string, { readonly name: string; readonly arguments: string; readonly cwd: string | undefined; observedPath?: string }>
 
 /** One root's freshly rendered instruction text. */
 export interface RenderedRoot {
@@ -193,16 +196,13 @@ export function touchedPathOfToolCall(name: string, argumentsJson: string): stri
  * The directory a touched path's instructions would live in.
  *
  * Tool arguments are the model's raw input, so a relative `file_path` is
- * resolved against the session cwd — the base the tool layer itself uses —
- * rather than against this process's cwd. Mac's `realpath` spelling is applied
- * here so the result compares against the canonical roots.
- * @param path - a touched path, absolute or relative to the session cwd.
- * @param session - the session the touch belongs to.
+ * captured as an absolute path at the operation boundary. Mac's `realpath`
+ * spelling is applied here so it compares against the canonical roots.
+ * @param path - the absolute touched file path.
  * @returns the canonical parent directory, or `undefined` when it cannot be named.
  */
-function parentDirectoryOf(path: string, session: Session): string | undefined {
-  const cwd = session.header.cwd
-  const absolute = isAbsolute(path) ? path : cwd === undefined ? undefined : resolve(cwd, path)
+function parentDirectoryOf(path: string): string | undefined {
+  const absolute = isAbsolute(path) ? path : undefined
   if (absolute === undefined) return undefined
   try {
     return canonicalPath(dirname(absolute))
@@ -281,6 +281,8 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   const states = new WeakMap<object, SessionState>()
   const callsBySession = new WeakMap<object, PendingCalls>()
+  const executions = new AsyncLocalStorage<ToolCaller>()
+  aroundTool(ctx, (exec, next) => executions.run(exec, next))
   const stateOf = (session: object): SessionState => {
     const existing = states.get(session)
     if (existing !== undefined) return existing
@@ -301,7 +303,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         const oldest = pendingCalls.keys().next()
         if (!oldest.done) pendingCalls.delete(oldest.value)
       }
-      pendingCalls.set(event.data.callId, { name: event.data.name, arguments: event.data.arguments })
+      pendingCalls.set(event.data.callId, { name: event.data.name, arguments: event.data.arguments, cwd: effectiveDirectory(ctx, session) })
       return
     }
     if (event.type !== 'tool/result') return
@@ -313,20 +315,30 @@ export function apply(ctx: Context, config: Config = {}): void {
     // been reached at all. The failure bit moved between releases; the adapter
     // reads both spellings.
     if (event.data.error !== undefined || toolResultFailed(event.data.message)) return
-    const path = touchedPathOfToolCall(call.name, call.arguments)
+    const path = call.observedPath ?? touchedPathOfToolCall(call.name, call.arguments)
     if (path === undefined) return
     const state = stateOf(session)
     if (state.touched.size >= MAX_TOUCHED_PATHS) return
-    state.touched.add(path)
+    if (isAbsolute(path)) state.touched.add(path)
+    else if (call.cwd !== undefined) state.touched.add(resolve(call.cwd, path))
   })
 
   ctx.inject(['fs'], (scope: Context) => {
+    // Native tools report the actual canonical target with their execution as
+    // actor. Prefer it over a pre-dispatch cwd snapshot: ensure() may recover a
+    // missing cwd, and a directory change can race the tool's async resolution.
+    scope.on('fs/observed', (target, _observation, actor) => {
+      const exec = executions.getStore()
+      if (exec?.agent === undefined || FILE_TOUCH_TOOL_NAMES[exec.name] !== true || actor !== exec) return
+      const call = callsBySession.get(exec.agent.session)?.get(exec.callId)
+      if (call !== undefined) call.observedPath = scope.fs.processPath(target)
+    })
     scope.on('agent/pre-step', async ({ agent, messages, signal }, next) => {
       const decision = await next()
       // A rejected step never delivers: the touch stays queued for the step that
       // actually enters.
       if (decision.kind !== 'enter') return decision
-      const seeded = await pending(scope, states, agent, config, maxBytes, signal)
+      const seeded = await pending(scope, states, agent, config, maxBytes, signal, decision.messages)
       if (seeded === undefined) return decision
       signal.throwIfAborted()
       // Splice in at the same place upstream's own instruction baseline goes:
@@ -334,7 +346,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       // context stays adjacent instead of displacing the operator's prompt.
       const lastClaimed = decision.messages.findLastIndex(message => messages.includes(message))
       return { ...decision, messages: decision.messages.toSpliced(lastClaimed + 1, 0, seeded) }
-    })
+    }, { prepend: true })
   })
 }
 
@@ -358,6 +370,7 @@ async function pending(
   config: Config,
   maxBytes: number,
   signal: AbortSignal,
+  messages: readonly UserMessage[],
 ): Promise<UserMessage | undefined> {
   const session = agent.session
   const state: SessionState = states.get(session) ?? { scopes: new Map(), touched: new Set() }
@@ -369,11 +382,8 @@ async function pending(
   // A root the scope no longer grants — removed, missing, or redirected — must
   // be retracted. `sanitizeAdditionalRoots` already withheld the unusable ones,
   // so "absent from the scope" is the single condition to react to.
-  const granted = new Set(scope.additionalRoots)
-  const revoked = [...new Set([...state.scopes.values()].map(entry => entry.root))]
-    .filter(root => !granted.has(root))
-
   const rendered: RenderedRoot[] = []
+  const nativeCopy = nativeInstructionCopies(messages, effectiveDirectory(ctx, session))
   const gone: GoneScope[] = []
   const updates: Array<{ readonly key: string; readonly scope: DeliveredScope }> = []
 
@@ -383,21 +393,27 @@ async function pending(
       let remaining = maxBytes
       for (const root of scope.additionalRoots) {
         signal.throwIfAborted()
-        const plan = await planRoot(ctx, api, root, config, state, session, signal)
+        const plan = await planRoot(ctx, api, root, config, state, signal)
         gone.push(...plan.gone)
         if (plan.deliveries.length === 0) continue
         if (remaining <= 0) {
           retryTouches = true
           continue
         }
-        const { text, omitted, truncated } = api.render(plan.deliveries.map(entry => entry.file), { maxBytes: remaining })
+        const deliveries = plan.deliveries.filter(entry => {
+          if (!nativeCopy(entry.file)) return true
+          updates.push({ key: entry.key, scope: { root, path: entry.file.absolutePath, digest: digestOf(entry.file.content) } })
+          return false
+        })
+        if (deliveries.length === 0) continue
+        const { text, omitted, truncated } = api.render(deliveries.map(entry => entry.file), { maxBytes: remaining })
         const omittedPaths = new Set(omitted.map(file => file.absolutePath))
         const truncatedPaths = new Set(truncated.map(file => file.displayPath))
         if (omitted.length > 0 || truncated.length > 0 || text === '') retryTouches = true
         if (text === '') continue
         remaining -= Buffer.byteLength(text, 'utf8')
         rendered.push({ root, text })
-        for (const entry of plan.deliveries) {
+        for (const entry of deliveries) {
           if (omittedPaths.has(entry.file.absolutePath)) continue
           updates.push({ key: entry.key, scope: {
             root, path: entry.file.absolutePath,
@@ -408,20 +424,25 @@ async function pending(
     }
   }
 
-  const text = composeInstructionMessage(rendered, revoked, gone.map(entry => entry.scope))
+  // Discovery/read awaits can span revocation or redirect. Publish only files
+  // still inside the live root set, and retract any earlier delivery now gone.
+  const current = new Set(ctx.multiRootScope.resolve(ctx.sandboxPolicy.resolve({ session })).additionalRoots)
+  const revoked = [...new Set([...state.scopes.values()].map(entry => entry.root))].filter(root => !current.has(root))
+  const liveUpdates = updates.filter(entry => current.has(entry.scope.root))
+  const text = composeInstructionMessage(rendered.filter(entry => current.has(entry.root)), revoked, gone.filter(entry => current.has(entry.scope.root)).map(entry => entry.scope))
   const message = text === undefined ? undefined : await createInstructionMessage({ text, plugin: PLUGIN_SOURCE })
   signal.throwIfAborted()
   // Keep budget-deferred directories discoverable without another tool call.
   // Delete only the evaluated snapshot, preserving new touches during I/O.
   if (!retryTouches) for (const touch of evaluatedTouches) state.touched.delete(touch)
-  if (text !== undefined) {
+  if (text !== undefined || liveUpdates.length > 0) {
     // The message is built, so the bookkeeping it was built from is now the
     // recorded truth: withdrawals are forgotten and deliveries are remembered.
     for (const root of revoked) {
       for (const [key, entry] of state.scopes) if (entry.root === root) state.scopes.delete(key)
     }
     for (const entry of gone) state.scopes.delete(entry.key)
-    for (const entry of updates) state.scopes.set(entry.key, entry.scope)
+    for (const entry of liveUpdates) state.scopes.set(entry.key, entry.scope)
   }
   return message
 }
@@ -475,7 +496,6 @@ interface DirectoryWalk {
  * @param root - the canonical additional root.
  * @param config - the row's configuration.
  * @param state - the session's delivery state.
- * @param session - the session, for the cwd a relative touch resolves against.
  * @param signal - the turn's cancellation signal.
  * @returns the files to send and the deliveries to withdraw.
  */
@@ -485,7 +505,6 @@ async function planRoot(
   root: string,
   config: Config,
   state: SessionState,
-  session: Session,
   signal: AbortSignal,
 ): Promise<RootPlan> {
   const delivered = new Map<string, DeliveredScope>()
@@ -497,7 +516,7 @@ async function planRoot(
     if (dir !== root) dirs.add(dir)
   }
   for (const touched of state.touched) {
-    const parent = parentDirectoryOf(touched, session)
+    const parent = parentDirectoryOf(touched)
     if (parent === undefined || !isCanonicallyUnder(parent, root)) continue
     // Every ancestor up to the root, not just the file's own directory. The
     // walk for `<root>/a/b` REPORTS `<root>/a/AGENTS.md` (discovery walks
@@ -632,13 +651,20 @@ async function loadDirectory(
 
   const files: LoadedInstructionFile[] = []
   for (const candidate of candidates) {
+    // Global display paths do not resolve relative to projectRoot. This also
+    // excludes a global home placed *inside* an explicitly registered root.
+    if (isAbsolute(candidate.displayPath) || resolve(root, candidate.displayPath) !== resolve(candidate.absolutePath)) continue
     if (!isCanonicallyUnder(canonicalPath(candidate.absolutePath), root)) continue
     try {
       const target = await fs.resolve(candidate.absolutePath)
+      const path = fs.processPath(target)
+      if (!isCanonicallyUnder(path, root)) continue
       const info = await fs.stat(target, signal)
       if (info === undefined || info.type !== 'file') continue
       if (info.size !== undefined && info.size > maxSourceBytes) continue
-      files.push({ ...candidate, displayPath: candidate.absolutePath, content: await fs.readText(target, signal) })
+      const content = await fs.readText(target, signal)
+      if (canonicalPath(candidate.absolutePath) !== path || !isCanonicallyUnder(path, root)) continue
+      files.push({ ...candidate, displayPath: candidate.absolutePath, content })
     } catch {
       continue
     }
