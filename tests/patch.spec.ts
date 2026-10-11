@@ -177,4 +177,9 @@ describe('inserted rows', () => {
       maxAdditionalRoots: 16,
     })
   })
+
+  it('defaults the scope row to no per-tool caps', () => {
+    const scope = inserted.find(row => row.id === 'multi-root-scope')
+    expect(scope?.config).toMatchObject({ toolAccess: {} })
+  })
 })

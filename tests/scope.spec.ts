@@ -195,11 +195,15 @@ describe('workspace topology context', () => {
 
   it('states the additional roots next to the sandbox policy sentence', async () => {
     promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
-    expect(await topology()).toBe(
-      `Current DSH workspace roots: ${JSON.stringify([fixture.outside])} are additional roots of this session's workspace. `
-      + `Under workspace-write they may be modified like the session workspace; the session origin remains the primary root `
-      + `(${JSON.stringify(fixture.workspace)}); changing the working directory does not change these grants.`,
-    )
+    let expected = `Current DSH workspace roots: ${JSON.stringify([fixture.outside])} are writable additional roots of this session's workspace. `
+      + `The session origin remains the primary root (${JSON.stringify(fixture.workspace)}); `
+      + 'changing the working directory does not change these grants. '
+      + 'Grant changes apply to later operations and newly started processes, not to processes already running.'
+    if (process.platform === 'win32') {
+      expected += ' Writable additional roots are enforced for shell processes by the upstream Windows ACL '
+        + 'restricted-token sandbox, whose enforcement is reported as partial; reads are not confined by it.'
+    }
+    expect(await topology()).toBe(expected)
     const snapshot = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))
     expect(snapshot.indexOf('Current DSH file policy')).toBeLessThan(snapshot.indexOf('Current DSH workspace roots'))
   })
@@ -216,7 +220,7 @@ describe('workspace topology context', () => {
     expect(assembly.contexts.find(context => context.name === MULTI_ROOT_CONTEXT_NAME)?.text).toBe('')
   })
 
-  it('contributes nothing while the policy is read-only, even with additional roots', async () => {
+  it('states membership without a write promise while the policy is read-only', async () => {
     promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
     const readOnly = new Context()
     const fibers = [
@@ -228,8 +232,12 @@ describe('workspace topology context', () => {
     try {
       readOnly.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
       const assembly = await readOnly.systemPrompt.assemble({ agent: agent() })
-      expect(assembly.contexts.find(context => context.name === MULTI_ROOT_CONTEXT_NAME)?.text).toBe('')
-      expect(renderContextSnapshot(assembly)).not.toContain('workspace roots')
+      expect(assembly.contexts.find(context => context.name === MULTI_ROOT_CONTEXT_NAME)?.text).toBe(
+        `Current DSH workspace roots: ${JSON.stringify([fixture.outside])} are additional roots of this session's `
+        + 'workspace and are readable; nothing is writable in read-only mode.',
+      )
+      // The text names membership only: no root is called writable.
+      expect(renderContextSnapshot(assembly)).toContain('nothing is writable in read-only mode')
     } finally {
       while (fibers.length > 0) await fibers.pop()?.dispose()
     }
@@ -246,6 +254,13 @@ describe('workspace topology context', () => {
     const second = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))
     expect(second).toBe(first)
     expect(first).toContain(JSON.stringify([fixture.outside, canonicalPath(third)]))
+
+    // An alias is display-only: it never reaches the model-facing text.
+    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { ...root('a', fixture.outside), alias: 'payments' },
+      root('b', third),
+    ])
+    expect(renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))).toBe(first)
   })
 
   it('mounts without a system-prompt seam at all (soft dependency)', async () => {

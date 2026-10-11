@@ -56,6 +56,12 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/providers'
     - id: multi-root-scope
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/scope'
+      config:
+        # Per-tool write caps: a tool listed here may never write ANY
+        # additional root (the primary root is unaffected). `read-only` is the
+        # only legal value; anything else fails closed — every additional-root
+        # write is refused for the session. Empty map: no cap at all.
+        toolAccess: {}
     - id: multi-root-registry
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
       config:

@@ -40,13 +40,13 @@ interface Mounted {
 }
 
 /** Mount the SHIPPED provider and pin the real upstream Windows ACL runner. */
-async function mountProvider(workspace: string): Promise<Mounted> {
+async function mountProvider(workspace: string, scopeConfig: ConstructorParameters<typeof MultiRootScopeService>[1] = {}): Promise<Mounted> {
   const ctx = new Context()
   // Execute the shipped provider: its import.meta.url must locate the built
   // standalone runner, not a nonexistent src/windows-runner.js under Vitest.
   const { MultiRootSandboxProvider } = await import(pathToFileURL(join(REPO_ROOT, 'lib/sandbox.js')).href) as typeof import('../src/sandbox.ts')
   ctx.provide('sandboxPolicy', {} as never)
-  await ctx.plugin(MultiRootScopeService)
+  await ctx.plugin(MultiRootScopeService, scopeConfig)
   await mountCompat(ctx)
   await ctx.plugin(MultiRootSandboxProvider)
   const provider = ctx.sandbox as MultiRootSandboxProvider
@@ -631,6 +631,48 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       )
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
   }, 300_000)
+
+  it('drops the additional-root grant for a capped tool dispatch', async () => {
+    const fixture = createFixtureWorkspace('win-toolcap')
+    const primary = fixture.workspace
+    const a = join(fixture.base, 'extra-a')
+    mkdirSync(a)
+    const mounted = await mountProvider(primary, { toolAccess: { bash: 'read-only' } })
+    try {
+      mounted.ctx.multiRootScope.setAdditionalRoots(primary, [
+        { id: 'a', path: a, recordedPath: canonicalPath(a), access: 'read-write' },
+      ])
+      const waterfall = mounted.ctx.waterfall.bind(mounted.ctx) as (
+        event: string,
+        exec: { name: string; callId: string },
+        next: () => Promise<unknown>,
+      ) => Promise<unknown>
+      const dispatch = (name: string, body: () => Promise<unknown>) => waterfall('tools/execute', { name, callId: name }, body)
+
+      // Uncapped: the widened runner grants A and a confined write lands.
+      await dispatch('write', async () => {
+        const confined = await mounted.provider.confine([process.execPath, '-e', writeProbe([a], 'uncapped.txt')], mounted.policy)
+        expect(confined.argv.slice(1)).toContain('--additional-root')
+        const result = await spawnArgv(confined.argv[0]!, confined.argv.slice(1))
+        expect(result.stdout.trim()).toBe('allowed')
+        expect(existsSync(join(a, 'uncapped.txt'))).toBe(true)
+      })
+
+      // Capped: the runner is never given --additional-root, so the kernel
+      // token alone refuses the write for Node and PowerShell alike.
+      await dispatch('bash', async () => {
+        const confined = await mounted.provider.confine([process.execPath, '-e', writeProbe([a], 'capped.txt')], mounted.policy)
+        expect(confined.argv.slice(1)).not.toContain('--additional-root')
+        const node = await spawnArgv(confined.argv[0]!, confined.argv.slice(1))
+        expect(node.stdout.trim()).toMatch(/^denied:/)
+        expect(existsSync(join(a, 'capped.txt'))).toBe(false)
+        const ps = await spawnConfined(mounted, powershellArgv(
+          `try { Set-Content -Path ${JSON.stringify(join(a, 'capped-ps.txt'))} -Value bad; 'allowed' } catch { 'denied' }`,
+        ))
+        expect(ps.stdout.trim()).toBe('denied')
+      })
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
 
   it('runs Git Bash confined when a Git installation is present', async (context) => {
     const fixture = createFixtureWorkspace('win-bash')
