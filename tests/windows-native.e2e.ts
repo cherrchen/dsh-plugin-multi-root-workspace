@@ -277,21 +277,19 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
         return
       }
       hijacked = true
-      // The premise to prove first: the setup must be effective, i.e. even the
-      // UNCONFINED test process cannot write into the foreign directory. On an
-      // elevated runner the DACL edit may leave the caller able to write, in
-      // which case "foreign-owned" was never established and nothing below is
-      // meaningful.
-      const unconfinedProbe = join(foreign, 'unconfined.txt')
-      let callerCanWrite = false
-      try {
-        writeFileSync(unconfinedProbe, 'x')
-        callerCanWrite = true
-        rmSync(unconfinedProbe, { force: true })
-      } catch { /* expected: the lockout works */ }
-      if (callerCanWrite) {
-        if (process.env.CI !== undefined) expect.unreachable('the caller can still write the foreign-owned directory; the icacls lockout is ineffective on this host')
-        context.skip('the caller can still write the foreign-owned directory; the lockout is ineffective')
+      // The premise to prove first: the setup must be effective. An unconfined
+      // WRITE probe is not a valid check on an elevated host — libuv opens
+      // files with FILE_FLAG_BACKUP_SEMANTICS and the elevated runner token
+      // holds backup/restore privileges, so the unconfined process bypasses
+      // the DACL entirely (the restricted-token child cannot). Read the ACL
+      // back instead: the Everyone DENY entry must be present.
+      const acl = icacls([foreign])
+      const aclText = `${acl.stdout}\n${acl.stderr}`
+      // icacls renders a deny ACE as e.g. `Everyone:(OI)(CI)(DENY)(W,D,DC)`.
+      if (!/(everyone|S-1-1-0)[^\r\n]*\(DENY\)/i.test(aclText)) {
+        restore()
+        if (process.env.CI !== undefined) expect.unreachable(`the Everyone deny ACE is missing from the ACL; icacls says:\n${aclText}`)
+        context.skip(`cannot verify the deny ACE on this host; icacls says:\n${aclText}`)
         return
       }
       mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: foreign, recordedPath: canonicalPath(foreign) }])
@@ -442,16 +440,21 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
         { name: 'cmd-ping', argv: ['cmd.exe', '/d', '/c', 'ping -n 60 127.0.0.1'] },
         { name: 'powershell-sleep', argv: ['powershell.exe', '-NoProfile', '-Command', 'Start-Sleep -Seconds 60'] },
       ]
-      // One run of the same argv per terminal: the property is PARITY —
-      // whatever upstream's Ctrl+C semantics are under the restricted token,
-      // the widened runner must match them.
-      const interruptOutcome = async (argv: readonly string[], ready?: string): Promise<'interrupted' | 'timeout' | 'failed' | 'no-input'> => {
+      // One run of the same argv per terminal. The upstream runner calls
+      // SetConsoleCtrlHandler(NULL, TRUE) — an ignore-Ctrl+C attribute the
+      // confined child INHERITS — while our runner's SIGINT handling is a Node
+      // handler and is not inherited. So parity is not the property: the
+      // property is that the PLUGIN run is interrupted and exits with the
+      // child's own code (the runner forwarded Ctrl+C and mirrored the child's
+      // exit rather than dying itself).
+      type Interrupt = { outcome: 'interrupted' | 'timeout' | 'failed' | 'no-input'; exitCode?: number | null }
+      const interruptOutcome = async (argv: readonly string[], ready?: string): Promise<Interrupt> => {
         const terminal = await mounted.ctx.subprocess.spawnTerminal({
           argv: [...argv], cwd: fixture.workspace, rows: 24, cols: 100, terminalType: 'xterm-256color', graceMs: 3000,
         })
         terminals.push(terminal)
         terminal.output.resume()
-        if (typeof terminal.write !== 'function') return 'no-input'
+        if (typeof terminal.write !== 'function') return { outcome: 'no-input' }
         try {
           if (ready !== undefined) {
             // Wait until the child is demonstrably running (its ready marker)
@@ -467,8 +470,11 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
           }
           await terminal.write('\x03')
           return await Promise.race([
-            terminal.done.then(() => 'interrupted' as const, () => 'failed' as const),
-            new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), 20_000)),
+            terminal.done.then(
+              done => ({ outcome: 'interrupted' as const, exitCode: done.exitCode }),
+              () => ({ outcome: 'failed' as const }),
+            ),
+            new Promise<Interrupt>(resolve => setTimeout(() => resolve({ outcome: 'timeout' }), 20_000)),
           ])
         } finally {
           await terminal.terminate()
@@ -476,16 +482,18 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       }
       const unconfinedOutcomes: string[] = []
       let baseline: (typeof candidates)[number] | undefined
+      let baselineExitCode: number | null | undefined
       for (const candidate of candidates) {
-        const outcome = await interruptOutcome(candidate.argv, candidate.ready)
-        unconfinedOutcomes.push(`${candidate.name}=${outcome}`)
-        console.info(`ConPTY Ctrl+C unconfined candidate ${candidate.name}: ${outcome}`)
-        if (outcome === 'no-input') {
+        const result = await interruptOutcome(candidate.argv, candidate.ready)
+        unconfinedOutcomes.push(`${candidate.name}=${result.outcome}`)
+        console.info(`ConPTY Ctrl+C unconfined candidate ${candidate.name}: ${result.outcome}`)
+        if (result.outcome === 'no-input') {
           context.skip('this release exposes no terminal input API')
           return
         }
-        if (outcome === 'interrupted') {
+        if (result.outcome === 'interrupted') {
           baseline = candidate
+          baselineExitCode = result.exitCode
           break
         }
       }
@@ -496,14 +504,20 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       const upstream = await mounted.provider.confine(baseline!.argv, mounted.policy)
       mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
       const widened = await mounted.provider.confine(baseline!.argv, mounted.policy)
-      const upstreamOutcome = await interruptOutcome(upstream.argv, baseline!.ready)
-      const pluginOutcome = await interruptOutcome(widened.argv, baseline!.ready)
-      console.info(`ConPTY Ctrl+C (program=${baseline!.name}): upstream=${upstreamOutcome} plugin=${pluginOutcome}`)
-      if (upstreamOutcome === 'no-input' || pluginOutcome === 'no-input') {
+      const upstreamResult = await interruptOutcome(upstream.argv, baseline!.ready)
+      console.info(`ConPTY Ctrl+C upstream (program=${baseline!.name}): ${upstreamResult.outcome} — ` +
+        'an upstream runner characteristic: its SetConsoleCtrlHandler ignore flag is inherited by the confined child, ' +
+        'so a timeout here is expected and not asserted')
+      const pluginResult = await interruptOutcome(widened.argv, baseline!.ready)
+      console.info(`ConPTY Ctrl+C plugin (program=${baseline!.name}): ${pluginResult.outcome} exit=${String(pluginResult.exitCode)}`)
+      if (upstreamResult.outcome === 'no-input' || pluginResult.outcome === 'no-input') {
         context.skip('this release exposes no terminal input API')
         return
       }
-      expect(pluginOutcome).toBe(upstreamOutcome)
+      expect(pluginResult.outcome, 'the plugin-confined child was not interrupted by \\x03').toBe('interrupted')
+      expect(pluginResult.exitCode,
+        `the widened runner must mirror the child's own SIGINT exit (the unconfined baseline exited ${String(baselineExitCode)}), not die as the runner itself`)
+        .toBe(baselineExitCode)
     } finally {
       for (const terminal of terminals) await terminal.terminate().catch(() => {})
       await mounted.ctx.fiber.dispose()
@@ -529,13 +543,15 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     const mounted = await mountProvider(fixture.workspace)
     try {
       const script = `echo x > '${fixture.outside.replace(/\\/g, '/')}/bash.txt' && echo bash-ok`
-      // MSYS cannot start under the write-restricted Low-integrity token
-      // (`NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0…): 0xC0000022`).
-      // That is an upstream restricted-token limitation, not a plugin defect —
-      // the property is PARITY between the upstream runner's argv and the
-      // widened runner's argv for the same child.
+      // MSYS cannot start under the write-restricted Low-integrity token:
+      // `NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0…): 0xC0000022` on
+      // newer releases, `*** fatal error - CreateFileMapping …, Win32 error
+      // 5. Terminating.` (exit 256) on 0.1.5-rc.2. That is an upstream
+      // restricted-token limitation, not a plugin defect — the property is
+      // PARITY between the upstream runner's argv and the widened runner's
+      // argv for the same child.
       const msysStartupFailure = (result: Spawned): boolean =>
-        /NtCreateDirectoryObject|0xC0000022/i.test(result.stderr) || result.status === 3221225794
+        /NtCreateDirectoryObject|0xC0000022|\*\*\* fatal error - /i.test(result.stderr) || result.status === 3221225794
       const upstream = await mounted.provider.confine([bash, '-c', script], mounted.policy)
       const upstreamResult = await spawnArgv(upstream.argv[0]!, upstream.argv.slice(1))
       mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
