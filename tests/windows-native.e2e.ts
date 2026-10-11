@@ -117,6 +117,7 @@ function writeProbeMarked(roots: readonly string[], name = 'probe.txt'): string 
 
 /** Extract the indexed `MRW:` verdicts from a ConPTY stream, ignoring ANSI/OSC escapes. */
 function ptyVerdicts(seen: string): (string | undefined)[] {
+  // eslint-disable-next-line no-control-regex -- the escape sequences are exactly what ConPTY emits.
   const clean = seen.replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, '')
   const verdicts: (string | undefined)[] = []
   for (const match of clean.matchAll(/MRW:(\d+):([^\r\n]+)/g)) {
