@@ -104,7 +104,7 @@ describe('registration lifecycle', () => {
   })
 
   it('keeps registry order and reorders on move', async () => {
-    const { registry } = await mount()
+    const { registry, scope } = await mount()
     const first = makeRoot('first')
     const second = makeRoot('second')
     const third = makeRoot('third')
@@ -117,10 +117,18 @@ describe('registration lifecycle', () => {
     // Move the last one in front of the first (what the panel's ↑ action does).
     await registry.move(primary, { kind: 'ordinal', ordinal: 3 }, { kind: 'ordinal', ordinal: 1 })
     expect(registry.granted(primary)).toEqual([third, first, second])
+    expect(scope.scopeOf(primary)).toEqual([third, first, second])
+    expect(storedPaths()).toEqual([third, first, second])
+
+    await disposeAll()
+    const restarted = await mount()
+    expect(restarted.scope.scopeOf(primary)).toEqual([third, first, second])
 
     // No anchor moves it to the end.
-    await registry.move(primary, { kind: 'ordinal', ordinal: 1 })
-    expect(registry.granted(primary)).toEqual([first, second, third])
+    await restarted.registry.move(primary, { kind: 'ordinal', ordinal: 1 })
+    expect(restarted.registry.granted(primary)).toEqual([first, second, third])
+    expect(restarted.scope.scopeOf(primary)).toEqual([first, second, third])
+    expect(storedPaths()).toEqual([first, second, third])
   })
 
   it('sets and clears a display alias without touching the path', async () => {
@@ -622,7 +630,7 @@ describe('fresh classification inside every mutation', () => {
     expect(publications).toBe(1)
   })
 
-  it('fires no scope publication for alias and move on a healthy store', async () => {
+  it('publishes changed root order once but stays silent for alias, refresh and a no-op move', async () => {
     const { registry, scope } = await mount()
     const first = makeRoot('first')
     const second = makeRoot('second')
@@ -632,11 +640,18 @@ describe('fresh classification inside every mutation', () => {
     let publications = 0
     const unsubscribe = scope.subscribe(() => { publications += 1 })
     await registry.setAlias(primary, { kind: 'ordinal', ordinal: 1 }, 'one')
+    await registry.refresh(primary)
+    await registry.move(primary, { kind: 'ordinal', ordinal: 2 })
+    expect(publications).toBe(0)
     await registry.move(primary, { kind: 'ordinal', ordinal: 2 }, { kind: 'ordinal', ordinal: 1 })
+    expect(publications).toBe(1)
+    await registry.refresh(primary)
+    await registry.move(primary, { kind: 'ordinal', ordinal: 2 })
     unsubscribe()
 
-    expect(publications).toBe(0)
+    expect(publications).toBe(1)
     expect(registry.granted(primary)).toEqual([second, first])
+    expect(scope.scopeOf(primary)).toEqual([second, first])
   })
 
   it('serializes a concurrent add/remove/alias/move burst with no lost write', async () => {

@@ -603,16 +603,8 @@ try {
     check.equal(readFileSync(join(primaryRepo, 'README.md'), 'utf8'), PRIMARY_README, 'web: the primary repository is byte-identical')
     check.equal(readFileSync(join(outsideRoot, 'keep.txt'), 'utf8'), 'untouched\n', 'web: a file outside every root is byte-identical')
     check.ok(!existsSync(join(outsideRoot, 'denied.txt')), 'web: the write outside every root left no file behind')
-    // The cap proofs, read off the world rather than the model's report: the
-    // confined shell's write into the additional root never landed, the same
-    // shell's write into the primary root did, and the uncapped write tool
-    // kept the full grant.
-    check.ok(!existsSync(join(additionalRepo, 'capped-shell.txt')), `web: capped ${shellTool} could not write the additional root`)
-    check.ok(existsSync(join(primaryRepo, 'shell-primary.txt')), `web: capped ${shellTool} still writes the primary root`)
-    rmSync(join(primaryRepo, 'shell-primary.txt'), { force: true })
     check.equal(readFileSync(join(additionalRepo, 'write-tool.txt'), 'utf8'), 'written by the write tool\n', 'web: the uncapped write tool keeps the additional-root grant')
     check.contains(git(additionalRepo, 'status', '--porcelain'), ' M README.md', 'web: git reports the change in the other repository')
-    check.equal(git(primaryRepo, 'status', '--porcelain'), '', 'web: the primary repository has no local changes')
 
     const webRequests = model.steps.slice(stepsBeforeWeb)
     // Tool results travel back to the model, so the step requests are the one
@@ -633,11 +625,17 @@ try {
     // operator's denial text is built from.
     check.contains(webRendered, 'file access denied under workspace-write mode', 'web: the tool layer reported the outside write as a sandbox denial')
     if (webShellUnavailable) {
-      check.skip(`web: confined ${shellTool} (git diff and the other repository's check) — ${runnerSkip()}`)
+      check.skip(`web: confined ${shellTool} (per-tool cap writes, git diff and the other repository's check) — ${runnerSkip()}`)
     } else {
+      // A missing additional-root marker proves the cap only when the shell
+      // actually ran; its primary-root write is the positive control.
+      check.ok(!existsSync(join(additionalRepo, 'capped-shell.txt')), `web: capped ${shellTool} could not write the additional root`)
+      check.ok(existsSync(join(primaryRepo, 'shell-primary.txt')), `web: capped ${shellTool} still writes the primary root`)
       check.contains(webRendered, 'README.md |', `web: ${shellTool} saw the other repository's diff`, webRendered.slice(-800))
       check.contains(webRendered, 'repo-b check ok', `web: ${shellTool} ran the other repository's check`, webRendered.slice(-800))
     }
+    rmSync(join(primaryRepo, 'shell-primary.txt'), { force: true })
+    check.equal(git(primaryRepo, 'status', '--porcelain'), '', 'web: the primary repository has no local changes')
     const webExcerpt = webRendered.slice(-800)
     check.contains(webRendered, jsonText(canonical(additionalRepo)), 'web: the model\'s request names the additional root', webExcerpt)
     check.contains(webRendered, 'additional roots of this session\'s workspace', 'web: the runtime-context snapshot states the topology', webExcerpt)
@@ -699,18 +697,18 @@ try {
     check.equal(readFileSync(join(additionalRepo, 'README.md'), 'utf8'), EDITED_README, 'headless: the additional root carries the agent\'s write')
     check.equal(readFileSync(join(primaryRepo, 'README.md'), 'utf8'), PRIMARY_README, 'headless: the primary repository is byte-identical')
     check.ok(!existsSync(join(outsideRoot, 'denied.txt')), 'headless: the write outside every root left no file behind')
-    check.ok(!existsSync(join(additionalRepo, 'capped-shell.txt')), `headless: capped ${shellTool} could not write the additional root`)
-    check.ok(existsSync(join(primaryRepo, 'shell-primary.txt')), `headless: capped ${shellTool} still writes the primary root`)
-    rmSync(join(primaryRepo, 'shell-primary.txt'), { force: true })
     check.equal(readFileSync(join(additionalRepo, 'write-tool.txt'), 'utf8'), 'written by the write tool\n', 'headless: the uncapped write tool keeps the additional-root grant')
     check.contains(git(additionalRepo, 'status', '--porcelain'), ' M README.md', 'headless: git reports the change in the other repository')
 
     const headlessResults = model.steps.slice(stepsBeforeHeadless).map(request => JSON.stringify(request)).join('\n')
     if (runnerFailed(headlessResults)) {
-      check.skip(`headless: confined ${shellTool} — ${runnerSkip()}`)
+      check.skip(`headless: confined ${shellTool} (per-tool cap writes and the other repository's check) — ${runnerSkip()}`)
     } else {
+      check.ok(!existsSync(join(additionalRepo, 'capped-shell.txt')), `headless: capped ${shellTool} could not write the additional root`)
+      check.ok(existsSync(join(primaryRepo, 'shell-primary.txt')), `headless: capped ${shellTool} still writes the primary root`)
       check.contains(headlessResults, 'repo-b check ok', `headless: ${shellTool} ran the other repository's check`, headlessResults.slice(-800))
     }
+    rmSync(join(primaryRepo, 'shell-primary.txt'), { force: true })
 
     const headlessRequests = model.steps.slice(stepsBeforeHeadless)
     const headlessRendered = headlessRequests.map(request => JSON.stringify(request)).join('\n')

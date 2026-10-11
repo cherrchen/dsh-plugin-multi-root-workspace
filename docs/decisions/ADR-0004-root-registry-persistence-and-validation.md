@@ -38,7 +38,7 @@ M3 要把"哪些目录是附加根"从测试注入变成用户可管理的持久
 12. **重复 id 的处置**：读取时若同一 id 出现在多条记录中，**这些记录全部**报 `invalid`、全部不授予。"按 id 取第一条"正是让存储无法解读的歧义来源。清理由 `removeAt` 按第 17 条的 entry ref 删除**一条**；单独 id 有多个匹配时直接拒绝。
 13. **读取也重新校验，但不写存储**：`refresh(primaryRoot)` = 重新 `stat` 每个登记目录 + 重新解析 + 重新裁决 + 重播种 scope + 通知监听者，**不落盘**；命令 `list` 与面板 `list` 端点都走它。理由：没有重新校验的"刷新"会让面板列出的范围与实际授予的范围长期不一致（目录删掉后仍显示 `available`），而只读刷新若落盘又会把"看一眼列表"变成一次写入。`recheck` 保留为"refresh + 落盘一次"，仅供需要持久化重判结果的调用方使用。
 14. **写操作按主根整体串行**：每次变更的"读快照 → 校验 → 落盘"整段进入该主根的 Promise 队列。存储域只串行化单个 `put()`/`delete()`，不足以覆盖读—改—写：并发 `add(A)`/`add(B)` 会双双成功却只留一条，`remove` 与 `add` 并发会把已删除的记录写回去。这是对本文档原「风险与处置」里"domain 层串行化写入链即足够"这一判断的更正。
-15. **`publish` 幂等**：仅当"实际授予集合 + 不可用集合"发生变化时才重播种 scope 并通知监听者。重新校验因此可以随时执行而不产生抖动，也不会在每次列目录时重复告警。
+15. **`publish` 幂等**：仅当"按登记顺序排列的实际授予根（含 access）+ 不可用根状态"发生变化时才重播种 scope 并通知监听者。重新校验因此可以随时执行而不产生抖动，也不会在每次列目录时重复告警。排序语义由下方 2026-10-12 修订明确。
 
 ### 2026-09-13 第二轮审查补充
 
@@ -49,7 +49,11 @@ M3 要把"哪些目录是附加根"从测试注入变成用户可管理的持久
 
 ### 2026-10-11 修订：mutation 前先重新分类（B5）
 
-原先 `add` / `removeAt` / `setAlias` / `move` 在串行队列内读的是 `statusesOf` 的**缓存**分类：根 A 缓存为 `missing` 时它不进 `existing`，其目录恢复后立刻 `add` 其子路径会通过校验、落盘一条随后被判 `nested` 的 invalid 记录；revive 判定同样读缓存，缓存 `available` 而实际 `redirected` 时重加原路径会新建第二条同路径记录。现改为：每个 mutation 的 serialize job 第一步以**存储记录**重新 `reclassify`（重新 stat / realpath、重发布——先发布撤销再授予顺序不变），校验与 ref 解析一律使用这份 fresh 列表；revive 也只看 fresh 分类。`refresh`/`recheck` 语义不变。元数据 mutation（alias、move）不消费分类结果，文件系统未变化时其 publish 签名必须逐字节相同——不允许元数据操作意外变成 grant 变化。mutation 抛错（校验失败或存储 `put` 失败）时内存 scope 与持久态一致：重发布反映的是存储记录。见 [ADR-0014](./ADR-0014-root-limit-and-provider-conflict.md)。
+原先 `add` / `removeAt` / `setAlias` / `move` 在串行队列内读的是 `statusesOf` 的**缓存**分类：根 A 缓存为 `missing` 时它不进 `existing`，其目录恢复后立刻 `add` 其子路径会通过校验、落盘一条随后被判 `nested` 的 invalid 记录；revive 判定同样读缓存，缓存 `available` 而实际 `redirected` 时重加原路径会新建第二条同路径记录。现改为：每个 mutation 的 serialize job 第一步以**存储记录**重新 `reclassify`（重新 stat / realpath、重发布——先发布撤销再授予顺序不变），校验与 ref 解析一律使用这份 fresh 列表；revive 也只看 fresh 分类。`refresh`/`recheck` 语义不变。原修订把 alias、move 都视为不应重发布的元数据操作；其中 move 的发布规则由下方排序修订更正。mutation 抛错（校验失败或存储 `put` 失败）时内存 scope 与持久态一致：重发布反映的是存储记录。见 [ADR-0014](./ADR-0014-root-limit-and-provider-conflict.md)。
+
+### 2026-10-12 修订：排序同步到实时 scope（PR #10）
+
+`publish` 签名不再排序：可用根按注册表顺序进入 scope，因为指令发现按该顺序消费所有附加根共享的字节预算（[ADR-0010](./ADR-0010-additional-root-instruction-scope.md)）。成功持久化的 `move` 若改变顺序，必须立即重发布；否则面板与存储显示新顺序，模型却继续按旧顺序获得指令，直到进程重启。alias、不改变顺序的 move、分类不变的 refresh 仍保持签名不变，不重复发布。回归同时验证实时与重启后的顺序、单次发布及真实 `agent/pre-step` 在有限预算下对新会话的指令优先级。
 
 ## Alternatives Considered
 

@@ -757,19 +757,18 @@ export class MultiRootRegistry extends Service {
    * the scope rebuilds its root table on each call, skipping the no-op write is
    * also what keeps the read path cheap.
    *
-   * The signature is order-insensitive on purpose: a `move` (or an `alias`)
-   * changes only presentation, and metadata-only mutations must not republish
-   * a grant the filesystem never changed — the scope keeps its existing order
-   * until the granted SET actually differs.
+   * Available roots keep registry order: instruction discovery consumes them
+   * under a shared byte budget, so a move must update the live scope immediately.
+   * Aliases and no-op moves still leave the signature unchanged.
    */
   private publish(key: string, statuses: readonly RootStatus[]): void {
     const withheld = statuses.filter(status => status.state !== 'available')
     // Access is part of the signature: an access change IS a grant change and
-    // must republish, while alias/move still produce an identical signature.
+    // must republish, while aliases still produce an identical signature.
     const signature = [
       ...statuses.filter(status => status.state === 'available').map(status => `available:${status.access}:${recordedGrantOf(status)}`),
       ...withheld.map(status => `${status.state}:${status.path}`),
-    ].sort().join('\n')
+    ].join('\n')
     // A key with nothing published yet reads as the empty signature: the very
     // first classification of an empty key must not "publish" an empty grant
     // (and fire every listener) for a set that was already empty.

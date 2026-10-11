@@ -90,7 +90,7 @@ pnpm docs:check         # 文档结构检查
    - **web**：进程内启动 web 组合（`provideCmdline(['--no-open','--port','0'])`），创建带模型选择与 agent preset 的 root agent，用 `/workspace-folders add` 注册附加根，再驱动一轮真实 turn；
    - **headless**：以真实 CLI 子进程 `dsh --profile headless "<task>"` 跑一次性任务，注册通过预写注册表存储完成（那是子进程唯一可用的登记路径）。
 4. 断言全部落在**世界**上：`repo-b/README.md` 的字节、`repo-a` 与根外文件的字节不变、根外没有留下文件、`git status/diff` 由冒烟自己重跑、以及模型请求体里出现的拓扑快照（附加根路径 + "additional roots of this session's workspace" + cwd 不变）。工具结果从**模型自己的请求体**里读（工具结果会回传给模型），因此两条腿用同一套判据。
-5. 无法嵌套内核沙箱的宿主上，受限 bash 的两项显式 skip 并打印原因（`git diff` 与 `repo-b` 检查的断言随之 skip），其余断言照常执行。
+5. 无法嵌套内核沙箱的宿主上，两条腿的受限 shell 断言显式 skip 并打印原因：包括 per-tool cap 的附加根拒写 / 主根可写文件标记、`git diff` 与 `repo-b` 检查。只有 runner 可用时才检查这些产物，避免命令根本没执行却把缺少主根标记误报为失败，或把缺少附加根标记当成 cap 生效。fs 工具、拓扑与指令断言照常执行。
 
 ### 4.4 环境变量
 
