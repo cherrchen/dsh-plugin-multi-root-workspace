@@ -8,8 +8,11 @@ import { execFileSync } from 'node:child_process'
  * Returns the path unchanged on volumes where 8.3 generation is off.
  */
 export function shortPathName(path: string): string {
-  return execFileSync('cmd', ['/d', '/c', `for %I in ("${path}") do @echo %~sI`], {
+  // @types/node's ExecFileSyncOptions omits `windowsVerbatimArguments`, which
+  // the runtime does support for execFile/execFileSync.
+  const options = {
     encoding: 'utf8',
     windowsVerbatimArguments: true,
-  }).trim()
+  } as const
+  return execFileSync('cmd', ['/d', '/c', `for %I in ("${path}") do @echo %~sI`], options).trim()
 }
