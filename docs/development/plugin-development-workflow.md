@@ -36,12 +36,14 @@ pnpm lint               # oxlint（host 与 client 半部都扫）
 pnpm typecheck          # tsc -p tsconfig.host.json 与 -p tsconfig.client.json 各一次
 pnpm build              # tsc 出两面 lib/types/**/*.d.ts + tsdown 出 lib/*.js（host ESM）与 lib/client.js（浏览器闭包工厂）
 pnpm test               # vitest run：单测 + 校验规则 + 注册表（含并发/替换/恢复/跨进程 lease）+ 命令/通道 + 空根差分 parity + 方言 grant 矩阵 + client 制品/面板 + 词典 parity + patch 不变量
-pnpm kernel:probe       # 本机是否真能受限执行；能则导出 DSH_REQUIRE_KERNEL_RUNNER=1，使内核断言必须真跑
+pnpm kernel:probe       # 本机是否真能受限执行（Windows 上用真实上游 runner 双向验证 windows-acl）；能跑的方言写入 DSH_PROBE_VERIFIED_DIALECTS，使其断言必须真跑
 pnpm smoke:compose      # 组合门禁（需要先 build）
 pnpm smoke:behavior     # 空根直通 + 多根 battery + 注册表/命令 battery（需要先 build）
 pnpm smoke:journey      # 跨两个 git repo 的 web/headless 双 profile 旅程（需要先 build）
 pnpm smoke              # compose + behavior + journey
-pnpm verify:all         # lint → typecheck → build → test → kernel:probe → smoke
+pnpm pack:check         # 打包产物门禁：tarball 成员（含 lib/windows-runner.js）、exports 目标、patch 引用模块与传递 chunk
+pnpm smoke:packed       # tarball 经 dsh plugin add 装进隔离 $DSH_HOME，从安装副本跑完整 behavior battery（需要先 build）
+pnpm verify:all         # lint → typecheck → build → kernel:probe → test → smoke → pack:check → smoke:packed
 pnpm docs:check         # 文档结构检查
 ```
 
@@ -96,6 +98,7 @@ pnpm docs:check         # 文档结构检查
 | `DSH_CLI` | 指定要驱动的 `dsh` 入口；默认用 `devDependencies` 里 pin 的那份。用于支持矩阵回归 |
 | `DSH_SMOKE_HOME` | 冒烟临时根目录（默认 `tmpdir()/dsh-multi-root-smoke`） |
 | `DSH_SMOKE_KEEP=1` | 保留临时 `$DSH_HOME` 与夹具，便于事后检查；`docs:check` 已忽略 `.dsh-smoke/` |
+| `DSH_SMOKE_PLUGIN_SOURCE` | `smoke:behavior` 用 `dsh plugin add` 安装的来源（目录或 tarball）；`smoke:packed` 内部使用它指向打出的 `.tgz` |
 
 冒烟永远不会写操作者真实的 `$DSH_HOME`：脚本在组合 profile 前会把进程内 `DSH_HOME` 指向临时目录，并在启动时断言目标不是真实家目录。
 
@@ -122,6 +125,11 @@ client 面**不能**复用上游的 `clientBundle` preset：它不在任何包�
 `bundle` 在调用 tsdown 之前先跑 `scripts/clean-lib.mjs`，删掉 `lib/` 里上一轮的 **JavaScript** 面。两个原因：两个 tsdown 配置共用 `lib/` 且都设 `clean: false`（整目录清理会让 host / client 两面互相删除，并把 `build:types` 先产出的 `lib/types/` 一起带走），而共享 chunk 的文件名带内容哈希、内容一变旧名字就永久留在原地。`files` 发布的是 `lib/*.js`，所以这一清理是"`pnpm pack` 绝不把历史 chunk 当死代码打进去"的保证——CI 在干净 checkout 上永远碰不到这个问题，**只有本地打包会**。`lib/types/**/*.d.ts` 不匹配该清理的扩展名，保持不动。
 
 client 测试分两层：`tests/client-bundle.spec.ts` 断言**制品字节**（banner、`exports.apply`/`exports.inject`、唯一 external 是 react、manifest 的 `./client` 与 `dsh.client` 声明）；`tests/client-panel.spec.tsx` 在 jsdom 里直接应用真实 client 入口、渲染注册的组件，并断言它对通道发出的 `(channel, endpoint, payload)` 三元组。
+
+### 4.7 打包产物验证（`pack:check` / `smoke:packed`）
+
+- `pnpm pack:check`（`scripts/check-pack.mjs`）：`pnpm pack` 到临时目录后用自带的 tar 解析器（ustar + GNU `L` + pax，不依赖 GNU tar，Windows 可用）列出全部成员，并断言——必备文件（`package.json`、`cordis.patch.yml`、双语 README/CHANGELOG、LICENSE、`lib/index.js` / `client.js` / `windows-runner.js`）、`exports` 声明的每个 `default` / `types` 目标、`cordis.patch.yml` 每行可解析的包内模块、以及 packed `lib/*.js` 相对 `import`/`from`/`import()` 闭包里的每个共享 chunk 都在包内。当前 tarball 为 70 个成员。
+- `pnpm smoke:packed`（`scripts/smoke-packed.mjs`）：先 `pack:check` 同款打包，再让 `smoke:behavior` 在仓库**之外**的 scratch `$DSH_HOME` 里以 `DSH_SMOKE_PLUGIN_SOURCE=<tgz>` 经真实 `dsh plugin --profile <p> add <tgz>` 安装，断言被加载的插件解析在 checkout 之外（`lib/windows-runner.js` 在 Windows 上据此做真实受限 pwsh 写）。tarball 的首次 `add` 会停在 `koffi` 构建授权（`ERR_PNPM_IGNORED_BUILDS`），共享 installer 按[故障排查条目](../troubleshooting/install-stops-at-build-approval.md)恢复——待决标记可能不存在、恢复后可能还需 remove+add 才激活，两种情况都会逐字打印输出。
 
 ## 5. 安装到真实运行时
 
@@ -177,18 +185,20 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 
 ## 7. CI
 
-`.github/workflows/ci.yml` 的 `releases` job 用 `scripts/list-dsh-releases.mjs` 从 `SUPPORTED_DSH_RELEASES` 读取版本轴，`verify` 将该轴与启用的 OS 做笛卡尔积。开发 pin 使用 frozen lockfile，其他版本先用 `upgrade-dsh.mjs` 重指 DSH / cordis 后重新安装；制品名同时含 OS 与 DSH 版本。主车道在 `ubuntu-latest` 与 `macos-latest` 上执行：**`compat:check`** → `lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `docs:check`。`compat:check` 放在最前，因为后续每一步的结果只有对"契约真正声明的版本"才算证据。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。
+`.github/workflows/ci.yml` 的 `releases` job 用 `scripts/list-dsh-releases.mjs` 从 `SUPPORTED_DSH_RELEASES` 读取版本轴，`verify` 将该轴与启用的 OS 做笛卡尔积。开发 pin 使用 frozen lockfile，其他版本先用 `upgrade-dsh.mjs` 重指 DSH / cordis 后重新安装；制品名同时含 OS 与 DSH 版本。主车道在 `ubuntu-latest`、`macos-latest` 与 `windows-latest`（变量见下）上执行**同一份全部门禁**：**`compat:check`** → `lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `pack:check` → `smoke:packed` → `docs:check`。`compat:check` 放在最前，因为后续每一步的结果只有对"契约真正声明的版本"才算证据。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。
+
+最后一个 `gate` job（`needs: [releases, verify]`，`if: always()`）只在两个上游 job 都恰好 `success` 时通过：矩阵被跳过、取消或部分失败都不能再显示为绿。release 的 `publish` 依赖的正是这个 gate（见[发版流程](./release-workflow.md)）。
 
 `.github/workflows/upgrade.yml` 是**按周**运行的升级车道（也可手动触发指定版本）：解析 `@deepseek-ai/dsh` 最新 pre-release → 重指 pin → 安装 → 与主车道同样顺序的完整矩阵，全程 `DSH_MULTI_ROOT_COMPAT=warn`。它的权限是 `contents: read`，不提交、不推送、不碰 allowlist；成功时只在 step summary 里写出人工提升的三步。它**不**跑 `compat:check`（候选按设计不在 allowlist 上）。这些性质由 `tests/workflows.spec.ts` 钉住。 手动版本输入及 candidate output 只通过 step `env` 传入 shell，禁止把 GitHub 表达式直接嵌进 `run`；写入 `$GITHUB_OUTPUT` 前校验为单行版本，避免 shell 代码执行与多行输出注入。
 
 Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seatbelt。**"没跑"不会被记成通过**，机制分两层，而且**按方言**判定：
 
-1. `pnpm kernel:probe`（`scripts/check-kernel-runner.mjs`）用原始机制逐个探测本机能否受限执行（`sandbox-exec` + allow profile / `bwrap` 绑定 flags / Landlock launcher），把**确实跑通的那几个方言**写进 `$GITHUB_ENV` 的 `DSH_PROBE_VERIFIED_DIALECTS`；一个都跑不通时打印每条机制的原因。
+1. `pnpm kernel:probe`（`scripts/check-kernel-runner.mjs`）用原始机制逐个探测本机能否受限执行（`sandbox-exec` + allow profile / `bwrap` 绑定 flags / Landlock launcher；Windows 上换成 `windows-acl`——直接运行**真实上游 runner**，同时验证一次允许写与一次兄弟目录被拒，只放不放的不算 sandbox），把**确实跑通的那几个方言**写进 `$GITHUB_ENV` 的 `DSH_PROBE_VERIFIED_DIALECTS`；一个都跑不通时打印每条机制的原因。
 2. `tests/parity-matrix.spec.ts` 与 `smoke:behavior` 的内核断言：**探针证明本机跑得通的方言必须真跑**（runner 不可用即失败），本机没有的方言永不要求（在 macOS 上要求 bwrap、或在 Linux 上要求 Seatbelt，都只会制造与本插件无关的红灯），未跑探针时一律不要求（开发机照旧打印原因后 skip）。判定集中在 `tests/support/kernel-runner.ts`；`DSH_REQUIRE_KERNEL_RUNNER=1` 可强制要求全部方言，用来检查 skip 本身是否诚实。
 
 ### Windows 验证腿
 
-`ci.yml` 在仓库变量 `DSH_WINDOWS_CI=1` 时才把 `windows-latest` 加入动态矩阵，验证校验规则、注册表、命令与 RPC 通道、面板、client 制品，以及 B1 的真实 LSP stdio 和 B2 的原生 ACL 执行。`tests/windows-multi-root.spec.ts` 必须真实启动 restricted-token Node、PowerShell 与 ConPTY，覆盖两根可写、第三目录拒绝、read-only 拒绝、移除根后拒绝和 PTY 退出码保留；Windows 不按能力探针跳过该用例。它在 Windows 上**不跑**需要 POSIX shell 的冒烟（`smoke:compose/behavior/journey`）与只探测 POSIX 方言的 `kernel:probe`；POSIX 方言的真实执行断言在该平台显式 skip。目录 symlink 无权限时，仅省略矩阵中依赖该链接的行，workspace-write 与 read-only 使用同一条件，其余行继续验证。
+`ci.yml` 在仓库变量 `DSH_WINDOWS_CI=1` 时才把 `windows-latest` 加入动态矩阵。自 B1–B3 加固批起 Windows 与其他两平台跑**同一份门禁**：`kernel:probe`（`windows-acl` 探针，见上）、`smoke:compose` / `smoke:behavior` / `smoke:journey`（以 `SandboxPwshExecutor` 与 pwsh 工具原生执行——**不经 Git Bash**，行为 battery 的多根断言用受限 pwsh 实写）、`pack:check` / `smoke:packed`（安装副本在 Windows 上真的经 `lib/windows-runner.js` 做一次受限多根 pwsh 写），外加 `tests/windows-native.e2e.ts` 的原生组：restricted-token Node、PowerShell 与 ConPTY 覆盖两根可写、第三目录拒绝、read-only、移除根/foreign-owned/junction/8.3 别名、撤销快照、并发 private temp、退出码与流镜像、ConPTY Ctrl+C 与 Git Bash parity；`tests/windows-multi-root.spec.ts` 的结构用例同样实跑。POSIX 方言的真实执行断言在该平台按方言显式 skip。目录 symlink 无权限时，仅省略矩阵中依赖该链接的行（junction 取代），workspace-write 与 read-only 使用同一条件，其余行继续验证。
 
 该变量**当前已置 1**：本仓库是公开仓库，标准 runner 在公开仓库上不计费（计费的 2× 倍率只作用于私有仓库），因此这条腿没有理由停着。清掉变量即回到两 OS 矩阵。
 
@@ -196,7 +206,7 @@ Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seat
 
 LSP 源码回传断言应比较读盘得到的完整源码。夹具里的路径经 `JSON.stringify()` 写入源码时，Windows 的反斜杠已转义，不能再用未转义的原始路径作子串断言。B1–B3 各版本和平台的验收证据只记在[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
 
-失败可诊断：`test` 与 `smoke:behavior` 的输出会同时写入 `vitest.log` / `smoke-behavior.log`，步骤失败时由 `actions/upload-artifact@v4` 上传，公共仓库无需管理员权限即可下载——"红但看不到日志"的运行等于没人能修。
+失败可诊断：`test` 与各冒烟的输出同时写入 `vitest.log` / `smoke-*.log`（`tee` + `set -o pipefail`，红不会被吞成绿），由 `actions/upload-artifact@v4` 以 `if: always()` 上传——成功与失败的日志都能下载，公共仓库无需管理员权限。
 
 ## 8. 常见失败与处置
 

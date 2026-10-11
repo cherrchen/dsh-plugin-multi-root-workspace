@@ -57,7 +57,7 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 | §11/§12 通用 seam、Core 不认识插件 | **不受约束时的理想形态**（架构文档 §9）；不改上游时以"多根 provider 子类"代位，seam 词汇（附加可写根贡献者）保留在插件内部接口上 | 部分满足，见 §2 代价 |
 | §13 单一权限世界 | fs 直接取插件 scope；bash / terminal / PTY 经插件的 sandbox provider 取同一份 scope；插件自带 parity 测试钉住 | 满足，责任在插件 |
 | §14 数据模型：插件只存 Additional Roots | `AdditionalWorkspaceRoot { id, path, alias?, addedAt }` per workspaceId | 插件职责 |
-| §15 Root Path 规则 | `realpathSync.native` canonical 化 + 冲突校验（非绝对 / 不存在 / 非目录 / 等于主根 / 与主根双向重叠 / 与附加根重复或双向重叠）；读取侧另判 `recordedPath` 变化与重复 id | 插件职责 |
+| §15 Root Path 规则 | `realpathSync.native` canonical 化 + 冲突校验（非绝对 / 不存在 / 非目录 / 等于主根 / 与主根双向重叠 / 与附加根重复或双向重叠）；读取侧另判 `recordedPath` 变化与重复 id；Windows 网络/设备路径（UNC、`\\?\`、`\\.\`、映射网络盘）在任何 fs 触碰之前以 `unsupported-path` 词法拒绝 | 插件职责 |
 | §16 初版附加根继承 workspace-write | 附加根与主根同权，无 per-root mode | 第一期范围 |
 | §17 `*.dsh-workspace.json` | 第一期不做；storage 为唯一数据源 | 后续阶段 |
 | §18 兼容性：不装/无根 = 单目录行为 | 未安装：组合零变化。安装且根列表为空：子类行为与上游 byte-identical（子类在空附加根时直通上游实现路径） | 验收标准 |
@@ -107,11 +107,11 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 
 1. **不装插件**：组合与行为与现状完全一致（本条由"插件是外部 bundle"天然保证）。
 2. **安装且根列表为空**：`fs` / `bash` / `sandbox` 的行为与上游一致（sandbox provider 空根时逐元素返回上游 `confine` 结果；fs provider 的 containment 语义由差分 parity 测试证明与上游逐项一致）；`dsh --dump-config` 仅显示两行被替换。
-3. **多根生效**：添加附加根后的新 Session 中——对附加根内路径的 `write` / `edit` 成功；`bash` 在附加根内创建/修改文件成功（macOS Seatbelt、Linux bwrap 与 Landlock）；附加根外任意路径写入仍被拒绝并返回升级指引；`read-only` 模式下附加根同样不可写。
+3. **多根生效**：添加附加根后的新 Session 中——对附加根内路径的 `write` / `edit` 成功；受限 shell 在附加根内创建/修改文件成功（macOS Seatbelt、Linux bwrap 与 Landlock、Windows root-set ACL runner 下的 pwsh）；附加根外任意路径写入仍被拒绝并返回升级指引；`read-only` 模式下附加根同样不可写。
 4. **单一权限世界**：插件自建 parity 测试——同一 scope 下 fs fence 与内核 runner 对附加根内外的写行为一致；不存在任一工具能写附加根而另一工具不能的组合。
 5. **cwd 不变**：多根 Session 的 `header.cwd`、`workspace.path`、transcript cwd 显示均为主根；无虚拟 cwd。
 6. **模型可见 ⟺ 已记录**：拓扑文案经 `systemPrompt.context` 快照落 log；快照回放能重建相同拓扑。
-7. **Path 规则**：`~/p`、`/abs/p`、`/abs/../abs/p`、symlink 别名 canonical 化后判重；与主根相同（`equals-primary`）或与主根互相包含（`primary-overlap`）的候选被拒绝并给出明确错误；与其他根重复或互相包含同样拒绝；缺失目录添加时拒绝、启动时降级为"保留登记 + 不授予 + 用户可见通知"，不静默；同一条主根下重复 id 的记录全部报 `invalid` 且不授予，并可逐条移除。
+7. **Path 规则**：`~/p`、`/abs/p`、`/abs/../abs/p`、symlink 别名 canonical 化后判重；与主根相同（`equals-primary`）或与主根互相包含（`primary-overlap`）的候选被拒绝并给出明确错误；与其他根重复或互相包含同样拒绝；缺失目录添加时拒绝、启动时降级为"保留登记 + 不授予 + 用户可见通知"，不静默；同一条主根下重复 id 的记录全部报 `invalid` 且不授予，并可逐条移除；Windows 上的网络/设备路径（UNC `\\server\share`、`\\?\`、`\\.\`，以及 canonical 化后变成 UNC 的映射网络盘）在任何 fs 触碰**之前**以 `unsupported-path` 拒绝——restricted token 的 capability SID 无法绑定 SMB 访问，stat UNC 本身会触发认证。
 7.1 **授权不可被本地替换转移**：登记目录（或其链接链）在登记后被替换成指向别处的符号链接时，该根变为 `redirected`、撤销授予，且**绝不**把写权限交给新目标；恢复原目录后由一次重新校验自动复原。
 7.2 **刷新即重新校验**：命令 `list` 与面板刷新是同一条路径——重新 `stat`、重新解析、重新裁决并同步 scope，且只读刷新不写存储；目录删除后列表必须显示不可用并撤销授予，目录恢复后必须重新授予（不需要重启）。
 7.3 **并发不丢操作**：同一主根上并发发起的增删改必须全部生效，且不得复活已删除的记录。
@@ -131,6 +131,14 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 - 触碰识别只认 `read` / `write` / `edit` 三个工具名，且只认成功的调用；其他写文件工具（例如 `str_replace_editor`）不会触发子目录指令的发现。
 - 跨进程只有 single-writer 语义：同一 storage root 上不能并发写登记表；另一个进程要等到持锁者退出后经 `refresh()` 接管（这是刻意的 fail-closed，不是待修的竞态）。
 - 支持矩阵是精确版本 allowlist：不在清单上、或核心包混装的宿主上，四个安全相关行根本不启动（组合退化为"未装插件"）。
+
+### 已知限制（Windows，B1–B3 加固后确认）
+
+- **网络与设备路径不能成为根**：UNC / `\\?\` / `\\.\` / 映射网络盘在登记时即以 `unsupported-path` 拒绝，存量记录判 `invalid`；runner 侧同样 fail closed（见 [ADR-0011 修订](../decisions/ADR-0011-multi-root-workspace-consumers.md)）。
+- **受限 Windows shell 是 pwsh，不是 Git Bash**：MSYS 在 restricted Low-integrity token 下无法启动（0.2.x：`NtCreateDirectoryObject … 0xC0000022`；`0.1.5-rc.2`：`CreateFileMapping … Win32 error 5`，exit 256），上游 runner 与插件 runner 一致——这是上游 restricted-token 限制。
+- **上游 runner 的 confined 子进程收不到 Ctrl+C**：上游 runner 调 `SetConsoleCtrlHandler(NULL, TRUE)` 且 ignore 标志被子进程继承；插件 runner（非空根）用 Node SIGINT handler，Ctrl+C 能到达子进程并由 runner 镜像其退出码。
+- **其余继承上游**：enforcement 仍是 `partial`；`Local\` 命名信号量按登录会话隔离，网络共享上的 `$DSH_HOME` 不受 lease 保护（同上游 SessionWriteLease）；standing workspace ACE 随根集合只增不减；已启动进程保留启动时根集合。
+- **验证门禁**：`kernel:probe` 在 Windows 上以真实上游 runner 验证 `windows-acl`（允许写 + 拒绝写缺一不可），三个冒烟与 `pack:check` / `smoke:packed` 在 Linux / macOS / Windows 全平台执行；CI `gate` job 保证矩阵被 skip/cancel 不会显示为成功。
 
 ### 已知限制（M3）
 

@@ -62,6 +62,30 @@ LSP 测试启动真实 stdio 协议进程并确认 root/cwd/URI、源码和进�
 
 三个消费方始终以 canonical 主根索引同一个 scope。公共方法和 Windows argv 形状仍是精确支持合同的一部分；上游变动必须经测试确认。Windows standing ACL 数量随使用过的根集合增长；旧版目录变化不支持附加根自动监听，新增树明确使用手动刷新。
 
+## 修订：加固与 Windows 全量验证（2026-10-11，Amendment）
+
+Status 保持 **Accepted**；本节按 Windows CI 原生执行的实测结果补充安全边界与限制，不改变原有设计取舍。
+
+### 确认的缺陷与处置
+
+1. **Windows 网络/设备根按 `unsupported-path` 词法拒绝**。UNC（`\\server\share`）、`\\?\` 与 `\\.\` 设备路径、以及映射网络盘（`realpathSync.native` 会解析成 UNC）此前会被当成普通目录接受。restricted token 的 capability SID / Low integrity label 无法证明能约束 SMB 访问，而对 UNC 路径 `stat` 本身就会触发 SMB 认证。规则：注册表校验在任何 fs 触碰**之前**做词法判定（`isWindowsNetworkOrDevicePath`，`/^\\\\/`）；canonical 化之后再判一次（捕捉映射盘）；存量记录由 `classifyStoredRoots` 判 `invalid`；profile 扩展抛 `DialectUnrecognizedError`（→ `SandboxUnavailableError`）、runner exit 127——永远是 fail closed，绝不无约束执行。
+2. **Windows runner 在授权后、spawn 前重新验证根**：每个传入根必须仍存在、是目录、且 canonical 身份与传入时一致；`--temp` 必须是已存在的目录。任何一项不满足即以上游兼容的 `windows-acl-run:` 签名退出 127，不启动无约束子进程（confine 与 spawn 之间根被移除的场景由原生用例钉住）。
+3. **面板文件端点词法拒绝反斜杠**：POSIX 上 `..\..\x`、`\\server\share`、`\abs` 既不是绝对路径也不匹配 scheme，此前会解析到所选根**内部**并被服务——客户端只以 `/` 拼接，所以 `\` 一律拒绝。
+4. **Windows reveal 接受 exit 0/1**：`explorer.exe` 在成功时也返回 1，原先只认 0 导致 Windows 上 reveal 恒报 `reveal-unavailable`。
+5. **文件树 RPC 支持 AbortSignal**：`files` / `readFile` 在组件卸载、路径或会话变化时中止在飞调用；Connection RPC 本就支持 signal，host 端早已转发，修的是客户端不传。
+
+### 实测确认的（上游）边界，保留并记录
+
+- **Git Bash/MSYS 在 restricted token 下无法启动**：0.2.x 报 `NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0…): 0xC0000022`，`0.1.5-rc.2` 报 `CreateFileMapping …, Win32 error 5`（exit 256）；上游 runner 与插件 runner 表现一致，Windows 受限 shell 就是 pwsh。
+- **Ctrl+C 语义在两个 runner 下不同且都是既成事实**：上游 runner 调 `SetConsoleCtrlHandler(NULL, TRUE)`，ignore 标志被 confined 子进程继承（上游 confine 的子进程收不到 Ctrl+C）；插件 runner 用 Node SIGINT handler（不被继承），Ctrl+C 能到达子进程，runner 镜像其退出码。这不是缺陷，是两条实现路径的如实差异。
+- **foreign-owned 根在 elevated host 上的可测边界**：unconfined 的 admin 进程不是有效探针（libuv `FILE_FLAG_BACKUP_SEMANTICS` + backup/restore 特权绕过 DACL，restricted token 不能）；接受两种结局——runner 在 spawn 前拒绝（127），或子进程跑起来且所有未授权写被内核拒绝。
+- **不变的既有语义**：`Local\` 命名信号量按登录会话隔离，网络共享上的 `$DSH_HOME` 不受 lease 保护（同上游 SessionWriteLease）；standing workspace ACE 随根集合增长且不在活跃子进程下撤销；已启动进程保留启动时快照。
+- **Windows enforcement 仍是上游 `partial`**。
+
+### 验证义务（本修订新增）
+
+Windows 内核证据不得再靠结构测试替代：`kernel:probe` 用真实上游 runner 验证 `windows-acl`（允许写 + 兄弟目录被拒，缺一不可）并导出方言；三冒烟在 Windows 以 pwsh 原生运行；`pack:check` 与 `smoke:packed` 证明 tarball 成员完整且安装副本可启动。CI 增加 `gate` job，矩阵被 skip/cancel 不得显示为成功。
+
 ## Related Documents
 
 - [架构](../architecture/multi-root-workspace.md)

@@ -86,6 +86,17 @@ function canonical(path) {
   }
 }
 
+/**
+ * The spelling `path` has INSIDE JSON-serialized text.
+ *
+ * Checks that search a recorded model request or a channel view search a JSON
+ * body, where each backslash is escaped: a Windows path only ever appears as
+ * `D:\\a\\...`, never as `D:\a\...`. On POSIX this is the identity.
+ */
+function jsonText(path) {
+  return JSON.stringify(path).slice(1, -1)
+}
+
 /** Seed one Git repository with a tracked file and one commit. */
 function seedRepo(path, trackedFile, content) {
   mkdirSync(path, { recursive: true })
@@ -550,8 +561,8 @@ try {
     check.equal(web.channelUnauthenticated, 401, 'web: an unauthenticated panel POST reaches the channel route (401, not the SPA fallback 405)', `status ${String(web.channelUnauthenticated)}`)
     check.equal(web.channelList, 200, 'web: the panel channel answers an authenticated list over real HTTP', `status ${String(web.channelList)}`)
     check.ok(web.channelView?.ok === true, 'web: the channel answers with an ok envelope', JSON.stringify(web.channelView)?.slice(0, 400))
-    check.contains(JSON.stringify(web.channelView?.value), canonical(additionalRepo), 'web: the channel view lists the registered additional root', JSON.stringify(web.channelView)?.slice(0, 400))
-    check.contains(JSON.stringify(web.channelView?.value), canonical(primaryRepo), 'web: the channel view names the primary root', JSON.stringify(web.channelView)?.slice(0, 400))
+    check.contains(JSON.stringify(web.channelView?.value), jsonText(canonical(additionalRepo)), 'web: the channel view lists the registered additional root', JSON.stringify(web.channelView)?.slice(0, 400))
+    check.contains(JSON.stringify(web.channelView?.value), jsonText(canonical(primaryRepo)), 'web: the channel view names the primary root', JSON.stringify(web.channelView)?.slice(0, 400))
     check.equal(readFileSync(join(additionalRepo, 'README.md'), 'utf8'), EDITED_README, 'web: the additional root carries the agent\'s write')
     check.equal(readFileSync(join(primaryRepo, 'README.md'), 'utf8'), PRIMARY_README, 'web: the primary repository is byte-identical')
     check.equal(readFileSync(join(outsideRoot, 'keep.txt'), 'utf8'), 'untouched\n', 'web: a file outside every root is byte-identical')
@@ -585,7 +596,7 @@ try {
       check.contains(webRendered, 'repo-b check ok', `web: ${shellTool} ran the other repository's check`, webRendered.slice(-800))
     }
     const webExcerpt = webRendered.slice(-800)
-    check.contains(webRendered, canonical(additionalRepo), 'web: the model\'s request names the additional root', webExcerpt)
+    check.contains(webRendered, jsonText(canonical(additionalRepo)), 'web: the model\'s request names the additional root', webExcerpt)
     check.contains(webRendered, 'additional roots of this session\'s workspace', 'web: the runtime-context snapshot states the topology', webExcerpt)
     check.contains(webRendered, 'the session origin remains the primary root', 'web: the snapshot separates session origin from cwd', webExcerpt)
     check.ok(webRequests.length >= SCRIPT_LENGTH, 'web: the agent issued one request per scripted step', `requests: ${webRequests.length}`)
@@ -599,7 +610,7 @@ try {
     check.equal(rolesCarrying(webFirstStep, RULE_PRIMARY).length, 1, 'web: the primary root\'s AGENTS.md reached the model exactly once', webWire)
     check.equal(rolesCarrying(webFirstStep, RULE_USER_GLOBAL).length, 1, 'web: the user-global AGENTS.md was not injected a second time', webWire)
     check.equal(rolesCarrying(webFirstStep, RULE_ANCESTOR).length, 0, 'web: an ancestor of the additional root was not injected at all', webWire)
-    check.contains(JSON.stringify(webFirstStep), canonical(additionalRepo), 'web: the instruction text names the root its rules belong to')
+    check.contains(JSON.stringify(webFirstStep), jsonText(canonical(additionalRepo)), 'web: the instruction text names the root its rules belong to')
 
     // The nested instruction journey. The first scripted call READS a file in
     // the additional root's `src/deep/`, so that directory's own AGENTS.md —
@@ -652,7 +663,7 @@ try {
     const headlessRequests = model.steps.slice(stepsBeforeHeadless)
     const headlessRendered = headlessRequests.map(request => JSON.stringify(request)).join('\n')
     const headlessExcerpt = headlessRendered.slice(-800)
-    check.contains(headlessRendered, canonical(additionalRepo), 'headless: the model\'s request names the additional root', headlessExcerpt)
+    check.contains(headlessRendered, jsonText(canonical(additionalRepo)), 'headless: the model\'s request names the additional root', headlessExcerpt)
     check.contains(headlessRendered, 'additional roots of this session\'s workspace', 'headless: the runtime-context snapshot states the topology', headlessExcerpt)
 
     const headlessFirstStep = headlessRequests[0]

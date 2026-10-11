@@ -8,6 +8,21 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Network and device roots are rejected on Windows**: UNC (`\\server\share`), `\\?\`, `\\.\`, and mapped network drives were previously accepted as ordinary additional roots; they are now rejected lexically as `unsupported-path` before any filesystem access, stored records are marked `invalid`, and the confined-execution side fails closed (`SandboxUnavailableError` / exit 127) rather than silently running unconfined ([ADR-0011 amendment](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)).
+- **The Windows runner re-verifies roots before spawn**: after the ACL grant and before the child starts, every root must still exist and resolve to the same canonical directory, and `--temp` must be an existing directory; anything else exits 127 without launching an unconfined process.
+- **"Reveal in file manager" no longer reports failure on Windows**: `explorer.exe` returns 1 on success, so exit codes 0 and 1 are both accepted on win32.
+- **Panel file endpoints reject backslash paths**: on POSIX, `..\..\x` previously resolved inside the selected root; backslashes are now rejected lexically.
+- **Panel file-tree calls are abortable**: in-flight `files` / `readFile` calls are cancelled on unmount, path, or session change, so stale responses no longer render as errors.
+
+### Changed
+
+- **Confined Windows shell behavior, documented**: the confined shell is pwsh (Git Bash/MSYS cannot start under the restricted token, identically to the upstream runner); under the plugin runner a confined child receives Ctrl+C and the runner mirrors its exit code, while an upstream-confined child inherits the runner's ignore-Ctrl+C flag and cannot receive it — both are established behavior ([ADR-0011 amendment](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)).
+- Install note added: if the first install was interrupted by the `koffi` build approval, a successful follow-up `add` may still leave the plugin absent from `dsh.profile.bundles`; one `remove` + `add` activates it ([troubleshooting](./docs/troubleshooting/install-stops-at-build-approval.md)).
+
 ## [0.1.6] - 2026-10-11
 
 ### Added

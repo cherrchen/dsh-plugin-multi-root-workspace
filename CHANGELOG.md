@@ -8,6 +8,21 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [Unreleased]
+
+### Fixed
+
+- **Windows 上的网络与设备根被拒绝**：UNC（`\\server\share`）、`\\?\`、`\\.\` 与映射网络盘此前会被当成普通附加根登记；现在在任何文件系统触碰之前以 `unsupported-path` 词法拒绝，存量记录标记为 `invalid`，受限执行侧 fail closed（`SandboxUnavailableError` / 退出 127），绝不静默放开（[ADR-0011 修订](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
+- **Windows runner 在 spawn 前重新验证根**：授权 ACL 之后、启动子进程之前重新确认每个根仍存在且是同一 canonical 目录，并要求 `--temp` 已存在；不满足即退出 127，不启动无约束进程。
+- **Windows 上「在文件管理器中显示」不再误报失败**：`explorer.exe` 成功时也返回 1，win32 现在接受退出码 0/1。
+- **面板文件端点拒绝反斜杠路径**：POSIX 上 `..\..\x` 此前会解析到所选根内部；现在词法拒绝。
+- **面板文件树调用可中止**：组件卸载、路径或会话变化时取消在飞的 `files` / `readFile` 调用，过期响应不再渲染为错误。
+
+### Changed
+
+- **Windows 受限 shell 行为说明**：受限 shell 是 pwsh（Git Bash/MSYS 在 restricted token 下无法启动，与上游 runner 一致）；在插件 runner 下 confined 子进程能收到 Ctrl+C 且 runner 镜像其退出码，而上游 runner 的子进程因继承 ignore-Ctrl+C 标志收不到（两者均为既成事实，见 [ADR-0011 修订](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
+- 安装提示补充：被 `koffi` 构建授权打断的首次安装，在授权后若插件未进 `dsh.profile.bundles`，需一次 `remove` + `add` 完成激活（[故障排查](./docs/troubleshooting/install-stops-at-build-approval.md)）。
+
 ## [0.1.6] - 2026-10-11
 
 ### Added
