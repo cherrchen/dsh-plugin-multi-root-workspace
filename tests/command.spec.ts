@@ -176,7 +176,7 @@ describe('parseFoldersCommand', () => {
   })
 
   it('accepts every subcommand', () => {
-    for (const verb of ['list', 'add', 'remove', 'alias', 'reveal', 'help']) {
+    for (const verb of ['list', 'add', 'remove', 'alias', 'access', 'reveal', 'help']) {
       expect(parseFoldersCommand(`${verb} x`).verb).toBe(verb)
     }
   })
@@ -191,6 +191,7 @@ describe('renderRootsReport', () => {
     id: 'id-1' as RootStatus['id'],
     addedAt: '2026-09-12T00:00:00.000Z',
     state: 'available',
+    access: 'read-write',
     ...over,
   })
 
@@ -206,9 +207,9 @@ describe('renderRootsReport', () => {
       status({ path: '/gone', state: 'missing', detail: 'the directory is not present right now' }),
       status({ path: '/nested', state: 'invalid', detail: 'overlaps /extra' }),
     ])
-    expect(text).toContain('  1 /extra [payments]')
-    expect(text).toContain('  2 /gone (missing:')
-    expect(text).toContain('  3 /nested (invalid:')
+    expect(text).toContain('  1 /extra [payments] (read-write)')
+    expect(text).toContain('  2 /gone (read-write) (missing:')
+    expect(text).toContain('  3 /nested (read-write) (invalid:')
     expect(text).toContain('Writable additional roots: 1 of 3.')
     expect(text).toContain('2 root(s) are registered but not writable right now')
   })
@@ -706,4 +707,67 @@ it('shows effective cwd while root management stays bound to the session origin'
   expect(result.value?.primaryRoot).toBe(primary)
   expect(result.value?.effectiveCwd).toBe(fixture.outside)
   expect(result.value?.roots).toEqual([])
+})
+
+describe('per-root access on the command and the panel', () => {
+  it('registers a read-only root with `add <path> --read-only` and reports access in list', async () => {
+    const stack = await mount()
+    const extra = join(fixture.base, 'extra')
+    mkdirSync(extra)
+
+    const added = await run(`add ${extra} --read-only`)
+    expect(added.kind).toBe('success')
+    expect(added.text).toContain(`${canonicalPath(extra)} (read-only)`)
+    // A read-only member stays registered but is not a writable root.
+    expect(added.text).toContain('Writable additional roots: 0 of 1.')
+    expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+    expect(stack.scope.writableOf(primary)).toEqual([])
+  })
+
+  it('toggles access with `access <ref> read-only|read-write` and rejects other levels', async () => {
+    const stack = await mount()
+    const extra = join(fixture.base, 'extra')
+    mkdirSync(extra)
+    await run(`add ${extra}`)
+
+    const downgraded = await run(`access 1 read-only`)
+    expect(downgraded.kind).toBe('success')
+    expect(downgraded.text).toContain('(read-only)')
+    expect(stack.scope.writableOf(primary)).toEqual([])
+
+    const upgraded = await run(`access 1 read-write`)
+    expect(upgraded.kind).toBe('success')
+    expect(upgraded.text).toContain('(read-write)')
+    expect(stack.scope.writableOf(primary)).toEqual([canonicalPath(extra)])
+
+    const bad = await run(`access 1 readwrite`)
+    expect(bad.kind).toBe('error')
+    expect(bad.text).toContain('read-only or read-write')
+  })
+
+  it('carries access through the panel add/setAccess endpoints as a RootsView', async () => {
+    await mount({ withConnection: true })
+    const extra = join(fixture.base, 'extra')
+    mkdirSync(extra)
+    const payload: PanelRequest = { sessionId: PANEL_SESSION }
+
+    const added = await callPanel('add', { ...payload, path: extra, access: 'read-only' })
+    expect(added.ok).toBe(true)
+    expect(added.value?.roots[0]?.access).toBe('read-only')
+    const root = added.value?.roots[0]!
+    const entry = { ordinal: root.ordinal, id: root.id, path: root.path, addedAt: root.addedAt }
+
+    const missing = await callPanel('setAccess', { ...payload, entry })
+    expect(missing.error?.code).toBe('invalid-ref')
+
+    const upgraded = await callPanel('setAccess', { ...payload, entry, access: 'read-write' })
+    expect(upgraded.ok).toBe(true)
+    expect(upgraded.value?.roots[0]?.access).toBe('read-write')
+  })
+
+  it('rejects an out-of-contract access value at the wire boundary', async () => {
+    await mount({ withConnection: true })
+    const result = await callPanel('add', { sessionId: PANEL_SESSION, path: fixture.outside, access: 'execute' })
+    expect(result.error?.code).toBe('panel/bad-request')
+  })
 })

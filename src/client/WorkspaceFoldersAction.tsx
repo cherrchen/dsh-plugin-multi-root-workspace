@@ -211,6 +211,8 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     noSession: false,
   })
   const [manualPath, setManualPath] = useState('')
+  /** The access the Add controls register new roots with; `read-write` is the historical default. */
+  const [addAccess, setAddAccess] = useState<'read-write' | 'read-only'>('read-write')
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
@@ -310,7 +312,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
    * @returns whether the host accepted it (the caller decides whether to clear
    *   the input it came from).
    */
-  const mutate = useCallback(async (endpoint: 'add' | 'remove' | 'alias' | 'move', payload: Record<string, unknown>): Promise<boolean> => {
+  const mutate = useCallback(async (endpoint: 'add' | 'remove' | 'alias' | 'move' | 'setAccess', payload: Record<string, unknown>): Promise<boolean> => {
     if (panel === undefined) return false
     const base = requestBase()
     if (base === undefined) {
@@ -347,8 +349,8 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
       return
     }
     if (picked === null || picked.trim() === '') return
-    await mutate('add', { path: picked })
-  }, [mutate, props])
+    await mutate('add', { path: picked, access: addAccess })
+  }, [mutate, props, addAccess])
 
   /**
    * Add the path in the manual field — the one the operator typed. The picker
@@ -360,8 +362,8 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     if (path === '') return
     // Cleared only on success: a rejected path stays in the field so the operator
     // can fix it instead of retyping it.
-    if (await mutate('add', { path })) setManualPath('')
-  }, [manualPath, mutate])
+    if (await mutate('add', { path, access: addAccess })) setManualPath('')
+  }, [manualPath, mutate, addAccess])
 
   /** Reveal one root: the answer is the revealed path, not a new view. */
   const reveal = useCallback(async (root: RootView) => {
@@ -498,6 +500,9 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                   <span className="mrfw-rootName">{displayNameOf(root)}</span>
                   <span className="mrfw-rootPath">{root.path}</span>
                 </div>
+                <span className="mrfw-accessBadge">
+                  {t(root.access === 'read-only' ? 'access.readOnly' : 'access.readWrite')}
+                </span>
                 {root.state === 'available' ? null : (
                   <span title={root.detail} className="mrfw-stateWarn">
                     {t(stateKey(root.state))}
@@ -531,6 +536,12 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                   onClose={() => { setMenuFor(undefined) }}
                   items={[
                     { id: 'rename', label: t('panel.rename'), icon: <IconEdit /> },
+                    {
+                      id: 'access',
+                      label: t(root.access === 'read-only' ? 'panel.accessReadWrite' : 'panel.accessReadOnly'),
+                      icon: <IconEdit />,
+                      disabled: state.busy,
+                    },
                     { id: 'remove', label: t('panel.remove'), icon: <IconTrash />, danger: true, disabled: state.busy },
                   ]}
                   onSelect={(id) => {
@@ -538,6 +549,13 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                     if (id === 'rename') {
                       setAliasFor(key)
                       setAliasDraft(root.alias ?? '')
+                    }
+                    if (id === 'access') {
+                      const access = root.access === 'read-only' ? 'read-write' : 'read-only'
+                      // Upgrading widens what the agent may modify, so it is
+                      // the one access change that asks first.
+                      if (access === 'read-write' && !window.confirm(t('panel.accessUpgradeConfirm'))) return
+                      void mutate('setAccess', { entry: entryOf(root), access })
                     }
                     if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
                   }}
@@ -595,6 +613,16 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
               onChange={event => { setManualPath(event.target.value) }}
               onKeyDown={event => { if (event.key === 'Enter') void addManualPath() }}
             />
+            <select
+              className="mrfw-input mrfw-accessSelect"
+              value={addAccess}
+              disabled={state.busy || atLimit}
+              aria-label={t('panel.accessLabel')}
+              onChange={event => { setAddAccess(event.target.value === 'read-only' ? 'read-only' : 'read-write') }}
+            >
+              <option value="read-write">{t('access.readWrite')}</option>
+              <option value="read-only">{t('access.readOnly')}</option>
+            </select>
             <Action
               onClick={() => { void addManualPath() }}
               disabled={state.busy || atLimit || manualPath.trim() === ''}
