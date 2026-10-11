@@ -600,7 +600,7 @@ try {
     const webExcerpt = webRendered.slice(-800)
     check.contains(webRendered, jsonText(canonical(additionalRepo)), 'web: the model\'s request names the additional root', webExcerpt)
     check.contains(webRendered, 'additional roots of this session\'s workspace', 'web: the runtime-context snapshot states the topology', webExcerpt)
-    check.contains(webRendered, 'the session origin remains the primary root', 'web: the snapshot separates session origin from cwd', webExcerpt)
+    check.contains(webRendered, 'session origin remains the primary root', 'web: the snapshot separates session origin from cwd', webExcerpt)
     check.ok(webRequests.length >= SCRIPT_LENGTH, 'web: the agent issued one request per scripted step', `requests: ${webRequests.length}`)
 
     // The instruction journey, read off the first step's wire body: the Agent
