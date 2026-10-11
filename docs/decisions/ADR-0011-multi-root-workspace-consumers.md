@@ -73,6 +73,7 @@ Status 保持 **Accepted**；本节按 Windows CI 原生执行的实测结果补
 3. **面板文件端点词法拒绝反斜杠**：POSIX 上 `..\..\x`、`\\server\share`、`\abs` 既不是绝对路径也不匹配 scheme，此前会解析到所选根**内部**并被服务——客户端只以 `/` 拼接，所以 `\` 一律拒绝。
 4. **Windows reveal 接受 exit 0/1**：`explorer.exe` 在成功时也返回 1，原先只认 0 导致 Windows 上 reveal 恒报 `reveal-unavailable`。
 5. **文件树 RPC 支持 AbortSignal**：`files` / `readFile` 在组件卸载、路径或会话变化时中止在飞调用；Connection RPC 本就支持 signal，host 端早已转发，修的是客户端不传。
+6. **独立 runner 的模块图只许 `node:` 内置**（全批第 7 项确认缺陷，CI run `38131613042` 由 `smoke:packed` 暴露）：`lib/windows-runner.js` 是独立 Node 进程，宿主的进程内插件包解析不适用——它此前静态 import `@deepseek-ai/dsh-sandbox`，从插件安装目录解析不到，`main()` 之前就死于 `ERR_MODULE_NOT_FOUND`（`0.1.5-rc.2` / `0.1.6-*` 仍写 module-fallback 目录所以幸免，`0.1.7-alpha.1+` 的受限 pwsh 全部失败）。处置：共享契约移入零裸 specifier 的 `src/windows-runner-contract.ts`；上游 ACL 包改为从 `--upstream-runner`（widen 时把上游 runner 自身路径传给它）按包自引用 `createRequire(...).resolve` 后动态 import，解析失败即 `windows-acl-run:` + exit 127 fail closed。`pack:check` 断言打包 runner 全图无裸 specifier，另有把 runner 拷进无 `node_modules` 目录直接运行的可移植用例；checkout 内测试原本看不到该缺陷（checkout 的 `node_modules` 带着 peers）。
 
 ### 实测确认的（上游）边界，保留并记录
 

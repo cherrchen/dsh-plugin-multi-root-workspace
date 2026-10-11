@@ -128,7 +128,7 @@ client 测试分两层：`tests/client-bundle.spec.ts` 断言**制品字节**（
 
 ### 4.7 打包产物验证（`pack:check` / `smoke:packed`）
 
-- `pnpm pack:check`（`scripts/check-pack.mjs`）：`pnpm pack` 到临时目录后用自带的 tar 解析器（ustar + GNU `L` + pax，不依赖 GNU tar，Windows 可用）列出全部成员，并断言——必备文件（`package.json`、`cordis.patch.yml`、双语 README/CHANGELOG、LICENSE、`lib/index.js` / `client.js` / `windows-runner.js`）、`exports` 声明的每个 `default` / `types` 目标、`cordis.patch.yml` 每行可解析的包内模块、以及 packed `lib/*.js` 相对 `import`/`from`/`import()` 闭包里的每个共享 chunk 都在包内。当前 tarball 为 70 个成员。
+- `pnpm pack:check`（`scripts/check-pack.mjs`）：`pnpm pack` 到临时目录后用自带的 tar 解析器（ustar + GNU `L` + pax，不依赖 GNU tar，Windows 可用）列出全部成员，并断言——必备文件（`package.json`、`cordis.patch.yml`、双语 README/CHANGELOG、LICENSE、`lib/index.js` / `client.js` / `windows-runner.js`）、`exports` 声明的每个 `default` / `types` 目标、`cordis.patch.yml` 每行可解析的包内模块、以及 packed `lib/*.js` 相对 `import`/`from`/`import()` 闭包里的每个共享 chunk 都在包内；外加一条 runner 专项——`lib/windows-runner.js` 及其传递 chunk 的每个非相对 specifier 必须是 `node:` 内置（它是独立进程，宿主的插件包解析不适用，见[账本缺陷 #7](../plans/active/2026-09-12-multi-root-workspace.md)）。当前 tarball 为 71 个成员。
 - `pnpm smoke:packed`（`scripts/smoke-packed.mjs`）：先 `pack:check` 同款打包，再让 `smoke:behavior` 在仓库**之外**的 scratch `$DSH_HOME` 里以 `DSH_SMOKE_PLUGIN_SOURCE=<tgz>` 经真实 `dsh plugin --profile <p> add <tgz>` 安装，断言被加载的插件解析在 checkout 之外（`lib/windows-runner.js` 在 Windows 上据此做真实受限 pwsh 写）。tarball 的首次 `add` 会停在 `koffi` 构建授权（`ERR_PNPM_IGNORED_BUILDS`），共享 installer 按[故障排查条目](../troubleshooting/install-stops-at-build-approval.md)恢复——待决标记可能不存在、恢复后可能还需 remove+add 才激活，两种情况都会逐字打印输出。
 
 ## 5. 安装到真实运行时

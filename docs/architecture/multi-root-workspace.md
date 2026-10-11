@@ -147,7 +147,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
      - **bwrap (linux，含 `runnerCommand` 配置情形)**：从 `<workspaceRoot>` 的 bind 三元组克隆 flag，在分隔符前追加 `[flag, root, root]`。
      - **Landlock (linux)**：取 `<workspaceRoot>` 前一位的 rw flag，追加 `[flag, root]`。
      - **已授予即跳过**：语言方已授予同一路径时不再重复授予（与 fs fence 的去重一致，并避免 bwrap 上真实 `/tmp` 覆盖 `--tmpfs /tmp`）。
-     - **Windows ACL**：MVP 曾保持上游 wrap 并告警；B2 改用 root-set SID runner，授权集合、撤销语义与验证边界见 [ADR-0011](../decisions/ADR-0011-multi-root-workspace-consumers.md)。
+     - **Windows ACL**：MVP 曾保持上游 wrap 并告警；B2 改用 root-set SID runner，授权集合、撤销语义与验证边界见 [ADR-0011](../decisions/ADR-0011-multi-root-workspace-consumers.md)。扩展后的 argv 为 `[node, <插件 runner>, --upstream-runner <上游 runner 路径>, <上游 flags…>, --additional-root …]`：插件 runner 是独立 Node 进程，其静态模块图只许 `node:` 内置（`src/windows-runner-contract.ts`），上游 ACL 包从 `--upstream-runner` 位置按包自引用解析后动态 import——插件安装目录不在其解析路径上。
   5. 识别或克隆失败 ⇒ 抛 `SandboxUnavailableError`（fail closed），绝不退化为"只授予主根"的静默执行。
 - 三条不变量：空附加根或非 `workspace-write` 时**逐元素**返回 super 的结果；`enforcement` / `denialSignatures` / `runnerFailureRules` 原样透传（否则 bash 的 denial / enforcement 上报会失真）；只有 `argv` 可以变化。
 - **调用形状跨版本保形**：上游 `confine` 在不同受支持版本上分别是同步与异步的，因此整个覆盖走 `src/compat/sandbox-confine.ts` 的 `widenConfined()`：上游同步就同步返回，上游返回 promise 就返回 promise。绝不统一包成 promise——那会把 `ctx.sandbox.confine()` 对组合里每一个既有调用方（bash executor、PTY backend）变成 thenable，等于插件自己引入一次破坏性变更。见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md) 第 4 条。
