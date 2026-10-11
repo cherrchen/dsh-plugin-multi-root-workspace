@@ -10,6 +10,17 @@ This file records the user-visible changes of every **released** version.
 
 ## [Unreleased]
 
+### Added
+
+- **Per-root access levels**: roots registered with `add --read-only` (or the panel's add-row selector) stay readable, browsable, and part of LSP and instruction delivery, but the fs fence, confined processes, and the Windows ACL grant them no write authority; `/workspace-folders access <ref> read-only|read-write` and the panel switch access per root (upgrading requires the root to be available and never re-authorizes its path). The persistence layout stays downgrade-safe: an older plugin reads a read-only record as invalid rather than upgrading it to writable ([ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)).
+- **Per-tool write caps**: configuring `toolAccess: { <tool>: 'read-only' }` on the `multi-root-scope` row makes that tool permanently unable to write any additional root (the primary root is unaffected); enforcement rides the real `tools/execute` dispatch context, and invalid configuration fails closed ([ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)).
+- **Additional-root limit**: each primary root stores at most 16 additional-root records by default (`maxAdditionalRoots`, up to 64); new additions past the limit are refused while over-limit history keeps granting. `list` prints `N of LIMIT` honestly ([ADR-0014](./docs/decisions/ADR-0014-root-limit-and-provider-conflict.md)).
+- **Provider-conflict detection**: when another plugin also replaces `ctx.fs` / `ctx.sandbox`, the multi-root rows fail loudly and grant nothing instead of depending on load order ([ADR-0014](./docs/decisions/ADR-0014-root-limit-and-provider-conflict.md)).
+
+### Changed
+
+- **Model-facing topology rewritten**: the prompt states authority truthfully per mode and platform — writable and read-only roots listed separately, cd/worktree switches do not change grants, grant changes constrain only later operations and new processes, capped tools are named, and Windows adds the restricted-token partial-enforcement caveat plus the note that reads are not confined by it ([ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)).
+
 ### Fixed
 
 - **Confined shell commands work again for installed copies on Windows (DSH 0.1.7-alpha.1+)**: with the published v0.1.6 installed from npm/tarball, the standalone Windows runner died before its first line with `ERR_MODULE_NOT_FOUND` — its static module graph imported upstream packages that cannot be resolved from the plugin's install directory, so every confined command in a session with additional roots failed on the affected releases. The runner's static graph is now `node:` builtins only, and it loads the upstream ACL package by self-reference from the upstream runner's own location.

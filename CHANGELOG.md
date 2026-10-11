@@ -10,6 +10,17 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 ## [Unreleased]
 
+### Added
+
+- **附加根访问级别**：`add --read-only`（或面板添加行选择）登记的根可读、可浏览、参与 LSP 与指令注入，但 fs 写、受限进程与 Windows ACL 都不授予它写权限；`/workspace-folders access <ref> read-only|read-write` 与面板按根切换（升级到可写要求该根此刻可用且不重新授权路径）。持久化布局向下兼容：旧版本插件把只读记录判为无效而非升级为可写（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)）。
+- **per-tool 写权限封顶**：`multi-root-scope` 行配置 `toolAccess: { <工具名>: 'read-only' }` 后，该工具永远不能写任何附加根（主根不受影响）；封顶经 `tools/execute` 的真实 dispatch 上下文执行，非法配置 fail closed（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)）。
+- **附加根数量上限**：每个主根默认最多登记 16 条附加根记录（`maxAdditionalRoots` 可调至 64）；超限的新增被拒绝，历史超限记录照常授予。列表如实显示 `N of LIMIT`（[ADR-0014](./docs/decisions/ADR-0014-root-limit-and-provider-conflict.md)）。
+- **Provider 冲突检测**：另一插件也替换 `ctx.fs` / `ctx.sandbox` 时，多根行响亮失败并拒绝一切授予，而不是依赖装载顺序（[ADR-0014](./docs/decisions/ADR-0014-root-limit-and-provider-conflict.md)）。
+
+### Changed
+
+- **模型侧拓扑文案重写**：按当前模式与平台如实陈述授权——可写与只读根分组列出，声明 cwd/worktree 切换不改变授权、授权变化只约束后续操作与新进程；配置封顶工具时点名；Windows 附带 restricted-token partial-enforcement 与读不受其 confine 的说明（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)）。
+
 ### Fixed
 
 - **安装副本在 Windows（DSH 0.1.7-alpha.1+）上的受限命令恢复可用**：发布的 v0.1.6 从 npm/tarball 安装后，独立 Windows runner 在首行之前就死于 `ERR_MODULE_NOT_FOUND`——它的静态模块图 import 的上游包无法从插件安装目录解析，受影响版本上配置了附加根的会话里每条受限命令都会失败。runner 的静态图现在只含 `node:` 内置，上游 ACL 包改为从上游 runner 自身位置按包自引用加载。

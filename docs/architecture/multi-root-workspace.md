@@ -3,7 +3,7 @@
 > 状态：**§4、§5.1、§5.3、§6、§7 均已实现（M1/M2/M3，随 `v0.1.0` 发版）；§3 的 `multi-root-compat` 门禁、§6.1 的附加根指令行、§7 的跨进程 Authority Lease 与 host 推导的面板权威属 `v0.1.1` 硬化批次（H1–H4），已实现并随 `v0.1.1` 发版**。进度、编号与发布状态的唯一真源是[路线图 §进度总账](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)；已实现部分可按当前仓库代码与各 completed 计划中的实施结果验证；§8 的长期演进形态、§9 的上游 seam 附录仍是设计。
 > 硬约束：不修改上游仓库（deepseek-harness）任何包；产物是外部 bundle，经 `dsh plugin add` 或 profile patch 组合。
 > 事实依据：[multi-root-workspace-research.md](../reference/multi-root-workspace-research.md)（§1-7 上游现状，§8 不改上游机制，§9 发布形态与运行时解析，§10 方言形状与子类可用面）；需求边界：[multi-root-workspace.md](../requirements/multi-root-workspace.md)；排期：[M1 计划](../plans/completed/2026-09-12-m1-composition-and-passthrough.md)、[M2 计划](../plans/completed/2026-09-12-m2-additional-roots-and-dialect-grants.md)
-> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)；M2 实施后 §5.3 与 §6 改写为已实现的机制（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；M3 实施后 §7 改写为已实现的机制（[ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)）。2026-09-15：§7 增加 store-wide Registry Authority Lease（[ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)）；面板主根改为 host session 推导（[ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)）；§3 增加 `multi-root-compat` 启动门禁与 §6.1 附加根指令行（[ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)、[ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)）。
+> 修订（2026-09-12）：按 M1 实现前探查收窄替换集合为两行并取消 `MultiRootBashExecutor`（§5.2），依据见 [ADR-0001](../decisions/ADR-0001-provider-replacement-scope.md) 与 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)；M2 实施后 §5.3 与 §6 改写为已实现的机制（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）；M3 实施后 §7 改写为已实现的机制（[ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[ADR-0005](../decisions/ADR-0005-out-of-tree-client-transport.md)）。2026-09-15：§7 增加 store-wide Registry Authority Lease（[ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)）；面板主根改为 host session 推导（[ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)）；§3 增加 `multi-root-compat` 启动门禁与 §6.1 附加根指令行（[ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)、[ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)）。2026-10-11：P2 批次（B4–B8，未发布）落地——每根 access 与 `toolAccess` per-tool 封顶（[ADR-0013](../decisions/ADR-0013-per-root-and-per-tool-access.md)）、mutation 前重分类（[ADR-0004 修订](../decisions/ADR-0004-root-registry-persistence-and-validation.md)）、根数量上限与 `multi-root-providers` 冲突门禁（[ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md)）、平台感知拓扑文案（B8）。
 
 ## 1. 总览
 
@@ -68,12 +68,18 @@ dsh-plugin-multi-root-workspace/
   - id: multi-root-sandbox
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
     inject: [multiRootCompat, sandboxPolicy, multiRootScope]
+  - id: multi-root-providers                             # B7：provider 冲突门禁，见 ADR-0014
+    name: '@dsh-electron/dsh-plugin-multi-root-workspace/providers'
+    inject: [multiRootCompat, fs, sandbox]
   - id: multi-root-scope
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/scope'
+    config:
+      toolAccess: {}                                       # B4：{ <tool>: 'read-only' } 封顶附加根写权限
   - id: multi-root-registry                                # 已实现（M3）；lease 见 ADR-0007
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
     config:
       leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+      maxAdditionalRoots: 16                               # B6：每主根存储记录上限（1..64）
   - id: multi-root-instructions                            # 已实现；附加根顶层与工作过的子目录的 AGENTS.md，见 §6.1
     name: '@dsh-electron/dsh-plugin-multi-root-workspace/instructions'
     config:
@@ -92,20 +98,26 @@ dsh-plugin-multi-root-workspace/
 // 多根语义在插件内的唯一 home（对应上游 roots.ts 的角色）——已实现的公开面
 export interface FilesystemScope {
   primaryRoot: string          // = policy.workspaceRoot canonical（上游 resolve 的结果）
-  additionalRoots: readonly string[]   // canonical、去重、≠primary、可为空
+  additionalRoots: readonly string[]   // 全部被授予的成员（任意 access），canonical、去重、≠primary
+  roots: readonly ScopeRoot[]          // { path, access, alias?, id }，登记顺序
+  writableRoots: readonly string[]     // access = read-write 的成员 ∩ 本次调用的工具 cap
 }
 
 class MultiRootScopeService extends Service {         // ctx.multiRootScope
-  /** 每次受限调用解析一次。 */
+  /** 每次受限调用解析一次；writableRoots 由 access 与工具 cap 决定。 */
   resolve(policy: SandboxExecutionPolicy): FilesystemScope
   /** 某一 canonical 主根已登记的附加根（需求 §19 的代位）。 */
   scopeOf(primaryRoot: string): readonly string[]
+  /** 只读成员之外的可写集（B4）。 */
+  writableOf(primaryRoot: string): readonly string[]
   /** 登记表写入口：M2 由测试与冒烟注入，M3 由插件存储喂养。 */
   setAdditionalRoots(primaryRoot: string, roots: readonly AdditionalWorkspaceRoot[]): void
 }
 ```
 
-- **数据源（已实现）**：§7 的注册表（`dsh-storage-domain` domain `multi_root_workspace`，键 = canonical 主根，记录 `RegisteredRoot { id, path, recordedPath?, alias?, addedAt }`）在每次变更后调用 `setAdditionalRoots(root, roots)`；该方法仍是 scope 的公开写口，测试与冒烟脚本可直接使用。provider 结构不随数据源改变——它们只经 `resolve()` / `scopeOf()` 取根。
+- **数据源（已实现）**：§7 的注册表（`dsh-storage-domain` domain `multi_root_workspace`，键 = canonical 主根，记录 `RegisteredRoot { id, path, recordedPath? | readOnlyRecordedPath?, access, alias?, addedAt }`）在每次变更后调用 `setAdditionalRoots(root, roots)`；该方法仍是 scope 的公开写口，测试与冒烟脚本可直接使用。provider 结构不随数据源改变——它们只经 `resolve()` / `scopeOf()` 取根。
+- **成员资格 vs 可写性（B4，安全相关）**：`additionalRoots` / `roots` 是**成员资格投影**——任意 access 的可用成员都在其中，LSP、workspace-files、指令注入、路由与读操作继续按它工作；`writableRoots` 是**写授权投影**——只含 `access = read-write` 的成员，再与本调用的工具 cap 相交。fs fence 与所有方言（含 Windows `--additional-root` 与 `workspaceScopeSid`）只消费 `writableRoots`；`writableRoots` 为空即空根直通。read-only 是"写授权缺省"，不是读 confinement（ADR-0013）。
+- **per-tool 封顶（B4 part 2）**：`multi-root-scope` 行配置 `toolAccess: Record<string, 'read-only'>`；scope 在 `tools/execute` 的 around-dispatch waterfall（`aroundTool`）里把 `{ capped }` 放进模块级 `AsyncLocalStorage`——工具名在 dispatch 入口读一次，嵌套只收窄（`parent?.capped || toolAccess[exec.name] === 'read-only'`）。dispatch 内 `resolve()` 读 ALS；**dispatch 外** `toolAccess` 非空即封顶（fail closed：无法证明工具身份按最严格解释）；空配置行为与未配置逐字节相同。非法配置（非对象或非 `'read-only'` 值）fail closed：一切按封顶 + log error，不抛错。cap 只收窄，不能放宽到根 access 之上。`toolCaps()` 供拓扑文案点名被封顶的工具。
 - **解析链**：`policy.workspaceRoot` → `canonicalPath`（= `realpathSync.native`）→ 登记表查找 → `sanitizeAdditionalRoots`（canonical 化、去重、剔除等于主根的项、**剔除解析结果已不等于登记时授予目录的项**、保持登记顺序）。存在性与重定向判定都在注册表侧完成：`available` 才进入登记表，`missing` / `redirected` / `invalid` 保留但不授予（ADR-0004）。
 - **授权前提（安全相关）**：登记项携带 `recordedPath`（登记当时观察到的 canonical 目录），scope 只在 `canonicalPath(path) === recordedPath` 时授予。`canonicalPath` 是 `realpath`，因此"目录被替换成符号链接"会让解析结果变到另一个目录；把重新解析当成重新授权就等于把写权限交给任何能改本机文件系统的人。scope 侧也会独立做这个判断（不假设调用者已经判过）。
 - **为什么用插件存储而不是 session 事件**：out-of-tree 插件 append 自有事件类型会给会话日志引入"未装插件的 dsh 拒绝打开"风险（session-format 的 required-on-read 规则，除非信封 `ignorable: true`）；存储按不可变的 header cwd 索引，fork/resume/重启行为同样确定。模型可见性由 §6 的 context 快照落 log 满足。
@@ -119,7 +131,7 @@ class MultiRootScopeService extends Service {         // ctx.multiRootScope
 
 - `extends LocalFileSystem`（不 extends `SandboxedFileSystem`：其 `checkedTarget` 是 TS-private，跨包子类不能类型安全地复用或覆盖）。
 - 保留上游 `SandboxedFileSystem` 的对外行为：`sandboxMode` getter（供 `tool-fs` 的 `FsSandboxController` / escalation UI 使用）、`FS_SANDBOX_DENIED` 错误语义与升级指引文案。
-- `writeText` / `editText`：解析 scope → `read-only` 全拒、`workspace-write` 对 `[primaryRoot, ...additionalRoots, /tmp, tmpdir()]` 逐个 containment 判定、`danger-full-access` 放行。写路径本体（原子写、edit 临界区、锁）调用上游 `LocalFileSystem` 实现——**不重写 IO**。
+- `writeText` / `editText`：解析 scope → `read-only` 全拒、`workspace-write` 对 `[primaryRoot, ...writableRoots, /tmp, tmpdir()]` 逐个 containment 判定（`writableRoots` 已含 access 与工具 cap 的收窄；指向只读根的写入被拒并点名 `… is a read-only additional root`）、`danger-full-access` 放行。写路径本体（原子写、edit 临界区、锁）调用上游 `LocalFileSystem` 实现——**不重写 IO**。
 - containment 判定使用插件内的本地实现，并在文件头注明来源 commit 与复制范围：上游 `isPathUnder` 只存在于 `@deepseek-ai/dsh-fs-sandbox/src/containment.ts`，而发布包不含 `src/`（见 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)），深导入在安装形态下必然失败；等价性由差分 parity 测试钉住（§6）。
 - 多根 denial 文案列出全部允许根；escalation 沿用上游 API（只放宽 mode，不放宽根）。
 
@@ -140,7 +152,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 - `extends LocalSandboxProvider`。上游发布形态的公开面只有 `confine(argv, policy)` 与测试钩子 `internals`（`runnerArgv` / `landlockLauncher` / `seatbeltExec` 均为 TS-private，见调研 §10.1），因此实现方式是从 `super.confine` 的**输出**识别方言并克隆 grant 模板（[ADR-0003](../decisions/ADR-0003-dialect-grant-widening.md)）。
 - `override confine(argv, policy)` 的决策顺序（已实现）：
   1. 先 `super.confine(argv, policy)`：上游结果是 argv 与三个 fact 的唯一来源；
-  2. `ctx.multiRootScope.resolve(policy)`；**非 `workspace-write` 或附加根为空 ⇒ 原样返回上游结果**（`read-only` 不授予任何附加根；`danger-full-access` 下 bash 与 PTY 根本不调用 `confine`，见调研 §10.4）；
+  2. `ctx.multiRootScope.resolve(policy)`；**非 `workspace-write` 或 `writableRoots` 为空 ⇒ 原样返回上游结果**（`read-only` 不授予任何附加根；`danger-full-access` 下 bash 与 PTY 根本不调用 `confine`，见调研 §10.4；B4 起 grant 集合是可写成员 ∩ 工具 cap，不是成员资格）；
   3. 校验 `[...profileArgs, '--', ...callerArgv]` 结构，按结构标记识别方言（seatbelt `[…, -p, <SBPL>]` / windows-acl `--mode` / landlock `--rw` / bwrap `--ro-bind`）；
   4. 按方言克隆观测到的 grant 拼写并追加附加根：
      - **Seatbelt (darwin)**：在既有的 `(allow file-write* (subpath …))` allow form 内追加 `(subpath "…")`（字面量转义与上游 `sbplString` 同实现）。
@@ -158,7 +170,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 
 ## 6. Agent 认知与单一权限世界
 
-- **拓扑注入（已实现）**：`MultiRootScopeService` 注册 `ctx.systemPrompt.context({ name: 'multi-root:scope', order: getContextOrder('SANDBOX_POLICY') + 1, … })`：workspace-write 且有附加根时输出一段稳定拓扑（只列根，不列文件，满足需求 §8），其中声明附加根属于同一 workspace 且 session cwd 不变；空根、`read-only`、以及没有 agent 的诊断装配下都不输出任何内容（空段被 `renderContextSections` 过滤，快照与未装插件逐字节相同）。注册是软依赖：宿主没有 `systemPrompt` seam 时不贡献拓扑也不报错。快照随请求落 model history（上游 `sandbox:policy` 同机制），满足 model-visible ⟺ logged。
+- **拓扑注入（已实现，B8 重写渲染）**：`MultiRootScopeService` 注册 `ctx.systemPrompt.context({ name: 'multi-root:scope', order: getContextOrder('SANDBOX_POLICY') + 1, … })`。渲染是纯函数 `renderWorkspaceRootsContext({ platform, mode, primaryRoot, roots, cappedTools })`，输入是**会话视图**（成员 + 根 access + 配置的 capped tools），不读工具 ALS——提示词陈述的是授权事实，不是某次调用的收窄。规则：零成员 ⇒ 空段（快照与未装插件逐字节相同）；`read-only` ⇒ 成员可读、无可写承诺；`danger-full-access` ⇒ 成员资格 + 无沙箱隔离；`workspace-write` ⇒ writable / read-only 两组 JSON 分别列出，声明 session origin 不变、cd/worktree 切换不改变授权、授权变化只约束后续操作与新进程，cappedTools 非空时点名这些工具不能写附加根；win32 附加 upstream Windows ACL restricted-token 的 partial-enforcement 与"读不受其 confine"说明。只列 `available` 成员，不渲染 alias 与宿主内部（SID、lease、存储路径、id）。快照随请求落 model history（上游 `sandbox:policy` 同机制），满足 model-visible ⟺ logged。
 - **单一权限世界（已实现）**：fs fence 与内核方言（sandbox provider）消费 §4 的同一份 `FilesystemScope`；bash 与 terminal/PTY 通过 `ctx.sandbox` 间接消费同一份，因此它们的根集合与 fs fence **由构造相同**。插件自带 **parity 矩阵测试**（接替上游 `writableRoots()` 测试的角色）：同一 scope 下，对「主根内 / 主根嵌套 / 附加根内 / 附加根嵌套 / 根外 / 共享词法前缀的兄弟目录 / 经附加根内符号链接逃逸 / 平台临时区」逐类比较 fs fence 的真实写判定与各方言 argv 的授予集合，并在两端模式（workspace-write / read-only）各跑一轮；解析 argv 的代码由测试侧独立实现。宿主能真正执行 runner 时（Linux CI 的 bwrap/Landlock、macOS 的 Seatbelt、Windows 的 windows-acl——由 `kernel:probe` 用真实上游 runner 双向验证后导出）另加真实受限执行用例，被探针验证的方言不可 skip，不能执行时显式 skip 并说明原因。
 - 已知不对称（上游既有，非插件引入）：bwrap 与 Landlock 只授予字面 `/tmp`，不授予 `tmpdir()`（调研 §10.3），因此 parity 断言的语义限定为「附加根集合与模式」。Windows B2 的当前机制见 [ADR-0011](../decisions/ADR-0011-multi-root-workspace-consumers.md)。
 
@@ -180,8 +192,12 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 
 三行插件行之外新增两行：`multi-root-registry`（服务）与 `multi-root-command`（用户表面）。前者把注册表喂给 §4 的 scope，后者把命令与面板接到注册表上；两个 provider 完全不知道它们存在。
 
-- **注册表（`MultiRootRegistry`，`ctx.multiRootRegistry`）**：`dsh-storage-domain` 的 domain `multi_root_workspace`（version 1，`single` layout，单表 `roots`），**键 = canonical 主根**，值 = 有序记录 `{ id, path, recordedPath?, alias?, addedAt }`（可选仅为兼容旧数据，新登记必填）。`[Service.init]` 先拿 store-wide 内核 lease，成功后才打开 domain、用与写入相同的规则重新判定、只把可用的根播种进 `ctx.multiRootScope`。每次变更先落盘再改内存，成功后重播种 scope 并通知监听者；**同一主根的所有变更在一条 Promise 队列里整体串行**（读快照 → 校验 → 落盘），因为存储域只串行化单个写入，覆盖不到读—改—写。JSON backend 打开后内存 authoritative、没有跨进程 CAS，因此 **同一时刻只允许一个 Registry Authority Process** 打开这份介质（POSIX `flock` / Windows named semaphore，进程死亡由 kernel 释放）；争用进程 fail-closed：scope 为空、mutation 抛 `registry-contended`、`refresh()` 可重新竞选。存储整体打不开时降级为"没有附加根 + 所有写操作抛 `storage-unavailable`"，不阻断 harness 启动。拆除顺序是**排空在飞 mutation → close domain → release lease**：整段拆除在 authority 转场队列里执行、与 acquisition 不交错，所以继任者绝不会打开一份缺了本进程最后一次写的快照。取舍见 [ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md) 与 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。
+- **注册表（`MultiRootRegistry`，`ctx.multiRootRegistry`）**：`dsh-storage-domain` 的 domain `multi_root_workspace`（version 1，`single` layout，单表 `roots`），**键 = canonical 主根**，值 = 有序记录 `{ id, path, recordedPath? | readOnlyRecordedPath?, alias?, addedAt }`——B4 起 access 由**在场的是哪个 grant 键**表达：`recordedPath` = read-write、`readOnlyRecordedPath` = read-only、两者都在或都不在 = `invalid`；domain version 保持 1（严格相等校验使升版本在升降级两向都打不开），旧版插件剥离未知键后把 read-only 记录判 `invalid`，降级绝不升级为可写（ADR-0013）。`[Service.init]` 先拿 store-wide 内核 lease，成功后才打开 domain、用与写入相同的规则重新判定、只把可用的根播种进 `ctx.multiRootScope`。每次变更先落盘再改内存，成功后重播种 scope 并通知监听者；**同一主根的所有变更在一条 Promise 队列里整体串行**（读快照 → 校验 → 落盘），因为存储域只串行化单个写入，覆盖不到读—改—写。JSON backend 打开后内存 authoritative、没有跨进程 CAS，因此 **同一时刻只允许一个 Registry Authority Process** 打开这份介质（POSIX `flock` / Windows named semaphore，进程死亡由 kernel 释放）；争用进程 fail-closed：scope 为空、mutation 抛 `registry-contended`、`refresh()` 可重新竞选。存储整体打不开时降级为"没有附加根 + 所有写操作抛 `storage-unavailable`"，不阻断 harness 启动。拆除顺序是**排空在飞 mutation → close domain → release lease**：整段拆除在 authority 转场队列里执行、与 acquisition 不交错，所以继任者绝不会打开一份缺了本进程最后一次写的快照。取舍见 [ADR-0004](../decisions/ADR-0004-root-registry-persistence-and-validation.md) 与 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。
 - **读路径的重新校验（`refresh`）**：`registry.refresh(primaryRoot)` 先 `ensureAuthority()`（争用方可在对方退出后接管并**从磁盘重新 open**），再重新 `stat`、重新解析、重新裁决、重播种 scope 并通知监听者，**不写存储**；命令 `list` 与面板 `list` 端点都先走它，所以"列出来的范围"永远等于"此刻授予的范围"（目录消失 → `missing` 且撤销；目录回来 → 恢复授予；目录被替换 → `redirected` 且撤销）。`publish` 只在授予集合或不可用集合变化时才真正动 scope，因此刷新可以随时执行而不产生抖动。`recheck` = refresh + 落盘一次。
+- **mutation 前先重分类（B5）**：每个 mutation 的 serialize job 第一步以存储记录 `reclassify`（重新 stat / realpath、重发布），校验与 ref 解析只用这份 fresh 列表；revive 判定同样看 fresh 分类——缓存状态可能滞后于文件系统（ADR-0004 修订）。
+- **访问级别（B4）**：`add` 默认 read-write；revive 保留既有 access（显式传入除外）；`setAccess` 在序列化队列内先 reclassify——降级 read-only 永远允许（含 withheld 根），升级 read-write 仅当 fresh `available`，否则 `root-unavailable`，且不重新记录路径。alias/move 永不改 access；publish 签名含 access。
+- **数量上限（B6）**：`maxAdditionalRoots`（默认 16、顶 64）按主根下全部存储记录计数；超限的新增以 `root-limit-reached` 拒绝，历史超限存量照常分类与授予只拒新增；非法值 `config-invalid` fail closed。`RootsView` 暴露 `limit`/`count`。
+- **provider 冲突门禁（B7）**：`multi-root-providers` 行 inject `multiRootCompat, fs, sandbox`，`init` 时校验 `ctx.fs`/`ctx.sandbox` 是本插件品牌（不可枚举 `Symbol.for('…/provider')`）；任一外来即 log error 并 throw。注册表、指令、LSP、workspace-files 都 inject 它——外来 provider 下这些行不存在、scope 恒空，与装载顺序无关（ADR-0014）。
 - **所有变更按具体记录**：命令和面板把列表行捕获为 `{ ordinal, id, path, addedAt }` entry ref，注册表在串行队列内重新核验后才执行 remove/alias/move。重复 id 不再会误删、批量改名或让排序隐式丢记录；无法唯一区分时明确拒绝。
 - **scope 实时撤销**：每次 `scopeOf`/`resolve` 除了比对 `recordedPath`，还当场确认路径存在且是目录。即使尚未调用 registry `refresh`，删除的根也不会进入 fs/内核 grant，更不会被写入重建。
 - **校验（`src/roots.ts` 纯函数，fail loud）**：`~` 展开（只限前导 `~`）→ 必须绝对 → **Windows 网络/设备路径词法拒绝（`unsupported-path`，在 canonical 化与 `stat` 之前，canonical 结果再判一次以捕捉映射盘）** → 必须存在且是目录 → `canonicalPath` → 不等于主根 → **不与主根互相包含（`primary-overlap`，双向）** → 不与其他根重复 → 不与任何根互相包含（`nested` 双向拒绝）。失败返回稳定 code（`not-absolute` / `missing` / `not-a-directory` / `unsupported-path` / `equals-primary` / `primary-overlap` / `duplicate` / `nested` / `invalid-alias` / `not-found` / `invalid-ref` / `storage-unavailable` / `registry-contended` / `reveal-unavailable` / `session-not-found`），三类表面（命令、面板、内部 API）共用同一词汇。存储读取侧用同一套规则（`classifyStoredRoots`），并额外判定 `recordedPath` 变化（`redirected`）、重复 id（全部 `invalid`）与 UNC/设备路径的 `invalid`。

@@ -47,6 +47,10 @@ M3 要把"哪些目录是附加根"从测试注入变成用户可管理的持久
 18. **scope 的每次解析都是最后的安全门**：除了验证 `canonicalPath(path) === recordedPath`，还必须当场 `stat` 并确认是目录。因此目录在两次 registry refresh 之间被删除时，provider 的下一次 resolve 已经撤销授予，不会因写入而把目录重新创建。
 19. **CI 的能力探针必须先于依赖其结果的单测**：`kernel:probe` 在 `test` 前导出逐方言结果；Windows 开关在 matrix 生成阶段决定是否创建 runner；升级工作流从 manifest 枚举所有直接 `@deepseek-ai/dsh*` 依赖并输出完版本清单。
 
+### 2026-10-11 修订：mutation 前先重新分类（B5）
+
+原先 `add` / `removeAt` / `setAlias` / `move` 在串行队列内读的是 `statusesOf` 的**缓存**分类：根 A 缓存为 `missing` 时它不进 `existing`，其目录恢复后立刻 `add` 其子路径会通过校验、落盘一条随后被判 `nested` 的 invalid 记录；revive 判定同样读缓存，缓存 `available` 而实际 `redirected` 时重加原路径会新建第二条同路径记录。现改为：每个 mutation 的 serialize job 第一步以**存储记录**重新 `reclassify`（重新 stat / realpath、重发布——先发布撤销再授予顺序不变），校验与 ref 解析一律使用这份 fresh 列表；revive 也只看 fresh 分类。`refresh`/`recheck` 语义不变。元数据 mutation（alias、move）不消费分类结果，文件系统未变化时其 publish 签名必须逐字节相同——不允许元数据操作意外变成 grant 变化。mutation 抛错（校验失败或存储 `put` 失败）时内存 scope 与持久态一致：重发布反映的是存储记录。见 [ADR-0014](./ADR-0014-root-limit-and-provider-conflict.md)。
+
 ## Alternatives Considered
 
 | 方案 | 否决理由 |

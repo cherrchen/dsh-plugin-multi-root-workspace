@@ -155,12 +155,16 @@ dsh --profile web --dump-config
 **命令**（文本入口，headless 下同样可用）：
 
 ```text
-/workspace-folders                       # 列出主根与附加根
+/workspace-folders                       # 列出主根与附加根（含每根访问级别）
 /workspace-folders add <绝对路径>         # 无参数时打开系统目录选择器
+/workspace-folders add <绝对路径> --read-only   # 登记为只读根：可读可浏览，任何工具不得写入
+/workspace-folders access 1 read-write   # 切换访问级别（升级到可写要求该根此刻可用）
 /workspace-folders alias 1 支付           # 给第 1 个附加根起别名
 /workspace-folders remove 1              # 按序号或路径移除
 /workspace-folders reveal 1              # 在文件管理器中显示
 ```
+
+附加根默认 read-write；read-only 根保留全部成员资格（可读、文件树、LSP、指令），只是 fs 写、受限进程与 Windows ACL 都不授予它写权限。每个主根的附加根数量有上限（默认 16，经注册表行配置 `maxAdditionalRoots` 可调至 64）；宿主还可以在 `multi-root-scope` 行配置 `toolAccess: { <工具名>: 'read-only' }`，让某个工具永远不能写任何附加根（例如 `{ bash: 'read-only' }`——bash 仍可写主根）。语义与持久化编码见 [ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)，上限与 provider 冲突门禁见 [ADR-0014](./docs/decisions/ADR-0014-root-limit-and-provider-conflict.md)。
 
 `add` 后执行 `list` 的预期输出：
 
@@ -217,7 +221,7 @@ docs/             需求、架构、决策记录（ADR）、计划、开发工�
 - Windows 多根 runner 继承上游 partial enforcement、caller-owned 目录及 private temp 分离条件；已启动进程保留启动时根集合，后续进程使用更新后的集合（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - **Windows 上的网络与设备路径不能成为附加根**：UNC（`\\server\share`）、`\\?\`、`\\.\` 与映射网络盘在登记时即以 `unsupported-path` 拒绝——restricted token 的 capability SID 无法绑定 SMB 访问（[ADR-0011 修订](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - **Windows 受限 shell 是 pwsh，不含 Git Bash**：MSYS 在 restricted Low-integrity token 下无法启动（上游 runner 与插件 runner 表现一致，属上游限制）；上游 runner 的 confined 子进程因继承 ignore-Ctrl+C 标志而收不到 Ctrl+C，插件 runner 下子进程能收到并由 runner 镜像其退出码。
-- 附加根与主根同权（无 per-root read-only）；附加根不能作为 bash/PTY 的默认工作目录（session cwd 语义不变）。
+- 附加根默认与主根同权；`--read-only` 登记或 `access` 切换后可变为只读（写授权缺省，不是读 confinement）。已启动的进程保留启动时根集合，cap/access 变化只约束之后的调用与新进程（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)）；附加根不能作为 bash/PTY 的默认工作目录（session cwd 语义不变）。
 - 附加根文件树位于“工作区目录”对话框，采用手动刷新；可展开目录和预览前 200 行文本。主根原生 Files tab 保留，有 actions slot 时提供打开该对话框的入口。LSP 按附加文件所在根初始化独立 workspace；需要宿主配置对应语言服务器（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - 命令的输出文案为英文（host 侧没有活动语言信息），面板文案中英双语跟随界面语言。
 - Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：`sidebar.footer.action` 是所有受支持版本都提供的插槽，而 `sidebar.panellist`/`main` 不是。

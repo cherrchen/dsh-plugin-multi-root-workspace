@@ -93,11 +93,11 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 | P1 | Additional Root LSP workspace routing | 后续评审补充；B1 将附加根内文件路由至该仓库 workspaceRoot，保留相对路径的主根 cwd 语义；实现与验证状态见路线账本 |
 | P1 | Windows 内核级多根（pwsh 方言 / ACL） | 第一期就已登记；B2 的受限 PowerShell/PTY 使用 root-set SID 授权；实现与平台验证状态见路线账本 |
 | P1 | `workspace-files`（Client 文件树）多根 confine | 第一期就已登记；B3 按当前会话 scope 浏览附加根，通过现有目录面板提供 lazy tree 与文本 preview；实现与验证状态见路线账本 |
-| P2 | Read-only root / per-root / per-tool 权限 | 第一期就已登记；初版附加根与主根同权（§16） |
-| P2 | Mutation 前强制 reclassify | 后续评审补充；避免缓存的 `missing` / `redirected` 状态让 `add` 后立刻 invalid |
-| P2 | Additional Root 数量上限 | 后续评审补充；防止 realpath/stat、sandbox argv 与 prompt 预算随根数量无界增长 |
-| P2 | Provider replacement conflict detection | 后续评审补充；若另一插件也替换 `ctx.fs` / `ctx.sandbox`，应 fail loud，而不是依赖 patch 顺序 |
-| P2 | Windows-aware model capability prompt | 后续评审补充；不再对 Windows 模型宣称"附加根与主根完全同权" |
+| P2 | Read-only root / per-root / per-tool 权限 | 第一期就已登记；初版附加根与主根同权（§16）。B4 已实现：根记录携带 access（持久化用 `recordedPath` / `readOnlyRecordedPath` 区分，domain v1 不变、降级 fail closed）；`multi-root-scope` 行配置 `toolAccess` 按工具封顶附加根写权限；实现见 [B4–B8 计划](../plans/active/2026-10-11-b4-b8-p2.md) 与 [ADR-0013](../decisions/ADR-0013-per-root-and-per-tool-access.md) |
+| P2 | Mutation 前强制 reclassify | 后续评审补充；避免缓存的 `missing` / `redirected` 状态让 `add` 后立刻 invalid。B5 已实现：每个 mutation 在串行队列内先以存储记录重分类再校验，见 [ADR-0004 修订](../decisions/ADR-0004-root-registry-persistence-and-validation.md) |
+| P2 | Additional Root 数量上限 | 后续评审补充；防止 realpath/stat、sandbox argv 与 prompt 预算随根数量无界增长。B6 已实现：`maxAdditionalRoots` 默认 16、顶 64，超限存量照授只拒新增，见 [ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md) |
+| P2 | Provider replacement conflict detection | 后续评审补充；若另一插件也替换 `ctx.fs` / `ctx.sandbox`，应 fail loud，而不是依赖 patch 顺序。B7 已实现：品牌 + `multi-root-providers` 门禁，见 [ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md) |
+| P2 | Windows-aware model capability prompt | 后续评审补充；不再对 Windows 模型宣称"附加根与主根完全同权"。B8 已实现：拓扑文案按模式、访问级别、capped tools 与平台陈述，win32 附带 restricted-token partial-enforcement 与读不受限说明，见 [ADR-0013](../decisions/ADR-0013-per-root-and-per-tool-access.md) |
 | P3 | Registry observer 语义 | 后续评审补充；区分 grant change / metadata change，并隔离 listener 异常 |
 | P3 | 收紧 TOCTOU 文档表述 | 后续评审补充；与 DSH 本地 path-based sandbox 保持同一 threat model，不声称消除 path race |
 | P3 | `*.dsh-workspace.json` Import/Export | 第一期就已登记（§17）；storage 目前是唯一数据源 |
@@ -120,6 +120,11 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 7.6 **跨进程单写者**：两个 DSH 进程共用同一 storage root 时，只有持有 store-wide 内核 lease 的进程打开登记表并授予附加根；另一进程 fail-closed（空 scope、`registry-contended`），其 `list`/Refresh 在对方退出或崩溃后可接管并读回最后一次 durable 写。释放顺序：排空在飞 mutation → close domain → release lease，且与在飞 acquisition 不交错（继任者绝不会打开一份缺了最后一次写的快照）。见 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。
 7.7 **面板主根由 host session 推导**：面板通道每个端点（含 `list`）只接受必填 `sessionId`；host 用 `resolvePanelPrimaryRoot` 取该 session 的 `header.cwd` canonical，不接受客户端 `primaryRoot`，也不回退部署默认 workspace。缺失或未知会话拒绝；浏览器没有当前 Session 时显示空态、不调用 host。`/workspace-folders` 仍用 `invocation.agent.session`。见 [ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)。
 7.8 **附加根指令注入（H4 Phase 1 + Phase 2）**：零附加根时该行一条 message 都不注入（空根与未装插件仍逐字节一致）；每个附加根**顶层**的 `AGENTS.md` / `CLAUDE.md` 在模型第一步之前可见，且以绝对路径标注（两个根的 `AGENTS.md` 不混淆）；**由成功工具调用到达的子目录**里的同类文件在其目录被考察到之后、下一步之前可见（触碰仅认成功的 `read` / `write` / `edit`，失败的调用不算）；每个文件恰好投递一次，内容变化才重发该文件；所有附加根共享同一份 64 KiB 预算；根被移除、消失或被替换（`redirected`）时注入**显式撤销**文案，已投递文件消失时注入**显式撤回**文案（点名绝对路径）；`$DSH_HOME`、主根自身与任何祖先目录的指令文件不被重复注入。触碰 `a/b/file` 时，`a/AGENTS.md` 与 `a/b/AGENTS.md` 都必须可见（被触碰路径的父目录及其每个祖先直到根都被考察）。见 [ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)。
+7.9 **每根访问级别**：附加根可登记为 `read-write`（默认）或 `read-only`（`add --read-only` / `access` 子命令 / 面板切换）。`read-only` 根保留全部成员资格（可读、LSP、文件树、指令、路由），但 fs write/edit、受限进程与 Windows ACL 都不得授予它写权限；指向只读根的写入被拒并点名 `… is a read-only additional root`。降级到 read-only 永远允许；升级到 read-write 仅在该根此刻 `available` 时允许，且不重新记录路径。持久化编码保证旧版本插件读到 read-only 记录时判 `invalid` 而非升级为可写。
+7.10 **per-tool 封顶**：`multi-root-scope` 行配置 `toolAccess: { <tool>: 'read-only' }` 时，该工具的 dispatch 内（真实 `tools/execute` waterfall 携带的 AsyncLocalStorage）一切附加根写权限被移除——fs write/edit 拒绝、新进程 confine 不含附加根 grant；主根写权限不受影响。嵌套 dispatch 只收窄不放宽；并发 dispatch 互不污染；dispatch 之外配置非空即按封顶处理；非法配置 fail closed（封顶 + log）。封顶语义已由真实 bash 工具 + 真实 write 工具的组合 journey 实跑验证。
+7.11 **根数量上限**：`maxAdditionalRoots`（默认 16、可配置至 64）按主根下全部存储记录计数；达到上限的新增以 `root-limit-reached` 拒绝，历史超限记录照常分类与授予、只拒新增；非法配置值使注册表 `config-invalid` fail closed。
+7.12 **provider 冲突 fail closed**：任一外来 provider 占用 `ctx.fs` / `ctx.sandbox`（无论装载顺序）时 `multi-root-providers` 门禁抛错、注册表缺席、scope 恒空，绝不把写权限交给外来实现。
+7.13 **模型可见的授权陈述**：拓扑文案只列可用成员，按 `writable` / `read-only` 分组陈述，声明 session origin 不变、cd/worktree 切换不改变授权、授权变化只约束后续操作与新进程；配置 capped tools 时点名这些工具不能写附加根；Windows 附加 restricted-token partial-enforcement 与读不受其 confine 的说明；read-only 与 danger-full-access 模式不做超出上游语义的承诺。
 8. **失败要响亮**：misconfiguration（非绝对路径、重复 id、patch 行未按预期生效）在装载或首次 resolve 时抛错。
 9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias/排序可用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制。
 10. **升级韧性**：`package.json` pin dsh 精确版本；仓库 CI 含"升级 smoke"脚本（对上游 demo 行为差异报警）；provider 子类只依赖上游公开方法面（不触碰 TS-private、不做原型替换）。
