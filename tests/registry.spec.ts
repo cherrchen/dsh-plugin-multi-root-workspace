@@ -395,6 +395,27 @@ describe('revalidation without a restart', () => {
     expect(scope.scopeOf(primary)).toEqual([canonicalPath(elsewhere)])
   })
 
+  it('decides revive from the fresh classification, not the stale cache', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
+    const { registry, scope } = await mount()
+    const granted = makeRoot('granted')
+    const elsewhere = makeRoot('elsewhere')
+    await registry.add(primary, { path: granted })
+    rmSync(granted, { recursive: true, force: true })
+    symlinkSync(elsewhere, granted)
+    // No refresh in between: the cache still reports `available`. Judging
+    // revive from that stale state would write a SECOND record for the same
+    // operator-given path; judging it from the fresh re-classification the
+    // mutation just performed sees `redirected` and revives the one record.
+    const statuses = await registry.add(primary, { path: granted })
+    expect(statuses).toHaveLength(1)
+    expect(statuses[0]?.state).toBe('available')
+    expect(statuses[0]?.path).toBe(canonicalPath(elsewhere))
+    expect(registry.granted(primary)).toEqual([canonicalPath(elsewhere)])
+    expect(scope.scopeOf(primary)).toEqual([canonicalPath(elsewhere)])
+  })
+
   it('tells observers only when the effective grant changed', async () => {
     const { registry } = await mount()
     const extra = makeRoot('extra')

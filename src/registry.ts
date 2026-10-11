@@ -363,11 +363,9 @@ export class MultiRootRegistry extends Service {
       // store where it immediately classifies as `invalid`. Revocations publish
       // before any grant, which is the required order.
       // The state the operator last saw is captured BEFORE the fresh
-      // classification: it decides revive-vs-duplicate, the one verdict the
-      // filesystem alone cannot make — a withheld root whose directory just
-      // came back is observationally identical to one that was always granted,
-      // and only the earlier state tells "the operator re-confirms a withheld
-      // root" apart from "the operator re-adds a granted one".
+      // classification: the fresh list alone cannot tell "the operator
+      // re-confirms a root that was withheld at their last observation" from
+      // "the operator re-adds a root that was — and still is — granted".
       const earlier = this.cache.get(key)
       const statuses = this.reclassify(key)
       const alias = normalizeAlias(input.alias)
@@ -378,15 +376,18 @@ export class MultiRootRegistry extends Service {
       // resolves to — so re-adding a directory that was replaced by a symlink
       // updates that registration (re-recording what it is granted for)
       // instead of piling a second record for the same operator-given path on
-      // top of it. Only a record that was WITHHELD (or never classified, and
-      // still is) can be revived this way; re-adding a granted root stays a
-      // `duplicate` refusal.
+      // top of it. A re-add revives when EITHER observation reports the record
+      // withheld — the fresh classification catches a root that degraded since
+      // the last one (a grant that is now `redirected` must revive, never
+      // duplicate), the last observation catches the operator re-confirming a
+      // root whose directory silently came back. Only a root that was granted
+      // then AND is granted now stays a `duplicate` refusal.
       const expanded = expandRootInput(input.path)
       const preliminary = isAbsolute(expanded) ? canonicalRoot(expanded) : undefined
       const revived = preliminary === undefined ? -1 : statuses.findIndex((status) => {
         if (status.path !== preliminary && canonicalRoot(status.path) !== preliminary) return false
         const before = earlier?.find(candidate => candidate.id === status.id)
-        return (before ?? status).state !== 'available'
+        return status.state !== 'available' || (before !== undefined && before.state !== 'available')
       })
       // The cap counts STORED records — every state, including withheld and
       // unusable ones — so it is stable and independent of the filesystem. A
