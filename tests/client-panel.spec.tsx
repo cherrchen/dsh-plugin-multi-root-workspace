@@ -422,10 +422,11 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
+    // The access select is untouched, so no level travels: a chosen level is
+    // the only one a request may carry — a displayed default is not a choice.
     expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
       sessionId: 'session-1',
       path: '/repos/picked',
-      access: 'read-write',
     })
 
     const manual = screen.getByPlaceholderText(`${NS}.panel.addManual`)
@@ -437,7 +438,6 @@ describe('the panel dialog', () => {
     expect(harness.calls.filter(call => call.endpoint === 'add')[1]?.payload).toEqual({
       sessionId: 'session-1',
       path: '/repos/typed',
-      access: 'read-write',
     })
     expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('value', '')
   })
@@ -471,7 +471,6 @@ describe('the panel dialog', () => {
     expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
       sessionId: 'session-1',
       path: '/repos/entered',
-      access: 'read-write',
     })
   })
 
@@ -488,7 +487,6 @@ describe('the panel dialog', () => {
     expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
       sessionId: 'session-1',
       path: '/repos/picked',
-      access: 'read-write',
     })
     // The picker path and the typed path are two different actions; the typed
     // text is neither submitted nor cleared by the picker.
@@ -663,6 +661,34 @@ describe('the panel dialog', () => {
       sessionId: 'session-1',
       path: '/repos/picked',
       access: 'read-only',
+    })
+  })
+
+  it('keeps the re-register route open at the root limit, and it sends no access', async () => {
+    const harness = mount()
+    // count >= limit: a full store, one of whose records is withheld.
+    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B], limit: 2, count: 2 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
+
+    // Every NEW-add control stays refused at the limit (the picker button even
+    // relabels itself to explain the refusal)…
+    expect(screen.getByRole('button', { name: `${NS}.panel.limitReached` })).toHaveProperty('disabled', true)
+    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: `${NS}.panel.addConfirm` })).toHaveProperty('disabled', true)
+
+    // …but a withheld row keeps its re-register action: a revive consumes no
+    // slot and the host accepts it at or above the limit. The request names
+    // the stored path and NO access, so the record's level is preserved
+    // (ROOT_B is read-only) instead of silently widened.
+    const reRegister = screen.getByRole('button', { name: `${NS}.panel.reRegister` })
+    expect(reRegister).toHaveProperty('disabled', false)
+    fireEvent.click(reRegister)
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
+    expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
+      sessionId: 'session-1',
+      path: '/repos/website',
     })
   })
 

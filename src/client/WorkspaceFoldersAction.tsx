@@ -30,6 +30,7 @@ import {
   IconFolderClose,
   IconFolderOpen,
   IconPlus,
+  IconRefresh,
   IconTrash,
 } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
@@ -213,6 +214,13 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   const [manualPath, setManualPath] = useState('')
   /** The access the Add controls register new roots with; `read-write` is the historical default. */
   const [addAccess, setAddAccess] = useState<'read-write' | 'read-only'>('read-write')
+  /**
+   * Whether the operator actually picked a level. The select shows its default
+   * before they do, and sending that default would be an explicit value the
+   * operator never named: on a revive the registry upgrades a read-only record
+   * to it. Only a chosen level may travel in the request.
+   */
+  const [accessChosen, setAccessChosen] = useState(false)
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
@@ -349,8 +357,8 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
       return
     }
     if (picked === null || picked.trim() === '') return
-    await mutate('add', { path: picked, access: addAccess })
-  }, [mutate, props, addAccess])
+    await mutate('add', { path: picked, ...(accessChosen ? { access: addAccess } : {}) })
+  }, [mutate, props, addAccess, accessChosen])
 
   /**
    * Add the path in the manual field — the one the operator typed. The picker
@@ -362,8 +370,20 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     if (path === '') return
     // Cleared only on success: a rejected path stays in the field so the operator
     // can fix it instead of retyping it.
-    if (await mutate('add', { path, access: addAccess })) setManualPath('')
-  }, [manualPath, mutate, addAccess])
+    if (await mutate('add', { path, ...(accessChosen ? { access: addAccess } : {}) })) setManualPath('')
+  }, [manualPath, mutate, addAccess, accessChosen])
+
+  /**
+   * Re-register one withheld or unusable root in place. The request carries
+   * the stored path and deliberately NO access: `registry.add` treats the call
+   * as a revive — it keeps the record's access, alias, and identity instead of
+   * creating a new registration — which is also why the root limit must not
+   * gate this button: a revive consumes no slot, and it is the panel's only
+   * repair route for a redirected entry.
+   */
+  const reRegister = useCallback(async (root: RootView) => {
+    await mutate('add', { path: root.path })
+  }, [mutate])
 
   /** Reveal one root: the answer is the revealed path, not a new view. */
   const reveal = useCallback(async (root: RootView) => {
@@ -508,6 +528,14 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                     {t(stateKey(root.state))}
                   </span>
                 )}
+                {root.state === 'available' ? null : (
+                  <IconButton
+                    disabled={state.busy}
+                    onClick={() => { void reRegister(root) }}
+                    icon={<IconRefresh />}
+                    label={t('panel.reRegister')}
+                  />
+                )}
                 <IconButton
                   onClick={() => { void copyPath(root) }}
                   icon={<IconCopy />}
@@ -618,7 +646,10 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
               value={addAccess}
               disabled={state.busy || atLimit}
               aria-label={t('panel.accessLabel')}
-              onChange={event => { setAddAccess(event.target.value === 'read-only' ? 'read-only' : 'read-write') }}
+              onChange={event => {
+                setAccessChosen(true)
+                setAddAccess(event.target.value === 'read-only' ? 'read-only' : 'read-write')
+              }}
             >
               <option value="read-write">{t('access.readWrite')}</option>
               <option value="read-only">{t('access.readOnly')}</option>
