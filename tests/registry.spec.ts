@@ -506,6 +506,189 @@ describe('a store with records that cannot be told apart', () => {
   })
 })
 
+describe('fresh classification inside every mutation', () => {
+  it('rejects an add that only passed because a restored root was still cached as missing', async () => {
+    const { registry, scope } = await mount()
+    const outer = makeRoot('outer')
+    await registry.add(primary, { path: outer })
+    rmSync(outer, { recursive: true, force: true })
+    expect((await registry.refresh(primary))[0]?.state).toBe('missing')
+
+    // The directory came back, with a child inside it. A mutation must judge
+    // against THAT state, not the cached `missing`: the child is nested under
+    // the restored root, so the add is refused and nothing is written.
+    mkdirSync(join(outer, 'inner'), { recursive: true })
+    const inner = canonicalPath(join(outer, 'inner'))
+    await expect(registry.add(primary, { path: inner })).rejects.toMatchObject({ code: 'nested' })
+    expect(storedPaths()).toEqual([outer])
+    expect(registry.list(primary)[0]?.state).toBe('available')
+    expect(registry.granted(primary)).toEqual([outer])
+    expect(scope.scopeOf(primary)).toEqual([outer])
+  })
+
+  it('judges a nested add against the restored root even while the cache still says missing', async () => {
+    const { registry, scope } = await mount()
+    const outer = makeRoot('outer')
+    await registry.add(primary, { path: outer })
+    rmSync(outer, { recursive: true, force: true })
+    expect((await registry.refresh(primary))[0]?.state).toBe('missing')
+
+    // Only the child is recreated (with its parent), so the stored root is
+    // usable again the moment the mutation runs — no refresh in between.
+    const inner = canonicalPath(join(outer, 'inner'))
+    mkdirSync(inner, { recursive: true })
+    await expect(registry.add(primary, { path: inner })).rejects.toMatchObject({ code: 'nested' })
+    expect(storedPaths()).toEqual([outer])
+    expect(scope.scopeOf(primary)).toEqual([outer])
+  })
+
+  it('revives a redirected registration against the fresh resolution when the original directory is back', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
+    const { registry, scope } = await mount()
+    const granted = makeRoot('granted')
+    const elsewhere = makeRoot('elsewhere')
+    await registry.add(primary, { path: granted })
+
+    rmSync(granted, { recursive: true, force: true })
+    symlinkSync(elsewhere, granted)
+    expect((await registry.refresh(primary))[0]?.state).toBe('redirected')
+
+    // The original directory is back, but no refresh ran: the mutation itself
+    // must re-resolve and re-record against what is there NOW.
+    rmSync(granted, { force: true })
+    mkdirSync(granted)
+    const statuses = await registry.add(primary, { path: granted })
+    expect(statuses).toHaveLength(1)
+    expect(statuses[0]?.state).toBe('available')
+    expect(statuses[0]?.path).toBe(canonicalPath(granted))
+    expect(registry.granted(primary)).toEqual([canonicalPath(granted)])
+    expect(scope.scopeOf(primary)).toEqual([canonicalPath(granted)])
+  })
+
+  it('publishes the restored grant exactly once when an alias lands on a root that came back', async () => {
+    const { registry, scope } = await mount()
+    const extra = makeRoot('extra')
+    await registry.add(primary, { path: extra })
+    rmSync(extra, { recursive: true, force: true })
+    expect((await registry.refresh(primary))[0]?.state).toBe('missing')
+
+    let publications = 0
+    const unsubscribe = scope.subscribe(() => { publications += 1 })
+    mkdirSync(extra)
+    const statuses = await registry.setAlias(primary, { kind: 'path', path: extra }, 'back')
+    unsubscribe()
+
+    expect(statuses[0]?.state).toBe('available')
+    expect(statuses[0]?.alias).toBe('back')
+    expect(scope.scopeOf(primary)).toEqual([extra])
+    expect(publications).toBe(1)
+  })
+
+  it('fires no scope publication for alias and move on a healthy store', async () => {
+    const { registry, scope } = await mount()
+    const first = makeRoot('first')
+    const second = makeRoot('second')
+    await registry.add(primary, { path: first })
+    await registry.add(primary, { path: second })
+
+    let publications = 0
+    const unsubscribe = scope.subscribe(() => { publications += 1 })
+    await registry.setAlias(primary, { kind: 'ordinal', ordinal: 1 }, 'one')
+    await registry.move(primary, { kind: 'ordinal', ordinal: 2 }, { kind: 'ordinal', ordinal: 1 })
+    unsubscribe()
+
+    expect(publications).toBe(0)
+    expect(registry.granted(primary)).toEqual([second, first])
+  })
+
+  it('serializes a concurrent add/remove/alias/move burst with no lost write', async () => {
+    const { registry } = await mount()
+    const first = makeRoot('first')
+    const second = makeRoot('second')
+    const third = makeRoot('third')
+    await registry.add(primary, { path: first })
+    await registry.add(primary, { path: second })
+
+    await Promise.all([
+      registry.add(primary, { path: third }),
+      registry.setAlias(primary, { kind: 'ordinal', ordinal: 1 }, 'alpha'),
+      registry.move(primary, { kind: 'path', path: third }, { kind: 'ordinal', ordinal: 1 }),
+      registry.remove(primary, { kind: 'path', path: second }),
+    ])
+
+    const statuses = registry.list(primary)
+    expect(statuses.map(status => status.path)).toEqual([third, first])
+    expect(statuses[1]?.alias).toBe('alpha')
+    expect(storedPaths()).toEqual([third, first])
+  })
+
+  it('leaves the scope equal to the persisted state when the durable write fails', async () => {
+    const { registry, scope } = await mount()
+    const extra = makeRoot('extra')
+    await registry.add(primary, { path: extra })
+    const doomed = makeRoot('doomed')
+
+    const internal = registry as unknown as {
+      table: { put: (key: string, value: unknown) => Promise<void> }
+    }
+    const table = internal.table
+    const realPut = table.put.bind(table)
+    table.put = async () => { throw new Error('disk full') }
+    await expect(registry.add(primary, { path: doomed })).rejects.toThrow('disk full')
+    table.put = realPut
+
+    // Memory and disk agree: the failed mutation wrote nothing and granted
+    // nothing beyond what the store still holds.
+    expect(storedPaths()).toEqual([extra])
+    expect(registry.list(primary).map(status => status.path)).toEqual([extra])
+    expect(scope.scopeOf(primary)).toEqual([extra])
+
+    // The queue is not poisoned: a later mutation proceeds normally.
+    expect(await registry.remove(primary, { kind: 'path', path: extra })).toEqual([])
+  })
+})
+
+describe('lease authority', () => {
+  it('rejects every mutation as registry-contended before touching the filesystem', async () => {
+    await mount()
+    const second = await mount()
+    expect(second.registry.authority.kind).toBe('contended')
+
+    // The candidate does not exist: a contended process must report the lease,
+    // never a filesystem verdict it is not allowed to make.
+    const absent = join(fixture.base, 'never-created')
+    await expect(second.registry.add(primary, { path: absent })).rejects.toMatchObject({
+      code: 'registry-contended',
+    })
+    await expect(second.registry.removeAt(primary, { kind: 'ordinal', ordinal: 1 })).rejects.toMatchObject({
+      code: 'registry-contended',
+    })
+    await expect(second.registry.setAlias(primary, { kind: 'ordinal', ordinal: 1 }, 'x')).rejects.toMatchObject({
+      code: 'registry-contended',
+    })
+    await expect(second.registry.move(primary, { kind: 'ordinal', ordinal: 1 })).rejects.toMatchObject({
+      code: 'registry-contended',
+    })
+  })
+
+  it('takes over through refresh after the holder exits, then mutates normally', async () => {
+    const first = await mount()
+    const second = await mount()
+    expect(second.registry.authority.kind).toBe('contended')
+
+    await first.dispose()
+    stacks = stacks.filter(stack => stack !== first)
+    const extra = makeRoot('extra')
+
+    await second.registry.refresh(primary)
+    expect(second.registry.authority.kind).toBe('active')
+    const statuses = await second.registry.add(primary, { path: extra })
+    expect(statuses[0]?.state).toBe('available')
+    expect(second.scope.scopeOf(primary)).toEqual([extra])
+  })
+})
+
 describe('store that this build cannot read', () => {
   it('reports an unusable record as invalid and never grants it', async () => {
     const first = await mount()

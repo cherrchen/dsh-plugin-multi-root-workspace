@@ -55,6 +55,7 @@ import {
   availableRoots,
   canonicalRoot,
   classifyStoredRoots,
+  expandRootInput,
   removeStatusAt,
   resolveRootIndex,
   RootValidationError,
@@ -289,22 +290,47 @@ export class MultiRootRegistry extends Service {
     this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
-      const statuses = this.statusesOf(key)
+      // Re-classify FIRST, from the stored records: the cached list may be
+      // stale (a `missing` root whose directory came back, a `redirected` one
+      // whose target moved), and a candidate judged against it would either be
+      // refused for a rule that no longer holds or — worse — admitted into a
+      // store where it immediately classifies as `invalid`. Revocations publish
+      // before any grant, which is the required order.
+      // The state the operator last saw is captured BEFORE the fresh
+      // classification: it decides revive-vs-duplicate, the one verdict the
+      // filesystem alone cannot make — a withheld root whose directory just
+      // came back is observationally identical to one that was always granted,
+      // and only the earlier state tells "the operator re-confirms a withheld
+      // root" apart from "the operator re-adds a granted one".
+      const earlier = this.cache.get(key)
+      const statuses = this.reclassify(key)
+      const alias = normalizeAlias(input.alias)
+      // Reviving is detected BEFORE the candidate is judged: re-registering the
+      // very directory an existing record names is the operator confirming it,
+      // not a duplicate. The check looks at BOTH spellings of a registration —
+      // the canonical path it is stored under, and the path it currently
+      // resolves to — so re-adding a directory that was replaced by a symlink
+      // updates that registration (re-recording what it is granted for)
+      // instead of piling a second record for the same operator-given path on
+      // top of it. Only a record that was WITHHELD (or never classified, and
+      // still is) can be revived this way; re-adding a granted root stays a
+      // `duplicate` refusal.
+      const expanded = expandRootInput(input.path)
+      const preliminary = isAbsolute(expanded) ? canonicalRoot(expanded) : undefined
+      const revived = preliminary === undefined ? -1 : statuses.findIndex((status) => {
+        if (status.path !== preliminary && canonicalRoot(status.path) !== preliminary) return false
+        const before = earlier?.find(candidate => candidate.id === status.id)
+        return (before ?? status).state !== 'available'
+      })
+      const revivedPath = revived === -1 ? undefined : statuses[revived]!.path
       const canonical = validateRootCandidate(input.path, {
         primaryRoot: key,
         // A withheld or unusable registration grants nothing, so it may not block
-        // re-registering the very directory the operator is trying to restore.
-        existing: availableRoots(statuses),
+        // re-registering the very directory the operator is trying to restore —
+        // and neither may the revived record's own grant, whose re-registration
+        // is exactly what a revive confirms.
+        existing: availableRoots(statuses).filter(root => root !== revivedPath),
       })
-      const alias = normalizeAlias(input.alias)
-      // Reviving looks at BOTH spellings of an existing registration: the
-      // canonical path it is stored under, and the path it currently resolves
-      // to. Re-adding a directory that was replaced by a symlink therefore
-      // updates the existing registration (re-recording what it is granted for)
-      // instead of piling a second record for the same operator-given path on
-      // top of it.
-      const revived = statuses.findIndex(status =>
-        status.path === canonical || canonicalRoot(status.path) === canonical)
       const next = revived === -1
         ? [...statuses, {
           id: additionalRootId(randomUUID()),
@@ -355,7 +381,7 @@ export class MultiRootRegistry extends Service {
     await this.ensureAuthority()
     this.requireActive()
     const key = canonicalRoot(primaryRoot)
-    return await this.serialize(key, async () => await this.persist(key, removeStatusAt(this.statusesOf(key), ref)))
+    return await this.serialize(key, async () => await this.persist(key, removeStatusAt(this.reclassify(key), ref)))
   }
 
   /**
@@ -371,7 +397,7 @@ export class MultiRootRegistry extends Service {
     this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
-      const statuses = this.statusesOf(key)
+      const statuses = this.reclassify(key)
       const targetIndex = resolveRootIndex(statuses, ref)
       const normalized = normalizeAlias(alias)
       const next = statuses.map((status, index) => {
@@ -396,7 +422,7 @@ export class MultiRootRegistry extends Service {
     this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
-      const statuses = this.statusesOf(key)
+      const statuses = this.reclassify(key)
       const targetIndex = resolveRootIndex(statuses, ref)
       const anchorIndex = beforeRef === undefined ? undefined : resolveRootIndex(statuses, beforeRef)
       if (anchorIndex === targetIndex) return statuses
@@ -556,14 +582,22 @@ export class MultiRootRegistry extends Service {
    * exists to keep the two in sync, not to churn on every listing — and, since
    * the scope rebuilds its root table on each call, skipping the no-op write is
    * also what keeps the read path cheap.
+   *
+   * The signature is order-insensitive on purpose: a `move` (or an `alias`)
+   * changes only presentation, and metadata-only mutations must not republish
+   * a grant the filesystem never changed — the scope keeps its existing order
+   * until the granted SET actually differs.
    */
   private publish(key: string, statuses: readonly RootStatus[]): void {
     const withheld = statuses.filter(status => status.state !== 'available')
     const signature = [
       ...statuses.filter(status => status.state === 'available').map(status => `available:${status.recordedPath}`),
       ...withheld.map(status => `${status.state}:${status.path}`),
-    ].join('\n')
-    if (this.published.get(key) === signature) return
+    ].sort().join('\n')
+    // A key with nothing published yet reads as the empty signature: the very
+    // first classification of an empty key must not "publish" an empty grant
+    // (and fire every listener) for a set that was already empty.
+    if ((this.published.get(key) ?? '') === signature) return
     this.published.set(key, signature)
     const effective = statuses.flatMap(status => {
       if (status.state !== 'available' || status.recordedPath === undefined) return []
