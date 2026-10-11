@@ -72,7 +72,9 @@ async function spawnArgv(command: string, args: readonly string[], timeout = 120
       reject(new Error(`spawn timed out after ${timeout}ms: ${command} ${args.join(' ')}\nstderr: ${Buffer.concat(stderr).toString('utf8')}`))
     }, timeout)
     child.once('error', error => { clearTimeout(timer); resolve({ status: null, stdout: '', stderr: '', error }) })
-    child.once('exit', code => {
+    // `exit` may precede the final stdout/stderr chunks on Windows. Verdicts
+    // are complete only after `close`, when both pipes have drained.
+    child.once('close', code => {
       clearTimeout(timer)
       resolve({ status: code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') })
     })
@@ -89,7 +91,7 @@ async function startConfined(mounted: Mounted, argv: readonly string[], policy =
     child.stdout?.on('data', chunk => stdout.push(chunk as Buffer))
     child.stderr?.on('data', chunk => stderr.push(chunk as Buffer))
     child.once('error', reject)
-    child.once('exit', code => resolve({ status: code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') }))
+    child.once('close', code => resolve({ status: code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') }))
   })
   return { child, done }
 }
@@ -262,8 +264,9 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     const fixture = createFixtureWorkspace('win-owner')
     const foreign = join(fixture.base, 'foreign-owned')
     mkdirSync(foreign)
-    const whoami = execFileSync('whoami', { encoding: 'utf8' }).trim()
-    const owner = `${process.env.USERDOMAIN ?? ''}\\${process.env.USERNAME ?? whoami}`.replace(/^\\/, '')
+    const identity = execFileSync('whoami', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' })
+    const ownerSid = identity.match(/S-1-\d+(?:-\d+)+/)?.[0]
+    if (ownerSid === undefined) throw new Error(`whoami did not report the caller SID: ${identity}`)
     const icacls = (args: string[]) => spawnSync('icacls', args, { encoding: 'utf8', timeout: 60_000 })
     let hijacked = false
     const restore = (): void => {
@@ -287,21 +290,31 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     }
     const mounted = await mountProvider(fixture.workspace)
     try {
-      const seized = icacls([foreign, '/setowner', 'NT AUTHORITY\\SYSTEM'])
-      const locked = seized.status === 0 ? icacls([foreign, '/inheritance:r', '/grant:r', `${owner}:(OI)(CI)(RX)`]) : seized
+      // Build the DACL while we still own it. Keep explicit WRITE_DAC and
+      // WRITE_OWNER so later ACL edits and cleanup do not depend on the CI
+      // account's elevated restore privileges after inheritance is removed.
+      // Read/execute/control are not data-write permissions.
+      hijacked = true
+      const locked = icacls([foreign, '/inheritance:r', '/grant:r', `*${ownerSid}:(OI)(CI)(GR,GE,RC,S,WDAC,WO)`])
       // A grant-only DACL does not bind an elevated caller — administrators
       // still wrote through it on the CI runner — so an explicit DENY on
       // Everyone's write/delete/delete-child makes the lockout hold under
       // elevation too. WDAC/WO are deliberately not denied so cleanup can
       // still read and repair the ACL afterwards.
       const denied = locked.status === 0 ? icacls([foreign, '/deny', '*S-1-1-0:(OI)(CI)(W,D,DC)']) : locked
-      if (denied.status !== 0) {
-        restore()
-        if (process.env.CI !== undefined) expect.unreachable(`icacls setup failed on CI: ${denied.stderr || denied.stdout}`)
-        context.skip(`cannot build a foreign-owned directory on this host: ${denied.stderr || denied.stdout}`)
+      // SYSTEM's numeric SID avoids localized account-name lookup. Transfer
+      // ownership last, after the final DACL is complete.
+      const seized = denied.status === 0 ? icacls([foreign, '/setowner', '*S-1-5-18']) : denied
+      if (seized.status !== 0) {
+        const detail = `lock=${locked.status} deny=${denied.status} owner=${seized.status}: ${seized.stderr || seized.stdout}`
+        if (process.env.CI !== undefined) expect.unreachable(`icacls setup failed on CI: ${detail}`)
+        context.skip(`cannot build a foreign-owned directory on this host: ${detail}`)
         return
       }
-      hijacked = true
+      const recordedOwner = execFileSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command',
+        '(Get-Acl -LiteralPath $env:DSH_TEST_FOREIGN_ROOT).GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
+      ], { encoding: 'utf8', env: { ...process.env, DSH_TEST_FOREIGN_ROOT: foreign } }).trim()
+      expect(recordedOwner, 'the fixture must actually be owned by SYSTEM').toBe('S-1-5-18')
       // The premise to prove first: the setup must be effective. An unconfined
       // WRITE probe is not a valid check on an elevated host — libuv opens
       // files with FILE_FLAG_BACKUP_SEMANTICS and the elevated runner token
@@ -312,7 +325,6 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       const aclText = `${acl.stdout}\n${acl.stderr}`
       // icacls renders a deny ACE as e.g. `Everyone:(OI)(CI)(DENY)(W,D,DC)`.
       if (!/(everyone|S-1-1-0)[^\r\n]*\(DENY\)/i.test(aclText)) {
-        restore()
         if (process.env.CI !== undefined) expect.unreachable(`the Everyone deny ACE is missing from the ACL; icacls says:\n${aclText}`)
         context.skip(`cannot verify the deny ACE on this host; icacls says:\n${aclText}`)
         return

@@ -218,6 +218,10 @@ LSP 源码回传断言应比较读盘得到的完整源码。夹具里的路径�
 
 失败可诊断：`test` 与各冒烟的输出同时写入 `vitest.log` / `smoke-*.log`（`tee` + `set -o pipefail`，红不会被吞成绿），由 `actions/upload-artifact@v4` 以 `if: always()` 上传——成功与失败的日志都能下载，公共仓库无需管理员权限。
 
+Windows 的 foreign-owned ACL 夹具按**先 DACL、后 owner**搭建：用 `whoami /user` 的数字 SID 显式保留读/执行、`WRITE_DAC` 与 `WRITE_OWNER`，移除继承并加 Everyone 的写/删除 deny 后，最后把 owner 转交 SYSTEM 的数字 SID。这样后续 ACL 编辑和清理不依赖 elevated token 的 restore 特权；测试同时读回 SYSTEM owner 与 deny ACE，并执行真实受限写断言。任何搭建失败在 CI 仍是失败，不以整项 retry 或 skip 掩盖。若未来出现新的瞬态故障，应先按日志区分夹具、进程/管道、内核断言与安装网络问题；只有已确定可恢复的夹具或清理操作适合有次数上限的重试。
+
+原生 piped 子进程探针在 `close` 而非 `exit` 事件拼接输出：Node 的 `exit` 不保证 stdout/stderr 已关闭，过早解析会把完整 verdict 截断；`close` 才能证明输出管道已经结束。见 [Node child_process 文档](https://nodejs.org/api/child_process.html#event-close)。
+
 ## 8. 常见失败与处置
 
 | 症状 | 原因 | 处置 |

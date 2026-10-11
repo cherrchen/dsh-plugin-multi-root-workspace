@@ -430,3 +430,11 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 ### v0.1.6 发版验证（2026-10-11）
 
 `v0.1.6` 已通过 `pnpm release patch --tag` 生成，发版提交为 `466b3bb`，并推送至 `origin/main`，连同 annotated tag `v0.1.6`。本机 `pnpm verify:all`、`pnpm compat:check`、`pnpm docs:check` 均通过；本机 Test 为 393 passed / 4 skipped，compose 44/44、behavior 99/99、journey 55/55。GitHub [Release workflow run 38121365127](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38121365127) 全绿：11 个支持版本 × Linux/macOS/Windows 的 33 个 verify job，以及 npm publish 和 GitHub Release 创建均成功。
+
+### PR #10 全面复核与第二轮返工（2026-10-12，未发布）
+
+本轮修复内容见 [B4–B8 返工记录](./2026-10-11-b4-b8-p2.md#全面复核与第二轮审查返工2026-10-12pr-10)，接口与工程规则分别维护在 ADR-0013、ADR-0014 与开发工作流。
+
+本机开发 pin `0.2.1-alpha.2`：compat、lint、双端 typecheck、build、docs:check 通过；Seatbelt 探针原生执行成功并通过 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt` 约束完整测试，结果 **500 passed / 22 skipped**（35 文件通过、1 Windows 原生文件跳过）。compose **46/46**、behavior **99/99**、web/headless journey **62/62** 全通过；pack:check **73 个成员**通过，安装 tarball 的 packed behavior **98/98** 通过。外层 Agent 沙箱内的首次探针被 sandbox_apply 拒绝，该次不计原生证据；上述完整测试与冒烟在外层沙箱之外执行。
+
+本机不能证明 Windows ACL 夹具修复有效，也不能验证 Linux 内核；本轮跨版本与原生平台证据等待推送后的 CI 矩阵，不沿用历史 HEAD 的绿色结果。
