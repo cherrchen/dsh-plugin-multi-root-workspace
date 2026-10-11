@@ -66,9 +66,15 @@ const RULE_NESTED = 'house rule echo: the other repository\'s src directory uses
 const RULE_DEEP = 'house rule foxtrot: the other repository\'s src/deep directory uses one-space indentation'
 const RULE_USER_GLOBAL = 'house rule charlie: always explain the plan first'
 const RULE_ANCESTOR = 'house rule delta: this ancestor directory is not a workspace root'
-/** One scripted turn: six tool calls, then the closing assistant text. */
-const SCRIPT_LENGTH = 7
+/** One scripted turn: nine tool calls, then the closing assistant text. */
+const SCRIPT_LENGTH = 10
+/** A path spelling that survives inside a single-quoted Node `-e` string on every shell. */
+function shellPath(path) {
+  return path.replace(/\\/g, '/')
+}
 
+/** The composed shell tool's registered name on this platform. */
+const shellTool = process.platform === 'win32' ? 'pwsh' : 'bash'
 const home = resolveScratchHome(`journey-${process.pid}`)
 const fixtureRoot = join(REPO_ROOT, '.dsh-smoke', `journey-${process.pid}`)
 const primaryRepo = join(fixtureRoot, 'repo-a')
@@ -251,6 +257,13 @@ async function startScriptedModel() {
     // exists on both tool schemas.
     { name: 'bash', arguments: { command: `git -C '${additionalRepo}' diff --stat`, description: 'Show the other repository diff' } },
     { name: 'bash', arguments: { command: 'node check.mjs', description: 'Run the other repository check', workdir: additionalRepo } },
+    // The per-tool cap proof: the shell tool is configured `read-only` for
+    // additional roots on BOTH legs (see capShellTool), so this write must be
+    // refused by the kernel runner while the same shell still writes the
+    // primary root — and the uncapped `write` tool keeps the full grant.
+    { name: 'bash', arguments: { command: `node -e "require('fs').writeFileSync('${shellPath(join(additionalRepo, 'capped-shell.txt'))}','x')"`, description: 'Write the other repository through the shell' } },
+    { name: 'bash', arguments: { command: `node -e "require('fs').writeFileSync('${shellPath(join(primaryRepo, 'shell-primary.txt'))}','x')"`, description: 'Write the primary repository through the shell' } },
+    { name: 'write', arguments: { file_path: join(additionalRepo, 'write-tool.txt'), content: 'written by the write tool\n' } },
     { name: 'write', arguments: { file_path: join(outsideRoot, 'denied.txt'), content: 'must not land' } },
   ]
   /**
@@ -336,6 +349,26 @@ async function startScriptedModel() {
 async function prepareProfile(profile) {
   const added = await installPluginProfile(profile, home)
   check.ok(added === 0, `${profile}: plugin installed into the shipped profile`, `exit ${added}`)
+}
+
+/**
+ * Cap the composed shell tool for additional roots on one profile, the way a
+ * host configures it: an id-targeted config override in the profile's own
+ * patch layer, applied after every bundle layer. `bash` and `pwsh` are the two
+ * registered names the composed shell tool takes, so capping both keeps the
+ * assertion identical on every platform.
+ * @param profile - the shipped profile the next leg boots.
+ */
+function capShellTool(profile) {
+  writeFileSync(join(home, 'profiles', profile, 'cordis.patch.yml'), [
+    '# smoke override: the shell tool may never write an additional root.',
+    '- id: multi-root-scope',
+    '  config:',
+    '    toolAccess:',
+    '      bash: read-only',
+    '      pwsh: read-only',
+    '',
+  ].join('\n'))
 }
 
 /** Write the registry store a fresh process reads at boot. */
@@ -550,6 +583,7 @@ try {
   try {
     // ---- the browser composition ---------------------------------------------
     await prepareProfile('web')
+    capShellTool('web')
     process.chdir(primaryRepo)
     Object.assign(process.env, legEnvironment(model))
     const stepsBeforeWeb = model.steps.length
@@ -569,6 +603,14 @@ try {
     check.equal(readFileSync(join(primaryRepo, 'README.md'), 'utf8'), PRIMARY_README, 'web: the primary repository is byte-identical')
     check.equal(readFileSync(join(outsideRoot, 'keep.txt'), 'utf8'), 'untouched\n', 'web: a file outside every root is byte-identical')
     check.ok(!existsSync(join(outsideRoot, 'denied.txt')), 'web: the write outside every root left no file behind')
+    // The cap proofs, read off the world rather than the model's report: the
+    // confined shell's write into the additional root never landed, the same
+    // shell's write into the primary root did, and the uncapped write tool
+    // kept the full grant.
+    check.ok(!existsSync(join(additionalRepo, 'capped-shell.txt')), `web: capped ${shellTool} could not write the additional root`)
+    check.ok(existsSync(join(primaryRepo, 'shell-primary.txt')), `web: capped ${shellTool} still writes the primary root`)
+    rmSync(join(primaryRepo, 'shell-primary.txt'), { force: true })
+    check.equal(readFileSync(join(additionalRepo, 'write-tool.txt'), 'utf8'), 'written by the write tool\n', 'web: the uncapped write tool keeps the additional-root grant')
     check.contains(git(additionalRepo, 'status', '--porcelain'), ' M README.md', 'web: git reports the change in the other repository')
     check.equal(git(primaryRepo, 'status', '--porcelain'), '', 'web: the primary repository has no local changes')
 
@@ -576,7 +618,6 @@ try {
     // Tool results travel back to the model, so the step requests are the one
     // place every result is visible for BOTH legs (in process and subprocess).
     const webRendered = webRequests.map(request => JSON.stringify(request)).join('\n')
-    const shellTool = process.platform === 'win32' ? 'pwsh' : 'bash'
     const runnerFailed = rendered =>
       rendered.includes('SANDBOX_UNAVAILABLE')
       || rendered.includes('no sandbox backend is usable')
@@ -601,6 +642,7 @@ try {
     check.contains(webRendered, jsonText(canonical(additionalRepo)), 'web: the model\'s request names the additional root', webExcerpt)
     check.contains(webRendered, 'additional roots of this session\'s workspace', 'web: the runtime-context snapshot states the topology', webExcerpt)
     check.contains(webRendered, 'session origin remains the primary root', 'web: the snapshot separates session origin from cwd', webExcerpt)
+    check.contains(webRendered, 'cannot write additional roots', `web: the snapshot names ${shellTool} as capped for additional roots`, webExcerpt)
     check.ok(webRequests.length >= SCRIPT_LENGTH, 'web: the agent issued one request per scripted step', `requests: ${webRequests.length}`)
 
     // The instruction journey, read off the first step's wire body: the Agent
@@ -641,11 +683,15 @@ try {
 
     // ---- the one-shot composition --------------------------------------------
     await prepareProfile('headless')
+    capShellTool('headless')
     seedRegistryStore(primaryRepo)
     const stepsBeforeHeadless = model.steps.length
     // Reset the fixtures so the headless leg proves the same facts on its own.
     writeFileSync(join(additionalRepo, 'README.md'), SEED_README)
     execFileSync('git', ['-C', additionalRepo, 'checkout', '--', 'README.md'], { stdio: 'pipe' })
+    rmSync(join(additionalRepo, 'write-tool.txt'), { force: true })
+    rmSync(join(additionalRepo, 'capped-shell.txt'), { force: true })
+    rmSync(join(primaryRepo, 'shell-primary.txt'), { force: true })
 
     const headless = await runHeadlessLeg(model)
     check.equal(headless.code, 0, 'headless: the one-shot task completed', headless.stderr.slice(-400))
@@ -653,6 +699,10 @@ try {
     check.equal(readFileSync(join(additionalRepo, 'README.md'), 'utf8'), EDITED_README, 'headless: the additional root carries the agent\'s write')
     check.equal(readFileSync(join(primaryRepo, 'README.md'), 'utf8'), PRIMARY_README, 'headless: the primary repository is byte-identical')
     check.ok(!existsSync(join(outsideRoot, 'denied.txt')), 'headless: the write outside every root left no file behind')
+    check.ok(!existsSync(join(additionalRepo, 'capped-shell.txt')), `headless: capped ${shellTool} could not write the additional root`)
+    check.ok(existsSync(join(primaryRepo, 'shell-primary.txt')), `headless: capped ${shellTool} still writes the primary root`)
+    rmSync(join(primaryRepo, 'shell-primary.txt'), { force: true })
+    check.equal(readFileSync(join(additionalRepo, 'write-tool.txt'), 'utf8'), 'written by the write tool\n', 'headless: the uncapped write tool keeps the additional-root grant')
     check.contains(git(additionalRepo, 'status', '--porcelain'), ' M README.md', 'headless: git reports the change in the other repository')
 
     const headlessResults = model.steps.slice(stepsBeforeHeadless).map(request => JSON.stringify(request)).join('\n')
