@@ -24,7 +24,7 @@ Accepted
 - 行配置 `maxAdditionalRoots`，默认 `16`（`DEFAULT_MAX_ADDITIONAL_ROOTS`），硬顶 `64`（`MAX_ADDITIONAL_ROOTS_CEILING`）。构造时校验整数 1..64；非法值不抛错，注册表进入 `config-invalid` fail-closed：不授予任何根、mutation 响亮拒绝并命名坏值。
 - 计数 = 该主根下**全部存储记录**（含 missing / redirected / invalid）——与文件系统无关的稳定口径。
 - 新增记录达上限即 `root-limit-reached`；revive/重复登记既有记录不占新额度。检查在序列化队列内、reclassify 之后。
-- **超限存量永不截断**：历史超出上限的 store（例如上限被调低）照常被分类与授予，只有新增被拒绝，并每主根 warn 一次。`RootsView` 暴露 `limit` / `count`，命令与面板如实显示并禁用/解释 Add。
+- **超限存量永不截断**：历史超出上限的 store（例如上限被调低）照常被分类与授予，只有新增被拒绝，并每主根 warn 一次。`RootsView` 暴露 `limit` / `count`，命令与面板如实显示并禁用/解释 Add——但面板只为"新增"禁用控件：withheld / invalid 行的重新登记入口在到限时保持可用，因为 revive 不占新额度（外部审查返工，PR #10）。
 - 默认值的证据：`scripts/bench-root-scale.mjs`（`pnpm bench:roots`）对 0–64 根测量分类耗时与三方言 argv/profile 字节，结果存档于 `docs/reference/bench-root-scale-darwin.json`。
 
 ### B7：品牌 + provider 门禁行
