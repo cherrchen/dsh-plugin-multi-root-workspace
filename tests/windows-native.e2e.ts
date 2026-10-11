@@ -564,11 +564,11 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       )
       // PowerShell Set-Content: same verdicts under a different write API.
       await expectVerdicts(
-        powershellArgv(`try { Set-Content -Path ${JSON.stringify(join(a, 'ps.txt'))} -Value ok; 'allowed' } catch { 'denied' }`),
+        powershellArgv(`try { Set-Content -Path ${JSON.stringify(join(a, 'ps.txt'))} -Value ok -ErrorAction Stop; 'allowed' } catch { 'denied' }`),
         ['allowed'],
       )
       await expectVerdicts(
-        powershellArgv(`try { Set-Content -Path ${JSON.stringify(join(b, 'ps.txt'))} -Value bad; 'allowed' } catch { 'denied' }`),
+        powershellArgv(`try { Set-Content -Path ${JSON.stringify(join(b, 'ps.txt'))} -Value bad -ErrorAction Stop; 'allowed' } catch { 'denied' }`),
         ['denied'],
       )
       // The ConPTY path: the terminal spawns the confined argv, so the runner's
@@ -667,7 +667,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
         expect(node.stdout.trim()).toMatch(/^denied:/)
         expect(existsSync(join(a, 'capped.txt'))).toBe(false)
         const ps = await spawnConfined(mounted, powershellArgv(
-          `try { Set-Content -Path ${JSON.stringify(join(a, 'capped-ps.txt'))} -Value bad; 'allowed' } catch { 'denied' }`,
+          `try { Set-Content -Path ${JSON.stringify(join(a, 'capped-ps.txt'))} -Value bad -ErrorAction Stop; 'allowed' } catch { 'denied' }`,
         ))
         expect(ps.stdout.trim()).toBe('denied')
       })
