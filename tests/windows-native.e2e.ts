@@ -1,0 +1,421 @@
+/**
+ * Windows-native ACL hardening e2e: real restricted-token spawns against
+ * hostile root names, a second drive, path aliases, junction redirection,
+ * non-caller-owned roots, revocation snapshots, concurrent root sets, ConPTY
+ * interruption, and Git Bash. Runs only on Windows; every case cleans its
+ * fixtures in `finally`.
+ */
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { Context } from '@deepseek-ai/cordis'
+import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
+import { describe, expect, it } from 'vitest'
+import type { MultiRootSandboxProvider } from '../src/sandbox.ts'
+import { MultiRootScopeService } from '../src/scope.ts'
+import { mountCompat } from './support/compat.ts'
+import { createFixtureWorkspace, REPO_ROOT } from './support/temp-workspace.ts'
+
+const PLUGIN_RUNNER = join(REPO_ROOT, 'lib', 'windows-runner.js')
+const UPSTREAM_RUNNER_ARGS = (): string[] => [process.execPath, fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-sandbox-windows-acl/runner'))]
+
+interface Spawned {
+  readonly status: number | null
+  readonly stdout: string
+  readonly stderr: string
+  readonly error?: Error
+}
+
+interface Mounted {
+  readonly ctx: Context
+  readonly provider: MultiRootSandboxProvider
+  readonly policy: SandboxPolicy
+}
+
+/** Mount the SHIPPED provider and pin the real upstream Windows ACL runner. */
+async function mountProvider(workspace: string): Promise<Mounted> {
+  const ctx = new Context()
+  // Execute the shipped provider: its import.meta.url must locate the built
+  // standalone runner, not a nonexistent src/windows-runner.js under Vitest.
+  const { MultiRootSandboxProvider } = await import(pathToFileURL(join(REPO_ROOT, 'lib/sandbox.js')).href) as typeof import('../src/sandbox.ts')
+  ctx.provide('sandboxPolicy', {} as never)
+  await ctx.plugin(MultiRootScopeService)
+  await mountCompat(ctx)
+  await ctx.plugin(MultiRootSandboxProvider)
+  const provider = ctx.sandbox as MultiRootSandboxProvider
+  provider.internals = { chain: ['windows-acl'], windowsAclRunnerArgs: UPSTREAM_RUNNER_ARGS() }
+  return { ctx, provider, policy: { mode: 'workspace-write', workspaceRoot: canonicalPath(workspace) } }
+}
+
+/** Confine `argv` and spawn it, collecting the child's piped output. */
+async function spawnConfined(mounted: Mounted, argv: readonly string[], policy = mounted.policy): Promise<Spawned> {
+  const confined = await mounted.provider.confine(argv, policy)
+  return await spawnArgv(confined.argv[0]!, confined.argv.slice(1))
+}
+
+async function spawnArgv(command: string, args: readonly string[], timeout = 120_000): Promise<Spawned> {
+  return await new Promise<Spawned>((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
+    child.stdout?.on('data', chunk => stdout.push(chunk as Buffer))
+    child.stderr?.on('data', chunk => stderr.push(chunk as Buffer))
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      reject(new Error(`spawn timed out after ${timeout}ms: ${command} ${args.join(' ')}\nstderr: ${Buffer.concat(stderr).toString('utf8')}`))
+    }, timeout)
+    child.once('error', error => { clearTimeout(timer); resolve({ status: null, stdout: '', stderr: '', error }) })
+    child.once('exit', code => {
+      clearTimeout(timer)
+      resolve({ status: code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') })
+    })
+  })
+}
+
+/** A confined spawn whose exit can be awaited later (concurrency cases). */
+async function startConfined(mounted: Mounted, argv: readonly string[], policy = mounted.policy): Promise<{ child: ChildProcess; done: Promise<Spawned> }> {
+  const confined = await mounted.provider.confine(argv, policy)
+  const child = spawn(confined.argv[0]!, confined.argv.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] })
+  const done = new Promise<Spawned>((resolve, reject) => {
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
+    child.stdout?.on('data', chunk => stdout.push(chunk as Buffer))
+    child.stderr?.on('data', chunk => stderr.push(chunk as Buffer))
+    child.once('error', reject)
+    child.once('exit', code => resolve({ status: code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') }))
+  })
+  return { child, done }
+}
+
+/** A PowerShell invocation safe for hostile paths: the script goes base64. */
+function powershellArgv(script: string): string[] {
+  return ['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')]
+}
+
+/** Node `-e` payload that writes one file per root and reports allowed/denied. */
+function writeProbe(roots: readonly string[], name = 'probe.txt'): string {
+  return `const fs=require('fs');const roots=${JSON.stringify(roots)};for(const root of roots){try{fs.writeFileSync(root+${JSON.stringify(`/${name}`)},'ok');console.log('allowed')}catch(e){console.log('denied:'+(e&&e.code||e))}}`
+}
+
+/** Find a writable local fixed drive other than the fixture's, if one exists. */
+function secondDrive(fixtureDrive: string): string | undefined {
+  for (const letter of ['D:\\', 'C:\\']) {
+    if (letter.toUpperCase() === fixtureDrive) continue
+    try {
+      const probe = mkdtempSync(join(letter, 'dsh-mr-xdrive-probe-'))
+      rmSync(probe, { recursive: true, force: true })
+      return letter
+    } catch { continue }
+  }
+  return undefined
+}
+
+describe.runIf(process.platform === 'win32')('Windows ACL native confinement', () => {
+  it('confines hostile root names for Node and PowerShell children alike', async () => {
+    const fixture = createFixtureWorkspace('win-hostile')
+    const primary = join(fixture.base, "主 根 'a'&^%!(1)")
+    const extra = join(fixture.base, '额外 根;b,c')
+    const third = join(fixture.base, 'third')
+    for (const dir of [primary, extra, third]) mkdirSync(dir)
+    const mounted = await mountProvider(primary)
+    try {
+      mounted.ctx.multiRootScope.setAdditionalRoots(primary, [{ id: 'extra', path: extra, recordedPath: canonicalPath(extra) }])
+      const node = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([primary, extra, third])])
+      expect(node.error).toBeUndefined()
+      expect(node.status, node.stderr).toBe(0)
+      expect(node.stdout.trim().split(/\r?\n/)).toEqual(['allowed', 'allowed', expect.stringMatching(/^denied:/)])
+      const ps = powershellArgv(`[System.IO.File]::WriteAllText(${JSON.stringify(join(extra, 'ps.txt'))}, 'powershell')`)
+      const psResult = await spawnConfined(mounted, ps)
+      expect(psResult.status, psResult.stderr).toBe(0)
+      expect(readFileSync(join(extra, 'ps.txt'), 'utf8')).toBe('powershell')
+      const deniedPs = powershellArgv(`try { [System.IO.File]::WriteAllText(${JSON.stringify(join(third, 'ps.txt'))}, 'bad'); exit 11 } catch { exit 0 }`)
+      const deniedResult = await spawnConfined(mounted, deniedPs)
+      expect(deniedResult.status, deniedResult.stderr).toBe(0)
+      expect(existsSync(join(third, 'ps.txt'))).toBe(false)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 240_000)
+
+  it('grants an additional root on a different drive', async (context) => {
+    const fixture = createFixtureWorkspace('win-xdrive')
+    const fixtureDrive = canonicalPath(fixture.workspace).slice(0, 2).toUpperCase()
+    const drive = secondDrive(fixtureDrive)
+    if (drive === undefined) {
+      if (process.env.CI !== undefined) expect.unreachable('CI runners have a second fixed drive (C: and D:)')
+      context.skip('no second writable fixed drive found')
+      return
+    }
+    const extra = mkdtempSync(join(drive, `dsh-mr-xdrive-${process.pid}-`))
+    const third = join(fixture.base, 'third')
+    mkdirSync(third)
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'drive', path: extra, recordedPath: canonicalPath(extra) }])
+      const result = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([fixture.workspace, extra, third])])
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim().split(/\r?\n/)).toEqual(['allowed', 'allowed', expect.stringMatching(/^denied:/)])
+    } finally {
+      await mounted.ctx.fiber.dispose()
+      rmSync(extra, { recursive: true, force: true })
+      fixture.dispose()
+    }
+  }, 180_000)
+
+  it('grants a root registered under a case variant or its 8.3 alias', async () => {
+    const fixture = createFixtureWorkspace('win-alias')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const recorded = canonicalPath(fixture.outside)
+      // The scope canonicalizes `path`, so a case variant or the volume's 8.3
+      // short name for the same directory carries the same grant.
+      const variant = fixture.outside.toUpperCase()
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: variant, recordedPath: recorded }])
+      const first = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([fixture.outside], 'variant.txt')])
+      expect(first.status, first.stderr).toBe(0)
+      expect(first.stdout.trim()).toBe('allowed')
+      const short = execFileSync('cmd', ['/d', '/s', '/c', `for %I in ("${fixture.outside}") do @echo %~sI`], { encoding: 'utf8' }).trim()
+      if (short === fixture.outside || short === recorded) {
+        console.info(`8.3 short names are disabled on this volume; skipping the short-alias assertion (${short})`)
+        return
+      }
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: short, recordedPath: recorded }])
+      const second = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([fixture.outside], 'short.txt')])
+      expect(second.status, second.stderr).toBe(0)
+      expect(second.stdout.trim()).toBe('allowed')
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('withholds a junction that is repointed after registration', async () => {
+    const fixture = createFixtureWorkspace('win-junction')
+    const target = join(fixture.base, 'target')
+    const other = join(fixture.base, 'other')
+    const link = join(fixture.base, 'link')
+    for (const dir of [target, other]) mkdirSync(dir)
+    symlinkSync(target, link, 'junction')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      // Registering the junction records the TARGET; writes through the link
+      // work while the link still resolves there.
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: link, recordedPath: canonicalPath(link) }])
+      expect(canonicalPath(link)).toBe(canonicalPath(target))
+      const first = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([join(link)], 'via-link.txt')])
+      expect(first.status, first.stderr).toBe(0)
+      expect(first.stdout.trim()).toBe('allowed')
+      expect(existsSync(join(target, 'via-link.txt'))).toBe(true)
+      // Repoint the junction: the scope reports redirected and withholds, and
+      // the runner never widens a grant onto the new target.
+      rmSync(link, { force: true, recursive: true })
+      symlinkSync(other, link, 'junction')
+      expect(mounted.ctx.multiRootScope.scopeOf(fixture.workspace)).toEqual([])
+      const confined = await mounted.provider.confine([process.execPath, '-e', writeProbe([link, other], 'sneaky.txt')], mounted.policy)
+      expect(confined.argv[1]).not.toBe(PLUGIN_RUNNER)
+      const second = await spawnArgv(confined.argv[0]!, confined.argv.slice(1))
+      expect(second.stdout.trim().split(/\r?\n/)).toEqual([expect.stringMatching(/^denied:/), expect.stringMatching(/^denied:/)])
+      expect(existsSync(join(other, 'sneaky.txt'))).toBe(false)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('exits 127 without running the child when a root is removed between confine and spawn', async () => {
+    const fixture = createFixtureWorkspace('win-removed')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      const marker = join(fixture.workspace, 'child-ran.txt')
+      const confined = await mounted.provider.confine([process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(marker)},'ran')`], mounted.policy)
+      rmSync(fixture.outside, { recursive: true, force: true })
+      const result = await spawnArgv(confined.argv[0]!, confined.argv.slice(1))
+      expect(result.status).toBe(127)
+      expect(result.stderr).toContain('windows-acl-run:')
+      expect(existsSync(marker)).toBe(false)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 120_000)
+
+  it('refuses a root the caller does not own', async (context) => {
+    const fixture = createFixtureWorkspace('win-owner')
+    const foreign = join(fixture.base, 'foreign-owned')
+    mkdirSync(foreign)
+    const whoami = execFileSync('whoami', { encoding: 'utf8' }).trim()
+    const owner = `${process.env.USERDOMAIN ?? ''}\\${process.env.USERNAME ?? whoami}`.replace(/^\\/, '')
+    const icacls = (args: string[]) => spawnSync('icacls', args, { encoding: 'utf8', timeout: 60_000 })
+    let hijacked = false
+    const restore = (): void => {
+      icacls([foreign, '/setowner', whoami, '/T', '/C'])
+      icacls([foreign, '/reset', '/T', '/C'])
+    }
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const seized = icacls([foreign, '/setowner', 'NT AUTHORITY\\SYSTEM'])
+      const locked = seized.status === 0 ? icacls([foreign, '/inheritance:r', '/grant:r', `${owner}:(OI)(CI)(RX)`]) : seized
+      if (locked.status !== 0) {
+        restore()
+        if (process.env.CI !== undefined) expect.unreachable(`icacls setup failed on CI: ${locked.stderr || locked.stdout}`)
+        context.skip(`cannot build a foreign-owned directory on this host: ${locked.stderr || locked.stdout}`)
+        return
+      }
+      hijacked = true
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: foreign, recordedPath: canonicalPath(foreign) }])
+      const marker = join(fixture.workspace, 'child-ran.txt')
+      const result = await spawnConfined(mounted, [process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(marker)},'ran')`])
+      expect(result.status).toBe(127)
+      expect(result.stderr).toContain('windows-acl-run:')
+      expect(existsSync(marker)).toBe(false)
+    } finally {
+      if (hijacked) restore()
+      await mounted.ctx.fiber.dispose()
+      fixture.dispose()
+    }
+  }, 180_000)
+
+  it('keeps an already-confined child on its snapshot when a root is revoked', async () => {
+    const fixture = createFixtureWorkspace('win-revoke')
+    const go = join(fixture.workspace, 'go.flag')
+    const writtenByA = join(fixture.outside, 'from-a.txt')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      const waiter = `const fs=require('fs');const go=${JSON.stringify(go)};const t=setInterval(()=>{if(fs.existsSync(go)){clearInterval(t);fs.writeFileSync(${JSON.stringify(writtenByA)},'a');process.exit(0)}},100);setTimeout(()=>process.exit(9),90000)`
+      const a = await startConfined(mounted, [process.execPath, '-e', waiter])
+      // Revoke X before A is released: A's grant snapshot still covers it.
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+      const b = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([fixture.outside], 'from-b.txt')])
+      expect(b.stdout.trim()).toMatch(/^denied:/)
+      writeFileSync(go, 'go')
+      const aResult = await a.done
+      expect(aResult.status, aResult.stderr).toBe(0)
+      expect(readFileSync(writtenByA, 'utf8')).toBe('a')
+      a.child.kill('SIGKILL')
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('confines four children under two root sets with private temps each', async () => {
+    const fixture = createFixtureWorkspace('win-concurrent')
+    const secondPrimary = join(fixture.base, 'p2')
+    const extraY = join(fixture.base, 'extra-y')
+    const third = join(fixture.base, 'third')
+    for (const dir of [secondPrimary, extraY, third]) mkdirSync(dir)
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const payload = (roots: readonly string[]) => `const fs=require('fs');console.log('TEMP='+process.env.TEMP);const roots=${JSON.stringify(roots)};for(const root of roots){try{fs.writeFileSync(root+'/probe.txt','ok');console.log('allowed')}catch(e){console.log('denied:'+(e&&e.code||e))}}`
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      const setX = [
+        await startConfined(mounted, [process.execPath, '-e', payload([fixture.outside, extraY])]),
+        await startConfined(mounted, [process.execPath, '-e', payload([fixture.outside, extraY])]),
+      ]
+      const policyY = { ...mounted.policy, workspaceRoot: canonicalPath(secondPrimary) }
+      mounted.ctx.multiRootScope.setAdditionalRoots(secondPrimary, [{ id: 'y', path: extraY, recordedPath: canonicalPath(extraY) }])
+      const setY = [
+        await startConfined(mounted, [process.execPath, '-e', payload([extraY, fixture.outside])], policyY),
+        await startConfined(mounted, [process.execPath, '-e', payload([extraY, fixture.outside])], policyY),
+      ]
+      const results = await Promise.all([...setX, ...setY].map(entry => entry.done))
+      const temps: string[] = []
+      for (const [index, result] of results.entries()) {
+        expect(result.status, result.stderr).toBe(0)
+        const lines = result.stdout.trim().split(/\r?\n/)
+        temps.push(lines[0]!.replace('TEMP=', ''))
+        const verdicts = lines.slice(1)
+        // X-set children write X and are denied Y; Y-set the mirror image.
+        expect(verdicts, `child ${index}`).toEqual(index < 2
+          ? ['allowed', expect.stringMatching(/^denied:/)]
+          : ['allowed', expect.stringMatching(/^denied:/)])
+      }
+      expect(new Set(temps).size).toBe(4)
+      const parents = new Set(temps.map(temp => dirname(temp)))
+      expect(parents.size, `private temps share the upstream temp parent: ${temps.join(', ')}`).toBe(1)
+      for (const temp of temps) expect(existsSync(temp), `${temp} was not removed`).toBe(false)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 300_000)
+
+  it('mirrors the child exit code and carries both output streams', async () => {
+    const fixture = createFixtureWorkspace('win-streams')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      const result = await spawnConfined(mounted, [process.execPath, '-e', `process.stdout.write('out');process.stderr.write('err');process.exit(42)`])
+      expect(result.status).toBe(42)
+      expect(result.stdout).toContain('out')
+      expect(result.stderr).toContain('err')
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 120_000)
+
+  it('leaves read-only mode on the upstream runner with no widened grant', async () => {
+    const fixture = createFixtureWorkspace('win-readonly')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      const confined = await mounted.provider.confine(
+        [process.execPath, '-e', `try{require('fs').writeFileSync(${JSON.stringify(join(fixture.outside, 'ro.txt'))},'bad');console.log('allowed')}catch(e){console.log('denied:'+(e&&e.code||e))}`],
+        { ...mounted.policy, mode: 'read-only' },
+      )
+      expect(confined.argv[1]).not.toBe(PLUGIN_RUNNER)
+      const result = await spawnArgv(confined.argv[0]!, confined.argv.slice(1))
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim()).toMatch(/^denied:/)
+      expect(existsSync(join(fixture.outside, 'ro.txt'))).toBe(false)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 120_000)
+
+  it('interrupts a confined ConPTY child on Ctrl+C without hanging the runner', async (context) => {
+    const fixture = createFixtureWorkspace('win-pty')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      await mounted.ctx.plugin(LocalSubprocess)
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      const confined = await mounted.provider.confine(['powershell.exe', '-NoProfile', '-Command', 'Start-Sleep -Seconds 60'], mounted.policy)
+      const terminal = await mounted.ctx.subprocess.spawnTerminal({
+        argv: confined.argv, cwd: fixture.workspace, rows: 24, cols: 100, terminalType: 'xterm-256color', graceMs: 3000,
+      })
+      terminal.output.resume()
+      if (typeof terminal.write !== 'function') {
+        await terminal.terminate()
+        context.skip('this release exposes no terminal input API')
+        return
+      }
+      try {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        await terminal.write('\x03')
+        const outcome = await Promise.race([
+          terminal.done.then(() => 'done' as const, () => 'failed' as const),
+          new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), 20_000)),
+        ])
+        expect(outcome).not.toBe('timeout')
+      } finally {
+        await terminal.terminate()
+      }
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 120_000)
+
+  it('runs Git Bash confined when a Git installation is present', async (context) => {
+    const fixture = createFixtureWorkspace('win-bash')
+    const candidates = ['C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Program Files (x86)\\Git\\bin\\bash.exe']
+    let bash = candidates.find(existsSync)
+    if (bash === undefined) {
+      try {
+        bash = execFileSync('where', ['bash'], { encoding: 'utf8' }).split(/\r?\n/)[0]?.trim()
+      } catch { bash = undefined }
+    }
+    if (bash === undefined || bash === '') {
+      context.skip('no Git Bash on this host')
+      return
+    }
+    const third = join(fixture.base, 'third')
+    mkdirSync(third)
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      // If bash cannot START under the restricted token this is a real failure
+      // (msys runtime), not a denied write — surface the stderr, do not hide it.
+      const script = `echo x > '${fixture.outside.replace(/\\/g, '/')}/bash.txt' && echo bash-ok`
+      const allowed = await spawnConfined(mounted, [bash, '-c', script])
+      expect(allowed.status, allowed.stderr).toBe(0)
+      expect(allowed.stdout).toContain('bash-ok')
+      expect(readFileSync(join(fixture.outside, 'bash.txt'), 'utf8')).toContain('x')
+      const denied = await spawnConfined(mounted, [bash, '-c', `echo x > '${third.replace(/\\/g, '/')}/bash.txt' && echo wrote || echo denied`])
+      expect(denied.status, denied.stderr).toBe(0)
+      expect(existsSync(join(third, 'bash.txt'))).toBe(false)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+})
+

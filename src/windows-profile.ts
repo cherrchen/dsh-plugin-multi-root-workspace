@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { DialectUnrecognizedError } from './dialects.ts'
+import { isWindowsNetworkOrDevicePath } from './roots.ts'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 
 /** A root-set capability: removing or adding a root changes the token's identity. */
@@ -49,6 +50,11 @@ export function parseWindowsProfile(args: readonly string[], allowAdditional = f
 export function widenWindowsProfile(profile: readonly string[], roots: readonly string[], primaryRoot?: string): string[] {
   if (profile.length < 2 || profile[0] === undefined || profile[1]?.startsWith('--')) throw new DialectUnrecognizedError('Windows ACL runner invocation is not [node, runner, ...flags]')
   const parsed = parseWindowsProfile(profile.slice(2))
+  // Fail closed (the caller converts this to SandboxUnavailableError): a UNC or
+  // device root can never be widened into a profile, never run unconfined.
+  for (const root of [parsed.workspace, ...roots]) {
+    if (isWindowsNetworkOrDevicePath(root)) throw new DialectUnrecognizedError(`Windows ACL confinement cannot cover network or device paths: ${root}`)
+  }
   if (primaryRoot !== undefined && canonicalPath(parsed.workspace) !== primaryRoot) throw new DialectUnrecognizedError('Windows ACL profile workspace does not match the policy root')
   return [profile[0], fileURLToPath(new URL('./windows-runner.js', import.meta.url)), ...profile.slice(2), ...roots.flatMap(root => ['--additional-root', root])]
 }

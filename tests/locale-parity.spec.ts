@@ -51,6 +51,8 @@ describe('panel dictionaries', () => {
       'storage-unavailable',
       'registry-contended',
       'reveal-unavailable',
+      'session-not-found',
+      'unsupported-path',
       'unavailable',
       'copy-failed',
       'fallback',

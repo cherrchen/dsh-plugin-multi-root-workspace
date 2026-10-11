@@ -21,7 +21,7 @@ it('lazily expands additional directories and renders a bounded file preview', a
   fireEvent.click(await screen.findByText('app.ts'))
   expect(await screen.findByText('hello extra')).toBeDefined()
   expect(screen.getByText('Showing the first 200 lines')).toBeDefined()
-  expect(call).toHaveBeenLastCalledWith('readFile', { sessionId: 'session', entry, path: 'src/app.ts' })
+  expect(call).toHaveBeenLastCalledWith('readFile', { sessionId: 'session', entry, path: 'src/app.ts' }, expect.any(AbortSignal))
 })
 it('shows no session without sending a request', async () => {
   const call = vi.fn()
@@ -40,6 +40,18 @@ it('discards late results when the tree is closed', async () => {
   settle({ path: '.', entries: [{ name: 'stale', type: 'file' }], truncated: false })
   await new Promise(resolve => setTimeout(resolve, 0))
   expect(screen.queryByText('stale')).toBeNull()
+})
+it('aborts an in-flight listing when the tree unmounts', async () => {
+  let observed: AbortSignal | undefined
+  const call = vi.fn((_endpoint: string, _payload: unknown, signal?: AbortSignal) => {
+    observed = signal
+    return new Promise<FilesView>(() => {})
+  })
+  const view = render(<RootFileTree panel={{ call } as unknown as PanelClient} entry={entry} sessionId={() => 'session'} t={t} />)
+  fireEvent.click(screen.getByText('Browse files'))
+  await waitFor(() => expect(observed).toBeInstanceOf(AbortSignal))
+  view.unmount()
+  expect(observed?.aborted).toBe(true)
 })
 it('validates endpoint-specific responses and rejects path-like child names', async () => {
   const client = createPanelClient({ rpc: { call: async () => ({ ok: true, value: { path: '.', entries: [{ name: '../escape', type: 'file' }], truncated: false } }) } } as never)

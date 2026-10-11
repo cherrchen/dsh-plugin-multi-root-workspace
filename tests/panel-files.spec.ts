@@ -31,7 +31,7 @@ it('lists additional directories and previews text through the original workspac
   await expect(browseRoot(stack.ctx, fixture.workspace, { ...request, endpoint: 'readFile', path: 'huge.txt' }, signal())).rejects.toMatchObject({ code: 'workspace-file/too-large' })
 })
 it('rejects absolute paths, traversal, foreign primary roots, and forged entry snapshots', async () => {
-  for (const path of [fixture.base, '../ws', '../', 'file://outside', 'C:\\outside', '\0']) {
+  for (const path of [fixture.base, '../ws', '../', '..\\..\\x', 'file://outside', 'C:\\outside', 'C:foo', '\\\\server\\share', '/abs', '\\abs', '\0']) {
     await expect(browseRoot(stack.ctx, fixture.workspace, { ...request, path }, signal())).rejects.toBeDefined()
   }
   await expect(browseRoot(stack.ctx, fixture.outside, request, signal())).rejects.toBeDefined()

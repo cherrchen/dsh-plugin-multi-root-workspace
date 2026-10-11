@@ -1,8 +1,9 @@
 /** Standalone runner: public upstream AclSandbox with a capability for the whole root set. */
-import { closeSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { closeSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { parseWindowsProfile, workspaceScopeSid } from './windows-profile.ts'
+import { isWindowsNetworkOrDevicePath } from './roots.ts'
 
 async function main(): Promise<number> {
   if (process.platform !== 'win32') throw new Error('Windows ACL runner requires Windows')
@@ -11,9 +12,14 @@ async function main(): Promise<number> {
   if (separator < 0 || raw[separator + 1] === undefined) throw new Error('missing command after --')
   const profile = parseWindowsProfile(raw.slice(0, separator), true)
   const roots = [...new Set([profile.workspace, ...profile.additionalRoots])]
-  for (const root of roots) {
-    if (!statSync(root).isDirectory() || canonicalPath(root) !== root) throw new Error(`workspace root was removed or redirected: ${root}`)
+  const verifyRoots = (): void => {
+    for (const root of roots) {
+      if (isWindowsNetworkOrDevicePath(root)) throw new Error(`Windows ACL confinement cannot cover network or device paths: ${root}`)
+      if (!statSync(root).isDirectory() || canonicalPath(root) !== root) throw new Error(`workspace root was removed or redirected: ${root}`)
+    }
   }
+  verifyRoots()
+  if (!existsSync(profile.temp) || !statSync(profile.temp).isDirectory()) throw new Error(`--temp is not an existing directory: ${profile.temp}`)
   const { AclSandbox, assertTempRootOutsideWorkspace, workspaceWriteSid, tempWriteSid } = await import('@deepseek-ai/dsh-sandbox-windows-acl')
   if (profile.writeSid !== undefined && (profile.writeSid !== workspaceWriteSid(profile.workspace) || profile.tempWriteSid !== tempWriteSid(profile.temp))) {
     throw new Error('upstream capability SIDs do not match their paths')
@@ -26,6 +32,9 @@ async function main(): Promise<number> {
   try {
     await sandbox.init()
     initialized = true
+    // Narrow the swap window between the pre-check and the ACE grant: a root
+    // replaced between the two must not be confined under its new target.
+    verifyRoots()
     // Update the native environment block inherited by CreateProcessAsUserW.
     process.env.TMP = temp
     process.env.TEMP = temp

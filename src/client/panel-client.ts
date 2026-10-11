@@ -72,11 +72,13 @@ export interface PanelClient {
    * @param endpoint - the endpoint name; it also selects the response type.
    * @param payload - the request fields for that endpoint (the endpoint name
    *   travels as the RPC method, so it is not repeated in the payload).
+   * @param signal - optional cancellation; aborting rejects the call and
+   *   lets the host drop its in-flight `files` / `readFile` work.
    * @returns the host's value, in the shape the endpoint promises.
    * @throws {PanelError} when the host answered with a failure, or with a value
    *   that is not what this endpoint promises.
    */
-  call<E extends PanelEndpoint>(endpoint: E, payload: PanelRequest): Promise<PanelResponseMap[E]>
+  call<E extends PanelEndpoint>(endpoint: E, payload: PanelRequest, signal?: AbortSignal): Promise<PanelResponseMap[E]>
 }
 
 /**
@@ -86,10 +88,10 @@ export interface PanelClient {
  */
 export function createPanelClient(connection: ConnectionHandle): PanelClient {
   return {
-    async call(endpoint, payload) {
+    async call(endpoint, payload, signal) {
       let result: ChannelResult
       try {
-        result = await connection.rpc.call(PANEL_CHANNEL, endpoint, payload) as ChannelResult
+        result = await connection.rpc.call(PANEL_CHANNEL, endpoint, payload, signal) as ChannelResult
       } catch (error: unknown) {
         throw new PanelError('unavailable', error instanceof Error ? error.message : String(error))
       }

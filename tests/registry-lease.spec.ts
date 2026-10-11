@@ -5,7 +5,9 @@
  */
 
 import { mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
@@ -72,6 +74,58 @@ describe('RegistryAuthorityLease', () => {
         .rejects.toBeInstanceOf(RegistryLeaseContendedError)
     } finally {
       await lease.release()
+    }
+  })
+
+  it.runIf(process.platform === 'win32')('uses one semaphore name for a case-variant spelling and the 8.3 alias of the store', (context) => {
+    const variant = storeRoot.split('').map((letter, index) => index % 2 === 0 ? letter.toLowerCase() : letter.toUpperCase()).join('')
+    expect(leaseNameWin32(join(variant, `${DOMAIN_NAME}.lock`))).toBe(leaseNameWin32(leasePath))
+    // The 8.3 alias only exists on volumes where short-name generation is on;
+    // when it spells the long name there is nothing distinct to compare.
+    const short = execFileSync('cmd', ['/d', '/s', '/c', `for %I in ("${storeRoot}") do @echo %~sI`], { encoding: 'utf8' }).trim()
+    if (short === storeRoot) {
+      context.skip(`8.3 short names are disabled on this volume (${storeRoot} resolves to itself)`)
+      return
+    }
+    expect(leaseNameWin32(join(short, `${DOMAIN_NAME}.lock`))).toBe(leaseNameWin32(leasePath))
+  })
+
+  it('elects exactly one authority when three OS processes contend for one store', async () => {
+    // Same child program the multiprocess e2e drives: mount the stack, print one
+    // JSON status line with the authority verdict, hold until stdin closes.
+    const childSource = fileURLToPath(new URL('./support/registry-authority-child.ts', import.meta.url))
+    const children: ChildProcess[] = []
+    try {
+      const ready = await Promise.all([0, 1, 2].map(async () => {
+        const child = spawn(process.execPath, ['--experimental-transform-types', childSource,
+          JSON.stringify({ storeRoot, primary })], { stdio: ['pipe', 'pipe', 'pipe'] })
+        children.push(child)
+        const stderr: Buffer[] = []
+        child.stderr?.on('data', chunk => stderr.push(chunk as Buffer))
+        return await new Promise<{ authority: string }>((resolve, reject) => {
+          let buffer = ''
+          child.once('error', reject)
+          child.once('exit', (code, signal) => {
+            const detail = Buffer.concat(stderr).toString('utf8')
+            reject(new Error(`authority child exited before ready (code=${String(code)} signal=${String(signal)})${detail === '' ? '' : `\n${detail}`}`))
+          })
+          child.stdout?.on('data', chunk => {
+            buffer += String(chunk)
+            const line = buffer.split('\n').find(entry => entry.trim().startsWith('{'))
+            if (line === undefined) return
+            resolve(JSON.parse(line) as { authority: string })
+          })
+        })
+      }))
+      expect(ready.filter(entry => entry.authority === 'active')).toHaveLength(1)
+      expect(ready.filter(entry => entry.authority === 'contended')).toHaveLength(2)
+    } finally {
+      for (const child of children) child.stdin?.end()
+      for (const child of children) child.kill('SIGTERM')
+      await Promise.all(children.map(async child => await new Promise<void>(resolve => {
+        if (child.exitCode !== null || child.signalCode !== null) { resolve(); return }
+        child.once('exit', () => resolve())
+      })))
     }
   })
 

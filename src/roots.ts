@@ -22,6 +22,9 @@
  * 6. `duplicate` — another registered root canonicalizes to the same path.
  * 7. `nested` — the candidate lies under a registered root, or contains one.
  *    Same reasoning as rule 5, applied to the additional roots.
+ * 8. `unsupported-path` — on Windows, a network or device path (`\\server`,
+ *    `\\?\…`, `\\.\…`): the ACL confinement cannot be shown to cover it, so it
+ *    is rejected lexically before any filesystem touch.
  *
  * The stored side of the same rules lives in {@link classifyStoredRoots}, which
  * must never throw: a registration that stopped being usable is REPORTED, not
@@ -131,6 +134,7 @@ export type RootValidationCode =
   | 'registry-contended'
   | 'reveal-unavailable'
   | 'session-not-found'
+  | 'unsupported-path'
 
 /** A rejected root operation; `code` is the stable contract, `message` the fallback prose. */
 export class RootValidationError extends Error {
@@ -203,6 +207,23 @@ export function canonicalRoot(path: string): string {
   return canonicalPath(path)
 }
 
+/**
+ * Whether a path names a Windows network or device location: two leading
+ * slashes or backslashes in any mix (`\\server\share`, `//server/share`,
+ * `\\?\…`, `\\.\…`). Windows ACL confinement cannot be shown to cover these —
+ * the restricted token's capability SID and Low label are not what an SMB
+ * server evaluates, and merely resolving an attacker-chosen UNC path triggers
+ * SMB authentication — so they are refused lexically, before any filesystem
+ * access. Because `canonicalPath` resolves a mapped drive letter to its
+ * `\\server\share` form, checking the canonical spelling also catches mapped
+ * network drives.
+ * @param path - the path spelling to test.
+ * @returns whether it is a network or device path.
+ */
+export function isWindowsNetworkOrDevicePath(path: string): boolean {
+  return /^[\\/]{2}/.test(path)
+}
+
 /** Caller-supplied facts one candidate is judged against. */
 export interface RootCandidateContext {
   /** The session's workspace root; the candidate may not equal or overlap it. */
@@ -213,6 +234,12 @@ export interface RootCandidateContext {
    * of depending on where the host's home directory happens to sit.
    */
   readonly home?: string
+  /**
+   * The platform the rules run for; defaults to `process.platform`. A caller
+   * (a test, a probe) may exercise another platform's rules — notably the
+   * Windows network/device-path refusal — on any host.
+   */
+  readonly platform?: NodeJS.Platform
   /**
    * Canonical paths already granted. Missing and invalid registrations are
    * deliberately excluded: a withheld root grants nothing, so a candidate may
@@ -241,7 +268,16 @@ export function validateRootCandidate(raw: string, context: RootCandidateContext
       { reference: expanded },
     )
   }
+  const platform = context.platform ?? process.platform
+  if (platform === 'win32' && isWindowsNetworkOrDevicePath(expanded)) {
+    throw unsupportedPath(expanded)
+  }
   const canonical = canonicalRoot(expanded)
+  // The canonical spelling is judged too: realpath turns a mapped network
+  // drive letter into its \\server\share form.
+  if (platform === 'win32' && isWindowsNetworkOrDevicePath(canonical)) {
+    throw unsupportedPath(expanded)
+  }
   assertDirectory(canonical, expanded)
   const primaryRoot = canonicalRoot(context.primaryRoot)
   if (samePath(canonical, primaryRoot)) {
@@ -290,6 +326,15 @@ export function validateRootCandidate(raw: string, context: RootCandidateContext
   return canonical
 }
 
+/** The `unsupported-path` refusal, shared by the input and canonical checks. */
+function unsupportedPath(asTyped: string): RootValidationError {
+  return new RootValidationError(
+    'unsupported-path',
+    `"${asTyped}" is a network or device path, which Windows ACL confinement cannot cover`,
+    { reference: asTyped },
+  )
+}
+
 /** Assert that a canonical path is an existing directory. */
 function assertDirectory(canonical: string, asTyped: string): void {
   let stats
@@ -313,18 +358,20 @@ function assertDirectory(canonical: string, asTyped: string): void {
  * `invalid` (kept, unusable).
  * @param primaryRoot - the session workspace root the records belong to.
  * @param records - the stored records, in registry order.
+ * @param platform - the platform the rules run for; defaults to `process.platform`.
  * @returns one status per record, in the same order.
  */
 export function classifyStoredRoots(
   primaryRoot: string,
   records: readonly RegisteredRoot[],
+  platform: NodeJS.Platform = process.platform,
 ): RootStatus[] {
   const primary = canonicalRoot(primaryRoot)
   const claimed: string[] = []
   const duplicated = duplicatedIds(records)
   const statuses: RootStatus[] = []
   for (const [index, record] of records.entries()) {
-    const status = classifyStoredRoot(record, primary, claimed, duplicated.has(record.id), index)
+    const status = classifyStoredRoot(record, primary, claimed, duplicated.has(record.id), index, platform)
     statuses.push(status)
     if (status.state === 'available') claimed.push(status.path)
   }
@@ -362,6 +409,7 @@ function classifyStoredRoot(
   claimed: readonly string[],
   duplicatedId: boolean,
   position: number,
+  platform: NodeJS.Platform,
 ): RootStatus {
   const invalid = (detail: string): RootStatus => ({ ...record, state: 'invalid', detail })
   if (typeof record.path !== 'string' || record.path === '') return invalid('the record has no path')
@@ -379,6 +427,11 @@ function classifyStoredRoot(
   const recorded = record.recordedPath
   if (typeof recorded !== 'string' || recorded === '') {
     return invalid('the record does not say which directory it was granted for')
+  }
+  // A network or device path is judged lexically, BEFORE re-resolving it:
+  // canonicalizing a UNC path would touch the filesystem (and the network).
+  if (platform === 'win32' && (isWindowsNetworkOrDevicePath(record.path) || isWindowsNetworkOrDevicePath(recorded))) {
+    return invalid(`"${record.path}" is a network or device path, which Windows ACL confinement cannot cover`)
   }
   const canonical = canonicalRoot(record.path)
   if (!samePath(canonical, recorded)) {

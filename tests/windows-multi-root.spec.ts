@@ -28,6 +28,17 @@ describe('Windows root-set capability', () => {
     expect(widened.slice(2, profile.length)).toEqual(profile.slice(2))
     expect(parseWindowsProfile(widened.slice(2), true).additionalRoots).toEqual(roots)
   })
+  it('refuses to widen a profile onto a network or device path', () => {
+    // Any root that is a UNC or device path fails closed: the provider turns
+    // this DialectUnrecognizedError into SandboxUnavailableError, never a
+    // silently unconfined or primary-only spawn.
+    const uncWorkspace = ['node', 'runner.js', '--workspace', '\\\\server\\share', '--temp', 'C:\\temp', '--mode', 'workspace-write']
+    for (const args of [uncWorkspace, profile]) {
+      const roots = args === profile ? ['\\\\server\\share\\x'] : ['D:\\extra']
+      expect(() => widenWindowsProfile(args, roots)).toThrow('network or device paths')
+    }
+    expect(() => widenWindowsProfile(profile, ['D:\\fine', '//server/share'])).toThrow('network or device paths')
+  })
   it('fails closed on unknown, duplicated, missing, or unpaired flags', () => {
     for (const flags of [profile.slice(2).concat('--future', 'yes'), profile.slice(2).concat('--temp', 'x'), profile.slice(2).concat('--write-sid', 'sid'), profile.slice(2, -1)]) {
       expect(() => parseWindowsProfile(flags)).toThrow()

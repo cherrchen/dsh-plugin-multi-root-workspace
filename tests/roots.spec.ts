@@ -20,6 +20,7 @@ import {
   expandRootInput,
   indexedStatuses,
   isCanonicallyUnder,
+  isWindowsNetworkOrDevicePath,
   removeStatusAt,
   entryRootRef,
   resolveRootRef,
@@ -227,6 +228,41 @@ describe('validateRootCandidate', () => {
     expect(codeOf(alias, [canonicalPath(sibling)])).toBe('duplicate')
     expect(check(alias)).toBe(canonicalPath(sibling))
   })
+
+  describe('on Windows', () => {
+    const win32 = { platform: 'win32' as const }
+
+    it('rejects a network or device path lexically, before any filesystem touch', () => {
+      // `//host/missing` would otherwise be `missing` (or would hang inside an
+      // SMB lookup): the refusal must name unsupported-path and must happen
+      // without stat-ing the path.
+      for (const raw of ['//host/missing', '//server/share/dir', '//?/C:/x', '//./pipe/x']) {
+        try {
+          validateRootCandidate(raw, { primaryRoot: primary, existing: [], ...win32 })
+          expect.unreachable(`${raw} must be rejected`)
+        } catch (error: unknown) {
+          expect(error).toBeInstanceOf(RootValidationError)
+          expect((error as RootValidationError).code).toBe('unsupported-path')
+        }
+      }
+      expect(codeOf(join(fixture.base, 'nope'), [], undefined)).toBe('missing')
+    })
+
+    it('still accepts an ordinary local directory', () => {
+      expect(validateRootCandidate(sibling, { primaryRoot: primary, existing: [], ...win32 })).toBe(canonicalPath(sibling))
+    })
+  })
+})
+
+describe('isWindowsNetworkOrDevicePath', () => {
+  it('matches two leading slashes or backslashes in any mix', () => {
+    for (const path of ['\\\\server\\share\\x', '//server/share', '\\\\?\\C:\\x', '\\\\.\\pipe\\x', '/\\mixed']) {
+      expect(isWindowsNetworkOrDevicePath(path), path).toBe(true)
+    }
+    for (const path of ['C:\\x', '/home/x', 'relative', '']) {
+      expect(isWindowsNetworkOrDevicePath(path), path).toBe(false)
+    }
+  })
 })
 
 describe('classifyStoredRoots', () => {
@@ -328,6 +364,21 @@ describe('classifyStoredRoots', () => {
 
   it('flags a record containing the primary root as invalid', () => {
     expect(classifyStoredRoots(primary, [stored(fixture.base)])[0]?.state).toBe('invalid')
+  })
+
+  it('marks a network or device path invalid on Windows without stat-ing it', () => {
+    // `//host/missing` is absolute on every platform and resolves nowhere: only
+    // the lexical win32 check can mark it invalid without a filesystem touch.
+    for (const record of [
+      stored('//host/missing', 'unc-path'),
+      { ...stored(sibling, 'unc-recorded'), recordedPath: '//host/missing' },
+    ]) {
+      const status = classifyStoredRoots(primary, [record], 'win32')[0]!
+      expect(status.state).toBe('invalid')
+      expect(status.detail).toContain('network or device path')
+    }
+    // The same records stay available/ordinary on platforms without the rule.
+    expect(classifyStoredRoots(primary, [stored('//host/missing', 'unc-path')])[0]?.state).not.toBe('invalid')
   })
 })
 

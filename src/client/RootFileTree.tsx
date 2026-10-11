@@ -28,14 +28,15 @@ function Directory(props: RootFileTreeProps & { path: string }): ReactNode {
   const [error, setError] = useState<string>()
   useEffect(() => {
     let active = true
+    const cancel = new AbortController()
     setListing(undefined)
     setError(undefined)
     const session = props.sessionId()
     if (session === undefined) { setError(props.t('panel.noSession')); return }
-    void props.panel.call('files', { sessionId: session, entry: props.entry, path: props.path }).then(value => {
+    void props.panel.call('files', { sessionId: session, entry: props.entry, path: props.path }, cancel.signal).then(value => {
       if (active && props.sessionId() === session) setListing(value)
-    }, (failure: unknown) => { if (active) setError(failure instanceof Error ? failure.message : String(failure)) })
-    return () => { active = false }
+    }, (failure: unknown) => { if (active && !cancel.signal.aborted) setError(failure instanceof Error ? failure.message : String(failure)) })
+    return () => { active = false; cancel.abort() }
   }, [props.panel, props.entry, props.path, props.sessionId, props.t])
   if (error !== undefined) return <p className="mrfw-alert" role="alert">{error}</p>
   if (listing === undefined) return <p className="mrfw-note">{props.t('panel.loading')}</p>
@@ -51,20 +52,24 @@ function FileEntry(props: RootFileTreeProps & { path: string; name: string; kind
   const [preview, setPreview] = useState<FilePreview>()
   const [error, setError] = useState<string>()
   const epoch = useRef(0)
-  useEffect(() => () => { epoch.current += 1 }, [])
+  const cancel = useRef<AbortController | undefined>(undefined)
+  useEffect(() => () => { epoch.current += 1; cancel.current?.abort() }, [])
   const toggle = async (): Promise<void> => {
     setOpen(!open)
     const current = ++epoch.current
+    cancel.current?.abort()
     if (open || props.kind !== 'file') return
     setPreview(undefined)
     setError(undefined)
     const session = props.sessionId()
     if (session === undefined) { setError(props.t('panel.noSession')); return }
+    const controller = new AbortController()
+    cancel.current = controller
     try {
-      const value = await props.panel.call('readFile', { sessionId: session, entry: props.entry, path: props.path })
+      const value = await props.panel.call('readFile', { sessionId: session, entry: props.entry, path: props.path }, controller.signal)
       if (current === epoch.current && props.sessionId() === session) setPreview(value)
     } catch (failure: unknown) {
-      if (current === epoch.current) setError(failure instanceof Error ? failure.message : String(failure))
+      if (current === epoch.current && !controller.signal.aborted) setError(failure instanceof Error ? failure.message : String(failure))
     }
   }
   return <li>
