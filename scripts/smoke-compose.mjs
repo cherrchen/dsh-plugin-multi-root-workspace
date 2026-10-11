@@ -34,6 +34,10 @@ const INSERTED = [
   'multi-root-compat',
   'multi-root-fs',
   'multi-root-sandbox',
+  // The provider-conflict gate: asserts the mounted ctx.fs/ctx.sandbox carry
+  // this bundle's brand, so a foreign provider leaves every widened-authority
+  // row below unmounted rather than granting on it.
+  'multi-root-providers',
   'multi-root-scope',
   'multi-root-registry',
   'multi-root-instructions',

@@ -33,6 +33,8 @@ Architecture Decision Records（ADR），用于记录重要架构与工程决策
 不要提前创建空的 ADR 文件；仅在做出真实决策时新增。
 
 - [ADR-0012-session-origin-and-effective-cwd.md](./ADR-0012-session-origin-and-effective-cwd.md) — Session 原始项目与 effective cwd 分离、LSP 调用身份、指令 touch、Worktree 与进程快照（Accepted）。
+- [ADR-0013-per-root-and-per-tool-access.md](./ADR-0013-per-root-and-per-tool-access.md) — 每根 read-write/read-only 访问级别的持久化编码（domain v1、降级 fail closed）、`setAccess` 升级门槛、Windows root-set SID、`toolAccess` per-tool 封顶与 ALS dispatch 上下文（Accepted）。
+- [ADR-0014-root-limit-and-provider-conflict.md](./ADR-0014-root-limit-and-provider-conflict.md) — 每主根存储记录上限（默认 16、顶 64、超限存量照授）与 `multi-root-providers` 品牌门禁（外来 `ctx.fs`/`ctx.sandbox` fail closed）（Accepted）。
 
 ## 推荐命名
 

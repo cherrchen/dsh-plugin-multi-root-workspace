@@ -28,6 +28,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/sandbox
  */
 
+import type { Context } from '@deepseek-ai/cordis'
 import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
@@ -37,6 +38,7 @@ import type {} from './compat.ts'
 import { widenConfined } from './compat/sandbox-confine.ts'
 import type { ConfineCall, UpstreamConfined } from './compat/sandbox-confine.ts'
 import { DialectUnrecognizedError, splitConfined, widenProfileArgs } from './dialects.ts'
+import { brandMultiRootProvider } from './providers.ts'
 import type {} from './scope.ts'
 import { widenWindowsProfile } from './windows-profile.ts'
 
@@ -52,6 +54,13 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
   // widening below recognizes an upstream argv shape, so it must not run on a
   // release the contract has not verified (see src/compat.ts).
   static inject = ['multiRootCompat', 'sandboxPolicy', 'multiRootScope']
+
+  constructor(ctx: Context, config: Config) {
+    super(ctx, config)
+    // The conflict gate (`multiRootProviders`) verifies this brand rather than
+    // `instanceof`, so a duplicated install still identifies the provider.
+    brandMultiRootProvider(this, 'sandbox')
+  }
 
   /**
    * Wrap `argv` so it executes confined under `policy` on this host, granting
@@ -96,20 +105,25 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     // passthrough cases must stay free of the extra synchronous IO.
     if (policy.mode !== 'workspace-write') return confined
     const scope = this.ctx.multiRootScope.resolve(policy)
-    if (scope.additionalRoots.length === 0) return confined
+    // Only the WRITABLE members widen the kernel profile: a `read-only`
+    // additional root stays a workspace member (routed, readable) but the
+    // dialect must never grant a write to it. With none, the upstream result
+    // is returned element for element — the same passthrough as an empty scope.
+    const writable = scope.writableRoots
+    if (writable.length === 0) return confined
 
     try {
       const shape = splitConfined(confined.argv, argv)
       if (shape.dialect === 'windows-acl') {
-        return { ...confined, argv: [...widenWindowsProfile(shape.profileArgs, scope.additionalRoots, scope.primaryRoot), '--', ...argv] }
+        return { ...confined, argv: [...widenWindowsProfile(shape.profileArgs, writable, scope.primaryRoot), '--', ...argv] }
       }
-      const profileArgs = widenProfileArgs(shape.dialect, shape.profileArgs, policy, scope.additionalRoots)
+      const profileArgs = widenProfileArgs(shape.dialect, shape.profileArgs, policy, writable)
       return { ...confined, argv: [...profileArgs, '--', ...argv] }
     } catch (error: unknown) {
       if (!(error instanceof DialectUnrecognizedError)) throw error
       throw new SandboxUnavailableError(
         policy.mode,
-        `multi-root workspace: cannot grant the additional workspace roots [${scope.additionalRoots.join(', ')}] `
+        `multi-root workspace: cannot grant the additional workspace roots [${writable.join(', ')}] `
         + `under the primary root ${scope.primaryRoot} — ${error.message}`,
       )
     }

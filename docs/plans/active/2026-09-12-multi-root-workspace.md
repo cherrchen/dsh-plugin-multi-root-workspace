@@ -35,7 +35,12 @@
 | v0.1.4 | compat | DSH 支持矩阵扩展至 `0.1.7-rc.2`；相对 `rc.1` 形状未变，无新适配分支，cordis 仍是 `~4.0.4` | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `f2a8f75` | `v0.1.4` |
 | v0.1.5 | compat | DSH 支持矩阵扩展至 `0.2.0-rc.1` / `0.2.0-rc.2`，开发 pin 升级，全部支持版本 × OS 的持续矩阵 | [本次记录](#dsh-02-兼容提升2026-09-30) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `135af7f` | `v0.1.5` 已发布 |
 | v0.1.6 | DSH 0.2.1 + B1–B3 + ADR-0012 | DSH `0.2.1-alpha.1` / `.2`；Session origin 与动态 cwd 分离；附加根 LSP、Windows ACL、文件树与 Worktree | [B1–B3](#b1b3第二期-p12026-10-02)、[DSH 0.2.1](#dsh-021-迁移与目录安全契约2026-10-10) | [0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md)、[0012](../../decisions/ADR-0012-session-origin-and-effective-cwd.md) | `466b3bb` | `v0.1.6` |
-| 第二期 | 后续 B 项 | per-root / per-tool 权限等 P2/P3 项 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
+| 第二期 | B4 per-root / per-tool 权限 | 根自带 read-write / read-only 访问级别；`toolAccess` 按工具封顶附加根写权限（ALS 经 `tools/execute`）；命令与面板 surface | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0013](../../decisions/ADR-0013-per-root-and-per-tool-access.md) | `99a443f`…`1758885`、`980b925`、`8e770c9`…`f4fc3df` | 未发布 |
+| 第二期 | B5 mutation 前重分类 | 每个 mutation 的 serialize job 以存储记录重新分类再校验；revive 只看 fresh 分类 | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0004 修订](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[0014](../../decisions/ADR-0014-root-limit-and-provider-conflict.md) | `a3240b1`、`395e32b` | 未发布 |
+| 第二期 | B6 附加根数量上限 | `maxAdditionalRoots` 默认 16、顶 64；按全部存储记录计数；超限存量照授只拒新增；非法配置 fail closed | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0014](../../decisions/ADR-0014-root-limit-and-provider-conflict.md) | `067933f` | 未发布 |
+| 第二期 | B7 provider 冲突检测 | 品牌 + `multi-root-providers` 门禁；外来 `ctx.fs`/`ctx.sandbox` 下注册表缺席、scope 为空 | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0014](../../decisions/ADR-0014-root-limit-and-provider-conflict.md) | `2a36d5f` | 未发布 |
+| 第二期 | B8 平台感知提示词 | `renderWorkspaceRootsContext` 纯函数化；按模式/平台/访问级别陈述授权；win32 附带 partial-enforcement 说明 | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0013](../../decisions/ADR-0013-per-root-and-per-tool-access.md) | `a7f3d20` | 未发布 |
+| 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 
 ## 总体策略
 
@@ -425,3 +430,23 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 ### v0.1.6 发版验证（2026-10-11）
 
 `v0.1.6` 已通过 `pnpm release patch --tag` 生成，发版提交为 `466b3bb`，并推送至 `origin/main`，连同 annotated tag `v0.1.6`。本机 `pnpm verify:all`、`pnpm compat:check`、`pnpm docs:check` 均通过；本机 Test 为 393 passed / 4 skipped，compose 44/44、behavior 99/99、journey 55/55。GitHub [Release workflow run 38121365127](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38121365127) 全绿：11 个支持版本 × Linux/macOS/Windows 的 33 个 verify job，以及 npm publish 和 GitHub Release 创建均成功。
+
+### PR #10 全面复核与第二轮返工（2026-10-12，未发布）
+
+本轮修复内容见 [B4–B8 返工记录](./2026-10-11-b4-b8-p2.md#全面复核与第二轮审查返工2026-10-12pr-10)，接口与工程规则分别维护在 ADR-0013、ADR-0014 与开发工作流。
+
+本机开发 pin `0.2.1-alpha.2`：compat、lint、双端 typecheck、build、docs:check 通过；Seatbelt 探针原生执行成功并通过 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt` 约束完整测试，结果 **500 passed / 22 skipped**（35 文件通过、1 Windows 原生文件跳过）。compose **46/46**、behavior **99/99**、web/headless journey **62/62** 全通过；pack:check **73 个成员**通过，安装 tarball 的 packed behavior **98/98** 通过。外层 Agent 沙箱内的首次探针被 sandbox_apply 拒绝，该次不计原生证据；上述完整测试与冒烟在外层沙箱之外执行。
+
+本机不能证明 Windows ACL 夹具修复有效，也不能验证 Linux 内核；本轮跨版本与原生平台证据采用下方修复后矩阵，不沿用历史 HEAD 的绿色结果。
+
+首轮 [CI run 38153898876](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38153898876) 暴露新 SID 查询命中了 Git Bash PATH 中的 GNU whoami，所有 Windows 腿在夹具前置步骤失败；不将此轮计作修复验收。后续改为按 System32 绝对路径启动原生 whoami/icacls/takeown，继续完整矩阵验证。
+
+最终实现 HEAD `9c2a27a` 的 [CI run 38154203689](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38154203689) **35/35 success**：11 个精确支持版本 × Linux/macOS/Windows 的 33 个 verify job，以及 releases/gate；没有整项自动 retry 或额外 skip。全部 Windows 版本均完成 kernel:probe、原生测试、三冒烟、pack:check 与 smoke:packed。`0.1.6-alpha.1` Windows 日志确认 foreign-owned 夹具成功、受限子进程实际执行且两个未授权写都被拒（不是仅靠 runner 127 早退通过）；该腿 **496 passed / 26 skipped**，compose **46/46**、behavior **99/99**、journey **62/62**、packed behavior **98/98**。一次完整矩阵通过是本轮验收证据，不等于证明所有未来环境都不再出现瞬态失败；后续诊断与有界重试规则见开发工作流。
+
+### PR #10 第三轮返工（2026-10-12，未发布）
+
+修复内容见 [B4–B8 第三轮记录](./2026-10-11-b4-b8-p2.md#第三轮审查返工2026-10-12pr-10)。修改前回归复现了实时 scope 顺序、发布次数与真实指令预算优先级三个失败，修复后注册表 / 指令套件 **107/107** 通过。
+
+本机开发 pin `0.2.1-alpha.2`：compat、lint、双端 typecheck、build、docs:check 通过；完整测试在原生 Seatbelt 探针及 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt` 约束下 **501 passed / 22 skipped**。compose **46/46**、原生 behavior **99/99**、原生 web/headless journey **62/62**、pack:check **73 个成员**、原生 packed behavior **98/98** 全通过。
+
+同时在外层 Agent 沙箱内验证 runner 不可用路径：Seatbelt 返回 `sandbox_apply: Operation not permitted`，journey **55 passed / 0 failed / 2 skipped**，两条腿均明确跳过 shell cap 与命令产物，fs 与模型上下文检查仍执行。此记录只证明本机可用 / 不可用两种路径；本轮跨版本、Linux 与 Windows 结果须以本次推送触发的 CI 为准。

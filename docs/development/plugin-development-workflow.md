@@ -35,7 +35,8 @@ pnpm compat:check       # DSH 兼容性契约：allowlist / peerDependencies / �
 pnpm lint               # oxlint（host 与 client 半部都扫）
 pnpm typecheck          # tsc -p tsconfig.host.json 与 -p tsconfig.client.json 各一次
 pnpm build              # tsc 出两面 lib/types/**/*.d.ts + tsdown 出 lib/*.js（host ESM）与 lib/client.js（浏览器闭包工厂）
-pnpm test               # vitest run：单测 + 校验规则 + 注册表（含并发/替换/恢复/跨进程 lease）+ 命令/通道 + 空根差分 parity + 方言 grant 矩阵 + client 制品/面板 + 词典 parity + patch 不变量
+pnpm test               # vitest run：单测 + 校验规则 + 注册表（含并发/替换/恢复/跨进程 lease/reclassify/上限）+ 命令/通道 + 空根差分 parity + 方言 grant 矩阵（含 rw/ro）+ per-tool cap（真实 tools/execute waterfall + 方言实跑）+ provider 冲突 + 提示词快照 + client 制品/面板 + 词典 parity + patch 不变量
+pnpm bench:roots        # 0–64 根的分类耗时与各方言 argv/profile 字节测量（不进 CI 门禁；输出参考 docs/reference/bench-root-scale-darwin.json）
 pnpm kernel:probe       # 本机是否真能受限执行（Windows 上用真实上游 runner 双向验证 windows-acl）；能跑的方言写入 DSH_PROBE_VERIFIED_DIALECTS，使其断言必须真跑
 pnpm smoke:compose      # 组合门禁（需要先 build）
 pnpm smoke:behavior     # 空根直通 + 多根 battery + 注册表/命令 battery（需要先 build）
@@ -89,7 +90,7 @@ pnpm docs:check         # 文档结构检查
    - **web**：进程内启动 web 组合（`provideCmdline(['--no-open','--port','0'])`），创建带模型选择与 agent preset 的 root agent，用 `/workspace-folders add` 注册附加根，再驱动一轮真实 turn；
    - **headless**：以真实 CLI 子进程 `dsh --profile headless "<task>"` 跑一次性任务，注册通过预写注册表存储完成（那是子进程唯一可用的登记路径）。
 4. 断言全部落在**世界**上：`repo-b/README.md` 的字节、`repo-a` 与根外文件的字节不变、根外没有留下文件、`git status/diff` 由冒烟自己重跑、以及模型请求体里出现的拓扑快照（附加根路径 + "additional roots of this session's workspace" + cwd 不变）。工具结果从**模型自己的请求体**里读（工具结果会回传给模型），因此两条腿用同一套判据。
-5. 无法嵌套内核沙箱的宿主上，受限 bash 的两项显式 skip 并打印原因（`git diff` 与 `repo-b` 检查的断言随之 skip），其余断言照常执行。
+5. 无法嵌套内核沙箱的宿主上，两条腿的受限 shell 断言显式 skip 并打印原因：包括 per-tool cap 的附加根拒写 / 主根可写文件标记、`git diff` 与 `repo-b` 检查。只有 runner 可用时才检查这些产物，避免命令根本没执行却把缺少主根标记误报为失败，或把缺少附加根标记当成 cap 生效。fs 工具、拓扑与指令断言照常执行。
 
 ### 4.4 环境变量
 
@@ -112,6 +113,15 @@ pnpm docs:check         # 文档结构检查
 - `tests/parity-matrix.spec.ts` 的"真实受限执行"用例同样按宿主能力 skip（`unavailable` / `runner-failed` 都算不可用），并且只有在 runner 真的跑起来、却仍然写不进附加根时才判失败。
 
 在没有外层约束的终端（或 CI runner）中，同样的冒烟与用例会真实执行受限 bash。
+
+### 4.5.1 P2（B4–B8）专项测试
+
+- `tests/tool-access.spec.ts`：per-tool cap 经**真实 `tools/execute` waterfall** 驱动（工具名在 dispatch 入口解析）；本机可用方言做真实受限执行（macOS 上是 Seatbelt 的 `bash -c`——封顶工具写附加根被拒、写主根可），嵌套只收窄、并发隔离、dispatch 外 fail closed、非法配置封顶；bwrap/Landlock 行按 runner 可用性 skip。
+- `tests/prompt-context.spec.ts`：`renderWorkspaceRootsContext` 的平台 × 模式 × 根组合 × cappedTools 内联快照，以及连续装配稳定性（alias 不改变文案）。
+- `tests/provider-conflict.spec.ts`：真实组合 + 冲突 stub 插件（fs-only / sandbox-only × 前后顺序），断言门禁缺席 ⇒ 注册表缺席 ⇒ 空 scope 且无宽化。
+- `scripts/smoke-journey.mjs` cap leg：真实组合配置 `toolAccess: { bash: 'read-only' }`，脚本化模型调用**真实 bash 工具** `touch` 附加根（失败 / 文件缺席）与主根（成功）、真实 `write` 工具写附加根（成功），并断言模型请求含封顶文案。
+- Windows：`tests/windows-multi-root.spec.ts` 的 SID/argv 结构用例全平台跑；`tests/windows-native.e2e.ts` 的 access 矩阵（Node / PowerShell / ConPTY、`setAccess` 翻转、移除）在 Windows CI 原生执行，POSIX 下按既有 win32-gating skip，不新增跳过条件。
+- `pnpm bench:roots` 测量 0/1/4/16/32/64 条存储记录的分类耗时与各内核方言 argv/profile 字节（Windows 上另测 `workspaceScopeSid` 与 runner argv），输出 JSON；它为 `maxAdditionalRoots` 默认值提供证据，不进 CI 门禁。
 
 ### 4.6 构建面：两面一体
 
@@ -207,6 +217,12 @@ Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seat
 LSP 源码回传断言应比较读盘得到的完整源码。夹具里的路径经 `JSON.stringify()` 写入源码时，Windows 的反斜杠已转义，不能再用未转义的原始路径作子串断言。B1–B3 各版本和平台的验收证据只记在[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
 
 失败可诊断：`test` 与各冒烟的输出同时写入 `vitest.log` / `smoke-*.log`（`tee` + `set -o pipefail`，红不会被吞成绿），由 `actions/upload-artifact@v4` 以 `if: always()` 上传——成功与失败的日志都能下载，公共仓库无需管理员权限。
+
+Windows 的 foreign-owned ACL 夹具按**先 DACL、后 owner**搭建：用 `whoami /user` 的数字 SID 显式保留读/执行、`WRITE_DAC` 与 `WRITE_OWNER`，移除继承并加 Everyone 的写/删除 deny 后，最后把 owner 转交 SYSTEM 的数字 SID。这样后续 ACL 编辑和清理不依赖 elevated token 的 restore 特权；测试同时读回 SYSTEM owner 与 deny ACE，并执行真实受限写断言。任何搭建失败在 CI 仍是失败，不以整项 retry 或 skip 掩盖。若未来出现新的瞬态故障，应先按日志区分夹具、进程/管道、内核断言与安装网络问题；只有已确定可恢复的夹具或清理操作适合有次数上限的重试。
+
+原生 piped 子进程探针在 `close` 而非 `exit` 事件拼接输出：Node 的 `exit` 不保证 stdout/stderr 已关闭，过早解析会把完整 verdict 截断；`close` 才能证明输出管道已经结束。见 [Node child_process 文档](https://nodejs.org/api/child_process.html#event-close)。
+
+CI 的日志捕获使用 Git Bash，其 PATH 可能让同名 GNU 命令覆盖 Windows 工具。ACL 夹具的 `whoami.exe` / `icacls.exe` / `takeown.exe` 均按 `%SystemRoot%/System32` 绝对路径执行；不要用裸 `whoami /user`，否则命中 GNU whoami 后参数会被拒绝。
 
 ## 8. 常见失败与处置
 

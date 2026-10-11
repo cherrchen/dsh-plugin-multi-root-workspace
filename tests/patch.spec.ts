@@ -119,6 +119,7 @@ describe('inserted rows', () => {
       'multi-root-compat',
       'multi-root-fs',
       'multi-root-sandbox',
+      'multi-root-providers',
       'multi-root-scope',
       'multi-root-registry',
       'multi-root-instructions',
@@ -135,6 +136,15 @@ describe('inserted rows', () => {
     expect(gate).toBe(0)
     for (const gated of ['multi-root-fs', 'multi-root-sandbox', 'multi-root-registry', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files']) {
       expect(ids.indexOf(gated), `${gated} must come after the gate`).toBeGreaterThan(gate)
+    }
+  })
+
+  it('places the provider-conflict gate before every row that injects it', () => {
+    const ids = inserted.map(row => row.id)
+    const providers = ids.indexOf('multi-root-providers')
+    expect(providers).toBeGreaterThan(-1)
+    for (const gated of ['multi-root-registry', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files']) {
+      expect(ids.indexOf(gated), `${gated} must come after the provider-conflict gate`).toBeGreaterThan(providers)
     }
   })
 
@@ -164,6 +174,12 @@ describe('inserted rows', () => {
     const registry = inserted.find(row => row.id === 'multi-root-registry')
     expect(registry?.config).toMatchObject({
       leasePath: "dshHomePath('storages/multi_root_workspace.lock')",
+      maxAdditionalRoots: 16,
     })
+  })
+
+  it('defaults the scope row to no per-tool caps', () => {
+    const scope = inserted.find(row => row.id === 'multi-root-scope')
+    expect(scope?.config).toMatchObject({ toolAccess: {} })
   })
 })

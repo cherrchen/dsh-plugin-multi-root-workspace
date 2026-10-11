@@ -73,12 +73,19 @@ export async function composeProfile(profileName, home) {
   // The CLI writes this root include before booting; a profile created by
   // `dsh plugin add` alone does not have it yet.
   writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
+  // The profile's own patch layer is applied AFTER every bundle layer (the
+  // real boot path does this through `readProfilePatches`'s `patchPath`), so
+  // an id-targeted config override written into `cordis.patch.yml` reaches the
+  // in-process boot exactly as it reaches the CLI.
+  const profilePatch = typeof appBoot.loadOptionalPatches === 'function'
+    ? appBoot.loadOptionalPatches(BIN_NAME, join(profile.dir, appBoot.PROFILE_PATCH_FILENAME ?? 'cordis.patch.yml')) ?? []
+    : []
   return {
     appBoot,
     installAnchor,
     profile,
     resolution,
-    patches: profile.layers.flatMap(layer => layer.patches),
+    patches: [...profile.layers.flatMap(layer => layer.patches), ...profilePatch],
   }
 }
 

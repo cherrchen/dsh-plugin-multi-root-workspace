@@ -16,12 +16,15 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/scope
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { statSync } from 'node:fs'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
-import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type { RootAccess } from './roots.ts'
+import { aroundTool } from './compat/tool-context.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -44,20 +47,43 @@ export interface AdditionalWorkspaceRoot {
    * ever registered.
    */
   recordedPath: string
+  /**
+   * The write authority the registration carries. `read-only` roots remain
+   * workspace members — instructions, LSP, workspace-file routing, and reads
+   * all still see them — but they are never part of `writableRoots` and so
+   * never reach a write grant.
+   */
+  access: RootAccess
   /** Optional display alias. */
   alias?: string
 }
 
+/** One granted workspace member, with the authority fact the enforcement reads. */
+export interface ScopeRoot {
+  /** Canonical absolute directory. */
+  readonly path: string
+  /** The write authority the registration carries. */
+  readonly access: RootAccess
+  /** Optional display alias. */
+  readonly alias?: string
+  /** Stable registry identity. */
+  readonly id: string
+}
+
 /**
  * The resolved scope of one confined call. `primaryRoot` equals the policy's
- * workspace root; `additionalRoots` are canonical, deduplicated, never equal to
- * the primary root, and empty in M1.
+ * workspace root; `additionalRoots` are canonical, deduplicated, never equal
+ * to the primary root.
  */
 export interface FilesystemScope {
   /** The session's workspace root (`session.header.cwd`, canonical). */
   primaryRoot: string
-  /** Extra writable roots granted inside the same sandbox mechanism. */
+  /** Every granted member — ANY access level — canonical, in registry order. */
   additionalRoots: readonly string[]
+  /** The granted members with their access, in registry order. */
+  roots: readonly ScopeRoot[]
+  /** The members carrying `read-write` — the only paths a write may reach. */
+  writableRoots: readonly string[]
 }
 
 /**
@@ -82,8 +108,16 @@ export function sanitizeAdditionalRoots(
   primaryRoot: string,
   roots: readonly AdditionalWorkspaceRoot[],
 ): string[] {
+  return sanitizeMembers(primaryRoot, roots).map(root => root.path)
+}
+
+/** The member-level form of {@link sanitizeAdditionalRoots}: same rules, with access kept. */
+function sanitizeMembers(
+  primaryRoot: string,
+  roots: readonly AdditionalWorkspaceRoot[],
+): ScopeRoot[] {
   const seen = new Set<string>([primaryRoot])
-  const result: string[] = []
+  const result: ScopeRoot[] = []
   for (const root of roots) {
     const recorded = root.recordedPath
     if (typeof recorded !== 'string' || recorded === '') continue
@@ -96,7 +130,12 @@ export function sanitizeAdditionalRoots(
     }
     if (seen.has(canonical)) continue
     seen.add(canonical)
-    result.push(canonical)
+    result.push({
+      path: canonical,
+      access: root.access,
+      id: root.id,
+      ...(root.alias === undefined ? {} : { alias: root.alias }),
+    })
   }
   return result
 }
@@ -108,19 +147,74 @@ export function sanitizeAdditionalRoots(
 export const MULTI_ROOT_CONTEXT_NAME = 'multi-root:scope'
 
 /**
- * Render the workspace topology the model is told about. Only roots are listed
- * (never files), and the sentence states the two facts a denied write would
- * otherwise have to teach: that the additional roots are part of the SAME
- * workspace, and that the session cwd is unchanged (requirement §5, §8).
- * @param primaryRoot - the canonical session workspace root.
- * @param additionalRoots - canonical additional roots, in scope order.
- * @returns the stable topology sentence.
+ * Render the workspace topology the model is told about. Pure: the text
+ * depends only on its inputs, so two consecutive assemblies of the same
+ * session state produce the same contribution byte for byte. Only granted
+ * members are ever listed — withheld, missing, or invalid roots never reach
+ * `roots` in the first place — and no host internals (ids, SIDs, store or
+ * lease paths) are ever named.
+ * @param options.platform - the host platform (`process.platform` of the contribution).
+ * @param options.mode - the session's sandbox mode.
+ * @param options.primaryRoot - the canonical session workspace root.
+ * @param options.roots - the granted additional members, in registry order.
+ * @param options.cappedTools - sorted tool names that can never write an additional root.
+ * @param options.toolAccessInvalid - invalid host config caps every additional-root write.
+ * @returns the stable topology text; empty when there are no additional roots.
  */
-export function renderWorkspaceRootsContext(primaryRoot: string, additionalRoots: readonly string[]): string {
-  return `Current DSH workspace roots: ${JSON.stringify(additionalRoots)} are additional roots of this session's `
-    + `workspace. Under workspace-write they may be modified like the session workspace; `
-    + `the session origin remains the primary root (${JSON.stringify(primaryRoot)}); changing the working directory does not change these grants.`
+export function renderWorkspaceRootsContext(options: {
+  readonly platform: string
+  readonly mode: SandboxMode
+  readonly primaryRoot: string
+  readonly roots: readonly ScopeRoot[]
+  readonly cappedTools: readonly string[]
+  readonly toolAccessInvalid?: boolean
+}): string {
+  const { platform, mode, primaryRoot, roots, cappedTools } = options
+  if (roots.length === 0) return ''
+  const members = JSON.stringify(roots.map(root => root.path))
+  if (mode === 'read-only') {
+    return `Current DSH workspace roots: ${members} are additional roots of this session's workspace and are readable; `
+      + 'nothing is writable in read-only mode.'
+  }
+  if (mode === 'danger-full-access') {
+    return `Current DSH workspace roots: ${members} are additional roots of this session's workspace; `
+      + 'danger-full-access mode has no sandbox isolation.'
+  }
+  const writable = options.toolAccessInvalid ? [] : roots.filter(root => root.access === 'read-write').map(root => root.path)
+  const readOnly = roots.filter(root => root.access === 'read-only').map(root => root.path)
+  const groups: string[] = []
+  if (options.toolAccessInvalid) groups.push(`${members} are readable additional roots (all additional-root writes are refused because toolAccess is invalid)`)
+  if (writable.length > 0) groups.push(`${JSON.stringify(writable)} are writable additional roots`)
+  if (!options.toolAccessInvalid && readOnly.length > 0) groups.push(`${JSON.stringify(readOnly)} are read-only additional roots (writes are refused)`)
+  let text = `Current DSH workspace roots: ${groups.join(' and ')} of this session's workspace. `
+    + `The session origin remains the primary root (${JSON.stringify(primaryRoot)}); `
+    + 'changing the working directory does not change these grants. '
+    + 'Grant changes apply to later operations and newly started processes, not to processes already running.'
+  if (platform === 'win32' && !options.toolAccessInvalid) {
+    text += ' Writable additional roots are enforced for shell processes by the upstream Windows ACL '
+      + 'restricted-token sandbox, whose enforcement is reported as partial; reads are not confined by it.'
+  }
+  if (cappedTools.length > 0) {
+    text += ` The tools ${JSON.stringify(cappedTools)} cannot write additional roots even where they are writable.`
+  }
+  return text
 }
+
+/**
+ * Plugin configuration for the `multi-root-scope` row.
+ */
+export interface Config {
+  /**
+   * Per-tool write caps: a listed tool may never write ANY additional root
+   * (the primary root and upstream behaviour are unchanged). `read-only` is
+   * the only legal value — a cap restricts, it can never widen past the
+   * root's own access.
+   */
+  readonly toolAccess?: Record<string, 'read-only'>
+}
+
+/** The tool-dispatch cap carried across async boundaries by the waterfall. */
+const toolCapStore = new AsyncLocalStorage<{ readonly capped: boolean }>()
 
 /**
  * The `ctx.multiRootScope` service. Providers ask it — never the filesystem —
@@ -131,6 +225,10 @@ export class MultiRootScopeService extends Service {
   /** Additional roots keyed by canonical primary root; empty until roots are registered. */
   private readonly rootsByPrimary = new Map<string, readonly AdditionalWorkspaceRoot[]>()
   private readonly listeners = new Set<() => void>()
+  /** Validated `toolAccess` row config; empty when no tool is capped. */
+  private readonly caps: Record<string, 'read-only'>
+  /** A malformed `toolAccess` refuses every additional-root write (fail closed). */
+  private readonly capsInvalid: boolean
 
   /** Observe registry publications; consumers still resolve authority from scopeOf(). */
   subscribe(listener: () => void): () => void {
@@ -138,8 +236,51 @@ export class MultiRootScopeService extends Service {
     return () => { this.listeners.delete(listener) }
   }
 
-  constructor(ctx: Context) {
+  /**
+   * The sorted names of the tools `toolAccess` caps — read-only for the
+   * prompt contribution. An invalid config is not enumerated (it caps every
+   * call but is not a listable tool set).
+   */
+  toolCaps(): readonly string[] {
+    return Object.keys(this.caps).sort()
+  }
+
+  /** Whether malformed toolAccess caps every call, including unknown tools. */
+  get toolAccessInvalid(): boolean {
+    return this.capsInvalid
+  }
+
+  constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'multiRootScope')
+
+    const toolAccess = config.toolAccess
+    if (toolAccess === undefined) {
+      this.caps = {}
+      this.capsInvalid = false
+    } else if (typeof toolAccess !== 'object' || toolAccess === null || Array.isArray(toolAccess)
+      || Object.values(toolAccess).some(value => value !== 'read-only')) {
+      // Fail closed and loud: a row that cannot be parsed must never grant on
+      // a guess, so every additional-root write is refused for the session.
+      this.caps = {}
+      this.capsInvalid = true
+      ctx.logger.error(
+        'multi-root-workspace: invalid toolAccess config '
+        + `(expected an object mapping tool names to "read-only", got ${JSON.stringify(toolAccess)}); `
+        + 'no additional root is writable',
+      )
+    } else {
+      this.caps = { ...toolAccess }
+      this.capsInvalid = false
+    }
+
+    // The cap rides the tool dispatch across every await: a capped tool stays
+    // capped inside nested calls, and an uncapped outer call is narrowed by a
+    // capped inner dispatch (nesting only ever narrows). The tool name is read
+    // once at entry — never from model-supplied arguments.
+    aroundTool(ctx, (exec, next) => {
+      const parent = toolCapStore.getStore()
+      return toolCapStore.run({ capped: parent?.capped === true || this.caps[exec.name] === 'read-only' }, next)
+    })
 
     // The prompt contribution is a SOFT dependency: a composition without a
     // system-prompt seam (bare test contexts, headless probes) simply never
@@ -155,13 +296,18 @@ export class MultiRootScopeService extends Service {
           const session = assembly.agent?.session
           if (session === undefined) return ''
           const policy = scope.sandboxPolicy.resolve({ session })
-          // `read-only` mentions no writable root at all (upstream's policy
-          // sentence stays silent about the workspace root too), and with no
-          // additional root there is nothing to add.
-          if (policy.mode !== 'workspace-write') return ''
           const resolved = this.resolve(policy)
-          if (resolved.additionalRoots.length === 0) return ''
-          return renderWorkspaceRootsContext(resolved.primaryRoot, resolved.additionalRoots)
+          if (resolved.roots.length === 0) return ''
+          // The session view lists root access, never the tool-ambient cap:
+          // the text describes the workspace, not one call's permissions.
+          return renderWorkspaceRootsContext({
+            platform: process.platform,
+            mode: policy.mode,
+            primaryRoot: resolved.primaryRoot,
+            roots: resolved.roots,
+            cappedTools: this.toolCaps(),
+            toolAccessInvalid: this.toolAccessInvalid,
+          })
         },
       })
     })
@@ -174,18 +320,57 @@ export class MultiRootScopeService extends Service {
    */
   resolve(policy: SandboxExecutionPolicy): FilesystemScope {
     const primaryRoot = canonicalPath(policy.workspaceRoot)
-    return { primaryRoot, additionalRoots: this.scopeOf(primaryRoot) }
+    const roots = this.membersOf(primaryRoot)
+    return {
+      primaryRoot,
+      additionalRoots: roots.map(root => root.path),
+      roots,
+      writableRoots: this.capped() ? [] : roots.filter(root => root.access === 'read-write').map(root => root.path),
+    }
   }
 
   /**
-   * The additional roots registered for one canonical primary root.
+   * Whether THIS call's additional-root writes are capped. Inside a tool
+   * dispatch the AsyncLocalStorage store answers; outside any dispatch (user
+   * PTY, panel, an unknown async boundary) the answer is fail-closed: capped
+   * whenever `toolAccess` names any tool, because an operation whose tool
+   * identity is unknown gets the most restrictive configured cap. Membership
+   * is never affected — only writability.
+   */
+  private capped(): boolean {
+    if (this.capsInvalid) return true
+    const store = toolCapStore.getStore()
+    if (store !== undefined) return store.capped
+    return Object.keys(this.caps).length > 0
+  }
+
+  /**
+   * The additional roots registered for one canonical primary root — every
+   * granted member, ANY access level (a read-only root is still a member of
+   * the workspace for instructions, LSP, routing, and reads).
    * @param primaryRoot - canonical primary root (or any spelling thereof).
    * @returns the canonical additional roots; empty when none are registered.
    */
   scopeOf(primaryRoot: string): readonly string[] {
-    const registered = this.rootsByPrimary.get(canonicalPath(primaryRoot))
+    return this.membersOf(primaryRoot).map(root => root.path)
+  }
+
+  /**
+   * The additional roots a WRITE may reach for one primary root — the members
+   * carrying `read-write` only.
+   * @param primaryRoot - canonical primary root (or any spelling thereof).
+   * @returns the canonical writable roots; empty when none qualify.
+   */
+  writableOf(primaryRoot: string): readonly string[] {
+    return this.membersOf(primaryRoot).filter(root => root.access === 'read-write').map(root => root.path)
+  }
+
+  /** The sanitized members of one primary root, in registry order. */
+  private membersOf(primaryRoot: string): readonly ScopeRoot[] {
+    const key = canonicalPath(primaryRoot)
+    const registered = this.rootsByPrimary.get(key)
     if (registered === undefined) return []
-    return sanitizeAdditionalRoots(canonicalPath(primaryRoot), registered)
+    return sanitizeMembers(key, registered)
   }
 
   /**

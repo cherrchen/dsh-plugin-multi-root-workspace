@@ -270,6 +270,7 @@ describe('classifyStoredRoots', () => {
   const stored = (path: string, id = path, recordedPath = path): RegisteredRoot => ({
     id: additionalRootId(id),
     path,
+    access: 'read-write',
     recordedPath,
     addedAt: '2026-09-12T00:00:00.000Z',
   })
@@ -389,10 +390,11 @@ describe('classifyStoredRoots', () => {
 describe('resolveRootRef', () => {
   /** Built per test: the fixture tree only exists once `beforeAll` has run. */
   const statusesOf = (): ReturnType<typeof classifyStoredRoots> => classifyStoredRoots(primary, [
-    { id: additionalRootId('a'), path: sibling, recordedPath: sibling, addedAt: '2026-09-12T00:00:00.000Z' },
+    { id: additionalRootId('a'), path: sibling, access: 'read-write', recordedPath: sibling, addedAt: '2026-09-12T00:00:00.000Z' },
     {
       id: additionalRootId('b'),
       path: join(fixture.base, 'gone'),
+      access: 'read-write',
       recordedPath: join(fixture.base, 'gone'),
       addedAt: '2026-09-12T00:00:00.000Z',
     },
@@ -426,10 +428,11 @@ describe('resolveRootRef', () => {
 describe('indexedStatuses and removeStatusAt', () => {
   /** Two records that share one id — the case a removal by id cannot address. */
   const duplicateId = (): ReturnType<typeof classifyStoredRoots> => classifyStoredRoots(primary, [
-    { id: additionalRootId('same'), path: sibling, recordedPath: sibling, addedAt: '2026-09-12T00:00:00.000Z' },
+    { id: additionalRootId('same'), path: sibling, access: 'read-write', recordedPath: sibling, addedAt: '2026-09-12T00:00:00.000Z' },
     {
       id: additionalRootId('same'),
       path: join(fixture.base, 'gone'),
+      access: 'read-write',
       recordedPath: join(fixture.base, 'gone'),
       addedAt: '2026-09-12T00:00:00.000Z',
     },

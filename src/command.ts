@@ -58,6 +58,7 @@ import {
   entryRootRef,
   RootValidationError,
   resolveRootRef,
+  type RootAccess,
   type RootRef,
   type RootStatus,
 } from './roots.ts'
@@ -71,7 +72,7 @@ export const COMMAND_NAME = 'workspace-folders'
 /** One parsed command line. */
 export interface FoldersCommand {
   /** The subcommand; `list` when the line named none. */
-  readonly verb: 'list' | 'add' | 'remove' | 'alias' | 'reveal' | 'help'
+  readonly verb: 'list' | 'add' | 'remove' | 'alias' | 'access' | 'reveal' | 'help'
   /** Everything after the verb, verbatim (paths may contain spaces). */
   readonly rest: string
 }
@@ -93,6 +94,7 @@ export function parseFoldersCommand(rawInput: string): FoldersCommand {
     case 'add':
     case 'remove':
     case 'alias':
+    case 'access':
     case 'reveal':
     case 'help':
       return { verb, rest }
@@ -124,6 +126,7 @@ export function renderRootsReport(
   primaryRoot: string,
   statuses: readonly RootStatus[],
   unavailable?: string,
+  limit?: number,
 ): string {
   const lines = [`Workspace root (primary; access follows the current sandbox mode): ${primaryRoot}`]
   if (unavailable !== undefined) {
@@ -137,7 +140,7 @@ export function renderRootsReport(
   for (const [index, status] of statuses.entries()) {
     const alias = status.alias === undefined ? '' : ` [${status.alias}]`
     const state = status.state === 'available' ? '' : ` (${status.state}: ${status.detail ?? 'unavailable'})`
-    lines.push(`  ${index + 1} ${status.path}${alias}${state}`)
+    lines.push(`  ${index + 1} ${status.path}${alias} (${status.access})${state}`)
   }
   const withheld = statuses.length - availableRoots(statuses).length
   if (withheld > 0) {
@@ -146,7 +149,17 @@ export function renderRootsReport(
       + ` restore the directory and run /${COMMAND_NAME} list, or remove the entry.`,
     )
   }
-  lines.push(`Writable additional roots: ${availableRoots(statuses).length} of ${statuses.length}.`)
+  if (limit !== undefined) {
+    lines.push(`${statuses.length} of ${limit} additional roots.`)
+    if (statuses.length > limit) {
+      lines.push(
+        `Warning: the store exceeds the configured limit of ${limit};`
+        + ' every stored root stays granted, only new adds are refused.',
+      )
+    }
+  }
+  const writable = statuses.filter(status => status.state === 'available' && status.access === 'read-write').length
+  lines.push(`Writable additional roots: ${writable} of ${statuses.length}.`)
   return lines.join('\n')
 }
 
@@ -158,7 +171,7 @@ export function apply(ctx: Context): void {
   ctx.commands.register({
     name: COMMAND_NAME,
     description: 'List, add, remove, alias, or reveal the additional workspace roots of this session',
-    input: { hint: '[list|add [path]|remove <n|path>|alias <n|path> [name]|reveal <n|path>|help]' },
+    input: { hint: '[list|add [path] [--read-only|--read-write]|remove <n|path>|alias <n|path> [name]|access <n|path> <level>|reveal <n|path>|help]' },
     handler: async invocation => await runCommand(ctx, invocation),
   })
 
@@ -205,7 +218,8 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
       case 'list':
         return { kind: 'success', text: await report(registry, primaryRoot) }
       case 'add': {
-        const typed = unquote(parsed.rest)
+        const { text: rest, access } = splitAddAccess(parsed.rest)
+        const typed = unquote(rest)
         const path = typed === '' ? await pickRootPath(ctx, invocation.signal) : typed
         if (path === undefined) {
           return {
@@ -213,7 +227,7 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
             text: `/${COMMAND_NAME}: no directory was selected; pass an absolute path or use the Workspace Folders panel`,
           }
         }
-        await registry.add(primaryRoot, { path })
+        await registry.add(primaryRoot, { path, ...(access === undefined ? {} : { access }) })
         return { kind: 'success', text: await report(registry, primaryRoot) }
       }
       case 'remove': {
@@ -225,6 +239,13 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
         const { text: reference, rest: alias } = splitReference(parsed.rest)
         const { ref } = await targetOf(registry, primaryRoot, reference)
         await registry.setAlias(primaryRoot, ref, alias === '' ? undefined : unquote(alias))
+        return { kind: 'success', text: await report(registry, primaryRoot) }
+      }
+      case 'access': {
+        const { text: reference, rest: level } = splitReference(parsed.rest)
+        const access = parseAccessLevel(level)
+        const { ref } = await targetOf(registry, primaryRoot, reference)
+        await registry.setAccess(primaryRoot, ref, access)
         return { kind: 'success', text: await report(registry, primaryRoot) }
       }
       case 'reveal': {
@@ -245,7 +266,7 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
  */
 async function report(registry: MultiRootRegistry, primaryRoot: string): Promise<string> {
   const statuses = await registry.refresh(primaryRoot)
-  return renderRootsReport(canonicalRoot(primaryRoot), statuses, registry.unavailable)
+  return renderRootsReport(canonicalRoot(primaryRoot), statuses, registry.unavailable, registry.limit)
 }
 
 /** Render a failure the way the composer displays it. */
@@ -259,13 +280,46 @@ function helpText(): string {
   return [
     `/${COMMAND_NAME} — additional workspace roots of this session`,
     `  /${COMMAND_NAME} list`,
-    `  /${COMMAND_NAME} add [absolute path]   (no path opens the directory picker when one is composed)`,
+    `  /${COMMAND_NAME} add [absolute path] [--read-only|--read-write]   (no path opens the directory picker when one is composed)`,
     `  /${COMMAND_NAME} remove <n|path>`,
     `  /${COMMAND_NAME} alias <n|path> [name]  (no name clears the alias)`,
+    `  /${COMMAND_NAME} access <n|path> read-only|read-write`,
     `  /${COMMAND_NAME} reveal <n|path>`,
     'Roots are canonicalized before they are stored: `~` expands, and a duplicate, a nested directory,',
     "or this session's own workspace root is rejected.",
   ].join('\n')
+}
+
+/**
+ * Split `add`'s argument into the path text and the access flag. Either flag
+ * is accepted as the first or the last token, so a path containing the flag
+ * spelling (quoted or unquoted) is never mistaken for the flag.
+ *
+ * The access is TRI-STATE on purpose: it stays `undefined` when the operator
+ * named no level. `registry.add` revives a withheld record with its stored
+ * access unless a level is given explicitly, so forwarding a default here
+ * would silently upgrade a read-only registration to read-write.
+ */
+function splitAddAccess(text: string): { text: string; access: RootAccess | undefined } {
+  const trimmed = text.trim()
+  for (const access of ['read-only', 'read-write'] as const) {
+    const flag = `--${access}`
+    if (trimmed === flag) return { text: '', access }
+    if (trimmed.startsWith(`${flag} `) || trimmed.startsWith(`${flag}\t`)) {
+      return { text: trimmed.slice(flag.length).trim(), access }
+    }
+    if (new RegExp(`\\s${flag}$`).test(trimmed)) {
+      return { text: trimmed.slice(0, -flag.length).trim(), access }
+    }
+  }
+  return { text: trimmed, access: undefined }
+}
+
+/** Parse the access level an `access` subcommand must end with. */
+function parseAccessLevel(text: string): RootAccess {
+  const trimmed = text.trim()
+  if (trimmed === 'read-only' || trimmed === 'read-write') return trimmed
+  throw new RootValidationError('invalid-ref', `the access level must be read-only or read-write, got "${trimmed || 'nothing'}"`)
 }
 
 /**
@@ -358,6 +412,7 @@ function toRootView(status: RootStatus, index: number): RootView {
     ...(status.alias === undefined ? {} : { alias: status.alias }),
     addedAt: status.addedAt,
     state: status.state,
+    access: status.access,
     ...(status.detail === undefined ? {} : { detail: status.detail }),
   }
 }
@@ -408,6 +463,8 @@ async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoo
     ...(primaryName === undefined ? {} : { primaryName }),
     ...(effectiveCwd === undefined ? {} : { effectiveCwd }),
     roots: statuses.map(toRootView),
+    limit: registry.limit,
+    count: statuses.length,
     ...(unavailable === undefined ? {} : { unavailable }),
   }
 }
@@ -448,7 +505,15 @@ async function dispatchPanelRequest(
         await registry.add(primaryRoot, {
           path: request.path,
           ...(request.alias === undefined ? {} : { alias: request.alias }),
+          ...(request.access === undefined ? {} : { access: request.access }),
         })
+        return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
+      }
+      case 'setAccess': {
+        if (request.access === undefined) {
+          throw new RootValidationError('invalid-ref', 'an access level is required')
+        }
+        await registry.setAccess(primaryRoot, requireEntry(request), request.access)
         return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       }
       case 'remove':

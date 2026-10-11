@@ -346,6 +346,16 @@ export const STYLES = /* css */ `
   flex: 1 1 auto;
 }
 
+.mrfw-accessSelect {
+  flex: 0 0 auto;
+}
+
+.mrfw-accessBadge {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .mrfw-aliasEditor {
   display: flex;
   flex-wrap: wrap;

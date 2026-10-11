@@ -65,4 +65,5 @@ export const IconEllipsis = icon('IconEllipsisOutline16', 'IconEllipsisOutlineRe
 export const IconFolderClose = icon('IconFolderClose16', 'IconFolderCloseRegular')
 export const IconFolderOpen = icon('IconFolderOpenOutline16', 'IconFolderOpenOutlineRegular')
 export const IconPlus = icon('IconPlusOutline16', 'IconPlusOutlineRegular')
+export const IconRefresh = icon('IconRefreshOutline16', 'IconRefreshOutlineRegular')
 export const IconTrash = icon('IconTrashOutline16', 'IconTrashOutlineRegular')

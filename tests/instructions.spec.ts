@@ -33,6 +33,8 @@ import * as LlmMessage from '../src/compat/llm-message.ts'
 import { PLUGIN_SOURCE } from '../src/instructions.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
+import { mountProviderGate } from './support/providers.ts'
+import { mountRegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -93,10 +95,11 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
     await ctx.plugin(MultiRootScopeService),
   )
   await mountCompat(ctx)
-  fibers.push(
-    await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace }),
-    await ctx.plugin(Instructions, config),
-  )
+  fibers.push(await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace }))
+  // The row injects the provider-conflict gate; the real provider is already
+  // branded, and the missing `sandbox` gets a branded stub.
+  await mountProviderGate(ctx)
+  fibers.push(await ctx.plugin(Instructions, config))
 
   // A real Session, because `ctx.sandboxPolicy.resolve({ session })` reads the
   // session projection, not just the header.
@@ -112,7 +115,7 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
   const setRoots = (paths: readonly string[]): void => {
     ctx.multiRootScope.setAdditionalRoots(
       fixture.workspace,
-      paths.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path) })),
+      paths.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path), access: 'read-write' })),
     )
   }
   setRoots(roots)
@@ -351,7 +354,7 @@ describe('when a root leaves the workspace', () => {
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{
       id: 'root-0',
       path: repoA,
-      recordedPath: join(fixture.base, 'somewhere-else'),
+      recordedPath: join(fixture.base, 'somewhere-else'), access: 'read-write',
     }])
     expect(textOf(await world.step())).toContain('no longer')
   })
@@ -541,6 +544,49 @@ describe('touchedPathOfToolCall', () => {
 })
 
 describe('the byte budget', () => {
+  it('uses the moved registry order to prioritize instructions in a new session before restart', async () => {
+    writeFileSync(join(repoA, 'AGENTS.md'), '# priority alpha\n' + 'a'.repeat(2000))
+    writeFileSync(join(repoB, 'AGENTS.md'), '# priority bravo\n' + 'b'.repeat(2000))
+    const stack = await mountRegistryStack(join(dshHome, 'storages'), {}, {
+      beforeGate: async (ctx) => {
+        await ctx.plugin(SessionProjectionRegistry)
+        await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+        await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace })
+      },
+    })
+    try {
+      await stack.ctx.plugin(Instructions, { maxBytes: 900 })
+      await stack.registry.add(fixture.workspace, { path: repoA })
+      await stack.registry.add(fixture.workspace, { path: repoB })
+
+      const firstStep = async (): Promise<string> => {
+        const sessionId = SessionId(`sess-priority-${counter += 1}`)
+        const session = Session.create(sessionId, undefined, {
+          version: SESSION_FORMAT_VERSION, id: sessionId, createdAt: 0,
+          isSeeded: false, cwd: fixture.workspace,
+        })
+        const messages: UserMessage[] = []
+        const decision = await stack.ctx.waterfall(
+          'agent/pre-step',
+          { agent: { session } as unknown as Agent, messages, turn: 1, step: 1, signal: new AbortController().signal },
+          async (): Promise<PreStepDecision> => ({ kind: 'enter', messages }),
+        )
+        expect(decision.kind).toBe('enter')
+        return decision.kind === 'enter' ? textOf(decision.messages[0]) : ''
+      }
+
+      const before = await firstStep()
+      expect(before).toContain('# priority alpha')
+      expect(before).not.toContain('# priority bravo')
+      await stack.registry.move(fixture.workspace, { kind: 'ordinal', ordinal: 2 }, { kind: 'ordinal', ordinal: 1 })
+      const after = await firstStep()
+      expect(after).toContain('# priority bravo')
+      expect(after).not.toContain('# priority alpha')
+    } finally {
+      await stack.dispose()
+    }
+  })
+
   it('is shared across every additional root rather than granted per root', async () => {
     const chunk = '# rules '.repeat(200)
     writeFileSync(join(repoA, 'AGENTS.md'), chunk)

@@ -153,25 +153,30 @@ Expected: **only** the `fs-sandbox` and `sandbox` rows are replaced by the plugi
 **The command** (the text entry point; also available headless):
 
 ```text
-/workspace-folders                       # list the primary root and the additional roots
+/workspace-folders                       # list the primary root and the additional roots (with each root's access)
 /workspace-folders add <absolute path>   # with no path, opens the OS directory chooser
+/workspace-folders add <absolute path> --read-only   # register a read-only root: readable and browsable, never writable by any tool
+/workspace-folders access 1 read-write   # switch access (upgrading requires the root to be available right now)
 /workspace-folders alias 1 payments      # name the first additional root
 /workspace-folders remove 1              # by ordinal or by path
 /workspace-folders reveal 1              # show it in the file manager
 ```
 
+Additional roots default to read-write; a read-only root keeps full membership (readable, file tree, LSP, instructions) but is denied write authority by the fs fence, confined processes, and the Windows ACL alike. Each primary root caps its additional roots (default 16, configurable up to 64 via the registry row's `maxAdditionalRoots`); a host may also set `toolAccess: { <tool>: 'read-only' }` on the `multi-root-scope` row so a given tool can never write any additional root (e.g. `{ bash: 'read-only' }` — bash can still write the primary root). See [ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md) for semantics and the persistence encoding, and [ADR-0014](./docs/decisions/ADR-0014-root-limit-and-provider-conflict.md) for the limit and the provider-conflict gate.
+
 After an `add`, `list` prints:
 
 ```text
 Workspace root (primary; access follows the current sandbox mode): /home/me/monorepo
-  1 /home/me/payments-service [payments]
-  2 /home/me/website
+  1 /home/me/payments-service [payments] (read-write)
+  2 /home/me/website (read-write)
+2 of 16 additional roots.
 Writable additional roots: 2 of 2.
 ```
 
 **The panel** (Web GUI): the **Folders** dialog at the sidebar foot lists the primary root and the additional roots, and offers add (through the composed directory picker or a typed path), remove, alias, copy path, reveal in the file manager, and move up/down. Its copy is bilingual and follows the interface language. A root's state is shown honestly: `missing` (absent right now) and `redirected` (replaced by a symlink pointing elsewhere) keep their registration but are **not granted**; once the directory is back, a `list` or a panel refresh grants it again — no restart.
 
-**The model side**: the additional-root topology reaches the model through a `systemPrompt.context` snapshot attached to every request (same workspace, cwd unchanged) — no introspection tool needed. The full authorization semantics (canonicalization, `recordedPath` against symlink transplants, conflict rejection) live in the [architecture document](./docs/architecture/multi-root-workspace.md).
+**The model side**: the additional-root topology reaches the model through a `systemPrompt.context` snapshot attached to every request (the session origin stays the same, and changing the execution directory does not change grants) — no introspection tool needed. The full authorization semantics (canonicalization, `recordedPath` against symlink transplants, conflict rejection) live in the [architecture document](./docs/architecture/multi-root-workspace.md).
 
 ## Project Structure
 
@@ -215,7 +220,7 @@ Issues and PRs are welcome:
 - The Windows multi-root runner inherits upstream partial enforcement, caller-owned directory requirements, and private-temp isolation. Running processes retain their initial roots; later processes use the updated set ([ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)).
 - **Network and device paths cannot be additional roots on Windows**: UNC (`\\server\share`), `\\?\`, `\\.\`, and mapped network drives are rejected at registration with `unsupported-path` — the restricted token's capability SID cannot be shown to bind SMB access ([ADR-0011 amendment](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)).
 - **The confined Windows shell is pwsh; Git Bash is not available**: MSYS cannot start under the write-restricted Low-integrity token (identically under the upstream and plugin runners — an upstream limitation). An upstream-confined child also cannot receive Ctrl+C (it inherits the runner's ignore flag); under the plugin runner Ctrl+C reaches the child and the runner mirrors its exit code.
-- An additional root has the same rights as the primary root (no per-root read-only), and cannot become the default working directory of bash/PTY (session cwd semantics are unchanged).
+- An additional root defaults to the same rights as the primary root; registering with `--read-only` or switching via `access` makes it read-only (an absence of write authority, not read confinement). Running processes retain their startup root set — cap and access changes constrain only later calls and new processes ([ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)); hosts with workingDirectory may use an additional root as the execution directory for later tools, while the session origin and registry identity stay unchanged ([ADR-0012](./docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)).
 - Browse additional roots in the Workspace Folders dialog with manual refresh, expandable directories, and previews of up to 200 text lines. The native primary-root Files tab remains and offers a dialog action where supported. LSP uses the containing additional root as its own workspace; the host must configure the relevant language server ([ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)).
 - The command's own output text is English (a host-side handler has no active locale to consult); the panel is bilingual.
 - The Workspace Folders panel is a sidebar footer action plus a dialog rather than a full panel: `sidebar.footer.action` is offered by every supported release, whereas `sidebar.panellist` / `main` are not.

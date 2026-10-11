@@ -49,18 +49,22 @@ import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { defineDomain, domainTable, type KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
 import type {} from './compat.ts'
+import type {} from './providers.ts'
 import { RegistryAuthorityLease, RegistryLeaseContendedError } from './registry-lease.ts'
 import {
   additionalRootId,
   availableRoots,
   canonicalRoot,
   classifyStoredRoots,
+  expandRootInput,
+  isWindowsNetworkOrDevicePath,
   removeStatusAt,
   resolveRootIndex,
   RootValidationError,
   validateRootCandidate,
   type AdditionalRootId,
   type RegisteredRoot,
+  type RootAccess,
   type RootRef,
   type RootStatus,
 } from './roots.ts'
@@ -80,6 +84,16 @@ export const MAX_ALIAS_LENGTH = 120
  */
 export const REGISTRY_CONTENDED_MESSAGE
   = 'the root registry is owned by another DSH process; additional roots are not granted here. Close the other process, then retry.'
+/**
+ * Default cap on stored additional-root records per primary root. The bench
+ * evidence for this default lives in `docs/reference/bench-root-scale-*.json`
+ * (`pnpm bench:roots`): classification and argv widening stay flat far beyond
+ * it, so the cap exists to bound the operator-facing list and the widened
+ * profile size, not to protect the classifier.
+ */
+export const DEFAULT_MAX_ADDITIONAL_ROOTS = 16
+/** Hard ceiling for `maxAdditionalRoots`: values above it are config-invalid. */
+export const MAX_ADDITIONAL_ROOTS_CEILING = 64
 
 /**
  * Whether this process is the Registry Authority for the store-wide domain
@@ -90,6 +104,7 @@ export type RegistryAuthorityState =
   | { readonly kind: 'active' }
   | { readonly kind: 'contended' }
   | { readonly kind: 'storage-failed'; readonly reason: string }
+  | { readonly kind: 'config-invalid'; readonly reason: string }
 
 /**
  * Plugin configuration for the registry row. `leasePath` must sit beside the
@@ -100,6 +115,16 @@ export type RegistryAuthorityState =
 export interface Config {
   /** Absolute path of the store-wide kernel lock file. */
   readonly leasePath?: string
+  /**
+   * Cap on STORED additional-root records per primary root (every state
+   * counts, including withheld and unusable ones, so the count is stable and
+   * independent of the filesystem). Must be an integer in
+   * 1..{@link MAX_ADDITIONAL_ROOTS_CEILING}; an invalid value puts the
+   * registry in the fail-closed `config-invalid` state instead of throwing.
+   * A store that already exceeds the limit keeps every record and grants
+   * exactly what classification grants — only new adds are refused.
+   */
+  readonly maxAdditionalRoots?: number
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -108,14 +133,32 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** One persisted root record. `zod` validates it at the durable boundary. */
+/**
+ * One persisted root record. `zod` validates it at the durable boundary.
+ *
+ * `recordedPath` keeps meaning "a READ-WRITE grant" exactly as it always has,
+ * and `readOnlyRecordedPath` is the read-only grant's counterpart — the access
+ * level is expressed by WHICH key is present, never by an `access` field on
+ * the same `recordedPath`. That split is what makes this single layout
+ * downgrade-safe at domain version 1 (the JSON backend checks the version
+ * with strict equality, so a bump would break both upgrade and downgrade):
+ *
+ * - an OLDER plugin version parses this record with a schema that strips
+ *   unknown keys, so a read-only record loses `readOnlyRecordedPath` and
+ *   arrives with NO `recordedPath`; the old classification reports it
+ *   `invalid` and grants nothing — a downgrade can never escalate read-only
+ *   into read-write;
+ * - a record with `recordedPath` only is the read-write grant it always was,
+ *   so upgrading changes nothing for legacy records.
+ */
 const persistedRoot = z.object({
   id: z.string().min(1),
   path: z.string().min(1),
-  // Absent only in records written before the field existed (or by hand). Such a
-  // record is reported `invalid` rather than granted on a guess — see
-  // classifyStoredRoots.
+  // Absent only in records written before the field existed (or by hand), and
+  // in read-only records. Such a record is reported `invalid` rather than
+  // granted on a guess — see classifyStoredRoots.
   recordedPath: z.string().min(1).optional(),
+  readOnlyRecordedPath: z.string().min(1).optional(),
   alias: z.string().optional(),
   addedAt: z.string().min(1),
 })
@@ -152,6 +195,12 @@ export interface AddRootInput {
   readonly path: string
   /** Optional display alias. */
   readonly alias?: string
+  /**
+   * The write authority to register; defaults to `read-write` (the historical
+   * grant). On a REVIVE the existing record keeps its access unless this field
+   * is given explicitly.
+   */
+  readonly access?: RootAccess
 }
 
 /** The registry service: `ctx.multiRootRegistry`. */
@@ -159,7 +208,10 @@ export class MultiRootRegistry extends Service {
   // `multiRootCompat` is the compatibility gate, not a collaborator: this
   // service is what decides which directories become writable roots, so it must
   // not run on a release the contract has not verified (see src/compat.ts).
-  static inject = ['multiRootCompat', 'storageDomain', 'multiRootScope']
+  // `multiRootProviders` is the provider-conflict gate: with a foreign `ctx.fs`
+  // or `ctx.sandbox` it never starts, so this registry stays unmounted and the
+  // scope keeps granting nothing (see src/providers.ts).
+  static inject = ['multiRootCompat', 'multiRootProviders', 'storageDomain', 'multiRootScope']
 
   /** Absolute lock path; absent means the row was composed without `leasePath`. */
   private readonly leasePath: string | undefined
@@ -185,14 +237,31 @@ export class MultiRootRegistry extends Service {
   private loggedContended = false
   /** True once the fiber disposer has run: no further acquisition may happen. */
   private disposed = false
+  /** The validated per-primary-root cap (the default when the row omits it). */
+  private readonly maxRoots: number
+  /** Keys already warned about a historical over-limit store (one warning each). */
+  private readonly warnedOverLimit = new Set<string>()
 
   /**
    * @param ctx - the host context; `storageDomain` and `multiRootScope` are injected.
-   * @param config - the patch row's `leasePath`.
+   * @param config - the patch row's `leasePath` and `maxAdditionalRoots`.
    */
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'multiRootRegistry')
     this.leasePath = config.leasePath
+    const configured = config.maxAdditionalRoots === undefined ? DEFAULT_MAX_ADDITIONAL_ROOTS : config.maxAdditionalRoots
+    if (Number.isInteger(configured) && configured >= 1 && configured <= MAX_ADDITIONAL_ROOTS_CEILING) {
+      this.maxRoots = configured
+    } else {
+      // Fail closed, not throw: a bad row config must not keep the whole
+      // harness from starting, and it must never silently widen the cap.
+      this.maxRoots = DEFAULT_MAX_ADDITIONAL_ROOTS
+      this.authorityState = {
+        kind: 'config-invalid',
+        reason: `${DOMAIN_NAME}: maxAdditionalRoots must be an integer between 1 and `
+          + `${MAX_ADDITIONAL_ROOTS_CEILING}, got ${JSON.stringify(configured)}`,
+      }
+    }
   }
 
   /**
@@ -207,6 +276,12 @@ export class MultiRootRegistry extends Service {
    */
   protected async [Service.init](): Promise<void> {
     this.ctx.effect(() => () => this.releaseAuthority(), 'multi-root-registry: authority release')
+    // An invalid row config is fail-closed like an unreadable store: loud, and
+    // nothing is ever granted — but activation itself does not fail.
+    if (this.authorityState.kind === 'config-invalid') {
+      this.ctx.logger.error(`multi-root-workspace: ${this.authorityState.reason}; no additional root is granted`)
+      return
+    }
     await this.ensureAuthority()
   }
 
@@ -224,6 +299,7 @@ export class MultiRootRegistry extends Service {
       case 'contended':
         return REGISTRY_CONTENDED_MESSAGE
       case 'storage-failed':
+      case 'config-invalid':
         return this.authorityState.reason
     }
   }
@@ -234,6 +310,23 @@ export class MultiRootRegistry extends Service {
    */
   get authority(): RegistryAuthorityState {
     return this.authorityState
+  }
+
+  /**
+   * The configured cap on stored additional-root records per primary root.
+   * Surfaces show it next to the count so "N of LIMIT" is always explainable.
+   */
+  get limit(): number {
+    return this.maxRoots
+  }
+
+  /**
+   * Whether one primary root's stored record count exceeds {@link limit} — a
+   * historical over-limit store, which stays fully classified and granted.
+   * @param primaryRoot - the session workspace root (any spelling).
+   */
+  overLimit(primaryRoot: string): boolean {
+    return this.statusesOf(canonicalRoot(primaryRoot)).length > this.maxRoots
   }
 
   /**
@@ -289,42 +382,139 @@ export class MultiRootRegistry extends Service {
     this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
-      const statuses = this.statusesOf(key)
+      // Re-classify FIRST, from the stored records: the cached list may be
+      // stale (a `missing` root whose directory came back, a `redirected` one
+      // whose target moved), and a candidate judged against it would either be
+      // refused for a rule that no longer holds or — worse — admitted into a
+      // store where it immediately classifies as `invalid`. Revocations publish
+      // before any grant, which is the required order.
+      // The state the operator last saw is captured BEFORE the fresh
+      // classification: the fresh list alone cannot tell "the operator
+      // re-confirms a root that was withheld at their last observation" from
+      // "the operator re-adds a root that was — and still is — granted".
+      const earlier = this.cache.get(key)
+      const statuses = this.reclassify(key)
+      const alias = normalizeAlias(input.alias)
+      // Reviving is detected BEFORE the candidate is judged: re-registering the
+      // very directory an existing record names is the operator confirming it,
+      // not a duplicate. The check looks at BOTH spellings of a registration —
+      // the canonical path it is stored under, and the path it currently
+      // resolves to — so re-adding a directory that was replaced by a symlink
+      // updates that registration (re-recording what it is granted for)
+      // instead of piling a second record for the same operator-given path on
+      // top of it. A re-add revives when EITHER observation reports the record
+      // withheld — the fresh classification catches a root that degraded since
+      // the last one (a grant that is now `redirected` must revive, never
+      // duplicate), the last observation catches the operator re-confirming a
+      // root whose directory silently came back. Only a root that was granted
+      // then AND is granted now stays a `duplicate` refusal.
+      const expanded = expandRootInput(input.path)
+      // Revive matching must obey the same pre-I/O rejection as candidate
+      // validation: even realpath of a UNC path can initiate SMB auth.
+      if (process.platform === 'win32' && isWindowsNetworkOrDevicePath(expanded)) {
+        throw new RootValidationError('unsupported-path', `Windows ACL confinement cannot cover network or device paths: ${expanded}`)
+      }
+      const preliminary = isAbsolute(expanded) ? canonicalRoot(expanded) : undefined
+      const revived = preliminary === undefined ? -1 : statuses.findIndex((status) => {
+        if (process.platform === 'win32' && isWindowsNetworkOrDevicePath(status.path)) return false
+        if (status.path !== preliminary && canonicalRoot(status.path) !== preliminary) return false
+        const before = earlier?.find(candidate => candidate.id === status.id)
+        return status.state !== 'available' || (before !== undefined && before.state !== 'available')
+      })
+      // The cap counts STORED records — every state, including withheld and
+      // unusable ones — so it is stable and independent of the filesystem. A
+      // revive re-confirms an existing record and never counts as new, which
+      // is also what lets an over-limit store be repaired by re-registering.
+      if (revived === -1 && statuses.length >= this.maxRoots) {
+        throw new RootValidationError(
+          'root-limit-reached',
+          `this workspace already has ${statuses.length} additional roots; the configured limit is `
+          + `${this.maxRoots}. Remove one first, or raise maxAdditionalRoots.`,
+          { reference: String(this.maxRoots) },
+        )
+      }
+      const revivedPath = revived === -1 ? undefined : statuses[revived]!.path
       const canonical = validateRootCandidate(input.path, {
         primaryRoot: key,
         // A withheld or unusable registration grants nothing, so it may not block
-        // re-registering the very directory the operator is trying to restore.
-        existing: availableRoots(statuses),
+        // re-registering the very directory the operator is trying to restore —
+        // and neither may the revived record's own grant, whose re-registration
+        // is exactly what a revive confirms.
+        existing: availableRoots(statuses).filter(root => root !== revivedPath),
       })
-      const alias = normalizeAlias(input.alias)
-      // Reviving looks at BOTH spellings of an existing registration: the
-      // canonical path it is stored under, and the path it currently resolves
-      // to. Re-adding a directory that was replaced by a symlink therefore
-      // updates the existing registration (re-recording what it is granted for)
-      // instead of piling a second record for the same operator-given path on
-      // top of it.
-      const revived = statuses.findIndex(status =>
-        status.path === canonical || canonicalRoot(status.path) === canonical)
+      const access = input.access ?? 'read-write'
       const next = revived === -1
         ? [...statuses, {
           id: additionalRootId(randomUUID()),
           path: canonical,
-          recordedPath: canonical,
+          access,
+          ...(access === 'read-only' ? { readOnlyRecordedPath: canonical } : { recordedPath: canonical }),
           state: 'available',
           ...(alias === undefined ? {} : { alias }),
           addedAt: new Date().toISOString(),
         } satisfies RootStatus]
         : statuses.map((status, index) => index === revived
           ? {
-            ...status,
+            ...dropGrantFields(status),
             path: canonical,
+            // A revive keeps the registration's access unless the operator
+            // named a new one explicitly.
+            access: input.access ?? status.access,
             // Re-registering a withheld root is the operator confirming THIS
-            // directory again, which is exactly what re-records the grant.
-            recordedPath: canonical,
+            // directory again, which is exactly what re-records the grant —
+            // under the grant field the (possibly new) access level uses.
+            ...grantFields(input.access ?? status.access, canonical),
             addedAt: new Date().toISOString(),
             ...(alias === undefined ? {} : { alias }),
           }
           : status)
+      return await this.persist(key, next)
+    })
+  }
+
+  /**
+   * Change one registration's write authority WITHOUT re-recording its path.
+   *
+   * Re-resolving is not re-authorizing: the grant keeps the canonical
+   * directory it was recorded for; only which persisted field carries it
+   * changes. Downgrading to `read-only` is always allowed — a withheld root
+   * may be restricted while it is withheld — while upgrading to `read-write`
+   * requires the root to be `available` under the FRESH classification: a
+   * root that is not currently granted cannot be granted writability by a
+   * metadata change.
+   * @param primaryRoot - the session workspace root the root belongs to.
+   * @param ref - which registered root to change.
+   * @param access - the new write authority.
+   * @returns the updated status list.
+   * @throws {RootValidationError} `not-found` when the reference matches
+   *   nothing, `root-unavailable` when an upgrade targets a root that is not
+   *   `available` right now.
+   */
+  async setAccess(primaryRoot: string, ref: RootRef, access: RootAccess): Promise<readonly RootStatus[]> {
+    await this.ensureAuthority()
+    this.requireActive()
+    const key = canonicalRoot(primaryRoot)
+    return await this.serialize(key, async () => {
+      const statuses = this.reclassify(key)
+      const targetIndex = resolveRootIndex(statuses, ref)
+      const target = statuses[targetIndex]!
+      if (target.access === access) return statuses
+      if (access === 'read-write' && target.state !== 'available') {
+        throw new RootValidationError(
+          'root-unavailable',
+          `"${target.path}" is ${target.state} and cannot be made writable;`
+          + ' restore the directory first, then upgrade the access',
+          { reference: target.id },
+        )
+      }
+      const recorded = target.recordedPath ?? target.readOnlyRecordedPath
+      const next = statuses.map((status, index) => index === targetIndex
+        ? {
+          ...dropGrantFields(status),
+          access,
+          ...(recorded === undefined ? {} : grantFields(access, recorded)),
+        }
+        : status)
       return await this.persist(key, next)
     })
   }
@@ -355,7 +545,7 @@ export class MultiRootRegistry extends Service {
     await this.ensureAuthority()
     this.requireActive()
     const key = canonicalRoot(primaryRoot)
-    return await this.serialize(key, async () => await this.persist(key, removeStatusAt(this.statusesOf(key), ref)))
+    return await this.serialize(key, async () => await this.persist(key, removeStatusAt(this.reclassify(key), ref)))
   }
 
   /**
@@ -371,7 +561,7 @@ export class MultiRootRegistry extends Service {
     this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
-      const statuses = this.statusesOf(key)
+      const statuses = this.reclassify(key)
       const targetIndex = resolveRootIndex(statuses, ref)
       const normalized = normalizeAlias(alias)
       const next = statuses.map((status, index) => {
@@ -396,7 +586,7 @@ export class MultiRootRegistry extends Service {
     this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
-      const statuses = this.statusesOf(key)
+      const statuses = this.reclassify(key)
       const targetIndex = resolveRootIndex(statuses, ref)
       const anchorIndex = beforeRef === undefined ? undefined : resolveRootIndex(statuses, beforeRef)
       if (anchorIndex === targetIndex) return statuses
@@ -458,6 +648,16 @@ export class MultiRootRegistry extends Service {
     const key = canonicalRoot(primaryRoot)
     const statuses = classifyStoredRoots(key, record.roots.map(toRegisteredRoot))
     this.cache.set(key, statuses)
+    // A historical over-limit store (the limit was lowered, or the document
+    // was edited by hand) is never truncated and keeps granting exactly what
+    // classification grants; it is reported once per key instead.
+    if (statuses.length > this.maxRoots && !this.warnedOverLimit.has(key)) {
+      this.warnedOverLimit.add(key)
+      this.ctx.logger.warn(
+        `multi-root-workspace: ${statuses.length} roots are stored for ${key}, above the configured limit `
+        + `of ${this.maxRoots}; all of them stay granted, only new adds are refused`,
+      )
+    }
     this.publish(key, statuses)
     return statuses
   }
@@ -556,21 +756,32 @@ export class MultiRootRegistry extends Service {
    * exists to keep the two in sync, not to churn on every listing — and, since
    * the scope rebuilds its root table on each call, skipping the no-op write is
    * also what keeps the read path cheap.
+   *
+   * Available roots keep registry order: instruction discovery consumes them
+   * under a shared byte budget, so a move must update the live scope immediately.
+   * Aliases and no-op moves still leave the signature unchanged.
    */
   private publish(key: string, statuses: readonly RootStatus[]): void {
     const withheld = statuses.filter(status => status.state !== 'available')
+    // Access is part of the signature: an access change IS a grant change and
+    // must republish, while aliases still produce an identical signature.
     const signature = [
-      ...statuses.filter(status => status.state === 'available').map(status => `available:${status.recordedPath}`),
+      ...statuses.filter(status => status.state === 'available').map(status => `available:${status.access}:${recordedGrantOf(status)}`),
       ...withheld.map(status => `${status.state}:${status.path}`),
     ].join('\n')
-    if (this.published.get(key) === signature) return
+    // A key with nothing published yet reads as the empty signature: the very
+    // first classification of an empty key must not "publish" an empty grant
+    // (and fire every listener) for a set that was already empty.
+    if ((this.published.get(key) ?? '') === signature) return
     this.published.set(key, signature)
     const effective = statuses.flatMap(status => {
-      if (status.state !== 'available' || status.recordedPath === undefined) return []
+      const recorded = recordedGrantOf(status)
+      if (status.state !== 'available' || recorded === undefined) return []
       return [{
         id: status.id,
         path: status.path,
-        recordedPath: status.recordedPath,
+        recordedPath: recorded,
+        access: status.access,
         ...(status.alias === undefined ? {} : { alias: status.alias }),
       }]
     })
@@ -595,6 +806,12 @@ export class MultiRootRegistry extends Service {
   private requireTable(): KvTable<string, PersistedPrimaryRoot> {
     if (this.authorityState.kind === 'contended') {
       throw new RootValidationError('registry-contended', REGISTRY_CONTENDED_MESSAGE)
+    }
+    if (this.authorityState.kind === 'config-invalid') {
+      throw new RootValidationError(
+        'config-invalid',
+        `the root registry configuration is invalid (${this.authorityState.reason}); no additional root is granted`,
+      )
     }
     if (this.authorityState.kind === 'storage-failed') {
       throw new RootValidationError(
@@ -628,6 +845,8 @@ export class MultiRootRegistry extends Service {
       // first must not be followed by a new medium nobody will ever close.
       if (this.disposed) return
       if (this.authorityState.kind === 'active') return
+      // A config-invalid registry is terminally fail-closed: no lease, no domain.
+      if (this.authorityState.kind === 'config-invalid') return
       if (this.lease !== undefined) {
         await this.openDomain()
         return
@@ -790,26 +1009,68 @@ export class MultiRootRegistry extends Service {
   }
 }
 
+/** The recorded canonical directory a record was granted for, whichever grant field holds it. */
+function recordedGrantOf(record: { readonly recordedPath?: string; readonly readOnlyRecordedPath?: string }): string | undefined {
+  return record.recordedPath ?? record.readOnlyRecordedPath
+}
+
+/** The grant fields one access level persists: exactly one key, always. */
+function grantFields(access: RootAccess, recorded: string): { readonly recordedPath: string } | { readonly readOnlyRecordedPath: string } {
+  return access === 'read-only' ? { readOnlyRecordedPath: recorded } : { recordedPath: recorded }
+}
+
+/** Strip both grant fields so a re-write can set exactly the right one back. */
+function dropGrantFields<T extends { readonly recordedPath?: string; readonly readOnlyRecordedPath?: string }>(
+  status: T,
+): Omit<T, 'recordedPath' | 'readOnlyRecordedPath'> {
+  const { recordedPath: _write, readOnlyRecordedPath: _read, ...rest } = status
+  return rest
+}
+
 /** Project one status back to the durable record shape. */
 function toPersistedRoot(status: RootStatus): PersistedRoot {
+  const writeGrant = status.recordedPath
+  const readGrant = status.readOnlyRecordedPath
+  // A record that somehow carries BOTH grant fields is kept verbatim: it
+  // classifies `invalid` every time it is read, but rewriting it under one
+  // field would silently heal the ambiguity into a real grant.
+  const grant = writeGrant !== undefined && writeGrant !== '' && readGrant !== undefined && readGrant !== ''
+    ? { recordedPath: writeGrant, readOnlyRecordedPath: readGrant }
+    : status.access === 'read-only'
+      ? (readGrant === undefined || readGrant === '' ? {} : { readOnlyRecordedPath: readGrant })
+      : (writeGrant === undefined || writeGrant === '' ? {} : { recordedPath: writeGrant })
   return {
     id: status.id,
     path: status.path,
-    ...(status.recordedPath === undefined || status.recordedPath === '' ? {} : { recordedPath: status.recordedPath }),
+    ...grant,
     ...(status.alias === undefined ? {} : { alias: status.alias }),
     addedAt: status.addedAt,
   }
 }
 
-/** Recover the registered-root view of a stored record entry. */
+/**
+ * Recover the registered-root view of a stored record entry.
+ *
+ * Access is derived from WHICH grant field is present, never read from a
+ * stored `access` key: the persisted layout carries no such key on purpose.
+ * That is the downgrade safety in action — an older plugin version parses the
+ * same document with a schema that strips unknown keys, so a read-only record
+ * (no `recordedPath`) reaches the old classifier as "no grant recorded" and is
+ * reported `invalid`: downgrading can never escalate a read-only registration
+ * into a writable grant.
+ */
 function toRegisteredRoot(entry: PersistedRoot): RegisteredRoot {
+  const hasWriteGrant = entry.recordedPath !== undefined && entry.recordedPath !== ''
+  const hasReadGrant = entry.readOnlyRecordedPath !== undefined && entry.readOnlyRecordedPath !== ''
   return {
     id: additionalRootId(entry.id),
     path: entry.path,
-    // A record written before this field existed (or by hand) keeps whatever it
-    // has: classification needs to SEE the absence to report it as invalid,
+    access: hasReadGrant && !hasWriteGrant ? 'read-only' : 'read-write',
+    // A record written before these fields existed (or by hand) keeps whatever
+    // it has: classification needs to SEE the absence to report it as invalid,
     // rather than have it papered over here.
     ...(entry.recordedPath === undefined ? {} : { recordedPath: entry.recordedPath }),
+    ...(entry.readOnlyRecordedPath === undefined ? {} : { readOnlyRecordedPath: entry.readOnlyRecordedPath }),
     ...(entry.alias === undefined ? {} : { alias: entry.alias }),
     addedAt: entry.addedAt,
   }

@@ -35,10 +35,10 @@ import { z } from 'zod'
 export const PANEL_CHANNEL = '/multi-root-workspace'
 
 /** Endpoint names, relative to {@link PANEL_CHANNEL}. */
-export type PanelEndpoint = 'list' | 'add' | 'remove' | 'alias' | 'move' | 'reveal' | 'files' | 'readFile'
+export type PanelEndpoint = 'list' | 'add' | 'remove' | 'alias' | 'move' | 'setAccess' | 'reveal' | 'files' | 'readFile'
 
 /** Every endpoint name, for exhaustive iteration in tests and callers. */
-export const PANEL_ENDPOINTS: readonly PanelEndpoint[] = ['list', 'add', 'remove', 'alias', 'move', 'reveal', 'files', 'readFile']
+export const PANEL_ENDPOINTS: readonly PanelEndpoint[] = ['list', 'add', 'remove', 'alias', 'move', 'setAccess', 'reveal', 'files', 'readFile']
 
 export interface FilesView {
   readonly path: string
@@ -59,6 +59,13 @@ export interface FilePreview {
  */
 export type RootState = 'available' | 'missing' | 'redirected' | 'invalid'
 
+/**
+ * The write authority one registration carries, spelled out rather than
+ * imported: this module is inlined into the browser bundle and must not pull
+ * in `node:*`, so the one value the two sides share is duplicated here.
+ */
+export type RootAccess = 'read-write' | 'read-only'
+
 /** One root as the panel renders it. */
 export interface RootView {
   /** 1-based position in the returned snapshot. */
@@ -73,6 +80,8 @@ export interface RootView {
   readonly addedAt: string
   /** Whether the directory is writable right now, withheld, or unusable. */
   readonly state: RootState
+  /** The write authority the registration carries. */
+  readonly access: RootAccess
   /** Why the root is not `available`; a code the panel localizes. */
   readonly detail?: string
 }
@@ -99,6 +108,13 @@ export interface RootsView {
   readonly effectiveCwd?: string
   /** The additional roots, in registry order. */
   readonly roots: readonly RootView[]
+  /** The host cap; MAX_SAFE_INTEGER means a legacy host reported no limit. */
+  readonly limit: number
+  /**
+   * How many records are stored, in every state. `count > limit` is a
+   * historical over-limit store: everything stays granted, only adds refuse.
+   */
+  readonly count: number
   /** Set when the store itself could not be read; the panel shows this verbatim. */
   readonly unavailable?: string
 }
@@ -116,6 +132,7 @@ export interface PanelResponseMap {
   readonly remove: RootsView
   readonly alias: RootsView
   readonly move: RootsView
+  readonly setAccess: RootsView
   readonly reveal: RevealedView
   readonly files: FilesView
   readonly readFile: FilePreview
@@ -138,6 +155,8 @@ export interface PanelRequest {
   readonly path?: string
   /** Display alias (add/alias); empty clears it. */
   readonly alias?: string
+  /** Write authority (add — defaults to `read-write` — and setAccess). */
+  readonly access?: RootAccess
   /** Exact anchor row (move): the target is placed in front of it; absent moves it last. */
   readonly beforeEntry?: RootEntryView
   /** Compatibility anchor; accepted only when the id is unique. */
@@ -180,6 +199,7 @@ const panelRequestSchema = z.object({
   id: z.string().optional(),
   path: z.string().optional(),
   alias: z.string().optional(),
+  access: z.enum(['read-write', 'read-only']).optional(),
   beforeEntry: z.object({
     ordinal: z.number().int().positive(),
     id: z.string(),
@@ -201,6 +221,9 @@ const rootViewSchema = z.object({
   alias: z.string().optional(),
   addedAt: z.string(),
   state: z.enum(['available', 'missing', 'redirected', 'invalid']),
+  // Optional on the wire so an older host (which always meant read-write)
+  // still parses; narrowed to the legacy default in `narrowRootView`.
+  access: z.enum(['read-write', 'read-only']).optional(),
   detail: z.string().optional(),
 })
 
@@ -209,6 +232,10 @@ const rootsViewSchema = z.object({
   primaryName: z.string().optional(),
   effectiveCwd: z.string().optional(),
   roots: z.array(rootViewSchema),
+  // Pre-limit hosts omitted both fields. Absence is compatible; malformed
+  // supplied values still fail validation.
+  limit: z.number().int().nonnegative().optional(),
+  count: z.number().int().nonnegative().optional(),
   unavailable: z.string().optional(),
 })
 
@@ -266,6 +293,10 @@ export function parseRootsView(value: unknown): Parsed<RootsView> {
       ...(view.primaryName === undefined ? {} : { primaryName: view.primaryName }),
       ...(view.effectiveCwd === undefined ? {} : { effectiveCwd: view.effectiveCwd }),
       roots: view.roots.map(narrowRootView),
+      // Legacy hosts had no cap. Do not invent a client-side limit that
+      // disables their Add controls; all stored states count equally.
+      limit: view.limit ?? Number.MAX_SAFE_INTEGER,
+      count: view.count ?? view.roots.length,
       ...(view.unavailable === undefined ? {} : { unavailable: view.unavailable }),
     },
   }
@@ -306,6 +337,7 @@ function narrowCall(endpoint: PanelEndpoint, value: z.infer<typeof panelRequestS
     ...(value.id === undefined ? {} : { id: value.id }),
     ...(value.path === undefined ? {} : { path: value.path }),
     ...(value.alias === undefined ? {} : { alias: value.alias }),
+    ...(value.access === undefined ? {} : { access: value.access }),
     ...(value.beforeEntry === undefined ? {} : { beforeEntry: value.beforeEntry }),
     ...(value.beforeId === undefined ? {} : { beforeId: value.beforeId }),
   }
@@ -319,6 +351,8 @@ function narrowRootView(value: z.infer<typeof rootViewSchema>): RootView {
     path: value.path,
     addedAt: value.addedAt,
     state: value.state,
+    // A host that predates the field only ever granted read-write.
+    access: value.access ?? 'read-write',
     ...(value.alias === undefined ? {} : { alias: value.alias }),
     ...(value.detail === undefined ? {} : { detail: value.detail }),
   }

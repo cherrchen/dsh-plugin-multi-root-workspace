@@ -30,6 +30,10 @@
       "types": "./lib/types/registry.d.ts",
       "default": "./lib/registry.js"
     },
+    "./providers": {
+      "types": "./lib/types/providers.d.ts",
+      "default": "./lib/providers.js"
+    },
     "./instructions": {
       "types": "./lib/types/instructions.d.ts",
       "default": "./lib/instructions.js"
@@ -75,6 +79,7 @@
     "url": "git+https://github.com/cherrchen/dsh-plugin-multi-root-workspace.git"
   },
   "scripts": {
+    "bench:roots": "node --experimental-transform-types scripts/bench-root-scale.mjs",
     "build": "pnpm run build:types && pnpm run bundle",
     "build:types": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
     "bundle": "node scripts/clean-lib.mjs && tsdown",

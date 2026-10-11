@@ -10,6 +10,7 @@ import * as LspRouting from '../src/lsp.ts'
 import * as FilesRouting from '../src/workspace-files.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
+import { mountProviderGate } from './support/providers.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { adaptPathWatch } from '../src/compat/workspace-files.ts'
 
@@ -21,9 +22,12 @@ beforeEach(async () => {
   await ctx.plugin(LocalFileSystem, { cwd: fixture.workspace })
   await ctx.plugin(MultiRootScopeService)
   await mountCompat(ctx)
+  // The routing rows inject the provider-conflict gate; the LocalFileSystem
+  // above plays this bundle's provider, so the gate brands it.
+  await mountProviderGate(ctx)
   writeFileSync(join(fixture.workspace, 'same.ts'), 'primary')
   writeFileSync(join(fixture.outside, 'same.ts'), 'additional')
-  ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+  ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
 })
 afterEach(async () => { await ctx.fiber.dispose(); fixture.dispose() })
 

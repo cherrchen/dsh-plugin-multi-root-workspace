@@ -63,6 +63,7 @@ const hostConfig: UserConfig = {
     'src/sandbox.ts',
     'src/scope.ts',
     'src/registry.ts',
+    'src/providers.ts',
     'src/instructions.ts',
     'src/command.ts',
     'src/lsp.ts',

@@ -42,7 +42,7 @@ interface Harness {
   readonly calls: Call[]
   readonly registrations: Registration[]
   readonly dictionaries: { ns: string; dicts: Record<string, unknown> }[]
-  setView: (view: RootsView) => void
+  setView: (view: HostView) => void
   setSession: (sessionId: string | undefined) => void
   /**
    * Present the 0.1.6-alpha.2 catalog: no `current` field, and the main view
@@ -59,14 +59,18 @@ interface Harness {
   release: () => void
 }
 
-const ROOT_A: RootView = { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', alias: 'payments' }
-const ROOT_B: RootView = { ordinal: 2, id: 'b', path: '/repos/website', addedAt: '2026-09-12T00:00:00.000Z', state: 'missing', detail: 'gone' }
+/** Old hosts omit cap metadata; exercise their actual response on the channel. */
+type HostView = Omit<RootsView, 'limit' | 'count'> & Partial<Pick<RootsView, 'limit' | 'count'>>
+
+const ROOT_A: RootView = { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', access: 'read-write', alias: 'payments' }
+const ROOT_B: RootView = { ordinal: 2, id: 'b', path: '/repos/website', addedAt: '2026-09-12T00:00:00.000Z', state: 'missing', access: 'read-only', detail: 'gone' }
 const ROOT_C: RootView = {
   ordinal: 3,
   id: 'c',
   path: '/repos/swapped',
   addedAt: '2026-09-12T00:00:00.000Z',
   state: 'redirected',
+  access: 'read-write',
   detail: 'the path now resolves to "/repos/other"',
 }
 
@@ -95,7 +99,7 @@ function mount(withFilesActions = false): Harness {
   const calls: Call[] = []
   const registrations: Registration[] = []
   const dictionaries: { ns: string; dicts: Record<string, unknown> }[] = []
-  let view: RootsView = { primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B] }
+  let view: HostView = { primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 }
   const sessionListeners = new Set<() => void>()
   let currentSession: string | undefined = 'session-1'
   // Undefined keeps the 0.1.5 / 0.1.6-alpha.1 selection snapshot (`current`).
@@ -280,6 +284,21 @@ describe('the panel dialog', () => {
     expect(screen.getByText(`${NS}.state.missing`)).toBeTruthy()
   })
 
+  it('keeps legacy host lists usable even with more than the new default limit', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', roots: Array.from({ length: 17 }, (_, i) => ({
+      ...ROOT_A, ordinal: i + 1, id: String(i), path: `/repos/legacy-${i}`, alias: `legacy-${i}`,
+    })) })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('legacy-16')).toBeTruthy() })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('button', { name: `${NS}.panel.add` })).toHaveProperty('disabled', false)
+    fireEvent.change(screen.getByPlaceholderText(`${NS}.panel.addManual`), { target: { value: '/repos/new' } })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.addConfirm` }))
+    await waitFor(() => { expect(harness.calls.at(-1)).toMatchObject({ endpoint: 'add', payload: { path: '/repos/new' } }) })
+  })
+
   it('shows No active session and does not call the host when there is no current session', async () => {
     const harness = mount()
     harness.setSession(undefined)
@@ -364,7 +383,7 @@ describe('the panel dialog', () => {
 
   it('shows the upstream workspace title as the primary row name', async () => {
     const harness = mount()
-    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'Payments Platform', roots: [ROOT_A] })
+    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'Payments Platform', roots: [ROOT_A], limit: 16, count: 1 })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
@@ -421,6 +440,8 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
+    // The access select is untouched, so no level travels: a chosen level is
+    // the only one a request may carry — a displayed default is not a choice.
     expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
       sessionId: 'session-1',
       path: '/repos/picked',
@@ -528,7 +549,7 @@ describe('the panel dialog', () => {
 
   it('reports a reveal whose answer is not a reveal result', async () => {
     const harness = mount()
-    harness.setRevealed({ primaryRoot: '/repos/primary', roots: [] })
+    harness.setRevealed({ primaryRoot: '/repos/primary', roots: [], limit: 16, count: 0 })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
@@ -591,7 +612,7 @@ describe('the panel dialog', () => {
 
   it('renders a redirected root as its own state', async () => {
     const harness = mount()
-    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_C] })
+    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_C], limit: 16, count: 1 })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
@@ -630,13 +651,131 @@ describe('the panel dialog', () => {
 
   it('shows the store failure the host reported', async () => {
     const harness = mount()
-    harness.setView({ primaryRoot: '/repos/primary', roots: [], unavailable: 'multi_root_workspace: file is not valid JSON' })
+    harness.setView({ primaryRoot: '/repos/primary', roots: [], limit: 16, count: 0, unavailable: 'multi_root_workspace: file is not valid JSON' })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
     await waitFor(() => {
       expect(screen.getByText(/file is not valid JSON/)).toBeTruthy()
     })
+  })
+
+  it('shows an access badge per root and sends the Add row selector with the request', async () => {
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    // ROOT_A is read-write, ROOT_B is read-only: both carry a badge.
+    const badges = () => Array.from(document.querySelectorAll('.mrfw-accessBadge')).map(node => node.textContent)
+    expect(badges()).toEqual([`${NS}.access.readWrite`, `${NS}.access.readOnly`])
+
+    // The Add row selector defaults to read-write; choosing read-only goes into
+    // the same `add` request the path does.
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'read-only' } })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
+    expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
+      sessionId: 'session-1',
+      path: '/repos/picked',
+      access: 'read-only',
+    })
+  })
+
+  it('keeps the re-register route open at the root limit, and it sends no access', async () => {
+    const harness = mount()
+    // count >= limit: a full store, one of whose records is withheld.
+    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B], limit: 2, count: 2 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
+
+    // Every NEW-add control stays refused at the limit (the picker button even
+    // relabels itself to explain the refusal)…
+    expect(screen.getByRole('button', { name: `${NS}.panel.limitReached` })).toHaveProperty('disabled', true)
+    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: `${NS}.panel.addConfirm` })).toHaveProperty('disabled', true)
+
+    // …but a withheld row keeps its re-register action: a revive consumes no
+    // slot and the host accepts it at or above the limit. The request names
+    // the stored path and NO access, so the record's level is preserved
+    // (ROOT_B is read-only) instead of silently widened.
+    const reRegister = screen.getByRole('button', { name: `${NS}.panel.reRegister` })
+    expect(reRegister).toHaveProperty('disabled', false)
+    fireEvent.click(reRegister)
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
+    expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
+      sessionId: 'session-1',
+      path: '/repos/website',
+    })
+  })
+
+  it('flips a root to read-only without asking, and renders the host answer', async () => {
+    const harness = mount()
+    const confirm = vi.spyOn(window, 'confirm')
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadOnly` }))
+    // A downgrade widens nothing, so it is never confirmed.
+    expect(confirm).not.toHaveBeenCalled()
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(true) })
+    expect(harness.calls.find(call => call.endpoint === 'setAccess')?.payload).toEqual({
+      sessionId: 'session-1',
+      entry: { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
+      access: 'read-only',
+    })
+  })
+
+  it('confirms an upgrade to read-write and paints the host-returned view only', async () => {
+    const harness = mount()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
+
+    // ROOT_B is read-only: upgrading it is a grant, so it asks first.
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
+    expect(confirm).toHaveBeenCalled()
+    // Declined: no channel call at all.
+    expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(false)
+
+    confirm.mockReturnValue(true)
+    // The host answers a view where B is now writable; the panel must paint
+    // THAT answer, not an optimistic local flip.
+    const upgradedB: RootView = { ...ROOT_B, access: 'read-write', state: 'available' }
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
+    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_A, upgradedB], limit: 16, count: 2 })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(true) })
+    expect(harness.calls.find(call => call.endpoint === 'setAccess')?.payload).toEqual({
+      sessionId: 'session-1',
+      entry: { ordinal: 2, id: 'b', path: '/repos/website', addedAt: '2026-09-12T00:00:00.000Z' },
+      access: 'read-write',
+    })
+    await waitFor(() => {
+      expect(Array.from(document.querySelectorAll('.mrfw-accessBadge')).map(node => node.textContent))
+        .toEqual([`${NS}.access.readWrite`, `${NS}.access.readWrite`])
+    })
+  })
+
+  it('localizes a refused upgrade instead of flipping the badge', async () => {
+    const harness = mount()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
+
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
+    harness.setFailure({ code: 'root-unavailable', message: 'host prose' })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
+
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.root-unavailable`) })
+    // The badge still says what the last host view said.
+    expect(document.querySelectorAll('.mrfw-accessBadge')[1]?.textContent).toBe(`${NS}.access.readOnly`)
   })
 
   it('renders a working entry without any panel client (no Connection in this surface)', async () => {
@@ -674,7 +813,7 @@ describe('the panel copy', () => {
 
 it('displays effective cwd separately from the stable primary root', async () => {
   const harness = mount()
-  harness.setView({ primaryRoot: '/repos/primary', effectiveCwd: '/unregistered/current', roots: [ROOT_A] })
+  harness.setView({ primaryRoot: '/repos/primary', effectiveCwd: '/unregistered/current', roots: [ROOT_A], limit: 16, count: 1 })
   renderPanel(harness)
   fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
   await waitFor(() => { expect(screen.getByText('/unregistered/current')).toBeDefined() })
@@ -689,7 +828,7 @@ it('ignores a response belonging to the previous session after catalog selection
   renderPanel(harness)
   fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
   await waitFor(() => { expect(harness.calls).toHaveLength(1) })
-  harness.setView({ primaryRoot: '/repos/second', effectiveCwd: '/repos/second/src', roots: [] })
+  harness.setView({ primaryRoot: '/repos/second', effectiveCwd: '/repos/second/src', roots: [], limit: 16, count: 0 })
   act(() => { harness.setSession('session-2') })
   await waitFor(() => { expect(screen.getByText('/repos/second')).toBeDefined() })
   harness.release()

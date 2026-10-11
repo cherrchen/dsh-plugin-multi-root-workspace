@@ -42,14 +42,37 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
     - id: multi-root-sandbox
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
+    # The provider-conflict gate: `ctx.fs` and `ctx.sandbox` must be THIS
+    # bundle's branded providers — verified by a well-known symbol, not
+    # instanceof, so duplicated installs still count. If another plugin's
+    # provider took either key (or took it over later — cordis restarts an
+    # injecting fiber when an injected service changes, so this row re-checks),
+    # the row logs which service is foreign and throws. Every widened-authority
+    # row below injects `multiRootProviders`, so a conflicted composition keeps
+    # the registry unmounted, the scope empty, and nothing granted, regardless
+    # of patch order — fail loud, never a widened grant on an unverified
+    # provider.
+    - id: multi-root-providers
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/providers'
     - id: multi-root-scope
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/scope'
+      config:
+        # Per-tool write caps: a tool listed here may never write ANY
+        # additional root (the primary root is unaffected). `read-only` is the
+        # only legal value; anything else fails closed — every additional-root
+        # write is refused for the session. Empty map: no cap at all.
+        toolAccess: {}
     - id: multi-root-registry
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
       config:
         # Store-wide kernel lease beside the JSON domain document. A custom
         # storage-json.root must override this path in lockstep (ADR-0007).
         leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+        # Cap on stored additional-root records per primary root (integer,
+        # 1..64; the count covers every state, so it is stable). A store that
+        # already exceeds it keeps granting — only new adds are refused. Bench
+        # evidence for the default: docs/reference/bench-root-scale-*.json.
+        maxAdditionalRoots: 16
     # Upstream `agent-instructions` only discovers instruction files from the
     # session cwd upward, so an additional root's own AGENTS.md is invisible to
     # the model. This row closes that gap for the additional roots only; the

@@ -68,7 +68,7 @@ async function mount(plugin: unknown, fixture: FixtureWorkspace, mode: SandboxMo
   }
   fibers.push(await ctx.plugin(plugin as never, { cwd: fixture.workspace }))
   if (plugin === MultiRootFileSystem) {
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, roots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path) })))
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, roots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path), access: 'read-write' })))
   }
   return { ctx, fs: ctx.fs, fixture }
 }
@@ -294,6 +294,39 @@ describe('multi-root extension', () => {
     fixtures.push(fixture)
     const ours = await mount(MultiRootFileSystem, fixture, 'read-only', [fixture.outside])
     await expect(ours.fs.writeText(await target(ours, join(fixture.outside, 'x.txt')), 'x'))
+      .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+  })
+
+  it('refuses writes into a read-only member and says why, while it stays readable', async () => {
+    const fixture = createFixtureWorkspace('fs-readonly-member')
+    fixtures.push(fixture)
+    const ours = await mount(MultiRootFileSystem, fixture, 'workspace-write', [])
+    const writable = join(fixture.base, 'writable')
+    const readOnly = fixture.outside
+    await mkdir(writable, { recursive: true })
+    await mkdir(readOnly, { recursive: true })
+    await writeFile(join(readOnly, 'existing.txt'), 'seed')
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { id: 'rw', path: writable, recordedPath: canonicalPath(writable), access: 'read-write' },
+      { id: 'ro', path: readOnly, recordedPath: canonicalPath(readOnly), access: 'read-only' },
+    ])
+
+    // The read-only member is a workspace member: reads go through, writes do not.
+    expect(await ours.fs.readText(await target(ours, join(readOnly, 'existing.txt')))).toBe('seed')
+    await ours.fs.writeText(await target(ours, join(writable, 'ok.txt')), 'ok')
+    const failure = await ours.fs.writeText(await target(ours, join(readOnly, 'x.txt')), 'x')
+      .then(() => undefined, (error: unknown) => error as FsError & { code?: string })
+    expect(failure?.code).toBe('FS_SANDBOX_DENIED')
+    expect(failure?.message).toContain(`${readOnly} is a read-only additional root`)
+    await expect(ours.fs.editText(await target(ours, join(readOnly, 'existing.txt')), { oldString: 'seed', newString: 'edited', replaceAll: false }))
+      .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+
+    // Downgrading the writable member leaves nothing writable beyond the primary.
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { id: 'rw', path: writable, recordedPath: canonicalPath(writable), access: 'read-only' },
+      { id: 'ro', path: readOnly, recordedPath: canonicalPath(readOnly), access: 'read-only' },
+    ])
+    await expect(ours.fs.writeText(await target(ours, join(writable, 'after.txt')), 'x'))
       .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
   })
 

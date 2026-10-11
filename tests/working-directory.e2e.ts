@@ -36,14 +36,24 @@ afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
 async function world() {
   const fixture = createFixtureWorkspace('directory')
   const third = join(fixture.base, 'third'); mkdirSync(third)
-  const stack = await mountRegistryStack(join(fixture.base, 'store'))
+  // The real providers must mount before the provider-conflict gate inside the
+  // stack: a later `ctx.plugin` can never take an already-provided service key,
+  // and the gate needs this bundle's branded fs/sandbox to start the registry.
+  // The mounts keep their original dependency order (Policy waits on the
+  // session services), just inside the gate hook.
+  const stack = await mountRegistryStack(join(fixture.base, 'store'), {}, {
+    beforeGate: async ctx => {
+      await ctx.plugin(Sessions)
+      await ctx.plugin(Projections)
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace })
+      const { MultiRootSandboxProvider } = await import(pathToFileURL(join(REPO_ROOT, 'lib/sandbox.js')).href)
+      await ctx.plugin(MultiRootSandboxProvider)
+    },
+  })
   cleanup.push(async () => { await stack.dispose(); fixture.dispose() })
   const ctx = stack.ctx
-  await ctx.plugin(Sessions)
-  await ctx.plugin(Projections)
-  await ctx.plugin(SystemPrompt)
-  await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
-  await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace })
   await ctx.plugin(directoryModule.default)
   const session = ctx.sessions.create(SessionId('directory-owner'), { meta: { cwd: fixture.workspace } })
   const notices: unknown[] = []
@@ -87,8 +97,6 @@ it.runIf(directoryModule !== undefined)('replays effective cwd and recovers a mi
 })
 
 async function kernel(w: Awaited<ReturnType<typeof world>>, context: any) {
-  const { MultiRootSandboxProvider } = await import(pathToFileURL(join(REPO_ROOT, 'lib/sandbox.js')).href)
-  await w.ctx.plugin(MultiRootSandboxProvider)
   await w.ctx.plugin(LocalSubprocess)
   const command = [process.execPath, '-e', 'console.log("confined")']
   const wrapped = await w.ctx.sandbox.confine(command, w.ctx.sandboxPolicy.resolve({ session: w.session }) as never)

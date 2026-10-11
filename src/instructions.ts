@@ -57,6 +57,7 @@ import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from './compat.ts'
+import type {} from './providers.ts'
 import { instructionsApi } from './compat/agent-instructions.ts'
 import type { InstructionFile, InstructionsApi, LoadedInstructionFile } from './compat/agent-instructions.ts'
 import { createInstructionMessage } from './compat/llm-message.ts'
@@ -261,7 +262,9 @@ export function composeInstructionMessage(
 }
 
 /** This row is gated on the compatibility contract like every other provider. */
-export const inject = ['multiRootCompat', 'multiRootScope', 'sandboxPolicy']
+// `multiRootProviders` is the provider-conflict gate: a foreign `ctx.fs` or
+// `ctx.sandbox` must not end up named by this row's root list.
+export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootScope', 'sandboxPolicy']
 
 /**
  * Mount the additional-root instruction provider.

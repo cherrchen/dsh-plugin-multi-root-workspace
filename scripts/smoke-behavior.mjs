@@ -266,7 +266,7 @@ async function multiRootBattery(ctx) {
   scope.setAdditionalRoots(policy.workspaceRoot, [{
     id: 'extra',
     path: extraRoot,
-    recordedPath: canonical(extraRoot),
+    recordedPath: canonical(extraRoot), access: 'read-write',
   }])
   const resolved = scope.resolve(policy)
   const canonicalExtra = resolved.additionalRoots[0]

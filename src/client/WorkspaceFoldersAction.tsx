@@ -30,6 +30,7 @@ import {
   IconFolderClose,
   IconFolderOpen,
   IconPlus,
+  IconRefresh,
   IconTrash,
 } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
@@ -211,6 +212,15 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     noSession: false,
   })
   const [manualPath, setManualPath] = useState('')
+  /** The access the Add controls register new roots with; `read-write` is the historical default. */
+  const [addAccess, setAddAccess] = useState<'read-write' | 'read-only'>('read-write')
+  /**
+   * Whether the operator actually picked a level. The select shows its default
+   * before they do, and sending that default would be an explicit value the
+   * operator never named: on a revive the registry upgrades a read-only record
+   * to it. Only a chosen level may travel in the request.
+   */
+  const [accessChosen, setAccessChosen] = useState(false)
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
@@ -245,7 +255,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     const dialog = dialogRef.current
     if (dialog === null) return
     const focusable = Array.from(
-      dialog.querySelectorAll<HTMLElement>('button, input, [href], [tabindex]:not([tabindex="-1"])'),
+      dialog.querySelectorAll<HTMLElement>('button, input, select, [href], [tabindex]:not([tabindex="-1"])'),
     ).filter(element => !element.hasAttribute('disabled'))
     if (focusable.length === 0) {
       event.preventDefault()
@@ -310,7 +320,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
    * @returns whether the host accepted it (the caller decides whether to clear
    *   the input it came from).
    */
-  const mutate = useCallback(async (endpoint: 'add' | 'remove' | 'alias' | 'move', payload: Record<string, unknown>): Promise<boolean> => {
+  const mutate = useCallback(async (endpoint: 'add' | 'remove' | 'alias' | 'move' | 'setAccess', payload: Record<string, unknown>): Promise<boolean> => {
     if (panel === undefined) return false
     const base = requestBase()
     if (base === undefined) {
@@ -347,8 +357,8 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
       return
     }
     if (picked === null || picked.trim() === '') return
-    await mutate('add', { path: picked })
-  }, [mutate, props])
+    await mutate('add', { path: picked, ...(accessChosen ? { access: addAccess } : {}) })
+  }, [mutate, props, addAccess, accessChosen])
 
   /**
    * Add the path in the manual field — the one the operator typed. The picker
@@ -360,8 +370,20 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     if (path === '') return
     // Cleared only on success: a rejected path stays in the field so the operator
     // can fix it instead of retyping it.
-    if (await mutate('add', { path })) setManualPath('')
-  }, [manualPath, mutate])
+    if (await mutate('add', { path, ...(accessChosen ? { access: addAccess } : {}) })) setManualPath('')
+  }, [manualPath, mutate, addAccess, accessChosen])
+
+  /**
+   * Re-register one withheld or unusable root in place. The request carries
+   * the stored path and deliberately NO access: `registry.add` treats the call
+   * as a revive — it keeps the record's access, alias, and identity instead of
+   * creating a new registration — which is also why the root limit must not
+   * gate this button: a revive consumes no slot, and it is the panel's only
+   * repair route for a redirected entry.
+   */
+  const reRegister = useCallback(async (root: RootView) => {
+    await mutate('add', { path: root.path })
+  }, [mutate])
 
   /** Reveal one root: the answer is the revealed path, not a new view. */
   const reveal = useCallback(async (root: RootView) => {
@@ -408,6 +430,9 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   }, [mutate])
 
   const roots = state.view?.roots ?? []
+  // The host refuses the add as `root-limit-reached` anyway; disabling here is
+  // what makes the refusal explain itself before the operator clicks.
+  const atLimit = state.view !== undefined && state.view.count >= state.view.limit
   return (
     <div className="mrfw-overlay" role="presentation">
       <div
@@ -495,10 +520,21 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                   <span className="mrfw-rootName">{displayNameOf(root)}</span>
                   <span className="mrfw-rootPath">{root.path}</span>
                 </div>
+                <span className="mrfw-accessBadge">
+                  {t(root.access === 'read-only' ? 'access.readOnly' : 'access.readWrite')}
+                </span>
                 {root.state === 'available' ? null : (
                   <span title={root.detail} className="mrfw-stateWarn">
                     {t(stateKey(root.state))}
                   </span>
+                )}
+                {root.state === 'available' ? null : (
+                  <IconButton
+                    disabled={state.busy}
+                    onClick={() => { void reRegister(root) }}
+                    icon={<IconRefresh />}
+                    label={t('panel.reRegister')}
+                  />
                 )}
                 <IconButton
                   onClick={() => { void copyPath(root) }}
@@ -528,6 +564,12 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                   onClose={() => { setMenuFor(undefined) }}
                   items={[
                     { id: 'rename', label: t('panel.rename'), icon: <IconEdit /> },
+                    {
+                      id: 'access',
+                      label: t(root.access === 'read-only' ? 'panel.accessReadWrite' : 'panel.accessReadOnly'),
+                      icon: <IconEdit />,
+                      disabled: state.busy,
+                    },
                     { id: 'remove', label: t('panel.remove'), icon: <IconTrash />, danger: true, disabled: state.busy },
                   ]}
                   onSelect={(id) => {
@@ -535,6 +577,13 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                     if (id === 'rename') {
                       setAliasFor(key)
                       setAliasDraft(root.alias ?? '')
+                    }
+                    if (id === 'access') {
+                      const access = root.access === 'read-only' ? 'read-write' : 'read-only'
+                      // Upgrading widens what the agent may modify, so it is
+                      // the one access change that asks first.
+                      if (access === 'read-write' && !window.confirm(t('panel.accessUpgradeConfirm'))) return
+                      void mutate('setAccess', { entry: entryOf(root), access })
                     }
                     if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
                   }}
@@ -576,10 +625,10 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
             {state.noSession || props.pickDirectory === undefined ? null : (
               <IconButton
                 variant="outline"
-                disabled={state.busy}
+                disabled={state.busy || atLimit}
                 onClick={() => { void addViaPicker() }}
                 icon={<IconPlus />}
-                label={t('panel.add')}
+                label={atLimit ? t('panel.limitReached') : t('panel.add')}
               />
             )}
             {state.noSession ? null : (
@@ -588,14 +637,33 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
               className="mrfw-input"
               value={manualPath}
               placeholder={t('panel.addManual')}
+              disabled={atLimit}
               onChange={event => { setManualPath(event.target.value) }}
               onKeyDown={event => { if (event.key === 'Enter') void addManualPath() }}
             />
-            <Action onClick={() => { void addManualPath() }} disabled={state.busy || manualPath.trim() === ''} variant="primary">
+            <select
+              className="mrfw-input mrfw-accessSelect"
+              value={addAccess}
+              disabled={state.busy || atLimit}
+              aria-label={t('panel.accessLabel')}
+              onChange={event => {
+                setAccessChosen(true)
+                setAddAccess(event.target.value === 'read-only' ? 'read-only' : 'read-write')
+              }}
+            >
+              <option value="read-write">{t('access.readWrite')}</option>
+              <option value="read-only">{t('access.readOnly')}</option>
+            </select>
+            <Action
+              onClick={() => { void addManualPath() }}
+              disabled={state.busy || atLimit || manualPath.trim() === ''}
+              variant="primary"
+            >
               {t('panel.addConfirm')}
             </Action>
               </>
             )}
+            {atLimit ? <span className="mrfw-note">{t('panel.limitReached')}</span> : null}
             <Action onClick={() => { void refresh() }} disabled={state.busy} variant="outline">{t('panel.retry')}</Action>
           </div>
         </div>

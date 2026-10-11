@@ -32,9 +32,11 @@ import {
 } from '../src/compat/dsh-version.ts'
 import { MultiRootFileSystem } from '../src/fs.ts'
 import * as Instructions from '../src/instructions.ts'
+import * as Lsp from '../src/lsp.ts'
 import { MultiRootRegistry } from '../src/registry.ts'
 import { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
+import * as WorkspaceFilesRouting from '../src/workspace-files.ts'
 import { mountCompat } from './support/compat.ts'
 import { createFixtureWorkspace, REPO_ROOT } from './support/temp-workspace.ts'
 
@@ -242,6 +244,13 @@ describe('the gate is what the providers actually wait on', () => {
       expect(provider.inject, provider.name).toContain('multiRootCompat')
     }
     expect(Instructions.inject).toContain('multiRootCompat')
+  })
+
+  it('is paired with the provider-conflict gate on every widened-authority row', () => {
+    for (const gated of [MultiRootRegistry.inject, Instructions.inject, Lsp.inject, WorkspaceFilesRouting.inject]) {
+      expect(gated).toContain('multiRootProviders')
+      expect(gated).toContain('multiRootCompat')
+    }
   })
 
   it('leaves the fence and the sandbox unmounted while the service is absent', async () => {

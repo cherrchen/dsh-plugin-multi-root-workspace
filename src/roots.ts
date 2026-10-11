@@ -61,6 +61,15 @@ export function additionalRootId(value: string): AdditionalRootId {
   return value as AdditionalRootId
 }
 
+/**
+ * The write authority one registration carries. `read-write` is the historical
+ * grant: the root is a full member of the workspace's writable set.
+ * `read-only` keeps the root a workspace member — instructions, LSP,
+ * workspace-file routing, and reads all still see it — but removes it from
+ * the writable set the fs fence and every kernel dialect enforce.
+ */
+export type RootAccess = 'read-write' | 'read-only'
+
 /** One registered additional root exactly as it is persisted. */
 export interface RegisteredRoot {
   /** Stable registry identity. */
@@ -68,13 +77,27 @@ export interface RegisteredRoot {
   /** Canonical absolute directory (the `realpath` captured at registration). */
   readonly path: string
   /**
-   * The canonical directory this registration was GRANTED for: the `realpath`
-   * observed when the operator registered it (or the last time the operator
-   * restored it). Authorization is `canonicalPath(path) === recordedPath` — a
-   * root whose current resolution moved somewhere else is reported as
-   * `redirected` and withheld, never silently granted elsewhere.
+   * The write authority this registration carries. In memory every record has
+   * exactly one value; on disk it is expressed by WHICH grant field is
+   * present — `recordedPath` means read-write, `readOnlyRecordedPath` means
+   * read-only — never by a separate `access` key (see `registry.ts` for the
+   * downgrade safety that split buys).
+   */
+  readonly access: RootAccess
+  /**
+   * The canonical directory this READ-WRITE registration was GRANTED for: the
+   * `realpath` observed when the operator registered it (or the last time the
+   * operator restored it). Authorization is `canonicalPath(path) ===
+   * recordedPath` — a root whose current resolution moved somewhere else is
+   * reported as `redirected` and withheld, never silently granted elsewhere.
    */
   readonly recordedPath?: string
+  /**
+   * The canonical directory this READ-ONLY registration was granted for. It
+   * plays exactly the role `recordedPath` plays for a read-write record, kept
+   * under a separate key so the single persisted layout stays downgrade-safe.
+   */
+  readonly readOnlyRecordedPath?: string
   /** Optional display alias; absent when the operator cleared it. */
   readonly alias?: string
   /** ISO-8601 instant of registration. */
@@ -138,9 +161,12 @@ export type RootValidationCode =
   | 'invalid-ref'
   | 'storage-unavailable'
   | 'registry-contended'
+  | 'root-limit-reached'
+  | 'config-invalid'
   | 'reveal-unavailable'
   | 'session-not-found'
   | 'unsupported-path'
+  | 'root-unavailable'
 
 /** A rejected root operation; `code` is the stable contract, `message` the fallback prose. */
 export class RootValidationError extends Error {
@@ -413,7 +439,16 @@ function classifyStoredRoot(
     return invalid(`the id "${record.id}" is used by more than one record (entry ${position + 1})`)
   }
   if (!isAbsolute(record.path)) return invalid(`"${record.path}" is not an absolute path`)
-  const recorded = record.recordedPath
+  // A record may carry at most ONE grant field: `recordedPath` means
+  // read-write, `readOnlyRecordedPath` means read-only. A record naming both
+  // claims two different access levels at once — it classifies `invalid`,
+  // because silently picking one would turn a corrupted store into a grant.
+  const writeGrant = record.recordedPath
+  const readGrant = record.readOnlyRecordedPath
+  if (typeof writeGrant === 'string' && writeGrant !== '' && typeof readGrant === 'string' && readGrant !== '') {
+    return invalid('the record declares both a read-write and a read-only grant (ambiguous access)')
+  }
+  const recorded = typeof writeGrant === 'string' && writeGrant !== '' ? writeGrant : readGrant
   if (typeof recorded !== 'string' || recorded === '') {
     return invalid('the record does not say which directory it was granted for')
   }
