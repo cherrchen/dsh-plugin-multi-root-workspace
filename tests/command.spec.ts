@@ -581,7 +581,9 @@ describe('the panel channel', () => {
   })
 
   it('reports a failing file manager as reveal-unavailable', async () => {
-    await mount({ withConnection: true, withSubprocess: true, spawnExitCode: 1 })
+    // Exit code 1 is a SUCCESS on Windows (explorer.exe semantics), so the
+    // failing file manager must report a code that is a failure everywhere.
+    await mount({ withConnection: true, withSubprocess: true, spawnExitCode: 2 })
     const extra = join(fixture.base, 'extra')
     mkdirSync(extra)
     await callPanel('add', { sessionId: PANEL_SESSION, path: extra })

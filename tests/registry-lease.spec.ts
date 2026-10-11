@@ -5,7 +5,7 @@
  */
 
 import { mkdirSync, rmSync, symlinkSync } from 'node:fs'
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -17,6 +17,7 @@ import { leaseNameWin32 } from '../src/registry-lease-win32.ts'
 import { RootValidationError } from '../src/roots.ts'
 import MultiRootScopeService from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
+import { shortPathName } from './support/windows.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -82,7 +83,7 @@ describe('RegistryAuthorityLease', () => {
     expect(leaseNameWin32(join(variant, `${DOMAIN_NAME}.lock`))).toBe(leaseNameWin32(leasePath))
     // The 8.3 alias only exists on volumes where short-name generation is on;
     // when it spells the long name there is nothing distinct to compare.
-    const short = execFileSync('cmd', ['/d', '/s', '/c', `for %I in ("${storeRoot}") do @echo %~sI`], { encoding: 'utf8' }).trim()
+    const short = shortPathName(storeRoot)
     if (short === storeRoot) {
       context.skip(`8.3 short names are disabled on this volume (${storeRoot} resolves to itself)`)
       return

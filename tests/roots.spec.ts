@@ -377,8 +377,12 @@ describe('classifyStoredRoots', () => {
       expect(status.state).toBe('invalid')
       expect(status.detail).toContain('network or device path')
     }
-    // The same records stay available/ordinary on platforms without the rule.
-    expect(classifyStoredRoots(primary, [stored('//host/missing', 'unc-path')])[0]?.state).not.toBe('invalid')
+    // The same records stay available/ordinary on platforms without the rule —
+    // only meaningful on a POSIX host: on Windows the host filesystem handles
+    // `//host/missing` and may judge it invalid for its own reasons.
+    if (process.platform !== 'win32') {
+      expect(classifyStoredRoots(primary, [stored('//host/missing', 'unc-path')])[0]?.state).not.toBe('invalid')
+    }
   })
 })
 

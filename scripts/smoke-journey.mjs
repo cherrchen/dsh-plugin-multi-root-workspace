@@ -45,6 +45,7 @@ import {
   resolveScratchHome,
 } from './lib/dsh-runtime.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
+import { requireKernelRunner } from '../tests/support/kernel-runner.ts'
 
 const DOMAIN = 'multi_root_workspace'
 const PLUGIN_NAME = '@dsh-electron/dsh-plugin-multi-root-workspace'
@@ -232,10 +233,41 @@ async function startScriptedModel() {
     // own rule — so the README read stays exactly where it was.
     { name: 'read', arguments: { file_path: join(additionalRepo, 'README.md') } },
     { name: 'write', arguments: { file_path: join(additionalRepo, 'README.md'), content: EDITED_README } },
+    // The shell calls keep a placeholder name — the composed row is `bash` on
+    // POSIX and `pwsh` on Windows, decided per request from the tools the
+    // harness itself advertised. The command text is valid in both dialects:
+    // a single-quoted path is a literal string to PowerShell, and `workdir`
+    // exists on both tool schemas.
     { name: 'bash', arguments: { command: `git -C '${additionalRepo}' diff --stat`, description: 'Show the other repository diff' } },
     { name: 'bash', arguments: { command: 'node check.mjs', description: 'Run the other repository check', workdir: additionalRepo } },
     { name: 'write', arguments: { file_path: join(outsideRoot, 'denied.txt'), content: 'must not land' } },
   ]
+  /**
+   * Resolve a scripted shell call against the tool list the HARNESS sent:
+   * `pwsh` when that is the composed tool, `bash` otherwise. The command,
+   * description and workdir arguments are schema-identical on both tools, so
+   * only the name differs.
+   */
+  const withShellTool = (call, request) => {
+    if (call === undefined || (call.name !== 'bash' && call.name !== 'pwsh')) return call
+    const tools = request.tools ?? []
+    const found = tools.find(tool => (tool?.function?.name ?? tool?.name) === 'pwsh')
+    if (found === undefined) return { ...call, name: 'bash' }
+    // The pwsh tool's schema differs across releases: drop every argument the
+    // advertised schema does not declare (`additionalProperties: false` makes
+    // an extra field a hard error), and fold a missing `workdir` into the
+    // command itself.
+    const properties = found?.function?.parameters?.properties ?? found?.parameters?.properties ?? {}
+    const args = { ...call.arguments }
+    if ('workdir' in args && !('workdir' in properties)) {
+      args.command = `Set-Location -LiteralPath '${String(args.workdir).replace(/'/g, "''")}'; ${String(args.command)}`
+      delete args.workdir
+    }
+    if (Object.keys(properties).length > 0) {
+      for (const key of Object.keys(args)) if (!(key in properties)) delete args[key]
+    }
+    return { ...call, name: 'pwsh', arguments: args }
+  }
   const server = createServer((request, response) => {
     let body = ''
     request.setEncoding('utf8')
@@ -255,7 +287,7 @@ async function startScriptedModel() {
       // agent's own body too and a text match classifies everything as a title.
       const isTitle = !Array.isArray(parsed.tools) || parsed.tools.length === 0
       if (!isTitle) steps.push(parsed)
-      const call = isTitle ? undefined : calls[(steps.length - 1) % SCRIPT_LENGTH]
+      const call = isTitle ? undefined : withShellTool(calls[(steps.length - 1) % SCRIPT_LENGTH], parsed)
       const text = isTitle ? 'journey' : 'journey complete'
       const id = `journey-${steps.length}`
       response.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -531,16 +563,26 @@ try {
     // Tool results travel back to the model, so the step requests are the one
     // place every result is visible for BOTH legs (in process and subprocess).
     const webRendered = webRequests.map(request => JSON.stringify(request)).join('\n')
-    const webBashUnavailable = webRendered.includes('SANDBOX_UNAVAILABLE') || webRendered.includes('no sandbox backend is usable')
+    const shellTool = process.platform === 'win32' ? 'pwsh' : 'bash'
+    const runnerFailed = rendered =>
+      rendered.includes('SANDBOX_UNAVAILABLE')
+      || rendered.includes('no sandbox backend is usable')
+      || rendered.includes('the sandbox runner itself failed')
+    // On a host whose dialect the kernel probe verified, an unusable runner is
+    // a FAILURE, not a skip — requireKernelRunner throws for exactly that case.
+    const runnerSkip = () => process.platform === 'win32'
+      ? requireKernelRunner('windows-acl', 'the confined shell could not run in this process')
+      : 'no usable kernel runner in this process'
+    const webShellUnavailable = runnerFailed(webRendered)
     // The tool layer maps the structured FS_SANDBOX_DENIED code onto the shared
     // `[sandbox: …]` marker before the model sees it; that marker is what the
     // operator's denial text is built from.
     check.contains(webRendered, 'file access denied under workspace-write mode', 'web: the tool layer reported the outside write as a sandbox denial')
-    if (webBashUnavailable) {
-      check.skip('web: confined bash (git diff and the other repository\'s check) — no usable kernel runner in this process')
+    if (webShellUnavailable) {
+      check.skip(`web: confined ${shellTool} (git diff and the other repository's check) — ${runnerSkip()}`)
     } else {
-      check.contains(webRendered, 'README.md |', 'web: bash saw the other repository\'s diff', webRendered.slice(-800))
-      check.contains(webRendered, 'repo-b check ok', 'web: bash ran the other repository\'s check', webRendered.slice(-800))
+      check.contains(webRendered, 'README.md |', `web: ${shellTool} saw the other repository's diff`, webRendered.slice(-800))
+      check.contains(webRendered, 'repo-b check ok', `web: ${shellTool} ran the other repository's check`, webRendered.slice(-800))
     }
     const webExcerpt = webRendered.slice(-800)
     check.contains(webRendered, canonical(additionalRepo), 'web: the model\'s request names the additional root', webExcerpt)
@@ -601,10 +643,10 @@ try {
     check.contains(git(additionalRepo, 'status', '--porcelain'), ' M README.md', 'headless: git reports the change in the other repository')
 
     const headlessResults = model.steps.slice(stepsBeforeHeadless).map(request => JSON.stringify(request)).join('\n')
-    if (headlessResults.includes('SANDBOX_UNAVAILABLE') || headlessResults.includes('no sandbox backend is usable')) {
-      check.skip('headless: confined bash — no usable kernel runner in this process')
+    if (runnerFailed(headlessResults)) {
+      check.skip(`headless: confined ${shellTool} — ${runnerSkip()}`)
     } else {
-      check.contains(headlessResults, 'repo-b check ok', 'headless: bash ran the other repository\'s check', headlessResults.slice(-800))
+      check.contains(headlessResults, 'repo-b check ok', `headless: ${shellTool} ran the other repository's check`, headlessResults.slice(-800))
     }
 
     const headlessRequests = model.steps.slice(stepsBeforeHeadless)
