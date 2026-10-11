@@ -69,6 +69,7 @@ beforeEach(async () => {
   await mkdir(siblings.shared, { recursive: true })
   await mkdir(join(fixture.workspace, 'nested'), { recursive: true })
   await mkdir(join(fixture.outside, 'nested'), { recursive: true })
+  await mkdir(join(fixture.base, 'readonly'), { recursive: true })
   // A host that refuses directory symlinks (Windows without Developer Mode) still
   // gets the whole matrix minus the one row that needs the escape to exist.
   symlinkReason = symlinkUnsupportedReason()
@@ -102,7 +103,10 @@ interface World {
  * kernel provider with one dialect forced, and the scope carrying exactly one
  * additional root (the fixture's `out` tree).
  */
-async function mountWorld(dialect: Dialect): Promise<World> {
+async function mountWorld(
+  dialect: Dialect,
+  roots: readonly { path: string; access: 'read-write' | 'read-only' }[] = [{ path: fixture.outside, access: 'read-write' }],
+): Promise<World> {
   const ctx = new Context()
   fibers.push(
     await ctx.plugin(SessionProjectionRegistry),
@@ -111,11 +115,12 @@ async function mountWorld(dialect: Dialect): Promise<World> {
   )
   await mountCompat(ctx)
   fibers.push(await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace }))
-  ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{
-    id: 'extra',
-    path: fixture.outside,
-    recordedPath: canonicalPath(fixture.outside),
-  }])
+  ctx.multiRootScope.setAdditionalRoots(fixture.workspace, roots.map((root, index) => ({
+    id: `root-${index}`,
+    path: root.path,
+    recordedPath: canonicalPath(root.path),
+    access: root.access,
+  })))
   fibers.push(await ctx.plugin(MultiRootSandboxProvider, {}))
   const provider = ctx.sandbox as LocalSandboxProvider
   provider.internals = { ...internalsFor(dialect) }
@@ -210,6 +215,28 @@ describe('the fs fence and every kernel dialect agree on one scope', () => {
     })
   }
 
+  for (const dialect of DIALECTS) {
+    it(`denies a read-only member on both the fence and ${dialect}, while the writable member still passes`, async () => {
+      const restricted = join(fixture.base, 'readonly')
+      const world = await mountWorld(dialect, [
+        { path: fixture.outside, access: 'read-write' },
+        { path: restricted, access: 'read-only' },
+      ])
+      const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: fixture.workspace }
+      for (const entry of [
+        { name: 'a file in the writable member', path: join(fixture.outside, 'rw-member.txt'), expected: 'allow' },
+        { name: 'a file in the read-only member', path: join(restricted, 'ro-member.txt'), expected: 'deny' },
+      ] as const) {
+        const target = await world.ctx.fs.resolve(entry.path)
+        const fence = await fenceVerdict(world, policy, target)
+        const dialectAnswer = await dialectVerdict(world, policy, String(target.targetKey))
+        expect(fence, `${entry.name}: fs fence`).toBe(entry.expected)
+        expect(dialectAnswer, `${entry.name}: ${dialect} grant`).toBe(entry.expected)
+        expect(dialectAnswer, `${entry.name}: fs fence vs ${dialect}`).toBe(fence)
+      }
+    })
+  }
+
   it('never grants a root the scope does not carry, in any dialect', async () => {
     for (const dialect of DIALECTS) {
       const world = await mountWorld(dialect)
@@ -247,6 +274,33 @@ describe('real confined execution of the widened profile', () => {
       const writeOutside = runConfined(await confined(world.provider, ['bash', '-c', `echo payload > ${JSON.stringify(outside)}`], policy), fixture.workspace)
       expect(writeOutside.kind, 'write outside every root must be denied').toBe('denied')
       expect(existsSync(outside)).toBe(false)
+    })
+
+    it(`lets a confined command read but not write a read-only member, and write the writable one (${dialect})`, async (context) => {
+      const restricted = join(fixture.base, 'readonly')
+      const existing = join(restricted, 'pre-existing.txt')
+      await writeFile(existing, 'present')
+      const world = await mountWorld(dialect, [
+        { path: fixture.outside, access: 'read-write' },
+        { path: restricted, access: 'read-only' },
+      ])
+      if (dialect === 'landlock' && process.platform === 'linux') world.provider.internals = { chain: ['landlock'] }
+      const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: fixture.workspace }
+      const writeInside = runConfined(await confined(world.provider, ['bash', '-c', `echo payload > ${JSON.stringify(join(fixture.outside, 'rw-confined.txt'))}`], policy), fixture.workspace)
+      if (writeInside.kind === 'unavailable' || writeInside.kind === 'runner-failed') {
+        context.skip(requireKernelRunner(dialect, writeInside.detail))
+        return
+      }
+      expect(writeInside.kind, `write into the writable member: ${writeInside.kind === 'denied' ? writeInside.detail : ''}`).toBe('ok')
+      expect(existsSync(join(fixture.outside, 'rw-confined.txt'))).toBe(true)
+
+      // Reads inside a read-only root stay allowed — membership is unchanged.
+      const readExisting = runConfined(await confined(world.provider, ['bash', '-c', `cat ${JSON.stringify(existing)}`], policy), fixture.workspace)
+      expect(readExisting.kind, `read inside a read-only member: ${readExisting.kind === 'denied' ? readExisting.detail : ''}`).toBe('ok')
+
+      const writeRestricted = runConfined(await confined(world.provider, ['bash', '-c', `echo payload > ${JSON.stringify(join(restricted, 'ro-confined.txt'))}`], policy), fixture.workspace)
+      expect(writeRestricted.kind, 'write inside a read-only member must be denied').toBe('denied')
+      expect(existsSync(join(restricted, 'ro-confined.txt'))).toBe(false)
     })
   }
 })

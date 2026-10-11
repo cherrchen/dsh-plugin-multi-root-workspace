@@ -354,6 +354,8 @@ function seedRegistryStore(primaryRoot) {
             // The directory this registration is granted for. A record without it
             // is reported as unusable rather than granted on a guess (the plugin
             // never writes such a record itself; this seeding plays the registry).
+            // `recordedPath` alone IS the read-write grant; a read-only record
+            // would name `readOnlyRecordedPath` instead (see src/registry.ts).
             recordedPath: canonical(additionalRepo),
             alias: 'other-repo',
             addedAt: new Date().toISOString(),

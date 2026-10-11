@@ -58,7 +58,7 @@ it('initializes and pools real stdio servers independently for the primary and a
     await mountProviderGate(ctx)
     await ctx.plugin(Routing)
     await ctx.plugin(LspStdio, { servers: { fixture: { command: process.execPath, args: [SERVER], extensionToLanguage: { '.ts': 'typescript' } } } })
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
     for (const root of [fixture.workspace, fixture.outside]) writeFileSync(join(root, 'same.ts'), `const value = ${JSON.stringify(root)};`)
     const query = (filePath: string) => ctx.lsp.query({ workspaceRoot: fixture.workspace, filePath, operation: 'hover', position: { line: 0, character: 6 } })
     const primary = await query('same.ts')
@@ -87,7 +87,7 @@ describe('real stdio servers across session origins and edge roots', () => {
     mkdirSync(second)
     const { ctx } = await mountLsp(fixture)
     try {
-      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       for (const root of [fixture.workspace, fixture.outside, second]) writeFileSync(join(root, 'same.ts'), `const value = ${JSON.stringify(root)};`)
       const waterfall = ctx.waterfall.bind(ctx) as (event: string, payload: { agent: { session: { header: { cwd: string } } } }, next: () => Promise<unknown>) => Promise<{ kind: string; hover?: { contents: string } }>
       const queryIn = (origin: string, filePath: string, workspaceRoot: string) => waterfall('tools/execute', { agent: { session: { header: { cwd: origin } } } },
@@ -116,7 +116,7 @@ describe('real stdio servers across session origins and edge roots', () => {
     writeFileSync(join(named, 'uni.ts'), 'const u = 1\n')
     const { ctx } = await mountLsp(fixture)
     try {
-      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'uni', path: named, recordedPath: canonicalPath(named) }])
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'uni', path: named, recordedPath: canonicalPath(named), access: 'read-write' }])
       const result = await ctx.lsp.query({ workspaceRoot: fixture.workspace, filePath: join(named, 'uni.ts'), operation: 'hover', position: { line: 0, character: 6 } })
       const payload = hoverOf(result)
       expect(payload.rootUri).toBe(pathToFileURL(canonicalPath(named)).href)
@@ -130,7 +130,7 @@ describe('real stdio servers across session origins and edge roots', () => {
     writeFileSync(join(fixture.outside, 'fast.ts'), 'const f = 1\n')
     const { ctx } = await mountLsp(fixture)
     try {
-      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       const controller = new AbortController()
       const started = Date.now()
       const pending = ctx.lsp.query({ workspaceRoot: fixture.workspace, filePath: join(fixture.outside, 'slow.ts'), operation: 'hover', position: { line: 0, character: 6 } }, controller.signal)
@@ -153,7 +153,7 @@ describe('real stdio servers across session origins and edge roots', () => {
     writeFileSync(join(fixture.outside, 'well.ts'), 'const w = 1\n')
     const { ctx } = await mountLsp(fixture)
     try {
-      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       await expect(ctx.lsp.query({ workspaceRoot: fixture.workspace, filePath: join(fixture.outside, 'crash.ts'), operation: 'hover', position: { line: 0, character: 6 } })).rejects.toThrow()
       // Whether upstream respawns or reports, the next query must settle, not hang.
       const settled = await ctx.lsp.query({ workspaceRoot: fixture.workspace, filePath: join(fixture.outside, 'well.ts'), operation: 'hover', position: { line: 0, character: 6 } })
@@ -167,7 +167,7 @@ describe('real stdio servers across session origins and edge roots', () => {
     writeFileSync(join(fixture.outside, 'same.ts'), 'const value = 1\n')
     const { ctx } = await mountLsp(fixture)
     try {
-      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       writeFileSync(join(fixture.base, 'elsewhere.ts'), '')
       const other = join(fixture.base, 'other-target')
       mkdirSync(other)
@@ -186,7 +186,7 @@ describe('real stdio servers across session origins and edge roots', () => {
     writeFileSync(join(fixture.workspace, 'same.ts'), 'const value = 1\n')
     const { ctx, fiber } = await mountLsp(fixture)
     try {
-      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       await ctx.lsp.query({ workspaceRoot: fixture.workspace, filePath: 'same.ts', operation: 'hover', position: { line: 0, character: 0 } })
       await fiber.dispose()
       expect(Object.getOwnPropertyDescriptor(ctx.lsp, 'query')).toBeUndefined()
@@ -200,7 +200,7 @@ describe('real stdio servers across session origins and edge roots', () => {
     const { ctx } = await mountLsp(fixture)
     let crossDrive: string | undefined
     try {
-      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       writeFileSync(join(fixture.outside, 'same.ts'), 'const value = 1\n')
       const canonical = await ctx.lsp.query({ workspaceRoot: fixture.workspace, filePath: join(fixture.outside, 'same.ts'), operation: 'hover', position: { line: 0, character: 0 } })
       const variant = await ctx.lsp.query({ workspaceRoot: fixture.workspace, filePath: join(fixture.outside, 'SAME.TS').toUpperCase(), operation: 'hover', position: { line: 0, character: 0 } })
@@ -221,8 +221,8 @@ describe('real stdio servers across session origins and edge roots', () => {
       }
       writeFileSync(join(crossDrive, 'same.ts'), 'const value = 1\n')
       ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
-        { id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) },
-        { id: 'drive', path: crossDrive, recordedPath: canonicalPath(crossDrive) },
+        { id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' },
+        { id: 'drive', path: crossDrive, recordedPath: canonicalPath(crossDrive), access: 'read-write' },
       ])
       const other = await ctx.lsp.query({ workspaceRoot: fixture.workspace, filePath: join(crossDrive, 'same.ts'), operation: 'hover', position: { line: 0, character: 0 } })
       expect(hoverOf(other).rootUri).toBe(pathToFileURL(canonicalPath(crossDrive)).href)

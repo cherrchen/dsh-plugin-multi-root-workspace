@@ -84,7 +84,7 @@ async function confineBoth(
 ): Promise<{ upstream: ConfinedArgv; ours: ConfinedArgv; ctx: Context }> {
   const upstream = await mount(LocalSandboxProvider, mode, internalsFor(dialect))
   const ours = await mount(MultiRootSandboxProvider, mode, internalsFor(dialect))
-  ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, additionalRoots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path) })))
+  ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, additionalRoots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path), access: 'read-write' })))
   const policy: SandboxPolicy = { mode, workspaceRoot: fixture.workspace }
   return {
     upstream: await confined(upstream.provider, COMMAND, policy),
@@ -190,7 +190,7 @@ describe('the Windows ACL rung', () => {
   it('selects the plugin runner and preserves enforcement and payload', async () => {
     const upstream = await mount(LocalSandboxProvider, 'workspace-write', internalsFor('windows-acl'))
     const ours = await mount(MultiRootSandboxProvider, 'workspace-write', internalsFor('windows-acl'))
-    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'root-0', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'root-0', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
     const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: fixture.workspace }
     const expected = await confined(upstream.provider, COMMAND, policy)
     const result = await confined(ours.provider, COMMAND, policy)
@@ -199,5 +199,67 @@ describe('the Windows ACL rung', () => {
     expect(result.argv).toContain(canonicalPath(fixture.outside))
     expect(result.argv.slice(-COMMAND.length)).toEqual(COMMAND)
     expect({ ...result, argv: expected.argv }).toEqual(expected)
+  })
+})
+
+describe.skipIf(!posixRunner)('read-only additional roots (POSIX runner argv only)', () => {
+  /** Mount ours + upstream, with mixed-access members in the scope. */
+  const confineAccess = async (
+    dialect: Dialect,
+    members: readonly { path: string; access: 'read-write' | 'read-only' }[],
+    mode: SandboxPolicy['mode'] = 'workspace-write',
+  ): Promise<{ upstream: ConfinedArgv; ours: ConfinedArgv }> => {
+    const upstream = await mount(LocalSandboxProvider, mode, internalsFor(dialect))
+    const ours = await mount(MultiRootSandboxProvider, mode, internalsFor(dialect))
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, members.map((member, index) => ({
+      id: `root-${index}`,
+      path: member.path,
+      recordedPath: canonicalPath(member.path),
+      access: member.access,
+    })))
+    const policy: SandboxPolicy = { mode, workspaceRoot: fixture.workspace }
+    return {
+      upstream: await confined(upstream.provider, COMMAND, policy),
+      ours: await confined(ours.provider, COMMAND, policy),
+    }
+  }
+
+  it('widens only the writable members in every dialect', async () => {
+    const third = `${fixture.base}/third`
+    for (const dialect of DIALECTS) {
+      const { ours } = await confineAccess(dialect, [
+        { path: fixture.outside, access: 'read-write' },
+        { path: third, access: 'read-only' },
+      ])
+      const grants = parseConfined(ours.argv, COMMAND)
+      expect(grants.subpaths, dialect).toContain(canonicalPath(fixture.outside))
+      expect(grants.subpaths, dialect).not.toContain(canonicalPath(third))
+    }
+  })
+
+  it('returns the upstream result element for element when no member is writable', async () => {
+    for (const dialect of DIALECTS) {
+      const { upstream, ours } = await confineAccess(dialect, [{ path: fixture.outside, access: 'read-only' }])
+      expect(ours, dialect).toEqual(upstream)
+    }
+  })
+
+  it('widens nothing under read-only mode regardless of root access', async () => {
+    for (const dialect of DIALECTS) {
+      const { upstream, ours } = await confineAccess(dialect, [
+        { path: fixture.outside, access: 'read-write' },
+        { path: `${fixture.base}/third`, access: 'read-only' },
+      ], 'read-only')
+      expect(ours.argv, dialect).toEqual(upstream.argv)
+    }
+  })
+
+  it('leaves danger-full-access untouched (the executor never calls confine, but the guard holds anyway)', async () => {
+    for (const dialect of DIALECTS) {
+      const { upstream, ours } = await confineAccess(dialect, [
+        { path: fixture.outside, access: 'read-write' },
+      ], 'danger-full-access')
+      expect(ours.argv, dialect).toEqual(upstream.argv)
+    }
   })
 })

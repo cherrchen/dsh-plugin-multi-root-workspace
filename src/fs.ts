@@ -124,7 +124,9 @@ export class MultiRootFileSystem extends LocalFileSystem {
   private rootsFor(policy: SandboxExecutionPolicy, scope: FilesystemScope): string[] {
     const roots = writableRoots(policy)
     if (roots.length === 0) return roots
-    for (const root of scope.additionalRoots) {
+    // Only the writable members: a `read-only` root stays a workspace member
+    // (it is routed and readable) but can never enter this list.
+    for (const root of scope.writableRoots) {
       if (!roots.includes(root)) roots.push(root)
     }
     return roots
@@ -161,11 +163,19 @@ export class MultiRootFileSystem extends LocalFileSystem {
       }
     }
     if (!contained) {
-      const denial = `cannot write "${target.displayPath}": file access denied under workspace-write mode`
-      throw new FsError(
-        scope.additionalRoots.length === 0 ? denial : `${denial}; allowed roots: ${roots.join(', ')}`,
-        'FS_SANDBOX_DENIED',
-      )
+      let denial = `cannot write "${target.displayPath}": file access denied under workspace-write mode`
+      if (scope.additionalRoots.length > 0) denial += `; allowed roots: ${roots.join(', ')}`
+      // Name the read-only root the target sits in: without it, a denied write
+      // inside a workspace member looks identical to writing somewhere the
+      // operator never registered.
+      for (const root of scope.roots) {
+        if (root.access !== 'read-only') continue
+        if (await isPathUnder(fresh.targetKey, root.path)) {
+          denial += ` (${root.path} is a read-only additional root)`
+          break
+        }
+      }
+      throw new FsError(denial, 'FS_SANDBOX_DENIED')
     }
     return fresh
   }

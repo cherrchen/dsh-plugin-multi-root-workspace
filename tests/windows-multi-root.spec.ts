@@ -5,13 +5,17 @@ import { basename, dirname, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
+import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
-import { describe, expect, it } from 'vitest'
-import type { MultiRootSandboxProvider } from '../src/sandbox.ts'
+import { afterEach, describe, expect, it } from 'vitest'
+import { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { parseWindowsProfile, workspaceScopeSid, widenWindowsProfile } from '../src/windows-profile.ts'
 import { mountCompat } from './support/compat.ts'
+import { confined } from './support/confine.ts'
 import { createFixtureWorkspace, REPO_ROOT } from './support/temp-workspace.ts'
 
 // The upstream runner slot must be an absolute existing file: the standalone
@@ -127,7 +131,7 @@ it.runIf(process.platform === 'win32')('enforces real Windows writes in both roo
     await ctx.plugin(MultiRootSandboxProvider)
     const provider = ctx.sandbox as MultiRootSandboxProvider
     provider.internals = { chain: ['windows-acl'], windowsAclRunnerArgs: [process.execPath, fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-sandbox-windows-acl/runner'))] }
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
     const policy = { mode: 'workspace-write' as const, workspaceRoot: canonicalPath(fixture.workspace) }
     const execute = async (provider: LocalSandboxProvider, roots: string[]) => {
       const payload = `const fs=require('fs'); const roots=${JSON.stringify(roots)}; for(const root of roots){try {fs.writeFileSync(root+'/probe.txt','ok');console.log('allowed')}catch(e){console.log('denied:'+e.code)}}`
@@ -179,3 +183,104 @@ it.runIf(process.platform === 'win32')('enforces real Windows writes in both roo
     expect(denied.status, denied.stderr).toBe(0); expect(denied.stdout).toMatch(/^denied:/)
   } finally { await ctx.fiber.dispose(); fixture.dispose() }
 }, 180000)
+
+describe('writable-only roots in the Windows ACL profile', () => {
+  const fibers: Array<Awaited<ReturnType<Context['plugin']>>> = []
+  afterEach(async () => {
+    while (fibers.length > 0) await fibers.pop()?.dispose()
+  })
+
+  const COMMAND = ['cmd.exe', '/c', 'echo hi']
+
+  /**
+   * Confine once through the real provider with the windows-acl runner forced
+   * (no Win32 calls on a POSIX host): the answer is the argv shape plus the
+   * scope SID the runner would compute from the flags it received.
+   */
+  async function confineWindows(
+    fixture: ReturnType<typeof createFixtureWorkspace>,
+    members: readonly { path: string; access: 'read-write' | 'read-only' }[],
+  ): Promise<{ argv: readonly string[]; sid: string }> {
+    const ctx = new Context()
+    fibers.push(
+      await ctx.plugin(SessionProjectionRegistry),
+      await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace }),
+      await ctx.plugin(MultiRootScopeService),
+    )
+    await mountCompat(ctx)
+    fibers.push(await ctx.plugin(MultiRootSandboxProvider, {}))
+    const provider = ctx.sandbox as LocalSandboxProvider
+    provider.internals = { chain: ['windows-acl'], windowsAclRunnerArgs: ['node', '/fake/runner.js'] }
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, members.map((member, index) => ({
+      id: `root-${index}`,
+      path: member.path,
+      recordedPath: canonicalPath(member.path),
+      access: member.access,
+    })))
+    const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: fixture.workspace }
+    const result = await confined(provider, COMMAND, policy)
+    // The runner derives the scope SID from the flags it is invoked with, so
+    // reading them back is the same derivation — independent of the widening.
+    // (Parsed by hand rather than parseWindowsProfile: on a POSIX host the
+    // src-relative `./windows-runner.js` path the widening emits does not
+    // exist yet, and the strict runner-mode parse would fail on that alone.)
+    const workspace = flagValues(result.argv, '--workspace')[0]!
+    const additionalRoots = flagValues(result.argv, '--additional-root')
+    return { argv: result.argv, sid: workspaceScopeSid([workspace, ...additionalRoots]) }
+  }
+
+  /** Every value that follows one flag spelling in the argv. */
+  function flagValues(argv: readonly string[], flag: string): string[] {
+    const values: string[] = []
+    for (const [index, part] of argv.entries()) {
+      if (part === flag && argv[index + 1] !== undefined) values.push(argv[index + 1]!)
+    }
+    return values
+  }
+
+  it('grants only the writable members: A read-write + B read-only', async () => {
+    const fixture = createFixtureWorkspace('windows-access')
+    try {
+      const extra = `${fixture.base}/A`; mkdirSync(extra)
+      const restricted = `${fixture.base}/B`; mkdirSync(restricted)
+      const { argv, sid } = await confineWindows(fixture, [
+        { path: extra, access: 'read-write' },
+        { path: restricted, access: 'read-only' },
+      ])
+      expect(argv).toContain('--additional-root')
+      expect(argv).toContain(canonicalPath(extra))
+      expect(argv).not.toContain(canonicalPath(restricted))
+      expect(sid).toBe(workspaceScopeSid([canonicalPath(fixture.workspace), canonicalPath(extra)]))
+    } finally { fixture.dispose() }
+  })
+
+  it('degenerates to the upstream passthrough when every member is read-only', async () => {
+    const fixture = createFixtureWorkspace('windows-access')
+    try {
+      const restricted = `${fixture.base}/B`; mkdirSync(restricted)
+      const { argv, sid } = await confineWindows(fixture, [{ path: restricted, access: 'read-only' }])
+      // No widening at all: the upstream runner argv returns element for
+      // element, so no --additional-root flag and no plugin runner.
+      expect(argv).not.toContain('--additional-root')
+      expect(argv[1]).not.toMatch(/windows-runner\.js$/)
+      expect(sid).toBe(workspaceScopeSid([canonicalPath(fixture.workspace)]))
+    } finally { fixture.dispose() }
+  })
+
+  it('widens the SID when a member becomes writable', async () => {
+    const fixture = createFixtureWorkspace('windows-access')
+    try {
+      const extra = `${fixture.base}/A`; mkdirSync(extra)
+      const restricted = `${fixture.base}/B`; mkdirSync(restricted)
+      const { sid } = await confineWindows(fixture, [
+        { path: extra, access: 'read-write' },
+        { path: restricted, access: 'read-write' },
+      ])
+      expect(sid).toBe(workspaceScopeSid([
+        canonicalPath(fixture.workspace),
+        canonicalPath(extra),
+        canonicalPath(restricted),
+      ]))
+    } finally { fixture.dispose() }
+  })
+})

@@ -105,20 +105,25 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     // passthrough cases must stay free of the extra synchronous IO.
     if (policy.mode !== 'workspace-write') return confined
     const scope = this.ctx.multiRootScope.resolve(policy)
-    if (scope.additionalRoots.length === 0) return confined
+    // Only the WRITABLE members widen the kernel profile: a `read-only`
+    // additional root stays a workspace member (routed, readable) but the
+    // dialect must never grant a write to it. With none, the upstream result
+    // is returned element for element — the same passthrough as an empty scope.
+    const writable = scope.writableRoots
+    if (writable.length === 0) return confined
 
     try {
       const shape = splitConfined(confined.argv, argv)
       if (shape.dialect === 'windows-acl') {
-        return { ...confined, argv: [...widenWindowsProfile(shape.profileArgs, scope.additionalRoots, scope.primaryRoot), '--', ...argv] }
+        return { ...confined, argv: [...widenWindowsProfile(shape.profileArgs, writable, scope.primaryRoot), '--', ...argv] }
       }
-      const profileArgs = widenProfileArgs(shape.dialect, shape.profileArgs, policy, scope.additionalRoots)
+      const profileArgs = widenProfileArgs(shape.dialect, shape.profileArgs, policy, writable)
       return { ...confined, argv: [...profileArgs, '--', ...argv] }
     } catch (error: unknown) {
       if (!(error instanceof DialectUnrecognizedError)) throw error
       throw new SandboxUnavailableError(
         policy.mode,
-        `multi-root workspace: cannot grant the additional workspace roots [${scope.additionalRoots.join(', ')}] `
+        `multi-root workspace: cannot grant the additional workspace roots [${writable.join(', ')}] `
         + `under the primary root ${scope.primaryRoot} — ${error.message}`,
       )
     }

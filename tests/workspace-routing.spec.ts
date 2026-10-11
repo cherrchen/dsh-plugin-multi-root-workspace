@@ -27,7 +27,7 @@ beforeEach(async () => {
   await mountProviderGate(ctx)
   writeFileSync(join(fixture.workspace, 'same.ts'), 'primary')
   writeFileSync(join(fixture.outside, 'same.ts'), 'additional')
-  ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+  ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
 })
 afterEach(async () => { await ctx.fiber.dispose(); fixture.dispose() })
 

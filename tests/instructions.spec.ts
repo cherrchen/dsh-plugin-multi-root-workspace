@@ -114,7 +114,7 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
   const setRoots = (paths: readonly string[]): void => {
     ctx.multiRootScope.setAdditionalRoots(
       fixture.workspace,
-      paths.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path) })),
+      paths.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path), access: 'read-write' })),
     )
   }
   setRoots(roots)
@@ -353,7 +353,7 @@ describe('when a root leaves the workspace', () => {
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{
       id: 'root-0',
       path: repoA,
-      recordedPath: join(fixture.base, 'somewhere-else'),
+      recordedPath: join(fixture.base, 'somewhere-else'), access: 'read-write',
     }])
     expect(textOf(await world.step())).toContain('no longer')
   })

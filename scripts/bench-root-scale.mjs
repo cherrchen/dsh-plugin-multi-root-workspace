@@ -58,7 +58,7 @@ try {
     const roots = Array.from({ length: size }, (_unused, index) => {
       const dir = join(base, `r${index}`)
       mkdirSync(dir, { recursive: true })
-      return { id: `root-${index}`, path: dir, recordedPath: dir, addedAt: '2026-01-01T00:00:00.000Z' }
+      return { id: `root-${index}`, path: dir, recordedPath: dir, access: 'read-write', addedAt: '2026-01-01T00:00:00.000Z' }
     })
     pools.set(size, roots)
   }

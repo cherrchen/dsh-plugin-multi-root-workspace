@@ -13,7 +13,10 @@ import { Context } from '@deepseek-ai/cordis'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
+import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { describe, expect, it } from 'vitest'
+import { MultiRootFileSystem } from '../src/fs.ts'
 import type { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
@@ -123,7 +126,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     for (const dir of [primary, extra, third]) mkdirSync(dir)
     const mounted = await mountProvider(primary)
     try {
-      mounted.ctx.multiRootScope.setAdditionalRoots(primary, [{ id: 'extra', path: extra, recordedPath: canonicalPath(extra) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(primary, [{ id: 'extra', path: extra, recordedPath: canonicalPath(extra), access: 'read-write' }])
       const node = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([primary, extra, third])])
       expect(node.error).toBeUndefined()
       expect(node.status, node.stderr).toBe(0)
@@ -153,7 +156,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     mkdirSync(third)
     const mounted = await mountProvider(fixture.workspace)
     try {
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'drive', path: extra, recordedPath: canonicalPath(extra) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'drive', path: extra, recordedPath: canonicalPath(extra), access: 'read-write' }])
       const result = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([fixture.workspace, extra, third])])
       expect(result.status, result.stderr).toBe(0)
       expect(result.stdout.trim().split(/\r?\n/)).toEqual(['allowed', 'allowed', expect.stringMatching(/^denied:/)])
@@ -172,7 +175,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       // The scope canonicalizes `path`, so a case variant or the volume's 8.3
       // short name for the same directory carries the same grant.
       const variant = fixture.outside.toUpperCase()
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: variant, recordedPath: recorded }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: variant, recordedPath: recorded, access: 'read-write' }])
       const first = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([fixture.outside], 'variant.txt')])
       expect(first.status, first.stderr).toBe(0)
       expect(first.stdout.trim()).toBe('allowed')
@@ -181,7 +184,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
         console.info(`8.3 short names are disabled on this volume; skipping the short-alias assertion (${short})`)
         return
       }
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: short, recordedPath: recorded }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: short, recordedPath: recorded, access: 'read-write' }])
       const second = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([fixture.outside], 'short.txt')])
       expect(second.status, second.stderr).toBe(0)
       expect(second.stdout.trim()).toBe('allowed')
@@ -199,7 +202,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     try {
       // Registering the junction records the TARGET; writes through the link
       // work while the link still resolves there.
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: link, recordedPath: canonicalPath(link) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: link, recordedPath: canonicalPath(link), access: 'read-write' }])
       expect(canonicalPath(link)).toBe(canonicalPath(target))
       const first = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([join(link)], 'via-link.txt')])
       expect(first.status, first.stderr).toBe(0)
@@ -222,7 +225,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     const fixture = createFixtureWorkspace('win-removed')
     const mounted = await mountProvider(fixture.workspace)
     try {
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       const marker = join(fixture.workspace, 'child-ran.txt')
       const confined = await mounted.provider.confine([process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(marker)},'ran')`], mounted.policy)
       rmSync(fixture.outside, { recursive: true, force: true })
@@ -292,7 +295,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
         context.skip(`cannot verify the deny ACE on this host; icacls says:\n${aclText}`)
         return
       }
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: foreign, recordedPath: canonicalPath(foreign) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: foreign, recordedPath: canonicalPath(foreign), access: 'read-write' }])
       const third = join(fixture.base, 'third')
       mkdirSync(third)
       // Fail-closed, not a specific exit: either the runner refuses the grant
@@ -336,7 +339,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     const writtenByA = join(fixture.outside, 'from-a.txt')
     const mounted = await mountProvider(fixture.workspace)
     try {
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       const waiter = `const fs=require('fs');const go=${JSON.stringify(go)};const t=setInterval(()=>{if(fs.existsSync(go)){clearInterval(t);fs.writeFileSync(${JSON.stringify(writtenByA)},'a');process.exit(0)}},100);setTimeout(()=>process.exit(9),90000)`
       const a = await startConfined(mounted, [process.execPath, '-e', waiter])
       // Revoke X before A is released: A's grant snapshot still covers it.
@@ -360,13 +363,13 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     const mounted = await mountProvider(fixture.workspace)
     try {
       const payload = (roots: readonly string[]) => `const fs=require('fs');console.log('TEMP='+process.env.TEMP);const roots=${JSON.stringify(roots)};for(const root of roots){try{fs.writeFileSync(root+'/probe.txt','ok');console.log('allowed')}catch(e){console.log('denied:'+(e&&e.code||e))}}`
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'x', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       const setX = [
         await startConfined(mounted, [process.execPath, '-e', payload([fixture.outside, extraY])]),
         await startConfined(mounted, [process.execPath, '-e', payload([fixture.outside, extraY])]),
       ]
       const policyY = { ...mounted.policy, workspaceRoot: canonicalPath(secondPrimary) }
-      mounted.ctx.multiRootScope.setAdditionalRoots(secondPrimary, [{ id: 'y', path: extraY, recordedPath: canonicalPath(extraY) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(secondPrimary, [{ id: 'y', path: extraY, recordedPath: canonicalPath(extraY), access: 'read-write' }])
       const setY = [
         await startConfined(mounted, [process.execPath, '-e', payload([extraY, fixture.outside])], policyY),
         await startConfined(mounted, [process.execPath, '-e', payload([extraY, fixture.outside])], policyY),
@@ -394,7 +397,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     const fixture = createFixtureWorkspace('win-streams')
     const mounted = await mountProvider(fixture.workspace)
     try {
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       const result = await spawnConfined(mounted, [process.execPath, '-e', `process.stdout.write('out');process.stderr.write('err');process.exit(42)`])
       expect(result.status).toBe(42)
       expect(result.stdout).toContain('out')
@@ -406,7 +409,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     const fixture = createFixtureWorkspace('win-readonly')
     const mounted = await mountProvider(fixture.workspace)
     try {
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       const confined = await mounted.provider.confine(
         [process.execPath, '-e', `try{require('fs').writeFileSync(${JSON.stringify(join(fixture.outside, 'ro.txt'))},'bad');console.log('allowed')}catch(e){console.log('denied:'+(e&&e.code||e))}`],
         { ...mounted.policy, mode: 'read-only' },
@@ -502,7 +505,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       // confinement fact, and the log needs every outcome to see it.
       expect(baseline, `no candidate program was interruptible even unconfined (${unconfinedOutcomes.join(', ')}); the Ctrl+C mechanism itself is broken here`).toBeDefined()
       const upstream = await mounted.provider.confine(baseline!.argv, mounted.policy)
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       const widened = await mounted.provider.confine(baseline!.argv, mounted.policy)
       const upstreamResult = await interruptOutcome(upstream.argv, baseline!.ready)
       console.info(`ConPTY Ctrl+C upstream (program=${baseline!.name}): ${upstreamResult.outcome} — ` +
@@ -524,6 +527,110 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       fixture.dispose()
     }
   }, 180_000)
+
+  it('enforces per-root access end to end: writable members write, read-only members only read', async () => {
+    const fixture = createFixtureWorkspace('win-access')
+    const primary = fixture.workspace
+    const a = join(fixture.base, 'extra-a')
+    const b = join(fixture.base, 'extra-b')
+    for (const dir of [a, b]) mkdirSync(dir)
+    // A pre-existing file in the read-only member proves reads still pass.
+    writeFileSync(join(b, 'existing.txt'), 'seed')
+    const mounted = await mountProvider(primary)
+    try {
+      const setRoots = (roots: readonly { id: string; path: string; access: 'read-write' | 'read-only' }[]) =>
+        mounted.ctx.multiRootScope.setAdditionalRoots(primary,
+          roots.map(root => ({ id: root.id, path: root.path, recordedPath: canonicalPath(root.path), access: root.access })))
+      setRoots([
+        { id: 'a', path: a, access: 'read-write' },
+        { id: 'b', path: b, access: 'read-only' },
+      ])
+
+      const expectVerdicts = async (argv: readonly string[], wanted: readonly (string | RegExp)[]) => {
+        const result = await spawnConfined(mounted, argv)
+        expect(result.error).toBeUndefined()
+        const lines = result.stdout.trim().split(/\r?\n/)
+        expect(lines).toEqual(wanted.map(expectation => typeof expectation === 'string' ? expectation : expect.stringMatching(expectation)))
+      }
+
+      // Node fs.writeFileSync: primary and A writable, B refused, B readable.
+      await expectVerdicts(
+        [process.execPath, '-e', writeProbe([primary, a, b])],
+        ['allowed', 'allowed', /^denied:/],
+      )
+      await expectVerdicts(
+        [process.execPath, '-e', `console.log(require('fs').readFileSync(${JSON.stringify(join(b, 'existing.txt'))},'utf8'))`],
+        ['seed'],
+      )
+      // PowerShell Set-Content: same verdicts under a different write API.
+      await expectVerdicts(
+        powershellArgv(`try { Set-Content -Path ${JSON.stringify(join(a, 'ps.txt'))} -Value ok; 'allowed' } catch { 'denied' }`),
+        ['allowed'],
+      )
+      await expectVerdicts(
+        powershellArgv(`try { Set-Content -Path ${JSON.stringify(join(b, 'ps.txt'))} -Value bad; 'allowed' } catch { 'denied' }`),
+        ['denied'],
+      )
+      // The ConPTY path: the terminal spawns the confined argv, so the runner's
+      // restricted token gates it exactly like a piped spawn.
+      await mounted.ctx.plugin(LocalSubprocess)
+      const terminal = await mounted.ctx.subprocess.spawnTerminal({
+        argv: (await mounted.provider.confine([process.execPath, '-e', writeProbe([primary, a, b], 'pty.txt')], mounted.policy)).argv as string[],
+        cwd: primary, rows: 24, cols: 100, terminalType: 'xterm-256color', graceMs: 3000,
+      })
+      try {
+        terminal.output.resume()
+        let seen = ''
+        terminal.output.on('data', (chunk: Buffer | string) => { seen += chunk.toString() })
+        const done = await Promise.race([
+          terminal.done.then(() => 'done' as const, () => 'failed' as const),
+          new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), 60_000)),
+        ])
+        expect(done, `pty child never exited; output: ${seen}`).toBe('done')
+        expect(seen.replace(/\r/g, '')).toContain('allowed')
+        expect(seen.replace(/\r/g, '').split('\n').filter(line => line === 'allowed' || line.startsWith('denied')))
+          .toEqual(['allowed', 'allowed', expect.stringMatching(/^denied:/)])
+      } finally { await terminal.terminate() }
+
+      // The in-process fence agrees with the kernel token on both verbs. The
+      // file system needs the real policy/scope services, so it gets its own
+      // context carrying the same scope entries.
+      const fsCtx = new Context()
+      try {
+        await fsCtx.plugin(SessionProjectionRegistry)
+        await fsCtx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: primary })
+        await fsCtx.plugin(MultiRootScopeService)
+        await mountCompat(fsCtx)
+        await fsCtx.plugin(MultiRootFileSystem, { cwd: primary })
+        fsCtx.multiRootScope.setAdditionalRoots(primary, [
+          { id: 'a', path: a, recordedPath: canonicalPath(a), access: 'read-write' },
+          { id: 'b', path: b, recordedPath: canonicalPath(b), access: 'read-only' },
+        ])
+        const fs = fsCtx.fs
+        await fs.writeText(await fs.resolve(join(a, 'via-fs.txt')), 'fs')
+        await expect(fs.writeText(await fs.resolve(join(b, 'via-fs.txt')), 'fs'))
+          .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+        await expect(fs.editText(await fs.resolve(join(b, 'existing.txt')), { oldString: 'seed', newString: 'x', replaceAll: false }))
+          .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      } finally { await fsCtx.fiber.dispose() }
+
+      // Flip access: A read-only refuses new writes, B read-write accepts them.
+      setRoots([
+        { id: 'a', path: a, access: 'read-only' },
+        { id: 'b', path: b, access: 'read-write' },
+      ])
+      await expectVerdicts(
+        [process.execPath, '-e', writeProbe([a, b], 'after-flip.txt')],
+        [/^denied:/, 'allowed'],
+      )
+      // Removing B revokes it entirely for new processes.
+      setRoots([{ id: 'a', path: a, access: 'read-only' }])
+      await expectVerdicts(
+        [process.execPath, '-e', writeProbe([b], 'gone.txt')],
+        [/^denied:/],
+      )
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 300_000)
 
   it('runs Git Bash confined when a Git installation is present', async (context) => {
     const fixture = createFixtureWorkspace('win-bash')
@@ -554,7 +661,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
         /NtCreateDirectoryObject|0xC0000022|\*\*\* fatal error - /i.test(result.stderr) || result.status === 3221225794
       const upstream = await mounted.provider.confine([bash, '-c', script], mounted.policy)
       const upstreamResult = await spawnArgv(upstream.argv[0]!, upstream.argv.slice(1))
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
       const pluginResult = await spawnConfined(mounted, [bash, '-c', script])
       const upstreamFailed = msysStartupFailure(upstreamResult)
       const pluginFailed = msysStartupFailure(pluginResult)
