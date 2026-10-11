@@ -24,7 +24,7 @@ DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围�
 
 **已完成并发布：`v0.1.4`**——在 `v0.1.3` 契约不变的前提下，受支持的上游运行时扩展到 `0.1.7-rc.2`（形状与 `0.1.7-rc.1` 相同，适配层无新分支；cordis 仍是 `~4.0.4`）。详见 [CHANGELOG](./CHANGELOG.md)。
 
-**已发布 `v0.1.5`**：DSH 0.2 RC 支持与验证证据见[路线账本](./docs/plans/active/2026-09-12-multi-root-workspace.md)。本开发分支增加 DSH `0.2.1-alpha.1` / `0.2.1-alpha.2` 的精确兼容及动态 cwd 共存适配，尚未发布；接口审查见[迁移参考](./docs/reference/dsh-0.2.1-migration.md)。
+**v0.1.5 已发布**。当前开发分支包含尚未发布的 DSH `0.2.1-alpha.1` / `0.2.1-alpha.2` 支持、动态 cwd / Session origin 分离，以及 LSP、Windows ACL、附加根文件浏览与 Worktree 能力；这些变更拟纳入 `v0.1.6`，发布状态见[路线账本](./docs/plans/active/2026-09-12-multi-root-workspace.md)。
 
 进度、编号与发布状态的唯一真源是[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)（M1–M4 是 MVP 里程碑编号，H1–H4 是 `v0.1.1` 批次编号，其中 H1 即 M4）；逐项证据见各[已完成计划](./docs/plans/README.md)，每个版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)。
 

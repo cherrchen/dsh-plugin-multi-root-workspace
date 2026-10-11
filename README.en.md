@@ -24,7 +24,7 @@ Three things make this plugin worth looking at:
 
 **Done and released: `v0.1.4`** — with the `v0.1.3` contract unchanged, the supported upstream runtimes grow to `0.1.7-rc.2` (same shapes as `0.1.7-rc.1`, no new adapter branch; cordis stays at `~4.0.4`). See the [CHANGELOG](./CHANGELOG.en.md).
 
-**`v0.1.5` is released**: DSH 0.2 RC support and evidence are recorded in the [roadmap ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md). This development branch adds exact compatibility with DSH `0.2.1-alpha.1` / `0.2.1-alpha.2` and adapts to dynamic working directories; these changes are unreleased. See the [migration review](./docs/reference/dsh-0.2.1-migration.md).
+**`v0.1.5` is released**. This development branch contains unreleased support for DSH `0.2.1-alpha.1` / `0.2.1-alpha.2`, separation of dynamic cwd from Session origin, and LSP, Windows ACL, additional-root file browsing, and Worktree capabilities. These changes are proposed for `v0.1.6`; see the [roadmap ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md) for release status.
 
 The single source of truth for progress, numbering, and release state is the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账) (M1–M4 are the MVP milestone numbers, H1–H4 are the `v0.1.1` batch numbers, and H1 is M4); per-item evidence lives in the [completed plans](./docs/plans/README.md), and the user-visible changes of each version are in the [CHANGELOG](./CHANGELOG.en.md).
 
