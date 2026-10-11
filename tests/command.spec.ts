@@ -745,6 +745,39 @@ describe('per-root access on the command and the panel', () => {
     expect(bad.text).toContain('read-only or read-write')
   })
 
+  it('revives a withheld read-only root without upgrading it, unless a flag says so', async () => {
+    const stack = await mount()
+    const extra = join(fixture.base, 'extra')
+    mkdirSync(extra)
+    await run(`add ${extra} --read-only`)
+
+    // Withhold the record, let the operator OBSERVE it missing, then bring the
+    // directory back: the bare re-add is a revive — the withheld last
+    // observation is exactly what revive detection looks at — not a new
+    // registration, so the stored access must be kept.
+    rmSync(extra, { recursive: true, force: true })
+    await run('list')
+    mkdirSync(extra)
+
+    // No flag may not send a level at all: the command used to forward its own
+    // read-write default, which the registry then honored as an explicit
+    // upgrade and the root gained write authority silently.
+    const revived = await run(`add ${extra}`)
+    expect(revived.kind).toBe('success')
+    expect(revived.text).toContain(`${canonicalPath(extra)} (read-only)`)
+    expect(revived.text).not.toContain('(read-write)')
+    expect(stack.scope.writableOf(primary)).toEqual([])
+
+    // An explicit flag is the upgrade on the same revive path.
+    rmSync(extra, { recursive: true, force: true })
+    await run('list')
+    mkdirSync(extra)
+    const upgraded = await run(`add ${extra} --read-write`)
+    expect(upgraded.kind).toBe('success')
+    expect(upgraded.text).toContain(`${canonicalPath(extra)} (read-write)`)
+    expect(stack.scope.writableOf(primary)).toEqual([canonicalPath(extra)])
+  })
+
   it('carries access through the panel add/setAccess endpoints as a RootsView', async () => {
     await mount({ withConnection: true })
     const extra = join(fixture.base, 'extra')

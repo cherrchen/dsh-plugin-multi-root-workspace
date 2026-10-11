@@ -171,7 +171,7 @@ export function apply(ctx: Context): void {
   ctx.commands.register({
     name: COMMAND_NAME,
     description: 'List, add, remove, alias, or reveal the additional workspace roots of this session',
-    input: { hint: '[list|add [path] [--read-only]|remove <n|path>|alias <n|path> [name]|access <n|path> <level>|reveal <n|path>|help]' },
+    input: { hint: '[list|add [path] [--read-only|--read-write]|remove <n|path>|alias <n|path> [name]|access <n|path> <level>|reveal <n|path>|help]' },
     handler: async invocation => await runCommand(ctx, invocation),
   })
 
@@ -227,7 +227,7 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
             text: `/${COMMAND_NAME}: no directory was selected; pass an absolute path or use the Workspace Folders panel`,
           }
         }
-        await registry.add(primaryRoot, { path, access })
+        await registry.add(primaryRoot, { path, ...(access === undefined ? {} : { access }) })
         return { kind: 'success', text: await report(registry, primaryRoot) }
       }
       case 'remove': {
@@ -280,7 +280,7 @@ function helpText(): string {
   return [
     `/${COMMAND_NAME} — additional workspace roots of this session`,
     `  /${COMMAND_NAME} list`,
-    `  /${COMMAND_NAME} add [absolute path] [--read-only]   (no path opens the directory picker when one is composed)`,
+    `  /${COMMAND_NAME} add [absolute path] [--read-only|--read-write]   (no path opens the directory picker when one is composed)`,
     `  /${COMMAND_NAME} remove <n|path>`,
     `  /${COMMAND_NAME} alias <n|path> [name]  (no name clears the alias)`,
     `  /${COMMAND_NAME} access <n|path> read-only|read-write`,
@@ -291,20 +291,28 @@ function helpText(): string {
 }
 
 /**
- * Split `add`'s argument into the path text and the access flag. `--read-only`
+ * Split `add`'s argument into the path text and the access flag. Either flag
  * is accepted as the first or the last token, so a path containing the flag
  * spelling (quoted or unquoted) is never mistaken for the flag.
+ *
+ * The access is TRI-STATE on purpose: it stays `undefined` when the operator
+ * named no level. `registry.add` revives a withheld record with its stored
+ * access unless a level is given explicitly, so forwarding a default here
+ * would silently upgrade a read-only registration to read-write.
  */
-function splitAddAccess(text: string): { text: string; access: RootAccess } {
+function splitAddAccess(text: string): { text: string; access: RootAccess | undefined } {
   const trimmed = text.trim()
-  if (trimmed === '--read-only') return { text: '', access: 'read-only' }
-  if (trimmed.startsWith('--read-only ') || trimmed.startsWith('--read-only\t')) {
-    return { text: trimmed.slice('--read-only'.length).trim(), access: 'read-only' }
+  for (const access of ['read-only', 'read-write'] as const) {
+    const flag = `--${access}`
+    if (trimmed === flag) return { text: '', access }
+    if (trimmed.startsWith(`${flag} `) || trimmed.startsWith(`${flag}\t`)) {
+      return { text: trimmed.slice(flag.length).trim(), access }
+    }
+    if (new RegExp(`\\s${flag}$`).test(trimmed)) {
+      return { text: trimmed.slice(0, -flag.length).trim(), access }
+    }
   }
-  if (/\s--read-only$/.test(trimmed)) {
-    return { text: trimmed.slice(0, -'--read-only'.length).trim(), access: 'read-only' }
-  }
-  return { text: trimmed, access: 'read-write' }
+  return { text: trimmed, access: undefined }
 }
 
 /** Parse the access level an `access` subcommand must end with. */
