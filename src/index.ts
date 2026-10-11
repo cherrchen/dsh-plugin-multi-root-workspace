@@ -54,6 +54,7 @@ export type { Config as SandboxConfig } from './sandbox.ts'
 export { MultiRootScopeService, sanitizeAdditionalRoots, renderWorkspaceRootsContext } from './scope.ts'
 export type { AdditionalWorkspaceRoot, FilesystemScope } from './scope.ts'
 export { MultiRootRegistry, DOMAIN_NAME, MAX_ALIAS_LENGTH, REGISTRY_CONTENDED_MESSAGE, multiRootDomainSpec } from './registry.ts'
+export { DEFAULT_MAX_ADDITIONAL_ROOTS, MAX_ADDITIONAL_ROOTS_CEILING } from './registry.ts'
 export type { AddRootInput, Config as RegistryConfig, PersistedPrimaryRoot, RegistryAuthorityState } from './registry.ts'
 export { RegistryAuthorityLease, RegistryLeaseContendedError } from './registry-lease.ts'
 export {

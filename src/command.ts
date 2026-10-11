@@ -124,6 +124,7 @@ export function renderRootsReport(
   primaryRoot: string,
   statuses: readonly RootStatus[],
   unavailable?: string,
+  limit?: number,
 ): string {
   const lines = [`Workspace root (primary; access follows the current sandbox mode): ${primaryRoot}`]
   if (unavailable !== undefined) {
@@ -145,6 +146,15 @@ export function renderRootsReport(
       `${withheld} root(s) are registered but not writable right now;`
       + ` restore the directory and run /${COMMAND_NAME} list, or remove the entry.`,
     )
+  }
+  if (limit !== undefined) {
+    lines.push(`${statuses.length} of ${limit} additional roots.`)
+    if (statuses.length > limit) {
+      lines.push(
+        `Warning: the store exceeds the configured limit of ${limit};`
+        + ' every stored root stays granted, only new adds are refused.',
+      )
+    }
   }
   lines.push(`Writable additional roots: ${availableRoots(statuses).length} of ${statuses.length}.`)
   return lines.join('\n')
@@ -245,7 +255,7 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
  */
 async function report(registry: MultiRootRegistry, primaryRoot: string): Promise<string> {
   const statuses = await registry.refresh(primaryRoot)
-  return renderRootsReport(canonicalRoot(primaryRoot), statuses, registry.unavailable)
+  return renderRootsReport(canonicalRoot(primaryRoot), statuses, registry.unavailable, registry.limit)
 }
 
 /** Render a failure the way the composer displays it. */
@@ -408,6 +418,8 @@ async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoo
     ...(primaryName === undefined ? {} : { primaryName }),
     ...(effectiveCwd === undefined ? {} : { effectiveCwd }),
     roots: statuses.map(toRootView),
+    limit: registry.limit,
+    count: statuses.length,
     ...(unavailable === undefined ? {} : { unavailable }),
   }
 }

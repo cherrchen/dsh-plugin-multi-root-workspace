@@ -1,0 +1,130 @@
+{
+  "platform": "darwin",
+  "arch": "arm64",
+  "node": "v24.18.0",
+  "sizes": [
+    0,
+    1,
+    4,
+    16,
+    32,
+    64
+  ],
+  "classifyRuns": 200,
+  "rows": [
+    {
+      "roots": 0,
+      "classifyMs": 0.0116,
+      "argv": {
+        "seatbelt": {
+          "args": 3,
+          "bytes": 269
+        },
+        "bwrap": {
+          "args": 15,
+          "bytes": 240
+        },
+        "landlock": {
+          "args": 9,
+          "bytes": 137
+        }
+      },
+      "windows": null
+    },
+    {
+      "roots": 1,
+      "classifyMs": 0.0214,
+      "argv": {
+        "seatbelt": {
+          "args": 3,
+          "bytes": 353
+        },
+        "bwrap": {
+          "args": 18,
+          "bytes": 391
+        },
+        "landlock": {
+          "args": 11,
+          "bytes": 214
+        }
+      },
+      "windows": null
+    },
+    {
+      "roots": 4,
+      "classifyMs": 0.0521,
+      "argv": {
+        "seatbelt": {
+          "args": 3,
+          "bytes": 605
+        },
+        "bwrap": {
+          "args": 27,
+          "bytes": 844
+        },
+        "landlock": {
+          "args": 17,
+          "bytes": 445
+        }
+      },
+      "windows": null
+    },
+    {
+      "roots": 16,
+      "classifyMs": 0.1754,
+      "argv": {
+        "seatbelt": {
+          "args": 3,
+          "bytes": 1619
+        },
+        "bwrap": {
+          "args": 63,
+          "bytes": 2668
+        },
+        "landlock": {
+          "args": 41,
+          "bytes": 1375
+        }
+      },
+      "windows": null
+    },
+    {
+      "roots": 32,
+      "classifyMs": 0.3349,
+      "argv": {
+        "seatbelt": {
+          "args": 3,
+          "bytes": 2979
+        },
+        "bwrap": {
+          "args": 111,
+          "bytes": 5116
+        },
+        "landlock": {
+          "args": 73,
+          "bytes": 2623
+        }
+      },
+      "windows": null
+    },
+    {
+      "roots": 64,
+      "classifyMs": 0.6679,
+      "argv": {
+        "seatbelt": {
+          "args": 3,
+          "bytes": 5699
+        },
+        "bwrap": {
+          "args": 207,
+          "bytes": 10012
+        },
+        "landlock": {
+          "args": 137,
+          "bytes": 5119
+        }
+      },
+      "windows": null
+    }
+  ]
+}

@@ -16,7 +16,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
-import MultiRootRegistry, { DOMAIN_NAME } from '../../src/registry.ts'
+import MultiRootRegistry, { DOMAIN_NAME, type Config as RegistryConfig } from '../../src/registry.ts'
 import MultiRootScopeService from '../../src/scope.ts'
 import { mountCompat } from './compat.ts'
 
@@ -41,7 +41,7 @@ export interface RegistryStack {
  * @param storeRoot - directory the JSON backend owns (created when absent).
  * @returns the mounted stack.
  */
-export async function mountRegistryStack(storeRoot: string): Promise<RegistryStack> {
+export async function mountRegistryStack(storeRoot: string, registryConfig: RegistryConfig = {}): Promise<RegistryStack> {
   mkdirSync(storeRoot, { recursive: true })
   const ctx = new Context()
   await ctx.plugin(Storage)
@@ -53,7 +53,7 @@ export async function mountRegistryStack(storeRoot: string): Promise<RegistrySta
   // The registry injects the compatibility gate, so a stack without it would
   // silently never start the service under test (see src/compat.ts).
   await mountCompat(ctx)
-  await ctx.plugin(MultiRootRegistry, { leasePath: `${storeRoot}/${DOMAIN_NAME}.lock` })
+  await ctx.plugin(MultiRootRegistry, { leasePath: `${storeRoot}/${DOMAIN_NAME}.lock`, ...registryConfig })
   return {
     ctx,
     registry: ctx.multiRootRegistry,

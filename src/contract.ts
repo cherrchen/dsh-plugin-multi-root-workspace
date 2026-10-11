@@ -99,6 +99,13 @@ export interface RootsView {
   readonly effectiveCwd?: string
   /** The additional roots, in registry order. */
   readonly roots: readonly RootView[]
+  /** The configured cap on stored registrations for this primary root. */
+  readonly limit: number
+  /**
+   * How many records are stored, in every state. `count > limit` is a
+   * historical over-limit store: everything stays granted, only adds refuse.
+   */
+  readonly count: number
   /** Set when the store itself could not be read; the panel shows this verbatim. */
   readonly unavailable?: string
 }
@@ -209,6 +216,8 @@ const rootsViewSchema = z.object({
   primaryName: z.string().optional(),
   effectiveCwd: z.string().optional(),
   roots: z.array(rootViewSchema),
+  limit: z.number().int().nonnegative(),
+  count: z.number().int().nonnegative(),
   unavailable: z.string().optional(),
 })
 
@@ -266,6 +275,8 @@ export function parseRootsView(value: unknown): Parsed<RootsView> {
       ...(view.primaryName === undefined ? {} : { primaryName: view.primaryName }),
       ...(view.effectiveCwd === undefined ? {} : { effectiveCwd: view.effectiveCwd }),
       roots: view.roots.map(narrowRootView),
+      limit: view.limit,
+      count: view.count,
       ...(view.unavailable === undefined ? {} : { unavailable: view.unavailable }),
     },
   }

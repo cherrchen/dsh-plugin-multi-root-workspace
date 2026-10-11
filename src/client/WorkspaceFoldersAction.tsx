@@ -408,6 +408,9 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   }, [mutate])
 
   const roots = state.view?.roots ?? []
+  // The host refuses the add as `root-limit-reached` anyway; disabling here is
+  // what makes the refusal explain itself before the operator clicks.
+  const atLimit = state.view !== undefined && state.view.count >= state.view.limit
   return (
     <div className="mrfw-overlay" role="presentation">
       <div
@@ -576,10 +579,10 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
             {state.noSession || props.pickDirectory === undefined ? null : (
               <IconButton
                 variant="outline"
-                disabled={state.busy}
+                disabled={state.busy || atLimit}
                 onClick={() => { void addViaPicker() }}
                 icon={<IconPlus />}
-                label={t('panel.add')}
+                label={atLimit ? t('panel.limitReached') : t('panel.add')}
               />
             )}
             {state.noSession ? null : (
@@ -588,14 +591,20 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
               className="mrfw-input"
               value={manualPath}
               placeholder={t('panel.addManual')}
+              disabled={atLimit}
               onChange={event => { setManualPath(event.target.value) }}
               onKeyDown={event => { if (event.key === 'Enter') void addManualPath() }}
             />
-            <Action onClick={() => { void addManualPath() }} disabled={state.busy || manualPath.trim() === ''} variant="primary">
+            <Action
+              onClick={() => { void addManualPath() }}
+              disabled={state.busy || atLimit || manualPath.trim() === ''}
+              variant="primary"
+            >
               {t('panel.addConfirm')}
             </Action>
               </>
             )}
+            {atLimit ? <span className="mrfw-note">{t('panel.limitReached')}</span> : null}
             <Action onClick={() => { void refresh() }} disabled={state.busy} variant="outline">{t('panel.retry')}</Action>
           </div>
         </div>

@@ -95,7 +95,7 @@ function mount(withFilesActions = false): Harness {
   const calls: Call[] = []
   const registrations: Registration[] = []
   const dictionaries: { ns: string; dicts: Record<string, unknown> }[] = []
-  let view: RootsView = { primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B] }
+  let view: RootsView = { primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 }
   const sessionListeners = new Set<() => void>()
   let currentSession: string | undefined = 'session-1'
   // Undefined keeps the 0.1.5 / 0.1.6-alpha.1 selection snapshot (`current`).
@@ -364,7 +364,7 @@ describe('the panel dialog', () => {
 
   it('shows the upstream workspace title as the primary row name', async () => {
     const harness = mount()
-    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'Payments Platform', roots: [ROOT_A] })
+    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'Payments Platform', roots: [ROOT_A], limit: 16, count: 1 })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
@@ -528,7 +528,7 @@ describe('the panel dialog', () => {
 
   it('reports a reveal whose answer is not a reveal result', async () => {
     const harness = mount()
-    harness.setRevealed({ primaryRoot: '/repos/primary', roots: [] })
+    harness.setRevealed({ primaryRoot: '/repos/primary', roots: [], limit: 16, count: 0 })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
@@ -591,7 +591,7 @@ describe('the panel dialog', () => {
 
   it('renders a redirected root as its own state', async () => {
     const harness = mount()
-    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_C] })
+    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_C], limit: 16, count: 1 })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
@@ -630,7 +630,7 @@ describe('the panel dialog', () => {
 
   it('shows the store failure the host reported', async () => {
     const harness = mount()
-    harness.setView({ primaryRoot: '/repos/primary', roots: [], unavailable: 'multi_root_workspace: file is not valid JSON' })
+    harness.setView({ primaryRoot: '/repos/primary', roots: [], limit: 16, count: 0, unavailable: 'multi_root_workspace: file is not valid JSON' })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
@@ -674,7 +674,7 @@ describe('the panel copy', () => {
 
 it('displays effective cwd separately from the stable primary root', async () => {
   const harness = mount()
-  harness.setView({ primaryRoot: '/repos/primary', effectiveCwd: '/unregistered/current', roots: [ROOT_A] })
+  harness.setView({ primaryRoot: '/repos/primary', effectiveCwd: '/unregistered/current', roots: [ROOT_A], limit: 16, count: 1 })
   renderPanel(harness)
   fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
   await waitFor(() => { expect(screen.getByText('/unregistered/current')).toBeDefined() })
@@ -689,7 +689,7 @@ it('ignores a response belonging to the previous session after catalog selection
   renderPanel(harness)
   fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
   await waitFor(() => { expect(harness.calls).toHaveLength(1) })
-  harness.setView({ primaryRoot: '/repos/second', effectiveCwd: '/repos/second/src', roots: [] })
+  harness.setView({ primaryRoot: '/repos/second', effectiveCwd: '/repos/second/src', roots: [], limit: 16, count: 0 })
   act(() => { harness.setSession('session-2') })
   await waitFor(() => { expect(screen.getByText('/repos/second')).toBeDefined() })
   harness.release()

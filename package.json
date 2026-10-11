@@ -75,6 +75,7 @@
     "url": "git+https://github.com/cherrchen/dsh-plugin-multi-root-workspace.git"
   },
   "scripts": {
+    "bench:roots": "node --experimental-transform-types scripts/bench-root-scale.mjs",
     "build": "pnpm run build:types && pnpm run bundle",
     "build:types": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
     "bundle": "node scripts/clean-lib.mjs && tsdown",

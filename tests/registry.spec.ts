@@ -9,7 +9,7 @@
  * handed to the kernel dialects.
  */
 
-import { mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -46,8 +46,8 @@ function makeRoot(name: string): string {
 }
 
 /** Mount the shared stack over this test's private store root. */
-async function mount(): Promise<RegistryStack> {
-  const stack = await mountRegistryStack(storeRoot)
+async function mount(config: { maxAdditionalRoots?: number } = {}): Promise<RegistryStack> {
+  const stack = await mountRegistryStack(storeRoot, config)
   stacks.push(stack)
   return stack
 }
@@ -686,6 +686,91 @@ describe('lease authority', () => {
     const statuses = await second.registry.add(primary, { path: extra })
     expect(statuses[0]?.state).toBe('available')
     expect(second.scope.scopeOf(primary)).toEqual([extra])
+  })
+})
+
+describe('the additional-root limit', () => {
+  it('refuses a NEW registration at the limit and leaves the store unchanged', async () => {
+    const { registry } = await mount({ maxAdditionalRoots: 1 })
+    const first = makeRoot('first')
+    const second = makeRoot('second')
+    await registry.add(primary, { path: first })
+
+    await expect(registry.add(primary, { path: second })).rejects.toMatchObject({
+      code: 'root-limit-reached',
+      detail: { reference: '1' },
+    })
+    expect(storedPaths()).toEqual([first])
+    expect(registry.list(primary)).toHaveLength(1)
+    expect(registry.limit).toBe(1)
+    expect(registry.overLimit(primary)).toBe(false)
+  })
+
+  it('accepts exactly the configured number of roots and refuses one more', async () => {
+    const { registry } = await mount({ maxAdditionalRoots: 2 })
+    const roots = ['first', 'second'].map(name => makeRoot(name))
+    for (const path of roots) await registry.add(primary, { path })
+
+    expect(registry.granted(primary)).toEqual(roots)
+    await expect(registry.add(primary, { path: makeRoot('third') })).rejects.toMatchObject({
+      code: 'root-limit-reached',
+    })
+    expect(storedPaths()).toEqual(roots)
+  })
+
+  it('lets a withheld record revive past the limit, because it is not a new record', async () => {
+    const { registry } = await mount({ maxAdditionalRoots: 1 })
+    const extra = makeRoot('extra')
+    await registry.add(primary, { path: extra })
+    rmSync(extra, { recursive: true, force: true })
+    expect((await registry.refresh(primary))[0]?.state).toBe('missing')
+
+    mkdirSync(extra)
+    const revived = await registry.add(primary, { path: extra })
+    expect(revived).toHaveLength(1)
+    expect(revived[0]?.state).toBe('available')
+  })
+
+  it.each([0, -3, 1.5, 65])('fails closed on the invalid limit %s and grants nothing', async (bad) => {
+    const { registry, scope } = await mount({ maxAdditionalRoots: bad })
+    const extra = makeRoot('extra')
+
+    expect(registry.authority.kind).toBe('config-invalid')
+    expect(registry.unavailable).toContain('maxAdditionalRoots')
+    expect(registry.unavailable).toContain(String(bad))
+    expect(registry.list(primary)).toEqual([])
+    expect(scope.scopeOf(primary)).toEqual([])
+    await expect(registry.add(primary, { path: extra })).rejects.toMatchObject({ code: 'config-invalid' })
+    await expect(registry.removeAt(primary, { kind: 'ordinal', ordinal: 1 })).rejects.toMatchObject({ code: 'config-invalid' })
+    // The domain was never opened, so the store file may not exist at all.
+    expect(existsSync(storeFile) ? storedPaths() : []).toEqual([])
+  })
+
+  it('keeps a historical over-limit store fully classified and granted, refusing only new adds', async () => {
+    const first = await mount({ maxAdditionalRoots: 64 })
+    const roots = Array.from({ length: 20 }, (_unused, index) => makeRoot(`r${index}`))
+    for (const path of roots) await first.registry.add(primary, { path })
+    await first.dispose()
+    stacks = stacks.filter(stack => stack !== first)
+
+    const second = await mount({ maxAdditionalRoots: 16 })
+    expect(second.registry.limit).toBe(16)
+    expect(second.registry.overLimit(primary)).toBe(true)
+    const statuses = second.registry.list(primary)
+    expect(statuses).toHaveLength(20)
+    expect(statuses.every(status => status.state === 'available')).toBe(true)
+    expect(second.registry.granted(primary)).toHaveLength(20)
+    expect(second.scope.scopeOf(primary)).toHaveLength(20)
+
+    await expect(second.registry.add(primary, { path: makeRoot('fresh') })).rejects.toMatchObject({
+      code: 'root-limit-reached',
+    })
+    expect(storedPaths()).toHaveLength(20)
+
+    // Removal still works and the count drops.
+    const after = await second.registry.removeAt(primary, { kind: 'ordinal', ordinal: 1 })
+    expect(after).toHaveLength(19)
+    expect(storedPaths()).toHaveLength(19)
   })
 })
 

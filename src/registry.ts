@@ -81,6 +81,16 @@ export const MAX_ALIAS_LENGTH = 120
  */
 export const REGISTRY_CONTENDED_MESSAGE
   = 'the root registry is owned by another DSH process; additional roots are not granted here. Close the other process, then retry.'
+/**
+ * Default cap on stored additional-root records per primary root. The bench
+ * evidence for this default lives in `docs/reference/bench-root-scale-*.json`
+ * (`pnpm bench:roots`): classification and argv widening stay flat far beyond
+ * it, so the cap exists to bound the operator-facing list and the widened
+ * profile size, not to protect the classifier.
+ */
+export const DEFAULT_MAX_ADDITIONAL_ROOTS = 16
+/** Hard ceiling for `maxAdditionalRoots`: values above it are config-invalid. */
+export const MAX_ADDITIONAL_ROOTS_CEILING = 64
 
 /**
  * Whether this process is the Registry Authority for the store-wide domain
@@ -91,6 +101,7 @@ export type RegistryAuthorityState =
   | { readonly kind: 'active' }
   | { readonly kind: 'contended' }
   | { readonly kind: 'storage-failed'; readonly reason: string }
+  | { readonly kind: 'config-invalid'; readonly reason: string }
 
 /**
  * Plugin configuration for the registry row. `leasePath` must sit beside the
@@ -101,6 +112,16 @@ export type RegistryAuthorityState =
 export interface Config {
   /** Absolute path of the store-wide kernel lock file. */
   readonly leasePath?: string
+  /**
+   * Cap on STORED additional-root records per primary root (every state
+   * counts, including withheld and unusable ones, so the count is stable and
+   * independent of the filesystem). Must be an integer in
+   * 1..{@link MAX_ADDITIONAL_ROOTS_CEILING}; an invalid value puts the
+   * registry in the fail-closed `config-invalid` state instead of throwing.
+   * A store that already exceeds the limit keeps every record and grants
+   * exactly what classification grants — only new adds are refused.
+   */
+  readonly maxAdditionalRoots?: number
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -186,14 +207,31 @@ export class MultiRootRegistry extends Service {
   private loggedContended = false
   /** True once the fiber disposer has run: no further acquisition may happen. */
   private disposed = false
+  /** The validated per-primary-root cap (the default when the row omits it). */
+  private readonly maxRoots: number
+  /** Keys already warned about a historical over-limit store (one warning each). */
+  private readonly warnedOverLimit = new Set<string>()
 
   /**
    * @param ctx - the host context; `storageDomain` and `multiRootScope` are injected.
-   * @param config - the patch row's `leasePath`.
+   * @param config - the patch row's `leasePath` and `maxAdditionalRoots`.
    */
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'multiRootRegistry')
     this.leasePath = config.leasePath
+    const configured = config.maxAdditionalRoots ?? DEFAULT_MAX_ADDITIONAL_ROOTS
+    if (Number.isInteger(configured) && configured >= 1 && configured <= MAX_ADDITIONAL_ROOTS_CEILING) {
+      this.maxRoots = configured
+    } else {
+      // Fail closed, not throw: a bad row config must not keep the whole
+      // harness from starting, and it must never silently widen the cap.
+      this.maxRoots = DEFAULT_MAX_ADDITIONAL_ROOTS
+      this.authorityState = {
+        kind: 'config-invalid',
+        reason: `${DOMAIN_NAME}: maxAdditionalRoots must be an integer between 1 and `
+          + `${MAX_ADDITIONAL_ROOTS_CEILING}, got ${JSON.stringify(configured)}`,
+      }
+    }
   }
 
   /**
@@ -208,6 +246,12 @@ export class MultiRootRegistry extends Service {
    */
   protected async [Service.init](): Promise<void> {
     this.ctx.effect(() => () => this.releaseAuthority(), 'multi-root-registry: authority release')
+    // An invalid row config is fail-closed like an unreadable store: loud, and
+    // nothing is ever granted — but activation itself does not fail.
+    if (this.authorityState.kind === 'config-invalid') {
+      this.ctx.logger.error(`multi-root-workspace: ${this.authorityState.reason}; no additional root is granted`)
+      return
+    }
     await this.ensureAuthority()
   }
 
@@ -225,6 +269,7 @@ export class MultiRootRegistry extends Service {
       case 'contended':
         return REGISTRY_CONTENDED_MESSAGE
       case 'storage-failed':
+      case 'config-invalid':
         return this.authorityState.reason
     }
   }
@@ -235,6 +280,23 @@ export class MultiRootRegistry extends Service {
    */
   get authority(): RegistryAuthorityState {
     return this.authorityState
+  }
+
+  /**
+   * The configured cap on stored additional-root records per primary root.
+   * Surfaces show it next to the count so "N of LIMIT" is always explainable.
+   */
+  get limit(): number {
+    return this.maxRoots
+  }
+
+  /**
+   * Whether one primary root's stored record count exceeds {@link limit} — a
+   * historical over-limit store, which stays fully classified and granted.
+   * @param primaryRoot - the session workspace root (any spelling).
+   */
+  overLimit(primaryRoot: string): boolean {
+    return this.statusesOf(canonicalRoot(primaryRoot)).length > this.maxRoots
   }
 
   /**
@@ -322,6 +384,18 @@ export class MultiRootRegistry extends Service {
         const before = earlier?.find(candidate => candidate.id === status.id)
         return (before ?? status).state !== 'available'
       })
+      // The cap counts STORED records — every state, including withheld and
+      // unusable ones — so it is stable and independent of the filesystem. A
+      // revive re-confirms an existing record and never counts as new, which
+      // is also what lets an over-limit store be repaired by re-registering.
+      if (revived === -1 && statuses.length >= this.maxRoots) {
+        throw new RootValidationError(
+          'root-limit-reached',
+          `this workspace already has ${statuses.length} additional roots; the configured limit is `
+          + `${this.maxRoots}. Remove one first, or raise maxAdditionalRoots.`,
+          { reference: String(this.maxRoots) },
+        )
+      }
       const revivedPath = revived === -1 ? undefined : statuses[revived]!.path
       const canonical = validateRootCandidate(input.path, {
         primaryRoot: key,
@@ -484,6 +558,16 @@ export class MultiRootRegistry extends Service {
     const key = canonicalRoot(primaryRoot)
     const statuses = classifyStoredRoots(key, record.roots.map(toRegisteredRoot))
     this.cache.set(key, statuses)
+    // A historical over-limit store (the limit was lowered, or the document
+    // was edited by hand) is never truncated and keeps granting exactly what
+    // classification grants; it is reported once per key instead.
+    if (statuses.length > this.maxRoots && !this.warnedOverLimit.has(key)) {
+      this.warnedOverLimit.add(key)
+      this.ctx.logger.warn(
+        `multi-root-workspace: ${statuses.length} roots are stored for ${key}, above the configured limit `
+        + `of ${this.maxRoots}; all of them stay granted, only new adds are refused`,
+      )
+    }
     this.publish(key, statuses)
     return statuses
   }
@@ -630,6 +714,12 @@ export class MultiRootRegistry extends Service {
     if (this.authorityState.kind === 'contended') {
       throw new RootValidationError('registry-contended', REGISTRY_CONTENDED_MESSAGE)
     }
+    if (this.authorityState.kind === 'config-invalid') {
+      throw new RootValidationError(
+        'config-invalid',
+        `the root registry configuration is invalid (${this.authorityState.reason}); no additional root is granted`,
+      )
+    }
     if (this.authorityState.kind === 'storage-failed') {
       throw new RootValidationError(
         'storage-unavailable',
@@ -662,6 +752,8 @@ export class MultiRootRegistry extends Service {
       // first must not be followed by a new medium nobody will ever close.
       if (this.disposed) return
       if (this.authorityState.kind === 'active') return
+      // A config-invalid registry is terminally fail-closed: no lease, no domain.
+      if (this.authorityState.kind === 'config-invalid') return
       if (this.lease !== undefined) {
         await this.openDomain()
         return

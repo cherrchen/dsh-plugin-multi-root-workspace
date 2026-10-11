@@ -218,6 +218,17 @@ describe('renderRootsReport', () => {
     expect(text).toContain('Root registry unavailable:')
     expect(text).not.toContain('No additional roots')
   })
+
+  it('reports the configured limit and warns on a historical over-limit store', () => {
+    const statuses = [status({ path: '/a' }), status({ path: '/b' }), status({ path: '/c' })]
+    const text = renderRootsReport('/ws', statuses, undefined, 16)
+    expect(text).toContain('3 of 16 additional roots.')
+    expect(text).not.toContain('exceeds the configured limit')
+
+    const over = renderRootsReport('/ws', statuses, undefined, 2)
+    expect(over).toContain('3 of 2 additional roots.')
+    expect(over).toContain('exceeds the configured limit of 2')
+  })
 })
 
 describe('revealArgv', () => {

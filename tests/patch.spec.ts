@@ -164,6 +164,7 @@ describe('inserted rows', () => {
     const registry = inserted.find(row => row.id === 'multi-root-registry')
     expect(registry?.config).toMatchObject({
       leasePath: "dshHomePath('storages/multi_root_workspace.lock')",
+      maxAdditionalRoots: 16,
     })
   })
 })

@@ -138,6 +138,8 @@ export type RootValidationCode =
   | 'invalid-ref'
   | 'storage-unavailable'
   | 'registry-contended'
+  | 'root-limit-reached'
+  | 'config-invalid'
   | 'reveal-unavailable'
   | 'session-not-found'
   | 'unsupported-path'
