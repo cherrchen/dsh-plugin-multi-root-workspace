@@ -62,11 +62,11 @@ node scripts/release-notes.mjs v0.1.1   # 本地预览，输出 markdown
 
 ## `release.yml` 流程
 
-1. **verify**：`uses: ./.github/workflows/ci.yml`，完整复用 CI 门禁（ubuntu + macOS 矩阵、kernel probe、三个 smoke、docs:check）。任何门禁失败则不发版。
+1. **verify**：`uses: ./.github/workflows/ci.yml`，完整复用 CI 门禁（支持版本 × Linux/macOS/Windows 矩阵、kernel probe、三个 smoke、`pack:check` / `smoke:packed`、docs:check）。CI 末尾的 `gate` job（`if: always()`）只在 `releases` 与 `verify` 都恰好 `success` 时通过——矩阵被跳过或取消时 gate 失败，整个 called workflow 也随之失败。
 2. **publish**（`needs: verify`，ubuntu-latest）：
    - 校验 tag 与 `package.json` 版本一致；
    - `pnpm install --frozen-lockfile && pnpm build`（`lib/` 不进 git，tarball 必须现构建；client 制品须在 pack 前就绪）；
-   - `pnpm pack` 后校验 tarball 内容包含 `cordis.patch.yml`、`lib/index.js`、`lib/client.js`——缺任何一个都会破坏宿主 patch 或 client 启动图（见 [client-bundle-not-in-boot-graph](../troubleshooting/client-bundle-not-in-boot-graph.md)）；
+   - `node scripts/check-pack.mjs` 校验 tarball：必备文件（含 `lib/windows-runner.js`——缺它 Windows 受限多根就不存在）、每个 `exports` 目标、`cordis.patch.yml` 引用的每个模块、传递依赖的共享 chunk 全部在内（见 [client-bundle-not-in-boot-graph](../troubleshooting/client-bundle-not-in-boot-graph.md)）；
    - `pnpm publish --no-git-checks --provenance` 发布（`--no-git-checks` 是因为 Actions 中处于 detached HEAD）；认证走 npm trusted publishing（OIDC），`package.json` 的 `repository` 字段与 job 的 `id-token: write` 权限是它的前提；
    - 用 `gh release create` 创建 GitHub Release：正文来自 release-notes 脚本，tarball 作为 Release 资产。
 

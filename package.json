@@ -83,14 +83,16 @@
     "kernel:probe": "node scripts/check-kernel-runner.mjs",
     "lint": "oxlint",
     "release": "node scripts/bump-version.mjs",
+    "pack:check": "node scripts/check-pack.mjs",
     "smoke": "pnpm smoke:compose && pnpm smoke:behavior && pnpm smoke:journey",
     "smoke:behavior": "node scripts/smoke-behavior.mjs",
     "smoke:compose": "node scripts/smoke-compose.mjs",
     "smoke:journey": "node scripts/smoke-journey.mjs",
+    "smoke:packed": "node scripts/smoke-packed.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
-    "verify:all": "pnpm lint && pnpm typecheck && pnpm build && pnpm kernel:probe && pnpm test && pnpm smoke",
+    "verify:all": "pnpm lint && pnpm typecheck && pnpm build && pnpm kernel:probe && pnpm test && pnpm smoke && pnpm pack:check && pnpm smoke:packed",
     "prepare": "pnpm run bundle"
   },
   "engines": {

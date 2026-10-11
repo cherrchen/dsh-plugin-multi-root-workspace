@@ -69,6 +69,7 @@ export const zh = {
   'error.unavailable': '无法连接到 dsh 主进程。',
   'error.copy-failed': '无法写入剪贴板，请检查浏览器的剪贴板权限。',
   'error.session-not-found': '找不到该会话；请先打开一个工作区会话。',
+  'error.unsupported-path': '该路径是网络或设备路径，Windows ACL 隔离无法覆盖它。',
   'error.fallback': '操作失败。',
 } satisfies Record<string, string>
 
@@ -132,6 +133,7 @@ export const en = {
   'error.unavailable': 'Could not reach the dsh host process.',
   'error.copy-failed': 'Could not write to the clipboard; check the browser\'s clipboard permission.',
   'error.session-not-found': 'That session is not active; open a workspace session first.',
+  'error.unsupported-path': 'That is a network or device path, which Windows ACL confinement cannot cover.',
   'error.fallback': 'The operation failed.',
 } satisfies Record<Key, string>
 

@@ -9,7 +9,6 @@ on:
   push:
     branches:
       - main
-      - feat/dsh-0.2.1-alpha.2-compat
 
 permissions:
   contents: read
@@ -89,16 +88,18 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
 
       # Export the verified dialect set BEFORE unit tests decide whether their
-      # real-runner cases may skip.
-      - if: matrix.os != 'windows-latest'
-        name: Probe which kernel dialects this host can really run
+      # real-runner cases may skip. On Windows this probes the REAL upstream
+      # windows-acl runner and exports `windows-acl` when it can actually deny.
+      - name: Probe which kernel dialects this host can really run
         run: pnpm kernel:probe
 
       # The test log is captured as well as streamed, and uploaded when the step
       # fails. A red run has to be diagnosable from the run page alone — an
       # unreproducible failure with no log is a failure nobody can fix.
       - name: Run the unit suite
-        run: pnpm test 2>&1 | tee vitest.log
+        run: |
+          set -o pipefail
+          pnpm test 2>&1 | tee vitest.log
         shell: bash
       - name: Upload the test log
         if: always()
@@ -111,24 +112,59 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - if: matrix.os != 'windows-latest'
-        name: Composition gate
+      - name: Composition gate
         run: pnpm smoke:compose
-      - if: matrix.os != 'windows-latest'
-        name: Behavior battery
-        run: pnpm smoke:behavior > smoke-behavior.log 2>&1
-      - name: Upload the behavior smoke log when it failed
-        if: failure() && matrix.os != 'windows-latest'
+      # Streamed AND captured: `pipefail` makes the tee'd pipeline report the
+      # smoke's own exit code.
+      - name: Behavior battery
+        run: |
+          set -o pipefail
+          pnpm smoke:behavior 2>&1 | tee smoke-behavior.log
+        shell: bash
+      - name: Cross-repository journey
+        run: |
+          set -o pipefail
+          pnpm smoke:journey 2>&1 | tee smoke-journey.log
+        shell: bash
+
+      # The packed artifact is what a release ships; prove its completeness and
+      # run the behavior battery against the INSTALLED tarball on every OS.
+      - name: Packed artifact verification
+        run: pnpm pack:check
+      - name: Packed smoke
+        run: |
+          set -o pipefail
+          pnpm smoke:packed 2>&1 | tee smoke-packed.log
+        shell: bash
+
+      - name: Upload the smoke logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-log-${{ matrix.os }}-${{ matrix.dsh }}
           path: |
             smoke-behavior.log
-            vitest.log
+            smoke-journey.log
+            smoke-packed.log
           if-no-files-found: ignore
           retention-days: 7
-      - if: matrix.os != 'windows-latest'
-        name: Cross-repository journey
-        run: pnpm smoke:journey
 
       - run: pnpm docs:check
+
+  # The result the reusable workflow hands a caller: a skipped or cancelled
+  # matrix must never read as green, so `publish` in release.yml sees a failed
+  # verify unless BOTH upstream jobs ended in exactly `success`.
+  gate:
+    needs: [releases, verify]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require exact success upstream
+        run: |
+          releases="${{ needs.releases.result }}"
+          verify="${{ needs.verify.result }}"
+          echo "releases=${releases} verify=${verify}"
+          if [ "$releases" != "success" ] || [ "$verify" != "success" ]; then
+            echo "::error::CI gate failed: releases=${releases} verify=${verify} (both must be exactly 'success')"
+            exit 1
+          fi

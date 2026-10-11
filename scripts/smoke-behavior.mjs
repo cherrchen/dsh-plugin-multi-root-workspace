@@ -29,16 +29,16 @@
  * @module scripts/smoke-behavior
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { FileSystem } from '@deepseek-ai/dsh-fs'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import MultiRootFileSystem from '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
 import MultiRootSandboxProvider from '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
 import { createChecker } from './lib/check.mjs'
 import { requireKernelRunner } from '../tests/support/kernel-runner.ts'
-import { assertIsolatedHome, installPluginProfile, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
+import { assertIsolatedHome, installPluginProfile, pluginPackageDir, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
 import { runForeground } from './lib/shell-exec.mjs'
 
@@ -55,6 +55,29 @@ const check = createChecker('behavior')
 
 const PLUGIN_PROFILE = 'mr-plugin'
 const BASELINE_PROFILE = 'mr-baseline'
+/**
+ * What `dsh plugin add` installs: unset = this checkout; `smoke:packed` sets it
+ * to the packed TARBALL so the same battery runs against the shipped artifact.
+ */
+const PLUGIN_SOURCE = process.env.DSH_SMOKE_PLUGIN_SOURCE
+const WIN32 = process.platform === 'win32'
+
+/** The shell syntax the composed `ctx.shell` speaks on this host. */
+const SHELL = WIN32
+  ? {
+      label: 'pwsh',
+      cwd: '(Get-Location).Path',
+      write: target => `Set-Content -LiteralPath '${target.replace(/'/g, "''")}' -Value payload -ErrorAction Stop`,
+      confineArgv: ['pwsh', '-NoProfile', '-Command', 'exit 0'],
+      executor: 'SandboxPwshExecutor',
+    }
+  : {
+      label: 'bash',
+      cwd: 'pwd',
+      write: target => `echo payload > ${JSON.stringify(target)}`,
+      confineArgv: ['bash', '-c', 'true'],
+      executor: 'SandboxBashExecutor',
+    }
 
 /** Replace fixture paths so the two profiles' outcomes are comparable. */
 function normalize(value) {
@@ -102,6 +125,10 @@ async function battery(ctx) {
       return {
         exitCode: result.exitCode,
         denied: result.sandbox?.denied ?? null,
+        // The pwsh executor reports a runner that could not start as its own
+        // fact (`runnerFailed`), never as a denial — record it so a refused
+        // run reads as "did not run" instead of "wrote nothing".
+        runnerFailed: result.sandbox?.runnerFailed ?? null,
         enforcement: result.sandbox?.enforcement ?? null,
         stdout: result.stdout.text.trim(),
         // Recorded so a failed assertion prints WHY a confined write failed —
@@ -132,7 +159,7 @@ async function battery(ctx) {
     writeFileSync(path, 'visible')
     return await ctx.fs.readText(await ctx.fs.resolve(path))
   })
-  await record('bash reports the primary root as its cwd', () => bash('pwd'))
+  await record('bash reports the primary root as its cwd', () => bash(SHELL.cwd))
   await record('bash writes inside the primary root', async () => {
     const inside = await confinedWrite(bash, join(primaryRoot, 'bash-inside.txt'))
     return { ...inside, artifactRemoved: markerProbe(join(primaryRoot, 'bash-inside.txt')).cleanUp() }
@@ -189,7 +216,7 @@ function confinedFacts(outcome) {
     return match === null ? undefined : match[1] === 'true'
   }
   const wrote = fact('wrote')
-  const refused = text.includes('"failure"') || text.includes('SANDBOX_UNAVAILABLE')
+  const refused = text.includes('"failure"') || text.includes('SANDBOX_UNAVAILABLE') || text.includes('"runnerFailed":true')
   return {
     text,
     wrote,
@@ -219,7 +246,7 @@ function confinedFacts(outcome) {
  */
 async function confinedWrite(bash, target) {
   const marker = markerProbe(target)
-  const outcome = await bash(`echo payload > ${JSON.stringify(target)}`)
+  const outcome = await bash(SHELL.write(target))
   return { ...outcome, wrote: outcome.exitCode === 0, present: marker.present() }
 }
 
@@ -270,7 +297,7 @@ async function multiRootBattery(ctx) {
     // others, so the result is always awaited: awaiting a plain value is a
     // no-op, while reading a promise's `.argv` silently yields `undefined`
     // (see src/compat/sandbox-confine.ts).
-    const confined = await ctx.sandbox.confine(['bash', '-c', 'true'], policy)
+    const confined = await ctx.sandbox.confine(SHELL.confineArgv, policy)
     results.set('the host dialect grants the additional root', String(
       confined.argv.some(argument => argument.includes(String(canonicalExtra))),
     ))
@@ -287,6 +314,10 @@ async function multiRootBattery(ctx) {
       return {
         exitCode: result.exitCode,
         denied: result.sandbox?.denied ?? null,
+        // The pwsh executor reports a runner that could not start as its own
+        // fact (`runnerFailed`), never as a denial — record it so a refused
+        // run reads as "did not run" instead of "wrote nothing".
+        runnerFailed: result.sandbox?.runnerFailed ?? null,
         enforcement: result.sandbox?.enforcement ?? null,
         // Same evidence rule as the pass-through battery's bash(): a denied
         // write carries the kernel dialect's own denial message here.
@@ -387,7 +418,9 @@ async function registryBattery(ctx) {
     rmSync(swapped, { recursive: true, force: true })
     mkdirSync(swapped, { recursive: true })
     rmSync(extraRoot, { recursive: true, force: true })
-    symlinkSync(swapped, extraRoot)
+    // A junction is the unprivileged reparse point on Windows; a directory
+    // symlink would need a privilege CI runners do not grant.
+    symlinkSync(swapped, extraRoot, WIN32 ? 'junction' : undefined)
     const afterSwap = await run('/workspace-folders list')
     results.set('list reports a replaced root as redirected', String(afterSwap?.result?.text?.includes('redirected')))
     results.set('a replaced root loses its grant', String(!ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
@@ -450,6 +483,40 @@ async function registryRestartBattery(ctx) {
 }
 
 /**
+ * Where `dsh plugin add` left the package it installed — found by walking the
+ * scratch home for a `package.json` carrying this plugin's name. Used by
+ * `smoke:packed` to prove the battery ran against the installed artifact.
+ */
+function findInstalledPluginDir(root) {
+  const pending = [resolve(root)]
+  while (pending.length > 0) {
+    const dir = pending.pop()
+    let entries
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      // pnpm links dependencies as symlinks; resolve the real location so the
+      // "outside the repository" check compares canonical paths.
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
+      const child = join(dir, entry.name)
+      if (entry.name === 'dsh-plugin-multi-root-workspace'
+        && existsSync(join(child, 'package.json'))) {
+        try {
+          return realpathSync.native(child)
+        } catch {
+          return child
+        }
+      }
+      pending.push(child)
+    }
+  }
+  return undefined
+}
+
+/**
  * The kernel dialect this host would use, as far as the assertions care: the
  * per-dialect requirement rule needs a name even when confinement is impossible
  * (Windows has no kernel rung for additional roots at all).
@@ -457,6 +524,7 @@ async function registryRestartBattery(ctx) {
 function hostDialect() {
   if (process.platform === 'darwin') return 'seatbelt'
   if (process.platform === 'linux') return 'bwrap'
+  if (process.platform === 'win32') return 'windows-acl'
   return 'none'
 }
 
@@ -518,9 +586,9 @@ function identitiesOf(profile, ctx) {
   const plugin = profile === PLUGIN_PROFILE
   check.equal(names.fs, plugin ? 'MultiRootFileSystem' : 'SandboxedFileSystem', `${profile}: ctx.fs provider identity`)
   check.equal(names.sandbox, plugin ? 'MultiRootSandboxProvider' : 'LocalSandboxProvider', `${profile}: ctx.sandbox provider identity`)
-  check.equal(names.shell, 'SandboxBashExecutor', `${profile}: ctx.shell stays upstream`)
+  check.equal(names.shell, SHELL.executor, `${profile}: ctx.shell stays upstream`)
   check.equal(names.scope, plugin ? 'MultiRootScopeService' : 'undefined', `${profile}: scope service presence`)
-  if (plugin) {
+  if (plugin && PLUGIN_SOURCE === undefined) {
     check.ok(ctx.get('fs') instanceof MultiRootFileSystem, 'ctx.fs is this plugin\'s class')
     check.ok(ctx.get('sandbox') instanceof MultiRootSandboxProvider, 'ctx.sandbox is this plugin\'s class')
     check.ok(ctx.get('fs') instanceof FileSystem, 'ctx.fs shares the host filesystem seam identity')
@@ -553,8 +621,20 @@ try {
 
   const initCode = await runDsh(['plugin', '--profile', BASELINE_PROFILE, 'install'], { DSH_HOME: home })
   check.ok(initCode === 0, 'baseline profile initialized without the plugin', `exit ${initCode}`)
-  const addCode = await installPluginProfile(PLUGIN_PROFILE, home)
+  const addCode = await installPluginProfile(PLUGIN_PROFILE, home, PLUGIN_SOURCE ?? pluginPackageDir())
   check.ok(addCode === 0, 'plugin installed into a profile', `exit ${addCode}`)
+
+  if (PLUGIN_SOURCE !== undefined) {
+    // smoke:packed — the battery above must have run against the INSTALLED
+    // copy, not this checkout. Find the package the profile resolved and pin
+    // it outside the repository.
+    const installed = findInstalledPluginDir(home)
+    check.ok(installed !== undefined, 'packed: a plugin package exists under the scratch home')
+    check.ok(installed !== undefined && !installed.startsWith(REPO_ROOT + sep),
+      'packed: the resolved plugin lives outside the repository checkout', installed ?? 'not found')
+    check.ok(installed !== undefined && existsSync(join(installed, 'lib', 'windows-runner.js')),
+      'packed: the installed copy carries lib/windows-runner.js', installed ?? 'not found')
+  }
 
   const originalCwd = process.cwd()
   // The composed `sandbox-policy` row pins the deployment root to process.cwd().
@@ -643,11 +723,7 @@ try {
         check.contains(extraWrite, 'FS_SANDBOX_DENIED', `${mode}: read-only denies the additional root too`, extraWrite)
       }
 
-      if (process.platform === 'win32') {
-        check.skip(`${mode}: the host dialect grants the additional root (Windows ACL kernel multi-root is out of first-release scope)`)
-      } else {
-        check.equal(dialectGrant, String(mode === 'workspace-write'), `${mode}: host dialect grant matches the mode`, dialectGrant)
-      }
+      check.equal(dialectGrant, String(mode === 'workspace-write'), `${mode}: host dialect grant matches the mode`, dialectGrant)
 
       if (!bashExtra.ran) {
         check.skip(`${mode}: confined bash against the additional root (${requireKernelRunner(hostDialect(), String(bashExtra.failure).slice(0, 120))})`)

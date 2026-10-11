@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
@@ -13,7 +14,10 @@ import { parseWindowsProfile, workspaceScopeSid, widenWindowsProfile } from '../
 import { mountCompat } from './support/compat.ts'
 import { createFixtureWorkspace, REPO_ROOT } from './support/temp-workspace.ts'
 
-const profile = ['node', 'runner.js', '--workspace', 'C:\\primary', '--temp', 'C:\\temp', '--mode', 'workspace-write']
+// The upstream runner slot must be an absolute existing file: the standalone
+// runner resolves the upstream ACL package by self-reference FROM it.
+const upstreamRunner = fileURLToPath(import.meta.url)
+const profile = ['node', upstreamRunner, '--workspace', 'C:\\primary', '--temp', 'C:\\temp', '--mode', 'workspace-write']
 describe('Windows root-set capability', () => {
   it('is stable across ordering and casing, and changes on revocation', () => {
     const sid = workspaceScopeSid(['C:\\primary', 'D:\\extra'])
@@ -25,14 +29,38 @@ describe('Windows root-set capability', () => {
   it('preserves argv boundaries for paths with spaces, quotes, and -- tokens', () => {
     const roots = ['D:\\repo space', 'D:\\quote"repo', '--mode']
     const widened = widenWindowsProfile(profile, roots)
-    expect(widened.slice(2, profile.length)).toEqual(profile.slice(2))
+    expect(widened.slice(2, 4)).toEqual(['--upstream-runner', upstreamRunner])
+    expect(widened.slice(4, profile.length + 2)).toEqual(profile.slice(2))
     expect(parseWindowsProfile(widened.slice(2), true).additionalRoots).toEqual(roots)
+  })
+  it('refuses to widen a profile onto a network or device path', () => {
+    // Any root that is a UNC or device path fails closed: the provider turns
+    // this DialectUnrecognizedError into SandboxUnavailableError, never a
+    // silently unconfined or primary-only spawn.
+    const uncWorkspace = ['node', 'runner.js', '--workspace', '\\\\server\\share', '--temp', 'C:\\temp', '--mode', 'workspace-write']
+    for (const args of [uncWorkspace, profile]) {
+      const roots = args === profile ? ['\\\\server\\share\\x'] : ['D:\\extra']
+      expect(() => widenWindowsProfile(args, roots)).toThrow('network or device paths')
+    }
+    expect(() => widenWindowsProfile(profile, ['D:\\fine', '//server/share'])).toThrow('network or device paths')
   })
   it('fails closed on unknown, duplicated, missing, or unpaired flags', () => {
     for (const flags of [profile.slice(2).concat('--future', 'yes'), profile.slice(2).concat('--temp', 'x'), profile.slice(2).concat('--write-sid', 'sid'), profile.slice(2, -1)]) {
       expect(() => parseWindowsProfile(flags)).toThrow()
     }
     expect(() => widenWindowsProfile(profile, ['D:\\extra'], 'C:\\different')).toThrow('does not match')
+  })
+  it('recognizes --upstream-runner only in the runner mode, exactly once, as an absolute file', () => {
+    const runnerFlags = ['--upstream-runner', upstreamRunner, ...profile.slice(2)]
+    expect(parseWindowsProfile(runnerFlags, true).upstreamRunner).toBe(upstreamRunner)
+    // The upstream contract (allowAdditional off) must not know the flag at all.
+    expect(() => parseWindowsProfile(runnerFlags)).toThrow(/unknown or duplicate/)
+    // Required in the runner mode, accepted exactly once, and only when it
+    // names an absolute existing file — anything else fails closed.
+    expect(() => parseWindowsProfile(profile.slice(2), true)).toThrow(/--upstream-runner/)
+    expect(() => parseWindowsProfile([...runnerFlags, '--upstream-runner', upstreamRunner], true)).toThrow(/repeats --upstream-runner/)
+    expect(() => parseWindowsProfile(['--upstream-runner', 'runner.js', ...profile.slice(2)], true)).toThrow(/absolute existing file/)
+    expect(() => parseWindowsProfile(['--upstream-runner', join(REPO_ROOT, 'lib', 'nonexistent-runner.js'), ...profile.slice(2)], true)).toThrow(/absolute existing file/)
   })
   it('ships a standalone runner and fails closed when invoked on a different OS', () => {
     const runner = join(REPO_ROOT, 'lib/windows-runner.js')
@@ -41,6 +69,46 @@ describe('Windows root-set capability', () => {
     const result = spawnSync(process.execPath, [runner], { encoding: 'utf8' })
     expect(result.status).toBe(127)
     expect(result.stderr).toContain('windows-acl-run: Windows ACL runner requires Windows')
+  })
+  it('ships a runner whose module graph imports node builtins only, and boots from a bare directory', () => {
+    // lib/windows-runner.js runs as a separate Node process outside the host's
+    // plugin package resolution: a bare specifier in its static graph dies
+    // with ERR_MODULE_NOT_FOUND before main() can fail closed (the defect this
+    // test exists to keep dead).
+    const runner = join(REPO_ROOT, 'lib/windows-runner.js')
+    expect(existsSync(runner)).toBe(true)
+    const specifierPattern = /(?:import|export)[^'"]*?\bfrom\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g
+    const visited = new Set<string>()
+    const queue = [runner]
+    while (queue.length > 0) {
+      const file = queue.pop()!
+      if (visited.has(file)) continue
+      visited.add(file)
+      for (const match of readFileSync(file, 'utf8').matchAll(specifierPattern)) {
+        const specifier = (match[1] ?? match[2] ?? match[3])!
+        if (!specifier.startsWith('.')) {
+          expect(specifier, `${file} imports a bare specifier`).toMatch(/^node:/)
+          continue
+        }
+        const base = resolvePath(dirname(file), specifier)
+        for (const candidate of [base, `${base}.js`]) {
+          if (existsSync(candidate)) { queue.push(candidate); break }
+        }
+      }
+    }
+    // The same graph must run copied into a directory with NO node_modules on
+    // any path upward — where the installed tarball's runner actually lives.
+    const dir = mkdtempSync(join(tmpdir(), 'windows-runner-bare-'))
+    try {
+      for (const file of visited) copyFileSync(file, join(dir, basename(file)))
+      const result = spawnSync(process.execPath, [join(dir, basename(runner))], { encoding: 'utf8' })
+      expect(result.status).toBe(127)
+      expect(result.stderr).toContain('windows-acl-run:')
+      expect(result.stderr).not.toContain('ERR_MODULE_NOT_FOUND')
+      if (process.platform !== 'win32') expect(result.stderr).toContain('Windows ACL runner requires Windows')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

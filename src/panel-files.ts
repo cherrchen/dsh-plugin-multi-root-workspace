@@ -15,7 +15,10 @@ export async function browseRoot(ctx: Context, primaryRoot: string, request: Pan
   const root = resolveRootRef(roots, ref)
   if (root.state !== 'available') throw new RootValidationError('missing', 'the additional root is not available')
   const path = request.path ?? '.'
-  if (isAbsolute(path) || /^[a-z][a-z\d+.-]*:/iu.test(path) || path.includes('\0')) throw new RootValidationError('invalid-ref', 'a root-relative path is required')
+  // The panel only ever spells relative paths with `/`; a backslash is always a
+  // Windows traversal, drive, or UNC attempt, and `isAbsolute` alone misses it
+  // on POSIX hosts.
+  if (isAbsolute(path) || path.includes('\\') || /^[a-z][a-z\d+.-]*:/iu.test(path) || path.includes('\0')) throw new RootValidationError('invalid-ref', 'a root-relative path is required')
   const absolute = canonicalPath(resolve(root.path, path))
   if (!isCanonicallyUnder(absolute, root.path)) throw new RootValidationError('invalid-ref', 'the path is outside the selected root')
   const files = ctx.root.get('workspaceFiles')

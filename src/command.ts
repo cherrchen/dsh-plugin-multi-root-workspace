@@ -530,6 +530,15 @@ export function revealArgv(platform: NodeJS.Platform, path: string): readonly st
 }
 
 /**
+ * Whether the file manager's exit code means the reveal was accepted.
+ * `explorer.exe` answers 1 even when it successfully selected the item, so on
+ * Windows both 0 and 1 are success; the other managers honor the usual 0.
+ */
+export function revealAccepted(platform: NodeJS.Platform, exitCode: number | null): boolean {
+  return exitCode === 0 || (platform === 'win32' && exitCode === 1)
+}
+
+/**
  * Reveal one directory in the OS file manager through `ctx.subprocess`.
  *
  * This runs no confined command and grants the agent nothing: it is an
@@ -557,7 +566,7 @@ async function revealRoot(ctx: Context, path: string): Promise<void> {
   })
   const outcome = await handle.done
   await handle.waitForExit()
-  if (outcome.exitCode !== 0) {
+  if (!revealAccepted(process.platform, outcome.exitCode)) {
     throw new RootValidationError('reveal-unavailable', `the file manager exited with ${String(outcome.exitCode)}`)
   }
 }

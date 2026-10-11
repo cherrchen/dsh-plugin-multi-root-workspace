@@ -53,13 +53,10 @@ jobs:
           pnpm pack --pack-destination dist
           tarball="$(ls dist/*.tgz)"
           echo "TARBALL=$tarball" >> "$GITHUB_ENV"
-          tar -tzf "$tarball" | tee packed-files.txt
-          for required in package/cordis.patch.yml package/lib/index.js package/lib/client.js package/package.json; do
-            grep -qx "$required" packed-files.txt || {
-              echo "::error::The tarball is missing $required — the host or client boot graph would break."
-              exit 1
-            }
-          done
+          # Full completeness gate: required members, every exports target,
+          # every cordis.patch.yml module, and every relative import the
+          # packed lib/*.js entry files follow — including lib/windows-runner.js.
+          node scripts/check-pack.mjs
 
       # npm trusted publishing (OIDC): no static token exists in this repo.
       # The package's Publish settings on npmjs.com list this repository and

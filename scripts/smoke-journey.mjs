@@ -45,6 +45,7 @@ import {
   resolveScratchHome,
 } from './lib/dsh-runtime.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
+import { requireKernelRunner } from '../tests/support/kernel-runner.ts'
 
 const DOMAIN = 'multi_root_workspace'
 const PLUGIN_NAME = '@dsh-electron/dsh-plugin-multi-root-workspace'
@@ -83,6 +84,17 @@ function canonical(path) {
   } catch {
     return path
   }
+}
+
+/**
+ * The spelling `path` has INSIDE JSON-serialized text.
+ *
+ * Checks that search a recorded model request or a channel view search a JSON
+ * body, where each backslash is escaped: a Windows path only ever appears as
+ * `D:\\a\\...`, never as `D:\a\...`. On POSIX this is the identity.
+ */
+function jsonText(path) {
+  return JSON.stringify(path).slice(1, -1)
 }
 
 /** Seed one Git repository with a tracked file and one commit. */
@@ -232,10 +244,41 @@ async function startScriptedModel() {
     // own rule — so the README read stays exactly where it was.
     { name: 'read', arguments: { file_path: join(additionalRepo, 'README.md') } },
     { name: 'write', arguments: { file_path: join(additionalRepo, 'README.md'), content: EDITED_README } },
+    // The shell calls keep a placeholder name — the composed row is `bash` on
+    // POSIX and `pwsh` on Windows, decided per request from the tools the
+    // harness itself advertised. The command text is valid in both dialects:
+    // a single-quoted path is a literal string to PowerShell, and `workdir`
+    // exists on both tool schemas.
     { name: 'bash', arguments: { command: `git -C '${additionalRepo}' diff --stat`, description: 'Show the other repository diff' } },
     { name: 'bash', arguments: { command: 'node check.mjs', description: 'Run the other repository check', workdir: additionalRepo } },
     { name: 'write', arguments: { file_path: join(outsideRoot, 'denied.txt'), content: 'must not land' } },
   ]
+  /**
+   * Resolve a scripted shell call against the tool list the HARNESS sent:
+   * `pwsh` when that is the composed tool, `bash` otherwise. The command,
+   * description and workdir arguments are schema-identical on both tools, so
+   * only the name differs.
+   */
+  const withShellTool = (call, request) => {
+    if (call === undefined || (call.name !== 'bash' && call.name !== 'pwsh')) return call
+    const tools = request.tools ?? []
+    const found = tools.find(tool => (tool?.function?.name ?? tool?.name) === 'pwsh')
+    if (found === undefined) return { ...call, name: 'bash' }
+    // The pwsh tool's schema differs across releases: drop every argument the
+    // advertised schema does not declare (`additionalProperties: false` makes
+    // an extra field a hard error), and fold a missing `workdir` into the
+    // command itself.
+    const properties = found?.function?.parameters?.properties ?? found?.parameters?.properties ?? {}
+    const args = { ...call.arguments }
+    if ('workdir' in args && !('workdir' in properties)) {
+      args.command = `Set-Location -LiteralPath '${String(args.workdir).replace(/'/g, "''")}'; ${String(args.command)}`
+      delete args.workdir
+    }
+    if (Object.keys(properties).length > 0) {
+      for (const key of Object.keys(args)) if (!(key in properties)) delete args[key]
+    }
+    return { ...call, name: 'pwsh', arguments: args }
+  }
   const server = createServer((request, response) => {
     let body = ''
     request.setEncoding('utf8')
@@ -255,7 +298,7 @@ async function startScriptedModel() {
       // agent's own body too and a text match classifies everything as a title.
       const isTitle = !Array.isArray(parsed.tools) || parsed.tools.length === 0
       if (!isTitle) steps.push(parsed)
-      const call = isTitle ? undefined : calls[(steps.length - 1) % SCRIPT_LENGTH]
+      const call = isTitle ? undefined : withShellTool(calls[(steps.length - 1) % SCRIPT_LENGTH], parsed)
       const text = isTitle ? 'journey' : 'journey complete'
       const id = `journey-${steps.length}`
       response.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -518,8 +561,8 @@ try {
     check.equal(web.channelUnauthenticated, 401, 'web: an unauthenticated panel POST reaches the channel route (401, not the SPA fallback 405)', `status ${String(web.channelUnauthenticated)}`)
     check.equal(web.channelList, 200, 'web: the panel channel answers an authenticated list over real HTTP', `status ${String(web.channelList)}`)
     check.ok(web.channelView?.ok === true, 'web: the channel answers with an ok envelope', JSON.stringify(web.channelView)?.slice(0, 400))
-    check.contains(JSON.stringify(web.channelView?.value), canonical(additionalRepo), 'web: the channel view lists the registered additional root', JSON.stringify(web.channelView)?.slice(0, 400))
-    check.contains(JSON.stringify(web.channelView?.value), canonical(primaryRepo), 'web: the channel view names the primary root', JSON.stringify(web.channelView)?.slice(0, 400))
+    check.contains(JSON.stringify(web.channelView?.value), jsonText(canonical(additionalRepo)), 'web: the channel view lists the registered additional root', JSON.stringify(web.channelView)?.slice(0, 400))
+    check.contains(JSON.stringify(web.channelView?.value), jsonText(canonical(primaryRepo)), 'web: the channel view names the primary root', JSON.stringify(web.channelView)?.slice(0, 400))
     check.equal(readFileSync(join(additionalRepo, 'README.md'), 'utf8'), EDITED_README, 'web: the additional root carries the agent\'s write')
     check.equal(readFileSync(join(primaryRepo, 'README.md'), 'utf8'), PRIMARY_README, 'web: the primary repository is byte-identical')
     check.equal(readFileSync(join(outsideRoot, 'keep.txt'), 'utf8'), 'untouched\n', 'web: a file outside every root is byte-identical')
@@ -531,19 +574,29 @@ try {
     // Tool results travel back to the model, so the step requests are the one
     // place every result is visible for BOTH legs (in process and subprocess).
     const webRendered = webRequests.map(request => JSON.stringify(request)).join('\n')
-    const webBashUnavailable = webRendered.includes('SANDBOX_UNAVAILABLE') || webRendered.includes('no sandbox backend is usable')
+    const shellTool = process.platform === 'win32' ? 'pwsh' : 'bash'
+    const runnerFailed = rendered =>
+      rendered.includes('SANDBOX_UNAVAILABLE')
+      || rendered.includes('no sandbox backend is usable')
+      || rendered.includes('the sandbox runner itself failed')
+    // On a host whose dialect the kernel probe verified, an unusable runner is
+    // a FAILURE, not a skip — requireKernelRunner throws for exactly that case.
+    const runnerSkip = () => process.platform === 'win32'
+      ? requireKernelRunner('windows-acl', 'the confined shell could not run in this process')
+      : 'no usable kernel runner in this process'
+    const webShellUnavailable = runnerFailed(webRendered)
     // The tool layer maps the structured FS_SANDBOX_DENIED code onto the shared
     // `[sandbox: …]` marker before the model sees it; that marker is what the
     // operator's denial text is built from.
     check.contains(webRendered, 'file access denied under workspace-write mode', 'web: the tool layer reported the outside write as a sandbox denial')
-    if (webBashUnavailable) {
-      check.skip('web: confined bash (git diff and the other repository\'s check) — no usable kernel runner in this process')
+    if (webShellUnavailable) {
+      check.skip(`web: confined ${shellTool} (git diff and the other repository's check) — ${runnerSkip()}`)
     } else {
-      check.contains(webRendered, 'README.md |', 'web: bash saw the other repository\'s diff', webRendered.slice(-800))
-      check.contains(webRendered, 'repo-b check ok', 'web: bash ran the other repository\'s check', webRendered.slice(-800))
+      check.contains(webRendered, 'README.md |', `web: ${shellTool} saw the other repository's diff`, webRendered.slice(-800))
+      check.contains(webRendered, 'repo-b check ok', `web: ${shellTool} ran the other repository's check`, webRendered.slice(-800))
     }
     const webExcerpt = webRendered.slice(-800)
-    check.contains(webRendered, canonical(additionalRepo), 'web: the model\'s request names the additional root', webExcerpt)
+    check.contains(webRendered, jsonText(canonical(additionalRepo)), 'web: the model\'s request names the additional root', webExcerpt)
     check.contains(webRendered, 'additional roots of this session\'s workspace', 'web: the runtime-context snapshot states the topology', webExcerpt)
     check.contains(webRendered, 'the session origin remains the primary root', 'web: the snapshot separates session origin from cwd', webExcerpt)
     check.ok(webRequests.length >= SCRIPT_LENGTH, 'web: the agent issued one request per scripted step', `requests: ${webRequests.length}`)
@@ -557,7 +610,7 @@ try {
     check.equal(rolesCarrying(webFirstStep, RULE_PRIMARY).length, 1, 'web: the primary root\'s AGENTS.md reached the model exactly once', webWire)
     check.equal(rolesCarrying(webFirstStep, RULE_USER_GLOBAL).length, 1, 'web: the user-global AGENTS.md was not injected a second time', webWire)
     check.equal(rolesCarrying(webFirstStep, RULE_ANCESTOR).length, 0, 'web: an ancestor of the additional root was not injected at all', webWire)
-    check.contains(JSON.stringify(webFirstStep), canonical(additionalRepo), 'web: the instruction text names the root its rules belong to')
+    check.contains(JSON.stringify(webFirstStep), jsonText(canonical(additionalRepo)), 'web: the instruction text names the root its rules belong to')
 
     // The nested instruction journey. The first scripted call READS a file in
     // the additional root's `src/deep/`, so that directory's own AGENTS.md —
@@ -601,16 +654,16 @@ try {
     check.contains(git(additionalRepo, 'status', '--porcelain'), ' M README.md', 'headless: git reports the change in the other repository')
 
     const headlessResults = model.steps.slice(stepsBeforeHeadless).map(request => JSON.stringify(request)).join('\n')
-    if (headlessResults.includes('SANDBOX_UNAVAILABLE') || headlessResults.includes('no sandbox backend is usable')) {
-      check.skip('headless: confined bash — no usable kernel runner in this process')
+    if (runnerFailed(headlessResults)) {
+      check.skip(`headless: confined ${shellTool} — ${runnerSkip()}`)
     } else {
-      check.contains(headlessResults, 'repo-b check ok', 'headless: bash ran the other repository\'s check', headlessResults.slice(-800))
+      check.contains(headlessResults, 'repo-b check ok', `headless: ${shellTool} ran the other repository's check`, headlessResults.slice(-800))
     }
 
     const headlessRequests = model.steps.slice(stepsBeforeHeadless)
     const headlessRendered = headlessRequests.map(request => JSON.stringify(request)).join('\n')
     const headlessExcerpt = headlessRendered.slice(-800)
-    check.contains(headlessRendered, canonical(additionalRepo), 'headless: the model\'s request names the additional root', headlessExcerpt)
+    check.contains(headlessRendered, jsonText(canonical(additionalRepo)), 'headless: the model\'s request names the additional root', headlessExcerpt)
     check.contains(headlessRendered, 'additional roots of this session\'s workspace', 'headless: the runtime-context snapshot states the topology', headlessExcerpt)
 
     const headlessFirstStep = headlessRequests[0]

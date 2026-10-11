@@ -233,7 +233,7 @@ pnpm verify:all                                    # lint → typecheck → buil
 | 3 | ~~bash 子类落点未定~~（已关闭） | — | 不替换 `bash-sandbox`：bash 与 PTY 的 confinement 全部经 `ctx.sandbox`（ADR-0001） |
 | 4 | provider 行替换影响未盘点的 Consumer | 隐藏回归 | 已盘点：`ctx.sandbox` 的消费者是 bash-sandbox / pwsh-sandbox / terminal-bash；`ctx.fs` 的消费者是 tool-fs / tool-str-replace-editor。全部只依赖 `confine`、`sandboxMode` 等结构化事实；M1 冒烟逐一实跑 |
 | 5 | disable/insert 时序或 id 变化（上游 base patch 行 id 不是稳定承诺） | 组合失败 | duplicate-provide 天然抛错 + 插件身份断言 + `smoke:compose` 组合差分断言 |
-| 6 | Windows 内核级多根缺失（pwsh 方言） | Windows bash 场景 | B2 已实现 root-set SID runner；Windows 内核实跑证据待平台 CI，见 [B1–B3 记录](#b1b3第二期-p12026-10-02) |
+| 6 | Windows 内核级多根缺失（pwsh 方言） | Windows bash 场景 | B2 已实现 root-set SID runner；2026-10-11 起 `kernel:probe` 在 Windows 上以真实上游 runner 验证 `windows-acl` 并导出方言，Windows 冒烟与原生用例在全部 11 个支持版本上原生执行，证据见 [B1–B3 加固记录](#b1b3-加固与-windows-全量验证2026-10-11)；网络/设备根在 Windows 上按 `unsupported-path` 词法拒绝 |
 | 7 | `isPathUnder` 等价实现的正确性 | fence 语义漂移 | 深导入不可用（发布包不含 `src/`，ADR-0002）⇒ 本地实现 + 注明出处 + M1 差分 parity 套件钉住；M2 起另由方言矩阵复验 |
 | 8 | 拓扑快照进入 context 对 prompt cache 的影响 | 长会话成本 | 已落地：空根 / 只读 / 无 agent 时零输出（逐字节快照断言）；根集变化频率 = 用户增删根频率，可接受 |
 | 9 | ~~nested roots 态度未最终拍板~~（已关闭） | — | 已拍板**拒绝**（[ADR-0004](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)） |
@@ -242,7 +242,7 @@ pnpm verify:all                                    # lint → typecheck → buil
 | 12 | ~~附加根 nested instructions 未实现（H4 Phase 2）~~（已关闭） | — | 已实现（H4 Phase 2）：触碰取自持久化的 `session/event`（`tool/call` + `tool/result` 配对，只认成功的 `read` / `write` / `edit`），不使用 `SessionMessageProjection`；语义与边界见 [ADR-0010](../../decisions/ADR-0010-additional-root-instruction-scope.md) |
 | 13 | 触碰识别只覆盖 `read` / `write` / `edit` | 其他写文件工具（`str_replace_editor` 等）触碰的目录不会立刻发现其 nested 指令 | 记录为已知限制（需求文档 §5「已知限制」、README 已知限制）；上游同样只认这三个名字，扩大集合需要先有让插件识别工具类别的 seam |
 | 14 | 桌面端自带的旧 runtime（`0.1.2-rc.1`）不在 `v0.1.1` 的 allowlist 上 | 已安装的桌面端在升级自带 runtime 之前，插件的四行**不启动**（fail loud，组合退化为"未装插件"），即相对 `v0.1.0` 的功能回退 | 属 [ADR-0009](../../decisions/ADR-0009-dsh-compat-contract.md) 有意的收窄（范围承诺换成了实测清单）；已在 [CHANGELOG](../../../CHANGELOG.md) / [README](../../../README.md) 的「升级注意 / 环境要求」里明示，桌面端升级自带 runtime 后自动恢复；Electron 车道仍未建立 |
-| 15 | 生产依赖 `koffi`（Windows lease 的 FFI）带构建脚本，pnpm ≥10 默认不运行它 | 四种安装来源的**第一次** `dsh plugin add` 都会失败一次（可恢复：回答 profile 里留下的 `allowBuilds` 待决项）；`v0.1.0` 只在 git 来源有这一步 | 已写入 [README §安装](../../../README.md)、[CHANGELOG 升级注意](../../../CHANGELOG.md) 与[故障排查：安装停在构建授权](../../troubleshooting/install-stops-at-build-approval.md)。根治要重新设计 Windows Authority 的原生依赖（例如按需可选加载），属第二期 |
+| 15 | 生产依赖 `koffi`（Windows lease 的 FFI）带构建脚本，pnpm ≥10 默认不运行它 | 四种安装来源的**第一次** `dsh plugin add` 都会失败一次（可恢复：回答 profile 的 `allowBuilds` 后重跑）；实测（`0.2.1-alpha.2`，tarball）profile 的 `pnpm-workspace.yaml` 可能**没有**待决标记，且恢复后的 `add` 不激活 bundle，需要 remove+add（见故障排查）；`v0.1.0` 只在 git 来源有这一步 | 已写入 [README §安装](../../../README.md)、[CHANGELOG 升级注意](../../../CHANGELOG.md) 与[故障排查：安装停在构建授权](../../troubleshooting/install-stops-at-build-approval.md)（含激活验证与 remove+add 恢复）。根治要重新设计 Windows Authority 的原生依赖（例如按需可选加载），属第二期 |
 
 ## 与"可改上游"路线的关系
 
@@ -308,7 +308,7 @@ CI 主车道从 `SUPPORTED_DSH_RELEASES` 派生版本轴，与 Linux / macOS / �
 | 项 | 实现 | 验证状态 |
 |---|---|---|
 | B1 Additional Root LSP routing | additive 公共 query 包装，按 canonical file target 选择根，上游 stdio provider 负责独立初始化与池化 | 真实协议服务器 e2e、路由与撤销、取消、卸载恢复通过；九个支持版本的构建、类型与全量测试通过 |
-| B2 Windows kernel multi-root | 插件 runner 调用公开 AclSandbox，root-set capability SID、自有 private temp、保留失败签名与 payload | SID / argv / fail-closed 结构回归通过；2026-10-03 Windows 本机原生执行通过，远端矩阵状态见下方复验记录 |
+| B2 Windows kernel multi-root | 插件 runner 调用公开 AclSandbox，root-set capability SID、自有 private temp、保留失败签名与 payload | SID / argv / fail-closed 结构回归通过；2026-10-03 Windows 本机原生执行通过；2026-10-11 起 Windows CI 在全部 11 个支持版本上原生执行内核探针、冒烟与原生用例，证据见[加固记录](#b1b3-加固与-windows-全量验证2026-10-11) |
 | B3 workspace-files / client tree | 公共 list 和新版 path-watch 按根隔离；Connection 新增 files/readFile；对话框 lazy tree + preview，原生 Files actions slot 提供入口 | 真实 registry/fs 的包含性、跨主根、symlink/redirect、I/O 中撤销与 caps 回归通过；客户端 lazy tree、响应校验与可选 Files 入口通过；全量本地 gate 通过 |
 
 新增可选 peer 纳入原精确版本合同，allowlist 无变化。旧版会话级 watch 原样保留；附加根树手动刷新。已启动的 Windows/其他内核子进程使用启动时 scope，根集合变更限制后续进程。Windows 的 partial enforcement 与 caller-owned 目录条件继承上游。
@@ -342,6 +342,41 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 | 原生执行与 LSP 定向复验 | 两文件 6/6 通过；真实 restricted-token Node 和 PowerShell 可写两根、第三目录拒绝，ConPTY 两根写入及第三目录拒绝、退出码 `23` 保留，read-only 与移除根后拒绝；真实 LSP stdio 初始化和池化隔离通过 |
 | 跳过范围 | 本机无目录 symlink 权限，以及不适用于 Windows 的 POSIX 内核执行和条件用例；Windows 原生 ACL 用例没有 skip。Windows 不运行 POSIX 冒烟和 `kernel:probe` |
 | 修复后远端矩阵 | 修复提交 `41e4d1a` 的 [CI run 37118946523](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/37118946523) 全部 success：releases job 及九个支持版本 × Linux/macOS/Windows 的 27 个 verify job；九个 Windows job 均执行原生 ACL 用例，Linux/macOS 完成各自内核探针、测试及完整冒烟 |
+
+### B1–B3 加固与 Windows 全量验证（2026-10-11）
+
+分支 `feat/b1-b3-hardening`（在 `v0.1.6` 之上），目标是：把 B1–B3 的实现推到"每个消费者都有原生执行证据"、在 Windows 上 fail-closed 而不是静默运行、并让打包产物与 Windows 冒烟成为全平台门禁。提交序列：`9f9a1df`（硬化 + 原生 Windows 用例）、`af962fd`（原生 Windows 冒烟门禁 + 打包产物验证 + CI/release 门控）、`a0cfe22` / `1f72fb5`（CI 暴露后的测试修正）。**本节记录的是分支工作，尚未发布。**
+
+**审计分类（在 v0.1.6 HEAD 上）**：
+
+- **已实现且有原生证据**：B1 真实 stdio LSP 路由/池化；B2 root-set SID runner（Node / PowerShell / ConPTY，双根可写、第三根拒绝、read-only、撤销）；B3 list/watch 路由、面板 `files` / `readFile`、客户端 lazy tree；注册表 lease 的 junction 别名归一。
+- **已实现但欠测 → 本批补测**：LSP 并发会话（不同主根）、Unicode/空格根、飞行中取消、服务器崩溃（下一次查询上游重生）、真实服务器的 redirect、存活服务器下卸载、win32 大小写变体 + 第二盘；Windows 敌意名称（CJK、空格、`'&^%!();,`）、第二盘、大小写/8.3 别名、junction 重指、confine 与 spawn 之间根被移除（127，子进程不启动）、非调用者拥有的根、撤销快照语义、4 个并发进程各自独立 private temp 且退出后删除、退出码/stdout/stderr 镜像、ConPTY Ctrl+C、Git Bash；大小写变体/8.3 别名的 lease 名一致；三进程争用恰好选出一个 authority。
+- **确认的缺陷并已修复**：
+  1. **Windows 网络/设备根此前会被接受**（UNC `\\server\share`、`\\?\`、`\\.\`、映射网络盘——`realpathSync.native` 会把它解析成 UNC）：restricted token 的 capability SID / Low label 无法证明能绑定 SMB 访问，且 stat UNC 路径会触发 SMB 认证。新增 `unsupported-path` 错误码：注册表校验在任何 fs 触碰之前词法拒绝、存量记录判 `invalid`、profile 扩展与 runner 均 fail closed（`SandboxUnavailableError` / exit 127，绝不无约束执行）。
+  2. **runner 现在在 ACL 授予之后、spawn 之前重新验证每个根**（仍是目录 + canonical 身份一致），并要求 `--temp` 是已存在的目录。
+  3. **面板文件路径此前不拒绝反斜杠**（POSIX 上 `..\..\x` 会词法解析到根内）→ 现在拒绝。
+  4. **Windows reveal 总报失败**：`explorer.exe` 成功时退出 1 → win32 接受 0/1。
+  5. **文件树 RPC 现在可中止**：组件卸载 / 路径 / 会话变化时取消在飞调用（Connection RPC 支持 AbortSignal，host 早已转发该信号）。
+  6. **CI `pnpm test | tee` 缺 `pipefail`**：单测红了也能报绿 → 已修。
+  7. **安装副本的 Windows runner 在 `main()` 之前就死于 `ERR_MODULE_NOT_FOUND`**（CI run `38131613042` 由 `smoke:packed` 暴露，`7702ffb` 修复）：`lib/windows-runner.js` 是独立 Node 进程，宿主的进程内插件包解析不适用，它的静态图却 `import '@deepseek-ai/dsh-sandbox'`（roots/windows-profile chunk 也一样）——从插件安装目录解析不到。`0.1.5-rc.2` / `0.1.6-*` 通过是因为那些版本仍写 module-fallback 目录；`0.1.7-alpha.1+` 的受限 pwsh 全部失败。checkout 内测试看不到它（checkout 的 `node_modules` 带着 peers）。修复：runner 的静态图只许 `node:`（新模块 `src/windows-runner-contract.ts`），上游 ACL 包改为从 `--upstream-runner`（上游 runner 自身路径）按包自引用 `createRequire` 解析后动态 import；`check-pack` 与"拷到无 node_modules 目录运行"的可移植用例双重钉住。
+- **保留的上游限制（已记录，不算回归）**：Windows enforcement 仍是上游 `partial`；Git Bash/MSYS 在 restricted Low-integrity token 下无法启动（0.2.x：`NtCreateDirectoryObject … 0xC0000022`；0.1.5-rc.2：`CreateFileMapping … Win32 error 5`，exit 256）——上游 runner 与插件 runner 表现完全一致，Windows 受限 shell 就是 pwsh；上游 runner 调 `SetConsoleCtrlHandler(NULL, TRUE)` 且 ignore 标志被子进程继承，所以上游 confine 的子进程（空附加根）收不到 Ctrl+C，而插件 runner（非空根）用 Node SIGINT handler（不被继承），Ctrl+C 能到达子进程并由 runner 镜像其退出码（测试中为 130）；每个根集合的 standing workspace ACE 只增不减且永不撤销（与上游一致）；已启动进程保留启动时快照；`Local\` 命名信号量作用域 = 每登录会话，网络共享上的 `$DSH_HOME` 被多台机器使用不受 lease 保护（与上游 SessionWriteLease 相同）；elevated host 上的 foreign-owned 根：admin token 可能仍能授权，因此接受两种结局（exit 127 fail-closed，或 exit 0 且所有未授权写被拒），并且 unconfined admin 进程不是有效探针（libuv `FILE_FLAG_BACKUP_SEMANTICS` + backup/restore 特权绕过 DACL，restricted token 不能）。
+- **新增 CI / 代码门禁**：`kernel:probe` 以**真实上游 runner** 验证 `windows-acl`（一次允许写 + 一次兄弟目录被拒——不能拒绝的探针不算 sandbox）并导出该方言，Windows 内核断言因此不可 skip；`smoke:compose` / `smoke:behavior` / `smoke:journey` 在 Windows 原生运行（pwsh executor + pwsh 工具、两个真实 git 仓库、web + headless 两条腿）；新增 `pnpm pack:check`（tarball 成员含 `lib/windows-runner.js`、每个 `exports` 目标、`cordis.patch.yml` 引用的每个模块、传递依赖的共享 chunk、`lib/windows-runner.js` 全图只许 `node:` 导入；当前 71 个成员）与 `pnpm smoke:packed`（tarball 经 `dsh plugin add` 装进隔离 `$DSH_HOME`，再从**安装副本**跑完整 behavior battery 并断言其解析路径在 checkout 之外）；以上门禁在 Linux / macOS / Windows 三平台全部执行；冒烟日志 `if: always()` 上传；新增 `gate` job（`needs: [releases, verify]` + `if: always()`），矩阵被 skip/cancel 不再可能显示为成功；release 的 publish 依赖可复用 CI 的 gate 并使用 `check-pack`。
+
+**koffi 安装路径实测**（本机 macOS，DSH `0.2.1-alpha.2`，tarball 来源，全新 scratch profile）：第一次 `dsh plugin add <tgz>` 装完依赖后以 `[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: koffi@3.3.3` 失败；该 profile 的 `pnpm-workspace.yaml` **没有**留下 `set this to true or false` 待决标记；写入 `allowBuilds: { koffi: true }` 后重跑同一 `add` 退出 0，但插件**不在** `dsh.profile.bundles` 里（plugin-manager 的 reconcile 只激活本次运行中新增的依赖）；再做一次 `dsh plugin --profile <p> remove <name>` 加同一 `add` 才完成激活（`koffi install: Done`）。smoke 在 scratch home 内按此路径执行；对用户可见的处置见[故障排查：安装停在构建授权](../../troubleshooting/install-stops-at-build-approval.md)。
+
+**本地验收**（macOS，DSH `0.2.1-alpha.2`，`DSH_PROBE_VERIFIED_DIALECTS=seatbelt`）：`compat:check` / lint / typecheck / build 通过；`pnpm test` 31 文件、412 passed / 18 skipped（12 = Windows 原生用例在 macOS 上的平台 gate）；compose 44/44、behavior 99/99、journey 55/55；`pack:check` 71 成员；`smoke:packed` 98/98；`docs:check` 通过。
+
+**Windows CI 证据**：
+
+| Run | 结果与暴露 |
+|---|---|
+| `38126361009`（`9f9a1df`） | 11 个 Windows job 同批失败 7 项，Linux/macOS 全绿：5 处测试前提错误（exit code 1 在 win32 是成功语义、`cmd /s` 引号破坏 8.3 查询、POSIX 断言在 win32 上跑、elevated runner 下"必须 127"前提不成立）、ConPTY Ctrl\C 超时、Git Bash MSYS 启动失败签名未覆盖 |
+| `38127852508`（`af962fd`） | `kernel:probe` 验证 `windows-acl`；Git Bash parity 通过；仅剩两处：foreign-owned 用例的 icacls grant-only 锁定对 elevated 进程无效（admin 仍可写），PowerShell `Start-Sleep` 无交互时不响应 ConPTY Ctrl+C |
+| `38128970508`（`a0cfe22`） | 仅剩断言修正：foreign-owned 改为 ACL 回读验证（unconfined admin 进程有 backup/restore 特权，不是有效探针）；Ctrl+C 结果 `upstream=timeout plugin=interrupted`——上游 runner 的 ignore-Ctrl+C 标志被子进程继承，改为断言插件侧被中断且镜像子进程退出码；Git Bash 在 `0.1.5-rc.2` 上是 `CreateFileMapping … Win32 error 5` / exit 256 的另一签名 |
+| `38129713987` | Windows 上单测、compose 44/44、behavior 99/99 全绿；`smoke:journey` 50/5——断言在 JSON 序列化文本里找原始 Windows 路径（反斜杠被转义），改为按 `JSON.stringify` 转义拼写查找 |
+| `38130676072` | Windows 上全部冒烟转绿；`pack:check` 无法 spawn `pnpm.cmd` → 改为经 `npm_execpath` 启动 |
+| `38131613042` | `0.1.5-rc.2` / `0.1.6-*` 的 Windows 全绿（含 `smoke:packed`）；`0.1.7-alpha.1` 起 `smoke:packed` 暴露缺陷 #7：安装副本的 runner `ERR_MODULE_NOT_FOUND`（`@deepseek-ai/dsh-sandbox`）→ `7702ffb` 修复 |
+| [`38134856191`](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38134856191)（`7702ffb`，最终代码 HEAD） | **全部 35 个 job success**：releases + 11 个精确 DSH 版本 × Linux / macOS / Windows 的 33 个 verify + `gate`。每个 job 的 `kernel:probe` 都实际验证了本机方言（macOS `seatbelt`、Linux `landlock`、Windows `windows-acl`）并设为必跑；33 个 job 均为 compose 44/0/0、behavior 99/0/0、journey 55/0/0、`pack:check` 71 成员、`smoke:packed`（安装副本）98/0/0。单测：Windows 414 passed / 18 skipped（`0.2.1-alpha.2` 419 / 13），Linux / macOS 408 / 24（`0.2.1-alpha.2` 414 / 18）。Windows 上 `windows-native.e2e.ts` 12/12 实际执行、无 skip；唯一的 Windows 侧条件跳过是 8.3 别名断言——runner 的 D: 卷关闭了短名生成，日志显式记录。实测结局：Ctrl+C `upstream=timeout`、`plugin=interrupted exit=130`；Git Bash 两侧同为 MSYS 启动失败；foreign-owned 根在 elevated runner 上走「授权成功但两处写均被拒」结局。Linux bwrap 仍因宿主 uid map 限制不可执行，Landlock 为 Linux 原生证据 |
 
 ## DSH 0.2.1 迁移与目录安全契约（2026-10-10，随 v0.1.6 发布）
 

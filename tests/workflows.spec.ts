@@ -79,6 +79,73 @@ describe('CI workflow gates', () => {
     // promotion instructions is fine; running it as a step is not.
     expect(read('.github/workflows/upgrade.yml')).not.toContain('run: pnpm compat:check')
   })
+
+  it('runs the kernel probe and every smoke on Windows too', () => {
+    const ci = parse(read('.github/workflows/ci.yml'))
+    const steps = ci.jobs.verify.steps as Array<{ name?: string; if?: string; run?: string; shell?: string }>
+    // The Windows path is native (the real windows-acl runner, the pwsh tool),
+    // so no verify step may still skip `windows-latest` outright.
+    for (const step of steps) expect(step.if ?? '').not.toContain("matrix.os != 'windows-latest'")
+    const probe = steps.find(step => step.name === 'Probe which kernel dialects this host can really run')!
+    expect(probe.run).toBe('pnpm kernel:probe')
+    for (const name of ['Composition gate', 'Behavior battery', 'Cross-repository journey']) {
+      expect(steps.some(step => step.name === name)).toBe(true)
+    }
+    // The packed artifact gates run on every OS.
+    expect(steps.some(step => step.run === 'pnpm pack:check')).toBe(true)
+    expect(steps.some(step => (step.run ?? '').includes('pnpm smoke:packed'))).toBe(true)
+  })
+
+  it('streams and captures the behavior smoke, and uploads smoke logs unconditionally', () => {
+    const ci = parse(read('.github/workflows/ci.yml'))
+    const steps = ci.jobs.verify.steps as Array<{ name?: string; if?: string; run?: string; shell?: string; uses?: string }>
+    const behavior = steps.find(step => step.name === 'Behavior battery')!
+    expect(behavior.shell).toBe('bash')
+    expect(behavior.run).toContain('set -o pipefail')
+    expect(behavior.run).toContain('tee smoke-behavior.log')
+    const smokeUpload = steps.find(step => step.name === 'Upload the smoke logs')!
+    expect(smokeUpload.if).toBe('always()')
+    const testUpload = steps.find(step => step.name === 'Upload the test log')!
+    expect(testUpload.if).toBe('always()')
+  })
+
+  it('ends with a gate job that fails unless every upstream job is exactly success', () => {
+    const ci = parse(read('.github/workflows/ci.yml'))
+    const gate = ci.jobs.gate
+    expect(gate).toBeDefined()
+    expect(gate.needs).toEqual(['releases', 'verify'])
+    expect(gate.if).toBe('always()')
+    const body = (gate.steps as Array<{ run?: string }>).map(step => step.run ?? '').join('\n')
+    expect(body).toContain('needs.releases.result')
+    expect(body).toContain('needs.verify.result')
+    // A skipped or cancelled matrix must never read as green.
+    expect(body).toContain('"success"')
+  })
+
+  it('drops stale push branches and keeps main', () => {
+    const ci = parse(read('.github/workflows/ci.yml'))
+    const push = ci.on?.push ?? ci.true?.push
+    const branches = (push?.branches ?? []) as string[]
+    expect(branches).toContain('main')
+    expect(branches).not.toContain('feat/dsh-0.2.1-alpha.2-compat')
+  })
+})
+
+
+describe('release workflow gating', () => {
+  it('publishes only after the reusable CI gate, and verifies the pack through check-pack', () => {
+    const release = parse(read('.github/workflows/release.yml'))
+    // publish depends on the reusable workflow call; the gate job INSIDE
+    // ci.yml is what makes that call fail on a skipped or cancelled matrix.
+    expect(release.jobs.verify.uses).toBe('./.github/workflows/ci.yml')
+    expect(release.jobs.publish.needs).toBe('verify')
+    const body = (release.jobs.publish.steps as Array<{ run?: string }>).map(step => step.run ?? '').join('\n')
+    expect(body).toContain('node scripts/check-pack.mjs')
+    expect(body).not.toContain('tar -tzf')
+    // The shipped runner is required, not optional: it is what confines the
+    // multi-root pwsh write on Windows.
+    expect(read('scripts/check-pack.mjs')).toContain('package/lib/windows-runner.js')
+  })
 })
 
 

@@ -16,7 +16,7 @@ import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import * as CommandModule from '../src/command.ts'
-import { parseFoldersCommand, renderRootsReport, revealArgv } from '../src/command.ts'
+import { parseFoldersCommand, renderRootsReport, revealAccepted, revealArgv } from '../src/command.ts'
 import { PANEL_CHANNEL, type PanelRequest, type RootsView } from '../src/contract.ts'
 import type { RootStatus } from '../src/roots.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
@@ -225,6 +225,20 @@ describe('revealArgv', () => {
     expect(revealArgv('darwin', '/tmp/x')).toEqual(['open', '-R', '/tmp/x'])
     expect(revealArgv('win32', 'C:\\x')).toEqual(['explorer', '/select,C:\\x'])
     expect(revealArgv('linux', '/tmp/x')).toEqual(['xdg-open', '/tmp/x'])
+  })
+})
+
+describe('revealAccepted', () => {
+  it('treats explorer exit code 1 as success on Windows only', () => {
+    // explorer.exe answers 1 even when it did select the item.
+    expect(revealAccepted('win32', 0)).toBe(true)
+    expect(revealAccepted('win32', 1)).toBe(true)
+    expect(revealAccepted('win32', 2)).toBe(false)
+    for (const platform of ['darwin', 'linux'] as const) {
+      expect(revealAccepted(platform, 0)).toBe(true)
+      expect(revealAccepted(platform, 1)).toBe(false)
+    }
+    expect(revealAccepted('win32', null)).toBe(false)
   })
 })
 
@@ -567,7 +581,9 @@ describe('the panel channel', () => {
   })
 
   it('reports a failing file manager as reveal-unavailable', async () => {
-    await mount({ withConnection: true, withSubprocess: true, spawnExitCode: 1 })
+    // Exit code 1 is a SUCCESS on Windows (explorer.exe semantics), so the
+    // failing file manager must report a code that is a failure everywhere.
+    await mount({ withConnection: true, withSubprocess: true, spawnExitCode: 2 })
     const extra = join(fixture.base, 'extra')
     mkdirSync(extra)
     await callPanel('add', { sessionId: PANEL_SESSION, path: extra })

@@ -64,16 +64,15 @@ export function createChecker(label) {
     },
     /** Print the summary; exit non-zero when anything failed. */
     finish() {
-      const total = passed + failures.length
       if (skipped.length > 0) {
         console.log(`\n[smoke:${label}] ${skipped.length} assertion(s) skipped in this environment:`)
         for (const message of skipped) console.log(`  - ${message}`)
       }
       if (failures.length === 0) {
-        console.log(`\n[smoke:${label}] ${passed}/${total} checks passed`)
+        console.log(`\n[smoke:${label}] ${passed} passed, 0 failed, ${skipped.length} skipped`)
         return
       }
-      console.error(`\n[smoke:${label}] ${failures.length} of ${total} checks FAILED`)
+      console.error(`\n[smoke:${label}] ${passed} passed, ${failures.length} failed, ${skipped.length} skipped`)
       for (const failure of failures) {
         console.error(`  ✗ ${failure.message}`)
         if (failure.detail !== undefined) console.error(`      ${failure.detail.split('\n').join('\n      ')}`)

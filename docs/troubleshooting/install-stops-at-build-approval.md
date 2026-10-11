@@ -21,28 +21,36 @@ dsh: pnpm failed in profile directory <$DSH_HOME>/profiles/<name>
 
 ## 诊断方法
 
-1. 看该 profile 的 `pnpm-workspace.yaml`：`dsh` 会把待决项留在文件里，形如
+1. 看该 profile 的 `pnpm-workspace.yaml`：`dsh` **可能**把待决项留在文件里，形如
 
    ```yaml
    allowBuilds:
      koffi: set this to true or false
    ```
 
-   出现 `set this to true or false` 就说明卡在构建授权，不用再找别的原因。
+   出现 `set this to true or false` 就说明卡在构建授权。**但它也可能不出现**：实测（DSH `0.2.1-alpha.2`，tarball 来源，全新 profile）文件里只有 `packages:` 而没有待决标记——此时以 `[ERR_PNPM_IGNORED_BUILDS]` 输出为准，不要因为没有标记就排除本条目。
 2. 确认 profile 目录：`<$DSH_HOME>/profiles/<name>`（桌面端是 `desktop`，CLI 常用 `web` / `headless`）。
 3. 想要更完整的 pnpm 输出，可以直接在 profile 目录里跑 `pnpm install`——`dsh plugin add` 只转述了最后一行。
 
 ## 已验证的解决方案
 
-1. 把那一行改成 `true`（该 profile 的 `pnpm-workspace.yaml`）：
+1. 把待决行改成 `true`；如果文件里**没有**待决标记（上面的第二种情况），直接追加：
 
    ```yaml
    allowBuilds:
      koffi: true
    ```
 
-2. 重新执行同一条 `add`。这一次会看到 `node_modules/koffi install: Done`，安装完成，插件出现在 `dsh.profile.bundles` 里。
-3. git 来源还要多回一个待决项：本包自己的 `prepare`（现场构建 `lib/`），即
+2. 重新执行同一条 `add`。这一次会看到 `node_modules/koffi install: Done`。
+3. **验证激活**：打开该 profile 的 `package.json`，确认 `dsh.profile.bundles` 里出现 `@dsh-electron/dsh-plugin-multi-root-workspace`（不只是 `dependencies` 里有它）。实测（DSH `0.2.1-alpha.2`，tarball 来源）出现过这种情况：被构建授权打断的第一次 `add` 已经把依赖写进 `dependencies`，于是恢复后的 `add` 退出 0 却**不激活**——plugin-manager 的 reconcile 只处理"本次运行新增"的依赖。此时执行一次
+
+   ```sh
+   dsh plugin --profile <name> remove @dsh-electron/dsh-plugin-multi-root-workspace
+   dsh plugin --profile <name> add <原来源>
+   ```
+
+   即可激活，`dsh --profile <name> --dump-config` 应看到两行 disabled 加插件的 insert 行。
+4. git 来源还要多回一个待决项：本包自己的 `prepare`（现场构建 `lib/`），即
 
    ```yaml
    allowBuilds:
