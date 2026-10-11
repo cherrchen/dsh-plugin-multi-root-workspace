@@ -33,6 +33,7 @@ import * as LlmMessage from '../src/compat/llm-message.ts'
 import { PLUGIN_SOURCE } from '../src/instructions.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
+import { mountProviderGate } from './support/providers.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -93,10 +94,11 @@ async function mountWorld(config: Instructions.Config = {}, roots: readonly stri
     await ctx.plugin(MultiRootScopeService),
   )
   await mountCompat(ctx)
-  fibers.push(
-    await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace }),
-    await ctx.plugin(Instructions, config),
-  )
+  fibers.push(await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace }))
+  // The row injects the provider-conflict gate; the real provider is already
+  // branded, and the missing `sandbox` gets a branded stub.
+  await mountProviderGate(ctx)
+  fibers.push(await ctx.plugin(Instructions, config))
 
   // A real Session, because `ctx.sandboxPolicy.resolve({ session })` reads the
   // session projection, not just the header.

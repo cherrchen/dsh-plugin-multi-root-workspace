@@ -6,10 +6,13 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { aroundTool } from './compat/tool-context.ts'
 import type {} from './compat.ts'
+import type {} from './providers.ts'
 import { routeWorkspacePath } from './workspace-routing.ts'
 import { wrapMethod } from './method-wrapper.ts'
 
-export const inject = ['multiRootCompat', 'multiRootScope']
+// `multiRootProviders` is the provider-conflict gate: a foreign `ctx.fs` must
+// not carry an additional-root read this row issued.
+export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootScope']
 
 export function apply(ctx: Context): void {
   // The new native LSP tool supplies effective cwd, with no session field on

@@ -49,6 +49,7 @@ import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { defineDomain, domainTable, type KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
 import type {} from './compat.ts'
+import type {} from './providers.ts'
 import { RegistryAuthorityLease, RegistryLeaseContendedError } from './registry-lease.ts'
 import {
   additionalRootId,
@@ -181,7 +182,10 @@ export class MultiRootRegistry extends Service {
   // `multiRootCompat` is the compatibility gate, not a collaborator: this
   // service is what decides which directories become writable roots, so it must
   // not run on a release the contract has not verified (see src/compat.ts).
-  static inject = ['multiRootCompat', 'storageDomain', 'multiRootScope']
+  // `multiRootProviders` is the provider-conflict gate: with a foreign `ctx.fs`
+  // or `ctx.sandbox` it never starts, so this registry stays unmounted and the
+  // scope keeps granting nothing (see src/providers.ts).
+  static inject = ['multiRootCompat', 'multiRootProviders', 'storageDomain', 'multiRootScope']
 
   /** Absolute lock path; absent means the row was composed without `leasePath`. */
   private readonly leasePath: string | undefined

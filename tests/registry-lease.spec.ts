@@ -17,6 +17,7 @@ import { leaseNameWin32 } from '../src/registry-lease-win32.ts'
 import { RootValidationError } from '../src/roots.ts'
 import MultiRootScopeService from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
+import { mountProviderGate } from './support/providers.ts'
 import { shortPathName } from './support/windows.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -271,6 +272,7 @@ async function mountWithControlledDomain(options: {
     },
   })
   await mountCompat(ctx)
+  await mountProviderGate(ctx)
   const fiber = await ctx.plugin(MultiRootRegistry, { leasePath })
   return {
     ctx,

@@ -37,6 +37,7 @@ import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandb
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from './compat.ts'
 import { isPathUnder } from './containment.ts'
+import { brandMultiRootProvider } from './providers.ts'
 import type { FilesystemScope } from './scope.ts'
 
 /** Plugin config: the local backend's knobs verbatim (see `dsh-fs-local`). */
@@ -58,6 +59,9 @@ export class MultiRootFileSystem extends LocalFileSystem {
 
   constructor(ctx: Context, config: Config) {
     super(ctx, config)
+    // The conflict gate (`multiRootProviders`) verifies this brand rather than
+    // `instanceof`, so a duplicated install still identifies the provider.
+    brandMultiRootProvider(this, 'fs')
     this.defaultMode = ctx.sandboxPolicy.defaultMode
   }
 

@@ -3,11 +3,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { WorkspaceFiles } from '@deepseek-ai/dsh-api-workspace-files'
 import type { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from './compat.ts'
+import type {} from './providers.ts'
 import { adaptPathWatch } from './compat/workspace-files.ts'
 import { routeWorkspacePath } from './workspace-routing.ts'
 import { wrapMethod } from './method-wrapper.ts'
 
-export const inject = ['multiRootCompat', 'multiRootScope']
+// `multiRootProviders` is the provider-conflict gate: a foreign `ctx.fs` must
+// not serve additional-root entries this row listed.
+export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootScope']
 
 export function apply(ctx: Context): void {
   ctx.inject(['workspaceFiles', 'fs'], scope => {

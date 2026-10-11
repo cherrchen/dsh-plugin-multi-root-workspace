@@ -14,8 +14,11 @@ let request: PanelCall
 const signal = () => new AbortController().signal
 beforeEach(async () => {
   fixture = createFixtureWorkspace('panel-files')
-  stack = await mountRegistryStack(join(fixture.base, 'store'))
-  await stack.ctx.plugin(LocalFileSystem, { cwd: fixture.workspace })
+  // The provider-conflict gate mounts inside the stack, so the real fs must
+  // mount before it — a later plugin can never take an already-provided key.
+  stack = await mountRegistryStack(join(fixture.base, 'store'), {}, {
+    beforeGate: async ctx => { await ctx.plugin(LocalFileSystem, { cwd: fixture.workspace }) },
+  })
   new WorkspaceFiles(stack.ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 2 })
   await stack.registry.add(fixture.workspace, { path: fixture.outside })
   const root = (await stack.registry.refresh(fixture.workspace))[0]!

@@ -42,6 +42,18 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
     - id: multi-root-sandbox
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
+    # The provider-conflict gate: `ctx.fs` and `ctx.sandbox` must be THIS
+    # bundle's branded providers — verified by a well-known symbol, not
+    # instanceof, so duplicated installs still count. If another plugin's
+    # provider took either key (or took it over later — cordis restarts an
+    # injecting fiber when an injected service changes, so this row re-checks),
+    # the row logs which service is foreign and throws. Every widened-authority
+    # row below injects `multiRootProviders`, so a conflicted composition keeps
+    # the registry unmounted, the scope empty, and nothing granted, regardless
+    # of patch order — fail loud, never a widened grant on an unverified
+    # provider.
+    - id: multi-root-providers
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/providers'
     - id: multi-root-scope
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/scope'
     - id: multi-root-registry

@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest'
 import MultiRootScope from '../src/scope.ts'
 import * as Routing from '../src/lsp.ts'
 import { mountCompat } from './support/compat.ts'
+import { mountProviderGate } from './support/providers.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, REPO_ROOT, type FixtureWorkspace } from './support/temp-workspace.ts'
 
 interface HoverPayload {
@@ -32,6 +33,9 @@ async function mountLsp(fixture: FixtureWorkspace, cwd = fixture.workspace): Pro
   await ctx.plugin(Lsp)
   await ctx.plugin(MultiRootScope)
   await mountCompat(ctx)
+  // The routing row injects the provider-conflict gate; the LocalFileSystem
+  // above plays this bundle's provider, so the gate brands it.
+  await mountProviderGate(ctx)
   const fiber = await ctx.plugin(Routing)
   await ctx.plugin(LspStdio, { servers: { fixture: { command: process.execPath, args: [SERVER], extensionToLanguage: { '.ts': 'typescript' } } } })
   return { ctx, fiber }
@@ -51,6 +55,7 @@ it('initializes and pools real stdio servers independently for the primary and a
     await ctx.plugin(Lsp)
     await ctx.plugin(MultiRootScope)
     await mountCompat(ctx)
+    await mountProviderGate(ctx)
     await ctx.plugin(Routing)
     await ctx.plugin(LspStdio, { servers: { fixture: { command: process.execPath, args: [SERVER], extensionToLanguage: { '.ts': 'typescript' } } } })
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside) }])

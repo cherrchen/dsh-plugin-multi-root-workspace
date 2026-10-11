@@ -28,6 +28,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/sandbox
  */
 
+import type { Context } from '@deepseek-ai/cordis'
 import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
@@ -37,6 +38,7 @@ import type {} from './compat.ts'
 import { widenConfined } from './compat/sandbox-confine.ts'
 import type { ConfineCall, UpstreamConfined } from './compat/sandbox-confine.ts'
 import { DialectUnrecognizedError, splitConfined, widenProfileArgs } from './dialects.ts'
+import { brandMultiRootProvider } from './providers.ts'
 import type {} from './scope.ts'
 import { widenWindowsProfile } from './windows-profile.ts'
 
@@ -52,6 +54,13 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
   // widening below recognizes an upstream argv shape, so it must not run on a
   // release the contract has not verified (see src/compat.ts).
   static inject = ['multiRootCompat', 'sandboxPolicy', 'multiRootScope']
+
+  constructor(ctx: Context, config: Config) {
+    super(ctx, config)
+    // The conflict gate (`multiRootProviders`) verifies this brand rather than
+    // `instanceof`, so a duplicated install still identifies the provider.
+    brandMultiRootProvider(this, 'sandbox')
+  }
 
   /**
    * Wrap `argv` so it executes confined under `policy` on this host, granting

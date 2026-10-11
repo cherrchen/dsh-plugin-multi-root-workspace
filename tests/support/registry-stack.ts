@@ -19,6 +19,7 @@ import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import MultiRootRegistry, { DOMAIN_NAME, type Config as RegistryConfig } from '../../src/registry.ts'
 import MultiRootScopeService from '../../src/scope.ts'
 import { mountCompat } from './compat.ts'
+import { mountProviderGate } from './providers.ts'
 
 /** One mounted stack, with everything a spec needs to act on it. */
 export interface RegistryStack {
@@ -41,7 +42,17 @@ export interface RegistryStack {
  * @param storeRoot - directory the JSON backend owns (created when absent).
  * @returns the mounted stack.
  */
-export async function mountRegistryStack(storeRoot: string, registryConfig: RegistryConfig = {}): Promise<RegistryStack> {
+export interface RegistryStackOptions {
+  /**
+   * Runs after the compat gate and before the provider-conflict gate and the
+   * registry mount. A spec whose `ctx.fs`/`ctx.sandbox` must be a REAL provider
+   * (rather than the gate's branded stub) mounts it here — a later
+   * `ctx.plugin` can never take an already-provided service key.
+   */
+  beforeGate?: (ctx: Context) => Promise<void>
+}
+
+export async function mountRegistryStack(storeRoot: string, registryConfig: RegistryConfig = {}, options: RegistryStackOptions = {}): Promise<RegistryStack> {
   mkdirSync(storeRoot, { recursive: true })
   const ctx = new Context()
   await ctx.plugin(Storage)
@@ -53,6 +64,11 @@ export async function mountRegistryStack(storeRoot: string, registryConfig: Regi
   // The registry injects the compatibility gate, so a stack without it would
   // silently never start the service under test (see src/compat.ts).
   await mountCompat(ctx)
+  await options.beforeGate?.(ctx)
+  // The registry also injects the provider-conflict gate: the stack brands
+  // whatever fs/sandbox the spec mounted and stubs the missing one (see
+  // tests/support/providers.ts).
+  await mountProviderGate(ctx)
   await ctx.plugin(MultiRootRegistry, { leasePath: `${storeRoot}/${DOMAIN_NAME}.lock`, ...registryConfig })
   return {
     ctx,

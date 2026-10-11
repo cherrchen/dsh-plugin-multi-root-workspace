@@ -119,6 +119,7 @@ describe('inserted rows', () => {
       'multi-root-compat',
       'multi-root-fs',
       'multi-root-sandbox',
+      'multi-root-providers',
       'multi-root-scope',
       'multi-root-registry',
       'multi-root-instructions',
@@ -135,6 +136,15 @@ describe('inserted rows', () => {
     expect(gate).toBe(0)
     for (const gated of ['multi-root-fs', 'multi-root-sandbox', 'multi-root-registry', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files']) {
       expect(ids.indexOf(gated), `${gated} must come after the gate`).toBeGreaterThan(gate)
+    }
+  })
+
+  it('places the provider-conflict gate before every row that injects it', () => {
+    const ids = inserted.map(row => row.id)
+    const providers = ids.indexOf('multi-root-providers')
+    expect(providers).toBeGreaterThan(-1)
+    for (const gated of ['multi-root-registry', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files']) {
+      expect(ids.indexOf(gated), `${gated} must come after the provider-conflict gate`).toBeGreaterThan(providers)
     }
   })
 
