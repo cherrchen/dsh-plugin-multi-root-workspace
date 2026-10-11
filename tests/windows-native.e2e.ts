@@ -264,10 +264,13 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     const fixture = createFixtureWorkspace('win-owner')
     const foreign = join(fixture.base, 'foreign-owned')
     mkdirSync(foreign)
-    const identity = execFileSync('whoami', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' })
+    // CI invokes Vitest from Git Bash, whose GNU whoami precedes System32
+    // on PATH. Pin native utilities rather than depending on shell ordering.
+    const systemTool = (name: string): string => join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', `${name}.exe`)
+    const identity = execFileSync(systemTool('whoami'), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' })
     const ownerSid = identity.match(/S-1-\d+(?:-\d+)+/)?.[0]
     if (ownerSid === undefined) throw new Error(`whoami did not report the caller SID: ${identity}`)
-    const icacls = (args: string[]) => spawnSync('icacls', args, { encoding: 'utf8', timeout: 60_000 })
+    const icacls = (args: string[]) => spawnSync(systemTool('icacls'), args, { encoding: 'utf8', timeout: 60_000 })
     let hijacked = false
     const restore = (): void => {
       // Every cleanup step is best-effort and logged: takeown works for
@@ -281,7 +284,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       ] as const
       for (const [command, args] of steps) {
         try {
-          const done = spawnSync(command, [...args], { encoding: 'utf8', timeout: 60_000 })
+          const done = spawnSync(systemTool(command), [...args], { encoding: 'utf8', timeout: 60_000 })
           if (done.status !== 0) console.info(`foreign-owned cleanup \`${command} ${args.slice(1).join(' ')}\` exited ${done.status}: ${done.stderr || done.stdout}`)
         } catch (error) {
           console.info(`foreign-owned cleanup ${command} threw: ${String(error)}`)

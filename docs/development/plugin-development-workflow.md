@@ -222,6 +222,8 @@ Windows 的 foreign-owned ACL 夹具按**先 DACL、后 owner**搭建：用 `who
 
 原生 piped 子进程探针在 `close` 而非 `exit` 事件拼接输出：Node 的 `exit` 不保证 stdout/stderr 已关闭，过早解析会把完整 verdict 截断；`close` 才能证明输出管道已经结束。见 [Node child_process 文档](https://nodejs.org/api/child_process.html#event-close)。
 
+CI 的日志捕获使用 Git Bash，其 PATH 可能让同名 GNU 命令覆盖 Windows 工具。ACL 夹具的 `whoami.exe` / `icacls.exe` / `takeown.exe` 均按 `%SystemRoot%/System32` 绝对路径执行；不要用裸 `whoami /user`，否则命中 GNU whoami 后参数会被拒绝。
+
 ## 8. 常见失败与处置
 
 | 症状 | 原因 | 处置 |

@@ -438,3 +438,5 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 本机开发 pin `0.2.1-alpha.2`：compat、lint、双端 typecheck、build、docs:check 通过；Seatbelt 探针原生执行成功并通过 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt` 约束完整测试，结果 **500 passed / 22 skipped**（35 文件通过、1 Windows 原生文件跳过）。compose **46/46**、behavior **99/99**、web/headless journey **62/62** 全通过；pack:check **73 个成员**通过，安装 tarball 的 packed behavior **98/98** 通过。外层 Agent 沙箱内的首次探针被 sandbox_apply 拒绝，该次不计原生证据；上述完整测试与冒烟在外层沙箱之外执行。
 
 本机不能证明 Windows ACL 夹具修复有效，也不能验证 Linux 内核；本轮跨版本与原生平台证据等待推送后的 CI 矩阵，不沿用历史 HEAD 的绿色结果。
+
+首轮 [CI run 38153898876](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38153898876) 暴露新 SID 查询命中了 Git Bash PATH 中的 GNU whoami，所有 Windows 腿在夹具前置步骤失败；不将此轮计作修复验收。后续改为按 System32 绝对路径启动原生 whoami/icacls/takeown，继续完整矩阵验证。

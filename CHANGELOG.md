@@ -23,6 +23,9 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 ### Fixed
 
+- **附加根重新登记保留原权限**：命令与面板在未显式选择访问级别时不发送默认值，避免 revive 把只读登记静默升级；达到根上限时仍可从面板重新登记既有的不可用项。
+- **面板兼容旧宿主的根列表**：旧响应缺少 `limit` / `count` 时仍可显示和操作，显式非法值仍拒绝。
+- **非法 toolAccess 的拓扑文案与执行一致**：模型明确看到所有附加根写被拒，不再被告知 read-write 登记可写；根上限配置 `null` 同样 fail closed。
 - **安装副本在 Windows（DSH 0.1.7-alpha.1+）上的受限命令恢复可用**：发布的 v0.1.6 从 npm/tarball 安装后，独立 Windows runner 在首行之前就死于 `ERR_MODULE_NOT_FOUND`——它的静态模块图 import 的上游包无法从插件安装目录解析，受影响版本上配置了附加根的会话里每条受限命令都会失败。runner 的静态图现在只含 `node:` 内置，上游 ACL 包改为从上游 runner 自身位置按包自引用加载。
 - **Windows 上的网络与设备根被拒绝**：UNC（`\\server\share`）、`\\?\`、`\\.\` 与映射网络盘此前会被当成普通附加根登记；现在在任何文件系统触碰之前以 `unsupported-path` 词法拒绝，存量记录标记为 `invalid`，受限执行侧 fail closed（`SandboxUnavailableError` / 退出 127），绝不静默放开（[ADR-0011 修订](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - **Windows runner 在 spawn 前重新验证根**：授权 ACL 之后、启动子进程之前重新确认每个根仍存在且是同一 canonical 目录，并要求 `--temp` 已存在；不满足即退出 127，不启动无约束进程。
