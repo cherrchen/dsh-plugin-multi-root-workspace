@@ -104,6 +104,27 @@ function writeProbe(roots: readonly string[], name = 'probe.txt'): string {
   return `const fs=require('fs');const roots=${JSON.stringify(roots)};for(const root of roots){try{fs.writeFileSync(root+${JSON.stringify(`/${name}`)},'ok');console.log('allowed')}catch(e){console.log('denied:'+(e&&e.code||e))}}`
 }
 
+/**
+ * PTY variant: each verdict is its own `MRW:<index>:<verdict>` line.
+ * ConPTY interleaves output with cursor/erase escape sequences and may wrap
+ * lines, so verdicts are matched by marker anywhere in the stream instead of
+ * assuming clean `\n`-separated lines. Each marker line stays far below the
+ * 100-column terminal width, so wrapping cannot split one.
+ */
+function writeProbeMarked(roots: readonly string[], name = 'probe.txt'): string {
+  return `const fs=require('fs');const roots=${JSON.stringify(roots)};roots.forEach((root,i)=>{try{fs.writeFileSync(root+${JSON.stringify(`/${name}`)},'ok');console.log('MRW:'+i+':allowed')}catch(e){console.log('MRW:'+i+':denied:'+(e&&e.code||e))}})`
+}
+
+/** Extract the indexed `MRW:` verdicts from a ConPTY stream, ignoring ANSI/OSC escapes. */
+function ptyVerdicts(seen: string): (string | undefined)[] {
+  const clean = seen.replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, '')
+  const verdicts: (string | undefined)[] = []
+  for (const match of clean.matchAll(/MRW:(\d+):([^\r\n]+)/g)) {
+    verdicts[Number(match[1])] = match[2]!.trim()
+  }
+  return verdicts
+}
+
 /** Find a writable local fixed drive other than the fixture's, if one exists. */
 function secondDrive(fixtureDrive: string): string | undefined {
   for (const letter of ['D:\\', 'C:\\']) {
@@ -575,7 +596,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       // restricted token gates it exactly like a piped spawn.
       await mounted.ctx.plugin(LocalSubprocess)
       const terminal = await mounted.ctx.subprocess.spawnTerminal({
-        argv: (await mounted.provider.confine([process.execPath, '-e', writeProbe([primary, a, b], 'pty.txt')], mounted.policy)).argv as string[],
+        argv: (await mounted.provider.confine([process.execPath, '-e', writeProbeMarked([primary, a, b], 'pty.txt')], mounted.policy)).argv as string[],
         cwd: primary, rows: 24, cols: 100, terminalType: 'xterm-256color', graceMs: 3000,
       })
       try {
@@ -587,8 +608,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
           new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), 60_000)),
         ])
         expect(done, `pty child never exited; output: ${seen}`).toBe('done')
-        expect(seen.replace(/\r/g, '')).toContain('allowed')
-        expect(seen.replace(/\r/g, '').split('\n').filter(line => line === 'allowed' || line.startsWith('denied')))
+        expect(ptyVerdicts(seen), `pty verdicts; raw output: ${JSON.stringify(seen)}`)
           .toEqual(['allowed', 'allowed', expect.stringMatching(/^denied:/)])
       } finally { await terminal.terminate() }
 
