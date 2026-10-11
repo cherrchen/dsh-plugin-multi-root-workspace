@@ -24,7 +24,7 @@ DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围�
 
 **已完成并发布：`v0.1.4`**——在 `v0.1.3` 契约不变的前提下，受支持的上游运行时扩展到 `0.1.7-rc.2`（形状与 `0.1.7-rc.1` 相同，适配层无新分支；cordis 仍是 `~4.0.4`）。详见 [CHANGELOG](./CHANGELOG.md)。
 
-**v0.1.5 已发布**。当前开发分支包含尚未发布的 DSH `0.2.1-alpha.1` / `0.2.1-alpha.2` 支持、动态 cwd / Session origin 分离，以及 LSP、Windows ACL、附加根文件浏览与 Worktree 能力；这些变更拟纳入 `v0.1.6`，发布状态见[路线账本](./docs/plans/active/2026-09-12-multi-root-workspace.md)。
+**`v0.1.6` 已发布**：支持 DSH `0.2.1-alpha.1` / `.2`，并包含动态 cwd 与 Session origin 分离、附加根 LSP、Windows ACL、文件浏览与 Worktree 能力。详见 [CHANGELOG](./CHANGELOG.md) 与[路线账本](./docs/plans/active/2026-09-12-multi-root-workspace.md)。
 
 进度、编号与发布状态的唯一真源是[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)（M1–M4 是 MVP 里程碑编号，H1–H4 是 `v0.1.1` 批次编号，其中 H1 即 M4）；逐项证据见各[已完成计划](./docs/plans/README.md)，每个版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)。
 
@@ -52,7 +52,7 @@ dsh --profile web
 - **使用本源码构建的插件**：需要一个受支持的 DSH 运行时 —— 当前是 **`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-alpha.1` 与 `0.2.1-alpha.2`**，别的版本装不上也不会跑（见下）。`dsh plugin` 会把包装进对应 profile，无需本地 Node 工具链
 - **从源码构建 / 参与**：**Node.js** `^22.19.0 || >=24`（仓库 `engines` 钉住）、**Git**、**pnpm 11**（`packageManager` 钉 `pnpm@11.25.0`，建议经 corepack 启用）
 - **DSH 运行时**：开发依赖精确 pin 在 `0.2.1-alpha.2`（受支持版本里的基线）；升级流程见[开发工作流](./docs/development/plugin-development-workflow.md)
-- **平台支持**：macOS Seatbelt / Linux bwrap、Landlock；当前开发分支还实现 Windows root-set ACL runner，平台验证状态见[路线账本](./docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
+- **平台支持**：macOS Seatbelt、Linux bwrap / Landlock，以及 Windows root-set ACL runner；各平台实际执行证据见[路线账本](./docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
 - 运行冒烟测试**不需要模型凭据**：e2e 的模型轮次由内联的脚本化模型端点提供
 
 **受支持的 DSH 版本是一份精确清单，不是一个范围。** 因为本插件替换的是 `ctx.fs` 与 `ctx.sandbox`——安全边界本身——而它识别内核沙箱方言靠的是对具体上游版本实测出来的 argv 形状。所以 `peerDependencies` 只列真正跑过全套验证的版本，启动时也会再查一遍：宿主的版本不在清单上，或者若干个 `@deepseek-ai/dsh-*` 混装了不同版本，那么 fs / sandbox / registry / instructions / lsp / workspace-files 六行**不启动**，组合退化成"没装这个插件"，并打印一条说明。诊断办法见[故障排查：DSH 版本不在支持矩阵上](./docs/troubleshooting/unsupported-dsh-release.md)，理由见 [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)。
@@ -90,8 +90,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.5/dsh-electron-dsh-plugin-multi-root-workspace-0.1.5.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.5.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.6/dsh-electron-dsh-plugin-multi-root-workspace-0.1.6.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.6.tgz
 ```
 
 同样是预构建产物（不需要编译本插件本身），适合内网或离线环境交付；首次 `add` 同样要回答那一次 `allowBuilds`。
@@ -110,10 +110,10 @@ allowBuilds:
   koffi: true
 ```
 
-然后重新执行 `add` 即可。建议锁定 tag（如 `#v0.1.5`），让后续推送无法悄悄改变实际运行的内容：
+然后重新执行 `add` 即可。建议锁定 tag（如 `#v0.1.6`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.5
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.6
 ```
 
 ### 从本地源码安装（开发调试）

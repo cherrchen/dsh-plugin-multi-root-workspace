@@ -1,6 +1,6 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 候选范围见下方 B1–B3 与 DSH 0.2.1 记录，正在准备发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
+> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
 > 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
@@ -34,7 +34,7 @@
 | v0.1.3 | compat | DSH 支持矩阵扩展至 `0.1.7-alpha.2` 与 `0.1.7-rc.1`；形状未变，`rc.1` 安装期 peer 门禁要求精确 peer | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `10381fc` | `v0.1.3` |
 | v0.1.4 | compat | DSH 支持矩阵扩展至 `0.1.7-rc.2`；相对 `rc.1` 形状未变，无新适配分支，cordis 仍是 `~4.0.4` | — | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `f2a8f75` | `v0.1.4` |
 | v0.1.5 | compat | DSH 支持矩阵扩展至 `0.2.0-rc.1` / `0.2.0-rc.2`，开发 pin 升级，全部支持版本 × OS 的持续矩阵 | [本次记录](#dsh-02-兼容提升2026-09-30) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `135af7f` | `v0.1.5` 已发布 |
-| v0.1.6（候选） | DSH 0.2.1 + B1–B3 + ADR-0012 | DSH `0.2.1-alpha.1` / `.2`；Session origin 与动态 cwd 分离；附加根 LSP、Windows ACL、文件树与 Worktree | [B1–B3](#b1b3第二期-p12026-10-02)、[DSH 0.2.1](#dsh-021-迁移与目录安全契约2026-10-10未发布) | [0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md)、[0012](../../decisions/ADR-0012-session-origin-and-effective-cwd.md) | `feat/dsh-0.2.1-alpha.2-compat` | 本机 `verify:all`、`compat:check`、`docs:check` 全绿；拟纳入 v0.1.6 |
+| v0.1.6 | DSH 0.2.1 + B1–B3 + ADR-0012 | DSH `0.2.1-alpha.1` / `.2`；Session origin 与动态 cwd 分离；附加根 LSP、Windows ACL、文件树与 Worktree | [B1–B3](#b1b3第二期-p12026-10-02)、[DSH 0.2.1](#dsh-021-迁移与目录安全契约2026-10-10) | [0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md)、[0012](../../decisions/ADR-0012-session-origin-and-effective-cwd.md) | `466b3bb` | `v0.1.6` |
 | 第二期 | 后续 B 项 | per-root / per-tool 权限等 P2/P3 项 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 
 ## 总体策略
@@ -343,9 +343,9 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 | 跳过范围 | 本机无目录 symlink 权限，以及不适用于 Windows 的 POSIX 内核执行和条件用例；Windows 原生 ACL 用例没有 skip。Windows 不运行 POSIX 冒烟和 `kernel:probe` |
 | 修复后远端矩阵 | 修复提交 `41e4d1a` 的 [CI run 37118946523](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/37118946523) 全部 success：releases job 及九个支持版本 × Linux/macOS/Windows 的 27 个 verify job；九个 Windows job 均执行原生 ACL 用例，Linux/macOS 完成各自内核探针、测试及完整冒烟 |
 
-## DSH 0.2.1 迁移与目录安全契约（2026-10-10，未发布）
+## DSH 0.2.1 迁移与目录安全契约（2026-10-10，随 v0.1.6 发布）
 
-分支 `feat/dsh-0.2.1-alpha.2-compat` 从 `main` 的 `f149fa4` 创建；实际基线 package 为 `0.1.5`，`v0.1.5` 已由 `657e6d1` 发布，前述「待打 tag」是发版准备时的历史状态。本任务保持 package version，不 release、不发布 npm、不合并 main。上游差异唯一真源是[接口审查](../../reference/dsh-0.2.1-migration.md)，目录、指令、LSP 和进程快照设计是 [ADR-0012](../../decisions/ADR-0012-session-origin-and-effective-cwd.md)。
+分支 `feat/dsh-0.2.1-alpha.2-compat` 从 `main` 的 `f149fa4` 创建；本项现已包含于 `v0.1.6`。上游差异唯一真源是[接口审查](../../reference/dsh-0.2.1-migration.md)，目录、指令、LSP 和进程快照设计是 [ADR-0012](../../decisions/ADR-0012-session-origin-and-effective-cwd.md)。
 
 | 项 | 当前证据 |
 |---|---|
@@ -386,3 +386,7 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 [评审问题](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/8#discussion_r4237499560)指出 native 代投递的文件在 cwd 切换后被上游撤回，插件却保留完整 digest，导致仍获授权的指令不再补发。修复规则见 [ADR-0012 指令章节](../../decisions/ADR-0012-session-origin-and-effective-cwd.md#指令)。新增四条回归覆盖无 baseline identity 的 remove、baseline 替换、不同项目复用同名 scope，以及补发构造失败后无需新 touch 的重试；同时断言同批去重、插件投递不受 native remove 影响和根撤销仍生效。
 
 本机 alpha.2 enforce 下 compat、lint、双端 typecheck、build、完整 test（31 文件，388 passed / 9 skipped）、docs:check 和 diff whitespace 检查通过；指令定向测试 53/53，web/headless journey 52/52。本次受限进程没有可用 kernel runner，journey 的两条 confined bash 断言明确 skip；不更新为 native 内核验收，也未复跑其他版本和平台。此前最终矩阵证据属于上述历史 HEAD，修复后的跨版本结果由新提交 CI 另行验证。
+
+### v0.1.6 发版验证（2026-10-11）
+
+`v0.1.6` 已通过 `pnpm release patch --tag` 生成，发版提交为 `466b3bb`，并推送至 `origin/main`，连同 annotated tag `v0.1.6`。本机 `pnpm verify:all`、`pnpm compat:check`、`pnpm docs:check` 均通过；本机 Test 为 393 passed / 4 skipped，compose 44/44、behavior 99/99、journey 55/55。GitHub [Release workflow run 38121365127](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38121365127) 全绿：11 个支持版本 × Linux/macOS/Windows 的 33 个 verify job，以及 npm publish 和 GitHub Release 创建均成功。
