@@ -57,6 +57,7 @@ import {
   canonicalRoot,
   classifyStoredRoots,
   expandRootInput,
+  isWindowsNetworkOrDevicePath,
   removeStatusAt,
   resolveRootIndex,
   RootValidationError,
@@ -248,7 +249,7 @@ export class MultiRootRegistry extends Service {
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'multiRootRegistry')
     this.leasePath = config.leasePath
-    const configured = config.maxAdditionalRoots ?? DEFAULT_MAX_ADDITIONAL_ROOTS
+    const configured = config.maxAdditionalRoots === undefined ? DEFAULT_MAX_ADDITIONAL_ROOTS : config.maxAdditionalRoots
     if (Number.isInteger(configured) && configured >= 1 && configured <= MAX_ADDITIONAL_ROOTS_CEILING) {
       this.maxRoots = configured
     } else {
@@ -408,8 +409,14 @@ export class MultiRootRegistry extends Service {
       // root whose directory silently came back. Only a root that was granted
       // then AND is granted now stays a `duplicate` refusal.
       const expanded = expandRootInput(input.path)
+      // Revive matching must obey the same pre-I/O rejection as candidate
+      // validation: even realpath of a UNC path can initiate SMB auth.
+      if (process.platform === 'win32' && isWindowsNetworkOrDevicePath(expanded)) {
+        throw new RootValidationError('unsupported-path', `Windows ACL confinement cannot cover network or device paths: ${expanded}`)
+      }
       const preliminary = isAbsolute(expanded) ? canonicalRoot(expanded) : undefined
       const revived = preliminary === undefined ? -1 : statuses.findIndex((status) => {
+        if (process.platform === 'win32' && isWindowsNetworkOrDevicePath(status.path)) return false
         if (status.path !== preliminary && canonicalRoot(status.path) !== preliminary) return false
         const before = earlier?.find(candidate => candidate.id === status.id)
         return status.state !== 'available' || (before !== undefined && before.state !== 'available')

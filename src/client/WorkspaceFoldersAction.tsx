@@ -255,7 +255,7 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     const dialog = dialogRef.current
     if (dialog === null) return
     const focusable = Array.from(
-      dialog.querySelectorAll<HTMLElement>('button, input, [href], [tabindex]:not([tabindex="-1"])'),
+      dialog.querySelectorAll<HTMLElement>('button, input, select, [href], [tabindex]:not([tabindex="-1"])'),
     ).filter(element => !element.hasAttribute('disabled'))
     if (focusable.length === 0) {
       event.preventDefault()

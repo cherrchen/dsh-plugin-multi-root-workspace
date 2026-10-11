@@ -26,6 +26,7 @@ Accepted
 - 新增记录达上限即 `root-limit-reached`；revive/重复登记既有记录不占新额度。检查在序列化队列内、reclassify 之后。
 - **超限存量永不截断**：历史超出上限的 store（例如上限被调低）照常被分类与授予，只有新增被拒绝，并每主根 warn 一次。`RootsView` 暴露 `limit` / `count`，命令与面板如实显示并禁用/解释 Add——但面板只为"新增"禁用控件：withheld / invalid 行的重新登记入口在到限时保持可用，因为 revive 不占新额度（外部审查返工，PR #10）。
 - 默认值的证据：`scripts/bench-root-scale.mjs`（`pnpm bench:roots`）对 0–64 根测量分类耗时与三方言 argv/profile 字节，结果存档于 `docs/reference/bench-root-scale-darwin.json`。
+- 面板 wire 的 `limit` / `count` 允许缺省，以兼容上限功能之前的宿主；缺省 count 按全部返回行计数，缺省 limit 在解析后的视图中以 `Number.MAX_SAFE_INTEGER` 表达旧宿主未报告上限，避免凭空施加默认 16 的客户端限制。显式给出的坏值仍拒绝解析，新宿主仍必须返回实际配置与计数。行配置只有 `undefined` 使用默认值，`null` 属于非法值。
 
 ### B7：品牌 + provider 门禁行
 

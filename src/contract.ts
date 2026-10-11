@@ -108,7 +108,7 @@ export interface RootsView {
   readonly effectiveCwd?: string
   /** The additional roots, in registry order. */
   readonly roots: readonly RootView[]
-  /** The configured cap on stored registrations for this primary root. */
+  /** The host cap; MAX_SAFE_INTEGER means a legacy host reported no limit. */
   readonly limit: number
   /**
    * How many records are stored, in every state. `count > limit` is a
@@ -232,8 +232,10 @@ const rootsViewSchema = z.object({
   primaryName: z.string().optional(),
   effectiveCwd: z.string().optional(),
   roots: z.array(rootViewSchema),
-  limit: z.number().int().nonnegative(),
-  count: z.number().int().nonnegative(),
+  // Pre-limit hosts omitted both fields. Absence is compatible; malformed
+  // supplied values still fail validation.
+  limit: z.number().int().nonnegative().optional(),
+  count: z.number().int().nonnegative().optional(),
   unavailable: z.string().optional(),
 })
 
@@ -291,8 +293,10 @@ export function parseRootsView(value: unknown): Parsed<RootsView> {
       ...(view.primaryName === undefined ? {} : { primaryName: view.primaryName }),
       ...(view.effectiveCwd === undefined ? {} : { effectiveCwd: view.effectiveCwd }),
       roots: view.roots.map(narrowRootView),
-      limit: view.limit,
-      count: view.count,
+      // Legacy hosts had no cap. Do not invent a client-side limit that
+      // disables their Add controls; all stored states count equally.
+      limit: view.limit ?? Number.MAX_SAFE_INTEGER,
+      count: view.count ?? view.roots.length,
       ...(view.unavailable === undefined ? {} : { unavailable: view.unavailable }),
     },
   }

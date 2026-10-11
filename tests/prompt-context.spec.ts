@@ -90,4 +90,21 @@ describe('renderWorkspaceRootsContext', () => {
     expect(first).not.toContain(A.id)
     expect(first).not.toContain('S-1-')
   })
+
+  it('never promises writes for invalid toolAccess on any platform, preserving mode and empty semantics', () => {
+    for (const platform of PLATFORMS) {
+      for (const mode of MODES) {
+        const options = { platform, mode, primaryRoot: PRIMARY, cappedTools: [], toolAccessInvalid: true }
+        expect(renderWorkspaceRootsContext({ ...options, roots: [] })).toBe('')
+        const text = renderWorkspaceRootsContext({ ...options, roots: [A, B] })
+        if (mode === 'workspace-write') {
+          expect(text).toContain('all additional-root writes are refused because toolAccess is invalid')
+          expect(text).not.toContain('are writable additional roots')
+          expect(text).not.toContain('Writable additional roots are enforced')
+        } else {
+          expect(text).toBe(render(platform, mode, [A, B]))
+        }
+      }
+    }
+  })
 })

@@ -9,10 +9,10 @@
  * handed to the kernel dialects.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DOMAIN_NAME, MAX_ALIAS_LENGTH } from '../src/registry.ts'
 import { entryRootRef, RootValidationError } from '../src/roots.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
@@ -73,6 +73,22 @@ afterEach(async () => {
 })
 
 describe('registration lifecycle', () => {
+  it('rejects Windows network/device candidates before revive matching can resolve them', async () => {
+    const { registry } = await mount()
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const realpath = vi.spyOn(realpathSync, 'native')
+    try {
+      for (const path of ['//server/share', '\\\\server\\share', '//?/C:/x', '//./pipe/x']) {
+        await expect(registry.add(primary, { path })).rejects.toMatchObject({ code: 'unsupported-path' })
+        expect(realpath.mock.calls.some(([candidate]) => String(candidate) === path)).toBe(false)
+      }
+      expect(registry.list(primary)).toEqual([])
+    } finally {
+      realpath.mockRestore()
+      platform.mockRestore()
+    }
+  })
+
   it('grants a newly registered root, persists it, and reports it available', async () => {
     const { registry, scope } = await mount()
     const extra = makeRoot('extra')
@@ -752,8 +768,8 @@ describe('the additional-root limit', () => {
     expect(revived[0]?.state).toBe('available')
   })
 
-  it.each([0, -3, 1.5, 65])('fails closed on the invalid limit %s and grants nothing', async (bad) => {
-    const { registry, scope } = await mount({ maxAdditionalRoots: bad })
+  it.each([0, -3, 1.5, 65, null])('fails closed on the invalid limit %s and grants nothing', async (bad) => {
+    const { registry, scope } = await mount({ maxAdditionalRoots: bad as number })
     const extra = makeRoot('extra')
 
     expect(registry.authority.kind).toBe('config-invalid')

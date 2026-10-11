@@ -158,6 +158,7 @@ export const MULTI_ROOT_CONTEXT_NAME = 'multi-root:scope'
  * @param options.primaryRoot - the canonical session workspace root.
  * @param options.roots - the granted additional members, in registry order.
  * @param options.cappedTools - sorted tool names that can never write an additional root.
+ * @param options.toolAccessInvalid - invalid host config caps every additional-root write.
  * @returns the stable topology text; empty when there are no additional roots.
  */
 export function renderWorkspaceRootsContext(options: {
@@ -166,6 +167,7 @@ export function renderWorkspaceRootsContext(options: {
   readonly primaryRoot: string
   readonly roots: readonly ScopeRoot[]
   readonly cappedTools: readonly string[]
+  readonly toolAccessInvalid?: boolean
 }): string {
   const { platform, mode, primaryRoot, roots, cappedTools } = options
   if (roots.length === 0) return ''
@@ -178,16 +180,17 @@ export function renderWorkspaceRootsContext(options: {
     return `Current DSH workspace roots: ${members} are additional roots of this session's workspace; `
       + 'danger-full-access mode has no sandbox isolation.'
   }
-  const writable = roots.filter(root => root.access === 'read-write').map(root => root.path)
+  const writable = options.toolAccessInvalid ? [] : roots.filter(root => root.access === 'read-write').map(root => root.path)
   const readOnly = roots.filter(root => root.access === 'read-only').map(root => root.path)
   const groups: string[] = []
+  if (options.toolAccessInvalid) groups.push(`${members} are readable additional roots (all additional-root writes are refused because toolAccess is invalid)`)
   if (writable.length > 0) groups.push(`${JSON.stringify(writable)} are writable additional roots`)
-  if (readOnly.length > 0) groups.push(`${JSON.stringify(readOnly)} are read-only additional roots (writes are refused)`)
+  if (!options.toolAccessInvalid && readOnly.length > 0) groups.push(`${JSON.stringify(readOnly)} are read-only additional roots (writes are refused)`)
   let text = `Current DSH workspace roots: ${groups.join(' and ')} of this session's workspace. `
     + `The session origin remains the primary root (${JSON.stringify(primaryRoot)}); `
     + 'changing the working directory does not change these grants. '
     + 'Grant changes apply to later operations and newly started processes, not to processes already running.'
-  if (platform === 'win32') {
+  if (platform === 'win32' && !options.toolAccessInvalid) {
     text += ' Writable additional roots are enforced for shell processes by the upstream Windows ACL '
       + 'restricted-token sandbox, whose enforcement is reported as partial; reads are not confined by it.'
   }
@@ -240,6 +243,11 @@ export class MultiRootScopeService extends Service {
    */
   toolCaps(): readonly string[] {
     return Object.keys(this.caps).sort()
+  }
+
+  /** Whether malformed toolAccess caps every call, including unknown tools. */
+  get toolAccessInvalid(): boolean {
+    return this.capsInvalid
   }
 
   constructor(ctx: Context, config: Config = {}) {
@@ -298,6 +306,7 @@ export class MultiRootScopeService extends Service {
             primaryRoot: resolved.primaryRoot,
             roots: resolved.roots,
             cappedTools: this.toolCaps(),
+            toolAccessInvalid: this.toolAccessInvalid,
           })
         },
       })

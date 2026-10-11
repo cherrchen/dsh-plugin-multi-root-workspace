@@ -42,7 +42,7 @@ interface Harness {
   readonly calls: Call[]
   readonly registrations: Registration[]
   readonly dictionaries: { ns: string; dicts: Record<string, unknown> }[]
-  setView: (view: RootsView) => void
+  setView: (view: HostView) => void
   setSession: (sessionId: string | undefined) => void
   /**
    * Present the 0.1.6-alpha.2 catalog: no `current` field, and the main view
@@ -58,6 +58,9 @@ interface Harness {
   /** Release a call held by `holdNextCall`. */
   release: () => void
 }
+
+/** Old hosts omit cap metadata; exercise their actual response on the channel. */
+type HostView = Omit<RootsView, 'limit' | 'count'> & Partial<Pick<RootsView, 'limit' | 'count'>>
 
 const ROOT_A: RootView = { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', access: 'read-write', alias: 'payments' }
 const ROOT_B: RootView = { ordinal: 2, id: 'b', path: '/repos/website', addedAt: '2026-09-12T00:00:00.000Z', state: 'missing', access: 'read-only', detail: 'gone' }
@@ -96,7 +99,7 @@ function mount(withFilesActions = false): Harness {
   const calls: Call[] = []
   const registrations: Registration[] = []
   const dictionaries: { ns: string; dicts: Record<string, unknown> }[] = []
-  let view: RootsView = { primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 }
+  let view: HostView = { primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 }
   const sessionListeners = new Set<() => void>()
   let currentSession: string | undefined = 'session-1'
   // Undefined keeps the 0.1.5 / 0.1.6-alpha.1 selection snapshot (`current`).
@@ -279,6 +282,21 @@ describe('the panel dialog', () => {
     expect(screen.getByText('primary')).toBeTruthy()
     expect(screen.getByText('payments')).toBeTruthy()
     expect(screen.getByText(`${NS}.state.missing`)).toBeTruthy()
+  })
+
+  it('keeps legacy host lists usable even with more than the new default limit', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', roots: Array.from({ length: 17 }, (_, i) => ({
+      ...ROOT_A, ordinal: i + 1, id: String(i), path: `/repos/legacy-${i}`, alias: `legacy-${i}`,
+    })) })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('legacy-16')).toBeTruthy() })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('button', { name: `${NS}.panel.add` })).toHaveProperty('disabled', false)
+    fireEvent.change(screen.getByPlaceholderText(`${NS}.panel.addManual`), { target: { value: '/repos/new' } })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.addConfirm` }))
+    await waitFor(() => { expect(harness.calls.at(-1)).toMatchObject({ endpoint: 'add', payload: { path: '/repos/new' } }) })
   })
 
   it('shows No active session and does not call the host when there is no current session', async () => {

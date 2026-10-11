@@ -48,7 +48,7 @@ Windows runner 的 capability SID 只对「主根 + 可写附加根」这一个�
 
 `MultiRootScopeService` 在公开的 `tools/execute` around-dispatch waterfall（`src/compat/tool-context.ts` 的 `aroundTool`）里把 `{ capped }` 放进模块级 `AsyncLocalStorage`：工具名在 dispatch 入口读一次（绝不读模型参数），`capped = parent?.capped || toolAccess[exec.name] === 'read-only'`——嵌套只会收窄。`resolve()` 在 dispatch 内读 ALS store；**dispatch 之外**（用户 PTY、面板、未知 async 边界）无法证明工具身份，按最严格解释处理：`toolAccess` 非空即封顶。空 `toolAccess`（含未配置）行为与实现前逐字节一致。`toolAccess` 配置非法（非对象、数组、或任何值不是 `'read-only'`）时 fail closed：一切调用按封顶处理并 log error，不抛错。封顶只收窄，任何值都不能放宽到根自身 access 之上。
 
-`toolCaps()` 返回排序后的被封顶工具名，供拓扑文案（ADR-0013 与 B8 的提示词修订一起落地）列出。
+`toolCaps()` 返回排序后的被封顶工具名，供拓扑文案（ADR-0013 与 B8 的提示词修订一起落地）列出。非法配置不对应有限的工具名单，由 `toolAccessInvalid` 单独表达：workspace-write 拓扑只陈述成员可读、全部附加根写被拒及配置原因，不再把 read-write 登记说成当前可写；零成员、read-only 与 danger-full-access 模式仍遵循各自原有文案。
 
 ## Alternatives Considered
 

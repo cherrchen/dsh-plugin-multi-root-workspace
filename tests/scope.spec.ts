@@ -208,6 +208,17 @@ describe('workspace topology context', () => {
     expect(snapshot.indexOf('Current DSH file policy')).toBeLessThan(snapshot.indexOf('Current DSH workspace roots'))
   })
 
+  it.each([null, [], { bash: 'read-write' }])('reflects invalid toolAccess %j in the assembled prompt', async (toolAccess) => {
+    await promptFibers.pop()!.dispose()
+    promptFibers.push(await promptCtx.plugin(MultiRootScopeService, { toolAccess: toolAccess as never }))
+    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
+    expect(promptCtx.multiRootScope.resolve(policy(fixture.workspace)).writableRoots).toEqual([])
+    const text = await topology()
+    expect(text).toContain(JSON.stringify([fixture.outside]))
+    expect(text).toContain('all additional-root writes are refused because toolAccess is invalid')
+    expect(text).not.toContain('are writable additional roots')
+  })
+
   it('contributes nothing while the scope holds no additional root', async () => {
     expect(await topology()).toBe('')
     const snapshot = renderContextSnapshot(await promptCtx.systemPrompt.assemble({ agent: agent() }))
