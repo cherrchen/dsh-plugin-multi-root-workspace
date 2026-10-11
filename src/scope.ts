@@ -22,6 +22,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type { RootAccess } from './roots.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -44,20 +45,43 @@ export interface AdditionalWorkspaceRoot {
    * ever registered.
    */
   recordedPath: string
+  /**
+   * The write authority the registration carries. `read-only` roots remain
+   * workspace members — instructions, LSP, workspace-file routing, and reads
+   * all still see them — but they are never part of `writableRoots` and so
+   * never reach a write grant.
+   */
+  access: RootAccess
   /** Optional display alias. */
   alias?: string
 }
 
+/** One granted workspace member, with the authority fact the enforcement reads. */
+export interface ScopeRoot {
+  /** Canonical absolute directory. */
+  readonly path: string
+  /** The write authority the registration carries. */
+  readonly access: RootAccess
+  /** Optional display alias. */
+  readonly alias?: string
+  /** Stable registry identity. */
+  readonly id: string
+}
+
 /**
  * The resolved scope of one confined call. `primaryRoot` equals the policy's
- * workspace root; `additionalRoots` are canonical, deduplicated, never equal to
- * the primary root, and empty in M1.
+ * workspace root; `additionalRoots` are canonical, deduplicated, never equal
+ * to the primary root.
  */
 export interface FilesystemScope {
   /** The session's workspace root (`session.header.cwd`, canonical). */
   primaryRoot: string
-  /** Extra writable roots granted inside the same sandbox mechanism. */
+  /** Every granted member — ANY access level — canonical, in registry order. */
   additionalRoots: readonly string[]
+  /** The granted members with their access, in registry order. */
+  roots: readonly ScopeRoot[]
+  /** The members carrying `read-write` — the only paths a write may reach. */
+  writableRoots: readonly string[]
 }
 
 /**
@@ -82,8 +106,16 @@ export function sanitizeAdditionalRoots(
   primaryRoot: string,
   roots: readonly AdditionalWorkspaceRoot[],
 ): string[] {
+  return sanitizeMembers(primaryRoot, roots).map(root => root.path)
+}
+
+/** The member-level form of {@link sanitizeAdditionalRoots}: same rules, with access kept. */
+function sanitizeMembers(
+  primaryRoot: string,
+  roots: readonly AdditionalWorkspaceRoot[],
+): ScopeRoot[] {
   const seen = new Set<string>([primaryRoot])
-  const result: string[] = []
+  const result: ScopeRoot[] = []
   for (const root of roots) {
     const recorded = root.recordedPath
     if (typeof recorded !== 'string' || recorded === '') continue
@@ -96,7 +128,12 @@ export function sanitizeAdditionalRoots(
     }
     if (seen.has(canonical)) continue
     seen.add(canonical)
-    result.push(canonical)
+    result.push({
+      path: canonical,
+      access: root.access,
+      id: root.id,
+      ...(root.alias === undefined ? {} : { alias: root.alias }),
+    })
   }
   return result
 }
@@ -112,14 +149,25 @@ export const MULTI_ROOT_CONTEXT_NAME = 'multi-root:scope'
  * (never files), and the sentence states the two facts a denied write would
  * otherwise have to teach: that the additional roots are part of the SAME
  * workspace, and that the session cwd is unchanged (requirement §5, §8).
+ * Read-only members are named separately so the text never claims they are
+ * writable.
  * @param primaryRoot - the canonical session workspace root.
- * @param additionalRoots - canonical additional roots, in scope order.
+ * @param writableRoots - canonical additional roots carrying `read-write`, in scope order.
+ * @param readOnlyRoots - canonical additional roots carrying `read-only`, in scope order.
  * @returns the stable topology sentence.
  */
-export function renderWorkspaceRootsContext(primaryRoot: string, additionalRoots: readonly string[]): string {
-  return `Current DSH workspace roots: ${JSON.stringify(additionalRoots)} are additional roots of this session's `
+export function renderWorkspaceRootsContext(
+  primaryRoot: string,
+  writableRoots: readonly string[],
+  readOnlyRoots: readonly string[],
+): string {
+  let text = `Current DSH workspace roots: ${JSON.stringify(writableRoots)} are additional roots of this session's `
     + `workspace. Under workspace-write they may be modified like the session workspace; `
     + `the session origin remains the primary root (${JSON.stringify(primaryRoot)}); changing the working directory does not change these grants.`
+  if (readOnlyRoots.length > 0) {
+    text += ` ${JSON.stringify(readOnlyRoots)} are read-only additional roots (writes are refused).`
+  }
+  return text
 }
 
 /**
@@ -161,7 +209,11 @@ export class MultiRootScopeService extends Service {
           if (policy.mode !== 'workspace-write') return ''
           const resolved = this.resolve(policy)
           if (resolved.additionalRoots.length === 0) return ''
-          return renderWorkspaceRootsContext(resolved.primaryRoot, resolved.additionalRoots)
+          return renderWorkspaceRootsContext(
+            resolved.primaryRoot,
+            resolved.writableRoots,
+            resolved.roots.filter(root => root.access === 'read-only').map(root => root.path),
+          )
         },
       })
     })
@@ -174,18 +226,42 @@ export class MultiRootScopeService extends Service {
    */
   resolve(policy: SandboxExecutionPolicy): FilesystemScope {
     const primaryRoot = canonicalPath(policy.workspaceRoot)
-    return { primaryRoot, additionalRoots: this.scopeOf(primaryRoot) }
+    const roots = this.membersOf(primaryRoot)
+    return {
+      primaryRoot,
+      additionalRoots: roots.map(root => root.path),
+      roots,
+      writableRoots: roots.filter(root => root.access === 'read-write').map(root => root.path),
+    }
   }
 
   /**
-   * The additional roots registered for one canonical primary root.
+   * The additional roots registered for one canonical primary root — every
+   * granted member, ANY access level (a read-only root is still a member of
+   * the workspace for instructions, LSP, routing, and reads).
    * @param primaryRoot - canonical primary root (or any spelling thereof).
    * @returns the canonical additional roots; empty when none are registered.
    */
   scopeOf(primaryRoot: string): readonly string[] {
-    const registered = this.rootsByPrimary.get(canonicalPath(primaryRoot))
+    return this.membersOf(primaryRoot).map(root => root.path)
+  }
+
+  /**
+   * The additional roots a WRITE may reach for one primary root — the members
+   * carrying `read-write` only.
+   * @param primaryRoot - canonical primary root (or any spelling thereof).
+   * @returns the canonical writable roots; empty when none qualify.
+   */
+  writableOf(primaryRoot: string): readonly string[] {
+    return this.membersOf(primaryRoot).filter(root => root.access === 'read-write').map(root => root.path)
+  }
+
+  /** The sanitized members of one primary root, in registry order. */
+  private membersOf(primaryRoot: string): readonly ScopeRoot[] {
+    const key = canonicalPath(primaryRoot)
+    const registered = this.rootsByPrimary.get(key)
     if (registered === undefined) return []
-    return sanitizeAdditionalRoots(canonicalPath(primaryRoot), registered)
+    return sanitizeMembers(key, registered)
   }
 
   /**

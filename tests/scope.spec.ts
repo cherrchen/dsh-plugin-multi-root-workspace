@@ -45,8 +45,8 @@ function policy(workspaceRoot: string, mode: SandboxExecutionPolicy['mode'] = 'w
 }
 
 /** Register one additional root the way the registry does: canonical, with its granted directory. */
-function root(id: string, path: string): { id: string; path: string; recordedPath: string } {
-  return { id, path, recordedPath: canonicalPath(path) }
+function root(id: string, path: string): { id: string; path: string; recordedPath: string; access: 'read-write' } {
+  return { id, path, recordedPath: canonicalPath(path), access: 'read-write' }
 }
 
 describe('scope resolution', () => {
@@ -154,7 +154,7 @@ describe('root sanitization', () => {
   })
 
   it('withholds a registration that does not say which directory it was granted for', () => {
-    const incomplete = { id: 'x', path: fixture.outside, recordedPath: '' }
+    const incomplete = { id: 'x', path: fixture.outside, recordedPath: '', access: 'read-write' }
     expect(sanitizeAdditionalRoots(fixture.workspace, [incomplete])).toEqual([])
   })
 })
@@ -253,5 +253,79 @@ describe('workspace topology context', () => {
     const fiber = await bare.plugin(MultiRootScopeService)
     expect(bare.multiRootScope.resolve(policy(fixture.workspace)).additionalRoots).toEqual([])
     await fiber.dispose()
+  })
+})
+
+describe('per-root access', () => {
+  /** A read-only member: still a workspace root, never a writable one. */
+  const readOnlyRoot = (id: string, path: string) => ({ ...root(id, path), access: 'read-only' as const })
+
+  it('keeps a read-only root a member while excluding it from the writable set', () => {
+    const third = `${fixture.base}/third`
+    mkdirSync(third)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      root('a', fixture.outside),
+      readOnlyRoot('b', third),
+    ])
+    const resolved = ctx.multiRootScope.resolve(policy(fixture.workspace))
+    // Membership (instructions, LSP, routing, reads) covers BOTH levels.
+    expect(resolved.additionalRoots).toEqual([fixture.outside, canonicalPath(third)])
+    expect(resolved.writableRoots).toEqual([fixture.outside])
+    expect(resolved.roots.map(member => member.access)).toEqual(['read-write', 'read-only'])
+    expect(ctx.multiRootScope.scopeOf(fixture.workspace)).toEqual([fixture.outside, canonicalPath(third)])
+    expect(ctx.multiRootScope.writableOf(fixture.workspace)).toEqual([fixture.outside])
+  })
+
+  it('answers an empty writable set when every member is read-only', () => {
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [readOnlyRoot('x', fixture.outside)])
+    const resolved = ctx.multiRootScope.resolve(policy(fixture.workspace))
+    expect(resolved.additionalRoots).toEqual([fixture.outside])
+    expect(resolved.writableRoots).toEqual([])
+  })
+})
+
+describe('read-only topology text', () => {
+  let promptCtx: Context
+  let promptFibers: Array<Awaited<ReturnType<Context['plugin']>>>
+  let session: Session
+
+  beforeEach(async () => {
+    promptCtx = new Context()
+    promptFibers = [
+      await promptCtx.plugin(SystemPrompt),
+      await promptCtx.plugin(SessionProjectionRegistry),
+      await promptCtx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace }),
+      await promptCtx.plugin(MultiRootScopeService),
+    ]
+    const sessionId = SessionId('sess-topology-ro')
+    session = Session.create(sessionId, undefined, {
+      version: SESSION_FORMAT_VERSION,
+      id: sessionId,
+      createdAt: 0,
+      isSeeded: false,
+      cwd: fixture.workspace,
+    })
+  })
+
+  afterEach(async () => {
+    while (promptFibers.length > 0) await promptFibers.pop()?.dispose()
+  })
+
+  const agent = (): Agent => ({ session }) as unknown as Agent
+
+  it('never calls a read-only root writable and names it separately', async () => {
+    const third = `${fixture.base}/third`
+    mkdirSync(third)
+    promptCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { ...root('a', fixture.outside) },
+      { ...root('b', third), access: 'read-only' },
+    ])
+    const assembly = await promptCtx.systemPrompt.assemble({ agent: agent() })
+    const text = assembly.contexts.find(context => context.name === MULTI_ROOT_CONTEXT_NAME)?.text ?? ''
+    // The writable sentence lists only the writable member; the read-only
+    // member is named as read-only, with its write refusal stated.
+    expect(text).toContain(JSON.stringify([fixture.outside]))
+    expect(text).not.toContain(JSON.stringify([fixture.outside, canonicalPath(third)]))
+    expect(text).toContain(`${JSON.stringify([canonicalPath(third)])} are read-only additional roots (writes are refused)`)
   })
 })
