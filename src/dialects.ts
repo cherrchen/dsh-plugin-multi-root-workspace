@@ -36,6 +36,7 @@
  */
 
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import { DialectUnrecognizedError } from './windows-runner-contract.ts'
 
 /** The kernel runner dialects a confined argv can speak. */
 export type RunnerDialect = 'seatbelt' | 'bwrap' | 'landlock' | 'windows-acl'
@@ -44,13 +45,13 @@ export type RunnerDialect = 'seatbelt' | 'bwrap' | 'landlock' | 'windows-acl'
  * Raised when a confined argv cannot be recognized or widened. The provider
  * converts this into the fail-closed `SandboxUnavailableError`: an unrecognized
  * dialect must never degrade into "the primary root was granted after all".
+ *
+ * The class itself lives in `windows-runner-contract.ts`: the standalone
+ * Windows runner's module graph may import node builtins only, so the shared
+ * error type cannot sit in a module that (even type-only) references upstream
+ * packages. Re-exported here unchanged — `instanceof` identity is preserved.
  */
-export class DialectUnrecognizedError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'DialectUnrecognizedError'
-  }
-}
+export { DialectUnrecognizedError }
 
 /** One wrapped argv split into its runner/profile part and the caller's argv. */
 export interface ConfinedShape {

@@ -137,12 +137,12 @@ function moduleTarget(name, pkg) {
   return file === undefined ? undefined : `package/${file.replace(/^\.\//, '')}`
 }
 
-/** Relative specifiers a packed ESM file references. */
+/** Every specifier a packed ESM file references. */
 function importSpecifiers(source) {
   const found = []
   for (const match of source.matchAll(/(?:import|export)[^'"]*?\bfrom\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g)) {
     const specifier = match[1] ?? match[2] ?? match[3]
-    if (specifier !== undefined && specifier.startsWith('.')) found.push(specifier)
+    if (specifier !== undefined) found.push(specifier)
   }
   return found
 }
@@ -209,9 +209,35 @@ function main() {
       if (visited.has(name)) continue
       visited.add(name)
       for (const specifier of importSpecifiers(members.get(name).toString('utf8'))) {
+        if (!specifier.startsWith('.')) continue
         const resolved = resolveMember(name, specifier, members)
         assert(resolved !== undefined, `${name} imports ${specifier}, which is not in the tarball`)
         if (resolved !== undefined && resolved.endsWith('.js') && !visited.has(resolved)) queue.push(resolved)
+      }
+    }
+
+    // lib/windows-runner.js executes as a SEPARATE Node process: the host's
+    // in-process plugin package resolution does not apply, so its whole static
+    // module graph may import `node:` builtins only. It reaches the upstream
+    // ACL package dynamically through `--upstream-runner`, never through a
+    // static bare specifier (CI run 38131613042: ERR_MODULE_NOT_FOUND from the
+    // installed tarball before main() could fail closed).
+    {
+      const runnerQueue = ['package/lib/windows-runner.js']
+      const runnerVisited = new Set()
+      while (runnerQueue.length > 0) {
+        const name = runnerQueue.pop()
+        if (runnerVisited.has(name) || !members.has(name)) continue
+        runnerVisited.add(name)
+        for (const specifier of importSpecifiers(members.get(name).toString('utf8'))) {
+          if (specifier.startsWith('.')) {
+            const resolved = resolveMember(name, specifier, members)
+            assert(resolved !== undefined, `${name} imports ${specifier}, which is not in the tarball`)
+            if (resolved !== undefined && resolved.endsWith('.js')) runnerQueue.push(resolved)
+          } else {
+            assert(specifier.startsWith('node:'), `${name} imports ${specifier}: the standalone Windows runner may import node builtins only`)
+          }
+        }
       }
     }
 

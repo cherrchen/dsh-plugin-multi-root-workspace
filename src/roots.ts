@@ -38,6 +38,12 @@ import { homedir } from 'node:os'
 import { isAbsolute, join, sep } from 'node:path'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 
+// The predicate lives in the standalone runner's contract module: its whole
+// static graph may import node builtins only. Re-exported so the established
+// import sites (`roots.ts` readers, `windows-profile.ts`) keep working.
+import { isWindowsNetworkOrDevicePath } from './windows-runner-contract.ts'
+export { isWindowsNetworkOrDevicePath }
+
 /**
  * Stable identity of one registered additional root. A generated uuid, never
  * the path: a path is re-canonicalized on every read and a display alias may
@@ -205,23 +211,6 @@ export function isCanonicallyUnder(candidate: string, root: string): boolean {
  */
 export function canonicalRoot(path: string): string {
   return canonicalPath(path)
-}
-
-/**
- * Whether a path names a Windows network or device location: two leading
- * slashes or backslashes in any mix (`\\server\share`, `//server/share`,
- * `\\?\…`, `\\.\…`). Windows ACL confinement cannot be shown to cover these —
- * the restricted token's capability SID and Low label are not what an SMB
- * server evaluates, and merely resolving an attacker-chosen UNC path triggers
- * SMB authentication — so they are refused lexically, before any filesystem
- * access. Because `canonicalPath` resolves a mapped drive letter to its
- * `\\server\share` form, checking the canonical spelling also catches mapped
- * network drives.
- * @param path - the path spelling to test.
- * @returns whether it is a network or device path.
- */
-export function isWindowsNetworkOrDevicePath(path: string): boolean {
-  return /^[\\/]{2}/.test(path)
 }
 
 /** Caller-supplied facts one candidate is judged against. */

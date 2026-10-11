@@ -1,9 +1,21 @@
-/** Standalone runner: public upstream AclSandbox with a capability for the whole root set. */
+/**
+ * Standalone runner: public upstream AclSandbox with a capability for the
+ * whole root set.
+ *
+ * This file is built into `lib/windows-runner.js` and executed as a SEPARATE
+ * Node process. The host's in-process plugin package resolution does not
+ * apply there, so this module (and everything it statically imports — only
+ * `windows-runner-contract.ts`) may import `node:` builtins exclusively. The
+ * upstream ACL package is reached dynamically through `--upstream-runner`:
+ * `createRequire(<upstream runner>).resolve('@deepseek-ai/dsh-sandbox-windows-acl')
+ * resolves the package by self-reference from its own install location — the
+ * one anchor guaranteed to see it.
+ */
 import { closeSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
-import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
-import { parseWindowsProfile, workspaceScopeSid } from './windows-profile.ts'
-import { isWindowsNetworkOrDevicePath } from './roots.ts'
+import { pathToFileURL } from 'node:url'
+import { canonicalPath, isWindowsNetworkOrDevicePath, parseWindowsProfile, workspaceScopeSid } from './windows-runner-contract.ts'
 
 async function main(): Promise<number> {
   if (process.platform !== 'win32') throw new Error('Windows ACL runner requires Windows')
@@ -20,7 +32,10 @@ async function main(): Promise<number> {
   }
   verifyRoots()
   if (!existsSync(profile.temp) || !statSync(profile.temp).isDirectory()) throw new Error(`--temp is not an existing directory: ${profile.temp}`)
-  const { AclSandbox, assertTempRootOutsideWorkspace, workspaceWriteSid, tempWriteSid } = await import('@deepseek-ai/dsh-sandbox-windows-acl')
+  // Resolution and import both fail loudly (exit 127, `windows-acl-run:`) when
+  // the upstream runner's location can no longer see its own package.
+  const aclEntry = createRequire(profile.upstreamRunner!).resolve('@deepseek-ai/dsh-sandbox-windows-acl')
+  const { AclSandbox, assertTempRootOutsideWorkspace, workspaceWriteSid, tempWriteSid } = await import(pathToFileURL(aclEntry).href)
   if (profile.writeSid !== undefined && (profile.writeSid !== workspaceWriteSid(profile.workspace) || profile.tempWriteSid !== tempWriteSid(profile.temp))) {
     throw new Error('upstream capability SIDs do not match their paths')
   }
