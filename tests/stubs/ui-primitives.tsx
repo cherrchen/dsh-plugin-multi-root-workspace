@@ -55,6 +55,30 @@ export function PathLabel(props: {
   )
 }
 
+/** Minimal `Modal` mirror: closed renders nothing; open portals a labeled dialog. */
+export function Modal(props: {
+  readonly open: boolean
+  readonly onClose: () => void
+  readonly title: string
+  readonly description?: string
+  readonly closeLabel: string
+  readonly footer?: ReactNode
+  readonly children?: ReactNode
+}): ReactNode {
+  if (!props.open) return null
+  return createPortal(
+    createElement(
+      'div',
+      { role: 'dialog', 'aria-label': props.title },
+      createElement('h2', null, props.title),
+      props.description === undefined ? null : createElement('p', null, props.description),
+      props.children,
+      props.footer,
+    ),
+    document.body,
+  )
+}
+
 /** Minimal `MenuItem` mirror (only the fields the panel uses). */
 interface StubMenuItem {
   readonly id: string

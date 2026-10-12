@@ -24,7 +24,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
-import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   IconAccessReadOnly,
   IconAccessReadWrite,
@@ -256,6 +256,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
    */
   const [accessChosen, setAccessChosen] = useState(false)
   const [accessMenuOpen, setAccessMenuOpen] = useState(false)
+  /** The read-only root waiting on the upgrade confirmation's red button. */
+  const [upgradeFor, setUpgradeFor] = useState<RootView | undefined>(undefined)
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
@@ -279,10 +281,11 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   useEffect(() => { dialogRef.current?.focus() }, [])
   const onDialogKeyDown = (event: ReactKeyboardEvent): void => {
     if (event.key === 'Escape') {
-      // An open menu owns Escape: its own listener closes just the menu, and
-      // this handler must not close the dialog underneath it — the portaled
-      // access dropdown's events bubble through this dialog's React tree too.
-      if (menuFor !== undefined || accessMenuOpen) return
+      // An open menu or the upgrade confirmation owns Escape: its own
+      // listener closes just that layer, and this handler must not close the
+      // dialog underneath it — the portaled dropdown and Modal bubble their
+      // events through this dialog's React tree too.
+      if (menuFor !== undefined || accessMenuOpen || upgradeFor !== undefined) return
       event.stopPropagation()
       props.onClose()
       return
@@ -473,6 +476,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const primaryPath = state.view?.primaryRoot
   const cwdPath = state.view?.effectiveCwd
   return (
+    <>
     <div className="mrfw-overlay" role="presentation">
       <div
         className="mrfw-mask"
@@ -640,8 +644,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     if (id === 'access') {
                       const access = root.access === 'read-only' ? 'read-write' : 'read-only'
                       // Upgrading widens what the agent may modify, so it is
-                      // the one access change that asks first.
-                      if (access === 'read-write' && !window.confirm(t('panel.accessUpgradeConfirm'))) return
+                      // the one access change that asks first — through the
+                      // confirmation layered over this dialog, not the
+                      // browser's window.confirm.
+                      if (access === 'read-write') { setUpgradeFor(root); return }
                       void mutate('setAccess', { entry: entryOf(root), access })
                     }
                     if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
@@ -765,6 +771,35 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
         </div>
       </div>
     </div>
+    {/* The write-access grant asks first: a host-modal confirmation layered
+        over this dialog — cancel or a mask click dismisses, the red button
+        commits the setAccess mutation. Downgrades skip this entirely. */}
+    <Modal
+      open={upgradeFor !== undefined}
+      onClose={() => { setUpgradeFor(undefined) }}
+      title={t('panel.accessUpgradeTitle')}
+      description={t('panel.accessUpgradeConfirm')}
+      closeLabel={t('panel.close')}
+      footer={(
+        <>
+          <Action onClick={() => { setUpgradeFor(undefined) }}>{t('panel.aliasCancel')}</Action>
+          <Action
+            variant="danger"
+            disabled={state.busy}
+            onClick={() => {
+              const pending = upgradeFor
+              setUpgradeFor(undefined)
+              if (pending !== undefined) {
+                void mutate('setAccess', { entry: entryOf(pending), access: 'read-write' })
+              }
+            }}
+          >
+            {t('panel.accessUpgradeDo')}
+          </Action>
+        </>
+      )}
+    />
+    </>
   )
 }
 

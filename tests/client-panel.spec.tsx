@@ -749,8 +749,9 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadOnly` }))
-    // A downgrade widens nothing, so it is never confirmed.
+    // A downgrade widens nothing, so it never confirms — not even the modal.
     expect(confirm).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: `${NS}.panel.accessUpgradeTitle` })).toBeNull()
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'setAccess')?.payload).toEqual({
       sessionId: 'session-1',
@@ -761,25 +762,30 @@ describe('the panel dialog', () => {
 
   it('confirms an upgrade to read-write and paints the host-returned view only', async () => {
     const harness = mount()
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const confirm = vi.spyOn(window, 'confirm')
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
 
-    // ROOT_B is read-only: upgrading it is a grant, so it asks first.
+    // ROOT_B is read-only: upgrading it is a grant, so it asks first — in a
+    // dialog layered on this one, never through window.confirm.
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
-    expect(confirm).toHaveBeenCalled()
-    // Declined: no channel call at all.
+    expect(confirm).not.toHaveBeenCalled()
+    const upgradeDialog = screen.getByRole('dialog', { name: `${NS}.panel.accessUpgradeTitle` })
+    expect(upgradeDialog).toBeTruthy()
+    // Cancelled: the layer closes and no channel call at all.
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.aliasCancel` }))
+    await waitFor(() => { expect(screen.queryByRole('dialog', { name: `${NS}.panel.accessUpgradeTitle` })).toBeNull() })
     expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(false)
 
-    confirm.mockReturnValue(true)
     // The host answers a view where B is now writable; the panel must paint
     // THAT answer, not an optimistic local flip.
     const upgradedB: RootView = { ...ROOT_B, access: 'read-write', state: 'available' }
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
     harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_A, upgradedB], limit: 16, count: 2 })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessUpgradeDo` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'setAccess')?.payload).toEqual({
       sessionId: 'session-1',
@@ -794,7 +800,6 @@ describe('the panel dialog', () => {
 
   it('localizes a refused upgrade instead of flipping the badge', async () => {
     const harness = mount()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
@@ -802,6 +807,7 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
     harness.setFailure({ code: 'root-unavailable', message: 'host prose' })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessUpgradeDo` }))
 
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.root-unavailable`) })
     // The badge still says what the last host view said.

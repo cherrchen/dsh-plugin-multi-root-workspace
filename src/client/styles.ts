@@ -483,8 +483,18 @@ export const STYLES = /* css */ `
   background: var(--dsw-alias-interactive-bg-active);
 }
 
+/* The solid destructive action of the capsule family: the upgrade confirm's
+   red button. state-error-primary is the error ink upstream also uses as a
+   fill (StateDot); the hover darkens through color-mix — upstream's own
+   recipe (Tag) — never a guessed token: an undefined var() would fall back
+   to transparent and white-out the whole button. */
+.mrfw-btnDanger {
+  background: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+
 .mrfw-btnDanger:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-danger);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 85%, black);
 }
 
 .mrfw-btnOutline {
