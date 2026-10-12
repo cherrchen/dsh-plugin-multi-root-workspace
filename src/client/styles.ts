@@ -112,10 +112,10 @@ export const STYLES = /* css */ `
 }
 
 /* The root switcher is the launcher's grown-up form on runtimes whose
-   files.actions owner carries absolutePath. It poses as the path label, so
-   it takes the path's flex position and stretch: order: -1 ahead of every
-   order-0 sibling, and a growing min-width:0 item so the label can
-   ellipsize instead of pushing the header controls out. */
+   files.actions owner carries absolutePath. It takes the path label's flex
+   position and stretch: order: -1 ahead of every order-0 sibling, and a
+   growing min-width:0 item so both the trigger label and the PathLabel
+   inside it can ellipsize instead of pushing the header controls out. */
 .mrfw-rootSwitcher {
   order: -1;
   flex: 1 1 auto;
@@ -124,12 +124,15 @@ export const STYLES = /* css */ `
   align-items: center;
 }
 
-/* While the switcher exists it replaces the upstream path label outright —
-   the :has() guard again keeps the upstream-naming rule inert unless this
-   plugin is actually in the row. :not([data-files-entry]) is what confines
-   the rule to the header: every tree row carries data-files-path with its
-   own path as the value, and only the PathLabel carries it bare. Without
-   the qualifier this display:none would blank the entire native tree. */
+/* While the switcher exists it hides the upstream path label — the
+   :has() guard again keeps the upstream-naming rule inert unless this
+   plugin is actually in the row. The switcher draws its own PathLabel of
+   the selected root next to the trigger (className mrfw-switcherPath, no
+   data-files-* attributes), so the header keeps a path in the same spot.
+   :not([data-files-entry]) is what confines this rule to the header:
+   every tree row carries data-files-path with its own path as the value,
+   and only the PathLabel carries it bare. Without the qualifier this
+   display:none would blank the entire native tree. */
 [data-files-root]:has(.mrfw-rootSwitcher) [data-files-path]:not([data-files-entry]) {
   display: none;
 }
@@ -146,9 +149,10 @@ export const STYLES = /* css */ `
 
 /* The trigger borrows the path label's look: quiet text with a folder
    glyph, the hover of the neighboring header buttons, and the overflow
-   behavior PathLabel itself uses in a narrow header. */
+   behavior PathLabel itself uses in a narrow header. It may shrink but
+   never grows — the PathLabel after it owns the free header space. */
 .mrfw-rootSwitchBtn {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   display: inline-flex;
   align-items: center;
@@ -186,6 +190,13 @@ export const STYLES = /* css */ `
 .mrfw-rootSwitchChevron {
   margin-left: auto;
   color: var(--dsw-alias-label-tertiary);
+}
+
+/* The selected root's full path sits between the trigger and the reload —
+   the very PathLabel upstream draws there, so it brings its own grow,
+   left-clip and hover-title behavior; only the gutters are ours. */
+.mrfw-switcherPath {
+  margin: 0 12px 0 4px;
 }
 
 /* The self-drawn additional-root tree, portaled into the pane as a sibling

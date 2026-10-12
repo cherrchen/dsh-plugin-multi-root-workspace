@@ -36,6 +36,13 @@ describe('the root-switcher rules', () => {
     expect(STYLES).toMatch(/\[data-files-root\]:has\(\.mrfw-rootSwitcher\)\s*\[data-files-path\]:not\(\[data-files-entry\]\)\s*\{[^}]*display:\s*none/s)
   })
 
+  it('lets the path label own the free space while the trigger only shrinks', () => {
+    // The PathLabel brings its own grow/clip styles; the plugin's rules only
+    // keep the trigger from competing for the same space.
+    expect(STYLES).toMatch(/\.mrfw-rootSwitchBtn\s*\{[^}]*flex:\s*0\s+1\s+auto/s)
+    expect(STYLES).toMatch(/\.mrfw-switcherPath\s*\{/s)
+  })
+
   it('hides the native tree body and its reload only while an additional root is selected', () => {
     // The two hooks share one rule: the reload refreshes the very tree that
     // is no longer visible, so it hides under the same condition.

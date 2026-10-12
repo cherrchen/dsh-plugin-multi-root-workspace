@@ -43,6 +43,18 @@ export const IconRefreshOutline16 = icon('refresh')
 export const IconSettingsOutline16 = icon('settings')
 export const IconTrashOutline16 = icon('trash')
 
+/** Minimal `PathLabel` mirror: a titled span carrying the whole path. */
+export function PathLabel(props: {
+  readonly path: string
+  readonly className?: string
+}): ReactNode {
+  return createElement(
+    'span',
+    { className: props.className, title: props.path, 'data-path-label': true },
+    props.path,
+  )
+}
+
 /** Minimal `MenuItem` mirror (only the fields the panel uses). */
 interface StubMenuItem {
   readonly id: string

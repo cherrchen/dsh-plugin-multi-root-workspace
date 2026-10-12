@@ -223,7 +223,7 @@ docs/             需求、架构、决策记录（ADR）、计划、开发工�
 - **Windows 上的网络与设备路径不能成为附加根**：UNC（`\\server\share`）、`\\?\`、`\\.\` 与映射网络盘在登记时即以 `unsupported-path` 拒绝——restricted token 的 capability SID 无法绑定 SMB 访问（[ADR-0011 修订](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - **Windows 受限 shell 是 pwsh，不含 Git Bash**：MSYS 在 restricted Low-integrity token 下无法启动（上游 runner 与插件 runner 表现一致，属上游限制）；上游 runner 的 confined 子进程因继承 ignore-Ctrl+C 标志而收不到 Ctrl+C，插件 runner 下子进程能收到并由 runner 镜像其退出码。
 - 附加根默认与主根同权；`--read-only` 登记或 `access` 切换后可变为只读（写授权缺省，不是读 confinement）。已启动的进程保留启动时根集合，cap/access 变化只约束之后的调用与新进程（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)）；提供 workingDirectory 的宿主可以把附加根作为后续工具的执行目录，Session 原始项目与登记身份不变（[ADR-0012](./docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)）。
-- 附加根文件树由 **Files 页签的根选择器**承载：头部入口列出主根与全部附加根，选中附加根时插件自绘懒加载树接管树区（可展开目录、预览前 200 行文本、手动刷新），切回主根即恢复原生视图；对话框回归纯管理。该接管依赖上游 `data-files-*` DOM 钩子，钩子失效时静默退化为原生观感（[ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)）。LSP 按附加文件所在根初始化独立 workspace；需要宿主配置对应语言服务器（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
+- 附加根文件树由 **Files 页签的根选择器**承载：头部入口列出主根与全部附加根，旁边仍显示选中根的完整路径；选中附加根时插件自绘懒加载树接管树区（可展开目录、预览前 200 行文本、手动刷新），切回主根即恢复原生视图；对话框回归纯管理。该接管依赖上游 `data-files-*` DOM 钩子，钩子失效时静默退化为原生观感（[ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)）。LSP 按附加文件所在根初始化独立 workspace；需要宿主配置对应语言服务器（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - 命令的输出文案为英文（host 侧没有活动语言信息），面板文案中英双语跟随界面语言。
 - Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：`sidebar.footer.action` 是所有受支持版本都提供的插槽，而 `sidebar.panellist`/`main` 不是。
 

@@ -182,6 +182,23 @@ describe('the Files-tab root switcher', () => {
     expect(missing.textContent).toContain(`${NS}.state.missing`)
   })
 
+  it('shows the selected root full path between the trigger and the reload', async () => {
+    const harness = mount()
+    renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    // Primary selection: the path is the pane's workspace root — the same
+    // value the hidden upstream label carried.
+    const label = document.querySelector('.mrfw-switcherPath')
+    expect(label?.getAttribute('title')).toBe('/repos/primary')
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    // Additional selection: the path follows the selected root.
+    expect(document.querySelector('.mrfw-switcherPath')?.getAttribute('title')).toBe('/repos/payments')
+  })
+
   it('selecting an additional root marks the switcher and portals the lazy tree into the pane', async () => {
     const harness = mount()
     const { pane } = renderInPane(harness)

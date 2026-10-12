@@ -3,8 +3,11 @@
  * the P1 gear launcher first claimed. It poses as the pane's path label: a
  * trigger that opens a menu of this session's roots (primary first, the
  * registered additional roots next, and the Workspace Folders manager last),
- * and while an additional root is selected it lends the pane's body area to
- * this plugin's own lazy tree.
+ * followed by a `PathLabel` of the selected root's full path — the same
+ * component upstream draws in that spot, so both primary and additional
+ * selections read exactly like the native header. While an additional root
+ * is selected it also lends the pane's body area to this plugin's own lazy
+ * tree.
  *
  * Two upstream DOM hooks make the takeover work, and both degrade silently:
  *
@@ -30,7 +33,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Menu, PathLabel, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import { IconChevronDown, IconFolderClose, IconFolderOpen, IconSettings } from '../compat/client-icons.ts'
 import type { RootsView, RootView } from '../contract.ts'
 import { RootFileTree } from './RootFileTree.tsx'
@@ -182,6 +185,10 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
             </button>
           )}
         />
+        {/* The selected root's full path, between the trigger and the reload:
+            the same PathLabel upstream puts in this spot, so the header reads
+            exactly as before except the label now follows the selection. */}
+        <PathLabel path={triggerPath} className="mrfw-switcherPath" />
       </span>
       {selected !== 'primary' && panel !== undefined && pane !== null
         ? createPortal(
