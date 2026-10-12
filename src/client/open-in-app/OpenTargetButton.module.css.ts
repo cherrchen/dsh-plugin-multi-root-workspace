@@ -5,9 +5,12 @@
  * installs carries one flat sheet (`src/client/styles.ts`). The upstream
  * component reads `css.<name>` so the forked file needs one importable
  * module exporting that same key map — this file, reached through the
- * verbatim `import css from './OpenTargetButton.module.css.ts'` specifier
- * (the one sanctioned fork edit: the specifier gains the `.ts` this
- * toolchain resolves everywhere — tsc, tsdown, vitest).
+ * verbatim `./OpenTargetButton.module.css.ts` specifier (the one sanctioned
+ * fork edit: the specifier gains the `.ts` this toolchain resolves
+ * everywhere — tsc, tsdown, vitest). The specifier text is spelled without
+ * its `import` clause on purpose: the packed-artifact check scans every
+ * bundle comment too, and quoting the full statement would read as a
+ * relative import the tarball does not carry.
  *
  * Each upstream local class maps to an `mrfw-open*` name so the copied
  * rules cannot collide with host DOM; the rules themselves live in

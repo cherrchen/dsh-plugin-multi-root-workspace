@@ -38,8 +38,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Menu, PathLabel, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
-import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings } from '../compat/client-icons.ts'
+import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings, maybeComponent } from '../compat/client-icons.ts'
 import type { RootsView, RootView } from '../contract.ts'
 import { RootFileTree } from './RootFileTree.tsx'
 import { OpenInAppAction, type OpenInAppAdapter } from './open-in-app/adapter.tsx'
@@ -66,6 +66,14 @@ export interface RootSwitcherProps extends Omit<WorkspaceFoldersActionProps, 'co
 
 /** `sessionId` fallback for compositions that carry no session service. */
 const NO_SESSION = (): undefined => undefined
+
+/**
+ * The subdued full-path label upstream's Files header draws — it exists from
+ * `0.1.7-alpha.1` on. A pixel-era runtime has no such export, so the probe
+ * returns `undefined` and the header falls back to a plain titled span: the
+ * path stays readable and hoverable, only the dir/file typography differs.
+ */
+const PathLabel = maybeComponent<(props: { path: string; className?: string | undefined }) => ReactNode>(['PathLabel'])
 
 /** The Files-header switcher: root menu, dialog entry, and the portal tree. */
 export function RootSwitcher(props: RootSwitcherProps): ReactNode {
@@ -203,8 +211,12 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
         />
         {/* The selected root's full path, between the trigger and the reload:
             the same PathLabel upstream puts in this spot, so the header reads
-            exactly as before except the label now follows the selection. */}
-        <PathLabel path={triggerPath} className="mrfw-switcherPath" />
+            exactly as before except the label now follows the selection. On a
+            runtime that does not export PathLabel a plain span carries the
+            same class and title instead. */}
+        {PathLabel === undefined
+          ? <span className="mrfw-switcherPath" title={triggerPath}>{triggerPath}</span>
+          : <PathLabel path={triggerPath} className="mrfw-switcherPath" />}
         {/* The takeover hides the native reload (it refreshes the hidden
             tree), so the header gets a replacement of its own — same position,
             same icon-button recipe as the upstream `.tool`. It bumps the

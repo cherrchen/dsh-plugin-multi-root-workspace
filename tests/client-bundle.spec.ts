@@ -61,6 +61,17 @@ describe('the client bundle artifact', () => {
     expect(source).toContain('/multi-root-workspace')
   })
 
+  it('carries no relative-module specifier anywhere — even quoted in a comment', () => {
+    // The bundle is one self-contained file, so `from './…'` may never
+    // appear in it at all; scripts/check-pack.mjs scans the raw bytes and
+    // reads a comment-quoted specifier as an import the tarball lacks.
+    const source = readFileSync(clientPath, 'utf8')
+    const specifiers = [
+      ...source.matchAll(/(?:import|export)[^'"]*?\bfrom\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g),
+    ].map(match => match[1] ?? match[2] ?? match[3])
+    expect(specifiers.filter(specifier => specifier?.startsWith('.'))).toEqual([])
+  })
+
   it('ships every file the runtime reads from the package', () => {
     for (const file of ['lib/client.js', 'lib/index.js', 'cordis.patch.yml']) {
       expect(manifest.files.some(pattern => matches(pattern, file)), `${file} must be published`).toBe(true)

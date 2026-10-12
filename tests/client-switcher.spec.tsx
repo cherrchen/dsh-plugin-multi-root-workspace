@@ -15,6 +15,7 @@
 import type { ReactElement } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { OPEN_IN_APP_APPS_ROUTE, OPEN_IN_APP_OPEN_ROUTE } from '@deepseek-ai/dsh-host-open-in-app/shared'
 import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from '../src/contract.ts'
 import * as client from '../src/client/index.ts'
 import { NS } from '../src/client/locales.ts'
@@ -127,14 +128,19 @@ interface FetchCall {
   readonly body?: unknown
 }
 
-/** Stub the open-in-app host routes the fork's controller fetches. */
+/**
+ * Stub the open-in-app host routes the fork's controller fetches. The route
+ * constants come from the installed shared module so the stub matches
+ * whichever spelling the matrix version carries — document-relative from
+ * 0.1.7-alpha.1 on, absolute before it.
+ */
 function stubOpenInApp(apps: readonly string[] = ['finder', 'vscode']): FetchCall[] {
   const calls: FetchCall[] = []
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const body = init?.body === undefined ? undefined : JSON.parse(String(init.body)) as unknown
     calls.push({ method: init?.method ?? 'GET', url, ...(body === undefined ? {} : { body }) })
-    if (url === 'open-in-app/apps') {
+    if (url === OPEN_IN_APP_APPS_ROUTE) {
       return new Response(JSON.stringify({ apps }), { status: 200 })
     }
     return new Response(JSON.stringify({ ok: true }), { status: 200 })
@@ -393,18 +399,18 @@ describe('the forked open-in-app control', () => {
       return found!
     })
     expect(split.classList.contains('mrfw-openSplit')).toBe(true)
-    expect(fetchCalls.some(call => call.url === 'open-in-app/apps')).toBe(true)
+    expect(fetchCalls.some(call => call.url === OPEN_IN_APP_APPS_ROUTE)).toBe(true)
 
     // The main half launches the preferred app on the SELECTED root —
     // /repos/payments, not the pane's /repos/primary.
     const main = split.querySelector<HTMLElement>('.mrfw-openMain')!
     fireEvent.click(main)
     await waitFor(() => {
-      expect(fetchCalls.some(call => call.url === 'open-in-app/open'
+      expect(fetchCalls.some(call => call.url === OPEN_IN_APP_OPEN_ROUTE
         && call.method === 'POST'
         && (call.body as { app?: string; path?: string }).path === '/repos/payments')).toBe(true)
     })
-    const open = fetchCalls.find(call => call.url === 'open-in-app/open')!
+    const open = fetchCalls.find(call => call.url === OPEN_IN_APP_OPEN_ROUTE)!
     expect((open.body as { app: string }).app).toBe('finder')
     expect(fetchCalls.every(call => (call.body as { path?: string } | undefined)?.path !== '/repos/primary')).toBe(true)
   })
@@ -428,7 +434,7 @@ describe('the forked open-in-app control', () => {
     const row = await screen.findByRole('button', { name: /app\.vscode/ })
     fireEvent.click(row)
     await waitFor(() => {
-      expect(fetchCalls.some(call => call.url === 'open-in-app/open'
+      expect(fetchCalls.some(call => call.url === OPEN_IN_APP_OPEN_ROUTE
         && (call.body as { app?: string }).app === 'vscode'
         && (call.body as { path?: string }).path === '/repos/payments')).toBe(true)
     })

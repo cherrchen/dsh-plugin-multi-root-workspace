@@ -30,7 +30,8 @@ root through its slot props and cannot be re-pointed.
 | `locales.ts` | upstream `locales.ts` | only `NS` + the `OpenInAppKey` union + the `LocaleNamespaceMap` augmentation; dictionaries are NOT re-registered — the adapter binds upstream's live `open-in-app` namespace so strings track upstream automatically |
 | `open-path.ts` | upstream `open-path.ts` | only the `OpenInAppPathFailure` union; upstream's `OpenInAppPathController` speaks to a Session Remote this plugin does not hold and nothing here calls it |
 | `ambient.d.ts` | `dsh-client-shortcuts/client` types | type-only import; the runtime catalog is soft-probed in the adapter |
-| `adapter.tsx` | upstream `apply`'s `directoryInjected` | our wiring: controller singleton, snapshot→hook binding, `useShortcuts` soft-probe, `bind('open-in-app')`, and the `*Regular` glyph gate for 0.1.x pixel-name runtimes |
+| `upstream-surface.d.ts` | the primitives exports the pinned revision spells | declares the `*Regular` glyph consts and a `shortcutKeys`-aware `Tooltip` overload so the verbatim named imports resolve on pixel-era manifests too; types only — runtime stays gated by the adapter |
+| `adapter.tsx` | upstream `apply`'s `directoryInjected` | our wiring: controller singleton, snapshot→hook binding, `useShortcuts` soft-probe, `bind('open-in-app')`, the `*Regular` glyph gate for 0.1.x pixel-name runtimes, and the icon route through `compat/open-in-app-routes` (whose `*_ROUTE` spelling likewise postdates the pixel era) |
 | `FORK.md` | — | this file |
 
 ## Sync procedure (when the dev pin moves)

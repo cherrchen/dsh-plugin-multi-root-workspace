@@ -65,6 +65,16 @@ export function maybeIcon(names: readonly string[]): PanelIcon | undefined {
   return undefined
 }
 
+/**
+ * The same by-name probe for a whole component a release may not carry:
+ * `PathLabel` arrived in `0.1.7-alpha.1`, so pixel-era runtimes degrade to a
+ * plain span where the header invites one. Absence degrades to no component,
+ * not to a boot error.
+ */
+export function maybeComponent<T>(names: readonly string[]): T | undefined {
+  return maybeIcon(names) as T | undefined
+}
+
 /** Resolved once, against the installed module. */
 function icon(pixelName: string, regularName: string): PanelIcon {
   return selectIcon(installed, [pixelName, regularName])

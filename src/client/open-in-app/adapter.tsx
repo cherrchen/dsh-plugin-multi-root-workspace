@@ -12,7 +12,11 @@
  *   header simply keeps the native button, mirroring upstream's own
  *   "no apps → no button" absence;
  * - `ctx.locale.bind('open-in-app')` consumes upstream's registered
- *   dictionary verbatim — same strings, upstream's updates included.
+ *   dictionary verbatim — same strings, upstream's updates included;
+ * - the icon route comes through `compat/open-in-app-routes`: the `*_ROUTE`
+ *   spelling is another 0.1.7+ name, so the constant is probed by export
+ *   name rather than imported (a pixel-era manifest lacks it entirely —
+ *   a named import would fail the bundle's own build).
  *
  * Everything here is ours; nothing in this file needs upstream sync.
  *
@@ -21,9 +25,9 @@
 
 import { useSyncExternalStore } from 'react'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import { OPEN_IN_APP_ICON_PREFIX_ROUTE } from '@deepseek-ai/dsh-host-open-in-app/shared'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { maybeIcon } from '../../compat/client-icons.ts'
+import { OPEN_IN_APP_ICON_URL_PREFIX } from '../../compat/open-in-app-routes.ts'
 import { OpenInAppController } from './controller.ts'
 import { OpenInAppAction, type OpenInAppActionProps } from './OpenInAppAction.tsx'
 import { NS } from './locales.ts'
@@ -86,7 +90,7 @@ export function createOpenInAppAdapter(deps: {
     useShortcuts: bindSnapshot(deps.shortcuts ?? NO_SHORTCUTS),
     launch: (appId, path) => controller.launch(appId, path),
     choose: (appId) => { controller.choose(appId) },
-    iconUrl: appId => `${OPEN_IN_APP_ICON_PREFIX_ROUTE}/${appId}`,
+    iconUrl: appId => `${OPEN_IN_APP_ICON_URL_PREFIX}/${appId}`,
     t: deps.t as OpenInAppActionProps['t'],
   }
 }
