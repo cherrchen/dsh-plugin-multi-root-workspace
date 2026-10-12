@@ -44,6 +44,7 @@ interface Harness {
   readonly occupant: (owner?: { absolutePath?: string }) => unknown
   setView: (view: RootsView) => void
   setSession: (sessionId: string | undefined) => void
+  setListFails: (fails: boolean) => void
 }
 
 /** Apply the real client entry to a recording stub context. */
@@ -53,10 +54,14 @@ function mount(withConnection = true): Harness {
   const sessionListeners = new Set<() => void>()
   let view: RootsView = { primaryRoot: '/repos/primary', primaryName: 'Platform', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 }
   let currentSession: string | undefined = 'session-1'
+  let listFails = false
   const connection = {
     rpc: {
       call: async (channel: string, endpoint: string, payload: PanelRequest) => {
         calls.push({ channel, endpoint, payload })
+        if (endpoint === 'list' && listFails) {
+          return { ok: false, error: { code: 'registry-contended', message: 'registry busy' } }
+        }
         if (endpoint === 'files') {
           return {
             ok: true,
@@ -115,6 +120,7 @@ function mount(withConnection = true): Harness {
       currentSession = next
       for (const listener of sessionListeners) listener()
     },
+    setListFails: next => { listFails = next },
   }
 }
 
@@ -347,6 +353,53 @@ describe('the Files-tab root switcher', () => {
     await openMenu()
     await waitFor(() => { expect(switcherKind()).toBe('primary') })
     expect(pane.querySelector('.mrfw-switcherTree')).toBeNull()
+  })
+
+  it('returns to the primary root when a refresh cannot revalidate the selection', async () => {
+    const harness = mount()
+    const { pane } = renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    expect(pane.querySelector('.mrfw-switcherTree')).not.toBeNull()
+
+    // The next refresh cannot revalidate the roots at all: the takeover must
+    // not keep the native primary tree hidden behind a stale selection.
+    harness.setListFails(true)
+    await openMenu()
+    await waitFor(() => { expect(switcherKind()).toBe('primary') })
+    expect(pane.querySelector('.mrfw-switcherTree')).toBeNull()
+  })
+
+  it('reconciles the selection when the folders manager closes', async () => {
+    const harness = mount()
+    const { pane } = renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    expect(pane.querySelector('.mrfw-switcherTree')).not.toBeNull()
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.switcher.manage` }))
+    await waitFor(() => { expect(screen.getByRole('dialog')).toBeTruthy() })
+
+    // The manager removed the selected root: its mutations live in the
+    // dialog's own state, so closing it must re-list and drop the revoked
+    // selection rather than keep browsing the stale grant.
+    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'Platform', roots: [ROOT_B], limit: 16, count: 1 })
+    const listsBefore = harness.calls.filter(call => call.endpoint === 'list').length
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.close` }))
+    await waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull() })
+    await waitFor(() => {
+      expect(harness.calls.filter(call => call.endpoint === 'list').length).toBeGreaterThan(listsBefore)
+    })
+    await waitFor(() => { expect(switcherKind()).toBe('primary') })
+    expect(pane.querySelector('.mrfw-switcherTree')).toBeNull()
+    expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform')
   })
 
   it('resets the selection and refetches when the session changes', async () => {

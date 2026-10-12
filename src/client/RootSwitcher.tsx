@@ -137,10 +137,13 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   }, [props.subscribeSession, props.sessionId, refresh])
 
   // A refresh that reports the selected root gone or withheld sends the
-  // selection back to the primary root instead of browsing a stale grant.
+  // selection back to the primary root instead of browsing a stale grant —
+  // and a refresh that could not answer at all does the same: an undefined
+  // view means nothing revalidated the selection, so the takeover must not
+  // keep the native primary tree hidden behind it.
   useEffect(() => {
-    if (selected === 'primary' || view === undefined) return
-    const current = view.roots.find(root => root.id === selected.id)
+    if (selected === 'primary') return
+    const current = view?.roots.find(root => root.id === selected.id)
     if (current === undefined || current.state !== 'available') setSelected('primary')
   }, [view, selected])
 
@@ -261,7 +264,14 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
           {...(props.sessionId === undefined ? {} : { sessionId: props.sessionId })}
           {...(props.subscribeSession === undefined ? {} : { subscribeSession: props.subscribeSession })}
           t={t}
-          onClose={() => { setDialogOpen(false) }}
+          onClose={() => {
+            setDialogOpen(false)
+            // The manager may have removed or invalidated the selected root;
+            // those mutations live in the dialog's own state and never reach
+            // this snapshot, so closing re-lists and lets the reconciliation
+            // above drop a selection the registry revoked.
+            void refresh()
+          }}
         />
       ) : null}
     </>
