@@ -1,61 +1,60 @@
+<div align="center">
+
 # dsh-plugin-multi-root-workspace
 
 中文 | [English](./README.en.md)
 
-## 项目简介（What & Why）
+</div>
 
-DSH（DeepSeek Harness）的外部插件 bundle：把 Workspace 的可写范围从"一个 canonical 目录"扩展为"**一个主根 + N 个附加根**"，且**不修改上游仓库任何包**。
+## 项目简介
 
-它解决的问题是：一个开发项目往往由多个独立 Git Repository 组成，而 DSH 原生只把会话原始项目当作唯一的可写根，Agent 跨仓库干活就得反复换会话。
+DSH（DeepSeek Harness）原生只把会话启动的目录当作 Agent 唯一的可写根；本插件是一个不修改上游任何代码的外部扩展，把可写范围扩为"**一个主目录 + 多个附加目录**"。
 
-这个插件的三个核心价值：
+一个开发项目往往由多个独立 Git 仓库组成，跨仓库干活原本得反复换会话。Codex、Cursor 等同类工具早已支持在一个工作区添加多个文件夹；本插件把同样的能力带给 DSH：把其他仓库登记为附加根，Agent 即可直接读写。
 
-- **Agent 零学习成本**：继续使用原生 `read` / `write` / `edit` / `bash` 工具，插件不新增任何 `workspace_*` 工具，只是把"哪些目录属于当前 Workspace"这一个问题的答案变多了。
-- **安全不降级**：多根授权走上游同款机制——进程内 fs fence + 内核级 runner（macOS Seatbelt / Linux bwrap / Landlock），fs 与 bash/PTY 共享同一条 scope；绝不退化为 danger-full-access 或提示词约束。
-- **不装就当不存在**：以 bundle patch 替换上游 `fs-sandbox` 与 `sandbox` 两行 provider；未配置附加根时行为与未装插件逐项一致，misconfiguration 一律响亮报错，从不静默降级。
+- **Agent 零学习成本**：继续使用原生 `read` / `write` / `edit` / `bash`，插件不新增任何工具，只是授权的目录变多了。
+- **安全不降级**：附加根走上游同款授权机制——进程内文件围栏 + 内核级沙箱（macOS Seatbelt / Linux bwrap / Landlock / Windows ACL），文件与 bash 共享同一份授权范围，绝不退化成全开放或只靠提示词约束。
+- **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
-**已完成并发布：MVP `v0.1.0`（里程碑 M1–M3）**——组合与空根直通、多根能力与方言 grant、根注册表 / `/workspace-folders` 命令 / Workspace Folders 面板 / 跨仓库旅程 e2e。
-
-**已完成并发布：`v0.1.1` 硬化批次（H1–H4）**——跨进程 Registry Authority Lease（两个 DSH 进程共用 `$DSH_HOME` 时只有持锁者授予附加根，另一方 fail-closed 并在对方退出后接管）、面板主根改为 host session 推导（不再接受客户端指名的根）、DSH 兼容性从文档约定变成**启动时执行的代码契约**（精确 allowlist + 混装检测 + `src/compat/` 适配层，见 [CHANGELOG](./CHANGELOG.md) 的「升级注意」），以及**附加根自身的 `AGENTS.md` / `CLAUDE.md` 进入模型上下文**——原生指令发现从会话 cwd 向上走，永远到不了附加根。
-
-**已完成并发布：`v0.1.2`**——在 `v0.1.1` 契约不变的前提下，受支持的上游运行时扩展到 `0.1.6-alpha.2` 与 `0.1.7-alpha.1`（后者含 session format 4、进程内 `PluginPackages`、bash `execute().result()` 等适配）；并修复 `0.1.6-alpha.2` 上 Workspace Folders 面板因 Session 目录删掉 `current` 而误显示「没有活动会话」的问题。详见 [CHANGELOG](./CHANGELOG.md)。
-
-**已完成并发布：`v0.1.3`**——在 `v0.1.2` 契约不变的前提下，受支持的上游运行时进一步扩展到 `0.1.7-alpha.2` 与 `0.1.7-rc.1`（形状与 `0.1.7-alpha.1` 相同，适配层无新分支；`rc.1` 起安装期按 `peerDependencies` 精确匹配宿主运行时）。详见 [CHANGELOG](./CHANGELOG.md)。
-
-**已完成并发布：`v0.1.4`**——在 `v0.1.3` 契约不变的前提下，受支持的上游运行时扩展到 `0.1.7-rc.2`（形状与 `0.1.7-rc.1` 相同，适配层无新分支；cordis 仍是 `~4.0.4`）。详见 [CHANGELOG](./CHANGELOG.md)。
-
-**`v0.1.6` 已发布**：支持 DSH `0.2.1-alpha.1` / `.2`，并包含动态 cwd 与 Session origin 分离、附加根 LSP、Windows ACL、文件浏览与 Worktree 能力。详见 [CHANGELOG](./CHANGELOG.md) 与[路线账本](./docs/plans/active/2026-09-12-multi-root-workspace.md)。
-
-进度、编号与发布状态的唯一真源是[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)（M1–M4 是 MVP 里程碑编号，H1–H4 是 `v0.1.1` 批次编号，其中 H1 即 M4）；逐项证据见各[已完成计划](./docs/plans/README.md)，每个版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)。
+当前发布版本 `v0.1.6`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
 
-已有 DSH 运行时（web / Electron 桌面 / headless 均可）时，最短路径是两步——插件已发布到 [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace)：
+插件已发布到 [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace)。可以在 DSH 的插件安装页面填入包名 `@dsh-electron/dsh-plugin-multi-root-workspace`，也可以用命令行两步装完：
 
 ```sh
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 dsh --profile web
+# --profile 按你的启动方式选择，可选值见 DSH 文档
 ```
 
-其他安装来源（GitHub 仓库 / 本地源码）与源码方式运行 DSH 的命令差异，见[安装](#安装)。
+tarball、GitHub、本地源码等其他安装方式见[安装](#安装)。
 
 启动后侧栏底部出现 **Folders**（`🗂`）动作，或直接在会话里：
 
 ```text
-/workspace-folders add ~/code/another-repo
+/workspace-folders add ~/code/another-repo [--read-only|--read-write]
 ```
 
 之后 Agent 即可在该目录读写、跑 bash——与本会话的主根同权。DSH 的动态 working directory 只影响新操作的相对路径和执行目录，切换 cwd 不会新增授权，也不会改变注册表归属。
 
 ## 环境要求
 
-- **使用本源码构建的插件**：需要一个受支持的 DSH 运行时 —— 当前是 **`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-alpha.1` 与 `0.2.1-alpha.2`**，别的版本装不上也不会跑（见下）。`dsh plugin` 会把包装进对应 profile，无需本地 Node 工具链
-- **从源码构建 / 参与**：**Node.js** `^22.19.0 || >=24`（仓库 `engines` 钉住）、**Git**、**pnpm 11**（`packageManager` 钉 `pnpm@11.25.0`，建议经 corepack 启用）
-- **DSH 运行时**：开发依赖精确 pin 在 `0.2.1-alpha.2`（受支持版本里的基线）；升级流程见[开发工作流](./docs/development/plugin-development-workflow.md)
-- **平台支持**：macOS Seatbelt、Linux bwrap / Landlock，以及 Windows root-set ACL runner；各平台实际执行证据见[路线账本](./docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
-- 运行冒烟测试**不需要模型凭据**：e2e 的模型轮次由内联的脚本化模型端点提供
+**使用本插件**：一个下表中的 DSH 版本（精确匹配，不是范围）。`dsh plugin` 负责安装，无需本地 Node 工具链。
 
-**受支持的 DSH 版本是一份精确清单，不是一个范围。** 因为本插件替换的是 `ctx.fs` 与 `ctx.sandbox`——安全边界本身——而它识别内核沙箱方言靠的是对具体上游版本实测出来的 argv 形状。所以 `peerDependencies` 只列真正跑过全套验证的版本，启动时也会再查一遍：宿主的版本不在清单上，或者若干个 `@deepseek-ai/dsh-*` 混装了不同版本，那么 fs / sandbox / registry / instructions / lsp / workspace-files 六行**不启动**，组合退化成"没装这个插件"，并打印一条说明。诊断办法见[故障排查：DSH 版本不在支持矩阵上](./docs/troubleshooting/unsupported-dsh-release.md)，理由见 [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)。
+| DSH 系列 | 受支持的版本 |
+| --- | --- |
+| `0.1.5` | `0.1.5-rc.2` |
+| `0.1.6` | `0.1.6-alpha.1`、`0.1.6-alpha.2` |
+| `0.1.7` | `0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2` |
+| `0.2.0` | `0.2.0-rc.1`、`0.2.0-rc.2` |
+| `0.2.1` | `0.2.1-alpha.1`、`0.2.1-alpha.2` |
+
+DSH 版本不在表内、或 `@deepseek-ai/dsh-*` 各包版本不一致时，插件不会启动，行为等同没装。
+
+**从源码构建 / 贡献**：Node.js `^22.19.0 || >=24`，pnpm `11.25.0`（建议经 corepack 启用）；开发 pin 的 DSH 为 `0.2.1-alpha.2`。
+
+**运行平台**：macOS（Seatbelt）、Linux（bwrap / Landlock）、Windows（root-set ACL runner）。
 
 ## 安装
 
@@ -63,19 +62,19 @@ dsh --profile web
 
 | 来源 | 命令 | 说明 |
 | --- | --- | --- |
-| npm 注册表（推荐） | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | 预构建产物，即装即用；首次 `add` 需要回答一次 `allowBuilds`（见下） |
-| tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | 预构建离线包，适合内网/离线；同样需要那一次 `allowBuilds` 回答 |
-| 本地路径 | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` 链接本地 checkout，依赖已在本仓库装好，适合开发调试 |
-| GitHub / git | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | 拉源码由 `prepare` 现场构建；需要两次 `allowBuilds` 回答（本包 + `koffi`），建议锁定 tag |
+| npm 注册表（推荐） | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | 预构建产物，即装即用 |
+| GitHub | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | 安装时自动从源码构建；`allowBuilds` 需含本包，建议锁定版本 |
+| tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | 预构建离线包，适合内网/离线 |
+| 从源码安装 | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` 链接本地 checkout，适合开发调试；无需 `allowBuilds` |
 
-**首次安装需要回答一次 `allowBuilds`，四种来源皆然。** 本插件带一个需要构建的原生依赖 `koffi`（Windows 上 Registry Authority 用的 FFI 封装；其他平台装了不用），而 pnpm ≥10 默认不运行任何依赖的生命周期脚本。所以第一次 `dsh plugin add` 会以 `[ERR_PNPM_IGNORED_BUILDS]` 失败，并把待决项写进该 profile 的 `pnpm-workspace.yaml`：
+**首次安装时 `dsh plugin add` 会以 `[ERR_PNPM_IGNORED_BUILDS]` 失败**：在该 profile 的 `pnpm-workspace.yaml` 里补上下面这行，再执行一次 `add` 即可：
 
 ```yaml
 allowBuilds:
-  koffi: true          # dsh 留的占位是 "set this to true or false"
+  koffi: true
 ```
 
-把它改成 `true` 再执行一次 `add` 即可。把这一行理解为**允许该依赖的安装脚本在你的机器上执行**（不在 agent 运行的任何沙箱之内）——`koffi` 的脚本只做本地预编译。注意两点（实测于 DSH `0.2.1-alpha.2`，tarball 来源）：profile 的 `pnpm-workspace.yaml` 可能**没有** `set this to true or false` 标记（直接补 `allowBuilds` 即可）；恢复后的 `add` 退出 0 也可能没把插件激活进 `dsh.profile.bundles`——检查该 profile 的 `package.json`，缺的话做一次 `remove` + `add`。诊断步骤见[故障排查：安装停在构建授权](./docs/troubleshooting/install-stops-at-build-approval.md)。
+如果重跑退出 0 但插件没有进入 `dsh.profile.bundles`，做一次 `remove` + `add`。更多排查见[故障排查](./docs/troubleshooting/install-stops-at-build-approval.md)。
 
 ### 从 npm 安装（推荐）
 
@@ -83,7 +82,7 @@ allowBuilds:
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-安装的是预构建产物（不需要编译本插件本身），但首次仍要回答上面那一次 `allowBuilds`。
+安装的是预构建产物，首次安装需要添加 `allowBuilds`。
 
 ### 从 tarball 安装
 
@@ -94,7 +93,7 @@ pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.6.tgz
 ```
 
-同样是预构建产物（不需要编译本插件本身），适合内网或离线环境交付；首次 `add` 同样要回答那一次 `allowBuilds`。
+同样是预构建产物，适合内网或离线环境交付；首次安装同样需要添加 `allowBuilds`。
 
 ### 从 GitHub 安装
 
@@ -102,7 +101,7 @@ dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.
 dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace
 ```
 
-pnpm ≥10 下首次 `add` 会失败：git 安装拉取的是**源码而非构建产物**，包内自包含的 `prepare` 脚本要现场构建（直接转译 `src/`，不做类型检查）。按 `dsh` 的提示把 pnpm 打印的包键写入该 profile 的 `pnpm-workspace.yaml`——这条来源要回答**两个**待决项：
+GitHub 来源装的是源码，`add` 时会自动构建，不需要手动编译；但 `allowBuilds` 要写两行——本包自身和 `koffi`：
 
 ```yaml
 allowBuilds:
@@ -110,61 +109,109 @@ allowBuilds:
   koffi: true
 ```
 
-然后重新执行 `add` 即可。建议锁定 tag（如 `#v0.1.6`），让后续推送无法悄悄改变实际运行的内容：
+建议锁定版本（如 `#v0.1.6`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
 dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.6
 ```
 
-### 从本地源码安装（开发调试）
+### 从本地源码安装
 
 ```sh
 git clone https://github.com/cherrchen/dsh-plugin-multi-root-workspace.git
 cd dsh-plugin-multi-root-workspace
-export CI=true    # 无 TTY 时 pnpm 的依赖自检会中止，见开发工作流 §8
+export CI=true
 pnpm install
-pnpm build        # 生成 lib/（未纳入 Git），制品测试与安装都依赖它
-dsh plugin --profile web add "$PWD"
+pnpm build
+dsh plugin --profile web add /path/to/repo
 ```
 
-> **提示**：如果你的 DSH 是 clone 源码方式使用（而非 `npm install -g @deepseek-ai/deepseek-harness`），`dsh` 不在全局 PATH 里，请把上述命令中的 `dsh` 换成 `pnpm dsh`——例如 `pnpm dsh plugin --profile web add ...`、`pnpm dsh --profile web`。
+> [!TIP]
+> `dsh` 不在 PATH 里时（例如用源码仓库跑 DSH），把命令里的 `dsh` 换成 `pnpm dsh`。
 
 ## 运行方法
 
-开发自检（每步的预期结果）：
+开发自检：
 
 ```sh
-pnpm lint && pnpm typecheck   # 预期：0 警告 0 错误；两个 tsconfig 全部通过
-pnpm test                     # 预期：全部通过；本机没有的内核 runner 用例会显式 skip 并打印原因
-pnpm kernel:probe             # 预期：报告本机可用的内核 runner（seatbelt / bwrap / landlock）
-pnpm smoke                    # 预期：compose 40/40、behavior 99/99、journey 55/55
-pnpm docs:check               # 预期：0 errors, 0 warnings
+pnpm lint && pnpm typecheck
+pnpm test
+pnpm kernel:probe
+pnpm smoke
+pnpm docs:check
 ```
 
 安装进 DSH 运行时并验证组合：
 
 ```sh
-dsh plugin --profile web add "$PWD"
-dsh --profile web --dump-config
+dsh plugin --profile web add /path/to/repo
+dsh --profile web --dump-config | grep -A3 'multi-root'
 ```
 
-预期：组合里**仅** `fs-sandbox` 与 `sandbox` 两行被替换为插件的 `multi-root-fs` / `multi-root-sandbox`，并插入 10 行（`multi-root-compat` / `fs` / `sandbox` / `scope` / `registry` / `instructions` / `lsp` / `workspace-files` / `command` 与 client 载体行 `multi-root-client`）；`bash-sandbox` 保持上游（bash 与 PTY 经 `ctx.sandbox` 取根）。启动 `dsh --profile web` 后，侧栏底部出现 Folders 动作。
+预期输出：
+
+```text
+# == @deepseek-ai/dsh-base, patched by @dsh-electron/dsh-plugin-multi-root-workspace
+- id: sandbox
+  name: '@deepseek-ai/dsh-sandbox-local'
+  disabled: true
+--
+# == @deepseek-ai/dsh-base, patched by @dsh-electron/dsh-plugin-multi-root-workspace
+- id: fs-sandbox
+  name: '@deepseek-ai/dsh-fs-sandbox'
+  disabled: true
+--
+# == @dsh-electron/dsh-plugin-multi-root-workspace
+- id: multi-root-compat
+  name: '@dsh-electron/dsh-plugin-multi-root-workspace/compat'
+- id: multi-root-fs
+  name: '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
+- id: multi-root-sandbox
+  name: '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
+- id: multi-root-providers
+  name: '@dsh-electron/dsh-plugin-multi-root-workspace/providers'
+- id: multi-root-scope
+  name: '@dsh-electron/dsh-plugin-multi-root-workspace/scope'
+  config:
+    toolAccess: {}
+- id: multi-root-registry
+  name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
+  config:
+    leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+    maxAdditionalRoots: 16
+- id: multi-root-instructions
+  name: '@dsh-electron/dsh-plugin-multi-root-workspace/instructions'
+  config:
+    maxBytes: 65536
+- id: multi-root-lsp
+  name: '@dsh-electron/dsh-plugin-multi-root-workspace/lsp'
+- id: multi-root-workspace-files
+  name: '@dsh-electron/dsh-plugin-multi-root-workspace/workspace-files'
+- id: multi-root-command
+  name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
+- id: multi-root-client
+  name: '@dsh-electron/dsh-plugin-multi-root-workspace'
+```
+
+即上游 `fs-sandbox` 与 `sandbox` 两行被禁用、由插件同名服务接管，插件自身的 `multi-root-*` 行全部挂载。启动后侧栏底部会出现 **Folders** 动作。
 
 ## 使用方法
 
-**命令**（文本入口，headless 下同样可用）：
+### 命令
 
 ```text
-/workspace-folders                       # 列出主根与附加根（含每根访问级别）
-/workspace-folders add <绝对路径>         # 无参数时打开系统目录选择器
-/workspace-folders add <绝对路径> --read-only   # 登记为只读根：可读可浏览，任何工具不得写入
-/workspace-folders access 1 read-write   # 切换访问级别（升级到可写要求该根此刻可用）
-/workspace-folders alias 1 支付           # 给第 1 个附加根起别名
-/workspace-folders remove 1              # 按序号或路径移除
-/workspace-folders reveal 1              # 在文件管理器中显示
+/workspace-folders [list]                              # 列出主根与附加根（含每根访问级别与状态）
+/workspace-folders add <绝对路径> [--read-only|--read-write]   # 不带路径时打开系统目录选择器；默认 read-write
+/workspace-folders access <序号|路径> read-only|read-write     # 切换访问级别（升到可写要求该根此刻可用）
+/workspace-folders alias <序号|路径> [别名]                     # 不带别名则清除已有别名
+/workspace-folders remove <序号|路径>                           # 序号即 list 输出的编号
+/workspace-folders reveal <序号|路径>                           # 在文件管理器中显示
+/workspace-folders help                                       # 查看命令帮助
 ```
 
-附加根默认 read-write；read-only 根保留全部成员资格（可读、文件树、LSP、指令），只是 fs 写、受限进程与 Windows ACL 都不授予它写权限。每个主根的附加根数量有上限（默认 16，经注册表行配置 `maxAdditionalRoots` 可调至 64）；宿主还可以在 `multi-root-scope` 行配置 `toolAccess: { <工具名>: 'read-only' }`，让某个工具永远不能写任何附加根（例如 `{ bash: 'read-only' }`——bash 仍可写主根）。语义与持久化编码见 [ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)，上限与 provider 冲突门禁见 [ADR-0014](./docs/decisions/ADR-0014-root-limit-and-provider-conflict.md)。
+路径可带引号；与已有根重复、嵌套在已有根内部、或就是主根本身的路径会被拒绝。
+
+附加根默认与主根同权（read-write），`add` 时带 `--read-only` 或事后 `access` 可切为只读。每个主根最多登记 16 个附加根（`maxAdditionalRoots` 配置可调至 64）。宿主还可以在 `multi-root-scope` 行配置 `toolAccess`，例如 `{ bash: 'read-only' }` 让 bash 永远不能写任何附加根（仍可写主根）。
 
 `add` 后执行 `list` 的预期输出：
 
@@ -176,32 +223,40 @@ Workspace root (primary; access follows the current sandbox mode): /home/me/mono
 Writable additional roots: 2 of 2.
 ```
 
-**面板**（Web GUI）：侧栏底部的 **Folders** 对话框列出主根与附加根，支持添加（走组合好的目录选择器或手输路径）、移除、别名、复制路径、在文件管理器中显示与上下移排序；文案中英双语跟随界面语言。根目录的状态会如实显示：`missing`（暂时不存在）、`redirected`（被替换成指向别处的符号链接）的根**保留登记但暂不授予**，目录恢复后 `list` 或面板刷新即自动重新授予，无需重启。
+### 面板
 
-**模型侧**：附加根拓扑经 `systemPrompt.context` 快照随每次请求告知模型（同一 Session 原始项目，切换执行目录不改变授权），无需新增内省工具。授权规则（canonical 化、`recordedPath` 防符号链接转移、冲突拒绝）的完整语义见[架构文档](./docs/architecture/multi-root-workspace.md)。
+侧栏底部的 **Folders** 对话框列出主根与附加根，支持添加、移除、别名、切换只读/可写、复制路径、在文件管理器中显示与上下移排序。
+
+### 模型侧
+
+附加根的拓扑信息会注入系统提示词，让模型知道当前有哪些目录可用，授权变化时信息随之更新，不需要向模型提供新的工具。
 
 ## 项目结构
 
 ```text
-src/
-  roots.ts        纯规则层：canonical 化、冲突校验、登记状态分类（available/missing/redirected/invalid）
-  registry.ts     根注册表：dsh-storage-domain 持久化，同一主根的变更在一条队列里串行
-  registry-lease.ts / registry-lease-win32.ts
-                  跨进程 Registry Authority：POSIX flock 与 Windows named semaphore（进程死亡由内核释放）
-  scope.ts        ctx.multiRootScope：唯一的授权源，兼发模型可见的拓扑快照
-  fs.ts           多根文件系统 provider（进程内 fence，子类自上游 LocalFileSystem）
-  sandbox.ts      多根内核沙箱 provider（子类自上游 LocalSandboxProvider）
-  dialects.ts     Seatbelt / bwrap / Landlock profile 的识别与附加 grant 拼装（不认识即响亮报错）
-  containment.ts  路径包含判定（词法快速路径 + dev/ino 别名回退）
-  instructions.ts 附加根 AGENTS.md / CLAUDE.md 的发现、增量投递、预算与撤回（顶层 + 本会话触碰过的子目录，经 agent/pre-step 注入）
-  compat.ts       multi-root-compat 启动门禁（版本 allowlist 与混装判定）
-  compat/         版本差异适配层：dsh-version / sandbox-confine / agent-instructions / llm-message（可选 peer 按需加载）
-  command.ts      /workspace-folders 命令与面板 RPC 的 host 半部
-  contract.ts     面板线协议（zod 双端校验，可内联进浏览器 bundle）
-  client/         浏览器半部：侧栏动作、对话框、双语词典
-tests/            差分 parity、方言真实执行矩阵、契约往返、组件与 locale 门禁、跨进程 lease e2e、指令注入
-scripts/          冒烟（compose / behavior / journey）、文档与内核 runner 检查、兼容性契约检查、升级流程
-docs/             需求、架构、决策记录（ADR）、计划、开发工作流
+.
+├── src/
+│   ├── roots.ts                      纯规则层：canonical 化、冲突校验、登记状态分类（available/missing/redirected/invalid）
+│   ├── registry.ts                   根注册表：dsh-storage-domain 持久化，同一主根的变更在一条队列里串行
+│   ├── registry-lease.ts             跨进程 Registry Authority：POSIX flock（进程死亡由内核释放）
+│   ├── registry-lease-win32.ts       同上，Windows named semaphore 实现
+│   ├── scope.ts                      ctx.multiRootScope：唯一的授权源，兼发模型可见的拓扑快照
+│   ├── fs.ts                         多根文件系统 provider（进程内 fence，子类自上游 LocalFileSystem）
+│   ├── sandbox.ts                    多根内核沙箱 provider（子类自上游 LocalSandboxProvider）
+│   ├── dialects.ts                   Seatbelt / bwrap / Landlock profile 的识别与附加 grant 拼装（不认识即响亮报错）
+│   ├── windows-*.ts                  Windows root-set ACL runner 与 restricted-token 执行
+│   ├── containment.ts                路径包含判定（词法快速路径 + dev/ino 别名回退）
+│   ├── instructions.ts               附加根 AGENTS.md / CLAUDE.md 的发现、增量投递、预算与撤回（顶层 + 本会话触碰过的子目录，经 agent/pre-step 注入）
+│   ├── lsp.ts                        附加根按所在根初始化独立 LSP workspace
+│   ├── workspace-files.ts            Files 页签附加根文件浏览的 host 路由与 confinement
+│   ├── compat.ts                     multi-root-compat 启动门禁（版本 allowlist 与混装判定）
+│   ├── compat/                       版本差异适配层：dsh-version / sandbox-confine / agent-instructions / llm-message 等（可选 peer 按需加载）
+│   ├── command.ts                    /workspace-folders 命令与面板 RPC 的 host 半部
+│   ├── contract.ts                   面板线协议（zod 双端校验，可内联进浏览器 bundle）
+│   └── client/                       浏览器半部：侧栏动作、Folders 对话框、Files 页签根切换器、双语词典
+├── tests/                            差分 parity、方言真实执行矩阵、契约往返、组件与 locale 门禁、跨进程 lease e2e、指令注入
+├── scripts/                          冒烟（compose / behavior / journey）、文档与内核 runner 检查、兼容性契约检查、升级流程
+└── docs/                             需求、架构、决策记录（ADR）、计划、开发工作流
 ```
 
 ## 贡献指南
@@ -232,6 +287,7 @@ docs/             需求、架构、决策记录（ADR）、计划、开发工�
 项目长期文档位于 [`docs/`](./docs/README.md)：
 
 - [版本变更记录（CHANGELOG）](./CHANGELOG.md)
+- [用户指南](./docs/guide/README.md)
 - [需求](./docs/requirements/multi-root-workspace.md)
 - [目标架构](./docs/architecture/multi-root-workspace.md)
 - [上游调研](./docs/reference/multi-root-workspace-research.md)

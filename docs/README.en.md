@@ -13,6 +13,7 @@ This directory holds the project's long-term documentation and engineering knowl
 | [`decisions/`](./decisions/README.md) | Architecture Decision Records |
 | [`plans/`](./plans/README.md) | Active and completed implementation plans |
 | [`development/`](./development/README.md) | Development workflow and engineering practices |
+| [`guide/`](./guide/README.md) | User guide: the operational detail the top-level README omits |
 | [`reference/`](./reference/README.md) | Stable technical reference |
 | [`troubleshooting/`](./troubleshooting/README.md) | Known issues, diagnostics, and solutions |
 

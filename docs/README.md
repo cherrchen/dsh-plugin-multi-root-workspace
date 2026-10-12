@@ -13,6 +13,7 @@ English: [README.en.md](./README.en.md)
 | [`decisions/`](./decisions/README.md) | Architecture Decision Records |
 | [`plans/`](./plans/README.md) | 当前与已完成的实施计划 |
 | [`development/`](./development/README.md) | 开发流程与工程实践 |
+| [`guide/`](./guide/README.md) | 用户指南：README 省略的操作细节与语义说明 |
 | [`reference/`](./reference/README.md) | 稳定技术参考 |
 | [`troubleshooting/`](./troubleshooting/README.md) | 已知问题、诊断方法和解决方案 |
 
