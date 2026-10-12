@@ -145,14 +145,23 @@ export function apply(ctx: ClientContext): void {
     // A runtime that stops carrying it falls back to the icon-only launcher
     // rather than to a nameless switcher.
     const absolutePath = (props as { readonly absolutePath?: string } | undefined)?.absolutePath
+    // The slot is session-scoped: `props.sessionId` is THIS pane's session —
+    // the same identity the framework minted `filesTree` with. Panel calls
+    // must target it, not the global current-session resolver: a Files pane
+    // that outlives a session switch would otherwise list — and fail to
+    // route — another session's roots over its own tree and primary root.
+    // The global resolver remains the fallback for a composition that
+    // composes the occupant without session shares.
+    const paneSessionId = (): string | undefined =>
+      (props as { readonly sessionId?: string } | undefined)?.sessionId ?? sessionId()
     // The wrapper is rebuilt per render but every member it carries is a
     // framework-stable prop or an apply-level constant, so the switcher's
     // takeover effect — which keys on the selection, not the wrapper —
     // never restarts because of it. `undefined` means the fork cannot mount.
     const filesTree = createFilesTreeSurface(props, filesTreeT)
     return absolutePath === undefined
-      ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId, subscribeSession, t, compact: true })
-      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId, subscribeSession, t, openInApp, filesTree })
+      ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, compact: true })
+      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, openInApp, filesTree })
   }))
 }
 

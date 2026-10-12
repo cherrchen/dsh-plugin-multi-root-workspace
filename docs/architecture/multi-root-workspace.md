@@ -236,7 +236,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 
 ## 10. 多根消费方扩展（B1–B3）
 
-LSP、Windows ACL 与 workspace-files 的当前接缝、客户端树、scope 变更与兼容边界见 [ADR-0011](../decisions/ADR-0011-multi-root-workspace-consumers.md)。`multi-root-lsp` / `multi-root-workspace-files` 是 additive、compat-gated 行，不禁用其他 provider。Windows 非空 scope 使用插件 runner；POSIX 方言仍按 §5 扩展上游 profile。加固修订（2026-10-11，见 ADR-0011 修订节）：**Windows 网络/设备根**（UNC、`\\?\`、`\\.\`、映射网络盘）在任何 fs 触碰之前以 `unsupported-path` 词法拒绝；runner 在 ACL 授予后、spawn 前重新验证每个根并要求 `--temp` 已存在，否则 exit 127 fail closed；原面板文件端点词法拒绝反斜杠路径（该端点已随 P11 移除，词法兜底仍由 `workspaceFiles` 路由层承担）；Windows reveal 接受 exit 0/1（`explorer.exe` 成功也返回 1）。进度与各平台的验证证据只登记在[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
+LSP、Windows ACL 与 workspace-files 的当前接缝、客户端树、scope 变更与兼容边界见 [ADR-0011](../decisions/ADR-0011-multi-root-workspace-consumers.md)。`multi-root-lsp` / `multi-root-workspace-files` 是 additive、compat-gated 行，不禁用其他 provider。Windows 非空 scope 使用插件 runner；POSIX 方言仍按 §5 扩展上游 profile。加固修订（2026-10-11，见 ADR-0011 修订节）：**Windows 网络/设备根**（UNC、`\\?\`、`\\.\`、映射网络盘）在任何 fs 触碰之前以 `unsupported-path` 词法拒绝；runner 在 ACL 授予后、spawn 前重新验证每个根并要求 `--temp` 已存在，否则 exit 127 fail closed；原面板文件端点词法拒绝反斜杠路径（该端点已随 P11 移除，词法兜底仍由 `workspaceFiles` 路由层承担）；**读面边界（2026-10-12 review 修订）**：`stat`/`read`/`readBytes`（及旧版 `readAll`/`readRelated`，结构探测包装）上游不做 workspace 围限，`workspace-files.ts` 对词法上仍落在「在册未授权」根下的路径以 `workspace-file/outside-workspace` 拒绝——被撤/redirect 根的缓存树行不能顺词法路径复生读权；Windows reveal 接受 exit 0/1（`explorer.exe` 成功也返回 1）。进度与各平台的验证证据只登记在[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
 
 ## 11. 动态执行目录与 Session 原始项目
 

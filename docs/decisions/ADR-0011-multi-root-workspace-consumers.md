@@ -38,7 +38,7 @@ restricted-token 的读取、网络、Everyone/hard-link 等边界及各版本�
 
 ### 文件树与隔离
 
-现有 `workspaceFiles.list` 对附加根绝对路径按同一 scope 选择根，再把 host 派生的 scope 与绝对 target 委托上游，保留它的目录类型检查和配置的 entry cap。异步完成后根若被删除、消失或 redirect，丢弃结果。现代三参数 `changes(scope, path, signal)` 同样路由；根撤销的 scope publication 中止等待中的流，逐帧再验 canonical scope。旧版二参数、会话级 `changes(scope, signal)` 没有可路由的 path，原样保留；差异只在 `src/compat/workspace-files.ts` 按 arity 探测。
+现有 `workspaceFiles.list` 对附加根绝对路径按同一 scope 选择根，再把 host 派生的 scope 与绝对 target 委托上游，保留它的目录类型检查和配置的 entry cap。异步完成后根若被删除、消失或 redirect，丢弃结果。现代三参数 `changes(scope, path, signal)` 同样路由；根撤销的 scope publication 中止等待中的流，逐帧再验 canonical scope。旧版二参数、会话级 `changes(scope, signal)` 没有可路由的 path，原样保留；差异只在 `src/compat/workspace-files.ts` 按 arity 探测。（**2026-10-12 修订**：读面 `stat`/`read`/`readBytes` 与文件级 `changes` 也纳入同一包装——上游这四个方法本就不做 workspace 围限，授权边界由 `routeWorkspacePath` + `registry.list()` 的「在册未授权」词法检查补齐：活授权根照上路由，路径词法上仍落在已登记但未授权的根下时以 `workspace-file/outside-workspace` 拒绝，撤销/redirect 后缓存树行不能顺词法路径复生读权。）
 
 浏览器复用 ADR-0005 的 Connection 通道，增加 `files` / `readFile`，每个端点有自己的 response schema；均必须有 live `sessionId`。host 从 session 得主根，`registry.refresh()` 重验根，再根据 exact entry 定位；只接收所选根内的相对路径，canonical 包含性拦截 traversal / symlink escape，I/O 后重验登记与路径身份。新端点复用原 `workspaceFiles.list` / `read`，保留 host 配置的资源上限。preview 最多请求前 200 行，非 EOF 明示截断。
 
@@ -97,9 +97,9 @@ Status 保持 **Accepted**；`files` / `readFile` 端点、隔离与重验语义
 
 ## 修订：面板 `files` / `readFile` 端点下线（2026-10-12，Amendment）
 
-Status 保持 **Accepted**；`workspaceFiles.list` / `changes` / `read` 的 host 侧按根路由不变——它是 P11 复刻树的数据源。
+Status 保持 **Accepted**；`workspaceFiles` 的 host 侧按根路由不变——它是 P11 复刻树的数据源。
 
-- Files 页签的附加根树从自绘 `RootFileTree` 换成 `src/client/files-tree/` 下逐字节复刻的上游组件：列目录与目录 watch 直接调 `remote.workspaceFiles.list/changes`（按绝对路径路由到附加根，即本节包装的就位通路），文件点击经 `dsh-resource://file/session/<id>/<abs-path>` 交给 viewer——`workspaceFiles.read` 本就不做 workspace 围限，宿主侧无须再为本插件单开读取通道。
+- Files 页签的附加根树从自绘 `RootFileTree` 换成 `src/client/files-tree/` 下逐字节复刻的上游组件：列目录与目录 watch 直接调 `remote.workspaceFiles.list/changes`（按绝对路径路由到附加根，即本节包装的就位通路），文件点击经 `dsh-resource://file/session/<id>/<abs-path>` 交给 viewer——`workspaceFiles` 的读面（`stat`/`read`/`readBytes`）上游不做 workspace 围限，由本插件包装统一兜底：活授权根放行、在册未授权根的词法路径拒绝，宿主侧无须再为本插件单开读取通道。
 - 因此插件私有的 `files` / `readFile` 面板端点、`FilesView` / `FilePreview` 契约、`RootFileTree`、`src/panel-files.ts` 整体删除，不留回退；面板 RPC 只剩根管理与 reveal。
 - Windows 词法纪律随之收敛：`unsupported-path` 仍由 fs/scope 层统一拒绝；原「面板文件端点词法拒绝反斜杠路径」一条随端点消失，剩余面是复刻树把绝对路径原样交给 `workspaceFiles.list/changes`——同一层词法校验继续兜底。
 - 复刻的同步义务、store/inject 声明与 DOM 纪律见 [ADR-0015](./ADR-0015-files-tab-plugin-owned-browsing.md) 修订节与 `src/client/files-tree/FORK.md`。

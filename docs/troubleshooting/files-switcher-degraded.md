@@ -25,6 +25,7 @@
 4. 复刻钮缺失的排查顺序：`.mrfw-openSplit` 元素是否存在（不存在 ⇒ adapter 未建，查 `*Regular` 图标与 `open-in-app/apps` 路由）；存在但被隐藏 ⇒ 检查 `:not(.mrfw-openSplit)` 限定符是否还在隐藏规则里。
 5. 复刻树缺失的排查顺序：接管态下 DevTools 找 `.mrfw-ftBody`（不存在 ⇒ adapter 未建，查 `filesTreeSurfaceSupported()` 的 primitives 探针——folder 图标/`FileTypeIcon`/`classifyFileType`）；存在但行为异常 ⇒ 对照 `src/client/files-tree/FORK.md` 查上游该版本的 `ui-sidebar-files` 源码漂移；滚动/展开记忆丢失 ⇒ 查 `data-dockkit-content`。
 6. **附加根树卡在「正在读取…」不复位（已修，留作诊断参考）**：根因查明——`remote.workspaceFiles` 是 cordis 的嵌套服务，在 context 代理路径上受 inject 守卫（未声明的 fiber 访问会抛 `cannot get property "remote.workspaceFiles" without inject`），而本版 cordis 的 inject 条目全是 required（声明会把整行 gate 在可选服务上）。`lazyFilesRemote` 一度走 `ctx.get('remote').workspaceFiles` 代理路径，抛出的 rejection 无人接住（verbatim `load` 的 `.then` 无 `.catch`），静默钉死 loading。现改为 `ctx.get('remote')` / `ctx.get('remote.workspaceFiles')`——免 inject 的 store 直查；且一切查找失败都折叠成 settled `gateway/internal` 失败行（P11 回归测试锁住）。所以接管态下：出现 `error.unavailable` 失败行 ⇒ 读行的真实错误信息，即 remote 侧实际失败原因；**永远停在 loading** ⇒ `changes` 流开了但一帧未出（传输层问题——此时主根原生树通常也同样不工作），查 DevTools 的 WebSocket 与 host 日志，而非本插件。
+7. **点击附加根文件报 `workspace-file/outside-workspace`**：这是 `src/workspace-files.ts` 的读面边界按设计拒绝——该路径词法上仍落在一个**已登记但未授权**的根下（被移除、消失或 `redirected`；上游 `stat`/`read`/`readBytes`/`readAll`/`readRelated` 与文件级 `changes` 本就不做 workspace 围限，所以边界由本插件补）。处置：在 Workspace Folders 面板重新挂载/修正该根（redirected 需重新授权）；若报错路径从未属于任何附加根，则是 `routeWorkspacePath` 的真 bug，按 routing 层排查。
 
 ## 已验证的解决方案
 

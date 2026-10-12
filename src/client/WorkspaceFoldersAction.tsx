@@ -291,6 +291,11 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       return
     }
     if (event.key !== 'Tab') return
+    // While the upgrade confirmation owns the topmost modal, Tab belongs to
+    // its own focus trap. The portaled Modal still bubbles keys through this
+    // dialog's React tree (like Escape above), and trapping here would yank
+    // focus to a control behind the active confirmation.
+    if (upgradeFor !== undefined) return
     const dialog = dialogRef.current
     if (dialog === null) return
     const focusable = Array.from(

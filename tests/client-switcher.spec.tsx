@@ -575,7 +575,7 @@ describe('the Files-tab root switcher', () => {
     expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull()
   })
 
-  it('resets the selection and refetches when the session changes', async () => {
+  it('keeps each pane bound to its own session when the global session changes', async () => {
     const harness = mount()
     const { pane } = renderInPane(harness)
     await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
@@ -584,10 +584,18 @@ describe('the Files-tab root switcher', () => {
     fireEvent.click(screen.getByRole('button', { name: 'payments' }))
     await waitFor(() => { expect(switcherKind()).toBe('additional') })
 
+    // The slot is session-scoped: an already mounted pane keeps its own
+    // sessionId — a global session flip must neither re-list nor reset the
+    // takeover, or session B's roots would render over session A's tree.
     act(() => { harness.setSession('session-2') })
+    await waitFor(() => {
+      expect(pane.querySelector('.mrfw-rootSwitcher')?.getAttribute('data-root-kind')).toBe('additional')
+    })
+    expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull()
+    expect(harness.calls.every(call => call.payload.sessionId === 'session-1')).toBe(true)
 
-    await waitFor(() => { expect(switcherKind()).toBe('primary') })
-    expect(pane.querySelector('.mrfw-ftBody')).toBeNull()
+    // A new pane the framework mints for session-2 targets that registry.
+    renderInPane(harness)
     await waitFor(() => {
       expect(harness.calls.some(call => call.endpoint === 'list' && call.payload.sessionId === 'session-2')).toBe(true)
     })

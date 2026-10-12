@@ -625,6 +625,26 @@ describe('the panel dialog', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('lets the nested upgrade modal keep its own Tab while it is open', async () => {
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
+
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
+    const upgradeDialog = screen.getByRole('dialog', { name: `${NS}.panel.accessUpgradeTitle` })
+
+    // The confirmation's buttons live outside `dialogRef` (the Modal portals
+    // to document.body) but still bubble keys through the dialog's React
+    // tree. A Tab must reach the modal's own focus handling — the parent
+    // trap would otherwise steal focus to a control behind the modal.
+    const modalButton = upgradeDialog.querySelector('button')!
+    modalButton.focus()
+    fireEvent.keyDown(modalButton, { key: 'Tab' })
+    expect(upgradeDialog.contains(document.activeElement)).toBe(true)
+  })
+
   it('renders a redirected root as its own state', async () => {
     const harness = mount()
     harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_C], limit: 16, count: 1 })
