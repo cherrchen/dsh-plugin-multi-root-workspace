@@ -40,7 +40,104 @@ export const IconFolderClose16 = icon('folder-close')
 export const IconFolderOpenOutline16 = icon('folder-open')
 export const IconPlusOutline16 = icon('plus')
 export const IconRefreshOutline16 = icon('refresh')
+export const IconSettingsOutline16 = icon('settings')
 export const IconTrashOutline16 = icon('trash')
+
+// The *Regular family the open-in-app fork spells verbatim (0.1.7+ names).
+export const IconChevronDownOutlineRegular = icon('chevron-down')
+export const IconRightUpOutlineRegular = icon('right-up')
+export const IconFolderOpenOutlineRegular = icon('folder-open')
+export const IconWarningOutlineRegular = icon('warning')
+
+// The names the files-tree fork spells verbatim: the folder pair the tree
+// rows toggle between (Regular in 0.1.7+, pixel-sized before it) and the
+// file-type pair every supported release carries.
+export const IconFolderCloseRegular = icon('folder-close')
+export const IconFolderOpenRegular = icon('folder-open')
+export const IconFolderOpen16 = icon('folder-open')
+
+/** Minimal `classifyFileType` mirror: a kind string by extension. */
+export function classifyFileType(path: string): string {
+  const name = path.split('/').pop() ?? path
+  const dot = name.lastIndexOf('.')
+  if (dot < 0) return 'file'
+  const extension = name.slice(dot + 1).toLowerCase()
+  return ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs'].includes(extension) ? 'code'
+    : ['md', 'markdown', 'txt'].includes(extension) ? 'text'
+    : 'file'
+}
+
+/** Minimal `FileTypeIcon` mirror: the kind lands on `data-icon`. */
+export function FileTypeIcon(props: IconProps & {
+  readonly kind?: string
+  readonly path?: string
+}): ReactNode {
+  const kind = props.kind ?? (props.path === undefined ? 'file' : classifyFileType(props.path))
+  return createElement('svg', {
+    'data-icon': `file-${kind}`,
+    className: props.className,
+    width: props.size ?? 16,
+    height: props.size ?? 16,
+  })
+}
+
+/** Minimal `Tooltip` mirror: the wrapper renders its content in place. */
+export function Tooltip(props: {
+  readonly label?: ReactNode
+  readonly children?: ReactNode
+}): ReactNode {
+  return createElement(Fragment, null, props.children)
+}
+
+/** Minimal `Toast` mirror: a labeled banner that dismisses itself on click. */
+export function Toast(props: {
+  readonly text: string
+  readonly icon?: ReactNode
+  readonly onDone: () => void
+}): ReactNode {
+  return createElement(
+    'div',
+    { role: 'status', onClick: props.onDone },
+    props.icon,
+    props.text,
+  )
+}
+
+/** Minimal `PathLabel` mirror: a titled span carrying the whole path. */
+export function PathLabel(props: {
+  readonly path: string
+  readonly className?: string
+}): ReactNode {
+  return createElement(
+    'span',
+    { className: props.className, title: props.path, 'data-path-label': true },
+    props.path,
+  )
+}
+
+/** Minimal `Modal` mirror: closed renders nothing; open portals a labeled dialog. */
+export function Modal(props: {
+  readonly open: boolean
+  readonly onClose: () => void
+  readonly title: string
+  readonly description?: string
+  readonly closeLabel: string
+  readonly footer?: ReactNode
+  readonly children?: ReactNode
+}): ReactNode {
+  if (!props.open) return null
+  return createPortal(
+    createElement(
+      'div',
+      { role: 'dialog', 'aria-label': props.title },
+      createElement('h2', null, props.title),
+      props.description === undefined ? null : createElement('p', null, props.description),
+      props.children,
+      props.footer,
+    ),
+    document.body,
+  )
+}
 
 /** Minimal `MenuItem` mirror (only the fields the panel uses). */
 interface StubMenuItem {
@@ -48,21 +145,52 @@ interface StubMenuItem {
   readonly label: ReactNode
   readonly disabled?: boolean
   readonly danger?: boolean
+  readonly icon?: ReactNode
 }
+
+/** Minimal `MenuEntry` mirror: a row, a hairline, or a heading. */
+type StubMenuEntry =
+  | StubMenuItem
+  | { readonly type: 'separator'; readonly id: string }
+  | { readonly type: 'label'; readonly id: string; readonly text: string }
 
 /**
  * The anchored menu: the anchor renders in place, the open list portals to
- * `document.body` as one button per item — the same observable shape the real
- * `Menu` gives a jsdom test (placement, graceful close, and submenu behavior
- * are visual concerns this stub deliberately drops).
+ * `document.body` with one button per item — the same observable shape the
+ * real `Menu` gives a jsdom test (placement, graceful close, and submenu
+ * behavior are visual concerns this stub deliberately drops).
  */
 export function Menu(props: {
   open: boolean
   anchor: ReactNode
-  items: readonly StubMenuItem[]
+  items: readonly StubMenuEntry[]
+  footer?: readonly StubMenuEntry[]
+  selectedId?: string
   onSelect: (id: string) => void
   onClose: () => void
 }): ReactNode {
+  const entry = (item: StubMenuEntry): ReactNode => {
+    if ('type' in item && item.type === 'separator') {
+      return createElement('hr', { key: item.id, 'data-separator': item.id })
+    }
+    if ('type' in item && item.type === 'label') {
+      return createElement('div', { key: item.id, 'data-menu-label': item.id }, item.text)
+    }
+    const row = item as StubMenuItem
+    return createElement(
+      'button',
+      {
+        key: row.id,
+        type: 'button',
+        disabled: row.disabled === true,
+        'data-danger': row.danger === true ? 'true' : undefined,
+        'data-selected': props.selectedId === row.id ? 'true' : undefined,
+        onClick: () => props.onSelect(row.id),
+      },
+      row.icon,
+      row.label,
+    )
+  }
   return createElement(
     Fragment,
     null,
@@ -72,19 +200,8 @@ export function Menu(props: {
           createElement(
             'div',
             { 'data-menu': 'true' },
-            props.items.map(item =>
-              createElement(
-                'button',
-                {
-                  key: item.id,
-                  type: 'button',
-                  disabled: item.disabled === true,
-                  'data-danger': item.danger === true ? 'true' : undefined,
-                  onClick: () => props.onSelect(item.id),
-                },
-                item.label,
-              ),
-            ),
+            props.items.map(entry),
+            (props.footer ?? []).map(entry),
           ),
           document.body,
         )

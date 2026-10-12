@@ -13,7 +13,7 @@
  *   from endpoint to response type, so the panel cannot silently decode one
  *   endpoint's answer as another's. `reveal` answers with
  *   {@link RevealedView}; root-management endpoints answer with
- *   {@link RootsView}, and browsing returns {@link FilesView} or {@link FilePreview}.
+ *   {@link RootsView}.
  *   The host builds those answers in `command.ts` and the
  *   panel parses them here — one definition, two consumers.
  * - **Runtime validation at the boundary.** The payload arrives from a browser
@@ -35,21 +35,10 @@ import { z } from 'zod'
 export const PANEL_CHANNEL = '/multi-root-workspace'
 
 /** Endpoint names, relative to {@link PANEL_CHANNEL}. */
-export type PanelEndpoint = 'list' | 'add' | 'remove' | 'alias' | 'move' | 'setAccess' | 'reveal' | 'files' | 'readFile'
+export type PanelEndpoint = 'list' | 'add' | 'remove' | 'alias' | 'move' | 'setAccess' | 'reveal'
 
 /** Every endpoint name, for exhaustive iteration in tests and callers. */
-export const PANEL_ENDPOINTS: readonly PanelEndpoint[] = ['list', 'add', 'remove', 'alias', 'move', 'setAccess', 'reveal', 'files', 'readFile']
-
-export interface FilesView {
-  readonly path: string
-  readonly entries: readonly { readonly name: string; readonly type: 'file' | 'directory' | 'other' }[]
-  readonly truncated: boolean
-}
-
-export interface FilePreview {
-  readonly text: string
-  readonly eof: boolean
-}
+export const PANEL_ENDPOINTS: readonly PanelEndpoint[] = ['list', 'add', 'remove', 'alias', 'move', 'setAccess', 'reveal']
 
 /**
  * How one registered root currently stands, as the panel renders it. Kept in
@@ -134,8 +123,6 @@ export interface PanelResponseMap {
   readonly move: RootsView
   readonly setAccess: RootsView
   readonly reveal: RevealedView
-  readonly files: FilesView
-  readonly readFile: FilePreview
 }
 
 /**
@@ -151,7 +138,7 @@ export interface PanelRequest {
   readonly entry?: RootEntryView
   /** Compatibility reference; accepted only when the id is unique. */
   readonly id?: string
-  /** Candidate directory (add), or root-relative browsing path (files/readFile). */
+  /** Candidate directory (add). */
   readonly path?: string
   /** Display alias (add/alias); empty clears it. */
   readonly alias?: string
@@ -240,22 +227,6 @@ const rootsViewSchema = z.object({
 })
 
 const revealedViewSchema = z.object({ revealed: z.string() })
-const filesViewSchema = z.object({
-  path: z.string(),
-  entries: z.array(z.object({ name: z.string().min(1).refine(name => name !== '.' && name !== '..' && !/[\\/]/.test(name) && !name.includes(String.fromCharCode(0))), type: z.enum(['file', 'directory', 'other']) })),
-  truncated: z.boolean(),
-})
-const filePreviewSchema = z.object({ text: z.string(), eof: z.boolean() })
-
-export function parseFilesView(value: unknown): Parsed<FilesView> {
-  const parsed = filesViewSchema.safeParse(value)
-  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, message: firstIssue(parsed.error) }
-}
-
-export function parseFilePreview(value: unknown): Parsed<FilePreview> {
-  const parsed = filePreviewSchema.safeParse(value)
-  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, message: firstIssue(parsed.error) }
-}
 
 const errorViewSchema = z.object({
   code: z.string(),

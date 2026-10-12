@@ -22,7 +22,12 @@
     "emitDeclarationOnly": true,
     "sourceMap": true,
     "rootDir": "src",
-    "outDir": "lib/types"
+    "outDir": "lib/types",
+    "paths": {
+      "@deepseek-ai/dsh-api-remotes/client": [
+        "./src/client/files-tree/client-remote.d.ts"
+      ]
+    }
   },
   "include": [
     "src/client/**/*.ts",

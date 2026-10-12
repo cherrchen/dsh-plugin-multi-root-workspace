@@ -92,7 +92,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 |---|---|---|
 | P1 | Additional Root LSP workspace routing | 后续评审补充；B1 将附加根内文件路由至该仓库 workspaceRoot，保留相对路径的主根 cwd 语义；实现与验证状态见路线账本 |
 | P1 | Windows 内核级多根（pwsh 方言 / ACL） | 第一期就已登记；B2 的受限 PowerShell/PTY 使用 root-set SID 授权；实现与平台验证状态见路线账本 |
-| P1 | `workspace-files`（Client 文件树）多根 confine | 第一期就已登记；B3 按当前会话 scope 浏览附加根，通过现有目录面板提供 lazy tree 与文本 preview；实现与验证状态见路线账本 |
+| P1 | `workspace-files`（Client 文件树）多根 confine | 第一期就已登记；B3 按当前会话 scope 浏览附加根，Files 页签根选择器选中附加根时以逐字节复刻的上游 Files 树体接管树区（懒加载、目录 watch 自动刷新、文件点击进宿主 viewer；对话框行内树与私有 `files`/`readFile` 端点已下线，见 [ADR-0015](../decisions/ADR-0015-files-tab-plugin-owned-browsing.md) 与 [ADR-0016](../decisions/ADR-0016-files-tab-native-tree-fork.md)）；实现与验证状态见路线账本 |
 | P2 | Read-only root / per-root / per-tool 权限 | 第一期就已登记；初版附加根与主根同权（§16）。B4 已实现：根记录携带 access（持久化用 `recordedPath` / `readOnlyRecordedPath` 区分，domain v1 不变、降级 fail closed）；`multi-root-scope` 行配置 `toolAccess` 按工具封顶附加根写权限；实现见 [B4–B8 计划](../plans/active/2026-10-11-b4-b8-p2.md) 与 [ADR-0013](../decisions/ADR-0013-per-root-and-per-tool-access.md) |
 | P2 | Mutation 前强制 reclassify | 后续评审补充；避免缓存的 `missing` / `redirected` 状态让 `add` 后立刻 invalid。B5 已实现：每个 mutation 在串行队列内先以存储记录重分类再校验，见 [ADR-0004 修订](../decisions/ADR-0004-root-registry-persistence-and-validation.md) |
 | P2 | Additional Root 数量上限 | 后续评审补充；防止 realpath/stat、sandbox argv 与 prompt 预算随根数量无界增长。B6 已实现：`maxAdditionalRoots` 默认 16、顶 64，超限存量照授只拒新增，见 [ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md) |
@@ -126,7 +126,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 7.12 **provider 冲突 fail closed**：任一外来 provider 占用 `ctx.fs` / `ctx.sandbox`（无论装载顺序）时 `multi-root-providers` 门禁抛错、注册表缺席、scope 恒空，绝不把写权限交给外来实现。
 7.13 **模型可见的授权陈述**：拓扑文案只列可用成员，按 `writable` / `read-only` 分组陈述，声明 session origin 不变、cd/worktree 切换不改变授权、授权变化只约束后续操作与新进程；配置 capped tools 时点名这些工具不能写附加根；Windows 附加 restricted-token partial-enforcement 与读不受其 confine 的说明；read-only 与 danger-full-access 模式不做超出上游语义的承诺。
 8. **失败要响亮**：misconfiguration（非绝对路径、重复 id、patch 行未按预期生效）在装载或首次 resolve 时抛错。
-9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias/排序可用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制。
+9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias/排序可用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制；浏览落点是 Files 页签根选择器（选中附加根以插件自绘树接管树区，头部各控件——刷新、「在应用中打开」——均作用于选中根，`data-*` 钩子失效即静默退化），见 ADR-0015。
 10. **升级韧性**：`package.json` pin dsh 精确版本；仓库 CI 含"升级 smoke"脚本（对上游 demo 行为差异报警）；provider 子类只依赖上游公开方法面（不触碰 TS-private、不做原型替换）。
 11. **e2e**：需求 §22 场景实跑通过（跨 repo 读写、双 repo 测试、git diff），headless + web 双 profile —— 由 `pnpm smoke:journey` 覆盖：web 组合进程内启动 + 命令注册根 + 真实 agent 轮次，headless 组合以真实 CLI 子进程跑一次性任务，模型由内联的脚本化 OpenAI 兼容端点提供（无凭据）。受限 bash 在无法嵌套内核沙箱的宿主上显式 skip 并打印原因。
 

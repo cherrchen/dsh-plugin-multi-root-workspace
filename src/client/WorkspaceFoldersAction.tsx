@@ -16,27 +16,32 @@
  * native look — sidebar trigger, modal card, capsule buttons — in both themes
  * without naming a single color here (see ADR-0006).
  *
+ * The dialog itself is also exported: the Files-tab root switcher opens the
+ * same manager through its trailing menu item instead of carrying a second
+ * dialog.
+ *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/WorkspaceFoldersAction
  */
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
-import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
+  IconAccessReadOnly,
+  IconAccessReadWrite,
   IconChevronDown,
   IconChevronUp,
   IconCopy,
   IconEdit,
   IconEllipsis,
-  IconFolderClose,
   IconFolderOpen,
   IconPlus,
   IconRefresh,
+  IconSettings,
   IconTrash,
 } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { Key } from './locales.ts'
 import type { RootEntryView, RootState, RootView, RootsView } from '../contract.ts'
-import { RootFileTree } from './RootFileTree.tsx'
 
 /** Translate one key of this plugin's namespace. */
 export type Translate = (key: Key, params?: Record<string, unknown>) => string
@@ -57,7 +62,7 @@ export interface WorkspaceFoldersActionProps {
   readonly subscribeSession?: (listener: () => void) => () => void
   /** Whether the sidebar renders wide content (`false` in the icon rail). */
   readonly wide?: boolean
-  /** Compact launcher in the upstream Files tab's public actions slot. */
+  /** Icon-only launcher in the upstream Files tab's public actions slot. */
   readonly compact?: boolean
 }
 
@@ -126,8 +131,35 @@ function CloseIcon(): ReactNode {
   )
 }
 
+/**
+ * One path that copies itself: text that paints like the surrounding copy
+ * and reveals a trailing icon on hover — clicking the text or the icon
+ * copies the same canonical path. The accessible name swaps to "copied"
+ * for the feedback window, the icon button's old recipe. Shared by the
+ * primary row, the current-directory line, and every additional root.
+ */
+function PathCopy(props: {
+  readonly path: string
+  readonly copied: boolean
+  readonly onCopy: () => void
+  readonly t: Translate
+}): ReactNode {
+  return (
+    <button
+      type="button"
+      className="mrfw-rootPath mrfw-pathCopy"
+      title={props.path}
+      aria-label={props.copied ? props.t('panel.copied') : props.t('panel.copyPath')}
+      onClick={props.onCopy}
+    >
+      {props.path}
+      <span className="mrfw-pathCopyIcon" aria-hidden="true"><IconCopy size={14} /></span>
+    </button>
+  )
+}
+
 /** The locale key for one reported root state. */
-function stateKey(state: RootState): Key {
+export function stateKey(state: RootState): Key {
   switch (state) {
     case 'available': return 'state.available'
     case 'missing': return 'state.missing'
@@ -137,7 +169,7 @@ function stateKey(state: RootState): Key {
 }
 
 /** The final segment of an absolute path, on either platform separator. */
-function basename(path: string): string {
+export function basename(path: string): string {
   const segments = path.split(/[\\/]/).filter(segment => segment !== '')
   return segments[segments.length - 1] ?? path
 }
@@ -146,7 +178,7 @@ function basename(path: string): string {
  * The primary text of one row: the stored alias when set, otherwise the
  * directory's own name — the display the registration was added with.
  */
-function displayNameOf(root: RootView): string {
+export function displayNameOf(root: RootView): string {
   return root.alias ?? basename(root.path)
 }
 
@@ -162,14 +194,15 @@ export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): Reac
       <div className={props.compact ? 'mrfw-fileLauncher' : rail ? 'mrfw-triggerRow mrfw-railRow' : 'mrfw-triggerRow'}>
         <button
           type="button"
-          className={props.compact ? 'mrfw-btn mrfw-btnGhost' : rail ? 'mrfw-trigger mrfw-triggerRail' : 'mrfw-trigger'}
+          className={props.compact ? 'mrfw-btn mrfw-btnGhost mrfw-iconBtn' : rail ? 'mrfw-trigger mrfw-triggerRail' : 'mrfw-trigger'}
           title={props.t('action.title')}
+          aria-label={props.compact === true ? props.t('action.title') : undefined}
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => { setOpen(value => !value) }}
         >
-          <span className="mrfw-triggerIcon" aria-hidden="true"><IconFolderClose size={rail ? 18 : 16} /></span>
-          {rail ? null : <span className="mrfw-triggerLabel">{props.t('action.label')}</span>}
+          <span className="mrfw-triggerIcon" aria-hidden="true"><IconSettings size={rail ? 18 : 16} /></span>
+          {rail || props.compact === true ? null : <span className="mrfw-triggerLabel">{props.t('action.label')}</span>}
         </button>
       </div>
       {open ? <WorkspaceFoldersDialog {...props} onClose={() => { setOpen(false) }} /> : null}
@@ -186,7 +219,8 @@ interface DialogState {
   readonly noSession: boolean
 }
 
-function entryOf(root: RootView): RootEntryView {
+/** The exact row reference the browsing endpoints and mutations carry. */
+export function entryOf(root: RootView): RootEntryView {
   return { ordinal: root.ordinal, id: root.id, path: root.path, addedAt: root.addedAt }
 }
 
@@ -203,7 +237,7 @@ function rowKey(root: RootView): string {
  * (see `contract.ts`). Treating a reveal answer as a roots view is exactly the
  * contract mismatch this split removes.
  */
-function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: () => void }): ReactNode {
+export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: () => void }): ReactNode {
   const { panel, t } = props
   const [state, setState] = useState<DialogState>({
     view: undefined,
@@ -221,6 +255,9 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
    * to it. Only a chosen level may travel in the request.
    */
   const [accessChosen, setAccessChosen] = useState(false)
+  const [accessMenuOpen, setAccessMenuOpen] = useState(false)
+  /** The read-only root waiting on the upgrade confirmation's red button. */
+  const [upgradeFor, setUpgradeFor] = useState<RootView | undefined>(undefined)
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
@@ -229,9 +266,12 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   const requestEpoch = useRef(0)
   const mounted = useRef(true)
 
-  useEffect(() => () => {
-    mounted.current = false
-    requestEpoch.current += 1
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      requestEpoch.current += 1
+    }
   }, [])
 
   const requestBase = useCallback((): { sessionId: string } | undefined => {
@@ -244,14 +284,21 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   useEffect(() => { dialogRef.current?.focus() }, [])
   const onDialogKeyDown = (event: ReactKeyboardEvent): void => {
     if (event.key === 'Escape') {
-      // A row menu owns Escape while it is open: its own listener closes just
-      // the menu, and this handler must not close the dialog underneath it.
-      if (menuFor !== undefined) return
+      // An open menu or the upgrade confirmation owns Escape: its own
+      // listener closes just that layer, and this handler must not close the
+      // dialog underneath it — the portaled dropdown and Modal bubble their
+      // events through this dialog's React tree too.
+      if (menuFor !== undefined || accessMenuOpen || upgradeFor !== undefined) return
       event.stopPropagation()
       props.onClose()
       return
     }
     if (event.key !== 'Tab') return
+    // While the upgrade confirmation owns the topmost modal, Tab belongs to
+    // its own focus trap. The portaled Modal still bubbles keys through this
+    // dialog's React tree (like Escape above), and trapping here would yank
+    // focus to a control behind the active confirmation.
+    if (upgradeFor !== undefined) return
     const dialog = dialogRef.current
     if (dialog === null) return
     const focusable = Array.from(
@@ -405,10 +452,9 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
     }
   }, [panel, requestBase])
 
-  const copyPath = useCallback(async (root: RootView) => {
+  const copyPath = useCallback(async (key: string, path: string) => {
     try {
-      await navigator.clipboard.writeText(root.path)
-      const key = rowKey(root)
+      await navigator.clipboard.writeText(path)
       setCopiedId(key)
       setState(previous => ({ ...previous, error: undefined }))
       window.setTimeout(() => { setCopiedId(current => (current === key ? undefined : current)) }, 1500)
@@ -433,7 +479,12 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
   // The host refuses the add as `root-limit-reached` anyway; disabling here is
   // what makes the refusal explain itself before the operator clicks.
   const atLimit = state.view !== undefined && state.view.count >= state.view.limit
+  const IconAccessTrigger = addAccess === 'read-only' ? IconAccessReadOnly : IconAccessReadWrite
+  // Captured as consts: narrowing does not reach the onCopy closures below.
+  const primaryPath = state.view?.primaryRoot
+  const cwdPath = state.view?.effectiveCwd
   return (
+    <>
     <div className="mrfw-overlay" role="presentation">
       <div
         className="mrfw-mask"
@@ -486,20 +537,36 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
             <div className="mrfw-row mrfw-rowBare">
               <div className="mrfw-rootText">
                 <span className="mrfw-rootName">
-                  {state.view === undefined ? '…' : (state.view.primaryName ?? basename(state.view.primaryRoot))}
+                  <span className="mrfw-rootNameText">
+                    {state.view === undefined ? '…' : (state.view.primaryName ?? basename(state.view.primaryRoot))}
+                  </span>
                 </span>
-                <span className="mrfw-rootPath">{state.view?.primaryRoot ?? '…'}</span>
+                {primaryPath === undefined
+                  ? <span className="mrfw-rootPath">…</span>
+                  : (
+                    <PathCopy
+                      path={primaryPath}
+                      copied={copiedId === 'primary'}
+                      onCopy={() => { void copyPath('primary', primaryPath) }}
+                      t={t}
+                    />
+                  )}
               </div>
             </div>
           </section>
 
-          {state.view?.effectiveCwd !== undefined && (
+          {cwdPath !== undefined && (
             <section className="mrfw-section">
               <div className="mrfw-sectionTitleRow">
                 <span className="mrfw-sectionTitle">{t('panel.cwd')}</span>
                 <span className="mrfw-sectionNote">{t('panel.cwdNote')}</span>
               </div>
-              <span className="mrfw-rootPath">{state.view.effectiveCwd}</span>
+              <PathCopy
+                path={cwdPath}
+                copied={copiedId === 'cwd'}
+                onCopy={() => { void copyPath('cwd', cwdPath) }}
+                t={t}
+              />
             </section>
           )}
 
@@ -517,12 +584,21 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
               const key = rowKey(root)
               return <div key={key} className="mrfw-row">
                 <div className="mrfw-rootText">
-                  <span className="mrfw-rootName">{displayNameOf(root)}</span>
-                  <span className="mrfw-rootPath">{root.path}</span>
+                  <span className="mrfw-rootName">
+                    <span className="mrfw-rootNameText">{displayNameOf(root)}</span>
+                    {/* The access level rides beside the name as read-only
+                        text; changing it stays behind the row's … menu. */}
+                    <span className="mrfw-accessBadge">
+                      {t(root.access === 'read-only' ? 'access.readOnly' : 'access.readWrite')}
+                    </span>
+                  </span>
+                  <PathCopy
+                    path={root.path}
+                    copied={copiedId === key}
+                    onCopy={() => { void copyPath(key, root.path) }}
+                    t={t}
+                  />
                 </div>
-                <span className="mrfw-accessBadge">
-                  {t(root.access === 'read-only' ? 'access.readOnly' : 'access.readWrite')}
-                </span>
                 {root.state === 'available' ? null : (
                   <span title={root.detail} className="mrfw-stateWarn">
                     {t(stateKey(root.state))}
@@ -536,11 +612,6 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                     label={t('panel.reRegister')}
                   />
                 )}
-                <IconButton
-                  onClick={() => { void copyPath(root) }}
-                  icon={<IconCopy />}
-                  label={copiedId === key ? t('panel.copied') : t('panel.copyPath')}
-                />
                 <IconButton
                   disabled={state.busy}
                   onClick={() => { void reveal(root) }}
@@ -581,8 +652,10 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                     if (id === 'access') {
                       const access = root.access === 'read-only' ? 'read-write' : 'read-only'
                       // Upgrading widens what the agent may modify, so it is
-                      // the one access change that asks first.
-                      if (access === 'read-write' && !window.confirm(t('panel.accessUpgradeConfirm'))) return
+                      // the one access change that asks first — through the
+                      // confirmation layered over this dialog, not the
+                      // browser's window.confirm.
+                      if (access === 'read-write') { setUpgradeFor(root); return }
                       void mutate('setAccess', { entry: entryOf(root), access })
                     }
                     if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
@@ -614,7 +687,6 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                     <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
                   </span>
                 ) : null}
-                {root.state === 'available' && panel !== undefined && props.sessionId !== undefined && <RootFileTree panel={panel} entry={entryOf(root)} sessionId={props.sessionId} t={t} />}
               </div>
             })}
           </section>
@@ -641,19 +713,57 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
               onChange={event => { setManualPath(event.target.value) }}
               onKeyDown={event => { if (event.key === 'Enter') void addManualPath() }}
             />
-            <select
-              className="mrfw-input mrfw-accessSelect"
-              value={addAccess}
-              disabled={state.busy || atLimit}
-              aria-label={t('panel.accessLabel')}
-              onChange={event => {
-                setAccessChosen(true)
-                setAddAccess(event.target.value === 'read-only' ? 'read-only' : 'read-write')
+            {/* The access picker is the host's own anchored menu — the same
+                dropdown kit the root switcher and the row menus use — not a
+                native select. Only an explicit selection marks the level
+                chosen, so the displayed default still travels in no request
+                (accessChosen keeps its meaning). Opens upward: the row sits
+                at the dialog's bottom edge. */}
+            <Menu
+              open={accessMenuOpen}
+              onClose={() => { setAccessMenuOpen(false) }}
+              className="mrfw-accessSelect"
+              items={[
+                {
+                  id: 'read-write',
+                  label: t('access.readWrite'),
+                  icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />,
+                },
+                {
+                  id: 'read-only',
+                  label: t('access.readOnly'),
+                  icon: IconAccessReadOnly === undefined ? undefined : <IconAccessReadOnly />,
+                },
+              ]}
+              selectedId={addAccess}
+              onSelect={(id) => {
+                setAccessMenuOpen(false)
+                if (id === 'read-write' || id === 'read-only') {
+                  setAccessChosen(true)
+                  setAddAccess(id)
+                }
               }}
-            >
-              <option value="read-write">{t('access.readWrite')}</option>
-              <option value="read-only">{t('access.readOnly')}</option>
-            </select>
+              portal
+              side="top"
+              align="end"
+              closeOnPointerLeave
+              anchor={(
+                <button
+                  type="button"
+                  className="mrfw-btn mrfw-btnOutline mrfw-accessTrigger"
+                  title={t('panel.accessLabel')}
+                  aria-label={t('panel.accessLabel')}
+                  aria-haspopup="menu"
+                  aria-expanded={accessMenuOpen}
+                  disabled={state.busy || atLimit}
+                  onClick={() => { setAccessMenuOpen(open => !open) }}
+                >
+                  {IconAccessTrigger === undefined ? null : <IconAccessTrigger />}
+                  {t(addAccess === 'read-only' ? 'access.readOnly' : 'access.readWrite')}
+                  {accessMenuOpen ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
+                </button>
+              )}
+            />
             <Action
               onClick={() => { void addManualPath() }}
               disabled={state.busy || atLimit || manualPath.trim() === ''}
@@ -669,6 +779,35 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
         </div>
       </div>
     </div>
+    {/* The write-access grant asks first: a host-modal confirmation layered
+        over this dialog — cancel or a mask click dismisses, the red button
+        commits the setAccess mutation. Downgrades skip this entirely. */}
+    <Modal
+      open={upgradeFor !== undefined}
+      onClose={() => { setUpgradeFor(undefined) }}
+      title={t('panel.accessUpgradeTitle')}
+      description={t('panel.accessUpgradeConfirm')}
+      closeLabel={t('panel.close')}
+      footer={(
+        <>
+          <Action onClick={() => { setUpgradeFor(undefined) }}>{t('panel.aliasCancel')}</Action>
+          <Action
+            variant="danger"
+            disabled={state.busy}
+            onClick={() => {
+              const pending = upgradeFor
+              setUpgradeFor(undefined)
+              if (pending !== undefined) {
+                void mutate('setAccess', { entry: entryOf(pending), access: 'read-write' })
+              }
+            }}
+          >
+            {t('panel.accessUpgradeDo')}
+          </Action>
+        </>
+      )}
+    />
+    </>
   )
 }
 

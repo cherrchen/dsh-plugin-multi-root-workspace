@@ -49,6 +49,7 @@ completed:
 - [2026-09-15-panel-session-derived-authority.md](./completed/2026-09-15-panel-session-derived-authority.md) — `v0.1.1` batch H2: panel primary root derived from the host session, the client `primaryRoot` field removed (implemented 2026-09-15, released with `v0.1.1`).
 - [2026-09-15-dsh-compat-contract.md](./completed/2026-09-15-dsh-compat-contract.md) — `v0.1.1` batch H3 + H4 Phase 1: DSH compatibility becomes a code contract enforced at startup, bringing `0.1.6-alpha.1` and top-level additional-root instruction injection in with it (implemented 2026-09-15, released with `v0.1.1`).
 - [2026-09-15-v0.1.1-review-rework.md](./completed/2026-09-15-v0.1.1-review-rework.md) — pre-release rework for PR #1 on the `v0.1.1` batch (2 P1 + 3 P2 findings): authority teardown order (drain → close → release), intermediate-directory instructions becoming reachable, `warn` relaxing `unsupported` only, both optional peers loaded on demand, and absence separated from evaluation failure (implemented 2026-09-15, released with `v0.1.1`).
+- [2026-10-12-files-header-root-browsing.md](./completed/2026-10-12-files-header-root-browsing.md) (Chinese) — Files-header root browsing: P1 moved an icon-only gear launcher ahead of reload, P2 upgraded it to a root switcher whose portal takes over the tree area, P3–P10 were visual-review fixes, and P11 replaced the self-drawn tree with a verbatim fork of upstream's Files tree (`src/client/files-tree/`, retiring the private `files`/`readFile` endpoints; implemented 2026-10-12, unreleased; see ADR-0015).
 
 ### Batch Numbering
 

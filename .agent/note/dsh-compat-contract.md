@@ -86,7 +86,7 @@ await mountCompat(ctx)
 | `src/compat/client-session.ts` | 当前会话：`list.current`（0.1.5 / 0.1.6-alpha.1）→ 目录行 `retainedBy.mainView > 0`（0.1.6-alpha.2 与 0.1.7-alpha.1 至 0.1.7-rc.2；0.1.7 挪走了别的目录字段，主视图谓词没变） |
 | `src/compat/llm-message.ts` | session format 3 及更早投 `{ kind: 'plugin', plugin, form: 'instructions' }`；format 4（`0.1.7` 的 `SESSION_FORMAT_VERSION`）拒绝 `kind: 'plugin'`，改投 `{ kind: 'multi-root-workspace', plugin, form: 'instructions' }`。探针是 session 包导出的格式常量，**不是** renderer 名字——0.1.6 已经改名却仍接受 `plugin`。不要用 `agent-instructions`：上游把那个 kind 的 `changes` 当自己的协调权威 |
 | `src/compat/tool-result.ts` | 失败位：0.1.5/0.1.6 在 `content[0].isError`，0.1.7 在消息自身的 `isError`。`event.data.error` 两边都还在 |
-| `src/compat/client-icons.ts` | 面板图标：0.1.5/0.1.6 是像素名（`IconFolderClose16`），0.1.7 是线宽名。上游 UI 用的是 Regular，不是 Medium。先取像素名，没有再取 Regular |
+| `src/compat/client-icons.ts` | 面板图标：0.1.5/0.1.6 是像素名（`IconFolderClose16`），0.1.7 是线宽名。上游 UI 用的是 Regular，不是 Medium。先取像素名，没有再取 Regular。纯装饰字形走 `maybeIcon` 软探测（缺失降级为无图标，不抛错）——权限字形 `IconWorkspaceWrite`/`IconReadOnly` 仅 0.1.7+ 存在 |
 | `scripts/lib/profile-boot.mjs` | `healProfilesModuleFallback` 是函数就调用它；否则 `createRuntimeResolution`，并在 `boot` 的 prepare 里 `hostCtx.plugin(PluginPackages, { resolution })`。0.1.7 不再导出 heal |
 | `scripts/lib/shell-exec.mjs` | `shell.run` 存在就用它；否则 `shell.execute(spec)` 再 `execution.result()`。0.1.7 的 `SandboxBashExecutor` 改了名从 run 到 execute |
 
@@ -188,10 +188,29 @@ Windows 的 Node 不能直接 `execFileSync('npm')` 启动 `npm.cmd`，旧版矩
 
 ## 10. B1–B3 的新接缝
 
-LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述符；不要比较 Cordis 代理函数的引用。旧版 `changes(scope, signal)` 与新版 `changes(scope, path, signal)` 由 `src/compat/workspace-files.ts` 按 arity 适配。Windows 非空 scope 的 runner 必须用整个根集合的 SID，不能把主根 SID 授予附加根，否则移除后仍可写。可选 peer 均纳入混装检查，carrier barrel 不得静态加载这些可选包。完整决策见 [ADR-0011](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md)，各平台验证状态只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
+LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述符；不要比较 Cordis 代理函数的引用。旧版 `changes(scope, signal)` 与新版 `changes(scope, path, signal)` 由 `src/compat/workspace-files.ts` 按 arity 适配。读面 `stat`/`read`/`readBytes` 同样被包装——上游对它们不做 workspace 围限，边界由 `routeWorkspacePath` + `registry.list()` 的「在册未授权」词法检查补齐（拒绝用 `workspace-file/outside-workspace`）；`readBytes` 第三参跨版本形态不同（`WorkspaceByteRange` ↔ `WorkspaceByteReadOptions`），wrapper 保留 range 与其余选项，只在路由时改写 `baseFile`，关联尾路径语义见 [ADR-0011 的读面修订](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md#修订面板-files--readfile-端点下线2026-10-12amendment)。Windows 非空 scope 的 runner 必须用整个根集合的 SID，不能把主根 SID 授予附加根，否则移除后仍可写。可选 peer 均纳入混装检查，carrier barrel 不得静态加载这些可选包。完整决策见 [ADR-0011](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md)，各平台验证状态只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
 
 ## 11. DSH 0.2.1 目录语义
 
 当前开发基线为 `0.2.1-alpha.2` / Cordis `4.0.5-alpha.1`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
 
 升级脚本接受单一 Cordis prerelease 版本，仍输出精确 pin。新的安装期 peer gate 需要在隔离候选 smoke profile 使用精确 allow-version 豁免；只用于升级车道，正式矩阵和生产仍 enforce。当前 package 为 `0.1.5` 且 `v0.1.5` tag 已存在，本迁移不创建 release。
+
+## 12. 浏览器侧的上游 DOM 钩子（升版目检）
+
+`src/client/` 里有两处**不是槽位契约**的上游结构依赖，结构探测管不到它们，只能靠目检：
+
+| 依赖 | 消费方 | 失效表现 |
+| --- | --- | --- |
+| `FilesBody` 扁平 flex header + flex 项上的 `data-files-root` / `data-files-path` / `data-files-reload` | `styles.ts` 的 `:has()` 规则（`.mrfw-rootSwitcher` 接管路径标签位置、隐藏 `[data-files-path]`——选择器自带 `PathLabel`（`.mrfw-switcherPath`）显示选中根完整路径、自带 `.mrfw-switcherReload` 在附加根态顶替原生 reload；`[data-root-kind="additional"]` 时隐藏 `[data-files-body]` 与 `[data-files-reload]`） | 规则停止匹配：上游路径标签恢复显示、与选择器自带 PathLabel 并存（路径出现两次），选择器退回槽内默认位序，仅剩菜单可用——静默退化，功能不坏 |
+| `closest('[data-files-root]')` 命中本 pane | `RootSwitcher.tsx` 的 portal 目标查找 | 找不到祖先即不渲染复刻树，切附加根只改菜单态；原生布局不受影响 |
+| dockkit tabHost 上的 `data-dockkit-content`（值为 tab id） | `RootSwitcher.tsx` 的复刻树 store bucket 键（scroll/展开态记忆） | 属性缺席时退回生成 id——功能不受影响，只是滚动/展开记忆跨接管不保留；属性若改名或挪位，bucket 键与原生 tab 失配 |
+| `ui-open-in-app` 分离按钮锚点上的 `data-open-target="directory"` | 附加根态的隐藏规则（`:not(.mrfw-openSplit)` 保住复刻按钮自身） | 属性改名/移除 → 原生按钮在附加根态露出、点击仍开主根（旧 bug 回归）；选择器失效只影响隐藏，不碰功能 |
+
+⚠️ `data-files-path` 有**双重含义**：表头 `PathLabel` 携带裸值（`"true"`），而**每个树行**（`data-files-entry` 的 `li`）也携带它、值是该行自己的绝对路径。任何想命中表头标签的选择器都必须写 `[data-files-path]:not([data-files-entry])`——不带限定符的 `display:none`/`order` 会作用到整棵原生树（曾真实发生：主根树区全空）。其余三个钩子（`root`/`body`/`reload`）各只出现一次。
+
+提升上游版本时（升级车道跑完、人工验收阶段）必须目检三态：无附加根时 Files 页签是原生观感；选中一个附加根时树区换成逐字节复刻的原生 Files 树（行高/图标/缩进/空态/截断/失败行应与原生逐项一致）、原生 reload 由 header 内的同款 `.mrfw-switcherReload` 顶替、原生 open-in-app 按钮由复刻按钮顶替（点开 chevron 菜单应与原生同款）；切回主根时原生树、reload 与 open-in-app 完整还原。任一项失真先查这五个 `data-*` 属性还在不在对应 flex 项上（`.header` / `.body` 的 class 是 CSS-module hash，不能锚）。退化症状与修法见 [故障排查条目](../../docs/troubleshooting/files-switcher-degraded.md)，决策见 [ADR-0015](../../docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
+
+**files-tree 复刻面**：`src/client/files-tree/` 是上游 `ui-sidebar-files` 树体的逐字节 fork（基线 `d743267388` = `0.2.1-alpha.2`；清单、shim 对照、外壳 delta 与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——`directory-node.ts`/`face.ts`/`store.ts`/`FilesBody.module.css` 与 `FilesBody.tsx` 的行级定义必须字节级一致，许可差异只有外壳函数根源改写与 css specifier 的 `.ts` 后缀；同时检查上游 `locales.ts` 的 `zh` 键集（shim 的 `SidebarFilesKey` 联合须同步）、`workspaceFiles` remote 面与 `data-dockkit-content` 钩子。复刻体类名 `mrfw-ft*`、不携带 `data-files-root`/`data-files-body`（防本插件 `:has()` 隐藏规则误伤）； primitives 探针失败时整棵复刻树不渲染（同型降级，不崩）。**remote 面只能经 `ctx.get` 懒解析**：`remote.workspaceFiles` 是 cordis 嵌套服务，context 代理路径（`remote.workspaceFiles` 或 `ctx['remote.workspaceFiles']`）受 inject 守卫（未声明 fiber 直接抛 `without inject`），而本版 cordis 的 inject 条目全 required（声明会把整行 gate 在可选服务上）——`lazyFilesRemote` 用 `ctx.get('remote')`/`ctx.get('remote.workspaceFiles')` 免守卫直查 store，一切查找失败折叠成 `gateway/internal` 失败行（verbatim `load` 的 `.then` 无 `.catch`，逃逸 rejection 会静默钉死 loading）。**编译面同理钉在 dev-pin**：`0.2.0-rc.2` 之前 `workspaceFiles.changes` 是 2 参（session 级 watch），`tsconfig.client.json` 的 `paths` 把 `@deepseek-ai/dsh-api-remotes/client` 映射到 `client-remote.d.ts`（本地声明拼的是 path-watch 时代的 3 参签名），让 verbatim `face.ts` 在矩阵旧版本上也能过 typecheck——安全前提是 `files.actions` 槽位在旧版不存在、调用永不会执行。
+
+**open-in-app 复刻面**：`src/client/open-in-app/` 是上游 `ui-open-in-app` client 包的逐字节 fork（基线 `d743267388` = `0.2.1-alpha.2`；清单、shim 对照与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——唯一许可差异是 `OpenTargetButton.tsx` 里 css specifier 的 `.ts` 后缀；同时检查上游 `locales.ts` 的 `zh` 键集是否新增（shim 的 `OpenInAppKey` 联合须同步）、`shared.ts` 路由常量是否变化（devDep 版本即出处记录）、`OpenInAppActionInjected` 的 hook 名是否漂移。复刻组件拼写 `*Regular` 图标族：0.1.5/0.1.6 像素名运行时不建 adapter、不渲染按钮（同型降级，不崩）。

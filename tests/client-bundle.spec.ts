@@ -47,9 +47,12 @@ describe('the client bundle artifact', () => {
   it('imports only module-table words, so nothing else needs a shared identity', () => {
     const source = readFileSync(clientPath, 'utf8')
     const required = [...source.matchAll(/require\("([^"]+)"\)/g)].map(match => match[1]).sort()
-    // The primitives word carries the row menu and the icons (ADR-0006); the
-    // web shell seeds it, so it stays external rather than bundled.
-    expect(required).toEqual(['@deepseek-ai/dsh-client-ui-primitives', 'react', 'react/jsx-runtime'])
+    // The primitives word carries the row menu and the icons (ADR-0006),
+    // react-dom carries createPortal for the switcher's tree, client-store
+    // backs the forks' SnapshotStores, and cordis is what the files-tree
+    // fork's inlined typert-protocol (RemoteError) references — the web
+    // shell seeds all of them, so they stay external rather than bundled.
+    expect(required).toEqual(['@deepseek-ai/cordis', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-primitives', 'react', 'react-dom', 'react/jsx-runtime'])
   })
 
   it('inlines its own contract instead of importing the host half', () => {
@@ -57,6 +60,17 @@ describe('the client bundle artifact', () => {
     expect(source).not.toContain(`require("${PACKAGE_NAME}`)
     expect(source).not.toContain('node:fs')
     expect(source).toContain('/multi-root-workspace')
+  })
+
+  it('carries no relative-module specifier anywhere — even quoted in a comment', () => {
+    // The bundle is one self-contained file, so `from './…'` may never
+    // appear in it at all; scripts/check-pack.mjs scans the raw bytes and
+    // reads a comment-quoted specifier as an import the tarball lacks.
+    const source = readFileSync(clientPath, 'utf8')
+    const specifiers = [
+      ...source.matchAll(/(?:import|export)[^'"]*?\bfrom\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g),
+    ].map(match => match[1] ?? match[2] ?? match[3])
+    expect(specifiers.filter(specifier => specifier?.startsWith('.'))).toEqual([])
   })
 
   it('ships every file the runtime reads from the package', () => {

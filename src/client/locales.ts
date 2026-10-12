@@ -14,13 +14,9 @@ export const NS = 'multiRootWorkspace'
 
 /** Chinese copy (the canonical shape). */
 export const zh = {
-  'files.browse': '浏览文件',
-  'files.reload': '刷新文件树',
-  'files.empty': '目录为空',
-  'files.truncated': '条目过多，列表已截断',
-  'files.previewTruncated': '仅显示前 200 行',
   'action.label': '工作区目录',
   'action.title': '管理本会话的附属工作目录',
+  'switcher.manage': '管理工作区目录…',
   'panel.title': '工作区目录',
   'panel.subtitle': '主目录和附加目录遵循当前沙箱模式；workspace-write 可写，read-only 下都不可写。',
   'panel.primary': '主根',
@@ -57,6 +53,8 @@ export const zh = {
   'panel.accessReadOnly': '设为只读',
   'panel.accessReadWrite': '设为读写',
   'panel.accessUpgradeConfirm': '将该目录升级为可写？Agent 将能在其中修改文件。',
+  'panel.accessUpgradeTitle': '升级为可写权限',
+  'panel.accessUpgradeDo': '升级',
   'state.available': '可写',
   'state.missing': '目录不存在，暂不授予',
   'state.redirected': '登记目录已被替换（现在指向别处），暂不授予',
@@ -89,13 +87,9 @@ export type Key = keyof typeof zh
 
 /** English copy, pinned to the Chinese key set. */
 export const en = {
-  'files.browse': 'Browse files',
-  'files.reload': 'Refresh files',
-  'files.empty': 'Empty directory',
-  'files.truncated': 'More entries were omitted',
-  'files.previewTruncated': 'Showing the first 200 lines',
   'action.label': 'Folders',
   'action.title': 'Manage this session\'s secondary working directories',
+  'switcher.manage': 'Manage workspace folders…',
   'panel.title': 'Workspace folders',
   'panel.subtitle': 'The primary and additional folders follow the current sandbox mode: writable in workspace-write and read-only in read-only.',
   'panel.primary': 'Primary root',
@@ -132,6 +126,8 @@ export const en = {
   'panel.accessReadOnly': 'Make read-only',
   'panel.accessReadWrite': 'Make read-write',
   'panel.accessUpgradeConfirm': 'Grant write access to this folder? The agent will be able to modify files in it.',
+  'panel.accessUpgradeTitle': 'Grant write access',
+  'panel.accessUpgradeDo': 'Upgrade',
   'state.available': 'Writable',
   'state.missing': 'Directory is absent; not granted',
   'state.redirected': 'Registration was replaced (it now points elsewhere); not granted',

@@ -12,7 +12,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createElement } from 'react'
+import { createElement, StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PANEL_CHANNEL, type PanelRequest, type RevealedView, type RootView, type RootsView } from '../src/contract.ts'
@@ -208,8 +208,9 @@ function mount(withFilesActions = false): Harness {
  * bare function as a child.
  * @param harness - the mounted harness whose registration to render.
  */
-function renderPanel(harness: Harness): void {
-  render(createElement(harness.registrations[0]!.component as never))
+function renderPanel(harness: Harness, strictMode = false): void {
+  const panel = createElement(harness.registrations[0]!.component as never)
+  render(strictMode ? createElement(StrictMode, null, panel) : panel)
 }
 
 beforeEach(() => {
@@ -228,7 +229,10 @@ describe('the client entry', () => {
     const registration = harness.registrations.find(item => item.options.name === 'sidebar.right.tab.files.actions')!
     expect(registration).toBeDefined()
     render(createElement(registration.component as never))
-    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    // Icon-only: the accessible name comes from `aria-label`, never from text.
+    const launcher = screen.getByRole('button', { name: /action.title/ })
+    expect(launcher.textContent).toBe('')
+    fireEvent.click(launcher)
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
     expect(harness.calls[0]).toEqual({ channel: PANEL_CHANNEL, endpoint: 'list', payload: { sessionId: 'session-1' } })
   })
@@ -268,6 +272,18 @@ describe('the client entry', () => {
 })
 
 describe('the panel dialog', () => {
+  it('accepts list and mutation results after StrictMode replays mount effects', async () => {
+    const harness = mount()
+    renderPanel(harness, true)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await screen.findByText('/repos/payments')
+    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_B], limit: 16, count: 1 })
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.remove` }))
+    await waitFor(() => { expect(screen.queryByText('/repos/payments')).toBeNull() })
+    expect(harness.calls.some(call => call.endpoint === 'remove')).toBe(true)
+  })
+
   it('reads the roots view for the current session and lists both roots', async () => {
     const harness = mount()
     renderPanel(harness)
@@ -282,6 +298,17 @@ describe('the panel dialog', () => {
     expect(screen.getByText('primary')).toBeTruthy()
     expect(screen.getByText('payments')).toBeTruthy()
     expect(screen.getByText(`${NS}.state.missing`)).toBeTruthy()
+  })
+
+  it('embeds no additional-root file tree inside the dialog', async () => {
+    // Browsing moved to the Files-tab root switcher; the management rows
+    // keep no per-row tree.
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    expect(document.querySelector('.mrfw-ftBody')).toBeNull()
   })
 
   it('keeps legacy host lists usable even with more than the new default limit', async () => {
@@ -440,7 +467,7 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
-    // The access select is untouched, so no level travels: a chosen level is
+    // The access picker is untouched, so no level travels: a chosen level is
     // the only one a request may carry — a displayed default is not a choice.
     expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
       sessionId: 'session-1',
@@ -524,10 +551,11 @@ describe('the panel dialog', () => {
       entry: { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
     })
 
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.copyPath` })[0]!)
+    fireEvent.click(screen.getByTitle('/repos/payments'))
     await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repos/payments') })
-    // The action is an icon button: the success swaps the accessible name.
-    await waitFor(() => { expect(screen.getAllByRole('button', { name: `${NS}.panel.copied` })[0]).toBeTruthy() })
+    // The path region itself is the control: the copy button IS the path
+    // text, and the success swaps its accessible name for the feedback window.
+    await waitFor(() => { expect(screen.getByTitle('/repos/payments').getAttribute('aria-label')).toBe(`${NS}.panel.copied`) })
   })
 
   it('does not report an error when a reveal succeeds', async () => {
@@ -566,7 +594,7 @@ describe('the panel dialog', () => {
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'))
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.copyPath` })[0]!)
+    fireEvent.click(screen.getByTitle('/repos/payments'))
 
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.copy-failed`) })
   })
@@ -608,6 +636,26 @@ describe('the panel dialog', () => {
 
     fireEvent.keyDown(dialog, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('lets the nested upgrade modal keep its own Tab while it is open', async () => {
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
+
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
+    const upgradeDialog = screen.getByRole('dialog', { name: `${NS}.panel.accessUpgradeTitle` })
+
+    // The confirmation's buttons live outside `dialogRef` (the Modal portals
+    // to document.body) but still bubble keys through the dialog's React
+    // tree. A Tab must reach the modal's own focus handling — the parent
+    // trap would otherwise steal focus to a control behind the modal.
+    const modalButton = upgradeDialog.querySelector('button')!
+    modalButton.focus()
+    fireEvent.keyDown(modalButton, { key: 'Tab' })
+    expect(upgradeDialog.contains(document.activeElement)).toBe(true)
   })
 
   it('renders a redirected root as its own state', async () => {
@@ -666,13 +714,27 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
-    // ROOT_A is read-write, ROOT_B is read-only: both carry a badge.
+    // ROOT_A is read-write, ROOT_B is read-only: both carry a badge. The
+    // badge rides inside the name line, next to the display name — not in
+    // the action cluster.
     const badges = () => Array.from(document.querySelectorAll('.mrfw-accessBadge')).map(node => node.textContent)
     expect(badges()).toEqual([`${NS}.access.readWrite`, `${NS}.access.readOnly`])
+    expect(document.querySelectorAll('.mrfw-rootName .mrfw-accessBadge').length).toBe(2)
+
+    // Every path is its own copy control — the primary row's too: a
+    // borderless button painting as text, with the hover-revealed icon inside
+    // it — no standalone copy action anywhere.
+    const pathCopies = Array.from(document.querySelectorAll('.mrfw-pathCopy'))
+    expect(pathCopies.length).toBe(3)
+    expect(pathCopies[0]?.textContent).toContain('/repos/primary')
+    expect(pathCopies[1]?.textContent).toContain('/repos/payments')
+    expect(pathCopies[1]?.querySelector('.mrfw-pathCopyIcon')).toBeTruthy()
 
     // The Add row selector defaults to read-write; choosing read-only goes into
-    // the same `add` request the path does.
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'read-only' } })
+    // the same `add` request the path does. The picker is the host's anchored
+    // Menu — a trigger named by its aria-label, rows named by their text.
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessLabel` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.access.readOnly` }))
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
@@ -719,8 +781,9 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadOnly` }))
-    // A downgrade widens nothing, so it is never confirmed.
+    // A downgrade widens nothing, so it never confirms — not even the modal.
     expect(confirm).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: `${NS}.panel.accessUpgradeTitle` })).toBeNull()
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'setAccess')?.payload).toEqual({
       sessionId: 'session-1',
@@ -731,25 +794,30 @@ describe('the panel dialog', () => {
 
   it('confirms an upgrade to read-write and paints the host-returned view only', async () => {
     const harness = mount()
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const confirm = vi.spyOn(window, 'confirm')
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
 
-    // ROOT_B is read-only: upgrading it is a grant, so it asks first.
+    // ROOT_B is read-only: upgrading it is a grant, so it asks first — in a
+    // dialog layered on this one, never through window.confirm.
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
-    expect(confirm).toHaveBeenCalled()
-    // Declined: no channel call at all.
+    expect(confirm).not.toHaveBeenCalled()
+    const upgradeDialog = screen.getByRole('dialog', { name: `${NS}.panel.accessUpgradeTitle` })
+    expect(upgradeDialog).toBeTruthy()
+    // Cancelled: the layer closes and no channel call at all.
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.aliasCancel` }))
+    await waitFor(() => { expect(screen.queryByRole('dialog', { name: `${NS}.panel.accessUpgradeTitle` })).toBeNull() })
     expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(false)
 
-    confirm.mockReturnValue(true)
     // The host answers a view where B is now writable; the panel must paint
     // THAT answer, not an optimistic local flip.
     const upgradedB: RootView = { ...ROOT_B, access: 'read-write', state: 'available' }
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
     harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_A, upgradedB], limit: 16, count: 2 })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessUpgradeDo` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'setAccess')?.payload).toEqual({
       sessionId: 'session-1',
@@ -764,7 +832,6 @@ describe('the panel dialog', () => {
 
   it('localizes a refused upgrade instead of flipping the badge', async () => {
     const harness = mount()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
@@ -772,6 +839,7 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
     harness.setFailure({ code: 'root-unavailable', message: 'host prose' })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessUpgradeDo` }))
 
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.root-unavailable`) })
     // The badge still says what the last host view said.
@@ -820,6 +888,13 @@ it('displays effective cwd separately from the stable primary root', async () =>
   expect(screen.getByText('/repos/primary')).toBeDefined()
   expect(screen.getByText(`${NS}.panel.cwdNote`)).toBeDefined()
   expect(harness.calls[0]?.payload).toEqual({ sessionId: 'session-1' })
+
+  // Both the primary path and the current-directory path are copy controls
+  // of the same recipe as the additional roots'.
+  fireEvent.click(screen.getByTitle('/unregistered/current'))
+  await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/unregistered/current') })
+  fireEvent.click(screen.getByTitle('/repos/primary'))
+  await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repos/primary') })
 })
 
 it('ignores a response belonging to the previous session after catalog selection changes', async () => {

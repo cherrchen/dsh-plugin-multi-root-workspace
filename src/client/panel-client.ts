@@ -24,8 +24,6 @@ import {
   parseErrorView,
   parseRevealedView,
   parseRootsView,
-  parseFilesView,
-  parseFilePreview,
   type PanelEndpoint,
   type PanelRequest,
   type PanelResponseMap,
@@ -72,8 +70,7 @@ export interface PanelClient {
    * @param endpoint - the endpoint name; it also selects the response type.
    * @param payload - the request fields for that endpoint (the endpoint name
    *   travels as the RPC method, so it is not repeated in the payload).
-   * @param signal - optional cancellation; aborting rejects the call and
-   *   lets the host drop its in-flight `files` / `readFile` work.
+   * @param signal - optional cancellation; aborting rejects the call.
    * @returns the host's value, in the shape the endpoint promises.
    * @throws {PanelError} when the host answered with a failure, or with a value
    *   that is not what this endpoint promises.
@@ -118,9 +115,7 @@ export function createPanelClient(connection: ConnectionHandle): PanelClient {
  * @throws {PanelError} `panel/bad-response` when the value is not that shape.
  */
 function expectShape<E extends PanelEndpoint>(endpoint: E, value: unknown): PanelResponseMap[E] {
-  const parsed = endpoint === 'reveal' ? parseRevealedView(value)
-    : endpoint === 'files' ? parseFilesView(value)
-    : endpoint === 'readFile' ? parseFilePreview(value) : parseRootsView(value)
+  const parsed = endpoint === 'reveal' ? parseRevealedView(value) : parseRootsView(value)
   if (!parsed.ok) throw new PanelError('panel/bad-response', parsed.message)
   return parsed.value as PanelResponseMap[E]
 }

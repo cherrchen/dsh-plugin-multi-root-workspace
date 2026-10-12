@@ -52,6 +52,29 @@ export function selectIcon(module: IconModule, names: readonly string[]): PanelI
   )
 }
 
+/**
+ * The same by-name probe for a decorative glyph a release may simply not
+ * carry: absence degrades to no icon, not to a boot error. Required icons go
+ * through `selectIcon` and fail loud; optional ones go through here.
+ */
+export function maybeIcon(names: readonly string[]): PanelIcon | undefined {
+  for (const name of names) {
+    const found = installed[name]
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/**
+ * The same by-name probe for a whole component a release may not carry:
+ * `PathLabel` arrived in `0.1.7-alpha.1`, so pixel-era runtimes degrade to a
+ * plain span where the header invites one. Absence degrades to no component,
+ * not to a boot error.
+ */
+export function maybeComponent<T>(names: readonly string[]): T | undefined {
+  return maybeIcon(names) as T | undefined
+}
+
 /** Resolved once, against the installed module. */
 function icon(pixelName: string, regularName: string): PanelIcon {
   return selectIcon(installed, [pixelName, regularName])
@@ -66,4 +89,10 @@ export const IconFolderClose = icon('IconFolderClose16', 'IconFolderCloseRegular
 export const IconFolderOpen = icon('IconFolderOpenOutline16', 'IconFolderOpenOutlineRegular')
 export const IconPlus = icon('IconPlusOutline16', 'IconPlusOutlineRegular')
 export const IconRefresh = icon('IconRefreshOutline16', 'IconRefreshOutlineRegular')
+export const IconSettings = icon('IconSettingsOutline16', 'IconSettingsOutlineRegular')
 export const IconTrash = icon('IconTrashOutline16', 'IconTrashOutlineRegular')
+
+// The permission glyphs exist only from 0.1.7-alpha.1 on; earlier releases
+// render the access picker's menu rows — and its trigger — without icons.
+export const IconAccessReadWrite = maybeIcon(['IconWorkspaceWriteRegular'])
+export const IconAccessReadOnly = maybeIcon(['IconReadOnlyRegular'])
