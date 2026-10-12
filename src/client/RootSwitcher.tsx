@@ -14,12 +14,16 @@
  * - The stylesheet rules: while `.mrfw-rootSwitcher` exists inside a
  *   `[data-files-root]` pane the upstream `data-files-path` is hidden and the
  *   switcher takes its flex position; while the switcher carries
- *   `data-root-kind="additional"` the native `data-files-body` and
- *   `data-files-reload` hide too (the reload refreshes the very tree that is
- *   no longer visible — the header gets a `.mrfw-switcherReload` replacement
- *   that re-keys the portaled tree instead). Upstream changing that DOM
- *   shape simply stops the selectors from matching — the native header
- *   keeps working and the switcher is just another actions occupant.
+ *   `data-root-kind="additional"` the native `data-files-body`,
+ *   `data-files-reload`, and `data-open-target="directory"` split button
+ *   hide too (the reload refreshes the very tree that is no longer
+ *   visible, and the native open-in-app button only ever receives the
+ *   primary root through its slot props — the header gets a
+ *   `.mrfw-switcherReload` replacement and the plugin's verbatim fork of
+ *   the open-in-app control, pointed at the selected root). Upstream
+ *   changing that DOM shape simply stops the selectors from matching — the
+ *   native header keeps working and the switcher is just another actions
+ *   occupant.
  * - `closest('[data-files-root]')` from the switcher's own element locates
  *   the pane the self-drawn tree is portaled into, as a sibling of
  *   `data-files-body`. No match → no portal: the component keeps working as
@@ -38,6 +42,7 @@ import { Menu, PathLabel, type MenuEntry } from '@deepseek-ai/dsh-client-ui-prim
 import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings } from '../compat/client-icons.ts'
 import type { RootsView, RootView } from '../contract.ts'
 import { RootFileTree } from './RootFileTree.tsx'
+import { OpenInAppAction, type OpenInAppAdapter } from './open-in-app/adapter.tsx'
 import {
   basename,
   displayNameOf,
@@ -51,6 +56,12 @@ import {
 export interface RootSwitcherProps extends Omit<WorkspaceFoldersActionProps, 'compact' | 'wide'> {
   /** This pane's workspace root, carried by the slot owner's `absolutePath`. */
   readonly primaryPath: string
+  /**
+   * The forked open-in-app control's shared props, or `undefined` where the
+   * fork cannot render (an undefined adapter is upstream's own "no button"
+   * state, so the switcher just draws nothing there too).
+   */
+  readonly openInApp?: OpenInAppAdapter | undefined
 }
 
 /** `sessionId` fallback for compositions that carry no session service. */
@@ -211,6 +222,16 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
           >
             <IconRefresh size={15} />
           </button>
+        ) : null}
+        {/* The takeover hides the native open-in-app split button (its slot
+            props only ever carry the primary root), so the header gets the
+            plugin's verbatim fork of that same control, pointed at the
+            selected additional root — same component, same dictionary, same
+            persisted app choice, same routes. Rendered under exactly the
+            hide rule's condition; undefined adapter means no button, just
+            like upstream's own "no apps" absence. */}
+        {treeVisible && props.openInApp !== undefined ? (
+          <OpenInAppAction {...props.openInApp} absolutePath={triggerPath} />
         ) : null}
       </span>
       {treeVisible

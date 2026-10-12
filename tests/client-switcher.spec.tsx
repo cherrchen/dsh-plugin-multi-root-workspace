@@ -14,7 +14,7 @@
 
 import type { ReactElement } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from '../src/contract.ts'
 import * as client from '../src/client/index.ts'
 import { NS } from '../src/client/locales.ts'
@@ -120,8 +120,31 @@ function mount(withConnection = true): Harness {
 /** The pane fixtures this suite appended to `document.body`. */
 const appended: HTMLElement[] = []
 
+/** One fetch the open-in-app fork issued (verb, url, decoded JSON body). */
+interface FetchCall {
+  readonly method: string
+  readonly url: string
+  readonly body?: unknown
+}
+
+/** Stub the open-in-app host routes the fork's controller fetches. */
+function stubOpenInApp(apps: readonly string[] = ['finder', 'vscode']): FetchCall[] {
+  const calls: FetchCall[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const body = init?.body === undefined ? undefined : JSON.parse(String(init.body)) as unknown
+    calls.push({ method: init?.method ?? 'GET', url, ...(body === undefined ? {} : { body }) })
+    if (url === 'open-in-app/apps') {
+      return new Response(JSON.stringify({ apps }), { status: 200 })
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200 })
+  }))
+  return calls
+}
+
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
   for (const element of appended.splice(0)) element.remove()
 })
 
@@ -344,5 +367,85 @@ describe('the Files-tab root switcher', () => {
     const launcher = screen.getByRole('button', { name: /action.title/ })
     expect(launcher.closest('.mrfw-fileLauncher')).not.toBeNull()
     expect(launcher.textContent).toBe('')
+  })
+})
+
+describe('the forked open-in-app control', () => {
+  it('opens the selected additional root, never the primary one', async () => {
+    const fetchCalls = stubOpenInApp()
+    const harness = mount()
+    renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    // Primary selection: the native button keeps the spot; the fork draws
+    // nothing of its own — exactly upstream's presence, not a duplicate.
+    expect(document.querySelector('[data-open-target="directory"]')).toBeNull()
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+
+    // The fork is the same control: the data-open-target split button,
+    // sitting inside the switcher where the native one was hidden.
+    const split = await waitFor(() => {
+      const found = document.querySelector('.mrfw-rootSwitcher [data-open-target="directory"]')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(split.classList.contains('mrfw-openSplit')).toBe(true)
+    expect(fetchCalls.some(call => call.url === 'open-in-app/apps')).toBe(true)
+
+    // The main half launches the preferred app on the SELECTED root —
+    // /repos/payments, not the pane's /repos/primary.
+    const main = split.querySelector<HTMLElement>('.mrfw-openMain')!
+    fireEvent.click(main)
+    await waitFor(() => {
+      expect(fetchCalls.some(call => call.url === 'open-in-app/open'
+        && call.method === 'POST'
+        && (call.body as { app?: string; path?: string }).path === '/repos/payments')).toBe(true)
+    })
+    const open = fetchCalls.find(call => call.url === 'open-in-app/open')!
+    expect((open.body as { app: string }).app).toBe('finder')
+    expect(fetchCalls.every(call => (call.body as { path?: string } | undefined)?.path !== '/repos/primary')).toBe(true)
+  })
+
+  it('lists the installed applications in the chevron menu and launches the picked one', async () => {
+    const fetchCalls = stubOpenInApp()
+    const harness = mount()
+    renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    const chevron = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('.mrfw-openChevron')
+      expect(found).not.toBeNull()
+      return found!
+    })
+
+    fireEvent.click(chevron)
+    // Menu rows read upstream's own namespace: open-in-app.app.* keys.
+    const row = await screen.findByRole('button', { name: /app\.vscode/ })
+    fireEvent.click(row)
+    await waitFor(() => {
+      expect(fetchCalls.some(call => call.url === 'open-in-app/open'
+        && (call.body as { app?: string }).app === 'vscode'
+        && (call.body as { path?: string }).path === '/repos/payments')).toBe(true)
+    })
+  })
+
+  it('draws no button when the host reports no applications — upstream same absence', async () => {
+    stubOpenInApp([])
+    const harness = mount()
+    renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    // The component still mounts; with no resolved app it returns null,
+    // byte-identical to upstream's own empty-catalog behavior.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(document.querySelector('[data-open-target="directory"]')).toBeNull()
   })
 })

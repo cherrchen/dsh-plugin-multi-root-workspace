@@ -43,6 +43,34 @@ export const IconRefreshOutline16 = icon('refresh')
 export const IconSettingsOutline16 = icon('settings')
 export const IconTrashOutline16 = icon('trash')
 
+// The *Regular family the open-in-app fork spells verbatim (0.1.7+ names).
+export const IconChevronDownOutlineRegular = icon('chevron-down')
+export const IconRightUpOutlineRegular = icon('right-up')
+export const IconFolderOpenOutlineRegular = icon('folder-open')
+export const IconWarningOutlineRegular = icon('warning')
+
+/** Minimal `Tooltip` mirror: the wrapper renders its content in place. */
+export function Tooltip(props: {
+  readonly label?: ReactNode
+  readonly children?: ReactNode
+}): ReactNode {
+  return createElement(Fragment, null, props.children)
+}
+
+/** Minimal `Toast` mirror: a labeled banner that dismisses itself on click. */
+export function Toast(props: {
+  readonly text: string
+  readonly icon?: ReactNode
+  readonly onDone: () => void
+}): ReactNode {
+  return createElement(
+    'div',
+    { role: 'status', onClick: props.onDone },
+    props.icon,
+    props.text,
+  )
+}
+
 /** Minimal `PathLabel` mirror: a titled span carrying the whole path. */
 export function PathLabel(props: {
   readonly path: string

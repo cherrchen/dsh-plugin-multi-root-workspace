@@ -126,7 +126,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 7.12 **provider 冲突 fail closed**：任一外来 provider 占用 `ctx.fs` / `ctx.sandbox`（无论装载顺序）时 `multi-root-providers` 门禁抛错、注册表缺席、scope 恒空，绝不把写权限交给外来实现。
 7.13 **模型可见的授权陈述**：拓扑文案只列可用成员，按 `writable` / `read-only` 分组陈述，声明 session origin 不变、cd/worktree 切换不改变授权、授权变化只约束后续操作与新进程；配置 capped tools 时点名这些工具不能写附加根；Windows 附加 restricted-token partial-enforcement 与读不受其 confine 的说明；read-only 与 danger-full-access 模式不做超出上游语义的承诺。
 8. **失败要响亮**：misconfiguration（非绝对路径、重复 id、patch 行未按预期生效）在装载或首次 resolve 时抛错。
-9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias/排序可用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制；浏览落点是 Files 页签根选择器（选中附加根以插件自绘树接管树区，`data-files-*` 钩子失效即静默退化），见 ADR-0015。
+9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias/排序可用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制；浏览落点是 Files 页签根选择器（选中附加根以插件自绘树接管树区，头部各控件——刷新、「在应用中打开」——均作用于选中根，`data-*` 钩子失效即静默退化），见 ADR-0015。
 10. **升级韧性**：`package.json` pin dsh 精确版本；仓库 CI 含"升级 smoke"脚本（对上游 demo 行为差异报警）；provider 子类只依赖上游公开方法面（不触碰 TS-private、不做原型替换）。
 11. **e2e**：需求 §22 场景实跑通过（跨 repo 读写、双 repo 测试、git diff），headless + web 双 profile —— 由 `pnpm smoke:journey` 覆盖：web 组合进程内启动 + 命令注册根 + 真实 agent 轮次，headless 组合以真实 CLI 子进程跑一次性任务，模型由内联的脚本化 OpenAI 兼容端点提供（无凭据）。受限 bash 在无法嵌套内核沙箱的宿主上显式 skip 并打印原因。
 

@@ -25,6 +25,7 @@ Accepted
 
 - **触发钮伪装成路径标签入口**：占据路径标签位置的 flex 项（`order: -1` + `flex: 1 1 auto` + `min-width: 0`），上游 `[data-files-path]` 由 `:has()` 守卫规则隐藏。菜单列主根（标注 `panel.primary`、默认选中）与各附加根（`list` RPC 按 `sessionId` 取视图；非 `available` 的根如实标注状态且禁用）；「管理工作区目录…」放在 `Menu` 的 `footer` 区，打开同一个 `WorkspaceFoldersDialog`。触发钮后随一个 `PathLabel`（`mrfw-switcherPath`）显示**选中根**的完整路径——主根即原标签的值，附加根为其 canonical 路径——同一上游组件，观感与原生一致；该元素不携带 `data-files-*`，不会被本插件的隐藏规则误伤。
 - **附加根选中时接管树区**：`closest('[data-files-root]')` 定位本 pane，`createPortal` 把 `RootFileTree`（去掉 Browse 门控、直渲染）挂成 `[data-files-body]` 的兄弟节点；`:has(.mrfw-rootSwitcher[data-root-kind="additional"])` 条件下的规则同时隐藏原生 body 与 reload——reload 刷的是被隐藏的树，留着只会误导。header 原位出现一个同款 `.mrfw-switcherReload` 图标钮（28px tool 配方），点击递增 `RootFileTree` 的 `reload` 计数——每个已挂载目录在现有行下后台重拉、成功即就地换数据，展开态保留、不出现 loading 闪烁（只有根或目录身份变化才清空当前列表）；它与 portal 同生同灭，纯菜单降级时不会出现死按钮。原生树在后台保持 watch，切回主根即恢复。
+- **附加根选中时同时接管 open-in-app 分离按钮**：上游 `ui-open-in-app` 的 files.actions occupant 拿到的 `absolutePath` 永远是主根，且该 prop 由 `FilesBody` 单方注入、插件无法改指——选中附加根时它会把目录发到错误的位置，是缺陷而非可接受偏差。`:has(...[data-root-kind="additional"])` 规则隐藏其 `data-open-target="directory"` 元素，header 原位渲染 `src/client/open-in-app/` 下**逐字节复刻**的上游组件树（`OpenInAppAction`/`OpenTargetButton`/`controller`/`applications`/`open-failure-toast`，来源 `d743267388` = `0.2.1-alpha.2`，唯一改动是 css specifier 追加 `.ts`），`absolutePath` 换成选中根。宿主 HTTP 路由（`GET open-in-app/apps`/`POST open-in-app/open`）不校验路径归属，附加根路径直接可用；locale 直接 `bind('open-in-app')` 消费上游已注册词典，应用选择共享 `dsh.open-in-app.choice` 持久化键——观感、文案、偏好与原生完全一致并自动跟随上游更新。复刻面与同步步骤见 `src/client/open-in-app/FORK.md`。
 - **选中态是组件实例 state**：每个 tab 渲染实例独立、重开复位，不持久化也不跨 tab 共享。
 - **降级是设计的一部分**：无 connection/session → 菜单只列主根（观感等同原生路径标签）；找不到 `[data-files-root]` 祖先 → 不 portal、不隐藏任何上游元素，组件仍是一个可用的菜单；上游改掉 `data-*` 属性 → 全部 `:has()` 规则与 `closest()` 同时失效，退回原生布局。DOM 钩子已列入 `.agent/note/dsh-compat-contract.md` 的升版目检清单。
 - **对话框回归纯管理**：行内 `RootFileTree` 与 `files.browse` 词条移除，浏览统一在 Files 页签进行。
@@ -39,8 +40,11 @@ Accepted
 
 ## Consequences
 
-- Files 页签成为多根浏览入口；选中附加根时树区归本插件渲染，reload 隐藏符合"它服务的是原生树"的事实。
-- 视觉接管依赖四个上游 `data-*` 属性与扁平 flex header——非槽位契约，失效路径全部为静默退化（已写入 compat 目检与故障排查条目）。
+- Files 页签成为多根浏览入口；选中附加根时树区归本插件渲染，reload 与 open-in-app 的隐藏符合"它们服务的是原生树与主根"的事实。
+- 视觉接管依赖五个上游 `data-*` 属性与扁平 flex header——非槽位契约，失效路径全部为静默退化（已写入 compat 目检与故障排查条目）。
+- open-in-app 复刻引入一份**有同步义务的源码副本**（FORK.md 钉住上游 commit、逐字节清单与 diff 步骤）；`*Regular` 图标族缺席的 0.1.x 运行时不建 adapter、不渲染该按钮，与上游"无应用即无按钮"同型降级。
+- `dsh-client-store` 随复刻的 controller 进入 client bundle 的 module-table 依赖集（`createSnapshotStore`），bundle 测试随之钉住；`@deepseek-ai/dsh-host-open-in-app` 仅以 devDependency 形式取 `./shared` 路由常量内联。
+- 上游 `workspace.openLocal` 快捷键仍按 `session.cwd` 打开主根——其解析在上游 apply 闭包内，插件够不着；已接受的已知限制，仅影响键盘路径。
 - `createPortal` 挂进上游容器属非常规手段，但 React 树仍属本插件（事件、状态、卸载自洽），容器缺席时干脆不渲染。
 - `order` 只改视觉序：选择器在 DOM 中仍位于 reload 之后，Tab 键序与读屏序不变——已接受的已知限制。
 - 原生树在隐藏期间继续 watch（小开销，换来瞬时切回）；自绘树保持手动刷新，没有 watch。

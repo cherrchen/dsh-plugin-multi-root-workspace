@@ -204,7 +204,10 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 | --- | --- | --- |
 | `FilesBody` 扁平 flex header + flex 项上的 `data-files-root` / `data-files-path` / `data-files-reload` | `styles.ts` 的 `:has()` 规则（`.mrfw-rootSwitcher` 接管路径标签位置、隐藏 `[data-files-path]`——选择器自带 `PathLabel`（`.mrfw-switcherPath`）显示选中根完整路径、自带 `.mrfw-switcherReload` 在附加根态顶替原生 reload；`[data-root-kind="additional"]` 时隐藏 `[data-files-body]` 与 `[data-files-reload]`） | 规则停止匹配：上游路径标签恢复显示、与选择器自带 PathLabel 并存（路径出现两次），选择器退回槽内默认位序，仅剩菜单可用——静默退化，功能不坏 |
 | `closest('[data-files-root]')` 命中本 pane | `RootSwitcher.tsx` 的 portal 目标查找 | 找不到祖先即不渲染自绘树，切附加根只改菜单态；原生布局不受影响 |
+| `ui-open-in-app` 分离按钮锚点上的 `data-open-target="directory"` | 附加根态的隐藏规则（`:not(.mrfw-openSplit)` 保住复刻按钮自身） | 属性改名/移除 → 原生按钮在附加根态露出、点击仍开主根（旧 bug 回归）；选择器失效只影响隐藏，不碰功能 |
 
 ⚠️ `data-files-path` 有**双重含义**：表头 `PathLabel` 携带裸值（`"true"`），而**每个树行**（`data-files-entry` 的 `li`）也携带它、值是该行自己的绝对路径。任何想命中表头标签的选择器都必须写 `[data-files-path]:not([data-files-entry])`——不带限定符的 `display:none`/`order` 会作用到整棵原生树（曾真实发生：主根树区全空）。其余三个钩子（`root`/`body`/`reload`）各只出现一次。
 
-提升上游版本时（升级车道跑完、人工验收阶段）必须目检三态：无附加根时 Files 页签是原生观感；选中一个附加根时树区换成插件自绘树、原生 reload 由 header 内的同款 `.mrfw-switcherReload` 顶替；切回主根时原生树与 reload 完整还原。任一项失真先查这四个 `data-*` 属性还在不在对应 flex 项上（`.header` / `.body` 的 class 是 CSS-module hash，不能锚）。退化症状与修法见 [故障排查条目](../../docs/troubleshooting/files-switcher-degraded.md)，决策见 [ADR-0015](../../docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
+提升上游版本时（升级车道跑完、人工验收阶段）必须目检三态：无附加根时 Files 页签是原生观感；选中一个附加根时树区换成插件自绘树、原生 reload 由 header 内的同款 `.mrfw-switcherReload` 顶替、原生 open-in-app 按钮由复刻按钮顶替（点开 chevron 菜单应与原生同款）；切回主根时原生树、reload 与 open-in-app 完整还原。任一项失真先查这五个 `data-*` 属性还在不在对应 flex 项上（`.header` / `.body` 的 class 是 CSS-module hash，不能锚）。退化症状与修法见 [故障排查条目](../../docs/troubleshooting/files-switcher-degraded.md)，决策见 [ADR-0015](../../docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
+
+**open-in-app 复刻面**：`src/client/open-in-app/` 是上游 `ui-open-in-app` client 包的逐字节 fork（基线 `d743267388` = `0.2.1-alpha.2`；清单、shim 对照与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——唯一许可差异是 `OpenTargetButton.tsx` 里 css specifier 的 `.ts` 后缀；同时检查上游 `locales.ts` 的 `zh` 键集是否新增（shim 的 `OpenInAppKey` 联合须同步）、`shared.ts` 路由常量是否变化（devDep 版本即出处记录）、`OpenInAppActionInjected` 的 hook 名是否漂移。复刻组件拼写 `*Regular` 图标族：0.1.5/0.1.6 像素名运行时不建 adapter、不渲染按钮（同型降级，不崩）。

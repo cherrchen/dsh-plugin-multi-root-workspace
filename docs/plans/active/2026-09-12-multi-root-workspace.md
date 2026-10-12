@@ -451,9 +451,9 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 
 同时在外层 Agent 沙箱内验证 runner 不可用路径：Seatbelt 返回 `sandbox_apply: Operation not permitted`，journey **55 passed / 0 failed / 2 skipped**，两条腿均明确跳过 shell cap 与命令产物，fs 与模型上下文检查仍执行。此记录只证明本机可用 / 不可用两种路径；本轮跨版本、Linux 与 Windows 结果须以本次推送触发的 CI 为准。
 
-### Files 头部根浏览 P1–P8（2026-10-12，未发布）
+### Files 头部根浏览 P1–P9（2026-10-12，未发布）
 
-实施计划见 [files-header-root-browsing](../completed/2026-10-12-files-header-root-browsing.md)（P1+P2 为原计划两阶段，P3–P8 为目检后追加，每阶段一个提交），决策见 [ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
+实施计划见 [files-header-root-browsing](../completed/2026-10-12-files-header-root-browsing.md)（P1+P2 为原计划两阶段，P3–P9 为目检后追加，每阶段一个提交），决策见 [ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
 
 - **P1**（提交 `7e3232a`，后改写为 `79f6934`）：`files.actions` 的 launcher 改为仅图标齿轮钮并经 flex `order` 前移到 reload 左侧；footer 触发器同步换齿轮。
 - **P2**（提交 `252b927`）：该 occupant 升级为 `RootSwitcher`——伪装成 PathLabel 的触发钮 + `Menu`（主根、`list` RPC 返回的附加根、footer 的「管理…」入口）；选中附加根时 `closest('[data-files-root]')` 定位 pane，`createPortal` 挂入 `RootFileTree` 接管树区，`:has()` 规则同条件隐藏原生 path/body/reload；owner 缺 `absolutePath` 时退回 P1 compact launcher。对话框行内 `RootFileTree` 与 `files.browse` 词条下线。`data-files-*` 钩子（非槽位契约）列入 `.agent/note` 升版目检与故障排查条目。
@@ -463,5 +463,6 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 - **P6**：对话框添加行的权限选择器从系统原生 `<select>` 换成 ui-primitives `Menu` 锚定下拉（胶囊触发钮 + 勾选行，与根选择器同一控件族）；`onSelect` 即显式选择，`accessChosen` 的「未触碰不携带 access」语义不变。权限字形（`IconWorkspaceWrite`/`IconReadOnly`）仅 0.1.7+ 存在，走新增的 `maybeIcon` 软探测，缺失版本回退为无图标行。
 - **P7**：附属根行的权限徽标移到显示名右侧（`.mrfw-rootName` 改 flex 基线对齐，徽标 `flex:none`）；复制从独立 IconButton 变为路径本身——抽出的 `PathCopy` 组件（`.mrfw-pathCopy` 无边框按钮保持文本观感，`.mrfw-pathCopyIcon` 在流内 `opacity:0` → hover/focus 才可见、出现不回流，点击路径区任意处复制完整 canonical path，反馈沿用 copyPath↔copied 的可达名切换）随后推广到**全部路径展示**：主根行与「当前执行目录」行同一控件。
 - **P8**：只读→读写升级的 `window.confirm` 换成 ui-primitives `Modal` 确认层——覆盖在工作区目录对话框之上，footer 为普通取消钮 + 红色确认钮（`.mrfw-btnDanger` 补实底配方）；Escape/遮罩即取消，portaled Modal 的 Escape 也纳入底层对话框的守卫；降级方向照旧无确认直接执行。
+- **P9**：修复 open-in-app 分离按钮在附加根态仍路由到主根——上游 `files.actions` 槽位的 `absolutePath` 永远是原生树根。`:has()` 规则隐藏原生 `data-open-target="directory"` 元素（整项隐藏 + 内层兜底双选择器），`src/client/open-in-app/` 逐字节复刻上游 `ui-open-in-app` client 包（基线 `d743267388` = `0.2.1-alpha.2`，`FORK.md` 钉住清单与同步步骤）在原位渲染同款控件、`absolutePath` 换为选中根；宿主路由不校验根归属，locale `bind('open-in-app')` 复用上游词典，应用选择共享 `dsh.open-in-app.choice`。css 走 `*.module.css.ts` shim（类名前缀 `mrfw-open-`）；`*Regular` 图标族缺席的运行时不渲染按钮（同型降级）；`dsh-client-store` 因此进入 bundle module-table；`workspace.openLocal` 快捷键仍开主根（已知限制）。**遗留**：复刻钮与窗口右缘间距仍有像素级偏差（容器 gap + 整项隐藏两轮修正后目检仍报残留，成因未查明，待后续阶段）。
 
 本机开发 pin `0.2.1-alpha.2`：P1 与 P2 各自完成时 `pnpm lint` / `typecheck` / `test` / `build` / `docs:check` / `smoke`（compose 46、behavior 99、journey 62）全绿。web 组合三态（无附加根原生观感 / 附加根选中接管 / 切回主根还原）的目检见计划 Validation 记录。

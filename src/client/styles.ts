@@ -122,6 +122,10 @@ export const STYLES = /* css */ `
   min-width: 0;
   display: flex;
   align-items: center;
+  /* Same 4px the upstream .header puts between its own flex items, so the
+     takeover controls (reload, open-in-app fork) sit at the same offsets the
+     hidden native ones did — no drift between primary and additional state. */
+  gap: 4px;
 }
 
 /* While the switcher exists it hides the upstream path label — the
@@ -145,6 +149,26 @@ export const STYLES = /* css */ `
    background, so switching back to the primary root restores it instantly. */
 [data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-body],
 [data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-reload] {
+  display: none;
+}
+
+/* While the switcher names an additional root, the native open-in-app split
+   button hides too: its slot props carry the pane's primary root, so it
+   would always open the primary root no matter what the switcher selected.
+   The header gets the plugin's own fork of that same control instead (the
+   open-in-app directory), wired to the selected root.
+
+   The first selector hides the whole header flex item — the occupant's Menu
+   root span wraps the marked .split, and hiding only the inner control
+   would leave an empty flex item whose surrounding gaps push the fork 4px
+   left of the native position. The '>' combinators scope the :has() to
+   header-item level (grandchildren of the pane) so a future attribute
+   moved onto the item itself can never match the .header element. The
+   second selector is the fallback for that shape: the attribute on the
+   flex item itself. Both spare the fork through :not(.mrfw-openSplit) —
+   its data-open-target shares the attribute byte-for-byte. */
+[data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) > * > *:has([data-open-target="directory"]:not(.mrfw-openSplit)),
+[data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-open-target="directory"]:not(.mrfw-openSplit) {
   display: none;
 }
 
@@ -195,9 +219,11 @@ export const STYLES = /* css */ `
 
 /* The selected root's full path sits between the trigger and the reload —
    the very PathLabel upstream draws there, so it brings its own grow,
-   left-clip and hover-title behavior; only the gutters are ours. */
+   left-clip and hover-title behavior; only the gutters are ours. The right
+   margin plus the container gap reproduces upstream's .path margin-right
+   12px + header gap 4px; the left gutter comes from the same container gap. */
 .mrfw-switcherPath {
-  margin: 0 12px 0 4px;
+  margin: 0 12px 0 0;
 }
 
 /* The takeover's own reload, standing exactly where the hidden native one
@@ -235,6 +261,93 @@ export const STYLES = /* css */ `
   overflow: auto;
   padding: 4px 8px;
 }
+
+/* ── open-in-app fork (verbatim rules, renamed classes) ───────────────────
+   Copied from upstream's OpenTargetButton.module.css
+   (dsh-client-ui-open-in-app @ 0.2.1-alpha.2) with local names mapped to
+   mrfw-open* so the rules cannot collide with host DOM. Fork sync re-diffs
+   the upstream file and re-applies the rename — see
+   src/client/open-in-app/FORK.md. */
+
+/* Sized to sit in the document header's 24px control row beside its round
+   icon buttons: a hairline pill with a 12px label and a narrow chevron half. */
+.mrfw-openMenuAnchor {
+  display: inline-flex;
+  flex: none;
+  align-self: center;
+}
+
+.mrfw-openSplit {
+  display: inline-flex;
+  align-items: stretch;
+  box-sizing: border-box;
+  height: 24px;
+  overflow: hidden;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-sm);
+  font-family: var(--dsw-font-family);
+}
+
+.mrfw-openMain,
+.mrfw-openChevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-label-primary);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mrfw-openMain {
+  gap: 4px;
+  padding: 3px 5px;
+}
+
+.mrfw-openChevron {
+  padding: 3px 4px 3px 3px;
+  border-left: 0.5px solid var(--dsw-alias-border-l4);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-openMain:hover:not(:disabled),
+.mrfw-openMain:focus-visible,
+.mrfw-openChevron:hover:not(:disabled),
+.mrfw-openChevron:focus-visible {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* Pending disables clicks without a restyle; only hover feedback pauses. */
+.mrfw-openMain:disabled,
+.mrfw-openChevron:disabled {
+  cursor: default;
+}
+
+.mrfw-openAppIcon {
+  object-fit: contain;
+}
+
+/* The unavailable preview emphasizes the same actions with a labeled button. */
+.mrfw-openSplit[data-size='large'] {
+  height: 36px;
+  border-radius: var(--dsw-radius-md);
+  border-color: var(--dsw-alias-border-l2);
+}
+
+.mrfw-openSplit[data-size='large'] .mrfw-openMain {
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 14px;
+}
+
+.mrfw-openSplit[data-size='large'] .mrfw-openChevron {
+  padding: 6px 10px;
+}
+
+.mrfw-openSkeleton { display: inline-block; flex: none; border-radius: var(--dsw-radius-xs); background: var(--dsw-alias-interactive-bg-hover); }
 
 .mrfw-overlay {
   position: fixed;

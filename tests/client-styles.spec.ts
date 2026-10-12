@@ -43,6 +43,18 @@ describe('the root-switcher rules', () => {
     expect(STYLES).toMatch(/\.mrfw-switcherPath\s*\{/s)
   })
 
+  it('reproduces the header item gap inside the switcher so replacements keep native offsets', () => {
+    // The upstream .header puts 4px between flex items; the takeover renders
+    // the reload and the open-in-app fork inside the switcher instead, so the
+    // container must carry that same 4px — otherwise the controls drift a few
+    // pixels relative to the primary-root layout.
+    expect(STYLES).toMatch(/\.mrfw-rootSwitcher\s*\{[^}]*gap:\s*4px/s)
+    // The path's right margin (12px) plus that gap reproduces upstream's
+    // .path margin-right 12px + header gap 4px; the left gutter now comes
+    // from the container gap, so a left margin here would double-count.
+    expect(STYLES).toMatch(/\.mrfw-switcherPath\s*\{[^}]*margin:\s*0\s+12px\s+0\s+0/s)
+  })
+
   it('gives the take-over reload the upstream tool-button recipe', () => {
     expect(STYLES).toMatch(/\.mrfw-switcherReload\s*\{[^}]*width:\s*28px[^}]*height:\s*28px/s)
     expect(STYLES).toMatch(/\.mrfw-switcherReload:hover\s*\{[^}]*background:\s*var\(--dsw-alias-interactive-bg-hover\)/s)
@@ -84,5 +96,26 @@ describe('the additional-root row rules', () => {
     // The hover must darken through color-mix, upstream's own recipe.
     expect(STYLES).toMatch(/\.mrfw-btnDanger\s*\{[^}]*background:\s*var\(--dsw-alias-state-error-primary\)/s)
     expect(STYLES).toMatch(/\.mrfw-btnDanger:hover:not\(:disabled\)\s*\{[^}]*color-mix/s)
+  })
+})
+
+describe('the open-in-app takeover', () => {
+  it('hides the native split button only under an additional root, sparing the fork', () => {
+    // The occupant's Menu root span stays an empty header flex item if only
+    // the inner .split hides — its gap then pushes the fork left of the
+    // native position. The primary selector therefore hides whichever
+    // header-level item contains the marked control; the descendant
+    // selector is the fallback for an upstream that puts the attribute on
+    // the item itself. The fork shares data-open-target="directory"
+    // byte-for-byte, so both must exclude mrfw-openSplit.
+    expect(STYLES).toMatch(/\[data-files-root\]:has\(\.mrfw-rootSwitcher\[data-root-kind="additional"\]\)\s*>\s*\*\s*>\s*\*:has\(\[data-open-target="directory"\]:not\(\.mrfw-openSplit\)\)/s)
+    expect(STYLES).toMatch(/\[data-files-root\]:has\(\.mrfw-rootSwitcher\[data-root-kind="additional"\]\)\s+\[data-open-target="directory"\]:not\(\.mrfw-openSplit\)\s*\{[^}]*display:\s*none/s)
+    expect(STYLES).not.toMatch(/\[data-open-target="directory"\]\s*\{[^}]*display:\s*none/s)
+  })
+
+  it('carries the forked OpenTargetButton rules under mrfw-open* names', () => {
+    expect(STYLES).toMatch(/\.mrfw-openSplit\s*\{[^}]*height:\s*24px[^}]*border:/s)
+    expect(STYLES).toMatch(/\.mrfw-openChevron\s*\{[^}]*border-left:/s)
+    expect(STYLES).toMatch(/\.mrfw-openMain:hover:not\(:disabled\)/s)
   })
 })
