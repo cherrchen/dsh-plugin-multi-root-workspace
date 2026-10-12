@@ -158,16 +158,20 @@ export const STYLES = /* css */ `
    The header gets the plugin's own fork of that same control instead (the
    open-in-app directory), wired to the selected root.
 
-   The first selector hides the whole header flex item — the occupant's Menu
-   root span wraps the marked .split, and hiding only the inner control
-   would leave an empty flex item whose surrounding gaps push the fork 4px
-   left of the native position. The '>' combinators scope the :has() to
-   header-item level (grandchildren of the pane) so a future attribute
-   moved onto the item itself can never match the .header element. The
-   second selector is the fallback for that shape: the attribute on the
-   flex item itself. Both spare the fork through :not(.mrfw-openSplit) —
-   its data-open-target shares the attribute byte-for-byte. */
-[data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) > * > *:has([data-open-target="directory"]:not(.mrfw-openSplit)),
+   The slot's render site is wrapped in the renderer's own anchor —
+   <div data-slot="sidebar.right.tab.files.actions" style="display:contents">
+   — so the header's flex items inside it are the occupants themselves, and
+   the native item is the ui-primitives Menu anchor span wrapping the marked
+   .split. The first selector hides that occupant item through the data-slot
+   anchor: hiding only the inner control would leave the empty anchor span
+   as a zero-width flex item whose header gap pushes the fork 4px left of
+   the native position. The wrapper itself can never be the target — its
+   inline display:contents beats any stylesheet rule, and hiding it would
+   take the switcher with it. The second selector is the fallback for an
+   upstream that moves the attribute off the item. The fork survives both:
+   the only data-open-target inside .mrfw-rootSwitcher is its own
+   .mrfw-openSplit, which :not() excludes. */
+[data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-slot="sidebar.right.tab.files.actions"] > *:has([data-open-target="directory"]:not(.mrfw-openSplit)),
 [data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-open-target="directory"]:not(.mrfw-openSplit) {
   display: none;
 }

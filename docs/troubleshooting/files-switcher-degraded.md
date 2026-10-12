@@ -8,17 +8,17 @@
 - **选中附加根但原生树仍在**：菜单状态变了、触发钮显示根名，树区却仍是主根原生树——`[data-root-kind="additional"]` 条件下的 `display:none` 规则失效，或 `closest('[data-files-root]')` 找不到祖先（portal 目标缺席时组件**主动不渲染**自绘树）。
 - **原生 reload 还留着 / 附加根态出现两个刷新钮**：与上一条同源的 `:has()` 失效——接管态下原生 reload 应隐藏、由 header 内的 `.mrfw-switcherReload` 顶替（点击原地重拉自绘树，不清屏）；两者同时可见即规则失配。
 - **附加根态出现两个「在应用中打开」钮 / 原生钮点回主根**：`data-open-target="directory"` 钩子（`ui-open-in-app` 分离按钮的锚点属性）改名或挪位——隐藏规则失配时原生钮在附加根态重新露出，点击仍打开**主根**（P9 修复前的旧 bug 回归）；复刻钮自身带 `.mrfw-openSplit`、被 `:not()` 保住，仍开选中根。若连复刻钮都不见了，先查 adapter 是否因 `*Regular` 图标族缺席而未建（0.1.x 像素名运行时的预期降级），再查 `GET open-in-app/apps` 是否 404/空数组（上游「无应用即无按钮」同型行为）。
-- **复刻钮与窗口右缘间距残留像素级偏差（已知未修）**：`.mrfw-rootSwitcher` 已补 `gap: 4px` 复刻 header 项间距、隐藏规则已升级为「整项隐藏 + 内层兜底」（消除空 `.menuAnchor` 占位），目检仍报偏差——成因未查明，暂记为已知问题待后续阶段处理，升级目检时一并复核。
+- **复刻钮与窗口右缘间距像素级偏差（已修，留作诊断参考）**：根因查明——上游 `ui-renderer` 给每个槽位渲染点包 `<div data-slot="<key>" style="display:contents">`，`.header` 的子项是该包装而非 occupant 的 Menu 锚 span；旧的 `> * > *` 隐藏选择器命中包装自身，样式表 `display:none` 敌不过内联 `display:contents` 而惰性，原生 `.split` 只被内层兜底藏住、空的 Menu 锚 span 仍以零宽 flex 项多占一个 header gap。现第一选择器锚定 `[data-slot="sidebar.right.tab.files.actions"] > *:has(...)` 隐藏 occupant 项本身。**若该 `data-slot` 锚点改名或挪位，同一症状回归**：DevTools 中在 `.mrfw-rootSwitcher` 之前的同槽位查找一个无内容的 Menu 锚 span——仍占位即确认（原生 `.split` 被藏而锚壳残留），再对照该版本 `scoped-slots.tsx` 的包装实现找新锚。
 
 所有症状共享一个性质：**功能不坏**。选择器菜单依然列出主根与附加根、能打开管理对话框；变的是视觉接管退回了原生布局。
 
 ## 根本原因
 
-`data-files-root` / `data-files-path` / `data-files-reload` / `data-files-body` 落在上游 `FilesBody` 的 flex 项本体上，`data-open-target="directory"` 落在 `ui-open-in-app` occupant 的锚点上——它们都是上游渲染器的实现细节，**不是 `files.actions` 槽位契约的一部分**。上游改 DOM（换布局、改属性名、给 flex 项包 wrapper）时，插件的 `:has()` 规则和 `closest()` 查找同时失去目标——这正是设计选择的失效路径：静默退化而非破碎头部（[ADR-0015](../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)）。
+`data-files-root` / `data-files-path` / `data-files-reload` / `data-files-body` 落在上游 `FilesBody` 的 flex 项本体上，`data-open-target="directory"` 落在 `ui-open-in-app` occupant 的锚点上，`data-slot="sidebar.right.tab.files.actions"` 落在渲染器给槽位渲染点包的 `display:contents` 包装上（occupant 项级隐藏经它定位）——它们都是上游渲染器的实现细节，**不是 `files.actions` 槽位契约的一部分**。上游改 DOM（换布局、改属性名、给 flex 项包 wrapper）时，插件的 `:has()` 规则和 `closest()` 查找同时失去目标——这正是设计选择的失效路径：静默退化而非破碎头部（[ADR-0015](../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)）。
 
 ## 诊断方法
 
-1. 打开 Files 页签，DevTools 检查 pane：四个 `data-files-*` 属性是否仍在对应元素上（`data-files-root` 在 pane、`data-files-path`/`data-files-reload` 在 header 的 flex 项、`data-files-body` 在树区），`data-open-target="directory"` 是否仍在 open-in-app 分离按钮的锚点上。`.header` / `.body` 的 class 是 CSS-module hash，不能锚。注意 `data-files-path` 有双重含义：**每个树行也携带它**（值是该行绝对路径），所以命中表头标签的选择器必须是 `[data-files-path]:not([data-files-entry])`——如果症状是「主根树区整片空白」，先查这条限定符还在不在。
+1. 打开 Files 页签，DevTools 检查 pane：四个 `data-files-*` 属性是否仍在对应元素上（`data-files-root` 在 pane、`data-files-path`/`data-files-reload` 在 header 的 flex 项、`data-files-body` 在树区），`data-open-target="directory"` 是否仍在 open-in-app 分离按钮的锚点上，`data-slot="sidebar.right.tab.files.actions"` 包装是否仍包着 actions 区全部 occupant（其内联 `display:contents` 是故意的——不能对它 `display:none`，要隐藏的是包装内的 occupant 项）。`.header` / `.body` 的 class 是 CSS-module hash，不能锚。注意 `data-files-path` 有双重含义：**每个树行也携带它**（值是该行绝对路径），所以命中表头标签的选择器必须是 `[data-files-path]:not([data-files-entry])`——如果症状是「主根树区整片空白」，先查这条限定符还在不在。
 2. 确认 `.mrfw-rootSwitcher` 确实渲染进了 actions 区（footer 面板存在 ⇒ client bundle 在跑；选择器不在则说明 slot 注册本身出了问题，另查 `files.actions` 槽位是否还声明）。
 3. 选中一个附加根后看 `.mrfw-rootSwitcher` 是否带上 `data-root-kind="additional"`：带了但原生树仍可见 ⇒ `:has()` 规则失配；不带 ⇒ 组件状态问题而非钩子问题。
 4. 复刻钮缺失的排查顺序：`.mrfw-openSplit` 元素是否存在（不存在 ⇒ adapter 未建，查 `*Regular` 图标与 `open-in-app/apps` 路由）；存在但被隐藏 ⇒ 检查 `:not(.mrfw-openSplit)` 限定符是否还在隐藏规则里。

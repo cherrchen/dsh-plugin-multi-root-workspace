@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * The stylesheet rules that position this plugin's launcher inside the
  * upstream Files tab header.
@@ -100,17 +101,59 @@ describe('the additional-root row rules', () => {
 })
 
 describe('the open-in-app takeover', () => {
+  // The hide rule's first selector, spelled once so both the stylesheet
+  // assertion and the DOM regression below exercise the exact same string.
+  const NATIVE_ITEM_SELECTOR =
+    '[data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-slot="sidebar.right.tab.files.actions"] > *:has([data-open-target="directory"]:not(.mrfw-openSplit))'
+
   it('hides the native split button only under an additional root, sparing the fork', () => {
-    // The occupant's Menu root span stays an empty header flex item if only
-    // the inner .split hides — its gap then pushes the fork left of the
-    // native position. The primary selector therefore hides whichever
-    // header-level item contains the marked control; the descendant
-    // selector is the fallback for an upstream that puts the attribute on
-    // the item itself. The fork shares data-open-target="directory"
+    // The occupant item — the ui-primitives Menu anchor span wrapping the
+    // marked control — must go, not just the inner .split: an emptied
+    // anchor still sits in the header as a zero-width flex item whose gap
+    // pushes the fork left of the native position. The item is reached
+    // through the renderer's own data-slot wrapper anchor; that wrapper
+    // carries inline display:contents and must never be the target. The
+    // descendant selector is the fallback for an upstream that moves the
+    // attribute off the item. The fork shares data-open-target
     // byte-for-byte, so both must exclude mrfw-openSplit.
-    expect(STYLES).toMatch(/\[data-files-root\]:has\(\.mrfw-rootSwitcher\[data-root-kind="additional"\]\)\s*>\s*\*\s*>\s*\*:has\(\[data-open-target="directory"\]:not\(\.mrfw-openSplit\)\)/s)
+    expect(STYLES).toContain(NATIVE_ITEM_SELECTOR)
     expect(STYLES).toMatch(/\[data-files-root\]:has\(\.mrfw-rootSwitcher\[data-root-kind="additional"\]\)\s+\[data-open-target="directory"\]:not\(\.mrfw-openSplit\)\s*\{[^}]*display:\s*none/s)
     expect(STYLES).not.toMatch(/\[data-open-target="directory"\]\s*\{[^}]*display:\s*none/s)
+    // The retired pane-grandchild form hit the data-slot wrapper itself —
+    // inert against its inline display:contents, and if that inline style
+    // ever vanished it would hide the whole slot, switcher included.
+    expect(STYLES).not.toMatch(/>\s*\*\s*>\s*\*:has\(\[data-open-target/)
+  })
+
+  it('matches the occupant item, never the slot wrapper or the fork', () => {
+    // The header shape upstream's FilesBody plus the scoped-slots renderer
+    // produce: actions occupants sit inside a display:contents data-slot
+    // wrapper, each occupant a Menu anchor span around its control.
+    document.body.innerHTML = `
+      <div data-files-root>
+        <div class="header">
+          <div data-slot="sidebar.right.tab.files.actions" style="display:contents">
+            <span class="nativeAnchor"><div data-open-target="directory"></div></span>
+            <span class="mrfw-rootSwitcher" data-root-kind="additional">
+              <span class="mrfw-openMenuAnchor"><div class="mrfw-openSplit" data-open-target="directory"></div></span>
+            </span>
+          </div>
+        </div>
+      </div>`
+    const nativeAnchor = document.querySelector('.nativeAnchor')!
+    const slotWrapper = document.querySelector('[data-slot]')!
+    const switcher = document.querySelector('.mrfw-rootSwitcher')!
+    const forkAnchor = document.querySelector('.mrfw-openMenuAnchor')!
+
+    expect(nativeAnchor.matches(NATIVE_ITEM_SELECTOR)).toBe(true)
+    expect(slotWrapper.matches(NATIVE_ITEM_SELECTOR)).toBe(false)
+    expect(switcher.matches(NATIVE_ITEM_SELECTOR)).toBe(false)
+    expect(forkAnchor.matches(NATIVE_ITEM_SELECTOR)).toBe(false)
+
+    // A primary-root selection must leave every element untouched.
+    switcher.setAttribute('data-root-kind', 'primary')
+    expect(document.querySelectorAll(NATIVE_ITEM_SELECTOR)).toHaveLength(0)
+    expect(nativeAnchor.matches(NATIVE_ITEM_SELECTOR)).toBe(false)
   })
 
   it('carries the forked OpenTargetButton rules under mrfw-open* names', () => {
