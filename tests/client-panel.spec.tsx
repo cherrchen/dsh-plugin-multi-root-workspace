@@ -295,8 +295,7 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
-    expect(document.querySelector('.mrfw-fileTree')).toBeNull()
-    expect(screen.queryByRole('button', { name: `${NS}.files.reload` })).toBeNull()
+    expect(document.querySelector('.mrfw-ftBody')).toBeNull()
   })
 
   it('keeps legacy host lists usable even with more than the new default limit', async () => {

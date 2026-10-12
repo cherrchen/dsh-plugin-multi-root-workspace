@@ -1,8 +1,8 @@
-# Files 头部根浏览：launcher 前移（P1）、根选择器 + 自绘附加根树（P2）与观感精修（P3–P10）
+# Files 头部根浏览：launcher 前移（P1）、根选择器 + 附加根树（P2/P11）与观感精修（P3–P10）
 
 ## Current State
 
-本计划实施完成。P1 单独提交（仅图标齿轮 launcher 前移，原 `7e3232a` 后改写为 `79f6934`）；P2 按 Design 落地（提交 `252b927`）：`files.actions` 挂载 `RootSwitcher`（owner `absolutePath` 缺席时退回 compact launcher），附加根选中时 `RootFileTree` 经 `createPortal` 接管树区，对话框行内树与 `files.browse` 词条下线，`data-files-*` 钩子列入 compat 目检与故障排查，决策见 [ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。目检另捕获一处真实缺陷：上游 `data-files-path` 双重含义（每个树行也携带），头部规则收紧为 `[data-files-path]:not([data-files-entry])`。用户目检后追加 P3–P10 八个精修阶段（见文末「追加阶段」节）：P3 恢复头部完整路径显示（提交 `0c50edc`），P4 附加根态刷新收进 header（提交 `89bdf75`），P5 刷新改原地重拉消除 loading 闪烁（提交 `9fe0ad4`），P6 权限选择器换 DSH 下拉（提交 `6ca3dcb`），P7 徽标换位 + 路径即复制（提交 `6ed341d`），P8 升级确认换宿主 Modal（提交 `de163c7`），P9 open-in-app 按钮附加根态复刻接管（提交 `45def89`），P10 修复复刻钮残留的 4px 左偏——根因为 `data-slot` 槽位包装的内联 `display:contents` 使 P9 的 `> * > *` 隐藏选择器惰性，修复改经该锚点隐藏 occupant 项。
+本计划实施完成。P1 单独提交（仅图标齿轮 launcher 前移，原 `7e3232a` 后改写为 `79f6934`）；P2 按 Design 落地（提交 `252b927`）：`files.actions` 挂载 `RootSwitcher`（owner `absolutePath` 缺席时退回 compact launcher），附加根选中时 `RootFileTree` 经 `createPortal` 接管树区，对话框行内树与 `files.browse` 词条下线，`data-files-*` 钩子列入 compat 目检与故障排查，决策见 [ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。目检另捕获一处真实缺陷：上游 `data-files-path` 双重含义（每个树行也携带），头部规则收紧为 `[data-files-path]:not([data-files-entry])`。用户目检后追加 P3–P10 八个精修阶段（见文末「追加阶段」节）：P3 恢复头部完整路径显示（提交 `0c50edc`），P4 附加根态刷新收进 header（提交 `89bdf75`），P5 刷新改原地重拉消除 loading 闪烁（提交 `9fe0ad4`），P6 权限选择器换 DSH 下拉（提交 `6ca3dcb`），P7 徽标换位 + 路径即复制（提交 `6ed341d`），P8 升级确认换宿主 Modal（提交 `de163c7`），P9 open-in-app 按钮附加根态复刻接管（提交 `45def89`），P10 修复复刻钮残留的 4px 左偏——根因为 `data-slot` 槽位包装的内联 `display:contents` 使 P9 的 `> * > *` 隐藏选择器惰性，修复改经该锚点隐藏 occupant 项。P11 把附加根树从自绘实现换成对上游 `ui-sidebar-files` client 包的逐字节复刻（提交见文末 P11 条目）：自绘树与 `files`/`readFile` 端点、`browseRoot`、`RootFileTree` 一并下线，数据通路改走宿主 `remote.workspaceFiles.list/changes`（本插件 host 包装本就按绝对路径路由附加根），文件点击经 `sidebarRight.openResourceIn` 进宿主 viewer——复刻同时获得原生 watch 自动刷新、展开/滚动还原与失败行语义，决策见 [ADR-0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md)。
 
 ## Goal
 
@@ -90,9 +90,9 @@ Files 头部当前视觉序（DOM 序）：`[data-files-path] 路径 | ↻ reloa
 - ADR：**新增 ADR-0015**（Files tab 自绘树接管：备选=原生树重指——不可行、上游参数化——留作上游事项、保持对话框——已否）并修订 [ADR-0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md) 中"lazy tree 放在现有对话框"的表述。
 - **完成即提交**。
 
-## 追加阶段（P3–P10，web 目检后的精修）
+## 追加阶段（P3–P11，web 目检后的精修与复刻化）
 
-P2 的人工核验通过后，用户基于真实观感追加八个小阶段，各自单独提交、各自全绿：
+P2 的人工核验通过后，用户基于真实观感追加阶段，各自单独提交、各自全绿。P3–P10 为八个小阶段；P11 是把自绘树换成上游逐字节复刻的机制替换，规模与 P2 同级：
 
 - **P3**（提交 `0c50edc`）**恢复头部完整路径**：P2 把上游路径标签整体隐藏后，头部只剩根名触发钮——用户在主根与附加根态都要求原位置仍显示完整路径。实现：触发钮后随一个 `PathLabel`（`mrfw-switcherPath`），主根显示 pane 工作区根（即原标签的值）、附加根显示其 canonical 路径；复用上游同一组件，自带生长/左端渐隐/hover 全路径。`.mrfw-rootSwitchBtn` 收敛为 `flex: 0 1 auto` 只缩不涨，把剩余宽度让给路径；该元素不带 `data-files-*`，不受本插件隐藏规则影响。
 - **P4**（提交 `89bdf75`）**附加根态刷新收进 header**：接管态原本只有树区顶部一个「刷新文件树」文本钮，与主根态的 header reload 不一致。`RootFileTree` 移除行内按钮；header 在原生 reload 位置渲染 `.mrfw-switcherReload` 图标钮（上游 `.tool` 配方：28px 命中区、15px 字形、次色 + hover 高亮），图标走既有 `IconRefresh` 双名适配器。按钮与 portal 树同生同灭（统一 `treeVisible` 条件），纯菜单降级时不渲染；不带 `data-files-reload`，不会被隐藏规则误伤。
@@ -102,10 +102,11 @@ P2 的人工核验通过后，用户基于真实观感追加八个小阶段，�
 - **P8**（提交 `de163c7`）**升级确认换宿主 Modal**：只读→读写的 `window.confirm` 换成 ui-primitives `Modal`——覆盖在工作区目录对话框之上的确认层：title/description 沿用升级文案，footer 普通取消钮 + 红色确认钮（`.mrfw-btnDanger` 补上实底 error 填充配方，hover 用 `color-mix` 加深——修复了引用未定义 `label-error` token 导致按钮白化隐形的问题）。确认才发 `setAccess`；Escape/遮罩点击即取消且不误关底层对话框（portaled Modal 的事件冒泡纳入既有 Escape 守卫）。降级方向照旧无确认直接执行。
 - **P9** **open-in-app 按钮附加根态复刻接管**：上游 `ui-open-in-app` 的 files.actions occupant 拿到的 `absolutePath` 永远是原生树根（`FilesBody` 单方注入，插件无法改指），选中附加根时点击仍打开主根——缺陷而非偏差。`:has(...[data-root-kind="additional"])` 规则隐藏其 `data-open-target="directory"` 元素（`:not(.mrfw-openSplit)` 保住复刻钮自身）；`src/client/open-in-app/` 逐字节复刻上游 client 包（基线 `d743267388` = `0.2.1-alpha.2`，`FORK.md` 记录清单、shim 对照与同步步骤），header 原位渲染同款分离按钮、`absolutePath` 换为选中根。宿主 HTTP 路由不校验路径归属，locale 直接 `bind('open-in-app')` 消费上游词典，应用选择共享 `dsh.open-in-app.choice`——观感与原生完全一致并自动跟随上游；css 因无 module 管线走 `*.module.css.ts` shim（逐条拷贝规则、类名前缀 `mrfw-open-`），`dsh-client-shortcuts` 仅 type-only 声明。`*Regular` 图标族缺席的 0.1.x 运行时不建 adapter、不渲染按钮（与上游「无应用即无按钮」同型降级）；`workspace.openLocal` 快捷键仍开主根（上游 `session.cwd` 解析，已知限制）。**目检遗留（P10 已修）**：复刻钮与窗口右缘的间距相对原生仍有像素级偏差——两轮修正（`.mrfw-rootSwitcher` 补 `gap: 4px` 复刻 header 项间距 + 隐藏规则升级为 `> * > *`「整项隐藏 + 内层兜底」双选择器以清除空 `.menuAnchor` 占位）后用户目检仍报残留；P10 查明第二轮选择器实际命中 `data-slot` 槽位包装而被其内联 `display:contents` 压成惰性，见下条。
 - **P10** **修复复刻钮 4px 左偏（根因：`data-slot` 包装的内联 `display:contents`）**：P9 的「整项隐藏」选择器 `[data-files-root]:has(...) > * > *:has(...)` 目标是 `.header` 的孙子辈 flex 项，但上游 `ui-renderer` 给每个槽位渲染点包了 `<div data-slot="<key>" style="display:contents">`——`.header` 的实际子项正是这个包装，occupant 项（原生钮的 Menu 锚 span 与本插件的 `.mrfw-rootSwitcher`）都在包装内。于是 `> * > *` 命中的是包装自身：样式表 `display:none` 敌不过其内联 `display:contents`，第一选择器完全惰性（且一旦内联样式消失还会把复刻钮连同整个槽位一起藏掉）；实际只有内层兜底生效——原生 `.split` 被藏，空的 Menu 锚 span 仍以零宽 flex 项占位，多占的一个 4px header gap 把复刻钮与 reload 左推。修复：第一选择器改经渲染器的公开锚点定位 occupant 项——`[data-slot="sidebar.right.tab.files.actions"] > *:has([data-open-target="directory"]:not(.mrfw-openSplit))`，`> * > *` 形态删除（jsdom DOM 回归测试以 `element.matches()` 钉住：命中原生锚 span、不命中 data-slot 包装 / 选择器自身 / 复刻锚，主根态全不命中）。
+- **P11** **附加根树改复刻原生 Files 树，自绘树下线**：P2 的自绘树（▸/▾ 文本行 + `files`/`readFile` RPC + 200 行预览）与原生树观感不一致，本阶段按 P9 先例把 `ui-sidebar-files` client 包复刻进 `src/client/files-tree/`（基线 `d743267388` = `0.2.1-alpha.2`，`FORK.md` 记录清单、delta 与同步步骤）。**可行性缝隙**：上游 `ui-open-in-app` 自己在 `files.actions` 注册上就声明了 `inject`——list occupant 声明 `store`+`inject` 是被支持的形态（`ui-plan` 的 actions 注册同型），session scope 槽位的 inject 工厂签名 `(sessionId, actions)` 与 `filesFace` 恰好吻合，于是 `store.ts`/`face.ts`/`directory-node.ts` 三文件**字节级复刻**、`FilesBody.tsx` 中 `Entry`/`Level`/`TreeContext`/`orderEntries`/`failureLine`/滚动还原逐字节，仅 `FilesBody` 外壳换写为 `FilesTree`——根源 `sessions.byId[sessionId].cwd` 改为选中根 prop，`useTabInfo`/`renderSlot`/header 整块不复制（occupant 拿不到 `useTabInfo`，头部控件本插件已有等价物）。**钩子替换**：`tab.id`→`closest('[data-dockkit-content]')`（dockkit 写在 tab 宿主元素上的真实 tab id，整个兼容窗口皆存在，缺席退回生成 id）；`tab.signal`→接管期 AbortController（取消选中/换根/卸载即 abort，复刻 face 的 abort 监听做 `forget`+`close`）；`tabActions.openResource`→`ctx.get('sidebarRight').openResourceIn(sessionId, addr)`；`t`→`ctx.locale.bind('sidebarFiles')` 消费上游词典。**accepted deltas**（FORK.md 逐项记录）：css specifier 指 `./FilesBody.module.css.ts` shim（类名 `mrfw-ft*`，**不携带 `data-files-body`/`data-files-root`**——防本插件自身隐藏规则误伤，行级 `data-files-entry`/`data-files-path` 原样保留）；primitives import 指 `./primitives.ts` 按导出名解析（`IconFolderCloseRegular`/`IconFolderOpenRegular`/`FileTypeIcon`/`classifyFileType`，像素名兜底）；`fileAddressFor(sessionId, undefined, path)`——上游传 `state.root` 作 cwd 会把地址相对化，host 侧按**主根**解析相对路径会指错文件，故令地址携带绝对路径；`remote` 经 `ctx.get('remote')` 惰性解析，缺席时 list 回 `{ok:false}`/`$stream` 死流——渲染为原生 `error.unavailable` 失败行而非静默。**下线**：`files`/`readFile` 端点、`browseRoot`、`FilesView`/`FilePreview` 及其 zod 校验、`RootFileTree.tsx`、仅它使用的词条——宿主 `read`/`readBytes`/`stat` 本不做 workspace 围限，文件点击经 `openResource` 直接进宿主 documentpreview viewer，watch 自动刷新与展开/滚动还原白得。**不复制**：`bindCommands`/`refreshShortcut`（tab 快捷键仍刷原生树，与自绘时代同级）、隐藏 auto-refresh 钮（store `autoRefresh` 恒 true = 原生默认）。**兼容面**：`files.actions` 槽位 0.2.0-rc.2 才出现，窗口内三版本被复刻文件 diff 为零、单基线通吃；新增 devDep `dsh-api-remotes`/`dsh-client-ui-dockkit`/`dsh-util-workspace-path` 固定 dev pin（运行时要么 type-only、要么被 client bundle 的 `alwaysBundle` 内联，不产生新模块表请求）。`data-root-kind` 改绑 `treeVisible`：fork 缺席（primitives 门或 pane 找不到）时附加根行不渲染为可选，attribute 不提前声称 additional，原生布局不被误伤。
 
 ## Validation
 
-每阶段：`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm docs:check` 全绿；`pnpm smoke`（compose/behavior/journey）无回归。P2 另需 web 组合人工核验三态：无附加根（原生观感）、选中附加根（自绘树 + reload 隐藏）、切回主根（完全还原）。P3–P10 各经用户 web 目检确认后提交。
+每阶段：`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm docs:check` 全绿；`pnpm smoke`（compose/behavior/journey）无回归。P2 另需 web 组合人工核验三态：无附加根（原生观感）、选中附加根（自绘树 + reload 隐藏）、切回主根（完全还原）。P3–P10 各经用户 web 目检确认后提交。P11 另需 web 人工核验：附加根树行结构/图标/hover/展开缩进与原生树逐项一致，目录 watch 自动刷新生效，文件点击进宿主 viewer，刷新不闪 loading。
 
 ## Risks
 
@@ -113,11 +114,13 @@ P2 的人工核验通过后，用户基于真实观感追加八个小阶段，�
 - `createPortal` 进上游容器属非常规手段：容器不存在则放弃 portal；React 树仍属本插件，事件/状态自洽。
 - `order` 只改视觉序，焦点/读屏序不变（P2 选择器在 DOM 中仍位于 reload 之后——可接受的已知限制）。
 - 附加根选中态不跨 tab 持久；原生树在隐藏期间保持 watch（小开销，换来瞬时切回）。
+- P11 的复刻树把行级观感绑定在上游源码上：上游 `ui-sidebar-files` 后续版本改动需按 `src/client/files-tree/FORK.md` 的同步步骤重拷重 diff（dev pin 变更时例行）；`data-dockkit-content` 是本阶段新增的 DOM 钩子，缺席时退化为生成 id（功能不坏、仅失去跨重挂载的状态还原）。
 
 ## Documentation Impact
 
 - 本文件进 `docs/plans/active/`；完成后移 `completed/` 并在[进度总账](../active/2026-09-12-multi-root-workspace.md)补行。
 - P2 落地时更新：[架构 §client 半部](../../architecture/multi-root-workspace.md)、[需求文档](../../requirements/multi-root-workspace.md)、`README.md`/`README.en.md` 面板与 Files 入口叙述、[ADR-0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md) 修订 + 新 ADR、troubleshooting 增补 `data-*` 钩子条目；发布时进 CHANGELOG。
+- P11 落地时更新：同批文档中「自绘树」叙述改为复刻树（架构、需求、README 双语、ADR-0015 增补 superseded 注记 + 新 ADR-0016）、`src/client/files-tree/FORK.md` 新增、troubleshooting 与 `.agent/note/dsh-compat-contract.md` 的 `data-*` 钩子清单补 `data-dockkit-content`、进度总账补行；发布时进 CHANGELOG。
 
 ## Completion Criteria
 
@@ -131,3 +134,4 @@ P2 的人工核验通过后，用户基于真实观感追加八个小阶段，�
 - P8 单独提交并全绿：升级为 Modal 确认层（取消 + 红钮）；取消/Escape/遮罩不发 setAccess；降级无确认。
 - P9 单独提交并全绿：附加根态隐藏原生 open-in-app 并在原位渲染复刻钮——主按钮与 chevron 菜单均对选中根发起 `open-in-app/open`（不再开主根）；主根态原生钮原样、无重复控件；空应用目录不渲染；观感/文案/图标与原生一致。**遗留（P10 已修）**：复刻钮与窗口右缘间距存在像素级残留偏差，根因与修复见 P10。
 - P10 单独提交并全绿：隐藏规则的第一选择器改经 `[data-slot="sidebar.right.tab.files.actions"]` 锚点命中 occupant 项（`> * > *` 形态移除并有断言钉住），附加根态复刻钮与 reload 相对窗口右缘的偏移与主根态原生位置一致——无 4px 残留偏差。
+- P11 单独提交并全绿：附加根树为 `src/client/files-tree/` 下的上游复刻实现（store/face/directory-node 字节级、行渲染逐字节、外壳换写记录于 FORK.md）；行结构、文件夹/文件类型图标、hover、缩进、loading/empty/truncated/failed 行与原生树逐项一致；目录 watch 自动刷新与展开还原生效；文件点击经 `openResource` 打开宿主 viewer；`files`/`readFile` 端点与 `RootFileTree` 移除且无残留引用；附加根态 header 复刻刷新钮触发 face `refresh(tabId)` 原地重读；主根态原生行为不变；fork 不可用时退回「仅菜单」降级而非空树区。

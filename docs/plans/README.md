@@ -49,7 +49,7 @@ completed：
 - [2026-09-15-panel-session-derived-authority.md](./completed/2026-09-15-panel-session-derived-authority.md) — v0.1.1 批次 H2：面板主根改为 host session 推导，删除客户端 `primaryRoot`（2026-09-15 实施完成，随 `v0.1.1` 发版）。
 - [2026-09-15-dsh-compat-contract.md](./completed/2026-09-15-dsh-compat-contract.md) — v0.1.1 批次 H3 + H4 Phase 1：DSH 兼容性变成启动时执行的代码契约，并把 `0.1.6-alpha.1` 与附加根顶层指令注入一并纳入（2026-09-15 实施完成，随 `v0.1.1` 发版）。
 - [2026-09-15-v0.1.1-review-rework.md](./completed/2026-09-15-v0.1.1-review-rework.md) — v0.1.1 批次发版前的 PR #1 评审返工（2 项 P1 + 3 项 P2）：authority 拆除顺序（排空 → close → release）、中间目录指令可达、`warn` 只放宽 `unsupported`、两个可选 peer 按需加载、缺失与求值失败分离（2026-09-15 实施完成，随 `v0.1.1` 发版）。
-- [2026-10-12-files-header-root-browsing.md](./completed/2026-10-12-files-header-root-browsing.md) — Files 头部根浏览两阶段：P1 仅图标齿轮 launcher 前移，P2 根选择器 + 插件自绘树 portal 接管树区（2026-10-12 实施完成，未发版；决策见 ADR-0015）。
+- [2026-10-12-files-header-root-browsing.md](./completed/2026-10-12-files-header-root-browsing.md) — Files 头部根浏览：P1 仅图标齿轮 launcher 前移，P2 根选择器 portal 接管树区，P3–P10 目检修正，P11 接管树换为逐字节复刻的上游 Files 树（`src/client/files-tree/`，自绘树与私有 `files`/`readFile` 端点下线；2026-10-12 实施完成，未发版；决策见 ADR-0015）。
 
 ### 编号口径
 

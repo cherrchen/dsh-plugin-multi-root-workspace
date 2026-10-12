@@ -6,8 +6,9 @@
  * followed by a `PathLabel` of the selected root's full path — the same
  * component upstream draws in that spot, so both primary and additional
  * selections read exactly like the native header. While an additional root
- * is selected it also lends the pane's body area to this plugin's own lazy
- * tree.
+ * is selected it also lends the pane's body area to this plugin's verbatim
+ * fork of the native Files tree (`files-tree/`), so an additional root reads
+ * and behaves exactly like the primary one.
  *
  * Two upstream DOM hooks make the takeover work, and both degrade silently:
  *
@@ -25,9 +26,11 @@
  *   native header keeps working and the switcher is just another actions
  *   occupant.
  * - `closest('[data-files-root]')` from the switcher's own element locates
- *   the pane the self-drawn tree is portaled into, as a sibling of
+ *   the pane the forked Files tree is portaled into, as a sibling of
  *   `data-files-body`. No match → no portal: the component keeps working as
- *   a menu and the native tree keeps its area.
+ *   a menu and the native tree keeps its area. The tree's tab id comes from
+ *   the same element's `closest('[data-dockkit-content]')` — the dockkit
+ *   tabHost section — with a generated fallback where the hook is absent.
  *
  * The selected root is component state on purpose: every tab render
  * occurrence gets its own, and reopening the pane resets to the primary
@@ -39,14 +42,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings, maybeComponent } from '../compat/client-icons.ts'
 import type { RootsView, RootView } from '../contract.ts'
-import { RootFileTree } from './RootFileTree.tsx'
+import { FilesTree, type FilesTreeSurface } from './files-tree/adapter.tsx'
 import { OpenInAppAction, type OpenInAppAdapter } from './open-in-app/adapter.tsx'
 import {
   basename,
   displayNameOf,
-  entryOf,
   stateKey,
   WorkspaceFoldersDialog,
   type WorkspaceFoldersActionProps,
@@ -62,10 +65,23 @@ export interface RootSwitcherProps extends Omit<WorkspaceFoldersActionProps, 'co
    * state, so the switcher just draws nothing there too).
    */
   readonly openInApp?: OpenInAppAdapter | undefined
+  /**
+   * The forked Files tree's shared props, or `undefined` where the fork
+   * cannot render — the additional-root rows then stay out of the menu at
+   * all, which is the same absence upstream's own tree produces.
+   */
+  readonly filesTree?: FilesTreeSurface | undefined
 }
 
-/** `sessionId` fallback for compositions that carry no session service. */
-const NO_SESSION = (): undefined => undefined
+/** The takeover's portal + lifetime, created while an additional root browses. */
+interface Takeover {
+  /** Lifetime handed to the tree's face: aborting forgets the store bucket and closes the watches. */
+  readonly signal: AbortSignal
+  /** The store bucket's key — the dockkit tab id where the hook exists, else a generated one. */
+  readonly tabId: TabId
+  /** The root the tree lists. */
+  readonly root: string
+}
 
 /**
  * The subdued full-path label upstream's Files header draws — it exists from
@@ -77,13 +93,14 @@ const PathLabel = maybeComponent<(props: { path: string; className?: string | un
 
 /** The Files-header switcher: root menu, dialog entry, and the portal tree. */
 export function RootSwitcher(props: RootSwitcherProps): ReactNode {
-  const { panel, t, primaryPath } = props
+  const { panel, t, primaryPath, filesTree } = props
   const [menuOpen, setMenuOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [view, setView] = useState<RootsView | undefined>(undefined)
   const [selected, setSelected] = useState<RootView | 'primary'>('primary')
-  const [treeEpoch, setTreeEpoch] = useState(0)
+  const [takeover, setTakeover] = useState<Takeover | null>(null)
   const wrapperRef = useRef<HTMLSpanElement | null>(null)
+  const fallbackTabId = useRef<TabId | undefined>(undefined)
   const [pane, setPane] = useState<HTMLElement | null>(null)
   const mounted = useRef(true)
   const requestEpoch = useRef(0)
@@ -155,19 +172,42 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   const primaryLabel = view?.primaryName ?? basename(view?.primaryRoot ?? primaryPath)
   const triggerLabel = selected === 'primary' ? primaryLabel : displayNameOf(selected)
   const triggerPath = selected === 'primary' ? (view?.primaryRoot ?? primaryPath) : selected.path
-  // Exactly the portal condition: the tree — and the header reload that
-  // re-keys it — exist together or not at all.
-  const treeVisible = selected !== 'primary' && panel !== undefined && pane !== null
+  // Exactly the portal condition: the forked tree — and the header reload
+  // that refreshes it — exist together or not at all. A missing fork keeps
+  // every native piece visible and the menu's additional rows unlisted, so
+  // data-root-kind never hides controls the takeover did not replace.
+  const treeVisible = selected !== 'primary' && panel !== undefined && pane !== null && filesTree !== undefined
+  const selectedPath = selected === 'primary' ? undefined : selected.path
+
+  // While an additional root is selected the pane's body area belongs to the
+  // forked tree: the takeover mints the AbortController the face's watches
+  // and store bucket live under, and the dockkit tabHost's
+  // data-dockkit-content supplies the same tab id the native tree uses — so
+  // the fork's store bucket, scroll memory, and expansion state are keyed
+  // exactly like a real Files tab. Deselecting, switching roots, or
+  // unmounting aborts the controller: the face forgets the bucket and closes
+  // every watch, mirroring what upstream's tab-record signal does on close.
+  useEffect(() => {
+    if (!treeVisible || selectedPath === undefined) { setTakeover(null); return }
+    const controller = new AbortController()
+    const tabId = (wrapperRef.current?.closest<HTMLElement>('[data-dockkit-content]')?.dataset.dockkitContent ?? '')
+      || (fallbackTabId.current ??= `mrfw-${Math.random().toString(36).slice(2)}` as TabId)
+    setTakeover({ signal: controller.signal, tabId: tabId as TabId, root: selectedPath })
+    return () => { controller.abort() }
+  }, [treeVisible, selectedPath])
 
   const items = useMemo((): MenuEntry[] => [
     { id: 'primary', label: `${primaryLabel} · ${t('panel.primary')}`, icon: <IconFolderOpen /> },
-    ...roots.map((root): MenuEntry => ({
+    // Where the fork cannot render, the additional rows stay out of the menu
+    // entirely: offering a root the body cannot browse would desynchronize
+    // the label from the pane. The primary row and the manager stay.
+    ...(filesTree === undefined ? [] : roots).map((root): MenuEntry => ({
       id: `root:${root.id}`,
       label: root.state === 'available' ? displayNameOf(root) : `${displayNameOf(root)} · ${t(stateKey(root.state))}`,
       icon: <IconFolderClose />,
       disabled: root.state !== 'available',
     })),
-  ], [roots, primaryLabel, t])
+  ], [roots, primaryLabel, t, filesTree])
 
   const onSelect = (id: string): void => {
     setMenuOpen(false)
@@ -182,7 +222,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
       <span
         ref={wrapperRef}
         className="mrfw-rootSwitcher"
-        data-root-kind={selected === 'primary' ? 'primary' : 'additional'}
+        data-root-kind={treeVisible ? 'additional' : 'primary'}
       >
         <Menu
           open={menuOpen}
@@ -226,18 +266,19 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
           : <PathLabel path={triggerPath} className="mrfw-switcherPath" />}
         {/* The takeover hides the native reload (it refreshes the hidden
             tree), so the header gets a replacement of its own — same position,
-            same icon-button recipe as the upstream `.tool`. It bumps the
-            portaled tree's reload counter: every mounted directory re-lists
-            under its current rows, so a refresh never blanks to a loading
-            note. Rendered under exactly the portal condition, so a menu-only
-            switcher never shows a dead button. */}
-        {treeVisible ? (
+            same icon-button recipe as the upstream `.tool`, and upstream's own
+            `reload` string through the fork's bound namespace. It calls the
+            face's refresh: every mounted directory re-lists under its current
+            rows, so a refresh never blanks to a loading note. Rendered under
+            exactly the portal condition, so a menu-only switcher never shows
+            a dead button. */}
+        {treeVisible && filesTree !== undefined ? (
           <button
             type="button"
             className="mrfw-switcherReload"
-            aria-label={t('files.reload')}
-            title={t('files.reload')}
-            onClick={() => { setTreeEpoch(epoch => epoch + 1) }}
+            aria-label={filesTree.t('reload')}
+            title={filesTree.t('reload')}
+            onClick={() => { if (takeover !== null) filesTree.face.refresh(takeover.tabId) }}
           >
             <IconRefresh size={15} />
           </button>
@@ -253,11 +294,20 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
           <OpenInAppAction {...props.openInApp} absolutePath={triggerPath} />
         ) : null}
       </span>
-      {treeVisible
+      {treeVisible && takeover !== null && filesTree !== undefined
         ? createPortal(
-            <div className="mrfw-switcherTree">
-              <RootFileTree reload={treeEpoch} panel={panel} entry={entryOf(selected)} sessionId={props.sessionId ?? NO_SESSION} t={t} />
-            </div>,
+            <FilesTree
+              tabId={takeover.tabId}
+              sessionId={filesTree.sessionId}
+              root={takeover.root}
+              signal={takeover.signal}
+              useStore={filesTree.useStore}
+              actions={filesTree.actions}
+              start={filesTree.face.start}
+              toggle={filesTree.face.toggle}
+              onOpen={filesTree.openFile}
+              t={filesTree.t}
+            />,
             pane,
           )
         : null}

@@ -48,10 +48,11 @@ describe('the client bundle artifact', () => {
     const source = readFileSync(clientPath, 'utf8')
     const required = [...source.matchAll(/require\("([^"]+)"\)/g)].map(match => match[1]).sort()
     // The primitives word carries the row menu and the icons (ADR-0006),
-    // react-dom carries createPortal for the switcher's tree, and
-    // client-store backs the open-in-app fork's SnapshotStores — the web
+    // react-dom carries createPortal for the switcher's tree, client-store
+    // backs the forks' SnapshotStores, and cordis is what the files-tree
+    // fork's inlined typert-protocol (RemoteError) references — the web
     // shell seeds all of them, so they stay external rather than bundled.
-    expect(required).toEqual(['@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-primitives', 'react', 'react-dom', 'react/jsx-runtime'])
+    expect(required).toEqual(['@deepseek-ai/cordis', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-primitives', 'react', 'react-dom', 'react/jsx-runtime'])
   })
 
   it('inlines its own contract instead of importing the host half', () => {

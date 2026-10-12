@@ -3,20 +3,28 @@
  * The Files-tab root switcher, driven through the real client entry: the
  * registered occupant is rendered inside a `data-files-root` fixture and the
  * menu, the portal tree, and the degradation paths are observed through the
- * stub Connection channel and the DOM.
+ * stub Connection channel, the stub `remote`/`sidebarRight` services, and the
+ * DOM.
  *
- * The pane fixture mirrors the DOM shape the stylesheet relies on —
- * `data-files-root` on the pane, `data-files-path` / `data-files-reload` on
- * the header children, `data-files-body` on the tree area — because the
- * component's `closest('[data-files-root]')` lookup is what decides whether
- * the self-drawn tree exists at all.
+ * The pane fixture mirrors the DOM shape the stylesheet and the takeover
+ * rely on — `data-files-root` on the pane, `data-files-path` /
+ * `data-files-reload` on the header children, `data-files-body` on the tree
+ * area, `data-dockkit-content` on the tab host — because the component's
+ * `closest` lookups are what decide whether the forked tree exists at all.
+ *
+ * The harness plays the slot framework's part for the occupant: it mints
+ * the registration's session store, runs its `inject` factory, and spreads
+ * the result plus `useStore`/`actions`/`sessionId` onto the props — the same
+ * shares the upstream Files registration composes.
  */
 
-import type { ReactElement } from 'react'
+import { useSyncExternalStore, type ReactElement } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OPEN_IN_APP_APPS_ROUTE, OPEN_IN_APP_OPEN_ROUTE } from '@deepseek-ai/dsh-host-open-in-app/shared'
+import type { StoreInstance } from '@deepseek-ai/dsh-client-store'
 import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from '../src/contract.ts'
+import type { FilesState } from '../src/client/files-tree/store.ts'
 import * as client from '../src/client/index.ts'
 import { NS } from '../src/client/locales.ts'
 
@@ -27,10 +35,95 @@ interface Call {
   readonly payload: PanelRequest
 }
 
+/** One captured workspaceFiles call (the forked tree's remote traffic). */
+interface TreeCall {
+  readonly kind: 'list' | 'changes'
+  readonly sessionId: string
+  readonly path: string
+}
+
+/** One captured sidebarRight.openResourceIn call. */
+interface OpenCall {
+  readonly sessionId: string
+  readonly address: string
+}
+
+/** The frame a stub watch queue hands the verbatim `createWatch` loop. */
+type WatchFrame = { readonly kind: 'ready' } | { readonly kind: 'change' }
+
+/** A parked per-directory watch the spec can feed frames into. */
+interface WatchControl {
+  push: (frame: WatchFrame) => void
+  stop: () => void
+}
+
+/**
+ * The `workspaceFiles.changes` stub's product: yields `ready` once, then
+ * whatever `push` feeds it, until `stop` parks it for good. The iterable
+ * carries `stop` so the `$stream` stub's `dispose` can wake a parked reader.
+ */
+function watchStub(control: WatchControl): AsyncIterable<WatchFrame> & { stop(): void } {
+  const queue: WatchFrame[] = [{ kind: 'ready' }]
+  let wake: (() => void) | undefined
+  let stopped = false
+  control.push = frame => { queue.push(frame); wake?.() }
+  control.stop = () => { stopped = true; wake?.() }
+  return {
+    [Symbol.asyncIterator]: async function* () {
+      try {
+        while (!stopped) {
+          while (queue.length > 0) yield queue.shift()!
+          if (!stopped) await new Promise<void>(resolve => { wake = resolve })
+          wake = undefined
+        }
+      } finally { stopped = true }
+    },
+    stop: () => { control.stop() },
+  }
+}
+
+/**
+ * The `$stream` supervisor's stand-in: iterates `open`'s frames once,
+ * wrapping each as `{ value, accept }`. There is no reconnect supervision —
+ * a stubbed stream that ends simply ends.
+ */
+function streamStub(options: { name: string; open: (signal: AbortSignal) => AsyncIterable<WatchFrame>; ended: (accepted: boolean) => Error }) {
+  const inner = options.open(new AbortController().signal) as AsyncIterable<WatchFrame> & { stop?: () => void }
+  const iterator = inner[Symbol.asyncIterator]()
+  let disposed = false
+  const finish = async (): Promise<void> => {
+    if (disposed) return
+    disposed = true
+    inner.stop?.()
+    await iterator.return?.()
+  }
+  return {
+    [Symbol.asyncIterator]() {
+      return (async function* () {
+        try {
+          while (true) {
+            const next = await iterator.next()
+            if (next.done) return
+            yield { value: next.value, accept(): void {} }
+          }
+        } finally { await finish() }
+      })()
+    },
+    dispose: finish,
+  }
+}
+
 /** One slot registration the plugin made. */
 interface Registration {
-  readonly options: { name: string; id?: string; order?: number }
-  readonly component: (owner?: unknown) => unknown
+  readonly options: {
+    name: string
+    id?: string
+    order?: number
+    locale?: string
+    store?: { create(scopeKey?: string): StoreInstance<FilesState, never> }
+    inject?: (sessionId: unknown, actions: unknown) => Record<string, unknown>
+  }
+  readonly component: (props?: unknown) => unknown
 }
 
 const ROOT_A: RootView = { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', access: 'read-write', alias: 'payments' }
@@ -39,6 +132,10 @@ const ROOT_B: RootView = { ordinal: 2, id: 'b', path: '/repos/website', addedAt:
 /** The stub client context, plus what the plugin did with it. */
 interface Harness {
   readonly calls: Call[]
+  /** The forked tree's `workspaceFiles` traffic: `changes` opens, then `list`s. */
+  readonly treeCalls: TreeCall[]
+  /** Addresses the fork asked `sidebarRight.openResourceIn` to open. */
+  readonly opens: OpenCall[]
   readonly registrations: Registration[]
   /** The `files.actions` occupant factory; call it with the slot owner. */
   readonly occupant: (owner?: { absolutePath?: string }) => unknown
@@ -50,6 +147,8 @@ interface Harness {
 /** Apply the real client entry to a recording stub context. */
 function mount(withConnection = true): Harness {
   const calls: Call[] = []
+  const treeCalls: TreeCall[] = []
+  const opens: OpenCall[] = []
   const registrations: Registration[] = []
   const sessionListeners = new Set<() => void>()
   let view: RootsView = { primaryRoot: '/repos/primary', primaryName: 'Platform', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 }
@@ -62,22 +161,31 @@ function mount(withConnection = true): Harness {
         if (endpoint === 'list' && listFails) {
           return { ok: false, error: { code: 'registry-contended', message: 'registry busy' } }
         }
-        if (endpoint === 'files') {
-          return {
-            ok: true,
-            value: {
-              path: payload.path ?? '.',
-              entries: payload.path === undefined || payload.path === '.'
-                ? [{ name: 'src', type: 'directory' }, { name: 'notes.md', type: 'file' }]
-                : [{ name: 'inner.ts', type: 'file' }],
-              truncated: false,
-            },
-          }
-        }
-        if (endpoint === 'readFile') return { ok: true, value: { text: 'preview text', eof: true } }
         return { ok: true, value: view }
       },
     },
+  }
+  const remote = {
+    workspaceFiles: {
+      list: async (sessionId: string, path: string) => {
+        treeCalls.push({ kind: 'list', sessionId, path })
+        return {
+          ok: true,
+          value: {
+            path,
+            truncated: false,
+            entries: path === '/repos/payments'
+              ? [{ name: 'src', type: 'directory' }, { name: 'notes.md', type: 'file' }]
+              : [{ name: 'inner.ts', type: 'file' }],
+          },
+        }
+      },
+      changes: (sessionId: string, path: string) => {
+        treeCalls.push({ kind: 'changes', sessionId, path })
+        return watchStub({ push: () => {}, stop: () => {} })
+      },
+    },
+    $stream: streamStub,
   }
   const ctx = {
     effect: (callback: () => unknown) => {
@@ -90,13 +198,20 @@ function mount(withConnection = true): Harness {
     },
     slots: {
       inject: (_name: string, callback: () => unknown) => { callback(); return () => {} },
-      register: (options: Registration['options'], component: (owner?: unknown) => unknown) => {
+      register: (options: Registration['options'], component: (props?: unknown) => unknown) => {
         registrations.push({ options, component })
         return () => {}
       },
     },
     get: (name: string) => {
       if (name === 'connection') return withConnection ? connection : undefined
+      if (name === 'remote') return remote
+      // `remote.workspaceFiles` is a nested service — lazyFilesRemote reads it
+      // through the inject-free `ctx.get`, so the stub serves it by name.
+      if (name === 'remote.workspaceFiles') return remote.workspaceFiles
+      if (name === 'sidebarRight') {
+        return { openResourceIn: (sessionId: string, address: string) => { opens.push({ sessionId, address }) } }
+      }
       if (name === 'sessions') {
         return {
           list: {
@@ -111,10 +226,27 @@ function mount(withConnection = true): Harness {
   client.apply(ctx as never)
   const registration = registrations.find(item => item.options.name === 'sidebar.right.tab.files.actions')
   if (registration === undefined) throw new Error('no files.actions registration')
+  // What the slot framework synthesizes for a session-scoped registration
+  // that declares a store and an inject factory: one minted instance, its
+  // baked actions, the `useStore` hook bound to its snapshot source, and the
+  // factory's face spread onto the composed props.
+  const instance = registration.options.store?.create('session-1')
+  const useStore = <S,>(selector: (state: FilesState) => S): S => useSyncExternalStore(
+    notify => instance!.subscribe(notify),
+    () => selector(instance!.getSnapshot()),
+  )
   return {
     calls,
+    treeCalls,
+    opens,
     registrations,
-    occupant: registration.component,
+    occupant: owner => registration.component({
+      sessionId: currentSession,
+      useStore,
+      actions: instance?.actions,
+      ...registration.options.inject?.(currentSession, instance?.actions),
+      ...owner,
+    }),
     setView: next => { view = next },
     setSession: next => {
       currentSession = next
@@ -161,10 +293,13 @@ afterEach(() => {
 })
 
 /**
- * Render the occupant inside a header that mirrors the upstream Files pane.
- * The returned `pane` is where the self-drawn tree must portal into.
+ * Render the occupant inside a header that mirrors the upstream Files pane,
+ * itself inside a dockkit tab host. The returned `pane` is where the forked
+ * tree must portal into.
  */
 function renderInPane(harness: Harness, owner = { absolutePath: '/repos/primary' }): { pane: HTMLElement } {
+  const host = document.createElement('section')
+  host.setAttribute('data-dockkit-content', 'tab-1')
   const pane = document.createElement('div')
   pane.setAttribute('data-files-root', '')
   const header = document.createElement('div')
@@ -176,8 +311,9 @@ function renderInPane(harness: Harness, owner = { absolutePath: '/repos/primary'
   const body = document.createElement('div')
   body.setAttribute('data-files-body', '')
   pane.append(header, body)
-  document.body.append(pane)
-  appended.push(pane)
+  host.append(pane)
+  document.body.append(host)
+  appended.push(host)
   render(harness.occupant(owner) as ReactElement, { container: header })
   return { pane }
 }
@@ -243,17 +379,24 @@ describe('the Files-tab root switcher', () => {
     fireEvent.click(screen.getByRole('button', { name: 'payments' }))
 
     await waitFor(() => { expect(switcherKind()).toBe('additional') })
-    const tree = pane.querySelector('.mrfw-switcherTree')
+    const tree = pane.querySelector('.mrfw-ftBody')
     expect(tree).not.toBeNull()
-    // The tree lazily lists the selected root through the files endpoint.
+    // The tree watches, then lazily lists the selected root's absolute path
+    // through workspaceFiles — the verbatim face's own call order.
     await waitFor(() => {
-      expect(harness.calls.some(call => call.endpoint === 'files'
-        && call.payload.sessionId === 'session-1'
-        && call.payload.path === '.'
-        && call.payload.entry?.id === 'a')).toBe(true)
+      expect(harness.treeCalls.some(call => call.kind === 'changes'
+        && call.sessionId === 'session-1'
+        && call.path === '/repos/payments')).toBe(true)
+      expect(harness.treeCalls.some(call => call.kind === 'list'
+        && call.sessionId === 'session-1'
+        && call.path === '/repos/payments')).toBe(true)
     })
-    await waitFor(() => { expect(screen.getByText('▸ src')).toBeTruthy() })
-    expect(screen.getByText('notes.md')).toBeTruthy()
+    // Upstream rows: directory entry hooks and icon+name buttons.
+    await waitFor(() => {
+      expect(pane.querySelector('[data-files-entry="directory"][data-files-path="/repos/payments/src"]')).not.toBeNull()
+    })
+    expect(screen.getByRole('button', { name: 'src' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'notes.md' })).toBeTruthy()
     // The trigger now names the selected root.
     expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('payments')
   })
@@ -268,21 +411,21 @@ describe('the Files-tab root switcher', () => {
 
     await openMenu()
     fireEvent.click(screen.getByRole('button', { name: 'payments' }))
-    await waitFor(() => { expect(pane.querySelector('.mrfw-switcherTree')).not.toBeNull() })
+    await waitFor(() => { expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull() })
 
     const reload = document.querySelector<HTMLElement>('.mrfw-switcherReload')
     expect(reload?.closest('.mrfw-rootSwitcher')).not.toBeNull()
-    const filesBefore = harness.calls.filter(call => call.endpoint === 'files').length
+    const listedBefore = harness.treeCalls.filter(call => call.kind === 'list').length
     fireEvent.click(reload!)
-    // The refresh is in place: the current rows stay while the refetch is
-    // in flight — no loading-note flash.
+    // The refresh is in place: the current rows stay while the relist is
+    // in flight — a ready level never drops back to the loading note.
     expect(pane.textContent).toContain('src')
-    expect(pane.textContent).not.toContain(`${NS}.panel.loading`)
+    expect(pane.textContent).not.toContain('sidebarFiles.loading')
     await waitFor(() => {
-      expect(harness.calls.filter(call => call.endpoint === 'files').length).toBeGreaterThan(filesBefore)
+      expect(harness.treeCalls.filter(call => call.kind === 'list').length).toBeGreaterThan(listedBefore)
     })
     await waitFor(() => { expect(pane.textContent).toContain('src') })
-    expect(pane.textContent).not.toContain(`${NS}.panel.loading`)
+    expect(pane.textContent).not.toContain('sidebarFiles.loading')
   })
 
   it('removes the portal tree when the selection returns to the primary root', async () => {
@@ -292,13 +435,13 @@ describe('the Files-tab root switcher', () => {
 
     await openMenu()
     fireEvent.click(screen.getByRole('button', { name: 'payments' }))
-    await waitFor(() => { expect(pane.querySelector('.mrfw-switcherTree')).not.toBeNull() })
+    await waitFor(() => { expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull() })
 
     await openMenu()
     fireEvent.click(screen.getByRole('button', { name: /panel\.primary/ }))
 
     await waitFor(() => { expect(switcherKind()).toBe('primary') })
-    expect(pane.querySelector('.mrfw-switcherTree')).toBeNull()
+    expect(pane.querySelector('.mrfw-ftBody')).toBeNull()
   })
 
   it('opens the Workspace Folders dialog from the trailing manage item', async () => {
@@ -323,9 +466,12 @@ describe('the Files-tab root switcher', () => {
     fireEvent.click(screen.getByRole('button', { name: 'payments' }))
 
     // The selection still applies to the menu state, but with no pane there
-    // is nowhere to put the tree — the native layout is left alone.
-    await waitFor(() => { expect(switcherKind()).toBe('additional') })
-    expect(document.querySelector('.mrfw-switcherTree')).toBeNull()
+    // is nowhere to put the tree — data-root-kind stays primary so the
+    // native layout is left alone.
+    await waitFor(() => { expect(switcherKind()).toBe('primary') })
+    expect(document.querySelector('.mrfw-ftBody')).toBeNull()
+    // No remote traffic either: no pane means no takeover lifetime at all.
+    expect(harness.treeCalls).toHaveLength(0)
   })
 
   it('lists only the primary root and the manage entry without a connection', async () => {
@@ -346,13 +492,13 @@ describe('the Files-tab root switcher', () => {
 
     await openMenu()
     fireEvent.click(screen.getByRole('button', { name: 'payments' }))
-    await waitFor(() => { expect(pane.querySelector('.mrfw-switcherTree')).not.toBeNull() })
+    await waitFor(() => { expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull() })
 
     harness.setView({ primaryRoot: '/repos/primary', primaryName: 'Platform', roots: [ROOT_B], limit: 16, count: 1 })
     // Opening the menu refetches; the stale selection must not survive it.
     await openMenu()
     await waitFor(() => { expect(switcherKind()).toBe('primary') })
-    expect(pane.querySelector('.mrfw-switcherTree')).toBeNull()
+    expect(pane.querySelector('.mrfw-ftBody')).toBeNull()
   })
 
   it('returns to the primary root when a refresh cannot revalidate the selection', async () => {
@@ -363,14 +509,14 @@ describe('the Files-tab root switcher', () => {
     await openMenu()
     fireEvent.click(screen.getByRole('button', { name: 'payments' }))
     await waitFor(() => { expect(switcherKind()).toBe('additional') })
-    expect(pane.querySelector('.mrfw-switcherTree')).not.toBeNull()
+    expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull()
 
     // The next refresh cannot revalidate the roots at all: the takeover must
     // not keep the native primary tree hidden behind a stale selection.
     harness.setListFails(true)
     await openMenu()
     await waitFor(() => { expect(switcherKind()).toBe('primary') })
-    expect(pane.querySelector('.mrfw-switcherTree')).toBeNull()
+    expect(pane.querySelector('.mrfw-ftBody')).toBeNull()
   })
 
   it('reconciles the selection when the folders manager closes', async () => {
@@ -381,7 +527,7 @@ describe('the Files-tab root switcher', () => {
     await openMenu()
     fireEvent.click(screen.getByRole('button', { name: 'payments' }))
     await waitFor(() => { expect(switcherKind()).toBe('additional') })
-    expect(pane.querySelector('.mrfw-switcherTree')).not.toBeNull()
+    expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull()
 
     await openMenu()
     fireEvent.click(screen.getByRole('button', { name: `${NS}.switcher.manage` }))
@@ -398,7 +544,7 @@ describe('the Files-tab root switcher', () => {
       expect(harness.calls.filter(call => call.endpoint === 'list').length).toBeGreaterThan(listsBefore)
     })
     await waitFor(() => { expect(switcherKind()).toBe('primary') })
-    expect(pane.querySelector('.mrfw-switcherTree')).toBeNull()
+    expect(pane.querySelector('.mrfw-ftBody')).toBeNull()
     expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform')
   })
 
@@ -426,7 +572,7 @@ describe('the Files-tab root switcher', () => {
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.close` }))
     await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('ledger') })
     expect(switcherKind()).toBe('additional')
-    expect(pane.querySelector('.mrfw-switcherTree')).not.toBeNull()
+    expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull()
   })
 
   it('resets the selection and refetches when the session changes', async () => {
@@ -441,7 +587,7 @@ describe('the Files-tab root switcher', () => {
     act(() => { harness.setSession('session-2') })
 
     await waitFor(() => { expect(switcherKind()).toBe('primary') })
-    expect(pane.querySelector('.mrfw-switcherTree')).toBeNull()
+    expect(pane.querySelector('.mrfw-ftBody')).toBeNull()
     await waitFor(() => {
       expect(harness.calls.some(call => call.endpoint === 'list' && call.payload.sessionId === 'session-2')).toBe(true)
     })

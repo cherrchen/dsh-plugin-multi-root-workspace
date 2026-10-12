@@ -14,10 +14,6 @@ export const NS = 'multiRootWorkspace'
 
 /** Chinese copy (the canonical shape). */
 export const zh = {
-  'files.reload': '刷新文件树',
-  'files.empty': '目录为空',
-  'files.truncated': '条目过多，列表已截断',
-  'files.previewTruncated': '仅显示前 200 行',
   'action.label': '工作区目录',
   'action.title': '管理本会话的附属工作目录',
   'switcher.manage': '管理工作区目录…',
@@ -91,10 +87,6 @@ export type Key = keyof typeof zh
 
 /** English copy, pinned to the Chinese key set. */
 export const en = {
-  'files.reload': 'Refresh files',
-  'files.empty': 'Empty directory',
-  'files.truncated': 'More entries were omitted',
-  'files.previewTruncated': 'Showing the first 200 lines',
   'action.label': 'Folders',
   'action.title': 'Manage this session\'s secondary working directories',
   'switcher.manage': 'Manage workspace folders…',

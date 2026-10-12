@@ -143,9 +143,9 @@ export const STYLES = /* css */ `
 
 /* While the switcher names an additional root, the native tree body and its
    reload hide: the reload refreshes the very tree that is no longer
-   visible, and the plugin's own tree is portaled in as the body's sibling.
+   visible, and the plugin's forked tree is portaled in as the body's sibling.
    The header still offers a reload — the switcher's own .mrfw-switcherReload
-   re-keys the portaled tree. The native tree keeps watching in the
+   calls the forked face's refresh. The native tree keeps watching in the
    background, so switching back to the primary root restores it instantly. */
 [data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-body],
 [data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-reload] {
@@ -232,8 +232,8 @@ export const STYLES = /* css */ `
 
 /* The takeover's own reload, standing exactly where the hidden native one
    did: the upstream .tool recipe verbatim (28px hit area, 15px glyph,
-   secondary voice, hover fills). It bumps the portaled tree's reload
-   counter — an in-place refresh, not a remount. */
+   secondary voice, hover fills). It calls the forked face's refresh — an
+   in-place re-list, not a remount. */
 .mrfw-switcherReload {
   flex: none;
   display: inline-flex;
@@ -255,15 +255,103 @@ export const STYLES = /* css */ `
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-/* The self-drawn additional-root tree, portaled into the pane as a sibling
-   of the hidden native body. The pane is a vertical flex column whose body
-   is the stretch item, so the same recipe makes this tree take over the
-   vacated space and scroll its own overflow. */
-.mrfw-switcherTree {
+/* ── files-tree fork (verbatim rules, renamed classes) ─────────────────────
+   Copied from upstream's FilesBody.module.css (ui-sidebar-files @
+   0.2.1-alpha.2) with local names mapped to mrfw-ft* so the rules cannot
+   collide with host DOM — and so the fork's own body (which must NOT carry
+   data-files-body) stays visible while the rules above hide the native one.
+   The header-only rules (root/header/path/tool/status/statusLine/titleIcon)
+   belong to the upstream shell this fork drops and are not mapped. Fork sync
+   re-diffs the upstream file and re-applies the rename — see
+   src/client/files-tree/FORK.md. */
+
+/* The pane's own .root already supplies the flex column, color, and font;
+   the fork's body takes the same stretch item the hidden native body held,
+   including the workspace list's 2px scrollbar offset and stable gutter. */
+.mrfw-ftBody {
   flex: 1 1 auto;
   min-height: 0;
+  margin-right: 2px;
+  padding: 8px 0 8px 8px;
   overflow: auto;
-  padding: 4px 8px;
+  scrollbar-gutter: stable;
+}
+
+.mrfw-ftBody::-webkit-scrollbar-track {
+  margin: 2px;
+}
+
+.mrfw-ftLevel {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mrfw-ftLevel .mrfw-ftLevel {
+  padding-left: 18px;
+}
+
+.mrfw-ftItem {
+  margin: 0;
+  padding: 0;
+}
+
+/* Rows abut, so the hover fill is the whole row; the tree's air is this
+   inset, not a gap between rows. */
+.mrfw-ftRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 10px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  cursor: pointer;
+}
+
+.mrfw-ftRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* The folder glyph rides the tertiary ink, as the workspace tree's does. */
+.mrfw-ftIcon {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The type's coloured sheet at the folder glyph's 16px; its colour is its own. */
+.mrfw-ftFileIcon {
+  flex: 0 0 auto;
+}
+
+.mrfw-ftName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Neither a file nor a directory: shown so the directory is reported whole,
+   greyed so nobody tries to open it. */
+.mrfw-ftOther {
+  color: var(--dsw-alias-label-tertiary);
+  cursor: default;
+}
+
+.mrfw-ftOther:hover {
+  background: transparent;
+}
+
+.mrfw-ftNote {
+  margin: 0;
+  padding: 3px 10px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
 }
 
 /* ── open-in-app fork (verbatim rules, renamed classes) ───────────────────
@@ -709,11 +797,6 @@ export const STYLES = /* css */ `
   border-radius: 16px;
 }
 
-.mrfw-fileTree { flex-basis: 100%; min-width: 0; }
-.mrfw-fileLevel { list-style: none; padding-left: 16px; margin: 4px 0; }
-.mrfw-fileEntry { display: block; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; text-align: left; cursor: pointer; padding: 4px; overflow-wrap: anywhere; }
-.mrfw-fileEntry:focus-visible { outline: 1px solid var(--dsw-alias-brand-primary); }
-.mrfw-filePreview { max-height: 320px; overflow: auto; padding: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; }
 .mrfw-actions .mrfw-iconBtn {
   width: 32px;
 }

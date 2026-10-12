@@ -92,7 +92,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 |---|---|---|
 | P1 | Additional Root LSP workspace routing | 后续评审补充；B1 将附加根内文件路由至该仓库 workspaceRoot，保留相对路径的主根 cwd 语义；实现与验证状态见路线账本 |
 | P1 | Windows 内核级多根（pwsh 方言 / ACL） | 第一期就已登记；B2 的受限 PowerShell/PTY 使用 root-set SID 授权；实现与平台验证状态见路线账本 |
-| P1 | `workspace-files`（Client 文件树）多根 confine | 第一期就已登记；B3 按当前会话 scope 浏览附加根，lazy tree 与文本 preview 现由 Files 页签根选择器承载（对话框行内树已下线，见 [ADR-0015](../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)）；实现与验证状态见路线账本 |
+| P1 | `workspace-files`（Client 文件树）多根 confine | 第一期就已登记；B3 按当前会话 scope 浏览附加根，Files 页签根选择器选中附加根时以逐字节复刻的上游 Files 树体接管树区（懒加载、目录 watch 自动刷新、文件点击进宿主 viewer；对话框行内树与私有 `files`/`readFile` 端点已下线，见 [ADR-0015](../decisions/ADR-0015-files-tab-plugin-owned-browsing.md) 与 [ADR-0016](../decisions/ADR-0016-files-tab-native-tree-fork.md)）；实现与验证状态见路线账本 |
 | P2 | Read-only root / per-root / per-tool 权限 | 第一期就已登记；初版附加根与主根同权（§16）。B4 已实现：根记录携带 access（持久化用 `recordedPath` / `readOnlyRecordedPath` 区分，domain v1 不变、降级 fail closed）；`multi-root-scope` 行配置 `toolAccess` 按工具封顶附加根写权限；实现见 [B4–B8 计划](../plans/active/2026-10-11-b4-b8-p2.md) 与 [ADR-0013](../decisions/ADR-0013-per-root-and-per-tool-access.md) |
 | P2 | Mutation 前强制 reclassify | 后续评审补充；避免缓存的 `missing` / `redirected` 状态让 `add` 后立刻 invalid。B5 已实现：每个 mutation 在串行队列内先以存储记录重分类再校验，见 [ADR-0004 修订](../decisions/ADR-0004-root-registry-persistence-and-validation.md) |
 | P2 | Additional Root 数量上限 | 后续评审补充；防止 realpath/stat、sandbox argv 与 prompt 预算随根数量无界增长。B6 已实现：`maxAdditionalRoots` 默认 16、顶 64，超限存量照授只拒新增，见 [ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md) |

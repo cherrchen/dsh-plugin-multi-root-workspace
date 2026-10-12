@@ -314,9 +314,9 @@ CI 主车道从 `SUPPORTED_DSH_RELEASES` 派生版本轴，与 Linux / macOS / �
 |---|---|---|
 | B1 Additional Root LSP routing | additive 公共 query 包装，按 canonical file target 选择根，上游 stdio provider 负责独立初始化与池化 | 真实协议服务器 e2e、路由与撤销、取消、卸载恢复通过；九个支持版本的构建、类型与全量测试通过 |
 | B2 Windows kernel multi-root | 插件 runner 调用公开 AclSandbox，root-set capability SID、自有 private temp、保留失败签名与 payload | SID / argv / fail-closed 结构回归通过；2026-10-03 Windows 本机原生执行通过；2026-10-11 起 Windows CI 在全部 11 个支持版本上原生执行内核探针、冒烟与原生用例，证据见[加固记录](#b1b3-加固与-windows-全量验证2026-10-11) |
-| B3 workspace-files / client tree | 公共 list 和新版 path-watch 按根隔离；Connection 新增 files/readFile；对话框 lazy tree + preview，原生 Files actions slot 提供入口 | 真实 registry/fs 的包含性、跨主根、symlink/redirect、I/O 中撤销与 caps 回归通过；客户端 lazy tree、响应校验与可选 Files 入口通过；全量本地 gate 通过 |
+| B3 workspace-files / client tree | 公共 list 和新版 path-watch 按根隔离；Connection 新增 files/readFile；对话框 lazy tree + preview，原生 Files actions slot 提供入口（**2026-10-12 P11 修订**：面板 `files`/`readFile` 端点与对话框内树随后移除——浏览统一在 Files 页签由逐字节复刻的上游树体承担，数据源正是本行的 list/watch 路由，见下方 P1–P11 节） | 真实 registry/fs 的包含性、跨主根、symlink/redirect、I/O 中撤销与 caps 回归通过；客户端 lazy tree、响应校验与可选 Files 入口通过；全量本地 gate 通过 |
 
-新增可选 peer 纳入原精确版本合同，allowlist 无变化。旧版会话级 watch 原样保留；附加根树手动刷新。已启动的 Windows/其他内核子进程使用启动时 scope，根集合变更限制后续进程。Windows 的 partial enforcement 与 caller-owned 目录条件继承上游。
+新增可选 peer 纳入原精确版本合同，allowlist 无变化。旧版会话级 watch 原样保留；附加根树手动刷新（P11 起为原生 watch 自动刷新，同条修订）。已启动的 Windows/其他内核子进程使用启动时 scope，根集合变更限制后续进程。Windows 的 partial enforcement 与 caller-owned 目录条件继承上游。
 
 本地验收（macOS，2026-10-02）：
 
@@ -451,9 +451,9 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 
 同时在外层 Agent 沙箱内验证 runner 不可用路径：Seatbelt 返回 `sandbox_apply: Operation not permitted`，journey **55 passed / 0 failed / 2 skipped**，两条腿均明确跳过 shell cap 与命令产物，fs 与模型上下文检查仍执行。此记录只证明本机可用 / 不可用两种路径；本轮跨版本、Linux 与 Windows 结果须以本次推送触发的 CI 为准。
 
-### Files 头部根浏览 P1–P10（2026-10-12，未发布）
+### Files 头部根浏览 P1–P11（2026-10-12，未发布）
 
-实施计划见 [files-header-root-browsing](../completed/2026-10-12-files-header-root-browsing.md)（P1+P2 为原计划两阶段，P3–P10 为目检后追加，每阶段一个提交），决策见 [ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
+实施计划见 [files-header-root-browsing](../completed/2026-10-12-files-header-root-browsing.md)（P1+P2 为原计划两阶段，P3–P11 为目检后追加，每阶段一个提交），决策见 [ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
 
 - **P1**（提交 `7e3232a`，后改写为 `79f6934`）：`files.actions` 的 launcher 改为仅图标齿轮钮并经 flex `order` 前移到 reload 左侧；footer 触发器同步换齿轮。
 - **P2**（提交 `252b927`）：该 occupant 升级为 `RootSwitcher`——伪装成 PathLabel 的触发钮 + `Menu`（主根、`list` RPC 返回的附加根、footer 的「管理…」入口）；选中附加根时 `closest('[data-files-root]')` 定位 pane，`createPortal` 挂入 `RootFileTree` 接管树区，`:has()` 规则同条件隐藏原生 path/body/reload；owner 缺 `absolutePath` 时退回 P1 compact launcher。对话框行内 `RootFileTree` 与 `files.browse` 词条下线。`data-files-*` 钩子（非槽位契约）列入 `.agent/note` 升版目检与故障排查条目。
@@ -465,5 +465,6 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 - **P8**：只读→读写升级的 `window.confirm` 换成 ui-primitives `Modal` 确认层——覆盖在工作区目录对话框之上，footer 为普通取消钮 + 红色确认钮（`.mrfw-btnDanger` 补实底配方）；Escape/遮罩即取消，portaled Modal 的 Escape 也纳入底层对话框的守卫；降级方向照旧无确认直接执行。
 - **P9**：修复 open-in-app 分离按钮在附加根态仍路由到主根——上游 `files.actions` 槽位的 `absolutePath` 永远是原生树根。`:has()` 规则隐藏原生 `data-open-target="directory"` 元素（整项隐藏 + 内层兜底双选择器），`src/client/open-in-app/` 逐字节复刻上游 `ui-open-in-app` client 包（基线 `d743267388` = `0.2.1-alpha.2`，`FORK.md` 钉住清单与同步步骤）在原位渲染同款控件、`absolutePath` 换为选中根；宿主路由不校验根归属，locale `bind('open-in-app')` 复用上游词典，应用选择共享 `dsh.open-in-app.choice`。css 走 `*.module.css.ts` shim（类名前缀 `mrfw-open-`）；`*Regular` 图标族缺席的运行时不渲染按钮（同型降级）；`dsh-client-store` 因此进入 bundle module-table；`workspace.openLocal` 快捷键仍开主根（已知限制）。**遗留（P10 已修）**：复刻钮与窗口右缘间距仍有像素级偏差（容器 gap + 整项隐藏两轮修正后目检仍报残留，根因与修复见 P10）。
 - **P10**：修复 P9 遗留的复刻钮 4px 左偏——根因查明：上游 `ui-renderer` 给每个槽位渲染点包 `<div data-slot="sidebar.right.tab.files.actions" style="display:contents">`，`.header` 的子项是该包装而非 occupant 的 Menu 锚 span，P9 的 `> * > *` 选择器命中包装自身、被其内联 `display:contents` 压成惰性；只有内层兜底生效，空锚 span 仍以零宽 flex 项多占一个 header gap。第一选择器改经 `data-slot` 锚点定位 occupant 项，`> * > *` 形态删除；新增 jsdom DOM 回归（`element.matches()` 钉住命中面：命中原生锚 span、不命中包装 / 选择器 / 复刻锚，主根态全不命中）。
+- **P11**：自绘 `RootFileTree` 换成 `src/client/files-tree/` 下逐字节复刻的上游 `ui-sidebar-files` 树体（基线 `d743267388` = `0.2.1-alpha.2`；`directory-node`/`face`/`store`/`FilesBody.module.css` 字节级一致，行级 `Entry`/`Level` 逐字节，唯一改写是外壳函数——根由 `sessions.byId` cwd 换成选中根 prop、tab 身份经 `data-dockkit-content` 取得、生命周期由 takeover AbortController 供给、文件经 `fileAddressFor(sessionId, undefined, path)` + `sidebarRight.openResourceIn` 交给 viewer 打开）。`files.actions` 注册按上游同款声明 `store`/`inject`（session 域合法形态，`ui-open-in-app` 有先例）；列目录与 watch 直走 `remote.workspaceFiles.list/changes` 的按根路由，remote 缺席时 lazy proxy 折成 `gateway/internal` 失败。插件私有 `files`/`readFile` 端点、`browseRoot`、`FilesView`/`FilePreview`、`RootFileTree.tsx`、`panel-files.ts` 与对应词条整体删除。复刻体类名 `mrfw-ft*`、不携带 `data-files-root`/`data-files-body`；primitives 探针失败时整树不渲染（同型降级）。附带收益：附加根树获得原生 watch 自动刷新与按 tab 的滚动/展开记忆。新增 devDep `dsh-client-ui-dockkit`、`dsh-util-workspace-path`、`dsh-api-remotes`、`dsh-client-ui-session` 全部钉在 dev pin；清单与同步步骤见 `src/client/files-tree/FORK.md`。
 
-本机开发 pin `0.2.1-alpha.2`：P1 与 P2 各自完成时 `pnpm lint` / `typecheck` / `test` / `build` / `docs:check` / `smoke`（compose 46、behavior 99、journey 62）全绿；P10 完成时 lint / typecheck / test / build / docs:check 全绿（未跑 smoke）。web 组合三态（无附加根原生观感 / 附加根选中接管 / 切回主根还原）的目检见计划 Validation 记录。
+本机开发 pin `0.2.1-alpha.2`：P1 与 P2 各自完成时 `pnpm lint` / `typecheck` / `test` / `build` / `docs:check` / `smoke`（compose 46、behavior 99、journey 62）全绿；P10 完成时 lint / typecheck / test / build / docs:check 全绿（未跑 smoke）；P11 完成时 lint / typecheck / test（37 文件 537 passed / 22 skipped）/ build / docs:check / smoke（compose 46、behavior 99、journey 62）全绿。web 组合三态（无附加根原生观感 / 附加根选中接管 / 切回主根还原）的目检见计划 Validation 记录。

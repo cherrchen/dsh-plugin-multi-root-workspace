@@ -70,7 +70,9 @@ describe('the root-switcher rules', () => {
   })
 
   it('gives the portaled tree the stretch-and-scroll recipe of the native body', () => {
-    expect(STYLES).toMatch(/\.mrfw-switcherTree\s*\{[^}]*flex:\s*1 1 auto[^}]*min-height:\s*0[^}]*overflow:\s*auto/s)
+    // The fork's own body class — never data-files-body, which the hide rule
+    // above would switch off.
+    expect(STYLES).toMatch(/\.mrfw-ftBody\s*\{[^}]*flex:\s*1 1 auto[^}]*min-height:\s*0[^}]*overflow:\s*auto/s)
   })
 })
 

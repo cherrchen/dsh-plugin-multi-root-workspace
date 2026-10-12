@@ -49,6 +49,38 @@ export const IconRightUpOutlineRegular = icon('right-up')
 export const IconFolderOpenOutlineRegular = icon('folder-open')
 export const IconWarningOutlineRegular = icon('warning')
 
+// The names the files-tree fork spells verbatim: the folder pair the tree
+// rows toggle between (Regular in 0.1.7+, pixel-sized before it) and the
+// file-type pair every supported release carries.
+export const IconFolderCloseRegular = icon('folder-close')
+export const IconFolderOpenRegular = icon('folder-open')
+export const IconFolderOpen16 = icon('folder-open')
+
+/** Minimal `classifyFileType` mirror: a kind string by extension. */
+export function classifyFileType(path: string): string {
+  const name = path.split('/').pop() ?? path
+  const dot = name.lastIndexOf('.')
+  if (dot < 0) return 'file'
+  const extension = name.slice(dot + 1).toLowerCase()
+  return ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs'].includes(extension) ? 'code'
+    : ['md', 'markdown', 'txt'].includes(extension) ? 'text'
+    : 'file'
+}
+
+/** Minimal `FileTypeIcon` mirror: the kind lands on `data-icon`. */
+export function FileTypeIcon(props: IconProps & {
+  readonly kind?: string
+  readonly path?: string
+}): ReactNode {
+  const kind = props.kind ?? (props.path === undefined ? 'file' : classifyFileType(props.path))
+  return createElement('svg', {
+    'data-icon': `file-${kind}`,
+    className: props.className,
+    width: props.size ?? 16,
+    height: props.size ?? 16,
+  })
+}
+
 /** Minimal `Tooltip` mirror: the wrapper renders its content in place. */
 export function Tooltip(props: {
   readonly label?: ReactNode

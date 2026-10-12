@@ -50,7 +50,6 @@ import {
   type RootsView,
 } from './contract.ts'
 import type { MultiRootRegistry } from './registry.ts'
-import { browseRoot } from './panel-files.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
 import {
   availableRoots,
@@ -193,8 +192,8 @@ export function apply(ctx: Context): void {
       ctx.logger.warn('multi-root: connection resolved without the service; the panel channel is not mounted')
       return
     }
-    const dispose = connection.rpc.handle(PANEL_CHANNEL, async (endpoint, payload, signal) =>
-      await dispatchPanelRequest(ctx, endpoint, payload, signal))
+    const dispose = connection.rpc.handle(PANEL_CHANNEL, async (endpoint, payload) =>
+      await dispatchPanelRequest(ctx, endpoint, payload))
     return () => { void dispose() }
   })
 }
@@ -482,7 +481,6 @@ async function dispatchPanelRequest(
   ctx: Context,
   endpoint: string,
   payload: unknown,
-  signal: AbortSignal,
 ): Promise<ConnectionRpcResult<unknown>> {
   try {
     const parsed = parsePanelCall(endpoint, payload)
@@ -493,9 +491,6 @@ async function dispatchPanelRequest(
     const registry = ctx.multiRootRegistry
     const primaryRoot = resolvePanelPrimaryRoot(ctx, request.sessionId)
     switch (request.endpoint) {
-      case 'files':
-      case 'readFile':
-        return { ok: true, value: await browseRoot(ctx, primaryRoot, request, signal) }
       case 'list':
         return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       case 'add': {

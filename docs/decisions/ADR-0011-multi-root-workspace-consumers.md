@@ -95,6 +95,15 @@ Status 保持 **Accepted**；`files` / `readFile` 端点、隔离与重验语义
 - 「`files.actions` 时加入打开该对话框的动作」一句仍成立，但入口形态变为选择器菜单的「管理工作区目录…」末项。
 - 决策理由（原生树不可重指、`data-*` 钩子降级模型、被拒方案）见 [ADR-0015](./ADR-0015-files-tab-plugin-owned-browsing.md)。
 
+## 修订：面板 `files` / `readFile` 端点下线（2026-10-12，Amendment）
+
+Status 保持 **Accepted**；`workspaceFiles.list` / `changes` / `read` 的 host 侧按根路由不变——它是 P11 复刻树的数据源。
+
+- Files 页签的附加根树从自绘 `RootFileTree` 换成 `src/client/files-tree/` 下逐字节复刻的上游组件：列目录与目录 watch 直接调 `remote.workspaceFiles.list/changes`（按绝对路径路由到附加根，即本节包装的就位通路），文件点击经 `dsh-resource://file/session/<id>/<abs-path>` 交给 viewer——`workspaceFiles.read` 本就不做 workspace 围限，宿主侧无须再为本插件单开读取通道。
+- 因此插件私有的 `files` / `readFile` 面板端点、`FilesView` / `FilePreview` 契约、`RootFileTree`、`src/panel-files.ts` 整体删除，不留回退；面板 RPC 只剩根管理与 reveal。
+- Windows 词法纪律随之收敛：`unsupported-path` 仍由 fs/scope 层统一拒绝；原「面板文件端点词法拒绝反斜杠路径」一条随端点消失，剩余面是复刻树把绝对路径原样交给 `workspaceFiles.list/changes`——同一层词法校验继续兜底。
+- 复刻的同步义务、store/inject 声明与 DOM 纪律见 [ADR-0015](./ADR-0015-files-tab-plugin-owned-browsing.md) 修订节与 `src/client/files-tree/FORK.md`。
+
 ## Related Documents
 
 - [架构](../architecture/multi-root-workspace.md)

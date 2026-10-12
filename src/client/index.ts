@@ -22,6 +22,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
+// Merges `sessionId` onto session-scope composed props and `SessionId` onto
+// the inject factory's first parameter — the same merge upstream's Files
+// registration compiles against.
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { createElement } from 'react'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
@@ -32,6 +36,7 @@ import { STYLES } from './styles.ts'
 import { RootSwitcher } from './RootSwitcher.tsx'
 import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction.tsx'
 import { OPEN_IN_APP_NS, createOpenInAppAdapter } from './open-in-app/adapter.tsx'
+import { FILES_TREE_NS, createFilesTreeSeats, createFilesTreeSurface } from './files-tree/adapter.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -96,6 +101,13 @@ export function apply(ctx: ClientContext): void {
     t: ctx.locale.bind(OPEN_IN_APP_NS) as unknown as (key: string, params?: Record<string, unknown>) => string,
     shortcuts: readService<{ catalog?: ObservableSnapshot<readonly ShortcutCatalogEntry[]> }>(ctx, 'shortcuts')?.catalog,
   })
+  // The files-tree fork's seats: an exclusive store and the verbatim face
+  // over a lazily resolved `remote` — the same declaration upstream's own
+  // Files registration makes, plus the session-bound open route. The fork
+  // binds upstream's `sidebarFiles` namespace so its rows say exactly what
+  // the native tree says.
+  const filesTreeSeats = createFilesTreeSeats(ctx)
+  const filesTreeT = ctx.locale.bind(FILES_TREE_NS)
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
@@ -122,14 +134,25 @@ export function apply(ctx: ClientContext): void {
   // Optional: old surfaces without the Files actions slot retain the footer entry.
   ctx.slots.inject('sidebar.right.tab.files.actions', () => ctx.slots.register({
     name: 'sidebar.right.tab.files.actions', id: SLOT_ID, order: 50,
-  }, owner => {
+    // The fork's store + face, declared exactly as upstream declares them on
+    // its own registration: the framework mints the store per session, runs
+    // the inject factory with (sessionId, bound actions), and spreads the
+    // face's members onto the composed props.
+    store: filesTreeSeats.store,
+    inject: filesTreeSeats.inject,
+  }, function FilesActionsOccupant(props) {
     // The slot contract promises owner.absolutePath — the pane's primary root.
     // A runtime that stops carrying it falls back to the icon-only launcher
     // rather than to a nameless switcher.
-    const absolutePath = (owner as { readonly absolutePath?: string } | undefined)?.absolutePath
+    const absolutePath = (props as { readonly absolutePath?: string } | undefined)?.absolutePath
+    // The wrapper is rebuilt per render but every member it carries is a
+    // framework-stable prop or an apply-level constant, so the switcher's
+    // takeover effect — which keys on the selection, not the wrapper —
+    // never restarts because of it. `undefined` means the fork cannot mount.
+    const filesTree = createFilesTreeSurface(props, filesTreeT)
     return absolutePath === undefined
       ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId, subscribeSession, t, compact: true })
-      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId, subscribeSession, t, openInApp })
+      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId, subscribeSession, t, openInApp, filesTree })
   }))
 }
 
