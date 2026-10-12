@@ -99,12 +99,104 @@ export const STYLES = /* css */ `
 
 /* Pin the upstream path label ahead of the launcher — but only while this
    plugin is in the row: the :has() guard keeps a rule that names an
-   upstream element inert whenever the launcher is absent. Both selectors
-   depend on upstream's DOM shape, which is not part of the slot contract;
-   if it changes, the rules simply stop matching and the launcher falls back
-   to its in-slot position — a silent degradation, never a broken header. */
-[data-files-root]:has(.mrfw-fileLauncher) [data-files-path] {
+   upstream element inert whenever the launcher is absent. The
+   :not([data-files-entry]) qualifier is load-bearing, not decorative:
+   upstream puts data-files-path on EVERY tree row too (the row's own
+   absolute path), so an unqualified selector would match the whole tree,
+   not just the header's PathLabel. Both selectors depend on upstream's DOM
+   shape, which is not part of the slot contract; if it changes, the rules
+   simply stop matching and the launcher falls back to its in-slot position —
+   a silent degradation, never a broken header. */
+[data-files-root]:has(.mrfw-fileLauncher) [data-files-path]:not([data-files-entry]) {
   order: -2;
+}
+
+/* The root switcher is the launcher's grown-up form on runtimes whose
+   files.actions owner carries absolutePath. It poses as the path label, so
+   it takes the path's flex position and stretch: order: -1 ahead of every
+   order-0 sibling, and a growing min-width:0 item so the label can
+   ellipsize instead of pushing the header controls out. */
+.mrfw-rootSwitcher {
+  order: -1;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+/* While the switcher exists it replaces the upstream path label outright —
+   the :has() guard again keeps the upstream-naming rule inert unless this
+   plugin is actually in the row. :not([data-files-entry]) is what confines
+   the rule to the header: every tree row carries data-files-path with its
+   own path as the value, and only the PathLabel carries it bare. Without
+   the qualifier this display:none would blank the entire native tree. */
+[data-files-root]:has(.mrfw-rootSwitcher) [data-files-path]:not([data-files-entry]) {
+  display: none;
+}
+
+/* While the switcher names an additional root, the native tree body and its
+   reload hide: the reload refreshes the very tree that is no longer
+   visible, and the plugin's own tree is portaled in as the body's sibling.
+   The native tree keeps watching in the background, so switching back to
+   the primary root restores it instantly. */
+[data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-body],
+[data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-reload] {
+  display: none;
+}
+
+/* The trigger borrows the path label's look: quiet text with a folder
+   glyph, the hover of the neighboring header buttons, and the overflow
+   behavior PathLabel itself uses in a narrow header. */
+.mrfw-rootSwitchBtn {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  margin: 0;
+  padding: 0 4px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.mrfw-rootSwitchBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-rootSwitchBtn .mrfw-triggerIcon {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-rootSwitchLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mrfw-rootSwitchChevron {
+  margin-left: auto;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The self-drawn additional-root tree, portaled into the pane as a sibling
+   of the hidden native body. The pane is a vertical flex column whose body
+   is the stretch item, so the same recipe makes this tree take over the
+   vacated space and scroll its own overflow. */
+.mrfw-switcherTree {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 8px;
 }
 
 .mrfw-overlay {

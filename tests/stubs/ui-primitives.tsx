@@ -49,21 +49,52 @@ interface StubMenuItem {
   readonly label: ReactNode
   readonly disabled?: boolean
   readonly danger?: boolean
+  readonly icon?: ReactNode
 }
+
+/** Minimal `MenuEntry` mirror: a row, a hairline, or a heading. */
+type StubMenuEntry =
+  | StubMenuItem
+  | { readonly type: 'separator'; readonly id: string }
+  | { readonly type: 'label'; readonly id: string; readonly text: string }
 
 /**
  * The anchored menu: the anchor renders in place, the open list portals to
- * `document.body` as one button per item — the same observable shape the real
- * `Menu` gives a jsdom test (placement, graceful close, and submenu behavior
- * are visual concerns this stub deliberately drops).
+ * `document.body` with one button per item — the same observable shape the
+ * real `Menu` gives a jsdom test (placement, graceful close, and submenu
+ * behavior are visual concerns this stub deliberately drops).
  */
 export function Menu(props: {
   open: boolean
   anchor: ReactNode
-  items: readonly StubMenuItem[]
+  items: readonly StubMenuEntry[]
+  footer?: readonly StubMenuEntry[]
+  selectedId?: string
   onSelect: (id: string) => void
   onClose: () => void
 }): ReactNode {
+  const entry = (item: StubMenuEntry): ReactNode => {
+    if ('type' in item && item.type === 'separator') {
+      return createElement('hr', { key: item.id, 'data-separator': item.id })
+    }
+    if ('type' in item && item.type === 'label') {
+      return createElement('div', { key: item.id, 'data-menu-label': item.id }, item.text)
+    }
+    const row = item as StubMenuItem
+    return createElement(
+      'button',
+      {
+        key: row.id,
+        type: 'button',
+        disabled: row.disabled === true,
+        'data-danger': row.danger === true ? 'true' : undefined,
+        'data-selected': props.selectedId === row.id ? 'true' : undefined,
+        onClick: () => props.onSelect(row.id),
+      },
+      row.icon,
+      row.label,
+    )
+  }
   return createElement(
     Fragment,
     null,
@@ -73,19 +104,8 @@ export function Menu(props: {
           createElement(
             'div',
             { 'data-menu': 'true' },
-            props.items.map(item =>
-              createElement(
-                'button',
-                {
-                  key: item.id,
-                  type: 'button',
-                  disabled: item.disabled === true,
-                  'data-danger': item.danger === true ? 'true' : undefined,
-                  onClick: () => props.onSelect(item.id),
-                },
-                item.label,
-              ),
-            ),
+            props.items.map(entry),
+            (props.footer ?? []).map(entry),
           ),
           document.body,
         )

@@ -14,13 +14,13 @@ export const NS = 'multiRootWorkspace'
 
 /** Chinese copy (the canonical shape). */
 export const zh = {
-  'files.browse': '浏览文件',
   'files.reload': '刷新文件树',
   'files.empty': '目录为空',
   'files.truncated': '条目过多，列表已截断',
   'files.previewTruncated': '仅显示前 200 行',
   'action.label': '工作区目录',
   'action.title': '管理本会话的附属工作目录',
+  'switcher.manage': '管理工作区目录…',
   'panel.title': '工作区目录',
   'panel.subtitle': '主目录和附加目录遵循当前沙箱模式；workspace-write 可写，read-only 下都不可写。',
   'panel.primary': '主根',
@@ -89,13 +89,13 @@ export type Key = keyof typeof zh
 
 /** English copy, pinned to the Chinese key set. */
 export const en = {
-  'files.browse': 'Browse files',
   'files.reload': 'Refresh files',
   'files.empty': 'Empty directory',
   'files.truncated': 'More entries were omitted',
   'files.previewTruncated': 'Showing the first 200 lines',
   'action.label': 'Folders',
   'action.title': 'Manage this session\'s secondary working directories',
+  'switcher.manage': 'Manage workspace folders…',
   'panel.title': 'Workspace folders',
   'panel.subtitle': 'The primary and additional folders follow the current sandbox mode: writable in workspace-write and read-only in read-only.',
   'panel.primary': 'Primary root',

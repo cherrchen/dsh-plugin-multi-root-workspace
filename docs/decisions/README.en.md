@@ -33,6 +33,7 @@ Architecture Decision Records (ADRs), capturing important architecture and engin
 - [ADR-0012-session-origin-and-effective-cwd.md](./ADR-0012-session-origin-and-effective-cwd.md) — Separates session origin from effective cwd, including LSP caller identity, instruction touches, Worktrees and process snapshots (Accepted).
 - [ADR-0013-per-root-and-per-tool-access.md](./ADR-0013-per-root-and-per-tool-access.md) — Per-root read-write/read-only access with a downgrade-safe v1 persistence encoding, `setAccess` upgrade gating, the Windows root-set SID, and `toolAccess` per-tool caps via the AsyncLocalStorage dispatch context (Accepted).
 - [ADR-0014-root-limit-and-provider-conflict.md](./ADR-0014-root-limit-and-provider-conflict.md) — A per-primary stored-record cap (default 16, ceiling 64, over-limit history keeps granting) and the `multi-root-providers` brand gate that fails closed when a foreign provider owns `ctx.fs`/`ctx.sandbox` (Accepted).
+- [ADR-0015-files-tab-plugin-owned-browsing.md](./ADR-0015-files-tab-plugin-owned-browsing.md) (Chinese) — The Files-tab root switcher: the native tree cannot be retargeted, so the plugin's own `RootFileTree` takes over the tree area through `createPortal`, degrading silently when the `data-files-*` hooks stop matching (Accepted).
 
 Do not pre-create empty ADR files; add one only when a real decision is made.
 

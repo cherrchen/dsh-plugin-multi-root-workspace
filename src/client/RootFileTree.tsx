@@ -11,15 +11,16 @@ export interface RootFileTreeProps {
   t: Translate
 }
 
+/**
+ * The tree the Files-tab root switcher portals into the pane it takes over:
+ * it lists the selected root outright — no Browse gate — and keeps the manual
+ * reload because nothing else refreshes this tree.
+ */
 export function RootFileTree(props: RootFileTreeProps): ReactNode {
-  const [open, setOpen] = useState(false)
   const [generation, setGeneration] = useState(0)
   return <div className="mrfw-fileTree">
-    <button className="mrfw-btn mrfw-btnGhost" type="button" aria-expanded={open} onClick={() => { setOpen(value => !value) }}>{props.t('files.browse')}</button>
-    {open && <>
-      <button className="mrfw-btn mrfw-btnGhost" type="button" onClick={() => { setGeneration(value => value + 1) }}>{props.t('files.reload')}</button>
-      <Directory key={generation} {...props} path="." />
-    </>}
+    <button className="mrfw-btn mrfw-btnGhost" type="button" onClick={() => { setGeneration(value => value + 1) }}>{props.t('files.reload')}</button>
+    <Directory key={generation} {...props} path="." />
   </div>
 }
 

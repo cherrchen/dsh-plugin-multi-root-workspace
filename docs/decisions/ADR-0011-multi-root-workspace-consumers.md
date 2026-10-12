@@ -42,7 +42,7 @@ restricted-token 的读取、网络、Everyone/hard-link 等边界及各版本�
 
 浏览器复用 ADR-0005 的 Connection 通道，增加 `files` / `readFile`，每个端点有自己的 response schema；均必须有 live `sessionId`。host 从 session 得主根，`registry.refresh()` 重验根，再根据 exact entry 定位；只接收所选根内的相对路径，canonical 包含性拦截 traversal / symlink escape，I/O 后重验登记与路径身份。新端点复用原 `workspaceFiles.list` / `read`，保留 host 配置的资源上限。preview 最多请求前 200 行，非 EOF 明示截断。
 
-附加根的 lazy tree 放在现有 Workspace Folders 对话框，每个 available 根可展开；目录点击加载下一层，文件点击显示文本 preview，手动刷新重建树。主根的原生 Files tab 保留；存在 `sidebar.right.tab.files.actions` 时加入打开该对话框的动作，旧版仍从 footer 进入。浏览器不替换 DOM，不建立 Typert namespace，不安装一份私有客户端服务身份。
+附加根的 lazy tree 最初放在现有 Workspace Folders 对话框，每个 available 根可展开；目录点击加载下一层，文件点击显示文本 preview，手动刷新重建树。主根的原生 Files tab 保留；存在 `sidebar.right.tab.files.actions` 时加入打开该对话框的动作，旧版仍从 footer 进入。浏览器不替换 DOM，不建立 Typert namespace，不安装一份私有客户端服务身份。（**2026-10-12 修订**：浏览面迁往 Files 页签根选择器，对话框回归纯管理——见文末修订节与 [ADR-0015](./ADR-0015-files-tab-plugin-owned-browsing.md)。）
 
 ### 兼容与验证
 
@@ -86,6 +86,14 @@ Status 保持 **Accepted**；本节按 Windows CI 原生执行的实测结果补
 ### 验证义务（本修订新增）
 
 Windows 内核证据不得再靠结构测试替代：`kernel:probe` 用真实上游 runner 验证 `windows-acl`（允许写 + 兄弟目录被拒，缺一不可）并导出方言；三冒烟在 Windows 以 pwsh 原生运行；`pack:check` 与 `smoke:packed` 证明 tarball 成员完整且安装副本可启动。CI 增加 `gate` job，矩阵被 skip/cancel 不得显示为成功。
+
+## 修订：懒加载树迁往 Files 页签（2026-10-12，Amendment）
+
+Status 保持 **Accepted**；`files` / `readFile` 端点、隔离与重验语义不变，改变的是浏览器里这棵树的位置。
+
+- 对话框行内的 `RootFileTree` 移除，Workspace Folders 回归纯管理；浏览统一在 Files 页签：`files.actions` occupant 升级为 `RootSwitcher`，选中附加根时以 `createPortal` 把同一棵树挂成 `[data-files-body]` 的兄弟节点接管树区，切回主根恢复原生视图。
+- 「`files.actions` 时加入打开该对话框的动作」一句仍成立，但入口形态变为选择器菜单的「管理工作区目录…」末项。
+- 决策理由（原生树不可重指、`data-*` 钩子降级模型、被拒方案）见 [ADR-0015](./ADR-0015-files-tab-plugin-owned-browsing.md)。
 
 ## Related Documents
 

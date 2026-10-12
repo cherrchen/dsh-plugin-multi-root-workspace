@@ -287,6 +287,18 @@ describe('the panel dialog', () => {
     expect(screen.getByText(`${NS}.state.missing`)).toBeTruthy()
   })
 
+  it('embeds no additional-root file tree inside the dialog', async () => {
+    // Browsing moved to the Files-tab root switcher; the management rows
+    // keep no per-row tree.
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    expect(document.querySelector('.mrfw-fileTree')).toBeNull()
+    expect(screen.queryByRole('button', { name: `${NS}.files.reload` })).toBeNull()
+  })
+
   it('keeps legacy host lists usable even with more than the new default limit', async () => {
     const harness = mount()
     harness.setView({ primaryRoot: '/repos/primary', roots: Array.from({ length: 17 }, (_, i) => ({

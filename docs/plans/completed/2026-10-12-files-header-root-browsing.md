@@ -1,5 +1,9 @@
 # Files 头部根浏览：launcher 前移（P1）与根选择器 + 自绘附加根树（P2）
 
+## Current State
+
+本计划实施完成。P1 以 `7e3232a` 单独提交（仅图标齿轮 launcher 前移）；P2 按 Design 落地：`files.actions` 挂载 `RootSwitcher`（owner `absolutePath` 缺席时退回 compact launcher），附加根选中时 `RootFileTree` 经 `createPortal` 接管树区，对话框行内树与 `files.browse` 词条下线，`data-files-*` 钩子列入 compat 目检与故障排查，决策见 [ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
+
 ## Goal
 
 让右侧栏 Files tab 的头部成为多根浏览入口，分两阶段交付、**每阶段一个提交**：
@@ -99,7 +103,7 @@ Files 头部当前视觉序（DOM 序）：`[data-files-path] 路径 | ↻ reloa
 
 ## Documentation Impact
 
-- 本文件进 `docs/plans/active/`；完成后移 `completed/` 并在[进度总账](./2026-09-12-multi-root-workspace.md)补行。
+- 本文件进 `docs/plans/active/`；完成后移 `completed/` 并在[进度总账](../active/2026-09-12-multi-root-workspace.md)补行。
 - P2 落地时更新：[架构 §client 半部](../../architecture/multi-root-workspace.md)、[需求文档](../../requirements/multi-root-workspace.md)、`README.md`/`README.en.md` 面板与 Files 入口叙述、[ADR-0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md) 修订 + 新 ADR、troubleshooting 增补 `data-*` 钩子条目；发布时进 CHANGELOG。
 
 ## Completion Criteria

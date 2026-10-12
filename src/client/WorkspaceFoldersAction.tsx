@@ -16,6 +16,10 @@
  * native look — sidebar trigger, modal card, capsule buttons — in both themes
  * without naming a single color here (see ADR-0006).
  *
+ * The dialog itself is also exported: the Files-tab root switcher opens the
+ * same manager through its trailing menu item instead of carrying a second
+ * dialog.
+ *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/WorkspaceFoldersAction
  */
 
@@ -36,7 +40,6 @@ import {
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { Key } from './locales.ts'
 import type { RootEntryView, RootState, RootView, RootsView } from '../contract.ts'
-import { RootFileTree } from './RootFileTree.tsx'
 
 /** Translate one key of this plugin's namespace. */
 export type Translate = (key: Key, params?: Record<string, unknown>) => string
@@ -127,7 +130,7 @@ function CloseIcon(): ReactNode {
 }
 
 /** The locale key for one reported root state. */
-function stateKey(state: RootState): Key {
+export function stateKey(state: RootState): Key {
   switch (state) {
     case 'available': return 'state.available'
     case 'missing': return 'state.missing'
@@ -137,7 +140,7 @@ function stateKey(state: RootState): Key {
 }
 
 /** The final segment of an absolute path, on either platform separator. */
-function basename(path: string): string {
+export function basename(path: string): string {
   const segments = path.split(/[\\/]/).filter(segment => segment !== '')
   return segments[segments.length - 1] ?? path
 }
@@ -146,7 +149,7 @@ function basename(path: string): string {
  * The primary text of one row: the stored alias when set, otherwise the
  * directory's own name — the display the registration was added with.
  */
-function displayNameOf(root: RootView): string {
+export function displayNameOf(root: RootView): string {
   return root.alias ?? basename(root.path)
 }
 
@@ -187,7 +190,8 @@ interface DialogState {
   readonly noSession: boolean
 }
 
-function entryOf(root: RootView): RootEntryView {
+/** The exact row reference the browsing endpoints and mutations carry. */
+export function entryOf(root: RootView): RootEntryView {
   return { ordinal: root.ordinal, id: root.id, path: root.path, addedAt: root.addedAt }
 }
 
@@ -204,7 +208,7 @@ function rowKey(root: RootView): string {
  * (see `contract.ts`). Treating a reveal answer as a roots view is exactly the
  * contract mismatch this split removes.
  */
-function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: () => void }): ReactNode {
+export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: () => void }): ReactNode {
   const { panel, t } = props
   const [state, setState] = useState<DialogState>({
     view: undefined,
@@ -615,7 +619,6 @@ function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { onClose: 
                     <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
                   </span>
                 ) : null}
-                {root.state === 'available' && panel !== undefined && props.sessionId !== undefined && <RootFileTree panel={panel} entry={entryOf(root)} sessionId={props.sessionId} t={t} />}
               </div>
             })}
           </section>

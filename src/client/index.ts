@@ -27,6 +27,7 @@ import { currentSessionIdOf, subscribeSessions } from '../compat/client-session.
 import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { NS, en, zh } from './locales.ts'
 import { STYLES } from './styles.ts'
+import { RootSwitcher } from './RootSwitcher.tsx'
 import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -110,7 +111,15 @@ export function apply(ctx: ClientContext): void {
   // Optional: old surfaces without the Files actions slot retain the footer entry.
   ctx.slots.inject('sidebar.right.tab.files.actions', () => ctx.slots.register({
     name: 'sidebar.right.tab.files.actions', id: SLOT_ID, order: 50,
-  }, () => createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId, subscribeSession, t, compact: true })))
+  }, owner => {
+    // The slot contract promises owner.absolutePath — the pane's primary root.
+    // A runtime that stops carrying it falls back to the icon-only launcher
+    // rather than to a nameless switcher.
+    const absolutePath = (owner as { readonly absolutePath?: string } | undefined)?.absolutePath
+    return absolutePath === undefined
+      ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId, subscribeSession, t, compact: true })
+      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId, subscribeSession, t })
+  }))
 }
 
 /**
