@@ -23,6 +23,21 @@ it('lists the root outright and lazily expands directories with a bounded file p
   expect(screen.getByText('Showing the first 200 lines')).toBeDefined()
   expect(call).toHaveBeenLastCalledWith('readFile', { sessionId: 'session', entry, path: 'src/app.ts' }, expect.any(AbortSignal))
 })
+it('refreshes in place on a reload bump without flashing the loading note', async () => {
+  const call = vi.fn(async (_endpoint: string, payload: { path?: string }) => ({
+    path: payload.path ?? '.',
+    entries: [{ name: 'src', type: 'directory' as const }],
+    truncated: false,
+  }))
+  const view = render(<RootFileTree panel={{ call } as PanelClient} entry={entry} sessionId={() => 'session'} t={t} />)
+  await screen.findByText('▸ src')
+  view.rerender(<RootFileTree panel={{ call } as PanelClient} entry={entry} sessionId={() => 'session'} t={t} reload={1} />)
+  // The existing rows stay while the refetch is in flight.
+  expect(screen.getByText('▸ src')).toBeDefined()
+  expect(screen.queryByText(en['panel.loading'])).toBeNull()
+  await waitFor(() => expect(call).toHaveBeenCalledTimes(2))
+  expect(screen.getByText('▸ src')).toBeDefined()
+})
 it('shows no session without sending a request', async () => {
   const call = vi.fn()
   render(<RootFileTree panel={{ call }} entry={entry} sessionId={() => undefined} t={t} />)

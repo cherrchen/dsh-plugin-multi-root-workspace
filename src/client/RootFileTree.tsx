@@ -9,14 +9,20 @@ export interface RootFileTreeProps {
   entry: RootEntryView
   sessionId: () => string | undefined
   t: Translate
+  /**
+   * Bumped by the owner to refresh every mounted listing in place. The
+   * switcher's header reload owns this counter — nothing here carries a
+   * refresh control of its own (the native pane works the same way: reload
+   * lives in the header, not inside the tree).
+   */
+  readonly reload?: number
 }
 
 /**
  * The tree the Files-tab root switcher portals into the pane it takes over:
- * it lists the selected root outright — no Browse gate — and refreshes by
- * remount: the switcher's header reload re-keys this component, so nothing
- * here carries a refresh control of its own (the native pane works the same
- * way — reload lives in the header, not inside the tree).
+ * it lists the selected root outright — no Browse gate — and refreshes in
+ * place: a `reload` bump re-lists every mounted directory under its current
+ * rows, so a refresh never flashes the loading note.
  */
 export function RootFileTree(props: RootFileTreeProps): ReactNode {
   return <div className="mrfw-fileTree">
@@ -27,18 +33,26 @@ export function RootFileTree(props: RootFileTreeProps): ReactNode {
 function Directory(props: RootFileTreeProps & { path: string }): ReactNode {
   const [listing, setListing] = useState<FilesView>()
   const [error, setError] = useState<string>()
+  // Only a different root or directory may blank the current rows — a
+  // `reload` bump refetches underneath them, which is what keeps the
+  // loading note from flashing on every manual refresh.
+  const identity = useRef<string>()
   useEffect(() => {
     let active = true
     const cancel = new AbortController()
-    setListing(undefined)
-    setError(undefined)
+    const self = `${props.entry.id}:${props.path}`
+    if (identity.current !== self) {
+      identity.current = self
+      setListing(undefined)
+      setError(undefined)
+    }
     const session = props.sessionId()
     if (session === undefined) { setError(props.t('panel.noSession')); return }
     void props.panel.call('files', { sessionId: session, entry: props.entry, path: props.path }, cancel.signal).then(value => {
-      if (active && props.sessionId() === session) setListing(value)
+      if (active && props.sessionId() === session) { setListing(value); setError(undefined) }
     }, (failure: unknown) => { if (active && !cancel.signal.aborted) setError(failure instanceof Error ? failure.message : String(failure)) })
     return () => { active = false; cancel.abort() }
-  }, [props.panel, props.entry, props.path, props.sessionId, props.t])
+  }, [props.panel, props.entry, props.path, props.sessionId, props.t, props.reload])
   if (error !== undefined) return <p className="mrfw-alert" role="alert">{error}</p>
   if (listing === undefined) return <p className="mrfw-note">{props.t('panel.loading')}</p>
   return <ul className="mrfw-fileLevel">

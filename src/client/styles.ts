@@ -202,7 +202,8 @@ export const STYLES = /* css */ `
 
 /* The takeover's own reload, standing exactly where the hidden native one
    did: the upstream .tool recipe verbatim (28px hit area, 15px glyph,
-   secondary voice, hover fills). It re-keys the portaled tree. */
+   secondary voice, hover fills). It bumps the portaled tree's reload
+   counter — an in-place refresh, not a remount. */
 .mrfw-switcherReload {
   flex: none;
   display: inline-flex;

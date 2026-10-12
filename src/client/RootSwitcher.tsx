@@ -196,9 +196,10 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
         <PathLabel path={triggerPath} className="mrfw-switcherPath" />
         {/* The takeover hides the native reload (it refreshes the hidden
             tree), so the header gets a replacement of its own — same position,
-            same icon-button recipe as the upstream `.tool`. It re-keys the
-            portaled tree, the same remount refresh the in-tree button used.
-            Rendered under exactly the portal condition, so a menu-only
+            same icon-button recipe as the upstream `.tool`. It bumps the
+            portaled tree's reload counter: every mounted directory re-lists
+            under its current rows, so a refresh never blanks to a loading
+            note. Rendered under exactly the portal condition, so a menu-only
             switcher never shows a dead button. */}
         {treeVisible ? (
           <button
@@ -215,7 +216,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
       {treeVisible
         ? createPortal(
             <div className="mrfw-switcherTree">
-              <RootFileTree key={treeEpoch} panel={panel} entry={entryOf(selected)} sessionId={props.sessionId ?? NO_SESSION} t={t} />
+              <RootFileTree reload={treeEpoch} panel={panel} entry={entryOf(selected)} sessionId={props.sessionId ?? NO_SESSION} t={t} />
             </div>,
             pane,
           )

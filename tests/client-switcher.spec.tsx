@@ -239,10 +239,15 @@ describe('the Files-tab root switcher', () => {
     expect(reload?.closest('.mrfw-rootSwitcher')).not.toBeNull()
     const filesBefore = harness.calls.filter(call => call.endpoint === 'files').length
     fireEvent.click(reload!)
-    // The header reload re-keys the tree: a fresh root listing goes out.
+    // The refresh is in place: the current rows stay while the refetch is
+    // in flight — no loading-note flash.
+    expect(pane.textContent).toContain('src')
+    expect(pane.textContent).not.toContain(`${NS}.panel.loading`)
     await waitFor(() => {
       expect(harness.calls.filter(call => call.endpoint === 'files').length).toBeGreaterThan(filesBefore)
     })
+    await waitFor(() => { expect(pane.textContent).toContain('src') })
+    expect(pane.textContent).not.toContain(`${NS}.panel.loading`)
   })
 
   it('removes the portal tree when the selection returns to the primary root', async () => {
