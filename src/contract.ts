@@ -49,11 +49,12 @@ export const PANEL_ENDPOINTS: readonly PanelEndpoint[] = ['list', 'add', 'remove
 export type RootState = 'available' | 'missing' | 'redirected' | 'invalid'
 
 /**
- * The write authority one registration carries, spelled out rather than
- * imported: this module is inlined into the browser bundle and must not pull
- * in `node:*`, so the one value the two sides share is duplicated here.
+ * The write authority one registration carries (B9 three-state), spelled out
+ * rather than imported: this module is inlined into the browser bundle and
+ * must not pull in `node:*`, so the one value the two sides share is
+ * duplicated here.
  */
-export type RootAccess = 'read-write' | 'read-only'
+export type RootAccess = 'inherit' | 'read-write' | 'read-only'
 
 /** One root as the panel renders it. */
 export interface RootView {
@@ -142,7 +143,7 @@ export interface PanelRequest {
   readonly path?: string
   /** Display alias (add/alias); empty clears it. */
   readonly alias?: string
-  /** Write authority (add — defaults to `read-write` — and setAccess). */
+  /** Write authority (add — defaults to `inherit` — and setAccess). */
   readonly access?: RootAccess
   /** Exact anchor row (move): the target is placed in front of it; absent moves it last. */
   readonly beforeEntry?: RootEntryView
@@ -186,7 +187,7 @@ const panelRequestSchema = z.object({
   id: z.string().optional(),
   path: z.string().optional(),
   alias: z.string().optional(),
-  access: z.enum(['read-write', 'read-only']).optional(),
+  access: z.enum(['inherit', 'read-write', 'read-only']).optional(),
   beforeEntry: z.object({
     ordinal: z.number().int().positive(),
     id: z.string(),
@@ -208,9 +209,10 @@ const rootViewSchema = z.object({
   alias: z.string().optional(),
   addedAt: z.string(),
   state: z.enum(['available', 'missing', 'redirected', 'invalid']),
-  // Optional on the wire so an older host (which always meant read-write)
-  // still parses; narrowed to the legacy default in `narrowRootView`.
-  access: z.enum(['read-write', 'read-only']).optional(),
+  // Optional on the wire so an older host (which always meant session-following
+  // read-write — `inherit` under B9) still parses; narrowed to the legacy
+  // default in `narrowRootView`.
+  access: z.enum(['inherit', 'read-write', 'read-only']).optional(),
   detail: z.string().optional(),
 })
 
@@ -322,8 +324,9 @@ function narrowRootView(value: z.infer<typeof rootViewSchema>): RootView {
     path: value.path,
     addedAt: value.addedAt,
     state: value.state,
-    // A host that predates the field only ever granted read-write.
-    access: value.access ?? 'read-write',
+    // A host that predates the field only ever granted session-following
+    // read-write — `inherit` under B9.
+    access: value.access ?? 'inherit',
     ...(value.alias === undefined ? {} : { alias: value.alias }),
     ...(value.detail === undefined ? {} : { detail: value.detail }),
   }

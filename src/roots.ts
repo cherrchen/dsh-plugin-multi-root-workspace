@@ -62,13 +62,18 @@ export function additionalRootId(value: string): AdditionalRootId {
 }
 
 /**
- * The write authority one registration carries. `read-write` is the historical
- * grant: the root is a full member of the workspace's writable set.
- * `read-only` keeps the root a workspace member — instructions, LSP,
- * workspace-file routing, and reads all still see it — but removes it from
- * the writable set the fs fence and every kernel dialect enforce.
+ * The write authority one registration carries (B9, ADR-0017).
+ *
+ * - `inherit` — the root follows the session mode: writable under
+ *   `workspace-write` and unrestricted under `danger-full-access`, read-only
+ *   under `read-only`. This is what legacy `recordedPath` records mean.
+ * - `read-only` — the root stays a workspace member (instructions, LSP,
+ *   workspace-file routing, and reads all still see it) but a write is refused
+ *   under EVERY mode, including `danger-full-access`.
+ * - `read-write` — the root is writable under EVERY mode, including a global
+ *   `read-only` session; it does not widen anything beyond its own directory.
  */
-export type RootAccess = 'read-write' | 'read-only'
+export type RootAccess = 'inherit' | 'read-write' | 'read-only'
 
 /** One registered additional root exactly as it is persisted. */
 export interface RegisteredRoot {
@@ -79,13 +84,14 @@ export interface RegisteredRoot {
   /**
    * The write authority this registration carries. In memory every record has
    * exactly one value; on disk it is expressed by WHICH grant field is
-   * present — `recordedPath` means read-write, `readOnlyRecordedPath` means
-   * read-only — never by a separate `access` key (see `registry.ts` for the
-   * downgrade safety that split buys).
+   * present — `recordedPath` means `inherit`, `readOnlyRecordedPath` means
+   * `read-only`, `readWriteRecordedPath` means `read-write` — never by a
+   * separate `access` key (see `registry.ts` for the downgrade safety that
+   * split buys).
    */
   readonly access: RootAccess
   /**
-   * The canonical directory this READ-WRITE registration was GRANTED for: the
+   * The canonical directory this INHERIT registration was GRANTED for: the
    * `realpath` observed when the operator registered it (or the last time the
    * operator restored it). Authorization is `canonicalPath(path) ===
    * recordedPath` — a root whose current resolution moved somewhere else is
@@ -94,10 +100,17 @@ export interface RegisteredRoot {
   readonly recordedPath?: string
   /**
    * The canonical directory this READ-ONLY registration was granted for. It
-   * plays exactly the role `recordedPath` plays for a read-write record, kept
+   * plays exactly the role `recordedPath` plays for an inherit record, kept
    * under a separate key so the single persisted layout stays downgrade-safe.
    */
   readonly readOnlyRecordedPath?: string
+  /**
+   * The canonical directory this fixed READ-WRITE registration was granted
+   * for. Same role as the other two grant fields, under its own key: an older
+   * plugin strips the unknown field and classifies the record `invalid`
+   * rather than granting it as a legacy `recordedPath` write.
+   */
+  readonly readWriteRecordedPath?: string
   /** Optional display alias; absent when the operator cleared it. */
   readonly alias?: string
   /** ISO-8601 instant of registration. */
@@ -440,15 +453,17 @@ function classifyStoredRoot(
   }
   if (!isAbsolute(record.path)) return invalid(`"${record.path}" is not an absolute path`)
   // A record may carry at most ONE grant field: `recordedPath` means
-  // read-write, `readOnlyRecordedPath` means read-only. A record naming both
-  // claims two different access levels at once — it classifies `invalid`,
-  // because silently picking one would turn a corrupted store into a grant.
-  const writeGrant = record.recordedPath
-  const readGrant = record.readOnlyRecordedPath
-  if (typeof writeGrant === 'string' && writeGrant !== '' && typeof readGrant === 'string' && readGrant !== '') {
-    return invalid('the record declares both a read-write and a read-only grant (ambiguous access)')
+  // `inherit`, `readOnlyRecordedPath` means `read-only`, and
+  // `readWriteRecordedPath` means `read-write` (ADR-0017). A record naming
+  // more than one claims different access levels at once — it classifies
+  // `invalid`, because silently picking one would turn a corrupted store
+  // into a grant.
+  const grants = [record.recordedPath, record.readOnlyRecordedPath, record.readWriteRecordedPath]
+    .filter((grant): grant is string => typeof grant === 'string' && grant !== '')
+  if (grants.length > 1) {
+    return invalid('the record declares more than one grant (ambiguous access)')
   }
-  const recorded = typeof writeGrant === 'string' && writeGrant !== '' ? writeGrant : readGrant
+  const recorded = grants[0]
   if (typeof recorded !== 'string' || recorded === '') {
     return invalid('the record does not say which directory it was granted for')
   }

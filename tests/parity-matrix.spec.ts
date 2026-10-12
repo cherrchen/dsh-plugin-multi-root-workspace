@@ -43,6 +43,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MultiRootFileSystem } from '../src/fs.ts'
 import { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
+import type { RootAccess } from '../src/roots.ts'
 import { mountCompat } from './support/compat.ts'
 import { confined } from './support/confine.ts'
 import { allowsWrite, parseConfined, runConfined } from './support/dialect-grants.ts'
@@ -105,7 +106,7 @@ interface World {
  */
 async function mountWorld(
   dialect: Dialect,
-  roots: readonly { path: string; access: 'read-write' | 'read-only' }[] = [{ path: fixture.outside, access: 'read-write' }],
+  roots: readonly { path: string; access: RootAccess }[] = [{ path: fixture.outside, access: 'inherit' }],
 ): Promise<World> {
   const ctx = new Context()
   fibers.push(

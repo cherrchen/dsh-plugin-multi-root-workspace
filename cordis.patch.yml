@@ -86,6 +86,17 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/lsp'
     - id: multi-root-workspace-files
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/workspace-files'
+    # The B9 consumer seam for `danger-full-access`: the shell executor, the
+    # PTC runtime, and the PTY backend all skip `ctx.sandbox.confine` in that
+    # mode, so an explicit `read-only` additional root would silently stay
+    # writable. This row wraps `ctx.subprocess.spawn` / `spawnTerminal`,
+    # `ctx.shell.execute` (and `start` where a release still exposes it), and
+    # `ctx.ptcRuntime.execute` at their public methods — under Full-access with
+    # restricted roots it asks `ctx.sandbox` for a restricted profile prefix
+    # and runs the call inside it. A dialect that cannot express "ambient minus
+    # subtree" (Landlock, Windows ACL) fails closed before the process starts.
+    - id: multi-root-process-fence
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/process-fence'
     - id: multi-root-command
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
     - id: multi-root-client

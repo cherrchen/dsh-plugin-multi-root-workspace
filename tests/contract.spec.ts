@@ -15,7 +15,7 @@ describe('roots-view wire compatibility', () => {
     if (!result.ok) return
     expect(result.value.count).toBe(4)
     expect(result.value.limit).toBe(Number.MAX_SAFE_INTEGER)
-    expect(result.value.roots.map(root => root.access)).toEqual(Array(4).fill('read-write'))
+    expect(result.value.roots.map(root => root.access)).toEqual(Array(4).fill('inherit'))
   })
 
   it('preserves explicit limits, over-limit counts and read-only access', () => {

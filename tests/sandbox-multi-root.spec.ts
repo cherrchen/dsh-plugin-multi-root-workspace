@@ -81,10 +81,11 @@ async function confineBoth(
   dialect: Dialect | 'windows-acl',
   mode: SandboxPolicy['mode'],
   additionalRoots: readonly string[],
+  access: 'inherit' | 'read-only' | 'read-write' = 'read-write',
 ): Promise<{ upstream: ConfinedArgv; ours: ConfinedArgv; ctx: Context }> {
   const upstream = await mount(LocalSandboxProvider, mode, internalsFor(dialect))
   const ours = await mount(MultiRootSandboxProvider, mode, internalsFor(dialect))
-  ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, additionalRoots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path), access: 'read-write' })))
+  ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, additionalRoots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path), access })))
   const policy: SandboxPolicy = { mode, workspaceRoot: fixture.workspace }
   return {
     upstream: await confined(upstream.provider, COMMAND, policy),
@@ -170,11 +171,27 @@ describe.skipIf(!posixRunner)('additional-root grants per dialect (POSIX runner 
 })
 
 describe.skipIf(!posixRunner)('mode and scope gating (POSIX runner argv only)', () => {
-  it('grants nothing under read-only, even with a populated scope', async () => {
+  it('grants nothing under read-only when the members inherit', async () => {
     for (const dialect of DIALECTS) {
-      const { upstream, ours } = await confineBoth(dialect, 'read-only', [fixture.outside])
+      const { upstream, ours } = await confineBoth(dialect, 'read-only', [fixture.outside], 'inherit')
       expect(ours.argv, dialect).toEqual(upstream.argv)
       expect(parseConfined(ours.argv, COMMAND).subpaths, dialect).not.toContain(fixture.outside)
+    }
+  })
+
+  it('grants a fixed read-write member back onto a read-only profile (B9)', async () => {
+    for (const dialect of DIALECTS) {
+      const { upstream, ours } = await confineBoth(dialect, 'read-only', [fixture.outside], 'read-write')
+      expect(ours.argv, dialect).not.toEqual(upstream.argv)
+      const grants = parseConfined(ours.argv, COMMAND)
+      expect(grants.subpaths, dialect).toContain(canonicalPath(fixture.outside))
+    }
+  })
+
+  it('grants nothing under read-only when the only member is explicit read-only', async () => {
+    for (const dialect of DIALECTS) {
+      const { upstream, ours } = await confineBoth(dialect, 'read-only', [fixture.outside], 'read-only')
+      expect(ours.argv, dialect).toEqual(upstream.argv)
     }
   })
 
@@ -206,7 +223,7 @@ describe.skipIf(!posixRunner)('read-only additional roots (POSIX runner argv onl
   /** Mount ours + upstream, with mixed-access members in the scope. */
   const confineAccess = async (
     dialect: Dialect,
-    members: readonly { path: string; access: 'read-write' | 'read-only' }[],
+    members: readonly { path: string; access: 'inherit' | 'read-only' | 'read-write' }[],
     mode: SandboxPolicy['mode'] = 'workspace-write',
   ): Promise<{ upstream: ConfinedArgv; ours: ConfinedArgv }> => {
     const upstream = await mount(LocalSandboxProvider, mode, internalsFor(dialect))
@@ -244,13 +261,26 @@ describe.skipIf(!posixRunner)('read-only additional roots (POSIX runner argv onl
     }
   })
 
-  it('widens nothing under read-only mode regardless of root access', async () => {
+  it('widens nothing under read-only mode for inherit and read-only members', async () => {
     for (const dialect of DIALECTS) {
       const { upstream, ours } = await confineAccess(dialect, [
-        { path: fixture.outside, access: 'read-write' },
+        { path: fixture.outside, access: 'inherit' },
         { path: `${fixture.base}/third`, access: 'read-only' },
       ], 'read-only')
       expect(ours.argv, dialect).toEqual(upstream.argv)
+    }
+  })
+
+  it('grafts only the fixed read-write members under read-only mode (B9)', async () => {
+    const third = `${fixture.base}/third`
+    for (const dialect of DIALECTS) {
+      const { ours } = await confineAccess(dialect, [
+        { path: fixture.outside, access: 'read-write' },
+        { path: third, access: 'inherit' },
+      ], 'read-only')
+      const grants = parseConfined(ours.argv, COMMAND)
+      expect(grants.subpaths, dialect).toContain(canonicalPath(fixture.outside))
+      expect(grants.subpaths, dialect).not.toContain(canonicalPath(third))
     }
   })
 

@@ -30,14 +30,15 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
-import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import type { ConfinedArgv, ConfinedSandboxMode, SandboxExecutionPolicy, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { Config } from '@deepseek-ai/dsh-sandbox-local'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from './compat.ts'
 import { widenConfined } from './compat/sandbox-confine.ts'
 import type { ConfineCall, UpstreamConfined } from './compat/sandbox-confine.ts'
-import { DialectUnrecognizedError, splitConfined, widenProfileArgs } from './dialects.ts'
+import { denyProfileArgs, DialectUnrecognizedError, graftProfileArgs, splitConfined, widenProfileArgs } from './dialects.ts'
+import { restrictProfileArgs } from './dialects.ts'
 import { brandMultiRootProvider } from './providers.ts'
 import type {} from './scope.ts'
 import { widenWindowsProfile } from './windows-profile.ts'
@@ -87,46 +88,108 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
   }
 
   /**
-   * Graft the scope's additional roots onto one upstream `confine` result.
+   * Graft the scope's effective grants and denies onto one upstream `confine`
+   * result.
    *
    * Pure with respect to the upstream call: it only ever reads the scope and
    * rewrites `argv`. `enforcement`, `denialSignatures` and `runnerFailureRules`
    * are passed through untouched, because the bash executor derives its denial
    * and enforcement reporting from them.
+   *
+   * Mode behavior (B9): `workspace-write` widens the grant with the effective
+   * writable roots AND denies any restricted root the upstream grants could
+   * reach (a `read-only` root registered under the platform temp). `read-only`
+   * grafts the fixed `read-write` roots back onto the deny-all baseline — the
+   * three-state matrix's standout cell. `danger-full-access` never reaches
+   * here (consumers bypass `confine`); its deny semantics live in
+   * {@link restrictedArgvPrefix}.
    * @param confined - the upstream result for this call.
    * @param argv - the caller's argv, needed to re-split the wrapped form.
    * @param policy - the per-call policy.
-   * @returns the upstream result element for element, or one with a widened argv.
+   * @returns the upstream result element for element, or one with a rewritten argv.
    */
   private widenForScope(confined: ConfinedArgv, argv: readonly string[], policy: SandboxPolicy): ConfinedArgv {
-    // The mode check comes BEFORE the scope is resolved: `resolve` re-realpaths
-    // the workspace root and every registered root, and no mode other than
-    // `workspace-write` can use that answer — the empty-root and read-only
-    // passthrough cases must stay free of the extra synchronous IO.
-    if (policy.mode !== 'workspace-write') return confined
+    // `danger-full-access` never confines; if a caller still hands it here the
+    // upstream result passes untouched — its deny semantics live in
+    // `restrictedArgvPrefix`, never on a confined profile.
+    if (policy.mode !== 'workspace-write' && policy.mode !== 'read-only') return confined
     const scope = this.ctx.multiRootScope.resolve(policy)
-    // Only the WRITABLE members widen the kernel profile: a `read-only`
-    // additional root stays a workspace member (routed, readable) but the
-    // dialect must never grant a write to it. With none, the upstream result
-    // is returned element for element — the same passthrough as an empty scope.
     const writable = scope.writableRoots
-    if (writable.length === 0) return confined
+    const denied = scope.deniedRoots
+    if (writable.length === 0 && (denied.length === 0 || policy.mode === 'read-only')) return confined
 
     try {
       const shape = splitConfined(confined.argv, argv)
       if (shape.dialect === 'windows-acl') {
-        return { ...confined, argv: [...widenWindowsProfile(shape.profileArgs, writable, scope.primaryRoot), '--', ...argv] }
+        return { ...confined, argv: [...widenWindowsProfile(shape.profileArgs, writable, denied, scope.primaryRoot), '--', ...argv] }
       }
-      const profileArgs = widenProfileArgs(shape.dialect, shape.profileArgs, policy, writable)
+      const profileArgs = policy.mode === 'workspace-write'
+        ? denyProfileArgs(shape.dialect, widenProfileArgs(shape.dialect, shape.profileArgs, policy, writable), denied)
+        : graftProfileArgs(shape.dialect, shape.profileArgs, writable)
       return { ...confined, argv: [...profileArgs, '--', ...argv] }
     } catch (error: unknown) {
       if (!(error instanceof DialectUnrecognizedError)) throw error
       throw new SandboxUnavailableError(
         policy.mode,
-        `multi-root workspace: cannot grant the additional workspace roots [${writable.join(', ')}] `
-        + `under the primary root ${scope.primaryRoot} — ${error.message}`,
+        `multi-root workspace: cannot apply the additional workspace roots (writable: [${writable.join(', ')}], `
+        + `denied: [${denied.join(', ')}]) under the primary root ${scope.primaryRoot} — ${error.message}`,
       )
     }
+  }
+
+  /**
+   * Build the runner-prefix that confines an ambient-writable execution to
+   * everything EXCEPT `deniedRoots` — the `danger-full-access` + explicit
+   * `read-only` cell, which the shell, PTY and PTC consumers never route
+   * through `confine()` at all.
+   *
+   * The restricted profile does not depend on the callee's argv, so the prefix
+   * is computed once per call here and the synchronous `ctx.subprocess.spawn`
+   * seam only has to prepend it. The upstream profile builders stay private:
+   * this probes `confine` under `read-only` for the runner's argument skeleton
+   * and rewrites the file-effect part per dialect. Landlock and Windows ACL
+   * cannot express "everything except" (their models only grant), so on those
+   * hosts the call fails closed with `SandboxUnavailableError` rather than
+   * spawning an unconfined process — an explicit `read-only` root must never
+   * silently become writable under Full-access.
+   *
+   * The return preserves the installed `confine` shape: a synchronous result
+   * on a synchronous release, a promise on an asynchronous one.
+   * @param policy - the caller's policy (mode must be `danger-full-access`).
+   * @param deniedRoots - canonical roots this execution must not write.
+   * @param signal - cancellation, forwarded to releases that accept it.
+   * @returns the argv prefix, ending at the `--` separator.
+   */
+  restrictedArgvPrefix(
+    policy: SandboxExecutionPolicy,
+    deniedRoots: readonly string[],
+    signal?: AbortSignal,
+  ): readonly string[] | Promise<readonly string[]> {
+    // `danger-full-access` is deliberately not a ConfinedSandboxMode: the probe
+    // runs under `read-only` purely to harvest the runner skeleton.
+    const probePolicy: SandboxPolicy = {
+      mode: 'read-only',
+      workspaceRoot: policy.workspaceRoot,
+      ...(policy.sessionId === undefined ? {} : { sessionId: policy.sessionId }),
+    }
+    const base = super.confine as unknown as ConfineCall
+    const probe = base.call(this, ['true'], probePolicy, signal)
+    const restrict = (confined: ConfinedArgv): readonly string[] => {
+      try {
+        const shape = splitConfined(confined.argv, ['true'])
+        return [...restrictProfileArgs(shape.dialect, shape.profileArgs, deniedRoots), '--']
+      } catch (error: unknown) {
+        if (!(error instanceof DialectUnrecognizedError)) throw error
+        throw new SandboxUnavailableError(
+          policy.mode as ConfinedSandboxMode,
+          `multi-root workspace: cannot confine an ambient execution away from the denied roots `
+          + `[${deniedRoots.join(', ')}] — ${error.message}`,
+        )
+      }
+    }
+    return typeof (probe as { then?: unknown }).then === 'function'
+      ? (probe as Promise<ConfinedArgv>).then(restrict)
+      : restrict(probe as ConfinedArgv)
   }
 
 }

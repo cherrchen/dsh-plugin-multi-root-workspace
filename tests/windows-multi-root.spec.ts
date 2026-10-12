@@ -32,7 +32,7 @@ describe('Windows root-set capability', () => {
   })
   it('preserves argv boundaries for paths with spaces, quotes, and -- tokens', () => {
     const roots = ['D:\\repo space', 'D:\\quote"repo', '--mode']
-    const widened = widenWindowsProfile(profile, roots)
+    const widened = widenWindowsProfile(profile, roots, [])
     expect(widened.slice(2, 4)).toEqual(['--upstream-runner', upstreamRunner])
     expect(widened.slice(4, profile.length + 2)).toEqual(profile.slice(2))
     expect(parseWindowsProfile(widened.slice(2), true).additionalRoots).toEqual(roots)
@@ -44,15 +44,25 @@ describe('Windows root-set capability', () => {
     const uncWorkspace = ['node', 'runner.js', '--workspace', '\\\\server\\share', '--temp', 'C:\\temp', '--mode', 'workspace-write']
     for (const args of [uncWorkspace, profile]) {
       const roots = args === profile ? ['\\\\server\\share\\x'] : ['D:\\extra']
-      expect(() => widenWindowsProfile(args, roots)).toThrow('network or device paths')
+      expect(() => widenWindowsProfile(args, roots, [])).toThrow('network or device paths')
     }
-    expect(() => widenWindowsProfile(profile, ['D:\\fine', '//server/share'])).toThrow('network or device paths')
+    expect(() => widenWindowsProfile(profile, ['D:\\fine', '//server/share'], [])).toThrow('network or device paths')
   })
   it('fails closed on unknown, duplicated, missing, or unpaired flags', () => {
     for (const flags of [profile.slice(2).concat('--future', 'yes'), profile.slice(2).concat('--temp', 'x'), profile.slice(2).concat('--write-sid', 'sid'), profile.slice(2, -1)]) {
       expect(() => parseWindowsProfile(flags)).toThrow()
     }
-    expect(() => widenWindowsProfile(profile, ['D:\\extra'], 'C:\\different')).toThrow('does not match')
+    expect(() => widenWindowsProfile(profile, ['D:\\extra'], [], 'C:\\different')).toThrow('does not match')
+  })
+  it('fails closed when a denied root sits inside a granted directory (B9)', () => {
+    // The restricted-token model cannot subtract: an explicit read-only root
+    // under the workspace or the private temp stays writable through the
+    // parent's ACE, so the profile refuses rather than confine too wide.
+    expect(() => widenWindowsProfile(profile, [], ['C:\\primary\\ro'])).toThrow('cannot deny')
+    expect(() => widenWindowsProfile(profile, [], ['C:\\temp\\ro'])).toThrow('cannot deny')
+    expect(() => widenWindowsProfile(profile, ['D:\\extra'], ['D:\\extra\\ro'])).toThrow('cannot deny')
+    // A denied root outside every grant is denied by the mode already.
+    expect(() => widenWindowsProfile(profile, [], ['D:\\elsewhere\\ro'])).not.toThrow()
   })
   it('recognizes --upstream-runner only in the runner mode, exactly once, as an absolute file', () => {
     const runnerFlags = ['--upstream-runner', upstreamRunner, ...profile.slice(2)]
@@ -199,7 +209,7 @@ describe('writable-only roots in the Windows ACL profile', () => {
    */
   async function confineWindows(
     fixture: ReturnType<typeof createFixtureWorkspace>,
-    members: readonly { path: string; access: 'read-write' | 'read-only' }[],
+    members: readonly { path: string; access: 'inherit' | 'read-only' | 'read-write' }[],
   ): Promise<{ argv: readonly string[]; sid: string }> {
     const ctx = new Context()
     fibers.push(

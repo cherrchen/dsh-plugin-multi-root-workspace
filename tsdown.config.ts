@@ -68,6 +68,7 @@ const hostConfig: UserConfig = {
     'src/command.ts',
     'src/lsp.ts',
     'src/workspace-files.ts',
+    'src/process-fence.ts',
     'src/windows-runner.ts',
   ],
   tsconfig: 'tsconfig.host.json',

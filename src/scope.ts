@@ -48,10 +48,12 @@ export interface AdditionalWorkspaceRoot {
    */
   recordedPath: string
   /**
-   * The write authority the registration carries. `read-only` roots remain
-   * workspace members — instructions, LSP, workspace-file routing, and reads
-   * all still see them — but they are never part of `writableRoots` and so
-   * never reach a write grant.
+   * The write authority the registration carries (B9 three-state).
+   * `read-only` roots remain workspace members — instructions, LSP,
+   * workspace-file routing, and reads all still see them — but they are never
+   * part of `writableRoots` and never reach a write grant, under ANY mode.
+   * `inherit` follows the session mode; fixed `read-write` stays writable even
+   * under a read-only session.
    */
   access: RootAccess
   /** Optional display alias. */
@@ -82,8 +84,20 @@ export interface FilesystemScope {
   additionalRoots: readonly string[]
   /** The granted members with their access, in registry order. */
   roots: readonly ScopeRoot[]
-  /** The members carrying `read-write` — the only paths a write may reach. */
+  /**
+   * The members a write may reach under THIS call — the effective access
+   * (registration policy × session mode) narrowed by the tool cap.
+   */
   writableRoots: readonly string[]
+  /**
+   * The members THIS call must not write — `additionalRoots` minus
+   * `writableRoots`. It is the deny set enforcement reads: explicit
+   * `read-only` roots under `danger-full-access` (and wherever another grant,
+   * such as the platform temp area, would otherwise cover the same path), and
+   * every member when the call is tool-capped. Read access is unaffected —
+   * these are all still workspace members.
+   */
+  deniedRoots: readonly string[]
 }
 
 /**
@@ -147,6 +161,18 @@ function sanitizeMembers(
 export const MULTI_ROOT_CONTEXT_NAME = 'multi-root:scope'
 
 /**
+ * The B9 effective-access rule (ADR-0017's nine-cell matrix): whether a root
+ * with this registration policy is writable under this session mode.
+ * `read-write` is writable everywhere; `inherit` follows the mode;
+ * `read-only` never is.
+ */
+function effectivelyWritable(mode: SandboxMode, access: RootAccess): boolean {
+  if (access === 'read-write') return true
+  if (access === 'read-only') return false
+  return mode !== 'read-only'
+}
+
+/**
  * Render the workspace topology the model is told about. Pure: the text
  * depends only on its inputs, so two consecutive assemblies of the same
  * session state produce the same contribution byte for byte. Only granted
@@ -172,16 +198,30 @@ export function renderWorkspaceRootsContext(options: {
   const { platform, mode, primaryRoot, roots, cappedTools } = options
   if (roots.length === 0) return ''
   const members = JSON.stringify(roots.map(root => root.path))
+  const readOnly = roots.filter(root => root.access === 'read-only').map(root => root.path)
   if (mode === 'read-only') {
-    return `Current DSH workspace roots: ${members} are additional roots of this session's workspace and are readable; `
-      + 'nothing is writable in read-only mode.'
+    // Fixed read-write roots keep their grant even in a read-only session.
+    const writable = options.toolAccessInvalid ? [] : roots.filter(root => root.access === 'read-write').map(root => root.path)
+    if (writable.length === 0) {
+      return `Current DSH workspace roots: ${members} are additional roots of this session's workspace and are readable; `
+        + 'nothing is writable in read-only mode.'
+    }
+    const readable = roots.filter(root => root.access !== 'read-write').map(root => root.path)
+    let text = `Current DSH workspace roots: ${JSON.stringify(writable)} are additional roots that stay writable even in read-only mode`
+    if (readable.length > 0) text += `, and ${JSON.stringify(readable)} are readable additional roots`
+    return text + ' of this session\'s workspace; everything else is read-only.'
   }
   if (mode === 'danger-full-access') {
+    // The refused set mirrors the scope's deny set: explicit read-only roots
+    // always, and every member when the call is tool-capped.
+    const refused = options.toolAccessInvalid ? roots.map(root => root.path) : readOnly
     return `Current DSH workspace roots: ${members} are additional roots of this session's workspace; `
-      + 'danger-full-access mode has no sandbox isolation.'
+      + 'danger-full-access mode has no sandbox isolation'
+      + (refused.length > 0
+        ? `, except writes under the additional roots ${JSON.stringify(refused)} are still refused${options.toolAccessInvalid === true ? ' because toolAccess is invalid' : ''}.`
+        : '.')
   }
-  const writable = options.toolAccessInvalid ? [] : roots.filter(root => root.access === 'read-write').map(root => root.path)
-  const readOnly = roots.filter(root => root.access === 'read-only').map(root => root.path)
+  const writable = options.toolAccessInvalid ? [] : roots.filter(root => root.access !== 'read-only').map(root => root.path)
   const groups: string[] = []
   if (options.toolAccessInvalid) groups.push(`${members} are readable additional roots (all additional-root writes are refused because toolAccess is invalid)`)
   if (writable.length > 0) groups.push(`${JSON.stringify(writable)} are writable additional roots`)
@@ -321,11 +361,16 @@ export class MultiRootScopeService extends Service {
   resolve(policy: SandboxExecutionPolicy): FilesystemScope {
     const primaryRoot = canonicalPath(policy.workspaceRoot)
     const roots = this.membersOf(primaryRoot)
+    const writable = this.capped()
+      ? []
+      : roots.filter(root => effectivelyWritable(policy.mode, root.access)).map(root => root.path)
+    const writableSet = new Set(writable)
     return {
       primaryRoot,
       additionalRoots: roots.map(root => root.path),
       roots,
-      writableRoots: this.capped() ? [] : roots.filter(root => root.access === 'read-write').map(root => root.path),
+      writableRoots: writable,
+      deniedRoots: roots.filter(root => !writableSet.has(root.path)).map(root => root.path),
     }
   }
 
@@ -356,13 +401,29 @@ export class MultiRootScopeService extends Service {
   }
 
   /**
-   * The additional roots a WRITE may reach for one primary root — the members
-   * carrying `read-write` only.
+   * The additional roots a WRITE may reach for one primary root under
+   * `workspace-write` — the members whose effective access is writable there
+   * (`inherit` and fixed `read-write`). Tool caps are per-call and do not
+   * apply to this diagnostic projection.
    * @param primaryRoot - canonical primary root (or any spelling thereof).
    * @returns the canonical writable roots; empty when none qualify.
    */
   writableOf(primaryRoot: string): readonly string[] {
-    return this.membersOf(primaryRoot).filter(root => root.access === 'read-write').map(root => root.path)
+    return this.membersOf(primaryRoot).filter(root => root.access !== 'read-only').map(root => root.path)
+  }
+
+  /**
+   * Whether ANY registered primary currently publishes an explicit `read-only`
+   * member. The PTY seam resolves its caller through an environment marker;
+   * when that lookup fails this flag is the difference between pass-through
+   * (nothing to deny anywhere on the store) and fail closed.
+   * @returns whether at least one primary holds a restricted root.
+   */
+  hasActiveDenyRoots(): boolean {
+    for (const members of this.rootsByPrimary.values()) {
+      if (members.some(root => root.access === 'read-only')) return true
+    }
+    return false
   }
 
   /** The sanitized members of one primary root, in registry order. */

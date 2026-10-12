@@ -43,6 +43,9 @@ const INSERTED = [
   'multi-root-instructions',
   'multi-root-lsp',
   'multi-root-workspace-files',
+  // The B9 process fence: wraps the public shell/PTC/PTY entries so
+  // `danger-full-access` cannot bypass an explicit read-only root.
+  'multi-root-process-fence',
   'multi-root-command',
   // The client-graph anchor: mounted at the bare package name so the web
   // client-module scan reads this package's `dsh.client` declaration.

@@ -13,7 +13,12 @@ import {
 // established import sites working unchanged.
 export { parseWindowsProfile, workspaceScopeSid, type WindowsProfile } from './windows-runner-contract.ts'
 
-export function widenWindowsProfile(profile: readonly string[], roots: readonly string[], primaryRoot?: string): string[] {
+export function widenWindowsProfile(
+  profile: readonly string[],
+  roots: readonly string[],
+  deniedRoots: readonly string[],
+  primaryRoot?: string,
+): string[] {
   if (profile.length < 2 || profile[0] === undefined || profile[1]?.startsWith('--')) throw new DialectUnrecognizedError('Windows ACL runner invocation is not [node, runner, ...flags]')
   const parsed = parseWindowsProfile(profile.slice(2))
   // Fail closed (the caller converts this to SandboxUnavailableError): a UNC or
@@ -22,6 +27,23 @@ export function widenWindowsProfile(profile: readonly string[], roots: readonly 
     if (isWindowsNetworkOrDevicePath(root)) throw new DialectUnrecognizedError(`Windows ACL confinement cannot cover network or device paths: ${root}`)
   }
   if (primaryRoot !== undefined && canonicalPath(parsed.workspace) !== primaryRoot) throw new DialectUnrecognizedError('Windows ACL profile workspace does not match the policy root')
+  // The restricted-token model grants; it cannot subtract. A denied root under
+  // a granted directory (the workspace, the private temp, or a widened root)
+  // stays writable through the parent's ACE — refuse the profile instead. The
+  // registration rules already keep a denied root out of the workspace and out
+  // of every sibling root, so the only reachable overlap is the temp area.
+  if (parsed.mode === 'workspace-write') {
+    const granted = [parsed.workspace, parsed.temp, ...roots]
+    const covered = deniedRoots.filter(root => granted.some(target => windowsContained(root, target)))
+    if (covered.length > 0) {
+      throw new DialectUnrecognizedError(
+        `Windows ACL cannot deny [${covered.join(', ')}] inside a writable grant — the restricted-token model only grants`,
+      )
+    }
+  }
+  // With nothing to graft the upstream argv returns element for element — the
+  // same passthrough as an empty scope.
+  if (roots.length === 0) return [...profile]
   // The widened runner is OUR standalone file; it learns where the upstream
   // runner lives (--upstream-runner) because that location is the only anchor
   // from which @deepseek-ai/dsh-sandbox-windows-acl is importable — the plugin
@@ -33,4 +55,17 @@ export function widenWindowsProfile(profile: readonly string[], roots: readonly 
     ...profile.slice(2),
     ...roots.flatMap(root => ['--additional-root', root]),
   ]
+}
+
+/**
+ * Containment over Windows SPELLINGS, not the host OS: the profile this
+ * function rewrites may be produced for a Windows host while the check runs
+ * in tests on POSIX, so the comparison cannot borrow the host's separator or
+ * case rules.
+ */
+function windowsContained(candidate: string, root: string): boolean {
+  const normalize = (path: string): string => path.replaceAll('/', '\\').replace(/\\+$/, '').toLowerCase()
+  const target = normalize(candidate)
+  const base = normalize(root)
+  return target === base || target.startsWith(`${base}\\`)
 }

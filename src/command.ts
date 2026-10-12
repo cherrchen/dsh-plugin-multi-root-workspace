@@ -33,6 +33,7 @@ import type { ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session'
@@ -126,6 +127,7 @@ export function renderRootsReport(
   statuses: readonly RootStatus[],
   unavailable?: string,
   limit?: number,
+  mode?: SandboxMode,
 ): string {
   const lines = [`Workspace root (primary; access follows the current sandbox mode): ${primaryRoot}`]
   if (unavailable !== undefined) {
@@ -157,8 +159,13 @@ export function renderRootsReport(
       )
     }
   }
-  const writable = statuses.filter(status => status.state === 'available' && status.access === 'read-write').length
-  lines.push(`Writable additional roots: ${writable} of ${statuses.length}.`)
+  // "Writable" is mode-relative under the three-state contract (B9): an
+  // `inherit` root is writable only when the session is not read-only, while
+  // a fixed `read-write` root stays writable under every mode.
+  const writable = statuses.filter(status => status.state === 'available'
+    && status.access !== 'read-only'
+    && (mode !== 'read-only' || status.access === 'read-write')).length
+  lines.push(`Writable additional roots${mode === undefined ? '' : ' under the current mode'}: ${writable} of ${statuses.length}.`)
   return lines.join('\n')
 }
 
@@ -170,7 +177,7 @@ export function apply(ctx: Context): void {
   ctx.commands.register({
     name: COMMAND_NAME,
     description: 'List, add, remove, alias, or reveal the additional workspace roots of this session',
-    input: { hint: '[list|add [path] [--read-only|--read-write]|remove <n|path>|alias <n|path> [name]|access <n|path> <level>|reveal <n|path>|help]' },
+    input: { hint: '[list|add [path] [--inherit|--read-only|--read-write]|remove <n|path>|alias <n|path> [name]|access <n|path> <level>|reveal <n|path>|help]' },
     handler: async invocation => await runCommand(ctx, invocation),
   })
 
@@ -215,7 +222,7 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
       case 'help':
         return { kind: 'success', text: helpText() }
       case 'list':
-        return { kind: 'success', text: await report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
       case 'add': {
         const { text: rest, access } = splitAddAccess(parsed.rest)
         const typed = unquote(rest)
@@ -227,25 +234,25 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
           }
         }
         await registry.add(primaryRoot, { path, ...(access === undefined ? {} : { access }) })
-        return { kind: 'success', text: await report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
       }
       case 'remove': {
         const { ref } = await targetOf(registry, primaryRoot, parsed.rest)
         await registry.removeAt(primaryRoot, ref)
-        return { kind: 'success', text: await report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
       }
       case 'alias': {
         const { text: reference, rest: alias } = splitReference(parsed.rest)
         const { ref } = await targetOf(registry, primaryRoot, reference)
         await registry.setAlias(primaryRoot, ref, alias === '' ? undefined : unquote(alias))
-        return { kind: 'success', text: await report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
       }
       case 'access': {
         const { text: reference, rest: level } = splitReference(parsed.rest)
         const access = parseAccessLevel(level)
         const { ref } = await targetOf(registry, primaryRoot, reference)
         await registry.setAccess(primaryRoot, ref, access)
-        return { kind: 'success', text: await report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
       }
       case 'reveal': {
         const { status: target } = await targetOf(registry, primaryRoot, parsed.rest)
@@ -263,9 +270,9 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
  * directory. The refresh is what makes the report describe the present rather
  * than the moment the process started.
  */
-async function report(registry: MultiRootRegistry, primaryRoot: string): Promise<string> {
+async function report(registry: MultiRootRegistry, primaryRoot: string, mode?: SandboxMode): Promise<string> {
   const statuses = await registry.refresh(primaryRoot)
-  return renderRootsReport(canonicalRoot(primaryRoot), statuses, registry.unavailable, registry.limit)
+  return renderRootsReport(canonicalRoot(primaryRoot), statuses, registry.unavailable, registry.limit, mode)
 }
 
 /** Render a failure the way the composer displays it. */
@@ -279,13 +286,15 @@ function helpText(): string {
   return [
     `/${COMMAND_NAME} — additional workspace roots of this session`,
     `  /${COMMAND_NAME} list`,
-    `  /${COMMAND_NAME} add [absolute path] [--read-only|--read-write]   (no path opens the directory picker when one is composed)`,
+    `  /${COMMAND_NAME} add [absolute path] [--inherit|--read-only|--read-write]   (no path opens the directory picker when one is composed)`,
     `  /${COMMAND_NAME} remove <n|path>`,
     `  /${COMMAND_NAME} alias <n|path> [name]  (no name clears the alias)`,
-    `  /${COMMAND_NAME} access <n|path> read-only|read-write`,
+    `  /${COMMAND_NAME} access <n|path> inherit|read-only|read-write`,
     `  /${COMMAND_NAME} reveal <n|path>`,
     'Roots are canonicalized before they are stored: `~` expands, and a duplicate, a nested directory,',
     "or this session's own workspace root is rejected.",
+    'Access levels: `inherit` follows the session mode; `read-only` refuses writes under every mode;',
+    '`read-write` stays writable even in a read-only session.',
   ].join('\n')
 }
 
@@ -297,11 +306,11 @@ function helpText(): string {
  * The access is TRI-STATE on purpose: it stays `undefined` when the operator
  * named no level. `registry.add` revives a withheld record with its stored
  * access unless a level is given explicitly, so forwarding a default here
- * would silently upgrade a read-only registration to read-write.
+ * would silently change the registration's authority.
  */
 function splitAddAccess(text: string): { text: string; access: RootAccess | undefined } {
   const trimmed = text.trim()
-  for (const access of ['read-only', 'read-write'] as const) {
+  for (const access of ['read-only', 'read-write', 'inherit'] as const) {
     const flag = `--${access}`
     if (trimmed === flag) return { text: '', access }
     if (trimmed.startsWith(`${flag} `) || trimmed.startsWith(`${flag}\t`)) {
@@ -317,8 +326,8 @@ function splitAddAccess(text: string): { text: string; access: RootAccess | unde
 /** Parse the access level an `access` subcommand must end with. */
 function parseAccessLevel(text: string): RootAccess {
   const trimmed = text.trim()
-  if (trimmed === 'read-only' || trimmed === 'read-write') return trimmed
-  throw new RootValidationError('invalid-ref', `the access level must be read-only or read-write, got "${trimmed || 'nothing'}"`)
+  if (trimmed === 'read-only' || trimmed === 'read-write' || trimmed === 'inherit') return trimmed
+  throw new RootValidationError('invalid-ref', `the access level must be inherit, read-only, or read-write, got "${trimmed || 'nothing'}"`)
 }
 
 /**

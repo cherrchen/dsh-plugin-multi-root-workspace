@@ -20,7 +20,8 @@
  * so the assertion holds even where a confined process cannot be spawned), the
  * denial names every allowed root, and — when this process can actually run a
  * confined command — bash writes the additional root while the outside tree
- * stays denied. `read-only` must leave the additional root ungranted.
+ * stays denied. `read-only` must leave the `inherit` additional root ungranted —
+ * while the B9 fixed `read-write` root must stay writable under the same mode.
  *
  * The run is isolated: a scratch `$DSH_HOME` and a fixture tree under the
  * repository's ignored `.dsh-smoke/` directory (outside `/tmp`, so containment
@@ -46,8 +47,10 @@ const home = resolveScratchHome(`behavior-${process.pid}`)
 const fixtureRoot = join(REPO_ROOT, '.dsh-smoke', `behavior-${process.pid}`)
 const primaryRoot = join(fixtureRoot, 'ws')
 const outsideRoot = join(fixtureRoot, 'out')
-/** The additional root a multi-root session registers. */
+/** The additional root a multi-root session registers — `inherit`: follows the session mode. */
 const extraRoot = join(fixtureRoot, 'extra')
+/** The B9 fixed `read-write` root: must stay writable even under a `read-only` session. */
+const fixedRoot = join(fixtureRoot, 'fixed')
 /** A tree outside every root, used to prove the denial is still enforced. */
 const thirdRoot = join(fixtureRoot, 'third')
 const keep = process.env.DSH_SMOKE_KEEP === '1'
@@ -266,7 +269,11 @@ async function multiRootBattery(ctx) {
   scope.setAdditionalRoots(policy.workspaceRoot, [{
     id: 'extra',
     path: extraRoot,
-    recordedPath: canonical(extraRoot), access: 'read-write',
+    recordedPath: canonical(extraRoot), access: 'inherit',
+  }, {
+    id: 'fixed',
+    path: fixedRoot,
+    recordedPath: canonical(fixedRoot), access: 'read-write',
   }])
   const resolved = scope.resolve(policy)
   const canonicalExtra = resolved.additionalRoots[0]
@@ -283,6 +290,7 @@ async function multiRootBattery(ctx) {
   }
 
   results.set('fs writes into the additional root', await write(join(extraRoot, 'fs-extra.txt')))
+  results.set('fs writes into the fixed root', await write(join(fixedRoot, 'fs-fixed.txt')))
   const denial = await write(join(thirdRoot, 'fs-third.txt'))
   results.set('fs writes outside every root', denial)
   results.set('fs denial names every allowed root', String(
@@ -300,6 +308,9 @@ async function multiRootBattery(ctx) {
     const confined = await ctx.sandbox.confine(SHELL.confineArgv, policy)
     results.set('the host dialect grants the additional root', String(
       confined.argv.some(argument => argument.includes(String(canonicalExtra))),
+    ))
+    results.set('the host dialect grants the fixed root', String(
+      confined.argv.some(argument => argument.includes(String(canonical(fixedRoot)))),
     ))
     results.set('the host dialect keeps its enforcement facts', `${confined.enforcement}/${confined.denialSignatures.length}`)
   } catch (error) {
@@ -323,6 +334,7 @@ async function multiRootBattery(ctx) {
         // write carries the kernel dialect's own denial message here.
         stderr: result.stderr.text.trim(),
         wroteExtra: existsSync(join(extraRoot, 'bash-extra.txt')),
+        wroteFixed: existsSync(join(fixedRoot, 'bash-fixed.txt')),
         wroteThird: existsSync(join(thirdRoot, 'bash-third.txt')),
       }
     } catch (error) {
@@ -330,6 +342,7 @@ async function multiRootBattery(ctx) {
     }
   }
   results.set('bash writes into the additional root', JSON.stringify(await confinedWrite(bash, join(extraRoot, 'bash-extra.txt'))))
+  results.set('bash writes into the fixed root', JSON.stringify(await confinedWrite(bash, join(fixedRoot, 'bash-fixed.txt'))))
   results.set('bash writes outside every root', JSON.stringify(await confinedWrite(bash, join(thirdRoot, 'bash-third.txt'))))
 
   return results
@@ -613,6 +626,7 @@ try {
   mkdirSync(primaryRoot, { recursive: true })
   mkdirSync(outsideRoot, { recursive: true })
   mkdirSync(extraRoot, { recursive: true })
+  mkdirSync(fixedRoot, { recursive: true })
   mkdirSync(thirdRoot, { recursive: true })
   assertIsolatedHome(home)
 
@@ -695,13 +709,17 @@ try {
     // --- additional roots: the same composition, one root wider -----------------
     for (const mode of ['workspace-write', 'read-only']) {
       for (const name of ['fs-extra.txt', 'bash-extra.txt']) rmSync(join(extraRoot, name), { force: true })
+      for (const name of ['fs-fixed.txt', 'bash-fixed.txt']) rmSync(join(fixedRoot, name), { force: true })
       for (const name of ['fs-third.txt', 'bash-third.txt']) rmSync(join(thirdRoot, name), { force: true })
 
       const outcomes = await runMultiRootProfile(PLUGIN_PROFILE, mode)
       const extraWrite = String(outcomes.get('fs writes into the additional root'))
+      const fixedWrite = String(outcomes.get('fs writes into the fixed root'))
       const thirdWrite = String(outcomes.get('fs writes outside every root'))
       const dialectGrant = String(outcomes.get('the host dialect grants the additional root'))
+      const dialectGrantFixed = String(outcomes.get('the host dialect grants the fixed root'))
       const bashExtra = confinedFacts(outcomes.get('bash writes into the additional root'))
+      const bashFixed = confinedFacts(outcomes.get('bash writes into the fixed root'))
       const bashThird = confinedFacts(outcomes.get('bash writes outside every root'))
 
       check.equal(String(outcomes.get('scope resolves the additional root')).length > 0, true,
@@ -715,15 +733,18 @@ try {
 
       if (mode === 'workspace-write') {
         check.equal(extraWrite, 'ok', `${mode}: fs writes into the additional root`, extraWrite)
+        check.equal(fixedWrite, 'ok', `${mode}: fs writes into the fixed root`, fixedWrite)
         check.contains(thirdWrite, 'FS_SANDBOX_DENIED', `${mode}: fs denies a write outside every root`)
         check.contains(thirdWrite, 'allowed roots:', `${mode}: the denial names the allowed roots`)
         check.equal(String(outcomes.get('fs denial names every allowed root')), 'true',
           `${mode}: the denial lists both the primary and the additional root`, thirdWrite)
       } else {
-        check.contains(extraWrite, 'FS_SANDBOX_DENIED', `${mode}: read-only denies the additional root too`, extraWrite)
+        check.contains(extraWrite, 'FS_SANDBOX_DENIED', `${mode}: read-only denies the inherit root`, extraWrite)
+        check.equal(fixedWrite, 'ok', `${mode}: read-only still writes the fixed read-write root`, fixedWrite)
       }
 
       check.equal(dialectGrant, String(mode === 'workspace-write'), `${mode}: host dialect grant matches the mode`, dialectGrant)
+      check.equal(dialectGrantFixed, 'true', `${mode}: host dialect always grants the fixed root`, dialectGrantFixed)
 
       if (!bashExtra.ran) {
         check.skip(`${mode}: confined bash against the additional root (${requireKernelRunner(hostDialect(), String(bashExtra.failure).slice(0, 120))})`)
@@ -732,7 +753,12 @@ try {
         check.equal(bashThird.wrote, false, `${mode}: bash cannot write outside every root`, bashThird.text)
         check.equal(bashThird.denied, true, `${mode}: bash reports the outside denial`, bashThird.text)
       } else {
-        check.equal(bashExtra.wrote, false, `${mode}: read-only leaves the additional root untouched`, bashExtra.text)
+        check.equal(bashExtra.wrote, false, `${mode}: read-only leaves the inherit root untouched`, bashExtra.text)
+      }
+      if (!bashFixed.ran) {
+        check.skip(`${mode}: confined bash against the fixed root (${requireKernelRunner(hostDialect(), String(bashFixed.failure).slice(0, 120))})`)
+      } else {
+        check.equal(bashFixed.wrote, true, `${mode}: bash always writes the fixed read-write root`, bashFixed.text)
       }
     }
     // --- the M3 path: roots registered by the command, not by the smoke --------

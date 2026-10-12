@@ -136,29 +136,38 @@ declare module '@deepseek-ai/cordis' {
 /**
  * One persisted root record. `zod` validates it at the durable boundary.
  *
- * `recordedPath` keeps meaning "a READ-WRITE grant" exactly as it always has,
- * and `readOnlyRecordedPath` is the read-only grant's counterpart — the access
- * level is expressed by WHICH key is present, never by an `access` field on
- * the same `recordedPath`. That split is what makes this single layout
- * downgrade-safe at domain version 1 (the JSON backend checks the version
- * with strict equality, so a bump would break both upgrade and downgrade):
+ * The access level is expressed by WHICH grant key is present, never by an
+ * `access` field on the same `recordedPath` (ADR-0017):
+ *
+ * - `recordedPath` means `inherit` — the historical writable grant, which
+ *   under B9 keeps following the session mode. Upgrading a legacy record to
+ *   `inherit` changes nothing about its effective authority.
+ * - `readOnlyRecordedPath` means `read-only`.
+ * - `readWriteRecordedPath` means fixed `read-write` (B9).
+ *
+ * That split is what makes this single layout downgrade-safe at domain
+ * version 1 (the JSON backend checks the version with strict equality, so a
+ * bump would break both upgrade and downgrade):
  *
  * - an OLDER plugin version parses this record with a schema that strips
- *   unknown keys, so a read-only record loses `readOnlyRecordedPath` and
- *   arrives with NO `recordedPath`; the old classification reports it
- *   `invalid` and grants nothing — a downgrade can never escalate read-only
- *   into read-write;
- * - a record with `recordedPath` only is the read-write grant it always was,
+ *   unknown keys, so a read-only or fixed read-write record loses its grant
+ *   field and arrives with NO `recordedPath`; the old classification reports
+ *   it `invalid` and grants nothing — a downgrade can never escalate either
+ *   restricted level into a write grant. A fixed read-write record must
+ *   therefore NEVER also write `recordedPath`: an older plugin would see the
+ *   legacy field and grant it as plain read-write;
+ * - a record with `recordedPath` only is the writable grant it always was,
  *   so upgrading changes nothing for legacy records.
  */
 const persistedRoot = z.object({
   id: z.string().min(1),
   path: z.string().min(1),
   // Absent only in records written before the field existed (or by hand), and
-  // in read-only records. Such a record is reported `invalid` rather than
+  // in non-inherit records. Such a record is reported `invalid` rather than
   // granted on a guess — see classifyStoredRoots.
   recordedPath: z.string().min(1).optional(),
   readOnlyRecordedPath: z.string().min(1).optional(),
+  readWriteRecordedPath: z.string().min(1).optional(),
   alias: z.string().optional(),
   addedAt: z.string().min(1),
 })
@@ -196,9 +205,9 @@ export interface AddRootInput {
   /** Optional display alias. */
   readonly alias?: string
   /**
-   * The write authority to register; defaults to `read-write` (the historical
-   * grant). On a REVIVE the existing record keeps its access unless this field
-   * is given explicitly.
+   * The write authority to register; defaults to `inherit` (the historical
+   * session-following grant). On a REVIVE the existing record keeps its
+   * access unless this field is given explicitly.
    */
   readonly access?: RootAccess
 }
@@ -442,13 +451,13 @@ export class MultiRootRegistry extends Service {
         // is exactly what a revive confirms.
         existing: availableRoots(statuses).filter(root => root !== revivedPath),
       })
-      const access = input.access ?? 'read-write'
+      const access = input.access ?? 'inherit'
       const next = revived === -1
         ? [...statuses, {
           id: additionalRootId(randomUUID()),
           path: canonical,
           access,
-          ...(access === 'read-only' ? { readOnlyRecordedPath: canonical } : { recordedPath: canonical }),
+          ...grantFields(access, canonical),
           state: 'available',
           ...(alias === undefined ? {} : { alias }),
           addedAt: new Date().toISOString(),
@@ -477,18 +486,22 @@ export class MultiRootRegistry extends Service {
    *
    * Re-resolving is not re-authorizing: the grant keeps the canonical
    * directory it was recorded for; only which persisted field carries it
-   * changes. Downgrading to `read-only` is always allowed — a withheld root
-   * may be restricted while it is withheld — while upgrading to `read-write`
-   * requires the root to be `available` under the FRESH classification: a
-   * root that is not currently granted cannot be granted writability by a
+   * changes. The three levels are not a total order — `inherit` is weaker
+   * than `read-write` under a read-only session but stronger under
+   * Full-access — so "upgrade" cannot be a single direction. The gate is
+   * therefore: pinning to `read-only` is always allowed (a withheld root may
+   * be restricted while it is withheld), while ANY other target requires the
+   * root to be `available` under the FRESH classification — every
+   * non-read-only level can widen authority under some session mode, and a
+   * root that is not currently granted must not be granted anything by a
    * metadata change.
    * @param primaryRoot - the session workspace root the root belongs to.
    * @param ref - which registered root to change.
    * @param access - the new write authority.
    * @returns the updated status list.
    * @throws {RootValidationError} `not-found` when the reference matches
-   *   nothing, `root-unavailable` when an upgrade targets a root that is not
-   *   `available` right now.
+   *   nothing, `root-unavailable` when the target is not `available` and the
+   *   new level is not `read-only`.
    */
   async setAccess(primaryRoot: string, ref: RootRef, access: RootAccess): Promise<readonly RootStatus[]> {
     await this.ensureAuthority()
@@ -499,15 +512,15 @@ export class MultiRootRegistry extends Service {
       const targetIndex = resolveRootIndex(statuses, ref)
       const target = statuses[targetIndex]!
       if (target.access === access) return statuses
-      if (access === 'read-write' && target.state !== 'available') {
+      if (access !== 'read-only' && target.state !== 'available') {
         throw new RootValidationError(
           'root-unavailable',
-          `"${target.path}" is ${target.state} and cannot be made writable;`
-          + ' restore the directory first, then upgrade the access',
+          `"${target.path}" is ${target.state} and cannot change to "${access}";`
+          + ' restore the directory first — only "read-only" may be set while a root is not granted',
           { reference: target.id },
         )
       }
-      const recorded = target.recordedPath ?? target.readOnlyRecordedPath
+      const recorded = target.recordedPath ?? target.readOnlyRecordedPath ?? target.readWriteRecordedPath
       const next = statuses.map((status, index) => index === targetIndex
         ? {
           ...dropGrantFields(status),
@@ -1010,35 +1023,52 @@ export class MultiRootRegistry extends Service {
 }
 
 /** The recorded canonical directory a record was granted for, whichever grant field holds it. */
-function recordedGrantOf(record: { readonly recordedPath?: string; readonly readOnlyRecordedPath?: string }): string | undefined {
-  return record.recordedPath ?? record.readOnlyRecordedPath
+function recordedGrantOf(record: {
+  readonly recordedPath?: string
+  readonly readOnlyRecordedPath?: string
+  readonly readWriteRecordedPath?: string
+}): string | undefined {
+  return record.recordedPath ?? record.readOnlyRecordedPath ?? record.readWriteRecordedPath
 }
 
 /** The grant fields one access level persists: exactly one key, always. */
-function grantFields(access: RootAccess, recorded: string): { readonly recordedPath: string } | { readonly readOnlyRecordedPath: string } {
-  return access === 'read-only' ? { readOnlyRecordedPath: recorded } : { recordedPath: recorded }
+function grantFields(access: RootAccess, recorded: string): { readonly recordedPath: string } | { readonly readOnlyRecordedPath: string } | { readonly readWriteRecordedPath: string } {
+  if (access === 'read-only') return { readOnlyRecordedPath: recorded }
+  if (access === 'read-write') return { readWriteRecordedPath: recorded }
+  return { recordedPath: recorded }
 }
 
-/** Strip both grant fields so a re-write can set exactly the right one back. */
-function dropGrantFields<T extends { readonly recordedPath?: string; readonly readOnlyRecordedPath?: string }>(
+/** Strip every grant field so a re-write can set exactly the right one back. */
+function dropGrantFields<T extends { readonly recordedPath?: string; readonly readOnlyRecordedPath?: string; readonly readWriteRecordedPath?: string }>(
   status: T,
-): Omit<T, 'recordedPath' | 'readOnlyRecordedPath'> {
-  const { recordedPath: _write, readOnlyRecordedPath: _read, ...rest } = status
+): Omit<T, 'recordedPath' | 'readOnlyRecordedPath' | 'readWriteRecordedPath'> {
+  const { recordedPath: _inherit, readOnlyRecordedPath: _read, readWriteRecordedPath: _write, ...rest } = status
   return rest
 }
 
 /** Project one status back to the durable record shape. */
 function toPersistedRoot(status: RootStatus): PersistedRoot {
-  const writeGrant = status.recordedPath
-  const readGrant = status.readOnlyRecordedPath
-  // A record that somehow carries BOTH grant fields is kept verbatim: it
-  // classifies `invalid` every time it is read, but rewriting it under one
+  const grants = [status.recordedPath, status.readOnlyRecordedPath, status.readWriteRecordedPath]
+    .filter((grant): grant is string => grant !== undefined && grant !== '')
+  // A record that somehow carries MORE THAN ONE grant field is kept verbatim:
+  // it classifies `invalid` every time it is read, but rewriting it under one
   // field would silently heal the ambiguity into a real grant.
-  const grant = writeGrant !== undefined && writeGrant !== '' && readGrant !== undefined && readGrant !== ''
-    ? { recordedPath: writeGrant, readOnlyRecordedPath: readGrant }
+  const grant = grants.length > 1
+    ? {
+      ...(status.recordedPath === undefined ? {} : { recordedPath: status.recordedPath }),
+      ...(status.readOnlyRecordedPath === undefined ? {} : { readOnlyRecordedPath: status.readOnlyRecordedPath }),
+      ...(status.readWriteRecordedPath === undefined ? {} : { readWriteRecordedPath: status.readWriteRecordedPath }),
+    }
+    // Exactly one field present: re-emit it ONLY when it already names the
+    // status's access. A record whose single field contradicts its access is
+    // inconsistent memory state — rewriting it under the access's field would
+    // silently heal the mismatch into a real grant, so the grant is dropped
+    // instead and the record classifies `invalid` on the next read.
     : status.access === 'read-only'
-      ? (readGrant === undefined || readGrant === '' ? {} : { readOnlyRecordedPath: readGrant })
-      : (writeGrant === undefined || writeGrant === '' ? {} : { recordedPath: writeGrant })
+      ? (status.readOnlyRecordedPath === undefined || status.readOnlyRecordedPath === '' ? {} : { readOnlyRecordedPath: status.readOnlyRecordedPath })
+      : status.access === 'read-write'
+        ? (status.readWriteRecordedPath === undefined || status.readWriteRecordedPath === '' ? {} : { readWriteRecordedPath: status.readWriteRecordedPath })
+        : (status.recordedPath === undefined || status.recordedPath === '' ? {} : { recordedPath: status.recordedPath })
   return {
     id: status.id,
     path: status.path,
@@ -1060,17 +1090,27 @@ function toPersistedRoot(status: RootStatus): PersistedRoot {
  * into a writable grant.
  */
 function toRegisteredRoot(entry: PersistedRoot): RegisteredRoot {
-  const hasWriteGrant = entry.recordedPath !== undefined && entry.recordedPath !== ''
+  const hasInheritGrant = entry.recordedPath !== undefined && entry.recordedPath !== ''
   const hasReadGrant = entry.readOnlyRecordedPath !== undefined && entry.readOnlyRecordedPath !== ''
+  const hasWriteGrant = entry.readWriteRecordedPath !== undefined && entry.readWriteRecordedPath !== ''
+  // Exactly one grant field names the access. Zero or several still resolves
+  // to a value — the in-memory type requires one — but the record classifies
+  // `invalid` on the grant-field count before `access` is ever read.
+  const access: RootAccess = hasWriteGrant && !hasInheritGrant && !hasReadGrant
+    ? 'read-write'
+    : hasReadGrant && !hasInheritGrant && !hasWriteGrant
+      ? 'read-only'
+      : 'inherit'
   return {
     id: additionalRootId(entry.id),
     path: entry.path,
-    access: hasReadGrant && !hasWriteGrant ? 'read-only' : 'read-write',
+    access,
     // A record written before these fields existed (or by hand) keeps whatever
     // it has: classification needs to SEE the absence to report it as invalid,
     // rather than have it papered over here.
     ...(entry.recordedPath === undefined ? {} : { recordedPath: entry.recordedPath }),
     ...(entry.readOnlyRecordedPath === undefined ? {} : { readOnlyRecordedPath: entry.readOnlyRecordedPath }),
+    ...(entry.readWriteRecordedPath === undefined ? {} : { readWriteRecordedPath: entry.readWriteRecordedPath }),
     ...(entry.alias === undefined ? {} : { alias: entry.alias }),
     addedAt: entry.addedAt,
   }

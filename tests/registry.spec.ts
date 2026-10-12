@@ -876,12 +876,12 @@ describe('per-root access', () => {
     return document.tables.roots[primary]?.roots ?? []
   }
 
-  it('reads a legacy record — recordedPath only — as the read-write grant it always was', async () => {
+  it('reads a legacy record — recordedPath only — as the inherit grant it now means', async () => {
     const { registry, scope } = await mount()
     const extra = makeRoot('extra')
     await registry.add(primary, { path: extra })
     const [status] = registry.list(primary)
-    expect(status?.access).toBe('read-write')
+    expect(status?.access).toBe('inherit')
     expect(storedRecords()).toEqual([expect.objectContaining({ recordedPath: extra })])
     expect(storedRecords()[0]).not.toHaveProperty('readOnlyRecordedPath')
     expect(scope.scopeOf(primary)).toEqual([extra])
@@ -908,7 +908,26 @@ describe('per-root access', () => {
     expect(second.scope.writableOf(primary)).toEqual([])
   })
 
-  it('reports a record carrying both grant fields as invalid (ambiguous access)', async () => {
+  it('round-trips a fixed read-write registration as readWriteRecordedPath, never recordedPath', async () => {
+    const first = await mount()
+    const extra = makeRoot('extra')
+    const statuses = await first.registry.add(primary, { path: extra, access: 'read-write' })
+    expect(statuses[0]?.access).toBe('read-write')
+    expect(storedRecords()).toEqual([expect.objectContaining({ readWriteRecordedPath: extra })])
+    // The fixed grant must never write `recordedPath`: an older plugin would
+    // read that legacy field and grant it as the session-following write.
+    expect(storedRecords()[0]).not.toHaveProperty('recordedPath')
+    expect(storedRecords()[0]).not.toHaveProperty('readOnlyRecordedPath')
+    await disposeAll()
+
+    const second = await mount()
+    const [status] = second.registry.list(primary)
+    expect(status?.access).toBe('read-write')
+    expect(status?.state).toBe('available')
+    expect(second.scope.writableOf(primary)).toEqual([extra])
+  })
+
+  it('reports a record carrying more than one grant field as invalid (ambiguous access)', async () => {
     const first = await mount()
     const extra = makeRoot('extra')
     await first.registry.add(primary, { path: extra })
@@ -954,6 +973,38 @@ describe('per-root access', () => {
     expect(parsed).not.toHaveProperty('readOnlyRecordedPath')
   })
 
+  it('cannot be escalated by a downgrade: a fixed read-write record is ungrantable to every older schema', async () => {
+    const { registry } = await mount()
+    const extra = makeRoot('extra')
+    await registry.add(primary, { path: extra, access: 'read-write' })
+    const [record] = storedRecords()
+
+    const { z } = await import('zod')
+    // The pre-access schema (only `recordedPath` existed) …
+    const oldestPersistedRoot = z.object({
+      id: z.string().min(1),
+      path: z.string().min(1),
+      recordedPath: z.string().min(1).optional(),
+      alias: z.string().optional(),
+      addedAt: z.string().min(1),
+    })
+    // … and the two-level schema (`readOnlyRecordedPath` added) both strip the
+    // unknown grant field and find NO `recordedPath`: invalid, never granted.
+    const twoLevelPersistedRoot = z.object({
+      id: z.string().min(1),
+      path: z.string().min(1),
+      recordedPath: z.string().min(1).optional(),
+      readOnlyRecordedPath: z.string().min(1).optional(),
+      alias: z.string().optional(),
+      addedAt: z.string().min(1),
+    })
+    for (const schema of [oldestPersistedRoot, twoLevelPersistedRoot]) {
+      const parsed = schema.parse(record)
+      expect(parsed.recordedPath).toBeUndefined()
+      expect(parsed).not.toHaveProperty('readWriteRecordedPath')
+    }
+  })
+
   it('upgrades and downgrades access without re-recording the grant', async () => {
     const { registry, scope } = await mount()
     const extra = makeRoot('extra')
@@ -970,7 +1021,8 @@ describe('per-root access', () => {
     const rw = await registry.setAccess(primary, { kind: 'ordinal', ordinal: 1 }, 'read-write')
     expect(rw[0]?.access).toBe('read-write')
     expect(scope.writableOf(primary)).toEqual([extra])
-    expect(storedRecords()[0]).toMatchObject({ recordedPath: extra })
+    expect(storedRecords()[0]).toMatchObject({ readWriteRecordedPath: extra })
+    expect(storedRecords()[0]).not.toHaveProperty('recordedPath')
     expect(storedRecords()[0]).not.toHaveProperty('readOnlyRecordedPath')
   })
 
@@ -986,6 +1038,10 @@ describe('per-root access', () => {
     // Upgrading requires the FRESH classification to grant the root: a record
     // that is `missing` (or any withheld state) cannot be made writable.
     await expect(registry.setAccess(primary, { kind: 'ordinal', ordinal: 1 }, 'read-write'))
+      .rejects.toMatchObject({ code: 'root-unavailable' })
+    // `inherit` can widen authority too (Full-access and workspace-write), so
+    // it is gated the same way; only `read-only` is always allowed.
+    await expect(registry.setAccess(primary, { kind: 'ordinal', ordinal: 1 }, 'inherit'))
       .rejects.toMatchObject({ code: 'root-unavailable' })
     // Downgrading is always allowed, even for a withheld root.
     const downgraded = await registry.setAccess(primary, { kind: 'ordinal', ordinal: 2 }, 'read-only')
@@ -1037,7 +1093,8 @@ describe('per-root access', () => {
     const upgraded = await registry.add(primary, { path: elsewhere, access: 'read-write' })
     expect(upgraded).toHaveLength(1)
     expect(upgraded[0]?.access).toBe('read-write')
-    expect(storedRecords()[0]).toMatchObject({ recordedPath: canonicalPath(elsewhere) })
+    expect(storedRecords()[0]).toMatchObject({ readWriteRecordedPath: canonicalPath(elsewhere) })
+    expect(storedRecords()[0]).not.toHaveProperty('recordedPath')
     expect(storedRecords()[0]).not.toHaveProperty('readOnlyRecordedPath')
   })
 
@@ -1051,7 +1108,7 @@ describe('per-root access', () => {
     await registry.setAlias(primary, { kind: 'ordinal', ordinal: 1 }, 'docs')
     await registry.move(primary, { kind: 'ordinal', ordinal: 2 }, { kind: 'ordinal', ordinal: 1 })
     const statuses = registry.list(primary)
-    expect(statuses.map(status => status.access)).toEqual(['read-write', 'read-only'])
+    expect(statuses.map(status => status.access)).toEqual(['inherit', 'read-only'])
     expect(statuses[1]?.alias).toBe('docs')
   })
 })

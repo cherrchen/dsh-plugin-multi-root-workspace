@@ -65,8 +65,19 @@ Windows runner 的 capability SID 只对「主根 + 可写附加根」这一个�
 - `danger-full-access` 与 `read-only` 模式逐字节保持上游语义。
 - 已知限制：由未封顶工具启动的长寿命进程（常驻 dev server）在 cap 生效前拿到的快照不回收；回收方式仍是结束旧进程再启动。dispatch 之外的操作在配置非空时一律按封顶处理，这是刻意的偏严。
 
+## 修订：B9 三态权限取代两档 access（2026-10-13，Amendment）
+
+Status 保持 **Accepted**；`toolAccess` 封顶机制、`recordedPath`/`readOnlyRecordedPath` 的降级安全原则与 ALS dispatch 上下文不变，权限模型与编码按 [ADR-0017](./ADR-0017-three-state-root-access-and-sandbox-modes.md) 更新。
+
+- **决策表前两行废止**：`read-only` 模式不再「全拒」——显式 `read-write` 登记根保持可写；`danger-full-access` 不再「放行」——显式 `read-only` 登记根在该模式下仍拒写。新合同以 ADR-0017 的九格矩阵为准。
+- **`RootAccess` 扩为三档** `inherit | read-only | read-write`；持久化编码重映射：`recordedPath` → `inherit`（旧 `read-write` 记录升级后语义 = 继承），`readOnlyRecordedPath` → `read-only` 不变，新增 `readWriteRecordedPath` → 固定 `read-write`。单键在场、零/多键判 `invalid`、禁止默认修复等规则不变。
+- **`setAccess` 升级门槛重做**：三档非全序，`inherit ↔ read-write` 不构成单向升降；仅「离开 `read-only`」维持 `available` 门槛。
+- **Windows root-set SID**：`workspace-write` 下集合语义不变；`read-only` 会话的固定读写根并入 `--write-sid` root 集；Full-access 下的局部只读需要新机制，见 ADR-0017 后端表。
+
 ## Related Documents
 
+- [B9 开发计划](../plans/active/2026-10-13-b9-root-access-and-sandbox-modes.md)
+- [ADR-0017：附加根三态权限与跨 SandboxMode 执行一致性](./ADR-0017-three-state-root-access-and-sandbox-modes.md)
 - [B4–B8 开发计划](../plans/active/2026-10-11-b4-b8-p2.md)
 - [ADR-0004 注册表持久化与校验](./ADR-0004-root-registry-persistence-and-validation.md)（单布局编码的同一套兼容策略）
 - [ADR-0012 session origin 与进程快照](./ADR-0012-session-origin-and-effective-cwd.md)

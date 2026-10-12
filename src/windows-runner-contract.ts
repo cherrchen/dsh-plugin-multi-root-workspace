@@ -74,7 +74,16 @@ export function workspaceScopeSid(roots: readonly string[]): string {
 export interface WindowsProfile {
   workspace: string
   temp: string
-  mode: 'workspace-write'
+  /**
+   * `workspace-write` grants the workspace, the private temp, and every
+   * `--additional-root`. `read-only` is legal only on the widened form (the
+   * standalone runner): the runner then grants the additional roots ALONE — a
+   * workspace-write token over just those directories — which is how a fixed
+   * `read-write` additional root stays writable inside a read-only session
+   * (B9). An upstream `read-only` profile carries no `--additional-root`, so
+   * the mode only ever reaches the runner with grants attached.
+   */
+  mode: 'read-only' | 'workspace-write'
   additionalRoots: string[]
   /**
    * The upstream runner's own file (`--upstream-runner`). Required when
@@ -117,13 +126,19 @@ export function parseWindowsProfile(args: readonly string[], allowAdditional = f
   }
   const workspace = fields.get('--workspace')
   const temp = fields.get('--temp')
-  if (workspace === undefined || temp === undefined || fields.get('--mode') !== 'workspace-write') {
-    throw new DialectUnrecognizedError('Windows multi-root requires --workspace, --temp and --mode workspace-write')
+  const mode = fields.get('--mode')
+  if (workspace === undefined || temp === undefined || (mode !== 'workspace-write' && mode !== 'read-only')) {
+    throw new DialectUnrecognizedError('Windows multi-root requires --workspace, --temp, and --mode read-only or workspace-write')
+  }
+  // On the standalone runner a read-only profile must carry grants — an
+  // upstream `read-only` invocation never reaches this process.
+  if (allowAdditional && mode === 'read-only' && additionalRoots.length === 0) {
+    throw new DialectUnrecognizedError('Windows multi-root read-only requires at least one --additional-root')
   }
   const writeSid = fields.get('--write-sid')
   const tempWriteSid = fields.get('--temp-write-sid')
   if ((writeSid === undefined) !== (tempWriteSid === undefined)) throw new DialectUnrecognizedError('Windows ACL profile requires both capability SIDs or neither')
-  return { workspace, temp, mode: 'workspace-write', additionalRoots,
+  return { workspace, temp, mode, additionalRoots,
     ...(upstreamRunner === undefined ? {} : { upstreamRunner }),
     ...(writeSid === undefined ? {} : { writeSid }), ...(tempWriteSid === undefined ? {} : { tempWriteSid }) }
 }

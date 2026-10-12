@@ -45,8 +45,8 @@ function policy(workspaceRoot: string, mode: SandboxExecutionPolicy['mode'] = 'w
 }
 
 /** Register one additional root the way the registry does: canonical, with its granted directory. */
-function root(id: string, path: string): { id: string; path: string; recordedPath: string; access: 'read-write' } {
-  return { id, path, recordedPath: canonicalPath(path), access: 'read-write' }
+function root(id: string, path: string): { id: string; path: string; recordedPath: string; access: 'inherit' } {
+  return { id, path, recordedPath: canonicalPath(path), access: 'inherit' }
 }
 
 describe('scope resolution', () => {
@@ -297,7 +297,7 @@ describe('per-root access', () => {
     // Membership (instructions, LSP, routing, reads) covers BOTH levels.
     expect(resolved.additionalRoots).toEqual([fixture.outside, canonicalPath(third)])
     expect(resolved.writableRoots).toEqual([fixture.outside])
-    expect(resolved.roots.map(member => member.access)).toEqual(['read-write', 'read-only'])
+    expect(resolved.roots.map(member => member.access)).toEqual(['inherit', 'read-only'])
     expect(ctx.multiRootScope.scopeOf(fixture.workspace)).toEqual([fixture.outside, canonicalPath(third)])
     expect(ctx.multiRootScope.writableOf(fixture.workspace)).toEqual([fixture.outside])
   })

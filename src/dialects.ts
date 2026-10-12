@@ -36,6 +36,7 @@
  */
 
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import { isCanonicallyUnder } from './roots.ts'
 import { DialectUnrecognizedError } from './windows-runner-contract.ts'
 
 /** The kernel runner dialects a confined argv can speak. */
@@ -156,6 +157,60 @@ export function widenProfileArgs(
   }
 }
 
+/**
+ * Graft writable grants onto a `read-only` profile — the B9 cell where a fixed
+ * `read-write` additional root stays writable while the session mode denies
+ * every other write. Each dialect appends its own grant spelling AFTER
+ * upstream's deny-all baseline, so the appended form wins:
+ *
+ * - seatbelt: SBPL is last-match-wins — a trailing `(allow file-write*
+ *   (subpath …))` overrides the blanket `(deny file-write*)` for those roots;
+ * - bwrap: mounts apply in order — a `--bind W W` after `--ro-bind / /`
+ *   re-mounts that subtree writable inside the read-only namespace;
+ * - landlock: grants union — an extra `--rw W` widens exactly that subtree.
+ *
+ * `windows-acl` cannot be spelled this way and goes through
+ * `widenWindowsProfile` (the standalone runner grants only the listed roots).
+ * @param dialect - the recognized dialect.
+ * @param profileArgs - the upstream read-only profile arguments.
+ * @param additionalRoots - canonical roots the effective scope keeps writable.
+ * @returns the grafted profile arguments.
+ */
+export function graftProfileArgs(
+  dialect: RunnerDialect,
+  profileArgs: readonly string[],
+  additionalRoots: readonly string[],
+): string[] {
+  if (additionalRoots.length === 0) return [...profileArgs]
+  switch (dialect) {
+    case 'seatbelt': return graftSeatbelt(profileArgs, additionalRoots)
+    case 'bwrap': return [...profileArgs, ...additionalRoots.flatMap(root => ['--bind', root, root])]
+    case 'landlock': {
+      const granted = new Set<string>()
+      for (let index = 0; index + 1 < profileArgs.length; index += 1) {
+        if (profileArgs[index] === '--rw') granted.add(profileArgs[index + 1] as string)
+      }
+      const added = additionalRoots.filter(root => !granted.has(root)).flatMap(root => ['--rw', root])
+      return [...profileArgs, ...added]
+    }
+    case 'windows-acl':
+      throw new DialectUnrecognizedError('Windows ACL read-only grafting requires widenWindowsProfile')
+  }
+}
+
+/** Append a trailing allow form to the SBPL — last-match-wins overrides the blanket deny. */
+function graftSeatbelt(profileArgs: readonly string[], additionalRoots: readonly string[]): string[] {
+  const profile = profileArgs[profileArgs.length - 1]
+  if (profile === undefined || profileArgs[profileArgs.length - 2] !== '-p') {
+    throw new DialectUnrecognizedError(`seatbelt profile is not "[<sandbox-exec>, …, -p, <SBPL>]": ${JSON.stringify(profileArgs)}`)
+  }
+  const granted = new Set([...profile.matchAll(SBPL_SUBPATH_TOKEN)].map(token => sbplValue(token[1] as string)))
+  const added = additionalRoots.filter(root => !granted.has(root))
+  if (added.length === 0) return [...profileArgs]
+  const widened = profile + ` (allow file-write* ${added.map(root => `(subpath ${sbplString(root)})`).join(' ')})`
+  return [...profileArgs.slice(0, -1), widened]
+}
+
 /** Quote one path exactly the way the upstream Seatbelt profile builder does. */
 function sbplString(path: string): string {
   return `"${path.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`)}"`
@@ -246,4 +301,176 @@ function widenLandlock(profileArgs: readonly string[], workspaceRoot: string, ad
   }
   const added = additionalRoots.filter(root => !granted.has(root)).flatMap(root => [flag, root])
   return [...profileArgs, ...added]
+}
+
+/**
+ * The bwrap mount points a workspace-write profile makes writable: every
+ * `[flag, X, X]` triple whose flag is not `--ro*`, plus every `--tmpfs` target.
+ * @returns writable mount targets in profile order.
+ */
+function bwrapWritableMounts(profileArgs: readonly string[]): string[] {
+  const targets: string[] = []
+  for (let index = 0; index + 2 < profileArgs.length; index += 1) {
+    const flag = profileArgs[index] as string
+    if (!flag.startsWith('--') || flag.startsWith('--ro')) continue
+    if (flag === '--tmpfs') {
+      targets.push(profileArgs[index + 1] as string)
+      index += 1
+      continue
+    }
+    if (profileArgs[index + 1] === profileArgs[index + 2]) targets.push(profileArgs[index + 2] as string)
+  }
+  return targets
+}
+
+/** The `--tmpfs` mount targets — a denied root under one is masked, not denied. */
+function bwrapTmpfsTargets(profileArgs: readonly string[]): string[] {
+  const targets: string[] = []
+  for (let index = 0; index + 1 < profileArgs.length; index += 1) {
+    if (profileArgs[index] === '--tmpfs') targets.push(profileArgs[index + 1] as string)
+  }
+  return targets
+}
+
+/** The paths a Landlock profile grants read-write (`--rw` flag values). */
+function landlockWritablePaths(profileArgs: readonly string[]): string[] {
+  const granted: string[] = []
+  for (let index = 0; index + 1 < profileArgs.length; index += 1) {
+    if (profileArgs[index] === '--rw') granted.push(profileArgs[index + 1] as string)
+  }
+  return granted
+}
+
+/**
+ * Deny `deniedRoots` inside an upstream `workspace-write` profile — the B9 edge
+ * where an explicit `read-only` (or tool-capped) additional root sits under a
+ * directory the profile grants writable (the platform temp area, which an
+ * additional root may legitimately be registered beneath).
+ *
+ * A denied root outside every grant needs no profile work at all: the mode
+ * already denies it. Per dialect:
+ *
+ * - seatbelt appends a trailing `(deny file-write* (subpath …))` form — last
+ *   match wins over every earlier allow, and a redundant deny on an ungranted
+ *   root is harmless;
+ * - bwrap re-mounts the root `--ro-bind` AFTER the writable binds (a later
+ *   mount wins inside the namespace); roots under a `--tmpfs` target are
+ *   skipped — the tmpfs masks them entirely (an over-deny of reads, chosen
+ *   over a broken `--ro-bind` whose source cannot resolve);
+ * - landlock cannot subtract: a denied root under an `--rw` grant throws —
+ *   union semantics have no deny primitive;
+ * - windows-acl goes through `widenWindowsProfile`, whose runner-side ACL
+ *   grant cannot subtract either — its caller checks the same overlap.
+ * @param dialect - the recognized dialect.
+ * @param profileArgs - the upstream workspace-write profile arguments.
+ * @param deniedRoots - canonical roots this call must not write.
+ * @returns the profile arguments with the in-profile denies applied.
+ */
+export function denyProfileArgs(
+  dialect: RunnerDialect,
+  profileArgs: readonly string[],
+  deniedRoots: readonly string[],
+): string[] {
+  if (deniedRoots.length === 0) return [...profileArgs]
+  switch (dialect) {
+    case 'seatbelt': {
+      const profile = profileArgs[profileArgs.length - 1]
+      if (profile === undefined || profileArgs[profileArgs.length - 2] !== '-p') {
+        throw new DialectUnrecognizedError(`seatbelt profile is not "[<sandbox-exec>, …, -p, <SBPL>]": ${JSON.stringify(profileArgs)}`)
+      }
+      // Deny only what an allow-subpath grant could reach — the mode already
+      // denies the rest, and an all-restricted scope stays a passthrough.
+      const granted = [...profile.matchAll(SBPL_SUBPATH_TOKEN)].map(token => sbplValue(token[1] as string))
+      const covered = deniedRoots.filter(root => granted.some(target => isCanonicallyUnder(root, target)))
+      if (covered.length === 0) return [...profileArgs]
+      const denied = covered.map(root => `(subpath ${sbplString(root)})`).join(' ')
+      return [...profileArgs.slice(0, -1), `${profile} (deny file-write* ${denied})`]
+    }
+    case 'bwrap': {
+      const writable = bwrapWritableMounts(profileArgs)
+      const masked = bwrapTmpfsTargets(profileArgs)
+      const binds = deniedRoots
+        .filter(root => writable.some(target => isCanonicallyUnder(root, target)) && !masked.some(target => isCanonicallyUnder(root, target)))
+        .flatMap(root => ['--ro-bind', root, root])
+      return [...profileArgs, ...binds]
+    }
+    case 'landlock': {
+      const granted = landlockWritablePaths(profileArgs)
+      const covered = deniedRoots.filter(root => granted.some(target => isCanonicallyUnder(root, target)))
+      if (covered.length > 0) {
+        throw new DialectUnrecognizedError(
+          `landlock cannot deny [${covered.join(', ')}] inside a writable grant — its launcher only supports allowlist union`,
+        )
+      }
+      return [...profileArgs]
+    }
+    case 'windows-acl':
+      throw new DialectUnrecognizedError('Windows ACL deny overlap is checked by widenWindowsProfile')
+  }
+}
+
+/**
+ * Restrict an ambient-writable execution to everything EXCEPT `deniedRoots` —
+ * the B9 cell `danger-full-access` + explicit `read-only`. The consumers of
+ * this profile (shell, PTY, PTC) bypass `confine()` entirely under that mode,
+ * so the process fence builds this profile from an upstream skeleton instead:
+ * the caller probes `confine` once under `read-only` to obtain the runner's
+ * argument prefix, and this function rewrites the file-effect part.
+ *
+ * - seatbelt: `(version 1) (allow default)` kept from the profile head, plus a
+ *   trailing `(deny file-write* (subpath …))` — allow-default with subpath
+ *   carve-outs, the inverse of the confined profiles;
+ * - bwrap: `--ro-bind / /` becomes `--bind / /` (ambient writable namespace),
+ *   each denied root is re-mounted `--ro-bind` after it;
+ * - landlock and windows-acl cannot express "everything except" — the launcher
+ *   only unions allowlists and the ACL model only grants — so both throw.
+ * @param dialect - the recognized dialect.
+ * @param profileArgs - the upstream read-only skeleton's profile arguments.
+ * @param deniedRoots - canonical roots the execution must not write.
+ * @returns the restricted profile arguments.
+ */
+export function restrictProfileArgs(
+  dialect: RunnerDialect,
+  profileArgs: readonly string[],
+  deniedRoots: readonly string[],
+): string[] {
+  if (deniedRoots.length === 0) return [...profileArgs]
+  switch (dialect) {
+    case 'seatbelt': {
+      const profile = profileArgs[profileArgs.length - 1]
+      if (profile === undefined || profileArgs[profileArgs.length - 2] !== '-p') {
+        throw new DialectUnrecognizedError(`seatbelt profile is not "[<sandbox-exec>, …, -p, <SBPL>]": ${JSON.stringify(profileArgs)}`)
+      }
+      const allowDefault = '(allow default)'
+      const anchor = profile.indexOf(allowDefault)
+      if (anchor < 0) {
+        throw new DialectUnrecognizedError(`seatbelt profile has no "(allow default)" to restrict from: ${JSON.stringify(profile)}`)
+      }
+      const denied = deniedRoots.map(root => `(subpath ${sbplString(root)})`).join(' ')
+      const restricted = `${profile.slice(0, anchor + allowDefault.length)} (deny file-write* ${denied})`
+      return [...profileArgs.slice(0, -1), restricted]
+    }
+    case 'bwrap': {
+      const args: string[] = []
+      for (let index = 0; index < profileArgs.length; index += 1) {
+        const flag = profileArgs[index] as string
+        if (flag === '--ro-bind' && profileArgs[index + 1] === '/' && profileArgs[index + 2] === '/') {
+          args.push('--bind', '/', '/')
+          index += 2
+          continue
+        }
+        if (flag === '--tmpfs') {
+          index += 1
+          continue
+        }
+        args.push(flag)
+      }
+      for (const root of deniedRoots) args.push('--ro-bind', root, root)
+      return args
+    }
+    case 'landlock':
+      throw new DialectUnrecognizedError('landlock cannot express an ambient grant minus subtree denies — its launcher only unions allowlists')
+    case 'windows-acl':
+      throw new DialectUnrecognizedError('Windows ACL cannot express an ambient grant minus subtree denies — the restricted-token model only grants')
+  }
 }

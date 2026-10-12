@@ -719,7 +719,7 @@ describe('per-root access on the command and the panel', () => {
     expect(added.kind).toBe('success')
     expect(added.text).toContain(`${canonicalPath(extra)} (read-only)`)
     // A read-only member stays registered but is not a writable root.
-    expect(added.text).toContain('Writable additional roots: 0 of 1.')
+    expect(added.text).toContain('Writable additional roots under the current mode: 0 of 1.')
     expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
     expect(stack.scope.writableOf(primary)).toEqual([])
   })
@@ -742,7 +742,7 @@ describe('per-root access on the command and the panel', () => {
 
     const bad = await run(`access 1 readwrite`)
     expect(bad.kind).toBe('error')
-    expect(bad.text).toContain('read-only or read-write')
+    expect(bad.text).toContain('inherit, read-only, or read-write')
   })
 
   it('revives a withheld read-only root without upgrading it, unless a flag says so', async () => {

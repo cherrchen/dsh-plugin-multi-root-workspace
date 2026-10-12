@@ -40,6 +40,8 @@ active:
 
 - [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace development path and **progress ledger**: the MVP `v0.1.0` milestones M1/M2/M3 are implemented and released; the `v0.1.1` hardening batch H1–H4 is implemented and released with `v0.1.1`; the `v0.1.2` support-matrix expansion is implemented and released with `v0.1.2`; the `v0.1.3` support-matrix expansion (`0.1.7-alpha.2` / `0.1.7-rc.1`) is implemented and released with `v0.1.3`; the `v0.1.4` support-matrix expansion (`0.1.7-rc.2`) is implemented and released with `v0.1.4`; `v0.1.5` (DSH `0.2.0-rc.1` / `.2`) is released; `v0.1.6` (DSH `0.2.1-alpha.1` / `.2`, B1–B3, and dynamic cwd) is released.
 
+- [2026-10-13-b9-root-access-and-sandbox-modes.md](./active/2026-10-13-b9-root-access-and-sandbox-modes.md) (Chinese) — B9 implementation plan: inherited, read-only, and read-write additional-root policies enforced across SandboxMode values, covering migration, process entry points, native backend feasibility, and acceptance checks. Progress and release state belong to the progress ledger.
+
 completed:
 
 - [2026-09-12-m1-composition-and-passthrough.md](./completed/2026-09-12-m1-composition-and-passthrough.md) — M1 development plan: bundle skeleton, two-row provider replacement, empty-root pass-through (implemented and verified 2026-09-12, released with `v0.1.0`).
@@ -55,6 +57,7 @@ completed:
 
 - **M1–M4** are the MVP roadmap milestones (M4 = the cross-process lease).
 - **H1–H4** are the `v0.1.1` hardening batch: H1 = M4, H2 = panel authority, H3 = the compatibility contract, H4 = additional-root instructions (Phase 1 top-level and Phase 2 nested are both done).
+- **B-series** numbers identify second-phase tasks; B9's implementation phases do not receive separate B numbers.
 - Single source of truth: the [roadmap progress ledger](./active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Naming Convention

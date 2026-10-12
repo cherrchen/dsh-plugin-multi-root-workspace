@@ -37,6 +37,7 @@ Architecture Decision Records（ADR），用于记录重要架构与工程决策
 - [ADR-0014-root-limit-and-provider-conflict.md](./ADR-0014-root-limit-and-provider-conflict.md) — 每主根存储记录上限（默认 16、顶 64、超限存量照授）与 `multi-root-providers` 品牌门禁（外来 `ctx.fs`/`ctx.sandbox` fail closed）（Accepted）。
 - [ADR-0015-files-tab-plugin-owned-browsing.md](./ADR-0015-files-tab-plugin-owned-browsing.md) — Files 页签根选择器：原生树不可重指，故经 `createPortal` 接管树区（现挂 `files-tree/` 逐字节复刻的上游 Files 树），`data-files-*` 钩子失效即静默退化（Accepted，2026-10-12 修订）。
 - [ADR-0016-files-tab-native-tree-fork.md](./ADR-0016-files-tab-native-tree-fork.md) — 附加根树逐字节复刻上游 `ui-sidebar-files` 树体（外壳函数换根源、store/inject 声明、`workspaceFiles` 数据通路、私有 `files`/`readFile` 端点随之下线），替代自绘 `RootFileTree`（Accepted）。
+- [ADR-0017-three-state-root-access-and-sandbox-modes.md](./ADR-0017-three-state-root-access-and-sandbox-modes.md) — B9 附加根三态权限（inherit/read-only/read-write）九格矩阵、`readWriteRecordedPath` 持久化编码、shell/pwsh/PTY/PTC 消费侧公开方法接缝（ALS + env 会话标记）、各方言受限 profile 构造与 Windows 单 SID 边界（Accepted，Phase 1 定案）。
 
 ## 推荐命名
 
