@@ -16,9 +16,10 @@
  *   switcher takes its flex position; while the switcher carries
  *   `data-root-kind="additional"` the native `data-files-body` and
  *   `data-files-reload` hide too (the reload refreshes the very tree that is
- *   no longer visible). Upstream changing that DOM shape simply stops the
- *   selectors from matching — the native header keeps working and the
- *   switcher is just another actions occupant.
+ *   no longer visible — the header gets a `.mrfw-switcherReload` replacement
+ *   that re-keys the portaled tree instead). Upstream changing that DOM
+ *   shape simply stops the selectors from matching — the native header
+ *   keeps working and the switcher is just another actions occupant.
  * - `closest('[data-files-root]')` from the switcher's own element locates
  *   the pane the self-drawn tree is portaled into, as a sibling of
  *   `data-files-body`. No match → no portal: the component keeps working as
@@ -34,7 +35,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Menu, PathLabel, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
-import { IconChevronDown, IconFolderClose, IconFolderOpen, IconSettings } from '../compat/client-icons.ts'
+import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings } from '../compat/client-icons.ts'
 import type { RootsView, RootView } from '../contract.ts'
 import { RootFileTree } from './RootFileTree.tsx'
 import {
@@ -62,6 +63,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [view, setView] = useState<RootsView | undefined>(undefined)
   const [selected, setSelected] = useState<RootView | 'primary'>('primary')
+  const [treeEpoch, setTreeEpoch] = useState(0)
   const wrapperRef = useRef<HTMLSpanElement | null>(null)
   const [pane, setPane] = useState<HTMLElement | null>(null)
   const mounted = useRef(true)
@@ -127,6 +129,9 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   const primaryLabel = view?.primaryName ?? basename(view?.primaryRoot ?? primaryPath)
   const triggerLabel = selected === 'primary' ? primaryLabel : displayNameOf(selected)
   const triggerPath = selected === 'primary' ? (view?.primaryRoot ?? primaryPath) : selected.path
+  // Exactly the portal condition: the tree — and the header reload that
+  // re-keys it — exist together or not at all.
+  const treeVisible = selected !== 'primary' && panel !== undefined && pane !== null
 
   const items = useMemo((): MenuEntry[] => [
     { id: 'primary', label: `${primaryLabel} · ${t('panel.primary')}`, icon: <IconFolderOpen /> },
@@ -189,11 +194,28 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
             the same PathLabel upstream puts in this spot, so the header reads
             exactly as before except the label now follows the selection. */}
         <PathLabel path={triggerPath} className="mrfw-switcherPath" />
+        {/* The takeover hides the native reload (it refreshes the hidden
+            tree), so the header gets a replacement of its own — same position,
+            same icon-button recipe as the upstream `.tool`. It re-keys the
+            portaled tree, the same remount refresh the in-tree button used.
+            Rendered under exactly the portal condition, so a menu-only
+            switcher never shows a dead button. */}
+        {treeVisible ? (
+          <button
+            type="button"
+            className="mrfw-switcherReload"
+            aria-label={t('files.reload')}
+            title={t('files.reload')}
+            onClick={() => { setTreeEpoch(epoch => epoch + 1) }}
+          >
+            <IconRefresh size={15} />
+          </button>
+        ) : null}
       </span>
-      {selected !== 'primary' && panel !== undefined && pane !== null
+      {treeVisible
         ? createPortal(
             <div className="mrfw-switcherTree">
-              <RootFileTree panel={panel} entry={entryOf(selected)} sessionId={props.sessionId ?? NO_SESSION} t={t} />
+              <RootFileTree key={treeEpoch} panel={panel} entry={entryOf(selected)} sessionId={props.sessionId ?? NO_SESSION} t={t} />
             </div>,
             pane,
           )

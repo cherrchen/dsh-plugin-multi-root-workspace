@@ -6,7 +6,7 @@
 
 - **路径标签出现两次/位置错乱**：选择器以普通菜单钮的身份停在 actions 区原位，上游路径标签恢复显示，与选择器自带的 `PathLabel`（`.mrfw-switcherPath`）并存——`[data-files-root]:has(.mrfw-rootSwitcher) [data-files-path]:not([data-files-entry])` 或 `.mrfw-rootSwitcher { order: -1 }` 失效（上游把扁平 flex header 换了结构，或属性挪了位置）。
 - **选中附加根但原生树仍在**：菜单状态变了、触发钮显示根名，树区却仍是主根原生树——`[data-root-kind="additional"]` 条件下的 `display:none` 规则失效，或 `closest('[data-files-root]')` 找不到祖先（portal 目标缺席时组件**主动不渲染**自绘树）。
-- **原生 reload 还留着**：与上一条同源的 `:has()` 失效——reload 只会刷被隐藏的原生树，所以它和 body 受同一条规则控制。
+- **原生 reload 还留着 / 附加根态出现两个刷新钮**：与上一条同源的 `:has()` 失效——接管态下原生 reload 应隐藏、由 header 内的 `.mrfw-switcherReload` 顶替（点击重挂载自绘树）；两者同时可见即规则失配。
 
 所有症状共享一个性质：**功能不坏**。选择器菜单依然列出主根与附加根、能打开管理对话框；变的是视觉接管退回了原生布局。
 

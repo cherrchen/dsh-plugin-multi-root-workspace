@@ -223,6 +223,28 @@ describe('the Files-tab root switcher', () => {
     expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('payments')
   })
 
+  it('offers a header reload while the take-over is on, and re-lists on click', async () => {
+    const harness = mount()
+    const { pane } = renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    // The native reload covers the primary root — the switcher adds none.
+    expect(document.querySelector('.mrfw-switcherReload')).toBeNull()
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(pane.querySelector('.mrfw-switcherTree')).not.toBeNull() })
+
+    const reload = document.querySelector<HTMLElement>('.mrfw-switcherReload')
+    expect(reload?.closest('.mrfw-rootSwitcher')).not.toBeNull()
+    const filesBefore = harness.calls.filter(call => call.endpoint === 'files').length
+    fireEvent.click(reload!)
+    // The header reload re-keys the tree: a fresh root listing goes out.
+    await waitFor(() => {
+      expect(harness.calls.filter(call => call.endpoint === 'files').length).toBeGreaterThan(filesBefore)
+    })
+  })
+
   it('removes the portal tree when the selection returns to the primary root', async () => {
     const harness = mount()
     const { pane } = renderInPane(harness)

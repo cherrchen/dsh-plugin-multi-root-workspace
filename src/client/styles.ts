@@ -140,8 +140,9 @@ export const STYLES = /* css */ `
 /* While the switcher names an additional root, the native tree body and its
    reload hide: the reload refreshes the very tree that is no longer
    visible, and the plugin's own tree is portaled in as the body's sibling.
-   The native tree keeps watching in the background, so switching back to
-   the primary root restores it instantly. */
+   The header still offers a reload — the switcher's own .mrfw-switcherReload
+   re-keys the portaled tree. The native tree keeps watching in the
+   background, so switching back to the primary root restores it instantly. */
 [data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-body],
 [data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-reload] {
   display: none;
@@ -197,6 +198,30 @@ export const STYLES = /* css */ `
    left-clip and hover-title behavior; only the gutters are ours. */
 .mrfw-switcherPath {
   margin: 0 12px 0 4px;
+}
+
+/* The takeover's own reload, standing exactly where the hidden native one
+   did: the upstream .tool recipe verbatim (28px hit area, 15px glyph,
+   secondary voice, hover fills). It re-keys the portaled tree. */
+.mrfw-switcherReload {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mrfw-switcherReload:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 /* The self-drawn additional-root tree, portaled into the pane as a sibling

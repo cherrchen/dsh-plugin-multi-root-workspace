@@ -43,6 +43,11 @@ describe('the root-switcher rules', () => {
     expect(STYLES).toMatch(/\.mrfw-switcherPath\s*\{/s)
   })
 
+  it('gives the take-over reload the upstream tool-button recipe', () => {
+    expect(STYLES).toMatch(/\.mrfw-switcherReload\s*\{[^}]*width:\s*28px[^}]*height:\s*28px/s)
+    expect(STYLES).toMatch(/\.mrfw-switcherReload:hover\s*\{[^}]*background:\s*var\(--dsw-alias-interactive-bg-hover\)/s)
+  })
+
   it('hides the native tree body and its reload only while an additional root is selected', () => {
     // The two hooks share one rule: the reload refreshes the very tree that
     // is no longer visible, so it hides under the same condition.

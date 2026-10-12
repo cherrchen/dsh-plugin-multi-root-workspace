@@ -24,7 +24,7 @@ Accepted
 `sidebar.right.tab.files.actions` 的 occupant 是 **`RootSwitcher`**（owner `absolutePath` 缺失时退回 P1 的仅图标 launcher）：
 
 - **触发钮伪装成路径标签入口**：占据路径标签位置的 flex 项（`order: -1` + `flex: 1 1 auto` + `min-width: 0`），上游 `[data-files-path]` 由 `:has()` 守卫规则隐藏。菜单列主根（标注 `panel.primary`、默认选中）与各附加根（`list` RPC 按 `sessionId` 取视图；非 `available` 的根如实标注状态且禁用）；「管理工作区目录…」放在 `Menu` 的 `footer` 区，打开同一个 `WorkspaceFoldersDialog`。触发钮后随一个 `PathLabel`（`mrfw-switcherPath`）显示**选中根**的完整路径——主根即原标签的值，附加根为其 canonical 路径——同一上游组件，观感与原生一致；该元素不携带 `data-files-*`，不会被本插件的隐藏规则误伤。
-- **附加根选中时接管树区**：`closest('[data-files-root]')` 定位本 pane，`createPortal` 把 `RootFileTree`（去掉 Browse 门控、直渲染）挂成 `[data-files-body]` 的兄弟节点；`:has(.mrfw-rootSwitcher[data-root-kind="additional"])` 条件下的规则同时隐藏原生 body 与 reload——reload 刷的是被隐藏的树，留着只会误导。原生树在后台保持 watch，切回主根即恢复。
+- **附加根选中时接管树区**：`closest('[data-files-root]')` 定位本 pane，`createPortal` 把 `RootFileTree`（去掉 Browse 门控、直渲染）挂成 `[data-files-body]` 的兄弟节点；`:has(.mrfw-rootSwitcher[data-root-kind="additional"])` 条件下的规则同时隐藏原生 body 与 reload——reload 刷的是被隐藏的树，留着只会误导。header 原位出现一个同款 `.mrfw-switcherReload` 图标钮（28px tool 配方），点击以 `key` 重挂载 portaled 树，等效原行内「刷新文件树」按钮；它与 portal 同生同灭，纯菜单降级时不会出现死按钮。原生树在后台保持 watch，切回主根即恢复。
 - **选中态是组件实例 state**：每个 tab 渲染实例独立、重开复位，不持久化也不跨 tab 共享。
 - **降级是设计的一部分**：无 connection/session → 菜单只列主根（观感等同原生路径标签）；找不到 `[data-files-root]` 祖先 → 不 portal、不隐藏任何上游元素，组件仍是一个可用的菜单；上游改掉 `data-*` 属性 → 全部 `:has()` 规则与 `closest()` 同时失效，退回原生布局。DOM 钩子已列入 `.agent/note/dsh-compat-contract.md` 的升版目检清单。
 - **对话框回归纯管理**：行内 `RootFileTree` 与 `files.browse` 词条移除，浏览统一在 Files 页签进行。
