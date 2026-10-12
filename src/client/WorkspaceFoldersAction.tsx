@@ -131,6 +131,33 @@ function CloseIcon(): ReactNode {
   )
 }
 
+/**
+ * One path that copies itself: text that paints like the surrounding copy
+ * and reveals a trailing icon on hover — clicking the text or the icon
+ * copies the same canonical path. The accessible name swaps to "copied"
+ * for the feedback window, the icon button's old recipe. Shared by the
+ * primary row, the current-directory line, and every additional root.
+ */
+function PathCopy(props: {
+  readonly path: string
+  readonly copied: boolean
+  readonly onCopy: () => void
+  readonly t: Translate
+}): ReactNode {
+  return (
+    <button
+      type="button"
+      className="mrfw-rootPath mrfw-pathCopy"
+      title={props.path}
+      aria-label={props.copied ? props.t('panel.copied') : props.t('panel.copyPath')}
+      onClick={props.onCopy}
+    >
+      {props.path}
+      <span className="mrfw-pathCopyIcon" aria-hidden="true"><IconCopy size={14} /></span>
+    </button>
+  )
+}
+
 /** The locale key for one reported root state. */
 export function stateKey(state: RootState): Key {
   switch (state) {
@@ -414,10 +441,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     }
   }, [panel, requestBase])
 
-  const copyPath = useCallback(async (root: RootView) => {
+  const copyPath = useCallback(async (key: string, path: string) => {
     try {
-      await navigator.clipboard.writeText(root.path)
-      const key = rowKey(root)
+      await navigator.clipboard.writeText(path)
       setCopiedId(key)
       setState(previous => ({ ...previous, error: undefined }))
       window.setTimeout(() => { setCopiedId(current => (current === key ? undefined : current)) }, 1500)
@@ -443,6 +469,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   // what makes the refusal explain itself before the operator clicks.
   const atLimit = state.view !== undefined && state.view.count >= state.view.limit
   const IconAccessTrigger = addAccess === 'read-only' ? IconAccessReadOnly : IconAccessReadWrite
+  // Captured as consts: narrowing does not reach the onCopy closures below.
+  const primaryPath = state.view?.primaryRoot
+  const cwdPath = state.view?.effectiveCwd
   return (
     <div className="mrfw-overlay" role="presentation">
       <div
@@ -496,20 +525,36 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             <div className="mrfw-row mrfw-rowBare">
               <div className="mrfw-rootText">
                 <span className="mrfw-rootName">
-                  {state.view === undefined ? '…' : (state.view.primaryName ?? basename(state.view.primaryRoot))}
+                  <span className="mrfw-rootNameText">
+                    {state.view === undefined ? '…' : (state.view.primaryName ?? basename(state.view.primaryRoot))}
+                  </span>
                 </span>
-                <span className="mrfw-rootPath">{state.view?.primaryRoot ?? '…'}</span>
+                {primaryPath === undefined
+                  ? <span className="mrfw-rootPath">…</span>
+                  : (
+                    <PathCopy
+                      path={primaryPath}
+                      copied={copiedId === 'primary'}
+                      onCopy={() => { void copyPath('primary', primaryPath) }}
+                      t={t}
+                    />
+                  )}
               </div>
             </div>
           </section>
 
-          {state.view?.effectiveCwd !== undefined && (
+          {cwdPath !== undefined && (
             <section className="mrfw-section">
               <div className="mrfw-sectionTitleRow">
                 <span className="mrfw-sectionTitle">{t('panel.cwd')}</span>
                 <span className="mrfw-sectionNote">{t('panel.cwdNote')}</span>
               </div>
-              <span className="mrfw-rootPath">{state.view.effectiveCwd}</span>
+              <PathCopy
+                path={cwdPath}
+                copied={copiedId === 'cwd'}
+                onCopy={() => { void copyPath('cwd', cwdPath) }}
+                t={t}
+              />
             </section>
           )}
 
@@ -527,12 +572,21 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               const key = rowKey(root)
               return <div key={key} className="mrfw-row">
                 <div className="mrfw-rootText">
-                  <span className="mrfw-rootName">{displayNameOf(root)}</span>
-                  <span className="mrfw-rootPath">{root.path}</span>
+                  <span className="mrfw-rootName">
+                    <span className="mrfw-rootNameText">{displayNameOf(root)}</span>
+                    {/* The access level rides beside the name as read-only
+                        text; changing it stays behind the row's … menu. */}
+                    <span className="mrfw-accessBadge">
+                      {t(root.access === 'read-only' ? 'access.readOnly' : 'access.readWrite')}
+                    </span>
+                  </span>
+                  <PathCopy
+                    path={root.path}
+                    copied={copiedId === key}
+                    onCopy={() => { void copyPath(key, root.path) }}
+                    t={t}
+                  />
                 </div>
-                <span className="mrfw-accessBadge">
-                  {t(root.access === 'read-only' ? 'access.readOnly' : 'access.readWrite')}
-                </span>
                 {root.state === 'available' ? null : (
                   <span title={root.detail} className="mrfw-stateWarn">
                     {t(stateKey(root.state))}
@@ -546,11 +600,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     label={t('panel.reRegister')}
                   />
                 )}
-                <IconButton
-                  onClick={() => { void copyPath(root) }}
-                  icon={<IconCopy />}
-                  label={copiedId === key ? t('panel.copied') : t('panel.copyPath')}
-                />
                 <IconButton
                   disabled={state.busy}
                   onClick={() => { void reveal(root) }}

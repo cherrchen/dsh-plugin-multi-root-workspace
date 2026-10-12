@@ -60,3 +60,21 @@ describe('the root-switcher rules', () => {
     expect(STYLES).toMatch(/\.mrfw-switcherTree\s*\{[^}]*flex:\s*1 1 auto[^}]*min-height:\s*0[^}]*overflow:\s*auto/s)
   })
 })
+
+describe('the additional-root row rules', () => {
+  it('rides the access badge beside the name, never shrinking', () => {
+    expect(STYLES).toMatch(/\.mrfw-rootName\s*\{[^}]*display:\s*flex[^}]*align-items:\s*baseline/s)
+    expect(STYLES).toMatch(/\.mrfw-rootNameText\s*\{[^}]*text-overflow:\s*ellipsis/s)
+    expect(STYLES).toMatch(/\.mrfw-accessBadge\s*\{[^}]*flex:\s*none/s)
+  })
+
+  it('makes the path itself the copy control, icon visible only on hover or focus', () => {
+    // The button must stay unstyled (paint like the text around it) and the
+    // icon must live in flow at opacity 0 — display:none would re-wrap the
+    // string every time it appears.
+    expect(STYLES).toMatch(/\.mrfw-pathCopy\s*\{[^}]*background:\s*transparent/s)
+    expect(STYLES).toMatch(/\.mrfw-pathCopy\s*\{[^}]*border:\s*0/s)
+    expect(STYLES).toMatch(/\.mrfw-pathCopyIcon\s*\{[^}]*opacity:\s*0/s)
+    expect(STYLES).toMatch(/\.mrfw-pathCopy:hover\s+\.mrfw-pathCopyIcon[\s\S]*?opacity:\s*1/s)
+  })
+})

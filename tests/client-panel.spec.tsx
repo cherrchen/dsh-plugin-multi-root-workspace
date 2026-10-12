@@ -539,10 +539,11 @@ describe('the panel dialog', () => {
       entry: { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
     })
 
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.copyPath` })[0]!)
+    fireEvent.click(screen.getByTitle('/repos/payments'))
     await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repos/payments') })
-    // The action is an icon button: the success swaps the accessible name.
-    await waitFor(() => { expect(screen.getAllByRole('button', { name: `${NS}.panel.copied` })[0]).toBeTruthy() })
+    // The path region itself is the control: the copy button IS the path
+    // text, and the success swaps its accessible name for the feedback window.
+    await waitFor(() => { expect(screen.getByTitle('/repos/payments').getAttribute('aria-label')).toBe(`${NS}.panel.copied`) })
   })
 
   it('does not report an error when a reveal succeeds', async () => {
@@ -581,7 +582,7 @@ describe('the panel dialog', () => {
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'))
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.copyPath` })[0]!)
+    fireEvent.click(screen.getByTitle('/repos/payments'))
 
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.copy-failed`) })
   })
@@ -681,9 +682,21 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
-    // ROOT_A is read-write, ROOT_B is read-only: both carry a badge.
+    // ROOT_A is read-write, ROOT_B is read-only: both carry a badge. The
+    // badge rides inside the name line, next to the display name — not in
+    // the action cluster.
     const badges = () => Array.from(document.querySelectorAll('.mrfw-accessBadge')).map(node => node.textContent)
     expect(badges()).toEqual([`${NS}.access.readWrite`, `${NS}.access.readOnly`])
+    expect(document.querySelectorAll('.mrfw-rootName .mrfw-accessBadge').length).toBe(2)
+
+    // Every path is its own copy control — the primary row's too: a
+    // borderless button painting as text, with the hover-revealed icon inside
+    // it — no standalone copy action anywhere.
+    const pathCopies = Array.from(document.querySelectorAll('.mrfw-pathCopy'))
+    expect(pathCopies.length).toBe(3)
+    expect(pathCopies[0]?.textContent).toContain('/repos/primary')
+    expect(pathCopies[1]?.textContent).toContain('/repos/payments')
+    expect(pathCopies[1]?.querySelector('.mrfw-pathCopyIcon')).toBeTruthy()
 
     // The Add row selector defaults to read-write; choosing read-only goes into
     // the same `add` request the path does. The picker is the host's anchored
@@ -837,6 +850,13 @@ it('displays effective cwd separately from the stable primary root', async () =>
   expect(screen.getByText('/repos/primary')).toBeDefined()
   expect(screen.getByText(`${NS}.panel.cwdNote`)).toBeDefined()
   expect(harness.calls[0]?.payload).toEqual({ sessionId: 'session-1' })
+
+  // Both the primary path and the current-directory path are copy controls
+  // of the same recipe as the additional roots'.
+  fireEvent.click(screen.getByTitle('/unregistered/current'))
+  await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/unregistered/current') })
+  fireEvent.click(screen.getByTitle('/repos/primary'))
+  await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repos/primary') })
 })
 
 it('ignores a response belonging to the previous session after catalog selection changes', async () => {

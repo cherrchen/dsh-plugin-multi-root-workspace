@@ -380,14 +380,25 @@ export const STYLES = /* css */ `
   min-width: 0;
 }
 
+/* The name line is a flex row: the truncating name text first, the access
+   badge beside it never shrinking — baseline-aligned so the badge's smaller
+   voice sits on the name's baseline rather than its middle. */
 .mrfw-rootName {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 14px;
   line-height: 20px;
   font-weight: 500;
   color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-rootNameText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mrfw-rootPath {
@@ -396,6 +407,35 @@ export const STYLES = /* css */ `
   line-height: 18px;
   word-break: break-all;
   color: var(--dsw-alias-label-tertiary);
+}
+
+/* The path doubles as the copy control: an unstyled button that keeps the
+   text recipe and makes the whole string clickable — the whole region, not
+   just the icon, copies on click. */
+.mrfw-pathCopy {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* The trailing icon stays in flow but invisible until the path is hovered
+   or focused: appearing never re-wraps the text, and the icon inherits the
+   path's own tertiary ink. */
+.mrfw-pathCopyIcon {
+  display: inline-flex;
+  margin-left: 4px;
+  vertical-align: -2px;
+  opacity: 0;
+  transition: opacity var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.mrfw-pathCopy:hover .mrfw-pathCopyIcon,
+.mrfw-pathCopy:focus-visible .mrfw-pathCopyIcon {
+  opacity: 1;
 }
 
 .mrfw-note {
@@ -513,6 +553,7 @@ export const STYLES = /* css */ `
 }
 
 .mrfw-accessBadge {
+  flex: none;
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);

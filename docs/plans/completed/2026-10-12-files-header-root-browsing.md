@@ -1,8 +1,8 @@
-# Files 头部根浏览：launcher 前移（P1）、根选择器 + 自绘附加根树（P2）与观感精修（P3–P6）
+# Files 头部根浏览：launcher 前移（P1）、根选择器 + 自绘附加根树（P2）与观感精修（P3–P7）
 
 ## Current State
 
-本计划实施完成。P1 单独提交（仅图标齿轮 launcher 前移，原 `7e3232a` 后改写为 `79f6934`）；P2 按 Design 落地（提交 `252b927`）：`files.actions` 挂载 `RootSwitcher`（owner `absolutePath` 缺席时退回 compact launcher），附加根选中时 `RootFileTree` 经 `createPortal` 接管树区，对话框行内树与 `files.browse` 词条下线，`data-files-*` 钩子列入 compat 目检与故障排查，决策见 [ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。目检另捕获一处真实缺陷：上游 `data-files-path` 双重含义（每个树行也携带），头部规则收紧为 `[data-files-path]:not([data-files-entry])`。用户目检后追加 P3–P6 四个精修阶段（见文末「追加阶段」节）：P3 恢复头部完整路径显示（提交 `0c50edc`），P4 附加根态刷新收进 header（提交 `89bdf75`），P5 刷新改原地重拉消除 loading 闪烁（提交 `9fe0ad4`），P6 权限选择器换 DSH 分段控件（提交见账本）。
+本计划实施完成。P1 单独提交（仅图标齿轮 launcher 前移，原 `7e3232a` 后改写为 `79f6934`）；P2 按 Design 落地（提交 `252b927`）：`files.actions` 挂载 `RootSwitcher`（owner `absolutePath` 缺席时退回 compact launcher），附加根选中时 `RootFileTree` 经 `createPortal` 接管树区，对话框行内树与 `files.browse` 词条下线，`data-files-*` 钩子列入 compat 目检与故障排查，决策见 [ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。目检另捕获一处真实缺陷：上游 `data-files-path` 双重含义（每个树行也携带），头部规则收紧为 `[data-files-path]:not([data-files-entry])`。用户目检后追加 P3–P7 五个精修阶段（见文末「追加阶段」节）：P3 恢复头部完整路径显示（提交 `0c50edc`），P4 附加根态刷新收进 header（提交 `89bdf75`），P5 刷新改原地重拉消除 loading 闪烁（提交 `9fe0ad4`），P6 权限选择器换 DSH 下拉（提交 `6ca3dcb`），P7 徽标换位 + 路径即复制（提交见账本）。
 
 ## Goal
 
@@ -90,18 +90,19 @@ Files 头部当前视觉序（DOM 序）：`[data-files-path] 路径 | ↻ reloa
 - ADR：**新增 ADR-0015**（Files tab 自绘树接管：备选=原生树重指——不可行、上游参数化——留作上游事项、保持对话框——已否）并修订 [ADR-0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md) 中"lazy tree 放在现有对话框"的表述。
 - **完成即提交**。
 
-## 追加阶段（P3–P6，web 目检后的精修）
+## 追加阶段（P3–P7，web 目检后的精修）
 
-P2 的人工核验通过后，用户基于真实观感追加四个小阶段，各自单独提交、各自全绿：
+P2 的人工核验通过后，用户基于真实观感追加五个小阶段，各自单独提交、各自全绿：
 
 - **P3**（提交 `0c50edc`）**恢复头部完整路径**：P2 把上游路径标签整体隐藏后，头部只剩根名触发钮——用户在主根与附加根态都要求原位置仍显示完整路径。实现：触发钮后随一个 `PathLabel`（`mrfw-switcherPath`），主根显示 pane 工作区根（即原标签的值）、附加根显示其 canonical 路径；复用上游同一组件，自带生长/左端渐隐/hover 全路径。`.mrfw-rootSwitchBtn` 收敛为 `flex: 0 1 auto` 只缩不涨，把剩余宽度让给路径；该元素不带 `data-files-*`，不受本插件隐藏规则影响。
 - **P4**（提交 `89bdf75`）**附加根态刷新收进 header**：接管态原本只有树区顶部一个「刷新文件树」文本钮，与主根态的 header reload 不一致。`RootFileTree` 移除行内按钮；header 在原生 reload 位置渲染 `.mrfw-switcherReload` 图标钮（上游 `.tool` 配方：28px 命中区、15px 字形、次色 + hover 高亮），图标走既有 `IconRefresh` 双名适配器。按钮与 portal 树同生同灭（统一 `treeVisible` 条件），纯菜单降级时不渲染；不带 `data-files-reload`，不会被隐藏规则误伤。
 - **P5**（提交 `9fe0ad4`）**刷新改原地重拉，消除 loading 闪烁**：P4 的 header reload 用 `key` 重挂载树，每次点击全部目录闪回「正在读取」。`RootFileTree` 改收 `reload` 计数 prop：每个已挂载 `Directory` 的拉取 effect 依赖它后台重拉，但**只在 `entry.id + path` 身份变化时**才清空 `listing`——重拉期间旧行保持渲染，成功就地换数据；展开态与文件预览均保留。切根仍正常清屏。
-- **P6** **权限选择器换 DSH 下拉**：对话框添加行的 access 选择器原为系统原生 `<select>`，观感与 DSH 其他控件不一致。换成 ui-primitives `Menu` 锚定下拉——胶囊触发钮显示当前级别、菜单行 `selectedId` 勾选、权限字形（`IconWorkspaceWrite`/`IconReadOnly`，仅 0.1.7+，走新 `maybeIcon` 软探测、缺失版本无图标）。`onSelect` 即显式选择——`accessChosen` 的「未触碰不携带 access」（revive 保留原级别）语义不变。
+- **P6**（提交 `6ca3dcb`）**权限选择器换 DSH 下拉**：对话框添加行的 access 选择器原为系统原生 `<select>`，观感与 DSH 其他控件不一致。换成 ui-primitives `Menu` 锚定下拉——胶囊触发钮显示当前级别、菜单行 `selectedId` 勾选、权限字形（`IconWorkspaceWrite`/`IconReadOnly`，仅 0.1.7+，走新 `maybeIcon` 软探测、缺失版本无图标）。`onSelect` 即显式选择——`accessChosen` 的「未触碰不携带 access」（revive 保留原级别）语义不变。
+- **P7** **权限徽标换位 + 路径即复制**：附属根行的 access 徽标从动作图标区移到显示名右侧——`.mrfw-rootName` 改为 flex 基线对齐行（徽标 `flex:none` 永不收缩，名字文本在 `.mrfw-rootNameText` 内保持省略截断）。复制动作从独立 IconButton 变为路径文本本身：抽出的 `PathCopy` 组件（`.mrfw-pathCopy` 无边框无背景按钮沿用代码字体/灰字观感，`.mrfw-pathCopyIcon` 留在文本流内 `opacity:0` → hover/focus 才可见、占位但不回流）统一服务**全部路径展示**——主根行、「当前执行目录」行与各附属根行同一个控件；点击路径区任意位置或 icon 均复制完整 canonical path；可达名沿用 copyPath↔copied 的 1.5s 反馈窗，失败仍走 `copy-failed`。
 
 ## Validation
 
-每阶段：`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm docs:check` 全绿；`pnpm smoke`（compose/behavior/journey）无回归。P2 另需 web 组合人工核验三态：无附加根（原生观感）、选中附加根（自绘树 + reload 隐藏）、切回主根（完全还原）。P3–P6 各经用户 web 目检确认后提交。
+每阶段：`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm docs:check` 全绿；`pnpm smoke`（compose/behavior/journey）无回归。P2 另需 web 组合人工核验三态：无附加根（原生观感）、选中附加根（自绘树 + reload 隐藏）、切回主根（完全还原）。P3–P7 各经用户 web 目检确认后提交。
 
 ## Risks
 
@@ -122,4 +123,5 @@ P2 的人工核验通过后，用户基于真实观感追加四个小阶段，�
 - P3 单独提交并全绿：触发钮与 reload 之间显示选中根完整路径（主根与附加根均生效），观感与原生 PathLabel 一致。
 - P4 单独提交并全绿：附加根态 header 在原生 reload 位置提供同款图标刷新钮，树区不再自带刷新控件。
 - P5 单独提交并全绿：点刷新不清屏、不闪「正在读取」；目录展开态与文件预览保留；切根仍正确清屏。
-- P6 单独提交并全绿：添加行权限选择器为 DSH 分段控件观感；未触碰时 `add` 仍不携带 access。
+- P6 单独提交并全绿：添加行权限选择器为 DSH 下拉观感；未触碰时 `add` 仍不携带 access。
+- P7 单独提交并全绿：徽标在名字右侧、动作区无复制钮；主根、当前目录与各附属根的路径区 hover/focus 末尾显 icon，点击路径区即复制。
