@@ -80,6 +80,33 @@ export const STYLES = /* css */ `
   justify-content: center;
 }
 
+/* Icon-only launcher inside the upstream Files tab header. Upstream's
+   FilesBody renders .header as one flat flex row — PathLabel, then the
+   reload button, then the files.actions slot occupants — and each of those
+   children carries a stable data-files-* attribute on the flex item itself
+   (data-files-root on the pane, data-files-path, data-files-reload).
+   A registration order sorts only INSIDE the actions slot and can never
+   overtake the reload button, so the launcher is moved with the flex order
+   property instead: this wrapper is the slot's root element and therefore a
+   direct flex item of .header, and order: -1 puts it ahead of every
+   order-0 sibling while the :has() rule below keeps the path first. */
+.mrfw-fileLauncher {
+  order: -1;
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+/* Pin the upstream path label ahead of the launcher — but only while this
+   plugin is in the row: the :has() guard keeps a rule that names an
+   upstream element inert whenever the launcher is absent. Both selectors
+   depend on upstream's DOM shape, which is not part of the slot contract;
+   if it changes, the rules simply stop matching and the launcher falls back
+   to its in-slot position — a silent degradation, never a broken header. */
+[data-files-root]:has(.mrfw-fileLauncher) [data-files-path] {
+  order: -2;
+}
+
 .mrfw-overlay {
   position: fixed;
   inset: 0;

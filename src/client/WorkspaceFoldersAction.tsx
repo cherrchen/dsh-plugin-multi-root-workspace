@@ -27,10 +27,10 @@ import {
   IconCopy,
   IconEdit,
   IconEllipsis,
-  IconFolderClose,
   IconFolderOpen,
   IconPlus,
   IconRefresh,
+  IconSettings,
   IconTrash,
 } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
@@ -57,7 +57,7 @@ export interface WorkspaceFoldersActionProps {
   readonly subscribeSession?: (listener: () => void) => () => void
   /** Whether the sidebar renders wide content (`false` in the icon rail). */
   readonly wide?: boolean
-  /** Compact launcher in the upstream Files tab's public actions slot. */
+  /** Icon-only launcher in the upstream Files tab's public actions slot. */
   readonly compact?: boolean
 }
 
@@ -162,14 +162,15 @@ export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): Reac
       <div className={props.compact ? 'mrfw-fileLauncher' : rail ? 'mrfw-triggerRow mrfw-railRow' : 'mrfw-triggerRow'}>
         <button
           type="button"
-          className={props.compact ? 'mrfw-btn mrfw-btnGhost' : rail ? 'mrfw-trigger mrfw-triggerRail' : 'mrfw-trigger'}
+          className={props.compact ? 'mrfw-btn mrfw-btnGhost mrfw-iconBtn' : rail ? 'mrfw-trigger mrfw-triggerRail' : 'mrfw-trigger'}
           title={props.t('action.title')}
+          aria-label={props.compact === true ? props.t('action.title') : undefined}
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => { setOpen(value => !value) }}
         >
-          <span className="mrfw-triggerIcon" aria-hidden="true"><IconFolderClose size={rail ? 18 : 16} /></span>
-          {rail ? null : <span className="mrfw-triggerLabel">{props.t('action.label')}</span>}
+          <span className="mrfw-triggerIcon" aria-hidden="true"><IconSettings size={rail ? 18 : 16} /></span>
+          {rail || props.compact === true ? null : <span className="mrfw-triggerLabel">{props.t('action.label')}</span>}
         </button>
       </div>
       {open ? <WorkspaceFoldersDialog {...props} onClose={() => { setOpen(false) }} /> : null}

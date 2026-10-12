@@ -66,4 +66,5 @@ export const IconFolderClose = icon('IconFolderClose16', 'IconFolderCloseRegular
 export const IconFolderOpen = icon('IconFolderOpenOutline16', 'IconFolderOpenOutlineRegular')
 export const IconPlus = icon('IconPlusOutline16', 'IconPlusOutlineRegular')
 export const IconRefresh = icon('IconRefreshOutline16', 'IconRefreshOutlineRegular')
+export const IconSettings = icon('IconSettingsOutline16', 'IconSettingsOutlineRegular')
 export const IconTrash = icon('IconTrashOutline16', 'IconTrashOutlineRegular')

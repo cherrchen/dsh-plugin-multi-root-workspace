@@ -228,7 +228,10 @@ describe('the client entry', () => {
     const registration = harness.registrations.find(item => item.options.name === 'sidebar.right.tab.files.actions')!
     expect(registration).toBeDefined()
     render(createElement(registration.component as never))
-    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    // Icon-only: the accessible name comes from `aria-label`, never from text.
+    const launcher = screen.getByRole('button', { name: /action.title/ })
+    expect(launcher.textContent).toBe('')
+    fireEvent.click(launcher)
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
     expect(harness.calls[0]).toEqual({ channel: PANEL_CHANNEL, endpoint: 'list', payload: { sessionId: 'session-1' } })
   })

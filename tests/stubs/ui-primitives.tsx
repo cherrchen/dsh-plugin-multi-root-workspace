@@ -40,6 +40,7 @@ export const IconFolderClose16 = icon('folder-close')
 export const IconFolderOpenOutline16 = icon('folder-open')
 export const IconPlusOutline16 = icon('plus')
 export const IconRefreshOutline16 = icon('refresh')
+export const IconSettingsOutline16 = icon('settings')
 export const IconTrashOutline16 = icon('trash')
 
 /** Minimal `MenuItem` mirror (only the fields the panel uses). */
