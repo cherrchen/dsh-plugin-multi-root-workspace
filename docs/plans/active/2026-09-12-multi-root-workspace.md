@@ -451,14 +451,15 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 
 同时在外层 Agent 沙箱内验证 runner 不可用路径：Seatbelt 返回 `sandbox_apply: Operation not permitted`，journey **55 passed / 0 failed / 2 skipped**，两条腿均明确跳过 shell cap 与命令产物，fs 与模型上下文检查仍执行。此记录只证明本机可用 / 不可用两种路径；本轮跨版本、Linux 与 Windows 结果须以本次推送触发的 CI 为准。
 
-### Files 头部根浏览 P1–P5（2026-10-12，未发布）
+### Files 头部根浏览 P1–P6（2026-10-12，未发布）
 
-实施计划见 [files-header-root-browsing](../completed/2026-10-12-files-header-root-browsing.md)（P1+P2 为原计划两阶段，P3–P5 为目检后追加，每阶段一个提交），决策见 [ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
+实施计划见 [files-header-root-browsing](../completed/2026-10-12-files-header-root-browsing.md)（P1+P2 为原计划两阶段，P3–P6 为目检后追加，每阶段一个提交），决策见 [ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
 
 - **P1**（提交 `7e3232a`，后改写为 `79f6934`）：`files.actions` 的 launcher 改为仅图标齿轮钮并经 flex `order` 前移到 reload 左侧；footer 触发器同步换齿轮。
 - **P2**（提交 `252b927`）：该 occupant 升级为 `RootSwitcher`——伪装成 PathLabel 的触发钮 + `Menu`（主根、`list` RPC 返回的附加根、footer 的「管理…」入口）；选中附加根时 `closest('[data-files-root]')` 定位 pane，`createPortal` 挂入 `RootFileTree` 接管树区，`:has()` 规则同条件隐藏原生 path/body/reload；owner 缺 `absolutePath` 时退回 P1 compact launcher。对话框行内 `RootFileTree` 与 `files.browse` 词条下线。`data-files-*` 钩子（非槽位契约）列入 `.agent/note` 升版目检与故障排查条目。
 - **P3**：触发钮后随一个 `PathLabel`（`mrfw-switcherPath`）显示**选中根**的完整路径——主根即原标签的值，附加根为其 canonical 路径；复用上游同一组件，观感与原生一致。`.mrfw-rootSwitchBtn` 收敛为只缩不涨（`flex: 0 1 auto`），PathLabel 接管头部剩余宽度。
 - **P4**：附加根态的刷新收进 header——`RootFileTree` 移除行内「刷新文件树」按钮，header 在原生 reload 位置出现同款 `.mrfw-switcherReload` 图标钮（28px tool 配方）；与 portal 同生同灭，纯菜单降级时不渲染。
 - **P5**：刷新改原地重拉消除 loading 闪烁——`RootFileTree` 收 `reload` 计数 prop，各挂载目录 effect 依赖之；只有根或目录身份（`entry.id + path`）变化才清空当前列表，reload 重拉在现有行下后台进行、成功就地换数据，展开态与文件预览均保留。
+- **P6**：对话框添加行的权限选择器从系统原生 `<select>` 换成 ui-primitives `Menu` 锚定下拉（胶囊触发钮 + 勾选行，与根选择器同一控件族）；`onSelect` 即显式选择，`accessChosen` 的「未触碰不携带 access」语义不变。权限字形（`IconWorkspaceWrite`/`IconReadOnly`）仅 0.1.7+ 存在，走新增的 `maybeIcon` 软探测，缺失版本回退为无图标行。
 
 本机开发 pin `0.2.1-alpha.2`：P1 与 P2 各自完成时 `pnpm lint` / `typecheck` / `test` / `build` / `docs:check` / `smoke`（compose 46、behavior 99、journey 62）全绿。web 组合三态（无附加根原生观感 / 附加根选中接管 / 切回主根还原）的目检见计划 Validation 记录。

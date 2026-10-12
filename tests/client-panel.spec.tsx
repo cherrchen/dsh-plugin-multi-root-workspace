@@ -455,7 +455,7 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
-    // The access select is untouched, so no level travels: a chosen level is
+    // The access picker is untouched, so no level travels: a chosen level is
     // the only one a request may carry — a displayed default is not a choice.
     expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
       sessionId: 'session-1',
@@ -686,8 +686,10 @@ describe('the panel dialog', () => {
     expect(badges()).toEqual([`${NS}.access.readWrite`, `${NS}.access.readOnly`])
 
     // The Add row selector defaults to read-write; choosing read-only goes into
-    // the same `add` request the path does.
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'read-only' } })
+    // the same `add` request the path does. The picker is the host's anchored
+    // Menu — a trigger named by its aria-label, rows named by their text.
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessLabel` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.access.readOnly` }))
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({

@@ -26,6 +26,8 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
+  IconAccessReadOnly,
+  IconAccessReadWrite,
   IconChevronDown,
   IconChevronUp,
   IconCopy,
@@ -226,6 +228,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
    * to it. Only a chosen level may travel in the request.
    */
   const [accessChosen, setAccessChosen] = useState(false)
+  const [accessMenuOpen, setAccessMenuOpen] = useState(false)
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
@@ -249,9 +252,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   useEffect(() => { dialogRef.current?.focus() }, [])
   const onDialogKeyDown = (event: ReactKeyboardEvent): void => {
     if (event.key === 'Escape') {
-      // A row menu owns Escape while it is open: its own listener closes just
-      // the menu, and this handler must not close the dialog underneath it.
-      if (menuFor !== undefined) return
+      // An open menu owns Escape: its own listener closes just the menu, and
+      // this handler must not close the dialog underneath it — the portaled
+      // access dropdown's events bubble through this dialog's React tree too.
+      if (menuFor !== undefined || accessMenuOpen) return
       event.stopPropagation()
       props.onClose()
       return
@@ -438,6 +442,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   // The host refuses the add as `root-limit-reached` anyway; disabling here is
   // what makes the refusal explain itself before the operator clicks.
   const atLimit = state.view !== undefined && state.view.count >= state.view.limit
+  const IconAccessTrigger = addAccess === 'read-only' ? IconAccessReadOnly : IconAccessReadWrite
   return (
     <div className="mrfw-overlay" role="presentation">
       <div
@@ -645,19 +650,57 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               onChange={event => { setManualPath(event.target.value) }}
               onKeyDown={event => { if (event.key === 'Enter') void addManualPath() }}
             />
-            <select
-              className="mrfw-input mrfw-accessSelect"
-              value={addAccess}
-              disabled={state.busy || atLimit}
-              aria-label={t('panel.accessLabel')}
-              onChange={event => {
-                setAccessChosen(true)
-                setAddAccess(event.target.value === 'read-only' ? 'read-only' : 'read-write')
+            {/* The access picker is the host's own anchored menu — the same
+                dropdown kit the root switcher and the row menus use — not a
+                native select. Only an explicit selection marks the level
+                chosen, so the displayed default still travels in no request
+                (accessChosen keeps its meaning). Opens upward: the row sits
+                at the dialog's bottom edge. */}
+            <Menu
+              open={accessMenuOpen}
+              onClose={() => { setAccessMenuOpen(false) }}
+              className="mrfw-accessSelect"
+              items={[
+                {
+                  id: 'read-write',
+                  label: t('access.readWrite'),
+                  icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />,
+                },
+                {
+                  id: 'read-only',
+                  label: t('access.readOnly'),
+                  icon: IconAccessReadOnly === undefined ? undefined : <IconAccessReadOnly />,
+                },
+              ]}
+              selectedId={addAccess}
+              onSelect={(id) => {
+                setAccessMenuOpen(false)
+                if (id === 'read-write' || id === 'read-only') {
+                  setAccessChosen(true)
+                  setAddAccess(id)
+                }
               }}
-            >
-              <option value="read-write">{t('access.readWrite')}</option>
-              <option value="read-only">{t('access.readOnly')}</option>
-            </select>
+              portal
+              side="top"
+              align="end"
+              closeOnPointerLeave
+              anchor={(
+                <button
+                  type="button"
+                  className="mrfw-btn mrfw-btnOutline mrfw-accessTrigger"
+                  title={t('panel.accessLabel')}
+                  aria-label={t('panel.accessLabel')}
+                  aria-haspopup="menu"
+                  aria-expanded={accessMenuOpen}
+                  disabled={state.busy || atLimit}
+                  onClick={() => { setAccessMenuOpen(open => !open) }}
+                >
+                  {IconAccessTrigger === undefined ? null : <IconAccessTrigger />}
+                  {t(addAccess === 'read-only' ? 'access.readOnly' : 'access.readWrite')}
+                  {accessMenuOpen ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
+                </button>
+              )}
+            />
             <Action
               onClick={() => { void addManualPath() }}
               disabled={state.busy || atLimit || manualPath.trim() === ''}

@@ -506,6 +506,12 @@ export const STYLES = /* css */ `
   flex: 0 0 auto;
 }
 
+/* The access dropdown's capsule trigger: the Menu anchor wrapper is the flex
+   item, the button inside keeps the control row's 32px capsule recipe. */
+.mrfw-accessTrigger {
+  padding: 0 12px;
+}
+
 .mrfw-accessBadge {
   font-size: 12px;
   line-height: 18px;
