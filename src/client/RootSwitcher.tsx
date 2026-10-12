@@ -144,7 +144,11 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   useEffect(() => {
     if (selected === 'primary') return
     const current = view?.roots.find(root => root.id === selected.id)
-    if (current === undefined || current.state !== 'available') setSelected('primary')
+    if (current === undefined || current.state !== 'available') { setSelected('primary'); return }
+    // The match can carry a newer alias, access, or path than the row
+    // `onSelect` captured; adopt the refreshed object so the trigger label,
+    // the path label, and the tree entry stop rendering the stale snapshot.
+    if (current !== selected) setSelected(current)
   }, [view, selected])
 
   const roots = useMemo(() => view?.roots ?? [], [view])

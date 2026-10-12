@@ -402,6 +402,33 @@ describe('the Files-tab root switcher', () => {
     expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform')
   })
 
+  it('adopts the refreshed row when the manager renames the selected root', async () => {
+    const harness = mount()
+    const { pane } = renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('payments')
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.switcher.manage` }))
+    await waitFor(() => { expect(screen.getByRole('dialog')).toBeTruthy() })
+
+    // The manager renamed the root: the row for the same id is still
+    // available, but the captured selection must not keep the old alias —
+    // closing re-lists and the switcher adopts the refreshed row.
+    harness.setView({
+      primaryRoot: '/repos/primary', primaryName: 'Platform',
+      roots: [{ ...ROOT_A, alias: 'ledger' }, ROOT_B], limit: 16, count: 2,
+    })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.close` }))
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('ledger') })
+    expect(switcherKind()).toBe('additional')
+    expect(pane.querySelector('.mrfw-switcherTree')).not.toBeNull()
+  })
+
   it('resets the selection and refetches when the session changes', async () => {
     const harness = mount()
     const { pane } = renderInPane(harness)
