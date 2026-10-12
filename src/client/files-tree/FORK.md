@@ -33,6 +33,7 @@ the shell rewrite, never hand-edits inside those definitions.
 | --- | --- | --- |
 | `FilesBody.module.css.ts` | the css-module virtual module | exports the same `css.<name>` map → `mrfw-ft*` classes; rules live in styles.ts; header-only keys are unmapped because the fork draws no header |
 | `locales.ts` | upstream `locales.ts` | only `NS` + the `SidebarFilesKey` union + the `LocaleNamespaceMap` augmentation; dictionaries are NOT re-registered — `ctx.locale.bind('sidebarFiles')` consumes upstream's live namespace so strings track upstream automatically |
+| `client-remote.d.ts` | `@deepseek-ai/dsh-api-remotes/client`'s exported `ClientRemote` | `tsconfig.client.json` `paths` maps the specifier here so `face.ts`/`adapter.tsx`/`store.ts`/`FilesTree.tsx` (the only importers) compile against the dev-pin's `workspaceFiles` signatures on every supported manifest; on releases older than `0.2.0-rc.2` the real `changes` has two parameters (session-wide watch) and would fail the verbatim 3-argument call — safe because the `files.actions` slot does not exist there so the fork never mounts |
 | `primitives.ts` | the named primitives imports upstream spells | runtime-probes `IconFolderCloseRegular`/`IconFolderOpenRegular` (with `*16` pixel-era fallbacks), `FileTypeIcon`, and `classifyFileType` through `compat/client-icons`'s `maybeIcon`/`maybeComponent`; the adapter's gate turns a missing export into no tree at all — upstream's own absence shape |
 | `adapter.tsx` | upstream `apply`'s store/inject wiring | our wiring: `lazyFilesRemote` (`remote` and `remote.workspaceFiles` resolved per call through `ctx.get` — the inject-free store lookup, required because `remote.workspaceFiles` is a nested service whose context-proxy path throws "without inject" on undeclared fibers and this cordis treats every inject entry as required; every lookup failure — absent service, absent namespace, synchronous throw, or a rejected call — is folded into a settled `gateway/internal` RemoteResult/stream failure, because the verbatim `load` awaits `list` through `.then` with no `.catch` and an escaped rejection would die inside `DirectoryNode.task` pinning the level at `loading` forever), `createFilesTreeSeats` (the `store`/`inject` registration declarations: verbatim `filesFace` + session-bound `openFile` through `sidebarRight.openResourceIn`), and `createFilesTreeSurface` (the prop-share assembly + the primitives gate) |
 | `FORK.md` | — | this file |
@@ -103,7 +104,9 @@ upstream binds inside it arrives as a prop instead:
    namespace).
 6. Re-check `face.ts`'s `FilesInjected` members against `adapter.tsx` and
    `FilesTree.tsx`'s `Pick<FilesInjected, 'start' | 'toggle'>`, and the
-   `workspaceFiles` remote slice against `lazyFilesRemote`.
+   `workspaceFiles` remote slice against `lazyFilesRemote` and
+   `client-remote.d.ts` — the shim must keep spelling the new baseline's
+   signatures, or the verbatim call sites drift.
 7. Re-probe the glyph names: if upstream's named imports change, update
    `primitives.ts`'s candidate lists (and the gate) rather than the
    component.
