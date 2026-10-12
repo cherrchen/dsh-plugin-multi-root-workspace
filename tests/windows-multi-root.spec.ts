@@ -141,7 +141,7 @@ it.runIf(process.platform === 'win32')('enforces real Windows writes in both roo
     await ctx.plugin(MultiRootSandboxProvider)
     const provider = ctx.sandbox as MultiRootSandboxProvider
     provider.internals = { chain: ['windows-acl'], windowsAclRunnerArgs: [process.execPath, fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-sandbox-windows-acl/runner'))] }
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'inherit' }])
     const policy = { mode: 'workspace-write' as const, workspaceRoot: canonicalPath(fixture.workspace) }
     const execute = async (provider: LocalSandboxProvider, roots: string[]) => {
       const payload = `const fs=require('fs'); const roots=${JSON.stringify(roots)}; for(const root of roots){try {fs.writeFileSync(root+'/probe.txt','ok');console.log('allowed')}catch(e){console.log('denied:'+e.code)}}`

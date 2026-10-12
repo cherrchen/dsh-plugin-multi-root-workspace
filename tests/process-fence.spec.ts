@@ -119,6 +119,10 @@ function member(path: string, access: 'inherit' | 'read-only' | 'read-write', in
   return { id: `root-${index}`, path, recordedPath: canonicalPath(path), access }
 }
 
+/** The SBPL spelling of a subpath literal — backslashes and quotes escaped. */
+const sbplSubpath = (path: string): string =>
+  `(subpath "${path.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}")`
+
 describe('the restricted argv prefix', () => {
   const policy = { mode: 'danger-full-access', workspaceRoot: '' } as unknown as SandboxPolicy
 
@@ -130,7 +134,7 @@ describe('the restricted argv prefix', () => {
     expect(prefix[prefix.length - 1]).toBe('--')
     const sbpl = prefix[prefix.length - 2]!
     expect(sbpl).toContain('(allow default)')
-    expect(sbpl).toContain(`(deny file-write* (subpath "${denied}"))`)
+    expect(sbpl).toContain(`(deny file-write* ${sbplSubpath(denied)})`)
     expect(sbpl).not.toContain('(allow file-write*')
   })
 
@@ -152,8 +156,11 @@ describe('the restricted argv prefix', () => {
   it('fails closed on Landlock and Windows ACL — their models cannot subtract', async () => {
     for (const dialect of ['landlock', 'windows-acl'] as const) {
       const { provider } = await mountStack(dialect, 'danger-full-access')
-      const call = (provider as MultiRootSandboxProvider)
-        .restrictedArgvPrefix({ ...policy, workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)])
+      // `confine` is synchronous on some supported releases: wrapping the
+      // call in Promise.resolve().then() folds a synchronous throw into the
+      // same rejection shape the async releases produce.
+      const call = Promise.resolve().then(() => (provider as MultiRootSandboxProvider)
+        .restrictedArgvPrefix({ ...policy, workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)]))
       await expect(call).rejects.toBeInstanceOf(SandboxUnavailableError)
     }
   })
@@ -167,7 +174,7 @@ describe('shell and PTC execute entries', () => {
     await shell.execute({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
     expect(captured.spawned).toHaveLength(1)
     const argv = captured.spawned[0]!.argv
-    expect(argv.join(' ')).toContain(`(deny file-write* (subpath "${canonicalPath(fixture.outside)}"))`)
+    expect(argv.join(' ')).toContain(`(deny file-write* ${sbplSubpath(canonicalPath(fixture.outside))}`)
     expect(argv.slice(-COMMAND.length)).toEqual(COMMAND)
   })
 
@@ -284,7 +291,7 @@ describe('the workspace-write deny edge', () => {
       ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(root.path, 'read-only')])
       const result = await confined(provider, COMMAND, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
       const sbpl = result.argv.find(arg => arg.includes('file-write*'))!
-      expect(sbpl).toContain(`(deny file-write* (subpath "${canonicalPath(root.path)}"))`)
+      expect(sbpl).toContain(`(deny file-write* ${sbplSubpath(canonicalPath(root.path))}`)
     } finally { root.cleanup() }
   })
 

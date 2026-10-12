@@ -446,7 +446,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     const fixture = createFixtureWorkspace('win-readonly')
     const mounted = await mountProvider(fixture.workspace)
     try {
-      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'extra', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'inherit' }])
       const confined = await mounted.provider.confine(
         [process.execPath, '-e', `try{require('fs').writeFileSync(${JSON.stringify(join(fixture.outside, 'ro.txt'))},'bad');console.log('allowed')}catch(e){console.log('denied:'+(e&&e.code||e))}`],
         { ...mounted.policy, mode: 'read-only' },
@@ -456,6 +456,26 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       expect(result.status, result.stderr).toBe(0)
       expect(result.stdout.trim()).toMatch(/^denied:/)
       expect(existsSync(join(fixture.outside, 'ro.txt'))).toBe(false)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 120_000)
+
+  it('routes read-only mode through the plugin runner when a fixed read-write root exists', async () => {
+    const fixture = createFixtureWorkspace('win-readonly-fixed')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'fixed', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
+      const confined = await mounted.provider.confine(
+        [process.execPath, '-e', `const fs=require('fs');for(const root of ${JSON.stringify([fixture.outside, fixture.workspace])}){try{fs.writeFileSync(root+'/probe.txt','ok');console.log('allowed')}catch(e){console.log('denied:'+(e&&e.code||e))}}`],
+        { ...mounted.policy, mode: 'read-only' },
+      )
+      // The fixed root must use the standalone runner: upstream's read-only
+      // profile cannot grant anything, and the workspace stays denied.
+      expect(confined.argv[1]).toBe(PLUGIN_RUNNER)
+      const result = await spawnArgv(confined.argv[0]!, confined.argv.slice(1))
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim().split(/\r?\n/)).toEqual(['allowed', expect.stringMatching(/^denied:/)])
+      expect(readFileSync(join(fixture.outside, 'probe.txt'), 'utf8')).toBe('ok')
+      expect(existsSync(join(fixture.workspace, 'probe.txt'))).toBe(false)
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
   }, 120_000)
 
