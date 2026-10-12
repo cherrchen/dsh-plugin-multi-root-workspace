@@ -12,7 +12,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createElement } from 'react'
+import { createElement, StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PANEL_CHANNEL, type PanelRequest, type RevealedView, type RootView, type RootsView } from '../src/contract.ts'
@@ -208,8 +208,9 @@ function mount(withFilesActions = false): Harness {
  * bare function as a child.
  * @param harness - the mounted harness whose registration to render.
  */
-function renderPanel(harness: Harness): void {
-  render(createElement(harness.registrations[0]!.component as never))
+function renderPanel(harness: Harness, strictMode = false): void {
+  const panel = createElement(harness.registrations[0]!.component as never)
+  render(strictMode ? createElement(StrictMode, null, panel) : panel)
 }
 
 beforeEach(() => {
@@ -271,6 +272,18 @@ describe('the client entry', () => {
 })
 
 describe('the panel dialog', () => {
+  it('accepts list and mutation results after StrictMode replays mount effects', async () => {
+    const harness = mount()
+    renderPanel(harness, true)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await screen.findByText('/repos/payments')
+    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_B], limit: 16, count: 1 })
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.remove` }))
+    await waitFor(() => { expect(screen.queryByText('/repos/payments')).toBeNull() })
+    expect(harness.calls.some(call => call.endpoint === 'remove')).toBe(true)
+  })
+
   it('reads the roots view for the current session and lists both roots', async () => {
     const harness = mount()
     renderPanel(harness)

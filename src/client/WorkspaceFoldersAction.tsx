@@ -266,9 +266,12 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const requestEpoch = useRef(0)
   const mounted = useRef(true)
 
-  useEffect(() => () => {
-    mounted.current = false
-    requestEpoch.current += 1
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      requestEpoch.current += 1
+    }
   }, [])
 
   const requestBase = useCallback((): { sessionId: string } | undefined => {

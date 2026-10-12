@@ -188,7 +188,7 @@ Windows 的 Node 不能直接 `execFileSync('npm')` 启动 `npm.cmd`，旧版矩
 
 ## 10. B1–B3 的新接缝
 
-LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述符；不要比较 Cordis 代理函数的引用。旧版 `changes(scope, signal)` 与新版 `changes(scope, path, signal)` 由 `src/compat/workspace-files.ts` 按 arity 适配。读面 `stat`/`read`/`readBytes` 同样被包装——上游对它们不做 workspace 围限，边界由 `routeWorkspacePath` + `registry.list()` 的「在册未授权」词法检查补齐（拒绝用 `workspace-file/outside-workspace`）；`readBytes` 第三参跨版本形态不同（`WorkspaceByteRange` ↔ `WorkspaceByteReadOptions`），wrapper 按 `unknown` 透传、只消费 `baseFile` 字段。Windows 非空 scope 的 runner 必须用整个根集合的 SID，不能把主根 SID 授予附加根，否则移除后仍可写。可选 peer 均纳入混装检查，carrier barrel 不得静态加载这些可选包。完整决策见 [ADR-0011](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md)，各平台验证状态只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
+LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述符；不要比较 Cordis 代理函数的引用。旧版 `changes(scope, signal)` 与新版 `changes(scope, path, signal)` 由 `src/compat/workspace-files.ts` 按 arity 适配。读面 `stat`/`read`/`readBytes` 同样被包装——上游对它们不做 workspace 围限，边界由 `routeWorkspacePath` + `registry.list()` 的「在册未授权」词法检查补齐（拒绝用 `workspace-file/outside-workspace`）；`readBytes` 第三参跨版本形态不同（`WorkspaceByteRange` ↔ `WorkspaceByteReadOptions`），wrapper 保留 range 与其余选项，只在路由时改写 `baseFile`，关联尾路径语义见 [ADR-0011 的读面修订](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md#修订面板-files--readfile-端点下线2026-10-12amendment)。Windows 非空 scope 的 runner 必须用整个根集合的 SID，不能把主根 SID 授予附加根，否则移除后仍可写。可选 peer 均纳入混装检查，carrier barrel 不得静态加载这些可选包。完整决策见 [ADR-0011](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md)，各平台验证状态只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
 
 ## 11. DSH 0.2.1 目录语义
 

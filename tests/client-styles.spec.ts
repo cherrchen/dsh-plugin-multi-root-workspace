@@ -96,9 +96,9 @@ describe('the additional-root row rules', () => {
   it('keeps the danger button on real tokens — an undefined var() whites it out', () => {
     // label-error is an ink, not an alias-layer token this runtime defines:
     // hovering once fell back to transparent and the red button vanished.
-    // The hover must darken through color-mix, upstream's own recipe.
+    // Both sides of the hover mix must follow the host theme.
     expect(STYLES).toMatch(/\.mrfw-btnDanger\s*\{[^}]*background:\s*var\(--dsw-alias-state-error-primary\)/s)
-    expect(STYLES).toMatch(/\.mrfw-btnDanger:hover:not\(:disabled\)\s*\{[^}]*color-mix/s)
+    expect(STYLES).toMatch(/\.mrfw-btnDanger:hover:not\(:disabled\)\s*\{[^}]*color-mix\(in srgb, var\(--dsw-alias-state-error-primary\) 85%, var\(--dsw-alias-label-primary\)\)/s)
   })
 })
 

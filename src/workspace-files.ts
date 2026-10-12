@@ -2,11 +2,11 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { WorkspaceFiles, WorkspaceFileRange, WorkspaceFileScope } from '@deepseek-ai/dsh-api-workspace-files'
 import type { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
-import { dirname, resolve as resolveLexically } from 'node:path'
+import { resolve as resolveLexically } from 'node:path'
 import type {} from './compat.ts'
 import type {} from './providers.ts'
 import type { MultiRootRegistry } from './registry.ts'
-import { adaptPathWatch } from './compat/workspace-files.ts'
+import { adaptPathWatch, resolveRelatedWorkspacePath } from './compat/workspace-files.ts'
 import { isCanonicallyUnder } from './roots.ts'
 import { routeWorkspacePath } from './workspace-routing.ts'
 import { wrapMethod } from './method-wrapper.ts'
@@ -50,8 +50,8 @@ export function apply(ctx: Context): void {
       const restoreReadBytes = wrapMethod(service, 'readBytes', original => {
         // The third parameter is version-shaped — a plain `WorkspaceByteRange`
         // on older releases, a `WorkspaceByteReadOptions` carrying `baseFile`
-        // later — so the wrapper passes it through untouched and only reads
-        // `baseFile` when the shape carries one. With `baseFile`, `path`
+        // later — so the wrapper preserves every option and only rewrites
+        // `baseFile` when routing changes its spelling. With `baseFile`, `path`
         // resolves from the base file's directory upstream, so the base
         // carries the routing identity and the joined tail is checked for a
         // withheld-root landing.
@@ -63,9 +63,10 @@ export function apply(ctx: Context): void {
           if (baseFile !== undefined) {
             const routed = await routeRead(scope, request, baseFile, signal)
             if (routed === 'deny') throw await outside(baseFile)
-            const escaped = relatedTailWithheld(scope, request.workspaceRoot, resolveLexically(request.workspaceRoot, routed.path), path)
+            const escaped = await relatedTailWithheld(scope, request.workspaceRoot, routed, path, signal)
             if (escaped !== undefined) throw await outside(escaped)
-            return call.call(this, routed.request, path, options, signal)
+            const routedOptions = baseFile === routed.path ? options : { ...options as Record<string, unknown>, baseFile: routed.path }
+            return call.call(this, routed.request, path, routedOptions, signal)
           }
           const routed = await routeRead(scope, request, path, signal)
           if (routed === 'deny') throw await outside(path)
@@ -87,7 +88,7 @@ export function apply(ctx: Context): void {
         ? wrapMethod(legacy as WorkspaceFiles & LegacyReads, 'readRelated', original => (async function(this: WorkspaceFiles, request: WorkspaceFileScope, path: string, relativePath: string, signal: AbortSignal): Promise<unknown> {
             const routed = await routeRead(scope, request, path, signal)
             if (routed === 'deny') throw await outside(path)
-            const escaped = relatedTailWithheld(scope, request.workspaceRoot, resolveLexically(request.workspaceRoot, routed.path), relativePath)
+            const escaped = await relatedTailWithheld(scope, request.workspaceRoot, routed, relativePath, signal)
             if (escaped !== undefined) throw await outside(escaped)
             return original.call(this, routed.request, routed.path, relativePath, signal)
           }) as unknown as typeof original)
@@ -194,13 +195,17 @@ function underWithheldRoot(scope: Context, primaryRoot: string, path: string): b
 }
 
 /**
- * Resolve `tail` from `absoluteBase`'s directory and report the joined path
+ * Resolve `tail` from the canonical base file's directory and report the joined path
  * when it lands under a withheld root. `readRelated`'s tail and `readBytes`'s
  * `baseFile`-relative target both read a file located relative to another
  * file, so the granted base must not reach back into a dead grant.
  */
-function relatedTailWithheld(scope: Context, primaryRoot: string, absoluteBase: string, tail: string): string | undefined {
-  const target = resolveLexically(dirname(absoluteBase), tail)
+async function relatedTailWithheld(scope: Context, primaryRoot: string, base: Exclude<RoutedRead, 'deny'>, tail: string, signal: AbortSignal): Promise<string | undefined> {
+  if (registeredRoots(scope, primaryRoot).length === 0) return undefined
+  // Upstream locates the canonical base before joining the normalized tail;
+  // an intermediate directory alias must not change the path being checked.
+  const targetBase = await scope.fs.resolve(base.path, { cwd: base.request.workspaceRoot, signal })
+  const target = resolveRelatedWorkspacePath(scope.fs.processPath(targetBase), tail)
   return underWithheldRoot(scope, primaryRoot, target) ? target : undefined
 }
 

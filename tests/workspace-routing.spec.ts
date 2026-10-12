@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { Lsp, LspProviderId } from '@deepseek-ai/dsh-lsp'
@@ -99,6 +99,10 @@ function hasPathWatch(service: WorkspaceFiles): boolean {
   return service.changes.length >= 3
 }
 
+// The legacy surface uses readRelated for base-relative reads; its readBytes
+// takes a plain range. Newer hosts fold readRelated into readBytes options.
+const supportsBaseFile = typeof (WorkspaceFiles.prototype as WorkspaceFiles & { readRelated?: unknown }).readRelated !== 'function'
+
 describe('workspace-files isolation', () => {
   it('lists each root through the original caps and rejects unrelated directories', async () => {
     const { service, scope } = await files()
@@ -190,7 +194,7 @@ describe('workspace-files isolation', () => {
     // surface on this version's service so the probe wraps it.
     const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
     Object.defineProperty(raw, 'readAll', { configurable: true, writable: true, value: async (_r: unknown, path: string) => ({ data: readFileSync(path) }) })
-    Object.defineProperty(raw, 'readRelated', { configurable: true, writable: true, value: async (_r: unknown, path: string, tail: string) => ({ data: readFileSync(join(dirname(path), tail)) }) })
+    Object.defineProperty(raw, 'readRelated', { configurable: true, writable: true, value: async (_r: unknown, path: string, tail: string) => ({ data: readFileSync(join(dirname(path), tail.replace(/\\/g, '/'))) }) })
     await ctx.plugin(FilesRouting)
     type LegacySurface = WorkspaceFiles & {
       readAll: (r: unknown, p: string, s: AbortSignal) => Promise<{ data: Buffer }>
@@ -207,7 +211,7 @@ describe('workspace-files isolation', () => {
     writeFileSync(join(fixture.outside, 'other.txt'), 'another')
     expect((await service.readAll(scope, file, signal())).data.toString()).toBe('additional')
     expect((await service.readRelated(scope, file, 'other.txt', signal())).data.toString()).toBe('another')
-    expect(decodeBytes((await service.readBytes(scope, 'same.ts', { baseFile: file } as never, signal())).data)).toBe('additional')
+    if (supportsBaseFile) expect(decodeBytes((await service.readBytes(scope, 'same.ts', { baseFile: file } as never, signal())).data)).toBe('additional')
 
     // Withheld: the direct reads refuse, and so does a base-relative tail
     // that escapes a *granted* base into the dead grant.
@@ -216,8 +220,11 @@ describe('workspace-files isolation', () => {
     await expect(service.readAll(scope, file, signal())).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
     await expect(service.readRelated(scope, file, 'other.txt', signal())).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
     await expect(service.readRelated(scope, primary, join('..', 'out', 'same.ts'), signal())).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
-    await expect(service.readBytes(scope, 'same.ts', { baseFile: file } as never, signal())).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
-    await expect(service.readBytes(scope, join('..', 'out', 'same.ts'), { baseFile: primary } as never, signal())).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    await expect(service.readRelated(scope, primary, '..\\out\\same.ts', signal())).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    if (supportsBaseFile) {
+      await expect(service.readBytes(scope, 'same.ts', { baseFile: file } as never, signal())).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+      await expect(service.readBytes(scope, join('..', 'out', 'same.ts'), { baseFile: primary } as never, signal())).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    }
   })
 
   it('restores the upstream read methods when the row unloads', async () => {
@@ -228,6 +235,49 @@ describe('workspace-files isolation', () => {
     expect(Object.getOwnPropertyDescriptor(service, 'readBytes')).toBeUndefined()
     const file = join(fixture.outside, 'same.ts')
     expect((await service.stat(scope, file, new AbortController().signal)).absolutePath).toBe(canonicalPath(file))
+  })
+
+  it.skipIf(!supportsBaseFile)('refuses slash, backslash and mixed tails into a withheld root', async () => {
+    const { service, scope } = await files()
+    ctx.provide('multiRootRegistry', { list: () => [{ path: canonicalPath(fixture.outside) }] } as never)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+    const target = join(fixture.outside, 'assets'); mkdirSync(target)
+    writeFileSync(join(target, 'image.txt'), 'withheld')
+    const baseFile = join(fixture.workspace, 'same.ts')
+    for (const tail of ['../out/assets/image.txt', '..\\out\\assets\\image.txt', '../out\\assets/image.txt']) {
+      await expect(service.readBytes(scope, tail, { baseFile } as never, new AbortController().signal))
+        .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    }
+  })
+
+  it.skipIf(!supportsBaseFile)('preserves a workspace-relative baseFile when routing into a nested additional root', async () => {
+    const extra = join(fixture.outside, 'nested'); mkdirSync(extra)
+    writeFileSync(join(extra, 'base.md'), 'base')
+    writeFileSync(join(extra, 'image.txt'), 'correct-image')
+    // If re-routing reinterprets the relative base, it lands in this shadow
+    // directory instead. Reading the expected bytes rules out both a missing
+    // file regression and silently reading the wrong file.
+    const shadow = join(fixture.outside, 'out', 'nested'); mkdirSync(shadow, { recursive: true })
+    writeFileSync(join(shadow, 'base.md'), 'shadow-base')
+    writeFileSync(join(shadow, 'image.txt'), 'wrong-image')
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'nested', path: extra, recordedPath: canonicalPath(extra), access: 'read-write' }])
+    const { service, scope } = await files()
+    const options = { baseFile: relative(fixture.workspace, join(extra, 'base.md')), range: { offset: 0, length: 7 } }
+    const result = await service.readBytes(scope, 'image.txt', options as never, new AbortController().signal)
+    expect(decodeBytes(result.data)).toBe('correct')
+    expect(result.absolutePath).toBe(canonicalPath(join(extra, 'image.txt')))
+    expect(options.baseFile).toBe(relative(fixture.workspace, join(extra, 'base.md')))
+  })
+
+  it.skipIf(!supportsBaseFile || symlinkUnsupportedReason() !== undefined)('checks related tails from the canonical base directory through a primary-root alias', async () => {
+    const nested = join(fixture.workspace, 'deep', 'nested'); mkdirSync(nested, { recursive: true })
+    writeFileSync(join(nested, 'base.md'), 'base')
+    const alias = join(fixture.workspace, 'alias'); symlinkSync(nested, alias, 'dir')
+    const { service, scope } = await files()
+    ctx.provide('multiRootRegistry', { list: () => [{ path: canonicalPath(fixture.outside) }] } as never)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+    await expect(service.readBytes(scope, '../../../out/same.ts', { baseFile: join(alias, 'base.md') } as never, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
   })
 })
 

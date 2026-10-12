@@ -18,7 +18,7 @@
  * shares the upstream Files registration composes.
  */
 
-import { useSyncExternalStore, type ReactElement } from 'react'
+import { StrictMode, useSyncExternalStore, type ReactElement } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OPEN_IN_APP_APPS_ROUTE, OPEN_IN_APP_OPEN_ROUTE } from '@deepseek-ai/dsh-host-open-in-app/shared'
@@ -297,7 +297,7 @@ afterEach(() => {
  * itself inside a dockkit tab host. The returned `pane` is where the forked
  * tree must portal into.
  */
-function renderInPane(harness: Harness, owner = { absolutePath: '/repos/primary' }): { pane: HTMLElement } {
+function renderInPane(harness: Harness, owner = { absolutePath: '/repos/primary' }, strictMode = false): { pane: HTMLElement } {
   const host = document.createElement('section')
   host.setAttribute('data-dockkit-content', 'tab-1')
   const pane = document.createElement('div')
@@ -314,7 +314,8 @@ function renderInPane(harness: Harness, owner = { absolutePath: '/repos/primary'
   host.append(pane)
   document.body.append(host)
   appended.push(host)
-  render(harness.occupant(owner) as ReactElement, { container: header })
+  const occupant = harness.occupant(owner) as ReactElement
+  render(strictMode ? <StrictMode>{occupant}</StrictMode> : occupant, { container: header })
   return { pane }
 }
 
@@ -330,6 +331,16 @@ async function openMenu(): Promise<void> {
 }
 
 describe('the Files-tab root switcher', () => {
+  it('loads and browses additional roots after StrictMode replays mount effects', async () => {
+    const harness = mount()
+    const { pane } = renderInPane(harness, undefined, true)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+  })
+
   it('renders the primary root name and lists the session roots in its menu', async () => {
     const harness = mount()
     renderInPane(harness)

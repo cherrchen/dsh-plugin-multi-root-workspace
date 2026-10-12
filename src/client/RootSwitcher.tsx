@@ -105,9 +105,12 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   const mounted = useRef(true)
   const requestEpoch = useRef(0)
 
-  useEffect(() => () => {
-    mounted.current = false
-    requestEpoch.current += 1
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      requestEpoch.current += 1
+    }
   }, [])
 
   // Locate the pane once, after mount. Finding no `[data-files-root]`
