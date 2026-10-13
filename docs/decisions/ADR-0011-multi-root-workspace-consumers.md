@@ -114,7 +114,7 @@ Status 保持 **Accepted**；LSP 路由、workspace-files 隔离与 Windows runn
 
 ## 修订：Windows ambient deny runner（2026-10-13，Amendment）
 
-B9 原先延后的 Windows Full-access + 局部只读现按用户要求重新纳入。现有 read-only / workspace-write allow-token 路径不变；新的 ambient deny-token 路径、standing ACE 和 partial enforcement 边界见 [ADR-0018](./ADR-0018-windows-ambient-write-denial.md)。上文「单 root-set SID 只有 allow 维度」仍描述原 runner，并不限制插件自己的独立原生机制。验收状态只见路线账本。
+B9 原先延后的 Windows Full-access + 局部只读现按用户要求重新纳入。现有 read-only / workspace-write allow-token 路径不变；新的 ambient token-attribute 路径、standing ACE 和 partial enforcement 边界见 [ADR-0019](./ADR-0019-windows-token-attributes-and-conditional-acls.md)。上文「单 root-set SID 只有 allow 维度」仍描述原 runner，并不限制插件自己的独立原生机制。验收状态只见路线账本。
 
 ## Related Documents
 

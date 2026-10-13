@@ -1,8 +1,8 @@
 /** Ambient ACL writes minus registered read-only roots (Windows B9).
  *
- * The restricting list mirrors the caller's enabled identities and adds only
- * deny identities. A second access check therefore preserves ambient DACL
- * grants while those identities match explicit deny ACEs in protected trees.
+ * The restricting list mirrors the caller's enabled identities. An inherited
+ * mandatory token attribute identifies denied roots to conditional ACEs in
+ * the NORMAL access check, so narrowing the SID list cannot discard the deny.
  * Privileges that could bypass the DACL are removed; integrity is not lowered.
  * Standing ACEs retain the restriction for running children and concurrent
  * snapshots. They are never revoked during runner teardown.
@@ -59,6 +59,11 @@ export async function runWindowsDenied(
       getSecurityInfo: [advapi32, 'uint32', ['void*', 'int', 'uint32', 'void*', 'void*', 'void*', 'void*', 'void*']],
       setSecurityInfo: [advapi32, 'uint32', ['void*', 'int', 'uint32', 'void*', 'void*', 'void*', 'void*']],
       setEntriesInAclW: [advapi32, 'uint32', ['uint32', 'void*', 'void*', 'void*']],
+      convertStringSecurityDescriptorToSecurityDescriptorW: [advapi32, 'int', ['str16', 'uint32', 'void*', 'void*']],
+      getSecurityDescriptorDacl: [advapi32, 'int', ['void*', 'void*', 'void*', 'void*']],
+      initializeAcl: [advapi32, 'int', ['void*', 'uint32', 'uint32']],
+      getAce: [advapi32, 'int', ['void*', 'uint32', 'void*']],
+      addAce: [advapi32, 'int', ['void*', 'uint32', 'uint32', 'void*', 'uint32']],
       getTempPathW: [kernel32, 'uint32', ['uint32', 'void*']],
       lockFileEx: [kernel32, 'int', ['void*', 'uint32', 'uint32', 'uint32', 'uint32', 'void*']],
       unlockFileEx: [kernel32, 'int', ['void*', 'uint32', 'uint32', 'uint32', 'void*']],
@@ -122,8 +127,7 @@ export async function runWindowsDenied(
       if ((attributes & 8) !== 0) owners.push(group)
     }
     const ownerRights = sid('S-1-3-4')
-    const denies = roots.map(root => sid(rootDenySid(root)))
-    identities.push(...denies)
+    const denies = roots.map(rootDenySid)
     const list = Buffer.alloc(identities.length * 16)
     identities.forEach((value, i) => writePointer(list, i * 16, value))
     const restrictedOut = Buffer.alloc(8)
@@ -143,16 +147,48 @@ export async function runWindowsDenied(
       writePointer(data, 40, trustee)
       return data
     }
-    // Restricting SIDs can be intersected away by CreateRestrictedToken. Lock
-    // token assignment, impersonation, adjustment and security editing. Token
-    // duplication stays available: PowerShell/.NET needs it to query identity.
-    // A weakened copy cannot be activated as a process or thread token. The
-    // runner keeps its already-open handle for CreateProcessAsUserW.
+    // Conditional ACEs inspect an inheritable mandatory LOCAL token attribute,
+    // not the removable restricting-SID list. Protected token adjustment keeps
+    // the attribute on copied and narrowed tokens while .NET identity queries
+    // and impersonation continue to work.
+    const allocations: NativePointer[] = []
+    const allocate = (data: Buffer): NativePointer => {
+      const value = native.koffi.alloc('uint8', data.length)
+      allocations.push(value)
+      native.koffi.encode(value, 'uint8', data, data.length)
+      return value
+    }
+    const unicode = (value: string): Buffer => {
+      const text = Buffer.from(value + '\0', 'utf16le')
+      const record = Buffer.alloc(16)
+      record.writeUInt16LE(text.length - 2)
+      record.writeUInt16LE(text.length, 2)
+      writePointer(record, 8, allocate(text))
+      return record
+    }
+    try {
+      const attribute = Buffer.alloc(40)
+      unicode('DshMultiRootDeniedRoots').copy(attribute)
+      attribute.writeUInt16LE(3, 16) // TOKEN_SECURITY_ATTRIBUTE_TYPE_STRING
+      attribute.writeUInt32LE(0x20, 20) // MANDATORY; inheritable (no NON_INHERITABLE)
+      attribute.writeUInt32LE(denies.length, 24)
+      writePointer(attribute, 32, allocate(Buffer.concat(denies.map(unicode))))
+      const attributes = Buffer.alloc(16)
+      attributes.writeUInt16LE(1)
+      attributes.writeUInt32LE(1, 4)
+      writePointer(attributes, 8, allocate(attribute))
+      const operation = Buffer.alloc(4)
+      operation.writeUInt32LE(2) // TOKEN_SECURITY_ATTRIBUTE_OPERATION_ADD
+      const input = Buffer.alloc(16)
+      writePointer(input, 0, allocate(attributes))
+      writePointer(input, 8, allocate(operation))
+      check(api.setTokenInformation!(restrictedToken, 39, input, input.length), 'SetTokenInformation(TokenSecurityAttributes)')
+    } finally { for (const value of allocations) native.koffi.free(value) }
     const tokenAclOut = Buffer.alloc(8)
     status(api.setEntriesInAclW!(3, Buffer.concat([
-      entry(userSid, 3, 0x1e5 | WRITE_DAC | WRITE_OWNER, 0),
-      // Default DACLs are also used for process/thread/IPC objects: preserve
-      // ordinary identity access while denying the token mutation rights.
+      entry(userSid, 3, 0x80 | WRITE_DAC | WRITE_OWNER, 0),
+      // Permit identity duplication and activation; only attribute/default
+      // adjustment and security-descriptor changes must be unavailable.
       entry(userSid, 1, 0x10000000, 0),
       entry(ownerRights, 1, 0x20000, 0),
     ]), null, tokenAclOut), 'SetEntriesInAclW(token)')
@@ -162,7 +198,7 @@ export async function runWindowsDenied(
       // CreateProcess derives a NEW primary-token object. Its security comes
       // from the token's default DACL, not the source token object's DACL.
       // Set both so descendants cannot reopen a freshly cloned token to strip
-      // the restricting deny identities.
+      // the mandatory deny attribute.
       const defaultDacl = Buffer.alloc(8)
       writePointer(defaultDacl, 0, tokenAcl)
       check(api.setTokenInformation!(restrictedToken, 6, defaultDacl, 8), 'SetTokenInformation(TokenDefaultDacl)')
@@ -173,7 +209,7 @@ export async function runWindowsDenied(
     if (tempLength === 0 || tempLength >= 32768) throw new Error('GetTempPathW failed')
     const lockDirectory = join(tempPath.subarray(0, tempLength * 2).toString('utf16le'), 'dsh-acl-locks')
     mkdirSync(lockDirectory, { recursive: true })
-    const protect = (path: string, denySid: NativePointer, mask: number, inheritance: number): void => {
+    const protect = (path: string, denyId: string, mask: number, inheritance: number): void => {
       // Same path-lock protocol as the upstream ACL writer (local port, no
       // private import), so a concurrent allow grant cannot erase this deny.
       const lockPath = join(lockDirectory, `${createHash('sha256').update(path.toLowerCase()).digest('hex').slice(0, 16)}.lock`)
@@ -206,15 +242,44 @@ export async function runWindowsDenied(
           const oldAcl = pointer(aclOut)
           if (oldAcl === null || oldAcl === 0n) throw new Error(`deny ACL cannot preserve a null DACL: ${path}`)
           const edits = Buffer.concat([
-            entry(denySid, 3, mask, inheritance),
             entry(ownerRights, 1, 0x20000, inheritance),
             entry(owner, 1, WRITE_DAC, inheritance),
           ])
           const mergedOut = Buffer.alloc(8)
-          status(api.setEntriesInAclW!(3, edits, oldAcl, mergedOut), `SetEntriesInAclW(${path})`)
+          status(api.setEntriesInAclW!(2, edits, oldAcl, mergedOut), `SetEntriesInAclW(${path})`)
           merged = pointer(mergedOut)
           // Keep existing protection/inheritance and every unrelated ACE.
-          status(api.setSecurityInfo!(handle, 1, 4, null, null, merged, null), `SetSecurityInfo(${path})`)
+          const descriptorOut = Buffer.alloc(8)
+          const flags = inheritance === 3 ? 'OICI' : ''
+          const condition = `(Exists DshMultiRootDeniedRoots && DshMultiRootDeniedRoots Contains "${denyId}")`
+          check(api.convertStringSecurityDescriptorToSecurityDescriptorW!(
+            `D:(XD;${flags};0x${mask.toString(16)};;;WD;${condition})`, 1, descriptorOut, null,
+          ), 'ConvertStringSecurityDescriptorToSecurityDescriptorW(conditional deny)')
+          const conditionalDescriptor = pointer(descriptorOut)
+          try {
+            const present = Buffer.alloc(4), acl = Buffer.alloc(8), defaulted = Buffer.alloc(4)
+            check(api.getSecurityDescriptorDacl!(conditionalDescriptor, present, acl, defaulted), 'GetSecurityDescriptorDacl')
+            const first = Buffer.alloc(8)
+            check(api.getAce!(pointer(acl), 0, first), 'GetAce(conditional deny)')
+            const header = Buffer.from(native.koffi.decode(pointer(first), 'uint8', 4) as Uint8Array)
+            const denyBytes = Buffer.from(native.koffi.decode(pointer(first), 'uint8', header.readUInt16LE(2)) as Uint8Array)
+            const existingHeader = Buffer.from(native.koffi.decode(merged, 'uint8', 8) as Uint8Array)
+            const count = existingHeader.readUInt16LE(4)
+            const others: Buffer[] = []
+            for (let index = 0; index < count; index++) {
+              const ace = Buffer.alloc(8)
+              check(api.getAce!(merged, index, ace), 'GetAce(existing)')
+              const h = Buffer.from(native.koffi.decode(pointer(ace), 'uint8', 4) as Uint8Array)
+              const bytes = Buffer.from(native.koffi.decode(pointer(ace), 'uint8', h.readUInt16LE(2)) as Uint8Array)
+              if (!bytes.equals(denyBytes)) others.push(bytes)
+            }
+            const size = 8 + denyBytes.length + others.reduce((total, bytes) => total + bytes.length, 0)
+            if (size > 65535) throw new Error(`deny ACL exceeds the Windows ACL size limit: ${path}`)
+            const combined = Buffer.alloc(size)
+            check(api.initializeAcl!(combined, size, 4), 'InitializeAcl')
+            for (const bytes of [denyBytes, ...others]) check(api.addAce!(combined, 4, 0xffffffff, bytes, bytes.length), 'AddAce')
+            status(api.setSecurityInfo!(handle, 1, 4, null, null, combined, null), `SetSecurityInfo(${path})`)
+          } finally { api.localFree!(conditionalDescriptor) }
         } finally {
           if (merged !== undefined) api.localFree!(merged)
           api.localFree!(descriptor)
@@ -225,20 +290,20 @@ export async function runWindowsDenied(
         finally { native.koffi.free(overlapped); check(api.closeHandle!(lock), 'CloseHandle(lock)') }
       }
     }
-    const walk = (path: string, denySid: NativePointer): void => {
+    const walk = (path: string, denyId: string): void => {
       const before = lstatSync(path)
       // Refuse canonical redirection; do not alter another root through a
       // junction or mount point. A successful external target is ambient.
       if (!before.isSymbolicLink() && canonicalPath(path).toLowerCase() !== path.toLowerCase()) throw new Error(`deny subtree redirected: ${path}`)
-      protect(path, denySid, MUTATION, before.isDirectory() ? 3 : 0)
-      if (!before.isSymbolicLink() && before.isDirectory()) for (const name of readdirSync(path)) walk(join(path, name), denySid)
+      protect(path, denyId, MUTATION, before.isDirectory() ? 3 : 0)
+      if (!before.isSymbolicLink() && before.isDirectory()) for (const name of readdirSync(path)) walk(join(path, name), denyId)
     }
     roots.forEach((root, i) => {
-      const denySid = denies[i]!
-      walk(root, denySid)
+      const denyId = denies[i]!
+      walk(root, denyId)
       // Delete can be authorized by the parent rather than the target. Its
       // security edits are guarded too, so the child cannot remove this ACE.
-      protect(dirname(root), denySid, FILE_DELETE_CHILD | WRITE_DAC | WRITE_OWNER, 0)
+      protect(dirname(root), denyId, FILE_DELETE_CHILD | WRITE_DAC | WRITE_OWNER, 0)
     })
     verifyRoots()
     // No temporary directory or environment rewrite: ambient temp semantics.

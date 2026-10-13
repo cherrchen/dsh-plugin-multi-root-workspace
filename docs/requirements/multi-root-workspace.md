@@ -106,7 +106,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 
 ## 5. 验收标准
 
-本节涉及模式与 per-root / per-tool 的条目按 B9 的 [ADR-0017](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md) 合同验收；Windows ambient 拒写机制与 partial 边界见 [ADR-0018](../decisions/ADR-0018-windows-ambient-write-denial.md)。未获原生证据或只能拒绝启动的组合不能记为完整支持；执行与发布状态只见路线账本。
+本节涉及模式与 per-root / per-tool 的条目按 B9 的 [ADR-0017](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md) 合同验收；Windows ambient 拒写机制与 partial 边界见 [ADR-0019](../decisions/ADR-0019-windows-token-attributes-and-conditional-acls.md)。未获原生证据或只能拒绝启动的组合不能记为完整支持；执行与发布状态只见路线账本。
 
 1. **不装插件**：组合与行为与现状完全一致（本条由"插件是外部 bundle"天然保证）。
 2. **安装且根列表为空**：`fs` / `bash` / `sandbox` 的行为与上游一致（sandbox provider 空根时逐元素返回上游 `confine` 结果；fs provider 的 containment 语义由差分 parity 测试证明与上游逐项一致）；`dsh --dump-config` 仅显示两行被替换。

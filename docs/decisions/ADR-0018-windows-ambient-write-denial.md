@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-10-13；Windows 原生验收状态见路线账本）
+Superseded by [ADR-0019](./ADR-0019-windows-token-attributes-and-conditional-acls.md)（2026-10-13）
 
 ## Date
 
@@ -12,7 +12,11 @@ Accepted（2026-10-13；Windows 原生验收状态见路线账本）
 
 用户要求把 B9 原先延后的 Windows Full-access + 局部只读重新纳入开发。既有上游 `AclSandbox` 的 capability SID 只表达 allowlist，不能用 workspace-write 近似该组合，否则主根和未登记区域会失去 Full-access 文件写权限。独立 runner 仍不能深导入任何上游实现。
 
-## Decision
+## 原生回归结论与替代
+
+本文保留 B9 Windows 首轮方案的历史。真实回归证明：restricting SID 可以经 CreateRestrictedToken 被取交集删除；仅设置 token DACL 不足以传递到派生对象；禁止 token duplicate 又使 PowerShell 的 .NET 初始化失败；保留 duplicate、限制副本激活也未守住实际 impersonation 写入边界。因此本文的 token-DACL 防派生方案**不能作为当前执行保证**，已由 ADR-0019 的 mandatory local token attribute + conditional deny ACE 替代。下文 Decision 是被替代的方案，不是当前实现。
+
+## Decision（被替代）
 
 ### 入口与令牌
 

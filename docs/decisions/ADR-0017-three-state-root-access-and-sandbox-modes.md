@@ -117,7 +117,7 @@ Phase 1 时本机外层沙箱拒绝 `sandbox_apply`，原生证据留待补齐�
 
 用户撤回本 ADR 中 Windows 新机制的延后范围。本节取代上表 Windows 行的「延后并显式拒绝」决定，历史 Phase 1 结论保留。
 
-Full-access 的 Windows profile 改为选择插件独立 runner 的 `--mode danger-full-access --deny-root`；令牌、deny ACE、owner / parent / token 防绕过与生命周期按 [ADR-0018](./ADR-0018-windows-ambient-write-denial.md)。权限仍从同一 scope 的 `deniedRoots` 读取，Windows enforcement 仍为 `partial`，缺失能力或路径不满足原生前置条件时拒绝启动。Landlock 的决定不变。原生证据与验收状态只维护于路线账本。
+Full-access 的 Windows profile 改为选择插件独立 runner 的 `--mode danger-full-access --deny-root`；令牌、deny ACE、owner / parent / token 防绕过与生命周期按 [ADR-0019](./ADR-0019-windows-token-attributes-and-conditional-acls.md)。权限仍从同一 scope 的 `deniedRoots` 读取，Windows enforcement 仍为 `partial`，缺失能力或路径不满足原生前置条件时拒绝启动。Landlock 的决定不变。原生证据与验收状态只维护于路线账本。
 
 ## Related Documents
 
