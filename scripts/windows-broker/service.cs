@@ -85,7 +85,10 @@ public sealed class RootDenyBroker : ServiceBase {
             if (process == IntPtr.Zero) throw new Win32Exception();
             IntPtr token = IntPtr.Zero, processToken = IntPtr.Zero, minted = IntPtr.Zero;
             try {
-                Check(OpenProcessToken(process, 0x18, out processToken), "OpenProcessToken(client)"); // QUERY | QUERY_SOURCE
+                // SeDebugPrivilege opens the process, not its token object. Acquire
+                // only QUERY/QUERY_SOURCE while impersonating the authenticated
+                // pipe caller, then revert before any privileged minting.
+                pipe.RunAsClient(() => { Check(OpenProcessToken(process, 0x18, out processToken), "OpenProcessToken(client)"); });
                 if (TokenSid(processToken) != sid || IsTokenRestricted(processToken))
                     throw new UnauthorizedAccessException("Caller process must be an unrestricted installation identity");
                 Check(DuplicateHandle(process, new IntPtr(unchecked((long)UInt64.Parse(fields[1]))), GetCurrentProcess(), out token,

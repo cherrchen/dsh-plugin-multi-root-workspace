@@ -521,3 +521,5 @@ CI 日志读取：`gh api --allow-escape-sequences repos/cherrchen/dsh-plugin-mu
 候选提交 `13af289` 的本机门禁：compat/typecheck/lint/build/docs 全通过；602 passed / 26 平台跳过，随后加入 broker 响应边界回归后 609 passed / 26 平台跳过；Seatbelt probe 通过，compose 48/48、behavior 126/126、journey 62/62、packed behavior 125/125，所有冒烟 0 skip。CI [38391229281](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38391229281) 的 Windows C# 编译通过、服务启动失败，尚未到达 token / 拒写断言。续作将 token-create 特权错误移到可回传的请求阶段，并让现有单版本 diag workflow 在相关 PR 编辑时运行；完整 CI 门禁不减少。弱化测试进一步要求实际激活成功且写返回 EPERM/EACCES，增加受限调用方向 broker 请求重建 token 的拒绝断言。
 
 单版本 [diag 38391811054](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38391811054) 明确失败为 `EnablePrivilege(SeCreateTokenPrivilege) win32=1300`，LocalSystem 并不持有候选需要的 token-create 特权。续作改用 ADR-0020 的专用虚拟服务账户和仅该 SID 的固定 LSA rights；完整 CI 旧候选轮次已取消，继续保留全矩阵验收要求。
+
+专用账户候选 `7d49dfb` 的 [diag 38393091968](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38393091968) 已通过账户 rights 配置及服务启动，实际请求在 `OpenProcessToken(client)` 返回 Win32 5。修正为仅在短暂模拟已认证 pipe caller 期间获取其 process-token QUERY/QUERY_SOURCE handle，随后恢复服务身份进行创建；不放宽 token DACL，也不接受客户端提供身份。
