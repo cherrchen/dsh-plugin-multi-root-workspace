@@ -17,6 +17,7 @@ import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { describe, expect, it } from 'vitest'
 import { MultiRootFileSystem } from '../src/fs.ts'
+import { rootDenySid } from '../src/windows-runner-contract.ts'
 import type { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
@@ -202,8 +203,36 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     writeFileSync(leaf, 'seed')
     const mounted = await mountProvider(fixture.workspace)
     try {
+      const outside = canonicalPath(fixture.outside)
+      const denyId = rootDenySid(outside)
+      // A condition matrix on ambient probe files isolates WHERE the
+      // conditional deny fails: a plain deny proves the restricted token
+      // honours deny ACEs at all; Exists variants prove whether the local
+      // attribute is visible to the evaluator; the wrong-id Contains proves
+      // whether the value/type comparison is the failing term.
+      const probeDir = join(fixture.workspace, 'cond-probes')
+      mkdirSync(probeDir)
+      const probes: Array<[name: string, ace: string, expectHint: string]> = [
+        ['a-real', `XD;;0x116;;;WD;(Exists DshMultiRootDeniedRoots && DshMultiRootDeniedRoots Contains "${denyId}")`, 'deny iff mechanism works'],
+        ['b-notexists', 'XD;;0x116;;;WD;(!(Exists DshMultiRootDeniedRoots))', 'deny iff attribute invisible'],
+        ['c-contains-miss', 'XD;;0x116;;;WD;(DshMultiRootDeniedRoots Contains "S-1-4-00000-0")', 'deny iff attribute invisible (UNKNOWN→deny)'],
+        ['d-exists', 'XD;;0x116;;;WD;(Exists DshMultiRootDeniedRoots)', 'deny iff attribute visible'],
+        ['e-plain', 'D;;0x116;;;WD', 'always deny'],
+        ['f-ambient', 'A;;FA;;;WD', 'always allow'],
+      ]
+      for (const [name, ace, hint] of probes) {
+        const file = join(probeDir, `${name}.txt`)
+        writeFileSync(file, 'seed')
+        const apply = await spawnArgv('powershell.exe', [
+          '-NoProfile', '-NonInteractive', '-Command',
+          `$f=${JSON.stringify(file)};$a=Get-Acl -LiteralPath $f;`
+          + `$a.SetSecurityDescriptorSddlForm(${JSON.stringify(`D:(${ace})(A;;FA;;;WD)`)});`
+          + `Set-Acl -LiteralPath $f -AclObject $a;'${name}:${hint}'`,
+        ])
+        if (apply.status !== 0) console.log(`DIAG probe ${name} apply failed: ${apply.stderr.trim()}`)
+      }
       const prefix = await mounted.provider.restrictedArgvPrefix(
-        { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)],
+        { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [outside],
       )
       const koffiEntry = fileURLToPath(import.meta.resolve('koffi'))
       const diag = `
@@ -214,39 +243,33 @@ const openTok=bind(a,'OpenProcessToken','int',['void*','uint32','void*']);
 const getInfo=bind(a,'GetTokenInformation','int',['void*','int','void*','uint32','void*']);
 const ntQuery=bind(n,'NtQuerySecurityAttributesToken','int32',['void*','void*','uint32','void*','uint32','void*']);
 const cur=bind(b,'GetCurrentProcess','void*',[]);
-const gle=bind(b,'GetLastError','uint32',[]);
 const out=Buffer.alloc(8);
-console.log('OPENTOK',openTok(cur(),8,out),'GLE',gle());
+console.log('OPENTOK',openTok(cur(),8,out));
 const tok=k.decode(out,'void*');
 const dw=Buffer.alloc(4);
 if(getInfo(tok,40,dw,4,Buffer.alloc(4)))console.log('RESTRICTED',dw.readUInt32LE());
 const ru=r=>Buffer.from(k.decode(k.decode(r.subarray(8),'void*'),'uint8',r.readUInt16LE(0))).toString('utf16le');
 const sz=Buffer.alloc(4);
-let st=ntQuery(tok,null,0,null,0,sz);
-console.log('NQUERY_SIZE NTSTATUS',st,sz.readUInt32LE());
+ntQuery(tok,null,0,null,0,sz);
 const buf=Buffer.alloc(Math.max(sz.readUInt32LE(),16));
-st=ntQuery(tok,null,0,buf,buf.length,sz);
+const st=ntQuery(tok,null,0,buf,buf.length,sz);
 console.log('NQUERY NTSTATUS',st);
 if(st===0){
   const count=buf.readUInt32LE(4);
   console.log('ATTRCOUNT',count);
   const arr=Buffer.from(k.decode(k.decode(buf.subarray(8),'void*'),'uint8',count*40));
   for(let i=0;i<count;i++){
-    const at=arr.subarray(i*40),vc=at.readUInt32LE(24);
-    const vals=Buffer.from(k.decode(k.decode(at.subarray(32),'void*'),'uint8',vc*16));
-    const vs=[];for(let j=0;j<vc;j++)vs.push(ru(vals.subarray(j*16)));
-    console.log('ATTR',JSON.stringify(ru(at)),'type',at.readUInt16LE(16),'flags',at.readUInt32LE(20).toString(16),'values',JSON.stringify(vs));
+    const at=arr.subarray(i*40),vc=at.readUInt32LE(24),vt=at.readUInt16LE(16);
+    let vs=[];
+    if(vt===3){const vals=Buffer.from(k.decode(k.decode(at.subarray(32),'void*'),'uint8',vc*16));for(let j=0;j<vc;j++)vs.push(ru(vals.subarray(j*16)));}
+    console.log('ATTR',JSON.stringify(ru(at)),'type',vt,'flags',at.readUInt32LE(20).toString(16),'count',vc,'values',JSON.stringify(vs));
   }
 }
-const cl=Buffer.alloc(4);
-if(!getInfo(tok,33,null,0,cl)){
-  const cb=Buffer.alloc(Math.max(cl.readUInt32LE(),16));
-  if(getInfo(tok,33,cb,cb.length,cl)){
-    const cc=cb.readUInt32LE(4),ca=Buffer.from(k.decode(k.decode(cb.subarray(8),'void*'),'uint8',cc*32));
-    for(let i=0;i<cc;i++){const c=ca.subarray(i*32);console.log('CLAIM',JSON.stringify(k.decode(k.decode(c.subarray(0),'void*'),'char16_t',-1)),'type',c.readUInt16LE(8),'flags',c.readUInt32LE(12).toString(16));}
-  }
+try{fs.writeFileSync(${JSON.stringify(leaf)},'x');console.log('WRITE-denied-root allowed')}catch(e){console.log('WRITE-denied-root denied',e&&e.code||e)}
+for(const name of ${JSON.stringify(probes.map(p => p[0]))}){
+  const p=${JSON.stringify(probeDir)}+'\\\\'+name+'.txt';
+  try{fs.writeFileSync(p,'x');console.log('PROBE',name,'allowed')}catch(e){console.log('PROBE',name,'denied',e&&e.code||e)}
 }
-try{fs.writeFileSync(${JSON.stringify(leaf)},'x');console.log('WRITE allowed')}catch(e){console.log('WRITE denied',e&&e.code||e)}
 `
       const child = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', diag])
       console.log(`DIAG child status=${child.status}\n${child.stdout}\nSTDERR:${child.stderr}`)
@@ -255,7 +278,7 @@ try{fs.writeFileSync(${JSON.stringify(leaf)},'x');console.log('WRITE allowed')}c
         `[Console]::OutputEncoding=[Text.Encoding]::UTF8;`
         + `(Get-Acl -LiteralPath ${JSON.stringify(fixture.outside)}).GetSecurityDescriptorSddlForm('All');`
         + `(Get-Acl -LiteralPath ${JSON.stringify(leaf)}).GetSecurityDescriptorSddlForm('All');`
-        + `(Get-Acl -LiteralPath ${JSON.stringify(dirname(fixture.outside))}).GetSecurityDescriptorSddlForm('Dacl')`,
+        + `(Get-Acl -LiteralPath ${JSON.stringify(dirname(fixture.outside))}).GetSecurityDescriptorSddlForm('All')`,
       ])
       console.log(`DIAG sddl status=${sddl.status}\n${sddl.stdout}\nSTDERR:${sddl.stderr}`)
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
