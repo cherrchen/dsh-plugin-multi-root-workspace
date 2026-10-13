@@ -60,14 +60,16 @@ public sealed class RootDenyBroker : ServiceBase {
     }
     void Handle(NamedPipeServerStream pipe) {
         try {
+            // A pipe impersonation context exists only after its first read.
+            // Reading a bounded request performs no privileged operation.
+            var read = Task.Run(() => ReadRequest(pipe));
+            if (!read.Wait(5000)) throw new System.TimeoutException("Request timeout");
             // Authenticate the pipe token, not a SID or PID supplied in data.
             string caller = null;
             pipe.RunAsClient(() => { caller = WindowsIdentity.GetCurrent().User.Value; });
             if (caller != sid) throw new UnauthorizedAccessException("Caller SID mismatch");
             uint pid;
             Check(GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out pid), "GetNamedPipeClientProcessId");
-            var read = Task.Run(() => ReadRequest(pipe));
-            if (!read.Wait(5000)) throw new System.TimeoutException("Request timeout");
             string[] fields = read.Result.Split('|');
             if (fields.Length != 3 || fields[0] != "1" || !Regex.IsMatch(fields[1], @"^[0-9]{1,20}$"))
                 throw new ArgumentException("Invalid request");

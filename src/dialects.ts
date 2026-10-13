@@ -39,6 +39,12 @@ import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { isCanonicallyUnder } from './roots.ts'
 import { DialectUnrecognizedError } from './windows-runner-contract.ts'
 
+/** Profiles carry their target platform's spellings even in cross-OS tests. */
+function profileContains(candidate: string, root: string): boolean {
+  if (!root.startsWith('/')) return isCanonicallyUnder(candidate, root)
+  return candidate === root || candidate.startsWith(root.endsWith('/') ? root : root + '/')
+}
+
 /** The kernel runner dialects a confined argv can speak. */
 export type RunnerDialect = 'seatbelt' | 'bwrap' | 'landlock' | 'windows-acl'
 
@@ -372,7 +378,7 @@ export function denyProfileArgs(
       // Deny only what an allow-subpath grant could reach — the mode already
       // denies the rest, and an all-restricted scope stays a passthrough.
       const granted = [...profile.matchAll(SBPL_SUBPATH_TOKEN)].map(token => sbplValue(token[1] as string))
-      const covered = deniedRoots.filter(root => granted.some(target => isCanonicallyUnder(root, target)))
+      const covered = deniedRoots.filter(root => granted.some(target => profileContains(root, target)))
       if (covered.length === 0) return [...profileArgs]
       const denied = covered.map(root => `(subpath ${sbplString(root)})`).join(' ')
       return [...profileArgs.slice(0, -1), `${profile} (deny file-write* ${denied})`]
@@ -380,13 +386,13 @@ export function denyProfileArgs(
     case 'bwrap': {
       const writable = bwrapWritableMounts(profileArgs)
       const binds = deniedRoots
-        .filter(root => writable.some(target => isCanonicallyUnder(root, target)))
+        .filter(root => writable.some(target => profileContains(root, target)))
         .flatMap(root => ['--ro-bind', root, root])
       return [...profileArgs, ...binds]
     }
     case 'landlock': {
       const granted = landlockWritablePaths(profileArgs)
-      const covered = deniedRoots.filter(root => granted.some(target => isCanonicallyUnder(root, target)))
+      const covered = deniedRoots.filter(root => granted.some(target => profileContains(root, target)))
       if (covered.length > 0) {
         throw new DialectUnrecognizedError(
           `landlock cannot deny [${covered.join(', ')}] inside a writable grant — its launcher only supports allowlist union`,

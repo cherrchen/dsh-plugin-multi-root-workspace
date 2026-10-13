@@ -322,11 +322,21 @@ describe('multi-root extension', () => {
         'read-write': true,
       }
       for (const [access, dir] of Object.entries(dirs)) {
+        const editPath = join(dir, 'edit-cell.txt')
+        await writeFile(editPath, 'before')
         const write = ours.fs.writeText(await target(ours, join(dir, 'cell.txt')), 'x')
         if (writable[access]) {
           await write
         } else {
           await expect(write, `${access} root under ${mode}`).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+        }
+        const edit = ours.fs.editText(await target(ours, editPath), { oldString: 'before', newString: 'after', replaceAll: false })
+        if (writable[access]) {
+          await edit
+          expect(await readFile(editPath, 'utf8')).toBe('after')
+        } else {
+          await expect(edit, `edit ${access} root under ${mode}`).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+          expect(await readFile(editPath, 'utf8')).toBe('before')
         }
       }
       // The primary root and unregistered paths keep ordinary mode semantics.

@@ -149,9 +149,8 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
    * this probes `confine` under `read-only` for the runner's argument skeleton
    * and rewrites the file-effect part per dialect. Windows selects the
    * standalone ambient deny-token runner. Landlock cannot express
-   * "everything except" (its model only grants), so on that host the call fails closed with `SandboxUnavailableError` rather than
-   * spawning an unconfined process — an explicit `read-only` root must never
-   * silently become writable under Full-access.
+   * "everything except", so this combination selects bubblewrap; unusable
+   * runners fail without spawning an unconfined command.
    *
    * The return preserves the installed `confine` shape: a synchronous result
    * on a synchronous release, a promise on an asynchronous one.

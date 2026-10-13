@@ -76,6 +76,7 @@ async function mountStack(
   dialect: Dialect,
   mode: SandboxPolicy['mode'] | 'danger-full-access',
   sessions: ReadonlyMap<string, Session> = new Map(),
+  legacyShell = false,
 ): Promise<Stack> {
   const ctx = new Context()
   fibers.push(
@@ -105,7 +106,7 @@ async function mountStack(
           return { pid: 2 }
         },
       } as never)
-      fiber.provide('shell', { execute } as never)
+      fiber.provide('shell', legacyShell ? { run: execute, start: execute } as never : { execute } as never)
       fiber.provide('ptcRuntime', { run: execute } as never)
       fiber.provide('sessions', { get: (id: string) => sessions.get(id) } as never)
     },
@@ -182,6 +183,14 @@ describe('the restricted argv prefix', () => {
 })
 
 describe('shell and PTC execute entries', () => {
+  it('confines the legacy foreground run entry which bypasses execute and start', async () => {
+    const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access', new Map(), true)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    const shell = ctx.get('shell') as { run(spec: unknown): Promise<unknown> }
+    await shell.run({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
+    expect(captured.spawned[0]?.argv).toContain('-p')
+    expect(captured.spawned[0]?.argv.join(' ')).toContain('(deny file-write*')
+  })
   it('confines an ambient spawn when a read-only root exists under Full-access', async () => {
     const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access')
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])

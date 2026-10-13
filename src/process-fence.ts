@@ -181,6 +181,7 @@ export function apply(ctx: Context): void {
     const shell = scope.get('shell') as PolicyEntrypoint | undefined
     if (shell === undefined) return
     deniedEntry(scope, shell, 'execute')
+    deniedEntry(scope, shell, 'run')
     deniedEntry(scope, shell, 'start')
   })
 

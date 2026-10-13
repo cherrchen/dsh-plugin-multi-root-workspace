@@ -85,6 +85,29 @@ function writableInside(world: World): readonly string[] {
 }
 
 describe('per-tool write caps', () => {
+  it('caps every root policy in all three modes, including Full-access inheritance and fixed read-write', async () => {
+    const world = await mountWorld({ bash: 'read-only' })
+    for (const access of ['inherit', 'read-only', 'read-write'] as const) {
+      world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{
+        id: 'matrix', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access,
+      }])
+      for (const mode of ['read-only', 'workspace-write', 'danger-full-access'] as const) {
+        const policy = { mode, workspaceRoot: fixture.workspace }
+        await dispatch(world.ctx, 'bash', async () => {
+          expect(world.ctx.multiRootScope.resolve(policy).deniedRoots).toEqual([canonicalPath(fixture.outside)])
+          await expect(world.ctx.fs.writeText(await world.ctx.fs.resolve(join(fixture.outside, 'capped-matrix.txt')),
+            'bad', undefined, undefined, policy)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+        })
+        await dispatch(world.ctx, 'write', async () => {
+          const write = world.ctx.fs.writeText(await world.ctx.fs.resolve(join(fixture.outside, 'uncapped-matrix.txt')),
+            'ok', undefined, undefined, policy)
+          if (access === 'read-only' || (access === 'inherit' && mode === 'read-only')) {
+            await expect(write).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+          } else await write
+        })
+      }
+    }
+  })
   it('refuses additional-root writes inside a capped dispatch — fence and kernel agree', async (context) => {
     const world = await mountWorld({ bash: 'read-only' })
     const marker = join(fixture.outside, 'capped.txt')
