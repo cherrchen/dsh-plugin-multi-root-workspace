@@ -45,6 +45,7 @@ const REQUIRED = [
   'package/lib/windows-runner.js',
   'package/scripts/windows-broker/install.ps1',
   'package/scripts/windows-broker/service.cs',
+  'package/scripts/windows-broker/rights.cs',
 ]
 
 /**

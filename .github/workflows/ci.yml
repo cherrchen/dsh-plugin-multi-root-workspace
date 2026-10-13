@@ -96,7 +96,7 @@ jobs:
         run: pnpm kernel:probe
 
       - if: runner.os == 'Windows'
-        name: Install the B9 token-attribute broker
+        name: Install the B9 deny-token broker
         shell: pwsh
         run: ./scripts/windows-broker/install.ps1
 

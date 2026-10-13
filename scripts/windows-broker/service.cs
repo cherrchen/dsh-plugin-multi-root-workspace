@@ -1,4 +1,4 @@
-// A narrow SYSTEM service: mirror the authenticated process identity and add
+// A narrow privileged service: mirror the authenticated process identity and add
 // only deny-only normal groups. It never opens files or launches commands.
 using System;
 using System.ComponentModel;
@@ -31,6 +31,8 @@ public sealed class RootDenyBroker : ServiceBase {
     }
     protected override void OnStart(string[] args) {
         EnablePrivilege("SeTcbPrivilege");
+        EnablePrivilege("SeDebugPrivilege");
+        EnablePrivilege("SeImpersonatePrivilege");
         Task.Run((Action)Serve);
     }
     protected override void OnStop() {
@@ -40,6 +42,7 @@ public sealed class RootDenyBroker : ServiceBase {
     void Serve() {
         var security = new PipeSecurity();
         security.SetAccessRuleProtection(true, false);
+        security.AddAccessRule(new PipeAccessRule(WindowsIdentity.GetCurrent().User, PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier("S-1-5-18"), PipeAccessRights.FullControl, AccessControlType.Allow));
         // The runner reads the kernel attribute back; a spoofed ACK cannot authorize a launch.
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(sid), PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize, AccessControlType.Allow));

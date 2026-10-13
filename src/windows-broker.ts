@@ -31,7 +31,7 @@ export async function requestDenyToken(userSid: string, tokenHandle: bigint, den
     }
     socket.once('connect', () => { socket.write(`2|${tokenHandle}|${deniedIds.join(',')}\n`) })
     socket.once('error', error => finish(new Error(
-      `Windows read-only roots require the installed SYSTEM broker (${brokerPipeName(userSid)}): ${error.message}`,
+      `Windows read-only roots require the installed privileged broker (${brokerPipeName(userSid)}): ${error.message}`,
     )))
     socket.once('end', () => { if (!response.includes('\n')) finish(new Error('deny-token broker disconnected')) })
     socket.on('data', bytes => {

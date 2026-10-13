@@ -71,4 +71,4 @@ Windows Full-access 的局部拒写独立 runner 仍在开发，候选通过管�
 - 附加根自身的 `AGENTS.md` / `CLAUDE.md` 也会进入模型上下文：根目录顶层的在会话第一步之前注入，子目录的在本会话成功触碰过该目录之后注入（上游的原生发现从会话 cwd 向上走，永远到不了附加根）。
 - 面板侧：侧栏底部 **Folders** 动作打开对话框；Files 页签的根选择器可以浏览附加根（选中时树区由原生的复刻视图接管，切回主根恢复原生）。面板文案中英双语跟随界面语言。
 
-B9 Windows Full-access 局部只读需要管理员安装随包提供的 SYSTEM broker（[安装与安全边界](../decisions/ADR-0019-windows-token-attributes-and-conditional-acls.md#修订system-broker-的实现与安装2026-10-13)）；插件不会自动提权。Linux 同组合需要可执行的 bubblewrap，即使普通受限模式选择的是 Landlock。依赖缺失会报告 runner 不可用，不能作为允许裸启动的理由。
+B9 Windows Full-access 局部只读需要管理员安装随包提供的 特权 broker（[安装与安全边界](../decisions/ADR-0020-windows-normal-deny-groups.md#安装与卸载)）；插件不会自动提权。Linux 同组合需要可执行的 bubblewrap，即使普通受限模式选择的是 Landlock。依赖缺失会报告 runner 不可用，不能作为允许裸启动的理由。

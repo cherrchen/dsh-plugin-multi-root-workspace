@@ -17,14 +17,14 @@ Proposed（2026-10-13；候选已实现，Windows 原生验收状态只见路线
 ## Decision（候选）
 
 - 保留既有安装入口、用户 SID 隔离、scope、公开进程接缝、根 SID 派生、逐对象 ACL writer、owner / parent guard、standing ACL 与 partial 边界。
-- SYSTEM broker 启用 SeCreateTokenPrivilege 与 SeTcbPrivilege。协议 v2 仅接受源 process-token handle 与最多 64 个固定格式 root deny SID。源身份来自内核管道 PID，管道身份、process token SID 和安装 SID 必须一致；NtCompareTokens 验证传入 handle 等同该 process token。不接受任意身份、命令、路径、权限或属性名。
+- broker 使用独立虚拟服务账户 `NT SERVICE\DshMultiRootBroker-<installation-hash>`。LocalSystem 在实际 CI 上缺少 SeCreateTokenPrivilege（启用返回 Win32 1300），所以管理员安装器通过 LsaAddAccountRights 只向该服务 SID 授予 SeServiceLogonRight、SeCreateTokenPrivilege、SeTcbPrivilege、SeDebugPrivilege 和 SeImpersonatePrivilege；分别用于服务登录、token 创建 / session 镜像、打开已认证 caller 进程及管道认证。服务启动启用所需特权，不修改宿主用户、LocalSystem 或 ALL SERVICES 的权限，不依赖重启系统或其他系统进程。协议 v2 仅接受源 process-token handle 与最多 64 个固定格式 root deny SID。源身份来自内核管道 PID，管道身份、process token SID 和安装 SID 必须一致；NtCompareTokens 验证传入 handle 等同该 process token。不接受任意身份、命令、路径、权限或属性名。
 - broker 拒绝已 restricted、AppContainer 或携带 user/device claims 与 device groups 的调用方 process token，避免重新铸造时丢掉现有限制。NtCreateTokenEx 镜像源 user、普通 groups（含 logon SID / integrity）、privileges、owner、primary group、default DACL、authentication ID、expiration、token source、mandatory policy 和 session ID；只增加每根的 `MANDATORY | USE_FOR_DENY_ONLY` 普通组，不增加 enabled / owner / allow 身份。
 - broker 返回同一调用方进程内的有限权限 handle；读写 socket 失败则尽力关闭已回传 handle。runner 再用 CreateRestrictedToken 删除特权并镜像 ambient restricting identities，以公开 CreateProcessAsUser 接缝启动。
 - runner 在 ACL 编辑 / spawn 前读回真正派生 token 的 TokenGroups，逐根验证普通组的 mandatory / deny-only 标志及禁用 enabled 标志。任何安装、认证、创建、回读失败都禁止裸启动。
 - 每根使用 **普通 deny ACE**，trustee 为该 root deny SID。去掉 restricting list 或把全部普通 groups disable 后，该 trustee 仍在普通 deny-only groups 中匹配。宿主从未携带这些 groups，因此保留同一树的写与 ACL 管理权限。
 - token 对象与 TokenDefaultDacl 拒绝 group / privilege / default 调整以及 descriptor 编辑；query、duplicate 与实际 impersonation 保留。既有 owner / parent / protected-descendant、ConPTY / fd 7 合同不变。
 
-本方案仍需 Windows 原生结果验证；结构检查和 macOS 跳过不能确认 NtCreateTokenEx、CreateProcessAsUser 或真实拒写成立。不修改系统账户权限策略，不从其他系统进程窃取 token；服务自身不能启用所需特权时 fail closed。
+本方案仍需 Windows 原生结果验证；结构检查和 macOS 跳过不能确认 NtCreateTokenEx、CreateProcessAsUser 或真实拒写成立。只修改该专用虚拟服务账户的固定权限集合，记录安装新增的 rights，升级 / 卸载及启动失败时仅撤销这次安装新增项，保留预存 account policy；不从其他系统进程获取 token；服务自身不能启用所需特权时 fail closed。
 
 ## Validation
 
@@ -42,3 +42,7 @@ Proposed（2026-10-13；候选已实现，Windows 原生验收状态只见路线
 - [B9 专项计划](../plans/active/2026-10-13-b9-root-access-and-sandbox-modes.md)
 - [Microsoft：CreateRestrictedToken](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)
 - [System Informer：NtCreateTokenEx ABI](https://github.com/winsiderss/phnt/blob/master/ntseapi.h)
+
+## 安装与卸载
+
+安装入口保持 `scripts/windows-broker/install.ps1 -UserSid <插件宿主用户SID>`，必须使用管理员 PowerShell；省略 UserSid 时使用当前用户，卸载加 `-Uninstall`。每用户稳定命名的服务账户与 pipe，安装目录和 executable 由管理员持有，宿主用户与虚拟服务账户仅获读取/执行。安装器的 `rights.cs` 随 tarball 提供，并作为打包必须项检查；broker 不提供修改 LSA policy 的请求。旧 LocalSystem 安装由同一入口停止并替换，协议 v1 客户端被新版拒绝，不能静默恢复裸进程。

@@ -1,9 +1,9 @@
 name: diag
 
-# Temporary single-lane diagnostic for the B9 Windows conditional-ACE failure.
+# Single-version diagnostic for the B9 Windows deny-token preconditions.
 # Runs on relevant PR edits as well as dispatch, so a diagnostic workflow
-# need not first land on the default branch;
-# it never merges to main.
+# need not first land on the default branch. The full CI matrix remains the
+# acceptance gate.
 on:
   workflow_dispatch:
   pull_request:
