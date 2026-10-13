@@ -74,9 +74,11 @@ public sealed class RootDenyBroker : ServiceBase {
             uint pid;
             Check(GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out pid), "GetNamedPipeClientProcessId");
             string[] fields = read.Result.Split('|');
-            if (fields.Length != 3 || fields[0] != "2" || !Regex.IsMatch(fields[1], @"^[0-9]{1,20}$"))
+            bool assigning = fields.Length == 4 && fields[0] == "3";
+            if ((!assigning && (fields.Length != 3 || fields[0] != "2")) || !Regex.IsMatch(fields[1], @"^[0-9]{1,20}$")
+                || (assigning && !Regex.IsMatch(fields[2], @"^[0-9]{1,20}$")))
                 throw new ArgumentException("Invalid request");
-            string[] roots = fields[2].Split(',');
+            string[] roots = fields[fields.Length - 1].Split(',');
             if (roots.Length < 1 || roots.Length > 64) throw new ArgumentException("Invalid root count");
             foreach (var root in roots)
                 if (!Regex.IsMatch(root, @"^S-1-4-[0-9]{1,10}-[0-9]{1,10}-[0-9]{1,10}-[0-9]{1,10}-3$"))
@@ -89,8 +91,12 @@ public sealed class RootDenyBroker : ServiceBase {
                 // only QUERY/QUERY_SOURCE while impersonating the authenticated
                 // pipe caller, then revert before any privileged minting.
                 pipe.RunAsClient(() => { Check(OpenProcessToken(process, 0x18, out processToken), "OpenProcessToken(client)"); });
-                if (TokenSid(processToken) != sid || IsTokenRestricted(processToken))
+                if (TokenSid(processToken) != sid || RestrictedSource(processToken))
                     throw new UnauthorizedAccessException("Caller process must be an unrestricted installation identity");
+                if (assigning) {
+                    AssignToChild(process, processToken, pid, fields[1], fields[2], roots, pipe);
+                    return;
+                }
                 Check(DuplicateHandle(process, new IntPtr(unchecked((long)UInt64.Parse(fields[1]))), GetCurrentProcess(), out token,
                     8, false, 0), "DuplicateHandle(token)");
                 bool equal;
@@ -116,6 +122,43 @@ public sealed class RootDenyBroker : ServiceBase {
             }
         } catch (Exception e) { try { Reply(pipe, "ERROR:" + e.GetType().Name + ":" + e.Message.Replace('\n', ' ').Replace('\r', ' ') + "\n"); } catch {} }
     }
+    void AssignToChild(IntPtr caller, IntPtr source, uint pid, string processField, string threadField, string[] roots, NamedPipeServerStream pipe) {
+        IntPtr child = IntPtr.Zero, thread = IntPtr.Zero, original = IntPtr.Zero, token = IntPtr.Zero;
+        try {
+            Check(DuplicateHandle(caller, new IntPtr(unchecked((long)UInt64.Parse(processField))), GetCurrentProcess(), out child,
+                0x600, false, 0), "DuplicateHandle(child)"); // SET_INFORMATION | QUERY_INFORMATION
+            Check(DuplicateHandle(caller, new IntPtr(unchecked((long)UInt64.Parse(threadField))), GetCurrentProcess(), out thread,
+                0x2C0, false, 0), "DuplicateHandle(primary thread)"); // QUERY | SET_TOKEN | DIRECT_IMPERSONATION
+            ProcessBasicInformation info; int length;
+            NtCheck(NtQueryInformationProcess(child, 0, out info, Marshal.SizeOf(typeof(ProcessBasicInformation)), out length), "NtQueryInformationProcess(child)");
+            if (info.ParentId.ToUInt64() != pid || info.ProcessId.ToUInt64() == pid
+                || GetProcessIdOfThread(thread) != info.ProcessId.ToUInt64())
+                throw new UnauthorizedAccessException("Not a direct caller-owned child thread");
+            pipe.RunAsClient(() => { Check(OpenProcessToken(child, 8, out original), "OpenProcessToken(child)"); });
+            bool equal; NtCheck(NtCompareTokens(source, original, out equal), "NtCompareTokens(child)");
+            if (!equal) throw new UnauthorizedAccessException("Child identity does not match its caller");
+            token = MintDenyToken(source, roots);
+            ProtectToken(token, TokenSid(source));
+            EnablePrivilege("SeAssignPrimaryTokenPrivilege");
+            var access = new ProcessAccessToken { Token = token, Thread = thread };
+            // The kernel refuses assignment after the initial thread starts.
+            // No argv, executable, environment or path enters this operation.
+            NtCheck(NtSetInformationProcess(child, 9, ref access, Marshal.SizeOf(typeof(ProcessAccessToken))), "NtSetInformationProcess(access token)");
+            Reply(pipe, "OK\n");
+        } finally {
+            foreach (var h in new[] { token, original, thread, child }) if (h != IntPtr.Zero) CloseHandle(h);
+        }
+    }
+    static void ProtectToken(IntPtr token, string user) {
+        var descriptor = new RawSecurityDescriptor("D:(D;;0xc00e0;;;" + user + ")(A;;GA;;;" + user + ")(A;;RC;;;OW)");
+        var bytes = new byte[descriptor.DiscretionaryAcl.BinaryLength]; descriptor.DiscretionaryAcl.GetBinaryForm(bytes, 0);
+        IntPtr acl = Marshal.AllocHGlobal(bytes.Length);
+        try {
+            Marshal.Copy(bytes, 0, acl, bytes.Length);
+            uint code = SetSecurityInfo(token, 6, 4, IntPtr.Zero, IntPtr.Zero, acl, IntPtr.Zero);
+            if (code != 0) throw new Win32Exception((int)code, "SetSecurityInfo(token)");
+        } finally { Marshal.FreeHGlobal(acl); }
+    }
     static string ReadRequest(Stream stream) {
         var data = new MemoryStream();
         for (int n = 0; n < 8192; n++) {
@@ -135,6 +178,11 @@ public sealed class RootDenyBroker : ServiceBase {
         IntPtr data = Marshal.AllocHGlobal(length);
         try { Check(GetTokenInformation(token, 1, data, length, out length), "GetTokenInformation(user)"); return new SecurityIdentifier(Marshal.ReadIntPtr(data)).Value; }
         finally { Marshal.FreeHGlobal(data); }
+    }
+    static bool RestrictedSource(IntPtr token) {
+        if (IsTokenRestricted(token)) return true;
+        var data = Query(token, 21);
+        try { return Marshal.ReadInt32(data) != 0; } finally { Marshal.FreeHGlobal(data); }
     }
     static IntPtr Query(IntPtr token, int kind) {
         int length;
@@ -230,6 +278,12 @@ public sealed class RootDenyBroker : ServiceBase {
             int error = Marshal.GetLastWin32Error(); if (error != 0) throw new Win32Exception(error, "EnablePrivilege(" + name + ") win32=" + error);
         } finally { CloseHandle(token); }
     }
+    [StructLayout(LayoutKind.Sequential)] struct ProcessAccessToken { public IntPtr Token, Thread; }
+    [StructLayout(LayoutKind.Sequential)] struct ProcessBasicInformation { public int ExitStatus; public IntPtr Peb; public UIntPtr Affinity; public int Priority; public UIntPtr ProcessId, ParentId; }
+    [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr process, int kind, out ProcessBasicInformation info, int size, out int length);
+    [DllImport("ntdll.dll")] static extern int NtSetInformationProcess(IntPtr process, int kind, ref ProcessAccessToken info, int size);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern uint GetProcessIdOfThread(IntPtr thread);
+    [DllImport("advapi32.dll")] static extern uint SetSecurityInfo(IntPtr handle, int kind, uint info, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
     [StructLayout(LayoutKind.Sequential)] struct SidAttributes { public IntPtr Sid; public uint Attributes; }
     [StructLayout(LayoutKind.Sequential)] struct ObjectAttributes { public int Length; public IntPtr RootDirectory, ObjectName; public uint Attributes; public IntPtr SecurityDescriptor, SecurityQualityOfService; }
     [StructLayout(LayoutKind.Sequential)] struct SecurityQualityOfService { public int Length, ImpersonationLevel; public byte ContextTrackingMode, EffectiveOnly; }

@@ -4,7 +4,7 @@ import type { Socket } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('node:net', () => ({ createConnection: vi.fn() }))
-import { brokerPipeName, requestDenyToken } from '../src/windows-broker.ts'
+import { assignDenyToken, brokerPipeName, requestDenyToken } from '../src/windows-broker.ts'
 import { rootDenySid } from '../src/windows-runner-contract.ts'
 
 describe('Windows broker request boundary', () => {
@@ -65,5 +65,37 @@ describe('Windows broker response boundary', () => {
     await vi.advanceTimersByTimeAsync(10_000)
     await check
     expect(second.socket.destroy).toHaveBeenCalledOnce()
+  })
+})
+
+
+describe('Windows suspended assignment RPC', () => {
+  const user = 'S-1-5-21-100-200-300-1001', deny = rootDenySid('C:\\readonly')
+  const fixture = (reply: string) => {
+    let pending = Buffer.from(reply)
+    const io = {
+      open: vi.fn(() => 42), write: vi.fn(), available: vi.fn(() => pending.length),
+      read: vi.fn(() => { const bytes = pending; pending = Buffer.alloc(0); return bytes }),
+      pause: vi.fn(), close: vi.fn(),
+    }
+    return io
+  }
+  it('sends only process/thread handles and deny identities, then closes the authenticated channel', () => {
+    const io = fixture('OK\n')
+    assignDenyToken(user, 101n, 102n, [deny], io)
+    expect(io.write).toHaveBeenCalledWith(42, Buffer.from(`3|101|102|${deny}\n`))
+    expect(io.close).toHaveBeenCalledWith(42)
+  })
+  it.each(['ERROR:foreign child\n', 'OK|untrusted-handle\n', 'x'.repeat(1025)])('refuses an untrusted assignment reply', reply => {
+    const io = fixture(reply)
+    expect(() => assignDenyToken(user, 101n, 102n, [deny], io)).toThrow(/assignment/)
+    expect(io.close).toHaveBeenCalledWith(42)
+  })
+  it('bounds a silent assignment peer without depending on an event-loop timer', () => {
+    const io = fixture('')
+    const now = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(10_001)
+    try { expect(() => assignDenyToken(user, 101n, 102n, [deny], io)).toThrow('timed out') }
+    finally { now.mockRestore() }
+    expect(io.close).toHaveBeenCalledWith(42)
   })
 })

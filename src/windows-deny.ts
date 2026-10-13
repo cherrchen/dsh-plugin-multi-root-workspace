@@ -1,6 +1,6 @@
 /** Ambient ACL writes minus registered read-only roots (Windows B9).
  *
- * The restricting list mirrors the caller's enabled identities. An inherited
+ * The restricting list mirrors the caller's enabled identities. Inherited
  * deny-only NORMAL groups identify denied roots to ordinary deny ACEs in
  * the NORMAL access check, so narrowing the SID list cannot discard the deny.
  * Privileges that could bypass the DACL are removed; integrity is not lowered.
@@ -20,7 +20,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { loadWindowsNative, readWindowsWideString, spawnWindowsDeniedChild } from './compat/windows-native.ts'
 import type { NativeApi, NativePointer } from './compat/windows-native.ts'
 import { canonicalPath, isWindowsNetworkOrDevicePath, rootDenySid } from './windows-runner-contract.ts'
-import { requestDenyToken } from './windows-broker.ts'
+import { assignDenyToken, requestDenyToken } from './windows-broker.ts'
 
 const WRITE_DAC = 0x40000
 const WRITE_OWNER = 0x80000
@@ -67,6 +67,10 @@ export async function runWindowsDenied(
       getAce: [advapi32, 'int', ['void*', 'uint32', 'void*']],
       addAce: [advapi32, 'int', ['void*', 'uint32', 'uint32', 'void*', 'uint32']],
       getTempPathW: [kernel32, 'uint32', ['uint32', 'void*']],
+      writeFile: [kernel32, 'int', ['void*', 'void*', 'uint32', 'void*', 'void*']],
+      readFile: [kernel32, 'int', ['void*', 'void*', 'uint32', 'void*', 'void*']],
+      peekNamedPipe: [kernel32, 'int', ['void*', 'void*', 'uint32', 'void*', 'void*', 'void*']],
+      sleep: [kernel32, 'void', ['uint32']],
       lockFileEx: [kernel32, 'int', ['void*', 'uint32', 'uint32', 'uint32', 'uint32', 'void*']],
       unlockFileEx: [kernel32, 'int', ['void*', 'uint32', 'uint32', 'uint32', 'void*']],
     }
@@ -136,8 +140,10 @@ export async function runWindowsDenied(
     check(api.convertSidToStringSidW!(userSid, sidOut), 'ConvertSidToStringSidW')
     const text = pointer(sidOut)
     let minted: NativePointer
+    let brokerUser: string
     try {
-      const handle = await requestDenyToken(readWindowsWideString(native.koffi, text), native.koffi.address(currentToken), denies)
+      brokerUser = readWindowsWideString(native.koffi, text)
+      const handle = await requestDenyToken(brokerUser, native.koffi.address(currentToken), denies)
       const bytes = Buffer.alloc(8)
       bytes.writeBigUInt64LE(handle)
       minted = pointer(bytes)
@@ -145,25 +151,28 @@ export async function runWindowsDenied(
     const restrictedOut = Buffer.alloc(8)
     try {
       // Preserve ambient identities, remove bypass privileges, and mark this as
-      // a restricted token suitable for CreateProcessAsUser from this caller.
+      // a restricted token whose normal deny groups can be checked before ACL edits.
       check(api.createRestrictedToken!(minted, 1, 0, null, 0, null, identities.length, list, restrictedOut), 'CreateRestrictedToken')
     } finally { api.closeHandle!(minted) }
     restrictedToken = pointer(restrictedOut)
     // Verify the kernel NORMAL group list, never trust a broker ACK alone.
-    const denyGroups = info(restrictedToken, 2)
-    const denyCount = denyGroups.readUInt32LE()
-    if (denyCount > (denyGroups.length - 8) / 16) throw new Error('truncated deny TokenGroups')
-    const verified = new Set<string>()
-    for (let i = 0; i < denyCount; i++) {
-      const offset = 8 + i * 16
-      const flags = denyGroups.readUInt32LE(offset + 8)
-      if ((flags & 0x10) === 0 || (flags & 6) !== 0) continue
-      const valueOut = Buffer.alloc(8)
-      check(api.convertSidToStringSidW!(pointer(denyGroups, offset), valueOut), 'ConvertSidToStringSidW(group)')
-      const value = pointer(valueOut)
-      try { verified.add(readWindowsWideString(native.koffi, value)) } finally { api.localFree!(value) }
+    const verifyDenyGroups = (token: NativePointer): void => {
+      const denyGroups = info(token, 2)
+      const denyCount = denyGroups.readUInt32LE()
+      if (denyCount > (denyGroups.length - 8) / 16) throw new Error('truncated deny TokenGroups')
+      const verified = new Set<string>()
+      for (let i = 0; i < denyCount; i++) {
+        const offset = 8 + i * 16
+        const flags = denyGroups.readUInt32LE(offset + 8)
+        if ((flags & 0x10) === 0 || (flags & 6) !== 0) continue
+        const valueOut = Buffer.alloc(8)
+        check(api.convertSidToStringSidW!(pointer(denyGroups, offset), valueOut), 'ConvertSidToStringSidW(group)')
+        const value = pointer(valueOut)
+        try { verified.add(readWindowsWideString(native.koffi, value)) } finally { api.localFree!(value) }
+      }
+      if (denies.some(id => !verified.has(id))) throw new Error('broker did not install the deny-only normal groups')
     }
-    if (denies.some(id => !verified.has(id))) throw new Error('broker did not install the deny-only normal groups')
+    verifyDenyGroups(restrictedToken)
 
     const entry = (trustee: NativePointer, mode: number, mask: number, inheritance: number): Buffer => {
       const data = Buffer.alloc(48)
@@ -301,6 +310,41 @@ export async function runWindowsDenied(
     const child = spawnWindowsDeniedChild(native, api, {
       token: restrictedToken, command: argv[0]!, args: argv.slice(1), cwd: process.cwd(),
       ...(control ? { controlFileDescriptor: 7 as const } : {}),
+    }, {
+      sourceToken: currentToken,
+      assign(child, thread) {
+        assignDenyToken(brokerUser, native.koffi.address(child), native.koffi.address(thread), denies, {
+          open(pipe) {
+            const handle = api.createFileW!(pipe, 0xc0000000, 0, null, 3, 0, null)
+            if (handle === null || BigInt(handle) === -1n || BigInt(handle) === 0xffffffffffffffffn) {
+              throw new Error(`Open broker assignment pipe failed (Win32 ${api.getLastError!()})`)
+            }
+            return handle
+          },
+          write(pipe, bytes) {
+            const count = Buffer.alloc(4)
+            check(api.writeFile!(pipe, bytes, bytes.length, count, null), 'WriteFile(broker)')
+            if (count.readUInt32LE() !== bytes.length) throw new Error('incomplete broker assignment write')
+          },
+          available(pipe) {
+            const count = Buffer.alloc(4)
+            check(api.peekNamedPipe!(pipe, null, 0, null, count, null), 'PeekNamedPipe(broker)')
+            return count.readUInt32LE()
+          },
+          read(pipe, length) {
+            const data = Buffer.alloc(length), count = Buffer.alloc(4)
+            check(api.readFile!(pipe, data, length, count, null), 'ReadFile(broker)')
+            if (count.readUInt32LE() === 0) throw new Error('broker assignment disconnected')
+            return data.subarray(0, count.readUInt32LE())
+          },
+          pause() { api.sleep!(10) },
+          close(pipe) { api.closeHandle!(pipe) },
+        })
+        const out = Buffer.alloc(8)
+        check(api.openProcessToken!(child, 8, out), 'OpenProcessToken(assigned child)')
+        const token = pointer(out)
+        try { verifyDenyGroups(token) } finally { api.closeHandle!(token) }
+      },
     })
     if (control) closeSync(7)
     try { return native.waitForProcessExit(api, child.process) }

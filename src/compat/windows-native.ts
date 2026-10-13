@@ -65,15 +65,35 @@ export function spawnWindowsDeniedChild(
   native: WindowsNative,
   api: NativeApi,
   options: Parameters<WindowsNative['spawnInheritedJobProcess']>[1],
+  activation?: { sourceToken: NativePointer; assign(process: NativePointer, thread: NativePointer): void },
 ): ReturnType<WindowsNative['spawnInheritedJobProcess']> {
-  if (options.controlFileDescriptor === undefined) return native.spawnInheritedJobProcess(api, options)
+  let launchApi = api
+  if (activation !== undefined) {
+    launchApi = { ...api, createProcessAsUserW: (...args: readonly unknown[]): number => {
+      if ((Number(args[6]) & 4) === 0) throw new Error('Windows deny activation requires a suspended child')
+      const result = api.createProcessAsUserW!(activation.sourceToken, ...args.slice(1))
+      if (result === 0) return result
+      const processInfo = Buffer.from(native.koffi.decode(args[10], 'uint8', 24) as Uint8Array)
+      const process = native.koffi.decode(processInfo, 'void*')
+      const thread = native.koffi.decode(processInfo.subarray(8), 'void*')
+      try { activation.assign(process, thread) }
+      catch (error) {
+        api.terminateProcess!(process, 127)
+        api.closeHandle!(thread)
+        api.closeHandle!(process)
+        throw error
+      }
+      return result
+    } }
+  }
+  if (options.controlFileDescriptor === undefined) return native.spawnInheritedJobProcess(launchApi, options)
   const handle = api.uvGetOsfhandle!(7)
   if (api.getFileType!(handle) !== 3) throw new Error('subprocess control descriptor is not a Windows pipe')
   if (api.setHandleInformation!(handle, 1, 1) === 0) throw new Error(`SetHandleInformation(control) failed (Win32 ${api.getLastError!()})`)
-  const adapted = { ...api, createProcessAsUserW: (...args: readonly unknown[]): number => {
+  const adapted = { ...launchApi, createProcessAsUserW: (...args: readonly unknown[]): number => {
     const original = Buffer.from(native.koffi.decode(args[9], 'uint8', 104) as Uint8Array)
     if (original.readUInt32LE(0) !== 104) throw new Error('unrecognized Windows STARTUPINFO layout')
-    if (original.readUInt16LE(66) !== 0) return api.createProcessAsUserW!(...args)
+    if (original.readUInt16LE(66) !== 0) return launchApi.createProcessAsUserW!(...args)
     const count = 8
     const data = Buffer.alloc(4 + count + count * 8)
     data.writeUInt32LE(count)
@@ -88,7 +108,7 @@ export function spawnWindowsDeniedChild(
       native.koffi.encode(reserved, 'uint8', data, data.length)
       original.writeUInt16LE(data.length, 66)
       original.writeBigUInt64LE(native.koffi.address(reserved), 72)
-      return api.createProcessAsUserW!(...args.slice(0, 9), original, ...args.slice(10))
+      return launchApi.createProcessAsUserW!(...args.slice(0, 9), original, ...args.slice(10))
     } finally { native.koffi.free(reserved) }
   } }
   try { return native.spawnInheritedJobProcess(adapted, options) }

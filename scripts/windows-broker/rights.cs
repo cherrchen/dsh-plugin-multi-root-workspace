@@ -8,7 +8,7 @@ using System.Security.Principal;
 using System.Text.RegularExpressions;
 
 public static class DshBrokerRights {
-    static readonly string[] Required = { "SeServiceLogonRight", "SeCreateTokenPrivilege", "SeTcbPrivilege", "SeDebugPrivilege", "SeImpersonatePrivilege" };
+    static readonly string[] Required = { "SeServiceLogonRight", "SeCreateTokenPrivilege", "SeAssignPrimaryTokenPrivilege", "SeTcbPrivilege", "SeDebugPrivilege", "SeImpersonatePrivilege" };
     public static string[] Install(string serviceSid) { return Change(serviceSid, null); }
     public static void Remove(string serviceSid, string[] added) { Change(serviceSid, added); }
     static string[] Change(string serviceSid, string[] remove) {

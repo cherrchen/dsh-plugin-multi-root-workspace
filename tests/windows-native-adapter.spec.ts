@@ -74,3 +74,45 @@ describe('Windows native public-process adapter', () => {
     expect(f.inheritance).toEqual([1, 0])
   })
 })
+
+
+describe('Windows suspended token activation seam', () => {
+  const fixture = (flags = 4) => {
+    const events: string[] = []
+    const processInfo = Buffer.alloc(24)
+    processInfo.writeBigUInt64LE(101n)
+    processInfo.writeBigUInt64LE(102n, 8)
+    const api: NativeApi = {
+      createProcessAsUserW: (token) => { expect(token).toBe(99n); events.push('create-suspended'); return 1 },
+      terminateProcess: (process) => { events.push(`terminate-${process}`); return 1 },
+      closeHandle: handle => { events.push(`close-${handle}`); return 1 },
+    }
+    const native = {
+      koffi: { decode: (value: Buffer, type: string) => type === 'void*' ? value.readBigUInt64LE() : value },
+      spawnInheritedJobProcess(bindings: NativeApi) {
+        bindings.createProcessAsUserW!(3n, null, '', null, null, 1, flags, null, '', Buffer.alloc(104), processInfo)
+        events.push('resume')
+        return { process: 101n, job: 103n }
+      },
+    } as unknown as WindowsNative
+    const options = { token: 3n, command: 'node', args: [], cwd: 'C:\\work' }
+    return { api, native, options, events }
+  }
+  it('assigns and verifies the suspended child before any resume', () => {
+    const f = fixture()
+    spawnWindowsDeniedChild(f.native, f.api, f.options, { sourceToken: 99n, assign(process, thread) {
+      expect(process).toBe(101n); expect(thread).toBe(102n); f.events.push('verified-assignment')
+    } })
+    expect(f.events).toEqual(['create-suspended', 'verified-assignment', 'resume'])
+  })
+  it('terminates and closes a child whose assignment cannot be verified, without resuming it', () => {
+    const f = fixture()
+    expect(() => spawnWindowsDeniedChild(f.native, f.api, f.options, { sourceToken: 99n, assign() { throw new Error('unverified token') } })).toThrow('unverified')
+    expect(f.events).toEqual(['create-suspended', 'terminate-101', 'close-102', 'close-101'])
+  })
+  it('refuses a helper without a suspended-create flag before it can create a process', () => {
+    const f = fixture(0)
+    expect(() => spawnWindowsDeniedChild(f.native, f.api, f.options, { sourceToken: 99n, assign() { throw new Error('unreachable') } })).toThrow('suspended child')
+    expect(f.events).toEqual([])
+  })
+})

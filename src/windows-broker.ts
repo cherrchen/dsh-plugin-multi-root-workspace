@@ -48,3 +48,38 @@ export async function requestDenyToken(userSid: string, tokenHandle: bigint, den
     })
   })
 }
+
+
+/** Synchronous, bounded RPC inside the public suspended-create binding. The
+ * caller verifies the child's kernel token before the helper can resume it.
+ */
+export function assignDenyToken(
+  userSid: string, processHandle: bigint, threadHandle: bigint, deniedIds: readonly string[],
+  io: {
+    open(pipe: string): unknown
+    write(pipe: unknown, bytes: Buffer): void
+    available(pipe: unknown): number
+    read(pipe: unknown, count: number): Buffer
+    pause(): void
+    close(pipe: unknown): void
+  },
+): void {
+  if (processHandle <= 0n || threadHandle <= 0n || processHandle > 0xffffffffffffffffn || threadHandle > 0xffffffffffffffffn
+    || deniedIds.length < 1 || deniedIds.length > 64 || deniedIds.some(id => !/^S-1-4-(?:[0-9]{1,10}-){4}3$/.test(id))) {
+    throw new Error('invalid deny-token assignment request')
+  }
+  const pipe = io.open(`\\\\.\\pipe\\${brokerPipeName(userSid)}`)
+  try {
+    const deadline = Date.now() + 10_000
+    io.write(pipe, Buffer.from(`3|${processHandle}|${threadHandle}|${deniedIds.join(',')}\n`, 'ascii'))
+    let response = ''
+    while (!response.includes('\n')) {
+      if (Date.now() > deadline) throw new Error('deny-token assignment timed out')
+      const count = io.available(pipe)
+      if (count > 1024 || response.length + count > 1024) throw new Error('invalid deny-token assignment response')
+      if (count > 0) response += io.read(pipe, count).toString('utf8')
+      else io.pause()
+    }
+    if (response.slice(0, response.indexOf('\n')) !== 'OK') throw new Error(`deny-token assignment refused: ${response.trim()}`)
+  } finally { io.close(pipe) }
+}

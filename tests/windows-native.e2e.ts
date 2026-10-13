@@ -249,8 +249,9 @@ const derived=k.decode(derivedOut,'void*');
 // restricting-list intersection and this normal-group disabling operation.
 info(derived,2,null,0,size);const groups=Buffer.alloc(size.readUInt32LE());
 if(!info(derived,2,groups,groups.length,size))throw Error('TokenGroups unavailable');
-const count=groups.readUInt32LE(), all=groups.subarray(8,8+count*16), disabledOut=Buffer.alloc(8);
-if(!restrict(derived,1,count,all,0,null,1,oneSid,disabledOut))throw Error('group disabling unavailable');
+const count=groups.readUInt32LE(), ordinary=[];for(let i=0;i<count;i++){const group=groups.subarray(8+i*16,24+i*16);if((group.readUInt32LE(8)&0x20)===0)ordinary.push(group)}
+const all=Buffer.concat(ordinary), disabledOut=Buffer.alloc(8);
+if(!restrict(derived,1,ordinary.length,all,0,null,1,oneSid,disabledOut))throw Error('group disabling unavailable');
 const disabled=k.decode(disabledOut,'void*');
 const attempt=ok=>{try{if(!ok)throw Error('weak token activation failed');try{fs.writeFileSync(${JSON.stringify(seed)},'escaped');console.log('escaped')}catch(e){if(!['EPERM','EACCES'].includes(e.code))throw e;console.log('denied')}}finally{if(ok)revert()}};
 attempt(impersonate(derived));
