@@ -148,6 +148,24 @@ public sealed class RootDenyBroker : ServiceBase {
         try { Check(GetTokenInformation(token, kind, data, capacity, out length), "GetTokenInformation(" + kind + ")"); return data; }
         catch { Marshal.FreeHGlobal(data); throw; }
     }
+    static void RejectInheritedAttributes(IntPtr source) {
+        int length;
+        NtQuerySecurityAttributesToken(source, IntPtr.Zero, 0, IntPtr.Zero, 0, out length);
+        if (length < 16 || length > 1048576) throw new ArgumentException("Invalid local attributes size");
+        var data = Marshal.AllocHGlobal(length);
+        try {
+            NtCheck(NtQuerySecurityAttributesToken(source, IntPtr.Zero, 0, data, length, out length), "NtQuerySecurityAttributesToken(source)");
+            uint count = unchecked((uint)Marshal.ReadInt32(data, 4));
+            if (Marshal.ReadInt16(data) != 1 || count > 128) throw new ArgumentException("Invalid local attributes");
+            var array = Marshal.ReadIntPtr(data, 8);
+            for (int i = 0; i < count; i++) {
+                // Native TOKEN_SECURITY_ATTRIBUTE_V1: UNICODE_STRING Name,
+                // type/reserved, flags, count, values (40 bytes on 64-bit).
+                if ((Marshal.ReadInt32(array, i * 40 + 20) & 1) == 0)
+                    throw new UnauthorizedAccessException("Inheritable local security attributes unsupported");
+            }
+        } finally { Marshal.FreeHGlobal(data); }
+    }
     static IntPtr MintDenyToken(IntPtr source, string[] roots) {
         EnablePrivilege("SeCreateTokenPrivilege");
         var memory = new System.Collections.Generic.List<IntPtr>();
@@ -162,6 +180,7 @@ public sealed class RootDenyBroker : ServiceBase {
             if (Marshal.ReadInt32(query(33), 4) != 0 || Marshal.ReadInt32(query(34), 4) != 0
                 || Marshal.ReadInt32(query(37)) != 0)
                 throw new UnauthorizedAccessException("Claim-bearing source unsupported");
+            RejectInheritedAttributes(source);
             var user = query(1); var originalGroups = query(2); var privileges = query(3);
             var owner = query(4); var primary = query(5); var dacl = query(6); var tokenSource = query(7);
             var statistics = (TokenStatistics)Marshal.PtrToStructure(query(10), typeof(TokenStatistics));
@@ -182,7 +201,9 @@ public sealed class RootDenyBroker : ServiceBase {
                 // CreateRestrictedToken keeps it deny-only even when disabling it.
                 Marshal.StructureToPtr(new SidAttributes { Sid = p, Attributes = 0x11 }, IntPtr.Add(groups, offset + (count + i) * stride), false);
             }
-            var attributes = new ObjectAttributes { Length = Marshal.SizeOf(typeof(ObjectAttributes)) };
+            var qos = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SecurityQualityOfService))); memory.Add(qos);
+            Marshal.StructureToPtr(new SecurityQualityOfService { Length = Marshal.SizeOf(typeof(SecurityQualityOfService)), ImpersonationLevel = 2, ContextTrackingMode = 1 }, qos, false);
+            var attributes = new ObjectAttributes { Length = Marshal.SizeOf(typeof(ObjectAttributes)), SecurityQualityOfService = qos };
             NtCheck(NtCreateTokenEx(out token, 0xF01FF, ref attributes, 1,
                 ref statistics.AuthenticationId, ref statistics.ExpirationTime, user, groups, privileges,
                 IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, mandatory, owner, primary, dacl, tokenSource), "NtCreateTokenEx");
@@ -207,12 +228,14 @@ public sealed class RootDenyBroker : ServiceBase {
     }
     [StructLayout(LayoutKind.Sequential)] struct SidAttributes { public IntPtr Sid; public uint Attributes; }
     [StructLayout(LayoutKind.Sequential)] struct ObjectAttributes { public int Length; public IntPtr RootDirectory, ObjectName; public uint Attributes; public IntPtr SecurityDescriptor, SecurityQualityOfService; }
+    [StructLayout(LayoutKind.Sequential)] struct SecurityQualityOfService { public int Length, ImpersonationLevel; public byte ContextTrackingMode, EffectiveOnly; }
     [StructLayout(LayoutKind.Sequential)] struct TokenStatistics { public Luid TokenId, AuthenticationId; public long ExpirationTime; public int Type, ImpersonationLevel; public uint DynamicCharged, DynamicAvailable, GroupCount, PrivilegeCount; public Luid ModifiedId; }
     [DllImport("ntdll.dll")] static extern int NtCreateTokenEx(out IntPtr token, uint access, ref ObjectAttributes attributes, int type,
         ref Luid authId, ref long expiration, IntPtr user, IntPtr groups, IntPtr privileges, IntPtr userClaims, IntPtr deviceClaims,
         IntPtr deviceGroups, IntPtr mandatory, IntPtr owner, IntPtr primary, IntPtr dacl, IntPtr source);
     [DllImport("ntdll.dll")] static extern int NtCompareTokens(IntPtr first, IntPtr second, [MarshalAs(UnmanagedType.U1)] out bool equal);
     [DllImport("ntdll.dll")] static extern uint RtlNtStatusToDosError(int status);
+    [DllImport("ntdll.dll")] static extern int NtQuerySecurityAttributesToken(IntPtr token, IntPtr names, uint count, IntPtr data, int size, out int length);
     [StructLayout(LayoutKind.Sequential)] struct Luid { public uint Low; public int High; }
     [StructLayout(LayoutKind.Sequential)] struct TokenPrivileges { public uint Count; public Luid Luid; public uint Attributes; }
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetNamedPipeClientProcessId(IntPtr pipe, out uint pid);

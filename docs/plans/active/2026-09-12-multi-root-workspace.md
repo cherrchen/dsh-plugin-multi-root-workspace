@@ -525,3 +525,5 @@ CI 日志读取：`gh api --allow-escape-sequences repos/cherrchen/dsh-plugin-mu
 专用账户候选 `7d49dfb` 的 [diag 38393091968](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38393091968) 已通过账户 rights 配置及服务启动，实际请求在 `OpenProcessToken(client)` 返回 Win32 5。修正为仅在短暂模拟已认证 pipe caller 期间获取其 process-token QUERY/QUERY_SOURCE handle，随后恢复服务身份进行创建；不放宽 token DACL，也不接受客户端提供身份。
 
 候选 `4969e15` 的 [diag 38393550613](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38393550613) 已越过 token handle 获取，下一处失败为信息查询 size 检查。空 claim/group 通道改为提供至少 16 字节的已清零 buffer 进行实际查询，必须确认第二次 API 调用成功；不能从 sizing 失败推断空集合。所有查询错误现在带信息类编号及 Win32 码。
+
+候选 `f7c753e` 的 [diag 38394060369](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38394060369) 已越过全部 source 信息查询并执行 NtCreateTokenEx，返回 NTSTATUS c000000d / Win32 87。续作补齐 ObjectAttributes 的 SECURITY_QUALITY_OF_SERVICE（SecurityImpersonation）；另拒绝源 token 的可继承 local 属性，以免创建时丢掉原有属性约束。
