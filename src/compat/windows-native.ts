@@ -35,6 +35,13 @@ export interface WindowsNative {
   waitForProcessExit(api: NativeApi, process: NativePointer): number
 }
 
+/** Decode the UTF-16 pointee, not a second string pointer stored at its first
+ * code units. `decode(ptr, 'str16')` would dereference those units as an address.
+ */
+export function readWindowsWideString(koffi: KoffiApi, pointer: NativePointer): string {
+  return String(koffi.decode(pointer, 'char16_t', -1))
+}
+
 export async function loadWindowsNative(upstreamRunner: string): Promise<WindowsNative> {
   const fromRunner = createRequire(upstreamRunner)
   const aclEntry = fromRunner.resolve('@deepseek-ai/dsh-sandbox-windows-acl')

@@ -17,7 +17,7 @@
 import { closeSync, lstatSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, isAbsolute, join } from 'node:path'
-import { loadWindowsNative, spawnWindowsDeniedChild } from './compat/windows-native.ts'
+import { loadWindowsNative, readWindowsWideString, spawnWindowsDeniedChild } from './compat/windows-native.ts'
 import type { NativeApi, NativePointer } from './compat/windows-native.ts'
 import { canonicalPath, isWindowsNetworkOrDevicePath, rootDenySid } from './windows-runner-contract.ts'
 import { requestDenyAttribute } from './windows-broker.ts'
@@ -193,7 +193,7 @@ export async function runWindowsDenied(
         check(api.convertSidToStringSidW!(userSid, sidOut), 'ConvertSidToStringSidW')
         const text = pointer(sidOut)
         try {
-          await requestDenyAttribute(String(native.koffi.decode(text, 'str16')), native.koffi.address(restrictedToken), denies)
+          await requestDenyAttribute(readWindowsWideString(native.koffi, text), native.koffi.address(restrictedToken), denies)
         } finally { api.localFree!(text) }
       }
     } finally { for (const value of allocations) native.koffi.free(value) }

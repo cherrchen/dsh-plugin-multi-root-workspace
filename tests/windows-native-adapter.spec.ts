@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { spawnWindowsDeniedChild } from '../src/compat/windows-native.ts'
+import { readWindowsWideString, spawnWindowsDeniedChild } from '../src/compat/windows-native.ts'
+import koffi from 'koffi'
 import type { NativeApi, WindowsNative } from '../src/compat/windows-native.ts'
 
 /** Exercise the public CreateProcess boundary with actual STARTUPINFO bytes,
@@ -38,6 +39,14 @@ function fixture(reservedLength = 0) {
 }
 
 describe('Windows native public-process adapter', () => {
+  it('reads a real UTF-16 pointee without treating code units as another pointer', () => {
+    const bytes = Buffer.from('S-1-5-21-100-200-300-1001\0', 'utf16le')
+    const pointer = koffi.alloc('uint8', bytes.length)
+    try {
+      koffi.encode(pointer, 'uint8', bytes, bytes.length)
+      expect(readWindowsWideString(koffi, pointer)).toBe('S-1-5-21-100-200-300-1001')
+    } finally { koffi.free(pointer) }
+  })
   it('forwards fd 7 for a helper without CRT support, then restores handle inheritance', () => {
     const f = fixture()
     expect(spawnWindowsDeniedChild(f.native, f.api, f.options)).toEqual({ process: 1n, job: 2n })
