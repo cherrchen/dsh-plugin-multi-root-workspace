@@ -67,7 +67,7 @@ public sealed class RootDenyBroker : ServiceBase {
             uint pid;
             Check(GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out pid), "GetNamedPipeClientProcessId");
             var read = Task.Run(() => ReadRequest(pipe));
-            if (!read.Wait(5000)) throw new TimeoutException("Request timeout");
+            if (!read.Wait(5000)) throw new System.TimeoutException("Request timeout");
             string[] fields = read.Result.Split('|');
             if (fields.Length != 3 || fields[0] != "1" || !Regex.IsMatch(fields[1], @"^[0-9]{1,20}$"))
                 throw new ArgumentException("Invalid request");
