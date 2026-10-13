@@ -523,3 +523,5 @@ CI 日志读取：`gh api --allow-escape-sequences repos/cherrchen/dsh-plugin-mu
 单版本 [diag 38391811054](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38391811054) 明确失败为 `EnablePrivilege(SeCreateTokenPrivilege) win32=1300`，LocalSystem 并不持有候选需要的 token-create 特权。续作改用 ADR-0020 的专用虚拟服务账户和仅该 SID 的固定 LSA rights；完整 CI 旧候选轮次已取消，继续保留全矩阵验收要求。
 
 专用账户候选 `7d49dfb` 的 [diag 38393091968](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38393091968) 已通过账户 rights 配置及服务启动，实际请求在 `OpenProcessToken(client)` 返回 Win32 5。修正为仅在短暂模拟已认证 pipe caller 期间获取其 process-token QUERY/QUERY_SOURCE handle，随后恢复服务身份进行创建；不放宽 token DACL，也不接受客户端提供身份。
+
+候选 `4969e15` 的 [diag 38393550613](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38393550613) 已越过 token handle 获取，下一处失败为信息查询 size 检查。空 claim/group 通道改为提供至少 16 字节的已清零 buffer 进行实际查询，必须确认第二次 API 调用成功；不能从 sizing 失败推断空集合。所有查询错误现在带信息类编号及 Win32 码。

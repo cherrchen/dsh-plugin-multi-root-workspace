@@ -139,9 +139,13 @@ public sealed class RootDenyBroker : ServiceBase {
     static IntPtr Query(IntPtr token, int kind) {
         int length;
         GetTokenInformation(token, kind, IntPtr.Zero, 0, out length);
-        if (length < 4 || length > 1048576) throw new ArgumentException("Invalid token information size");
-        var data = Marshal.AllocHGlobal(length);
-        try { Check(GetTokenInformation(token, kind, data, length, out length), "GetTokenInformation(" + kind + ")"); return data; }
+        if (length < 0 || length > 1048576) throw new ArgumentException("Invalid token information size kind=" + kind + " length=" + length);
+        // Empty claim/group channels can report zero bytes on the sizing call.
+        // A real second query must still succeed; never infer absence from an error.
+        int capacity = Math.Max(length, 16);
+        var data = Marshal.AllocHGlobal(capacity);
+        Marshal.Copy(new byte[capacity], 0, data, capacity);
+        try { Check(GetTokenInformation(token, kind, data, capacity, out length), "GetTokenInformation(" + kind + ")"); return data; }
         catch { Marshal.FreeHGlobal(data); throw; }
     }
     static IntPtr MintDenyToken(IntPtr source, string[] roots) {
