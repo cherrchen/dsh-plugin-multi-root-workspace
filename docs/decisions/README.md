@@ -40,6 +40,7 @@ Architecture Decision Records（ADR），用于记录重要架构与工程决策
 - [ADR-0017-three-state-root-access-and-sandbox-modes.md](./ADR-0017-three-state-root-access-and-sandbox-modes.md) — B9 附加根三态权限（inherit/read-only/read-write）九格矩阵、`readWriteRecordedPath` 持久化编码、shell/pwsh/PTY/PTC 消费侧公开方法接缝（ALS + env 会话标记）、各方言受限 profile 构造与 Windows 单 SID 边界（Accepted，Phase 1 定案）。
 - [ADR-0018-windows-ambient-write-denial.md](./ADR-0018-windows-ambient-write-denial.md) — B9 Windows Full-access 局部拒写：ambient deny token、显式 ACL、防 owner / parent / token 旁路、standing ACE 与 partial 边界（被 ADR-0019 替代）。
 - [ADR-0019-windows-token-attributes-and-conditional-acls.md](./ADR-0019-windows-token-attributes-and-conditional-acls.md) — 替代 ADR-0018 的限制 SID 方案：继承的 mandatory local token attribute + 条件 deny ACE，让取交集后的 token 副本仍拒写，保留 PowerShell 身份查询；原生设置属性需要 SeTcbPrivilege，broker 范围待定（Proposed）。
+- [ADR-0020-windows-normal-deny-groups.md](./ADR-0020-windows-normal-deny-groups.md) — 铸造镜像调用方身份、仅增加普通 deny-only 组的 token，以普通 deny ACE 避开 local 属性条件；保留弱化 token 实际写入验证（Proposed）。
 
 ## 推荐命名
 

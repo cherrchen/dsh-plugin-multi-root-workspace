@@ -17,7 +17,6 @@ import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { describe, expect, it } from 'vitest'
 import { MultiRootFileSystem } from '../src/fs.ts'
-import { rootDenySid } from '../src/windows-runner-contract.ts'
 import type { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
@@ -197,121 +196,6 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
   }, 300_000)
 
-  it('reports the restricted child token attributes and installed conditional ACEs (diagnostic)', async () => {
-    const fixture = createFixtureWorkspace('win-b9-diag')
-    const leaf = join(fixture.outside, 'leaf.txt')
-    writeFileSync(leaf, 'seed')
-    const mounted = await mountProvider(fixture.workspace)
-    try {
-      const outside = canonicalPath(fixture.outside)
-      const denyId = rootDenySid(outside)
-      // A condition matrix on ambient probe files isolates WHERE the
-      // conditional deny fails: a plain deny proves the restricted token
-      // honours deny ACEs at all; Exists variants prove whether the local
-      // attribute is visible to the evaluator; the wrong-id Contains proves
-      // whether the value/type comparison is the failing term.
-      const probeDir = join(fixture.workspace, 'cond-probes')
-      mkdirSync(probeDir)
-      const probes: Array<[name: string, ace: string, expectHint: string]> = [
-        ['a-real', `XD;;0x116;;;WD;(Exists DshMultiRootDeniedRoots && DshMultiRootDeniedRoots Contains "${denyId}")`, 'deny iff mechanism works (MANDATORY)'],
-        ['d-exists', 'XD;;0x116;;;WD;(Exists DshMultiRootDeniedRoots)', 'deny iff MANDATORY attr visible'],
-        ['g-tsa', 'XD;;0x116;;;WD;(Exists TSA://ProcUnique)', 'deny iff kernel attr visible'],
-        ['h-alt-d', 'XD;;0x116;;;WD;(Exists DshMultiRootDeniedRootsD)', 'deny iff DEFAULT flag lands in working list'],
-        ['i-alt-f', 'XD;;0x116;;;WD;(Exists DshMultiRootDeniedRootsF)', 'deny iff DEFAULT|DENY_ONLY works'],
-        ['j-alt-real', `XD;;0x116;;;WD;(Exists DshMultiRootDeniedRootsD && DshMultiRootDeniedRootsD Contains "${denyId}")`, 'deny iff mechanism works (DEFAULT)'],
-        ['k-user-exists', 'XD;;0x116;;;WD;(Exists @User.DshMultiRootDeniedRoots)', 'deny iff user claim visible'],
-        ['l-user-real', `XD;;0x116;;;WD;(Exists @User.DshMultiRootDeniedRoots && @User.DshMultiRootDeniedRoots Contains "${denyId}")`, 'deny iff mechanism works (@User)'],
-        ['e-plain', 'D;;0x116;;;WD', 'always deny'],
-        ['f-ambient', 'A;;FA;;;WD', 'always allow'],
-      ]
-      for (const [name, ace, hint] of probes) {
-        const file = join(probeDir, `${name}.txt`)
-        writeFileSync(file, 'seed')
-        // EncodedCommand keeps the SDDL's quotes and operators out of the
-        // command-line parser; the applied SDDL is echoed back so an apply
-        // that silently failed cannot masquerade as an honest verdict.
-        const psArgv = powershellArgv(
-          `$f='${file}'`
-          + `;$a=Get-Acl -LiteralPath $f`
-          + `;$a.SetSecurityDescriptorSddlForm('D:(${ace})(A;;FA;;;WD)')`
-          + `;Set-Acl -LiteralPath $f -AclObject $a`
-          + `;(Get-Acl -LiteralPath $f).GetSecurityDescriptorSddlForm('Access')`
-          + `;Write-Output '${name}:${hint}'`,
-        )
-        const apply = await spawnArgv(psArgv[0]!, psArgv.slice(1))
-        console.log(`DIAG apply ${name} status=${apply.status} ${apply.stdout.trim().split(/\r?\n/).join(' | ')}${apply.stderr.trim() ? ` STDERR:${apply.stderr.trim()}` : ''}`)
-      }
-      const prefix = await mounted.provider.restrictedArgvPrefix(
-        { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [outside],
-      )
-      const koffiEntry = fileURLToPath(import.meta.resolve('koffi'))
-      const diag = `
-const fs=require('fs'),k=require(${JSON.stringify(koffiEntry)});
-const a=k.load('advapi32.dll'),b=k.load('kernel32.dll'),n=k.load('ntdll.dll');
-const bind=(lib,name,ret,args)=>lib.func('__stdcall',name,ret,args);
-const openTok=bind(a,'OpenProcessToken','int',['void*','uint32','void*']);
-const getInfo=bind(a,'GetTokenInformation','int',['void*','int','void*','uint32','void*']);
-const ntQuery=bind(n,'NtQuerySecurityAttributesToken','int32',['void*','void*','uint32','void*','uint32','void*']);
-const cur=bind(b,'GetCurrentProcess','void*',[]);
-const out=Buffer.alloc(8);
-console.log('OPENTOK',openTok(cur(),8,out));
-const tok=k.decode(out,'void*');
-const dw=Buffer.alloc(4);
-if(getInfo(tok,40,dw,4,Buffer.alloc(4)))console.log('RESTRICTED',dw.readUInt32LE());
-const ru=r=>Buffer.from(k.decode(k.decode(r.subarray(8),'void*'),'uint8',r.readUInt16LE(0))).toString('utf16le');
-const sz=Buffer.alloc(4);
-ntQuery(tok,null,0,null,0,sz);
-const buf=Buffer.alloc(Math.max(sz.readUInt32LE(),16));
-const st=ntQuery(tok,null,0,buf,buf.length,sz);
-console.log('NQUERY NTSTATUS',st);
-if(st===0){
-  const count=buf.readUInt32LE(4);
-  console.log('ATTRCOUNT',count);
-  const arr=Buffer.from(k.decode(k.decode(buf.subarray(8),'void*'),'uint8',count*40));
-  for(let i=0;i<count;i++){
-    const at=arr.subarray(i*40),vc=at.readUInt32LE(24),vt=at.readUInt16LE(16);
-    let vs=[];
-    if(vt===3){const vals=Buffer.from(k.decode(k.decode(at.subarray(32),'void*'),'uint8',vc*16));for(let j=0;j<vc;j++)vs.push(ru(vals.subarray(j*16)));}
-    console.log('ATTR',JSON.stringify(ru(at)),'type',vt,'flags',at.readUInt32LE(20).toString(16),'count',vc,'values',JSON.stringify(vs));
-  }
-}
-// CLAIM_SECURITY_ATTRIBUTE_V1: PWSTR Name; USHORT ValueType,Reserved; ULONG Flags,ValueCount; PWSTR* pString — 32 bytes on x64.
-getInfo(tok,33,null,0,sz);
-const cbuf=Buffer.alloc(Math.max(sz.readUInt32LE(),16));
-const cok=getInfo(tok,33,cbuf,cbuf.length,sz);
-console.log('CLAIMS',cok,sz.readUInt32LE());
-if(cok){
-  const cc=cbuf.readUInt32LE(4);
-  console.log('CLAIMCOUNT',cc);
-  const carr=Buffer.from(k.decode(k.decode(cbuf.subarray(8),'void*'),'uint8',cc*32));
-  const cname=p=>Buffer.from(k.decode(p,'char16_t',40)).toString('utf16le').replace(/\0.*$/,'');
-  const cstr=p=>Buffer.from(k.decode(p,'char16_t',256)).toString('utf16le').replace(/\0.*$/,'');
-  for(let i=0;i<cc;i++){
-    const at=carr.subarray(i*32),vc=at.readUInt32LE(16),vt=at.readUInt16LE(8);
-    let vs=[];
-    if(vt===3){const vals=Buffer.from(k.decode(k.decode(at.subarray(24),'void*'),'uint8',vc*8));for(let j=0;j<vc;j++)vs.push(cstr(k.decode(vals.subarray(j*8),'void*')));}
-    console.log('CLAIM',JSON.stringify(cname(k.decode(at.subarray(0),'void*'))),'type',vt,'flags',at.readUInt32LE(12).toString(16),'count',vc,'values',JSON.stringify(vs));
-  }
-}
-try{fs.writeFileSync(${JSON.stringify(leaf)},'x');console.log('WRITE-denied-root allowed')}catch(e){console.log('WRITE-denied-root denied',e&&e.code||e)}
-for(const name of ${JSON.stringify(probes.map(p => p[0]))}){
-  const p=${JSON.stringify(probeDir)}+'\\\\'+name+'.txt';
-  try{fs.writeFileSync(p,'x');console.log('PROBE',name,'allowed')}catch(e){console.log('PROBE',name,'denied',e&&e.code||e)}
-}
-`
-      const child = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', diag])
-      console.log(`DIAG child status=${child.status}\n${child.stdout}\nSTDERR:${child.stderr}`)
-      const sddl = await spawnArgv('powershell.exe', [
-        '-NoProfile', '-NonInteractive', '-Command',
-        `[Console]::OutputEncoding=[Text.Encoding]::UTF8;`
-        + `(Get-Acl -LiteralPath ${JSON.stringify(fixture.outside)}).GetSecurityDescriptorSddlForm('All');`
-        + `(Get-Acl -LiteralPath ${JSON.stringify(leaf)}).GetSecurityDescriptorSddlForm('All');`
-        + `(Get-Acl -LiteralPath ${JSON.stringify(dirname(fixture.outside))}).GetSecurityDescriptorSddlForm('All')`,
-      ])
-      console.log(`DIAG sddl status=${sddl.status}\n${sddl.stdout}\nSTDERR:${sddl.stderr}`)
-    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
-  }, 120_000)
-
   it('denies overwrite, delete, rename, ACL edits and activation of weakened tokens, including protected descendant ACLs', async () => {
     const fixture = createFixtureWorkspace('win-b9-mutations')
     const nested = join(fixture.outside, 'protected')
@@ -335,7 +219,7 @@ for(const name of ${JSON.stringify(probes.map(p => p[0]))}){
       const acl = await spawnArgv(prefix[0]!, [...prefix.slice(1), icacls, seed, '/reset'])
       expect(acl.status, acl.stdout + acl.stderr).not.toBe(0)
       // .NET needs token duplication for identity queries. Test the actual
-      // escape: remove the deny SID, then attempt to activate that weakened
+      // escape: discard the restricting list, then attempt to activate that weakened
       // token through both public impersonation paths and write the seed.
       const koffiEntry = fileURLToPath(import.meta.resolve('koffi'))
       const tokenProbe = `
@@ -360,14 +244,22 @@ const oneSid=Buffer.alloc(16);oneSid.writeBigUInt64LE(k.address(k.decode(user,'v
 const derivedOut=Buffer.alloc(8);
 if(!restrict(source,1,0,null,0,null,1,oneSid,derivedOut))throw Error('token narrowing unavailable');
 const derived=k.decode(derivedOut,'void*');
+// Disable every ordinary group too. Deny-only markers must survive both the
+// restricting-list intersection and this normal-group disabling operation.
+info(derived,2,null,0,size);const groups=Buffer.alloc(size.readUInt32LE());
+if(!info(derived,2,groups,groups.length,size))throw Error('TokenGroups unavailable');
+const count=groups.readUInt32LE(), all=groups.subarray(8,8+count*16), disabledOut=Buffer.alloc(8);
+if(!restrict(derived,1,count,all,0,null,1,oneSid,disabledOut))throw Error('group disabling unavailable');
+const disabled=k.decode(disabledOut,'void*');
 const attempt=ok=>{try{if(!ok){console.log('denied');return}try{fs.writeFileSync(${JSON.stringify(seed)},'escaped');console.log('escaped')}catch(e){console.log('denied')}}finally{if(ok)revert()}};
 attempt(impersonate(derived));
+attempt(impersonate(disabled));
 const threadOut=Buffer.alloc(8), copied=duplicate(derived,4,null,2,2,threadOut);
 if(copied){const thread=k.decode(threadOut,'void*');attempt(setThread(null,thread));close(thread)}else console.log('denied');
-close(derived);close(source);close(h);`
+close(disabled);close(derived);close(source);close(h);`
       const token = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', tokenProbe])
       expect(token.status, token.stderr).toBe(0)
-      expect(token.stdout.trim().split(/\r?\n/)).toEqual(['denied', 'denied'])
+      expect(token.stdout.trim().split(/\r?\n/)).toEqual(['denied', 'denied', 'denied'])
       expect(readFileSync(seed, 'utf8')).toBe('seed')
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
   }, 180_000)

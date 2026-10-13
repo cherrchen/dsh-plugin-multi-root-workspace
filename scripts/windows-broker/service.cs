@@ -1,5 +1,5 @@
-// A narrow SYSTEM service: add one mandatory deny attribute to a caller-owned
-// restricted token. It never opens files, changes ACLs, or launches commands.
+// A narrow SYSTEM service: mirror the authenticated process identity and add
+// only deny-only normal groups. It never opens files or launches commands.
 using System;
 using System.ComponentModel;
 using System.IO;
@@ -31,6 +31,7 @@ public sealed class RootDenyBroker : ServiceBase {
     }
     protected override void OnStart(string[] args) {
         EnablePrivilege("SeTcbPrivilege");
+        EnablePrivilege("SeCreateTokenPrivilege");
         Task.Run((Action)Serve);
     }
     protected override void OnStop() {
@@ -71,49 +72,43 @@ public sealed class RootDenyBroker : ServiceBase {
             uint pid;
             Check(GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out pid), "GetNamedPipeClientProcessId");
             string[] fields = read.Result.Split('|');
-            if (fields.Length != 3 || fields[0] != "1" || !Regex.IsMatch(fields[1], @"^[0-9]{1,20}$"))
+            if (fields.Length != 3 || fields[0] != "2" || !Regex.IsMatch(fields[1], @"^[0-9]{1,20}$"))
                 throw new ArgumentException("Invalid request");
             string[] roots = fields[2].Split(',');
             if (roots.Length < 1 || roots.Length > 64) throw new ArgumentException("Invalid root count");
             foreach (var root in roots)
                 if (!Regex.IsMatch(root, @"^S-1-4-[0-9]{1,10}-[0-9]{1,10}-[0-9]{1,10}-[0-9]{1,10}-3$"))
                     throw new ArgumentException("Invalid deny identity");
-            IntPtr process = OpenProcess(0x1040, false, pid); // QUERY_LIMITED_INFORMATION | DUP_HANDLE
+            IntPtr process = OpenProcess(0x1040, false, pid);
             if (process == IntPtr.Zero) throw new Win32Exception();
-            IntPtr token = IntPtr.Zero, processToken = IntPtr.Zero;
+            IntPtr token = IntPtr.Zero, processToken = IntPtr.Zero, minted = IntPtr.Zero;
             try {
-                Check(OpenProcessToken(process, 0x8A, out processToken), "OpenProcessToken(client)"); // QUERY | DUPLICATE | ADJUST_DEFAULT
-                if (TokenSid(processToken) != sid) throw new UnauthorizedAccessException("Process SID mismatch");
+                Check(OpenProcessToken(process, 0x18, out processToken), "OpenProcessToken(client)"); // QUERY | QUERY_SOURCE
+                if (TokenSid(processToken) != sid || IsTokenRestricted(processToken))
+                    throw new UnauthorizedAccessException("Caller process must be an unrestricted installation identity");
                 Check(DuplicateHandle(process, new IntPtr(unchecked((long)UInt64.Parse(fields[1]))), GetCurrentProcess(), out token,
-                    0x88, false, 0), "DuplicateHandle(token)"); // QUERY | ADJUST_DEFAULT, never SAME_ACCESS
-                if (TokenSid(token) != sid || !IsTokenRestricted(token)) throw new UnauthorizedAccessException("Not a caller-owned restricted token");
-                AddAttribute(token, roots);
-                // The conditional-ACE evaluator's local lookup never sees
-                // TokenSecurityAttributes — not even the kernel's own
-                // TSA://ProcUnique — so the deny set is also published as a
-                // user claim, the documented CAP channel.
-                try { AddUserClaim(token, roots); }
-                catch (Win32Exception restricted) {
-                    // Discriminate "claims cannot be written on a restricted
-                    // token" from "claims cannot be written at all": retry on a
-                    // throwaway non-restricted duplicate of the caller's
-                    // process token and report both error codes.
-                    string note;
-                    IntPtr dup = IntPtr.Zero;
-                    try {
-                        Check(DuplicateTokenEx(processToken, 0xA8, IntPtr.Zero, 2, 1, out dup), "DuplicateTokenEx");
-                        try { AddUserClaim(dup, roots); note = "dup-claim-ok"; }
-                        catch (Win32Exception e2) { note = "dup-claim-win32=" + e2.NativeErrorCode; }
-                    } catch (Win32Exception e3) { note = "dup-win32=" + e3.NativeErrorCode; }
-                    finally { if (dup != IntPtr.Zero) CloseHandle(dup); }
-                    throw new Win32Exception(restricted.NativeErrorCode, restricted.Message + " [" + note + "]");
+                    8, false, 0), "DuplicateHandle(token)");
+                bool equal;
+                NtCheck(NtCompareTokens(processToken, token, out equal), "NtCompareTokens");
+                if (!equal) throw new UnauthorizedAccessException("Source is not the caller process token");
+                minted = MintDenyToken(processToken, roots);
+                IntPtr remote;
+                // Only rights needed to derive and protect the launch token; no
+                // group/privilege adjustment or owner changes.
+                Check(DuplicateHandle(GetCurrentProcess(), minted, process, out remote,
+                    0x6008B, false, 0), "DuplicateHandle(reply)"); // WRITE_DAC | READ_CONTROL | QUERY | DUPLICATE | ASSIGN_PRIMARY | ADJUST_DEFAULT
+                try { Reply(pipe, "OK|" + unchecked((ulong)remote.ToInt64()) + "\n"); }
+                catch {
+                    IntPtr cleanup;
+                    if (DuplicateHandle(process, remote, GetCurrentProcess(), out cleanup, 0, false, 1)) CloseHandle(cleanup);
+                    throw;
                 }
             } finally {
+                if (minted != IntPtr.Zero) CloseHandle(minted);
                 if (token != IntPtr.Zero) CloseHandle(token);
                 if (processToken != IntPtr.Zero) CloseHandle(processToken);
                 CloseHandle(process);
             }
-            Reply(pipe, "OK\n");
         } catch (Exception e) { try { Reply(pipe, "ERROR:" + e.GetType().Name + ":" + e.Message.Replace('\n', ' ').Replace('\r', ' ') + "\n"); } catch {} }
     }
     static string ReadRequest(Stream stream) {
@@ -136,69 +131,61 @@ public sealed class RootDenyBroker : ServiceBase {
         try { Check(GetTokenInformation(token, 1, data, length, out length), "GetTokenInformation(user)"); return new SecurityIdentifier(Marshal.ReadIntPtr(data)).Value; }
         finally { Marshal.FreeHGlobal(data); }
     }
-    static void AddAttribute(IntPtr token, string[] roots) {
-        var values = new UnicodeString[roots.Length];
-        // Diagnostic variants: identical values under different flag sets, so a
-        // single run can show which flag admits an attribute to the working
-        // list the ACE evaluator reads.
-        var variants = new[] {
-            new { Name = "DshMultiRootDeniedRoots",  Flags = 0x20u },          // MANDATORY (current)
-            new { Name = "DshMultiRootDeniedRootsD", Flags = 0x60u },          // + DEFAULT
-            new { Name = "DshMultiRootDeniedRootsF", Flags = 0x64u },          // + DEFAULT + USE_FOR_DENY_ONLY
-        };
-        var names = new IntPtr[variants.Length];
-        try {
-            for (int i = 0; i < roots.Length; i++) values[i] = Unicode(roots[i], Marshal.StringToHGlobalUni(roots[i]));
-            // One call per variant: a flag the kernel rejects must not take the
-            // accepted variants down with it. The first (canonical) variant is
-            // mandatory; the alternates are diagnostic — their presence or
-            // absence shows up in the caller's token-attribute readback.
-            for (int v = 0; v < variants.Length; v++) {
-                IntPtr array = IntPtr.Zero, attribute = IntPtr.Zero, info = IntPtr.Zero, operation = IntPtr.Zero;
-                try {
-                    names[v] = Marshal.StringToHGlobalUni(variants[v].Name);
-                    array = Marshal.AllocHGlobal(values.Length * Marshal.SizeOf(typeof(UnicodeString)));
-                    for (int i = 0; i < values.Length; i++) Marshal.StructureToPtr(values[i], IntPtr.Add(array, i * Marshal.SizeOf(typeof(UnicodeString))), false);
-                    attribute = Allocate(new AttributeV1 { Name = Unicode(variants[v].Name, names[v]), ValueType = 3, Flags = variants[v].Flags, Count = (uint)values.Length, Values = array });
-                    info = Allocate(new AttributesInfo { Version = 1, Count = 1, Attributes = attribute });
-                    operation = Marshal.AllocHGlobal(4); Marshal.WriteInt32(operation, 2); // ADD only; never REPLACE/DELETE
-                    var input = new AttributesOperation { Attributes = info, Operations = operation };
-                    IntPtr data = Allocate(input);
-                    try {
-                        if (!SetTokenInformation(token, 39, data, Marshal.SizeOf(typeof(AttributesOperation)))) {
-                            int error = Marshal.GetLastWin32Error();
-                            if (v == 0) throw new Win32Exception(error, "SetTokenInformation(TokenSecurityAttributes) win32=" + error);
-                        }
-                    } finally { Marshal.FreeHGlobal(data); }
-                } finally {
-                    if (names[v] != IntPtr.Zero) Marshal.FreeHGlobal(names[v]);
-                    foreach (var memory in new[] { array, attribute, info, operation }) if (memory != IntPtr.Zero) Marshal.FreeHGlobal(memory);
-                }
-            }
-        } finally {
-            foreach (var value in values) if (value.Buffer != IntPtr.Zero) Marshal.FreeHGlobal(value.Buffer);
-        }
+    static IntPtr Query(IntPtr token, int kind) {
+        int length;
+        GetTokenInformation(token, kind, IntPtr.Zero, 0, out length);
+        if (length < 4 || length > 1048576) throw new ArgumentException("Invalid token information size");
+        var data = Marshal.AllocHGlobal(length);
+        try { Check(GetTokenInformation(token, kind, data, length, out length), "GetTokenInformation(" + kind + ")"); return data; }
+        catch { Marshal.FreeHGlobal(data); throw; }
     }
-    static void AddUserClaim(IntPtr token, string[] roots) {
-        IntPtr name = Marshal.StringToHGlobalUni("DshMultiRootDeniedRoots"), values = IntPtr.Zero, attribute = IntPtr.Zero, info = IntPtr.Zero;
-        var valuePointers = new IntPtr[roots.Length];
+    static IntPtr MintDenyToken(IntPtr source, string[] roots) {
+        var memory = new System.Collections.Generic.List<IntPtr>();
+        IntPtr token = IntPtr.Zero;
         try {
+            Func<int, IntPtr> query = kind => { var p = Query(source, kind); memory.Add(p); return p; };
+            // Fail closed for token types whose full authority cannot be mirrored here.
+            if (Marshal.ReadInt32(query(29)) != 0 || Marshal.ReadInt32(query(21)) != 0)
+                throw new UnauthorizedAccessException("Restricted or AppContainer source unsupported");
+            // NtCreateTokenEx cannot silently discard enterprise/device claims.
+            // This narrow broker accepts only sources without those channels.
+            if (Marshal.ReadInt32(query(33), 4) != 0 || Marshal.ReadInt32(query(34), 4) != 0
+                || Marshal.ReadInt32(query(37)) != 0)
+                throw new UnauthorizedAccessException("Claim-bearing source unsupported");
+            var user = query(1); var originalGroups = query(2); var privileges = query(3);
+            var owner = query(4); var primary = query(5); var dacl = query(6); var tokenSource = query(7);
+            var statistics = (TokenStatistics)Marshal.PtrToStructure(query(10), typeof(TokenStatistics));
+            var session = query(12); var mandatory = query(27);
+            int count = Marshal.ReadInt32(originalGroups), stride = Marshal.SizeOf(typeof(SidAttributes));
+            if (count < 0 || count > 4096) throw new ArgumentException("Invalid group count");
+            int offset = IntPtr.Size == 8 ? 8 : 4;
+            var groups = Marshal.AllocHGlobal(offset + (count + roots.Length) * stride); memory.Add(groups);
+            Marshal.WriteInt32(groups, count + roots.Length);
+            for (int i = 0; i < count; i++) {
+                var group = (SidAttributes)Marshal.PtrToStructure(IntPtr.Add(originalGroups, offset + i * stride), typeof(SidAttributes));
+                Marshal.StructureToPtr(group, IntPtr.Add(groups, offset + i * stride), false);
+            }
             for (int i = 0; i < roots.Length; i++) {
-                valuePointers[i] = Marshal.StringToHGlobalUni(roots[i]);
+                var identity = new SecurityIdentifier(roots[i]); var bytes = new byte[identity.BinaryLength]; identity.GetBinaryForm(bytes, 0);
+                var p = Marshal.AllocHGlobal(bytes.Length); memory.Add(p); Marshal.Copy(bytes, 0, p, bytes.Length);
+                // NORMAL group, not a restricting SID. Cannot supply allow rights;
+                // CreateRestrictedToken keeps it deny-only even when disabling it.
+                Marshal.StructureToPtr(new SidAttributes { Sid = p, Attributes = 0x11 }, IntPtr.Add(groups, offset + (count + i) * stride), false);
             }
-            values = Marshal.AllocHGlobal(roots.Length * IntPtr.Size);
-            for (int i = 0; i < roots.Length; i++) Marshal.WriteIntPtr(IntPtr.Add(values, i * IntPtr.Size), valuePointers[i]);
-            attribute = Allocate(new ClaimAttributeV1 { Name = name, ValueType = 3, Reserved = 0, Flags = 0x20, Count = (uint)roots.Length, Values = values });
-            info = Allocate(new ClaimAttributesInfo { Version = 1, Reserved = 0, Count = 1, Attributes = attribute });
-            Check(SetTokenInformation(token, 33, info, Marshal.SizeOf(typeof(ClaimAttributesInfo))), "SetTokenInformation(TokenUserClaimAttributes)");
+            var attributes = new ObjectAttributes { Length = Marshal.SizeOf(typeof(ObjectAttributes)) };
+            NtCheck(NtCreateTokenEx(out token, 0xF01FF, ref attributes, 1,
+                ref statistics.AuthenticationId, ref statistics.ExpirationTime, user, groups, privileges,
+                IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, mandatory, owner, primary, dacl, tokenSource), "NtCreateTokenEx");
+            Check(SetTokenInformation(token, 12, session, 4), "SetTokenInformation(session)");
+            var result = token; token = IntPtr.Zero; return result;
         } finally {
-            Marshal.FreeHGlobal(name);
-            foreach (var pointer in valuePointers) if (pointer != IntPtr.Zero) Marshal.FreeHGlobal(pointer);
-            foreach (var memory in new[] { values, attribute, info }) if (memory != IntPtr.Zero) Marshal.FreeHGlobal(memory);
+            if (token != IntPtr.Zero) CloseHandle(token);
+            foreach (var p in memory) Marshal.FreeHGlobal(p);
         }
     }
-    static UnicodeString Unicode(string value, IntPtr memory) { return new UnicodeString { Length = checked((ushort)(value.Length * 2)), MaximumLength = checked((ushort)(value.Length * 2 + 2)), Buffer = memory }; }
-    static IntPtr Allocate<T>(T value) { var memory = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(T))); Marshal.StructureToPtr(value, memory, false); return memory; }
+    static void NtCheck(int code, string name) {
+        if (code < 0) { int error = unchecked((int)RtlNtStatusToDosError(code)); throw new Win32Exception(error, name + " NTSTATUS=" + unchecked((uint)code).ToString("x") + " win32=" + error); }
+    }
     static void Check(bool ok, string name) { if (!ok) { int error = Marshal.GetLastWin32Error(); throw new Win32Exception(error, name + " win32=" + error); } }
     static void EnablePrivilege(string name) {
         IntPtr token; Check(OpenProcessToken(GetCurrentProcess(), 0x28, out token), "OpenProcessToken(service)");
@@ -208,12 +195,14 @@ public sealed class RootDenyBroker : ServiceBase {
             int error = Marshal.GetLastWin32Error(); if (error != 0) throw new Win32Exception(error);
         } finally { CloseHandle(token); }
     }
-    [StructLayout(LayoutKind.Sequential)] struct UnicodeString { public ushort Length, MaximumLength; public IntPtr Buffer; }
-    [StructLayout(LayoutKind.Sequential)] struct AttributeV1 { public UnicodeString Name; public ushort ValueType, Reserved; public uint Flags, Count; public IntPtr Values; }
-    [StructLayout(LayoutKind.Sequential)] struct AttributesInfo { public ushort Version, Reserved; public uint Count; public IntPtr Attributes; }
-    [StructLayout(LayoutKind.Sequential)] struct ClaimAttributeV1 { public IntPtr Name; public ushort ValueType, Reserved; public uint Flags, Count; public IntPtr Values; }
-    [StructLayout(LayoutKind.Sequential)] struct ClaimAttributesInfo { public ushort Version, Reserved; public uint Count; public IntPtr Attributes; }
-    [StructLayout(LayoutKind.Sequential)] struct AttributesOperation { public IntPtr Attributes, Operations; }
+    [StructLayout(LayoutKind.Sequential)] struct SidAttributes { public IntPtr Sid; public uint Attributes; }
+    [StructLayout(LayoutKind.Sequential)] struct ObjectAttributes { public int Length; public IntPtr RootDirectory, ObjectName; public uint Attributes; public IntPtr SecurityDescriptor, SecurityQualityOfService; }
+    [StructLayout(LayoutKind.Sequential)] struct TokenStatistics { public Luid TokenId, AuthenticationId; public long ExpirationTime; public int Type, ImpersonationLevel; public uint DynamicCharged, DynamicAvailable, GroupCount, PrivilegeCount; public Luid ModifiedId; }
+    [DllImport("ntdll.dll")] static extern int NtCreateTokenEx(out IntPtr token, uint access, ref ObjectAttributes attributes, int type,
+        ref Luid authId, ref long expiration, IntPtr user, IntPtr groups, IntPtr privileges, IntPtr userClaims, IntPtr deviceClaims,
+        IntPtr deviceGroups, IntPtr mandatory, IntPtr owner, IntPtr primary, IntPtr dacl, IntPtr source);
+    [DllImport("ntdll.dll")] static extern int NtCompareTokens(IntPtr first, IntPtr second, [MarshalAs(UnmanagedType.U1)] out bool equal);
+    [DllImport("ntdll.dll")] static extern uint RtlNtStatusToDosError(int status);
     [StructLayout(LayoutKind.Sequential)] struct Luid { public uint Low; public int High; }
     [StructLayout(LayoutKind.Sequential)] struct TokenPrivileges { public uint Count; public Luid Luid; public uint Attributes; }
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetNamedPipeClientProcessId(IntPtr pipe, out uint pid);
@@ -227,5 +216,4 @@ public sealed class RootDenyBroker : ServiceBase {
     [DllImport("advapi32.dll")] static extern bool IsTokenRestricted(IntPtr token);
     [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool LookupPrivilegeValue(string system, string name, out Luid luid);
     [DllImport("advapi32.dll", SetLastError=true)] static extern bool AdjustTokenPrivileges(IntPtr token, bool disable, ref TokenPrivileges privileges, int size, IntPtr previous, IntPtr returned);
-    [DllImport("advapi32.dll", SetLastError=true)] static extern bool DuplicateTokenEx(IntPtr existing, uint access, IntPtr attributes, int level, int type, out IntPtr duplicate);
 }

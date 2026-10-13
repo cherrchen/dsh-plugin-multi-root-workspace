@@ -1,7 +1,7 @@
 /** Ambient ACL writes minus registered read-only roots (Windows B9).
  *
  * The restricting list mirrors the caller's enabled identities. An inherited
- * mandatory token attribute identifies denied roots to conditional ACEs in
+ * mandatory deny-only NORMAL groups identify denied roots to ordinary deny ACEs in
  * the NORMAL access check, so narrowing the SID list cannot discard the deny.
  * Privileges that could bypass the DACL are removed; integrity is not lowered.
  * Standing ACEs retain the restriction for running children and concurrent
@@ -20,7 +20,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { loadWindowsNative, readWindowsWideString, spawnWindowsDeniedChild } from './compat/windows-native.ts'
 import type { NativeApi, NativePointer } from './compat/windows-native.ts'
 import { canonicalPath, isWindowsNetworkOrDevicePath, rootDenySid } from './windows-runner-contract.ts'
-import { requestDenyAttribute } from './windows-broker.ts'
+import { requestDenyToken } from './windows-broker.ts'
 
 const WRITE_DAC = 0x40000
 const WRITE_OWNER = 0x80000
@@ -45,14 +45,12 @@ export async function runWindowsDenied(
   }
   verifyRoots()
   const native = await loadWindowsNative(upstreamRunner)
-  const ntdll = native.koffi.load('ntdll.dll')
   const api = native.extendWin32ProcessBindings(({ kernel32, advapi32, bind }) => {
     const definitions: Record<string, [unknown, string, string[]]> = {
       openProcess: [kernel32, 'void*', ['uint32', 'int', 'uint32']],
       openProcessToken: [advapi32, 'int', ['void*', 'uint32', 'void*']],
       getTokenInformation: [advapi32, 'int', ['void*', 'int', 'void*', 'uint32', 'void*']],
       setTokenInformation: [advapi32, 'int', ['void*', 'int', 'void*', 'uint32']],
-      ntQuerySecurityAttributesToken: [ntdll, 'int32', ['void*', 'void*', 'uint32', 'void*', 'uint32', 'void*']],
       createRestrictedToken: [advapi32, 'int', ['void*', 'uint32', 'uint32', 'void*', 'uint32', 'void*', 'uint32', 'void*', 'void*']],
       createFileW: [kernel32, 'void*', ['str16', 'uint32', 'uint32', 'void*', 'uint32', 'uint32', 'void*']],
       convertStringSidToSidW: [advapi32, 'int', ['str16', 'void*']],
@@ -134,13 +132,38 @@ export async function runWindowsDenied(
     const denies = roots.map(rootDenySid)
     const list = Buffer.alloc(identities.length * 16)
     identities.forEach((value, i) => writePointer(list, i * 16, value))
+    const sidOut = Buffer.alloc(8)
+    check(api.convertSidToStringSidW!(userSid, sidOut), 'ConvertSidToStringSidW')
+    const text = pointer(sidOut)
+    let minted: NativePointer
+    try {
+      const handle = await requestDenyToken(readWindowsWideString(native.koffi, text), native.koffi.address(currentToken), denies)
+      const bytes = Buffer.alloc(8)
+      bytes.writeBigUInt64LE(handle)
+      minted = pointer(bytes)
+    } finally { api.localFree!(text) }
     const restrictedOut = Buffer.alloc(8)
-    // DISABLE_MAX_PRIVILEGE, with a FULL restricting access check. The
-    // WRITE_RESTRICTED shortcut does not cover directory rename/delete's
-    // parent-access path. Mirroring every ambient enabled identity preserves
-    // reads too, so checking every access does not turn this into a read fence.
-    check(api.createRestrictedToken!(currentToken, 1, 0, null, 0, null, identities.length, list, restrictedOut), 'CreateRestrictedToken')
+    try {
+      // Preserve ambient identities, remove bypass privileges, and mark this as
+      // a restricted token suitable for CreateProcessAsUser from this caller.
+      check(api.createRestrictedToken!(minted, 1, 0, null, 0, null, identities.length, list, restrictedOut), 'CreateRestrictedToken')
+    } finally { api.closeHandle!(minted) }
     restrictedToken = pointer(restrictedOut)
+    // Verify the kernel NORMAL group list, never trust a broker ACK alone.
+    const denyGroups = info(restrictedToken, 2)
+    const denyCount = denyGroups.readUInt32LE()
+    if (denyCount > (denyGroups.length - 8) / 16) throw new Error('truncated deny TokenGroups')
+    const verified = new Set<string>()
+    for (let i = 0; i < denyCount; i++) {
+      const offset = 8 + i * 16
+      const flags = denyGroups.readUInt32LE(offset + 8)
+      if ((flags & 0x11) !== 0x11 || (flags & 6) !== 0) continue
+      const valueOut = Buffer.alloc(8)
+      check(api.convertSidToStringSidW!(pointer(denyGroups, offset), valueOut), 'ConvertSidToStringSidW(group)')
+      const value = pointer(valueOut)
+      try { verified.add(readWindowsWideString(native.koffi, value)) } finally { api.localFree!(value) }
+    }
+    if (denies.some(id => !verified.has(id))) throw new Error('broker did not install the mandatory deny-only normal groups')
 
     const entry = (trustee: NativePointer, mode: number, mask: number, inheritance: number): Buffer => {
       const data = Buffer.alloc(48)
@@ -151,100 +174,10 @@ export async function runWindowsDenied(
       writePointer(data, 40, trustee)
       return data
     }
-    // Conditional ACEs inspect an inheritable mandatory LOCAL token attribute,
-    // not the removable restricting-SID list. Protected token adjustment keeps
-    // the attribute on copied and narrowed tokens while .NET identity queries
-    // and impersonation continue to work.
-    const allocations: NativePointer[] = []
-    const allocate = (data: Buffer): NativePointer => {
-      const value = native.koffi.alloc('uint8', data.length)
-      allocations.push(value)
-      native.koffi.encode(value, 'uint8', data, data.length)
-      return value
-    }
-    const unicode = (value: string): Buffer => {
-      const text = Buffer.from(value + '\0', 'utf16le')
-      const record = Buffer.alloc(16)
-      record.writeUInt16LE(text.length - 2)
-      record.writeUInt16LE(text.length, 2)
-      writePointer(record, 8, allocate(text))
-      return record
-    }
-    try {
-      const attribute = Buffer.alloc(40)
-      unicode('DshMultiRootDeniedRoots').copy(attribute)
-      attribute.writeUInt16LE(3, 16) // TOKEN_SECURITY_ATTRIBUTE_TYPE_STRING
-      attribute.writeUInt32LE(0x20, 20) // MANDATORY; inheritable (no NON_INHERITABLE)
-      attribute.writeUInt32LE(denies.length, 24)
-      writePointer(attribute, 32, allocate(Buffer.concat(denies.map(unicode))))
-      const attributes = Buffer.alloc(16)
-      attributes.writeUInt16LE(1)
-      attributes.writeUInt32LE(1, 4)
-      writePointer(attributes, 8, allocate(attribute))
-      const operation = Buffer.alloc(4)
-      operation.writeUInt32LE(2) // TOKEN_SECURITY_ATTRIBUTE_OPERATION_ADD
-      const input = Buffer.alloc(16)
-      writePointer(input, 0, allocate(attributes))
-      writePointer(input, 8, allocate(operation))
-      if (api.setTokenInformation!(restrictedToken, 39, input, input.length) === 0) {
-        const code = api.getLastError!()
-        if (code !== 1314) throw new Error(`SetTokenInformation(TokenSecurityAttributes) failed (Win32 ${code})`)
-        const sidOut = Buffer.alloc(8)
-        check(api.convertSidToStringSidW!(userSid, sidOut), 'ConvertSidToStringSidW')
-        const text = pointer(sidOut)
-        try {
-          await requestDenyAttribute(readWindowsWideString(native.koffi, text), native.koffi.address(restrictedToken), denies)
-        } finally { api.localFree!(text) }
-      }
-    } finally { for (const value of allocations) native.koffi.free(value) }
-    // Do not trust a pipe ACK alone: verify the mandatory, inheritable kernel
-    // attribute before installing any conditional ACE or launching a child.
-    // NtQuery returns native UNICODE_STRING records. GetTokenInformation's
-    // Win32 claim conversion uses PWSTR records and cannot be decoded with
-    // that layout (doing so dereferences flag bits as a pointer).
-    const queryName = native.koffi.alloc('uint8', 64)
-    let claims: Buffer
-    try {
-      const nameBytes = Buffer.from('DshMultiRootDeniedRoots\0', 'utf16le')
-      native.koffi.encode(queryName, 'uint8', nameBytes, nameBytes.length)
-      const name = Buffer.alloc(16)
-      name.writeUInt16LE(nameBytes.length - 2)
-      name.writeUInt16LE(nameBytes.length, 2)
-      writePointer(name, 8, queryName)
-      const size = Buffer.alloc(4)
-      api.ntQuerySecurityAttributesToken!(restrictedToken, name, 1, null, 0, size)
-      const length = size.readUInt32LE()
-      if (length < 16 || length > 1024 * 1024) throw new Error('invalid security attribute query size')
-      claims = Buffer.alloc(length)
-      const code = api.ntQuerySecurityAttributesToken!(restrictedToken, name, 1, claims, length, size)
-      if (code !== 0) throw new Error(`NtQuerySecurityAttributesToken failed (NTSTATUS ${code})`)
-    } finally { native.koffi.free(queryName) }
-    if (claims.readUInt16LE(0) !== 1 || claims.readUInt32LE(4) > 128) throw new Error('invalid token security attributes')
-    const claimCount = claims.readUInt32LE(4)
-    const claimBytes = Buffer.from(native.koffi.decode(pointer(claims, 8), 'uint8', claimCount * 40) as Uint8Array)
-    const readUnicode = (record: Buffer): string => {
-      const length = record.readUInt16LE(0)
-      if (length > 1024 || length % 2 !== 0) throw new Error('invalid token attribute string')
-      return Buffer.from(native.koffi.decode(pointer(record, 8), 'uint8', length) as Uint8Array).toString('utf16le')
-    }
-    let verified = false
-    for (let i = 0; i < claimCount; i++) {
-      const claim = claimBytes.subarray(i * 40, (i + 1) * 40)
-      if (readUnicode(claim) !== 'DshMultiRootDeniedRoots') continue
-      const flags = claim.readUInt32LE(20)
-      if (claim.readUInt16LE(16) !== 3 || (flags & 0x20) === 0 || (flags & 0x19) !== 0 || claim.readUInt32LE(24) !== denies.length) {
-        throw new Error('deny token attribute is not mandatory and inheritable')
-      }
-      const values = Buffer.from(native.koffi.decode(pointer(claim, 32), 'uint8', denies.length * 16) as Uint8Array)
-      const actual = Array.from({ length: denies.length }, (_, index) => readUnicode(values.subarray(index * 16))).sort()
-      if (JSON.stringify(actual) !== JSON.stringify([...denies].sort())) throw new Error('deny token attribute does not match the root set')
-      verified = true
-    }
-    if (!verified) throw new Error('broker did not install the mandatory deny token attribute')
     const tokenAclOut = Buffer.alloc(8)
     status(api.setEntriesInAclW!(3, Buffer.concat([
-      entry(userSid, 3, 0x80 | WRITE_DAC | WRITE_OWNER, 0),
-      // Permit identity duplication and activation; only attribute/default
+      entry(userSid, 3, 0x20 | 0x40 | 0x80 | WRITE_DAC | WRITE_OWNER, 0),
+      // Permit identity duplication and activation; only group/privilege/default
       // adjustment and security-descriptor changes must be unavailable.
       entry(userSid, 1, 0x10000000, 0),
       entry(ownerRights, 1, 0x20000, 0),
@@ -255,7 +188,7 @@ export async function runWindowsDenied(
       // CreateProcess derives a NEW primary-token object. Its security comes
       // from the token's default DACL, not the source token object's DACL.
       // Set both so descendants cannot reopen a freshly cloned token to strip
-      // the mandatory deny attribute.
+      // the mandatory deny-only groups.
       const defaultDacl = Buffer.alloc(8)
       writePointer(defaultDacl, 0, tokenAcl)
       check(api.setTokenInformation!(restrictedToken, 6, defaultDacl, 8), 'SetTokenInformation(TokenDefaultDacl)')
@@ -308,16 +241,15 @@ export async function runWindowsDenied(
           // Keep existing protection/inheritance and every unrelated ACE.
           const descriptorOut = Buffer.alloc(8)
           const flags = inheritance === 3 ? 'OICI' : ''
-          const condition = `(Exists DshMultiRootDeniedRoots && DshMultiRootDeniedRoots Contains "${denyId}")`
           check(api.convertStringSecurityDescriptorToSecurityDescriptorW!(
-            `D:(XD;${flags};0x${mask.toString(16)};;;WD;${condition})`, 1, descriptorOut, null,
-          ), 'ConvertStringSecurityDescriptorToSecurityDescriptorW(conditional deny)')
+            `D:(D;${flags};0x${mask.toString(16)};;;${denyId})`, 1, descriptorOut, null,
+          ), 'ConvertStringSecurityDescriptorToSecurityDescriptorW(normal-group deny)')
           const conditionalDescriptor = pointer(descriptorOut)
           try {
             const present = Buffer.alloc(4), acl = Buffer.alloc(8), defaulted = Buffer.alloc(4)
             check(api.getSecurityDescriptorDacl!(conditionalDescriptor, present, acl, defaulted), 'GetSecurityDescriptorDacl')
             const first = Buffer.alloc(8)
-            check(api.getAce!(pointer(acl), 0, first), 'GetAce(conditional deny)')
+            check(api.getAce!(pointer(acl), 0, first), 'GetAce(normal-group deny)')
             const header = Buffer.from(native.koffi.decode(pointer(first), 'uint8', 4) as Uint8Array)
             const denyBytes = Buffer.from(native.koffi.decode(pointer(first), 'uint8', header.readUInt16LE(2)) as Uint8Array)
             const existingHeader = Buffer.from(native.koffi.decode(merged, 'uint8', 8) as Uint8Array)

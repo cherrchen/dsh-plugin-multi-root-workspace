@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-10-13；用户授权继续实现 broker 路径；ADR-0018 的原生证伪保留，原生执行状态只见路线账本）
+Superseded（2026-10-13；属性读回成功但 local 条件未兑现拒写；后续候选见 [ADR-0020](./ADR-0020-windows-normal-deny-groups.md)，原生状态只见路线账本）
 
 ## Date
 
@@ -12,11 +12,11 @@ Accepted（2026-10-13；用户授权继续实现 broker 路径；ADR-0018 的原
 
 ADR-0018 的原生回归暴露可执行旁路：CreateRestrictedToken 取交集能移除 restricting deny SID；限制副本激活也不能守住实际 impersonation 写入。禁止 duplicate 虽能阻断这条操作，却破坏 PowerShell 的 .NET 身份查询。本决策使 deny 的判断独立于可删除的 restricting SID list。
 
-## 原生前置条件（2026-10-13）
+## 原生前置条件（首轮，2026-10-13）
 
 普通 Windows 插件进程设置 TokenSecurityAttributes 时实际返回 Win32 1314（缺少所需特权）。该信息类需要 SeTcbPrivilege，不能以一般管理员组或 TOKEN_ADJUST_DEFAULT 代替。当前 prototype 在这一步 fail closed，未启动子进程、也未开始树 ACL 修改；后续条件 ACE 的实际执行尚未获证据。不得宣称该设计已经可交付。
 
-完整实现需要独立、经管理员安装的 SYSTEM broker，仅为受限 token 添加不可随派生移除的只读属性。是否允许增加此特权组件及部署前置条件，待用户范围决定；本 ADR 继续 Proposed，不把需求缺口重新延后为已完成。
+完整实现需要独立、经管理员安装的 SYSTEM broker，仅为受限 token 添加不可随派生移除的只读属性。之后用户已授权 broker 路径；下面保留首轮设计与后续安装修订，不把未经原生验收的设计写成执行保证。
 
 ## Decision（目标）
 

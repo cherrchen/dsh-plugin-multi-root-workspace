@@ -50,7 +50,7 @@ English: [README.en.md](./README.en.md)
 
 B9 开发分支中，新根默认 `inherit`（继承会话模式）；`add --inherit|--read-only|--read-write` 或面板可显式选三档。显式只读保持完整成员资格，但 Full-access 也不得写；固定读写在全局只读会话仍可写该根。旧可写记录升级为 inherit，重新登记保留原策略。权限与迁移合同见 [ADR-0017](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)；已启动进程保留启动快照，变化只约束之后的调用与新进程。发布包是否包含 B9 见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)。
 
-Windows Full-access 的局部拒写独立 runner 仍在开发，普通进程缺少设置安全属性的 SeTcbPrivilege，完整执行需要特权 broker 的范围决定与原生验收；目前拒绝启动，不能当作已实现。目标继续报告 partial；其 ACL 前置条件、父目录 guard 与 standing ACE 边界见 [ADR-0019](../decisions/ADR-0019-windows-token-attributes-and-conditional-acls.md)。无法表达的后端组合拒绝启动，不退回裸进程；具体后端限制见 ADR-0017。
+Windows Full-access 的局部拒写独立 runner 仍在开发，候选通过管理员安装的 broker 创建普通 deny-only 组 token，完整执行仍需原生验收；缺少可信 broker 时拒绝启动，不能当作已实现。目标继续报告 partial；其 token 与 ACL 合同见 [ADR-0020](../decisions/ADR-0020-windows-normal-deny-groups.md)。无法表达的后端组合拒绝启动，不退回裸进程；具体后端限制见 ADR-0017。
 
 每个主根的附加根数量有上限（默认 16，经注册表行配置 `maxAdditionalRoots` 可调至 64）；超限的新增被拒绝，历史超限记录照常授予（[ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md)）。
 

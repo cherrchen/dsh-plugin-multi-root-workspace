@@ -14,7 +14,7 @@
 
 ## Current State
 
-当前三态存储、scope / fs、命令 / 面板与进程接缝已实施，合同见 [ADR-0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)。Windows 的只读会话 + 固定读写已通过独立 runner 实现；先前延后的 Full-access + 局部只读现已重新纳入 B9，目标采用 [ADR-0019](../../decisions/ADR-0019-windows-token-attributes-and-conditional-acls.md) 的独立 token-attribute 路径。Landlock 的该组合仍按 ADR-0017 在 spawn 前显式拒绝。原生执行和验收状态只见路线账本。
+当前三态存储、scope / fs、命令 / 面板与进程接缝已实施，合同见 [ADR-0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)。Windows 的只读会话 + 固定读写已通过独立 runner 实现；先前延后的 Full-access + 局部只读现已重新纳入 B9，候选采用 [ADR-0020](../../decisions/ADR-0020-windows-normal-deny-groups.md) 的普通 deny-only 组路径；先前 token-attribute 路径的证伪见 ADR-0019。Landlock 的该组合仍按 ADR-0017 在 spawn 前显式拒绝。原生执行和验收状态只见路线账本。
 
 ## Scope
 

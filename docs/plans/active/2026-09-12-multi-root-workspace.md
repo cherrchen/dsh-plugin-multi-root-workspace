@@ -513,3 +513,7 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 恢复后顺序：读取本节与 ADR-0017/0019、双语兼容笔记；检查 Git/最终 CI 状态；修复以上两个问题；运行相应本机检查并分批提交推送；保留 Windows 原生反绕过测试，确认11版本×4系统完整 gate；更新本账本和 PR 最终证据后才能记完成。版本 allowlist、版本号和 tag 均未变更，用户没有要求发布。
 
 CI 日志读取：`gh api --allow-escape-sequences repos/cherrchen/dsh-plugin-multi-root-workspace/actions/jobs/<job-id>/logs > /tmp/b9-job.log`。`gh run view --log-failed` 会尝试写受限制的默认 cache；上述 API 可避开。Git 写操作及本机脱离外层沙箱的 Seatbelt 原生执行需要工具的 `require_escalated`；前述提交/推送与测试已有授权。不要输出完整 journey/smoke 日志，其中可能含临时 web 认证令牌。
+
+### B9 交接续作：普通 deny-only 组候选（2026-10-13）
+
+收到外部 Agent 的交接并恢复开发。起点 `b947250` 干净且已推送；旧 start() 活句柄与 stderr 诊断改动保留。复核 CI 38376966866：UserClaimAttributes 写入在两种 token 上均返回 87；`@User` Exists 探针的 PowerShell 非终止 SDDL 错误导致 ACE 未装入，该探针不能证明求值。当前改用 [ADR-0020](../../decisions/ADR-0020-windows-normal-deny-groups.md) 候选：NtCreateTokenEx 镜像调用方身份，仅增加普通 deny-only groups，普通 deny ACE 不依赖属性求值；弱化测试增加 disable 全部普通组后的真实写入。B9 仍未完成、未发布，Windows 原生与完整门禁正在验证。

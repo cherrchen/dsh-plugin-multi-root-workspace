@@ -38,6 +38,7 @@ Architecture Decision Records (ADRs), capturing important architecture and engin
 - [ADR-0017-three-state-root-access-and-sandbox-modes.md](./ADR-0017-three-state-root-access-and-sandbox-modes.md) (Chinese) — B9 three-state additional-root access (inherit/read-only/read-write) with the nine-cell matrix, the `readWriteRecordedPath` persistence encoding, consumer-side public-method seams for shell/pwsh/PTY/PTC (ALS + env session marker), per-dialect restricted profiles, and the Windows single-SID boundary (Accepted, Phase 1 decisions).
 - [ADR-0018-windows-ambient-write-denial.md](./ADR-0018-windows-ambient-write-denial.md) (Chinese) — Windows ambient write denial for B9: restricted tokens, explicit ACLs, owner/parent/token bypass protection, standing ACEs, and partial enforcement boundaries (superseded by ADR-0019).
 - [ADR-0019-windows-token-attributes-and-conditional-acls.md](./ADR-0019-windows-token-attributes-and-conditional-acls.md) (Chinese) — Replaces ADR-0018 with inherited mandatory local token attributes and conditional deny ACEs; narrowed token copies remain denied while PowerShell identity queries remain possible; native attribute provisioning requires SeTcbPrivilege and a broker scope decision (Proposed).
+- [ADR-0020-windows-normal-deny-groups.md](./ADR-0020-windows-normal-deny-groups.md) (Chinese) — Mirror the caller identity with additional normal deny-only groups and ordinary deny ACEs, retaining actual write attempts after token narrowing (Proposed).
 
 Do not pre-create empty ADR files; add one only when a real decision is made.
 

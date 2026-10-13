@@ -16,7 +16,7 @@ A real development project is usually several independent Git repositories, and 
 - **Security does not degrade**: additional roots are authorized through the same mechanism the harness already uses — an in-process filesystem fence plus kernel-level sandboxes (macOS Seatbelt / Linux bwrap / Landlock / Windows ACL), with files and bash sharing one and the same scope. It never degenerates into full access or prompt-level constraints.
 - **Absent when absent**: with no additional root configured, its behavior is item-for-item identical to an uninstalled harness; every misconfiguration fails loudly instead of silently degrading.
 
-The development branch adds B9 three-state access and develops Windows ambient write denial; see the [usage guide](./docs/guide/README.en.md) and [ADR-0019](./docs/decisions/ADR-0019-windows-token-attributes-and-conditional-acls.md) for platform limits. These changes are unreleased; complete Windows execution still requires a privileged-broker scope decision and native acceptance.
+The development branch adds B9 three-state access and develops Windows ambient write denial; see the [usage guide](./docs/guide/README.en.md) and [ADR-0020](./docs/decisions/ADR-0020-windows-normal-deny-groups.md) for platform limits. These changes are unreleased; complete Windows execution still requires native acceptance.
 
 Current released version: `v0.1.6`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
