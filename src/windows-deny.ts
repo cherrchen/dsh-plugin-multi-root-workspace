@@ -1,7 +1,7 @@
 /** Ambient ACL writes minus registered read-only roots (Windows B9).
  *
  * The restricting list mirrors the caller's enabled identities. An inherited
- * mandatory deny-only NORMAL groups identify denied roots to ordinary deny ACEs in
+ * deny-only NORMAL groups identify denied roots to ordinary deny ACEs in
  * the NORMAL access check, so narrowing the SID list cannot discard the deny.
  * Privileges that could bypass the DACL are removed; integrity is not lowered.
  * Standing ACEs retain the restriction for running children and concurrent
@@ -157,13 +157,13 @@ export async function runWindowsDenied(
     for (let i = 0; i < denyCount; i++) {
       const offset = 8 + i * 16
       const flags = denyGroups.readUInt32LE(offset + 8)
-      if ((flags & 0x11) !== 0x11 || (flags & 6) !== 0) continue
+      if ((flags & 0x10) === 0 || (flags & 6) !== 0) continue
       const valueOut = Buffer.alloc(8)
       check(api.convertSidToStringSidW!(pointer(denyGroups, offset), valueOut), 'ConvertSidToStringSidW(group)')
       const value = pointer(valueOut)
       try { verified.add(readWindowsWideString(native.koffi, value)) } finally { api.localFree!(value) }
     }
-    if (denies.some(id => !verified.has(id))) throw new Error('broker did not install the mandatory deny-only normal groups')
+    if (denies.some(id => !verified.has(id))) throw new Error('broker did not install the deny-only normal groups')
 
     const entry = (trustee: NativePointer, mode: number, mask: number, inheritance: number): Buffer => {
       const data = Buffer.alloc(48)
@@ -188,7 +188,7 @@ export async function runWindowsDenied(
       // CreateProcess derives a NEW primary-token object. Its security comes
       // from the token's default DACL, not the source token object's DACL.
       // Set both so descendants cannot reopen a freshly cloned token to strip
-      // the mandatory deny-only groups.
+      // the deny-only groups.
       const defaultDacl = Buffer.alloc(8)
       writePointer(defaultDacl, 0, tokenAcl)
       check(api.setTokenInformation!(restrictedToken, 6, defaultDacl, 8), 'SetTokenInformation(TokenDefaultDacl)')

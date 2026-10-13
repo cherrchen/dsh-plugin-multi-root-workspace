@@ -197,37 +197,20 @@ public sealed class RootDenyBroker : ServiceBase {
             for (int i = 0; i < roots.Length; i++) {
                 var identity = new SecurityIdentifier(roots[i]); var bytes = new byte[identity.BinaryLength]; identity.GetBinaryForm(bytes, 0);
                 var p = Marshal.AllocHGlobal(bytes.Length); memory.Add(p); Marshal.Copy(bytes, 0, p, bytes.Length);
-                // NORMAL group, not a restricting SID. Cannot supply allow rights;
-                // CreateRestrictedToken keeps it deny-only even when disabling it.
-                Marshal.StructureToPtr(new SidAttributes { Sid = p, Attributes = 0x11 }, IntPtr.Add(groups, offset + (count + i) * stride), false);
+                // Private intermediate token only. Convert these normal groups
+                // to deny-only before any handle can leave the broker.
+                Marshal.StructureToPtr(new SidAttributes { Sid = p, Attributes = 7 }, IntPtr.Add(groups, offset + (count + i) * stride), false);
             }
             var qos = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SecurityQualityOfService))); memory.Add(qos);
             Marshal.StructureToPtr(new SecurityQualityOfService { Length = Marshal.SizeOf(typeof(SecurityQualityOfService)), ImpersonationLevel = 2, ContextTrackingMode = 1 }, qos, false);
             var attributes = new ObjectAttributes { Length = Marshal.SizeOf(typeof(ObjectAttributes)), SecurityQualityOfService = qos };
-            int creation = NtCreateTokenEx(out token, 0xF01FF, ref attributes, 1,
+            NtCheck(NtCreateTokenEx(out token, 0xF01FF, ref attributes, 1,
                 ref statistics.AuthenticationId, ref statistics.ExpirationTime, user, groups, privileges,
-                IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, mandatory, owner, primary, dacl, tokenSource);
-            if (creation < 0) {
-                // Bounded diagnostic clones are never returned or launched.
-                // Distinguish an extended-policy ABI failure from a deny-group
-                // failure in one native run; no successful probe is a fallback.
-                IntPtr probe;
-                int baseEx = NtCreateTokenEx(out probe, 0xF01FF, ref attributes, 1,
-                    ref statistics.AuthenticationId, ref statistics.ExpirationTime, user, originalGroups, privileges,
-                    IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, mandatory, owner, primary, dacl, tokenSource);
-                if (probe != IntPtr.Zero) CloseHandle(probe);
-                int noPolicy = NtCreateTokenEx(out probe, 0xF01FF, ref attributes, 1,
-                    ref statistics.AuthenticationId, ref statistics.ExpirationTime, user, groups, privileges,
-                    IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, owner, primary, dacl, tokenSource);
-                if (probe != IntPtr.Zero) CloseHandle(probe);
-                int legacy = NtCreateToken(out probe, 0xF01FF, ref attributes, 1,
-                    ref statistics.AuthenticationId, ref statistics.ExpirationTime, user, groups, privileges,
-                    owner, primary, dacl, tokenSource);
-                if (probe != IntPtr.Zero) CloseHandle(probe);
-                throw new Win32Exception((int)RtlNtStatusToDosError(creation), "NtCreateTokenEx status=" + unchecked((uint)creation).ToString("x")
-                    + " base=" + unchecked((uint)baseEx).ToString("x") + " no-policy=" + unchecked((uint)noPolicy).ToString("x") + " legacy=" + unchecked((uint)legacy).ToString("x")
-                    + " policy=" + Marshal.ReadInt32(mandatory) + " qos-size=" + Marshal.SizeOf(typeof(SecurityQualityOfService)));
-            }
+                IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, mandatory, owner, primary, dacl, tokenSource), "NtCreateTokenEx");
+            IntPtr narrowed;
+            Check(CreateRestrictedToken(token, 1, (uint)roots.Length, IntPtr.Add(groups, offset + count * stride),
+                0, IntPtr.Zero, 0, IntPtr.Zero, out narrowed), "CreateRestrictedToken(broker deny groups)");
+            CloseHandle(token); token = narrowed;
             Check(SetTokenInformation(token, 12, session, 4), "SetTokenInformation(session)");
             var result = token; token = IntPtr.Zero; return result;
         } finally {
@@ -254,8 +237,6 @@ public sealed class RootDenyBroker : ServiceBase {
     [DllImport("ntdll.dll")] static extern int NtCreateTokenEx(out IntPtr token, uint access, ref ObjectAttributes attributes, int type,
         ref Luid authId, ref long expiration, IntPtr user, IntPtr groups, IntPtr privileges, IntPtr userClaims, IntPtr deviceClaims,
         IntPtr deviceGroups, IntPtr mandatory, IntPtr owner, IntPtr primary, IntPtr dacl, IntPtr source);
-    [DllImport("ntdll.dll")] static extern int NtCreateToken(out IntPtr token, uint access, ref ObjectAttributes attributes, int type,
-        ref Luid authId, ref long expiration, IntPtr user, IntPtr groups, IntPtr privileges, IntPtr owner, IntPtr primary, IntPtr dacl, IntPtr source);
     [DllImport("ntdll.dll")] static extern int NtCompareTokens(IntPtr first, IntPtr second, [MarshalAs(UnmanagedType.U1)] out bool equal);
     [DllImport("ntdll.dll")] static extern uint RtlNtStatusToDosError(int status);
     [DllImport("ntdll.dll")] static extern int NtQuerySecurityAttributesToken(IntPtr token, IntPtr names, uint count, IntPtr data, int size, out int length);
@@ -269,6 +250,8 @@ public sealed class RootDenyBroker : ServiceBase {
     [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
     [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr data, int size, out int length);
     [DllImport("advapi32.dll", SetLastError=true)] static extern bool SetTokenInformation(IntPtr token, int kind, IntPtr data, int size);
+    [DllImport("advapi32.dll", SetLastError=true)] static extern bool CreateRestrictedToken(IntPtr token, uint flags, uint disableCount, IntPtr disableSids,
+        uint deleteCount, IntPtr deletePrivileges, uint restrictCount, IntPtr restrictSids, out IntPtr result);
     [DllImport("advapi32.dll")] static extern bool IsTokenRestricted(IntPtr token);
     [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool LookupPrivilegeValue(string system, string name, out Luid luid);
     [DllImport("advapi32.dll", SetLastError=true)] static extern bool AdjustTokenPrivileges(IntPtr token, bool disable, ref TokenPrivileges privileges, int size, IntPtr previous, IntPtr returned);

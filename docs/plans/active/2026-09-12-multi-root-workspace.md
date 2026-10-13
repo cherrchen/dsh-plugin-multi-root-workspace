@@ -527,3 +527,5 @@ CI 日志读取：`gh api --allow-escape-sequences repos/cherrchen/dsh-plugin-mu
 候选 `4969e15` 的 [diag 38393550613](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38393550613) 已越过 token handle 获取，下一处失败为信息查询 size 检查。空 claim/group 通道改为提供至少 16 字节的已清零 buffer 进行实际查询，必须确认第二次 API 调用成功；不能从 sizing 失败推断空集合。所有查询错误现在带信息类编号及 Win32 码。
 
 候选 `f7c753e` 的 [diag 38394060369](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38394060369) 已越过全部 source 信息查询并执行 NtCreateTokenEx，返回 NTSTATUS c000000d / Win32 87。续作补齐 ObjectAttributes 的 SECURITY_QUALITY_OF_SERVICE（SecurityImpersonation）；另拒绝源 token 的可继承 local 属性，以免创建时丢掉原有属性约束。
+
+候选 `5e65a2f` 的 [diag 38395468655](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38395468655) 给出参数对照：原始 groups 创建成功（base=0）；增加直接 deny-only groups 后 extended、no-policy、legacy 均 c000000d。改为仅在 broker 内创建普通组，随即以 CreateRestrictedToken 转成 deny-only 并移除 bypass privileges，服务不回传中间 token；runner 再过滤并验证普通组 deny-only / 非 enabled，不把 mandatory 位当作抗删除依据。普通组与可删除 restricting list 的区别仍由原生弱化测试验证。

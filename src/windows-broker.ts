@@ -10,7 +10,7 @@ export function brokerPipeName(userSid: string): string {
 }
 
 /** The broker must acknowledge before any ACL edits or process creation. The
- * caller independently reads the mandatory deny-only groups from the token;
+ * caller independently reads the deny-only groups from the token;
  * even an impersonated pipe server cannot fabricate that kernel state.
  */
 export async function requestDenyToken(userSid: string, tokenHandle: bigint, deniedIds: readonly string[]): Promise<bigint> {
