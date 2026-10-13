@@ -219,6 +219,8 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
         ['h-alt-d', 'XD;;0x116;;;WD;(Exists DshMultiRootDeniedRootsD)', 'deny iff DEFAULT flag lands in working list'],
         ['i-alt-f', 'XD;;0x116;;;WD;(Exists DshMultiRootDeniedRootsF)', 'deny iff DEFAULT|DENY_ONLY works'],
         ['j-alt-real', `XD;;0x116;;;WD;(Exists DshMultiRootDeniedRootsD && DshMultiRootDeniedRootsD Contains "${denyId}")`, 'deny iff mechanism works (DEFAULT)'],
+        ['k-user-exists', 'XD;;0x116;;;WD;(Exists @User.DshMultiRootDeniedRoots)', 'deny iff user claim visible'],
+        ['l-user-real', `XD;;0x116;;;WD;(Exists @User.DshMultiRootDeniedRoots && @User.DshMultiRootDeniedRoots Contains "${denyId}")`, 'deny iff mechanism works (@User)'],
         ['e-plain', 'D;;0x116;;;WD', 'always deny'],
         ['f-ambient', 'A;;FA;;;WD', 'always allow'],
       ]
@@ -271,6 +273,24 @@ if(st===0){
     let vs=[];
     if(vt===3){const vals=Buffer.from(k.decode(k.decode(at.subarray(32),'void*'),'uint8',vc*16));for(let j=0;j<vc;j++)vs.push(ru(vals.subarray(j*16)));}
     console.log('ATTR',JSON.stringify(ru(at)),'type',vt,'flags',at.readUInt32LE(20).toString(16),'count',vc,'values',JSON.stringify(vs));
+  }
+}
+// CLAIM_SECURITY_ATTRIBUTE_V1: PWSTR Name; USHORT ValueType,Reserved; ULONG Flags,ValueCount; PWSTR* pString — 32 bytes on x64.
+getInfo(tok,33,null,0,sz);
+const cbuf=Buffer.alloc(Math.max(sz.readUInt32LE(),16));
+const cok=getInfo(tok,33,cbuf,cbuf.length,sz);
+console.log('CLAIMS',cok,sz.readUInt32LE());
+if(cok){
+  const cc=cbuf.readUInt32LE(4);
+  console.log('CLAIMCOUNT',cc);
+  const carr=Buffer.from(k.decode(k.decode(cbuf.subarray(8),'void*'),'uint8',cc*32));
+  const cname=p=>Buffer.from(k.decode(p,'char16_t',40)).toString('utf16le').replace(/\0.*$/,'');
+  const cstr=p=>Buffer.from(k.decode(p,'char16_t',256)).toString('utf16le').replace(/\0.*$/,'');
+  for(let i=0;i<cc;i++){
+    const at=carr.subarray(i*32),vc=at.readUInt32LE(16),vt=at.readUInt16LE(8);
+    let vs=[];
+    if(vt===3){const vals=Buffer.from(k.decode(k.decode(at.subarray(24),'void*'),'uint8',vc*8));for(let j=0;j<vc;j++)vs.push(cstr(k.decode(vals.subarray(j*8),'void*')));}
+    console.log('CLAIM',JSON.stringify(cname(k.decode(at.subarray(0),'void*'))),'type',vt,'flags',at.readUInt32LE(12).toString(16),'count',vc,'values',JSON.stringify(vs));
   }
 }
 try{fs.writeFileSync(${JSON.stringify(leaf)},'x');console.log('WRITE-denied-root allowed')}catch(e){console.log('WRITE-denied-root denied',e&&e.code||e)}

@@ -88,6 +88,11 @@ public sealed class RootDenyBroker : ServiceBase {
                     0x88, false, 0), "DuplicateHandle(token)"); // QUERY | ADJUST_DEFAULT, never SAME_ACCESS
                 if (TokenSid(token) != sid || !IsTokenRestricted(token)) throw new UnauthorizedAccessException("Not a caller-owned restricted token");
                 AddAttribute(token, roots);
+                // The conditional-ACE evaluator's local lookup never sees
+                // TokenSecurityAttributes — not even the kernel's own
+                // TSA://ProcUnique — so the deny set is also published as a
+                // user claim, the documented CAP channel.
+                AddUserClaim(token, roots);
             } finally {
                 if (token != IntPtr.Zero) CloseHandle(token);
                 if (processToken != IntPtr.Zero) CloseHandle(processToken);
@@ -159,6 +164,24 @@ public sealed class RootDenyBroker : ServiceBase {
             foreach (var value in values) if (value.Buffer != IntPtr.Zero) Marshal.FreeHGlobal(value.Buffer);
         }
     }
+    static void AddUserClaim(IntPtr token, string[] roots) {
+        IntPtr name = Marshal.StringToHGlobalUni("DshMultiRootDeniedRoots"), values = IntPtr.Zero, attribute = IntPtr.Zero, info = IntPtr.Zero;
+        var valuePointers = new IntPtr[roots.Length];
+        try {
+            for (int i = 0; i < roots.Length; i++) {
+                valuePointers[i] = Marshal.StringToHGlobalUni(roots[i]);
+            }
+            values = Marshal.AllocHGlobal(roots.Length * IntPtr.Size);
+            for (int i = 0; i < roots.Length; i++) Marshal.WriteIntPtr(IntPtr.Add(values, i * IntPtr.Size), valuePointers[i]);
+            attribute = Allocate(new ClaimAttributeV1 { Name = name, ValueType = 3, Reserved = 0, Flags = 0x20, Count = (uint)roots.Length, Values = values });
+            info = Allocate(new ClaimAttributesInfo { Version = 1, Reserved = 0, Count = 1, Attributes = attribute });
+            Check(SetTokenInformation(token, 33, info, Marshal.SizeOf(typeof(ClaimAttributesInfo))), "SetTokenInformation(TokenUserClaimAttributes)");
+        } finally {
+            Marshal.FreeHGlobal(name);
+            foreach (var pointer in valuePointers) if (pointer != IntPtr.Zero) Marshal.FreeHGlobal(pointer);
+            foreach (var memory in new[] { values, attribute, info }) if (memory != IntPtr.Zero) Marshal.FreeHGlobal(memory);
+        }
+    }
     static UnicodeString Unicode(string value, IntPtr memory) { return new UnicodeString { Length = checked((ushort)(value.Length * 2)), MaximumLength = checked((ushort)(value.Length * 2 + 2)), Buffer = memory }; }
     static IntPtr Allocate<T>(T value) { var memory = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(T))); Marshal.StructureToPtr(value, memory, false); return memory; }
     static void Check(bool ok, string name) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error(), name); }
@@ -173,6 +196,8 @@ public sealed class RootDenyBroker : ServiceBase {
     [StructLayout(LayoutKind.Sequential)] struct UnicodeString { public ushort Length, MaximumLength; public IntPtr Buffer; }
     [StructLayout(LayoutKind.Sequential)] struct AttributeV1 { public UnicodeString Name; public ushort ValueType, Reserved; public uint Flags, Count; public IntPtr Values; }
     [StructLayout(LayoutKind.Sequential)] struct AttributesInfo { public ushort Version, Reserved; public uint Count; public IntPtr Attributes; }
+    [StructLayout(LayoutKind.Sequential)] struct ClaimAttributeV1 { public IntPtr Name; public ushort ValueType, Reserved; public uint Flags, Count; public IntPtr Values; }
+    [StructLayout(LayoutKind.Sequential)] struct ClaimAttributesInfo { public ushort Version, Reserved; public uint Count; public IntPtr Attributes; }
     [StructLayout(LayoutKind.Sequential)] struct AttributesOperation { public IntPtr Attributes, Operations; }
     [StructLayout(LayoutKind.Sequential)] struct Luid { public uint Low; public int High; }
     [StructLayout(LayoutKind.Sequential)] struct TokenPrivileges { public uint Count; public Luid Luid; public uint Attributes; }
