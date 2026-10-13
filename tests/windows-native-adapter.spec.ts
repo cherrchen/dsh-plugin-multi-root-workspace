@@ -67,6 +67,18 @@ describe('Windows native public-process adapter', () => {
     expect(f.descriptor()).toHaveLength(0)
     expect(f.inheritance).toEqual([1, 0])
   })
+  it('binds missing file-type support through an older helper public extension seam', () => {
+    const f = fixture()
+    const getFileType = f.api.getFileType!
+    delete f.api.getFileType
+    f.native.extendWin32ProcessBindings = create => create({ kernel32: 'kernel32', advapi32: 'advapi32', bind(library, name, result, args) {
+      expect([library, name, result, args]).toEqual(['kernel32', 'GetFileType', 'uint32', ['void*']])
+      return getFileType
+    } })
+    spawnWindowsDeniedChild(f.native, f.api, f.options)
+    expect(f.descriptor().readBigUInt64LE(12 + 7 * 8)).toBe(17n)
+    expect(f.inheritance).toEqual([1, 0])
+  })
   it('fails closed on an unknown STARTUPINFO layout and still clears inheritance', () => {
     const f = fixture()
     f.startup.writeUInt32LE(80)

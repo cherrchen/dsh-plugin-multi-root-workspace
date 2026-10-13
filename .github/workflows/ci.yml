@@ -158,6 +158,11 @@ jobs:
 
       - run: pnpm docs:check
 
+      - if: always() && runner.os == 'Windows'
+        name: Uninstall the B9 broker and revoke installation rights
+        shell: pwsh
+        run: ./scripts/windows-broker/install.ps1 -Uninstall
+
   # The result the reusable workflow hands a caller: a skipped or cancelled
   # matrix must never read as green, so `publish` in release.yml sees a failed
   # verify unless BOTH upstream jobs ended in exactly `success`.

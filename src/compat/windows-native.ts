@@ -67,6 +67,13 @@ export function spawnWindowsDeniedChild(
   options: Parameters<WindowsNative['spawnInheritedJobProcess']>[1],
   activation?: { sourceToken: NativePointer; assign(process: NativePointer, thread: NativePointer): void },
 ): ReturnType<WindowsNative['spawnInheritedJobProcess']> {
+  // The oldest supported public table has uv_get_osfhandle and inheritance,
+  // but predates GetFileType. Bind that operation through its public seam.
+  if (options.controlFileDescriptor !== undefined && typeof api.getFileType !== 'function') {
+    api = { ...api, ...native.extendWin32ProcessBindings(({ kernel32, bind }) => ({
+      getFileType: bind(kernel32, 'GetFileType', 'uint32', ['void*']) as NativeFunction,
+    })) }
+  }
   let launchApi = api
   if (activation !== undefined) {
     launchApi = { ...api, createProcessAsUserW: (...args: readonly unknown[]): number => {

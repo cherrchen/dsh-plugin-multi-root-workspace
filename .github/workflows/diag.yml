@@ -38,3 +38,10 @@ jobs:
         shell: pwsh
         run: ./scripts/windows-broker/install.ps1
       - run: pnpm vitest run tests/windows-native.e2e.ts
+      - name: Verify broker install, upgrade and scoped rights removal
+        shell: pwsh
+        run: ./scripts/windows-broker/verify-install.ps1
+      - name: Uninstall the broker
+        if: always()
+        shell: pwsh
+        run: ./scripts/windows-broker/install.ps1 -Uninstall
