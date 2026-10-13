@@ -82,7 +82,7 @@ public sealed class RootDenyBroker : ServiceBase {
             if (process == IntPtr.Zero) throw new Win32Exception();
             IntPtr token = IntPtr.Zero, processToken = IntPtr.Zero;
             try {
-                Check(OpenProcessToken(process, 8, out processToken), "OpenProcessToken(client)");
+                Check(OpenProcessToken(process, 0x8A, out processToken), "OpenProcessToken(client)"); // QUERY | DUPLICATE | ADJUST_DEFAULT
                 if (TokenSid(processToken) != sid) throw new UnauthorizedAccessException("Process SID mismatch");
                 Check(DuplicateHandle(process, new IntPtr(unchecked((long)UInt64.Parse(fields[1]))), GetCurrentProcess(), out token,
                     0x88, false, 0), "DuplicateHandle(token)"); // QUERY | ADJUST_DEFAULT, never SAME_ACCESS
@@ -92,7 +92,22 @@ public sealed class RootDenyBroker : ServiceBase {
                 // TokenSecurityAttributes — not even the kernel's own
                 // TSA://ProcUnique — so the deny set is also published as a
                 // user claim, the documented CAP channel.
-                AddUserClaim(token, roots);
+                try { AddUserClaim(token, roots); }
+                catch (Win32Exception restricted) {
+                    // Discriminate "claims cannot be written on a restricted
+                    // token" from "claims cannot be written at all": retry on a
+                    // throwaway non-restricted duplicate of the caller's
+                    // process token and report both error codes.
+                    string note;
+                    IntPtr dup = IntPtr.Zero;
+                    try {
+                        Check(DuplicateTokenEx(processToken, 0xA8, IntPtr.Zero, 2, 1, out dup), "DuplicateTokenEx");
+                        try { AddUserClaim(dup, roots); note = "dup-claim-ok"; }
+                        catch (Win32Exception e2) { note = "dup-claim-win32=" + e2.NativeErrorCode; }
+                    } catch (Win32Exception e3) { note = "dup-win32=" + e3.NativeErrorCode; }
+                    finally { if (dup != IntPtr.Zero) CloseHandle(dup); }
+                    throw new Win32Exception(restricted.NativeErrorCode, restricted.Message + " [" + note + "]");
+                }
             } finally {
                 if (token != IntPtr.Zero) CloseHandle(token);
                 if (processToken != IntPtr.Zero) CloseHandle(processToken);
@@ -212,4 +227,5 @@ public sealed class RootDenyBroker : ServiceBase {
     [DllImport("advapi32.dll")] static extern bool IsTokenRestricted(IntPtr token);
     [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool LookupPrivilegeValue(string system, string name, out Luid luid);
     [DllImport("advapi32.dll", SetLastError=true)] static extern bool AdjustTokenPrivileges(IntPtr token, bool disable, ref TokenPrivileges privileges, int size, IntPtr previous, IntPtr returned);
+    [DllImport("advapi32.dll", SetLastError=true)] static extern bool DuplicateTokenEx(IntPtr existing, uint access, IntPtr attributes, int level, int type, out IntPtr duplicate);
 }
