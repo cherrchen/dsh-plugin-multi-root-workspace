@@ -127,8 +127,7 @@ public sealed class RootDenyBroker : ServiceBase {
             new { Name = "DshMultiRootDeniedRootsF", Flags = 0x64u },          // + DEFAULT + USE_FOR_DENY_ONLY
         };
         var names = new IntPtr[variants.Length];
-        var attributes = new AttributeV1[variants.Length];
-        IntPtr array = IntPtr.Zero, attributeBlock = IntPtr.Zero, attributes = IntPtr.Zero, operation = IntPtr.Zero;
+        IntPtr array = IntPtr.Zero, attributeBlock = IntPtr.Zero, info = IntPtr.Zero, operation = IntPtr.Zero;
         try {
             for (int i = 0; i < roots.Length; i++) values[i] = Unicode(roots[i], Marshal.StringToHGlobalUni(roots[i]));
             array = Marshal.AllocHGlobal(values.Length * Marshal.SizeOf(typeof(UnicodeString)));
@@ -136,19 +135,19 @@ public sealed class RootDenyBroker : ServiceBase {
             attributeBlock = Marshal.AllocHGlobal(variants.Length * Marshal.SizeOf(typeof(AttributeV1)));
             for (int i = 0; i < variants.Length; i++) {
                 names[i] = Marshal.StringToHGlobalUni(variants[i].Name);
-                attributes[i] = new AttributeV1 { Name = Unicode(variants[i].Name, names[i]), ValueType = 3, Flags = variants[i].Flags, Count = (uint)values.Length, Values = array };
-                Marshal.StructureToPtr(attributes[i], IntPtr.Add(attributeBlock, i * Marshal.SizeOf(typeof(AttributeV1))), false);
+                var attribute = new AttributeV1 { Name = Unicode(variants[i].Name, names[i]), ValueType = 3, Flags = variants[i].Flags, Count = (uint)values.Length, Values = array };
+                Marshal.StructureToPtr(attribute, IntPtr.Add(attributeBlock, i * Marshal.SizeOf(typeof(AttributeV1))), false);
             }
-            attributes = Allocate(new AttributesInfo { Version = 1, Count = (uint)variants.Length, Attributes = attributeBlock });
+            info = Allocate(new AttributesInfo { Version = 1, Count = (uint)variants.Length, Attributes = attributeBlock });
             operation = Marshal.AllocHGlobal(4); Marshal.WriteInt32(operation, 2); // ADD only; never REPLACE/DELETE
-            var input = new AttributesOperation { Attributes = attributes, Operations = operation };
+            var input = new AttributesOperation { Attributes = info, Operations = operation };
             IntPtr data = Allocate(input);
             try { Check(SetTokenInformation(token, 39, data, Marshal.SizeOf(typeof(AttributesOperation))), "SetTokenInformation(TokenSecurityAttributes)"); }
             finally { Marshal.FreeHGlobal(data); }
         } finally {
             foreach (var value in values) if (value.Buffer != IntPtr.Zero) Marshal.FreeHGlobal(value.Buffer);
             foreach (var memory in names) if (memory != IntPtr.Zero) Marshal.FreeHGlobal(memory);
-            foreach (var memory in new[] { array, attributeBlock, attributes, operation }) if (memory != IntPtr.Zero) Marshal.FreeHGlobal(memory);
+            foreach (var memory in new[] { array, attributeBlock, info, operation }) if (memory != IntPtr.Zero) Marshal.FreeHGlobal(memory);
         }
     }
     static UnicodeString Unicode(string value, IntPtr memory) { return new UnicodeString { Length = checked((ushort)(value.Length * 2)), MaximumLength = checked((ushort)(value.Length * 2 + 2)), Buffer = memory }; }
