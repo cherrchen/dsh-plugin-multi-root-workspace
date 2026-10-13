@@ -20,7 +20,7 @@ Accepted（2026-10-13；Windows 原生验收状态见路线账本）
 
 runner 从上游 ACL 安装位置解析公开的 `dsh-win32-process` 和 Koffi，结构检查集中于 `src/compat/windows-native.ts`。只使用其公开 inherited-stdio / Job / fd 7 / wait 接口；独立 runner 的静态模块图仍只有 `node:` 内置。未知导出、路径失效或原生失败都退出 127，不启动裸进程。
 
-使用 `CreateRestrictedToken(DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED)`，restricting list 包含原 token 的 user、enabled 且非 deny-only 的 groups，以及每个拒写根的独立 deny SID。ambient 的正常 DACL 与 restricting 检查均可匹配原身份；根上的显式 deny ACE 则在第二次检查拒绝写。保持原 integrity，不创建 private temp、不改 TMP / TEMP，不把目录 grant 扩成全局提升。可绕过 DACL 的 backup / restore / take-owner 等特权被移除。
+使用 `CreateRestrictedToken(DISABLE_MAX_PRIVILEGE)`，restricting list 包含原 token 的 user、enabled 且非 deny-only 的 groups，以及每个拒写根的独立 deny SID。ambient 的正常 DACL 与完整 restricting 检查均可匹配原身份；根上的显式 deny ACE 则在第二次检查拒绝写。不使用 WRITE_RESTRICTED 快捷方式：第一轮 Windows 原生回归证明该快捷方式可放过目录重命名的 parent-access 路径；read 仍匹配原身份，不额外加读取围限。保持原 integrity，不创建 private temp、不改 TMP / TEMP，不把目录 grant 扩成全局提升。可绕过 DACL 的 backup / restore / take-owner 等特权被移除。
 
 ### 防绕过与 ACL 生命周期
 

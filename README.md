@@ -16,6 +16,8 @@ DSH（DeepSeek Harness）原生只把会话启动的目录当作 Agent 唯一的
 - **安全不降级**：附加根走上游同款授权机制——进程内文件围栏 + 内核级沙箱（macOS Seatbelt / Linux bwrap / Landlock / Windows ACL），文件与 bash 共享同一份授权范围，绝不退化成全开放或只靠提示词约束。
 - **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
+开发分支的 B9 三态权限与 Windows Full-access 局部拒写，见[使用指南](./docs/guide/README.md#访问级别数量上限与-per-tool-封顶)；平台限制见 [ADR-0018](./docs/decisions/ADR-0018-windows-ambient-write-denial.md)。这部分尚未发布。
+
 当前发布版本 `v0.1.6`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始

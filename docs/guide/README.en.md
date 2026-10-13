@@ -40,13 +40,15 @@ The command is the text entry point and works in headless compositions too. Subc
 - Paths may be quoted, and `~` expands to the home directory; registration canonicalizes first — a path that duplicates an existing root, nests inside one, or is the workspace root itself is rejected.
 - `remove` / `access` / `alias` / `reveal` take `<n|path>` (n is the number `list` prints).
 - `alias` with no name clears the existing alias.
-- Raising `access` to `read-write` requires the root to be available right now.
+- `access` accepts `inherit`, `read-only`, or `read-write`; changes that widen access require an available root. See [ADR-0017](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md) for the transition rules.
 - `list` reports each root's state honestly: roots shown as `missing` (absent right now) or `redirected` (replaced by a symlink pointing elsewhere) **stay registered but are not granted**; once the directory is back, one `list` or a panel refresh grants it again — no restart.
 - The command's own output is in English (the host side has no active locale information).
 
 ## Access levels, the root limit, and per-tool caps
 
-Additional roots default to read-write — the same rights as the primary root. A read-only root keeps full membership (readable, file tree, LSP, instruction injection) but is denied write authority by the fs fence, confined processes, and the Windows ACL alike. Processes already running keep the root set they started with; an access change constrains only later calls and new processes ([ADR-0013](../decisions/ADR-0013-per-root-and-per-tool-access.md)).
+On the B9 development branch, new roots default to `inherit` (the session mode); `add --inherit|--read-only|--read-write` and the panel select among three policies. Explicit read-only keeps full membership but denies writes even under Full-access; fixed read-write allows writes to that root even in a globally read-only session. Old writable records migrate to inherit, and re-registration preserves the existing policy. [ADR-0017](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md) owns the access and migration contract. Running processes retain their startup snapshot; changes affect later calls and new processes. See the [roadmap](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13) for whether a released package contains B9.
+
+Windows ambient write denial uses a standalone runner and still reports partial enforcement. Its ACL prerequisites, parent guards, and standing ACE boundaries are documented in [ADR-0018](../decisions/ADR-0018-windows-ambient-write-denial.md). Unsupported backend combinations refuse to start rather than launch a bare process; ADR-0017 documents those limits.
 
 Each primary root caps its additional roots (default 16, configurable up to 64 via the registry row's `maxAdditionalRoots`); new adds beyond the limit are refused while roots already stored stay granted ([ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md)).
 
@@ -57,9 +59,9 @@ A host may also set `toolAccess: { <tool>: 'read-only' }` on the `multi-root-sco
 `dsh --profile web --dump-config` prints a YAML array of rows grouped by bundle (each row has `id` / `name` / optional `disabled` / `config`); `# == <bundle>` comment lines mark the source bundle and `patched by` marks a patch. Installing this plugin changes exactly two things:
 
 - the upstream `fs-sandbox` and `sandbox` rows gain `disabled: true`;
-- a `# == @dsh-electron/dsh-plugin-multi-root-workspace` section is appended with all the `multi-root-*` rows (the compat gate, fs, sandbox, the providers-conflict check, scope, registry, instructions, lsp, workspace-files, command, and the client carrier row).
+- a `# == @dsh-electron/dsh-plugin-multi-root-workspace` section is appended with all the `multi-root-*` rows (the compat gate, fs, sandbox, the providers-conflict check, scope, registry, instructions, lsp, workspace-files, process-fence, command, and the client carrier row).
 
-`bash-sandbox` stays upstream: the bash executor and the PTY backend take their roots from `ctx.sandbox`, so they inherit multi-root grants with no plugin-side executor. The plugin is an out-of-tree extension and modifies no upstream package.
+`bash-sandbox` stays upstream: confined modes use `ctx.sandbox`; `multi-root-process-fence` wraps the public shell, PTC, and PTY entries to apply the same scope restrictions to the Full-access bypass. The plugin is an out-of-tree extension and modifies no upstream package.
 
 ## Model-side and panel-side behavior
 

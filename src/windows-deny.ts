@@ -126,9 +126,11 @@ export async function runWindowsDenied(
     const list = Buffer.alloc(identities.length * 16)
     identities.forEach((value, i) => writePointer(list, i * 16, value))
     const restrictedOut = Buffer.alloc(8)
-    // DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED. Keep ambient groups and IL;
-    // remove backup/restore/take-owner privileges that bypass file DACLs.
-    check(api.createRestrictedToken!(currentToken, 9, 0, null, 0, null, identities.length, list, restrictedOut), 'CreateRestrictedToken')
+    // DISABLE_MAX_PRIVILEGE, with a FULL restricting access check. The
+    // WRITE_RESTRICTED shortcut does not cover directory rename/delete's
+    // parent-access path. Mirroring every ambient enabled identity preserves
+    // reads too, so checking every access does not turn this into a read fence.
+    check(api.createRestrictedToken!(currentToken, 1, 0, null, 0, null, identities.length, list, restrictedOut), 'CreateRestrictedToken')
     restrictedToken = pointer(restrictedOut)
 
     const entry = (trustee: NativePointer, mode: number, mask: number, inheritance: number): Buffer => {

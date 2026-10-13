@@ -40,13 +40,15 @@ English: [README.en.md](./README.en.md)
 - 路径可以带引号，`~` 会展开为家目录；登记前会先 canonical 化——与已有根重复、嵌套在已有根内部、或就是主根本身的路径会被拒绝。
 - `remove` / `access` / `alias` / `reveal` 的参数接受 `序号|路径`（序号即 `list` 输出的编号）。
 - `alias` 不带别名参数会清除已有别名。
-- `access` 升到 `read-write` 要求该根此刻可用。
+- `access` 支持 `inherit` / `read-only` / `read-write`；扩权变更要求该根此刻可用，具体方向见 [ADR-0017](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)。
 - `list` 如实显示每根状态：`missing`（暂时不存在）、`redirected`（被替换成指向别处的符号链接）的根**保留登记但暂不授予**；目录恢复后执行一次 `list` 或刷新面板即自动重新授予，无需重启。
 - 命令的输出文案为英文（host 侧没有活动语言信息）。
 
 ## 访问级别、数量上限与 per-tool 封顶
 
-附加根默认与主根同权（read-write）；read-only 根保留全部成员资格（可读、文件树、LSP、指令注入），只是 fs 写、受限进程与 Windows ACL 都不授予它写权限。已启动的进程保留启动时的根集合，access 变化只约束之后的调用与新进程（[ADR-0013](../decisions/ADR-0013-per-root-and-per-tool-access.md)）。
+B9 开发分支中，新根默认 `inherit`（继承会话模式）；`add --inherit|--read-only|--read-write` 或面板可显式选三档。显式只读保持完整成员资格，但 Full-access 也不得写；固定读写在全局只读会话仍可写该根。旧可写记录升级为 inherit，重新登记保留原策略。权限与迁移合同见 [ADR-0017](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)；已启动进程保留启动快照，变化只约束之后的调用与新进程。发布包是否包含 B9 见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)。
+
+Windows Full-access 的局部拒写采用独立 runner，继续报告 partial；其 ACL 前置条件、父目录 guard 与 standing ACE 边界见 [ADR-0018](../decisions/ADR-0018-windows-ambient-write-denial.md)。无法表达的后端组合拒绝启动，不退回裸进程；具体后端限制见 ADR-0017。
 
 每个主根的附加根数量有上限（默认 16，经注册表行配置 `maxAdditionalRoots` 可调至 64）；超限的新增被拒绝，历史超限记录照常授予（[ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md)）。
 
@@ -57,9 +59,9 @@ English: [README.en.md](./README.en.md)
 `dsh --profile web --dump-config` 的输出是按 bundle 分组的 YAML 行数组（每行 `id` / `name` / 可选 `disabled` / `config`），`# == <bundle>` 注释行标记来源、`patched by` 标记被 patch。装入本插件后的差异是：
 
 - 上游 `fs-sandbox` 与 `sandbox` 两行打上 `disabled: true`；
-- 末尾追加 `# == @dsh-electron/dsh-plugin-multi-root-workspace` 段的全部 `multi-root-*` 行（compat 门禁、fs、sandbox、providers 冲突检测、scope、registry、instructions、lsp、workspace-files、command、client 载体行）。
+- 末尾追加 `# == @dsh-electron/dsh-plugin-multi-root-workspace` 段的全部 `multi-root-*` 行（compat 门禁、fs、sandbox、providers 冲突检测、scope、registry、instructions、lsp、workspace-files、process-fence、command、client 载体行）。
 
-`bash-sandbox` 保持上游：bash 执行器与 PTY 都经 `ctx.sandbox` 取根，天然继承多根授权。插件只做 out-of-tree 扩展，不修改上游任何包。
+`bash-sandbox` 保持上游：受限模式经 `ctx.sandbox` 取根；Full-access bypass 由 `multi-root-process-fence` 包装 shell / PTC / PTY 的公开入口，按同一 scope 应用只读限制。插件只做 out-of-tree 扩展，不修改上游任何包。
 
 ## 模型侧与面板侧的行为
 
