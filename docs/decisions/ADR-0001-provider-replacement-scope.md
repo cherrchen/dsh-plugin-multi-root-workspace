@@ -55,7 +55,7 @@ fs 侧仍必须替换：`LocalFileSystem` 自身不做 containment，`SandboxedF
 
 Status 保持 **Accepted**；「只替换 `fs-sandbox` 与 `sandbox` 两行」不变。本 ADR 的关键实测「bash 与 PTY 的全部 confinement 都委托 `ctx.sandbox`」在 B9 范围收窄：`workspace-write` / `read-only` 模式下依然成立，但**全部 11 个支持版本在 `danger-full-access` 下不调用 `confine()`**——`SandboxBashExecutor.execute` / `SandboxPwshExecutor.execute`（`0.1.5/0.1.6` 含 `start`）、`dsh-terminal-bash` 私有 `spawnArgv` 与 `dsh-ptc-runtime-node` 都自带 Full-access 旁路。
 
-因此 B9 仍不替换 `bash-sandbox` / `pwsh-sandbox` / `terminal-bash` / `ptc-runtime` 行（`executeArgv` protected、`processFacts` 私有、组内 `terminals` 被 isolate，子类化与行替换都不可行），改为按 ADR-0011 先例用公开方法包装接缝：`ctx.shell.execute`（+ 旧版 `start`）、`ctx.ptcRuntime.execute`、`ctx.subprocess.spawn`（ALS 注入 deny 上下文）与 `ctx.subprocess.spawnTerminal`（env 会话标记恢复策略）。详见 [ADR-0017](./ADR-0017-three-state-root-access-and-sandbox-modes.md)。
+因此 B9 仍不替换 `bash-sandbox` / `pwsh-sandbox` / `terminal-bash` / `ptc-runtime` 行（`executeArgv` protected、`processFacts` 私有、组内 `terminals` 被 isolate，子类化与行替换都不可行），改为按 ADR-0011 先例用公开方法包装接缝：`ctx.shell.execute`（+ 旧版 `start`）、`ctx.ptcRuntime.execute`、`ctx.subprocess.spawn`（ALS 注入 deny 上下文）与 `ctx.subprocess.spawnTerminal`（env `DSH_PTY_SESSION_ID` 判别 agent PTY，用户面板终端任何模式直通——`ctx.terminals` 在 web profile 上被 `isolate`，registry 不是可达接缝）。详见 [ADR-0017](./ADR-0017-three-state-root-access-and-sandbox-modes.md)。
 
 ## Related Documents
 

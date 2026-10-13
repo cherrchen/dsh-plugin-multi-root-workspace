@@ -180,9 +180,11 @@ export class MultiRootFileSystem extends LocalFileSystem {
       for (const path of scope.deniedRoots) {
         if (await isPathUnder(fresh.targetKey, path)) {
           const root = scope.roots.find(root => root.path === path)
-          const reason = root?.access === 'read-only' || root === undefined
-            ? `${path} is a read-only additional root`
-            : `${path} is an additional root this call may not write`
+          const reason = path === scope.protectedHome
+            ? `${path} is the DSH home directory, which is protected under danger-full-access while workspace restrictions apply`
+            : root?.access === 'read-only' || root === undefined
+              ? `${path} is a read-only additional root`
+              : `${path} is an additional root this call may not write`
           throw new FsError(`cannot write "${target.displayPath}": ${reason}`, 'FS_SANDBOX_DENIED')
         }
       }

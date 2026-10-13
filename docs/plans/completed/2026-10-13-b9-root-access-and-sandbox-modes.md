@@ -129,6 +129,15 @@ ADR-0019 属性条件路径被证伪后，以 [ADR-0020](../../decisions/ADR-002
 
 回归：`tests/b9-review-regressions.spec.ts`（反转的两条 P1 复现）、scope / registry-lease 的 authority 断言、process-fence 的 clamped prefix 与不可解析终端断言、dialects 的 `--ro-bind-try` 期望、prompt-context 降级句。未发布；版本号、tag 与 allowlist 不变。
 
+## 用户终端直通与 `$DSH_HOME` 负授权（2026-10-14 第二批）
+
+两项用户产品决策，合同记录于 [ADR-0017 修订节](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#用户终端直通与-dsh_home-负授权修订2026-10-14)。
+
+1. **面板用户终端任何模式不受约束**：`spawnTerminal` 按 `env.DSH_SESSION_ID` 恢复会话曾把面板用户终端（controller 盖同标记）误伤为受限对象。判别改为 `DSH_PTY_SESSION_ID`——全部支持版本的 `dsh-terminal-bash` backend 启动 agent PTY 时盖该标记，面板 controller 不盖；env 无该标记即用户终端任何模式直通，有则按 `DSH_SESSION_ID` 恢复会话与策略，会话不可解析且 `hasActiveDenyRoots()` 时 fail closed。`ctx.terminals` 不包装：`optional-persistent-terminals` 组 `isolate: terminals` 使 registry 在 web profile 不可达。
+2. **`$DSH_HOME` 受限 Full-access 负授权**：`danger-full-access` 且（deny 集非空或 authority `unavailable`）时 canonical `dshHome`（scope 配置，patch 行 `dshHomePath()`）追加 `deniedRoots`（`protectedHome`）；confined 模式与零根健康 authority 不追加；主根在 home 内 deny 胜出；fs 专用拒写文案；`clampedExecution(policy, deniedRoots, signal)` 按 workspace-write 分支规则 graft deny（含 Windows ACL），不可表达 `SandboxUnavailableError`；拓扑固定陈述。Windows 风险如实记录：home 整树持久化 deny ACE + 父目录守卫、不随拆卸撤销、任一节点失败即拒启动。
+
+回归：process-fence agent/user 终端分轨断言（controller 形状直通、backend 形状受限/钳制、不可解析会话 fail closed）、scope `protectedHome` 矩阵、b9-review-regressions home 拒写（含主根位于 home 内）、patch 行 `dshHome`、prompt-context home 陈述句。未发布；版本号、tag 与 allowlist 不变。
+
 ## Validation
 
 | 验证面 | 必需证据 |

@@ -179,8 +179,8 @@ describe('inserted rows', () => {
     })
   })
 
-  it('defaults the scope row to no per-tool caps', () => {
+  it('defaults the scope row to no per-tool caps and wires the DSH-home boundary', () => {
     const scope = inserted.find(row => row.id === 'multi-root-scope')
-    expect(scope?.config).toMatchObject({ toolAccess: {} })
+    expect(scope?.config).toMatchObject({ toolAccess: {}, dshHome: 'dshHomePath()' })
   })
 })

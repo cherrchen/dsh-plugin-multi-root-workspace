@@ -129,6 +129,27 @@ describe('renderWorkspaceRootsContext', () => {
     }
   })
 
+  it('names the protected DSH home while it is denied under Full-access', () => {
+    const home = '/user/.dsh'
+    for (const platform of PLATFORMS) {
+      // With members the home sentence joins the topology text.
+      expect(renderWorkspaceRootsContext({
+        platform, mode: 'danger-full-access', primaryRoot: PRIMARY,
+        roots: [A, C], cappedTools: [], protectedHome: home,
+      })).toBe(`Writes under the DSH home directory at ${JSON.stringify(home)} are refused. Current DSH workspace roots: ["/repos/a","/repos/c"] are additional roots of this session's workspace; danger-full-access mode has no sandbox isolation.`)
+      // With an unavailable authority and no members, both notes still render.
+      expect(renderWorkspaceRootsContext({
+        platform, mode: 'danger-full-access', primaryRoot: PRIMARY,
+        roots: [], cappedTools: [], authority: 'unavailable', protectedHome: home,
+      })).toBe(`${REGISTRY_UNAVAILABLE_NOTE} Writes under the DSH home directory at ${JSON.stringify(home)} are refused.`)
+      // The note is a Full-access statement only.
+      expect(renderWorkspaceRootsContext({
+        platform, mode: 'workspace-write', primaryRoot: PRIMARY,
+        roots: [A], cappedTools: [], protectedHome: home,
+      })).not.toContain('DSH home')
+    }
+  })
+
   it('never promises writes for invalid toolAccess on any platform, preserving mode and empty semantics', () => {
     for (const platform of PLATFORMS) {
       for (const mode of MODES) {

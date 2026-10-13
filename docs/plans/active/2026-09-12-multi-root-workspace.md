@@ -551,3 +551,12 @@ Phase 5 完成，专项计划移至 completed；ADR-0020 Accepted，ADR-0019 保
 - **bwrap deny 根改用 `--ro-bind-try`**：此前 `--ro-bind <missing recordedPath>` 使 bwrap 启动即失败，一个被删除的只读根会打断全部 Full-access shell（或其位于 temp 时的 workspace-write 命令）。deny / restrict（含 landlock→bwrap）均改 `--ro-bind-try`；残余（命名空间内可重建目录）已由 fs fence 的 `recordedPath` 拒绝兜底并记录。
 
 回归：新增 `tests/b9-review-regressions.spec.ts`（反转的两条 P1 复现：争用进程写只读根与 ambient 区均拒写、接管后恢复；stale target 的 write/edit 均拒写）；scope / registry-lease 增加 authority 状态断言；process-fence 增加 clamped prefix（与上游 `workspace-write` confined argv 逐项一致）与不可解析终端断言；dialects 期望改 `--ro-bind-try`；prompt-context 增加降级句。本机门禁输出见交接报告；未发布，版本号与 allowlist 不变。
+
+#### 用户终端直通与 `$DSH_HOME` 负授权（2026-10-14 第二批）
+
+两项用户产品决策，合同记录于 [ADR-0017 修订节](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#用户终端直通与-dsh_home-负授权修订2026-10-14)。
+
+- **面板用户终端任何模式不受约束**：原 `spawnTerminal` 按 `env.DSH_SESSION_ID` 恢复会话的机制把面板用户终端（controller 同盖该标记）误伤为受限对象。判别改为 `DSH_PTY_SESSION_ID`：全部 11 个支持版本的 `dsh-terminal-bash` backend 启动 agent PTY 时经 `childEnvironment` 盖该标记（与 `DSH_SESSION_ID` 并列），面板 controller 不盖——env 无该标记即用户终端，任何模式直通；有则按 `DSH_SESSION_ID` 恢复会话与策略，会话不可解析且 `hasActiveDenyRoots()` 时 fail closed。`ctx.terminals` 不包装：`optional-persistent-terminals` 组 `isolate: terminals` 使 registry 在 web profile 不可达，env 判别同时覆盖隔离与未隔离挂载。
+- **`$DSH_HOME` 受限 Full-access 负授权**：scope 新增 `dshHome` 配置（patch 行 `dshHomePath()`；非法值记 error 忽略）。`danger-full-access` 且（deny 集非空或 authority `unavailable`）时把 canonical home 追加进 `deniedRoots`（`protectedHome`），`workspace-write` / `read-only` 与零根健康 authority 不追加；主根在 home 内时 deny 胜出。fs 有专用拒写文案；`clampedExecution` 改收 deny 集并按 workspace-write 分支规则 graft（POSIX `denyProfileArgs`、Windows `widenWindowsProfile(…, [], denied, primary)`），不可表达 → `SandboxUnavailableError`；模型拓扑固定陈述 home 拒写。Windows 风险如实记录：该 deny 经 `runWindowsDenied` 对 home 整树写**持久化** deny ACE（含父目录守卫），ambient 进程不受影响但存在 ACL 写入量与节点失败面。
+
+回归：process-fence agent/user 终端分轨断言（controller 形状直通、backend 形状受限/钳制、不可解析会话 fail closed）、scope `protectedHome` 触发矩阵、b9-review-regressions home 拒写（含主根位于 home 内）、patch 行 `dshHome`、prompt-context home 陈述句。未发布；版本号与 allowlist 不变。

@@ -6,8 +6,9 @@
  * Upstream's shell executor, PTC runtime and PTY backend all skip
  * `ctx.sandbox.confine` in that mode, so the fence wraps their public
  * entries: an AsyncLocalStorage deny context set around `execute` rewrites
- * the argv `ctx.subprocess.spawn` receives, and `spawnTerminal` resolves its
- * caller from the `DSH_SESSION_ID` environment marker.
+ * the argv `ctx.subprocess.spawn` receives, and `spawnTerminal` confines only
+ * a spec carrying the agent-PTY `DSH_PTY_SESSION_ID` marker — a spawn without
+ * it (the panel's controller, i.e. a user terminal) stays untouched.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -24,6 +25,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { SubprocessSpawnSpec, SubprocessTerminalSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
+import type { Config as ScopeConfig } from '../src/scope.ts'
 import { denyProfileArgs } from '../src/dialects.ts'
 import * as ProcessFence from '../src/process-fence.ts'
 import { mountCompat } from './support/compat.ts'
@@ -75,15 +77,18 @@ interface Stack {
 async function mountStack(
   dialect: Dialect,
   mode: SandboxPolicy['mode'] | 'danger-full-access',
-  sessions: ReadonlyMap<string, Session> = new Map(),
+  scopeConfig: ScopeConfig = {},
   legacyShell = false,
   spawnResult: unknown = { pid: 1 },
+  sessions: ReadonlyMap<string, Session> = new Map(),
 ): Promise<Stack> {
   const ctx = new Context()
   fibers.push(
+    // `sandboxPolicy.resolve({ session })` reads the session's logged mode
+    // override through this service, so it stays mounted.
     await ctx.plugin(SessionProjectionRegistry),
     await ctx.plugin(SandboxPolicyService, { mode, workspaceRoot: fixture.workspace }),
-    await ctx.plugin(MultiRootScopeService),
+    await ctx.plugin(MultiRootScopeService, scopeConfig),
   )
   await mountCompat(ctx)
   fibers.push(await ctx.plugin(MultiRootSandboxProvider, {}))
@@ -185,7 +190,7 @@ describe('the restricted argv prefix', () => {
 
 describe('shell and PTC execute entries', () => {
   it('confines the legacy foreground run entry which bypasses execute and start', async () => {
-    const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access', new Map(), true)
+    const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access', {}, true)
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     const shell = ctx.get('shell') as { run(spec: unknown): Promise<unknown> }
     await shell.run({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
@@ -240,7 +245,7 @@ describe('shell and PTC execute entries', () => {
       done: new Promise(resolve => { resolveDone = resolve }),
       sandbox: undefined as unknown,
     }
-    const { ctx } = await mountStack('seatbelt', 'danger-full-access', new Map(), true, handle)
+    const { ctx } = await mountStack('seatbelt', 'danger-full-access', {}, true, handle)
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     const shell = ctx.get('shell') as { start(spec: unknown): Promise<unknown> }
     const proc = await shell.start({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
@@ -303,8 +308,8 @@ describe('the unavailable-authority downgrade', () => {
   })
 })
 
-describe('spawnTerminal', () => {
-  const spec = (env: Record<string, string>): SubprocessTerminalSpawnSpec => ({
+describe('agent and user terminals', () => {
+  const spec = (env: Record<string, string> = {}): SubprocessTerminalSpawnSpec => ({
     argv: ['/bin/bash', '-l'],
     cwd: fixture.workspace,
     env,
@@ -323,59 +328,82 @@ describe('spawnTerminal', () => {
       cwd: fixture.workspace,
     })
 
-  it('rewrites the PTY argv when its session runs Full-access over a denied root', async () => {
-    const session = liveSession('sess-pty-1')
-    const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access', new Map([[session.id, session]]))
+  /** The controller-shaped spec: env carries only the session marker, like the panel. */
+  const userSpec = (sessionId: string): SubprocessTerminalSpawnSpec =>
+    spec({ DSH_SESSION_ID: sessionId })
+
+  /** The backend-shaped spec: env carries both markers, like dsh-terminal-bash. */
+  const agentSpec = (sessionId: string, ptyId = 'pty-1'): SubprocessTerminalSpawnSpec =>
+    spec({ DSH_SESSION_ID: sessionId, DSH_PTY_SESSION_ID: ptyId })
+
+  it('never confines a user terminal — the panel controller stamps no PTY marker, in any mode', async () => {
+    const session = liveSession('sess-user-pty')
+    const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access', {}, false, { pid: 1 }, new Map([[session.id, session]]))
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
-    await ctx.subprocess.spawnTerminal(spec({ DSH_SESSION_ID: session.id }))
+    await ctx.subprocess.spawnTerminal(userSpec(session.id))
     expect(captured.terminals).toHaveLength(1)
-    expect(captured.terminals[0]!.argv.join(' ')).toContain('(deny file-write*')
+    expect(captured.terminals[0]!.argv).toEqual(['/bin/bash', '-l'])
+    // Same under an unavailable registry authority: still user behavior.
+    ctx.multiRootScope.setRegistryAuthority(false)
+    await ctx.subprocess.spawnTerminal(userSpec(session.id))
+    expect(captured.terminals[1]!.argv).toEqual(['/bin/bash', '-l'])
+  })
+
+  it('confines an agent PTY under Full-access with a denied root', async () => {
+    const session = liveSession('sess-agent-pty')
+    const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access', {}, false, { pid: 1 }, new Map([[session.id, session]]))
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    await ctx.subprocess.spawnTerminal(agentSpec(session.id))
+    expect(captured.terminals).toHaveLength(1)
+    expect(captured.terminals[0]!.argv.join(' '))
+      .toContain(`(deny file-write* ${sbplSubpath(canonicalPath(fixture.outside))}`)
     expect(captured.terminals[0]!.argv.slice(-2)).toEqual(['/bin/bash', '-l'])
   })
 
-  it('passes through when the session is not Full-access or nothing is denied', async () => {
-    const session = liveSession('sess-pty-2')
-    const { ctx, captured } = await mountStack('seatbelt', 'workspace-write', new Map([[session.id, session]]))
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
-    await ctx.subprocess.spawnTerminal(spec({ DSH_SESSION_ID: session.id }))
-    expect(captured.terminals[0]!.argv).toEqual(['/bin/bash', '-l'])
-  })
-
-  it('fails closed on an unresolvable session when restricted roots exist', async () => {
-    const { ctx } = await mountStack('seatbelt', 'danger-full-access')
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
-    await expect(ctx.subprocess.spawnTerminal(spec({ DSH_SESSION_ID: 'sess-gone' }))).rejects.toThrow('read-only roots')
-  })
-
-  it('clamps a resolved terminal session to workspace-write while the registry authority is unavailable', async () => {
-    const session = liveSession('sess-pty-clamped')
-    const { ctx, provider, captured } = await mountStack('seatbelt', 'danger-full-access', new Map([[session.id, session]]))
+  it('clamps an agent PTY to the workspace-write profile while the registry authority is unavailable', async () => {
+    const session = liveSession('sess-agent-clamped')
+    const { ctx, provider, captured } = await mountStack('seatbelt', 'danger-full-access', {}, false, { pid: 1 }, new Map([[session.id, session]]))
     ctx.multiRootScope.setRegistryAuthority(false)
-    await ctx.subprocess.spawnTerminal(spec({ DSH_SESSION_ID: session.id }))
-    expect(captured.terminals).toHaveLength(1)
+    await ctx.subprocess.spawnTerminal(agentSpec(session.id))
     const expected = await confined(provider, ['/bin/bash', '-l'], { mode: 'workspace-write', workspaceRoot: fixture.workspace })
     expect(captured.terminals[0]!.argv).toEqual(expected.argv)
   })
 
-  it('refuses an unresolvable terminal session while the registry authority is unavailable', async () => {
-    const { ctx } = await mountStack('seatbelt', 'danger-full-access')
-    // Authority alone flips the fail-closed flag: an unattributable terminal
-    // must not spawn ambient while restrictions cannot even be enumerated.
+  it('applies the DSH-home deny inside the clamped prefix when a grant covers it', async () => {
+    const home = canonicalPath(tmpdir())
+    const session = liveSession('sess-agent-home')
+    const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access', { dshHome: home }, false, { pid: 1 }, new Map([[session.id, session]]))
     ctx.multiRootScope.setRegistryAuthority(false)
-    await expect(ctx.subprocess.spawnTerminal(spec({ DSH_SESSION_ID: 'sess-gone' }))).rejects.toThrow()
+    await ctx.subprocess.spawnTerminal(agentSpec(session.id))
+    // The workspace-write temp grant covers the (fixture) home, so the
+    // clamped profile must carry a trailing deny form for it.
+    const sbpl = captured.terminals[0]!.argv.join(' ')
+    expect(sbpl).toContain(`(deny file-write* ${sbplSubpath(home)}`)
+    expect(sbpl).toContain('(allow file-write*')
   })
 
-  it('passes an unresolvable session through when no primary holds a restricted root', async () => {
-    const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access')
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'inherit')])
-    await ctx.subprocess.spawnTerminal(spec({ DSH_SESSION_ID: 'sess-gone' }))
+  it('leaves a workspace-write agent PTY untouched by the fence', async () => {
+    const session = liveSession('sess-ww-pty')
+    const { ctx, captured } = await mountStack('seatbelt', 'workspace-write', {}, false, { pid: 1 }, new Map([[session.id, session]]))
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    await ctx.subprocess.spawnTerminal(agentSpec(session.id))
     expect(captured.terminals[0]!.argv).toEqual(['/bin/bash', '-l'])
   })
 
-  it('passes a spawn without the session marker straight through', async () => {
-    const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access')
+  it('fails closed on an agent PTY whose session marker does not resolve while restrictions exist', async () => {
+    const { ctx } = await mountStack('seatbelt', 'danger-full-access')
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
-    await ctx.subprocess.spawnTerminal(spec({}))
+    await expect(ctx.subprocess.spawnTerminal(agentSpec('sess-gone'))).rejects.toThrow('read-only roots')
+    // Authority alone flips the flag: an unattributable agent terminal must
+    // not spawn ambient while restrictions cannot even be enumerated.
+    ctx.multiRootScope.setRegistryAuthority(false)
+    await expect(ctx.subprocess.spawnTerminal(agentSpec('sess-gone'))).rejects.toThrow()
+  })
+
+  it('passes an unresolvable agent PTY through when no primary holds a restricted root', async () => {
+    const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access')
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'inherit')])
+    await ctx.subprocess.spawnTerminal(agentSpec('sess-gone'))
     expect(captured.terminals[0]!.argv).toEqual(['/bin/bash', '-l'])
   })
 })

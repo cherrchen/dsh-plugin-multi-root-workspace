@@ -18,6 +18,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { statSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
@@ -113,6 +114,19 @@ export interface FilesystemScope {
    * never have registered roots.
    */
   authority: 'available' | 'unavailable'
+  /**
+   * The canonical DSH home directory, present exactly when this scope appended
+   * it to `deniedRoots` — i.e. under `danger-full-access` while restrictions
+   * apply (a non-empty deny set or an unavailable authority). `$DSH_HOME`
+   * holds the store, the lease, the profiles and the user's own config: an
+   * ambient Full-access process must not edit them, so once the workspace
+   * carries ANY deny boundary the home joins it. Zero additional roots with a
+   * healthy authority never set this — the empty scope stays upstream-exact.
+   * Never set under `workspace-write` or `read-only`: those modes already
+   * confine writes by containment, so denying home adds nothing but the cost
+   * of a stale `FsTarget` re-resolution on every write.
+   */
+  protectedHome?: string
 }
 
 /**
@@ -211,6 +225,9 @@ function effectivelyWritable(mode: SandboxMode, access: RootAccess): boolean {
  * @param options.authority - the registry-authority fact; `unavailable` under
  *   `danger-full-access` downgrades enforcement to `workspace-write`, which the
  *   model must hear even when there is no topology to describe.
+ * @param options.protectedHome - the canonical DSH home when the scope appended
+ *   it to the deny set (`danger-full-access` with restrictions); stated by path
+ *   so the model can place the refusal.
  * @returns the stable topology text; empty when there are no additional roots
  *   and no downgrade to report.
  */
@@ -222,12 +239,20 @@ export function renderWorkspaceRootsContext(options: {
   readonly cappedTools: readonly string[]
   readonly toolAccessInvalid?: boolean
   readonly authority?: 'available' | 'unavailable'
+  readonly protectedHome?: string
 }): string {
   const { platform, mode, primaryRoot, roots, cappedTools } = options
   const authorityNote = options.authority === 'unavailable' && mode === 'danger-full-access'
-    ? REGISTRY_UNAVAILABLE_NOTE + (roots.length === 0 ? '' : ' ')
+    ? REGISTRY_UNAVAILABLE_NOTE
     : ''
-  if (roots.length === 0) return authorityNote
+  const homeNote = options.protectedHome !== undefined && mode === 'danger-full-access'
+    ? `Writes under the DSH home directory at ${JSON.stringify(options.protectedHome)} are refused.`
+    : ''
+  // The leading notes (downgrade, protected home) precede the topology text;
+  // they are also the whole contribution when there are no roots to describe.
+  const lead = [authorityNote, homeNote].filter(note => note !== '').join(' ')
+  if (roots.length === 0) return lead
+  const prefix = lead === '' ? '' : `${lead} `
   const members = JSON.stringify(roots.map(root => root.path))
   const readOnly = roots.filter(root => root.access === 'read-only').map(root => root.path)
   const capNote = cappedTools.length === 0 ? ''
@@ -236,19 +261,19 @@ export function renderWorkspaceRootsContext(options: {
     // Fixed read-write roots keep their grant even in a read-only session.
     const writable = options.toolAccessInvalid ? [] : roots.filter(root => root.access === 'read-write').map(root => root.path)
     if (writable.length === 0) {
-      return authorityNote + `Current DSH workspace roots: ${members} are additional roots of this session's workspace and are readable; `
+      return prefix + `Current DSH workspace roots: ${members} are additional roots of this session's workspace and are readable; `
         + 'nothing is writable in read-only mode.' + capNote
     }
     const readable = roots.filter(root => root.access !== 'read-write').map(root => root.path)
     let text = `Current DSH workspace roots: ${JSON.stringify(writable)} are additional roots that stay writable even in read-only mode`
     if (readable.length > 0) text += `, and ${JSON.stringify(readable)} are readable additional roots`
-    return authorityNote + text + ' of this session\'s workspace; everything else is read-only.' + capNote
+    return prefix + text + ' of this session\'s workspace; everything else is read-only.' + capNote
   }
   if (mode === 'danger-full-access') {
     // The refused set mirrors the scope's deny set: explicit read-only roots
     // always, and every member when the call is tool-capped.
     const refused = options.toolAccessInvalid ? roots.map(root => root.path) : readOnly
-    return authorityNote + `Current DSH workspace roots: ${members} are additional roots of this session's workspace; `
+    return prefix + `Current DSH workspace roots: ${members} are additional roots of this session's workspace; `
       + 'danger-full-access mode has no sandbox isolation'
       + (refused.length > 0
         ? `, except writes under the additional roots ${JSON.stringify(refused)} are still refused${options.toolAccessInvalid === true ? ' because toolAccess is invalid' : ''}.`
@@ -267,7 +292,7 @@ export function renderWorkspaceRootsContext(options: {
     text += ' Writable additional roots are enforced for shell processes by the upstream Windows ACL '
       + 'restricted-token sandbox, whose enforcement is reported as partial; reads are not confined by it.'
   }
-  return authorityNote + text + capNote
+  return prefix + text + capNote
 }
 
 /**
@@ -281,6 +306,16 @@ export interface Config {
    * root's own access.
    */
   readonly toolAccess?: Record<string, 'read-only'>
+  /**
+   * The resolved DSH home directory (`$DSH_HOME` / `~/.dsh`), which the patch
+   * row fills from `dshHomePath()`. Under `danger-full-access` it joins the
+   * deny set exactly while restrictions apply — a non-empty derived deny set
+   * or an unavailable registry authority — so an ambient agent process cannot
+   * overwrite the store, the lease file, profiles, or the user's own config.
+   * Absent or invalid (non-string, empty, relative) means the boundary simply
+   * does not exist: bare test compositions carry no home.
+   */
+  readonly dshHome?: string
 }
 
 /** The tool-dispatch cap carried across async boundaries by the waterfall. */
@@ -308,6 +343,13 @@ export class MultiRootScopeService extends Service {
   private readonly caps: Record<string, 'read-only'>
   /** A malformed `toolAccess` refuses every additional-root write (fail closed). */
   private readonly capsInvalid: boolean
+  /**
+   * The configured DSH home boundary; `undefined` when the row carries no
+   * `dshHome` (bare test compositions) or one that is not an absolute string —
+   * an invalid value is logged at construction and ignored rather than
+   * treated as evidence.
+   */
+  private readonly dshHome: string | undefined
 
   /** Observe registry publications; consumers still resolve authority from scopeOf(). */
   subscribe(listener: () => void): () => void {
@@ -352,6 +394,16 @@ export class MultiRootScopeService extends Service {
       this.capsInvalid = false
     }
 
+    const dshHome = config.dshHome
+    if (dshHome !== undefined && (typeof dshHome !== 'string' || dshHome.trim() === '' || !isAbsolute(dshHome))) {
+      ctx.logger.error(
+        'multi-root-workspace: invalid dshHome config '
+        + `(expected an absolute path, got ${JSON.stringify(dshHome)}); the DSH-home deny boundary is disabled`,
+      )
+    } else {
+      this.dshHome = dshHome
+    }
+
     // The cap rides the tool dispatch across every await: a capped tool stays
     // capped inside nested calls, and an uncapped outer call is narrowed by a
     // capped inner dispatch (nesting only ever narrows). The tool name is read
@@ -377,9 +429,12 @@ export class MultiRootScopeService extends Service {
           const policy = scope.sandboxPolicy.resolve({ session })
           const resolved = this.resolve(policy)
           // Zero roots normally contributes nothing — except while the
-          // registry authority is unavailable, when Full-access is enforced as
-          // workspace-write and the model must hear that downgrade.
-          if (resolved.roots.length === 0 && resolved.authority !== 'unavailable') return ''
+          // registry authority is unavailable (Full-access is enforced as
+          // workspace-write and the model must hear that downgrade), or the
+          // scope appended the DSH-home boundary (withheld roots can deny
+          // without granting membership).
+          if (resolved.roots.length === 0 && resolved.authority !== 'unavailable'
+            && resolved.protectedHome === undefined) return ''
           // The session view lists root access, never the tool-ambient cap:
           // the text describes the workspace, not one call's permissions.
           return renderWorkspaceRootsContext({
@@ -390,6 +445,7 @@ export class MultiRootScopeService extends Service {
             cappedTools: this.toolCaps(),
             toolAccessInvalid: this.toolAccessInvalid,
             authority: resolved.authority,
+            ...(resolved.protectedHome === undefined ? {} : { protectedHome: resolved.protectedHome }),
           })
         },
       })
@@ -416,13 +472,31 @@ export class MultiRootScopeService extends Service {
       && root.recordedPath !== '' && root.recordedPath !== primaryRoot
       && (capped || !effectivelyWritable(policy.mode, root.access)))
       .map(root => root.recordedPath)
+    const deniedRoots = [...new Set(denied)]
+    // The DSH home joins the deny set only while restrictions apply under
+    // Full-access: a non-empty derived deny set, or an authority that cannot
+    // prove the set is empty. Zero roots with a healthy authority stay
+    // upstream-exact; confined modes never see it (containment already
+    // excludes the home). When the primary root sits inside the home the deny
+    // wins — the workspace is unwritable under Full-access rather than the
+    // boundary silently dropped.
+    let protectedHome: string | undefined
+    if (this.dshHome !== undefined && policy.mode === 'danger-full-access'
+      && (deniedRoots.length > 0 || this.registryAuthority === 'unavailable')) {
+      const home = canonicalPath(this.dshHome)
+      if (!deniedRoots.includes(home)) {
+        deniedRoots.push(home)
+        protectedHome = home
+      }
+    }
     return {
       primaryRoot,
       additionalRoots: roots.map(root => root.path),
       roots,
       writableRoots: writable,
-      deniedRoots: [...new Set(denied)],
+      deniedRoots,
       authority: this.registryAuthority,
+      ...(protectedHome === undefined ? {} : { protectedHome }),
     }
   }
 
@@ -466,11 +540,12 @@ export class MultiRootScopeService extends Service {
 
   /**
    * Whether ANY registered primary currently publishes an explicit `read-only`
-   * member. The PTY seam resolves its caller through an environment marker;
-   * when that lookup fails this flag is the difference between pass-through
-   * (nothing to deny anywhere on the store) and fail closed. An unavailable
-   * registry authority answers `true` by itself: a terminal whose session
-   * cannot be resolved must not inherit a deny set this process cannot see.
+   * member. The PTY seam resolves its caller through the agent-PTY
+   * environment markers; when that lookup fails this flag is the difference
+   * between pass-through (nothing to deny anywhere on the store) and fail
+   * closed. An unavailable registry authority answers `true` by itself: a
+   * terminal whose session cannot be resolved must not inherit a deny set
+   * this process cannot see.
    * @returns whether at least one primary holds a restricted root, or the
    *   registry cannot prove none does.
    */

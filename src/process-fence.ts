@@ -20,20 +20,23 @@
  *   sandbox provider for the restricted prefix and runs the call inside the
  *   store, so every subprocess the executor launches is confined.
  * - `ctx.ptcRuntime.run` does the same for `run_code`.
- * - `ctx.subprocess.spawnTerminal` resolves the caller from the
- *   `DSH_SESSION_ID` environment marker the terminal backend always stamps —
- *   `Agent.enter` forces that id to equal the session id — and rewrites the
- *   already-built argv in place. A spawn carrying the marker whose session
- *   cannot be resolved fails closed whenever ANY registered primary holds an
- *   explicit `read-only` root OR the registry authority is unavailable: a
- *   terminal we cannot attribute must not inherit a deny set we cannot
- *   compute.
+ * - `ctx.subprocess.spawnTerminal` keys on the `DSH_PTY_SESSION_ID` marker:
+ *   every supported `dsh-terminal-bash` backend stamps it (alongside
+ *   `DSH_SESSION_ID`) when it launches an agent's PTY, and no other caller —
+ *   above all the panel's terminal controller — ever sets it. A spec without
+ *   the marker is a USER terminal, passed through untouched in every mode:
+ *   the sandbox protects agent behavior, and upstream never confines the
+ *   user's own terminal. `ctx.terminals` itself is deliberately NOT wrapped:
+ *   upstream mounts it inside `optional-persistent-terminals` with
+ *   `isolate: { terminals: true }`, so the registry entry is unreachable from
+ *   this row — the shared `spawnTerminal` seam plus the env discriminator
+ *   covers both the un-isolated SDK mount and the isolated web mount.
  *
  * The same seam carries the unknown-authority downgrade: while the scope
  * reports `authority: 'unavailable'` — a contended, storage-failed or
  * config-invalid registry publishes an empty deny set that is NOT evidence —
  * `danger-full-access` executions run inside the upstream `workspace-write`
- * profile instead of ambient.
+ * profile (with the deny set applied) instead of ambient.
  *
  * Windows uses the standalone ambient deny-token runner. Landlock cannot subtract a subtree, so that combination selects bubblewrap.
  * An unusable mount runner fails without starting an unconfined process.
@@ -117,7 +120,7 @@ export function apply(ctx: Context): void {
     if (policy.mode !== 'danger-full-access') return undefined
     const scope = ctx.multiRootScope.resolve(policy)
     if (scope.authority === 'unavailable') {
-      return (ctx.sandbox as MultiRootSandboxProvider).clampedExecution(policy, signal)
+      return (ctx.sandbox as MultiRootSandboxProvider).clampedExecution(policy, scope.deniedRoots, signal)
     }
     if (scope.deniedRoots.length === 0) return undefined
     return (ctx.sandbox as MultiRootSandboxProvider).restrictedExecution(policy, scope.deniedRoots, signal)
@@ -166,18 +169,27 @@ export function apply(ctx: Context): void {
       this: unknown,
       spec: SubprocessTerminalSpawnSpec,
     ) {
+      // `DSH_PTY_SESSION_ID` is stamped by every supported dsh-terminal-bash
+      // backend when it launches an agent's PTY — and never by any other
+      // caller. A spec without it is a USER terminal (the panel's controller
+      // calls `spawnTerminal` directly): the sandbox guards agent behavior,
+      // so user terminals pass through untouched in every mode.
+      const ptySessionId = spec.env?.DSH_PTY_SESSION_ID
+      if (ptySessionId === undefined || ptySessionId === '') return await original.call(this, spec)
       const sessionId = spec.env?.DSH_SESSION_ID
-      if (sessionId === undefined || sessionId === '') return await original.call(this, spec)
-      const session = ctx.get('sessions')?.get(sessionId as SessionId)
+      const session = sessionId === undefined || sessionId === ''
+        ? undefined
+        : ctx.get('sessions')?.get(sessionId as SessionId)
       if (session === undefined) {
-        // A PTY spawn whose owner session is gone is already an anomaly. With
-        // no explicit read-only roots anywhere there is nothing to deny and
-        // the spawn stays upstream-exact; otherwise refuse it — an
-        // unattributable terminal must not inherit an uncomputed deny set.
+        // An agent PTY whose owner session is gone is already an anomaly.
+        // With no explicit read-only roots anywhere there is nothing to deny
+        // and the spawn stays upstream-exact; otherwise refuse it — an
+        // unattributable agent terminal must not inherit an uncomputed deny
+        // set.
         if (!ctx.multiRootScope.hasActiveDenyRoots()) return await original.call(this, spec)
         throw new Error(
-          'multi-root workspace: terminal spawn carries a session marker that does not resolve '
-          + `to a live session (${JSON.stringify(sessionId)}), and explicit read-only roots are `
+          'multi-root workspace: agent terminal spawn carries a session marker that does not resolve '
+          + `to a live session (${JSON.stringify(sessionId ?? ptySessionId)}), and explicit read-only roots are `
           + 'or may be registered — refusing to spawn an unconfined terminal',
         )
       }

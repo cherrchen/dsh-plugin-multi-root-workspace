@@ -22,12 +22,14 @@ import { describe, expect, it } from 'vitest'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MultiRootFileSystem } from '../src/fs.ts'
+import type { Config as ScopeConfig } from '../src/scope.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason } from './support/temp-workspace.ts'
 
 /** Mount one Full-access stack: real storage + registry + the multi-root fs fence. */
-async function stack(store: string, primary: string): Promise<RegistryStack> {
+async function stack(store: string, primary: string, scopeConfig: ScopeConfig = {}): Promise<RegistryStack> {
   return await mountRegistryStack(store, {}, {
+    scopeConfig,
     beforeGate: async ctx => {
       await ctx.plugin(SessionProjectionRegistry)
       await ctx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: primary })
@@ -89,6 +91,70 @@ describe('an unknown registry authority is not "no restrictions"', () => {
     } finally {
       await second?.dispose()
       await first.dispose()
+      fixture.dispose()
+    }
+  })
+})
+
+describe('the DSH-home boundary under Full-access', () => {
+  it('refuses ambient writes under the configured home while restrictions apply', async () => {
+    const fixture = createFixtureWorkspace('review-home')
+    const home = join(fixture.base, 'dsh-home')
+    mkdirSync(home)
+    const service = await stack(join(fixture.base, 'store'), fixture.workspace, { dshHome: home })
+    try {
+      // With zero additional roots and a healthy authority the home boundary
+      // does not engage — Full-access stays upstream-exact.
+      const free = join(home, 'early.txt')
+      await service.ctx.fs.writeText(await service.ctx.fs.resolve(free), 'before')
+      expect(readFileSync(free, 'utf8')).toBe('before')
+
+      // Once any deny boundary exists, the home is protected too.
+      await service.registry.add(fixture.workspace, { path: fixture.outside, access: 'read-only' })
+      const victim = join(home, 'victim.txt')
+      writeFileSync(victim, 'config')
+      await expect(service.ctx.fs.writeText(await service.ctx.fs.resolve(victim), 'tampered'))
+        .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      expect(readFileSync(victim, 'utf8')).toBe('config')
+      await expect(service.ctx.fs.writeText(await service.ctx.fs.resolve(victim), 'tampered'))
+        .rejects.toThrow('DSH home directory')
+    } finally {
+      await service.dispose()
+      fixture.dispose()
+    }
+  })
+
+  it('denies the home under the unavailable-authority clamp', async () => {
+    const fixture = createFixtureWorkspace('review-home-clamp')
+    const home = join(fixture.base, 'dsh-home')
+    mkdirSync(home)
+    const service = await stack(join(fixture.base, 'store'), fixture.workspace, { dshHome: home })
+    try {
+      service.scope.setRegistryAuthority(false)
+      const victim = join(home, 'victim.txt')
+      writeFileSync(victim, 'config')
+      await expect(service.ctx.fs.writeText(await service.ctx.fs.resolve(victim), 'tampered'))
+        .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      expect(readFileSync(victim, 'utf8')).toBe('config')
+    } finally {
+      await service.dispose()
+      fixture.dispose()
+    }
+  })
+
+  it('lets the deny win when the primary root sits inside the home', async () => {
+    const fixture = createFixtureWorkspace('review-home-primary')
+    const home = join(fixture.base, 'dsh-home')
+    const primary = join(home, 'workspace')
+    mkdirSync(primary, { recursive: true })
+    const service = await stack(join(fixture.base, 'store'), primary, { dshHome: home })
+    try {
+      await service.registry.add(primary, { path: fixture.outside, access: 'read-only' })
+      const target = await service.ctx.fs.resolve(join(primary, 'work.txt'))
+      await expect(service.ctx.fs.writeText(target, 'inside primary'))
+        .rejects.toThrow('DSH home directory')
+    } finally {
+      await service.dispose()
       fixture.dispose()
     }
   })

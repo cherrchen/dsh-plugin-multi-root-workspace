@@ -29,7 +29,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
+import { canonicalPath, SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, ConfinedSandboxMode, SandboxExecutionPolicy, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { Config } from '@deepseek-ai/dsh-sandbox-local'
@@ -222,15 +222,26 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
    * `denialSignatures` and `runnerFailureRules` pass through untouched: they
    * describe the very confine result the process is about to run under.
    *
+   * `deniedRoots` graft onto the probed profile exactly the way
+   * `widenForScope`'s workspace-write branch does with an empty writable set
+   * — POSIX dialects take `denyProfileArgs`, Windows takes
+   * `widenWindowsProfile` — so a deny a grant would cover (the DSH home under
+   * a temp grant, say) is refused inside the clamped profile too. A dialect
+   * that cannot subtract that root under a grant throws
+   * `DialectUnrecognizedError` → `SandboxUnavailableError`: the clamp fails
+   * closed rather than run ambient.
+   *
    * The return preserves the installed `confine` shape: a synchronous result
    * on a synchronous release, a promise on an asynchronous one.
    * @param policy - the caller's policy (mode is `danger-full-access`; the
    *   probe itself runs under `workspace-write`).
+   * @param deniedRoots - canonical roots the clamped execution must not write.
    * @param signal - cancellation, forwarded to releases that accept it.
    * @returns the confined facts whose argv is the workspace-write prefix.
    */
   clampedExecution(
     policy: SandboxExecutionPolicy,
+    deniedRoots: readonly string[],
     signal?: AbortSignal,
   ): UpstreamConfined {
     const probePolicy: SandboxPolicy = {
@@ -243,7 +254,13 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     const clamp = (confined: ConfinedArgv): ConfinedArgv => {
       try {
         const shape = splitConfined(confined.argv, ['true'])
-        return { ...confined, argv: [...shape.profileArgs, '--'] }
+        const profileArgs = shape.dialect === 'windows-acl'
+          // `widenWindowsProfile` cross-checks the profile's workspace against
+          // the canonical primary root, matching the widenForScope call site.
+          ? widenWindowsProfile(shape.profileArgs, [], deniedRoots, canonicalPath(policy.workspaceRoot))
+          : denyProfileArgs(shape.dialect,
+            widenProfileArgs(shape.dialect, shape.profileArgs, probePolicy, []), deniedRoots)
+        return { ...confined, argv: [...profileArgs, '--'] }
       } catch (error: unknown) {
         if (!(error instanceof DialectUnrecognizedError)) throw error
         throw new SandboxUnavailableError(

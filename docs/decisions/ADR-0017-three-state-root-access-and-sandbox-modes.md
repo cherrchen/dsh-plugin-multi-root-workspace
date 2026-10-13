@@ -56,7 +56,7 @@ Phase 1 时本机外层沙箱拒绝 `sandbox_apply`，原生证据留待补齐�
 | `ctx.shell.execute`（`0.1.5/0.1.6` 结构探测补 `start`） | `spec.sandboxPolicy.mode` ≠ Full-access → 直通；Full-access 且当前 scope 无显式只读根 → 直通 | Full-access + 有显式只读根 → ALS 注入 deny 上下文后委托原方法；`ctx.shell` 在 win32 是 pwsh executor，逻辑与方言无关 |
 | `ctx.ptcRuntime.execute`（`run` 内部委托 `execute`，同包装覆盖） | 同上，policy 来自参数 | 同上 |
 | `ctx.subprocess.spawn` | ALS 无 deny 上下文 → 直通 | 有 → 调 `ctx.sandbox` 受限 confine 重写 `spec.argv` 后委托原方法；其余 spec 字段与 signal 原样穿透 |
-| `ctx.subprocess.spawnTerminal` | env 无 `DSH_SESSION_ID` → 非终端 spawn，直通 | `sessions.get(env.DSH_SESSION_ID)` → `sandboxPolicy.resolve({session})` → scope；无显式只读根 → 直通；有 → 受限 confine 重写 argv；会话不可解析且任何 primary 下存在显式只读根 → fail closed 拒 spawn（不明示放行，也不误伤无受限根的部署） |
+| `ctx.subprocess.spawnTerminal` | env 无 `DSH_PTY_SESSION_ID` → 非 agent PTY（面板 controller 等用户终端），任何模式直通 | env 有 `DSH_PTY_SESSION_ID`（每个支持版本的 `dsh-terminal-bash` backend 启动 agent PTY 时都盖）→ `sessions.get(env.DSH_SESSION_ID)` → `sandboxPolicy.resolve({session})` → scope；无 deny → 直通；有 → 受限 confine / clamped prefix 重写 argv；会话不可解析且 `hasActiveDenyRoots()` → fail closed 拒 spawn |
 | `ctx.fs` write/edit fence | Full-access：目标在显式只读根内 → `FS_SANDBOX_DENIED`；read-only：目标在固定读写根内且工具未封顶 → 放行 | 其余沿用 workspace-write 判定；零受限根保持快速路径，不引入额外 realpath IO |
 
 `ctx.sandbox`（已替换行）增加受限 confine 内部路径，供 `spawn` / `spawnTerminal` 包装调用：`ConfinedSandboxMode` 之外的 mode 由 compat 层一次受控 cast。三种构造：
@@ -96,7 +96,7 @@ Phase 1 时本机外层沙箱拒绝 `sandbox_apply`，原生证据留待补齐�
 | 方案 | 否决理由 |
 | --- | --- |
 | 替换 `bash-sandbox` / `pwsh-sandbox` 行挂载 executor 子类 | `executeArgv` 是 protected、`processFacts` 是私有，子类无法复现事实戳记只能整段重实现；行替换还要镜像平台 disabled 与 config 漂移。method-wrapper 与 ADR-0011 的公共接缝先例一致 |
-| 包装 `ctx.terminals` 或其 backend | `persistent-shell` 组 `isolate: terminals`，组外拿不到组内服务实例；backend 委托的共享 `ctx.subprocess.spawnTerminal` 才是可达接缝 |
+| 包装 `ctx.terminals` 或其 backend | `optional-persistent-terminals` 组 `isolate: terminals`，组外拿不到组内服务实例——`dsh-web-app` 上 registry 不可达，只有 `dsh-sdk-minimal` 把它挂在根；backend 委托的共享 `ctx.subprocess.spawnTerminal` + env 判别才是全 profile 可达接缝 |
 | `subprocess.spawn` 按 argv 形状识别受限调用 | 无法区分「已 confine 的 argv」与裸 argv，二次嵌套 confinement 可能直接失败（本环境实测 `sandbox_apply` 嵌套拒绝）；必须靠 ALS 精确传递授权意图 |
 | PTC 子进程按 env 标记识别 | PTC 把 `process.env` 全键置 `undefined` 后仅显式注入 `DSH_PTC_RUNTIME_NODE`，没有会话标记；且 `execute(spec, policy, …)` 的 policy 本就是显式参数，ALS 更精确 |
 | 把 Full-access + 局部只读近似为 `workspace-write` + 扩展根 | 改变全局模式语义（主根与未登记区域失去 Full-access），计划明确禁止 |
@@ -146,7 +146,7 @@ Landlock 的 allowlist 无法实现 Full-access 子树减法，该组合不再�
 **复现**：两个 stack 共用同一 store，第二个 `registry-contended`、发布空 scope，deny 集为空——Full-access 的 fs fence 与进程 fence 都把它读作「没有限制」，可以覆写另一进程登记的 `read-only` 根。**决定**：scope 新增 `authority: 'available' | 'unavailable'` 事实，注册表在构造（覆盖 config-invalid 与 acquire 前）、`enterContended` / `enterStorageFailed`、以及 `releaseAuthority` 转场开头标记 `unavailable`，`openDomain` 发布完全部存储记录后才标记 `available`。该事实不可用时：
 
 - fs fence 把 `danger-full-access` 降为上游 `workspace-write` 语义——可写集 = `writableRoots({...policy, mode:'workspace-write'})`（主根 + 平台 temp），不并入 scope 的 writable 成员；
-- 进程 fence 不再走 restricted profile，而是用 `clampedExecution`（以 `['true']` 探一次 `workspace-write` 的 `super.confine`、保留其 profile 前缀与 enforcement / denialSignatures / runnerFailureRules）把 shell / PTC / PTY 的 ambient 执行钳进上游 workspace-write confine；`spawnTerminal` 的不可解析会话分支经 `hasActiveDenyRoots()`（authority 不可用即真）自动拒绝；
+- 进程 fence 不再走 restricted profile，而是用 `clampedExecution`（以 `['true']` 探一次 `workspace-write` 的 `super.confine`、保留其 profile 前缀与 enforcement / denialSignatures / runnerFailureRules）把 shell / PTC / PTY 的 ambient 执行钳进上游 workspace-write confine；
 - 模型拓扑在 Full-access + authority 不可用时固定陈述降级句（`REGISTRY_UNAVAILABLE_NOTE`），其他模式与零根仍不贡献；
 - `workspace-write` 与 `read-only` 模式不变：那里 scope 本就为空，不追加授予。
 
@@ -165,6 +165,24 @@ Landlock 的 allowlist 无法实现 Full-access 子树减法，该组合不再�
 进程 fence 行注释此前写 `ctx.ptcRuntime.execute`；代码包装的是公开 `run`（私有 `execute` 不作为跨包接缝）。注释已改为 `ctx.ptcRuntime.run`，并补记未知 authority 的 Full-access 降级。
 
 回归：`tests/b9-review-regressions.spec.ts`（反转的两条 P1 复现）、scope / registry-lease 的 authority 状态断言、process-fence 的 clamped prefix 与 unresolvable-terminal 断言、dialects 的 `--ro-bind-try` 期望、prompt-context 的降级句。
+
+## 用户终端直通与 `$DSH_HOME` 负授权修订（2026-10-14）
+
+评审返工的两项用户产品决策，覆盖本节之前 `spawnTerminal` 的 env 标记机制与 deny 集构成。
+
+### 面板用户终端任何模式都不受本插件约束
+
+**问题**：原机制用 `env.DSH_SESSION_ID` 恢复会话，但上游 `dsh-api-terminal-controller` 给面板终端 spawn 时同样盖 `DSH_SESSION_ID: agent.id`——按该标记识别会把**用户**终端一并 confine。决定按用户定案：沙箱保护的是 agent 行为，面板终端是用户行为，本插件任何模式都不介入。
+
+**机制**：agent PTY 与用户终端的结构差别在 env——全部 11 个受支持版本的 `dsh-terminal-bash` backend 启动 agent PTY 时经 `childEnvironment` 盖 `DSH_PTY_SESSION_ID: spec.sessionId`（与 `DSH_SESSION_ID: spec.owner.id` 并列），而面板 controller 只盖 `DSH_SESSION_ID`。`spawnTerminal` 包装据此判别：`DSH_PTY_SESSION_ID` 缺席 → 用户终端，任何模式直通；存在 → 按 `DSH_SESSION_ID` 恢复会话与策略，受限时前缀 argv，会话不可解析且 `hasActiveDenyRoots()` 时 fail closed 拒 spawn。`ctx.terminals` 本身不包装：`optional-persistent-terminals` 组 `isolate: terminals` 使 registry 在 web profile 上不可达，共享 `spawnTerminal` + env 判别同时覆盖隔离与未隔离两种挂载。
+
+### `$DSH_HOME` 在受限 Full-access 下加入 deny 集
+
+**决定**：scope 配置新增 `dshHome`（patch 行以 `dshHomePath()` 注入；非绝对路径日志报错并忽略）。`resolve()` 在 `danger-full-access` 且（registry/工具 cap 派生的 deny 集非空 **或** authority `unavailable`）时把 canonical home 追加进 `deniedRoots` 并以 `protectedHome` 暴露；`workspace-write` / `read-only` 与零根健康 authority 的 Full-access 都不追加（保持零根直通）。主根位于 home 内时 deny 胜出（Full-access 下主根不可写），不做剔除。fs fence 对 home 命中给出专用拒写文案；进程 fence 的 restricted / clamped prefix 自动携带该 deny——`clampedExecution` 改为 `(policy, deniedRoots, signal)`，按 workspace-write 分支同一规则把 deny 集 graft 到探针 profile 上（POSIX 用 `denyProfileArgs`，Windows 用 `widenWindowsProfile(…, [], denied, primary)`），`DialectUnrecognizedError` → `SandboxUnavailableError` fail closed（含 Landlock 在主根为 `~` 等不可表达情形）。模型拓扑在 `protectedHome` 存在时固定陈述「`$DSH_HOME` 目录下写入被拒」并打印绝对路径。
+
+**Windows 风险如实记录**：Windows 路径的 deny 经 `runWindowsDenied` 对 deny 根整树递归写入**持久化** deny ACE（含父目录 `FILE_DELETE_CHILD` / `WRITE_DAC` 防移除守卫），拆卸时**不撤销**——ACE 只匹配 broker 为该根派发的 deny-only 组 SID，ambient 进程不受影响，但 `$DSH_HOME` 全部节点 ACL 被长期改写、每次受限 spawn 都要整树 `readdir`+`SetSecurityInfo`；任一节点不可写/不可改 DACL 时整个 spawn 在启动前 fail closed。`$DSH_HOME` 内含 storages/、lease 文件、profiles 与宿主自身工件——宿主进程不在受限令牌内不受影响，但该持久化 ACL 写入量与节点失败面是本轮已知的平台代价，未另造机制。
+
+回归：process-fence 的 agent/user 终端分轨断言（controller 形状直通、backend 形状受限/钳制、不可解析会话 fail closed）、scope 的 `protectedHome` 全触发矩阵、b9-review-regressions 的 home 拒写（含主根位于 home 内）、patch 行 `dshHome`、prompt-context 的 home 陈述句。
 
 ## Related Documents
 

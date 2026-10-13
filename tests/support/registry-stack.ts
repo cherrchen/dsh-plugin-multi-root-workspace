@@ -18,6 +18,7 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import MultiRootRegistry, { DOMAIN_NAME, type Config as RegistryConfig } from '../../src/registry.ts'
 import MultiRootScopeService from '../../src/scope.ts'
+import type { Config as ScopeConfig } from '../../src/scope.ts'
 import { mountCompat } from './compat.ts'
 import { mountProviderGate } from './providers.ts'
 
@@ -50,6 +51,8 @@ export interface RegistryStackOptions {
    * `ctx.plugin` can never take an already-provided service key.
    */
   beforeGate?: (ctx: Context) => Promise<void>
+  /** `multi-root-scope` row config (toolAccess, dshHome); default `{}`. */
+  scopeConfig?: ScopeConfig
 }
 
 export async function mountRegistryStack(storeRoot: string, registryConfig: RegistryConfig = {}, options: RegistryStackOptions = {}): Promise<RegistryStack> {
@@ -60,7 +63,7 @@ export async function mountRegistryStack(storeRoot: string, registryConfig: Regi
   const facility = new DomainFacility(ctx, { backend: 'json', routes: {} })
   ctx.storage.mount('domain', facility)
   ctx.provide('storageDomain', facility)
-  await ctx.plugin(MultiRootScopeService)
+  await ctx.plugin(MultiRootScopeService, options.scopeConfig ?? {})
   // The registry injects the compatibility gate, so a stack without it would
   // silently never start the service under test (see src/compat.ts).
   await mountCompat(ctx)

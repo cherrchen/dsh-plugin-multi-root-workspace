@@ -19,6 +19,7 @@ import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-ses
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt, { renderContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import { MULTI_ROOT_CONTEXT_NAME, MultiRootScopeService, sanitizeAdditionalRoots } from '../src/scope.ts'
+import type { Config as ScopeConfig } from '../src/scope.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -386,5 +387,101 @@ describe('read-only topology text', () => {
     expect(text).toContain(JSON.stringify([fixture.outside]))
     expect(text).not.toContain(JSON.stringify([fixture.outside, canonicalPath(third)]))
     expect(text).toContain(`${JSON.stringify([canonicalPath(third)])} are read-only additional roots (writes are refused)`)
+  })
+})
+
+describe('the DSH-home boundary', () => {
+  let home: string
+  let homeCtx: Context
+  let homeFiber: Awaited<ReturnType<Context['plugin']>>
+
+  /**
+   * Mount the scope row with a `dshHome` config — the value the patch row
+   * fills with `dshHomePath()` — under a fixture directory.
+   */
+  const mountWithHome = async (dshHome: unknown = home, toolAccess?: ScopeConfig['toolAccess']): Promise<void> => {
+    homeCtx = new Context()
+    homeFiber = await homeCtx.plugin(MultiRootScopeService, {
+      ...(dshHome === undefined ? {} : { dshHome: dshHome as string }),
+      ...(toolAccess === undefined ? {} : { toolAccess }),
+    })
+  }
+  const homeScope = () => homeCtx.multiRootScope
+
+  beforeEach(() => {
+    home = join(fixture.base, 'dsh-home')
+    mkdirSync(home)
+  })
+  afterEach(async () => {
+    await homeFiber?.dispose()
+  })
+
+  it('appends the home to deniedRoots under Full-access once any deny exists', async () => {
+    await mountWithHome()
+    homeScope().setAdditionalRoots(fixture.workspace, [
+      { ...root('ro', fixture.outside), access: 'read-only' },
+    ])
+    const scope = homeScope().resolve(policy(fixture.workspace, 'danger-full-access'))
+    expect(scope.deniedRoots).toEqual([canonicalPath(fixture.outside), canonicalPath(home)])
+    expect(scope.protectedHome).toBe(canonicalPath(home))
+  })
+
+  it('denies the home under Full-access while the registry authority is unavailable', async () => {
+    await mountWithHome()
+    homeScope().setRegistryAuthority(false)
+    const scope = homeScope().resolve(policy(fixture.workspace, 'danger-full-access'))
+    expect(scope.deniedRoots).toEqual([canonicalPath(home)])
+    expect(scope.protectedHome).toBe(canonicalPath(home))
+  })
+
+  it('never appends the home to a zero-root Full-access scope with available authority', async () => {
+    await mountWithHome()
+    const scope = homeScope().resolve(policy(fixture.workspace, 'danger-full-access'))
+    expect(scope.deniedRoots).toEqual([])
+    expect(scope.protectedHome).toBeUndefined()
+  })
+
+  it('never appends the home under the confined modes', async () => {
+    await mountWithHome()
+    homeScope().setAdditionalRoots(fixture.workspace, [
+      { ...root('ro', fixture.outside), access: 'read-only' },
+    ])
+    for (const mode of ['workspace-write', 'read-only'] as const) {
+      const scope = homeScope().resolve(policy(fixture.workspace, mode))
+      expect(scope.deniedRoots).toEqual([canonicalPath(fixture.outside)])
+      expect(scope.protectedHome).toBeUndefined()
+    }
+  })
+
+  it('appends the home for a tool-capped Full-access call with members', async () => {
+    await mountWithHome(home, { bash: 'read-only' })
+    homeScope().setAdditionalRoots(fixture.workspace, [root('a', fixture.outside)])
+    // Outside any dispatch a non-empty toolAccess caps every call — the deny
+    // set is non-empty, so the home boundary rides along.
+    const scope = homeScope().resolve(policy(fixture.workspace, 'danger-full-access'))
+    expect(scope.deniedRoots).toEqual([canonicalPath(fixture.outside), canonicalPath(home)])
+    expect(scope.protectedHome).toBe(canonicalPath(home))
+  })
+
+  it('denies the primary root itself when it sits inside the home', async () => {
+    const nested = join(home, 'workspace')
+    mkdirSync(nested)
+    await mountWithHome()
+    homeScope().setAdditionalRoots(nested, [
+      { ...root('ro', fixture.outside), access: 'read-only' },
+    ])
+    const scope = homeScope().resolve(policy(nested, 'danger-full-access'))
+    // Deny wins over containment: the workspace is unwritable under
+    // Full-access rather than the boundary being silently dropped.
+    expect(scope.deniedRoots).toContain(canonicalPath(home))
+    expect(scope.protectedHome).toBe(canonicalPath(home))
+  })
+
+  it('ignores a missing or invalid dshHome — the boundary simply does not exist', async () => {
+    await mountWithHome('relative/not-absolute')
+    homeScope().setRegistryAuthority(false)
+    const scope = homeScope().resolve(policy(fixture.workspace, 'danger-full-access'))
+    expect(scope.deniedRoots).toEqual([])
+    expect(scope.protectedHome).toBeUndefined()
   })
 })
