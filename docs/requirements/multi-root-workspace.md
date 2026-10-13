@@ -98,7 +98,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 | P2 | Additional Root 数量上限 | 后续评审补充；防止 realpath/stat、sandbox argv 与 prompt 预算随根数量无界增长。B6 已实现：`maxAdditionalRoots` 默认 16、顶 64，超限存量照授只拒新增，见 [ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md) |
 | P2 | Provider replacement conflict detection | 后续评审补充；若另一插件也替换 `ctx.fs` / `ctx.sandbox`，应 fail loud，而不是依赖 patch 顺序。B7 已实现：品牌 + `multi-root-providers` 门禁，见 [ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md) |
 | P2 | Windows-aware model capability prompt | 后续评审补充；不再对 Windows 模型宣称"附加根与主根完全同权"。B8 已实现：拓扑文案按模式、访问级别、capped tools 与平台陈述，win32 附带 restricted-token partial-enforcement 与读不受限说明，见 [ADR-0013](../decisions/ADR-0013-per-root-and-per-tool-access.md) |
-| P1 / P2 | B9 附加根三态权限与跨 SandboxMode 执行一致性 | 目标：继承 / 只读 / 读写，显式根策略不被会话模式默认行为覆盖；权限矩阵、迁移建议、进程后端验证关口与验收方案见 [B9 计划](../plans/active/2026-10-13-b9-root-access-and-sandbox-modes.md#目标权限矩阵)。进度与发布状态见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13) |
+| P1 / P2 | B9 附加根三态权限与跨 SandboxMode 执行一致性 | 目标：继承 / 只读 / 读写，显式根策略不被会话模式默认行为覆盖；权限矩阵、迁移建议、进程后端验证关口与验收方案见 [B9 计划](../plans/completed/2026-10-13-b9-root-access-and-sandbox-modes.md#目标权限矩阵)。进度与发布状态见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13) |
 | P3 | Registry observer 语义 | 后续评审补充；区分 grant change / metadata change，并隔离 listener 异常 |
 | P3 | 收紧 TOCTOU 文档表述 | 后续评审补充；与 DSH 本地 path-based sandbox 保持同一 threat model，不声称消除 path race |
 | P3 | `*.dsh-workspace.json` Import/Export | 第一期就已登记（§17）；storage 目前是唯一数据源 |

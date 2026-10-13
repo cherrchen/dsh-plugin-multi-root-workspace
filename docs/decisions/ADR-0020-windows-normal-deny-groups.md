@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed（2026-10-13；候选已实现，Windows 原生验收状态只见路线账本）
+Accepted（2026-10-13；Windows 原生及完整门禁证据只见路线账本）
 
 ## Date
 
@@ -14,7 +14,7 @@ Proposed（2026-10-13；候选已实现，Windows 原生验收状态只见路线
 
 [ADR-0018](./ADR-0018-windows-ambient-write-denial.md) 证伪的是 **restricting SID list** 的取交集删除，并非普通 TokenGroups 内的 deny-only SID。Microsoft 的 CreateRestrictedToken 合同区分二者：对普通组的 disable 操作只转换为 deny-only，不删除组；已有 deny-only 组不能贡献 allow 权限。可以通过特权 broker 创建带额外普通 deny-only 组的 token，再用普通 deny ACE，避开 local 属性 / claim 条件求值。
 
-## Decision（候选）
+## Decision
 
 - 保留既有安装入口、用户 SID 隔离、scope、公开进程接缝、根 SID 派生、逐对象 ACL writer、owner / parent guard、standing ACL 与 partial 边界。
 - broker 使用独立虚拟服务账户 `NT SERVICE\DshMultiRootBroker-<installation-hash>`。LocalSystem 在实际 CI 上缺少 SeCreateTokenPrivilege（启用返回 Win32 1300），所以管理员安装器通过 LsaAddAccountRights 只向该服务 SID 授予 SeServiceLogonRight、SeCreateTokenPrivilege、SeAssignPrimaryTokenPrivilege、SeTcbPrivilege、SeDebugPrivilege 和 SeImpersonatePrivilege；分别用于服务登录、token 创建与暂停子进程赋值 / session 镜像、打开已认证 caller 进程及管道认证。服务启动启用所需特权，不修改宿主用户、LocalSystem 或 ALL SERVICES 的权限，不依赖重启系统或其他系统进程。协议 v2 仅接受源 process-token handle 与最多 64 个固定格式 root deny SID。源身份来自内核管道 PID，管道身份、process token SID 和安装 SID 必须一致；token 对象的 QUERY / QUERY_SOURCE handle 在短暂模拟已认证管道调用方期间打开（SeDebugPrivilege 只覆盖 process，不越过 token DACL）；随后恢复服务身份再进行创建。NtCompareTokens 验证传入 handle 等同该 process token。不接受任意身份、命令、路径、权限或属性名。
@@ -26,11 +26,11 @@ Proposed（2026-10-13；候选已实现，Windows 原生验收状态只见路线
 - 客户端只在 public create binding 的暂停窗口中调用 v3，限定 IPC 时间与长度，并读回实际子进程 token 的完整 deny-only 组集合；ACK 不能作为放行依据。任何 assignment / 回读错误都终止并关闭暂停子进程，不得调用 ResumeThread。fd 7 与 ConPTY 沿用同一公开 helper，未知创建 flag 形状在创建前 fail closed。
 - broker 赋值 token 的对象 DACL 拒绝 group / privilege / default 调整及 descriptor 编辑；query、duplicate 与实际 impersonation 保留。TokenDefaultDacl 保留 caller 原值，避免把 token-specific 权限位写进 ambient 新对象的默认 ACL；普通 deny-only groups 自身不能通过 token narrowing 删除或恢复为 enabled。既有 owner / parent / protected-descendant、ConPTY / fd 7 合同不变。
 
-本方案仍需 Windows 原生结果验证；结构检查和 macOS 跳过不能确认 NtCreateTokenEx、CreateProcessAsUser 或真实拒写成立。只修改该专用虚拟服务账户的固定权限集合，记录安装新增的 rights，升级 / 卸载及启动失败时仅撤销这次安装新增项，保留预存 account policy；不从其他系统进程获取 token；服务自身不能启用所需特权时 fail closed。
+本方案的 Windows 原生执行已验证；后续修改仍必须运行真实 token 赋值与拒写回归，结构检查和 macOS 跳过不能替代 Windows 证据。只修改该专用虚拟服务账户的固定权限集合，记录安装新增的 rights，升级 / 卸载及启动失败时仅撤销这次安装新增项，保留预存 account policy；不从其他系统进程获取 token；服务自身不能启用所需特权时 fail closed。
 
 ## Validation
 
-现有九格矩阵、Node / pwsh / 后代、overwrite / delete / rename / ACL reset、protected DACL、ConPTY / fd 7、宿主写入与根权限变更回归全部保留。弱化 token 用例除 restricting-list 取交集外，再 disable 全部普通组，激活两种弱化 token 后真实写入；不以 API 失败或 broker ACK 代替写拒绝证据。全版本全平台执行只记录在[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)。
+现有九格矩阵、Node / pwsh / 后代、overwrite / delete / rename / ACL reset、protected DACL、ConPTY / fd 7、宿主写入与根权限变更回归全部保留。弱化 token 用例除 restricting-list 取交集外，再 disable 全部普通组，激活两种弱化 token 后真实写入；不以 API 失败或 broker ACK 代替写拒绝证据。安装生命周期用真实 LSA policy 回读验证安装、升级、卸载，保留预存服务权限及其他账户权限。安装生命周期用真实 LSA policy 回读验证安装、升级、卸载，保留预存服务权限及其他账户权限。全版本全平台执行只记录在[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)。
 
 ## Alternatives Considered
 
@@ -41,7 +41,7 @@ Proposed（2026-10-13；候选已实现，Windows 原生验收状态只见路线
 ## Related Documents
 
 - [ADR-0017：三态根权限](./ADR-0017-three-state-root-access-and-sandbox-modes.md)
-- [B9 专项计划](../plans/active/2026-10-13-b9-root-access-and-sandbox-modes.md)
+- [B9 专项计划](../plans/completed/2026-10-13-b9-root-access-and-sandbox-modes.md)
 - [Microsoft：CreateRestrictedToken](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)
 - [System Informer：NtCreateTokenEx ABI](https://github.com/winsiderss/phnt/blob/master/ntseapi.h)
 

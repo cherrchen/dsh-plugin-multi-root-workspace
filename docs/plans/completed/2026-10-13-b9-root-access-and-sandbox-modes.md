@@ -4,7 +4,7 @@
 
 为第二期增加 B9：附加根可选择「继承主目录权限」「只读」「读写」，文件操作与新启动的 shell / pwsh / PTY 按同一权限合同执行。显式只读不能被 DSH Full-access 绕过，显式读写在 DSH 只读模式下仍能授予该根写权限。
 
-本文记录目标合同与实施计划；Phase 1–4 已实施，Windows 补齐与 Phase 5 验收继续按下文执行。进度、执行证据与发布状态只维护在[路线账本](./2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)。本轮重新纳入 Windows Full-access + 局部只读的开发与原生验收，不创建 release。
+本文保留实施合同与阶段历史；Phase 1–5 已实施并验证。进度、执行证据与发布状态只维护在[路线账本](../active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)。本轮重新纳入 Windows Full-access + 局部只读的开发与原生验收，不创建 release。
 
 ## Background
 
@@ -14,7 +14,7 @@
 
 ## Current State
 
-当前三态存储、scope / fs、命令 / 面板与进程接缝已实施，合同见 [ADR-0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)。Windows 的只读会话 + 固定读写已通过独立 runner 实现；先前延后的 Full-access + 局部只读现已重新纳入 B9，候选采用 [ADR-0020](../../decisions/ADR-0020-windows-normal-deny-groups.md) 的普通 deny-only 组路径；先前 token-attribute 路径的证伪见 ADR-0019。Landlock 的该组合仍按 ADR-0017 在 spawn 前显式拒绝。原生执行和验收状态只见路线账本。
+当前三态存储、scope / fs、命令 / 面板与进程接缝已实施，合同见 [ADR-0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)。Windows 的只读会话 + 固定读写已通过独立 runner 实现；先前延后的 Full-access + 局部只读现已重新纳入 B9，采用 [ADR-0020](../../decisions/ADR-0020-windows-normal-deny-groups.md) 的普通 deny-only 组路径；先前 token-attribute 路径的证伪见 ADR-0019。Linux Full-access 局部只读按 ADR-0017 选择 bubblewrap；不可用时在 spawn 前明确拒绝。原生执行和验收状态只见路线账本。
 
 ## Scope
 
@@ -99,9 +99,13 @@ Phase 1 核对的接缝定案（ADR-0017）：全部用 `method-wrapper.ts` 公�
 用户撤回先前的 Windows 延后决定。本轮必须补齐 Full-access + 显式只读 / 工具封顶的执行面，且不修改上游包、版本 allowlist 或全局会话模式。
 
 1. 从已识别的 Windows runner profile 构造 `--mode danger-full-access --deny-root`，沿用 shell / PTC / PTY 的公开接缝。
-2. 独立 runner 的无特权限权 prototype 已被原生 token 弱化写入证伪。目标改为不可移除安全属性 + 条件 ACL；TokenSecurityAttributes 需要 SeTcbPrivilege，用户已授权继续实现经管理员安装的 SYSTEM broker。保留 owner-implicit WRITE_DAC 与父目录删除的防绕过要求。具体设计与 Windows partial 边界见 ADR-0019，不复制实现合同。
+2. 独立 runner 的无特权限权 prototype 已被原生 token 弱化写入证伪。此阶段曾改为不可移除安全属性 + 条件 ACL，并经用户授权实现管理员安装的 SYSTEM broker；该路径后被原生验证证伪，最终方案见下面的修订。保留 owner-implicit WRITE_DAC 与父目录删除的防绕过要求。具体设计与 Windows partial 边界见 ADR-0019，不复制实现合同。
 3. 原生验证混合根九格、Node / PowerShell / 后代进程 / ConPTY、fd 7、受保护 DACL、删除/重命名/ACL 编辑、令牌派生、撤销快照、路径失效与并发。
 4. `smoke:behavior` 和安装 tarball 的 `smoke:packed` 均通过真实 Full-access pwsh 执行允许/拒绝矩阵；全部 11 版本 × 启用 OS 在现有 CI 验收。
+
+### Phase 3 最终修订：普通 deny-only 组与暂停赋值
+
+ADR-0019 属性条件路径被证伪后，以 [ADR-0020](../../decisions/ADR-0020-windows-normal-deny-groups.md) 的专用虚拟服务账户、普通 deny-only groups 与暂停子进程赋值替代。保留全部原生拒写、token 弱化、owner / parent guard、ConPTY 和 fd 7 回归；服务安装、升级、卸载通过 policy 回读验证权限回收。版本与平台结果只记录在路线账本。
 
 ### Phase 4：命令、面板与模型上下文
 
@@ -112,7 +116,7 @@ Phase 1 核对的接缝定案（ADR-0017）：全部用 `method-wrapper.ts` 公�
 
 ### Phase 5：全矩阵验收与文档同步
 
-完成下列验收、同步当前行为文档，并把版本与原生平台执行证据写入路线账本。满足完成条件后按文档规则将专项计划迁往 completed；发布仍遵循独立 release workflow。
+下列验收已完成，当前行为文档已同步；版本与原生平台执行证据见路线账本。本专项计划迁往 completed，发布仍遵循独立 release workflow。
 
 ## Validation
 
@@ -129,7 +133,7 @@ Phase 1 核对的接缝定案（ADR-0017）：全部用 `method-wrapper.ts` 公�
 
 ## Risks
 
-- Full-access 的局部只读与现有「只增加 allow roots」架构不同，可能需要新的公开入口或后端机制；Landlock 与 Windows 的选择性限制能力尚未验证。
+- Full-access 的局部只读与现有「只增加 allow roots」架构不同，可能需要新的公开入口或后端机制；Landlock 无法表达该减法，由 bubblewrap 承担；Windows ACL 保留 ADR-0020 链接的 partial 边界。
 - 全局 Full-access 下不同词法路径、symlink 与 withheld 状态可能绕过局部限制；需按继承的 path-based threat model 说明实际边界，不宣称消除 TOCTOU。
 - 原有 `read-write` 名称在 B9 中获得更强的独立授权含义，旧记录和缺省请求不得无提示升级。
 - 旧插件 Full-access bypass 不是新 grant 编码能消除的问题；兼容声明须与执行证据一致。

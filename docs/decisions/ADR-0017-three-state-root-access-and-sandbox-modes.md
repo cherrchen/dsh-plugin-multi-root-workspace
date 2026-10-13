@@ -139,7 +139,7 @@ Landlock 的 allowlist 无法实现 Full-access 子树减法，该组合不再�
 
 ## Related Documents
 
-- [B9 专项计划](../plans/active/2026-10-13-b9-root-access-and-sandbox-modes.md)
+- [B9 专项计划](../plans/completed/2026-10-13-b9-root-access-and-sandbox-modes.md)
 - [路线账本 · B9 条目](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)
 - [ADR-0013：Per-Root 访问级别与 Per-Tool 封顶](./ADR-0013-per-root-and-per-tool-access.md)（本 ADR 修订其权限模型与编码）
 - [ADR-0001：Provider 替换范围](./ADR-0001-provider-replacement-scope.md)

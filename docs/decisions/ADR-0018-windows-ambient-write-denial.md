@@ -61,7 +61,7 @@ Windows CI 原生验证九格混合根矩阵、主根和 ambient 写允许、只
 
 - [ADR-0017：B9 三态权限](./ADR-0017-three-state-root-access-and-sandbox-modes.md)
 - [ADR-0011：Windows 消费方与 partial 边界](./ADR-0011-multi-root-workspace-consumers.md)
-- [B9 专项计划](../plans/active/2026-10-13-b9-root-access-and-sandbox-modes.md)
+- [B9 专项计划](../plans/completed/2026-10-13-b9-root-access-and-sandbox-modes.md)
 - [路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)
 - [Microsoft：CreateRestrictedToken](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)
 - [Microsoft：OWNER RIGHTS SID](https://learn.microsoft.com/en-us/windows/win32/secauthz/well-known-sids)

@@ -40,7 +40,7 @@
 | 第二期 | B6 附加根数量上限 | `maxAdditionalRoots` 默认 16、顶 64；按全部存储记录计数；超限存量照授只拒新增；非法配置 fail closed | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0014](../../decisions/ADR-0014-root-limit-and-provider-conflict.md) | `067933f` | 未发布 |
 | 第二期 | B7 provider 冲突检测 | 品牌 + `multi-root-providers` 门禁；外来 `ctx.fs`/`ctx.sandbox` 下注册表缺席、scope 为空 | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0014](../../decisions/ADR-0014-root-limit-and-provider-conflict.md) | `2a36d5f` | 未发布 |
 | 第二期 | B8 平台感知提示词 | `renderWorkspaceRootsContext` 纯函数化；按模式/平台/访问级别陈述授权；win32 附带 partial-enforcement 说明 | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0013](../../decisions/ADR-0013-per-root-and-per-tool-access.md) | `a7f3d20` | 未发布 |
-| 第二期 | B9 附加根三态权限与跨 SandboxMode 执行一致性 | 继承 / 只读 / 读写；显式根权限覆盖会话模式默认行为，文件与新进程执行一致；先验证 Full-access 局部限权 | [B9 计划](./2026-10-13-b9-root-access-and-sandbox-modes.md) | [0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)；并修订 [0001](../../decisions/ADR-0001-provider-replacement-scope.md)/[0003](../../decisions/ADR-0003-dialect-grant-widening.md)/[0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md)/[0012](../../decisions/ADR-0012-session-origin-and-effective-cwd.md)/[0013](../../decisions/ADR-0013-per-root-and-per-tool-access.md) | — | 实现已落地（575 测试通过）；Windows Full-access 局部只读重新纳入 B9，deny-token 实现与原生 CI 验收中；Landlock 该组合仍显式拒绝，未发布 |
+| 第二期 | B9 附加根三态权限与跨 SandboxMode 执行一致性 | 继承 / 只读 / 读写；显式根权限覆盖会话模式默认行为，文件与新进程执行一致；先验证 Full-access 局部限权 | [B9 计划](../completed/2026-10-13-b9-root-access-and-sandbox-modes.md) | [0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)；并修订 [0001](../../decisions/ADR-0001-provider-replacement-scope.md)/[0003](../../decisions/ADR-0003-dialect-grant-widening.md)/[0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md)/[0012](../../decisions/ADR-0012-session-origin-and-effective-cwd.md)/[0013](../../decisions/ADR-0013-per-root-and-per-tool-access.md) | — | B9 实施与原生验收完成；Windows 普通 deny-only 组与暂停赋值、Linux bubblewrap 补局部只读；保留 Windows partial 边界，未发布 |
 | 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 
 ## 总体策略
@@ -474,7 +474,7 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 
 ## B9：附加根三态权限与跨 SandboxMode 执行一致性（2026-10-13）
 
-用户要求为第二期补充 B9，覆盖 P1 / P2 的沙箱与根权限问题。目标权限合同和完整实施路径见 [B9 专项计划](./2026-10-13-b9-root-access-and-sandbox-modes.md)，本节不复制权限矩阵。
+用户要求为第二期补充 B9，覆盖 P1 / P2 的沙箱与根权限问题。目标权限合同和完整实施路径见 [B9 专项计划](../completed/2026-10-13-b9-root-access-and-sandbox-modes.md)，本节不复制权限矩阵。
 
 - **进度**：Phase 1 审查与定案完成（2026-10-13），决策写入 [ADR-0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)，ADR-0001/0003/0011/0012/0013 已按修订节同步。定案：三档编码 `recordedPath`→`inherit`（旧 read-write 记录自动改为继承）、`readOnlyRecordedPath`→`read-only`、新增 `readWriteRecordedPath`→固定读写；新增根默认 `inherit`；PTC（run_code）纳入 B9。**Phase 2–4 实现已落地（2026-10-14）**：注册表三档 + 迁移、scope 有效权限与 deny 集投影、fs fence 三态化、命令 `--inherit` 与面板三态、`ctx.sandbox` 受限 confine（`restrictedArgvPrefix`）与四方言 profile 变换、新增 `multi-root-process-fence` 行以 ALS + `spawn`/`spawnTerminal` 包装覆盖 shell / PTC / PTY 的 Full-access bypass。**两个组合按定案显式拒绝（spawn 前 fail closed，不计为已实现）**：Landlock Full-access + 局部只读——「尝试扩展」结论为不可行，上游启动器只有 `--ro`/`--rw` allowlist union，无法对 `--rw` 祖先做子树减法；Windows ACL 同组合——上游 runner 只导出 grant 模型（`AclSandbox`/`AclWriteGrant`），无 deny ACE 或受限 token 原语，新机制延后并在 ADR-0017 标注。Windows read-only + 固定读写经独立 runner `--mode read-only` + `--additional-root` 实现，仅授权固定根。
 - **首个关口**：已核对——全部 11 个支持版本的 bash / pwsh / PTY / PTC 在 Full-access 下绕过 `confine()`；接缝定案为公开方法包装（`ctx.shell.execute`/`ctx.ptcRuntime.execute` 注入 ALS、`ctx.subprocess.spawn` 按 ALS confine、`ctx.subprocess.spawnTerminal` 由 env 会话标记恢复策略），不新增替换行。
@@ -533,3 +533,11 @@ CI 日志读取：`gh api --allow-escape-sequences repos/cherrchen/dsh-plugin-mu
 候选 `83139a2` 的 [diag 38396216276](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38396216276) 已通过 NtCreateTokenEx、服务内转换 deny-only、runner 再过滤及组读回，失败移到 CreateProcessAsUserW / Win32 1314：broker 创建的 token 不属于 runner 自身的直接派生，不能享受免 SeAssignPrimaryTokenPrivilege 的启动例外。续作的本地候选新增仅对 caller-owned 初始暂停子进程设置 token 的 v3 操作；helper 创建 flag、parent PID、线程归属、源身份与实际 child token 回读均须验证，失败终止且不 Resume。专用服务账户需要另增 SeAssignPrimaryTokenPrivilege，用户已明确授权该新增权限及提交、推送、原生 CI 验证；不为宿主用户授予特权，不把 argv 或路径传给服务。
 
 暂停赋值候选 `43e0a26` 的 [diag 38399814375](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38399814375) Windows 原生 18/18 全通过，包括真实弱化 token 激活后拒写及 broker 重建拒绝。完整矩阵同一提交发现 `0.1.5-rc.2` 的公开 process binding 缺少 GetFileType，fd 7 用例失败；兼容层通过公开 extension seam 补齐，保留原生回归，不缩小版本矩阵。补充安装、升级、卸载的真实 LSA policy 回读验证，要求预存服务权限与其他账户权限不变。完整门禁尚待最终结果。
+
+### B9 最终验收（2026-10-13，未发布）
+
+实现提交 `006637a` 的 [完整 CI 38400586253](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38400586253) 全部通过：11 个精确支持版本 × Windows / macOS / Ubuntu latest / Ubuntu 22.04 = 44 个 verify job，另加 releases 与总 gate，46/46 success。各版本执行 compat、lint、双端 typecheck、build、kernel probe、单元与原生测试、compose / behavior / journey、pack / packed smoke、docs；Windows 在安装 broker 后运行，结束卸载并撤销新增权限。全部 11 个 Windows job 的原生 ACL suite 18/18 通过；包括 overwrite / delete / rename / ACL reset、protected descendants、两种真实 token 激活后拒写、disable 全部普通组后的拒写、broker 重建拒绝、ConPTY / fd 7 与宿主写允许。
+
+[diag 38400586259](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38400586259) 额外验证服务安装、升级、卸载的实际 LSA policy；预存服务登录权保留，其他账户权限不变。Mac 本机最终 618 passed / 26 其他平台跳过，Seatbelt probe 通过，compose 48/48、behavior 126/126、journey 62/62、packed behavior 125/125 全部 0 skip；compat / lint / typecheck / build / pack / docs 通过。
+
+Phase 5 完成，专项计划移至 completed；ADR-0020 Accepted，ADR-0019 保留 Superseded 历史。用户已分别明确授权提交推送、专用服务账户及包括 SeAssignPrimaryTokenPrivilege 在内的固定权限集合。未合并 PR #12、未创建 tag、未发布；完整门禁不扩大 allowlist，Windows 仍报告 partial，授权快照、standing ACL、path-based TOCTOU 与 owner/parent 操作边界见 ADR-0020 及其链接的 ADR-0018。
