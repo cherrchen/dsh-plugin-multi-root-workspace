@@ -49,6 +49,7 @@ export async function runWindowsDenied(
       openProcess: [kernel32, 'void*', ['uint32', 'int', 'uint32']],
       openProcessToken: [advapi32, 'int', ['void*', 'uint32', 'void*']],
       getTokenInformation: [advapi32, 'int', ['void*', 'int', 'void*', 'uint32', 'void*']],
+      setTokenInformation: [advapi32, 'int', ['void*', 'int', 'void*', 'uint32']],
       createRestrictedToken: [advapi32, 'int', ['void*', 'uint32', 'uint32', 'void*', 'uint32', 'void*', 'uint32', 'void*', 'void*']],
       createFileW: [kernel32, 'void*', ['str16', 'uint32', 'uint32', 'void*', 'uint32', 'uint32', 'void*']],
       convertStringSidToSidW: [advapi32, 'int', ['str16', 'void*']],
@@ -149,11 +150,22 @@ export async function runWindowsDenied(
     const tokenAclOut = Buffer.alloc(8)
     status(api.setEntriesInAclW!(3, Buffer.concat([
       entry(userSid, 3, 0x1e7 | WRITE_DAC | WRITE_OWNER, 0),
-      entry(userSid, 1, 0x20018, 0),
+      // Default DACLs are also used for process/thread/IPC objects: preserve
+      // ordinary identity access while denying the token mutation rights.
+      entry(userSid, 1, 0x10000000, 0),
       entry(ownerRights, 1, 0x20000, 0),
     ]), null, tokenAclOut), 'SetEntriesInAclW(token)')
     const tokenAcl = pointer(tokenAclOut)
-    try { status(api.setSecurityInfo!(restrictedToken, 6, 4, null, null, tokenAcl, null), 'SetSecurityInfo(token)') }
+    try {
+      status(api.setSecurityInfo!(restrictedToken, 6, 4, null, null, tokenAcl, null), 'SetSecurityInfo(token)')
+      // CreateProcess derives a NEW primary-token object. Its security comes
+      // from the token's default DACL, not the source token object's DACL.
+      // Set both so descendants cannot reopen a freshly cloned token to strip
+      // the restricting deny identities.
+      const defaultDacl = Buffer.alloc(8)
+      writePointer(defaultDacl, 0, tokenAcl)
+      check(api.setTokenInformation!(restrictedToken, 6, defaultDacl, 8), 'SetTokenInformation(TokenDefaultDacl)')
+    }
     finally { api.localFree!(tokenAcl) }
     const tempPath = Buffer.alloc(32768 * 2)
     const tempLength = api.getTempPathW!(32768, tempPath)

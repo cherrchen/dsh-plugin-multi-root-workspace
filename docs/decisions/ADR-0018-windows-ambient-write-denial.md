@@ -30,7 +30,7 @@ runner 从上游 ACL 安装位置解析公开的 `dsh-win32-process` 和 Koffi�
 - OWNER RIGHTS 的 READ_CONTROL ACE 关闭 owner-implicit WRITE_DAC；真实 owner 获得显式 WRITE_DAC，宿主保留 ACL 管理能力，但 deny token 会被 deny SID 拒绝。只接受 caller-owned（user 或 enabled owner group）对象和非 null DACL，不能保守表达时 fail closed。
 - 直接父目录的 FILE_DELETE_CHILD 也可授权删除只读根，因此对父目录添加同一 deny SID 的非继承 FILE_DELETE_CHILD / WRITE_DAC / WRITE_OWNER guard。同样应用 owner 权利处理，防止子进程重写 parent guard。
 - 每个对象的 read → merge → set 使用与上游 ACL writer 一致的 `GetTempPathW()/dsh-acl-locks/<path-hash>.lock` + `LockFileEx` 协议串行，锁文件不可删除；这是本地 Win32 重实现，不深导入私有 helper，避免并发 allow grant 擦除 deny。进程退出由内核释放，不使用 PID/TTL 锁。保留无关 ACE、owner、SACL 与原继承状态。
-- `CreateRestrictedToken` 可把 restricting list 取交集，故自定义 deny SID 不能独自成为可信边界。新 token 的 DACL 允许 query / READ_CONTROL，拒绝 duplicate / assign / adjust / WRITE_DAC / WRITE_OWNER，并用 OWNER RIGHTS 去除隐式 WRITE_DAC。runner 的已打开 handle 继续负责 spawn；子进程无法打开 TOKEN_DUPLICATE 去掉 deny SID。
+- `CreateRestrictedToken` 可把 restricting list 取交集，故自定义 deny SID 不能独自成为可信边界。同时设置源 token 对象 DACL 与 TokenDefaultDacl：进程创建会派生新 primary-token 对象，其 DACL 来自 default DACL，只有源对象限权不足。DACL 拒绝 duplicate / assign / adjust / WRITE_DAC / WRITE_OWNER，并用 OWNER RIGHTS 去除隐式 WRITE_DAC；其余普通身份权利保留，query 可用。runner 的已打开 handle 继续负责 spawn；子进程无法打开 TOKEN_DUPLICATE 去掉 deny SID。
 - deny ACE 为 standing ACE，退出时不撤销，保留运行中进程的权限快照及并发安全。移除根 / 改为可写后，新 token 不携带其 deny SID，standing deny 不匹配，宿主和后续 ambient 进程仍可写。token / process / Job / lock 句柄按生命周期关闭；runner 镜像子进程退出码，Job 保证 runner 死亡时结束其子进程。
 
 ### 能力边界
