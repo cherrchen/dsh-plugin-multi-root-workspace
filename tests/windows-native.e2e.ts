@@ -196,6 +196,71 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
   }, 300_000)
 
+  it('reports the restricted child token attributes and installed conditional ACEs (diagnostic)', async () => {
+    const fixture = createFixtureWorkspace('win-b9-diag')
+    const leaf = join(fixture.outside, 'leaf.txt')
+    writeFileSync(leaf, 'seed')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const prefix = await mounted.provider.restrictedArgvPrefix(
+        { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)],
+      )
+      const koffiEntry = fileURLToPath(import.meta.resolve('koffi'))
+      const diag = `
+const fs=require('fs'),k=require(${JSON.stringify(koffiEntry)});
+const a=k.load('advapi32.dll'),b=k.load('kernel32.dll'),n=k.load('ntdll.dll');
+const bind=(lib,name,ret,args)=>lib.func('__stdcall',name,ret,args);
+const openTok=bind(a,'OpenProcessToken','int',['void*','uint32','void*']);
+const getInfo=bind(a,'GetTokenInformation','int',['void*','int','void*','uint32','void*']);
+const ntQuery=bind(n,'NtQuerySecurityAttributesToken','int32',['void*','void*','uint32','void*','uint32','void*']);
+const cur=bind(b,'GetCurrentProcess','void*',[]);
+const gle=bind(b,'GetLastError','uint32',[]);
+const out=Buffer.alloc(8);
+console.log('OPENTOK',openTok(cur(),8,out),'GLE',gle());
+const tok=k.decode(out,'void*');
+const dw=Buffer.alloc(4);
+if(getInfo(tok,40,dw,4,Buffer.alloc(4)))console.log('RESTRICTED',dw.readUInt32LE());
+const ru=r=>Buffer.from(k.decode(k.decode(r.subarray(8),'void*'),'uint8',r.readUInt16LE(0))).toString('utf16le');
+const sz=Buffer.alloc(4);
+let st=ntQuery(tok,null,0,null,0,sz);
+console.log('NQUERY_SIZE NTSTATUS',st,sz.readUInt32LE());
+const buf=Buffer.alloc(Math.max(sz.readUInt32LE(),16));
+st=ntQuery(tok,null,0,buf,buf.length,sz);
+console.log('NQUERY NTSTATUS',st);
+if(st===0){
+  const count=buf.readUInt32LE(4);
+  console.log('ATTRCOUNT',count);
+  const arr=Buffer.from(k.decode(k.decode(buf.subarray(8),'void*'),'uint8',count*40));
+  for(let i=0;i<count;i++){
+    const at=arr.subarray(i*40),vc=at.readUInt32LE(24);
+    const vals=Buffer.from(k.decode(k.decode(at.subarray(32),'void*'),'uint8',vc*16));
+    const vs=[];for(let j=0;j<vc;j++)vs.push(ru(vals.subarray(j*16)));
+    console.log('ATTR',JSON.stringify(ru(at)),'type',at.readUInt16LE(16),'flags',at.readUInt32LE(20).toString(16),'values',JSON.stringify(vs));
+  }
+}
+const cl=Buffer.alloc(4);
+if(!getInfo(tok,33,null,0,cl)){
+  const cb=Buffer.alloc(Math.max(cl.readUInt32LE(),16));
+  if(getInfo(tok,33,cb,cb.length,cl)){
+    const cc=cb.readUInt32LE(4),ca=Buffer.from(k.decode(k.decode(cb.subarray(8),'void*'),'uint8',cc*32));
+    for(let i=0;i<cc;i++){const c=ca.subarray(i*32);console.log('CLAIM',JSON.stringify(k.decode(k.decode(c.subarray(0),'void*'),'char16_t',-1)),'type',c.readUInt16LE(8),'flags',c.readUInt32LE(12).toString(16));}
+  }
+}
+try{fs.writeFileSync(${JSON.stringify(leaf)},'x');console.log('WRITE allowed')}catch(e){console.log('WRITE denied',e&&e.code||e)}
+`
+      const child = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', diag])
+      console.log(`DIAG child status=${child.status}\n${child.stdout}\nSTDERR:${child.stderr}`)
+      const sddl = await spawnArgv('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `[Console]::OutputEncoding=[Text.Encoding]::UTF8;`
+        + `(Get-Acl -LiteralPath ${JSON.stringify(fixture.outside)}).GetSecurityDescriptorSddlForm('All');`
+        + `(Get-Acl -LiteralPath ${JSON.stringify(leaf)}).GetSecurityDescriptorSddlForm('All');`
+        + `(Get-Acl -LiteralPath ${JSON.stringify(dirname(fixture.outside))}).GetSecurityDescriptorSddlForm('Dacl')`,
+      ])
+      console.log(`DIAG sddl status=${sddl.status}\n${sddl.stdout}\nSTDERR:${sddl.stderr}`)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 120_000)
+
   it('denies overwrite, delete, rename, ACL edits and activation of weakened tokens, including protected descendant ACLs', async () => {
     const fixture = createFixtureWorkspace('win-b9-mutations')
     const nested = join(fixture.outside, 'protected')

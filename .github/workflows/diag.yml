@@ -1,0 +1,33 @@
+name: diag
+
+# Temporary single-lane diagnostic for the B9 Windows conditional-ACE failure.
+# Runs only on explicit dispatch against the branch that carries this file;
+# it never merges to main.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      CI: 'true'
+      FORCE_COLOR: '0'
+      TERM: dumb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Install the B9 token-attribute broker
+        shell: pwsh
+        run: ./scripts/windows-broker/install.ps1
+      - run: pnpm vitest run tests/windows-native.e2e.ts
