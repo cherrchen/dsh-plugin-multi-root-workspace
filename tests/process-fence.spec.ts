@@ -77,6 +77,7 @@ async function mountStack(
   mode: SandboxPolicy['mode'] | 'danger-full-access',
   sessions: ReadonlyMap<string, Session> = new Map(),
   legacyShell = false,
+  spawnResult: unknown = { pid: 1 },
 ): Promise<Stack> {
   const ctx = new Context()
   fibers.push(
@@ -99,7 +100,7 @@ async function mountStack(
       fiber.provide('subprocess', {
         spawn: (spec: SubprocessSpawnSpec) => {
           captured.spawned.push(spec)
-          return { pid: 1 }
+          return spawnResult
         },
         spawnTerminal: async (spec: SubprocessTerminalSpawnSpec) => {
           captured.terminals.push(spec)
@@ -227,6 +228,28 @@ describe('shell and PTC execute entries', () => {
     expect(argv).toContain('--ro-bind')
     expect(argv[argv.indexOf('--ro-bind') + 1]).toBe(canonicalPath(fixture.outside))
     expect(argv.slice(-COMMAND.length)).toEqual(COMMAND)
+  })
+
+  it('stamps a live legacy start() handle at settle from the captured stderr tail', async () => {
+    let resolveDone!: (outcome: unknown) => void
+    const handle = {
+      status: 'running',
+      exitCode: 1,
+      signal: null,
+      collected: { stderr: { readFrom: () => ({ text: 'denied: Operation not permitted' }) } },
+      done: new Promise(resolve => { resolveDone = resolve }),
+      sandbox: undefined as unknown,
+    }
+    const { ctx } = await mountStack('seatbelt', 'danger-full-access', new Map(), true, handle)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    const shell = ctx.get('shell') as { start(spec: unknown): Promise<unknown> }
+    const proc = await shell.start({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
+    // The fenced handle is the same live object — identity, not a snapshot.
+    expect(proc).toBe(handle)
+    expect(handle.sandbox).toBeUndefined()
+    resolveDone(undefined)
+    await handle.done
+    expect(handle.sandbox).toMatchObject({ mode: 'danger-full-access', enforcement: 'full', denied: true })
   })
 
   it('revocation applies to the NEXT process — a later call sees the new scope', async () => {

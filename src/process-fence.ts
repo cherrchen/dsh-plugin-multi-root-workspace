@@ -59,10 +59,13 @@ export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootScope'
 
 /**
  * The deny context a wrapping consumer hands to the synchronous `spawn` seam:
- * the restricted profile prefix, already ending at the `--` separator.
+ * the restricted profile prefix, already ending at the `--` separator, plus the
+ * non-consuming stderr tail reader of the confined spawn the consumer launched
+ * — the settle-time evidence a live process handle cannot carry itself.
  */
 interface PreparedDeny {
   readonly argvPrefix: readonly string[]
+  stderr?: (() => string | undefined) | undefined
 }
 
 const processDenyStore = new AsyncLocalStorage<PreparedDeny>()
@@ -71,6 +74,8 @@ const processDenyStore = new AsyncLocalStorage<PreparedDeny>()
 function isThenable(value: unknown): value is Promise<ConfinedArgv> {
   return typeof (value as { then?: unknown } | null | undefined)?.then === 'function'
 }
+
+const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 
 /** `spec.sandboxPolicy`, the optional field every process spec may carry. */
 interface PolicyCarryingSpec {
@@ -108,10 +113,14 @@ export function apply(ctx: Context): void {
    * Run `body` under the restricted deny context when `prepared` is a prefix —
    * preserving the sync/async shape of the prepared value itself.
    */
-  const runDenied = (prepared: ConfinedArgv | Promise<ConfinedArgv>, policy: SandboxExecutionPolicy, body: () => unknown): unknown =>
-    isThenable(prepared)
-      ? prepared.then(facts => processDenyStore.run({ argvPrefix: facts.argv }, () => decorateProcessOutcome(body(), facts, policy)))
-      : processDenyStore.run({ argvPrefix: prepared.argv }, () => decorateProcessOutcome(body(), prepared, policy))
+  const runDenied = (prepared: ConfinedArgv | Promise<ConfinedArgv>, policy: SandboxExecutionPolicy, body: () => unknown): unknown => {
+    const run = (facts: ConfinedArgv): unknown => {
+      const store: PreparedDeny = { argvPrefix: facts.argv }
+      return processDenyStore.run(store, () =>
+        decorateProcessOutcome(body(), facts, policy, { stderr: () => store.stderr?.() }))
+    }
+    return isThenable(prepared) ? prepared.then(run) : run(prepared)
+  }
 
   // The synchronous seam every confined-capable spawn crosses. The store is
   // set ONLY around a consumer call that already paid for the restricted
@@ -124,7 +133,19 @@ export function apply(ctx: Context): void {
     ) {
       const store = processDenyStore.getStore()
       if (store === undefined) return original.call(this, spec)
-      return original.call(this, { ...spec, argv: [...store.argvPrefix, ...spec.argv] })
+      const handle = original.call(this, { ...spec, argv: [...store.argvPrefix, ...spec.argv] })
+      // `collected.stderr.readFrom(0)` is cursor-free — a live shell handle's
+      // only settle-time window into the denial text the executor's own
+      // `onProcessDone` would see. The last confined spawn wins; execute-style
+      // entries launch exactly one.
+      const stderr = object(handle) && object(handle.collected) && object(handle.collected.stderr)
+        && typeof handle.collected.stderr.readFrom === 'function'
+        ? handle.collected.stderr as { readFrom(fromByte: number): { text: string } }
+        : undefined
+      if (stderr !== undefined) store.stderr = () => {
+        try { return stderr.readFrom(0).text } catch { return undefined }
+      }
+      return handle
     }))
 
     scope.effect(() => wrapMethod(scope.subprocess, 'spawnTerminal', original => async function (

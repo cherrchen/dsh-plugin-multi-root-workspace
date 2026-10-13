@@ -494,3 +494,22 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 - 第三批本机验收：开发 pin 0.2.1-alpha.2；compat / lint / 双端 typecheck / build / docs:check / pack:check 全通过。原生 Seatbelt probe 通过并强制执行对应内核断言：测试 593 passed / 26 skipped（其他平台不算本机证据），compose 48/48、behavior 126/126、journey 62/62、packed behavior 125/125，所有冒烟 0 skip。Windows broker 原生 CI 已通过编译和安装，已修复属性查询 ABI；完整 Windows 与 Linux bwrap 证据继续由当前提交矩阵确认。
 
 - 第四批：矩阵发现并修复旧版 shell 的公开前台 run 入口绕过（不能只包 execute/start）、Windows 管道必须先读取再取得 impersonation 身份、跨平台 POSIX profile 路径比较，以及原生测试将 Landlock 成功运行的 partial warning 误判为 runner 失败。新增独立 runner 证据分类、九格 edit、三模式工具 cap 和真实 Koffi UTF-16 回归；兼容笔记双语同步。Windows 弱化令牌反绕过断言保留，新的矩阵继续验证。
+
+### B9 暂停交接（2026-10-13）
+
+用户要求暂停开发并准备交接。B9 **未完成、未验收、未发布**，继续工作需要用户恢复任务。用户此前已授权具体实现 Windows ADR-0019，不能把拒绝启动作为最终结果，也不能删除弱化令牌实际写入回归来获取绿灯。
+
+- 仓库：`/Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace`；分支 `feat/sandbox-permision-harden`；[PR #12](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/12)。最新开发提交 `e472de4` 已推送。此次交接前工作树干净；本节是暂停后唯一文件修改，尚未提交/推送。PR 已更新实现说明，但最后的测试数字和 Windows 失败事实尚需在恢复后同步。
+- 已推送批次：`55cb262` 失效只读边界/有效权限；`1c822db` SYSTEM broker；`9f00548` Framework 编译歧义；`e946389` 属性查询 ABI；`598df54` 进程诊断/Linux 混合权限；`7c4e99f` UTF-16 指针解码；`e472de4` 旧 shell run/管道认证读取顺序/原生证据分类。
+- 本机最终原生验证：开发 pin `0.2.1-alpha.2`，Seatbelt 内核断言强制运行；测试 **598 passed / 26 skipped**，compose **48/48**、behavior **126/126**、journey **62/62**、packed behavior **125/125**，冒烟全部 0 skip。compat、lint、双端 typecheck、build、docs:check、pack:check 通过。其他平台的跳过不是本机原生证据。
+- 当前 [CI 38348496627](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38348496627) 对应 `e472de4`，暂停时仍在运行，不取消。已成功32个 job（包括 versions job），另有两个 macOS job 运行中。**全部11个 Windows 版本失败**；应在恢复后重新读取最终结果。Linux latest 和 Ubuntu 22.04 的原生执行已有通过结果，不能据此认为 Windows 完成。
+
+**必须首先处理的 Windows 缺陷**：broker 已通过编译、管理员安装、管道认证、设置 mandatory/inheritable 属性与 runner 读回；进程可以启动，但条件 ACL 没有兑现拒写。`tests/windows-native.e2e.ts` 的完整矩阵、mutation/弱化令牌、ConPTY 三组失败：显式只读根返回 `allowed`；overwrite/delete/rename/弱化令牌组出现 `escaped`；ConPTY 只读写入也放行。代表 job `115135351095`（`0.1.7-alpha.2, windows-latest`），原始日志在本机 `/tmp/b9-broker-handshake.log`（约693–780行；临时文件可能在后续会话消失，以 CI 为准）。启动成功绝不能作为拒写验收。
+
+排查入口：`src/windows-deny.ts` 的 token 构造/属性读回/`protect()`/child spawn，`src/compat/windows-native.ts` 的公开进程 seam，`scripts/windows-broker/service.cs`。目前条件表达式为 `(Exists DshMultiRootDeniedRoots && DshMultiRootDeniedRoots Contains "<root-id>")`，条件 deny 放在 ACL 首位。普通 token 设置 Win32 1314 已通过 broker 解决；新失败根因尚未证明。下一步应直接核验真正子进程 token 是否保留属性、条件 ACE 是否匹配，而不是继续修改无证据的兼容分支。Chromium 的公开属性实现使用本地属性名和 mandatory flags，可作为 ABI 参照；不要把 `@User` 属性与本地属性混为一谈。
+
+**已修复的兼容风险（恢复后第一批提交）**：`src/compat/process-result.ts` 的 `decorateProcessOutcome()` 曾把旧 shell `start()` 返回的活跃后台 handle 交给 `stampProcessResult()` 展开复制，丢失原型、live 字段和方法身份——上游 `processOutcome(proc)` 与 `renderProcessRead(proc.readOutput(), proc.sandbox)` 都读同一对象，副本会冻结 `status`/`exitCode` 并脱离消费者持有的实体。现改为：handle 形态（`done` settle 钩子、可调成员或非平凡原型）保持身份原地返回，`sandbox` 戳记推迟到 `done` 结算时按上游 `onProcessDone` 语义原地写入；结算 stderr 由 `process-fence.ts` 的 spawn 包装器经 `SubprocessHandle.collected.stderr.readFrom(0)`（游标无关、全版本契约）捕获并作为 diagnostics 传入。回归覆盖 live handle 身份/取消/轮询、结算戳记、runner 失败分类与无 diagnostics 退化；本机 602 passed / 27 skipped。
+
+恢复后顺序：读取本节与 ADR-0017/0019、双语兼容笔记；检查 Git/最终 CI 状态；修复以上两个问题；运行相应本机检查并分批提交推送；保留 Windows 原生反绕过测试，确认11版本×4系统完整 gate；更新本账本和 PR 最终证据后才能记完成。版本 allowlist、版本号和 tag 均未变更，用户没有要求发布。
+
+CI 日志读取：`gh api --allow-escape-sequences repos/cherrchen/dsh-plugin-multi-root-workspace/actions/jobs/<job-id>/logs > /tmp/b9-job.log`。`gh run view --log-failed` 会尝试写受限制的默认 cache；上述 API 可避开。Git 写操作及本机脱离外层沙箱的 Seatbelt 原生执行需要工具的 `require_escalated`；前述提交/推送与测试已有授权。不要输出完整 journey/smoke 日志，其中可能含临时 web 认证令牌。
