@@ -152,7 +152,7 @@ public sealed class RootDenyBroker : ServiceBase {
                     try {
                         if (!SetTokenInformation(token, 39, data, Marshal.SizeOf(typeof(AttributesOperation)))) {
                             int error = Marshal.GetLastWin32Error();
-                            if (v == 0) throw new Win32Exception(error, "SetTokenInformation(TokenSecurityAttributes)");
+                            if (v == 0) throw new Win32Exception(error, "SetTokenInformation(TokenSecurityAttributes) win32=" + error);
                         }
                     } finally { Marshal.FreeHGlobal(data); }
                 } finally {
@@ -184,7 +184,7 @@ public sealed class RootDenyBroker : ServiceBase {
     }
     static UnicodeString Unicode(string value, IntPtr memory) { return new UnicodeString { Length = checked((ushort)(value.Length * 2)), MaximumLength = checked((ushort)(value.Length * 2 + 2)), Buffer = memory }; }
     static IntPtr Allocate<T>(T value) { var memory = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(T))); Marshal.StructureToPtr(value, memory, false); return memory; }
-    static void Check(bool ok, string name) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error(), name); }
+    static void Check(bool ok, string name) { if (!ok) { int error = Marshal.GetLastWin32Error(); throw new Win32Exception(error, name + " win32=" + error); } }
     static void EnablePrivilege(string name) {
         IntPtr token; Check(OpenProcessToken(GetCurrentProcess(), 0x28, out token), "OpenProcessToken(service)");
         try { Luid luid; Check(LookupPrivilegeValue(null, name, out luid), "LookupPrivilegeValue");
