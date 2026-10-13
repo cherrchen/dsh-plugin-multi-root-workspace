@@ -213,10 +213,12 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       const probeDir = join(fixture.workspace, 'cond-probes')
       mkdirSync(probeDir)
       const probes: Array<[name: string, ace: string, expectHint: string]> = [
-        ['a-real', `XD;;0x116;;;WD;(Exists DshMultiRootDeniedRoots && DshMultiRootDeniedRoots Contains "${denyId}")`, 'deny iff mechanism works'],
-        ['b-notexists', 'XD;;0x116;;;WD;(!(Exists DshMultiRootDeniedRoots))', 'deny iff attribute invisible'],
-        ['c-contains-miss', 'XD;;0x116;;;WD;(DshMultiRootDeniedRoots Contains "S-1-4-00000-0")', 'deny iff attribute invisible (UNKNOWN→deny)'],
-        ['d-exists', 'XD;;0x116;;;WD;(Exists DshMultiRootDeniedRoots)', 'deny iff attribute visible'],
+        ['a-real', `XD;;0x116;;;WD;(Exists DshMultiRootDeniedRoots && DshMultiRootDeniedRoots Contains "${denyId}")`, 'deny iff mechanism works (MANDATORY)'],
+        ['d-exists', 'XD;;0x116;;;WD;(Exists DshMultiRootDeniedRoots)', 'deny iff MANDATORY attr visible'],
+        ['g-tsa', 'XD;;0x116;;;WD;(Exists TSA://ProcUnique)', 'deny iff kernel attr visible'],
+        ['h-alt-d', 'XD;;0x116;;;WD;(Exists DshMultiRootDeniedRootsD)', 'deny iff DEFAULT flag lands in working list'],
+        ['i-alt-f', 'XD;;0x116;;;WD;(Exists DshMultiRootDeniedRootsF)', 'deny iff DEFAULT|DENY_ONLY works'],
+        ['j-alt-real', `XD;;0x116;;;WD;(Exists DshMultiRootDeniedRootsD && DshMultiRootDeniedRootsD Contains "${denyId}")`, 'deny iff mechanism works (DEFAULT)'],
         ['e-plain', 'D;;0x116;;;WD', 'always deny'],
         ['f-ambient', 'A;;FA;;;WD', 'always allow'],
       ]
