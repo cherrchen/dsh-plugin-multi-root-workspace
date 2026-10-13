@@ -56,6 +56,11 @@ function isThenable(value: unknown): value is Promise<ConfinedArgv> {
   return typeof (value as { then?: unknown } | null | undefined)?.then === 'function'
 }
 
+/** Map an installed confine result without changing its synchronous shape. */
+export function mapConfined<T>(value: UpstreamConfined, map: (confined: ConfinedArgv) => T): T | Promise<T> {
+  return isThenable(value) ? value.then(map) : map(value as unknown as ConfinedArgv)
+}
+
 /**
  * Call the upstream `confine` and widen its result, preserving sync/async shape.
  *

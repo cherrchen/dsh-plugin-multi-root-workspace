@@ -195,7 +195,7 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 
 ## 7. CI
 
-`.github/workflows/ci.yml` 的 `releases` job 用 `scripts/list-dsh-releases.mjs` 从 `SUPPORTED_DSH_RELEASES` 读取版本轴，`verify` 将该轴与启用的 OS 做笛卡尔积。开发 pin 使用 frozen lockfile，其他版本先用 `upgrade-dsh.mjs` 重指 DSH / cordis 后重新安装；制品名同时含 OS 与 DSH 版本。主车道在 `ubuntu-latest`、`macos-latest` 与 `windows-latest`（变量见下）上执行**同一份全部门禁**：**`compat:check`** → `lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `pack:check` → `smoke:packed` → `docs:check`。`compat:check` 放在最前，因为后续每一步的结果只有对"契约真正声明的版本"才算证据。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。
+`.github/workflows/ci.yml` 的 `releases` job 用 `scripts/list-dsh-releases.mjs` 从 `SUPPORTED_DSH_RELEASES` 读取版本轴，`verify` 将该轴与启用的 OS 做笛卡尔积。开发 pin 使用 frozen lockfile，其他版本先用 `upgrade-dsh.mjs` 重指 DSH / cordis 后重新安装；制品名同时含 OS 与 DSH 版本。主车道在 `ubuntu-latest`、`ubuntu-22.04`、`macos-latest` 与 `windows-latest`（变量见下）上执行**同一份全部门禁**：**`compat:check`** → `lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `pack:check` → `smoke:packed` → `docs:check`。`compat:check` 放在最前，因为后续每一步的结果只有对"契约真正声明的版本"才算证据。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。
 
 最后一个 `gate` job（`needs: [releases, verify]`，`if: always()`）只在两个上游 job 都恰好 `success` 时通过：矩阵被跳过、取消或部分失败都不能再显示为绿。release 的 `publish` 依赖的正是这个 gate（见[发版流程](./release-workflow.md)）。
 
@@ -249,3 +249,5 @@ CI 的日志捕获使用 Git Bash，其 PATH 可能让同名 GNU 命令覆盖 Wi
 | 注册的根标着 `redirected` 且写不进去 | 该路径现在解析到的目录与登记时授予的目录不同（常见原因：登记目录被替换成指向别处的符号链接，或链接链中某一段改了） | 这是刻意行为：重新解析不等于重新授权，授权不会被转移到新目标。把目录恢复成登记时那个（或删掉那层符号链接）后执行 `/workspace-folders list` 即可复原；若确实想改到新目录，先 `remove` 再 `add` 一次，等于重新确认 |
 | 列表里有一条 `invalid`，说明写着"重复的 id"或"没有说明授予目录" | 存储被手工改过，或来自缺少 `recordedPath` 字段的旧记录 | 该记录不授予任何权限，可用 `/workspace-folders remove <n>` 或面板里的"移除"逐条删除（删除是按位置/单条进行的，不会一次删掉多条） |
 | 内核断言在本地/CI 被 skip | 宿主不能受限执行（外层沙箱禁止嵌套，或缺 bwrap/Landlock launcher） | 本地属正常；CI 里 `pnpm kernel:probe` 会在能执行的宿主上导出 `DSH_REQUIRE_KERNEL_RUNNER=1`，此时 skip 会变成失败。要在本地强制检查，可自行 `DSH_REQUIRE_KERNEL_RUNNER=1 pnpm test`（预期在看到各条原因后失败） |
+
+B9 的 Linux 原生执行证据分两类：latest 保留实际 Landlock 选择与宿主限制，22.04 增加真实 bubblewrap 允许/拒绝证据，全部受支持版本均覆盖两条 Linux 腿。不会关闭 latest 的 AppArmor/user namespace 策略以换取绿灯；不能执行 bubblewrap 的宿主须按安装前置条件或 runnerFailure 如实报告。Windows 腿在原生测试前通过 tarball 同源的管理员脚本安装 token-attribute broker，安装资源的打包完整性由 pack:check 验证。

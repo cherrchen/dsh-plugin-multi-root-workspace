@@ -35,7 +35,7 @@ import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { Config } from '@deepseek-ai/dsh-sandbox-local'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from './compat.ts'
-import { widenConfined } from './compat/sandbox-confine.ts'
+import { mapConfined, widenConfined } from './compat/sandbox-confine.ts'
 import type { ConfineCall, UpstreamConfined } from './compat/sandbox-confine.ts'
 import { denyProfileArgs, DialectUnrecognizedError, graftProfileArgs, splitConfined, widenProfileArgs } from './dialects.ts'
 import { restrictProfileArgs } from './dialects.ts'
@@ -165,6 +165,16 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     deniedRoots: readonly string[],
     signal?: AbortSignal,
   ): readonly string[] | Promise<readonly string[]> {
+    const result = this.restrictedExecution(policy, deniedRoots, signal)
+    return mapConfined(result, confined => confined.argv)
+  }
+
+  /** Full-access restriction and the actual selected backend's diagnostics. */
+  restrictedExecution(
+    policy: SandboxExecutionPolicy,
+    deniedRoots: readonly string[],
+    signal?: AbortSignal,
+  ): UpstreamConfined {
     // `danger-full-access` is deliberately not a ConfinedSandboxMode: the probe
     // runs under `read-only` purely to harvest the runner skeleton.
     const probePolicy: SandboxPolicy = {
@@ -174,12 +184,17 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     }
     const base = super.confine as unknown as ConfineCall
     const probe = base.call(this, ['true'], probePolicy, signal)
-    const restrict = (confined: ConfinedArgv): readonly string[] => {
+    const restrict = (confined: ConfinedArgv): ConfinedArgv => {
       try {
         const shape = splitConfined(confined.argv, ['true'])
-        return [...(shape.dialect === 'windows-acl'
+        const argv = [...(shape.dialect === 'windows-acl'
           ? restrictWindowsProfile(shape.profileArgs, deniedRoots)
           : restrictProfileArgs(shape.dialect, shape.profileArgs, deniedRoots)), '--']
+        // Landlock cannot subtract a subtree. This combination selects the
+        // bubblewrap backend instead; its diagnostics must follow that choice.
+        return shape.dialect === 'landlock'
+          ? { argv, enforcement: 'full', denialSignatures: ['read-only file system'], runnerFailureRules: [{ fatalSignatures: ['bwrap: '] }] }
+          : { ...confined, argv }
       } catch (error: unknown) {
         if (!(error instanceof DialectUnrecognizedError)) throw error
         throw new SandboxUnavailableError(
@@ -189,9 +204,7 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
         )
       }
     }
-    return typeof (probe as { then?: unknown }).then === 'function'
-      ? (probe as Promise<ConfinedArgv>).then(restrict)
-      : restrict(probe as ConfinedArgv)
+    return widenConfined(() => probe, restrict, ['true'], probePolicy, signal)
   }
 
 }

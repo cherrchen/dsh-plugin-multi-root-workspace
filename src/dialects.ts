@@ -323,15 +323,6 @@ function bwrapWritableMounts(profileArgs: readonly string[]): string[] {
   return targets
 }
 
-/** The `--tmpfs` mount targets — a denied root under one is masked, not denied. */
-function bwrapTmpfsTargets(profileArgs: readonly string[]): string[] {
-  const targets: string[] = []
-  for (let index = 0; index + 1 < profileArgs.length; index += 1) {
-    if (profileArgs[index] === '--tmpfs') targets.push(profileArgs[index + 1] as string)
-  }
-  return targets
-}
-
 /** The paths a Landlock profile grants read-write (`--rw` flag values). */
 function landlockWritablePaths(profileArgs: readonly string[]): string[] {
   const granted: string[] = []
@@ -388,9 +379,8 @@ export function denyProfileArgs(
     }
     case 'bwrap': {
       const writable = bwrapWritableMounts(profileArgs)
-      const masked = bwrapTmpfsTargets(profileArgs)
       const binds = deniedRoots
-        .filter(root => writable.some(target => isCanonicallyUnder(root, target)) && !masked.some(target => isCanonicallyUnder(root, target)))
+        .filter(root => writable.some(target => isCanonicallyUnder(root, target)))
         .flatMap(root => ['--ro-bind', root, root])
       return [...profileArgs, ...binds]
     }
@@ -451,25 +441,22 @@ export function restrictProfileArgs(
       return [...profileArgs.slice(0, -1), restricted]
     }
     case 'bwrap': {
-      const args: string[] = []
-      for (let index = 0; index < profileArgs.length; index += 1) {
-        const flag = profileArgs[index] as string
-        if (flag === '--ro-bind' && profileArgs[index + 1] === '/' && profileArgs[index + 2] === '/') {
-          args.push('--bind', '/', '/')
-          index += 2
-          continue
-        }
-        if (flag === '--tmpfs') {
-          index += 1
-          continue
-        }
-        args.push(flag)
+      const base = profileArgs.indexOf('--ro-bind')
+      if (base < 1 || profileArgs[base + 1] !== '/' || profileArgs[base + 2] !== '/') {
+        throw new DialectUnrecognizedError('bwrap ambient profile requires an observed root mount')
       }
+      // Retain the runner invocation but do not inherit confined-mode PID,
+      // proc, device or temporary mounts into the Full-access combination.
+      const args = [...profileArgs.slice(0, base), '--bind', '/', '/', '--die-with-parent']
       for (const root of deniedRoots) args.push('--ro-bind', root, root)
       return args
     }
     case 'landlock':
-      throw new DialectUnrecognizedError('landlock cannot express an ambient grant minus subtree denies — its launcher only unions allowlists')
+      // A union-only Landlock profile cannot express this cell. Select the
+      // mount backend for it, preserving ambient writes outside denied roots.
+      // Missing/unusable bubblewrap is a runner failure, never a bare spawn.
+      return ['bwrap', '--bind', '/', '/', '--die-with-parent',
+        ...deniedRoots.flatMap(root => ['--ro-bind', root, root])]
     case 'windows-acl':
       throw new DialectUnrecognizedError('Windows ACL cannot express an ambient grant minus subtree denies — the restricted-token model only grants')
   }

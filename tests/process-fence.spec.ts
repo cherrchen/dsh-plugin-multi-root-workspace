@@ -15,10 +15,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { canonicalPath, SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
+import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { LocalSandboxProvider, SandboxInternals } from '@deepseek-ai/dsh-sandbox-local'
-import { LocalSandboxProvider as UpstreamSandbox } from '@deepseek-ai/dsh-sandbox-local'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import { Session, SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -70,7 +69,7 @@ interface Stack {
 
 /**
  * Mount the real providers and the fence row, with the spawned surfaces
- * stubbed: `ctx.shell.execute` and `ctx.ptcRuntime.execute` run their command
+ * stubbed: `ctx.shell.execute` and `ctx.ptcRuntime.run` run their command
  * through `ctx.subprocess.spawn` exactly the way the upstream consumers do.
  */
 async function mountStack(
@@ -107,7 +106,7 @@ async function mountStack(
         },
       } as never)
       fiber.provide('shell', { execute } as never)
-      fiber.provide('ptcRuntime', { execute } as never)
+      fiber.provide('ptcRuntime', { run: execute } as never)
       fiber.provide('sessions', { get: (id: string) => sessions.get(id) } as never)
     },
   })
@@ -145,6 +144,9 @@ describe('the restricted argv prefix', () => {
       .restrictedArgvPrefix({ ...policy, workspaceRoot: fixture.workspace }, [denied])
     expect(prefix).toContain('--bind')
     expect(prefix).not.toContain('--tmpfs')
+    expect(prefix).not.toContain('--unshare-pid')
+    expect(prefix).not.toContain('--proc')
+    expect(prefix).not.toContain('--dev')
     expect(prefix).toContain('--ro-bind')
     const bindIndex = prefix.indexOf('--bind')
     expect(prefix[bindIndex + 1]).toBe('/')
@@ -153,7 +155,7 @@ describe('the restricted argv prefix', () => {
     expect(prefix[prefix.length - 1]).toBe('--')
   })
 
-  it('fails closed on Landlock — its allowlist cannot subtract', async () => {
+  it('selects bubblewrap when the selected Landlock allowlist cannot subtract', async () => {
     for (const dialect of ['landlock'] as const) {
       const { provider } = await mountStack(dialect, 'danger-full-access')
       // `confine` is synchronous on some supported releases: wrapping the
@@ -161,7 +163,10 @@ describe('the restricted argv prefix', () => {
       // same rejection shape the async releases produce.
       const call = Promise.resolve().then(() => (provider as MultiRootSandboxProvider)
         .restrictedArgvPrefix({ ...policy, workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)]))
-      await expect(call).rejects.toBeInstanceOf(SandboxUnavailableError)
+      const prefix = await call
+      expect(prefix[0]).toBe('bwrap')
+      expect(prefix).toContain('--bind')
+      expect(prefix.slice(prefix.indexOf('--ro-bind'))).toEqual(['--ro-bind', canonicalPath(fixture.outside), canonicalPath(fixture.outside), '--'])
     }
   })
 
@@ -180,7 +185,7 @@ describe('shell and PTC execute entries', () => {
   it('confines an ambient spawn when a read-only root exists under Full-access', async () => {
     const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access')
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
-    const shell = ctx.get('shell') as { execute(spec: unknown): Promise<unknown> }
+    const shell = ctx.get('shell') as { run(spec: unknown): Promise<unknown> }
     await shell.execute({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
     expect(captured.spawned).toHaveLength(1)
     const argv = captured.spawned[0]!.argv
@@ -191,7 +196,7 @@ describe('shell and PTC execute entries', () => {
   it('passes the bare argv through when nothing is denied', async () => {
     const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access')
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'inherit')])
-    const shell = ctx.get('shell') as { execute(spec: unknown): Promise<unknown> }
+    const shell = ctx.get('shell') as { run(spec: unknown): Promise<unknown> }
     await shell.execute({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
     expect(captured.spawned[0]!.argv).toEqual(COMMAND)
   })
@@ -199,16 +204,16 @@ describe('shell and PTC execute entries', () => {
   it('does not touch a non-full-access call — upstream confine still owns it', async () => {
     const { ctx, captured } = await mountStack('seatbelt', 'workspace-write')
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
-    const shell = ctx.get('shell') as { execute(spec: unknown): Promise<unknown> }
+    const shell = ctx.get('shell') as { run(spec: unknown): Promise<unknown> }
     await shell.execute({ sandboxPolicy: { mode: 'workspace-write', workspaceRoot: fixture.workspace } })
     expect(captured.spawned[0]!.argv).toEqual(COMMAND)
   })
 
-  it('confines ptcRuntime.execute through the same store', async () => {
+  it('confines ptcRuntime.run through the same store', async () => {
     const { ctx, captured } = await mountStack('bwrap', 'danger-full-access')
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
-    const runtime = ctx.get('ptcRuntime') as { execute(spec: unknown): Promise<unknown> }
-    await runtime.execute({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
+    const runtime = ctx.get('ptcRuntime') as { run(spec: unknown): Promise<unknown> }
+    await runtime.run({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
     const argv = captured.spawned[0]!.argv
     expect(argv).toContain('--ro-bind')
     expect(argv[argv.indexOf('--ro-bind') + 1]).toBe(canonicalPath(fixture.outside))
@@ -218,7 +223,7 @@ describe('shell and PTC execute entries', () => {
   it('revocation applies to the NEXT process — a later call sees the new scope', async () => {
     const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access')
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
-    const shell = ctx.get('shell') as { execute(spec: unknown): Promise<unknown> }
+    const shell = ctx.get('shell') as { run(spec: unknown): Promise<unknown> }
     const spec = { sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } }
     await shell.execute(spec)
     expect(captured.spawned[0]!.argv.join(' ')).toContain('deny file-write*')
@@ -305,25 +310,10 @@ describe('the workspace-write deny edge', () => {
     } finally { root.cleanup() }
   })
 
-  it('relies on the tmpfs mask on bwrap — a denied root under it needs no rebind', async () => {
-    const root = tempMember()
-    try {
-      const upstreamCtx = new Context()
-      fibers.push(
-        await upstreamCtx.plugin(SessionProjectionRegistry),
-        await upstreamCtx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace }),
-        await upstreamCtx.plugin(UpstreamSandbox, {}),
-      )
-      const upstream = upstreamCtx.sandbox as LocalSandboxProvider
-      upstream.internals = internalsFor('bwrap')
-      const upstreamResult = await confined(upstream, COMMAND, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
-      const { ctx, provider } = await mountStack('bwrap', 'workspace-write')
-      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(root.path, 'read-only')])
-      const result = await confined(provider, COMMAND, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
-      // The member sits under the temp area upstream mounts as --tmpfs: the
-      // mask already denies it, so no extra --ro-bind appears over upstream.
-      expect(result.argv).toEqual(upstreamResult.argv)
-    } finally { root.cleanup() }
+  it('makes a denied root under bwrap temp masking readable through a readonly bind', () => {
+    const profile = ['bwrap', '--ro-bind', '/', '/', '--tmpfs', '/tmp', '--bind', '/workspace', '/workspace']
+    expect(denyProfileArgs('bwrap', profile, ['/tmp/readonly']))
+      .toEqual([...profile, '--ro-bind', '/tmp/readonly', '/tmp/readonly'])
   })
 
   it('fails closed on Landlock — a denied root under a --rw grant cannot be subtracted', () => {

@@ -553,7 +553,7 @@ function canonical(path) {
 /** Exercise the installed Windows runner through the REAL Full-access pwsh
  * bypass. This battery also runs against the tarball in smoke:packed.
  */
-async function windowsAmbientBattery() {
+async function ambientBattery() {
   process.env.DSH_PERMISSION_MODE = 'danger-full-access'
   const { ctx } = await bootProfile(PLUGIN_PROFILE, home)
   try {
@@ -562,6 +562,21 @@ async function windowsAmbientBattery() {
       { id: 'ro', path: extraRoot, recordedPath: canonical(extraRoot), access: 'read-only' },
       { id: 'fixed', path: fixedRoot, recordedPath: canonical(fixedRoot), access: 'read-write' },
     ])
+    // Prove this profile can actually execute before asserting the matrix.
+    const probePath = join(primaryRoot, 'full-access-probe.txt')
+    const probeSpec = ctx.shell.resolve({ command: SHELL.write(probePath), workdir: primaryRoot, sandboxPolicy: policy })
+    let probe
+    try { probe = await runForeground(ctx.shell, probeSpec) }
+    catch (error) {
+      if (error?.code !== 'SANDBOX_UNAVAILABLE') throw error
+      check.skip(requireKernelRunner(hostDialect(), describe(error)))
+      return
+    }
+    if (probe.sandbox?.runnerFailed) {
+      check.skip(requireKernelRunner(hostDialect(), probe.stderr.text))
+      return
+    }
+    check.equal(probe.exitCode, 0, 'Full-access restricted profile runs an ambient write', probe.stderr.text)
     for (const [name, root, expected] of [
       ['primary', primaryRoot, true], ['ambient', thirdRoot, true],
       ['fixed', fixedRoot, true], ['read-only', extraRoot, false],
@@ -570,17 +585,36 @@ async function windowsAmbientBattery() {
       rmSync(path, { force: true })
       const spec = ctx.shell.resolve({ command: SHELL.write(path), workdir: primaryRoot, sandboxPolicy: policy })
       const result = await runForeground(ctx.shell, spec)
-      check.equal(existsSync(path), expected, `Full-access pwsh: ${name} write matches root policy`, result.stderr.text)
-      if (expected) check.equal(result.exitCode, 0, `Full-access pwsh: ${name} command exits successfully`, result.stderr.text)
-      else check.ok(result.exitCode !== 0, 'Full-access pwsh: read-only write fails', result.stderr.text)
+      check.equal(existsSync(path), expected, `Full-access shell: ${name} write matches root policy`, result.stderr.text)
+      if (expected) check.equal(result.exitCode, 0, `Full-access shell: ${name} command exits successfully`, result.stderr.text)
+      else {
+        check.ok(result.exitCode !== 0, 'Full-access shell: read-only write fails', result.stderr.text)
+        check.equal(result.sandbox?.denied, true, 'Full-access shell: kernel denial is reported', result.stderr.text)
+        check.ok(result.sandbox?.enforcement !== undefined, 'Full-access shell: enforcement is reported')
+      }
+    }
+    // Exercise the real PTC runtime, not an execute-shaped test double.
+    const runtime = ctx.get('ptcRuntime')
+    if (runtime !== undefined) {
+      for (const [name, root, writable] of [['primary', primaryRoot, true], ['ambient', thirdRoot, true],
+        ['fixed', fixedRoot, true], ['read-only', extraRoot, false]]) {
+        const path = join(root, 'ptc-full-access.txt')
+        rmSync(path, { force: true })
+        const spec = runtime.resolve({ program: `const fs = await import('node:fs'); fs.writeFileSync(${JSON.stringify(path)}, 'ok'); return 42;`,
+          bindings: [], cwd: primaryRoot, sandboxPolicy: policy })
+        const result = await runtime.run(spec)
+        check.equal(existsSync(path), writable, `Full-access PTC: ${name} matches root policy`, JSON.stringify(result))
+        if (writable) check.equal(result.value, 42, `Full-access PTC: ${name} returns its value`, JSON.stringify(result))
+        else check.equal(result.sandbox?.denied, true, 'Full-access PTC: denied writes retain diagnostic facts', JSON.stringify(result))
+      }
     }
     // Removing the restriction must affect the next launch without removing
     // standing ACEs used by already-running deny tokens.
     ctx.multiRootScope.setAdditionalRoots(policy.workspaceRoot, [])
     const spec = ctx.shell.resolve({ command: SHELL.write(join(extraRoot, 'after-remove.txt')), workdir: primaryRoot, sandboxPolicy: policy })
     const result = await runForeground(ctx.shell, spec)
-    check.equal(result.exitCode, 0, 'Full-access pwsh: removed root is ambient again', result.stderr.text)
-    check.ok(existsSync(join(extraRoot, 'after-remove.txt')), 'Full-access pwsh: next launch observes removal')
+    check.equal(result.exitCode, 0, 'Full-access shell: removed root is ambient again', result.stderr.text)
+    check.ok(existsSync(join(extraRoot, 'after-remove.txt')), 'Full-access shell: next launch observes removal')
   } finally { await ctx.fiber.dispose() }
 }
 
@@ -795,7 +829,7 @@ try {
         check.equal(bashFixed.wrote, true, `${mode}: bash always writes the fixed read-write root`, bashFixed.text)
       }
     }
-    if (process.platform === 'win32') await windowsAmbientBattery()
+    await ambientBattery()
 
     // --- the M3 path: roots registered by the command, not by the smoke --------
     for (const name of ['registry-before.txt', 'registry-after.txt', 'registry-removed.txt', 'registry-restart.txt']) {

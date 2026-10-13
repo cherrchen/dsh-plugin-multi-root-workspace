@@ -129,6 +129,14 @@ Full-access 的 Windows profile 改为选择插件独立 runner 的 `--mode dang
 
 面板响应的 `mode` / `effectiveAccess` 由活会话在宿主派生，只作展示，客户端不能上传授权事实；兼容旧响应缺字段时不猜测有效权限。每根并列显示登记策略与当前有效权限，工具 cap 单列说明。继承与固定读写之间两向切换都在某个模式下扩权，因此均要求确认。模型拓扑在三个模式下均列出配置的工具 cap。
 
+## 进程诊断与 Linux 后端修订（2026-10-13）
+
+Full-access 包装保留受限 prefix 对应的 `enforcement`、`denialSignatures` 与 `runnerFailureRules`，在 shell execution 的公开 `result()` / PTC 返回结果上补事实；execution 身份、调用上下文、缓存和同步/异步形状不变。runner 初始化失败优先于 kernel denial，不把信号退出或成功恢复的命令标为拒绝。`proc.sandbox` 的私有 jobs 事实仍是上游限制，不伪造未观测的进程事实。
+
+PTC 接缝改为公开 `ctx.ptcRuntime.run()`，不包装实现类的私有 `execute`。普通 shell、PTY 与 PTC 仍从同一 scope 取策略；真实组合冒烟及安装副本同时验证 Full-access 主根/ambient/固定读写允许、只读拒写和结果事实。
+
+Landlock 的 allowlist 无法实现 Full-access 子树减法，该组合不再直接判 unsupported，而是选 bubblewrap mount 后端：主机根原样读写、只读根单独 ro-bind。不带 workspace-write 的 PID、proc、device 或 tmpfs 替换，保持其他区域的原模式。该路径需要宿主安装且可执行 bubblewrap；不可用按 runnerFailure 报告，绝不裸启动。选择新后端时结果诊断同时切为 bubblewrap 的实际方言，不能保留 Landlock EACCES 拼写。bwrap 的 workspace-write temp mask 下注册的只读树也以 ro-bind 显式恢复读取。
+
 ## Related Documents
 
 - [B9 专项计划](../plans/active/2026-10-13-b9-root-access-and-sandbox-modes.md)

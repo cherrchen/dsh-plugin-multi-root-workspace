@@ -39,7 +39,7 @@ jobs:
         # variable to park it again.
         # Repository variables are available while expanding a matrix, unlike
         # `matrix.*` in a job-level condition.
-        os: ${{ fromJSON(vars.DSH_WINDOWS_CI == '1' && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+        os: ${{ fromJSON(vars.DSH_WINDOWS_CI == '1' && '["ubuntu-latest","ubuntu-22.04","macos-latest","windows-latest"]' || '["ubuntu-latest","ubuntu-22.04","macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     env:
       # Readable, non-interactive failures: no TTY to wrap, no spinner rewrites.
@@ -83,6 +83,8 @@ jobs:
       - name: Build the package (before the tests that read lib/)
         run: pnpm build
 
+      # 22.04 provides native bwrap evidence; latest retains the Landlock lane.
+      # Do not disable AppArmor/user-namespace policy on the latest image.
       - if: runner.os == 'Linux'
         name: Install the bwrap kernel runner
         run: sudo apt-get update && sudo apt-get install -y bubblewrap

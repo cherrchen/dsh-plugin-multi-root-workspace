@@ -19,7 +19,7 @@
  *   executor itself does, and — under Full-access with deny roots — asks the
  *   sandbox provider for the restricted prefix and runs the call inside the
  *   store, so every subprocess the executor launches is confined.
- * - `ctx.ptcRuntime.execute` does the same for `run_code`.
+ * - `ctx.ptcRuntime.run` does the same for `run_code`.
  * - `ctx.subprocess.spawnTerminal` resolves the caller from the
  *   `DSH_SESSION_ID` environment marker the terminal backend always stamps —
  *   `Agent.enter` forces that id to equal the session id — and rewrites the
@@ -28,17 +28,15 @@
  *   explicit `read-only` root: a terminal we cannot attribute must not inherit
  *   a deny set we cannot compute.
  *
- * Windows uses the standalone ambient deny-token runner. Landlock cannot
- * express "ambient minus subtree" (its confinement model only grants), so its prefix
- * throws `SandboxUnavailableError` — the process refuses to start unconfined
- * rather than silently widening an explicit restriction.
+ * Windows uses the standalone ambient deny-token runner. Landlock cannot subtract a subtree, so that combination selects bubblewrap.
+ * An unusable mount runner fails without starting an unconfined process.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/process-fence
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Context } from '@deepseek-ai/cordis'
-import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
+import type { ConfinedArgv, SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -51,6 +49,7 @@ import type {} from './providers.ts'
 import type {} from './scope.ts'
 import { wrapMethod } from './method-wrapper.ts'
 import type { MultiRootSandboxProvider } from './sandbox.ts'
+import { decorateProcessOutcome } from './compat/process-result.ts'
 
 // `multiRootProviders` is the provider-conflict gate: the restricted profile is
 // only meaningful when `ctx.sandbox` is THIS bundle's provider — a foreign one
@@ -69,7 +68,7 @@ interface PreparedDeny {
 const processDenyStore = new AsyncLocalStorage<PreparedDeny>()
 
 /** Whether a value is a thenable, i.e. whether the installed `confine` is async. */
-function isThenable(value: unknown): value is Promise<readonly string[]> {
+function isThenable(value: unknown): value is Promise<ConfinedArgv> {
   return typeof (value as { then?: unknown } | null | undefined)?.then === 'function'
 }
 
@@ -83,6 +82,7 @@ interface PolicyCarryingSpec {
 interface PolicyEntrypoint {
   execute(spec: PolicyCarryingSpec, ...rest: unknown[]): unknown
   start(spec: PolicyCarryingSpec, ...rest: unknown[]): unknown
+  run(spec: PolicyCarryingSpec, ...rest: unknown[]): unknown
 }
 
 export function apply(ctx: Context): void {
@@ -97,21 +97,21 @@ export function apply(ctx: Context): void {
    * synchronously — `SandboxUnavailableError` from a dialect that cannot
    * express the deny, which must propagate to the caller, never be swallowed.
    */
-  const prepare = (policy: SandboxExecutionPolicy, signal?: AbortSignal): readonly string[] | Promise<readonly string[]> | undefined => {
+  const prepare = (policy: SandboxExecutionPolicy, signal?: AbortSignal): ConfinedArgv | Promise<ConfinedArgv> | undefined => {
     if (policy.mode !== 'danger-full-access') return undefined
     const denied = ctx.multiRootScope.resolve(policy).deniedRoots
     if (denied.length === 0) return undefined
-    return (ctx.sandbox as MultiRootSandboxProvider).restrictedArgvPrefix(policy, denied, signal)
+    return (ctx.sandbox as MultiRootSandboxProvider).restrictedExecution(policy, denied, signal)
   }
 
   /**
    * Run `body` under the restricted deny context when `prepared` is a prefix —
    * preserving the sync/async shape of the prepared value itself.
    */
-  const runDenied = <T>(prepared: readonly string[] | Promise<readonly string[]>, body: () => T): T | Promise<T> =>
+  const runDenied = (prepared: ConfinedArgv | Promise<ConfinedArgv>, policy: SandboxExecutionPolicy, body: () => unknown): unknown =>
     isThenable(prepared)
-      ? prepared.then(argvPrefix => processDenyStore.run({ argvPrefix }, body))
-      : processDenyStore.run({ argvPrefix: prepared }, body)
+      ? prepared.then(facts => processDenyStore.run({ argvPrefix: facts.argv }, () => decorateProcessOutcome(body(), facts, policy)))
+      : processDenyStore.run({ argvPrefix: prepared.argv }, () => decorateProcessOutcome(body(), prepared, policy))
 
   // The synchronous seam every confined-capable spawn crosses. The store is
   // set ONLY around a consumer call that already paid for the restricted
@@ -149,7 +149,7 @@ export function apply(ctx: Context): void {
       const policy = ctx.sandboxPolicy.resolve({ session })
       const prepared = prepare(policy, spec.signal)
       if (prepared === undefined) return await original.call(this, spec)
-      const argvPrefix = await prepared
+      const argvPrefix = (await prepared).argv
       return await original.call(this, { ...spec, argv: [...argvPrefix, ...spec.argv] })
     }))
   })
@@ -160,16 +160,17 @@ export function apply(ctx: Context): void {
    * Full-access with roots to deny, execute it inside the restricted store so
    * every subprocess it launches is confined.
    */
-  const deniedEntry = (scope: Context, target: PolicyEntrypoint, key: 'execute' | 'start'): void => {
+  const deniedEntry = (scope: Context, target: PolicyEntrypoint, key: 'execute' | 'start' | 'run'): void => {
     if (typeof target[key] !== 'function') return
     scope.effect(() => wrapMethod(target, key, original => function (
       this: unknown,
       spec: PolicyCarryingSpec | undefined,
       ...rest: unknown[]
     ) {
-      const prepared = prepare(policyOf(spec), spec?.signal)
+      const policy = policyOf(spec)
+      const prepared = prepare(policy, spec?.signal)
       if (prepared === undefined) return original.call(this, spec as PolicyCarryingSpec, ...rest)
-      return runDenied(prepared, () => original.call(this, spec as PolicyCarryingSpec, ...rest))
+      return runDenied(prepared, policy, () => original.call(this, spec as PolicyCarryingSpec, ...rest))
     }))
   }
 
@@ -188,6 +189,8 @@ export function apply(ctx: Context): void {
   ctx.inject(['ptcRuntime'], (scope: Context) => {
     const runtime = scope.get('ptcRuntime') as PolicyEntrypoint | undefined
     if (runtime === undefined) return
-    deniedEntry(scope, runtime, 'execute')
+    // `run` is public. The concrete runtime's `execute` helper is private and
+    // is deliberately not used as a cross-package compatibility seam.
+    deniedEntry(scope, runtime, 'run')
   })
 }

@@ -30,7 +30,7 @@ describe('CI workflow gates', () => {
   it('omits the Windows runner from the matrix unless its repository switch is enabled', () => {
     const ci = read('.github/workflows/ci.yml')
     expect(ci).toContain("fromJSON(vars.DSH_WINDOWS_CI == '1'")
-    expect(ci).toContain("'[\"ubuntu-latest\",\"macos-latest\"]'")
+    expect(ci).toContain("'[\"ubuntu-latest\",\"ubuntu-22.04\",\"macos-latest\"]'")
   })
 
   it('derives the upgrade set from the package manifest', () => {
