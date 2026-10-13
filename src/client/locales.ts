@@ -14,6 +14,17 @@ export const NS = 'multiRootWorkspace'
 
 /** Chinese copy (the canonical shape). */
 export const zh = {
+  'panel.mode': '当前会话权限：',
+  'panel.effectiveAccess': '当前有效：',
+  'panel.toolCaps': '工具 {tools} 对附属根始终只读。',
+  'panel.invalidCap': '工具权限配置无效，附属根写入全部被拒绝。',
+  'mode.read-only': '只读',
+  'mode.workspace-write': '读写',
+  'mode.danger-full-access': 'Full-access',
+  'effective.read-only': '只读',
+  'effective.read-write': '读写',
+  'effective.full-access': 'Full-access',
+  'effective.unavailable': '不可用',
   'action.label': '工作区目录',
   'action.title': '管理本会话的附属工作目录',
   'switcher.manage': '管理工作区目录…',
@@ -89,6 +100,17 @@ export type Key = keyof typeof zh
 
 /** English copy, pinned to the Chinese key set. */
 export const en = {
+  'panel.mode': 'Current session access:',
+  'panel.effectiveAccess': 'Effective:',
+  'panel.toolCaps': 'The tools {tools} always have read-only access to additional roots.',
+  'panel.invalidCap': 'Invalid tool access configuration refuses all additional-root writes.',
+  'mode.read-only': 'Read-only',
+  'mode.workspace-write': 'Read-write',
+  'mode.danger-full-access': 'Full-access',
+  'effective.read-only': 'Read-only',
+  'effective.read-write': 'Read-write',
+  'effective.full-access': 'Full-access',
+  'effective.unavailable': 'Unavailable',
   'action.label': 'Folders',
   'action.title': 'Manage this session\'s secondary working directories',
   'switcher.manage': 'Manage workspace folders…',

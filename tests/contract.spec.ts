@@ -9,6 +9,16 @@ const legacy = {
 }
 
 describe('roots-view wire compatibility', () => {
+  it('preserves host-derived effective permissions and rejects malformed modes', () => {
+    const root = { ...legacy.roots[0], access: 'inherit', effectiveAccess: 'full-access' }
+    const view = { ...legacy, mode: 'danger-full-access', cappedTools: ['bash'], toolAccessInvalid: false, roots: [root] }
+    expect(parseRootsView(view)).toMatchObject({ ok: true, value: {
+      mode: 'danger-full-access', cappedTools: ['bash'], toolAccessInvalid: false,
+      roots: [{ effectiveAccess: 'full-access' }],
+    } })
+    expect(parseRootsView({ ...view, mode: 'writable' })).toMatchObject({ ok: false })
+    expect(parseRootsView({ ...view, roots: [{ ...root, effectiveAccess: 'system' }] })).toMatchObject({ ok: false })
+  })
   it('accepts pre-access/pre-limit hosts without imposing a new client cap', () => {
     const result = parseRootsView(legacy)
     expect(result.ok).toBe(true)

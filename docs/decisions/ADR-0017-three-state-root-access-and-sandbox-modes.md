@@ -119,6 +119,16 @@ Phase 1 时本机外层沙箱拒绝 `sandbox_apply`，原生证据留待补齐�
 
 Full-access 的 Windows profile 改为选择插件独立 runner 的 `--mode danger-full-access --deny-root`；令牌、deny ACE、owner / parent / token 防绕过与生命周期按 [ADR-0019](./ADR-0019-windows-token-attributes-and-conditional-acls.md)。权限仍从同一 scope 的 `deniedRoots` 读取，Windows enforcement 仍为 `partial`，缺失能力或路径不满足原生前置条件时拒绝启动。Landlock 的决定不变。原生证据与验收状态只维护于路线账本。
 
+## 失效登记的负授权修订（2026-10-13）
+
+本节取代前文「deny 集只含 available」的决定。Registry 经同一 `setAdditionalRoots()` 写端口发布 available、missing 与 redirected 的有效登记，后两者带 `withheld`，不授予成员资格或写权限。`deniedRoots` 独立按登记策略、工具 cap 与 **recorded canonical 路径**生成；目录消失、刷新或重启不能解除仍登记的只读边界。仅显式移除登记或经校验修改策略才撤回对应负授权。Invalid 记录仍不发布；重新解析不把拒写边界或写授权转移到 redirect 的新目标。fs 直接检查负授权路径，不依赖成员投影。
+
+缺失路径的内核启动若不能表达该负授权必须失败关闭，不能因无法挂载路径而裸启动。既有进程仍保留启动快照。
+
+## 面板与模型说明修订（2026-10-13）
+
+面板响应的 `mode` / `effectiveAccess` 由活会话在宿主派生，只作展示，客户端不能上传授权事实；兼容旧响应缺字段时不猜测有效权限。每根并列显示登记策略与当前有效权限，工具 cap 单列说明。继承与固定读写之间两向切换都在某个模式下扩权，因此均要求确认。模型拓扑在三个模式下均列出配置的工具 cap。
+
 ## Related Documents
 
 - [B9 专项计划](../plans/active/2026-10-13-b9-root-access-and-sandbox-modes.md)

@@ -286,6 +286,20 @@ describe('per-root access', () => {
   /** A read-only member: still a workspace root, never a writable one. */
   const readOnlyRoot = (id: string, path: string) => ({ ...root(id, path), access: 'read-only' as const })
 
+  it('retains withheld negative boundaries without granting membership or following redirection', () => {
+    const recorded = canonicalPath(fixture.outside)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{
+      ...readOnlyRoot('ro', fixture.outside), withheld: true,
+    }])
+    const resolved = ctx.multiRootScope.resolve(policy(fixture.workspace, 'danger-full-access'))
+    expect(resolved.additionalRoots).toEqual([])
+    expect(resolved.writableRoots).toEqual([])
+    expect(resolved.deniedRoots).toEqual([recorded])
+    expect(ctx.multiRootScope.hasActiveDenyRoots()).toBe(true)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+    expect(ctx.multiRootScope.resolve(policy(fixture.workspace, 'danger-full-access')).deniedRoots).toEqual([])
+  })
+
   it('keeps a read-only root a member while excluding it from the writable set', () => {
     const third = `${fixture.base}/third`
     mkdirSync(third)

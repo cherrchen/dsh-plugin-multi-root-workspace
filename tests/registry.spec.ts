@@ -1068,6 +1068,22 @@ describe('per-root access', () => {
     unsubscribe()
   })
 
+  it('persists the negative boundary across refresh and restart of a missing read-only registration', async () => {
+    const extra = makeRoot('missing-readonly')
+    const first = await mount()
+    await first.registry.add(primary, { path: extra, access: 'read-only' })
+    rmSync(extra, { recursive: true })
+    await first.registry.refresh(primary)
+    const policy = { mode: 'danger-full-access' as const, workspaceRoot: primary }
+    expect(first.scope.resolve(policy).additionalRoots).toEqual([])
+    expect(first.scope.resolve(policy).deniedRoots).toEqual([extra])
+    await disposeAll()
+    const second = await mount()
+    expect(second.scope.resolve(policy).deniedRoots).toEqual([extra])
+    await second.registry.removeAt(primary, entryRootRef(second.registry.list(primary)[0]!, 1))
+    expect(second.scope.resolve(policy).deniedRoots).toEqual([])
+  })
+
   it('keeps the existing access on revive, and honors an explicit one', async (context) => {
     const noSymlinks = symlinkUnsupportedReason()
     if (noSymlinks !== undefined) context.skip(noSymlinks)

@@ -23,6 +23,12 @@ const MODES: SandboxMode[] = ['workspace-write', 'read-only', 'danger-full-acces
 const PLATFORMS = ['darwin', 'linux', 'win32']
 
 describe('renderWorkspaceRootsContext', () => {
+  it('describes configured caps in all modes, including fixed writes and Full-access inheritance', () => {
+    for (const mode of MODES) {
+      expect(render('linux', mode, [A, B, C], ['bash', 'run_code']))
+        .toContain('The tools ["bash","run_code"] cannot write additional roots even where they are writable.')
+    }
+  })
   it('is empty without members, on every platform and mode', () => {
     for (const platform of PLATFORMS) {
       for (const mode of MODES) {

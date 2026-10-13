@@ -780,7 +780,7 @@ export class MultiRootRegistry extends Service {
     // must republish, while aliases still produce an identical signature.
     const signature = [
       ...statuses.filter(status => status.state === 'available').map(status => `available:${status.access}:${recordedGrantOf(status)}`),
-      ...withheld.map(status => `${status.state}:${status.path}`),
+      ...withheld.map(status => `${status.state}:${status.access}:${status.path}:${recordedGrantOf(status) ?? ''}`),
     ].join('\n')
     // A key with nothing published yet reads as the empty signature: the very
     // first classification of an empty key must not "publish" an empty grant
@@ -789,12 +789,13 @@ export class MultiRootRegistry extends Service {
     this.published.set(key, signature)
     const effective = statuses.flatMap(status => {
       const recorded = recordedGrantOf(status)
-      if (status.state !== 'available' || recorded === undefined) return []
+      if (status.state === 'invalid' || recorded === undefined) return []
       return [{
         id: status.id,
         path: status.path,
         recordedPath: recorded,
         access: status.access,
+        ...(status.state === 'available' ? {} : { withheld: true }),
         ...(status.alias === undefined ? {} : { alias: status.alias }),
       }]
     })

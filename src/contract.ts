@@ -55,6 +55,14 @@ export type RootState = 'available' | 'missing' | 'redirected' | 'invalid'
  * duplicated here.
  */
 export type RootAccess = 'inherit' | 'read-write' | 'read-only'
+export type WorkspaceMode = 'read-only' | 'workspace-write' | 'danger-full-access'
+export type EffectiveRootAccess = 'read-only' | 'read-write' | 'full-access' | 'unavailable'
+
+/** The shared nine-cell rule; tool dispatch may subsequently narrow writes. */
+export function effectiveRootAccess(access: RootAccess, mode: WorkspaceMode): EffectiveRootAccess {
+  if (access !== 'inherit') return access
+  return mode === 'danger-full-access' ? 'full-access' : mode === 'workspace-write' ? 'read-write' : 'read-only'
+}
 
 /** One root as the panel renders it. */
 export interface RootView {
@@ -72,6 +80,8 @@ export interface RootView {
   readonly state: RootState
   /** The write authority the registration carries. */
   readonly access: RootAccess
+  /** Host-derived session permission, before any per-tool cap. */
+  readonly effectiveAccess?: EffectiveRootAccess
   /** Why the root is not `available`; a code the panel localizes. */
   readonly detail?: string
 }
@@ -96,6 +106,9 @@ export interface RootsView {
   readonly primaryName?: string
   /** Execution directory only; never a registry key or an authorization grant. */
   readonly effectiveCwd?: string
+  readonly mode?: WorkspaceMode
+  readonly cappedTools?: readonly string[]
+  readonly toolAccessInvalid?: boolean
   /** The additional roots, in registry order. */
   readonly roots: readonly RootView[]
   /** The host cap; MAX_SAFE_INTEGER means a legacy host reported no limit. */
@@ -214,12 +227,16 @@ const rootViewSchema = z.object({
   // default in `narrowRootView`.
   access: z.enum(['inherit', 'read-write', 'read-only']).optional(),
   detail: z.string().optional(),
+  effectiveAccess: z.enum(['read-only', 'read-write', 'full-access', 'unavailable']).optional(),
 })
 
 const rootsViewSchema = z.object({
   primaryRoot: z.string(),
   primaryName: z.string().optional(),
   effectiveCwd: z.string().optional(),
+  mode: z.enum(['read-only', 'workspace-write', 'danger-full-access']).optional(),
+  cappedTools: z.array(z.string()).optional(),
+  toolAccessInvalid: z.boolean().optional(),
   roots: z.array(rootViewSchema),
   // Pre-limit hosts omitted both fields. Absence is compatible; malformed
   // supplied values still fail validation.
@@ -265,6 +282,9 @@ export function parseRootsView(value: unknown): Parsed<RootsView> {
       primaryRoot: view.primaryRoot,
       ...(view.primaryName === undefined ? {} : { primaryName: view.primaryName }),
       ...(view.effectiveCwd === undefined ? {} : { effectiveCwd: view.effectiveCwd }),
+      ...(view.mode === undefined ? {} : { mode: view.mode }),
+      ...(view.cappedTools === undefined ? {} : { cappedTools: view.cappedTools }),
+      ...(view.toolAccessInvalid === undefined ? {} : { toolAccessInvalid: view.toolAccessInvalid }),
       roots: view.roots.map(narrowRootView),
       // Legacy hosts had no cap. Do not invent a client-side limit that
       // disables their Add controls; all stored states count equally.
@@ -327,6 +347,7 @@ function narrowRootView(value: z.infer<typeof rootViewSchema>): RootView {
     // A host that predates the field only ever granted session-following
     // read-write — `inherit` under B9.
     access: value.access ?? 'inherit',
+    ...(value.effectiveAccess === undefined ? {} : { effectiveAccess: value.effectiveAccess }),
     ...(value.alias === undefined ? {} : { alias: value.alias }),
     ...(value.detail === undefined ? {} : { detail: value.detail }),
   }

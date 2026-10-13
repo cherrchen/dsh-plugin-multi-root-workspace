@@ -158,13 +158,12 @@ export class MultiRootFileSystem extends LocalFileSystem {
     // read-only when the ambient mode — or another writable grant covering the
     // same path — would allow the write.
     if (scope.deniedRoots.length > 0) {
-      const denied = new Set(scope.deniedRoots)
-      for (const root of scope.roots) {
-        if (!denied.has(root.path)) continue
-        if (await isPathUnder(fresh.targetKey, root.path)) {
-          const reason = root.access === 'read-only'
-            ? `${root.path} is a read-only additional root`
-            : `${root.path} is an additional root this call may not write`
+      for (const path of scope.deniedRoots) {
+        if (await isPathUnder(fresh.targetKey, path)) {
+          const root = scope.roots.find(root => root.path === path)
+          const reason = root?.access === 'read-only' || root === undefined
+            ? `${path} is a read-only additional root`
+            : `${path} is an additional root this call may not write`
           throw new FsError(`cannot write "${target.displayPath}": ${reason}`, 'FS_SANDBOX_DENIED')
         }
       }

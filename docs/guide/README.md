@@ -46,6 +46,8 @@ English: [README.en.md](./README.en.md)
 
 ## 访问级别、数量上限与 per-tool 封顶
 
+面板同时显示登记策略与宿主派生的当前有效权限，并注明工具写入封顶；继承与固定读写之间的切换均需确认。目录失效只撤销授权，不解除仍登记的只读边界。
+
 B9 开发分支中，新根默认 `inherit`（继承会话模式）；`add --inherit|--read-only|--read-write` 或面板可显式选三档。显式只读保持完整成员资格，但 Full-access 也不得写；固定读写在全局只读会话仍可写该根。旧可写记录升级为 inherit，重新登记保留原策略。权限与迁移合同见 [ADR-0017](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)；已启动进程保留启动快照，变化只约束之后的调用与新进程。发布包是否包含 B9 见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)。
 
 Windows Full-access 的局部拒写独立 runner 仍在开发，普通进程缺少设置安全属性的 SeTcbPrivilege，完整执行需要特权 broker 的范围决定与原生验收；目前拒绝启动，不能当作已实现。目标继续报告 partial；其 ACL 前置条件、父目录 guard 与 standing ACE 边界见 [ADR-0019](../decisions/ADR-0019-windows-token-attributes-and-conditional-acls.md)。无法表达的后端组合拒绝启动，不退回裸进程；具体后端限制见 ADR-0017。

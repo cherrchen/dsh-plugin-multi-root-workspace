@@ -33,6 +33,7 @@ import type { ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
+import { effectiveRootAccess } from './contract.ts'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -466,11 +467,20 @@ async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoo
   const primaryName = await primaryNameOf(ctx, primaryRoot, request)
   const session = ctx.get('sessions')?.get(request.sessionId as SessionId)
   const effectiveCwd = session === undefined ? undefined : effectiveDirectory(ctx, session)
+  // Session origin and policy are host-derived; the request carries neither.
+  if (session === undefined) throw new RootValidationError('session-not-found', 'the panel session closed during the request')
+  const policy = ctx.sandboxPolicy.resolve({ session })
+  const scope = ctx.get('multiRootScope')
   return {
     primaryRoot: canonicalRoot(primaryRoot),
     ...(primaryName === undefined ? {} : { primaryName }),
     ...(effectiveCwd === undefined ? {} : { effectiveCwd }),
-    roots: statuses.map(toRootView),
+    mode: policy.mode,
+    cappedTools: scope?.toolCaps() ?? [],
+    toolAccessInvalid: scope?.toolAccessInvalid ?? false,
+    roots: statuses.map((status, index) => ({ ...toRootView(status, index),
+      effectiveAccess: status.state === 'available' ? effectiveRootAccess(status.access, policy.mode) : 'unavailable',
+    })),
     limit: registry.limit,
     count: statuses.length,
     ...(unavailable === undefined ? {} : { unavailable }),

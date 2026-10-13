@@ -187,7 +187,7 @@ export function accessKey(access: RootAccess): Key {
  */
 export function widensAccess(from: RootAccess, to: RootAccess): boolean {
   if (from === 'read-only') return to !== 'read-only'
-  return from === 'inherit' && to === 'read-write'
+  return (from === 'inherit' && to === 'read-write') || (from === 'read-write' && to === 'inherit')
 }
 
 /** The final segment of an absolute path, on either platform separator. */
@@ -541,6 +541,13 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           ) : (
             <>
           <p className="mrfw-description">{t('panel.subtitle')}</p>
+          {state.view?.mode === undefined ? null : <p className="mrfw-note">
+            {t('panel.mode')} {t(`mode.${state.view.mode}`)}
+          </p>}
+          {state.view?.toolAccessInvalid ? <p className="mrfw-note">{t('panel.invalidCap')}</p>
+            : (state.view?.cappedTools?.length ?? 0) > 0 ? <p className="mrfw-note">
+              {t('panel.toolCaps', { tools: state.view!.cappedTools!.join(', ') })}
+            </p> : null}
 
           {state.error === undefined ? null : (
             <p role="alert" className="mrfw-alert">
@@ -614,6 +621,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     <span className="mrfw-accessBadge">
                       {t(accessKey(root.access))}
                     </span>
+                    {root.effectiveAccess === undefined ? null : <span className="mrfw-effectiveAccess">
+                      {t('panel.effectiveAccess')} {t(`effective.${root.effectiveAccess}`)}
+                    </span>}
                   </span>
                   <PathCopy
                     path={root.path}

@@ -25,6 +25,7 @@ import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandb
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { RootAccess } from './roots.ts'
 import { aroundTool } from './compat/tool-context.ts'
+import { effectiveRootAccess } from './contract.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -56,6 +57,8 @@ export interface AdditionalWorkspaceRoot {
    * under a read-only session.
    */
   access: RootAccess
+  /** Registry withheld the positive grant; retain its recorded deny boundary. */
+  withheld?: boolean
   /** Optional display alias. */
   alias?: string
 }
@@ -90,8 +93,9 @@ export interface FilesystemScope {
    */
   writableRoots: readonly string[]
   /**
-   * The members THIS call must not write — `additionalRoots` minus
-   * `writableRoots`. It is the deny set enforcement reads: explicit
+   * Registered boundaries THIS call must not write, including missing and
+   * redirected registrations. Negative restrictions never create a grant.
+   * It is the deny set enforcement reads: explicit
    * `read-only` roots under `danger-full-access` (and wherever another grant,
    * such as the platform temp area, would otherwise cover the same path), and
    * every member when the call is tool-capped. Read access is unaffected —
@@ -133,6 +137,7 @@ function sanitizeMembers(
   const seen = new Set<string>([primaryRoot])
   const result: ScopeRoot[] = []
   for (const root of roots) {
+    if (root.withheld) continue
     const recorded = root.recordedPath
     if (typeof recorded !== 'string' || recorded === '') continue
     const canonical = canonicalPath(root.path)
@@ -167,9 +172,7 @@ export const MULTI_ROOT_CONTEXT_NAME = 'multi-root:scope'
  * `read-only` never is.
  */
 function effectivelyWritable(mode: SandboxMode, access: RootAccess): boolean {
-  if (access === 'read-write') return true
-  if (access === 'read-only') return false
-  return mode !== 'read-only'
+  return effectiveRootAccess(access, mode) !== 'read-only'
 }
 
 /**
@@ -199,17 +202,19 @@ export function renderWorkspaceRootsContext(options: {
   if (roots.length === 0) return ''
   const members = JSON.stringify(roots.map(root => root.path))
   const readOnly = roots.filter(root => root.access === 'read-only').map(root => root.path)
+  const capNote = cappedTools.length === 0 ? ''
+    : ` The tools ${JSON.stringify(cappedTools)} cannot write additional roots even where they are writable.`
   if (mode === 'read-only') {
     // Fixed read-write roots keep their grant even in a read-only session.
     const writable = options.toolAccessInvalid ? [] : roots.filter(root => root.access === 'read-write').map(root => root.path)
     if (writable.length === 0) {
       return `Current DSH workspace roots: ${members} are additional roots of this session's workspace and are readable; `
-        + 'nothing is writable in read-only mode.'
+        + 'nothing is writable in read-only mode.' + capNote
     }
     const readable = roots.filter(root => root.access !== 'read-write').map(root => root.path)
     let text = `Current DSH workspace roots: ${JSON.stringify(writable)} are additional roots that stay writable even in read-only mode`
     if (readable.length > 0) text += `, and ${JSON.stringify(readable)} are readable additional roots`
-    return text + ' of this session\'s workspace; everything else is read-only.'
+    return text + ' of this session\'s workspace; everything else is read-only.' + capNote
   }
   if (mode === 'danger-full-access') {
     // The refused set mirrors the scope's deny set: explicit read-only roots
@@ -219,7 +224,7 @@ export function renderWorkspaceRootsContext(options: {
       + 'danger-full-access mode has no sandbox isolation'
       + (refused.length > 0
         ? `, except writes under the additional roots ${JSON.stringify(refused)} are still refused${options.toolAccessInvalid === true ? ' because toolAccess is invalid' : ''}.`
-        : '.')
+        : '.') + capNote
   }
   const writable = options.toolAccessInvalid ? [] : roots.filter(root => root.access !== 'read-only').map(root => root.path)
   const groups: string[] = []
@@ -234,10 +239,7 @@ export function renderWorkspaceRootsContext(options: {
     text += ' Writable additional roots are enforced for shell processes by the upstream Windows ACL '
       + 'restricted-token sandbox, whose enforcement is reported as partial; reads are not confined by it.'
   }
-  if (cappedTools.length > 0) {
-    text += ` The tools ${JSON.stringify(cappedTools)} cannot write additional roots even where they are writable.`
-  }
-  return text
+  return text + capNote
 }
 
 /**
@@ -361,16 +363,24 @@ export class MultiRootScopeService extends Service {
   resolve(policy: SandboxExecutionPolicy): FilesystemScope {
     const primaryRoot = canonicalPath(policy.workspaceRoot)
     const roots = this.membersOf(primaryRoot)
-    const writable = this.capped()
+    const capped = this.capped()
+    const writable = capped
       ? []
       : roots.filter(root => effectivelyWritable(policy.mode, root.access)).map(root => root.path)
-    const writableSet = new Set(writable)
+    const registered = this.rootsByPrimary.get(primaryRoot) ?? []
+    // Use the recorded spelling, never re-resolve it into a replacement grant.
+    // A disappeared directory must not become writable merely because it left
+    // membership; explicit removal is what withdraws the negative boundary.
+    const denied = registered.filter(root => typeof root.recordedPath === 'string'
+      && root.recordedPath !== '' && root.recordedPath !== primaryRoot
+      && (capped || !effectivelyWritable(policy.mode, root.access)))
+      .map(root => root.recordedPath)
     return {
       primaryRoot,
       additionalRoots: roots.map(root => root.path),
       roots,
       writableRoots: writable,
-      deniedRoots: roots.filter(root => !writableSet.has(root.path)).map(root => root.path),
+      deniedRoots: [...new Set(denied)],
     }
   }
 
@@ -421,7 +431,7 @@ export class MultiRootScopeService extends Service {
    */
   hasActiveDenyRoots(): boolean {
     for (const members of this.rootsByPrimary.values()) {
-      if (members.some(root => root.access === 'read-only')) return true
+      if (members.some(root => root.access === 'read-only') || (members.length > 0 && this.capped())) return true
     }
     return false
   }

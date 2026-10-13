@@ -417,6 +417,21 @@ describe('multi-root extension', () => {
       .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
     expect(existsSync(fixture.outside)).toBe(false)
   })
+
+  it('retains a missing read-only boundary under Full-access until explicit removal', async () => {
+    const fixture = createFixtureWorkspace('fs-missing-deny')
+    const ours = await mount(MultiRootFileSystem, fixture, 'danger-full-access', [])
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { id: 'ro', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-only' },
+    ])
+    await rm(fixture.outside, { recursive: true })
+    await expect(ours.fs.writeText(await target(ours, join(fixture.outside, 'recreated.txt')), 'x'))
+      .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(existsSync(fixture.outside)).toBe(false)
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+    await ours.fs.writeText(await target(ours, join(fixture.outside, 'removed.txt')), 'ok')
+    expect(existsSync(join(fixture.outside, 'removed.txt'))).toBe(true)
+  })
 })
 
 describe('configuration compatibility', () => {
