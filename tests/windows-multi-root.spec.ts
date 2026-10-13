@@ -13,7 +13,8 @@ import LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MultiRootSandboxProvider } from '../src/sandbox.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
-import { parseWindowsProfile, workspaceScopeSid, widenWindowsProfile } from '../src/windows-profile.ts'
+import { parseWindowsProfile, restrictWindowsProfile, workspaceScopeSid, widenWindowsProfile } from '../src/windows-profile.ts'
+import { rootDenySid } from '../src/windows-runner-contract.ts'
 import { mountCompat } from './support/compat.ts'
 import { confined } from './support/confine.ts'
 import { createFixtureWorkspace, REPO_ROOT } from './support/temp-workspace.ts'
@@ -23,6 +24,24 @@ import { createFixtureWorkspace, REPO_ROOT } from './support/temp-workspace.ts'
 const upstreamRunner = fileURLToPath(import.meta.url)
 const profile = ['node', upstreamRunner, '--workspace', 'C:\\primary', '--temp', 'C:\\temp', '--mode', 'workspace-write']
 describe('Windows root-set capability', () => {
+  it('uses a separate stable per-root deny identity', () => {
+    expect(rootDenySid('D:\\extra')).toBe(rootDenySid('d:\\EXTRA'))
+    expect(rootDenySid('D:\\extra')).not.toBe(rootDenySid('D:\\other'))
+    expect(rootDenySid('D:\\extra')).not.toBe(workspaceScopeSid(['D:\\extra']))
+  })
+  it('strictly separates ambient deny profiles from grant profiles', () => {
+    const args = restrictWindowsProfile(profile, ['D:\\ro space', 'E:\\ro'])
+    const parsed = parseWindowsProfile(args.slice(2), true)
+    expect(parsed.mode).toBe('danger-full-access')
+    expect(parsed.deniedRoots).toEqual(['D:\\ro space', 'E:\\ro'])
+    expect(parsed.additionalRoots).toEqual([])
+    expect(() => parseWindowsProfile(args.slice(2))).toThrow()
+    expect(() => restrictWindowsProfile(profile, [])).toThrow()
+    expect(() => restrictWindowsProfile(profile, ['\\\\server\\share'])).toThrow('network or device')
+    expect(() => parseWindowsProfile([...args.slice(2), '--additional-root', 'D:\\extra'], true)).toThrow('deny roots only')
+    expect(() => parseWindowsProfile([...args.slice(2), '--write-sid', 'sid', '--temp-write-sid', 'sid2'], true)).toThrow('deny roots only')
+    expect(() => parseWindowsProfile(['--upstream-runner', upstreamRunner, ...profile.slice(2), '--deny-root', 'D:\\ro'], true)).toThrow('deny roots only')
+  })
   it('is stable across ordering and casing, and changes on revocation', () => {
     const sid = workspaceScopeSid(['C:\\primary', 'D:\\extra'])
     expect(sid).toBe(workspaceScopeSid(['d:\\EXTRA', 'c:\\PRIMARY', 'C:\\primary']))

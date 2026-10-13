@@ -113,6 +113,12 @@ Phase 1 时本机外层沙箱拒绝 `sandbox_apply`，原生证据留待补齐�
 - Windows enforcement 维持上游 `partial`；Full-access + 局部只读组合在新机制落地前为显式拒绝 + 文档标注。
 - ADR-0013 的两档模型、持久化编码与决策表按修订节更新；ADR-0001 的「confinement 全部委托 `ctx.sandbox`」假设、ADR-0003 的门控条款、ADR-0011 的 Windows 单 SID 模型、ADR-0012 的 read-only 授权行同步修订。
 
+## 修订：Windows Full-access 局部只读重新纳入 B9（2026-10-13，Amendment）
+
+用户撤回本 ADR 中 Windows 新机制的延后范围。本节取代上表 Windows 行的「延后并显式拒绝」决定，历史 Phase 1 结论保留。
+
+Full-access 的 Windows profile 改为选择插件独立 runner 的 `--mode danger-full-access --deny-root`；令牌、deny ACE、owner / parent / token 防绕过与生命周期按 [ADR-0018](./ADR-0018-windows-ambient-write-denial.md)。权限仍从同一 scope 的 `deniedRoots` 读取，Windows enforcement 仍为 `partial`，缺失能力或路径不满足原生前置条件时拒绝启动。Landlock 的决定不变。原生证据与验收状态只维护于路线账本。
+
 ## Related Documents
 
 - [B9 专项计划](../plans/active/2026-10-13-b9-root-access-and-sandbox-modes.md)

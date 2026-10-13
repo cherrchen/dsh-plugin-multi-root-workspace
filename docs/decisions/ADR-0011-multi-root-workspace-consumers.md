@@ -112,6 +112,10 @@ Status 保持 **Accepted**；LSP 路由、workspace-files 隔离与 Windows runn
 - **公开方法包装接缝的消费面扩大**：`method-wrapper.ts` 同一机制在 B9 下新增包装 `ctx.shell.execute`（`0.1.5/0.1.6` 含 `start`）、`ctx.ptcRuntime.execute`、`ctx.subprocess.spawn`（ALS deny 上下文）与 `ctx.subprocess.spawnTerminal`（env `DSH_SESSION_ID` 恢复会话），用于 Full-access 下的显式只读强制。Windows 上 `terminal-pwsh` 与 `persistent-pwsh` 走同一 `dsh-terminal-bash` backend，由 `spawnTerminal` 包装统一覆盖。
 - **Windows 单 root-set SID 模型的表达边界**：当前 `workspaceScopeSid([primary, ...writable])` 只有 allow 维度，表达不了「Full-access 全局 + 个别附加根拒写」。B9 合同下该组合需要新机制（deny ACE / 受限 token 变体）；`read-only` 会话的固定读写根并入既有 `--write-sid` root 集即可表达。落地困难过大时按用户决定延后，文档与验收如实标注该组合未实现。见 [ADR-0017](./ADR-0017-three-state-root-access-and-sandbox-modes.md)。
 
+## 修订：Windows ambient deny runner（2026-10-13，Amendment）
+
+B9 原先延后的 Windows Full-access + 局部只读现按用户要求重新纳入。现有 read-only / workspace-write allow-token 路径不变；新的 ambient deny-token 路径、standing ACE 和 partial enforcement 边界见 [ADR-0018](./ADR-0018-windows-ambient-write-denial.md)。上文「单 root-set SID 只有 allow 维度」仍描述原 runner，并不限制插件自己的独立原生机制。验收状态只见路线账本。
+
 ## Related Documents
 
 - [ADR-0017：附加根三态权限与跨 SandboxMode 执行一致性](./ADR-0017-three-state-root-access-and-sandbox-modes.md)

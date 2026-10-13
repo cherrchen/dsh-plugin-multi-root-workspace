@@ -71,6 +71,13 @@ export function workspaceScopeSid(roots: readonly string[]): string {
   return `S-1-4-${words.join('-')}-2`
 }
 
+/** A standing deny identity, deliberately disjoint from all write capabilities. */
+export function rootDenySid(root: string): string {
+  const hash = createHash('sha256').update('dsh-multi-root-deny\0').update(root.toLowerCase()).digest()
+  const words = [0, 4, 8, 12].map(offset => (hash.readUInt32LE(offset) % (2 ** 30 - 1)) + 1)
+  return `S-1-4-${words.join('-')}-3`
+}
+
 export interface WindowsProfile {
   workspace: string
   temp: string
@@ -83,8 +90,9 @@ export interface WindowsProfile {
    * (B9). An upstream `read-only` profile carries no `--additional-root`, so
    * the mode only ever reaches the runner with grants attached.
    */
-  mode: 'read-only' | 'workspace-write'
+  mode: 'read-only' | 'workspace-write' | 'danger-full-access'
   additionalRoots: string[]
+  deniedRoots: string[]
   /**
    * The upstream runner's own file (`--upstream-runner`). Required when
    * `allowAdditional` parses — our standalone runner resolves
@@ -105,6 +113,7 @@ export interface WindowsProfile {
 export function parseWindowsProfile(args: readonly string[], allowAdditional = false): WindowsProfile {
   const fields = new Map<string, string>()
   const additionalRoots: string[] = []
+  const deniedRoots: string[] = []
   let upstreamRunner: string | undefined
   const known = new Set(['--workspace', '--temp', '--mode', '--write-sid', '--temp-write-sid'])
   for (let index = 0; index < args.length; index += 2) {
@@ -112,6 +121,7 @@ export function parseWindowsProfile(args: readonly string[], allowAdditional = f
     const value = args[index + 1]
     if (key === undefined || value === undefined || value === '') throw new DialectUnrecognizedError('Windows ACL profile has a missing value')
     if (allowAdditional && key === '--additional-root') { additionalRoots.push(value); continue }
+    if (allowAdditional && key === '--deny-root') { deniedRoots.push(value); continue }
     if (allowAdditional && key === '--upstream-runner') {
       if (upstreamRunner !== undefined) throw new DialectUnrecognizedError('Windows ACL profile repeats --upstream-runner')
       upstreamRunner = value
@@ -127,8 +137,13 @@ export function parseWindowsProfile(args: readonly string[], allowAdditional = f
   const workspace = fields.get('--workspace')
   const temp = fields.get('--temp')
   const mode = fields.get('--mode')
-  if (workspace === undefined || temp === undefined || (mode !== 'workspace-write' && mode !== 'read-only')) {
+  if (workspace === undefined || temp === undefined || (mode !== 'workspace-write' && mode !== 'read-only' && !(allowAdditional && mode === 'danger-full-access'))) {
     throw new DialectUnrecognizedError('Windows multi-root requires --workspace, --temp, and --mode read-only or workspace-write')
+  }
+  if (mode === 'danger-full-access'
+    ? deniedRoots.length === 0 || additionalRoots.length > 0 || fields.has('--write-sid') || fields.has('--temp-write-sid')
+    : deniedRoots.length > 0) {
+    throw new DialectUnrecognizedError('Windows ambient restriction requires deny roots only, without write grants or capability SIDs')
   }
   // On the standalone runner a read-only profile must carry grants — an
   // upstream `read-only` invocation never reaches this process.
@@ -138,7 +153,7 @@ export function parseWindowsProfile(args: readonly string[], allowAdditional = f
   const writeSid = fields.get('--write-sid')
   const tempWriteSid = fields.get('--temp-write-sid')
   if ((writeSid === undefined) !== (tempWriteSid === undefined)) throw new DialectUnrecognizedError('Windows ACL profile requires both capability SIDs or neither')
-  return { workspace, temp, mode, additionalRoots,
+  return { workspace, temp, mode, additionalRoots, deniedRoots,
     ...(upstreamRunner === undefined ? {} : { upstreamRunner }),
     ...(writeSid === undefined ? {} : { writeSid }), ...(tempWriteSid === undefined ? {} : { tempWriteSid }) }
 }

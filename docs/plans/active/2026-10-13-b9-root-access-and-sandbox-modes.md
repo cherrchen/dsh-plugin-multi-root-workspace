@@ -4,7 +4,7 @@
 
 为第二期增加 B9：附加根可选择「继承主目录权限」「只读」「读写」，文件操作与新启动的 shell / pwsh / PTY 按同一权限合同执行。显式只读不能被 DSH Full-access 绕过，显式读写在 DSH 只读模式下仍能授予该根写权限。
 
-本文记录目标合同与实施计划，不表示这些行为已经实现。进度、执行证据与发布状态只维护在[路线账本](./2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)。本轮文档工作不启动代码实现、运行时探测或发版。
+本文记录目标合同与实施计划；Phase 1–4 已实施，Windows 补齐与 Phase 5 验收继续按下文执行。进度、执行证据与发布状态只维护在[路线账本](./2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)。本轮重新纳入 Windows Full-access + 局部只读的开发与原生验收，不创建 release。
 
 ## Background
 
@@ -14,14 +14,7 @@
 
 ## Current State
 
-按当前源码与本地安装的开发基线检查：
-
-- [`RootAccess`](../../../src/roots.ts) 与[面板合同](../../../src/contract.ts)只有 `read-only / read-write`；注册表默认新根为 `read-write`。
-- [注册表](../../../src/registry.ts)在 domain v1 用 `recordedPath / readOnlyRecordedPath` 区分授权，旧记录的可写性仍受会话模式支配。
-- [scope](../../../src/scope.ts)目前按根 access 与工具 cap 计算 `writableRoots`，没有三态策略与会话模式组合出的有效权限。
-- [fs fence](../../../src/fs.ts)在 `read-only` 下直接拒绝写，在 `danger-full-access` 下直接放行；只有 `workspace-write` 分支检查附加根。
-- [sandbox provider](../../../src/sandbox.ts)只扩展 `workspace-write` profile。本地 DSH `0.2.1-alpha.2` 的 `dsh-bash-sandbox` 与 `dsh-terminal-bash` 在 Full-access 下跳过 `confine()`；其他支持版本与 pwsh 消费面须在实施前逐项核对。
-- 模型拓扑和客户端文案仍陈述原来的模式规则，不能用于宣称 B9 限制已经生效。
+当前三态存储、scope / fs、命令 / 面板与进程接缝已实施，合同见 [ADR-0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)。Windows 的只读会话 + 固定读写已通过独立 runner 实现；先前延后的 Full-access + 局部只读现已重新纳入 B9，采用 [ADR-0018](../../decisions/ADR-0018-windows-ambient-write-denial.md) 的独立 deny-token 路径。Landlock 的该组合仍按 ADR-0017 在 spawn 前显式拒绝。原生执行和验收状态只见路线账本。
 
 ## Scope
 
@@ -100,6 +93,15 @@ Phase 1 核对的接缝定案（ADR-0017）：全部用 `method-wrapper.ts` 公�
 2. 基于 Phase 1 证据实现各方言的混合权限，检查 backend enforcement 的真实程度；Windows 继续报告 partial，不将结构测试当原生证据。
 3. 核对 Windows root-set SID、private temp、残留 ACE 与 token 快照，不把固定读写额外扩成主根写授权。
 4. 未知形状、不可用 runner 或不支持的权限组合在 spawn 前拒绝；空根及无需额外处理的组合保留原有直通行为。
+
+### Phase 3 修订：Windows 重新纳入（2026-10-13）
+
+用户撤回先前的 Windows 延后决定。本轮必须补齐 Full-access + 显式只读 / 工具封顶的执行面，且不修改上游包、版本 allowlist 或全局会话模式。
+
+1. 从已识别的 Windows runner profile 构造 `--mode danger-full-access --deny-root`，沿用 shell / PTC / PTY 的公开接缝。
+2. 独立 runner 构造保留 ambient DACL grant 的受限令牌，显式 deny 根内变更；关闭 owner-implicit WRITE_DAC、父目录删除旁路与令牌再派生旁路。具体设计与 Windows partial 边界见 ADR-0018，不复制实现合同。
+3. 原生验证混合根九格、Node / PowerShell / 后代进程 / ConPTY、fd 7、受保护 DACL、删除/重命名/ACL 编辑、令牌派生、撤销快照、路径失效与并发。
+4. `smoke:behavior` 和安装 tarball 的 `smoke:packed` 均通过真实 Full-access pwsh 执行允许/拒绝矩阵；全部 11 版本 × 启用 OS 在现有 CI 验收。
 
 ### Phase 4：命令、面板与模型上下文
 

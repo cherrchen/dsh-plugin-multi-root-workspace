@@ -550,6 +550,40 @@ function canonical(path) {
   }
 }
 
+/** Exercise the installed Windows runner through the REAL Full-access pwsh
+ * bypass. This battery also runs against the tarball in smoke:packed.
+ */
+async function windowsAmbientBattery() {
+  process.env.DSH_PERMISSION_MODE = 'danger-full-access'
+  const { ctx } = await bootProfile(PLUGIN_PROFILE, home)
+  try {
+    const policy = ctx.sandboxPolicy.resolve({})
+    ctx.multiRootScope.setAdditionalRoots(policy.workspaceRoot, [
+      { id: 'ro', path: extraRoot, recordedPath: canonical(extraRoot), access: 'read-only' },
+      { id: 'fixed', path: fixedRoot, recordedPath: canonical(fixedRoot), access: 'read-write' },
+    ])
+    for (const [name, root, expected] of [
+      ['primary', primaryRoot, true], ['ambient', thirdRoot, true],
+      ['fixed', fixedRoot, true], ['read-only', extraRoot, false],
+    ]) {
+      const path = join(root, 'full-access.txt')
+      rmSync(path, { force: true })
+      const spec = ctx.shell.resolve({ command: SHELL.write(path), workdir: primaryRoot, sandboxPolicy: policy })
+      const result = await runForeground(ctx.shell, spec)
+      check.equal(existsSync(path), expected, `Full-access pwsh: ${name} write matches root policy`, result.stderr.text)
+      if (expected) check.equal(result.exitCode, 0, `Full-access pwsh: ${name} command exits successfully`, result.stderr.text)
+      else check.ok(result.exitCode !== 0, 'Full-access pwsh: read-only write fails', result.stderr.text)
+    }
+    // Removing the restriction must affect the next launch without removing
+    // standing ACEs used by already-running deny tokens.
+    ctx.multiRootScope.setAdditionalRoots(policy.workspaceRoot, [])
+    const spec = ctx.shell.resolve({ command: SHELL.write(join(extraRoot, 'after-remove.txt')), workdir: primaryRoot, sandboxPolicy: policy })
+    const result = await runForeground(ctx.shell, spec)
+    check.equal(result.exitCode, 0, 'Full-access pwsh: removed root is ambient again', result.stderr.text)
+    check.ok(existsSync(join(extraRoot, 'after-remove.txt')), 'Full-access pwsh: next launch observes removal')
+  } finally { await ctx.fiber.dispose() }
+}
+
 /** Boot one profile and run the registry battery, then the restart battery. */
 async function runRegistryProfile(profile) {
   process.env.DSH_PERMISSION_MODE = 'workspace-write'
@@ -761,6 +795,8 @@ try {
         check.equal(bashFixed.wrote, true, `${mode}: bash always writes the fixed read-write root`, bashFixed.text)
       }
     }
+    if (process.platform === 'win32') await windowsAmbientBattery()
+
     // --- the M3 path: roots registered by the command, not by the smoke --------
     for (const name of ['registry-before.txt', 'registry-after.txt', 'registry-removed.txt', 'registry-restart.txt']) {
       rmSync(join(extraRoot, name), { force: true })

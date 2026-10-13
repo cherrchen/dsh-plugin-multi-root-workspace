@@ -153,8 +153,8 @@ describe('the restricted argv prefix', () => {
     expect(prefix[prefix.length - 1]).toBe('--')
   })
 
-  it('fails closed on Landlock and Windows ACL — their models cannot subtract', async () => {
-    for (const dialect of ['landlock', 'windows-acl'] as const) {
+  it('fails closed on Landlock — its allowlist cannot subtract', async () => {
+    for (const dialect of ['landlock'] as const) {
       const { provider } = await mountStack(dialect, 'danger-full-access')
       // `confine` is synchronous on some supported releases: wrapping the
       // call in Promise.resolve().then() folds a synchronous throw into the
@@ -163,6 +163,16 @@ describe('the restricted argv prefix', () => {
         .restrictedArgvPrefix({ ...policy, workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)]))
       await expect(call).rejects.toBeInstanceOf(SandboxUnavailableError)
     }
+  })
+
+  it('selects the standalone ambient deny runner on Windows ACL', async () => {
+    const { provider } = await mountStack('windows-acl', 'danger-full-access')
+    const denied = canonicalPath(fixture.outside)
+    const prefix = await (provider as MultiRootSandboxProvider)
+      .restrictedArgvPrefix({ ...policy, workspaceRoot: fixture.workspace }, [denied])
+    expect(prefix).toContain('danger-full-access')
+    expect(prefix.slice(prefix.indexOf('--deny-root'))).toEqual(['--deny-root', denied, '--'])
+    expect(prefix).not.toContain('--additional-root')
   })
 })
 

@@ -16,6 +16,7 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { canonicalPath, isWindowsNetworkOrDevicePath, parseWindowsProfile, workspaceScopeSid } from './windows-runner-contract.ts'
+import { runWindowsDenied } from './windows-deny.ts'
 
 async function main(): Promise<number> {
   if (process.platform !== 'win32') throw new Error('Windows ACL runner requires Windows')
@@ -23,6 +24,9 @@ async function main(): Promise<number> {
   const separator = raw.indexOf('--')
   if (separator < 0 || raw[separator + 1] === undefined) throw new Error('missing command after --')
   const profile = parseWindowsProfile(raw.slice(0, separator), true)
+  if (profile.mode === 'danger-full-access') {
+    return await runWindowsDenied(profile.upstreamRunner!, profile.deniedRoots, raw.slice(separator + 1))
+  }
   // Under `workspace-write` the grant set is the workspace plus every
   // additional root. Under `read-only` (B9's fixed `read-write` cell) the
   // grant set is the additional roots ALONE: the workspace-write token is what

@@ -28,8 +28,8 @@
  *   explicit `read-only` root: a terminal we cannot attribute must not inherit
  *   a deny set we cannot compute.
  *
- * Landlock and Windows ACL cannot express "ambient minus subtree" (their
- * confinement models only grant), so on those hosts the restricted prefix
+ * Windows uses the standalone ambient deny-token runner. Landlock cannot
+ * express "ambient minus subtree" (its confinement model only grants), so its prefix
  * throws `SandboxUnavailableError` — the process refuses to start unconfined
  * rather than silently widening an explicit restriction.
  *

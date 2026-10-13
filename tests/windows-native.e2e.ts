@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
-import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import type { SandboxExecutionPolicy, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -142,6 +142,131 @@ function secondDrive(fixtureDrive: string): string | undefined {
 }
 
 describe.runIf(process.platform === 'win32')('Windows ACL native confinement', () => {
+  it('enforces the complete B9 mode matrix for mixed roots without restricting ambient writes', async () => {
+    const fixture = createFixtureWorkspace('win-b9-matrix')
+    const inherited = join(fixture.base, 'inherit')
+    const fixed = join(fixture.base, 'fixed')
+    const readonly = join(fixture.base, "只 读 'a'&%!")
+    const ambient = join(fixture.base, 'ambient')
+    for (const dir of [inherited, fixed, readonly, ambient]) mkdirSync(dir)
+    writeFileSync(join(readonly, 'seed.txt'), 'seed')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+        { id: 'inherit', path: inherited, recordedPath: canonicalPath(inherited), access: 'inherit' },
+        { id: 'fixed', path: fixed, recordedPath: canonicalPath(fixed), access: 'read-write' },
+        { id: 'ro', path: readonly, recordedPath: canonicalPath(readonly), access: 'read-only' },
+      ])
+      for (const mode of ['read-only', 'workspace-write', 'danger-full-access'] as const) {
+        const policy: SandboxExecutionPolicy = { mode, workspaceRoot: fixture.workspace }
+        const command = [process.execPath, '-e', writeProbe([fixture.workspace, inherited, readonly, fixed, ambient], `${mode}.txt`)]
+        const argv = mode === 'danger-full-access'
+          ? [...await mounted.provider.restrictedArgvPrefix(policy, mounted.ctx.multiRootScope.resolve(policy).deniedRoots), ...command]
+          : (await mounted.provider.confine(command, policy)).argv
+        const result = await spawnArgv(argv[0]!, argv.slice(1))
+        expect(result.status, result.stderr).toBe(0)
+        expect(result.stdout.trim().split(/\r?\n/)).toEqual([
+          mode === 'read-only' ? expect.stringMatching(/^denied:/) : 'allowed',
+          mode === 'read-only' ? expect.stringMatching(/^denied:/) : 'allowed',
+          expect.stringMatching(/^denied:/), 'allowed',
+          mode === 'danger-full-access' ? 'allowed' : expect.stringMatching(/^denied:/),
+        ])
+      }
+      const policy: SandboxExecutionPolicy = { mode: 'danger-full-access', workspaceRoot: fixture.workspace }
+      const prefix = await mounted.provider.restrictedArgvPrefix(policy, [canonicalPath(readonly)])
+      const ps = await spawnArgv(prefix[0]!, [...prefix.slice(1), ...powershellArgv(
+        `Get-Content -LiteralPath ${JSON.stringify(join(readonly, 'seed.txt'))}; try { Set-Content -LiteralPath ${JSON.stringify(join(readonly, 'ps.txt'))} -Value bad -ErrorAction Stop; 'wrote' } catch { 'denied' }; Set-Content -LiteralPath ${JSON.stringify(join(ambient, 'ps.txt'))} -Value ok; 'ambient'`,
+      )])
+      expect(ps.status, ps.stderr).toBe(0)
+      expect(ps.stdout.trim().split(/\r?\n/)).toEqual(['seed', 'denied', 'ambient'])
+      // A descendant receives the same token and cannot escape through Node's
+      // ordinary CreateProcess path.
+      const descendant = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e',
+        `const r=require('child_process').spawnSync(process.execPath,['-e',${JSON.stringify(writeProbe([readonly, ambient], 'descendant.txt'))}],{encoding:'utf8'});process.stdout.write(r.stdout);process.stderr.write(r.stderr);process.exit(r.status??99)`])
+      expect(descendant.status, descendant.stderr).toBe(0)
+      expect(descendant.stdout.trim().split(/\r?\n/)).toEqual([expect.stringMatching(/^denied:/), 'allowed'])
+      // Host permissions survive the standing deny ACE; changing access later
+      // does not revoke that ACE from a token which still carries its identity.
+      writeFileSync(join(readonly, 'host.txt'), 'host')
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+      const unrestricted = await spawnArgv(process.execPath, ['-e', writeProbe([readonly], 'removed.txt')])
+      expect(unrestricted.stdout.trim()).toBe('allowed')
+      const oldSnapshot = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', writeProbe([readonly], 'old.txt')])
+      expect(oldSnapshot.stdout.trim()).toMatch(/^denied:/)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 300_000)
+
+  it('denies overwrite, delete, rename, ACL edits and token derivation, including protected descendant ACLs', async () => {
+    const fixture = createFixtureWorkspace('win-b9-mutations')
+    const nested = join(fixture.outside, 'protected')
+    mkdirSync(nested)
+    const seed = join(nested, 'seed.txt')
+    writeFileSync(seed, 'seed')
+    // Disable inheritance while retaining the existing ACEs: a root-only
+    // inheritable deny would miss this directory and its explicit allows.
+    const icacls = join(process.env.SystemRoot!, 'System32', 'icacls.exe')
+    execFileSync(icacls, [nested, '/inheritance:d'])
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const prefix = await mounted.provider.restrictedArgvPrefix(
+        { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)],
+      )
+      const mutation = `const fs=require('fs');const p=${JSON.stringify(seed)};for(const op of [()=>fs.writeFileSync(p,'bad'),()=>fs.unlinkSync(p),()=>fs.renameSync(p,p+'.moved'),()=>fs.renameSync(${JSON.stringify(fixture.outside)},${JSON.stringify(fixture.outside + '-moved')})]){try{op();console.log('escaped')}catch(e){console.log('denied')}}`
+      const result = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', mutation])
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim().split(/\r?\n/)).toEqual(['denied', 'denied', 'denied', 'denied'])
+      expect(readFileSync(seed, 'utf8')).toBe('seed')
+      const acl = await spawnArgv(prefix[0]!, [...prefix.slice(1), icacls, seed, '/reset'])
+      expect(acl.status, acl.stdout + acl.stderr).not.toBe(0)
+      // Removing a restricting deny SID would restore ambient write access.
+      // The token DACL must prevent opening TOKEN_DUPLICATE in the first place.
+      const koffiEntry = fileURLToPath(import.meta.resolve('koffi'))
+      const tokenProbe = `const k=require(${JSON.stringify(koffiEntry)});const a=k.load('advapi32.dll'),b=k.load('kernel32.dll');const open=b.func('__stdcall','OpenProcess','void*',['uint32','int','uint32']);const tok=a.func('__stdcall','OpenProcessToken','int',['void*','uint32','void*']);const close=b.func('__stdcall','CloseHandle','int',['void*']);const h=open(0x400,0,process.pid),out=Buffer.alloc(8);console.log(tok(h,8,out));if(out.readBigUInt64LE())close(k.decode(out,'void*'));console.log(tok(h,2,Buffer.alloc(8)));close(h)`
+      const token = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', tokenProbe])
+      expect(token.status, token.stderr).toBe(0)
+      expect(token.stdout.trim().split(/\r?\n/)).toEqual(['1', '0'])
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('preserves ConPTY output and the control descriptor on ambient deny launches', async () => {
+    const fixture = createFixtureWorkspace('win-b9-transport')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const prefix = await mounted.provider.restrictedArgvPrefix(
+        { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)],
+      )
+      await mounted.ctx.plugin(LocalSubprocess)
+      const terminal = await mounted.ctx.subprocess.spawnTerminal({
+        argv: [...prefix, process.execPath, '-e', writeProbeMarked([fixture.workspace, fixture.outside])],
+        cwd: fixture.workspace, rows: 24, cols: 100, terminalType: 'xterm-256color', graceMs: 3000,
+      })
+      try {
+        let seen = ''
+        terminal.output.on('data', (chunk: Buffer | string) => { seen += chunk.toString() })
+        terminal.output.resume()
+        await terminal.done
+        expect(ptyVerdicts(seen)).toEqual(['allowed', expect.stringMatching(/^denied:/)])
+      } finally { await terminal.terminate() }
+      const control = await new Promise<string>((resolve, reject) => {
+        const child = spawn(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', "require('fs').writeSync(7,'control-ok');process.exit(23)"], {
+          env: { ...process.env, DSH_SUBPROCESS_CONTROL: 'pipe' },
+          stdio: ['ignore', 'pipe', 'pipe', 'ignore', 'ignore', 'ignore', 'ignore', 'pipe'],
+        })
+        let result = ''
+        let stderr = ''
+        child.stderr?.on('data', chunk => { stderr += chunk.toString() })
+        const pipe = child.stdio[7] as NodeJS.ReadableStream
+        pipe.on('data', (chunk: Buffer) => { result += chunk.toString() })
+        child.once('error', reject)
+        child.once('close', code => {
+          if (code !== 23) reject(new Error(`control child exit ${code}: ${stderr}`))
+          else resolve(result)
+        })
+      })
+      expect(control).toBe('control-ok')
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
   it('confines hostile root names for Node and PowerShell children alike', async () => {
     const fixture = createFixtureWorkspace('win-hostile')
     const primary = join(fixture.base, "主 根 'a'&^%!(1)")

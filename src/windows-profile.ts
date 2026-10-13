@@ -13,6 +13,21 @@ import {
 // established import sites working unchanged.
 export { parseWindowsProfile, workspaceScopeSid, type WindowsProfile } from './windows-runner-contract.ts'
 
+/** Recognize the upstream runner, then select our ambient deny-token path. */
+export function restrictWindowsProfile(profile: readonly string[], deniedRoots: readonly string[]): string[] {
+  if (profile.length < 2 || profile[0] === undefined || profile[1]?.startsWith('--')) {
+    throw new DialectUnrecognizedError('Windows ACL runner invocation is not [node, runner, ...flags]')
+  }
+  const parsed = parseWindowsProfile(profile.slice(2))
+  if (deniedRoots.length === 0) throw new DialectUnrecognizedError('Windows ambient restriction requires at least one deny root')
+  for (const root of [parsed.workspace, ...deniedRoots]) {
+    if (isWindowsNetworkOrDevicePath(root)) throw new DialectUnrecognizedError(`Windows ACL confinement cannot cover network or device paths: ${root}`)
+  }
+  return [profile[0], fileURLToPath(new URL('./windows-runner.js', import.meta.url)),
+    '--upstream-runner', profile[1]!, '--workspace', parsed.workspace, '--temp', parsed.temp,
+    '--mode', 'danger-full-access', ...deniedRoots.flatMap(root => ['--deny-root', root])]
+}
+
 export function widenWindowsProfile(
   profile: readonly string[],
   roots: readonly string[],

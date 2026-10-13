@@ -41,7 +41,7 @@ import { denyProfileArgs, DialectUnrecognizedError, graftProfileArgs, splitConfi
 import { restrictProfileArgs } from './dialects.ts'
 import { brandMultiRootProvider } from './providers.ts'
 import type {} from './scope.ts'
-import { widenWindowsProfile } from './windows-profile.ts'
+import { restrictWindowsProfile, widenWindowsProfile } from './windows-profile.ts'
 
 export type { Config }
 
@@ -147,9 +147,9 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
    * is computed once per call here and the synchronous `ctx.subprocess.spawn`
    * seam only has to prepend it. The upstream profile builders stay private:
    * this probes `confine` under `read-only` for the runner's argument skeleton
-   * and rewrites the file-effect part per dialect. Landlock and Windows ACL
-   * cannot express "everything except" (their models only grant), so on those
-   * hosts the call fails closed with `SandboxUnavailableError` rather than
+   * and rewrites the file-effect part per dialect. Windows selects the
+   * standalone ambient deny-token runner. Landlock cannot express
+   * "everything except" (its model only grants), so on that host the call fails closed with `SandboxUnavailableError` rather than
    * spawning an unconfined process — an explicit `read-only` root must never
    * silently become writable under Full-access.
    *
@@ -177,7 +177,9 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     const restrict = (confined: ConfinedArgv): readonly string[] => {
       try {
         const shape = splitConfined(confined.argv, ['true'])
-        return [...restrictProfileArgs(shape.dialect, shape.profileArgs, deniedRoots), '--']
+        return [...(shape.dialect === 'windows-acl'
+          ? restrictWindowsProfile(shape.profileArgs, deniedRoots)
+          : restrictProfileArgs(shape.dialect, shape.profileArgs, deniedRoots)), '--']
       } catch (error: unknown) {
         if (!(error instanceof DialectUnrecognizedError)) throw error
         throw new SandboxUnavailableError(
