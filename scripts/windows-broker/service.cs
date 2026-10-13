@@ -127,27 +127,36 @@ public sealed class RootDenyBroker : ServiceBase {
             new { Name = "DshMultiRootDeniedRootsF", Flags = 0x64u },          // + DEFAULT + USE_FOR_DENY_ONLY
         };
         var names = new IntPtr[variants.Length];
-        IntPtr array = IntPtr.Zero, attributeBlock = IntPtr.Zero, info = IntPtr.Zero, operation = IntPtr.Zero;
         try {
             for (int i = 0; i < roots.Length; i++) values[i] = Unicode(roots[i], Marshal.StringToHGlobalUni(roots[i]));
-            array = Marshal.AllocHGlobal(values.Length * Marshal.SizeOf(typeof(UnicodeString)));
-            for (int i = 0; i < values.Length; i++) Marshal.StructureToPtr(values[i], IntPtr.Add(array, i * Marshal.SizeOf(typeof(UnicodeString))), false);
-            attributeBlock = Marshal.AllocHGlobal(variants.Length * Marshal.SizeOf(typeof(AttributeV1)));
-            for (int i = 0; i < variants.Length; i++) {
-                names[i] = Marshal.StringToHGlobalUni(variants[i].Name);
-                var attribute = new AttributeV1 { Name = Unicode(variants[i].Name, names[i]), ValueType = 3, Flags = variants[i].Flags, Count = (uint)values.Length, Values = array };
-                Marshal.StructureToPtr(attribute, IntPtr.Add(attributeBlock, i * Marshal.SizeOf(typeof(AttributeV1))), false);
+            // One call per variant: a flag the kernel rejects must not take the
+            // accepted variants down with it. The first (canonical) variant is
+            // mandatory; the alternates are diagnostic — their presence or
+            // absence shows up in the caller's token-attribute readback.
+            for (int v = 0; v < variants.Length; v++) {
+                IntPtr array = IntPtr.Zero, attribute = IntPtr.Zero, info = IntPtr.Zero, operation = IntPtr.Zero;
+                try {
+                    names[v] = Marshal.StringToHGlobalUni(variants[v].Name);
+                    array = Marshal.AllocHGlobal(values.Length * Marshal.SizeOf(typeof(UnicodeString)));
+                    for (int i = 0; i < values.Length; i++) Marshal.StructureToPtr(values[i], IntPtr.Add(array, i * Marshal.SizeOf(typeof(UnicodeString))), false);
+                    attribute = Allocate(new AttributeV1 { Name = Unicode(variants[v].Name, names[v]), ValueType = 3, Flags = variants[v].Flags, Count = (uint)values.Length, Values = array });
+                    info = Allocate(new AttributesInfo { Version = 1, Count = 1, Attributes = attribute });
+                    operation = Marshal.AllocHGlobal(4); Marshal.WriteInt32(operation, 2); // ADD only; never REPLACE/DELETE
+                    var input = new AttributesOperation { Attributes = info, Operations = operation };
+                    IntPtr data = Allocate(input);
+                    try {
+                        if (!SetTokenInformation(token, 39, data, Marshal.SizeOf(typeof(AttributesOperation)))) {
+                            int error = Marshal.GetLastWin32Error();
+                            if (v == 0) throw new Win32Exception(error, "SetTokenInformation(TokenSecurityAttributes)");
+                        }
+                    } finally { Marshal.FreeHGlobal(data); }
+                } finally {
+                    if (names[v] != IntPtr.Zero) Marshal.FreeHGlobal(names[v]);
+                    foreach (var memory in new[] { array, attribute, info, operation }) if (memory != IntPtr.Zero) Marshal.FreeHGlobal(memory);
+                }
             }
-            info = Allocate(new AttributesInfo { Version = 1, Count = (uint)variants.Length, Attributes = attributeBlock });
-            operation = Marshal.AllocHGlobal(4); Marshal.WriteInt32(operation, 2); // ADD only; never REPLACE/DELETE
-            var input = new AttributesOperation { Attributes = info, Operations = operation };
-            IntPtr data = Allocate(input);
-            try { Check(SetTokenInformation(token, 39, data, Marshal.SizeOf(typeof(AttributesOperation))), "SetTokenInformation(TokenSecurityAttributes)"); }
-            finally { Marshal.FreeHGlobal(data); }
         } finally {
             foreach (var value in values) if (value.Buffer != IntPtr.Zero) Marshal.FreeHGlobal(value.Buffer);
-            foreach (var memory in names) if (memory != IntPtr.Zero) Marshal.FreeHGlobal(memory);
-            foreach (var memory in new[] { array, attributeBlock, info, operation }) if (memory != IntPtr.Zero) Marshal.FreeHGlobal(memory);
         }
     }
     static UnicodeString Unicode(string value, IntPtr memory) { return new UnicodeString { Length = checked((ushort)(value.Length * 2)), MaximumLength = checked((ushort)(value.Length * 2 + 2)), Buffer = memory }; }

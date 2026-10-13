@@ -229,9 +229,9 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
         // command-line parser; the applied SDDL is echoed back so an apply
         // that silently failed cannot masquerade as an honest verdict.
         const psArgv = powershellArgv(
-          `$f=${JSON.stringify(file)}`
+          `$f='${file}'`
           + `;$a=Get-Acl -LiteralPath $f`
-          + `;$a.SetSecurityDescriptorSddlForm(${JSON.stringify(`D:(${ace})(A;;FA;;;WD)`)})`
+          + `;$a.SetSecurityDescriptorSddlForm('D:(${ace})(A;;FA;;;WD)')`
           + `;Set-Acl -LiteralPath $f -AclObject $a`
           + `;(Get-Acl -LiteralPath $f).GetSecurityDescriptorSddlForm('Access')`
           + `;Write-Output '${name}:${hint}'`,
