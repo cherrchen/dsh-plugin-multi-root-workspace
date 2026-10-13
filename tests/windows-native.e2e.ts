@@ -196,7 +196,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
   }, 300_000)
 
-  it('denies overwrite, delete, rename, ACL edits and token derivation, including protected descendant ACLs', async () => {
+  it('denies overwrite, delete, rename, ACL edits and activation of weakened tokens, including protected descendant ACLs', async () => {
     const fixture = createFixtureWorkspace('win-b9-mutations')
     const nested = join(fixture.outside, 'protected')
     mkdirSync(nested)
@@ -218,13 +218,41 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       expect(readFileSync(seed, 'utf8')).toBe('seed')
       const acl = await spawnArgv(prefix[0]!, [...prefix.slice(1), icacls, seed, '/reset'])
       expect(acl.status, acl.stdout + acl.stderr).not.toBe(0)
-      // Removing a restricting deny SID would restore ambient write access.
-      // The token DACL must prevent opening TOKEN_DUPLICATE in the first place.
+      // .NET needs token duplication for identity queries. Test the actual
+      // escape: remove the deny SID, then attempt to activate that weakened
+      // token through both public impersonation paths and write the seed.
       const koffiEntry = fileURLToPath(import.meta.resolve('koffi'))
-      const tokenProbe = `const k=require(${JSON.stringify(koffiEntry)});const a=k.load('advapi32.dll'),b=k.load('kernel32.dll');const open=b.func('__stdcall','OpenProcess','void*',['uint32','int','uint32']);const tok=a.func('__stdcall','OpenProcessToken','int',['void*','uint32','void*']);const close=b.func('__stdcall','CloseHandle','int',['void*']);const h=open(0x400,0,process.pid),out=Buffer.alloc(8);console.log(tok(h,8,out));if(out.readBigUInt64LE())close(k.decode(out,'void*'));console.log(tok(h,2,Buffer.alloc(8)));close(h)`
+      const tokenProbe = `
+const fs=require('fs'), k=require(${JSON.stringify(koffiEntry)});
+const a=k.load('advapi32.dll'), b=k.load('kernel32.dll');
+const bind=(lib,name,ret,args)=>lib.func('__stdcall',name,ret,args);
+const open=bind(b,'OpenProcess','void*',['uint32','int','uint32']);
+const tok=bind(a,'OpenProcessToken','int',['void*','uint32','void*']);
+const info=bind(a,'GetTokenInformation','int',['void*','int','void*','uint32','void*']);
+const restrict=bind(a,'CreateRestrictedToken','int',['void*','uint32','uint32','void*','uint32','void*','uint32','void*','void*']);
+const impersonate=bind(a,'ImpersonateLoggedOnUser','int',['void*']);
+const duplicate=bind(a,'DuplicateTokenEx','int',['void*','uint32','void*','int','int','void*']);
+const setThread=bind(a,'SetThreadToken','int',['void*','void*']);
+const revert=bind(a,'RevertToSelf','int',[]);
+const close=bind(b,'CloseHandle','int',['void*']);
+const h=open(0x400,0,process.pid), out=Buffer.alloc(8);
+if(!tok(h,10,out))throw Error('identity query/duplication unavailable');
+const source=k.decode(out,'void*'), size=Buffer.alloc(4);
+info(source,1,null,0,size); const user=Buffer.alloc(size.readUInt32LE());
+if(!info(source,1,user,user.length,size))throw Error('TokenUser unavailable');
+const oneSid=Buffer.alloc(16);oneSid.writeBigUInt64LE(k.address(k.decode(user,'void*')));
+const derivedOut=Buffer.alloc(8);
+if(!restrict(source,1,0,null,0,null,1,oneSid,derivedOut))throw Error('token narrowing unavailable');
+const derived=k.decode(derivedOut,'void*');
+const attempt=ok=>{try{if(!ok){console.log('denied');return}try{fs.writeFileSync(${JSON.stringify(seed)},'escaped');console.log('escaped')}catch(e){console.log('denied')}}finally{if(ok)revert()}};
+attempt(impersonate(derived));
+const threadOut=Buffer.alloc(8), copied=duplicate(derived,4,null,2,2,threadOut);
+if(copied){const thread=k.decode(threadOut,'void*');attempt(setThread(null,thread));close(thread)}else console.log('denied');
+close(derived);close(source);close(h);`
       const token = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', tokenProbe])
       expect(token.status, token.stderr).toBe(0)
-      expect(token.stdout.trim().split(/\r?\n/)).toEqual(['1', '0'])
+      expect(token.stdout.trim().split(/\r?\n/)).toEqual(['denied', 'denied'])
+      expect(readFileSync(seed, 'utf8')).toBe('seed')
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
   }, 180_000)
 

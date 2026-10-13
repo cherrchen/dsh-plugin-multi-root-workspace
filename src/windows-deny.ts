@@ -144,12 +144,13 @@ export async function runWindowsDenied(
       return data
     }
     // Restricting SIDs can be intersected away by CreateRestrictedToken. Lock
-    // the token object before spawning: children may query it, but cannot
-    // duplicate, assign, adjust, or rewrite its security descriptor. The
+    // token assignment, impersonation, adjustment and security editing. Token
+    // duplication stays available: PowerShell/.NET needs it to query identity.
+    // A weakened copy cannot be activated as a process or thread token. The
     // runner keeps its already-open handle for CreateProcessAsUserW.
     const tokenAclOut = Buffer.alloc(8)
     status(api.setEntriesInAclW!(3, Buffer.concat([
-      entry(userSid, 3, 0x1e7 | WRITE_DAC | WRITE_OWNER, 0),
+      entry(userSid, 3, 0x1e5 | WRITE_DAC | WRITE_OWNER, 0),
       // Default DACLs are also used for process/thread/IPC objects: preserve
       // ordinary identity access while denying the token mutation rights.
       entry(userSid, 1, 0x10000000, 0),
