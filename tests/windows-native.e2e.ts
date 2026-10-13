@@ -223,13 +223,19 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       for (const [name, ace, hint] of probes) {
         const file = join(probeDir, `${name}.txt`)
         writeFileSync(file, 'seed')
-        const apply = await spawnArgv('powershell.exe', [
-          '-NoProfile', '-NonInteractive', '-Command',
-          `$f=${JSON.stringify(file)};$a=Get-Acl -LiteralPath $f;`
-          + `$a.SetSecurityDescriptorSddlForm(${JSON.stringify(`D:(${ace})(A;;FA;;;WD)`)});`
-          + `Set-Acl -LiteralPath $f -AclObject $a;'${name}:${hint}'`,
-        ])
-        if (apply.status !== 0) console.log(`DIAG probe ${name} apply failed: ${apply.stderr.trim()}`)
+        // EncodedCommand keeps the SDDL's quotes and operators out of the
+        // command-line parser; the applied SDDL is echoed back so an apply
+        // that silently failed cannot masquerade as an honest verdict.
+        const psArgv = powershellArgv(
+          `$f=${JSON.stringify(file)}`
+          + `;$a=Get-Acl -LiteralPath $f`
+          + `;$a.SetSecurityDescriptorSddlForm(${JSON.stringify(`D:(${ace})(A;;FA;;;WD)`)})`
+          + `;Set-Acl -LiteralPath $f -AclObject $a`
+          + `;(Get-Acl -LiteralPath $f).GetSecurityDescriptorSddlForm('Access')`
+          + `;Write-Output '${name}:${hint}'`,
+        )
+        const apply = await spawnArgv(psArgv[0]!, psArgv.slice(1))
+        console.log(`DIAG apply ${name} status=${apply.status} ${apply.stdout.trim().split(/\r?\n/).join(' | ')}${apply.stderr.trim() ? ` STDERR:${apply.stderr.trim()}` : ''}`)
       }
       const prefix = await mounted.provider.restrictedArgvPrefix(
         { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [outside],
