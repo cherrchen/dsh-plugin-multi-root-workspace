@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-10-13；替代 [ADR-0018](./ADR-0018-windows-ambient-write-denial.md)；原生执行状态只见路线账本）
+Proposed（2026-10-13；ADR-0018 的原生证伪保留；本方案需要特权 broker 的范围决定，原生执行状态只见路线账本）
 
 ## Date
 
@@ -12,7 +12,13 @@ Accepted（2026-10-13；替代 [ADR-0018](./ADR-0018-windows-ambient-write-denia
 
 ADR-0018 的原生回归暴露可执行旁路：CreateRestrictedToken 取交集能移除 restricting deny SID；限制副本激活也不能守住实际 impersonation 写入。禁止 duplicate 虽能阻断这条操作，却破坏 PowerShell 的 .NET 身份查询。本决策使 deny 的判断独立于可删除的 restricting SID list。
 
-## Decision
+## 原生前置条件（2026-10-13）
+
+普通 Windows 插件进程设置 TokenSecurityAttributes 时实际返回 Win32 1314（缺少所需特权）。该信息类需要 SeTcbPrivilege，不能以一般管理员组或 TOKEN_ADJUST_DEFAULT 代替。当前 prototype 在这一步 fail closed，未启动子进程、也未开始树 ACL 修改；后续条件 ACE 的实际执行尚未获证据。不得宣称该设计已经可交付。
+
+完整实现需要独立、经管理员安装的 SYSTEM broker，仅为受限 token 添加不可随派生移除的只读属性。是否允许增加此特权组件及部署前置条件，待用户范围决定；本 ADR 继续 Proposed，不把需求缺口重新延后为已完成。
+
+## Decision（目标）
 
 - 保留 `--mode danger-full-access --deny-root`、同一 scope、公开 shell / PTC / PTY 接缝和原生 process helper。只删除可绕过 DACL 的特权，完整 restricting check 镜像原 enabled identities，保留 ambient 文件访问与 integrity。
 - 给派生 token 设置 mandatory、可继承的 **local security attribute** `DshMultiRootDeniedRoots`，字符串数组为 canonical 拒写根的稳定 hash 标识（沿用 `rootDenySid` 格式，仅作属性值，不把它加入 SID list）。使用 TokenSecurityAttributes 的 v1 / UNICODE_STRING ABI 与 ADD 操作；未知能力或失败均拒绝启动。

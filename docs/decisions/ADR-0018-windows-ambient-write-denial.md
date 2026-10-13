@@ -2,7 +2,7 @@
 
 ## Status
 
-Superseded by [ADR-0019](./ADR-0019-windows-token-attributes-and-conditional-acls.md)（2026-10-13）
+Rejected（原生回归证伪，2026-10-13；后续方案见 [ADR-0019](./ADR-0019-windows-token-attributes-and-conditional-acls.md)）
 
 ## Date
 
