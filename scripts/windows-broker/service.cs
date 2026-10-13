@@ -31,7 +31,6 @@ public sealed class RootDenyBroker : ServiceBase {
     }
     protected override void OnStart(string[] args) {
         EnablePrivilege("SeTcbPrivilege");
-        EnablePrivilege("SeCreateTokenPrivilege");
         Task.Run((Action)Serve);
     }
     protected override void OnStop() {
@@ -140,6 +139,7 @@ public sealed class RootDenyBroker : ServiceBase {
         catch { Marshal.FreeHGlobal(data); throw; }
     }
     static IntPtr MintDenyToken(IntPtr source, string[] roots) {
+        EnablePrivilege("SeCreateTokenPrivilege");
         var memory = new System.Collections.Generic.List<IntPtr>();
         IntPtr token = IntPtr.Zero;
         try {
@@ -192,7 +192,7 @@ public sealed class RootDenyBroker : ServiceBase {
         try { Luid luid; Check(LookupPrivilegeValue(null, name, out luid), "LookupPrivilegeValue");
             var privileges = new TokenPrivileges { Count = 1, Luid = luid, Attributes = 2 };
             Check(AdjustTokenPrivileges(token, false, ref privileges, 0, IntPtr.Zero, IntPtr.Zero), "AdjustTokenPrivileges");
-            int error = Marshal.GetLastWin32Error(); if (error != 0) throw new Win32Exception(error);
+            int error = Marshal.GetLastWin32Error(); if (error != 0) throw new Win32Exception(error, "EnablePrivilege(" + name + ") win32=" + error);
         } finally { CloseHandle(token); }
     }
     [StructLayout(LayoutKind.Sequential)] struct SidAttributes { public IntPtr Sid; public uint Attributes; }

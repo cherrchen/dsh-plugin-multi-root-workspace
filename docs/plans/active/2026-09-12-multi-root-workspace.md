@@ -517,3 +517,5 @@ CI 日志读取：`gh api --allow-escape-sequences repos/cherrchen/dsh-plugin-mu
 ### B9 交接续作：普通 deny-only 组候选（2026-10-13）
 
 收到外部 Agent 的交接并恢复开发。起点 `b947250` 干净且已推送；旧 start() 活句柄与 stderr 诊断改动保留。复核 CI 38376966866：UserClaimAttributes 写入在两种 token 上均返回 87；`@User` Exists 探针的 PowerShell 非终止 SDDL 错误导致 ACE 未装入，该探针不能证明求值。当前改用 [ADR-0020](../../decisions/ADR-0020-windows-normal-deny-groups.md) 候选：NtCreateTokenEx 镜像调用方身份，仅增加普通 deny-only groups，普通 deny ACE 不依赖属性求值；弱化测试增加 disable 全部普通组后的真实写入。B9 仍未完成、未发布，Windows 原生与完整门禁正在验证。
+
+候选提交 `13af289` 的本机门禁：compat/typecheck/lint/build/docs 全通过；602 passed / 26 平台跳过，随后加入 broker 响应边界回归后 609 passed / 26 平台跳过；Seatbelt probe 通过，compose 48/48、behavior 126/126、journey 62/62、packed behavior 125/125，所有冒烟 0 skip。CI [38391229281](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38391229281) 的 Windows C# 编译通过、服务启动失败，尚未到达 token / 拒写断言。续作将 token-create 特权错误移到可回传的请求阶段，并让现有单版本 diag workflow 在相关 PR 编辑时运行；完整 CI 门禁不减少。弱化测试进一步要求实际激活成功且写返回 EPERM/EACCES，增加受限调用方向 broker 请求重建 token 的拒绝断言。

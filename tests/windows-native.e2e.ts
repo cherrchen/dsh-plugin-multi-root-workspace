@@ -1,3 +1,4 @@
+import { rootDenySid } from '../src/windows-runner-contract.ts'
 /**
  * Windows-native ACL hardening e2e: real restricted-token spawns against
  * hostile root names, a second drive, path aliases, junction redirection,
@@ -211,7 +212,7 @@ describe.runIf(process.platform === 'win32')('Windows ACL native confinement', (
       const prefix = await mounted.provider.restrictedArgvPrefix(
         { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)],
       )
-      const mutation = `const fs=require('fs');const p=${JSON.stringify(seed)};for(const op of [()=>fs.writeFileSync(p,'bad'),()=>fs.unlinkSync(p),()=>fs.renameSync(p,p+'.moved'),()=>fs.renameSync(${JSON.stringify(fixture.outside)},${JSON.stringify(fixture.outside + '-moved')})]){try{op();console.log('escaped')}catch(e){console.log('denied')}}`
+      const mutation = `const fs=require('fs');const p=${JSON.stringify(seed)};for(const op of [()=>fs.writeFileSync(p,'bad'),()=>fs.unlinkSync(p),()=>fs.renameSync(p,p+'.moved'),()=>fs.renameSync(${JSON.stringify(fixture.outside)},${JSON.stringify(fixture.outside + '-moved')})]){try{op();console.log('escaped')}catch(e){if(!['EPERM','EACCES'].includes(e.code))throw e;console.log('denied')}}`
       const result = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', mutation])
       expect(result.status, result.stderr).toBe(0)
       expect(result.stdout.trim().split(/\r?\n/)).toEqual(['denied', 'denied', 'denied', 'denied'])
@@ -251,15 +252,26 @@ if(!info(derived,2,groups,groups.length,size))throw Error('TokenGroups unavailab
 const count=groups.readUInt32LE(), all=groups.subarray(8,8+count*16), disabledOut=Buffer.alloc(8);
 if(!restrict(derived,1,count,all,0,null,1,oneSid,disabledOut))throw Error('group disabling unavailable');
 const disabled=k.decode(disabledOut,'void*');
-const attempt=ok=>{try{if(!ok){console.log('denied');return}try{fs.writeFileSync(${JSON.stringify(seed)},'escaped');console.log('escaped')}catch(e){console.log('denied')}}finally{if(ok)revert()}};
+const attempt=ok=>{try{if(!ok)throw Error('weak token activation failed');try{fs.writeFileSync(${JSON.stringify(seed)},'escaped');console.log('escaped')}catch(e){if(!['EPERM','EACCES'].includes(e.code))throw e;console.log('denied')}}finally{if(ok)revert()}};
 attempt(impersonate(derived));
 attempt(impersonate(disabled));
 const threadOut=Buffer.alloc(8), copied=duplicate(derived,4,null,2,2,threadOut);
-if(copied){const thread=k.decode(threadOut,'void*');attempt(setThread(null,thread));close(thread)}else console.log('denied');
+if(copied){const thread=k.decode(threadOut,'void*');attempt(setThread(null,thread));close(thread)}else throw Error('weak token duplication failed');
+// A sandboxed process must not ask the broker to remint its process identity
+// without the existing denies. Authenticate from the process token, not the
+// supplied handle or a temporary thread impersonation.
+const convert=bind(a,'ConvertSidToStringSidW','int',['void*','void*']);
+const sidOut=Buffer.alloc(8);if(!convert(k.decode(user,'void*'),sidOut))throw Error('SID query failed');
+const sidText=k.decode(k.decode(sidOut,'void*'),'char16_t',-1);
+const pipeName='DshMultiRootBroker-'+require('crypto').createHash('sha256').update(sidText).digest('hex').slice(0,16);
+const socket=require('net').createConnection(${JSON.stringify('\\\\.\\pipe\\')}+pipeName);
+const timeout=setTimeout(()=>{socket.destroy();throw Error('broker timeout')},10000);
+let response='';socket.on('connect',()=>socket.write('2|'+k.address(source)+'|'+${JSON.stringify(rootDenySid(canonicalPath(fixture.outside)))}+'\\n'));
+socket.on('error',e=>{throw e});socket.on('data',b=>{response+=b.toString();if(!response.includes('\\n'))return;clearTimeout(timeout);socket.destroy();if(!response.includes('Caller process must be an unrestricted'))throw Error(response);console.log('broker-denied')});
 close(disabled);close(derived);close(source);close(h);`
       const token = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', tokenProbe])
       expect(token.status, token.stderr).toBe(0)
-      expect(token.stdout.trim().split(/\r?\n/)).toEqual(['denied', 'denied', 'denied'])
+      expect(token.stdout.trim().split(/\r?\n/)).toEqual(['denied', 'denied', 'denied', 'broker-denied'])
       expect(readFileSync(seed, 'utf8')).toBe('seed')
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
   }, 180_000)
