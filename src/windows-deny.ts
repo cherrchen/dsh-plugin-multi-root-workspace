@@ -45,12 +45,14 @@ export async function runWindowsDenied(
   }
   verifyRoots()
   const native = await loadWindowsNative(upstreamRunner)
+  const ntdll = native.koffi.load('ntdll.dll')
   const api = native.extendWin32ProcessBindings(({ kernel32, advapi32, bind }) => {
     const definitions: Record<string, [unknown, string, string[]]> = {
       openProcess: [kernel32, 'void*', ['uint32', 'int', 'uint32']],
       openProcessToken: [advapi32, 'int', ['void*', 'uint32', 'void*']],
       getTokenInformation: [advapi32, 'int', ['void*', 'int', 'void*', 'uint32', 'void*']],
       setTokenInformation: [advapi32, 'int', ['void*', 'int', 'void*', 'uint32']],
+      ntQuerySecurityAttributesToken: [ntdll, 'int32', ['void*', 'void*', 'uint32', 'void*', 'uint32', 'void*']],
       createRestrictedToken: [advapi32, 'int', ['void*', 'uint32', 'uint32', 'void*', 'uint32', 'void*', 'uint32', 'void*', 'void*']],
       createFileW: [kernel32, 'void*', ['str16', 'uint32', 'uint32', 'void*', 'uint32', 'uint32', 'void*']],
       convertStringSidToSidW: [advapi32, 'int', ['str16', 'void*']],
@@ -197,7 +199,26 @@ export async function runWindowsDenied(
     } finally { for (const value of allocations) native.koffi.free(value) }
     // Do not trust a pipe ACK alone: verify the mandatory, inheritable kernel
     // attribute before installing any conditional ACE or launching a child.
-    const claims = info(restrictedToken, 39)
+    // NtQuery returns native UNICODE_STRING records. GetTokenInformation's
+    // Win32 claim conversion uses PWSTR records and cannot be decoded with
+    // that layout (doing so dereferences flag bits as a pointer).
+    const queryName = native.koffi.alloc('uint8', 64)
+    let claims: Buffer
+    try {
+      const nameBytes = Buffer.from('DshMultiRootDeniedRoots\0', 'utf16le')
+      native.koffi.encode(queryName, 'uint8', nameBytes, nameBytes.length)
+      const name = Buffer.alloc(16)
+      name.writeUInt16LE(nameBytes.length - 2)
+      name.writeUInt16LE(nameBytes.length, 2)
+      writePointer(name, 8, queryName)
+      const size = Buffer.alloc(4)
+      api.ntQuerySecurityAttributesToken!(restrictedToken, name, 1, null, 0, size)
+      const length = size.readUInt32LE()
+      if (length < 16 || length > 1024 * 1024) throw new Error('invalid security attribute query size')
+      claims = Buffer.alloc(length)
+      const code = api.ntQuerySecurityAttributesToken!(restrictedToken, name, 1, claims, length, size)
+      if (code !== 0) throw new Error(`NtQuerySecurityAttributesToken failed (NTSTATUS ${code})`)
+    } finally { native.koffi.free(queryName) }
     if (claims.readUInt16LE(0) !== 1 || claims.readUInt32LE(4) > 128) throw new Error('invalid token security attributes')
     const claimCount = claims.readUInt32LE(4)
     const claimBytes = Buffer.from(native.koffi.decode(pointer(claims, 8), 'uint8', claimCount * 40) as Uint8Array)
@@ -211,7 +232,7 @@ export async function runWindowsDenied(
       const claim = claimBytes.subarray(i * 40, (i + 1) * 40)
       if (readUnicode(claim) !== 'DshMultiRootDeniedRoots') continue
       const flags = claim.readUInt32LE(20)
-      if (claim.readUInt16LE(16) !== 3 || (flags & 0x20) === 0 || (flags & 0x1a) !== 0 || claim.readUInt32LE(24) !== denies.length) {
+      if (claim.readUInt16LE(16) !== 3 || (flags & 0x20) === 0 || (flags & 0x19) !== 0 || claim.readUInt32LE(24) !== denies.length) {
         throw new Error('deny token attribute is not mandatory and inheritable')
       }
       const values = Buffer.from(native.koffi.decode(pointer(claim, 32), 'uint8', denies.length * 16) as Uint8Array)
