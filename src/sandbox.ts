@@ -206,6 +206,56 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     return widenConfined(() => probe, restrict, ['true'], probePolicy, signal)
   }
 
+  /**
+   * Clamp an ambient-writable execution to the UPSTREAM `workspace-write`
+   * confine — the `danger-full-access` + unavailable-registry-authority cell.
+   * A process that cannot prove the store is its own cannot know whether a
+   * registered `read-only` boundary exists, so ambient writes degrade to the
+   * mode upstream would have enforced anyway: the primary root plus the
+   * platform temp areas, with NO additional-root widening (the registry's
+   * empty answer is not a grant either).
+   *
+   * Built like {@link restrictedExecution}: the upstream profile builders are
+   * private, so this probes `confine` once under `workspace-write` with a
+   * dummy argv and keeps the profile arguments — for every dialect, Windows
+   * ACL included — ending at the `--` separator. `enforcement`,
+   * `denialSignatures` and `runnerFailureRules` pass through untouched: they
+   * describe the very confine result the process is about to run under.
+   *
+   * The return preserves the installed `confine` shape: a synchronous result
+   * on a synchronous release, a promise on an asynchronous one.
+   * @param policy - the caller's policy (mode is `danger-full-access`; the
+   *   probe itself runs under `workspace-write`).
+   * @param signal - cancellation, forwarded to releases that accept it.
+   * @returns the confined facts whose argv is the workspace-write prefix.
+   */
+  clampedExecution(
+    policy: SandboxExecutionPolicy,
+    signal?: AbortSignal,
+  ): UpstreamConfined {
+    const probePolicy: SandboxPolicy = {
+      mode: 'workspace-write',
+      workspaceRoot: policy.workspaceRoot,
+      ...(policy.sessionId === undefined ? {} : { sessionId: policy.sessionId }),
+    }
+    const base = super.confine as unknown as ConfineCall
+    const probe = base.call(this, ['true'], probePolicy, signal)
+    const clamp = (confined: ConfinedArgv): ConfinedArgv => {
+      try {
+        const shape = splitConfined(confined.argv, ['true'])
+        return { ...confined, argv: [...shape.profileArgs, '--'] }
+      } catch (error: unknown) {
+        if (!(error instanceof DialectUnrecognizedError)) throw error
+        throw new SandboxUnavailableError(
+          policy.mode as ConfinedSandboxMode,
+          'multi-root workspace: cannot clamp an ambient execution to workspace-write '
+          + `while the registry authority is unavailable — ${error.message}`,
+        )
+      }
+    }
+    return widenConfined(() => probe, clamp, ['true'], probePolicy, signal)
+  }
+
 }
 
 export default MultiRootSandboxProvider

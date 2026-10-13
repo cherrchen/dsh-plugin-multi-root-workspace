@@ -86,7 +86,7 @@ Phase 1 时本机外层沙箱拒绝 `sandbox_apply`，原生证据留待补齐�
 ### 生命周期与边界
 
 - `writableRoots` / deny 集只含 `available` 成员；撤销、missing、redirected、withheld 不重新授权目标。
-- `registry-contended` 维持空 scope + 拒一切 mutation（含固定读写），不缓存「上次已知」。
+- `registry-contended`（以及 storage-failed / config-invalid / 拆除后）维持空 scope + 拒一切 mutation（含固定读写），不缓存「上次已知」；空 scope 同时标记 `authority: 'unavailable'`，使 Full-access 在该进程按 workspace-write 执行而非信任空 deny 集（见下方审查返工修订）。
 - 模式与根变更只影响后续 fs 调用与新启动进程；已运行进程保留启动时内核快照（同 ADR-0012）。PTY 侧上游已有「打开终端时禁止切模式」fence，语义一致。
 - 零附加根时全部接缝直通，逐字节保持上游行为。
 - `setAdditionalRoots()` 仍是唯一写端口；mutation 读-分类-验证-持久化仍在原序列化队列与 lease/teardown 顺序内。
@@ -136,6 +136,35 @@ Full-access 包装保留受限 prefix 对应的 `enforcement`、`denialSignature
 PTC 接缝改为公开 `ctx.ptcRuntime.run()`，不包装实现类的私有 `execute`。旧版 shell 的公开 `run` / `start` 同样包装（前台 run 不经过 start/execute），普通 shell、PTY 与 PTC 仍从同一 scope 取策略；真实组合冒烟及安装副本同时验证 Full-access 主根/ambient/固定读写允许、只读拒写和结果事实。
 
 Landlock 的 allowlist 无法实现 Full-access 子树减法，该组合不再直接判 unsupported，而是选 bubblewrap mount 后端：主机根原样读写、只读根单独 ro-bind。不带 workspace-write 的 PID、proc、device 或 tmpfs 替换，保持其他区域的原模式。该路径需要宿主安装且可执行 bubblewrap；不可用按 runnerFailure 报告，绝不裸启动。选择新后端时结果诊断同时切为 bubblewrap 的实际方言，不能保留 Landlock EACCES 拼写。bwrap 的 workspace-write temp mask 下注册的只读树也以 ro-bind 显式恢复读取。
+
+## 外部审查返工修订（2026-10-14，PR #12 评审）
+
+评审复现了两个 Full-access P1 绕过；修复设计经用户批准，另有一个本批一并修复的 Linux 可用性问题。
+
+### 权限未知不等于没有限制（P1）
+
+**复现**：两个 stack 共用同一 store，第二个 `registry-contended`、发布空 scope，deny 集为空——Full-access 的 fs fence 与进程 fence 都把它读作「没有限制」，可以覆写另一进程登记的 `read-only` 根。**决定**：scope 新增 `authority: 'available' | 'unavailable'` 事实，注册表在构造（覆盖 config-invalid 与 acquire 前）、`enterContended` / `enterStorageFailed`、以及 `releaseAuthority` 转场开头标记 `unavailable`，`openDomain` 发布完全部存储记录后才标记 `available`。该事实不可用时：
+
+- fs fence 把 `danger-full-access` 降为上游 `workspace-write` 语义——可写集 = `writableRoots({...policy, mode:'workspace-write'})`（主根 + 平台 temp），不并入 scope 的 writable 成员；
+- 进程 fence 不再走 restricted profile，而是用 `clampedExecution`（以 `['true']` 探一次 `workspace-write` 的 `super.confine`、保留其 profile 前缀与 enforcement / denialSignatures / runnerFailureRules）把 shell / PTC / PTY 的 ambient 执行钳进上游 workspace-write confine；`spawnTerminal` 的不可解析会话分支经 `hasActiveDenyRoots()`（authority 不可用即真）自动拒绝；
+- 模型拓扑在 Full-access + authority 不可用时固定陈述降级句（`REGISTRY_UNAVAILABLE_NOTE`），其他模式与零根仍不贡献；
+- `workspace-write` 与 `read-only` 模式不变：那里 scope 本就为空，不追加授予。
+
+**取舍与残余**：降级是有意的近似——「主根 + temp」是上游本身可证可授的最大安全集，比「拒绝一切执行」可用、比「放行 ambient」安全。残余已记录：该进程内 Full-access 进程写不了 `read-only` 根（好），但也写不了其它进程合法登记的 `inherit` / `read-write` 根（收窄，接管后恢复）；模型与面板看到的是陈述而非新模式名。
+
+### Full-access 不得沿用旧 FsTarget（P1）
+
+**复现**：先 resolve 一个普通目录内的文件，再将其父目录替换为指向 `read-only` 根子目录的符号链接，`writeText(oldTarget)` 用启动前的 targetKey 通过 deny 检查并覆写被保护文件（workspace-write 本来就重解析，所以只有 Full-access 有洞）。**决定**：`checkedTarget` 只在「`danger-full-access` 且 deny 集为空」时返回调用方 target（逐字节保持上游零根行为）；其余情形一律 `resolve(target.displayPath)` 取新 target、以 `fresh.targetKey` 跑 deny 检查，并把 `fresh` 交给实际 mutation——检查的身份与写入的身份始终同一个，Full-access 与受限模式一致。
+
+### bwrap 对缺失 deny 根改用 `--ro-bind-try`
+
+`--ro-bind <missing recordedPath>` 会让 bwrap 启动即失败（"Can't find source path"），于是一个被删除的 `read-only` 根会打断 Linux 上**所有** Full-access shell（以及它位于 temp 下时的 workspace-write）。**决定**：`denyProfileArgs` 与 `restrictProfileArgs`（含 landlock→bwrap 分支）对 deny 根一律使用 `--ro-bind-try`：源缺失时跳过该 bind 而不是让整个命名空间启动失败。`--ro-bind / /` 的方言识别与 grant bind（`--bind` / `--ro` / 各类 `--rw`）不动。**残余**：Full-access 进程可以在 bwrap 命名空间里重建被删目录并写入——fs fence 仍按 `recordedPath` 拒写，该残余是可接受的进程面缺口，与「missing 根不解除只读边界」的登记语义并存。
+
+### cordis.patch.yml 注释订正
+
+进程 fence 行注释此前写 `ctx.ptcRuntime.execute`；代码包装的是公开 `run`（私有 `execute` 不作为跨包接缝）。注释已改为 `ctx.ptcRuntime.run`，并补记未知 authority 的 Full-access 降级。
+
+回归：`tests/b9-review-regressions.spec.ts`（反转的两条 P1 复现）、scope / registry-lease 的 authority 状态断言、process-fence 的 clamped prefix 与 unresolvable-terminal 断言、dialects 的 `--ro-bind-try` 期望、prompt-context 的降级句。
 
 ## Related Documents
 

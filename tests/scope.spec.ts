@@ -107,6 +107,25 @@ describe('scope resolution', () => {
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('x', fixture.outside)])
     expect(ctx.multiRootScope.scopeOf(`${fixture.workspace}/sub/..`)).toEqual([fixture.outside])
   })
+
+  it('reports the registry authority the registry last published, and fails closed while unavailable', () => {
+    // A composition with no registry row defaults to `available`: nothing can
+    // ever have been registered, so nothing is unknown.
+    expect(ctx.multiRootScope.resolve(policy(fixture.workspace)).authority).toBe('available')
+    expect(ctx.multiRootScope.hasActiveDenyRoots()).toBe(false)
+    let fired = 0
+    const unsubscribe = ctx.multiRootScope.subscribe(() => { fired += 1 })
+    ctx.multiRootScope.setRegistryAuthority(false)
+    expect(ctx.multiRootScope.resolve(policy(fixture.workspace)).authority).toBe('unavailable')
+    // The PTY seam's fail-closed flag answers on authority alone.
+    expect(ctx.multiRootScope.hasActiveDenyRoots()).toBe(true)
+    expect(fired).toBe(1)
+    ctx.multiRootScope.setRegistryAuthority(true)
+    expect(ctx.multiRootScope.resolve(policy(fixture.workspace)).authority).toBe('available')
+    expect(ctx.multiRootScope.hasActiveDenyRoots()).toBe(false)
+    expect(fired).toBe(2)
+    unsubscribe()
+  })
 })
 
 describe('root sanitization', () => {

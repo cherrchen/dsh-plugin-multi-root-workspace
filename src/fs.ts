@@ -118,7 +118,9 @@ export class MultiRootFileSystem extends LocalFileSystem {
    * under `read-only`) widened by the scope's EFFECTIVE writable members.
    * Under `read-only` that is exactly the fixed `read-write` roots (the tool
    * cap may already have emptied the scope's list), so an explicit grant
-   * survives a globally read-only session.
+   * survives a globally read-only session. An unavailable registry authority
+   * never contributes members: a process that cannot read the store grants
+   * only the upstream derivation.
    * @param policy - the per-call policy.
    * @param scope - the scope resolved once for this call; both the fence and
    *   the denial message below share it instead of re-resolving.
@@ -126,6 +128,7 @@ export class MultiRootFileSystem extends LocalFileSystem {
    */
   private rootsFor(policy: SandboxExecutionPolicy, scope: FilesystemScope): string[] {
     const roots = writableRoots(policy)
+    if (scope.authority === 'unavailable') return roots
     for (const root of scope.writableRoots) {
       if (!roots.includes(root)) roots.push(root)
     }
@@ -141,19 +144,35 @@ export class MultiRootFileSystem extends LocalFileSystem {
    * `danger-full-access` and where a broader grant (the platform temp area)
    * would otherwise cover the path. `read-only` then grants only the fixed
    * `read-write` members; `workspace-write` requires containment under the
-   * widened writable set; `danger-full-access` returns the caller's target
-   * once the deny set passes.
+   * widened writable set.
+   *
+   * `danger-full-access` is the only mode with a fast path, and only while
+   * the deny set is empty: it then returns the caller's target untouched,
+   * upstream-exact. Once ANY deny boundary exists the caller's `FsTarget` may
+   * be stale — the directory it resolved through can since have been replaced
+   * by a symlink into a denied root — so the fence re-resolves
+   * `target.displayPath`, checks the FRESH target key, and mutates that fresh
+   * target rather than the stale one the caller resolved earlier.
+   *
+   * One more Full-access rule: while the registry authority is `unavailable`
+   * the empty deny set is not trustworthy — the store this process cannot
+   * read may hold explicit `read-only` registrations — so the mode degrades
+   * to upstream `workspace-write` semantics (primary root plus the platform
+   * temp areas, no additional-root widening) until the authority returns.
    * @param target - the resolved target about to be mutated.
    * @param sandboxPolicy - the per-call policy; omit for the deployment fallback.
    * @returns the fresh canonical target the mutation must use.
    */
   private async checkedTarget(target: FsTarget, sandboxPolicy?: SandboxExecutionPolicy): Promise<FsTarget> {
     const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
-    const { mode } = policy
     // One resolution per call: the deny pass, the containment pass, and (on
     // denial) the message all share this scope rather than re-resolving.
     const scope = this.ctx.multiRootScope.resolve(policy)
-    const fresh = mode === 'danger-full-access' ? target : await this.resolve(target.displayPath)
+    const effectiveMode: SandboxMode = scope.authority === 'unavailable' && policy.mode === 'danger-full-access'
+      ? 'workspace-write'
+      : policy.mode
+    if (effectiveMode === 'danger-full-access' && scope.deniedRoots.length === 0) return target
+    const fresh = await this.resolve(target.displayPath)
     // The deny set first: it is what keeps an explicit `read-only` root
     // read-only when the ambient mode — or another writable grant covering the
     // same path — would allow the write.
@@ -168,8 +187,9 @@ export class MultiRootFileSystem extends LocalFileSystem {
         }
       }
     }
-    if (mode === 'danger-full-access') return target
-    const roots = this.rootsFor(policy, scope)
+    if (effectiveMode === 'danger-full-access') return fresh
+    const effectivePolicy: SandboxExecutionPolicy = { ...policy, mode: effectiveMode }
+    const roots = this.rootsFor(effectivePolicy, scope)
     let contained = false
     for (const root of roots) {
       if (await isPathUnder(fresh.targetKey, root)) {
@@ -178,7 +198,7 @@ export class MultiRootFileSystem extends LocalFileSystem {
       }
     }
     if (!contained) {
-      let denial = `cannot write "${target.displayPath}": file access denied under ${mode} mode`
+      let denial = `cannot write "${target.displayPath}": file access denied under ${effectiveMode} mode`
       if (scope.additionalRoots.length > 0) denial += `; allowed roots: ${roots.join(', ')}`
       throw new FsError(denial, 'FS_SANDBOX_DENIED')
     }

@@ -541,3 +541,13 @@ CI 日志读取：`gh api --allow-escape-sequences repos/cherrchen/dsh-plugin-mu
 [diag 38400586259](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38400586259) 额外验证服务安装、升级、卸载的实际 LSA policy；预存服务登录权保留，其他账户权限不变。Mac 本机最终 618 passed / 26 其他平台跳过，Seatbelt probe 通过，compose 48/48、behavior 126/126、journey 62/62、packed behavior 125/125 全部 0 skip；compat / lint / typecheck / build / pack / docs 通过。
 
 Phase 5 完成，专项计划移至 completed；ADR-0020 Accepted，ADR-0019 保留 Superseded 历史。用户已分别明确授权提交推送、专用服务账户及包括 SeAssignPrimaryTokenPrivilege 在内的固定权限集合。未合并 PR #12、未创建 tag、未发布；完整门禁不扩大 allowlist，Windows 仍报告 partial，授权快照、standing ACL、path-based TOCTOU 与 owner/parent 操作边界见 ADR-0020 及其链接的 ADR-0018。
+
+### B9 外部审查返工（2026-10-14，PR #12 评审）
+
+外部评审复现两个 Full-access P1 绕过，另有一项 Linux 可用性问题；三处修复设计经用户批准，合同与残余记录于 [ADR-0017 修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#外部审查返工修订2026-10-14pr-12-评审) 与 [ADR-0007 第三轮修订](../../decisions/ADR-0007-registry-authority-lease.md#第三轮修订2026-10-14b9-评审返工)。
+
+- **权限未知 ≠ 没有限制（P1）**：`registry-contended` 进程发布空 scope 后，Full-access 的 fs / 进程 fence 曾把空 deny 集当作「无限制」放行 ambient 写，可覆写另一进程登记的 `read-only` 根。修复：scope 新增 `authority: 'available' | 'unavailable'`（注册表在构造、contended、storage-failed、config-invalid、releaseAuthority 转场标 `unavailable`，`openDomain` 发布完全部记录后标 `available`）；不可用时 fs fence 以 `writableRoots({mode:'workspace-write'})` 判定（仅主根 + temp，不并入 scope 成员），进程 fence 用 `clampedExecution`（`workspace-write` 探针 + 原 profile 前缀）钳制 shell / PTC / PTY，`spawnTerminal` 不可解析会话经 `hasActiveDenyRoots()` 自动拒绝；模型拓扑在 Full-access + 不可用时固定陈述降级句。
+- **Full-access 不再沿用旧 FsTarget（P1）**：`checkedTarget` 只在 Full-access 且 deny 集为空时返回调用方 target（零根逐字节保持上游）；其余一律重解析 displayPath、以新 `targetKey` 判 deny 并以新 target 执行 mutation——评审的「父目录被换成指向只读根的符号链接」绕过被关闭。
+- **bwrap deny 根改用 `--ro-bind-try`**：此前 `--ro-bind <missing recordedPath>` 使 bwrap 启动即失败，一个被删除的只读根会打断全部 Full-access shell（或其位于 temp 时的 workspace-write 命令）。deny / restrict（含 landlock→bwrap）均改 `--ro-bind-try`；残余（命名空间内可重建目录）已由 fs fence 的 `recordedPath` 拒绝兜底并记录。
+
+回归：新增 `tests/b9-review-regressions.spec.ts`（反转的两条 P1 复现：争用进程写只读根与 ambient 区均拒写、接管后恢复；stale target 的 write/edit 均拒写）；scope / registry-lease 增加 authority 状态断言；process-fence 增加 clamped prefix（与上游 `workspace-write` confined argv 逐项一致）与不可解析终端断言；dialects 期望改 `--ro-bind-try`；prompt-context 增加降级句。本机门禁输出见交接报告；未发布，版本号与 allowlist 不变。

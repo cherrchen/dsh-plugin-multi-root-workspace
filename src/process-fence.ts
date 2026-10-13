@@ -25,8 +25,15 @@
  *   `Agent.enter` forces that id to equal the session id — and rewrites the
  *   already-built argv in place. A spawn carrying the marker whose session
  *   cannot be resolved fails closed whenever ANY registered primary holds an
- *   explicit `read-only` root: a terminal we cannot attribute must not inherit
- *   a deny set we cannot compute.
+ *   explicit `read-only` root OR the registry authority is unavailable: a
+ *   terminal we cannot attribute must not inherit a deny set we cannot
+ *   compute.
+ *
+ * The same seam carries the unknown-authority downgrade: while the scope
+ * reports `authority: 'unavailable'` — a contended, storage-failed or
+ * config-invalid registry publishes an empty deny set that is NOT evidence —
+ * `danger-full-access` executions run inside the upstream `workspace-write`
+ * profile instead of ambient.
  *
  * Windows uses the standalone ambient deny-token runner. Landlock cannot subtract a subtree, so that combination selects bubblewrap.
  * An unusable mount runner fails without starting an unconfined process.
@@ -97,16 +104,23 @@ export function apply(ctx: Context): void {
     spec?.sandboxPolicy ?? ctx.sandboxPolicy.resolve()
 
   /**
-   * The restricted prefix for one Full-access call, or `undefined` when the
-   * call needs no confinement (not full-access, or nothing to deny). May throw
-   * synchronously — `SandboxUnavailableError` from a dialect that cannot
-   * express the deny, which must propagate to the caller, never be swallowed.
+   * The confined facts for one Full-access call, or `undefined` when the call
+   * needs no confinement (not full-access, and nothing to deny while the
+   * registry is the store's authority). An `unavailable` scope authority
+   * clamps the call to the upstream `workspace-write` profile: the empty deny
+   * set a contended or failed registry publishes is not evidence that nothing
+   * is restricted. May throw synchronously — `SandboxUnavailableError` from a
+   * dialect that cannot express the confinement, which must propagate to the
+   * caller, never be swallowed.
    */
   const prepare = (policy: SandboxExecutionPolicy, signal?: AbortSignal): ConfinedArgv | Promise<ConfinedArgv> | undefined => {
     if (policy.mode !== 'danger-full-access') return undefined
-    const denied = ctx.multiRootScope.resolve(policy).deniedRoots
-    if (denied.length === 0) return undefined
-    return (ctx.sandbox as MultiRootSandboxProvider).restrictedExecution(policy, denied, signal)
+    const scope = ctx.multiRootScope.resolve(policy)
+    if (scope.authority === 'unavailable') {
+      return (ctx.sandbox as MultiRootSandboxProvider).clampedExecution(policy, signal)
+    }
+    if (scope.deniedRoots.length === 0) return undefined
+    return (ctx.sandbox as MultiRootSandboxProvider).restrictedExecution(policy, scope.deniedRoots, signal)
   }
 
   /**
@@ -164,7 +178,7 @@ export function apply(ctx: Context): void {
         throw new Error(
           'multi-root workspace: terminal spawn carries a session marker that does not resolve '
           + `to a live session (${JSON.stringify(sessionId)}), and explicit read-only roots are `
-          + 'registered — refusing to spawn an unconfined terminal',
+          + 'or may be registered — refusing to spawn an unconfined terminal',
         )
       }
       const policy = ctx.sandboxPolicy.resolve({ session })

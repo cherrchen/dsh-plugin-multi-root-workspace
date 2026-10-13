@@ -37,7 +37,9 @@
  *   memory-authoritative after open, so two DSH processes sharing a storage
  *   root cannot each keep a live domain snapshot. A store-wide kernel lease
  *   (ADR-0007) elects one authority; a contended process publishes an empty
- *   scope, rejects mutations, and retries the lease from {@link MultiRootRegistry.refresh}.
+ *   scope marked `authority: 'unavailable'` — under which Full-access is
+ *   enforced as workspace-write — rejects mutations, and retries the lease
+ *   from {@link MultiRootRegistry.refresh}.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/registry
  */
@@ -98,7 +100,7 @@ export const MAX_ADDITIONAL_ROOTS_CEILING = 64
 /**
  * Whether this process is the Registry Authority for the store-wide domain
  * medium. Contended and storage-failed are both fail-closed: the scope stays
- * empty and mutations reject.
+ * empty, is marked `authority: 'unavailable'`, and mutations reject.
  */
 export type RegistryAuthorityState =
   | { readonly kind: 'active' }
@@ -258,6 +260,12 @@ export class MultiRootRegistry extends Service {
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'multiRootRegistry')
     this.leasePath = config.leasePath
+    // Until `openDomain()` proves otherwise this process is NOT the store's
+    // authority: the empty root table a contended, storage-failed or
+    // config-invalid registry publishes must read as "restrictions unknown",
+    // never as "nothing is restricted" — Full-access enforcement downgrades
+    // to workspace-write while this flag is out (ADR-0017 review amendment).
+    this.ctx.multiRootScope.setRegistryAuthority(false)
     const configured = config.maxAdditionalRoots === undefined ? DEFAULT_MAX_ADDITIONAL_ROOTS : config.maxAdditionalRoots
     if (Number.isInteger(configured) && configured >= 1 && configured <= MAX_ADDITIONAL_ROOTS_CEILING) {
       this.maxRoots = configured
@@ -922,11 +930,17 @@ export class MultiRootRegistry extends Service {
     for (const [primaryRoot, record] of this.table.entries()) {
       this.accept(primaryRoot, record)
     }
+    // Authority is published only AFTER every stored root reached the scope:
+    // between acquisition and this line the scope must still read
+    // `unavailable`, so a Full-access call can never race a half-published
+    // registry into an ambient grant.
+    this.ctx.multiRootScope.setRegistryAuthority(true)
   }
 
   /** Fail closed: empty scope, no table, contended state. */
   private enterContended(): void {
     this.withdrawPublished()
+    this.ctx.multiRootScope.setRegistryAuthority(false)
     this.table = undefined
     this.authorityState = { kind: 'contended' }
     if (!this.loggedContended) {
@@ -941,6 +955,7 @@ export class MultiRootRegistry extends Service {
   /** Fail closed: empty scope, no table, storage-failed state. The lease, if held, stays. */
   private enterStorageFailed(reason: string): void {
     this.withdrawPublished()
+    this.ctx.multiRootScope.setRegistryAuthority(false)
     this.table = undefined
     this.authorityState = { kind: 'storage-failed', reason }
   }
@@ -971,9 +986,12 @@ export class MultiRootRegistry extends Service {
     this.disposed = true
     await this.serializeAuthority(async () => {
       // Fail closed first, so no further mutation is admitted while teardown
-      // runs (a mutation admitted later would fail in `requireTable()`, by design).
+      // runs (a mutation admitted later would fail in `requireTable()`, by
+      // design) — and so enforcement immediately stops treating the empty
+      // scope as proof that nothing is denied.
       this.table = undefined
       this.authorityState = { kind: 'contended' }
+      this.ctx.multiRootScope.setRegistryAuthority(false)
       await this.drainMutations()
       // After the drain, so a grant a finishing mutation just published is
       // dropped instead of outliving the teardown.

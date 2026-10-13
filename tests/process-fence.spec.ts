@@ -149,10 +149,10 @@ describe('the restricted argv prefix', () => {
     expect(prefix).not.toContain('--unshare-pid')
     expect(prefix).not.toContain('--proc')
     expect(prefix).not.toContain('--dev')
-    expect(prefix).toContain('--ro-bind')
+    expect(prefix).toContain('--ro-bind-try')
     const bindIndex = prefix.indexOf('--bind')
     expect(prefix[bindIndex + 1]).toBe('/')
-    const roIndex = prefix.lastIndexOf('--ro-bind')
+    const roIndex = prefix.lastIndexOf('--ro-bind-try')
     expect(prefix[roIndex + 1]).toBe(denied)
     expect(prefix[prefix.length - 1]).toBe('--')
   })
@@ -168,7 +168,7 @@ describe('the restricted argv prefix', () => {
       const prefix = await call
       expect(prefix[0]).toBe('bwrap')
       expect(prefix).toContain('--bind')
-      expect(prefix.slice(prefix.indexOf('--ro-bind'))).toEqual(['--ro-bind', canonicalPath(fixture.outside), canonicalPath(fixture.outside), '--'])
+      expect(prefix.slice(prefix.indexOf('--ro-bind-try'))).toEqual(['--ro-bind-try', canonicalPath(fixture.outside), canonicalPath(fixture.outside), '--'])
     }
   })
 
@@ -225,8 +225,8 @@ describe('shell and PTC execute entries', () => {
     const runtime = ctx.get('ptcRuntime') as { run(spec: unknown): Promise<unknown> }
     await runtime.run({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
     const argv = captured.spawned[0]!.argv
-    expect(argv).toContain('--ro-bind')
-    expect(argv[argv.indexOf('--ro-bind') + 1]).toBe(canonicalPath(fixture.outside))
+    expect(argv).toContain('--ro-bind-try')
+    expect(argv[argv.indexOf('--ro-bind-try') + 1]).toBe(canonicalPath(fixture.outside))
     expect(argv.slice(-COMMAND.length)).toEqual(COMMAND)
   })
 
@@ -262,6 +262,44 @@ describe('shell and PTC execute entries', () => {
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
     await shell.execute(spec)
     expect(captured.spawned[1]!.argv).toEqual(COMMAND)
+  })
+})
+
+describe('the unavailable-authority downgrade', () => {
+  it('clamps shell execute to the upstream workspace-write profile, not the restricted one', async () => {
+    const { ctx, provider, captured } = await mountStack('seatbelt', 'danger-full-access')
+    // The registry marks the scope unavailable when it is not the store's
+    // authority; an empty deny set then means "unknown", not "nothing".
+    ctx.multiRootScope.setRegistryAuthority(false)
+    const shell = ctx.get('shell') as { execute(spec: unknown): Promise<unknown> }
+    await shell.execute({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
+    expect(captured.spawned).toHaveLength(1)
+    // The clamp is exactly the argv upstream `confine` would produce under
+    // workspace-write: primary root + temp grants, no additional roots, and
+    // no ambient "(allow default) + subpath deny" restricted profile.
+    const expected = await confined(provider, COMMAND, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+    expect(captured.spawned[0]!.argv).toEqual(expected.argv)
+    expect(captured.spawned[0]!.argv.join(' ')).not.toContain('(deny file-write* (subpath')
+  })
+
+  it('clamps ptcRuntime.run through the same workspace-write profile', async () => {
+    const { ctx, provider, captured } = await mountStack('bwrap', 'danger-full-access')
+    ctx.multiRootScope.setRegistryAuthority(false)
+    const runtime = ctx.get('ptcRuntime') as { run(spec: unknown): Promise<unknown> }
+    await runtime.run({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
+    const expected = await confined(provider, COMMAND, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+    expect(captured.spawned[0]!.argv).toEqual(expected.argv)
+  })
+
+  it('keeps the restricted profile for deny roots once authority is restored', async () => {
+    const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access')
+    ctx.multiRootScope.setRegistryAuthority(false)
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    ctx.multiRootScope.setRegistryAuthority(true)
+    const shell = ctx.get('shell') as { execute(spec: unknown): Promise<unknown> }
+    await shell.execute({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
+    expect(captured.spawned[0]!.argv.join(' '))
+      .toContain(`(deny file-write* ${sbplSubpath(canonicalPath(fixture.outside))}`)
   })
 })
 
@@ -309,6 +347,24 @@ describe('spawnTerminal', () => {
     await expect(ctx.subprocess.spawnTerminal(spec({ DSH_SESSION_ID: 'sess-gone' }))).rejects.toThrow('read-only roots')
   })
 
+  it('clamps a resolved terminal session to workspace-write while the registry authority is unavailable', async () => {
+    const session = liveSession('sess-pty-clamped')
+    const { ctx, provider, captured } = await mountStack('seatbelt', 'danger-full-access', new Map([[session.id, session]]))
+    ctx.multiRootScope.setRegistryAuthority(false)
+    await ctx.subprocess.spawnTerminal(spec({ DSH_SESSION_ID: session.id }))
+    expect(captured.terminals).toHaveLength(1)
+    const expected = await confined(provider, ['/bin/bash', '-l'], { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+    expect(captured.terminals[0]!.argv).toEqual(expected.argv)
+  })
+
+  it('refuses an unresolvable terminal session while the registry authority is unavailable', async () => {
+    const { ctx } = await mountStack('seatbelt', 'danger-full-access')
+    // Authority alone flips the fail-closed flag: an unattributable terminal
+    // must not spawn ambient while restrictions cannot even be enumerated.
+    ctx.multiRootScope.setRegistryAuthority(false)
+    await expect(ctx.subprocess.spawnTerminal(spec({ DSH_SESSION_ID: 'sess-gone' }))).rejects.toThrow()
+  })
+
   it('passes an unresolvable session through when no primary holds a restricted root', async () => {
     const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access')
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'inherit')])
@@ -344,8 +400,10 @@ describe('the workspace-write deny edge', () => {
 
   it('makes a denied root under bwrap temp masking readable through a readonly bind', () => {
     const profile = ['bwrap', '--ro-bind', '/', '/', '--tmpfs', '/tmp', '--bind', '/workspace', '/workspace']
+    // `--ro-bind-try`: a missing source skips the bind instead of failing the
+    // whole launch, so a deleted read-only root cannot break every command.
     expect(denyProfileArgs('bwrap', profile, ['/tmp/readonly']))
-      .toEqual([...profile, '--ro-bind', '/tmp/readonly', '/tmp/readonly'])
+      .toEqual([...profile, '--ro-bind-try', '/tmp/readonly', '/tmp/readonly'])
   })
 
   it('fails closed on Landlock — a denied root under a --rw grant cannot be subtracted', () => {

@@ -90,10 +90,13 @@
     # PTC runtime, and the PTY backend all skip `ctx.sandbox.confine` in that
     # mode, so an explicit `read-only` additional root would silently stay
     # writable. This row wraps `ctx.subprocess.spawn` / `spawnTerminal`,
-    # `ctx.shell.execute` (and `start` where a release still exposes it), and
-    # `ctx.ptcRuntime.execute` at their public methods — under Full-access with
-    # restricted roots it asks `ctx.sandbox` for a restricted profile prefix
-    # and runs the call inside it. A dialect that cannot express "ambient minus
+    # `ctx.shell.execute` (and `run` / `start` where a release still exposes
+    # them), and `ctx.ptcRuntime.run` at their public methods — under
+    # Full-access with restricted roots it asks `ctx.sandbox` for a restricted
+    # profile prefix and runs the call inside it, and while the registry
+    # authority is unavailable (contended, storage-failed, config-invalid) it
+    # clamps the same calls to the upstream workspace-write profile instead of
+    # trusting the empty deny set. A dialect that cannot express "ambient minus
     # subtree" (Landlock, Windows ACL) fails closed before the process starts.
     - id: multi-root-process-fence
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/process-fence'

@@ -36,7 +36,7 @@ M3 把附加根登记进 `dsh-storage-domain` 的 `multi_root_workspace` domain�
      | { kind: 'storage-failed'; reason: string }
    ```
 
-   争用时：`multiRootScope` 为空、mutation 抛 `registry-contended`、面板/命令通过 `unavailable` 说明「另一个 DSH 进程占用登记表」。绝不读取已有 domain snapshot 继续 grant。
+   争用时：`multiRootScope` 为空、mutation 抛 `registry-contended`、面板/命令通过 `unavailable` 说明「另一个 DSH 进程占用登记表」。绝不读取已有 domain snapshot 继续 grant。空 scope 同时标记 `authority: 'unavailable'`：B9 引入 deny 语义之后，空 scope 本身不再是充分的 fail-closed 证据（见文末 2026-10-14 修订）。
 5. **不必强迫第二个 DSH 重启。** `refresh()`（命令 `list`、面板 Retry）先走 `ensureAuthority()`：前一个进程退出或崩溃后，等待方重新拿 lease、从磁盘重新 open、读回最后一次 durable mutation、再 publish。
 6. **锁路径显式配置**，默认与 JSON backend 相邻：
 
@@ -79,6 +79,10 @@ PR #1（head `507c954`）的 P1-1 指出：`releaseAuthority()` 先释放 lease�
 ## 第二轮返工补充（2026-09-16）
 
 Windows semaphore 名称必须先用 `realpathSync.native` 解析已创建的父目录，再拼接锁文件名、大小写归一化并散列。锁文件本身不必存在；只用 `resolve()` 的词法归一化无法合并 junction、符号链接和短路径别名，会让同一介质产生两把锁。纯命名测试与实际 acquire 争用测试均覆盖目录别名；本次 macOS 验证不替代 Windows 原生内核验证，详见[第二轮审查报告](../plans/completed/2026-09-15-v0.1.1-review-rework.md#第二轮审查与修复2026-09-16)。
+
+## 第三轮修订（2026-10-14，B9 评审返工）
+
+B9（ADR-0017）给 `danger-full-access` 引入 deny 集语义后，「空 scope」本身不再是 fail-closed：争用进程读不到登记表，也就读不到另一个进程登记的 `read-only` 边界，空 deny 集曾被 fs / 进程 fence 当作「没有限制」而放行 ambient 写（评审复现的 P1）。因此非 active 状态（构造期、contended、storage-failed、config-invalid、releaseAuthority 转场）在发布空 scope 的同时调用 `setRegistryAuthority(false)` 标记 `authority: 'unavailable'`，`openDomain` 发布完全部存储记录后才置回 `available`。该标记不可用时，Full-access 的 fs 写与进程执行都降级为上游 `workspace-write` 语义，直到接管或修复。lease、acquire/open/release 顺序与本 ADR 其余决定不变。
 
 ## Related Documents
 

@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { renderWorkspaceRootsContext } from '../src/scope.ts'
+import { REGISTRY_UNAVAILABLE_NOTE, renderWorkspaceRootsContext } from '../src/scope.ts'
 import type { ScopeRoot } from '../src/scope.ts'
 
 const PRIMARY = '/work/primary'
@@ -107,6 +107,26 @@ describe('renderWorkspaceRootsContext', () => {
     expect(first).not.toContain('payments')
     expect(first).not.toContain(A.id)
     expect(first).not.toContain('S-1-')
+  })
+
+  it('states the Full-access downgrade while the registry authority is unavailable', () => {
+    for (const platform of PLATFORMS) {
+      const options = { platform, mode: 'danger-full-access' as const, primaryRoot: PRIMARY, cappedTools: [] }
+      expect(renderWorkspaceRootsContext({ ...options, roots: [], authority: 'unavailable' }))
+        .toBe(REGISTRY_UNAVAILABLE_NOTE)
+      // With members the note still comes first, ahead of the topology text.
+      expect(renderWorkspaceRootsContext({ ...options, roots: [A, C], authority: 'unavailable' }))
+        .toBe(`${REGISTRY_UNAVAILABLE_NOTE} Current DSH workspace roots: ["/repos/a","/repos/c"] are additional roots of this session's workspace; danger-full-access mode has no sandbox isolation.`)
+    }
+  })
+
+  it('contributes nothing for an unavailable authority outside Full-access', () => {
+    for (const platform of PLATFORMS) {
+      for (const mode of ['workspace-write', 'read-only'] as const) {
+        expect(renderWorkspaceRootsContext({ platform, mode, primaryRoot: PRIMARY, roots: [], cappedTools: [], authority: 'unavailable' }))
+          .toBe('')
+      }
+    }
   })
 
   it('never promises writes for invalid toolAccess on any platform, preserving mode and empty semantics', () => {

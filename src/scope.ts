@@ -102,6 +102,17 @@ export interface FilesystemScope {
    * these are all still workspace members.
    */
   deniedRoots: readonly string[]
+  /**
+   * Whether this process holds the registry authority for the store. While it
+   * is `unavailable` — contended, storage-failed, config-invalid, or torn
+   * down — the empty root table is NOT evidence that nothing is restricted:
+   * the registrations this process cannot see may carry explicit `read-only`
+   * boundaries, so `danger-full-access` enforcement degrades to upstream
+   * `workspace-write` semantics instead of trusting the empty deny set.
+   * A composition with no registry at all never reports `unavailable` — it can
+   * never have registered roots.
+   */
+  authority: 'available' | 'unavailable'
 }
 
 /**
@@ -166,6 +177,15 @@ function sanitizeMembers(
 export const MULTI_ROOT_CONTEXT_NAME = 'multi-root:scope'
 
 /**
+ * The deterministic sentence the model hears while the registry authority is
+ * unavailable under `danger-full-access` — the mode's enforcement is then the
+ * upstream `workspace-write` one, which the prompt must not leave implicit.
+ */
+export const REGISTRY_UNAVAILABLE_NOTE = 'The DSH multi-root registry is not available in this process, '
+  + 'so danger-full-access is temporarily enforced as workspace-write: writes are limited to the primary root '
+  + 'and the platform temp area.'
+
+/**
  * The B9 effective-access rule (ADR-0017's nine-cell matrix): whether a root
  * with this registration policy is writable under this session mode.
  * `read-write` is writable everywhere; `inherit` follows the mode;
@@ -188,7 +208,11 @@ function effectivelyWritable(mode: SandboxMode, access: RootAccess): boolean {
  * @param options.roots - the granted additional members, in registry order.
  * @param options.cappedTools - sorted tool names that can never write an additional root.
  * @param options.toolAccessInvalid - invalid host config caps every additional-root write.
- * @returns the stable topology text; empty when there are no additional roots.
+ * @param options.authority - the registry-authority fact; `unavailable` under
+ *   `danger-full-access` downgrades enforcement to `workspace-write`, which the
+ *   model must hear even when there is no topology to describe.
+ * @returns the stable topology text; empty when there are no additional roots
+ *   and no downgrade to report.
  */
 export function renderWorkspaceRootsContext(options: {
   readonly platform: string
@@ -197,9 +221,13 @@ export function renderWorkspaceRootsContext(options: {
   readonly roots: readonly ScopeRoot[]
   readonly cappedTools: readonly string[]
   readonly toolAccessInvalid?: boolean
+  readonly authority?: 'available' | 'unavailable'
 }): string {
   const { platform, mode, primaryRoot, roots, cappedTools } = options
-  if (roots.length === 0) return ''
+  const authorityNote = options.authority === 'unavailable' && mode === 'danger-full-access'
+    ? REGISTRY_UNAVAILABLE_NOTE + (roots.length === 0 ? '' : ' ')
+    : ''
+  if (roots.length === 0) return authorityNote
   const members = JSON.stringify(roots.map(root => root.path))
   const readOnly = roots.filter(root => root.access === 'read-only').map(root => root.path)
   const capNote = cappedTools.length === 0 ? ''
@@ -208,19 +236,19 @@ export function renderWorkspaceRootsContext(options: {
     // Fixed read-write roots keep their grant even in a read-only session.
     const writable = options.toolAccessInvalid ? [] : roots.filter(root => root.access === 'read-write').map(root => root.path)
     if (writable.length === 0) {
-      return `Current DSH workspace roots: ${members} are additional roots of this session's workspace and are readable; `
+      return authorityNote + `Current DSH workspace roots: ${members} are additional roots of this session's workspace and are readable; `
         + 'nothing is writable in read-only mode.' + capNote
     }
     const readable = roots.filter(root => root.access !== 'read-write').map(root => root.path)
     let text = `Current DSH workspace roots: ${JSON.stringify(writable)} are additional roots that stay writable even in read-only mode`
     if (readable.length > 0) text += `, and ${JSON.stringify(readable)} are readable additional roots`
-    return text + ' of this session\'s workspace; everything else is read-only.' + capNote
+    return authorityNote + text + ' of this session\'s workspace; everything else is read-only.' + capNote
   }
   if (mode === 'danger-full-access') {
     // The refused set mirrors the scope's deny set: explicit read-only roots
     // always, and every member when the call is tool-capped.
     const refused = options.toolAccessInvalid ? roots.map(root => root.path) : readOnly
-    return `Current DSH workspace roots: ${members} are additional roots of this session's workspace; `
+    return authorityNote + `Current DSH workspace roots: ${members} are additional roots of this session's workspace; `
       + 'danger-full-access mode has no sandbox isolation'
       + (refused.length > 0
         ? `, except writes under the additional roots ${JSON.stringify(refused)} are still refused${options.toolAccessInvalid === true ? ' because toolAccess is invalid' : ''}.`
@@ -239,7 +267,7 @@ export function renderWorkspaceRootsContext(options: {
     text += ' Writable additional roots are enforced for shell processes by the upstream Windows ACL '
       + 'restricted-token sandbox, whose enforcement is reported as partial; reads are not confined by it.'
   }
-  return text + capNote
+  return authorityNote + text + capNote
 }
 
 /**
@@ -267,6 +295,15 @@ export class MultiRootScopeService extends Service {
   /** Additional roots keyed by canonical primary root; empty until roots are registered. */
   private readonly rootsByPrimary = new Map<string, readonly AdditionalWorkspaceRoot[]>()
   private readonly listeners = new Set<() => void>()
+  /**
+   * The registry-authority fact the registry row publishes. Defaults to
+   * `available`: a composition without a registry row can never have
+   * registered roots, so nothing is unknown there. The registry sets it false
+   * the moment it cannot prove the store is its own — before the lease is
+   * acquired, while contended or storage-failed, and at teardown — and true
+   * only after the accepted records have been published.
+   */
+  private registryAuthority: 'available' | 'unavailable' = 'available'
   /** Validated `toolAccess` row config; empty when no tool is capped. */
   private readonly caps: Record<string, 'read-only'>
   /** A malformed `toolAccess` refuses every additional-root write (fail closed). */
@@ -339,7 +376,10 @@ export class MultiRootScopeService extends Service {
           if (session === undefined) return ''
           const policy = scope.sandboxPolicy.resolve({ session })
           const resolved = this.resolve(policy)
-          if (resolved.roots.length === 0) return ''
+          // Zero roots normally contributes nothing — except while the
+          // registry authority is unavailable, when Full-access is enforced as
+          // workspace-write and the model must hear that downgrade.
+          if (resolved.roots.length === 0 && resolved.authority !== 'unavailable') return ''
           // The session view lists root access, never the tool-ambient cap:
           // the text describes the workspace, not one call's permissions.
           return renderWorkspaceRootsContext({
@@ -349,6 +389,7 @@ export class MultiRootScopeService extends Service {
             roots: resolved.roots,
             cappedTools: this.toolCaps(),
             toolAccessInvalid: this.toolAccessInvalid,
+            authority: resolved.authority,
           })
         },
       })
@@ -381,6 +422,7 @@ export class MultiRootScopeService extends Service {
       roots,
       writableRoots: writable,
       deniedRoots: [...new Set(denied)],
+      authority: this.registryAuthority,
     }
   }
 
@@ -426,10 +468,14 @@ export class MultiRootScopeService extends Service {
    * Whether ANY registered primary currently publishes an explicit `read-only`
    * member. The PTY seam resolves its caller through an environment marker;
    * when that lookup fails this flag is the difference between pass-through
-   * (nothing to deny anywhere on the store) and fail closed.
-   * @returns whether at least one primary holds a restricted root.
+   * (nothing to deny anywhere on the store) and fail closed. An unavailable
+   * registry authority answers `true` by itself: a terminal whose session
+   * cannot be resolved must not inherit a deny set this process cannot see.
+   * @returns whether at least one primary holds a restricted root, or the
+   *   registry cannot prove none does.
    */
   hasActiveDenyRoots(): boolean {
+    if (this.registryAuthority === 'unavailable') return true
     for (const members of this.rootsByPrimary.values()) {
       if (members.some(root => root.access === 'read-only') || (members.length > 0 && this.capped())) return true
     }
@@ -460,6 +506,20 @@ export class MultiRootScopeService extends Service {
     } else {
       this.rootsByPrimary.set(key, [...roots])
     }
+    for (const listener of this.listeners) listener()
+  }
+
+  /**
+   * Publish the registry-authority fact. This is the REGISTRY's write port —
+   * the counterpart of {@link setAdditionalRoots}: the registry marks the
+   * scope `unavailable` the moment it stops being the store's authority
+   * (before acquisition, on contention or storage failure, at teardown) and
+   * `available` only once its stored records have been published. Nothing
+   * else may call it, and it never touches the root table.
+   * @param available - whether this process holds the registry authority.
+   */
+  setRegistryAuthority(available: boolean): void {
+    this.registryAuthority = available ? 'available' : 'unavailable'
     for (const listener of this.listeners) listener()
   }
 }

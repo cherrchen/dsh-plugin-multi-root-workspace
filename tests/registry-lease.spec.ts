@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
+import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import MultiRootRegistry, { DOMAIN_NAME, REGISTRY_CONTENDED_MESSAGE } from '../src/registry.ts'
 import { RegistryAuthorityLease, RegistryLeaseContendedError } from '../src/registry-lease.ts'
 import { leaseNameWin32 } from '../src/registry-lease-win32.ts'
@@ -207,6 +208,42 @@ describe('registry authority at the service boundary', () => {
     await expect(registry.add(primary, { path: makeRoot('extra') })).rejects.toMatchObject({
       code: 'storage-unavailable',
     })
+  })
+
+  it('marks the scope authority through every registry state transition', async () => {
+    const policy: SandboxExecutionPolicy = { mode: 'danger-full-access', workspaceRoot: primary }
+    const authorityOf = (stack: RegistryStack) => stack.scope.resolve(policy).authority
+
+    // Active: the accepted records published, so the scope is authoritative.
+    const first = await mount()
+    expect(first.registry.authority.kind).toBe('active')
+    expect(authorityOf(first)).toBe('available')
+
+    // Contended: the empty scope must read as "restrictions unknown".
+    const second = await mount()
+    expect(second.registry.authority.kind).toBe('contended')
+    expect(authorityOf(second)).toBe('unavailable')
+
+    // Storage-failed: same fail-closed marking on a broken medium.
+    const failed = await mountRegistryStack(join(fixture.base, 'broken'), { leasePath: '' })
+    stacks.push(failed)
+    expect(failed.registry.authority.kind).toBe('storage-failed')
+    expect(authorityOf(failed)).toBe('unavailable')
+
+    // Config-invalid: the terminal fail-closed state also marks the scope.
+    const invalid = await mountRegistryStack(join(fixture.base, 'invalid'), { maxAdditionalRoots: 0 })
+    stacks.push(invalid)
+    expect(invalid.registry.authority.kind).toBe('config-invalid')
+    expect(authorityOf(invalid)).toBe('unavailable')
+
+    // Teardown: the released stack stops claiming authority, and the waiter
+    // becomes authoritative only after it publishes the durable records.
+    await first.dispose()
+    stacks = stacks.filter(stack => stack !== first)
+    expect(authorityOf(first)).toBe('unavailable')
+    await second.registry.refresh(primary)
+    expect(second.registry.authority.kind).toBe('active')
+    expect(authorityOf(second)).toBe('available')
   })
 })
 

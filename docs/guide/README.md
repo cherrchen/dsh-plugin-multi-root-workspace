@@ -48,6 +48,8 @@ English: [README.en.md](./README.en.md)
 
 面板同时显示登记策略与宿主派生的当前有效权限，并注明工具写入封顶；继承与固定读写之间的切换均需确认。目录失效只撤销授权，不解除仍登记的只读边界。
 
+两个 DSH 进程共用同一 storage root 时，只有持有注册表 lease 的进程能读到登记表。另一个进程的空根表不代表「没有限制」：那里的 Full-access 降级按 workspace-write 执行（只写主根与系统临时区），直到它接管 lease 或存储恢复；workspace-write 与 read-only 模式不受影响。
+
 B9 开发分支中，新根默认 `inherit`（继承会话模式）；`add --inherit|--read-only|--read-write` 或面板可显式选三档。显式只读保持完整成员资格，但 Full-access 也不得写；固定读写在全局只读会话仍可写该根。旧可写记录升级为 inherit，重新登记保留原策略。权限与迁移合同见 [ADR-0017](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)；已启动进程保留启动快照，变化只约束之后的调用与新进程。发布包是否包含 B9 见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)。
 
 Windows Full-access 的局部拒写独立 runner 通过管理员安装的 broker 赋予暂停子进程普通 deny-only 组 token，读回验证后恢复执行；缺少可信 broker 时拒绝启动。Windows ACL 继续报告 partial；其 token 与 ACL 合同见 [ADR-0020](../decisions/ADR-0020-windows-normal-deny-groups.md)。无法表达的后端组合拒绝启动，不退回裸进程；具体后端限制见 ADR-0017。
