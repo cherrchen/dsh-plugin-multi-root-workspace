@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed（2026-10-13；ADR-0018 的原生证伪保留；本方案需要特权 broker 的范围决定，原生执行状态只见路线账本）
+Accepted（2026-10-13；用户授权继续实现 broker 路径；ADR-0018 的原生证伪保留，原生执行状态只见路线账本）
 
 ## Date
 
@@ -48,3 +48,11 @@ Windows 原生测试验证混合根九格、Node / pwsh / 后代、ConPTY / fd 7
 - [路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b9附加根三态权限与跨-sandboxmode-执行一致性2026-10-13)
 - [Microsoft：Conditional ACE SDDL](https://learn.microsoft.com/en-us/windows/win32/secauthz/security-descriptor-definition-language-for-conditional-aces-)
 - [Chromium：AccessToken 安全属性实现与 ABI](https://chromium.googlesource.com/chromium/src/+/refs/tags/145.0.7632.1/base/win/access_token.cc)
+
+## 修订：SYSTEM broker 的实现与安装（2026-10-13）
+
+用户确认继续开发可受限启动的 Windows 路径，不以拒绝启动作为该组合的最终实现。新增 [管理员安装脚本](../../scripts/windows-broker/install.ps1) 与 [服务源码](../../scripts/windows-broker/service.cs)，随 tarball 提供。以管理员 PowerShell 执行 `./scripts/windows-broker/install.ps1 -UserSid <使用插件的用户SID>`；省略 SID 使用当前用户。`-Uninstall` 移除同一 SID 的服务及二进制。每用户一个稳定命名的 LocalSystem 服务，安装目录由管理员持有，普通客户端只有读取/执行权限。安装是明确的管理员部署操作，插件不自动提权或安装服务。
+
+服务只接受「当前本地管道客户端持有的 restricted token handle + 最多64个根拒写标识」，从管道身份与内核客户端 PID 验证安装 SID、进程 SID 和目标 token SID；从该进程复制最低权限的 token handle。只允许 ADD 操作设置固定属性名、固定 mandatory/inheritable flags；不接受路径、命令、PID、任意属性名、ACL 编辑、移除属性或普通 token。管道拒绝 Network SID，连接读取限时限长，服务并发上限8。客户端在收到 ACK 后读回实际 token 属性，确认名字、标志与完整根集合，防止伪管道 ACK 绕过。服务仅启用 SeTcbPrivilege，不替客户端启动进程；后续 ACL 和 spawn 仍在普通 runner 中执行。
+
+正常路径从 broker 获得属性后继续原有 token 保护、条件 ACE、Node/pwsh/PTY 启动，避免原先普通宿主 Win32 1314 的必然拒绝。未安装 broker、认证失败或内核属性不匹配仍按基础设施失败处理，不能裸启动突破只读要求。Windows CI 在原生测试和所有安装副本冒烟前安装同一服务。原生回归必须保留 token 弱化后实际写入的反例，不能用安装成功替代内核证明。

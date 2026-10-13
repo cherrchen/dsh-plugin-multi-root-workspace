@@ -43,6 +43,8 @@ const REQUIRED = [
   'package/lib/index.js',
   'package/lib/client.js',
   'package/lib/windows-runner.js',
+  'package/scripts/windows-broker/install.ps1',
+  'package/scripts/windows-broker/service.cs',
 ]
 
 /**

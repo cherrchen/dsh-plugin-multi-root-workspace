@@ -93,6 +93,11 @@ jobs:
       - name: Probe which kernel dialects this host can really run
         run: pnpm kernel:probe
 
+      - if: runner.os == 'Windows'
+        name: Install the B9 token-attribute broker
+        shell: pwsh
+        run: ./scripts/windows-broker/install.ps1
+
       # The test log is captured as well as streamed, and uploaded when the step
       # fails. A red run has to be diagnosable from the run page alone — an
       # unreproducible failure with no log is a failure nobody can fix.

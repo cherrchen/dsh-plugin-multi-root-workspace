@@ -20,6 +20,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { loadWindowsNative, spawnWindowsDeniedChild } from './compat/windows-native.ts'
 import type { NativeApi, NativePointer } from './compat/windows-native.ts'
 import { canonicalPath, isWindowsNetworkOrDevicePath, rootDenySid } from './windows-runner-contract.ts'
+import { requestDenyAttribute } from './windows-broker.ts'
 
 const WRITE_DAC = 0x40000
 const WRITE_OWNER = 0x80000
@@ -56,6 +57,7 @@ export async function runWindowsDenied(
       localFree: [kernel32, 'void*', ['void*']],
       getLengthSid: [advapi32, 'uint32', ['void*']],
       equalSid: [advapi32, 'int', ['void*', 'void*']],
+      convertSidToStringSidW: [advapi32, 'int', ['void*', 'void*']],
       getSecurityInfo: [advapi32, 'uint32', ['void*', 'int', 'uint32', 'void*', 'void*', 'void*', 'void*', 'void*']],
       setSecurityInfo: [advapi32, 'uint32', ['void*', 'int', 'uint32', 'void*', 'void*', 'void*', 'void*']],
       setEntriesInAclW: [advapi32, 'uint32', ['uint32', 'void*', 'void*', 'void*']],
@@ -182,8 +184,42 @@ export async function runWindowsDenied(
       const input = Buffer.alloc(16)
       writePointer(input, 0, allocate(attributes))
       writePointer(input, 8, allocate(operation))
-      check(api.setTokenInformation!(restrictedToken, 39, input, input.length), 'SetTokenInformation(TokenSecurityAttributes)')
+      if (api.setTokenInformation!(restrictedToken, 39, input, input.length) === 0) {
+        const code = api.getLastError!()
+        if (code !== 1314) throw new Error(`SetTokenInformation(TokenSecurityAttributes) failed (Win32 ${code})`)
+        const sidOut = Buffer.alloc(8)
+        check(api.convertSidToStringSidW!(userSid, sidOut), 'ConvertSidToStringSidW')
+        const text = pointer(sidOut)
+        try {
+          await requestDenyAttribute(String(native.koffi.decode(text, 'str16')), native.koffi.address(restrictedToken), denies)
+        } finally { api.localFree!(text) }
+      }
     } finally { for (const value of allocations) native.koffi.free(value) }
+    // Do not trust a pipe ACK alone: verify the mandatory, inheritable kernel
+    // attribute before installing any conditional ACE or launching a child.
+    const claims = info(restrictedToken, 39)
+    if (claims.readUInt16LE(0) !== 1 || claims.readUInt32LE(4) > 128) throw new Error('invalid token security attributes')
+    const claimCount = claims.readUInt32LE(4)
+    const claimBytes = Buffer.from(native.koffi.decode(pointer(claims, 8), 'uint8', claimCount * 40) as Uint8Array)
+    const readUnicode = (record: Buffer): string => {
+      const length = record.readUInt16LE(0)
+      if (length > 1024 || length % 2 !== 0) throw new Error('invalid token attribute string')
+      return Buffer.from(native.koffi.decode(pointer(record, 8), 'uint8', length) as Uint8Array).toString('utf16le')
+    }
+    let verified = false
+    for (let i = 0; i < claimCount; i++) {
+      const claim = claimBytes.subarray(i * 40, (i + 1) * 40)
+      if (readUnicode(claim) !== 'DshMultiRootDeniedRoots') continue
+      const flags = claim.readUInt32LE(20)
+      if (claim.readUInt16LE(16) !== 3 || (flags & 0x20) === 0 || (flags & 0x1a) !== 0 || claim.readUInt32LE(24) !== denies.length) {
+        throw new Error('deny token attribute is not mandatory and inheritable')
+      }
+      const values = Buffer.from(native.koffi.decode(pointer(claim, 32), 'uint8', denies.length * 16) as Uint8Array)
+      const actual = Array.from({ length: denies.length }, (_, index) => readUnicode(values.subarray(index * 16))).sort()
+      if (JSON.stringify(actual) !== JSON.stringify([...denies].sort())) throw new Error('deny token attribute does not match the root set')
+      verified = true
+    }
+    if (!verified) throw new Error('broker did not install the mandatory deny token attribute')
     const tokenAclOut = Buffer.alloc(8)
     status(api.setEntriesInAclW!(3, Buffer.concat([
       entry(userSid, 3, 0x80 | WRITE_DAC | WRITE_OWNER, 0),

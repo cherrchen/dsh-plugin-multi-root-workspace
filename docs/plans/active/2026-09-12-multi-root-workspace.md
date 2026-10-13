@@ -486,3 +486,5 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 ### B9 审查修复批次（2026-10-13）
 
 - 第一批：失效登记保留负授权边界，Registry 刷新/重启不解除只读；成员资格与写授权继续 withheld。新增缺失目录重建、刷新/重启与显式移除回归。同时补齐面板会话模式/有效权限/工具 cap、两向继承切换确认和三模式模型 cap 说明。开发 pin 的相关七文件测试 194 passed，lint、双端 typecheck 与 docs:check 通过。其余批次与原生矩阵继续执行，不据此将 B9 标记完成。
+
+- 第二批：实现管理员安装的每用户 SYSTEM token-attribute broker；普通 runner 在 Win32 1314 时请求服务，并读回 mandatory/inheritable 属性后继续 ACL 与 spawn。服务只允许给同用户 restricted token ADD 固定拒写属性，资源限时限长，不接受命令或 ACL 操作；安装源码随 tarball 发布，Windows CI 原生验证前安装。用户已授权继续开发，先前等待范围决定的状态由本条取代；原生执行验收继续跟进。

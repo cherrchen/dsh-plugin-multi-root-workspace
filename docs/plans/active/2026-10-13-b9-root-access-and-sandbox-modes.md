@@ -99,7 +99,7 @@ Phase 1 核对的接缝定案（ADR-0017）：全部用 `method-wrapper.ts` 公�
 用户撤回先前的 Windows 延后决定。本轮必须补齐 Full-access + 显式只读 / 工具封顶的执行面，且不修改上游包、版本 allowlist 或全局会话模式。
 
 1. 从已识别的 Windows runner profile 构造 `--mode danger-full-access --deny-root`，沿用 shell / PTC / PTY 的公开接缝。
-2. 独立 runner 的无特权限权 prototype 已被原生 token 弱化写入证伪。目标改为不可移除安全属性 + 条件 ACL；TokenSecurityAttributes 需要 SeTcbPrivilege，是否引入经管理员安装的 SYSTEM broker 待用户范围决定。保留 owner-implicit WRITE_DAC 与父目录删除的防绕过要求。具体设计与 Windows partial 边界见 ADR-0019，不复制实现合同。
+2. 独立 runner 的无特权限权 prototype 已被原生 token 弱化写入证伪。目标改为不可移除安全属性 + 条件 ACL；TokenSecurityAttributes 需要 SeTcbPrivilege，用户已授权继续实现经管理员安装的 SYSTEM broker。保留 owner-implicit WRITE_DAC 与父目录删除的防绕过要求。具体设计与 Windows partial 边界见 ADR-0019，不复制实现合同。
 3. 原生验证混合根九格、Node / PowerShell / 后代进程 / ConPTY、fd 7、受保护 DACL、删除/重命名/ACL 编辑、令牌派生、撤销快照、路径失效与并发。
 4. `smoke:behavior` 和安装 tarball 的 `smoke:packed` 均通过真实 Full-access pwsh 执行允许/拒绝矩阵；全部 11 版本 × 启用 OS 在现有 CI 验收。
 

@@ -73,7 +73,9 @@
     "README.en.md",
     "CHANGELOG.md",
     "CHANGELOG.en.md",
-    "LICENSE"
+    "LICENSE",
+    "scripts/windows-broker/*.ps1",
+    "scripts/windows-broker/*.cs"
   ],
   "publishConfig": {
     "access": "public"
