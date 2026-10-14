@@ -154,10 +154,10 @@ describe('the restricted argv prefix', () => {
     expect(prefix).not.toContain('--unshare-pid')
     expect(prefix).not.toContain('--proc')
     expect(prefix).not.toContain('--dev')
-    expect(prefix).toContain('--ro-bind-try')
+    expect(prefix).toContain('--ro-bind')
     const bindIndex = prefix.indexOf('--bind')
     expect(prefix[bindIndex + 1]).toBe('/')
-    const roIndex = prefix.lastIndexOf('--ro-bind-try')
+    const roIndex = prefix.lastIndexOf('--ro-bind')
     expect(prefix[roIndex + 1]).toBe(denied)
     expect(prefix[prefix.length - 1]).toBe('--')
   })
@@ -173,7 +173,7 @@ describe('the restricted argv prefix', () => {
       const prefix = await call
       expect(prefix[0]).toBe('bwrap')
       expect(prefix).toContain('--bind')
-      expect(prefix.slice(prefix.indexOf('--ro-bind-try'))).toEqual(['--ro-bind-try', canonicalPath(fixture.outside), canonicalPath(fixture.outside), '--'])
+      expect(prefix.slice(prefix.indexOf('--ro-bind'))).toEqual(['--ro-bind', canonicalPath(fixture.outside), canonicalPath(fixture.outside), '--'])
     }
   })
 
@@ -230,8 +230,8 @@ describe('shell and PTC execute entries', () => {
     const runtime = ctx.get('ptcRuntime') as { run(spec: unknown): Promise<unknown> }
     await runtime.run({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
     const argv = captured.spawned[0]!.argv
-    expect(argv).toContain('--ro-bind-try')
-    expect(argv[argv.indexOf('--ro-bind-try') + 1]).toBe(canonicalPath(fixture.outside))
+    expect(argv).toContain('--ro-bind')
+    expect(argv[argv.indexOf('--ro-bind') + 1]).toBe(canonicalPath(fixture.outside))
     expect(argv.slice(-COMMAND.length)).toEqual(COMMAND)
   })
 
@@ -428,10 +428,9 @@ describe('the workspace-write deny edge', () => {
 
   it('makes a denied root under bwrap temp masking readable through a readonly bind', () => {
     const profile = ['bwrap', '--ro-bind', '/', '/', '--tmpfs', '/tmp', '--bind', '/workspace', '/workspace']
-    // `--ro-bind-try`: a missing source skips the bind instead of failing the
-    // whole launch, so a deleted read-only root cannot break every command.
+    // Mandatory sources keep a vanished deny root from becoming writable.
     expect(denyProfileArgs('bwrap', profile, ['/tmp/readonly']))
-      .toEqual([...profile, '--ro-bind-try', '/tmp/readonly', '/tmp/readonly'])
+      .toEqual([...profile, '--ro-bind', '/tmp/readonly', '/tmp/readonly'])
   })
 
   it('fails closed on Landlock — a denied root under a --rw grant cannot be subtracted', () => {

@@ -548,7 +548,7 @@ Phase 5 完成，专项计划移至 completed；ADR-0020 Accepted，ADR-0019 保
 
 - **权限未知 ≠ 没有限制（P1）**：`registry-contended` 进程发布空 scope 后，Full-access 的 fs / 进程 fence 曾把空 deny 集当作「无限制」放行 ambient 写，可覆写另一进程登记的 `read-only` 根。修复：scope 新增 `authority: 'available' | 'unavailable'`（注册表在构造、contended、storage-failed、config-invalid、releaseAuthority 转场标 `unavailable`，`openDomain` 发布完全部记录后标 `available`）；不可用时 fs fence 以 `writableRoots({mode:'workspace-write'})` 判定（仅主根 + temp，不并入 scope 成员），进程 fence 用 `clampedExecution`（`workspace-write` 探针 + 原 profile 前缀）钳制 shell / PTC / PTY，`spawnTerminal` 不可解析会话经 `hasActiveDenyRoots()` 自动拒绝；模型拓扑在 Full-access + 不可用时固定陈述降级句。
 - **Full-access 不再沿用旧 FsTarget（P1）**：`checkedTarget` 只在 Full-access 且 deny 集为空时返回调用方 target（零根逐字节保持上游）；其余一律重解析 displayPath、以新 `targetKey` 判 deny 并以新 target 执行 mutation——评审的「父目录被换成指向只读根的符号链接」绕过被关闭。
-- **bwrap deny 根改用 `--ro-bind-try`**：此前 `--ro-bind <missing recordedPath>` 使 bwrap 启动即失败，一个被删除的只读根会打断全部 Full-access shell（或其位于 temp 时的 workspace-write 命令）。deny / restrict（含 landlock→bwrap）均改 `--ro-bind-try`；残余（命名空间内可重建目录）已由 fs fence 的 `recordedPath` 拒绝兜底并记录。
+- **bwrap deny 根改用 `--ro-bind-try`（历史决定，已取代）**：此前 `--ro-bind <missing recordedPath>` 使 bwrap 启动即失败，一个被删除的只读根会打断全部 Full-access shell（或其位于 temp 时的 workspace-write 命令）。deny / restrict（含 landlock→bwrap）均改 `--ro-bind-try`；当时记录了命名空间内可重建目录的残余，后续 P1 确认 fs fence 无法兜底进程写入，以下修订撤回该决定。
 
 回归：新增 `tests/b9-review-regressions.spec.ts`（反转的两条 P1 复现：争用进程写只读根与 ambient 区均拒写、接管后恢复；stale target 的 write/edit 均拒写）；scope / registry-lease 增加 authority 状态断言；process-fence 增加 clamped prefix（与上游 `workspace-write` confined argv 逐项一致）与不可解析终端断言；dialects 期望改 `--ro-bind-try`；prompt-context 增加降级句。本机门禁输出见交接报告；未发布，版本号与 allowlist 不变。
 
@@ -560,3 +560,10 @@ Phase 5 完成，专项计划移至 completed；ADR-0020 Accepted，ADR-0019 保
 - **`$DSH_HOME` 受限 Full-access 负授权**：scope 新增 `dshHome` 配置（patch 行 `dshHomePath()`；非法值记 error 忽略）。`danger-full-access` 且（deny 集非空或 authority `unavailable`）时把 canonical home 追加进 `deniedRoots`（`protectedHome`），`workspace-write` / `read-only` 与零根健康 authority 不追加；主根在 home 内时 deny 胜出。fs 有专用拒写文案；`clampedExecution` 改收 deny 集并按 workspace-write 分支规则 graft（POSIX `denyProfileArgs`、Windows `widenWindowsProfile(…, [], denied, primary)`），不可表达 → `SandboxUnavailableError`；模型拓扑固定陈述 home 拒写。Windows 风险如实记录：该 deny 经 `runWindowsDenied` 对 home 整树写**持久化** deny ACE（含父目录守卫），ambient 进程不受影响但存在 ACL 写入量与节点失败面。
 
 回归：process-fence agent/user 终端分轨断言（controller 形状直通、backend 形状受限/钳制、不可解析会话 fail closed）、scope `protectedHome` 触发矩阵、b9-review-regressions home 拒写（含主根位于 home 内）、patch 行 `dshHome`、prompt-context home 陈述句。未发布；版本号与 allowlist 不变。
+
+
+#### 最新 P1：缺失拒写根的 bubblewrap 挂载（2026-10-14）
+
+PR #12 的最新 Code Reviewer 指出 `--ro-bind-try` 会在只读根被删除时跳过挂载，使 Full-access 进程可重建并写入该路径。deny / restrict（含 Landlock fallback）统一改回强制 `--ro-bind`，源缺失时拒绝启动；workspace-write 可写父挂载同样失败关闭。决策、代价与回归场景见 [ADR-0017 缺失根修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#缺失-deny-根必须失败关闭2026-10-14pr-12-最新-p1)。新增 `tests/missing-deny-root.spec.ts`；未发布，版本与 allowlist 不变。
+
+验证：新增三项构造回归在旧实现上均失败，修复后通过；开发 pin 的 compat、lint、双端 typecheck、build、docs:check、pack:check 通过。原生 Seatbelt probe 通过；完整测试 643 通过 / 29 平台跳过（含新增的 3 项 Linux 原生用例）；compose 48/48、behavior 126/126、journey 62/62、packed behavior 125/125，全部冒烟 0 skip。本机为 macOS，bubblewrap / Landlock 不可用，Linux 原生缺失源执行证据待推送后的 CI，不把结构断言记为原生验证。

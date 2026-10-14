@@ -156,7 +156,7 @@ Landlock 的 allowlist 无法实现 Full-access 子树减法，该组合不再�
 
 **复现**：先 resolve 一个普通目录内的文件，再将其父目录替换为指向 `read-only` 根子目录的符号链接，`writeText(oldTarget)` 用启动前的 targetKey 通过 deny 检查并覆写被保护文件（workspace-write 本来就重解析，所以只有 Full-access 有洞）。**决定**：`checkedTarget` 只在「`danger-full-access` 且 deny 集为空」时返回调用方 target（逐字节保持上游零根行为）；其余情形一律 `resolve(target.displayPath)` 取新 target、以 `fresh.targetKey` 跑 deny 检查，并把 `fresh` 交给实际 mutation——检查的身份与写入的身份始终同一个，Full-access 与受限模式一致。
 
-### bwrap 对缺失 deny 根改用 `--ro-bind-try`
+### bwrap 对缺失 deny 根改用 `--ro-bind-try`（已由后续 P1 修订取代）
 
 `--ro-bind <missing recordedPath>` 会让 bwrap 启动即失败（"Can't find source path"），于是一个被删除的 `read-only` 根会打断 Linux 上**所有** Full-access shell（以及它位于 temp 下时的 workspace-write）。**决定**：`denyProfileArgs` 与 `restrictProfileArgs`（含 landlock→bwrap 分支）对 deny 根一律使用 `--ro-bind-try`：源缺失时跳过该 bind 而不是让整个命名空间启动失败。`--ro-bind / /` 的方言识别与 grant bind（`--bind` / `--ro` / 各类 `--rw`）不动。**残余**：Full-access 进程可以在 bwrap 命名空间里重建被删目录并写入——fs fence 仍按 `recordedPath` 拒写，该残余是可接受的进程面缺口，与「missing 根不解除只读边界」的登记语义并存。
 
@@ -165,6 +165,14 @@ Landlock 的 allowlist 无法实现 Full-access 子树减法，该组合不再�
 进程 fence 行注释此前写 `ctx.ptcRuntime.execute`；代码包装的是公开 `run`（私有 `execute` 不作为跨包接缝）。注释已改为 `ctx.ptcRuntime.run`，并补记未知 authority 的 Full-access 降级。
 
 回归：`tests/b9-review-regressions.spec.ts`（反转的两条 P1 复现）、scope / registry-lease 的 authority 状态断言、process-fence 的 clamped prefix 与 unresolvable-terminal 断言、dialects 的 `--ro-bind-try` 期望、prompt-context 的降级句。
+
+## 缺失 deny 根必须失败关闭（2026-10-14，PR #12 最新 P1）
+
+本节取代上述 `--ro-bind-try` 决定。fs fence 只约束进程内文件工具，不能兜底 shell、PTC 或 Agent PTY 的写入；把缺失源跳过会让可写的父挂载暴露同一路径，命令可重建目录并写入，因此该残余违背「missing 根不解除只读边界」的不变量。
+
+`denyProfileArgs` 与 `restrictProfileArgs`（包括 Landlock 转 bubblewrap）对拒写根统一使用强制 `--ro-bind R R`。路径在登记后或 profile 构造后消失时，由 bubblewrap 在执行目标命令前拒绝启动；不做先 stat 再可选挂载，不放行裸命令，也不授予父目录额外权限。目录恢复后同一 profile 可再次启动，ambient 写入与该根拒写的边界保持原状。代价是缺失根会阻断依赖该拒写挂载的新进程；用户可恢复目录，或显式移除登记。
+
+回归：`tests/missing-deny-root.spec.ts` 覆盖 Full-access bwrap、Landlock fallback 与 workspace-write 可写父挂载三种构造，固定强制挂载拼写；Linux 原生用例在构造 profile 后删除根，验证启动失败、命令未执行、目录未重建，并验证恢复目录后的 ambient 可写与只读根拒写。原生执行前先探测 bubblewrap，沿用已有 kernel-runner 必须执行/显式跳过规则。现有 process-fence 测试同步强制挂载期望。
 
 ## 用户终端直通与 `$DSH_HOME` 负授权修订（2026-10-14）
 

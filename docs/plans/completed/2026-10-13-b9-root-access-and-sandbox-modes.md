@@ -124,7 +124,7 @@ ADR-0019 属性条件路径被证伪后，以 [ADR-0020](../../decisions/ADR-002
 
 1. **权限未知不再读作「没有限制」（P1）**：争用 / storage-failed / config-invalid / 拆除后的注册表发布空 scope 并标记 `authority: 'unavailable'`；该事实不可用时 Full-access 的 fs 写与 shell / PTC / PTY 执行都降级为上游 `workspace-write`（fs 侧 `writableRoots({mode:'workspace-write'})`、进程侧 `clampedExecution` 探针前缀），`spawnTerminal` 不可解析会话经 `hasActiveDenyRoots()` 拒绝，模型拓扑陈述降级句。
 2. **Full-access 重解析 checked target（P1）**：`checkedTarget` 只在 Full-access + 空 deny 集时直通调用方 `FsTarget`；其余情形重解析 displayPath、以新 targetKey 判 deny 并以新 target 执行 write/edit，堵住「父目录被换成指向只读根的符号链接」的 stale-target 绕过。
-3. **bwrap deny 根用 `--ro-bind-try`**：缺失的 deny 根不再让整个 bwrap 命名空间启动失败；命名空间内重建目录的残余由 fs fence 的 `recordedPath` 拒绝兜底。
+3. **bwrap deny 根用 `--ro-bind-try`（历史决定，已取代）**：当时避免缺失源导致启动失败；后续 P1 指出 fs fence 不能兜底进程写入，已改回强制挂载，见 [ADR-0017 缺失根修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#缺失-deny-根必须失败关闭2026-10-14pr-12-最新-p1)。
 4. `cordis.patch.yml` 进程 fence 注释订正为公开 `ctx.ptcRuntime.run` 接缝并补记降级。
 
 回归：`tests/b9-review-regressions.spec.ts`（反转的两条 P1 复现）、scope / registry-lease 的 authority 断言、process-fence 的 clamped prefix 与不可解析终端断言、dialects 的 `--ro-bind-try` 期望、prompt-context 降级句。未发布；版本号、tag 与 allowlist 不变。

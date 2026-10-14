@@ -350,13 +350,10 @@ function landlockWritablePaths(profileArgs: readonly string[]): string[] {
  * - seatbelt appends a trailing `(deny file-write* (subpath …))` form — last
  *   match wins over every earlier allow, and a redundant deny on an ungranted
  *   root is harmless;
- * - bwrap re-mounts the root `--ro-bind-try` AFTER the writable binds (a later
- *   mount wins inside the namespace, and the `-try` spelling skips a missing
- *   source instead of failing the whole launch — a deleted `read-only` root
- *   must not break every confined command); roots under a `--tmpfs` target
- *   are skipped — the tmpfs masks them entirely. Residual: a missing denied
- *   root also cannot be masked, so a process that recreates the directory
- *   writes into it — the fs fence still refuses it by `recordedPath`;
+ * - bwrap re-mounts the root `--ro-bind` AFTER the writable mounts (a later
+ *   mount wins inside the namespace). The source is mandatory: if a denied
+ *   root disappears, namespace setup fails before the command can recreate it.
+ *   This also restores read access to denied roots under a `--tmpfs` target;
  * - landlock cannot subtract: a denied root under an `--rw` grant throws —
  *   union semantics have no deny primitive;
  * - windows-acl goes through `widenWindowsProfile`, whose runner-side ACL
@@ -390,11 +387,9 @@ export function denyProfileArgs(
       const writable = bwrapWritableMounts(profileArgs)
       const binds = deniedRoots
         .filter(root => writable.some(target => profileContains(root, target)))
-        // `--ro-bind-try`: a deleted denied root skips the bind instead of
-        // failing every launch (`--ro-bind` errors on a missing source). The
-        // residual is documented above — a recreated directory is writable in
-        // the namespace, and the fs fence still refuses it.
-        .flatMap(root => ['--ro-bind-try', root, root])
+        // A missing deny source must fail namespace setup: skipping this
+        // mount would let the command recreate the path under a writable grant.
+        .flatMap(root => ['--ro-bind', root, root])
       return [...profileArgs, ...binds]
     }
     case 'landlock': {
@@ -424,10 +419,8 @@ export function denyProfileArgs(
  *   trailing `(deny file-write* (subpath …))` — allow-default with subpath
  *   carve-outs, the inverse of the confined profiles;
  * - bwrap: `--ro-bind / /` becomes `--bind / /` (ambient writable namespace),
- *   each denied root is re-mounted `--ro-bind-try` after it — the `-try`
- *   spelling skips a missing source, so a deleted `read-only` root cannot
- *   break every ambient command (residual: a recreated directory is writable
- *   in the namespace; the fs fence still refuses it);
+ *   each denied root is re-mounted `--ro-bind` after it. A missing source
+ *   fails the launch, retaining the registered negative authorization;
  * - landlock and windows-acl cannot express "everything except" — the launcher
  *   only unions allowlists and the ACL model only grants — so both throw.
  * @param dialect - the recognized dialect.
@@ -464,7 +457,7 @@ export function restrictProfileArgs(
       // Retain the runner invocation but do not inherit confined-mode PID,
       // proc, device or temporary mounts into the Full-access combination.
       const args = [...profileArgs.slice(0, base), '--bind', '/', '/', '--die-with-parent']
-      for (const root of deniedRoots) args.push('--ro-bind-try', root, root)
+      for (const root of deniedRoots) args.push('--ro-bind', root, root)
       return args
     }
     case 'landlock':
@@ -472,7 +465,7 @@ export function restrictProfileArgs(
       // mount backend for it, preserving ambient writes outside denied roots.
       // Missing/unusable bubblewrap is a runner failure, never a bare spawn.
       return ['bwrap', '--bind', '/', '/', '--die-with-parent',
-        ...deniedRoots.flatMap(root => ['--ro-bind-try', root, root])]
+        ...deniedRoots.flatMap(root => ['--ro-bind', root, root])]
     case 'windows-acl':
       throw new DialectUnrecognizedError('Windows ACL cannot express an ambient grant minus subtree denies — the restricted-token model only grants')
   }
