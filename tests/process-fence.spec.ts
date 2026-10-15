@@ -141,9 +141,14 @@ describe('the restricted argv prefix', () => {
     const sbpl = prefix[prefix.length - 2]!
     expect(sbpl).toContain('(allow default)')
     // The deny form pins the root's ancestors as literals too: renaming the
-    // parent directory must not carry the tree past its deny boundary.
+    // parent directory must not carry the tree past its deny boundary. The
+    // ancestor walk only reads POSIX spellings — a Windows-spelled root
+    // contributes none (its deny ACE follows the directory object, so the
+    // platform needs no pinning; ADR-0017).
     expect(sbpl).toContain(`(deny file-write* ${sbplSubpath(denied)}`)
-    expect(sbpl).toContain(`(literal "${canonicalPath(fixture.base)}")`)
+    if (process.platform !== 'win32') {
+      expect(sbpl).toContain(`(literal "${canonicalPath(fixture.base)}")`)
+    }
     expect(sbpl).not.toContain('(allow file-write*')
   })
 

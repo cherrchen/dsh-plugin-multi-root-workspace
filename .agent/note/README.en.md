@@ -21,6 +21,7 @@ The core test:
 ## Current State
 
 - [dsh-compat-contract.en.md](./dsh-compat-contract.en.md) — the DSH compatibility contract: the allowlist's single source of truth, how the `multiRootCompat` gate affects tests, `confine`'s shape-preserving sync/async adapter, the rules for `src/compat/`, how to use the upgrade lane, and two quiet traps already stepped in.
+- [windows-deny-broker-packaged-child.en.md](./windows-deny-broker-packaged-child.en.md) — the B9 Windows deny broker's MSIX-alias trap: Store `pwsh.exe` launched through an execution alias gets a package-identity token, and `NtCompareTokens` fails closed; includes the minimal reproduction matrix and candidate fixes.
 
 ## What Does Not Belong Here
 
