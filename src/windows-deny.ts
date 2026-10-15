@@ -68,6 +68,7 @@ export async function runWindowsDenied(
       getAce: [advapi32, 'int', ['void*', 'uint32', 'void*']],
       addAce: [advapi32, 'int', ['void*', 'uint32', 'uint32', 'void*', 'uint32']],
       getTempPathW: [kernel32, 'uint32', ['uint32', 'void*']],
+      getPackageFullName: [kernel32, 'int32', ['void*', 'void*', 'void*']],
       writeFile: [kernel32, 'int', ['void*', 'void*', 'uint32', 'void*', 'void*']],
       readFile: [kernel32, 'int', ['void*', 'void*', 'uint32', 'void*', 'void*']],
       peekNamedPipe: [kernel32, 'int', ['void*', 'void*', 'uint32', 'void*', 'void*', 'void*']],
@@ -314,6 +315,27 @@ export async function runWindowsDenied(
     }, {
       sourceToken: currentToken,
       assign(child, thread) {
+        // A packaged (MSIX / Store) child carries a package identity the minted
+        // deny token cannot preserve; refuse with an actionable diagnosis rather
+        // than the broker's opaque NtCompareTokens mismatch.
+        const packageNameLength = Buffer.alloc(4)
+        const packageProbe = api.getPackageFullName!(child, packageNameLength, null)
+        if (packageProbe === 122) { // ERROR_INSUFFICIENT_BUFFER: the child IS packaged
+          const nameBuffer = Buffer.alloc(packageNameLength.readUInt32LE() * 2)
+          const read = api.getPackageFullName!(child, packageNameLength, nameBuffer)
+          const fullName = read === 0
+            ? nameBuffer.subarray(0, (packageNameLength.readUInt32LE() - 1) * 2).toString('utf16le')
+            : `<unreadable, Win32 ${read}>`
+          throw new Error(
+            `deny launch refused: ${argv[0]} started as packaged (MSIX/Microsoft Store) application ${fullName}; `
+            + 'a packaged process carries a package identity the deny token cannot preserve. '
+            + 'Install the MSI or ZIP build of PowerShell (or use a non-packaged executable) '
+            + 'and put it ahead of the WindowsApps alias on PATH',
+          )
+        }
+        if (packageProbe !== 15700) { // APPMODEL_ERROR_NO_PACKAGE: ordinary non-packaged child
+          throw new Error(`GetPackageFullName(child) failed (Win32 ${packageProbe})`)
+        }
         assignDenyToken(brokerUser, native.koffi.address(child), native.koffi.address(thread), denies, {
           open(pipe) {
             const handle = api.createFileW!(pipe, 0xc0000000, 0, null, 3, 0, null)

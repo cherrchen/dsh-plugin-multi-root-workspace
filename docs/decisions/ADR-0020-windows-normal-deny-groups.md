@@ -22,7 +22,7 @@ Accepted（2026-10-13；Windows 原生及完整门禁证据只见路线账本）
 - broker 返回同一调用方进程内的有限权限 handle；读写 socket 失败则尽力关闭已回传 handle。runner 再用 CreateRestrictedToken 验证普通 deny-only groups，但由 broker 创建的 token 不是 runner 自身的直接派生，实际 CreateProcessAsUserW 返回 Win32 1314，不能直接用于启动。公开 helper 必须以原 runner token 创建暂停的子进程（检查 CREATE_SUSPENDED），经下面的 assignment 操作后才能由 helper 加 Job / ResumeThread。
 - runner 在 ACL 编辑 / spawn 前读回真正派生 token 的 TokenGroups，逐根验证普通组的 deny-only 标志及禁用 enabled 标志。任何安装、认证、创建、回读失败都禁止裸启动。
 - 每根使用 **普通 deny ACE**，trustee 为该 root deny SID。去掉 restricting list 或把全部普通 groups disable 后，该 trustee 仍在普通 deny-only groups 中匹配。宿主从未携带这些 groups，因此保留同一树的写与 ACL 管理权限。
-- 协议 v3 只携带子进程 / 主线程 handle 与 root deny IDs，不携带命令、路径、cwd、环境或任意 token。broker 从 pipe 身份认证原 runner，拒绝 IsTokenRestricted 或 TokenHasRestrictions；验证子进程内核 parent PID 等于 caller PID、线程属于该子进程，且原子进程 token 与 caller process token 经 NtCompareTokens 相等。随后创建新的同身份 deny-only token，保护其对象 DACL，设置该子进程的 ProcessAccessToken。失败或子进程已开始执行时拒绝赋值；不提供任意运行中进程的身份切换。
+- 协议 v3 只携带子进程 / 主线程 handle 与 root deny IDs，不携带命令、路径、cwd、环境或任意 token。broker 从 pipe 身份认证原 runner，拒绝 IsTokenRestricted 与 AppContainer 调用方；UAC 过滤令牌（TokenHasRestrictions，无 restricting SID）按 2026-10-16 修订放行；验证子进程内核 parent PID 等于 caller PID、线程属于该子进程，且原子进程 token 与 caller process token 经 NtCompareTokens 相等。随后创建新的同身份 deny-only token，保护其对象 DACL，设置该子进程的 ProcessAccessToken。失败或子进程已开始执行时拒绝赋值；不提供任意运行中进程的身份切换。
 - 客户端只在 public create binding 的暂停窗口中调用 v3，限定 IPC 时间与长度，并读回实际子进程 token 的完整 deny-only 组集合；ACK 不能作为放行依据。任何 assignment / 回读错误都终止并关闭暂停子进程，不得调用 ResumeThread。fd 7 与 ConPTY 沿用同一公开 helper，未知创建 flag 形状在创建前 fail closed。
 - broker 赋值 token 的对象 DACL 拒绝 group / privilege / default 调整及 descriptor 编辑；query、duplicate 与实际 impersonation 保留。TokenDefaultDacl 保留 caller 原值，避免把 token-specific 权限位写进 ambient 新对象的默认 ACL；普通 deny-only groups 自身不能通过 token narrowing 删除或恢复为 enabled。既有 owner / parent / protected-descendant、ConPTY / fd 7 合同不变。
 
@@ -61,3 +61,22 @@ broker 的 v2/v3 拒写身份预算由 64 提升为 **256**，与注册表新增
 历史超限记录不删除、不截断，scope / fs 仍保留其授权语义；**Windows Full-access 新进程若需要超过 256 个拒写边界（包含 home），在构造 prefix 或 runner 改 ACL 前明确拒绝整次启动**，文案给出实际数量并要求减少登记限制。此限制是有界 IPC / 原生令牌构造的运行容量，不是新的注册表上限，也不是以缺失 deny 换取启动成功。原生系统的其他 token/ACL 前置条件仍可能拒绝启动，enforcement 维持 partial。
 
 安装的 service create → 新增 LSA rights → staging JSON 写入 → 完整记录发布 → 启动/等待 Running 纳入同一回滚路径。staging 写入或发布失败也撤销这次新增的 rights，保留安装前的 rights；清理 staging / committed 记录与失败的服务。记录先完整写入 `.pending` 再移动到正式路径，避免半截 JSON 阻断未来卸载。原生 `verify-install.ps1` 分别注入记录写入、发布和服务启动失败，实际回读 LSA policy 与 SCM，随后重装、升级、卸载，继续检查预存权限和其他账户 policy。
+
+## 过滤令牌放行与打包子进程诊断（2026-10-16，Windows 真机验证）
+
+真机发现：原「拒绝 TokenHasRestrictions」规则把所有**非提权** UAC 管理员 runner 挡在门外——UAC 管理员的普通（filtered）token 本身 TokenHasRestrictions=1，每条非提权命令都被 `Caller process must be an unrestricted installation identity` 拒绝。CI 全程提权、无 UAC 过滤，从未触发该路径。
+
+**新调用方验收规则**（经用户定案）：拒绝 `IsTokenRestricted`（restricting SID / write-restricted）与 `TokenIsAppContainer`（class 29），接受 `TokenHasRestrictions`（class 21）——三类拒绝各自报独立文案。`MintDenyToken` 同步去掉 class 21 条件、保留 class 29。
+
+**为何放行不扩权**：minted token 逐字段镜像调用方——groups 按原属性逐位复制（deny-only 的 Administrators 仍是 deny-only）、privileges、mandatory label、auth id 与 session 全部照搬；从 filtered caller 铸出的 token 不拥有调用方之外的任何权力。remint 同样镜像既有 deny-only groups：受限子进程请求再铸币时新 token 仍携带原 deny 边界（原生回归已断言 deny-only 组保留且模拟写仍被拒）。
+
+**残余风险（已接受）**：SYSTEM 服务现在对安装用户的 medium-IL 进程可达——但标准用户本就可达该服务，UAC 也不是安全边界；输入仍有界且经正则校验。
+
+**兼容性损失（已接受）**：minted token 不携带 filtered 源的 linked token 与虚拟化标志，子进程失去「以提权副本自居」的语义——这正是本机制想要的。
+
+**打包子进程**：MSIX 激活给子进程 token 写入包身份 security attributes，`NtCompareTokens` 必然返回不等（minted token 不镜像这些 claims）。真机确认 `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe` 别名**与** `C:\Program Files\WindowsApps\<包全名>\pwsh.exe` 真实 exe 同样走打包激活（候选 A「直接执行包内 exe」被证伪）。赋值仍 fail-closed，但 runner 在 `assign` 回调起始处用 kernel32 `GetPackageFullName` 结构探测（122=已打包、15700=非打包、其他错误码同样拒绝），对打包子进程给出可操作诊断：安装 MSI/ZIP 版 PowerShell 并把非打包可执行文件排在 WindowsApps 别名之前。本地验证用 `%TEMP%\pwsh-portable\pwsh.exe`（zip 解压版）可通过全链路。
+
+**残余（真机发现，未修改）**：
+
+- 属主残余：deny 遍历要求每个路径归调用方所有；提权会话创建的路径属主为 BUILTIN\Administrators（filtered token 仅 deny-only 持有），此类路径作为只读根或位于 `$DSH_HOME` 内时，非提权受限 Full-access 启动 fail-closed 报 `deny ACL requires caller-owned path`，须先 `icacls <path> /setowner <user> /T` 修正属主。
+- pnpm 硬链接残余：`$DSH_HOME` profile `node_modules` 是全局 store 的硬链接，共享同一安全描述符，deny ACE 会写到 store 文件及其全部链接；store 文件由提权安装创建时遍历直接 fail-closed。跳过硬链接不安全（文件内容写由文件自身 ACL 约束），留作开放决策。

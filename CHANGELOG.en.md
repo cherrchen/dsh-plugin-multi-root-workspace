@@ -38,6 +38,7 @@ This file records the user-visible changes of every **released** version.
 - **The Windows runner re-verifies roots before spawn**: after the ACL grant and before the child starts, every root must still exist and resolve to the same canonical directory, and `--temp` must be an existing directory; anything else exits 127 without launching an unconfined process.
 - **"Reveal in file manager" no longer reports failure on Windows**: `explorer.exe` returns 1 on success, so exit codes 0 and 1 are both accepted on win32.
 - **Panel file endpoints reject backslash paths**: on POSIX, `..\..\x` previously resolved inside the selected root; backslashes are now rejected lexically.
+- **The Windows broker accepts UAC-filtered callers and diagnoses packaged children**: restricted commands launched by a non-elevated UAC administrator were previously refused for not being an "unrestricted identity"; only callers carrying restricting SIDs or an AppContainer are refused now, and a Store/MSIX child (such as `pwsh.exe` under the WindowsApps alias) gets a diagnostic pointing at the MSI/ZIP build before launch. After upgrading, reinstall the broker once with `install.ps1` for this to take effect ([ADR-0020 amendment](./docs/decisions/ADR-0020-windows-normal-deny-groups.md)).
 - **Panel file-tree calls are abortable**: in-flight `files` / `readFile` calls are cancelled on unmount, path, or session change, so stale responses no longer render as errors.
 
 ### Changed

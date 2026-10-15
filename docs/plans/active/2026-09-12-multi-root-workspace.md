@@ -579,3 +579,24 @@ PR #12 的最新 Code Reviewer 指出 `--ro-bind-try` 会在只读根被删除�
 PR #12 评审的又一处 P1：deny 根的祖先目录被改名即可把整棵树搬出 subpath deny（Seatbelt 只检查被操作路径，fs fence 的 deny 集仍记旧 `recordedPath`）。修复钉住每个祖先：Seatbelt deny 形式追加 `(literal A)`（restrict 与 workspace-write covered 根一致），bwrap 把祖先 `--bind A A` 自绑成挂接点使 `rename` 返回 EBUSY（restrict 全量钉扎、workspace-write 只钉可写 bind 目标内的祖先，tmpfs 内与挂载点自身不绑，ro-bind 仍在最后）；Windows deny ACE 随目录对象走，不受影响。代价：受限 Full-access 进程不能 rename/chmod/touch 被拒根与 `$DSH_HOME` 的祖先目录（目录内读写不变）。决定、复现与取舍见 [ADR-0017 本节](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#祖先目录改名不得解除拒写2026-10-15pr-12-评审-p1)；Linux 侧由 bwrap 原生 CI 用例验证，本机无 Linux。
 
 同批收尾：进程栅栏的入口形状探测收进 `src/compat/process-entrypoints.ts`（shell `execute`/`run`/`start` 与 PTC 公开 `run`，业务代码不再出现版本注释）；Full-access 拓扑在存在拒写根时补「授权变化只对后续操作与新进程生效」句；README/CHANGELOG/指南补齐 B9 三态合同与两条边界说明（Landlock 主机上受限 Full-access 需要 bwrap 否则拒绝启动；持久终端/已运行进程保留启动时 deny 集）。未发布，版本号与 allowlist 不变。
+
+#### Windows 真机验证（2026-10-16）
+
+Windows 实机（非 CI）验证暴露两个 CI 不可见的问题，处置经用户定案，决策细节见 [ADR-0020 本轮修订](../../decisions/ADR-0020-windows-normal-deny-groups.md#过滤令牌放行与打包子进程诊断2026-10-16windows-真机验证)：
+
+- **UAC 过滤令牌被误拒**：`TokenHasRestrictions` 拒绝规则挡住全部非提权 UAC 管理员 runner（`Caller process must be an unrestricted installation identity`）。改判为拒绝 `IsTokenRestricted` 与 `TokenIsAppContainer`、放行 filtered token——minted token 逐位镜像调用方身份，放行不扩权。**升级后需 `install.ps1` 重装 broker**。
+- **打包子进程保持 fail-closed，加诊断**：Store/MSIX 版 `pwsh.exe`（别名与包内真实 exe 均验证走打包激活，「直接执行包内 exe」候选证伪）携带包身份，`NtCompareTokens` 必不等。runner 在赋值前用 `GetPackageFullName` 探测，对打包子进程给出指向 MSI/ZIP 版的可操作诊断。
+
+真机验证数字：
+
+- **提权侧**（broker 按当前源码重装，ZIP 版 pwsh 7.6.0 居 PATH 首位）：`windows-native.e2e` **24/24**（含三条新增用例：filtered caller 放行、受限子进程嵌套 deny 集、打包子进程诊断；remint 用例改判为验证 deny-only 组被保留）；smoke:behavior **126/0/0**、smoke:packed **125/0/0**。
+- **改动前的提权基线**：compat/lint/typecheck/build/kernel:probe/docs 通过；compose **48/0/0**。`working-directory.e2e`（2 用例）与 journey 的「pwsh saw the other repository's diff」仅在提权下失败（提权创建的目录归 Administrators，git 报 dubious ownership）；非提权下通过：**5/5**、journey **62/0/0**。
+- **改动后的非提权侧**：探针矩阵——node `denied:EPERM`、Store 别名 exit 127 且报打包诊断、ZIP pwsh `denied:UnauthorizedAccessException`；smoke:behavior **126/0/0**（先清除上一提权运行留下的 Administrators 属主 `%TEMP%\dsh-multi-root-smoke` 残留后）、smoke:journey **62/0/0**、smoke:packed **104 通过 / 1 跳过**（见残余 2）；`windows-native.e2e` **22/24**，2 个失败均为仅提权可构造的夹具（另一驱动器 `C:\` 根的 ACL 写入、指定外国属主）；完整 `pnpm test` **676 通过 / 2 失败（同两条）/ 46 跳过**；compat/lint/typecheck/docs 通过。
+- CI run 38767014622（commit 21369d9，win32 断言修复提交）：**47/47 全绿**。
+
+残余（真机发现，未修改）：
+
+- **属主残余**：runner 的 deny 遍历要求每个路径归调用方所有。提权会话创建的路径属主为 BUILTIN\Administrators，而 filtered token 仅以 deny-only 形式持有该组。此类路径若为只读根或位于 `$DSH_HOME` 内，非提权的受限 Full-access 启动会 fail-closed 报 `deny ACL requires caller-owned path`（安全但不可用，须先修正属主，例如 `icacls <path> /setowner <user> /T`）。
+- **pnpm 硬链接残余**：pnpm 把全局 store（`%LOCALAPPDATA%\pnpm\store`）中的包文件硬链接进 `$DSH_HOME` 各 profile 的 `node_modules`，也链进其他项目。硬链接共享同一份安全描述符，因此 `$DSH_HOME` 的 deny 遍历会把常驻 deny ACE 写到 store 文件及其全部链接上。已用 `fsutil hardlink list` 验证：一个仓库文件与 store 及另两个项目共享链接。而 store 文件若是提权安装所建，遍历会 fail-closed（即非提权 `smoke:packed` 的跳过原因：`...\dsh-plugin-multi-root-workspace\CHANGELOG.md` 非调用方所有）。跳过硬链接不安全——文件内容写受文件自身 ACL 约束，跳过的链接会让受限子进程改动 `$DSH_HOME` 内的插件代码。留作用户的开放决策。
+
+未发布，版本号与 allowlist 不变。

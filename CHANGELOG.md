@@ -38,6 +38,7 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - **Windows runner 在 spawn 前重新验证根**：授权 ACL 之后、启动子进程之前重新确认每个根仍存在且是同一 canonical 目录，并要求 `--temp` 已存在；不满足即退出 127，不启动无约束进程。
 - **Windows 上「在文件管理器中显示」不再误报失败**：`explorer.exe` 成功时也返回 1，win32 现在接受退出码 0/1。
 - **面板文件端点拒绝反斜杠路径**：POSIX 上 `..\..\x` 此前会解析到所选根内部；现在词法拒绝。
+- **Windows broker 放行 UAC 过滤调用方并诊断打包子进程**：非提权 UAC 管理员发起的受限命令此前被 broker 以「unrestricted 身份」拒绝；现在只拒绝携带 restricting SID 或 AppContainer 的调用方，Store/MSIX 版子进程（如 WindowsApps 别名的 `pwsh.exe`）在启动前给出指向 MSI/ZIP 版的诊断。升级后需用 `install.ps1` 重装一次 broker 才会生效（[ADR-0020 修订](./docs/decisions/ADR-0020-windows-normal-deny-groups.md)）。
 - **面板文件树调用可中止**：组件卸载、路径或会话变化时取消在飞的 `files` / `readFile` 调用，过期响应不再渲染为错误。
 
 ### Changed

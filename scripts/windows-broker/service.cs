@@ -94,8 +94,9 @@ public sealed class RootDenyBroker : ServiceBase {
                 // only QUERY/QUERY_SOURCE while impersonating the authenticated
                 // pipe caller, then revert before any privileged minting.
                 pipe.RunAsClient(() => { Check(OpenProcessToken(process, 0x18, out processToken), "OpenProcessToken(client)"); });
-                if (TokenSid(processToken) != sid || RestrictedSource(processToken))
+                if (TokenSid(processToken) != sid)
                     throw new UnauthorizedAccessException("Caller process must be an unrestricted installation identity");
+                RefuseRestrictedSource(processToken);
                 if (assigning) {
                     AssignToChild(process, processToken, pid, fields[1], fields[2], roots, pipe);
                     return;
@@ -182,10 +183,17 @@ public sealed class RootDenyBroker : ServiceBase {
         try { Check(GetTokenInformation(token, 1, data, length, out length), "GetTokenInformation(user)"); return new SecurityIdentifier(Marshal.ReadIntPtr(data)).Value; }
         finally { Marshal.FreeHGlobal(data); }
     }
-    static bool RestrictedSource(IntPtr token) {
-        if (IsTokenRestricted(token)) return true;
-        var data = Query(token, 21);
-        try { return Marshal.ReadInt32(data) != 0; } finally { Marshal.FreeHGlobal(data); }
+    // UAC-filtered callers (TokenHasRestrictions) are accepted: minting only
+    // mirrors the caller's own groups, privileges and label, so no authority is
+    // gained. Real restricting SID lists and AppContainer stay refused.
+    static void RefuseRestrictedSource(IntPtr token) {
+        if (IsTokenRestricted(token))
+            throw new UnauthorizedAccessException("Caller process token carries restricting SIDs");
+        var data = Query(token, 29);
+        try {
+            if (Marshal.ReadInt32(data) != 0)
+                throw new UnauthorizedAccessException("AppContainer caller unsupported");
+        } finally { Marshal.FreeHGlobal(data); }
     }
     static IntPtr Query(IntPtr token, int kind) {
         int length;
@@ -224,8 +232,8 @@ public sealed class RootDenyBroker : ServiceBase {
         try {
             Func<int, IntPtr> query = kind => { var p = Query(source, kind); memory.Add(p); return p; };
             // Fail closed for token types whose full authority cannot be mirrored here.
-            if (Marshal.ReadInt32(query(29)) != 0 || Marshal.ReadInt32(query(21)) != 0)
-                throw new UnauthorizedAccessException("Restricted or AppContainer source unsupported");
+            if (Marshal.ReadInt32(query(29)) != 0)
+                throw new UnauthorizedAccessException("AppContainer source unsupported");
             // NtCreateTokenEx cannot silently discard enterprise/device claims.
             // This narrow broker accepts only sources without those channels.
             if (Marshal.ReadInt32(query(33), 4) != 0 || Marshal.ReadInt32(query(34), 4) != 0

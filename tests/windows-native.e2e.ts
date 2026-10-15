@@ -7,7 +7,7 @@ import { rootDenySid } from '../src/windows-runner-contract.ts'
  * fixtures in `finally`.
  */
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -296,21 +296,42 @@ attempt(impersonate(derived));
 attempt(impersonate(disabled));
 const threadOut=Buffer.alloc(8), copied=duplicate(derived,4,null,2,2,threadOut);
 if(copied){const thread=k.decode(threadOut,'void*');attempt(setThread(null,thread));close(thread)}else throw Error('weak token duplication failed');
-// A sandboxed process must not ask the broker to remint its process identity
-// without the existing denies. Authenticate from the process token, not the
-// supplied handle or a temporary thread impersonation.
+// A confined caller may ask the broker to remint its process identity: its
+// token carries no restricting SIDs, only UAC-style TokenHasRestrictions, which
+// the broker now accepts. Reminting must mirror the existing deny-only groups —
+// the returned token still carries the root deny SID as deny-only, and an
+// impersonation built from it still cannot write the seed.
 const convert=bind(a,'ConvertSidToStringSidW','int',['void*','void*']);
+const free=bind(b,'LocalFree','void*',['void*']);
+const gle=bind(b,'GetLastError','uint32',[]);
 const sidOut=Buffer.alloc(8);if(!convert(k.decode(user,'void*'),sidOut))throw Error('SID query failed');
-const sidText=k.decode(k.decode(sidOut,'void*'),'char16_t',-1);
+const sidText=k.decode(k.decode(sidOut,'void*'),'char16_t',-1);free(k.decode(sidOut,'void*'));
 const pipeName='DshMultiRootBroker-'+require('crypto').createHash('sha256').update(sidText).digest('hex').slice(0,16);
 const socket=require('net').createConnection(${JSON.stringify('\\\\.\\pipe\\')}+pipeName);
 const timeout=setTimeout(()=>{socket.destroy();throw Error('broker timeout')},10000);
 let response='';socket.on('connect',()=>socket.write('2|'+k.address(source)+'|'+${JSON.stringify(rootDenySid(canonicalPath(fixture.outside)))}+'\\n'));
-socket.on('error',e=>{throw e});socket.on('data',b=>{response+=b.toString();if(!response.includes('\\n'))return;clearTimeout(timeout);socket.destroy();if(!response.includes('Caller process must be an unrestricted'))throw Error(response);console.log('broker-denied')});
-close(disabled);close(derived);close(source);close(h);`
+socket.on('error',e=>{throw e});socket.on('data',b=>{response+=b.toString();if(!response.includes('\\n'))return;clearTimeout(timeout);socket.destroy();
+const accepted=response.match(/^OK\\|([0-9]+)/);if(!accepted)throw Error('remint refused: '+JSON.stringify(response));
+const handleSlot=Buffer.alloc(8);handleSlot.writeBigUInt64LE(BigInt(accepted[1]));const minted=k.decode(handleSlot,'void*');
+info(minted,2,null,0,size);const sizingError=gle();const mintedGroups=Buffer.alloc(size.readUInt32LE());
+if(!info(minted,2,mintedGroups,mintedGroups.length,size))throw Error('reminted TokenGroups unavailable Win32='+gle()+' sizingWin32='+sizingError+' handle='+accepted[1]);
+const mintedCount=mintedGroups.readUInt32LE();let mirrored=false;
+for(let i=0;i<mintedCount;i++){const group=mintedGroups.subarray(8+i*16,24+i*16);const flags=group.readUInt32LE(8);
+if((flags&0x10)===0||(flags&4)!==0)continue;const nameOut=Buffer.alloc(8);
+if(!convert(k.decode(group,'void*'),nameOut))throw Error('reminted group SID query failed');
+const name=k.decode(k.decode(nameOut,'void*'),'char16_t',-1);free(k.decode(nameOut,'void*'));
+if(name===${JSON.stringify(rootDenySid(canonicalPath(fixture.outside)))})mirrored=true}
+if(!mirrored)throw Error('reminted token dropped the deny-only root group');
+const impersonationOut=Buffer.alloc(8);
+if(!duplicate(minted,0xF01FF,null,2,1,impersonationOut))throw Error('reminted token duplication failed');
+const impersonation=k.decode(impersonationOut,'void*');
+try{if(!impersonate(impersonation))throw Error('reminted impersonation failed');
+try{fs.writeFileSync(${JSON.stringify(seed)},'escaped');console.log('escaped')}catch(e){if(!['EPERM','EACCES'].includes(e.code))throw e;console.log('remint-keeps-deny')}}finally{revert();close(impersonation)}
+close(minted);close(disabled);close(derived);close(source);close(h)});
+`
       const token = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', tokenProbe])
       expect(token.status, token.stderr).toBe(0)
-      expect(token.stdout.trim().split(/\r?\n/)).toEqual(['denied', 'denied', 'denied', 'broker-denied'])
+      expect(token.stdout.trim().split(/\r?\n/)).toEqual(['denied', 'denied', 'denied', 'remint-keeps-deny'])
       expect(readFileSync(seed, 'utf8')).toBe('seed')
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
   }, 180_000)
@@ -989,6 +1010,130 @@ close(disabled);close(derived);close(source);close(h);`
       const denied = await spawnConfined(mounted, [bash, '-c', `echo x > '${third.replace(/\\/g, '/')}/bash.txt' && echo wrote || echo denied`])
       expect(denied.status, denied.stderr).toBe(0)
       expect(existsSync(join(third, 'bash.txt'))).toBe(false)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('accepts a UAC-filtered caller: the broker mints for a TokenHasRestrictions identity', async () => {
+    const fixture = createFixtureWorkspace('win-filtered')
+    const ambient = join(fixture.base, 'ambient')
+    mkdirSync(ambient)
+    // An elevated run owns new fixtures through the Administrators group, which
+    // a filtered token holds deny-only; hand the fixture paths to the caller's
+    // user SID so the runner's caller-owned check can pass. Non-elevated the
+    // caller already owns them and the icacls result is ignored either way.
+    const systemTool = (name: string): string => join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', `${name}.exe`)
+    const identity = execFileSync(systemTool('whoami'), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' })
+    const userSid = identity.match(/S-1-\d+(?:-\d+)+/)?.[0]
+    if (userSid !== undefined) {
+      for (const dir of [fixture.base, ambient, fixture.outside]) {
+        spawnSync(systemTool('icacls'), [dir, '/setowner', `*${userSid}`], { encoding: 'utf8', timeout: 60_000 })
+      }
+    }
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const prefix = await mounted.provider.restrictedArgvPrefix(
+        { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)],
+      )
+      const koffiEntry = fileURLToPath(import.meta.resolve('koffi'))
+      // Grandchild probe: the denied root refuses writes, ambient accepts them,
+      // Administrators (when listed) is deny-only, and no bypass privilege
+      // survived the filtered-token mint.
+      const probe = `
+const fs=require('fs'), k=require(${JSON.stringify(koffiEntry)});
+const a=k.load('advapi32.dll'), b=k.load('kernel32.dll');
+const bind=(lib,name,ret,args)=>lib.func('__stdcall',name,ret,args);
+const tok=bind(a,'OpenProcessToken','int',['void*','uint32','void*']);
+const info=bind(a,'GetTokenInformation','int',['void*','int','void*','uint32','void*']);
+const privName=bind(a,'LookupPrivilegeNameW','int',['void*','void*','void*','void*']);
+const convert=bind(a,'ConvertSidToStringSidW','int',['void*','void*']);
+const free=bind(b,'LocalFree','void*',['void*']);
+const cur=bind(b,'GetCurrentProcess','void*',[]);
+const close=bind(b,'CloseHandle','int',['void*']);
+const denied=${JSON.stringify(fixture.outside)}, ambient=${JSON.stringify(ambient)};
+try{fs.writeFileSync(denied+'/filtered.txt','bad');console.log('escaped')}catch(e){if(!['EPERM','EACCES'].includes(e.code))throw e;console.log('denied')}
+try{fs.writeFileSync(ambient+'/filtered.txt','ok');console.log('allowed')}catch(e){console.log('ambient-denied:'+(e&&e.code||e))}
+const out=Buffer.alloc(8);if(!tok(cur(),10,out))throw Error('token query unavailable');
+const token=k.decode(out,'void*');const size=Buffer.alloc(4);
+info(token,2,null,0,size);const groups=Buffer.alloc(size.readUInt32LE());
+if(!info(token,2,groups,groups.length,size))throw Error('TokenGroups unavailable');
+const gcount=groups.readUInt32LE();let admins=null;
+for(let i=0;i<gcount;i++){const g=groups.subarray(8+i*16,24+i*16);const so=Buffer.alloc(8);
+if(!convert(k.decode(g,'void*'),so))continue;const name=k.decode(k.decode(so,'void*'),'char16_t',-1);free(k.decode(so,'void*'));
+if(name==='S-1-5-32-544')admins=g.readUInt32LE(8)}
+if(admins===null)console.log('admins-absent');
+else if((admins&0x10)!==0&&(admins&4)===0)console.log('admins-deny-only');
+else throw Error('Administrators retained enabled authority: 0x'+admins.toString(16));
+info(token,3,null,0,size);const privs=Buffer.alloc(size.readUInt32LE());
+if(!info(token,3,privs,privs.length,size))throw Error('TokenPrivileges unavailable');
+const pcount=privs.readUInt32LE();const banned=new Set(['SeDebugPrivilege','SeBackupPrivilege','SeRestorePrivilege','SeTakeOwnershipPrivilege','SeTcbPrivilege','SeAssignPrimaryTokenPrivilege']);
+for(let i=0;i<pcount;i++){const luid=privs.subarray(4+i*12,4+i*12+8);const nameSize=Buffer.alloc(4);nameSize.writeUInt32LE(64);
+const nameBuf=Buffer.alloc(128);if(!privName(null,luid,nameBuf,nameSize))throw Error('LookupPrivilegeNameW failed');
+const name=nameBuf.subarray(0,nameSize.readUInt32LE()*2).toString('utf16le');
+if(banned.has(name))throw Error('bypass privilege survived: '+name)}
+console.log('privs-clean');close(token);`
+      const helper = join(REPO_ROOT, 'tests', 'support', 'windows-filtered-spawn.mjs')
+      const upstreamRunner = UPSTREAM_RUNNER_ARGS()[1]!
+      const argv = [...prefix, process.execPath, '-e', probe]
+      const result = await spawnArgv(process.execPath, [helper, upstreamRunner, fixture.workspace, '--', argv[0]!, ...argv.slice(1)])
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim().split(/\r?\n/)).toEqual([
+        'denied', 'allowed', expect.stringMatching(/^admins-(deny-only|absent)$/), 'privs-clean',
+      ])
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('keeps both deny sets when a confined child runs the Full-access runner again', async () => {
+    const fixture = createFixtureWorkspace('win-nested')
+    // Sibling deny roots must not share a parent: the outer runner's parent
+    // guard denies WRITE_DAC on the first root's parent, which would block the
+    // inner runner's own parent guard for the second root.
+    const secondParent = mkdtempSync(join(dirname(fixture.base), 'dsh-mr-nestedb-'))
+    const second = join(secondParent, 'second-deny')
+    mkdirSync(second)
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const outerPrefix = await mounted.provider.restrictedArgvPrefix(
+        { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)],
+      )
+      const innerPrefix = await mounted.provider.restrictedArgvPrefix(
+        { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [canonicalPath(second)],
+      )
+      const innerArgv = [...innerPrefix, process.execPath, '-e', writeProbe([fixture.outside, second, fixture.workspace], 'nested.txt')]
+      // The outer child's process token is the broker-minted deny token (no
+      // restricting SIDs); the broker may remint it, and the remint must carry
+      // BOTH deny-only groups, so the grandchild writes neither A nor B.
+      const relay = `const r=require('child_process').spawnSync(${JSON.stringify(innerArgv[0])},${JSON.stringify(innerArgv.slice(1))},{encoding:'utf8'});process.stdout.write(r.stdout);process.stderr.write(r.stderr);process.exit(r.status??99)`
+      const result = await spawnArgv(outerPrefix[0]!, [...outerPrefix.slice(1), process.execPath, '-e', relay])
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim().split(/\r?\n/)).toEqual([
+        expect.stringMatching(/^denied:/), expect.stringMatching(/^denied:/), 'allowed',
+      ])
+    } finally { await mounted.ctx.fiber.dispose(); rmSync(secondParent, { recursive: true, force: true }); fixture.dispose() }
+  }, 180_000)
+
+  it('refuses a packaged (MSIX/Store) child with an actionable diagnosis', async (context) => {
+    const alias = join(process.env.LOCALAPPDATA ?? '', 'Microsoft', 'WindowsApps', 'pwsh.exe')
+    // App-execution aliases are reparse points that cannot be stat-followed:
+    // existsSync reports false while lstatSync sees the entry itself.
+    let aliasPresent = false
+    try { aliasPresent = lstatSync(alias).size > 0 } catch { aliasPresent = false }
+    if (!aliasPresent) {
+      context.skip('no Store pwsh app-execution alias on this host')
+      return
+    }
+    const fixture = createFixtureWorkspace('win-packaged')
+    const marker = join(fixture.workspace, 'packaged-ran.txt')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const prefix = await mounted.provider.restrictedArgvPrefix(
+        { mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [canonicalPath(fixture.outside)],
+      )
+      const result = await spawnArgv(prefix[0]!, [...prefix.slice(1), alias, '-NoProfile', '-NonInteractive', '-Command',
+        `[IO.File]::WriteAllText('${marker.replace(/'/g, "''")}', 'ran')`])
+      expect(result.status, result.stdout + result.stderr).toBe(127)
+      expect(result.stderr).toContain('windows-acl-run:')
+      expect(result.stderr).toContain('packaged (MSIX/Microsoft Store)')
+      expect(existsSync(marker)).toBe(false)
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
   }, 180_000)
 })

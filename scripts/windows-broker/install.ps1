@@ -25,7 +25,10 @@ $service = Get-Service -Name $name -ErrorAction SilentlyContinue
 if ($service) { Stop-Service $name -Force; & $sc delete $name | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Cannot remove previous broker service.' }; Start-Sleep -Milliseconds 500 }
 # Revoke only rights this installer added; preserve pre-existing account policy.
 if (Test-Path $rightsRecord) {
-    [DshBrokerRights]::Remove($serviceSid, [string[]]@(Get-Content -Raw $rightsRecord | ConvertFrom-Json))
+    # Windows PowerShell 5.1 emits the JSON array as a single object; cast the
+    # result value directly (not inside @(...)) so it yields one element per
+    # recorded right.
+    [DshBrokerRights]::Remove($serviceSid, [string[]](Get-Content -Raw $rightsRecord | ConvertFrom-Json))
     Remove-Item $rightsRecord -Force
 }
 if ($Uninstall) { if (Test-Path $directory) { Remove-Item $directory -Recurse -Force }; Write-Output "Removed $name"; return }
