@@ -47,7 +47,7 @@ try {
     # Inject each post-grant failure through PowerShell's command resolution.
     # Include a partial staging record, then verify actual LSA policy and SCM.
     foreach ($step in @('Set-Content', 'Move-Item', 'Start-Service')) {
-        Set-Item -Path "Function:global:$step" -Value {
+        Set-Item -Path "Function:$step" -Value {
             Microsoft.PowerShell.Management\Set-Content -LiteralPath "$record.pending" -Value '['
             throw 'Injected installation failure'
         }
@@ -56,12 +56,13 @@ try {
         catch {
             if ($_.Exception.Message -notlike '*Injected installation failure*') { throw }
             $failed = $true
-        } finally { Remove-Item -LiteralPath "Function:global:$step" -Force }
+        } finally { Remove-Item -Path "Function:$step" -Force }
         if (-not $failed) { throw "Failure injection did not run: $step" }
         Assert-Rights (Read-Policy) @($preexisting + 'SeServiceLogonRight')
         if (Test-Path $record) { throw 'Rollback retained a committed rights record.' }
         if (Test-Path "$record.pending") { throw 'Rollback retained a partial rights record.' }
         if (Get-Service $name -ErrorAction SilentlyContinue) { throw 'Rollback retained the failed service.' }
+        Write-Output "Verified rollback after $step failure"
     }
     & $installer
     Assert-Rights (Read-Policy) $required
