@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
-import { DialectUnrecognizedError, detectDialect, splitConfined, widenProfileArgs } from '../src/dialects.ts'
+import { DialectUnrecognizedError, denyProfileArgs, detectDialect, restrictProfileArgs, splitConfined, widenProfileArgs } from '../src/dialects.ts'
 
 const WORKSPACE = '/ws'
 const EXTRA = '/extra'
@@ -163,5 +163,81 @@ describe('the windows-acl rung and mode gating', () => {
     const widened = widenProfileArgs('bwrap', BWRAP, policy(), [])
     expect(widened).toEqual(BWRAP)
     expect(widened).not.toBe(BWRAP)
+  })
+})
+
+describe('deny ancestors (renaming a parent must not walk a tree past its deny)', () => {
+  // The restricted SBPL is rebuilt from `(allow default)` onward — anything
+  // the skeleton carries after it is replaced, never kept.
+  const SKELETON_SBPL = '(version 1) (allow default) (deny file-write*)'
+  const RESTRICTED_SBPL = '(version 1) (allow default)'
+  const SKELETON_BWRAP = ['bwrap', '--ro-bind', '/', '/']
+
+  it('pins every ancestor as a Seatbelt literal in the restricted profile', () => {
+    const restricted = restrictProfileArgs('seatbelt', ['sandbox-exec', '-p', SKELETON_SBPL], ['/T/parent/root'])
+    expect(restricted).toEqual(['sandbox-exec', '-p',
+      `${RESTRICTED_SBPL} (deny file-write* (subpath "/T/parent/root") (literal "/T") (literal "/T/parent"))`])
+  })
+
+  it('dedupes shared ancestors and skips the filesystem root and the denied roots themselves', () => {
+    const restricted = restrictProfileArgs('seatbelt', ['sandbox-exec', '-p', SKELETON_SBPL],
+      ['/a/b', '/a/b/c', '/a/d'])
+    expect(restricted[2]).toContain('(deny file-write* (subpath "/a/b") (subpath "/a/b/c") (subpath "/a/d") (literal "/a"))')
+    expect(restricted[2]).not.toContain('(literal "/")')
+    expect(restricted[2]).not.toContain('(literal "/a/b")')
+  })
+
+  it('emits no literal for a root directly under /', () => {
+    const restricted = restrictProfileArgs('seatbelt', ['sandbox-exec', '-p', SKELETON_SBPL], ['/root'])
+    expect(restricted[2]).toBe(`${RESTRICTED_SBPL} (deny file-write* (subpath "/root"))`)
+  })
+
+  it('keeps ancestor literals out of the deny form when no covered root exists (workspace-write)', () => {
+    const widened = [...SEATBELT.slice(0, -1), `${SEATBELT_PROFILE}`]
+    expect(denyProfileArgs('seatbelt', widened, ['/elsewhere/root'])).toEqual(widened)
+  })
+
+  it('pins ancestors of the covered roots only, inside the same deny form (workspace-write)', () => {
+    const denied = denyProfileArgs('seatbelt', SEATBELT, ['/private/tmp/parent/root'])
+    expect(denied[2]).toContain('(deny file-write* (subpath "/private/tmp/parent/root")'
+      + ' (literal "/private") (literal "/private/tmp") (literal "/private/tmp/parent"))')
+  })
+
+  it('self-binds every ancestor before the ro-binds in the restricted bwrap profile', () => {
+    expect(restrictProfileArgs('bwrap', SKELETON_BWRAP, ['/a/b/root', '/c/root']))
+      .toEqual(['bwrap', '--bind', '/', '/', '--die-with-parent',
+        '--bind', '/a', '/a', '--bind', '/c', '/c', '--bind', '/a/b', '/a/b',
+        '--ro-bind', '/a/b/root', '/a/b/root', '--ro-bind', '/c/root', '/c/root'])
+  })
+
+  it('pins ancestors in the Landlock → bwrap fallback the same way', () => {
+    expect(restrictProfileArgs('landlock', ['/landlock-run', '--ro', '/'], ['/a/b/root']))
+      .toEqual(['bwrap', '--bind', '/', '/', '--die-with-parent',
+        '--bind', '/a', '/a', '--bind', '/a/b', '/a/b',
+        '--ro-bind', '/a/b/root', '/a/b/root'])
+  })
+
+  it('self-binds a covered root\'s renamable ancestors before the ro-binds (workspace-write)', () => {
+    const profile = ['bwrap', '--ro-bind', '/', '/', '--bind', '/work', '/work']
+    expect(denyProfileArgs('bwrap', profile, ['/work/parent/root']))
+      .toEqual([...profile, '--bind', '/work/parent', '/work/parent', '--ro-bind', '/work/parent/root', '/work/parent/root'])
+  })
+
+  it('never self-binds an ancestor inside a --tmpfs target', () => {
+    const profile = ['bwrap', '--ro-bind', '/', '/', '--tmpfs', '/tmp', '--bind', '/work', '/work']
+    expect(denyProfileArgs('bwrap', profile, ['/tmp/parent/root']))
+      .toEqual([...profile, '--ro-bind', '/tmp/parent/root', '/tmp/parent/root'])
+  })
+
+  it('never self-binds an ancestor at or outside the writable bind targets', () => {
+    const profile = ['bwrap', '--ro-bind', '/', '/', '--bind', '/work', '/work']
+    // `/work` IS a mountpoint already and `/` is outside every writable target.
+    expect(denyProfileArgs('bwrap', profile, ['/work/root']))
+      .toEqual([...profile, '--ro-bind', '/work/root', '/work/root'])
+  })
+
+  it('does no profile work for a denied root no grant covers (workspace-write)', () => {
+    const profile = ['bwrap', '--ro-bind', '/', '/', '--bind', '/work', '/work']
+    expect(denyProfileArgs('bwrap', profile, ['/elsewhere/parent/root'])).toEqual(profile)
   })
 })

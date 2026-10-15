@@ -278,6 +278,7 @@ export function renderWorkspaceRootsContext(options: {
       + 'danger-full-access mode has no sandbox isolation'
       + (refused.length > 0
         ? `, except writes under the additional roots ${JSON.stringify(refused)} are still refused${options.toolAccessInvalid === true ? ' because toolAccess is invalid' : ''}.`
+          + ' Grant changes apply to later operations and newly started processes, not to processes already running.'
         : '.') + capNote
   }
   const writable = options.toolAccessInvalid ? [] : roots.filter(root => root.access !== 'read-only').map(root => root.path)

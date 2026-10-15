@@ -35,6 +35,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/dialects
  */
 
+import { posix } from 'node:path'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { isCanonicallyUnder } from './roots.ts'
 import { DialectUnrecognizedError } from './windows-runner-contract.ts'
@@ -48,6 +49,40 @@ function profileContains(candidate: string, root: string): boolean {
 /** Both containment directions overlap: a deny ancestor covers a grant too. */
 function profileOverlaps(left: string, right: string): boolean {
   return profileContains(left, right) || profileContains(right, left)
+}
+
+/**
+ * Every proper ancestor directory of each denied root, deduplicated and sorted
+ * shallow → deep, minus the filesystem root and the roots themselves.
+ *
+ * A `(subpath R)` deny or a `--ro-bind R` pins a DIRECTORY, not a path: the
+ * kernel denies writes beneath it but says nothing about the ancestors, so
+ * `rename`ing an ancestor moves the whole tree out from under its deny while
+ * every profile (and the fs fence's recorded `recordedPath`) still names the
+ * old spelling. Denying/binding each ancestor itself is what keeps the
+ * boundary attached to the directory the operator chose.
+ *
+ * Profiles carry target-platform spellings and Seatbelt/bwrap are always
+ * POSIX, so the walk is posix `dirname`; a non-POSIX spelling contributes no
+ * ancestors (`dirname('C:\\x')` is `.`).
+ * @param roots - canonical denied roots.
+ * @returns the ancestor directories, shallowest first.
+ */
+function denyAncestors(roots: readonly string[]): string[] {
+  const denied = new Set(roots)
+  const ancestors = new Set<string>()
+  for (const root of roots) {
+    let ancestor = posix.dirname(root.replace(/\/+$/, '') || '/')
+    // `ancestors.has` is a sound early exit: the upward walk is deterministic,
+    // so a directory already collected dragged every ancestor of its own in.
+    while (posix.dirname(ancestor) !== ancestor && !ancestors.has(ancestor)) {
+      ancestors.add(ancestor)
+      ancestor = posix.dirname(ancestor)
+    }
+  }
+  return [...ancestors]
+    .filter(ancestor => !denied.has(ancestor))
+    .sort((left, right) => left.split('/').length - right.split('/').length || (left < right ? -1 : 1))
 }
 
 /** The kernel runner dialects a confined argv can speak. */
@@ -315,23 +350,30 @@ function widenLandlock(profileArgs: readonly string[], workspaceRoot: string, ad
 }
 
 /**
- * The bwrap mount points a workspace-write profile makes writable: every
- * `[flag, X, X]` triple whose flag is not `--ro*`, plus every `--tmpfs` target.
- * @returns writable mount targets in profile order.
+ * The bwrap mount points a workspace-write profile makes writable, split by
+ * mechanism: `binds` are the `[flag, X, X]` triples whose flag is not `--ro*`
+ * (a host directory stays reachable and writable), `tmpfs` are the `--tmpfs`
+ * targets (a fresh private filesystem that hides whatever the host has there).
+ * The distinction matters for the ancestor pinning in {@link denyProfileArgs}:
+ * a directory inside a tmpfs is renamable only within the namespace and never
+ * touches the host tree — while self-binding it would expose and make writable
+ * the host content the tmpfs exists to hide.
+ * @returns the writable bind targets and the tmpfs targets, in profile order.
  */
-function bwrapWritableMounts(profileArgs: readonly string[]): string[] {
-  const targets: string[] = []
+function bwrapWritableMounts(profileArgs: readonly string[]): { binds: string[]; tmpfs: string[] } {
+  const binds: string[] = []
+  const tmpfs: string[] = []
   for (let index = 0; index + 2 < profileArgs.length; index += 1) {
     const flag = profileArgs[index] as string
     if (!flag.startsWith('--') || flag.startsWith('--ro')) continue
     if (flag === '--tmpfs') {
-      targets.push(profileArgs[index + 1] as string)
+      tmpfs.push(profileArgs[index + 1] as string)
       index += 1
       continue
     }
-    if (profileArgs[index + 1] === profileArgs[index + 2]) targets.push(profileArgs[index + 2] as string)
+    if (profileArgs[index + 1] === profileArgs[index + 2]) binds.push(profileArgs[index + 2] as string)
   }
-  return targets
+  return { binds, tmpfs }
 }
 
 /** The paths a Landlock profile grants read-write (`--rw` flag values). */
@@ -352,17 +394,28 @@ function landlockWritablePaths(profileArgs: readonly string[]): string[] {
  * A denied root outside every grant needs no profile work at all: the mode
  * already denies it. Per dialect:
  *
- * - seatbelt appends a trailing `(deny file-write* (subpath …))` form — last
- *   match wins over every earlier allow, and a redundant deny on an ungranted
- *   root is harmless;
+ * - seatbelt appends a trailing `(deny file-write* (subpath …) (literal …))`
+ *   form — last match wins over every earlier allow, and a redundant deny on
+ *   an ungranted root is harmless. The literals pin every ancestor of a denied
+ *   root: Seatbelt checks the operated path only, so `rename`ing an ancestor
+ *   would otherwise move the whole tree out from under its `subpath` deny;
  * - bwrap re-mounts the root `--ro-bind` AFTER the writable mounts (a later
  *   mount wins inside the namespace). The source is mandatory: if a denied
  *   root disappears, namespace setup fails before the command can recreate it.
- *   This also restores read access to denied roots under a `--tmpfs` target;
+ *   This also restores read access to denied roots under a `--tmpfs` target.
+ *   Ancestors of a denied root that lie strictly inside a writable BIND target
+ *   are self-bound (`--bind A A`) BEFORE the ro-binds: the kernel refuses to
+ *   rename a mountpoint, so the deny can no longer be walked off by renaming
+ *   the tree's parent. Ancestors inside a `--tmpfs` target are never bound —
+ *   a rename there only moves namespace-private mounts, while the self-bind
+ *   would expose and make writable the host content the tmpfs hides — and
+ *   ancestors outside every writable target are not renamable anyway;
  * - landlock cannot subtract: a denied root under an `--rw` grant throws —
  *   union semantics have no deny primitive;
  * - windows-acl goes through `widenWindowsProfile`, whose runner-side ACL
- *   grant cannot subtract either — its caller checks the same overlap.
+ *   grant cannot subtract either — its caller checks the same overlap. The
+ *   ancestor question does not arise there: the deny ACE lives on the denied
+ *   directory object and follows it through a parent rename.
  * @param dialect - the recognized dialect.
  * @param profileArgs - the upstream workspace-write profile arguments.
  * @param deniedRoots - canonical roots this call must not write.
@@ -385,17 +438,27 @@ export function denyProfileArgs(
       const granted = [...profile.matchAll(SBPL_SUBPATH_TOKEN)].map(token => sbplValue(token[1] as string))
       const covered = deniedRoots.filter(root => granted.some(target => profileOverlaps(root, target)))
       if (covered.length === 0) return [...profileArgs]
-      const denied = covered.map(root => `(subpath ${sbplString(root)})`).join(' ')
+      const denied = [
+        ...covered.map(root => `(subpath ${sbplString(root)})`),
+        ...denyAncestors(covered).map(ancestor => `(literal ${sbplString(ancestor)})`),
+      ].join(' ')
       return [...profileArgs.slice(0, -1), `${profile} (deny file-write* ${denied})`]
     }
     case 'bwrap': {
       const writable = bwrapWritableMounts(profileArgs)
-      const binds = deniedRoots
-        .filter(root => writable.some(target => profileOverlaps(root, target)))
+      const covered = deniedRoots
+        .filter(root => [...writable.binds, ...writable.tmpfs].some(target => profileOverlaps(root, target)))
+      // Pin the renamable ancestors shallow → deep, BEFORE the ro-binds so no
+      // self-bind can shadow one.
+      const pins = denyAncestors(covered)
+        .filter(ancestor => writable.binds.some(target => ancestor !== target && profileContains(ancestor, target))
+          && !writable.tmpfs.some(target => profileContains(ancestor, target)))
+        .flatMap(ancestor => ['--bind', ancestor, ancestor])
+      const binds = covered
         // A missing deny source must fail namespace setup: skipping this
         // mount would let the command recreate the path under a writable grant.
         .flatMap(root => ['--ro-bind', root, root])
-      return [...profileArgs, ...binds]
+      return [...profileArgs, ...pins, ...binds]
     }
     case 'landlock': {
       const granted = landlockWritablePaths(profileArgs)
@@ -421,13 +484,21 @@ export function denyProfileArgs(
  * argument prefix, and this function rewrites the file-effect part.
  *
  * - seatbelt: `(version 1) (allow default)` kept from the profile head, plus a
- *   trailing `(deny file-write* (subpath …))` — allow-default with subpath
- *   carve-outs, the inverse of the confined profiles;
+ *   trailing `(deny file-write* (subpath …) (literal …))` — allow-default with
+ *   subpath carve-outs, the inverse of the confined profiles. The literals
+ *   pin every ancestor of a denied root, so `rename`ing the tree's parent
+ *   cannot walk it out from under the deny (Seatbelt checks the operated
+ *   path only — verified natively on macOS);
  * - bwrap: `--ro-bind / /` becomes `--bind / /` (ambient writable namespace),
- *   each denied root is re-mounted `--ro-bind` after it. A missing source
- *   fails the launch, retaining the registered negative authorization;
+ *   each denied root is re-mounted `--ro-bind` after it, and every ancestor
+ *   of a denied root is self-bound `--bind A A` between the root mount and the
+ *   ro-binds — a mountpoint cannot be renamed (EBUSY), so the deny follows no
+ *   rename of the tree's ancestors. A missing source fails the launch,
+ *   retaining the registered negative authorization;
  * - landlock and windows-acl cannot express "everything except" — the launcher
  *   only unions allowlists and the ACL model only grants — so both throw.
+ *   (windows-acl needs no ancestor pinning anyway: the deny ACE lives on the
+ *   denied directory object and follows it through a parent rename.)
  * @param dialect - the recognized dialect.
  * @param profileArgs - the upstream read-only skeleton's profile arguments.
  * @param deniedRoots - canonical roots the execution must not write.
@@ -450,7 +521,10 @@ export function restrictProfileArgs(
       if (anchor < 0) {
         throw new DialectUnrecognizedError(`seatbelt profile has no "(allow default)" to restrict from: ${JSON.stringify(profile)}`)
       }
-      const denied = deniedRoots.map(root => `(subpath ${sbplString(root)})`).join(' ')
+      const denied = [
+        ...deniedRoots.map(root => `(subpath ${sbplString(root)})`),
+        ...denyAncestors(deniedRoots).map(ancestor => `(literal ${sbplString(ancestor)})`),
+      ].join(' ')
       const restricted = `${profile.slice(0, anchor + allowDefault.length)} (deny file-write* ${denied})`
       return [...profileArgs.slice(0, -1), restricted]
     }
@@ -461,7 +535,11 @@ export function restrictProfileArgs(
       }
       // Retain the runner invocation but do not inherit confined-mode PID,
       // proc, device or temporary mounts into the Full-access combination.
+      // Under `--bind / /` every ancestor is writable, so ALL of them are
+      // pinned as self-bind mountpoints (the kernel refuses to rename one);
+      // the ro-binds stay last so no self-bind shadows a deny.
       const args = [...profileArgs.slice(0, base), '--bind', '/', '/', '--die-with-parent']
+      for (const ancestor of denyAncestors(deniedRoots)) args.push('--bind', ancestor, ancestor)
       for (const root of deniedRoots) args.push('--ro-bind', root, root)
       return args
     }
@@ -469,7 +547,10 @@ export function restrictProfileArgs(
       // A union-only Landlock profile cannot express this cell. Select the
       // mount backend for it, preserving ambient writes outside denied roots.
       // Missing/unusable bubblewrap is a runner failure, never a bare spawn.
+      // The ancestor self-binds carry the same rename-pinning as the bwrap
+      // branch above.
       return ['bwrap', '--bind', '/', '/', '--die-with-parent',
+        ...denyAncestors(deniedRoots).flatMap(ancestor => ['--bind', ancestor, ancestor]),
         ...deniedRoots.flatMap(root => ['--ro-bind', root, root])]
     case 'windows-acl':
       throw new DialectUnrecognizedError('Windows ACL cannot express an ambient grant minus subtree denies — the restricted-token model only grants')

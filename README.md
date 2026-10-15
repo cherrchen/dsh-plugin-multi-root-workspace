@@ -35,10 +35,10 @@ tarball、GitHub、本地源码等其他安装方式见[安装](#安装)。
 启动后侧栏底部出现 **Folders**（`🗂`）动作，或直接在会话里：
 
 ```text
-/workspace-folders add ~/code/another-repo [--read-only|--read-write]
+/workspace-folders add ~/code/another-repo [--inherit|--read-only|--read-write]
 ```
 
-之后 Agent 即可在该目录读写、跑 bash——与本会话的主根同权。DSH 的动态 working directory 只影响新操作的相对路径和执行目录，切换 cwd 不会新增授权，也不会改变注册表归属。
+之后 Agent 即可在该目录读写、跑 bash——默认 `inherit`，访问级别跟随会话模式。DSH 的动态 working directory 只影响新操作的相对路径和执行目录，切换 cwd 不会新增授权，也不会改变注册表归属。
 
 ## 环境要求
 
@@ -202,27 +202,27 @@ dsh --profile web --dump-config | grep -A3 'multi-root'
 ### 命令
 
 ```text
-/workspace-folders [list]                              # 列出主根与附加根（含每根访问级别与状态）
-/workspace-folders add <绝对路径> [--read-only|--read-write]   # 不带路径时打开系统目录选择器；默认 read-write
-/workspace-folders access <序号|路径> read-only|read-write     # 切换访问级别（升到可写要求该根此刻可用）
-/workspace-folders alias <序号|路径> [别名]                     # 不带别名则清除已有别名
-/workspace-folders remove <序号|路径>                           # 序号即 list 输出的编号
-/workspace-folders reveal <序号|路径>                           # 在文件管理器中显示
-/workspace-folders help                                       # 查看命令帮助
+/workspace-folders [list]                                        # 列出主根与附加根（含每根访问级别与状态）
+/workspace-folders add <绝对路径> [--inherit|--read-only|--read-write]  # 不带路径时打开系统目录选择器；新登记默认 inherit
+/workspace-folders access <序号|路径> inherit|read-only|read-write      # 切换访问级别（扩权要求该根此刻可用）
+/workspace-folders alias <序号|路径> [别名]                            # 不带别名则清除已有别名
+/workspace-folders remove <序号|路径>                                  # 序号即 list 输出的编号
+/workspace-folders reveal <序号|路径>                                  # 在文件管理器中显示
+/workspace-folders help                                              # 查看命令帮助
 ```
 
 路径可带引号；与已有根重复、嵌套在已有根内部、或就是主根本身的路径会被拒绝。
 
-附加根默认与主根同权（read-write），`add` 时带 `--read-only` 或事后 `access` 可切为只读。每个主根最多登记 16 个附加根（`maxAdditionalRoots` 配置可调至 64）。宿主还可以在 `multi-root-scope` 行配置 `toolAccess`，例如 `{ bash: 'read-only' }` 让 bash 永远不能写任何附加根（仍可写主根）。
+访问级别是三态的（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)，语义细节见[使用指南](./docs/guide/README.md#访问级别数量上限与-per-tool-封顶)）：`inherit` 跟随会话模式——`workspace-write` 可写、`read-only` 拒写、`danger-full-access` 不受限；`read-only` 在任何模式下都拒写（包括 Full-access）；`read-write` 固定在只读会话里仍可写。旧版插件登记的可写记录升级后按 `inherit` 读。每个主根最多登记 16 个附加根（`maxAdditionalRoots` 配置可调至 64）。宿主还可以在 `multi-root-scope` 行配置 `toolAccess`，例如 `{ bash: 'read-only' }` 让 bash 永远不能写任何附加根（仍可写主根）。
 
-`add` 后执行 `list` 的预期输出：
+`add` 后执行 `list` 的预期输出（`workspace-write` 会话，website 登记为只读）：
 
 ```text
 Workspace root (primary; access follows the current sandbox mode): /home/me/monorepo
-  1 /home/me/payments-service [支付] (read-write)
-  2 /home/me/website (read-write)
+  1 /home/me/payments-service [支付] (inherit)
+  2 /home/me/website (read-only)
 2 of 16 additional roots.
-Writable additional roots: 2 of 2.
+Writable additional roots under the current mode: 1 of 2.
 ```
 
 ### 面板
@@ -279,7 +279,8 @@ Writable additional roots: 2 of 2.
 - Windows 多根 runner 继承上游 partial enforcement、caller-owned 目录及 private temp 分离条件；已启动进程保留启动时根集合，后续进程使用更新后的集合（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - **Windows 上的网络与设备路径不能成为附加根**：UNC（`\\server\share`）、`\\?\`、`\\.\` 与映射网络盘在登记时即以 `unsupported-path` 拒绝——restricted token 的 capability SID 无法绑定 SMB 访问（[ADR-0011 修订](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - **Windows 受限 shell 是 pwsh，不含 Git Bash**：MSYS 在 restricted Low-integrity token 下无法启动（上游 runner 与插件 runner 表现一致，属上游限制）；上游 runner 的 confined 子进程因继承 ignore-Ctrl+C 标志而收不到 Ctrl+C，插件 runner 下子进程能收到并由 runner 镜像其退出码。
-- 附加根默认与主根同权；`--read-only` 登记或 `access` 切换后可变为只读（写授权缺省，不是读 confinement）。已启动的进程保留启动时根集合，cap/access 变化只约束之后的调用与新进程（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)）；提供 workingDirectory 的宿主可以把附加根作为后续工具的执行目录，Session 原始项目与登记身份不变（[ADR-0012](./docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)）。
+- 附加根访问级别是三态的：新登记默认 `inherit`（跟随会话模式），`--read-only` 在任何模式下都拒写（包括 Full-access），`--read-write` 固定在只读会话里仍可写（写授权问题，不是读 confinement；[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。已启动的进程与持久终端保留启动时的 deny 集——一个在某根变为只读之前就启动的终端保持不受限，直到重启；cap/access 变化只约束之后的调用与新进程（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)）；提供 workingDirectory 的宿主可以把附加根作为后续工具的执行目录，Session 原始项目与登记身份不变（[ADR-0012](./docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)）。
+- **上游选择 Landlock 的 Linux 主机上，受限 Full-access 需要 bwrap**：Landlock 的 allowlist 表达不了「全部可写、除这些根」，该组合改选 bubblewrap 拼出拒写边界；主机没有可用的 bwrap（未安装或禁用非特权 userns）时，存在任何拒写边界（只读根或受保护的 `$DSH_HOME`）的 Full-access 命令在启动前失败关闭。启用 bwrap，或在该主机上避免在 Full-access 下使用显式只读根（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
 - 附加根文件树由 **Files 页签的根选择器**承载：头部入口列出主根与全部附加根，旁边仍显示选中根的完整路径；选中附加根时逐字节复刻的上游 Files 树体接管树区（懒加载目录、原生行式与图标、watch 自动刷新、文件点击进宿主 viewer、header 原位提供手动刷新），header 右侧「在应用中打开」按钮同时由逐字节复刻的上游控件顶替、对选中根而非主根发起打开；切回主根即恢复原生视图；对话框回归纯管理。该接管依赖上游 `data-*` DOM 钩子，钩子失效时静默退化为原生观感（[ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](./docs/decisions/ADR-0016-files-tab-native-tree-fork.md)）。LSP 按附加文件所在根初始化独立 workspace；需要宿主配置对应语言服务器（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - 命令的输出文案为英文（host 侧没有活动语言信息），面板文案中英双语跟随界面语言。
 - Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：`sidebar.footer.action` 是所有受支持版本都提供的插槽，而 `sidebar.panellist`/`main` 不是。

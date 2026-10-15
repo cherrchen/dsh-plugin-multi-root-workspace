@@ -77,7 +77,7 @@ describe('renderWorkspaceRootsContext', () => {
   it('states the absence of isolation under danger-full-access, except the read-only members', () => {
     for (const platform of PLATFORMS) {
       expect(render(platform, 'danger-full-access', [A, B])).toMatchInlineSnapshot(
-        `"Current DSH workspace roots: ["/repos/a","/repos/b"] are additional roots of this session's workspace; danger-full-access mode has no sandbox isolation, except writes under the additional roots ["/repos/b"] are still refused."`,
+        `"Current DSH workspace roots: ["/repos/a","/repos/b"] are additional roots of this session's workspace; danger-full-access mode has no sandbox isolation, except writes under the additional roots ["/repos/b"] are still refused. Grant changes apply to later operations and newly started processes, not to processes already running."`,
       )
       expect(render(platform, 'danger-full-access', [A, C])).toMatchInlineSnapshot(
         `"Current DSH workspace roots: ["/repos/a","/repos/c"] are additional roots of this session's workspace; danger-full-access mode has no sandbox isolation."`,

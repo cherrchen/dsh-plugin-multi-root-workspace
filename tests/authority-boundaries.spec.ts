@@ -1,6 +1,6 @@
 /** Cross-layer regressions for PR #12: unknown temp grants and deny ancestors. */
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -114,7 +114,7 @@ describe('a deny ancestor wins over a writable descendant', () => {
     const home = '/home/dsh', primary = home + '/workspace'
     const sbpl = `(version 1) (allow default) (deny file-write*) (allow file-write* (subpath "${primary}") (subpath "/tmp"))`
     expect(denyProfileArgs('seatbelt', ['sandbox-exec', '-p', sbpl], [home]).at(-1))
-      .toContain(`(deny file-write* (subpath "${home}"))`)
+      .toContain(`(deny file-write* (subpath "${home}") (literal "/home"))`)
     const profile = ['bwrap', '--ro-bind', '/', '/', '--bind', primary, primary, '--tmpfs', '/tmp']
     expect(denyProfileArgs('bwrap', profile, [home]).slice(-3)).toEqual(['--ro-bind', home, home])
     expect(denyProfileArgs('bwrap', profile, ['/']).slice(-3)).toEqual(['--ro-bind', '/', '/'])
@@ -164,5 +164,80 @@ describe('a deny ancestor wins over a writable descendant', () => {
       expect(denied.status).not.toBe(0)
       expect(readFileSync(allowed, 'utf8')).toBe('ok')
     } finally { await ctx.fiber.dispose(); rmSync(temp, { recursive: true, force: true }); fixture.dispose() }
+  })
+
+  for (const dialect of ['seatbelt', 'bwrap'] as const) it(`blocks the ancestor rename that would carry a deny root past its boundary in native ${dialect}`, async test => {
+    if ((dialect === 'seatbelt' && process.platform !== 'darwin') || (dialect === 'bwrap' && process.platform !== 'linux')) {
+      test.skip('requires the native target platform'); return
+    }
+    const fixture = createFixtureWorkspace('authority-rename')
+    const ctx = await sandbox()
+    try {
+      const provider = pin(ctx, dialect)
+      // Prove the runner executes before asserting a rename denial — a profile
+      // that cannot launch at all protects nothing (see kernel-runner.ts).
+      const probe = await provider.confine(['true'], { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      const check = spawnSync(probe.argv[0]!, probe.argv.slice(1), { encoding: 'utf8' })
+      if (check.error || check.status !== 0) { test.skip(requireKernelRunner(dialect, check.error?.message ?? check.stderr)); return }
+      const parent = join(fixture.base, 'parent')
+      const root = join(parent, 'root')
+      const moved = join(fixture.base, 'parent2')
+      mkdirSync(parent)
+      mkdirSync(root)
+      writeFileSync(join(root, 'f'), 'original')
+      // The attack: rename the denied root's ancestor so the registered path
+      // dies with the moved tree, then recreate and write it. The rename must
+      // be refused (Seatbelt literal deny, bwrap mountpoint EBUSY), a sibling
+      // file inside the same parent must still write (ambient grants intact),
+      // and the root's content must not move.
+      const command = [process.execPath, '-e',
+        'const f=require("fs");'
+        + 'try{f.renameSync(process.argv[1],process.argv[2]);process.exit(9)}'
+        + 'catch(e){if(!["EPERM","EACCES","EBUSY","EROFS"].includes(e.code))throw e}'
+        + 'f.writeFileSync(process.argv[4],"ok");'
+        + 'if(f.readFileSync(process.argv[3],"utf8")!=="original")process.exit(8)',
+        parent, moved, join(root, 'f'), join(parent, 'sibling.txt')]
+      const prefix = await provider.restrictedExecution({ mode: 'danger-full-access', workspaceRoot: fixture.workspace }, [canonicalPath(root)])
+      const result = spawnSync(prefix.argv[0]!, [...prefix.argv.slice(1), ...command], { encoding: 'utf8' })
+      expect(result.status, result.stderr).toBe(0)
+      expect(existsSync(moved)).toBe(false)
+      expect(readFileSync(join(root, 'f'), 'utf8')).toBe('original')
+      expect(existsSync(join(parent, 'sibling.txt'))).toBe(true)
+    } finally { await ctx.fiber.dispose(); fixture.dispose() }
+  })
+
+  it('blocks the ancestor rename of a covered deny root in native seatbelt workspace-write', async test => {
+    if (process.platform !== 'darwin') { test.skip('requires the native target platform'); return }
+    const fixture = createFixtureWorkspace('authority-rename-covered')
+    // The deny edge exists exactly for roots beneath a grant — the platform
+    // temp area is the one place a registration may overlap a writable subpath.
+    const parent = mkdtempSync(join(canonicalPath(tmpdir()), 'mrw-rename-'))
+    const root = join(parent, 'root')
+    const moved = `${parent}-moved`
+    mkdirSync(root)
+    writeFileSync(join(root, 'f'), 'original')
+    const ctx = await sandbox()
+    try {
+      const provider = pin(ctx, 'seatbelt')
+      const probe = await provider.confine(['true'], { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      const check = spawnSync(probe.argv[0]!, probe.argv.slice(1), { encoding: 'utf8' })
+      if (check.error || check.status !== 0) { test.skip(requireKernelRunner('seatbelt', check.error?.message ?? check.stderr)); return }
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{
+        id: 'temp-ro', path: root, recordedPath: canonicalPath(root), access: 'read-only',
+      }])
+      const command = [process.execPath, '-e',
+        'const f=require("fs");'
+        + 'try{f.renameSync(process.argv[1],process.argv[2]);process.exit(9)}'
+        + 'catch(e){if(!["EPERM","EACCES","EBUSY","EROFS"].includes(e.code))throw e}'
+        + 'f.writeFileSync(process.argv[4],"ok");'
+        + 'if(f.readFileSync(process.argv[3],"utf8")!=="original")process.exit(8)',
+        parent, moved, join(root, 'f'), join(parent, 'sibling.txt')]
+      const confined = await provider.confine(command, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      const result = spawnSync(confined.argv[0]!, confined.argv.slice(1), { encoding: 'utf8' })
+      expect(result.status, result.stderr).toBe(0)
+      expect(existsSync(moved)).toBe(false)
+      expect(readFileSync(join(root, 'f'), 'utf8')).toBe('original')
+      expect(existsSync(join(parent, 'sibling.txt'))).toBe(true)
+    } finally { await ctx.fiber.dispose(); rmSync(parent, { recursive: true, force: true }); fixture.dispose() }
   })
 })

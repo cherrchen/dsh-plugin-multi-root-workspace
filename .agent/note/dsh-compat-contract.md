@@ -87,6 +87,7 @@ await mountCompat(ctx)
 | `src/compat/llm-message.ts` | session format 3 及更早投 `{ kind: 'plugin', plugin, form: 'instructions' }`；format 4（`0.1.7` 的 `SESSION_FORMAT_VERSION`）拒绝 `kind: 'plugin'`，改投 `{ kind: 'multi-root-workspace', plugin, form: 'instructions' }`。探针是 session 包导出的格式常量，**不是** renderer 名字——0.1.6 已经改名却仍接受 `plugin`。不要用 `agent-instructions`：上游把那个 kind 的 `changes` 当自己的协调权威 |
 | `src/compat/tool-result.ts` | 失败位：0.1.5/0.1.6 在 `content[0].isError`，0.1.7 在消息自身的 `isError`。`event.data.error` 两边都还在 |
 | `src/compat/client-icons.ts` | 面板图标：0.1.5/0.1.6 是像素名（`IconFolderClose16`），0.1.7 是线宽名。上游 UI 用的是 Regular，不是 Medium。先取像素名，没有再取 Regular。纯装饰字形走 `maybeIcon` 软探测（缺失降级为无图标，不抛错）——权限字形 `IconWorkspaceWrite`/`IconReadOnly` 仅 0.1.7+ 存在 |
+| `src/compat/process-entrypoints.ts` | 进程栅栏包装哪些公开入口：`ctx.shell` 上 `execute`/`run`/`start` 的存在性探测（`start` 存在于 0.1.6 及更早），`ctx.ptcRuntime` 只认公开 `run`（具体实现的 `execute` 是私有 helper，不作跨包接缝） |
 | `scripts/lib/profile-boot.mjs` | `healProfilesModuleFallback` 是函数就调用它；否则 `createRuntimeResolution`，并在 `boot` 的 prepare 里 `hostCtx.plugin(PluginPackages, { resolution })`。0.1.7 不再导出 heal |
 | `scripts/lib/shell-exec.mjs` | `shell.run` 存在就用它；否则 `shell.execute(spec)` 再 `execution.result()`。0.1.7 的 `SandboxBashExecutor` 改了名从 run 到 execute |
 

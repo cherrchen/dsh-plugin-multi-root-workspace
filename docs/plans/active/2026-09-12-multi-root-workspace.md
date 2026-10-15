@@ -573,3 +573,9 @@ PR #12 的最新 Code Reviewer 指出 `--ro-bind-try` 会在只读根被删除�
 基于 PR #12 头部 `5103979` 复现并修复：未知 registry authority 保留共享 temp grant 的 fs/进程绕过；四后端遗漏 deny 祖先覆盖 grant 的反向相交；Windows broker 无法容纳 64 根加 home 与历史超限存量；安装记录写入失败未撤销新增 LSA rights。权限决定见 [ADR-0017 本轮修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#临时区与反向包含修订2026-10-15)，有界 IPC、超预算显式拒绝与安装回滚见 [ADR-0020 本轮修订](../../decisions/ADR-0020-windows-normal-deny-groups.md#协议容量与安装回滚修订2026-10-15)。未发布，版本号与兼容 allowlist 不变。
 
 本机 macOS 开发 pin：compat、lint、双端 typecheck、build、docs:check、pack:check 通过；原生 Seatbelt probe 与含新增回归的完整测试 **668 通过 / 33 平台跳过**；compose **48/48**、behavior **126/126**、journey **62/62**、packed behavior **125/125**，全部冒烟 0 skip。新增 Windows 原生 64/80 根加 home、primary-only 执行，以及真实 LSA/SCM 的三类失败注入随本次 CI 验证；本机不把平台跳过记为 Windows/Linux 原生证据。
+
+#### 祖先改名解除拒写修复与文档/接缝收尾（2026-10-15）
+
+PR #12 评审的又一处 P1：deny 根的祖先目录被改名即可把整棵树搬出 subpath deny（Seatbelt 只检查被操作路径，fs fence 的 deny 集仍记旧 `recordedPath`）。修复钉住每个祖先：Seatbelt deny 形式追加 `(literal A)`（restrict 与 workspace-write covered 根一致），bwrap 把祖先 `--bind A A` 自绑成挂接点使 `rename` 返回 EBUSY（restrict 全量钉扎、workspace-write 只钉可写 bind 目标内的祖先，tmpfs 内与挂载点自身不绑，ro-bind 仍在最后）；Windows deny ACE 随目录对象走，不受影响。代价：受限 Full-access 进程不能 rename/chmod/touch 被拒根与 `$DSH_HOME` 的祖先目录（目录内读写不变）。决定、复现与取舍见 [ADR-0017 本节](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#祖先目录改名不得解除拒写2026-10-15pr-12-评审-p1)；Linux 侧由 bwrap 原生 CI 用例验证，本机无 Linux。
+
+同批收尾：进程栅栏的入口形状探测收进 `src/compat/process-entrypoints.ts`（shell `execute`/`run`/`start` 与 PTC 公开 `run`，业务代码不再出现版本注释）；Full-access 拓扑在存在拒写根时补「授权变化只对后续操作与新进程生效」句；README/CHANGELOG/指南补齐 B9 三态合同与两条边界说明（Landlock 主机上受限 Full-access 需要 bwrap 否则拒绝启动；持久终端/已运行进程保留启动时 deny 集）。未发布，版本号与 allowlist 不变。

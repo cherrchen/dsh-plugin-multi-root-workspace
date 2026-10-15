@@ -140,7 +140,10 @@ describe('the restricted argv prefix', () => {
     expect(prefix[prefix.length - 1]).toBe('--')
     const sbpl = prefix[prefix.length - 2]!
     expect(sbpl).toContain('(allow default)')
-    expect(sbpl).toContain(`(deny file-write* ${sbplSubpath(denied)})`)
+    // The deny form pins the root's ancestors as literals too: renaming the
+    // parent directory must not carry the tree past its deny boundary.
+    expect(sbpl).toContain(`(deny file-write* ${sbplSubpath(denied)}`)
+    expect(sbpl).toContain(`(literal "${canonicalPath(fixture.base)}")`)
     expect(sbpl).not.toContain('(allow file-write*')
   })
 

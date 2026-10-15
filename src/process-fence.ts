@@ -15,10 +15,12 @@
  *   synchronous, so the profile — which never depends on the callee's argv —
  *   is built by the wrapping consumer, not here.
  * - `ctx.shell.execute` (bash and pwsh alike, and `start` where an older
- *   release still exposes it) resolves the per-call policy exactly the way the
- *   executor itself does, and — under Full-access with deny roots — asks the
- *   sandbox provider for the restricted prefix and runs the call inside the
- *   store, so every subprocess the executor launches is confined.
+ *   release still exposes it — `compat/process-entrypoints.ts` owns which
+ *   entries a mounted executor actually carries) resolves the per-call policy
+ *   exactly the way the executor itself does, and — under Full-access with
+ *   deny roots — asks the sandbox provider for the restricted prefix and runs
+ *   the call inside the store, so every subprocess the executor launches is
+ *   confined.
  * - `ctx.ptcRuntime.run` does the same for `run_code`.
  * - `ctx.subprocess.spawnTerminal` keys on the `DSH_PTY_SESSION_ID` marker:
  *   every supported `dsh-terminal-bash` backend stamps it (alongside
@@ -64,6 +66,8 @@ import type {} from './scope.ts'
 import { wrapMethod } from './method-wrapper.ts'
 import type { MultiRootSandboxProvider } from './sandbox.ts'
 import { decorateProcessOutcome } from './compat/process-result.ts'
+import { ptcEntrypoints, shellEntrypoints } from './compat/process-entrypoints.ts'
+import type { ProcessEntrypoint } from './compat/process-entrypoints.ts'
 
 // `multiRootProviders` is the provider-conflict gate: the restricted profile is
 // only meaningful when `ctx.sandbox` is THIS bundle's provider — a foreign one
@@ -211,8 +215,7 @@ export function apply(ctx: Context): void {
    * Full-access with roots to deny, execute it inside the restricted store so
    * every subprocess it launches is confined.
    */
-  const deniedEntry = (scope: Context, target: PolicyEntrypoint, key: 'execute' | 'start' | 'run'): void => {
-    if (typeof target[key] !== 'function') return
+  const deniedEntry = (scope: Context, target: PolicyEntrypoint, key: ProcessEntrypoint): void => {
     scope.effect(() => wrapMethod(target, key, original => function (
       this: unknown,
       spec: PolicyCarryingSpec | undefined,
@@ -225,15 +228,13 @@ export function apply(ctx: Context): void {
     }))
   }
 
-  // The bash / pwsh tool executors. `execute` is the only entry on every
-  // supported release; `start` existed through 0.1.6 and is wrapped when the
-  // mounted executor still exposes it — structure, not a version check.
+  // The bash / pwsh tool executors. Which execute-style entries the mounted
+  // service actually carries is a per-release shape — `compat/process-entrypoints`
+  // answers it structurally (a version string is never probed).
   ctx.inject(['shell'], (scope: Context) => {
     const shell = scope.get('shell') as PolicyEntrypoint | undefined
     if (shell === undefined) return
-    deniedEntry(scope, shell, 'execute')
-    deniedEntry(scope, shell, 'run')
-    deniedEntry(scope, shell, 'start')
+    for (const key of shellEntrypoints(shell)) deniedEntry(scope, shell, key)
   })
 
   // `run_code` — the PTC runtime spawns its Node worker through the same
@@ -241,8 +242,6 @@ export function apply(ctx: Context): void {
   ctx.inject(['ptcRuntime'], (scope: Context) => {
     const runtime = scope.get('ptcRuntime') as PolicyEntrypoint | undefined
     if (runtime === undefined) return
-    // `run` is public. The concrete runtime's `execute` helper is private and
-    // is deliberately not used as a cross-package compatibility seam.
-    deniedEntry(scope, runtime, 'run')
+    for (const key of ptcEntrypoints(runtime)) deniedEntry(scope, runtime, key)
   })
 }

@@ -210,6 +210,21 @@ sandbox 在 confine 入口捕获一次 scope，避免异步 profile 探测后混
 
 回归见 `tests/authority-boundaries.spec.ts`：双真实 registry stack + 临时区只读根的 write/edit、两种可写模式、接管与显式移除、四后端主根授权、双向相交和 Seatbelt/bwrap 原生执行；Windows 原生主根授权与容量回归在 `tests/windows-native.e2e.ts`。执行证据统一记路线账本。
 
+## 祖先目录改名不得解除拒写（2026-10-15，PR #12 评审 P1）
+
+**复现（macOS 原生 sandbox-exec 已验证）**：受限 Full-access profile `(version 1) (allow default) (deny file-write* (subpath "$T/parent/root"))` 下，直接写 `root/f` 被拒；但 `mv "$T/parent" "$T/parent2" && echo hacked > "$T/parent2/root/f" && mv "$T/parent2" "$T/parent"` 成功改写只读根。Seatbelt 只检查被操作路径本身，祖先目录在 subpath 之外；改名成功后 fs fence 的 deny 集仍记录旧 `recordedPath`，进程内 fence 同样放行——所以必须由内核在改名这一步就拒绝。bwrap 同理：`rename` 挂接点本身返回 EBUSY，但挂接点的祖先仍可被改名，被删路径由后续 profile 的 `--ro-bind` 落到重建的假目录上。
+
+**决定**：deny 边界必须钉住拒绝根的每个祖先目录，使祖先改名（而非只改子树）不可能发生。
+
+- **Seatbelt**：deny 形式从 `(deny file-write* (subpath R)…)` 扩为 `(deny file-write* (subpath R)… (literal A)…)`，A 为被拒根的每个真祖先目录（不含文件系统根），`restrictProfileArgs`（Full-access）与 `denyProfileArgs`（workspace-write 的 covered 根）一致。literal 只拒绝对祖先目录本身的 file-write*（改名、chmod、touch、unlink），其子孙照常按 grant 判定——`touch $T/parent/sibling` 已实测放行。
+- **bwrap**：把每个祖先做成命名空间内的挂接点（`--bind A A` 自绑），`rename(祖先)` 返回 EBUSY。`restrictProfileArgs`（含 Landlock→bwrap 回退）在 `--bind / /` 之后、全部 `--ro-bind R R` 之前按浅→深顺序放置；`denyProfileArgs`（workspace-write）只对严格位于可写 **bind** 挂载目标内的祖先自绑——`--tmpfs` 目标内的祖先不自绑（tmpfs 内的改名只搬动命名空间私有挂载、不伤宿主，而自绑反而会暴露并使可写 tmpfs 所遮蔽的宿主内容），可写目标之外（含挂载点自身）的祖先本就不可改名。ro-bind 仍保持最后，避免任何自绑遮蔽 deny。
+- **Windows 不受影响**：deny ACE 写在目录对象上，`rootDenySid` 按路径确定，父目录改名不影响该对象上的 ACE——边界随目录走，不需要祖先钉扎。
+- **Landlock→bwrap 回退**同享同一组 `--bind A A`。
+
+**代价**：受限 Full-access 下进程对拒绝根（含 `$DSH_HOME`）的任一祖先目录本身失去写权限——不能 rename / chmod / touch 这些目录，例如 `$DSH_HOME` 为 `~/.dsh` 时受限进程不能改名家目录本身；祖先目录内的读写不受影响。该收窄是刻意的：改不掉祖先就搬不走拒写边界。Linux 侧假设（祖先自绑使 rename 失败）由 `tests/authority-boundaries.spec.ts` 的 bwrap 原生用例在 CI 上验证，本机无 Linux 环境不作原生断言。
+
+回归：`tests/dialects.spec.ts` 的祖先字面量/自绑拼写与排序、`tests/process-fence.spec.ts` 的 deny 形式断言、`tests/authority-boundaries.spec.ts` 的 Seatbelt 原生改名拒绝（Full-access 与 workspace-write covered 根两路）——原生用例同测「祖先被改名失败 + 同父目录兄弟文件照常可写」。
+
 ## Related Documents
 
 - [B9 专项计划](../plans/completed/2026-10-13-b9-root-access-and-sandbox-modes.md)
