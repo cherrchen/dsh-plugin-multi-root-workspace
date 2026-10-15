@@ -32,6 +32,7 @@ import {
   type CompatEnforcement,
   type CompatReport,
 } from './compat/dsh-version.ts'
+import { assertAgentPtyMarker } from './compat/pty-marker.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -131,5 +132,13 @@ export function apply(ctx: Context): void {
   const report = classifyInstallation()
   const warning = assertSupportedInstallation(report, compatEnforcement())
   if (warning !== undefined) ctx.logger.warn(warning)
+  // The PTY marker is the same class of contract as the version verdict — a
+  // precondition, not a diagnostic. A backend that drops the DSH_PTY_SESSION_ID
+  // stamp would reclassify agent terminals as user terminals and pass them
+  // unconfined under restricted Full-access, so an unverifiable marker refuses
+  // the composition outright. Like `mixed`/`incomplete` it is not relaxable:
+  // `warn` exists to gather evidence on an unlisted release, and a broken
+  // marker contract IS the finding that lane exists to surface.
+  assertAgentPtyMarker()
   ctx.plugin(MultiRootCompatService, report)
 }

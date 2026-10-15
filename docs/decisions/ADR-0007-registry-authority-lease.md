@@ -84,6 +84,8 @@ Windows semaphore 名称必须先用 `realpathSync.native` 解析已创建的父
 
 B9（ADR-0017）给 `danger-full-access` 引入 deny 集语义后，「空 scope」本身不再是 fail-closed：争用进程读不到登记表，也就读不到另一个进程登记的 `read-only` 边界，空 deny 集曾被 fs / 进程 fence 当作「没有限制」而放行 ambient 写（评审复现的 P1）。因此非 active 状态（构造期、contended、storage-failed、config-invalid、releaseAuthority 转场）在发布空 scope 的同时调用 `setRegistryAuthority(false)` 标记 `authority: 'unavailable'`，`openDomain` 发布完全部存储记录后才置回 `available`。该标记不可用时，Full-access 的 fs 写与进程执行都降级为上游 `workspace-write` 语义，直到接管或修复。lease、acquire/open/release 顺序与本 ADR 其余决定不变。
 
+**如实记录**（PR #12 评审）：`enterStorageFailed` 保留已持有的 lease——介质打开失败不等于本进程放弃 authority；瞬态存储故障不应把 lease 弹跳给等着的进程，故障期间它仍归本进程，scope 按 unavailable 收缩，介质恢复或 `refresh()` 重试后原样接管。
+
 ## Related Documents
 
 - [ADR-0002 上游耦合策略](./ADR-0002-upstream-coupling-policy.md)

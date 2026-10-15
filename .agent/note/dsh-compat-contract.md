@@ -221,4 +221,6 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 PTC 的具体实现 `execute` 是 private；包装公开 `run`。Windows 宽字符串指针用 `koffi.decode(ptr, 'char16_t', -1)` 解码指向的数据，不能用 `str16`（那会再解引用一次，把字符串头当地址并原生崩溃）。旧属性候选的 TokenSecurityAttributes 查询采用 native UNICODE_STRING，不能与 Win32 claim 的 PWSTR 布局混用。runner 从 broker 接收 token handle，再读回派生 token 的普通 TokenGroups，确认每根 deny-only 且非 enabled；不能信任 broker ACK。普通 deny-only 组与可取交集删除的 restricting SID list 是两个列表；安装与安全边界链接 ADR-0020，不在本笔记复制进度。
 
+PTY 的 agent/用户判别是 §13 唯一的静默 fail-open 接缝：`DSH_PTY_SESSION_ID` 只由 agent PTY 的启动路径盖章（面板终端控制器只盖 `DSH_SESSION_ID`），下游 release 一旦不再盖章，agent PTY 会被当作用户终端直通放行。`src/compat/pty-marker.ts` 在启动时探测已安装 `@deepseek-ai/dsh-terminal-bash` 的构建产物里有没有这个常量——探的是产物内容，不是版本号也不是 in-process shape（远端打包/裁剪后的构建不执行本机代码也能验证）。后端不存在 = 无 PTY 接缝、放行；存在但探不到 = 启动拒载，`DSH_MULTI_ROOT_COMPAT=warn` 也放宽不了（warn 只放行「未列名但自洽的候选版本」，不放行「合同已经破裂」）。测试在 `tests/pty-marker.spec.ts`。
+
 旧版 Windows process binding 的 `GetFileType` 可能缺失；fd 7 适配必须通过公开 `extendWin32ProcessBindings` 补齐，不能依赖开发 pin 的表形状。

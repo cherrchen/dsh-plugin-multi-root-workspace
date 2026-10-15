@@ -107,9 +107,12 @@
     # into the spawn env; a spec without it — the panel's terminal controller
     # calls `spawnTerminal` directly — is a USER terminal and passes through
     # in every mode (`ctx.terminals` is `isolate`d on the web profile, so the
-    # registry entry itself is not a reachable seam). A dialect that cannot
-    # express "ambient minus subtree" (Landlock, Windows ACL) fails closed
-    # before the process starts.
+    # registry entry itself is not a reachable seam). The marker is a load
+    # contract, not an assumption: `multi-root-compat` probes the installed
+    # `dsh-terminal-bash` build for `DSH_PTY_SESSION_ID` at startup and refuses
+    # to load when an installed backend no longer stamps it. A dialect that
+    # cannot express "ambient minus subtree" (Landlock, Windows ACL) fails
+    # closed before the process starts.
     - id: multi-root-process-fence
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/process-fence'
     - id: multi-root-command

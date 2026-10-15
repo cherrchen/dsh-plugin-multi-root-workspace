@@ -26,7 +26,11 @@
  *   above all the panel's terminal controller — ever sets it. A spec without
  *   the marker is a USER terminal, passed through untouched in every mode:
  *   the sandbox protects agent behavior, and upstream never confines the
- *   user's own terminal. `ctx.terminals` itself is deliberately NOT wrapped:
+ *   user's own terminal. Because that marker is the ONLY discriminator, the
+ *   `multi-root-compat` gate asserts it at boot (`compat/pty-marker.ts`):
+ *   an installed backend whose emitted code no longer stamps it fails the
+ *   plugin load rather than silently reclassifying agent PTYs as the user's.
+ *   `ctx.terminals` itself is deliberately NOT wrapped:
  *   upstream mounts it inside `optional-persistent-terminals` with
  *   `isolate: { terminals: true }`, so the registry entry is unreachable from
  *   this row — the shared `spawnTerminal` seam plus the env discriminator

@@ -797,6 +797,10 @@ export class MultiRootRegistry extends Service {
     this.published.set(key, signature)
     const effective = statuses.flatMap(status => {
       const recorded = recordedGrantOf(status)
+      // An `invalid` record publishes NOTHING — not even its deny boundary:
+      // a record too corrupt to parse cannot state a trustworthy restriction,
+      // so under Full-access its former path becomes ambient-writable again.
+      // The tradeoff is recorded in ADR-0017 (失效登记的负授权修订).
       if (status.state === 'invalid' || recorded === undefined) return []
       return [{
         id: status.id,

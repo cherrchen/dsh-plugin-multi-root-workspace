@@ -123,6 +123,8 @@ Full-access 的 Windows profile 改为选择插件独立 runner 的 `--mode dang
 
 本节取代前文「deny 集只含 available」的决定。Registry 经同一 `setAdditionalRoots()` 写端口发布 available、missing 与 redirected 的有效登记，后两者带 `withheld`，不授予成员资格或写权限。`deniedRoots` 独立按登记策略、工具 cap 与 **recorded canonical 路径**生成；目录消失、刷新或重启不能解除仍登记的只读边界。仅显式移除登记或经校验修改策略才撤回对应负授权。Invalid 记录仍不发布；重新解析不把拒写边界或写授权转移到 redirect 的新目标。fs 直接检查负授权路径，不依赖成员投影。
 
+**Invalid 记录的负授权同样不发布（PR #12 评审订正）**：一条连 grant 字段都解析不出的记录，其 deny 声明本身也不可信——只发布「能确认的部分」等于发明一条记录里没有的边界。因此 invalid 记录不携带任何投影：不授予、也不拒写；Full-access 下其曾登记的路径恢复 ambient 可写。这是有意的取舍而非疏漏：能写坏存储的攻击者本就有 ambient 权限（store 在 `$DSH_HOME` 内，受限 Full-access 下本就受 deny 保护），而损坏面由 `list` / 面板的 `invalid` 状态显著报告。若未来要保留部分可解析记录的 deny 边界，应以单独字段实现，不能借多 grant 字段歧义记录重建语义。
+
 缺失路径的内核启动若不能表达该负授权必须失败关闭，不能因无法挂载路径而裸启动。既有进程仍保留启动快照。
 
 ## 面板与模型说明修订（2026-10-13）
@@ -136,6 +138,8 @@ Full-access 包装保留受限 prefix 对应的 `enforcement`、`denialSignature
 PTC 接缝改为公开 `ctx.ptcRuntime.run()`，不包装实现类的私有 `execute`。旧版 shell 的公开 `run` / `start` 同样包装（前台 run 不经过 start/execute），普通 shell、PTY 与 PTC 仍从同一 scope 取策略；真实组合冒烟及安装副本同时验证 Full-access 主根/ambient/固定读写允许、只读拒写和结果事实。
 
 Landlock 的 allowlist 无法实现 Full-access 子树减法，该组合不再直接判 unsupported，而是选 bubblewrap mount 后端：主机根原样读写、只读根单独 ro-bind。不带 workspace-write 的 PID、proc、device 或 tmpfs 替换，保持其他区域的原模式。该路径需要宿主安装且可执行 bubblewrap；不可用按 runnerFailure 报告，绝不裸启动。选择新后端时结果诊断同时切为 bubblewrap 的实际方言，不能保留 Landlock EACCES 拼写。bwrap 的 workspace-write temp mask 下注册的只读树也以 ro-bind 显式恢复读取。
+
+**如实记录**：该回退不在 profile 层预探测 bubblewrap 是否安装——`restrictedExecution` 只借 `confine` 的 read-only 骨架变换 argv，bwrap 缺失要到子进程 spawn 时才以 ENOENT / runnerFailure 形态出现。行为是 fail closed（绝不裸启动），但用户看到的报错是「进程启动失败」而非「后端不可用」；诊断质量限制已知，不混淆为权限拒绝。
 
 ## 外部审查返工修订（2026-10-14，PR #12 评审）
 
@@ -183,6 +187,10 @@ Landlock 的 allowlist 无法实现 Full-access 子树减法，该组合不再�
 **问题**：原机制用 `env.DSH_SESSION_ID` 恢复会话，但上游 `dsh-api-terminal-controller` 给面板终端 spawn 时同样盖 `DSH_SESSION_ID: agent.id`——按该标记识别会把**用户**终端一并 confine。决定按用户定案：沙箱保护的是 agent 行为，面板终端是用户行为，本插件任何模式都不介入。
 
 **机制**：agent PTY 与用户终端的结构差别在 env——全部 11 个受支持版本的 `dsh-terminal-bash` backend 启动 agent PTY 时经 `childEnvironment` 盖 `DSH_PTY_SESSION_ID: spec.sessionId`（与 `DSH_SESSION_ID: spec.owner.id` 并列），而面板 controller 只盖 `DSH_SESSION_ID`。`spawnTerminal` 包装据此判别：`DSH_PTY_SESSION_ID` 缺席 → 用户终端，任何模式直通；存在 → 按 `DSH_SESSION_ID` 恢复会话与策略，受限时前缀 argv，会话不可解析且 `hasActiveDenyRoots()` 时 fail closed 拒 spawn。`ctx.terminals` 本身不包装：`optional-persistent-terminals` 组 `isolate: terminals` 使 registry 在 web profile 上不可达，共享 `spawnTerminal` + env 判别同时覆盖隔离与未隔离两种挂载。
+
+**marker 合同升为启动断言（PR #12 评审订正）**：`DSH_PTY_SESSION_ID` 是判别 agent 与用户终端的唯一事实，env 键不是导出符号，单靠版本或导出探测无法确认它仍被盖章——backend 一旦停盖，agent PTY 会被误判为用户终端而在受限 Full-access 下静默直通（fail-open）。因此 `multi-root-compat` 门禁在注册服务前运行 `src/compat/pty-marker.ts` 的内容探针：经 `@deepseek-ai/dsh` 锚点解析已装 backend 的发布产物并核验其中仍写入该 marker。backend 缺席时合同空虚成立（无 backend 即无 agent PTY）；backend 在而 marker 不可确认（未写入或源码不可读）时判 `unverifiable`，拒绝整个插件装载而非放行——与 `mixed`/`incomplete` 同级，`DSH_MULTI_ROOT_COMPAT=warn` 不可放宽，升级车道的「装载被拒」本身就是该版本破坏合同的证据。
+
+**已知保守性**（如实记录）：`hasActiveDenyRoots()` 是全 store 级判断——任一 primary 存在显式只读根、或 authority 不可用时即返回 true。一个携带死会话标记的 agent PTY 因此在所有 primary 上被拒 spawn，而非仅所属 primary；该路径只覆盖会话已消亡的异常场景，方向是 fail closed，有意不做每主根细粒度判别。
 
 ### `$DSH_HOME` 在受限 Full-access 下加入 deny 集
 

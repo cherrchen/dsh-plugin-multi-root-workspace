@@ -48,3 +48,8 @@ Accepted（2026-10-13；Windows 原生及完整门禁证据只见路线账本）
 ## 安装与卸载
 
 安装入口保持 `scripts/windows-broker/install.ps1 -UserSid <插件宿主用户SID>`，必须使用管理员 PowerShell；省略 UserSid 时使用当前用户，卸载加 `-Uninstall`。每用户稳定命名的服务账户与 pipe，安装目录和 executable 由管理员持有，宿主用户与虚拟服务账户仅获读取/执行。安装器的 `rights.cs` 随 tarball 提供，并作为打包必须项检查；broker 不提供修改 LSA policy 的请求。旧 LocalSystem 安装由同一入口停止并替换，协议 v1 客户端被新版拒绝，不能静默恢复裸进程。
+
+## 已知边界（PR #12 评审记录）
+
+- **deny 根的 delete→recreate 竞态**：deny ACE 写在文件系统对象上而非路径上，受拒根被删除并原地重建后，新目录不携带 deny ACE，deny-only 组 token 不再拒其写入。runner 在 ACL 整树写入前后各做一次 canonical 校验收窄窗口，但窗口不能归零。该窗口不在威胁模型内：受限子进程无法删除受拒根（父目录 `FILE_DELETE_CHILD` + 根自身 `DELETE`/`WRITE_DAC`/`WRITE_OWNER` deny），能删根的只有 ambient 权限进程——而 ambient 进程本就在本机制的防护范围之外。
+- **broker 服务的可观测性**：pipe 监听失败时服务按有界节奏静默重试，诊断依赖 Windows 事件日志 / 服务状态；客户端侧只看到连接拒绝，错误文案已指向 broker 安装状态（`Windows read-only roots require the installed privileged broker`）。
