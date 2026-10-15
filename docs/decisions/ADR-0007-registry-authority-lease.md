@@ -92,3 +92,7 @@ B9（ADR-0017）给 `danger-full-access` 引入 deny 集语义后，「空 scope
 - [ADR-0004 Root 注册表的持久化形态与校验语义](./ADR-0004-root-registry-persistence-and-validation.md)
 - [架构文档 §7](../architecture/multi-root-workspace.md)
 - [M4 开发计划](../plans/completed/2026-09-15-m4-registry-authority-lease.md)
+
+## 修订：未知边界不得保留共享临时区授权（2026-10-15）
+
+此前按上游 workspace-write 降级仍授予共享临时区，争用进程因而能覆写另一进程合法登记于临时区内的只读根。未知权威时，Full-access 与 workspace-write 均收窄为仅主根可写，read-only 不变；显式 deny 仍优先。fs 与进程执行遵循同一规则，接管后恢复正常授权。构造与后端边界见 [ADR-0017 的本轮修订](./ADR-0017-three-state-root-access-and-sandbox-modes.md#临时区与反向包含修订2026-10-15)。

@@ -44,6 +44,25 @@ foreach ($right in $required) {
 $seed = [DshBrokerRights]::Install($serviceSid)
 [DshBrokerRights]::Remove($serviceSid, [string[]]@($seed | Where-Object { $_ -ne 'SeServiceLogonRight' }))
 try {
+    # Inject each post-grant failure through PowerShell's command resolution.
+    # Include a partial staging record, then verify actual LSA policy and SCM.
+    foreach ($step in @('Set-Content', 'Move-Item', 'Start-Service')) {
+        Set-Item -Path "Function:global:$step" -Value {
+            Microsoft.PowerShell.Management\Set-Content -LiteralPath "$record.pending" -Value '['
+            throw 'Injected installation failure'
+        }
+        $failed = $false
+        try { & $installer }
+        catch {
+            if ($_.Exception.Message -notlike '*Injected installation failure*') { throw }
+            $failed = $true
+        } finally { Remove-Item -LiteralPath "Function:global:$step" -Force }
+        if (-not $failed) { throw "Failure injection did not run: $step" }
+        Assert-Rights (Read-Policy) @($preexisting + 'SeServiceLogonRight')
+        if (Test-Path $record) { throw 'Rollback retained a committed rights record.' }
+        if (Test-Path "$record.pending") { throw 'Rollback retained a partial rights record.' }
+        if (Get-Service $name -ErrorAction SilentlyContinue) { throw 'Rollback retained the failed service.' }
+    }
     & $installer
     Assert-Rights (Read-Policy) $required
     if (@(Get-Content -Raw $record | ConvertFrom-Json) -contains 'SeServiceLogonRight') { throw 'Installer recorded a pre-existing right.' }

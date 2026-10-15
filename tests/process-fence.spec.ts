@@ -271,7 +271,7 @@ describe('shell and PTC execute entries', () => {
 })
 
 describe('the unavailable-authority downgrade', () => {
-  it('clamps shell execute to the upstream workspace-write profile, not the restricted one', async () => {
+  it('limits shell execute to the primary root without shared temp grants', async () => {
     const { ctx, provider, captured } = await mountStack('seatbelt', 'danger-full-access')
     // The registry marks the scope unavailable when it is not the store's
     // authority; an empty deny set then means "unknown", not "nothing".
@@ -279,15 +279,12 @@ describe('the unavailable-authority downgrade', () => {
     const shell = ctx.get('shell') as { execute(spec: unknown): Promise<unknown> }
     await shell.execute({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
     expect(captured.spawned).toHaveLength(1)
-    // The clamp is exactly the argv upstream `confine` would produce under
-    // workspace-write: primary root + temp grants, no additional roots, and
-    // no ambient "(allow default) + subpath deny" restricted profile.
     const expected = await confined(provider, COMMAND, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
     expect(captured.spawned[0]!.argv).toEqual(expected.argv)
-    expect(captured.spawned[0]!.argv.join(' ')).not.toContain('(deny file-write* (subpath')
+    expect(captured.spawned[0]!.argv.join(' ')).not.toContain(sbplSubpath(canonicalPath(tmpdir())))
   })
 
-  it('clamps ptcRuntime.run through the same workspace-write profile', async () => {
+  it('limits ptcRuntime.run to the primary root', async () => {
     const { ctx, provider, captured } = await mountStack('bwrap', 'danger-full-access')
     ctx.multiRootScope.setRegistryAuthority(false)
     const runtime = ctx.get('ptcRuntime') as { run(spec: unknown): Promise<unknown> }
@@ -360,7 +357,7 @@ describe('agent and user terminals', () => {
     expect(captured.terminals[0]!.argv.slice(-2)).toEqual(['/bin/bash', '-l'])
   })
 
-  it('clamps an agent PTY to the workspace-write profile while the registry authority is unavailable', async () => {
+  it('limits an agent PTY to the primary root while the registry authority is unavailable', async () => {
     const session = liveSession('sess-agent-clamped')
     const { ctx, provider, captured } = await mountStack('seatbelt', 'danger-full-access', {}, false, { pid: 1 }, new Map([[session.id, session]]))
     ctx.multiRootScope.setRegistryAuthority(false)
@@ -375,10 +372,9 @@ describe('agent and user terminals', () => {
     const { ctx, captured } = await mountStack('seatbelt', 'danger-full-access', { dshHome: home }, false, { pid: 1 }, new Map([[session.id, session]]))
     ctx.multiRootScope.setRegistryAuthority(false)
     await ctx.subprocess.spawnTerminal(agentSpec(session.id))
-    // The workspace-write temp grant covers the (fixture) home, so the
-    // clamped profile must carry a trailing deny form for it.
+    // The shared temp grant is gone: this home is already outside all grants.
     const sbpl = captured.terminals[0]!.argv.join(' ')
-    expect(sbpl).toContain(`(deny file-write* ${sbplSubpath(home)}`)
+    expect(sbpl).not.toContain(sbplSubpath(home))
     expect(sbpl).toContain('(allow file-write*')
   })
 

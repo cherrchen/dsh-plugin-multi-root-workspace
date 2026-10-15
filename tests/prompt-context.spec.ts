@@ -114,17 +114,17 @@ describe('renderWorkspaceRootsContext', () => {
       const options = { platform, mode: 'danger-full-access' as const, primaryRoot: PRIMARY, cappedTools: [] }
       expect(renderWorkspaceRootsContext({ ...options, roots: [], authority: 'unavailable' }))
         .toBe(REGISTRY_UNAVAILABLE_NOTE)
-      // With members the note still comes first, ahead of the topology text.
+      // Old members must not advertise grants while authority is unavailable.
       expect(renderWorkspaceRootsContext({ ...options, roots: [A, C], authority: 'unavailable' }))
-        .toBe(`${REGISTRY_UNAVAILABLE_NOTE} Current DSH workspace roots: ["/repos/a","/repos/c"] are additional roots of this session's workspace; danger-full-access mode has no sandbox isolation.`)
+        .toBe(REGISTRY_UNAVAILABLE_NOTE)
     }
   })
 
-  it('contributes nothing for an unavailable authority outside Full-access', () => {
+  it('states the primary-only limit under workspace-write and keeps read-only silent', () => {
     for (const platform of PLATFORMS) {
       for (const mode of ['workspace-write', 'read-only'] as const) {
         expect(renderWorkspaceRootsContext({ platform, mode, primaryRoot: PRIMARY, roots: [], cappedTools: [], authority: 'unavailable' }))
-          .toBe('')
+          .toBe(mode === 'read-only' ? '' : REGISTRY_UNAVAILABLE_NOTE)
       }
     }
   })

@@ -108,8 +108,8 @@ export interface FilesystemScope {
    * is `unavailable` — contended, storage-failed, config-invalid, or torn
    * down — the empty root table is NOT evidence that nothing is restricted:
    * the registrations this process cannot see may carry explicit `read-only`
-   * boundaries, so `danger-full-access` enforcement degrades to upstream
-   * `workspace-write` semantics instead of trusting the empty deny set.
+   * boundaries, so both writable modes limit writes to the primary root
+   * instead of trusting the empty deny set.
    * A composition with no registry at all never reports `unavailable` — it can
    * never have registered roots.
    */
@@ -192,12 +192,12 @@ export const MULTI_ROOT_CONTEXT_NAME = 'multi-root:scope'
 
 /**
  * The deterministic sentence the model hears while the registry authority is
- * unavailable under `danger-full-access` — the mode's enforcement is then the
- * upstream `workspace-write` one, which the prompt must not leave implicit.
+ * unavailable under either writable mode — enforcement is then the
+ * primary-root-only one, which the prompt must not leave implicit.
  */
 export const REGISTRY_UNAVAILABLE_NOTE = 'The DSH multi-root registry is not available in this process, '
-  + 'so danger-full-access is temporarily enforced as workspace-write: writes are limited to the primary root '
-  + 'and the platform temp area.'
+  + 'so writes are temporarily limited to the primary root; shared platform temp directories are not writable. '
+  + 'Explicit deny boundaries still take precedence.'
 
 /**
  * The B9 effective-access rule (ADR-0017's nine-cell matrix): whether a root
@@ -223,7 +223,7 @@ function effectivelyWritable(mode: SandboxMode, access: RootAccess): boolean {
  * @param options.cappedTools - sorted tool names that can never write an additional root.
  * @param options.toolAccessInvalid - invalid host config caps every additional-root write.
  * @param options.authority - the registry-authority fact; `unavailable` under
- *   `danger-full-access` downgrades enforcement to `workspace-write`, which the
+ *   `danger-full-access` and `workspace-write` limit writes to the primary root, which the
  *   model must hear even when there is no topology to describe.
  * @param options.protectedHome - the canonical DSH home when the scope appended
  *   it to the deny set (`danger-full-access` with restrictions); stated by path
@@ -242,7 +242,7 @@ export function renderWorkspaceRootsContext(options: {
   readonly protectedHome?: string
 }): string {
   const { platform, mode, primaryRoot, roots, cappedTools } = options
-  const authorityNote = options.authority === 'unavailable' && mode === 'danger-full-access'
+  const authorityNote = options.authority === 'unavailable' && mode !== 'read-only'
     ? REGISTRY_UNAVAILABLE_NOTE
     : ''
   const homeNote = options.protectedHome !== undefined && mode === 'danger-full-access'
@@ -251,6 +251,7 @@ export function renderWorkspaceRootsContext(options: {
   // The leading notes (downgrade, protected home) precede the topology text;
   // they are also the whole contribution when there are no roots to describe.
   const lead = [authorityNote, homeNote].filter(note => note !== '').join(' ')
+  if (options.authority === 'unavailable') return lead
   if (roots.length === 0) return lead
   const prefix = lead === '' ? '' : `${lead} `
   const members = JSON.stringify(roots.map(root => root.path))
@@ -430,7 +431,7 @@ export class MultiRootScopeService extends Service {
           const resolved = this.resolve(policy)
           // Zero roots normally contributes nothing — except while the
           // registry authority is unavailable (Full-access is enforced as
-          // workspace-write and the model must hear that downgrade), or the
+          // primary-root-only writes and the model must hear that limit), or the
           // scope appended the DSH-home boundary (withheld roots can deny
           // without granting membership).
           if (resolved.roots.length === 0 && resolved.authority !== 'unavailable'
@@ -461,7 +462,7 @@ export class MultiRootScopeService extends Service {
     const primaryRoot = canonicalPath(policy.workspaceRoot)
     const roots = this.membersOf(primaryRoot)
     const capped = this.capped()
-    const writable = capped
+    const writable = capped || this.registryAuthority === 'unavailable'
       ? []
       : roots.filter(root => effectivelyWritable(policy.mode, root.access)).map(root => root.path)
     const registered = this.rootsByPrimary.get(primaryRoot) ?? []

@@ -16,6 +16,22 @@ import { createHash } from 'node:crypto'
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 
+/** IPC budget, independent of the registry's configurable add limit. Historical
+ * over-limit stores retain their records. Beyond this native launch budget the
+ * whole ambient launch is refused before ACL edits; denies are never truncated.
+ * Keep the broker service's MaxDenyRoots in sync (covered by contract tests).
+ */
+export const MAX_WINDOWS_DENY_ROOTS = 256
+
+export function assertWindowsDenyCapacity(count: number): void {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_WINDOWS_DENY_ROOTS) {
+    throw new DialectUnrecognizedError(
+      `Windows ambient restriction requires 1–${MAX_WINDOWS_DENY_ROOTS} deny roots including the protected DSH home; got ${count}. `
+      + 'Reduce the registered restrictions before launching; no deny roots were dropped',
+    )
+  }
+}
+
 /**
  * Raised when a confined argv or a runner profile cannot be recognized or
  * widened. The provider converts this into the fail-closed

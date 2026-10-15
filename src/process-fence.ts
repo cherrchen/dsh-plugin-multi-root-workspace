@@ -39,7 +39,7 @@
  * The same seam carries the unknown-authority downgrade: while the scope
  * reports `authority: 'unavailable'` — a contended, storage-failed or
  * config-invalid registry publishes an empty deny set that is NOT evidence —
- * `danger-full-access` executions run inside the upstream `workspace-write`
+ * `danger-full-access` executions run inside a primary-root-only
  * profile (with the deny set applied) instead of ambient.
  *
  * Windows uses the standalone ambient deny-token runner. Landlock cannot subtract a subtree, so that combination selects bubblewrap.
@@ -114,7 +114,7 @@ export function apply(ctx: Context): void {
    * The confined facts for one Full-access call, or `undefined` when the call
    * needs no confinement (not full-access, and nothing to deny while the
    * registry is the store's authority). An `unavailable` scope authority
-   * clamps the call to the upstream `workspace-write` profile: the empty deny
+   * clamps the call to a primary-root-only profile: the empty deny
    * set a contended or failed registry publishes is not evidence that nothing
    * is restricted. May throw synchronously — `SandboxUnavailableError` from a
    * dialect that cannot express the confinement, which must propagate to the

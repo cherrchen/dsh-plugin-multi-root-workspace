@@ -38,7 +38,7 @@
  *   root cannot each keep a live domain snapshot. A store-wide kernel lease
  *   (ADR-0007) elects one authority; a contended process publishes an empty
  *   scope marked `authority: 'unavailable'` — under which Full-access is
- *   enforced as workspace-write — rejects mutations, and retries the lease
+ *   limited to primary-root-only writes — rejects mutations, and retries the lease
  *   from {@link MultiRootRegistry.refresh}.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/registry
@@ -264,7 +264,7 @@ export class MultiRootRegistry extends Service {
     // authority: the empty root table a contended, storage-failed or
     // config-invalid registry publishes must read as "restrictions unknown",
     // never as "nothing is restricted" — Full-access enforcement downgrades
-    // to workspace-write while this flag is out (ADR-0017 review amendment).
+    // to primary-root-only writes while this flag is out (ADR-0017 review amendment).
     this.ctx.multiRootScope.setRegistryAuthority(false)
     const configured = config.maxAdditionalRoots === undefined ? DEFAULT_MAX_ADDITIONAL_ROOTS : config.maxAdditionalRoots
     if (Number.isInteger(configured) && configured >= 1 && configured <= MAX_ADDITIONAL_ROOTS_CEILING) {

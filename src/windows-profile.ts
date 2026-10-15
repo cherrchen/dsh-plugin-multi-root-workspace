@@ -5,6 +5,7 @@ import {
   DialectUnrecognizedError,
   isWindowsNetworkOrDevicePath,
   parseWindowsProfile,
+  assertWindowsDenyCapacity,
 } from './windows-runner-contract.ts'
 
 // The contract lives in windows-runner-contract.ts: lib/windows-runner.js runs
@@ -15,6 +16,7 @@ export { parseWindowsProfile, workspaceScopeSid, type WindowsProfile } from './w
 
 /** Recognize the upstream runner, then select our ambient deny-token path. */
 export function restrictWindowsProfile(profile: readonly string[], deniedRoots: readonly string[]): string[] {
+  assertWindowsDenyCapacity(deniedRoots.length)
   if (profile.length < 2 || profile[0] === undefined || profile[1]?.startsWith('--')) {
     throw new DialectUnrecognizedError('Windows ACL runner invocation is not [node, runner, ...flags]')
   }
@@ -45,11 +47,12 @@ export function widenWindowsProfile(
   // The restricted-token model grants; it cannot subtract. A denied root under
   // a granted directory (the workspace, the private temp, or a widened root)
   // stays writable through the parent's ACE — refuse the profile instead. The
-  // registration rules already keep a denied root out of the workspace and out
-  // of every sibling root, so the only reachable overlap is the temp area.
-  if (parsed.mode === 'workspace-write') {
-    const granted = [parsed.workspace, parsed.temp, ...roots]
-    const covered = deniedRoots.filter(root => granted.some(target => windowsContained(root, target)))
+  // registration rules keep ordinary members disjoint, but protected home
+  // may contain the primary, and registered denies may contain a temp grant.
+  {
+    const granted = parsed.mode === 'workspace-write' ? [parsed.workspace, parsed.temp, ...roots] : roots
+    const covered = deniedRoots.filter(root => granted.some(target =>
+      windowsContained(root, target) || windowsContained(target, root)))
     if (covered.length > 0) {
       throw new DialectUnrecognizedError(
         `Windows ACL cannot deny [${covered.join(', ')}] inside a writable grant — the restricted-token model only grants`,

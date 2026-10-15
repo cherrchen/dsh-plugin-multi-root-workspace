@@ -8,6 +8,7 @@ import { rootDenySid } from '../src/windows-runner-contract.ts'
  */
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
@@ -143,6 +144,43 @@ function secondDrive(fixtureDrive: string): string | undefined {
 }
 
 describe.runIf(process.platform === 'win32')('Windows ACL native confinement', () => {
+  it.each([64, 80])('keeps every deny in a %i-root snapshot plus the DSH home', async count => {
+    const fixture = createFixtureWorkspace('deny-capacity')
+    const home = join(fixture.base, 'home')
+    const roots = Array.from({ length: count }, (_, i) => join(fixture.base, `root-${i}`))
+    for (const root of [...roots, home]) mkdirSync(root)
+    const mounted = await mountProvider(fixture.workspace, { dshHome: home })
+    try {
+      // 64 is a legal current limit; 80 represents an accepted historical
+      // over-limit snapshot. The scope must not truncate either one.
+      mounted.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, roots.map((path, i) => ({
+        id: `root-${i}`, path, recordedPath: canonicalPath(path), access: 'read-only',
+      })))
+      const policy = { mode: 'danger-full-access' as const, workspaceRoot: fixture.workspace }
+      const denied = mounted.ctx.multiRootScope.resolve(policy).deniedRoots
+      expect(denied).toHaveLength(count + 1)
+      const prefix = await mounted.provider.restrictedArgvPrefix(policy, denied)
+      const argv = [...prefix, process.execPath, '-e', writeProbe([roots[0]!, roots[count - 1]!, home, fixture.workspace], 'capacity.txt')]
+      const result = await spawnArgv(argv[0]!, argv.slice(1))
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim().split(/\r?\n/)).toEqual([
+        expect.stringMatching(/^denied:/), expect.stringMatching(/^denied:/), expect.stringMatching(/^denied:/), 'allowed',
+      ])
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 120_000)
+
+  it('omits shared temp grants under an unavailable authority', async () => {
+    const fixture = createFixtureWorkspace('primary-only')
+    const shared = mkdtempSync(join(tmpdir(), 'mrw-clamp-'))
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      mounted.ctx.multiRootScope.setRegistryAuthority(false)
+      const result = await spawnConfined(mounted, [process.execPath, '-e', writeProbe([fixture.workspace, shared], 'primary-only.txt')])
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim().split(/\r?\n/)).toEqual(['allowed', expect.stringMatching(/^denied:/)])
+    } finally { await mounted.ctx.fiber.dispose(); rmSync(shared, { recursive: true, force: true }); fixture.dispose() }
+  })
+
   it('enforces the complete B9 mode matrix for mixed roots without restricting ambient writes', async () => {
     const fixture = createFixtureWorkspace('win-b9-matrix')
     const inherited = join(fixture.base, 'inherit')

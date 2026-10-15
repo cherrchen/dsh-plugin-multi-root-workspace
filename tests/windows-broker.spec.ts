@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
 import { createConnection } from 'node:net'
 import type { Socket } from 'node:net'
@@ -5,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('node:net', () => ({ createConnection: vi.fn() }))
 import { assignDenyToken, brokerPipeName, requestDenyToken } from '../src/windows-broker.ts'
-import { rootDenySid } from '../src/windows-runner-contract.ts'
+import { MAX_WINDOWS_DENY_ROOTS, assertWindowsDenyCapacity, rootDenySid } from '../src/windows-runner-contract.ts'
 
 describe('Windows broker request boundary', () => {
   const user = 'S-1-5-21-100-200-300-1001'
@@ -14,10 +15,20 @@ describe('Windows broker request boundary', () => {
     expect(brokerPipeName(user)).not.toBe(brokerPipeName(user + '0'))
     expect(() => brokerPipeName('..\\another-pipe')).toThrow('invalid')
   })
+  it('keeps the native service and byte budget aligned with the client limit', () => {
+    const service = readFileSync(new URL('../scripts/windows-broker/service.cs', import.meta.url), 'utf8')
+    const maximum = Number(/MaxDenyRoots = (\d+)/.exec(service)?.[1])
+    const bytes = Number(/MaxRequestBytes = (\d+)/.exec(service)?.[1])
+    expect(maximum).toBe(MAX_WINDOWS_DENY_ROOTS)
+    expect(bytes).toBeGreaterThan(Buffer.byteLength(`3|${'9'.repeat(20)}|${'9'.repeat(20)}|${Array(maximum).fill('S-1-4-4294967295-4294967295-4294967295-4294967295-3').join(',')}\n`))
+    expect(() => assertWindowsDenyCapacity(65)).not.toThrow()
+    expect(() => assertWindowsDenyCapacity(81)).not.toThrow()
+    expect(() => assertWindowsDenyCapacity(maximum + 1)).toThrow('no deny roots were dropped')
+  })
   it('accepts no arbitrary attribute value, command or unbounded set', async () => {
     const deny = rootDenySid('C:\\readonly')
     for (const [handle, values] of [[0n, [deny]], [1n, []], [1n, ['administrator']],
-      [1n, [deny + '|run command']], [1n, Array(65).fill(deny)]] as const) {
+      [1n, [deny + '|run command']], [1n, Array(MAX_WINDOWS_DENY_ROOTS + 1).fill(deny)]] as const) {
       await expect(requestDenyToken(user, handle, values)).rejects.toThrow('invalid deny-token broker request')
     }
   })
@@ -36,6 +47,16 @@ describe('Windows broker response boundary', () => {
   }
   afterEach(() => { vi.useRealTimers(); vi.clearAllMocks() })
 
+  it.each([65, 81, MAX_WINDOWS_DENY_ROOTS])('transmits all %i deny identities without truncation', async count => {
+    const socket = Object.assign(new EventEmitter(), { write: vi.fn(), destroy: vi.fn() })
+    vi.mocked(createConnection).mockReturnValue(socket as unknown as Socket)
+    const ids = Array.from({ length: count }, (_, i) => rootDenySid(`C:\\root-${i}`))
+    const response = requestDenyToken(user, 512n, ids)
+    socket.emit('connect')
+    expect(socket.write).toHaveBeenCalledWith(`2|512|${ids.join(',')}\n`)
+    socket.emit('data', Buffer.from('OK|42\n'))
+    await expect(response).resolves.toBe(42n)
+  })
   it('receives a fragmented 64-bit handle without losing precision', async () => {
     const { socket, response } = connect()
     expect(socket.write).toHaveBeenCalledWith(`2|512|${deny}\n`)
@@ -80,6 +101,15 @@ describe('Windows suspended assignment RPC', () => {
     }
     return io
   }
+  it.each([65, 81, MAX_WINDOWS_DENY_ROOTS])('assigns all %i identities and refuses one beyond the budget', count => {
+    const io = fixture('OK\n')
+    const ids = Array.from({ length: count }, (_, i) => rootDenySid(`C:\\root-${i}`))
+    assignDenyToken(user, 101n, 102n, ids, io)
+    expect(io.write).toHaveBeenCalledWith(42, Buffer.from(`3|101|102|${ids.join(',')}\n`))
+    const invalid = fixture('OK\n')
+    expect(() => assignDenyToken(user, 101n, 102n, Array(MAX_WINDOWS_DENY_ROOTS + 1).fill(deny), invalid)).toThrow('invalid')
+    expect(invalid.open).not.toHaveBeenCalled()
+  })
   it('sends only process/thread handles and deny identities, then closes the authenticated channel', () => {
     const io = fixture('OK\n')
     assignDenyToken(user, 101n, 102n, [deny], io)

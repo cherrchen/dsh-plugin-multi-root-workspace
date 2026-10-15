@@ -41,6 +41,7 @@ import { denyProfileArgs, DialectUnrecognizedError, graftProfileArgs, splitConfi
 import { restrictProfileArgs } from './dialects.ts'
 import { brandMultiRootProvider } from './providers.ts'
 import type {} from './scope.ts'
+import type { FilesystemScope } from './scope.ts'
 import { restrictWindowsProfile, widenWindowsProfile } from './windows-profile.ts'
 
 export type { Config }
@@ -83,8 +84,15 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
    * @returns the argv to spawn instead, plus the selected backend's facts.
    */
   override confine(argv: readonly string[], policy: SandboxPolicy, signal?: AbortSignal): UpstreamConfined {
+    // Snapshot once at dispatch. A workspace-write call with unknown denies
+    // must not inherit the shared temp grants either.
+    const scope = this.ctx.multiRootScope.resolve(policy)
+    if (policy.mode === 'workspace-write' && scope.authority === 'unavailable') {
+      const prefix = this.clampedExecution(policy, scope.deniedRoots, signal)
+      return widenConfined(() => prefix, facts => ({ ...facts, argv: [...facts.argv, ...argv] }), argv, policy, signal)
+    }
     const base = super.confine as unknown as ConfineCall
-    return widenConfined(base.bind(this), confined => this.widenForScope(confined, argv, policy), argv, policy, signal)
+    return widenConfined(base.bind(this), confined => this.widenForScope(confined, argv, policy, scope), argv, policy, signal)
   }
 
   /**
@@ -106,14 +114,14 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
    * @param confined - the upstream result for this call.
    * @param argv - the caller's argv, needed to re-split the wrapped form.
    * @param policy - the per-call policy.
+   * @param scope - the authorization snapshot taken at dispatch.
    * @returns the upstream result element for element, or one with a rewritten argv.
    */
-  private widenForScope(confined: ConfinedArgv, argv: readonly string[], policy: SandboxPolicy): ConfinedArgv {
+  private widenForScope(confined: ConfinedArgv, argv: readonly string[], policy: SandboxPolicy, scope: FilesystemScope): ConfinedArgv {
     // `danger-full-access` never confines; if a caller still hands it here the
     // upstream result passes untouched — its deny semantics live in
     // `restrictedArgvPrefix`, never on a confined profile.
-    if (policy.mode !== 'workspace-write' && policy.mode !== 'read-only') return confined
-    const scope = this.ctx.multiRootScope.resolve(policy)
+    if (scope.authority === 'unavailable' || (policy.mode !== 'workspace-write' && policy.mode !== 'read-only')) return confined
     const writable = scope.writableRoots
     const denied = scope.deniedRoots
     if (writable.length === 0 && (denied.length === 0 || policy.mode === 'read-only')) return confined
@@ -207,37 +215,15 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
   }
 
   /**
-   * Clamp an ambient-writable execution to the UPSTREAM `workspace-write`
-   * confine — the `danger-full-access` + unavailable-registry-authority cell.
-   * A process that cannot prove the store is its own cannot know whether a
-   * registered `read-only` boundary exists, so ambient writes degrade to the
-   * mode upstream would have enforced anyway: the primary root plus the
-   * platform temp areas, with NO additional-root widening (the registry's
-   * empty answer is not a grant either).
-   *
-   * Built like {@link restrictedExecution}: the upstream profile builders are
-   * private, so this probes `confine` once under `workspace-write` with a
-   * dummy argv and keeps the profile arguments — for every dialect, Windows
-   * ACL included — ending at the `--` separator. `enforcement`,
-   * `denialSignatures` and `runnerFailureRules` pass through untouched: they
-   * describe the very confine result the process is about to run under.
-   *
-   * `deniedRoots` graft onto the probed profile exactly the way
-   * `widenForScope`'s workspace-write branch does with an empty writable set
-   * — POSIX dialects take `denyProfileArgs`, Windows takes
-   * `widenWindowsProfile` — so a deny a grant would cover (the DSH home under
-   * a temp grant, say) is refused inside the clamped profile too. A dialect
-   * that cannot subtract that root under a grant throws
-   * `DialectUnrecognizedError` → `SandboxUnavailableError`: the clamp fails
-   * closed rather than run ambient.
-   *
-   * The return preserves the installed `confine` shape: a synchronous result
-   * on a synchronous release, a promise on an asynchronous one.
-   * @param policy - the caller's policy (mode is `danger-full-access`; the
-   *   probe itself runs under `workspace-write`).
-   * @param deniedRoots - canonical roots the clamped execution must not write.
-   * @param signal - cancellation, forwarded to releases that accept it.
-   * @returns the confined facts whose argv is the workspace-write prefix.
+   * Limit an execution with unknown registry authority to the primary root.
+   * Shared temp grants are unsafe: another process may have registered a
+   * read-only root beneath them. Harvest the upstream read-only skeleton and
+   * graft only the primary root, retaining diagnostics and the sync/async shape.
+   * Explicit denies still win; an unrepresentable overlap refuses launch.
+   * @param policy - the caller's execution policy.
+   * @param deniedRoots - known negative boundaries, including protected home.
+   * @param signal - cancellation forwarded to upstream.
+   * @returns the confined prefix ending at `--`, without the caller's command.
    */
   clampedExecution(
     policy: SandboxExecutionPolicy,
@@ -245,7 +231,7 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     signal?: AbortSignal,
   ): UpstreamConfined {
     const probePolicy: SandboxPolicy = {
-      mode: 'workspace-write',
+      mode: 'read-only',
       workspaceRoot: policy.workspaceRoot,
       ...(policy.sessionId === undefined ? {} : { sessionId: policy.sessionId }),
     }
@@ -257,15 +243,15 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
         const profileArgs = shape.dialect === 'windows-acl'
           // `widenWindowsProfile` cross-checks the profile's workspace against
           // the canonical primary root, matching the widenForScope call site.
-          ? widenWindowsProfile(shape.profileArgs, [], deniedRoots, canonicalPath(policy.workspaceRoot))
+          ? widenWindowsProfile(shape.profileArgs, [canonicalPath(policy.workspaceRoot)], deniedRoots, canonicalPath(policy.workspaceRoot))
           : denyProfileArgs(shape.dialect,
-            widenProfileArgs(shape.dialect, shape.profileArgs, probePolicy, []), deniedRoots)
+            graftProfileArgs(shape.dialect, shape.profileArgs, [canonicalPath(policy.workspaceRoot)]), deniedRoots)
         return { ...confined, argv: [...profileArgs, '--'] }
       } catch (error: unknown) {
         if (!(error instanceof DialectUnrecognizedError)) throw error
         throw new SandboxUnavailableError(
           policy.mode as ConfinedSandboxMode,
-          'multi-root workspace: cannot clamp an ambient execution to workspace-write '
+          'multi-root workspace: cannot limit an execution to the primary root '
           + `while the registry authority is unavailable — ${error.message}`,
         )
       }

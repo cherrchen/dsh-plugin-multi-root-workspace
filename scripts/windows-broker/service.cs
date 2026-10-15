@@ -14,6 +14,9 @@ using System.Threading;
 using System.Threading.Tasks;
 
 public sealed class RootDenyBroker : ServiceBase {
+    // Same bounded IPC contract as MAX_WINDOWS_DENY_ROOTS in the client.
+    const int MaxDenyRoots = 256;
+    const int MaxRequestBytes = 32768;
     readonly string sid, pipeName;
     volatile bool stopping;
     NamedPipeServerStream listener;
@@ -79,7 +82,7 @@ public sealed class RootDenyBroker : ServiceBase {
                 || (assigning && !Regex.IsMatch(fields[2], @"^[0-9]{1,20}$")))
                 throw new ArgumentException("Invalid request");
             string[] roots = fields[fields.Length - 1].Split(',');
-            if (roots.Length < 1 || roots.Length > 64) throw new ArgumentException("Invalid root count");
+            if (roots.Length < 1 || roots.Length > MaxDenyRoots) throw new ArgumentException("Invalid root count");
             foreach (var root in roots)
                 if (!Regex.IsMatch(root, @"^S-1-4-[0-9]{1,10}-[0-9]{1,10}-[0-9]{1,10}-[0-9]{1,10}-3$"))
                     throw new ArgumentException("Invalid deny identity");
@@ -161,7 +164,7 @@ public sealed class RootDenyBroker : ServiceBase {
     }
     static string ReadRequest(Stream stream) {
         var data = new MemoryStream();
-        for (int n = 0; n < 8192; n++) {
+        for (int n = 0; n < MaxRequestBytes; n++) {
             int value = stream.ReadByte();
             if (value < 0) throw new IOException("Disconnected");
             if (value == 10) return Encoding.ASCII.GetString(data.ToArray());

@@ -46,15 +46,41 @@ $framework = Join-Path $env:SystemRoot 'Microsoft.NET/Framework64/v4.0.30319'
 $compiler = Join-Path $framework 'csc.exe'
 & $compiler /nologo /target:exe /platform:anycpu "/out:$exe" "/reference:$(Join-Path $framework 'System.ServiceProcess.dll')" (Join-Path $PSScriptRoot 'service.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Broker compilation failed.' }
-& $sc create $name binPath= "`"$exe`" $sid $name" start= auto obj= "NT SERVICE\$name" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Broker service registration failed.' }
-$addedRights = [DshBrokerRights]::Install($serviceSid)
-ConvertTo-Json -InputObject @($addedRights) | Set-Content -LiteralPath $rightsRecord
-try { Start-Service $name }
-catch {
-    [DshBrokerRights]::Remove($serviceSid, $addedRights)
-    Remove-Item $rightsRecord -Force
-    throw
+$pendingRecord = "$rightsRecord.pending"
+$addedRights = [string[]]@()
+$serviceCreated = $false
+try {
+    & $sc create $name binPath= "`"$exe`" $sid $name" start= auto obj= "NT SERVICE\$name" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Broker service registration failed.' }
+    $serviceCreated = $true
+    $addedRights = [DshBrokerRights]::Install($serviceSid)
+    # Publish a complete record; a failed write must not leave malformed JSON
+    # on the upgrade/uninstall path.
+    ConvertTo-Json -InputObject @($addedRights) | Set-Content -LiteralPath $pendingRecord
+    Move-Item -LiteralPath $pendingRecord -Destination $rightsRecord -Force
+    Start-Service $name
+    (Get-Service $name).WaitForStatus('Running', [TimeSpan]::FromSeconds(15))
+} catch {
+    $installationError = $_
+    try {
+        if ($serviceCreated) {
+            $failedService = Get-Service -Name $name -ErrorAction SilentlyContinue
+            if ($failedService -and $failedService.Status -ne 'Stopped') { Stop-Service $name -Force }
+        }
+    } finally {
+        try {
+            # Revoke exactly this attempt's additions even if stopping fails.
+            # Remove the record only AFTER successful revocation.
+            [DshBrokerRights]::Remove($serviceSid, $addedRights)
+            Remove-Item -LiteralPath $pendingRecord -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $rightsRecord -Force -ErrorAction SilentlyContinue
+        } finally {
+            if ($serviceCreated) {
+                & $sc delete $name | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw 'Cannot roll back failed broker service registration.' }
+            }
+        }
+    }
+    throw $installationError
 }
-(Get-Service $name).WaitForStatus('Running', [TimeSpan]::FromSeconds(15))
 Write-Output "Installed $name for $sid"

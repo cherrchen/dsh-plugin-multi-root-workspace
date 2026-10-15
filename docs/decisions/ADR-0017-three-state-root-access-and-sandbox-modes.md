@@ -200,6 +200,16 @@ Landlock 的 allowlist 无法实现 Full-access 子树减法，该组合不再�
 
 回归：process-fence 的 agent/user 终端分轨断言（controller 形状直通、backend 形状受限/钳制、不可解析会话 fail closed）、scope 的 `protectedHome` 全触发矩阵、b9-review-regressions 的 home 拒写（含主根位于 home 内）、patch 行 `dshHome`、prompt-context 的 home 陈述句。
 
+## 临时区与反向包含修订（2026-10-15）
+
+本节取代前述未知 authority 的「上游 workspace-write（主根 + temp）」降级。共享临时区允许合法登记只读根，读不到登记表的进程不能证明这些 grant 安全。authority 不可用期间，**Full-access 与 workspace-write 均只授予主根写权限**，不授予共享临时区；read-only 不变。fs 从同次 scope 取主根；sandbox 从上游 read-only 骨架仅 graft 主根，保留同步/异步返回形状与实际后端诊断。Full-access 的 shell / PTC / Agent PTY 仍经同一 clamped prefix。主根本身位于临时区时，仅其子树可写，临时区兄弟目录仍不可写。接管后正常 grant / deny 恢复，用户终端仍直通。
+
+sandbox 在 confine 入口捕获一次 scope，避免异步 profile 探测后混用另一份权威快照；新进程沿用启动时权限快照的既有语义。模型在 Full-access 与 workspace-write 下均陈述仅主根可写且共享临时区不可写；权威未知时不呈现旧成员的 grant。
+
+拒写与授予的相交判断改为**双向包含**。不仅 deny 在 grant 下，grant 在 deny 下也必须限权：例如 home 包含主根，或已登记的只读根包含平台临时区。Seatbelt 追加祖先 subpath deny，bubblewrap 在 grant 后强制 ro-bind deny 根；Landlock 与 Windows allow-token profile 无法减法，两个方向的重叠都拒绝启动。Windows read-only 骨架 graft 主根时同样检查该重叠，不能因原 mode 为 read-only 而漏判。缺失 deny 源仍失败关闭，不改用可选挂载。
+
+回归见 `tests/authority-boundaries.spec.ts`：双真实 registry stack + 临时区只读根的 write/edit、两种可写模式、接管与显式移除、四后端主根授权、双向相交和 Seatbelt/bwrap 原生执行；Windows 原生主根授权与容量回归在 `tests/windows-native.e2e.ts`。执行证据统一记路线账本。
+
 ## Related Documents
 
 - [B9 专项计划](../plans/completed/2026-10-13-b9-root-access-and-sandbox-modes.md)

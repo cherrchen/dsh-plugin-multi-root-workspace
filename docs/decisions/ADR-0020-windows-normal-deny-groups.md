@@ -53,3 +53,11 @@ Accepted（2026-10-13；Windows 原生及完整门禁证据只见路线账本）
 
 - **deny 根的 delete→recreate 竞态**：deny ACE 写在文件系统对象上而非路径上，受拒根被删除并原地重建后，新目录不携带 deny ACE，deny-only 组 token 不再拒其写入。runner 在 ACL 整树写入前后各做一次 canonical 校验收窄窗口，但窗口不能归零。该窗口不在威胁模型内：受限子进程无法删除受拒根（父目录 `FILE_DELETE_CHILD` + 根自身 `DELETE`/`WRITE_DAC`/`WRITE_OWNER` deny），能删根的只有 ambient 权限进程——而 ambient 进程本就在本机制的防护范围之外。
 - **broker 服务的可观测性**：pipe 监听失败时服务按有界节奏静默重试，诊断依赖 Windows 事件日志 / 服务状态；客户端侧只看到连接拒绝，错误文案已指向 broker 安装状态（`Windows read-only roots require the installed privileged broker`）。
+
+## 协议容量与安装回滚修订（2026-10-15）
+
+broker 的 v2/v3 拒写身份预算由 64 提升为 **256**，与注册表新增上限解耦；请求帧上限同步为 32768 个 ASCII 字节。客户端、服务、prefix 构造与 runner 启动共用同一容量合同，测试核对 C# 常量与最坏格式请求的帧长。合法的 64 个只读根加独立 home 共 65 项可完整传输；原生回归还覆盖 80 个历史存量根加 home，验证第一根、最后一根与 home 均拒写。
+
+历史超限记录不删除、不截断，scope / fs 仍保留其授权语义；**Windows Full-access 新进程若需要超过 256 个拒写边界（包含 home），在构造 prefix 或 runner 改 ACL 前明确拒绝整次启动**，文案给出实际数量并要求减少登记限制。此限制是有界 IPC / 原生令牌构造的运行容量，不是新的注册表上限，也不是以缺失 deny 换取启动成功。原生系统的其他 token/ACL 前置条件仍可能拒绝启动，enforcement 维持 partial。
+
+安装的 service create → 新增 LSA rights → staging JSON 写入 → 完整记录发布 → 启动/等待 Running 纳入同一回滚路径。staging 写入或发布失败也撤销这次新增的 rights，保留安装前的 rights；清理 staging / committed 记录与失败的服务。记录先完整写入 `.pending` 再移动到正式路径，避免半截 JSON 阻断未来卸载。原生 `verify-install.ps1` 分别注入记录写入、发布和服务启动失败，实际回读 LSA policy 与 SCM，随后重装、升级、卸载，继续检查预存权限和其他账户 policy。

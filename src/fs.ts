@@ -120,15 +120,17 @@ export class MultiRootFileSystem extends LocalFileSystem {
    * cap may already have emptied the scope's list), so an explicit grant
    * survives a globally read-only session. An unavailable registry authority
    * never contributes members: a process that cannot read the store grants
-   * only the upstream derivation.
+   * only the primary root (and no shared temp grant).
    * @param policy - the per-call policy.
    * @param scope - the scope resolved once for this call; both the fence and
    *   the denial message below share it instead of re-resolving.
    * @returns the canonical writable roots; possibly empty.
    */
   private rootsFor(policy: SandboxExecutionPolicy, scope: FilesystemScope): string[] {
+    // Unknown registrations may deny any shared temp subtree. Only the primary
+    // root is provably disjoint from this primary's additional registrations.
+    if (scope.authority === 'unavailable') return policy.mode === 'read-only' ? [] : [scope.primaryRoot]
     const roots = writableRoots(policy)
-    if (scope.authority === 'unavailable') return roots
     for (const root of scope.writableRoots) {
       if (!roots.includes(root)) roots.push(root)
     }
@@ -157,8 +159,8 @@ export class MultiRootFileSystem extends LocalFileSystem {
    * One more Full-access rule: while the registry authority is `unavailable`
    * the empty deny set is not trustworthy — the store this process cannot
    * read may hold explicit `read-only` registrations — so the mode degrades
-   * to upstream `workspace-write` semantics (primary root plus the platform
-   * temp areas, no additional-root widening) until the authority returns.
+   * to primary-root-only writes (no shared temp or additional-root grants)
+   * until the authority returns.
    * @param target - the resolved target about to be mutated.
    * @param sandboxPolicy - the per-call policy; omit for the deployment fallback.
    * @returns the fresh canonical target the mutation must use.

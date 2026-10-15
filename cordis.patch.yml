@@ -101,7 +101,7 @@
     # Full-access with restricted roots it asks `ctx.sandbox` for a restricted
     # profile prefix and runs the call inside it, and while the registry
     # authority is unavailable (contended, storage-failed, config-invalid) it
-    # clamps the same calls to the upstream workspace-write profile instead of
+    # limits the same calls to primary-root-only writes (no shared temp) instead of
     # trusting the empty deny set. `spawnTerminal` only confines agent PTYs:
     # every supported `dsh-terminal-bash` backend stamps `DSH_PTY_SESSION_ID`
     # into the spawn env; a spec without it — the panel's terminal controller

@@ -567,3 +567,9 @@ Phase 5 完成，专项计划移至 completed；ADR-0020 Accepted，ADR-0019 保
 PR #12 的最新 Code Reviewer 指出 `--ro-bind-try` 会在只读根被删除时跳过挂载，使 Full-access 进程可重建并写入该路径。deny / restrict（含 Landlock fallback）统一改回强制 `--ro-bind`，源缺失时拒绝启动；workspace-write 可写父挂载同样失败关闭。决策、代价与回归场景见 [ADR-0017 缺失根修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#缺失-deny-根必须失败关闭2026-10-14pr-12-最新-p1)。新增 `tests/missing-deny-root.spec.ts`；未发布，版本与 allowlist 不变。
 
 验证：新增三项构造回归在旧实现上均失败，修复后通过；开发 pin 的 compat、lint、双端 typecheck、build、docs:check、pack:check 通过。原生 Seatbelt probe 通过；完整测试 643 通过 / 29 平台跳过（含新增的 3 项 Linux 原生用例）；compose 48/48、behavior 126/126、journey 62/62、packed behavior 125/125，全部冒烟 0 skip。本机为 macOS，bubblewrap / Landlock 不可用，Linux 原生缺失源执行证据待推送后的 CI，不把结构断言记为原生验证。
+
+#### 四项审查修复（2026-10-15）
+
+基于 PR #12 头部 `5103979` 复现并修复：未知 registry authority 保留共享 temp grant 的 fs/进程绕过；四后端遗漏 deny 祖先覆盖 grant 的反向相交；Windows broker 无法容纳 64 根加 home 与历史超限存量；安装记录写入失败未撤销新增 LSA rights。权限决定见 [ADR-0017 本轮修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#临时区与反向包含修订2026-10-15)，有界 IPC、超预算显式拒绝与安装回滚见 [ADR-0020 本轮修订](../../decisions/ADR-0020-windows-normal-deny-groups.md#协议容量与安装回滚修订2026-10-15)。未发布，版本号与兼容 allowlist 不变。
+
+本机 macOS 开发 pin：compat、lint、双端 typecheck、build、docs:check、pack:check 通过；原生 Seatbelt probe 与含新增回归的完整测试 **668 通过 / 33 平台跳过**；compose **48/48**、behavior **126/126**、journey **62/62**、packed behavior **125/125**，全部冒烟 0 skip。新增 Windows 原生 64/80 根加 home、primary-only 执行，以及真实 LSA/SCM 的三类失败注入随本次 CI 验证；本机不把平台跳过记为 Windows/Linux 原生证据。

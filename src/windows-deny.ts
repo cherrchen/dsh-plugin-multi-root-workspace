@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto'
 import { dirname, isAbsolute, join } from 'node:path'
 import { loadWindowsNative, readWindowsWideString, spawnWindowsDeniedChild } from './compat/windows-native.ts'
 import type { NativeApi, NativePointer } from './compat/windows-native.ts'
-import { canonicalPath, isWindowsNetworkOrDevicePath, rootDenySid } from './windows-runner-contract.ts'
+import { assertWindowsDenyCapacity, canonicalPath, isWindowsNetworkOrDevicePath, rootDenySid } from './windows-runner-contract.ts'
 import { assignDenyToken, requestDenyToken } from './windows-broker.ts'
 
 const WRITE_DAC = 0x40000
@@ -34,6 +34,7 @@ export async function runWindowsDenied(
   roots: readonly string[],
   argv: readonly string[],
 ): Promise<number> {
+  assertWindowsDenyCapacity(roots.length)
   if (process.arch !== 'x64' && process.arch !== 'arm64') throw new Error('Windows ambient restriction requires a 64-bit process')
   const verifyRoots = (): void => {
     for (const root of roots) {

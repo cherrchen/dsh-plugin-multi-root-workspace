@@ -3,6 +3,7 @@
  */
 import { createHash } from 'node:crypto'
 import { createConnection } from 'node:net'
+import { MAX_WINDOWS_DENY_ROOTS } from './windows-runner-contract.ts'
 
 export function brokerPipeName(userSid: string): string {
   if (!/^S-1-[0-9]+(?:-[0-9]+)+$/.test(userSid)) throw new Error('invalid broker user SID')
@@ -14,7 +15,7 @@ export function brokerPipeName(userSid: string): string {
  * even an impersonated pipe server cannot fabricate that kernel state.
  */
 export async function requestDenyToken(userSid: string, tokenHandle: bigint, deniedIds: readonly string[]): Promise<bigint> {
-  if (tokenHandle <= 0n || tokenHandle > 0xffffffffffffffffn || deniedIds.length === 0 || deniedIds.length > 64
+  if (tokenHandle <= 0n || tokenHandle > 0xffffffffffffffffn || deniedIds.length === 0 || deniedIds.length > MAX_WINDOWS_DENY_ROOTS
     || deniedIds.some(id => !/^S-1-4-(?:[0-9]{1,10}-){4}3$/.test(id))) {
     throw new Error('invalid deny-token broker request')
   }
@@ -65,7 +66,7 @@ export function assignDenyToken(
   },
 ): void {
   if (processHandle <= 0n || threadHandle <= 0n || processHandle > 0xffffffffffffffffn || threadHandle > 0xffffffffffffffffn
-    || deniedIds.length < 1 || deniedIds.length > 64 || deniedIds.some(id => !/^S-1-4-(?:[0-9]{1,10}-){4}3$/.test(id))) {
+    || deniedIds.length < 1 || deniedIds.length > MAX_WINDOWS_DENY_ROOTS || deniedIds.some(id => !/^S-1-4-(?:[0-9]{1,10}-){4}3$/.test(id))) {
     throw new Error('invalid deny-token assignment request')
   }
   const pipe = io.open(`\\\\.\\pipe\\${brokerPipeName(userSid)}`)
