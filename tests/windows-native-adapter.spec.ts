@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { readWindowsWideString, spawnWindowsDeniedChild, terminateWindowsJobAndWait } from '../src/compat/windows-native.ts'
 import { pinWindowsDenyPaths, readWindowsPathIdentity } from '../src/compat/windows-path-guard.ts'
 import { preflightWindowsDenyRoots } from '../src/compat/windows-deny-preflight.ts'
+import { canonicalPath } from '../src/windows-runner-contract.ts'
 import koffi from 'koffi'
 import type { NativeApi, WindowsNative } from '../src/compat/windows-native.ts'
 
@@ -513,9 +514,11 @@ describe('Windows deny preflight (mocked binding seam)', () => {
     return { native, api, events, closed }
   }
 
-  /** A real directory tree; only the Win32 answers are scripted. */
+  /** A real directory tree; only the Win32 answers are scripted. The base is
+   * canonicalized: a host whose temp path is an 8.3 alias (`RUNNER~1`) would
+   * otherwise script the mock under a spelling the scanned tree never uses. */
   function tree() {
-    const base = mkdtempSync(join(tmpdir(), 'dsh-mr-preflight-'))
+    const base = canonicalPath(mkdtempSync(join(tmpdir(), 'dsh-mr-preflight-')))
     const root = join(base, 'denied')
     mkdirSync(root)
     const file = join(root, 'file.txt')

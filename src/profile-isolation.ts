@@ -391,14 +391,17 @@ function inspectYaml(dir: string): Pick<DiscoveredProfile, 'yamlPath' | 'yamlTex
  * @returns the inspected home, profiles, skipped entries, and scan counts.
  */
 function inspectHome(home: string): InspectedHome {
-  const canonical = canonicalPath(home)
+  // Inspect the path AS SPELLED before canonicalizing: `canonicalPath`
+  // resolves reparse points to their targets, so an lstat on the result can
+  // never see a linked home. The walk below still uses the canonical spelling.
   let stat
-  try { stat = lstatSync(canonical) } catch (error) {
-    throw new Error(`the DSH home ${canonical} cannot be inspected: ${describeError(error)}`)
+  try { stat = lstatSync(home) } catch (error) {
+    throw new Error(`the DSH home ${home} cannot be inspected: ${describeError(error)}`)
   }
   if (stat.isSymbolicLink()) {
-    throw new Error(`the DSH home ${canonical} is a reparse point — refusing to work through it`)
+    throw new Error(`the DSH home ${home} is a reparse point — refusing to work through it`)
   }
+  const canonical = canonicalPath(home)
   if (!stat.isDirectory()) throw new Error(`the DSH home ${canonical} is not a directory`)
 
   const scan: InspectedHome['scan'] = {

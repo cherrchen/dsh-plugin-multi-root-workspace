@@ -9,7 +9,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
@@ -208,7 +208,7 @@ describe('the home scan', () => {
     expect(report.scan.files).toBeGreaterThan(0)
   })
 
-  it.runIf(process.platform === 'win32')('an uninspectable subtree makes the report incomplete — never clean', () => {
+  it.runIf(process.platform === 'win32')('an uninspectable subtree makes the report incomplete — never clean', context => {
     makeProfile('real')
     const locked = join(home, 'locked-dir')
     mkdirSync(locked)
@@ -220,6 +220,15 @@ describe('the home scan', () => {
     // Deny listing on the subtree: readdir fails, the scan records it.
     const deny = spawnSync(systemTool('icacls'), [locked, '/deny', `*${userSid}:(RD)`], { encoding: 'utf8', timeout: 60_000 })
     expect(deny.status, deny.stderr).toBe(0)
+    // On an elevated host the token bypasses the listing deny — the subtree
+    // stays inspectable and the refusal premise cannot be built.
+    let listable = true
+    try { readdirSync(locked) } catch { listable = false }
+    if (listable) {
+      spawnSync(systemTool('icacls'), [locked, '/remove:d', `*${userSid}`], { encoding: 'utf8', timeout: 60_000 })
+      context.skip('the host token bypasses the ACL listing deny — an uninspectable subtree cannot be built')
+      return
+    }
     try {
       const report = isolateReport(home)
       expect(report.incomplete).toBe(true)

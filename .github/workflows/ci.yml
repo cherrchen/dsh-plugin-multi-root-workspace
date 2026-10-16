@@ -63,7 +63,13 @@ jobs:
             pnpm install --frozen-lockfile
           else
             node scripts/upgrade-dsh.mjs "$DSH_MATRIX_VERSION"
-            pnpm install --no-frozen-lockfile --config.minimumReleaseAge=0
+            # The repointed tree resolves the newest upstream builds by design.
+            # pnpm re-verifies lockfile package ages inside `install` itself and
+            # again before every `pnpm run`, reading THIS file — so the intended
+            # bypass lives in config, not a one-shot CLI flag. This checkout is
+            # throwaway; nothing lands back in the repository.
+            echo 'minimumReleaseAge: 0' >> pnpm-workspace.yaml
+            pnpm install --no-frozen-lockfile
           fi
         shell: bash
       # Before anything else: the allowlist, peerDependencies, the development

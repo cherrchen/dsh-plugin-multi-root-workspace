@@ -1544,7 +1544,14 @@ describe.runIf(process.platform === 'win32')('hardlink preflight', () => {
       // The save file is UTF-16: one `path\nSDDL` pair per saved object.
       const lines = readFileSync(save, 'utf16le').split(/\r?\n/).filter(line => line.trim() !== '')
       expect(lines.length).toBeGreaterThanOrEqual(2)
-      return lines[lines.length - 1]!.trim()
+      const sddl = lines[lines.length - 1]!.trim()
+      // `D:` control flags: AI/AR are bookkeeping, not access. The runner's
+      // parent-guard write on a deny root's parent re-derives the DACL of
+      // every auto-inheriting sibling — an ACE-identical descriptor comes
+      // back flagged `D:AI` where a `D:`-drive fixture had plain `D:`. Keep
+      // `P` (protected blocks inheritance — access-relevant); compare the
+      // rest byte-for-byte.
+      return sddl.replace(/^(D:)([A-Z]*)/, (_match, prefix: string, flags: string) => prefix + flags.replace(/A[IR]/g, ''))
     } finally { rmSync(save, { force: true }) }
   }
 
@@ -1651,7 +1658,7 @@ describe.runIf(process.platform === 'win32')('hardlink preflight', () => {
     } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
   }, 180_000)
 
-  it('refuses an uninspectable tree — an unreadable file fails the scan, nothing is mutated', async () => {
+  it('refuses an uninspectable tree — an unreadable file fails the scan, nothing is mutated', async context => {
     const fixture = createFixtureWorkspace('win-hl-locked')
     const denied = join(fixture.base, 'ro-root')
     mkdirSync(denied)
@@ -1667,6 +1674,18 @@ describe.runIf(process.platform === 'win32')('hardlink preflight', () => {
     expect(userSid, 'cannot create the unreadable fixture without the caller SID').not.toBeUndefined()
     const deniedAcl = spawnSync(systemTool('icacls'), [lockedFile, '/deny', `*${userSid}:(R)`], { encoding: 'utf8', timeout: 60_000 })
     expect(deniedAcl.status, deniedAcl.stderr).toBe(0)
+    // On an elevated host the runner's FILE_FLAG_BACKUP_SEMANTICS open
+    // bypasses the deny ACE through SeBackupPrivilege — the file stays
+    // inspectable and no refusal can occur. libuv opens files with the same
+    // flag, so a plain read probes the same open class the preflight uses.
+    let bypassed = false
+    try { readFileSync(lockedFile, 'utf8'); bypassed = true } catch { /* the deny holds */ }
+    if (bypassed) {
+      spawnSync(systemTool('icacls'), [lockedFile, '/remove:d', `*${userSid}`], { encoding: 'utf8', timeout: 60_000 })
+      fixture.dispose()
+      context.skip('the host token bypasses the read deny through backup-privileged opens — an uninspectable fixture cannot be built')
+      return
+    }
     const mounted = await mountProvider(fixture.workspace)
     // Baseline includes the test's own deny ACE — the failed run must move nothing.
     const before = aclSnapshot([denied, lockedFile])

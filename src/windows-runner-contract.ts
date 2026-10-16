@@ -14,7 +14,7 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, realpathSync, statSync } from 'node:fs'
-import { isAbsolute } from 'node:path'
+import { isAbsolute, win32 } from 'node:path'
 
 /** IPC budget, independent of the registry's configurable add limit. Historical
  * over-limit stores retain their records. Beyond this native launch budget the
@@ -184,7 +184,7 @@ export function parseWindowsProfile(args: readonly string[], allowAdditional = f
   const tempWriteSid = fields.get('--temp-write-sid')
   if ((writeSid === undefined) !== (tempWriteSid === undefined)) throw new DialectUnrecognizedError('Windows ACL profile requires both capability SIDs or neither')
   if (protectedHome !== undefined
-    && (mode !== 'danger-full-access' || !isAbsolute(protectedHome)
+    && (mode !== 'danger-full-access' || !win32.isAbsolute(protectedHome)
       || !deniedRoots.some(root => root.toLowerCase() === protectedHome!.toLowerCase()))) {
     throw new DialectUnrecognizedError('--protected-home must be an absolute member of the deny roots on a standalone danger-full-access profile')
   }
