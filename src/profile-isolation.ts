@@ -33,7 +33,7 @@
  * @module profile-isolation
  */
 
-import { lstatSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, lstatSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { canonicalPath } from './windows-runner-contract.ts'
 
@@ -140,7 +140,7 @@ function plainCommentStart(value: string): number {
  * This is a strict subset scanner, deliberately NOT a YAML parser: it accepts
  * only top-level `key:` lines (plain or quoted keys) plus indented nested
  * content it never interprets, and throws — naming the file and the 1-based
- * line — on tabs in indentation, `%` / `---` / `...` directives, duplicate
+ * line — on an indented first entry, tabs in indentation, `%` / `---` / `...` directives, duplicate
  * top-level keys, or any other non-indented content line outside the key
  * form. A `#` preceded by whitespace ends a plain scalar; quoted scalars are
  * unquoted for the reported value. `valueStart`/`valueEnd` are the UTF-16
@@ -172,7 +172,10 @@ export function parseWorkspaceYamlKeys(text: string, path = WORKSPACE_YAML): Rea
     if (content === '') continue
     if (indentation.includes('\t')) fail(line, 'tab in indentation')
     if (content.startsWith('#')) continue
-    if (indentation.length > 0) continue // nested block content is accepted unchecked
+    if (indentation.length > 0) {
+      if (entries.size === 0) fail(line, 'indented top-level mappings are outside the supported subset')
+      continue // nested content after a top-level entry is accepted unchecked
+    }
     if (content.startsWith('%')) fail(line, 'a `%` directive is outside the supported subset')
     if (/^-{3}(?:\s|$)/.test(content)) fail(line, 'a `---` document marker is outside the supported subset')
     if (/^\.{3}(?:\s|$)/.test(content)) fail(line, 'a `...` document end is outside the supported subset')
@@ -544,11 +547,16 @@ function writeAtomically(path: string, text: string): void {
     throw new Error(`refusing to write through ${path}: not a plain file`)
   }
   const temp = `${path}.mrw-${process.pid}.tmp`
+  // Exclusive creation refuses existing files and links without truncating
+  // their targets. Keep this outside the cleanup block: a failed open gives
+  // us no ownership of the existing path, so we must not remove it either.
+  const descriptor = openSync(temp, 'wx')
   try {
-    writeFileSync(temp, text)
+    try { writeFileSync(descriptor, text) }
+    finally { closeSync(descriptor) }
     renameSync(temp, path)
   } catch (error) {
-    try { rmSync(temp, { force: true }) } catch { /* the temp may never have existed */ }
+    try { rmSync(temp, { force: true }) } catch { /* preserve the original write failure */ }
     throw error
   }
 }

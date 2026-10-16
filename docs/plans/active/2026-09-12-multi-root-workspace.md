@@ -647,5 +647,6 @@ Windows 实机（非 CI）验证暴露两个 CI 不可见的问题，处置经�
 - **冒烟实跑**：`smoke:compose` 48 通过；`smoke:behavior` 112 通过 / 1 跳过；`smoke:journey` 62 通过；`smoke:packed` 111 通过 / 1 跳过。唯一跳过原因一致：本机 `pwsh.exe` 是 MSIX 商店版，受限 token 拒绝 packaged 子进程——上游既定限制，非本批缺陷。
 - **内核探针**：`pnpm kernel:probe`——windows-acl 可用；seatbelt / bwrap / Landlock 本机不存在，POSIX 原生执行仍未验证（mocked profile 构造验证不充当内核拒写证据）。
 - **验收期修复（测试/冒烟基础设施，非产品代码）**：`tests/windows-native.e2e.ts` 的 `secondDrive()` 盘符比较既有缺陷——`'C:\'` 与 `'C:'` 比较恒不等，单盘机把 C: 当作不同盘在卷根跑 xdrive 用例，撞上游 `grantWrite` 写 mandatory label 的 WRITE_OWNER 需求；归一化后本机如实跳过（CI 的 `D:` 仍会真跑）。`sddlOf` 改用 `icacls /save` 替代 `powershell Get-Acl`——本机混合 PowerShell 5.1/7 `PSModulePath` 与共享 ModuleAnalysisCache 使 spawn 的 `powershell.exe -NoProfile` 间歇性模块加载失败，属宿主环境抖动。`scripts/smoke-behavior.mjs` 清理识别进程内映射的 `.node` addon：packed 模式下 `boot()` 从 scratch profile `dlopen` `koffi.node`，映射期间所有者进程自身无法删除——残留仅当全部由映射 addon 解释（每个失败文件是 `.node`、每个失败目录是其祖先）且注入了 `DSH_SMOKE_HOME` 时移交父进程在子进程退出后删除；独立运行的严格清理语义不变。
-- **边界如实记录**：macOS / Linux 内核原生执行本机不可用；xdrive 第二可写盘路径本机跳过（无第二固定盘）；非提权 CI lane 按 C2 节 defer。全部工作尚未提交，HEAD 仍为 `3a34595`。
+- **复审修复（推送前）**：`isolate-profiles --apply` 两处复审发现已修——整体缩进的顶层 YAML 一律 refused（原先误判 `packageImportMethod` absent 并追加零缩进键，使合法文件失效）；临时文件改 `wx` 独占创建，既有文件 / 硬链接 / 符号链接不再被写穿或删除，仅清理本进程创建的临时文件。新增 4 项回归；修复后完整套件 49 文件 775 通过 / 49 跳过 / 0 失败，冒烟四项、`pack:check`、`docs:check` 重跑全绿。
+- **边界如实记录**：macOS / Linux 内核原生执行本机不可用；xdrive 第二可写盘路径本机跳过（无第二固定盘）；非提权 CI lane 按 C2 节 defer。
 - **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。

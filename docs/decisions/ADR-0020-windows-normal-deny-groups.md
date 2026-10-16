@@ -110,8 +110,8 @@ deny ACE 写在文件对象上、随目录改名迁移，但登记的规范拼�
 **决定**：`/workspace-folders isolate-profiles` 作为宿主侧维护命令落地（`src/profile-isolation.ts` + `src/command.ts`），面板不加端点——它是配置迁移工具，不是根管理面。默认**只读检查**，`--apply` 才迁移配置；多链接文件若在受保护 home 仍残留，检查输出直接给出退出宿主、删 `node_modules`、按 lockfile 重装的步骤。
 
 - **profile 判定保守**：只认 `profiles/` 下真实目录、`package.json` 可解析为对象且 `dsh.profile` 为对象的条目；重解析点与普通文件只枚举、不落笔，对重解析点绝不下降。
-- **YAML 是严格子集扫描器而非解析器**（运行期依赖预算不含 yaml 包）：拒绝缩进 tab、`%` / `---` / `...` 指令、重复顶层键与所有非 `key:` 形式的顶层行；`&` `*` `!` `|` `>` `{` `[` 起始的值记为 complex。标量按原始 span 原地替换，注释、引号风格与 CRLF/LF 行尾保留；缺失文件用上游 `initProfile` 同款模板加 `packageImportMethod: copy` 补齐。复杂值 / 冲突 / 不可读一律 refused，不猜写。
-- **写入一律原子**：先写 `pnpm-workspace.yaml.mrw-<pid>.tmp` 再 rename 就位，失败保留原文件；目标文件本身是重解析点或非普通文件时拒绝写穿。
+- **YAML 是严格子集扫描器而非解析器**（运行期依赖预算不含 yaml 包）：拒绝整体缩进的顶层映射（首个非空、非注释行必须从第 0 列开始）、缩进 tab、`%` / `---` / `...` 指令、重复顶层键与所有非 `key:` 形式的顶层行；`&` `*` `!` `|` `>` `{` `[` 起始的值记为 complex。标量按原始 span 原地替换，注释、引号风格与 CRLF/LF 行尾保留；缺失文件用上游 `initProfile` 同款模板加 `packageImportMethod: copy` 补齐。复杂值 / 冲突 / 不可读一律 refused，不猜写。
+- **写入一律原子**：通过 `wx` 独占创建 `pnpm-workspace.yaml.mrw-<pid>.tmp`，向返回的文件描述符写入并关闭后再 rename 就位，失败保留原文件；已有临时文件、硬链接或符号链接均使创建失败，既不写穿也不删除已有路径。只有本次成功创建的临时文件才参与失败清理。目标文件本身是重解析点或非普通文件时拒绝写穿。
 - **整 home 扫描而非只看 `profiles/*/node_modules`**：`nlink > 1` 是文件对象属性，pnpm 硬链接可能出现在 profile 之外（store、共享缓存），局部扫描必然漏报；任一子树不可读时结论为 incomplete，不报干净。
 - **残留边界照旧显式声明**：设置 copy 不隔离既有依赖——硬链接在重装前仍是硬链接；copy 不修复 Administrators 属主路径，也不撤销此前可能已写到 store / 其他项目的 deny ACE（没有自动 reset，属人工评审项）；命令之后新建的 profile 需要同一配置或重新检查。
 - **冒烟**：`scripts/lib/dsh-runtime.mjs` 的 `ensureProfileCopyImport` 在首个 `dsh plugin add` 之前给冒烟 profile 写 copy（journey / compose / behavior 正向）；`smoke-behavior` 另建一个保持默认硬链接的 scratch profile，以真实 runner 断言退出 127 + 硬链接拒绝文案 + 子进程未运行（负向，真实预检拒绝而非断言跳过）。预检拒绝发生在 pin / token 请求 / ACL 编辑之前，无需 broker 或提权即可回归；CI 非提权 lane 未新增（GitHub Windows runner 全程提权，另起非提权进程需要第二账户，记入路线账本 defer）。

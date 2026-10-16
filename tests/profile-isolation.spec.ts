@@ -232,6 +232,32 @@ describe('the home scan', () => {
 })
 
 describe('applyIsolateConfig', () => {
+  it.each(['hardlink', 'copy'])('refuses an indented top-level mapping with %s without changing it', method => {
+    const original = `# profile settings\n  packages:\n    - .\n  packageImportMethod: ${method}\n`
+    const profile = makeProfile('indented', { yaml: original })
+    expect(isolateReport(home).profiles[0]?.yaml).toMatchObject({
+      state: 'unreadable', detail: expect.stringContaining('indented top-level'),
+    })
+    expect(applyIsolateConfig(home).actions[0]).toMatchObject({ action: 'refused' })
+    expect(readFileSync(join(profile, 'pnpm-workspace.yaml'), 'utf8')).toBe(original)
+  })
+
+  it.each(['file', 'hardlink'] as const)('preserves an occupied temporary %s and its external target', kind => {
+    const original = 'packageImportMethod: hardlink\n'
+    const profile = makeProfile('occupied', { yaml: original })
+    const yamlPath = join(profile, 'pnpm-workspace.yaml')
+    const temp = `${yamlPath}.mrw-${process.pid}.tmp`
+    const outside = join(fixture.base, 'outside.txt')
+    writeFileSync(outside, 'keep external contents')
+    if (kind === 'hardlink') linkSync(outside, temp)
+    else writeFileSync(temp, 'keep temporary contents')
+    const before = readFileSync(temp, 'utf8')
+    expect(applyIsolateConfig(home).actions[0]).toMatchObject({ action: 'refused' })
+    expect(readFileSync(yamlPath, 'utf8')).toBe(original)
+    expect(readFileSync(temp, 'utf8')).toBe(before)
+    expect(readFileSync(outside, 'utf8')).toBe('keep external contents')
+  })
+
   it('writes the upstream template plus copy for a profile without a yaml', () => {
     const profile = makeProfile('fresh')
     const report = applyIsolateConfig(home)
