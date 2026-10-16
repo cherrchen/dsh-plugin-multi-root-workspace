@@ -183,4 +183,9 @@ describe('inserted rows', () => {
     const scope = inserted.find(row => row.id === 'multi-root-scope')
     expect(scope?.config).toMatchObject({ toolAccess: {}, dshHome: 'dshHomePath()' })
   })
+
+  it('wires the same DSH home onto the command row so isolate-profiles inspects the protected home', () => {
+    const command = inserted.find(row => row.id === 'multi-root-command')
+    expect(command?.config).toMatchObject({ dshHome: 'dshHomePath()' })
+  })
 })

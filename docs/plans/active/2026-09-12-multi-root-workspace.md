@@ -41,6 +41,7 @@
 | 第二期 | B7 provider 冲突检测 | 品牌 + `multi-root-providers` 门禁；外来 `ctx.fs`/`ctx.sandbox` 下注册表缺席、scope 为空 | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0014](../../decisions/ADR-0014-root-limit-and-provider-conflict.md) | `2a36d5f` | 未发布 |
 | 第二期 | B8 平台感知提示词 | `renderWorkspaceRootsContext` 纯函数化；按模式/平台/访问级别陈述授权；win32 附带 partial-enforcement 说明 | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0013](../../decisions/ADR-0013-per-root-and-per-tool-access.md) | `a7f3d20` | 未发布 |
 | 第二期 | B9 附加根三态权限与跨 SandboxMode 执行一致性 | 继承 / 只读 / 读写；显式根权限覆盖会话模式默认行为，文件与新进程执行一致；先验证 Full-access 局部限权 | [B9 计划](../completed/2026-10-13-b9-root-access-and-sandbox-modes.md) | [0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)；并修订 [0001](../../decisions/ADR-0001-provider-replacement-scope.md)/[0003](../../decisions/ADR-0003-dialect-grant-widening.md)/[0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md)/[0012](../../decisions/ADR-0012-session-origin-and-effective-cwd.md)/[0013](../../decisions/ADR-0013-per-root-and-per-tool-access.md) | — | B9 实施与原生验收完成；Windows 普通 deny-only 组与暂停赋值、Linux bubblewrap 补局部只读；保留 Windows partial 边界，未发布 |
+| 第二期 | 分支安全审查修复（R1–R4） | 负授权规则统一（R2/R3）、Windows 祖先路径稳定性（R1）、硬链接失败关闭与 profile 隔离（R4） | [审查计划](./2026-10-16-branch-security-review-and-hardlink-isolation.md) | [0017 修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)、[0004 修订](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[0020 修订](../../decisions/ADR-0020-windows-normal-deny-groups.md) | — | Phase A（R2/R3）、B（R1）、C1（全根硬链接预检）与 C2（`/workspace-folders isolate-profiles` 命令、迁移与冒烟）已实施，门禁已执行（771 通过 / 49 跳过，冒烟四项实跑通过）；POSIX 原生内核未验证；未发布 |
 | 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 
 ## 总体策略
@@ -600,3 +601,51 @@ Windows 实机（非 CI）验证暴露两个 CI 不可见的问题，处置经�
 - **pnpm 硬链接残余**：pnpm 把全局 store（`%LOCALAPPDATA%\pnpm\store`）中的包文件硬链接进 `$DSH_HOME` 各 profile 的 `node_modules`，也链进其他项目。硬链接共享同一份安全描述符，因此 `$DSH_HOME` 的 deny 遍历会把常驻 deny ACE 写到 store 文件及其全部链接上。已用 `fsutil hardlink list` 验证：一个仓库文件与 store 及另两个项目共享链接。而 store 文件若是提权安装所建，遍历会 fail-closed（即非提权 `smoke:packed` 的跳过原因：`...\dsh-plugin-multi-root-workspace\CHANGELOG.md` 非调用方所有）。跳过硬链接不安全——文件内容写受文件自身 ACL 约束，跳过的链接会让受限子进程改动 `$DSH_HOME` 内的插件代码。留作用户的开放决策。
 
 未发布，版本号与 allowlist 不变。
+
+## 分支安全审查修复（2026-10-16 起，门禁已执行）
+
+`feat/sandbox-permision-harden` 的分支安全审查（[2026-10-16 审查计划](./2026-10-16-branch-security-review-and-hardlink-isolation.md)）确认 R1–R4 四条发现；修复按计划的三阶段推进，本节记录进度与证据。
+
+### Phase A：统一负授权规则（R2 + R3，已实施）
+
+- **R2 修复**：`widenForScope` 的 read-only 分支在 graft 固定读写根之后同样应用 `denyProfileArgs`——Seatbelt 在 allow 之后追加 deny（last match wins），bwrap 沿用缺失根失败关闭决定使用强制 `--ro-bind`，Landlock 对不可表达的子树减法 fail closed（`SANDBOX_UNAVAILABLE`）；windows-acl 此前已拒绝同一重叠。同步/Promise 形状与上游 `enforcement` / `denialSignatures` / `runnerFailureRules` 不变。
+- **R3 修复**：`classifyStoredRoots` 改两遍分类——第一遍逐条独立判定（recorded boundary 绝对性、以其判主根重叠先于 redirect），第二遍对全部结构有效记录的 recorded boundary 两两比较，任一重叠双方判 `membership-conflict` invalid：成员资格 withheld 但 recorded 边界仍作为 deny 发布，结果与展示顺序/重启无关。`registry.add` 改用 `reservedRootBoundary` 收集保留边界（missing、redirected、冲突记录都算），仅按索引豁免精确复活的同一行。结构损坏记录照旧不发布任何投影。
+- **本批证据**：`pnpm exec vitest run tests/roots.spec.ts tests/registry.spec.ts tests/missing-deny-root.spec.ts tests/sandbox-multi-root.spec.ts tests/b9-review-regressions.spec.ts` —— 130 通过 / 27 跳过（平台与内核原生用例）；`pnpm typecheck`、`pnpm docs:check` 通过。新增回归：mocked 上游 `confine` 的四方言 read-only 组合（POSIX 形状在 Windows 上亦可跑，sync/Promise 两路）、missing/redirected 子根双向包含拒绝、redirected 保留原边界、legacy 重叠两种顺序均判冲突且 deny 保留、重建缺失只读子根后真实 `MultiRootFileSystem` writeText/edit 拒写且内容不变。
+- **明确未做**：Phase B（R1）另行实施见下节；Phase C（R4，硬链接预检 + profile 隔离命令）未开始；完整门禁（compat:check、lint、build、完整 test、kernel:probe、三项 smoke、pack:check、smoke:packed）与 macOS/Linux 原生执行留待实施验收阶段统一运行——mocked 上游的 profile 构造验证不充当 POSIX 内核拒写证据。
+- **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。
+
+### Phase B：Windows 祖先路径钉扎（R1，已实施）
+
+- **机制**：`src/compat/windows-path-guard.ts` 经公开 `extendWin32ProcessBindings` 接缝绑定 CreateFileW 等原语，为每个 deny 根钉住从卷根到根本身的去重祖先链——每个目录持有 GENERIC_READ + 读/写共享（不含 delete sharing）的常驻句柄，实机探测否决了 FILE_READ_ATTRIBUTES 属性级句柄（不参与删除共享门）。同句柄校验目录属性、非重解析点、`HANDLE_FLAG_INHERIT` 清零、内核最终 DOS 拼写一致；任一环失败逆序释放并拒绝启动，不写任何祖先链持久 ACL。
+- **runner 集成**：`runWindowsDenied` 在 token 请求与 ACL 编辑之前获取钉住；`closeSync(7)` 与 `waitForProcessExit` 包入子进程 try 后，先 `terminateWindowsJobAndWait`（TerminateJobObject + ActiveProcesses 轮询至零，无超时）排空 Job 再关句柄，钉住在全部资源清理中最后释放。runner 被强制终止为异常边界——句柄随进程消亡、后代由 kill-on-close 兜底。
+- **本批证据**：`pnpm exec vitest run tests/windows-native-adapter.spec.ts` —— 26 通过（新增 mocked Job 排空：先 terminate 再轮询至 ActiveProcesses=0、Sleep(10) 间隔、Win32 失败不透传）；`pnpm exec vitest run tests/windows-native.e2e.ts -t "ancestor guard|preserves ConPTY output and the control descriptor"` —— 5 通过：真实受限子进程 rename deny 根父/祖父目录均拒绝、ambient 写仍可用，宿主 `MultiRootFileSystem` 对原拼写 writeText/editText 仍 `FS_SANDBOX_DENIED` 且内容不变；退出子进程的 Job 后代被排空（pid 死亡先于钉住释放、逃逸标记未写出）；ConPTY terminate 后钉住释放且无存活进程；祖先被 DELETE 独占句柄预占时发布版 runner 在 spawn 前 127 拒绝；ConPTY 输出与 fd 7 控制描述符回归不变。原型组「deny path guard」4 通过 / 1 跳过（本机无第二可写固定盘，第二驱动器钉扎未验证）。`pnpm build`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:check` 通过。
+- **明确未做**：Phase C（R4，硬链接预检 + profile 隔离）未开始；完整门禁与 macOS/Linux 原生执行仍留待实施验收阶段。
+- **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。
+
+### Phase C1：Windows 全根硬链接预检（R4，已实施）
+
+- **机制**：`src/compat/windows-deny-preflight.ts` 在祖先钉住之后、任何 token 请求 / ACL 编辑 / 锁工作之前，对全部 deny 根做只读递归预检——FILE_READ_ATTRIBUTES + 全共享打开、`GetFileInformationByHandle` 读身份、`GetFileType` 要求普通文件为磁盘类型，每个检查句柄在下行前关闭；任一打开 / 类型 / 身份 / 目录列出失败（含句柄关闭失败，聚合保留原始错误）都使启动在零副作用点拒绝并报出根与路径。任一普通文件 `links > 1` 一律拒绝：快照无法证明链接拓扑，保守不试图证明——不跳过 `node_modules`，不做全局重置。诊断区分「protected DSH home」（指向挂起的 `/workspace-folders isolate-profiles`）与登记根（建立独立副本）。
+- **写侧收紧**：ACL 遍历消费快照（深度优先序），目录继承与否由快照属性决定；写目录继承 ACE 前比对即时 `readdir` 名单与快照名单；`protect` 在即将写 ACL 的活句柄上 `verifyHandle` 复核属性位 / 卷序列 / 文件索引 / link 计数；根父目录守卫（树外、无快照）是唯一豁免 `verifyContent` 的调用且不启用 OICI。非事务性如实记录：复核到写之间的恶意并发外部修改仍可能竞过，零副作用只承诺到预检失败点。
+- **标签透传**：`--protected-home` 只做诊断标签——`scope.protectedHome` 经 `restrictedExecution` / `restrictedArgvPrefix` 第四可选参、`restrictWindowsProfile`、runner 契约解析（仅 standalone `danger-full-access`、须为 deny 根成员）传到 `runWindowsDenied`，不改变任何授权。
+- **本批证据**：`pnpm exec vitest run tests/windows-native-adapter.spec.ts tests/windows-multi-root.spec.ts tests/process-fence.spec.ts` —— 73 通过（新增 7 项 mocked 预检用例：快照序 / 句柄协议 / 硬链接与 home 标签 / 重解析不下降 / 打开·读·列出·关闭失败与聚合 / verifyHandle 身份与 link 复核；parser 标签校验与 fence 标签转发）；`pnpm exec vitest run tests/windows-native.e2e.ts -t "hardlink preflight|ancestor guard"` —— 11 通过：深层硬链接、末根硬链接首根零变化、同树双名、protected home 标签拒绝、不可读文件拒绝、junction 目标未扫描未改写、独立副本成功且外部原件不变——SDDL 前后快照逐字节比对，全部失败都在任何 ACL 副作用之前 127 退出且子进程哨兵未创建。`pnpm build` 通过。
+- **明确未做**：C2——`/workspace-folders isolate-profiles` 命令、profile 迁移与硬链接冒烟夹具未实施；完整门禁与 macOS/Linux 原生执行仍留待实施验收阶段。
+- **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。
+
+### Phase C2：profile 硬链接隔离命令与冒烟夹具（R4，已实施）
+
+- **命令与检查**：`/workspace-folders isolate-profiles` 落地为宿主侧维护命令（面板无端点），默认只读检查、`--apply` 迁移。`src/profile-isolation.ts` 只认 `profiles/` 下 `package.json` 可解析且 `dsh.profile` 为对象的真实目录；整 home 递归扫描统计目录 / 文件 / `nlink>1` 与不可检查项，任一不可读子树报 incomplete 不报干净；home 本身是重解析点即拒绝检查，profile 内重解析点只计数不下降。
+- **保守 YAML 迁移**：不引入 yaml 运行期依赖——`parseWorkspaceYamlKeys` 是严格子集扫描器，拒绝缩进 tab、指令 / 文档标记、重复顶层键、非 `key:` 顶层行及 `&` `*` `!` `|` `>` `{` `[` 起始的复杂值；缺失文件用上游 `initProfile` 同款模板补 `packageImportMethod: copy`，标量值按原始 span 原地替换（注释、引号与 CRLF/LF 保留），其余一律 refused。写入走 `<file>.mrw-<pid>.tmp` + rename 原子就位，重解析点目标拒绝写穿；`cordis.patch.yml` 的 `multi-root-command` 行新增 `dshHome` 配置。
+- **诊断与 remediation**：预检文案移除「pending」措辞，指向现已存在的命令；`--apply` 报告逐 profile 的 written / replaced / noop / refused，并在仍有多链接文件时给出 PowerShell 安全引用（`& 'path' -Verb RunAs` 风格单引号转义）的退出宿主 → 删 `node_modules` → 按 lockfile 重装步骤。copy 不隔离既有硬链接、不修复 Administrators 属主、不撤销历史 store ACE——三条边界在命令输出、ADR 与指南中一致声明。
+- **冒烟夹具**：`scripts/lib/dsh-runtime.mjs` 新增 `ensureProfileCopyImport`，`installPluginProfile` 在首个 `dsh plugin add` 前落 copy 配置，journey / compose / behavior / packed 冒烟 profile 全覆盖（正向）；`smoke-behavior` 另建保持默认硬链接的 scratch profile，用真实 runner `--deny-root <home> --protected-home <home>` 断言 127 + 硬链接拒绝文案 + 子进程未运行（负向，不与正向夹具共享 home）。
+- **本批证据**：`pnpm exec vitest run tests/patch.spec.ts tests/profile-isolation.spec.ts tests/command.spec.ts` —— 80 项执行，79 通过 / 1 跳过（新增 23 项隔离套件：YAML 子集接受/拒绝面、span 精确替换、确认 profile 过滤、重解析边界、整 home 多链接统计、incomplete 结论、模板创建 / 追加 / 替换 / noop / 拒绝矩阵、原子写失败、PowerShell 引用；命令解析、帮助、hint 与 handler 集成；patch `dshHome` 断言）。`pnpm run build:types`、`pnpm run bundle`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:check` 通过。本机另以与冒烟负向相同的夹具形状实跑发布版 `lib/windows-runner.js`（scratch home + profile 内指向 home 外「store」文件的真实 `linkSync` 硬链接，`--deny-root <home> --protected-home <home>`）：退出 127，stderr 为 `windows-acl-run: hardlinked file inside the protected DSH home … has links=2; … run \`/workspace-folders isolate-profiles\` …`，子进程哨兵未创建——零副作用拒绝、文案指向 C2 命令，本机非提权会话实机验证。
+- **明确未做 / defer**：非提权 CI lane 未新增——GitHub Actions `windows-latest` 全程提权，非提权进程需第二账户或计划任务，超出本批范围；预检拒绝本身发生在 token / broker 之前，非提权环境可本地回归（冒烟负向即此路径）。完整门禁（compat:check、完整 test、kernel:probe、三项 smoke 实跑、pack:check、smoke:packed）与 macOS/Linux 原生执行仍留待实施验收阶段。
+- **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。
+
+### 实施验收（2026-10-17，门禁执行完毕）
+
+- **套件与类型**：`pnpm typecheck`、`pnpm lint`（0 警告 / 0 错误）、`pnpm run build:types`、`pnpm run bundle`、`pnpm docs:check`、`pnpm compat:check`、`pnpm pack:check`（109 个打包成员）全部通过。完整 `pnpm test` 串行执行（`pnpm pack` 的 `prepare` 会清空重建 `lib/`，与测试并发会产生假象，不可并行）：49 个文件、771 通过 / 49 跳过 / 0 失败；其中 `windows-native.e2e.ts` 38 通过 / 2 跳过。
+- **冒烟实跑**：`smoke:compose` 48 通过；`smoke:behavior` 112 通过 / 1 跳过；`smoke:journey` 62 通过；`smoke:packed` 111 通过 / 1 跳过。唯一跳过原因一致：本机 `pwsh.exe` 是 MSIX 商店版，受限 token 拒绝 packaged 子进程——上游既定限制，非本批缺陷。
+- **内核探针**：`pnpm kernel:probe`——windows-acl 可用；seatbelt / bwrap / Landlock 本机不存在，POSIX 原生执行仍未验证（mocked profile 构造验证不充当内核拒写证据）。
+- **验收期修复（测试/冒烟基础设施，非产品代码）**：`tests/windows-native.e2e.ts` 的 `secondDrive()` 盘符比较既有缺陷——`'C:\'` 与 `'C:'` 比较恒不等，单盘机把 C: 当作不同盘在卷根跑 xdrive 用例，撞上游 `grantWrite` 写 mandatory label 的 WRITE_OWNER 需求；归一化后本机如实跳过（CI 的 `D:` 仍会真跑）。`sddlOf` 改用 `icacls /save` 替代 `powershell Get-Acl`——本机混合 PowerShell 5.1/7 `PSModulePath` 与共享 ModuleAnalysisCache 使 spawn 的 `powershell.exe -NoProfile` 间歇性模块加载失败，属宿主环境抖动。`scripts/smoke-behavior.mjs` 清理识别进程内映射的 `.node` addon：packed 模式下 `boot()` 从 scratch profile `dlopen` `koffi.node`，映射期间所有者进程自身无法删除——残留仅当全部由映射 addon 解释（每个失败文件是 `.node`、每个失败目录是其祖先）且注入了 `DSH_SMOKE_HOME` 时移交父进程在子进程退出后删除；独立运行的严格清理语义不变。
+- **边界如实记录**：macOS / Linux 内核原生执行本机不可用；xdrive 第二可写盘路径本机跳过（无第二固定盘）；非提权 CI lane 按 C2 节 defer。全部工作尚未提交，HEAD 仍为 `3a34595`。
+- **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。

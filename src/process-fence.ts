@@ -131,7 +131,7 @@ export function apply(ctx: Context): void {
       return (ctx.sandbox as MultiRootSandboxProvider).clampedExecution(policy, scope.deniedRoots, signal)
     }
     if (scope.deniedRoots.length === 0) return undefined
-    return (ctx.sandbox as MultiRootSandboxProvider).restrictedExecution(policy, scope.deniedRoots, signal)
+    return (ctx.sandbox as MultiRootSandboxProvider).restrictedExecution(policy, scope.deniedRoots, signal, scope.protectedHome)
   }
 
   /**

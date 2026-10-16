@@ -30,16 +30,16 @@
  * @module scripts/smoke-behavior
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { FileSystem } from '@deepseek-ai/dsh-fs'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import MultiRootFileSystem from '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
 import MultiRootSandboxProvider from '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
 import { createChecker } from './lib/check.mjs'
 import { requireKernelRunner } from '../tests/support/kernel-runner.ts'
-import { assertIsolatedHome, installPluginProfile, pluginPackageDir, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
+import { assertIsolatedHome, ensureProfileCopyImport, installPluginProfile, pluginPackageDir, REPO_ROOT, resolveScratchHome, runDsh, runtimeRequire } from './lib/dsh-runtime.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
 import { runForeground } from './lib/shell-exec.mjs'
 
@@ -618,6 +618,132 @@ async function ambientBattery() {
   } finally { await ctx.fiber.dispose() }
 }
 
+/**
+ * The C2 negative regression: a profile left on pnpm's DEFAULT hardlink
+ * import makes the protected $DSH_HOME itself un-deniable, and the shipped
+ * ambient-deny runner must refuse it at the read-only preflight — before any
+ * token request, lock, or ACL write — instead of mutating objects every link
+ * shares (the store, other projects). The fixture uses a real `linkSync`
+ * hardlink inside the profile's node_modules — the same filesystem fact a
+ * default `dsh plugin add` produces — and asserts a REAL refusal: nonzero
+ * exit, the preflight diagnostic on stderr, and a child that never ran. This
+ * battery also runs against the tarball in smoke:packed.
+ */
+async function hardlinkDenyNegative() {
+  if (!WIN32) return
+  const profile = 'mr-hardlink'
+  const profileDir = join(home, 'profiles', profile)
+  mkdirSync(join(profileDir, 'node_modules', 'fixture-dep'), { recursive: true })
+  // Exactly what upstream initProfile writes — no packageImportMethod, so the
+  // profile's import method is pnpm's default (hardlink).
+  writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+    name: `dsh-profile-${profile}`, private: true, dependencies: {}, dsh: { profile: { bundles: [] } },
+  }, null, 2))
+  writeFileSync(join(profileDir, 'pnpm-workspace.yaml'),
+    'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n')
+  // A real multi-link file: the "store" name lives OUTSIDE the home, the
+  // imported name inside the profile's node_modules — the object pnpm's
+  // default import method shares.
+  const storeSide = join(fixtureRoot, 'fake-store', 'fixture-dep', 'index.js')
+  mkdirSync(dirname(storeSide), { recursive: true })
+  writeFileSync(storeSide, 'store')
+  const linked = join(profileDir, 'node_modules', 'fixture-dep', 'index.js')
+  linkSync(storeSide, linked)
+  check.ok(lstatSync(linked).nlink > 1,
+    'the default-method profile fixture carries a real multi-link file', linked)
+
+  // The shipped runner, driven with the argv the composition builds: the
+  // scope appends the home to the deny set under Full-access, and the
+  // protectedHome label is what names it in the diagnostic.
+  const installed = PLUGIN_SOURCE === undefined ? undefined : findInstalledPluginDir(home)
+  const runner = installed === undefined
+    ? join(REPO_ROOT, 'lib', 'windows-runner.js')
+    : join(installed, 'lib', 'windows-runner.js')
+  const upstream = runtimeRequire().resolve('@deepseek-ai/dsh-sandbox-windows-acl/runner')
+  const sentinel = join(primaryRoot, 'hardlink-child-ran.txt')
+  const tempDir = join(fixtureRoot, 'temp')
+  mkdirSync(tempDir, { recursive: true })
+  const { spawn } = await import('node:child_process')
+  const result = await new Promise((settle, reject) => {
+    const child = spawn(process.execPath, [
+      runner,
+      '--workspace', primaryRoot,
+      '--temp', tempDir,
+      '--mode', 'danger-full-access',
+      '--deny-root', canonical(home),
+      '--protected-home', canonical(home),
+      '--upstream-runner', upstream,
+      '--', process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(sentinel)},'ran')`,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', chunk => { stdout += chunk })
+    child.stderr.on('data', chunk => { stderr += chunk })
+    child.on('error', reject)
+    child.on('close', code => settle({ stdout, stderr, code: code ?? 1 }))
+  })
+  check.ok(result.code !== 0,
+    'a hardlinked $DSH_HOME refuses the ambient deny launch (nonzero exit)', `exit ${result.code}\n${result.stderr}`)
+  check.contains(result.stderr, 'windows-acl-run:',
+    'the refusal is the shipped runner\'s own diagnostic', result.stderr)
+  check.contains(result.stderr, 'hardlinked file',
+    'the refusal names the hardlink preflight', result.stderr)
+  check.contains(result.stderr, 'protected DSH home',
+    'the refusal names the protected home', result.stderr)
+  check.contains(result.stderr, 'isolate-profiles',
+    'the refusal names the remediation command', result.stderr)
+  check.ok(!existsSync(sentinel), 'the refused launch never ran the child', sentinel)
+}
+
+/**
+ * Remove the scratch home. Retries ride out the Windows EPERM window where a
+ * just-exited child's handle — or an AV/indexer scan over the freshly
+ * installed profile tree — still holds the tree. When deletion still fails,
+ * libuv reports the top-level path whatever descendant failed, so walk the
+ * tree and identify the resistant entries: an installed `.node` addon stays
+ * mapped until this process exits (the packed smoke loads koffi from the
+ * profile, not the checkout), so its owner can never delete it. When a caller
+ * injected `DSH_SMOKE_HOME` it owns the parent tree and removes the leftover
+ * after this process exits; standalone runs still fail on any residue.
+ */
+function removeScratchHome(root) {
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+    return
+  } catch { /* identified below */ }
+  const files = []
+  const dirs = []
+  const other = []
+  const probe = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        try { probe(full) } catch (error) { other.push(`${full}/: ${error.code ?? error}`) }
+        try { rmSync(full, { recursive: true, force: true }) } catch { dirs.push(full) }
+      } else {
+        try { rmSync(full, { force: true }) } catch { files.push(full) }
+      }
+    }
+  }
+  try { probe(root) } catch (error) { other.push(`walk: ${error.code ?? error}`) }
+  // Defer only when the residue is explained entirely by mapped `.node`
+  // addons: every failed file is one, and every failed directory is an
+  // ancestor of one (it stays non-empty while the addon inside resists).
+  const deferred = process.env.DSH_SMOKE_HOME !== undefined
+    && files.length > 0
+    && files.every(path => path.includes('.node'))
+    && dirs.every(dir => files.some(file => file.startsWith(dir + sep)))
+    && other.length === 0
+  if (deferred) {
+    console.log(`[smoke:behavior] left ${root} for the caller: in-process addon still mapped (${files[0]})`)
+    return
+  }
+  const residue = [...files, ...dirs.map(dir => `${dir}/`), ...other]
+  throw new Error(`scratch home cleanup failed; resistant: ${residue.slice(0, 10).join(' | ') || 'none'}`)
+}
+
 /** Boot one profile and run the registry battery, then the restart battery. */
 async function runRegistryProfile(profile) {
   process.env.DSH_PERMISSION_MODE = 'workspace-write'
@@ -701,6 +827,10 @@ try {
   console.log(`[smoke:behavior] scratch home: ${home}`)
   console.log(`[smoke:behavior] fixture: ${fixtureRoot}`)
 
+  // The baseline profile also gets the copy import BEFORE `plugin install`
+  // materializes its store references: the C1 deny preflight counts every
+  // multi-link file under the home, not only the plugin profile's.
+  ensureProfileCopyImport(home, BASELINE_PROFILE)
   const initCode = await runDsh(['plugin', '--profile', BASELINE_PROFILE, 'install'], { DSH_HOME: home })
   check.ok(initCode === 0, 'baseline profile initialized without the plugin', `exit ${initCode}`)
   const addCode = await installPluginProfile(PLUGIN_PROFILE, home, PLUGIN_SOURCE ?? pluginPackageDir())
@@ -886,13 +1016,18 @@ try {
     delete process.env.DSH_PERMISSION_MODE
   }
 
+  // The negative regression runs LAST: the hardlinked profile it creates
+  // would refuse every further Full-access launch, so it must not exist while
+  // the positive ambient battery still needs one.
+  await hardlinkDenyNegative()
+
   check.finish()
 } finally {
   rmSync(join(tmpdir(), `dsh-mr-behavior-${process.pid}.txt`), { force: true })
   if (keep) {
     console.log(`[smoke:behavior] kept scratch home at ${home} and fixture at ${fixtureRoot}`)
   } else {
-    rmSync(home, { recursive: true, force: true })
-    rmSync(fixtureRoot, { recursive: true, force: true })
+    removeScratchHome(home)
+    rmSync(fixtureRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
   }
 }

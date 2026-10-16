@@ -14,11 +14,14 @@
  * explicit allow, or fail to reach a protected DACL). Reparse points are not
  * followed: targets have their own canonical policy and must not be mutated.
  */
-import { closeSync, lstatSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { closeSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { dirname, isAbsolute, join } from 'node:path'
-import { loadWindowsNative, readWindowsWideString, spawnWindowsDeniedChild } from './compat/windows-native.ts'
+import { basename, dirname, isAbsolute, join } from 'node:path'
+import { loadWindowsNative, readWindowsWideString, spawnWindowsDeniedChild, terminateWindowsJobAndWait } from './compat/windows-native.ts'
 import type { NativeApi, NativePointer } from './compat/windows-native.ts'
+import { preflightWindowsDenyRoots } from './compat/windows-deny-preflight.ts'
+import { pinWindowsDenyPaths } from './compat/windows-path-guard.ts'
+import type { WindowsPathGuard } from './compat/windows-path-guard.ts'
 import { assertWindowsDenyCapacity, canonicalPath, isWindowsNetworkOrDevicePath, rootDenySid } from './windows-runner-contract.ts'
 import { assignDenyToken, requestDenyToken } from './windows-broker.ts'
 
@@ -33,6 +36,7 @@ export async function runWindowsDenied(
   upstreamRunner: string,
   roots: readonly string[],
   argv: readonly string[],
+  protectedHome?: string,
 ): Promise<number> {
   assertWindowsDenyCapacity(roots.length)
   if (process.arch !== 'x64' && process.arch !== 'arm64') throw new Error('Windows ambient restriction requires a 64-bit process')
@@ -62,6 +66,7 @@ export async function runWindowsDenied(
       getSecurityInfo: [advapi32, 'uint32', ['void*', 'int', 'uint32', 'void*', 'void*', 'void*', 'void*', 'void*']],
       setSecurityInfo: [advapi32, 'uint32', ['void*', 'int', 'uint32', 'void*', 'void*', 'void*', 'void*']],
       setEntriesInAclW: [advapi32, 'uint32', ['uint32', 'void*', 'void*', 'void*']],
+      getFileInformationByHandle: [kernel32, 'int', ['void*', 'void*']],
       convertStringSecurityDescriptorToSecurityDescriptorW: [advapi32, 'int', ['str16', 'uint32', 'void*', 'void*']],
       getSecurityDescriptorDacl: [advapi32, 'int', ['void*', 'void*', 'void*', 'void*']],
       initializeAcl: [advapi32, 'int', ['void*', 'uint32', 'uint32']],
@@ -110,7 +115,29 @@ export async function runWindowsDenied(
   const retained: Buffer[] = []
   let currentToken: NativePointer
   let restrictedToken: NativePointer
+  let pathGuard: WindowsPathGuard | undefined
+  let primary: unknown
+  let threw = false
+  let exitCode = 0
   try {
+    // Pin every ancestor of every deny root BEFORE any token request or ACL
+    // edit. The deny ACEs follow each file object through a rename — but the
+    // registered boundary does not: a restricted child that renames an
+    // ancestor moves the protected tree to a NEW path the recorded deny set
+    // does not name, and the host fs fence (which matches recorded spellings)
+    // then no longer covers the moved objects. The pins stay held until the
+    // Job has drained (below).
+    pathGuard = pinWindowsDenyPaths(native, roots)
+    // Scan EVERY deny root and descendant before any token request, ACL edit,
+    // or lock work: a deny ACE lands on the file object, so a hardlinked file
+    // would mutate under every link — discovering it mid-walk would already
+    // have rewritten paths outside the tree. The scan is read-only; any
+    // uninspectable node or multi-link file refuses the launch here, before
+    // the first side effect. This is NOT transactional: a malicious
+    // concurrent external mutation can still race between the scan (and the
+    // per-handle recheck in `protect`) and each write — the zero-side-effect
+    // guarantee covers preflight failures, not every possible race.
+    const preflight = preflightWindowsDenyRoots(native, roots, protectedHome)
     const processHandle = api.openProcess!(0x400, 0, process.pid)
     check(Number(processHandle !== null && processHandle !== 0), 'OpenProcess')
     const out = Buffer.alloc(8)
@@ -210,7 +237,7 @@ export async function runWindowsDenied(
     if (tempLength === 0 || tempLength >= 32768) throw new Error('GetTempPathW failed')
     const lockDirectory = join(tempPath.subarray(0, tempLength * 2).toString('utf16le'), 'dsh-acl-locks')
     mkdirSync(lockDirectory, { recursive: true })
-    const protect = (path: string, denyId: string, mask: number, inheritance: number): void => {
+    const protect = (path: string, denyId: string, mask: number, inheritance: number, verifyContent = true): void => {
       // Same path-lock protocol as the upstream ACL writer (local port, no
       // private import), so a concurrent allow grant cannot erase this deny.
       const lockPath = join(lockDirectory, `${createHash('sha256').update(path.toLowerCase()).digest('hex').slice(0, 16)}.lock`)
@@ -230,6 +257,15 @@ export async function runWindowsDenied(
         const handle = api.createFileW!(path, 0x60000, 7, null, 3, 0x02200000, null)
         if (handle === null || BigInt(handle) === -1n || BigInt(handle) === 0xffffffffffffffffn) {
           throw new Error(`CreateFileW(${path}) failed (Win32 ${api.getLastError!()})`)
+        }
+        // The live handle must still be the object the preflight inspected:
+        // same volume serial and file index, same directory/reparse kind, and
+        // still a single link for plain files. A path replaced since the scan
+        // fails closed rather than denying an uninspected object. The parent
+        // guard outside the denied trees is exempt — it has no snapshot.
+        if (verifyContent) {
+          try { preflight.verifyHandle(api, path, handle) }
+          catch (error) { api.closeHandle!(handle); throw error }
         }
         try { status(api.getSecurityInfo!(handle, 1, 5, ownerOut, null, aclOut, null, sdOut), `GetSecurityInfo(${path})`) }
         catch (error) { api.closeHandle!(handle); throw error }
@@ -278,6 +314,7 @@ export async function runWindowsDenied(
             const combined = Buffer.alloc(size)
             check(api.initializeAcl!(combined, size, 4), 'InitializeAcl')
             for (const bytes of [denyBytes, ...others]) check(api.addAce!(combined, 4, 0xffffffff, bytes, bytes.length), 'AddAce')
+            if (verifyContent) preflight.verifyHandle(api, path, handle)
             status(api.setSecurityInfo!(handle, 1, 4, null, null, combined, null), `SetSecurityInfo(${path})`)
           } finally { api.localFree!(conditionalDescriptor) }
         } finally {
@@ -290,20 +327,43 @@ export async function runWindowsDenied(
         finally { native.koffi.free(overlapped); check(api.closeHandle!(lock), 'CloseHandle(lock)') }
       }
     }
-    const walk = (path: string, denyId: string): void => {
-      const before = lstatSync(path)
-      // Refuse canonical redirection; do not alter another root through a
-      // junction or mount point. A successful external target is ambient.
-      if (!before.isSymbolicLink() && canonicalPath(path).toLowerCase() !== path.toLowerCase()) throw new Error(`deny subtree redirected: ${path}`)
-      protect(path, denyId, MUTATION, before.isDirectory() ? 3 : 0)
-      if (!before.isSymbolicLink() && before.isDirectory()) for (const name of readdirSync(path)) walk(join(path, name), denyId)
+    // Direct-child names per scanned directory — the check below compares a
+    // fresh listing against these before writing inheritable denies, because
+    // an object-inherit ACE reaches whatever children exist at write time.
+    const expectedChildren = new Map<string, Set<string>>()
+    for (const scanned of preflight.entries.values()) {
+      const parent = dirname(scanned.path).toLowerCase()
+      if (parent === scanned.path.toLowerCase()) continue
+      const names = expectedChildren.get(parent) ?? new Set<string>()
+      names.add(basename(scanned.path))
+      expectedChildren.set(parent, names)
+    }
+    const denyIdFor = new Map(roots.map((root, i) => [root.toLowerCase(), denies[i]!]))
+    // Mutate exactly the inspected tree: the snapshot, not a fresh lstat,
+    // decides what is a directory (and therefore which entries carry the
+    // object-inherit deny), and no path outside it is ever opened for
+    // mutation — a reparse point is denied on itself, never descended into.
+    for (const scanned of preflight.entries.values()) {
+      const isPlainDirectory = (scanned.identity.attributes & (0x10 | 0x400)) === 0x10
+      if (isPlainDirectory) {
+        let names: string[]
+        try { names = readdirSync(scanned.path).sort() }
+        catch (error) {
+          throw new Error(`deny tree changed during ACL writes: cannot list ${scanned.path} (${error instanceof Error ? error.message : String(error)})`)
+        }
+        const expected = expectedChildren.get(scanned.path.toLowerCase()) ?? new Set<string>()
+        if (names.length !== expected.size || names.some(name => !expected.has(name))) {
+          throw new Error(`deny tree changed since the preflight scan: ${scanned.path}`)
+        }
+      }
+      protect(scanned.path, denyIdFor.get(scanned.root.toLowerCase())!, MUTATION, isPlainDirectory ? 3 : 0)
     }
     roots.forEach((root, i) => {
-      const denyId = denies[i]!
-      walk(root, denyId)
       // Delete can be authorized by the parent rather than the target. Its
       // security edits are guarded too, so the child cannot remove this ACE.
-      protect(dirname(root), denyId, FILE_DELETE_CHILD | WRITE_DAC | WRITE_OWNER, 0)
+      // The parent lives OUTSIDE the denied tree — no preflight snapshot, no
+      // verifyHandle, and no OICI inheritance.
+      protect(dirname(root), denies[i]!, FILE_DELETE_CHILD | WRITE_DAC | WRITE_OWNER, 0, false)
     })
     verifyRoots()
     // No temporary directory or environment rewrite: ambient temp semantics.
@@ -369,14 +429,75 @@ export async function runWindowsDenied(
         try { verifyDenyGroups(token) } finally { api.closeHandle!(token) }
       },
     })
-    if (control) closeSync(7)
-    try { return native.waitForProcessExit(api, child.process) }
-    finally { check(api.closeHandle!(child.job), 'CloseHandle(job)') }
-  } finally {
-    if (restrictedToken !== undefined) check(api.closeHandle!(restrictedToken), 'CloseHandle(restricted token)')
-    if (currentToken !== undefined) check(api.closeHandle!(currentToken), 'CloseHandle(token)')
-    for (const value of parsedSids) api.localFree!(value)
-    // Buffers must stay reachable through the last native use of their SIDs.
-    retained.length = 0
+    let waitError: unknown
+    let waitThrew = false
+    // `waitForProcessExit` owns and closes the process handle once called;
+    // before that call the handle is still ours to close on teardown.
+    let waited = false
+    try {
+      // Even a control-pipe close failure must drain the Job below.
+      if (control) closeSync(7)
+      waited = true
+      exitCode = native.waitForProcessExit(api, child.process)
+    } catch (error) {
+      waitError = error
+      waitThrew = true
+    }
+    // `waitForProcessExit` covered the direct child only; the kill-on-close
+    // Job may still host descendants it spawned before exiting. Terminate
+    // and drain the Job while the ancestor pins are still held — a surviving
+    // descendant must never see a window where a rename is unblocked but its
+    // restricted token still runs. Both teardown steps run even when the
+    // first fails, and a drain error never erases a wait error.
+    const drainErrors: Error[] = []
+    try { terminateWindowsJobAndWait(native, api, child.job) }
+    catch (error) { drainErrors.push(error instanceof Error ? error : new Error(String(error))) }
+    try { check(api.closeHandle!(child.job), 'CloseHandle(job)') }
+    catch (error) { drainErrors.push(error instanceof Error ? error : new Error(String(error))) }
+    if (!waited) {
+      // The wait helper never took ownership — the direct-child handle is
+      // still open and must not leak.
+      try { check(api.closeHandle!(child.process), 'CloseHandle(child process)') }
+      catch (error) { drainErrors.push(error instanceof Error ? error : new Error(String(error))) }
+    }
+    if (waitThrew || drainErrors.length > 0) {
+      const all = [
+        ...(waitThrew ? [waitError instanceof Error ? waitError : new Error(String(waitError))] : []),
+        ...drainErrors,
+      ]
+      if (all.length === 1) throw all[0]
+      throw new AggregateError(all, all[0]!.message)
+    }
+  } catch (error) {
+    primary = error
+    threw = true
   }
+  // Cleanup runs every resource, even when earlier steps fail: a close error
+  // must never skip a later handle, and a secondary failure must not erase
+  // the primary one.
+  const cleanupErrors: Error[] = []
+  const attempt = (operation: () => void): void => {
+    try { operation() }
+    catch (error) { cleanupErrors.push(error instanceof Error ? error : new Error(String(error))) }
+  }
+  attempt(() => { if (restrictedToken !== undefined) check(api.closeHandle!(restrictedToken), 'CloseHandle(restricted token)') })
+  attempt(() => { if (currentToken !== undefined) check(api.closeHandle!(currentToken), 'CloseHandle(token)') })
+  for (const value of parsedSids) attempt(() => api.localFree!(value))
+  // Buffers must stay reachable through the last native use of their SIDs.
+  retained.length = 0
+  // Last release: the ancestor pins outlive the Job drain and the token
+  // closes. Forced termination of this runner is the abnormal boundary — the
+  // handles die with the process, and only the Job's kill-on-close flag (not
+  // this ordering) bounds the descendants then.
+  attempt(() => pathGuard?.close())
+  if (threw) {
+    if (cleanupErrors.length === 0) throw primary
+    throw new AggregateError(
+      [primary instanceof Error ? primary : new Error(String(primary)), ...cleanupErrors],
+      primary instanceof Error ? primary.message : String(primary),
+    )
+  }
+  if (cleanupErrors.length === 1) throw cleanupErrors[0]
+  if (cleanupErrors.length > 1) throw new AggregateError(cleanupErrors, 'Windows ambient deny cleanup failed')
+  return exitCode
 }

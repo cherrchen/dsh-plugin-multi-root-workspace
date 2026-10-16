@@ -58,9 +58,9 @@ const code = await new Promise((settle, fail) => {
 if (keep) {
   console.log(`[smoke:packed] kept scratch home root at ${smokeHome}`)
 } else {
-  rmSync(smokeHome, { recursive: true, force: true })
+  rmSync(smokeHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
 }
-rmSync(packDir, { recursive: true, force: true })
+rmSync(packDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
 
 if (code !== 0) {
   console.error(`[smoke:packed] the packed artifact failed the behavior battery (exit ${code})`)

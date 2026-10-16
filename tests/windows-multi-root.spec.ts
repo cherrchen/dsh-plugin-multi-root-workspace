@@ -42,6 +42,27 @@ describe('Windows root-set capability', () => {
     expect(() => parseWindowsProfile([...args.slice(2), '--write-sid', 'sid', '--temp-write-sid', 'sid2'], true)).toThrow('deny roots only')
     expect(() => parseWindowsProfile(['--upstream-runner', upstreamRunner, ...profile.slice(2), '--deny-root', 'D:\\ro'], true)).toThrow('deny roots only')
   })
+  it('labels the protected home for runner diagnostics only, never changing the deny set', () => {
+    const denied = ['D:\\ro space', 'E:\\ro']
+    const withHome = restrictWindowsProfile(profile, denied, 'E:\\ro')
+    const parsed = parseWindowsProfile(withHome.slice(2), true)
+    expect(parsed.protectedHome).toBe('E:\\ro')
+    expect(parsed.deniedRoots).toEqual(denied)
+    // The label is case-insensitive and a non-member label is dropped rather
+    // than shipped to the runner — it carries no authority of its own.
+    expect(parseWindowsProfile(restrictWindowsProfile(profile, denied, 'e:\\RO').slice(2), true).protectedHome).toBe('e:\\RO')
+    expect(restrictWindowsProfile(profile, denied, 'D:\\nope')).not.toContain('--protected-home')
+    expect(restrictWindowsProfile(profile, denied)).not.toContain('--protected-home')
+    // The upstream contract must not know the flag at all.
+    expect(() => parseWindowsProfile(withHome.slice(2))).toThrow(/unknown or duplicate/)
+    // Duplicates, non-absolute values, non-members, and the wrong mode all fail.
+    const bare = restrictWindowsProfile(profile, denied).slice(2)
+    expect(() => parseWindowsProfile([...withHome.slice(2), '--protected-home', 'E:\\ro'], true)).toThrow(/repeats --protected-home/)
+    expect(() => parseWindowsProfile([...bare, '--protected-home', 'D:\\nope'], true)).toThrow(/absolute member/)
+    expect(() => parseWindowsProfile([...bare, '--protected-home', 'relative\\path'], true)).toThrow(/absolute member/)
+    const writeProfile = ['--upstream-runner', upstreamRunner, ...profile.slice(2), '--protected-home', 'E:\\ro']
+    expect(() => parseWindowsProfile(writeProfile, true)).toThrow(/danger-full-access/)
+  })
   it('is stable across ordering and casing, and changes on revocation', () => {
     const sid = workspaceScopeSid(['C:\\primary', 'D:\\extra'])
     expect(sid).toBe(workspaceScopeSid(['d:\\EXTRA', 'c:\\PRIMARY', 'C:\\primary']))

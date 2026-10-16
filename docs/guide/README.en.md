@@ -34,7 +34,7 @@ When running DSH from a source checkout, `dsh` is not on PATH — use `pnpm dsh`
 
 ## The full semantics of `/workspace-folders`
 
-The command is the text entry point and works in headless compositions too. Subcommands: `list` / `add` / `remove` / `alias` / `access` / `reveal` / `help`; a bare `/workspace-folders` is `list`.
+The command is the text entry point and works in headless compositions too. Subcommands: `list` / `add` / `remove` / `alias` / `access` / `reveal` / `isolate-profiles` / `help`; a bare `/workspace-folders` is `list`.
 
 - `add` with no path opens the OS directory picker (where the composition provides one); `add --read-only` with no path works too.
 - Paths may be quoted, and `~` expands to the home directory; registration canonicalizes first — a path that duplicates an existing root, nests inside one, or is the workspace root itself is rejected.
@@ -42,11 +42,12 @@ The command is the text entry point and works in headless compositions too. Subc
 - `alias` with no name clears the existing alias.
 - `access` accepts `inherit`, `read-only`, or `read-write`; changes that widen access require an available root. See [ADR-0017](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md) for the transition rules.
 - `list` reports each root's state honestly: roots shown as `missing` (absent right now) or `redirected` (replaced by a symlink pointing elsewhere) **stay registered but are not granted**; once the directory is back, one `list` or a panel refresh grants it again — no restart.
+- `isolate-profiles` is a host-side maintenance command (the panel has no endpoint for it): by default it performs a **read-only inspection** — listing each confirmed profile under `$DSH_HOME/profiles/` with its `packageImportMethod` state and scanning the whole home once, reporting `scanned N dirs/M files, K multi-link files, J uninspectable`; when anything cannot be inspected the verdict is INCOMPLETE and must not be read as clean. `--apply` atomically writes `packageImportMethod: copy` into each fixable profile's `pnpm-workspace.yaml` (creating the file when absent, replacing scalar values in place while preserving comments and line endings, and refusing to rewrite complex, conflicting, or unreadable files). On Windows a deny ACE lands on the file object rather than a link name — when profile dependencies arrive as hardlinks (the pnpm default), denying under `$DSH_HOME` would rewrite shared objects in the global store; this command is the remediation the restricted Full-access preflight refusal points at. It only edits configuration: **existing hardlinks remain hardlinks until you quit the host, delete the profile's `node_modules`, and reinstall from the lockfile as the report instructs**; it does not repair Administrators-owned paths or deny ACEs already written to the store or other projects, and it performs no global ACL reset. The command does not delete `node_modules` or run pnpm for you, and a profile created afterwards needs the same configuration or another inspection.
 - The command's own output is in English (the host side has no active locale information).
 
 ## Access levels, the root limit, and per-tool caps
 
-The panel shows both the registration policy and host-derived effective session access, with tool write caps. Switching between inherit and fixed read-write requires confirmation. A missing registration loses its grant while retaining its read-only boundary.
+The panel shows both the registration policy and host-derived effective session access, with tool write caps. Switching between inherit and fixed read-write requires confirmation. A missing registration loses its grant while retaining its read-only boundary. When two registrations' granted directories overlap — including the recorded boundary of a missing one — both memberships are withheld, yet each recorded deny boundary still holds and reordering the list cannot lift it; removing one of the registrations resolves the conflict.
 
 When two DSH processes share the same storage root, only the process holding the registry lease can read the registry. The other process's empty root table does not mean "no restrictions": until it takes the lease over or the store recovers, both Full-access and workspace-write grant writes only to the primary root, with no shared platform temp grants. Read-only still refuses writes, and explicit denies take precedence over the primary grant.
 

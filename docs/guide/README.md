@@ -34,7 +34,7 @@ English: [README.en.md](./README.en.md)
 
 ## `/workspace-folders` 命令的完整语义
 
-命令是文本入口，headless 组合下同样可用；子命令为 `list` / `add` / `remove` / `alias` / `access` / `reveal` / `help`，`/workspace-folders` 不带参数等同 `list`。
+命令是文本入口，headless 组合下同样可用；子命令为 `list` / `add` / `remove` / `alias` / `access` / `reveal` / `isolate-profiles` / `help`，`/workspace-folders` 不带参数等同 `list`。
 
 - `add` 不带路径时打开系统目录选择器（组合了目录选择器的 profile 才有），也可以 `add --read-only` 只给 flag 不给路径。
 - 路径可以带引号，`~` 会展开为家目录；登记前会先 canonical 化——与已有根重复、嵌套在已有根内部、或就是主根本身的路径会被拒绝。
@@ -42,11 +42,12 @@ English: [README.en.md](./README.en.md)
 - `alias` 不带别名参数会清除已有别名。
 - `access` 支持 `inherit` / `read-only` / `read-write`；扩权变更要求该根此刻可用，具体方向见 [ADR-0017](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)。
 - `list` 如实显示每根状态：`missing`（暂时不存在）、`redirected`（被替换成指向别处的符号链接）的根**保留登记但暂不授予**；目录恢复后执行一次 `list` 或刷新面板即自动重新授予，无需重启。
+- `isolate-profiles` 是宿主侧维护命令（面板没有对应端点）：默认**只读检查**——列出 `$DSH_HOME/profiles/` 下每个确认 profile 的 `packageImportMethod` 状态，并对整个 home 做一次扫描，报告 `scanned N dirs/M files, K multi-link files, J uninspectable`；存在无法检查的条目时结论为 INCOMPLETE，不能当作干净。`--apply` 把 `packageImportMethod: copy` 原子写入每个可修复 profile 的 `pnpm-workspace.yaml`（缺失则建文件，标量值原地替换、注释与换行风格保留，复杂/冲突/不可读文件拒绝改写）。Windows 上 deny ACE 写在文件对象而非链接名上——profile 依赖若以硬链接引入（pnpm 默认），对 `$DSH_HOME` 下 deny 会改写全局 store 中被共享的对象；该命令即是受限 Full-access 预检拒绝时指引的修复入口。它只改配置：**既有硬链接在按报告步骤退出宿主、删除 profile `node_modules`、按 lockfile 重装之前仍是硬链接**；它不修复 Administrators 属主或此前写到 store / 其他项目的 deny ACE，也不做全局 ACL 重置。命令不删 `node_modules`、不替你运行 pnpm，新建的 profile 也要重新检查或再跑一次。
 - 命令的输出文案为英文（host 侧没有活动语言信息）。
 
 ## 访问级别、数量上限与 per-tool 封顶
 
-面板同时显示登记策略与宿主派生的当前有效权限，并注明工具写入封顶；继承与固定读写之间的切换均需确认。目录失效只撤销授权，不解除仍登记的只读边界。
+面板同时显示登记策略与宿主派生的当前有效权限，并注明工具写入封顶；继承与固定读写之间的切换均需确认。目录失效只撤销授权，不解除仍登记的只读边界。两条登记的授权目录互相重叠时（含已失效目录的登记边界），双方都不授予成员资格，但各自登记的拒写边界仍然生效，调整列表顺序也不能解除——移除其中一条登记即可修复。
 
 两个 DSH 进程共用同一 storage root 时，只有持有注册表 lease 的进程能读到登记表。另一个进程的空根表不代表「没有限制」：在它接管 lease 或存储恢复前，Full-access 与 workspace-write 均只授予主根写权限，不授予共享系统临时区；read-only 继续拒绝写入。显式拒写边界仍优先于主根授权。
 

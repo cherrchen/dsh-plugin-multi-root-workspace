@@ -79,4 +79,39 @@ broker 的 v2/v3 拒写身份预算由 64 提升为 **256**，与注册表新增
 **残余（真机发现，未修改）**：
 
 - 属主残余：deny 遍历要求每个路径归调用方所有；提权会话创建的路径属主为 BUILTIN\Administrators（filtered token 仅 deny-only 持有），此类路径作为只读根或位于 `$DSH_HOME` 内时，非提权受限 Full-access 启动 fail-closed 报 `deny ACL requires caller-owned path`，须先 `icacls <path> /setowner <user> /T` 修正属主。
-- pnpm 硬链接残余：`$DSH_HOME` profile `node_modules` 是全局 store 的硬链接，共享同一安全描述符，deny ACE 会写到 store 文件及其全部链接；store 文件由提权安装创建时遍历直接 fail-closed。跳过硬链接不安全（文件内容写由文件自身 ACL 约束），留作开放决策。
+- pnpm 硬链接残余：`$DSH_HOME` profile `node_modules` 是全局 store 的硬链接，共享同一安全描述符，deny ACE 会写到 store 文件及其全部链接；store 文件由提权安装创建时遍历直接 fail-closed。跳过硬链接不安全（文件内容写由文件自身 ACL 约束）。该开放决策已由下方「全根硬链接预检」（C1，fail-closed 预检）与「Profile 硬链接隔离命令」（C2，copy 迁移工具）两节落地结案。
+
+## 祖先路径钉住与 Job 排空（2026-10-16，Phase B 实机验证）
+
+deny ACE 写在文件对象上、随目录改名迁移，但登记的规范拼写不会跟着走：受限子进程把任一祖先目录改名后，受保护子树整体落到一个**新路径**——内核仍凭迁移过去的 ACE 拒绝受限 token 的写，但宿主 fs fence 按 recorded deny 集的路径拼写匹配，新路径下的对象不再被其覆盖，宿主 fs 工具即可对原只读树写入（shell→宿主新路径缺口，R1 的实际形态）。单靠对象 ACL 无法表达「路径不可搬走」，因此 ambient deny runner 为每个 deny 根钉住从卷根到根本身的完整祖先链（`src/compat/windows-path-guard.ts`、`src/windows-deny.ts`）。
+
+- 机制：每个祖先目录持有一个 GENERIC_READ + 读/写共享（不含 delete sharing）的常驻句柄。实机探测确认 FILE_READ_ATTRIBUTES 的属性级句柄不参与删除共享门——既不阻塞改名、也不被冲突句柄阻塞——钉住必须使用验证过的数据读访问。共享读写下普通读取、写入与兄弟文件创建不受影响；整条祖先链（含 `C:\`、用户目录）不写入任何持久 ACL，句柄释放即还原。
+- 同句柄校验：必须为目录、非重解析点、`HANDLE_FLAG_INHERIT` 清零（受限子进程不能用继承到的句柄 `CloseHandle` 解除钉住），`GetFinalPathNameByHandleW` 的内核规范 DOS 名必须等于预期拼写（拒绝 UNC / 设备落点）。任一步失败按逆序关闭全部已持有句柄并拒绝启动；启动前已存在不兼容共享句柄（如 DELETE 独占）的祖先同样使获取失败，先于任何 token 请求与子进程启动。
+- 生命周期：钉住在 token 请求与 ACL 编辑之前建立；`waitForProcessExit` 只覆盖直接子进程，其退出后 runner 先 `TerminateJobObject(job, 127)` 再轮询 `QueryInformationJobObject(JobObjectBasicAccountingInformation)` 的 `ActiveProcesses` 至零（不设超时），随后才关闭 Job 句柄、token，最后释放钉住——退出子进程拉起的后代不会带着受限 token 活到钉住窗口之外。
+- 残余边界：`TerminateJobObject` / `QueryInformationJobObject` API 失败与 runner 进程被强制终止同属异常清理路径——钉住句柄随清理或进程消亡，后代由 Job 的 kill-on-close 兜底，不再承诺钉住顺序保护。deny 根本身的 delete→recreate 竞态不变（见「已知边界」）。
+- 证据：`windows-native.e2e.ts`「ancestor guard」组（真实受限子进程 rename 父/祖父目录被拒、宿主 fs 对原拼写仍拒写、排空后代不可写逃逸标记、ConPTY 终止后释放、预占 DELETE 句柄使发布版 runner 在 spawn 前拒绝）与 adapter 的 mocked Job 排空时序；第二固定驱动器用例因本机无第二盘跳过，未在本地验证。证据数字见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#分支安全审查修复2026-10-16进行中)「分支安全审查修复」节。
+
+## 全根硬链接预检与身份复核（2026-10-16，Phase C1 实机验证）
+
+**威胁模型（R4）**：deny ACE 写在文件对象上——硬链接文件的全部名字共享同一对象，对其中一条名字 `SetSecurityInfo` 会同时改写树内外每一条链接的访问判定。pnpm 全局 store 与 `$DSH_HOME` profile 的 `node_modules` 正是跨项目硬链接：此前按字典序 `lstat` 边走边写，发现硬链接之前已把 deny 写进 store 对象，属于先污染后检测。此外 profile 目录可能包含 OWNER RIGHTS / owner 合并 ACE，副作用不限于 deny 组。
+
+**决定**：`src/compat/windows-deny-preflight.ts` 在 runner 钉住祖先之后、任何 token 请求 / ACL 编辑 / 锁工作之前，对**全部** deny 根递归做只读预检（FILE_READ_ATTRIBUTES + 全共享打开，读 BY_HANDLE_FILE_INFORMATION 后即在下行前关闭检查句柄）。任一节点打开 / 类型 / 身份 / 目录列出失败——含扫描句柄自身关闭失败——都使整个启动在零副作用点拒绝；失败信息同时携带根与路径。任一普通文件 `links > 1` 立即拒绝并报出根、路径、link 计数、种类（protected DSH home 或登记根）与修复指引（home 指向挂起的 `/workspace-folders isolate-profiles` 隔离命令；用户根要求建立独立副本）。nlink>1 一律拒绝是刻意的保守——快照无法证明全部链接都在树内，也不试图证明；不跳过 `node_modules`，不做全局 ACL 重置。
+
+**身份复核**：ACL 遍历改为消费预检快照（按深度优先插入序），目录 / 重解析位由快照决定而不信即时 `lstat` 迁移；写目录继承 ACE 之前先比对即时 `readdir` 名单与快照名单（新增 / 缺失都失败）。`protect` 在同一把即将修改 ACL 的活句柄上复核 `verifyHandle`——属性位、卷序列、文件索引、普通文件 link 计数任一变化即拒。根父目录守卫位于被拒绝树之外、无快照：仅此调用豁免 `verifyContent`，且不启用 OICI 继承。重解析点记录快照并只对重解析对象本身写 deny，绝不下降到外部目标。
+
+**限制与竞态**：这不是事务——预检（及逐句柄复核）之后、写之前的恶意并发外部修改仍可能竞过；零副作用保证只覆盖「预检失败」情形，不承诺所有竞态都只影响树外 ACL。快照把替换攻击窗口从「扫描到写之间任意时刻」收窄到「复核到写之间」；更强保证需另案验证。
+
+**残留边界不变**：`$DSH_HOME` 的 profile 硬链接 remediation 待 C2 隔离命令落地；预检失败的启动 127 不接触任何 ACL，成功路径照旧保留持久 deny 组 ACE。
+
+**证据**：`windows-native.e2e.ts`「hardlink preflight」组（深层硬链接 / 末根硬链接首根零变化 / 同树双名 / protected home 标签 / 不可读文件 / junction 目标未触碰 / 独立副本成功且外部原件不变，全部以 SDDL 快照比对）；adapter mocked 接缝覆盖身份变化、link 计数变化、打开 / 读 / 列出失败与清理错误聚合；数字见路线账本「分支安全审查修复」节。
+
+## Profile 硬链接隔离命令（2026-10-16，Phase C2 落地）
+
+**决定**：`/workspace-folders isolate-profiles` 作为宿主侧维护命令落地（`src/profile-isolation.ts` + `src/command.ts`），面板不加端点——它是配置迁移工具，不是根管理面。默认**只读检查**，`--apply` 才迁移配置；多链接文件若在受保护 home 仍残留，检查输出直接给出退出宿主、删 `node_modules`、按 lockfile 重装的步骤。
+
+- **profile 判定保守**：只认 `profiles/` 下真实目录、`package.json` 可解析为对象且 `dsh.profile` 为对象的条目；重解析点与普通文件只枚举、不落笔，对重解析点绝不下降。
+- **YAML 是严格子集扫描器而非解析器**（运行期依赖预算不含 yaml 包）：拒绝缩进 tab、`%` / `---` / `...` 指令、重复顶层键与所有非 `key:` 形式的顶层行；`&` `*` `!` `|` `>` `{` `[` 起始的值记为 complex。标量按原始 span 原地替换，注释、引号风格与 CRLF/LF 行尾保留；缺失文件用上游 `initProfile` 同款模板加 `packageImportMethod: copy` 补齐。复杂值 / 冲突 / 不可读一律 refused，不猜写。
+- **写入一律原子**：先写 `pnpm-workspace.yaml.mrw-<pid>.tmp` 再 rename 就位，失败保留原文件；目标文件本身是重解析点或非普通文件时拒绝写穿。
+- **整 home 扫描而非只看 `profiles/*/node_modules`**：`nlink > 1` 是文件对象属性，pnpm 硬链接可能出现在 profile 之外（store、共享缓存），局部扫描必然漏报；任一子树不可读时结论为 incomplete，不报干净。
+- **残留边界照旧显式声明**：设置 copy 不隔离既有依赖——硬链接在重装前仍是硬链接；copy 不修复 Administrators 属主路径，也不撤销此前可能已写到 store / 其他项目的 deny ACE（没有自动 reset，属人工评审项）；命令之后新建的 profile 需要同一配置或重新检查。
+- **冒烟**：`scripts/lib/dsh-runtime.mjs` 的 `ensureProfileCopyImport` 在首个 `dsh plugin add` 之前给冒烟 profile 写 copy（journey / compose / behavior 正向）；`smoke-behavior` 另建一个保持默认硬链接的 scratch profile，以真实 runner 断言退出 127 + 硬链接拒绝文案 + 子进程未运行（负向，真实预检拒绝而非断言跳过）。预检拒绝发生在 pin / token 请求 / ACL 编辑之前，无需 broker 或提权即可回归；CI 非提权 lane 未新增（GitHub Windows runner 全程提权，另起非提权进程需要第二账户，记入路线账本 defer）。

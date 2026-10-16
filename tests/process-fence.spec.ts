@@ -11,7 +11,7 @@
  * it (the panel's controller, i.e. a user terminal) stays untouched.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -141,10 +141,10 @@ describe('the restricted argv prefix', () => {
     const sbpl = prefix[prefix.length - 2]!
     expect(sbpl).toContain('(allow default)')
     // The deny form pins the root's ancestors as literals too: renaming the
-    // parent directory must not carry the tree past its deny boundary. The
-    // ancestor walk only reads POSIX spellings — a Windows-spelled root
-    // contributes none (its deny ACE follows the directory object, so the
-    // platform needs no pinning; ADR-0017).
+    // parent directory must not move the tree to a path the deny set no
+    // longer names. The ancestor walk only reads POSIX spellings — a
+    // Windows-spelled root contributes none (that platform pins ancestors
+    // with live handles inside the ambient deny runner; ADR-0017/0020).
     expect(sbpl).toContain(`(deny file-write* ${sbplSubpath(denied)}`)
     if (process.platform !== 'win32') {
       expect(sbpl).toContain(`(literal "${canonicalPath(fixture.base)}")`)
@@ -193,6 +193,20 @@ describe('the restricted argv prefix', () => {
     expect(prefix).toContain('danger-full-access')
     expect(prefix.slice(prefix.indexOf('--deny-root'))).toEqual(['--deny-root', denied, '--'])
     expect(prefix).not.toContain('--additional-root')
+  })
+
+  it('forwards the scope protected-home label onto the Windows runner argv', async () => {
+    const home = join(fixture.base, 'dsh-home')
+    mkdirSync(home)
+    const { ctx, captured } = await mountStack('windows-acl', 'danger-full-access', { dshHome: home })
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    const shell = ctx.get('shell') as { run(spec: unknown): Promise<unknown> }
+    await shell.execute({ sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: fixture.workspace } })
+    const argv = captured.spawned[0]!.argv
+    expect(argv).toContain('--protected-home')
+    expect(argv[argv.indexOf('--protected-home') + 1]).toBe(canonicalPath(home))
+    // The label is diagnostics only: the deny set is unchanged either way.
+    expect(argv[argv.indexOf('--deny-root') + 1]).toBe(canonicalPath(fixture.outside))
   })
 })
 

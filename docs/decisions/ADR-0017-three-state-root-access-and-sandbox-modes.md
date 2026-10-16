@@ -218,12 +218,33 @@ sandbox 在 confine 入口捕获一次 scope，避免异步 profile 探测后混
 
 - **Seatbelt**：deny 形式从 `(deny file-write* (subpath R)…)` 扩为 `(deny file-write* (subpath R)… (literal A)…)`，A 为被拒根的每个真祖先目录（不含文件系统根），`restrictProfileArgs`（Full-access）与 `denyProfileArgs`（workspace-write 的 covered 根）一致。literal 只拒绝对祖先目录本身的 file-write*（改名、chmod、touch、unlink），其子孙照常按 grant 判定——`touch $T/parent/sibling` 已实测放行。
 - **bwrap**：把每个祖先做成命名空间内的挂接点（`--bind A A` 自绑），`rename(祖先)` 返回 EBUSY。`restrictProfileArgs`（含 Landlock→bwrap 回退）在 `--bind / /` 之后、全部 `--ro-bind R R` 之前按浅→深顺序放置；`denyProfileArgs`（workspace-write）只对严格位于可写 **bind** 挂载目标内的祖先自绑——`--tmpfs` 目标内的祖先不自绑（tmpfs 内的改名只搬动命名空间私有挂载、不伤宿主，而自绑反而会暴露并使可写 tmpfs 所遮蔽的宿主内容），可写目标之外（含挂载点自身）的祖先本就不可改名。ro-bind 仍保持最后，避免任何自绑遮蔽 deny。
-- **Windows 不受影响**：deny ACE 写在目录对象上，`rootDenySid` 按路径确定，父目录改名不影响该对象上的 ACE——边界随目录走，不需要祖先钉扎。
+- **Windows 不受影响（已被取代）**：deny ACE 写在目录对象上，`rootDenySid` 按路径确定，父目录改名不影响该对象上的 ACE——当时判断边界随目录走，不需要祖先钉扎。**本条已被 [ADR-0020](./ADR-0020-windows-normal-deny-groups.md) 的 Phase B 修订（2026-10-16）取代**：ACE 确随对象走，但改名把受保护子树搬到 recorded deny 集不覆盖的新路径——宿主 fs fence 只匹配登记拼写，新路径下的对象不再被其覆盖（shell→宿主新路径缺口，R1）——故 Windows 祖先钉扎实为必需并已由 ambient deny runner 实施。
 - **Landlock→bwrap 回退**同享同一组 `--bind A A`。
 
 **代价**：受限 Full-access 下进程对拒绝根（含 `$DSH_HOME`）的任一祖先目录本身失去写权限——不能 rename / chmod / touch 这些目录，例如 `$DSH_HOME` 为 `~/.dsh` 时受限进程不能改名家目录本身；祖先目录内的读写不受影响。该收窄是刻意的：改不掉祖先就搬不走拒写边界。Linux 侧假设（祖先自绑使 rename 失败）由 `tests/authority-boundaries.spec.ts` 的 bwrap 原生用例在 CI 上验证，本机无 Linux 环境不作原生断言。
 
 回归：`tests/dialects.spec.ts` 的祖先字面量/自绑拼写与排序、`tests/process-fence.spec.ts` 的 deny 形式断言、`tests/authority-boundaries.spec.ts` 的 Seatbelt 原生改名拒绝（Full-access 与 workspace-write covered 根两路）——原生用例同测「祖先被改名失败 + 同父目录兄弟文件照常可写」。
+
+## 负授权保留与顺序无关冲突（2026-10-16，分支安全审查 Phase A）
+
+分支安全审查（[2026-10-16 分支安全审查与硬链接隔离修复计划](../plans/active/2026-10-16-branch-security-review-and-hardlink-isolation.md)）在 `feat/sandbox-permision-harden` 上证实 R2、R3 两条 P1 真实可达，本节记录其定案修复；R1（Windows 祖先改名跨工具绕过）与 R4（硬链接 ACL 副作用）按该计划的 B/C 阶段另行实施，实施状态以路线账本为准。
+
+### read-only 的 deny 在 graft 之后应用（R2）
+
+`widenForScope` 原先只在 workspace-write 分支调用 `denyProfileArgs`；read-only 分支 graft 完固定读写根即结束。一个无需手改存储即可构造的状态——子根登记只读后删除目录，再把仍存在的父根登记为固定读写——会让三个 POSIX 后端的 read-only profile 同时漏掉拒写边界：进程面可写、fs 面拒写。现在两种受限模式都先扩宽/嫁接、再对同一 deny 集应用 `denyProfileArgs`：Seatbelt 在 allow 之后追加 deny（last match wins），bwrap 沿用缺失根失败关闭的决定使用强制 `--ro-bind`（缺失源启动即失败），Landlock 无法表达「rw 祖先内的只读子树」仍抛 `DialectUnrecognizedError` 并转成 `SANDBOX_UNAVAILABLE`；windows-acl 此前已在 `widenWindowsProfile` 拒绝同一重叠。同步/Promise 返回形状与 `enforcement` / `denialSignatures` / `runnerFailureRules` 不变。
+
+### 成员冲突：顺序无关、负授权保留（R3）
+
+`classifyStoredRoots` 改为两遍：
+
+- **第一遍逐条独立判定**：结构信任（id、唯一 grant 字段、recorded boundary 绝对、非网络/设备路径），并以 **recorded boundary** 判定主根重叠——先于 `path` 的 redirect 解析，不让攻击者可控的当前目标参与授权比较；之后才解析当前路径判 `redirected` / `missing` / `available`。
+- **第二遍对全部结构有效记录的 recorded boundary 两两比较**（含 missing 与 redirected）：任一方向包含即双方判 `invalid`、`invalidReason: 'membership-conflict'`（内部字段，不持久化不上线）。冲突集合从第一遍快照构造，与迭代顺序无关；展示排序、`move`、alias、refresh 与重启都不能把一条明确的只读登记变成「没有边界」。
+
+发布规则相应拆分：结构 invalid 的记录照旧不发布任何投影（连 grant 都解析不出的记录其边界声明不可信——前文 PR #12 订正的取舍不变）；成员冲突的记录以 withheld、仅负授权形式发布——成员资格与写授权都拿不到，但 recorded boundary 仍进入 `deniedRoots`。修复路径是操作者显式移除其中一条登记，在此之前拒绝放行两侧授予。
+
+新增与复活的冲突校验和分类共用同一份结果：`registry.add` 对每条既有状态调用 `reservedRootBoundary`（结构有效记录的单一 recorded grant，含 missing、redirected 与 membership-conflict），并**按索引**精确豁免本次复活的同一行——按行而非按路径，同路径的其他记录仍保留其边界。该 helper 只从分类结果推导，不引入平行授权表；scope 的 deny 集仍只来自 `setAdditionalRoots` 单一写口。本节取代 ADR-0004 第 10 条「redirected 先于重叠判定」的顺序描述与「重叠者全部不授予且不保留 deny」的隐含结果，历史条目保留。
+
+回归：`tests/roots.spec.ts`（reservedRootBoundary 各状态、三方重叠不依赖顺序、recorded boundary 先于 redirect 判主根重叠、损坏记录不进冲突遍）；`tests/registry.spec.ts`（missing/redirected 子根的两个包含方向拒绝新增、redirected 保留原边界、legacy 重叠两种展示顺序、move/alias/refresh/重启后 deny 不变、冲突根 withheld 且三模式 deny 保留）；`tests/sandbox-multi-root.spec.ts`（mock 上游 `confine` 的四方言 read-only 组合，sync/Promise 两形状：Seatbelt deny 在 allow 之后、bwrap 强制 `--ro-bind`、Landlock 与 windows-acl fail closed、无 graft 时逐字节直通）；`tests/b9-review-regressions.spec.ts`（重建缺失只读子根后，真实 `MultiRootFileSystem` 的 writeText/edit 仍拒绝、内容不变）。
 
 ## Related Documents
 

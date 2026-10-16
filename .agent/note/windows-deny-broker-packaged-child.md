@@ -51,7 +51,7 @@ B9 验证期间在实机发现的平台陷阱：`danger-full-access` + 显式 `r
 ## 残余发现（2026-10-16，未修改）
 
 - **属主残余**：deny 遍历要求每个路径归调用方所有。提权会话创建的路径属主为 BUILTIN\Administrators，filtered token 仅以 deny-only 持有该组；此类路径作为只读根或位于 `$DSH_HOME` 内时，非提权受限 Full-access 启动 fail-closed 报 `deny ACL requires caller-owned path`，须 `icacls <path> /setowner <user> /T` 修正属主后才可用。
-- **pnpm 硬链接残余**：`$DSH_HOME` profile 的 `node_modules` 文件是 pnpm 全局 store 的硬链接（与其他项目共享同一安全描述符），`$DSH_HOME` 的 deny 遍历会把 deny ACE 写到 store 文件及其全部链接上；store 文件由提权安装创建时遍历直接 fail-closed（非提权 `smoke:packed` 因此跳过一条 windows-acl 断言）。已用 `fsutil hardlink list` 证实跨项目共享。跳过硬链接不安全：文件内容写由文件自身 ACL 约束，跳过的链接会让受限子进程改动 `$DSH_HOME` 插件代码。留作开放决策。
+- **pnpm 硬链接残余**：`$DSH_HOME` profile 的 `node_modules` 文件是 pnpm 全局 store 的硬链接（与其他项目共享同一安全描述符），`$DSH_HOME` 的 deny 遍历会把 deny ACE 写到 store 文件及其全部链接上；store 文件由提权安装创建时遍历直接 fail-closed（非提权 `smoke:packed` 因此跳过一条 windows-acl 断言）。已用 `fsutil hardlink list` 证实跨项目共享。跳过硬链接不安全：文件内容写由文件自身 ACL 约束，跳过的链接会让受限子进程改动 `$DSH_HOME` 插件代码。**Phase C1 已落地全根只读预检**（`src/compat/windows-deny-preflight.ts`）：任一普通文件 `links > 1` 或任一不可检查节点都在零副作用点使启动 127 失败，不跳过 `node_modules`，不做全局 ACL 重置。**Phase C2 已落地 `/workspace-folders isolate-profiles`**（`src/profile-isolation.ts` + `src/command.ts`）：默认只读检查（逐 profile 报告 `packageImportMethod` 状态 + 整 home 多链接扫描），`--apply` 把 `packageImportMethod: copy` 原子写入可修复 profile 的 `pnpm-workspace.yaml`——只认 `profiles/` 下 `dsh.profile` 确认的目录，YAML 走严格子集扫描器（标量原地替换、注释/行尾保留，复杂/冲突/不可读拒绝），不做全局 ACL 重置。存量 `node_modules` 硬链接仍需按报告步骤退出宿主、删目录、按 lockfile 重装才会真正脱钩；属主残余与已写出的 store ACE 不在其修复范围。冒烟侧 `ensureProfileCopyImport`（`scripts/lib/dsh-runtime.mjs`）在首个 `dsh plugin add` 前给冒烟 profile 写 copy（正向），`smoke-behavior` 另建默认硬链接 scratch profile 断言真实预检拒绝（负向）。
 
 ## 复现要点
 

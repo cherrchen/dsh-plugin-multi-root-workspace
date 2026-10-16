@@ -208,6 +208,7 @@ dsh --profile web --dump-config | grep -A3 'multi-root'
 /workspace-folders alias <序号|路径> [别名]                            # 不带别名则清除已有别名
 /workspace-folders remove <序号|路径>                                  # 序号即 list 输出的编号
 /workspace-folders reveal <序号|路径>                                  # 在文件管理器中显示
+/workspace-folders isolate-profiles [--apply]                        # 检查 $DSH_HOME profile 依赖导入方式与多链接文件；--apply 写入 copy 配置
 /workspace-folders help                                              # 查看命令帮助
 ```
 

@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse } from 'yaml'
 import { createChecker } from './lib/check.mjs'
-import { assertIsolatedHome, captureDsh, installPluginProfile, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
+import { assertIsolatedHome, captureDsh, ensureProfileCopyImport, installPluginProfile, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
 
 const PLUGIN_NAME = '@dsh-electron/dsh-plugin-multi-root-workspace'
 const REPLACED = new Map([
@@ -88,6 +88,9 @@ try {
   const pluginProfile = 'mr-plugin'
 
   console.log(`[smoke:compose] scratch home: ${home}`)
+  // Copy import lands before `plugin install` materializes store references —
+  // the hardlink preflight counts every multi-link file under the home.
+  ensureProfileCopyImport(home, baselineProfile)
   const initCode = await runDsh(['plugin', '--profile', baselineProfile, 'install'], { DSH_HOME: home })
   check.ok(initCode === 0, 'baseline profile initialized without the plugin', `exit ${initCode}`)
 

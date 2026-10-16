@@ -14,8 +14,18 @@ import {
 // established import sites working unchanged.
 export { parseWindowsProfile, workspaceScopeSid, type WindowsProfile } from './windows-runner-contract.ts'
 
-/** Recognize the upstream runner, then select our ambient deny-token path. */
-export function restrictWindowsProfile(profile: readonly string[], deniedRoots: readonly string[]): string[] {
+/** Recognize the upstream runner, then select our ambient deny-token path.
+ *
+ * `protectedHome` is a diagnostics label only: when it names one of the deny
+ * roots it is forwarded as `--protected-home` so the runner can word its
+ * hardlink/scan remediation for the protected `$DSH_HOME`. It never changes
+ * which roots are denied or how.
+ */
+export function restrictWindowsProfile(
+  profile: readonly string[],
+  deniedRoots: readonly string[],
+  protectedHome?: string,
+): string[] {
   assertWindowsDenyCapacity(deniedRoots.length)
   if (profile.length < 2 || profile[0] === undefined || profile[1]?.startsWith('--')) {
     throw new DialectUnrecognizedError('Windows ACL runner invocation is not [node, runner, ...flags]')
@@ -25,9 +35,12 @@ export function restrictWindowsProfile(profile: readonly string[], deniedRoots: 
   for (const root of [parsed.workspace, ...deniedRoots]) {
     if (isWindowsNetworkOrDevicePath(root)) throw new DialectUnrecognizedError(`Windows ACL confinement cannot cover network or device paths: ${root}`)
   }
+  const label = protectedHome !== undefined && deniedRoots.some(root => root.toLowerCase() === protectedHome.toLowerCase())
+    ? ['--protected-home', protectedHome]
+    : []
   return [profile[0], fileURLToPath(new URL('./windows-runner.js', import.meta.url)),
     '--upstream-runner', profile[1]!, '--workspace', parsed.workspace, '--temp', parsed.temp,
-    '--mode', 'danger-full-access', ...deniedRoots.flatMap(root => ['--deny-root', root])]
+    '--mode', 'danger-full-access', ...deniedRoots.flatMap(root => ['--deny-root', root]), ...label]
 }
 
 export function widenWindowsProfile(

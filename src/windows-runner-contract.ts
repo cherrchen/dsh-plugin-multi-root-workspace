@@ -116,6 +116,14 @@ export interface WindowsProfile {
    * location, the only place that package is guaranteed importable.
    */
   upstreamRunner?: string
+  /**
+   * Diagnostics label only (`--protected-home`): which `--deny-root` is the
+   * protected `$DSH_HOME`. It changes no authorization — every deny root's
+   * policy is identical — it only selects the remediation wording in
+   * hardlink/scan diagnostics. Valid only on the standalone
+   * `danger-full-access` form.
+   */
+  protectedHome?: string
   writeSid?: string
   tempWriteSid?: string
 }
@@ -131,6 +139,7 @@ export function parseWindowsProfile(args: readonly string[], allowAdditional = f
   const additionalRoots: string[] = []
   const deniedRoots: string[] = []
   let upstreamRunner: string | undefined
+  let protectedHome: string | undefined
   const known = new Set(['--workspace', '--temp', '--mode', '--write-sid', '--temp-write-sid'])
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index]
@@ -141,6 +150,11 @@ export function parseWindowsProfile(args: readonly string[], allowAdditional = f
     if (allowAdditional && key === '--upstream-runner') {
       if (upstreamRunner !== undefined) throw new DialectUnrecognizedError('Windows ACL profile repeats --upstream-runner')
       upstreamRunner = value
+      continue
+    }
+    if (allowAdditional && key === '--protected-home') {
+      if (protectedHome !== undefined) throw new DialectUnrecognizedError('Windows ACL profile repeats --protected-home')
+      protectedHome = value
       continue
     }
     if (!known.has(key) || fields.has(key)) throw new DialectUnrecognizedError(`Windows ACL profile has unknown or duplicate flag ${key}`)
@@ -169,7 +183,13 @@ export function parseWindowsProfile(args: readonly string[], allowAdditional = f
   const writeSid = fields.get('--write-sid')
   const tempWriteSid = fields.get('--temp-write-sid')
   if ((writeSid === undefined) !== (tempWriteSid === undefined)) throw new DialectUnrecognizedError('Windows ACL profile requires both capability SIDs or neither')
+  if (protectedHome !== undefined
+    && (mode !== 'danger-full-access' || !isAbsolute(protectedHome)
+      || !deniedRoots.some(root => root.toLowerCase() === protectedHome!.toLowerCase()))) {
+    throw new DialectUnrecognizedError('--protected-home must be an absolute member of the deny roots on a standalone danger-full-access profile')
+  }
   return { workspace, temp, mode, additionalRoots, deniedRoots,
     ...(upstreamRunner === undefined ? {} : { upstreamRunner }),
+    ...(protectedHome === undefined ? {} : { protectedHome }),
     ...(writeSid === undefined ? {} : { writeSid }), ...(tempWriteSid === undefined ? {} : { tempWriteSid }) }
 }

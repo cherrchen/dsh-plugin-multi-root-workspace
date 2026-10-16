@@ -121,3 +121,47 @@ export function spawnWindowsDeniedChild(
   try { return native.spawnInheritedJobProcess(adapted, options) }
   finally { api.setHandleInformation!(handle, 1, 0) }
 }
+
+/**
+ * Terminate a kill-on-close Job and wait until the kernel reports it drained.
+ *
+ * The public `waitForProcessExit` covers the direct child only: a descendant
+ * the child spawned before exiting stays in the Job and could otherwise keep
+ * running — with its restricted token — after the runner has released its
+ * ancestor pins. `TerminateJobObject(job, 127)` kills every member; the
+ * subsequent `QueryInformationJobObject` polling loop (class 1,
+ * JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, `ActiveProcesses` at byte 40) only
+ * returns once the kernel reports none left. There is deliberately no
+ * timeout: releasing pins while a live descendant remains is exactly the gap
+ * this wait exists to close. The caller still owns and closes the Job handle
+ * afterwards.
+ *
+ * Abnormal-error boundary: a TerminateJobObject or QueryInformationJobObject
+ * API failure throws into the caller's teardown — the Job handle is still
+ * closed there and its kill-on-close flag is the residual bound, same as the
+ * forced-termination case: if the runner process itself is killed, no
+ * in-process guarantee can survive, the Job flag takes the descendants down
+ * with it, and the pin handles die with the process. Protection is promised
+ * only through this orderly path.
+ */
+export function terminateWindowsJobAndWait(native: WindowsNative, api: NativeApi, job: NativePointer): void {
+  const jobApi = { ...api, ...native.extendWin32ProcessBindings(({ kernel32, bind }) => ({
+    terminateJobObject: bind(kernel32, 'TerminateJobObject', 'int', ['void*', 'uint32']) as NativeFunction,
+    queryInformationJobObject: bind(kernel32, 'QueryInformationJobObject', 'int', ['void*', 'int', 'void*', 'uint32', 'void*']) as NativeFunction,
+    sleep: bind(kernel32, 'Sleep', 'void', ['uint32']) as NativeFunction,
+    getLastError: bind(kernel32, 'GetLastError', 'uint32', []) as NativeFunction,
+  })) }
+  if (jobApi.terminateJobObject!(job, 127) === 0) {
+    throw new Error(`TerminateJobObject failed (Win32 ${jobApi.getLastError!()})`)
+  }
+  // JOBOBJECT_BASIC_ACCOUNTING_INFORMATION (JobObjectBasicAccountingInformation,
+  // class 1) is 48 bytes; ActiveProcesses is the DWORD at offset 40.
+  const info = Buffer.alloc(48)
+  for (;;) {
+    if (jobApi.queryInformationJobObject!(job, 1, info, info.length, null) === 0) {
+      throw new Error(`QueryInformationJobObject failed (Win32 ${jobApi.getLastError!()})`)
+    }
+    if (info.readUInt32LE(40) === 0) return
+    jobApi.sleep!(10)
+  }
+}

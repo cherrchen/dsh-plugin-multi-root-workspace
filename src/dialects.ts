@@ -414,8 +414,11 @@ function landlockWritablePaths(profileArgs: readonly string[]): string[] {
  *   union semantics have no deny primitive;
  * - windows-acl goes through `widenWindowsProfile`, whose runner-side ACL
  *   grant cannot subtract either — its caller checks the same overlap. The
- *   ancestor question does not arise there: the deny ACE lives on the denied
- *   directory object and follows it through a parent rename.
+ *   deny ACE does follow its directory object through a parent rename, but
+ *   the moved tree's NEW path no longer matches the recorded deny set — so
+ *   the ambient deny runner pins every ancestor of each deny root with a
+ *   non-delete-sharing handle for the child lifetime (`windows-path-guard.ts`,
+ *   `windows-deny.ts`).
  * @param dialect - the recognized dialect.
  * @param profileArgs - the upstream workspace-write profile arguments.
  * @param deniedRoots - canonical roots this call must not write.
@@ -495,10 +498,12 @@ export function denyProfileArgs(
  *   ro-binds — a mountpoint cannot be renamed (EBUSY), so the deny follows no
  *   rename of the tree's ancestors. A missing source fails the launch,
  *   retaining the registered negative authorization;
- * - landlock and windows-acl cannot express "everything except" — the launcher
- *   only unions allowlists and the ACL model only grants — so both throw.
- *   (windows-acl needs no ancestor pinning anyway: the deny ACE lives on the
- *   denied directory object and follows it through a parent rename.)
+ * - landlock cannot express "everything except" — its launcher only unions
+ *   allowlists, so it throws. windows-acl expresses the cell through the
+ *   standalone ambient-deny runner instead of this profile rewrite: standing
+ *   deny ACEs on every denied object, plus ancestor pin handles held through
+ *   the child and its drained Job descendants so no rename can vacate the
+ *   registered spelling (`windows-deny.ts`, `windows-path-guard.ts`).
  * @param dialect - the recognized dialect.
  * @param profileArgs - the upstream read-only skeleton's profile arguments.
  * @param deniedRoots - canonical roots the execution must not write.

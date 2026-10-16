@@ -206,6 +206,7 @@ The upstream `fs-sandbox` and `sandbox` rows are disabled and taken over by the 
 /workspace-folders alias <n|path> [name]                                    # omitting the name clears the alias
 /workspace-folders remove <n|path>                                          # n is the number list prints
 /workspace-folders reveal <n|path>                                          # show it in the file manager
+/workspace-folders isolate-profiles [--apply]                               # inspect profile import method and multi-link files under $DSH_HOME; --apply writes copy config
 /workspace-folders help                                                     # show the command help
 ```
 

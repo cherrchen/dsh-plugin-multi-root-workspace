@@ -47,6 +47,8 @@ async function mount(options: {
   spawnExitCode?: number
   /** Session id → cwd. `false` leaves the sessions service absent. */
   sessions?: Record<string, string> | Map<string, string> | false
+  /** The row's config, as the patch supplies it (`dshHome` for isolate-profiles). */
+  config?: { dshHome?: string }
 } = {}): Promise<RegistryStack> {
   const stack = await mountRegistryStack(storeRoot)
   stacks.push(stack)
@@ -95,7 +97,7 @@ async function mount(options: {
       },
     } as never)
   }
-  const fiber = await ctx.plugin(CommandModule)
+  const fiber = await ctx.plugin(CommandModule, options.config ?? {})
   contexts.push(ctx)
   void fiber
   if (options.withConnection === true && options.sessions !== false) {
@@ -176,9 +178,10 @@ describe('parseFoldersCommand', () => {
   })
 
   it('accepts every subcommand', () => {
-    for (const verb of ['list', 'add', 'remove', 'alias', 'access', 'reveal', 'help']) {
+    for (const verb of ['list', 'add', 'remove', 'alias', 'access', 'reveal', 'isolate-profiles', 'help']) {
       expect(parseFoldersCommand(`${verb} x`).verb).toBe(verb)
     }
+    expect(parseFoldersCommand('isolate-profiles --apply')).toEqual({ verb: 'isolate-profiles', rest: '--apply' })
   })
 
   it('rejects an unknown subcommand with a stable code', () => {
@@ -367,6 +370,78 @@ describe('the /workspace-folders command', () => {
     const text = (await run('help')).text ?? ''
     expect(text).toContain('/workspace-folders add')
     expect(text).toContain('alias')
+    expect(text).toContain('isolate-profiles')
+  })
+
+  it('isolate-profiles reports the home, the profiles, and the scan counts — read-only by default', async () => {
+    const dshHome = join(fixture.base, 'dsh-home')
+    const profileDir = join(dshHome, 'profiles', 'default')
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(profileDir, 'package.json'), JSON.stringify({ dsh: { profile: {} } }))
+    await mount({ config: { dshHome } })
+
+    const check = await run('isolate-profiles')
+    expect(check.kind).toBe('success')
+    expect(check.text).toContain('isolate-profiles')
+    expect(check.text).toContain(canonicalPath(dshHome))
+    expect(check.text).toContain('default: packageImportMethod is unset')
+    expect(check.text).toMatch(/scanned \d+ dirs\/\d+ files, \d+ multi-link files, \d+ uninspectable/)
+    expect(check.text).toContain('--apply')
+    // Read-only: nothing was written.
+    expect(readFileSync(join(profileDir, 'package.json'), 'utf8')).not.toContain('copy')
+    expect(() => readFileSync(join(profileDir, 'pnpm-workspace.yaml'), 'utf8')).toThrow()
+  })
+
+  it('isolate-profiles --apply writes the copy import and prints the remediation', async () => {
+    const dshHome = join(fixture.base, 'dsh-home')
+    const profileDir = join(dshHome, 'profiles', 'main')
+    mkdirSync(join(profileDir, 'node_modules', 'dep'), { recursive: true })
+    writeFileSync(join(profileDir, 'package.json'), JSON.stringify({ dsh: { profile: {} } }))
+    writeFileSync(join(profileDir, 'node_modules', 'dep', 'index.js'), 'dep')
+    await mount({ config: { dshHome } })
+
+    const applied = await run('isolate-profiles --apply')
+    expect(applied.kind).toBe('success')
+    expect(applied.text).toContain('main: written')
+    expect(applied.text).toContain('Remove-Item -Recurse -Force')
+    expect(applied.text).toContain(`pnpm --dir '${join(canonicalPath(dshHome), 'profiles', 'main')}' install`)
+    expect(applied.text).toContain('does not isolate existing dependencies')
+    expect(applied.text).toContain('no automatic reset')
+    expect(readFileSync(join(profileDir, 'pnpm-workspace.yaml'), 'utf8')).toContain('packageImportMethod: copy')
+
+    const again = await run('isolate-profiles')
+    expect(again.text).toContain('main: packageImportMethod: copy')
+  })
+
+  it('isolate-profiles rejects any argument other than --apply', async () => {
+    const dshHome = join(fixture.base, 'dsh-home')
+    mkdirSync(dshHome, { recursive: true })
+    await mount({ config: { dshHome } })
+    for (const input of ['isolate-profiles --force', 'isolate-profiles --apply --apply', 'isolate-profiles extra']) {
+      const result = await run(input)
+      expect(result.kind, input).toBe('error')
+      expect(result.text, input).toContain('invalid-ref')
+    }
+  })
+
+  it('isolate-profiles fails clearly when dshHome is missing or not absolute', async () => {
+    await mount()
+    const missing = await run('isolate-profiles')
+    expect(missing.kind).toBe('error')
+    expect(missing.text).toContain('config-invalid')
+    expect(missing.text).toContain('dshHome')
+
+    await mount({ config: { dshHome: 'relative/home' } })
+    const relative = await run('isolate-profiles')
+    expect(relative.kind).toBe('error')
+    expect(relative.text).toContain('config-invalid')
+  })
+
+  it('isolate-profiles has no panel endpoint — the channel still rejects it', async () => {
+    await mount({ withConnection: true })
+    const answer = await callPanel('isolate-profiles', { sessionId: PANEL_SESSION })
+    expect(answer.ok).toBe(false)
+    expect(answer.error?.code).toBe('panel/bad-request')
   })
 })
 

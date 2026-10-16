@@ -117,5 +117,10 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/process-fence'
     - id: multi-root-command
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
+      config:
+        # `/workspace-folders isolate-profiles` inspects the same canonical
+        # home the scope protects; spelled exactly like the scope row so the
+        # two can never disagree about which home was checked.
+        dshHome: !!js dshHomePath()
     - id: multi-root-client
       name: '@dsh-electron/dsh-plugin-multi-root-workspace'

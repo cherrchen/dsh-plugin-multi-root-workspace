@@ -61,6 +61,7 @@ import {
   expandRootInput,
   isWindowsNetworkOrDevicePath,
   removeStatusAt,
+  reservedRootBoundary,
   resolveRootIndex,
   RootValidationError,
   validateRootCandidate,
@@ -450,14 +451,22 @@ export class MultiRootRegistry extends Service {
           { reference: String(this.maxRoots) },
         )
       }
-      const revivedPath = revived === -1 ? undefined : statuses[revived]!.path
       const canonical = validateRootCandidate(input.path, {
         primaryRoot: key,
-        // A withheld or unusable registration grants nothing, so it may not block
-        // re-registering the very directory the operator is trying to restore —
-        // and neither may the revived record's own grant, whose re-registration
-        // is exactly what a revive confirms.
-        existing: availableRoots(statuses).filter(root => root !== revivedPath),
+        // The overlap rules judge every registration that still carries an
+        // intact recorded grant — available, missing, redirected, and
+        // membership-conflict records alike. A withheld root grants nothing,
+        // but its recorded boundary is exactly the negative restriction a new
+        // writable root must not swallow while the operator has not removed
+        // the record; only a structurally invalid record reserves nothing.
+        // The revive exemption is by INDEX, never by path: re-registering the
+        // exact row being confirmed releases only that one reservation — a
+        // second record that happens to name the same boundary keeps its own.
+        existing: statuses.flatMap((status, index) => {
+          if (index === revived) return []
+          const boundary = reservedRootBoundary(status)
+          return boundary === undefined ? [] : [boundary]
+        }),
       })
       const access = input.access ?? 'inherit'
       const next = revived === -1
@@ -770,9 +779,13 @@ export class MultiRootRegistry extends Service {
   /**
    * Push one status list into the scope and notify listeners.
    *
-   * What is published is the effective GRANT — only `available` roots, so a
-   * withheld registration can never reach a provider. When the grant and the
-   * withheld set are unchanged (the common case for a read-path refresh on a
+   * What is published is the effective GRANT — membership requires
+   * `available`, so a withheld registration can never reach a provider as a
+   * grant. Withheld entries still publish for their DENY boundary alone;
+   * that includes `membership-conflict` records, whose recorded grant is
+   * intact and trustworthy even though their membership cannot stand. When
+   * the grant and the withheld set are unchanged (the common case for a
+   * read-path refresh on a
    * healthy workspace) the scope is left alone and no listener fires: a refresh
    * exists to keep the two in sync, not to churn on every listing — and, since
    * the scope rebuilds its root table on each call, skipping the no-op write is
@@ -784,11 +797,14 @@ export class MultiRootRegistry extends Service {
    */
   private publish(key: string, statuses: readonly RootStatus[]): void {
     const withheld = statuses.filter(status => status.state !== 'available')
-    // Access is part of the signature: an access change IS a grant change and
-    // must republish, while aliases still produce an identical signature.
+    // Access AND invalidReason are part of the signature: an access change IS
+    // a grant change and must republish, and a flip between structural
+    // `invalid` and `membership-conflict` changes whether the recorded
+    // boundary still denies — while aliases still produce an identical
+    // signature.
     const signature = [
       ...statuses.filter(status => status.state === 'available').map(status => `available:${status.access}:${recordedGrantOf(status)}`),
-      ...withheld.map(status => `${status.state}:${status.access}:${status.path}:${recordedGrantOf(status) ?? ''}`),
+      ...withheld.map(status => `${status.state}:${status.invalidReason ?? ''}:${status.access}:${status.path}:${recordedGrantOf(status) ?? ''}`),
     ].join('\n')
     // A key with nothing published yet reads as the empty signature: the very
     // first classification of an empty key must not "publish" an empty grant
@@ -797,11 +813,15 @@ export class MultiRootRegistry extends Service {
     this.published.set(key, signature)
     const effective = statuses.flatMap(status => {
       const recorded = recordedGrantOf(status)
-      // An `invalid` record publishes NOTHING — not even its deny boundary:
-      // a record too corrupt to parse cannot state a trustworthy restriction,
-      // so under Full-access its former path becomes ambient-writable again.
-      // The tradeoff is recorded in ADR-0017 (失效登记的负授权修订).
-      if (status.state === 'invalid' || recorded === undefined) return []
+      // A structurally `invalid` record publishes NOTHING — not even its deny
+      // boundary: a record too corrupt to parse cannot state a trustworthy
+      // restriction, so under Full-access its former path becomes
+      // ambient-writable again. A `membership-conflict` record is different:
+      // its recorded grant IS intact and trustworthy, so it still publishes —
+      // withheld, deny-only — and a read-only boundary inside a covering grant
+      // stays denied. The tradeoff is recorded in ADR-0017 (失效登记的负授权修订
+      // and its membership-conflict amendment).
+      if ((status.state === 'invalid' && status.invalidReason !== 'membership-conflict') || recorded === undefined) return []
       return [{
         id: status.id,
         path: status.path,

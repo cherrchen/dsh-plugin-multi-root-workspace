@@ -16,12 +16,14 @@
  *   target, exactly like the confined modes always did.
  */
 
-import { mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MultiRootFileSystem } from '../src/fs.ts'
+import { DOMAIN_NAME } from '../src/registry.ts'
 import type { Config as ScopeConfig } from '../src/scope.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason } from './support/temp-workspace.ts'
@@ -197,6 +199,74 @@ describe('a stale FsTarget under Full-access', () => {
       expect(readFileSync(victim, 'utf8')).toBe('protected')
     } finally {
       await service.dispose()
+      fixture.dispose()
+    }
+  })
+})
+
+describe('a legacy overlapping store keeps its read-only boundary', () => {
+  it('denies writes into the recreated child while both memberships stay withheld', async () => {
+    const fixture = createFixtureWorkspace('review-conflict')
+    const store = join(fixture.base, 'store')
+    mkdirSync(store)
+    const cage = join(fixture.base, 'cage')
+    const denied = join(cage, 'denied')
+    mkdirSync(denied, { recursive: true })
+    const victim = join(denied, 'victim.txt')
+    writeFileSync(victim, 'original')
+
+    // Persist the formerly legal state: the read-only child registered, then
+    // — while it was missing — a covering fixed read-write parent admitted by
+    // the old available-only overlap check.
+    const first = await stack(store, fixture.workspace)
+    await first.registry.add(fixture.workspace, { path: denied, access: 'read-only' })
+    await first.dispose()
+    const storeFile = join(store, `${DOMAIN_NAME}.json`)
+    const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+      tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
+    }
+    document.tables.roots[canonicalPath(fixture.workspace)]!.roots.push({
+      id: 'legacy-parent',
+      path: canonicalPath(cage),
+      readWriteRecordedPath: canonicalPath(cage),
+      addedAt: '2026-10-16T00:00:00.000Z',
+    })
+    writeFileSync(storeFile, JSON.stringify(document))
+
+    // The child is gone when the pair is re-opened; both records classify as a
+    // membership conflict and publish no membership — but the child's recorded
+    // read-only boundary still feeds the deny set.
+    rmSync(denied, { recursive: true, force: true })
+    const second = await stack(store, fixture.workspace)
+    try {
+      const statuses = second.registry.list(fixture.workspace)
+      expect(statuses.map(status => status.state)).toEqual(['invalid', 'invalid'])
+      expect(statuses.every(status => status.invalidReason === 'membership-conflict')).toBe(true)
+      expect(second.scope.scopeOf(fixture.workspace)).toEqual([])
+
+      mkdirSync(denied, { recursive: true })
+      writeFileSync(victim, 'original')
+      for (const mode of ['read-only', 'workspace-write', 'danger-full-access'] as const) {
+        expect(second.scope.resolve({ mode, workspaceRoot: fixture.workspace }).deniedRoots, mode)
+          .toEqual([canonicalPath(denied)])
+      }
+
+      // The R3 invariant: a denied directory recreated under an accepted
+      // writable parent must NOT be writable through the in-process fence —
+      // the conflict withheld BOTH grants and kept the child's deny.
+      const target = await second.ctx.fs.resolve(victim)
+      await expect(second.ctx.fs.writeText(target, 'bypass'))
+        .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      await expect(second.ctx.fs.editText(target,
+        { oldString: 'original', newString: 'bypass', replaceAll: false }))
+        .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      expect(readFileSync(victim, 'utf8')).toBe('original')
+
+      // The fence stays writable inside the primary root — the deny is the
+      // child boundary, not a lockout.
+      await second.ctx.fs.writeText(await second.ctx.fs.resolve(join(fixture.workspace, 'inside.txt')), 'inside')
+    } finally {
+      await second.dispose()
       fixture.dispose()
     }
   })

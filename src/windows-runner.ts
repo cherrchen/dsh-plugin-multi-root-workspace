@@ -25,7 +25,7 @@ async function main(): Promise<number> {
   if (separator < 0 || raw[separator + 1] === undefined) throw new Error('missing command after --')
   const profile = parseWindowsProfile(raw.slice(0, separator), true)
   if (profile.mode === 'danger-full-access') {
-    return await runWindowsDenied(profile.upstreamRunner!, profile.deniedRoots, raw.slice(separator + 1))
+    return await runWindowsDenied(profile.upstreamRunner!, profile.deniedRoots, raw.slice(separator + 1), profile.protectedHome)
   }
   // Under `workspace-write` the grant set is the workspace plus every
   // additional root. Under `read-only` (B9's fixed `read-write` cell) the

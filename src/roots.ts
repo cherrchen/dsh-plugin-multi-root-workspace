@@ -28,7 +28,12 @@
  *
  * The stored side of the same rules lives in {@link classifyStoredRoots}, which
  * must never throw: a registration that stopped being usable is REPORTED, not
- * deleted, so the operator can see it and remove it deliberately.
+ * deleted, so the operator can see it and remove it deliberately. It runs in
+ * two passes — every record's own structural trust and availability first,
+ * then overlap between the RECORDED boundaries of all structurally sound
+ * records — so the answer never depends on registry order, and a pair of
+ * records whose grants collide (`membership-conflict`) keeps its trustworthy
+ * negative boundary even while its membership is withheld.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/roots
  */
@@ -127,7 +132,9 @@ export interface RegisteredRoot {
  *   registered for (it was replaced by a symlink, or a symlink in the chain
  *   changed); kept, withheld, and `recheck` restores it once the original
  *   directory is back.
- * - `invalid` — the record violates a rule and can only be removed.
+ * - `invalid` — the record violates a rule and can only be removed. Whether the
+ *   violation also voids the record's negative boundary is told apart by
+ *   {@link RootStatus.invalidReason}.
  */
 export type RootState = 'available' | 'missing' | 'redirected' | 'invalid'
 
@@ -137,6 +144,20 @@ export interface RootStatus extends RegisteredRoot {
   readonly state: RootState
   /** Why the root is not `available`; absent otherwise. */
   readonly detail?: string
+  /**
+   * Distinguishes WHY an `invalid` record is unusable. Internal only: it is
+   * neither persisted nor sent over the panel wire — `state` and `detail`
+   * carry everything a surface needs.
+   *
+   * `'membership-conflict'` means the record passed every structural rule —
+   * including an intact, absolute recorded grant — but its recorded boundary
+   * overlaps another record's. Neither membership may be granted while the
+   * conflict stands, yet the boundary remains a trustworthy negative
+   * restriction, so {@link reservedRootBoundary} keeps it reserved and the
+   * registry publishes the root as a withheld, deny-only entry. Every other
+   * `invalid` verdict left the grant unverifiable, so it contributes nothing.
+   */
+  readonly invalidReason?: 'membership-conflict'
 }
 
 /** One status together with the 1-based ordinal the surfaces accept for it. */
@@ -269,10 +290,13 @@ export interface RootCandidateContext {
    */
   readonly platform?: NodeJS.Platform
   /**
-   * Canonical paths already granted. Missing and invalid registrations are
-   * deliberately excluded: a withheld root grants nothing, so a candidate may
-   * legitimately sit under it, and an unusable record must not block a store
-   * the operator is trying to make work again.
+   * The recorded boundaries already reserved: {@link reservedRootBoundary}
+   * applied to every other status — available, missing, redirected, and
+   * membership-conflict records alike. A withheld root grants nothing, but
+   * its recorded boundary is the negative restriction a new writable root
+   * must not swallow while the operator has not removed it. Only a
+   * structurally invalid record contributes nothing, and the row being
+   * revived exempts only itself.
    */
   readonly existing: readonly string[]
 }
@@ -395,15 +419,81 @@ export function classifyStoredRoots(
   platform: NodeJS.Platform = process.platform,
 ): RootStatus[] {
   const primary = canonicalRoot(primaryRoot)
-  const claimed: string[] = []
   const duplicated = duplicatedIds(records)
-  const statuses: RootStatus[] = []
-  for (const [index, record] of records.entries()) {
-    const status = classifyStoredRoot(record, primary, claimed, duplicated.has(record.id), index, platform)
-    statuses.push(status)
-    if (status.state === 'available') claimed.push(status.path)
+  // Pass one judges each record alone — structural trust, the primary-root
+  // rules on the RECORDED boundary, and current availability. Neither
+  // registration order nor another record's verdict participates, so a
+  // cosmetic `move` can never change who is granted.
+  const statuses = records.map((record, index) =>
+    classifyStoredRoot(record, primary, duplicated.has(record.id), index, platform))
+  return markMembershipConflicts(statuses)
+}
+
+/**
+ * Pass two of {@link classifyStoredRoots}: every pair of structurally sound
+ * records whose RECORDED boundaries overlap is a membership conflict, and
+ * BOTH are unusable — which side "won" must never depend on registry order
+ * (a reorder is cosmetic and cannot revoke a deny boundary). Missing and
+ * redirected records participate too: withheld roots carry no grant, but
+ * their recorded boundaries still describe restrictions the operator has not
+ * removed.
+ *
+ * The comparison is lexical over the recorded grant via
+ * {@link isCanonicallyUnder}/{@link samePath} — never the current resolution,
+ * which a replaced directory can steer. The conflict set is built from the
+ * ORIGINAL first-pass statuses, so a third overlapping record is marked even
+ * when the pair found first was already doomed.
+ */
+function markMembershipConflicts(statuses: readonly RootStatus[]): RootStatus[] {
+  // A structurally invalid record carries no trustworthy boundary: its fields
+  // can claim nothing — no membership, and no deny either.
+  const boundaries = statuses.map(status => (status.state === 'invalid' ? undefined : singleGrantOf(status)))
+  const conflicts = new Map<number, string[]>()
+  for (let index = 0; index < boundaries.length; index += 1) {
+    const boundary = boundaries[index]
+    if (boundary === undefined) continue
+    for (let other = index + 1; other < boundaries.length; other += 1) {
+      const otherBoundary = boundaries[other]
+      if (otherBoundary === undefined) continue
+      if (samePath(boundary, otherBoundary)
+        || isCanonicallyUnder(boundary, otherBoundary)
+        || isCanonicallyUnder(otherBoundary, boundary)) {
+        conflicts.set(index, [...(conflicts.get(index) ?? []), otherBoundary])
+        conflicts.set(other, [...(conflicts.get(other) ?? []), boundary])
+      }
+    }
   }
-  return statuses
+  if (conflicts.size === 0) return [...statuses]
+  return statuses.map((status, index) => {
+    const others = conflicts.get(index)
+    if (others === undefined) return status
+    const boundary = boundaries[index]!
+    const partners = others.map(other => `"${other}"`).join(', ')
+    return {
+      ...status,
+      state: 'invalid',
+      invalidReason: 'membership-conflict',
+      detail: `the recorded grant "${boundary}" overlaps the recorded grant ${partners} — `
+        + 'neither membership is granted until one registration is removed, '
+        + 'and any recorded read-only restriction remains in force',
+    }
+  })
+}
+
+/**
+ * The single recorded grant a record or status carries — `undefined` unless
+ * EXACTLY one grant field holds a non-empty string. Shared by the conflict
+ * pass and {@link reservedRootBoundary}; the stored decoder is the source of
+ * the access level, so this never cross-checks the field against `access`.
+ */
+function singleGrantOf(record: {
+  readonly recordedPath?: string
+  readonly readOnlyRecordedPath?: string
+  readonly readWriteRecordedPath?: string
+}): string | undefined {
+  const grants = [record.recordedPath, record.readOnlyRecordedPath, record.readWriteRecordedPath]
+    .filter((grant): grant is string => typeof grant === 'string' && grant !== '')
+  return grants.length === 1 ? grants[0] : undefined
 }
 
 /**
@@ -423,18 +513,20 @@ function duplicatedIds(records: readonly RegisteredRoot[]): Set<string> {
 }
 
 /**
- * Judge one stored record against the primary root and the roots claimed before
- * it.
+ * Judge one stored record's structural trust and current availability —
+ * WITHOUT looking at any other record (record-vs-record overlap is the second
+ * pass of {@link classifyStoredRoots}).
  *
  * Identity and the recorded directory are checked BEFORE the current
  * resolution is used for anything: a record whose path now resolves elsewhere
  * must not have its new (attacker-influenced) target participate in the
- * overlap rules.
+ * overlap rules. The primary-root rules therefore judge the RECORDED
+ * boundary — the directory the operator was granted — not what `path`
+ * resolves to today.
  */
 function classifyStoredRoot(
   record: RegisteredRoot,
   primary: string,
-  claimed: readonly string[],
   duplicatedId: boolean,
   position: number,
   platform: NodeJS.Platform,
@@ -467,10 +559,28 @@ function classifyStoredRoot(
   if (typeof recorded !== 'string' || recorded === '') {
     return invalid('the record does not say which directory it was granted for')
   }
+  // The recorded boundary feeds every overlap rule — against the primary root
+  // here, against other records in pass two — so it must be an absolute
+  // canonical spelling. A non-absolute one can claim nothing and contributes
+  // nothing (no membership, no deny).
+  if (!isAbsolute(recorded)) {
+    return invalid(`the recorded grant "${recorded}" is not an absolute path`)
+  }
   // A network or device path is judged lexically, BEFORE re-resolving it:
   // canonicalizing a UNC path would touch the filesystem (and the network).
   if (platform === 'win32' && (isWindowsNetworkOrDevicePath(record.path) || isWindowsNetworkOrDevicePath(recorded))) {
     return invalid(`"${record.path}" is a network or device path, which Windows ACL confinement cannot cover`)
+  }
+  // The primary-root rules judge the recorded boundary BEFORE the redirect
+  // check resolves `path`: the current resolution is attacker-influenceable,
+  // the recorded grant is not. A record whose grant was the workspace root —
+  // or inside it, or containing it — is unusable no matter where `path`
+  // points now.
+  if (samePath(recorded, primary)) {
+    return invalid(`"${recorded}" is this session's workspace root`)
+  }
+  if (isCanonicallyUnder(recorded, primary) || isCanonicallyUnder(primary, recorded)) {
+    return invalid(`"${recorded}" overlaps this session's workspace root`)
   }
   const canonical = canonicalRoot(record.path)
   if (!samePath(canonical, recorded)) {
@@ -482,20 +592,6 @@ function classifyStoredRoot(
       ...record,
       state: 'redirected',
       detail: `the path now resolves to "${canonical}" instead of the registered "${recorded}"`,
-    }
-  }
-  if (samePath(canonical, primary)) {
-    return invalid(`"${canonical}" is this session's workspace root`)
-  }
-  if (isCanonicallyUnder(canonical, primary) || isCanonicallyUnder(primary, canonical)) {
-    return invalid(`"${canonical}" overlaps this session's workspace root`)
-  }
-  if (claimed.some(existing => samePath(existing, canonical))) {
-    return invalid(`"${canonical}" is registered twice`)
-  }
-  for (const existing of claimed) {
-    if (isCanonicallyUnder(canonical, existing) || isCanonicallyUnder(existing, canonical)) {
-      return invalid(`"${canonical}" overlaps the registered root "${existing}"`)
     }
   }
   let isDirectory = false
@@ -517,6 +613,27 @@ function classifyStoredRoot(
  */
 export function availableRoots(statuses: readonly RootStatus[]): string[] {
   return statuses.filter(status => status.state === 'available').map(status => status.path)
+}
+
+/**
+ * The recorded boundary one status still RESERVES: the grant it was
+ * registered for, which a new or revived registration may not overlap merely
+ * because the root is currently unusable.
+ *
+ * `available`, `missing`, `redirected`, and membership-conflict statuses all
+ * carry an intact, trustworthy recorded grant; every other `invalid` verdict
+ * means the grant could not be parsed at all, so it reserves — and denies —
+ * nothing. This is not an independent authorization table: it derives the
+ * boundary from the status list {@link classifyStoredRoots} produced, with
+ * the same grant-extraction semantics, so its answer can never disagree with
+ * classification.
+ * @param status - one classified registration.
+ * @returns the absolute recorded boundary, or `undefined` when there is none.
+ */
+export function reservedRootBoundary(status: RootStatus): string | undefined {
+  if (status.state === 'invalid' && status.invalidReason !== 'membership-conflict') return undefined
+  const boundary = singleGrantOf(status)
+  return boundary !== undefined && isAbsolute(boundary) ? boundary : undefined
 }
 
 /**

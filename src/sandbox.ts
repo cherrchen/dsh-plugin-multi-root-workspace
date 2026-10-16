@@ -104,11 +104,15 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
    * are passed through untouched, because the bash executor derives its denial
    * and enforcement reporting from them.
    *
-   * Mode behavior (B9): `workspace-write` widens the grant with the effective
-   * writable roots AND denies any restricted root the upstream grants could
-   * reach (a `read-only` root registered under the platform temp). `read-only`
-   * grafts the fixed `read-write` roots back onto the deny-all baseline — the
-   * three-state matrix's standout cell. `danger-full-access` never reaches
+   * Mode behavior (B9, R2): `workspace-write` widens the grant with the
+   * effective writable roots AND denies any restricted root the upstream
+   * grants could reach (a `read-only` root registered under the platform
+   * temp). `read-only` grafts the fixed `read-write` roots back onto the
+   * deny-all baseline — the three-state matrix's standout cell — and then
+   * applies the SAME deny pass: a grafted writable parent must not silently
+   * swallow a denied child (Seatbelt appends the deny after the allow, bwrap
+   * adds a mandatory `--ro-bind`, Landlock / windows-acl refuse the
+   * unrepresentable subtraction). `danger-full-access` never reaches
    * here (consumers bypass `confine`); its deny semantics live in
    * {@link restrictedArgvPrefix}.
    * @param confined - the upstream result for this call.
@@ -131,9 +135,10 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
       if (shape.dialect === 'windows-acl') {
         return { ...confined, argv: [...widenWindowsProfile(shape.profileArgs, writable, denied, scope.primaryRoot), '--', ...argv] }
       }
-      const profileArgs = policy.mode === 'workspace-write'
-        ? denyProfileArgs(shape.dialect, widenProfileArgs(shape.dialect, shape.profileArgs, policy, writable), denied)
+      const widened = policy.mode === 'workspace-write'
+        ? widenProfileArgs(shape.dialect, shape.profileArgs, policy, writable)
         : graftProfileArgs(shape.dialect, shape.profileArgs, writable)
+      const profileArgs = denyProfileArgs(shape.dialect, widened, denied)
       return { ...confined, argv: [...profileArgs, '--', ...argv] }
     } catch (error: unknown) {
       if (!(error instanceof DialectUnrecognizedError)) throw error
@@ -165,14 +170,18 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
    * @param policy - the caller's policy (mode must be `danger-full-access`).
    * @param deniedRoots - canonical roots this execution must not write.
    * @param signal - cancellation, forwarded to releases that accept it.
+   * @param protectedHome - diagnostics label: which deny root is the
+   *   protected `$DSH_HOME`. Forwarded to the Windows runner only when it is
+   *   a member of `deniedRoots`; it never changes authorization.
    * @returns the argv prefix, ending at the `--` separator.
    */
   restrictedArgvPrefix(
     policy: SandboxExecutionPolicy,
     deniedRoots: readonly string[],
     signal?: AbortSignal,
+    protectedHome?: string,
   ): readonly string[] | Promise<readonly string[]> {
-    const result = this.restrictedExecution(policy, deniedRoots, signal)
+    const result = this.restrictedExecution(policy, deniedRoots, signal, protectedHome)
     return mapConfined(result, confined => confined.argv)
   }
 
@@ -181,6 +190,7 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     policy: SandboxExecutionPolicy,
     deniedRoots: readonly string[],
     signal?: AbortSignal,
+    protectedHome?: string,
   ): UpstreamConfined {
     // `danger-full-access` is deliberately not a ConfinedSandboxMode: the probe
     // runs under `read-only` purely to harvest the runner skeleton.
@@ -195,7 +205,7 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
       try {
         const shape = splitConfined(confined.argv, ['true'])
         const argv = [...(shape.dialect === 'windows-acl'
-          ? restrictWindowsProfile(shape.profileArgs, deniedRoots)
+          ? restrictWindowsProfile(shape.profileArgs, deniedRoots, protectedHome)
           : restrictProfileArgs(shape.dialect, shape.profileArgs, deniedRoots)), '--']
         // Landlock cannot subtract a subtree. This combination selects the
         // bubblewrap backend instead; its diagnostics must follow that choice.

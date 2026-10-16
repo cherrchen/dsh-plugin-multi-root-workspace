@@ -7,9 +7,9 @@ import { rootDenySid } from '../src/windows-runner-contract.ts'
  * fixtures in `finally`.
  */
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, parse } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
@@ -24,6 +24,9 @@ import { MultiRootScopeService } from '../src/scope.ts'
 import { mountCompat } from './support/compat.ts'
 import { createFixtureWorkspace, REPO_ROOT } from './support/temp-workspace.ts'
 import { shortPathName } from './support/windows.ts'
+import { loadWindowsNative } from '../src/compat/windows-native.ts'
+import type { NativeFunction, WindowsNative } from '../src/compat/windows-native.ts'
+import { pinWindowsDenyPaths } from '../src/compat/windows-path-guard.ts'
 
 const PLUGIN_RUNNER = join(REPO_ROOT, 'lib', 'windows-runner.js')
 const UPSTREAM_RUNNER_ARGS = (): string[] => [process.execPath, fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-sandbox-windows-acl/runner'))]
@@ -83,6 +86,43 @@ async function spawnArgv(command: string, args: readonly string[], timeout = 120
   })
 }
 
+/** Spawn `argv` while exposing its live stdout buffer for readiness probes. */
+function spawnObserved(argv: readonly string[]): { child: ChildProcess; output: () => string; done: Promise<Spawned> } {
+  const child = spawn(argv[0]!, argv.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] })
+  const stdout: Buffer[] = []
+  const stderr: Buffer[] = []
+  child.stdout?.on('data', chunk => stdout.push(chunk as Buffer))
+  child.stderr?.on('data', chunk => stderr.push(chunk as Buffer))
+  const done = new Promise<Spawned>((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', code => resolve({ status: code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') }))
+  })
+  return { child, done, output: () => Buffer.concat(stdout).toString('utf8') }
+}
+
+/** Poll `predicate` until it holds or the deadline expires. */
+async function waitFor(predicate: () => boolean, description: string, timeout = 15_000): Promise<void> {
+  const deadline = Date.now() + timeout
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${description}`)
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+}
+
+/** Whether `pid` still names a live process (the signal-0 probe). */
+function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true } catch { return false }
+}
+
+/** A pin handle must make rename/delete of the directory fail outright. */
+function expectRenameBlocked(from: string, to: string): void {
+  let code: string | undefined
+  try { renameSync(from, to) } catch (error) { code = (error as NodeJS.ErrnoException).code }
+  expect(code, `rename of ${from}`).toMatch(/EPERM|EACCES|EBUSY/)
+  expect(existsSync(from), 'the pinned directory itself stays put').toBe(true)
+  expect(existsSync(to), 'no moved copy may appear').toBe(false)
+}
+
 /** A confined spawn whose exit can be awaited later (concurrency cases). */
 async function startConfined(mounted: Mounted, argv: readonly string[], policy = mounted.policy): Promise<{ child: ChildProcess; done: Promise<Spawned> }> {
   const confined = await mounted.provider.confine(argv, policy)
@@ -133,7 +173,10 @@ function ptyVerdicts(seen: string): (string | undefined)[] {
 /** Find a writable local fixed drive other than the fixture's, if one exists. */
 function secondDrive(fixtureDrive: string): string | undefined {
   for (const letter of ['D:\\', 'C:\\']) {
-    if (letter.toUpperCase() === fixtureDrive) continue
+    // `fixtureDrive` is a two-character 'C:'; `letter` carries the trailing
+    // separator — compare the drive letters only, or a single-drive host
+    // "finds" C:\ as its own second drive and lands at the volume root.
+    if (letter.slice(0, 2).toUpperCase() === fixtureDrive) continue
     try {
       const probe = mkdtempSync(join(letter, 'dsh-mr-xdrive-probe-'))
       rmSync(probe, { recursive: true, force: true })
@@ -1138,3 +1181,550 @@ console.log('privs-clean');close(token);`
   }, 180_000)
 })
 
+/**
+ * Phase B prototype evidence: `pinWindowsDenyPaths` holds a GENERIC_READ +
+ * share-read/write (no delete-sharing) handle on every ancestor of each deny
+ * root, so renames of the registered tree fail while a confined child would
+ * be running — without any persistent ancestor ACL. This is the
+ * runner-integration-free feasibility check: every case OBSERVES the rename
+ * attempt failing and the tree staying put, never infers it from the acquire
+ * succeeding. No broker, no build, no ACL writes.
+ */
+describe.runIf(process.platform === 'win32')('deny path guard', () => {
+  let nativePromise: Promise<WindowsNative> | undefined
+  const loadNative = (): Promise<WindowsNative> =>
+    (nativePromise ??= loadWindowsNative(UPSTREAM_RUNNER_ARGS()[1]!))
+
+  it('blocks parent, grandparent and root renames while held, releases on close, keeps siblings writable', async () => {
+    const fixture = createFixtureWorkspace('path-guard')
+    const cage = join(fixture.base, 'cage')
+    const inner = join(cage, 'inner')
+    const denied = join(inner, 'denied')
+    mkdirSync(denied, { recursive: true })
+    writeFileSync(join(denied, 'seed.txt'), 'seed')
+    const guard = pinWindowsDenyPaths(await loadNative(), [canonicalPath(denied)])
+    try {
+      // The deny root, its parent, its grandparent, and the fixture base are
+      // all pinned: every rename attempt fails and the tree does not move.
+      for (const dir of [denied, inner, cage, fixture.base]) {
+        expectRenameBlocked(dir, `${dir}-moved`)
+      }
+      expect(readFileSync(join(denied, 'seed.txt'), 'utf8')).toBe('seed')
+      // Read+write sharing still permits ordinary work inside pinned dirs.
+      writeFileSync(join(inner, 'sibling.txt'), 'sibling')
+      expect(readFileSync(join(inner, 'sibling.txt'), 'utf8')).toBe('sibling')
+      // A spawned CHILD process hits the same block — the pin is on the object,
+      // not on our process token.
+      const child = await spawnArgv(process.execPath, ['-e',
+        `require('fs').renameSync(${JSON.stringify(inner)}, ${JSON.stringify(`${inner}-child`)})`])
+      expect(child.status, `child rename must fail: ${child.stdout}${child.stderr}`).not.toBe(0)
+      expect(existsSync(inner)).toBe(true)
+      expect(existsSync(`${inner}-child`)).toBe(false)
+    } finally {
+      guard.close()
+    }
+    // Released: the identical rename now succeeds.
+    renameSync(inner, `${inner}-moved`)
+    expect(existsSync(`${inner}-moved`)).toBe(true)
+    fixture.dispose()
+  }, 120_000)
+
+  it('fails acquisition when a DELETE-sharing handle already holds a deny path', async () => {
+    const native = await loadNative()
+    // Bind the same public seam for a raw conflicting handle: DELETE access,
+    // DELETE-only sharing — our GENERIC_READ pin is then NOT covered
+    // by its share mode, so CreateFileW must fail before any spawn.
+    const api = native.extendWin32ProcessBindings(({ kernel32, bind }) => ({
+      createFileW: bind(kernel32, 'CreateFileW', 'void*', ['str16', 'uint32', 'uint32', 'void*', 'uint32', 'uint32', 'void*']),
+      closeHandle: bind(kernel32, 'CloseHandle', 'int', ['void*']),
+      getLastError: bind(kernel32, 'GetLastError', 'uint32', []),
+    }))
+    const fixture = createFixtureWorkspace('path-guard-share')
+    const denied = join(fixture.base, 'denied')
+    mkdirSync(denied)
+    const blocker = api.createFileW!(canonicalPath(denied), 0x10000, 4, null, 3, 0x02200000, null)
+    expect(blocker === null || BigInt(blocker as bigint) === -1n).toBe(false)
+    try {
+      expect(() => pinWindowsDenyPaths(native, [canonicalPath(denied)])).toThrow(/CreateFileW.*Win32 32/)
+    } finally {
+      api.closeHandle!(blocker)
+    }
+    // Once the conflicting handle is gone the same pin succeeds.
+    pinWindowsDenyPaths(native, [canonicalPath(denied)]).close()
+    fixture.dispose()
+  }, 120_000)
+
+  it('refuses a deny root reached through a junction ancestor, leaving the target untouched', async () => {
+    const fixture = createFixtureWorkspace('path-guard-junction')
+    const real = join(fixture.base, 'real')
+    mkdirSync(join(real, 'denied'), { recursive: true })
+    writeFileSync(join(real, 'denied', 'victim.txt'), 'original')
+    const link = join(fixture.base, 'alias')
+    symlinkSync(real, link, 'junction')
+    // The lexical spelling crosses the reparse point: the guard must refuse
+    // instead of pinning the link's target under a borrowed name.
+    const native = await loadNative()
+    expect(() => pinWindowsDenyPaths(native, [join(link, 'denied')])).toThrow(/reparse point/)
+    // Nothing was pinned or mutated: the real directory still renames freely.
+    renameSync(real, `${real}-moved`)
+    expect(readFileSync(join(`${real}-moved`, 'denied', 'victim.txt'), 'utf8')).toBe('original')
+    fixture.dispose()
+  }, 120_000)
+
+  it('accepts a canonical alias spelling and pins the resolved ancestors', async () => {
+    const fixture = createFixtureWorkspace('path-guard-alias')
+    const real = join(fixture.base, 'real')
+    const denied = join(real, 'denied')
+    mkdirSync(denied, { recursive: true })
+    const link = join(fixture.base, 'alias')
+    symlinkSync(real, link, 'junction')
+    // The canonical spelling of alias\denied is real\denied: accepted, and the
+    // REAL ancestors are the pinned ones — the link name is cosmetic.
+    const canonical = canonicalPath(join(link, 'denied'))
+    expect(canonical.toLowerCase()).toBe(canonicalPath(denied).toLowerCase())
+    const guard = pinWindowsDenyPaths(await loadNative(), [canonical])
+    try {
+      expectRenameBlocked(real, `${real}-moved`)
+      expectRenameBlocked(denied, `${denied}-moved`)
+    } finally {
+      guard.close()
+    }
+    fixture.dispose()
+  }, 120_000)
+
+  it('pins a deny root on a second fixed drive when one is writable', async (context) => {
+    const probe = createFixtureWorkspace('path-guard-xdrive')
+    const drive = secondDrive(parse(probe.base).root.toUpperCase())
+    probe.dispose()
+    if (drive === undefined) {
+      context.skip('no second writable fixed drive found')
+      return
+    }
+    const root = mkdtempSync(join(drive, 'dsh-mr-guard-'))
+    const denied = join(root, 'denied')
+    mkdirSync(denied)
+    const guard = pinWindowsDenyPaths(await loadNative(), [canonicalPath(denied)])
+    try {
+      expectRenameBlocked(denied, `${denied}-moved`)
+      expectRenameBlocked(root, `${root}-moved`)
+    } finally {
+      guard.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 120_000)
+})
+
+/**
+ * Phase B runner integration evidence: the shipped ambient-deny runner holds
+ * the ancestor pins for the WHOLE confined lifetime — acquired before any
+ * token request or ACL edit, released only after the kill-on-close Job has
+ * drained. Every case goes through `restrictedArgvPrefix` + the real
+ * `lib/windows-runner.js` (broker included), observes the blocked rename or
+ * the drained descendant directly, and never infers safety from the runner
+ * merely having started.
+ */
+describe.runIf(process.platform === 'win32')('ancestor guard', () => {
+  let nativePromise: Promise<WindowsNative> | undefined
+  const loadNative = (): Promise<WindowsNative> =>
+    (nativePromise ??= loadWindowsNative(UPSTREAM_RUNNER_ARGS()[1]!))
+
+  /** Set one read-only member and return the ambient-deny runner prefix. */
+  async function restrictedPrefix(mounted: Mounted, workspace: string, denied: string): Promise<readonly string[]> {
+    mounted.ctx.multiRootScope.setAdditionalRoots(workspace, [
+      { id: 'ro', path: denied, recordedPath: canonicalPath(denied), access: 'read-only' },
+    ])
+    const policy: SandboxExecutionPolicy = { mode: 'danger-full-access', workspaceRoot: workspace }
+    const deniedRoots = mounted.ctx.multiRootScope.resolve(policy).deniedRoots
+    expect(deniedRoots).toContain(canonicalPath(denied))
+    return await mounted.provider.restrictedArgvPrefix(policy, deniedRoots)
+  }
+
+  it('keeps the denied tree unrenamable inside the restricted child, and the fs fence still refuses the registered spelling', async () => {
+    const fixture = createFixtureWorkspace('win-ancestor-shell')
+    const cage = join(fixture.base, 'cage')
+    const inner = join(cage, 'inner')
+    const denied = join(inner, 'ro-root')
+    mkdirSync(denied, { recursive: true })
+    const seed = join(denied, 'seed.txt')
+    writeFileSync(seed, 'seed')
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const prefix = await restrictedPrefix(mounted, fixture.workspace, denied)
+      const ambient = join(fixture.workspace, 'ambient.txt')
+      // The restricted child attempts the escape directly: rename the deny
+      // root's parent AND grandparent, then prove ambient writes still work.
+      const script = `const fs=require('fs');for(const dir of ${JSON.stringify([inner, cage])}){try{fs.renameSync(dir,dir+'-moved');console.log('rename-escaped')}catch(e){console.log('rename-denied:'+(e&&e.code||e))}}fs.writeFileSync(${JSON.stringify(ambient)},'ok');console.log('ambient-ok')`
+      const result = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e', script])
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim().split(/\r?\n/)).toEqual([
+        expect.stringMatching(/^rename-denied:E/), expect.stringMatching(/^rename-denied:E/), 'ambient-ok',
+      ])
+      expect(existsSync(inner)).toBe(true)
+      expect(existsSync(`${inner}-moved`)).toBe(false)
+      expect(existsSync(`${cage}-moved`)).toBe(false)
+      expect(readFileSync(seed, 'utf8')).toBe('seed')
+      expect(readFileSync(ambient, 'utf8')).toBe('ok')
+
+      // The in-process fence judges the SAME registered spelling: because the
+      // tree never moved, the original protected file is still denied to host
+      // fs writes too — reproducing the actual shell → fs sequence.
+      const fsCtx = new Context()
+      try {
+        await fsCtx.plugin(SessionProjectionRegistry)
+        await fsCtx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: fixture.workspace })
+        await fsCtx.plugin(MultiRootScopeService)
+        await mountCompat(fsCtx)
+        await fsCtx.plugin(MultiRootFileSystem, { cwd: fixture.workspace })
+        fsCtx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+          { id: 'ro', path: denied, recordedPath: canonicalPath(denied), access: 'read-only' },
+        ])
+        const fs = fsCtx.fs
+        await expect(fs.writeText(await fs.resolve(seed), 'bad'))
+          .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+        await expect(fs.editText(await fs.resolve(seed), { oldString: 'seed', newString: 'x', replaceAll: false }))
+          .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      } finally { await fsCtx.fiber.dispose() }
+      expect(readFileSync(seed, 'utf8')).toBe('seed')
+      expect(existsSync(`${inner}-moved`)).toBe(false)
+      expect(existsSync(`${cage}-moved`)).toBe(false)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('holds the pins past the direct child exit until the Job has drained its descendant', async () => {
+    const fixture = createFixtureWorkspace('win-ancestor-drain')
+    const cage = join(fixture.base, 'cage')
+    const denied = join(cage, 'ro-root')
+    mkdirSync(denied, { recursive: true })
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const prefix = await restrictedPrefix(mounted, fixture.workspace, denied)
+      const pidFile = join(fixture.workspace, 'descendant.pid')
+      const escaped = join(fixture.workspace, 'escaped.txt')
+      const go = join(fixture.workspace, 'go.flag')
+      // The direct child spawns a descendant (Job member — the Job grants no
+      // breakaway), prints the ready marker, then WAITS on a go-file: the
+      // "pins held while the runner is active" probe must not race the
+      // child's own exit. The descendant records its pid, then would write
+      // the escape marker seconds later — past the runner's exit if the Job
+      // drain is missing.
+      const descendant = `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(escaped)},'escaped'),3000)`
+      const script = `const cp=require('child_process'),fs=require('fs');const d=cp.spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:'ignore'});d.unref();console.log('ready');const t=setInterval(()=>{if(fs.existsSync(${JSON.stringify(go)})){clearInterval(t);process.exit(0)}},50);setTimeout(()=>process.exit(9),60000)`
+      const runner = spawnObserved([...prefix, process.execPath, '-e', script])
+      try {
+        await waitFor(() => runner.output().includes('ready'), 'the confined child ready marker', 30_000)
+        // The runner is demonstrably active (the direct child is still
+        // running): the ancestor cannot be renamed.
+        expectRenameBlocked(cage, `${cage}-moved`)
+        await waitFor(() => existsSync(pidFile), 'the descendant pid marker', 15_000)
+        const pid = Number(readFileSync(pidFile, 'utf8').trim())
+        expect(Number.isInteger(pid)).toBe(true)
+        const observedAt = Date.now()
+        // Release the direct child; the descendant outlives it inside the Job.
+        writeFileSync(go, 'go')
+        const result = await Promise.race([
+          runner.done,
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('runner did not exit after the direct child did')), 60_000)),
+        ])
+        expect(result.status, result.stderr).toBe(0)
+        // The drain, not luck, is what stops the descendant: the Job's
+        // ActiveProcesses reached zero before the runner exited — on the
+        // orderly path the descendant pid is already dead, no post-exit wait.
+        expect(processAlive(pid), `Job descendant ${pid} outlived the drained runner`).toBe(false)
+        const elapsed = Date.now() - observedAt
+        if (elapsed < 3600) await new Promise(resolve => setTimeout(resolve, 3600 - elapsed))
+        expect(existsSync(escaped), 'a Job descendant survived the drain and wrote after the runner exited').toBe(false)
+      } finally {
+        runner.child.kill('SIGKILL')
+        await runner.done.catch(() => {})
+      }
+      // Only after full drain + runner exit may the rename succeed again.
+      await waitFor(() => {
+        try { renameSync(cage, `${cage}-moved`); return true } catch { return false }
+      }, 'the ancestor pins to release', 15_000)
+      expect(existsSync(`${cage}-moved`)).toBe(true)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('releases the pins after a terminated ConPTY launch, leaving no survivor', async () => {
+    const fixture = createFixtureWorkspace('win-ancestor-cancel')
+    const cage = join(fixture.base, 'cage')
+    const denied = join(cage, 'ro-root')
+    mkdirSync(denied, { recursive: true })
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const prefix = await restrictedPrefix(mounted, fixture.workspace, denied)
+      await mounted.ctx.plugin(LocalSubprocess)
+      // The ready marker carries the confined child's pid so the test can
+      // prove no survivor — not merely that the terminal resolved.
+      const terminal = await mounted.ctx.subprocess.spawnTerminal({
+        argv: [...prefix, process.execPath, '-e', `process.stdout.write('ready:'+process.pid+'\\n');setInterval(()=>{},1000)`],
+        cwd: fixture.workspace, rows: 24, cols: 100, terminalType: 'xterm-256color', graceMs: 3000,
+      })
+      let seen = ''
+      try {
+        terminal.output.on('data', (chunk: Buffer | string) => { seen += chunk.toString() })
+        terminal.output.resume()
+        await waitFor(() => /ready:\d+/.test(seen), 'the confined ready marker', 30_000)
+        const childPid = Number(seen.match(/ready:(\d+)/)![1])
+        expectRenameBlocked(cage, `${cage}-moved`)
+        await terminal.terminate()
+        await Promise.race([
+          terminal.done,
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('terminated runner never finished')), 60_000)),
+        ])
+        // Forced termination of the runner kills the Job via kill-on-close;
+        // the pin handles die with the runner process.
+        await waitFor(() => !processAlive(childPid), `confined child ${childPid} to exit`, 15_000)
+      } finally { await terminal.terminate() }
+      await waitFor(() => {
+        try { renameSync(cage, `${cage}-moved`); return true } catch { return false }
+      }, 'the ancestor pins to release', 15_000)
+      expect(existsSync(`${cage}-moved`)).toBe(true)
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('refuses the shipped launch when an incompatible handle already holds an ancestor', async () => {
+    const fixture = createFixtureWorkspace('win-ancestor-blocked')
+    const cage = join(fixture.base, 'cage')
+    const denied = join(cage, 'ro-root')
+    mkdirSync(denied, { recursive: true })
+    const mounted = await mountProvider(fixture.workspace)
+    try {
+      const prefix = await restrictedPrefix(mounted, fixture.workspace, denied)
+      const api = (await loadNative()).extendWin32ProcessBindings(({ kernel32, bind }) => ({
+        createFileW: bind(kernel32, 'CreateFileW', 'void*', ['str16', 'uint32', 'uint32', 'void*', 'uint32', 'uint32', 'void*']) as NativeFunction,
+        closeHandle: bind(kernel32, 'CloseHandle', 'int', ['void*']) as NativeFunction,
+        getLastError: bind(kernel32, 'GetLastError', 'uint32', []) as NativeFunction,
+      }))
+      // A DELETE-access handle sharing ONLY delete: the runner's pin open
+      // (GENERIC_READ with read+write sharing) is not covered, so acquisition
+      // must fail before any token request, ACL edit, or child launch.
+      const blocker = api.createFileW!(canonicalPath(cage), 0x10000, 4, null, 3, 0x02200000, null)
+      expect(blocker === null || BigInt(blocker as bigint) === -1n || BigInt(blocker as bigint) === 0xffffffffffffffffn).toBe(false)
+      try {
+        const sentinel = join(fixture.workspace, 'launched.txt')
+        const result = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e',
+          `require('fs').writeFileSync(${JSON.stringify(sentinel)},'ran')`])
+        expect(result.status).toBe(127)
+        expect(result.stderr).toContain('windows-acl-run:')
+        expect(result.stderr).toContain('CreateFileW')
+        expect(existsSync(sentinel)).toBe(false)
+        // The refused launch left the tree untouched.
+        expect(existsSync(cage)).toBe(true)
+        expect(existsSync(denied)).toBe(true)
+      } finally {
+        api.closeHandle!(blocker)
+      }
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+})
+
+
+/**
+ * Phase C1 evidence: the shipped ambient-deny runner scans EVERY deny root
+ * and descendant — read-only — before the first token request or ACL write.
+ * A multi-link file or an uninspectable node exits 127 with the hardlink/scan
+ * diagnostic, the child never runs, and no security descriptor anywhere has
+ * moved. SDDL snapshots prove the before/after equality directly.
+ */
+describe.runIf(process.platform === 'win32')('hardlink preflight', () => {
+  /**
+   * The security descriptor as the kernel reports it — SDDL text, read
+   * through `icacls /save` rather than PowerShell: a mixed pwsh/5.1 host can
+   * make `powershell.exe` autoload an incompatible `Microsoft.PowerShell.
+   * Security` module from the shared analysis cache — the flake is in the
+   * runtime, not in the path under test.
+   */
+  function sddlOf(path: string): string {
+    const icacls = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'icacls.exe')
+    const save = join(tmpdir(), `sddl-${process.pid}-${Math.random().toString(16).slice(2)}.txt`)
+    const saveResult = spawnSync(icacls, [path, '/save', save], { encoding: 'utf8', timeout: 60_000 })
+    try {
+      expect(saveResult.status, saveResult.stderr).toBe(0)
+      // The save file is UTF-16: one `path\nSDDL` pair per saved object.
+      const lines = readFileSync(save, 'utf16le').split(/\r?\n/).filter(line => line.trim() !== '')
+      expect(lines.length).toBeGreaterThanOrEqual(2)
+      return lines[lines.length - 1]!.trim()
+    } finally { rmSync(save, { force: true }) }
+  }
+
+  /** Snapshot every listed path; `expectUnchanged` compares after the run. */
+  function aclSnapshot(paths: readonly string[]): () => void {
+    const before = new Map(paths.map(path => [path, sddlOf(path)]))
+    return () => {
+      for (const [path, sddl] of before) {
+        expect(sddlOf(path), `ACL of ${path} changed`).toBe(sddl)
+      }
+    }
+  }
+
+  /** A confined launch that must refuse BEFORE the sentinel could run. */
+  async function expectPreflightRefusal(
+    prefix: readonly string[], sentinel: string, diagnostics: RegExp,
+  ): Promise<void> {
+    const result = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e',
+      `require('fs').writeFileSync(${JSON.stringify(sentinel)},'ran')`])
+    expect(result.status, result.stderr).toBe(127)
+    expect(result.stderr).toContain('windows-acl-run:')
+    expect(result.stderr).toMatch(diagnostics)
+    expect(existsSync(sentinel), 'the child must never run on a preflight refusal').toBe(false)
+  }
+
+  /** Mount a provider with `roots` as read-only members and return its prefix. */
+  async function denyPrefix(mounted: Mounted, workspace: string, roots: readonly string[]): Promise<readonly string[]> {
+    mounted.ctx.multiRootScope.setAdditionalRoots(workspace, roots.map((path, i) => ({
+      id: `ro-${i}`, path, recordedPath: canonicalPath(path), access: 'read-only' as const,
+    })))
+    const policy: SandboxExecutionPolicy = { mode: 'danger-full-access', workspaceRoot: workspace }
+    const scope = mounted.ctx.multiRootScope.resolve(policy)
+    return await mounted.provider.restrictedArgvPrefix(policy, scope.deniedRoots, undefined, scope.protectedHome)
+  }
+
+  it('refuses a deep hardlink before any ACL write — every descriptor unchanged', async () => {
+    const fixture = createFixtureWorkspace('win-hl-deep')
+    const denied = join(fixture.base, 'ro-root')
+    mkdirSync(join(denied, 'sub', 'dir'), { recursive: true })
+    const outsideLink = join(fixture.base, 'outside-link.txt')
+    writeFileSync(join(denied, 'sub', 'dir', 'linked.txt'), 'shared')
+    linkSync(join(denied, 'sub', 'dir', 'linked.txt'), outsideLink)
+    const mounted = await mountProvider(fixture.workspace)
+    const before = aclSnapshot([denied, join(denied, 'sub'), join(denied, 'sub', 'dir'), join(denied, 'sub', 'dir', 'linked.txt'), outsideLink])
+    try {
+      const prefix = await denyPrefix(mounted, fixture.workspace, [denied])
+      await expectPreflightRefusal(prefix, join(fixture.workspace, 'sentinel.txt'), /hardlinked file.*links=2/s)
+    before()
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('leaves earlier roots byte-identical when the LAST root is the hardlinked one', async () => {
+    const fixture = createFixtureWorkspace('win-hl-multi')
+    const first = join(fixture.base, 'ro-first')
+    const last = join(fixture.base, 'ro-last')
+    mkdirSync(first)
+    mkdirSync(last)
+    const firstFile = join(first, 'keep.txt')
+    writeFileSync(firstFile, 'keep')
+    writeFileSync(join(last, 'linked.txt'), 'shared')
+    linkSync(join(last, 'linked.txt'), join(fixture.base, 'external.txt'))
+    const mounted = await mountProvider(fixture.workspace)
+    const before = aclSnapshot([first, firstFile, last, join(last, 'linked.txt'), join(fixture.base, 'external.txt')])
+    try {
+      const prefix = await denyPrefix(mounted, fixture.workspace, [first, last])
+      await expectPreflightRefusal(prefix, join(fixture.workspace, 'sentinel.txt'), /hardlinked file.*links=2/s)
+    before()
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('refuses a same-tree hardlink — two names inside one root are still multi-link', async () => {
+    const fixture = createFixtureWorkspace('win-hl-same')
+    const denied = join(fixture.base, 'ro-root')
+    mkdirSync(denied)
+    writeFileSync(join(denied, 'a.txt'), 'shared')
+    linkSync(join(denied, 'a.txt'), join(denied, 'b.txt'))
+    const mounted = await mountProvider(fixture.workspace)
+    const before = aclSnapshot([denied, join(denied, 'a.txt'), join(denied, 'b.txt')])
+    try {
+      const prefix = await denyPrefix(mounted, fixture.workspace, [denied])
+      await expectPreflightRefusal(prefix, join(fixture.workspace, 'sentinel.txt'), /hardlinked file.*links=2/s)
+    before()
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('names the protected DSH home and the isolation remediation for a hardlinked home file', async () => {
+    const fixture = createFixtureWorkspace('win-hl-home')
+    const denied = join(fixture.base, 'ro-root')
+    const home = join(fixture.base, 'dsh-home')
+    mkdirSync(denied)
+    mkdirSync(home)
+    writeFileSync(join(home, 'store.json'), '{}')
+    linkSync(join(home, 'store.json'), join(fixture.base, 'home-copy.json'))
+    const mounted = await mountProvider(fixture.workspace, { dshHome: home })
+    const before = aclSnapshot([home, join(home, 'store.json'), join(fixture.base, 'home-copy.json')])
+    try {
+      // The home joins the deny set only once a registered restriction exists.
+      const prefix = await denyPrefix(mounted, fixture.workspace, [denied])
+      const scope = mounted.ctx.multiRootScope.resolve({ mode: 'danger-full-access', workspaceRoot: fixture.workspace })
+      expect(scope.protectedHome).toBe(canonicalPath(home))
+      await expectPreflightRefusal(prefix, join(fixture.workspace, 'sentinel.txt'),
+        /protected DSH home.*links=2.*isolate-profiles/s)
+      before()
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('refuses an uninspectable tree — an unreadable file fails the scan, nothing is mutated', async () => {
+    const fixture = createFixtureWorkspace('win-hl-locked')
+    const denied = join(fixture.base, 'ro-root')
+    mkdirSync(denied)
+    const lockedFile = join(denied, 'locked.txt')
+    writeFileSync(lockedFile, 'locked')
+    // Deny the caller's read on one child: the metadata-only inspection open
+    // still evaluates access and fails ACCESS_DENIED. (A share-mode lock does
+    // NOT cover this path — FILE_READ_ATTRIBUTES opens are transparent to the
+    // sharing gate, the same probe result Phase B established.)
+    const systemTool = (name: string): string => join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', `${name}.exe`)
+    const userSid = execFileSync(systemTool('whoami'), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' })
+      .match(/S-1-\d+(?:-\d+)+/)?.[0]
+    expect(userSid, 'cannot create the unreadable fixture without the caller SID').not.toBeUndefined()
+    const deniedAcl = spawnSync(systemTool('icacls'), [lockedFile, '/deny', `*${userSid}:(R)`], { encoding: 'utf8', timeout: 60_000 })
+    expect(deniedAcl.status, deniedAcl.stderr).toBe(0)
+    const mounted = await mountProvider(fixture.workspace)
+    // Baseline includes the test's own deny ACE — the failed run must move nothing.
+    const before = aclSnapshot([denied, lockedFile])
+    try {
+      const prefix = await denyPrefix(mounted, fixture.workspace, [denied])
+      await expectPreflightRefusal(prefix, join(fixture.workspace, 'sentinel.txt'), /cannot inspect.*Win32 5/s)
+      before()
+    } finally {
+      spawnSync(systemTool('icacls'), [lockedFile, '/remove:d', `*${userSid}`], { encoding: 'utf8', timeout: 60_000 })
+      await mounted.ctx.fiber.dispose()
+      fixture.dispose()
+    }
+  }, 180_000)
+
+  it('denies a junction on itself without scanning or mutating its external target', async () => {
+    const fixture = createFixtureWorkspace('win-hl-junction')
+    const denied = join(fixture.base, 'ro-root')
+    const target = join(fixture.base, 'junction-target')
+    mkdirSync(denied)
+    mkdirSync(target)
+    const targetFile = join(target, 'victim.txt')
+    writeFileSync(targetFile, 'original')
+    symlinkSync(target, join(denied, 'junc'), 'junction')
+    const mounted = await mountProvider(fixture.workspace)
+    const before = aclSnapshot([target, targetFile])
+    try {
+      const prefix = await denyPrefix(mounted, fixture.workspace, [denied])
+      const sentinel = join(fixture.workspace, 'sentinel.txt')
+      const result = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e',
+        `require('fs').writeFileSync(${JSON.stringify(sentinel)},'ran')`])
+      expect(result.status, result.stderr).toBe(0)
+      expect(existsSync(sentinel)).toBe(true)
+      // The target was never opened for inspection or mutation — its content
+      // and security descriptor are byte-identical, and ambient writes to it
+      // still succeed (its own canonical policy is a different root's).
+      writeFileSync(targetFile, 'ambient')
+    before()
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+
+  it('accepts independent copies — ambient writes allowed, denied root refused, external original untouched', async () => {
+    const fixture = createFixtureWorkspace('win-hl-copies')
+    const denied = join(fixture.base, 'ro-root')
+    mkdirSync(denied)
+    const original = join(fixture.base, 'original.txt')
+    writeFileSync(original, 'original')
+    // A COPY, not a link: independent ACL storage, safe to deny.
+    writeFileSync(join(denied, 'copy.txt'), readFileSync(original, 'utf8'))
+    const mounted = await mountProvider(fixture.workspace)
+    const before = aclSnapshot([original])
+    try {
+      const prefix = await denyPrefix(mounted, fixture.workspace, [denied])
+      const result = await spawnArgv(prefix[0]!, [...prefix.slice(1), process.execPath, '-e',
+        writeProbe([fixture.workspace, denied], 'copy-check.txt')])
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim().split(/\r?\n/)).toEqual(['allowed', expect.stringMatching(/^denied:/)])
+      expect(readFileSync(original, 'utf8')).toBe('original')
+    before()
+    } finally { await mounted.ctx.fiber.dispose(); fixture.dispose() }
+  }, 180_000)
+})
