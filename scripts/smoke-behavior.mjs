@@ -641,10 +641,12 @@ async function hardlinkDenyNegative() {
   }, null, 2))
   writeFileSync(join(profileDir, 'pnpm-workspace.yaml'),
     'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n')
-  // A real multi-link file: the "store" name lives OUTSIDE the home, the
-  // imported name inside the profile's node_modules — the object pnpm's
-  // default import method shares.
-  const storeSide = join(fixtureRoot, 'fake-store', 'fixture-dep', 'index.js')
+  // A real multi-link file: the "store" name lives outside `profiles/` but
+  // INSIDE the home — hardlinks cannot cross volumes, and on hosts whose
+  // TEMP volume differs from the checkout's (CI: C: vs D:) `fixtureRoot`
+  // cannot host the second name. The imported name inside the profile's
+  // node_modules is the object pnpm's default import method shares.
+  const storeSide = join(home, 'fake-store', 'fixture-dep', 'index.js')
   mkdirSync(dirname(storeSide), { recursive: true })
   writeFileSync(storeSide, 'store')
   const linked = join(profileDir, 'node_modules', 'fixture-dep', 'index.js')
