@@ -8,10 +8,11 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
-## [Unreleased]
+## [0.1.7] - 2026-10-17
 
 ### Added
 
+- **Files 页签内浏览附加根**：文件树 header 新增根切换器（伪装成路径标签的菜单入口，列出主根与全部附加根及其状态）；选中附加根时由逐字节复刻的上游 Files 树接管树区——行高、图标、缩进、空态与原生逐项一致，原生 reload 由 header 原位同款图标钮顶替，切回主根即完整还原。原生 open-in-app 按钮由复刻件顶替并把目标换成选中根（[ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](./docs/decisions/ADR-0016-files-tab-native-tree-fork.md)）。面板行带访问级别徽标，所有路径用同一 `PathCopy` 控件一点即复制；只读 → 读写升级经确认层；添加行的权限选择器为锚定下拉。
 - **附加根访问级别升级为三态**：`add [--inherit|--read-only|--read-write]`（或面板添加行选择）。`inherit` 跟随会话模式——新登记的默认值，旧版插件登记的可写记录也迁移为 `inherit`；`read-only` 可读、可浏览、参与 LSP 与指令注入，但任何模式（包括 `danger-full-access`）都不授予写权限；`read-write` 固定在全局只读会话里仍可写。`/workspace-folders access <ref> inherit|read-only|read-write` 与面板按根切换（扩权要求该根此刻可用且不重新授权路径）。持久化布局向下兼容：旧版本插件把只读记录判为无效而非升级为可写（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)、[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
 - **Full-access 也强制执行拒写边界**：shell / pwsh 执行器、`run_code`（PTC）与 agent PTY 在 `danger-full-access` 下绕过 `confine`，进程围栏为它们统一套用受限内核 profile（macOS Seatbelt、Linux bwrap——上游选定 Landlock 的主机同样改走 bubblewrap，bwrap 不可用时该组合在启动前拒绝），显式只读根与被工具封顶的根在该模式下依旧拒写；fs fence 读取同一份 deny 集（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
 - **受限 Full-access 保护 `$DSH_HOME`**：只要存在任何拒写边界（只读根、工具封顶成员或注册表权限不可用），home 目录就进入 deny 集——存根存储、注册表 lease 与用户 profile 都在其中；零附加根且注册表健康时 Full-access 与上游逐字节一致（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
@@ -155,7 +156,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.3...v0.1.4

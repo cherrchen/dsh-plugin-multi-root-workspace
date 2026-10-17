@@ -16,7 +16,7 @@ A real development project is usually several independent Git repositories, and 
 - **Security does not degrade**: additional roots are authorized through the same mechanism the harness already uses — an in-process filesystem fence plus kernel-level sandboxes (macOS Seatbelt / Linux bwrap / Landlock / Windows ACL), with files and bash sharing one and the same scope. It never degenerates into full access or prompt-level constraints.
 - **Absent when absent**: with no additional root configured, its behavior is item-for-item identical to an uninstalled harness; every misconfiguration fails loudly instead of silently degrading.
 
-Current released version: `v0.1.6`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+Current released version: `v0.1.7`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Quick Start
 
@@ -87,8 +87,8 @@ This installs pre-built artifacts; the first install needs the `allowBuilds` add
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # or download the tgz from the GitHub Release assets, e.g.:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.6/dsh-electron-dsh-plugin-multi-root-workspace-0.1.6.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.6.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.7/dsh-electron-dsh-plugin-multi-root-workspace-0.1.7.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.7.tgz
 ```
 
 Also pre-built, handy for air-gapped or offline delivery; the first install needs the same `allowBuilds` addition.
@@ -107,10 +107,10 @@ allowBuilds:
   koffi: true
 ```
 
-Pinning a version (e.g. `#v0.1.6`) is recommended so a later push cannot silently change what actually runs:
+Pinning a version (e.g. `#v0.1.7`) is recommended so a later push cannot silently change what actually runs:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.6
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.7
 ```
 
 ### Install from a local clone
