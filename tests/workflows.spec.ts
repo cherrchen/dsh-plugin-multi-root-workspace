@@ -109,6 +109,16 @@ describe('CI workflow gates', () => {
     expect(testUpload.if).toBe('always()')
   })
 
+  it('bounds packed smoke while preserving time for logs and broker cleanup', () => {
+    const ci = parse(read('.github/workflows/ci.yml'))
+    const packed = ci.jobs.verify.steps.find((step: { name?: string }) => step.name === 'Packed smoke')
+    expect(packed['timeout-minutes']).toBe(15)
+    expect(ci.jobs.verify['timeout-minutes']).toBe(45)
+    const uninstall = ci.jobs.verify.steps.find((step: { name?: string }) =>
+      step.name === 'Uninstall the B9 broker and revoke installation rights')
+    expect(uninstall.if).toBe("always() && runner.os == 'Windows'")
+  })
+
   it('ends with a gate job that fails unless every upstream job is exactly success', () => {
     const ci = parse(read('.github/workflows/ci.yml'))
     const gate = ci.jobs.gate

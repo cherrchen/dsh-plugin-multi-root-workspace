@@ -37,6 +37,7 @@ import { FileSystem } from '@deepseek-ai/dsh-fs'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import MultiRootFileSystem from '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
 import MultiRootSandboxProvider from '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
+import { removeBehaviorHome, removeScratchTree } from './lib/smoke-cleanup.mjs'
 import { createChecker } from './lib/check.mjs'
 import { requireKernelRunner } from '../tests/support/kernel-runner.ts'
 import { assertIsolatedHome, ensureProfileCopyImport, installPluginProfile, pluginPackageDir, REPO_ROOT, resolveScratchHome, runDsh, runtimeRequire } from './lib/dsh-runtime.mjs'
@@ -699,53 +700,6 @@ async function hardlinkDenyNegative() {
   check.ok(!existsSync(sentinel), 'the refused launch never ran the child', sentinel)
 }
 
-/**
- * Remove the scratch home. Retries ride out the Windows EPERM window where a
- * just-exited child's handle — or an AV/indexer scan over the freshly
- * installed profile tree — still holds the tree. When deletion still fails,
- * libuv reports the top-level path whatever descendant failed, so walk the
- * tree and identify the resistant entries: an installed `.node` addon stays
- * mapped until this process exits (the packed smoke loads koffi from the
- * profile, not the checkout), so its owner can never delete it. When a caller
- * injected `DSH_SMOKE_HOME` it owns the parent tree and removes the leftover
- * after this process exits; standalone runs still fail on any residue.
- */
-function removeScratchHome(root) {
-  try {
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
-    return
-  } catch { /* identified below */ }
-  const files = []
-  const dirs = []
-  const other = []
-  const probe = (dir) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        try { probe(full) } catch (error) { other.push(`${full}/: ${error.code ?? error}`) }
-        try { rmSync(full, { recursive: true, force: true }) } catch { dirs.push(full) }
-      } else {
-        try { rmSync(full, { force: true }) } catch { files.push(full) }
-      }
-    }
-  }
-  try { probe(root) } catch (error) { other.push(`walk: ${error.code ?? error}`) }
-  // Defer only when the residue is explained entirely by mapped `.node`
-  // addons: every failed file is one, and every failed directory is an
-  // ancestor of one (it stays non-empty while the addon inside resists).
-  const deferred = process.env.DSH_SMOKE_HOME !== undefined
-    && files.length > 0
-    && files.every(path => path.includes('.node'))
-    && dirs.every(dir => files.some(file => file.startsWith(dir + sep)))
-    && other.length === 0
-  if (deferred) {
-    console.log(`[smoke:behavior] left ${root} for the caller: in-process addon still mapped (${files[0]})`)
-    return
-  }
-  const residue = [...files, ...dirs.map(dir => `${dir}/`), ...other]
-  throw new Error(`scratch home cleanup failed; resistant: ${residue.slice(0, 10).join(' | ') || 'none'}`)
-}
-
 /** Boot one profile and run the registry battery, then the restart battery. */
 async function runRegistryProfile(profile) {
   process.env.DSH_PERMISSION_MODE = 'workspace-write'
@@ -1029,7 +983,7 @@ try {
   if (keep) {
     console.log(`[smoke:behavior] kept scratch home at ${home} and fixture at ${fixtureRoot}`)
   } else {
-    removeScratchHome(home)
-    rmSync(fixtureRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+    await removeBehaviorHome(home, process.env.DSH_SMOKE_DEFER_HOME_CLEANUP === '1')
+    await removeScratchTree(fixtureRoot)
   }
 }

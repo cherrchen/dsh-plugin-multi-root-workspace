@@ -20,11 +20,12 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { packTarball } from './check-pack.mjs'
+import { removeScratchTree } from './lib/smoke-cleanup.mjs'
 
 const REPO_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const keep = process.env.DSH_SMOKE_KEEP === '1'
@@ -48,19 +49,29 @@ const child = spawn(process.execPath, [join(REPO_ROOT, 'scripts', 'smoke-behavio
     ...process.env,
     DSH_SMOKE_PLUGIN_SOURCE: tarball,
     DSH_SMOKE_HOME: smokeHome,
+    // This child loads the installed koffi.node. Windows cannot delete it
+    // until the child exits; this parent owns ALL home cleanup after close.
+    DSH_SMOKE_DEFER_HOME_CLEANUP: '1',
   },
 })
-const code = await new Promise((settle, fail) => {
-  child.on('error', fail)
-  child.on('close', value => settle(value ?? 1))
-})
-
-if (keep) {
-  console.log(`[smoke:packed] kept scratch home root at ${smokeHome}`)
-} else {
-  rmSync(smokeHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+let code
+try {
+  code = await new Promise((settle, fail) => {
+    child.on('error', fail)
+    child.on('close', value => settle(value ?? 1))
+  })
+} finally {
+  try {
+    if (keep) {
+      console.log(`[smoke:packed] kept scratch home root at ${smokeHome}`)
+    } else {
+      console.log('[smoke:packed] child closed; removing scratch home')
+      await removeScratchTree(smokeHome)
+    }
+  } finally {
+    await removeScratchTree(packDir)
+  }
 }
-rmSync(packDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
 
 if (code !== 0) {
   console.error(`[smoke:packed] the packed artifact failed the behavior battery (exit ${code})`)

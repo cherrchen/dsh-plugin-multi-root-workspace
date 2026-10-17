@@ -650,3 +650,11 @@ Windows 实机（非 CI）验证暴露两个 CI 不可见的问题，处置经�
 - **复审修复（推送前）**：`isolate-profiles --apply` 两处复审发现已修——整体缩进的顶层 YAML 一律 refused（原先误判 `packageImportMethod` absent 并追加零缩进键，使合法文件失效）；临时文件改 `wx` 独占创建，既有文件 / 硬链接 / 符号链接不再被写穿或删除，仅清理本进程创建的临时文件。新增 4 项回归；修复后完整套件 49 文件 775 通过 / 49 跳过 / 0 失败，冒烟四项、`pack:check`、`docs:check` 重跑全绿。
 - **边界如实记录**：macOS / Linux 内核原生执行本机不可用；xdrive 第二可写盘路径本机跳过（无第二固定盘）；非提权 CI lane 按 C2 节 defer。
 - **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。
+
+### PR #12 复核与 Windows packed smoke 清理修复（2026-10-17）
+
+- **旧审查逐项复核**：PR 四条意见均有对应修复及回归——缺失 deny 根使用强制 bwrap mount（`tests/missing-deny-root.spec.ts`）；broker 授权、记录落盘及启动共用回滚路径（诊断脚本真实注入 `Set-Content` / `Move-Item` / `Start-Service` 三类失败）；shell 入口探测集中在 `src/compat/process-entrypoints.ts`；中英文 README 与 Unreleased changelog 已说明 inherit 默认值及三态。R1–R4 的实现与测试亦复核；补齐 changelog 中仍称 Windows 仅靠对象 ACL 随改名移动的过时表述，并补记负授权与硬链接隔离行为，决定仍由 ADR-0017 / ADR-0020 维护。
+- **远端基线证据**：`ba704b7` 的 [CI run 38937909169](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38937909169) 共 44 条平台/版本 verify 车道及最终 gate 全绿；[diag run 38937909410](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38937909410) 验证真实 broker 生命周期与三类授权后失败回滚。此处是旧提交证据，不替代本次修复的验收。
+- **阻塞证据**：Windows `0.1.6-alpha.1` job `117098022247` 在北京时间 01:18:09 已打印 packed battery **132/0/0**，03:15:48 才移交清理；11 条 Windows 版本车道的 Packed smoke 均约 118–119 分钟。锁定文件为子进程加载的安装副本 `koffi.node`，旧 `rmSync(maxRetries: 10, retryDelay: 500)` 在递归祖先层层重试，等待无法在本进程退出前解除的模块映射。
+- **修复与回归**：清理所有权和有界重试规则写入[开发工作流](../../development/plugin-development-workflow.md#ci)。新增真实 `.node` 加载的深层目录子进程回归（移交后退出、父进程严格删除、独立清理持久锁必须及时失败），以及普通目录、外部 junction 不跟随、显式移交和 CI 超时门禁回归；不靠扩展名豁免清理，不跳过行为断言。
+- **本地执行**：Windows 非提权会话，开发 pin `0.2.1-alpha.2`、Node `24.14.0`；内核探针 windows-acl 可用。完整套件 **50 文件、781 通过 / 49 条件跳过 / 0 失败**，含新增回归；lint、双端 typecheck、build、compat:check 通过。compose **48/0/0**、behavior **133/0/0**、journey **62/0/0**、packed behavior **132/0/0**，pack:check **109 成员完整**；packed 含打包/安装/严格清理耗时 **50.04 秒**，四项冒烟加打包检查共 **101.99 秒**，无残留。docs:check 通过。本次提交远端矩阵仍待验证，尚不以本地通过宣告合并门槛。

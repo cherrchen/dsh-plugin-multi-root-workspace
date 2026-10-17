@@ -218,6 +218,8 @@ LSP 源码回传断言应比较读盘得到的完整源码。夹具里的路径�
 
 失败可诊断：`test` 与各冒烟的输出同时写入 `vitest.log` / `smoke-*.log`（`tee` + `set -o pipefail`，红不会被吞成绿），由 `actions/upload-artifact@v4` 以 `if: always()` 上传——成功与失败的日志都能下载，公共仓库无需管理员权限。
 
+`smoke:packed` 的 scratch home 由父进程在行为子进程的 `close` 之后严格删除：父进程显式设置 `DSH_SMOKE_DEFER_HOME_CLEANUP=1`，行为子进程不先尝试删除 home。Windows 会把从安装副本加载的 `koffi.node` 映射到子进程退出为止，进程自身重试删除不能解除映射。仅设置 `DSH_SMOKE_HOME` 不转交清理责任；`DSH_SMOKE_KEEP=1` 仍保留调试现场。`scripts/lib/smoke-cleanup.mjs` 对整棵树最多删除四次、间隔 250 ms，每次递归删除禁用内层重试（`maxRetries: 0`），持久锁或权限错误仍使冒烟失败；不得把失败文件名包含 `.node` 当作清理成功。Node 的递归重试会在锁定文件的每层祖先重复放大等待，曾使 Windows packed battery 已通过后仍等待约 118 分钟。CI 将 Packed smoke 限为 15 分钟、verify job 限为 45 分钟，step 超时后仍执行日志上传和 broker 卸载；这些超时不替代实际清理与行为断言。
+
 Windows 的 foreign-owned ACL 夹具按**先 DACL、后 owner**搭建：用 `whoami /user` 的数字 SID 显式保留读/执行、`WRITE_DAC` 与 `WRITE_OWNER`，移除继承并加 Everyone 的写/删除 deny 后，最后把 owner 转交 SYSTEM 的数字 SID。这样后续 ACL 编辑和清理不依赖 elevated token 的 restore 特权；测试同时读回 SYSTEM owner 与 deny ACE，并执行真实受限写断言。任何搭建失败在 CI 仍是失败，不以整项 retry 或 skip 掩盖。若未来出现新的瞬态故障，应先按日志区分夹具、进程/管道、内核断言与安装网络问题；只有已确定可恢复的夹具或清理操作适合有次数上限的重试。
 
 原生 piped 子进程探针在 `close` 而非 `exit` 事件拼接输出：Node 的 `exit` 不保证 stdout/stderr 已关闭，过早解析会把完整 verdict 截断；`close` 才能证明输出管道已经结束。见 [Node child_process 文档](https://nodejs.org/api/child_process.html#event-close)。

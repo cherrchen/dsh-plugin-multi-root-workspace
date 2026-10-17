@@ -28,7 +28,9 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 ### Fixed
 
 - **注册表权限不可用不再读作「没有限制」**：读到空根表的进程（争用、存储故障、配置非法）曾在 Full-access 下放行一切写；现在 `danger-full-access` 与 `workspace-write` 都只授予主根写权限（共享平台临时区不再可写），显式拒写边界仍优先，接管 lease 后恢复（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
-- **改名祖先目录不能再解除只读边界**：此前把被拒根的父目录改名即可把整棵树搬出 subpath deny / ro-bind 之外；现在 Seatbelt 同时拒写被拒根的每个祖先目录本身（`(literal …)`），bwrap 把祖先自绑为挂接点使 rename 返回 EBUSY——代价是受限进程不能 rename/chmod/touch 被拒根的祖先目录（目录内读写不变）；Windows 的 deny ACE 写在目录对象上，本就随目录走（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
+- **改名祖先目录不能再解除只读边界**：此前把被拒根的父目录改名即可把整棵树搬出路径拒写边界；现在 Seatbelt 同时拒写被拒根的每个祖先目录本身（`(literal …)`），bwrap 把祖先自绑为挂接点使 rename 返回 EBUSY；Windows 用不共享删除的目录句柄钉住根及祖先，直到受限 Job 后代排空，防止 shell 搬走目录后经宿主文件工具绕过。祖先目录的元数据或改名操作会受相应机制限制（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)、[ADR-0020](./docs/decisions/ADR-0020-windows-normal-deny-groups.md)）。
+- **负授权不随排序、消失或冲突丢失**：存量重叠登记双方撤销成员授权，但可信记录的拒写边界仍保留；新增根也检查 missing / redirected 根的保留边界。全局只读会话追加固定读写根后统一应用 deny，无法表达子树减法的后端在启动前拒绝。
+- **Windows 拒写前检查全部根的硬链接**：任一根存在多链接文件或不可检查节点时，在任何 ACL 写入前拒绝启动，避免改写 pnpm store 或其他链接的共享对象。新增宿主维护命令 `/workspace-folders isolate-profiles [--apply]`：默认只读检查，显式 apply 仅将 profile 导入配置设为 copy；存量依赖仍需按报告重装，不修复历史 ACL（[ADR-0020](./docs/decisions/ADR-0020-windows-normal-deny-groups.md)）。
 - **Linux 上消失的拒写根失败关闭而非放行**：deny 根的 bwrap 挂载恢复为强制项——目录在登记后或 profile 构造后被删除时命名空间搭建失败、命令不会执行，不再出现在可写父挂载下被重建写入的缺口（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
 - **附加根重新登记保留原权限**：命令与面板在未显式选择访问级别时不发送默认值，避免 revive 把只读登记静默升级；达到根上限时仍可从面板重新登记既有的不可用项。
 - **面板兼容旧宿主的根列表**：旧响应缺少 `limit` / `count` 时仍可显示和操作，显式非法值仍拒绝。
