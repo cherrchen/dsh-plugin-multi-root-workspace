@@ -50,11 +50,11 @@ tarball、GitHub、本地源码等其他安装方式见[安装](#安装)。
 | `0.1.6` | `0.1.6-alpha.1`、`0.1.6-alpha.2` |
 | `0.1.7` | `0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2` |
 | `0.2.0` | `0.2.0-rc.1`、`0.2.0-rc.2` |
-| `0.2.1` | `0.2.1-alpha.1`、`0.2.1-alpha.2` |
+| `0.2.1` | `0.2.1-alpha.1`、`0.2.1-alpha.2`、`0.2.1-alpha.3`、`0.2.1-alpha.4`、`0.2.1-alpha.5`、`0.2.1-rc.1`、`0.2.1-rc.2` |
 
 DSH 版本不在表内、或 `@deepseek-ai/dsh-*` 各包版本不一致时，插件不会启动，行为等同没装。
 
-**从源码构建 / 贡献**：Node.js `^22.19.0 || >=24`，pnpm `11.25.0`（建议经 corepack 启用）；开发 pin 的 DSH 为 `0.2.1-alpha.2`。
+**从源码构建 / 贡献**：Node.js `^22.19.0 || >=24`，pnpm `11.25.0`（建议经 corepack 启用）；开发 pin 的 DSH 为 `0.2.1-rc.2`。
 
 **运行平台**：macOS（Seatbelt）、Linux（bwrap / Landlock）、Windows（root-set ACL runner）。
 

@@ -7,11 +7,11 @@
 
 | 项 | 值 | 说明 |
 | --- | --- | --- |
-| 开发目标版本（基线） | `0.2.0-rc.2` | 精确 pin 在 `devDependencies`；CI 主车道对全部支持版本与启用的 OS 做笛卡尔积验证 |
+| 开发目标版本（基线） | `0.2.1-rc.2` | 精确 pin 在 `devDependencies`；CI 主车道对全部支持版本与启用的 OS 做笛卡尔积验证 |
 | 支持矩阵 | [`SUPPORTED_DSH_RELEASES`](../../src/compat/dsh-version.ts) | **精确版本 allowlist**；`peerDependencies` 逐项或，不承诺未来版本 |
-| 实测证据 | [路线图兼容提升记录](../plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30未发布) | 升级与旧版回归都运行完整矩阵；`upgrade.yml` 只探测候选，不自动扩大 allowlist |
+| 实测证据 | [路线图兼容提升记录](../plans/active/2026-09-12-multi-root-workspace.md#dsh-021-后续兼容提升2026-10-17)（历次记录同档） | 升级与旧版回归都运行完整矩阵；`upgrade.yml` 只探测候选，不自动扩大 allowlist |
 | 运行时门禁 | `multi-root-compat` 行 | 版本不在 allowlist 或核心包混装时，四个安全相关行根本不启动（ADR-0009） |
-| cordis | 基线 `4.0.4`；旧版按 `dsh` 声明的范围下限精确 pin | `upgrade-dsh.mjs` 同步重指，并从精确 release-age 条目派生 workspace-only 的 DSH probe overrides，避免预发布范围导致混装、重复副本导致工具调度 Symbol 不一致。已有自定义 overrides 时拒绝覆盖；探测后恢复保存的 workspace |
+| cordis | 基线 `4.0.5`；旧版按 `dsh` 声明的范围下限精确 pin | `upgrade-dsh.mjs` 同步重指，并从精确 release-age 条目派生 workspace-only 的 DSH probe overrides，避免预发布范围导致混装、重复副本导致工具调度 Symbol 不一致。已有自定义 overrides 时拒绝覆盖；探测后恢复保存的 workspace |
 
 **必须精确 pin**：`@deepseek-ai/dsh-*` 的 `latest` dist-tag 指向陈旧的 `0.0.1-rc.1`，真正的新版发布在 `next`；范围依赖会解析到错误版本。`pnpm-workspace.yaml` 里的 `minimumReleaseAgeExclude` 对开发版本的直接与传递 DSH 包、宿主 document tooling 都逐项列出精确版本，供 frozen install 与运行脚本前的依赖自检使用；不使用跨版本通配豁免。它是为此配套的（pnpm 的发布年龄门禁会拦下刚发布的预发布版本）。
 

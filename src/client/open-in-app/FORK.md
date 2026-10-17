@@ -7,9 +7,12 @@ native one shows — because the upstream occupant always receives the primary
 root through its slot props and cannot be re-pointed.
 
 - **Source**: `deepseek-harness/packages/client/ui-open-in-app/src/client/`
-- **Revision**: `d743267388` (release `0.2.1-alpha.2`, 2026-10-09) — matches
+- **Revision**: `687f282e86` (release `0.2.1-rc.2`, 2026-10-17) — matches
   this package's dev pin and the `@deepseek-ai/dsh-host-open-in-app`
   devDependency, which is the machine-readable record of the fork base.
+  The upstream `src/client/` tree did not change between `0.2.1-alpha.2`
+  (`d743267388`) and `0.2.1-rc.2`, so the fork files below remain
+  byte-identical without a re-copy.
 
 ## Verbatim files (copy-diff must stay empty)
 

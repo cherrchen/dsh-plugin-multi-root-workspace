@@ -20,6 +20,7 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - **per-tool 写权限封顶**：`multi-root-scope` 行配置 `toolAccess: { <工具名>: 'read-only' }` 后，该工具永远不能写任何附加根（主根不受影响）；封顶经 `tools/execute` 的真实 dispatch 上下文执行，非法配置 fail closed（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)）。
 - **附加根数量上限**：每个主根默认最多登记 16 条附加根记录（`maxAdditionalRoots` 可调至 64）；超限的新增被拒绝，历史超限记录照常授予。列表如实显示 `N of LIMIT`（[ADR-0014](./docs/decisions/ADR-0014-root-limit-and-provider-conflict.md)）。
 - **Provider 冲突检测**：另一插件也替换 `ctx.fs` / `ctx.sandbox` 时，多根行响亮失败并拒绝一切授予，而不是依赖装载顺序（[ADR-0014](./docs/decisions/ADR-0014-root-limit-and-provider-conflict.md)）。
+- **精确支持 DSH `0.2.1-alpha.3`、`0.2.1-alpha.4`、`0.2.1-alpha.5`、`0.2.1-rc.1` 与 `0.2.1-rc.2`**。上游 `alpha.3` 起 `dsh-storage-domain` 把 `zod` 固定为 `4.4.3`，两个 zod 副本的类型互不兼容，域 schema 改由存储域自身解析的 zod 构建；`alpha.4` 起上游版本需求优先读 `engines.dsh`，本插件仍以 `peerDependencies` 为唯一版本契约。开发 pin 提升到 `0.2.1-rc.2`（cordis `4.0.5`；`alpha.3`–`alpha.5` 的 cordis 为 `4.0.5-alpha.2`）。
 
 ### Changed
 

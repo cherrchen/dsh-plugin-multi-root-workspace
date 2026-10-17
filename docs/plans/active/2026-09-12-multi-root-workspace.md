@@ -42,6 +42,7 @@
 | 第二期 | B8 平台感知提示词 | `renderWorkspaceRootsContext` 纯函数化；按模式/平台/访问级别陈述授权；win32 附带 partial-enforcement 说明 | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0013](../../decisions/ADR-0013-per-root-and-per-tool-access.md) | `a7f3d20` | 未发布 |
 | 第二期 | B9 附加根三态权限与跨 SandboxMode 执行一致性 | 继承 / 只读 / 读写；显式根权限覆盖会话模式默认行为，文件与新进程执行一致；先验证 Full-access 局部限权 | [B9 计划](../completed/2026-10-13-b9-root-access-and-sandbox-modes.md) | [0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)；并修订 [0001](../../decisions/ADR-0001-provider-replacement-scope.md)/[0003](../../decisions/ADR-0003-dialect-grant-widening.md)/[0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md)/[0012](../../decisions/ADR-0012-session-origin-and-effective-cwd.md)/[0013](../../decisions/ADR-0013-per-root-and-per-tool-access.md) | — | B9 实施与原生验收完成；Windows 普通 deny-only 组与暂停赋值、Linux bubblewrap 补局部只读；保留 Windows partial 边界，未发布 |
 | 第二期 | 分支安全审查修复（R1–R4） | 负授权规则统一（R2/R3）、Windows 祖先路径稳定性（R1）、硬链接失败关闭与 profile 隔离（R4） | [审查计划](./2026-10-16-branch-security-review-and-hardlink-isolation.md) | [0017 修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)、[0004 修订](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[0020 修订](../../decisions/ADR-0020-windows-normal-deny-groups.md) | — | Phase A（R2/R3）、B（R1）、C1（全根硬链接预检）与 C2（`/workspace-folders isolate-profiles` 命令、迁移与冒烟）已实施，门禁已执行（771 通过 / 49 跳过，冒烟四项实跑通过）；POSIX 原生内核未验证；未发布 |
+| compat | DSH 0.2.1 后续提升 | DSH 支持矩阵扩展至 `0.2.1-alpha.3`–`0.2.1-rc.2` 五个精确版本；storage-domain zod 分裂适配、warn 车道 allow-version 预授权 | [本次记录](#dsh-021-后续兼容提升2026-10-17) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | — | 未发布 |
 | 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 
 ## 总体策略
@@ -659,3 +660,44 @@ Windows 实机（非 CI）验证暴露两个 CI 不可见的问题，处置经�
 - **修复与回归**：清理所有权和有界重试规则写入[开发工作流](../../development/plugin-development-workflow.md#ci)。新增真实 `.node` 加载的深层目录子进程回归（移交后退出、父进程严格删除、独立清理持久锁必须及时失败），以及普通目录、外部 junction 不跟随、显式移交和 CI 超时门禁回归；不靠扩展名豁免清理，不跳过行为断言。
 - **本地执行**：Windows 非提权会话，开发 pin `0.2.1-alpha.2`、Node `24.14.0`；内核探针 windows-acl 可用。完整套件 **50 文件、781 通过 / 49 条件跳过 / 0 失败**，含新增回归；lint、双端 typecheck、build、compat:check 通过。compose **48/0/0**、behavior **133/0/0**、journey **62/0/0**、packed behavior **132/0/0**，pack:check **109 成员完整**；packed 含打包/安装/严格清理耗时 **50.04 秒**，四项冒烟加打包检查共 **101.99 秒**，无残留。docs:check 通过。
 - **修复提交远端执行**：`033bbe6` 的 [CI run 39022484207](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39022484207) **44 条 verify 车道及最终 gate 全部 success**（含 releases 共 46 jobs）；11 条 Windows packed smoke 分别为 **31–67 秒**，不再等待模块映射解除。相同提交的 [diag run 39022484171](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39022484171) 同样 success，真实 Windows ACL 与 broker 生命周期通过。当前复核未发现新的合并阻断项；非提权 CI lane 与 Windows partial / 并发外部修改边界仍按既有决定记录，未扩大安全承诺。未合并、未发布。
+
+## DSH 0.2.1 后续兼容提升（2026-10-17）
+
+用户授权范围是 `dsh-v0.2.1-alpha.3` 至 `dsh-v0.2.1-rc.2` 的五个发布版本。上游本地 tag 与 npm `versions` 列表一致，逐 tag 与 `0.2.1-alpha.2` 做源码差分。支持合同保留全部旧版，再纳入这五个精确版本；开发 pin 与 lockfile 升到 `0.2.1-rc.2`，cordis 是 `4.0.5`。插件版本号不变（`0.1.6`），不创建 release tag。
+
+| 上游 tag | commit |
+|---|---|
+| `dsh-v0.2.1-alpha.3` | `2fbf4359b82fb94c03dcce0b831660d87f12ea5c` |
+| `dsh-v0.2.1-alpha.4` | `86a402200d95fecef4529d969836f1fe13c6cb0d` |
+| `dsh-v0.2.1-alpha.5` | `1517a4dbca0a2789ff1d41ba439600f8547d23fa` |
+| `dsh-v0.2.1-rc.1` | `1600d8a1e140dcde43a1a0941940a0480712c011` |
+| `dsh-v0.2.1-rc.2` | `687f282e8625c6b8d11ff58211a90524be2e4317` |
+
+#### 接口变更与风险
+
+| 接缝 | 上游变化与影响 | 本次处理与证据 |
+|---|---|---|
+| registry storage / zod | `alpha.3` 起 `dsh-storage-domain` 把 `zod` 依赖从 `^4.4.3` 钉死为 `4.4.3`；本插件自身的 `^4.6.2` 解析成另一副本，`domainTable` 声明的 `ZodType` 与插件侧 schema 类型互不兼容（运行时仅调 `.parse`/`.safeParse`，是类型缝而非行为缝） | 新增 `src/compat/storage-zod.ts`：经 `createRequire` 从 `dsh-storage-domain` 自身解析路径取 zod 构建域 schema，值与声明同源，任何支持版本都成立；不 pin 本包 zod、不加 overrides、不做版本串分支。宿主/客户端 typecheck 与全部测试通过 |
+| 插件安装门禁 | `alpha.4` 起 plugin-manager 优先读 `engines.dsh`，缺失时回退 `peerDependencies` 的 `@deepseek-ai/dsh*` 条目；本插件仍以 peers 为唯一版本契约 | peers 精确枚举 16 个版本；warn 车道在首个 `plugin add` 前授予精确 `allow-version` 豁免（覆盖 remove/add 激活回退路径），保留反应式回退，enforce 模式不依赖豁免 |
+| cordis | `alpha.3`–`alpha.5` 依赖 `~4.0.5-alpha.2`；`rc.1`/`rc.2` 依赖 `~4.0.5`（解析为 `4.0.5`） | `cordis-pin.mjs`/`upgrade-dsh.mjs` 按候选版本分派；peer 声明补 `|| 4.0.5-alpha.2`（`4.0.5` 已在 `>=4.0.1 <5.0.0` 内），开发 pin `4.0.5` |
+| fork 客户端文件 | `alpha.2`→`rc.2` 的 `src/client/` 子树逐字节零改动（含 files-tree 与 open-in-app 上游源）；locales 仅新增 market meta 键，与 fork 的 `SidebarFilesKey` 无关 | 按 FORK.md 核对后仅前移 revision 基线至 `687f282e86`，不重新拷贝 |
+| Connection RPC / session / workingDirectory / LSP / workspaceFiles | `rpc.call` 签名不变；handler 新增第 4 个可选 `peer` 参数向后兼容；`sessions.list` 快照、`retainedBy.mainView`、working-directory 服务键与 LSP stdio 池形状均未变 | 不新增适配分支；行为/旅程冒烟在真实 profile 上验证 |
+| `read` 等工具提示文案 | `dsh-tools` 个别工具 description 微调，事件名与 schema 未变 | 本插件不钉文案快照，无影响 |
+
+#### 候选车道与验收
+
+每个候选版本走完整 upgrade lane（`upgrade-dsh.mjs` repoint + 重装 + `DSH_MULTI_ROOT_COMPAT=warn pnpm verify:all`），cordis pin 按版本分派。本地宿主为 macOS：`pnpm kernel:probe` 实测 Seatbelt 可执行并作为必跑断言（`DSH_PROBE_VERIFIED_DIALECTS=seatbelt`）；bwrap / Landlock 本机不存在，Linux/Windows 原生证据由远端 CI 承担，不得把本地 skip 记为通过。
+
+| 运行时 | 单测 | compose | behavior | journey | packed behavior | 结果 |
+|---|---|---|---|---|---|---|
+| `0.2.1-alpha.3` | 766 passed / 64 skipped | 48 | 126 | 62 | 125 | 通过 |
+| `0.2.1-alpha.4` | 766 passed / 64 skipped | 48 | 126 | 62 | 125 | 通过 |
+| `0.2.1-alpha.5` | 766 passed / 64 skipped | 48 | 126 | 62 | 125 | 通过 |
+| `0.2.1-rc.1` | 766 passed / 64 skipped | 48 | 126 | 62 | 125 | 通过 |
+| `0.2.1-rc.2` | 766 passed / 64 skipped | 48 | 126 | 62 | 125 | 通过 |
+
+候选期间修复两处接缝（见上）：storage-zod 适配消除 zod 双副本类型不兼容；`installPluginProfile` 的 warn 预授权修复「构建审批中断后的 remove/add 激活路径撞上版本门禁」——该路径曾把插件装为依赖但未激活，行为断言以 `setAdditionalRoots` 空指针暴露，现已修复并有 rc.2 完整 packed battery 复验。
+
+#### 正式提升
+
+`SUPPORTED_DSH_RELEASES` 扩至 16 个精确版本；20 个 `@deepseek-ai/dsh-*` peer 同步枚举；cordis peer 补 `4.0.5-alpha.2`；开发 pin `0.2.1-rc.2`、cordis `4.0.5`；release-age 精确豁免重写为 rc.2 集合；probe overrides 与 `minimumReleaseAge: 0` 不落入提交。提升后 enforce 验收（`0.2.1-rc.2` / cordis `4.0.5` 开发树，本机 macOS）：`pnpm compat:check` 四方一致；`pnpm verify:all` 全绿——lint、双端 typecheck、build、`kernel:probe`（Seatbelt 实测可执行，bwrap / Landlock 本机不存在）、test **49 文件 766 passed / 64 skipped**、compose **48/0/0**、behavior **126/0/0**、journey **62/0/0**、pack:check **110 成员**、packed behavior **125/0/0**（enforce 下无豁免，peers 精确覆盖 rc.2 直接通过版本门禁）；`pnpm docs:check` 通过。远端 16 版本 × OS 矩阵由本分支 PR 的 CI 车道执行，未完成前不记为通过。
