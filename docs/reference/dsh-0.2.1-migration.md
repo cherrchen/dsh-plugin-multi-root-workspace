@@ -1,12 +1,17 @@
 # DSH 0.2.1 接口与安全契约审查
 
-2026-10-10 对上游发布 tag 做只读源码对照；发布包行为另由本仓库测试和真实 Host smoke 验证，执行状态只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。不修改上游 checkout，也不深导入其内部源码。
+2026-10-10 对上游发布 tag 做只读源码对照（至 `alpha.2`）；2026-10-17 补查 `alpha.3` 至 `rc.2`。发布包行为另由本仓库测试和真实 Host smoke 验证，执行状态只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。不修改上游 checkout，也不深导入其内部源码。
 
 | tag | commit |
 |---|---|
 | `dsh-v0.2.0-rc.2` | `639ed015397290b3745d163aafe02ffee4aa3f84` |
 | `dsh-v0.2.1-alpha.1` | `5badb15009ae1756c3afe0ae0cef1faafc290ccc` |
 | `dsh-v0.2.1-alpha.2` | `6851e496285b2c9670066fdd142e7e46da586649` |
+| `dsh-v0.2.1-alpha.3` | `2fbf4359b82fb94c03dcce0b831660d87f12ea5c` |
+| `dsh-v0.2.1-alpha.4` | `86a402200d95fecef4529d969836f1fe13c6cb0d` |
+| `dsh-v0.2.1-alpha.5` | `1517a4dbca0a2789ff1d41ba439600f8547d23fa` |
+| `dsh-v0.2.1-rc.1` | `1600d8a1e140dcde43a1a0941940a0480712c011` |
+| `dsh-v0.2.1-rc.2` | `687f282e8625c6b8d11ff58211a90524be2e4317` |
 
 ## 实际组合与不变量
 
@@ -50,6 +55,22 @@ bundle 禁用上游 `fs-sandbox` / `sandbox` 两行，插入 compat gate、scope
 | Cordis / loader / runtime resolution | cordis `4.0.4` | cordis `~4.0.5-alpha.1` | 轻量 tooling 适配：精确 prerelease pin；provider 生命周期与公开 wrapper disposal 仍复验 |
 | `packages/experimental/worktree/src/` / `tool-worktree` | 不存在 | 新建 checkout，默认 `.agents/worktrees`，保持原 policy | 安全契约协作；不重实现，不自动登记；失败保留 artifacts，cwd 仅成功时更新 |
 | 上游移除 invariant rows、tool mutation result 展示与 Session title 实现 | 有变化 | 有变化 | 不相关于根授权；真实 Host composition / journey 检查组合影响 |
+
+## alpha.2 → rc.2 补充审查（2026-10-17）
+
+`alpha.2` 到 `rc.2` 的上游变化集中在 Connection Peer 认证重设计、plugin-market/客户端基础设施和一个依赖 pin；fs / sandbox / storage 语义、Seatbelt / bwrap / Landlock profile、session format 4、`working-directory` 与 fork 源 `src/client/` 子树均无源码 diff。
+
+| 接缝 / 上游源码 | 变化 | 分类与插件处理 |
+|---|---|---|
+| `packages/storage/storage-domain/package.json` | `alpha.3` 起 `zod` 由 `^4.4.3` 改为精确 `4.4.3` | **类型边界变化**：本包 `zod@^4.6.2` 从此解析出第二副本；zod v4 的 `ZodType` 按构建 minor 标记，两副本互不兼容。域 schema 改由 storage-domain 自身解析的 zod 构建（`src/compat/storage-zod.ts`），值与 `domainTable` 声明的 `ZodType` 始终同源；不 pin 本包 zod（旧支持版本的 `^4.4.3` 会把分裂移到另一侧） |
+| `packages/client/connection/src/` | `alpha.3`：`OperatorPeer` 移除，新增 `Peer`（principal/interactions/signal/disposal）、`createPeer`/`admitConnection`/`ConnectionAdmission`；RPC handler 多收一个认证后的 Peer 参数；`HostConnectionService` 跟踪 browser/API Peer；connection 增加 WebSocket/interactions API | API 兼容：插件只调用 `connection.rpc.handle`（处理器参数更少对新增参数向后兼容）与 `connection.rpc.call`；`/multi-root-workspace` 通道语义不变。Peer 模型不改变面板的 live-session authority 推导 |
+| `packages/api/workspace-files/src/index.ts` | `alpha.3`：`workspaceFileScope` 查找新增 `resource: 'session'` | API 兼容：附加元数据字段，scope 构造与包装路径不变 |
+| `packages/boot/plugin-manager`、`plugin-market` | `alpha.4` 起第三方插件的版本需求优先读 `engines.dsh`，缺省回退 DSH `peerDependencies`；plugin-market 新增 source repository / Custom markets / Discover | API 兼容：本插件仍以 `peerDependencies` 为唯一版本契约（`compat:check` 四处一致），不引入 `engines.dsh` 这第二处版本列表；`allow-version` 豁免路径照旧只用于候选 lane |
+| `packages/fs/tool-fs/src/read.ts` | `alpha.5`：read 失败提示由 "cat, sed, head, or tail" 收敛为只提 `cat` | 模型可见文案微调；工具事件名与 `fs/observed` 契约不变，指令 capture 不受影响 |
+| `@deepseek-ai/dsh` → cordis | `alpha.3`–`alpha.5`：`~4.0.5-alpha.2`；`rc.1`/`rc.2`：`~4.0.5`（解析为 `4.0.5` 稳定版） | 轻量 tooling 适配：`scripts/lib/cordis-pin.mjs` 按候选版本选精确 pin；provider 生命周期与 wrapper disposal 仍由测试复验 |
+| `packages/extensions/cordis-client-runner/src/client/slot-catalog.ts` | `rc.2`：新增 `conversation.input.model.label` slot 与 `client-ui-deepseek-model-label-1017` 注册 | 不相关：不占本插件 slot；`sidebar.footer.action` 注册不变 |
+| client 模块 release 门控 / manifest（`alpha.4`） | client 模块清单带 Host release 身份，release 变化触发模块重载 | API 兼容：`dsh.client` 加载通道不变；panel 与 files-tree 由客户端 bundle 测试与 journey 验证 |
+| remote-access rbac（`alpha.3`） | 非 owner 调用与事件按 rbac policy 拦截 | 不相关：插件未使用 remoteAccess；本地 profile 的 Connection 通道无 rbac 影响 |
 
 ## Worktree 约束
 

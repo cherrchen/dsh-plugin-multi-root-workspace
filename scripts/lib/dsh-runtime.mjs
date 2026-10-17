@@ -325,6 +325,20 @@ export async function installPluginProfile(profile, home, source = pluginPackage
   // every Full-access launch this smoke tries to exercise).
   ensureProfileCopyImport(home, profile)
   const args = ['plugin', '--profile', profile, 'add', source]
+  // In warn mode the exemption is granted UP FRONT, not only on a rejected
+  // first add: the first add can be stopped by an earlier gate (pnpm's build
+  // approval) and then only reach the version check inside
+  // `ensureBundleActivated`'s remove + add cycle — a path with no recovery of
+  // its own. An unneeded grant is a harmless profile record; a runtime too
+  // old to know `allow-version` answers nonzero and is ignored, because such
+  // runtimes do not gate installs at all.
+  if (process.env.DSH_MULTI_ROOT_COMPAT === 'warn') {
+    const granted = await grantVersionExemption(profile, home)
+    if (granted !== 0) {
+      console.log(`[dsh-runtime] up-front allow-version grant exited ${granted}; ` +
+        'continuing — the reactive grant below still covers a runtime that refuses it before the profile exists')
+    }
+  }
   let first = await captureDsh(args, { DSH_HOME: home })
   if (first.code === 0) {
     // What the docs need to know: whether the first add even ASKED for build
@@ -338,12 +352,22 @@ export async function installPluginProfile(profile, home, source = pluginPackage
     process.stderr.write(first.stderr)
     return first.code
   }
-  const plugin = require('@dsh-electron/dsh-plugin-multi-root-workspace/package.json')
-  const runtime = runtimeRequire()('@deepseek-ai/dsh/package.json').version
-  const allowed = await runDsh(['plugin', '--profile', profile, 'allow-version', `${plugin.name}@${plugin.version}`,
-    '--dsh-version', runtime, '--accept-risk'], { DSH_HOME: home })
+  const allowed = await grantVersionExemption(profile, home)
   if (allowed !== 0) return allowed
   const readded = await runDsh(args, { DSH_HOME: home })
   if (readded !== 0) return readded
   return await ensureBundleActivated(profile, home, source, args)
+}
+
+/**
+ * Grant this package's exact-version install exemption on the smoke runtime.
+ * @param profile - the profile to exempt the install in.
+ * @param home - the isolated `$DSH_HOME`.
+ * @returns the `dsh plugin allow-version` exit code.
+ */
+async function grantVersionExemption(profile, home) {
+  const plugin = require('@dsh-electron/dsh-plugin-multi-root-workspace/package.json')
+  const runtime = runtimeRequire()('@deepseek-ai/dsh/package.json').version
+  return await runDsh(['plugin', '--profile', profile, 'allow-version', `${plugin.name}@${plugin.version}`,
+    '--dsh-version', runtime, '--accept-risk'], { DSH_HOME: home })
 }

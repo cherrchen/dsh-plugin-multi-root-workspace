@@ -49,8 +49,8 @@ import { isAbsolute } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { defineDomain, domainTable, type KvTable } from '@deepseek-ai/dsh-storage-domain'
-import { z } from 'zod'
 import type {} from './compat.ts'
+import { domainZod, type DomainValueSchema } from './compat/storage-zod.ts'
 import type {} from './providers.ts'
 import { RegistryAuthorityLease, RegistryLeaseContendedError } from './registry-lease.ts'
 import {
@@ -137,7 +137,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 /**
- * One persisted root record. `zod` validates it at the durable boundary.
+ * Stored shape of one root record.
  *
  * The access level is expressed by WHICH grant key is present, never by an
  * `access` field on the same `recordedPath` (ADR-0017):
@@ -162,12 +162,44 @@ declare module '@deepseek-ai/cordis' {
  * - a record with `recordedPath` only is the writable grant it always was,
  *   so upgrading changes nothing for legacy records.
  */
-const persistedRoot = z.object({
+type PersistedRoot = {
+  id: string
+  path: string
+  /**
+   * Absent only in records written before the field existed (or by hand),
+   * and in non-inherit records. Such a record is reported `invalid` rather
+   * than granted on a guess — see classifyStoredRoots.
+   */
+  recordedPath?: string | undefined
+  readOnlyRecordedPath?: string | undefined
+  readWriteRecordedPath?: string | undefined
+  alias?: string | undefined
+  addedAt: string
+}
+
+/**
+ * Stored shape of one primary root's records: the whole registration list.
+ * The domain's `single` layout stores the entire unit as one document, so
+ * keys stay opaque strings — which is exactly what lets the canonical
+ * primary root itself be the key.
+ */
+export type PersistedPrimaryRoot = { roots: PersistedRoot[] }
+
+/**
+ * The durable-boundary validators. The builder is the zod module the
+ * INSTALLED storage-domain resolves, not this package's own `zod` copy:
+ * `domainTable` types `schema` as the `ZodType` of ITS resolved zod, and
+ * since `0.2.1-alpha.3` upstream pins that copy at `4.4.3` exactly while
+ * this package floats on `^4.6.2` for its wire validation. The two copies
+ * brand incompatible types on either side of that upstream change, so the
+ * schema is built where the boundary type comes from — see
+ * `src/compat/storage-zod.ts`.
+ */
+const z = domainZod()
+
+const persistedRoot: DomainValueSchema<PersistedRoot> = z.object({
   id: z.string().min(1),
   path: z.string().min(1),
-  // Absent only in records written before the field existed (or by hand), and
-  // in non-inherit records. Such a record is reported `invalid` rather than
-  // granted on a guess — see classifyStoredRoots.
   recordedPath: z.string().min(1).optional(),
   readOnlyRecordedPath: z.string().min(1).optional(),
   readWriteRecordedPath: z.string().min(1).optional(),
@@ -175,18 +207,9 @@ const persistedRoot = z.object({
   addedAt: z.string().min(1),
 })
 
-/**
- * One primary root's whole registration list. The domain's `single` layout
- * stores the entire unit as one document, so keys stay opaque strings — which
- * is exactly what lets the canonical primary root itself be the key.
- */
-const persistedPrimaryRoot = z.object({ roots: z.array(persistedRoot) })
-
-/** Stored shape of one primary root's records. */
-export type PersistedPrimaryRoot = z.infer<typeof persistedPrimaryRoot>
-
-/** Stored shape of one root record. */
-type PersistedRoot = z.infer<typeof persistedRoot>
+const persistedPrimaryRoot: DomainValueSchema<PersistedPrimaryRoot> = z.object({
+  roots: z.array(persistedRoot),
+})
 
 /**
  * The domain declaration: version 1, `single` layout, one `roots` table keyed
