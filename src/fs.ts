@@ -113,19 +113,24 @@ export class MultiRootFileSystem extends LocalFileSystem {
   }
 
   /**
-   * The writable roots of one workspace-write call: the upstream derivation
-   * (primary root plus the platform temp areas, canonical and deduplicated)
-   * widened by the scope's additional roots, in scope order.
+   * The writable roots of one confined call: the upstream derivation (primary
+   * root plus the platform temp areas, canonical and deduplicated — empty
+   * under `read-only`) widened by the scope's EFFECTIVE writable members.
+   * Under `read-only` that is exactly the fixed `read-write` roots (the tool
+   * cap may already have emptied the scope's list), so an explicit grant
+   * survives a globally read-only session. An unavailable registry authority
+   * never contributes members: a process that cannot read the store grants
+   * only the primary root (and no shared temp grant).
    * @param policy - the per-call policy.
    * @param scope - the scope resolved once for this call; both the fence and
    *   the denial message below share it instead of re-resolving.
-   * @returns the canonical writable roots; empty under `read-only`.
+   * @returns the canonical writable roots; possibly empty.
    */
   private rootsFor(policy: SandboxExecutionPolicy, scope: FilesystemScope): string[] {
+    // Unknown registrations may deny any shared temp subtree. Only the primary
+    // root is provably disjoint from this primary's additional registrations.
+    if (scope.authority === 'unavailable') return policy.mode === 'read-only' ? [] : [scope.primaryRoot]
     const roots = writableRoots(policy)
-    if (roots.length === 0) return roots
-    // Only the writable members: a `read-only` root stays a workspace member
-    // (it is routed and readable) but can never enter this list.
     for (const root of scope.writableRoots) {
       if (!roots.includes(root)) roots.push(root)
     }
@@ -133,28 +138,62 @@ export class MultiRootFileSystem extends LocalFileSystem {
   }
 
   /**
-   * Enforce the per-call policy against `target` and return the EXACT target the
-   * mutation must use, so the checked identity is the mutated one (no
-   * check-here-write-there TOCTOU). `read-only` denies; `workspace-write`
-   * re-canonicalizes NOW (reflecting a concurrently swapped symlink ancestor),
-   * requires containment under one of the scope's writable roots, and returns
-   * THAT fresh target; `danger-full-access` returns the caller's target unfenced.
+   * Enforce the per-call policy against `target` and return the EXACT target
+   * the mutation must use, so the checked identity is the mutated one (no
+   * check-here-write-there TOCTOU). Deny precedes containment: a root in
+   * `scope.deniedRoots` — an explicit `read-only` root, or any member when the
+   * call is tool-capped — refuses writes under EVERY mode, including
+   * `danger-full-access` and where a broader grant (the platform temp area)
+   * would otherwise cover the path. `read-only` then grants only the fixed
+   * `read-write` members; `workspace-write` requires containment under the
+   * widened writable set.
+   *
+   * `danger-full-access` is the only mode with a fast path, and only while
+   * the deny set is empty: it then returns the caller's target untouched,
+   * upstream-exact. Once ANY deny boundary exists the caller's `FsTarget` may
+   * be stale — the directory it resolved through can since have been replaced
+   * by a symlink into a denied root — so the fence re-resolves
+   * `target.displayPath`, checks the FRESH target key, and mutates that fresh
+   * target rather than the stale one the caller resolved earlier.
+   *
+   * One more Full-access rule: while the registry authority is `unavailable`
+   * the empty deny set is not trustworthy — the store this process cannot
+   * read may hold explicit `read-only` registrations — so the mode degrades
+   * to primary-root-only writes (no shared temp or additional-root grants)
+   * until the authority returns.
    * @param target - the resolved target about to be mutated.
    * @param sandboxPolicy - the per-call policy; omit for the deployment fallback.
    * @returns the fresh canonical target the mutation must use.
    */
   private async checkedTarget(target: FsTarget, sandboxPolicy?: SandboxExecutionPolicy): Promise<FsTarget> {
     const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
-    const { mode } = policy
-    if (mode === 'danger-full-access') return target
-    if (mode === 'read-only') {
-      throw new FsError(`cannot write "${target.displayPath}": file access denied under read-only mode`, 'FS_SANDBOX_DENIED')
-    }
-    const fresh = await this.resolve(target.displayPath)
-    // One resolution per call: the fence and (on denial) the message below
-    // share this scope rather than each paying for its own re-realpath pass.
+    // One resolution per call: the deny pass, the containment pass, and (on
+    // denial) the message all share this scope rather than re-resolving.
     const scope = this.ctx.multiRootScope.resolve(policy)
-    const roots = this.rootsFor(policy, scope)
+    const effectiveMode: SandboxMode = scope.authority === 'unavailable' && policy.mode === 'danger-full-access'
+      ? 'workspace-write'
+      : policy.mode
+    if (effectiveMode === 'danger-full-access' && scope.deniedRoots.length === 0) return target
+    const fresh = await this.resolve(target.displayPath)
+    // The deny set first: it is what keeps an explicit `read-only` root
+    // read-only when the ambient mode — or another writable grant covering the
+    // same path — would allow the write.
+    if (scope.deniedRoots.length > 0) {
+      for (const path of scope.deniedRoots) {
+        if (await isPathUnder(fresh.targetKey, path)) {
+          const root = scope.roots.find(root => root.path === path)
+          const reason = path === scope.protectedHome
+            ? `${path} is the DSH home directory, which is protected under danger-full-access while workspace restrictions apply`
+            : root?.access === 'read-only' || root === undefined
+              ? `${path} is a read-only additional root`
+              : `${path} is an additional root this call may not write`
+          throw new FsError(`cannot write "${target.displayPath}": ${reason}`, 'FS_SANDBOX_DENIED')
+        }
+      }
+    }
+    if (effectiveMode === 'danger-full-access') return fresh
+    const effectivePolicy: SandboxExecutionPolicy = { ...policy, mode: effectiveMode }
+    const roots = this.rootsFor(effectivePolicy, scope)
     let contained = false
     for (const root of roots) {
       if (await isPathUnder(fresh.targetKey, root)) {
@@ -163,18 +202,8 @@ export class MultiRootFileSystem extends LocalFileSystem {
       }
     }
     if (!contained) {
-      let denial = `cannot write "${target.displayPath}": file access denied under workspace-write mode`
+      let denial = `cannot write "${target.displayPath}": file access denied under ${effectiveMode} mode`
       if (scope.additionalRoots.length > 0) denial += `; allowed roots: ${roots.join(', ')}`
-      // Name the read-only root the target sits in: without it, a denied write
-      // inside a workspace member looks identical to writing somewhere the
-      // operator never registered.
-      for (const root of scope.roots) {
-        if (root.access !== 'read-only') continue
-        if (await isPathUnder(fresh.targetKey, root.path)) {
-          denial += ` (${root.path} is a read-only additional root)`
-          break
-        }
-      }
       throw new FsError(denial, 'FS_SANDBOX_DENIED')
     }
     return fresh

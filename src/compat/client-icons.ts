@@ -96,3 +96,4 @@ export const IconTrash = icon('IconTrashOutline16', 'IconTrashOutlineRegular')
 // render the access picker's menu rows — and its trigger — without icons.
 export const IconAccessReadWrite = maybeIcon(['IconWorkspaceWriteRegular'])
 export const IconAccessReadOnly = maybeIcon(['IconReadOnlyRegular'])
+export const IconAccessInherit = maybeIcon(['IconWorkspaceTreeOutline16', 'IconWorkspaceTreeOutlineRegular'])

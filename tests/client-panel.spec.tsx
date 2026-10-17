@@ -744,6 +744,18 @@ describe('the panel dialog', () => {
     })
   })
 
+  it('shows the host session mode, effective access and tool caps separately from registration', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', mode: 'danger-full-access', cappedTools: ['bash'],
+      roots: [{ ...ROOT_A, access: 'inherit', effectiveAccess: 'full-access' }], limit: 16, count: 1 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText(/mode.danger-full-access/)).toBeTruthy() })
+    expect(document.querySelector('.mrfw-effectiveAccess')?.textContent).toContain('effective.full-access')
+    expect(document.querySelector('.mrfw-accessBadge')?.textContent).toContain('access.inherit')
+    expect(screen.getByText(/panel.toolCaps/)).toBeTruthy()
+  })
+
   it('keeps the re-register route open at the root limit, and it sends no access', async () => {
     const harness = mount()
     // count >= limit: a full store, one of whose records is withheld.
@@ -828,6 +840,20 @@ describe('the panel dialog', () => {
       expect(Array.from(document.querySelectorAll('.mrfw-accessBadge')).map(node => node.textContent))
         .toEqual([`${NS}.access.readWrite`, `${NS}.access.readWrite`])
     })
+  })
+
+  it('confirms fixed read-write changing to Full-access inheritance before sending the mutation', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', mode: 'danger-full-access', roots: [ROOT_A], limit: 16, count: 1 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.more` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessInherit` }))
+    expect(screen.getByRole('dialog', { name: `${NS}.panel.accessUpgradeTitle` })).toBeTruthy()
+    expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessUpgradeDo` }))
+    await waitFor(() => { expect(harness.calls.find(call => call.endpoint === 'setAccess')?.payload.access).toBe('inherit') })
   })
 
   it('localizes a refused upgrade instead of flipping the badge', async () => {

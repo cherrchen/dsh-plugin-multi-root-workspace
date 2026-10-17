@@ -125,6 +125,7 @@ describe('inserted rows', () => {
       'multi-root-instructions',
       'multi-root-lsp',
       'multi-root-workspace-files',
+      'multi-root-process-fence',
       'multi-root-command',
       'multi-root-client',
     ])
@@ -134,7 +135,7 @@ describe('inserted rows', () => {
     const ids = inserted.map(row => row.id)
     const gate = ids.indexOf('multi-root-compat')
     expect(gate).toBe(0)
-    for (const gated of ['multi-root-fs', 'multi-root-sandbox', 'multi-root-registry', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files']) {
+    for (const gated of ['multi-root-fs', 'multi-root-sandbox', 'multi-root-registry', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files', 'multi-root-process-fence']) {
       expect(ids.indexOf(gated), `${gated} must come after the gate`).toBeGreaterThan(gate)
     }
   })
@@ -143,7 +144,7 @@ describe('inserted rows', () => {
     const ids = inserted.map(row => row.id)
     const providers = ids.indexOf('multi-root-providers')
     expect(providers).toBeGreaterThan(-1)
-    for (const gated of ['multi-root-registry', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files']) {
+    for (const gated of ['multi-root-registry', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files', 'multi-root-process-fence']) {
       expect(ids.indexOf(gated), `${gated} must come after the provider-conflict gate`).toBeGreaterThan(providers)
     }
   })
@@ -178,8 +179,13 @@ describe('inserted rows', () => {
     })
   })
 
-  it('defaults the scope row to no per-tool caps', () => {
+  it('defaults the scope row to no per-tool caps and wires the DSH-home boundary', () => {
     const scope = inserted.find(row => row.id === 'multi-root-scope')
-    expect(scope?.config).toMatchObject({ toolAccess: {} })
+    expect(scope?.config).toMatchObject({ toolAccess: {}, dshHome: 'dshHomePath()' })
+  })
+
+  it('wires the same DSH home onto the command row so isolate-profiles inspects the protected home', () => {
+    const command = inserted.find(row => row.id === 'multi-root-command')
+    expect(command?.config).toMatchObject({ dshHome: 'dshHomePath()' })
   })
 })

@@ -55,6 +55,10 @@
       "types": "./lib/types/workspace-files.d.ts",
       "default": "./lib/workspace-files.js"
     },
+    "./process-fence": {
+      "types": "./lib/types/process-fence.d.ts",
+      "default": "./lib/process-fence.js"
+    },
     "./windows-runner": {
       "types": "./lib/types/windows-runner.d.ts",
       "default": "./lib/windows-runner.js"
@@ -69,7 +73,9 @@
     "README.en.md",
     "CHANGELOG.md",
     "CHANGELOG.en.md",
-    "LICENSE"
+    "LICENSE",
+    "scripts/windows-broker/*.ps1",
+    "scripts/windows-broker/*.cs"
   ],
   "publishConfig": {
     "access": "public"

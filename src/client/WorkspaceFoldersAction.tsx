@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
+  IconAccessInherit,
   IconAccessReadOnly,
   IconAccessReadWrite,
   IconChevronDown,
@@ -41,7 +42,7 @@ import {
 } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { Key } from './locales.ts'
-import type { RootEntryView, RootState, RootView, RootsView } from '../contract.ts'
+import type { RootAccess, RootEntryView, RootState, RootView, RootsView } from '../contract.ts'
 
 /** Translate one key of this plugin's namespace. */
 export type Translate = (key: Key, params?: Record<string, unknown>) => string
@@ -168,6 +169,27 @@ export function stateKey(state: RootState): Key {
   }
 }
 
+/** The locale key for one registration's access level. */
+export function accessKey(access: RootAccess): Key {
+  switch (access) {
+    case 'inherit': return 'access.inherit'
+    case 'read-only': return 'access.readOnly'
+    case 'read-write': return 'access.readWrite'
+  }
+}
+
+/**
+ * Whether moving FROM `from` TO `to` could widen the agent's write authority
+ * under some session mode. The three levels are not a total order — `inherit`
+ * is weaker than `read-write` under a read-only session but never weaker
+ * under the others — so the check is spelled out per pair rather than
+ * computed from a rank. Only a widening change asks for confirmation.
+ */
+export function widensAccess(from: RootAccess, to: RootAccess): boolean {
+  if (from === 'read-only') return to !== 'read-only'
+  return (from === 'inherit' && to === 'read-write') || (from === 'read-write' && to === 'inherit')
+}
+
 /** The final segment of an absolute path, on either platform separator. */
 export function basename(path: string): string {
   const segments = path.split(/[\\/]/).filter(segment => segment !== '')
@@ -246,8 +268,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     noSession: false,
   })
   const [manualPath, setManualPath] = useState('')
-  /** The access the Add controls register new roots with; `read-write` is the historical default. */
-  const [addAccess, setAddAccess] = useState<'read-write' | 'read-only'>('read-write')
+  /** The access the Add controls register new roots with; `inherit` is the default. */
+  const [addAccess, setAddAccess] = useState<RootAccess>('inherit')
   /**
    * Whether the operator actually picked a level. The select shows its default
    * before they do, and sending that default would be an explicit value the
@@ -256,8 +278,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
    */
   const [accessChosen, setAccessChosen] = useState(false)
   const [accessMenuOpen, setAccessMenuOpen] = useState(false)
-  /** The read-only root waiting on the upgrade confirmation's red button. */
-  const [upgradeFor, setUpgradeFor] = useState<RootView | undefined>(undefined)
+  /** The widening access change waiting on the confirmation's red button. */
+  const [upgradeFor, setUpgradeFor] = useState<{ root: RootView; access: RootAccess } | undefined>(undefined)
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
@@ -479,7 +501,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   // The host refuses the add as `root-limit-reached` anyway; disabling here is
   // what makes the refusal explain itself before the operator clicks.
   const atLimit = state.view !== undefined && state.view.count >= state.view.limit
-  const IconAccessTrigger = addAccess === 'read-only' ? IconAccessReadOnly : IconAccessReadWrite
+  const IconAccessTrigger = addAccess === 'read-only' ? IconAccessReadOnly
+    : addAccess === 'read-write' ? IconAccessReadWrite : IconAccessInherit
   // Captured as consts: narrowing does not reach the onCopy closures below.
   const primaryPath = state.view?.primaryRoot
   const cwdPath = state.view?.effectiveCwd
@@ -518,6 +541,13 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           ) : (
             <>
           <p className="mrfw-description">{t('panel.subtitle')}</p>
+          {state.view?.mode === undefined ? null : <p className="mrfw-note">
+            {t('panel.mode')} {t(`mode.${state.view.mode}`)}
+          </p>}
+          {state.view?.toolAccessInvalid ? <p className="mrfw-note">{t('panel.invalidCap')}</p>
+            : (state.view?.cappedTools?.length ?? 0) > 0 ? <p className="mrfw-note">
+              {t('panel.toolCaps', { tools: state.view!.cappedTools!.join(', ') })}
+            </p> : null}
 
           {state.error === undefined ? null : (
             <p role="alert" className="mrfw-alert">
@@ -589,8 +619,11 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     {/* The access level rides beside the name as read-only
                         text; changing it stays behind the row's … menu. */}
                     <span className="mrfw-accessBadge">
-                      {t(root.access === 'read-only' ? 'access.readOnly' : 'access.readWrite')}
+                      {t(accessKey(root.access))}
                     </span>
+                    {root.effectiveAccess === undefined ? null : <span className="mrfw-effectiveAccess">
+                      {t('panel.effectiveAccess')} {t(`effective.${root.effectiveAccess}`)}
+                    </span>}
                   </span>
                   <PathCopy
                     path={root.path}
@@ -635,12 +668,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   onClose={() => { setMenuFor(undefined) }}
                   items={[
                     { id: 'rename', label: t('panel.rename'), icon: <IconEdit /> },
-                    {
-                      id: 'access',
-                      label: t(root.access === 'read-only' ? 'panel.accessReadWrite' : 'panel.accessReadOnly'),
-                      icon: <IconEdit />,
-                      disabled: state.busy,
-                    },
+                    { id: 'access:inherit', label: t('panel.accessInherit'), disabled: state.busy || root.access === 'inherit' },
+                    { id: 'access:read-only', label: t('panel.accessReadOnly'), disabled: state.busy || root.access === 'read-only' },
+                    { id: 'access:read-write', label: t('panel.accessReadWrite'), disabled: state.busy || root.access === 'read-write' },
                     { id: 'remove', label: t('panel.remove'), icon: <IconTrash />, danger: true, disabled: state.busy },
                   ]}
                   onSelect={(id) => {
@@ -649,13 +679,12 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       setAliasFor(key)
                       setAliasDraft(root.alias ?? '')
                     }
-                    if (id === 'access') {
-                      const access = root.access === 'read-only' ? 'read-write' : 'read-only'
-                      // Upgrading widens what the agent may modify, so it is
-                      // the one access change that asks first — through the
-                      // confirmation layered over this dialog, not the
-                      // browser's window.confirm.
-                      if (access === 'read-write') { setUpgradeFor(root); return }
+                    if (id.startsWith('access:')) {
+                      const access = id.slice('access:'.length) as RootAccess
+                      // Widening what the agent may modify — under ANY session
+                      // mode — asks first, through the confirmation layered
+                      // over this dialog, not the browser's window.confirm.
+                      if (widensAccess(root.access, access)) { setUpgradeFor({ root, access }); return }
                       void mutate('setAccess', { entry: entryOf(root), access })
                     }
                     if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
@@ -725,6 +754,11 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               className="mrfw-accessSelect"
               items={[
                 {
+                  id: 'inherit',
+                  label: t('access.inherit'),
+                  icon: IconAccessInherit === undefined ? undefined : <IconAccessInherit />,
+                },
+                {
                   id: 'read-write',
                   label: t('access.readWrite'),
                   icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />,
@@ -738,7 +772,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               selectedId={addAccess}
               onSelect={(id) => {
                 setAccessMenuOpen(false)
-                if (id === 'read-write' || id === 'read-only') {
+                if (id === 'inherit' || id === 'read-write' || id === 'read-only') {
                   setAccessChosen(true)
                   setAddAccess(id)
                 }
@@ -759,7 +793,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   onClick={() => { setAccessMenuOpen(open => !open) }}
                 >
                   {IconAccessTrigger === undefined ? null : <IconAccessTrigger />}
-                  {t(addAccess === 'read-only' ? 'access.readOnly' : 'access.readWrite')}
+                  {t(accessKey(addAccess))}
                   {accessMenuOpen ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
                 </button>
               )}
@@ -779,14 +813,14 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
         </div>
       </div>
     </div>
-    {/* The write-access grant asks first: a host-modal confirmation layered
+    {/* A widening access change asks first: a host-modal confirmation layered
         over this dialog — cancel or a mask click dismisses, the red button
-        commits the setAccess mutation. Downgrades skip this entirely. */}
+        commits the setAccess mutation. Narrowing changes skip it entirely. */}
     <Modal
       open={upgradeFor !== undefined}
       onClose={() => { setUpgradeFor(undefined) }}
       title={t('panel.accessUpgradeTitle')}
-      description={t('panel.accessUpgradeConfirm')}
+      description={upgradeFor === undefined ? '' : t('panel.accessUpgradeConfirm', { access: t(accessKey(upgradeFor.access)) })}
       closeLabel={t('panel.close')}
       footer={(
         <>
@@ -798,7 +832,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               const pending = upgradeFor
               setUpgradeFor(undefined)
               if (pending !== undefined) {
-                void mutate('setAccess', { entry: entryOf(pending), access: 'read-write' })
+                void mutate('setAccess', { entry: entryOf(pending.root), access: pending.access })
               }
             }}
           >

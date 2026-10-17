@@ -28,11 +28,14 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/command
  */
 
+import { isAbsolute } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
+import { effectiveRootAccess } from './contract.ts'
+import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session'
@@ -61,6 +64,13 @@ import {
   type RootRef,
   type RootStatus,
 } from './roots.ts'
+import {
+  applyIsolateConfig,
+  isolateReport,
+  remediationSteps,
+  type ApplyReport,
+  type IsolateReport,
+} from './profile-isolation.ts'
 
 /** Services this row needs before it may activate. */
 export const inject = ['commands', 'sandboxPolicy', 'multiRootRegistry']
@@ -71,7 +81,7 @@ export const COMMAND_NAME = 'workspace-folders'
 /** One parsed command line. */
 export interface FoldersCommand {
   /** The subcommand; `list` when the line named none. */
-  readonly verb: 'list' | 'add' | 'remove' | 'alias' | 'access' | 'reveal' | 'help'
+  readonly verb: 'list' | 'add' | 'remove' | 'alias' | 'access' | 'reveal' | 'isolate-profiles' | 'help'
   /** Everything after the verb, verbatim (paths may contain spaces). */
   readonly rest: string
 }
@@ -95,6 +105,7 @@ export function parseFoldersCommand(rawInput: string): FoldersCommand {
     case 'alias':
     case 'access':
     case 'reveal':
+    case 'isolate-profiles':
     case 'help':
       return { verb, rest }
     default:
@@ -126,6 +137,7 @@ export function renderRootsReport(
   statuses: readonly RootStatus[],
   unavailable?: string,
   limit?: number,
+  mode?: SandboxMode,
 ): string {
   const lines = [`Workspace root (primary; access follows the current sandbox mode): ${primaryRoot}`]
   if (unavailable !== undefined) {
@@ -157,21 +169,33 @@ export function renderRootsReport(
       )
     }
   }
-  const writable = statuses.filter(status => status.state === 'available' && status.access === 'read-write').length
-  lines.push(`Writable additional roots: ${writable} of ${statuses.length}.`)
+  // "Writable" is mode-relative under the three-state contract (B9): an
+  // `inherit` root is writable only when the session is not read-only, while
+  // a fixed `read-write` root stays writable under every mode.
+  const writable = statuses.filter(status => status.state === 'available'
+    && status.access !== 'read-only'
+    && (mode !== 'read-only' || status.access === 'read-write')).length
+  lines.push(`Writable additional roots${mode === undefined ? '' : ' under the current mode'}: ${writable} of ${statuses.length}.`)
   return lines.join('\n')
+}
+
+/** The command-row config: the canonical DSH home `isolate-profiles` inspects. */
+export interface CommandConfig {
+  /** `$DSH_HOME` as the host resolved it — an absolute path, or the verb fails. */
+  readonly dshHome?: string
 }
 
 /**
  * Register the command and, where a host Connection exists, the panel channel.
  * @param ctx - the host context carrying `commands`, `sandboxPolicy`, and the registry.
+ * @param config - the row's config; `dshHome` feeds `isolate-profiles` only.
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: CommandConfig = {}): void {
   ctx.commands.register({
     name: COMMAND_NAME,
-    description: 'List, add, remove, alias, or reveal the additional workspace roots of this session',
-    input: { hint: '[list|add [path] [--read-only|--read-write]|remove <n|path>|alias <n|path> [name]|access <n|path> <level>|reveal <n|path>|help]' },
-    handler: async invocation => await runCommand(ctx, invocation),
+    description: 'List, add, remove, alias, or reveal the additional workspace roots of this session, or isolate DSH profile imports',
+    input: { hint: '[list|add [path] [--inherit|--read-only|--read-write]|remove <n|path>|alias <n|path> [name]|access <n|path> <level>|reveal <n|path>|isolate-profiles [--apply]|help]' },
+    handler: async invocation => await runCommand(ctx, invocation, config),
   })
 
   // Soft: a profile without the browser host half (headless, sdk) simply has no
@@ -199,7 +223,7 @@ export function apply(ctx: Context): void {
 }
 
 /** Execute one `/workspace-folders` invocation. */
-async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<CommandResult> {
+async function runCommand(ctx: Context, invocation: CommandInvocation, config: CommandConfig): Promise<CommandResult> {
   let parsed: FoldersCommand
   try {
     parsed = parseFoldersCommand(invocation.rawInput)
@@ -215,7 +239,7 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
       case 'help':
         return { kind: 'success', text: helpText() }
       case 'list':
-        return { kind: 'success', text: await report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
       case 'add': {
         const { text: rest, access } = splitAddAccess(parsed.rest)
         const typed = unquote(rest)
@@ -227,30 +251,41 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
           }
         }
         await registry.add(primaryRoot, { path, ...(access === undefined ? {} : { access }) })
-        return { kind: 'success', text: await report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
       }
       case 'remove': {
         const { ref } = await targetOf(registry, primaryRoot, parsed.rest)
         await registry.removeAt(primaryRoot, ref)
-        return { kind: 'success', text: await report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
       }
       case 'alias': {
         const { text: reference, rest: alias } = splitReference(parsed.rest)
         const { ref } = await targetOf(registry, primaryRoot, reference)
         await registry.setAlias(primaryRoot, ref, alias === '' ? undefined : unquote(alias))
-        return { kind: 'success', text: await report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
       }
       case 'access': {
         const { text: reference, rest: level } = splitReference(parsed.rest)
         const access = parseAccessLevel(level)
         const { ref } = await targetOf(registry, primaryRoot, reference)
         await registry.setAccess(primaryRoot, ref, access)
-        return { kind: 'success', text: await report(registry, primaryRoot) }
+        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
       }
       case 'reveal': {
         const { status: target } = await targetOf(registry, primaryRoot, parsed.rest)
         await revealRoot(ctx, target.path)
         return { kind: 'success', text: `revealed ${target.path}` }
+      }
+      case 'isolate-profiles': {
+        if (parsed.rest !== '' && parsed.rest !== '--apply') {
+          throw new RootValidationError(
+            'invalid-ref',
+            `isolate-profiles accepts only --apply or nothing, got "${parsed.rest}"`,
+          )
+        }
+        const home = isolateHome(config)
+        const report = parsed.rest === '--apply' ? applyIsolateConfig(home) : isolateReport(home)
+        return { kind: 'success', text: renderIsolateReport(report) }
       }
     }
   } catch (error: unknown) {
@@ -263,9 +298,9 @@ async function runCommand(ctx: Context, invocation: CommandInvocation): Promise<
  * directory. The refresh is what makes the report describe the present rather
  * than the moment the process started.
  */
-async function report(registry: MultiRootRegistry, primaryRoot: string): Promise<string> {
+async function report(registry: MultiRootRegistry, primaryRoot: string, mode?: SandboxMode): Promise<string> {
   const statuses = await registry.refresh(primaryRoot)
-  return renderRootsReport(canonicalRoot(primaryRoot), statuses, registry.unavailable, registry.limit)
+  return renderRootsReport(canonicalRoot(primaryRoot), statuses, registry.unavailable, registry.limit, mode)
 }
 
 /** Render a failure the way the composer displays it. */
@@ -274,18 +309,102 @@ function failureText(error: unknown): string {
   return `/${COMMAND_NAME}: ${error instanceof Error ? error.message : String(error)}`
 }
 
+/**
+ * The DSH home `isolate-profiles` inspects — the row config's `dshHome`,
+ * an absolute path. Missing or invalid is a verb failure, not a guess: the
+ * home is the protected root the deny writer scans, and a wrong guess would
+ * either read the wrong tree or pretend a home was checked when none was.
+ */
+function isolateHome(config: CommandConfig): string {
+  const home = config.dshHome
+  if (typeof home !== 'string' || !isAbsolute(home)) {
+    throw new RootValidationError(
+      'config-invalid',
+      `isolate-profiles needs this row's dshHome config to be an absolute path, got ${JSON.stringify(home)}`,
+    )
+  }
+  return home
+}
+
+/**
+ * Render the `isolate-profiles` report: one line per confirmed profile, the
+ * whole-home scan counts, then — on `--apply` — the per-profile action and
+ * the remediation steps. An incomplete scan is always called out, because an
+ * uninspectable entry is not evidence the home is clean.
+ */
+function renderIsolateReport(report: IsolateReport | ApplyReport): string {
+  const lines: string[] = [
+    `/${COMMAND_NAME} isolate-profiles — pnpm import isolation for the DSH home`,
+    `DSH home: ${report.home}`,
+  ]
+  if (report.profiles.length === 0) {
+    lines.push('No confirmed profiles under profiles/ (a profile is a directory whose package.json has dsh.profile as an object).')
+  }
+  for (const profile of report.profiles) {
+    const yaml = profile.yaml
+    const state = yaml.state === 'copy'
+      ? 'packageImportMethod: copy — isolated on the next install'
+      : yaml.state === 'absent'
+        ? 'packageImportMethod is unset — pnpm defaults to hardlinks'
+        : yaml.state === 'conflict'
+          ? `conflict: ${yaml.detail ?? 'needs a manual fix'}`
+          : `unreadable: ${yaml.detail ?? 'cannot be read'}`
+    lines.push(`  ${profile.name}: ${state}`)
+  }
+  if (report.nonProfileEntries.length > 0) {
+    lines.push(`${report.nonProfileEntries.length} entr(ies) under profiles/ are not confirmed profiles and were left untouched:`)
+    for (const entry of report.nonProfileEntries) lines.push(`    ${entry}`)
+  }
+  const scan = report.scan
+  lines.push(`Home scan: scanned ${scan.directories} dirs/${scan.files} files, ${scan.multiLinkTotal} multi-link files, ${scan.uninspectableTotal} uninspectable`)
+  for (const path of scan.multiLinkPaths) lines.push(`    multi-link: ${path}`)
+  if (scan.multiLinkTotal > scan.multiLinkPaths.length) {
+    lines.push(`    … and ${scan.multiLinkTotal - scan.multiLinkPaths.length} more multi-link file(s)`)
+  }
+  for (const entry of scan.uninspectable) lines.push(`    uninspectable: ${entry.path} (${entry.reason})`)
+  if (report.scan.uninspectableTotal > scan.uninspectable.length) {
+    lines.push(`    … and ${scan.uninspectableTotal - scan.uninspectable.length} more uninspectable entr(ies)`)
+  }
+  if (report.incomplete) {
+    lines.push(`INCOMPLETE: ${scan.uninspectableTotal} entr(ies) could not be inspected — this report must not be read as clean.`)
+  }
+  const stuck = report.profiles.filter(profile =>
+    profile.yaml.state === 'unreadable' || (profile.yaml.state === 'conflict'))
+  if (stuck.length > 0) {
+    lines.push('Profiles listed as conflict/unreadable are refused by --apply: fix or remove their pnpm-workspace.yaml by hand, then re-run.')
+  }
+  if ('actions' in report) {
+    lines.push('Apply results:')
+    for (const action of (report as ApplyReport).actions) {
+      lines.push(`  ${action.name}: ${action.action}${action.detail === undefined ? '' : ` — ${action.detail}`}`)
+    }
+    lines.push(...remediationSteps(report))
+  } else {
+    lines.push(`This was a read-only check; run /${COMMAND_NAME} isolate-profiles --apply to write packageImportMethod: copy into every fixable profile.`)
+    lines.push('A configured profile still needs its dependencies reinstalled to become copies — the check reports, --apply configures, the reinstall is yours.')
+  }
+  return lines.join('\n')
+}
+
 /** The command's own help text. */
 function helpText(): string {
   return [
     `/${COMMAND_NAME} — additional workspace roots of this session`,
     `  /${COMMAND_NAME} list`,
-    `  /${COMMAND_NAME} add [absolute path] [--read-only|--read-write]   (no path opens the directory picker when one is composed)`,
+    `  /${COMMAND_NAME} add [absolute path] [--inherit|--read-only|--read-write]   (no path opens the directory picker when one is composed)`,
     `  /${COMMAND_NAME} remove <n|path>`,
     `  /${COMMAND_NAME} alias <n|path> [name]  (no name clears the alias)`,
-    `  /${COMMAND_NAME} access <n|path> read-only|read-write`,
+    `  /${COMMAND_NAME} access <n|path> inherit|read-only|read-write`,
     `  /${COMMAND_NAME} reveal <n|path>`,
+    `  /${COMMAND_NAME} isolate-profiles [--apply]   (report or set packageImportMethod: copy for every profile under $DSH_HOME)`,
     'Roots are canonicalized before they are stored: `~` expands, and a duplicate, a nested directory,',
     "or this session's own workspace root is rejected.",
+    'Access levels: `inherit` follows the session mode; `read-only` refuses writes under every mode;',
+    '`read-write` stays writable even in a read-only session.',
+    '`isolate-profiles` exists because a Windows deny ACE applies to the file object, not one hardlink name:',
+    'profiles whose dependencies are hardlinked into the pnpm store make `$DSH_HOME` unsafe to deny;',
+    'the check scans the whole home (links > 1, uninspectable entries) and --apply rewrites the yaml atomically,',
+    'but the existing hardlinks are replaced only by the reinstall the report prints.',
   ].join('\n')
 }
 
@@ -297,11 +416,11 @@ function helpText(): string {
  * The access is TRI-STATE on purpose: it stays `undefined` when the operator
  * named no level. `registry.add` revives a withheld record with its stored
  * access unless a level is given explicitly, so forwarding a default here
- * would silently upgrade a read-only registration to read-write.
+ * would silently change the registration's authority.
  */
 function splitAddAccess(text: string): { text: string; access: RootAccess | undefined } {
   const trimmed = text.trim()
-  for (const access of ['read-only', 'read-write'] as const) {
+  for (const access of ['read-only', 'read-write', 'inherit'] as const) {
     const flag = `--${access}`
     if (trimmed === flag) return { text: '', access }
     if (trimmed.startsWith(`${flag} `) || trimmed.startsWith(`${flag}\t`)) {
@@ -317,8 +436,8 @@ function splitAddAccess(text: string): { text: string; access: RootAccess | unde
 /** Parse the access level an `access` subcommand must end with. */
 function parseAccessLevel(text: string): RootAccess {
   const trimmed = text.trim()
-  if (trimmed === 'read-only' || trimmed === 'read-write') return trimmed
-  throw new RootValidationError('invalid-ref', `the access level must be read-only or read-write, got "${trimmed || 'nothing'}"`)
+  if (trimmed === 'read-only' || trimmed === 'read-write' || trimmed === 'inherit') return trimmed
+  throw new RootValidationError('invalid-ref', `the access level must be inherit, read-only, or read-write, got "${trimmed || 'nothing'}"`)
 }
 
 /**
@@ -457,11 +576,20 @@ async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoo
   const primaryName = await primaryNameOf(ctx, primaryRoot, request)
   const session = ctx.get('sessions')?.get(request.sessionId as SessionId)
   const effectiveCwd = session === undefined ? undefined : effectiveDirectory(ctx, session)
+  // Session origin and policy are host-derived; the request carries neither.
+  if (session === undefined) throw new RootValidationError('session-not-found', 'the panel session closed during the request')
+  const policy = ctx.sandboxPolicy.resolve({ session })
+  const scope = ctx.get('multiRootScope')
   return {
     primaryRoot: canonicalRoot(primaryRoot),
     ...(primaryName === undefined ? {} : { primaryName }),
     ...(effectiveCwd === undefined ? {} : { effectiveCwd }),
-    roots: statuses.map(toRootView),
+    mode: policy.mode,
+    cappedTools: scope?.toolCaps() ?? [],
+    toolAccessInvalid: scope?.toolAccessInvalid ?? false,
+    roots: statuses.map((status, index) => ({ ...toRootView(status, index),
+      effectiveAccess: status.state === 'available' ? effectiveRootAccess(status.access, policy.mode) : 'unavailable',
+    })),
     limit: registry.limit,
     count: statuses.length,
     ...(unavailable === undefined ? {} : { unavailable }),

@@ -16,6 +16,7 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { canonicalPath, isWindowsNetworkOrDevicePath, parseWindowsProfile, workspaceScopeSid } from './windows-runner-contract.ts'
+import { runWindowsDenied } from './windows-deny.ts'
 
 async function main(): Promise<number> {
   if (process.platform !== 'win32') throw new Error('Windows ACL runner requires Windows')
@@ -23,7 +24,16 @@ async function main(): Promise<number> {
   const separator = raw.indexOf('--')
   if (separator < 0 || raw[separator + 1] === undefined) throw new Error('missing command after --')
   const profile = parseWindowsProfile(raw.slice(0, separator), true)
-  const roots = [...new Set([profile.workspace, ...profile.additionalRoots])]
+  if (profile.mode === 'danger-full-access') {
+    return await runWindowsDenied(profile.upstreamRunner!, profile.deniedRoots, raw.slice(separator + 1), profile.protectedHome)
+  }
+  // Under `workspace-write` the grant set is the workspace plus every
+  // additional root. Under `read-only` (B9's fixed `read-write` cell) the
+  // grant set is the additional roots ALONE: the workspace-write token is what
+  // expresses "only these dirs writable", the workspace itself staying denied.
+  const roots = profile.mode === 'read-only'
+    ? [...new Set(profile.additionalRoots)]
+    : [...new Set([profile.workspace, ...profile.additionalRoots])]
   const verifyRoots = (): void => {
     for (const root of roots) {
       if (isWindowsNetworkOrDevicePath(root)) throw new Error(`Windows ACL confinement cannot cover network or device paths: ${root}`)
@@ -40,9 +50,17 @@ async function main(): Promise<number> {
     throw new Error('upstream capability SIDs do not match their paths')
   }
   for (const root of roots) assertTempRootOutsideWorkspace(root, profile.temp)
-  // Own a new private temp capability even when upstream already owns a session temp.
-  const temp = mkdtempSync(join(profile.temp, 'dsh-multi-root-'))
-  const sandbox = new AclSandbox({ writableDirs: roots, tempDir: temp, writeSid: workspaceScopeSid(roots), tempWriteSid: tempWriteSid(temp), mode: 'workspace-write' })
+  // Own a new private temp capability even when upstream already owns a session
+  // temp — read-only mode grants no temp at all (`tempDir: null`), matching the
+  // upstream mode meaning.
+  const temp = profile.mode === 'workspace-write' ? mkdtempSync(join(profile.temp, 'dsh-multi-root-')) : null
+  const sandbox = new AclSandbox({
+    writableDirs: roots,
+    tempDir: temp,
+    writeSid: workspaceScopeSid(roots),
+    ...(temp === null ? {} : { tempWriteSid: tempWriteSid(temp) }),
+    mode: 'workspace-write',
+  })
   let initialized = false
   try {
     await sandbox.init()
@@ -51,8 +69,10 @@ async function main(): Promise<number> {
     // replaced between the two must not be confined under its new target.
     verifyRoots()
     // Update the native environment block inherited by CreateProcessAsUserW.
-    process.env.TMP = temp
-    process.env.TEMP = temp
+    if (temp !== null) {
+      process.env.TMP = temp
+      process.env.TEMP = temp
+    }
     // Keep the runner alive while its console-sharing child handles Ctrl+C.
     process.on('SIGINT', () => {})
     const control = process.env.DSH_SUBPROCESS_CONTROL === 'pipe'
@@ -63,7 +83,7 @@ async function main(): Promise<number> {
     // Match the upstream runner: cleanup diagnostics must not mask a child exit code.
     try { if (initialized) sandbox.dispose() }
     catch (error) { reportCleanup(error) }
-    try { rmSync(temp, { recursive: true, force: true }) }
+    try { if (temp !== null) rmSync(temp, { recursive: true, force: true }) }
     catch (error) { reportCleanup(error) }
   }
 }

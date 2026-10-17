@@ -22,6 +22,7 @@ import {
   isCanonicallyUnder,
   isWindowsNetworkOrDevicePath,
   removeStatusAt,
+  reservedRootBoundary,
   entryRootRef,
   resolveRootRef,
   RootValidationError,
@@ -34,6 +35,7 @@ let fixture: FixtureWorkspace
 let primary: string
 let sibling: string
 let nested: string
+let other: string
 let alias: string
 /** Why the symlink cases cannot run here, when the host refuses directory links. */
 let symlinkReason: string | undefined
@@ -43,9 +45,11 @@ beforeAll(() => {
   primary = canonicalPath(fixture.workspace)
   sibling = join(fixture.base, 'extra')
   nested = join(sibling, 'inner')
+  other = join(fixture.base, 'other')
   alias = join(fixture.base, 'alias')
   mkdirSync(sibling)
   mkdirSync(nested)
+  mkdirSync(other)
   writeFileSync(join(fixture.base, 'a-file'), 'not a directory')
   // Windows refuses a directory symlink without Developer Mode or elevation: the
   // alias cases then skip with the reason instead of failing for a privilege this
@@ -276,10 +280,10 @@ describe('classifyStoredRoots', () => {
   })
 
   it('marks an existing root available and keeps registry order', () => {
-    const statuses = classifyStoredRoots(primary, [stored(sibling), stored(nested, 'n2')])
-    expect(statuses.map(status => status.state)).toEqual(['available', 'invalid'])
+    const statuses = classifyStoredRoots(primary, [stored(sibling), stored(other, 'o2')])
+    expect(statuses.map(status => status.state)).toEqual(['available', 'available'])
     expect(statuses[0]?.path).toBe(canonicalPath(sibling))
-    expect(availableRoots(statuses)).toEqual([canonicalPath(sibling)])
+    expect(availableRoots(statuses)).toEqual([canonicalPath(sibling), canonicalPath(other)])
   })
 
   it('keeps a registration whose directory vanished, as missing rather than invalid', () => {
@@ -294,16 +298,33 @@ describe('classifyStoredRoots', () => {
     expect(classifyStoredRoots(primary, [stored(primary)])[0]?.state).toBe('invalid')
   })
 
-  it('flags the second of two equal records as invalid (first one wins)', () => {
+  it('flags both records of equal recorded boundaries as a membership conflict', () => {
+    // No "first one wins": which side of an equal pair is unusable must never
+    // depend on which record the registry happens to list first.
     const statuses = classifyStoredRoots(primary, [stored(sibling), stored(join(sibling, '.'), 'other')])
-    expect(statuses.map(status => status.state)).toEqual(['available', 'invalid'])
+    expect(statuses.map(status => status.state)).toEqual(['invalid', 'invalid'])
+    expect(statuses.every(status => status.invalidReason === 'membership-conflict')).toBe(true)
+    expect(availableRoots(statuses)).toEqual([])
   })
 
-  it('flags overlapping records in either direction as invalid', () => {
-    const outerFirst = classifyStoredRoots(primary, [stored(sibling), stored(nested, 'n2')])
-    expect(outerFirst[1]?.state).toBe('invalid')
-    const innerFirst = classifyStoredRoots(primary, [stored(nested), stored(sibling, 'n2')])
-    expect(innerFirst[1]?.state).toBe('invalid')
+  it('flags every record of an overlap as a membership conflict, in either direction and either order', () => {
+    // Both sides lose membership while the conflict stands, and the detail
+    // says the trustworthy negative boundary survives — a move is cosmetic
+    // and must never change who is denied.
+    for (const records of [
+      [stored(sibling), stored(nested, 'n2')],
+      [stored(nested), stored(sibling, 'n2')],
+      [stored(nested), stored(join(nested, 'deep'), 'n2'), stored(sibling, 'n3')],
+    ]) {
+      const statuses = classifyStoredRoots(primary, records)
+      expect(statuses.map(status => status.state)).toEqual(records.map(() => 'invalid'))
+      for (const status of statuses) {
+        expect(status.invalidReason).toBe('membership-conflict')
+        expect(status.detail).toContain('overlaps')
+        expect(status.detail).toContain('remains in force')
+      }
+      expect(availableRoots(statuses)).toEqual([])
+    }
   })
 
   it('flags a relative stored path as invalid', () => {
@@ -384,6 +405,110 @@ describe('classifyStoredRoots', () => {
     if (process.platform !== 'win32') {
       expect(classifyStoredRoots(primary, [stored('//host/missing', 'unc-path')])[0]?.state).not.toBe('invalid')
     }
+  })
+
+  it('marks a membership conflict between missing and redirected records too', () => {
+    // Withheld records grant nothing, but their recorded boundaries still
+    // describe restrictions the operator has not removed — a missing record
+    // and a redirected one must collide like two available ones.
+    const gone = join(fixture.base, 'vanished')
+    const statuses = classifyStoredRoots(primary, [
+      stored(gone, 'gone', gone),
+      // Granted for `gone` but now resolving to `sibling`: redirected, and its
+      // recorded boundary still names `gone` — the very boundary above.
+      stored(sibling, 'moved', gone),
+    ])
+    expect(statuses.map(status => status.state)).toEqual(['invalid', 'invalid'])
+    expect(statuses.every(status => status.invalidReason === 'membership-conflict')).toBe(true)
+  })
+
+  it('judges the primary-overlap rule on the recorded boundary, before the redirect check', () => {
+    // The record's path now resolves outside the primary root, but its
+    // recorded grant IS inside it: the current resolution is
+    // attacker-influenceable, so a grant that was inside the workspace must
+    // not come back as `redirected` (withheld-but-revivable).
+    const inside = join(primary, 'inside')
+    const statuses = classifyStoredRoots(primary, [stored(sibling, 'moved', inside)])
+    expect(statuses[0]?.state).toBe('invalid')
+    expect(statuses[0]?.invalidReason).toBeUndefined()
+    expect(statuses[0]?.detail).toContain('overlaps')
+  })
+
+  it('flags a non-absolute recorded boundary as invalid, and lets it claim nothing', () => {
+    const statuses = classifyStoredRoots(primary, [
+      stored(sibling, 'corrupt', 'relative/grant'),
+      stored(nested, 'n2'),
+    ])
+    // The corrupt record is structural-invalid and stays out of pass two —
+    // the overlapping `nested` record is NOT dragged into a conflict with a
+    // boundary that could never be verified.
+    expect(statuses[0]?.state).toBe('invalid')
+    expect(statuses[0]?.invalidReason).toBeUndefined()
+    expect(statuses[1]?.state).toBe('available')
+    expect(availableRoots(statuses)).toEqual([canonicalPath(nested)])
+  })
+
+  it('keeps a multi-grant record out of the conflict pass entirely', () => {
+    // Two grant fields at once can state no trustworthy boundary: it never
+    // conflicts with — and never denies through — the root it overlaps.
+    const statuses = classifyStoredRoots(primary, [
+      { ...stored(sibling, 'corrupt'), readOnlyRecordedPath: nested },
+      stored(nested, 'n2'),
+    ])
+    expect(statuses[0]?.state).toBe('invalid')
+    expect(statuses[0]?.invalidReason).toBeUndefined()
+    expect(statuses[0]?.detail).toContain('more than one grant')
+    expect(statuses[1]?.state).toBe('available')
+    expect(availableRoots(statuses)).toEqual([canonicalPath(nested)])
+  })
+})
+
+describe('reservedRootBoundary', () => {
+  const stored = (path: string, id = path, grant: 'recordedPath' | 'readOnlyRecordedPath' | 'readWriteRecordedPath' = 'recordedPath'): RegisteredRoot => ({
+    id: additionalRootId(id),
+    path,
+    access: 'inherit',
+    [grant]: path,
+    addedAt: '2026-09-12T00:00:00.000Z',
+  })
+
+  it('returns the one recorded grant of every trustworthy status', () => {
+    const gone = join(fixture.base, 'vanished')
+    const statuses = classifyStoredRoots(primary, [
+      stored(sibling),
+      stored(gone, 'gone', 'readOnlyRecordedPath'),
+      // Granted for `other` but now resolving to `sibling`: redirected — and
+      // the reserved boundary is the recorded grant, never the resolution.
+      { ...stored(other, 'moved', 'readWriteRecordedPath'), path: sibling },
+    ])
+    expect(statuses.map(status => status.state)).toEqual(['available', 'missing', 'redirected'])
+    expect(reservedRootBoundary(statuses[0]!)).toBe(sibling)
+    expect(reservedRootBoundary(statuses[1]!)).toBe(gone)
+    expect(reservedRootBoundary(statuses[2]!)).toBe(other)
+  })
+
+  it('keeps the recorded boundary of a membership-conflict record', () => {
+    // A conflicted record grants nothing, but its recorded boundary is exactly
+    // the deny an attacker would like to see lapse — it stays reserved.
+    const statuses = classifyStoredRoots(primary, [stored(sibling), stored(nested, 'n2', 'readOnlyRecordedPath')])
+    expect(statuses.every(status => status.invalidReason === 'membership-conflict')).toBe(true)
+    expect(reservedRootBoundary(statuses[0]!)).toBe(sibling)
+    expect(reservedRootBoundary(statuses[1]!)).toBe(nested)
+  })
+
+  it('returns nothing for a structurally invalid record', () => {
+    const noGrant: RegisteredRoot = {
+      id: additionalRootId('legacy'), path: sibling, access: 'inherit', addedAt: '2026-09-12T00:00:00.000Z',
+    }
+    const noGrantStatus = classifyStoredRoots(primary, [noGrant])[0]!
+    expect(noGrantStatus.state).toBe('invalid')
+    expect(reservedRootBoundary(noGrantStatus)).toBeUndefined()
+    const ambiguous = classifyStoredRoots(primary, [{ ...stored(sibling, 'corrupt'), readOnlyRecordedPath: nested }])[0]!
+    expect(ambiguous.invalidReason).toBeUndefined()
+    expect(reservedRootBoundary(ambiguous)).toBeUndefined()
+    const notAbsolute = classifyStoredRoots(primary, [{ ...stored(sibling, 'corrupt2'), recordedPath: 'relative' }])[0]!
+    expect(notAbsolute.invalidReason).toBeUndefined()
+    expect(reservedRootBoundary(notAbsolute)).toBeUndefined()
   })
 })
 

@@ -40,6 +40,8 @@
 | 第二期 | B6 附加根数量上限 | `maxAdditionalRoots` 默认 16、顶 64；按全部存储记录计数；超限存量照授只拒新增；非法配置 fail closed | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0014](../../decisions/ADR-0014-root-limit-and-provider-conflict.md) | `067933f` | 未发布 |
 | 第二期 | B7 provider 冲突检测 | 品牌 + `multi-root-providers` 门禁；外来 `ctx.fs`/`ctx.sandbox` 下注册表缺席、scope 为空 | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0014](../../decisions/ADR-0014-root-limit-and-provider-conflict.md) | `2a36d5f` | 未发布 |
 | 第二期 | B8 平台感知提示词 | `renderWorkspaceRootsContext` 纯函数化；按模式/平台/访问级别陈述授权；win32 附带 partial-enforcement 说明 | [B4–B8](./2026-10-11-b4-b8-p2.md) | [0013](../../decisions/ADR-0013-per-root-and-per-tool-access.md) | `a7f3d20` | 未发布 |
+| 第二期 | B9 附加根三态权限与跨 SandboxMode 执行一致性 | 继承 / 只读 / 读写；显式根权限覆盖会话模式默认行为，文件与新进程执行一致；先验证 Full-access 局部限权 | [B9 计划](../completed/2026-10-13-b9-root-access-and-sandbox-modes.md) | [0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)；并修订 [0001](../../decisions/ADR-0001-provider-replacement-scope.md)/[0003](../../decisions/ADR-0003-dialect-grant-widening.md)/[0011](../../decisions/ADR-0011-multi-root-workspace-consumers.md)/[0012](../../decisions/ADR-0012-session-origin-and-effective-cwd.md)/[0013](../../decisions/ADR-0013-per-root-and-per-tool-access.md) | — | B9 实施与原生验收完成；Windows 普通 deny-only 组与暂停赋值、Linux bubblewrap 补局部只读；保留 Windows partial 边界，未发布 |
+| 第二期 | 分支安全审查修复（R1–R4） | 负授权规则统一（R2/R3）、Windows 祖先路径稳定性（R1）、硬链接失败关闭与 profile 隔离（R4） | [审查计划](./2026-10-16-branch-security-review-and-hardlink-isolation.md) | [0017 修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)、[0004 修订](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[0020 修订](../../decisions/ADR-0020-windows-normal-deny-groups.md) | — | Phase A（R2/R3）、B（R1）、C1（全根硬链接预检）与 C2（`/workspace-folders isolate-profiles` 命令、迁移与冒烟）已实施，门禁已执行（771 通过 / 49 跳过，冒烟四项实跑通过）；POSIX 原生内核未验证；未发布 |
 | 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 
 ## 总体策略
@@ -470,3 +472,190 @@ PR #7 原 HEAD `1c914b5` 的 [CI run 36987457760](https://github.com/cherrchen/d
 本机开发 pin `0.2.1-alpha.2`：P1 与 P2 各自完成时 `pnpm lint` / `typecheck` / `test` / `build` / `docs:check` / `smoke`（compose 46、behavior 99、journey 62）全绿；P10 完成时 lint / typecheck / test / build / docs:check 全绿（未跑 smoke）；P11 完成时 lint / typecheck / test（37 文件 537 passed / 22 skipped）/ build / docs:check / smoke（compose 46、behavior 99、journey 62）全绿。web 组合三态（无附加根原生观感 / 附加根选中接管 / 切回主根还原）的目检见计划 Validation 记录。
 
 本轮 PR #11 审查修复（2026-10-12，未发布）：四项修复与回归面见[计划的 Review corrections](../completed/2026-10-12-files-header-root-browsing.md#review-corrections2026-10-12)，关联读取约束见 ADR-0011。开发 pin `0.2.1-alpha.2` 上 compat / lint / 双端 typecheck / build / docs:check 全通过；原生 macOS 内核探针确认 Seatbelt 可用，并在 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt` 下运行全套测试（**549 passed / 22 skipped**）、三冒烟（compose **46/46**、behavior **99/99**、journey **62/62**）、pack:check（**92 个成员**）与 packed behavior（**98/98**），全部通过。外层 Agent 沙箱中的探针仍报告 `sandbox_apply: Operation not permitted`，原生验证在该沙箱之外完成；本轮其他版本与 Linux / Windows 的执行证据以本次提交触发的 CI 为准。
+
+## B9：附加根三态权限与跨 SandboxMode 执行一致性（2026-10-13）
+
+用户要求为第二期补充 B9，覆盖 P1 / P2 的沙箱与根权限问题。目标权限合同和完整实施路径见 [B9 专项计划](../completed/2026-10-13-b9-root-access-and-sandbox-modes.md)，本节不复制权限矩阵。
+
+- **进度**：Phase 1 审查与定案完成（2026-10-13），决策写入 [ADR-0017](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)，ADR-0001/0003/0011/0012/0013 已按修订节同步。定案：三档编码 `recordedPath`→`inherit`（旧 read-write 记录自动改为继承）、`readOnlyRecordedPath`→`read-only`、新增 `readWriteRecordedPath`→固定读写；新增根默认 `inherit`；PTC（run_code）纳入 B9。**Phase 2–4 实现已落地（2026-10-14）**：注册表三档 + 迁移、scope 有效权限与 deny 集投影、fs fence 三态化、命令 `--inherit` 与面板三态、`ctx.sandbox` 受限 confine（`restrictedArgvPrefix`）与四方言 profile 变换、新增 `multi-root-process-fence` 行以 ALS + `spawn`/`spawnTerminal` 包装覆盖 shell / PTC / PTY 的 Full-access bypass。**两个组合按定案显式拒绝（spawn 前 fail closed，不计为已实现）**：Landlock Full-access + 局部只读——「尝试扩展」结论为不可行，上游启动器只有 `--ro`/`--rw` allowlist union，无法对 `--rw` 祖先做子树减法；Windows ACL 同组合——上游 runner 只导出 grant 模型（`AclSandbox`/`AclWriteGrant`），无 deny ACE 或受限 token 原语，新机制延后并在 ADR-0017 标注。Windows read-only + 固定读写经独立 runner `--mode read-only` + `--additional-root` 实现，仅授权固定根。
+- **首个关口**：已核对——全部 11 个支持版本的 bash / pwsh / PTY / PTC 在 Full-access 下绕过 `confine()`；接缝定案为公开方法包装（`ctx.shell.execute`/`ctx.ptcRuntime.execute` 注入 ALS、`ctx.subprocess.spawn` 按 ALS confine、`ctx.subprocess.spawnTerminal` 由 env 会话标记恢复策略），不新增替换行。
+- **本轮证据范围**：文档规划、11 个支持版本的执行链源码核对、真实 composition dump；`pnpm vitest run` 575 通过 / 22 跳过（含新增 `tests/process-fence.spec.ts` 16 例：受限 prefix、ALS 注入、PTY 会话解析 fail-closed、撤销对下一进程生效、各后端 deny 边缘）；`pnpm docs:check` 通过。**Seatbelt 已获 macOS 原生执行证据**：`sandbox-exec` CLI 直接验证两种构造（`(allow default)+(deny file-write* (subpath R))` 下 R 内写 EPERM、ambient 写放行；deny-default + graft `(allow file-write* (subpath W))` 下 W 内写放行、其余写 EPERM；且验证 deny 必须拼 canonical 路径——`/tmp` 词法拼写不匹配 `/private/tmp` 实路径，这正是 deny 集取 `recordedPath` 的原因），`smoke:behavior` 105/105 在真实组合内端到端复验（只读会话下 inherit 根拒写、固定读写根经 fs/dialect/confined bash 三面可写，0 skip）。`smoke:compose` 48/48、`smoke:journey` 62/62、`pack:check` 与 `smoke:packed` 104/104（打包产物含 `multi-root-process-fence` 行）全绿。bwrap / Landlock / Windows ACL 的原生执行证据待对应平台补齐；结构确认不当作原生证据。不借用 B4–B8 的绿灯作为 B9 证据。
+- **Windows 重新纳入（2026-10-13）**：用户撤回先前延后决定；新增 [ADR-0019](../../decisions/ADR-0019-windows-token-attributes-and-conditional-acls.md)，并按修订节更新 ADR-0017 / ADR-0011。独立 runner 的 ambient token-attribute 路径接入现有 shell / PTC / PTY fence；原生回归覆盖混合根九格、PowerShell / Node 后代、受保护 DACL、overwrite / delete / rename / ACL edits、弱化令牌仍拒写、ConPTY 与 fd 7。行为冒烟及 packed 冒烟增加真实 Full-access pwsh 的主根 / 未登记目录 / 固定读写允许、显式只读拒写、移除后新进程可写断言。本机开发 pin `0.2.1-alpha.2` 上 compat / lint / 双端 typecheck / build / docs:check / pack:check 全通过；测试 **574 passed / 33 skipped**，compose **48/48**，behavior **95 passed / 6 skipped**，journey **55 passed / 2 skipped**，packed behavior **94 passed / 6 skipped**。本机外层沙箱禁止 Seatbelt 嵌套（`sandbox_apply: Operation not permitted`），Windows 原生组按平台跳过，原生结果须由本次提交 CI 确认，不能以 macOS 结构测试代替。
+- **Windows 原生开发结果（2026-10-13，尚未验收）**：PR #12 的原生 CI 已实际运行新九格 / pwsh / Node 后代 / ConPTY / fd 7。restricting deny SID prototype 能通过普通文件矩阵，但 WRITE_RESTRICTED 漏掉根重命名，改完整 restricting check 后重命名被拒；token 副本保护继续被 actual impersonation 写入证伪（CI [38341055967](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38341055967)，输出 escaped）。条件 ACL prototype 改用 mandatory local attribute，但设置 TokenSecurityAttributes 返回 **Win32 1314**（CI [38342020870](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38342020870)），普通宿主缺少 SeTcbPrivilege；启动 fail closed，条件 ACL 后续尚未取得原生证据。当前 Windows Full-access 局部只读不能记为已完成，是否引入需管理员安装的最小 SYSTEM broker 等待用户范围决定。ADR-0018 标记被替代，ADR-0019 保持 Proposed；不得去掉实际令牌弱化回归来获取绿灯。
+- **发布状态**：未发布，未指定目标版本；本轮不修改兼容 allowlist、创建 tag 或发版。
+
+### B9 审查修复批次（2026-10-13）
+
+- 第一批：失效登记保留负授权边界，Registry 刷新/重启不解除只读；成员资格与写授权继续 withheld。新增缺失目录重建、刷新/重启与显式移除回归。同时补齐面板会话模式/有效权限/工具 cap、两向继承切换确认和三模式模型 cap 说明。开发 pin 的相关七文件测试 194 passed，lint、双端 typecheck 与 docs:check 通过。其余批次与原生矩阵继续执行，不据此将 B9 标记完成。
+
+- 第二批：实现管理员安装的每用户 SYSTEM token-attribute broker；普通 runner 在 Win32 1314 时请求服务，并读回 mandatory/inheritable 属性后继续 ACL 与 spawn。服务只允许给同用户 restricted token ADD 固定拒写属性，资源限时限长，不接受命令或 ACL 操作；安装源码随 tarball 发布，Windows CI 原生验证前安装。用户已授权继续开发，先前等待范围决定的状态由本条取代；原生执行验收继续跟进。
+
+- 第三批：Full-access shell/PTC 结果补齐实际后端诊断，保留 execution 身份/缓存，PTC 改用公开 run 接缝；Landlock 组合选择 bubblewrap 并保持 ambient 文件/进程/设备语义；bwrap 临时区的只读根保持可读。客户端样式与双语回归同步修正，真实组合/packed 冒烟扩展到各 OS 的 Full-access 与 PTC。实际执行证据随后记录。
+
+- 第三批本机验收：开发 pin 0.2.1-alpha.2；compat / lint / 双端 typecheck / build / docs:check / pack:check 全通过。原生 Seatbelt probe 通过并强制执行对应内核断言：测试 593 passed / 26 skipped（其他平台不算本机证据），compose 48/48、behavior 126/126、journey 62/62、packed behavior 125/125，所有冒烟 0 skip。Windows broker 原生 CI 已通过编译和安装，已修复属性查询 ABI；完整 Windows 与 Linux bwrap 证据继续由当前提交矩阵确认。
+
+- 第四批：矩阵发现并修复旧版 shell 的公开前台 run 入口绕过（不能只包 execute/start）、Windows 管道必须先读取再取得 impersonation 身份、跨平台 POSIX profile 路径比较，以及原生测试将 Landlock 成功运行的 partial warning 误判为 runner 失败。新增独立 runner 证据分类、九格 edit、三模式工具 cap 和真实 Koffi UTF-16 回归；兼容笔记双语同步。Windows 弱化令牌反绕过断言保留，新的矩阵继续验证。
+
+### B9 暂停交接（2026-10-13）
+
+用户要求暂停开发并准备交接。B9 **未完成、未验收、未发布**，继续工作需要用户恢复任务。用户此前已授权具体实现 Windows ADR-0019，不能把拒绝启动作为最终结果，也不能删除弱化令牌实际写入回归来获取绿灯。
+
+- 仓库：`/Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace`；分支 `feat/sandbox-permision-harden`；[PR #12](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/12)。最新开发提交 `e472de4` 已推送。此次交接前工作树干净；本节是暂停后唯一文件修改，尚未提交/推送。PR 已更新实现说明，但最后的测试数字和 Windows 失败事实尚需在恢复后同步。
+- 已推送批次：`55cb262` 失效只读边界/有效权限；`1c822db` SYSTEM broker；`9f00548` Framework 编译歧义；`e946389` 属性查询 ABI；`598df54` 进程诊断/Linux 混合权限；`7c4e99f` UTF-16 指针解码；`e472de4` 旧 shell run/管道认证读取顺序/原生证据分类。
+- 本机最终原生验证：开发 pin `0.2.1-alpha.2`，Seatbelt 内核断言强制运行；测试 **598 passed / 26 skipped**，compose **48/48**、behavior **126/126**、journey **62/62**、packed behavior **125/125**，冒烟全部 0 skip。compat、lint、双端 typecheck、build、docs:check、pack:check 通过。其他平台的跳过不是本机原生证据。
+- 当前 [CI 38348496627](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38348496627) 对应 `e472de4`，暂停时仍在运行，不取消。已成功32个 job（包括 versions job），另有两个 macOS job 运行中。**全部11个 Windows 版本失败**；应在恢复后重新读取最终结果。Linux latest 和 Ubuntu 22.04 的原生执行已有通过结果，不能据此认为 Windows 完成。
+
+**必须首先处理的 Windows 缺陷**：broker 已通过编译、管理员安装、管道认证、设置 mandatory/inheritable 属性与 runner 读回；进程可以启动，但条件 ACL 没有兑现拒写。`tests/windows-native.e2e.ts` 的完整矩阵、mutation/弱化令牌、ConPTY 三组失败：显式只读根返回 `allowed`；overwrite/delete/rename/弱化令牌组出现 `escaped`；ConPTY 只读写入也放行。代表 job `115135351095`（`0.1.7-alpha.2, windows-latest`），原始日志在本机 `/tmp/b9-broker-handshake.log`（约693–780行；临时文件可能在后续会话消失，以 CI 为准）。启动成功绝不能作为拒写验收。
+
+排查入口：`src/windows-deny.ts` 的 token 构造/属性读回/`protect()`/child spawn，`src/compat/windows-native.ts` 的公开进程 seam，`scripts/windows-broker/service.cs`。目前条件表达式为 `(Exists DshMultiRootDeniedRoots && DshMultiRootDeniedRoots Contains "<root-id>")`，条件 deny 放在 ACL 首位。普通 token 设置 Win32 1314 已通过 broker 解决；新失败根因尚未证明。下一步应直接核验真正子进程 token 是否保留属性、条件 ACE 是否匹配，而不是继续修改无证据的兼容分支。Chromium 的公开属性实现使用本地属性名和 mandatory flags，可作为 ABI 参照；不要把 `@User` 属性与本地属性混为一谈。
+
+**已修复的兼容风险（恢复后第一批提交）**：`src/compat/process-result.ts` 的 `decorateProcessOutcome()` 曾把旧 shell `start()` 返回的活跃后台 handle 交给 `stampProcessResult()` 展开复制，丢失原型、live 字段和方法身份——上游 `processOutcome(proc)` 与 `renderProcessRead(proc.readOutput(), proc.sandbox)` 都读同一对象，副本会冻结 `status`/`exitCode` 并脱离消费者持有的实体。现改为：handle 形态（`done` settle 钩子、可调成员或非平凡原型）保持身份原地返回，`sandbox` 戳记推迟到 `done` 结算时按上游 `onProcessDone` 语义原地写入；结算 stderr 由 `process-fence.ts` 的 spawn 包装器经 `SubprocessHandle.collected.stderr.readFrom(0)`（游标无关、全版本契约）捕获并作为 diagnostics 传入。回归覆盖 live handle 身份/取消/轮询、结算戳记、runner 失败分类与无 diagnostics 退化；本机 602 passed / 27 skipped。
+
+恢复后顺序：读取本节与 ADR-0017/0019、双语兼容笔记；检查 Git/最终 CI 状态；修复以上两个问题；运行相应本机检查并分批提交推送；保留 Windows 原生反绕过测试，确认11版本×4系统完整 gate；更新本账本和 PR 最终证据后才能记完成。版本 allowlist、版本号和 tag 均未变更，用户没有要求发布。
+
+CI 日志读取：`gh api --allow-escape-sequences repos/cherrchen/dsh-plugin-multi-root-workspace/actions/jobs/<job-id>/logs > /tmp/b9-job.log`。`gh run view --log-failed` 会尝试写受限制的默认 cache；上述 API 可避开。Git 写操作及本机脱离外层沙箱的 Seatbelt 原生执行需要工具的 `require_escalated`；前述提交/推送与测试已有授权。不要输出完整 journey/smoke 日志，其中可能含临时 web 认证令牌。
+
+### B9 交接续作：普通 deny-only 组候选（2026-10-13）
+
+收到外部 Agent 的交接并恢复开发。起点 `b947250` 干净且已推送；旧 start() 活句柄与 stderr 诊断改动保留。复核 CI 38376966866：UserClaimAttributes 写入在两种 token 上均返回 87；`@User` Exists 探针的 PowerShell 非终止 SDDL 错误导致 ACE 未装入，该探针不能证明求值。当前改用 [ADR-0020](../../decisions/ADR-0020-windows-normal-deny-groups.md) 候选：NtCreateTokenEx 镜像调用方身份，仅增加普通 deny-only groups，普通 deny ACE 不依赖属性求值；弱化测试增加 disable 全部普通组后的真实写入。B9 仍未完成、未发布，Windows 原生与完整门禁正在验证。
+
+候选提交 `13af289` 的本机门禁：compat/typecheck/lint/build/docs 全通过；602 passed / 26 平台跳过，随后加入 broker 响应边界回归后 609 passed / 26 平台跳过；Seatbelt probe 通过，compose 48/48、behavior 126/126、journey 62/62、packed behavior 125/125，所有冒烟 0 skip。CI [38391229281](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38391229281) 的 Windows C# 编译通过、服务启动失败，尚未到达 token / 拒写断言。续作将 token-create 特权错误移到可回传的请求阶段，并让现有单版本 diag workflow 在相关 PR 编辑时运行；完整 CI 门禁不减少。弱化测试进一步要求实际激活成功且写返回 EPERM/EACCES，增加受限调用方向 broker 请求重建 token 的拒绝断言。
+
+单版本 [diag 38391811054](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38391811054) 明确失败为 `EnablePrivilege(SeCreateTokenPrivilege) win32=1300`，LocalSystem 并不持有候选需要的 token-create 特权。续作改用 ADR-0020 的专用虚拟服务账户和仅该 SID 的固定 LSA rights；完整 CI 旧候选轮次已取消，继续保留全矩阵验收要求。
+
+专用账户候选 `7d49dfb` 的 [diag 38393091968](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38393091968) 已通过账户 rights 配置及服务启动，实际请求在 `OpenProcessToken(client)` 返回 Win32 5。修正为仅在短暂模拟已认证 pipe caller 期间获取其 process-token QUERY/QUERY_SOURCE handle，随后恢复服务身份进行创建；不放宽 token DACL，也不接受客户端提供身份。
+
+候选 `4969e15` 的 [diag 38393550613](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38393550613) 已越过 token handle 获取，下一处失败为信息查询 size 检查。空 claim/group 通道改为提供至少 16 字节的已清零 buffer 进行实际查询，必须确认第二次 API 调用成功；不能从 sizing 失败推断空集合。所有查询错误现在带信息类编号及 Win32 码。
+
+候选 `f7c753e` 的 [diag 38394060369](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38394060369) 已越过全部 source 信息查询并执行 NtCreateTokenEx，返回 NTSTATUS c000000d / Win32 87。续作补齐 ObjectAttributes 的 SECURITY_QUALITY_OF_SERVICE（SecurityImpersonation）；另拒绝源 token 的可继承 local 属性，以免创建时丢掉原有属性约束。
+
+候选 `5e65a2f` 的 [diag 38395468655](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38395468655) 给出参数对照：原始 groups 创建成功（base=0）；增加直接 deny-only groups 后 extended、no-policy、legacy 均 c000000d。改为仅在 broker 内创建普通组，随即以 CreateRestrictedToken 转成 deny-only 并移除 bypass privileges，服务不回传中间 token；runner 再过滤并验证普通组 deny-only / 非 enabled，不把 mandatory 位当作抗删除依据。普通组与可删除 restricting list 的区别仍由原生弱化测试验证。
+
+候选 `83139a2` 的 [diag 38396216276](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38396216276) 已通过 NtCreateTokenEx、服务内转换 deny-only、runner 再过滤及组读回，失败移到 CreateProcessAsUserW / Win32 1314：broker 创建的 token 不属于 runner 自身的直接派生，不能享受免 SeAssignPrimaryTokenPrivilege 的启动例外。续作的本地候选新增仅对 caller-owned 初始暂停子进程设置 token 的 v3 操作；helper 创建 flag、parent PID、线程归属、源身份与实际 child token 回读均须验证，失败终止且不 Resume。专用服务账户需要另增 SeAssignPrimaryTokenPrivilege，用户已明确授权该新增权限及提交、推送、原生 CI 验证；不为宿主用户授予特权，不把 argv 或路径传给服务。
+
+暂停赋值候选 `43e0a26` 的 [diag 38399814375](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38399814375) Windows 原生 18/18 全通过，包括真实弱化 token 激活后拒写及 broker 重建拒绝。完整矩阵同一提交发现 `0.1.5-rc.2` 的公开 process binding 缺少 GetFileType，fd 7 用例失败；兼容层通过公开 extension seam 补齐，保留原生回归，不缩小版本矩阵。补充安装、升级、卸载的真实 LSA policy 回读验证，要求预存服务权限与其他账户权限不变。完整门禁尚待最终结果。
+
+### B9 最终验收（2026-10-13，未发布）
+
+实现提交 `006637a` 的 [完整 CI 38400586253](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38400586253) 全部通过：11 个精确支持版本 × Windows / macOS / Ubuntu latest / Ubuntu 22.04 = 44 个 verify job，另加 releases 与总 gate，46/46 success。各版本执行 compat、lint、双端 typecheck、build、kernel probe、单元与原生测试、compose / behavior / journey、pack / packed smoke、docs；Windows 在安装 broker 后运行，结束卸载并撤销新增权限。全部 11 个 Windows job 的原生 ACL suite 18/18 通过；包括 overwrite / delete / rename / ACL reset、protected descendants、两种真实 token 激活后拒写、disable 全部普通组后的拒写、broker 重建拒绝、ConPTY / fd 7 与宿主写允许。
+
+[diag 38400586259](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38400586259) 额外验证服务安装、升级、卸载的实际 LSA policy；预存服务登录权保留，其他账户权限不变。Mac 本机最终 618 passed / 26 其他平台跳过，Seatbelt probe 通过，compose 48/48、behavior 126/126、journey 62/62、packed behavior 125/125 全部 0 skip；compat / lint / typecheck / build / pack / docs 通过。
+
+Phase 5 完成，专项计划移至 completed；ADR-0020 Accepted，ADR-0019 保留 Superseded 历史。用户已分别明确授权提交推送、专用服务账户及包括 SeAssignPrimaryTokenPrivilege 在内的固定权限集合。未合并 PR #12、未创建 tag、未发布；完整门禁不扩大 allowlist，Windows 仍报告 partial，授权快照、standing ACL、path-based TOCTOU 与 owner/parent 操作边界见 ADR-0020 及其链接的 ADR-0018。
+
+### B9 外部审查返工（2026-10-14，PR #12 评审）
+
+外部评审复现两个 Full-access P1 绕过，另有一项 Linux 可用性问题；三处修复设计经用户批准，合同与残余记录于 [ADR-0017 修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#外部审查返工修订2026-10-14pr-12-评审) 与 [ADR-0007 第三轮修订](../../decisions/ADR-0007-registry-authority-lease.md#第三轮修订2026-10-14b9-评审返工)。
+
+- **权限未知 ≠ 没有限制（P1）**：`registry-contended` 进程发布空 scope 后，Full-access 的 fs / 进程 fence 曾把空 deny 集当作「无限制」放行 ambient 写，可覆写另一进程登记的 `read-only` 根。修复：scope 新增 `authority: 'available' | 'unavailable'`（注册表在构造、contended、storage-failed、config-invalid、releaseAuthority 转场标 `unavailable`，`openDomain` 发布完全部记录后标 `available`）；不可用时 fs fence 以 `writableRoots({mode:'workspace-write'})` 判定（仅主根 + temp，不并入 scope 成员），进程 fence 用 `clampedExecution`（`workspace-write` 探针 + 原 profile 前缀）钳制 shell / PTC / PTY，`spawnTerminal` 不可解析会话经 `hasActiveDenyRoots()` 自动拒绝；模型拓扑在 Full-access + 不可用时固定陈述降级句。
+- **Full-access 不再沿用旧 FsTarget（P1）**：`checkedTarget` 只在 Full-access 且 deny 集为空时返回调用方 target（零根逐字节保持上游）；其余一律重解析 displayPath、以新 `targetKey` 判 deny 并以新 target 执行 mutation——评审的「父目录被换成指向只读根的符号链接」绕过被关闭。
+- **bwrap deny 根改用 `--ro-bind-try`（历史决定，已取代）**：此前 `--ro-bind <missing recordedPath>` 使 bwrap 启动即失败，一个被删除的只读根会打断全部 Full-access shell（或其位于 temp 时的 workspace-write 命令）。deny / restrict（含 landlock→bwrap）均改 `--ro-bind-try`；当时记录了命名空间内可重建目录的残余，后续 P1 确认 fs fence 无法兜底进程写入，以下修订撤回该决定。
+
+回归：新增 `tests/b9-review-regressions.spec.ts`（反转的两条 P1 复现：争用进程写只读根与 ambient 区均拒写、接管后恢复；stale target 的 write/edit 均拒写）；scope / registry-lease 增加 authority 状态断言；process-fence 增加 clamped prefix（与上游 `workspace-write` confined argv 逐项一致）与不可解析终端断言；dialects 期望改 `--ro-bind-try`；prompt-context 增加降级句。本机门禁输出见交接报告；未发布，版本号与 allowlist 不变。
+
+#### 用户终端直通与 `$DSH_HOME` 负授权（2026-10-14 第二批）
+
+两项用户产品决策，合同记录于 [ADR-0017 修订节](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#用户终端直通与-dsh_home-负授权修订2026-10-14)。
+
+- **面板用户终端任何模式不受约束**：原 `spawnTerminal` 按 `env.DSH_SESSION_ID` 恢复会话的机制把面板用户终端（controller 同盖该标记）误伤为受限对象。判别改为 `DSH_PTY_SESSION_ID`：全部 11 个支持版本的 `dsh-terminal-bash` backend 启动 agent PTY 时经 `childEnvironment` 盖该标记（与 `DSH_SESSION_ID` 并列），面板 controller 不盖——env 无该标记即用户终端，任何模式直通；有则按 `DSH_SESSION_ID` 恢复会话与策略，会话不可解析且 `hasActiveDenyRoots()` 时 fail closed。`ctx.terminals` 不包装：`optional-persistent-terminals` 组 `isolate: terminals` 使 registry 在 web profile 不可达，env 判别同时覆盖隔离与未隔离挂载。
+- **`$DSH_HOME` 受限 Full-access 负授权**：scope 新增 `dshHome` 配置（patch 行 `dshHomePath()`；非法值记 error 忽略）。`danger-full-access` 且（deny 集非空或 authority `unavailable`）时把 canonical home 追加进 `deniedRoots`（`protectedHome`），`workspace-write` / `read-only` 与零根健康 authority 不追加；主根在 home 内时 deny 胜出。fs 有专用拒写文案；`clampedExecution` 改收 deny 集并按 workspace-write 分支规则 graft（POSIX `denyProfileArgs`、Windows `widenWindowsProfile(…, [], denied, primary)`），不可表达 → `SandboxUnavailableError`；模型拓扑固定陈述 home 拒写。Windows 风险如实记录：该 deny 经 `runWindowsDenied` 对 home 整树写**持久化** deny ACE（含父目录守卫），ambient 进程不受影响但存在 ACL 写入量与节点失败面。
+
+回归：process-fence agent/user 终端分轨断言（controller 形状直通、backend 形状受限/钳制、不可解析会话 fail closed）、scope `protectedHome` 触发矩阵、b9-review-regressions home 拒写（含主根位于 home 内）、patch 行 `dshHome`、prompt-context home 陈述句。未发布；版本号与 allowlist 不变。
+
+
+#### 最新 P1：缺失拒写根的 bubblewrap 挂载（2026-10-14）
+
+PR #12 的最新 Code Reviewer 指出 `--ro-bind-try` 会在只读根被删除时跳过挂载，使 Full-access 进程可重建并写入该路径。deny / restrict（含 Landlock fallback）统一改回强制 `--ro-bind`，源缺失时拒绝启动；workspace-write 可写父挂载同样失败关闭。决策、代价与回归场景见 [ADR-0017 缺失根修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#缺失-deny-根必须失败关闭2026-10-14pr-12-最新-p1)。新增 `tests/missing-deny-root.spec.ts`；未发布，版本与 allowlist 不变。
+
+验证：新增三项构造回归在旧实现上均失败，修复后通过；开发 pin 的 compat、lint、双端 typecheck、build、docs:check、pack:check 通过。原生 Seatbelt probe 通过；完整测试 643 通过 / 29 平台跳过（含新增的 3 项 Linux 原生用例）；compose 48/48、behavior 126/126、journey 62/62、packed behavior 125/125，全部冒烟 0 skip。本机为 macOS，bubblewrap / Landlock 不可用，Linux 原生缺失源执行证据待推送后的 CI，不把结构断言记为原生验证。
+
+#### 四项审查修复（2026-10-15）
+
+基于 PR #12 头部 `5103979` 复现并修复：未知 registry authority 保留共享 temp grant 的 fs/进程绕过；四后端遗漏 deny 祖先覆盖 grant 的反向相交；Windows broker 无法容纳 64 根加 home 与历史超限存量；安装记录写入失败未撤销新增 LSA rights。权限决定见 [ADR-0017 本轮修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#临时区与反向包含修订2026-10-15)，有界 IPC、超预算显式拒绝与安装回滚见 [ADR-0020 本轮修订](../../decisions/ADR-0020-windows-normal-deny-groups.md#协议容量与安装回滚修订2026-10-15)。未发布，版本号与兼容 allowlist 不变。
+
+本机 macOS 开发 pin：compat、lint、双端 typecheck、build、docs:check、pack:check 通过；原生 Seatbelt probe 与含新增回归的完整测试 **668 通过 / 33 平台跳过**；compose **48/48**、behavior **126/126**、journey **62/62**、packed behavior **125/125**，全部冒烟 0 skip。新增 Windows 原生 64/80 根加 home、primary-only 执行，以及真实 LSA/SCM 的三类失败注入随本次 CI 验证；本机不把平台跳过记为 Windows/Linux 原生证据。
+
+#### 祖先改名解除拒写修复与文档/接缝收尾（2026-10-15）
+
+PR #12 评审的又一处 P1：deny 根的祖先目录被改名即可把整棵树搬出 subpath deny（Seatbelt 只检查被操作路径，fs fence 的 deny 集仍记旧 `recordedPath`）。修复钉住每个祖先：Seatbelt deny 形式追加 `(literal A)`（restrict 与 workspace-write covered 根一致），bwrap 把祖先 `--bind A A` 自绑成挂接点使 `rename` 返回 EBUSY（restrict 全量钉扎、workspace-write 只钉可写 bind 目标内的祖先，tmpfs 内与挂载点自身不绑，ro-bind 仍在最后）；Windows deny ACE 随目录对象走，不受影响。代价：受限 Full-access 进程不能 rename/chmod/touch 被拒根与 `$DSH_HOME` 的祖先目录（目录内读写不变）。决定、复现与取舍见 [ADR-0017 本节](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#祖先目录改名不得解除拒写2026-10-15pr-12-评审-p1)；Linux 侧由 bwrap 原生 CI 用例验证，本机无 Linux。
+
+同批收尾：进程栅栏的入口形状探测收进 `src/compat/process-entrypoints.ts`（shell `execute`/`run`/`start` 与 PTC 公开 `run`，业务代码不再出现版本注释）；Full-access 拓扑在存在拒写根时补「授权变化只对后续操作与新进程生效」句；README/CHANGELOG/指南补齐 B9 三态合同与两条边界说明（Landlock 主机上受限 Full-access 需要 bwrap 否则拒绝启动；持久终端/已运行进程保留启动时 deny 集）。未发布，版本号与 allowlist 不变。
+
+#### Windows 真机验证（2026-10-16）
+
+Windows 实机（非 CI）验证暴露两个 CI 不可见的问题，处置经用户定案，决策细节见 [ADR-0020 本轮修订](../../decisions/ADR-0020-windows-normal-deny-groups.md#过滤令牌放行与打包子进程诊断2026-10-16windows-真机验证)：
+
+- **UAC 过滤令牌被误拒**：`TokenHasRestrictions` 拒绝规则挡住全部非提权 UAC 管理员 runner（`Caller process must be an unrestricted installation identity`）。改判为拒绝 `IsTokenRestricted` 与 `TokenIsAppContainer`、放行 filtered token——minted token 逐位镜像调用方身份，放行不扩权。**升级后需 `install.ps1` 重装 broker**。
+- **打包子进程保持 fail-closed，加诊断**：Store/MSIX 版 `pwsh.exe`（别名与包内真实 exe 均验证走打包激活，「直接执行包内 exe」候选证伪）携带包身份，`NtCompareTokens` 必不等。runner 在赋值前用 `GetPackageFullName` 探测，对打包子进程给出指向 MSI/ZIP 版的可操作诊断。
+
+真机验证数字：
+
+- **提权侧**（broker 按当前源码重装，ZIP 版 pwsh 7.6.0 居 PATH 首位）：`windows-native.e2e` **24/24**（含三条新增用例：filtered caller 放行、受限子进程嵌套 deny 集、打包子进程诊断；remint 用例改判为验证 deny-only 组被保留）；smoke:behavior **126/0/0**、smoke:packed **125/0/0**。
+- **改动前的提权基线**：compat/lint/typecheck/build/kernel:probe/docs 通过；compose **48/0/0**。`working-directory.e2e`（2 用例）与 journey 的「pwsh saw the other repository's diff」仅在提权下失败（提权创建的目录归 Administrators，git 报 dubious ownership）；非提权下通过：**5/5**、journey **62/0/0**。
+- **改动后的非提权侧**：探针矩阵——node `denied:EPERM`、Store 别名 exit 127 且报打包诊断、ZIP pwsh `denied:UnauthorizedAccessException`；smoke:behavior **126/0/0**（先清除上一提权运行留下的 Administrators 属主 `%TEMP%\dsh-multi-root-smoke` 残留后）、smoke:journey **62/0/0**、smoke:packed **104 通过 / 1 跳过**（见残余 2）；`windows-native.e2e` **22/24**，2 个失败均为仅提权可构造的夹具（另一驱动器 `C:\` 根的 ACL 写入、指定外国属主）；完整 `pnpm test` **676 通过 / 2 失败（同两条）/ 46 跳过**；compat/lint/typecheck/docs 通过。
+- CI run 38767014622（commit 21369d9，win32 断言修复提交）：**47/47 全绿**。
+
+残余（真机发现，未修改）：
+
+- **属主残余**：runner 的 deny 遍历要求每个路径归调用方所有。提权会话创建的路径属主为 BUILTIN\Administrators，而 filtered token 仅以 deny-only 形式持有该组。此类路径若为只读根或位于 `$DSH_HOME` 内，非提权的受限 Full-access 启动会 fail-closed 报 `deny ACL requires caller-owned path`（安全但不可用，须先修正属主，例如 `icacls <path> /setowner <user> /T`）。
+- **pnpm 硬链接残余**：pnpm 把全局 store（`%LOCALAPPDATA%\pnpm\store`）中的包文件硬链接进 `$DSH_HOME` 各 profile 的 `node_modules`，也链进其他项目。硬链接共享同一份安全描述符，因此 `$DSH_HOME` 的 deny 遍历会把常驻 deny ACE 写到 store 文件及其全部链接上。已用 `fsutil hardlink list` 验证：一个仓库文件与 store 及另两个项目共享链接。而 store 文件若是提权安装所建，遍历会 fail-closed（即非提权 `smoke:packed` 的跳过原因：`...\dsh-plugin-multi-root-workspace\CHANGELOG.md` 非调用方所有）。跳过硬链接不安全——文件内容写受文件自身 ACL 约束，跳过的链接会让受限子进程改动 `$DSH_HOME` 内的插件代码。留作用户的开放决策。
+
+未发布，版本号与 allowlist 不变。
+
+## 分支安全审查修复（2026-10-16 起，门禁已执行）
+
+`feat/sandbox-permision-harden` 的分支安全审查（[2026-10-16 审查计划](./2026-10-16-branch-security-review-and-hardlink-isolation.md)）确认 R1–R4 四条发现；修复按计划的三阶段推进，本节记录进度与证据。
+
+### Phase A：统一负授权规则（R2 + R3，已实施）
+
+- **R2 修复**：`widenForScope` 的 read-only 分支在 graft 固定读写根之后同样应用 `denyProfileArgs`——Seatbelt 在 allow 之后追加 deny（last match wins），bwrap 沿用缺失根失败关闭决定使用强制 `--ro-bind`，Landlock 对不可表达的子树减法 fail closed（`SANDBOX_UNAVAILABLE`）；windows-acl 此前已拒绝同一重叠。同步/Promise 形状与上游 `enforcement` / `denialSignatures` / `runnerFailureRules` 不变。
+- **R3 修复**：`classifyStoredRoots` 改两遍分类——第一遍逐条独立判定（recorded boundary 绝对性、以其判主根重叠先于 redirect），第二遍对全部结构有效记录的 recorded boundary 两两比较，任一重叠双方判 `membership-conflict` invalid：成员资格 withheld 但 recorded 边界仍作为 deny 发布，结果与展示顺序/重启无关。`registry.add` 改用 `reservedRootBoundary` 收集保留边界（missing、redirected、冲突记录都算），仅按索引豁免精确复活的同一行。结构损坏记录照旧不发布任何投影。
+- **本批证据**：`pnpm exec vitest run tests/roots.spec.ts tests/registry.spec.ts tests/missing-deny-root.spec.ts tests/sandbox-multi-root.spec.ts tests/b9-review-regressions.spec.ts` —— 130 通过 / 27 跳过（平台与内核原生用例）；`pnpm typecheck`、`pnpm docs:check` 通过。新增回归：mocked 上游 `confine` 的四方言 read-only 组合（POSIX 形状在 Windows 上亦可跑，sync/Promise 两路）、missing/redirected 子根双向包含拒绝、redirected 保留原边界、legacy 重叠两种顺序均判冲突且 deny 保留、重建缺失只读子根后真实 `MultiRootFileSystem` writeText/edit 拒写且内容不变。
+- **明确未做**：Phase B（R1）另行实施见下节；Phase C（R4，硬链接预检 + profile 隔离命令）未开始；完整门禁（compat:check、lint、build、完整 test、kernel:probe、三项 smoke、pack:check、smoke:packed）与 macOS/Linux 原生执行留待实施验收阶段统一运行——mocked 上游的 profile 构造验证不充当 POSIX 内核拒写证据。
+- **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。
+
+### Phase B：Windows 祖先路径钉扎（R1，已实施）
+
+- **机制**：`src/compat/windows-path-guard.ts` 经公开 `extendWin32ProcessBindings` 接缝绑定 CreateFileW 等原语，为每个 deny 根钉住从卷根到根本身的去重祖先链——每个目录持有 GENERIC_READ + 读/写共享（不含 delete sharing）的常驻句柄，实机探测否决了 FILE_READ_ATTRIBUTES 属性级句柄（不参与删除共享门）。同句柄校验目录属性、非重解析点、`HANDLE_FLAG_INHERIT` 清零、内核最终 DOS 拼写一致；任一环失败逆序释放并拒绝启动，不写任何祖先链持久 ACL。
+- **runner 集成**：`runWindowsDenied` 在 token 请求与 ACL 编辑之前获取钉住；`closeSync(7)` 与 `waitForProcessExit` 包入子进程 try 后，先 `terminateWindowsJobAndWait`（TerminateJobObject + ActiveProcesses 轮询至零，无超时）排空 Job 再关句柄，钉住在全部资源清理中最后释放。runner 被强制终止为异常边界——句柄随进程消亡、后代由 kill-on-close 兜底。
+- **本批证据**：`pnpm exec vitest run tests/windows-native-adapter.spec.ts` —— 26 通过（新增 mocked Job 排空：先 terminate 再轮询至 ActiveProcesses=0、Sleep(10) 间隔、Win32 失败不透传）；`pnpm exec vitest run tests/windows-native.e2e.ts -t "ancestor guard|preserves ConPTY output and the control descriptor"` —— 5 通过：真实受限子进程 rename deny 根父/祖父目录均拒绝、ambient 写仍可用，宿主 `MultiRootFileSystem` 对原拼写 writeText/editText 仍 `FS_SANDBOX_DENIED` 且内容不变；退出子进程的 Job 后代被排空（pid 死亡先于钉住释放、逃逸标记未写出）；ConPTY terminate 后钉住释放且无存活进程；祖先被 DELETE 独占句柄预占时发布版 runner 在 spawn 前 127 拒绝；ConPTY 输出与 fd 7 控制描述符回归不变。原型组「deny path guard」4 通过 / 1 跳过（本机无第二可写固定盘，第二驱动器钉扎未验证）。`pnpm build`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:check` 通过。
+- **明确未做**：Phase C（R4，硬链接预检 + profile 隔离）未开始；完整门禁与 macOS/Linux 原生执行仍留待实施验收阶段。
+- **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。
+
+### Phase C1：Windows 全根硬链接预检（R4，已实施）
+
+- **机制**：`src/compat/windows-deny-preflight.ts` 在祖先钉住之后、任何 token 请求 / ACL 编辑 / 锁工作之前，对全部 deny 根做只读递归预检——FILE_READ_ATTRIBUTES + 全共享打开、`GetFileInformationByHandle` 读身份、`GetFileType` 要求普通文件为磁盘类型，每个检查句柄在下行前关闭；任一打开 / 类型 / 身份 / 目录列出失败（含句柄关闭失败，聚合保留原始错误）都使启动在零副作用点拒绝并报出根与路径。任一普通文件 `links > 1` 一律拒绝：快照无法证明链接拓扑，保守不试图证明——不跳过 `node_modules`，不做全局重置。诊断区分「protected DSH home」（指向挂起的 `/workspace-folders isolate-profiles`）与登记根（建立独立副本）。
+- **写侧收紧**：ACL 遍历消费快照（深度优先序），目录继承与否由快照属性决定；写目录继承 ACE 前比对即时 `readdir` 名单与快照名单；`protect` 在即将写 ACL 的活句柄上 `verifyHandle` 复核属性位 / 卷序列 / 文件索引 / link 计数；根父目录守卫（树外、无快照）是唯一豁免 `verifyContent` 的调用且不启用 OICI。非事务性如实记录：复核到写之间的恶意并发外部修改仍可能竞过，零副作用只承诺到预检失败点。
+- **标签透传**：`--protected-home` 只做诊断标签——`scope.protectedHome` 经 `restrictedExecution` / `restrictedArgvPrefix` 第四可选参、`restrictWindowsProfile`、runner 契约解析（仅 standalone `danger-full-access`、须为 deny 根成员）传到 `runWindowsDenied`，不改变任何授权。
+- **本批证据**：`pnpm exec vitest run tests/windows-native-adapter.spec.ts tests/windows-multi-root.spec.ts tests/process-fence.spec.ts` —— 73 通过（新增 7 项 mocked 预检用例：快照序 / 句柄协议 / 硬链接与 home 标签 / 重解析不下降 / 打开·读·列出·关闭失败与聚合 / verifyHandle 身份与 link 复核；parser 标签校验与 fence 标签转发）；`pnpm exec vitest run tests/windows-native.e2e.ts -t "hardlink preflight|ancestor guard"` —— 11 通过：深层硬链接、末根硬链接首根零变化、同树双名、protected home 标签拒绝、不可读文件拒绝、junction 目标未扫描未改写、独立副本成功且外部原件不变——SDDL 前后快照逐字节比对，全部失败都在任何 ACL 副作用之前 127 退出且子进程哨兵未创建。`pnpm build` 通过。
+- **明确未做**：C2——`/workspace-folders isolate-profiles` 命令、profile 迁移与硬链接冒烟夹具未实施；完整门禁与 macOS/Linux 原生执行仍留待实施验收阶段。
+- **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。
+
+### Phase C2：profile 硬链接隔离命令与冒烟夹具（R4，已实施）
+
+- **命令与检查**：`/workspace-folders isolate-profiles` 落地为宿主侧维护命令（面板无端点），默认只读检查、`--apply` 迁移。`src/profile-isolation.ts` 只认 `profiles/` 下 `package.json` 可解析且 `dsh.profile` 为对象的真实目录；整 home 递归扫描统计目录 / 文件 / `nlink>1` 与不可检查项，任一不可读子树报 incomplete 不报干净；home 本身是重解析点即拒绝检查，profile 内重解析点只计数不下降。
+- **保守 YAML 迁移**：不引入 yaml 运行期依赖——`parseWorkspaceYamlKeys` 是严格子集扫描器，拒绝缩进 tab、指令 / 文档标记、重复顶层键、非 `key:` 顶层行及 `&` `*` `!` `|` `>` `{` `[` 起始的复杂值；缺失文件用上游 `initProfile` 同款模板补 `packageImportMethod: copy`，标量值按原始 span 原地替换（注释、引号与 CRLF/LF 保留），其余一律 refused。写入走 `<file>.mrw-<pid>.tmp` + rename 原子就位，重解析点目标拒绝写穿；`cordis.patch.yml` 的 `multi-root-command` 行新增 `dshHome` 配置。
+- **诊断与 remediation**：预检文案移除「pending」措辞，指向现已存在的命令；`--apply` 报告逐 profile 的 written / replaced / noop / refused，并在仍有多链接文件时给出 PowerShell 安全引用（`& 'path' -Verb RunAs` 风格单引号转义）的退出宿主 → 删 `node_modules` → 按 lockfile 重装步骤。copy 不隔离既有硬链接、不修复 Administrators 属主、不撤销历史 store ACE——三条边界在命令输出、ADR 与指南中一致声明。
+- **冒烟夹具**：`scripts/lib/dsh-runtime.mjs` 新增 `ensureProfileCopyImport`，`installPluginProfile` 在首个 `dsh plugin add` 前落 copy 配置，journey / compose / behavior / packed 冒烟 profile 全覆盖（正向）；`smoke-behavior` 另建保持默认硬链接的 scratch profile，用真实 runner `--deny-root <home> --protected-home <home>` 断言 127 + 硬链接拒绝文案 + 子进程未运行（负向，不与正向夹具共享 home）。
+- **本批证据**：`pnpm exec vitest run tests/patch.spec.ts tests/profile-isolation.spec.ts tests/command.spec.ts` —— 80 项执行，79 通过 / 1 跳过（新增 23 项隔离套件：YAML 子集接受/拒绝面、span 精确替换、确认 profile 过滤、重解析边界、整 home 多链接统计、incomplete 结论、模板创建 / 追加 / 替换 / noop / 拒绝矩阵、原子写失败、PowerShell 引用；命令解析、帮助、hint 与 handler 集成；patch `dshHome` 断言）。`pnpm run build:types`、`pnpm run bundle`、`pnpm typecheck`、`pnpm lint`、`pnpm docs:check` 通过。本机另以与冒烟负向相同的夹具形状实跑发布版 `lib/windows-runner.js`（scratch home + profile 内指向 home 外「store」文件的真实 `linkSync` 硬链接，`--deny-root <home> --protected-home <home>`）：退出 127，stderr 为 `windows-acl-run: hardlinked file inside the protected DSH home … has links=2; … run \`/workspace-folders isolate-profiles\` …`，子进程哨兵未创建——零副作用拒绝、文案指向 C2 命令，本机非提权会话实机验证。
+- **明确未做 / defer**：非提权 CI lane 未新增——GitHub Actions `windows-latest` 全程提权，非提权进程需第二账户或计划任务，超出本批范围；预检拒绝本身发生在 token / broker 之前，非提权环境可本地回归（冒烟负向即此路径）。完整门禁（compat:check、完整 test、kernel:probe、三项 smoke 实跑、pack:check、smoke:packed）与 macOS/Linux 原生执行仍留待实施验收阶段。
+- **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。
+
+### 实施验收（2026-10-17，门禁执行完毕）
+
+- **套件与类型**：`pnpm typecheck`、`pnpm lint`（0 警告 / 0 错误）、`pnpm run build:types`、`pnpm run bundle`、`pnpm docs:check`、`pnpm compat:check`、`pnpm pack:check`（109 个打包成员）全部通过。完整 `pnpm test` 串行执行（`pnpm pack` 的 `prepare` 会清空重建 `lib/`，与测试并发会产生假象，不可并行）：49 个文件、771 通过 / 49 跳过 / 0 失败；其中 `windows-native.e2e.ts` 38 通过 / 2 跳过。
+- **冒烟实跑**：`smoke:compose` 48 通过；`smoke:behavior` 112 通过 / 1 跳过；`smoke:journey` 62 通过；`smoke:packed` 111 通过 / 1 跳过。唯一跳过原因一致：本机 `pwsh.exe` 是 MSIX 商店版，受限 token 拒绝 packaged 子进程——上游既定限制，非本批缺陷。
+- **内核探针**：`pnpm kernel:probe`——windows-acl 可用；seatbelt / bwrap / Landlock 本机不存在，POSIX 原生执行仍未验证（mocked profile 构造验证不充当内核拒写证据）。
+- **验收期修复（测试/冒烟基础设施，非产品代码）**：`tests/windows-native.e2e.ts` 的 `secondDrive()` 盘符比较既有缺陷——`'C:\'` 与 `'C:'` 比较恒不等，单盘机把 C: 当作不同盘在卷根跑 xdrive 用例，撞上游 `grantWrite` 写 mandatory label 的 WRITE_OWNER 需求；归一化后本机如实跳过（CI 的 `D:` 仍会真跑）。`sddlOf` 改用 `icacls /save` 替代 `powershell Get-Acl`——本机混合 PowerShell 5.1/7 `PSModulePath` 与共享 ModuleAnalysisCache 使 spawn 的 `powershell.exe -NoProfile` 间歇性模块加载失败，属宿主环境抖动。`scripts/smoke-behavior.mjs` 清理识别进程内映射的 `.node` addon：packed 模式下 `boot()` 从 scratch profile `dlopen` `koffi.node`，映射期间所有者进程自身无法删除——残留仅当全部由映射 addon 解释（每个失败文件是 `.node`、每个失败目录是其祖先）且注入了 `DSH_SMOKE_HOME` 时移交父进程在子进程退出后删除；独立运行的严格清理语义不变。
+- **复审修复（推送前）**：`isolate-profiles --apply` 两处复审发现已修——整体缩进的顶层 YAML 一律 refused（原先误判 `packageImportMethod` absent 并追加零缩进键，使合法文件失效）；临时文件改 `wx` 独占创建，既有文件 / 硬链接 / 符号链接不再被写穿或删除，仅清理本进程创建的临时文件。新增 4 项回归；修复后完整套件 49 文件 775 通过 / 49 跳过 / 0 失败，冒烟四项、`pack:check`、`docs:check` 重跑全绿。
+- **边界如实记录**：macOS / Linux 内核原生执行本机不可用；xdrive 第二可写盘路径本机跳过（无第二固定盘）；非提权 CI lane 按 C2 节 defer。
+- **发布状态**：未发布；版本号、tag 与版本 allowlist 不变。
+
+### PR #12 复核与 Windows packed smoke 清理修复（2026-10-17）
+
+- **旧审查逐项复核**：PR 四条意见均有对应修复及回归——缺失 deny 根使用强制 bwrap mount（`tests/missing-deny-root.spec.ts`）；broker 授权、记录落盘及启动共用回滚路径（诊断脚本真实注入 `Set-Content` / `Move-Item` / `Start-Service` 三类失败）；shell 入口探测集中在 `src/compat/process-entrypoints.ts`；中英文 README 与 Unreleased changelog 已说明 inherit 默认值及三态。R1–R4 的实现与测试亦复核；补齐 changelog 中仍称 Windows 仅靠对象 ACL 随改名移动的过时表述，并补记负授权与硬链接隔离行为，决定仍由 ADR-0017 / ADR-0020 维护。
+- **远端基线证据**：`ba704b7` 的 [CI run 38937909169](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38937909169) 共 44 条平台/版本 verify 车道及最终 gate 全绿；[diag run 38937909410](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/38937909410) 验证真实 broker 生命周期与三类授权后失败回滚。此处是旧提交证据，不替代本次修复的验收。
+- **阻塞证据**：Windows `0.1.6-alpha.1` job `117098022247` 在北京时间 01:18:09 已打印 packed battery **132/0/0**，03:15:48 才移交清理；11 条 Windows 版本车道的 Packed smoke 均约 118–119 分钟。锁定文件为子进程加载的安装副本 `koffi.node`，旧 `rmSync(maxRetries: 10, retryDelay: 500)` 在递归祖先层层重试，等待无法在本进程退出前解除的模块映射。
+- **修复与回归**：清理所有权和有界重试规则写入[开发工作流](../../development/plugin-development-workflow.md#ci)。新增真实 `.node` 加载的深层目录子进程回归（移交后退出、父进程严格删除、独立清理持久锁必须及时失败），以及普通目录、外部 junction 不跟随、显式移交和 CI 超时门禁回归；不靠扩展名豁免清理，不跳过行为断言。
+- **本地执行**：Windows 非提权会话，开发 pin `0.2.1-alpha.2`、Node `24.14.0`；内核探针 windows-acl 可用。完整套件 **50 文件、781 通过 / 49 条件跳过 / 0 失败**，含新增回归；lint、双端 typecheck、build、compat:check 通过。compose **48/0/0**、behavior **133/0/0**、journey **62/0/0**、packed behavior **132/0/0**，pack:check **109 成员完整**；packed 含打包/安装/严格清理耗时 **50.04 秒**，四项冒烟加打包检查共 **101.99 秒**，无残留。docs:check 通过。
+- **修复提交远端执行**：`033bbe6` 的 [CI run 39022484207](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39022484207) **44 条 verify 车道及最终 gate 全部 success**（含 releases 共 46 jobs）；11 条 Windows packed smoke 分别为 **31–67 秒**，不再等待模块映射解除。相同提交的 [diag run 39022484171](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39022484171) 同样 success，真实 Windows ACL 与 broker 生命周期通过。当前复核未发现新的合并阻断项；非提权 CI lane 与 Windows partial / 并发外部修改边界仍按既有决定记录，未扩大安全承诺。未合并、未发布。

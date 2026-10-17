@@ -80,7 +80,7 @@ describe('the additional-root row rules', () => {
   it('rides the access badge beside the name, never shrinking', () => {
     expect(STYLES).toMatch(/\.mrfw-rootName\s*\{[^}]*display:\s*flex[^}]*align-items:\s*baseline/s)
     expect(STYLES).toMatch(/\.mrfw-rootNameText\s*\{[^}]*text-overflow:\s*ellipsis/s)
-    expect(STYLES).toMatch(/\.mrfw-accessBadge\s*\{[^}]*flex:\s*none/s)
+    expect(STYLES).toMatch(/\.mrfw-accessBadge[^{}]*\{[^}]*flex:\s*none/s)
   })
 
   it('makes the path itself the copy control, icon visible only on hover or focus', () => {

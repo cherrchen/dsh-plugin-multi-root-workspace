@@ -51,8 +51,15 @@ fs 侧仍必须替换：`LocalFileSystem` 自身不做 containment，`SandboxedF
 - 代价：`policy.workspaceRoot`（= session cwd = 主根）仍决定 bash 的默认 workdir 与 PTY 的默认 cwd，这正是需求“不改 Session cwd 语义”的期望行为，但也意味着“以附加根为默认工作目录”不在第一阶段范围内。
 - 影响文档：架构设计稿的 patch 示例、provider 小节与总览图需同步；需求文档中“多根 bash 执行器”的机制表述需改写。
 
+## 修订：B9 增加消费侧公开方法接缝（2026-10-13，Amendment）
+
+Status 保持 **Accepted**；「只替换 `fs-sandbox` 与 `sandbox` 两行」不变。本 ADR 的关键实测「bash 与 PTY 的全部 confinement 都委托 `ctx.sandbox`」在 B9 范围收窄：`workspace-write` / `read-only` 模式下依然成立，但**全部 11 个支持版本在 `danger-full-access` 下不调用 `confine()`**——`SandboxBashExecutor.execute` / `SandboxPwshExecutor.execute`（`0.1.5/0.1.6` 含 `start`）、`dsh-terminal-bash` 私有 `spawnArgv` 与 `dsh-ptc-runtime-node` 都自带 Full-access 旁路。
+
+因此 B9 仍不替换 `bash-sandbox` / `pwsh-sandbox` / `terminal-bash` / `ptc-runtime` 行（`executeArgv` protected、`processFacts` 私有、组内 `terminals` 被 isolate，子类化与行替换都不可行），改为按 ADR-0011 先例用公开方法包装接缝：`ctx.shell.execute`（+ 旧版 `start`）、`ctx.ptcRuntime.execute`、`ctx.subprocess.spawn`（ALS 注入 deny 上下文）与 `ctx.subprocess.spawnTerminal`（env `DSH_PTY_SESSION_ID` 判别 agent PTY，用户面板终端任何模式直通——`ctx.terminals` 在 web profile 上被 `isolate`，registry 不是可达接缝）。详见 [ADR-0017](./ADR-0017-three-state-root-access-and-sandbox-modes.md)。
+
 ## Related Documents
 
+- [ADR-0017：附加根三态权限与跨 SandboxMode 执行一致性](./ADR-0017-three-state-root-access-and-sandbox-modes.md)
 - [架构设计：Multi-root Workspace](../architecture/multi-root-workspace.md)
 - [开发需求：Multi-root Workspace](../requirements/multi-root-workspace.md)
 - [上游调研：Workspace / Sandbox / 插件体系](../reference/multi-root-workspace-research.md)

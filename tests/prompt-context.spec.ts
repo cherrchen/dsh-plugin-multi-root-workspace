@@ -7,12 +7,13 @@
 
 import { describe, expect, it } from 'vitest'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { renderWorkspaceRootsContext } from '../src/scope.ts'
+import { REGISTRY_UNAVAILABLE_NOTE, renderWorkspaceRootsContext } from '../src/scope.ts'
 import type { ScopeRoot } from '../src/scope.ts'
 
 const PRIMARY = '/work/primary'
 const A: ScopeRoot = { path: '/repos/a', access: 'read-write', id: 'root-rec-a' }
 const B: ScopeRoot = { path: '/repos/b', access: 'read-only', id: 'root-rec-b' }
+const C: ScopeRoot = { path: '/repos/c', access: 'inherit', id: 'root-rec-c' }
 
 function render(platform: string, mode: SandboxMode, roots: readonly ScopeRoot[], cappedTools: readonly string[] = []): string {
   return renderWorkspaceRootsContext({ platform, mode, primaryRoot: PRIMARY, roots, cappedTools })
@@ -22,6 +23,12 @@ const MODES: SandboxMode[] = ['workspace-write', 'read-only', 'danger-full-acces
 const PLATFORMS = ['darwin', 'linux', 'win32']
 
 describe('renderWorkspaceRootsContext', () => {
+  it('describes configured caps in all modes, including fixed writes and Full-access inheritance', () => {
+    for (const mode of MODES) {
+      expect(render('linux', mode, [A, B, C], ['bash', 'run_code']))
+        .toContain('The tools ["bash","run_code"] cannot write additional roots even where they are writable.')
+    }
+  })
   it('is empty without members, on every platform and mode', () => {
     for (const platform of PLATFORMS) {
       for (const mode of MODES) {
@@ -51,18 +58,29 @@ describe('renderWorkspaceRootsContext', () => {
     )
   })
 
-  it('states membership and readability under read-only mode, with no write promise', () => {
+  it('names the fixed read-write members a read-only session keeps writable', () => {
     for (const platform of PLATFORMS) {
       expect(render(platform, 'read-only', [A, B])).toMatchInlineSnapshot(
-        `"Current DSH workspace roots: ["/repos/a","/repos/b"] are additional roots of this session's workspace and are readable; nothing is writable in read-only mode."`,
+        `"Current DSH workspace roots: ["/repos/a"] are additional roots that stay writable even in read-only mode, and ["/repos/b"] are readable additional roots of this session's workspace; everything else is read-only."`,
       )
     }
   })
 
-  it('states membership and the absence of isolation under danger-full-access', () => {
+  it('promises nothing writable under read-only when no member is pinned read-write', () => {
+    for (const platform of PLATFORMS) {
+      expect(render(platform, 'read-only', [C, B])).toMatchInlineSnapshot(
+        `"Current DSH workspace roots: ["/repos/c","/repos/b"] are additional roots of this session's workspace and are readable; nothing is writable in read-only mode."`,
+      )
+    }
+  })
+
+  it('states the absence of isolation under danger-full-access, except the read-only members', () => {
     for (const platform of PLATFORMS) {
       expect(render(platform, 'danger-full-access', [A, B])).toMatchInlineSnapshot(
-        `"Current DSH workspace roots: ["/repos/a","/repos/b"] are additional roots of this session's workspace; danger-full-access mode has no sandbox isolation."`,
+        `"Current DSH workspace roots: ["/repos/a","/repos/b"] are additional roots of this session's workspace; danger-full-access mode has no sandbox isolation, except writes under the additional roots ["/repos/b"] are still refused. Grant changes apply to later operations and newly started processes, not to processes already running."`,
+      )
+      expect(render(platform, 'danger-full-access', [A, C])).toMatchInlineSnapshot(
+        `"Current DSH workspace roots: ["/repos/a","/repos/c"] are additional roots of this session's workspace; danger-full-access mode has no sandbox isolation."`,
       )
     }
   })
@@ -91,6 +109,47 @@ describe('renderWorkspaceRootsContext', () => {
     expect(first).not.toContain('S-1-')
   })
 
+  it('states the Full-access downgrade while the registry authority is unavailable', () => {
+    for (const platform of PLATFORMS) {
+      const options = { platform, mode: 'danger-full-access' as const, primaryRoot: PRIMARY, cappedTools: [] }
+      expect(renderWorkspaceRootsContext({ ...options, roots: [], authority: 'unavailable' }))
+        .toBe(REGISTRY_UNAVAILABLE_NOTE)
+      // Old members must not advertise grants while authority is unavailable.
+      expect(renderWorkspaceRootsContext({ ...options, roots: [A, C], authority: 'unavailable' }))
+        .toBe(REGISTRY_UNAVAILABLE_NOTE)
+    }
+  })
+
+  it('states the primary-only limit under workspace-write and keeps read-only silent', () => {
+    for (const platform of PLATFORMS) {
+      for (const mode of ['workspace-write', 'read-only'] as const) {
+        expect(renderWorkspaceRootsContext({ platform, mode, primaryRoot: PRIMARY, roots: [], cappedTools: [], authority: 'unavailable' }))
+          .toBe(mode === 'read-only' ? '' : REGISTRY_UNAVAILABLE_NOTE)
+      }
+    }
+  })
+
+  it('names the protected DSH home while it is denied under Full-access', () => {
+    const home = '/user/.dsh'
+    for (const platform of PLATFORMS) {
+      // With members the home sentence joins the topology text.
+      expect(renderWorkspaceRootsContext({
+        platform, mode: 'danger-full-access', primaryRoot: PRIMARY,
+        roots: [A, C], cappedTools: [], protectedHome: home,
+      })).toBe(`Writes under the DSH home directory at ${JSON.stringify(home)} are refused. Current DSH workspace roots: ["/repos/a","/repos/c"] are additional roots of this session's workspace; danger-full-access mode has no sandbox isolation.`)
+      // With an unavailable authority and no members, both notes still render.
+      expect(renderWorkspaceRootsContext({
+        platform, mode: 'danger-full-access', primaryRoot: PRIMARY,
+        roots: [], cappedTools: [], authority: 'unavailable', protectedHome: home,
+      })).toBe(`${REGISTRY_UNAVAILABLE_NOTE} Writes under the DSH home directory at ${JSON.stringify(home)} are refused.`)
+      // The note is a Full-access statement only.
+      expect(renderWorkspaceRootsContext({
+        platform, mode: 'workspace-write', primaryRoot: PRIMARY,
+        roots: [A], cappedTools: [], protectedHome: home,
+      })).not.toContain('DSH home')
+    }
+  })
+
   it('never promises writes for invalid toolAccess on any platform, preserving mode and empty semantics', () => {
     for (const platform of PLATFORMS) {
       for (const mode of MODES) {
@@ -101,8 +160,13 @@ describe('renderWorkspaceRootsContext', () => {
           expect(text).toContain('all additional-root writes are refused because toolAccess is invalid')
           expect(text).not.toContain('are writable additional roots')
           expect(text).not.toContain('Writable additional roots are enforced')
+        } else if (mode === 'read-only') {
+          // An invalid cap refuses every additional-root write: even a member
+          // pinned read-write gets no write promise.
+          expect(text).toContain('nothing is writable in read-only mode')
+          expect(text).not.toContain('stay writable')
         } else {
-          expect(text).toBe(render(platform, mode, [A, B]))
+          expect(text).toContain('writes under the additional roots ["/repos/a","/repos/b"] are still refused because toolAccess is invalid')
         }
       }
     }

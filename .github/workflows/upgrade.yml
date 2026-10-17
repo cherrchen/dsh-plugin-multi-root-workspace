@@ -81,8 +81,12 @@ jobs:
       # A candidate release drags in every transitive @deepseek-ai package, all
       # published minutes ago; the release-age gate is bypassed for this
       # throwaway tree rather than enumerated in pnpm-workspace.yaml (ADR-0002).
+      # Written INTO the workspace config because `install` re-audits lockfile
+      # ages against the file, and every later `pnpm run` verifies them again.
       - name: Install the candidate
-        run: pnpm install --no-frozen-lockfile --config.minimumReleaseAge=0
+        run: |
+          echo 'minimumReleaseAge: 0' >> pnpm-workspace.yaml
+          pnpm install --no-frozen-lockfile
       # The declared pin and the RESOLVED tree are different facts, and the
       # second one is what everything below actually ran against.
       - name: Report the tree under test

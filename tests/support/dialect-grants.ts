@@ -142,10 +142,13 @@ export function classifyOutcome(
   runnerFailureRules: readonly RunnerFailureRule[],
 ): ConfinedOutcome {
   if (result.spawnError !== undefined) return { kind: 'unavailable', detail: result.spawnError }
-  const lines = result.stderr.split('\n')
-  const fatal = runnerFailureRules.some(rule => lines.some(line => rule.fatalSignatures.some(signature => line.toLowerCase().includes(signature.toLowerCase()))))
-  if (fatal) return { kind: 'runner-failed', detail: result.stderr.trim() }
   if (result.status === 0) return { kind: 'ok', stdout: result.stdout }
+  const lines = result.stderr.split('\n')
+  const fatal = result.status !== null && runnerFailureRules.some(rule =>
+    (rule.allowedExitCodes === undefined || rule.allowedExitCodes.includes(result.status!))
+    && lines.some(line => !rule.informationalLines?.some(info => info.toLowerCase() === line.replace(/\r$/, '').toLowerCase())
+      && rule.fatalSignatures.some(signature => line.toLowerCase().includes(signature.toLowerCase()))))
+  if (fatal) return { kind: 'runner-failed', detail: result.stderr.trim() }
   const denied = lines.some(line => denialSignatures.some(signature => line.toLowerCase().includes(signature.toLowerCase())))
   if (denied) return { kind: 'denied', detail: result.stderr.trim() }
   return { kind: 'runner-failed', detail: `exit ${String(result.status)}: ${result.stderr.trim()}` }

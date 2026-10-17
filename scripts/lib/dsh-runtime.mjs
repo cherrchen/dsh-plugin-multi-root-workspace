@@ -10,11 +10,12 @@
  * @module scripts/lib/dsh-runtime
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { isMap, isScalar, parseDocument } from 'yaml'
 
 const require = createRequire(import.meta.url)
 
@@ -157,6 +158,58 @@ export function pluginPackageDir() {
 }
 
 /**
+ * Mirrors `PROFILE_PNPM_WORKSPACE` written by `initProfile` in
+ * `@deepseek-ai/dsh-app-boot` (a private upstream constant): when a profile
+ * has no `pnpm-workspace.yaml` this is the file upstream would write.
+ */
+const PROFILE_PNPM_WORKSPACE = 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n'
+
+/**
+ * Make a scratch profile import the store BY COPY before its first install.
+ *
+ * Why: `packageImportMethod` unset means pnpm imports the global store into
+ * `profiles/<name>/node_modules` BY HARDLINK, and a deny ACE the plugin later
+ * writes on `$DSH_HOME` then rewrites objects every other link shares — the
+ * store itself and other projects. The C2 smoke asserts both halves: positive
+ * profiles get the copy setting here, and a deliberately default-method
+ * profile proves the ambient deny launch still refuses a hardlinked home.
+ *
+ * The existing-file path goes through the real `yaml` Document (this is a
+ * devDependency — runtime plugin code never imports it) and only when the
+ * top level is a genuine mapping with a scalar-or-absent key; anything else —
+ * anchors, aliases, flow values, parse errors — is refused rather than
+ * guessed, the same conservatism the shipped `isolate-profiles` applies.
+ * @param home - the isolated `$DSH_HOME`.
+ * @param profile - the profile directory name under `profiles/`.
+ */
+export function ensureProfileCopyImport(home, profile) {
+  const dir = join(home, 'profiles', profile)
+  mkdirSync(dir, { recursive: true })
+  const yamlPath = join(dir, 'pnpm-workspace.yaml')
+  if (!existsSync(yamlPath)) {
+    writeFileSync(yamlPath, `${PROFILE_PNPM_WORKSPACE}packageImportMethod: copy\n`)
+    return
+  }
+  const document = parseDocument(readFileSync(yamlPath, 'utf8'))
+  if (document.errors.length > 0) {
+    throw new Error(`cannot extend ${yamlPath}: ${document.errors[0].message}`)
+  }
+  const contents = document.contents
+  if (!isMap(contents)) {
+    throw new Error(`cannot extend ${yamlPath}: the top level is not a plain mapping`)
+  }
+  const existing = contents.get('packageImportMethod', true)
+  // An anchored or tagged node is refused too: rewriting it would silently
+  // break any alias that names it — ambiguous input is never guessed at.
+  const plain = existing === undefined || existing === null
+    || (isScalar(existing) && existing.anchor === undefined && existing.tag === undefined)
+  if (!plain) throw new Error(`cannot extend ${yamlPath}: packageImportMethod is not a plain scalar`)
+  if (isScalar(existing) && existing.value === 'copy') return
+  document.set('packageImportMethod', 'copy')
+  writeFileSync(yamlPath, document.toString())
+}
+
+/**
  * pnpm's supply-chain recovery, confined to the scratch home.
  *
  * pnpm ≥10 refuses a dependency's build scripts unless the profile's
@@ -266,6 +319,11 @@ async function ensureBundleActivated(profile, home, source, args) {
  */
 export async function installPluginProfile(profile, home, source = pluginPackageDir()) {
   assertIsolatedHome(home)
+  // The profile gets `packageImportMethod: copy` BEFORE the first install:
+  // pnpm's default is hardlink import, and a hardlinked profile makes the
+  // protected $DSH_HOME unsafe to deny (the C1 preflight would then refuse
+  // every Full-access launch this smoke tries to exercise).
+  ensureProfileCopyImport(home, profile)
   const args = ['plugin', '--profile', profile, 'add', source]
   let first = await captureDsh(args, { DSH_HOME: home })
   if (first.code === 0) {

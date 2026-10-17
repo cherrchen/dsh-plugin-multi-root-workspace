@@ -55,6 +55,10 @@ M3 要把"哪些目录是附加根"从测试注入变成用户可管理的持久
 
 `publish` 签名不再排序：可用根按注册表顺序进入 scope，因为指令发现按该顺序消费所有附加根共享的字节预算（[ADR-0010](./ADR-0010-additional-root-instruction-scope.md)）。成功持久化的 `move` 若改变顺序，必须立即重发布；否则面板与存储显示新顺序，模型却继续按旧顺序获得指令，直到进程重启。alias、不改变顺序的 move、分类不变的 refresh 仍保持签名不变，不重复发布。回归同时验证实时与重启后的顺序、单次发布及真实 `agent/pre-step` 在有限预算下对新会话的指令优先级。
 
+### 2026-10-16 修订：recorded boundary 判主根重叠、成员冲突保留负授权（分支安全审查 Phase A）
+
+本节修订第 10、11 条的裁决描述。原实现有两处缺陷：其一，`redirected` 判出即返回、且记录间重叠只累计「先出现且 available」的记录——missing/redirected 等 withheld 记录完全不参与冲突判定，其 recorded 边界能被后续登记覆盖而不会让相交双方互相标记；其二，被判 `invalid` 的记录不发布任何投影，于是把父根 `move` 到子根之前就能让一条明确的只读边界从 `deniedRoots` 消失。现改为：主根重叠（双向）以 recorded boundary 判定且先于 redirect 解析——recorded grant 落在主根内的记录判 `invalid`，不再因当前解析到别处而降级为可复活的 `redirected`；记录间包含改为第二遍对**全部结构有效记录**的 recorded boundary 做两两比较，任一重叠双方均判 `invalid`（内部原因 `membership-conflict`），成员资格 withheld 但其 recorded boundary 仍作为负授权发布。`move` 因此是纯粹的外观操作，撤销不了一条只读边界。结构损坏（缺/多 grant、相对 recordedPath、重复 id）的记录照旧不参与冲突判定、不发布任何投影。安全动机与完整设计见 [ADR-0017 §负授权保留与顺序无关冲突](./ADR-0017-three-state-root-access-and-sandbox-modes.md#负授权保留与顺序无关冲突2026-10-16分支安全审查-phase-a)。
+
 ## Alternatives Considered
 
 | 方案 | 否决理由 |

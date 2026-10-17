@@ -68,7 +68,7 @@ async function mount(plugin: unknown, fixture: FixtureWorkspace, mode: SandboxMo
   }
   fibers.push(await ctx.plugin(plugin as never, { cwd: fixture.workspace }))
   if (plugin === MultiRootFileSystem) {
-    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, roots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path), access: 'read-write' })))
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, roots.map((path, index) => ({ id: `root-${index}`, path, recordedPath: canonicalPath(path), access: 'inherit' })))
   }
   return { ctx, fs: ctx.fs, fixture }
 }
@@ -297,6 +297,93 @@ describe('multi-root extension', () => {
       .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
   })
 
+  it('enforces the nine-cell matrix: registration access x session mode', async () => {
+    // ADR-0017's contract, on the fs fence: `inherit` follows the session
+    // mode, `read-only` refuses under every mode (Full-access included), and
+    // `read-write` stays writable even in a globally read-only session.
+    for (const mode of ['read-only', 'workspace-write', 'danger-full-access'] as const) {
+      const fixture = createFixtureWorkspace(`fs-matrix-${mode}`)
+      fixtures.push(fixture)
+      const ours = await mount(MultiRootFileSystem, fixture, mode, [])
+      const dirs = {
+        inherit: join(fixture.base, `inherit-${mode}`),
+        'read-only': join(fixture.base, `readonly-${mode}`),
+        'read-write': join(fixture.base, `fixed-${mode}`),
+      }
+      for (const dir of Object.values(dirs)) await mkdir(dir, { recursive: true })
+      ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+        { id: 'i', path: dirs.inherit, recordedPath: canonicalPath(dirs.inherit), access: 'inherit' },
+        { id: 'r', path: dirs['read-only'], recordedPath: canonicalPath(dirs['read-only']), access: 'read-only' },
+        { id: 'w', path: dirs['read-write'], recordedPath: canonicalPath(dirs['read-write']), access: 'read-write' },
+      ])
+      const writable: Record<string, boolean> = {
+        inherit: mode !== 'read-only',
+        'read-only': false,
+        'read-write': true,
+      }
+      for (const [access, dir] of Object.entries(dirs)) {
+        const editPath = join(dir, 'edit-cell.txt')
+        await writeFile(editPath, 'before')
+        const write = ours.fs.writeText(await target(ours, join(dir, 'cell.txt')), 'x')
+        if (writable[access]) {
+          await write
+        } else {
+          await expect(write, `${access} root under ${mode}`).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+        }
+        const edit = ours.fs.editText(await target(ours, editPath), { oldString: 'before', newString: 'after', replaceAll: false })
+        if (writable[access]) {
+          await edit
+          expect(await readFile(editPath, 'utf8')).toBe('after')
+        } else {
+          await expect(edit, `edit ${access} root under ${mode}`).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+          expect(await readFile(editPath, 'utf8')).toBe('before')
+        }
+      }
+      // The primary root and unregistered paths keep ordinary mode semantics.
+      const primaryWrite = ours.fs.writeText(await target(ours, join(fixture.workspace, 'primary.txt')), 'x')
+      if (mode === 'read-only') {
+        await expect(primaryWrite).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      } else {
+        await primaryWrite
+      }
+    }
+  })
+
+  it('denies a read-only member under danger-full-access and names it', async () => {
+    const fixture = createFixtureWorkspace('fs-full-access-deny')
+    fixtures.push(fixture)
+    const ours = await mount(MultiRootFileSystem, fixture, 'danger-full-access', [])
+    const readOnly = fixture.outside
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { id: 'ro', path: readOnly, recordedPath: canonicalPath(readOnly), access: 'read-only' },
+    ])
+    const failure = await ours.fs.writeText(await target(ours, join(readOnly, 'x.txt')), 'x')
+      .then(() => undefined, (error: unknown) => error as FsError & { code?: string })
+    expect(failure?.code).toBe('FS_SANDBOX_DENIED')
+    expect(failure?.message).toContain(`${readOnly} is a read-only additional root`)
+    // Everything else stays unfenced: the primary root still writes freely.
+    await ours.fs.writeText(await target(ours, join(fixture.workspace, 'ok.txt')), 'ok')
+  })
+
+  it('lets a fixed read-write member write under a read-only session, nothing else', async () => {
+    const fixture = createFixtureWorkspace('fs-ro-fixed')
+    fixtures.push(fixture)
+    const ours = await mount(MultiRootFileSystem, fixture, 'read-only', [])
+    const fixed = fixture.outside
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { id: 'w', path: fixed, recordedPath: canonicalPath(fixed), access: 'read-write' },
+    ])
+    await ours.fs.writeText(await target(ours, join(fixed, 'ok.txt')), 'ok')
+    await ours.fs.editText(await target(ours, join(fixed, 'ok.txt')), { oldString: 'ok', newString: 'edited', replaceAll: false })
+    // The primary root and every other path still obey the read-only session.
+    await expect(ours.fs.writeText(await target(ours, join(fixture.workspace, 'nope.txt')), 'x'))
+      .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    const unrelated = join(fixture.base, 'unrelated')
+    await mkdir(unrelated, { recursive: true })
+    await expect(ours.fs.writeText(await target(ours, join(unrelated, 'x.txt')), 'x'))
+      .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+  })
+
   it('refuses writes into a read-only member and says why, while it stays readable', async () => {
     const fixture = createFixtureWorkspace('fs-readonly-member')
     fixtures.push(fixture)
@@ -339,6 +426,21 @@ describe('multi-root extension', () => {
     await expect(ours.fs.writeText(await target(ours, join(fixture.outside, 'recreated.txt')), 'x'))
       .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
     expect(existsSync(fixture.outside)).toBe(false)
+  })
+
+  it('retains a missing read-only boundary under Full-access until explicit removal', async () => {
+    const fixture = createFixtureWorkspace('fs-missing-deny')
+    const ours = await mount(MultiRootFileSystem, fixture, 'danger-full-access', [])
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { id: 'ro', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-only' },
+    ])
+    await rm(fixture.outside, { recursive: true })
+    await expect(ours.fs.writeText(await target(ours, join(fixture.outside, 'recreated.txt')), 'x'))
+      .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(existsSync(fixture.outside)).toBe(false)
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+    await ours.fs.writeText(await target(ours, join(fixture.outside, 'removed.txt')), 'ok')
+    expect(existsSync(join(fixture.outside, 'removed.txt'))).toBe(true)
   })
 })
 

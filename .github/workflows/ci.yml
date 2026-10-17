@@ -28,6 +28,7 @@ jobs:
 
   verify:
     needs: releases
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +40,7 @@ jobs:
         # variable to park it again.
         # Repository variables are available while expanding a matrix, unlike
         # `matrix.*` in a job-level condition.
-        os: ${{ fromJSON(vars.DSH_WINDOWS_CI == '1' && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+        os: ${{ fromJSON(vars.DSH_WINDOWS_CI == '1' && '["ubuntu-latest","ubuntu-22.04","macos-latest","windows-latest"]' || '["ubuntu-latest","ubuntu-22.04","macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     env:
       # Readable, non-interactive failures: no TTY to wrap, no spinner rewrites.
@@ -63,7 +64,13 @@ jobs:
             pnpm install --frozen-lockfile
           else
             node scripts/upgrade-dsh.mjs "$DSH_MATRIX_VERSION"
-            pnpm install --no-frozen-lockfile --config.minimumReleaseAge=0
+            # The repointed tree resolves the newest upstream builds by design.
+            # pnpm re-verifies lockfile package ages inside `install` itself and
+            # again before every `pnpm run`, reading THIS file — so the intended
+            # bypass lives in config, not a one-shot CLI flag. This checkout is
+            # throwaway; nothing lands back in the repository.
+            echo 'minimumReleaseAge: 0' >> pnpm-workspace.yaml
+            pnpm install --no-frozen-lockfile
           fi
         shell: bash
       # Before anything else: the allowlist, peerDependencies, the development
@@ -83,6 +90,8 @@ jobs:
       - name: Build the package (before the tests that read lib/)
         run: pnpm build
 
+      # 22.04 provides native bwrap evidence; latest retains the Landlock lane.
+      # Do not disable AppArmor/user-namespace policy on the latest image.
       - if: runner.os == 'Linux'
         name: Install the bwrap kernel runner
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
@@ -92,6 +101,11 @@ jobs:
       # windows-acl runner and exports `windows-acl` when it can actually deny.
       - name: Probe which kernel dialects this host can really run
         run: pnpm kernel:probe
+
+      - if: runner.os == 'Windows'
+        name: Install the B9 deny-token broker
+        shell: pwsh
+        run: ./scripts/windows-broker/install.ps1
 
       # The test log is captured as well as streamed, and uploaded when the step
       # fails. A red run has to be diagnosable from the run page alone — an
@@ -132,6 +146,9 @@ jobs:
       - name: Packed artifact verification
         run: pnpm pack:check
       - name: Packed smoke
+        # Includes installation and parent cleanup. A hung child or native
+        # filesystem operation must still leave time to upload logs/uninstall.
+        timeout-minutes: 15
         run: |
           set -o pipefail
           pnpm smoke:packed 2>&1 | tee smoke-packed.log
@@ -150,6 +167,11 @@ jobs:
           retention-days: 7
 
       - run: pnpm docs:check
+
+      - if: always() && runner.os == 'Windows'
+        name: Uninstall the B9 broker and revoke installation rights
+        shell: pwsh
+        run: ./scripts/windows-broker/install.ps1 -Uninstall
 
   # The result the reusable workflow hands a caller: a skipped or cancelled
   # matrix must never read as green, so `publish` in release.yml sees a failed

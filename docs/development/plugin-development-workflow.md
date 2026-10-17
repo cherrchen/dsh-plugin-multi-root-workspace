@@ -195,7 +195,7 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 
 ## 7. CI
 
-`.github/workflows/ci.yml` 的 `releases` job 用 `scripts/list-dsh-releases.mjs` 从 `SUPPORTED_DSH_RELEASES` 读取版本轴，`verify` 将该轴与启用的 OS 做笛卡尔积。开发 pin 使用 frozen lockfile，其他版本先用 `upgrade-dsh.mjs` 重指 DSH / cordis 后重新安装；制品名同时含 OS 与 DSH 版本。主车道在 `ubuntu-latest`、`macos-latest` 与 `windows-latest`（变量见下）上执行**同一份全部门禁**：**`compat:check`** → `lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `pack:check` → `smoke:packed` → `docs:check`。`compat:check` 放在最前，因为后续每一步的结果只有对"契约真正声明的版本"才算证据。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。
+`.github/workflows/ci.yml` 的 `releases` job 用 `scripts/list-dsh-releases.mjs` 从 `SUPPORTED_DSH_RELEASES` 读取版本轴，`verify` 将该轴与启用的 OS 做笛卡尔积。开发 pin 使用 frozen lockfile，其他版本先用 `upgrade-dsh.mjs` 重指 DSH / cordis 后重新安装；制品名同时含 OS 与 DSH 版本。主车道在 `ubuntu-latest`、`ubuntu-22.04`、`macos-latest` 与 `windows-latest`（变量见下）上执行**同一份全部门禁**：**`compat:check`** → `lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `pack:check` → `smoke:packed` → `docs:check`。`compat:check` 放在最前，因为后续每一步的结果只有对"契约真正声明的版本"才算证据。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。
 
 最后一个 `gate` job（`needs: [releases, verify]`，`if: always()`）只在两个上游 job 都恰好 `success` 时通过：矩阵被跳过、取消或部分失败都不能再显示为绿。release 的 `publish` 依赖的正是这个 gate（见[发版流程](./release-workflow.md)）。
 
@@ -217,6 +217,8 @@ Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seat
 LSP 源码回传断言应比较读盘得到的完整源码。夹具里的路径经 `JSON.stringify()` 写入源码时，Windows 的反斜杠已转义，不能再用未转义的原始路径作子串断言。B1–B3 各版本和平台的验收证据只记在[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
 
 失败可诊断：`test` 与各冒烟的输出同时写入 `vitest.log` / `smoke-*.log`（`tee` + `set -o pipefail`，红不会被吞成绿），由 `actions/upload-artifact@v4` 以 `if: always()` 上传——成功与失败的日志都能下载，公共仓库无需管理员权限。
+
+`smoke:packed` 的 scratch home 由父进程在行为子进程的 `close` 之后严格删除：父进程显式设置 `DSH_SMOKE_DEFER_HOME_CLEANUP=1`，行为子进程不先尝试删除 home。Windows 会把从安装副本加载的 `koffi.node` 映射到子进程退出为止，进程自身重试删除不能解除映射。仅设置 `DSH_SMOKE_HOME` 不转交清理责任；`DSH_SMOKE_KEEP=1` 仍保留调试现场。`scripts/lib/smoke-cleanup.mjs` 对整棵树最多删除四次、间隔 250 ms，每次递归删除禁用内层重试（`maxRetries: 0`），持久锁或权限错误仍使冒烟失败；不得把失败文件名包含 `.node` 当作清理成功。Node 的递归重试会在锁定文件的每层祖先重复放大等待，曾使 Windows packed battery 已通过后仍等待约 118 分钟。CI 将 Packed smoke 限为 15 分钟、verify job 限为 45 分钟，step 超时后仍执行日志上传和 broker 卸载；这些超时不替代实际清理与行为断言。
 
 Windows 的 foreign-owned ACL 夹具按**先 DACL、后 owner**搭建：用 `whoami /user` 的数字 SID 显式保留读/执行、`WRITE_DAC` 与 `WRITE_OWNER`，移除继承并加 Everyone 的写/删除 deny 后，最后把 owner 转交 SYSTEM 的数字 SID。这样后续 ACL 编辑和清理不依赖 elevated token 的 restore 特权；测试同时读回 SYSTEM owner 与 deny ACE，并执行真实受限写断言。任何搭建失败在 CI 仍是失败，不以整项 retry 或 skip 掩盖。若未来出现新的瞬态故障，应先按日志区分夹具、进程/管道、内核断言与安装网络问题；只有已确定可恢复的夹具或清理操作适合有次数上限的重试。
 
@@ -249,3 +251,5 @@ CI 的日志捕获使用 Git Bash，其 PATH 可能让同名 GNU 命令覆盖 Wi
 | 注册的根标着 `redirected` 且写不进去 | 该路径现在解析到的目录与登记时授予的目录不同（常见原因：登记目录被替换成指向别处的符号链接，或链接链中某一段改了） | 这是刻意行为：重新解析不等于重新授权，授权不会被转移到新目标。把目录恢复成登记时那个（或删掉那层符号链接）后执行 `/workspace-folders list` 即可复原；若确实想改到新目录，先 `remove` 再 `add` 一次，等于重新确认 |
 | 列表里有一条 `invalid`，说明写着"重复的 id"或"没有说明授予目录" | 存储被手工改过，或来自缺少 `recordedPath` 字段的旧记录 | 该记录不授予任何权限，可用 `/workspace-folders remove <n>` 或面板里的"移除"逐条删除（删除是按位置/单条进行的，不会一次删掉多条） |
 | 内核断言在本地/CI 被 skip | 宿主不能受限执行（外层沙箱禁止嵌套，或缺 bwrap/Landlock launcher） | 本地属正常；CI 里 `pnpm kernel:probe` 会在能执行的宿主上导出 `DSH_REQUIRE_KERNEL_RUNNER=1`，此时 skip 会变成失败。要在本地强制检查，可自行 `DSH_REQUIRE_KERNEL_RUNNER=1 pnpm test`（预期在看到各条原因后失败） |
+
+B9 的 Linux 原生执行证据分两类：latest 保留实际 Landlock 选择与宿主限制，22.04 增加真实 bubblewrap 允许/拒绝证据，全部受支持版本均覆盖两条 Linux 腿。不会关闭 latest 的 AppArmor/user namespace 策略以换取绿灯；不能执行 bubblewrap 的宿主须按安装前置条件或 runnerFailure 如实报告。Windows 腿在原生测试前通过 tarball 同源的管理员脚本安装 token-attribute broker，安装资源的打包完整性由 pack:check 验证。

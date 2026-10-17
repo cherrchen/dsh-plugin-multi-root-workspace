@@ -105,8 +105,20 @@ Status 保持 **Accepted**；`workspaceFiles` 的 host 侧按根路由不变—�
 - 关联读取的检查必须与上游实际读取指向同一文件：旧 `readRelated` 与新 `readBytes({ baseFile })` 均先定位 canonical base，再把尾路径中的 `\` 归一为 `/`，依 base 的路径形态使用 POSIX / Windows 规则解析。此语义集中在 `src/compat/workspace-files.ts`；未授权根检查不能直接用运行平台的 `node:path.resolve` 解释原始尾路径，否则 POSIX 上的反斜杠 traversal 会漏检。`readBytes` 路由改变 `workspaceRoot` 时同步把 `baseFile` 改为已解析的绝对路径，保留 range 与其余选项且不修改调用方对象，防止相对 base 被新根重新解释。无附加 scope 与存量登记时保留原参数透传。
 - 复刻的同步义务、store/inject 声明与 DOM 纪律见 [ADR-0015](./ADR-0015-files-tab-plugin-owned-browsing.md) 修订节与 `src/client/files-tree/FORK.md`。
 
+## 修订：B9 接缝扩展与 Windows 单 SID 模型边界（2026-10-13，Amendment）
+
+Status 保持 **Accepted**；LSP 路由、workspace-files 隔离与 Windows runner 既有语义不变。两点随 B9 更新：
+
+- **公开方法包装接缝的消费面扩大**：`method-wrapper.ts` 同一机制在 B9 下新增包装 `ctx.shell.execute`（`0.1.5/0.1.6` 含 `start`）、`ctx.ptcRuntime.execute`、`ctx.subprocess.spawn`（ALS deny 上下文）与 `ctx.subprocess.spawnTerminal`（env `DSH_PTY_SESSION_ID` 判别 agent PTY——每个支持版本的 `dsh-terminal-bash` backend 都盖；面板用户终端无此标记，任何模式直通，详见 ADR-0017）。Windows 上 `terminal-pwsh` 与 `persistent-pwsh` 走同一 `dsh-terminal-bash` backend，由 `spawnTerminal` 包装统一覆盖。
+- **Windows 单 root-set SID 模型的表达边界**：当前 `workspaceScopeSid([primary, ...writable])` 只有 allow 维度，表达不了「Full-access 全局 + 个别附加根拒写」。B9 合同下该组合需要新机制（deny ACE / 受限 token 变体）；`read-only` 会话的固定读写根并入既有 `--write-sid` root 集即可表达。落地困难过大时按用户决定延后，文档与验收如实标注该组合未实现。见 [ADR-0017](./ADR-0017-three-state-root-access-and-sandbox-modes.md)。
+
+## 修订：Windows ambient deny runner（2026-10-13，Amendment）
+
+B9 原先延后的 Windows Full-access + 局部只读现按用户要求重新纳入。现有 read-only / workspace-write allow-token 路径不变；新的 ambient token-attribute 路径、standing ACE 和 partial enforcement 边界见 [ADR-0019](./ADR-0019-windows-token-attributes-and-conditional-acls.md)。上文「单 root-set SID 只有 allow 维度」仍描述原 runner，并不限制插件自己的独立原生机制。验收状态只见路线账本。
+
 ## Related Documents
 
+- [ADR-0017：附加根三态权限与跨 SandboxMode 执行一致性](./ADR-0017-three-state-root-access-and-sandbox-modes.md)
 - [架构](../architecture/multi-root-workspace.md)
 - [需求](../requirements/multi-root-workspace.md)
 - [进度账本](../plans/active/2026-09-12-multi-root-workspace.md)

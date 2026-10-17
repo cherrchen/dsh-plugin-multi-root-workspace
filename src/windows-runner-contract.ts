@@ -14,7 +14,23 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, realpathSync, statSync } from 'node:fs'
-import { isAbsolute } from 'node:path'
+import { isAbsolute, win32 } from 'node:path'
+
+/** IPC budget, independent of the registry's configurable add limit. Historical
+ * over-limit stores retain their records. Beyond this native launch budget the
+ * whole ambient launch is refused before ACL edits; denies are never truncated.
+ * Keep the broker service's MaxDenyRoots in sync (covered by contract tests).
+ */
+export const MAX_WINDOWS_DENY_ROOTS = 256
+
+export function assertWindowsDenyCapacity(count: number): void {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_WINDOWS_DENY_ROOTS) {
+    throw new DialectUnrecognizedError(
+      `Windows ambient restriction requires 1–${MAX_WINDOWS_DENY_ROOTS} deny roots including the protected DSH home; got ${count}. `
+      + 'Reduce the registered restrictions before launching; no deny roots were dropped',
+    )
+  }
+}
 
 /**
  * Raised when a confined argv or a runner profile cannot be recognized or
@@ -71,11 +87,28 @@ export function workspaceScopeSid(roots: readonly string[]): string {
   return `S-1-4-${words.join('-')}-2`
 }
 
+/** A standing deny identity, deliberately disjoint from all write capabilities. */
+export function rootDenySid(root: string): string {
+  const hash = createHash('sha256').update('dsh-multi-root-deny\0').update(root.toLowerCase()).digest()
+  const words = [0, 4, 8, 12].map(offset => (hash.readUInt32LE(offset) % (2 ** 30 - 1)) + 1)
+  return `S-1-4-${words.join('-')}-3`
+}
+
 export interface WindowsProfile {
   workspace: string
   temp: string
-  mode: 'workspace-write'
+  /**
+   * `workspace-write` grants the workspace, the private temp, and every
+   * `--additional-root`. `read-only` is legal only on the widened form (the
+   * standalone runner): the runner then grants the additional roots ALONE — a
+   * workspace-write token over just those directories — which is how a fixed
+   * `read-write` additional root stays writable inside a read-only session
+   * (B9). An upstream `read-only` profile carries no `--additional-root`, so
+   * the mode only ever reaches the runner with grants attached.
+   */
+  mode: 'read-only' | 'workspace-write' | 'danger-full-access'
   additionalRoots: string[]
+  deniedRoots: string[]
   /**
    * The upstream runner's own file (`--upstream-runner`). Required when
    * `allowAdditional` parses — our standalone runner resolves
@@ -83,6 +116,14 @@ export interface WindowsProfile {
    * location, the only place that package is guaranteed importable.
    */
   upstreamRunner?: string
+  /**
+   * Diagnostics label only (`--protected-home`): which `--deny-root` is the
+   * protected `$DSH_HOME`. It changes no authorization — every deny root's
+   * policy is identical — it only selects the remediation wording in
+   * hardlink/scan diagnostics. Valid only on the standalone
+   * `danger-full-access` form.
+   */
+  protectedHome?: string
   writeSid?: string
   tempWriteSid?: string
 }
@@ -96,16 +137,24 @@ export interface WindowsProfile {
 export function parseWindowsProfile(args: readonly string[], allowAdditional = false): WindowsProfile {
   const fields = new Map<string, string>()
   const additionalRoots: string[] = []
+  const deniedRoots: string[] = []
   let upstreamRunner: string | undefined
+  let protectedHome: string | undefined
   const known = new Set(['--workspace', '--temp', '--mode', '--write-sid', '--temp-write-sid'])
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index]
     const value = args[index + 1]
     if (key === undefined || value === undefined || value === '') throw new DialectUnrecognizedError('Windows ACL profile has a missing value')
     if (allowAdditional && key === '--additional-root') { additionalRoots.push(value); continue }
+    if (allowAdditional && key === '--deny-root') { deniedRoots.push(value); continue }
     if (allowAdditional && key === '--upstream-runner') {
       if (upstreamRunner !== undefined) throw new DialectUnrecognizedError('Windows ACL profile repeats --upstream-runner')
       upstreamRunner = value
+      continue
+    }
+    if (allowAdditional && key === '--protected-home') {
+      if (protectedHome !== undefined) throw new DialectUnrecognizedError('Windows ACL profile repeats --protected-home')
+      protectedHome = value
       continue
     }
     if (!known.has(key) || fields.has(key)) throw new DialectUnrecognizedError(`Windows ACL profile has unknown or duplicate flag ${key}`)
@@ -117,13 +166,30 @@ export function parseWindowsProfile(args: readonly string[], allowAdditional = f
   }
   const workspace = fields.get('--workspace')
   const temp = fields.get('--temp')
-  if (workspace === undefined || temp === undefined || fields.get('--mode') !== 'workspace-write') {
-    throw new DialectUnrecognizedError('Windows multi-root requires --workspace, --temp and --mode workspace-write')
+  const mode = fields.get('--mode')
+  if (workspace === undefined || temp === undefined || (mode !== 'workspace-write' && mode !== 'read-only' && !(allowAdditional && mode === 'danger-full-access'))) {
+    throw new DialectUnrecognizedError('Windows multi-root requires --workspace, --temp, and --mode read-only or workspace-write')
+  }
+  if (mode === 'danger-full-access'
+    ? deniedRoots.length === 0 || additionalRoots.length > 0 || fields.has('--write-sid') || fields.has('--temp-write-sid')
+    : deniedRoots.length > 0) {
+    throw new DialectUnrecognizedError('Windows ambient restriction requires deny roots only, without write grants or capability SIDs')
+  }
+  // On the standalone runner a read-only profile must carry grants — an
+  // upstream `read-only` invocation never reaches this process.
+  if (allowAdditional && mode === 'read-only' && additionalRoots.length === 0) {
+    throw new DialectUnrecognizedError('Windows multi-root read-only requires at least one --additional-root')
   }
   const writeSid = fields.get('--write-sid')
   const tempWriteSid = fields.get('--temp-write-sid')
   if ((writeSid === undefined) !== (tempWriteSid === undefined)) throw new DialectUnrecognizedError('Windows ACL profile requires both capability SIDs or neither')
-  return { workspace, temp, mode: 'workspace-write', additionalRoots,
+  if (protectedHome !== undefined
+    && (mode !== 'danger-full-access' || !win32.isAbsolute(protectedHome)
+      || !deniedRoots.some(root => root.toLowerCase() === protectedHome!.toLowerCase()))) {
+    throw new DialectUnrecognizedError('--protected-home must be an absolute member of the deny roots on a standalone danger-full-access profile')
+  }
+  return { workspace, temp, mode, additionalRoots, deniedRoots,
     ...(upstreamRunner === undefined ? {} : { upstreamRunner }),
+    ...(protectedHome === undefined ? {} : { protectedHome }),
     ...(writeSid === undefined ? {} : { writeSid }), ...(tempWriteSid === undefined ? {} : { tempWriteSid }) }
 }

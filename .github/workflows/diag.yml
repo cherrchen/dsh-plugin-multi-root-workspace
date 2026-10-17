@@ -1,0 +1,47 @@
+name: diag
+
+# Single-version diagnostic for the B9 Windows deny-token preconditions.
+# Runs on relevant PR edits as well as dispatch, so a diagnostic workflow
+# need not first land on the default branch. The full CI matrix remains the
+# acceptance gate.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/windows-broker/**'
+      - 'src/windows-deny.ts'
+      - 'tests/windows-native.e2e.ts'
+      - '.github/workflows/diag.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      CI: 'true'
+      FORCE_COLOR: '0'
+      TERM: dumb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Install the B9 deny-token broker
+        shell: pwsh
+        run: ./scripts/windows-broker/install.ps1
+      - run: pnpm vitest run tests/windows-native.e2e.ts
+      - name: Verify broker install, upgrade and scoped rights removal
+        shell: pwsh
+        run: ./scripts/windows-broker/verify-install.ps1
+      - name: Uninstall the broker
+        if: always()
+        shell: pwsh
+        run: ./scripts/windows-broker/install.ps1 -Uninstall

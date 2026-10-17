@@ -62,6 +62,12 @@
         # only legal value; anything else fails closed — every additional-root
         # write is refused for the session. Empty map: no cap at all.
         toolAccess: {}
+        # The harness home holds the store, the lease file, and the user's
+        # profiles — nothing an ambient Full-access process may touch. While
+        # ANY deny boundary exists under danger-full-access (a restricted root
+        # or an unavailable registry authority), the scope appends this path
+        # to the deny set, so fs writes and spawned processes refuse it.
+        dshHome: !!js dshHomePath()
     - id: multi-root-registry
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
       config:
@@ -86,7 +92,35 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/lsp'
     - id: multi-root-workspace-files
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/workspace-files'
+    # The B9 consumer seam for `danger-full-access`: the shell executor, the
+    # PTC runtime, and the PTY backend all skip `ctx.sandbox.confine` in that
+    # mode, so an explicit `read-only` additional root would silently stay
+    # writable. This row wraps `ctx.subprocess.spawn` / `spawnTerminal`,
+    # `ctx.shell.execute` (and `run` / `start` where a release still exposes
+    # them), and `ctx.ptcRuntime.run` at their public methods — under
+    # Full-access with restricted roots it asks `ctx.sandbox` for a restricted
+    # profile prefix and runs the call inside it, and while the registry
+    # authority is unavailable (contended, storage-failed, config-invalid) it
+    # limits the same calls to primary-root-only writes (no shared temp) instead of
+    # trusting the empty deny set. `spawnTerminal` only confines agent PTYs:
+    # every supported `dsh-terminal-bash` backend stamps `DSH_PTY_SESSION_ID`
+    # into the spawn env; a spec without it — the panel's terminal controller
+    # calls `spawnTerminal` directly — is a USER terminal and passes through
+    # in every mode (`ctx.terminals` is `isolate`d on the web profile, so the
+    # registry entry itself is not a reachable seam). The marker is a load
+    # contract, not an assumption: `multi-root-compat` probes the installed
+    # `dsh-terminal-bash` build for `DSH_PTY_SESSION_ID` at startup and refuses
+    # to load when an installed backend no longer stamps it. A dialect that
+    # cannot express "ambient minus subtree" (Landlock, Windows ACL) fails
+    # closed before the process starts.
+    - id: multi-root-process-fence
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/process-fence'
     - id: multi-root-command
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/command'
+      config:
+        # `/workspace-folders isolate-profiles` inspects the same canonical
+        # home the scope protects; spelled exactly like the scope row so the
+        # two can never disagree about which home was checked.
+        dshHome: !!js dshHomePath()
     - id: multi-root-client
       name: '@dsh-electron/dsh-plugin-multi-root-workspace'

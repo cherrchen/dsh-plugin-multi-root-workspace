@@ -876,12 +876,12 @@ describe('per-root access', () => {
     return document.tables.roots[primary]?.roots ?? []
   }
 
-  it('reads a legacy record — recordedPath only — as the read-write grant it always was', async () => {
+  it('reads a legacy record — recordedPath only — as the inherit grant it now means', async () => {
     const { registry, scope } = await mount()
     const extra = makeRoot('extra')
     await registry.add(primary, { path: extra })
     const [status] = registry.list(primary)
-    expect(status?.access).toBe('read-write')
+    expect(status?.access).toBe('inherit')
     expect(storedRecords()).toEqual([expect.objectContaining({ recordedPath: extra })])
     expect(storedRecords()[0]).not.toHaveProperty('readOnlyRecordedPath')
     expect(scope.scopeOf(primary)).toEqual([extra])
@@ -908,7 +908,26 @@ describe('per-root access', () => {
     expect(second.scope.writableOf(primary)).toEqual([])
   })
 
-  it('reports a record carrying both grant fields as invalid (ambiguous access)', async () => {
+  it('round-trips a fixed read-write registration as readWriteRecordedPath, never recordedPath', async () => {
+    const first = await mount()
+    const extra = makeRoot('extra')
+    const statuses = await first.registry.add(primary, { path: extra, access: 'read-write' })
+    expect(statuses[0]?.access).toBe('read-write')
+    expect(storedRecords()).toEqual([expect.objectContaining({ readWriteRecordedPath: extra })])
+    // The fixed grant must never write `recordedPath`: an older plugin would
+    // read that legacy field and grant it as the session-following write.
+    expect(storedRecords()[0]).not.toHaveProperty('recordedPath')
+    expect(storedRecords()[0]).not.toHaveProperty('readOnlyRecordedPath')
+    await disposeAll()
+
+    const second = await mount()
+    const [status] = second.registry.list(primary)
+    expect(status?.access).toBe('read-write')
+    expect(status?.state).toBe('available')
+    expect(second.scope.writableOf(primary)).toEqual([extra])
+  })
+
+  it('reports a record carrying more than one grant field as invalid (ambiguous access)', async () => {
     const first = await mount()
     const extra = makeRoot('extra')
     await first.registry.add(primary, { path: extra })
@@ -954,6 +973,38 @@ describe('per-root access', () => {
     expect(parsed).not.toHaveProperty('readOnlyRecordedPath')
   })
 
+  it('cannot be escalated by a downgrade: a fixed read-write record is ungrantable to every older schema', async () => {
+    const { registry } = await mount()
+    const extra = makeRoot('extra')
+    await registry.add(primary, { path: extra, access: 'read-write' })
+    const [record] = storedRecords()
+
+    const { z } = await import('zod')
+    // The pre-access schema (only `recordedPath` existed) …
+    const oldestPersistedRoot = z.object({
+      id: z.string().min(1),
+      path: z.string().min(1),
+      recordedPath: z.string().min(1).optional(),
+      alias: z.string().optional(),
+      addedAt: z.string().min(1),
+    })
+    // … and the two-level schema (`readOnlyRecordedPath` added) both strip the
+    // unknown grant field and find NO `recordedPath`: invalid, never granted.
+    const twoLevelPersistedRoot = z.object({
+      id: z.string().min(1),
+      path: z.string().min(1),
+      recordedPath: z.string().min(1).optional(),
+      readOnlyRecordedPath: z.string().min(1).optional(),
+      alias: z.string().optional(),
+      addedAt: z.string().min(1),
+    })
+    for (const schema of [oldestPersistedRoot, twoLevelPersistedRoot]) {
+      const parsed = schema.parse(record)
+      expect(parsed.recordedPath).toBeUndefined()
+      expect(parsed).not.toHaveProperty('readWriteRecordedPath')
+    }
+  })
+
   it('upgrades and downgrades access without re-recording the grant', async () => {
     const { registry, scope } = await mount()
     const extra = makeRoot('extra')
@@ -970,7 +1021,8 @@ describe('per-root access', () => {
     const rw = await registry.setAccess(primary, { kind: 'ordinal', ordinal: 1 }, 'read-write')
     expect(rw[0]?.access).toBe('read-write')
     expect(scope.writableOf(primary)).toEqual([extra])
-    expect(storedRecords()[0]).toMatchObject({ recordedPath: extra })
+    expect(storedRecords()[0]).toMatchObject({ readWriteRecordedPath: extra })
+    expect(storedRecords()[0]).not.toHaveProperty('recordedPath')
     expect(storedRecords()[0]).not.toHaveProperty('readOnlyRecordedPath')
   })
 
@@ -986,6 +1038,10 @@ describe('per-root access', () => {
     // Upgrading requires the FRESH classification to grant the root: a record
     // that is `missing` (or any withheld state) cannot be made writable.
     await expect(registry.setAccess(primary, { kind: 'ordinal', ordinal: 1 }, 'read-write'))
+      .rejects.toMatchObject({ code: 'root-unavailable' })
+    // `inherit` can widen authority too (Full-access and workspace-write), so
+    // it is gated the same way; only `read-only` is always allowed.
+    await expect(registry.setAccess(primary, { kind: 'ordinal', ordinal: 1 }, 'inherit'))
       .rejects.toMatchObject({ code: 'root-unavailable' })
     // Downgrading is always allowed, even for a withheld root.
     const downgraded = await registry.setAccess(primary, { kind: 'ordinal', ordinal: 2 }, 'read-only')
@@ -1010,6 +1066,22 @@ describe('per-root access', () => {
     await registry.setAccess(primary, { kind: 'ordinal', ordinal: 1 }, 'read-only')
     expect(publications).toBe(1)
     unsubscribe()
+  })
+
+  it('persists the negative boundary across refresh and restart of a missing read-only registration', async () => {
+    const extra = makeRoot('missing-readonly')
+    const first = await mount()
+    await first.registry.add(primary, { path: extra, access: 'read-only' })
+    rmSync(extra, { recursive: true })
+    await first.registry.refresh(primary)
+    const policy = { mode: 'danger-full-access' as const, workspaceRoot: primary }
+    expect(first.scope.resolve(policy).additionalRoots).toEqual([])
+    expect(first.scope.resolve(policy).deniedRoots).toEqual([extra])
+    await disposeAll()
+    const second = await mount()
+    expect(second.scope.resolve(policy).deniedRoots).toEqual([extra])
+    await second.registry.removeAt(primary, entryRootRef(second.registry.list(primary)[0]!, 1))
+    expect(second.scope.resolve(policy).deniedRoots).toEqual([])
   })
 
   it('keeps the existing access on revive, and honors an explicit one', async (context) => {
@@ -1037,7 +1109,8 @@ describe('per-root access', () => {
     const upgraded = await registry.add(primary, { path: elsewhere, access: 'read-write' })
     expect(upgraded).toHaveLength(1)
     expect(upgraded[0]?.access).toBe('read-write')
-    expect(storedRecords()[0]).toMatchObject({ recordedPath: canonicalPath(elsewhere) })
+    expect(storedRecords()[0]).toMatchObject({ readWriteRecordedPath: canonicalPath(elsewhere) })
+    expect(storedRecords()[0]).not.toHaveProperty('recordedPath')
     expect(storedRecords()[0]).not.toHaveProperty('readOnlyRecordedPath')
   })
 
@@ -1051,7 +1124,198 @@ describe('per-root access', () => {
     await registry.setAlias(primary, { kind: 'ordinal', ordinal: 1 }, 'docs')
     await registry.move(primary, { kind: 'ordinal', ordinal: 2 }, { kind: 'ordinal', ordinal: 1 })
     const statuses = registry.list(primary)
-    expect(statuses.map(status => status.access)).toEqual(['read-write', 'read-only'])
+    expect(statuses.map(status => status.access)).toEqual(['inherit', 'read-only'])
     expect(statuses[1]?.alias).toBe('docs')
+  })
+})
+
+describe('a withheld root still reserves its recorded boundary', () => {
+  it('refuses to register the parent of a missing read-only root — and lets the exact row revive', async () => {
+    const { registry } = await mount()
+    const denied = makeRoot('cage/denied')
+    await registry.add(primary, { path: denied, access: 'read-only' })
+    rmSync(denied, { recursive: true, force: true })
+    expect((await registry.refresh(primary))[0]?.state).toBe('missing')
+
+    // The withheld record's recorded boundary still reserves its tree: a
+    // covering parent would grant writes through the very path the operator
+    // marked read-only — refused as `nested`, the same refusal as for an
+    // available one.
+    const cage = canonicalPath(join(fixture.base, 'cage'))
+    await expect(registry.add(primary, { path: cage })).rejects.toMatchObject({ code: 'nested' })
+    expect(storedPaths()).toEqual([denied])
+
+    // The reservation is by ROW, not by path: re-creating and re-adding the
+    // exact directory is the revive the exemption exists for, and it keeps
+    // the recorded access.
+    mkdirSync(denied, { recursive: true })
+    const revived = await registry.add(primary, { path: denied })
+    expect(revived).toHaveLength(1)
+    expect(revived[0]?.state).toBe('available')
+    expect(revived[0]?.access).toBe('read-only')
+  })
+
+  it('reserves the recorded boundary of a redirected registration, never its current resolution', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
+    const { registry } = await mount()
+    const group = makeRoot('group')
+    const cage = makeRoot('group/cage')
+    const elsewhere = makeRoot('elsewhere')
+    await registry.add(primary, { path: cage, access: 'read-only' })
+
+    rmSync(cage, { recursive: true, force: true })
+    symlinkSync(elsewhere, cage)
+    expect((await registry.refresh(primary))[0]?.state).toBe('redirected')
+
+    // The reserved boundary is the RECORDED grant: a candidate containing it
+    // is refused even though `cage` currently resolves elsewhere.
+    await expect(registry.add(primary, { path: group })).rejects.toMatchObject({ code: 'nested' })
+    expect(storedPaths()).toEqual([cage])
+
+    // The mirror image: a candidate under where `cage` NOW resolves is an
+    // ordinary add — its canonical form never touches the reserved boundary,
+    // because the boundary is never re-resolved.
+    const inner = makeRoot('elsewhere/inner')
+    const accepted = await registry.add(primary, { path: join(cage, 'inner') })
+    expect(accepted).toHaveLength(2)
+    expect(accepted[1]?.path).toBe(canonicalPath(inner))
+  })
+
+  it('exempts only the exact revived row — a twin boundary still refuses the re-add', async () => {
+    const first = await mount()
+    const extra = makeRoot('extra')
+    await first.registry.add(primary, { path: extra })
+    await disposeAll()
+
+    // A store may carry TWO records for one boundary: both classify as a
+    // membership conflict and both keep their reservation.
+    const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+      tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
+    }
+    const entry = document.tables.roots[primary]!.roots[0]!
+    document.tables.roots[primary]!.roots.push({ ...entry, id: 'twin' })
+    writeFileSync(storeFile, JSON.stringify(document))
+
+    const second = await mount()
+    const statuses = second.registry.list(primary)
+    expect(statuses.map(status => status.state)).toEqual(['invalid', 'invalid'])
+    expect(statuses.every(status => status.invalidReason === 'membership-conflict')).toBe(true)
+    expect(second.scope.scopeOf(primary)).toEqual([])
+
+    // Re-adding the path revives only the FIRST matching row: the twin's
+    // reservation survives, so the add is refused and the pair must be
+    // repaired by removal — never by silently healing into one grant.
+    await expect(second.registry.add(primary, { path: extra })).rejects.toMatchObject({ code: 'duplicate' })
+    expect(second.registry.list(primary)).toHaveLength(2)
+    const after = await second.registry.removeAt(primary, { kind: 'ordinal', ordinal: 2 })
+    expect(after[0]?.state).toBe('available')
+    expect(after[0]?.invalidReason).toBeUndefined()
+    expect(second.scope.scopeOf(primary)).toEqual([extra])
+  })
+})
+
+describe('a legacy overlapping store (membership-conflict)', () => {
+  /**
+   * Persist the state the pre-fix registry could produce — a read-only child
+   * went missing and a covering fixed read-write parent was then admitted
+   * against the available-only overlap check — by seeding the parent record
+   * into the store document between two mounts.
+   */
+  async function seedOverlap(order: 'child-first' | 'parent-first'): Promise<{ cage: string; denied: string }> {
+    const first = await mount()
+    const cage = makeRoot('cage')
+    const denied = makeRoot('cage/denied')
+    await first.registry.add(primary, { path: denied, access: 'read-only' })
+    await disposeAll()
+    const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+      tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
+    }
+    const parent = { id: 'legacy-parent', path: cage, readWriteRecordedPath: cage, addedAt: '2026-09-12T00:00:00.000Z' }
+    const roots = document.tables.roots[primary]!.roots
+    if (order === 'parent-first') roots.unshift(parent)
+    else roots.push(parent)
+    writeFileSync(storeFile, JSON.stringify(document))
+    return { cage, denied }
+  }
+
+  /** Both records are `membership-conflict` invalid — regardless of order. */
+  const expectConflicted = (statuses: readonly { state: string; invalidReason?: string; detail?: string }[]): void => {
+    expect(statuses.map(status => status.state)).toEqual(['invalid', 'invalid'])
+    expect(statuses.every(status => status.invalidReason === 'membership-conflict')).toBe(true)
+    expect(statuses.every(status => status.detail?.includes('overlaps') === true)).toBe(true)
+    expect(statuses.every(status => status.detail?.includes('remains in force') === true)).toBe(true)
+  }
+
+  for (const order of ['child-first', 'parent-first'] as const) {
+    it(`withholds both sides and keeps the read-only boundary denied (${order})`, async () => {
+      const { denied } = await seedOverlap(order)
+      const stack = await mount()
+
+      expectConflicted(stack.registry.list(primary))
+      // Neither membership is granted; the read-only boundary still denies
+      // under every mode, including Full-access.
+      expect(stack.registry.granted(primary)).toEqual([])
+      expect(stack.scope.scopeOf(primary)).toEqual([])
+      expect(stack.scope.writableOf(primary)).toEqual([])
+      for (const mode of ['read-only', 'workspace-write', 'danger-full-access'] as const) {
+        expect(stack.scope.resolve({ mode, workspaceRoot: primary }).deniedRoots, mode).toEqual([denied])
+      }
+    })
+  }
+
+  it('keeps the pair withheld through move, alias, refresh and a restart', async () => {
+    const { cage, denied } = await seedOverlap('child-first')
+    const stack = await mount()
+
+    // A cosmetic move must never decide which side of the overlap is granted:
+    // BOTH directions keep both records unusable, and the deny survives each.
+    expectConflicted(await stack.registry.move(primary, { kind: 'ordinal', ordinal: 2 }, { kind: 'ordinal', ordinal: 1 }))
+    expectConflicted(await stack.registry.move(primary, { kind: 'ordinal', ordinal: 1 }))
+    await stack.registry.setAlias(primary, { kind: 'ordinal', ordinal: 2 }, 'still-conflicted')
+    expectConflicted(await stack.registry.refresh(primary))
+
+    // The reserved boundaries still block new registrations in BOTH
+    // containment directions — inside the child's tree and on the parent's
+    // own boundary. They also block a REVIVE of either side: the exemption is
+    // by row index only, so the still-standing twin boundary keeps refusing.
+    const deeper = makeRoot('cage/denied/deeper')
+    await expect(stack.registry.add(primary, { path: deeper })).rejects.toMatchObject({ code: 'nested' })
+    await expect(stack.registry.add(primary, { path: cage })).rejects.toMatchObject({ code: 'nested' })
+    await expect(stack.registry.add(primary, { path: denied })).rejects.toMatchObject({ code: 'nested' })
+    expect(storedPaths()).toEqual([denied, cage])
+
+    await disposeAll()
+    const reopened = await mount()
+    expectConflicted(reopened.registry.list(primary))
+    expect(reopened.scope.resolve({ mode: 'danger-full-access', workspaceRoot: primary }).deniedRoots)
+      .toEqual([denied])
+  })
+
+  it('keeps a record that claims two grants out of the conflict — and out of the deny set', async () => {
+    const first = await mount()
+    const healthy = makeRoot('healthy')
+    await first.registry.add(primary, { path: healthy })
+    await disposeAll()
+
+    // A corrupt record that declares two access levels at once AND overlaps
+    // the healthy root: it can state no trustworthy boundary, so it neither
+    // conflicts with the healthy root nor denies through it.
+    const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+      tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
+    }
+    const inner = canonicalPath(join(healthy, 'inner'))
+    document.tables.roots[primary]!.roots.push({
+      id: 'corrupt', path: inner, recordedPath: inner, readOnlyRecordedPath: inner,
+      addedAt: '2026-09-12T00:00:00.000Z',
+    })
+    writeFileSync(storeFile, JSON.stringify(document))
+
+    const second = await mount()
+    const statuses = second.registry.list(primary)
+    expect(statuses.map(status => status.state)).toEqual(['available', 'invalid'])
+    expect(statuses[1]?.invalidReason).toBeUndefined()
+    expect(second.scope.scopeOf(primary)).toEqual([healthy])
+    expect(second.scope.resolve({ mode: 'danger-full-access', workspaceRoot: primary }).deniedRoots).toEqual([])
   })
 })

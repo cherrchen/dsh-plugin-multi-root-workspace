@@ -12,7 +12,11 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 ### Added
 
-- **附加根访问级别**：`add --read-only`（或面板添加行选择）登记的根可读、可浏览、参与 LSP 与指令注入，但 fs 写、受限进程与 Windows ACL 都不授予它写权限；`/workspace-folders access <ref> read-only|read-write` 与面板按根切换（升级到可写要求该根此刻可用且不重新授权路径）。持久化布局向下兼容：旧版本插件把只读记录判为无效而非升级为可写（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)）。
+- **附加根访问级别升级为三态**：`add [--inherit|--read-only|--read-write]`（或面板添加行选择）。`inherit` 跟随会话模式——新登记的默认值，旧版插件登记的可写记录也迁移为 `inherit`；`read-only` 可读、可浏览、参与 LSP 与指令注入，但任何模式（包括 `danger-full-access`）都不授予写权限；`read-write` 固定在全局只读会话里仍可写。`/workspace-folders access <ref> inherit|read-only|read-write` 与面板按根切换（扩权要求该根此刻可用且不重新授权路径）。持久化布局向下兼容：旧版本插件把只读记录判为无效而非升级为可写（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)、[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
+- **Full-access 也强制执行拒写边界**：shell / pwsh 执行器、`run_code`（PTC）与 agent PTY 在 `danger-full-access` 下绕过 `confine`，进程围栏为它们统一套用受限内核 profile（macOS Seatbelt、Linux bwrap——上游选定 Landlock 的主机同样改走 bubblewrap，bwrap 不可用时该组合在启动前拒绝），显式只读根与被工具封顶的根在该模式下依旧拒写；fs fence 读取同一份 deny 集（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
+- **受限 Full-access 保护 `$DSH_HOME`**：只要存在任何拒写边界（只读根、工具封顶成员或注册表权限不可用），home 目录就进入 deny 集——存根存储、注册表 lease 与用户 profile 都在其中；零附加根且注册表健康时 Full-access 与上游逐字节一致（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
+- **面板用户终端不受约束**：进程围栏只对 env 带 `DSH_PTY_SESSION_ID` 的 spawn 生效（agent PTY 由 terminal-bash backend 盖章）；你在面板打开的终端属于用户行为，任何模式直通（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
+- **Windows 上 Full-access 的局部拒写**：随包提供需管理员安装的每用户特权 broker——安装器只向专用虚拟服务账户 `NT SERVICE\DshMultiRootBroker-<安装哈希>` 授予固定 LSA 权限（`SeServiceLogonRight`、`SeCreateTokenPrivilege`、`SeAssignPrimaryTokenPrivilege`、`SeTcbPrivilege`、`SeDebugPrivilege`、`SeImpersonatePrivilege`），不为宿主用户提权；broker 为受限子进程构造普通 deny-only 组 token，runner 读回验证后才放行。未安装 broker 时该组合拒绝启动；Windows 执行仍如实报告 partial 边界（[ADR-0020](./docs/decisions/ADR-0020-windows-normal-deny-groups.md)）。
 - **per-tool 写权限封顶**：`multi-root-scope` 行配置 `toolAccess: { <工具名>: 'read-only' }` 后，该工具永远不能写任何附加根（主根不受影响）；封顶经 `tools/execute` 的真实 dispatch 上下文执行，非法配置 fail closed（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)）。
 - **附加根数量上限**：每个主根默认最多登记 16 条附加根记录（`maxAdditionalRoots` 可调至 64）；超限的新增被拒绝，历史超限记录照常授予。列表如实显示 `N of LIMIT`（[ADR-0014](./docs/decisions/ADR-0014-root-limit-and-provider-conflict.md)）。
 - **Provider 冲突检测**：另一插件也替换 `ctx.fs` / `ctx.sandbox` 时，多根行响亮失败并拒绝一切授予，而不是依赖装载顺序（[ADR-0014](./docs/decisions/ADR-0014-root-limit-and-provider-conflict.md)）。
@@ -23,6 +27,11 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 ### Fixed
 
+- **注册表权限不可用不再读作「没有限制」**：读到空根表的进程（争用、存储故障、配置非法）曾在 Full-access 下放行一切写；现在 `danger-full-access` 与 `workspace-write` 都只授予主根写权限（共享平台临时区不再可写），显式拒写边界仍优先，接管 lease 后恢复（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
+- **改名祖先目录不能再解除只读边界**：此前把被拒根的父目录改名即可把整棵树搬出路径拒写边界；现在 Seatbelt 同时拒写被拒根的每个祖先目录本身（`(literal …)`），bwrap 把祖先自绑为挂接点使 rename 返回 EBUSY；Windows 用不共享删除的目录句柄钉住根及祖先，直到受限 Job 后代排空，防止 shell 搬走目录后经宿主文件工具绕过。祖先目录的元数据或改名操作会受相应机制限制（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)、[ADR-0020](./docs/decisions/ADR-0020-windows-normal-deny-groups.md)）。
+- **负授权不随排序、消失或冲突丢失**：存量重叠登记双方撤销成员授权，但可信记录的拒写边界仍保留；新增根也检查 missing / redirected 根的保留边界。全局只读会话追加固定读写根后统一应用 deny，无法表达子树减法的后端在启动前拒绝。
+- **Windows 拒写前检查全部根的硬链接**：任一根存在多链接文件或不可检查节点时，在任何 ACL 写入前拒绝启动，避免改写 pnpm store 或其他链接的共享对象。新增宿主维护命令 `/workspace-folders isolate-profiles [--apply]`：默认只读检查，显式 apply 仅将 profile 导入配置设为 copy；存量依赖仍需按报告重装，不修复历史 ACL（[ADR-0020](./docs/decisions/ADR-0020-windows-normal-deny-groups.md)）。
+- **Linux 上消失的拒写根失败关闭而非放行**：deny 根的 bwrap 挂载恢复为强制项——目录在登记后或 profile 构造后被删除时命名空间搭建失败、命令不会执行，不再出现在可写父挂载下被重建写入的缺口（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
 - **附加根重新登记保留原权限**：命令与面板在未显式选择访问级别时不发送默认值，避免 revive 把只读登记静默升级；达到根上限时仍可从面板重新登记既有的不可用项。
 - **面板兼容旧宿主的根列表**：旧响应缺少 `limit` / `count` 时仍可显示和操作，显式非法值仍拒绝。
 - **非法 toolAccess 的拓扑文案与执行一致**：模型明确看到所有附加根写被拒，不再被告知 read-write 登记可写；根上限配置 `null` 同样 fail closed。
@@ -31,6 +40,7 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - **Windows runner 在 spawn 前重新验证根**：授权 ACL 之后、启动子进程之前重新确认每个根仍存在且是同一 canonical 目录，并要求 `--temp` 已存在；不满足即退出 127，不启动无约束进程。
 - **Windows 上「在文件管理器中显示」不再误报失败**：`explorer.exe` 成功时也返回 1，win32 现在接受退出码 0/1。
 - **面板文件端点拒绝反斜杠路径**：POSIX 上 `..\..\x` 此前会解析到所选根内部；现在词法拒绝。
+- **Windows broker 放行 UAC 过滤调用方并诊断打包子进程**：非提权 UAC 管理员发起的受限命令此前被 broker 以「unrestricted 身份」拒绝；现在只拒绝携带 restricting SID 或 AppContainer 的调用方，Store/MSIX 版子进程（如 WindowsApps 别名的 `pwsh.exe`）在启动前给出指向 MSI/ZIP 版的诊断。升级后需用 `install.ps1` 重装一次 broker 才会生效（[ADR-0020 修订](./docs/decisions/ADR-0020-windows-normal-deny-groups.md)）。
 - **面板文件树调用可中止**：组件卸载、路径或会话变化时取消在飞的 `files` / `readFile` 调用，过期响应不再渲染为错误。
 
 ### Changed

@@ -20,7 +20,8 @@
  * so the assertion holds even where a confined process cannot be spawned), the
  * denial names every allowed root, and — when this process can actually run a
  * confined command — bash writes the additional root while the outside tree
- * stays denied. `read-only` must leave the additional root ungranted.
+ * stays denied. `read-only` must leave the `inherit` additional root ungranted —
+ * while the B9 fixed `read-write` root must stay writable under the same mode.
  *
  * The run is isolated: a scratch `$DSH_HOME` and a fixture tree under the
  * repository's ignored `.dsh-smoke/` directory (outside `/tmp`, so containment
@@ -29,16 +30,17 @@
  * @module scripts/smoke-behavior
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { FileSystem } from '@deepseek-ai/dsh-fs'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import MultiRootFileSystem from '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
 import MultiRootSandboxProvider from '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
+import { removeBehaviorHome, removeScratchTree } from './lib/smoke-cleanup.mjs'
 import { createChecker } from './lib/check.mjs'
 import { requireKernelRunner } from '../tests/support/kernel-runner.ts'
-import { assertIsolatedHome, installPluginProfile, pluginPackageDir, REPO_ROOT, resolveScratchHome, runDsh } from './lib/dsh-runtime.mjs'
+import { assertIsolatedHome, ensureProfileCopyImport, installPluginProfile, pluginPackageDir, REPO_ROOT, resolveScratchHome, runDsh, runtimeRequire } from './lib/dsh-runtime.mjs'
 import { bootProfile } from './lib/profile-boot.mjs'
 import { runForeground } from './lib/shell-exec.mjs'
 
@@ -46,8 +48,10 @@ const home = resolveScratchHome(`behavior-${process.pid}`)
 const fixtureRoot = join(REPO_ROOT, '.dsh-smoke', `behavior-${process.pid}`)
 const primaryRoot = join(fixtureRoot, 'ws')
 const outsideRoot = join(fixtureRoot, 'out')
-/** The additional root a multi-root session registers. */
+/** The additional root a multi-root session registers — `inherit`: follows the session mode. */
 const extraRoot = join(fixtureRoot, 'extra')
+/** The B9 fixed `read-write` root: must stay writable even under a `read-only` session. */
+const fixedRoot = join(fixtureRoot, 'fixed')
 /** A tree outside every root, used to prove the denial is still enforced. */
 const thirdRoot = join(fixtureRoot, 'third')
 const keep = process.env.DSH_SMOKE_KEEP === '1'
@@ -266,7 +270,11 @@ async function multiRootBattery(ctx) {
   scope.setAdditionalRoots(policy.workspaceRoot, [{
     id: 'extra',
     path: extraRoot,
-    recordedPath: canonical(extraRoot), access: 'read-write',
+    recordedPath: canonical(extraRoot), access: 'inherit',
+  }, {
+    id: 'fixed',
+    path: fixedRoot,
+    recordedPath: canonical(fixedRoot), access: 'read-write',
   }])
   const resolved = scope.resolve(policy)
   const canonicalExtra = resolved.additionalRoots[0]
@@ -283,6 +291,7 @@ async function multiRootBattery(ctx) {
   }
 
   results.set('fs writes into the additional root', await write(join(extraRoot, 'fs-extra.txt')))
+  results.set('fs writes into the fixed root', await write(join(fixedRoot, 'fs-fixed.txt')))
   const denial = await write(join(thirdRoot, 'fs-third.txt'))
   results.set('fs writes outside every root', denial)
   results.set('fs denial names every allowed root', String(
@@ -300,6 +309,9 @@ async function multiRootBattery(ctx) {
     const confined = await ctx.sandbox.confine(SHELL.confineArgv, policy)
     results.set('the host dialect grants the additional root', String(
       confined.argv.some(argument => argument.includes(String(canonicalExtra))),
+    ))
+    results.set('the host dialect grants the fixed root', String(
+      confined.argv.some(argument => argument.includes(String(canonical(fixedRoot)))),
     ))
     results.set('the host dialect keeps its enforcement facts', `${confined.enforcement}/${confined.denialSignatures.length}`)
   } catch (error) {
@@ -323,6 +335,7 @@ async function multiRootBattery(ctx) {
         // write carries the kernel dialect's own denial message here.
         stderr: result.stderr.text.trim(),
         wroteExtra: existsSync(join(extraRoot, 'bash-extra.txt')),
+        wroteFixed: existsSync(join(fixedRoot, 'bash-fixed.txt')),
         wroteThird: existsSync(join(thirdRoot, 'bash-third.txt')),
       }
     } catch (error) {
@@ -330,6 +343,7 @@ async function multiRootBattery(ctx) {
     }
   }
   results.set('bash writes into the additional root', JSON.stringify(await confinedWrite(bash, join(extraRoot, 'bash-extra.txt'))))
+  results.set('bash writes into the fixed root', JSON.stringify(await confinedWrite(bash, join(fixedRoot, 'bash-fixed.txt'))))
   results.set('bash writes outside every root', JSON.stringify(await confinedWrite(bash, join(thirdRoot, 'bash-third.txt'))))
 
   return results
@@ -537,6 +551,155 @@ function canonical(path) {
   }
 }
 
+/** Exercise the installed Windows runner through the REAL Full-access pwsh
+ * bypass. This battery also runs against the tarball in smoke:packed.
+ */
+async function ambientBattery() {
+  process.env.DSH_PERMISSION_MODE = 'danger-full-access'
+  const { ctx } = await bootProfile(PLUGIN_PROFILE, home)
+  try {
+    const policy = ctx.sandboxPolicy.resolve({})
+    ctx.multiRootScope.setAdditionalRoots(policy.workspaceRoot, [
+      { id: 'ro', path: extraRoot, recordedPath: canonical(extraRoot), access: 'read-only' },
+      { id: 'fixed', path: fixedRoot, recordedPath: canonical(fixedRoot), access: 'read-write' },
+    ])
+    // Prove this profile can actually execute before asserting the matrix.
+    const probePath = join(primaryRoot, 'full-access-probe.txt')
+    const probeSpec = ctx.shell.resolve({ command: SHELL.write(probePath), workdir: primaryRoot, sandboxPolicy: policy })
+    let probe
+    try { probe = await runForeground(ctx.shell, probeSpec) }
+    catch (error) {
+      if (error?.code !== 'SANDBOX_UNAVAILABLE') throw error
+      check.skip(requireKernelRunner(hostDialect(), describe(error)))
+      return
+    }
+    if (probe.sandbox?.runnerFailed) {
+      check.skip(requireKernelRunner(hostDialect(), probe.stderr.text))
+      return
+    }
+    check.equal(probe.exitCode, 0, 'Full-access restricted profile runs an ambient write', probe.stderr.text)
+    for (const [name, root, expected] of [
+      ['primary', primaryRoot, true], ['ambient', thirdRoot, true],
+      ['fixed', fixedRoot, true], ['read-only', extraRoot, false],
+    ]) {
+      const path = join(root, 'full-access.txt')
+      rmSync(path, { force: true })
+      const spec = ctx.shell.resolve({ command: SHELL.write(path), workdir: primaryRoot, sandboxPolicy: policy })
+      const result = await runForeground(ctx.shell, spec)
+      check.equal(existsSync(path), expected, `Full-access shell: ${name} write matches root policy`, result.stderr.text)
+      if (expected) check.equal(result.exitCode, 0, `Full-access shell: ${name} command exits successfully`, result.stderr.text)
+      else {
+        check.ok(result.exitCode !== 0, 'Full-access shell: read-only write fails', result.stderr.text)
+        check.equal(result.sandbox?.denied, true, 'Full-access shell: kernel denial is reported', result.stderr.text)
+        check.ok(result.sandbox?.enforcement !== undefined, 'Full-access shell: enforcement is reported')
+      }
+    }
+    // Exercise the real PTC runtime, not an execute-shaped test double.
+    const runtime = ctx.get('ptcRuntime')
+    if (runtime !== undefined) {
+      for (const [name, root, writable] of [['primary', primaryRoot, true], ['ambient', thirdRoot, true],
+        ['fixed', fixedRoot, true], ['read-only', extraRoot, false]]) {
+        const path = join(root, 'ptc-full-access.txt')
+        rmSync(path, { force: true })
+        const spec = runtime.resolve({ program: `const fs = await import('node:fs'); fs.writeFileSync(${JSON.stringify(path)}, 'ok'); return 42;`,
+          bindings: [], cwd: primaryRoot, sandboxPolicy: policy })
+        const result = await runtime.run(spec)
+        check.equal(existsSync(path), writable, `Full-access PTC: ${name} matches root policy`, JSON.stringify(result))
+        if (writable) check.equal(result.value, 42, `Full-access PTC: ${name} returns its value`, JSON.stringify(result))
+        else check.equal(result.sandbox?.denied, true, 'Full-access PTC: denied writes retain diagnostic facts', JSON.stringify(result))
+      }
+    }
+    // Removing the restriction must affect the next launch without removing
+    // standing ACEs used by already-running deny tokens.
+    ctx.multiRootScope.setAdditionalRoots(policy.workspaceRoot, [])
+    const spec = ctx.shell.resolve({ command: SHELL.write(join(extraRoot, 'after-remove.txt')), workdir: primaryRoot, sandboxPolicy: policy })
+    const result = await runForeground(ctx.shell, spec)
+    check.equal(result.exitCode, 0, 'Full-access shell: removed root is ambient again', result.stderr.text)
+    check.ok(existsSync(join(extraRoot, 'after-remove.txt')), 'Full-access shell: next launch observes removal')
+  } finally { await ctx.fiber.dispose() }
+}
+
+/**
+ * The C2 negative regression: a profile left on pnpm's DEFAULT hardlink
+ * import makes the protected $DSH_HOME itself un-deniable, and the shipped
+ * ambient-deny runner must refuse it at the read-only preflight — before any
+ * token request, lock, or ACL write — instead of mutating objects every link
+ * shares (the store, other projects). The fixture uses a real `linkSync`
+ * hardlink inside the profile's node_modules — the same filesystem fact a
+ * default `dsh plugin add` produces — and asserts a REAL refusal: nonzero
+ * exit, the preflight diagnostic on stderr, and a child that never ran. This
+ * battery also runs against the tarball in smoke:packed.
+ */
+async function hardlinkDenyNegative() {
+  if (!WIN32) return
+  const profile = 'mr-hardlink'
+  const profileDir = join(home, 'profiles', profile)
+  mkdirSync(join(profileDir, 'node_modules', 'fixture-dep'), { recursive: true })
+  // Exactly what upstream initProfile writes — no packageImportMethod, so the
+  // profile's import method is pnpm's default (hardlink).
+  writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+    name: `dsh-profile-${profile}`, private: true, dependencies: {}, dsh: { profile: { bundles: [] } },
+  }, null, 2))
+  writeFileSync(join(profileDir, 'pnpm-workspace.yaml'),
+    'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n')
+  // A real multi-link file: the "store" name lives outside `profiles/` but
+  // INSIDE the home — hardlinks cannot cross volumes, and on hosts whose
+  // TEMP volume differs from the checkout's (CI: C: vs D:) `fixtureRoot`
+  // cannot host the second name. The imported name inside the profile's
+  // node_modules is the object pnpm's default import method shares.
+  const storeSide = join(home, 'fake-store', 'fixture-dep', 'index.js')
+  mkdirSync(dirname(storeSide), { recursive: true })
+  writeFileSync(storeSide, 'store')
+  const linked = join(profileDir, 'node_modules', 'fixture-dep', 'index.js')
+  linkSync(storeSide, linked)
+  check.ok(lstatSync(linked).nlink > 1,
+    'the default-method profile fixture carries a real multi-link file', linked)
+
+  // The shipped runner, driven with the argv the composition builds: the
+  // scope appends the home to the deny set under Full-access, and the
+  // protectedHome label is what names it in the diagnostic.
+  const installed = PLUGIN_SOURCE === undefined ? undefined : findInstalledPluginDir(home)
+  const runner = installed === undefined
+    ? join(REPO_ROOT, 'lib', 'windows-runner.js')
+    : join(installed, 'lib', 'windows-runner.js')
+  const upstream = runtimeRequire().resolve('@deepseek-ai/dsh-sandbox-windows-acl/runner')
+  const sentinel = join(primaryRoot, 'hardlink-child-ran.txt')
+  const tempDir = join(fixtureRoot, 'temp')
+  mkdirSync(tempDir, { recursive: true })
+  const { spawn } = await import('node:child_process')
+  const result = await new Promise((settle, reject) => {
+    const child = spawn(process.execPath, [
+      runner,
+      '--workspace', primaryRoot,
+      '--temp', tempDir,
+      '--mode', 'danger-full-access',
+      '--deny-root', canonical(home),
+      '--protected-home', canonical(home),
+      '--upstream-runner', upstream,
+      '--', process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(sentinel)},'ran')`,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', chunk => { stdout += chunk })
+    child.stderr.on('data', chunk => { stderr += chunk })
+    child.on('error', reject)
+    child.on('close', code => settle({ stdout, stderr, code: code ?? 1 }))
+  })
+  check.ok(result.code !== 0,
+    'a hardlinked $DSH_HOME refuses the ambient deny launch (nonzero exit)', `exit ${result.code}\n${result.stderr}`)
+  check.contains(result.stderr, 'windows-acl-run:',
+    'the refusal is the shipped runner\'s own diagnostic', result.stderr)
+  check.contains(result.stderr, 'hardlinked file',
+    'the refusal names the hardlink preflight', result.stderr)
+  check.contains(result.stderr, 'protected DSH home',
+    'the refusal names the protected home', result.stderr)
+  check.contains(result.stderr, 'isolate-profiles',
+    'the refusal names the remediation command', result.stderr)
+  check.ok(!existsSync(sentinel), 'the refused launch never ran the child', sentinel)
+}
+
 /** Boot one profile and run the registry battery, then the restart battery. */
 async function runRegistryProfile(profile) {
   process.env.DSH_PERMISSION_MODE = 'workspace-write'
@@ -613,12 +776,17 @@ try {
   mkdirSync(primaryRoot, { recursive: true })
   mkdirSync(outsideRoot, { recursive: true })
   mkdirSync(extraRoot, { recursive: true })
+  mkdirSync(fixedRoot, { recursive: true })
   mkdirSync(thirdRoot, { recursive: true })
   assertIsolatedHome(home)
 
   console.log(`[smoke:behavior] scratch home: ${home}`)
   console.log(`[smoke:behavior] fixture: ${fixtureRoot}`)
 
+  // The baseline profile also gets the copy import BEFORE `plugin install`
+  // materializes its store references: the C1 deny preflight counts every
+  // multi-link file under the home, not only the plugin profile's.
+  ensureProfileCopyImport(home, BASELINE_PROFILE)
   const initCode = await runDsh(['plugin', '--profile', BASELINE_PROFILE, 'install'], { DSH_HOME: home })
   check.ok(initCode === 0, 'baseline profile initialized without the plugin', `exit ${initCode}`)
   const addCode = await installPluginProfile(PLUGIN_PROFILE, home, PLUGIN_SOURCE ?? pluginPackageDir())
@@ -695,13 +863,17 @@ try {
     // --- additional roots: the same composition, one root wider -----------------
     for (const mode of ['workspace-write', 'read-only']) {
       for (const name of ['fs-extra.txt', 'bash-extra.txt']) rmSync(join(extraRoot, name), { force: true })
+      for (const name of ['fs-fixed.txt', 'bash-fixed.txt']) rmSync(join(fixedRoot, name), { force: true })
       for (const name of ['fs-third.txt', 'bash-third.txt']) rmSync(join(thirdRoot, name), { force: true })
 
       const outcomes = await runMultiRootProfile(PLUGIN_PROFILE, mode)
       const extraWrite = String(outcomes.get('fs writes into the additional root'))
+      const fixedWrite = String(outcomes.get('fs writes into the fixed root'))
       const thirdWrite = String(outcomes.get('fs writes outside every root'))
       const dialectGrant = String(outcomes.get('the host dialect grants the additional root'))
+      const dialectGrantFixed = String(outcomes.get('the host dialect grants the fixed root'))
       const bashExtra = confinedFacts(outcomes.get('bash writes into the additional root'))
+      const bashFixed = confinedFacts(outcomes.get('bash writes into the fixed root'))
       const bashThird = confinedFacts(outcomes.get('bash writes outside every root'))
 
       check.equal(String(outcomes.get('scope resolves the additional root')).length > 0, true,
@@ -715,15 +887,18 @@ try {
 
       if (mode === 'workspace-write') {
         check.equal(extraWrite, 'ok', `${mode}: fs writes into the additional root`, extraWrite)
+        check.equal(fixedWrite, 'ok', `${mode}: fs writes into the fixed root`, fixedWrite)
         check.contains(thirdWrite, 'FS_SANDBOX_DENIED', `${mode}: fs denies a write outside every root`)
         check.contains(thirdWrite, 'allowed roots:', `${mode}: the denial names the allowed roots`)
         check.equal(String(outcomes.get('fs denial names every allowed root')), 'true',
           `${mode}: the denial lists both the primary and the additional root`, thirdWrite)
       } else {
-        check.contains(extraWrite, 'FS_SANDBOX_DENIED', `${mode}: read-only denies the additional root too`, extraWrite)
+        check.contains(extraWrite, 'FS_SANDBOX_DENIED', `${mode}: read-only denies the inherit root`, extraWrite)
+        check.equal(fixedWrite, 'ok', `${mode}: read-only still writes the fixed read-write root`, fixedWrite)
       }
 
       check.equal(dialectGrant, String(mode === 'workspace-write'), `${mode}: host dialect grant matches the mode`, dialectGrant)
+      check.equal(dialectGrantFixed, 'true', `${mode}: host dialect always grants the fixed root`, dialectGrantFixed)
 
       if (!bashExtra.ran) {
         check.skip(`${mode}: confined bash against the additional root (${requireKernelRunner(hostDialect(), String(bashExtra.failure).slice(0, 120))})`)
@@ -732,9 +907,16 @@ try {
         check.equal(bashThird.wrote, false, `${mode}: bash cannot write outside every root`, bashThird.text)
         check.equal(bashThird.denied, true, `${mode}: bash reports the outside denial`, bashThird.text)
       } else {
-        check.equal(bashExtra.wrote, false, `${mode}: read-only leaves the additional root untouched`, bashExtra.text)
+        check.equal(bashExtra.wrote, false, `${mode}: read-only leaves the inherit root untouched`, bashExtra.text)
+      }
+      if (!bashFixed.ran) {
+        check.skip(`${mode}: confined bash against the fixed root (${requireKernelRunner(hostDialect(), String(bashFixed.failure).slice(0, 120))})`)
+      } else {
+        check.equal(bashFixed.wrote, true, `${mode}: bash always writes the fixed read-write root`, bashFixed.text)
       }
     }
+    await ambientBattery()
+
     // --- the M3 path: roots registered by the command, not by the smoke --------
     for (const name of ['registry-before.txt', 'registry-after.txt', 'registry-removed.txt', 'registry-restart.txt']) {
       rmSync(join(extraRoot, name), { force: true })
@@ -790,13 +972,18 @@ try {
     delete process.env.DSH_PERMISSION_MODE
   }
 
+  // The negative regression runs LAST: the hardlinked profile it creates
+  // would refuse every further Full-access launch, so it must not exist while
+  // the positive ambient battery still needs one.
+  await hardlinkDenyNegative()
+
   check.finish()
 } finally {
   rmSync(join(tmpdir(), `dsh-mr-behavior-${process.pid}.txt`), { force: true })
   if (keep) {
     console.log(`[smoke:behavior] kept scratch home at ${home} and fixture at ${fixtureRoot}`)
   } else {
-    rmSync(home, { recursive: true, force: true })
-    rmSync(fixtureRoot, { recursive: true, force: true })
+    await removeBehaviorHome(home, process.env.DSH_SMOKE_DEFER_HOME_CLEANUP === '1')
+    await removeScratchTree(fixtureRoot)
   }
 }

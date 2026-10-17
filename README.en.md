@@ -16,6 +16,8 @@ A real development project is usually several independent Git repositories, and 
 - **Security does not degrade**: additional roots are authorized through the same mechanism the harness already uses — an in-process filesystem fence plus kernel-level sandboxes (macOS Seatbelt / Linux bwrap / Landlock / Windows ACL), with files and bash sharing one and the same scope. It never degenerates into full access or prompt-level constraints.
 - **Absent when absent**: with no additional root configured, its behavior is item-for-item identical to an uninstalled harness; every misconfiguration fails loudly instead of silently degrading.
 
+The development branch implements B9 three-state access and Windows ambient write denial; see the [usage guide](./docs/guide/README.en.md) and [ADR-0020](./docs/decisions/ADR-0020-windows-normal-deny-groups.md) for platform limits. These changes are unreleased; the roadmap ledger records native acceptance evidence.
+
 Current released version: `v0.1.6`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Quick Start
@@ -31,10 +33,10 @@ dsh --profile web
 Once it is up, the **Folders** action (`🗂`) appears at the sidebar foot — or, straight in a session:
 
 ```text
-/workspace-folders add ~/code/another-repo [--read-only|--read-write]
+/workspace-folders add ~/code/another-repo [--inherit|--read-only|--read-write]
 ```
 
-The agent can now read, write, and run bash in that directory, with the same rights as this session's workspace. Other install options (tarball, GitHub, a local clone) are covered under [Installation](#installation).
+The agent can now read, write, and run bash in that directory — the default is `inherit`, so the access level follows the session mode. Other install options (tarball, GitHub, a local clone) are covered under [Installation](#installation).
 
 ## Requirements
 
@@ -198,27 +200,28 @@ The upstream `fs-sandbox` and `sandbox` rows are disabled and taken over by the 
 ### Command
 
 ```text
-/workspace-folders [list]                                    # list the primary root and the additional roots (access and state included)
-/workspace-folders add <absolute path> [--read-only|--read-write]   # no path opens the OS directory picker; defaults to read-write
-/workspace-folders access <n|path> read-only|read-write             # switch access (upgrading requires the root to be available right now)
-/workspace-folders alias <n|path> [name]                            # omitting the name clears the alias
-/workspace-folders remove <n|path>                                  # n is the number list prints
-/workspace-folders reveal <n|path>                                  # show it in the file manager
-/workspace-folders help                                             # show the command help
+/workspace-folders [list]                                             # list the primary root and the additional roots (access and state included)
+/workspace-folders add <absolute path> [--inherit|--read-only|--read-write]  # no path opens the OS directory picker; new registrations default to inherit
+/workspace-folders access <n|path> inherit|read-only|read-write             # switch access (widening requires the root to be available right now)
+/workspace-folders alias <n|path> [name]                                    # omitting the name clears the alias
+/workspace-folders remove <n|path>                                          # n is the number list prints
+/workspace-folders reveal <n|path>                                          # show it in the file manager
+/workspace-folders isolate-profiles [--apply]                               # inspect profile import method and multi-link files under $DSH_HOME; --apply writes copy config
+/workspace-folders help                                                     # show the command help
 ```
 
 Paths may be quoted; a path that duplicates an existing root, nests inside one, or is the workspace root itself is rejected.
 
-Additional roots default to read-write — the same rights as the primary root; register with `--read-only` or switch later via `access`. A primary root accepts at most 16 additional roots (`maxAdditionalRoots` can raise it to 64). A host may also cap a tool for all additional roots via `toolAccess` on the `multi-root-scope` row — e.g. `{ bash: 'read-only' }` keeps bash from ever writing an additional root (it can still write the primary root).
+Access is three-state ([ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md); the [usage guide](./docs/guide/README.en.md#access-levels-the-root-limit-and-per-tool-caps) has the exact semantics): `inherit` follows the session mode — writable under `workspace-write`, refused under `read-only`, unrestricted under `danger-full-access`; `read-only` refuses writes in every mode, including Full-access; a fixed `read-write` root stays writable even in a read-only session. Writable records registered by older plugin versions read back as `inherit`. A primary root accepts at most 16 additional roots (`maxAdditionalRoots` can raise it to 64). A host may also cap a tool for all additional roots via `toolAccess` on the `multi-root-scope` row — e.g. `{ bash: 'read-only' }` keeps bash from ever writing an additional root (it can still write the primary root).
 
-After an `add`, `list` prints:
+After an `add`, `list` prints (a `workspace-write` session, with `website` registered read-only):
 
 ```text
 Workspace root (primary; access follows the current sandbox mode): /home/me/monorepo
-  1 /home/me/payments-service [payments] (read-write)
-  2 /home/me/website (read-write)
+  1 /home/me/payments-service [payments] (inherit)
+  2 /home/me/website (read-only)
 2 of 16 additional roots.
-Writable additional roots: 2 of 2.
+Writable additional roots under the current mode: 1 of 2.
 ```
 
 ### Panel
@@ -275,7 +278,8 @@ Issues and PRs are welcome:
 - The Windows multi-root runner inherits upstream partial enforcement, caller-owned directory requirements, and private-temp isolation. Running processes retain their initial roots; later processes use the updated set ([ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)).
 - **Network and device paths cannot be additional roots on Windows**: UNC (`\\server\share`), `\\?\`, `\\.\`, and mapped network drives are rejected at registration with `unsupported-path` — the restricted token's capability SID cannot be shown to bind SMB access ([ADR-0011 amendment](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)).
 - **The confined Windows shell is pwsh; Git Bash is not available**: MSYS cannot start under the write-restricted Low-integrity token (identically under the upstream and plugin runners — an upstream limitation). An upstream-confined child also cannot receive Ctrl+C (it inherits the runner's ignore flag); under the plugin runner Ctrl+C reaches the child and the runner mirrors its exit code.
-- An additional root defaults to the same rights as the primary root; registering with `--read-only` or switching via `access` makes it read-only (an absence of write authority, not read confinement). Running processes retain their startup root set — cap and access changes constrain only later calls and new processes ([ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)); hosts with workingDirectory may use an additional root as the execution directory for later tools, while the session origin and registry identity stay unchanged ([ADR-0012](./docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)).
+- Additional-root access is three-state: new registrations default to `inherit` (they follow the session mode), `--read-only` refuses writes in every mode (including Full-access), and a fixed `--read-write` stays writable even in a read-only session — it is a question of write authority, never read confinement ([ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)). A running process or persistent terminal keeps the deny set it was started with — a terminal started before a root turned read-only stays unrestricted until restarted; cap and access changes constrain only later calls and new processes ([ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)); hosts with workingDirectory may use an additional root as the execution directory for later tools, while the session origin and registry identity stay unchanged ([ADR-0012](./docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)).
+- **On Linux hosts where upstream selected Landlock, a restricted Full-access needs bubblewrap**: Landlock's allowlist cannot express "everything writable except these roots", so that combination selects bwrap to spell the deny boundary; on a host without a usable bwrap (not installed, or unprivileged user namespaces disabled), a Full-access command that carries any deny boundary (a read-only root, or the protected `$DSH_HOME`) fails closed at launch. Enable bwrap there, or avoid explicit read-only roots under Full-access on such hosts ([ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)).
 - Browse additional roots from the **Files tab's root switcher**: the header entry lists the primary root and every additional root, with the selected root's full path still shown beside it; selecting one lets a byte-for-byte fork of the upstream Files tree take over the tree area (lazy-loaded directories, native rows and icons, watch-driven auto-refresh, file clicks opening in the host viewer, plus a manual refresh in the header's reload spot), and the header's open-in-app button is simultaneously replaced by a byte-for-byte fork of the upstream control that opens the selected root instead of the primary one; switching back to the primary root restores the native view. The dialog is management-only again. The takeover relies on upstream `data-*` DOM hooks and degrades silently to the native look when they stop matching ([ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md), [ADR-0016](./docs/decisions/ADR-0016-files-tab-native-tree-fork.md)). LSP uses the containing additional root as its own workspace; the host must configure the relevant language server ([ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)).
 - The command's own output text is English (a host-side handler has no active locale to consult); the panel is bilingual.
 - The Workspace Folders panel is a sidebar footer action plus a dialog rather than a full panel: `sidebar.footer.action` is offered by every supported release, whereas `sidebar.panellist` / `main` are not.

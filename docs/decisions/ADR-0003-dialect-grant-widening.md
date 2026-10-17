@@ -46,8 +46,19 @@ Accepted
 - 代价：Windows 上 fs 可写而 bash 不可写的不对称在第一期保留，必须由文档与一次性告警持续说明。
 - 代价：`tmpdir()` 相关的授予差异（上游 bwrap/Landlock 只授予字面 `/tmp`）不由插件修正；parity 断言的语义限定为「附加根集合与模式」，`/tmp` 行只对本机原生方言比较。
 
+## 修订：B9 受限 confine 扩展门控与构造模式（2026-10-13，Amendment）
+
+Status 保持 **Accepted**；「结构识别 + 观测克隆 + 已授予跳过 + 失败即抛错」对 `workspace-write` 的 widen 路径不变。决策第 4 条「`read-only` 与 `danger-full-access` 一律原样返回上游结果」按 B9 合同更新：
+
+- `read-only` 下不再原样返回：显式 `read-write` 登记根仍以观测克隆的 grant 拼写 append 到上游 RO profile（同一条克隆路径，只是拼在只读 profile 上）。
+- `danger-full-access` 下消费者不调用 `confine`；插件新增的受限 confine 路径自建「全放行 − 局部拒写」profile（Seatbelt `(allow default)` + subpath deny；bwrap `--bind / /` + `--ro-bind` 受限根；Landlock 扩展拼写；Windows 新机制待定）。这些 profile 是**自建**而非克隆——克隆策略只适用于从上游输出取模板，Full-access 没有上游输出可取。识别失败 / 表达不出仍在 spawn 前抛错，fail-closed 纪律不变。
+- 「显式只读优先于覆盖同一路径的其他写授权（含平台 temp）」是新增的授权优先级规则，适用于三种构造。
+
+详见 [ADR-0017](./ADR-0017-three-state-root-access-and-sandbox-modes.md)。
+
 ## Related Documents
 
+- [ADR-0017：附加根三态权限与跨 SandboxMode 执行一致性](./ADR-0017-three-state-root-access-and-sandbox-modes.md)
 - [ADR-0001：只替换两个 provider 行](./ADR-0001-provider-replacement-scope.md)
 - [ADR-0002：上游耦合策略](./ADR-0002-upstream-coupling-policy.md)
 - [架构设计：Multi-root Workspace](../architecture/multi-root-workspace.md)

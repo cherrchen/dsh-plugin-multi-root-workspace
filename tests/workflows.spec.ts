@@ -30,7 +30,7 @@ describe('CI workflow gates', () => {
   it('omits the Windows runner from the matrix unless its repository switch is enabled', () => {
     const ci = read('.github/workflows/ci.yml')
     expect(ci).toContain("fromJSON(vars.DSH_WINDOWS_CI == '1'")
-    expect(ci).toContain("'[\"ubuntu-latest\",\"macos-latest\"]'")
+    expect(ci).toContain("'[\"ubuntu-latest\",\"ubuntu-22.04\",\"macos-latest\"]'")
   })
 
   it('derives the upgrade set from the package manifest', () => {
@@ -107,6 +107,16 @@ describe('CI workflow gates', () => {
     expect(smokeUpload.if).toBe('always()')
     const testUpload = steps.find(step => step.name === 'Upload the test log')!
     expect(testUpload.if).toBe('always()')
+  })
+
+  it('bounds packed smoke while preserving time for logs and broker cleanup', () => {
+    const ci = parse(read('.github/workflows/ci.yml'))
+    const packed = ci.jobs.verify.steps.find((step: { name?: string }) => step.name === 'Packed smoke')
+    expect(packed['timeout-minutes']).toBe(15)
+    expect(ci.jobs.verify['timeout-minutes']).toBe(45)
+    const uninstall = ci.jobs.verify.steps.find((step: { name?: string }) =>
+      step.name === 'Uninstall the B9 broker and revoke installation rights')
+    expect(uninstall.if).toBe("always() && runner.os == 'Windows'")
   })
 
   it('ends with a gate job that fails unless every upstream job is exactly success', () => {
