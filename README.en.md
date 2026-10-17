@@ -16,8 +16,6 @@ A real development project is usually several independent Git repositories, and 
 - **Security does not degrade**: additional roots are authorized through the same mechanism the harness already uses — an in-process filesystem fence plus kernel-level sandboxes (macOS Seatbelt / Linux bwrap / Landlock / Windows ACL), with files and bash sharing one and the same scope. It never degenerates into full access or prompt-level constraints.
 - **Absent when absent**: with no additional root configured, its behavior is item-for-item identical to an uninstalled harness; every misconfiguration fails loudly instead of silently degrading.
 
-The development branch implements B9 three-state access and Windows ambient write denial; see the [usage guide](./docs/guide/README.en.md) and [ADR-0020](./docs/decisions/ADR-0020-windows-normal-deny-groups.md) for platform limits. These changes are unreleased; the roadmap ledger records native acceptance evidence.
-
 Current released version: `v0.1.6`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Quick Start
@@ -200,14 +198,14 @@ The upstream `fs-sandbox` and `sandbox` rows are disabled and taken over by the 
 ### Command
 
 ```text
-/workspace-folders [list]                                             # list the primary root and the additional roots (access and state included)
+/workspace-folders [list]                                                    # list the primary root and the additional roots (access and state included)
 /workspace-folders add <absolute path> [--inherit|--read-only|--read-write]  # no path opens the OS directory picker; new registrations default to inherit
-/workspace-folders access <n|path> inherit|read-only|read-write             # switch access (widening requires the root to be available right now)
-/workspace-folders alias <n|path> [name]                                    # omitting the name clears the alias
-/workspace-folders remove <n|path>                                          # n is the number list prints
-/workspace-folders reveal <n|path>                                          # show it in the file manager
-/workspace-folders isolate-profiles [--apply]                               # inspect profile import method and multi-link files under $DSH_HOME; --apply writes copy config
-/workspace-folders help                                                     # show the command help
+/workspace-folders access <n|path> inherit|read-only|read-write              # switch access (widening requires the root to be available right now)
+/workspace-folders alias <n|path> [name]                                     # omitting the name clears the alias
+/workspace-folders remove <n|path>                                           # n is the number list prints
+/workspace-folders reveal <n|path>                                           # show it in the file manager
+/workspace-folders isolate-profiles [--apply]                                # inspect profile import method and multi-link files under $DSH_HOME; --apply writes copy config
+/workspace-folders help                                                      # show the command help
 ```
 
 Paths may be quoted; a path that duplicates an existing root, nests inside one, or is the workspace root itself is rejected.

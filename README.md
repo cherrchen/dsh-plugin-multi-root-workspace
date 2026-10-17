@@ -16,8 +16,6 @@ DSH（DeepSeek Harness）原生只把会话启动的目录当作 Agent 唯一的
 - **安全不降级**：附加根走上游同款授权机制——进程内文件围栏 + 内核级沙箱（macOS Seatbelt / Linux bwrap / Landlock / Windows ACL），文件与 bash 共享同一份授权范围，绝不退化成全开放或只靠提示词约束。
 - **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
-开发分支的 B9 三态权限与 Windows Full-access 局部拒写实现，见[使用指南](./docs/guide/README.md#访问级别数量上限与-per-tool-封顶)；平台限制见 [ADR-0020](./docs/decisions/ADR-0020-windows-normal-deny-groups.md)。这部分尚未发布；原生验收证据见路线账本。
-
 当前发布版本 `v0.1.6`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
@@ -202,14 +200,14 @@ dsh --profile web --dump-config | grep -A3 'multi-root'
 ### 命令
 
 ```text
-/workspace-folders [list]                                        # 列出主根与附加根（含每根访问级别与状态）
+/workspace-folders [list]                                               # 列出主根与附加根（含每根访问级别与状态）
 /workspace-folders add <绝对路径> [--inherit|--read-only|--read-write]  # 不带路径时打开系统目录选择器；新登记默认 inherit
 /workspace-folders access <序号|路径> inherit|read-only|read-write      # 切换访问级别（扩权要求该根此刻可用）
-/workspace-folders alias <序号|路径> [别名]                            # 不带别名则清除已有别名
-/workspace-folders remove <序号|路径>                                  # 序号即 list 输出的编号
-/workspace-folders reveal <序号|路径>                                  # 在文件管理器中显示
-/workspace-folders isolate-profiles [--apply]                        # 检查 $DSH_HOME profile 依赖导入方式与多链接文件；--apply 写入 copy 配置
-/workspace-folders help                                              # 查看命令帮助
+/workspace-folders alias <序号|路径> [别名]                             # 不带别名则清除已有别名
+/workspace-folders remove <序号|路径>                                   # 序号即 list 输出的编号
+/workspace-folders reveal <序号|路径>                                   # 在文件管理器中显示
+/workspace-folders isolate-profiles [--apply]                           # 检查 $DSH_HOME profile 依赖导入方式与多链接文件；--apply 写入 copy 配置
+/workspace-folders help                                                 # 查看命令帮助
 ```
 
 路径可带引号；与已有根重复、嵌套在已有根内部、或就是主根本身的路径会被拒绝。
