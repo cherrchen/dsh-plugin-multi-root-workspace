@@ -46,7 +46,11 @@ export async function autoReviewBattery(ctx, label) {
     assert.equal(readFileSync(join(ro,'keep'),'utf8'),'unchanged')
     assert.equal(requests.length,2,'one reviewer request per call')
     const text=requests[0].messages[0].content[0].text
-    assert.ok(text.includes(primary) && text.includes(rw) && text.includes(ro) && text.includes('registryAuthority'))
+    // Paths reach the reviewer through JSON.stringify: a Windows `D:\…` is
+    // escaped `D:\\…` and canonical roots may carry a `\\?\` prefix, so match
+    // the escaped spelling (without quotes it stays a substring of both).
+    const esc=path=>JSON.stringify(path).slice(1,-1)
+    assert.ok(text.includes(esc(primary)) && text.includes(esc(rw)) && text.includes(esc(ro)) && text.includes('registryAuthority'))
     assert.ok(text.includes('"role": "constraint"') && text.includes('Keep all edits local.'))
     assert.equal(existsSync(join(rw,'ok')),true)
     console.log(`[auto-review] ${label}: captured real reviewer context; scripted allow wrote rw and could not alter ro (2 calls / 2 reviews)`)
