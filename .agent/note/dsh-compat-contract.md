@@ -29,18 +29,18 @@ node_modules                实际解析到的版本          allowlist 中的�
 
 ## 2. 你写的测试可能因为门禁而失败——这是对的
 
-`multi-root-compat` 是 patch 第一行，以下行 inject 它：
+`multi-root-compat` 是 patch 第一行，以下**宽授权行** inject 它：
 
 ```text
-multi-root-fs
-multi-root-sandbox
+multi-root-providers
 multi-root-registry
 multi-root-instructions
 multi-root-lsp
 multi-root-workspace-files
+multi-root-process-fence
 ```
 
-cordis 不会启动 injected service 缺失的行。所以在测试里 mount 上述任何 provider 之前，必须先：
+cordis 不会启动 injected service 缺失的行。所以在测试里 mount 上述任何行（或经它们间接受门控的行，如注入 `multiRootRegistry` 的 `multi-root-command`）之前，必须先：
 
 ```ts
 import { mountCompat } from './support/compat.ts'
@@ -48,7 +48,9 @@ import { mountCompat } from './support/compat.ts'
 await mountCompat(ctx)
 ```
 
-否则 `ctx.get('fs')` / `ctx.get('sandbox')` 是 `undefined`，你会看到 `Cannot read properties of undefined (reading 'confine')` 这类报错。这不是 bug，是门禁在工作（`tests/compat.spec.ts` 里有一条专门断言这个行为）。
+否则 `ctx.get('multiRootRegistry')` 之类是 `undefined`。这不是 bug，是门禁在工作（`tests/compat.spec.ts` 里有专门断言）。
+
+**两个 provider 行（`multi-root-fs` / `multi-root-sandbox`）刻意不 inject 门禁**：它们的放宽由 scope 驱动，而被门禁的 registry 永远不会在被拒安装上填充 scope，所以它们在门禁失败时退化为上游 provider。这必须保持：patch 已经无条件禁用了上游 `fs-sandbox` / `sandbox`，provider 一缺席，`ctx.fs` / `ctx.sandbox` 消失 → `ctx.shell`（inject `sandbox`）起不来 → `permissionPresets`（inject `shell`）起不来 → 整个 profile 瘫痪（`permissionPresets/catalog` 报 service-unavailable）。门禁失败的正确形状是"插件功能缺席、profile 完好"，从来不是"profile 死"。
 
 `mountCompat` 挂载的是**真实的** compat 行，含门禁策略。所以整个单元套件在一个不在 allowlist 上的版本上会直接失败——这是刻意的，见下面第 5 条。
 
@@ -189,7 +191,7 @@ Windows 的 Node 不能直接 `execFileSync('npm')` 启动 `npm.cmd`，旧版矩
 
 ## 10. B1–B3 的新接缝
 
-LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述符；不要比较 Cordis 代理函数的引用。旧版 `changes(scope, signal)` 与新版 `changes(scope, path, signal)` 由 `src/compat/workspace-files.ts` 按 arity 适配。读面 `stat`/`read`/`readBytes` 同样被包装——上游对它们不做 workspace 围限，边界由 `routeWorkspacePath` + `registry.list()` 的「在册未授权」词法检查补齐（拒绝用 `workspace-file/outside-workspace`）；`readBytes` 第三参跨版本形态不同（`WorkspaceByteRange` ↔ `WorkspaceByteReadOptions`），wrapper 保留 range 与其余选项，只在路由时改写 `baseFile`，关联尾路径语义见 [ADR-0011 的读面修订](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md#修订面板-files--readfile-端点下线2026-10-12amendment)。Windows 非空 scope 的 runner 必须用整个根集合的 SID，不能把主根 SID 授予附加根，否则移除后仍可写。可选 peer 均纳入混装检查，carrier barrel 不得静态加载这些可选包。完整决策见 [ADR-0011](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md)，各平台验证状态只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
+LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述符；不要比较 Cordis 代理函数的引用。旧版 `changes(scope, signal)` 与新版 `changes(scope, path, signal)` 由 `src/compat/workspace-files.ts` 按 arity 适配。读面 `stat`/`read`/`readBytes` 同样被包装——上游对它们不做 workspace 围限，边界由 `routeWorkspacePath` + `registry.list()` 的「在册未授权」词法检查补齐（拒绝用 `workspace-file/outside-workspace`）；`readBytes` 第三参跨版本形态不同（`WorkspaceByteRange` ↔ `WorkspaceByteReadOptions`），wrapper 保留 range 与其余选项，只在路由时改写 `baseFile`，关联尾路径语义见 [ADR-0011 的读面修订](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md#修订面板-files--readfile-端点下线2026-10-12amendment)。Windows 非空 scope 的 runner 必须用整个根集合的 SID，不能把主根 SID 授予附加根，否则移除后仍可写。可选 peer 均纳入混装检查，carrier barrel 不得静态加载这些可选包。混装检查的"证词"按谁真正加载解析到的副本来分（`src/compat/dsh-version.ts`）：`RUNTIME_OPTIONAL_PACKAGES` 是本插件自己动态 `import()` 的（`dsh-agent-instructions` / `dsh-llm` / `dsh-session` / `dsh-typert-protocol`），私有副本真的会执行，任何位置的命中都作证；`HOST_SERVICE_PACKAGES` 只作为宿主挂载的服务或类型被消费，落在**本插件目录内**的副本永远不可能执行——`link:` 安装的检出会把 `dsh-lsp` / `dsh-lsp-stdio` / `dsh-working-directory` 解析到自己的 devDependencies，不剔除就会把一个版本统一的宿主幻影判成 `mixed`。宿主锚点回退（经 `@deepseek-ai/dsh` 的 package.json）只对这些宿主服务包开放，且同样受插件根边界约束。还有第三类 `RUNNER_ANCHORED_PACKAGES`：`dsh-sandbox-windows-acl` 由独立 runner 进程经 `profile.upstreamRunner` 自引用加载，执行副本是已安装 `dsh-sandbox-local` 树里的兄弟副本——只从该锚点取证，锚点解析不到即缺席（runner 同样加载不到），命中一律作证（锚点即执行链，含插件根内命中）；自解析与 dsh 宿主锚点都不反映这里的执行情况。新增可选包时必须按"谁会加载这份副本、经哪个锚点"归入其一，不要混进另一个列表。完整决策见 [ADR-0011](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md)，各平台验证状态只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
 
 ## 11. DSH 0.2.1 目录语义
 

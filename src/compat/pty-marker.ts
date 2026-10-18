@@ -21,7 +21,7 @@
  * Resolution follows the optional-peer precedent (`agent-instructions.ts`):
  * the backend is not a peer of this plugin, so the plugin anchor is tried
  * first (flat layouts) and the `@deepseek-ai/dsh` host anchor second — the
- * same `HOST_RESOLVED_PACKAGES` pattern as `dsh-version.ts` — because the
+ * same host-anchor fallback pattern as `dsh-version.ts` — because the
  * backend rides inside the harness meta package's own dependency tree.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/compat/pty-marker
@@ -93,7 +93,7 @@ export interface AgentPtyMarkerIo {
  * reach: this module first (flat layouts where the backend is a direct
  * install), then the `@deepseek-ai/dsh` host manifest (pnpm-style layouts
  * where it is the meta package's own dependency — the
- * `HOST_RESOLVED_PACKAGES` precedent). A resolution failure that is not a
+ * host-anchor fallback pattern in `dsh-version.ts`). A resolution failure that is not a
  * genuine NOT_FOUND propagates: a resolvable-but-broken specifier is not
  * evidence of absence.
  */

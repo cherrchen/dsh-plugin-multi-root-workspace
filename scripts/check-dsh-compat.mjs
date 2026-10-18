@@ -64,7 +64,7 @@ const contractSource = readFileSync(CONTRACT, 'utf8')
 const supported = readStringArray(contractSource, 'SUPPORTED_DSH_RELEASES')
 const required = readStringArray(contractSource, 'REQUIRED_CORE_PACKAGES')
 const optional = readStringArray(contractSource, 'OPTIONAL_CORE_PACKAGES')
-const hostResolved = readStringArray(contractSource, 'HOST_RESOLVED_PACKAGES')
+const hostService = readStringArray(contractSource, 'HOST_SERVICE_PACKAGES')
 const core = [...required, ...optional]
 
 const manifest = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'))
@@ -115,7 +115,7 @@ for (const name of core) {
     installed.set(name, require(`${name}/package.json`).version)
   } catch {
     try {
-      if (!hostResolved.includes(name)) throw new Error('no host lookup')
+      if (!hostService.includes(name)) throw new Error('no host lookup')
       installed.set(name, createRequire(require.resolve('@deepseek-ai/dsh/package.json'))(`${name}/package.json`).version)
     } catch { installed.set(name, undefined) }
   }

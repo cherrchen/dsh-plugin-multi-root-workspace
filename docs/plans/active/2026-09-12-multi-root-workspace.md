@@ -705,3 +705,12 @@ Windows 实机（非 CI）验证暴露两个 CI 不可见的问题，处置经�
 `SUPPORTED_DSH_RELEASES` 扩至 16 个精确版本；20 个 `@deepseek-ai/dsh-*` peer 同步枚举；cordis peer 补 `4.0.5-alpha.2`；开发 pin `0.2.1-rc.2`、cordis `4.0.5`；release-age 精确豁免重写为 rc.2 集合；probe overrides 与 `minimumReleaseAge: 0` 不落入提交。提升后 enforce 验收（`0.2.1-rc.2` / cordis `4.0.5` 开发树，本机 macOS）：`pnpm compat:check` 四方一致；`pnpm verify:all` 全绿——lint、双端 typecheck、build、`kernel:probe`（Seatbelt 实测可执行，bwrap / Landlock 本机不存在）、test **49 文件 766 passed / 64 skipped**、compose **48/0/0**、behavior **126/0/0**、journey **62/0/0**、pack:check **110 成员**、packed behavior **125/0/0**（enforce 下无豁免，peers 精确覆盖 rc.2 直接通过版本门禁）；`pnpm docs:check` 通过。远端 16 版本 × OS 矩阵由本分支 PR 的 CI 车道执行，未完成前不记为通过。
 
 远端矩阵已完成：PR #13（head `40ff7dd`）的 [CI run 39029762518](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39029762518) **66/66 jobs 全部 success**（16 版本 × 4 OS verify 车道 + releases + gate），随后合入 `main`（`eaf2d8f`）。本批次与第二期 B 系列、Files 页签浏览一并随 `v0.1.7` 发版。
+
+## DSH 0.2.0 `permissionPresets/catalog` 修复（2026-10-18，进行中）
+
+用户报告：插件在 DSH `0.2.0`（宿主实际组合 `0.2.0-rc.2`）上把权限设置页拖死——`gateway/service-unavailable: permissionPresets/catalog: active Service "permissionPresets" is unavailable`。以 `dsh-app-boot@0.2.0-rc.2` 进程内复现基线（无插件正常）与含插件组合，还原出「检测误报 × 爆炸半径」双因：
+
+1. **误报**：`classifyInstallation()` 对所有 optional 包一视同仁。`link:` 安装下 `dsh-lsp` / `dsh-lsp-stdio` / `dsh-working-directory` 从插件锚点解析到仓库自身 devDependencies（`0.2.1-rc.2`），版本统一的宿主被判 `mixed`。修法：`OPTIONAL_CORE_PACKAGES` 按"谁加载副本、经哪个锚点"拆为三类：`RUNTIME_OPTIONAL_PACKAGES`（插件动态 import，私有副本真会执行）、`HOST_SERVICE_PACKAGES`（只作宿主挂载服务/类型，插件根内命中计为缺席，宿主锚点回退受同一根边界约束）与 `RUNNER_ANCHORED_PACKAGES`（`dsh-sandbox-windows-acl` 由独立 runner 经上游 runner 自引用加载，只从 `dsh-sandbox-local` 锚点取证——Codex 评审 P2 指出，归 host-service 会让未受检 ABI 被判缺席）。
+2. **爆炸半径**：上游 `fs-sandbox`/`sandbox` 被 patch 无条件禁用，而替身 provider 又 inject `multiRootCompat`；门禁一倒 `ctx.fs`/`ctx.sandbox` 消失 → `ctx.shell` → `permissionPresets` 全瘫。修法：两个 provider 行不 inject 门禁——放宽由 scope 驱动、被门禁的 registry 不可能在被拒安装上填充 scope，provider 空 scope 即上游等价。宽授权行（providers/registry/instructions/lsp/workspace-files/process-fence）门禁不变，`mixed`/`incomplete` 依旧 fail-closed。
+
+落点：`src/compat/dsh-version.ts`、`src/fs.ts`、`src/sandbox.ts`、`src/compat.ts`、`cordis.patch.yml`、`scripts/check-dsh-compat.mjs`、`src/index.ts`、`tests/compat.spec.ts`；文档：ADR-0009 修订节（2026-10-18）、故障排查条目退化形态更正、`.agent/note/dsh-compat-contract.{md,en.md}` §2/§10、AGENTS.md 不变量 #7。同期观测的 `job/registered` 未知事件报错经查证为 0.2.1 线 harness 写入的 session 日志被 0.2.0 reader 读取，与本插件无关。

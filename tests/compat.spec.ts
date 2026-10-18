@@ -24,9 +24,12 @@ import {
   classifyInstallation,
   compatEnforcement,
   CORE_PACKAGES,
+  HOST_SERVICE_PACKAGES,
   OPTIONAL_CORE_PACKAGES,
   readInstalledVersion,
   REQUIRED_CORE_PACKAGES,
+  RUNNER_ANCHORED_PACKAGES,
+  RUNTIME_OPTIONAL_PACKAGES,
   SUPPORTED_DSH_RELEASES,
   type VersionReader,
 } from '../src/compat/dsh-version.ts'
@@ -65,6 +68,17 @@ describe('the supported release list', () => {
   it('inspects every package this plugin couples to, required before optional', () => {
     expect(CORE_PACKAGES).toEqual([...REQUIRED_CORE_PACKAGES, ...OPTIONAL_CORE_PACKAGES])
     expect(new Set(CORE_PACKAGES).size).toBe(CORE_PACKAGES.length)
+  })
+
+  it('partitions the optional packages by who would load the resolved copy', () => {
+    // Every optional package is either loaded by this plugin at run time (its
+    // resolved copy testifies wherever it lives), consumed only as a mounted
+    // host service (only a copy outside this package's own root testifies), or
+    // executed by the standalone runner through the upstream-runner anchor
+    // (only the anchored hit testifies).
+    const partitioned = [...RUNTIME_OPTIONAL_PACKAGES, ...HOST_SERVICE_PACKAGES, ...RUNNER_ANCHORED_PACKAGES]
+    expect([...partitioned].sort()).toEqual([...OPTIONAL_CORE_PACKAGES].sort())
+    expect(new Set(partitioned).size).toBe(partitioned.length)
   })
 })
 
@@ -109,6 +123,38 @@ describe('the release this suite runs against', () => {
     for (const name of REQUIRED_CORE_PACKAGES) {
       expect(readInstalledVersion(name), `${name} must resolve`).toBeTypeOf('string')
     }
+  })
+})
+
+describe('host-service package inspection', () => {
+  it('ignores a host-service package whose only resolution lands inside this package\'s own root', () => {
+    // The regression this pins: a `link:`-installed checkout resolves
+    // `dsh-lsp`/`dsh-lsp-stdio`/`dsh-working-directory` to its own
+    // devDependencies, which phantom-mixed a uniformly 0.2.0-rc.2 host. Those
+    // packages are devDependencies of THIS repository — the repository itself
+    // IS the plugin-private tree — so the read must come back absent.
+    for (const name of ['@deepseek-ai/dsh-lsp', '@deepseek-ai/dsh-lsp-stdio', '@deepseek-ai/dsh-working-directory'] as const) {
+      expect(HOST_SERVICE_PACKAGES).toContain(name)
+      expect(readInstalledVersion(name), `${name} must not testify from inside the plugin tree`).toBeUndefined()
+    }
+  })
+
+  it('counts a runtime-loaded optional package even when its copy is inside the plugin tree', () => {
+    // `dsh-llm` is dynamically imported from this package's own modules: a
+    // private copy genuinely executes, so it testifies wherever it resolves.
+    expect(RUNTIME_OPTIONAL_PACKAGES).toContain('@deepseek-ai/dsh-llm')
+    expect(readInstalledVersion('@deepseek-ai/dsh-llm')).toBeTypeOf('string')
+  })
+
+  it('inspects the Windows ACL package from the upstream-runner anchor, not as a host service', () => {
+    // The standalone runner imports the package by self-reference from the
+    // upstream runner's own install location — a sibling of the installed
+    // `dsh-sandbox-local`. Filing it as a host service would discard this
+    // repository's own copy as phantom and report an unchecked ABI absent;
+    // filing it as self-resolved would instead phantom-mix a linked checkout.
+    expect(HOST_SERVICE_PACKAGES).not.toContain('@deepseek-ai/dsh-sandbox-windows-acl')
+    expect(RUNNER_ANCHORED_PACKAGES).toContain('@deepseek-ai/dsh-sandbox-windows-acl')
+    expect(readInstalledVersion('@deepseek-ai/dsh-sandbox-windows-acl')).toBeTypeOf('string')
   })
 })
 
@@ -238,12 +284,23 @@ describe('the gate policy', () => {
   })
 })
 
-describe('the gate is what the providers actually wait on', () => {
-  it('is injected by every security-relevant row, so none can start without it', () => {
-    for (const provider of [MultiRootFileSystem, MultiRootSandboxProvider, MultiRootRegistry]) {
-      expect(provider.inject, provider.name).toContain('multiRootCompat')
+describe('the gate is what the widened-authority rows wait on', () => {
+  it('is injected by every widened-authority row, so none can start without it', () => {
+    for (const gated of [MultiRootRegistry.inject, Instructions.inject, Lsp.inject, WorkspaceFilesRouting.inject]) {
+      expect(gated).toContain('multiRootCompat')
     }
-    expect(Instructions.inject).toContain('multiRootCompat')
+    expect(MultiRootRegistry.inject).toContain('multiRootCompat')
+  })
+
+  it('is NOT injected by the two providers: an unverified release must degrade to the upstream fence, not to a dead profile', () => {
+    // Widening is scope-driven and the registry that feeds the scope stays
+    // gated, so the providers can never grant on an unverified release. The
+    // alternative — holding `ctx.fs`/`ctx.sandbox` back — is strictly worse:
+    // `ctx.shell`, `permissionPresets` and every confining tool stall with
+    // them, and the composition bricks instead of degrading to "plugin not
+    // installed".
+    expect(MultiRootFileSystem.inject).not.toContain('multiRootCompat')
+    expect(MultiRootSandboxProvider.inject).not.toContain('multiRootCompat')
   })
 
   it('is paired with the provider-conflict gate on every widened-authority row', () => {
@@ -253,7 +310,7 @@ describe('the gate is what the providers actually wait on', () => {
     }
   })
 
-  it('leaves the fence and the sandbox unmounted while the service is absent', async () => {
+  it('keeps the fence and the sandbox serving while the service is absent', async () => {
     const fixture = createFixtureWorkspace('compat-gate')
     const ctx = new Context()
     const fibers = [
@@ -264,11 +321,11 @@ describe('the gate is what the providers actually wait on', () => {
       await ctx.plugin(MultiRootSandboxProvider, { cwd: fixture.workspace }),
     ]
     try {
-      // Cordis holds a row whose injected service is missing, so neither
-      // provider ever claims its service key — the composition degrades to an
-      // uninstalled harness instead of to an unguarded one.
-      expect(ctx.get('fs')).toBeUndefined()
-      expect(ctx.get('sandbox')).toBeUndefined()
+      // The providers degrade to the upstream fence: they register with an
+      // empty scope — never a wider one — so the profile keeps working like an
+      // uninstalled harness instead of losing `ctx.fs`/`ctx.sandbox` outright.
+      expect(ctx.get('fs')).toBeDefined()
+      expect(ctx.get('sandbox')).toBeDefined()
 
       await mountCompat(ctx)
       expect(ctx.get('fs')).toBeDefined()
