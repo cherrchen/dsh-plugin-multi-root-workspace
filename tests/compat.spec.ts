@@ -28,6 +28,7 @@ import {
   OPTIONAL_CORE_PACKAGES,
   readInstalledVersion,
   REQUIRED_CORE_PACKAGES,
+  RUNNER_ANCHORED_PACKAGES,
   RUNTIME_OPTIONAL_PACKAGES,
   SUPPORTED_DSH_RELEASES,
   type VersionReader,
@@ -71,9 +72,11 @@ describe('the supported release list', () => {
 
   it('partitions the optional packages by who would load the resolved copy', () => {
     // Every optional package is either loaded by this plugin at run time (its
-    // resolved copy testifies wherever it lives) or consumed only as a mounted
-    // host service (only a copy outside this package's own root testifies).
-    const partitioned = [...RUNTIME_OPTIONAL_PACKAGES, ...HOST_SERVICE_PACKAGES]
+    // resolved copy testifies wherever it lives), consumed only as a mounted
+    // host service (only a copy outside this package's own root testifies), or
+    // executed by the standalone runner through the upstream-runner anchor
+    // (only the anchored hit testifies).
+    const partitioned = [...RUNTIME_OPTIONAL_PACKAGES, ...HOST_SERVICE_PACKAGES, ...RUNNER_ANCHORED_PACKAGES]
     expect([...partitioned].sort()).toEqual([...OPTIONAL_CORE_PACKAGES].sort())
     expect(new Set(partitioned).size).toBe(partitioned.length)
   })
@@ -141,6 +144,17 @@ describe('host-service package inspection', () => {
     // private copy genuinely executes, so it testifies wherever it resolves.
     expect(RUNTIME_OPTIONAL_PACKAGES).toContain('@deepseek-ai/dsh-llm')
     expect(readInstalledVersion('@deepseek-ai/dsh-llm')).toBeTypeOf('string')
+  })
+
+  it('inspects the Windows ACL package from the upstream-runner anchor, not as a host service', () => {
+    // The standalone runner imports the package by self-reference from the
+    // upstream runner's own install location — a sibling of the installed
+    // `dsh-sandbox-local`. Filing it as a host service would discard this
+    // repository's own copy as phantom and report an unchecked ABI absent;
+    // filing it as self-resolved would instead phantom-mix a linked checkout.
+    expect(HOST_SERVICE_PACKAGES).not.toContain('@deepseek-ai/dsh-sandbox-windows-acl')
+    expect(RUNNER_ANCHORED_PACKAGES).toContain('@deepseek-ai/dsh-sandbox-windows-acl')
+    expect(readInstalledVersion('@deepseek-ai/dsh-sandbox-windows-acl')).toBeTypeOf('string')
   })
 })
 

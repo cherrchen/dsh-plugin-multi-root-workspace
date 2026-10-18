@@ -110,12 +110,30 @@ export const HOST_SERVICE_PACKAGES = [
   '@deepseek-ai/dsh-commands',
   '@deepseek-ai/dsh-lsp',
   '@deepseek-ai/dsh-lsp-stdio',
-  '@deepseek-ai/dsh-sandbox-windows-acl',
   '@deepseek-ai/dsh-subprocess',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-working-directory',
 ] as const
+
+/**
+ * Optional packages this plugin executes that are resolved through an anchor
+ * OTHER than this module. The standalone Windows ACL runner
+ * (`src/windows-runner.ts`) imports `@deepseek-ai/dsh-sandbox-windows-acl` by
+ * self-reference from the upstream runner's own install location — a file the
+ * installed `dsh-sandbox-local` points at in its confined argv — so the copy
+ * that testifies is the one sibling to that required package, not whatever
+ * this module can reach. Neither the self-resolution hit nor the
+ * `@deepseek-ai/dsh` host anchor reflects execution here: if sandbox-local's
+ * own anchor cannot see the package, the runner cannot load it either, and
+ * absent is the honest answer.
+ */
+export const RUNNER_ANCHORED_PACKAGES = [
+  '@deepseek-ai/dsh-sandbox-windows-acl',
+] as const
+
+/** The required package whose tree produces the upstream runner argv. */
+const RUNNER_ANCHOR_PACKAGE = '@deepseek-ai/dsh-sandbox-local'
 
 /** Every package the contract inspects, required first. */
 export const CORE_PACKAGES = [...REQUIRED_CORE_PACKAGES, ...OPTIONAL_CORE_PACKAGES] as const
@@ -250,6 +268,10 @@ function insidePackageRoot(manifestPath: string, root: string | undefined): bool
  * `@deepseek-ai/dsh` host manifest supplies a second anchor for host-internal
  * packages that are never plugin peers.
  *
+ * {@link RUNNER_ANCHORED_PACKAGES} are a third policy: executed, but resolved
+ * from the upstream-runner anchor rather than this module, so only a hit
+ * sibling to the installed `dsh-sandbox-local` testifies.
+ *
  * A package that cannot be resolved in either place is reported absent rather
  * than throwing, because "not installed" is a legitimate answer for every
  * optional package.
@@ -259,6 +281,14 @@ function insidePackageRoot(manifestPath: string, root: string | undefined): bool
  */
 export function readInstalledVersion(packageName: string): string | undefined {
   const require = createRequire(import.meta.url)
+  if ((RUNNER_ANCHORED_PACKAGES as readonly string[]).includes(packageName)) {
+    // Whatever the anchor resolves IS the copy the runner loads — the anchor
+    // chain is the executor chain, so the plugin-root exclusion does not
+    // apply. A miss means the runner cannot load the package, which is absent.
+    const anchor = resolvePackageJson(require, RUNNER_ANCHOR_PACKAGE)
+    const hit = anchor === undefined ? undefined : resolvePackageJson(createRequire(anchor), packageName)
+    return hit === undefined ? undefined : versionOfManifest(hit)
+  }
   if (!(HOST_SERVICE_PACKAGES as readonly string[]).includes(packageName)) {
     const hit = resolvePackageJson(require, packageName)
     return hit === undefined ? undefined : versionOfManifest(hit)

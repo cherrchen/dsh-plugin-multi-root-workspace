@@ -30,6 +30,7 @@ export {
   OPTIONAL_CORE_PACKAGES,
   readInstalledVersion,
   REQUIRED_CORE_PACKAGES,
+  RUNNER_ANCHORED_PACKAGES,
   RUNTIME_OPTIONAL_PACKAGES,
   SUPPORTED_DSH_RELEASES,
 } from './compat/dsh-version.ts'
