@@ -141,8 +141,8 @@ function repointWorkspace(version, cordisVersion) {
   // ordinary-plugin lane (some of these APIs did not exist there at all).
   const companion = JSON.parse(readFileSync(join(REPO_ROOT, 'compat/auto-review/package.json'), 'utf8'))
   const joint = companion.peerDependencies['@deepseek-ai/dsh-tools'] === version
-  let workspaceSource = source.replace(/^  - compat\/auto-review\n/mu, '')
-  if (joint) workspaceSource = workspaceSource.replace('  - .\n', '  - .\n  - compat/auto-review\n')
+  let workspaceSource = source.replace(/^  - compat\/auto-review\r?\n/mu, '')
+  if (joint) workspaceSource = workspaceSource.replace(/^(  - \.)(\r?\n)/mu, `$1$2  - compat/auto-review$2`)
   let updated = workspaceSource.replace(/^(\s*- '@deepseek-ai\/dsh(?:-[\w-]+)?)@[^']+'$/gmu, (line, prefix) => {
     count += 1
     return `${prefix}@${version}'`

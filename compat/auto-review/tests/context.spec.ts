@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync, rmSync, renameSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import LlmRuntime, { LlmAdapter, ToolCallId, createMessage, createUserMessage, createToolResultMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -21,7 +22,7 @@ import { MultiRootFileSystem } from '../../../src/fs.ts'
 import * as Instructions from '../../../src/instructions.ts'
 import ReviewContextService from '../../../src/review-context.ts'
 import { mountRegistryStack } from '../../../tests/support/registry-stack.ts'
-import { createFixtureWorkspace } from '../../../tests/support/temp-workspace.ts'
+import { createFixtureWorkspace, REPO_ROOT } from '../../../tests/support/temp-workspace.ts'
 import * as Companion from '../src/index.ts'
 
 const cleanup: Array<() => Promise<void>> = []
@@ -42,7 +43,16 @@ async function world(toolAccess: Record<string,'read-only'> = {}, instructionCon
     await ctx.plugin(Sessions); await ctx.plugin(Projections); await ctx.plugin(SystemPrompt)
     await ctx.plugin(Policy,{mode:'danger-full-access',workspaceRoot:f.workspace})
     await ctx.plugin(MultiRootFileSystem,{cwd:f.workspace})
-    if(ptc)await ctx.plugin(MultiRootSandboxProvider,{})
+    if(ptc){
+      // The widened Windows ACL argv names ./windows-runner.js beside the
+      // provider module; only lib/ ships it (src/ carries windows-runner.ts),
+      // so the real-runner mount reads the built provider — the choice
+      // tests/windows-multi-root.spec.ts makes for its Windows-native cases.
+      const provider=process.platform==='win32'
+        ?(await import(pathToFileURL(join(REPO_ROOT,'lib','sandbox.js')).href) as typeof import('../../../src/sandbox.ts')).MultiRootSandboxProvider
+        :MultiRootSandboxProvider
+      await ctx.plugin(provider,{})
+    }
   }})
   cleanup.push(async () => { await stack.dispose(); f.dispose() })
   const ctx = stack.ctx

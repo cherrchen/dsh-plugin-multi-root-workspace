@@ -762,3 +762,15 @@ Seatbelt 证明的断言强制实跑。PTC 联合用例用真实 Node runtime �
 本批没有在 Linux bwrap/Landlock 或 Windows ACL/broker/pwsh/ConPTY 主机上原生执行；相关原有测试按本机平台跳过，已把新增联合 gate 接入现有 OS 矩阵，但没有把尚未运行的远端 CI 写成通过。真实模型语义质量未认证：脚本化 allow 只证明请求来源与内容、单一 owner及执行围栏独立，不能证明误拒绝/误放行率。Phase 3 普通目标源码自动读取未实施。
 
 当前 mixed native 帧若含已失效附加指令，公开接口无法无损拆出其中的 global/primary 正文，本次 review 明确失败；需要重建 producer baseline，必要时用新 Session。指令/根/authority 在等待期间变化同样失败，不沿用旧 allow。已经启动的进程保留旧 kernel snapshot，多次复核不声称消除任意敌对文件系统 TOCTOU。fork 只维护精确基线；正式上下文 API 足够后删除 fork 的迁移合同见 ADR-0021 与 FORK.md。
+
+### 远端 CI 首轮失败与修复
+
+分支首 head `40ec946` 的 [CI run 39130958098](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39130958098)：releases 及全部 Linux/macOS verify 成功，**16 个 Windows verify job 全部失败**，gate 随之失败。三类失败均由本批 Windows 首跑暴露：
+
+| 失败面 | 原因 | 修复 |
+|---|---|---|
+| `0.1.5-rc.2` 至 `0.2.1-alpha.1` 共 10 个 lane 的 install：`@deepseek-ai/dsh-working-directory@<旧版>` 不存在（该包自 `0.2.1-alpha.2` 才发布） | Windows 检出为 CRLF，`upgrade-dsh.mjs` 按字面 `\n` 删不掉 `packages:` 中的 `compat/auto-review` 行，companion 仍留在 workspace（日志 `Scope: all 2 workspace projects`），probe overrides 将其 devDependency 一并重指到不存在的旧版 | `.gitattributes` 增加 `* text=auto eol=lf` 统一 LF 检出；脚本的两处 `packages:` 行编辑同时容忍 `\r?\n` 作防御纵深 |
+| `0.2.1-alpha.2` 至 `0.2.1-rc.1` 共 5 个 lane 的 `auto-review:fork`：`upstream baseline drift` | 同一 CRLF 检出；`check-auto-review-fork.mjs` 对 `upstream.ts` 原始字节计算 sha256 | 同上 `.gitattributes`；这些 lane 顺带验证了 companion 在场但被排除时普通插件门禁全绿 |
+| `0.2.1-rc.2` lane 单测：`reviews real PTC inner fs calls …` 的 worker `Cannot find module` | 联合用例经 `src/sandbox.ts` 挂载 provider，`import.meta.url` 落在 `src/`，widen/restrict 产出的 `src/windows-runner.js` 不存在——与 2026-10-03 Windows 修复记录（PR #7）是同一陷阱 | win32 下该用例改从 `lib/sandbox.js` 挂载 provider，沿用 `tests/windows-multi-root.spec.ts` 的既定选择 |
+
+非 joint 版本本就没有上游 Auto Review：companion 由 upgrade 脚本从 `packages:` 摘除（joint 仅 `0.2.1-rc.2`），`vitest.config.ts`、`build-auto-review.mjs`、`smoke-auto-review.mjs` 也只在精确 pin 下启用；本次修复恢复的是这条既定语义——旧版上该功能视为不存在，不安装、不构建、不验证。远端复验以下一次 CI run 为准，在此之前不把 Windows lane 记为通过。
