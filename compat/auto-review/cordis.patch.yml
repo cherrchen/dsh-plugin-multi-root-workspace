@@ -1,0 +1,9 @@
+# Enable with configure.mjs; the official bundle must precede this one.
+- id: auto-review
+  disabled: true
+- insert:
+    - id: multi-root-review-context
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/review-context'
+    - id: multi-root-auto-review
+      name: '@dsh-electron/dsh-plugin-multi-root-auto-review'
+      required: true

@@ -104,6 +104,7 @@ jobs:
       - run: pnpm smoke:compose
       - run: pnpm smoke:behavior > smoke-behavior.log 2>&1
       - run: pnpm smoke:journey
+      - run: pnpm auto-review:fork && pnpm smoke:auto-review
 
       - name: Upload the logs when a step failed
         if: failure()

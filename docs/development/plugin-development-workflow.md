@@ -253,3 +253,14 @@ CI 的日志捕获使用 Git Bash，其 PATH 可能让同名 GNU 命令覆盖 Wi
 | 内核断言在本地/CI 被 skip | 宿主不能受限执行（外层沙箱禁止嵌套，或缺 bwrap/Landlock launcher） | 本地属正常；CI 里 `pnpm kernel:probe` 会在能执行的宿主上导出 `DSH_REQUIRE_KERNEL_RUNNER=1`，此时 skip 会变成失败。要在本地强制检查，可自行 `DSH_REQUIRE_KERNEL_RUNNER=1 pnpm test`（预期在看到各条原因后失败） |
 
 B9 的 Linux 原生执行证据分两类：latest 保留实际 Landlock 选择与宿主限制，22.04 增加真实 bubblewrap 允许/拒绝证据，全部受支持版本均覆盖两条 Linux 腿。不会关闭 latest 的 AppArmor/user namespace 策略以换取绿灯；不能执行 bubblewrap 的宿主须按安装前置条件或 runnerFailure 如实报告。Windows 腿在原生测试前通过 tarball 同源的管理员脚本安装 token-attribute broker，安装资源的打包完整性由 pack:check 验证。
+
+
+## 9. 可选 Auto Review companion
+
+设计、来源边界、精确版本与混合 native 帧限制见 [ADR-0021](../decisions/ADR-0021-auto-review-context-companion.md)。安装入口与 profile 顺序契约见 [companion README](../../compat/auto-review/README.md)，不要把兼容 owner 加入普通 patch。
+
+`pnpm build` 在精确联合开发 pin 上构建独立 companion；旧版普通车道只构建主包。`upgrade-dsh.mjs` 在不匹配 companion 精确合同的 probe 中把该项目移出临时 workspace，避免全局 overrides 把它的 API 依赖误改成不存在的旧发布。回退 probe 文件时依旧禁止覆盖未提交修改。
+
+`pnpm auto-review:fork` 重放显式差异，并钉住风险 policy、身份、角色、决策协议和 owner teardown。`pnpm smoke:auto-review` 同时执行源码与两个 tarball 的安装、web/headless 装配、真实请求捕获、固定 allow 实写、live disable/restore/re-enable 和实际 package remove；该门禁接入 `verify:all` 和 CI。headless 装配探针禁用自动发起任务的 launcher，真实 headless agent journey 仍由原 `smoke:journey` 验证。普通旧版明确跳过联合 gate，继续跑原有门禁。
+
+主包和 companion 的版本/发布仍需人工协调：修改主包版本时检查 companion 的精确主包 peer，单独构建和打包 companion；本批不自动发布第二个 npm 包。跨平台日志与具体执行数量只记路线账本。

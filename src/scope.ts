@@ -411,8 +411,7 @@ export class MultiRootScopeService extends Service {
     // capped inner dispatch (nesting only ever narrows). The tool name is read
     // once at entry — never from model-supplied arguments.
     aroundTool(ctx, (exec, next) => {
-      const parent = toolCapStore.getStore()
-      return toolCapStore.run({ capped: parent?.capped === true || this.caps[exec.name] === 'read-only' }, next)
+      return toolCapStore.run({ capped: this.capForTool(exec.name) }, next)
     })
 
     // The prompt contribution is a SOFT dependency: a composition without a
@@ -460,9 +459,22 @@ export class MultiRootScopeService extends Service {
    * @returns the canonical scope; `additionalRoots` is empty when none are registered.
    */
   resolve(policy: SandboxExecutionPolicy): FilesystemScope {
+    return this.project(policy, this.capped())
+  }
+
+  /** Read-only pending-dispatch projection. Does not mint an ALS execution grant. */
+  previewForTool(policy: SandboxExecutionPolicy, toolName: string): FilesystemScope {
+    return this.project(policy, this.capForTool(toolName))
+  }
+
+  /** Execution and review use exactly the same parent-narrowing rule. */
+  private capForTool(toolName: string): boolean {
+    return this.capsInvalid || toolCapStore.getStore()?.capped === true || this.caps[toolName] === 'read-only'
+  }
+
+  private project(policy: SandboxExecutionPolicy, capped: boolean): FilesystemScope {
     const primaryRoot = canonicalPath(policy.workspaceRoot)
     const roots = this.membersOf(primaryRoot)
-    const capped = this.capped()
     const writable = capped || this.registryAuthority === 'unavailable'
       ? []
       : roots.filter(root => effectivelyWritable(policy.mode, root.access)).map(root => root.path)

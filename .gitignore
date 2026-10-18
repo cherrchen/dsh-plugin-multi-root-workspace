@@ -157,3 +157,6 @@ vite.config.ts.timestamp-*
 
 # ZCode session-local workspace state
 .zcode/
+
+# Independent optional companion build output.
+/compat/auto-review/lib/

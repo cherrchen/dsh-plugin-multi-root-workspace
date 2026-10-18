@@ -62,6 +62,10 @@
     "./windows-runner": {
       "types": "./lib/types/windows-runner.d.ts",
       "default": "./lib/windows-runner.js"
+    },
+    "./review-context": {
+      "types": "./lib/types/review-context.d.ts",
+      "default": "./lib/review-context.js"
     }
   },
   "files": [
@@ -86,7 +90,7 @@
   },
   "scripts": {
     "bench:roots": "node --experimental-transform-types scripts/bench-root-scale.mjs",
-    "build": "pnpm run build:types && pnpm run bundle",
+    "build": "pnpm run build:types && pnpm run bundle && node scripts/build-auto-review.mjs",
     "build:types": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
     "bundle": "node scripts/clean-lib.mjs && tsdown",
     "compat:check": "node scripts/check-dsh-compat.mjs",
@@ -103,8 +107,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
-    "verify:all": "pnpm lint && pnpm typecheck && pnpm build && pnpm kernel:probe && pnpm test && pnpm smoke && pnpm pack:check && pnpm smoke:packed",
-    "prepare": "pnpm run bundle"
+    "verify:all": "pnpm lint && pnpm typecheck && pnpm build && pnpm kernel:probe && pnpm test && pnpm smoke && pnpm pack:check && pnpm smoke:packed && pnpm auto-review:fork && pnpm smoke:auto-review",
+    "prepare": "pnpm run bundle",
+    "auto-review:fork": "node scripts/check-auto-review-fork.mjs",
+    "smoke:auto-review": "node scripts/verify-auto-review.mjs"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

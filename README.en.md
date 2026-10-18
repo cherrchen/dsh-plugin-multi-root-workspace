@@ -230,6 +230,10 @@ The **Folders** dialog at the sidebar foot lists the primary root and the additi
 
 The additional-root topology is injected into the system prompt so the model knows which directories are available, and the information updates when grants change. No new tool needs to be exposed to the model.
 
+## Optional Auto Review integration
+
+For multi-root reviewer context, explicitly install and enable the separate [companion](./compat/auto-review/README.en.md). The joint integration targets only DSH `0.2.1-rc.2`; ordinary installation keeps the existing support matrix and does not enable or select Auto.
+
 ## Project Structure
 
 ```text

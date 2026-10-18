@@ -1,0 +1,148 @@
+--- a/index.ts
++++ b/index.ts
+@@ -8,6 +8,9 @@
+  * @module @deepseek-ai/dsh-experimental-auto-review
+  */
+ 
++import { assertForkPackages } from './compat/contract.ts'
++import { partitionInstructions } from './context.ts'
++import type { ReviewContext } from '@dsh-electron/dsh-plugin-multi-root-workspace/review-context'
+ import type {} from '@deepseek-ai/dsh-working-directory'
+ import type { Context } from '@deepseek-ai/cordis'
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+@@ -103,6 +106,7 @@
+   readonly provider: string
+   readonly model: string
+   readonly cwd: string
++  readonly multiRoot: ReviewContext
+   readonly projectInstructions: readonly HistoricalUserMessage[]
+   readonly history: readonly HistoricalEntry[]
+   readonly action: PendingAction
+@@ -122,9 +126,9 @@
+ }
+ 
+ /** Cordis plugin name used by loader diagnostics. */
+-export const name = 'experimental-auto-review'
++export const name = 'multi-root-auto-review'
+ /** Complete host services required before Auto may be advertised. */
+-export const inject = ['approval', 'llm', 'permissionPresets', 'sessions', 'tools', 'workingDirectory']
++export const inject = ['approval', 'llm', 'permissionPresets', 'sessions', 'tools', 'workingDirectory', 'multiRootCompat', 'multiRootProviders', 'multiRootReviewContext']
+ 
+ /** Return JSON text for one immutable logged value. */
+ function json(value: unknown): string {
+@@ -359,7 +363,7 @@
+  * @param exec - immutable pending execution.
+  * @returns the exact route and four data sections paired with {@link REVIEW_POLICY}.
+  */
+-function snapshotAutoReview(agent: Agent, exec: ToolExecution, cwd: string): ReviewSnapshot {
++function snapshotAutoReview(agent: Agent, exec: ToolExecution, cwd: string, multiRoot: ReviewContext): ReviewSnapshot {
+   const { session } = agent
+   // The reviewer's risk inputs are the whole action history: earlier native calls
+   // and PTC starts carry the authorizations and duplicate identities this call is
+@@ -513,6 +517,7 @@
+     provider: header.config.provider,
+     model: header.config.model,
+     cwd,
++    multiRoot,
+     projectInstructions,
+     history,
+     action,
+@@ -521,13 +526,16 @@
+ 
+ /** Render the four data sections paired with the fixed policy section. */
+ function reviewUserText(snapshot: ReviewSnapshot): string {
++  const instructions = partitionInstructions(snapshot.projectInstructions, snapshot.multiRoot)
+   return [
+     'ENVIRONMENT',
+-    json({ cwd: snapshot.cwd }),
++    json({ cwd: snapshot.cwd, ...snapshot.multiRoot.environment, executionFence: 'Reviewer allow and human approval remain subject to host write fences. Root membership is not human authorization; read-only restricts writes, not reads.' }),
+     'PROJECT_INSTRUCTIONS',
+-    json(snapshot.projectInstructions),
++    json([...instructions.currentNative, ...instructions.fresh.map(constraint => ({
++      kind: 'current-root-instructions', role: 'constraint', source: { kind: 'multi-root-workspace', snapshot: 'current' }, ...constraint,
++    }))]),
+     'FILTERED_HISTORY',
+-    json(snapshot.history),
++    json([...snapshot.history, ...instructions.historical]),
+     'PENDING_ACTION',
+     json(snapshot.action),
+   ].join('\n\n')
+@@ -617,9 +625,12 @@
+   agent: Agent,
+   exec: ToolExecution,
+   signal: AbortSignal,
+-): Promise<AutoReviewDecision> {
++): Promise<{ decision: AutoReviewDecision; context: ReviewContext }> {
+   const cwd = await ctx.workingDirectory.ensure(agent, signal)
+-  const snapshot = snapshotAutoReview(agent, exec, cwd)
++  const context = await ctx.multiRootReviewContext.build(exec, signal)
++  if (context.environment.effectiveCwd !== undefined && context.environment.effectiveCwd !== cwd) throw new Error('review-context: effective cwd changed during collection')
++  const snapshot = snapshotAutoReview(agent, exec, cwd, context)
++  await ctx.multiRootReviewContext.assertCurrent(exec, context, signal)
+   // This review prompt is sent only through ctx.llm.stream and never enters a Session log.
+   const options: GenerateOptions = deepFreeze({
+     provider: snapshot.provider,
+@@ -632,7 +643,9 @@
+     temperature: 0,
+     signal,
+   })
+-  return readDecision(ctx.llm.stream(options))
++  const decision = await readDecision(ctx.llm.stream(options))
++  await ctx.multiRootReviewContext.assertCurrent(exec, context, signal)
++  return { decision, context }
+ }
+ 
+ /** Materialize the fixed model-facing final Auto denial plus optional UI detail. */
+@@ -674,12 +687,35 @@
+ 
+ /** Install the Auto preset and its prepended per-call review gate. */
+ export function apply(ctx: Context): void {
++  assertForkPackages()
++  ctx.multiRootReviewContext.assertCompatible()
++  const reviewed = new WeakMap<ToolExecution['token'], ReviewContext>()
++  // Check again after human approval and immediately before body dispatch.
++  // Captured token identity, never call ids or model arguments, correlates it.
+   // Retain the injected service while this context drains on disposal.
+   const permissionPresets = ctx.permissionPresets
+   let accepting = true
+   const active = new Set<Promise<void>>()
+   const lifecycle = new AbortController()
+ 
++  ctx.on('tools/execute', async (exec, next) => {
++    const context = reviewed.get(exec.token)
++    if (context !== undefined) {
++      reviewed.delete(exec.token)
++      const completed = Promise.withResolvers<void>()
++      active.add(completed.promise)
++      try {
++        const signal = AbortSignal.any([exec.signal, lifecycle.signal])
++        await ctx.multiRootReviewContext.assertCurrent(exec, context, signal)
++        signal.throwIfAborted()
++      } finally {
++        active.delete(completed.promise)
++        completed.resolve()
++      }
++    }
++    return next()
++  }, { prepend: true })
++
+   ctx.effect(function* () {
+     const stopListener = ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
+       const agent = exec.agent
+@@ -703,13 +739,15 @@
+         )
+         if (isAborted(lifecycle.signal)) return { kind: 'cancel' }
+         if (!review.ok) return failed(exec, review.error)
+-        const { decision } = review
++        const { decision, context } = review.decision
+         // The permission owner pins an approval policy into every published Session.
+         if (decision.decision === 'deny' && ctx.approval.overrideOf(agent.session) === 'never') {
+           return denied(exec, decision.reason)
+         }
+         const downstream = await next()
+         if (isAborted(lifecycle.signal)) return { kind: 'cancel' }
++        try { await ctx.multiRootReviewContext.assertCurrent(exec, context, signal) } catch (error) { return failed(exec, error) }
++        reviewed.set(exec.token, context)
+         if (decision.decision === 'allow' || downstream.kind !== 'allow') return downstream
+         return askUser(exec, decision.reason)
+       } finally {

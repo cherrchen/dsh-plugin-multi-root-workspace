@@ -42,6 +42,8 @@ Architecture Decision Records（ADR），用于记录重要架构与工程决策
 - [ADR-0019-windows-token-attributes-and-conditional-acls.md](./ADR-0019-windows-token-attributes-and-conditional-acls.md) — 替代 ADR-0018 的限制 SID 方案：继承的 mandatory local token attribute + 条件 deny ACE，让取交集后的 token 副本仍拒写，保留 PowerShell 身份查询；原生属性已读回但条件未兑现拒写，替代方案见 ADR-0020（Superseded）。
 - [ADR-0020-windows-normal-deny-groups.md](./ADR-0020-windows-normal-deny-groups.md) — 铸造镜像调用方身份、仅增加普通 deny-only 组的 token，以普通 deny ACE 避开 local 属性条件；保留弱化 token 实际写入验证（Accepted）。
 
+- [ADR-0021-auto-review-context-companion.md](./ADR-0021-auto-review-context-companion.md) — 可选 Auto Review companion、同源工具权限预览、当前约束快照、native 重叠与失败关闭、fork 同步（Accepted）。
+
 ## 推荐命名
 
 ```text

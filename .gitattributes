@@ -1,0 +1,2 @@
+# Unified patch context lines retain their required leading space.
+compat/auto-review/fork.patch whitespace=-blank-at-eol
