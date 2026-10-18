@@ -8,6 +8,12 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.8] - 2026-10-18
+
+### Fixed
+
+- **DSH 0.2.0 上权限设置页不可用**：以 `link:` 方式安装时，插件把只作为宿主服务消费、自身从不加载的可选包（`dsh-lsp` / `dsh-lsp-stdio` / `dsh-working-directory` 等）解析到检出目录自己的 devDependencies，版本统一的宿主被误判为 `mixed`；同时两个 provider 替身行 inject 兼容门禁而上游 `fs-sandbox` / `sandbox` 已被无条件禁用，门禁一旦拒绝，`ctx.fs` / `ctx.sandbox` 消失并连带 `ctx.shell` 与 `permissionPresets` 瘫痪（`permissionPresets/catalog` 报 `service-unavailable`）。可选包现按"谁加载副本、经哪个锚点"分为运行时加载、宿主服务与 runner 锚定三类——插件根内的宿主服务副本不再作证，Windows ACL 包改从 `dsh-sandbox-local` 锚点取证；两个 provider 行不再 inject 门禁，在被拒安装上退化为上游等价行为，宽授权行的门禁不变（[ADR-0009 修订](./docs/decisions/ADR-0009-dsh-compat-contract.md#修订2026-10-18permissionpresetscatalog-事故误报检测--被门禁的-provider)）。
+
 ## [0.1.7] - 2026-10-17
 
 ### Added
@@ -156,7 +162,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.4...v0.1.5

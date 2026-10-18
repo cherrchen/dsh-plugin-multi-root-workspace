@@ -8,6 +8,12 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.8] - 2026-10-18
+
+### Fixed
+
+- **Permission settings page unavailable on DSH 0.2.0**: when installed via `link:`, the plugin resolved optional packages it never loads — packages consumed only as mounted host services (`dsh-lsp` / `dsh-lsp-stdio` / `dsh-working-directory`, among others) — to the checkout's own devDependencies, so a uniformly-versioned host was misjudged as `mixed`; and because the two replacement provider rows injected the compatibility gate while upstream `fs-sandbox` / `sandbox` were already disabled unconditionally, a refused gate removed `ctx.fs` / `ctx.sandbox`, taking down `ctx.shell` and `permissionPresets` with it (`permissionPresets/catalog` reported `service-unavailable`). Optional packages are now classified by who loads the resolved copy and through which anchor — runtime-loaded, host-service, or runner-anchored — so host-service copies inside the plugin root no longer testify, and the Windows ACL package is inspected from the `dsh-sandbox-local` anchor; the two provider rows no longer inject the gate and degrade to upstream-equivalent behavior on a refused installation, while every widened-authority row stays gated (see [ADR-0009 amendment](./docs/decisions/ADR-0009-dsh-compat-contract.md#修订2026-10-18permissionpresetscatalog-事故误报检测--被门禁的-provider)).
+
 ## [0.1.7] - 2026-10-17
 
 ### Added
@@ -156,7 +162,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.4...v0.1.5

@@ -16,7 +16,7 @@ DSH（DeepSeek Harness）原生只把会话启动的目录当作 Agent 唯一的
 - **安全不降级**：附加根走上游同款授权机制——进程内文件围栏 + 内核级沙箱（macOS Seatbelt / Linux bwrap / Landlock / Windows ACL），文件与 bash 共享同一份授权范围，绝不退化成全开放或只靠提示词约束。
 - **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
-当前发布版本 `v0.1.7`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
+当前发布版本 `v0.1.8`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
 
@@ -89,8 +89,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.7/dsh-electron-dsh-plugin-multi-root-workspace-0.1.7.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.7.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.8/dsh-electron-dsh-plugin-multi-root-workspace-0.1.8.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.8.tgz
 ```
 
 同样是预构建产物，适合内网或离线环境交付；首次安装同样需要添加 `allowBuilds`。
@@ -109,10 +109,10 @@ allowBuilds:
   koffi: true
 ```
 
-建议锁定版本（如 `#v0.1.7`），让后续推送无法悄悄改变实际运行的内容：
+建议锁定版本（如 `#v0.1.8`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.7
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.8
 ```
 
 ### 从本地源码安装
