@@ -2,15 +2,25 @@
  * `multi-root-compat`: the startup gate that turns the DSH compatibility
  * contract from documentation into a precondition.
  *
- * The four security-relevant rows of this bundle — `multi-root-fs`,
- * `multi-root-sandbox`, `multi-root-registry`, `multi-root-instructions` —
- * inject `multiRootCompat`. Cordis will not start a plugin whose injected
- * service is absent, so this row is what decides whether they run at all:
+ * Every widened-authority row of this bundle — `multi-root-providers`,
+ * `multi-root-registry`, `multi-root-instructions`, `multi-root-lsp`,
+ * `multi-root-workspace-files`, `multi-root-process-fence` — injects
+ * `multiRootCompat`. Cordis will not start a plugin whose injected service is
+ * absent, so this row is what decides whether they run at all:
  *
  * ```text
- * compat check passes  →  ctx.multiRootCompat exists  →  the providers start
+ * compat check passes  →  ctx.multiRootCompat exists  →  the gated rows start
  * compat check fails   →  the row throws             →  they never start
  * ```
+ *
+ * The two PROVIDER rows (`multi-root-fs`, `multi-root-sandbox`) deliberately
+ * do NOT inject the gate: their widening is scope-driven, and the gated
+ * registry can never populate the scope on a refused installation — so they
+ * degenerate to the upstream providers. That is what keeps a refused gate a
+ * loud degradation (the plugin's features absent, the profile intact) instead
+ * of a dead profile: upstream `fs-sandbox`/`sandbox` are already disabled by
+ * the patch, so holding `ctx.fs`/`ctx.sandbox` back would take `ctx.shell`,
+ * `permissionPresets` and every confining tool down with them.
  *
  * That is why the gate is a plain `apply` and not a `Service` subclass mounted
  * directly: the check has to be able to fail BEFORE the service exists. A

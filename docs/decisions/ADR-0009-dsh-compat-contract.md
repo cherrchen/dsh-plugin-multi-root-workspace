@@ -54,25 +54,27 @@ export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1'] as const
 
 ### 2. `multi-root-compat` 是启动门禁，不只是一个诊断服务
 
-`src/compat.ts` 是 patch 里的第一行。四个安全相关的 provider 行全部 inject `multiRootCompat`：
+`src/compat.ts` 是 patch 里的第一行。**宽授权行**全部 inject `multiRootCompat`（2026-10-18 修订后）：
 
 ```text
-multi-root-fs
-multi-root-sandbox
+multi-root-providers
 multi-root-registry
 multi-root-instructions
+multi-root-lsp
+multi-root-workspace-files
+multi-root-process-fence
 ```
 
 cordis 不会启动一个 injected service 缺失的行，所以判定结果直接决定它们是否运行：
 
 ```text
-compat 通过  →  ctx.multiRootCompat 存在  →  四个 provider 启动
-compat 失败  →  该行抛错               →  四个 provider 永不启动
+compat 通过  →  ctx.multiRootCompat 存在  →  宽授权行启动
+compat 失败  →  该行抛错               →  宽授权行永不启动
 ```
 
 因此这一行实现为普通 `apply` 而**不是**直接挂载的 `Service` 子类：`Service` 的构造函数里 `super(ctx, name)` 已经抢占了 service key，等它能检查任何东西时，门禁的意义已经没了。
 
-失败时 `ctx.fs` / `ctx.sandbox` 保持为上游行（或不存在），组合退化成“未安装本插件”的形态，而不是“围栏可疑”的形态。
+**两个 provider 行（`multi-root-fs` / `multi-root-sandbox`）是刻意的例外，不 inject 门禁**：它们的放宽完全由 scope 驱动，而被门禁的 registry 永远不可能在被拒安装上填充 scope，所以 provider 在门禁失败时**自动退化为上游 provider**——scope 为空，授予面与上游逐字节一致。这不是放宽门禁，而是保住 host 的基线服务图：patch 无条件禁用了上游 `fs-sandbox` / `sandbox`，`ctx.fs` / `ctx.sandbox` 只剩我们的替身；若替身也被扣住，`ctx.shell`（inject `sandbox`）与 `permissionPresets`（inject `shell`）随之瘫痪，门禁一次误报就会把 profile 变砖（这正是 `permissionPresets/catalog` 事故的形状，见文末 2026-10-18 修订）。失败时组合退化成“插件功能缺席”的形态，而不是“围栏可疑”或“宿主死亡”的形态。
 
 ### 3. 混装是独立的、优先于版本判断的失败
 
@@ -158,7 +160,7 @@ smoke 脚本不再假定任何单一版本的形状：
 
 - 正面：“本插件支持哪些上游版本”现在是一个可执行的事实，而且由四处一致性检查守住，不再是 README 里的一句话。
 - 正面：混装组合从“npm 允许、运行时沉默”变成启动期 fail loud，并且错误信息里列出每个被检查包的实际版本。
-- 正面：未验证版本上的失败方式从“可能静默放宽围栏”变成“四个 provider 不启动、组合退化为未安装本插件”。
+- 正面：未验证版本上的失败方式从“可能静默放宽围栏”变成“宽授权行不启动、两个 provider 退化为上游实现、组合表现为未安装本插件”（2026-10-18 修订后；此前 provider 也被门禁扣住，一次判定误报就会把 `ctx.fs`/`ctx.sandbox`/`ctx.shell`/`permissionPresets` 整条链拖死）。
 - 正面：`0.1.6-alpha.1` 的两处接口变化已经被适配层吸收，升级到它不需要改业务代码。
 - 正面：smoke 与单元套件对两个版本都成立，所以“绿灯”对整个 allowlist 都是有效证据。
 - 代价：上游每次发版都需要人工决定是否提升，并跑一遍升级车道。这是刻意的（见 Alternatives 最后几行）。
@@ -224,6 +226,17 @@ PR #1（head `507c954`）的 P2-3 / P2-4 / P2-5 收紧了两条规则（内容�
 对照 tag `dsh-v0.1.7-rc.1` → `dsh-v0.1.7-rc.2`：本插件依赖的 `confine`、instruction renderer、session format 4、工具失败位、面板图标、`retainedBy.mainView`、`createRuntimeResolution` / `PluginPackages`、`shell.execute().result()` 都没有改形状。cordis 仍是 `~4.0.4`。适配层没有新分支。安装期 peer 门禁与 `rc.1` 相同，所以 peer 与 allowlist 在同一次改动里加宽。
 
 实测（macOS，seatbelt 可用，bwrap / landlock 不可用）：`0.1.7-rc.2` 纳入后 enforce（cordis `4.0.4`）与基线回归（pin 回到 `0.1.5-rc.2`，cordis `4.0.2`）都是 343 passed / 3 skipped，compose 40/40，behavior 99/99，journey 55/55。
+
+## 修订（2026-10-18）：`permissionPresets/catalog` 事故——误报检测 + 被门禁的 provider
+
+DSH `0.2.0`（复现于 `0.2.0-rc.2`）上插件报 `gateway/service-unavailable: permissionPresets/catalog: active Service "permissionPresets" is unavailable`。进程内复现还原出完整链：**一次检测误报 × 一个过宽的爆炸半径**。
+
+1. **检测误报（`mixed` 幻影）**。`classifyInstallation()` 曾把所有 optional 包一视同仁：只要从本模块解析得到版本就作证。但 optional 列表里混着两类包——本插件运行时真正 `import()` 的（`dsh-llm` / `dsh-agent-instructions` / `dsh-session` / `dsh-typert-protocol`），与只作为宿主挂载服务/类型被消费、插件从不加载的（`dsh-lsp` / `dsh-lsp-stdio` / `dsh-working-directory` / `dsh-tools` / `dsh-subprocess` / `dsh-agent` / `dsh-api-workspace-files` / `dsh-client-connection` / `dsh-commands` / `dsh-system-prompt` / `dsh-sandbox-windows-acl`）。`link:` 安装的检出会把后一类解析到**自己的 devDependencies**（0.2.1-rc.2 树），于是一个版本统一的 `0.2.0-rc.2` 宿主被判成 `mixed`。修法：`OPTIONAL_CORE_PACKAGES` 拆为 `RUNTIME_OPTIONAL_PACKAGES` 与 `HOST_SERVICE_PACKAGES`；宿主服务包只有在解析命中**落在本插件根之外**的副本时才作证，插件根内的命中一律计为缺席，宿主锚点回退（经 `@deepseek-ai/dsh` 的 package.json）随之推广到全部宿主服务包并受同一根边界约束。
+2. **爆炸半径**。`fs-sandbox` / `sandbox` 两行在 patch 里是**无条件禁用**的，而替身 `multi-root-fs` / `multi-root-sandbox` 当时也 inject `multiRootCompat`。门禁一倒，`ctx.fs` / `ctx.sandbox` 消失 → `ctx.shell`（inject `sandbox`）起不来 → `permissionPresets`（inject `shell`）起不来 → UI 报 service-unavailable。文档原承诺“退化成未安装本插件”，实际是整个 profile 瘫痪——检测层任何误报都会放大成宿主死亡。修法：provider 行不再 inject 门禁。放宽由 scope 驱动，被门禁的 registry 不可能在被拒安装上填充 scope，所以 provider 空 scope 启动、授予面与上游逐字节一致；这不引入“门禁失败也能放宽”的路径，只保住 host 基线服务图。
+
+两条边界同时保持：`mixed` / `incomplete` 依旧 fail-closed（宽授权行全部仍被门禁扣住），`DSH_MULTI_ROOT_COMPAT=warn` 的放宽面不变。钉住它的测试：`tests/compat.spec.ts` 的 `describe('host-service package inspection')`（本仓库自身 devDependencies 不得作证、运行时加载包仍作证）与 `describe('the gate is what the widened-authority rows wait on')`（provider 不 inject 门禁、缺门禁时 `ctx.fs`/`ctx.sandbox` 仍在服务）。`scripts/check-dsh-compat.mjs` 同步改读 `HOST_SERVICE_PACKAGES`。
+
+附注：同期观测到的 `job/registered` 未知事件报错与本插件无关——那是 `0.2.1` 线 harness 写入的 session 日志被 `0.2.0` reader 读到，属历史会话污染/版本混用，不是本修复的对象。
 
 ## Related Documents
 

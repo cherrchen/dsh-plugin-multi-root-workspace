@@ -32,12 +32,20 @@
 - id: sandbox
   disabled: true
 - insert:
-    # The compatibility gate comes first, and every security-relevant row below
-    # injects `multiRootCompat`. If the installed DSH release is not on this
-    # plugin's allowlist, this row throws and none of them start, rather than
-    # widening a sandbox profile whose shape was never verified (ADR-0009).
+    # The compatibility gate comes first, and every widened-authority row
+    # below injects `multiRootCompat`. If the installed DSH release is not on
+    # this plugin's allowlist, this row throws and none of them start, rather
+    # than widening a sandbox profile whose shape was never verified (ADR-0009).
     - id: multi-root-compat
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/compat'
+    # The two PROVIDER rows deliberately do NOT inject the gate: their widening
+    # is scope-driven, and the gated registry can never populate the scope on a
+    # refused installation, so they degenerate to the upstream providers. They
+    # MUST keep serving: upstream `fs-sandbox`/`sandbox` are already disabled
+    # above, so holding `ctx.fs`/`ctx.sandbox` back would take `ctx.shell`,
+    # `permissionPresets` and every confining tool down with them — a refused
+    # gate would brick the profile instead of degrading to "plugin not
+    # installed" (ADR-0009).
     - id: multi-root-fs
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
     - id: multi-root-sandbox

@@ -50,10 +50,14 @@ export type Config = LocalConfig
  * roots.
  */
 export class MultiRootFileSystem extends LocalFileSystem {
-  // `multiRootCompat` is the compatibility gate, not a collaborator: this class
-  // widens the upstream write fence, so it must not run on a release the
-  // contract has not verified (see src/compat.ts).
-  static inject = ['multiRootCompat', 'sandboxPolicy', 'multiRootScope']
+  // `multiRootCompat` is deliberately absent: widening is scope-driven, and on
+  // a release the contract has not verified the gated registry can never
+  // populate the scope, so this provider degenerates to the upstream one.
+  // Injecting the gate here would instead leave `ctx.fs` unprovided — and take
+  // `ctx.shell`, `permissionPresets` and every fs-dependent row down with it —
+  // which is a far louder failure than the documented "plugin not installed"
+  // degradation (see src/compat.ts).
+  static inject = ['sandboxPolicy', 'multiRootScope']
 
   private readonly defaultMode: SandboxMode
 

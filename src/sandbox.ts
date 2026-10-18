@@ -52,10 +52,14 @@ export type { Config }
  * grant mechanics stay the upstream implementation's.
  */
 export class MultiRootSandboxProvider extends LocalSandboxProvider {
-  // `multiRootCompat` is the compatibility gate, not a collaborator: the dialect
-  // widening below recognizes an upstream argv shape, so it must not run on a
-  // release the contract has not verified (see src/compat.ts).
-  static inject = ['multiRootCompat', 'sandboxPolicy', 'multiRootScope']
+  // `multiRootCompat` is deliberately absent: widening is scope-driven, and on
+  // a release the contract has not verified the gated registry can never
+  // populate the scope, so this provider degenerates to the upstream one.
+  // Injecting the gate here would instead leave `ctx.sandbox` unprovided — and
+  // take `ctx.shell`, `permissionPresets` and every confining tool down with
+  // it — which is a far louder failure than the documented "plugin not
+  // installed" degradation (see src/compat.ts).
+  static inject = ['sandboxPolicy', 'multiRootScope']
 
   constructor(ctx: Context, config: Config) {
     super(ctx, config)

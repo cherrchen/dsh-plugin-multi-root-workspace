@@ -20,7 +20,10 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/compat/dsh-version
  */
 
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { dirname, join, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * The releases this plugin is verified against, as EXACT version strings.
@@ -73,11 +76,49 @@ export const OPTIONAL_CORE_PACKAGES = [
   '@deepseek-ai/dsh-system-prompt',
 ] as const
 
+/**
+ * The optional packages this plugin loads itself at run time, through dynamic
+ * `import()`s inside this package's own modules. The copy this module resolves
+ * IS the copy that would execute, so every resolvable hit testifies — a
+ * private copy inside this package's own tree genuinely loads, and a version
+ * that disagrees with the host is a real mixed installation, not a phantom.
+ */
+export const RUNTIME_OPTIONAL_PACKAGES = [
+  '@deepseek-ai/dsh-agent-instructions',
+  '@deepseek-ai/dsh-llm',
+  '@deepseek-ai/dsh-session',
+  '@deepseek-ai/dsh-typert-protocol',
+] as const
+
+/**
+ * The optional packages this plugin consumes only as mounted host services or
+ * ambient types — it never imports them, so a copy inside this package's own
+ * tree can never execute. The only version that testifies is the one the
+ * COMPOSITION resolves (the installation or the profile): a resolution that
+ * lands inside this package's own root is a private development or bundled
+ * copy and must be reported absent — otherwise a `link:`-installed checkout
+ * whose devDependencies carry a newer release phantom-mixes every supported
+ * host it is developed against (the report that motivated this split:
+ * `dsh-lsp`/`dsh-lsp-stdio`/`dsh-working-directory` resolving to the plugin's
+ * devDependencies on a `0.2.0-rc.2` host produced a `mixed` verdict on a
+ * uniformly `0.2.0-rc.2` installation).
+ */
+export const HOST_SERVICE_PACKAGES = [
+  '@deepseek-ai/dsh-agent',
+  '@deepseek-ai/dsh-api-workspace-files',
+  '@deepseek-ai/dsh-client-connection',
+  '@deepseek-ai/dsh-commands',
+  '@deepseek-ai/dsh-lsp',
+  '@deepseek-ai/dsh-lsp-stdio',
+  '@deepseek-ai/dsh-sandbox-windows-acl',
+  '@deepseek-ai/dsh-subprocess',
+  '@deepseek-ai/dsh-system-prompt',
+  '@deepseek-ai/dsh-tools',
+  '@deepseek-ai/dsh-working-directory',
+] as const
+
 /** Every package the contract inspects, required first. */
 export const CORE_PACKAGES = [...REQUIRED_CORE_PACKAGES, ...OPTIONAL_CORE_PACKAGES] as const
-
-/** Services looked up structurally; older runtimes never install these modules. */
-export const HOST_RESOLVED_PACKAGES = ['@deepseek-ai/dsh-working-directory'] as const
 
 /** How this plugin reacts to an installation it does not support. */
 export type CompatEnforcement = 'enforce' | 'warn'
@@ -121,31 +162,113 @@ export interface CompatReport {
 export type VersionReader = (packageName: string) => string | undefined
 
 /**
+ * Resolve one package's `package.json` path through a require, or `undefined`
+ * when it cannot be resolved. The path — not just the version — matters: the
+ * caller needs to know WHERE the copy lives to judge whether it belongs to the
+ * inspected installation.
+ * @param require - the require to resolve through.
+ * @param packageName - the package to locate.
+ * @returns the manifest path, or `undefined`.
+ */
+function resolvePackageJson(require: NodeRequire, packageName: string): string | undefined {
+  try {
+    return require.resolve(`${packageName}/package.json`)
+  } catch {
+    return undefined
+  }
+}
+
+/** Read `version` off a resolved manifest path; a broken manifest is absent. */
+function versionOfManifest(manifestPath: string): string | undefined {
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version?: unknown }
+    return typeof manifest.version === 'string' ? manifest.version : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The second resolution anchor: a require rooted at the installed
+ * `@deepseek-ai/dsh` meta package. Host-internal packages that never appear as
+ * plugin peers are only reachable this way (the pattern the retired
+ * `HOST_RESOLVED_PACKAGES` list carved out for `dsh-working-directory`,
+ * generalized here to every host-service package).
+ * @param require - this module's require, used to locate the meta package.
+ * @returns the host-rooted require, or `undefined` when `dsh` itself cannot be
+ *   resolved.
+ */
+function hostAnchorRequire(require: NodeRequire): NodeRequire | undefined {
+  const anchor = resolvePackageJson(require, '@deepseek-ai/dsh')
+  return anchor === undefined ? undefined : createRequire(anchor)
+}
+
+/**
+ * This package's own install root — the boundary between a copy that belongs
+ * to the inspected installation and a private copy only this package can see.
+ * @param require - this module's require; self-reference through the package's
+ *   `exports` is tried first, then a walk up from this module's file.
+ * @returns the package root, or `undefined` when neither anchor works.
+ */
+function pluginPackageRoot(require: NodeRequire): string | undefined {
+  try {
+    return dirname(require.resolve('@dsh-electron/dsh-plugin-multi-root-workspace/package.json'))
+  } catch {
+    let dir = dirname(fileURLToPath(import.meta.url))
+    while (true) {
+      if (existsSync(join(dir, 'package.json'))) return dir
+      const parent = dirname(dir)
+      if (parent === dir) return undefined
+      dir = parent
+    }
+  }
+}
+
+/**
+ * Whether a resolved manifest path lives inside this package's own root — the
+ * mark of a private copy no composition can mount. An unknown root cannot
+ * exclude anything, so it answers `false` rather than guessing.
+ */
+function insidePackageRoot(manifestPath: string, root: string | undefined): boolean {
+  return root !== undefined && (manifestPath === root || manifestPath.startsWith(`${root}${sep}`))
+}
+
+/**
  * Read one package's declared version through Node resolution.
  *
- * Resolution runs from THIS module, which is what makes the answer meaningful:
- * the upstream packages are peer dependencies, so they resolve to the single
- * copy the host provides — the same copy the providers will subclass at
- * runtime. A package that cannot be resolved is reported absent rather than
- * throwing, because "not installed" is a legitimate answer for every optional
- * package.
+ * Resolution runs from THIS module — for required and runtime-loaded packages
+ * the copy found here is the copy that would execute, which is what makes the
+ * answer meaningful: the upstream packages are peer dependencies, so they
+ * resolve to the single copy the host provides — the same copy the providers
+ * will subclass at runtime.
+ *
+ * {@link HOST_SERVICE_PACKAGES} are different: the plugin never imports them,
+ * so a copy inside this package's own tree can never execute, and counting it
+ * would report a mixed installation out of a linked checkout's devDependencies
+ * alone. Only a hit OUTSIDE this package's root — a copy the composition could
+ * mount — testifies; when this module cannot reach the package at all, the
+ * `@deepseek-ai/dsh` host manifest supplies a second anchor for host-internal
+ * packages that are never plugin peers.
+ *
+ * A package that cannot be resolved in either place is reported absent rather
+ * than throwing, because "not installed" is a legitimate answer for every
+ * optional package.
  * @param packageName - the package to inspect.
  * @returns the declared version, or `undefined` when the package or its
  *   manifest cannot be resolved.
  */
 export function readInstalledVersion(packageName: string): string | undefined {
   const require = createRequire(import.meta.url)
-  try {
-    const manifest = require(`${packageName}/package.json`) as { version?: unknown }
-    return typeof manifest.version === 'string' ? manifest.version : undefined
-  } catch {
-    if (!(HOST_RESOLVED_PACKAGES as readonly string[]).includes(packageName)) return undefined
-    try {
-      const host = createRequire(require.resolve('@deepseek-ai/dsh/package.json'))
-      const manifest = host(`${packageName}/package.json`) as { version?: unknown }
-      return typeof manifest.version === 'string' ? manifest.version : undefined
-    } catch { return undefined }
+  if (!(HOST_SERVICE_PACKAGES as readonly string[]).includes(packageName)) {
+    const hit = resolvePackageJson(require, packageName)
+    return hit === undefined ? undefined : versionOfManifest(hit)
   }
+  const root = pluginPackageRoot(require)
+  const selfHit = resolvePackageJson(require, packageName)
+  if (selfHit !== undefined && !insidePackageRoot(selfHit, root)) return versionOfManifest(selfHit)
+  const host = hostAnchorRequire(require)
+  const hostHit = host === undefined ? undefined : resolvePackageJson(host, packageName)
+  return hostHit === undefined || insidePackageRoot(hostHit, root) ? undefined : versionOfManifest(hostHit)
 }
 
 /**

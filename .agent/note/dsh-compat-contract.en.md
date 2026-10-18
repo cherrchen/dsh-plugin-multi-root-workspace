@@ -29,18 +29,18 @@ node_modules                resolved versions        one entry of the allowlist
 
 ## 2. Your tests may fail because of the gate — and that is correct
 
-`multi-root-compat` is the first row in the patch, and these four inject it:
+`multi-root-compat` is the first row in the patch, and these **widened-authority** rows inject it:
 
 ```text
-multi-root-fs
-multi-root-sandbox
+multi-root-providers
 multi-root-registry
 multi-root-instructions
 multi-root-lsp
 multi-root-workspace-files
+multi-root-process-fence
 ```
 
-Cordis will not start a row whose injected service is absent. So before mounting any of those providers in a test you must first:
+Cordis will not start a row whose injected service is absent. So before mounting any of those rows in a test (or a transitively gated row such as `multi-root-command`, which injects `multiRootRegistry`), you must first:
 
 ```ts
 import { mountCompat } from './support/compat.ts'
@@ -48,7 +48,9 @@ import { mountCompat } from './support/compat.ts'
 await mountCompat(ctx)
 ```
 
-Otherwise `ctx.get('fs')` / `ctx.get('sandbox')` are `undefined` and you will see errors like `Cannot read properties of undefined (reading 'confine')`. That is not a bug; it is the gate working (`tests/compat.spec.ts` asserts this behavior explicitly).
+Otherwise `ctx.get('multiRootRegistry')` and friends are `undefined`. That is not a bug; it is the gate working (`tests/compat.spec.ts` asserts this explicitly).
+
+**The two provider rows (`multi-root-fs` / `multi-root-sandbox`) deliberately do NOT inject the gate**: their widening is scope-driven, and the gated registry can never populate the scope on a refused installation, so they degenerate to the upstream providers. This must hold: the patch already disables upstream `fs-sandbox` / `sandbox` unconditionally, so an absent provider takes `ctx.fs` / `ctx.sandbox` down → `ctx.shell` (injects `sandbox`) never starts → `permissionPresets` (injects `shell`) never starts → the whole profile bricks (`permissionPresets/catalog` reports service-unavailable). The correct shape of a refused gate is "plugin features absent, profile intact" — never "profile dead".
 
 `mountCompat` mounts the **real** compat row, gate policy included. So the whole unit suite fails outright on a release that is not on the allowlist — deliberately; see point 5.
 
@@ -189,7 +191,7 @@ On Windows, Node cannot start `npm.cmd` with `execFileSync('npm')`; old-version 
 
 ## 10. New B1–B3 seams
 
-LSP and workspace-files wrap public methods; unloading must restore original property descriptors. Do not compare Cordis proxy function references. `src/compat/workspace-files.ts` adapts old `changes(scope, signal)` and new `changes(scope, path, signal)` by arity. The read surface `stat`/`read`/`readBytes` is wrapped the same way — upstream gives it no workspace confinement, so the boundary comes from `routeWorkspacePath` plus a lexical check against `registry.list()`'s registered-but-withheld roots (refused `workspace-file/outside-workspace`); `readBytes`' third parameter is version-shaped (`WorkspaceByteRange` ↔ `WorkspaceByteReadOptions`). The wrapper preserves the range and other options, rewriting only `baseFile` during routing; related-path semantics are recorded in [ADR-0011's read-surface amendment](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md#修订面板-files--readfile-端点下线2026-10-12amendment). The pre-0.2 `readAll`/`readRelated` pair is wrapped by structural probe when a release still carries them. The Windows runner for a populated scope must use a SID for the entire root set: granting additional roots to the primary SID would retain write access after removal. Optional peers participate in mixed-tree checks and must stay out of carrier-barrel static imports. See [ADR-0011](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md) for the decision and the [roadmap](../../docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02) for platform validation.
+LSP and workspace-files wrap public methods; unloading must restore original property descriptors. Do not compare Cordis proxy function references. `src/compat/workspace-files.ts` adapts old `changes(scope, signal)` and new `changes(scope, path, signal)` by arity. The read surface `stat`/`read`/`readBytes` is wrapped the same way — upstream gives it no workspace confinement, so the boundary comes from `routeWorkspacePath` plus a lexical check against `registry.list()`'s registered-but-withheld roots (refused `workspace-file/outside-workspace`); `readBytes`' third parameter is version-shaped (`WorkspaceByteRange` ↔ `WorkspaceByteReadOptions`). The wrapper preserves the range and other options, rewriting only `baseFile` during routing; related-path semantics are recorded in [ADR-0011's read-surface amendment](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md#修订面板-files--readfile-端点下线2026-10-12amendment). The pre-0.2 `readAll`/`readRelated` pair is wrapped by structural probe when a release still carries them. The Windows runner for a populated scope must use a SID for the entire root set: granting additional roots to the primary SID would retain write access after removal. Optional peers participate in mixed-tree checks and must stay out of carrier-barrel static imports. Whether a resolved copy TESTIFIES is split by who would actually load it (`src/compat/dsh-version.ts`): `RUNTIME_OPTIONAL_PACKAGES` are the ones this plugin dynamically `import()`s itself (`dsh-agent-instructions` / `dsh-llm` / `dsh-session` / `dsh-typert-protocol`) — a private copy genuinely executes, so any hit testifies; `HOST_SERVICE_PACKAGES` are consumed only as mounted host services or ambient types, so a copy landing INSIDE this package's own root can never run — a `link:`-installed checkout resolves `dsh-lsp` / `dsh-lsp-stdio` / `dsh-working-directory` to its own devDependencies, and not excluding that hit phantom-mixes a uniformly-versioned host into `mixed`. The host-anchor fallback (via `@deepseek-ai/dsh`'s package.json) applies only to these host-service packages and is bounded by the same plugin-root rule. A new optional package must be filed under whichever list matches who loads its copy — never added to both. See [ADR-0011](../../docs/decisions/ADR-0011-multi-root-workspace-consumers.md) for the decision and the [roadmap](../../docs/plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02) for platform validation.
 
 ## 11. DSH 0.2.1 directory semantics
 

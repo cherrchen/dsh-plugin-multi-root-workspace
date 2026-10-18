@@ -29,9 +29,14 @@ const REPLACED = new Map([
   ['sandbox', '@deepseek-ai/dsh-sandbox-local'],
 ])
 const INSERTED = [
-  // The compatibility gate comes first: the rows below inject `multiRootCompat`,
-  // so a harness whose DSH release is not on the allowlist mounts none of them.
+  // The compatibility gate comes first: every widened-authority row below
+  // injects `multiRootCompat`, so a harness whose DSH release is not on the
+  // allowlist mounts none of them.
   'multi-root-compat',
+  // The two providers stay mounted on a refused gate by design — their
+  // widening is scope-driven and the gated registry can never populate the
+  // scope, so they degenerate to the upstream providers instead of taking
+  // ctx.fs/ctx.sandbox (and with them ctx.shell + permissionPresets) down.
   'multi-root-fs',
   'multi-root-sandbox',
   // The provider-conflict gate: asserts the mounted ctx.fs/ctx.sandbox carry
