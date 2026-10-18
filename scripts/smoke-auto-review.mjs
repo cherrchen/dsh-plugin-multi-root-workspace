@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { packTarball, readTarGz } from './check-pack.mjs'
 import { autoReviewBattery } from './lib/auto-review-battery.mjs'
@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { configure, COMPANION } from '../compat/auto-review/configure.mjs'
 import { join } from 'node:path'
 import { bootProfile, composeProfile } from './lib/profile-boot.mjs'
+import { removeBehaviorHome, removeScratchTree } from './lib/smoke-cleanup.mjs'
 import { loadAppBoot, loadRuntimeModule, resolveScratchHome, installPluginProfile, ensureProfileCopyImport, runDsh, runtimeRequire } from './lib/dsh-runtime.mjs'
 if (JSON.parse(readFileSync(runtimeRequire().resolve('@deepseek-ai/dsh/package.json'),'utf8')).version !== '0.2.1-rc.2') {
   console.log('[auto-review] skipped: joint runtime contract is only 0.2.1-rc.2; ordinary bundle gates remain active')
@@ -102,4 +103,11 @@ try {
       console.log(`[auto-review] ${name}: actual package uninstall preserves the selected official bundle`)
     }
   }
-} finally { rmSync(home, {recursive:true, force:true}); for(const pack of packs)rmSync(pack.dir,{recursive:true,force:true}) }
+} finally {
+  // The packed child maps koffi.node from the installed profile; on Windows a
+  // mapped addon can only be deleted after this process exits, so the parent
+  // removes the scratch home (DSH_SMOKE_DEFER_HOME_CLEANUP, same contract as
+  // smoke:packed). Standalone runs keep the strict bounded cleanup.
+  await removeBehaviorHome(home, process.env.DSH_SMOKE_DEFER_HOME_CLEANUP === '1')
+  for(const pack of packs)await removeScratchTree(pack.dir)
+}
