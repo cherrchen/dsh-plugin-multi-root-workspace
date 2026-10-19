@@ -527,6 +527,9 @@ function snapshotAutoReview(agent: Agent, exec: ToolExecution, cwd: string, mult
 /** Render the four data sections paired with the fixed policy section. */
 function reviewUserText(snapshot: ReviewSnapshot): string {
   const instructions = partitionInstructions(snapshot.projectInstructions, snapshot.multiRoot)
+  // Demoted native instruction frames stay part of the conversation; current ones render only as project instructions.
+  const history = [...snapshot.history, ...instructions.historical]
+    .filter(entry => entry.kind !== 'user-message' || entry.source.kind !== 'agent-instructions')
   return [
     'ENVIRONMENT',
     json({ cwd: snapshot.cwd, ...snapshot.multiRoot.environment, executionFence: 'Reviewer allow and human approval remain subject to host write fences. Root membership is not human authorization; read-only restricts writes, not reads.' }),
@@ -535,7 +538,7 @@ function reviewUserText(snapshot: ReviewSnapshot): string {
       kind: 'current-root-instructions', role: 'constraint', source: { kind: 'multi-root-workspace', snapshot: 'current' }, ...constraint,
     }))]),
     'FILTERED_HISTORY',
-    json([...snapshot.history, ...instructions.historical]),
+    json(history),
     'PENDING_ACTION',
     json(snapshot.action),
   ].join('\n\n')
@@ -628,6 +631,7 @@ async function classifyRisk(
 ): Promise<{ decision: AutoReviewDecision; context: ReviewContext }> {
   const cwd = await ctx.workingDirectory.ensure(agent, signal)
   const context = await ctx.multiRootReviewContext.build(exec, signal)
+  // A provider that omits effectiveCwd makes no claim; a mismatched one fails.
   if (context.environment.effectiveCwd !== undefined && context.environment.effectiveCwd !== cwd) throw new Error('review-context: effective cwd changed during collection')
   const snapshot = snapshotAutoReview(agent, exec, cwd, context)
   await ctx.multiRootReviewContext.assertCurrent(exec, context, signal)

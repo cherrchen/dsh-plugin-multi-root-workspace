@@ -30,7 +30,7 @@ export function partitionInstructions(native: readonly NativeMessage[], context:
       project = resolve(context.environment.effectiveCwd, identity.projectRoot)
     }
     const changes=source.changes ?? []
-    if (context.environment.sessionOrigin !== undefined && project === undefined && changes.length > 0) {
+    if (project === undefined && changes.length > 0) {
       throw new Error('review-context: native instruction scope is incomplete; refresh the agent step')
     }
     const external: Array<{path:string;action:string;digest?:string}> = []
