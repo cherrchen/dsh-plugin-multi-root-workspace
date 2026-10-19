@@ -133,6 +133,27 @@ if (releases.length > 1) {
   else notes.push(`installed tree: ${release}`)
 }
 
+// 5. The Auto Review companion is verified in lockstep with the development
+//    pin: its own version tracks this package's, every dsh peer and dev pin is
+//    the exact development release, and the workspace peer is this version.
+//    Bumping without it leaves the companion promising an unverified fork.
+const companion = JSON.parse(readFileSync(join(REPO_ROOT, 'compat', 'auto-review', 'package.json'), 'utf8'))
+if (companion.version !== manifest.version) {
+  fail(`compat/auto-review is version ${companion.version} but package.json is ${manifest.version}; bump them together`)
+}
+const companionPeers = companion.peerDependencies ?? {}
+const workspacePeer = companionPeers['@dsh-electron/dsh-plugin-multi-root-workspace']
+if (workspacePeer !== manifest.version) {
+  fail(`compat/auto-review peerDependencies["@dsh-electron/dsh-plugin-multi-root-workspace"] is "${workspacePeer}" but this package is ${manifest.version}`)
+}
+const [devPin] = [...pinned]
+if (devPin !== undefined) {
+  for (const [name, range] of [...Object.entries(companionPeers), ...Object.entries(companion.devDependencies ?? {})]) {
+    if (name !== '@deepseek-ai/dsh' && !name.startsWith('@deepseek-ai/dsh-')) continue
+    if (range !== devPin) fail(`compat/auto-review pins "${name}" at "${range}" but the development pin is "${devPin}"`)
+  }
+}
+
 for (const note of notes) console.log(`[compat] ${note}`)
 
 if (failures.length > 0) {

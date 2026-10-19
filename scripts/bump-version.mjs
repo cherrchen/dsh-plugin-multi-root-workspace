@@ -78,12 +78,23 @@ function nextVersion(current, bump, pre) {
   return bump
 }
 
+const RELEASE_MANIFESTS = ['package.json', 'compat/auto-review/package.json']
+
 function rewriteVersion(newVersion) {
   const manifestPath = new URL('../package.json', import.meta.url)
   const text = readFileSync(manifestPath, 'utf8')
   const replaced = text.replace(/^(  "version": ")[^"]*(",?)$/m, `$1${newVersion}$2`)
   if (replaced === text) throw new Error('Could not find the "version" field in package.json')
   writeFileSync(manifestPath, replaced)
+  // The Auto Review companion is versioned in lockstep: its own version and
+  // its peer pin on this package move together (compat:check enforces it).
+  const companionPath = new URL('../compat/auto-review/package.json', import.meta.url)
+  const companion = readFileSync(companionPath, 'utf8')
+  const peer = /("@dsh-electron\/dsh-plugin-multi-root-workspace": ")(?!workspace)[^"]*(")/
+  const versioned = companion.replace(/^(  "version": ")[^"]*(",?)$/m, `$1${newVersion}$2`)
+  if (versioned === companion) throw new Error('Could not find the "version" field in compat/auto-review/package.json')
+  if (!peer.test(companion)) throw new Error('Could not find the workspace peer in compat/auto-review/package.json')
+  writeFileSync(companionPath, versioned.replace(peer, `$1${newVersion}$2`))
 }
 
 function commitAndTag(version) {
@@ -93,17 +104,17 @@ function commitAndTag(version) {
   const foreign = status.split('\n').filter((line) => {
     if (line.trim() === '' || line.startsWith('??')) return false
     const [xy, file] = [line.slice(0, 2), line.slice(3)]
-    if (file === 'package.json') return xy === ' D' || xy === 'D ' || xy === 'MD'
+    if (RELEASE_MANIFESTS.includes(file)) return xy === ' D' || xy === 'D ' || xy === 'MD'
     return true
   })
   if (foreign.length > 0) {
-    throw new Error('Refusing to tag: the working tree has changes other than package.json:\n' + foreign.join('\n'))
+    throw new Error('Refusing to tag: the working tree has changes other than the release manifests:\n' + foreign.join('\n'))
   }
   const tag = `v${version}`
-  runGit(['add', 'package.json'])
+  runGit(['add', ...RELEASE_MANIFESTS])
   runGit(['commit', '-m', `chore(release): ${tag}`])
   runGit(['tag', '-a', tag, '-m', tag])
-  console.log(`Committed package.json and created annotated tag ${tag}.`)
+  console.log(`Committed the release manifests and created annotated tag ${tag}.`)
   console.log(`Publish it with: git push origin main --follow-tags`)
 }
 
