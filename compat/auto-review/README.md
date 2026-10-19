@@ -16,6 +16,6 @@ node "<profile-directory>/node_modules/@dsh-electron/dsh-plugin-multi-root-auto-
 
 卸载/禁用存活的 Auto owner 会按官方逻辑把 Auto Session 迁移为 Full access。重新加载不会自动把它们切回 Auto；Multi-root 写围栏继续生效。
 
-当前拓扑与指令进入 reviewer 数据分区，项目文本只作为 constraint。预算、I/O、取消或快照变化使本次调用失败。纯附加根 native 旧帧降为历史 fact，由当前文件替代。混合 native 帧如果不能证明附加文件仍当前，则失败关闭，须先刷新 native baseline。bash/pwsh 只收集已知目录链，不能推断任意脚本的全部目标。普通源码自动读取不在本版范围内。
+当前拓扑与指令进入 reviewer 数据分区，项目文本只作为 constraint。预算、I/O、取消或快照变化使本次调用失败。新鲜度通过全量重建上下文再比对指纹来保证：一次调用最多重建五次（构建一次、检查点四次），每次都是一次有界的注册表与指令扫描——这是新鲜性语义的固定成本，不是授权检查。纯附加根 native 旧帧降为历史 fact，由当前文件替代。混合 native 帧如果不能证明附加文件仍当前，则失败关闭，须先刷新 native baseline。bash/pwsh 只收集已知目录链，不能推断任意脚本的全部目标。普通源码自动读取不在本版范围内。
 
 Fork 基线与同步规则见 [FORK.md](./FORK.md)。完整设计与验证记录保存在主仓库文档中。
