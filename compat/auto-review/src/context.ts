@@ -24,7 +24,8 @@ export function partitionInstructions(native: readonly NativeMessage[], context:
     const source = entry.source as { baseline?: boolean; baselineIdentity?: string; changes?: Array<{action: string; path: string; digest?: string}> }
     if (source.baseline) project = undefined
     if (source.baselineIdentity !== undefined) {
-      const identity = JSON.parse(source.baselineIdentity)
+      let identity: { projectRoot?: unknown }
+      try { identity = JSON.parse(source.baselineIdentity) } catch { throw new Error('review-context: invalid native baseline identity') }
       if (typeof identity.projectRoot !== 'string') throw new Error('review-context: invalid native baseline identity')
       project = resolve(context.environment.effectiveCwd, identity.projectRoot)
     }
