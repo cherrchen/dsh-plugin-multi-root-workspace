@@ -65,7 +65,7 @@ import { createInstructionMessage } from './compat/llm-message.ts'
 import { toolResultFailed } from './compat/tool-result.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
 import { aroundTool, type ToolCaller } from './compat/tool-context.ts'
-import { ptcFileActivity, replayedInstructionTargets, touchedPathOfToolCall } from './compat/instruction-activity.ts'
+import { FILE_TOUCH_TOOL_NAMES, ptcFileActivity, replayedInstructionTargets, touchedPathOfToolCall } from './compat/instruction-activity.ts'
 import { nativeInstructionCopies } from './compat/instruction-overlap.ts'
 import { isCanonicallyUnder } from './roots.ts'
 import type {} from './scope.ts'
@@ -101,8 +101,8 @@ export const DEFAULT_MAX_BYTES = 65536
 /** Largest instruction file this row will read; larger files are ignored. */
 export const DEFAULT_MAX_SOURCE_BYTES = 32768
 
-/** Tools whose SUCCESS makes the directories on the path to the file relevant. */
-const FILE_TOUCH_TOOL_NAMES: Record<string, true> = { read: true, write: true, edit: true }
+// A successful read/write/edit makes the directories on the path to the file
+// relevant; FILE_TOUCH_TOOL_NAMES is shared with the review-context replay.
 
 /** Cap on unanswered `tool/call` records remembered per session. */
 const MAX_PENDING_CALLS = 128

@@ -85,9 +85,12 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
   return [...paths]
 }
 
+/** fs tools whose success touches the file at their `file_path` argument. */
+export const FILE_TOUCH_TOOL_NAMES: Record<string, true> = { read: true, write: true, edit: true }
+
 /** One explicit fs-tool target, shared with live touch capture. */
 export function touchedPathOfToolCall(name: string, argumentsJson: string): string | undefined {
-  if (!['read', 'write', 'edit'].includes(name)) return undefined
+  if (FILE_TOUCH_TOOL_NAMES[name] !== true) return undefined
   let parsed: unknown
   try { parsed = JSON.parse(argumentsJson) } catch { return undefined }
   if (typeof parsed !== 'object' || parsed === null || !('file_path' in parsed) || typeof parsed.file_path !== 'string') return undefined
