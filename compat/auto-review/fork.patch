@@ -1,5 +1,5 @@
 --- a/upstream.ts	2026-10-18 20:13:42
-+++ b/index.ts	2026-10-19 15:56:29
++++ b/index.ts	2026-10-19 15:58:27
 @@ -8,6 +8,9 @@
   * @module @deepseek-ai/dsh-experimental-auto-review
   */
@@ -39,7 +39,26 @@
    const { session } = agent
    // The reviewer's risk inputs are the whole action history: earlier native calls
    // and PTC starts carry the authorizations and duplicate identities this call is
-@@ -513,6 +517,7 @@
+@@ -425,12 +429,16 @@
+       if (isProjectInstruction(event.data.source)) {
+         const content = event.data.content
+         if (content.length > 0) {
+-          projectInstructions.push({
++          const entry: HistoricalUserMessage = {
+             kind: 'user-message',
+             role: 'constraint',
+             source: event.data.source,
+             content,
+-          })
++          }
++          projectInstructions.push(entry)
++          // A demoted frame keeps its surface position: this placeholder is
++          // rewritten to 'fact' or dropped once partitioning decides.
++          history.push(entry)
+         }
+       } else {
+         history.push(...filteredUserEntries(
+@@ -513,6 +521,7 @@
      provider: header.config.provider,
      model: header.config.model,
      cwd,
@@ -47,14 +66,21 @@
      projectInstructions,
      history,
      action,
-@@ -521,13 +526,19 @@
+@@ -521,13 +530,26 @@
  
  /** Render the four data sections paired with the fixed policy section. */
  function reviewUserText(snapshot: ReviewSnapshot): string {
 +  const instructions = partitionInstructions(snapshot.projectInstructions, snapshot.multiRoot)
-+  // Demoted native instruction frames stay part of the conversation; current ones render only as project instructions.
-+  const history = [...snapshot.history, ...instructions.historical]
-+    .filter(entry => entry.kind !== 'user-message' || entry.source.kind !== 'agent-instructions')
++  // Demoted native frames stay at the surface position they occupied; current
++  // project frames are rendered only in PROJECT_INSTRUCTIONS.
++  const demoted = new Set<HistoricalUserMessage>(instructions.demoted)
++  const history = snapshot.history.flatMap(entry =>
++    entry.kind !== 'user-message' || entry.source.kind !== 'agent-instructions'
++      ? [entry]
++      : demoted.has(entry)
++        ? [{ ...entry, role: 'fact' as const }]
++        : [],
++  )
    return [
      'ENVIRONMENT',
 -    json({ cwd: snapshot.cwd }),
@@ -70,7 +96,7 @@
      'PENDING_ACTION',
      json(snapshot.action),
    ].join('\n\n')
-@@ -617,9 +628,13 @@
+@@ -617,9 +639,13 @@
    agent: Agent,
    exec: ToolExecution,
    signal: AbortSignal,
@@ -86,7 +112,7 @@
    // This review prompt is sent only through ctx.llm.stream and never enters a Session log.
    const options: GenerateOptions = deepFreeze({
      provider: snapshot.provider,
-@@ -632,7 +647,9 @@
+@@ -632,7 +658,9 @@
      temperature: 0,
      signal,
    })
@@ -97,7 +123,7 @@
  }
  
  /** Materialize the fixed model-facing final Auto denial plus optional UI detail. */
-@@ -674,12 +691,43 @@
+@@ -674,12 +702,43 @@
  
  /** Install the Auto preset and its prepended per-call review gate. */
  export function apply(ctx: Context): void {
@@ -141,7 +167,7 @@
    ctx.effect(function* () {
      const stopListener = ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
        const agent = exec.agent
-@@ -703,13 +751,15 @@
+@@ -703,13 +762,15 @@
          )
          if (isAborted(lifecycle.signal)) return { kind: 'cancel' }
          if (!review.ok) return failed(exec, review.error)

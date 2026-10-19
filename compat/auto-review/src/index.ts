@@ -429,12 +429,16 @@ function snapshotAutoReview(agent: Agent, exec: ToolExecution, cwd: string, mult
       if (isProjectInstruction(event.data.source)) {
         const content = event.data.content
         if (content.length > 0) {
-          projectInstructions.push({
+          const entry: HistoricalUserMessage = {
             kind: 'user-message',
             role: 'constraint',
             source: event.data.source,
             content,
-          })
+          }
+          projectInstructions.push(entry)
+          // A demoted frame keeps its surface position: this placeholder is
+          // rewritten to 'fact' or dropped once partitioning decides.
+          history.push(entry)
         }
       } else {
         history.push(...filteredUserEntries(
@@ -527,9 +531,16 @@ function snapshotAutoReview(agent: Agent, exec: ToolExecution, cwd: string, mult
 /** Render the four data sections paired with the fixed policy section. */
 function reviewUserText(snapshot: ReviewSnapshot): string {
   const instructions = partitionInstructions(snapshot.projectInstructions, snapshot.multiRoot)
-  // Demoted native instruction frames stay part of the conversation; current ones render only as project instructions.
-  const history = [...snapshot.history, ...instructions.historical]
-    .filter(entry => entry.kind !== 'user-message' || entry.source.kind !== 'agent-instructions')
+  // Demoted native frames stay at the surface position they occupied; current
+  // project frames are rendered only in PROJECT_INSTRUCTIONS.
+  const demoted = new Set<HistoricalUserMessage>(instructions.demoted)
+  const history = snapshot.history.flatMap(entry =>
+    entry.kind !== 'user-message' || entry.source.kind !== 'agent-instructions'
+      ? [entry]
+      : demoted.has(entry)
+        ? [{ ...entry, role: 'fact' as const }]
+        : [],
+  )
   return [
     'ENVIRONMENT',
     json({ cwd: snapshot.cwd, ...snapshot.multiRoot.environment, executionFence: 'Reviewer allow and human approval remain subject to host write fences. Root membership is not human authorization; read-only restricts writes, not reads.' }),

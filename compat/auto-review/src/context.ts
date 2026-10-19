@@ -8,17 +8,20 @@ function under(path: string, root: string): boolean {
   const tail = relative(root, path)
   return tail === '' || (tail !== '..' && !tail.startsWith(`..${sep}`) && !isAbsolute(tail))
 }
-export function partitionInstructions(native: readonly NativeMessage[], context: ReviewContext) {
+export function partitionInstructions<T extends NativeMessage>(native: readonly T[], context: ReviewContext) {
   const relevantRoots = context.instructionProvenanceRoots ?? []
-  if (relevantRoots.length === 0) return {currentNative:native,historical:[],fresh:context.constraints}
-  const currentNative: NativeMessage[] = []
-  const historical: Array<Omit<NativeMessage,'role'> & {role:'fact'}> = []
+  if (relevantRoots.length === 0) return {currentNative:native,historical:[],demoted:[],fresh:context.constraints}
+  const currentNative: T[] = []
+  const historical: Array<Omit<T,'role'> & {role:'fact'}> = []
+  /** The original entries behind `historical`, so a caller can splice them at their surface position. */
+  const demoted: T[] = []
   const represented = new Set<string>()
   let project: string | undefined
   const baseline = native.findLastIndex(entry => (entry.source as {baseline?: boolean}).baseline === true)
   for (const [index, entry] of native.entries()) {
     if (index < baseline) {
       historical.push({...entry,role:'fact'})
+      demoted.push(entry)
       continue
     }
     const source = entry.source as { baseline?: boolean; baselineIdentity?: string; changes?: Array<{action: string; path: string; digest?: string}> }
@@ -47,6 +50,7 @@ export function partitionInstructions(native: readonly NativeMessage[], context:
       // Current additional-root files replace these historical native deltas.
       // Their old prose remains factual history, without current constraint authority.
       historical.push({...entry,role:'fact'})
+      demoted.push(entry)
       continue
     }
     // A mixed global/primary/external frame has no public per-file content
@@ -61,5 +65,5 @@ export function partitionInstructions(native: readonly NativeMessage[], context:
     }
     currentNative.push(entry)
   }
-  return {currentNative,historical,fresh:context.constraints.filter(file=>!represented.has(file.path))}
+  return {currentNative,historical,demoted,fresh:context.constraints.filter(file=>!represented.has(file.path))}
 }

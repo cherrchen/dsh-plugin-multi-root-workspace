@@ -31,6 +31,26 @@ assert.equal(section(fork,'const REVIEW_POLICY ='),section(baseline,'const REVIE
 for (const name of ['json','parseLoggedArguments','sameJson','isRecord','loggedSchema','isAborted','isHumanInstruction','isProjectInstruction','isCheckpoint','isDirectParentInstruction','directParentInitialPromptSeq','textRole','filteredUserEntries','stepIdentity','sameStep','scopedCallKey','scopePtcStarts','nativeAction','ptcAction','topLevelMemberCount','parseDecision','readDecision','denied','askUser','failed']) {
   assert.equal(section(fork,`function ${name}(`),section(baseline,`function ${name}(`),`${name}: protected upstream behavior drift`)
 }
-assert.equal(section(fork,'function snapshotAutoReview(').replace(', multiRoot: ReviewContext','').replace('    multiRoot,\n',''), section(baseline,'function snapshotAutoReview('),'snapshot identity/filter drift')
+// A native instruction frame is pushed once and shared as a positional history
+// placeholder; normalize that deliberate structure back to the upstream shape.
+const forkSnapshot = section(fork,'function snapshotAutoReview(')
+  .replace(', multiRoot: ReviewContext','')
+  .replace('    multiRoot,\n','')
+  .replace(`          const entry: HistoricalUserMessage = {
+            kind: 'user-message',
+            role: 'constraint',
+            source: event.data.source,
+            content,
+          }
+          projectInstructions.push(entry)
+          // A demoted frame keeps its surface position: this placeholder is
+          // rewritten to 'fact' or dropped once partitioning decides.
+          history.push(entry)`, `          projectInstructions.push({
+            kind: 'user-message',
+            role: 'constraint',
+            source: event.data.source,
+            content,
+          })`)
+assert.equal(forkSnapshot, section(baseline,'function snapshotAutoReview('),'snapshot identity/filter drift')
 assert.equal(fork.slice(fork.indexOf('    yield stopListener')),baseline.slice(baseline.indexOf('    yield stopListener')),'owner registration/disposal drift')
 console.log('[auto-review:fork] baseline hash, explicit delta, policy, identity, roles, protocol and owner teardown verified')
