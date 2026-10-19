@@ -706,8 +706,16 @@ export function apply(ctx: Context): void {
       active.add(completed.promise)
       try {
         const signal = AbortSignal.any([exec.signal, lifecycle.signal])
-        await ctx.multiRootReviewContext.assertCurrent(exec, context, signal)
-        signal.throwIfAborted()
+        try {
+          await ctx.multiRootReviewContext.assertCurrent(exec, context, signal)
+          signal.throwIfAborted()
+        } catch (error) {
+          // Cancellation keeps its native shape; a stale snapshot reports with
+          // the same attribution a pre-dispatch review failure carries.
+          signal.throwIfAborted()
+          const message = error instanceof Error ? error.message : String(error)
+          throw new Error(`Auto review of tool "${exec.name}" failed; its body was not executed: ${message}`, { cause: error })
+        }
       } finally {
         active.delete(completed.promise)
         completed.resolve()

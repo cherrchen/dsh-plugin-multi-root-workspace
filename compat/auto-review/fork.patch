@@ -1,5 +1,5 @@
---- a/index.ts
-+++ b/index.ts
+--- a/a/index.ts
++++ b/b/index.ts
 @@ -8,6 +8,9 @@
   * @module @deepseek-ai/dsh-experimental-auto-review
   */
@@ -10,7 +10,7 @@
  import type {} from '@deepseek-ai/dsh-working-directory'
  import type { Context } from '@deepseek-ai/cordis'
  import type { Agent } from '@deepseek-ai/dsh-agent'
-@@ -103,6 +106,7 @@
+@@ -103,6 +106,7 @@ interface ReviewSnapshot {
    readonly provider: string
    readonly model: string
    readonly cwd: string
@@ -18,7 +18,7 @@
    readonly projectInstructions: readonly HistoricalUserMessage[]
    readonly history: readonly HistoricalEntry[]
    readonly action: PendingAction
-@@ -122,9 +126,9 @@
+@@ -122,9 +126,9 @@ interface ScopedPtcStart {
  }
  
  /** Cordis plugin name used by loader diagnostics. */
@@ -30,7 +30,7 @@
  
  /** Return JSON text for one immutable logged value. */
  function json(value: unknown): string {
-@@ -359,7 +363,7 @@
+@@ -359,7 +363,7 @@ function ptcAction(
   * @param exec - immutable pending execution.
   * @returns the exact route and four data sections paired with {@link REVIEW_POLICY}.
   */
@@ -39,7 +39,7 @@
    const { session } = agent
    // The reviewer's risk inputs are the whole action history: earlier native calls
    // and PTC starts carry the authorizations and duplicate identities this call is
-@@ -513,6 +517,7 @@
+@@ -513,6 +517,7 @@ function snapshotAutoReview(agent: Agent, exec: ToolExecution, cwd: string): Rev
      provider: header.config.provider,
      model: header.config.model,
      cwd,
@@ -47,7 +47,7 @@
      projectInstructions,
      history,
      action,
-@@ -521,13 +526,16 @@
+@@ -521,13 +526,16 @@ function snapshotAutoReview(agent: Agent, exec: ToolExecution, cwd: string): Rev
  
  /** Render the four data sections paired with the fixed policy section. */
  function reviewUserText(snapshot: ReviewSnapshot): string {
@@ -67,7 +67,7 @@
      'PENDING_ACTION',
      json(snapshot.action),
    ].join('\n\n')
-@@ -617,9 +625,12 @@
+@@ -617,9 +625,12 @@ async function classifyRisk(
    agent: Agent,
    exec: ToolExecution,
    signal: AbortSignal,
@@ -82,7 +82,7 @@
    // This review prompt is sent only through ctx.llm.stream and never enters a Session log.
    const options: GenerateOptions = deepFreeze({
      provider: snapshot.provider,
-@@ -632,7 +643,9 @@
+@@ -632,7 +643,9 @@ async function classifyRisk(
      temperature: 0,
      signal,
    })
@@ -93,7 +93,7 @@
  }
  
  /** Materialize the fixed model-facing final Auto denial plus optional UI detail. */
-@@ -674,12 +687,35 @@
+@@ -674,12 +687,43 @@ function failed(exec: ToolExecution, error: unknown): PreToolDecision {
  
  /** Install the Auto preset and its prepended per-call review gate. */
  export function apply(ctx: Context): void {
@@ -116,8 +116,16 @@
 +      active.add(completed.promise)
 +      try {
 +        const signal = AbortSignal.any([exec.signal, lifecycle.signal])
-+        await ctx.multiRootReviewContext.assertCurrent(exec, context, signal)
-+        signal.throwIfAborted()
++        try {
++          await ctx.multiRootReviewContext.assertCurrent(exec, context, signal)
++          signal.throwIfAborted()
++        } catch (error) {
++          // Cancellation keeps its native shape; a stale snapshot reports with
++          // the same attribution a pre-dispatch review failure carries.
++          signal.throwIfAborted()
++          const message = error instanceof Error ? error.message : String(error)
++          throw new Error(`Auto review of tool "${exec.name}" failed; its body was not executed: ${message}`, { cause: error })
++        }
 +      } finally {
 +        active.delete(completed.promise)
 +        completed.resolve()
@@ -129,7 +137,7 @@
    ctx.effect(function* () {
      const stopListener = ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
        const agent = exec.agent
-@@ -703,13 +739,15 @@
+@@ -703,13 +747,15 @@ export function apply(ctx: Context): void {
          )
          if (isAborted(lifecycle.signal)) return { kind: 'cancel' }
          if (!review.ok) return failed(exec, review.error)
