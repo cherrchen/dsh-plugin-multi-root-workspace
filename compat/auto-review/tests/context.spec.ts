@@ -198,6 +198,40 @@ describe('current host review context and real tool fences', () => {
     expect(snapshot.constraints.map(item=>item.path)).toContain(instruction)
     expect(snapshot.constraints[0]?.text).toBe('resumed constraint')
   })
+  it.each(['remove-root', 'missing-root', 'delete-file'] as const)('keeps withdrawn native provenance after pre-step: %s',async(change)=>{
+    const w=await world()
+    const path=join(w.f.outside,'AGENTS.md')
+    const text='obsolete native constraint'
+    writeFileSync(path,text)
+    const native=createUserMessage({source:{
+      kind:'agent-instructions',baseline:true,baselineIdentity:JSON.stringify({projectRoot:w.f.outside}),
+      changes:[{action:'set',path,digest:createHash('sha1').update(text).digest('hex')}],
+    },content:[{type:'text',text}]})
+    w.session.append('user/message',native,{surfaceOp:'append'})
+    const step=(messages: typeof native[]=[])=>w.ctx.waterfall('agent/pre-step',
+      {agent:w.agent,messages:[],signal:new AbortController().signal},async()=>({kind:'enter',messages}))
+    // Borrow the native copy through the real pre-step delivery path.
+    await step([native])
+    expect(w.ctx.multiRootInstructions.knownRoots(w.session)).toContain(w.f.outside)
+    if(change==='remove-root'){
+      const record=w.stack.registry.list(w.f.workspace).find(root=>root.path===w.f.outside)!
+      await w.stack.registry.remove(w.f.workspace,{kind:'id',id:record.id})
+    }else if(change==='missing-root') rmSync(w.f.outside,{recursive:true})
+    else rmSync(path)
+    await w.stack.registry.refresh(w.f.workspace)
+    await step()
+    await step() // A later steady-state step must not resurrect the old frame.
+    expect(w.ctx.multiRootInstructions.knownRoots(w.session)).toContain(w.f.outside)
+    const snapshot=await w.build('bash',{})
+    expect(snapshot.constraints).toEqual([])
+    if(change!=='delete-file') expect(snapshot.environment.roots.map(root=>root.path)).not.toContain(w.f.outside)
+    expect((await w.run('write',{file_path:join(w.f.workspace,'reviewed.txt'),content:'ok'})).isError).toBe(false)
+    const request=w.adapter.requests[0]!
+    expect(section(request,'PROJECT_INSTRUCTIONS','FILTERED_HISTORY')).toEqual([])
+    expect(section(request,'FILTERED_HISTORY','PENDING_ACTION')).toContainEqual(expect.objectContaining({
+      role:'fact',content:[{type:'text',text}],
+    }))
+  })
   it('re-reads updates, deletion and revocation, and ignores historical prose',async()=>{
     const w=await world();const path=join(w.f.outside,'AGENTS.md');writeFileSync(path,'old-rule')
     const before=await w.build();writeFileSync(path,'new-rule');expect((await w.build()).constraints[0]?.text).toBe('new-rule')

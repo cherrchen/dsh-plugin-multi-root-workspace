@@ -40,6 +40,8 @@ DSH `0.2.1-rc.2` 的 Auto Review 没有专用上下文贡献接口；它不继�
 
 ### 新鲜度、执行与维护边界
 
+撤销后的来源识别使用 Session 内独立的历史根集合：指令投递（含借用 native 副本）成功后记录根，撤销根或删除文件仅清理当前投递索引，不删除历史来源。该集合只参与 native 旧帧降为 fact 的判定，不授予访问、不触发已撤销目录的扫描，review 的只读快照也不写入它。与现有投递索引一样，该集合仅在进程内保留；这项修复不承诺跨进程恢复已撤销根的来源。
+
 fingerprint 覆盖权限、cwd、authority、当前约束及 native producer 的可见元数据/正文摘要。收集完成后、发送前、模型返回后、后续 gate 后及真正 dispatch 前均复核；dispatch 用官方 registry token 关联，覆盖人工批准等待。发生变化使 body 不执行，不自动循环重试。新复核受同一取消和 owner drain 管理。
 
 reviewer allow 和人工批准都不提供 fs/kernel 围栏豁免。官方 native/PTC 身份核验、严格输出解析、ask/never、下游单调 gate、取消和卸载迁移逻辑保留。fork 首批只接纳 DSH `0.2.1-rc.2`；普通插件原支持集合不缩减。fork 执行的 llm/tools/permission-presets/util-values 副本独立检查精确版本，普通插件不因 companion 的私有开发副本误报混装。旧版验证时 probe 不把全局 overrides 应用于独立 companion 开发树。

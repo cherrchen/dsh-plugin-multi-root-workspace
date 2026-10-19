@@ -141,6 +141,8 @@ interface DeliveredScope {
 interface SessionState {
   /** Delivered instruction files, keyed by {@link scopeKey}. */
   readonly scopes: Map<string, DeliveredScope>
+  /** Historical provenance, retained after delivery withdrawal; never grants access. */
+  readonly provenanceRoots: Set<string>
   /** Absolute paths touched by a successful tool call since the last evaluation. */
   readonly touched: Set<string>
   /** Successful work index retained independently of delivery deltas. */
@@ -300,7 +302,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const stateOf = (session: object): SessionState => {
     const existing = states.get(session)
     if (existing !== undefined) return existing
-    const created: SessionState = { scopes: new Map(), touched: new Set(), worked: new Set() }
+    const created: SessionState = { scopes: new Map(), provenanceRoots: new Set(), touched: new Set(), worked: new Set() }
     states.set(session, created)
     return created
   }
@@ -346,7 +348,7 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   ctx.inject(['fs'], (scope: Context) => {
     scope.provide('multiRootInstructions', {
-      knownRoots(session) { return [...new Set([...(states.get(session)?.scopes.values() ?? [])].map(entry => entry.root))] },
+      knownRoots(session) { return [...(states.get(session)?.provenanceRoots ?? [])] },
       async snapshot(agent, roots, target, signal) {
         signal.throwIfAborted()
         if (roots.length === 0) return []
@@ -358,6 +360,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         // all current files, including unchanged and formerly native copies.
         const state: SessionState = {
           scopes: new Map([...(existing?.scopes ?? [])].map(([key, value]) => [key, { ...value, digest: undefined }])),
+          provenanceRoots: new Set(existing?.provenanceRoots),
           touched: new Set([...(existing?.touched ?? []), ...(existing?.worked ?? [])]),
           worked: new Set(),
         }
@@ -435,7 +438,7 @@ async function pending(
   messages: readonly UserMessage[],
 ): Promise<UserMessage | undefined> {
   const session = agent.session
-  const state: SessionState = states.get(session) ?? { scopes: new Map(), touched: new Set(), worked: new Set() }
+  const state: SessionState = states.get(session) ?? { scopes: new Map(), provenanceRoots: new Set(), touched: new Set(), worked: new Set() }
   states.set(session, state)
   const evaluatedTouches = new Set(state.touched)
   let retryTouches = false
@@ -514,7 +517,10 @@ async function pending(
       for (const [key, entry] of state.scopes) if (entry.root === root) state.scopes.delete(key)
     }
     for (const entry of gone) state.scopes.delete(entry.key)
-    for (const entry of liveUpdates) state.scopes.set(entry.key, entry.scope)
+    for (const entry of liveUpdates) {
+      state.scopes.set(entry.key, entry.scope)
+      state.provenanceRoots.add(entry.scope.root)
+    }
   }
   return message
 }
