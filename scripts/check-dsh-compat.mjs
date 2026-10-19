@@ -133,10 +133,11 @@ if (releases.length > 1) {
   else notes.push(`installed tree: ${release}`)
 }
 
-// 5. The Auto Review companion is verified in lockstep with the development
-//    pin: its own version tracks this package's, every dsh peer and dev pin is
-//    the exact development release, and the workspace peer is this version.
-//    Bumping without it leaves the companion promising an unverified fork.
+// 5. The Auto Review companion is versioned with this package and holds its
+//    own exact fork-verified dsh pin: its version tracks this package's, the
+//    workspace peer is this version, and every dsh peer/dev entry is the same
+//    single allowlisted release. It deliberately does not follow the matrix
+//    dev pin — lanes that install another release must not rewrite it.
 const companion = JSON.parse(readFileSync(join(REPO_ROOT, 'compat', 'auto-review', 'package.json'), 'utf8'))
 if (companion.version !== manifest.version) {
   fail(`compat/auto-review is version ${companion.version} but package.json is ${manifest.version}; bump them together`)
@@ -146,12 +147,17 @@ const workspacePeer = companionPeers['@dsh-electron/dsh-plugin-multi-root-worksp
 if (workspacePeer !== manifest.version) {
   fail(`compat/auto-review peerDependencies["@dsh-electron/dsh-plugin-multi-root-workspace"] is "${workspacePeer}" but this package is ${manifest.version}`)
 }
-const [devPin] = [...pinned]
-if (devPin !== undefined) {
-  for (const [name, range] of [...Object.entries(companionPeers), ...Object.entries(companion.devDependencies ?? {})]) {
-    if (name !== '@deepseek-ai/dsh' && !name.startsWith('@deepseek-ai/dsh-')) continue
-    if (range !== devPin) fail(`compat/auto-review pins "${name}" at "${range}" but the development pin is "${devPin}"`)
-  }
+const companionPins = new Set()
+for (const [name, range] of [...Object.entries(companionPeers), ...Object.entries(companion.devDependencies ?? {})]) {
+  if (name !== '@deepseek-ai/dsh' && !name.startsWith('@deepseek-ai/dsh-')) continue
+  companionPins.add(range)
+}
+if (companionPins.size === 0) fail('compat/auto-review pins no dsh release at all')
+else if (companionPins.size > 1) fail(`compat/auto-review mixes dsh pins: ${[...companionPins].sort().join(', ')}`)
+else {
+  const [companionPin] = [...companionPins]
+  if (!supported.includes(companionPin)) fail(`compat/auto-review pins dsh ${companionPin}, which is not on the allowlist`)
+  else notes.push(`auto-review companion pin: ${companionPin}`)
 }
 
 for (const note of notes) console.log(`[compat] ${note}`)
