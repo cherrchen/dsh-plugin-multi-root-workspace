@@ -77,6 +77,9 @@ export class MultiRootReviewContext extends Service {
       ambientWrites: policy.mode === 'danger-full-access' && scope.authority === 'available',
       readConfinement: false,
       primaryRootWritable: policy.mode !== 'read-only' && !scope.deniedRoots.some(deny => isCanonicallyUnder(scope.primaryRoot, deny)),
+      // The Auto preset pins danger-full-access, so the narrower modes are
+      // unreachable through the companion today; they keep the contract honest
+      // for a direct caller that builds a context under a different policy.
       writeBoundary: scope.authority === 'unavailable' && policy.mode !== 'read-only'
         ? 'primary-root-only; no shared temp grants; explicit denies take precedence'
         : policy.mode === 'danger-full-access'
