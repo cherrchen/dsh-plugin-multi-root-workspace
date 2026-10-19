@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync, rmSync, renameSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -9,7 +10,7 @@ import Sessions, { SessionId } from '@deepseek-ai/dsh-session'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Policy from '@deepseek-ai/dsh-sandbox-policy'
-import Tools from '@deepseek-ai/dsh-tools'
+import Tools, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 import Approval, {setApprovalPolicy} from '@deepseek-ai/dsh-user-approval'
 import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
 import LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
@@ -124,6 +125,57 @@ describe('current host review context and real tool fences', () => {
     expect((await w.build('bash',{})).constraints).toHaveLength(0)
     const decision=await w.ctx.waterfall('agent/pre-step',{agent:w.agent,messages:[],signal:new AbortController().signal},async()=>({kind:'enter',messages:[]}))
     expect(JSON.stringify(decision)).not.toContain('new-rule')
+  })
+  it('recollects the effective cwd instruction chain before demoting native constraints on a first bash call',async()=>{
+    const w=await world()
+    const middle=join(w.f.outside,'src'), cwd=join(middle,'nested')
+    mkdirSync(cwd,{recursive:true})
+    const files=[join(w.f.outside,'AGENTS.md'),join(middle,'AGENTS.md'),join(cwd,'AGENTS.md')]
+    const texts=['root constraint','middle constraint','nested constraint: never deploy']
+    files.forEach((file,index)=>writeFileSync(file,texts[index]!))
+    await w.ctx.workingDirectory.set(w.agent,cwd)
+    w.session.append('user/message',createUserMessage({source:{
+      kind:'agent-instructions',baseline:true,baselineIdentity:JSON.stringify({projectRoot:w.f.outside}),
+      changes:files.map((file,index)=>({action:'set' as const,path:file,digest:createHash('sha1').update(texts[index]!).digest('hex')})),
+    },content:[{type:'text',text:texts.join('\n')}]}),{surfaceOp:'append'})
+    let executed=0
+    w.ctx.tools.register(defineContentToolFixture({name:'bash',description:'Record a reviewed bash dispatch',parameters:{command:{type:'string'}},async execute(){
+      executed++;return [{type:'text',text:'done'}]
+    }}))
+    expect((await w.run('bash',{command:'echo reviewed'})).isError).toBe(false)
+    expect(executed).toBe(1);expect(w.adapter.requests).toHaveLength(1)
+    const request=w.adapter.requests[0]!
+    const constraints=section(request,'PROJECT_INSTRUCTIONS','FILTERED_HISTORY')
+    expect(constraints.map((item:any)=>item.text)).toEqual(texts)
+    expect(constraints.every((item:any)=>item.role==='constraint' && item.source.snapshot==='current')).toBe(true)
+    expect(section(request,'FILTERED_HISTORY','PENDING_ACTION')[0]).toMatchObject({role:'fact'})
+    expect(w.ctx.multiRootInstructions.knownRoots(w.session)).toEqual([])
+    // Cwd discovery is review-local, not a successful file touch or delivery.
+    await w.ctx.workingDirectory.set(w.agent,w.f.workspace)
+    expect((await w.build('bash',{})).constraints.map(item=>item.path)).toEqual([files[0]])
+    const decision=await w.ctx.waterfall('agent/pre-step',{agent:w.agent,messages:[],signal:new AbortController().signal},async()=>({kind:'enter',messages:[]}))
+    expect(JSON.stringify(decision)).not.toContain(texts[2])
+  })
+  it('applies source budgets to the cwd chain before any review or dispatch',async()=>{
+    const w=await world({}, {maxSourceBytes:8})
+    const cwd=join(w.f.outside,'nested');mkdirSync(cwd)
+    writeFileSync(join(cwd,'AGENTS.md'),'a nested constraint beyond the source budget')
+    await w.ctx.workingDirectory.set(w.agent,cwd)
+    const target=join(w.f.workspace,'never.txt')
+    const result=await w.run('write',{file_path:target,content:'no'})
+    expect(result.isError).toBe(true);expect(JSON.stringify(result)).toContain('source budget exceeded')
+    expect(w.adapter.requests).toHaveLength(0);expect(()=>readFileSync(target)).toThrow()
+  })
+  it('keeps cwd discovery within current additional roots',async()=>{
+    const w=await world()
+    const cwd=join(w.f.base,'unregistered','nested');mkdirSync(cwd,{recursive:true})
+    writeFileSync(join(cwd,'AGENTS.md'),'unregistered instruction')
+    await w.ctx.workingDirectory.set(w.agent,cwd)
+    expect((await w.build('bash',{})).constraints).toEqual([])
+    const primaryNested=join(w.f.workspace,'nested');mkdirSync(primaryNested)
+    writeFileSync(join(primaryNested,'AGENTS.md'),'primary instruction')
+    await w.ctx.workingDirectory.set(w.agent,primaryNested)
+    expect((await w.build('bash',{})).constraints).toEqual([])
   })
   it.skipIf(process.platform==='win32')('finds first-target instructions through a final file symlink without reading its contents',async()=>{
     const w=await world();mkdirSync(join(w.f.outside,'actual'))

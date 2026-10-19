@@ -366,9 +366,14 @@ export function apply(ctx: Context, config: Config = {}): void {
         // oxlint-disable-next-line typescript/no-deprecated -- No public activity projection exists.
         for (const path of replayedInstructionTargets(agent.session.snapshotEvents(), agent.session.header.cwd)) state.touched.add(path)
         if (target !== undefined) state.touched.add(target)
+        // Native discovery can already cover this directory before any file
+        // tool succeeds. Recollect that chain before replacing native frames,
+        // without recording cwd as successful activity or delivery state.
+        const cwd = effectiveDirectory(scope, agent.session)
+        const reviewCwd = cwd === undefined ? undefined : canonicalPath(cwd)
         const result: CurrentRootInstruction[] = []
         for (const root of roots) {
-          const plan = await planRoot(scope, api, root, config, state, signal, true)
+          const plan = await planRoot(scope, api, root, config, state, signal, true, reviewCwd)
           for (const {file} of plan.deliveries) {
             result.push({ root, path: file.absolutePath, relativeDirectory: relativeDirectoryOf(root, dirname(file.absolutePath)),
               digest: digestOf(file.content), text: file.content })
@@ -558,12 +563,16 @@ interface DirectoryWalk {
  * of that directory's ancestors up to the root, because discovery reports an
  * intermediate directory's file but only the exact directory's candidates
  * survive the filter below.
+ * A strict review can also seed its effective cwd chain without recording a
+ * successful touch; ordinary pre-step delivery never supplies that seed.
  * @param ctx - the row's context, for `fs` and the logger.
  * @param api - the adapted upstream instruction surface.
  * @param root - the canonical additional root.
  * @param config - the row's configuration.
  * @param state - the session's delivery state.
  * @param signal - the turn's cancellation signal.
+ * @param strict - fail on incomplete review discovery instead of deferring delivery.
+ * @param reviewCwd - review-only directory seed; never a successful touch.
  * @returns the files to send and the deliveries to withdraw.
  */
 async function planRoot(
@@ -574,6 +583,7 @@ async function planRoot(
   state: SessionState,
   signal: AbortSignal,
   strict = false,
+  reviewCwd?: string,
 ): Promise<RootPlan> {
   const delivered = new Map<string, DeliveredScope>()
   for (const [key, entry] of state.scopes) if (entry.root === root) delivered.set(key, entry)
@@ -583,8 +593,9 @@ async function planRoot(
     const dir = dirname(entry.path)
     if (dir !== root) dirs.add(dir)
   }
-  for (const touched of state.touched) {
-    const parent = parentDirectoryOf(touched)
+  const parents = [...state.touched].map(parentDirectoryOf)
+  if (reviewCwd !== undefined) parents.push(reviewCwd)
+  for (const parent of parents) {
     if (parent === undefined || !isCanonicallyUnder(parent, root)) continue
     // Every ancestor up to the root, not just the file's own directory. The
     // walk for `<root>/a/b` REPORTS `<root>/a/AGENTS.md` (discovery walks

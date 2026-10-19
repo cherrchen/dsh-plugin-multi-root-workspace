@@ -28,7 +28,7 @@ DSH `0.2.1-rc.2` 的 Auto Review 没有专用上下文贡献接口；它不继�
 
 `multiRootReviewContext` 注入原 compat、provider brand、scope、Registry、instructions、policy 和 workingDirectory。每次 build 调用 Registry `refresh()`，只从现有 scope 读取权限。返回 Session origin、effective cwd、注册策略、工具实际 writable/deny 集合、protected home 和 authority。没有新的根授权表。
 
-指令行提供只读 facade，复用现有 `planRoot` / `loadDirectory`，严格模式不吞掉探测、读取、超限或取消。收集当前有效根的顶层、成功活动目录链及本次显式 read/write/edit 目标目录链；不运行脚本猜目标，不读取普通目标源码。读取自己的 delivery scope 索引副本，不提交投递或成功 touch。成功活动也从持久化 native/PTC start/result 配对重建，以覆盖不发 `session/event` 的 seed/resume。相对成功操作若跨越 cwd 变化，检查已知候选目录链；不声称恢复了未持久化的 canonical observation。
+指令行提供只读 facade，复用现有 `planRoot` / `loadDirectory`，严格模式不吞掉探测、读取、超限或取消。收集当前有效根的顶层、成功活动目录链、本次显式 read/write/edit 目标目录链，以及 effective cwd 位于有效附加根内时从该目录到根的链。cwd 链在首次 bash/pwsh、尚无成功文件活动时也收集，避免将 native 已提供的嵌套约束降为历史后遗漏当前副本；它仅作为本次只读发现入口，不登记成功 touch 或消费投递状态。不运行脚本猜目标，不读取普通目标源码。读取自己的 delivery scope 索引副本，不提交投递或成功 touch。成功活动也从持久化 native/PTC start/result 配对重建，以覆盖不发 `session/event` 的 seed/resume。相对成功操作若跨越 cwd 变化，检查已知候选目录链；不声称恢复了未持久化的 canonical observation。
 
 每源默认上限 32 KiB，全部附加约束及元数据共用原 instructions 预算；新增完整 context JSON 另受 64 KiB 上限。成功路径索引和未完成 durable activity 均有 512 项上限，超限使该次 review 技术失败。零有效根不扫描指令文件。不存在的普通候选是正常缺席，I/O 错误、权限错误、超大源、预算不足和接口缺席均失败关闭；只返回 complete 快照，不把 incomplete 折叠为空数组。
 
