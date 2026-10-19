@@ -20,15 +20,29 @@ export function configure(manifest, enabled) {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [action, directory] = process.argv.slice(2)
   if (!['enable', 'disable'].includes(action) || directory === undefined) throw new Error('Usage: dsh-multi-root-auto-review enable|disable <profile-directory>')
-  const file = join(resolve(directory), 'package.json')
+  // Resolve the manifest itself: renaming over a symlinked package.json would
+  // replace the link instead of writing the real profile file.
+  const file = realpathSync(join(resolve(directory), 'package.json'))
   const previous = readFileSync(file, 'utf8')
   const updated = configure(JSON.parse(previous), action === 'enable')
   if (action === 'enable' && updated.dependencies?.[COMPANION] === undefined) throw new Error('Auto Review: install the companion into this profile first')
+  // rename() alone cannot make read-modify-write atomic, so a pid-annotated
+  // lock serializes concurrent runs; a lock whose owner exited is swept once.
+  const lock = `${file}.multi-root-auto-review.lock`
+  try { writeFileSync(lock, `${process.pid}\n`, {flag:'wx'}) } catch (error) {
+    if (error.code !== 'EEXIST') throw error
+    const owner = Number.parseInt(readFileSync(lock, 'utf8'), 10)
+    let alive = Number.isInteger(owner)
+    if (alive) try { process.kill(owner, 0) } catch (check) { alive = check.code !== 'ESRCH' }
+    if (alive) throw new Error(`Auto Review: profile is locked by another configure run (pid ${owner})`)
+    rmSync(lock)
+    writeFileSync(lock, `${process.pid}\n`, {flag:'wx'})
+  }
   const pending = `${file}.multi-root-auto-review-${process.pid}`
   try {
     writeFileSync(pending, `${JSON.stringify(updated, null, 2)}\n`, {flag:'wx',mode:statSync(file).mode & 0o777})
     if (readFileSync(file, 'utf8') !== previous) throw new Error('Auto Review: profile changed concurrently; retry')
     renameSync(pending, file)
-  } finally {rmSync(pending,{force:true})}
+  } finally {rmSync(pending,{force:true});rmSync(lock,{force:true})}
   console.log(`Auto Review companion ${action}d. Restart/recompose the profile; unloading live Auto migrates its sessions to Full access.`)
 }
