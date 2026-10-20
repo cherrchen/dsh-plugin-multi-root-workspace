@@ -234,7 +234,7 @@ Writable additional roots under the current mode: 1 of 2.
 
 ## 可选 Auto Review 适配
 
-需要 Auto Review 多根上下文时，显式安装并启用独立 [companion](./compat/auto-review/README.md)。该集成仅面向 DSH `0.2.1-rc.2`；普通安装保持原支持范围且不会启用或选择 Auto。
+需要 Auto Review 多根上下文时，在插件管理器的主包行列表中启用默认关闭的 [Auto Review 入口](./src/auto-review/README.md)。该集成仅面向 DSH `0.2.1-rc.2`；普通安装保持原支持范围且不会启用或选择 Auto。
 
 ## 项目结构
 

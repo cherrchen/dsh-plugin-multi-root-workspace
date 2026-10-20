@@ -34,6 +34,14 @@
         "eqeqeq": "error",
         "no-throw-literal": "error"
       }
+    },
+    {
+      "files": [
+        "tests/auto-review/upstream.spec.ts"
+      ],
+      "rules": {
+        "no-throw-literal": "off"
+      }
     }
   ]
 }

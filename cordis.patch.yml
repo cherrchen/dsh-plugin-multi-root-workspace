@@ -132,3 +132,9 @@
         dshHome: !!js dshHomePath()
     - id: multi-root-client
       name: '@dsh-electron/dsh-plugin-multi-root-workspace'
+    # One optional row owns its context service and review owner. It remains
+    # inert until explicitly enabled in the Plugin Manager row list.
+    - id: multi-root-auto-review
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/auto-review'
+      disabled: true
+      required: true

@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-const read = name => readFileSync(new URL(`../compat/auto-review/${name}`, import.meta.url), 'utf8')
-const baseline = read('upstream.ts'), fork = read('src/index.ts')
+const read = name => readFileSync(new URL(`../src/auto-review/${name}`, import.meta.url), 'utf8')
+const baseline = read('upstream.ts'), fork = read('fork.ts')
 assert.equal(createHash('sha256').update(baseline).digest('hex'), '1b0ebf6539f2f412c012eadf8049d19f711267040423d7800b3c4f06809413a7', 'upstream baseline drift')
 const original = baseline.split('\n'), output = []
 let cursor = 0

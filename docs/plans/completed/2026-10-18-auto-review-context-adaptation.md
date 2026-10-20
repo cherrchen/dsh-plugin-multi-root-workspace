@@ -158,4 +158,4 @@ context row 必须注入 `multiRootCompat`、`multiRootProviders`、`multiRootSc
 
 ## 实施落点
 
-实际交付结构、公开入口、采集预算、有界流式读取、native 当前 baseline 与混合帧失败边界、装配排序和生命周期以 [ADR-0021](../../decisions/ADR-0021-auto-review-context-companion.md) 为准；本文件前面的伪接口与候选名称保留为设计过程记录。安装操作见 [companion README](../../../compat/auto-review/README.md)，fork 同步见 [FORK.md](../../../compat/auto-review/FORK.md)。本批验证、平台覆盖和未发布状态仅维护在[路线账本](../active/2026-09-12-multi-root-workspace.md#auto-review-多根上下文适配2026-10-18)。
+实际交付结构、公开入口、采集预算、有界流式读取、native 当前 baseline 与混合帧失败边界、装配排序和生命周期以 [ADR-0021](../../decisions/ADR-0021-auto-review-context-companion.md) 为准；本文件前面的伪接口与候选名称保留为设计过程记录。安装操作见 [companion README](../../../src/auto-review/README.md)，fork 同步见 [FORK.md](../../../src/auto-review/FORK.md)。本批验证、平台覆盖和未发布状态仅维护在[路线账本](../active/2026-09-12-multi-root-workspace.md#auto-review-多根上下文适配2026-10-18)。

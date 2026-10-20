@@ -12,7 +12,8 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx', 'tests/**/*.e2e.ts', ...(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).devDependencies['@deepseek-ai/dsh'] === '0.2.1-rc.2' ? ['compat/auto-review/tests/**/*.spec.ts'] : [])],
+    exclude: ['node_modules/**', ...(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).devDependencies['@deepseek-ai/dsh'] === '0.2.1-rc.2' ? [] : ['tests/auto-review/**'])],
+    include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx', 'tests/**/*.e2e.ts'],
     pool: 'forks',
     testTimeout: 30_000,
   },

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { partitionInstructions } from '../src/context.ts'
+import { partitionInstructions } from '../../src/auto-review/context.ts'
 const primary=resolve('fixture-primary'), additional=resolve('fixture-additional'), path=resolve(additional,'AGENTS.md')
 const digest=(text:string)=>createHash('sha1').update(text).digest('hex')
 const context=(text='current')=>({environment:{sessionOrigin:primary,effectiveCwd:additional},instructionProvenanceRoots:[additional],constraints:[{root:additional,path,relativeDirectory:'.',digest:'sha256',text}]}) as any

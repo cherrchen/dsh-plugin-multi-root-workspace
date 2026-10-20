@@ -66,6 +66,10 @@
     "./review-context": {
       "types": "./lib/types/review-context.d.ts",
       "default": "./lib/review-context.js"
+    },
+    "./auto-review": {
+      "types": "./lib/types/auto-review/entry.d.ts",
+      "default": "./lib/auto-review.js"
     }
   },
   "files": [
@@ -79,7 +83,11 @@
     "CHANGELOG.en.md",
     "LICENSE",
     "scripts/windows-broker/*.ps1",
-    "scripts/windows-broker/*.cs"
+    "scripts/windows-broker/*.cs",
+    "src/auto-review/FORK.md",
+    "src/auto-review/LICENSE",
+    "src/auto-review/README.md",
+    "src/auto-review/README.en.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -90,8 +98,8 @@
   },
   "scripts": {
     "bench:roots": "node --experimental-transform-types scripts/bench-root-scale.mjs",
-    "build": "pnpm run build:types && pnpm run bundle && node scripts/build-auto-review.mjs",
-    "build:types": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
+    "build": "pnpm run build:types && pnpm run bundle",
+    "build:types": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json && node scripts/build-auto-review.mjs",
     "bundle": "node scripts/clean-lib.mjs && tsdown",
     "compat:check": "node scripts/check-dsh-compat.mjs",
     "docs:check": "node scripts/check-docs.mjs",
@@ -106,7 +114,7 @@
     "smoke:packed": "node scripts/smoke-packed.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit && node scripts/build-auto-review.mjs",
     "verify:all": "pnpm lint && pnpm typecheck && pnpm build && pnpm kernel:probe && pnpm test && pnpm smoke && pnpm pack:check && pnpm smoke:packed && pnpm auto-review:fork && pnpm smoke:auto-review",
     "prepare": "pnpm run bundle",
     "auto-review:fork": "node scripts/check-auto-review-fork.mjs",
@@ -138,7 +146,9 @@
     "@deepseek-ai/dsh-subprocess": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2",
     "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2",
     "@deepseek-ai/dsh-tools": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2"
+    "@deepseek-ai/dsh-typert-protocol": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2",
+    "@deepseek-ai/dsh-permission-presets": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2",
+    "@deepseek-ai/dsh-util-values": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-agent": {
@@ -181,6 +191,12 @@
       "optional": true
     },
     "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-permission-presets": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-util-values": {
       "optional": true
     }
   },
@@ -241,7 +257,25 @@
     "typescript": "^6.0.3",
     "vitest": "^4.1.8",
     "yaml": "^2.9.0",
-    "zustand": "~4.5.7"
+    "zustand": "~4.5.7",
+    "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-agent-loop-testkit": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-bash-sandbox": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-compaction": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-fs-observation-policy": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm-deepseek": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm-deepseek-api-key": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-permission-presets": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-ptc-runtime-node": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-shell": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-shell-env": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-subagent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tool-bash": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tool-fs": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tool-subagent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-user-approval": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-working-directory": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-util-values": "0.2.1-rc.2"
   },
   "dsh": {
     "bundle": {

@@ -255,12 +255,14 @@ CI 的日志捕获使用 Git Bash，其 PATH 可能让同名 GNU 命令覆盖 Wi
 B9 的 Linux 原生执行证据分两类：latest 保留实际 Landlock 选择与宿主限制，22.04 增加真实 bubblewrap 允许/拒绝证据，全部受支持版本均覆盖两条 Linux 腿。不会关闭 latest 的 AppArmor/user namespace 策略以换取绿灯；不能执行 bubblewrap 的宿主须按安装前置条件或 runnerFailure 如实报告。Windows 腿在原生测试前通过 tarball 同源的管理员脚本安装 token-attribute broker，安装资源的打包完整性由 pack:check 验证。
 
 
-## 9. 可选 Auto Review companion
+## 9. 可选 Auto Review 子路径
 
-设计、来源边界、精确版本与混合 native 帧限制见 [ADR-0021](../decisions/ADR-0021-auto-review-context-companion.md)。安装入口与 profile 顺序契约见 [companion README](../../compat/auto-review/README.md)，不要把兼容 owner 加入普通 patch。
+装配与生命周期见 [ADR-0022](../decisions/ADR-0022-auto-review-loader-entry.md)，使用与旧 companion 迁移见 [Auto Review README](../../src/auto-review/README.md)。原约束、快照与审查语义继续由 [ADR-0021](../decisions/ADR-0021-auto-review-context-companion.md) 说明。
 
-`pnpm build` 在精确联合开发 pin 上构建独立 companion；旧版普通车道只构建主包。`upgrade-dsh.mjs` 在不匹配 companion 精确合同的 probe 中把该项目移出临时 workspace，避免全局 overrides 把它的 API 依赖误改成不存在的旧发布。回退 probe 文件时依旧禁止覆盖未提交修改。
+主包 patch 只增加一条默认 disabled 的 `multi-root-auto-review`。它拥有 context 和 reviewer，不需要第二个 context 开关、独立包或 configure。主包 `bundle` 总是生成 `lib/auto-review.js` 及其共享 chunks；`prepare` 的 git 安装路径也包含它。host 类型检查排除 `src/auto-review/**`，`scripts/build-auto-review.mjs` 在精确联合 pin 上单独检查实现类型，并为全部普通车道保留相同的公开 Loader 声明；原始 `upstream.ts` 不参与编译或构建。
 
-`pnpm auto-review:fork` 重放显式差异，并钉住风险 policy、身份、角色、决策协议和 owner teardown。`pnpm smoke:auto-review` 同时执行源码与两个 tarball 的安装、web/headless 装配、真实请求捕获、固定 allow 实写、live disable/restore/re-enable 和实际 package remove；该门禁接入 `verify:all` 和 CI。headless 装配探针禁用自动发起任务的 launcher，真实 headless agent journey 仍由原 `smoke:journey` 验证。普通旧版明确跳过联合 gate，继续跑原有门禁。
+原 companion 的开发/测试依赖并入主开发 manifest。`scripts/lib/auto-review-development.mjs` 记录其归属；普通旧版 probe 删除这些仅供 fork 使用的 dev 条目，避免安装尚未发布的旧版本包，恢复精确 fork pin 时重新补齐。它们不是第二个支持版本列表；精确 release 门禁仍在 `src/compat/auto-review-contract.ts`。回退 probe 文件时仍禁止覆盖未提交修改。
 
-主包和 companion 的版本/发布仍需人工协调：修改主包版本时检查 companion 的精确主包 peer，单独构建和打包 companion；本批不自动发布第二个 npm 包。跨平台日志与具体执行数量只记路线账本。
+`pnpm auto-review:fork` 重放显式差异并钉住 policy、身份、角色、协议和 owner teardown。`pnpm smoke:auto-review` 验证 source/link 与单一 tarball、web/headless × 官方前后顺序、默认零挂载、重复 reload 不写配置、真实请求/围栏、live disable/restore/re-enable 和重启。`tests/auto-review/loader.spec.ts` 额外模拟延迟 import 与异步 drain；普通旧版跳过联合集成测试，继续原有门禁。
+
+不再维护第二个版本、发布清单或 tarball。平台执行证据与发布状态只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#auto-review-内置入口迁移2026-10-20)。

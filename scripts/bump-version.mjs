@@ -78,7 +78,7 @@ function nextVersion(current, bump, pre) {
   return bump
 }
 
-const RELEASE_MANIFESTS = ['package.json', 'compat/auto-review/package.json']
+const RELEASE_MANIFESTS = ['package.json']
 
 function rewriteVersion(newVersion) {
   const manifestPath = new URL('../package.json', import.meta.url)
@@ -86,15 +86,6 @@ function rewriteVersion(newVersion) {
   const replaced = text.replace(/^(  "version": ")[^"]*(",?)$/m, `$1${newVersion}$2`)
   if (replaced === text) throw new Error('Could not find the "version" field in package.json')
   writeFileSync(manifestPath, replaced)
-  // The Auto Review companion is versioned in lockstep: its own version and
-  // its peer pin on this package move together (compat:check enforces it).
-  const companionPath = new URL('../compat/auto-review/package.json', import.meta.url)
-  const companion = readFileSync(companionPath, 'utf8')
-  const peer = /("@dsh-electron\/dsh-plugin-multi-root-workspace": ")(?!workspace)[^"]*(")/
-  const versioned = companion.replace(/^(  "version": ")[^"]*(",?)$/m, `$1${newVersion}$2`)
-  if (versioned === companion) throw new Error('Could not find the "version" field in compat/auto-review/package.json')
-  if (!peer.test(companion)) throw new Error('Could not find the workspace peer in compat/auto-review/package.json')
-  writeFileSync(companionPath, versioned.replace(peer, `$1${newVersion}$2`))
 }
 
 function commitAndTag(version) {

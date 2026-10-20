@@ -1,7 +1,7 @@
 /** Reconcile native overlap by producer metadata, never by parsing instruction prose. */
 import { createHash } from 'node:crypto'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
-import type { ReviewContext } from '@dsh-electron/dsh-plugin-multi-root-workspace/review-context'
+import type { ReviewContext } from '../review-context.ts'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 interface NativeMessage { readonly kind: 'user-message'; readonly role: string; readonly source: MessageSource; readonly content: readonly ContentBlock[] }
 function under(path: string, root: string): boolean {
