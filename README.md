@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="public/multi-root-mark.svg" width="120" />
+
 # dsh-plugin-multi-root-workspace
 
 中文 | [English](./README.en.md)
