@@ -10,7 +10,7 @@ const MODULE = '@dsh-electron/dsh-plugin-multi-root-workspace/auto-review'
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
 
-async function fixture(delay = 0) {
+async function fixture(delay = 0, failOfficial = false) {
   const ctx = new Context()
   ctx.baseUrl = import.meta.url
   await ctx.plugin(Loader)
@@ -29,7 +29,10 @@ async function fixture(delay = 0) {
       owner = undefined
     }
   })
-  const official = { name: 'official', apply(c: Context) { claim(c, 'official') } }
+  const official = { name: 'official', apply(c: Context) {
+    if (failOfficial) throw new Error('official exploded')
+    claim(c, 'official')
+  } }
   const own = { name: 'fork', async apply(c: Context) {
     await c.effect(async function* () {
       const takeover = new AutoReviewTakeover(c)
@@ -47,11 +50,12 @@ async function fixture(delay = 0) {
       if (child !== undefined) yield child.dispose
     })
   } }
+  const other = { name: 'other', apply() {} }
   const imports: string[] = []
   ctx.loader.import = async (name: string) => {
     imports.push(name)
     if (name === OFFICIAL_AUTO_REVIEW && delay) await new Promise(resolve => setTimeout(resolve, delay))
-    return name === OFFICIAL_AUTO_REVIEW ? official : own
+    return name === OFFICIAL_AUTO_REVIEW ? official : name === 'other-module' ? other : own
   }
   const rows = (enabled: boolean, officialDisabled = false, first = true) => {
     const a = { id: 'auto-review', name: OFFICIAL_AUTO_REVIEW, disabled: officialDisabled }
@@ -117,6 +121,31 @@ describe('Auto Review Loader takeover', () => {
     expect(f.owner()).toBeUndefined()
     expect(f.imports).not.toContain(OFFICIAL_AUTO_REVIEW)
     expect(f.errors).not.toHaveBeenCalled()
+  })
+
+  it('releases ownership when an update retargets the row with an explicit enabled flag', async () => {
+    const f = await fixture()
+    await f.update(f.rows(true))
+    expect(f.owner()).toBe('fork')
+    // `disabled: false`/`null` merges over the marker the wrapper writes onto
+    // entry.options; the exit must still dispose this fiber and restore the
+    // official rows recorded in desired.
+    await f.update([
+      { id: 'auto-review', name: OFFICIAL_AUTO_REVIEW },
+      { id: 'multi-root-auto-review', name: 'other-module', disabled: false },
+    ])
+    // The retargeted entry's fiber now points at the new module, so the old
+    // owner's drain-and-restore is not covered by loader.await(); poll it.
+    await vi.waitFor(() => expect(f.owner()).toBe('official'))
+    expect(f.events).toEqual(['claim:official', 'release:official', 'claim:fork', 'release:fork', 'claim:official'])
+    expect(f.errors).not.toHaveBeenCalled()
+  })
+
+  it('still takes over when the suppressed official fiber fails to start', async () => {
+    const f = await fixture(0, true)
+    await f.update(f.rows(true))
+    expect(f.owner()).toBe('fork')
+    expect(f.errors.mock.calls.flat().map(String).join('\n')).toContain('official exploded')
   })
 
   it('rejects legacy companion coexistence with an actionable diagnostic', async () => {

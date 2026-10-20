@@ -135,7 +135,7 @@ if (releases.length > 1) {
 
 // The optional integration's release is narrower than ordinary support.
 const autoReviewContract = readFileSync(join(REPO_ROOT, 'src/compat/auto-review-contract.ts'), 'utf8')
-const autoRelease = /release !== '([^']+)'/u.exec(autoReviewContract)?.[1]
+const autoRelease = /AUTO_REVIEW_RELEASE = '([^']+)'/u.exec(autoReviewContract)?.[1]
 if (autoRelease === undefined || !supported.includes(autoRelease)) fail('Auto Review exact release must belong to the ordinary allowlist')
 else notes.push(`optional Auto Review release: ${autoRelease}`)
 

@@ -232,7 +232,7 @@ The additional-root topology is injected into the system prompt so the model kno
 
 ## Optional Auto Review integration
 
-For multi-root reviewer context, enable the default-disabled [Auto Review row] in the main package’s Plugin Manager row list(./src/auto-review/README.en.md). The joint integration targets only DSH `0.2.1-rc.2`; ordinary installation keeps the existing support matrix and does not enable or select Auto.
+For multi-root reviewer context, enable the default-disabled [Auto Review row](./src/auto-review/README.en.md) in the main package’s Plugin Manager row list. The joint integration targets only DSH `0.2.1-rc.2`; ordinary installation keeps the existing support matrix and does not enable or select Auto.
 
 ## Project Structure
 

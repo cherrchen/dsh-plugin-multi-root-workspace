@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 export default defineConfig({
   resolve: {
@@ -12,7 +12,7 @@ export default defineConfig({
     },
   },
   test: {
-    exclude: ['node_modules/**', ...(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).devDependencies['@deepseek-ai/dsh'] === '0.2.1-rc.2' ? [] : ['tests/auto-review/**'])],
+    exclude: [...configDefaults.exclude, 'node_modules/**', ...(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).devDependencies['@deepseek-ai/dsh'] === '0.2.1-rc.2' ? [] : ['tests/auto-review/**'])],
     include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx', 'tests/**/*.e2e.ts'],
     pool: 'forks',
     testTimeout: 30_000,

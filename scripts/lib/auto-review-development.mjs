@@ -24,7 +24,7 @@ export const AUTO_REVIEW_DEVELOPMENT_PACKAGES = [
 ]
 
 export function autoReviewRelease(source) {
-  const release = /release !== '([^']+)'/u.exec(source)?.[1]
+  const release = /AUTO_REVIEW_RELEASE = '([^']+)'/u.exec(source)?.[1]
   if (release === undefined) throw new Error('Auto Review exact release contract is unreadable')
   return release
 }

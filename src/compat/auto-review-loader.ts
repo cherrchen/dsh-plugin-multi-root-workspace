@@ -38,6 +38,17 @@ interface Entry {
 // finished. Keep desired configuration and a drain barrier across that handoff.
 const takeovers = new WeakMap<Group, AutoReviewTakeover>()
 
+// Desired state must survive the mutations Loader performs in place on entry
+// options; a shallow fallback covers programmatic callers whose rows are not
+// plain cloneable data.
+function cloneRows<T extends Options | Options[]>(value: T): T {
+  try {
+    return structuredClone(value)
+  } catch {
+    return (Array.isArray(value) ? value.map(row => ({ ...row })) : { ...value }) as T
+  }
+}
+
 /**
  * internal/plugin is emitted before Fiber checks dependencies or runs apply.
  * Disposing there also stops an import already in flight when takeover began.
@@ -54,19 +65,25 @@ export class AutoReviewTakeover {
   readonly stopHook: () => void
   private desired: Options[]
   private stopOwner: () => Promise<void> = async () => {}
+  // An update unselected, retargeted, or disabled this row; on close the
+  // official entries belong back regardless of how the merge rewrote options.
+  private exiting = false
   private closing: Promise<void> | undefined
   private readonly draining = new Set<Promise<void>>()
 
   constructor(private readonly ctx: Context) {
     const entry = (ctx.fiber as Fiber & { entry?: Entry }).entry
     if (entry === undefined) throw new Error('multi-root Auto Review must be mounted as a Loader entry')
+    // A fiber finishing its import after its row was disabled must not start
+    // suppressing official entries it can never legitimately replace.
+    if (entry.disabled) throw new Error('multi-root Auto Review mounted on a disabled Loader entry')
     this.entry = entry
     this.group = entry.parent
     const previous = takeovers.get(this.group)
     if (previous !== undefined && previous.entry !== entry && previous.closing === undefined) {
       throw new Error('Only one multi-root Auto Review Loader entry may own a group')
     }
-    this.desired = structuredClone(previous?.desired ?? this.group.data)
+    this.desired = cloneRows(previous?.desired ?? this.group.data)
     if (this.desired.some(row => row.name === LEGACY_AUTO_REVIEW)) {
       throw new Error('Remove the legacy @dsh-electron/dsh-plugin-multi-root-auto-review package/bundle before enabling the built-in Auto Review entry')
     }
@@ -76,7 +93,7 @@ export class AutoReviewTakeover {
     takeovers.set(this.group, this)
     const self = this
     this.restoreUpdate = wrapMethod(this.group, 'update', original => function (this: Group, config: Options[]): Promise<void> {
-      self.desired = structuredClone(config)
+      self.desired = cloneRows(config)
       if (config.some(row => row.name === LEGACY_AUTO_REVIEW)) {
         return Promise.reject(new Error('Remove the legacy multi-root Auto Review companion before reloading this profile'))
       }
@@ -85,8 +102,13 @@ export class AutoReviewTakeover {
         // Start Loader's own disposal synchronously. Include does not await
         // group.update(), and loader.await() only sees entry import/inertia
         // tasks. Deferring this call would let reconciliation report success
-        // before the reviewer/context had actually stopped.
+        // before the reviewer/context had actually stopped. Dispose is
+        // explicit: an update carrying `disabled: false`/`null` merges over
+        // the marker below and would otherwise leave this fiber running under
+        // a retargeted module name.
+        self.exiting = true
         self.entry.options.disabled = true
+        self.entry.fiber?.dispose()
       }
       // Official restoration is part of our awaited disposer, after drain.
       return Reflect.apply(original, this, [config.filter(row => row.name !== OFFICIAL_AUTO_REVIEW)])
@@ -119,7 +141,10 @@ export class AutoReviewTakeover {
     for (const entry of Object.values(this.group.tree.store)) {
       if (entry.parent === this.group && entry.options.name === OFFICIAL_AUTO_REVIEW) this.suppress(entry)
     }
-    await Promise.all([...this.draining])
+    // Drain means "wait for the suppressed fiber to leave", never "inherit its
+    // failure": a broken official import must not fail this entry's startup.
+    // The task chain already logs each failure.
+    await Promise.allSettled([...this.draining])
   }
 
   /** Called before any asynchronous startup, so early unload also drains it. */
@@ -131,15 +156,15 @@ export class AutoReviewTakeover {
 
   private async finish(restore: boolean): Promise<void> {
     await this.stopOwner()
-    await Promise.all([...this.draining])
+    await Promise.allSettled([...this.draining])
     this.stopHook()
     this.restoreUpdate()
     // Restore from the latest desired input after drain; loss of a required
     // service must not select a fallback. A successor owns restoration now.
-    if (!restore || takeovers.get(this.group) !== this || !this.entry.disabled || this.group.ctx.fiber.state === 5 || this.group.ctx.fiber.uid === null) return
+    if (!restore || takeovers.get(this.group) !== this || !(this.exiting || this.entry.disabled) || this.group.ctx.fiber.state === 5 || this.group.ctx.fiber.uid === null) return
     for (const [index, options] of this.desired.entries()) {
       if (options.name !== OFFICIAL_AUTO_REVIEW || this.group.tree.store[options.id] !== undefined) continue
-      const copy = structuredClone(options)
+      const copy = cloneRows(options)
       this.group.data.splice(Math.min(index, this.group.data.length), 0, copy)
       const id = await this.group.create(copy)
       const restored = this.group.tree.store[id]
