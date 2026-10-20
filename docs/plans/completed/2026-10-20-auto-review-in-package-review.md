@@ -1,6 +1,6 @@
 # Auto Review 并入主包：需求评审
 
-> 状态：迁移实施中。日期：2026-10-20。下文保留实施前的需求评审；选定方案见 [ADR-0022](../../decisions/ADR-0022-auto-review-loader-entry.md)，它取代 ADR-0021 的交付结构，保留上下文与安全合同。实施及验证进度只见[路线账本](./2026-09-12-multi-root-workspace.md#auto-review-内置入口迁移2026-10-20)。
+> 状态：已实施（并入 `main`，随 `v0.1.9` 发版）。日期：2026-10-20。下文保留实施前的需求评审；选定方案见 [ADR-0022](../../decisions/ADR-0022-auto-review-loader-entry.md)，它取代 ADR-0021 的交付结构，保留上下文与安全合同。实施及验证结果见[路线账本](../active/2026-09-12-multi-root-workspace.md#auto-review-内置入口迁移2026-10-20)。
 
 ## 结论
 

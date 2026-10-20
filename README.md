@@ -19,7 +19,7 @@
 - **可选 Auto review（默认关闭）**：fork 上游实验性「自动授权审查」，向 Reviewer 补充附加目录的审查上下文——当前工作区拓扑、各根访问级别与实时指令文件；出厂关闭，需在插件管理器的行列表中显式打开 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` 行后生效，启用时接管官方同名 bundle。
 - **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
-当前发布版本 `v0.1.8`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
+当前发布版本 `v0.1.9`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
 
@@ -93,8 +93,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.8/dsh-electron-dsh-plugin-multi-root-workspace-0.1.8.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.8.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.9/dsh-electron-dsh-plugin-multi-root-workspace-0.1.9.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.9.tgz
 ```
 
 同样是预构建产物，适合内网或离线环境交付；首次安装同样需要添加 `allowBuilds`。
@@ -113,10 +113,10 @@ allowBuilds:
   koffi: true
 ```
 
-建议锁定版本（如 `#v0.1.8`），让后续推送无法悄悄改变实际运行的内容：
+建议锁定版本（如 `#v0.1.9`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.8
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.9
 ```
 
 ### 从本地源码安装

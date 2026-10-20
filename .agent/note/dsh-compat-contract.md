@@ -181,7 +181,7 @@ pnpm verify:all   # lint → typecheck → build → test → kernel:probe → s
 
 开发 pin 是 `0.2.0-rc.2`，cordis 是 `4.0.4`。回到开发基线不再表示回到 `0.1.5-rc.2` / `4.0.2`；前文的旧版探测记录是历史事实。恢复探测前保存的 manifest / workspace / lockfile，并重装安装树，绝不把未提交的支持声明退回 HEAD。
 
-`0.2.0-rc.1` / `rc.2` 保留了现有适配器的接缝。0.2 的 agent-loop 异常恢复会在关闭 step 前补保守的失败 `tool/result`：`message.isError: true`、纯文本 content，并带 `data.error`。它绝不能算成功文件 touch；`tests/instructions.spec.ts` 同时钉住旧 content block、新 message 与恢复事件三种失败形状。Windows 新增 ACL diagnosis skill 由继承的上游 provider 自动软注册，本插件仍不承诺 Windows 内核多根授权。风险与各版验证证据见[路线图记录](../../docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30未发布)。
+`0.2.0-rc.1` / `rc.2` 保留了现有适配器的接缝。0.2 的 agent-loop 异常恢复会在关闭 step 前补保守的失败 `tool/result`：`message.isError: true`、纯文本 content，并带 `data.error`。它绝不能算成功文件 touch；`tests/instructions.spec.ts` 同时钉住旧 content block、新 message 与恢复事件三种失败形状。Windows 新增 ACL diagnosis skill 由继承的上游 provider 自动软注册，本插件仍不承诺 Windows 内核多根授权。风险与各版验证证据见[路线图记录](../../docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30)。
 
 CI 用 `scripts/list-dsh-releases.mjs` 从 allowlist 直接读取版本轴，所有支持版本都跑所有启用的 OS，主车道始终 enforce。`pnpm-workspace.yaml` 对开发版本的传递 DSH 包与 LibreOffice host tooling 逐项使用精确发布年龄豁免：pnpm 11 不接受带版本的包名通配模式，而且运行脚本前也会校验整棵锁文件。安装候选仍使用 `--config.minimumReleaseAge=0`，临时 pin 与临时豁免必须恢复。
 

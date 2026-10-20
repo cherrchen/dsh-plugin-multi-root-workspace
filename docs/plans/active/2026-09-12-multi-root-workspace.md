@@ -1,6 +1,6 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
+> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；v0.1.9（Auto Review 多根上下文以主包内置可选行交付，默认关闭，ADR-0022）已发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
 > 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
@@ -47,7 +47,8 @@
 | compat | DSH 0.2.1 后续提升 | DSH 支持矩阵扩展至 `0.2.1-alpha.3`–`0.2.1-rc.2` 五个精确版本；storage-domain zod 分裂适配、warn 车道 allow-version 预授权 | [本次记录](#dsh-021-后续兼容提升2026-10-17) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `eaf2d8f` | `v0.1.7` |
 | compat | DSH 0.2.0 `permissionPresets/catalog` 修复 | 可选包按"谁加载副本、经哪个锚点"分三类取证（运行时加载 / 宿主服务 / runner 锚定），link: 检出不再幻影混装；两个 provider 行不再 inject 门禁，被拒安装退化为上游等价而非拖死 `ctx.fs`/`ctx.sandbox`/`ctx.shell`/`permissionPresets` | [本次记录](#dsh-020-permissionpresetscatalog-修复2026-10-18) | [0009 修订](../../decisions/ADR-0009-dsh-compat-contract.md) | `f6d81de` | `v0.1.8` |
 | 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
-| 兼容协作 | Auto Review 多根上下文 | 拓扑/有效访问权限/当前项目约束的可信输入；可选外部兼容层及联合验证 | [适配计划](../completed/2026-10-18-auto-review-context-adaptation.md)、[源码调研](../../reference/auto-review-compatibility.md) | [0021](../../decisions/ADR-0021-auto-review-context-companion.md) | `feat/compat-auto-review` | Phase 0–2 已实施；本机验收与旧版回归见[本次记录](#auto-review-多根上下文适配2026-10-18)；仅联合目标 `0.2.1-rc.2`，未发布；Phase 3 不在本批范围 |
+| 兼容协作 | Auto Review 多根上下文 | 拓扑/有效访问权限/当前项目约束的可信输入；可选外部兼容层及联合验证 | [适配计划](../completed/2026-10-18-auto-review-context-adaptation.md)、[源码调研](../../reference/auto-review-compatibility.md) | [0021](../../decisions/ADR-0021-auto-review-context-companion.md) | `feat/compat-auto-review` | Phase 0–2 已实施；本机验收与旧版回归见[本次记录](#auto-review-多根上下文适配2026-10-18)；仅联合目标 `0.2.1-rc.2`；独立 companion 交付形态在发布前被 ADR-0022 取代，能力以内置行随 `v0.1.9` 发版；Phase 3 不在本批范围 |
+| 兼容协作 | Auto Review 内置入口迁移 | companion 并入主包：`./auto-review` 导出 + 默认 `disabled` 的 `multi-root-auto-review` 行；loader 生命周期接管/恢复；configure、独立 manifest 与第二 tarball 退役 | [评审记录](../completed/2026-10-20-auto-review-in-package-review.md)、[迁移记录](#auto-review-内置入口迁移2026-10-20) | [0022](../../decisions/ADR-0022-auto-review-loader-entry.md) | `9138084`…`e4804fb` | `v0.1.9` |
 
 ## 总体策略
 
@@ -719,7 +720,7 @@ Windows 实机（非 CI）验证暴露两个 CI 不可见的问题，处置经�
 
 ## Auto Review 多根上下文适配（2026-10-18）
 
-工作分支 `feat/compat-auto-review` 从 `main` 的 `15c1d26` 创建，保留了调研、计划及导航的未提交修改。上游核对为 `dsh-v0.2.1-rc.2` / `687f282e8625c6b8d11ff58211a90524be2e4317`，没有编辑上游源码、安装包或检出其旧构建产物。实现设计和维护边界见 [ADR-0021](../../decisions/ADR-0021-auto-review-context-companion.md)，阶段范围见[已归档计划](../completed/2026-10-18-auto-review-context-adaptation.md)。主包版本仍为 `0.1.8`，未创建 tag、未发布 companion；普通支持 allowlist、provider 门禁例外与默认 Auto 行为不变。
+工作分支 `feat/compat-auto-review` 从 `main` 的 `15c1d26` 创建，保留了调研、计划及导航的未提交修改。上游核对为 `dsh-v0.2.1-rc.2` / `687f282e8625c6b8d11ff58211a90524be2e4317`，没有编辑上游源码、安装包或检出其旧构建产物。实现设计和维护边界见 [ADR-0021](../../decisions/ADR-0021-auto-review-context-companion.md)，阶段范围见[已归档计划](../completed/2026-10-18-auto-review-context-adaptation.md)。本节工作完成时主包版本仍为 `0.1.8`，未创建 tag；独立 companion 从未发布——其交付形态随后被 [ADR-0022](../../decisions/ADR-0022-auto-review-loader-entry.md) 取代，同一能力并入主包内置行随 `v0.1.9` 发版（见下节）。普通支持 allowlist、provider 门禁例外与默认 Auto 行为不变。
 
 ### 装配与请求证据
 
@@ -785,8 +786,8 @@ Seatbelt 证明的断言强制实跑。PTC 联合用例用真实 Node runtime �
 
 ## Auto Review 内置入口迁移（2026-10-20）
 
-用户授权将独立 companion 合并进主包。需求评审见[评审记录](./2026-10-20-auto-review-in-package-review.md)，交付及生命周期方案见 [ADR-0022](../../decisions/ADR-0022-auto-review-loader-entry.md)。迁移实施中，尚未提交、创建 tag 或发布。
+用户授权将独立 companion 合并进主包。需求评审见[评审记录](../completed/2026-10-20-auto-review-in-package-review.md)，交付及生命周期方案见 [ADR-0022](../../decisions/ADR-0022-auto-review-loader-entry.md)。已实施并经 PR #16 合入 `main`（`9138084`，随后 README 收尾 `0851a28`/`e4804fb`），随 `v0.1.9` 发版。
 
 已移入 `src/auto-review/`，增加主包 `./auto-review` 导出和默认 disabled 的 `multi-root-auto-review` 行；context/reviewer 共用一个开关。configure、独立 manifest/workspace、第二 tarball 与版本协调退役。精确 fork 仍仅支持 `0.2.1-rc.2`，普通 allowlist 未变。
 
-最小真实 loader 验证已通过两种顺序、延迟 import、反复 reload、官方原有 disabled、官方后加入/移除与描述符恢复。真实 profile 联合回归（source 与 packed 双车道、web/headless × 官方前后序、默认零挂载、live 接管/恢复/再启用、真实 reviewer 请求）已通过；typecheck 双通道、全量 vitest、lint、docs:check、pack:check、compat/fork 门禁全绿。官方 bundle 未选择时入口独立运行（自身注册 Auto preset），已在 README/ADR-0022 写明。`verify:all` 全项在本机通过（含 kernel:probe、compose/behavior/journey/packed 与 auto-review 双车道 smoke）。尚未执行：旧版本 probe 车道与多 OS CI；未提交、未创建 tag、未发布。
+最小真实 loader 验证已通过两种顺序、延迟 import、反复 reload、官方原有 disabled、官方后加入/移除与描述符恢复。真实 profile 联合回归（source 与 packed 双车道、web/headless × 官方前后序、默认零挂载、live 接管/恢复/再启用、真实 reviewer 请求）已通过；typecheck 双通道、全量 vitest、lint、docs:check、pack:check、compat/fork 门禁全绿。官方 bundle 未选择时入口独立运行（自身注册 Auto preset），已在 README/ADR-0022 写明。`verify:all` 全项在本机通过（含 kernel:probe、compose/behavior/journey/packed 与 auto-review 双车道 smoke）。合入后 `main` 的多 OS CI 已复验：`9138084` 的 [CI run 39399743823](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39399743823) 全绿（含各支持版本的 Windows/Linux/macOS 车道）。随 `v0.1.9` 发版。

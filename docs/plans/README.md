@@ -38,15 +38,14 @@ completed/
 
 active：
 
-- [2026-10-20-auto-review-in-package-review.md](./active/2026-10-20-auto-review-in-package-review.md) — Auto Review 并入主包的需求评审：逐项可行性、loader 最小验证、接管与恢复边界、待验证合同及验收条件；迁移实施中。
+- [2026-10-16-branch-security-review-and-hardlink-isolation.md](./active/2026-10-16-branch-security-review-and-hardlink-isolation.md) — 分支安全审查证据与拟议修复：负授权、Windows 祖先改名、pnpm 硬链接隔离；Phase A（R2/R3 负授权）、B（R1 祖先钉扎）、C1（全根硬链接预检）与 C2（`/workspace-folders isolate-profiles` 命令、迁移与冒烟）已实施并验收，随 `v0.1.7` 发版。
 
-- [2026-10-16-branch-security-review-and-hardlink-isolation.md](./active/2026-10-16-branch-security-review-and-hardlink-isolation.md) — 分支安全审查证据与拟议修复：负授权、Windows 祖先改名、pnpm 硬链接隔离；Phase A（R2/R3 负授权）、B（R1 祖先钉扎）、C1（全根硬链接预检）与 C2（`/workspace-folders isolate-profiles` 命令、迁移与冒烟）已实施，完整门禁未跑。
-
-- [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace 开发路径与**进度总账**：MVP `v0.1.0` 的 M1/M2/M3 已实施并发版；`v0.1.1` 硬化批次 H1–H4 已实施并随 `v0.1.1` 发版；`v0.1.2` 支持矩阵提升已实施并随 `v0.1.2` 发版；`v0.1.3` 支持矩阵提升（`0.1.7-alpha.2` / `0.1.7-rc.1`）已实施并随 `v0.1.3` 发版；`v0.1.4` 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版；`v0.1.5`（DSH `0.2.0-rc.1` / `.2`）已发布；`v0.1.6`（DSH `0.2.1-alpha.1` / `.2`、B1–B3 与动态 cwd）已发布；`v0.1.7`（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发布。
+- [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace 开发路径与**进度总账**：MVP `v0.1.0` 的 M1/M2/M3 已实施并发版；`v0.1.1` 硬化批次 H1–H4 已实施并随 `v0.1.1` 发版；`v0.1.2` 支持矩阵提升已实施并随 `v0.1.2` 发版；`v0.1.3` 支持矩阵提升（`0.1.7-alpha.2` / `0.1.7-rc.1`）已实施并随 `v0.1.3` 发版；`v0.1.4` 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版；`v0.1.5`（DSH `0.2.0-rc.1` / `.2`）已发布；`v0.1.6`（DSH `0.2.1-alpha.1` / `.2`、B1–B3 与动态 cwd）已发布；`v0.1.7`（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发布；`v0.1.8`（DSH 0.2.0 `permissionPresets/catalog` 修复）已发布；`v0.1.9`（Auto Review 主包内置可选行）已发布。
 
 
 completed：
 
+- [2026-10-20-auto-review-in-package-review.md](./completed/2026-10-20-auto-review-in-package-review.md) — Auto Review 并入主包的需求评审：逐项可行性、loader 最小验证、接管与恢复边界、待验证合同及验收条件；已实施并随 `v0.1.9` 发版。
 - [2026-10-18-auto-review-context-adaptation.md](./completed/2026-10-18-auto-review-context-adaptation.md) — Auto Review 多根上下文适配（Phase 0–2）：显式 companion fork、同源权限投影、当前约束、联合验证与正式接口迁移边界；状态和证据见路线账本。
 - [2026-10-13-b9-root-access-and-sandbox-modes.md](./completed/2026-10-13-b9-root-access-and-sandbox-modes.md) — B9 专项计划：附加根继承 / 只读 / 读写与跨 SandboxMode 执行一致性；包括迁移、进程入口、内核能力验证与验收方案。进度与发布状态见进度总账。
 - [2026-09-12-m1-composition-and-passthrough.md](./completed/2026-09-12-m1-composition-and-passthrough.md) — M1 开发计划：bundle 骨架、两行 provider 替换、空根直通（2026-09-12 实施完成并验证，随 `v0.1.0` 发版）。
@@ -56,7 +55,7 @@ completed：
 - [2026-09-15-panel-session-derived-authority.md](./completed/2026-09-15-panel-session-derived-authority.md) — v0.1.1 批次 H2：面板主根改为 host session 推导，删除客户端 `primaryRoot`（2026-09-15 实施完成，随 `v0.1.1` 发版）。
 - [2026-09-15-dsh-compat-contract.md](./completed/2026-09-15-dsh-compat-contract.md) — v0.1.1 批次 H3 + H4 Phase 1：DSH 兼容性变成启动时执行的代码契约，并把 `0.1.6-alpha.1` 与附加根顶层指令注入一并纳入（2026-09-15 实施完成，随 `v0.1.1` 发版）。
 - [2026-09-15-v0.1.1-review-rework.md](./completed/2026-09-15-v0.1.1-review-rework.md) — v0.1.1 批次发版前的 PR #1 评审返工（2 项 P1 + 3 项 P2）：authority 拆除顺序（排空 → close → release）、中间目录指令可达、`warn` 只放宽 `unsupported`、两个可选 peer 按需加载、缺失与求值失败分离（2026-09-15 实施完成，随 `v0.1.1` 发版）。
-- [2026-10-12-files-header-root-browsing.md](./completed/2026-10-12-files-header-root-browsing.md) — Files 头部根浏览：P1 仅图标齿轮 launcher 前移，P2 根选择器 portal 接管树区，P3–P10 目检修正，P11 接管树换为逐字节复刻的上游 Files 树（`src/client/files-tree/`，自绘树与私有 `files`/`readFile` 端点下线；2026-10-12 实施完成，未发版；决策见 ADR-0015）。
+- [2026-10-12-files-header-root-browsing.md](./completed/2026-10-12-files-header-root-browsing.md) — Files 头部根浏览：P1 仅图标齿轮 launcher 前移，P2 根选择器 portal 接管树区，P3–P10 目检修正，P11 接管树换为逐字节复刻的上游 Files 树（`src/client/files-tree/`，自绘树与私有 `files`/`readFile` 端点下线；2026-10-12 实施完成，随 `v0.1.7` 发版；决策见 ADR-0015）。
 
 ### 编号口径
 

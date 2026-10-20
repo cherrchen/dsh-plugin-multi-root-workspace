@@ -8,6 +8,13 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.9] - 2026-10-20
+
+### Added
+
+- **Optional Auto Review (off by default)**: the main package gains an `./auto-review` subpath export and a `multi-root-auto-review` patch row — a fork of upstream's experimental "auto review" that feeds the reviewer the additional roots' context: the current workspace topology, each root's effective access level, and live instruction files. The row ships `disabled: true`; while off it mounts neither the reviewer nor the review context and does not register the Auto preset. The ordinary support matrix is unchanged — only DSH `0.2.1-rc.2` can enable it, and enabling it on any other release fails loudly rather than silently degrading. To turn it on, open the `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` row in the Plugin Manager row list (profiles without hot reload ask for a restart), or set `disabled: false` in the profile's `cordis.patch.yml`; the context and the reviewer share this single switch.
+- **Takes over the official reviewer while on**: the same switch mounts the multi-root review context and the fork reviewer, and stops the official `@deepseek-ai/dsh-experimental-auto-review` row in the same group at run time — the official bundle may sit before or after this package, the takeover only touches runtime state and never writes back the official row's persisted configuration; when the official bundle was never selected, the row runs standalone (it registers its own Auto preset). Disabling restores the official row per its original configuration on the next reload/restart and never re-selects Auto on its own; unloading any live Auto owner keeps the official Auto → Full access semantics. A profile that ever installed the old standalone companion package from a local tarball/link must remove its bundle selection and dependency before enabling this row (a leftover companion alongside the built-in entry is refused explicitly). Usage notes live in [src/auto-review/README.en.md](./src/auto-review/README.en.md) ([ADR-0021](./docs/decisions/ADR-0021-auto-review-context-companion.md), [ADR-0022](./docs/decisions/ADR-0022-auto-review-loader-entry.md)).
+
 ## [0.1.8] - 2026-10-18
 
 ### Fixed
@@ -162,7 +169,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.5...v0.1.6

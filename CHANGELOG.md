@@ -8,6 +8,13 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.9] - 2026-10-20
+
+### Added
+
+- **可选 Auto Review（默认关闭）**：主包新增 `./auto-review` 子路径导出与 `multi-root-auto-review` patch 行——fork 上游实验性「自动授权审查」，向 Reviewer 补充附加根的审查上下文：当前工作区拓扑、各根有效访问级别与实时指令文件。该行出厂 `disabled: true`，关闭时不挂载 reviewer 或 review context、不注册 Auto preset；普通支持矩阵不变，仅 DSH `0.2.1-rc.2` 可启用——在任何其他版本上打开会响亮失败，不会静默降级。启用方式：在插件管理器的行列表中打开 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` 行（无热重载的 profile 按提示重启），或在 profile 的 `cordis.patch.yml` 中置 `disabled: false`；context 与 reviewer 共用这一个开关。
+- **启用后接管官方 reviewer**：同一个开关挂载多根 review context 与 fork reviewer，并在运行时停止同组官方 `@deepseek-ai/dsh-experimental-auto-review` 行——官方 bundle 位于主包前后均可，接管只改运行时状态、不写回官方的持久配置；官方 bundle 未被选择时该行独立运行（自带注册 Auto preset）。关闭后官方按原配置随 reload/restart 恢复，不自动重选 Auto；任何存活 Auto owner 的卸载沿用官方 Auto → Full access 语义。曾以本地 tarball/link 安装过旧独立 companion 包的 profile，须先移除其 bundle 与依赖再启用本行（残留 companion 与内置入口共存会被明确拒绝）。使用说明见 [src/auto-review/README.md](./src/auto-review/README.md)（[ADR-0021](./docs/decisions/ADR-0021-auto-review-context-companion.md)、[ADR-0022](./docs/decisions/ADR-0022-auto-review-loader-entry.md)）。
+
 ## [0.1.8] - 2026-10-18
 
 ### Fixed
@@ -162,7 +169,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.5...v0.1.6

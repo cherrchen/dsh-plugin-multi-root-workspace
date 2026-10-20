@@ -12,7 +12,7 @@ Accepted
 
 ## Context
 
-companion patch 只能禁用前面已经插入的官方行，必须靠 configure 将 companion 排到 bundles 末尾。用户需要单一主包、默认关闭、通过现有插件管理器中的行开关启用，且不承担该排序契约。首次需求评审与最小复现见[评审记录](../plans/active/2026-10-20-auto-review-in-package-review.md)。
+companion patch 只能禁用前面已经插入的官方行，必须靠 configure 将 companion 排到 bundles 末尾。用户需要单一主包、默认关闭、通过现有插件管理器中的行开关启用，且不承担该排序契约。首次需求评审与最小复现见[评审记录](../plans/completed/2026-10-20-auto-review-in-package-review.md)。
 
 ## Decision
 

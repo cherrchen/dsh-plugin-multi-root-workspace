@@ -19,7 +19,7 @@ Not every project is a monorepo. A real development project is usually several i
 - **Optional Auto review (off by default)**: a fork of upstream's experimental auto-review that gives the reviewer the additional directories' context — the current workspace topology, each root's access level, and live instruction files; it ships disabled and only takes effect once the `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` row is explicitly enabled in the Plugin Manager row list, taking over the official bundle while on.
 - **Absent when absent**: with no additional root configured, its behavior is item-for-item identical to an uninstalled harness; every misconfiguration fails loudly instead of silently degrading.
 
-Current released version: `v0.1.8`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+Current released version: `v0.1.9`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Quick Start
 
@@ -91,8 +91,8 @@ This installs pre-built artifacts; the first install needs the `allowBuilds` add
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # or download the tgz from the GitHub Release assets, e.g.:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.8/dsh-electron-dsh-plugin-multi-root-workspace-0.1.8.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.8.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.9/dsh-electron-dsh-plugin-multi-root-workspace-0.1.9.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.9.tgz
 ```
 
 Also pre-built, handy for air-gapped or offline delivery; the first install needs the same `allowBuilds` addition.
@@ -111,10 +111,10 @@ allowBuilds:
   koffi: true
 ```
 
-Pinning a version (e.g. `#v0.1.8`) is recommended so a later push cannot silently change what actually runs:
+Pinning a version (e.g. `#v0.1.9`) is recommended so a later push cannot silently change what actually runs:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.8
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.9
 ```
 
 ### Install from a local clone
