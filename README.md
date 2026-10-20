@@ -10,24 +10,24 @@
 
 ## 项目简介
 
-DSH（DeepSeek Harness）原生只把会话启动的目录当作 Agent 唯一的可写根；本插件是一个不修改上游任何代码的外部扩展，把可写范围扩为"**一个主目录 + 多个附加目录**"。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 默认把新建工作区所在的目录作为 Agent 的主目录，在默认的工作区读写模式（`workspace-write`）下，沙箱的读写范围也仅覆盖这一个目录。本插件将 DSH 的工作区范围拓展到“一个主目录 + 多个附加目录”。
 
-一个开发项目往往由多个独立 Git 仓库组成，跨仓库干活原本得反复换会话。Codex、Cursor 等同类工具早已支持在一个工作区添加多个文件夹；本插件把同样的能力带给 DSH：把其他仓库登记为附加根，Agent 即可直接读写。
+并非所有项目都是 monorepo。一个开发项目往往由多个独立 Git 仓库组成，跨仓库干活原本得反复换会话。同类工具早已支持在一个工作区添加多个文件夹，本插件把同样的能力带给 DSH：把其他仓库登记为附加根，并按需授予只读、读写或不受限的访问级别，Agent 即可在授权范围内读写。
 
-- **Agent 零学习成本**：继续使用原生 `read` / `write` / `edit` / `bash`，插件不新增任何工具，只是授权的目录变多了。
-- **安全不降级**：附加根走上游同款授权机制——进程内文件围栏 + 内核级沙箱（macOS Seatbelt / Linux bwrap / Landlock / Windows ACL），文件与 bash 共享同一份授权范围，绝不退化成全开放或只靠提示词约束。
+- **不新增工具**：Agent 照旧使用原生 `read` / `write` / `edit` / `bash`，只是授权的目录变多了。
+- **沙箱约束**：附加根可继承会话（主目录）的权限设置，也可单独固定为只读或读写；在只读与读写下，约束不靠系统提示词，而由进程内文件围栏 + 内核级沙箱（macOS Seatbelt / Linux bwrap / Landlock / Windows ACL）执行，文件与 bash 共享同一份授权范围。
+- **可选 Auto review（默认关闭）**：fork 上游实验性「自动授权审查」，向 Reviewer 补充附加目录的审查上下文——当前工作区拓扑、各根访问级别与实时指令文件；出厂关闭，需在插件管理器的行列表中显式打开 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` 行后生效，启用时接管官方同名 bundle。
 - **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
 当前发布版本 `v0.1.8`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
 
-插件已发布到 [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace)。可以在 DSH 的插件安装页面填入包名 `@dsh-electron/dsh-plugin-multi-root-workspace`，也可以用命令行两步装完：
+插件已发布到 [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace)。在 DSH 侧栏的**插件**页点**添加插件**、填入包名 `@dsh-electron/dsh-plugin-multi-root-workspace` 即可安装；也可以用命令行两步装完：
 
 ```sh
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
-dsh --profile web
-# --profile 按你的启动方式选择，可选值见 DSH 文档
+dsh --profile web       # --profile 按你的启动方式选择，可选值见 DSH 文档
 ```
 
 tarball、GitHub、本地源码等其他安装方式见[安装](#安装)。
@@ -60,6 +60,8 @@ DSH 版本不在表内、或 `@deepseek-ai/dsh-*` 各包版本不一致时，插
 
 ## 安装
 
+不使用命令行时，DSH 侧栏的**插件**页提供同一安装入口：点**添加插件**，填入 npm 包名（或 Git 地址、tarball、本地绝对路径）。
+
 `dsh plugin` 支持四种安装来源。以下均以 web profile 为例；桌面端（Electron）把 `--profile web` 换成 `--profile desktop`，安装方式同源。
 
 | 来源 | 命令 | 说明 |
@@ -76,7 +78,7 @@ allowBuilds:
   koffi: true
 ```
 
-如果重跑退出 0 但插件没有进入 `dsh.profile.bundles`，做一次 `remove` + `add`。更多排查见[故障排查](./docs/troubleshooting/install-stops-at-build-approval.md)。
+如果重跑 `退出 0` 但插件没有进入 `dsh.profile.bundles`，做一次 `remove` + `add`。更多排查见[故障排查](./docs/troubleshooting/install-stops-at-build-approval.md)。
 
 ### 从 npm 安装（推荐）
 
@@ -202,14 +204,14 @@ dsh --profile web --dump-config | grep -A3 'multi-root'
 ### 命令
 
 ```text
-/workspace-folders [list]                                               # 列出主根与附加根（含每根访问级别与状态）
-/workspace-folders add <绝对路径> [--inherit|--read-only|--read-write]  # 不带路径时打开系统目录选择器；新登记默认 inherit
-/workspace-folders access <序号|路径> inherit|read-only|read-write      # 切换访问级别（扩权要求该根此刻可用）
-/workspace-folders alias <序号|路径> [别名]                             # 不带别名则清除已有别名
-/workspace-folders remove <序号|路径>                                   # 序号即 list 输出的编号
-/workspace-folders reveal <序号|路径>                                   # 在文件管理器中显示
-/workspace-folders isolate-profiles [--apply]                           # 检查 $DSH_HOME profile 依赖导入方式与多链接文件；--apply 写入 copy 配置
-/workspace-folders help                                                 # 查看命令帮助
+/workspace-folders [list]                                                   # 列出主根与附加根（含每根访问级别与状态）
+/workspace-folders add <absolute path> [--inherit|--read-only|--read-write] # 不带路径时打开系统目录选择器；新登记默认 inherit
+/workspace-folders access <order|path> inherit|read-only|read-write         # 切换访问级别（扩权要求该根此刻可用）
+/workspace-folders alias <order|path> [alias]                               # 不带别名则清除已有别名
+/workspace-folders remove <order|path>                                      # 序号即 list 输出的编号
+/workspace-folders reveal <order|path>                                      # 在文件管理器中显示
+/workspace-folders isolate-profiles [--apply]                               # 检查 $DSH_HOME profile 依赖导入方式与多链接文件；--apply 写入 copy 配置
+/workspace-folders help                                                     # 查看命令帮助
 ```
 
 路径可带引号；与已有根重复、嵌套在已有根内部、或就是主根本身的路径会被拒绝。

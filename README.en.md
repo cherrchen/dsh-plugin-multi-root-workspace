@@ -10,24 +10,24 @@
 
 ## What & Why
 
-DSH (DeepSeek Harness) natively treats only the directory a session starts in as the agent's sole writable root; this plugin is an out-of-tree extension that modifies no upstream code and widens that scope to "**one primary root + N additional roots**".
+By default, [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) treats the directory a new workspace is created in as the agent's primary directory; under the default workspace read-write mode (`workspace-write`), the sandbox's read-write scope covers that directory alone. This plugin extends DSH's workspace scope to "one primary root + N additional roots".
 
-A real development project is usually several independent Git repositories, and working across them meant juggling sessions. Peer harnesses already treat this as standard: Codex offers `--add-dir`, and Cursor lets you add folders to a workspace. This plugin brings the same capability to DSH — register the other repositories as additional roots, and the agent can read and write them directly.
+Not every project is a monorepo. A real development project is usually several independent Git repositories, and working across them meant juggling sessions. Peer harnesses already support adding multiple folders to a single workspace. This plugin brings the same capability to DSH — register the other repositories as additional roots, grant each read-only, read-write, or unrestricted access, and the agent can work in them within that grant.
 
-- **Zero learning cost for the agent**: it keeps using the native `read` / `write` / `edit` / `bash` tools — the plugin adds no new tools at all, it only grants more directories.
-- **Security does not degrade**: additional roots are authorized through the same mechanism the harness already uses — an in-process filesystem fence plus kernel-level sandboxes (macOS Seatbelt / Linux bwrap / Landlock / Windows ACL), with files and bash sharing one and the same scope. It never degenerates into full access or prompt-level constraints.
+- **No new tools**: the agent keeps using the native `read` / `write` / `edit` / `bash`; only the granted directories grow.
+- **Sandbox confinement**: an additional root may inherit the session's (primary root's) permission setting, or be pinned to read-only or read-write; under read-only and read-write, confinement does not rest on system prompts — it is enforced by an in-process filesystem fence plus kernel-level sandboxes (macOS Seatbelt / Linux bwrap / Landlock / Windows ACL), with files and bash sharing one and the same scope.
+- **Optional Auto review (off by default)**: a fork of upstream's experimental auto-review that gives the reviewer the additional directories' context — the current workspace topology, each root's access level, and live instruction files; it ships disabled and only takes effect once the `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` row is explicitly enabled in the Plugin Manager row list, taking over the official bundle while on.
 - **Absent when absent**: with no additional root configured, its behavior is item-for-item identical to an uninstalled harness; every misconfiguration fails loudly instead of silently degrading.
 
 Current released version: `v0.1.8`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Quick Start
 
-The plugin is published on [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace). You can paste the package name `@dsh-electron/dsh-plugin-multi-root-workspace` into DSH's plugin install page, or install it in two commands:
+The plugin is published on [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace). Open the **Plugins** page in the sidebar, choose **Add plugin**, and paste the package name `@dsh-electron/dsh-plugin-multi-root-workspace` — or install it in two commands:
 
 ```sh
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
-dsh --profile web
-# pick the --profile for how you launch DSH; see its docs for the values
+dsh --profile web       # pick the --profile for how you launch DSH; see its docs for the values
 ```
 
 Once it is up, the **Folders** action (`🗂`) appears at the sidebar foot — or, straight in a session:
@@ -58,6 +58,8 @@ The plugin does not start — as if it were not installed — when the DSH relea
 
 ## Installation
 
+The same install is available without the CLI: open **Plugins** in the sidebar, choose **Add plugin**, and enter the npm package name (or a Git address, tarball, or absolute local path).
+
 `dsh plugin` supports four install sources. All commands below use the web profile as the example; for the Electron desktop swap `--profile web` for `--profile desktop` — the install method is the same.
 
 | Source | Command | Notes |
@@ -74,7 +76,7 @@ allowBuilds:
   koffi: true
 ```
 
-If the retry exits 0 but the plugin never lands in `dsh.profile.bundles`, do a `remove` + `add`. Further diagnosis: [troubleshooting](./docs/troubleshooting/install-stops-at-build-approval.md).
+If the retry `exits 0` but the plugin never lands in `dsh.profile.bundles`, do a `remove` + `add`. Further diagnosis: [troubleshooting](./docs/troubleshooting/install-stops-at-build-approval.md).
 
 ### Install from npm (recommended)
 

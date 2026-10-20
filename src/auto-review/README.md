@@ -2,7 +2,7 @@
 
 English: [README.en.md](./README.en.md)
 
-Auto Review 已内置于 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review`，仅支持 DSH `0.2.1-rc.2`。安装主包后，在插件管理器中展开 Multi-root Workspace 的行列表，打开 `multi-root-auto-review`。该行出厂关闭；关闭时不挂载 reviewer 或 review context，也不注册 Auto preset。无热重载的 profile 需要按管理器提示重启。
+Auto Review 已内置于 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review`，仅支持 DSH `0.2.1-rc.2`。安装主包后，在插件管理器中展开 Multi-root Workspace 的行列表，打开 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` 行（`cordis.patch.yml` 中的行 id 为 `multi-root-auto-review`）。该行出厂关闭；关闭时不挂载 reviewer 或 review context，也不注册 Auto preset。无热重载的 profile 需要按管理器提示重启。
 
 启用后，同一个开关挂载当前多根 context 与 reviewer，并在运行时停止同组官方 `@deepseek-ai/dsh-experimental-auto-review` 行。官方 bundle 位于主包前后均可；后续 reload 仍保持单一 owner。接管不修改官方的持久配置。关闭后，官方仅在仍被选择且原配置允许启用时随 reload/restart 恢复；官方未被选择时不会自动安装或启用。官方 bundle 未被选择时，该行仍独立提供同一份 reviewer（自带注册 Auto preset），只是没有可接管的官方 owner。
 
