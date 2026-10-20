@@ -44,7 +44,7 @@ import ToolRuntime, {
   type ToolExecutionToken,
 } from '@deepseek-ai/dsh-tools'
 import ApprovalService, { setApprovalPolicy, type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
-import * as AutoReview from '../src/index.ts'
+import * as AutoReview from '../../src/auto-review/fork.ts'
 
 const EXPECTED_REVIEW_POLICY = `REVIEW_POLICY
 You are the final authorization reviewer for exactly one pending tool call. Your decision replaces human approval for this call. If you allow it, the call executes immediately with full host access and no later confirmation.

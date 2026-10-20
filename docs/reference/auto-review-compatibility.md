@@ -78,4 +78,4 @@ Auto 是权限 preset，其底层 sandbox mode 为 `danger-full-access`，并不
 - 在下游追加第二次独立 review 无法纠正上游第一次 review 的上下文缺失，还会产生双重审查和费用。
 - 外部 bundle 可以替换 `auto-review` loader 行，以本地 fork 保留上游 gate/lifecycle，仅替换快照拼装。这不编辑上游包，符合 out-of-tree 约束，但需要明确的 fork、精确基线、差分测试和可选启用机制。
 
-据此，短期路线已定案为**显式启用的独立 companion，固定 fork 该版审查入口**，长期迁移到正式 context contribution API。当前接口与失败边界见 [ADR-0021](../decisions/ADR-0021-auto-review-context-companion.md)，安装及同步步骤见 [companion](../../compat/auto-review/README.md)。普通支持列表和发布版本不因该可选集成自动改变；本次不提交上游提案。
+最初采用独立 companion；当前交付已迁入主包的默认关闭 loader 子路径（[ADR-0022](../decisions/ADR-0022-auto-review-loader-entry.md)），上下文与失败边界继续遵循 [ADR-0021](../decisions/ADR-0021-auto-review-context-companion.md)。长期迁移到正式 context contribution API。安装及同步步骤见 [Auto Review](../../src/auto-review/README.md)。普通支持列表和发布版本不因该可选集成自动改变；本次不提交上游提案。

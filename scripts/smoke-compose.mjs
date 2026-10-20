@@ -55,6 +55,9 @@ const INSERTED = [
   // The client-graph anchor: mounted at the bare package name so the web
   // client-module scan reads this package's `dsh.client` declaration.
   'multi-root-client',
+  // The optional Auto Review entry: ships disabled, so it is present in the
+  // composition metadata but mounts no reviewer, context or takeover hook.
+  'multi-root-auto-review',
 ]
 const UPSTREAM_STANDALONE = ['bash-sandbox', 'sandbox-policy', 'tool-fs', 'tool-bash', 'terminal-bash']
 
@@ -128,7 +131,11 @@ try {
       `${id} resolves inside ${PLUGIN_NAME}`,
       String(row?.name),
     )
-    check.ok(row?.disabled !== true, `${id} is enabled`)
+    if (id === 'multi-root-auto-review') {
+      check.ok(row?.disabled === true, `${id} ships disabled`)
+    } else {
+      check.ok(row?.disabled !== true, `${id} is enabled`)
+    }
   }
 
   // 3. The two replaced rows are disabled, and nothing else changed about them.

@@ -44,6 +44,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { npmOutput } from './lib/npm-cli.mjs'
 import { cordisPin } from './lib/cordis-pin.mjs'
+import { AUTO_REVIEW_DEVELOPMENT_PACKAGES, autoReviewRelease } from './lib/auto-review-development.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MANIFEST = join(REPO_ROOT, 'package.json')
@@ -100,6 +101,11 @@ function repointManifest(version, cordisVersion) {
   const source = readFileSync(MANIFEST, 'utf8')
   const manifest = JSON.parse(source)
   const changed = []
+  const forkRelease = autoReviewRelease(readFileSync(join(REPO_ROOT, 'src/compat/auto-review-contract.ts'), 'utf8'))
+  for (const name of AUTO_REVIEW_DEVELOPMENT_PACKAGES) {
+    if (version === forkRelease) manifest.devDependencies[name] = version
+    else delete manifest.devDependencies[name]
+  }
   for (const name of Object.keys(manifest.devDependencies ?? {})) {
     if (!isDshPackage(name)) continue
     if (manifest.devDependencies[name] === version) continue
@@ -136,14 +142,7 @@ function repointManifest(version, cordisVersion) {
 function repointWorkspace(version, cordisVersion) {
   const source = readFileSync(WORKSPACE, 'utf8')
   let count = 0
-  // This independent fork has an exact joint contract. Do not apply the
-  // probe's global overrides to its own pinned development tree on an old
-  // ordinary-plugin lane (some of these APIs did not exist there at all).
-  const companion = JSON.parse(readFileSync(join(REPO_ROOT, 'compat/auto-review/package.json'), 'utf8'))
-  const joint = companion.peerDependencies['@deepseek-ai/dsh-tools'] === version
-  let workspaceSource = source.replace(/^  - compat\/auto-review\r?\n/mu, '')
-  if (joint) workspaceSource = workspaceSource.replace(/^(  - \.)(\r?\n)/mu, `$1$2  - compat/auto-review$2`)
-  let updated = workspaceSource.replace(/^(\s*- '@deepseek-ai\/dsh(?:-[\w-]+)?)@[^']+'$/gmu, (line, prefix) => {
+  let updated = source.replace(/^(\s*- '@deepseek-ai\/dsh(?:-[\w-]+)?)@[^']+'$/gmu, (line, prefix) => {
     count += 1
     return `${prefix}@${version}'`
   })

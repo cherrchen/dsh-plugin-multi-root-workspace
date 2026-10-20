@@ -128,6 +128,7 @@ describe('inserted rows', () => {
       'multi-root-process-fence',
       'multi-root-command',
       'multi-root-client',
+      'multi-root-auto-review',
     ])
   })
 

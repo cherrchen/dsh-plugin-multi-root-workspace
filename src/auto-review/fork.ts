@@ -8,9 +8,9 @@
  * @module @deepseek-ai/dsh-experimental-auto-review
  */
 
-import { assertForkPackages } from './compat/contract.ts'
+import { assertForkPackages } from '../compat/auto-review-packages.ts'
 import { partitionInstructions } from './context.ts'
-import type { ReviewContext } from '@dsh-electron/dsh-plugin-multi-root-workspace/review-context'
+import type { ReviewContext } from '../review-context.ts'
 import type {} from '@deepseek-ai/dsh-working-directory'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'

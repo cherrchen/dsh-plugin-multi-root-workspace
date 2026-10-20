@@ -15,16 +15,16 @@ import Approval, {setApprovalPolicy} from '@deepseek-ai/dsh-user-approval'
 import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
 import LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
 import { NodePtcRuntime } from '@deepseek-ai/dsh-ptc-runtime-node'
-import { MultiRootSandboxProvider } from '../../../src/sandbox.ts'
-import * as ProcessFence from '../../../src/process-fence.ts'
-import { requireKernelRunner } from '../../../tests/support/kernel-runner.ts'
+import { MultiRootSandboxProvider } from '../../src/sandbox.ts'
+import * as ProcessFence from '../../src/process-fence.ts'
+import { requireKernelRunner } from '../support/kernel-runner.ts'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
-import { MultiRootFileSystem } from '../../../src/fs.ts'
-import * as Instructions from '../../../src/instructions.ts'
-import ReviewContextService from '../../../src/review-context.ts'
-import { mountRegistryStack } from '../../../tests/support/registry-stack.ts'
-import { createFixtureWorkspace, REPO_ROOT } from '../../../tests/support/temp-workspace.ts'
-import * as Companion from '../src/index.ts'
+import { MultiRootFileSystem } from '../../src/fs.ts'
+import * as Instructions from '../../src/instructions.ts'
+import ReviewContextService from '../../src/review-context.ts'
+import { mountRegistryStack } from '../support/registry-stack.ts'
+import { createFixtureWorkspace, REPO_ROOT } from '../support/temp-workspace.ts'
+import * as Companion from '../../src/auto-review/fork.ts'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { vi.restoreAllMocks(); while(cleanup.length) await cleanup.pop()!() })
@@ -50,7 +50,7 @@ async function world(toolAccess: Record<string,'read-only'> = {}, instructionCon
       // so the real-runner mount reads the built provider — the choice
       // tests/windows-multi-root.spec.ts makes for its Windows-native cases.
       const provider=process.platform==='win32'
-        ?(await import(pathToFileURL(join(REPO_ROOT,'lib','sandbox.js')).href) as typeof import('../../../src/sandbox.ts')).MultiRootSandboxProvider
+        ?(await import(pathToFileURL(join(REPO_ROOT,'lib','sandbox.js')).href) as typeof import('../../src/sandbox.ts')).MultiRootSandboxProvider
         :MultiRootSandboxProvider
       await ctx.plugin(provider,{})
     }

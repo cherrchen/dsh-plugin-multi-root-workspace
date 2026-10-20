@@ -159,4 +159,3 @@ vite.config.ts.timestamp-*
 .zcode/
 
 # Independent optional companion build output.
-/compat/auto-review/lib/

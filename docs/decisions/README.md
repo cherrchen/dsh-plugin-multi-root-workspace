@@ -52,3 +52,5 @@ ADR-0002-short-title.md
 ```
 
 编号递增，标题使用小写中划线。
+
+- [ADR-0022-auto-review-loader-entry.md](./ADR-0022-auto-review-loader-entry.md) — Auto Review 并入主包：默认关闭的单一 loader 行、运行时接管、并发导入防护、有序 owner 交接与单包构建（取代 ADR-0021 的交付结构）。

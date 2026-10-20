@@ -106,7 +106,7 @@ export async function bootProfile(profileName, home, prepare) {
     ? undefined
     : async (hostCtx) => {
         if (resolution !== undefined) await hostCtx.plugin(appBoot.PluginPackages, { resolution })
-        if (prepare !== undefined) await prepare(hostCtx)
+        if (prepare !== undefined) await prepare(hostCtx, { profile, installAnchor })
       }
   const ctx = await appBoot.boot(BIN_NAME, join(profile.dir, 'cordis.yml'), patches, prepareBoot)
   return { ctx, appBoot, installAnchor, profile }

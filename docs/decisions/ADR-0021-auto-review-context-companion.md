@@ -4,6 +4,8 @@
 
 Accepted
 
+交付结构已由 [ADR-0022](./ADR-0022-auto-review-loader-entry.md) 取代：独立 companion、bundle 排序与 configure 退役。本文其余上下文及安全语义继续适用，下文保留原始决策历史。
+
 ## Date
 
 2026-10-18
@@ -62,5 +64,5 @@ reviewer allow 和人工批准都不提供 fs/kernel 围栏豁免。官方 nativ
 ## Related Documents
 
 - [适配计划](../plans/completed/2026-10-18-auto-review-context-adaptation.md)
-- [companion 操作与 fork 维护](../../compat/auto-review/README.md)
+- [companion 操作与 fork 维护](../../src/auto-review/README.md)
 - [ADR-0009](./ADR-0009-dsh-compat-contract.md)、[ADR-0010](./ADR-0010-additional-root-instruction-scope.md)、[ADR-0013](./ADR-0013-per-root-and-per-tool-access.md)

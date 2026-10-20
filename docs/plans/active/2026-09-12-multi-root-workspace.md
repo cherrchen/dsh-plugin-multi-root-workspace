@@ -782,3 +782,11 @@ Seatbelt 证明的断言强制实跑。PTC 联合用例用真实 Node runtime �
 `15637f8` 的 [CI run 39138769855](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39138769855)：路径断言修复生效，四种组合的完整 battery（装/启/审/停/卸）在 Windows 全部通过；冒烟推进到收尾清理时暴露第六类失败——packed 子进程从安装副本 `dlopen` `koffi.node`（`profiles/<name>/node_modules/@koromix/…/koffi.node`），进程内映射期间 `rmSync` unlink 报 `EPERM`——与 2026-10-17 记录的 smoke-behavior 缺陷同源，只是当时 joint 冒烟在更早的断言处已挂、从未走到清理。修复沿用既定契约：`smoke-auto-review.mjs` 收到 `DSH_SMOKE_DEFER_HOME_CLEANUP` 时把 home 清理移交父进程，`verify-auto-review.mjs` 为每个子进程注入 `DSH_SMOKE_HOME` 并在子进程关闭后以 `removeScratchTree`（有界重试）删除根目录；独立运行保持严格清理语义不变。
 
 `df79b35` 的 [CI run 39139931861](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39139931861)：**66/66 jobs 全部 success**——releases、16 版本 × 4 OS 共 64 条 verify 车道及最终 gate。四轮 Windows 修复（CRLF 检出与行编辑、fork 基线哈希、源码侧 runner 路径、neverBundle 解析后谓词、reviewer 文本 JSON 转义、映射 addon 清理移交）在远端全部复验通过，joint 冒烟在 Windows 上完成 packed/unpacked 双形态全流程。
+
+## Auto Review 内置入口迁移（2026-10-20）
+
+用户授权将独立 companion 合并进主包。需求评审见[评审记录](./2026-10-20-auto-review-in-package-review.md)，交付及生命周期方案见 [ADR-0022](../../decisions/ADR-0022-auto-review-loader-entry.md)。迁移实施中，尚未提交、创建 tag 或发布。
+
+已移入 `src/auto-review/`，增加主包 `./auto-review` 导出和默认 disabled 的 `multi-root-auto-review` 行；context/reviewer 共用一个开关。configure、独立 manifest/workspace、第二 tarball 与版本协调退役。精确 fork 仍仅支持 `0.2.1-rc.2`，普通 allowlist 未变。
+
+最小真实 loader 验证已通过两种顺序、延迟 import、反复 reload、官方原有 disabled、官方后加入/移除与描述符恢复。真实 profile 联合回归（source 与 packed 双车道、web/headless × 官方前后序、默认零挂载、live 接管/恢复/再启用、真实 reviewer 请求）已通过；typecheck 双通道、全量 vitest、lint、docs:check、pack:check、compat/fork 门禁全绿。官方 bundle 未选择时入口独立运行（自身注册 Auto preset），已在 README/ADR-0022 写明。`verify:all` 全项在本机通过（含 kernel:probe、compose/behavior/journey/packed 与 auto-review 双车道 smoke）。尚未执行：旧版本 probe 车道与多 OS CI；未提交、未创建 tag、未发布。

@@ -1,12 +1,12 @@
---- a/upstream.ts	2026-10-18 20:13:42
-+++ b/index.ts	2026-10-19 15:58:27
+--- upstream.ts
++++ fork.ts
 @@ -8,6 +8,9 @@
   * @module @deepseek-ai/dsh-experimental-auto-review
   */
  
-+import { assertForkPackages } from './compat/contract.ts'
++import { assertForkPackages } from '../compat/auto-review-packages.ts'
 +import { partitionInstructions } from './context.ts'
-+import type { ReviewContext } from '@dsh-electron/dsh-plugin-multi-root-workspace/review-context'
++import type { ReviewContext } from '../review-context.ts'
  import type {} from '@deepseek-ai/dsh-working-directory'
  import type { Context } from '@deepseek-ai/cordis'
  import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -123,7 +123,7 @@
  }
  
  /** Materialize the fixed model-facing final Auto denial plus optional UI detail. */
-@@ -674,12 +702,43 @@
+@@ -674,11 +702,42 @@
  
  /** Install the Auto preset and its prepended per-call review gate. */
  export function apply(ctx: Context): void {
@@ -137,7 +137,7 @@
    let accepting = true
    const active = new Set<Promise<void>>()
    const lifecycle = new AbortController()
- 
++
 +  ctx.on('tools/execute', async (exec, next) => {
 +    const context = reviewed.get(exec.token)
 +    if (context !== undefined) {
@@ -163,10 +163,9 @@
 +    }
 +    return next()
 +  }, { prepend: true })
-+
+ 
    ctx.effect(function* () {
      const stopListener = ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
-       const agent = exec.agent
 @@ -703,13 +762,15 @@
          )
          if (isAborted(lifecycle.signal)) return { kind: 'cancel' }

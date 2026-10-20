@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.host.json",
+  "include": ["src/auto-review/**/*.ts"],
+  "exclude": ["src/auto-review/upstream.ts"]
+}
