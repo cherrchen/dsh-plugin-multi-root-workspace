@@ -52,12 +52,12 @@ const REQUIRED = [
  * Run `pnpm pack` into `dir` and return the generated tarball's path.
  * The tarball name comes from the directory listing, not stdout parsing.
  */
-export function packTarball(dir = mkdtempSync(join(tmpdir(), 'dsh-pack-'))) {
+export function packTarball(dir = mkdtempSync(join(tmpdir(), 'dsh-pack-')), packageDir = REPO_ROOT) {
   // Node refuses to spawn Windows `.cmd` shims without a shell, so prefer the
   // package manager entry pnpm itself exported to this script run.
   const execPath = process.env.npm_execpath ?? ''
   const args = ['pack', '--pack-destination', dir]
-  const options = { cwd: REPO_ROOT, encoding: 'utf8' }
+  const options = { cwd: packageDir, encoding: 'utf8' }
   const packed = /\.[cm]?js$/u.test(execPath) ? spawnSync(process.execPath, [execPath, ...args], options)
     : execPath !== '' ? spawnSync(execPath, args, options)
       : spawnSync('pnpm', args, { ...options, shell: process.platform === 'win32' })

@@ -47,6 +47,7 @@
 | compat | DSH 0.2.1 后续提升 | DSH 支持矩阵扩展至 `0.2.1-alpha.3`–`0.2.1-rc.2` 五个精确版本；storage-domain zod 分裂适配、warn 车道 allow-version 预授权 | [本次记录](#dsh-021-后续兼容提升2026-10-17) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `eaf2d8f` | `v0.1.7` |
 | compat | DSH 0.2.0 `permissionPresets/catalog` 修复 | 可选包按"谁加载副本、经哪个锚点"分三类取证（运行时加载 / 宿主服务 / runner 锚定），link: 检出不再幻影混装；两个 provider 行不再 inject 门禁，被拒安装退化为上游等价而非拖死 `ctx.fs`/`ctx.sandbox`/`ctx.shell`/`permissionPresets` | [本次记录](#dsh-020-permissionpresetscatalog-修复2026-10-18) | [0009 修订](../../decisions/ADR-0009-dsh-compat-contract.md) | `f6d81de` | `v0.1.8` |
 | 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
+| 兼容协作 | Auto Review 多根上下文 | 拓扑/有效访问权限/当前项目约束的可信输入；可选外部兼容层及联合验证 | [适配计划](../completed/2026-10-18-auto-review-context-adaptation.md)、[源码调研](../../reference/auto-review-compatibility.md) | [0021](../../decisions/ADR-0021-auto-review-context-companion.md) | `feat/compat-auto-review` | Phase 0–2 已实施；本机验收与旧版回归见[本次记录](#auto-review-多根上下文适配2026-10-18)；仅联合目标 `0.2.1-rc.2`，未发布；Phase 3 不在本批范围 |
 
 ## 总体策略
 
@@ -715,3 +716,69 @@ Windows 实机（非 CI）验证暴露两个 CI 不可见的问题，处置经�
 2. **爆炸半径**：上游 `fs-sandbox`/`sandbox` 被 patch 无条件禁用，而替身 provider 又 inject `multiRootCompat`；门禁一倒 `ctx.fs`/`ctx.sandbox` 消失 → `ctx.shell` → `permissionPresets` 全瘫。修法：两个 provider 行不 inject 门禁——放宽由 scope 驱动、被门禁的 registry 不可能在被拒安装上填充 scope，provider 空 scope 即上游等价。宽授权行（providers/registry/instructions/lsp/workspace-files/process-fence）门禁不变，`mixed`/`incomplete` 依旧 fail-closed。
 
 落点：`src/compat/dsh-version.ts`、`src/fs.ts`、`src/sandbox.ts`、`src/compat.ts`、`cordis.patch.yml`、`scripts/check-dsh-compat.mjs`、`src/index.ts`、`tests/compat.spec.ts`；文档：ADR-0009 修订节（2026-10-18）、故障排查条目退化形态更正、`.agent/note/dsh-compat-contract.{md,en.md}` §2/§10、AGENTS.md 不变量 #7。同期观测的 `job/registered` 未知事件报错经查证为 0.2.1 线 harness 写入的 session 日志被 0.2.0 reader 读取，与本插件无关。
+
+## Auto Review 多根上下文适配（2026-10-18）
+
+工作分支 `feat/compat-auto-review` 从 `main` 的 `15c1d26` 创建，保留了调研、计划及导航的未提交修改。上游核对为 `dsh-v0.2.1-rc.2` / `687f282e8625c6b8d11ff58211a90524be2e4317`，没有编辑上游源码、安装包或检出其旧构建产物。实现设计和维护边界见 [ADR-0021](../../decisions/ADR-0021-auto-review-context-companion.md)，阶段范围见[已归档计划](../completed/2026-10-18-auto-review-context-adaptation.md)。主包版本仍为 `0.1.8`，未创建 tag、未发布 companion；普通支持 allowlist、provider 门禁例外与默认 Auto 行为不变。
+
+### 装配与请求证据
+
+Phase 0 先在隔离 profile 中验证官方 Auto Review / Multi-root 两种顺序：web 和 headless 均启动，fs/sandbox、Registry 和官方 Auto 可用。确认 Loader 的 id patch 只能作用于此前的 insert 后，采用显式 enable 顺序校验，不依赖碰撞或静默 patch 跳过。headless 装配探针禁用 launcher，避免自动发起无关任务；原有 headless journey 仍实跑。
+
+`pnpm smoke:auto-review` 的 source/link 腿运行 web/headless × 两种顺序，共四组；packed 腿把主包和 companion **分别打包并实际安装**，运行 web/headless 两组。每组依次验证：普通安装不发布 Auto 或 context → 官方 owner → 安装 companion、执行安装副本的 enable CLI → 单一兼容 owner → 捕获两次真实 reviewer 请求 → 固定 allow 对可写根写入成功、对只读根拒写且原字节不变 → live disable 迁移存活 Auto 到 Full access 并恢复官方 → live re-enable 仍只有一个 owner且不自动重选 Auto → 重启恢复 → 实际移除 companion 包保留官方选择。总计 **6 组 / 12 次工具调用 / 12 次 reviewer 请求**；两包 packed 结构检查含入口、声明、bin、双语 README、MIT 和 FORK 文档。
+
+### 本机完整门禁
+
+执行环境为 macOS arm64 / Node 24，运行的是本仓库锁定的发布包，不是上游 checkout 的 node_modules。`pnpm compat:check` 四方一致；`DSH_PROBE_VERIFIED_DIALECTS=seatbelt pnpm verify:all`（本机为避免 pnpm 的依赖自检误触发重装，使用 `--config.verifyDepsBeforeRun=false`，不改变门禁内容）退出 0：
+
+| 门禁 | 结果 |
+|---|---|
+| lint / 双端 typecheck / 主包与独立 companion build | 通过 |
+| kernel probe | Seatbelt 可执行；bwrap 不存在；Landlock launcher 不存在 |
+| test | **55 文件：54 passed / 1 skipped；828 passed / 64 skipped** |
+| 官方 fork 行为回归 | 31 用例通过；覆盖 native/PTC 身份、风险协议、human/parent/constraint/checkpoint/fact、ask/never、下游 gate、取消和卸载 |
+| 联合 context / fs / PTC | 17 用例通过；真实主根/cwd、三态注册、nested/首次目标/最终 file symlink、resume、更新/删除/撤销/redirect、authority、预算/故障、有界 stream 关闭、人工批准后复核、嵌套/并发 cap；不读取普通目标正文 |
+| native instruction overlap | 6 用例通过；当前 baseline、纯附加帧替换、mixed 帧去重/失败、未登记 cwd 的 native 约束保留 |
+| compose / behavior / journey | **48 / 126 / 62** passed，均 0 failed / 0 skipped |
+| pack:check / packed behavior | **115 成员 / 125** passed，packed behavior 0 failed / 0 skipped |
+| auto-review:fork / smoke:auto-review | 基线与允许差异通过；上述 source 与 packed 六组通过 |
+| docs:check / git diff --check | 通过 |
+
+Seatbelt 证明的断言强制实跑。PTC 联合用例用真实 Node runtime 与 SDK bridge：外层 run_code 不审查，内层 write 每次恰好一次；继承外层 run_code 的 cap；子进程直接 `node:fs` 覆写只读文件也被内核拒绝，原内容不变。人工批准同样不能解除 fs 围栏。成功路径与失败路径的 main Agent delivery bookkeeping 分离，审查发现没有伪造成功 touch。
+
+### 旧版普通插件回归
+
+使用仓库内隔离副本，经既有 upgrade 工具逐版本安装，不切换或回退主工作区。probe 已排除不匹配联合合同的独立 companion 项目，避免全局 overrides 误重指该 fork 的开发依赖；没有放宽普通插件 allowlist。每个已支持旧版运行 `compat:check`、双端 typecheck、build，以及 scope、instructions、tool-access、compat、optional peers、working-directory、durable activity 和 preview 差分八组回归。最终结果在下表记录。
+
+| 运行时（现有 allowlist 中的精确条目） | 共享回归 | 类型 / 构建 / compat |
+|---|---|---|
+| `0.1.5-rc.2` 至 `0.2.1-alpha.1` 的 10 项 | 每项 131 passed / 7 skipped | 通过 |
+| `0.2.1-alpha.2` 至 `0.2.1-rc.1` 的 5 项 | 每项 137 passed / 1 skipped | 通过 |
+
+其中旧宿主缺失 workingDirectory/worktree 的用例按能力明确跳过，剩余 skip 属现有平台/能力条件；不记为原生通过。`0.2.0-rc.2` 还实跑原有完整普通插件路径：compose **48**、behavior **126**、journey **62**、packed behavior **125** 全过，pack:check 通过，确认可选新入口没有重现 `permissionPresets/catalog` 故障。旧版未启用、也不宣称联合 Auto Review 兼容。
+
+### 未覆盖与维护边界
+
+本批没有在 Linux bwrap/Landlock 或 Windows ACL/broker/pwsh/ConPTY 主机上原生执行；相关原有测试按本机平台跳过，已把新增联合 gate 接入现有 OS 矩阵，但没有把尚未运行的远端 CI 写成通过。真实模型语义质量未认证：脚本化 allow 只证明请求来源与内容、单一 owner及执行围栏独立，不能证明误拒绝/误放行率。Phase 3 普通目标源码自动读取未实施。
+
+当前 mixed native 帧若含已失效附加指令，公开接口无法无损拆出其中的 global/primary 正文，本次 review 明确失败；需要重建 producer baseline，必要时用新 Session。指令/根/authority 在等待期间变化同样失败，不沿用旧 allow。已经启动的进程保留旧 kernel snapshot，多次复核不声称消除任意敌对文件系统 TOCTOU。fork 只维护精确基线；正式上下文 API 足够后删除 fork 的迁移合同见 ADR-0021 与 FORK.md。
+
+### 远端 CI 首轮失败与修复
+
+分支首 head `40ec946` 的 [CI run 39130958098](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39130958098)：releases 及全部 Linux/macOS verify 成功，**16 个 Windows verify job 全部失败**，gate 随之失败。三类失败均由本批 Windows 首跑暴露：
+
+| 失败面 | 原因 | 修复 |
+|---|---|---|
+| `0.1.5-rc.2` 至 `0.2.1-alpha.1` 共 10 个 lane 的 install：`@deepseek-ai/dsh-working-directory@<旧版>` 不存在（该包自 `0.2.1-alpha.2` 才发布） | Windows 检出为 CRLF，`upgrade-dsh.mjs` 按字面 `\n` 删不掉 `packages:` 中的 `compat/auto-review` 行，companion 仍留在 workspace（日志 `Scope: all 2 workspace projects`），probe overrides 将其 devDependency 一并重指到不存在的旧版 | `.gitattributes` 增加 `* text=auto eol=lf` 统一 LF 检出；脚本的两处 `packages:` 行编辑同时容忍 `\r?\n` 作防御纵深 |
+| `0.2.1-alpha.2` 至 `0.2.1-rc.1` 共 5 个 lane 的 `auto-review:fork`：`upstream baseline drift` | 同一 CRLF 检出；`check-auto-review-fork.mjs` 对 `upstream.ts` 原始字节计算 sha256 | 同上 `.gitattributes`；这些 lane 顺带验证了 companion 在场但被排除时普通插件门禁全绿 |
+| `0.2.1-rc.2` lane 单测：`reviews real PTC inner fs calls …` 的 worker `Cannot find module` | 联合用例经 `src/sandbox.ts` 挂载 provider，`import.meta.url` 落在 `src/`，widen/restrict 产出的 `src/windows-runner.js` 不存在——与 2026-10-03 Windows 修复记录（PR #7）是同一陷阱 | win32 下该用例改从 `lib/sandbox.js` 挂载 provider，沿用 `tests/windows-multi-root.spec.ts` 的既定选择 |
+
+非 joint 版本本就没有上游 Auto Review：companion 由 upgrade 脚本从 `packages:` 摘除（joint 仅 `0.2.1-rc.2`），`vitest.config.ts`、`build-auto-review.mjs`、`smoke-auto-review.mjs` 也只在精确 pin 下启用；本次修复恢复的是这条既定语义——旧版上该功能视为不存在，不安装、不构建、不验证。远端复验以下一次 CI run 为准，在此之前不把 Windows lane 记为通过。
+
+`87fd7aa` 的 [CI run 39136285430](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39136285430)：三类修复全部生效——`0.1.5-rc.2` 等老版本 Windows install、fork 基线哈希、`0.2.1-rc.2` 联合单测均通过；但同一 lane 的 joint 冒烟暴露第四类失败：companion 启用后 `lib/index.js` 仍引用 `./compat/contract.ts`（`ERR_MODULE_NOT_FOUND …\lib\compat\contract.ts`）。原因是 `build-auto-review.mjs` 的 `neverBundle` 用「不以 `.`/`/` 开头」判定外部依赖，而 rolldown 会用**解析后绝对路径**再次调该谓词——macOS/Linux 的 `/Volumes/…` 以 `/` 开头被正确内联，Windows 的 `D:\…`/`D:/…` 被误判为外部依赖并原样保留 `.ts` specifier。修复改为与 `tsdown.config.ts` 相同的契约：按 companion manifest（dependencies + peerDependencies）枚举外部包名，任何解析形态都不会误伤自有源码；并在构建后断言 `lib/index.js` 不再残留相对导入（单文件产物的既定契约），把这类缺陷挡在本地而非依赖远端冒烟。
+
+`ef6a26c` 的 [CI run 39137744875](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39137744875)：bundle 修复生效，companion 在 Windows 成功导入激活（不再出现 `did not activate`）；冒烟推进到 reviewer 请求断言后暴露第五类失败——`auto-review-battery.mjs` 用 `text.includes(primary)` 匹配 reviewer 文本中的根路径，但该文本经 `JSON.stringify` 渲染，Windows 路径 `D:\…` 被转义为 `D:\\…`（canonical 根另有 `\\?\` 前缀），POSIX 的 `/` 无转义问题故仅 Windows 失败。断言改为按 JSON 转义拼写匹配（去引号后仍为 `\\?\` canonical 形式的子串），产品代码不动。
+
+`15637f8` 的 [CI run 39138769855](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39138769855)：路径断言修复生效，四种组合的完整 battery（装/启/审/停/卸）在 Windows 全部通过；冒烟推进到收尾清理时暴露第六类失败——packed 子进程从安装副本 `dlopen` `koffi.node`（`profiles/<name>/node_modules/@koromix/…/koffi.node`），进程内映射期间 `rmSync` unlink 报 `EPERM`——与 2026-10-17 记录的 smoke-behavior 缺陷同源，只是当时 joint 冒烟在更早的断言处已挂、从未走到清理。修复沿用既定契约：`smoke-auto-review.mjs` 收到 `DSH_SMOKE_DEFER_HOME_CLEANUP` 时把 home 清理移交父进程，`verify-auto-review.mjs` 为每个子进程注入 `DSH_SMOKE_HOME` 并在子进程关闭后以 `removeScratchTree`（有界重试）删除根目录；独立运行保持严格清理语义不变。
+
+`df79b35` 的 [CI run 39139931861](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39139931861)：**66/66 jobs 全部 success**——releases、16 版本 × 4 OS 共 64 条 verify 车道及最终 gate。四轮 Windows 修复（CRLF 检出与行编辑、fork 基线哈希、源码侧 runner 路径、neverBundle 解析后谓词、reviewer 文本 JSON 转义、映射 addon 清理移交）在远端全部复验通过，joint 冒烟在 Windows 上完成 packed/unpacked 双形态全流程。

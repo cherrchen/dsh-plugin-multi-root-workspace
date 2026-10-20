@@ -166,6 +166,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Optional Auto Review fork and joint gates
+        run: pnpm auto-review:fork && pnpm smoke:auto-review
+
       - run: pnpm docs:check
 
       - if: always() && runner.os == 'Windows'

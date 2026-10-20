@@ -136,7 +136,14 @@ function repointManifest(version, cordisVersion) {
 function repointWorkspace(version, cordisVersion) {
   const source = readFileSync(WORKSPACE, 'utf8')
   let count = 0
-  let updated = source.replace(/^(\s*- '@deepseek-ai\/dsh(?:-[\w-]+)?)@[^']+'$/gmu, (line, prefix) => {
+  // This independent fork has an exact joint contract. Do not apply the
+  // probe's global overrides to its own pinned development tree on an old
+  // ordinary-plugin lane (some of these APIs did not exist there at all).
+  const companion = JSON.parse(readFileSync(join(REPO_ROOT, 'compat/auto-review/package.json'), 'utf8'))
+  const joint = companion.peerDependencies['@deepseek-ai/dsh-tools'] === version
+  let workspaceSource = source.replace(/^  - compat\/auto-review\r?\n/mu, '')
+  if (joint) workspaceSource = workspaceSource.replace(/^(  - \.)(\r?\n)/mu, `$1$2  - compat/auto-review$2`)
+  let updated = workspaceSource.replace(/^(\s*- '@deepseek-ai\/dsh(?:-[\w-]+)?)@[^']+'$/gmu, (line, prefix) => {
     count += 1
     return `${prefix}@${version}'`
   })

@@ -23,6 +23,7 @@ Only established, relatively stable factual reference content belongs here.
 
 ## Current State
 
+- [auto-review-compatibility.md](./auto-review-compatibility.md) (Chinese) — Review context, source roles, tool scheduling order, and external integration seams in Auto Review `0.2.1-rc.2`.
 - [multi-root-workspace-research.md](./multi-root-workspace-research.md) — Snapshot research of the upstream repository's Workspace / Sandbox / plugin system (master `c291e7961a`; §8 covers the supplementary research on the no-upstream-changes mechanism).
 
 ## Naming Convention

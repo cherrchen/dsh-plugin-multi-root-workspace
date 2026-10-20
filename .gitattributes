@@ -1,0 +1,7 @@
+# Text is checked out LF on every platform: the upgrade lane rewrites
+# pnpm-workspace.yaml line-wise and the fork gate hashes upstream.ts, and a
+# CRLF working tree silently changes both inputs.
+* text=auto eol=lf
+
+# Unified patch context lines retain their required leading space.
+compat/auto-review/fork.patch whitespace=-blank-at-eol

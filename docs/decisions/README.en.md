@@ -50,3 +50,5 @@ ADR-0002-short-title.md
 ```
 
 Numbers increment; titles use lowercase kebab-case.
+
+- [ADR-0021-auto-review-context-companion.md](./ADR-0021-auto-review-context-companion.md) — Optional Auto Review companion, shared tool permission preview, current constraints, native overlap, fail-closed checks and fork synchronization (Accepted).

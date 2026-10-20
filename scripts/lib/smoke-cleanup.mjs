@@ -24,7 +24,7 @@ export async function removeScratchTree(root) {
 /** Only the packed-smoke parent opts in: it removes the tree after close. */
 export async function removeBehaviorHome(root, deferToParent = false) {
   if (deferToParent) {
-    console.log(`[smoke:behavior] deferred scratch home cleanup to parent after exit: ${root}`)
+    console.log(`[smoke] deferred scratch home cleanup to parent after exit: ${root}`)
     return
   }
   await removeScratchTree(root)

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 
@@ -11,7 +12,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx', 'tests/**/*.e2e.ts'],
+    include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx', 'tests/**/*.e2e.ts', ...(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).devDependencies['@deepseek-ai/dsh'] === '0.2.1-rc.2' ? ['compat/auto-review/tests/**/*.spec.ts'] : [])],
     pool: 'forks',
     testTimeout: 30_000,
   },

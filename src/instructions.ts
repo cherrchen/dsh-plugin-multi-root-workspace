@@ -47,6 +47,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { stat as nodeStat } from 'node:fs/promises'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -64,9 +65,28 @@ import { createInstructionMessage } from './compat/llm-message.ts'
 import { toolResultFailed } from './compat/tool-result.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
 import { aroundTool, type ToolCaller } from './compat/tool-context.ts'
+import { FILE_TOUCH_TOOL_NAMES, ptcFileActivity, replayedInstructionTargets, touchedPathOfToolCall } from './compat/instruction-activity.ts'
 import { nativeInstructionCopies } from './compat/instruction-overlap.ts'
 import { isCanonicallyUnder } from './roots.ts'
 import type {} from './scope.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    multiRootInstructions: {
+      knownRoots(session: object): readonly string[]
+      snapshot(agent: Agent, roots: readonly string[], target: string | undefined, signal: AbortSignal): Promise<readonly CurrentRootInstruction[]>
+    }
+  }
+}
+
+/** Current constraints; never delivery deltas or authorization. */
+export interface CurrentRootInstruction {
+  readonly root: string
+  readonly path: string
+  readonly relativeDirectory: string
+  readonly digest: string
+  readonly text: string
+}
 
 /** The `plugin` attribution every message this row produces carries. */
 export const PLUGIN_SOURCE = '@dsh-electron/dsh-plugin-multi-root-workspace'
@@ -81,8 +101,8 @@ export const DEFAULT_MAX_BYTES = 65536
 /** Largest instruction file this row will read; larger files are ignored. */
 export const DEFAULT_MAX_SOURCE_BYTES = 32768
 
-/** Tools whose SUCCESS makes the directories on the path to the file relevant. */
-const FILE_TOUCH_TOOL_NAMES: Record<string, true> = { read: true, write: true, edit: true }
+// A successful read/write/edit makes the directories on the path to the file
+// relevant; FILE_TOUCH_TOOL_NAMES is shared with the review-context replay.
 
 /** Cap on unanswered `tool/call` records remembered per session. */
 const MAX_PENDING_CALLS = 128
@@ -121,8 +141,13 @@ interface DeliveredScope {
 interface SessionState {
   /** Delivered instruction files, keyed by {@link scopeKey}. */
   readonly scopes: Map<string, DeliveredScope>
+  /** Historical provenance, retained after delivery withdrawal; never grants access. */
+  readonly provenanceRoots: Set<string>
   /** Absolute paths touched by a successful tool call since the last evaluation. */
   readonly touched: Set<string>
+  /** Successful work index retained independently of delivery deltas. */
+  readonly worked: Set<string>
+  overflow?: boolean
 }
 
 /** Unanswered `tool/call` records, by call id, so a result can name its tool. */
@@ -179,21 +204,7 @@ function relativeDirectoryOf(root: string, directory: string): string {
  * @param argumentsJson - the tool call's raw arguments, exactly as produced.
  * @returns the trimmed absolute-or-relative path, or `undefined`.
  */
-export function touchedPathOfToolCall(name: string, argumentsJson: string): string | undefined {
-  if (FILE_TOUCH_TOOL_NAMES[name] !== true) return undefined
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(argumentsJson)
-  } catch {
-    return undefined
-  }
-  if (typeof parsed !== 'object' || parsed === null) return undefined
-  if (!('file_path' in parsed)) return undefined
-  const path = parsed.file_path
-  if (typeof path !== 'string') return undefined
-  const trimmed = path.trim()
-  return trimmed.length > 0 ? trimmed : undefined
-}
+export { touchedPathOfToolCall } from './compat/instruction-activity.ts'
 
 /**
  * The directory a touched path's instructions would live in.
@@ -291,7 +302,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const stateOf = (session: object): SessionState => {
     const existing = states.get(session)
     if (existing !== undefined) return existing
-    const created: SessionState = { scopes: new Map(), touched: new Set() }
+    const created: SessionState = { scopes: new Map(), provenanceRoots: new Set(), touched: new Set(), worked: new Set() }
     states.set(session, created)
     return created
   }
@@ -303,39 +314,88 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.on('session/event', (session, event) => {
     const pendingCalls = callsBySession.get(session) ?? new Map()
     callsBySession.set(session, pendingCalls)
-    if (event.type === 'tool/call') {
+    const ptc = ptcFileActivity(event)
+    if (event.type === 'tool/call' || ptc?.kind === 'start') {
       if (pendingCalls.size >= MAX_PENDING_CALLS) {
         const oldest = pendingCalls.keys().next()
         if (!oldest.done) pendingCalls.delete(oldest.value)
       }
-      pendingCalls.set(event.data.callId, { name: event.data.name, arguments: event.data.arguments, cwd: effectiveDirectory(ctx, session) })
+      const call = ptc?.kind === 'start' ? {callId:ptc.id,name:ptc.name,arguments:ptc.arguments} : event.type === 'tool/call' ? event.data : undefined
+      if (call !== undefined) pendingCalls.set(call.callId, { name: call.name, arguments: call.arguments, cwd: effectiveDirectory(ctx, session) })
       return
     }
-    if (event.type !== 'tool/result') return
-    const callId = event.data.message.source.callId
+    if (event.type !== 'tool/result' && ptc?.kind !== 'end') return
+    const callId = ptc?.kind === 'end' ? ptc.id : event.type === 'tool/result' ? event.data.message.source.callId : ''
     const call = pendingCalls.get(callId)
     pendingCalls.delete(callId)
     if (call === undefined) return
     // A failed call never makes a directory relevant: the file may not have
     // been reached at all. The failure bit moved between releases; the adapter
     // reads both spellings.
-    if (event.data.error !== undefined || toolResultFailed(event.data.message)) return
+    if (ptc?.kind === 'end' ? ptc.failed : event.type === 'tool/result' && (event.data.error !== undefined || toolResultFailed(event.data.message))) return
     const path = call.observedPath ?? touchedPathOfToolCall(call.name, call.arguments)
     if (path === undefined) return
     const state = stateOf(session)
+    const absolute = isAbsolute(path) ? path : call.cwd === undefined ? undefined : resolve(call.cwd, path)
+    if (absolute !== undefined) {
+      if (state.worked.size >= MAX_DELIVERED_SCOPES && !state.worked.has(absolute)) state.overflow = true
+      else state.worked.add(absolute)
+    }
     if (state.touched.size >= MAX_TOUCHED_PATHS) return
     if (isAbsolute(path)) state.touched.add(path)
     else if (call.cwd !== undefined) state.touched.add(resolve(call.cwd, path))
   })
 
   ctx.inject(['fs'], (scope: Context) => {
+    scope.provide('multiRootInstructions', {
+      knownRoots(session) { return [...(states.get(session)?.provenanceRoots ?? [])] },
+      async snapshot(agent, roots, target, signal) {
+        signal.throwIfAborted()
+        if (roots.length === 0) return []
+        const api = await instructionsApi()
+        if (api === undefined) throw new Error('review-context: instruction discovery unavailable')
+        const existing = states.get(agent.session)
+        if (existing?.overflow) throw new Error('review-context: successful work index exceeded')
+        // Copy the scope index; invalidate ONLY this copy's digests to collect
+        // all current files, including unchanged and formerly native copies.
+        const state: SessionState = {
+          scopes: new Map([...(existing?.scopes ?? [])].map(([key, value]) => [key, { ...value, digest: undefined }])),
+          provenanceRoots: new Set(existing?.provenanceRoots),
+          touched: new Set([...(existing?.touched ?? []), ...(existing?.worked ?? [])]),
+          worked: new Set(),
+        }
+        // Seed events do not publish session/event on resume. Read their
+        // successful activity without mutating the main agent's delivery index.
+        // oxlint-disable-next-line typescript/no-deprecated -- No public activity projection exists.
+        for (const path of replayedInstructionTargets(agent.session.snapshotEvents(), agent.session.header.cwd)) state.touched.add(path)
+        if (target !== undefined) state.touched.add(target)
+        // Native discovery can already cover this directory before any file
+        // tool succeeds. Recollect that chain before replacing native frames,
+        // without recording cwd as successful activity or delivery state.
+        const cwd = effectiveDirectory(scope, agent.session)
+        const reviewCwd = cwd === undefined ? undefined : canonicalPath(cwd)
+        const result: CurrentRootInstruction[] = []
+        for (const root of roots) {
+          const plan = await planRoot(scope, api, root, config, state, signal, true, reviewCwd)
+          for (const {file} of plan.deliveries) {
+            result.push({ root, path: file.absolutePath, relativeDirectory: relativeDirectoryOf(root, dirname(file.absolutePath)),
+              digest: digestOf(file.content), text: file.content })
+          }
+        }
+        signal.throwIfAborted()
+        // Metadata counts too, and no partial constraint is ever returned.
+        if (Buffer.byteLength(JSON.stringify(result), 'utf8') > maxBytes) throw new Error('review-context: instruction budget exceeded')
+        return result
+      },
+    })
     // Native tools report the actual canonical target with their execution as
     // actor. Prefer it over a pre-dispatch cwd snapshot: ensure() may recover a
     // missing cwd, and a directory change can race the tool's async resolution.
     scope.on('fs/observed', (target, _observation, actor) => {
       const exec = executions.getStore()
       if (exec?.agent === undefined || FILE_TOUCH_TOOL_NAMES[exec.name] !== true || actor !== exec) return
-      const call = callsBySession.get(exec.agent.session)?.get(exec.callId)
+      const calls = callsBySession.get(exec.agent.session)
+      const call = calls?.get(exec.callId) ?? calls?.get(`ptc:${exec.callId}`)
       if (call !== undefined) call.observedPath = scope.fs.processPath(target)
     })
     scope.on('agent/pre-step', async ({ agent, messages, signal }, next) => {
@@ -378,7 +438,7 @@ async function pending(
   messages: readonly UserMessage[],
 ): Promise<UserMessage | undefined> {
   const session = agent.session
-  const state: SessionState = states.get(session) ?? { scopes: new Map(), touched: new Set() }
+  const state: SessionState = states.get(session) ?? { scopes: new Map(), provenanceRoots: new Set(), touched: new Set(), worked: new Set() }
   states.set(session, state)
   const evaluatedTouches = new Set(state.touched)
   let retryTouches = false
@@ -457,7 +517,10 @@ async function pending(
       for (const [key, entry] of state.scopes) if (entry.root === root) state.scopes.delete(key)
     }
     for (const entry of gone) state.scopes.delete(entry.key)
-    for (const entry of liveUpdates) state.scopes.set(entry.key, entry.scope)
+    for (const entry of liveUpdates) {
+      state.scopes.set(entry.key, entry.scope)
+      state.provenanceRoots.add(entry.scope.root)
+    }
   }
   return message
 }
@@ -506,12 +569,16 @@ interface DirectoryWalk {
  * of that directory's ancestors up to the root, because discovery reports an
  * intermediate directory's file but only the exact directory's candidates
  * survive the filter below.
+ * A strict review can also seed its effective cwd chain without recording a
+ * successful touch; ordinary pre-step delivery never supplies that seed.
  * @param ctx - the row's context, for `fs` and the logger.
  * @param api - the adapted upstream instruction surface.
  * @param root - the canonical additional root.
  * @param config - the row's configuration.
  * @param state - the session's delivery state.
  * @param signal - the turn's cancellation signal.
+ * @param strict - fail on incomplete review discovery instead of deferring delivery.
+ * @param reviewCwd - review-only directory seed; never a successful touch.
  * @returns the files to send and the deliveries to withdraw.
  */
 async function planRoot(
@@ -521,6 +588,8 @@ async function planRoot(
   config: Config,
   state: SessionState,
   signal: AbortSignal,
+  strict = false,
+  reviewCwd?: string,
 ): Promise<RootPlan> {
   const delivered = new Map<string, DeliveredScope>()
   for (const [key, entry] of state.scopes) if (entry.root === root) delivered.set(key, entry)
@@ -530,8 +599,9 @@ async function planRoot(
     const dir = dirname(entry.path)
     if (dir !== root) dirs.add(dir)
   }
-  for (const touched of state.touched) {
-    const parent = parentDirectoryOf(touched)
+  const parents = [...state.touched].map(parentDirectoryOf)
+  if (reviewCwd !== undefined) parents.push(reviewCwd)
+  for (const parent of parents) {
     if (parent === undefined || !isCanonicallyUnder(parent, root)) continue
     // Every ancestor up to the root, not just the file's own directory. The
     // walk for `<root>/a/b` REPORTS `<root>/a/AGENTS.md` (discovery walks
@@ -555,7 +625,7 @@ async function planRoot(
     signal.throwIfAborted()
     walks.push({
       relativeDirectory: relativeDirectoryOf(root, dir),
-      read: await loadDirectory(ctx.fs, api, root, config, signal, dir),
+      read: await loadDirectory(ctx.fs, api, root, config, signal, dir, strict),
     })
   }
   // Shallow first, so the model reads the broader rules before the narrower
@@ -582,7 +652,7 @@ async function planRoot(
       const previous = delivered.get(key)
       if (previous !== undefined && previous.digest === digestOf(file.content)) continue
       if (previous === undefined && walk.relativeDirectory !== '.') {
-        if (state.scopes.size >= MAX_DELIVERED_SCOPES) {
+        if (!strict && state.scopes.size >= MAX_DELIVERED_SCOPES) {
           if (!scopeCapWarned) {
             scopeCapWarned = true
             ctx.logger.warn('multi-root workspace: additional-root instruction scopes capped at %d', MAX_DELIVERED_SCOPES)
@@ -609,6 +679,24 @@ interface DirectoryRead {
   readonly files: readonly LoadedInstructionFile[]
   /** Whether the walk itself succeeded; a failed walk judges nothing. */
   readonly probed: boolean
+}
+
+/** Bounded provider read; an over-budget source never becomes a partial constraint. */
+async function readReviewInstruction(
+  fs: FileSystem,
+  target: Parameters<FileSystem['streamText']>[0],
+  signal: AbortSignal,
+  maxBytes: number,
+): Promise<string> {
+  const chunks: string[] = []
+  let bytes = 0
+  for await (const chunk of await fs.streamText(target, signal)) {
+    signal.throwIfAborted()
+    bytes += Buffer.byteLength(chunk, 'utf8')
+    if (bytes > maxBytes) throw new Error('review-context: instruction source budget exceeded')
+    chunks.push(chunk)
+  }
+  return chunks.join('')
 }
 
 /**
@@ -644,9 +732,26 @@ async function loadDirectory(
   config: Config,
   signal: AbortSignal,
   cwd: string,
+  strict = false,
 ): Promise<DirectoryRead> {
-  const maxSourceBytes = config.maxSourceBytes ?? DEFAULT_MAX_SOURCE_BYTES
+  const configuredSourceBytes = config.maxSourceBytes ?? DEFAULT_MAX_SOURCE_BYTES
+  if (strict && (!Number.isFinite(configuredSourceBytes) || configuredSourceBytes <= 0)) throw new Error('review-context: invalid source budget')
+  const maxSourceBytes = strict ? Math.min(configuredSourceBytes, DEFAULT_MAX_BYTES) : configuredSourceBytes
   let candidates: readonly InstructionFile[]
+  if (strict) {
+    // Upstream discovery deliberately treats probe failures as absent. A review
+    // may not do that. Preflight this exact directory's configured candidates;
+    // normal missing/non-file paths still are absence, permission/I/O errors are not.
+    for (const name of [...(config.instructionFileCandidates ?? ['AGENTS.md', 'CLAUDE.md']),
+      ...(config.localInstructionFileCandidates ?? ['AGENTS.local.md', 'CLAUDE.local.md'])]) {
+      if (basename(name) !== name || name === '.' || name === '..') throw new Error('review-context: invalid instruction candidate')
+      signal.throwIfAborted()
+      try { await nodeStat(resolve(cwd, name)) } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw new Error('review-context: instruction probe failed')
+      }
+    }
+  }
   try {
     candidates = await api.discover({
       cwd,
@@ -657,7 +762,8 @@ async function loadDirectory(
       ...(config.instructionFileCandidates === undefined ? {} : { instructionFileCandidates: config.instructionFileCandidates }),
       ...(config.localInstructionFileCandidates === undefined ? {} : { localInstructionFileCandidates: config.localInstructionFileCandidates }),
     })
-  } catch {
+  } catch (error) {
+    if (strict) throw error
     // Discovery probes a directory that may have vanished between the scope
     // resolution and this read. A directory that cannot be discovered
     // contributes nothing; it is not a reason to fail the model's step.
@@ -676,11 +782,17 @@ async function loadDirectory(
       if (!isCanonicallyUnder(path, root)) continue
       const info = await fs.stat(target, signal)
       if (info === undefined || info.type !== 'file') continue
-      if (info.size !== undefined && info.size > maxSourceBytes) continue
-      const content = await fs.readText(target, signal)
+      if (info.size !== undefined && info.size > maxSourceBytes) {
+        if (strict) throw new Error('review-context: instruction source budget exceeded')
+        continue
+      }
+      const content = strict ? await readReviewInstruction(fs, target, signal, maxSourceBytes) : await fs.readText(target, signal)
+      if (strict && Buffer.byteLength(content, 'utf8') > maxSourceBytes) throw new Error('review-context: instruction source budget exceeded')
+      if (strict && canonicalPath(candidate.absolutePath) !== path) throw new Error('review-context: instruction identity changed')
       if (canonicalPath(candidate.absolutePath) !== path || !isCanonicallyUnder(path, root)) continue
       files.push({ ...candidate, displayPath: candidate.absolutePath, content })
-    } catch {
+    } catch (error) {
+      if (strict) throw error
       continue
     }
   }

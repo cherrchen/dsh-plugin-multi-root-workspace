@@ -45,6 +45,7 @@ active:
 
 completed:
 
+- [2026-10-18-auto-review-context-adaptation.md](./completed/2026-10-18-auto-review-context-adaptation.md) (Chinese) — Phase 0–2 implementation plan: the explicit companion fork, shared permission preview, current constraints, joint verification, and migration to a formal upstream API; status and evidence belong to the roadmap ledger.
 - [2026-10-13-b9-root-access-and-sandbox-modes.md](./completed/2026-10-13-b9-root-access-and-sandbox-modes.md) (Chinese) — B9 implementation plan: inherited, read-only, and read-write additional-root policies enforced across SandboxMode values, covering migration, process entry points, native backend feasibility, and acceptance checks. Progress and release state belong to the progress ledger.
 - [2026-09-12-m1-composition-and-passthrough.md](./completed/2026-09-12-m1-composition-and-passthrough.md) — M1 development plan: bundle skeleton, two-row provider replacement, empty-root pass-through (implemented and verified 2026-09-12, released with `v0.1.0`).
 - [2026-09-12-m2-additional-roots-and-dialect-grants.md](./completed/2026-09-12-m2-additional-roots-and-dialect-grants.md) — M2 development plan: dialect grant widening, the parity matrix, the topology snapshot, and the multi-root smoke battery (implemented and verified 2026-09-12, released with `v0.1.0`).

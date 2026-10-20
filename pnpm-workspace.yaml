@@ -1,5 +1,6 @@
 packages:
   - .
+  - compat/auto-review
 
 # Native dependency build scripts this repository's toolchain needs to run.
 # Keep the list explicit: pnpm blocks unlisted build scripts by default.
