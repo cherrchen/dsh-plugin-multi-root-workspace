@@ -38,3 +38,13 @@ export function configValue(value: unknown): unknown {
   }
   return value
 }
+
+/** Cold Browser Catalog supplies a Session header, never a fabricated Agent. */
+export async function observedSkillOrigin(ctx: Context, sessionId: string): Promise<string> {
+  const query = ctx.get('sessionQuery')
+  if (query === undefined) throw new Error('multi-root skills: SessionQuery is unavailable')
+  using observation = await query.observeSession(sessionId as Agent['id'])
+  const cwd = observation.header.cwd
+  if (typeof cwd !== 'string' || cwd === '') throw new Error('multi-root skills: Session has no origin')
+  return canonicalPath(cwd)
+}
