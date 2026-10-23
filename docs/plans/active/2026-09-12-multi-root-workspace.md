@@ -795,7 +795,7 @@ Seatbelt 证明的断言强制实跑。PTC 联合用例用真实 Node runtime �
 
 ## Multi-root Skills 架构验证（2026-10-23）
 
-用户授权在 `feat/additional-root-skills` 上完成 Proposed ADR 的剩余工程验证，再定案并拆分计划。问题源为 Issue #17；[ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) 已据此升级为 **Accepted（架构定案）**。源码事实归[接缝调研](../../reference/multi-root-skills-seams.md)，S1–S7 任务和退出条件归[实施计划](./2026-10-23-multi-root-skills.md)。**生产功能尚未实施、未发布，A1–A13 尚未完成最终验收。**
+用户授权在 `feat/additional-root-skills` 上完成 Proposed ADR 的剩余工程验证，再定案并拆分计划。问题源为 Issue #17；[ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) 已据此升级为 **Accepted（架构定案）**。源码事实归[接缝调研](../../reference/multi-root-skills-seams.md)，S1–S7 任务和退出条件归[实施计划](./2026-10-23-multi-root-skills.md)。**生产功能开发中、未发布，A1–A13 尚未完成最终验收。**
 
 ### 执行范围与结果
 
@@ -831,4 +831,12 @@ macOS / Node `24.18.0`：**13 组检查通过**。其中一组对 `SUPPORTED_DSH
 
 ### 后续进度
 
-S1–S7 **均待实施**。本批产物是架构决策、可重复原型、源码参考和开发计划；没有新版本、tag 或发布承诺。
+2026-10-23 开始连续实施，按阶段保存可分批应用的 checkpoint；不创建发布版本或 tag。
+
+| 阶段 | 状态与证据 |
+| --- | --- |
+| S1 | 装配完成。新增独立 Skills entry / patch 行、可选 peer 分类、scope 身份与 Config 接缝。正式 `skills-compat.spec.ts` 随既有版本矩阵运行；本机 rc.2 的 4 个相关测试文件共 53 passed / 1 既有 skip，host typecheck、build、定向 lint、compat:check 通过。其余版本动态执行留在 S7，不扩大本机证据。 |
+| S2 | 开发中 |
+| S3–S7 | 待实施 |
+
+C0 保存既有架构文档与原型；C1 保存 S1。checkpoint 为本机临时快照仓库中的增量 patch，正式仓库未提交；后续阶段继续基于同一工作树。

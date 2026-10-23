@@ -66,6 +66,7 @@ const hostConfig: UserConfig = {
     'registry': 'src/registry.ts',
     'providers': 'src/providers.ts',
     'instructions': 'src/instructions.ts',
+    'skills': 'src/skills.ts',
     'review-context': 'src/review-context.ts',
     'command': 'src/command.ts',
     'lsp': 'src/lsp.ts',

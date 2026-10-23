@@ -2,7 +2,7 @@
 
 ## Goal
 
-实施 [ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)：附加根 Skill 的首步发现、命名空间调用、独立 Root 开关和插件详情全局配置。架构已接受，功能实施尚未开始；进度、执行证据和发布状态只见[路线账本](./2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。
+实施 [ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)：附加根 Skill 的首步发现、命名空间调用、独立 Root 开关和插件详情全局配置。架构已接受，功能正在实施；进度、执行证据和发布状态只见[路线账本](./2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。
 
 ## Background
 
@@ -10,7 +10,7 @@
 
 ## Current State
 
-现有 Registry、命令和 Dialog 没有 aliasId/skillsEnabled；patch、exports 与 Client 中尚无 Skills 行、命名空间菜单、读端点或 Settings 卡片。已发布兼容集合保持不变。当前原型的 roots Map、迁移函数与临时 profile 不能取代生产 Registry、lease 或 Gateway 集成。
+实施前基线：Registry、命令和 Dialog 没有 aliasId/skillsEnabled；patch、exports 与 Client 中没有 Skills 行、命名空间菜单、读端点或 Settings 卡片。已发布兼容集合保持不变。当前原型的 roots Map、迁移函数与临时 profile 不能取代生产 Registry、lease 或 Gateway 集成。
 
 ## Scope / Non-goals
 

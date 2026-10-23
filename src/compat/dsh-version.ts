@@ -59,6 +59,12 @@ export const REQUIRED_CORE_PACKAGES = [
  * that is the mixed-installation failure this contract exists to catch.
  */
 export const OPTIONAL_CORE_PACKAGES = [
+  '@deepseek-ai/dsh-skill',
+  '@deepseek-ai/dsh-skill-filesystem',
+  '@deepseek-ai/dsh-settings',
+  '@deepseek-ai/dsh-api-session-controller',
+  '@deepseek-ai/dsh-session-query',
+
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-working-directory',
   '@deepseek-ai/dsh-lsp',
@@ -84,6 +90,7 @@ export const OPTIONAL_CORE_PACKAGES = [
  * that disagrees with the host is a real mixed installation, not a phantom.
  */
 export const RUNTIME_OPTIONAL_PACKAGES = [
+  '@deepseek-ai/dsh-skill-filesystem',
   '@deepseek-ai/dsh-agent-instructions',
   '@deepseek-ai/dsh-llm',
   '@deepseek-ai/dsh-session',
@@ -104,6 +111,11 @@ export const RUNTIME_OPTIONAL_PACKAGES = [
  * uniformly `0.2.0-rc.2` installation).
  */
 export const HOST_SERVICE_PACKAGES = [
+  '@deepseek-ai/dsh-skill',
+  '@deepseek-ai/dsh-settings',
+  '@deepseek-ai/dsh-api-session-controller',
+  '@deepseek-ai/dsh-session-query',
+
   '@deepseek-ai/dsh-agent',
   '@deepseek-ai/dsh-api-workspace-files',
   '@deepseek-ai/dsh-client-connection',

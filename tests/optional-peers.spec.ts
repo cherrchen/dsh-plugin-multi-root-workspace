@@ -10,6 +10,11 @@
 import { describe, expect, it, vi } from 'vitest'
 
 let llmLoaded = false
+let filesystemSkillsLoaded = false
+vi.mock('@deepseek-ai/dsh-skill-filesystem', () => {
+  filesystemSkillsLoaded = true
+  return {}
+})
 
 vi.mock('@deepseek-ai/dsh-llm', () => {
   llmLoaded = true
@@ -31,6 +36,8 @@ describe('the optional LLM peer', () => {
     // property under test.
     await expect(import('../src/index.ts')).resolves.toBeDefined()
     await expect(import('../src/instructions.ts')).resolves.toBeDefined()
+    await expect(import('../src/skills.ts')).resolves.toBeDefined()
+    expect(filesystemSkillsLoaded).toBe(false)
     expect(llmLoaded).toBe(false)
   })
 })
