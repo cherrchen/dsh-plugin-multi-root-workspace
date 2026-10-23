@@ -13,7 +13,7 @@ Architecture Decision Records (ADRs), capturing important architecture and engin
 
 ## What Does Not Belong Here
 
-- Discussions or proposals that have not become decisions;
+- Raw discussions or proposals not yet shaped into a reviewable ADR (an ADR with agreed product rules and an architecture awaiting validation may be marked Proposed);
 - Day-to-day development plans (goes to `../plans/`).
 
 ## Current State
@@ -54,3 +54,5 @@ Numbers increment; titles use lowercase kebab-case.
 - [ADR-0021-auto-review-context-companion.md](./ADR-0021-auto-review-context-companion.md) — Optional Auto Review companion, shared tool permission preview, current constraints, native overlap, fail-closed checks and fork synchronization (Accepted).
 
 - [ADR-0022-auto-review-loader-entry.md](./ADR-0022-auto-review-loader-entry.md) (Chinese) — Auto Review in the main package: one default-disabled Loader row, runtime takeover, in-flight import suppression, ordered owner handover, and a single package build; replaces ADR-0021's delivery structure.
+
+- [ADR-0023-multi-root-skill-discovery-and-invocation.md](./ADR-0023-multi-root-skill-discovery-and-invocation.md) (Chinese) — Additional-root Skills: access-based defaults, aliasId namespaces, trusted Session scopes, native internal-ID bridging, effective-cwd discovery routing, Settings and migration boundaries (Accepted architecture; feature implementation pending).

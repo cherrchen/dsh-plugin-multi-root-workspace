@@ -791,3 +791,44 @@ Seatbelt 证明的断言强制实跑。PTC 联合用例用真实 Node runtime �
 已移入 `src/auto-review/`，增加主包 `./auto-review` 导出和默认 disabled 的 `multi-root-auto-review` 行；context/reviewer 共用一个开关。configure、独立 manifest/workspace、第二 tarball 与版本协调退役。精确 fork 仍仅支持 `0.2.1-rc.2`，普通 allowlist 未变。
 
 最小真实 loader 验证已通过两种顺序、延迟 import、反复 reload、官方原有 disabled、官方后加入/移除与描述符恢复。真实 profile 联合回归（source 与 packed 双车道、web/headless × 官方前后序、默认零挂载、live 接管/恢复/再启用、真实 reviewer 请求）已通过；typecheck 双通道、全量 vitest、lint、docs:check、pack:check、compat/fork 门禁全绿。官方 bundle 未选择时入口独立运行（自身注册 Auto preset），已在 README/ADR-0022 写明。`verify:all` 全项在本机通过（含 kernel:probe、compose/behavior/journey/packed 与 auto-review 双车道 smoke）。合入后 `main` 的多 OS CI 已复验：`9138084` 的 [CI run 39399743823](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39399743823) 全绿（含各支持版本的 Windows/Linux/macOS 车道）。随 `v0.1.9` 发版。
+
+
+## Multi-root Skills 架构验证（2026-10-23）
+
+用户授权在 `feat/additional-root-skills` 上完成 Proposed ADR 的剩余工程验证，再定案并拆分计划。问题源为 Issue #17；[ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) 已据此升级为 **Accepted（架构定案）**。源码事实归[接缝调研](../../reference/multi-root-skills-seams.md)，S1–S7 任务和退出条件归[实施计划](./2026-10-23-multi-root-skills.md)。**生产功能尚未实施、未发布，A1–A13 尚未完成最终验收。**
+
+### 执行范围与结果
+
+上游只读检出为 `dsh-v0.2.1-rc.2` / `687f282e8625c6b8d11ff58211a90524be2e4317`，未修改上游文件或切换其版本。本地运行时从本插件的 DSH 安装锚点解析，版本 `0.2.1-rc.2`；没有重指主 manifest/lockfile 或扩大支持集合。
+
+可复现命令：
+
+```sh
+node --experimental-transform-types scripts/probe-multi-root-skills.mjs --upstream <upstream-checkout>
+```
+
+macOS / Node `24.18.0`：**13 组检查通过**。其中一组对 `SUPPORTED_DSH_RELEASES` 当前全部 **16 个 tag** 进行源码契约审查并输出 source 摘要与能力标志；其余为当前 pin 的发布模块和 UI 纯核原型，不等于 16 个独立运行时或完整 OS 矩阵。
+
+| 原型证据 | 结果 |
+| --- | --- |
+| 真实 Registry、首步 pre-step、原生 skill 定义 | 首步有目录而无完整正文；两 Origin 共用 effective cwd 并发加载隔离；带父 scope 的子 Agent 按自身 Origin 选择根；缺失 scope 不贡献 |
+| 真实 SessionSkillCatalog 与 invocation | 内部候选退出原生人类目录；user-only 可经 Alias 加载而模型拒绝；model-only 不进入 Alias；原生冒号参数被拒绝 |
+| Alias pre-step | 保留用户原文，正文追加在 native Catalog 后；只解析本批用户消息；外部来源不能伪造手势 |
+| 失效与原生替换 Catalog | 全局关闭后空目录、新加载拒绝；有历史 Catalog 时产生空替换；恢复后重新发现 |
+| 延迟读取竞态 | get 已读文件、返回前关闭 Root 并失效，最终不返回正文 |
+| 动态可用性 | 元数据调用策略变化、Alias 更名、authority 丢失、Root missing 与 symlink redirect 均按当前状态判定 |
+| 受限原生文件解析 | 根外 Skill symlink 在内容读取前拒绝；未把原生 provider 当成自带 confinement |
+| native Effective CWD 负对照 | 未包装原生 snapshot 在附加根 cwd 暴露裸名；公开 snapshot/get 包装后不再暴露；主根 Skill 保留；live/cold Remote 与 cwd symlink 覆盖 |
+| 迁移与降级 | 分配幂等、反转输入顺序身份稳定、重复别名和空名处理；同值权限不重置；真实旧 Registry schema 剥离新字段，证实降级写回可能丢失手动选择 |
+| 真实 Loader/Settings 多行 profile | 表单只对 multi-root-skills 行暴露；启用/关闭可持久化并实时读取；modern volatile 修改不重挂 Skills fiber，不写 Registry 行 |
+| UI 纯核与卸载 | 冒号 trigger 保留、草稿不高亮限制复现、自定义已发送 matcher 可用；Registry 方法原始实例属性描述符可恢复 |
+
+### 验证后收敛的边界
+
+发现两项必须加入实现的约束：只注册 Provider 不能防 native effective-cwd 再发现；不能承诺 domain v1 的未知 metadata 经旧版写回仍保留。旧宿主的设置和已发送 UI 也须按实际能力分支：legacy installSection 与 modern volatile Config 分开；UserTextRule 只在 `0.2.1-alpha.3` 及之后的本次审查集合出现。
+
+尚未执行：旧版隔离安装树上的动态原型、真实 generated Gateway 传输、完整浏览器 DOM/交互、真实 agent-loop/LLM journey、新字段在生产 Registry lease/迁移队列中的集成、观察调度器资源测试，以及 Linux/Windows 原生路径与句柄测试。本次没有源码产品改动，因而没有将全套 kernel/smoke/packed 门禁记为执行通过；这些为 S1–S7 的交付门槛。文件句柄与前后检查也不声称可抵御任意祖先 rename 的原子事务。
+
+### 后续进度
+
+S1–S7 **均待实施**。本批产物是架构决策、可重复原型、源码参考和开发计划；没有新版本、tag 或发布承诺。

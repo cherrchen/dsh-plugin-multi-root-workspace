@@ -13,7 +13,7 @@ Architecture Decision Records（ADR），用于记录重要架构与工程决策
 
 ## 不应该存放什么
 
-- 未形成决策的讨论或提案；
+- 原始讨论或尚未整理成可评审 ADR 的提案（已形成明确产品规则、架构仍待验证的 ADR 可标为 Proposed）；
 - 日常开发计划（放入 `../plans/`）。
 
 ## 当前状态
@@ -54,3 +54,5 @@ ADR-0002-short-title.md
 编号递增，标题使用小写中划线。
 
 - [ADR-0022-auto-review-loader-entry.md](./ADR-0022-auto-review-loader-entry.md) — Auto Review 并入主包：默认关闭的单一 loader 行、运行时接管、并发导入防护、有序 owner 交接与单包构建（取代 ADR-0021 的交付结构）。
+
+- [ADR-0023-multi-root-skill-discovery-and-invocation.md](./ADR-0023-multi-root-skill-discovery-and-invocation.md) — 附加根 Skills：登记权限初始化开关、aliasId 命名空间、可信 Session scope、原生内部 ID 桥接、Effective CWD 发现路由、Settings 与迁移边界（Accepted，架构定案，功能待实施）。
