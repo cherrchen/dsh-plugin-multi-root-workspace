@@ -577,6 +577,9 @@ export const STYLES = /* css */ `
 
 /* A root entry's two lines: the display name on top, the absolute path under
    it in the tertiary voice (the workspace rows recipe of the host sidebar). */
+.mrfw-skillBody { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; }
+.mrfw-skillReference { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-1); border: none; cursor: pointer; font: inherit; }
+.mrfw-skillsSettings p { color: var(--dsw-alias-label-secondary); }
 .mrfw-skillsToggle { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .mrfw-skillsToggle code { color: var(--dsw-alias-label-secondary); }
 .mrfw-rootText {

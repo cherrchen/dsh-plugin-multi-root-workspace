@@ -840,7 +840,7 @@ macOS / Node `24.18.0`：**13 组检查通过**。其中一组对 `SUPPORTED_DSH
 | S3 | Provider / 受限原生解析 / live 与 cold Origin 路由已实现。rc.2 原生 pre-step 与公开 Remote 的回归验证两 Origin 共用 cwd、两目录发现、symlink 拒绝、冷 Session、裸名负对照、零根参数保持、reload 和描述符恢复。完整 Loader web/headless journey 与旧版动态运行仍在 S7 验收，不把本层测试称为完整组合验收。 |
 | S4 | 按需模型 get、Host Alias pre-step、读取前后文件签名和 generation fence、独立撤销提示已实现。rc.2 的 8 个正式回归经真实 tools.execute / pre-step 覆盖默认/user-only/model-only、伪造 source、旧 Alias/内部 ID、读取中禁用/移除/策略变化/取消、其他 Provider incomplete、原生 exact-ID winner；通过。 |
 | S5 | 共享 128 根 LRU 委托池与 2 秒单调度器、generation、冷 Session list/preview/changes RPC、Client epoch/取消围栏、ordered teardown 已实现。rc.2 8 个相关文件 86 passed（含真实 Connection localhost HTTP、实际文件增改删/Root missing、容量/去重/淘汰、排队取消、延迟 get 卸载排空、旧包丢弃）；typecheck 与定向 lint 通过。 |
-| S6 | 开发中 |
-| S7 | 待实施 |
+| S6 | Slash Source、完整文本插入、conditional UserTextRule/Renderer、安全预览、双形状 Settings 卡片及 Host 动态配置已实现。rc.2 Loader/Settings 真实多行 profile 验证只改 Skills 行、volatile 不重挂；legacy installSection 到达/移除回归通过。DOM 覆盖 namespace 补全、原文插入、sent 引用预览 RPC、表单映射与 accessible checkbox。旧宿主动态验收及真实浏览器整页检查在 S7 继续。 |
+| S7 | 开发中；本机首次全量回归 875 passed / 75 skipped，唯一制品测试因新增合法 react-dom/client external 断言待同步后复跑。 |
 
-C0 保存既有架构文档与原型；C1 保存 S1，C2 保存 S2，C3 保存 S3 的实现与本层测试，C4 保存 S4，C5 保存 S5。checkpoint 为本机临时快照仓库中的增量 patch，正式仓库未提交；后续阶段继续基于同一工作树。
+C0 保存既有架构文档与原型；C1 保存 S1，C2 保存 S2，C3 保存 S3 的实现与本层测试，C4 保存 S4，C5 保存 S5，C6 保存 S6 的实现与本层测试。checkpoint 为本机临时快照仓库中的增量 patch，正式仓库未提交；后续阶段继续基于同一工作树。

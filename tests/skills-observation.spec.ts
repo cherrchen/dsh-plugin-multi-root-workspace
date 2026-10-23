@@ -79,6 +79,7 @@ describe('Session read API and Client fences', () => {
     const replies: ((value: unknown) => void)[] = []
     const client = new SkillsClient({ rpc: { call: async () => await new Promise(resolve => replies.push(resolve)) } })
     const old = client.list('a').catch(error => error)
+    client.reset()
     const current = client.list('a')
     const value = { sessionId: 'a', generation: 2, enabled: true, skills: [{ name: 'root:review', description: 'new', modelInvocable: true }] }
     replies[1]!({ ok: true, value }); expect(await current).toEqual(value)

@@ -12,6 +12,7 @@ import { skillOrigin, skillAgent, observedSkillOrigin } from './compat/skills.ts
 import type {} from '@deepseek-ai/dsh-skill'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SkillsCatalogView, SkillsPreviewView, SkillsStatusView } from './skills-contract.ts'
+import { installSkillsSettings } from './compat/skills-settings.ts'
 import { configValue, volatileField } from './compat/skills.ts'
 
 export interface Config { readonly enabled?: boolean }
@@ -23,9 +24,11 @@ declare module '@deepseek-ai/cordis' {
 
 /** Assembly owner; discovery is installed only after native services arrive. */
 export class MultiRootSkills extends Service {
+  static Config = Config
   static provide = 'multiRootSkills'
   static inject = ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry', 'multiRootScope']
   constructor(ctx: Context, private readonly settingsConfig: Config = {}) { super(ctx, 'multiRootSkills') }
+  private settingsRead: (() => unknown) | undefined
   private revision = 0
   private catalog: AdditionalSkillCatalog | undefined
   private readonly changed = new Set<() => void>()
@@ -72,6 +75,9 @@ export class MultiRootSkills extends Service {
   protected async [Service.init](): Promise<void> {
     const owner = this, ctx = this.ctx
     await ctx.effect(async function* () {
+      const settings = installSkillsSettings(ctx, () => owner.settingsConfig.enabled, () => owner.invalidate())
+      owner.settingsRead = settings.read
+      yield settings.fiber.dispose
       yield ctx.multiRootRegistry.onChange(() => owner.invalidate())
       yield ctx.multiRootScope.subscribe(() => owner.invalidate())
       for (const fiber of installSkillRouting(ctx)) yield fiber.dispose
@@ -105,6 +111,6 @@ export class MultiRootSkills extends Service {
       yield () => { owner.closing = true; owner.invalidate() }
     }, 'multi-root skills: ordered owner')
   }
-  get enabled(): boolean { return !this.closing && configValue(this.settingsConfig.enabled) !== false }
+  get enabled(): boolean { return !this.closing && configValue(this.settingsRead?.() ?? this.settingsConfig.enabled) !== false }
 }
 export default MultiRootSkills

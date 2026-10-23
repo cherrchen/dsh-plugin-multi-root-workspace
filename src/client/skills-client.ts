@@ -2,7 +2,7 @@
 import { PANEL_CHANNEL } from '../contract.ts'
 import { skillsCatalogSchema, skillsPreviewSchema, skillsStatusSchema, type SkillsCatalogView, type SkillsPreviewView } from '../skills-contract.ts'
 interface Connection { rpc: { call(channel: string, endpoint: string, payload: unknown, signal?: AbortSignal): Promise<unknown> } }
-interface State { epoch: number; value?: SkillsCatalogView; request?: AbortController; watching?: AbortController; listeners: Set<() => void> }
+interface State { pending?: Promise<SkillsCatalogView>; epoch: number; value?: SkillsCatalogView; request?: AbortController; watching?: AbortController; listeners: Set<() => void> }
 export class SkillsClient {
   private readonly states = new Map<string, State>()
   private closed = false
@@ -21,14 +21,24 @@ export class SkillsClient {
   }
   async list(sessionId: string, signal?: AbortSignal): Promise<SkillsCatalogView> {
     if (this.closed) throw new Error('Skills client is closed')
-    const state = this.state(sessionId), epoch = ++state.epoch
-    state.request?.abort(); const request = new AbortController(); state.request = request
-    const value = skillsCatalogSchema.parse(await this.call('skillsList', { sessionId }, AbortSignal.any([request.signal, ...(signal ? [signal] : [])])))
-    if (this.closed || value.sessionId !== sessionId || epoch !== state.epoch) throw new Error('Stale Skills response')
-    state.value = value
-    for (const listener of state.listeners) listener()
-    return value
+    const state = this.state(sessionId)
+    if (state.pending === undefined) {
+      const epoch = ++state.epoch
+      state.request?.abort(); const request = new AbortController(); state.request = request
+      const pending = (async () => {
+        const value = skillsCatalogSchema.parse(await this.call('skillsList', { sessionId }, request.signal))
+        if (this.closed || value.sessionId !== sessionId || epoch !== state.epoch) throw new Error('Stale Skills response')
+        const changed = JSON.stringify(state.value) !== JSON.stringify(value)
+        state.value = value
+        if (changed) for (const listener of state.listeners) listener()
+        return value
+      })()
+      state.pending = pending
+      void pending.then(() => { if (state.pending === pending) delete state.pending }, () => { if (state.pending === pending) delete state.pending })
+    }
+    return await withAbort(state.pending, signal)
   }
+
   snapshot(sessionId: string): SkillsCatalogView | undefined { return this.states.get(sessionId)?.value }
   async preview(sessionId: string, name: string, signal?: AbortSignal): Promise<SkillsPreviewView> {
     const state = this.state(sessionId), epoch = state.epoch
@@ -48,7 +58,7 @@ export class SkillsClient {
     }
   }
   private invalidate(state: State): void {
-    state.epoch++; state.request?.abort(); delete state.value
+    state.epoch++; state.request?.abort(); delete state.pending; delete state.value
     for (const listener of state.listeners) listener()
   }
   reset(): void { for (const state of this.states.values()) this.invalidate(state) }
@@ -74,4 +84,14 @@ export class SkillsClient {
       }
     }
   }
+}
+
+async function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted()
+  if (signal === undefined) return await promise
+  return await new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+    promise.then(value => { signal.removeEventListener('abort', abort); if (!signal.aborted) resolve(value) }, error => { signal.removeEventListener('abort', abort); reject(error) })
+  })
 }

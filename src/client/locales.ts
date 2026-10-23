@@ -14,6 +14,13 @@ export const NS = 'multiRootWorkspace'
 
 /** Chinese copy (the canonical shape). */
 export const zh = {
+  'skills.globalEnable': '启用附属根 Skills',
+  'skills.globalHint': '控制所有附属目录的 Skill 发现与新调用；保留每个目录的独立选择。',
+  'skills.settingsFailed': '设置保存失败，请重试。',
+  'skills.userOnly': '仅用户调用',
+  'skills.referenceHint': 'Skill 引用，可点击预览；该展示不表示已经执行。',
+  'skills.previewUnavailable': '此 Skill 当前不可用，或在读取期间发生变化。',
+  'skills.loading': '正在加载 Skill…',
   'panel.skills': '技能',
   'panel.aliasIdEdit': '编辑 Skill 命名空间',
   'panel.aliasIdPlaceholder': '唯一的 kebab-case 标识',
@@ -105,6 +112,13 @@ export type Key = keyof typeof zh
 
 /** English copy, pinned to the Chinese key set. */
 export const en = {
+  'skills.globalEnable': 'Enable additional-root Skills',
+  'skills.globalHint': 'Controls discovery and new invocations for all additional folders, preserving each folder’s choice.',
+  'skills.settingsFailed': 'Could not save settings. Please try again.',
+  'skills.userOnly': 'User invocation only',
+  'skills.referenceHint': 'Skill reference. Click to preview; this display does not confirm execution.',
+  'skills.previewUnavailable': 'This Skill is unavailable or changed while it was loading.',
+  'skills.loading': 'Loading Skill…',
   'panel.skills': 'Skills',
   'panel.aliasIdEdit': 'Edit Skill namespace',
   'panel.aliasIdPlaceholder': 'Unique kebab-case identifier',

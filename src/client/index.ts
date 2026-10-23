@@ -33,6 +33,8 @@ import { currentSessionIdOf, subscribeSessions } from '../compat/client-session.
 import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { NS, en, zh } from './locales.ts'
 import { STYLES } from './styles.ts'
+import { installSkillsClient } from './skills.tsx'
+import { installSkillsSettingsCard } from './skills-settings.tsx'
 import { RootSwitcher } from './RootSwitcher.tsx'
 import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction.tsx'
 import { OPEN_IN_APP_NS, createOpenInAppAdapter } from './open-in-app/adapter.tsx'
@@ -93,6 +95,8 @@ export function apply(ctx: ClientContext): void {
   const sessionId = (): string | undefined => currentSessionIdOf(readService(ctx, 'sessions'))
   const subscribeSession = (listener: () => void): (() => void) => subscribeSessions(readService(ctx, 'sessions'), listener)
   const t = ctx.locale.bind(NS) as unknown as Translate
+  installSkillsClient(ctx, t, subscribeSession)
+  installSkillsSettingsCard(ctx, t)
   // The fork binds upstream's own open-in-app namespace — the same strings
   // the native button shows, upstream's dictionary updates included. The
   // adapter is undefined where the fork cannot render (pixel-era glyph
