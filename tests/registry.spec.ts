@@ -9,7 +9,7 @@
  * handed to the kernel dialects.
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -390,7 +390,7 @@ describe('revalidation without a restart', () => {
     // The dangerous outcome would be the OTHER directory showing up here.
     expect(scope.scopeOf(primary)).not.toContain(canonicalPath(elsewhere))
 
-    rmSync(granted, { force: true })
+    unlinkSync(granted)
     mkdirSync(granted)
     const restored = await registry.refresh(primary)
     expect(restored[0]?.state).toBe('available')
@@ -601,7 +601,7 @@ describe('fresh classification inside every mutation', () => {
 
     // The original directory is back, but no refresh ran: the mutation itself
     // must re-resolve and re-record against what is there NOW.
-    rmSync(granted, { force: true })
+    unlinkSync(granted)
     mkdirSync(granted)
     const statuses = await registry.add(primary, { path: granted })
     expect(statuses).toHaveLength(1)

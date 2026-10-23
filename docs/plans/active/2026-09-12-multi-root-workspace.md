@@ -841,7 +841,7 @@ macOS / Node `24.18.0`：**13 组检查通过**。其中一组对 `SUPPORTED_DSH
 | S4 | 按需模型 get、Host Alias pre-step、读取前后文件签名和 generation fence、独立撤销提示已实现。rc.2 的 8 个正式回归经真实 tools.execute / pre-step 覆盖默认/user-only/model-only、伪造 source、旧 Alias/内部 ID、读取中禁用/移除/策略变化/取消、其他 Provider incomplete、原生 exact-ID winner；通过。 |
 | S5 | 共享 128 根 LRU 委托池与 2 秒单调度器、generation、冷 Session list/preview/changes RPC、Client epoch/取消围栏、ordered teardown 已实现。rc.2 8 个相关文件 86 passed（含真实 Connection localhost HTTP、实际文件增改删/Root missing、容量/去重/淘汰、排队取消、延迟 get 卸载排空、旧包丢弃）；typecheck 与定向 lint 通过。 |
 | S6 | Slash Source、完整文本插入、conditional UserTextRule/Renderer、安全预览、双形状 Settings 卡片及 Host 动态配置已实现。rc.2 Loader/Settings 真实多行 profile 验证只改 Skills 行、volatile 不重挂；legacy installSection 到达/移除回归通过。DOM 覆盖 namespace 补全、原文插入、sent 引用预览 RPC、表单映射与 accessible checkbox。旧宿主动态验收及真实浏览器整页检查在 S7 继续。 |
-| S7 | macOS 本机集成与 Windows 16 精确版本本机完整门禁完成；Linux、Windows 两项本机能力缺口及必要 OS × 版本 CI 仍待补齐。不标记功能完成或迁移计划；执行证据与边界见下文。 |
+| S7 | macOS 本机集成、Windows 与 Linux（WSL2）各 16 精确版本本机完整门禁完成；Windows 两项本机能力缺口及必要 OS × 版本 CI 仍待补齐。不标记功能完成或迁移计划；执行证据与边界见下文。 |
 
 C0 保存既有架构文档与原型；C1 保存 S1，C2 保存 S2，C3 保存 S3 的实现与本层测试，C4 保存 S4，C5 保存 S5，C6 保存 S6 的实现与本层测试。checkpoint 为本机临时快照仓库中的增量 patch；上述阶段结束时正式仓库尚未提交，后续阶段继续基于同一工作树。本批提交状态见下文。
 
@@ -864,7 +864,7 @@ journey 使用真实 Loader、preset、Agent loop、原生 skill 工具和本地
 
 浏览器在隔离 home/仓库的真实 Web 页面完成：插件详情页只有一份全局 Skills 卡片、关闭/恢复；Root checkbox 关闭后候选消失、恢复后出现；`/repo-b:` 候选无内部 ID，选择插入完整 `/repo-b:review `；已发送引用显示并可打开受 Session RPC 重验的正文预览。浏览器的模型地址刻意指向不可用的本地端口，发送后的 transport failure 不作为模型调用成功证据；模型调用成功证据归上述 journey。草稿保持无原生高亮。末轮修正了普通会话 activity/title 更新误关闭预览的问题：Skills 现在只在当前 Session ID 实际变化时重置；现有根面板保持原订阅语义。
 
-A1/A2/A10 由真实 Registry/lease/JSON 重启与命令/DOM 测试覆盖；A3–A8 由 native snapshot/get、真实 tools.execute/pre-step、Connection 及 journey 覆盖，另有子 Agent 自身 Origin、cwd symlink 与 reload 的正式回归；A9 由文件变化、受限读取、128 根池配额/去重/LRU、排队取消与卸载排空覆盖；A11/A12 由真实 Loader/Settings、DOM 和浏览器覆盖。A13 的跨版本动态接缝见下节；该轮尚缺的 Windows 原生证据已在下文补验，Linux 与全平台退出条件仍未关闭，不能称 A1–A13 最终全部完成。
+A1/A2/A10 由真实 Registry/lease/JSON 重启与命令/DOM 测试覆盖；A3–A8 由 native snapshot/get、真实 tools.execute/pre-step、Connection 及 journey 覆盖，另有子 Agent 自身 Origin、cwd symlink 与 reload 的正式回归；A9 由文件变化、受限读取、128 根池配额/去重/LRU、排队取消与卸载排空覆盖；A11/A12 由真实 Loader/Settings、DOM 和浏览器覆盖。A13 的跨版本动态接缝见下节；该轮尚缺的 Windows、Linux 原生证据已在下文补验，全平台退出条件仍未关闭，不能称 A1–A13 最终全部完成。
 
 本机成本样本来自 `node --experimental-transform-types scripts/measure-multi-root-skills.mjs`：16 根 × 8 Skills，正文每项约 6 KiB；首次 metadata list **586.89 ms**，5 次重复 list **459.61–623.83 ms**，受检 preview **406.15–568.29 ms**。目录断言不含正文。这是同时执行其他回归时的本机 IO 样本，不是 UI 网络延迟、吞吐保证或跨平台性能认证；当前每次请求重验有可见扫描成本。
 
@@ -922,8 +922,59 @@ Windows 成本样本仍用 `measure-multi-root-skills.mjs` 的 16 根 × 8 Skill
 
 逐命令日志、源码快照校验和与机器可读汇总保存在被忽略的 `.dsh-smoke/s7-windows-20261023/`；上述执行结论以本节为持久真源。完整 Windows 本机矩阵不替代下述剩余平台和 CI 验收，也不补记第二磁盘/foreign-owner 两例为通过。
 
+### Linux 原生验证（2026-10-23，WSL2）
+
+Ubuntu `24.04.4 LTS` / WSL2，内核 `6.6.87.2-microsoft-standard-WSL2`、x86_64，夹具位于 Linux ext4（非 Windows 挂载盘）；Node `24.13.0`、pnpm `11.25.0`。基于 `72d27d3` 增加 Linux 专项回归并修正 symlink 夹具，没有修改产品源码、上游包、支持集合或主树开发 pin。验证在外层 Agent 执行沙箱之外进行；每版 `kernel:probe` 均确认 **bwrap 与 Landlock 实跑成功**，后续测试与冒烟均携带 `DSH_PROBE_VERIFIED_DIALECTS=bwrap,landlock`，这两个方言的原生断言不能因 runner 不可用而跳过。
+
+| 开发 pin `0.2.1-rc.2` 门禁 | 结果 |
+| --- | --- |
+| compat:check、lint、typecheck、build | 通过；主树 manifest、lockfile 与精确支持集合保持原样 |
+| test | **901 passed / 69 skipped**，64 文件通过、2 文件平台跳过；包含新增 7 项 Linux Skills 回归 |
+| kernel:probe | bwrap、Landlock 实跑成功；Seatbelt / Windows ACL 不计为 Linux 原生通过 |
+| smoke:compose / smoke:behavior / smoke:journey | **52 / 126 / 76 passed**，均 0 failed / 0 skipped |
+| pack:check / smoke:packed | **142 个成员**完整；安装 tarball 后 behavior **125 passed / 0 failed / 0 skipped** |
+| auto-review:fork / smoke:auto-review | 通过；source/link 与 tarball、web/headless × 官方 bundle 两种顺序、真实 reviewer 写围栏与 owner drain 均执行 |
+
+新增 `tests/skills-linux.e2e.ts` 在真实 Linux 文件系统上验证：大小写不同的两根不合并，关闭其中一根不会停用另一根，live/cold 查询均不能走 native 裸名旁路；登记目录替换为根外 symlink 后，旧内部 ID 与预览失效；Skill 目录 symlink 换目标触发观察失效且根外正文不可发现；已打开的真实文件句柄读取中发生文件替换、删除、撤销或取消时，旧正文不返回且句柄关闭。读取竞态只暂停 `FileHandle.readFile()` 的返回，仍执行真实 open/read/stat/close 与原生解析。既有原生沙箱、读写权限、进程围栏、Registry authority、Connection、DOM 和 agent-loop 回归随全量测试与冒烟执行。
+
+本轮两类首跑失败均保留日志并在处理后重跑：
+
+- 两项既有 Registry 测试使用 `rmSync()` 删除指向目录的 symlink，本机返回 `Path is a directory`，导致恢复目录前失败。改用 `unlinkSync()`，behavior battery 同一夹具操作同步修正；原有拒授/恢复断言保持不变。修正后所有版本的完整测试、source 与 packed behavior 均通过。新增 Linux symlink 用例也使用 `unlinkSync()`。
+- 系统 Git `2.43.0` 不认识 `0.2.1-alpha.2` 原生 Worktree 使用的 `--no-lazy-fetch`，该版两个既有 Worktree 用例失败。由 kernel.org 的 Git `2.48.1` 与 zlib.net 的 zlib `1.3.1` 源码在忽略的验证目录内构建独立 Git，通过既有 `DSH_TEST_GIT_COMMAND` 指向它，重跑该版全部门禁通过；不删除安全参数、不修改上游、不增加 skip。其余 15 版使用系统 Git 完成完整门禁。
+
+Linux 成本样本仍用 `measure-multi-root-skills.mjs` 的 16 根 × 8 Skills 夹具：首次 metadata list **356.25 ms**，5 次重复 list **237.01–269.07 ms**，受检 preview **233.66–264.99 ms**；目录不含正文。采样时另有版本车道运行，不作为 UI 网络延迟、性能阈值或跨平台性能认证。文件句柄与前后检查仍不声称提供对任意祖先 rename 的原子事务。
+
+#### Linux 精确版本完整本机矩阵
+
+从 `SUPPORTED_DSH_RELEASES` 读取全部 **16 个精确版本，16/16 完成本机完整门禁**。所有版本使用独立源码副本，副本既不嵌套在其他安装树内，也不在自动 temp grant 内；通过现有 `upgrade-dsh.mjs` 重指、单独 install。最多 **3 个版本车道并行**，每车道 `pnpm test --maxWorkers=2`；安装与测试使用 `CI=true`。全程 enforce，没有使用 `DSH_MULTI_ROOT_COMPAT=warn`。
+
+每版逐项执行 compat:check、lint、typecheck、build、kernel:probe、test、三项 smoke、pack:check、smoke:packed、auto-review:fork、smoke:auto-review 和 docs:check，最终全部命令退出 0。每版均强制 bwrap / Landlock 原生断言，新增 7 项 Linux Skills 用例进入每版完整套件。Auto Review 联合 smoke 按既有合同仅在 `0.2.1-rc.2` 实跑，其余 15 版明确报告可选集成跳过，不计为联合集成通过。
+
+下表 smoke 列为通过数，**全部 0 failed / 0 skipped**；test 的其他 OS、旧宿主缺席能力及互斥 Settings 等分支跳过单独列出，不计为相应原生能力通过。
+
+| DSH 精确版本 | test 通过 / 跳过 | compose | behavior | journey | packed behavior |
+| --- | --- | --- | --- | --- | --- |
+| `0.1.5-rc.2` | 822 / 78 | 52 | 118 | 76 | 117 |
+| `0.1.6-alpha.1` | 822 / 78 | 52 | 126 | 76 | 125 |
+| `0.1.6-alpha.2` | 822 / 78 | 52 | 126 | 76 | 125 |
+| `0.1.7-alpha.1` | 825 / 75 | 52 | 126 | 76 | 125 |
+| `0.1.7-alpha.2` | 825 / 75 | 52 | 126 | 76 | 125 |
+| `0.1.7-rc.1` | 825 / 75 | 52 | 126 | 76 | 125 |
+| `0.1.7-rc.2` | 825 / 75 | 52 | 126 | 76 | 125 |
+| `0.2.0-rc.1` | 825 / 75 | 52 | 126 | 76 | 125 |
+| `0.2.0-rc.2` | 825 / 75 | 52 | 126 | 76 | 125 |
+| `0.2.1-alpha.1` | 825 / 75 | 52 | 126 | 76 | 125 |
+| `0.2.1-alpha.2` | 831 / 69 | 52 | 126 | 76 | 125 |
+| `0.2.1-alpha.3` | 831 / 69 | 52 | 126 | 76 | 125 |
+| `0.2.1-alpha.4` | 831 / 69 | 52 | 126 | 76 | 125 |
+| `0.2.1-alpha.5` | 831 / 69 | 52 | 126 | 76 | 125 |
+| `0.2.1-rc.1` | 831 / 69 | 52 | 126 | 76 | 125 |
+| `0.2.1-rc.2` | 901 / 69 | 52 | 126 | 76 | 125 |
+
+逐命令日志、失败尝试、源码快照 SHA-256、隔离 Git 构建记录与机器可读汇总保存在被忽略的 `.dsh-smoke/s7-linux-20261023/`，复跑调度器为其中的 `run-matrix.py`；最终汇总逐项核实了全部命令退出码、smoke 零失败/零跳过、双方言探针与执行源码校验和。上述结论以本节为持久真源。WSL2 的原生执行不替代远端 Ubuntu 两种 runner 镜像或其他 OS 的本批 CI，也不补记 Windows 两项能力缺口为通过。
+
 ### 剩余验收与 checkpoint
 
-Windows 本机 16 版本完整门禁及 junction、大小写、句柄、观察和 ACL/broker/pwsh/ConPTY 验证已执行，边界见上节。尚缺 Linux bwrap/Landlock 原生证据、Windows 第二固定卷与 foreign-owner 两例的具备条件环境补验，以及支持版本 × 已启用 OS 的本批远端 CI 完整矩阵。新测试已进入既有测试入口；本批已按 C0 → C7a 的 checkpoint 顺序分为 9 笔提交，Windows 验证另作独立提交；远端 CI 执行证据须按实际 run 补记。功能发布前还须按 release workflow 更新双语 CHANGELOG；当前不编造版本号或修改已发布历史，S7 全平台退出条件尚未满足。
+Windows、Linux（WSL2）本机各 16 版本完整门禁已执行，平台路径、句柄、观察与原生沙箱证据及边界见上文。尚缺 Windows 第二固定卷与 foreign-owner 两例的具备条件环境补验，以及支持版本 × 已启用 OS 的本批远端 CI 完整矩阵。新测试已进入既有测试入口；本批已按 C0 → C7a 的 checkpoint 顺序分为 9 笔提交，Windows 验证另作独立提交；远端 CI 执行证据须按实际 run 补记。功能发布前还须按 release workflow 更新双语 CHANGELOG；当前不编造版本号或修改已发布历史，S7 全平台退出条件尚未满足。
 
 C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 保存浏览器末轮发现的预览生命周期修正及两形状回归。不表示 S7 全平台完成。C0–C7、C7a 为按顺序应用的增量 patch；临时快照另备份在本工作区被忽略的 `.dsh-smoke/checkpoints-multi-root-skills-20261023/`，含基线与校验和 manifest，可用于后续分批提交。正式仓库已按 checkpoint 完成分批提交；原始补丁继续保留，最后一笔另同步本节提交状态。S7 全平台退出条件满足前计划留在 active。

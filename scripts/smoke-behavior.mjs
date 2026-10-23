@@ -30,7 +30,7 @@
  * @module scripts/smoke-behavior
  */
 
-import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { FileSystem } from '@deepseek-ai/dsh-fs'
@@ -440,7 +440,7 @@ async function registryBattery(ctx) {
     results.set('a replaced root loses its grant', String(!ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
     results.set('a replaced root does not grant the new target', String(!ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(swapped))))
 
-    rmSync(extraRoot, { force: true })
+    unlinkSync(extraRoot)
     mkdirSync(extraRoot)
     rmSync(swapped, { recursive: true, force: true })
     const afterRestore = await run('/workspace-folders list')
