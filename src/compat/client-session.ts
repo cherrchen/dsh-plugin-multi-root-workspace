@@ -51,6 +51,15 @@ export function subscribeSessions(sessions: unknown, listener: () => void): () =
   return typeof list?.subscribe === 'function' ? list.subscribe(listener) : () => {}
 }
 
+/** Selection changes only: activity/title updates must not close a Skill preview. */
+export function subscribeCurrentSession(sessions: unknown, listener: () => void): () => void {
+  let previous = currentSessionIdOf(sessions)
+  return subscribeSessions(sessions, () => {
+    const current = currentSessionIdOf(sessions)
+    if (current !== previous) { previous = current; listener() }
+  })
+}
+
 /**
  * The list snapshot, when the service actually exposes one.
  *
