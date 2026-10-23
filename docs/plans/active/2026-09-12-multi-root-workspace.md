@@ -841,7 +841,7 @@ macOS / Node `24.18.0`：**13 组检查通过**。其中一组对 `SUPPORTED_DSH
 | S4 | 按需模型 get、Host Alias pre-step、读取前后文件签名和 generation fence、独立撤销提示已实现。rc.2 的 8 个正式回归经真实 tools.execute / pre-step 覆盖默认/user-only/model-only、伪造 source、旧 Alias/内部 ID、读取中禁用/移除/策略变化/取消、其他 Provider incomplete、原生 exact-ID winner；通过。 |
 | S5 | 共享 128 根 LRU 委托池与 2 秒单调度器、generation、冷 Session list/preview/changes RPC、Client epoch/取消围栏、ordered teardown 已实现。rc.2 8 个相关文件 86 passed（含真实 Connection localhost HTTP、实际文件增改删/Root missing、容量/去重/淘汰、排队取消、延迟 get 卸载排空、旧包丢弃）；typecheck 与定向 lint 通过。 |
 | S6 | Slash Source、完整文本插入、conditional UserTextRule/Renderer、安全预览、双形状 Settings 卡片及 Host 动态配置已实现。rc.2 Loader/Settings 真实多行 profile 验证只改 Skills 行、volatile 不重挂；legacy installSection 到达/移除回归通过。DOM 覆盖 namespace 补全、原文插入、sent 引用预览 RPC、表单映射与 accessible checkbox。旧宿主动态验收及真实浏览器整页检查在 S7 继续。 |
-| S7 | 本机集成与打包验证完成，必要 OS × 版本全套门禁仍待原生 CI；不标记功能完成或迁移计划。最终执行证据见下文。 |
+| S7 | macOS 本机集成与 Windows 16 精确版本本机完整门禁完成；Linux、Windows 两项本机能力缺口及必要 OS × 版本 CI 仍待补齐。不标记功能完成或迁移计划；执行证据与边界见下文。 |
 
 C0 保存既有架构文档与原型；C1 保存 S1，C2 保存 S2，C3 保存 S3 的实现与本层测试，C4 保存 S4，C5 保存 S5，C6 保存 S6 的实现与本层测试。checkpoint 为本机临时快照仓库中的增量 patch；上述阶段结束时正式仓库尚未提交，后续阶段继续基于同一工作树。本批提交状态见下文。
 
@@ -864,7 +864,7 @@ journey 使用真实 Loader、preset、Agent loop、原生 skill 工具和本地
 
 浏览器在隔离 home/仓库的真实 Web 页面完成：插件详情页只有一份全局 Skills 卡片、关闭/恢复；Root checkbox 关闭后候选消失、恢复后出现；`/repo-b:` 候选无内部 ID，选择插入完整 `/repo-b:review `；已发送引用显示并可打开受 Session RPC 重验的正文预览。浏览器的模型地址刻意指向不可用的本地端口，发送后的 transport failure 不作为模型调用成功证据；模型调用成功证据归上述 journey。草稿保持无原生高亮。末轮修正了普通会话 activity/title 更新误关闭预览的问题：Skills 现在只在当前 Session ID 实际变化时重置；现有根面板保持原订阅语义。
 
-A1/A2/A10 由真实 Registry/lease/JSON 重启与命令/DOM 测试覆盖；A3–A8 由 native snapshot/get、真实 tools.execute/pre-step、Connection 及 journey 覆盖，另有子 Agent 自身 Origin、cwd symlink 与 reload 的正式回归；A9 由文件变化、受限读取、128 根池配额/去重/LRU、排队取消与卸载排空覆盖；A11/A12 由真实 Loader/Settings、DOM 和浏览器覆盖。A13 的跨版本动态接缝见下节，Linux/Windows 原生部分仍悬空，不能称 A1–A13 最终全部完成。
+A1/A2/A10 由真实 Registry/lease/JSON 重启与命令/DOM 测试覆盖；A3–A8 由 native snapshot/get、真实 tools.execute/pre-step、Connection 及 journey 覆盖，另有子 Agent 自身 Origin、cwd symlink 与 reload 的正式回归；A9 由文件变化、受限读取、128 根池配额/去重/LRU、排队取消与卸载排空覆盖；A11/A12 由真实 Loader/Settings、DOM 和浏览器覆盖。A13 的跨版本动态接缝见下节；该轮尚缺的 Windows 原生证据已在下文补验，Linux 与全平台退出条件仍未关闭，不能称 A1–A13 最终全部完成。
 
 本机成本样本来自 `node --experimental-transform-types scripts/measure-multi-root-skills.mjs`：16 根 × 8 Skills，正文每项约 6 KiB；首次 metadata list **586.89 ms**，5 次重复 list **459.61–623.83 ms**，受检 preview **406.15–568.29 ms**。目录断言不含正文。这是同时执行其他回归时的本机 IO 样本，不是 UI 网络延迟、吞吐保证或跨平台性能认证；当前每次请求重验有可见扫描成本。
 
@@ -874,8 +874,56 @@ A1/A2/A10 由真实 Registry/lease/JSON 重启与命令/DOM 测试覆盖；A3–
 
 这是 macOS 上的跨版本动态接缝验证，不能替代每个版本的完整普通插件/联合 smoke 或其他 OS 原生验证。完整本机门禁仅对主开发 pin 执行。后续补充的真实 Connection 延迟包回归，以及两种 Session store 形状下只在选择变化时关闭预览的回归，均在主 pin 通过；不将未重跑的旧版新增断言计入上面的 58 项。
 
+### Windows 原生验证（2026-10-23）
+
+Windows 11 `10.0.26200` / NTFS，Node `24.14.0`、pnpm `11.25.0`，非提权 UAC 令牌；已有 deny broker 正在运行，PATH 首位为非 MSIX 的 PowerShell。基于 `4faa6f1` 增加 Windows 专项回归，没有修改产品源码、支持集合或主树开发 pin。验证在外层 Agent 执行沙箱之外进行；`kernel:probe` 确认真实 `windows-acl` runner 可写工作区、拒写相邻目录，后续测试与冒烟均携带 `DSH_PROBE_VERIFIED_DIALECTS=windows-acl`。
+
+| 开发 pin `0.2.1-rc.2` 门禁 | 结果 |
+| --- | --- |
+| compat:check、lint、typecheck、build | 通过；主树 manifest、lockfile 与精确支持集合保持原样 |
+| test | **912 passed / 51 skipped**，65 文件通过；包含新增 7 项 Windows Skills 回归 |
+| kernel:probe | `windows-acl` 实跑成功；Seatbelt/bwrap/Landlock 不在 Windows 上声明原生通过 |
+| smoke:compose / smoke:behavior / smoke:journey | **52 / 133 / 76 passed**，均 0 failed / 0 skipped |
+| pack:check / smoke:packed | **144 个成员**完整；安装 tarball 后 behavior **132 passed / 0 failed / 0 skipped** |
+| auto-review:fork / smoke:auto-review | 通过；source/link 与 tarball、web/headless × 官方 bundle 两种顺序、真实 reviewer 写围栏与 owner drain 均执行 |
+
+新增 `tests/skills-windows.e2e.ts` 在真实 Windows 文件系统上验证：大小写不同的 effective cwd 仍受 Root 开关约束（live/cold 两入口）；登记目录替换为根外 junction 后，旧内部 ID 与预览失效；Skill 目录 junction 改目标触发观察失效且根外正文不可发现；已打开的真实文件句柄读取中发生文件替换、删除、撤销或取消时，旧正文不返回且句柄关闭。读取竞态通过暂停 `FileHandle.readFile()` 的返回制造，保留真实 open/read/stat/close 与原生解析，不以 stub Provider 结果替代句柄证据。现有 Windows ACL/broker/pwsh/ConPTY 回归随全量测试和冒烟执行。
+
+本机只有一个可写固定卷，当前非提权令牌不能把夹具属主设为 SYSTEM；既有“第二固定磁盘授权”和“非调用方属主拒绝”两例按原有本地能力规则跳过，不能记为通过，须由具备条件的 Windows CI/提权环境补验。首次误将本地测试设为 `CI=true` 时，这两个 CI 前提被强制检查并失败（905 passed / 49 skipped / 2 failed），不作为成功证据；后续保留原生方言强制断言、按本地能力重跑得到上表结果，没有修改或放宽测试门禁。其余 skip 为现有平台/宿主能力分支，不计作相应原生能力通过。
+
+Windows 成本样本仍用 `measure-multi-root-skills.mjs` 的 16 根 × 8 Skills 夹具：首次 metadata list **1709.69 ms**，5 次重复 list **932.26–2308.76 ms**，受检 preview **962.29–1511.74 ms**；目录不含正文。采样时另有验证任务运行，不作为跨平台性能阈值。
+
+#### Windows 精确版本完整本机矩阵
+
+从 `SUPPORTED_DSH_RELEASES` 读取全部 **16 个精确版本，16/16 完成本机完整门禁**。开发 pin 使用上述主树结果，其余 15 个版本在独立源码副本中用 `upgrade-dsh.mjs` 重指、单独 install；副本既不位于其他安装树之下，也不在自动 temp grant 内，负对照夹具仍在非临时授权区域。主树不参与重指。安装使用 `CI=true`；本地测试保留上文两项能力限制，两个隔离车道各用 `pnpm test --maxWorkers=2` 限制并发。
+
+每版逐项执行 compat:check、lint、typecheck、build、kernel:probe、test、三项 smoke、pack:check、smoke:packed、auto-review:fork、smoke:auto-review 和 docs:check，全部命令退出 0。每版均核实 `windows-acl: ok` 并强制该方言的原生断言；全程 enforce，没有使用 `DSH_MULTI_ROOT_COMPAT=warn`。`auto-review:fork` 在所有版本执行；Auto Review 联合 smoke 仅在其合同指定的 `0.2.1-rc.2` 执行并通过，其余 15 版明确报告可选集成跳过，不计为联合集成通过。
+
+下表 smoke 列为通过数，**全部 0 failed / 0 skipped**；test 的平台/宿主能力跳过单独列出，不计作原生通过。新增 7 项 Windows Skills 用例进入每个版本的完整套件。
+
+| DSH 精确版本 | test 通过 / 跳过 | compose | behavior | journey | packed behavior |
+| --- | --- | --- | --- | --- | --- |
+| `0.1.5-rc.2` | 836 / 57 | 52 | 125 | 76 | 124 |
+| `0.1.6-alpha.1` | 836 / 57 | 52 | 133 | 76 | 132 |
+| `0.1.6-alpha.2` | 836 / 57 | 52 | 133 | 76 | 132 |
+| `0.1.7-alpha.1` | 838 / 55 | 52 | 133 | 76 | 132 |
+| `0.1.7-alpha.2` | 838 / 55 | 52 | 133 | 76 | 132 |
+| `0.1.7-rc.1` | 838 / 55 | 52 | 133 | 76 | 132 |
+| `0.1.7-rc.2` | 838 / 55 | 52 | 133 | 76 | 132 |
+| `0.2.0-rc.1` | 838 / 55 | 52 | 133 | 76 | 132 |
+| `0.2.0-rc.2` | 838 / 55 | 52 | 133 | 76 | 132 |
+| `0.2.1-alpha.1` | 838 / 55 | 52 | 133 | 76 | 132 |
+| `0.2.1-alpha.2` | 843 / 50 | 52 | 133 | 76 | 132 |
+| `0.2.1-alpha.3` | 843 / 50 | 52 | 133 | 76 | 132 |
+| `0.2.1-alpha.4` | 843 / 50 | 52 | 133 | 76 | 132 |
+| `0.2.1-alpha.5` | 843 / 50 | 52 | 133 | 76 | 132 |
+| `0.2.1-rc.1` | 843 / 50 | 52 | 133 | 76 | 132 |
+| `0.2.1-rc.2` | 912 / 51 | 52 | 133 | 76 | 132 |
+
+逐命令日志、源码快照校验和与机器可读汇总保存在被忽略的 `.dsh-smoke/s7-windows-20261023/`；上述执行结论以本节为持久真源。完整 Windows 本机矩阵不替代下述剩余平台和 CI 验收，也不补记第二磁盘/foreign-owner 两例为通过。
+
 ### 剩余验收与 checkpoint
 
-Linux bwrap/Landlock、Windows ACL/broker/pwsh/ConPTY 的原生路径、junction、句柄与沙箱测试，以及支持版本 × 已启用 OS 的全套既有 mandatory gates 尚未执行。新测试已进入既有测试入口；本批已按 C0 → C7a 的 checkpoint 顺序分为 9 笔提交，尚未推送，因而没有远端 CI run 可引用。功能发布前还须按 release workflow 更新双语 CHANGELOG；当前不编造版本号或修改已发布历史。
+Windows 本机 16 版本完整门禁及 junction、大小写、句柄、观察和 ACL/broker/pwsh/ConPTY 验证已执行，边界见上节。尚缺 Linux bwrap/Landlock 原生证据、Windows 第二固定卷与 foreign-owner 两例的具备条件环境补验，以及支持版本 × 已启用 OS 的本批远端 CI 完整矩阵。新测试已进入既有测试入口；本批已按 C0 → C7a 的 checkpoint 顺序分为 9 笔提交，Windows 验证另作独立提交；远端 CI 执行证据须按实际 run 补记。功能发布前还须按 release workflow 更新双语 CHANGELOG；当前不编造版本号或修改已发布历史，S7 全平台退出条件尚未满足。
 
 C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 保存浏览器末轮发现的预览生命周期修正及两形状回归。不表示 S7 全平台完成。C0–C7、C7a 为按顺序应用的增量 patch；临时快照另备份在本工作区被忽略的 `.dsh-smoke/checkpoints-multi-root-skills-20261023/`，含基线与校验和 manifest，可用于后续分批提交。正式仓库已按 checkpoint 完成分批提交；原始补丁继续保留，最后一笔另同步本节提交状态。S7 全平台退出条件满足前计划留在 active。

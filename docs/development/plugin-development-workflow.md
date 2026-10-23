@@ -271,7 +271,9 @@ B9 的 Linux 原生执行证据分两类：latest 保留实际 Landlock 选择�
 
 新增 `tests/skills-*.spec.ts`、`tests/client-skills.spec.tsx` 与 `tests/support/skills-stack.ts` 随既有版本矩阵执行。现代 Loader/Settings 测试从 app-boot 的公开安装锚点解析 ConfigEditor；缺少该能力的旧版改跑真实 legacy SettingsProvider 的 namespace 写回测试，不声明不存在的旧版 ConfigEditor 包。
 
-在临时目录复制源码建立隔离版本安装树时，可设置 `DSH_TEST_FIXTURE_PARENT` 指向可写且不在自动 temp grant 内的目录；测试仍执行原有 `assertOutsideTempGrants`，不能用此变量绕过权限负对照。主工作树的 manifest、lockfile、安装树和支持列表不随隔离验证修改。
+`tests/skills-windows.e2e.ts` 仅在 Windows 实跑：大小写不同的 effective cwd、Root 被 junction 替换后的旧 ID/预览撤销、junction 改目标的观察失效，以及真实文件句柄读取中替换、删除、撤销和取消后的结果丢弃与句柄关闭。读取竞态只在句柄已读到内容、尚未返回时暂停，不以替换整个 Provider 的 `get()` 模拟文件句柄；它不声称防住任意祖先 rename 的原子竞态。该文件已包含在普通 `pnpm test` 中。
+
+复制源码建立隔离版本安装树时，应放在主工作树及其他带 `node_modules` 的祖先目录之外，防止缺席的可选包从父树回退解析而混装；完整 smoke 的夹具固定在副本内，因此副本本身也须在自动 temp grant 之外。可设置 `DSH_TEST_FIXTURE_PARENT` 指向可写且不在自动 temp grant 内的目录，但它只影响测试夹具；测试仍执行原有 `assertOutsideTempGrants`，不能用此变量绕过权限负对照。主工作树的 manifest、lockfile、安装树和支持列表不随隔离验证修改。安装可使用 `CI=true`，本地测试不能因此假定具备 CI runner 的第二块固定磁盘或修改目录属主的权限；`DSH_PROBE_VERIFIED_DIALECTS` 仍须传入探针实际通过的方言，不放宽内核断言。
 
 `bootProfile` 为 in-process smoke 补齐 CLI 的完整 `profileContext`（home、patchPath、installAnchor、startedBundles 等），优先保留调用者提供的事实，否则现代 ConfigEditor/Settings 会因缺少注入而静默不启动，或在首次写回时报路径缺失。profile 重组使用该次 boot 返回的 appBoot 模块实例，避免安装/解析变化后落入另一个实例的 root Include WeakMap。`smoke:journey` 额外验证真实 web/headless 首步 Skill Catalog、原生按需 get、用户命名空间调用，以及全局关闭/恢复和 native cwd 旁路。
 
