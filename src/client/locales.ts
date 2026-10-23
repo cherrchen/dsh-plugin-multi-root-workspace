@@ -14,6 +14,11 @@ export const NS = 'multiRootWorkspace'
 
 /** Chinese copy (the canonical shape). */
 export const zh = {
+  'panel.skills': '技能',
+  'panel.aliasIdEdit': '编辑 Skill 命名空间',
+  'panel.aliasIdPlaceholder': '唯一的 kebab-case 标识',
+  'panel.aliasIdInvalid': '命名空间需要修复',
+  'error.invalid-alias-id': 'Skill 命名空间须为唯一的 kebab-case，最长 48 字符。',
   'panel.mode': '当前会话权限：',
   'panel.effectiveAccess': '当前有效：',
   'panel.toolCaps': '工具 {tools} 对附属根始终只读。',
@@ -100,6 +105,11 @@ export type Key = keyof typeof zh
 
 /** English copy, pinned to the Chinese key set. */
 export const en = {
+  'panel.skills': 'Skills',
+  'panel.aliasIdEdit': 'Edit Skill namespace',
+  'panel.aliasIdPlaceholder': 'Unique kebab-case identifier',
+  'panel.aliasIdInvalid': 'Namespace needs repair',
+  'error.invalid-alias-id': 'Skill namespace must be unique kebab-case, up to 48 characters.',
   'panel.mode': 'Current session access:',
   'panel.effectiveAccess': 'Effective:',
   'panel.toolCaps': 'The tools {tools} always have read-only access to additional roots.',

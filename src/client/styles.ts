@@ -577,6 +577,8 @@ export const STYLES = /* css */ `
 
 /* A root entry's two lines: the display name on top, the absolute path under
    it in the tertiary voice (the workspace rows recipe of the host sidebar). */
+.mrfw-skillsToggle { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.mrfw-skillsToggle code { color: var(--dsw-alias-label-secondary); }
 .mrfw-rootText {
   display: flex;
   flex: 1 1 240px;

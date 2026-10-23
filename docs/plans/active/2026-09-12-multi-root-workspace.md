@@ -836,7 +836,8 @@ macOS / Node `24.18.0`：**13 组检查通过**。其中一组对 `SUPPORTED_DSH
 | 阶段 | 状态与证据 |
 | --- | --- |
 | S1 | 装配完成。新增独立 Skills entry / patch 行、可选 peer 分类、scope 身份与 Config 接缝。正式 `skills-compat.spec.ts` 随既有版本矩阵运行；本机 rc.2 的 4 个相关测试文件共 53 passed / 1 既有 skip，host typecheck、build、定向 lint、compat:check 通过。其余版本动态执行留在 S7，不扩大本机证据。 |
-| S2 | 开发中 |
-| S3–S7 | 待实施 |
+| S2 | 完成 metadata / 迁移、两项 mutation、命令与 Dialog。rc.2 真实 JSON Registry、lease、命令、wire、DOM 与 locale 共 7 文件 187 passed / 1 既有 skip；新增覆盖迁移写失败、重复加载、损坏字段、并发命名空间、takeover、降级写回与 revive。新 metadata 不改变 grant 三键或 writableRoots；refresh 无写。 |
+| S3 | 开发中 |
+| S4–S7 | 待实施 |
 
-C0 保存既有架构文档与原型；C1 保存 S1。checkpoint 为本机临时快照仓库中的增量 patch，正式仓库未提交；后续阶段继续基于同一工作树。
+C0 保存既有架构文档与原型；C1 保存 S1，C2 保存 S2。checkpoint 为本机临时快照仓库中的增量 patch，正式仓库未提交；后续阶段继续基于同一工作树。

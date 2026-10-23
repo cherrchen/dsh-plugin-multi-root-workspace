@@ -43,7 +43,7 @@
 - authority domain open 后，在现有有序队列中迁移旧记录；先持久化，再发布新 Skills 投影。写失败不给新增能力，contended 进程不迁移；refresh 仍无写。
 - 实现 ADR 的稳定 aliasId 分配、编辑校验与在册唯一性，新增 Root、实际 access 变化与 revive 的开关规则；同值 setAccess 保留手动选择。
 - 扩展 RootStatus / RootsView 与 `src/contract.ts` 的 endpoint → response 映射，为命令/面板提供相同的 metadata mutation。保留 Session-derived authority 和一个串行 mutation 写路径。
-- 修改 Workspace Folders Dialog，显示并编辑每根 Skills/aliasId；增加清晰的命令支持及帮助。具体命令拼写在本批按现有子命令约定定案，同步双端验证。
+- 修改 Workspace Folders Dialog，显示并编辑每根 Skills/aliasId；增加清晰的命令支持及帮助。命令采用 `skills <n|path> on|off` 与 `alias-id <n|path> <kebab-case>`，同步双端验证。
 
 退出条件：A1/A2/A4/A10 的生产 Registry 测试通过，覆盖真实 JSON 栈、重启、并发、contended/takeover、迁移写失败、重复加载、同名空名、非法 metadata 与降级写回。grant 三键与 writableRoots 不被 metadata 修改；旧数据在全局关闭时仍能一致迁移。
 

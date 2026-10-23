@@ -282,6 +282,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const [upgradeFor, setUpgradeFor] = useState<{ root: RootView; access: RootAccess } | undefined>(undefined)
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
+  const [aliasField, setAliasField] = useState<'alias' | 'aliasId'>('alias')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
   const [menuFor, setMenuFor] = useState<string | undefined>(undefined)
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -389,7 +390,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
    * @returns whether the host accepted it (the caller decides whether to clear
    *   the input it came from).
    */
-  const mutate = useCallback(async (endpoint: 'add' | 'remove' | 'alias' | 'move' | 'setAccess', payload: Record<string, unknown>): Promise<boolean> => {
+  const mutate = useCallback(async (endpoint: 'add' | 'remove' | 'alias' | 'move' | 'setAccess' | 'setAliasId' | 'setSkillsEnabled', payload: Record<string, unknown>): Promise<boolean> => {
     if (panel === undefined) return false
     const base = requestBase()
     if (base === undefined) {
@@ -625,6 +626,12 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       {t('panel.effectiveAccess')} {t(`effective.${root.effectiveAccess}`)}
                     </span>}
                   </span>
+                  {root.skillsEnabled === undefined ? null : <label className="mrfw-skillsToggle">
+                    <input type="checkbox" checked={root.skillsEnabled} disabled={state.busy}
+                      onChange={event => { void mutate('setSkillsEnabled', { entry: entryOf(root), skillsEnabled: event.target.checked }) }} />
+                    {t('panel.skills')}
+                    <code>{root.aliasId === undefined ? t('panel.aliasIdInvalid') : `/${root.aliasId}:`}</code>
+                  </label>}
                   <PathCopy
                     path={root.path}
                     copied={copiedId === key}
@@ -668,6 +675,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   onClose={() => { setMenuFor(undefined) }}
                   items={[
                     { id: 'rename', label: t('panel.rename'), icon: <IconEdit /> },
+                    { id: 'alias-id', label: t('panel.aliasIdEdit'), disabled: state.busy },
                     { id: 'access:inherit', label: t('panel.accessInherit'), disabled: state.busy || root.access === 'inherit' },
                     { id: 'access:read-only', label: t('panel.accessReadOnly'), disabled: state.busy || root.access === 'read-only' },
                     { id: 'access:read-write', label: t('panel.accessReadWrite'), disabled: state.busy || root.access === 'read-write' },
@@ -675,7 +683,13 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   ]}
                   onSelect={(id) => {
                     setMenuFor(undefined)
+                    if (id === 'alias-id') {
+                      setAliasField('aliasId')
+                      setAliasFor(key)
+                      setAliasDraft(root.aliasId ?? '')
+                    }
                     if (id === 'rename') {
+                      setAliasField('alias')
                       setAliasFor(key)
                       setAliasDraft(root.alias ?? '')
                     }
@@ -707,10 +721,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       autoFocus
                       className="mrfw-input mrfw-inputInline"
                       value={aliasDraft}
-                      placeholder={t('panel.aliasPlaceholder')}
+                      placeholder={t(aliasField === 'aliasId' ? 'panel.aliasIdPlaceholder' : 'panel.aliasPlaceholder')}
                       onChange={event => { setAliasDraft(event.target.value) }}
                     />
-                    <Action disabled={state.busy} onClick={() => { void mutate('alias', { entry: entryOf(root), alias: aliasDraft }); setAliasFor(undefined) }}>
+                    <Action disabled={state.busy} onClick={() => { void mutate(aliasField === 'aliasId' ? 'setAliasId' : 'alias', { entry: entryOf(root), [aliasField]: aliasDraft }).then(ok => { if (ok) setAliasFor(undefined) }) }}>
                       {t('panel.aliasSave')}
                     </Action>
                     <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>

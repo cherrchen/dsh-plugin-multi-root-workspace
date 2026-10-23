@@ -118,6 +118,9 @@ export interface RegisteredRoot {
   readonly readWriteRecordedPath?: string
   /** Optional display alias; absent when the operator cleared it. */
   readonly alias?: string
+  /** Untrusted stored metadata; consumers must validate both fields and uniqueness. */
+  readonly aliasId?: unknown
+  readonly skillsEnabled?: unknown
   /** ISO-8601 instant of registration. */
   readonly addedAt: string
 }
@@ -191,6 +194,7 @@ export type RootValidationCode =
   | 'duplicate'
   | 'nested'
   | 'invalid-alias'
+  | 'invalid-alias-id'
   | 'not-found'
   | 'invalid-ref'
   | 'storage-unavailable'

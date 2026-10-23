@@ -272,6 +272,23 @@ describe('the client entry', () => {
 })
 
 describe('the panel dialog', () => {
+  it('toggles read-only Root Skills and edits its independent namespace over the channel', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', roots: [{ ...ROOT_B, aliasId: 'website', skillsEnabled: false }], limit: 16, count: 1 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const toggle = await screen.findByRole('checkbox', { name: /panel.skills/ })
+    fireEvent.click(toggle)
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setSkillsEnabled' && call.payload.skillsEnabled === true)).toBe(true) })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.more` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.aliasIdEdit` }))
+    const input = screen.getByPlaceholderText(`${NS}.panel.aliasIdPlaceholder`)
+    fireEvent.change(input, { target: { value: 'site' } })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.aliasSave` }))
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setAliasId' && call.payload.aliasId === 'site')).toBe(true) })
+    expect(harness.calls.filter(call => call.endpoint === 'setAccess')).toHaveLength(0)
+  })
+
   it('accepts list and mutation results after StrictMode replays mount effects', async () => {
     const harness = mount()
     renderPanel(harness, true)
