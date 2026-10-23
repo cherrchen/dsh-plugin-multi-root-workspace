@@ -155,5 +155,7 @@ describe('Skills metadata on the production Registry', () => {
     expect(migrateRootSkills(migrated)).toEqual(migrated)
     expect(migrateRootSkills([...rows].reverse()).reverse()).toEqual(migrated)
     expect(migrated[2]).toMatchObject({ aliasId: null, skillsEnabled: null })
+    expect(migrateRootSkills([{ id: 'd', path: '/four', aliasId: null }])[0]?.skillsEnabled).toBe(false)
+    expect(migrateRootSkills([{ id: 'e', path: '/five', aliasId: 'duplicate' }, { id: 'f', path: '/six', aliasId: 'duplicate' }]).map(row => row.skillsEnabled)).toEqual([false, false])
   })
 })

@@ -266,3 +266,13 @@ B9 的 Linux 原生执行证据分两类：latest 保留实际 Landlock 选择�
 `pnpm auto-review:fork` 重放显式差异并钉住 policy、身份、角色、协议和 owner teardown。`pnpm smoke:auto-review` 验证 source/link 与单一 tarball、web/headless × 官方前后顺序、默认零挂载、重复 reload 不写配置、真实请求/围栏、live disable/restore/re-enable 和重启。`tests/auto-review/loader.spec.ts` 额外模拟延迟 import 与异步 drain；普通旧版跳过联合集成测试，继续原有门禁。
 
 不再维护第二个版本、发布清单或 tarball。平台执行证据与发布状态只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#auto-review-内置入口迁移2026-10-20)。
+
+## Skills 接缝回归
+
+新增 `tests/skills-*.spec.ts`、`tests/client-skills.spec.tsx` 与 `tests/support/skills-stack.ts` 随既有版本矩阵执行。现代 Loader/Settings 测试从 app-boot 的公开安装锚点解析 ConfigEditor；缺少该能力的旧版改跑真实 legacy SettingsProvider 的 namespace 写回测试，不声明不存在的旧版 ConfigEditor 包。
+
+在临时目录复制源码建立隔离版本安装树时，可设置 `DSH_TEST_FIXTURE_PARENT` 指向可写且不在自动 temp grant 内的目录；测试仍执行原有 `assertOutsideTempGrants`，不能用此变量绕过权限负对照。主工作树的 manifest、lockfile、安装树和支持列表不随隔离验证修改。
+
+`bootProfile` 为 in-process smoke 补齐 CLI 的完整 `profileContext`（home、patchPath、installAnchor、startedBundles 等），优先保留调用者提供的事实，否则现代 ConfigEditor/Settings 会因缺少注入而静默不启动，或在首次写回时报路径缺失。profile 重组使用该次 boot 返回的 appBoot 模块实例，避免安装/解析变化后落入另一个实例的 root Include WeakMap。`smoke:journey` 额外验证真实 web/headless 首步 Skill Catalog、原生按需 get、用户命名空间调用，以及全局关闭/恢复和 native cwd 旁路。
+
+`node --experimental-transform-types scripts/measure-multi-root-skills.mjs` 在可清理的真实 Registry/native Skills 栈上测量 16 根、128 Skills 的首次目录、重复目录及受检预览耗时，同时断言目录不含正文。它输出本机 IO 样本，不作为跨平台性能阈值；结果与执行环境只记路线账本。

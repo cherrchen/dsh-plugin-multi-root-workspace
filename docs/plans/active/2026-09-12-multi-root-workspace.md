@@ -827,7 +827,7 @@ macOS / Node `24.18.0`：**13 组检查通过**。其中一组对 `SUPPORTED_DSH
 
 发现两项必须加入实现的约束：只注册 Provider 不能防 native effective-cwd 再发现；不能承诺 domain v1 的未知 metadata 经旧版写回仍保留。旧宿主的设置和已发送 UI 也须按实际能力分支：legacy installSection 与 modern volatile Config 分开；UserTextRule 只在 `0.2.1-alpha.3` 及之后的本次审查集合出现。
 
-尚未执行：旧版隔离安装树上的动态原型、真实 generated Gateway 传输、完整浏览器 DOM/交互、真实 agent-loop/LLM journey、新字段在生产 Registry lease/迁移队列中的集成、观察调度器资源测试，以及 Linux/Windows 原生路径与句柄测试。本次没有源码产品改动，因而没有将全套 kernel/smoke/packed 门禁记为执行通过；这些为 S1–S7 的交付门槛。文件句柄与前后检查也不声称可抵御任意祖先 rename 的原子事务。
+架构原型结束时尚未执行：旧版隔离安装树上的动态验证、真实 Connection 传输、完整浏览器 DOM/交互、真实 agent-loop/LLM journey、新字段在生产 Registry lease/迁移队列中的集成、观察调度器资源测试，以及 Linux/Windows 原生路径与句柄测试。该阶段没有源码产品改动，未将全套 kernel/smoke/packed 门禁记为执行通过；后续生产验证见下文。文件句柄与前后检查也不声称可抵御任意祖先 rename 的原子事务。
 
 ### 后续进度
 
@@ -841,6 +841,41 @@ macOS / Node `24.18.0`：**13 组检查通过**。其中一组对 `SUPPORTED_DSH
 | S4 | 按需模型 get、Host Alias pre-step、读取前后文件签名和 generation fence、独立撤销提示已实现。rc.2 的 8 个正式回归经真实 tools.execute / pre-step 覆盖默认/user-only/model-only、伪造 source、旧 Alias/内部 ID、读取中禁用/移除/策略变化/取消、其他 Provider incomplete、原生 exact-ID winner；通过。 |
 | S5 | 共享 128 根 LRU 委托池与 2 秒单调度器、generation、冷 Session list/preview/changes RPC、Client epoch/取消围栏、ordered teardown 已实现。rc.2 8 个相关文件 86 passed（含真实 Connection localhost HTTP、实际文件增改删/Root missing、容量/去重/淘汰、排队取消、延迟 get 卸载排空、旧包丢弃）；typecheck 与定向 lint 通过。 |
 | S6 | Slash Source、完整文本插入、conditional UserTextRule/Renderer、安全预览、双形状 Settings 卡片及 Host 动态配置已实现。rc.2 Loader/Settings 真实多行 profile 验证只改 Skills 行、volatile 不重挂；legacy installSection 到达/移除回归通过。DOM 覆盖 namespace 补全、原文插入、sent 引用预览 RPC、表单映射与 accessible checkbox。旧宿主动态验收及真实浏览器整页检查在 S7 继续。 |
-| S7 | 开发中；本机首次全量回归 875 passed / 75 skipped，唯一制品测试因新增合法 react-dom/client external 断言待同步后复跑。 |
+| S7 | 本机集成与打包验证完成，必要 OS × 版本全套门禁仍待原生 CI；不标记功能完成或迁移计划。最终执行证据见下文。 |
 
 C0 保存既有架构文档与原型；C1 保存 S1，C2 保存 S2，C3 保存 S3 的实现与本层测试，C4 保存 S4，C5 保存 S5，C6 保存 S6 的实现与本层测试。checkpoint 为本机临时快照仓库中的增量 patch，正式仓库未提交；后续阶段继续基于同一工作树。
+
+
+### 生产实现本机验收（2026-10-23）
+
+主工作树保持 `0.2.1-rc.2` 开发 pin、原 16 项精确支持集合及 enforce 门禁。macOS / Node `24.18.0`，未修改上游；S1–S6 生产实现及本机整体验证完成，S7 保留必要平台门禁与发布准备。
+
+| 本机门禁 | 结果 |
+| --- | --- |
+| compat:check、lint、typecheck、build | 通过；支持集合、peer 与安装树一致 |
+| test | **889 passed / 65 skipped**，63 文件通过、1 文件平台跳过；skip 不计为原生通过 |
+| kernel:probe | Seatbelt 实跑成功；本机无 bwrap/Landlock |
+| smoke:compose / smoke:behavior / smoke:journey | **52 / 126 / 76 passed**，均 0 failed / 0 skipped |
+| pack:check / smoke:packed | 通过；tarball behavior **125 passed / 0 failed / 0 skipped** |
+| auto-review:fork / smoke:auto-review | 通过；source/link 与 tarball，web/headless × 两种官方 bundle 顺序，真实 reviewer 和写围栏回归通过 |
+| 架构原型 | 更新为冻结旧记录 schema 后重新运行，仍 **13 组通过** |
+
+journey 使用真实 Loader、preset、Agent loop、原生 skill 工具和本地脚本化 LLM 服务；web/headless 的首请求只有目录，模型调用后收到正文，第二轮用户 `/repo-b:journey-user` 保留原文并按 user-only 策略加载。web 动态关闭/恢复 Config 后旧内部 ID 拒绝，主根 Skill 与各 Root 手动选择保留；关闭 Root 后进入附加目录不能通过 native 裸名发现。测试环境须允许原生 watcher 和 Seatbelt：外层执行沙箱曾使上游文件 Provider 报 incomplete，原生工具因此正确拒绝整个 Catalog，不能用绕过 incomplete 来取得绿灯。
+
+浏览器在隔离 home/仓库的真实 Web 页面完成：插件详情页只有一份全局 Skills 卡片、关闭/恢复；Root checkbox 关闭后候选消失、恢复后出现；`/repo-b:` 候选无内部 ID，选择插入完整 `/repo-b:review `；已发送引用显示并可打开受 Session RPC 重验的正文预览。浏览器的模型地址刻意指向不可用的本地端口，发送后的 transport failure 不作为模型调用成功证据；模型调用成功证据归上述 journey。草稿保持无原生高亮。
+
+A1/A2/A10 由真实 Registry/lease/JSON 重启与命令/DOM 测试覆盖；A3–A8 由 native snapshot/get、真实 tools.execute/pre-step、Connection 及 journey 覆盖，另有子 Agent 自身 Origin、cwd symlink 与 reload 的正式回归；A9 由文件变化、受限读取、128 根池配额/去重/LRU、排队取消与卸载排空覆盖；A11/A12 由真实 Loader/Settings、DOM 和浏览器覆盖。A13 的跨版本动态接缝见下节，Linux/Windows 原生部分仍悬空，不能称 A1–A13 最终全部完成。
+
+本机成本样本来自 `node --experimental-transform-types scripts/measure-multi-root-skills.mjs`：16 根 × 8 Skills，正文每项约 6 KiB；首次 metadata list **586.89 ms**，5 次重复 list **459.61–623.83 ms**，受检 preview **406.15–568.29 ms**。目录断言不含正文。这是同时执行其他回归时的本机 IO 样本，不是 UI 网络延迟、吞吐保证或跨平台性能认证；当前每次请求重验有可见扫描成本。
+
+### 已支持版本的隔离动态验证
+
+从 `SUPPORTED_DSH_RELEASES` 读取全部 **16 个版本**，在临时源码副本中依次通过既有 `upgrade-dsh.mjs` 重指，每项执行独立 install、`compat:check`、`typecheck`、`build` 和 10 个 Skills/Client/可选 peer/patch 定向测试文件。**16/16 通过**；每项 **58 passed / 1 skipped**。该 skip 为 legacy namespace Settings 与现代 ConfigEditor 两种互斥能力中的另一分支，实际对应形状均有运行，不是跳过整个 Settings 功能。临时树安装使用 `CI=true`，负对照 fixture 显式置于自动 temp grant 之外；主树 pin、lockfile 和安装树未参与重指。
+
+这是 macOS 上的跨版本动态接缝验证，不能替代每个版本的完整普通插件/联合 smoke 或其他 OS 原生验证。完整本机门禁仅对主开发 pin 执行。后续补充的真实 Connection 延迟包回归亦在主 pin 通过；不将未重跑的旧版新增断言计入上面的 58 项。
+
+### 剩余验收与 checkpoint
+
+Linux bwrap/Landlock、Windows ACL/broker/pwsh/ConPTY 的原生路径、junction、句柄与沙箱测试，以及支持版本 × 已启用 OS 的全套既有 mandatory gates 尚未执行。新测试已进入既有测试入口；本次未提交或推送，因而没有远端 CI run 可引用。功能发布前还须按 release workflow 更新双语 CHANGELOG；当前不编造版本号或修改已发布历史。
+
+C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档，不表示 S7 全平台完成。C0–C7 为按顺序应用的增量 patch；临时快照另备份在本工作区被忽略的 `.dsh-smoke/checkpoints-multi-root-skills-20261023/`，含基线与校验和 manifest，可用于后续分批提交。正式仓库保持未提交；S7 全平台退出条件满足前计划留在 active。

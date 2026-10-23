@@ -447,7 +447,10 @@ try {
     assert.equal(accessChange(previous, 'inherit', 'read-write').skillsEnabled, true)
     assert.equal(accessChange(previous, 'inherit', 'read-only').skillsEnabled, false)
     const { multiRootDomainSpec } = await import(pathToFileURL(join(REPO_ROOT, 'lib/registry.js')).href)
-    const legacy = multiRootDomainSpec.tables.roots.valueSchema.parse({ roots: [{ ...migrated[0], skillsEnabled: false }] })
+    // Freeze the pre-Skills record shape: the production schema now retains
+    // both fields, while an old plugin writing domain v1 strips them.
+    const legacyRecord = multiRootDomainSpec.tables.roots.valueSchema.shape.roots.element.omit({ aliasId: true, skillsEnabled: true })
+    const legacy = { roots: legacyRecord.array().parse([{ ...migrated[0], skillsEnabled: false }]) }
     assert.equal(legacy.roots[0].aliasId, undefined)
     assert.equal(migrate(legacy.roots)[0].skillsEnabled, true)
   })

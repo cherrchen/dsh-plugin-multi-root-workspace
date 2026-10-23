@@ -36,11 +36,11 @@ export async function skillsStack(base: string) {
   const rawSnapshotDescriptor = Object.getOwnPropertyDescriptor(ctx.skills, 'snapshot')
   const owner = await ctx.plugin(MultiRootSkills)
   const releaseAgents: (() => void)[] = []
-  function agent(cwd: string) {
+  function agent(cwd: string, parent?: Agent) {
     const id = SessionId(randomUUID())
     const session = Session.create(id, [], { id, cwd, version: SESSION_FORMAT_VERSION, createdAt: 0, isSeeded: false })
     const agent = { id, session, ctx, effectiveCwd: join(base, 'shared') } as unknown as Agent & { effectiveCwd: string }
-    headers.set(id, session.header); releaseAgents.push(ctx.agents.enter(agent, undefined))
+    headers.set(id, session.header); releaseAgents.push(ctx.agents.enter(agent, parent))
     return agent
   }
   return { ...stack, ctx, owner, agent, headers, remote, rawSnapshot, rawGet, rawSnapshotDescriptor,

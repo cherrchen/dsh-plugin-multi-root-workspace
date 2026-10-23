@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { boot, initProfile, readProfilePatches } from '@deepseek-ai/dsh-app-boot'
-import ConfigEditor from '@deepseek-ai/dsh-config-editor'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
+const settingsRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh-app-boot/package.json'))
+let configEditorPath: string | undefined
+try { configEditorPath = settingsRequire.resolve('@deepseek-ai/dsh-config-editor') } catch { /* Old Settings use a namespace provider. */ }
 import Settings from '@deepseek-ai/dsh-settings'
 import NativeSkills from '@deepseek-ai/dsh-skill'
 import * as Skills from '../src/skills.ts'
@@ -36,7 +40,21 @@ describe('live Host Skills settings', () => {
     } finally { await stack.dispose() }
   })
 
-  it('maps real Loader/Settings edits to the Skills row, without remounting it or editing Registry', async () => {
+  it.skipIf(typeof (Settings.prototype as any).installSection !== 'function')('uses a real legacy Settings provider for live namespace writes', async () => {
+    const stack = await skillsStack(fixture.base)
+    try {
+      class LegacySettings extends (Settings as any) { readonly writable = true; async load() { return {} }; async persist() {} }
+      await stack.ctx.plugin(LegacySettings)
+      expect(stack.ctx.settings.describe().some(row => row.ns === 'multi-root-skills')).toBe(true)
+      await stack.ctx.settings.mutate('multi-root-skills' as never, [{ op: 'set', path: ['enabled'], value: false }])
+      expect(stack.ctx.multiRootSkills.enabled).toBe(false)
+      await stack.ctx.settings.mutate('multi-root-skills' as never, [{ op: 'set', path: ['enabled'], value: true }])
+      expect(stack.ctx.multiRootSkills.enabled).toBe(true)
+    } finally { await stack.dispose() }
+  })
+
+  it.skipIf(configEditorPath === undefined)('maps real Loader/Settings edits to the Skills row, without remounting it or editing Registry', async () => {
+    const ConfigEditor = (await import(pathToFileURL(configEditorPath!).href)).default
     const stack = await skillsStack(fixture.base)
     let instance: Awaited<ReturnType<typeof boot>> | undefined
     try {

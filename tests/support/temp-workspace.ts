@@ -35,8 +35,9 @@ function contains(root: string, path: string): boolean {
  * @returns an existing directory that can host fixture siblings.
  */
 function fixtureParent(): string {
-  const candidates = [join(REPO_ROOT, '.dsh-smoke'), dirname(canonicalPath(tmpdir())), homedir()]
+  const candidates = [process.env.DSH_TEST_FIXTURE_PARENT, join(REPO_ROOT, '.dsh-smoke'), dirname(canonicalPath(tmpdir())), homedir()]
   for (const candidate of candidates) {
+    if (candidate === undefined) continue
     if (candidate === parse(candidate).root) continue
     try {
       mkdirSync(candidate, { recursive: true })

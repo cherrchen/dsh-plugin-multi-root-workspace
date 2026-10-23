@@ -13,7 +13,7 @@
 node --experimental-transform-types scripts/probe-multi-root-skills.mjs --upstream <upstream-checkout>
 ```
 
-原型通过现有 `scripts/lib/dsh-runtime.mjs` 从 DSH 安装锚点解析发布包，支持既有 `DSH_CLI` 覆盖；不从上游 `/src/` 深导入 Host 实现。UI 纯核单独从传入检出的 TypeScript 运行，因而需要 transform-types。测试只在临时目录创建文件、存储与最小 profile，结束后清理；不会更新主 manifest、lockfile、支持集合或上游检出。运行需要本包已有 `lib/registry.js`，用于真实旧 schema 的降级试验；尚未构建时先按开发工作流构建。
+原型通过现有 `scripts/lib/dsh-runtime.mjs` 从 DSH 安装锚点解析发布包，支持既有 `DSH_CLI` 覆盖；不从上游 `/src/` 深导入 Host 实现。UI 纯核单独从传入检出的 TypeScript 运行，因而需要 transform-types。测试只在临时目录创建文件、存储与最小 profile，结束后清理；不会更新主 manifest、lockfile、支持集合或上游检出。运行需要本包已有 `lib/registry.js`，从当前 schema 去掉两个新字段，冻结 Skills 引入前的真实记录形状以复现降级；尚未构建时先按开发工作流构建。
 
 原型内部的 roots Map 和迁移函数是受测模型，不是生产 Registry。原生首步 Catalog、SkillRegistry、FileSystemSkillProvider、工具定义、SessionSkillCatalog、Loader 和 Settings 使用真实发布模块。首次模型步骤通过真实 `agentEvents(...).waterfall('agent/pre-step')` 检查消息，未请求真实 LLM；工具检查执行真实注册的 `skill` 定义，尚不等同于完整 agent-loop journey。
 
@@ -81,6 +81,6 @@ modern Settings 只投影 volatile 字段；把 enabled 写成普通 boolean Con
 
 ## 迁移与已加载正文
 
-当前 [Registry schema](../../src/registry.ts) 使用 domain v1，未知 metadata 会被剥离。原型把含 aliasId/skillsEnabled:false 的新记录交给真实旧 schema，再重新执行迁移，能观察到字段丢失和 inherit 默认重新开启。这是降级写回的已知行为，不能以 v1 可读推导配置无损。
+[Registry schema](../../src/registry.ts) 继续使用 domain v1，新实现保留 Skills metadata；引入 Skills 前的记录 schema 会剥离这些未知字段。原型将当前 schema 冻结为旧记录形状，把含 aliasId/skillsEnabled:false 的新记录交给它，再重新执行迁移，能观察到字段丢失和 inherit 默认重新开启。生产回归另经真实 JSON 存储重新打开验证重迁移。这是降级写回的已知行为，不能以 v1 可读推导配置无损。
 
 当前原生 Skill 加载的结果是工具返回值或 instructions-form 用户上下文，没有插件能统一回收的“Skill 正在执行”句柄。原生 tool-skill 持久 Catalog 会记录 entry digest，变化时发送替换目录，变为空也会显式停用旧名称；已投递正文依然在会话历史中。禁用保证应针对后续发现与加载，不能承诺删除既有文本或结束其后已启动的工具进程。

@@ -35,6 +35,29 @@ describe('production Skill discovery and native cwd routing', () => {
     expect(rows.every(row => !row.name.includes('outside-secret'))).toBe(true)
   })
 
+  it('uses a child Agent’s own Origin and reroutes a symlink cwd after a disable and reload', async () => {
+    const a = project(fixture.base, 'parent'), b = project(fixture.base, 'child')
+    const extraA = project(fixture.base, 'parent-extra'), extraB = project(fixture.base, 'child-extra')
+    writeSkill(a, 'parent-primary', 'PARENT'); writeSkill(b, 'child-primary', 'CHILD')
+    writeSkill(extraA, 'review', 'PARENT EXTRA'); writeSkill(extraB, 'review', 'CHILD EXTRA')
+    const [rowA] = await stack.registry.add(a, { path: extraA })
+    const [rowB] = await stack.registry.add(b, { path: extraB })
+    const parent = stack.agent(a), child = stack.agent(b, parent)
+    const alias = join(fixture.base, 'cwd-link')
+    symlinkSync(extraA, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    parent.effectiveCwd = alias; child.effectiveCwd = alias
+    const childRows = (await stack.snapshot(child)).skills.map(row => row.name)
+    expect(childRows).toContain(internalSkillName(b, rowB!.id, 'review'))
+    expect(childRows).not.toContain(internalSkillName(a, rowA!.id, 'review'))
+    await stack.registry.setSkillsEnabled(a, { kind: 'id', id: rowA!.id }, false)
+    expect((await stack.snapshot(parent)).skills.map(row => row.name)).toEqual(['parent-primary'])
+    await stack.owner.dispose()
+    const { default: Skills } = await import('../src/skills.ts')
+    await stack.ctx.plugin(Skills)
+    expect((await stack.snapshot(parent)).skills.map(row => row.name)).toEqual(['parent-primary'])
+    expect((await stack.snapshot(child)).skills.some(row => row.name === internalSkillName(b, rowB!.id, 'review'))).toBe(true)
+  })
+
   it('reproduces bare native discovery and blocks it for live and cold Session reads', async () => {
     const a = project(fixture.base, 'a'), extra = project(fixture.base, 'extra')
     writeSkill(a, 'primary', 'PRIMARY'); writeSkill(extra, 'review', 'EXTRA')

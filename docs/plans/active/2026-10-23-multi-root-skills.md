@@ -10,7 +10,7 @@
 
 ## Current State
 
-实施前基线：Registry、命令和 Dialog 没有 aliasId/skillsEnabled；patch、exports 与 Client 中没有 Skills 行、命名空间菜单、读端点或 Settings 卡片。已发布兼容集合保持不变。当前原型的 roots Map、迁移函数与临时 profile 不能取代生产 Registry、lease 或 Gateway 集成。
+实施前基线：Registry、命令和 Dialog 没有 aliasId/skillsEnabled；patch、exports 与 Client 中没有 Skills 行、命名空间菜单、读端点或 Settings 卡片。已发布兼容集合保持不变。当前原型的 roots Map、迁移函数与临时 profile 不能取代生产 Registry、lease 或 Connection RPC 集成。
 
 ## Scope / Non-goals
 

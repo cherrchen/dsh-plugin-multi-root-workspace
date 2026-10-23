@@ -45,6 +45,7 @@ const INSERTED = [
   'multi-root-providers',
   'multi-root-scope',
   'multi-root-registry',
+  'multi-root-skills',
   'multi-root-instructions',
   'multi-root-lsp',
   'multi-root-workspace-files',

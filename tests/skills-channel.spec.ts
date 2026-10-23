@@ -43,6 +43,19 @@ it('serves cold Session metadata, preview and revocation over the real Connectio
       const catalog = await client.list(cold)
       expect(catalog.skills.map(row => row.name)).toEqual(['root:review'])
       expect((await client.preview(cold, 'root:review')).content).toContain('CHANNEL BODY')
+      // Buffer a real HTTP response at the Connection boundary, then switch
+      // epoch before delivering it. The old payload must never repopulate UI.
+      let releaseReply!: () => void, replyReady!: () => void
+      const held = new Promise<void>(resolve => { releaseReply = resolve })
+      const ready = new Promise<void>(resolve => { replyReady = resolve })
+      const delayed = new SkillsClient({ rpc: { call: async (...args: Parameters<typeof connection.rpc.call>) => {
+        const result = await connection.rpc.call(...args)
+        replyReady(); await held; return result
+      } } })
+      const oldReply = delayed.list(cold).catch(error => error)
+      await ready; delayed.reset(); releaseReply()
+      expect(await oldReply).toBeInstanceOf(Error)
+      expect(delayed.snapshot(cold)).toBeUndefined(); delayed.dispose()
       const changed = connection.rpc.call('/multi-root-workspace', 'skillsChanges', { sessionId: cold, generation: catalog.generation })
       await stack.registry.setSkillsEnabled(primary, { kind: 'id', id: row!.id }, false)
       expect(await changed).toMatchObject({ ok: true, value: { generation: expect.any(Number) } })

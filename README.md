@@ -207,6 +207,8 @@ dsh --profile web --dump-config | grep -A3 'multi-root'
 /workspace-folders [list]                                                   # 列出主根与附加根（含每根访问级别与状态）
 /workspace-folders add <absolute path> [--inherit|--read-only|--read-write] # 不带路径时打开系统目录选择器；新登记默认 inherit
 /workspace-folders access <order|path> inherit|read-only|read-write         # 切换访问级别（扩权要求该根此刻可用）
+/workspace-folders skills <order|path> on|off                               # 独立切换附属根 Skills，不改变写权限
+/workspace-folders alias-id <order|path> <kebab-case>                        # 编辑稳定 Skill 命名空间
 /workspace-folders alias <order|path> [alias]                               # 不带别名则清除已有别名
 /workspace-folders remove <order|path>                                      # 序号即 list 输出的编号
 /workspace-folders reveal <order|path>                                      # 在文件管理器中显示
@@ -227,6 +229,18 @@ Workspace root (primary; access follows the current sandbox mode): /home/me/mono
 2 of 16 additional roots.
 Writable additional roots under the current mode: 1 of 2.
 ```
+
+### 附属根 Skills（开发分支，尚未发布）
+
+发现附属目录的 `.dsh/skills` 和 `.agents/skills`，首个模型步骤可见名称与描述，正文按需加载。主根使用 `/skill-name`；附属根始终使用 `/alias-id:skill-name`，可在 Slash 菜单补全或手动输入。模型通过原生 `skill` 工具调用内部名称；工具日志中可能显示内部 ID，人类菜单只列命名空间引用。
+
+新登记的 `inherit` / `read-write` 根默认开启，`read-only` 根默认关闭；Workspace Folders Dialog 可独立切换 Skills 并编辑 `aliasId`。显示 Alias 的修改不改变 `aliasId`。只有登记权限的实际变化才重置开关；切换会话沙箱模式、同值权限设置和未改变权限的重新登记都保留手动选择。只读根开启 Skills 后仍没有写权限。
+
+Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 控制全部附属根，默认开启。关闭后阻止新的发现与调用，保留每根选择；恢复后按原值发现。主根 Skills、指令、LSP、文件浏览及沙箱权限不受此开关影响。旧版宿主使用兼容的插件设置页。已发送引用可在支持的宿主上点击预览，展示不表示已经执行；草稿内的原生 Skill 高亮暂不支持冒号引用。
+
+升级时旧 `inherit` / `read-write` 登记会默认开启 Skills。持久化迁移保留原有 grant；旧版写回可能剥离 `aliasId` 和手动开关，再升级时重新按默认值迁移，**不保证 Skills 配置无损降级**。如需保留选择，降级前备份 `$DSH_HOME/storages/multi_root_workspace.json`。已投递正文仍留在历史中，禁用不会结束已经启动的进程。
+
+架构与验收边界见 [ADR-0023](./docs/decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)，实施和平台状态见[路线账本](./docs/plans/active/2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。
 
 ### 面板
 

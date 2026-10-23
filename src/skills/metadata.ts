@@ -39,6 +39,6 @@ export function migrateRootSkills<T extends SkillsMetadata>(rows: readonly T[]):
   }
   return rows.map(row => ({ ...row,
     ...(row.aliasId === undefined && generated.has(row) ? { aliasId: generated.get(row)! } : {}),
-    ...(row.skillsEnabled === undefined ? { skillsEnabled: row.readOnlyRecordedPath === undefined } : {}),
+    ...(row.skillsEnabled === undefined ? { skillsEnabled: row.readOnlyRecordedPath === undefined && (row.aliasId === undefined || validAliasId(row.aliasId) && rows.filter(other => other.aliasId === row.aliasId).length === 1) } : {}),
   }))
 }

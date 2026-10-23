@@ -66,7 +66,7 @@ export class AdditionalSkillCatalog {
           seen.add(candidate.name)
           const locator: LocatedSkill = { primary, rootId: root.id, aliasId: root.aliasId as string, candidate }
           this.locators.add(locator)
-          candidates.push({ ...candidate, provider: SKILLS_PROVIDER, name: internalSkillName(primary, root.id, candidate.name), rank: Number.MAX_SAFE_INTEGER, invocation: { modelInvocable: candidate.invocation.modelInvocable, userInvocable: false }, locator })
+          candidates.push({ ...candidate, provider: SKILLS_PROVIDER, description: `/${locator.aliasId}:${candidate.name} — ${candidate.description}`, name: internalSkillName(primary, root.id, candidate.name), rank: Number.MAX_SAFE_INTEGER, invocation: { modelInvocable: candidate.invocation.modelInvocable, userInvocable: false }, locator })
         }
       } catch (error: unknown) {
         options.signal?.throwIfAborted()

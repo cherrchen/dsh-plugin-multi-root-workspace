@@ -52,10 +52,12 @@ try {
     const manifest = app.readProfileManifest('probe',dir)
     const bundles = manifest.dsh.profile.bundles
     app.writeProfileBundles(dir,manifest,first ? [...bundles.slice(0,2),official,...bundles.slice(2)] : [...bundles,official])
-    ;({ctx} = await bootProfile(name,home,prepare))
+    const activated = await bootProfile(name,home,prepare)
+    ctx = activated.ctx
+    const bootApp = activated.appBoot
     const recompose = async () => {
       const next = await composeProfile(name,home)
-      await app.reconcileProfilePatches(ctx,next.patches,'auto-review-smoke')
+      await bootApp.reconcileProfilePatches(ctx,next.patches,'auto-review-smoke')
     }
     const setEnabled = async enabled => {
       console.log(`[auto-review] ${name}: row -> ${enabled}`)
