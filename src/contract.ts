@@ -30,6 +30,10 @@
  */
 
 import { z } from 'zod'
+import type { SkillsResponseMap } from './skills-contract.ts'
+export { SKILLS_ENDPOINTS, skillsRequestSchema, skillsCatalogSchema, skillsPreviewSchema, skillsStatusSchema } from './skills-contract.ts'
+export type { SkillsEndpoint, SkillsStatusView, SkillsCatalogView, SkillsPreviewView } from './skills-contract.ts'
+export interface WorkspaceResponseMap extends PanelResponseMap, SkillsResponseMap {}
 
 /** The absolute logical channel both halves speak over. */
 export const PANEL_CHANNEL = '/multi-root-workspace'

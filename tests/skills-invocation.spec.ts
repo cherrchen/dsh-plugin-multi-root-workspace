@@ -94,6 +94,24 @@ describe('native loading and Host aliases', () => {
     expect(await execute(id)).toMatchObject({ isError: true })
   })
 
+  it('closes admission and awaits an in-flight read before owner disposal finishes', async () => {
+    writeSkill(extra, 'review', 'BODY')
+    const id = internalSkillName(primary, root.id, 'review')
+    await stack.snapshot(agent)
+    let entered!: () => void, resume!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { resume = resolve })
+    const get = FileSystemSkillProvider.prototype.get
+    vi.spyOn(FileSystemSkillProvider.prototype, 'get').mockImplementation(async function(...args) { const loaded = await get.apply(this, args); entered(); await held; return loaded })
+    const loading = stack.ctx.skills.get(id, { scope: agent })
+    await started
+    let disposed = false
+    const disposing = stack.owner.dispose().then(() => { disposed = true })
+    await new Promise(resolve => setTimeout(resolve, 10)); expect(disposed).toBe(false)
+    resume(); expect(await loading).toBeUndefined()
+    await disposing; expect(disposed).toBe(true)
+  })
+
   it('retains a native exact-name winner instead of overriding it', async () => {
     writeSkill(extra, 'review', 'PLUGIN BODY')
     const id = internalSkillName(primary, root.id, 'review')

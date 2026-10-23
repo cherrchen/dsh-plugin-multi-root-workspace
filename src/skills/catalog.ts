@@ -1,4 +1,6 @@
 /** Origin-scoped metadata discovery; Registry remains the only registration source. */
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { SkillReaderPool } from './pool.ts'
 import { createHash } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { statSync } from 'node:fs'
@@ -24,8 +26,9 @@ export type Reader = NonNullable<Awaited<ReturnType<typeof rootReader>>>
 export class AdditionalSkillCatalog {
   private readonly loadedReceipts = new WeakMap<SkillDefinition, { revision: number; locator: LocatedSkill; stamp: string }>()
   private readonly locators = new WeakSet<object>()
-  private readonly readers = new Map<string, Promise<Reader | undefined>>()
-  constructor(private readonly ctx: Context, private readonly signal: AbortSignal, private readonly enabled: () => boolean, private readonly generation: () => number = () => 0) {}
+  private readonly requests = new AsyncLocalStorage<{ primary: string; id: string }>()
+  readonly pool: SkillReaderPool
+  constructor(private readonly ctx: Context, private readonly signal: AbortSignal, private readonly enabled: () => boolean, private readonly generation: () => number = () => 0, invalidate: () => void = () => {}) { this.pool = new SkillReaderPool(invalidate) }
   current(primary: string, id: string): RootStatus | undefined {
     if (this.signal.aborted || !this.enabled() || this.ctx.multiRootRegistry.authority.kind !== 'active' || this.ctx.multiRootScope.resolve({ mode: 'read-only', workspaceRoot: primary }).authority !== 'available') return undefined
     const rows = this.ctx.multiRootRegistry.list(primary)
@@ -34,17 +37,14 @@ export class AdditionalSkillCatalog {
     const recorded = root.recordedPath ?? root.readOnlyRecordedPath ?? root.readWriteRecordedPath
     try { return recorded === canonicalPath(root.path) && statSync(root.path).isDirectory() ? root : undefined } catch { return undefined }
   }
-  async reader(primary: string, id: string): Promise<Reader | undefined> {
+  private async withReader<T>(primary: string, id: string, options: SkillLookupOptions, run: (reader: Reader | undefined) => Promise<T>): Promise<T> {
     const root = this.current(primary, id)
-    if (root === undefined) return undefined
-    const key = `${primary}\0${id}\0${root.path}`
-    let reader = this.readers.get(key)
-    if (reader === undefined) {
-      reader = rootReader(this.ctx, root.path, this.signal, () => this.current(primary, id)?.path === root.path)
-      this.readers.set(key, reader)
-      reader.catch(() => { if (this.readers.get(key) === reader) this.readers.delete(key) })
-    }
-    return await reader
+    if (root === undefined) return await run(undefined)
+    return await this.requests.run({ primary, id }, () => this.pool.use(root.path, signal => rootReader(this.ctx, root.path,
+      AbortSignal.any([signal, this.signal]), () => {
+        const request = this.requests.getStore()
+        return request !== undefined && this.current(request.primary, request.id)?.path === root.path
+      }), run, options.signal))
   }
   async list(primary: string, options: SkillLookupOptions): Promise<SkillCandidate[]> {
     options.signal?.throwIfAborted()
@@ -54,10 +54,9 @@ export class AdditionalSkillCatalog {
     const candidates: SkillCandidate[] = []
     for (const root of roots) {
       if (this.current(primary, root.id) === undefined) continue
-      const reader = await this.reader(primary, root.id)
-      if (reader === undefined) continue
       try {
-        const observed = await reader.list(options)
+        const observed = await this.withReader(primary, root.id, options, async reader => await reader?.list(options))
+        if (observed === undefined) continue
         options.signal?.throwIfAborted()
         const fresh = this.current(primary, root.id)
         if (fresh === undefined || fresh.aliasId !== root.aliasId) continue
@@ -83,13 +82,11 @@ export class AdditionalSkillCatalog {
     const root = this.current(primary, locator.rootId)
     if (root === undefined || root.aliasId !== locator.aliasId || entry.name !== internalSkillName(primary, root.id, locator.candidate.name)) return undefined
     const revision = this.generation()
-    const reader = await this.reader(primary, root.id)
-    if (reader === undefined) return undefined
     let loaded: SkillDefinition | undefined
     let stamp: string
     try {
       stamp = await fileStamp(locator.candidate.path)
-      loaded = await reader.get(locator.candidate, options)
+      loaded = await this.withReader(primary, root.id, options, async reader => await reader?.get(locator.candidate, options))
       if (stamp !== await fileStamp(locator.candidate.path)) return undefined
     }
     catch (error: unknown) {
@@ -116,8 +113,7 @@ export class AdditionalSkillCatalog {
   }
 
   async dispose(): Promise<void> {
-    const readers = [...this.readers.values()]; this.readers.clear()
-    await Promise.allSettled(readers.map(async reader => (await reader)?.dispose()))
+    await this.pool.dispose()
   }
 }
 

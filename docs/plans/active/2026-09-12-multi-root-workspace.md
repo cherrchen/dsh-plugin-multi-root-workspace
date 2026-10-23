@@ -839,7 +839,8 @@ macOS / Node `24.18.0`：**13 组检查通过**。其中一组对 `SUPPORTED_DSH
 | S2 | 完成 metadata / 迁移、两项 mutation、命令与 Dialog。rc.2 真实 JSON Registry、lease、命令、wire、DOM 与 locale 共 7 文件 187 passed / 1 既有 skip；新增覆盖迁移写失败、重复加载、损坏字段、并发命名空间、takeover、降级写回与 revive。新 metadata 不改变 grant 三键或 writableRoots；refresh 无写。 |
 | S3 | Provider / 受限原生解析 / live 与 cold Origin 路由已实现。rc.2 原生 pre-step 与公开 Remote 的回归验证两 Origin 共用 cwd、两目录发现、symlink 拒绝、冷 Session、裸名负对照、零根参数保持、reload 和描述符恢复。完整 Loader web/headless journey 与旧版动态运行仍在 S7 验收，不把本层测试称为完整组合验收。 |
 | S4 | 按需模型 get、Host Alias pre-step、读取前后文件签名和 generation fence、独立撤销提示已实现。rc.2 的 8 个正式回归经真实 tools.execute / pre-step 覆盖默认/user-only/model-only、伪造 source、旧 Alias/内部 ID、读取中禁用/移除/策略变化/取消、其他 Provider incomplete、原生 exact-ID winner；通过。 |
-| S5 | 开发中 |
-| S6–S7 | 待实施 |
+| S5 | 共享 128 根 LRU 委托池与 2 秒单调度器、generation、冷 Session list/preview/changes RPC、Client epoch/取消围栏、ordered teardown 已实现。rc.2 8 个相关文件 86 passed（含真实 Connection localhost HTTP、实际文件增改删/Root missing、容量/去重/淘汰、排队取消、延迟 get 卸载排空、旧包丢弃）；typecheck 与定向 lint 通过。 |
+| S6 | 开发中 |
+| S7 | 待实施 |
 
-C0 保存既有架构文档与原型；C1 保存 S1，C2 保存 S2，C3 保存 S3 的实现与本层测试，C4 保存 S4。checkpoint 为本机临时快照仓库中的增量 patch，正式仓库未提交；后续阶段继续基于同一工作树。
+C0 保存既有架构文档与原型；C1 保存 S1，C2 保存 S2，C3 保存 S3 的实现与本层测试，C4 保存 S4，C5 保存 S5。checkpoint 为本机临时快照仓库中的增量 patch，正式仓库未提交；后续阶段继续基于同一工作树。

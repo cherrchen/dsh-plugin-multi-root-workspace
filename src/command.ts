@@ -45,6 +45,8 @@ import type {} from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-workspace'
 import {
   PANEL_CHANNEL,
+  SKILLS_ENDPOINTS,
+  skillsRequestSchema,
   parsePanelCall,
   type PanelCall,
   type RevealedView,
@@ -52,6 +54,7 @@ import {
   type RootView,
   type RootsView,
 } from './contract.ts'
+import type {} from './skills.ts'
 import type { MultiRootRegistry } from './registry.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
 import {
@@ -218,8 +221,8 @@ export function apply(ctx: Context, config: CommandConfig = {}): void {
       ctx.logger.warn('multi-root: connection resolved without the service; the panel channel is not mounted')
       return
     }
-    const dispose = connection.rpc.handle(PANEL_CHANNEL, async (endpoint, payload) =>
-      await dispatchPanelRequest(ctx, endpoint, payload))
+    const dispose = connection.rpc.handle(PANEL_CHANNEL, async (endpoint, payload, signal) =>
+      await dispatchPanelRequest(ctx, endpoint, payload, signal))
     return () => { void dispose() }
   })
 }
@@ -626,8 +629,21 @@ async function dispatchPanelRequest(
   ctx: Context,
   endpoint: string,
   payload: unknown,
+  signal?: AbortSignal,
 ): Promise<ConnectionRpcResult<unknown>> {
   try {
+    if ((SKILLS_ENDPOINTS as readonly string[]).includes(endpoint)) {
+      const parsedSkills = skillsRequestSchema.safeParse(payload)
+      if (!parsedSkills.success) return { ok: false, error: { code: 'panel/bad-request', message: 'invalid Skills request', details: {} } }
+      const request = parsedSkills.data
+      if ((endpoint === 'skillsPreview' && request.name === undefined) || (endpoint === 'skillsChanges' && request.generation === undefined)) return { ok: false, error: { code: 'panel/bad-request', message: 'missing Skills request field', details: {} } }
+      const skills = ctx.get('multiRootSkills')
+      if (skills === undefined) throw new Error('multi-root skills: service is unavailable')
+      const value = endpoint === 'skillsList' ? await skills.listSession(request.sessionId, signal)
+        : endpoint === 'skillsPreview' ? await skills.previewSession(request.sessionId, request.name ?? '', signal)
+        : await skills.changes(request.sessionId, request.generation ?? -1, signal)
+      return { ok: true, value }
+    }
     const parsed = parsePanelCall(endpoint, payload)
     if (!parsed.ok) {
       return { ok: false, error: { code: 'panel/bad-request', message: parsed.message, details: {} } }
