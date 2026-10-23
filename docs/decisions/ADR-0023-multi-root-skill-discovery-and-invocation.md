@@ -4,7 +4,7 @@
 
 Accepted（2026-10-23，源码审查与架构原型验证后定案）
 
-接受的是产品规则和下述实现方案，功能尚未交付。原 Proposed 中的 Session 绑定、内部 ID、Settings、迁移与加载生命周期问题已有明确方案；额外发现的 Effective CWD 原生发现旁路也纳入决策。源码事实见[接缝调研](../reference/multi-root-skills-seams.md)，实际执行结果与未覆盖范围只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。生产实施与最终验收按[开发计划](../plans/active/2026-10-23-multi-root-skills.md)推进，不能把架构原型通过写成功能已完成。
+接受的是产品规则和下述实现方案。生产实现已落地，尚未发布；原型验证与生产验收分别记账。原 Proposed 中的 Session 绑定、内部 ID、Settings、迁移与加载生命周期问题已有明确方案；额外发现的 Effective CWD 原生发现旁路也纳入决策。源码事实见[接缝调研](../reference/multi-root-skills-seams.md)，实际执行结果与未覆盖范围只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。最终验收与发布准备按[开发计划](../plans/active/2026-10-23-multi-root-skills.md)推进，不能把架构原型通过写成功能已完成。
 
 ## Date
 
@@ -268,7 +268,7 @@ Settings 采用 Git 插件已存在的结构适配：
 | 读取与生命周期 | 受限 fs 委托原生解析，读取后 generation/身份/策略重验，禁用与原生替换 Catalog 协调；历史文本不声称可回收 |
 | 新发现的 Effective CWD 旁路 | 包装公开 Registry 读取与冷 SessionSkillCatalog，附加根 cwd 的原生发现归回 Origin |
 
-架构原型和源码审查支持上述选择。后续实现若需要改变这些决定，应补充修订理由与证据，不把尚未实施的 A1–A13 标为完成。开发阶段、依赖和各阶段退出条件见[实施计划](../plans/active/2026-10-23-multi-root-skills.md)。
+架构原型和源码审查支持上述选择。生产实现若需要改变这些决定，应补充修订理由与证据。A1–A13 的生产执行结果、平台覆盖与剩余项由路线账本记录，不能从本 ADR 的 Accepted 状态推导验收完成。开发阶段、依赖和各阶段退出条件见[实施计划](../plans/active/2026-10-23-multi-root-skills.md)。
 
 ## Related Documents
 

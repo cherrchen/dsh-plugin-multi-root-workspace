@@ -2,7 +2,7 @@
 
 ## Goal
 
-实施 [ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)：附加根 Skill 的首步发现、命名空间调用、独立 Root 开关和插件详情全局配置。架构已接受，功能正在实施；进度、执行证据和发布状态只见[路线账本](./2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。
+实施 [ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)：附加根 Skill 的首步发现、命名空间调用、独立 Root 开关和插件详情全局配置。架构已接受，生产实现已落地，继续按 S7 完成验收与发布准备；进度、执行证据和发布状态只见[路线账本](./2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。
 
 ## Background
 
@@ -10,7 +10,7 @@
 
 ## Current State
 
-实施前基线：Registry、命令和 Dialog 没有 aliasId/skillsEnabled；patch、exports 与 Client 中没有 Skills 行、命名空间菜单、读端点或 Settings 卡片。已发布兼容集合保持不变。当前原型的 roots Map、迁移函数与临时 profile 不能取代生产 Registry、lease 或 Connection RPC 集成。
+实施前基线中，Registry、命令和 Dialog 没有 aliasId/skillsEnabled，patch、exports 与 Client 中也没有 Skills 行、命名空间菜单、读端点或 Settings 卡片。现有生产实现已接入这些入口，并增加正式 Registry/lease、Connection、观察调度器、平台文件系统回归和 web/headless journey；它们是验收对象。原型的 roots Map、迁移函数与临时 profile 仅保留为架构参考，不能替代生产回归。已发布兼容集合保持不变，未发布本功能。
 
 ## Scope / Non-goals
 
@@ -109,6 +109,8 @@
 ## Validation
 
 S1 → S2 → S3 → S4 → S5 → S6 → S7 是依赖顺序。每批完成相应退出条件后推进；原生 API 形状无法维持时先修 compat，不能以跳过旧版、扩大 warn 或允许裸命令换取通过。架构若需改变，则修订 ADR 并说明新证据。
+
+Windows 的平台退出条件包含两项本机可能缺少前提的原生 ACL 用例：第二固定卷授权必须证明主根与跨卷附加根可写、第三目录拒写；foreign-owner 必须先读回 SYSTEM 属主与 Everyone deny ACE，再证明启动前拒绝或受限子进程的两处写入均被拒绝。CI 缺少这些前提应失败，不能按本机能力规则跳过。检查日志时须区分这两例与其他平台/宿主能力跳过，并绑定实际受检 SHA、run attempt 与任务链接；矩阵任务、最终 gate 和可选 Auto Review 的合同范围分别记账，不能仅凭已完成的部分任务称全矩阵通过。执行结果仍只记路线账本。
 
 ## Risks
 

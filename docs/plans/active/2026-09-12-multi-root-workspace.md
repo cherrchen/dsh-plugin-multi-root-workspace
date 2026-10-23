@@ -795,7 +795,7 @@ Seatbelt 证明的断言强制实跑。PTC 联合用例用真实 Node runtime �
 
 ## Multi-root Skills 架构验证（2026-10-23）
 
-用户授权在 `feat/additional-root-skills` 上完成 Proposed ADR 的剩余工程验证，再定案并拆分计划。问题源为 Issue #17；[ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) 已据此升级为 **Accepted（架构定案）**。源码事实归[接缝调研](../../reference/multi-root-skills-seams.md)，S1–S7 任务和退出条件归[实施计划](./2026-10-23-multi-root-skills.md)。**生产功能开发中、未发布，A1–A13 尚未完成最终验收。**
+用户授权在 `feat/additional-root-skills` 上完成 Proposed ADR 的剩余工程验证，再定案并拆分计划。问题源为 Issue #17；[ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) 已据此升级为 **Accepted（架构定案）**。源码事实归[接缝调研](../../reference/multi-root-skills-seams.md)，S1–S7 任务和退出条件归[实施计划](./2026-10-23-multi-root-skills.md)。**生产实现与本批全平台 CI 验证已完成、未发布；S7 尚余发布准备，A1–A13 的生产证据与能力边界见下文。**
 
 ### 执行范围与结果
 
@@ -841,7 +841,7 @@ macOS / Node `24.18.0`：**13 组检查通过**。其中一组对 `SUPPORTED_DSH
 | S4 | 按需模型 get、Host Alias pre-step、读取前后文件签名和 generation fence、独立撤销提示已实现。rc.2 的 8 个正式回归经真实 tools.execute / pre-step 覆盖默认/user-only/model-only、伪造 source、旧 Alias/内部 ID、读取中禁用/移除/策略变化/取消、其他 Provider incomplete、原生 exact-ID winner；通过。 |
 | S5 | 共享 128 根 LRU 委托池与 2 秒单调度器、generation、冷 Session list/preview/changes RPC、Client epoch/取消围栏、ordered teardown 已实现。rc.2 8 个相关文件 86 passed（含真实 Connection localhost HTTP、实际文件增改删/Root missing、容量/去重/淘汰、排队取消、延迟 get 卸载排空、旧包丢弃）；typecheck 与定向 lint 通过。 |
 | S6 | Slash Source、完整文本插入、conditional UserTextRule/Renderer、安全预览、双形状 Settings 卡片及 Host 动态配置已实现。rc.2 Loader/Settings 真实多行 profile 验证只改 Skills 行、volatile 不重挂；legacy installSection 到达/移除回归通过。DOM 覆盖 namespace 补全、原文插入、sent 引用预览 RPC、表单映射与 accessible checkbox。旧宿主动态验收及真实浏览器整页检查在 S7 继续。 |
-| S7 | macOS 本机集成、Windows 与 Linux（WSL2）各 16 精确版本本机完整门禁完成；Windows 两项本机能力缺口及必要 OS × 版本 CI 仍待补齐。不标记功能完成或迁移计划；执行证据与边界见下文。 |
+| S7 | macOS 本机集成、Windows 与 Linux（WSL2）各 16 精确版本本机完整门禁完成；PR #18 的远端 16 版本 × 4 runner 矩阵及最终 gate 全绿，补齐 Windows 第二固定卷与 foreign-owner 两项能力缺口。尚余发布准备，计划保留 active；执行证据与能力边界见下文。 |
 
 C0 保存既有架构文档与原型；C1 保存 S1，C2 保存 S2，C3 保存 S3 的实现与本层测试，C4 保存 S4，C5 保存 S5，C6 保存 S6 的实现与本层测试。checkpoint 为本机临时快照仓库中的增量 patch；上述阶段结束时正式仓库尚未提交，后续阶段继续基于同一工作树。本批提交状态见下文。
 
@@ -973,8 +973,34 @@ Linux 成本样本仍用 `measure-multi-root-skills.mjs` 的 16 根 × 8 Skills 
 
 逐命令日志、失败尝试、源码快照 SHA-256、隔离 Git 构建记录与机器可读汇总保存在被忽略的 `.dsh-smoke/s7-linux-20261023/`，复跑调度器为其中的 `run-matrix.py`；最终汇总逐项核实了全部命令退出码、smoke 零失败/零跳过、双方言探针与执行源码校验和。上述结论以本节为持久真源。WSL2 的原生执行不替代远端 Ubuntu 两种 runner 镜像或其他 OS 的本批 CI，也不补记 Windows 两项能力缺口为通过。
 
+### PR #18 远端 CI 验收（2026-10-23）
+
+[CI run 39955314649](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39955314649)（run #176，attempt **1**）对应 [PR #18](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/18) 的 `c51f3efd5f1ec38caa052b15cfc3e79b8a1de1d0`，实际 checkout 为 PR merge tree `ac3de488927b727289dffb8341d1d168f7e979c4`。矩阵从既有 allowlist 读取 **16 个精确版本 × 4 个 runner 镜像 = 64 项**：`ubuntu-latest`、`ubuntu-22.04`、`macos-latest`、`windows-latest`。Node `22.19.0` / pnpm `11.25.0`，使用 enforce 门禁，未扩大支持集合或修改 Windows 前提检查。GitHub connector 的 jobs 入口只返回前 30 项，核对时通过 Actions API 分页取得全部任务，不能把第一页当完整矩阵。
+
+该 run 于 **2026-10-23 20:58:09（Asia/Taipei）**结束，结论 **success**：**64/64 矩阵任务 success**，加上 releases 与[最终 gate](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39955314649/job/120426410563)，共 **66/66 任务 success**，没有失败、取消或整项跳过。每项均完成 compat、lint、双端 typecheck、build、kernel:probe、test、compose/behavior/journey、pack:check、smoke:packed、Auto Review 合同入口与 docs:check；Windows broker 安装与卸载也均成功。任务成功不等于其中所有平台/宿主能力断言均已执行，下表保留实际 skip。
+
+开发 pin 的远端执行证据：test 列为通过 / 跳过；所有 skip 均不计作对应原生能力通过。
+
+| runner / 任务日志 | test | compose / behavior / journey / packed behavior | 原生方言与边界 |
+| --- | --- | --- | --- |
+| [macos-latest](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39955314649/job/120419666897) | 891 / 79 | 52 / 126 / 76 / 125，均零失败、零跳过 | Seatbelt 实跑；无 bwrap/Landlock |
+| [ubuntu-latest](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39955314649/job/120419667036) | 893 / 77 | 52 / 105 / 76 / 104，均零失败；behavior 与 packed behavior 各 1 skip | Landlock 实跑；bwrap 因 `setting up uid map: Permission denied` 不可执行，保留宿主策略，不补记 bwrap 通过 |
+| [ubuntu-22.04](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39955314649/job/120419667109) | 901 / 69 | 52 / 126 / 76 / 125，均零失败、零跳过 | bwrap 与 Landlock 均实跑 |
+| [windows-latest](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39955314649/job/120419666834) | 926 / 44 | 52 / 133 / 76 / 132，均零失败、零跳过 | Windows Server 2025 / `windows-2025-vs2026`；真实 windows-acl 探针、broker 安装与卸载、Auto Review 和任务收尾均成功 |
+
+#### Windows 两项本机能力缺口的闭环
+
+已检查其余 15 个 Windows 任务的完整日志及 rc.2 已上传的 `vitest-log-windows-latest-0.2.1-rc.2`、`smoke-log-windows-latest-0.2.1-rc.2`。**16 个版本均完成原生测试，第二固定卷与 foreign-owner 不再是待补验项**。rc.2 的 vitest 日志明确列出以下两例通过；其他版本同一套件通过，且 `CI=true` 下缺少第二固定卷、SYSTEM owner 或 deny ACE 都会使测试失败，不能走本地能力 skip：
+
+- `grants an additional root on a different drive`：真实受限 Node 写探针断言主根、跨固定卷附加根为 `allowed`，第三目录为 `denied:*`。
+- `refuses a root the caller does not own`：测试先核实 owner 为 `S-1-5-18`（SYSTEM）并读回 Everyone deny ACE。全部 Windows 日志均记录 `the grant was applied; asserting the child could not write either dir (status 0)`，实际走的是**受限子进程启动后两处写入均拒绝**的成功分支；不宣称本轮复现了启动前 exit 127。随后断言 foreign-owned 与第三目录均未生成 `owned.txt`。
+
+每版 `tests/windows-native.e2e.ts` 为 **40 tests / 2 skipped**；上述两例不在 skip 内。每版 `tests/skills-windows.e2e.ts` 的 **7 项均执行通过**。完整套件按版本分组为：`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2` 各 **849 passed / 51 skipped**；`0.1.7-alpha.1` 至 `0.2.1-alpha.1` 的 7 个受支持版本各 **852 / 48**；`0.2.1-alpha.2` 至 `0.2.1-rc.1` 的 5 个受支持版本各 **857 / 43**；`0.2.1-rc.2` 为上表 **926 / 44**。这些远端计数独立于前述本机矩阵，不回写或覆盖本机的真实 skip。
+
+最早支持版的复核日志为 [Windows 0.1.5-rc.2](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/39955314649/job/120419666284)，开发 pin 的日志为上表 Windows 任务；其余版本任务均可由同一 run 的完整矩阵定位。Auto Review 的 fork 检查进入全部版本，联合 smoke 的真实集成范围仍仅限 `0.2.1-rc.2`，该版四个 runner 均完成 source/link 与 packed、web/headless × 两种官方 bundle 顺序；其他 15 版的可选集成退出 0 不计为联合集成通过。
+
 ### 剩余验收与 checkpoint
 
-Windows、Linux（WSL2）本机各 16 版本完整门禁已执行，平台路径、句柄、观察与原生沙箱证据及边界见上文。尚缺 Windows 第二固定卷与 foreign-owner 两例的具备条件环境补验，以及支持版本 × 已启用 OS 的本批远端 CI 完整矩阵。新测试已进入既有测试入口；本批已按 C0 → C7a 的 checkpoint 顺序分为 9 笔提交，Windows 验证另作独立提交；远端 CI 执行证据须按实际 run 补记。功能发布前还须按 release workflow 更新双语 CHANGELOG；当前不编造版本号或修改已发布历史，S7 全平台退出条件尚未满足。
+Windows、Linux（WSL2）本机各 16 版本完整门禁已执行；Windows 第二固定卷与 foreign-owner 两例及本批远端完整矩阵已补验，最终 gate 全绿。新测试已进入既有测试入口；本批已按 C0 → C7a 的 checkpoint 顺序分为 9 笔提交，Windows、Linux 验证另作独立提交。S7 剩余发布准备：按 release workflow 确定版本、同步发布状态并更新双语 CHANGELOG，说明旧 inherit/read-write 登记默认启用、read-only 默认关闭、全局关闭方式与 metadata 降级边界。当前未准备版本或 tag，不修改已发布历史，PR 保持 Draft，计划保留 active。上述 CI 结论只绑定记录的代码 SHA；后续提交的 CI 应另行核对，不能继承为已通过。
 
-C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 保存浏览器末轮发现的预览生命周期修正及两形状回归。不表示 S7 全平台完成。C0–C7、C7a 为按顺序应用的增量 patch；临时快照另备份在本工作区被忽略的 `.dsh-smoke/checkpoints-multi-root-skills-20261023/`，含基线与校验和 manifest，可用于后续分批提交。正式仓库已按 checkpoint 完成分批提交；原始补丁继续保留，最后一笔另同步本节提交状态。S7 全平台退出条件满足前计划留在 active。
+C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 保存浏览器末轮发现的预览生命周期修正及两形状回归。这些 checkpoint 只代表当时本机阶段完成，后续平台结果见上文。C0–C7、C7a 为按顺序应用的增量 patch；临时快照另备份在本工作区被忽略的 `.dsh-smoke/checkpoints-multi-root-skills-20261023/`，含基线与校验和 manifest，可用于后续分批提交。正式仓库已按 checkpoint 完成分批提交；原始补丁继续保留，最后一笔另同步本节提交状态。S7 全部退出条件（含发布准备）满足前计划留在 active。
