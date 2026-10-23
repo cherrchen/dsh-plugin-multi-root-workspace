@@ -6,6 +6,7 @@ import type { SkillViewOptions } from '@deepseek-ai/dsh-skill'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { skillOrigin, observedSkillOrigin } from '../compat/skills.ts'
 import { wrapMethod } from '../method-wrapper.ts'
+import { internalSkillName, SKILLS_PROVIDER } from './catalog.ts'
 import { containsPath } from './reader.ts'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 
@@ -21,7 +22,17 @@ export function installSkillRouting(ctx: Context): void {
   }
   ctx.inject(['skills'], scope => {
     const registry = scope.skills
-    scope.effect(() => wrapMethod(registry, 'snapshot', original => function(this: typeof registry, options = {}) { return original.call(this, optionsFor(options)) }))
+    scope.effect(() => wrapMethod(registry, 'snapshot', original => async function(this: typeof registry, options = {}) {
+      const result = await original.call(this, optionsFor(options))
+      const primary = skillOrigin(scope, options)
+      if (primary !== undefined) for (const skill of result.skills) {
+        if (skill.provider === SKILLS_PROVIDER) continue
+        if (scope.multiRootRegistry.list(primary).some(root => skill.name.startsWith(internalSkillName(primary, root.id, '')))) {
+          scope.logger.warn(`multi-root skills: internal ID conflict; native winner retained: ${skill.name} (${skill.provider})`)
+        }
+      }
+      return result
+    }))
     scope.effect(() => wrapMethod(registry, 'get', original => function(this: typeof registry, name, options = {}) { return original.call(this, name, optionsFor(options)) }))
   })
   ctx.inject(['sessionSkillCatalog', 'sessionQuery'], scope => {
