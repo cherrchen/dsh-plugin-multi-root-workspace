@@ -435,27 +435,17 @@ describe('the panel dialog', () => {
     expect(screen.getByText('/repos/primary')).toBeTruthy()
   })
 
-  it('removes, reorders, and re-aliases a root through the channel', async () => {
+  it('removes and re-aliases roots without showing reorder buttons', async () => {
     const harness = mount()
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.moveDown` })[0]!)
-    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'move')).toBe(true) })
-    // Moving down by one means placing A before the item AFTER B. With only two
-    // rows there is no anchor, so A moves to the end.
-    expect(harness.calls.find(call => call.endpoint === 'move')?.payload).toEqual({
-      sessionId: 'session-1',
-      entry: { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
-    })
-    await waitFor(() => {
-      expect(Array.from(document.querySelectorAll('.mrfw-rootPath')).map(node => node.textContent))
-        .toEqual(['/repos/primary', '/repos/website', '/repos/payments'])
-    })
+    expect(screen.queryByRole('button', { name: `${NS}.panel.moveUp` })).toBeNull()
+    expect(screen.queryByRole('button', { name: `${NS}.panel.moveDown` })).toBeNull()
 
     // Rename and remove live in the row's ellipsis menu.
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.rename` }))
     const input = screen.getByPlaceholderText(`${NS}.panel.aliasPlaceholder`)
     fireEvent.change(input, { target: { value: 'renamed' } })
@@ -463,16 +453,16 @@ describe('the panel dialog', () => {
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'alias')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'alias')?.payload).toEqual({
       sessionId: 'session-1',
-      entry: { ordinal: 2, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
+      entry: { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
       alias: 'renamed',
     })
 
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]!)
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remove')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'remove')?.payload).toEqual({
       sessionId: 'session-1',
-      entry: { ordinal: 2, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
+      entry: { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
     })
   })
 

@@ -2,7 +2,7 @@
  * The Workspace Folders panel: one sidebar footer action that opens a dialog
  * listing this session's workspace root and the additional roots registered for
  * it, with the actions the milestone requires — Add (through the composed
- * directory picker), Remove, Alias, Copy Path, Reveal, and reordering.
+ * directory picker), Remove, Alias, Copy Path, and Reveal.
  *
  * Why a footer action and its own dialog, instead of a first-class panel: the
  * slots that can host a full panel (`sidebar.panellist` + the keyed `main`
@@ -510,7 +510,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     }
   }, [])
 
-  const move = useCallback(async (root: RootView, before: RootView | undefined) => {
+  // Retained for a future drag-to-reorder interaction; no ordering controls are shown.
+  const _move = useCallback(async (root: RootView, before: RootView | undefined) => {
     await mutate('move', before === undefined
       ? { entry: entryOf(root) }
       : { entry: entryOf(root), beforeEntry: entryOf(before) })
@@ -615,7 +616,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 {t('panel.empty')} {t('panel.emptyHint')}
               </p>
             ) : null}
-            {roots.map((root, index) => {
+            {roots.map(root => {
               const key = rowKey(root)
               const IconAccess = root.access === 'read-only' ? IconAccessReadOnly
                 : root.access === 'read-write' ? IconAccessReadWrite : IconAccessInherit
@@ -665,18 +666,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   onClick={() => { void reveal(root) }}
                   icon={<IconFolderOpen />}
                   label={t('panel.reveal')}
-                />
-                <IconButton
-                  disabled={state.busy || index === 0}
-                  onClick={() => { void move(root, roots[index - 1]) }}
-                  icon={<IconChevronUp />}
-                  label={t('panel.moveUp')}
-                />
-                <IconButton
-                  disabled={state.busy || index === roots.length - 1}
-                  onClick={() => { void move(root, roots[index + 2]) }}
-                  icon={<IconChevronDown />}
-                  label={t('panel.moveDown')}
                 />
                 <Menu
                   open={menuFor === key}
