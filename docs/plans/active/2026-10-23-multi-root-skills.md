@@ -82,12 +82,12 @@
 
 退出条件：A8/A9 的真实文件变化与并发测试通过；证明观察根去重、容量上限、淘汰和重复启停无资源增长，并测量扫描与响应成本。用实际 Connection 通道验证旧响应丢弃，不只测试本地 Map。
 
-### S6 — Web Slash、引用预览与插件设置
+### S6 — Web Slash、普通文字引用与插件设置
 
 依赖：S2、S4、S5。
 
 - 独立 InputTriggerSource 列出 `/aliasId:skillName`，提供 `/repo-a:` 查询与完整插入；菜单以每次调用的 Session id 取目录。只按原始 userInvocable 列出，不泄漏 internal ID。
-- 新宿主探测 uiConversation.userText 与 keyed Renderer 后注册命名空间引用；旧宿主保留原文。预览通过自有 RPC，不能直接把客户端文件路径交给无重验的文件查看入口。
+- 按 ADR-0023 的 2026-10-24 修订，新宿主探测 uiConversation.userText 与 keyed Renderer 后完整匹配命名空间引用，仅返回普通文字；旧宿主保留原文。不添加背景或高亮，不提供点击弹窗；补全与调用保留。受检预览 RPC 保留，不接聊天点击入口。
 - Settings modern Config 用 volatile enabled 并在每次准入读取；legacy installSection 用 namespace + onChange；Client 双形状配置表单映射到正确行；包级卡片只注册一次。
 - 全局关闭/恢复实时失效 Host 和所有已打开 Session 的 Client Catalog；Workspace Folders Dialog 不增加第二份全局开关。Settings provider 消失/恢复、旧卡片与新卡片不重复注册。
 - 所有新 UI 文案中英文同步，沿用单一 styles.ts 与宿主颜色 token。

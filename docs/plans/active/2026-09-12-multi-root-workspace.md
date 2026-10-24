@@ -797,6 +797,10 @@ Seatbelt 证明的断言强制实跑。PTC 联合用例用真实 Node runtime �
 
 用户授权在 `feat/additional-root-skills` 上完成 Proposed ADR 的剩余工程验证，再定案并拆分计划。问题源为 Issue #17；[ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) 已据此升级为 **Accepted（架构定案）**。源码事实归[接缝调研](../../reference/multi-root-skills-seams.md)，S1–S7 任务和退出条件归[实施计划](./2026-10-23-multi-root-skills.md)。**生产实现与本批全平台 CI 验证已完成、未发布；S7 尚余发布准备，A1–A13 的生产证据与能力边界见下文。**
 
+### 2026-10-24 交互修订
+
+按用户反馈及 ADR-0023 的同日修订，命名空间引用改为普通文字，移除独立按钮样式和聊天点击预览入口；补全与 Host 调用保留。开发 pin 本地 `pnpm lint`、`pnpm typecheck`、`pnpm docs:check` 通过，`pnpm test -- tests/client-skills.spec.tsx` 实际执行全套：891 通过、90 跳过。DOM 回归覆盖 interactive 两态均输出文字节点，点击不打开弹窗、不调用预览 RPC；该结果不替代真实宿主浏览器目检。
+
 ### 执行范围与结果
 
 上游只读检出为 `dsh-v0.2.1-rc.2` / `687f282e8625c6b8d11ff58211a90524be2e4317`，未修改上游文件或切换其版本。本地运行时从本插件的 DSH 安装锚点解析，版本 `0.2.1-rc.2`；没有重指主 manifest/lockfile 或扩大支持集合。

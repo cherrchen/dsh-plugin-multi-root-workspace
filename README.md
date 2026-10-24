@@ -236,7 +236,7 @@ Writable additional roots under the current mode: 1 of 2.
 
 新登记的 `inherit` / `read-write` 根默认开启，`read-only` 根默认关闭；Workspace Folders Dialog 可独立切换 Skills 并编辑 `aliasId`。显示 Alias 的修改不改变 `aliasId`。只有登记权限的实际变化才重置开关；切换会话沙箱模式、同值权限设置和未改变权限的重新登记都保留手动选择。只读根开启 Skills 后仍没有写权限。
 
-Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 控制全部附属根，默认开启。关闭后阻止新的发现与调用，保留每根选择；恢复后按原值发现。主根 Skills、指令、LSP、文件浏览及沙箱权限不受此开关影响。旧版宿主使用兼容的插件设置页。已发送引用可在支持的宿主上点击预览，展示不表示已经执行；草稿内的原生 Skill 高亮暂不支持冒号引用。
+Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 控制全部附属根，默认开启。关闭后阻止新的发现与调用，保留每根选择；恢复后按原值发现。主根 Skills、指令、LSP、文件浏览及沙箱权限不受此开关影响。旧版宿主使用兼容的插件设置页。命名空间引用按普通用户输入显示，不添加背景、高亮或点击预览；草稿内的原生 Skill 高亮暂不支持冒号引用。
 
 升级时旧 `inherit` / `read-write` 登记会默认开启 Skills。持久化迁移保留原有 grant；旧版写回可能剥离 `aliasId` 和手动开关，再升级时重新按默认值迁移，**不保证 Skills 配置无损降级**。如需保留选择，降级前备份 `$DSH_HOME/storages/multi_root_workspace.json`。已投递正文仍留在历史中，禁用不会结束已经启动的进程。
 

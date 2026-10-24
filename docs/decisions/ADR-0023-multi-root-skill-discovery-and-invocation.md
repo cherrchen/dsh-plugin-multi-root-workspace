@@ -118,7 +118,7 @@ function canDiscoverSkills(globalEnabled: boolean, root: RootStatus): boolean {
 | `multi-root-skills` | 单一聚合 SkillProvider、受限的原生文件解析委托、正文加载、缓存与观察生命周期 |
 | Host Skill Alias Resolver | 置前的 pre-step waterfall，在原生 listener 返回后追加用户显式调用正文；保留原始消息 |
 | Client Slash Source | Session 级目录、补全与插入完整引用 |
-| Client UserText Rule / Renderer | 已发送引用展示、当前可用 Skill 的预览 |
+| Client UserText Rule / Renderer | 完整识别命名空间引用，按普通文本显示 |
 | Plugin Manager Settings | 包级详情卡片与 Host 行 Config 映射、实时失效 |
 
 ```text
@@ -165,18 +165,20 @@ Host 与各 Session Client 同时失效；Client 通过同一插件通道的 gen
 
 ### 5. Web UI 范围
 
-使用独立 `InputTriggerSource` 提供冒号命名空间补全，`onPick` 插入完整 `/aliasId:skillName `。实际 Slash Trigger 保留冒号；草稿 `scanTextRefs()` 的固定 `[\w-]+` 无法识别完整引用，纯核已复现。具有 `uiConversation.userText` 接缝的宿主可注册自定义 `UserTextRule` 与 Renderer；较早宿主保持已发送的原始文本，不以修改上游补齐该非必需展示能力。Renderer 识别的是引用语法，不伪称该 Skill 已执行；点击后仍由 Session RPC 重验并预览。
+使用独立 `InputTriggerSource` 提供冒号命名空间补全，`onPick` 插入完整 `/aliasId:skillName `。实际 Slash Trigger 保留冒号；草稿 `scanTextRefs()` 的固定 `[\w-]+` 无法识别完整引用，纯核已复现。具有 `uiConversation.userText` 接缝的宿主注册自定义 `UserTextRule`，完整匹配命名空间引用，Renderer 仅返回文字，避免原生规则把前缀当作裸名 Slash 引用；较早宿主保持已发送的原始文本。
+
+**2026-10-24 产品修订：** 本节原先允许已发送引用的按钮展示与点击预览，现按用户要求收敛为普通用户输入的文字效果：不添加独立背景、高亮、按钮或弹窗，也不注册 InputTriggerSource 的引用打开回调。自动补全、完整插入与 Host 调用不变。既有受检预览 RPC 保留为读取接口，不作为聊天中的点击交互。
 
 | Web 能力 | 第一阶段范围 |
 | --- | --- |
 | `/repo-a:` 自动补全 | 必须 |
 | 菜单插入完整 Skill 引用 | 必须 |
 | 手动输入引用并触发 Skill | 必须，由 Host 解析，不依赖客户端高亮 |
-| 已发送引用展示 | 在具备 UserTextRule 接缝的宿主支持；旧宿主保留原始文本 |
-| 点击引用预览 `SKILL.md` | 与自定义引用 Renderer 一同启用；预览走同一加载检查 |
+| 已发送引用展示 | 普通文字；具备 UserTextRule 接缝时完整匹配，旧宿主保留原文 |
+| 点击引用预览 `SKILL.md` | 不提供 |
 | 草稿内原生 Skill 高亮 | 暂不实现 |
 
-不为该限制修改上游编辑器。补全与预览按当前 live Session 隔离；没有活动 Session 时不猜主根。Host 调用路径也须覆盖 headless，不能让功能依赖 Web 文本规则。UI 继续使用宿主 token 与既有 `mrfw-` 样式约定。
+不为该限制修改上游编辑器。补全按当前 live Session 隔离；没有活动 Session 时不猜主根。Host 调用路径也须覆盖 headless，不能让功能依赖 Web 文本规则。UI 继续使用宿主 token 与既有 `mrfw-` 样式约定。
 
 ## Security
 
@@ -233,7 +235,7 @@ Settings 采用 Git 插件已存在的结构适配：
 
 用户得到稳定、可预测的附加根命名空间；权限只决定初始值，后续可独立控制。代价是 Registry metadata、迁移、Session 传播、双端缓存、Settings 与原生 Skill 生命周期必须协同，不能只注册一个扫描器就宣称完成。
 
-第一阶段接受草稿内没有原生高亮；已发送展示和预览按 UserTextRule 能力探测启用。默认启用的旧登记会产生用户可见行为变化，必须在功能发布时说明。观察、扫描与缓存使用统一预算；平台性能与完整集成成本仍需实施阶段验证。
+第一阶段接受草稿内没有原生高亮；已发送引用按普通文字展示（见 2026-10-24 产品修订）。默认启用的旧登记会产生用户可见行为变化，必须在功能发布时说明。观察、扫描与缓存使用统一预算；平台性能与完整集成成本仍需实施阶段验证。
 
 本 ADR 不改变现有已发布功能的说明，也不新增已完成进度或发布承诺。实现及平台执行证据后续归现有[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)，发布内容归双语 CHANGELOG。
 
@@ -254,7 +256,7 @@ Settings 采用 Git 插件已存在的结构适配：
 | A9 | Skill 新增、修改、删除、symlink 变化与 Root missing/redirected/恢复触发正确失效；文件逃逸根外被拒；watcher 预算、回收与 teardown 可验证 |
 | A10 | 旧存储迁移生成唯一稳定 aliasId 与正确开关；重复加载、写失败、并发 authority takeover、非法 metadata 和降级再升级有覆盖；grant 不被改写，refresh 不写盘 |
 | A11 | 真实插件管理页正确映射包 key / 行 ID / namespace，legacy 与新版入口覆盖；切换后 Host 和各 Session Client 动态更新，无需重启；根管理入口无全局重复开关 |
-| A12 | Web 补全、完整插入、手输触发通过；已发送展示和预览的计划范围有验证结论；接受草稿高亮缺失，全程不修改上游包 |
+| A12 | Web 补全、完整插入、手输触发通过；已发送引用为普通文字，点击不预览；接受草稿高亮缺失，全程不修改上游包 |
 | A13 | 受支持版本上的 Skill 接缝、web/headless 与必要平台路径行为有明确矩阵；门禁拒载、可选服务缺席及零附加根保持宿主正常工作，旧 Catalog 不旁路失败关闭 |
 
 ### Proposed 阶段问题的结论
