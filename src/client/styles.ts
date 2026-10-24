@@ -519,13 +519,6 @@ export const STYLES = /* css */ `
   padding: 0 24px 24px;
 }
 
-.mrfw-description {
-  margin: 0 0 8px;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
 .mrfw-alert {
   margin: 0 0 8px;
   font-size: 14px;
@@ -577,6 +570,23 @@ export const STYLES = /* css */ `
 
 /* A root entry's two lines: the display name on top, the absolute path under
    it in the tertiary voice (the workspace rows recipe of the host sidebar). */
+/* Match upstream General Settings' DeveloperToolsRow layout. */
+.mrfw-skillsSettings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 0;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+}
+.mrfw-skillsSettingsText { min-width: 0; }
+.mrfw-skillsSettingsTitle { font-size: 14px; line-height: 20px; }
+.mrfw-skillsSettingsDescription {
+  margin-top: 4px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
 .mrfw-rootText {
   display: flex;
   flex: 1 1 240px;
@@ -585,15 +595,14 @@ export const STYLES = /* css */ `
   min-width: 0;
 }
 
-/* The name line is a flex row: the truncating name text first, the access
-   badge beside it never shrinking — baseline-aligned so the badge's smaller
-   voice sits on the name's baseline rather than its middle. */
+/* Keep status tags and permission glyphs visible beside the alias, wrapping
+   onto another line when the dialog is narrow. */
 .mrfw-rootName {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-  overflow: hidden;
   font-size: 14px;
   line-height: 20px;
   font-weight: 500;
@@ -673,6 +682,10 @@ export const STYLES = /* css */ `
   line-height: 18px;
   cursor: pointer;
   transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.mrfw-btn[aria-busy='true'] {
+  cursor: wait;
 }
 
 .mrfw-btn:disabled {
@@ -768,8 +781,23 @@ export const STYLES = /* css */ `
   padding: 0 12px;
 }
 
-.mrfw-accessBadge,
-.mrfw-effectiveAccess {
+.mrfw-cwdTag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.mrfw-accessBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mrfw-accessBadge {
   flex: none;
   font-size: 12px;
   line-height: 18px;

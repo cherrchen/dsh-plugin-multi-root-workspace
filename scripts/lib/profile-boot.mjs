@@ -102,12 +102,26 @@ export async function bootProfile(profileName, home, prepare) {
   // `mountRootInclude` loads the tree. A release that already wrote the
   // fallback has nothing to publish, and passing `undefined` keeps `boot`'s
   // own "no prepare" path.
-  const prepareBoot = resolution === undefined && prepare === undefined
-    ? undefined
-    : async (hostCtx) => {
-        if (resolution !== undefined) await hostCtx.plugin(appBoot.PluginPackages, { resolution })
-        if (prepare !== undefined) await prepare(hostCtx, { profile, installAnchor })
-      }
+  let applicationReady = false
+  const readyListeners = new Set()
+  const prepareBoot = async (hostCtx) => {
+    if (resolution !== undefined) await hostCtx.plugin(appBoot.PluginPackages, { resolution })
+    if (prepare !== undefined) await prepare(hostCtx, { profile, installAnchor })
+    if (hostCtx.get('appReady') === undefined) hostCtx.provide('appReady', {
+      onReady(listener) { if (applicationReady) listener(); else readyListeners.add(listener); return () => readyListeners.delete(listener) },
+    })
+    // The CLI publishes this immutable launcher fact. Modern ConfigEditor and
+    // Settings inject it; omitting it silently disables the whole settings UI.
+    if (hostCtx.get('profileContext') === undefined) hostCtx.provide('profileContext', {
+      name: profileName, dir: profile.dir, home, installAnchor, cwd: process.cwd(),
+      patchPath: join(profile.dir, appBoot.PROFILE_PATCH_FILENAME ?? 'cordis.patch.yml'),
+      startedBundles: profile.layers.map(layer => layer.packageName), overlays: [],
+      telemetryDisabledEnv: process.env.DSH_TELEMETRY_DISABLED,
+    })
+  }
   const ctx = await appBoot.boot(BIN_NAME, join(profile.dir, 'cordis.yml'), patches, prepareBoot)
+  applicationReady = true
+  for (const listener of readyListeners) listener()
+  readyListeners.clear()
   return { ctx, appBoot, installAnchor, profile }
 }

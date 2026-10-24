@@ -30,15 +30,19 @@
  */
 
 import { z } from 'zod'
+import type { SkillsResponseMap } from './skills-contract.ts'
+export { SKILLS_ENDPOINTS, skillsRequestSchema, skillsCatalogSchema, skillsPreviewSchema, skillsStatusSchema } from './skills-contract.ts'
+export type { SkillsEndpoint, SkillsStatusView, SkillsCatalogView, SkillsPreviewView } from './skills-contract.ts'
+export interface WorkspaceResponseMap extends PanelResponseMap, SkillsResponseMap {}
 
 /** The absolute logical channel both halves speak over. */
 export const PANEL_CHANNEL = '/multi-root-workspace'
 
 /** Endpoint names, relative to {@link PANEL_CHANNEL}. */
-export type PanelEndpoint = 'list' | 'add' | 'remove' | 'alias' | 'move' | 'setAccess' | 'reveal'
+export type PanelEndpoint = 'list' | 'add' | 'remove' | 'alias' | 'move' | 'setAccess' | 'setSkillsEnabled' | 'setAliasId' | 'reveal'
 
 /** Every endpoint name, for exhaustive iteration in tests and callers. */
-export const PANEL_ENDPOINTS: readonly PanelEndpoint[] = ['list', 'add', 'remove', 'alias', 'move', 'setAccess', 'reveal']
+export const PANEL_ENDPOINTS: readonly PanelEndpoint[] = ['list', 'add', 'remove', 'alias', 'move', 'setAccess', 'setSkillsEnabled', 'setAliasId', 'reveal']
 
 /**
  * How one registered root currently stands, as the panel renders it. Kept in
@@ -73,6 +77,8 @@ export interface RootView {
   /** Canonical absolute directory. */
   readonly path: string
   /** Display alias as stored; absent when cleared. */
+  readonly aliasId?: string
+  readonly skillsEnabled?: boolean
   readonly alias?: string
   /** ISO-8601 registration instant. */
   readonly addedAt: string
@@ -135,6 +141,8 @@ export interface PanelResponseMap {
   readonly remove: RootsView
   readonly alias: RootsView
   readonly move: RootsView
+  readonly setSkillsEnabled: RootsView
+  readonly setAliasId: RootsView
   readonly setAccess: RootsView
   readonly reveal: RevealedView
 }
@@ -155,6 +163,8 @@ export interface PanelRequest {
   /** Candidate directory (add). */
   readonly path?: string
   /** Display alias (add/alias); empty clears it. */
+  readonly aliasId?: string
+  readonly skillsEnabled?: boolean
   readonly alias?: string
   /** Write authority (add — defaults to `inherit` — and setAccess). */
   readonly access?: RootAccess
@@ -199,6 +209,8 @@ const panelRequestSchema = z.object({
   }).strict().optional(),
   id: z.string().optional(),
   path: z.string().optional(),
+  aliasId: z.string().optional(),
+  skillsEnabled: z.boolean().optional(),
   alias: z.string().optional(),
   access: z.enum(['inherit', 'read-write', 'read-only']).optional(),
   beforeEntry: z.object({
@@ -219,6 +231,8 @@ const rootViewSchema = z.object({
   ordinal: z.number().int().positive(),
   id: z.string(),
   path: z.string(),
+  aliasId: z.string().optional(),
+  skillsEnabled: z.boolean().optional(),
   alias: z.string().optional(),
   addedAt: z.string(),
   state: z.enum(['available', 'missing', 'redirected', 'invalid']),
@@ -329,6 +343,8 @@ function narrowCall(endpoint: PanelEndpoint, value: z.infer<typeof panelRequestS
     ...(value.entry === undefined ? {} : { entry: value.entry }),
     ...(value.id === undefined ? {} : { id: value.id }),
     ...(value.path === undefined ? {} : { path: value.path }),
+    ...(value.aliasId === undefined ? {} : { aliasId: value.aliasId }),
+    ...(value.skillsEnabled === undefined ? {} : { skillsEnabled: value.skillsEnabled }),
     ...(value.alias === undefined ? {} : { alias: value.alias }),
     ...(value.access === undefined ? {} : { access: value.access }),
     ...(value.beforeEntry === undefined ? {} : { beforeEntry: value.beforeEntry }),
@@ -348,6 +364,8 @@ function narrowRootView(value: z.infer<typeof rootViewSchema>): RootView {
     // read-write — `inherit` under B9.
     access: value.access ?? 'inherit',
     ...(value.effectiveAccess === undefined ? {} : { effectiveAccess: value.effectiveAccess }),
+    ...(value.aliasId === undefined ? {} : { aliasId: value.aliasId }),
+    ...(value.skillsEnabled === undefined ? {} : { skillsEnabled: value.skillsEnabled }),
     ...(value.alias === undefined ? {} : { alias: value.alias }),
     ...(value.detail === undefined ? {} : { detail: value.detail }),
   }

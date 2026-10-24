@@ -50,6 +50,7 @@ interface DomainZodModule {
   object(shape: Record<string, unknown>): any
   string(): { min(length: number): any; optional(): any }
   array(item: unknown): any
+  unknown(): any
 }
 
 /**

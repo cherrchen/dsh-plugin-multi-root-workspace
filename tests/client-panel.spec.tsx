@@ -152,7 +152,9 @@ function mount(withFilesActions = false): Harness {
       },
       // The real service resolves the live locale per call; for the spec the
       // namespace-qualified key is enough to observe which copy is used.
-      bind: (ns: string) => (key: string) => `${ns}.${key}`,
+      bind: (ns: string) => (key: string, params?: Record<string, unknown>) => key === 'panel.accessEffective'
+        ? zh['panel.accessEffective'].replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name]))
+        : `${ns}.${key}`,
     },
     slots: {
       inject: (name: string, callback: () => unknown) => {
@@ -272,6 +274,80 @@ describe('the client entry', () => {
 })
 
 describe('the panel dialog', () => {
+  it('toggles read-only Root Skills and edits its independent namespace over the channel', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', roots: [{ ...ROOT_B, aliasId: 'website', skillsEnabled: false }], limit: 16, count: 1 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const toggle = await screen.findByRole('button', { name: `${NS}.panel.skills` })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    expect(toggle.getAttribute('title')).toBe(`${NS}.panel.skillsDisabled`)
+    expect(toggle.closest('.mrfw-rootText')).toBeNull()
+    expect(screen.queryByText('/website:')).toBeNull()
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    fireEvent.click(toggle)
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setSkillsEnabled' && call.payload.skillsEnabled === true)).toBe(true) })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.more` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.aliasIdEdit` }))
+    const input = screen.getByPlaceholderText(`${NS}.panel.aliasIdPlaceholder`)
+    fireEvent.change(input, { target: { value: 'site' } })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.aliasSave` }))
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setAliasId' && call.payload.aliasId === 'site')).toBe(true) })
+    expect(harness.calls.filter(call => call.endpoint === 'setAccess')).toHaveLength(0)
+  })
+
+  it('reflects an enabled Skills preference and disables it without changing folder access', async () => {
+    const harness = mount()
+    const root = { ...ROOT_A, aliasId: 'payments', skillsEnabled: true }
+    harness.setView({ primaryRoot: '/repos/primary', roots: [root], limit: 16, count: 1 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const toggle = await screen.findByRole('button', { name: `${NS}.panel.skills` })
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    expect(toggle.getAttribute('title')).toBe(`${NS}.panel.skillsEnabled`)
+    harness.setView({ primaryRoot: '/repos/primary', roots: [{ ...root, skillsEnabled: false }], limit: 16, count: 1 })
+    fireEvent.click(toggle)
+    await waitFor(() => { expect(toggle.getAttribute('aria-pressed')).toBe('false') })
+    expect(harness.calls.find(call => call.endpoint === 'setSkillsEnabled')?.payload).toEqual({
+      sessionId: 'session-1', entry: { ordinal: root.ordinal, id: root.id, path: root.path, addedAt: root.addedAt }, skillsEnabled: false,
+    })
+    expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(false)
+  })
+
+  it.each([false, true])('keeps Skills controls stable while saving (failure: %s)', async failure => {
+    const harness = mount()
+    const root = { ...ROOT_A, skillsEnabled: true }
+    harness.setView({ primaryRoot: '/repos/primary', roots: [root], limit: 16, count: 1 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const toggle = await screen.findByRole('button', { name: `${NS}.panel.skills` })
+    const reveal = screen.getByRole('button', { name: `${NS}.panel.reveal` })
+    const opacity = (element: HTMLElement) => getComputedStyle(element).opacity || '1'
+    const before = [opacity(toggle), opacity(reveal)]
+    toggle.focus()
+    harness.holdNextCall()
+    fireEvent.click(toggle)
+    expect([opacity(toggle), opacity(reveal)]).toEqual(before)
+    expect(document.activeElement).toBe(toggle)
+    expect(toggle.getAttribute('aria-busy')).toBe('true')
+    expect(toggle.getAttribute('aria-disabled')).toBe('true')
+    expect(toggle).toHaveProperty('disabled', false)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(toggle)
+    fireEvent.click(reveal)
+    expect(harness.calls.filter(call => call.endpoint === 'setSkillsEnabled')).toHaveLength(1)
+    expect(harness.calls.some(call => call.endpoint === 'reveal')).toBe(false)
+    if (failure) harness.setFailure({ code: 'storage-unavailable', message: 'save failed' })
+    else harness.setView({ primaryRoot: '/repos/primary', roots: [{ ...root, skillsEnabled: false }], limit: 16, count: 1 })
+    harness.release()
+    await waitFor(() => { expect(toggle.getAttribute('aria-busy')).toBeNull() })
+    expect(screen.getByRole('button', { name: `${NS}.panel.skills` })).toBe(toggle)
+    expect(toggle.getAttribute('aria-pressed')).toBe(String(failure))
+    expect(document.activeElement).toBe(toggle)
+    expect([opacity(toggle), opacity(reveal)]).toEqual(before)
+    expect(screen.queryByRole('alert') !== null).toBe(failure)
+  })
+
   it('accepts list and mutation results after StrictMode replays mount effects', async () => {
     const harness = mount()
     renderPanel(harness, true)
@@ -418,27 +494,17 @@ describe('the panel dialog', () => {
     expect(screen.getByText('/repos/primary')).toBeTruthy()
   })
 
-  it('removes, reorders, and re-aliases a root through the channel', async () => {
+  it('removes and re-aliases roots without showing reorder buttons', async () => {
     const harness = mount()
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.moveDown` })[0]!)
-    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'move')).toBe(true) })
-    // Moving down by one means placing A before the item AFTER B. With only two
-    // rows there is no anchor, so A moves to the end.
-    expect(harness.calls.find(call => call.endpoint === 'move')?.payload).toEqual({
-      sessionId: 'session-1',
-      entry: { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
-    })
-    await waitFor(() => {
-      expect(Array.from(document.querySelectorAll('.mrfw-rootPath')).map(node => node.textContent))
-        .toEqual(['/repos/primary', '/repos/website', '/repos/payments'])
-    })
+    expect(screen.queryByRole('button', { name: `${NS}.panel.moveUp` })).toBeNull()
+    expect(screen.queryByRole('button', { name: `${NS}.panel.moveDown` })).toBeNull()
 
     // Rename and remove live in the row's ellipsis menu.
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.rename` }))
     const input = screen.getByPlaceholderText(`${NS}.panel.aliasPlaceholder`)
     fireEvent.change(input, { target: { value: 'renamed' } })
@@ -446,16 +512,16 @@ describe('the panel dialog', () => {
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'alias')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'alias')?.payload).toEqual({
       sessionId: 'session-1',
-      entry: { ordinal: 2, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
+      entry: { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
       alias: 'renamed',
     })
 
-    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[1]!)
+    fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.more` })[0]!)
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]!)
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remove')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'remove')?.payload).toEqual({
       sessionId: 'session-1',
-      entry: { ordinal: 2, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
+      entry: { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z' },
     })
   })
 
@@ -612,7 +678,7 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]!)
     expect(harness.calls.some(call => call.endpoint === 'remove')).toBe(true)
     // The menu closed on selection; the row's icon actions carry the busy state.
-    expect(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]).toHaveProperty('disabled', true)
+    expect(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]?.getAttribute('aria-disabled')).toBe('true')
 
     harness.release()
     await waitFor(() => {
@@ -719,6 +785,8 @@ describe('the panel dialog', () => {
     // the action cluster.
     const badges = () => Array.from(document.querySelectorAll('.mrfw-accessBadge')).map(node => node.textContent)
     expect(badges()).toEqual([`${NS}.access.readWrite`, `${NS}.access.readOnly`])
+    expect(document.querySelector('.mrfw-accessBadge [data-icon="workspace-write"]')).not.toBeNull()
+    expect(document.querySelector('.mrfw-accessBadge [data-icon="read-only"]')).not.toBeNull()
     expect(document.querySelectorAll('.mrfw-rootName .mrfw-accessBadge').length).toBe(2)
 
     // Every path is its own copy control — the primary row's too: a
@@ -744,15 +812,16 @@ describe('the panel dialog', () => {
     })
   })
 
-  it('shows the host session mode, effective access and tool caps separately from registration', async () => {
+  it('keeps combined root permissions and tool caps without the introductory permission copy', async () => {
     const harness = mount()
     harness.setView({ primaryRoot: '/repos/primary', mode: 'danger-full-access', cappedTools: ['bash'],
       roots: [{ ...ROOT_A, access: 'inherit', effectiveAccess: 'full-access' }], limit: 16, count: 1 })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByText(/mode.danger-full-access/)).toBeTruthy() })
-    expect(document.querySelector('.mrfw-effectiveAccess')?.textContent).toContain('effective.full-access')
-    expect(document.querySelector('.mrfw-accessBadge')?.textContent).toContain('access.inherit')
+    await screen.findByText('/repos/payments')
+    expect(screen.queryByText(/panel.subtitle|panel.mode|mode.danger-full-access/)).toBeNull()
+    expect(document.querySelector('.mrfw-accessBadge')?.textContent)
+      .toBe(`${NS}.access.inherit（${NS}.effective.full-access）`)
     expect(screen.getByText(/panel.toolCaps/)).toBeTruthy()
   })
 
@@ -905,22 +974,42 @@ describe('the panel copy', () => {
   })
 })
 
-it('displays effective cwd separately from the stable primary root', async () => {
+it.each([
+  ['/repos/primary', '/repos/primary', 'primary'],
+  ['/repos/primary/src/nested', '/repos/primary', 'primary'],
+  ['/repos/payments', '/repos/payments', 'payments'],
+  ['/repos/payments/src/nested', '/repos/payments', 'payments'],
+  ['/repos/payments-other', undefined, undefined],
+  ['/unregistered/current', undefined, undefined],
+  [undefined, undefined, undefined],
+])('tags the listed root containing the Agent cwd %s', async (effectiveCwd, expectedPath, expectedName) => {
   const harness = mount()
-  harness.setView({ primaryRoot: '/repos/primary', effectiveCwd: '/unregistered/current', roots: [ROOT_A], limit: 16, count: 1 })
+  harness.setView({ primaryRoot: '/repos/primary', ...(effectiveCwd === undefined ? {} : { effectiveCwd }), roots: [ROOT_A], limit: 16, count: 1 })
   renderPanel(harness)
   fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-  await waitFor(() => { expect(screen.getByText('/unregistered/current')).toBeDefined() })
-  expect(screen.getByText('/repos/primary')).toBeDefined()
-  expect(screen.getByText(`${NS}.panel.cwdNote`)).toBeDefined()
+  await waitFor(() => { expect(screen.getByText('/repos/primary')).toBeDefined() })
+  const tag = screen.queryByText(`${NS}.panel.currentAgentCwd`)
+  if (expectedPath === undefined) {
+    expect(tag).toBeNull()
+  } else {
+    expect(tag?.closest('.mrfw-rootText')?.querySelector('.mrfw-rootNameText')?.textContent).toBe(expectedName)
+    expect(tag?.closest('.mrfw-rootText')?.querySelector('.mrfw-rootPath')?.textContent).toBe(expectedPath)
+    expect(document.querySelectorAll('.mrfw-cwdTag')).toHaveLength(1)
+  }
+  expect(screen.queryByText(`${NS}.panel.cwdNote`)).toBeNull()
   expect(harness.calls[0]?.payload).toEqual({ sessionId: 'session-1' })
-
-  // Both the primary path and the current-directory path are copy controls
-  // of the same recipe as the additional roots'.
-  fireEvent.click(screen.getByTitle('/unregistered/current'))
-  await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/unregistered/current') })
   fireEvent.click(screen.getByTitle('/repos/primary'))
   await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repos/primary') })
+})
+
+it('matches Windows cwd paths with mixed separators and casing', async () => {
+  const harness = mount()
+  harness.setView({ primaryRoot: 'C:/repos/primary', effectiveCwd: 'd:/REPOS/payments/src/',
+    roots: [{ ...ROOT_A, path: 'D:\\repos\\payments' }], limit: 16, count: 1 })
+  renderPanel(harness)
+  fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+  const tag = await screen.findByText(`${NS}.panel.currentAgentCwd`)
+  expect(tag.closest('.mrfw-rootName')?.textContent).toContain('payments')
 })
 
 it('ignores a response belonging to the previous session after catalog selection changes', async () => {

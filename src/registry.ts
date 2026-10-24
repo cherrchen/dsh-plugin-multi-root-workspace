@@ -44,6 +44,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/registry
  */
 
+import { migrateRootSkills, validateAliasId } from './skills/metadata.ts'
 import { randomUUID } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
@@ -174,6 +175,8 @@ type PersistedRoot = {
   readOnlyRecordedPath?: string | undefined
   readWriteRecordedPath?: string | undefined
   alias?: string | undefined
+  aliasId?: unknown
+  skillsEnabled?: unknown
   addedAt: string
 }
 
@@ -204,6 +207,8 @@ const persistedRoot: DomainValueSchema<PersistedRoot> = z.object({
   readOnlyRecordedPath: z.string().min(1).optional(),
   readWriteRecordedPath: z.string().min(1).optional(),
   alias: z.string().optional(),
+  aliasId: z.unknown().optional(),
+  skillsEnabled: z.unknown().optional(),
   addedAt: z.string().min(1),
 })
 
@@ -497,6 +502,7 @@ export class MultiRootRegistry extends Service {
           id: additionalRootId(randomUUID()),
           path: canonical,
           access,
+          skillsEnabled: access !== 'read-only',
           ...grantFields(access, canonical),
           state: 'available',
           ...(alias === undefined ? {} : { alias }),
@@ -509,6 +515,7 @@ export class MultiRootRegistry extends Service {
             // A revive keeps the registration's access unless the operator
             // named a new one explicitly.
             access: input.access ?? status.access,
+            ...(input.access !== undefined && input.access !== status.access ? { skillsEnabled: input.access !== 'read-only' } : {}),
             // Re-registering a withheld root is the operator confirming THIS
             // directory again, which is exactly what re-records the grant —
             // under the grant field the (possibly new) access level uses.
@@ -565,6 +572,7 @@ export class MultiRootRegistry extends Service {
         ? {
           ...dropGrantFields(status),
           access,
+          skillsEnabled: access !== 'read-only',
           ...(recorded === undefined ? {} : grantFields(access, recorded)),
         }
         : status)
@@ -623,6 +631,28 @@ export class MultiRootRegistry extends Service {
         return normalized === undefined ? rest : { ...rest, alias: normalized }
       })
       return await this.persist(key, next)
+    })
+  }
+
+  /** Change a Skill switch without changing any grant field. */
+  async setSkillsEnabled(primaryRoot: string, ref: RootRef, skillsEnabled: boolean): Promise<readonly RootStatus[]> {
+    if (typeof skillsEnabled !== 'boolean') throw new RootValidationError('invalid-ref', 'skillsEnabled must be a boolean')
+    return await this.setSkillsMetadata(primaryRoot, ref, { skillsEnabled })
+  }
+
+  async setAliasId(primaryRoot: string, ref: RootRef, aliasId: string): Promise<readonly RootStatus[]> {
+    return await this.setSkillsMetadata(primaryRoot, ref, { aliasId })
+  }
+
+  private async setSkillsMetadata(primaryRoot: string, ref: RootRef, patch: { skillsEnabled?: boolean; aliasId?: string }): Promise<readonly RootStatus[]> {
+    await this.ensureAuthority()
+    this.requireActive()
+    const key = canonicalRoot(primaryRoot)
+    return await this.serialize(key, async () => {
+      const statuses = this.reclassify(key)
+      const target = resolveRootIndex(statuses, ref)
+      if (patch.aliasId !== undefined) validateAliasId(patch.aliasId, statuses.filter((_row, index) => index !== target))
+      return await this.persist(key, statuses.map((row, index) => index === target ? { ...row, ...patch } : row))
     })
   }
 
@@ -763,15 +793,15 @@ export class MultiRootRegistry extends Service {
    */
   private async persist(key: string, statuses: readonly RootStatus[]): Promise<readonly RootStatus[]> {
     const table = this.requireTable()
+    const durable = persistedPrimaryRoot.parse({ roots: migrateRootSkills(statuses.map(toPersistedRoot)) })
     if (statuses.length === 0) await table.delete(key)
     else {
       // Validate the COMPLETE document before crossing the durable boundary.
       // In particular, legacy records keep an absent `recordedPath` absent;
       // they must never be rewritten as the schema-invalid empty string.
-      const durable = persistedPrimaryRoot.parse({ roots: statuses.map(toPersistedRoot) })
       await table.put(key, durable)
     }
-    const classified = statuses.length === 0 ? [] : classifyStoredRoots(key, statuses.map(toRegisteredRoot))
+    const classified = statuses.length === 0 ? [] : classifyStoredRoots(key, durable.roots.map(toRegisteredRoot))
     this.cache.set(key, classified)
     this.publish(key, classified)
     return classified
@@ -818,6 +848,8 @@ export class MultiRootRegistry extends Service {
    * under a shared byte budget, so a move must update the live scope immediately.
    * Aliases and no-op moves still leave the signature unchanged.
    */
+  private readonly metadataPublished = new Map<string, string>()
+
   private publish(key: string, statuses: readonly RootStatus[]): void {
     const withheld = statuses.filter(status => status.state !== 'available')
     // Access AND invalidReason are part of the signature: an access change IS
@@ -832,7 +864,15 @@ export class MultiRootRegistry extends Service {
     // A key with nothing published yet reads as the empty signature: the very
     // first classification of an empty key must not "publish" an empty grant
     // (and fire every listener) for a set that was already empty.
-    if ((this.published.get(key) ?? '') === signature) return
+    const previousMetadata = this.metadataPublished.get(key)
+    const metadata = JSON.stringify(statuses.map(row => [row.id, row.aliasId, row.skillsEnabled, row.state]))
+    this.metadataPublished.set(key, metadata)
+    if ((this.published.get(key) ?? '') === signature) {
+      if (previousMetadata !== metadata && (previousMetadata !== undefined || statuses.length > 0)) {
+        for (const listener of this.listeners) listener(key)
+      }
+      return
+    }
     this.published.set(key, signature)
     const effective = statuses.flatMap(status => {
       const recorded = recordedGrantOf(status)
@@ -975,7 +1015,15 @@ export class MultiRootRegistry extends Service {
     this.cache.clear()
     this.published.clear()
     for (const [primaryRoot, record] of this.table.entries()) {
-      this.accept(primaryRoot, record)
+      await this.serialize(canonicalRoot(primaryRoot), async () => {
+        const migrated = { roots: migrateRootSkills(record.roots) }
+        let accepted = record
+        if (JSON.stringify(migrated) !== JSON.stringify(record)) {
+          try { await this.table!.put(primaryRoot, migrated); accepted = migrated }
+          catch (error: unknown) { this.ctx.logger.warn(`multi-root skills: metadata migration failed; Skills remain withheld: ${String(error)}`) }
+        }
+        this.accept(primaryRoot, accepted)
+      })
     }
     // Authority is published only AFTER every stored root reached the scope:
     // between acquisition and this line the scope must still read
@@ -1013,6 +1061,7 @@ export class MultiRootRegistry extends Service {
       this.ctx.multiRootScope.setAdditionalRoots(key, [])
     }
     this.published.clear()
+    this.metadataPublished.clear()
     this.cache.clear()
   }
 
@@ -1140,6 +1189,8 @@ function toPersistedRoot(status: RootStatus): PersistedRoot {
     path: status.path,
     ...grant,
     ...(status.alias === undefined ? {} : { alias: status.alias }),
+    ...(status.aliasId === undefined ? {} : { aliasId: status.aliasId }),
+    ...(status.skillsEnabled === undefined ? {} : { skillsEnabled: status.skillsEnabled }),
     addedAt: status.addedAt,
   }
 }
@@ -1178,6 +1229,8 @@ function toRegisteredRoot(entry: PersistedRoot): RegisteredRoot {
     ...(entry.readOnlyRecordedPath === undefined ? {} : { readOnlyRecordedPath: entry.readOnlyRecordedPath }),
     ...(entry.readWriteRecordedPath === undefined ? {} : { readWriteRecordedPath: entry.readWriteRecordedPath }),
     ...(entry.alias === undefined ? {} : { alias: entry.alias }),
+    ...(entry.aliasId === undefined ? {} : { aliasId: entry.aliasId }),
+    ...(entry.skillsEnabled === undefined ? {} : { skillsEnabled: entry.skillsEnabled }),
     addedAt: entry.addedAt,
   }
 }

@@ -178,7 +178,7 @@ describe('parseFoldersCommand', () => {
   })
 
   it('accepts every subcommand', () => {
-    for (const verb of ['list', 'add', 'remove', 'alias', 'access', 'reveal', 'isolate-profiles', 'help']) {
+    for (const verb of ['list', 'add', 'remove', 'alias', 'alias-id', 'skills', 'access', 'reveal', 'isolate-profiles', 'help']) {
       expect(parseFoldersCommand(`${verb} x`).verb).toBe(verb)
     }
     expect(parseFoldersCommand('isolate-profiles --apply')).toEqual({ verb: 'isolate-profiles', rest: '--apply' })
@@ -851,6 +851,24 @@ describe('per-root access on the command and the panel', () => {
     expect(upgraded.kind).toBe('success')
     expect(upgraded.text).toContain(`${canonicalPath(extra)} (read-write)`)
     expect(stack.scope.writableOf(primary)).toEqual([canonicalPath(extra)])
+  })
+
+  it('manages namespace and Skills through command and matching panel mutations', async () => {
+    await mount({ withConnection: true })
+    const root = join(fixture.base, 'skills-command')
+    mkdirSync(root)
+    expect((await run(`add ${root}`)).kind).toBe('success')
+    expect((await run('skills 1 off')).kind).toBe('success')
+    expect((await run('alias-id 1 command-root')).kind).toBe('success')
+    const payload = { sessionId: PANEL_SESSION }
+    const listed = await callPanel('list', payload)
+    expect(listed.ok).toBe(true)
+    const entry = listed.value!.roots[0]!
+    expect(entry).toMatchObject({ skillsEnabled: false, aliasId: 'command-root' })
+    const enabled = await callPanel('setSkillsEnabled', { ...payload, id: entry.id, skillsEnabled: true })
+    expect(enabled).toMatchObject({ ok: true, value: { roots: [expect.objectContaining({ skillsEnabled: true })] } })
+    expect(await callPanel('setAliasId', { ...payload, id: entry.id, aliasId: 'panel-root' })).toMatchObject({ ok: true })
+    expect(await callPanel('setSkillsEnabled', { ...payload, id: entry.id, skillsEnabled: 'yes' })).toMatchObject({ ok: false })
   })
 
   it('carries access through the panel add/setAccess endpoints as a RootsView', async () => {

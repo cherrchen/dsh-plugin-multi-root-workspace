@@ -78,7 +78,7 @@ describe('the root-switcher rules', () => {
 
 describe('the additional-root row rules', () => {
   it('rides the access badge beside the name, never shrinking', () => {
-    expect(STYLES).toMatch(/\.mrfw-rootName\s*\{[^}]*display:\s*flex[^}]*align-items:\s*baseline/s)
+    expect(STYLES).toMatch(/\.mrfw-rootName\s*\{[^}]*display:\s*flex[^}]*align-items:\s*center/s)
     expect(STYLES).toMatch(/\.mrfw-rootNameText\s*\{[^}]*text-overflow:\s*ellipsis/s)
     expect(STYLES).toMatch(/\.mrfw-accessBadge[^{}]*\{[^}]*flex:\s*none/s)
   })

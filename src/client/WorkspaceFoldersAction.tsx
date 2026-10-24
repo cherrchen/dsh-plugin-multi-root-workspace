@@ -2,7 +2,7 @@
  * The Workspace Folders panel: one sidebar footer action that opens a dialog
  * listing this session's workspace root and the additional roots registered for
  * it, with the actions the milestone requires — Add (through the composed
- * directory picker), Remove, Alias, Copy Path, Reveal, and reordering.
+ * directory picker), Remove, Alias, Copy Path, and Reveal.
  *
  * Why a footer action and its own dialog, instead of a first-class panel: the
  * slots that can host a full panel (`sidebar.panellist` + the keyed `main`
@@ -77,11 +77,15 @@ const VARIANT_CLASS: Record<ActionVariant, string> = {
   danger: 'mrfw-btnDanger',
 }
 
-/** One small capsule button matching the panel's own styling. */
+/** One small capsule button matching the panel's own styling.
+ * Pending requests block activation through aria-disabled without changing
+ * opacity, hover or keyboard focus. Native disabled is for unavailable actions.
+ */
 function Action(props: {
   onClick: () => void
   children: ReactNode
   disabled?: boolean
+  pending?: boolean
   variant?: ActionVariant
 }): ReactNode {
   const variant = props.variant ?? 'ghost'
@@ -89,8 +93,10 @@ function Action(props: {
     <button
       type="button"
       className={`mrfw-btn ${VARIANT_CLASS[variant]}`}
-      onClick={props.onClick}
+      onClick={props.pending === true ? undefined : props.onClick}
       disabled={props.disabled === true}
+      aria-disabled={props.disabled === true || props.pending === true || undefined}
+      aria-busy={props.pending === true || undefined}
     >
       {props.children}
     </button>
@@ -106,6 +112,9 @@ function IconButton(props: {
   icon: ReactNode
   label: string
   disabled?: boolean
+  pending?: boolean
+  pressed?: boolean
+  hint?: string
   variant?: ActionVariant
 }): ReactNode {
   const variant = props.variant ?? 'ghost'
@@ -113,13 +122,27 @@ function IconButton(props: {
     <button
       type="button"
       className={`mrfw-btn mrfw-iconBtn ${VARIANT_CLASS[variant]}`}
-      title={props.label}
+      title={props.hint ?? props.label}
       aria-label={props.label}
-      onClick={props.onClick}
+      aria-pressed={props.pressed}
+      onClick={props.pending === true ? undefined : props.onClick}
       disabled={props.disabled === true}
+      aria-disabled={props.disabled === true || props.pending === true || undefined}
+      aria-busy={props.pending === true || undefined}
     >
       {props.icon}
     </button>
+  )
+}
+
+/** A skill is a reusable instruction document; the star denotes its capability. */
+function SkillsIcon({ enabled }: { enabled: boolean }): ReactNode {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 13.5H3a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1V7M4.5 4.5h5M4.5 7h3" />
+      <path d="m11.5 8 .85 2.65L15 11.5l-2.65.85-.85 2.65-.85-2.65L8 11.5l2.65-.85Z" />
+      {enabled ? null : <path d="m2 14 12-12" />}
+    </svg>
   )
 }
 
@@ -137,7 +160,7 @@ function CloseIcon(): ReactNode {
  * and reveals a trailing icon on hover — clicking the text or the icon
  * copies the same canonical path. The accessible name swaps to "copied"
  * for the feedback window, the icon button's old recipe. Shared by the
- * primary row, the current-directory line, and every additional root.
+ * primary row and every additional root.
  */
 function PathCopy(props: {
   readonly path: string
@@ -202,6 +225,24 @@ export function basename(path: string): string {
  */
 export function displayNameOf(root: RootView): string {
   return root.alias ?? basename(root.path)
+}
+
+/** Display-only path matching; the host remains the sole authority for grants. */
+function workingRootOf(view: RootsView | undefined): string | undefined {
+  if (view?.effectiveCwd === undefined) return undefined
+  const normalize = (path: string): string => {
+    const windows = /^[a-z]:[\\/]/i.test(path) || path.startsWith('\\')
+    const normalized = (windows ? path.replace(/\\/g, '/').toLowerCase() : path).replace(/\/+$/, '')
+    return normalized || '/'
+  }
+  const cwd = normalize(view.effectiveCwd)
+  // Longest boundary match is equivalent to walking up to the nearest listed root.
+  return [view.primaryRoot, ...view.roots.map(root => root.path)]
+    .filter(path => {
+      const root = normalize(path)
+      return cwd === root || cwd.startsWith(root.endsWith('/') ? root : `${root}/`)
+    })
+    .sort((a, b) => normalize(b).length - normalize(a).length)[0]
 }
 
 /** The sidebar footer action plus the dialog it opens. */
@@ -282,6 +323,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const [upgradeFor, setUpgradeFor] = useState<{ root: RootView; access: RootAccess } | undefined>(undefined)
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
   const [aliasDraft, setAliasDraft] = useState('')
+  const [aliasField, setAliasField] = useState<'alias' | 'aliasId'>('alias')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
   const [menuFor, setMenuFor] = useState<string | undefined>(undefined)
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -389,7 +431,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
    * @returns whether the host accepted it (the caller decides whether to clear
    *   the input it came from).
    */
-  const mutate = useCallback(async (endpoint: 'add' | 'remove' | 'alias' | 'move' | 'setAccess', payload: Record<string, unknown>): Promise<boolean> => {
+  const mutate = useCallback(async (endpoint: 'add' | 'remove' | 'alias' | 'move' | 'setAccess' | 'setAliasId' | 'setSkillsEnabled', payload: Record<string, unknown>): Promise<boolean> => {
     if (panel === undefined) return false
     const base = requestBase()
     if (base === undefined) {
@@ -491,7 +533,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     }
   }, [])
 
-  const move = useCallback(async (root: RootView, before: RootView | undefined) => {
+  // Retained for a future drag-to-reorder interaction; no ordering controls are shown.
+  const _move = useCallback(async (root: RootView, before: RootView | undefined) => {
     await mutate('move', before === undefined
       ? { entry: entryOf(root) }
       : { entry: entryOf(root), beforeEntry: entryOf(before) })
@@ -505,7 +548,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     : addAccess === 'read-write' ? IconAccessReadWrite : IconAccessInherit
   // Captured as consts: narrowing does not reach the onCopy closures below.
   const primaryPath = state.view?.primaryRoot
-  const cwdPath = state.view?.effectiveCwd
+  const workingRoot = workingRootOf(state.view)
   return (
     <>
     <div className="mrfw-overlay" role="presentation">
@@ -540,10 +583,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             <p className="mrfw-note">{t('panel.noSession')}</p>
           ) : (
             <>
-          <p className="mrfw-description">{t('panel.subtitle')}</p>
-          {state.view?.mode === undefined ? null : <p className="mrfw-note">
-            {t('panel.mode')} {t(`mode.${state.view.mode}`)}
-          </p>}
           {state.view?.toolAccessInvalid ? <p className="mrfw-note">{t('panel.invalidCap')}</p>
             : (state.view?.cappedTools?.length ?? 0) > 0 ? <p className="mrfw-note">
               {t('panel.toolCaps', { tools: state.view!.cappedTools!.join(', ') })}
@@ -570,6 +609,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   <span className="mrfw-rootNameText">
                     {state.view === undefined ? '…' : (state.view.primaryName ?? basename(state.view.primaryRoot))}
                   </span>
+                  {primaryPath !== undefined && workingRoot === primaryPath ? <span className="mrfw-cwdTag">{t('panel.currentAgentCwd')}</span> : null}
                 </span>
                 {primaryPath === undefined
                   ? <span className="mrfw-rootPath">…</span>
@@ -585,21 +625,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             </div>
           </section>
 
-          {cwdPath !== undefined && (
-            <section className="mrfw-section">
-              <div className="mrfw-sectionTitleRow">
-                <span className="mrfw-sectionTitle">{t('panel.cwd')}</span>
-                <span className="mrfw-sectionNote">{t('panel.cwdNote')}</span>
-              </div>
-              <PathCopy
-                path={cwdPath}
-                copied={copiedId === 'cwd'}
-                onCopy={() => { void copyPath('cwd', cwdPath) }}
-                t={t}
-              />
-            </section>
-          )}
-
           <section className="mrfw-section">
             <div className="mrfw-sectionTitleRow">
               <span className="mrfw-sectionTitle">{t('panel.additional')}</span>
@@ -610,20 +635,24 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 {t('panel.empty')} {t('panel.emptyHint')}
               </p>
             ) : null}
-            {roots.map((root, index) => {
+            {roots.map(root => {
               const key = rowKey(root)
+              const IconAccess = root.access === 'read-only' ? IconAccessReadOnly
+                : root.access === 'read-write' ? IconAccessReadWrite : IconAccessInherit
               return <div key={key} className="mrfw-row">
                 <div className="mrfw-rootText">
                   <span className="mrfw-rootName">
                     <span className="mrfw-rootNameText">{displayNameOf(root)}</span>
+                    {workingRoot === root.path ? <span className="mrfw-cwdTag">{t('panel.currentAgentCwd')}</span> : null}
                     {/* The access level rides beside the name as read-only
                         text; changing it stays behind the row's … menu. */}
                     <span className="mrfw-accessBadge">
-                      {t(accessKey(root.access))}
+                      {IconAccess === undefined ? null : <IconAccess size={14} />}
+                      {root.effectiveAccess === undefined ? t(accessKey(root.access)) : t('panel.accessEffective', {
+                        access: t(accessKey(root.access)),
+                        effective: t(`effective.${root.effectiveAccess}`),
+                      })}
                     </span>
-                    {root.effectiveAccess === undefined ? null : <span className="mrfw-effectiveAccess">
-                      {t('panel.effectiveAccess')} {t(`effective.${root.effectiveAccess}`)}
-                    </span>}
                   </span>
                   <PathCopy
                     path={root.path}
@@ -639,43 +668,48 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 )}
                 {root.state === 'available' ? null : (
                   <IconButton
-                    disabled={state.busy}
+                    pending={state.busy}
                     onClick={() => { void reRegister(root) }}
                     icon={<IconRefresh />}
                     label={t('panel.reRegister')}
                   />
                 )}
+                {root.skillsEnabled === undefined ? null : (
+                  <IconButton
+                    pending={state.busy}
+                    pressed={root.skillsEnabled}
+                    onClick={() => { void mutate('setSkillsEnabled', { entry: entryOf(root), skillsEnabled: !root.skillsEnabled }) }}
+                    icon={<SkillsIcon enabled={root.skillsEnabled} />}
+                    label={t('panel.skills')}
+                    hint={t(root.skillsEnabled ? 'panel.skillsEnabled' : 'panel.skillsDisabled')}
+                  />
+                )}
                 <IconButton
-                  disabled={state.busy}
+                  pending={state.busy}
                   onClick={() => { void reveal(root) }}
                   icon={<IconFolderOpen />}
                   label={t('panel.reveal')}
-                />
-                <IconButton
-                  disabled={state.busy || index === 0}
-                  onClick={() => { void move(root, roots[index - 1]) }}
-                  icon={<IconChevronUp />}
-                  label={t('panel.moveUp')}
-                />
-                <IconButton
-                  disabled={state.busy || index === roots.length - 1}
-                  onClick={() => { void move(root, roots[index + 2]) }}
-                  icon={<IconChevronDown />}
-                  label={t('panel.moveDown')}
                 />
                 <Menu
                   open={menuFor === key}
                   onClose={() => { setMenuFor(undefined) }}
                   items={[
                     { id: 'rename', label: t('panel.rename'), icon: <IconEdit /> },
-                    { id: 'access:inherit', label: t('panel.accessInherit'), disabled: state.busy || root.access === 'inherit' },
-                    { id: 'access:read-only', label: t('panel.accessReadOnly'), disabled: state.busy || root.access === 'read-only' },
-                    { id: 'access:read-write', label: t('panel.accessReadWrite'), disabled: state.busy || root.access === 'read-write' },
+                    { id: 'alias-id', label: t('panel.aliasIdEdit'), disabled: state.busy },
+                    { id: 'access:inherit', label: t('panel.accessInherit'), icon: IconAccessInherit === undefined ? undefined : <IconAccessInherit />, disabled: state.busy || root.access === 'inherit' },
+                    { id: 'access:read-only', label: t('panel.accessReadOnly'), icon: IconAccessReadOnly === undefined ? undefined : <IconAccessReadOnly />, disabled: state.busy || root.access === 'read-only' },
+                    { id: 'access:read-write', label: t('panel.accessReadWrite'), icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />, disabled: state.busy || root.access === 'read-write' },
                     { id: 'remove', label: t('panel.remove'), icon: <IconTrash />, danger: true, disabled: state.busy },
                   ]}
                   onSelect={(id) => {
                     setMenuFor(undefined)
+                    if (id === 'alias-id') {
+                      setAliasField('aliasId')
+                      setAliasFor(key)
+                      setAliasDraft(root.aliasId ?? '')
+                    }
                     if (id === 'rename') {
+                      setAliasField('alias')
                       setAliasFor(key)
                       setAliasDraft(root.alias ?? '')
                     }
@@ -694,7 +728,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   closeOnPointerLeave
                   anchor={(
                     <IconButton
-                      disabled={state.busy}
+                      pending={state.busy}
                       onClick={() => { setMenuFor(current => (current === key ? undefined : key)) }}
                       icon={<IconEllipsis />}
                       label={t('panel.more')}
@@ -707,10 +741,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       autoFocus
                       className="mrfw-input mrfw-inputInline"
                       value={aliasDraft}
-                      placeholder={t('panel.aliasPlaceholder')}
+                      placeholder={t(aliasField === 'aliasId' ? 'panel.aliasIdPlaceholder' : 'panel.aliasPlaceholder')}
                       onChange={event => { setAliasDraft(event.target.value) }}
                     />
-                    <Action disabled={state.busy} onClick={() => { void mutate('alias', { entry: entryOf(root), alias: aliasDraft }); setAliasFor(undefined) }}>
+                    <Action pending={state.busy} onClick={() => { void mutate(aliasField === 'aliasId' ? 'setAliasId' : 'alias', { entry: entryOf(root), [aliasField]: aliasDraft }).then(ok => { if (ok) setAliasFor(undefined) }) }}>
                       {t('panel.aliasSave')}
                     </Action>
                     <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
@@ -726,7 +760,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             {state.noSession || props.pickDirectory === undefined ? null : (
               <IconButton
                 variant="outline"
-                disabled={state.busy || atLimit}
+                pending={state.busy}
+                disabled={atLimit}
                 onClick={() => { void addViaPicker() }}
                 icon={<IconPlus />}
                 label={atLimit ? t('panel.limitReached') : t('panel.add')}
@@ -789,8 +824,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   aria-label={t('panel.accessLabel')}
                   aria-haspopup="menu"
                   aria-expanded={accessMenuOpen}
-                  disabled={state.busy || atLimit}
-                  onClick={() => { setAccessMenuOpen(open => !open) }}
+                  disabled={atLimit}
+                  aria-disabled={state.busy || atLimit || undefined}
+                  aria-busy={state.busy || undefined}
+                  onClick={() => { if (!state.busy) setAccessMenuOpen(open => !open) }}
                 >
                   {IconAccessTrigger === undefined ? null : <IconAccessTrigger />}
                   {t(accessKey(addAccess))}
@@ -800,7 +837,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             />
             <Action
               onClick={() => { void addManualPath() }}
-              disabled={state.busy || atLimit || manualPath.trim() === ''}
+              pending={state.busy}
+              disabled={atLimit || manualPath.trim() === ''}
               variant="primary"
             >
               {t('panel.addConfirm')}
@@ -808,7 +846,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               </>
             )}
             {atLimit ? <span className="mrfw-note">{t('panel.limitReached')}</span> : null}
-            <Action onClick={() => { void refresh() }} disabled={state.busy} variant="outline">{t('panel.retry')}</Action>
+            <Action onClick={() => { void refresh() }} pending={state.busy} variant="outline">{t('panel.retry')}</Action>
           </div>
         </div>
       </div>
@@ -827,7 +865,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           <Action onClick={() => { setUpgradeFor(undefined) }}>{t('panel.aliasCancel')}</Action>
           <Action
             variant="danger"
-            disabled={state.busy}
+            pending={state.busy}
             onClick={() => {
               const pending = upgradeFor
               setUpgradeFor(undefined)

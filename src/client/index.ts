@@ -29,10 +29,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { createElement } from 'react'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
-import { currentSessionIdOf, subscribeSessions } from '../compat/client-session.ts'
+import { currentSessionIdOf, subscribeSessions, subscribeCurrentSession } from '../compat/client-session.ts'
 import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { NS, en, zh } from './locales.ts'
 import { STYLES } from './styles.ts'
+import { installSkillsClient } from './skills.tsx'
+import { installSkillsSettingsCard } from './skills-settings.tsx'
 import { RootSwitcher } from './RootSwitcher.tsx'
 import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction.tsx'
 import { OPEN_IN_APP_NS, createOpenInAppAdapter } from './open-in-app/adapter.tsx'
@@ -93,6 +95,8 @@ export function apply(ctx: ClientContext): void {
   const sessionId = (): string | undefined => currentSessionIdOf(readService(ctx, 'sessions'))
   const subscribeSession = (listener: () => void): (() => void) => subscribeSessions(readService(ctx, 'sessions'), listener)
   const t = ctx.locale.bind(NS) as unknown as Translate
+  installSkillsClient(ctx, t, listener => subscribeCurrentSession(readService(ctx, 'sessions'), listener))
+  installSkillsSettingsCard(ctx, t)
   // The fork binds upstream's own open-in-app namespace — the same strings
   // the native button shows, upstream's dictionary updates included. The
   // adapter is undefined where the fork cannot render (pixel-era glyph

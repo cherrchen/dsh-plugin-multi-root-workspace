@@ -94,6 +94,6 @@ export const IconTrash = icon('IconTrashOutline16', 'IconTrashOutlineRegular')
 
 // The permission glyphs exist only from 0.1.7-alpha.1 on; earlier releases
 // render the access picker's menu rows — and its trigger — without icons.
-export const IconAccessReadWrite = maybeIcon(['IconWorkspaceWriteRegular'])
-export const IconAccessReadOnly = maybeIcon(['IconReadOnlyRegular'])
+export const IconAccessReadWrite = maybeIcon(['PermissionIconWorkspaceWriteRegular', 'IconWorkspaceWriteRegular'])
+export const IconAccessReadOnly = maybeIcon(['PermissionIconReadOnlyRegular', 'IconReadOnlyRegular'])
 export const IconAccessInherit = maybeIcon(['IconWorkspaceTreeOutline16', 'IconWorkspaceTreeOutlineRegular'])

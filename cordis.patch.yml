@@ -92,6 +92,10 @@
     # the model. This row closes that gap for the additional roots only; the
     # primary root and the user-global file stay upstream's. The budget is the
     # total for ALL additional roots, not per root.
+    - id: multi-root-skills
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/skills'
+      config:
+        enabled: true
     - id: multi-root-instructions
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/instructions'
       config:

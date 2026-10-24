@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { currentSessionIdOf } from '../src/compat/client-session.ts'
+import { currentSessionIdOf, subscribeCurrentSession } from '../src/compat/client-session.ts'
 
 /** One catalog row the way 0.1.6-alpha.2 projects it. */
 function row(id: string, mainView?: number): { id: string; retainedBy: { mainView?: number } } {
@@ -23,6 +23,20 @@ function sessions(snapshot: unknown): { list: { getSnapshot: () => unknown } } {
 }
 
 describe('currentSessionIdOf', () => {
+  it.each(['legacy', 'retained'] as const)('only reports selection changes on the %s store', shape => {
+    let id: string | undefined = 'a', notify!: () => void, changes = 0, stopped = false
+    const service = { list: {
+      getSnapshot: () => shape === 'legacy' ? { current: id } : { byId: id === undefined ? {} : { [id]: row(id, 1) } },
+      subscribe: (listener: () => void) => { notify = listener; return () => { stopped = true } },
+    } }
+    const stop = subscribeCurrentSession(service, () => { changes++ })
+    notify(); notify(); expect(changes).toBe(0)
+    id = 'b'; notify(); expect(changes).toBe(1)
+    notify(); expect(changes).toBe(1)
+    id = undefined; notify(); expect(changes).toBe(2)
+    stop(); expect(stopped).toBe(true)
+  })
+
   it('reads the explicit selection on the 0.1.5 and 0.1.6-alpha.1 snapshot', () => {
     expect(currentSessionIdOf(sessions({ current: 'session-1' }))).toBe('session-1')
   })

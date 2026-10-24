@@ -45,6 +45,8 @@ import type {} from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-workspace'
 import {
   PANEL_CHANNEL,
+  SKILLS_ENDPOINTS,
+  skillsRequestSchema,
   parsePanelCall,
   type PanelCall,
   type RevealedView,
@@ -52,6 +54,7 @@ import {
   type RootView,
   type RootsView,
 } from './contract.ts'
+import type {} from './skills.ts'
 import type { MultiRootRegistry } from './registry.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
 import {
@@ -81,7 +84,7 @@ export const COMMAND_NAME = 'workspace-folders'
 /** One parsed command line. */
 export interface FoldersCommand {
   /** The subcommand; `list` when the line named none. */
-  readonly verb: 'list' | 'add' | 'remove' | 'alias' | 'access' | 'reveal' | 'isolate-profiles' | 'help'
+  readonly verb: 'list' | 'add' | 'remove' | 'alias' | 'alias-id' | 'skills' | 'access' | 'reveal' | 'isolate-profiles' | 'help'
   /** Everything after the verb, verbatim (paths may contain spaces). */
   readonly rest: string
 }
@@ -103,6 +106,8 @@ export function parseFoldersCommand(rawInput: string): FoldersCommand {
     case 'add':
     case 'remove':
     case 'alias':
+    case 'alias-id':
+    case 'skills':
     case 'access':
     case 'reveal':
     case 'isolate-profiles':
@@ -151,7 +156,7 @@ export function renderRootsReport(
   for (const [index, status] of statuses.entries()) {
     const alias = status.alias === undefined ? '' : ` [${status.alias}]`
     const state = status.state === 'available' ? '' : ` (${status.state}: ${status.detail ?? 'unavailable'})`
-    lines.push(`  ${index + 1} ${status.path}${alias} (${status.access})${state}`)
+    lines.push(`  ${index + 1} ${status.path}${alias} (${status.access})${state}${typeof status.aliasId === 'string' ? ` Skills: ${status.skillsEnabled === true ? 'on' : 'off'} /${status.aliasId}:` : ''}`)
   }
   const withheld = statuses.length - availableRoots(statuses).length
   if (withheld > 0) {
@@ -194,7 +199,7 @@ export function apply(ctx: Context, config: CommandConfig = {}): void {
   ctx.commands.register({
     name: COMMAND_NAME,
     description: 'List, add, remove, alias, or reveal the additional workspace roots of this session, or isolate DSH profile imports',
-    input: { hint: '[list|add [path] [--inherit|--read-only|--read-write]|remove <n|path>|alias <n|path> [name]|access <n|path> <level>|reveal <n|path>|isolate-profiles [--apply]|help]' },
+    input: { hint: '[list|add [path] [--inherit|--read-only|--read-write]|remove <n|path>|alias <n|path> [name]|alias-id <n|path> <id>|skills <n|path> on|off|access <n|path> <level>|reveal <n|path>|isolate-profiles [--apply]|help]' },
     handler: async invocation => await runCommand(ctx, invocation, config),
   })
 
@@ -216,8 +221,8 @@ export function apply(ctx: Context, config: CommandConfig = {}): void {
       ctx.logger.warn('multi-root: connection resolved without the service; the panel channel is not mounted')
       return
     }
-    const dispose = connection.rpc.handle(PANEL_CHANNEL, async (endpoint, payload) =>
-      await dispatchPanelRequest(ctx, endpoint, payload))
+    const dispose = connection.rpc.handle(PANEL_CHANNEL, async (endpoint, payload, signal) =>
+      await dispatchPanelRequest(ctx, endpoint, payload, signal))
     return () => { void dispose() }
   })
 }
@@ -262,6 +267,17 @@ async function runCommand(ctx: Context, invocation: CommandInvocation, config: C
         const { text: reference, rest: alias } = splitReference(parsed.rest)
         const { ref } = await targetOf(registry, primaryRoot, reference)
         await registry.setAlias(primaryRoot, ref, alias === '' ? undefined : unquote(alias))
+        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
+      }
+      case 'alias-id':
+      case 'skills': {
+        const { text: reference, rest: value } = splitReference(parsed.rest)
+        const { ref } = await targetOf(registry, primaryRoot, reference)
+        if (parsed.verb === 'alias-id') await registry.setAliasId(primaryRoot, ref, unquote(value))
+        else {
+          if (value !== 'on' && value !== 'off') throw new RootValidationError('invalid-ref', 'skills requires on or off')
+          await registry.setSkillsEnabled(primaryRoot, ref, value === 'on')
+        }
         return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
       }
       case 'access': {
@@ -395,6 +411,8 @@ function helpText(): string {
     `  /${COMMAND_NAME} remove <n|path>`,
     `  /${COMMAND_NAME} alias <n|path> [name]  (no name clears the alias)`,
     `  /${COMMAND_NAME} access <n|path> inherit|read-only|read-write`,
+    `  /${COMMAND_NAME} skills <n|path> on|off`,
+    `  /${COMMAND_NAME} alias-id <n|path> <kebab-case>`,
     `  /${COMMAND_NAME} reveal <n|path>`,
     `  /${COMMAND_NAME} isolate-profiles [--apply]   (report or set packageImportMethod: copy for every profile under $DSH_HOME)`,
     'Roots are canonicalized before they are stored: `~` expands, and a duplicate, a nested directory,',
@@ -527,6 +545,8 @@ function toRootView(status: RootStatus, index: number): RootView {
     ordinal: index + 1,
     id: status.id,
     path: status.path,
+    ...(typeof status.aliasId === 'string' ? { aliasId: status.aliasId } : {}),
+    skillsEnabled: status.skillsEnabled === true,
     ...(status.alias === undefined ? {} : { alias: status.alias }),
     addedAt: status.addedAt,
     state: status.state,
@@ -609,8 +629,21 @@ async function dispatchPanelRequest(
   ctx: Context,
   endpoint: string,
   payload: unknown,
+  signal?: AbortSignal,
 ): Promise<ConnectionRpcResult<unknown>> {
   try {
+    if ((SKILLS_ENDPOINTS as readonly string[]).includes(endpoint)) {
+      const parsedSkills = skillsRequestSchema.safeParse(payload)
+      if (!parsedSkills.success) return { ok: false, error: { code: 'panel/bad-request', message: 'invalid Skills request', details: {} } }
+      const request = parsedSkills.data
+      if ((endpoint === 'skillsPreview' && request.name === undefined) || (endpoint === 'skillsChanges' && request.generation === undefined)) return { ok: false, error: { code: 'panel/bad-request', message: 'missing Skills request field', details: {} } }
+      const skills = ctx.get('multiRootSkills')
+      if (skills === undefined) throw new Error('multi-root skills: service is unavailable')
+      const value = endpoint === 'skillsList' ? await skills.listSession(request.sessionId, signal)
+        : endpoint === 'skillsPreview' ? await skills.previewSession(request.sessionId, request.name ?? '', signal)
+        : await skills.changes(request.sessionId, request.generation ?? -1, signal)
+      return { ok: true, value }
+    }
     const parsed = parsePanelCall(endpoint, payload)
     if (!parsed.ok) {
       return { ok: false, error: { code: 'panel/bad-request', message: parsed.message, details: {} } }
@@ -632,6 +665,14 @@ async function dispatchPanelRequest(
         })
         return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       }
+      case 'setSkillsEnabled':
+        if (request.skillsEnabled === undefined) throw new RootValidationError('invalid-ref', 'skillsEnabled is required')
+        await registry.setSkillsEnabled(primaryRoot, requireEntry(request), request.skillsEnabled)
+        return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
+      case 'setAliasId':
+        if (request.aliasId === undefined) throw new RootValidationError('invalid-alias-id', 'aliasId is required')
+        await registry.setAliasId(primaryRoot, requireEntry(request), request.aliasId)
+        return { ok: true, value: await rootsViewOf(ctx, registry, primaryRoot, request) }
       case 'setAccess': {
         if (request.access === undefined) {
           throw new RootValidationError('invalid-ref', 'an access level is required')

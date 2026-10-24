@@ -60,6 +60,8 @@ const EDITED_README = 'seed readme for repo-b\nedited by the agent through the a
  * proves the plugin did not inject a second copy of something upstream already
  * supplies (the primary chain and the user-global file).
  */
+const SKILL_MODEL_BODY = 'journey additional-root model skill body marker'
+const SKILL_USER_BODY = 'journey additional-root user-only skill body marker'
 const RULE_PRIMARY = 'house rule alpha: the primary repository is authoritative'
 const RULE_ADDITIONAL = 'house rule bravo: the other repository uses four-space indentation'
 const RULE_NESTED = 'house rule echo: the other repository\'s src directory uses two-space indentation'
@@ -67,7 +69,7 @@ const RULE_DEEP = 'house rule foxtrot: the other repository\'s src/deep director
 const RULE_USER_GLOBAL = 'house rule charlie: always explain the plan first'
 const RULE_ANCESTOR = 'house rule delta: this ancestor directory is not a workspace root'
 /** One scripted turn: nine tool calls, then the closing assistant text. */
-const SCRIPT_LENGTH = 10
+const SCRIPT_LENGTH = 11
 /** A path spelling that survives inside a single-quoted Node `-e` string on every shell. */
 function shellPath(path) {
   return path.replace(/\\/g, '/')
@@ -241,6 +243,7 @@ function messagesFrames(call, text, id) {
 async function startScriptedModel() {
   const requests = []
   const steps = []
+  const aliasSteps = []
   const calls = [
     // A read INSIDE the additional root's `src/deep/`: H4 phase 2 must make BOTH
     // that directory's AGENTS.md and its parent `src`'s — an ancestor of the
@@ -265,6 +268,7 @@ async function startScriptedModel() {
     { name: 'bash', arguments: { command: `node -e "require('fs').writeFileSync('${shellPath(join(primaryRepo, 'shell-primary.txt'))}','x')"`, description: 'Write the primary repository through the shell' } },
     { name: 'write', arguments: { file_path: join(additionalRepo, 'write-tool.txt'), content: 'written by the write tool\n' } },
     { name: 'write', arguments: { file_path: join(outsideRoot, 'denied.txt'), content: 'must not land' } },
+    { name: 'skill', arguments: { name: 'journey-model' } },
   ]
   /**
    * Resolve a scripted shell call against the tool list the HARNESS sent:
@@ -273,6 +277,11 @@ async function startScriptedModel() {
    * only the name differs.
    */
   const withShellTool = (call, request) => {
+    if (call?.name === 'skill') {
+      const name = JSON.stringify(request).match(/mr-[a-f0-9]{64}-journey-model/)?.[0]
+      if (name === undefined) throw new Error('additional-root model Skill missing from the native first-step catalog')
+      return { ...call, arguments: { name } }
+    }
     if (call === undefined || (call.name !== 'bash' && call.name !== 'pwsh')) return call
     const tools = request.tools ?? []
     const found = tools.find(tool => (tool?.function?.name ?? tool?.name) === 'pwsh')
@@ -310,9 +319,11 @@ async function startScriptedModel() {
       // session log travels with every request, so the title text appears in the
       // agent's own body too and a text match classifies everything as a title.
       const isTitle = !Array.isArray(parsed.tools) || parsed.tools.length === 0
-      if (!isTitle) steps.push(parsed)
-      const call = isTitle ? undefined : withShellTool(calls[(steps.length - 1) % SCRIPT_LENGTH], parsed)
-      const text = isTitle ? 'journey' : 'journey complete'
+      const alias = !isTitle && wireMessages(parsed).some(message => message.role === 'user' && message.text.includes('/repo-b:journey-user'))
+      if (!isTitle && !alias) steps.push(parsed)
+      if (alias) aliasSteps.push(parsed)
+      const call = isTitle || alias ? undefined : withShellTool(calls[(steps.length - 1) % SCRIPT_LENGTH], parsed)
+      const text = isTitle ? 'journey' : alias ? 'alias complete' : 'journey complete'
       const id = `journey-${steps.length}`
       response.writeHead(200, { 'content-type': 'text/event-stream' })
       // The REQUEST PATH picks the wire dialect, because that is how the
@@ -334,6 +345,7 @@ async function startScriptedModel() {
     baseUrl: `http://127.0.0.1:${address.port}`,
     requests,
     steps,
+    aliasSteps,
     close: () => new Promise(resolve => { server.close(resolve) }),
   }
 }
@@ -390,7 +402,7 @@ function seedRegistryStore(primaryRoot) {
             // `recordedPath` alone IS the read-write grant; a read-only record
             // would name `readOnlyRecordedPath` instead (see src/registry.ts).
             recordedPath: canonical(additionalRepo),
-            alias: 'other-repo',
+            alias: 'repo-b',
             addedAt: new Date().toISOString(),
           }],
         },
@@ -472,6 +484,25 @@ async function runWebLeg() {
         dispose()
       }
       observed.granted = ctx.multiRootScope.scopeOf(primaryRepo)
+      const llm = await loadRuntimeModule('@deepseek-ai/dsh-llm')
+      agent.followup(llm.createUserMessage({ content: [{ type: 'text', text: '/repo-b:journey-user verify this skill' }], source: { kind: 'user' } }))
+      await agent.whenIdle()
+      const root = ctx.multiRootRegistry.list(primaryRepo)[0]
+      const skills = ctx.get('skills')
+      const catalog = await skills.snapshot({ cwd: additionalRepo, scope: agent })
+      const internal = catalog.skills.find(skill => skill.name.endsWith('-journey-model'))?.name
+      if (!internal) throw new Error('live additional-root Skill missing')
+      const descriptor = ctx.settings.describe().find(entry => entry.ns === 'multi-root-skills')
+      await ctx.settings.mutate('multi-root-skills', [{ op: 'set', path: ['enabled'], value: false }], descriptor?.revision)
+      observed.globalDisabled = (await skills.snapshot({ cwd: additionalRepo, scope: agent })).skills.every(skill => skill.provider !== 'multi-root-workspace')
+        && await skills.get(internal, { cwd: additionalRepo, scope: agent }) === undefined
+      observed.primarySkillKept = (await skills.snapshot({ cwd: additionalRepo, scope: agent })).skills.some(skill => skill.name === 'journey-primary')
+      await ctx.settings.mutate('multi-root-skills', [{ op: 'set', path: ['enabled'], value: true }])
+      observed.globalRestored = ctx.multiRootRegistry.list(primaryRepo)[0].skillsEnabled === true
+        && (await skills.snapshot({ cwd: additionalRepo, scope: agent })).skills.some(skill => skill.name === internal)
+      await ctx.multiRootRegistry.setSkillsEnabled(primaryRepo, { kind: 'id', id: root.id }, false)
+      observed.noBareBypass = await skills.get('journey-model', { cwd: additionalRepo, scope: agent }) === undefined
+      await ctx.multiRootRegistry.setSkillsEnabled(primaryRepo, { kind: 'id', id: root.id }, true)
 
       // The panel's own path: real HTTP against the bound web server. An
       // unauthenticated POST must answer 401 — 405 would mean the channel
@@ -516,8 +547,8 @@ async function runWebLeg() {
  * @param model - the scripted endpoint.
  * @returns the process outcome and its stdout.
  */
-async function runHeadlessLeg(model) {
-  const child = spawn(process.execPath, [resolveDshCliPath(), '--profile', 'headless', 'work across both repositories'], {
+async function runHeadlessLeg(model, prompt = 'work across both repositories') {
+  const child = spawn(process.execPath, [resolveDshCliPath(), '--profile', 'headless', prompt], {
     cwd: primaryRepo,
     env: legEnvironment(model),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -555,6 +586,8 @@ try {
   // changes at the end, and an untracked fixture file would mask that.
   mkdirSync(primaryRepo, { recursive: true })
   writeFileSync(join(primaryRepo, 'AGENTS.md'), `# primary rules\n\n${RULE_PRIMARY}\n`)
+  mkdirSync(join(primaryRepo, '.dsh/skills/journey-primary'), { recursive: true })
+  writeFileSync(join(primaryRepo, '.dsh/skills/journey-primary/SKILL.md'), '---\nname: journey-primary\ndescription: Primary skill control\n---\nPRIMARY SKILL BODY\n')
   seedRepo(primaryRepo, 'README.md', PRIMARY_README)
   mkdirSync(additionalRepo, { recursive: true })
   writeFileSync(join(additionalRepo, 'check.mjs'), 'console.log("repo-b check ok")\n')
@@ -571,6 +604,10 @@ try {
   writeFileSync(join(additionalRepo, 'src', 'AGENTS.md'), `# other src rules\n\n${RULE_NESTED}\n`)
   writeFileSync(join(additionalRepo, 'src', 'deep', 'AGENTS.md'), `# other deep rules\n\n${RULE_DEEP}\n`)
   writeFileSync(join(additionalRepo, 'src', 'deep', 'entry.mjs'), 'export const entry = 1\n')
+  for (const [name, body, policy] of [['journey-model', SKILL_MODEL_BODY, ''], ['journey-user', SKILL_USER_BODY, 'disable-model-invocation: true\n']]) {
+    mkdirSync(join(additionalRepo, '.dsh/skills', name), { recursive: true })
+    writeFileSync(join(additionalRepo, '.dsh/skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: Additional-root journey Skill\n${policy}---\n${body}\n`)
+  }
   seedRepo(additionalRepo, 'README.md', SEED_README)
   mkdirSync(outsideRoot, { recursive: true })
   writeFileSync(join(outsideRoot, 'keep.txt'), 'untouched\n')
@@ -609,6 +646,14 @@ try {
     const webRequests = model.steps.slice(stepsBeforeWeb)
     // Tool results travel back to the model, so the step requests are the one
     // place every result is visible for BOTH legs (in process and subprocess).
+    check.ok(web.globalDisabled, 'web: global disable removes native catalog entries and blocks old internal IDs')
+    check.ok(web.primarySkillKept, 'web: global disable preserves primary-root native Skills')
+    check.ok(web.globalRestored, 'web: live global restore preserves Root choice and restores discovery')
+    check.ok(web.noBareBypass, 'web: disabled Root cannot re-enter through native additional-root cwd')
+    check.ok(JSON.stringify(model.aliasSteps).includes(SKILL_USER_BODY), 'web: user-only namespaced invocation reaches a real model request')
+    check.ok(!JSON.stringify(webRequests[0]).includes(SKILL_MODEL_BODY), 'web: first model request contains no additional-root Skill body')
+    check.ok(/mr-[a-f0-9]{64}-journey-model/.test(JSON.stringify(webRequests[0])), 'web: first model request contains the namespaced bridge catalog')
+    check.ok(JSON.stringify(webRequests).includes(SKILL_MODEL_BODY), 'web: native skill tool loads the body on demand')
     const webRendered = webRequests.map(request => JSON.stringify(request)).join('\n')
     const runnerFailed = rendered =>
       rendered.includes('SANDBOX_UNAVAILABLE')
@@ -700,6 +745,14 @@ try {
     check.equal(readFileSync(join(additionalRepo, 'write-tool.txt'), 'utf8'), 'written by the write tool\n', 'headless: the uncapped write tool keeps the additional-root grant')
     check.contains(git(additionalRepo, 'status', '--porcelain'), ' M README.md', 'headless: git reports the change in the other repository')
 
+    const headlessAlias = await runHeadlessLeg(model, '/repo-b:journey-user verify this skill')
+    check.equal(headlessAlias.code, 0, 'headless: user-only namespaced invocation completed')
+    check.contains(headlessAlias.stdout, 'alias complete', 'headless: namespaced turn reached the scripted model')
+    check.ok(model.aliasSteps.length >= 2 && JSON.stringify(model.aliasSteps.at(-1)).includes(SKILL_USER_BODY), 'headless: Host Alias injected user-only Skill body')
+    const headlessSteps = model.steps.slice(stepsBeforeHeadless)
+    check.ok(!JSON.stringify(headlessSteps[0]).includes(SKILL_MODEL_BODY), 'headless: first model request contains no additional-root Skill body')
+    check.ok(/mr-[a-f0-9]{64}-journey-model/.test(JSON.stringify(headlessSteps[0])), 'headless: first model request already contains the bridge catalog')
+    check.ok(JSON.stringify(headlessSteps).includes(SKILL_MODEL_BODY), 'headless: native skill tool loads the body on demand')
     const headlessResults = model.steps.slice(stepsBeforeHeadless).map(request => JSON.stringify(request)).join('\n')
     if (runnerFailed(headlessResults)) {
       check.skip(`headless: confined ${shellTool} (per-tool cap writes and the other repository's check) — ${runnerSkip()}`)

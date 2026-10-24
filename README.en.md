@@ -205,6 +205,8 @@ The upstream `fs-sandbox` and `sandbox` rows are disabled and taken over by the 
 /workspace-folders [list]                                                    # list the primary root and the additional roots (access and state included)
 /workspace-folders add <absolute path> [--inherit|--read-only|--read-write]  # no path opens the OS directory picker; new registrations default to inherit
 /workspace-folders access <n|path> inherit|read-only|read-write              # switch access (widening requires the root to be available right now)
+/workspace-folders skills <n|path> on|off                                    # toggle additional-root Skills independently of write access
+/workspace-folders alias-id <n|path> <kebab-case>                             # edit the stable Skill namespace
 /workspace-folders alias <n|path> [name]                                     # omitting the name clears the alias
 /workspace-folders remove <n|path>                                           # n is the number list prints
 /workspace-folders reveal <n|path>                                           # show it in the file manager
@@ -225,6 +227,18 @@ Workspace root (primary; access follows the current sandbox mode): /home/me/mono
 2 of 16 additional roots.
 Writable additional roots under the current mode: 1 of 2.
 ```
+
+### Additional-root Skills (development branch, unreleased)
+
+Skills are discovered in each additional folder’s `.dsh/skills` and `.agents/skills`. Names and descriptions are available before the first model step; bodies are loaded on invocation. The primary root uses `/skill-name`; additional roots always use `/alias-id:skill-name`, with Slash completion and manual entry. The model uses the native `skill` tool with an internal name. Internal IDs can appear in tool logs; human menus list namespaced references.
+
+New `inherit` and `read-write` registrations enable Skills by default; `read-only` registrations disable them. The Workspace Folders dialog provides an independent Skills toggle and editable `aliasId`. Renaming the display Alias keeps `aliasId` stable. An actual change to registered access resets the toggle; session sandbox mode changes, same-value access updates, and re-registration without an access change preserve the manual choice. Enabling Skills on a read-only root grants no write access.
+
+**Enable additional-root Skills** under Settings → Plugins → Multi-root Workspace controls all additional roots and defaults to on. Disabling it stops new discovery and invocation while preserving each root’s choice. Re-enabling restores discovery according to those choices. Primary-root Skills, instructions, LSP, browsing, and sandbox permissions retain their behavior. Older hosts use the compatible plugin settings page. Namespaced references appear as ordinary user text, without a separate background, highlighting, or click-to-preview action. Native draft highlighting does not yet support colon references.
+
+On upgrade, legacy `inherit` and `read-write` registrations start with Skills enabled. Migration preserves existing grants. An older plugin can strip `aliasId` and manual toggles when it writes the registry; upgrading again applies the defaults. **Lossless downgrade of Skills preferences is not guaranteed.** Back up `$DSH_HOME/storages/multi_root_workspace.json` before downgrading if preferences must survive. Disabling Skills does not remove previously delivered bodies from history or stop processes already started.
+
+See [ADR-0023](./docs/decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) for the architecture and acceptance boundaries, and the [progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23) for implementation and platform evidence.
 
 ### Panel
 
