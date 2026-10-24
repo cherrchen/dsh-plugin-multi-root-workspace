@@ -801,6 +801,14 @@ Seatbelt 证明的断言强制实跑。PTC 联合用例用真实 Node runtime �
 
 按用户反馈及 ADR-0023 的同日修订，命名空间引用改为普通文字，移除独立按钮样式和聊天点击预览入口；补全与 Host 调用保留。开发 pin 本地 `pnpm lint`、`pnpm typecheck`、`pnpm docs:check` 通过，`pnpm test -- tests/client-skills.spec.tsx` 实际执行全套：891 通过、90 跳过。DOM 回归覆盖 interactive 两态均输出文字节点，点击不打开弹窗、不调用预览 RPC；该结果不替代真实宿主浏览器目检。
 
+### 2026-10-24 PR #18 并发投递修复
+
+[P2 评论](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/18#discussion_r4367566103)指出：同一条用户消息调用多个 Skill 时，前一个正文通过准入后进入待投递数组，等待后一个加载期间即使被撤销，返回时仍会投递。现按 ADR-0023 的并发补充保留全批加载凭据，所有异步操作结束后统一重验，最后同步检查 generation，再更新投递跟踪并返回；任一失效即丢弃本批新正文。
+
+新增 9 项回归：7 类后续加载期间的失效（Root 关闭、移除、文件内容、用户调用策略、aliasId、全局关闭、authority）和最终准入期间 generation 改变共 8 项在修复前失败、修复后通过；另有未变化批次保持顺序、重复引用只注入一次的正对照。调用测试共 18/18 通过。
+
+本地为 macOS、开发 pin `0.2.1-rc.2`，未重指安装树或扩大支持集合。重新构建后移除预览导致的 `react-dom/client` 产物断言也已同步。`compat:check`、lint、双端 typecheck、build、`docs:check` 通过；外层沙箱禁止 Seatbelt 嵌套，改在可执行的环境运行探针并确认 Seatbelt 后，携带 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt` 执行全套：**911 通过、79 平台相关跳过**。compose / behavior / journey 为 **52 / 126 / 76 通过，零失败、零跳过**；`pack:check` 完整，`smoke:packed` 的 behavior 为 **125 通过、零失败、零跳过**。`auto-review:fork` 与 `smoke:auto-review` 亦通过（source/link、packed，web/headless 与两种 bundle 顺序）。这不是重新执行全部版本或跨平台矩阵的证据。
+
 ### 执行范围与结果
 
 上游只读检出为 `dsh-v0.2.1-rc.2` / `687f282e8625c6b8d11ff58211a90524be2e4317`，未修改上游文件或切换其版本。本地运行时从本插件的 DSH 安装锚点解析，版本 `0.2.1-rc.2`；没有重指主 manifest/lockfile 或扩大支持集合。

@@ -5,7 +5,7 @@ import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { skillsStack, project, writeSkill } from './support/skills-stack.ts'
-import { internalSkillName } from '../src/skills/catalog.ts'
+import { AdditionalSkillCatalog, internalSkillName } from '../src/skills/catalog.ts'
 
 let fixture: FixtureWorkspace, stack: Awaited<ReturnType<typeof skillsStack>>, primary: string, extra: string, agent: ReturnType<typeof stack.agent>, root: ReturnType<typeof stack.registry.list>[number]
 beforeEach(async () => {
@@ -79,6 +79,82 @@ describe('native loading and Host aliases', () => {
     resume()
     if (action === 'abort') await expect(loading).rejects.toThrow()
     else expect(await loading).toBeUndefined()
+  })
+
+  it('delivers an unchanged multi-Skill batch in request order, without duplicate bodies', async () => {
+    writeSkill(extra, 'first', 'FIRST BODY')
+    writeSkill(extra, 'second', 'SECOND BODY')
+    const request = user('/extra:first /extra:second /extra:first')
+    const result = await stack.preStep(agent, [request])
+    expect(result.kind).toBe('enter')
+    if (result.kind !== 'enter') throw new Error('pre-step rejected')
+    expect(result.messages[0]).toBe(request)
+    const bodies = result.messages.filter(message => 'plugin' in message.source && message.source.plugin === 'multi-root-skills')
+    expect(bodies).toHaveLength(2)
+    expect(JSON.stringify(bodies[0])).toContain('FIRST BODY')
+    expect(JSON.stringify(bodies[1])).toContain('SECOND BODY')
+  })
+
+  it.each(['disable', 'remove', 'edit', 'policy', 'alias', 'global', 'authority'] as const)('discards the pending batch when %s invalidates an earlier Skill during a later load', async action => {
+    writeSkill(extra, 'first', 'FIRST BODY')
+    const other = project(fixture.base, 'other')
+    await stack.registry.add(primary, { path: other })
+    writeSkill(other, 'second', 'SECOND BODY')
+    let entered!: () => void, resume!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { resume = resolve })
+    const get = FileSystemSkillProvider.prototype.get
+    vi.spyOn(FileSystemSkillProvider.prototype, 'get').mockImplementation(async function(...args) {
+      const loaded = await get.apply(this, args)
+      if (loaded?.name === 'second') { entered(); await held }
+      return loaded
+    })
+    const request = user('/extra:first /other:second')
+    const loading = stack.preStep(agent, [request])
+    await started
+    try {
+      if (action === 'disable') await stack.registry.setSkillsEnabled(primary, { kind: 'id', id: root.id }, false)
+      if (action === 'remove') await stack.registry.remove(primary, { kind: 'id', id: root.id })
+      if (action === 'edit') writeSkill(extra, 'first', 'CHANGED BODY')
+      if (action === 'policy') writeSkill(extra, 'first', 'FIRST BODY', 'user-invocable: false\n')
+      if (action === 'alias') await stack.registry.setAliasId(primary, { kind: 'id', id: root.id }, 'renamed')
+      if (action === 'global') {
+        vi.spyOn(stack.ctx.multiRootSkills, 'enabled', 'get').mockReturnValue(false)
+        stack.ctx.multiRootSkills.invalidate()
+      }
+      if (action === 'authority') stack.scope.setRegistryAuthority(false)
+    } finally { resume() }
+    const result = await loading
+    expect(result.kind).toBe('enter')
+    if (result.kind !== 'enter') throw new Error('pre-step rejected')
+    expect(result.messages[0]).toBe(request)
+    expect(JSON.stringify(result.messages)).not.toContain('FIRST BODY')
+    expect(JSON.stringify(result.messages)).not.toContain('SECOND BODY')
+  })
+
+  it('discards the batch if its generation changes during the final admission checks', async () => {
+    writeSkill(extra, 'first', 'FIRST BODY')
+    writeSkill(extra, 'second', 'SECOND BODY')
+    let entered!: () => void, resume!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { resume = resolve })
+    const validate = AdditionalSkillCatalog.prototype.admissionValid
+    vi.spyOn(AdditionalSkillCatalog.prototype, 'admissionValid').mockImplementation(async function(definition) {
+      const valid = await validate.call(this, definition)
+      if (definition.name === 'extra:second') { entered(); await held }
+      return valid
+    })
+    const request = user('/extra:first /extra:second')
+    const loading = stack.preStep(agent, [request])
+    await started
+    try { await stack.registry.setSkillsEnabled(primary, { kind: 'id', id: root.id }, false) }
+    finally { resume() }
+    const result = await loading
+    expect(result.kind).toBe('enter')
+    if (result.kind !== 'enter') throw new Error('pre-step rejected')
+    expect(result.messages[0]).toBe(request)
+    expect(JSON.stringify(result.messages)).not.toContain('FIRST BODY')
+    expect(JSON.stringify(result.messages)).not.toContain('SECOND BODY')
   })
 
   it('rereads changed policy/name and independently revokes when another native provider is incomplete', async () => {

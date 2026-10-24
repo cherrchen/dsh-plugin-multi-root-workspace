@@ -25,7 +25,8 @@ export function installSkillInvocations(ctx: Context, catalog: AdditionalSkillCa
       if (invoked.size === 0 && (previous === undefined || previous.size === 0)) return decision
       const options = { scope: agent, signal }
       const entries = await catalog.list(primary, options)
-      const injections = []
+      const revision = catalog.revision
+      const injections = [], pending = []
       if (previous !== undefined) {
         const remaining = new Set(entries.map(entry => entry.name))
         const revoked: string[] = []
@@ -43,9 +44,14 @@ export function installSkillInvocations(ctx: Context, catalog: AdditionalSkillCa
         if (loaded === undefined) continue
         const rendered = await renderAdditionalSkill(loaded)
         signal.throwIfAborted()
-        // Rendering/message construction await optional peers; admission must survive those awaits too.
+        // Keep the receipt until every load and optional-peer await in the batch has finished.
         const message = await createInstructionMessage({ plugin: 'multi-root-skills', text: rendered })
-        if (!await catalog.admissionValid(loaded)) continue
+        pending.push({ entry, loaded, message })
+      }
+      const admitted = await Promise.all(pending.map(({ loaded }) => catalog.admissionValid(loaded)))
+      signal.throwIfAborted()
+      // No await after this fence: later loads or receipt checks may have revoked an earlier body.
+      if (revision === catalog.revision && admitted.every(Boolean)) for (const { entry, message } of pending) {
         let tracked = known.get(agent)
         if (tracked === undefined) { tracked = new Map(); known.set(agent, tracked) }
         tracked.set(entry.name, entry.locator as LocatedSkill)

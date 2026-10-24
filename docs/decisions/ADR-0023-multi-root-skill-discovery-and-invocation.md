@@ -155,6 +155,8 @@ Web 和冷会话的附加根目录、预览使用本插件 `/multi-root-workspac
 - Skill 文件与元数据新增、修改、删除，目录或 symlink 变化；
 - 会话切换/恢复、订阅结束、插件重载与卸载。
 
+**2026-10-24 并发投递补充：** 一条用户消息调用多个 Skill 时，逐个加载成功不等于整批仍可投递。Alias Resolver 暂存正文及各自的加载凭据，所有加载、渲染与消息构造结束后并行重验全批凭据（包括文件身份），并在返回前同步核对批次开始时的 generation；任一凭据失效或 generation 改变，丢弃整批待投递正文。最终核对之后不得再 await，投递跟踪状态也只在该批获准时更新；原始消息及已构造的撤销通知保留。此补充落实既有「提交前重验」规则，避免等待后一个 Skill 时已撤销的前一个正文仍进入会话。
+
 Host 与各 Session Client 同时失效；Client 通过同一插件通道的 generation 查询/订阅协议丢弃旧响应，不能只依赖上游 UI Skill 缓存的 plugin-manager 事件。每次 pre-step、客户端目录和正文加载边界都重验 Root 与开关；不能等待文件观察通知才撤销。已知关闭/撤销应返回权威空贡献而非 incomplete，防止原生 Catalog 保留旧视图；其他 Provider 不完整导致原生目录延后时，插件仍须独立告知本功能的撤销且拒绝加载。
 
 文件解析复用公开 `FileSystemSkillProvider`，设置 `includeDefaultRoots: false`、显式两条 customSkillDirs、`watch: false`；同根先 `.dsh/skills` 后 `.agents/skills`，同名只保留前者。委托前为其注入仅限该登记根的 fs 读面，扫描前就拦截逃逸候选；不能等原生解析已读入根外文件后才过滤路径。正文读取用文件句柄与读取前后路径/状态检查，不向原 fs 写面授予任何权限。

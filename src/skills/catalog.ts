@@ -29,6 +29,8 @@ export class AdditionalSkillCatalog {
   private readonly requests = new AsyncLocalStorage<{ primary: string; id: string }>()
   readonly pool: SkillReaderPool
   constructor(private readonly ctx: Context, private readonly signal: AbortSignal, private readonly enabled: () => boolean, private readonly generation: () => number = () => 0, invalidate: () => void = () => {}) { this.pool = new SkillReaderPool(invalidate) }
+  /** Read synchronously after awaited receipt checks, immediately before batch delivery. */
+  get revision(): number { return this.generation() }
   current(primary: string, id: string): RootStatus | undefined {
     if (this.signal.aborted || !this.enabled() || this.ctx.multiRootRegistry.authority.kind !== 'active' || this.ctx.multiRootScope.resolve({ mode: 'read-only', workspaceRoot: primary }).authority !== 'available') return undefined
     const rows = this.ctx.multiRootRegistry.list(primary)

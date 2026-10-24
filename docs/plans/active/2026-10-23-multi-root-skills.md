@@ -65,7 +65,7 @@
 
 - 按 ADR 生成内部 ID，以最低优先级注册，原生用户位关闭、模型位保留，真实 invocation 策略单独保留；精确 ID 与外部贡献冲突时诊断，不能覆盖 winner。
 - 原生 skill 工具继续加载模型条目；Host 注册置前 pre-step Alias Resolver，只扫描本批用户消息，按稳定 Root 身份定位，正文在 native Catalog 返回后追加，保留用户原文。
-- 每次加载和预览重验开关、authority、scope、Root/文件身份及新解析的 name/invocation。读取后再检查 generation 与取消，不提交撤销中的旧结果。
+- 每次加载和预览重验开关、authority、scope、Root/文件身份及新解析的 name/invocation。读取后再检查 generation 与取消，不提交撤销中的旧结果。多 Skill 调用须在整批返回前重验全部加载凭据并同步核对 generation，获准后才更新投递跟踪；不能只在逐个加载后检查。
 - 已知关闭返回权威空贡献并失效原生缓存；验证 Catalog 替换为空、旧内部 ID、旧 Alias、用户手输与模型重放均不能新加载。独立处理原生其他 Provider incomplete 时本功能的撤销通知。
 - 消息 source 经 compat 适配 format 3/4；不使用 native agent-instructions producer，不提升到 systemPrompt。明确已加载正文与已启动进程的边界。
 
