@@ -77,11 +77,15 @@ const VARIANT_CLASS: Record<ActionVariant, string> = {
   danger: 'mrfw-btnDanger',
 }
 
-/** One small capsule button matching the panel's own styling. */
+/** One small capsule button matching the panel's own styling.
+ * Pending requests block activation through aria-disabled without changing
+ * opacity, hover or keyboard focus. Native disabled is for unavailable actions.
+ */
 function Action(props: {
   onClick: () => void
   children: ReactNode
   disabled?: boolean
+  pending?: boolean
   variant?: ActionVariant
 }): ReactNode {
   const variant = props.variant ?? 'ghost'
@@ -89,8 +93,10 @@ function Action(props: {
     <button
       type="button"
       className={`mrfw-btn ${VARIANT_CLASS[variant]}`}
-      onClick={props.onClick}
+      onClick={props.pending === true ? undefined : props.onClick}
       disabled={props.disabled === true}
+      aria-disabled={props.disabled === true || props.pending === true || undefined}
+      aria-busy={props.pending === true || undefined}
     >
       {props.children}
     </button>
@@ -106,6 +112,7 @@ function IconButton(props: {
   icon: ReactNode
   label: string
   disabled?: boolean
+  pending?: boolean
   pressed?: boolean
   hint?: string
   variant?: ActionVariant
@@ -118,8 +125,10 @@ function IconButton(props: {
       title={props.hint ?? props.label}
       aria-label={props.label}
       aria-pressed={props.pressed}
-      onClick={props.onClick}
+      onClick={props.pending === true ? undefined : props.onClick}
       disabled={props.disabled === true}
+      aria-disabled={props.disabled === true || props.pending === true || undefined}
+      aria-busy={props.pending === true || undefined}
     >
       {props.icon}
     </button>
@@ -663,7 +672,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 )}
                 {root.state === 'available' ? null : (
                   <IconButton
-                    disabled={state.busy}
+                    pending={state.busy}
                     onClick={() => { void reRegister(root) }}
                     icon={<IconRefresh />}
                     label={t('panel.reRegister')}
@@ -671,7 +680,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 )}
                 {root.skillsEnabled === undefined ? null : (
                   <IconButton
-                    disabled={state.busy}
+                    pending={state.busy}
                     pressed={root.skillsEnabled}
                     onClick={() => { void mutate('setSkillsEnabled', { entry: entryOf(root), skillsEnabled: !root.skillsEnabled }) }}
                     icon={<SkillsIcon enabled={root.skillsEnabled} />}
@@ -680,7 +689,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   />
                 )}
                 <IconButton
-                  disabled={state.busy}
+                  pending={state.busy}
                   onClick={() => { void reveal(root) }}
                   icon={<IconFolderOpen />}
                   label={t('panel.reveal')}
@@ -723,7 +732,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   closeOnPointerLeave
                   anchor={(
                     <IconButton
-                      disabled={state.busy}
+                      pending={state.busy}
                       onClick={() => { setMenuFor(current => (current === key ? undefined : key)) }}
                       icon={<IconEllipsis />}
                       label={t('panel.more')}
@@ -739,7 +748,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       placeholder={t(aliasField === 'aliasId' ? 'panel.aliasIdPlaceholder' : 'panel.aliasPlaceholder')}
                       onChange={event => { setAliasDraft(event.target.value) }}
                     />
-                    <Action disabled={state.busy} onClick={() => { void mutate(aliasField === 'aliasId' ? 'setAliasId' : 'alias', { entry: entryOf(root), [aliasField]: aliasDraft }).then(ok => { if (ok) setAliasFor(undefined) }) }}>
+                    <Action pending={state.busy} onClick={() => { void mutate(aliasField === 'aliasId' ? 'setAliasId' : 'alias', { entry: entryOf(root), [aliasField]: aliasDraft }).then(ok => { if (ok) setAliasFor(undefined) }) }}>
                       {t('panel.aliasSave')}
                     </Action>
                     <Action onClick={() => { setAliasFor(undefined) }}>{t('panel.aliasCancel')}</Action>
@@ -755,7 +764,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             {state.noSession || props.pickDirectory === undefined ? null : (
               <IconButton
                 variant="outline"
-                disabled={state.busy || atLimit}
+                pending={state.busy}
+                disabled={atLimit}
                 onClick={() => { void addViaPicker() }}
                 icon={<IconPlus />}
                 label={atLimit ? t('panel.limitReached') : t('panel.add')}
@@ -818,8 +828,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   aria-label={t('panel.accessLabel')}
                   aria-haspopup="menu"
                   aria-expanded={accessMenuOpen}
-                  disabled={state.busy || atLimit}
-                  onClick={() => { setAccessMenuOpen(open => !open) }}
+                  disabled={atLimit}
+                  aria-disabled={state.busy || atLimit || undefined}
+                  aria-busy={state.busy || undefined}
+                  onClick={() => { if (!state.busy) setAccessMenuOpen(open => !open) }}
                 >
                   {IconAccessTrigger === undefined ? null : <IconAccessTrigger />}
                   {t(accessKey(addAccess))}
@@ -829,7 +841,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             />
             <Action
               onClick={() => { void addManualPath() }}
-              disabled={state.busy || atLimit || manualPath.trim() === ''}
+              pending={state.busy}
+              disabled={atLimit || manualPath.trim() === ''}
               variant="primary"
             >
               {t('panel.addConfirm')}
@@ -837,7 +850,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               </>
             )}
             {atLimit ? <span className="mrfw-note">{t('panel.limitReached')}</span> : null}
-            <Action onClick={() => { void refresh() }} disabled={state.busy} variant="outline">{t('panel.retry')}</Action>
+            <Action onClick={() => { void refresh() }} pending={state.busy} variant="outline">{t('panel.retry')}</Action>
           </div>
         </div>
       </div>
@@ -856,7 +869,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           <Action onClick={() => { setUpgradeFor(undefined) }}>{t('panel.aliasCancel')}</Action>
           <Action
             variant="danger"
-            disabled={state.busy}
+            pending={state.busy}
             onClick={() => {
               const pending = upgradeFor
               setUpgradeFor(undefined)

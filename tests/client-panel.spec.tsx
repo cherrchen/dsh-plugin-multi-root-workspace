@@ -314,6 +314,40 @@ describe('the panel dialog', () => {
     expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(false)
   })
 
+  it.each([false, true])('keeps Skills controls stable while saving (failure: %s)', async failure => {
+    const harness = mount()
+    const root = { ...ROOT_A, skillsEnabled: true }
+    harness.setView({ primaryRoot: '/repos/primary', roots: [root], limit: 16, count: 1 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const toggle = await screen.findByRole('button', { name: `${NS}.panel.skills` })
+    const reveal = screen.getByRole('button', { name: `${NS}.panel.reveal` })
+    const opacity = (element: HTMLElement) => getComputedStyle(element).opacity || '1'
+    const before = [opacity(toggle), opacity(reveal)]
+    toggle.focus()
+    harness.holdNextCall()
+    fireEvent.click(toggle)
+    expect([opacity(toggle), opacity(reveal)]).toEqual(before)
+    expect(document.activeElement).toBe(toggle)
+    expect(toggle.getAttribute('aria-busy')).toBe('true')
+    expect(toggle.getAttribute('aria-disabled')).toBe('true')
+    expect(toggle).toHaveProperty('disabled', false)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(toggle)
+    fireEvent.click(reveal)
+    expect(harness.calls.filter(call => call.endpoint === 'setSkillsEnabled')).toHaveLength(1)
+    expect(harness.calls.some(call => call.endpoint === 'reveal')).toBe(false)
+    if (failure) harness.setFailure({ code: 'storage-unavailable', message: 'save failed' })
+    else harness.setView({ primaryRoot: '/repos/primary', roots: [{ ...root, skillsEnabled: false }], limit: 16, count: 1 })
+    harness.release()
+    await waitFor(() => { expect(toggle.getAttribute('aria-busy')).toBeNull() })
+    expect(screen.getByRole('button', { name: `${NS}.panel.skills` })).toBe(toggle)
+    expect(toggle.getAttribute('aria-pressed')).toBe(String(failure))
+    expect(document.activeElement).toBe(toggle)
+    expect([opacity(toggle), opacity(reveal)]).toEqual(before)
+    expect(screen.queryByRole('alert') !== null).toBe(failure)
+  })
+
   it('accepts list and mutation results after StrictMode replays mount effects', async () => {
     const harness = mount()
     renderPanel(harness, true)
@@ -644,7 +678,7 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.remove` })[0]!)
     expect(harness.calls.some(call => call.endpoint === 'remove')).toBe(true)
     // The menu closed on selection; the row's icon actions carry the busy state.
-    expect(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]).toHaveProperty('disabled', true)
+    expect(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]?.getAttribute('aria-disabled')).toBe('true')
 
     harness.release()
     await waitFor(() => {

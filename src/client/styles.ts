@@ -693,6 +693,10 @@ export const STYLES = /* css */ `
   transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
+.mrfw-btn[aria-busy='true'] {
+  cursor: wait;
+}
+
 .mrfw-btn:disabled {
   cursor: not-allowed;
   opacity: 0.4;
