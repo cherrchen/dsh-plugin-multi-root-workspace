@@ -106,6 +106,8 @@ function IconButton(props: {
   icon: ReactNode
   label: string
   disabled?: boolean
+  pressed?: boolean
+  hint?: string
   variant?: ActionVariant
 }): ReactNode {
   const variant = props.variant ?? 'ghost'
@@ -113,13 +115,25 @@ function IconButton(props: {
     <button
       type="button"
       className={`mrfw-btn mrfw-iconBtn ${VARIANT_CLASS[variant]}`}
-      title={props.label}
+      title={props.hint ?? props.label}
       aria-label={props.label}
+      aria-pressed={props.pressed}
       onClick={props.onClick}
       disabled={props.disabled === true}
     >
       {props.icon}
     </button>
+  )
+}
+
+/** A skill is a reusable instruction document; the star denotes its capability. */
+function SkillsIcon({ enabled }: { enabled: boolean }): ReactNode {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 13.5H3a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1V7M4.5 4.5h5M4.5 7h3" />
+      <path d="m11.5 8 .85 2.65L15 11.5l-2.65.85-.85 2.65-.85-2.65L8 11.5l2.65-.85Z" />
+      {enabled ? null : <path d="m2 14 12-12" />}
+    </svg>
   )
 }
 
@@ -635,12 +649,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       {t('panel.effectiveAccess')} {t(`effective.${root.effectiveAccess}`)}
                     </span>}
                   </span>
-                  {root.skillsEnabled === undefined ? null : <label className="mrfw-skillsToggle">
-                    <input type="checkbox" checked={root.skillsEnabled} disabled={state.busy}
-                      onChange={event => { void mutate('setSkillsEnabled', { entry: entryOf(root), skillsEnabled: event.target.checked }) }} />
-                    {t('panel.skills')}
-                    <code>{root.aliasId === undefined ? t('panel.aliasIdInvalid') : `/${root.aliasId}:`}</code>
-                  </label>}
                   <PathCopy
                     path={root.path}
                     copied={copiedId === key}
@@ -659,6 +667,16 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     onClick={() => { void reRegister(root) }}
                     icon={<IconRefresh />}
                     label={t('panel.reRegister')}
+                  />
+                )}
+                {root.skillsEnabled === undefined ? null : (
+                  <IconButton
+                    disabled={state.busy}
+                    pressed={root.skillsEnabled}
+                    onClick={() => { void mutate('setSkillsEnabled', { entry: entryOf(root), skillsEnabled: !root.skillsEnabled }) }}
+                    icon={<SkillsIcon enabled={root.skillsEnabled} />}
+                    label={t('panel.skills')}
+                    hint={t(root.skillsEnabled ? 'panel.skillsEnabled' : 'panel.skillsDisabled')}
                   />
                 )}
                 <IconButton

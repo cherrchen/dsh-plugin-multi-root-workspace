@@ -596,8 +596,6 @@ export const STYLES = /* css */ `
   font-size: 12px;
   line-height: 18px;
 }
-.mrfw-skillsToggle { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-.mrfw-skillsToggle code { color: var(--dsw-alias-label-secondary); }
 .mrfw-rootText {
   display: flex;
   flex: 1 1 240px;
@@ -705,6 +703,13 @@ export const STYLES = /* css */ `
 }
 
 .mrfw-btnGhost:active:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-active);
+}
+
+/* Per-folder Skills uses the action row's button geometry and a persistent
+   selected state; the icon's slash also distinguishes off without color. */
+.mrfw-iconBtn[aria-pressed='true'] {
+  color: var(--dsw-alias-brand-primary);
   background: var(--dsw-alias-interactive-bg-active);
 }
 

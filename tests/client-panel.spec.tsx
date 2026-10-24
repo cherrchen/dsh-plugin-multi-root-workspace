@@ -277,7 +277,12 @@ describe('the panel dialog', () => {
     harness.setView({ primaryRoot: '/repos/primary', roots: [{ ...ROOT_B, aliasId: 'website', skillsEnabled: false }], limit: 16, count: 1 })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    const toggle = await screen.findByRole('checkbox', { name: /panel.skills/ })
+    const toggle = await screen.findByRole('button', { name: `${NS}.panel.skills` })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    expect(toggle.getAttribute('title')).toBe(`${NS}.panel.skillsDisabled`)
+    expect(toggle.closest('.mrfw-rootText')).toBeNull()
+    expect(screen.queryByText('/website:')).toBeNull()
+    expect(screen.queryByRole('checkbox')).toBeNull()
     fireEvent.click(toggle)
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setSkillsEnabled' && call.payload.skillsEnabled === true)).toBe(true) })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.more` }))
@@ -287,6 +292,24 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.aliasSave` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'setAliasId' && call.payload.aliasId === 'site')).toBe(true) })
     expect(harness.calls.filter(call => call.endpoint === 'setAccess')).toHaveLength(0)
+  })
+
+  it('reflects an enabled Skills preference and disables it without changing folder access', async () => {
+    const harness = mount()
+    const root = { ...ROOT_A, aliasId: 'payments', skillsEnabled: true }
+    harness.setView({ primaryRoot: '/repos/primary', roots: [root], limit: 16, count: 1 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const toggle = await screen.findByRole('button', { name: `${NS}.panel.skills` })
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    expect(toggle.getAttribute('title')).toBe(`${NS}.panel.skillsEnabled`)
+    harness.setView({ primaryRoot: '/repos/primary', roots: [{ ...root, skillsEnabled: false }], limit: 16, count: 1 })
+    fireEvent.click(toggle)
+    await waitFor(() => { expect(toggle.getAttribute('aria-pressed')).toBe('false') })
+    expect(harness.calls.find(call => call.endpoint === 'setSkillsEnabled')?.payload).toEqual({
+      sessionId: 'session-1', entry: { ordinal: root.ordinal, id: root.id, path: root.path, addedAt: root.addedAt }, skillsEnabled: false,
+    })
+    expect(harness.calls.some(call => call.endpoint === 'setAccess')).toBe(false)
   })
 
   it('accepts list and mutation results after StrictMode replays mount effects', async () => {
