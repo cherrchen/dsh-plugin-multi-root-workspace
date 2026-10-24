@@ -812,13 +812,14 @@ describe('the panel dialog', () => {
     })
   })
 
-  it('combines registration and effective access while keeping session mode and tool caps', async () => {
+  it('keeps combined root permissions and tool caps without the introductory permission copy', async () => {
     const harness = mount()
     harness.setView({ primaryRoot: '/repos/primary', mode: 'danger-full-access', cappedTools: ['bash'],
       roots: [{ ...ROOT_A, access: 'inherit', effectiveAccess: 'full-access' }], limit: 16, count: 1 })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByText(/mode.danger-full-access/)).toBeTruthy() })
+    await screen.findByText('/repos/payments')
+    expect(screen.queryByText(/panel.subtitle|panel.mode|mode.danger-full-access/)).toBeNull()
     expect(document.querySelector('.mrfw-accessBadge')?.textContent)
       .toBe(`${NS}.access.inherit（${NS}.effective.full-access）`)
     expect(screen.getByText(/panel.toolCaps/)).toBeTruthy()

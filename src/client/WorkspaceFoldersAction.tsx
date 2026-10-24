@@ -583,10 +583,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             <p className="mrfw-note">{t('panel.noSession')}</p>
           ) : (
             <>
-          <p className="mrfw-description">{t('panel.subtitle')}</p>
-          {state.view?.mode === undefined ? null : <p className="mrfw-note">
-            {t('panel.mode')} {t(`mode.${state.view.mode}`)}
-          </p>}
           {state.view?.toolAccessInvalid ? <p className="mrfw-note">{t('panel.invalidCap')}</p>
             : (state.view?.cappedTools?.length ?? 0) > 0 ? <p className="mrfw-note">
               {t('panel.toolCaps', { tools: state.view!.cappedTools!.join(', ') })}

@@ -519,13 +519,6 @@ export const STYLES = /* css */ `
   padding: 0 24px 24px;
 }
 
-.mrfw-description {
-  margin: 0 0 8px;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
 .mrfw-alert {
   margin: 0 0 8px;
   font-size: 14px;
