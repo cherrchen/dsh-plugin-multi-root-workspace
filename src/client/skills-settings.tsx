@@ -11,16 +11,16 @@ export function SkillsSettingsCard({ form, t }: CardProps) {
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   return <div className="mrfw-skillsSettings">
-    <div className="mrfw-skillsToggle">
-      <Switch label={t('skills.globalEnable')} checked={snapshot.value?.enabled ?? true} disabled={busy || snapshot.status !== 'ready' || !snapshot.writable}
+    <div className="mrfw-skillsSettingsText">
+      <div className="mrfw-skillsSettingsTitle">{t('skills.globalEnable')}</div>
+      <div className="mrfw-skillsSettingsDescription">{t('skills.globalHint')}</div>
+      {error ? <div role="alert">{error}</div> : null}
+    </div>
+    <Switch label={t('skills.globalEnable')} checked={snapshot.value?.enabled ?? true} disabled={busy || snapshot.status !== 'ready' || !snapshot.writable}
         onChange={enabled => {
           setBusy(true); setError(undefined)
           void form.mutate([{ op: 'set', path: ['enabled'], value: enabled }], snapshot.revision).then(ok => { if (mounted.current && !ok) setError(t('skills.settingsFailed')) }).catch(() => { if (mounted.current) setError(t('skills.settingsFailed')) }).finally(() => { if (mounted.current) setBusy(false) })
         }} />
-      <span>{t('skills.globalEnable')}</span>
-    </div>
-    <p>{t('skills.globalHint')}</p>
-    {error ? <p role="alert">{error}</p> : null}
   </div>
 }
 export function installSkillsSettingsCard(ctx: Context, t: Translate): void {

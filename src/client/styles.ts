@@ -579,7 +579,23 @@ export const STYLES = /* css */ `
    it in the tertiary voice (the workspace rows recipe of the host sidebar). */
 .mrfw-skillBody { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; }
 .mrfw-skillReference { color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-1); border: none; cursor: pointer; font: inherit; }
-.mrfw-skillsSettings p { color: var(--dsw-alias-label-secondary); }
+/* Match upstream General Settings' DeveloperToolsRow layout. */
+.mrfw-skillsSettings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 0;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+}
+.mrfw-skillsSettingsText { min-width: 0; }
+.mrfw-skillsSettingsTitle { font-size: 14px; line-height: 20px; }
+.mrfw-skillsSettingsDescription {
+  margin-top: 4px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
 .mrfw-skillsToggle { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .mrfw-skillsToggle code { color: var(--dsw-alias-label-secondary); }
 .mrfw-rootText {
