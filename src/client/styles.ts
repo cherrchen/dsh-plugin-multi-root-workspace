@@ -706,13 +706,6 @@ export const STYLES = /* css */ `
   background: var(--dsw-alias-interactive-bg-active);
 }
 
-/* Per-folder Skills uses the action row's button geometry and a persistent
-   selected state; the icon's slash also distinguishes off without color. */
-.mrfw-iconBtn[aria-pressed='true'] {
-  color: var(--dsw-alias-brand-primary);
-  background: var(--dsw-alias-interactive-bg-active);
-}
-
 /* The solid destructive action of the capsule family: the upgrade confirm's
    red button. state-error-primary is the error ink upstream also uses as a
    fill (StateDot); the hover mixes in the host's primary label token to
