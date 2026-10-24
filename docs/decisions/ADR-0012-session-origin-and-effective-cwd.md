@@ -59,6 +59,10 @@ DSH `0.2.1-alpha.2` 新增 `workingDirectory` 和实验性 Worktree 服务。原
 
 Status 保持 **Accepted**；Session origin、effective cwd、LSP 身份、指令 touch 与进程快照语义不变。决策表中 `authorizedRootSet` 行的「read-only 不增加写授权」按 B9 合同收窄为：`read-only` 会话不再增加**继承**授权的写权限，但显式 `read-write` 登记根在该模式下仍获得写授权（见 [ADR-0017](./ADR-0017-three-state-root-access-and-sandbox-modes.md) 九格矩阵）。已启动进程保留启动快照、Registry 撤销只影响后续调用的约定不变。
 
+## 修订：面板工作目录标签（2026-10-24，Amendment）
+
+`RootsView.effectiveCwd` 仍仅用于显示。面板不再单列当前执行目录，而在匹配根的别名旁显示「当前Agent工作目录」标签：先匹配目录本身，再匹配最近的列表祖先；无匹配时不显示标签。主根显示名称改为「主要工作目录」。此展示不改变 Session 身份、Registry 主键或授权集合。
+
 ## Alternatives Considered
 
 - 用 effective cwd 替换 policy root / Registry key：会隐式授权并错配持久化，拒绝。

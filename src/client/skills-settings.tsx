@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '@deepseek-ai/cordis'
 import { bindSkillsForm, clientInject, type SkillsForm } from '../compat/skills-client.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
@@ -10,14 +11,14 @@ export function SkillsSettingsCard({ form, t }: CardProps) {
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   return <div className="mrfw-skillsSettings">
-    <label className="mrfw-skillsToggle">
-      <input type="checkbox" checked={snapshot.value?.enabled ?? true} disabled={busy || snapshot.status !== 'ready' || !snapshot.writable}
-        onChange={event => {
-          const enabled = event.target.checked; setBusy(true); setError(undefined)
+    <div className="mrfw-skillsToggle">
+      <Switch label={t('skills.globalEnable')} checked={snapshot.value?.enabled ?? true} disabled={busy || snapshot.status !== 'ready' || !snapshot.writable}
+        onChange={enabled => {
+          setBusy(true); setError(undefined)
           void form.mutate([{ op: 'set', path: ['enabled'], value: enabled }], snapshot.revision).then(ok => { if (mounted.current && !ok) setError(t('skills.settingsFailed')) }).catch(() => { if (mounted.current) setError(t('skills.settingsFailed')) }).finally(() => { if (mounted.current) setBusy(false) })
         }} />
-      {t('skills.globalEnable')}
-    </label>
+      <span>{t('skills.globalEnable')}</span>
+    </div>
     <p>{t('skills.globalHint')}</p>
     {error ? <p role="alert">{error}</p> : null}
   </div>

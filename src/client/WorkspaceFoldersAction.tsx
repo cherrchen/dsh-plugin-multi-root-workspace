@@ -137,7 +137,7 @@ function CloseIcon(): ReactNode {
  * and reveals a trailing icon on hover — clicking the text or the icon
  * copies the same canonical path. The accessible name swaps to "copied"
  * for the feedback window, the icon button's old recipe. Shared by the
- * primary row, the current-directory line, and every additional root.
+ * primary row and every additional root.
  */
 function PathCopy(props: {
   readonly path: string
@@ -202,6 +202,24 @@ export function basename(path: string): string {
  */
 export function displayNameOf(root: RootView): string {
   return root.alias ?? basename(root.path)
+}
+
+/** Display-only path matching; the host remains the sole authority for grants. */
+function workingRootOf(view: RootsView | undefined): string | undefined {
+  if (view?.effectiveCwd === undefined) return undefined
+  const normalize = (path: string): string => {
+    const windows = /^[a-z]:[\\/]/i.test(path) || path.startsWith('\\')
+    const normalized = (windows ? path.replace(/\\/g, '/').toLowerCase() : path).replace(/\/+$/, '')
+    return normalized || '/'
+  }
+  const cwd = normalize(view.effectiveCwd)
+  // Longest boundary match is equivalent to walking up to the nearest listed root.
+  return [view.primaryRoot, ...view.roots.map(root => root.path)]
+    .filter(path => {
+      const root = normalize(path)
+      return cwd === root || cwd.startsWith(root.endsWith('/') ? root : `${root}/`)
+    })
+    .sort((a, b) => normalize(b).length - normalize(a).length)[0]
 }
 
 /** The sidebar footer action plus the dialog it opens. */
@@ -506,7 +524,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     : addAccess === 'read-write' ? IconAccessReadWrite : IconAccessInherit
   // Captured as consts: narrowing does not reach the onCopy closures below.
   const primaryPath = state.view?.primaryRoot
-  const cwdPath = state.view?.effectiveCwd
+  const workingRoot = workingRootOf(state.view)
   return (
     <>
     <div className="mrfw-overlay" role="presentation">
@@ -571,6 +589,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   <span className="mrfw-rootNameText">
                     {state.view === undefined ? '…' : (state.view.primaryName ?? basename(state.view.primaryRoot))}
                   </span>
+                  {primaryPath !== undefined && workingRoot === primaryPath ? <span className="mrfw-cwdTag">{t('panel.currentAgentCwd')}</span> : null}
                 </span>
                 {primaryPath === undefined
                   ? <span className="mrfw-rootPath">…</span>
@@ -586,21 +605,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             </div>
           </section>
 
-          {cwdPath !== undefined && (
-            <section className="mrfw-section">
-              <div className="mrfw-sectionTitleRow">
-                <span className="mrfw-sectionTitle">{t('panel.cwd')}</span>
-                <span className="mrfw-sectionNote">{t('panel.cwdNote')}</span>
-              </div>
-              <PathCopy
-                path={cwdPath}
-                copied={copiedId === 'cwd'}
-                onCopy={() => { void copyPath('cwd', cwdPath) }}
-                t={t}
-              />
-            </section>
-          )}
-
           <section className="mrfw-section">
             <div className="mrfw-sectionTitleRow">
               <span className="mrfw-sectionTitle">{t('panel.additional')}</span>
@@ -613,13 +617,17 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             ) : null}
             {roots.map((root, index) => {
               const key = rowKey(root)
+              const IconAccess = root.access === 'read-only' ? IconAccessReadOnly
+                : root.access === 'read-write' ? IconAccessReadWrite : IconAccessInherit
               return <div key={key} className="mrfw-row">
                 <div className="mrfw-rootText">
                   <span className="mrfw-rootName">
                     <span className="mrfw-rootNameText">{displayNameOf(root)}</span>
+                    {workingRoot === root.path ? <span className="mrfw-cwdTag">{t('panel.currentAgentCwd')}</span> : null}
                     {/* The access level rides beside the name as read-only
                         text; changing it stays behind the row's … menu. */}
                     <span className="mrfw-accessBadge">
+                      {IconAccess === undefined ? null : <IconAccess size={14} />}
                       {t(accessKey(root.access))}
                     </span>
                     {root.effectiveAccess === undefined ? null : <span className="mrfw-effectiveAccess">
@@ -676,9 +684,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   items={[
                     { id: 'rename', label: t('panel.rename'), icon: <IconEdit /> },
                     { id: 'alias-id', label: t('panel.aliasIdEdit'), disabled: state.busy },
-                    { id: 'access:inherit', label: t('panel.accessInherit'), disabled: state.busy || root.access === 'inherit' },
-                    { id: 'access:read-only', label: t('panel.accessReadOnly'), disabled: state.busy || root.access === 'read-only' },
-                    { id: 'access:read-write', label: t('panel.accessReadWrite'), disabled: state.busy || root.access === 'read-write' },
+                    { id: 'access:inherit', label: t('panel.accessInherit'), icon: IconAccessInherit === undefined ? undefined : <IconAccessInherit />, disabled: state.busy || root.access === 'inherit' },
+                    { id: 'access:read-only', label: t('panel.accessReadOnly'), icon: IconAccessReadOnly === undefined ? undefined : <IconAccessReadOnly />, disabled: state.busy || root.access === 'read-only' },
+                    { id: 'access:read-write', label: t('panel.accessReadWrite'), icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />, disabled: state.busy || root.access === 'read-write' },
                     { id: 'remove', label: t('panel.remove'), icon: <IconTrash />, danger: true, disabled: state.busy },
                   ]}
                   onSelect={(id) => {

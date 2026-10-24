@@ -78,7 +78,7 @@ describe('namespaced Web Skills', () => {
     const form = { getSnapshot: () => snapshot, subscribe: () => () => {}, mutate: async (...args: unknown[]) => { writes.push(args); return true } }
     const snapshot = { value: { enabled: true }, status: 'ready', writable: true, revision: 7 }
     render(<SkillsSettingsCard form={form} t={t} />)
-    fireEvent.click(screen.getByRole('checkbox', { name: 'skills.globalEnable' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'skills.globalEnable' }))
     await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['enabled'], value: false }], 7]]))
     expect(screen.queryByRole('alert')).toBeNull()
   })

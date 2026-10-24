@@ -736,6 +736,8 @@ describe('the panel dialog', () => {
     // the action cluster.
     const badges = () => Array.from(document.querySelectorAll('.mrfw-accessBadge')).map(node => node.textContent)
     expect(badges()).toEqual([`${NS}.access.readWrite`, `${NS}.access.readOnly`])
+    expect(document.querySelector('.mrfw-accessBadge [data-icon="workspace-write"]')).not.toBeNull()
+    expect(document.querySelector('.mrfw-accessBadge [data-icon="read-only"]')).not.toBeNull()
     expect(document.querySelectorAll('.mrfw-rootName .mrfw-accessBadge').length).toBe(2)
 
     // Every path is its own copy control — the primary row's too: a
@@ -922,22 +924,42 @@ describe('the panel copy', () => {
   })
 })
 
-it('displays effective cwd separately from the stable primary root', async () => {
+it.each([
+  ['/repos/primary', '/repos/primary', 'primary'],
+  ['/repos/primary/src/nested', '/repos/primary', 'primary'],
+  ['/repos/payments', '/repos/payments', 'payments'],
+  ['/repos/payments/src/nested', '/repos/payments', 'payments'],
+  ['/repos/payments-other', undefined, undefined],
+  ['/unregistered/current', undefined, undefined],
+  [undefined, undefined, undefined],
+])('tags the listed root containing the Agent cwd %s', async (effectiveCwd, expectedPath, expectedName) => {
   const harness = mount()
-  harness.setView({ primaryRoot: '/repos/primary', effectiveCwd: '/unregistered/current', roots: [ROOT_A], limit: 16, count: 1 })
+  harness.setView({ primaryRoot: '/repos/primary', ...(effectiveCwd === undefined ? {} : { effectiveCwd }), roots: [ROOT_A], limit: 16, count: 1 })
   renderPanel(harness)
   fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-  await waitFor(() => { expect(screen.getByText('/unregistered/current')).toBeDefined() })
-  expect(screen.getByText('/repos/primary')).toBeDefined()
-  expect(screen.getByText(`${NS}.panel.cwdNote`)).toBeDefined()
+  await waitFor(() => { expect(screen.getByText('/repos/primary')).toBeDefined() })
+  const tag = screen.queryByText(`${NS}.panel.currentAgentCwd`)
+  if (expectedPath === undefined) {
+    expect(tag).toBeNull()
+  } else {
+    expect(tag?.closest('.mrfw-rootText')?.querySelector('.mrfw-rootNameText')?.textContent).toBe(expectedName)
+    expect(tag?.closest('.mrfw-rootText')?.querySelector('.mrfw-rootPath')?.textContent).toBe(expectedPath)
+    expect(document.querySelectorAll('.mrfw-cwdTag')).toHaveLength(1)
+  }
+  expect(screen.queryByText(`${NS}.panel.cwdNote`)).toBeNull()
   expect(harness.calls[0]?.payload).toEqual({ sessionId: 'session-1' })
-
-  // Both the primary path and the current-directory path are copy controls
-  // of the same recipe as the additional roots'.
-  fireEvent.click(screen.getByTitle('/unregistered/current'))
-  await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/unregistered/current') })
   fireEvent.click(screen.getByTitle('/repos/primary'))
   await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/repos/primary') })
+})
+
+it('matches Windows cwd paths with mixed separators and casing', async () => {
+  const harness = mount()
+  harness.setView({ primaryRoot: 'C:/repos/primary', effectiveCwd: 'd:/REPOS/payments/src/',
+    roots: [{ ...ROOT_A, path: 'D:\\repos\\payments' }], limit: 16, count: 1 })
+  renderPanel(harness)
+  fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+  const tag = await screen.findByText(`${NS}.panel.currentAgentCwd`)
+  expect(tag.closest('.mrfw-rootName')?.textContent).toContain('payments')
 })
 
 it('ignores a response belonging to the previous session after catalog selection changes', async () => {

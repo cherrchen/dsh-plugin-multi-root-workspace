@@ -590,15 +590,14 @@ export const STYLES = /* css */ `
   min-width: 0;
 }
 
-/* The name line is a flex row: the truncating name text first, the access
-   badge beside it never shrinking — baseline-aligned so the badge's smaller
-   voice sits on the name's baseline rather than its middle. */
+/* Keep status tags and permission glyphs visible beside the alias, wrapping
+   onto another line when the dialog is narrow. */
 .mrfw-rootName {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-  overflow: hidden;
   font-size: 14px;
   line-height: 20px;
   font-weight: 500;
@@ -771,6 +770,22 @@ export const STYLES = /* css */ `
    item, the button inside keeps the control row's 32px capsule recipe. */
 .mrfw-accessTrigger {
   padding: 0 12px;
+}
+
+.mrfw-cwdTag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.mrfw-accessBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .mrfw-accessBadge,

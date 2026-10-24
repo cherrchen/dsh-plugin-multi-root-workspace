@@ -56,6 +56,22 @@ export const IconFolderCloseRegular = icon('folder-close')
 export const IconFolderOpenRegular = icon('folder-open')
 export const IconFolderOpen16 = icon('folder-open')
 
+// Current upstream permission glyph export names.
+export const PermissionIconWorkspaceWriteRegular = icon('workspace-write')
+export const PermissionIconReadOnlyRegular = icon('read-only')
+
+/** Controlled host Switch mirror, preserving its accessible button contract. */
+export function Switch(props: {
+  checked: boolean
+  onChange: (next: boolean) => void
+  label: string
+  disabled?: boolean
+}): ReactNode {
+  return <button type="button" role="switch" aria-label={props.label}
+    aria-checked={props.checked} disabled={props.disabled}
+    onClick={() => props.onChange(!props.checked)} />
+}
+
 /** Minimal `classifyFileType` mirror: a kind string by extension. */
 export function classifyFileType(path: string): string {
   const name = path.split('/').pop() ?? path
