@@ -1,6 +1,6 @@
 # DSH 0.2.1 接口与安全契约审查
 
-2026-10-10 对上游发布 tag 做只读源码对照（至 `alpha.2`）；2026-10-17 补查 `alpha.3` 至 `rc.2`。发布包行为另由本仓库测试和真实 Host smoke 验证，执行状态只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。不修改上游 checkout，也不深导入其内部源码。
+2026-10-10 对上游发布 tag 做只读源码对照（至 `alpha.2`）；2026-10-17 补查 `alpha.3` 至 `rc.2`；2026-10-23 补查 `rc.3`。发布包行为另由本仓库测试和真实 Host smoke 验证，执行状态只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。不修改上游 checkout，也不深导入其内部源码。
 
 | tag | commit |
 |---|---|
@@ -12,6 +12,7 @@
 | `dsh-v0.2.1-alpha.5` | `1517a4dbca0a2789ff1d41ba439600f8547d23fa` |
 | `dsh-v0.2.1-rc.1` | `1600d8a1e140dcde43a1a0941940a0480712c011` |
 | `dsh-v0.2.1-rc.2` | `687f282e8625c6b8d11ff58211a90524be2e4317` |
+| `dsh-v0.2.1-rc.3` | `1f81c047fc48fa190a683e469daa699857e9afe8` |
 
 ## 实际组合与不变量
 
@@ -71,6 +72,17 @@ bundle 禁用上游 `fs-sandbox` / `sandbox` 两行，插入 compat gate、scope
 | `packages/extensions/cordis-client-runner/src/client/slot-catalog.ts` | `rc.2`：新增 `conversation.input.model.label` slot 与 `client-ui-deepseek-model-label-1017` 注册 | 不相关：不占本插件 slot；`sidebar.footer.action` 注册不变 |
 | client 模块 release 门控 / manifest（`alpha.4`） | client 模块清单带 Host release 身份，release 变化触发模块重载 | API 兼容：`dsh.client` 加载通道不变；panel 与 files-tree 由客户端 bundle 测试与 journey 验证 |
 | remote-access rbac（`alpha.3`） | 非 owner 调用与事件按 rbac policy 拦截 | 不相关：插件未使用 remoteAccess；本地 profile 的 Connection 通道无 rbac 影响 |
+
+## rc.2 → rc.3 补充审查（2026-10-23）
+
+`rc.2` 到 `rc.3` 的上游变化全部为新增：导航条目自定义带来两个新 sidebar 槽位与导航 pins 与选择态分离、导航/预设埋点，以及 DeepSeek API-key 路由接入官方 `/models` 列表。fs / sandbox / storage / session / working-directory / Connection RPC / fork 源 `src/client/` 子树均无源码 diff（`packages/client/ui-sidebar-files/src/client` 与 `packages/client/ui-open-in-app/src` 逐字节一致）。
+
+| 接缝 / 上游源码 | 变化 | 分类与插件处理 |
+|---|---|---|
+| client slot catalog / navigation（#6247、#6883、#6600） | 新增 `sidebar.panellist.actions` 与 `sidebar.right.tab.guide.actions` 槽位；navigation pins 与 selection 分离并加菜单图标；新增导航条目/预设选择埋点 | 不相关：新槽位与本插件的 `sidebar.footer.action`、`sidebar.right.tab.files.actions` 注册不冲突；pins/埋点是宿主内部 UI 状态 |
+| `dsh-llm` DeepSeek API-key 路由（#6944） | 模型列表改走官方 `/models` listing | 不相关：本插件的 LLM 接缝只包装工具调用消息形状（`llm-message`），不触碰模型枚举 |
+| `packages/client/ui-sidebar-files/src/client`、`packages/client/ui-open-in-app/src` | 与 `rc.2` 逐字节一致 | fork 基线只前移 revision 至 `1f81c047fc`，不重新拷贝 |
+| cordis / storage-domain zod / session format / install 门禁 | 无变化：`dsh` 仍依赖 cordis `~4.0.5`（解析 `4.0.5`）；zod pin、session format 4、`engines.dsh` 优先的装门禁语义同 `rc.2` | 无新适配分支；storage-zod 适配与 peers 契约原样覆盖 |
 
 ## Worktree 约束
 

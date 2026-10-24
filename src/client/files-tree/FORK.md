@@ -8,11 +8,11 @@ because the upstream component derives its root from the session's `cwd`,
 which is always the primary root and cannot be re-pointed.
 
 - **Source**: `deepseek-harness/packages/client/ui-sidebar-files/src/client/`
-- **Revision**: `687f282e86` (release `0.2.1-rc.2`, 2026-10-17) — matches
+- **Revision**: `1f81c047fc` (release `0.2.1-rc.3`, 2026-10-23) — matches
   this package's dev pin and the `@deepseek-ai/dsh-api-workspace-files`
   devDependency, which is the machine-readable record of the fork base.
   The upstream `src/client/` tree did not change between `0.2.1-alpha.2`
-  (`d743267388`) and `0.2.1-rc.2`, so the fork files below remain
+  (`d743267388`) and `0.2.1-rc.3`, so the fork files below remain
   byte-identical without a re-copy.
 
 ## Verbatim files (copy-diff must stay empty)
