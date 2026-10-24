@@ -152,7 +152,9 @@ function mount(withFilesActions = false): Harness {
       },
       // The real service resolves the live locale per call; for the spec the
       // namespace-qualified key is enough to observe which copy is used.
-      bind: (ns: string) => (key: string) => `${ns}.${key}`,
+      bind: (ns: string) => (key: string, params?: Record<string, unknown>) => key === 'panel.accessEffective'
+        ? zh['panel.accessEffective'].replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name]))
+        : `${ns}.${key}`,
     },
     slots: {
       inject: (name: string, callback: () => unknown) => {
@@ -776,15 +778,15 @@ describe('the panel dialog', () => {
     })
   })
 
-  it('shows the host session mode, effective access and tool caps separately from registration', async () => {
+  it('combines registration and effective access while keeping session mode and tool caps', async () => {
     const harness = mount()
     harness.setView({ primaryRoot: '/repos/primary', mode: 'danger-full-access', cappedTools: ['bash'],
       roots: [{ ...ROOT_A, access: 'inherit', effectiveAccess: 'full-access' }], limit: 16, count: 1 })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText(/mode.danger-full-access/)).toBeTruthy() })
-    expect(document.querySelector('.mrfw-effectiveAccess')?.textContent).toContain('effective.full-access')
-    expect(document.querySelector('.mrfw-accessBadge')?.textContent).toContain('access.inherit')
+    expect(document.querySelector('.mrfw-accessBadge')?.textContent)
+      .toBe(`${NS}.access.inherit（${NS}.effective.full-access）`)
     expect(screen.getByText(/panel.toolCaps/)).toBeTruthy()
   })
 

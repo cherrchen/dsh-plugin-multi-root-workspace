@@ -643,11 +643,11 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                         text; changing it stays behind the row's … menu. */}
                     <span className="mrfw-accessBadge">
                       {IconAccess === undefined ? null : <IconAccess size={14} />}
-                      {t(accessKey(root.access))}
+                      {root.effectiveAccess === undefined ? t(accessKey(root.access)) : t('panel.accessEffective', {
+                        access: t(accessKey(root.access)),
+                        effective: t(`effective.${root.effectiveAccess}`),
+                      })}
                     </span>
-                    {root.effectiveAccess === undefined ? null : <span className="mrfw-effectiveAccess">
-                      {t('panel.effectiveAccess')} {t(`effective.${root.effectiveAccess}`)}
-                    </span>}
                   </span>
                   <PathCopy
                     path={root.path}

@@ -802,8 +802,7 @@ export const STYLES = /* css */ `
   gap: 4px;
 }
 
-.mrfw-accessBadge,
-.mrfw-effectiveAccess {
+.mrfw-accessBadge {
   flex: none;
   font-size: 12px;
   line-height: 18px;
