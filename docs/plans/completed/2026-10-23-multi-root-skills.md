@@ -2,7 +2,7 @@
 
 ## Goal
 
-实施 [ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)：附加根 Skill 的首步发现、命名空间调用、独立 Root 开关和插件详情全局配置。架构已接受，生产实现已落地，继续按 S7 完成验收与发布准备；进度、执行证据和发布状态只见[路线账本](./2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。
+实施 [ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)：附加根 Skill 的首步发现、命名空间调用、独立 Root 开关和插件详情全局配置。架构已接受，生产实现已落地，S1–S7 全部完成并随 `v0.1.10` 发版；实施证据与能力边界见[路线账本](../active/2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。
 
 ## Background
 
@@ -10,7 +10,7 @@
 
 ## Current State
 
-实施前基线中，Registry、命令和 Dialog 没有 aliasId/skillsEnabled，patch、exports 与 Client 中也没有 Skills 行、命名空间菜单、读端点或 Settings 卡片。现有生产实现已接入这些入口，并增加正式 Registry/lease、Connection、观察调度器、平台文件系统回归和 web/headless journey；它们是验收对象。原型的 roots Map、迁移函数与临时 profile 仅保留为架构参考，不能替代生产回归。已发布兼容集合保持不变，未发布本功能。
+实施前基线中，Registry、命令和 Dialog 没有 aliasId/skillsEnabled，patch、exports 与 Client 中也没有 Skills 行、命名空间菜单、读端点或 Settings 卡片。现有生产实现已接入这些入口，并增加正式 Registry/lease、Connection、观察调度器、平台文件系统回归和 web/headless journey；它们是验收对象。原型的 roots Map、迁移函数与临时 profile 仅保留为架构参考，不能替代生产回归。兼容集合保持原样不变；本功能随 `v0.1.10` 发版。
 
 ## Scope / Non-goals
 

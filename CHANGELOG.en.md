@@ -8,11 +8,17 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
-## [Unreleased]
+## [0.1.10] - 2026-10-25
 
 ### Added
 
+- **Additional-root Skills**: skills are discovered in each additional folder's `.dsh/skills` and `.agents/skills`; names and descriptions are visible before the first model step and bodies load on invocation. The primary root uses `/skill-name`; additional roots always use the namespaced `/alias-id:skill-name` reference (completable from the Slash menu, invoked by the model through the native `skill` tool under an internal name). New `inherit` / `read-write` registrations enable Skills by default, `read-only` ones disable them; the Workspace Folders dialog provides an independent Skills toggle and `aliasId` editing, and the global **Enable additional-root Skills** switch under Settings → Plugins → Multi-root Workspace defaults to on — disabling it only stops new discovery and invocation while preserving each root's choice. On upgrade, legacy `inherit` / `read-write` registrations start with Skills enabled; migration preserves existing grants, but an older plugin writing the registry may strip `aliasId` and manual toggles — **lossless downgrade of Skills preferences is not guaranteed** (back up `$DSH_HOME/storages/multi_root_workspace.json` before downgrading). Enabling Skills on a read-only root grants no write access; disabling does not reclaim delivered bodies or stop started processes ([ADR-0023](./docs/decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)).
 - **Exact support for DSH `0.2.1-rc.3`**. The upstream `rc.2`→`rc.3` delta is purely additive (new sidebar slots, navigation pins, and a DeepSeek `/models` listing), so no new adapter branch is needed; the dev pin moves to `0.2.1-rc.3` (cordis `4.0.5` unchanged).
+
+### Fixed
+
+- **Workspace Folders panel aligned with upstream UI**: the settings switch row layout, the Skills toggle folded into the icon actions, button backgrounds confined to hover, action appearance preserved during saves, and the folder policy and effective access combined into one label; the move up/down reorder buttons (the ordering interface is retained for a future drag interaction) and the permission introduction text at the top of the dialog are removed.
+- **Namespaced skill reference rendering**: a sent `/alias-id:skill-name` reference renders as ordinary user text, without a dedicated button style, highlighting, or click-to-preview (same-day ADR-0023 revision); ordinary session activity/title updates no longer close an open skill body preview.
 
 ## [0.1.9] - 2026-10-20
 
@@ -175,7 +181,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.6...v0.1.7

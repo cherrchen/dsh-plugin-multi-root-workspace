@@ -17,9 +17,10 @@ Not every project is a monorepo. A real development project is usually several i
 - **No new tools**: the agent keeps using the native `read` / `write` / `edit` / `bash`; only the granted directories grow.
 - **Sandbox confinement**: an additional root may inherit the session's (primary root's) permission setting, or be pinned to read-only or read-write; under read-only and read-write, confinement does not rest on system prompts — it is enforced by an in-process filesystem fence plus kernel-level sandboxes (macOS Seatbelt / Linux bwrap / Landlock / Windows ACL), with files and bash sharing one and the same scope.
 - **Optional Auto review (off by default)**: a fork of upstream's experimental auto-review that gives the reviewer the additional directories' context — the current workspace topology, each root's access level, and live instruction files; it ships disabled and only takes effect once the `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` row is explicitly enabled in the Plugin Manager row list, taking over the official bundle while on.
+- **Additional-root Skills**: discovers `.dsh/skills` and `.agents/skills` inside additional folders, invoked through the namespaced `/alias-id:skill-name` reference and the native `skill` tool; each root has an independent toggle and editable `aliasId`, with a global setting that defaults to on.
 - **Absent when absent**: with no additional root configured, its behavior is item-for-item identical to an uninstalled harness; every misconfiguration fails loudly instead of silently degrading.
 
-Current released version: `v0.1.9`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+Current released version: `v0.1.10`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Quick Start
 
@@ -91,8 +92,8 @@ This installs pre-built artifacts; the first install needs the `allowBuilds` add
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # or download the tgz from the GitHub Release assets, e.g.:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.9/dsh-electron-dsh-plugin-multi-root-workspace-0.1.9.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.9.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.10/dsh-electron-dsh-plugin-multi-root-workspace-0.1.10.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.10.tgz
 ```
 
 Also pre-built, handy for air-gapped or offline delivery; the first install needs the same `allowBuilds` addition.
@@ -111,10 +112,10 @@ allowBuilds:
   koffi: true
 ```
 
-Pinning a version (e.g. `#v0.1.9`) is recommended so a later push cannot silently change what actually runs:
+Pinning a version (e.g. `#v0.1.10`) is recommended so a later push cannot silently change what actually runs:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.9
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.10
 ```
 
 ### Install from a local clone
@@ -228,7 +229,7 @@ Workspace root (primary; access follows the current sandbox mode): /home/me/mono
 Writable additional roots under the current mode: 1 of 2.
 ```
 
-### Additional-root Skills (development branch, unreleased)
+### Additional-root Skills
 
 Skills are discovered in each additional folder’s `.dsh/skills` and `.agents/skills`. Names and descriptions are available before the first model step; bodies are loaded on invocation. The primary root uses `/skill-name`; additional roots always use `/alias-id:skill-name`, with Slash completion and manual entry. The model uses the native `skill` tool with an internal name. Internal IDs can appear in tool logs; human menus list namespaced references.
 
@@ -242,7 +243,7 @@ See [ADR-0023](./docs/decisions/ADR-0023-multi-root-skill-discovery-and-invocati
 
 ### Panel
 
-The **Folders** dialog at the sidebar foot lists the primary root and the additional roots, and offers add, remove, alias, read-only/read-write switching, copy path, reveal in the file manager, and move up/down.
+The **Folders** dialog at the sidebar foot lists the primary root and the additional roots, and offers add, remove, alias, read-only/read-write switching, copy path, and reveal in the file manager.
 
 ### Model side
 

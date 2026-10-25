@@ -17,9 +17,10 @@
 - **不新增工具**：Agent 照旧使用原生 `read` / `write` / `edit` / `bash`，只是授权的目录变多了。
 - **沙箱约束**：附加根可继承会话（主目录）的权限设置，也可单独固定为只读或读写；在只读与读写下，约束不靠系统提示词，而由进程内文件围栏 + 内核级沙箱（macOS Seatbelt / Linux bwrap / Landlock / Windows ACL）执行，文件与 bash 共享同一份授权范围。
 - **可选 Auto review（默认关闭）**：fork 上游实验性「自动授权审查」，向 Reviewer 补充附加目录的审查上下文——当前工作区拓扑、各根访问级别与实时指令文件；出厂关闭，需在插件管理器的行列表中显式打开 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` 行后生效，启用时接管官方同名 bundle。
+- **附属根 Skills**：发现附属目录的 `.dsh/skills` 与 `.agents/skills`，附属根经 `/alias-id:skill-name` 命名空间调用原生 `skill` 工具；每根独立开关、可编辑 `aliasId`，全局设置默认开启。
 - **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
-当前发布版本 `v0.1.9`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
+当前发布版本 `v0.1.10`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
 
@@ -93,8 +94,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.9/dsh-electron-dsh-plugin-multi-root-workspace-0.1.9.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.9.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.10/dsh-electron-dsh-plugin-multi-root-workspace-0.1.10.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.10.tgz
 ```
 
 同样是预构建产物，适合内网或离线环境交付；首次安装同样需要添加 `allowBuilds`。
@@ -113,10 +114,10 @@ allowBuilds:
   koffi: true
 ```
 
-建议锁定版本（如 `#v0.1.9`），让后续推送无法悄悄改变实际运行的内容：
+建议锁定版本（如 `#v0.1.10`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.9
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.10
 ```
 
 ### 从本地源码安装
@@ -230,7 +231,7 @@ Workspace root (primary; access follows the current sandbox mode): /home/me/mono
 Writable additional roots under the current mode: 1 of 2.
 ```
 
-### 附属根 Skills（开发分支，尚未发布）
+### 附属根 Skills
 
 发现附属目录的 `.dsh/skills` 和 `.agents/skills`，首个模型步骤可见名称与描述，正文按需加载。主根使用 `/skill-name`；附属根始终使用 `/alias-id:skill-name`，可在 Slash 菜单补全或手动输入。模型通过原生 `skill` 工具调用内部名称；工具日志中可能显示内部 ID，人类菜单只列命名空间引用。
 
@@ -244,7 +245,7 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 
 ### 面板
 
-侧栏底部的 **Folders** 对话框列出主根与附加根，支持添加、移除、别名、切换只读/可写、复制路径、在文件管理器中显示与上下移排序。
+侧栏底部的 **Folders** 对话框列出主根与附加根，支持添加、移除、别名、切换只读/可写、复制路径与在文件管理器中显示。
 
 ### 模型侧
 

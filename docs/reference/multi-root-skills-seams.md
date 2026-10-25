@@ -1,6 +1,6 @@
 # Multi-root Skills 上游接缝调研
 
-调研日期：2026-10-23。本文只记录源码事实、原型方法和已知边界；架构选择归 [ADR-0023](../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)，任务分解归[实施计划](../plans/active/2026-10-23-multi-root-skills.md)，执行结果和未覆盖范围只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。
+调研日期：2026-10-23。本文只记录源码事实、原型方法和已知边界；架构选择归 [ADR-0023](../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)，任务分解归[实施计划](../plans/completed/2026-10-23-multi-root-skills.md)，执行结果和未覆盖范围只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。
 
 ## 基线与复现方法
 
