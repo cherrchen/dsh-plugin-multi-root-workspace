@@ -8,6 +8,12 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [Unreleased]
+
+### Added
+
+- **精确支持 DSH `0.2.1-rc.3`**。上游 `rc.2`→`rc.3` 的差异全部为新增（新 sidebar 槽位、导航 pins、DeepSeek `/models` 列表），不需要新增适配分支；开发 pin 提升到 `0.2.1-rc.3`（cordis `4.0.5` 不变）。
+
 ## [0.1.9] - 2026-10-20
 
 ### Added

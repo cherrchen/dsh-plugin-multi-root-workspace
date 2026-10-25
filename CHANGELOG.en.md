@@ -8,6 +8,12 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [Unreleased]
+
+### Added
+
+- **Exact support for DSH `0.2.1-rc.3`**. The upstream `rc.2`→`rc.3` delta is purely additive (new sidebar slots, navigation pins, and a DeepSeek `/models` listing), so no new adapter branch is needed; the dev pin moves to `0.2.1-rc.3` (cordis `4.0.5` unchanged).
+
 ## [0.1.9] - 2026-10-20
 
 ### Added
