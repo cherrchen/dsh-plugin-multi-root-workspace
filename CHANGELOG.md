@@ -8,11 +8,17 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
-## [Unreleased]
+## [0.1.10] - 2026-10-25
 
 ### Added
 
+- **附属根 Skills**：发现附属目录的 `.dsh/skills` 和 `.agents/skills`，首个模型步骤可见名称与描述，正文按需加载。主根使用 `/skill-name`；附属根始终使用 `/alias-id:skill-name` 命名空间引用（Slash 菜单可补全，模型经原生 `skill` 工具用内部名称调用）。新登记的 `inherit` / `read-write` 根默认开启，`read-only` 根默认关闭；Workspace Folders 对话框提供独立的 Skills 开关与 `aliasId` 编辑，Settings → Plugins → Multi-root Workspace 的「启用附属根 Skills」全局开关默认开启，关闭只阻止新发现与调用、保留每根选择。升级时旧 `inherit` / `read-write` 登记默认开启 Skills；持久化迁移保留原有 grant，但旧版写回可能剥离 `aliasId` 与手动开关，**不保证 Skills 配置无损降级**（降级前可备份 `$DSH_HOME/storages/multi_root_workspace.json`）。只读根开启 Skills 不授予写权限；禁用不回收已投递正文或已启动进程（[ADR-0023](./docs/decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)）。
 - **精确支持 DSH `0.2.1-rc.3`**。上游 `rc.2`→`rc.3` 的差异全部为新增（新 sidebar 槽位、导航 pins、DeepSeek `/models` 列表），不需要新增适配分支；开发 pin 提升到 `0.2.1-rc.3`（cordis `4.0.5` 不变）。
+
+### Fixed
+
+- **Workspace Folders 面板与上游 UI 对齐**：设置开关行布局、Skills 开关收入图标动作区、按钮背景只出现在 hover、保存期间动作外观保持、根策略与生效访问合并为一个标签；移除上移/下移排序按钮（排序接口保留，供后续拖动排序）与对话框顶部的权限说明文字。
+- **命名空间 Skill 引用的展示**：已发送的 `/alias-id:skill-name` 引用按普通用户文字渲染，不再携带独立按钮样式、高亮或点击预览（ADR-0023 同日修订）；普通会话的 activity/title 更新不再误关闭已打开的 Skill 正文预览。
 
 ## [0.1.9] - 2026-10-20
 
@@ -175,7 +181,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.6...v0.1.7

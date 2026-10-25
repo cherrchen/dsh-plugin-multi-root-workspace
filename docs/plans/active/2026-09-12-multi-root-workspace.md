@@ -1,6 +1,6 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；v0.1.9（Auto Review 多根上下文以主包内置可选行交付，默认关闭，ADR-0022）已发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
+> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；v0.1.9（Auto Review 多根上下文以主包内置可选行交付，默认关闭，ADR-0022）已发版；v0.1.10（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
 > 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
@@ -45,11 +45,12 @@
 | 第二期 | 分支安全审查修复（R1–R4） | 负授权规则统一（R2/R3）、Windows 祖先路径稳定性（R1）、硬链接失败关闭与 profile 隔离（R4） | [审查计划](./2026-10-16-branch-security-review-and-hardlink-isolation.md) | [0017 修订](../../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)、[0004 修订](../../decisions/ADR-0004-root-registry-persistence-and-validation.md)、[0020 修订](../../decisions/ADR-0020-windows-normal-deny-groups.md) | `55c6260` | Phase A（R2/R3）、B（R1）、C1（全根硬链接预检）与 C2（`/workspace-folders isolate-profiles` 命令、迁移与冒烟）已实施，门禁已执行（771 通过 / 49 跳过，冒烟四项实跑通过）；POSIX 原生内核未验证；随 `v0.1.7` 发版 |
 | 第二期 | Files 页签附加根浏览（P1–P11） | `RootSwitcher` 根切换器 + 复刻的 `RootFileTree` 接管树区；open-in-app fork 重定向到选中根；面板徽标、`PathCopy`、确认层与下拉选择器 | [P1–P11](#files-头部根浏览-p1p112026-10-12未发布) | [0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md) | `79f6934`…`a43cbc0` | `v0.1.7` |
 | compat | DSH 0.2.1 后续提升 | DSH 支持矩阵扩展至 `0.2.1-alpha.3`–`0.2.1-rc.2` 五个精确版本；storage-domain zod 分裂适配、warn 车道 allow-version 预授权 | [本次记录](#dsh-021-后续兼容提升2026-10-17) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `eaf2d8f` | `v0.1.7` |
-| compat | DSH 0.2.1-rc.3 提升 | DSH 支持矩阵纳入 `0.2.1-rc.3`；上游差异全部为新增（sidebar 槽位、导航 pins、DeepSeek `/models`），无新适配分支；开发 pin 升级 | [本次记录](#dsh-021-rc3-兼容提升2026-10-23) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | — | 未发布 |
+| compat | DSH 0.2.1-rc.3 提升 | DSH 支持矩阵纳入 `0.2.1-rc.3`；上游差异全部为新增（sidebar 槽位、导航 pins、DeepSeek `/models`），无新适配分支；开发 pin 升级 | [本次记录](#dsh-021-rc3-兼容提升2026-10-23) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `bddeae3` | `v0.1.10` |
 | compat | DSH 0.2.0 `permissionPresets/catalog` 修复 | 可选包按"谁加载副本、经哪个锚点"分三类取证（运行时加载 / 宿主服务 / runner 锚定），link: 检出不再幻影混装；两个 provider 行不再 inject 门禁，被拒安装退化为上游等价而非拖死 `ctx.fs`/`ctx.sandbox`/`ctx.shell`/`permissionPresets` | [本次记录](#dsh-020-permissionpresetscatalog-修复2026-10-18) | [0009 修订](../../decisions/ADR-0009-dsh-compat-contract.md) | `f6d81de` | `v0.1.8` |
 | 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 | 兼容协作 | Auto Review 多根上下文 | 拓扑/有效访问权限/当前项目约束的可信输入；可选外部兼容层及联合验证 | [适配计划](../completed/2026-10-18-auto-review-context-adaptation.md)、[源码调研](../../reference/auto-review-compatibility.md) | [0021](../../decisions/ADR-0021-auto-review-context-companion.md) | `feat/compat-auto-review` | Phase 0–2 已实施；本机验收与旧版回归见[本次记录](#auto-review-多根上下文适配2026-10-18)；仅联合目标 `0.2.1-rc.2`；独立 companion 交付形态在发布前被 ADR-0022 取代，能力以内置行随 `v0.1.9` 发版；Phase 3 不在本批范围 |
 | 兼容协作 | Auto Review 内置入口迁移 | companion 并入主包：`./auto-review` 导出 + 默认 `disabled` 的 `multi-root-auto-review` 行；loader 生命周期接管/恢复；configure、独立 manifest 与第二 tarball 退役 | [评审记录](../completed/2026-10-20-auto-review-in-package-review.md)、[迁移记录](#auto-review-内置入口迁移2026-10-20) | [0022](../../decisions/ADR-0022-auto-review-loader-entry.md) | `9138084`…`e4804fb` | `v0.1.9` |
+| 第二期 | 附属根 Skills（S1–S7） | 附属根 `.dsh/skills` / `.agents/skills` 发现、`/alias-id:skill-name` 命名空间调用、每根开关与 `aliasId`、全局 Settings 开关；native effective-cwd 旁路封堵 | [实施计划](../completed/2026-10-23-multi-root-skills.md)、[本次记录](#multi-root-skills-架构验证2026-10-23) | [0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) | `1218543`…`e2c6fb1` | `v0.1.10` |
 
 ## 总体策略
 
@@ -796,7 +797,7 @@ Seatbelt 证明的断言强制实跑。PTC 联合用例用真实 Node runtime �
 
 ## Multi-root Skills 架构验证（2026-10-23）
 
-用户授权在 `feat/additional-root-skills` 上完成 Proposed ADR 的剩余工程验证，再定案并拆分计划。问题源为 Issue #17；[ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) 已据此升级为 **Accepted（架构定案）**。源码事实归[接缝调研](../../reference/multi-root-skills-seams.md)，S1–S7 任务和退出条件归[实施计划](./2026-10-23-multi-root-skills.md)。**生产实现与本批全平台 CI 验证已完成、未发布；S7 尚余发布准备，A1–A13 的生产证据与能力边界见下文。**
+用户授权在 `feat/additional-root-skills` 上完成 Proposed ADR 的剩余工程验证，再定案并拆分计划。问题源为 Issue #17；[ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) 已据此升级为 **Accepted（架构定案）**。源码事实归[接缝调研](../../reference/multi-root-skills-seams.md)，S1–S7 任务和退出条件归[实施计划](../completed/2026-10-23-multi-root-skills.md)。**生产实现与本批全平台 CI 验证已完成，随 `v0.1.10` 发版；S7 含发布准备全部完成，A1–A13 的生产证据与能力边界见下文。**
 
 ### 2026-10-24 交互修订
 
@@ -854,7 +855,7 @@ macOS / Node `24.18.0`：**13 组检查通过**。其中一组对 `SUPPORTED_DSH
 | S4 | 按需模型 get、Host Alias pre-step、读取前后文件签名和 generation fence、独立撤销提示已实现。rc.2 的 8 个正式回归经真实 tools.execute / pre-step 覆盖默认/user-only/model-only、伪造 source、旧 Alias/内部 ID、读取中禁用/移除/策略变化/取消、其他 Provider incomplete、原生 exact-ID winner；通过。 |
 | S5 | 共享 128 根 LRU 委托池与 2 秒单调度器、generation、冷 Session list/preview/changes RPC、Client epoch/取消围栏、ordered teardown 已实现。rc.2 8 个相关文件 86 passed（含真实 Connection localhost HTTP、实际文件增改删/Root missing、容量/去重/淘汰、排队取消、延迟 get 卸载排空、旧包丢弃）；typecheck 与定向 lint 通过。 |
 | S6 | Slash Source、完整文本插入、conditional UserTextRule/Renderer、安全预览、双形状 Settings 卡片及 Host 动态配置已实现。rc.2 Loader/Settings 真实多行 profile 验证只改 Skills 行、volatile 不重挂；legacy installSection 到达/移除回归通过。DOM 覆盖 namespace 补全、原文插入、sent 引用预览 RPC、表单映射与 accessible checkbox。旧宿主动态验收及真实浏览器整页检查在 S7 继续。 |
-| S7 | macOS 本机集成、Windows 与 Linux（WSL2）各 16 精确版本本机完整门禁完成；PR #18 的远端 16 版本 × 4 runner 矩阵及最终 gate 全绿，补齐 Windows 第二固定卷与 foreign-owner 两项能力缺口。尚余发布准备，计划保留 active；执行证据与能力边界见下文。 |
+| S7 | macOS 本机集成、Windows 与 Linux（WSL2）各 16 精确版本本机完整门禁完成；PR #18 的远端 16 版本 × 4 runner 矩阵及最终 gate 全绿，补齐 Windows 第二固定卷与 foreign-owner 两项能力缺口。发布准备完成，随 `v0.1.10` 发版，计划归档 completed；执行证据与能力边界见下文。 |
 
 C0 保存既有架构文档与原型；C1 保存 S1，C2 保存 S2，C3 保存 S3 的实现与本层测试，C4 保存 S4，C5 保存 S5，C6 保存 S6 的实现与本层测试。checkpoint 为本机临时快照仓库中的增量 patch；上述阶段结束时正式仓库尚未提交，后续阶段继续基于同一工作树。本批提交状态见下文。
 
@@ -1016,11 +1017,11 @@ Linux 成本样本仍用 `measure-multi-root-skills.mjs` 的 16 根 × 8 Skills 
 
 Windows、Linux（WSL2）本机各 16 版本完整门禁已执行；Windows 第二固定卷与 foreign-owner 两例及本批远端完整矩阵已补验，最终 gate 全绿。新测试已进入既有测试入口；本批已按 C0 → C7a 的 checkpoint 顺序分为 9 笔提交，Windows、Linux 验证另作独立提交。S7 剩余发布准备：按 release workflow 确定版本、同步发布状态并更新双语 CHANGELOG，说明旧 inherit/read-write 登记默认启用、read-only 默认关闭、全局关闭方式与 metadata 降级边界。当前未准备版本或 tag，不修改已发布历史，PR 保持 Draft，计划保留 active。上述 CI 结论只绑定记录的代码 SHA；后续提交的 CI 应另行核对，不能继承为已通过。
 
-C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 保存浏览器末轮发现的预览生命周期修正及两形状回归。这些 checkpoint 只代表当时本机阶段完成，后续平台结果见上文。C0–C7、C7a 为按顺序应用的增量 patch；临时快照另备份在本工作区被忽略的 `.dsh-smoke/checkpoints-multi-root-skills-20261023/`，含基线与校验和 manifest，可用于后续分批提交。正式仓库已按 checkpoint 完成分批提交；原始补丁继续保留，最后一笔另同步本节提交状态。S7 全部退出条件（含发布准备）满足前计划留在 active。
+C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 保存浏览器末轮发现的预览生命周期修正及两形状回归。这些 checkpoint 只代表当时本机阶段完成，后续平台结果见上文。C0–C7、C7a 为按顺序应用的增量 patch；临时快照另备份在本工作区被忽略的 `.dsh-smoke/checkpoints-multi-root-skills-20261023/`，含基线与校验和 manifest，可用于后续分批提交。正式仓库已按 checkpoint 完成分批提交；原始补丁继续保留，最后一笔另同步本节提交状态。S7 全部退出条件（含发布准备）已满足；计划已归档 `completed/` 并随 `v0.1.10` 发版。
 
 ## DSH 0.2.1-rc.3 兼容提升（2026-10-23）
 
-用户授权范围是 `dsh-v0.2.1-rc.3` 一个发布版本。上游本地 tag 与 npm `versions` 列表一致，与 `0.2.1-rc.2` 做源码差分。支持合同保留全部旧版，再纳入这个精确版本；开发 pin 与 lockfile 升到 `0.2.1-rc.3`，cordis 仍是 `4.0.5`（`dsh` 仍依赖 `~4.0.5`）。插件版本号不变，不创建 release tag。
+用户授权范围是 `dsh-v0.2.1-rc.3` 一个发布版本。上游本地 tag 与 npm `versions` 列表一致，与 `0.2.1-rc.2` 做源码差分。支持合同保留全部旧版，再纳入这个精确版本；开发 pin 与 lockfile 升到 `0.2.1-rc.3`，cordis 仍是 `4.0.5`（`dsh` 仍依赖 `~4.0.5`）。插件版本号不变，本提升不单独创建 release tag（随后随 `v0.1.10` 一并发版）。
 
 | 上游 tag | commit |
 |---|---|
