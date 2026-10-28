@@ -40,7 +40,7 @@ active：
 
 - [2026-10-16-branch-security-review-and-hardlink-isolation.md](./active/2026-10-16-branch-security-review-and-hardlink-isolation.md) — 分支安全审查证据与拟议修复：负授权、Windows 祖先改名、pnpm 硬链接隔离；Phase A（R2/R3 负授权）、B（R1 祖先钉扎）、C1（全根硬链接预检）与 C2（`/workspace-folders isolate-profiles` 命令、迁移与冒烟）已实施并验收，随 `v0.1.7` 发版。
 
-- [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace 开发路径与**进度总账**：MVP `v0.1.0` 的 M1/M2/M3 已实施并发版；`v0.1.1` 硬化批次 H1–H4 已实施并随 `v0.1.1` 发版；`v0.1.2` 支持矩阵提升已实施并随 `v0.1.2` 发版；`v0.1.3` 支持矩阵提升（`0.1.7-alpha.2` / `0.1.7-rc.1`）已实施并随 `v0.1.3` 发版；`v0.1.4` 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版；`v0.1.5`（DSH `0.2.0-rc.1` / `.2`）已发布；`v0.1.6`（DSH `0.2.1-alpha.1` / `.2`、B1–B3 与动态 cwd）已发布；`v0.1.7`（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发布；`v0.1.8`（DSH 0.2.0 `permissionPresets/catalog` 修复）已发布；`v0.1.9`（Auto Review 主包内置可选行）已发布；`v0.1.10`（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发布。
+- [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace 开发路径与**进度总账**：MVP `v0.1.0` 的 M1/M2/M3 已实施并发版；`v0.1.1` 硬化批次 H1–H4 已实施并随 `v0.1.1` 发版；`v0.1.2` 支持矩阵提升已实施并随 `v0.1.2` 发版；`v0.1.3` 支持矩阵提升（`0.1.7-alpha.2` / `0.1.7-rc.1`）已实施并随 `v0.1.3` 发版；`v0.1.4` 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版；`v0.1.5`（DSH `0.2.0-rc.1` / `.2`）已发布；`v0.1.6`（DSH `0.2.1-alpha.1` / `.2`、B1–B3 与动态 cwd）已发布；`v0.1.7`（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发布；`v0.1.8`（DSH 0.2.0 `permissionPresets/catalog` 修复）已发布；`v0.1.9`（Auto Review 主包内置可选行）已发布；`v0.1.10`（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发布；进行中：DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 兼容提升（pin 已推进，未发版）。
 
 
 completed：

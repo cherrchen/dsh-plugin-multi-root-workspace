@@ -257,7 +257,7 @@ export const STYLES = /* css */ `
 
 /* ── files-tree fork (verbatim rules, renamed classes) ─────────────────────
    Copied from upstream's FilesBody.module.css (ui-sidebar-files @
-   0.2.1-alpha.2) with local names mapped to mrfw-ft* so the rules cannot
+   0.2.2-alpha.2) with local names mapped to mrfw-ft* so the rules cannot
    collide with host DOM — and so the fork's own body (which must NOT carry
    data-files-body) stays visible while the rules above hide the native one.
    The header-only rules (root/header/path/tool/status/statusLine/titleIcon)
@@ -314,8 +314,10 @@ export const STYLES = /* css */ `
   cursor: pointer;
 }
 
-.mrfw-ftRow:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+@media (hover: hover) {
+  .mrfw-ftRow:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 
 /* The folder glyph rides the tertiary ink, as the workspace tree's does. */
@@ -343,8 +345,10 @@ export const STYLES = /* css */ `
   cursor: default;
 }
 
-.mrfw-ftOther:hover {
-  background: transparent;
+@media (hover: hover) {
+  .mrfw-ftOther:hover {
+    background: transparent;
+  }
 }
 
 .mrfw-ftNote {

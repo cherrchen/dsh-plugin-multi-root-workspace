@@ -8,6 +8,13 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [Unreleased]
+
+### Added
+
+- **精确支持 DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2`**：`rc.4` 探针全绿、无需任何适配改动；`0.2.2-alpha.2` 把工具执行从 `dsh-tools` 拆出为独立执行器，`AgentRegistry` 新增注入 `sessionProjections`，本插件源码均不受影响。上游新增 `SandboxExecutionPolicy.additionalWritableRoots`（原生与 fork 无关的第三路可写根），宽授权 provider 与其正确复合——新回归用例钉住双方 grant 同时生效。开发 pin 提升到 `0.2.2-alpha.2`（cordis `4.0.6-alpha.1`，Node ≥24.9）。客户端 fork（files-tree、open-in-app）已对齐 `0.2.2-alpha.2` 基线——hover 规则移入 `@media (hover: hover)`，open-in-app 失败反馈改为应用级 `shell.overlay` outcome toast。
+- **升级通道与 CI**：CI verify 矩阵改为按已知名单分流——`0.1.*` / `0.2.0` / `0.2.1` 走 Node `22.19.0`，其余（含 0.2.2 及以后）走 Node `24.9.0`；升级脚本在重指旧版本时会顺带钉住该版本自带的 cordis 生态（plugin-loader/group/include、schemastery、cosmokit），避免与提交锁文件的 alpha 行混树。
+
 ## [0.1.10] - 2026-10-25
 
 ### Added

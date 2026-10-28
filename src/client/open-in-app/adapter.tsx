@@ -30,6 +30,7 @@ import { maybeIcon } from '../../compat/client-icons.ts'
 import { OPEN_IN_APP_ICON_URL_PREFIX } from '../../compat/open-in-app-routes.ts'
 import { OpenInAppController } from './controller.ts'
 import { OpenInAppAction, type OpenInAppActionProps } from './OpenInAppAction.tsx'
+import { createOpenInAppToastSource, type OpenInAppToastSource } from './open-toast.tsx'
 import { NS } from './locales.ts'
 
 /**
@@ -79,19 +80,26 @@ const NO_SHORTCUTS: ObservableSnapshot<readonly ShortcutCatalogEntry[]> = {
 export function createOpenInAppAdapter(deps: {
   readonly t: (key: string, params?: Record<string, unknown>) => string
   readonly shortcuts?: ObservableSnapshot<readonly ShortcutCatalogEntry[]> | undefined
-}): OpenInAppAdapter | undefined {
+}): { readonly adapter: OpenInAppAdapter; readonly toast: OpenInAppToastSource } | undefined {
   if (!REQUIRED_GLYPHS.every(name => maybeIcon([name]) !== undefined)) return undefined
   const controller = new OpenInAppController()
   void controller.load()
+  // Gesture feedback outlives the switcher panel that initiated it, exactly
+  // like upstream's own `shell.overlay` announcement seat.
+  const toast = createOpenInAppToastSource()
   return {
-    useOpenInAppApps: bindSnapshot(controller.apps),
-    useOpenInAppChoice: bindSnapshot(controller.choice),
-    useOpenInAppLaunch: bindSnapshot(controller.operation),
-    useShortcuts: bindSnapshot(deps.shortcuts ?? NO_SHORTCUTS),
-    launch: (appId, path) => controller.launch(appId, path),
-    choose: (appId) => { controller.choose(appId) },
-    iconUrl: appId => `${OPEN_IN_APP_ICON_URL_PREFIX}/${appId}`,
-    t: deps.t as OpenInAppActionProps['t'],
+    toast,
+    adapter: {
+      useOpenInAppApps: bindSnapshot(controller.apps),
+      useOpenInAppChoice: bindSnapshot(controller.choice),
+      useOpenInAppLaunch: bindSnapshot(controller.operation),
+      useShortcuts: bindSnapshot(deps.shortcuts ?? NO_SHORTCUTS),
+      launch: (appId, path) => controller.launch(appId, path),
+      report: toast.report,
+      choose: (appId) => { controller.choose(appId) },
+      iconUrl: appId => `${OPEN_IN_APP_ICON_URL_PREFIX}/${appId}`,
+      t: deps.t as OpenInAppActionProps['t'],
+    },
   }
 }
 

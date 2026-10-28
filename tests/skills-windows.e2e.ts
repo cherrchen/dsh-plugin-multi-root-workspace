@@ -60,7 +60,7 @@ describe.runIf(process.platform === 'win32')('Windows additional-root Skills', (
     try {
       await pool.use(root, async () => undefined, async () => {})
       expect(await reader!.list({})).toHaveLength(1)
-      rmSync(link); symlinkSync(join(outside, '.dsh/skills/secret'), link, 'junction')
+      rmSync(link, { force: true, recursive: true }); symlinkSync(join(outside, '.dsh/skills/secret'), link, 'junction')
       await pool.poll(); expect(changes).toBe(1)
       expect(await reader!.list({})).toEqual([])
       await pool.poll(); expect(changes).toBe(1)

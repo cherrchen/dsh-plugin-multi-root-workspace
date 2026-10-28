@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import AgentRegistry, { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
 import { Session, SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
 import NativeSkills from '@deepseek-ai/dsh-skill'
@@ -14,13 +15,16 @@ import LocalFs from '@deepseek-ai/dsh-fs-local'
 import { mountRegistryStack } from './registry-stack.ts'
 import MultiRootSkills from '../../src/skills.ts'
 import { SessionSkillCatalog } from '@deepseek-ai/dsh-api-session-controller'
+import { installToolExecutor } from './tool-executor.ts'
 
 export async function skillsStack(base: string) {
   const stack = await mountRegistryStack(join(base, 'store'), {}, { beforeGate: async ctx => {
     await ctx.plugin(LocalFs, { cwd: base })
   } })
   const ctx = stack.ctx
+  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt); await ctx.plugin(Tools); await ctx.plugin(AgentRegistry); await ctx.plugin(NativeSkills)
+  await installToolExecutor(ctx)
   await ctx.plugin(FileSkills, { includeDefaultRoots: true, dshHome: join(base, 'home'), agentsHome: join(base, 'agents'), watch: false })
   ctx.provide('workingDirectory', { ensure: async (agent: Agent) => (agent as Agent & { effectiveCwd?: string }).effectiveCwd ?? agent.session.header.cwd } as never)
   const headers = new Map<string, Session['header']>()

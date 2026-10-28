@@ -30,6 +30,8 @@ export type OpenInAppKey =
   | 'path.open'
   | 'path.more'
   | 'path.reveal'
+  | 'path.opened'
+  | 'path.revealed'
   | 'path.openError'
   | 'path.revealError'
   | 'app.cursor'

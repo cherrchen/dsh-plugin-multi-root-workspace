@@ -159,7 +159,7 @@ function mount(withFilesActions = false): Harness {
     slots: {
       inject: (name: string, callback: () => unknown) => {
         if (name === 'sidebar.right.tab.files.actions' && !withFilesActions) return () => {}
-        expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions']).toContain(name)
+        expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions', 'shell.overlay']).toContain(name)
         callback()
         return () => {}
       },
@@ -211,7 +211,8 @@ function mount(withFilesActions = false): Harness {
  * @param harness - the mounted harness whose registration to render.
  */
 function renderPanel(harness: Harness, strictMode = false): void {
-  const panel = createElement(harness.registrations[0]!.component as never)
+  const registration = harness.registrations.find(item => item.options.name === 'sidebar.footer.action')!
+  const panel = createElement(registration.component as never)
   render(strictMode ? createElement(StrictMode, null, panel) : panel)
 }
 
@@ -252,7 +253,7 @@ describe('the client entry', () => {
 
   it('registers into the sidebar footer action with a localized label thunk', () => {
     const harness = mount()
-    const registration = harness.registrations[0]
+    const registration = harness.registrations.find(item => item.options.name === 'sidebar.footer.action')
     expect(registration?.options.name).toBe('sidebar.footer.action')
     expect(registration?.options.id).toBe(client.SLOT_ID)
     expect(registration?.options.order).toBe(50)
@@ -956,7 +957,8 @@ describe('the panel dialog', () => {
       get: () => undefined,
     }
     client.apply(ctx as never)
-    render(createElement(registrations[0]!.component as never))
+    const footer = registrations.find(item => item.options.name === 'sidebar.footer.action')!
+    render(createElement(footer.component as never))
 
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByRole('alert')).toBeTruthy() })
