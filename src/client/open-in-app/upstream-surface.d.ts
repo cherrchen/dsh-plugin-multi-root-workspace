@@ -55,4 +55,21 @@ declare module '@deepseek-ai/dsh-client-ui-primitives' {
     openOnClick?: boolean
     children: import('react').ReactElement
   }): import('react').JSX.Element
+
+  /**
+   * `tone` and `actions` joined Toast in 0.2.2-alpha.2; an extra overload
+   * admits the fork's outcome-toast call where the real signature predates
+   * them. The props below are the union of every supported release's Toast
+   * surface, and the overlay slot this component mounts on exists only on
+   * releases whose Toast already carries the full shape.
+   */
+  export function Toast(props: {
+    text: string
+    icon?: import('react').ReactNode
+    tone?: 'success'
+    anchor?: HTMLElement | null
+    holdMs?: number
+    actions?: readonly { label: string; prefix?: string; onClick(): void }[]
+    onDone(): void
+  }): import('react').JSX.Element
 }

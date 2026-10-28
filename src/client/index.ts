@@ -38,6 +38,7 @@ import { installSkillsSettingsCard } from './skills-settings.tsx'
 import { RootSwitcher } from './RootSwitcher.tsx'
 import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction.tsx'
 import { OPEN_IN_APP_NS, createOpenInAppAdapter } from './open-in-app/adapter.tsx'
+import { OpenInAppToast } from './open-in-app/open-toast.tsx'
 import { FILES_TREE_NS, createFilesTreeSeats, createFilesTreeSurface } from './files-tree/adapter.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -105,6 +106,16 @@ export function apply(ctx: ClientContext): void {
     t: ctx.locale.bind(OPEN_IN_APP_NS) as unknown as (key: string, params?: Record<string, unknown>) => string,
     shortcuts: readService<{ catalog?: ObservableSnapshot<readonly ShortcutCatalogEntry[]> }>(ctx, 'shortcuts')?.catalog,
   })
+  // The toast entry mirrors upstream's own `shell.overlay` registration so a
+  // native-open failure (and a mobile handoff) announces from the shell even
+  // after this panel unmounts; absent adapter means the fork cannot render.
+  if (openInApp !== undefined) {
+    const { toast } = openInApp
+    ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+      name: 'shell.overlay', id: 'multi-root-open-in-app.toast', locale: OPEN_IN_APP_NS,
+      inject: () => ({ hooks: toast.hooks, dismiss: toast.dismiss }),
+    }, OpenInAppToast))
+  }
   // The files-tree fork's seats: an exclusive store and the verbatim face
   // over a lazily resolved `remote` — the same declaration upstream's own
   // Files registration makes, plus the session-bound open route. The fork
@@ -165,7 +176,7 @@ export function apply(ctx: ClientContext): void {
     const filesTree = createFilesTreeSurface(props, filesTreeT)
     return absolutePath === undefined
       ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, compact: true })
-      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, openInApp, filesTree })
+      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, openInApp: openInApp?.adapter, filesTree })
   }))
 }
 

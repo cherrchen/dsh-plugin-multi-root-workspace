@@ -8,12 +8,16 @@ because the upstream component derives its root from the session's `cwd`,
 which is always the primary root and cannot be re-pointed.
 
 - **Source**: `deepseek-harness/packages/client/ui-sidebar-files/src/client/`
-- **Revision**: `1f81c047fc` (release `0.2.1-rc.3`, 2026-10-23) — matches
+- **Revision**: `f3803c9697` (release `0.2.2-alpha.2`, 2026-10-27) — matches
   this package's dev pin and the `@deepseek-ai/dsh-api-workspace-files`
   devDependency, which is the machine-readable record of the fork base.
-  The upstream `src/client/` tree did not change between `0.2.1-alpha.2`
-  (`d743267388`) and `0.2.1-rc.3`, so the fork files below remain
-  byte-identical without a re-copy.
+  Between `0.2.1-rc.3` (`1f81c047fc`) and `0.2.2-alpha.2` the upstream
+  `src/client/` tree changed only in `FilesBody.module.css` (hover rules
+  wrapped in `@media (hover: hover)` — copied below and ported into
+  `src/client/styles.ts`), `index.ts` (more locale registrations — not
+  forked), and `locales.ts` (new language dictionaries — the `zh` key set,
+  and with it `SidebarFilesKey`, is unchanged). The component sources are
+  byte-identical to the previous baseline.
 
 ## Verbatim files (copy-diff must stay empty)
 
