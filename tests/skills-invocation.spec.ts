@@ -5,6 +5,7 @@ import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { skillsStack, project, writeSkill } from './support/skills-stack.ts'
+import { executeTool } from './support/tool-executor.ts'
 import { AdditionalSkillCatalog, internalSkillName } from '../src/skills/catalog.ts'
 
 let fixture: FixtureWorkspace, stack: Awaited<ReturnType<typeof skillsStack>>, primary: string, extra: string, agent: ReturnType<typeof stack.agent>, root: ReturnType<typeof stack.registry.list>[number]
@@ -17,7 +18,7 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await stack.dispose(); fixture.dispose() })
 const user = (text: string) => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })
 async function execute(name: string, caller: Agent = agent) {
-  return await stack.ctx.tools.execute({ callId: 'skills-call' as never, name: 'skill', arguments: { name }, agent: caller, signal: new AbortController().signal })
+  return await executeTool(stack.ctx, { callId: 'skills-call', name: 'skill', args: { name }, agent: caller, signal: new AbortController().signal })
 }
 
 describe('native loading and Host aliases', () => {
