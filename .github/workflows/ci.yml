@@ -55,7 +55,9 @@ jobs:
           version: 11.25.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.19.0
+          # Releases through 0.2.1 stay on the 22 lane; 0.2.2 and anything
+          # newer requires Node >=24.9, so the default must be the 24 lane.
+          node-version: ${{ (startsWith(matrix.dsh, '0.1.') || startsWith(matrix.dsh, '0.2.0') || startsWith(matrix.dsh, '0.2.1')) && '22.19.0' || '24.9.0' }}
           cache: pnpm
       - name: Install the exact matrix release
         run: |

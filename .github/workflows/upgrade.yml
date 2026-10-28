@@ -54,7 +54,8 @@ jobs:
           version: 11.25.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.19.0
+          # The lane probes the newest prerelease; 0.2.2+ requires Node >=24.9.
+          node-version: 24.9.0
           cache: pnpm
 
       - name: Resolve the candidate release

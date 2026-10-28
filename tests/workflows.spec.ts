@@ -33,6 +33,18 @@ describe('CI workflow gates', () => {
     expect(ci).toContain("'[\"ubuntu-latest\",\"ubuntu-22.04\",\"macos-latest\"]'")
   })
 
+  it('runs 0.2.2+ matrix releases on Node 24 while older releases stay on 22', () => {
+    const ci = read('.github/workflows/ci.yml')
+    // Releases through 0.2.1 run on Node 22; 0.2.2 declares engines
+    // node >=24.9 — so the expression names the releases that keep 22.19.0
+    // and defaults every newer release (a stable 0.2.2 included) to 24.9.0.
+    expect(ci).toContain("node-version: ${{ (startsWith(matrix.dsh, '0.1.') || startsWith(matrix.dsh, '0.2.0') || startsWith(matrix.dsh, '0.2.1')) && '22.19.0' || '24.9.0' }}")
+    const upgrade = read('.github/workflows/upgrade.yml')
+    // The upgrade lane probes the newest prerelease, which requires 24.9.
+    expect(upgrade).toContain('node-version: 24.9.0')
+    expect(upgrade).not.toContain('node-version: 22.19.0')
+  })
+
   it('derives the upgrade set from the package manifest', () => {
     const workflow = read('.github/workflows/upgrade.yml')
     expect(workflow).toContain('node scripts/upgrade-dsh.mjs')

@@ -91,6 +91,45 @@ function cordisRequiredBy(dshVersion) {
   return cordisPin(range)
 }
 
+/** Whether a dependency name belongs to the cordis ecosystem a DSH release declares beside its own packages. */
+function isEcosystemPackage(name) {
+  return name === '@deepseek-ai/schemastery' || name === '@deepseek-ai/cosmokit' || name.startsWith('@deepseek-ai/cordis-plugin-')
+}
+
+/**
+ * Pin the cordis ecosystem the target release declares, so a repointed tree
+ * cannot mix it with the newer one the committed lockfile carries.
+ *
+ * The lockfile prefers the versions of the last committed dev pin. Without
+ * these pins an older release resolves its `~1.0.6` plugin-loader to a
+ * `1.0.7-alpha.1` entry already in the lockfile, and the loader/cordis pair no
+ * longer matches what that release shipped with (Settings volatile writes then
+ * miss the live config). The ranges come from the release's own manifests:
+ * `dsh` and `dsh-app-boot` (which declares the plugin trio as peers) and the
+ * pinned cordis; the highest published version each range admits is the pin.
+ * @param version - the exact `@deepseek-ai/dsh` release being pinned.
+ * @param cordisVersion - the exact cordis version {@link cordisRequiredBy} returned.
+ * @returns package name to exact version, sorted by name.
+ */
+function ecosystemPins(version, cordisVersion) {
+  const ranges = new Map()
+  for (const spec of [`@deepseek-ai/dsh@${version}`, `@deepseek-ai/dsh-app-boot@${version}`, `@deepseek-ai/cordis@${cordisVersion}`]) {
+    for (const field of ['dependencies', 'peerDependencies']) {
+      const raw = npmOutput(['view', spec, field, '--json']).trim()
+      const declared = raw === '' ? {} : JSON.parse(raw)
+      for (const [name, range] of Object.entries(declared)) if (isEcosystemPackage(name)) ranges.set(name, range)
+    }
+  }
+  const pins = {}
+  for (const [name, range] of [...ranges].sort(([a], [b]) => a.localeCompare(b))) {
+    const raw = npmOutput(['view', `${name}@${range}`, 'version', '--json']).trim()
+    const admitted = [].concat(JSON.parse(raw))
+    if (admitted.length === 0) throw new Error(`[upgrade] no published ${name} satisfies ${range}`)
+    pins[name] = admitted.at(-1)
+  }
+  return pins
+}
+
 /**
  * Repoint every DSH devDependency, and cordis to the version that release requires.
  * @param version - the release to pin.
@@ -167,6 +206,7 @@ function repointWorkspace(version, cordisVersion) {
     .map(match => match[1]))].sort()
   updated = updated.trimEnd() + `\n\n${marker}\noverrides:\n`
     + `  '@deepseek-ai/cordis': '${cordisVersion}'\n`
+    + Object.entries(ecosystemPins(version, cordisVersion)).map(([name, pin]) => `  '${name}': '${pin}'\n`).join('')
     + names.map(name => `  '${name}': '${version}'\n`).join('')
     + '# END DSH probe overrides\n'
   writeFileSync(WORKSPACE, updated)
