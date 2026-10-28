@@ -49,11 +49,12 @@ The agent can now read, write, and run bash in that directory — the default is
 | `0.1.6` | `0.1.6-alpha.1`, `0.1.6-alpha.2` |
 | `0.1.7` | `0.1.7-alpha.1`, `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2` |
 | `0.2.0` | `0.2.0-rc.1`, `0.2.0-rc.2` |
-| `0.2.1` | `0.2.1-alpha.1`, `0.2.1-alpha.2`, `0.2.1-alpha.3`, `0.2.1-alpha.4`, `0.2.1-alpha.5`, `0.2.1-rc.1`, `0.2.1-rc.2`, `0.2.1-rc.3` |
+| `0.2.1` | `0.2.1-alpha.1`, `0.2.1-alpha.2`, `0.2.1-alpha.3`, `0.2.1-alpha.4`, `0.2.1-alpha.5`, `0.2.1-rc.1`, `0.2.1-rc.2`, `0.2.1-rc.3`, `0.2.1-rc.4` |
+| `0.2.2` | `0.2.2-alpha.2` |
 
 The plugin does not start — as if it were not installed — when the DSH release is not in the table or the `@deepseek-ai/dsh-*` packages disagree on a version.
 
-**Building from source / contributing**: Node.js `^22.19.0 || >=24`, pnpm `11.25.0` (enable via corepack); the dev-pinned DSH is `0.2.1-rc.3`.
+**Building from source / contributing**: Node.js `^22.19.0 || >=24`, pnpm `11.25.0` (enable via corepack); the dev-pinned DSH is `0.2.2-alpha.2` (Node ≥24.9).
 
 **Platforms**: macOS (Seatbelt), Linux (bwrap / Landlock), Windows (root-set ACL runner).
 

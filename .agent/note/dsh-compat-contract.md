@@ -13,15 +13,15 @@ src/compat/dsh-version.ts  →  SUPPORTED_DSH_RELEASES
 是**精确版本数组**，不是 semver 范围。当前：
 
 ```ts
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.2-alpha.2'] as const
 ```
 
 改它的时候，下面四处必须同时一致，否则 `pnpm compat:check` 失败：
 
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   allowlist
-package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3"
-package.json                devDependencies          allowlist 中的某一项（当前 0.2.1-rc.3）
+package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.4 || 0.2.2-alpha.2"
+package.json                devDependencies          allowlist 中的某一项（当前 0.2.2-alpha.2）
 node_modules                实际解析到的版本          allowlist 中的某一项
 ```
 
@@ -144,6 +144,8 @@ pnpm install --frozen-lockfile                                     # node_module
 - **那句 `git checkout` 会把三个文件整体退回 HEAD**，连同你对它们的未提交修改。在脏的 manifest 上跑探测之前先提交或 stash。
 - 候选版本装上之后，`pnpm <script>` 的**依赖自检**会因为同一个 release-age 门禁判定"依赖不同步"并触发一次重装，而那次重装同样会失败，把 `node_modules` 撕成半截（`.bin` 消失、`.package-map.json` 只剩一条）。这时 `pnpm install` 会说 "Already up to date" 却修不好，唯一出路是 `rm -rf node_modules` 重装。要避免它，探测期间绕开 pnpm 的脚本包装，直接用 `PATH="$PWD/node_modules/.bin:$PATH"` 跑 `oxlint` / `tsc` / `vitest` / `node scripts/*.mjs`。
 
+**混树坑（2026-10-28 踩实）**：重指旧版本时，committed lockfile 里已有的 alpha 行 cordis 生态包会被 pnpm 优先沿用——`dsh-app-boot` 的 `cordis-plugin-loader` / `-group` / `-include` peer 范围同时接纳稳定版与 alpha，`rc.3` 树上的 `0.2.1` 运行时曾跑到 `1.0.7-alpha.1` 的 loader 上，Settings 的 volatile 写够不到 live Config（`tests/skills-settings.spec.ts` 的 enabled 断言静默留在 `true`）。`upgrade-dsh.mjs` 现在除了 DSH/cordis pin，还会从目标版本自身的 `dsh` / `dsh-app-boot` / `cordis` manifest 推导 `cordis-plugin-*`、`schemastery`、`cosmokit` 的精确版本，写进同一个临时 `overrides` 块；跨预发行线回退旧版本后，务必确认解析出的 loader/group/include 是该版本自带的稳定版再下结论。
+
 ## 7. journey smoke 的模型端点同时说两套 wire 协议
 
 `0.1.6-alpha.1` 把默认 LLM 协议从 chat-completions 换成了 Messages：
@@ -179,7 +181,7 @@ pnpm verify:all   # lint → typecheck → build → test → kernel:probe → s
 
 ## 9. DSH 0.2 与新的开发基线
 
-开发 pin 是 `0.2.0-rc.2`，cordis 是 `4.0.4`。回到开发基线不再表示回到 `0.1.5-rc.2` / `4.0.2`；前文的旧版探测记录是历史事实。恢复探测前保存的 manifest / workspace / lockfile，并重装安装树，绝不把未提交的支持声明退回 HEAD。
+写本节时开发 pin 是 `0.2.0-rc.2`，cordis 是 `4.0.4`（当前基线见 §1）。回到开发基线不再表示回到 `0.1.5-rc.2` / `4.0.2`；前文的旧版探测记录是历史事实。恢复探测前保存的 manifest / workspace / lockfile，并重装安装树，绝不把未提交的支持声明退回 HEAD。
 
 `0.2.0-rc.1` / `rc.2` 保留了现有适配器的接缝。0.2 的 agent-loop 异常恢复会在关闭 step 前补保守的失败 `tool/result`：`message.isError: true`、纯文本 content，并带 `data.error`。它绝不能算成功文件 touch；`tests/instructions.spec.ts` 同时钉住旧 content block、新 message 与恢复事件三种失败形状。Windows 新增 ACL diagnosis skill 由继承的上游 provider 自动软注册，本插件仍不承诺 Windows 内核多根授权。风险与各版验证证据见[路线图记录](../../docs/plans/active/2026-09-12-multi-root-workspace.md#dsh-02-兼容提升2026-09-30)。
 
@@ -195,7 +197,7 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 ## 11. DSH 0.2.1 目录语义
 
-当前开发基线为 `0.2.1-rc.3` / Cordis `4.0.5`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
+当前开发基线为 `0.2.2-alpha.2` / Cordis `4.0.6-alpha.1`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
 
 升级脚本接受单一 Cordis prerelease 版本，仍输出精确 pin。新的安装期 peer gate 需要在隔离候选 smoke profile 使用精确 allow-version 豁免；warn 模式下豁免在第一次 `add` 前授予（构建审批恢复路径内部的 remove+add 同样有版本 gate），只用于升级车道，正式矩阵和生产仍 enforce。当前 package 为 `0.1.6` 且 `v0.1.6` tag 已存在，本迁移不创建 release。
 
@@ -216,16 +218,28 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 提升上游版本时（升级车道跑完、人工验收阶段）必须目检三态：无附加根时 Files 页签是原生观感；选中一个附加根时树区换成逐字节复刻的原生 Files 树（行高/图标/缩进/空态/截断/失败行应与原生逐项一致）、原生 reload 由 header 内的同款 `.mrfw-switcherReload` 顶替、原生 open-in-app 按钮由复刻按钮顶替（点开 chevron 菜单应与原生同款）；切回主根时原生树、reload 与 open-in-app 完整还原。任一项失真先查这五个 `data-*` 属性还在不在对应 flex 项上（`.header` / `.body` 的 class 是 CSS-module hash，不能锚）。退化症状与修法见 [故障排查条目](../../docs/troubleshooting/files-switcher-degraded.md)，决策见 [ADR-0015](../../docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
 
-**files-tree 复刻面**：`src/client/files-tree/` 是上游 `ui-sidebar-files` 树体的逐字节 fork（基线 `1f81c047fc` = `0.2.1-rc.3`；清单、shim 对照、外壳 delta 与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——`directory-node.ts`/`face.ts`/`store.ts`/`FilesBody.module.css` 与 `FilesBody.tsx` 的行级定义必须字节级一致，许可差异只有外壳函数根源改写与 css specifier 的 `.ts` 后缀；同时检查上游 `locales.ts` 的 `zh` 键集（shim 的 `SidebarFilesKey` 联合须同步）、`workspaceFiles` remote 面与 `data-dockkit-content` 钩子。复刻体类名 `mrfw-ft*`、不携带 `data-files-root`/`data-files-body`（防本插件 `:has()` 隐藏规则误伤）； primitives 探针失败时整棵复刻树不渲染（同型降级，不崩）。**remote 面只能经 `ctx.get` 懒解析**：`remote.workspaceFiles` 是 cordis 嵌套服务，context 代理路径（`remote.workspaceFiles` 或 `ctx['remote.workspaceFiles']`）受 inject 守卫（未声明 fiber 直接抛 `without inject`），而本版 cordis 的 inject 条目全 required（声明会把整行 gate 在可选服务上）——`lazyFilesRemote` 用 `ctx.get('remote')`/`ctx.get('remote.workspaceFiles')` 免守卫直查 store，一切查找失败折叠成 `gateway/internal` 失败行（verbatim `load` 的 `.then` 无 `.catch`，逃逸 rejection 会静默钉死 loading）。**编译面同理钉在 dev-pin**：`0.2.0-rc.2` 之前 `workspaceFiles.changes` 是 2 参（session 级 watch），`tsconfig.client.json` 的 `paths` 把 `@deepseek-ai/dsh-api-remotes/client` 映射到 `client-remote.d.ts`（本地声明拼的是 path-watch 时代的 3 参签名），让 verbatim `face.ts` 在矩阵旧版本上也能过 typecheck——安全前提是 `files.actions` 槽位在旧版不存在、调用永不会执行。
+**files-tree 复刻面**：`src/client/files-tree/` 是上游 `ui-sidebar-files` 树体的逐字节 fork（基线 `f3803c9697` = `0.2.2-alpha.2`；清单、shim 对照、外壳 delta 与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——`directory-node.ts`/`face.ts`/`store.ts`/`FilesBody.module.css` 与 `FilesBody.tsx` 的行级定义必须字节级一致，许可差异只有外壳函数根源改写与 css specifier 的 `.ts` 后缀；同时检查上游 `locales.ts` 的 `zh` 键集（shim 的 `SidebarFilesKey` 联合须同步）、`workspaceFiles` remote 面与 `data-dockkit-content` 钩子。复刻体类名 `mrfw-ft*`、不携带 `data-files-root`/`data-files-body`（防本插件 `:has()` 隐藏规则误伤）； primitives 探针失败时整棵复刻树不渲染（同型降级，不崩）。**remote 面只能经 `ctx.get` 懒解析**：`remote.workspaceFiles` 是 cordis 嵌套服务，context 代理路径（`remote.workspaceFiles` 或 `ctx['remote.workspaceFiles']`）受 inject 守卫（未声明 fiber 直接抛 `without inject`），而本版 cordis 的 inject 条目全 required（声明会把整行 gate 在可选服务上）——`lazyFilesRemote` 用 `ctx.get('remote')`/`ctx.get('remote.workspaceFiles')` 免守卫直查 store，一切查找失败折叠成 `gateway/internal` 失败行（verbatim `load` 的 `.then` 无 `.catch`，逃逸 rejection 会静默钉死 loading）。**编译面同理钉在 dev-pin**：`0.2.0-rc.2` 之前 `workspaceFiles.changes` 是 2 参（session 级 watch），`tsconfig.client.json` 的 `paths` 把 `@deepseek-ai/dsh-api-remotes/client` 映射到 `client-remote.d.ts`（本地声明拼的是 path-watch 时代的 3 参签名），让 verbatim `face.ts` 在矩阵旧版本上也能过 typecheck——安全前提是 `files.actions` 槽位在旧版不存在、调用永不会执行。
 
-**open-in-app 复刻面**：`src/client/open-in-app/` 是上游 `ui-open-in-app` client 包的逐字节 fork（基线 `1f81c047fc` = `0.2.1-rc.3`；清单、shim 对照与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——唯一许可差异是 `OpenTargetButton.tsx` 里 css specifier 的 `.ts` 后缀；同时检查上游 `locales.ts` 的 `zh` 键集是否新增（shim 的 `OpenInAppKey` 联合须同步）、`shared.ts` 路由常量是否变化（devDep 版本即出处记录）、`OpenInAppActionInjected` 的 hook 名是否漂移。复刻组件拼写 `*Regular` 图标族：0.1.5/0.1.6 像素名运行时不建 adapter、不渲染按钮（同型降级，不崩）。
+**open-in-app 复刻面**：`src/client/open-in-app/` 是上游 `ui-open-in-app` client 包的逐字节 fork（基线 `f3803c9697` = `0.2.2-alpha.2`；清单、shim 对照与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——许可差异只有 `OpenTargetButton.tsx` 里 css specifier 的 `.ts` 后缀与 `open-toast.tsx` 的两行（丢 layout 副作用导入、`isMobileDevice` 走 `device.ts` 探测 shim）；同时检查上游 `locales.ts` 的 `zh` 键集是否新增（shim 的 `OpenInAppKey` 联合须同步）、`shared.ts` 路由常量是否变化（devDep 版本即出处记录）、`OpenInAppActionInjected` 的 hook 名是否漂移。复刻组件拼写 `*Regular` 图标族：0.1.5/0.1.6 像素名运行时不建 adapter、不渲染按钮（同型降级，不崩）。
 
 ## 13. B9 进程栅栏接缝（Full-access bypass）
 
-全部 17 个支持版本的四个进程面在 `danger-full-access` 下都绕过 `ctx.sandbox.confine()`：bash/pwsh executor 的 `execute`（`0.1.5/0.1.6` 还有 `start`）、`dsh-terminal-bash` 模块私有 `spawnArgv`、`dsh-ptc-runtime-node`（run_code）。subprocess spec 不携带 `sandboxPolicy`，无法在下层恢复授权意图——`multi-root-process-fence` 行用 `AsyncLocalStorage` 注入 deny 上下文：包装 `ctx.shell.execute`（旧版 `run` / `start`）/`ctx.ptcRuntime.run` 置上下文，`ctx.subprocess.spawn` 见到上下文才重写 argv。PTY 的可达接缝只有共享的 `ctx.subprocess.spawnTerminal`（`persistent-shell` 组 `isolate: terminals`，组内 backend 不可达），会话从 `env.DSH_SESSION_ID` 恢复（`Agent.enter` 强制 `agent.id === session.id`）再 `sandboxPolicy.resolve({session})`；会话不可解析且存在显式只读根时 fail closed。受限 prefix 不私有调 runner：以 read-only policy 探 `super.confine(['true'])` 拆出 profile 骨架，再 `restrictProfileArgs` 变换（保同步/异步形状）。决策见 [ADR-0017](../../docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)，测试见 `tests/process-fence.spec.ts`。
+全部 19 个支持版本的四个进程面在 `danger-full-access` 下都绕过 `ctx.sandbox.confine()`：bash/pwsh executor 的 `execute`（`0.1.5/0.1.6` 还有 `start`）、`dsh-terminal-bash` 模块私有 `spawnArgv`、`dsh-ptc-runtime-node`（run_code）。subprocess spec 不携带 `sandboxPolicy`，无法在下层恢复授权意图——`multi-root-process-fence` 行用 `AsyncLocalStorage` 注入 deny 上下文：包装 `ctx.shell.execute`（旧版 `run` / `start`）/`ctx.ptcRuntime.run` 置上下文，`ctx.subprocess.spawn` 见到上下文才重写 argv。PTY 的可达接缝只有共享的 `ctx.subprocess.spawnTerminal`（`persistent-shell` 组 `isolate: terminals`，组内 backend 不可达），会话从 `env.DSH_SESSION_ID` 恢复（`Agent.enter` 强制 `agent.id === session.id`）再 `sandboxPolicy.resolve({session})`；会话不可解析且存在显式只读根时 fail closed。受限 prefix 不私有调 runner：以 read-only policy 探 `super.confine(['true'])` 拆出 profile 骨架，再 `restrictProfileArgs` 变换（保同步/异步形状）。决策见 [ADR-0017](../../docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)，测试见 `tests/process-fence.spec.ts`。
 
 PTC 的具体实现 `execute` 是 private；包装公开 `run`。Windows 宽字符串指针用 `koffi.decode(ptr, 'char16_t', -1)` 解码指向的数据，不能用 `str16`（那会再解引用一次，把字符串头当地址并原生崩溃）。旧属性候选的 TokenSecurityAttributes 查询采用 native UNICODE_STRING，不能与 Win32 claim 的 PWSTR 布局混用。runner 从 broker 接收 token handle，再读回派生 token 的普通 TokenGroups，确认每根 deny-only 且非 enabled；不能信任 broker ACK。普通 deny-only 组与可取交集删除的 restricting SID list 是两个列表；安装与安全边界链接 ADR-0020，不在本笔记复制进度。
 
 PTY 的 agent/用户判别是 §13 唯一的静默 fail-open 接缝：`DSH_PTY_SESSION_ID` 只由 agent PTY 的启动路径盖章（面板终端控制器只盖 `DSH_SESSION_ID`），下游 release 一旦不再盖章，agent PTY 会被当作用户终端直通放行。`src/compat/pty-marker.ts` 在启动时探测已安装 `@deepseek-ai/dsh-terminal-bash` 的构建产物里有没有这个常量——探的是产物内容，不是版本号也不是 in-process shape（远端打包/裁剪后的构建不执行本机代码也能验证）。后端不存在 = 无 PTY 接缝、放行；存在但探不到 = 启动拒载，`DSH_MULTI_ROOT_COMPAT=warn` 也放宽不了（warn 只放行「未列名但自洽的候选版本」，不放行「合同已经破裂」）。测试在 `tests/pty-marker.spec.ts`。
 
 旧版 Windows process binding 的 `GetFileType` 可能缺失；fd 7 适配必须通过公开 `extendWin32ProcessBindings` 补齐，不能依赖开发 pin 的表形状。
+
+## 14. DSH 0.2.2 接缝与安静陷阱
+
+`0.2.2-alpha.2` 是一次 2000+ commit 的大跨越（rc.4 之后无 alpha.1 标签）。插件源码不需要适配，但测试与宿主组合有几处必须知道的变化：
+
+- **AgentRegistry 新增 `static inject = ['sessionProjections']`**：任何测试栈在 `ctx.plugin(AgentRegistry)` 之前必须先挂 `SessionProjectionRegistry`，否则 `ctx.agents` 静默为 `undefined`，首个 `ctx.agents.enter()` 报 `Cannot read properties of undefined (reading 'enter')`——fixture 缺口，不是插件缺陷。`sessionProjections.register()` 改为 async 且返回 handle；`registry.stateOf(session,key)` 已废弃。
+- **工具执行拆出 `dsh-tools`**：执行器是独立行（`dsh-tool-executor-native` / `-ptc`），`ctx.tools.execute` 收批量 `calls` 输入；`@deepseek-ai/dsh-tools/pipeline` 子路径只在 0.2.2 起存在。测试侧的统一处理是 `tests/support/tool-executor.ts`：`ctx.tools.setExecutor` 存在才动态挂上等价分发器，调用按批量/单发两种形态分发。**注意**：`import('@deepseek-ai/dsh-tools/pipeline')` 这类字面动态导入会被 Vite 在转换期解析，在旧版本上直接炸整份 spec——动态导入的 specifier 必须在运行时才拼得出——即 `import()` 的实参写成模板字符串拼接，而不是一段完整字面量。
+- **Sandbox 原生第三路可写根**：`SandboxExecutionPolicy.additionalWritableRoots` + `workspaceWritableRoots`（policy service 配置键 `sandboxPolicy.additionalWritableRoots`）由 Seatbelt/bwrap/Landlock/fs-sandbox 原生消费；windows-acl 以 `SandboxUnsupportedPolicyError` 拒绝。本插件不设该字段，宽授权照旧来自自身 scope；两路 grant 的复合由 `tests/upstream-additional-roots.spec.ts` 钉住（旧版本按 `workspaceWritableRoots` 导出存在性结构性跳过）。
+- **Session/store**：store 持有的 Session 在 `session/created` 完成前拒绝 append——插件测试用独立 Session，不受影响。`dsh-storage-domain` 新增 `deleteRecords`/`deleteMany` 与 `unknown-state` 隔离，均为新增面。
+- **Node ≥24.9**：0.2.2 起的 lanes 需要 Node 24；CI verify 按已知旧版前缀走 22.19.0、其余走 24.9.0。
+- **Auto Review 不动**：上游实验性 auto-review 在 0.2.2 有变化（每条历史一条请求消息、AutoReviewFailedError、卸载规则），但可选 fork 仍钉死 `0.2.1-rc.2` 基线，`AUTO_REVIEW_RELEASE` 不随开发 pin 走。
+- **上游 Skills 语义微调**：filesystem provider 把失败根报为 incomplete observation、tool-skill 发布 incomplete catalog；本插件的多根 skills provider 仍把嵌套 observation 当普通候选、忽略 `complete:false`——行为不变，记为已知后续观察点。

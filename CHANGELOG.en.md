@@ -8,6 +8,13 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [Unreleased]
+
+### Added
+
+- **Exact support for DSH `0.2.1-rc.4` and `0.2.2-alpha.2`**: the `rc.4` probe was fully green with no adapter changes; `0.2.2-alpha.2` splits tool execution out of `dsh-tools` into executors and gives `AgentRegistry` a new `sessionProjections` injection — neither touches plugin source. Upstream's new `SandboxExecutionPolicy.additionalWritableRoots` (a native third writable-root path unrelated to this fork) composes correctly with the widened provider, pinned by a new regression spec asserting both grants take effect. The dev pin moves to `0.2.2-alpha.2` (cordis `4.0.6-alpha.1`, Node ≥24.9). The client forks (files-tree, open-in-app) are re-synced to the `0.2.2-alpha.2` baseline — hover rules moved under `@media (hover: hover)` and open-in-app failure feedback became an app-wide `shell.overlay` outcome toast.
+- **Upgrade lane and CI**: the CI verify matrix now routes by a known list — `0.1.*` / `0.2.0` / `0.2.1` run on Node `22.19.0`, everything else (including 0.2.2 and later) on `24.9.0`; the upgrade script additionally pins the target release's own cordis ecosystem (plugin-loader/group/include, schemastery, cosmokit) when repointing, so an older tree cannot mix with the alpha-line packages the committed lockfile prefers.
+
 ## [0.1.10] - 2026-10-25
 
 ### Added

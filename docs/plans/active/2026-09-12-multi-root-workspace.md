@@ -46,6 +46,7 @@
 | 第二期 | Files 页签附加根浏览（P1–P11） | `RootSwitcher` 根切换器 + 复刻的 `RootFileTree` 接管树区；open-in-app fork 重定向到选中根；面板徽标、`PathCopy`、确认层与下拉选择器 | [P1–P11](#files-头部根浏览-p1p112026-10-12未发布) | [0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md) | `79f6934`…`a43cbc0` | `v0.1.7` |
 | compat | DSH 0.2.1 后续提升 | DSH 支持矩阵扩展至 `0.2.1-alpha.3`–`0.2.1-rc.2` 五个精确版本；storage-domain zod 分裂适配、warn 车道 allow-version 预授权 | [本次记录](#dsh-021-后续兼容提升2026-10-17) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `eaf2d8f` | `v0.1.7` |
 | compat | DSH 0.2.1-rc.3 提升 | DSH 支持矩阵纳入 `0.2.1-rc.3`；上游差异全部为新增（sidebar 槽位、导航 pins、DeepSeek `/models`），无新适配分支；开发 pin 升级 | [本次记录](#dsh-021-rc3-兼容提升2026-10-23) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `bddeae3` | `v0.1.10` |
+| compat | DSH 0.2.1-rc.4 与 0.2.2-alpha.2 提升 | DSH 支持矩阵纳入 `0.2.1-rc.4` 与 `0.2.2-alpha.2`；测试栈补 `sessionProjections` 注入与执行器结构探测；fork 基线前移 `f3803c9697`；CI 按版本分流 Node 22/24；升级脚本补 cordis 生态 pin 防混树；开发 pin `0.2.2-alpha.2` / cordis `4.0.6-alpha.1` | [本次记录](#dsh-021-rc4-与-022-alpha2-兼容提升2026-10-28) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `pending` | - |
 | compat | DSH 0.2.0 `permissionPresets/catalog` 修复 | 可选包按"谁加载副本、经哪个锚点"分三类取证（运行时加载 / 宿主服务 / runner 锚定），link: 检出不再幻影混装；两个 provider 行不再 inject 门禁，被拒安装退化为上游等价而非拖死 `ctx.fs`/`ctx.sandbox`/`ctx.shell`/`permissionPresets` | [本次记录](#dsh-020-permissionpresetscatalog-修复2026-10-18) | [0009 修订](../../decisions/ADR-0009-dsh-compat-contract.md) | `f6d81de` | `v0.1.8` |
 | 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 | 兼容协作 | Auto Review 多根上下文 | 拓扑/有效访问权限/当前项目约束的可信输入；可选外部兼容层及联合验证 | [适配计划](../completed/2026-10-18-auto-review-context-adaptation.md)、[源码调研](../../reference/auto-review-compatibility.md) | [0021](../../decisions/ADR-0021-auto-review-context-companion.md) | `feat/compat-auto-review` | Phase 0–2 已实施；本机验收与旧版回归见[本次记录](#auto-review-多根上下文适配2026-10-18)；仅联合目标 `0.2.1-rc.2`；独立 companion 交付形态在发布前被 ADR-0022 取代，能力以内置行随 `v0.1.9` 发版；Phase 3 不在本批范围 |
@@ -1060,3 +1061,47 @@ C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 
 | `0.2.1-alpha.2` | 49 包统一 | 841 passed / 79 skipped | 52 | 126 | 通过 |
 
 回归后开发 pin 与安装树恢复 `0.2.1-rc.3`：可选 peer（`dsh-permission-presets` / `dsh-util-values`）曾被 lockfile 钉在旧版造成混装，`pnpm dedupe` 重指后 49 包统一 `0.2.1-rc.3`，frozen lockfile install 通过、`compat:check` 再次四方一致。该现象只发生在本地来回重指的工作流，不影响干净 checkout 的 frozen 安装。远端 17 版本 × OS 矩阵由本分支 PR 的 CI 车道执行，未完成前不记为通过。
+
+## DSH 0.2.1-rc.4 与 0.2.2-alpha.2 兼容提升（2026-10-28）
+
+用户授权范围是 `dsh-v0.2.1-rc.4` 与 `dsh-v0.2.2-alpha.2` 两个发布版本。上游本地 tag 与 npm `versions` 列表一致，分别与 `0.2.1-rc.3`、`0.2.1-rc.4` 做源码差分（接口审查见 [dsh-0.2.2-migration.md](../../reference/dsh-0.2.2-migration.md)）。支持合同保留全部旧版，再纳入这两个精确版本；开发 pin 与 lockfile 升到 `0.2.2-alpha.2`，cordis 随 `dsh` 声明升到 `4.0.6-alpha.1`；上游 root engines 自 0.2.2 起要求 Node `>=24.9.0`。插件版本号不变，本提升不单独创建 release tag。
+
+| 上游 tag | commit | npm dist-tag |
+|---|---|---|
+| `dsh-v0.2.1-rc.4` | `504a01a9578abc2c6f1fb896b1dc322c9fe24f66` | `next` |
+| `dsh-v0.2.2-alpha.2` | `f3803c96974ad4a94195fb97e5c637e9c2a3afe3` | `alpha` |
+
+#### 接口变更与风险
+
+| 接缝 | 上游变化与影响 | 本次处理与证据 |
+|---|---|---|
+| `AgentRegistry` 注入 | 新增 `inject = ['sessionProjections']`；挂缺 `ctx.agents` 为 `undefined` | 测试栈补挂 `SessionProjectionRegistry`（skills-stack、auto-review/parent）；插件源码不消费 `ctx.agents` |
+| 工具执行拆分 | `ctx.tools.setExecutor`、批量 `execute({calls})`、`dsh-tools/pipeline` 仅 0.2.2 起存在 | `tests/support/tool-executor.ts` 按 `setExecutor` 存在性动态挂载；动态导入 specifier 非字面量（Vite 转换期会解析字面动态导入，旧版本直接炸 spec） |
+| Sandbox `additionalWritableRoots` | 原生第三路可写根（Seatbelt/bwrap/Landlock/fs-sandbox 消费，windows-acl 拒绝） | 本插件不设该字段；`tests/upstream-additional-roots.spec.ts` 钉住原生根 X 与 scope 根 Y 在各方言同时授予、fs fence 与真实 Seatbelt 执行一致 |
+| client fork | `ui-sidebar-files` hover 移入 `@media (hover: hover)`；`ui-open-in-app` 失败反馈改为 `shell.overlay` outcome toast | fork 基线前移 `f3803c9697`（见两个 FORK.md）；新增 `outcome.ts`/`device.ts` shim、`open-failure-toast.tsx` 删除；`Toast` 的 `tone`/`actions` 经 `upstream-surface.d.ts` 重载在 0.1.5 像素期上过 typecheck |
+| session / storage / skills | session/created 完成前拒 append；storage 新增 deleteRecords/unknown-state；filesystem skills 报 incomplete observation | 均为新增面或语义微调，插件不受影响（skills incomplete 记为已知后续观察点） |
+| Node / cordis | 0.2.2 起 engines `>=24.9.0`；cordis `~4.0.6-alpha.1` | CI verify 按已知旧版前缀分流：仅 `0.1.*`/`0.2.0`/`0.2.1` 用 Node `22.19.0`，其余用 `24.9.0`；`upgrade.yml` 升至 `24.9.0` |
+
+#### 候选车道与验收
+
+`0.2.1-rc.4` 探针一次全绿、零源码改动：单测 **841 passed / 79 skipped**，compose **52**、behavior **126**、journey **76**。
+
+`0.2.2-alpha.2` 首跑 typecheck/build/三路 smoke 全绿；首轮 Vitest 为 **815 passed / 26 failed**——全部集中在 skills 测试栈（`AgentRegistry` 的 `sessionProjections` 注入 fixture 缺口），补齐后又暴露 `ToolExecutorUnavailableError`（执行器拆分），经 `tests/support/tool-executor.ts` 结构探测解决。修复后 alpha.2 enforce 验收（本机 macOS，Seatbelt 可执行）：`compat:check` 四方一致；lint、双端 typecheck、build、`kernel:probe` 全过；test **61 文件 855 passed / 79 skipped**、compose **52/0/0**、behavior **126/0/0**、journey **76/0/0**、packed behavior **125/0/0**；auto-review:fork 验证通过、smoke:auto-review 按设计跳过（仅 `0.2.1-rc.2` 目标）；`pnpm docs:check` 通过。`dsh plugin add` 在安装门禁下接受 `0.2.2-alpha.2`（peers 已含精确版本，无版本告警）。
+
+#### 旧版回归
+
+在正式 allowlist（enforce）下逐版重指重建：**回归期间发现升级脚本混树缺陷并已修复**——committed lockfile 偏好的 alpha 行 cordis 生态包（`cordis-plugin-loader@1.0.7-alpha.1` 等）会被旧版 peer 范围沿用，使 `0.2.1` 运行时混在 alpha loader 上、Settings volatile 写够不到 live Config（skills-settings 的 enabled 断言静默失败）；`upgrade-dsh.mjs` 现从目标版本自身 manifest 派生 `cordis-plugin-*`/`schemastery`/`cosmokit` 精确 pin。修复后每版跑 `compat:check`、双端 typecheck、build、全量 test、compose、behavior：
+
+| 版本 | resolved 树 | 单测 | compose | behavior | journey | 结果 |
+|---|---|---|---|---|---|---|
+| `0.2.1-rc.4` | 统一 `0.2.1-rc.4`（loader `1.0.6` / cordis `4.0.5`） | 851 passed / 83 skipped | 52 | 126 | 76 | 通过 |
+| `0.2.1-rc.3` | 统一 `0.2.1-rc.3`（loader `1.0.6` / cordis `4.0.5`） | 851 passed / 83 skipped | 52 | 126 | — | 通过 |
+| `0.2.1-rc.2` | 统一 `0.2.1-rc.2`（loader `1.0.6` / cordis `4.0.5`，含 Auto Review 开发包） | 921 passed / 83 skipped | 52 | 126 | — | 通过；auto-review:fork 验证、smoke:auto-review **真跑**（行开关往返、bundle 顺序、reload、owner drain） |
+| `0.2.1-alpha.2` | 统一 `0.2.1-alpha.2`（loader `1.0.6` / cordis `4.0.5-alpha.1`） | 851 passed / 83 skipped | 52 | 126 | — | 通过 |
+| `0.2.0-rc.2` | 统一 `0.2.0-rc.2`（loader `1.0.6` / cordis `4.0.4`） | 845 passed / 89 skipped | 52 | 126 | — | 通过 |
+| `0.1.7-rc.2` | 统一 `0.1.7-rc.2`（loader `1.0.6` / cordis `4.0.4`） | 845 passed / 89 skipped | 52 | 126 | — | 通过 |
+| `0.1.5-rc.2` | 统一 `0.1.5-rc.2`（loader `1.0.6` / cordis `4.0.2`） | 842 passed / 92 skipped | 52 | 118 | 76 | 通过 |
+
+回归后开发 pin 与安装树恢复 `0.2.2-alpha.2`：frozen lockfile install 通过、`--print-installed` 单一 `0.2.2-alpha.2`、`compat:check` 再次四方一致、workspace 无 probe 残留。
+
+**未覆盖**：Linux 上 bwrap/Landlock 的真实内核执行（本机仅 Seatbelt）、Windows ACL 原生矩阵、fork 的浏览器目检（`data-*` 钩子由源码对照核对）、远端全版本 × OS 矩阵（由本分支 PR 的 CI 车道执行）。
