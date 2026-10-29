@@ -1105,3 +1105,30 @@ C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 
 回归后开发 pin 与安装树恢复 `0.2.2-alpha.2`：frozen lockfile install 通过、`--print-installed` 单一 `0.2.2-alpha.2`、`compat:check` 再次四方一致、workspace 无 probe 残留。
 
 **未覆盖**：Linux 上 bwrap/Landlock 的真实内核执行（本机仅 Seatbelt）、Windows ACL 原生矩阵、fork 的浏览器目检（`data-*` 钩子由源码对照核对）、远端全版本 × OS 矩阵（由本分支 PR 的 CI 车道执行）。
+
+## Issue #24：Registry／Skills 刷新循环 hot-fix（2026-10-29）
+
+在 `fix/skill-lock-fix` 修复，尚未发布；问题机制与修复边界见[故障排查](../../troubleshooting/registry-owned-by-another-process.md#skills-查询导致持续刷新issue-24)，通知规则见 [ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md#4-生命周期缓存与撤销)。生产改动仅使 `setRegistryAuthority()` 对相同状态保持静默，保留现有 lease 重试、持续持锁、拆除顺序与 fail-closed 语义。
+
+新增 `tests/skills-authority.spec.ts` 的四项集成回归，并加强 `tests/scope.spec.ts` 的相同状态通知断言。集成用例挂真实内核锁、生产 Registry、原生 Skills，模拟收到 `skills/change` 即自动重查的客户端，设 20 次硬上限。覆盖正常持锁、空根及有根时持续竞争失败、存储打开失败、故障期间继续持锁、原持有者释放后接管、介质修复后恢复、授权与 Skill 正文加载，以及不可用期间的空附加根授权。既有 `authority-boundaries` / `process-fence` 回归继续覆盖仅主根可写与不授予共享临时区的执行边界。
+
+**先红后绿证据**：未改生产源码时，scope 单测因重复通知失败，两个竞争用例与存储故障用例均触及 20 次查询上限，共 **4 failed / 33 passed**。加入状态相等即返回的判断后，同一组 **37 passed**；持续竞争或存储故障下，初次查询为 1 次、变化事件为 0，重复刷新不增加事件；真实恢复仍通知，接管后稳定刷新不再失效。
+
+本机 macOS、Node `24.18.0`、开发 pin DSH `0.2.2-alpha.2`：`pnpm verify:all` 完成，`compat:check`、lint、双端 typecheck、build 通过；全量 test **848 passed / 90 skipped**；compose **52 passed / 0 failed / 0 skipped**、behavior **95 / 0 / 7**、journey **69 / 0 / 2**、packed behavior **94 / 0 / 7**，`pack:check`、`auto-review:fork` 与 `pnpm docs:check` 通过。`smoke:auto-review` 按既有规则跳过（仅针对 `0.2.1-rc.2`）。`kernel:probe` 正常完成，但外层沙箱使 Seatbelt `sandbox_apply: Operation not permitted`，bwrap/Landlock 未安装，真实受限执行用例按既有能力探测跳过。packed 安装遇到 `koffi` 构建审批后，经既有脚本在隔离 profile 中授权并 remove/add 恢复，behavior battery 通过。
+
+**20 分钟真实双 Host 观察通过**（20:31:56–20:51:57，Asia/Taipei，实际双实例时长 `1200.425s`）：两个独立进程挂完整 DSH `web` profile，共用隔离 `$DSH_HOME` 的登记存储；Skills 开启、真实 Agent/Session，每 5 秒查询、每 30 秒刷新 Registry，收到 `skills/change` 立即重查。约第 8 分半通过真实 HTTP/RPC 手动读取并修改附加根 Skill 正文，此后每 30 秒重复读取。没有 TUI 或模型调用，也没有强制 GC 或降低 V8 堆上限（实测每个 Host 上限 2240 MiB）；外部 RSS 超过 1 GiB 或查询失控即中止的保护均未触发。原定 30 分钟，按用户后续要求在控制器中把截止时间改为 20 分钟，仅调试控制器的截止变量，不重启或修改两个被测 Host；收尾接管观察为 5 秒。原始采样与汇总见[测量数据](../../reference/issue-24-registry-skills-soak-darwin.json)。
+
+| 指标（双实例阶段） | 持锁方 | 竞争等待方 |
+|---|---|---|
+| 平均 CPU（去除前 30 秒，100% = 一个 CPU 核心，整个 Host 的 user + system 时间） | 0.8560% | 0.7119% |
+| 5 秒窗口 CPU 峰值（去除前 30 秒） | 4.4424% | 4.1419% |
+| 结束时 RSS / V8 已用堆 / old-space | 28.094 / 88.244 / 66.008 MiB | 30.516 / 86.500 / 65.177 MiB |
+| 第 5–10 分钟 → 第 15–20 分钟已用堆中位数 | 83.908 → 87.704 MiB | 83.674 → 86.467 MiB |
+| 定时与事件驱动的原生 Skills 查询 / 主动 Registry 刷新 | 242 / 40 | 241 / 40 |
+| Skills 变化事件 | 1（修改 Skill 文件） | 0 |
+| HTTP/RPC 正文读取 | 24 次成功，包含修改后的正文 | 24 次正确拒绝 |
+| 运行错误 / 未预期退出 / OOM | 0 / 0 / 0 | 0 / 0 / 0 |
+
+两个 Host 在 20 分钟内都未出现报告中的持续单核占用或高速内存增长；已用堆有少量漂移，不能据此声称绝无慢泄漏。双实例阶段结束后，持锁方正常退出（code 0），等待方在约 60 ms 后完成显式刷新，从 `contended` 恢复 `active`，附加根写权限和原生 Skills 目录恢复；真实根/authority 变化产生 3 次原生 Skills 事件及有限重查，收尾阶段事件数不再增加，随后也正常退出（code 0）。完整记录含 486 个采样点；该接管阶段验证目录恢复，正文恢复另由上述正式回归用例覆盖。
+
+**未覆盖**：真实 `dsh-tui` 的 OOM 复现、Ubuntu 报告环境的原生复测、Windows 原生 ACL 和远端全版本 × OS 矩阵。版本号与 CHANGELOG 保持不变，发布时按既有流程记账。
