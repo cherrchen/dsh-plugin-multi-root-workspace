@@ -8,12 +8,16 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
-## [Unreleased]
+## [0.1.11] - 2026-10-29
 
 ### Added
 
 - **精确支持 DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2`**：`rc.4` 探针全绿、无需任何适配改动；`0.2.2-alpha.2` 把工具执行从 `dsh-tools` 拆出为独立执行器，`AgentRegistry` 新增注入 `sessionProjections`，本插件源码均不受影响。上游新增 `SandboxExecutionPolicy.additionalWritableRoots`（原生与 fork 无关的第三路可写根），宽授权 provider 与其正确复合——新回归用例钉住双方 grant 同时生效。开发 pin 提升到 `0.2.2-alpha.2`（cordis `4.0.6-alpha.1`，Node ≥24.9）。客户端 fork（files-tree、open-in-app）已对齐 `0.2.2-alpha.2` 基线——hover 规则移入 `@media (hover: hover)`，open-in-app 失败反馈改为应用级 `shell.overlay` outcome toast。
 - **升级通道与 CI**：CI verify 矩阵改为按已知名单分流——`0.1.*` / `0.2.0` / `0.2.1` 走 Node `22.19.0`，其余（含 0.2.2 及以后）走 Node `24.9.0`；升级脚本在重指旧版本时会顺带钉住该版本自带的 cordis 生态（plugin-loader/group/include、schemastery、cosmokit），避免与提交锁文件的 alpha 行混树。
+
+### Fixed
+
+- **Registry Authority 重复通知引发的 Skills 刷新反馈循环（[Issue #24](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/issues/24)）**：第二个 DSH 进程争用登记表 lease（或存储打开失败）时，附加根 Skills 的每次查询都经 `refresh()` 重试 lease；失败后 `setRegistryAuthority(false)` 即使状态没有变化也通知监听者，使 Skills 缓存失效并广播 `skills/change`，收到事件的客户端立即重查，形成无界反馈循环——等待方 Host 空闲时持续占用约一个 CPU 核心、内存增长直至 V8 OOM，零附加根同样可触发。现在仅在实际状态变化时通知；lease 重试、持锁方退出后的接管、以及「权限不可用时仅主根可写」的 fail-closed 语义不变（[故障排查](./docs/troubleshooting/registry-owned-by-another-process.md#skills-查询导致持续刷新issue-24)、[ADR-0023 修订](./docs/decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md#4-生命周期缓存与撤销)）。
 
 ## [0.1.10] - 2026-10-25
 
@@ -188,7 +192,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.7...v0.1.8

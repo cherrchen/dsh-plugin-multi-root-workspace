@@ -1,6 +1,6 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；v0.1.9（Auto Review 多根上下文以主包内置可选行交付，默认关闭，ADR-0022）已发版；v0.1.10（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
+> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；v0.1.9（Auto Review 多根上下文以主包内置可选行交付，默认关闭，ADR-0022）已发版；v0.1.10（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发版；v0.1.11（DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 支持矩阵提升、Issue #24 Registry／Skills 刷新循环 hot-fix）已发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
 > 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
@@ -46,12 +46,13 @@
 | 第二期 | Files 页签附加根浏览（P1–P11） | `RootSwitcher` 根切换器 + 复刻的 `RootFileTree` 接管树区；open-in-app fork 重定向到选中根；面板徽标、`PathCopy`、确认层与下拉选择器 | [P1–P11](#files-头部根浏览-p1p112026-10-12未发布) | [0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md) | `79f6934`…`a43cbc0` | `v0.1.7` |
 | compat | DSH 0.2.1 后续提升 | DSH 支持矩阵扩展至 `0.2.1-alpha.3`–`0.2.1-rc.2` 五个精确版本；storage-domain zod 分裂适配、warn 车道 allow-version 预授权 | [本次记录](#dsh-021-后续兼容提升2026-10-17) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `eaf2d8f` | `v0.1.7` |
 | compat | DSH 0.2.1-rc.3 提升 | DSH 支持矩阵纳入 `0.2.1-rc.3`；上游差异全部为新增（sidebar 槽位、导航 pins、DeepSeek `/models`），无新适配分支；开发 pin 升级 | [本次记录](#dsh-021-rc3-兼容提升2026-10-23) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `bddeae3` | `v0.1.10` |
-| compat | DSH 0.2.1-rc.4 与 0.2.2-alpha.2 提升 | DSH 支持矩阵纳入 `0.2.1-rc.4` 与 `0.2.2-alpha.2`；测试栈补 `sessionProjections` 注入与执行器结构探测；fork 基线前移 `f3803c9697`；CI 按版本分流 Node 22/24；升级脚本补 cordis 生态 pin 防混树；开发 pin `0.2.2-alpha.2` / cordis `4.0.6-alpha.1` | [本次记录](#dsh-021-rc4-与-022-alpha2-兼容提升2026-10-28) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `pending` | - |
+| compat | DSH 0.2.1-rc.4 与 0.2.2-alpha.2 提升 | DSH 支持矩阵纳入 `0.2.1-rc.4` 与 `0.2.2-alpha.2`；测试栈补 `sessionProjections` 注入与执行器结构探测；fork 基线前移 `f3803c9697`；CI 按版本分流 Node 22/24；升级脚本补 cordis 生态 pin 防混树；开发 pin `0.2.2-alpha.2` / cordis `4.0.6-alpha.1` | [本次记录](#dsh-021-rc4-与-022-alpha2-兼容提升2026-10-28) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `08795a1` | `v0.1.11` |
 | compat | DSH 0.2.0 `permissionPresets/catalog` 修复 | 可选包按"谁加载副本、经哪个锚点"分三类取证（运行时加载 / 宿主服务 / runner 锚定），link: 检出不再幻影混装；两个 provider 行不再 inject 门禁，被拒安装退化为上游等价而非拖死 `ctx.fs`/`ctx.sandbox`/`ctx.shell`/`permissionPresets` | [本次记录](#dsh-020-permissionpresetscatalog-修复2026-10-18) | [0009 修订](../../decisions/ADR-0009-dsh-compat-contract.md) | `f6d81de` | `v0.1.8` |
 | 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 | 兼容协作 | Auto Review 多根上下文 | 拓扑/有效访问权限/当前项目约束的可信输入；可选外部兼容层及联合验证 | [适配计划](../completed/2026-10-18-auto-review-context-adaptation.md)、[源码调研](../../reference/auto-review-compatibility.md) | [0021](../../decisions/ADR-0021-auto-review-context-companion.md) | `feat/compat-auto-review` | Phase 0–2 已实施；本机验收与旧版回归见[本次记录](#auto-review-多根上下文适配2026-10-18)；仅联合目标 `0.2.1-rc.2`；独立 companion 交付形态在发布前被 ADR-0022 取代，能力以内置行随 `v0.1.9` 发版；Phase 3 不在本批范围 |
 | 兼容协作 | Auto Review 内置入口迁移 | companion 并入主包：`./auto-review` 导出 + 默认 `disabled` 的 `multi-root-auto-review` 行；loader 生命周期接管/恢复；configure、独立 manifest 与第二 tarball 退役 | [评审记录](../completed/2026-10-20-auto-review-in-package-review.md)、[迁移记录](#auto-review-内置入口迁移2026-10-20) | [0022](../../decisions/ADR-0022-auto-review-loader-entry.md) | `9138084`…`e4804fb` | `v0.1.9` |
 | 第二期 | 附属根 Skills（S1–S7） | 附属根 `.dsh/skills` / `.agents/skills` 发现、`/alias-id:skill-name` 命名空间调用、每根开关与 `aliasId`、全局 Settings 开关；native effective-cwd 旁路封堵 | [实施计划](../completed/2026-10-23-multi-root-skills.md)、[本次记录](#multi-root-skills-架构验证2026-10-23) | [0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) | `1218543`…`e2c6fb1` | `v0.1.10` |
+| hot-fix | Issue #24 Registry／Skills 刷新循环 | `setRegistryAuthority()` 仅在实际状态变化时通知，阻断 Skills 失效 → `skills/change` → 客户端重查的无界反馈循环；lease 重试、接管与 fail-closed 语义不变 | [本次记录](#issue-24registryskills-刷新循环-hot-fix2026-10-29) | [0023 修订](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) | `c53c8a9` | `v0.1.11` |
 
 ## 总体策略
 
@@ -1108,7 +1109,7 @@ C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 
 
 ## Issue #24：Registry／Skills 刷新循环 hot-fix（2026-10-29）
 
-在 `fix/skill-lock-fix` 修复，尚未发布；问题机制与修复边界见[故障排查](../../troubleshooting/registry-owned-by-another-process.md#skills-查询导致持续刷新issue-24)，通知规则见 [ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md#4-生命周期缓存与撤销)。生产改动仅使 `setRegistryAuthority()` 对相同状态保持静默，保留现有 lease 重试、持续持锁、拆除顺序与 fail-closed 语义。
+在 `fix/skill-lock-fix` 修复并经 PR #25 合入 `main`，随 `v0.1.11` 发版；问题机制与修复边界见[故障排查](../../troubleshooting/registry-owned-by-another-process.md#skills-查询导致持续刷新issue-24)，通知规则见 [ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md#4-生命周期缓存与撤销)。生产改动仅使 `setRegistryAuthority()` 对相同状态保持静默，保留现有 lease 重试、持续持锁、拆除顺序与 fail-closed 语义。
 
 新增 `tests/skills-authority.spec.ts` 的四项集成回归，并加强 `tests/scope.spec.ts` 的相同状态通知断言。集成用例挂真实内核锁、生产 Registry、原生 Skills，模拟收到 `skills/change` 即自动重查的客户端，设 20 次硬上限。覆盖正常持锁、空根及有根时持续竞争失败、存储打开失败、故障期间继续持锁、原持有者释放后接管、介质修复后恢复、授权与 Skill 正文加载，以及不可用期间的空附加根授权。既有 `authority-boundaries` / `process-fence` 回归继续覆盖仅主根可写与不授予共享临时区的执行边界。
 
@@ -1131,4 +1132,4 @@ C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 
 
 两个 Host 在 20 分钟内都未出现报告中的持续单核占用或高速内存增长；已用堆有少量漂移，不能据此声称绝无慢泄漏。双实例阶段结束后，持锁方正常退出（code 0），等待方在约 60 ms 后完成显式刷新，从 `contended` 恢复 `active`，附加根写权限和原生 Skills 目录恢复；真实根/authority 变化产生 3 次原生 Skills 事件及有限重查，收尾阶段事件数不再增加，随后也正常退出（code 0）。完整记录含 486 个采样点；该接管阶段验证目录恢复，正文恢复另由上述正式回归用例覆盖。
 
-**未覆盖**：真实 `dsh-tui` 的 OOM 复现、Ubuntu 报告环境的原生复测、Windows 原生 ACL 和远端全版本 × OS 矩阵。版本号与 CHANGELOG 保持不变，发布时按既有流程记账。
+**未覆盖**：真实 `dsh-tui` 的 OOM 复现、Ubuntu 报告环境的原生复测、Windows 原生 ACL 和远端全版本 × OS 矩阵。

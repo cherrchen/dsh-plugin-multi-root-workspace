@@ -8,12 +8,16 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
-## [Unreleased]
+## [0.1.11] - 2026-10-29
 
 ### Added
 
 - **Exact support for DSH `0.2.1-rc.4` and `0.2.2-alpha.2`**: the `rc.4` probe was fully green with no adapter changes; `0.2.2-alpha.2` splits tool execution out of `dsh-tools` into executors and gives `AgentRegistry` a new `sessionProjections` injection — neither touches plugin source. Upstream's new `SandboxExecutionPolicy.additionalWritableRoots` (a native third writable-root path unrelated to this fork) composes correctly with the widened provider, pinned by a new regression spec asserting both grants take effect. The dev pin moves to `0.2.2-alpha.2` (cordis `4.0.6-alpha.1`, Node ≥24.9). The client forks (files-tree, open-in-app) are re-synced to the `0.2.2-alpha.2` baseline — hover rules moved under `@media (hover: hover)` and open-in-app failure feedback became an app-wide `shell.overlay` outcome toast.
 - **Upgrade lane and CI**: the CI verify matrix now routes by a known list — `0.1.*` / `0.2.0` / `0.2.1` run on Node `22.19.0`, everything else (including 0.2.2 and later) on `24.9.0`; the upgrade script additionally pins the target release's own cordis ecosystem (plugin-loader/group/include, schemastery, cosmokit) when repointing, so an older tree cannot mix with the alpha-line packages the committed lockfile prefers.
+
+### Fixed
+
+- **Skills refresh feedback loop caused by repeated Registry-authority notifications ([Issue #24](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/issues/24))**: while a second DSH process contends for the registry lease (or the store fails to open), every additional-root Skills query retried the lease through `refresh()`; on failure `setRegistryAuthority(false)` notified listeners even though the state had not changed, invalidating the Skills cache and broadcasting `skills/change` — clients re-query on every event, closing an unbounded feedback loop: the contending Host burned about one CPU core while idle, grew memory, and eventually died of V8 OOM, and zero additional roots did not prevent it. Listeners are now notified only on a real `available`/`unavailable` transition; the lease retry, takeover after the holder exits, and the fail-closed "primary root only while authority is unavailable" semantics are unchanged ([troubleshooting](./docs/troubleshooting/registry-owned-by-another-process.md#skills-查询导致持续刷新issue-24), [ADR-0023 revision](./docs/decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md#4-生命周期缓存与撤销)).
 
 ## [0.1.10] - 2026-10-25
 
@@ -188,7 +192,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.7...v0.1.8
