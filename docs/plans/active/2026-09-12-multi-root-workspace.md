@@ -1105,3 +1105,17 @@ C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 
 回归后开发 pin 与安装树恢复 `0.2.2-alpha.2`：frozen lockfile install 通过、`--print-installed` 单一 `0.2.2-alpha.2`、`compat:check` 再次四方一致、workspace 无 probe 残留。
 
 **未覆盖**：Linux 上 bwrap/Landlock 的真实内核执行（本机仅 Seatbelt）、Windows ACL 原生矩阵、fork 的浏览器目检（`data-*` 钩子由源码对照核对）、远端全版本 × OS 矩阵（由本分支 PR 的 CI 车道执行）。
+
+## Issue #24：Registry／Skills 刷新循环 hot-fix（2026-10-29）
+
+在 `fix/skill-lock-fix` 修复，尚未发布；问题机制与修复边界见[故障排查](../../troubleshooting/registry-owned-by-another-process.md#skills-查询导致持续刷新issue-24)，通知规则见 [ADR-0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md#4-生命周期缓存与撤销)。生产改动仅使 `setRegistryAuthority()` 对相同状态保持静默，保留现有 lease 重试、持续持锁、拆除顺序与 fail-closed 语义。
+
+新增 `tests/skills-authority.spec.ts` 的四项集成回归，并加强 `tests/scope.spec.ts` 的相同状态通知断言。集成用例挂真实内核锁、生产 Registry、原生 Skills，模拟收到 `skills/change` 即自动重查的客户端，设 20 次硬上限。覆盖正常持锁、空根及有根时持续竞争失败、存储打开失败、故障期间继续持锁、原持有者释放后接管、介质修复后恢复、授权与 Skill 正文加载，以及不可用期间的空附加根授权。既有 `authority-boundaries` / `process-fence` 回归继续覆盖仅主根可写与不授予共享临时区的执行边界。
+
+**先红后绿证据**：未改生产源码时，scope 单测因重复通知失败，两个竞争用例与存储故障用例均触及 20 次查询上限，共 **4 failed / 33 passed**。加入状态相等即返回的判断后，同一组 **37 passed**；持续竞争或存储故障下，初次查询为 1 次、变化事件为 0，重复刷新不增加事件；真实恢复仍通知，接管后稳定刷新不再失效。
+
+本机 macOS、Node `24.18.0`、开发 pin DSH `0.2.2-alpha.2`：`pnpm verify:all` 完成，`compat:check`、lint、双端 typecheck、build 通过；全量 test **848 passed / 90 skipped**；compose **52 passed / 0 failed / 0 skipped**、behavior **95 / 0 / 7**、journey **69 / 0 / 2**、packed behavior **94 / 0 / 7**，`pack:check`、`auto-review:fork` 与 `pnpm docs:check` 通过。`smoke:auto-review` 按既有规则跳过（仅针对 `0.2.1-rc.2`）。`kernel:probe` 正常完成，但外层沙箱使 Seatbelt `sandbox_apply: Operation not permitted`，bwrap/Landlock 未安装，真实受限执行用例按既有能力探测跳过。packed 安装遇到 `koffi` 构建审批后，经既有脚本在隔离 profile 中授权并 remove/add 恢复，behavior battery 通过。
+
+**长期观察进行中**：两个独立进程挂完整 DSH `web` profile，共用隔离 `$DSH_HOME` 的登记存储；Skills 开启、真实 Agent/Session，每 5 秒查询、每 30 秒刷新 Registry，收到 `skills/change` 立即重查。按用户要求观察 20 分钟，再核验接管；同时采样整个 Host 的 CPU、RSS、V8 堆与退出状态。已通过真实 HTTP/RPC 手动读取附加根 Skill 正文，并修改 Skill 文件：持锁方读取成功且只产生一次变化事件，等待方拒绝读取且不产生变化事件；随后每 30 秒重复正文读取。最终数据待观察结束补录，不能把进行中的观察计作通过。
+
+**未覆盖**：真实 `dsh-tui` 的 OOM 复现、Ubuntu 报告环境的原生复测、Windows 原生 ACL 和远端全版本 × OS 矩阵。版本号与 CHANGELOG 保持不变，发布时按既有流程记账。

@@ -605,10 +605,14 @@ export class MultiRootScopeService extends Service {
    * (before acquisition, on contention or storage failure, at teardown) and
    * `available` only once its stored records have been published. Nothing
    * else may call it, and it never touches the root table.
+   * Only transitions notify: a failed refresh may republish `unavailable`,
+   * and notifying on that no-op would re-arm Skills clients' refresh loop.
    * @param available - whether this process holds the registry authority.
    */
   setRegistryAuthority(available: boolean): void {
-    this.registryAuthority = available ? 'available' : 'unavailable'
+    const next = available ? 'available' : 'unavailable'
+    if (this.registryAuthority === next) return
+    this.registryAuthority = next
     for (const listener of this.listeners) listener()
   }
 }
