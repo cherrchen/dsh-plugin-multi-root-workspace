@@ -46,7 +46,7 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 | 需求（原文节号） | 不改上游下的机制 | 结论 |
 |---|---|---|
 | §4 不重实现原生设施；不造 `workspace_*` 工具 | 原生工具链（tool-fs / tool-bash / terminal）不动；插件零工具（可选一个内省工具）。注意：插件会**子类化**上游 fs 与 sandbox provider——这是"扩展"，不是重实现；文件 IO、进程、内核 runner 全部复用上游 | 满足（含澄清） |
-| §5.1 Root 管理 | 插件注册表 + `dsh-storage-domain` 持久化 + `canonicalPath` 校验；登记项带 `recordedPath`，授权需"当前解析 == 登记时授予的目录"；同一主根的变更整体串行；读取侧 `refresh` 重新校验但不写存储；跨进程由 store-wide 内核 lease 保证单写者（ADR-0007） | 插件职责 |
+| §5.1 Root 管理 | 插件注册表 + `dsh-storage-domain` 持久化 + `canonicalPath` 校验；登记项带 `recordedPath`，授权需"当前解析 == 登记时授予的目录"；同一 store 的变更与 fs write/edit 准入整体排序（[ADR-0024](../decisions/ADR-0024-registry-operation-admission.md)）；读取侧 `refresh` 重新校验但不写存储；跨进程由 store-wide 内核 lease 保证单写者（ADR-0007） | 插件职责 |
 | §5.2 Workspace Folders UI | slot 洞 + `directoryPicker` + locale 字典 | 插件 client 半部 |
 | §6 保留 Workspace.path 为 Primary Root | 现状即如此，不碰 | 零改动 |
 | §7 不改 Session cwd 语义 | `header.cwd` 不可变 | 零改动 |
@@ -78,7 +78,7 @@ Workspace = 一个 Primary Root（既有 workspace.path，不改）+ N 个 Addit
 
 MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作。它不是新功能，而是把四个已知的边界缺口补上；编号与发布状态见[路线图 §进度总账](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
-- **H1（= 路线图 M4）跨进程 Registry Authority Lease**：多个 DSH 进程共用同一 storage root 时，只允许一个进程打开登记表并授予附加根；其余进程 fail-closed 并在对方退出/崩溃后经 `refresh()` 接管。见 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。
+- **H1（= 路线图 M4）跨进程 Registry Authority Lease**：多个 DSH 进程共用同一 storage root 时，只允许一个进程打开登记表并授予附加根；其余进程 fail-closed 并在对方退出/崩溃后经 `refresh()` 接管。见 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。 后续 [ADR-0025](../decisions/ADR-0025-shared-registry-authority.md) 将存储管理与根使用分离，默认启用多 Host 共享。
 - **H2 面板权威收紧**：面板每个端点（含 `list`）只接受必填 `sessionId`，主根只来自 host 的 `session.header.cwd`；不再接受客户端指名的 `primaryRoot`，也不回退部署默认 workspace。见 [ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)。
 - **H3 DSH 兼容性代码契约**：支持矩阵是精确版本 allowlist（当前 `0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2`），启动时校验版本与混装，判定失败则四个安全相关行根本不启动；版本差异集中在 `src/compat/`。见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)。
 - **H4 Phase 1 附加根指令注入**：附加根**顶层** `AGENTS.md` / `CLAUDE.md` 进入模型上下文（user role 的 plugin instruction context），共享 64 KiB 预算，根离场即显式撤销。见 [ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)。
@@ -120,7 +120,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 7.3 **并发不丢操作**：同一主根上并发发起的增删改必须全部生效，且不得复活已删除的记录。
 7.4 **异常记录不扩散损坏**：缺少 `recordedPath` 的旧记录经无关写操作后仍可在重启时读取；一次 remove/alias/move 只能作用于一条可唯一定位的记录，不能按重复 id 批量命中或隐式删除其他记录。结构性 `invalid` 记录不发布任何投影——包括其 deny 边界：无法完整解析的记录其边界声明本身不可信，损坏不会遗留「半边生效」的负授权（取舍记录见 [ADR-0017 §失效登记](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#失效登记的负授权修订2026-10-13)）。**成员冲突是唯一的例外**：两条记录的 grant 字段各自完整、仅因 recorded 边界互相重叠而判 `invalid` 时，双方成员资格与写授权全部 withheld，但每条 recorded 边界仍作为 deny 发布——展示顺序、move 与重启都不能撤销一条明确的只读登记，修复方式是显式移除其中一条（见 [ADR-0017 §负授权保留与顺序无关冲突](../decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md#负授权保留与顺序无关冲突2026-10-16分支安全审查-phase-a)）。
 7.5 **实时 scope 不授予 missing 根**：目录在登记后被删除时，即使没有先执行 list/refresh，下一次 scope resolve 也必须排除它，不得通过写操作重建该目录。
-7.6 **跨进程单写者**：两个 DSH 进程共用同一 storage root 时，只有持有 store-wide 内核 lease 的进程打开登记表并授予附加根；另一进程 fail-closed（空 scope、`registry-contended`），其 `list`/Refresh 在对方退出或崩溃后可接管并读回最后一次 durable 写。空 scope 同时标记 `authority: 'unavailable'`：该进程看不到的 `read-only` 边界不当作不存在，`danger-full-access` 与 `workspace-write` 在其间都只授予主根写权限，移除共享临时区授权（fs 写与 shell / PTC / PTY 一致）；显式 deny 仍优先，`read-only` 不变。释放顺序：排空在飞 mutation → close domain → release lease，且与在飞 acquisition 不交错（继任者绝不会打开一份缺了最后一次写的快照）。见 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。
+7.6 **共享服务、唯一存储管理者**：同一 store 仅持内核 lease 的 owner 打开介质；多个 Host 的 mutation 与新操作 admission 在 owner 排序，owner 自己也不能绕过。撤权成功后新 admission 使用新状态，在飞操作可完成；断线停止新附加授权，保留拒绝边界，Full-access/Workspace-write 仅主根可写且无共享 temp，Files 拒绝未知外部读。崩溃后以原内核锁选举，胜者从磁盘重新打开并产生新 epoch，暂停不夺锁；拆除排空 mutation → close domain → release lease。请求结果不明不自动重放。详见 [ADR-0025](../decisions/ADR-0025-shared-registry-authority.md) 和[共享架构](../architecture/registry-authority-service.md)。
 7.7 **面板主根由 host session 推导**：面板通道每个端点（含 `list`）只接受必填 `sessionId`；host 用 `resolvePanelPrimaryRoot` 取该 session 的 `header.cwd` canonical，不接受客户端 `primaryRoot`，也不回退部署默认 workspace。缺失或未知会话拒绝；浏览器没有当前 Session 时显示空态、不调用 host。`/workspace-folders` 仍用 `invocation.agent.session`。见 [ADR-0008](../decisions/ADR-0008-panel-session-derived-authority.md)。
 7.8 **附加根指令注入（H4 Phase 1 + Phase 2）**：零附加根时该行一条 message 都不注入（空根与未装插件仍逐字节一致）；每个附加根**顶层**的 `AGENTS.md` / `CLAUDE.md` 在模型第一步之前可见，且以绝对路径标注（两个根的 `AGENTS.md` 不混淆）；**由成功工具调用到达的子目录**里的同类文件在其目录被考察到之后、下一步之前可见（触碰仅认成功的 `read` / `write` / `edit`，失败的调用不算）；每个文件恰好投递一次，内容变化才重发该文件；所有附加根共享同一份 64 KiB 预算；根被移除、消失或被替换（`redirected`）时注入**显式撤销**文案，已投递文件消失时注入**显式撤回**文案（点名绝对路径）；`$DSH_HOME`、主根自身与任何祖先目录的指令文件不被重复注入。触碰 `a/b/file` 时，`a/AGENTS.md` 与 `a/b/AGENTS.md` 都必须可见（被触碰路径的父目录及其每个祖先直到根都被考察）。见 [ADR-0010](../decisions/ADR-0010-additional-root-instruction-scope.md)。
 7.9 **每根访问级别**：附加根可登记为 `inherit`（新根默认）、`read-only` 或固定 `read-write`（`add --inherit|--read-only|--read-write` / `access` 子命令 / 面板切换）。`read-only` 根保留全部成员资格（可读、LSP、文件树、指令、路由），但 fs write/edit、受限进程与 Windows ACL 都不得授予它写权限；指向只读根的写入被拒并点名 `… is a read-only additional root`。降级到 read-only 永远允许；三态扩权变更按 ADR-0017 要求根此刻 `available`，且不重新记录路径。revive 一条 withheld 记录保留其既有 access，除非操作者**显式**给出新级别（旗标、select、`setAccess` 或面板 access 菜单项）——两个表面在操作者未指定时一律不发送 access，默认值绝不允许以显式值的身份上行。持久化编码保证旧版本插件读到 read-only 记录时判 `invalid` 而非升级为可写。
@@ -139,7 +139,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 
 - nested 指令文件只会在其目录**被考察到时**重新检查：根层每一步，子目录依赖"已经投递过"或"本次有触碰"；投递状态是进程内的，会话 resume 之后可能把已给过的指令再给一次。
 - 触碰识别只认 `read` / `write` / `edit` 三个工具名，且只认成功的调用；其他写文件工具（例如 `str_replace_editor`）不会触发子目录指令的发现。
-- 跨进程只有 single-writer 语义：同一 storage root 上不能并发写登记表；另一个进程要等到持锁者退出后经 `refresh()` 接管（这是刻意的 fail-closed，不是待修的竞态）。
+- 跨 Host 共享限定同机器、同用户和受支持的同一锁命名空间；仅一个存储管理者。老版本 holder 没有 IPC、内核无法认证 peer 或连接无法确认时，follower 安全退化而不另开介质。完整限制见[共享架构](../architecture/registry-authority-service.md)。
 - 支持矩阵是精确版本 allowlist：不在清单上、或核心包混装的宿主上，四个安全相关行根本不启动（组合退化为"未装插件"）。
 
 ### 已知限制（Windows，B1–B3 加固后确认）

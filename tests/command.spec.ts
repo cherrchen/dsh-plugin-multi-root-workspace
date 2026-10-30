@@ -14,7 +14,8 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AuthorityRpcError } from '../src/authority/protocol.ts'
 import * as CommandModule from '../src/command.ts'
 import { parseFoldersCommand, renderRootsReport, revealAccepted, revealArgv } from '../src/command.ts'
 import { PANEL_CHANNEL, type PanelRequest, type RootsView } from '../src/contract.ts'
@@ -896,4 +897,14 @@ describe('per-root access on the command and the panel', () => {
     const result = await callPanel('add', { sessionId: PANEL_SESSION, path: fixture.outside, access: 'execute' })
     expect(result.error?.code).toBe('panel/bad-request')
   })
+})
+
+it.each(['duplicate', 'authority-disconnected'])('preserves shared authority errors on command and panel surfaces: %s', async code => {
+  const stack = await mount({ withConnection: true })
+  const message = code === 'authority-disconnected' ? 'registry request result is unknown; resynchronize before another mutation' : 'duplicate root'
+  const spy = vi.spyOn(stack.registry, 'add').mockRejectedValue(new AuthorityRpcError(code, message))
+  try {
+    expect((await run(`add ${fixture.outside}`)).text).toContain(`${code}: ${message}`)
+    expect(await callPanel('add', { sessionId: PANEL_SESSION, path: fixture.outside })).toMatchObject({ ok: false, error: { code, message } })
+  } finally { spy.mockRestore() }
 })

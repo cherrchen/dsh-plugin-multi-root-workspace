@@ -183,6 +183,7 @@ dsh --profile web --dump-config | grep -A3 'multi-root'
 - id: multi-root-registry
   name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
   config:
+    sharedStorageRoot: !!js dshHomePath('storages')
     leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
     maxAdditionalRoots: 16
 - id: multi-root-instructions
@@ -262,7 +263,7 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 .
 ├── src/
 │   ├── roots.ts                      纯规则层：canonical 化、冲突校验、登记状态分类（available/missing/redirected/invalid）
-│   ├── registry.ts                   根注册表：dsh-storage-domain 持久化，同一主根的变更在一条队列里串行
+│   ├── registry.ts                   根注册表：dsh-storage-domain 持久化，唯一存储核心与 Host facade，store-wide 准入/变更排序
 │   ├── registry-lease.ts             跨进程 Registry Authority：POSIX flock（进程死亡由内核释放）
 │   ├── registry-lease-win32.ts       同上，Windows named semaphore 实现
 │   ├── scope.ts                      ctx.multiRootScope：唯一的授权源，兼发模型可见的拓扑快照
@@ -297,7 +298,7 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 ## 已知限制
 
 - 附加根的指令文件按需到达模型：根目录顶层的那一份在会话第一步之前注入，子目录里的那一份在本会话**成功**触碰过该目录之后注入；nested 文件只会在其目录被考察到时重新检查（根层每一步，子目录依赖已投递或有新触碰），投递状态是进程内的（resume 后可能再告知一次），也只识别 `read` / `write` / `edit` 三个工具名。主根与 user-global 的指令链仍由上游负责，本插件不重复注入（[ADR-0010](./docs/decisions/ADR-0010-additional-root-instruction-scope.md)）。
-- 跨进程单写者：同一 `$DSH_HOME` 上同时只允许一个 DSH 进程持有根登记表；另一个进程显示登记表不可用（`registry-contended`），持锁者退出或崩溃后刷新即接管——这是刻意的 fail-closed，不是待修的竞态（[ADR-0007](./docs/decisions/ADR-0007-registry-authority-lease.md)）。
+- 多 Host 共享同一登记服务：只有一个 Host 管理存储，各实例逐操作取得授权；断线停止新附加授权，权威退出后按内核锁接管。限同机器、同用户及同锁命名空间；Linux 共享连接需要 SO_PEERPIDFD，Windows 限同登录会话。旧进程/PTY 保留启动快照（[共享架构](./docs/architecture/registry-authority-service.md)）。
 - 支持矩阵是精确版本 allowlist：宿主版本不在清单上、或核心包混装了不同版本时，`fs` / `sandbox` / `registry` / `instructions` / `lsp` / `workspace-files` 六行**不启动**，组合退化为"没装这个插件"（[ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)）。
 - Windows 多根 runner 继承上游 partial enforcement、caller-owned 目录及 private temp 分离条件；已启动进程保留启动时根集合，后续进程使用更新后的集合（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - **Windows 上的网络与设备路径不能成为附加根**：UNC（`\\server\share`）、`\\?\`、`\\.\` 与映射网络盘在登记时即以 `unsupported-path` 拒绝——restricted token 的 capability SID 无法绑定 SMB 访问（[ADR-0011 修订](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。

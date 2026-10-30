@@ -38,3 +38,8 @@ export function ptcEntrypoints(runtime: object): readonly ProcessEntrypoint[] {
   const record = runtime as Partial<Record<ProcessEntrypoint, unknown>>
   return typeof record.run === 'function' ? ['run'] : []
 }
+
+/** Async public entries can acquire admission before calling their implementation. */
+export function isAsyncProcessEntry(entry: unknown): boolean {
+  return typeof entry === 'function' && entry.constructor.name === 'AsyncFunction'
+}

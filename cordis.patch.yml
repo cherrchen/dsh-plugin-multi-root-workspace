@@ -79,8 +79,9 @@
     - id: multi-root-registry
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
       config:
-        # Store-wide kernel lease beside the JSON domain document. A custom
-        # storage-json.root must override this path in lockstep (ADR-0007).
+        # Shared authority owns this explicit JSON medium; followers use IPC.
+        # Change both paths together for a custom Registry store (ADR-0025).
+        sharedStorageRoot: !!js dshHomePath('storages')
         leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
         # Cap on stored additional-root records per primary root (integer,
         # 1..64; the count covers every state, so it is stable). A store that

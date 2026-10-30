@@ -181,6 +181,7 @@ Expected output:
 - id: multi-root-registry
   name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
   config:
+    sharedStorageRoot: !!js dshHomePath('storages')
     leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
     maxAdditionalRoots: 16
 - id: multi-root-instructions
@@ -260,7 +261,7 @@ For multi-root reviewer context, enable the default-disabled [Auto Review row](.
 .
 ├── src/
 │   ├── roots.ts                      pure rules: canonicalization, conflict validation, record classification (available/missing/redirected/invalid)
-│   ├── registry.ts                   the root registry: dsh-storage-domain persistence, mutations of one primary root serialized in one queue
+│   ├── registry.ts                   one storage core and Host facades, store-wide ordering of mutations and admissions
 │   ├── registry-lease.ts             cross-process Registry Authority: POSIX flock (the kernel releases it on process death)
 │   ├── registry-lease-win32.ts       ditto, the Windows named-semaphore implementation
 │   ├── scope.ts                      ctx.multiRootScope: the single authorization source, plus the model-visible topology snapshot
@@ -295,7 +296,7 @@ Issues and PRs are welcome:
 ## Known Limitations
 
 - An additional root's instruction files arrive as they become relevant: the one at the root's top level is injected before the session's first step, and a subdirectory's is injected once the session has **successfully** worked in that directory. A nested file is re-examined only when its directory is examined (the root's own every step; a subdirectory's because it was delivered from, or because of a fresh touch), delivery state is in-process (so a resumed session may be told again), and only the `read` / `write` / `edit` tool names count. The primary root's chain and the user-global file remain upstream's job, and this plugin does not inject them a second time ([ADR-0010](./docs/decisions/ADR-0010-additional-root-instruction-scope.md)).
-- Single writer per store: only one DSH process at a time may hold the root registry for a given `$DSH_HOME`; another process reports the registry as unavailable (`registry-contended`) and takes over on refresh once the holder exits or crashes. That is deliberate fail-closed behavior, not a race waiting to be fixed ([ADR-0007](./docs/decisions/ADR-0007-registry-authority-lease.md)).
+- Hosts share one Registry service: one Host owns storage and each instance obtains admission for new operations. Disconnection stops new additional-root grants; a successor takes over through the kernel lease. Sharing is local to one user and lock namespace; Linux requires SO_PEERPIDFD, and Windows is limited to one login session. Existing processes and PTYs retain their launch snapshot ([architecture](./docs/architecture/registry-authority-service.md), Chinese).
 - The supported matrix is an exact-version allowlist: on a host whose release is not on the list, or whose core packages disagree about the release, the `fs` / `sandbox` / `registry` / `instructions` / `lsp` / `workspace-files` rows **do not start** and the composition degrades to "the plugin is not installed" ([ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)).
 - The Windows multi-root runner inherits upstream partial enforcement, caller-owned directory requirements, and private-temp isolation. Running processes retain their initial roots; later processes use the updated set ([ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)).
 - **Network and device paths cannot be additional roots on Windows**: UNC (`\\server\share`), `\\?\`, `\\.\`, and mapped network drives are rejected at registration with `unsupported-path` — the restricted token's capability SID cannot be shown to bind SMB access ([ADR-0011 amendment](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)).

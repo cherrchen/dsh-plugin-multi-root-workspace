@@ -28,6 +28,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/command
  */
 
+import { AuthorityRpcError } from './authority/protocol.ts'
 import { isAbsolute } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
@@ -321,7 +322,7 @@ async function report(registry: MultiRootRegistry, primaryRoot: string, mode?: S
 
 /** Render a failure the way the composer displays it. */
 function failureText(error: unknown): string {
-  if (error instanceof RootValidationError) return `/${COMMAND_NAME}: ${error.code}: ${error.message}`
+  if (error instanceof RootValidationError || error instanceof AuthorityRpcError) return `/${COMMAND_NAME}: ${error.code}: ${error.message}`
   return `/${COMMAND_NAME}: ${error instanceof Error ? error.message : String(error)}`
 }
 
@@ -708,7 +709,7 @@ async function dispatchPanelRequest(
       }
     }
   } catch (error: unknown) {
-    if (error instanceof RootValidationError) {
+    if (error instanceof RootValidationError || error instanceof AuthorityRpcError) {
       return { ok: false, error: { code: error.code, message: error.message, details: {} } }
     }
     return {

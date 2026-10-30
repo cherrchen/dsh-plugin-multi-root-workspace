@@ -279,3 +279,10 @@ B9 的 Linux 原生执行证据分两类：latest 保留实际 Landlock 选择�
 `bootProfile` 为 in-process smoke 补齐 CLI 的完整 `profileContext`（home、patchPath、installAnchor、startedBundles 等），优先保留调用者提供的事实，否则现代 ConfigEditor/Settings 会因缺少注入而静默不启动，或在首次写回时报路径缺失。profile 重组使用该次 boot 返回的 appBoot 模块实例，避免安装/解析变化后落入另一个实例的 root Include WeakMap。`smoke:journey` 额外验证真实 web/headless 首步 Skill Catalog、原生按需 get、用户命名空间调用，以及全局关闭/恢复和 native cwd 旁路。
 
 `node --experimental-transform-types scripts/measure-multi-root-skills.mjs` 在可清理的真实 Registry/native Skills 栈上测量 16 根、128 Skills 的首次目录、重复目录及受检预览耗时，同时断言目录不含正文。它输出本机 IO 样本，不作为跨平台性能阈值；结果与执行环境只记路线账本。
+
+
+### 共享 Registry 的原生验证
+
+共享服务的合同、配置和平台能力前提见[架构](../architecture/registry-authority-service.md)，执行结果只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#多-host-权威服务开发2026-10-29)。完整 `pnpm test` 已包含 `authority-native`、`shared-registry`、`shared-consumers` 与独立 Node 进程的 `shared-registry-multiprocess.e2e`。受限测试进程不能伪装正常 Host；能力探测会把外层沙箱或缺失 peer 身份接口的原因写入日志。需要真实正常 Host 的测试应在正常终端/CI 运行，不能通过关闭生产认证让测试变绿。
+
+直接测同步 shell handle 时，在 `registry.withOperation()` 的异步 callback 内启动并等待结算；展示断言用 `scope.snapshot()`，不要把已过期的 `scope.resolve()` 当缓存投影。默认 bundle 冒烟通过 Registry 真正登记根，不再仅往 scope 注入一份与权威介质不同的测试表。平台/版本隔离探测使用已有 `DSH_TEST_FIXTURE_PARENT` 将 fixture 放在自动 temp write grant 之外。

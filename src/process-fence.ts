@@ -63,10 +63,14 @@ import type {} from '@deepseek-ai/dsh-tools'
 import type {} from './compat.ts'
 import type {} from './providers.ts'
 import type {} from './scope.ts'
+import { withRegistryAdmission } from './registry-operation.ts'
+import { confineInstalled } from './compat/sandbox-confine.ts'
+import { hasConfinedProfile, originalProcessArgv } from './compat/process-profile.ts'
+import { aroundTool } from './compat/tool-context.ts'
 import { wrapMethod } from './method-wrapper.ts'
 import type { MultiRootSandboxProvider } from './sandbox.ts'
 import { decorateProcessOutcome } from './compat/process-result.ts'
-import { ptcEntrypoints, shellEntrypoints } from './compat/process-entrypoints.ts'
+import { isAsyncProcessEntry, ptcEntrypoints, shellEntrypoints } from './compat/process-entrypoints.ts'
 import type { ProcessEntrypoint } from './compat/process-entrypoints.ts'
 
 // `multiRootProviders` is the provider-conflict gate: the restricted profile is
@@ -109,6 +113,10 @@ interface PolicyEntrypoint {
 }
 
 export function apply(ctx: Context): void {
+  aroundTool(ctx, async (exec, next) => {
+    if (!ctx.get('multiRootRegistry')?.shared || exec.agent === undefined) return next()
+    return withRegistryAdmission(ctx, ctx.sandboxPolicy.resolve({ session: exec.agent.session }), 'process', next)
+  })
   // Resolve the policy the same way the upstream consumer does: the spec's own
   // resolved policy wins, the deployment/session resolution is the fallback.
   const policyOf = (spec: PolicyCarryingSpec | undefined): SandboxExecutionPolicy =>
@@ -157,8 +165,16 @@ export function apply(ctx: Context): void {
       spec: SubprocessSpawnSpec,
     ) {
       const store = processDenyStore.getStore()
-      if (store === undefined) return original.call(this, spec)
-      const handle = original.call(this, { ...spec, argv: [...store.argvPrefix, ...spec.argv] })
+      if (scope.multiRootScope.admissionRequired && scope.multiRootScope.hasAdmission() && !scope.multiRootScope.admissionPathsValid()) {
+        throw new Error('multi-root workspace: an admitted root was redirected before process launch')
+      }
+      const argv = store === undefined ? spec.argv : [...store.argvPrefix, ...spec.argv]
+      if (scope.multiRootScope.admissionRequired && (store !== undefined || hasConfinedProfile(argv))
+        && !scope.multiRootScope.permitsProfile(argv)) {
+        throw new Error('multi-root workspace: a confined spawn requires a profile from this live admission')
+      }
+      const handle = original.call(this, store === undefined ? spec : { ...spec, argv })
+      if (store === undefined) return handle
       // `collected.stderr.readFrom(0)` is cursor-free — a live shell handle's
       // only settle-time window into the denial text the executor's own
       // `onProcessDone` would see. The last confined spawn wins; execute-style
@@ -202,10 +218,21 @@ export function apply(ctx: Context): void {
         )
       }
       const policy = ctx.sandboxPolicy.resolve({ session })
-      const prepared = prepare(policy, spec.signal)
-      if (prepared === undefined) return await original.call(this, spec)
-      const argvPrefix = (await prepared).argv
-      return await original.call(this, { ...spec, argv: [...argvPrefix, ...spec.argv] })
+      return withRegistryAdmission(ctx, policy, 'pty', async () => {
+        if (ctx.get('multiRootRegistry')?.shared) {
+          const command = originalProcessArgv(spec.argv)
+          const prefix = prepare(policy, spec.signal)
+          const argv = policy.mode === 'danger-full-access'
+            ? prefix === undefined ? command : [...(await prefix).argv, ...command]
+            : (await confineInstalled(ctx.sandbox, command, { ...policy, mode: policy.mode }, spec.signal)).argv
+          if (!ctx.multiRootScope.admissionPathsValid()) throw new Error('an admitted terminal root was redirected')
+          return await original.call(this, { ...spec, argv })
+        }
+        const prepared = prepare(policy, spec.signal)
+        if (prepared === undefined) return await original.call(this, spec)
+        const argvPrefix = (await prepared).argv
+        return await original.call(this, { ...spec, argv: [...argvPrefix, ...spec.argv] })
+      })
     }))
   })
 
@@ -222,9 +249,18 @@ export function apply(ctx: Context): void {
       ...rest: unknown[]
     ) {
       const policy = policyOf(spec)
-      const prepared = prepare(policy, spec?.signal)
-      if (prepared === undefined) return original.call(this, spec as PolicyCarryingSpec, ...rest)
-      return runDenied(prepared, policy, () => original.call(this, spec as PolicyCarryingSpec, ...rest))
+      const run = () => {
+        const prepared = prepare(policy, spec?.signal)
+        if (prepared === undefined) return original.call(this, spec as PolicyCarryingSpec, ...rest)
+        return runDenied(prepared, policy, () => original.call(this, spec as PolicyCarryingSpec, ...rest))
+      }
+      if (ctx.get('multiRootRegistry')?.shared) {
+        // AsyncFunction is a structural probe; synchronous legacy entries keep
+        // their return shape and receive no additional grant without admission.
+        if (isAsyncProcessEntry(original)) return withRegistryAdmission(ctx, policy, 'process', run)
+        if (!ctx.multiRootScope.hasAdmission()) return ctx.get('multiRootRegistry')!.withPrimaryOperation(policy, run)
+      }
+      return run()
     }))
   }
 

@@ -5,6 +5,7 @@ import type { Context, Fiber } from '@deepseek-ai/cordis'
 import type { SkillViewOptions } from '@deepseek-ai/dsh-skill'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { skillOrigin, observedSkillOrigin } from '../compat/skills.ts'
+import { withRegistryRead } from '../registry-operation.ts'
 import { wrapMethod } from '../method-wrapper.ts'
 import { internalSkillName, SKILLS_PROVIDER } from './catalog.ts'
 import { containsPath } from './reader.ts'
@@ -24,6 +25,8 @@ export function installSkillRouting(ctx: Context): readonly Fiber[] {
   fibers.push(ctx.inject(['skills'], scope => {
     const registry = scope.skills
     scope.effect(() => wrapMethod(registry, 'snapshot', original => async function(this: typeof registry, options = {}) {
+      const primaryOrigin = skillOrigin(scope, options) ?? cold.getStore()
+      const run = async () => {
       const result = await original.call(this, optionsFor(options))
       const primary = skillOrigin(scope, options)
       if (primary !== undefined) for (const skill of result.skills) {
@@ -33,8 +36,14 @@ export function installSkillRouting(ctx: Context): readonly Fiber[] {
         }
       }
       return result
+      }
+      return primaryOrigin === undefined ? run() : withRegistryRead(scope, primaryOrigin, 'skills', run)
     }))
-    scope.effect(() => wrapMethod(registry, 'get', original => function(this: typeof registry, name, options = {}) { return original.call(this, name, optionsFor(options)) }))
+    scope.effect(() => wrapMethod(registry, 'get', original => function(this: typeof registry, name, options = {}) {
+      const primary = skillOrigin(scope, options) ?? cold.getStore()
+      const run = () => original.call(this, name, optionsFor(options))
+      return primary === undefined ? run() : withRegistryRead(scope, primary, 'skills', run)
+    }))
   }))
   fibers.push(ctx.inject(['sessionSkillCatalog', 'sessionQuery'], scope => {
     scope.effect(() => wrapMethod(scope.sessionSkillCatalog, 'list', original => async function(this: typeof scope.sessionSkillCatalog, request, signal) {

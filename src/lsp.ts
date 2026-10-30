@@ -8,6 +8,7 @@ import { aroundTool } from './compat/tool-context.ts'
 import type {} from './compat.ts'
 import type {} from './providers.ts'
 import { routeWorkspacePath } from './workspace-routing.ts'
+import { withRegistryRead } from './registry-operation.ts'
 import { wrapMethod } from './method-wrapper.ts'
 
 // `multiRootProviders` is the provider-conflict gate: a foreign `ctx.fs` must
@@ -27,6 +28,7 @@ export function apply(ctx: Context): void {
         const primary = session === undefined ? request.workspaceRoot
           : session.header.cwd ?? scope.get('sandboxPolicy')?.resolve({ session }).workspaceRoot
         if (primary === undefined) throw new Error('multi-root workspace: LSP caller has no session origin or deployment policy')
+        return await withRegistryRead(scope, primary, 'lsp', async () => {
         if (scope.multiRootScope.scopeOf(primary).length === 0 && session === undefined) {
           return original.call(this, request, signal)
         }
@@ -39,6 +41,7 @@ export function apply(ctx: Context): void {
         }
         if (session === undefined && route.workspaceRoot === route.primaryRoot) return original.call(this, request, signal)
         return original.call(this, { ...request, workspaceRoot: route.workspaceRoot, filePath: route.absolutePath }, signal)
+        })
       }), 'multi-root:lsp routing')
   })
 }

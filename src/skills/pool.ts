@@ -7,6 +7,7 @@ import type { Reader } from './catalog.ts'
 
 interface Entry {
   readonly key: string
+  readonly root: string
   readonly controller: AbortController
   readonly reader: Promise<Reader | undefined>
   busy: number
@@ -23,8 +24,9 @@ export class SkillReaderPool {
     this.timer.unref()
   }
   get size(): number { return this.entries.size }
-  get roots(): readonly string[] { return [...this.entries.keys()] }
-  async use<T>(key: string, create: (signal: AbortSignal) => Promise<Reader | undefined>, run: (reader: Reader | undefined) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  get roots(): readonly string[] { return [...new Set([...this.entries.values()].map(entry => entry.root))] }
+  async use<T>(root: string, create: (signal: AbortSignal) => Promise<Reader | undefined>, run: (reader: Reader | undefined) => Promise<T>, signal?: AbortSignal, identity = root): Promise<T> {
+    const key = identity
     for (;;) {
       signal?.throwIfAborted()
       if (this.closing) throw new Error('multi-root skills: reader pool is closing')
@@ -45,12 +47,12 @@ export class SkillReaderPool {
       }
       if (entry === undefined) {
         const controller = new AbortController()
-        entry = { key, controller, reader: create(controller.signal), busy: 0 }
+        entry = { key, root, controller, reader: create(controller.signal), busy: 0 }
         this.entries.set(key, entry)
       }
       this.entries.delete(key); this.entries.set(key, entry); entry.busy++
       try {
-        if (entry.stamp === undefined) entry.stamp = await skillTreeStamp(key)
+        if (entry.stamp === undefined) entry.stamp = await skillTreeStamp(entry.root)
         signal?.throwIfAborted()
         return await run(await entry.reader)
       } finally {
@@ -64,7 +66,7 @@ export class SkillReaderPool {
     this.polling ??= (async () => {
       let changed = false
       for (const entry of [...this.entries.values()]) {
-        const stamp = await skillTreeStamp(entry.key)
+        const stamp = await skillTreeStamp(entry.root)
         if (entry.stamp !== undefined && entry.stamp !== stamp) changed = true
         entry.stamp = stamp
       }

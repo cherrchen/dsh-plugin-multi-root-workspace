@@ -9,6 +9,7 @@ import type { MultiRootRegistry } from './registry.ts'
 import { adaptPathWatch, resolveRelatedWorkspacePath } from './compat/workspace-files.ts'
 import { isCanonicallyUnder } from './roots.ts'
 import { routeWorkspacePath } from './workspace-routing.ts'
+import { withRegistryRead } from './registry-operation.ts'
 import { wrapMethod } from './method-wrapper.ts'
 
 // `multiRootProviders` is the provider-conflict gate: a foreign `ctx.fs` must
@@ -94,31 +95,57 @@ export function apply(ctx: Context): void {
           }) as unknown as typeof original)
         : undefined
       const restoreWatch = adaptPathWatch(service, originalChanges => async function*(this: WorkspaceFiles, request, path, signal) {
-        if (scope.multiRootScope.scopeOf(request.workspaceRoot).length === 0 && registeredRoots(scope, request.workspaceRoot).length === 0) {
-          yield* originalChanges.call(this, request, path, signal)
+        const check = async () => {
+          const routed = await withRegistryRead(scope, request.workspaceRoot, 'files', () => routeRead(scope, request, path, signal))
+          if (routed === 'deny') throw await outside(path)
+        }
+        if (scope.get('multiRootRegistry')?.shared) await check()
+
+        if (scope.multiRootScope.snapshot({ workspaceRoot: request.workspaceRoot, mode: 'read-only' }).additionalRoots.length === 0 && registeredRoots(scope, request.workspaceRoot).length === 0) {
+          for await (const frame of originalChanges.call(this, request, path, signal)) {
+            if (scope.get('multiRootRegistry')?.shared) await check()
+            yield frame
+          }
           return
         }
-        const route = await routeWorkspacePath(scope, request.workspaceRoot, path, signal)
+        const route = await withRegistryRead(scope, request.workspaceRoot, 'files', () => routeWorkspacePath(scope, request.workspaceRoot, path, signal))
         if (route === undefined || route.workspaceRoot === route.primaryRoot) {
           // Directory targets are confined by the host's own check either
           // way; file watches are uncontained upstream, so a stale row
           // under a withheld root has to be refused here.
           if (underWithheldRoot(scope, request.workspaceRoot, path)) throw await outside(path)
-          yield* originalChanges.call(this, request, path, signal)
+          for await (const frame of originalChanges.call(this, request, path, signal)) {
+            if (scope.get('multiRootRegistry')?.shared) await check()
+            yield frame
+          }
           return
         }
         const lifetime = new AbortController()
         const unsubscribe = scope.multiRootScope.subscribe(() => {
-          if (!scope.multiRootScope.scopeOf(route.primaryRoot).includes(route.workspaceRoot)) lifetime.abort(new Error('the additional root was revoked'))
+          if (!scope.multiRootScope.snapshot({ workspaceRoot: route.primaryRoot, mode: 'read-only' }).additionalRoots.includes(route.workspaceRoot)) lifetime.abort(new Error('the additional root was revoked'))
         })
         try {
           for await (const frame of originalChanges.call(this, { ...request, workspaceRoot: route.workspaceRoot }, route.absolutePath, AbortSignal.any([signal, lifetime.signal, rowLifetime.signal]))) {
-            if (!scope.multiRootScope.scopeOf(route.primaryRoot).includes(route.workspaceRoot)) throw await outside(path)
+            await withRegistryRead(scope, route.primaryRoot, 'files', async () => {
+              if (!scope.multiRootScope.scopeOf(route.primaryRoot).includes(route.workspaceRoot)) throw await outside(path)
+            })
             yield frame
           }
         } finally { unsubscribe() }
       })
+      const admissionRestores: Array<() => void> = []
+      {
+        const methods = service as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
+        for (const key of ['list', 'stat', 'read', 'readBytes', 'readAll', 'readRelated']) {
+          if (typeof methods[key] !== 'function') continue
+          admissionRestores.push(wrapMethod(methods, key, original => async function(this: unknown, ...args: unknown[]) {
+            const request = args[0] as WorkspaceFileScope
+            return withRegistryRead(scope, request.workspaceRoot, 'files', () => original.apply(this, args))
+          }))
+        }
+      }
       return () => {
+        for (const restore of admissionRestores.reverse()) restore()
         rowLifetime.abort(new Error('multi-root workspace-files routing unloaded'))
         restoreList()
         restoreStat()
@@ -154,6 +181,11 @@ type LegacyReads = {
  * root, genuinely unrelated paths) keeps upstream's default read access.
  */
 async function routeRead(scope: Context, request: WorkspaceFileScope, path: string, signal: AbortSignal): Promise<RoutedRead> {
+  const registry = scope.get('multiRootRegistry')
+  if (registry?.shared && scope.multiRootScope.resolve({ workspaceRoot: request.workspaceRoot, mode: 'read-only' }).authority === 'unavailable') {
+    const route = await routeWorkspacePath(scope, request.workspaceRoot, path, signal)
+    return route !== undefined && route.workspaceRoot === route.primaryRoot ? { request, path: route.absolutePath } : 'deny'
+  }
   if (scope.multiRootScope.scopeOf(request.workspaceRoot).length === 0 && registeredRoots(scope, request.workspaceRoot).length === 0) {
     return { request, path }
   }
@@ -201,11 +233,14 @@ function underWithheldRoot(scope: Context, primaryRoot: string, path: string): b
  * file, so the granted base must not reach back into a dead grant.
  */
 async function relatedTailWithheld(scope: Context, primaryRoot: string, base: Exclude<RoutedRead, 'deny'>, tail: string, signal: AbortSignal): Promise<string | undefined> {
-  if (registeredRoots(scope, primaryRoot).length === 0) return undefined
+  const unknown = scope.get('multiRootRegistry')?.shared
+    && scope.multiRootScope.resolve({ workspaceRoot: primaryRoot, mode: 'read-only' }).authority === 'unavailable'
+  if (registeredRoots(scope, primaryRoot).length === 0 && !unknown) return undefined
   // Upstream locates the canonical base before joining the normalized tail;
   // an intermediate directory alias must not change the path being checked.
   const targetBase = await scope.fs.resolve(base.path, { cwd: base.request.workspaceRoot, signal })
   const target = resolveRelatedWorkspacePath(scope.fs.processPath(targetBase), tail)
+  if (unknown && await routeRead(scope, { ...base.request, workspaceRoot: primaryRoot }, target, signal) === 'deny') return target
   return underWithheldRoot(scope, primaryRoot, target) ? target : undefined
 }
 

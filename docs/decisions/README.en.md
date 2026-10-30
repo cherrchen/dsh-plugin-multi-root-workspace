@@ -56,3 +56,7 @@ Numbers increment; titles use lowercase kebab-case.
 - [ADR-0022-auto-review-loader-entry.md](./ADR-0022-auto-review-loader-entry.md) (Chinese) — Auto Review in the main package: one default-disabled Loader row, runtime takeover, in-flight import suppression, ordered owner handover, and a single package build; replaces ADR-0021's delivery structure.
 
 - [ADR-0023-multi-root-skill-discovery-and-invocation.md](./ADR-0023-multi-root-skill-discovery-and-invocation.md) (Chinese) — Additional-root Skills: access-based defaults, aliasId namespaces, trusted Session scopes, native internal-ID bridging, effective-cwd discovery routing, Settings and migration boundaries (Accepted architecture; feature implementation pending).
+
+- [ADR-0024-registry-operation-admission.md](./ADR-0024-registry-operation-admission.md) — Ordered operation admission and revocation; admitted work may finish (Accepted).
+
+- [ADR-0025-shared-registry-authority.md](./ADR-0025-shared-registry-authority.md) — Shared authority service, authenticated IPC, synchronous consumer contracts and fail-closed takeover (Accepted).

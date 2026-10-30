@@ -1,5 +1,10 @@
 # 根目录登记被另一个 DSH 进程占用
 
+> 当前 bundle 默认启用[共享权威服务](../architecture/registry-authority-service.md)。正常竞争者应成为 `follower` 并可使用附加根；下述单持锁消费是旧模式/历史行为。新模式仍显示不可用时，检查 holder 是否旧版无 IPC、`sharedStorageRoot` 与固定名 lease 是否同一物理目录、根数量上限是否一致、Host 是否被外层沙箱限制，以及 Linux 是否具备 SO_PEERPIDFD。不要删除活跃锁或配置第二条锁路径。
+
+共享请求丢应答会报告结果不明：先 list/refresh 对账，再决定下一次操作，不要自动重放。已打开介质的 unknown-state 故障须重启持锁 Host 并核对存储；不得通过另开 backend 恢复旧缓存授权。
+
+
 ## 症状
 
 - 第二个 DSH 进程（例如 Desktop 已开着，又启动了 `dsh --profile web` / headless，且共用同一个 `$DSH_HOME`）里，Folders 面板或 `/workspace-folders list` 显示根目录登记不可用，文案类似「owned by another DSH process」/「正由另一个 DSH 进程占用」。

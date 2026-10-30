@@ -53,6 +53,8 @@
 | 兼容协作 | Auto Review 内置入口迁移 | companion 并入主包：`./auto-review` 导出 + 默认 `disabled` 的 `multi-root-auto-review` 行；loader 生命周期接管/恢复；configure、独立 manifest 与第二 tarball 退役 | [评审记录](../completed/2026-10-20-auto-review-in-package-review.md)、[迁移记录](#auto-review-内置入口迁移2026-10-20) | [0022](../../decisions/ADR-0022-auto-review-loader-entry.md) | `9138084`…`e4804fb` | `v0.1.9` |
 | 第二期 | 附属根 Skills（S1–S7） | 附属根 `.dsh/skills` / `.agents/skills` 发现、`/alias-id:skill-name` 命名空间调用、每根开关与 `aliasId`、全局 Settings 开关；native effective-cwd 旁路封堵 | [实施计划](../completed/2026-10-23-multi-root-skills.md)、[本次记录](#multi-root-skills-架构验证2026-10-23) | [0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) | `1218543`…`e2c6fb1` | `v0.1.10` |
 | hot-fix | Issue #24 Registry／Skills 刷新循环 | `setRegistryAuthority()` 仅在实际状态变化时通知，阻断 Skills 失效 → `skills/change` → 客户端重查的无界反馈循环；lease 重试、接管与 fail-closed 语义不变 | [本次记录](#issue-24registryskills-刷新循环-hot-fix2026-10-29) | [0023 修订](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) | `c53c8a9` | `v0.1.11` |
+| Long-term | 多 Host 共享 Registry 权威服务 | 实现完成；本机与最早同步基线已验收，三平台/全版本矩阵待 CI | [本次记录](#多-host-权威服务开发2026-10-29) | [0025](../../decisions/ADR-0025-shared-registry-authority.md) | 当前开发分支 | 未发布 |
+
 
 ## 总体策略
 
@@ -1133,3 +1135,58 @@ C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 
 两个 Host 在 20 分钟内都未出现报告中的持续单核占用或高速内存增长；已用堆有少量漂移，不能据此声称绝无慢泄漏。双实例阶段结束后，持锁方正常退出（code 0），等待方在约 60 ms 后完成显式刷新，从 `contended` 恢复 `active`，附加根写权限和原生 Skills 目录恢复；真实根/authority 变化产生 3 次原生 Skills 事件及有限重查，收尾阶段事件数不再增加，随后也正常退出（code 0）。完整记录含 486 个采样点；该接管阶段验证目录恢复，正文恢复另由上述正式回归用例覆盖。
 
 **未覆盖**：真实 `dsh-tui` 的 OOM 复现、Ubuntu 报告环境的原生复测、Windows 原生 ACL 和远端全版本 × OS 矩阵。
+
+
+## 多 Host 权威服务开发（2026-10-29）
+
+在 `feat/multi-instant-dsh-lock-upgrade` 开始分批开发。目标与验收矩阵见[共享服务提案](../../architecture/registry-authority-service.md)，第一版撤权完成语义见 [ADR-0024](../../decisions/ADR-0024-registry-operation-admission.md)。A1 为最初基础；2026-10-30 已接入默认共享服务（[ADR-0025](../../decisions/ADR-0025-shared-registry-authority.md)），active/follower 均可逐操作使用附加根，唯一 owner 管理存储。实现完成与三平台/全版本验收分开记录。
+
+| 批次 | 范围 | 状态 |
+| --- | --- | --- |
+| A1 | 确定撤权语义；store-wide mutation / refresh / fs 准入排序；write/edit 每调用独立快照、过期 handle、epoch 与 publication revision | 已实施并完成下述本机门禁；未发布 |
+| A2 | async admission → sync confine/spawn；直接服务调用、shell/PTC/agent PTY 与旧进程边界 | 已实施；最早同步基线与开发基线本机验证，全版本矩阵待 CI |
+| B | 唯一存储核心 / Host facade；store 身份、配置握手、本机 IPC 与调用者隔离、流控、幂等及结果不明 | 已实施；macOS 原生 peer 攻击测试通过，其他平台原生待执行 |
+| C | LSP、Files/watch、instructions、Skills 等全消费者准入；断线保守拒绝、崩溃/竞选/接管、新 epoch | 已实施；本机真实服务及多进程回归通过 |
+| D | 屏障控制的真实多进程交错、三平台、所有支持版本与 packed 安装验收 | 多进程/本机 packed 已验证；Windows/Linux 与其余精确版本由原生 CI 继续验收 |
+
+A1 实现不改变 lock 路径、持锁时间、domain schema 或 provider 门禁。原有 hot-fix 保留；`setAdditionalRoots()` 仍是唯一根写口。测试使用真实 Registry / JSON backend / 内核锁，以 Promise 屏障固定“先准入后撤权”和“先撤权后准入”，并实际写入/编辑文件；不把通知、revision 或“连接活着”作为授权依据。
+
+本机证据（macOS、Node `24.18.0`、已安装 DSH `0.2.2-alpha.2`；未重装依赖、未更改支持矩阵）：
+
+| 检查 | 结果 |
+| --- | --- |
+| `compat:check`、lint、typecheck、build | 通过；compat enforce，allowlist / peer / dev pin / 实际树一致 |
+| 完整 `test` | 63 文件通过 / 3 文件跳过；862 测试通过 / 90 跳过，包含原有 Registry、lease 和 Skills 循环回归 |
+| 最后补强后的 `tests/registry-operation.spec.ts` | 15 项通过：跨主根排队屏障、detached async handle 失效、真实 fs 撤权交错、工具封顶、三态矩阵、路径替换与接管 |
+| `kernel:probe` | 完成；Seatbelt 被外层沙箱拒绝（`sandbox_apply: Operation not permitted`），bwrap/Landlock 未安装；内核执行断言按既有规则显式跳过 |
+| `smoke:compose` | 52 通过 / 0 失败 / 0 跳过 |
+| `smoke:behavior` | 95 通过 / 0 失败 / 7 内核项跳过 |
+| `smoke:journey` | 69 通过 / 0 失败 / 2 内核项跳过；web/headless 两条旅程 |
+| `pack:check` | 149 成员完整性检查通过 |
+| `smoke:packed` | 从 tarball 安装的 behavior battery：94 通过 / 0 失败 / 7 内核项跳过 |
+| `docs:check` | 0 错误 / 0 警告 |
+
+pnpm 的自动依赖自检最初尝试重装并因非交互环境中止；后续用 `pnpm_config_verify_deps_before_run=false` 运行仓库脚本以保留现有安装树，真实兼容门禁仍正常执行并通过。未执行真实 dsh-tui 双 Host；Windows/Linux、其他支持版本以及未来 IPC 行为均不能由本机测试代替。
+
+### 共享服务与全消费者接入（2026-10-30）
+
+默认 bundle 配置 `sharedStorageRoot`，owner 单独打开显式 JSON medium，follower 经内核认证 IPC；所有变更/admission 在核心排序，owner 无本地旁路。同步消费以短期上下文连接，复制的旧 argv 不再是后续新操作许可；agent PTY 新准入后重新生成 profile，用户控制器终端透传。fs、LSP、Files/watch、instructions、原生 Skills 缓存与加载已接入；失联保留拒绝边界，写入结果不明隔离，mutation 丢应答不自动重放。协议只缓存紧凑 mutation 结果，持续查询不积累整份 roots snapshot。behavior/packed battery 另以两个完整独立 boot 的 Host profile 验证实际安装产物的 IPC 共享、撤权和新 epoch 接管（同进程双 Host；进程隔离另由 e2e 覆盖）。具体合同与能力前提以[共享架构](../../architecture/registry-authority-service.md)为准。
+
+本机 macOS / Node `24.18.0` / DSH `0.2.2-alpha.2`，当前开发依赖树保持原样；新增的旧版验证使用 `/private/tmp` 独立安装树，不变更当前 manifest pin 或 allowlist。Seatbelt 在外层沙箱外实测可用，完整回归显式要求已验证的 Seatbelt，不能以嵌套沙箱为由静默跳过。
+
+| 验证范围 | 结果 |
+| --- | --- |
+| `compat:check`、lint、typecheck、build | 通过；enforce 模式及原精确支持列表保持 |
+| 当前基线完整 `test` | 67 文件通过 / 3 文件跳过，900 测试通过 / 84 跳过；包含真实 IPC 与独立进程 |
+| `kernel:probe` | Seatbelt 真实受限命令可执行；bwrap/Landlock 本机无 runner |
+| compose / behavior / journey | 52 / 136 / 76 通过，各 0 失败、0 跳过；web/headless 真实工具旅程 |
+| `pack:check` / `smoke:packed` | 157 成员检查通过；tarball 安装后 behavior 135 通过 / 0 失败 / 0 跳过 |
+| `auto-review:fork` / `smoke:auto-review` | fork 检查通过；可选集成按既有精确 `0.2.1-rc.2` 规则跳过 |
+| `docs:check` | 0 错误 / 0 警告 |
+| 最早支持版本 `0.1.5-rc.2`（Cordis `4.0.2`） | 隔离树 enforce compat、typecheck、build 通过；6 个接缝/共享/命令测试文件 86 通过 / 5 平台项跳过；behavior 128 / journey 76 通过，各 0 失败、0 跳过 |
+
+旧版 fixture 显式放在仓库既有 `.dsh-smoke` 物理目录，使用 `DSH_TEST_FIXTURE_PARENT`；隔离 smoke 仅修改 fixture 路径，避免 `/tmp` 自带 write grant 和 symlink 拼写使断言失真。没有对生产接缝加入测试豁免、没有放宽 compat。最早版本证明同步 confine/旧执行器与公开 JSON/domain 适配的实际兼容，不代替其余版本矩阵。
+
+确定性故障用例：独立进程并发同/异主根修改不丢数据；在 fs 真正解析处暂停已准入写，然后另一 Host 撤权，旧操作可完成、新写被拒；SIGKILL 后多个候选仅一个 owner，从磁盘恢复；旧 holder 重启成为 follower；SIGSTOP 时超时拒绝新操作但不夺锁。另覆盖广播丢失、已提交应答丢失不重放、断线后的新嵌套调用不继承旧 grant、新 epoch、unknown-state 保留 lease、原生 Skills change→requery 有界、读缓存撤权、指令显式撤回、空闲 Files 流断线取消、hello/change 同批读取，以及受限 macOS 子进程知道 endpoint 仍不能调用管理方法。
+
+**尚未执行的验收**：Windows 原生 pipe/token/ambient deny 与 semaphore 多候选崩溃恢复；Linux 原生 SO_PEERPIDFD、NoNewPrivs 与 bubblewrap 攻击用例（已编入测试）；三平台 × 所有精确版本远端 CI；真实 dsh-tui 的多 Host 长期运行/Ubuntu OOM 报告环境复测。此变更未发布，也未宣称这些平台/版本已通过；原先 Issue #24 hot-fix 的 20 分钟观察不能作为新共享服务的长期内存证据。

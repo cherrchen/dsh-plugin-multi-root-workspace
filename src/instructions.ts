@@ -1,3 +1,4 @@
+import { withRegistryRead, withRegistryAdmission } from './registry-operation.ts'
 /**
  * `multi-root-instructions`: the additional roots' own instruction files, made
  * visible to the model.
@@ -350,6 +351,9 @@ export function apply(ctx: Context, config: Config = {}): void {
     scope.provide('multiRootInstructions', {
       knownRoots(session) { return [...(states.get(session)?.provenanceRoots ?? [])] },
       async snapshot(agent, roots, target, signal) {
+        return withRegistryRead(scope, scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot, 'instructions', async () => {
+        const allowed = new Set(scope.multiRootScope.scopeOf(scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot))
+        roots = roots.filter(root => allowed.has(root))
         signal.throwIfAborted()
         if (roots.length === 0) return []
         const api = await instructionsApi()
@@ -386,6 +390,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         // Metadata counts too, and no partial constraint is ever returned.
         if (Buffer.byteLength(JSON.stringify(result), 'utf8') > maxBytes) throw new Error('review-context: instruction budget exceeded')
         return result
+        })
       },
     })
     // Native tools report the actual canonical target with their execution as
@@ -403,7 +408,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       // A rejected step never delivers: the touch stays queued for the step that
       // actually enters.
       if (decision.kind !== 'enter') return decision
-      const seeded = await pending(scope, states, agent, config, maxBytes, signal, decision.messages)
+      const seeded = await withRegistryAdmission(scope, scope.sandboxPolicy.resolve({ session: agent.session }), 'instructions', () => pending(scope, states, agent, config, maxBytes, signal, decision.messages))
       if (seeded === undefined) return decision
       signal.throwIfAborted()
       // Splice in at the same place upstream's own instruction baseline goes:
@@ -436,8 +441,10 @@ async function pending(
   maxBytes: number,
   signal: AbortSignal,
   messages: readonly UserMessage[],
+  retried = false,
 ): Promise<UserMessage | undefined> {
   const session = agent.session
+  const sourceEpoch = ctx.get('multiRootRegistry')?.epoch
   const state: SessionState = states.get(session) ?? { scopes: new Map(), provenanceRoots: new Set(), touched: new Set(), worked: new Set() }
   states.set(session, state)
   const evaluatedTouches = new Set(state.touched)
@@ -501,12 +508,24 @@ async function pending(
 
   // Discovery/read awaits can span revocation or redirect. Publish only files
   // still inside the live root set, and retract any earlier delivery now gone.
-  const current = new Set(ctx.multiRootScope.resolve(ctx.sandboxPolicy.resolve({ session })).additionalRoots)
+  const current = new Set(await withRegistryAdmission(ctx, ctx.sandboxPolicy.resolve({ session }), 'instructions',
+    () => ctx.multiRootScope.resolve(ctx.sandboxPolicy.resolve({ session })).additionalRoots))
   const revoked = [...new Set([...state.scopes.values()].map(entry => entry.root))].filter(root => !current.has(root))
   const liveUpdates = updates.filter(entry => current.has(entry.scope.root))
   const text = composeInstructionMessage(rendered.filter(entry => current.has(entry.root)), revoked, gone.filter(entry => current.has(entry.scope.root)).map(entry => entry.scope))
   const message = text === undefined ? undefined : await createInstructionMessage({ text, plugin: PLUGIN_SOURCE })
   signal.throwIfAborted()
+  if (ctx.get('multiRootRegistry')?.shared) {
+    const final = await withRegistryAdmission(ctx, ctx.sandboxPolicy.resolve({ session }), 'instructions', () => ({
+      roots: ctx.multiRootScope.resolve(ctx.sandboxPolicy.resolve({ session })).additionalRoots,
+      epoch: ctx.get('multiRootRegistry')?.epoch,
+    }))
+    if (sourceEpoch !== final.epoch || final.roots.length !== current.size || final.roots.some(root => !current.has(root))) {
+      if (retried) return undefined
+      return withRegistryAdmission(ctx, ctx.sandboxPolicy.resolve({ session }), 'instructions',
+        () => pending(ctx, states, agent, config, maxBytes, signal, messages, true))
+    }
+  }
   // Keep budget-deferred directories discoverable without another tool call.
   // Delete only the evaluated snapshot, preserving new touches during I/O.
   if (!retryTouches) for (const touch of evaluatedTouches) state.touched.delete(touch)

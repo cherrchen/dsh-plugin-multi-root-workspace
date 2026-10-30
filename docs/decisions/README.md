@@ -56,3 +56,7 @@ ADR-0002-short-title.md
 - [ADR-0022-auto-review-loader-entry.md](./ADR-0022-auto-review-loader-entry.md) — Auto Review 并入主包：默认关闭的单一 loader 行、运行时接管、并发导入防护、有序 owner 交接与单包构建（取代 ADR-0021 的交付结构）。
 
 - [ADR-0023-multi-root-skill-discovery-and-invocation.md](./ADR-0023-multi-root-skill-discovery-and-invocation.md) — 附加根 Skills：登记权限初始化开关、aliasId 命名空间、可信 Session scope、原生内部 ID 桥接、Effective CWD 发现路由、Settings 与迁移边界（Accepted，架构定案，功能待实施）。
+
+- [ADR-0024-registry-operation-admission.md](./ADR-0024-registry-operation-admission.md) — 操作准入与撤权顺序、允许在飞操作完成（Accepted）。
+
+- [ADR-0025-shared-registry-authority.md](./ADR-0025-shared-registry-authority.md) — 多 Host 共享权威服务、IPC 权限隔离、同步消费与失败关闭接管（Accepted）。

@@ -483,7 +483,7 @@ async function runWebLeg() {
       } finally {
         dispose()
       }
-      observed.granted = ctx.multiRootScope.scopeOf(primaryRepo)
+      observed.granted = ctx.multiRootScope.snapshot({ workspaceRoot: primaryRepo, mode: 'read-only' }).additionalRoots
       const llm = await loadRuntimeModule('@deepseek-ai/dsh-llm')
       agent.followup(llm.createUserMessage({ content: [{ type: 'text', text: '/repo-b:journey-user verify this skill' }], source: { kind: 'user' } }))
       await agent.whenIdle()

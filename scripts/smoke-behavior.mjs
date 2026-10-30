@@ -35,6 +35,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { FileSystem } from '@deepseek-ai/dsh-fs'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
+import { nativeHostAvailability } from '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
 import MultiRootFileSystem from '@dsh-electron/dsh-plugin-multi-root-workspace/fs'
 import MultiRootSandboxProvider from '@dsh-electron/dsh-plugin-multi-root-workspace/sandbox'
 import { removeBehaviorHome, removeScratchTree } from './lib/smoke-cleanup.mjs'
@@ -125,7 +126,7 @@ async function battery(ctx) {
     })
     try {
       const spec = ctx.shell.resolve({ command, workdir: primaryRoot, sandboxPolicy: policy })
-      const result = await runForeground(ctx.shell, spec)
+      const result = await foreground(ctx, spec)
       return {
         exitCode: result.exitCode,
         denied: result.sandbox?.denied ?? null,
@@ -254,6 +255,26 @@ async function confinedWrite(bash, target) {
   return { ...outcome, wrote: outcome.exitCode === 0, present: marker.present() }
 }
 
+/** Production shared mode admits direct service callers explicitly. */
+async function admitted(ctx, policy, body) {
+  const registry = ctx.get('multiRootRegistry')
+  return registry?.shared ? registry.withOperation(policy, 'process', body) : body()
+}
+async function foreground(ctx, spec) {
+  return admitted(ctx, spec.sandboxPolicy ?? ctx.sandboxPolicy.resolve({}), () => runForeground(ctx.shell, spec))
+}
+function projectedRoots(ctx, primary) {
+  return ctx.get('multiRootRegistry')?.shared
+    ? ctx.multiRootScope.snapshot({ workspaceRoot: primary, mode: 'read-only' }).additionalRoots
+    : ctx.multiRootScope.scopeOf(primary)
+}
+async function registrations(ctx, policy, roots) {
+  const registry = ctx.get('multiRootRegistry')
+  if (!registry?.shared) { ctx.multiRootScope.setAdditionalRoots(policy.workspaceRoot, roots); return }
+  for (const row of await registry.refresh(policy.workspaceRoot)) await registry.removeAt(policy.workspaceRoot, { kind: 'id', id: row.id })
+  for (const row of roots) await registry.add(policy.workspaceRoot, { path: row.path, access: row.access })
+}
+
 /**
  * One battery of operations against a booted tree that carries an ADDITIONAL
  * root: the scope is populated before anything is asked of the providers, so the
@@ -267,7 +288,7 @@ async function multiRootBattery(ctx) {
   const scope = ctx.get('multiRootScope')
   // A registration always carries the canonical directory it is granted for
   // (see src/scope.ts): the smoke plays the registry's role, so it records it.
-  scope.setAdditionalRoots(policy.workspaceRoot, [{
+  await registrations(ctx, policy, [{
     id: 'extra',
     path: extraRoot,
     recordedPath: canonical(extraRoot), access: 'inherit',
@@ -276,7 +297,7 @@ async function multiRootBattery(ctx) {
     path: fixedRoot,
     recordedPath: canonical(fixedRoot), access: 'read-write',
   }])
-  const resolved = scope.resolve(policy)
+  const resolved = scope.snapshot(policy)
   const canonicalExtra = resolved.additionalRoots[0]
   results.set('scope resolves the additional root', String(canonicalExtra))
   results.set('scope resolves the canonical primary root', resolved.primaryRoot)
@@ -306,7 +327,7 @@ async function multiRootBattery(ctx) {
     // others, so the result is always awaited: awaiting a plain value is a
     // no-op, while reading a promise's `.argv` silently yields `undefined`
     // (see src/compat/sandbox-confine.ts).
-    const confined = await ctx.sandbox.confine(SHELL.confineArgv, policy)
+    const confined = await admitted(ctx, policy, () => ctx.sandbox.confine(SHELL.confineArgv, policy))
     results.set('the host dialect grants the additional root', String(
       confined.argv.some(argument => argument.includes(String(canonicalExtra))),
     ))
@@ -322,7 +343,7 @@ async function multiRootBattery(ctx) {
   const bash = async (command) => {
     try {
       const spec = ctx.shell.resolve({ command, workdir: primaryRoot, sandboxPolicy: policy })
-      const result = await runForeground(ctx.shell, spec)
+      const result = await foreground(ctx, spec)
       return {
         exitCode: result.exitCode,
         denied: result.sandbox?.denied ?? null,
@@ -345,6 +366,7 @@ async function multiRootBattery(ctx) {
   results.set('bash writes into the additional root', JSON.stringify(await confinedWrite(bash, join(extraRoot, 'bash-extra.txt'))))
   results.set('bash writes into the fixed root', JSON.stringify(await confinedWrite(bash, join(fixedRoot, 'bash-fixed.txt'))))
   results.set('bash writes outside every root', JSON.stringify(await confinedWrite(bash, join(thirdRoot, 'bash-third.txt'))))
+  await registrations(ctx, policy, [])
 
   return results
 }
@@ -390,7 +412,7 @@ async function registryBattery(ctx) {
     const added = await run(`/workspace-folders add ${extraRoot}`)
     results.set('the command reports success', String(added?.result?.kind))
     results.set('the command names the workspace root', String(added?.result?.text?.includes(canonical(primaryRoot))))
-    const granted = ctx.multiRootScope.scopeOf(policy.workspaceRoot)
+    const granted = projectedRoots(ctx, policy.workspaceRoot)
     results.set('the scope grants the command-registered root', String(granted.includes(canonical(extraRoot))))
 
     const writeAfter = await write(join(extraRoot, 'registry-after.txt'))
@@ -417,12 +439,12 @@ async function registryBattery(ctx) {
     renameSync(extraRoot, moved)
     const whileGone = await run('/workspace-folders list')
     results.set('list reports a vanished root as missing', String(whileGone?.result?.text?.includes('missing')))
-    results.set('a vanished root loses its grant', String(!ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
+    results.set('a vanished root loses its grant', String(!projectedRoots(ctx, policy.workspaceRoot).includes(canonical(extraRoot))))
 
     renameSync(moved, extraRoot)
     const whenBack = await run('/workspace-folders list')
     results.set('list re-grants a restored root', String(!whenBack?.result?.text?.includes('missing')))
-    results.set('a restored root is writable again', String(ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
+    results.set('a restored root is writable again', String(projectedRoots(ctx, policy.workspaceRoot).includes(canonical(extraRoot))))
 
     // --- a replaced directory must NOT transfer the grant --------------------
     // Swapping the registered directory for a symlink used to move the writable
@@ -437,19 +459,19 @@ async function registryBattery(ctx) {
     symlinkSync(swapped, extraRoot, WIN32 ? 'junction' : undefined)
     const afterSwap = await run('/workspace-folders list')
     results.set('list reports a replaced root as redirected', String(afterSwap?.result?.text?.includes('redirected')))
-    results.set('a replaced root loses its grant', String(!ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
-    results.set('a replaced root does not grant the new target', String(!ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(swapped))))
+    results.set('a replaced root loses its grant', String(!projectedRoots(ctx, policy.workspaceRoot).includes(canonical(extraRoot))))
+    results.set('a replaced root does not grant the new target', String(!projectedRoots(ctx, policy.workspaceRoot).includes(canonical(swapped))))
 
     unlinkSync(extraRoot)
     mkdirSync(extraRoot)
     rmSync(swapped, { recursive: true, force: true })
     const afterRestore = await run('/workspace-folders list')
-    results.set('restoring the directory restores the grant', String(ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
+    results.set('restoring the directory restores the grant', String(projectedRoots(ctx, policy.workspaceRoot).includes(canonical(extraRoot))))
     results.set('the restored root is reported available', String(!afterRestore?.result?.text?.includes('redirected')))
 
     const removed = await run('/workspace-folders remove 1')
     results.set('the command removes the root', String(removed?.result?.kind))
-    results.set('the removal revokes the grant', String(!ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot))))
+    results.set('the removal revokes the grant', String(!projectedRoots(ctx, policy.workspaceRoot).includes(canonical(extraRoot))))
     const writeAfterRemoval = await write(join(extraRoot, 'registry-removed.txt'))
     results.set('fs denies the removed root again', writeAfterRemoval)
 
@@ -459,7 +481,7 @@ async function registryBattery(ctx) {
     results.set('the root can be registered again after removal', String(readded?.result?.kind))
     const realiased = await run('/workspace-folders alias 1 payments')
     results.set('the alias is set on the re-registered root', String(realiased?.result?.text?.includes('[payments]')))
-    results.set('the root is registered for the restart check', String(ctx.multiRootScope.scopeOf(policy.workspaceRoot).length))
+    results.set('the root is registered for the restart check', String(projectedRoots(ctx, policy.workspaceRoot).length))
   } finally {
     await handle.dispose()
   }
@@ -481,7 +503,7 @@ async function registryRestartBattery(ctx) {
   results.set('the persisted root is available', String(statuses[0]?.state))
   results.set('the alias survives the restart', String(statuses[0]?.alias))
   results.set('the scope grants the persisted root', String(
-    ctx.multiRootScope.scopeOf(policy.workspaceRoot).includes(canonical(extraRoot)),
+    projectedRoots(ctx, policy.workspaceRoot).includes(canonical(extraRoot)),
   ))
   try {
     await ctx.fs.writeText(await ctx.fs.resolve(join(extraRoot, 'registry-restart.txt')), 'payload', undefined, undefined, policy)
@@ -559,7 +581,7 @@ async function ambientBattery() {
   const { ctx } = await bootProfile(PLUGIN_PROFILE, home)
   try {
     const policy = ctx.sandboxPolicy.resolve({})
-    ctx.multiRootScope.setAdditionalRoots(policy.workspaceRoot, [
+    await registrations(ctx, policy, [
       { id: 'ro', path: extraRoot, recordedPath: canonical(extraRoot), access: 'read-only' },
       { id: 'fixed', path: fixedRoot, recordedPath: canonical(fixedRoot), access: 'read-write' },
     ])
@@ -567,7 +589,7 @@ async function ambientBattery() {
     const probePath = join(primaryRoot, 'full-access-probe.txt')
     const probeSpec = ctx.shell.resolve({ command: SHELL.write(probePath), workdir: primaryRoot, sandboxPolicy: policy })
     let probe
-    try { probe = await runForeground(ctx.shell, probeSpec) }
+    try { probe = await foreground(ctx, probeSpec) }
     catch (error) {
       if (error?.code !== 'SANDBOX_UNAVAILABLE') throw error
       check.skip(requireKernelRunner(hostDialect(), describe(error)))
@@ -585,7 +607,7 @@ async function ambientBattery() {
       const path = join(root, 'full-access.txt')
       rmSync(path, { force: true })
       const spec = ctx.shell.resolve({ command: SHELL.write(path), workdir: primaryRoot, sandboxPolicy: policy })
-      const result = await runForeground(ctx.shell, spec)
+      const result = await foreground(ctx, spec)
       check.equal(existsSync(path), expected, `Full-access shell: ${name} write matches root policy`, result.stderr.text)
       if (expected) check.equal(result.exitCode, 0, `Full-access shell: ${name} command exits successfully`, result.stderr.text)
       else {
@@ -603,7 +625,7 @@ async function ambientBattery() {
         rmSync(path, { force: true })
         const spec = runtime.resolve({ program: `const fs = await import('node:fs'); fs.writeFileSync(${JSON.stringify(path)}, 'ok'); return 42;`,
           bindings: [], cwd: primaryRoot, sandboxPolicy: policy })
-        const result = await runtime.run(spec)
+        const result = await admitted(ctx, policy, () => runtime.run(spec))
         check.equal(existsSync(path), writable, `Full-access PTC: ${name} matches root policy`, JSON.stringify(result))
         if (writable) check.equal(result.value, 42, `Full-access PTC: ${name} returns its value`, JSON.stringify(result))
         else check.equal(result.sandbox?.denied, true, 'Full-access PTC: denied writes retain diagnostic facts', JSON.stringify(result))
@@ -611,9 +633,9 @@ async function ambientBattery() {
     }
     // Removing the restriction must affect the next launch without removing
     // standing ACEs used by already-running deny tokens.
-    ctx.multiRootScope.setAdditionalRoots(policy.workspaceRoot, [])
+    await registrations(ctx, policy, [])
     const spec = ctx.shell.resolve({ command: SHELL.write(join(extraRoot, 'after-remove.txt')), workdir: primaryRoot, sandboxPolicy: policy })
-    const result = await runForeground(ctx.shell, spec)
+    const result = await foreground(ctx, spec)
     check.equal(result.exitCode, 0, 'Full-access shell: removed root is ambient again', result.stderr.text)
     check.ok(existsSync(join(extraRoot, 'after-remove.txt')), 'Full-access shell: next launch observes removal')
   } finally { await ctx.fiber.dispose() }
@@ -698,6 +720,48 @@ async function hardlinkDenyNegative() {
   check.contains(result.stderr, 'isolate-profiles',
     'the refusal names the remediation command', result.stderr)
   check.ok(!existsSync(sentinel), 'the refused launch never ran the child', sentinel)
+}
+
+/** Exercise two independently booted profiles through the installed bundle.
+ * This same battery runs after tarball installation in smoke:packed.
+ */
+async function sharedServiceBattery() {
+  const capability = await nativeHostAvailability()
+  if (!capability.available) { check.skip(`shared Registry native IPC: ${capability.reason}`); return }
+  process.env.DSH_PERMISSION_MODE = 'workspace-write'
+  const owner = await bootProfile(PLUGIN_PROFILE, home)
+  let follower
+  try {
+    follower = await bootProfile(PLUGIN_PROFILE, home)
+    const a = owner.ctx.multiRootRegistry, b = follower.ctx.multiRootRegistry
+    check.equal(a.authority.kind, 'active', 'shared Registry: one profile owns storage')
+    check.equal(b.authority.kind, 'follower', 'shared Registry: second profile uses IPC', b.unavailable)
+    const policy = owner.ctx.sandboxPolicy.resolve({})
+    await registrations(owner.ctx, policy, [{ path: extraRoot, access: 'read-write' }])
+    await b.refresh(policy.workspaceRoot)
+    for (const [index, ctx] of [owner.ctx, follower.ctx].entries()) {
+      const path = join(extraRoot, `shared-host-${index}.txt`)
+      await ctx.fs.writeText(await ctx.fs.resolve(path), 'shared', undefined, undefined, policy)
+      check.equal(readFileSync(path, 'utf8'), 'shared', `shared Registry: profile ${index} writes the additional root`)
+    }
+    const epoch = b.epoch, deniedPath = join(extraRoot, 'shared-revoked.txt')
+    rmSync(deniedPath, { force: true })
+    await a.setAccess(policy.workspaceRoot, { kind: 'path', path: extraRoot }, 'read-only')
+    let denial
+    try { await follower.ctx.fs.writeText(await follower.ctx.fs.resolve(deniedPath), 'must not land', undefined, undefined, policy) }
+    catch (error) { denial = describe(error) }
+    check.contains(String(denial), 'FS_SANDBOX_DENIED', 'shared Registry: cross-profile revocation refuses the next write')
+    check.equal(existsSync(deniedPath), false, 'shared Registry: revoked write leaves no file')
+    await owner.ctx.fiber.dispose()
+    const rows = await b.refresh(policy.workspaceRoot)
+    check.equal(b.authority.kind, 'active', 'shared Registry: follower takes over after owner disposal')
+    check.ok(b.epoch !== epoch, 'shared Registry: takeover establishes a new epoch')
+    check.equal(rows[0]?.access, 'read-only', 'shared Registry: takeover reopens durable revocation')
+    await b.setAccess(policy.workspaceRoot, { kind: 'path', path: extraRoot }, 'read-write')
+    await follower.ctx.fs.writeText(await follower.ctx.fs.resolve(deniedPath), 'successor', undefined, undefined, policy)
+    check.equal(readFileSync(deniedPath, 'utf8'), 'successor', 'shared Registry: successor can manage and grant the store')
+    await registrations(follower.ctx, policy, [])
+  } finally { await follower?.ctx.fiber.dispose(); await owner.ctx.fiber.dispose() }
 }
 
 /** Boot one profile and run the registry battery, then the restart battery. */
@@ -967,6 +1031,7 @@ try {
       'fs writes the persisted root after a restart')
     check.equal(String(registry.restart.get('the battery cleans up after itself')), '0',
       'the registry battery leaves the store empty')
+    await sharedServiceBattery()
   } finally {
     process.chdir(originalCwd)
     delete process.env.DSH_PERMISSION_MODE

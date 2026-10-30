@@ -25,6 +25,7 @@ import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { RootAccess } from './roots.ts'
+import { currentRegistryOperation, rememberOperationProfile, operationPermitsProfile } from './registry-operation.ts'
 import { aroundTool } from './compat/tool-context.ts'
 import { effectiveRootAccess } from './contract.ts'
 
@@ -332,6 +333,7 @@ export class MultiRootScopeService extends Service {
   /** Additional roots keyed by canonical primary root; empty until roots are registered. */
   private readonly rootsByPrimary = new Map<string, readonly AdditionalWorkspaceRoot[]>()
   private readonly listeners = new Set<() => void>()
+  private admissionProof: object | undefined
   /**
    * The registry-authority fact the registry row publishes. Defaults to
    * `available`: a composition without a registry row can never have
@@ -428,7 +430,7 @@ export class MultiRootScopeService extends Service {
           const session = assembly.agent?.session
           if (session === undefined) return ''
           const policy = scope.sandboxPolicy.resolve({ session })
-          const resolved = this.resolve(policy)
+          const resolved = this.snapshot(policy)
           // Zero roots normally contributes nothing — except while the
           // registry authority is unavailable (Full-access is enforced as
           // primary-root-only writes and the model must hear that limit), or the
@@ -458,8 +460,45 @@ export class MultiRootScopeService extends Service {
    * @param policy - the upstream policy whose workspace root is the primary root.
    * @returns the canonical scope; `additionalRoots` is empty when none are registered.
    */
+  requireAdmission(proof: object): void { this.admissionProof = proof }
+
+  rememberProfile(argv: readonly string[]): void {
+    if (this.admissionProof !== undefined) rememberOperationProfile(this.admissionProof, argv, this.capped())
+  }
+  permitsProfile(argv: readonly string[]): boolean {
+    return this.admissionProof === undefined || operationPermitsProfile(this.admissionProof, argv, this.capped())
+  }
+
+  get admissionRequired(): boolean { return this.admissionProof !== undefined }
+
+  admissionPathsValid(): boolean {
+    if (this.admissionProof === undefined) return true
+    const operation = currentRegistryOperation(this.admissionProof)
+    return operation !== undefined && operation.scope.additionalRoots.every(root => {
+      try { return canonicalPath(root) === root && statSync(root).isDirectory() } catch { return false }
+    })
+  }
+
+
+  hasAdmission(): boolean { return this.admissionProof === undefined || currentRegistryOperation(this.admissionProof) !== undefined }
+
+  /** Trusted display/review projection, never an execution permit. */
+  snapshot(policy: SandboxExecutionPolicy): FilesystemScope { return this.project(policy, this.capped()) }
+
+  resolveSnapshot(policy: SandboxExecutionPolicy, roots: readonly AdditionalWorkspaceRoot[], available: boolean): FilesystemScope {
+    return this.project(policy, this.capped(), roots, available ? 'available' : 'unavailable')
+  }
+
   resolve(policy: SandboxExecutionPolicy): FilesystemScope {
-    return this.project(policy, this.capped())
+    if (this.admissionProof === undefined) return this.project(policy, this.capped())
+    const operation = currentRegistryOperation(this.admissionProof)
+    if (operation !== undefined && operation.identity.mode === policy.mode && operation.scope.primaryRoot === canonicalPath(policy.workspaceRoot)) {
+      const snapshot = operation.scope
+      // The snapshot is already intersected with this Host's mode/tool cap.
+      // Never widen it after admission; nested dispatch may only remove writes.
+      return this.capped() ? { ...snapshot, writableRoots: [], deniedRoots: [...new Set([...snapshot.deniedRoots, ...snapshot.additionalRoots])] } : snapshot
+    }
+    return this.project(policy, true, undefined, 'unavailable')
   }
 
   /** Read-only pending-dispatch projection. Does not mint an ALS execution grant. */
@@ -472,13 +511,13 @@ export class MultiRootScopeService extends Service {
     return this.capsInvalid || toolCapStore.getStore()?.capped === true || this.caps[toolName] === 'read-only'
   }
 
-  private project(policy: SandboxExecutionPolicy, capped: boolean): FilesystemScope {
+  private project(policy: SandboxExecutionPolicy, capped: boolean, recorded?: readonly AdditionalWorkspaceRoot[], authority = this.registryAuthority): FilesystemScope {
     const primaryRoot = canonicalPath(policy.workspaceRoot)
-    const roots = this.membersOf(primaryRoot)
-    const writable = capped || this.registryAuthority === 'unavailable'
+    const registered = recorded ?? this.rootsByPrimary.get(primaryRoot) ?? []
+    const roots = authority === 'unavailable' ? [] : sanitizeMembers(primaryRoot, registered)
+    const writable = capped || authority === 'unavailable'
       ? []
       : roots.filter(root => effectivelyWritable(policy.mode, root.access)).map(root => root.path)
-    const registered = this.rootsByPrimary.get(primaryRoot) ?? []
     // Use the recorded spelling, never re-resolve it into a replacement grant.
     // A disappeared directory must not become writable merely because it left
     // membership; explicit removal is what withdraws the negative boundary.
@@ -496,7 +535,7 @@ export class MultiRootScopeService extends Service {
     // boundary silently dropped.
     let protectedHome: string | undefined
     if (this.dshHome !== undefined && policy.mode === 'danger-full-access'
-      && (deniedRoots.length > 0 || this.registryAuthority === 'unavailable')) {
+      && (deniedRoots.length > 0 || authority === 'unavailable')) {
       const home = canonicalPath(this.dshHome)
       if (!deniedRoots.includes(home)) {
         deniedRoots.push(home)
@@ -509,7 +548,7 @@ export class MultiRootScopeService extends Service {
       roots,
       writableRoots: writable,
       deniedRoots,
-      authority: this.registryAuthority,
+      authority,
       ...(protectedHome === undefined ? {} : { protectedHome }),
     }
   }
@@ -537,6 +576,12 @@ export class MultiRootScopeService extends Service {
    * @returns the canonical additional roots; empty when none are registered.
    */
   scopeOf(primaryRoot: string): readonly string[] {
+    if (this.admissionProof !== undefined) {
+      const operation = currentRegistryOperation(this.admissionProof)
+      return operation?.scope.primaryRoot === canonicalPath(primaryRoot) ? operation.scope.additionalRoots.filter(root => {
+        try { return canonicalPath(root) === root && statSync(root).isDirectory() } catch { return false }
+      }) : []
+    }
     return this.membersOf(primaryRoot).map(root => root.path)
   }
 
@@ -564,7 +609,7 @@ export class MultiRootScopeService extends Service {
    *   registry cannot prove none does.
    */
   hasActiveDenyRoots(): boolean {
-    if (this.registryAuthority === 'unavailable') return true
+    if (this.registryAuthority === 'unavailable' || !this.hasAdmission()) return true
     for (const members of this.rootsByPrimary.values()) {
       if (members.some(root => root.access === 'read-only') || (members.length > 0 && this.capped())) return true
     }

@@ -91,12 +91,13 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     // Snapshot once at dispatch. A workspace-write call with unknown denies
     // must not inherit the shared temp grants either.
     const scope = this.ctx.multiRootScope.resolve(policy)
+    const remember = (facts: ConfinedArgv): ConfinedArgv => { this.ctx.multiRootScope.rememberProfile(facts.argv); return facts }
     if (policy.mode === 'workspace-write' && scope.authority === 'unavailable') {
       const prefix = this.clampedExecution(policy, scope.deniedRoots, signal)
-      return widenConfined(() => prefix, facts => ({ ...facts, argv: [...facts.argv, ...argv] }), argv, policy, signal)
+      return widenConfined(() => prefix, facts => remember({ ...facts, argv: [...facts.argv, ...argv] }), argv, policy, signal)
     }
     const base = super.confine as unknown as ConfineCall
-    return widenConfined(base.bind(this), confined => this.widenForScope(confined, argv, policy, scope), argv, policy, signal)
+    return widenConfined(base.bind(this), confined => remember(this.widenForScope(confined, argv, policy, scope)), argv, policy, signal)
   }
 
   /**
@@ -225,7 +226,9 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
         )
       }
     }
-    return widenConfined(() => probe, restrict, ['true'], probePolicy, signal)
+    return widenConfined(() => probe, facts => {
+      const result = restrict(facts); this.ctx.multiRootScope.rememberProfile(result.argv); return result
+    }, ['true'], probePolicy, signal)
   }
 
   /**
@@ -270,7 +273,9 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
         )
       }
     }
-    return widenConfined(() => probe, clamp, ['true'], probePolicy, signal)
+    return widenConfined(() => probe, facts => {
+      const result = clamp(facts); this.ctx.multiRootScope.rememberProfile(result.argv); return result
+    }, ['true'], probePolicy, signal)
   }
 
 }

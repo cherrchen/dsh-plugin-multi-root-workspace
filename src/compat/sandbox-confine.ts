@@ -87,3 +87,8 @@ export function widenConfined(
   // runtime probe knows which, so the compiler has to be told.
   return result as UpstreamConfined
 }
+
+/** Public consumer call with the installed provider's arity and return shape. */
+export function confineInstalled(provider: Pick<LocalSandboxProvider, 'confine'>, argv: readonly string[], policy: SandboxPolicy, signal?: AbortSignal): ConfinedArgv | Promise<ConfinedArgv> {
+  return (provider.confine as unknown as ConfineCall).call(provider, argv, policy, signal)
+}
