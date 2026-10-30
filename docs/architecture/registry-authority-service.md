@@ -105,4 +105,4 @@ Windows contender 在零超时等待失败后立即关闭 semaphore handle，连
 
 `tests/shared-registry-multiprocess.e2e.ts` 通过独立 Node/V8、生产 Registry/JSON/fs 和真实 IPC 构造并发同/异主根 mutation、写入准入屏障、跨实例撤权、SIGKILL、多候选竞选、旧 holder 重启与暂停不夺锁。`tests/shared-registry.spec.ts` 补充丢通知、丢已提交应答不重放、失联嵌套操作与正常接管；`tests/shared-consumers.spec.ts` 覆盖同步/异步进程、复制 profile、PTY、Skills 缓存、Files/LSP 与 unknown-state。`tests/authority-native.spec.ts` 覆盖真实 peer gate、请求去重/冲突，按平台执行受限子进程攻击用例。旧 `registry-operation` 与 `skills-authority` 循环回归保留。
 
-原生测试用 `nativeHostAvailability()` 明确探测外层沙箱/缺失 peer-pidfd 等能力；它只决定测试能否运行，不改变生产认证。behavior 与 packed 的同一 battery 还 boot 两个完整 Host profile，共享实际安装产物并验证撤权/接管；独立进程隔离由前述 e2e 覆盖。三平台 CI 仍运行同一套正式测试及 compose/behavior/journey/packed 门禁。未执行的版本/平台不得标为通过；真实 dsh-tui 的长期 OOM 复测与共享服务一致性测试分别报告，不能相互替代。
+CI build 后用 `registry:probe --required` 要求正常原生 runner 的共享能力成立；绑定/API 异常不能被吞为 capability skip。原生测试用 `nativeHostAvailability()` 明确探测外层沙箱/缺失 peer-pidfd 等能力；它只决定测试能否运行，不改变生产认证。behavior 与 packed 的同一 battery 还 boot 两个完整 Host profile，共享实际安装产物并验证撤权/接管；独立进程隔离由前述 e2e 覆盖。三平台 CI 仍运行同一套正式测试及 compose/behavior/journey/packed 门禁。未执行的版本/平台不得标为通过；真实 dsh-tui 的长期 OOM 复测与共享服务一致性测试分别报告，不能相互替代。

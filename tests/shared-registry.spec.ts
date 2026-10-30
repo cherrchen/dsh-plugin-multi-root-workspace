@@ -1,13 +1,15 @@
 import { nativeHostAvailability } from '../src/authority/native.ts'
 /** Production owner/follower facade over a real kernel lease and local IPC. */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { randomUUID } from 'node:crypto'
+import type { Config as RegistryConfig } from '../src/registry.ts'
 import MultiRootFileSystem from '../src/fs.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
-import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
+import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
 
 const availability = await nativeHostAvailability()
 if (!availability.available) console.info(`shared Registry native tests unavailable: ${availability.reason}`)
@@ -16,9 +18,9 @@ const nativeTest = it.skipIf(!availability.available)
 let fixture: FixtureWorkspace, stacks: RegistryStack[]
 beforeEach(() => { fixture = createFixtureWorkspace('shared'); stacks = [] })
 afterEach(async () => { vi.restoreAllMocks(); for (const stack of stacks.reverse()) await stack.dispose(); fixture.dispose() })
-async function mount() {
+async function mount(config: RegistryConfig = {}) {
   const root = join(fixture.base, 'store')
-  const stack = await mountRegistryStack(root, { sharedStorageRoot: root }, { beforeGate: async ctx => {
+  const stack = await mountRegistryStack(root, { sharedStorageRoot: root, ...config }, { beforeGate: async ctx => {
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
     await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace })
@@ -146,4 +148,55 @@ nativeTest('does not let a new nested operation inherit an old admission after d
     })
     expect(old.scope.writableRoots).toContain(fixture.outside) // existing admitted work may finish
   })
+})
+
+nativeTest.skipIf(symlinkUnsupportedReason() !== undefined)('uses one authority across canonical and aliased storage directories', async () => {
+  const owner = await mount(), alias = join(fixture.base, 'store-alias')
+  symlinkSync(owner.storeRoot, alias, process.platform === 'win32' ? 'junction' : 'dir')
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  const follower = await mount({ sharedStorageRoot: alias })
+  expect(follower.registry.authority.kind, follower.registry.unavailable).toBe('follower')
+  expect(follower.registry.epoch).toBe(owner.registry.epoch)
+  const file = join(fixture.outside, 'aliased-store.txt')
+  await follower.ctx.fs.writeText(await follower.ctx.fs.resolve(file), 'shared medium')
+  expect(readFileSync(file, 'utf8')).toBe('shared medium')
+})
+
+nativeTest('rejects an alternate lock name without opening another domain', async () => {
+  const owner = await mount(), wrongLock = join(owner.storeRoot, 'other.lock')
+  const invalid = await mountRegistryStack(owner.storeRoot, { sharedStorageRoot: owner.storeRoot, leasePath: wrongLock })
+  stacks.push(invalid)
+  expect(invalid.registry.authority.kind).toBe('storage-failed')
+  expect(invalid.registry.unavailable).toContain('canonical medium lock')
+  expect(invalid.registry.available).toBe(false)
+  expect(existsSync(wrongLock)).toBe(false)
+  expect(owner.registry.authority.kind).toBe('active')
+})
+
+nativeTest('refuses a follower with a different shared root limit while the owner stays active', async () => {
+  const owner = await mount()
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  const follower = await mount({ maxAdditionalRoots: 17 })
+  expect(follower.registry.authority.kind).toBe('contended')
+  expect(follower.registry.available).toBe(false)
+  expect(follower.registry.granted(fixture.workspace)).toEqual([])
+  await expect(follower.registry.add(fixture.workspace, { path: fixture.outside })).rejects.toMatchObject({ code: 'registry-contended' })
+  expect(owner.registry.authority.kind).toBe('active')
+})
+
+nativeTest('refuses a response from an old authority epoch before executing the operation body', async () => {
+  const owner = await mount()
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  const follower = await mount()
+  const internal = follower.registry as unknown as { client: { request(method: string, args: unknown[]): Promise<unknown>; channel: { on(name: string, callback: () => void): void } } }
+  const snapshot = await internal.client.request('snapshot', [fixture.workspace]) as object
+  const closed = Promise.withResolvers<void>()
+  internal.client.channel.on('close', closed.resolve)
+  vi.spyOn(internal.client, 'request').mockResolvedValueOnce({ ...snapshot, epoch: randomUUID() })
+  const body = vi.fn()
+  await expect(follower.registry.withOperation({ workspaceRoot: fixture.workspace, mode: 'workspace-write' }, 'fs-write', body)).rejects.toThrow('authority epoch')
+  await closed.promise
+  expect(body).not.toHaveBeenCalled()
+  expect(follower.registry.available).toBe(false)
+  expect(follower.registry.granted(fixture.workspace)).toEqual([])
 })

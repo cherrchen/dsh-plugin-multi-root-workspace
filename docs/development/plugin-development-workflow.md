@@ -286,3 +286,6 @@ B9 的 Linux 原生执行证据分两类：latest 保留实际 Landlock 选择�
 共享服务的合同、配置和平台能力前提见[架构](../architecture/registry-authority-service.md)，执行结果只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#多-host-权威服务开发2026-10-29)。完整 `pnpm test` 已包含 `authority-native`、`shared-registry`、`shared-consumers` 与独立 Node 进程的 `shared-registry-multiprocess.e2e`。受限测试进程不能伪装正常 Host；能力探测会把外层沙箱或缺失 peer 身份接口的原因写入日志。需要真实正常 Host 的测试应在正常终端/CI 运行，不能通过关闭生产认证让测试变绿。
 
 直接测同步 shell handle 时，在 `registry.withOperation()` 的异步 callback 内启动并等待结算；展示断言用 `scope.snapshot()`，不要把已过期的 `scope.resolve()` 当缓存投影。默认 bundle 冒烟通过 Registry 真正登记根，不再仅往 scope 注入一份与权威介质不同的测试表。平台/版本隔离探测使用已有 `DSH_TEST_FIXTURE_PARENT` 将 fixture 放在自动 temp write grant 之外。
+
+
+共享服务 CI 在 build 后运行 `pnpm registry:probe --required`，正常原生 runner 必须具备 peer 认证能力后才进入套件；本地受外层沙箱约束时可运行不带 `--required` 的诊断。探针不关闭认证、不授予权限，作用是防止整套 shared tests 被 capability skip 后仍把矩阵记为已验收。Windows 的已知受限 token 可以报告不可用，绑定加载/原生 API 异常必须失败，不能伪装能力不足。

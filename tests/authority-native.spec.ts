@@ -1,3 +1,4 @@
+import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { fileURLToPath } from 'node:url'
 import { nativeHostAvailability } from '../src/authority/native.ts'
 /** Real local transports, including the kernel peer gate. */
@@ -161,7 +162,7 @@ nativeTest.runIf(process.platform === 'win32')('refuses a Windows ambient-deny c
   const provider = ctx.sandbox as InstanceType<typeof MultiRootSandboxProvider>
   provider.internals = { chain: ['windows-acl'], windowsAclRunnerArgs: [process.execPath, fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-sandbox-windows-acl/runner'))] }
   try {
-    const prefix = await provider.restrictedExecution({ mode: 'danger-full-access', workspaceRoot: root }, [denied])
+    const prefix = await provider.restrictedExecution({ mode: 'danger-full-access', workspaceRoot: root }, [canonicalPath(denied)])
     const argv = [...prefix.argv, process.execPath, '--experimental-transform-types', fileURLToPath(new URL('./support/authority-auth-child.ts', import.meta.url)), identity.endpoint, identity.id, root, root + '/extra']
     const child = spawn(argv[0]!, argv.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] })
     cleanups.push(() => { child.kill() })

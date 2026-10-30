@@ -1190,3 +1190,12 @@ pnpm 的自动依赖自检最初尝试重装并因非交互环境中止；后续
 确定性故障用例：独立进程并发同/异主根修改不丢数据；在 fs 真正解析处暂停已准入写，然后另一 Host 撤权，旧操作可完成、新写被拒；SIGKILL 后多个候选仅一个 owner，从磁盘恢复；旧 holder 重启成为 follower；SIGSTOP 时超时拒绝新操作但不夺锁。另覆盖广播丢失、已提交应答丢失不重放、断线后的新嵌套调用不继承旧 grant、新 epoch、unknown-state 保留 lease、原生 Skills change→requery 有界、读缓存撤权、指令显式撤回、空闲 Files 流断线取消、hello/change 同批读取，以及受限 macOS 子进程知道 endpoint 仍不能调用管理方法。
 
 **尚未执行的验收**：Windows 原生 pipe/token/ambient deny 与 semaphore 多候选崩溃恢复；Linux 原生 SO_PEERPIDFD、NoNewPrivs 与 bubblewrap 攻击用例（已编入测试）；三平台 × 所有精确版本远端 CI；真实 dsh-tui 的多 Host 长期运行/Ubuntu OOM 报告环境复测。此变更未发布，也未宣称这些平台/版本已通过；原先 Issue #24 hot-fix 的 20 分钟观察不能作为新共享服务的长期内存证据。
+
+
+### 初版核对与 Draft PR 验收（2026-10-30）
+
+初版 `c56fbb2` 与专项计划 `58e2439` 已推送并创建 [Draft PR #26](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/26)。首轮 [CI run 40997877818](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/40997877818) 覆盖 19 个精确版本 × 4 个 runner（macOS、Windows、Ubuntu latest/22.04），不能仅凭部分 job 成功记全绿。
+
+核对补充：加入 build 后的 `registry:probe --required`，防止认证实现异常导致 shared tests 整体跳过；Windows 能力探测只将已知受限身份记为 unavailable，原生绑定/API 错误向外失败。补充同物理 store 路径别名共享、替代锁名拒绝、Host 根上限冲突、旧 epoch 应答不能执行 body 的回归。首轮实际暴露两项夹具问题：Ubuntu latest 的 Full-access runner 受限提前返回时没有清理持久化登记；Windows ambient-deny probe 把 temp 的 8.3 别名直接传给要求 canonical 路径的 runner。分别补 finally 清理和 canonical 化，不放宽生产授权或降低内核断言。
+
+完整最新结果在 CI 完成后补记；此阶段不发布，不将原生/版本验收和真实 dsh-tui 长期观察合并为一个完成结论。

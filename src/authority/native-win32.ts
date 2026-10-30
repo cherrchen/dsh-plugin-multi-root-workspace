@@ -2,6 +2,8 @@
 import { EventEmitter } from 'node:events'
 import type { Channel, Listener } from './native.ts'
 
+class RestrictedRegistryPeerError extends Error {}
+
 let apiPromise: Promise<Awaited<ReturnType<typeof load>>> | undefined
 async function load() {
   const koffi = (await import('koffi')).default
@@ -45,15 +47,15 @@ async function load() {
   let ownUser: string
   try { ownUser = user(Number(self.readBigUInt64LE())) } finally { close(Number(self.readBigUInt64LE())) }
   function attest(token: number): void {
-    if (user(token) !== ownUser || restricted(token) !== 0 || tokenInfo(token, 29).readUInt32LE() !== 0) throw new Error('registry pipe refuses restricted or foreign-user token')
+    if (user(token) !== ownUser || restricted(token) !== 0 || tokenInfo(token, 29).readUInt32LE() !== 0) throw new RestrictedRegistryPeerError('registry pipe refuses restricted or foreign-user token')
     const groups = tokenInfo(token, 2), count = groups.readUInt32LE()
     if (count > 2048) throw new Error('registry token has too many groups')
     for (let i = 0; i < count; i++) {
       const group = sid(koffi.decode(groups.subarray(8 + i * 16), 'void *'))
-      if (/^S-1-4-(?:\d+-){4}3$/.test(group)) throw new Error('registry pipe refuses an ambient deny token')
+      if (/^S-1-4-(?:\d+-){4}3$/.test(group)) throw new RestrictedRegistryPeerError('registry pipe refuses an ambient deny token')
     }
     const integrity = sid(koffi.decode(tokenInfo(token, 25), 'void *'))
-    if (!/^S-1-16-\d+$/.test(integrity) || Number(integrity.split('-').at(-1)) < 8192) throw new Error('registry pipe refuses low-integrity peer')
+    if (!/^S-1-16-\d+$/.test(integrity) || Number(integrity.split('-').at(-1)) < 8192) throw new RestrictedRegistryPeerError('registry pipe refuses low-integrity peer')
   }
   function clientToken(handle: number): void {
     if (impersonate(handle) === 0) throw new Error('cannot attest registry client')
@@ -161,6 +163,10 @@ export async function listenWindows(endpoint: string, accepted: (channel: Channe
 export async function windowsHostAvailability(): Promise<{ available: boolean; reason?: string }> {
   // Connecting is still attested on both ends. A normal desktop Host is
   // supported; restricted-token native test runners should run outside it.
-  try { (await api()).attestSelf(); return { available: true } }
-  catch (error) { return { available: false, reason: String(error) } }
+  const native = await api() // missing/broken bindings are failures, never a test skip
+  try { native.attestSelf(); return { available: true } }
+  catch (error) {
+    if (error instanceof RestrictedRegistryPeerError) return { available: false, reason: error.message }
+    throw error
+  }
 }

@@ -122,7 +122,8 @@
     "verify:all": "pnpm lint && pnpm typecheck && pnpm build && pnpm kernel:probe && pnpm test && pnpm smoke && pnpm pack:check && pnpm smoke:packed && pnpm auto-review:fork && pnpm smoke:auto-review",
     "prepare": "pnpm run bundle",
     "auto-review:fork": "node scripts/check-auto-review-fork.mjs",
-    "smoke:auto-review": "node scripts/verify-auto-review.mjs"
+    "smoke:auto-review": "node scripts/verify-auto-review.mjs",
+    "registry:probe": "node scripts/check-registry-authority.mjs"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

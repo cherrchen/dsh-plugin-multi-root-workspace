@@ -579,8 +579,9 @@ function canonical(path) {
 async function ambientBattery() {
   process.env.DSH_PERMISSION_MODE = 'danger-full-access'
   const { ctx } = await bootProfile(PLUGIN_PROFILE, home)
+  let policy
   try {
-    const policy = ctx.sandboxPolicy.resolve({})
+    policy = ctx.sandboxPolicy.resolve({})
     await registrations(ctx, policy, [
       { id: 'ro', path: extraRoot, recordedPath: canonical(extraRoot), access: 'read-only' },
       { id: 'fixed', path: fixedRoot, recordedPath: canonical(fixedRoot), access: 'read-write' },
@@ -638,7 +639,12 @@ async function ambientBattery() {
     const result = await foreground(ctx, spec)
     check.equal(result.exitCode, 0, 'Full-access shell: removed root is ambient again', result.stderr.text)
     check.ok(existsSync(join(extraRoot, 'after-remove.txt')), 'Full-access shell: next launch observes removal')
-  } finally { await ctx.fiber.dispose() }
+  } finally {
+    // A refused runner returns early. Registrations are durable in shared mode,
+    // so cleanup must also run on that path before the command battery boots.
+    try { if (policy) await registrations(ctx, policy, []) }
+    finally { await ctx.fiber.dispose() }
+  }
 }
 
 /**
