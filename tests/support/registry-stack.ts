@@ -12,7 +12,7 @@
  */
 
 import { mkdirSync } from 'node:fs'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, type Fiber } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
@@ -28,6 +28,8 @@ export interface RegistryStack {
   readonly ctx: Context
   /** The registry under test. */
   readonly registry: MultiRootRegistry
+  /** The actual Registry row; unloading it keeps sibling Host services alive. */
+  readonly registryFiber: Fiber
   /** The scope the registry publishes into. */
   readonly scope: MultiRootScopeService
   /** The store root the JSON backend writes under. */
@@ -72,10 +74,11 @@ export async function mountRegistryStack(storeRoot: string, registryConfig: Regi
   // whatever fs/sandbox the spec mounted and stubs the missing one (see
   // tests/support/providers.ts).
   await mountProviderGate(ctx)
-  await ctx.plugin(MultiRootRegistry, { leasePath: `${storeRoot}/${DOMAIN_NAME}.lock`, ...registryConfig })
+  const registryFiber = await ctx.plugin(MultiRootRegistry, { leasePath: `${storeRoot}/${DOMAIN_NAME}.lock`, ...registryConfig })
   return {
     ctx,
     registry: ctx.multiRootRegistry,
+    registryFiber,
     scope: ctx.multiRootScope,
     storeRoot,
     storeFile: `${storeRoot}/${DOMAIN_NAME}.json`,

@@ -17,8 +17,8 @@ import MultiRootSkills from '../../src/skills.ts'
 import { SessionSkillCatalog } from '@deepseek-ai/dsh-api-session-controller'
 import { installToolExecutor } from './tool-executor.ts'
 
-export async function skillsStack(base: string) {
-  const stack = await mountRegistryStack(join(base, 'store'), {}, { beforeGate: async ctx => {
+export async function skillsStack(base: string, shared = false) {
+  const stack = await mountRegistryStack(join(base, 'store'), shared ? { sharedStorageRoot: join(base, 'store') } : {}, { beforeGate: async ctx => {
     await ctx.plugin(LocalFs, { cwd: base })
   } })
   const ctx = stack.ctx
@@ -26,7 +26,7 @@ export async function skillsStack(base: string) {
   await ctx.plugin(SystemPrompt); await ctx.plugin(Tools); await ctx.plugin(AgentRegistry); await ctx.plugin(NativeSkills)
   await installToolExecutor(ctx)
   await ctx.plugin(FileSkills, { includeDefaultRoots: true, dshHome: join(base, 'home'), agentsHome: join(base, 'agents'), watch: false })
-  ctx.provide('workingDirectory', { ensure: async (agent: Agent) => (agent as Agent & { effectiveCwd?: string }).effectiveCwd ?? agent.session.header.cwd } as never)
+  ctx.provide('workingDirectory', { get: (session: Session) => session.header.cwd, ensure: async (agent: Agent) => (agent as Agent & { effectiveCwd?: string }).effectiveCwd ?? agent.session.header.cwd } as never)
   const headers = new Map<string, Session['header']>()
   ctx.provide('sessionQuery', { observeSession: async (id: string) => {
     const header = headers.get(id)

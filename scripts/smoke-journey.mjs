@@ -483,7 +483,7 @@ async function runWebLeg() {
       } finally {
         dispose()
       }
-      observed.granted = ctx.multiRootScope.scopeOf(primaryRepo)
+      observed.granted = ctx.multiRootScope.snapshot({ workspaceRoot: primaryRepo, mode: 'read-only' }).additionalRoots
       const llm = await loadRuntimeModule('@deepseek-ai/dsh-llm')
       agent.followup(llm.createUserMessage({ content: [{ type: 'text', text: '/repo-b:journey-user verify this skill' }], source: { kind: 'user' } }))
       await agent.whenIdle()
@@ -650,7 +650,7 @@ try {
     check.ok(web.primarySkillKept, 'web: global disable preserves primary-root native Skills')
     check.ok(web.globalRestored, 'web: live global restore preserves Root choice and restores discovery')
     check.ok(web.noBareBypass, 'web: disabled Root cannot re-enter through native additional-root cwd')
-    check.ok(JSON.stringify(model.aliasSteps).includes(SKILL_USER_BODY), 'web: user-only namespaced invocation reaches a real model request')
+    check.ok(JSON.stringify(model.aliasSteps).includes(SKILL_USER_BODY), 'web: user-only namespaced invocation reaches a real model request', `alias requests: ${model.aliasSteps.length}; ${JSON.stringify(model.aliasSteps).slice(-1600)}`)
     check.ok(!JSON.stringify(webRequests[0]).includes(SKILL_MODEL_BODY), 'web: first model request contains no additional-root Skill body')
     check.ok(/mr-[a-f0-9]{64}-journey-model/.test(JSON.stringify(webRequests[0])), 'web: first model request contains the namespaced bridge catalog')
     check.ok(JSON.stringify(webRequests).includes(SKILL_MODEL_BODY), 'web: native skill tool loads the body on demand')

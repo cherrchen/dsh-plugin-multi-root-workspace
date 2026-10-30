@@ -122,7 +122,9 @@
     "verify:all": "pnpm lint && pnpm typecheck && pnpm build && pnpm kernel:probe && pnpm test && pnpm smoke && pnpm pack:check && pnpm smoke:packed && pnpm auto-review:fork && pnpm smoke:auto-review",
     "prepare": "pnpm run bundle",
     "auto-review:fork": "node scripts/check-auto-review-fork.mjs",
-    "smoke:auto-review": "node scripts/verify-auto-review.mjs"
+    "smoke:auto-review": "node scripts/verify-auto-review.mjs",
+    "registry:probe": "node scripts/check-registry-authority.mjs",
+    "soak:tui-registry": "node scripts/observe-tui-registry.mjs"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -157,7 +159,8 @@
     "@deepseek-ai/dsh-skill-filesystem": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.2-alpha.2",
     "@deepseek-ai/dsh-settings": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.2-alpha.2",
     "@deepseek-ai/dsh-api-session-controller": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.2-alpha.2",
-    "@deepseek-ai/dsh-session-query": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.2-alpha.2"
+    "@deepseek-ai/dsh-session-query": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.2-alpha.2",
+    "@deepseek-ai/dsh-storage-json": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.2-alpha.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-agent": {
@@ -222,6 +225,9 @@
     },
     "@deepseek-ai/dsh-session-query": {
       "optional": true
+    },
+    "@deepseek-ai/dsh-storage-json": {
+      "optional": true
     }
   },
   "devDependencies": {
@@ -268,6 +274,7 @@
     "@deepseek-ai/dsh-util-workspace-path": "0.2.2-alpha.2",
     "@deepseek-ai/dsh-workspace": "0.2.2-alpha.2",
     "@testing-library/react": "^16.3.3",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.31",
     "@types/react-dom": "~18.3.7",
@@ -279,7 +286,7 @@
     "react-dom": "^18.3.1",
     "tsdown": "^0.22.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8",
+    "vitest": "^4.1.12",
     "yaml": "^2.9.0",
     "zustand": "~4.5.7",
     "@deepseek-ai/dsh-skill": "0.2.2-alpha.2",
@@ -306,7 +313,7 @@
   "dependencies": {
     "@deepseek-ai/node-addon-system": "^0.1.2",
     "koffi": "^3.1.0",
-    "zod": "^4.6.2",
+    "zod": "^4.6.7",
     "@deepseek-ai/schemastery": "^3.18.2"
   }
 }

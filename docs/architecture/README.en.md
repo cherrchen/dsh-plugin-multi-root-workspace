@@ -25,11 +25,12 @@ Documents describing future designs must clearly state their status.
 
 ## Current State
 
-The architecture document carries **implemented Current state** and **still-future Target pieces**, with the boundary marked in the document header and in each section:
+The architecture documents distinguish **implemented Current state** from **future Target / Proposed designs**, with the boundary marked in each document header and section:
 
 - [multi-root-workspace.md](./multi-root-workspace.md) — upstream-unmodified design for Multi-root Workspace: provider replacement + subclassing.
   - Implemented (M1/M2/M3/M4): composition, scope resolution, both providers, the topology snapshot, the root registry / command / panel (primary root derived from the session cwd, ADR-0008), and the cross-process Authority Lease.
   - Still Target: the long-term upstream seam (§8) and the appendix (§9).
+- [registry-authority-service.md](./registry-authority-service.md) — Shared Registry authority: ordered admissions, kernel-authenticated IPC, consumer seams, fail-closed recovery and takeover (implemented; platform evidence in the progress ledger).
 
 ## Naming Convention
 

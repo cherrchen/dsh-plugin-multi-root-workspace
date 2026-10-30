@@ -7,6 +7,7 @@ import type { Reader } from './catalog.ts'
 
 interface Entry {
   readonly key: string
+  readonly root: string
   readonly controller: AbortController
   readonly reader: Promise<Reader | undefined>
   busy: number
@@ -23,8 +24,9 @@ export class SkillReaderPool {
     this.timer.unref()
   }
   get size(): number { return this.entries.size }
-  get roots(): readonly string[] { return [...this.entries.keys()] }
-  async use<T>(key: string, create: (signal: AbortSignal) => Promise<Reader | undefined>, run: (reader: Reader | undefined) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  get roots(): readonly string[] { return [...new Set([...this.entries.values()].map(entry => entry.root))] }
+  async use<T>(root: string, create: (signal: AbortSignal) => Promise<Reader | undefined>, run: (reader: Reader | undefined) => Promise<T>, signal?: AbortSignal, identity = root): Promise<T> {
+    const key = identity
     for (;;) {
       signal?.throwIfAborted()
       if (this.closing) throw new Error('multi-root skills: reader pool is closing')
@@ -45,12 +47,12 @@ export class SkillReaderPool {
       }
       if (entry === undefined) {
         const controller = new AbortController()
-        entry = { key, controller, reader: create(controller.signal), busy: 0 }
+        entry = { key, root, controller, reader: create(controller.signal), busy: 0 }
         this.entries.set(key, entry)
       }
       this.entries.delete(key); this.entries.set(key, entry); entry.busy++
       try {
-        if (entry.stamp === undefined) entry.stamp = await skillTreeStamp(key)
+        if (entry.stamp === undefined) entry.stamp = await skillTreeStamp(entry.root)
         signal?.throwIfAborted()
         return await run(await entry.reader)
       } finally {
@@ -64,7 +66,7 @@ export class SkillReaderPool {
     this.polling ??= (async () => {
       let changed = false
       for (const entry of [...this.entries.values()]) {
-        const stamp = await skillTreeStamp(entry.key)
+        const stamp = await skillTreeStamp(entry.root)
         if (entry.stamp !== undefined && entry.stamp !== stamp) changed = true
         entry.stamp = stamp
       }
@@ -91,15 +93,20 @@ export class SkillReaderPool {
 /** No symlink target outside the Root is read or enumerated. Content reads stay on demand. */
 export async function skillTreeStamp(root: string): Promise<string> {
   const rows: string[] = [canonicalPath(root)]
-  const stamp = async (path: string) => {
+  const stamp = async (path: string, identityOnly = false) => {
     try {
       const link = await lstat(path, { bigint: true })
-      rows.push(`${path}:${link.dev}:${link.ino}:${link.size}:${link.mtimeNs}:${link.ctimeNs}:${canonicalPath(path)}`)
+      // Ordinary root-file creation changes directory mtime/size/ctime, but
+      // does not change the Skills catalog. Keep root identity/permissions so
+      // replacement/disappearance still invalidates pending readers.
+      rows.push(identityOnly
+        ? `${path}:${link.dev}:${link.ino}:${link.mode}:${canonicalPath(path)}`
+        : `${path}:${link.dev}:${link.ino}:${link.size}:${link.mtimeNs}:${link.ctimeNs}:${canonicalPath(path)}`)
       if (!containsPath(root, canonicalPath(path))) return undefined
       return await stat(path)
     } catch { rows.push(`${path}:missing`); return undefined }
   }
-  await stamp(root)
+  await stamp(root, true)
   for (const directory of ['.dsh/skills', '.agents/skills']) {
     const path = join(root, directory)
     const info = await stamp(path)

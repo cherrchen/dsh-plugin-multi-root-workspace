@@ -92,6 +92,9 @@ jobs:
       - name: Build the package (before the tests that read lib/)
         run: pnpm build
 
+      - name: Require shared Registry peer authentication on native runners
+        run: pnpm registry:probe --required
+
       # 22.04 provides native bwrap evidence; latest retains the Landlock lane.
       # Do not disable AppArmor/user-namespace policy on the latest image.
       - if: runner.os == 'Linux'

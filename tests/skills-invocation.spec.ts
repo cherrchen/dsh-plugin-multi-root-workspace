@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { writeFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -156,6 +157,21 @@ describe('native loading and Host aliases', () => {
     expect(result.messages[0]).toBe(request)
     expect(JSON.stringify(result.messages)).not.toContain('FIRST BODY')
     expect(JSON.stringify(result.messages)).not.toContain('SECOND BODY')
+  })
+
+  it('keeps an explicit invocation when a poll observes unrelated workspace writes', async () => {
+    writeSkill(extra, 'review', 'USER BODY', 'disable-model-invocation: true\n')
+    const load = AdditionalSkillCatalog.prototype.load
+    vi.spyOn(AdditionalSkillCatalog.prototype, 'load').mockImplementation(async function(...args) {
+      const loaded = await load.apply(this, args)
+      // The journey edits/creates ordinary root files before the next gesture.
+      // Force the polling interleaving while its loaded receipt is pending.
+      writeFileSync(join(extra, 'unrelated.txt'), 'workspace output')
+      await this.pool.poll()
+      return loaded
+    })
+    const result = await stack.preStep(agent, [user('/extra:review')])
+    expect(JSON.stringify(result.messages)).toContain('USER BODY')
   })
 
   it('rereads changed policy/name and independently revokes when another native provider is incomplete', async () => {

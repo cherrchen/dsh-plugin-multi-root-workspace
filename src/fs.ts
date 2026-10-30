@@ -32,13 +32,16 @@ import type {
 } from '@deepseek-ai/dsh-fs'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import type { Config as LocalConfig } from '@deepseek-ai/dsh-fs-local'
-import { writableRoots } from '@deepseek-ai/dsh-sandbox'
+import { statSync } from 'node:fs'
+import { canonicalPath, writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from './compat.ts'
 import { isPathUnder } from './containment.ts'
 import { brandMultiRootProvider } from './providers.ts'
 import type { FilesystemScope } from './scope.ts'
+import type {} from './registry.ts'
+import type { RegistryOperationKind } from './registry-operation.ts'
 
 /** Plugin config: the local backend's knobs verbatim (see `dsh-fs-local`). */
 export type Config = LocalConfig
@@ -92,7 +95,9 @@ export class MultiRootFileSystem extends LocalFileSystem {
     signal?: AbortSignal,
     sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsWriteOutcome> {
-    return super.writeText(await this.checkedTarget(target, sandboxPolicy), content, expected, signal)
+    const policy = structuredClone(sandboxPolicy ?? this.ctx.sandboxPolicy.resolve())
+    return this.withOperation(policy, 'fs-write', async scope =>
+      super.writeText(await this.checkedTarget(target, policy, scope), content, expected, signal))
   }
 
   /**
@@ -113,7 +118,16 @@ export class MultiRootFileSystem extends LocalFileSystem {
     signal?: AbortSignal,
     sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsEditOutcome> {
-    return super.editText(await this.checkedTarget(target, sandboxPolicy), edit, expected, signal)
+    const policy = structuredClone(sandboxPolicy ?? this.ctx.sandboxPolicy.resolve())
+    return this.withOperation(policy, 'fs-edit', async scope =>
+      super.editText(await this.checkedTarget(target, policy, scope), edit, expected, signal))
+  }
+
+  /** The provider must also work without the gated registry (ADR-0009). */
+  private async withOperation<T>(policy: SandboxExecutionPolicy, kind: RegistryOperationKind, body: (scope: FilesystemScope) => Promise<T>): Promise<T> {
+    const registry = this.ctx.get('multiRootRegistry')
+    if (registry !== undefined) return registry.withOperation(policy, kind, operation => body(operation.scope))
+    return body(this.ctx.multiRootScope.resolve(policy))
   }
 
   /**
@@ -136,6 +150,8 @@ export class MultiRootFileSystem extends LocalFileSystem {
     if (scope.authority === 'unavailable') return policy.mode === 'read-only' ? [] : [scope.primaryRoot]
     const roots = writableRoots(policy)
     for (const root of scope.writableRoots) {
+      // Admission permits in-flight effects, never following a replaced path.
+      try { if (canonicalPath(root) !== root || !statSync(root).isDirectory()) continue } catch { continue }
       if (!roots.includes(root)) roots.push(root)
     }
     return roots
@@ -166,14 +182,11 @@ export class MultiRootFileSystem extends LocalFileSystem {
    * to primary-root-only writes (no shared temp or additional-root grants)
    * until the authority returns.
    * @param target - the resolved target about to be mutated.
-   * @param sandboxPolicy - the per-call policy; omit for the deployment fallback.
+   * @param policy - the per-call policy captured before admission.
+   * @param scope - the admission snapshot shared by every fence check.
    * @returns the fresh canonical target the mutation must use.
    */
-  private async checkedTarget(target: FsTarget, sandboxPolicy?: SandboxExecutionPolicy): Promise<FsTarget> {
-    const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
-    // One resolution per call: the deny pass, the containment pass, and (on
-    // denial) the message all share this scope rather than re-resolving.
-    const scope = this.ctx.multiRootScope.resolve(policy)
+  private async checkedTarget(target: FsTarget, policy: SandboxExecutionPolicy, scope: FilesystemScope): Promise<FsTarget> {
     const effectiveMode: SandboxMode = scope.authority === 'unavailable' && policy.mode === 'danger-full-access'
       ? 'workspace-write'
       : policy.mode

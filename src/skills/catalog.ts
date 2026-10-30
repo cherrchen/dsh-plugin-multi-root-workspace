@@ -1,3 +1,4 @@
+import { withRegistryRead } from '../registry-operation.ts'
 /** Origin-scoped metadata discovery; Registry remains the only registration source. */
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { SkillReaderPool } from './pool.ts'
@@ -17,6 +18,7 @@ export function internalSkillName(primary: string, rootId: string, skillName: st
 }
 export interface LocatedSkill {
   readonly primary: string
+  readonly authorityEpoch?: string | undefined
   readonly rootId: string
   readonly aliasId: string
   readonly candidate: SkillCandidate
@@ -26,13 +28,13 @@ export type Reader = NonNullable<Awaited<ReturnType<typeof rootReader>>>
 export class AdditionalSkillCatalog {
   private readonly loadedReceipts = new WeakMap<SkillDefinition, { revision: number; locator: LocatedSkill; stamp: string }>()
   private readonly locators = new WeakSet<object>()
-  private readonly requests = new AsyncLocalStorage<{ primary: string; id: string }>()
+  private readonly requests = new AsyncLocalStorage<{ primary: string; id: string; epoch: string | undefined }>()
   readonly pool: SkillReaderPool
   constructor(private readonly ctx: Context, private readonly signal: AbortSignal, private readonly enabled: () => boolean, private readonly generation: () => number = () => 0, invalidate: () => void = () => {}) { this.pool = new SkillReaderPool(invalidate) }
   /** Read synchronously after awaited receipt checks, immediately before batch delivery. */
   get revision(): number { return this.generation() }
   current(primary: string, id: string): RootStatus | undefined {
-    if (this.signal.aborted || !this.enabled() || this.ctx.multiRootRegistry.authority.kind !== 'active' || this.ctx.multiRootScope.resolve({ mode: 'read-only', workspaceRoot: primary }).authority !== 'available') return undefined
+    if (this.signal.aborted || !this.enabled() || !this.ctx.multiRootRegistry.available || this.ctx.multiRootScope.snapshot({ mode: 'read-only', workspaceRoot: primary }).authority !== 'available') return undefined
     const rows = this.ctx.multiRootRegistry.list(primary)
     const root = rows.find(row => row.id === id)
     if (root === undefined || root.state !== 'available' || root.skillsEnabled !== true || !skillsMetadataValid(root, rows)) return undefined
@@ -42,13 +44,16 @@ export class AdditionalSkillCatalog {
   private async withReader<T>(primary: string, id: string, options: SkillLookupOptions, run: (reader: Reader | undefined) => Promise<T>): Promise<T> {
     const root = this.current(primary, id)
     if (root === undefined) return await run(undefined)
-    return await this.requests.run({ primary, id }, () => this.pool.use(root.path, signal => rootReader(this.ctx, root.path,
+    return await this.requests.run({ primary, id, epoch: this.ctx.multiRootRegistry.epoch }, () => this.pool.use(root.path, signal => rootReader(this.ctx, root.path,
       AbortSignal.any([signal, this.signal]), () => {
         const request = this.requests.getStore()
-        return request !== undefined && this.current(request.primary, request.id)?.path === root.path
-      }), run, options.signal))
+        return request !== undefined && request.epoch === this.ctx.multiRootRegistry.epoch && this.current(request.primary, request.id)?.path === root.path
+      }), run, options.signal, `${this.ctx.multiRootRegistry.epoch ?? 'unavailable'}\0${root.path}`))
   }
   async list(primary: string, options: SkillLookupOptions): Promise<SkillCandidate[]> {
+    return withRegistryRead(this.ctx, primary, 'skills', () => this.listAdmitted(primary, options))
+  }
+  private async listAdmitted(primary: string, options: SkillLookupOptions): Promise<SkillCandidate[]> {
     options.signal?.throwIfAborted()
     if (!this.enabled()) return []
     const roots = await this.ctx.multiRootRegistry.refresh(primary)
@@ -66,7 +71,7 @@ export class AdditionalSkillCatalog {
         for (const candidate of Array.isArray(observed) ? observed : observed.candidates) {
           if (seen.has(candidate.name)) continue
           seen.add(candidate.name)
-          const locator: LocatedSkill = { primary, rootId: root.id, aliasId: root.aliasId as string, candidate }
+          const locator: LocatedSkill = { primary, authorityEpoch: this.ctx.multiRootRegistry.epoch, rootId: root.id, aliasId: root.aliasId as string, candidate }
           this.locators.add(locator)
           candidates.push({ ...candidate, provider: SKILLS_PROVIDER, description: `/${locator.aliasId}:${candidate.name} — ${candidate.description}`, name: internalSkillName(primary, root.id, candidate.name), rank: Number.MAX_SAFE_INTEGER, invocation: { modelInvocable: candidate.invocation.modelInvocable, userInvocable: false }, locator })
         }
@@ -79,8 +84,11 @@ export class AdditionalSkillCatalog {
   }
   /** Locators are created here and are not accepted from a client path or object. */
   async load(primary: string, entry: SkillCandidate, options: SkillLookupOptions, user: boolean): Promise<SkillDefinition | undefined> {
+    return withRegistryRead(this.ctx, primary, 'skills', () => this.loadAdmitted(primary, entry, options, user))
+  }
+  private async loadAdmitted(primary: string, entry: SkillCandidate, options: SkillLookupOptions, user: boolean): Promise<SkillDefinition | undefined> {
     const locator = entry.locator as LocatedSkill | undefined
-    if (typeof locator !== 'object' || locator === null || !this.locators.has(locator) || locator.primary !== primary) return undefined
+    if (typeof locator !== 'object' || locator === null || !this.locators.has(locator) || locator.primary !== primary || locator.authorityEpoch !== this.ctx.multiRootRegistry.epoch) return undefined
     const root = this.current(primary, locator.rootId)
     if (root === undefined || root.aliasId !== locator.aliasId || entry.name !== internalSkillName(primary, root.id, locator.candidate.name)) return undefined
     const revision = this.generation()
@@ -108,10 +116,12 @@ export class AdditionalSkillCatalog {
 
   async admissionValid(definition: SkillDefinition): Promise<boolean> {
     const receipt = this.loadedReceipts.get(definition)
-    if (receipt === undefined) return false
+    if (receipt === undefined || receipt.locator.authorityEpoch !== this.ctx.multiRootRegistry.epoch) return false
+    return withRegistryRead(this.ctx, receipt.locator.primary, 'skills', async () => {
     const current = this.current(receipt.locator.primary, receipt.locator.rootId)
     if (current === undefined || current.aliasId !== receipt.locator.aliasId || receipt.revision !== this.generation()) return false
     try { return receipt.stamp === await fileStamp(definition.path) && receipt.revision === this.generation() && this.current(receipt.locator.primary, receipt.locator.rootId)?.aliasId === receipt.locator.aliasId } catch { return false }
+    })
   }
 
   async dispose(): Promise<void> {

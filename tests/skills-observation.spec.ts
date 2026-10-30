@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { writeFileSync, rmSync } from 'node:fs'
+import { writeFileSync, rmSync, renameSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { SkillReaderPool } from '../src/skills/pool.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { skillsStack, project, writeSkill } from './support/skills-stack.ts'
@@ -49,6 +50,21 @@ describe('shared observation pool', () => {
     const waiting = pool.use(b, async () => undefined, async () => {}, signal.signal)
     signal.abort(); await expect(waiting).rejects.toThrow()
     resume(); await hold; await pool.dispose()
+  })
+
+  it('ignores ordinary root outputs but detects replacement at the same path', async () => {
+    let changes = 0
+    const pool = new SkillReaderPool(() => { changes++ })
+    const root = project(fixture.base, 'root')
+    try {
+      await pool.use(root, async () => undefined, async () => {})
+      const output = join(root, 'output.txt')
+      writeFileSync(output, 'created'); await pool.poll()
+      rmSync(output); await pool.poll()
+      expect(changes).toBe(0)
+      renameSync(root, `${root}-old`); mkdirSync(root)
+      await pool.poll(); expect(changes).toBe(1)
+    } finally { await pool.dispose() }
   })
 })
 
