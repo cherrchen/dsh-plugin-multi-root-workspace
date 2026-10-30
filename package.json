@@ -123,7 +123,8 @@
     "prepare": "pnpm run bundle",
     "auto-review:fork": "node scripts/check-auto-review-fork.mjs",
     "smoke:auto-review": "node scripts/verify-auto-review.mjs",
-    "registry:probe": "node scripts/check-registry-authority.mjs"
+    "registry:probe": "node scripts/check-registry-authority.mjs",
+    "soak:tui-registry": "node scripts/observe-tui-registry.mjs"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

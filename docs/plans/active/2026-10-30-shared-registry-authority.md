@@ -43,7 +43,7 @@
 
 ### 当前证据的适用范围
 
-初版时已有本机 macOS 开发基线、最早同步版本隔离树、真实内核锁/IPC、独立进程交错、原生 Skills 重查，以及安装产物双 Host profile 验证；这些本机结果自身不能证明其他平台或 TUI 长期运行。初版后的原生 CI、Windows waiter 交错补强及验收修复，见[总账的 Draft PR 验收记录](./2026-09-12-multi-root-workspace.md#初版核对与-draft-pr-验收2026-10-30)，不将下表的初版快照误读为实时待办。真实 dsh-tui 长期观察仍需独立执行；hot-fix 的旧双 Host 观察不能充当新共享服务的长期证据。
+初版时已有本机 macOS 开发基线、最早同步版本隔离树、真实内核锁/IPC、独立进程交错、原生 Skills 重查，以及安装产物双 Host profile 验证；这些本机结果自身不能证明其他平台或 TUI 长期运行。初版后的原生 CI、Windows waiter 交错补强及验收修复，见[总账的 Draft PR 验收记录](./2026-09-12-multi-root-workspace.md#初版核对与-draft-pr-验收2026-10-30)，不将下表的初版快照误读为实时待办。后续 macOS 真实 TUI 长跑与故障注入已补入总账；Ubuntu 报告环境仍需独立复测，不能用 hot-fix 的旧双 Host 观察或 macOS 结果替代。
 
 ## Scope
 
@@ -188,6 +188,6 @@
 - [x] 独立进程并发修改、跨实例撤权、断线/暂停/崩溃、多候选、旧 holder 和新 epoch 的交错验证完成。
 - [x] 真实受限 agent 不能管理 Registry；Windows semaphore/pipe 与 Linux peer 身份恢复假设有原生证据。
 - [x] 全消费者直接/同步/非工具接缝、缓存与流、mode/tool cap、路径身份和已启动进程快照验证完成。
-- [ ] 真实 TUI/报告环境的共享服务长期观察完成；旧 hot-fix 的观察没有被冒充为新服务证据。
+- [ ] 真实 TUI/报告环境的共享服务长期观察完成；macOS 已补证，Ubuntu/报告 Node 组合仍待复测，旧 hot-fix 观察不代替新服务证据。
 - [x] 每个 OS 的普通门禁、kernel probe、三项 smoke、pack 与 packed 验收完成，支持/发布状态如实维护。
 - [x] F1–F6 每项明确为采纳实施、另立计划或延期/不采纳并记录理由；未采纳项不虚报已实现，也不无限扩大首版完成条件。

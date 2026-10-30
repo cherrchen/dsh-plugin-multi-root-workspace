@@ -1147,7 +1147,7 @@ C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 
 | A2 | async admission → sync confine/spawn；直接服务调用、shell/PTC/agent PTY 与旧进程边界 | 已实施；原有全部精确版本原生 CI 验收通过 |
 | B | 唯一存储核心 / Host facade；store 身份、配置握手、本机 IPC 与调用者隔离、流控、幂等及结果不明 | 已实施；三平台原生认证/受限子进程回归通过 |
 | C | LSP、Files/watch、instructions、Skills 等全消费者准入；断线保守拒绝、崩溃/竞选/接管、新 epoch | 已实施；真实服务、多进程及全版本 CI 回归通过 |
-| D | 屏障控制的真实多进程交错、三平台、所有支持版本与 packed 安装验收 | 多进程、三平台、全版本及 packed 已验收；真实 TUI 长期资源观察仍待执行 |
+| D | 屏障控制的真实多进程交错、三平台、所有支持版本与 packed 安装验收 | 多进程、三平台、全版本及 packed 已验收；macOS 真实 TUI 长跑/故障注入通过，Ubuntu 报告环境待复测 |
 
 A1 实现不改变 lock 路径、持锁时间、domain schema 或 provider 门禁。原有 hot-fix 保留；`setAdditionalRoots()` 仍是唯一根写口。测试使用真实 Registry / JSON backend / 内核锁，以 Promise 屏障固定“先准入后撤权”和“先撤权后准入”，并实际写入/编辑文件；不把通知、revision 或“连接活着”作为授权依据。
 
@@ -1189,7 +1189,7 @@ pnpm 的自动依赖自检最初尝试重装并因非交互环境中止；后续
 
 确定性故障用例：独立进程并发同/异主根修改不丢数据；在 fs 真正解析处暂停已准入写，然后另一 Host 撤权，旧操作可完成、新写被拒；SIGKILL 后多个候选仅一个 owner，从磁盘恢复；旧 holder 重启成为 follower；SIGSTOP 时超时拒绝新操作但不夺锁。另覆盖广播丢失、已提交应答丢失不重放、断线后的新嵌套调用不继承旧 grant、新 epoch、unknown-state 保留 lease、原生 Skills change→requery 有界、读缓存撤权、指令显式撤回、空闲 Files 流断线取消、hello/change 同批读取，以及受限 macOS 子进程知道 endpoint 仍不能调用管理方法。
 
-**初版提交时尚未执行的验收**：Windows 原生 pipe/token/ambient deny 与 semaphore 多候选崩溃恢复；Linux 原生 SO_PEERPIDFD、NoNewPrivs 与 bubblewrap 攻击用例；三平台 × 所有精确版本远端 CI；真实 dsh-tui 的多 Host 长期运行/Ubuntu OOM 报告环境复测。前三项的后续结果见下节；真实 TUI 长期观察仍未执行。此变更未发布；原先 Issue #24 hot-fix 的 20 分钟观察不能作为新共享服务的长期内存证据。
+**初版提交时尚未执行的验收**：Windows 原生 pipe/token/ambient deny 与 semaphore 多候选崩溃恢复；Linux 原生 SO_PEERPIDFD、NoNewPrivs 与 bubblewrap 攻击用例；三平台 × 所有精确版本远端 CI；真实 dsh-tui 的多 Host 长期运行/Ubuntu OOM 报告环境复测。前三项的后续结果见下节；当时真实 TUI 长期观察仍未执行，后续 macOS 实机结果见本节末尾。此变更未发布；原先 Issue #24 hot-fix 的 20 分钟观察不能作为新共享服务的长期内存证据。
 
 
 ### 初版核对与 Draft PR 验收（2026-10-30）
@@ -1211,4 +1211,34 @@ pnpm 的自动依赖自检最初尝试重装并因非交互环境中止；后续
 
 **最终代码验收**：`480d474` 的 [CI run 41019582308](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41019582308) 首次执行完整成功，**76/76 verify**（19 个原有精确版本 × macOS / Windows / Ubuntu latest / Ubuntu 22.04），releases 与最终 gate 均成功。所有车道都经过 `registry:probe --required`，不能因共享能力探测整体跳过新服务回归。每车道执行 enforce compat、lint、typecheck、build、kernel probe、test、compose/behavior/journey、pack/packed、适用的 Auto Review 和 docs 门禁。Windows semaphore 保留 waiter handle 的屏障用例、pipe/token/ambient deny 用例已在原生执行；Linux NoNewPrivs/SO_PEERPIDFD 与 Ubuntu 22.04 的 bwrap 用例已执行。Ubuntu latest 的 bwrap 能力限制仍按 probe 显式处理，不把跳过记为该方言通过。
 
-`fa278b2` 原偶发失败车道不改代码重跑后成功（run attempt 2）；这不代替 `480d474` 的完整重验。Draft PR 保持未合并、未发布。**剩余交付**是新服务的真实 dsh-tui / Ubuntu 长期 CPU、RSS、V8 heap 观察及发布前复核；不以自动化一致性测试替代原报告环境的长期资源证据。
+`fa278b2` 原偶发失败车道不改代码重跑后成功（run attempt 2）；这不代替 `480d474` 的完整重验。Draft PR 保持未合并、未发布。**该 CI 检查点时的剩余交付**是新服务的真实 dsh-tui / Ubuntu 长期 CPU、RSS、V8 heap 观察及发布前复核；不以自动化一致性测试替代原报告环境的长期资源证据。
+
+
+### 真实 dsh-tui 的 macOS 实机验证（2026-10-30）
+
+使用本机 macOS Darwin 24.6.0 / arm64 / Node `24.18.0`，隔离安装报告使用的 **`@deepseek-harness-tui/dsh-tui@0.17.0` + DSH `0.2.1-rc.2` / Cordis `4.0.5`**。插件为代码提交 `6e87ab7` 打出的 tarball（元数据仍是开发基线 `0.1.11`，不是已发布 hot-fix 的包体）；SHA-256、版本、采样、逐项断言与 epoch 见[实机原始摘要](../../reference/issue-24-tui-shared-registry-soak-darwin.json)。开发树 pin/安装依赖和支持列表未改变；两侧均是真实 TUI PTY 及其独立 `host-entry.js`，经官方 plugin 安装的包体、真实 JSON/内核锁/认证 IPC、真实工具调度及文件 I/O。本地脚本模型只替代远端推理，无真实模型凭据。
+
+双 Host 首次共同采样 `08:15:49.031Z`，首次故障注入 `08:45:49.755Z`，**连续双 Host 1800.724 秒**；整个正式采样从 `08:15:22.278Z` 到 `08:53:07.971Z`。零根阶段约 5 分钟（稳定统计排除启动，含一次真实 list）；登记附加根、调用 Skill、写文件、撤权/恢复后，保留约 21.5 分钟无新输入的稳定窗口。所有时间为 UTC。
+
+| 稳定窗口 | owner | follower |
+| --- | --- | --- |
+| 零附加根：CPU 均值 / P95（100% = 一核心，整 Host） | 2.84% / 4.73% | 2.57% / 4.96% |
+| 零根：Skills 查询 / 变化事件 | 4→4 / 6→6 | 4→4 / 7→7 |
+| 已登记且 Skills 开启：CPU 均值 / P95 | 0.93% / 1.09% | 0.54% / 0.68% |
+| 已登记：heapUsed 起止（MiB） | 129.56→129.91 | 131.45→131.27 |
+| 已登记：old_space 起止（MiB） | 96.58→96.65 | 98.18→98.32 |
+| 已登记：Skills 查询 / 变化事件 | 19→19 / 12→12 | 21→21 / 13→13 |
+
+RSS、heapTotal、external、每个采样与分布另存 JSON；不强制 GC、不抬高 heap 上限。整 Host CPU 是主线程占用的上界，不将它误称为 Linux `/proc` 的逐线程采样。零根与带根窗口的 UI 动画/任务状态不同，不把两者 CPU 差值归因于 Registry 性能提升。本轮未见查询自激、持续单核占用或 retained heap 失控；有限窗口不能证明所有长期泄漏都不存在。
+
+真实操作与故障结果：
+
+- 两个 TUI 都能列出根，owner/follower 各经真实 `write` 成功落盘；两侧 `/additional:review` 均使正文抵达实际模型请求。
+- owner 通过 TUI 改为只读，follower 的下一次真实 write 返回 `is_error: true` / read-only additional root，目标未生成；follower 自己经 IPC 恢复权限后，owner 同步恢复。
+- owner `SIGSTOP` **138.971 秒**：follower 变为 contended，没有夺锁、没有目标文件或模型/工具调用。TUI 在约 5 秒时报 `registry request result is unknown`，错误发生在准备阶段，不能记为 write 工具返回拒绝。恢复后回到原 epoch；失败请求不自动重放，重新提交的新 write 成功。
+- owner `SIGKILL` 后，follower 成为 active、从磁盘恢复登记并以新 epoch 写入成功；旧 owner 重启成为该 epoch 的 follower，也能写入。
+- 新 owner 经 TUI `/exit` 正常退出（0），剩余 Host 再次竞选，以第三个 epoch 写入成功并 `/exit` 退出（0）。核对已知 launcher/Host PID 全部消失；无 OOM 或保护器中止。
+
+17 项文件/错误/Skill/epoch/退出/清理断言通过。长跑先用临时驱动执行，随后将观测方法整理为 `pnpm soak:tui-registry`；仓库脚本另以独立 store 短测真实启动、受支持/共享元数据、未登记根写入负例、清理，以及约 40 秒显式暂停/恢复。脚本不提供生产授权、不加入 bundle 或普通 CI；用法和保护边界见[开发工作流](../../development/plugin-development-workflow.md#真实-tui-的长期观测手工验收)。lint、Node/Python 语法、兼容静态检查与 docs 检查通过；本轮未改生产实现。
+
+**仍未验证**：原报告 Ubuntu / Node `24.22.1` 的同组合长跑。本轮未连接原 Ubuntu 机器，当前安装源也未取得该 Node 的 macOS 包；不能用 macOS/Node `24.18.0` 的结果勾掉原环境验收。真实模型/第三方工具、自主旧 PTY/进程和所有故障交错也不由这次实机步骤覆盖；既有三平台 CI 是独立证据。PR 继续 Draft、未合并、未发布；后续为报告环境复测与发布前复核。

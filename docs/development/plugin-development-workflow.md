@@ -47,6 +47,7 @@ pnpm pack:check         # 打包产物门禁：tarball 成员（含 lib/windows-
 pnpm smoke:packed       # tarball 经 dsh plugin add 装进隔离 $DSH_HOME，从安装副本跑完整 behavior battery（需要先 build）
 pnpm verify:all         # lint → typecheck → build → kernel:probe → test → smoke → pack:check → smoke:packed
 pnpm docs:check         # 文档结构检查
+pnpm soak:tui-registry --help # 真实 TUI / 独立 Host 长期观测；手工验收，不加入普通 CI
 ```
 
 三个冒烟都要求 `lib/` 已构建（冒烟脚本会检查并提示 `pnpm build`）。
@@ -289,3 +290,30 @@ B9 的 Linux 原生执行证据分两类：latest 保留实际 Landlock 选择�
 
 
 共享服务 CI 在 build 后运行 `pnpm registry:probe --required`，正常原生 runner 必须具备 peer 认证能力后才进入套件；本地受外层沙箱约束时可运行不带 `--required` 的诊断。探针不关闭认证、不授予权限，作用是防止整套 shared tests 被 capability skip 后仍把矩阵记为已验收。Windows 的已知受限 token 可以报告不可用，绑定加载/原生 API 异常必须失败，不能伪装能力不足。
+
+
+### 真实 TUI 的长期观测（手工验收）
+
+`pnpm soak:tui-registry` 在 macOS/Linux 上通过 Python 3 的真实 PTY 启动已安装的 `@deepseek-harness-tui/dsh-tui`；不是模拟 `skills/change` 客户端。它用本地脚本模型响应驱动真实工具，将终端流、请求和只读 Host 采样写入单独输出目录。它不加入普通 CI，也不自动将结束视为验收通过。Windows 的长期 TUI 观察需另备终端夹具，不能从这份 POSIX 脚本推导已通过。
+
+准备与运行：
+
+1. 在主工作树之外准备统一精确版本的 DSH/TUI 运行时；报告版本是 DSH `0.2.1-rc.2` / `@deepseek-harness-tui/dsh-tui@0.17.0`。TUI 的宽 peer 范围不能额外引入另一份 DSH/Cordis，隔离树使用目标 manifest 对应的精确 overrides；保持主工作树的依赖、支持列表及用户 profile 原样。
+2. 使用该运行时的真实 `dsh plugin --profile dsh-tui add`，在专用 `DSH_HOME` 依次安装 TUI、当前插件的 tarball、`scripts/lib/tui-registry-soak/observer`。observer 仅用于开发验收，不能安装到用户日用 profile 或打进发布 bundle。复制安装介质时沿用 `packageImportMethod: copy` 与原生构建许可规则。
+3. 在仓库忽略的 `.dsh-smoke/` 中建立 `primary` / `additional` 两个独立 Git 根，放置普通文件和 `.dsh/skills/review/SKILL.md`。不能把授权负对照放在自动可写的 temp 中；也不能使用仓库自身作为实测 Session origin。
+4. 运行下面的脚本，四个目录均由操作者指定；output 必须为空。仅在真实正常 Host 环境执行，不关闭生产 IPC 认证。
+
+```sh
+pnpm soak:tui-registry --runtime "$tui_runtime_dir" --home "$tui_home_dir" \
+  --fixture "$tui_fixture_dir" --output "$tui_output_dir" --deadline-minutes 45
+```
+
+stdin 接受 NDJSON 控制。例：`{"start":"owner"}`，等待其 telemetry 的 `authority` 为 active 后发 `{"start":"follower"}`；再确认另一方为 follower 且 epoch 相同。键盘输入用 `{"host":"owner","write":"/workspace-folders list"}`，等终端记录出现输入后再单独发送 `{"host":"owner","write":"\r"}`。文件中的 `\r` 是 JSON 的 Enter 转义，不是要向终端输入反斜线与字母 r。结束用 `{"exit":true}`。Host label 必须唯一；不要混用 launcher PID 与 telemetry 中 `host-entry.js` 的 PID。
+
+观测流程应事先确定：至少跨过原报告约 18 分 35 秒的 OOM 时间点，建议双 Host 连续 30 分钟以上；分别留出零附加根、已登记且 Skills 开启的稳定窗口。通过真实 TUI 命令登记/列出/撤权/恢复，用不同 `MRW_WRITE:<标记>` 提示词让本地模型调用真实 `write`，核对文件和对应 `tool_result.is_error`，不能从提示词含有“denied”推断实际拒绝。通过 `/additional:review` 等实际 alias 核对正文抵达模型，随后测试 owner 退出、follower 的新 epoch 和旧 owner 重启。正常退出与崩溃是不同用例，不把其中之一记为两者都验证。
+
+observer 每 5 秒采集整 Host 的 user+system CPU 差分（100% = 一个核心）、RSS、V8 heap/old_space、查询/事件、publication 与 authority/epoch；不执行 refresh/admission、不强制 GC、不增加 V8 heap 上限。preload 只在被测进程中重定向 `os.homedir()`，将 TUI 首次引导/偏好放入 output 的 user 目录，环境 `HOME` 不变；`DSH_HOME` 也只指向专用 profile。模型使用合成凭据和 loopback endpoint；原始请求/终端记录仍应按本地诊断数据处理，不直接上传真实会话内容。
+
+脚本有 45 分钟默认截止、2 GiB RSS、连续 6 个窗口 CPU >60%、每窗查询 >1000 的保护条件；外部 `ps` 检查 RSS，Host telemetry 非预期停滞 20 秒或启动 60 秒仍没有采样也会中止。显式 SIGSTOP 注入可豁免停滞至多 5 分钟，期间仍检查 RSS/总截止；SIGCONT 后留出重新采样窗口。触发保护不是通过。退出按该次创建的 PTY 进程组先恢复运行、再终止清理；主动崩溃控制 `{"killPid":123,"signal":"SIGKILL"}` 另核对 PID 仍指向已观测的 TUI Host，防止拿旧采样盲目杀进程。
+
+验收记录应包含实际版本与 tarball/lockfile 摘要、每阶段 UTC 和持续时长、稳定窗口的 CPU/RSS/heap 分布与查询/事件增量、真实工具正反例、退出/接管证据，以及保护器是否触发。原始大日志保留在本地输出目录；可共享的摘要/采样存入 reference，结果仍只登记到[总路线图](../plans/active/2026-09-12-multi-root-workspace.md)。macOS 实机结果不能替代 Ubuntu 报告环境或另一版 Node 的长期证据。
