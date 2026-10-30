@@ -1144,10 +1144,10 @@ C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 
 | 批次 | 范围 | 状态 |
 | --- | --- | --- |
 | A1 | 确定撤权语义；store-wide mutation / refresh / fs 准入排序；write/edit 每调用独立快照、过期 handle、epoch 与 publication revision | 已实施并完成下述本机门禁；未发布 |
-| A2 | async admission → sync confine/spawn；直接服务调用、shell/PTC/agent PTY 与旧进程边界 | 已实施；最早同步基线与开发基线本机验证，全版本矩阵待 CI |
-| B | 唯一存储核心 / Host facade；store 身份、配置握手、本机 IPC 与调用者隔离、流控、幂等及结果不明 | 已实施；macOS 原生 peer 攻击测试通过，其他平台原生待执行 |
-| C | LSP、Files/watch、instructions、Skills 等全消费者准入；断线保守拒绝、崩溃/竞选/接管、新 epoch | 已实施；本机真实服务及多进程回归通过 |
-| D | 屏障控制的真实多进程交错、三平台、所有支持版本与 packed 安装验收 | 多进程/本机 packed 已验证；Windows/Linux 与其余精确版本由原生 CI 继续验收 |
+| A2 | async admission → sync confine/spawn；直接服务调用、shell/PTC/agent PTY 与旧进程边界 | 已实施；原有全部精确版本原生 CI 验收通过 |
+| B | 唯一存储核心 / Host facade；store 身份、配置握手、本机 IPC 与调用者隔离、流控、幂等及结果不明 | 已实施；三平台原生认证/受限子进程回归通过 |
+| C | LSP、Files/watch、instructions、Skills 等全消费者准入；断线保守拒绝、崩溃/竞选/接管、新 epoch | 已实施；真实服务、多进程及全版本 CI 回归通过 |
+| D | 屏障控制的真实多进程交错、三平台、所有支持版本与 packed 安装验收 | 多进程、三平台、全版本及 packed 已验收；真实 TUI 长期资源观察仍待执行 |
 
 A1 实现不改变 lock 路径、持锁时间、domain schema 或 provider 门禁。原有 hot-fix 保留；`setAdditionalRoots()` 仍是唯一根写口。测试使用真实 Registry / JSON backend / 内核锁，以 Promise 屏障固定“先准入后撤权”和“先撤权后准入”，并实际写入/编辑文件；不把通知、revision 或“连接活着”作为授权依据。
 
@@ -1189,7 +1189,7 @@ pnpm 的自动依赖自检最初尝试重装并因非交互环境中止；后续
 
 确定性故障用例：独立进程并发同/异主根修改不丢数据；在 fs 真正解析处暂停已准入写，然后另一 Host 撤权，旧操作可完成、新写被拒；SIGKILL 后多个候选仅一个 owner，从磁盘恢复；旧 holder 重启成为 follower；SIGSTOP 时超时拒绝新操作但不夺锁。另覆盖广播丢失、已提交应答丢失不重放、断线后的新嵌套调用不继承旧 grant、新 epoch、unknown-state 保留 lease、原生 Skills change→requery 有界、读缓存撤权、指令显式撤回、空闲 Files 流断线取消、hello/change 同批读取，以及受限 macOS 子进程知道 endpoint 仍不能调用管理方法。
 
-**尚未执行的验收**：Windows 原生 pipe/token/ambient deny 与 semaphore 多候选崩溃恢复；Linux 原生 SO_PEERPIDFD、NoNewPrivs 与 bubblewrap 攻击用例（已编入测试）；三平台 × 所有精确版本远端 CI；真实 dsh-tui 的多 Host 长期运行/Ubuntu OOM 报告环境复测。此变更未发布，也未宣称这些平台/版本已通过；原先 Issue #24 hot-fix 的 20 分钟观察不能作为新共享服务的长期内存证据。
+**初版提交时尚未执行的验收**：Windows 原生 pipe/token/ambient deny 与 semaphore 多候选崩溃恢复；Linux 原生 SO_PEERPIDFD、NoNewPrivs 与 bubblewrap 攻击用例；三平台 × 所有精确版本远端 CI；真实 dsh-tui 的多 Host 长期运行/Ubuntu OOM 报告环境复测。前三项的后续结果见下节；真实 TUI 长期观察仍未执行。此变更未发布；原先 Issue #24 hot-fix 的 20 分钟观察不能作为新共享服务的长期内存证据。
 
 
 ### 初版核对与 Draft PR 验收（2026-10-30）
@@ -1198,7 +1198,7 @@ pnpm 的自动依赖自检最初尝试重装并因非交互环境中止；后续
 
 核对补充：加入 build 后的 `registry:probe --required`，防止认证实现异常导致 shared tests 整体跳过；Windows 能力探测只将已知受限身份记为 unavailable，原生绑定/API 错误向外失败。补充同物理 store 路径别名共享、替代锁名拒绝、Host 根上限冲突、旧 epoch 应答不能执行 body 的回归。首轮实际暴露两项夹具问题：Ubuntu latest 的 Full-access runner 受限提前返回时没有清理持久化登记；Windows ambient-deny probe 把 temp 的 8.3 别名直接传给要求 canonical 路径的 runner。分别补 finally 清理和 canonical 化，不放宽生产授权或降低内核断言。
 
-完整最新结果在 CI 完成后补记；此阶段不发布，不将原生/版本验收和真实 dsh-tui 长期观察合并为一个完成结论。
+最终验收见本节末尾；此阶段不发布，不将原生/版本验收和真实 dsh-tui 长期观察合并为一个完成结论。
 
 
 另外补齐 Windows semaphore 的真实子进程夹具：在 contender 持有 handle 的位置设置恢复屏障，holder SIGKILL 后不得借残存对象/旧缓存授权；waiter 关闭最后 handle 后重新竞选并读回磁盘数据。这个用例验证 handle 生命周期，屏障不声称是 Windows OS suspend 的独立实现。共享 Host NDJSON 驱动抽到测试 helper，保留已有多进程交错。macOS 上该 Windows 专项按平台跳过，执行结果须取 CI，不能记为本机通过。
@@ -1207,4 +1207,8 @@ pnpm 的自动依赖自检最初尝试重装并因非交互环境中止；后续
 
 随后补出确定性回归：在正文加载后、最终 receipt 检查前创建普通根文件并执行生产 `pool.poll()`，旧实现丢弃未变化的显式调用正文。根目录的 mtime/ctime/size 原本随普通文件增删改变，被误算为 Skills generation 变化。修复将根指纹限定为 canonical 身份/权限，Skills 目录和文件仍跟踪内容元数据；原路径的根替换、Skills 增删改和权限撤销检查保留。此交错解释偶发 journey 失败，但原失败没有保存该轮轮询时序，不能声称取得了逐事件对应证据。
 
-补强后本机完整测试 **906 通过 / 85 跳过**（67 文件通过 / 4 跳过），journey **76 通过 / 0 失败 / 0 跳过**；lint、typecheck、build、docs 检查通过。新回归先在旧逻辑失败，再在修复后通过；原有撤权/正文变更丢弃测试继续通过。修复后的全版本原生 CI 结果待本 PR 后续 run 补记。真实 dsh-tui / Ubuntu 长期 CPU、RSS、V8 heap 观察仍未执行。
+补强后本机完整测试 **906 通过 / 85 跳过**（67 文件通过 / 4 跳过），journey **76 通过 / 0 失败 / 0 跳过**，重新打包安装的 behavior **135 通过 / 0 失败 / 0 跳过**；lint、typecheck、build、docs 检查通过。新回归先在旧逻辑失败，再在修复后通过；原有撤权/正文变更丢弃测试继续通过。
+
+**最终代码验收**：`480d474` 的 [CI run 41019582308](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41019582308) 首次执行完整成功，**76/76 verify**（19 个原有精确版本 × macOS / Windows / Ubuntu latest / Ubuntu 22.04），releases 与最终 gate 均成功。所有车道都经过 `registry:probe --required`，不能因共享能力探测整体跳过新服务回归。每车道执行 enforce compat、lint、typecheck、build、kernel probe、test、compose/behavior/journey、pack/packed、适用的 Auto Review 和 docs 门禁。Windows semaphore 保留 waiter handle 的屏障用例、pipe/token/ambient deny 用例已在原生执行；Linux NoNewPrivs/SO_PEERPIDFD 与 Ubuntu 22.04 的 bwrap 用例已执行。Ubuntu latest 的 bwrap 能力限制仍按 probe 显式处理，不把跳过记为该方言通过。
+
+`fa278b2` 原偶发失败车道不改代码重跑后成功（run attempt 2）；这不代替 `480d474` 的完整重验。Draft PR 保持未合并、未发布。**剩余交付**是新服务的真实 dsh-tui / Ubuntu 长期 CPU、RSS、V8 heap 观察及发布前复核；不以自动化一致性测试替代原报告环境的长期资源证据。
