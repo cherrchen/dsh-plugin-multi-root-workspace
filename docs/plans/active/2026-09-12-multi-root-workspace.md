@@ -1202,3 +1202,9 @@ pnpm 的自动依赖自检最初尝试重装并因非交互环境中止；后续
 
 
 另外补齐 Windows semaphore 的真实子进程夹具：在 contender 持有 handle 的位置设置恢复屏障，holder SIGKILL 后不得借残存对象/旧缓存授权；waiter 关闭最后 handle 后重新竞选并读回磁盘数据。这个用例验证 handle 生命周期，屏障不声称是 Windows OS suspend 的独立实现。共享 Host NDJSON 驱动抽到测试 helper，保留已有多进程交错。macOS 上该 Windows 专项按平台跳过，执行结果须取 CI，不能记为本机通过。
+
+远端检查点：`b9e5d93` 的 [run 40998531394](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/40998531394) 完整成功，覆盖 19 精确版本 × 4 runner。新增 semaphore 夹具的 `fa278b2` [run 40999088342](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/40999088342) 首次执行中 75/76 verify 成功，Windows 19 车道全部通过；唯一失败是 Ubuntu 22.04 / `0.2.1-rc.2` journey 的显式 Skills 正文断言，因此整轮 gate 失败，不能记为全绿。
+
+随后补出确定性回归：在正文加载后、最终 receipt 检查前创建普通根文件并执行生产 `pool.poll()`，旧实现丢弃未变化的显式调用正文。根目录的 mtime/ctime/size 原本随普通文件增删改变，被误算为 Skills generation 变化。修复将根指纹限定为 canonical 身份/权限，Skills 目录和文件仍跟踪内容元数据；原路径的根替换、Skills 增删改和权限撤销检查保留。此交错解释偶发 journey 失败，但原失败没有保存该轮轮询时序，不能声称取得了逐事件对应证据。
+
+补强后本机完整测试 **906 通过 / 85 跳过**（67 文件通过 / 4 跳过），journey **76 通过 / 0 失败 / 0 跳过**；lint、typecheck、build、docs 检查通过。新回归先在旧逻辑失败，再在修复后通过；原有撤权/正文变更丢弃测试继续通过。修复后的全版本原生 CI 结果待本 PR 后续 run 补记。真实 dsh-tui / Ubuntu 长期 CPU、RSS、V8 heap 观察仍未执行。

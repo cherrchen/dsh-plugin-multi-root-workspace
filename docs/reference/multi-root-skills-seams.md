@@ -62,6 +62,8 @@ Registry 的 `isSkillName` 和 tool-skill 的 execute 都要求 kebab-case。仅
 
 因此原型给委托注入根内受限 fs，发现前验证 resolve/listDir，正文用句柄读取并在返回后重验；关闭、移除、身份改变和 generation 改变都丢弃结果。该方法证明普通 symlink 逃逸和读取中撤销可被拦截，不证明任意恶意祖先 rename 下的原子快照，也没有实测 Windows reparse-point 的内核细节。原生发现会解析读取全文，但只把元数据交给 Catalog；“按需正文”指正文进入模型上下文的时机，不意味着发现阶段只读文件头。
 
+生产观察池的轮询区分根身份与 Skills 内容：根只记录 canonical 路径、文件身份和权限；Skills 目录/文件继续记录内容相关元数据。普通根文件的增删不应改变 Skills generation，否则轮询与显式调用加载交错时会丢弃无变化的正文。根消失/替换、Skills 增删改和登记撤权仍使旧结果失效；回归分别覆盖这些交错，不以延迟轮询或重试掩盖问题。
+
 ## Settings 与 Web 接缝差异
 
 下面是审查集合中的形状分组，不是第二份支持名单；新版本仍以 allowlist 与接缝探测为准。

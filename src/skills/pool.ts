@@ -93,15 +93,20 @@ export class SkillReaderPool {
 /** No symlink target outside the Root is read or enumerated. Content reads stay on demand. */
 export async function skillTreeStamp(root: string): Promise<string> {
   const rows: string[] = [canonicalPath(root)]
-  const stamp = async (path: string) => {
+  const stamp = async (path: string, identityOnly = false) => {
     try {
       const link = await lstat(path, { bigint: true })
-      rows.push(`${path}:${link.dev}:${link.ino}:${link.size}:${link.mtimeNs}:${link.ctimeNs}:${canonicalPath(path)}`)
+      // Ordinary root-file creation changes directory mtime/size/ctime, but
+      // does not change the Skills catalog. Keep root identity/permissions so
+      // replacement/disappearance still invalidates pending readers.
+      rows.push(identityOnly
+        ? `${path}:${link.dev}:${link.ino}:${link.mode}:${canonicalPath(path)}`
+        : `${path}:${link.dev}:${link.ino}:${link.size}:${link.mtimeNs}:${link.ctimeNs}:${canonicalPath(path)}`)
       if (!containsPath(root, canonicalPath(path))) return undefined
       return await stat(path)
     } catch { rows.push(`${path}:missing`); return undefined }
   }
-  await stamp(root)
+  await stamp(root, true)
   for (const directory of ['.dsh/skills', '.agents/skills']) {
     const path = join(root, directory)
     const info = await stamp(path)
