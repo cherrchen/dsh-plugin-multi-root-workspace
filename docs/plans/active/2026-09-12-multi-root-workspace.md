@@ -1199,3 +1199,6 @@ pnpm 的自动依赖自检最初尝试重装并因非交互环境中止；后续
 核对补充：加入 build 后的 `registry:probe --required`，防止认证实现异常导致 shared tests 整体跳过；Windows 能力探测只将已知受限身份记为 unavailable，原生绑定/API 错误向外失败。补充同物理 store 路径别名共享、替代锁名拒绝、Host 根上限冲突、旧 epoch 应答不能执行 body 的回归。首轮实际暴露两项夹具问题：Ubuntu latest 的 Full-access runner 受限提前返回时没有清理持久化登记；Windows ambient-deny probe 把 temp 的 8.3 别名直接传给要求 canonical 路径的 runner。分别补 finally 清理和 canonical 化，不放宽生产授权或降低内核断言。
 
 完整最新结果在 CI 完成后补记；此阶段不发布，不将原生/版本验收和真实 dsh-tui 长期观察合并为一个完成结论。
+
+
+另外补齐 Windows semaphore 的真实子进程夹具：在 contender 持有 handle 的位置设置恢复屏障，holder SIGKILL 后不得借残存对象/旧缓存授权；waiter 关闭最后 handle 后重新竞选并读回磁盘数据。这个用例验证 handle 生命周期，屏障不声称是 Windows OS suspend 的独立实现。共享 Host NDJSON 驱动抽到测试 helper，保留已有多进程交错。macOS 上该 Windows 专项按平台跳过，执行结果须取 CI，不能记为本机通过。

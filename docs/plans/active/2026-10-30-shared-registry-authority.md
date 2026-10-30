@@ -151,7 +151,7 @@
 | 直接/同步/非工具进程入口 | 返回形状保持；没有准入不扩大权限；过期上下文/旧 argv 不放行；用户终端不误围限 | `process-fence.spec.ts`、`shared-consumers.spec.ts` |
 | 断线、冷缓存、storage-failed/unknown-state | 保留拒绝边界；无共享 temp/ambient 绕过；Files 不空表穿透；Skills 不自激重查 | `shared-consumers.spec.ts`、`skills-authority.spec.ts` |
 | owner 崩溃/暂停、多候选、旧 owner 重启 | 唯一继任者、磁盘重新打开、新 epoch；暂停未退出不夺锁，旧响应不复活 | `shared-registry-multiprocess.e2e.ts` |
-| Windows semaphore 与 pending pipe | 争用失败关闭 handle；holder 崩溃、waiter 暂停/恢复后行为可解释且可恢复；pending client 断开不永久损坏监听 | `registry-lease*.ts`、`authority-native.spec.ts` 与原生多进程夹具 |
+| Windows semaphore 与 pending pipe | 争用失败关闭 handle；holder 崩溃、waiter 暂停/恢复后行为可解释且可恢复；pending client 断开不永久损坏监听 | `registry-semaphore-win32.e2e.ts`、`registry-lease*.ts`、`authority-native.spec.ts` |
 | 三平台受限 agent 及伪装端点 | 知道协议/endpoint 仍无管理权限；token/peer 不可确认时拒绝，不继承连接 | `authority-native.spec.ts` 与原生 runner |
 | 新旧 holder / 协议 / 配置差异 | 不另开 domain、不接受不兼容状态、不把结果不明当作未提交重放 | `shared-registry.spec.ts` 及版本隔离安装树 |
 | 全消费者与缓存/流 | 每新操作准入；旧 Skill epoch、Files 帧或指令投递不能借缓存越过边界 | `shared-consumers.spec.ts` 及各消费者现有测试 |
