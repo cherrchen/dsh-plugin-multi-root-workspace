@@ -3,7 +3,7 @@
  * `@deepseek-ai/dsh-client-ui-primitives`.
  *
  * ```text
- * 0.1.5-rc.2 through 0.2.1-rc.4   no `isMobileDevice` export
+ * 0.1.5-rc.2 through 0.2.1-rc.5   no `isMobileDevice` export
  * 0.2.2-alpha.2 +                 `isMobileDevice` exported
  * ```
  *

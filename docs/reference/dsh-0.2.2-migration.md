@@ -34,3 +34,9 @@
 ## 环境要求变化
 
 `0.2.2` 起 root `engines` 要求 Node `>=24.9.0`；CI verify 按已知旧版前缀（`0.1.*` / `0.2.0` / `0.2.1`）分流 Node `22.19.0`，其余版本（含 0.2.2 及以后）默认 Node `24.9.0`。`dsh` 的 cordis 依赖升至 `~4.0.6-alpha.1`，本插件 dev pin 与 peer 同步。
+
+## 0.2.1-rc.5 后续审查（2026-10-30）
+
+上游 `dsh-v0.2.1-rc.5` 指向 `b830ec950faba0a46dda564be3e2d854afed94f1`，npm 的 `latest` 和 `next` 均指向该版本；`alpha` 仍指向 `0.2.2-alpha.2`。两条发布线以 `0.2.1-rc.4` 为共同祖先，`rc.5` 与 `alpha.2` 互不包含，不能把后者视为已覆盖前者。
+
+对比 `rc.4` 与 `rc.5`，除包版本号外，上游变化集中在聊天推理正文：`conversation.chat.reasoning.body` 的 owner 新增 `rawText`，`text` 改为适合显示的文本，推理摘要与翻译组件使用显示文本。插件不消费该 slot 或其类型，因此无需新增适配分支。`ui-sidebar-files`、`ui-open-in-app`、`workspace-files` 和 dockkit 的代码无变化；Files 的 `data-files-*`、dockkit 的 `data-dockkit-content` 及 open-in-app 的 `data-open-target` 钩子仍在。浏览器实机目检与各平台的执行证据见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。

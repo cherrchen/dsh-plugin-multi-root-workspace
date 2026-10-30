@@ -36,4 +36,4 @@ English: [README.en.md](./README.en.md)
 ```
 
 - [dsh-0.2.1-migration.md](./dsh-0.2.1-migration.md) — DSH 0.2.1 三个上游 tag 的接口、安全不变量与 Worktree 约束审查。
-- [dsh-0.2.2-migration.md](./dsh-0.2.2-migration.md) — DSH 0.2.1-rc.4 与 0.2.2-alpha.2 的接口与安全契约审查（sessionProjections 注入、工具执行拆分、additionalWritableRoots、Node 24 要求）。
+- [dsh-0.2.2-migration.md](./dsh-0.2.2-migration.md) — DSH 0.2.1-rc.4、0.2.1-rc.5 与 0.2.2-alpha.2 的接口与安全契约审查（sessionProjections 注入、工具执行拆分、additionalWritableRoots、Node 24 要求）。

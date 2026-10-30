@@ -215,7 +215,7 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 
 - **多 Host 共享 Registry（Current）**：[共享服务架构](./registry-authority-service.md)定义当前实现；[ADR-0025](../decisions/ADR-0025-shared-registry-authority.md)在共享模式替代 ADR-0007 的独占消费条款，唯一存储管理者和 lease 生命周期仍保留。
 - **当前（路径 A）**：替换两行 + 子类（外加一个自有 scope 服务行）。风险集中在上游 pre-stable 升级。
-- **升级韧性**：插件 `package.json` 精确 pin dsh 版本（`latest` dist-tag 指向陈旧版本，范围依赖会解析到错误版本，见调研 §9）；仓库 CI 加"升级 smoke"——改 pin 后跑差分 parity + 组合 dump 断言 + 空根行为用例（空根直通 + 多根写入 + 根外拒绝），差异即报警；子类只依赖公开方法面（禁止 `#` 假设、禁止原型替换）；**只允许包入口导入**，不引用任何 `pkg/src/*` 路径（发布包不含 `src/`）。完整策略见 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)。
+- **升级韧性**：插件 `package.json` 精确 pin dsh 版本（可变 dist-tag 和范围依赖不能保证解析到已验证版本，见调研 §9）；仓库 CI 加"升级 smoke"——改 pin 后跑差分 parity + 组合 dump 断言 + 空根行为用例（空根直通 + 多根写入 + 根外拒绝），差异即报警；子类只依赖公开方法面（禁止 `#` 假设、禁止原型替换）；**只允许包入口导入**，不引用任何 `pkg/src/*` 路径（发布包不含 `src/`）。完整策略见 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)。
 - **长期（路径 D / 上游 seam）**：若上游未来接受通用 Filesystem Scope Seam（`ctx.filesystemScope` contributor + `writableRoots()` 数组化 + 方言数组化，见 §9），插件撤销两个替换行，provider 子类退化为薄 scope contributor；`FilesystemScope` 接口即按该 seam 的目标形态设计，迁移是删除而非重写。
 
 ## 9. 附录：可改上游时的理想 seam（备忘）
