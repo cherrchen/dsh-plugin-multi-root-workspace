@@ -47,6 +47,7 @@
 | compat | DSH 0.2.1 后续提升 | DSH 支持矩阵扩展至 `0.2.1-alpha.3`–`0.2.1-rc.2` 五个精确版本；storage-domain zod 分裂适配、warn 车道 allow-version 预授权 | [本次记录](#dsh-021-后续兼容提升2026-10-17) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `eaf2d8f` | `v0.1.7` |
 | compat | DSH 0.2.1-rc.3 提升 | DSH 支持矩阵纳入 `0.2.1-rc.3`；上游差异全部为新增（sidebar 槽位、导航 pins、DeepSeek `/models`），无新适配分支；开发 pin 升级 | [本次记录](#dsh-021-rc3-兼容提升2026-10-23) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `bddeae3` | `v0.1.10` |
 | compat | DSH 0.2.1-rc.4 与 0.2.2-alpha.2 提升 | DSH 支持矩阵纳入 `0.2.1-rc.4` 与 `0.2.2-alpha.2`；测试栈补 `sessionProjections` 注入与执行器结构探测；fork 基线前移 `f3803c9697`；CI 按版本分流 Node 22/24；升级脚本补 cordis 生态 pin 防混树；开发 pin `0.2.2-alpha.2` / cordis `4.0.6-alpha.1` | [本次记录](#dsh-021-rc4-与-022-alpha2-兼容提升2026-10-28) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `08795a1` | `v0.1.11` |
+| compat | DSH 0.2.1-rc.5 提升 | 支持合同纳入 `0.2.1-rc.5`；保留原有版本和开发 pin，不新增 adapter 分支 | [本次记录](#dsh-021-rc5-兼容提升2026-10-30) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | — | 未发布 |
 | compat | DSH 0.2.0 `permissionPresets/catalog` 修复 | 可选包按"谁加载副本、经哪个锚点"分三类取证（运行时加载 / 宿主服务 / runner 锚定），link: 检出不再幻影混装；两个 provider 行不再 inject 门禁，被拒安装退化为上游等价而非拖死 `ctx.fs`/`ctx.sandbox`/`ctx.shell`/`permissionPresets` | [本次记录](#dsh-020-permissionpresetscatalog-修复2026-10-18) | [0009 修订](../../decisions/ADR-0009-dsh-compat-contract.md) | `f6d81de` | `v0.1.8` |
 | 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 | 兼容协作 | Auto Review 多根上下文 | 拓扑/有效访问权限/当前项目约束的可信输入；可选外部兼容层及联合验证 | [适配计划](../completed/2026-10-18-auto-review-context-adaptation.md)、[源码调研](../../reference/auto-review-compatibility.md) | [0021](../../decisions/ADR-0021-auto-review-context-companion.md) | `feat/compat-auto-review` | Phase 0–2 已实施；本机验收与旧版回归见[本次记录](#auto-review-多根上下文适配2026-10-18)；仅联合目标 `0.2.1-rc.2`；独立 companion 交付形态在发布前被 ADR-0022 取代，能力以内置行随 `v0.1.9` 发版；Phase 3 不在本批范围 |
@@ -247,7 +248,7 @@ pnpm verify:all                                    # lint → typecheck → buil
 
 | # | 风险/问题 | 影响 | 处置 |
 |---|---|---|---|
-| 1 | 上游 pre-stable API 升级破坏子类（AGENTS.md 明言无 semver 承诺） | 插件可用性 | 精确 pin（`latest` dist-tag 陈旧，必须写死版本，见 ADR-0002）+ 启动门禁（ADR-0009）+ 按周升级车道；只允许包入口导入；M1 即建立差分对照测试 |
+| 1 | 上游 pre-stable API 升级破坏子类（AGENTS.md 明言无 semver 承诺） | 插件可用性 | 精确 pin（可变 dist-tag 和范围依赖不能证明已验证版本，见 ADR-0002）+ 启动门禁（ADR-0009）+ 按周升级车道；只允许包入口导入；M1 即建立差分对照测试 |
 | 2 | 方言 parity 责任转移到插件 | 安全正确性 | 已落地：parity 矩阵测试（测试侧独立解析 argv 授予集合）+ 方言单测为核心资产；方言 grant 由 `super.confine` 输出克隆模板（上游 builder 在发布形态下不可达），识别失败即抛错（[ADR-0003](../../decisions/ADR-0003-dialect-grant-widening.md)） |
 | 3 | ~~bash 子类落点未定~~（已关闭） | — | 不替换 `bash-sandbox`：bash 与 PTY 的 confinement 全部经 `ctx.sandbox`（ADR-0001） |
 | 4 | provider 行替换影响未盘点的 Consumer | 隐藏回归 | 已盘点：`ctx.sandbox` 的消费者是 bash-sandbox / pwsh-sandbox / terminal-bash；`ctx.fs` 的消费者是 tool-fs / tool-str-replace-editor。全部只依赖 `confine`、`sandboxMode` 等结构化事实；M1 冒烟逐一实跑 |
@@ -1269,3 +1270,11 @@ RSS、heapTotal、external、每个采样与分布另存 JSON；不强制 GC、�
 后续：等待或验证解除精确 pin 的父包 / DSH 组合，确保 Host 实际使用修复版，完成其精确版本及原生矩阵，再按发布流程交付。旧 `0.1.11` 的 Socket 结果不会因本分支更新而自动修复；当前不能宣称 CVE 全部解决。Host 根项目 override 仍是另行验证的候选，并非本次已支持的安装合同。
 
 本机 macOS / Node `24.18.0` 的最终依赖树：lint、typecheck、build、enforce compat、原生 Registry probe、Seatbelt kernel probe 通过；显式要求已验证的 Seatbelt，完整测试 **907 通过 / 85 跳过**（67 文件通过 / 4 跳过）。compose / behavior / journey **52 / 136 / 76 通过**，packed behavior **135 通过**，均无失败；pack、Auto Review fork 检查通过，可选 Auto Review 集成仍按现有精确基线规则跳过。冻结安装通过；实际 tarball manifest 的 Zod 下限为 `^4.6.7`。docs 检查 **0 错误 / 0 警告**。本轮没有重跑真实 TUI 长期观察；安全依赖代码提交 `90c47e0` 的 [CI run 41058256934](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41058256934) **首次执行完整成功**：19 个原有精确版本 × 4 runner，**76/76 verify**，releases 与最终 gate 均成功。该结果独立于 `fc56c4f` 的旧依赖验收；兼容门禁通过不等于剩余 CVE 已修复。
+
+## DSH 0.2.1-rc.5 兼容提升（2026-10-30）
+
+本地上游 tag、远端 tag 与 npm 发布列表均核对：相对既有合同，本次唯一新增版本是 `0.2.1-rc.5`。与 `0.2.2-alpha.2` 的共同祖先是 `0.2.1-rc.4`，两条发布线互不包含；上游接口差异与 Files 钩子核对见[接口审查](../../reference/dsh-0.2.2-migration.md#021-rc5-后续审查2026-10-30)。本次把 `rc.5` 加入精确 allowlist 和全部 DSH peer，保留原 19 个版本；开发 pin 继续为 `0.2.2-alpha.2`，不调整 Auto Review 的 `0.2.1-rc.2` 基线，也不创建 release。
+
+候选树在独立目录重建：49 个直接检查的 DSH 包统一解析到 `0.2.1-rc.5`，cordis `4.0.5`；Node `22.23.1`、macOS 上先以候选 warn 门禁、再以正式 enforce 门禁各跑完整 `verify:all`。正式门禁下 `compat:check`、lint、双端 typecheck、build、Registry 原生认证探针和 Seatbelt 内核探针通过；测试 **903 通过 / 89 跳过**，compose / behavior / journey 分别 **52 / 136 / 76 通过**，打包安装后的 behavior **135 通过**，均无失败。Seatbelt 已显式要求实跑；Auto Review fork 校验通过，可选联合 smoke 按既有精确目标规则跳过。项目开发 pin 的 frozen 安装与 `compat:check` 亦通过。
+
+PR 的 CI 以正式门禁覆盖全部 20 个精确版本与启用的四个 runner，原 19 版的跨平台回归以该矩阵为准；本机结果不代替 Linux 或 Windows 原生执行。Files 页签浏览器三态目检本轮未执行，源码层钩子已核对。

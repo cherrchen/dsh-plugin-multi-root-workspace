@@ -13,7 +13,7 @@
 | 运行时门禁 | `multi-root-compat` 行 | 版本不在 allowlist 或核心包混装时，四个安全相关行根本不启动（ADR-0009） |
 | cordis | 基线 `4.0.6-alpha.1`；旧版按 `dsh` 声明的范围下限精确 pin | `upgrade-dsh.mjs` 同步重指，并从精确 release-age 条目派生 workspace-only 的 DSH probe overrides 与 cordis 生态 pin（`cordis-plugin-*` / `schemastery` / `cosmokit`，取自目标版本自身 manifest），避免预发布范围导致混装、重复副本导致工具调度 Symbol 不一致或生态版本错代。已有自定义 overrides 时拒绝覆盖；探测后恢复保存的 workspace |
 
-**必须精确 pin**：`@deepseek-ai/dsh-*` 的 `latest` dist-tag 指向陈旧的 `0.0.1-rc.1`，真正的新版发布在 `next`；范围依赖会解析到错误版本。`pnpm-workspace.yaml` 里的 `minimumReleaseAgeExclude` 对开发版本的直接与传递 DSH 包、宿主 document tooling 都逐项列出精确版本，供 frozen install 与运行脚本前的依赖自检使用；不使用跨版本通配豁免。它是为此配套的（pnpm 的发布年龄门禁会拦下刚发布的预发布版本）。
+**必须精确 pin**：上游使用多个可变的 npm dist-tag，`latest` / `next` 与 `alpha` 可以指向不同发布线；范围或 tag 不能证明解析到的是已验证版本。`pnpm-workspace.yaml` 里的 `minimumReleaseAgeExclude` 对开发版本的直接与传递 DSH 包、宿主 document tooling 都逐项列出精确版本，供 frozen install 与运行脚本前的依赖自检使用；不使用跨版本通配豁免。它是为此配套的（pnpm 的发布年龄门禁会拦下刚发布的预发布版本）。
 
 ## 2. 工具链
 

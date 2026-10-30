@@ -36,4 +36,4 @@ Use lowercase kebab-case, for example:
 ```
 
 - [dsh-0.2.1-migration.md](./dsh-0.2.1-migration.md) — Interface and security review of three upstream tags, with Worktree constraints.
-- [dsh-0.2.2-migration.md](./dsh-0.2.2-migration.md) — Interface and security review of DSH 0.2.1-rc.4 and 0.2.2-alpha.2 (sessionProjections injection, the tool-executor split, additionalWritableRoots, and the Node 24 requirement).
+- [dsh-0.2.2-migration.md](./dsh-0.2.2-migration.md) — Interface and security review of DSH 0.2.1-rc.4, 0.2.1-rc.5, and 0.2.2-alpha.2 (sessionProjections injection, the tool-executor split, additionalWritableRoots, and the Node 24 requirement).
