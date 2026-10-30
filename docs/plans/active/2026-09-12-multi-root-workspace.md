@@ -1251,4 +1251,21 @@ RSS、heapTotal、external、每个采样与分布另存 JSON；不强制 GC、�
 
 新增 `shared-registry.spec.ts` 的确定性屏障回归：真实介质和内核锁，暂停异步 listener 返回，先触发 Registry 行卸载再释放屏障；旧代码漏关 server，修复后清理顺序正确。继续验证继任者在同一 endpoint 启动、新 follower 握手、磁盘登记保留及真实 fs 写入。Windows 的 FIRST_PIPE_INSTANCE 由该用例在原生 CI 执行，不能用 macOS 结果代替。
 
-本机 macOS / Node `24.18.0` / DSH `0.2.2-alpha.2`：定向 3 文件 **39 通过 / 1 平台项跳过**；完整测试 **907 通过 / 85 跳过**；compose/behavior/journey **52/136/76 通过**，packed behavior **135 通过**，均无失败。lint、typecheck、build、compat、原生 Registry probe、Seatbelt kernel probe、pack 检查通过；依赖树及支持列表未变。本修复未重跑 TUI 长期观察，也不把前述旧提交的实机结果记为本提交的并发卸载验收。修复提交触发的原生矩阵结果以 PR checks 为准。
+本机 macOS / Node `24.18.0` / DSH `0.2.2-alpha.2`：定向 3 文件 **39 通过 / 1 平台项跳过**；完整测试 **907 通过 / 85 跳过**；compose/behavior/journey **52/136/76 通过**，packed behavior **135 通过**，均无失败。lint、typecheck、build、compat、原生 Registry probe、Seatbelt kernel probe、pack 检查通过；依赖树及支持列表未变。本修复未重跑 TUI 长期观察，也不把前述旧提交的实机结果记为本提交的并发卸载验收。修复提交 `fc56c4f` 的 [CI run 41031794733](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41031794733) 完整成功：**76/76 verify**（19 个原有精确版本 × 4 runner），releases 与最终 gate 均成功；包含 Windows FIRST_PIPE_INSTANCE 的新回归。该结果对应尚未升级安全依赖的 P1 提交，不替代后续依赖变更的矩阵。
+
+### Socket / CVE 依赖安全升级（2026-10-30，未发布）
+
+核对 [Socket 0.1.11 告警](https://socket.dev/npm/package/@dsh-electron/dsh-plugin-multi-root-workspace/alerts/0.1.11?tab=dependencies) 与实际安装树，公告、版本和引入链以[依赖安全排查](../../troubleshooting/dependency-security-alerts.md)为准；[审计摘要](../../reference/dependency-security-audit-2026-10-30.json)记录依赖文件哈希和原始告警的紧凑快照。没有仅凭 shell / network / install script 等行为标记判为恶意，也没有通过删除 Host peer 或绕过围栏消除告警。
+
+插件直接 Zod 下限提升到 `^4.6.7`；测试工具 Vitest 下限到 `^4.1.12`。显式开发依赖 MCP SDK `^1.32.2` 保留 GenAI 原本自动带入的可选能力并使用修复版，当前实际 GenAI `mcpToTool` 加载成功。定向更新原有范围允许的传递依赖，最终无 overrides / patchedDependencies；DSH 开发 pin `0.2.2-alpha.2`、Cordis 和 19 版本支持列表均不变。
+
+| 当前安装树审计 | 更新前 | 更新后 |
+| --- | --- | --- |
+| 生产含 Host peers | 5 high / 4 moderate | **5 high / 4 moderate** |
+| 完整开发 / Host 树 | 1 critical / 17 high / 27 moderate / 3 low | **0 critical / 5 high / 6 moderate / 0 low** |
+
+完整树审计条目从 48 降到 11，包含 critical 的修复；这是当前基线 lockfile 的结果，不是所有受支持 Host 的生产安全结论。生产审计剩余 Zod `4.4.3` 与 Undici `8.11.2` 均由 DSH 精确 pin，插件自己的 Zod 已是 `4.6.7`。完整树另外剩 `libreoffice-kit` 的 fflate `0.8.2` 和 `dsh-mcp-client` 的 2.x client `2.2.0` 精确 pin。最新 DSH `0.2.1-rc.5` 仍保留同一 Zod、Undici 和 MCP client pin，因此没有为消除告警而盲目扩充支持范围。
+
+后续：等待或验证解除精确 pin 的父包 / DSH 组合，确保 Host 实际使用修复版，完成其精确版本及原生矩阵，再按发布流程交付。旧 `0.1.11` 的 Socket 结果不会因本分支更新而自动修复；当前不能宣称 CVE 全部解决。Host 根项目 override 仍是另行验证的候选，并非本次已支持的安装合同。
+
+本机 macOS / Node `24.18.0` 的最终依赖树：lint、typecheck、build、enforce compat、原生 Registry probe、Seatbelt kernel probe 通过；显式要求已验证的 Seatbelt，完整测试 **907 通过 / 85 跳过**（67 文件通过 / 4 跳过）。compose / behavior / journey **52 / 136 / 76 通过**，packed behavior **135 通过**，均无失败；pack、Auto Review fork 检查通过，可选 Auto Review 集成仍按现有精确基线规则跳过。冻结安装通过；实际 tarball manifest 的 Zod 下限为 `^4.6.7`。docs 检查 **0 错误 / 0 警告**。本轮没有重跑真实 TUI 长期观察；安全依赖提交的原生版本矩阵以 PR checks 实际结果为准，不能沿用 `fc56c4f` 的全绿结果。

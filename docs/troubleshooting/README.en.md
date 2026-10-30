@@ -26,6 +26,8 @@ Only issues that are expected to recur and are costly to diagnose are worth reco
 - [The install stops at build approval](./install-stops-at-build-approval.md) (Chinese) — why the first `dsh plugin add` fails on `koffi`'s build script, and how to answer the one `allowBuilds` decision it leaves behind.
 - [Files-tab root switcher degraded](./files-switcher-degraded.md) (Chinese) — the upstream `data-files-*` hooks are not slot contract; how to inspect the three degradation states when the switcher falls back to a plain menu.
 
+- [Socket / CVE dependency alerts](./dependency-security-alerts.md) (Chinese) — direct dependency patches, upstream exact pins, and the limits of Host-level overrides.
+
 ## Naming Convention
 
 Use lowercase kebab-case, for example:
