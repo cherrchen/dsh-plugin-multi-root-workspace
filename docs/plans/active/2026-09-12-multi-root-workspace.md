@@ -1275,6 +1275,6 @@ RSS、heapTotal、external、每个采样与分布另存 JSON；不强制 GC、�
 
 本地上游 tag、远端 tag 与 npm 发布列表均核对：相对既有合同，本次唯一新增版本是 `0.2.1-rc.5`。与 `0.2.2-alpha.2` 的共同祖先是 `0.2.1-rc.4`，两条发布线互不包含；上游接口差异与 Files 钩子核对见[接口审查](../../reference/dsh-0.2.2-migration.md#021-rc5-后续审查2026-10-30)。本次把 `rc.5` 加入精确 allowlist 和全部 DSH peer，保留原 19 个版本；开发 pin 继续为 `0.2.2-alpha.2`，不调整 Auto Review 的 `0.2.1-rc.2` 基线，也不创建 release。
 
-候选树在独立目录重建：49 个直接检查的 DSH 包统一解析到 `0.2.1-rc.5`，cordis `4.0.5`；Node `22.23.1`、macOS 上先以候选 warn 门禁、再以正式 enforce 门禁各跑完整 `verify:all`。正式门禁下 `compat:check`、lint、双端 typecheck、build、Registry 原生认证探针和 Seatbelt 内核探针通过；测试 **903 通过 / 89 跳过**，compose / behavior / journey 分别 **52 / 136 / 76 通过**，打包安装后的 behavior **135 通过**，均无失败。Seatbelt 已显式要求实跑；Auto Review fork 校验通过，可选联合 smoke 按既有精确目标规则跳过。项目开发 pin 的 frozen 安装与 `compat:check` 亦通过。
+候选树在独立目录重建：49 个直接检查的 DSH 包统一解析到 `0.2.1-rc.5`，cordis `4.0.5`；Node `22.23.1`、macOS 上先以候选 warn 门禁、再以正式 enforce 门禁各跑完整 `verify:all`。正式门禁下 `compat:check`、lint、双端 typecheck、build、Registry 原生认证探针和 Seatbelt 内核探针通过；测试 **903 通过 / 89 跳过**，compose / behavior / journey 分别 **52 / 136 / 76 通过**，打包安装后的 behavior **135 通过**，均无失败。Seatbelt 已显式要求实跑；Auto Review fork 校验通过，可选联合 smoke 按既有精确目标规则跳过。开发 pin `0.2.2-alpha.2` 的 frozen 安装、`compat:check`、原生 Registry 探针与完整 `verify:all` 通过：测试 **907 通过 / 85 跳过**，四项 smoke 分别 **52 / 136 / 76 / 135 通过**，Seatbelt 实跑。
 
-PR 的 CI 以正式门禁覆盖全部 20 个精确版本与启用的四个 runner，原 19 版的跨平台回归以该矩阵为准；本机结果不代替 Linux 或 Windows 原生执行。Files 页签浏览器三态目检本轮未执行，源码层钩子已核对。
+PR 的 CI 以正式门禁覆盖全部 20 个精确版本与启用的四个 runner，原 19 版的跨平台回归以该矩阵为准；本机结果不代替 Linux 或 Windows 原生执行。`rc.5` 的隔离 Web profile 使用本地模拟模型和临时工作区完成 Files 页签三态目检：无附属根、选附属根、切回主根时目录树、路径与刷新 / 打开按钮均正常；对照主根与附属根的目录展开、空目录、长文件名截断、读取失败行和打开方式菜单，外观一致。
