@@ -53,7 +53,7 @@
 | 兼容协作 | Auto Review 内置入口迁移 | companion 并入主包：`./auto-review` 导出 + 默认 `disabled` 的 `multi-root-auto-review` 行；loader 生命周期接管/恢复；configure、独立 manifest 与第二 tarball 退役 | [评审记录](../completed/2026-10-20-auto-review-in-package-review.md)、[迁移记录](#auto-review-内置入口迁移2026-10-20) | [0022](../../decisions/ADR-0022-auto-review-loader-entry.md) | `9138084`…`e4804fb` | `v0.1.9` |
 | 第二期 | 附属根 Skills（S1–S7） | 附属根 `.dsh/skills` / `.agents/skills` 发现、`/alias-id:skill-name` 命名空间调用、每根开关与 `aliasId`、全局 Settings 开关；native effective-cwd 旁路封堵 | [实施计划](../completed/2026-10-23-multi-root-skills.md)、[本次记录](#multi-root-skills-架构验证2026-10-23) | [0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) | `1218543`…`e2c6fb1` | `v0.1.10` |
 | hot-fix | Issue #24 Registry／Skills 刷新循环 | `setRegistryAuthority()` 仅在实际状态变化时通知，阻断 Skills 失效 → `skills/change` → 客户端重查的无界反馈循环；lease 重试、接管与 fail-closed 语义不变 | [本次记录](#issue-24registryskills-刷新循环-hot-fix2026-10-29) | [0023 修订](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) | `c53c8a9` | `v0.1.11` |
-| Long-term | 多 Host 共享 Registry 权威服务 | 实现完成；本机与最早同步基线已验收，三平台/全版本矩阵待 CI | [本次记录](#多-host-权威服务开发2026-10-29) | [0025](../../decisions/ADR-0025-shared-registry-authority.md) | 当前开发分支 | 未发布 |
+| Long-term | 多 Host 共享 Registry 权威服务 | 实现完成；本机与最早同步基线已验收，三平台/全版本矩阵待 CI | [专项计划](./2026-10-30-shared-registry-authority.md)、[本次记录](#多-host-权威服务开发2026-10-29) | [0025](../../decisions/ADR-0025-shared-registry-authority.md) | `c56fbb2` | 未发布 |
 
 
 ## 总体策略
@@ -1139,7 +1139,7 @@ C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 
 
 ## 多 Host 权威服务开发（2026-10-29）
 
-在 `feat/multi-instant-dsh-lock-upgrade` 开始分批开发。目标与验收矩阵见[共享服务提案](../../architecture/registry-authority-service.md)，第一版撤权完成语义见 [ADR-0024](../../decisions/ADR-0024-registry-operation-admission.md)。A1 为最初基础；2026-10-30 已接入默认共享服务（[ADR-0025](../../decisions/ADR-0025-shared-registry-authority.md)），active/follower 均可逐操作使用附加根，唯一 owner 管理存储。实现完成与三平台/全版本验收分开记录。
+在 `feat/multi-instant-dsh-lock-upgrade` 开始分批开发。完整原始目标、初版能力对照、未完成项与后续演进见[专项计划](./2026-10-30-shared-registry-authority.md)；当前合同见[共享服务架构](../../architecture/registry-authority-service.md)，第一版撤权完成语义见 [ADR-0024](../../decisions/ADR-0024-registry-operation-admission.md)。A1 为最初基础；2026-10-30 已接入默认共享服务（[ADR-0025](../../decisions/ADR-0025-shared-registry-authority.md)），active/follower 均可逐操作使用附加根，唯一 owner 管理存储。实现完成与三平台/全版本验收分开记录。
 
 | 批次 | 范围 | 状态 |
 | --- | --- | --- |
