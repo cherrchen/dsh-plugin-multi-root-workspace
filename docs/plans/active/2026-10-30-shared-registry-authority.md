@@ -6,7 +6,7 @@
 
 本文是[总路线图](./2026-09-12-multi-root-workspace.md#多-host-权威服务开发2026-10-29)的专项补充，负责原始目标与当前实现的对应关系、剩余工作、依赖和退出条件。实时进度、精确测试结果、平台/版本证据和发布状态仍只维护在总路线图。架构合同以[共享服务架构](../../architecture/registry-authority-service.md)、[ADR-0024](../../decisions/ADR-0024-registry-operation-admission.md)和[ADR-0025](../../decisions/ADR-0025-shared-registry-authority.md)为准。
 
-本文以 **2026-10-30 的初版提交 `c56fbb2`** 为 Current State 快照。初版已经提交，尚未发布；原始方案的完整验收和后续演进尚未结束，因此本计划放在 `active/`。
+本文以 **2026-10-30 的初版提交 `c56fbb2`** 为 Current State 快照。初版经 PR #26 合入 `main` 并随 `v0.1.12` 发版；原始方案的完整验收（Ubuntu 报告环境长跑复测等）和后续演进尚未结束，因此本计划放在 `active/`。
 
 ## Background
 

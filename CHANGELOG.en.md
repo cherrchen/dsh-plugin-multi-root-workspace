@@ -8,6 +8,17 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.12] - 2026-10-30
+
+### Added
+
+- **Multiple Hosts can use additional roots at the same time (on by default)**: the bundle now configures a shared storage authority (`sharedStorageRoot`) — previously only the Host holding the store lease could use additional roots, and a second Host sharing the same registry was fail-closed. Now a single owner opens the storage medium and manages persistence, while the other Hosts read and write through their own Registry facades over kernel-authenticated local IPC; every mutation and each new operation's admission is ordered at the owner: operations that arrive after a revocation are refused immediately, ones admitted before it may finish, and a disconnect preserves the established deny boundary; when the owner exits or crashes a follower contends, takes over, and recovers under a new epoch, and a lost committed reply is never replayed. Copied exec argv and expired handles cannot stand in for a fresh admission, the synchronous confine/spawn entry points keep their return shape, and every consumer path (fs, sandbox, shell/PTC/agent PTY, LSP, Files/watch, instructions, Skills) goes through admission. Profiles without `sharedStorageRoot` keep the legacy contended-fail-closed behavior ([ADR-0024](./docs/decisions/ADR-0024-registry-operation-admission.md), [ADR-0025](./docs/decisions/ADR-0025-shared-registry-authority.md), [shared service architecture](./docs/architecture/registry-authority-service.md)).
+- **Exact support for DSH `0.2.1-rc.5`**: the delta from `0.2.1-rc.4` does not touch this plugin's interfaces, so no new adapter branch is needed; the dev pin stays at `0.2.2-alpha.2` and the support matrix now covers 20 exact releases.
+
+### Changed
+
+- **Dependency security floors raised**: the plugin's direct `zod` floor moves to `^4.6.7`; on the development side `vitest` moves to `^4.1.12`, and `@modelcontextprotocol/sdk` `^1.32.2` is declared explicitly to keep GenAI's optional `mcpToTool` capability on a fixed release. The full development tree's advisories drop from 1 critical / 17 high / 27 moderate to 5 high / 6 moderate; the remaining advisories in host trees are introduced by DSH's own exact pins (e.g. zod `4.4.3`, Undici `8.11.2`) and are not resolved by this plugin release ([dependency security review](./docs/troubleshooting/dependency-security-alerts.md)).
+
 ## [0.1.11] - 2026-10-29
 
 ### Added
@@ -192,7 +203,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...v0.1.9

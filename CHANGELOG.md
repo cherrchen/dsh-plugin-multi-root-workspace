@@ -8,6 +8,17 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.12] - 2026-10-30
+
+### Added
+
+- **多个 Host 可同时使用附加根（默认开启）**：bundle 现默认配置共享存储权威（`sharedStorageRoot`）——此前只有持有 store 租约的 Host 能使用附加根，共享同一登记的第二个 Host 一律 fail-closed。现在唯一 owner 打开存储介质并管理持久化，其余 Host 经本机内核认证的 IPC 通过各自的 Registry facade 读写；所有变更与每个新操作的授权在 owner 处统一排序：撤权后的新操作立即被拒，撤权前已准入的操作可以完成，断线/失联时保留既有拒绝边界；owner 退出或崩溃时 follower 竞选接管并以新 epoch 恢复，丢失的已提交应答不会自动重放。已复制的执行参数与过期句柄不能顶替新准入，同步 confine/spawn 入口保持原有返回形状；fs、sandbox、shell/PTC/agent PTY、LSP、Files/watch、指令与 Skills 消费路径全部接入准入。未启用 `sharedStorageRoot` 的 profile 保留旧的「争用即 fail-closed」行为（[ADR-0024](./docs/decisions/ADR-0024-registry-operation-admission.md)、[ADR-0025](./docs/decisions/ADR-0025-shared-registry-authority.md)、[共享服务架构](./docs/architecture/registry-authority-service.md)）。
+- **精确支持 DSH `0.2.1-rc.5`**：相对 `0.2.1-rc.4` 没有触及本插件的接口变化，不新增适配分支；开发 pin 保持 `0.2.2-alpha.2`，支持矩阵现为 20 个精确版本。
+
+### Changed
+
+- **依赖安全下限提升**：本插件直接依赖的 `zod` 下限升至 `^4.6.7`；开发侧 `vitest` 升至 `^4.1.12`，并显式声明 `@modelcontextprotocol/sdk` `^1.32.2` 以保留 GenAI `mcpToTool` 的可选能力。完整开发树的公告告警从 1 critical / 17 high / 27 moderate 降为 5 high / 6 moderate；宿主树中剩余告警均由 DSH 精确 pin 引入（如 zod `4.4.3`、Undici `8.11.2`），不随本插件版本解决（[依赖安全排查](./docs/troubleshooting/dependency-security-alerts.md)）。
+
 ## [0.1.11] - 2026-10-29
 
 ### Added
@@ -192,7 +203,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.8...v0.1.9

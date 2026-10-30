@@ -1,6 +1,6 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；v0.1.9（Auto Review 多根上下文以主包内置可选行交付，默认关闭，ADR-0022）已发版；v0.1.10（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发版；v0.1.11（DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 支持矩阵提升、Issue #24 Registry／Skills 刷新循环 hot-fix）已发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
+> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；v0.1.9（Auto Review 多根上下文以主包内置可选行交付，默认关闭，ADR-0022）已发版；v0.1.10（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发版；v0.1.11（DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 支持矩阵提升、Issue #24 Registry／Skills 刷新循环 hot-fix）已发版；v0.1.12（多 Host 共享 Registry 权威服务与逐操作授权、DSH `0.2.1-rc.5` 支持矩阵提升）已发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
 > 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
@@ -47,14 +47,14 @@
 | compat | DSH 0.2.1 后续提升 | DSH 支持矩阵扩展至 `0.2.1-alpha.3`–`0.2.1-rc.2` 五个精确版本；storage-domain zod 分裂适配、warn 车道 allow-version 预授权 | [本次记录](#dsh-021-后续兼容提升2026-10-17) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `eaf2d8f` | `v0.1.7` |
 | compat | DSH 0.2.1-rc.3 提升 | DSH 支持矩阵纳入 `0.2.1-rc.3`；上游差异全部为新增（sidebar 槽位、导航 pins、DeepSeek `/models`），无新适配分支；开发 pin 升级 | [本次记录](#dsh-021-rc3-兼容提升2026-10-23) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `bddeae3` | `v0.1.10` |
 | compat | DSH 0.2.1-rc.4 与 0.2.2-alpha.2 提升 | DSH 支持矩阵纳入 `0.2.1-rc.4` 与 `0.2.2-alpha.2`；测试栈补 `sessionProjections` 注入与执行器结构探测；fork 基线前移 `f3803c9697`；CI 按版本分流 Node 22/24；升级脚本补 cordis 生态 pin 防混树；开发 pin `0.2.2-alpha.2` / cordis `4.0.6-alpha.1` | [本次记录](#dsh-021-rc4-与-022-alpha2-兼容提升2026-10-28) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `08795a1` | `v0.1.11` |
-| compat | DSH 0.2.1-rc.5 提升 | 支持合同纳入 `0.2.1-rc.5`；保留原有版本和开发 pin，不新增 adapter 分支 | [本次记录](#dsh-021-rc5-兼容提升2026-10-30) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | — | 未发布 |
+| compat | DSH 0.2.1-rc.5 提升 | 支持合同纳入 `0.2.1-rc.5`；保留原有版本和开发 pin，不新增 adapter 分支 | [本次记录](#dsh-021-rc5-兼容提升2026-10-30) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `7bb642e` | `v0.1.12` |
 | compat | DSH 0.2.0 `permissionPresets/catalog` 修复 | 可选包按"谁加载副本、经哪个锚点"分三类取证（运行时加载 / 宿主服务 / runner 锚定），link: 检出不再幻影混装；两个 provider 行不再 inject 门禁，被拒安装退化为上游等价而非拖死 `ctx.fs`/`ctx.sandbox`/`ctx.shell`/`permissionPresets` | [本次记录](#dsh-020-permissionpresetscatalog-修复2026-10-18) | [0009 修订](../../decisions/ADR-0009-dsh-compat-contract.md) | `f6d81de` | `v0.1.8` |
 | 第二期 | 后续 P3 项 | Registry observer 语义、TOCTOU 表述、workspace 导入导出、SDK API 等 | 见[需求文档 §4/§7](../../requirements/multi-root-workspace.md) | — | — | 未开始 |
 | 兼容协作 | Auto Review 多根上下文 | 拓扑/有效访问权限/当前项目约束的可信输入；可选外部兼容层及联合验证 | [适配计划](../completed/2026-10-18-auto-review-context-adaptation.md)、[源码调研](../../reference/auto-review-compatibility.md) | [0021](../../decisions/ADR-0021-auto-review-context-companion.md) | `feat/compat-auto-review` | Phase 0–2 已实施；本机验收与旧版回归见[本次记录](#auto-review-多根上下文适配2026-10-18)；仅联合目标 `0.2.1-rc.2`；独立 companion 交付形态在发布前被 ADR-0022 取代，能力以内置行随 `v0.1.9` 发版；Phase 3 不在本批范围 |
 | 兼容协作 | Auto Review 内置入口迁移 | companion 并入主包：`./auto-review` 导出 + 默认 `disabled` 的 `multi-root-auto-review` 行；loader 生命周期接管/恢复；configure、独立 manifest 与第二 tarball 退役 | [评审记录](../completed/2026-10-20-auto-review-in-package-review.md)、[迁移记录](#auto-review-内置入口迁移2026-10-20) | [0022](../../decisions/ADR-0022-auto-review-loader-entry.md) | `9138084`…`e4804fb` | `v0.1.9` |
 | 第二期 | 附属根 Skills（S1–S7） | 附属根 `.dsh/skills` / `.agents/skills` 发现、`/alias-id:skill-name` 命名空间调用、每根开关与 `aliasId`、全局 Settings 开关；native effective-cwd 旁路封堵 | [实施计划](../completed/2026-10-23-multi-root-skills.md)、[本次记录](#multi-root-skills-架构验证2026-10-23) | [0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) | `1218543`…`e2c6fb1` | `v0.1.10` |
 | hot-fix | Issue #24 Registry／Skills 刷新循环 | `setRegistryAuthority()` 仅在实际状态变化时通知，阻断 Skills 失效 → `skills/change` → 客户端重查的无界反馈循环；lease 重试、接管与 fail-closed 语义不变 | [本次记录](#issue-24registryskills-刷新循环-hot-fix2026-10-29) | [0023 修订](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) | `c53c8a9` | `v0.1.11` |
-| Long-term | 多 Host 共享 Registry 权威服务 | 实现完成；本机与最早同步基线已验收，三平台/全版本矩阵待 CI | [专项计划](./2026-10-30-shared-registry-authority.md)、[本次记录](#多-host-权威服务开发2026-10-29) | [0025](../../decisions/ADR-0025-shared-registry-authority.md) | `c56fbb2` | 未发布 |
+| Long-term | 多 Host 共享 Registry 权威服务 | 实现完成；本机、最早同步基线、19 精确版本 × 三平台 CI 与 macOS 真实 TUI 长跑已验收；Ubuntu 报告环境长跑复测遗留 | [专项计划](./2026-10-30-shared-registry-authority.md)、[本次记录](#多-host-权威服务开发2026-10-29) | [0024](../../decisions/ADR-0024-registry-operation-admission.md)、[0025](../../decisions/ADR-0025-shared-registry-authority.md) | `abdb5c6` | `v0.1.12` |
 
 
 ## 总体策略
@@ -1144,7 +1144,7 @@ C7 保存本机集成、最终回归、浏览器/兼容性收敛和文档；C7a 
 
 | 批次 | 范围 | 状态 |
 | --- | --- | --- |
-| A1 | 确定撤权语义；store-wide mutation / refresh / fs 准入排序；write/edit 每调用独立快照、过期 handle、epoch 与 publication revision | 已实施并完成下述本机门禁；未发布 |
+| A1 | 确定撤权语义；store-wide mutation / refresh / fs 准入排序；write/edit 每调用独立快照、过期 handle、epoch 与 publication revision | 已实施并完成下述本机门禁；随 `v0.1.12` 发版 |
 | A2 | async admission → sync confine/spawn；直接服务调用、shell/PTC/agent PTY 与旧进程边界 | 已实施；原有全部精确版本原生 CI 验收通过 |
 | B | 唯一存储核心 / Host facade；store 身份、配置握手、本机 IPC 与调用者隔离、流控、幂等及结果不明 | 已实施；三平台原生认证/受限子进程回归通过 |
 | C | LSP、Files/watch、instructions、Skills 等全消费者准入；断线保守拒绝、崩溃/竞选/接管、新 epoch | 已实施；真实服务、多进程及全版本 CI 回归通过 |
@@ -1190,7 +1190,7 @@ pnpm 的自动依赖自检最初尝试重装并因非交互环境中止；后续
 
 确定性故障用例：独立进程并发同/异主根修改不丢数据；在 fs 真正解析处暂停已准入写，然后另一 Host 撤权，旧操作可完成、新写被拒；SIGKILL 后多个候选仅一个 owner，从磁盘恢复；旧 holder 重启成为 follower；SIGSTOP 时超时拒绝新操作但不夺锁。另覆盖广播丢失、已提交应答丢失不重放、断线后的新嵌套调用不继承旧 grant、新 epoch、unknown-state 保留 lease、原生 Skills change→requery 有界、读缓存撤权、指令显式撤回、空闲 Files 流断线取消、hello/change 同批读取，以及受限 macOS 子进程知道 endpoint 仍不能调用管理方法。
 
-**初版提交时尚未执行的验收**：Windows 原生 pipe/token/ambient deny 与 semaphore 多候选崩溃恢复；Linux 原生 SO_PEERPIDFD、NoNewPrivs 与 bubblewrap 攻击用例；三平台 × 所有精确版本远端 CI；真实 dsh-tui 的多 Host 长期运行/Ubuntu OOM 报告环境复测。前三项的后续结果见下节；当时真实 TUI 长期观察仍未执行，后续 macOS 实机结果见本节末尾。此变更未发布；原先 Issue #24 hot-fix 的 20 分钟观察不能作为新共享服务的长期内存证据。
+**初版提交时尚未执行的验收**：Windows 原生 pipe/token/ambient deny 与 semaphore 多候选崩溃恢复；Linux 原生 SO_PEERPIDFD、NoNewPrivs 与 bubblewrap 攻击用例；三平台 × 所有精确版本远端 CI；真实 dsh-tui 的多 Host 长期运行/Ubuntu OOM 报告环境复测。前三项的后续结果见下节；当时真实 TUI 长期观察仍未执行，后续 macOS 实机结果见本节末尾。该变更随后经 PR #26 合入 `main` 并随 `v0.1.12` 发版；原先 Issue #24 hot-fix 的 20 分钟观察不能作为新共享服务的长期内存证据。
 
 
 ### 初版核对与 Draft PR 验收（2026-10-30）
@@ -1212,7 +1212,7 @@ pnpm 的自动依赖自检最初尝试重装并因非交互环境中止；后续
 
 **最终代码验收**：`480d474` 的 [CI run 41019582308](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41019582308) 首次执行完整成功，**76/76 verify**（19 个原有精确版本 × macOS / Windows / Ubuntu latest / Ubuntu 22.04），releases 与最终 gate 均成功。所有车道都经过 `registry:probe --required`，不能因共享能力探测整体跳过新服务回归。每车道执行 enforce compat、lint、typecheck、build、kernel probe、test、compose/behavior/journey、pack/packed、适用的 Auto Review 和 docs 门禁。Windows semaphore 保留 waiter handle 的屏障用例、pipe/token/ambient deny 用例已在原生执行；Linux NoNewPrivs/SO_PEERPIDFD 与 Ubuntu 22.04 的 bwrap 用例已执行。Ubuntu latest 的 bwrap 能力限制仍按 probe 显式处理，不把跳过记为该方言通过。
 
-`fa278b2` 原偶发失败车道不改代码重跑后成功（run attempt 2）；这不代替 `480d474` 的完整重验。Draft PR 保持未合并、未发布。**该 CI 检查点时的剩余交付**是新服务的真实 dsh-tui / Ubuntu 长期 CPU、RSS、V8 heap 观察及发布前复核；不以自动化一致性测试替代原报告环境的长期资源证据。
+`fa278b2` 原偶发失败车道不改代码重跑后成功（run attempt 2）；这不代替 `480d474` 的完整重验。**该 CI 检查点时的剩余交付**是新服务的真实 dsh-tui / Ubuntu 长期 CPU、RSS、V8 heap 观察及发布前复核；不以自动化一致性测试替代原报告环境的长期资源证据。
 
 
 ### 真实 dsh-tui 的 macOS 实机验证（2026-10-30）
@@ -1242,7 +1242,7 @@ RSS、heapTotal、external、每个采样与分布另存 JSON；不强制 GC、�
 
 17 项文件/错误/Skill/epoch/退出/清理断言通过。长跑先用临时驱动执行，随后将观测方法整理为 `pnpm soak:tui-registry`；仓库脚本另以独立 store 短测真实启动、受支持/共享元数据、未登记根写入负例、清理，以及约 40 秒显式暂停/恢复。脚本不提供生产授权、不加入 bundle 或普通 CI；用法和保护边界见[开发工作流](../../development/plugin-development-workflow.md#真实-tui-的长期观测手工验收)。lint、Node/Python 语法、兼容静态检查与 docs 检查通过；本轮未改生产实现。
 
-**仍未验证**：原报告 Ubuntu / Node `24.22.1` 的同组合长跑。本轮未连接原 Ubuntu 机器，当前安装源也未取得该 Node 的 macOS 包；不能用 macOS/Node `24.18.0` 的结果勾掉原环境验收。真实模型/第三方工具、自主旧 PTY/进程和所有故障交错也不由这次实机步骤覆盖；既有三平台 CI 是独立证据。PR 继续 Draft、未合并、未发布；后续为报告环境复测与发布前复核。
+**仍未验证**：原报告 Ubuntu / Node `24.22.1` 的同组合长跑。本轮未连接原 Ubuntu 机器，当前安装源也未取得该 Node 的 macOS 包；不能用 macOS/Node `24.18.0` 的结果勾掉原环境验收。真实模型/第三方工具、自主旧 PTY/进程和所有故障交错也不由这次实机步骤覆盖；既有三平台 CI 是独立证据。PR #26 随后合入 `main` 并随 `v0.1.12` 发版；Ubuntu 报告环境的同组合长跑复测仍为遗留验收。
 
 ### PR #26 Review P1：打开与卸载重叠时的 listener 泄漏（2026-10-30）
 
@@ -1254,7 +1254,7 @@ RSS、heapTotal、external、每个采样与分布另存 JSON；不强制 GC、�
 
 本机 macOS / Node `24.18.0` / DSH `0.2.2-alpha.2`：定向 3 文件 **39 通过 / 1 平台项跳过**；完整测试 **907 通过 / 85 跳过**；compose/behavior/journey **52/136/76 通过**，packed behavior **135 通过**，均无失败。lint、typecheck、build、compat、原生 Registry probe、Seatbelt kernel probe、pack 检查通过；依赖树及支持列表未变。本修复未重跑 TUI 长期观察，也不把前述旧提交的实机结果记为本提交的并发卸载验收。修复提交 `fc56c4f` 的 [CI run 41031794733](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41031794733) 完整成功：**76/76 verify**（19 个原有精确版本 × 4 runner），releases 与最终 gate 均成功；包含 Windows FIRST_PIPE_INSTANCE 的新回归。该结果对应尚未升级安全依赖的 P1 提交，不替代后续依赖变更的矩阵。
 
-### Socket / CVE 依赖安全升级（2026-10-30，未发布）
+### Socket / CVE 依赖安全升级（2026-10-30）
 
 核对 [Socket 0.1.11 告警](https://socket.dev/npm/package/@dsh-electron/dsh-plugin-multi-root-workspace/alerts/0.1.11?tab=dependencies) 与实际安装树，公告、版本和引入链以[依赖安全排查](../../troubleshooting/dependency-security-alerts.md)为准；[审计摘要](../../reference/dependency-security-audit-2026-10-30.json)记录依赖文件哈希和原始告警的紧凑快照。没有仅凭 shell / network / install script 等行为标记判为恶意，也没有通过删除 Host peer 或绕过围栏消除告警。
 
@@ -1273,7 +1273,7 @@ RSS、heapTotal、external、每个采样与分布另存 JSON；不强制 GC、�
 
 ## DSH 0.2.1-rc.5 兼容提升（2026-10-30）
 
-本地上游 tag、远端 tag 与 npm 发布列表均核对：相对既有合同，本次唯一新增版本是 `0.2.1-rc.5`。与 `0.2.2-alpha.2` 的共同祖先是 `0.2.1-rc.4`，两条发布线互不包含；上游接口差异与 Files 钩子核对见[接口审查](../../reference/dsh-0.2.2-migration.md#021-rc5-后续审查2026-10-30)。本次把 `rc.5` 加入精确 allowlist 和全部 DSH peer，保留原 19 个版本；开发 pin 继续为 `0.2.2-alpha.2`，不调整 Auto Review 的 `0.2.1-rc.2` 基线，也不创建 release。
+本地上游 tag、远端 tag 与 npm 发布列表均核对：相对既有合同，本次唯一新增版本是 `0.2.1-rc.5`。与 `0.2.2-alpha.2` 的共同祖先是 `0.2.1-rc.4`，两条发布线互不包含；上游接口差异与 Files 钩子核对见[接口审查](../../reference/dsh-0.2.2-migration.md#021-rc5-后续审查2026-10-30)。本次把 `rc.5` 加入精确 allowlist 和全部 DSH peer，保留原 19 个版本；开发 pin 继续为 `0.2.2-alpha.2`，不调整 Auto Review 的 `0.2.1-rc.2` 基线，也不创建 release；经 PR #27 合入 `main`，随 `v0.1.12` 发版。
 
 候选树在独立目录重建：49 个直接检查的 DSH 包统一解析到 `0.2.1-rc.5`，cordis `4.0.5`；Node `22.23.1`、macOS 上先以候选 warn 门禁、再以正式 enforce 门禁各跑完整 `verify:all`。正式门禁下 `compat:check`、lint、双端 typecheck、build、Registry 原生认证探针和 Seatbelt 内核探针通过；测试 **903 通过 / 89 跳过**，compose / behavior / journey 分别 **52 / 136 / 76 通过**，打包安装后的 behavior **135 通过**，均无失败。Seatbelt 已显式要求实跑；Auto Review fork 校验通过，可选联合 smoke 按既有精确目标规则跳过。开发 pin `0.2.2-alpha.2` 的 frozen 安装、`compat:check`、原生 Registry 探针与完整 `verify:all` 通过：测试 **907 通过 / 85 跳过**，四项 smoke 分别 **52 / 136 / 76 / 135 通过**，Seatbelt 实跑。
 
