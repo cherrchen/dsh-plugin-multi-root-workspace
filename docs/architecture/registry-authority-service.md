@@ -95,7 +95,7 @@ DSH 的 bwrap/Landlock 执行通过 NoNewPrivs 限制；Windows ACL runner 使�
 
 断线立即停止新附加授权，保留最后已知记录与 withheld deny；Full-access/Workspace-write 主根范围且无共享 temp，显式 deny 优先。Files 即使缓存从未载入也拒绝未知外部读。下一次操作/refresh 按需重连；只允许安全 query 重试，mutation 不重放。
 
-owner 正常退出先停止连接/新请求，随后在 authority 队列中停止准入、排空 mutation、撤销发布、close domain、最后 release lease。POSIX endpoint 清理核对 inode，旧 disposer 不删除继任者 socket。owner 崩溃后候选只用原内核锁竞选；胜者从磁盘打开并产生新 epoch。暂停的 owner 仍持锁，超时不会让其他 Host 夺权；旧实例重启后成为 follower 或重新正常竞选，不能复用旧 domain。
+Registry 卸载先标记 disposed、拒绝新操作并关闭 follower 连接；server 清理必须在 authority 队列中等待已开始的 acquire/open/listen 完成，再关闭监听及 peer、停止准入、排空 mutation、撤销发布、close domain、最后 release lease。不能在队列外只关闭“当前 server”：正在打开存储的任务稍后仍可创建新 listener，造成监听泄漏；Windows 遗留 pipe instance 还会阻止继任者创建首个监听。POSIX endpoint 清理核对 inode，旧 disposer 不删除继任者 socket。owner 崩溃后候选只用原内核锁竞选；胜者从磁盘打开并产生新 epoch。暂停的 owner 仍持锁，超时不会让其他 Host 夺权；旧实例重启后成为 follower 或重新正常竞选，不能复用旧 domain。
 
 存储打开失败继续持锁，修复后可 refresh 重试。已打开 domain 的写入若报 `unknown-state`，保留拒绝信息、断开共享服务并隔离至重启，不重新打开另一个内存快照。明确失败的写不发布新 grant。
 
@@ -108,3 +108,5 @@ Windows contender 在零超时等待失败后立即关闭 semaphore handle，连
 CI build 后用 `registry:probe --required` 要求正常原生 runner 的共享能力成立；绑定/API 异常不能被吞为 capability skip。原生测试用 `nativeHostAvailability()` 明确探测外层沙箱/缺失 peer-pidfd 等能力；它只决定测试能否运行，不改变生产认证。behavior 与 packed 的同一 battery 还 boot 两个完整 Host profile，共享实际安装产物并验证撤权/接管；独立进程隔离由前述 e2e 覆盖。三平台 CI 仍运行同一套正式测试及 compose/behavior/journey/packed 门禁。未执行的版本/平台不得标为通过；真实 dsh-tui 的长期 OOM 复测与共享服务一致性测试分别报告，不能相互替代。
 
 `tests/registry-semaphore-win32.e2e.ts` 另用真实子进程在 contender handle 关闭前设置屏障：owner 被杀后先验证拒绝授权，最后 waiter 关闭 handle 后再验证从磁盘接管。它复现 semaphore 的 handle 生命周期，不把用户态屏障宣称为 Windows OS suspend。
+
+`shared-registry.spec.ts` 另在真实 domain 已打开、异步 listener 尚未返回时设置屏障，交错卸载 Registry 行；断言 server → domain → lease 的清理顺序，并让继任者在同一 endpoint 启动、接受新 follower 并实际写入。只释放锁或关闭 JSON 不能代替 listener 生命周期断言。

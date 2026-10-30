@@ -6,6 +6,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { AuthorityServer } from '../src/authority/protocol.ts'
 import type { Config as RegistryConfig } from '../src/registry.ts'
 import MultiRootFileSystem from '../src/fs.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
@@ -92,6 +93,72 @@ nativeTest('forwards mutations and preserves them when the owner exits and a fol
   const path = join(fixture.outside, 'successor.txt')
   await follower.ctx.fs.writeText(await follower.ctx.fs.resolve(path), 'successor')
   expect(readFileSync(path, 'utf8')).toBe('successor')
+})
+
+nativeTest('closes a late listener before storage and lease when disposal overlaps takeover', async () => {
+  const owner = await mount(), candidate = await mount()
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  const internal = candidate.registry as unknown as {
+    releaseAuthority(): Promise<void>
+    client: { channel: { once(event: string, listener: () => void): void } }
+    server: AuthorityServer | undefined
+    domain: { close(): Promise<void> }
+    lease: { release(): Promise<void> }
+  }
+  const disconnected = Promise.withResolvers<void>()
+  internal.client.channel.once('close', disconnected.resolve)
+  await owner.dispose(); await disconnected.promise
+
+  const opening = Promise.withResolvers<void>(), resume = Promise.withResolvers<void>()
+  const disposing = Promise.withResolvers<void>(), events: string[] = []
+  const listen = AuthorityServer.listen
+  let lateServer: AuthorityServer | undefined
+  vi.spyOn(AuthorityServer, 'listen').mockImplementationOnce(async (...args) => {
+    // Real openDomain has acquired the kernel lease and opened durable data,
+    // but has not yet assigned the asynchronous listener. No timing sleeps.
+    const closeDomain = internal.domain.close.bind(internal.domain)
+    vi.spyOn(internal.domain, 'close').mockImplementation(async () => { events.push('domain'); await closeDomain() })
+    const releaseLease = internal.lease.release.bind(internal.lease)
+    vi.spyOn(internal.lease, 'release').mockImplementation(async () => { events.push('lease'); await releaseLease() })
+    opening.resolve(); await resume.promise
+    lateServer = await listen(...args)
+    const closeServer = lateServer.close.bind(lateServer)
+    vi.spyOn(lateServer, 'close').mockImplementation(() => { events.push('server'); closeServer() })
+    return lateServer
+  })
+  const release = internal.releaseAuthority.bind(internal)
+  vi.spyOn(internal, 'releaseAuthority').mockImplementation(() => {
+    const done = release(); disposing.resolve(); return done
+  })
+  const refreshing = candidate.registry.refresh(fixture.workspace)
+  let disposal: Promise<void> | undefined
+  try {
+    await opening.promise
+    // Unload the Registry row, as a profile edit would, keeping its injected
+    // scope/storage services alive until its own teardown has finished.
+    disposal = candidate.registryFiber.dispose()
+    await disposing.promise
+    resume.resolve()
+    await Promise.all([refreshing, disposal])
+    expect([...events]).toEqual(['server', 'domain', 'lease'])
+    expect(internal.server).toBeUndefined()
+    expect(candidate.registry.available).toBe(false)
+
+    // In particular Windows must be able to create a FIRST_PIPE_INSTANCE at
+    // the same endpoint. A fresh follower proves the new listener serves IPC.
+    const successor = await mount(), follower = await mount()
+    expect(successor.registry.authority.kind, successor.registry.unavailable).toBe('active')
+    expect(follower.registry.authority.kind, follower.registry.unavailable).toBe('follower')
+    expect(follower.registry.epoch).toBe(successor.registry.epoch)
+    expect(follower.registry.list(fixture.workspace)).toHaveLength(1)
+    const file = join(fixture.outside, 'after-overlapping-disposal.txt')
+    await follower.ctx.fs.writeText(await follower.ctx.fs.resolve(file), 'successor')
+    expect(readFileSync(file, 'utf8')).toBe('successor')
+  } finally {
+    resume.resolve()
+    await Promise.allSettled([refreshing, ...(disposal ? [disposal] : [])])
+    lateServer?.close() // also retire the leaked listener when testing old code
+  }
 })
 
 nativeTest('refuses new shared grants after a disconnect and retains withheld paths', async () => {

@@ -1242,3 +1242,13 @@ RSS、heapTotal、external、每个采样与分布另存 JSON；不强制 GC、�
 17 项文件/错误/Skill/epoch/退出/清理断言通过。长跑先用临时驱动执行，随后将观测方法整理为 `pnpm soak:tui-registry`；仓库脚本另以独立 store 短测真实启动、受支持/共享元数据、未登记根写入负例、清理，以及约 40 秒显式暂停/恢复。脚本不提供生产授权、不加入 bundle 或普通 CI；用法和保护边界见[开发工作流](../../development/plugin-development-workflow.md#真实-tui-的长期观测手工验收)。lint、Node/Python 语法、兼容静态检查与 docs 检查通过；本轮未改生产实现。
 
 **仍未验证**：原报告 Ubuntu / Node `24.22.1` 的同组合长跑。本轮未连接原 Ubuntu 机器，当前安装源也未取得该 Node 的 macOS 包；不能用 macOS/Node `24.18.0` 的结果勾掉原环境验收。真实模型/第三方工具、自主旧 PTY/进程和所有故障交错也不由这次实机步骤覆盖；既有三平台 CI 是独立证据。PR 继续 Draft、未合并、未发布；后续为报告环境复测与发布前复核。
+
+### PR #26 Review P1：打开与卸载重叠时的 listener 泄漏（2026-10-30）
+
+[Review 5709799843](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/26#pullrequestreview-5709799843) 的 [P1](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/26#discussion_r4421755480) 成立：`releaseAuthority()` 原先在 authority 队列外关闭当前 server；正在运行的 `openDomain()` 随后仍能创建新 listener，队列里的拆除只关 domain/release lease，遗漏 listener。Windows 遗留 named-pipe instance 会阻止继任者创建首个监听。
+
+修复将 server 清理放回 authority-transition 队列，在已开始的 acquisition/open/listen 完成后，按 **server → domain → lease** 拆除。disposed 标记和 follower 连接失效仍即时执行，不改变持锁、撤权或数据格式合同。测试 helper 保留 `ctx.plugin()` 返回的真实 Registry fiber，用于只卸载该行并保留 sibling Host 服务。
+
+新增 `shared-registry.spec.ts` 的确定性屏障回归：真实介质和内核锁，暂停异步 listener 返回，先触发 Registry 行卸载再释放屏障；旧代码漏关 server，修复后清理顺序正确。继续验证继任者在同一 endpoint 启动、新 follower 握手、磁盘登记保留及真实 fs 写入。Windows 的 FIRST_PIPE_INSTANCE 由该用例在原生 CI 执行，不能用 macOS 结果代替。
+
+本机 macOS / Node `24.18.0` / DSH `0.2.2-alpha.2`：定向 3 文件 **39 通过 / 1 平台项跳过**；完整测试 **907 通过 / 85 跳过**；compose/behavior/journey **52/136/76 通过**，packed behavior **135 通过**，均无失败。lint、typecheck、build、compat、原生 Registry probe、Seatbelt kernel probe、pack 检查通过；依赖树及支持列表未变。本修复未重跑 TUI 长期观察，也不把前述旧提交的实机结果记为本提交的并发卸载验收。修复提交触发的原生矩阵结果以 PR checks 为准。

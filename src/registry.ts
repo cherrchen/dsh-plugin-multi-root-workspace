@@ -1340,8 +1340,10 @@ export class MultiRootRegistry extends Service {
     this.disposed = true
     this.connectionGeneration++
     this.client?.close(); this.client = undefined
-    this.server?.close(); this.server = undefined
     await this.serializeAuthority(async () => {
+      // An in-flight open may create its listener after disposal starts. Wait
+      // for that acquisition, then retire its endpoint before storage/lease.
+      this.server?.close(); this.server = undefined
       // Fail closed first, so no further mutation is admitted while teardown
       // runs (a mutation admitted later would fail in `requireTable()`, by
       // design) — and so enforcement immediately stops treating the empty
