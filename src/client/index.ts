@@ -26,7 +26,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 // the inject factory's first parameter — the same merge upstream's Files
 // registration compiles against.
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
-import { createElement } from 'react'
+import { createElement, useCallback } from 'react'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { currentSessionIdOf, subscribeSessions, subscribeCurrentSession } from '../compat/client-session.ts'
@@ -167,8 +167,15 @@ export function apply(ctx: ClientContext): void {
     // route — another session's roots over its own tree and primary root.
     // The global resolver remains the fallback for a composition that
     // composes the occupant without session shares.
-    const paneSessionId = (): string | undefined =>
-      (props as { readonly sessionId?: string } | undefined)?.sessionId ?? sessionId()
+    // The composed session share is a stable string; resolving it inside a
+    // callback memoized on that string keeps `refresh`'s identity — and with
+    // it the list-call effect — stable across every render this occupant
+    // sees, instead of re-issuing `list` on each upstream store write.
+    const composedSessionId = (props as { readonly sessionId?: string } | undefined)?.sessionId
+    const paneSessionId = useCallback(
+      (): string | undefined => composedSessionId ?? sessionId(),
+      [composedSessionId],
+    )
     // The wrapper is rebuilt per render but every member it carries is a
     // framework-stable prop or an apply-level constant, so the switcher's
     // takeover effect — which keys on the selection, not the wrapper —

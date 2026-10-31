@@ -26,18 +26,52 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
-import type { BoundActions } from '@deepseek-ai/dsh-client-store'
+import { createSnapshotStore, type BoundActions, type SnapshotSelectorHook } from '@deepseek-ai/dsh-client-store'
+import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
+import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { RemoteError, type RemoteFailure } from '@deepseek-ai/dsh-typert-protocol'
 import { createList, createWatch, filesFace, type FilesInjected } from './face.ts'
 import { createFilesStore } from './store.ts'
 import { filesTreeSurfaceSupported } from './primitives.ts'
 import type { FilesTreeProps } from './FilesTree.tsx'
+import type { RootView } from '../../contract.ts'
 import { NS } from './locales.ts'
 
 /** The `sidebarRight` face the fork uses to open a file resource. */
 interface SidebarRightOpen {
   readonly openResourceIn?: (sessionId: SessionId, address: string) => void
+}
+
+/**
+ * One session's per-tab additional-root selections, keyed by the pane's
+ * dockkit tab id. An absent entry means the primary root.
+ */
+export type TreeSelection = Readonly<Record<string, RootView>>
+
+/**
+ * The lifetimes a selection runs under, keyed by tab like the store bucket:
+ * while an entry's signal is live the tree keeps its loaded levels, watches,
+ * expansion, and scroll — exactly what upstream's tab-record signal gives the
+ * native tree across a body remount (opening a file deactivates this tab,
+ * unmounting its body without ending the record).
+ */
+export interface FilesTreeTakeover {
+  /**
+   * The live signal for (tabId, root); reuses the live entry so a remounted
+   * body finds its bucket and watches intact. A different root — or an entry
+   * already aborted — ends the previous controller before minting the next.
+   * @param tabId - the pane's dockkit tab id.
+   * @param root - absolute path of the root being browsed.
+   * @returns the signal the forked tree lives under.
+   */
+  readonly signal: (tabId: TabId, root: string) => AbortSignal
+  /**
+   * Abort and drop one tab's takeover: the reader deselected or switched
+   * roots, or the tab record itself went away.
+   * @param tabId - the pane's dockkit tab id.
+   */
+  readonly end: (tabId: TabId) => void
 }
 
 /** The inject face the registration composes onto the occupant's props. */
@@ -46,6 +80,21 @@ export interface FilesTreeInjected {
   readonly face: FilesInjected
   /** Open one `dsh-resource://file` address in the host viewer. */
   readonly openFile: (address: string) => void
+  /**
+   * The reserved inject compartment: the slot renderer binds each source to a
+   * `use<Name>` selector hook, so `treeSelection` reaches the component as
+   * `useTreeSelection`, never as a prop under its own key.
+   */
+  readonly hooks: { readonly treeSelection: HostObservable<TreeSelection> }
+  /**
+   * Persist one pane's selected root; `'primary'` drops its entry. The
+   * session-scoped snapshot survives the body remount a file open causes.
+   * @param tabId - the pane's dockkit tab id.
+   * @param root - the selected root, or `'primary'` to browse the session root.
+   */
+  readonly selectRoot: (tabId: TabId, root: RootView | 'primary') => void
+  /** The forked tree's lifetimes; see {@link FilesTreeTakeover}. */
+  readonly takeover: FilesTreeTakeover
 }
 
 /** Everything `FilesTree` needs that the slot framework does not synthesize. */
@@ -56,6 +105,12 @@ export interface FilesTreeSurface {
   readonly face: FilesInjected
   readonly openFile: (address: string) => void
   readonly t: FilesTreeProps['t']
+  /** Selector hook over this session's per-tab root selections. */
+  readonly useTreeSelection: SnapshotSelectorHook<TreeSelection>
+  /** The selection's write side; see {@link FilesTreeInjected.selectRoot}. */
+  readonly selectRoot: FilesTreeInjected['selectRoot']
+  /** The forked tree's lifetimes; see {@link FilesTreeTakeover}. */
+  readonly takeover: FilesTreeTakeover
 }
 
 /** The failure every lazy-remote path reports when the carrier is absent. */
@@ -154,13 +209,43 @@ export function createFilesTreeSeats(ctx: ClientContext): {
   const store = createFilesStore()
   const remote = lazyFilesRemote(ctx)
   const face = filesFace(createList(remote), createWatch(remote))
-  const inject = (sessionId: SessionId, actions: BoundActions<ReturnType<typeof createFilesStore>>): FilesTreeInjected => ({
-    face: face(sessionId, actions),
-    openFile: (address: string) => {
-      const sidebar = (ctx as unknown as { get(key: string): unknown }).get('sidebarRight') as SidebarRightOpen | undefined
-      sidebar?.openResourceIn?.(sessionId, address)
-    },
-  })
+  const inject = (sessionId: SessionId, actions: BoundActions<ReturnType<typeof createFilesStore>>): FilesTreeInjected => {
+    // Both live at the inject product's scope — one instance per session — so
+    // the selection and the controllers it runs under survive the body remount
+    // an opened file causes (the file tab takes the pane, the Files body
+    // unmounts, and component state would otherwise reset to 'primary').
+    const selection = createSnapshotStore<TreeSelection>({})
+    const takeovers = new Map<TabId, { readonly controller: AbortController; readonly root: string }>()
+    return {
+      face: face(sessionId, actions),
+      openFile: (address: string) => {
+        const sidebar = (ctx as unknown as { get(key: string): unknown }).get('sidebarRight') as SidebarRightOpen | undefined
+        sidebar?.openResourceIn?.(sessionId, address)
+      },
+      hooks: { treeSelection: selection },
+      selectRoot: (tabId, root) => {
+        const next: Record<string, RootView> = { ...selection.getSnapshot() }
+        if (root === 'primary') delete next[tabId]
+        else next[tabId] = root
+        selection.set(next)
+      },
+      takeover: {
+        signal: (tabId, root) => {
+          let held = takeovers.get(tabId)
+          if (held === undefined || held.root !== root || held.controller.signal.aborted) {
+            held?.controller.abort()
+            held = { controller: new AbortController(), root }
+            takeovers.set(tabId, held)
+          }
+          return held.controller.signal
+        },
+        end: (tabId) => {
+          takeovers.get(tabId)?.controller.abort()
+          takeovers.delete(tabId)
+        },
+      },
+    }
+  }
   return { store, inject }
 }
 
@@ -180,13 +265,17 @@ export function createFilesTreeSurface(
     readonly actions: FilesTreeSurface['actions']
     readonly face: FilesInjected | undefined
     readonly openFile: ((address: string) => void) | undefined
+    readonly useTreeSelection: FilesTreeSurface['useTreeSelection'] | undefined
+    readonly selectRoot: FilesTreeSurface['selectRoot'] | undefined
+    readonly takeover: FilesTreeSurface['takeover'] | undefined
   },
   t: FilesTreeProps['t'],
 ): FilesTreeSurface | undefined {
   if (!filesTreeSurfaceSupported()) return undefined
-  const { sessionId, useStore, actions, face, openFile } = props
-  if (face === undefined || openFile === undefined || useStore === undefined || actions === undefined) return undefined
-  return { sessionId, useStore, actions, face, openFile, t }
+  const { sessionId, useStore, actions, face, openFile, useTreeSelection, selectRoot, takeover } = props
+  if (face === undefined || openFile === undefined || useStore === undefined || actions === undefined
+    || useTreeSelection === undefined || selectRoot === undefined || takeover === undefined) return undefined
+  return { sessionId, useStore, actions, face, openFile, useTreeSelection, selectRoot, takeover, t }
 }
 
 export { filesTreeSurfaceSupported, NS as FILES_TREE_NS }

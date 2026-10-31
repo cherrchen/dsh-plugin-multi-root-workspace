@@ -18,7 +18,7 @@
  * shares the upstream Files registration composes.
  */
 
-import { StrictMode, useSyncExternalStore, type ReactElement } from 'react'
+import { StrictMode, createElement, useSyncExternalStore, type ReactElement } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OPEN_IN_APP_APPS_ROUTE, OPEN_IN_APP_OPEN_ROUTE } from '@deepseek-ai/dsh-host-open-in-app/shared'
@@ -235,18 +235,54 @@ function mount(withConnection = true): Harness {
     notify => instance!.subscribe(notify),
     () => selector(instance!.getSnapshot()),
   )
+  // The framework runs inject once per (registration, session binding) and
+  // binds each `hooks` source to a `use<Name>` selector hook — this cache is
+  // what lets a remounted occupant see the same selection and takeovers.
+  const injectProducts = new Map<unknown, Record<string, unknown>>()
+  const hookCache = new WeakMap<object, unknown>()
+  interface Source { getSnapshot(): unknown; subscribe(fn: () => void): () => void }
+  const bindHook = (source: Source): unknown => {
+    let hook = hookCache.get(source)
+    if (hook === undefined) {
+      hook = <S,>(selector: (snapshot: unknown) => S): S => useSyncExternalStore(
+        notify => source.subscribe(notify),
+        () => selector(source.getSnapshot()),
+      )
+      hookCache.set(source, hook)
+    }
+    return hook
+  }
+  const injectedProps = (session: unknown): Record<string, unknown> => {
+    let product = injectProducts.get(session)
+    if (product === undefined) {
+      const face = registration.options.inject?.(session, instance?.actions) ?? {}
+      const { hooks, ...rest } = face
+      product = { ...rest }
+      for (const [name, source] of Object.entries(hooks as Record<string, Source> | undefined ?? {})) {
+        product[`use${name.charAt(0).toUpperCase()}${name.slice(1)}`] = bindHook(source)
+      }
+      injectProducts.set(session, product)
+    }
+    return product
+  }
   return {
     calls,
     treeCalls,
     opens,
     registrations,
-    occupant: owner => registration.component({
-      sessionId: currentSession,
-      useStore,
-      actions: instance?.actions,
-      ...registration.options.inject?.(currentSession, instance?.actions),
-      ...owner,
-    }),
+    // The registered component renders as a real React component under the
+    // renderer (`jsx(Comp, props)`), so its hooks bind to its own fiber —
+    // wrap it in an element rather than invoking it synchronously.
+    occupant: owner => createElement(
+      registration.component as (props: Record<string, unknown>) => ReactElement,
+      {
+        sessionId: currentSession,
+        useStore,
+        actions: instance?.actions,
+        ...injectedProps(currentSession),
+        ...owner,
+      },
+    ),
     setView: next => { view = next },
     setSession: next => {
       currentSession = next
@@ -297,7 +333,13 @@ afterEach(() => {
  * itself inside a dockkit tab host. The returned `pane` is where the forked
  * tree must portal into.
  */
-function renderInPane(harness: Harness, owner = { absolutePath: '/repos/primary' }, strictMode = false): { pane: HTMLElement } {
+function renderInPane(harness: Harness, owner = { absolutePath: '/repos/primary' }, strictMode = false): {
+  pane: HTMLElement
+  host: HTMLElement
+  header: HTMLElement
+  unmount: () => void
+  rerender: (occupant: ReactElement) => void
+} {
   const host = document.createElement('section')
   host.setAttribute('data-dockkit-content', 'tab-1')
   const pane = document.createElement('div')
@@ -315,8 +357,14 @@ function renderInPane(harness: Harness, owner = { absolutePath: '/repos/primary'
   document.body.append(host)
   appended.push(host)
   const occupant = harness.occupant(owner) as ReactElement
-  render(strictMode ? <StrictMode>{occupant}</StrictMode> : occupant, { container: header })
-  return { pane }
+  const mounted = render(strictMode ? <StrictMode>{occupant}</StrictMode> : occupant, { container: header })
+  return {
+    pane,
+    host,
+    header,
+    unmount: () => { mounted.unmount() },
+    rerender: next => { mounted.rerender(next) },
+  }
 }
 
 function switcherKind(): string | null {
@@ -512,7 +560,7 @@ describe('the Files-tab root switcher', () => {
     expect(pane.querySelector('.mrfw-ftBody')).toBeNull()
   })
 
-  it('returns to the primary root when a refresh cannot revalidate the selection', async () => {
+  it('keeps the selected root while a refresh cannot answer — eviction needs an answered view', async () => {
     const harness = mount()
     const { pane } = renderInPane(harness)
     await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
@@ -522,12 +570,103 @@ describe('the Files-tab root switcher', () => {
     await waitFor(() => { expect(switcherKind()).toBe('additional') })
     expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull()
 
-    // The next refresh cannot revalidate the roots at all: the takeover must
-    // not keep the native primary tree hidden behind a stale selection.
+    // The next refresh cannot revalidate the roots at all: an unanswered
+    // list must not evict the persisted selection — remounts and transient
+    // failures would otherwise drop it on every first pending moment. The
+    // trigger keeps naming the stored row and the takeover keeps its rows;
+    // the tree's own failure line reports the host fault.
     harness.setListFails(true)
     await openMenu()
-    await waitFor(() => { expect(switcherKind()).toBe('primary') })
-    expect(pane.querySelector('.mrfw-ftBody')).toBeNull()
+    await waitFor(() => {
+      expect(harness.calls.some(call => call.endpoint === 'list')).toBe(true)
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(switcherKind()).toBe('additional')
+    expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull()
+    expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('payments')
+  })
+
+  it('restores the selection and the same tree when the body remounts after a file opens', async () => {
+    const harness = mount()
+    const { pane, unmount } = renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => {
+      expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull()
+    })
+    const traffic = harness.treeCalls.length
+
+    // What a file open does upstream: the viewer tab takes the pane and
+    // dockkit unmounts this tab's whole body — occupant subtree included —
+    // while the tabHost section stays connected, the tab record unharmed.
+    unmount()
+
+    // The remounted occupant rejoins the SAME pane inside the same tabHost
+    // section (a fresh header — the body's new subtree): the persisted
+    // selection makes it additional-root again, and the takeover entry never
+    // ended — the bucket and its watches survived — so the same rows are
+    // already there without a single new remote call.
+    const header2 = document.createElement('div')
+    pane.prepend(header2)
+    render(harness.occupant({ absolutePath: '/repos/primary' }) as ReactElement, { container: header2 })
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    await waitFor(() => {
+      expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull()
+    })
+    expect(harness.treeCalls.length).toBe(traffic)
+    expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('payments')
+  })
+
+  it('ends the takeover when the tabHost section leaves the document — the record really ended', async () => {
+    const harness = mount()
+    const { pane, host, unmount } = renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => {
+      expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull()
+    })
+
+    // The whole section leaving the document is the tab record's real end —
+    // the deferred attachment check must end the entry, forgetting the
+    // bucket and closing the watches.
+    unmount()
+    host.remove()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const traffic = harness.treeCalls.length
+
+    // The reopened tab carries the same fixture id, so the persisted
+    // selection restores — but its takeover ended, and the tree re-seeds
+    // from scratch: a fresh changes stream and a fresh root list.
+    renderInPane(harness)
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    await waitFor(() => {
+      expect(harness.treeCalls.length).toBeGreaterThan(traffic)
+      expect(document.querySelectorAll('[data-files-path="/repos/payments/notes.md"]').length).toBeGreaterThan(0)
+    })
+  })
+
+  it('does not re-issue list on ordinary re-renders — the refresh callback stays stable', async () => {
+    const harness = mount()
+    const { pane, header, rerender } = renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+    const lists = (): number => harness.calls.filter(call => call.endpoint === 'list').length
+    await waitFor(() => { expect(lists()).toBe(1) })
+
+    // The upstream tree's every store write re-renders the occupant. Each
+    // such re-render used to rebuild paneSessionId — and refresh with it —
+    // firing another list call. Memoized, the callback keeps its identity
+    // and the refresh effect does not refire.
+    for (let i = 0; i < 3; i += 1) {
+      rerender(harness.occupant({ absolutePath: '/repos/primary' }) as ReactElement)
+    }
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(lists()).toBe(1)
+    expect(pane.querySelector('.mrfw-rootSwitcher')).not.toBeNull()
+    expect(header.querySelector('.mrfw-rootSwitcher')).not.toBeNull()
   })
 
   it('reconciles the selection when the folders manager closes', async () => {

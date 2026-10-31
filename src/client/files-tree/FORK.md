@@ -42,7 +42,7 @@ the shell rewrite, never hand-edits inside those definitions.
 | `locales.ts` | upstream `locales.ts` | only `NS` + the `SidebarFilesKey` union + the `LocaleNamespaceMap` augmentation; dictionaries are NOT re-registered — `ctx.locale.bind('sidebarFiles')` consumes upstream's live namespace so strings track upstream automatically |
 | `client-remote.d.ts` | `@deepseek-ai/dsh-api-remotes/client`'s exported `ClientRemote` | `tsconfig.client.json` `paths` maps the specifier here so `face.ts`/`adapter.tsx`/`store.ts`/`FilesTree.tsx` (the only importers) compile against the dev-pin's `workspaceFiles` signatures on every supported manifest; on releases older than `0.2.0-rc.2` the real `changes` has two parameters (session-wide watch) and would fail the verbatim 3-argument call — safe because the `files.actions` slot does not exist there so the fork never mounts |
 | `primitives.ts` | the named primitives imports upstream spells | runtime-probes `IconFolderCloseRegular`/`IconFolderOpenRegular` (with `*16` pixel-era fallbacks), `FileTypeIcon`, and `classifyFileType` through `compat/client-icons`'s `maybeIcon`/`maybeComponent`; the adapter's gate turns a missing export into no tree at all — upstream's own absence shape |
-| `adapter.tsx` | upstream `apply`'s store/inject wiring | our wiring: `lazyFilesRemote` (`remote` and `remote.workspaceFiles` resolved per call through `ctx.get` — the inject-free store lookup, required because `remote.workspaceFiles` is a nested service whose context-proxy path throws "without inject" on undeclared fibers and this cordis treats every inject entry as required; every lookup failure — absent service, absent namespace, synchronous throw, or a rejected call — is folded into a settled `gateway/internal` RemoteResult/stream failure, because the verbatim `load` awaits `list` through `.then` with no `.catch` and an escaped rejection would die inside `DirectoryNode.task` pinning the level at `loading` forever), `createFilesTreeSeats` (the `store`/`inject` registration declarations: verbatim `filesFace` + session-bound `openFile` through `sidebarRight.openResourceIn`), and `createFilesTreeSurface` (the prop-share assembly + the primitives gate) |
+| `adapter.tsx` | upstream `apply`'s store/inject wiring | our wiring: `lazyFilesRemote` (`remote` and `remote.workspaceFiles` resolved per call through `ctx.get` — the inject-free store lookup, required because `remote.workspaceFiles` is a nested service whose context-proxy path throws "without inject" on undeclared fibers and this cordis treats every inject entry as required; every lookup failure — absent service, absent namespace, synchronous throw, or a rejected call — is folded into a settled `gateway/internal` RemoteResult/stream failure, because the verbatim `load` awaits `list` through `.then` with no `.catch` and an escaped rejection would die inside `DirectoryNode.task` pinning the level at `loading` forever), `createFilesTreeSeats` (the `store`/`inject` registration declarations: verbatim `filesFace` + session-bound `openFile` through `sidebarRight.openResourceIn`, plus the session-scoped `treeSelection` snapshot — exposed through the `hooks` compartment as `useTreeSelection` — and the (tab, root) takeover map that gives a body remount the native tree's occurrence-length lifetime), and `createFilesTreeSurface` (the prop-share assembly + the primitives gate) |
 | `FORK.md` | — | this file |
 
 ## Intentional deltas (upstream `FilesBody.tsx` → `FilesTree.tsx`)
@@ -56,10 +56,14 @@ upstream binds inside it arrives as a prop instead:
   from the dockkit `data-dockkit-content` ancestor (or a generated
   fallback), so the store bucket, expansion state, and scroll memory are
   keyed exactly like a real Files tab.
-- **Lifetime**: upstream rides the tab record's `signal`; the fork takes the
-  takeover's `AbortController` — deselecting, switching roots, or unmounting
-  aborts it, which forgets the bucket and closes every watch, mirroring
-  upstream's tab-close path.
+- **Lifetime**: upstream rides the tab record's `signal`; the fork takes a
+  controller from the inject product's takeover map, keyed by (tab, root).
+  Deselecting or switching roots ends it at once; a body unmount does not —
+  opening a file deactivates the tab without ending its record, and the
+  deferred `section.isConnected` check ends the entry only when the tabHost
+  section leaves the document (the record's real end). Either way the abort
+  forgets the bucket and closes every watch, mirroring upstream's tab-close
+  path while matching its hidden-tab survival.
 - **Open route**: upstream calls `tab.actions.openResource`; the fork calls
   the injected `openFile`, bound to `sidebarRight.openResourceIn`, and
   computes the address as `fileAddressFor(sessionId, undefined, path)` —
