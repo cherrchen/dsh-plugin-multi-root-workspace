@@ -8,6 +8,17 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.13] - 2026-10-31
+
+### Added
+
+- **Background recovery for the shared Registry (on by default)**: when Hosts share a registry, retryable authority contention, disconnections, and storage-open failures are retried automatically with backoff and jitter. A follower is considered recovered only after it has resynchronized its tracked primary roots. Set `backgroundRecovery: false` on `multi-root-registry` to disable background retries; on-demand recovery remains available. Configuration errors and writes with an unknown state still require configuration correction or a restart. Recovery preserves deny boundaries, every new operation still requires admission, and mutations with an unknown result are never replayed automatically. Read-only diagnostics and deduplicated transition logs help diagnose failures ([ADR-0026](./docs/decisions/ADR-0026-registry-background-recovery.md)).
+
+### Fixed
+
+- **Files tab retains its selected root when opening a file**: when opening a file in an additional root unmounts and remounts the Files tab, its selected root, expanded directories, and scroll position are retained. A pending or failed list request no longer resets the selection to the primary root; closing the tab cleans up watches and tree resources.
+- **Shared-authority recovery safety and consistency**: a retry cannot bypass a failed storage-to-lock binding check. Recovery synchronizes root projections and publishes consistent state in a batch; empty snapshots clear stale boundaries, and failed recovery rounds no longer generate repeated notifications. On Windows, the request timer stays active during the connection handshake so the process cannot exit prematurely.
+
 ## [0.1.12] - 2026-10-30
 
 ### Added
@@ -203,7 +214,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...v0.1.10

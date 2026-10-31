@@ -8,6 +8,17 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.13] - 2026-10-31
+
+### Added
+
+- **共享 Registry 后台恢复（默认开启）**：多个 Host 共享登记表时，可重试的权威争用、断线或存储打开失败会以退避和抖动自动重试；follower 重新同步已跟踪主根后才视为恢复。`multi-root-registry` 的 `backgroundRecovery: false` 可关闭后台重试，按需恢复仍可用；配置错误和状态不明的写入仍需修正配置或重启。恢复期间继续保留拒绝边界，每个新操作仍须授权，结果不明的变更不会自动重放。只读诊断信息和去重的状态转换日志有助于排查故障（[ADR-0026](./docs/decisions/ADR-0026-registry-background-recovery.md)）。
+
+### Fixed
+
+- **Files 页签打开文件后保留所选根**：打开附加根中的文件导致 Files 页签卸载并重新挂载时，保留该页签所选的根、目录展开状态与滚动位置；列表尚未应答或请求失败不会误将选择切回主根，关闭页签时会清理监听与目录树资源。
+- **共享权威恢复的安全性和一致性**：介质与锁绑定校验失败后重试不能绕过校验；恢复时同步根投影并批量发布一致的状态，空快照能清除过期边界，失败的恢复轮次不再产生重复通知。Windows 连接握手期间保持请求计时器有效，避免进程提前退出。
+
 ## [0.1.12] - 2026-10-30
 
 ### Added
@@ -203,7 +214,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.9...v0.1.10

@@ -1,6 +1,6 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；v0.1.9（Auto Review 多根上下文以主包内置可选行交付，默认关闭，ADR-0022）已发版；v0.1.10（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发版；v0.1.11（DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 支持矩阵提升、Issue #24 Registry／Skills 刷新循环 hot-fix）已发版；v0.1.12（多 Host 共享 Registry 权威服务与逐操作授权、DSH `0.2.1-rc.5` 支持矩阵提升）已发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
+> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；v0.1.9（Auto Review 多根上下文以主包内置可选行交付，默认关闭，ADR-0022）已发版；v0.1.10（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发版；v0.1.11（DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 支持矩阵提升、Issue #24 Registry／Skills 刷新循环 hot-fix）已发版；v0.1.12（多 Host 共享 Registry 权威服务与逐操作授权、DSH `0.2.1-rc.5` 支持矩阵提升）已发版；v0.1.13（F4 后台恢复与 Files 页签根选择修复）随 `v0.1.13` 发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
 > 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
@@ -55,6 +55,8 @@
 | 第二期 | 附属根 Skills（S1–S7） | 附属根 `.dsh/skills` / `.agents/skills` 发现、`/alias-id:skill-name` 命名空间调用、每根开关与 `aliasId`、全局 Settings 开关；native effective-cwd 旁路封堵 | [实施计划](../completed/2026-10-23-multi-root-skills.md)、[本次记录](#multi-root-skills-架构验证2026-10-23) | [0023](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) | `1218543`…`e2c6fb1` | `v0.1.10` |
 | hot-fix | Issue #24 Registry／Skills 刷新循环 | `setRegistryAuthority()` 仅在实际状态变化时通知，阻断 Skills 失效 → `skills/change` → 客户端重查的无界反馈循环；lease 重试、接管与 fail-closed 语义不变 | [本次记录](#issue-24registryskills-刷新循环-hot-fix2026-10-29) | [0023 修订](../../decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) | `c53c8a9` | `v0.1.11` |
 | Long-term | 多 Host 共享 Registry 权威服务 | 实现完成；本机、最早同步基线、19 精确版本 × 三平台 CI 与 macOS 真实 TUI 长跑已验收；Ubuntu 报告环境长跑复测遗留 | [专项计划](./2026-10-30-shared-registry-authority.md)、[本次记录](#多-host-权威服务开发2026-10-29) | [0024](../../decisions/ADR-0024-registry-operation-admission.md)、[0025](../../decisions/ADR-0025-shared-registry-authority.md) | `abdb5c6` | `v0.1.12` |
+| Long-term | F4 后台恢复与故障诊断 | 自动恢复、投影同步与诊断；三平台 CI 验收，真实 TUI soak 暂缓 | [专项计划](./2026-10-31-f4-background-recovery.md)、[本次记录](#f4-后台恢复与故障诊断立项2026-10-31) | [0026](../../decisions/ADR-0026-registry-background-recovery.md) | `0b2102c`…`8b3f22b` | 随 `v0.1.13` 发版 |
+| 第二期 | Files 页签根选择修复 | 打开文件后的页签重挂载保留根选择与目录树状态 | [ADR 修订](../../decisions/ADR-0016-files-tab-native-tree-fork.md) | [0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md) | `4cb8822` | 随 `v0.1.13` 发版 |
 
 
 ## 总体策略
@@ -1281,7 +1283,7 @@ PR 的 CI 以正式门禁覆盖全部 20 个精确版本与启用的四个 runne
 
 ## F4 后台恢复与故障诊断立项（2026-10-31）
 
-共享计划 F 表的 F4 项经三轮技术评审后通过（[专项计划](./2026-10-31-f4-background-recovery.md) rev.4），合同由 [ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md) 定案并立项。本节登记批次、合同与实施状态（逐批见下表）；三平台 CI 已验收（真实 dsh-tui soak 暂缓），**未发布**。2026-10-31 实施前源码审核门发现 shared 介质绑定校验可被重试绕过（复现两个 active owner），计划修订为 rev.5 并先行修复（F4-P0.5）。评审以真实 Registry + JSON 介质 + 内核锁做的定向复现已把五处前置缺口写进合同（follower hello 不同步投影、空快照 `''` 签名残留旧边界、整轮失败通知振荡、提交顺序被同步回调反向观察、握手不可取消/资格分类缺失）；实施时按"先红后绿"补齐，不以文档表述代替回归。
+共享计划 F 表的 F4 项经三轮技术评审后通过（[专项计划](./2026-10-31-f4-background-recovery.md) rev.4），合同由 [ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md) 定案并立项。本节登记批次、合同与实施状态（逐批见下表）；三平台 CI 已验收（真实 dsh-tui soak 暂缓），随 `v0.1.13` 发版。2026-10-31 实施前源码审核门发现 shared 介质绑定校验可被重试绕过（复现两个 active owner），计划修订为 rev.5 并先行修复（F4-P0.5）。评审以真实 Registry + JSON 介质 + 内核锁做的定向复现已把五处前置缺口写进合同（follower hello 不同步投影、空快照 `''` 签名残留旧边界、整轮失败通知振荡、提交顺序被同步回调反向观察、握手不可取消/资格分类缺失）；实施时按"先红后绿"补齐，不以文档表述代替回归。
 
 | 批次 | 范围 | 状态 |
 | --- | --- | --- |
@@ -1290,4 +1292,4 @@ PR 的 CI 以正式门禁覆盖全部 20 个精确版本与启用的四个 runne
 | F4-P2 | 恢复调度器（退避/jitter、合并/取消、`unref`、默认开启 opt-out）+ follower 投影同步完成条件（失败集合清零） | 已实施（macOS 本机：`recovery.spec.ts` 12/12 fake timers；`shared-registry.spec.ts` 自动接管、两主根重连同步、部分同步失败、持续 listen 失败静默、dispose 停调度、opt-out、Issue #24 静默均只读观测通过；三平台 CI 通过） |
 | F4-P3 | 诊断面 + 多进程 e2e + `pnpm soak:tui-registry` 口径复测 + 三平台/全版本验收 | 基本完成（真实 TUI soak 暂缓）：`diagnostics` getter 与转换日志已实施；多进程 e2e（SIGKILL→新 epoch 自动接管、SIGSTOP→SIGCONT 原 epoch 重连且不夺锁/不重放）macOS 本机通过；本机空闲降级 30s 长稳（尝试 5 次、scope 通知 0、CPU ≈40ms、heap +1–3MB）通过；全量 `pnpm test` 947 passed / 86 skipped / 0 failed。PR #29 CI（`0468e9a`，run 41193188159）82/82 通过：20 个精确版本 × ubuntu-22.04 / ubuntu-latest / macOS / Windows，gate 通过；Windows 原生后台接管用例实跑通过（约 2.5s），多进程 SIGKILL/SIGSTOP 三例按设计仅 POSIX 运行。暂缓：真实 dsh-tui `pnpm soak:tui-registry`（本批决定暂不运行） |
 
-验收沿用专项计划 Validation 表：自动恢复用例只经只读观测（getter/scope），不得调用 `refresh()` 或隐式 `ensureAuthority` 的 helper；提交一致性回归至少两个主根并同时检查 scope 订阅者、Registry 监听器和广播 snapshot。心跳式主动故障检测与 `unknown-state` 重开不在本批，单列 F4b 候选另立 ADR。Ubuntu 报告环境长跑仍是共享服务既有遗留验收，不由本批勾销；本批不指定版本号，不授权发布。
+验收沿用专项计划 Validation 表：自动恢复用例只经只读观测（getter/scope），不得调用 `refresh()` 或隐式 `ensureAuthority` 的 helper；提交一致性回归至少两个主根并同时检查 scope 订阅者、Registry 监听器和广播 snapshot。心跳式主动故障检测与 `unknown-state` 重开不在本批，单列 F4b 候选另立 ADR。Ubuntu 报告环境长跑仍是共享服务既有遗留验收，不由本批勾销；本批随 `v0.1.13` 发版，暂缓的验收仍保留。

@@ -248,4 +248,4 @@ rev.1 六问按首轮评审建议转为决定（rev.3 维持不变，待最终�
 - [x] R1 调度 + R2 完成条件（含失败集合重同步）+ R4 tick 成本控制实施完成；fake-timer 单测与多进程 e2e 全绿，且用例遵守只读观测规则（macOS 本机与三平台 CI）。
 - [x] 三平台 CI 通过；Windows semaphore 接管语义经原生验证：PR #29 CI（`0468e9a`，run 41193188159）82/82 通过：20 个精确版本 × ubuntu-22.04 / ubuntu-latest / macOS / Windows，gate 通过；Windows runner 上 `registry-semaphore-win32.e2e.ts` 的后台接管用例实跑通过（无任何操作、owner 死亡后 follower 自动接管，约 2.5s）。`shared-registry-multiprocess.e2e.ts` 的 SIGKILL/SIGSTOP 三例按设计只在 POSIX 运行，Windows 的 owner 死亡接管由前述 semaphore 用例覆盖。首轮 CI 的 Windows 失败及修正见评审修订记录"Windows CI 修正"。
 - [ ] soak 空闲降级资源有界；Issue #24 刷新循环无回归。已完成：`registry-recovery-soak.e2e.ts` 空闲降级 30s（macOS 本机实测尝试 5 次、scope 通知 0、CPU ≈40ms、heap 增长 1–3MB）与 Issue #24 静默用例在本机及三平台 CI 全部通过。**暂缓**：真实 dsh-tui `pnpm soak:tui-registry`（2026-10-31 决定本批暂不运行，需隔离 TUI 环境）；在其完成前本项保持未勾选。
-- [x] 架构文档恢复节与 ADR-0025"按需恢复"表述同步；总账已登记实施状态（未发布）。
+- [x] 架构文档恢复节与 ADR-0025"按需恢复"表述同步；总账已登记实施状态与发布版本。
