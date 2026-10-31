@@ -238,6 +238,16 @@ nativeTest('rejects an alternate lock name without opening another domain', asyn
   expect(invalid.registry.available).toBe(false)
   expect(existsSync(wrongLock)).toBe(false)
   expect(owner.registry.authority.kind).toBe('active')
+  const epoch = owner.registry.epoch
+  await invalid.registry.refresh(fixture.workspace).catch(() => [])
+  expect(invalid.registry.authority.kind).toBe('storage-failed')
+  expect(invalid.registry.unavailable).toContain('canonical medium lock')
+  expect(existsSync(wrongLock)).toBe(false)
+  expect(owner.registry.authority.kind).toBe('active')
+  expect(owner.registry.epoch).toBe(epoch)
+  const follower = await mount()
+  expect(follower.registry.authority.kind, follower.registry.unavailable).toBe('follower')
+  expect(follower.registry.epoch).toBe(owner.registry.epoch)
 })
 
 nativeTest('refuses a follower with a different shared root limit while the owner stays active', async () => {

@@ -1181,8 +1181,9 @@ export class MultiRootRegistry extends Service {
       if (this.sharedStorageRoot !== undefined && this.medium === undefined) {
         try {
           if (!isAbsolute(this.sharedStorageRoot)) throw new Error('sharedStorageRoot must be absolute')
-          this.medium = storeIdentity(this.sharedStorageRoot)
-          if (storeIdentity(dirname(leasePath)).id !== this.medium.id || basename(leasePath) !== `${DOMAIN_NAME}.lock`) throw new Error('shared registry requires its canonical medium lock, without alternate lock names')
+          const medium = storeIdentity(this.sharedStorageRoot)
+          if (storeIdentity(dirname(leasePath)).id !== medium.id || basename(leasePath) !== `${DOMAIN_NAME}.lock`) throw new Error('shared registry requires its canonical medium lock, without alternate lock names')
+          this.medium = medium
         } catch (error) { this.enterStorageFailed(String(error)); return }
       }
       try {
