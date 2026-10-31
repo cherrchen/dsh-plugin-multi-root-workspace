@@ -465,3 +465,137 @@ nativeTest('retracts a primary deleted from disk while this Host was disconnecte
   expect(deny().additionalRoots).toEqual([])
   expect(deny().deniedRoots).toEqual([])
 })
+
+nativeTest('takes over automatically after the owner exits without any user action', async () => {
+  const owner = await mount(), follower = await mount()
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  await follower.registry.refresh(fixture.workspace)
+  await owner.dispose()
+  await vi.waitFor(() => { expect(follower.registry.authority.kind).toBe('active') }, { timeout: 15000, interval: 50 })
+  expect(follower.registry.list(fixture.workspace).map(row => row.path)).toEqual([fixture.outside])
+  expect(follower.scope.snapshot({ workspaceRoot: fixture.workspace, mode: 'workspace-write' }).additionalRoots).toEqual([fixture.outside])
+}, 30_000)
+
+nativeTest('reconnects and resynchronizes withheld projections without a refresh', async () => {
+  const owner = await mount(), ws2 = join(fixture.base, 'ws2'), out2 = join(fixture.base, 'out2')
+  mkdirSync(ws2); mkdirSync(out2)
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  await owner.registry.add(ws2, { path: out2 })
+  const follower = await mount()
+  await follower.registry.refresh(ws2)
+  ;(follower.registry as unknown as { client: { close(): void } }).client.close()
+  await waitForAuthority(follower, 'contended')
+  const internal = owner.registry as unknown as { server: { changed(): void } }
+  vi.spyOn(internal.server, 'changed').mockImplementation(() => {})
+  await owner.registry.setAccess(fixture.workspace, { kind: 'path', path: fixture.outside }, 'read-only')
+  await owner.registry.removeAt(ws2, { kind: 'path', path: out2 })
+  await vi.waitFor(() => { expect(follower.registry.authority.kind).toBe('follower') }, { timeout: 15000, interval: 50 })
+  await vi.waitFor(() => {
+    expect(follower.registry.list(fixture.workspace).map(row => row.access)).toEqual(['read-only'])
+    const snap2 = follower.scope.snapshot({ workspaceRoot: ws2, mode: 'workspace-write' })
+    expect(snap2.additionalRoots).toEqual([])
+    expect(snap2.deniedRoots).toEqual([])
+    expect(snap2.authority).toBe('available')
+  }, { timeout: 15000, interval: 50 })
+  // The resynced boundary denies real writes: recovery restored no authority.
+  const file = join(fixture.outside, 'after-recovery.txt')
+  await expect(follower.ctx.fs.writeText(await follower.ctx.fs.resolve(file), 'denied')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+  expect(existsSync(file)).toBe(false)
+}, 30_000)
+
+nativeTest('resynchronizes a failed primary on a later tick while a synced one already recovered', async () => {
+  const owner = await mount(), ws2 = join(fixture.base, 'ws2'), out2 = join(fixture.base, 'out2')
+  mkdirSync(ws2); mkdirSync(out2)
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  await owner.registry.add(ws2, { path: out2, access: 'read-only' })
+  const follower = await mount()
+  await follower.registry.refresh(ws2)
+  ;(follower.registry as unknown as { client: { close(): void } }).client.close()
+  await waitForAuthority(follower, 'contended')
+  const internal = owner.registry as unknown as { server: { changed(): void }; captureSnapshot(primary: string): Promise<unknown> }
+  vi.spyOn(internal.server, 'changed').mockImplementation(() => {})
+  const capture = internal.captureSnapshot.bind(internal)
+  let failures = 0
+  vi.spyOn(internal, 'captureSnapshot').mockImplementation(async primary => {
+    if (canonicalPath(primary) === canonicalPath(ws2) && failures++ < 2) throw new Error('snapshot unavailable')
+    return capture(primary)
+  })
+  await vi.waitFor(() => {
+    const snap = follower.scope.snapshot({ workspaceRoot: ws2, mode: 'workspace-write' })
+    expect(snap.authority).toBe('available')
+    // primary1 synced and is visible again; primary2 stays withheld.
+    expect(follower.scope.snapshot({ workspaceRoot: fixture.workspace, mode: 'workspace-write' }).additionalRoots).toEqual([fixture.outside])
+    expect(snap.additionalRoots).toEqual([])
+    expect(snap.deniedRoots).toContain(out2)
+  }, { timeout: 20000, interval: 50 })
+  vi.restoreAllMocks()
+  await vi.waitFor(() => {
+    expect(follower.scope.snapshot({ workspaceRoot: ws2, mode: 'workspace-write' }).additionalRoots).toEqual([out2])
+  }, { timeout: 20000, interval: 50 })
+}, 40_000)
+
+nativeTest('stays silent across repeated failed takeover ticks and recovers when listen works again', async () => {
+  const owner = await mount()
+  await owner.registry.add(fixture.workspace, { path: fixture.outside, access: 'read-only' })
+  const follower = await mount()
+  const snapPolicy = { workspaceRoot: fixture.workspace, mode: 'workspace-write' as const }
+  await owner.dispose()
+  await waitForAuthority(follower, 'contended')
+  const errors: string[] = []
+  vi.spyOn(follower.ctx.logger, 'error').mockImplementation((...args: unknown[]) => { errors.push(args.map(String).join(' ')) })
+  const seen: string[] = []
+  const unsubscribe = follower.scope.subscribe(() => seen.push(follower.scope.snapshot(snapPolicy).authority))
+  const listen = vi.spyOn(AuthorityServer, 'listen').mockRejectedValue(new Error('listen refused'))
+  const listBefore = JSON.stringify(follower.registry.list(fixture.workspace))
+  const scopeBefore = JSON.stringify(follower.scope.snapshot(snapPolicy))
+  try {
+    // Several background ticks run without any user action (~1s + ~2s + ~4s).
+    await new Promise(resolve => setTimeout(resolve, 4500))
+    expect(follower.registry.authority).toMatchObject({ kind: 'storage-failed', recovery: 'retryable' })
+    expect(seen).toEqual([])
+    expect(JSON.stringify(follower.registry.list(fixture.workspace))).toBe(listBefore)
+    expect(JSON.stringify(follower.scope.snapshot(snapPolicy))).toBe(scopeBefore)
+    expect(errors.filter(text => text.includes('shared registry'))).toHaveLength(0)
+    listen.mockRestore()
+    await vi.waitFor(() => { expect(follower.registry.authority.kind).toBe('active') }, { timeout: 20000, interval: 50 })
+    expect(follower.registry.list(fixture.workspace).map(row => row.access)).toEqual(['read-only'])
+  } finally { unsubscribe() }
+}, 40_000)
+
+nativeTest('stops scheduling when the Host is torn down mid-backoff', async () => {
+  const owner = await mount(), follower = await mount()
+  await owner.dispose()
+  await waitForAuthority(follower, 'contended')
+  const internal = follower.registry as unknown as { ensureAuthority(options?: unknown): Promise<void> }
+  const ensure = vi.spyOn(internal, 'ensureAuthority')
+  await follower.dispose()
+  await new Promise(resolve => setTimeout(resolve, 2600))
+  expect(ensure).not.toHaveBeenCalled()
+}, 30_000)
+
+nativeTest('honours the backgroundRecovery opt-out', async () => {
+  const owner = await mount()
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  const follower = await mount({ backgroundRecovery: false })
+  await owner.dispose()
+  await waitForAuthority(follower, 'contended')
+  await new Promise(resolve => setTimeout(resolve, 5200))
+  expect(follower.registry.authority.kind).toBe('contended')
+}, 30_000)
+
+nativeTest('does not churn scope notifications while a contended medium never listens', async () => {
+  const root = join(fixture.base, 'store')
+  const lease = await RegistryAuthorityLease.acquire(join(root, `${DOMAIN_NAME}.lock`))
+  const follower = await mountRegistryStack(root, { sharedStorageRoot: root })
+  stacks.push(follower)
+  expect(follower.registry.authority.kind).toBe('contended')
+  let calls = 0
+  const unsubscribe = follower.scope.subscribe(() => { calls++ })
+  // Fake timers drive the recovery ticks; the failing connect resolves on
+  // microtasks, so advancing fake time replays ~10+ real seconds of retries.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    await vi.advanceTimersByTimeAsync(200_000)
+    expect(calls).toBe(0)
+  } finally { vi.useRealTimers(); unsubscribe(); await lease.release() }
+}, 30_000)

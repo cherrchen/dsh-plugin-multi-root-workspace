@@ -57,6 +57,7 @@ import { defineDomain, domainTable, type KvTable } from '@deepseek-ai/dsh-storag
 import type {} from './compat.ts'
 import { domainZod, type DomainValueSchema } from './compat/storage-zod.ts'
 import type {} from './providers.ts'
+import { RecoveryScheduler } from './authority/recovery.ts'
 import { RegistryAuthorityLease, RegistryLeaseContendedError } from './registry-lease.ts'
 import { freezeOperationScope, runRegistryOperation, runPrimaryOperation } from './registry-operation.ts'
 import type { RegistryOperation, RegistryOperationKind } from './registry-operation.ts'
@@ -152,6 +153,12 @@ export interface Config {
    * exactly what classification grants — only new adds are refused.
    */
   readonly maxAdditionalRoots?: number
+  /**
+   * Whether the registry retries a degraded authority in the background
+   * (bounded backoff, `unref`ed). Defaults to `true`; `false` leaves
+   * recovery to on-demand calls (refresh, the panel Retry button).
+   */
+  readonly backgroundRecovery?: boolean
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -289,6 +296,14 @@ export class MultiRootRegistry extends Service {
   private connectionAbort: AbortController | undefined
   private remoteProjectionReady = false
   private readonly remoteRevisions = new Map<string, number>()
+  /**
+   * Primary roots whose projection must still be synced after a follower
+   * reconnect — populated from the tracked cache keys at adoption, removed as
+   * each `applySnapshot` lands. Recovery completes only when it empties.
+   */
+  private pendingSync = new Set<string>()
+  /** Bounded background retry for degraded authority states (ADR-0026 R1). */
+  private readonly recovery: RecoveryScheduler
   private readonly operationProof = Object.freeze({})
   /** Whether this process currently owns the store. */
   private authorityState: RegistryAuthorityState = { kind: 'contended' }
@@ -332,6 +347,17 @@ export class MultiRootRegistry extends Service {
     this.authorityStorageContext = ctx
     this.leasePath = config.leasePath
     this.sharedStorageRoot = config.sharedStorageRoot
+    this.recovery = new RecoveryScheduler({
+      enabled: config.backgroundRecovery !== false,
+      eligible: () => !this.disposed && (this.authorityState.kind === 'contended'
+        || (this.authorityState.kind === 'storage-failed' && this.authorityState.recovery === 'retryable')
+        || (this.authorityState.kind === 'follower' && this.pendingSync.size > 0)),
+      run: async () => {
+        if (this.authorityState.kind === 'follower' && this.pendingSync.size > 0) { await this.syncProjection(); return }
+        await this.ensureAuthority({ background: true })
+        if (this.client) await this.syncProjection()
+      },
+    })
     if (config.sharedStorageRoot !== undefined) this.ctx.multiRootScope.requireAdmission(this.operationProof)
     // Until `openDomain()` proves otherwise this process is NOT the store's
     // authority: the empty root table a contended, storage-failed or
@@ -1114,18 +1140,36 @@ export class MultiRootRegistry extends Service {
       this.ctx.multiRootScope.setRegistryAuthority(snapshot.available)
     })
     this.remoteProjectionReady = snapshot.available
+    // An owner broadcast carries a complete snapshot too, so it settles the key.
+    this.pendingSync.delete(snapshot.primary)
   }
 
   private remoteUnavailable() {
-    this.connectionGeneration++
-    this.client = undefined
-    this.remoteRevisions.clear()
-    this.authorityState = { kind: 'contended' }
-    this.ctx.multiRootScope.setRegistryAuthority(false)
-    if (!this.remoteProjectionReady) return
-    this.remoteProjectionReady = false
-    // Keep recorded negative boundaries and Files' lexical deny information.
-    for (const [primary, rows] of this.cache) this.withholdScope(primary, rows)
+    try {
+      this.connectionGeneration++
+      this.client = undefined
+      this.remoteRevisions.clear()
+      this.pendingSync.clear()
+      this.authorityState = { kind: 'contended' }
+      this.ctx.multiRootScope.setRegistryAuthority(false)
+      if (!this.remoteProjectionReady) return
+      this.remoteProjectionReady = false
+      // Keep recorded negative boundaries and Files' lexical deny information.
+      for (const [primary, rows] of this.cache) this.withholdScope(primary, rows)
+    } finally { this.recovery.arm() }
+  }
+
+  /**
+   * Resynchronize each still-pending tracked primary outside the authority
+   * queue: per-key snapshots through the live client. A failed key stays in
+   * `pendingSync` for the next tick; a lost connection abandons the round —
+   * `remoteUnavailable` already emptied the set.
+   */
+  private async syncProjection(): Promise<void> {
+    for (const key of [...this.pendingSync]) {
+      try { await this.remoteSnapshot('snapshot', [key]) }
+      catch { if (!this.client) break }
+    }
   }
 
   /**
@@ -1232,8 +1276,8 @@ export class MultiRootRegistry extends Service {
    * retries here (the command `list` and the panel Retry button both call
    * {@link MultiRootRegistry.refresh}).
    */
-  private async ensureAuthority(): Promise<void> {
-    await this.serializeAuthority(async () => {
+  private async ensureAuthority(options: { background?: boolean } = {}): Promise<void> {
+    try { await this.serializeAuthority(async () => {
       // The teardown queues behind any acquisition, so a disposer that ran
       // first must not be followed by a new medium nobody will ever close.
       if (this.disposed) return
@@ -1278,7 +1322,7 @@ export class MultiRootRegistry extends Service {
           if (this.medium !== undefined) {
             // A holder can still be loading its domain. Bound startup waiting;
             // never release/steal its lease or spin from invalidation callbacks.
-            for (const delay of [0, 50, 150]) {
+            for (const delay of options.background ? [0] : [0, 50, 150]) {
               if (delay) await new Promise(resolve => setTimeout(resolve, delay))
               if (this.disposed) return
               const generation = ++this.connectionGeneration
@@ -1294,6 +1338,14 @@ export class MultiRootRegistry extends Service {
                 this.client = client; adopted = true
                 this.connectionFailure = undefined
                 this.authorityState = { kind: 'follower', epoch: client.epoch! }
+                // Recovery completes only after the tracked projections sync;
+                // with nothing to sync the connection alone is enough.
+                this.pendingSync = new Set(this.cache.keys())
+                if (this.pendingSync.size === 0) {
+                  this.ctx.multiRootScope.setRegistryAuthority(true)
+                  this.remoteProjectionReady = true
+                }
+                this.recovery.kick()
                 break
               } catch (error) { this.connectionFailure = String(error) /* Never open a follower domain. */ }
               finally { if (this.connectionAbort === controller) this.connectionAbort = undefined }
@@ -1310,6 +1362,7 @@ export class MultiRootRegistry extends Service {
       }
       await this.openDomain()
     })
+    } finally { this.recovery.arm() }
   }
 
   /**
@@ -1458,6 +1511,7 @@ export class MultiRootRegistry extends Service {
   private async releaseAuthority(): Promise<void> {
     this.disposed = true
     this.connectionGeneration++
+    this.recovery.dispose()
     // Aborted BEFORE queueing behind `authorityChain`: the in-flight handshake
     // this teardown would otherwise wait out ends immediately.
     this.connectionAbort?.abort()
