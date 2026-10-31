@@ -40,3 +40,19 @@ it.runIf(process.platform === 'win32')('recovers after the crashed holder and th
   expect(await follower.request('authority')).toMatchObject({ kind: 'active' })
   await follower.request('write', [join(fixture.outside, 'after-last-close'), 'recovered'])
 }, 30_000)
+
+it.runIf(process.platform === 'win32')('lets a follower take over in the background after the owner dies, no operation needed', async () => {
+  const root = join(fixture.base, 'store')
+  const owner = new SharedHost(root, fixture.workspace); hosts.push(owner); await owner.ready
+  const follower = new SharedHost(root, fixture.workspace); hosts.push(follower); await follower.ready
+  await owner.request('add', [fixture.outside]); await follower.request('list')
+  await owner.kill()
+  // Read-only polling only: the recovery scheduler performs the takeover.
+  let state: { authorityState: { kind: string } } | undefined
+  for (let i = 0; i < 400; i++) {
+    state = await follower.request('diagnostics')
+    if (state?.authorityState.kind === 'active') break
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  expect(state?.authorityState.kind).toBe('active')
+}, 60_000)

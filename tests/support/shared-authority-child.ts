@@ -30,6 +30,7 @@ lines.on('line', line => {
         const path = String(args[0]); return stack.ctx.fs.writeText(await stack.ctx.fs.resolve(path), String(args[1]))
       }
       case 'authority': return stack.registry.authority
+      case 'diagnostics': return stack.registry.diagnostics
       case 'pause-write': {
         const target = await stack.ctx.fs.resolve(String(args[0]))
         const gate = new Promise<void>(resolve => { release = resolve })

@@ -527,11 +527,15 @@ nativeTest('resynchronizes a failed primary on a later tick while a synced one a
     expect(follower.scope.snapshot({ workspaceRoot: fixture.workspace, mode: 'workspace-write' }).additionalRoots).toEqual([fixture.outside])
     expect(snap.additionalRoots).toEqual([])
     expect(snap.deniedRoots).toContain(out2)
+    // Read-only diagnostics agree: primary2 is still pending, class retryable.
+    expect(follower.registry.diagnostics).toMatchObject({ recoveryClass: 'retryable' })
+    expect(follower.registry.diagnostics.recovery.pendingSync).toBeGreaterThanOrEqual(1)
   }, { timeout: 20000, interval: 50 })
   vi.restoreAllMocks()
   await vi.waitFor(() => {
     expect(follower.scope.snapshot({ workspaceRoot: ws2, mode: 'workspace-write' }).additionalRoots).toEqual([out2])
   }, { timeout: 20000, interval: 50 })
+  expect(follower.registry.diagnostics).toMatchObject({ recoveryClass: undefined, recovery: { pendingSync: 0 } })
 }, 40_000)
 
 nativeTest('stays silent across repeated failed takeover ticks and recovers when listen works again', async () => {
@@ -599,3 +603,43 @@ nativeTest('does not churn scope notifications while a contended medium never li
     expect(calls).toBe(0)
   } finally { vi.useRealTimers(); unsubscribe(); await lease.release() }
 }, 30_000)
+
+nativeTest('reports structured recovery diagnostics through the degraded lifecycle', async () => {
+  const owner = await mount(), follower = await mount()
+  expect(owner.registry.diagnostics).toMatchObject({ recoveryClass: undefined, recovery: { phase: 'idle', pendingSync: 0 } })
+  const infos: string[] = []
+  vi.spyOn(follower.ctx.logger, 'info').mockImplementation((...args: unknown[]) => { infos.push(args.map(String).join(' ')) })
+  await owner.dispose()
+  await waitForAuthority(follower, 'contended')
+  const degraded = follower.registry.diagnostics
+  expect(degraded.recoveryClass).toBe('retryable')
+  expect(degraded.recovery.phase).toBe('waiting')
+  expect(degraded.recovery.nextRetryAt).toBeTypeOf('number')
+  await vi.waitFor(() => { expect(follower.registry.authority.kind).toBe('active') }, { timeout: 15000, interval: 50 })
+  expect(follower.registry.diagnostics).toMatchObject({ recoveryClass: undefined, recovery: { phase: 'idle' } })
+  // One line per transition only: contended in, recovered out — nothing per tick.
+  expect(infos.filter(text => text.includes('registry authority'))).toHaveLength(2)
+}, 30_000)
+
+nativeTest('marks config and quarantine classes as requires-restart', async () => {
+  const invalid = await mountRegistryStack(join(fixture.base, 'broken'), {
+    sharedStorageRoot: join(fixture.base, 'store'),
+    leasePath: join(fixture.base, 'store/other.lock'),
+  })
+  stacks.push(invalid)
+  expect(invalid.registry.diagnostics).toMatchObject({ recoveryClass: 'config', recovery: { phase: 'requires-restart' } })
+  const zeroCap = await mountRegistryStack(join(fixture.base, 'zerocap'), { maxAdditionalRoots: 0 })
+  stacks.push(zeroCap)
+  expect(zeroCap.registry.diagnostics).toMatchObject({ recoveryClass: 'config', recovery: { phase: 'requires-restart' } })
+  const odd = await mountRegistryStack(join(fixture.base, 'odd'), { backgroundRecovery: 'sometimes' as unknown as boolean, maxAdditionalRoots: 'x' as unknown as number })
+  stacks.push(odd)
+  expect(odd.registry.authority.kind).toBe('config-invalid')
+  const offRoot = join(fixture.base, 'off-store')
+  mkdirSync(offRoot)
+  const held = await RegistryAuthorityLease.acquire(join(offRoot, `${DOMAIN_NAME}.lock`))
+  const off = await mountRegistryStack(join(fixture.base, 'off'), { sharedStorageRoot: offRoot, leasePath: join(offRoot, `${DOMAIN_NAME}.lock`), backgroundRecovery: false })
+  stacks.push(off)
+  await held.release()
+  expect(off.registry.authority.kind).toBe('contended')
+  expect(off.registry.diagnostics).toMatchObject({ recoveryClass: 'retryable', recovery: { phase: 'disabled' } })
+})

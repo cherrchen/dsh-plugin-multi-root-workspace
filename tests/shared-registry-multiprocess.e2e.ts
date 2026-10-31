@@ -81,3 +81,52 @@ nativeTest.runIf(process.platform !== 'win32')('never steals a lease from a stop
   expect(await follower.request('list')).toHaveLength(1)
   expect(await follower.request('authority')).toMatchObject({ kind: 'follower' })
 })
+
+nativeTest.runIf(process.platform !== 'win32')('takes over with a fresh epoch after the owner is killed, without any operation', async () => {
+  const owner = await mount(), follower = await mount()
+  await owner.request('add', [fixture.outside])
+  const ownerEpoch = (await owner.request<{ epoch?: string }>('diagnostics')).epoch
+  expect((await follower.request<{ epoch?: string }>('diagnostics')).epoch).toBe(ownerEpoch)
+  await owner.kill() // SIGKILL
+  // Read-only polling only: the background scheduler performs the takeover.
+  let state: { authorityState: { kind: string }; epoch?: string } | undefined
+  for (let i = 0; i < 400; i++) {
+    state = await follower.request('diagnostics')
+    if (state?.authorityState.kind === 'active') break
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  expect(state?.authorityState.kind).toBe('active')
+  expect(state?.epoch, 'a takeover must win a NEW epoch, never inherit the dead owner').not.toBe(ownerEpoch)
+  const probe = await follower.request<{ rows: Row[] }>('probe')
+  expect(probe.rows.map(row => row.path)).toEqual([fixture.outside])
+}, 60_000)
+
+nativeTest.runIf(process.platform !== 'win32')('returns to the same-owner epoch after a stopped authority resumes, without replay', async () => {
+  const owner = await mount(), follower = await mount()
+  await owner.request('add', [fixture.outside])
+  await follower.request('list')
+  const ownerEpoch = (await owner.request<{ epoch?: string }>('diagnostics')).epoch
+  owner.child.kill('SIGSTOP')
+  try {
+    // This request drives the degrade: the frozen channel's ~5s request timer
+    // destroys the connection and the follower goes contended.
+    await expect(follower.request('list')).rejects.toThrow()
+    // The lease stays held: no tick may take over while the owner is stopped.
+    for (let i = 0; i < 30; i++) {
+      expect((await follower.request<{ authorityState: { kind: string } }>('diagnostics')).authorityState.kind).not.toBe('active')
+      await new Promise(resolve => setTimeout(resolve, 150))
+    }
+  } finally { owner.child.kill('SIGCONT') }
+  let state: { authorityState: { kind: string }; epoch?: string } | undefined
+  for (let i = 0; i < 400; i++) {
+    state = await follower.request('diagnostics')
+    if (state?.authorityState.kind === 'follower') break
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  // Reconnected to the SAME owner epoch — never took over, and the timed-out
+  // request was never replayed (the projection came through the new hello).
+  expect(state?.authorityState).toMatchObject({ kind: 'follower' })
+  expect(state?.epoch).toBe(ownerEpoch)
+  const probe = await follower.request<{ rows: Row[] }>('probe')
+  expect(probe.rows.map(row => row.path)).toEqual([fixture.outside])
+}, 60_000)

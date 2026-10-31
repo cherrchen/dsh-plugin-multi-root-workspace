@@ -117,6 +117,23 @@ export const MAX_ADDITIONAL_ROOTS_CEILING = 64
  */
 export type StorageFailureRecovery = 'retryable' | 'config' | 'quarantine'
 
+/** The recovery class a degraded authority belongs to (see {@link StorageFailureRecovery}). */
+export type RecoveryClass = 'retryable' | 'config' | 'quarantine'
+
+/** Operator-facing read-only picture of the registry authority and its recovery. */
+export interface RegistryDiagnostics {
+  readonly authorityState: RegistryAuthorityState
+  readonly epoch: string | undefined
+  readonly connectionFailure: string | undefined
+  readonly recoveryClass: RecoveryClass | undefined
+  readonly recovery: {
+    readonly phase: 'idle' | 'waiting' | 'attempting' | 'disabled' | 'requires-restart'
+    readonly attempts: number
+    readonly nextRetryAt: number | undefined
+    readonly pendingSync: number
+  }
+}
+
 /**
  * Whether this process is the Registry Authority for the store-wide domain
  * medium. Contended and storage-failed are both fail-closed: the scope stays
@@ -356,6 +373,7 @@ export class MultiRootRegistry extends Service {
         if (this.authorityState.kind === 'follower' && this.pendingSync.size > 0) { await this.syncProjection(); return }
         await this.ensureAuthority({ background: true })
         if (this.client) await this.syncProjection()
+        this.noteRecoveryTransition()
       },
     })
     if (config.sharedStorageRoot !== undefined) this.ctx.multiRootScope.requireAdmission(this.operationProof)
@@ -396,6 +414,7 @@ export class MultiRootRegistry extends Service {
     // nothing is ever granted — but activation itself does not fail.
     if (this.authorityState.kind === 'config-invalid') {
       this.ctx.logger.error(`multi-root-workspace: ${this.authorityState.reason}; no additional root is granted`)
+      this.noteRecoveryTransition()
       return
     }
     await this.ensureAuthority()
@@ -432,6 +451,63 @@ export class MultiRootRegistry extends Service {
 
   get authority(): RegistryAuthorityState {
     return this.authorityState
+  }
+
+  /** The class a degraded authority belongs to; `undefined` when healthy. */
+  private get recoveryClass(): RecoveryClass | undefined {
+    switch (this.authorityState.kind) {
+      case 'contended': return 'retryable'
+      case 'storage-failed': return this.authorityState.recovery
+      case 'config-invalid': return 'config'
+      case 'follower': return this.pendingSync.size > 0 ? 'retryable' : undefined
+      default: return undefined
+    }
+  }
+
+  /**
+   * Read-only diagnostics for operators: the authority state, the epoch, the
+   * last connection failure, and what the recovery scheduler is doing.
+   * `requires-restart` marks classes no timer will ever fix — a `config`
+   * row or a `quarantine`d store must NOT read as "retrying". Purely a read;
+   * it never arms or runs anything.
+   */
+  get diagnostics(): RegistryDiagnostics {
+    const recoveryClass = this.recoveryClass
+    const scheduled = this.recovery.state
+    return {
+      authorityState: this.authorityState,
+      epoch: this.epoch,
+      connectionFailure: this.connectionFailure,
+      recoveryClass,
+      recovery: {
+        phase: recoveryClass === 'config' || recoveryClass === 'quarantine' ? 'requires-restart' : scheduled.phase,
+        attempts: scheduled.attempts,
+        nextRetryAt: scheduled.nextRetryAt,
+        pendingSync: this.pendingSync.size,
+      },
+    }
+  }
+
+  /** The last logged `(kind, recoveryClass)` pair; dedupes transition logs. */
+  private loggedRecovery: string | undefined
+
+  /**
+   * Log one line per authority/recovery-class TRANSITION — never per tick:
+   * waiting↔attempting moves say nothing an operator did not already know.
+   */
+  private noteRecoveryTransition(): void {
+    const key = `${this.authorityState.kind}:${this.recoveryClass ?? ''}`
+    if (this.loggedRecovery === key) return
+    this.loggedRecovery = key
+    const detail = this.authorityState.kind === 'storage-failed' || this.authorityState.kind === 'config-invalid'
+      ? this.authorityState.reason
+      : this.connectionFailure ?? ''
+    this.ctx.logger.info(
+      this.recoveryClass === undefined
+        ? `multi-root-workspace: registry authority recovered (${this.authorityState.kind})`
+        : `multi-root-workspace: registry authority is ${this.authorityState.kind}`
+          + ` (${this.recoveryClass})${detail === '' ? '' : `: ${detail.slice(0, 200)}`}`,
+    )
   }
 
   /**
@@ -1156,7 +1232,7 @@ export class MultiRootRegistry extends Service {
       this.remoteProjectionReady = false
       // Keep recorded negative boundaries and Files' lexical deny information.
       for (const [primary, rows] of this.cache) this.withholdScope(primary, rows)
-    } finally { this.recovery.arm() }
+    } finally { this.recovery.arm(); this.noteRecoveryTransition() }
   }
 
   /**
@@ -1362,7 +1438,7 @@ export class MultiRootRegistry extends Service {
       }
       await this.openDomain()
     })
-    } finally { this.recovery.arm() }
+    } finally { this.recovery.arm(); this.noteRecoveryTransition() }
   }
 
   /**
@@ -1483,6 +1559,7 @@ export class MultiRootRegistry extends Service {
     } else this.withdrawPublished()
     this.table = undefined
     this.authorityState = { kind: 'storage-failed', reason, recovery }
+    this.noteRecoveryTransition()
   }
 
   /** Drop every grant this process has published. Idempotent. */
