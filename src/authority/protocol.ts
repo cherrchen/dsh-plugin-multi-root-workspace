@@ -78,20 +78,32 @@ export class AuthorityClient {
       else request.reject(new AuthorityRpcError(reply.code, reply.message))
     })
   }
-  static async connect(endpoint: string, store: string, limit: number, onChange: (snapshot: Snapshot) => void, disconnected: () => void) {
-    const client = new AuthorityClient(await connectNative(endpoint), store, limit, onChange, disconnected)
+  static async connect(endpoint: string, store: string, limit: number, onChange: (snapshot: Snapshot) => void, disconnected: () => void, signal?: AbortSignal) {
+    if (signal?.aborted) throw new AuthorityRpcError('authority-cancelled', 'registry handshake was cancelled')
+    const channel = await connectNative(endpoint)
+    if (signal?.aborted) { channel.destroy(); throw new AuthorityRpcError('authority-cancelled', 'registry handshake was cancelled') }
+    const client = new AuthorityClient(channel, store, limit, onChange, disconnected)
+    const onAbort = () => client.close()
+    signal?.addEventListener('abort', onAbort, { once: true })
     try {
       const hello = helloSchema.parse(await client.request('hello', [limit]))
       if (hello.store !== store || hello.limit !== limit) throw new Error('registry configuration mismatch')
       client.epoch = hello.epoch
       return client
-    } catch (error) { client.close(); throw error }
+    } catch (error) {
+      client.close()
+      if (signal?.aborted) throw new AuthorityRpcError('authority-cancelled', 'registry handshake was cancelled')
+      throw error
+    } finally { signal?.removeEventListener('abort', onAbort) }
   }
   request(method: Method, args: readonly unknown[]): Promise<unknown> {
     if (this.closed || this.pending.size >= MAX_PENDING) return Promise.reject(new AuthorityRpcError('authority-unavailable', 'registry connection is unavailable or busy'))
     const id = randomUUID()
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.channel.destroy() }, 5000)
+      // Unreferenced: a hanging request must not hold the event loop hostage
+      // once the channel itself is the only reason the process stays alive.
+      timer.unref()
       this.pending.set(id, { method, resolve, reject, timer })
       send(this.channel, { protocol: 1, store: this.store, epoch: this.epoch ?? null, id, method, args })
     })

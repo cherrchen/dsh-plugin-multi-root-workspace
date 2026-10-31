@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AuthorityClient, AuthorityServer } from '../src/authority/protocol.ts'
-import { storeIdentity } from '../src/authority/native.ts'
+import { listenNative, storeIdentity } from '../src/authority/native.ts'
 
 const availability = await nativeHostAvailability()
 if (!availability.available) console.info(`shared Registry native tests unavailable: ${availability.reason}`)
@@ -185,6 +185,28 @@ nativeTest('keeps repeated catalog queries bounded without consuming the mutatio
     expect(results).toEqual(Array.from({ length: 16 }, () => ['/primary']))
   }
 })
+
+nativeTest('cancels an in-flight hello handshake locally and unrefs its request timer', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mrw-ipc-cancel-')), identity = storeIdentity(root)
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }))
+  // Accepts channels but never answers: the hello exchange hangs until cancelled.
+  const listener = await listenNative(identity.endpoint, () => {})
+  cleanups.push(() => listener.close())
+  await expect(AuthorityClient.connect(identity.endpoint, identity.id, 16, () => {}, () => {}, AbortSignal.abort()))
+    .rejects.toMatchObject({ code: 'authority-cancelled' })
+  const timers = vi.spyOn(globalThis, 'setTimeout')
+  const controller = new AbortController()
+  const started = Date.now()
+  const connecting = AuthorityClient.connect(identity.endpoint, identity.id, 16, () => {}, () => {}, controller.signal)
+  const settled = expect(connecting).rejects.toMatchObject({ code: 'authority-cancelled' })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  controller.abort()
+  await settled
+  expect(Date.now() - started).toBeLessThan(500)
+  const index = timers.mock.calls.findIndex(call => call[1] === 5000)
+  expect(index, 'the pending-request timeout was not created').toBeGreaterThanOrEqual(0)
+  expect((timers.mock.results[index]!.value as { hasRef(): boolean }).hasRef()).toBe(false)
+}, 15_000)
 
 nativeTest('accepts a change in the same read buffer as its hello response', async () => {
   const root = mkdtempSync(join(tmpdir(), 'mrw-ipc-hello-')), identity = storeIdentity(root)
