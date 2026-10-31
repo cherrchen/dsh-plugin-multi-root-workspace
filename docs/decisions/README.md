@@ -60,3 +60,5 @@ ADR-0002-short-title.md
 - [ADR-0024-registry-operation-admission.md](./ADR-0024-registry-operation-admission.md) — 操作准入与撤权顺序、允许在飞操作完成（Accepted）。
 
 - [ADR-0025-shared-registry-authority.md](./ADR-0025-shared-registry-authority.md) — 多 Host 共享权威服务、IPC 权限隔离、同步消费与失败关闭接管（Accepted）。
+
+- [ADR-0026-registry-background-recovery.md](./ADR-0026-registry-background-recovery.md) — Registry 权威后台恢复与故障诊断：结构化重试资格、恢复调度不变量、投影同步完成条件、scope 真值签名与提交通知原子性、握手本地取消、诊断面（Accepted，合同定案，功能待实施）。

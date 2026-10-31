@@ -38,6 +38,8 @@ Plans with long-term reference value should not be deleted.
 
 active:
 
+- [2026-10-31-f4-background-recovery.md](./active/2026-10-31-f4-background-recovery.md) (Chinese) — F4 background-recovery and diagnostics plan (**rev.4 review passed, adopted via ADR-0026, not implemented**): a recovery scheduler reusing `ensureAuthority`, a projection-sync completion contract, atomic failed-round publication (including scope-subscriber batching), local handshake cancellation, and a diagnostics surface; the batch is registered in the progress ledger.
+
 - [2026-10-30-shared-registry-authority.md](./active/2026-10-30-shared-registry-authority.md) (Chinese) — Full original Long-term scope for Issue #24, comparison of the released baseline and the initial shared-service commit, six P1 audit items, and future evolution with exit criteria; the initial version is released with `v0.1.12`, and the remaining Ubuntu report-environment soak retest plus progress stay in the roadmap ledger.
 
 - [2026-10-16-branch-security-review-and-hardlink-isolation.md](./active/2026-10-16-branch-security-review-and-hardlink-isolation.md) (Chinese) — Branch review evidence and proposed fixes for deny boundaries, ancestor renames on Windows, and pnpm hard-link isolation; Phases A (R2/R3 negative authorization), B (R1 ancestor pinning), C1 (all-root hardlink preflight) and C2 (the `/workspace-folders isolate-profiles` command, migration and smokes) are implemented and accepted, released with `v0.1.7`.

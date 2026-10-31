@@ -1278,3 +1278,16 @@ RSS、heapTotal、external、每个采样与分布另存 JSON；不强制 GC、�
 候选树在独立目录重建：49 个直接检查的 DSH 包统一解析到 `0.2.1-rc.5`，cordis `4.0.5`；Node `22.23.1`、macOS 上先以候选 warn 门禁、再以正式 enforce 门禁各跑完整 `verify:all`。正式门禁下 `compat:check`、lint、双端 typecheck、build、Registry 原生认证探针和 Seatbelt 内核探针通过；测试 **903 通过 / 89 跳过**，compose / behavior / journey 分别 **52 / 136 / 76 通过**，打包安装后的 behavior **135 通过**，均无失败。Seatbelt 已显式要求实跑；Auto Review fork 校验通过，可选联合 smoke 按既有精确目标规则跳过。开发 pin `0.2.2-alpha.2` 的 frozen 安装、`compat:check`、原生 Registry 探针与完整 `verify:all` 通过：测试 **907 通过 / 85 跳过**，四项 smoke 分别 **52 / 136 / 76 / 135 通过**，Seatbelt 实跑。
 
 PR 的 CI 以正式门禁覆盖全部 20 个精确版本与启用的四个 runner，原 19 版的跨平台回归以该矩阵为准；本机结果不代替 Linux 或 Windows 原生执行。`rc.5` 的隔离 Web profile 使用本地模拟模型和临时工作区完成 Files 页签三态目检：无附属根、选附属根、切回主根时目录树、路径与刷新 / 打开按钮均正常；对照主根与附属根的目录展开、空目录、长文件名截断、读取失败行和打开方式菜单，外观一致。
+
+## F4 后台恢复与故障诊断立项（2026-10-31）
+
+共享计划 F 表的 F4 项经三轮技术评审后通过（[专项计划](./2026-10-31-f4-background-recovery.md) rev.4），合同由 [ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md) 定案并立项。本节登记批次、合同与实施状态（逐批见下表）；**无任何平台验收或发布**。2026-10-31 实施前源码审核门发现 shared 介质绑定校验可被重试绕过（复现两个 active owner），计划修订为 rev.5 并先行修复（F4-P0.5）。评审以真实 Registry + JSON 介质 + 内核锁做的定向复现已把五处前置缺口写进合同（follower hello 不同步投影、空快照 `''` 签名残留旧边界、整轮失败通知振荡、提交顺序被同步回调反向观察、握手不可取消/资格分类缺失）；实施时按"先红后绿"补齐，不以文档表述代替回归。
+
+| 批次 | 范围 | 状态 |
+| --- | --- | --- |
+| F4-P0.5 | 实施前源码审核门（计划 rev.5）+ R0 阻塞修复：shared 介质/锁绑定校验通过后才记录介质，重试不再绕过校验接管同一介质 | 已实施（macOS 本机：`shared-registry.spec.ts` 修复前红、修复后绿，`registry.spec.ts` 同跑 75/75；Linux/Windows 待 CI） |
+| F4-P1 | 前置修复：scope 真值签名；私有暂存与并集提交（scope `subscribe()` 纳入通知批处理，`setAdditionalRoots()` 仍为唯一根写口）；withheld republish 门控；失败日志去重；`AuthorityClient.connect` 本地取消与 request 定时器 `unref`；结构化资格分类 | 未实施 |
+| F4-P2 | 恢复调度器（退避/jitter、合并/取消、`unref`、默认开启 opt-out）+ follower 投影同步完成条件（失败集合清零） | 未实施 |
+| F4-P3 | 诊断面 + 多进程 e2e + `pnpm soak:tui-registry` 口径复测 + 三平台/全版本验收 | 未实施 |
+
+验收沿用专项计划 Validation 表：自动恢复用例只经只读观测（getter/scope），不得调用 `refresh()` 或隐式 `ensureAuthority` 的 helper；提交一致性回归至少两个主根并同时检查 scope 订阅者、Registry 监听器和广播 snapshot。心跳式主动故障检测与 `unknown-state` 重开不在本批，单列 F4b 候选另立 ADR。Ubuntu 报告环境长跑仍是共享服务既有遗留验收，不由本批勾销；本批不指定版本号，不授权发布。
