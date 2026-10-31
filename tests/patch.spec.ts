@@ -178,6 +178,7 @@ describe('inserted rows', () => {
     expect(registry?.config).toMatchObject({
       leasePath: "dshHomePath('storages/multi_root_workspace.lock')",
       maxAdditionalRoots: 16,
+      backgroundRecovery: true,
     })
   })
 

@@ -8,7 +8,7 @@ import { mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
@@ -227,8 +227,16 @@ describe('registry authority at the service boundary', () => {
     // Storage-failed: same fail-closed marking on a broken medium.
     const failed = await mountRegistryStack(join(fixture.base, 'broken'), { leasePath: '' })
     stacks.push(failed)
-    expect(failed.registry.authority.kind).toBe('storage-failed')
+    expect(failed.registry.authority).toMatchObject({ kind: 'storage-failed', recovery: 'config' })
     expect(authorityOf(failed)).toBe('unavailable')
+    // A `config` failure is terminal: refreshing never re-enters the failure path.
+    const entered = vi.spyOn(failed.registry as unknown as { enterStorageFailed(reason: string, recovery: string): void }, 'enterStorageFailed')
+    let scopeCalls = 0
+    const unsubscribe = failed.scope.subscribe(() => { scopeCalls += 1 })
+    await failed.registry.refresh(primary)
+    expect(entered).not.toHaveBeenCalled()
+    expect(scopeCalls).toBe(0)
+    unsubscribe()
 
     // Config-invalid: the terminal fail-closed state also marks the scope.
     const invalid = await mountRegistryStack(join(fixture.base, 'invalid'), { maxAdditionalRoots: 0 })

@@ -88,6 +88,10 @@
         # already exceeds it keeps granting — only new adds are refused. Bench
         # evidence for the default: docs/reference/bench-root-scale-*.json.
         maxAdditionalRoots: 16
+        # Bounded background recovery of a degraded authority (contended,
+        # follower reconnect, retryable storage failure); on by default.
+        # Set false for on-demand recovery only (refresh still works).
+        backgroundRecovery: true
     # Upstream `agent-instructions` only discovers instruction files from the
     # session cwd upward, so an additional root's own AGENTS.md is invisible to
     # the model. This row closes that gap for the additional roots only; the

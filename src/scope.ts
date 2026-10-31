@@ -333,6 +333,10 @@ export class MultiRootScopeService extends Service {
   /** Additional roots keyed by canonical primary root; empty until roots are registered. */
   private readonly rootsByPrimary = new Map<string, readonly AdditionalWorkspaceRoot[]>()
   private readonly listeners = new Set<() => void>()
+  /** Enclosing {@link MultiRootScopeService.batch} depth; inner calls nest. */
+  private batchDepth = 0
+  /** True when a batched write coalesced its notification into the flush. */
+  private batchDirty = false
   private admissionProof: object | undefined
   /**
    * The registry-authority fact the registry row publishes. Defaults to
@@ -359,6 +363,35 @@ export class MultiRootScopeService extends Service {
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
+  }
+
+  /**
+   * Run `body` as one notification round: `setAdditionalRoots()` and
+   * `setRegistryAuthority()` apply their state immediately (a same-value
+   * authority write still stays silent), but subscriber invocations coalesce
+   * into a single flush when the OUTERMOST batch ends — also when `body`
+   * throws, because the state already landed. A write a subscriber makes
+   * during the flush is not part of the batch and notifies synchronously
+   * under the normal rules.
+   * @param body - the writes to run as one round.
+   * @returns the body's return value.
+   */
+  batch<T>(body: () => T): T {
+    this.batchDepth++
+    try {
+      return body()
+    } finally {
+      if (--this.batchDepth === 0 && this.batchDirty) {
+        this.batchDirty = false
+        for (const listener of this.listeners) listener()
+      }
+    }
+  }
+
+  /** Notify subscribers now, or coalesce into the enclosing batch's flush. */
+  private notifySubscribers(): void {
+    if (this.batchDepth > 0) { this.batchDirty = true; return }
+    for (const listener of this.listeners) listener()
   }
 
   /**
@@ -640,7 +673,7 @@ export class MultiRootScopeService extends Service {
     } else {
       this.rootsByPrimary.set(key, [...roots])
     }
-    for (const listener of this.listeners) listener()
+    this.notifySubscribers()
   }
 
   /**
@@ -658,7 +691,7 @@ export class MultiRootScopeService extends Service {
     const next = available ? 'available' : 'unavailable'
     if (this.registryAuthority === next) return
     this.registryAuthority = next
-    for (const listener of this.listeners) listener()
+    this.notifySubscribers()
   }
 }
 

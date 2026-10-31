@@ -136,6 +136,76 @@ describe('scope resolution', () => {
   })
 })
 
+describe('notification batching', () => {
+  it('coalesces several writes in one batch into a single notification of the final state', () => {
+    const seen: string[][] = []
+    ctx.multiRootScope.subscribe(() => { seen.push([...ctx.multiRootScope.scopeOf(fixture.workspace)]) })
+    const returned = ctx.multiRootScope.batch(() => {
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('a', fixture.outside)])
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('b', fixture.outside)])
+      // Subscribers observe nothing until the outermost batch ends.
+      expect(seen).toEqual([])
+      return 'result'
+    })
+    expect(returned).toBe('result')
+    expect(seen).toEqual([[fixture.outside]])
+  })
+
+  it('flushes nested batches only when the outermost one ends', () => {
+    let fired = 0
+    ctx.multiRootScope.subscribe(() => { fired += 1 })
+    ctx.multiRootScope.batch(() => {
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('a', fixture.outside)])
+      ctx.multiRootScope.batch(() => {
+        ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+        ctx.multiRootScope.setRegistryAuthority(false)
+      })
+      expect(fired).toBe(0)
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('b', fixture.outside)])
+      expect(fired).toBe(0)
+    })
+    expect(fired).toBe(1)
+  })
+
+  it('still flushes the applied state when the batch body throws', () => {
+    let fired = 0
+    ctx.multiRootScope.subscribe(() => { fired += 1 })
+    expect(() => ctx.multiRootScope.batch(() => {
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('a', fixture.outside)])
+      throw new Error('boom')
+    })).toThrow('boom')
+    expect(fired).toBe(1)
+    expect(ctx.multiRootScope.scopeOf(fixture.workspace)).toEqual([fixture.outside])
+  })
+
+  it('stays silent for same-value authority writes inside a batch', () => {
+    let fired = 0
+    ctx.multiRootScope.subscribe(() => { fired += 1 })
+    ctx.multiRootScope.batch(() => {
+      ctx.multiRootScope.setRegistryAuthority(true)
+      ctx.multiRootScope.setRegistryAuthority(true)
+    })
+    expect(fired).toBe(0)
+  })
+
+  it('notifies synchronously for a write a subscriber makes during the flush', () => {
+    const calls: string[][] = []
+    let rewrote = false
+    ctx.multiRootScope.subscribe(() => {
+      calls.push([...ctx.multiRootScope.scopeOf(fixture.workspace)])
+      if (!rewrote) {
+        rewrote = true
+        ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [])
+      }
+    })
+    ctx.multiRootScope.batch(() => {
+      ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [root('a', fixture.outside)])
+    })
+    expect(calls).toEqual([[fixture.outside], []])
+  })
+})
+
 describe('root sanitization', () => {
   it('is pure and never mutates its input', () => {
     const roots = [root('x', fixture.outside)]

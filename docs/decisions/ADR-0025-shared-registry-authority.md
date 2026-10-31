@@ -22,7 +22,7 @@ Issue #24 的重复通知 hot-fix 消除了刷新循环，但第二个 Host 仍�
 4. **内核认证连接，不发行可读凭据文件。** POSIX 连接检查实际 peer；Darwin 用 audit token 与 sandbox 状态，Linux 用 SO_PEERCRED、SO_PEERPIDFD 和 NoNewPrivs。Windows 本机 pipe 检查实际 impersonation token，拒绝其他用户、restricted/AppContainer/低完整性以及本插件 ambient-deny token。连接不继承到执行的子进程。不能证明 peer 身份时拒绝共享，不能仅凭同 UID 放行。具体能力前提和信任范围见[架构](../architecture/registry-authority-service.md#4-ipc-权限边界)。
 5. **epoch 与全量快照维护投影，不替代授权。** store 身份绑定物理介质；每轮成功打开产生随机 epoch；有效根及 Skills metadata 变化递增 revision。新 epoch 必须重新握手/同步。通知可丢失，下一次 admission 仍从 owner 获取状态。
 6. **有界协议与明确的不确定结果。** 版本化严格 NDJSON、连接/消息/请求/去重上限、5 秒请求超时。连接内 UUID mutation 去重（仅保留紧凑结果），参数不同的 ID 重用断线；不承诺跨崩溃 exactly-once。mutation 丢应答直接报告结果不明，不自动重放；先 refresh 对账再由调用者决定下一项操作。
-7. **故障保留拒绝信息。** 断线撤销新 grant，保留在册/withheld 路径，Files 对未知外部路径也拒读；Full-access/Workspace-write 收窄到主根且不授予共享临时区。unknown-state 写入使已打开核心隔离至重启，并继续持锁。只靠内核 lease 竞选；超时不允许抢占暂停的 owner。新 owner 从磁盘重新打开，不复用旧快照。
+7. **故障保留拒绝信息。** 断线撤销新 grant，保留在册/withheld 路径，Files 对未知外部路径也拒读；Full-access/Workspace-write 收窄到主根且不授予共享临时区。unknown-state 写入使已打开核心隔离至重启，并继续持锁。只靠内核 lease 竞选；超时不允许抢占暂停的 owner。新 owner 从磁盘重新打开，不复用旧快照。降级后的恢复原为按需（下一次操作或 refresh 触发）；[ADR-0026](./ADR-0026-registry-background-recovery.md) 将其增补为有界后台恢复（结构化资格、退避调度、follower 投影同步、诊断面），本条的保留拒绝、不抢占与 unknown-state 隔离不变。介质/锁错配属须改配置的终态，重试不得绕过绑定校验。
 
 ## Alternatives Considered
 

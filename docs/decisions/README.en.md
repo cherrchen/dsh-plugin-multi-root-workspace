@@ -60,3 +60,5 @@ Numbers increment; titles use lowercase kebab-case.
 - [ADR-0024-registry-operation-admission.md](./ADR-0024-registry-operation-admission.md) — Ordered operation admission and revocation; admitted work may finish (Accepted).
 
 - [ADR-0025-shared-registry-authority.md](./ADR-0025-shared-registry-authority.md) — Shared authority service, authenticated IPC, synchronous consumer contracts and fail-closed takeover (Accepted).
+
+- [ADR-0026-registry-background-recovery.md](./ADR-0026-registry-background-recovery.md) (Chinese) — Registry authority background recovery and diagnostics: structured retry eligibility, scheduler invariants, projection-sync completion, scope truth signatures and commit notification atomicity, local handshake cancellation, and a diagnostics surface (Accepted contract; implementation pending).
