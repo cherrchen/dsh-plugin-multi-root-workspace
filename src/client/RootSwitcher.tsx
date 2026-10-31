@@ -32,9 +32,12 @@
  *   the same element's `closest('[data-dockkit-content]')` — the dockkit
  *   tabHost section — with a generated fallback where the hook is absent.
  *
- * The selected root is component state on purpose: every tab render
- * occurrence gets its own, and reopening the pane resets to the primary
- * root. There is no cross-tab or persisted selection.
+ * The selected root lives in the inject product's session-scoped snapshot,
+ * keyed by that dockkit tab id — component state could not survive the
+ * remount every file open causes (the opened tab takes the pane, the Files
+ * body unmounts with the whole occupant subtree). One selection per tab;
+ * session switches mint a fresh inject product, so no selection crosses
+ * sessions, and a registry eviction reconciles it back to primary.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/RootSwitcher
  */
@@ -91,17 +94,21 @@ interface Takeover {
  */
 const PathLabel = maybeComponent<(props: { path: string; className?: string | undefined }) => ReactNode>(['PathLabel'])
 
+/** Selector hook for a composition without the fork: nothing was ever selectable. */
+const noTreeSelection: NonNullable<RootSwitcherProps['filesTree']>['useTreeSelection'] = () => undefined as never
+
 /** The Files-header switcher: root menu, dialog entry, and the portal tree. */
 export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   const { panel, t, primaryPath, filesTree } = props
   const [menuOpen, setMenuOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [view, setView] = useState<RootsView | undefined>(undefined)
-  const [selected, setSelected] = useState<RootView | 'primary'>('primary')
   const [takeover, setTakeover] = useState<Takeover | null>(null)
   const wrapperRef = useRef<HTMLSpanElement | null>(null)
   const fallbackTabId = useRef<TabId | undefined>(undefined)
+  const sectionRef = useRef<HTMLElement | null>(null)
   const [pane, setPane] = useState<HTMLElement | null>(null)
+  const [tabId, setTabId] = useState<TabId | undefined>(undefined)
   const mounted = useRef(true)
   const requestEpoch = useRef(0)
 
@@ -113,12 +120,35 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
     }
   }, [])
 
-  // Locate the pane once, after mount. Finding no `[data-files-root]`
-  // ancestor is the supported degradation: nothing is portaled, and the
-  // stylesheet rules that would hide the native body match nothing either.
+  // Locate the pane and the dockkit tab once, after mount. The
+  // `[data-dockkit-content]` section outlives every hide/remount cycle of the
+  // body — only the tab record's end removes it — so it keys the persisted
+  // selection and answers the takeover's deferred end check. Finding no
+  // `[data-files-root]` ancestor is the supported degradation: nothing is
+  // portaled, and the stylesheet rules that would hide the native body match
+  // nothing either.
   useEffect(() => {
-    setPane(wrapperRef.current?.closest<HTMLElement>('[data-files-root]') ?? null)
+    const wrapper = wrapperRef.current
+    sectionRef.current = wrapper?.closest<HTMLElement>('[data-dockkit-content]') ?? null
+    const content = sectionRef.current?.dataset.dockkitContent
+    setTabId((content !== undefined && content !== ''
+      ? content
+      : (fallbackTabId.current ??= `mrfw-${Math.random().toString(36).slice(2)}` as TabId)) as TabId)
+    setPane(wrapper?.closest<HTMLElement>('[data-files-root]') ?? null)
   }, [])
+
+  // The persisted selection, keyed by this pane's tab id; an absent entry is
+  // the primary root. The bound hook is stable across renders, so the
+  // filesTree gate only ever picks the noop stand-in where the fork cannot
+  // mount at all — and no additional root can be selected there anyway.
+  const useTreeSelection = filesTree?.useTreeSelection ?? noTreeSelection
+  const stored = useTreeSelection(selection => (tabId === undefined ? undefined : selection[tabId]))
+  const selected: RootView | 'primary' = stored ?? 'primary'
+  const selectRoot = filesTree?.selectRoot
+  const setSelected = useCallback((next: RootView | 'primary'): void => {
+    if (selectRoot === undefined || tabId === undefined) return
+    selectRoot(tabId, next)
+  }, [selectRoot, tabId])
 
   const refresh = useCallback(async (): Promise<void> => {
     if (panel === undefined) { setView(undefined); return }
@@ -154,22 +184,24 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
       setView(undefined)
       void refresh()
     })
-  }, [props.subscribeSession, props.sessionId, refresh])
+  }, [props.subscribeSession, props.sessionId, refresh, setSelected])
 
   // A refresh that reports the selected root gone or withheld sends the
-  // selection back to the primary root instead of browsing a stale grant —
-  // and a refresh that could not answer at all does the same: an undefined
-  // view means nothing revalidated the selection, so the takeover must not
-  // keep the native primary tree hidden behind it.
+  // selection back to the primary root instead of browsing a stale grant.
+  // Only an answered view may evict it: while the list is still pending — or
+  // a refresh failed — the persisted choice stands, the trigger keeps naming
+  // it, and the forked tree's own rows surface whatever the host reports.
+  // Treating an unanswered list as eviction would drop the selection on every
+  // remount's first pending moment and on any transient failure.
   useEffect(() => {
-    if (selected === 'primary') return
-    const current = view?.roots.find(root => root.id === selected.id)
+    if (selected === 'primary' || view === undefined) return
+    const current = view.roots.find(root => root.id === selected.id)
     if (current === undefined || current.state !== 'available') { setSelected('primary'); return }
     // The match can carry a newer alias, access, or path than the row
     // `onSelect` captured; adopt the refreshed object so the trigger label,
     // the path label, and the tree entry stop rendering the stale snapshot.
     if (current !== selected) setSelected(current)
-  }, [view, selected])
+  }, [view, selected, setSelected])
 
   const roots = useMemo(() => view?.roots ?? [], [view])
   const primaryLabel = view?.primaryName ?? basename(view?.primaryRoot ?? primaryPath)
@@ -182,22 +214,29 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   const treeVisible = selected !== 'primary' && panel !== undefined && pane !== null && filesTree !== undefined
   const selectedPath = selected === 'primary' ? undefined : selected.path
 
+  const takeoverCtl = filesTree?.takeover
   // While an additional root is selected the pane's body area belongs to the
-  // forked tree: the takeover mints the AbortController the face's watches
-  // and store bucket live under, and the dockkit tabHost's
-  // data-dockkit-content supplies the same tab id the native tree uses — so
-  // the fork's store bucket, scroll memory, and expansion state are keyed
-  // exactly like a real Files tab. Deselecting, switching roots, or
-  // unmounting aborts the controller: the face forgets the bucket and closes
-  // every watch, mirroring what upstream's tab-record signal does on close.
+  // forked tree: the takeover keeps one controller per (tab, root) in the
+  // inject product, and the dockkit tabHost's data-dockkit-content supplies
+  // the same tab id the native tree uses — so the fork's store bucket, scroll
+  // memory, expansion state, and watches are keyed exactly like a real Files
+  // tab and survive the body unmount an opened file causes, mirroring what
+  // upstream's tab-record signal does for the native tree. Deselecting or
+  // switching roots ends the entry at once; a body unmount leaves it to the
+  // inject-side observer, which ends it whenever the tabHost section leaves
+  // the document — the record's real end, even long after this body is gone.
   useEffect(() => {
-    if (!treeVisible || selectedPath === undefined) { setTakeover(null); return }
-    const controller = new AbortController()
-    const tabId = (wrapperRef.current?.closest<HTMLElement>('[data-dockkit-content]')?.dataset.dockkitContent ?? '')
-      || (fallbackTabId.current ??= `mrfw-${Math.random().toString(36).slice(2)}` as TabId)
-    setTakeover({ signal: controller.signal, tabId: tabId as TabId, root: selectedPath })
-    return () => { controller.abort() }
-  }, [treeVisible, selectedPath])
+    if (!treeVisible || selectedPath === undefined || tabId === undefined || takeoverCtl === undefined) { setTakeover(null); return }
+    setTakeover({ signal: takeoverCtl.signal(tabId, selectedPath, sectionRef.current ?? undefined), tabId, root: selectedPath })
+    return () => {
+      // The mounted flag settles the branch: a deps change ends the entry
+      // now, while an unmount is a hide — upstream's occurrence signal never
+      // aborts on hide either — and the armed section observer owns the real
+      // end. No section hook means the fallback tabId, which cannot rejoin
+      // anything, so the old abort-on-unmount bound stands there.
+      if (mounted.current || sectionRef.current === null) takeoverCtl.end(tabId)
+    }
+  }, [treeVisible, selectedPath, tabId, takeoverCtl])
 
   const items = useMemo((): MenuEntry[] => [
     { id: 'primary', label: `${primaryLabel} · ${t('panel.primary')}`, icon: <IconFolderOpen /> },

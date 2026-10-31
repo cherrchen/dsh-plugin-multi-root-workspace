@@ -38,6 +38,10 @@ Accepted
 - primitives 经 `./primitives.ts` 按导出名解析（`*Regular` 与像素名双兜底）；folder 图标/`FileTypeIcon`/`classifyFileType` 缺席时 `filesTreeSurfaceSupported()` 为假、adapter 不建、整树不渲染——与 open-in-app 同型降级。
 - 随之下线：插件私有 `files`/`readFile` 面板端点、`browseRoot`、`FilesView`/`FilePreview` 及其 zod 校验、`RootFileTree.tsx`、`src/panel-files.ts` 与仅它们使用的词条——本插件私有 RPC 两半同改，无兼容负担，不留回退。
 
+## 修订：takeover 生命周期上移至 inject 产品（2026-10-31，Amendment）
+
+Status 保持 **Accepted**；复刻面与四个缝的 prop 形态不变。决策中「`tab.signal` → takeover 期自建 AbortController（abort 语义等同 tab 关闭）」当时绑定在组件生命周期上——打开文件让 dockkit 失活 Files 页签、整体卸载其 body（该页签类型不声明 `keepMounted`），组件态与控制器同灭，选中根随之重置回主根。修订后：选中根存入 inject 产品的 session 域快照（经 `hooks` 区格以 `useTreeSelection` 送达组件，键为 `data-dockkit-content` 的 tab id，无条目即主根）；takeover 控制器同样住进 inject 产品、按 (tabId, root) 复用，仅在取消选择、换根、或 tabHost 节段离开文档（tab 记录真正结束）时终止——body 卸载本身不再终止，与上游 occurrence signal 的「隐藏不终、记录终则终」语义完全对齐。节段移除的判定也在 inject 产品：组件 body 卸载后可能很久才轮到用户关闭该隐藏页签，届时组件早已不在，无法再做清理——故 `signal()` 收到节段即在其上挂 `MutationObserver`，与控制器同寿命，节段一旦离开文档即 end，已卸载的 body 也覆盖。`view` 未应答（list 挂起或失败）期间保留选择，只有应答过的视图能把被除名/被扣留的选择收回主根。
+
 ## Alternatives Considered
 
 - **精修自绘树逼近原生**：逐项对齐行高/图标/缩进/空态是永无终点的追影游戏——上游每次改版都得再追一遍；且自绘树没有 watch 自动刷新、展开/滚动记忆、失败行语义，这些是 store/face 层能力而非样式问题。排除。
