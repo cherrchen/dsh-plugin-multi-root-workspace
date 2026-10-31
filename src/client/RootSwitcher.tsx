@@ -222,22 +222,19 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   // memory, expansion state, and watches are keyed exactly like a real Files
   // tab and survive the body unmount an opened file causes, mirroring what
   // upstream's tab-record signal does for the native tree. Deselecting or
-  // switching roots ends the entry at once; an unmount ends it only if the
-  // tabHost section left the document — the tab record itself is gone — which
-  // the deferred check sees after the commit finishes.
+  // switching roots ends the entry at once; a body unmount leaves it to the
+  // inject-side observer, which ends it whenever the tabHost section leaves
+  // the document — the record's real end, even long after this body is gone.
   useEffect(() => {
     if (!treeVisible || selectedPath === undefined || tabId === undefined || takeoverCtl === undefined) { setTakeover(null); return }
-    setTakeover({ signal: takeoverCtl.signal(tabId, selectedPath), tabId, root: selectedPath })
+    setTakeover({ signal: takeoverCtl.signal(tabId, selectedPath, sectionRef.current ?? undefined), tabId, root: selectedPath })
     return () => {
-      // The mounted flag settles the branch: a deps change ends the entry now,
-      // while an unmount defers to the section's attachment — still connected
-      // means a hide, not an end (upstream's occurrence signal never aborts on
-      // hide either). No section hook means the fallback tabId, which cannot
-      // rejoin anything, so the old abort-on-unmount bound stands there.
-      if (mounted.current || sectionRef.current === null) { takeoverCtl.end(tabId); return }
-      queueMicrotask(() => {
-        if (sectionRef.current !== null && !sectionRef.current.isConnected) takeoverCtl.end(tabId)
-      })
+      // The mounted flag settles the branch: a deps change ends the entry
+      // now, while an unmount is a hide — upstream's occurrence signal never
+      // aborts on hide either — and the armed section observer owns the real
+      // end. No section hook means the fallback tabId, which cannot rejoin
+      // anything, so the old abort-on-unmount bound stands there.
+      if (mounted.current || sectionRef.current === null) takeoverCtl.end(tabId)
     }
   }, [treeVisible, selectedPath, tabId, takeoverCtl])
 

@@ -631,8 +631,8 @@ describe('the Files-tab root switcher', () => {
     })
 
     // The whole section leaving the document is the tab record's real end —
-    // the deferred attachment check must end the entry, forgetting the
-    // bucket and closing the watches.
+    // the inject-side observer must end the entry, forgetting the bucket and
+    // closing the watches.
     unmount()
     host.remove()
     await new Promise(resolve => setTimeout(resolve, 0))
@@ -641,6 +641,34 @@ describe('the Files-tab root switcher', () => {
     // The reopened tab carries the same fixture id, so the persisted
     // selection restores — but its takeover ended, and the tree re-seeds
     // from scratch: a fresh changes stream and a fresh root list.
+    renderInPane(harness)
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    await waitFor(() => {
+      expect(harness.treeCalls.length).toBeGreaterThan(traffic)
+      expect(document.querySelectorAll('[data-files-path="/repos/payments/notes.md"]').length).toBeGreaterThan(0)
+    })
+  })
+
+  it('still ends the takeover when the hidden tab closes long after the body unmounted', async () => {
+    const harness = mount()
+    const { pane, host, unmount } = renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => {
+      expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull()
+    })
+
+    // The body hid a while ago and its component is gone — no cleanup can
+    // run — but the record's end is exactly what the inject-side observer is
+    // for: removing the section now must still end the entry.
+    unmount()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    host.remove()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const traffic = harness.treeCalls.length
+
     renderInPane(harness)
     await waitFor(() => { expect(switcherKind()).toBe('additional') })
     await waitFor(() => {

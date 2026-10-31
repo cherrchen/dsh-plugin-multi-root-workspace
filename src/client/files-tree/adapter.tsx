@@ -63,9 +63,13 @@ export interface FilesTreeTakeover {
    * already aborted — ends the previous controller before minting the next.
    * @param tabId - the pane's dockkit tab id.
    * @param root - absolute path of the root being browsed.
+   * @param section - the dockkit tabHost section the caller mounted under; a
+   *   live entry keeps an observer on it that ends the takeover whenever the
+   *   section leaves the document — the record's real end — including when the
+   *   body that mounted it has long been unmounted itself.
    * @returns the signal the forked tree lives under.
    */
-  readonly signal: (tabId: TabId, root: string) => AbortSignal
+  readonly signal: (tabId: TabId, root: string, section?: Element) => AbortSignal
   /**
    * Abort and drop one tab's takeover: the reader deselected or switched
    * roots, or the tab record itself went away.
@@ -215,7 +219,19 @@ export function createFilesTreeSeats(ctx: ClientContext): {
     // an opened file causes (the file tab takes the pane, the Files body
     // unmounts, and component state would otherwise reset to 'primary').
     const selection = createSnapshotStore<TreeSelection>({})
-    const takeovers = new Map<TabId, { readonly controller: AbortController; readonly root: string }>()
+    interface Held {
+      readonly controller: AbortController
+      readonly root: string
+      section: Element | undefined
+      observer: MutationObserver | undefined
+    }
+    const takeovers = new Map<TabId, Held>()
+    const endTakeover = (tabId: TabId): void => {
+      const held = takeovers.get(tabId)
+      held?.observer?.disconnect()
+      held?.controller.abort()
+      takeovers.delete(tabId)
+    }
     return {
       face: face(sessionId, actions),
       openFile: (address: string) => {
@@ -230,19 +246,30 @@ export function createFilesTreeSeats(ctx: ClientContext): {
         selection.set(next)
       },
       takeover: {
-        signal: (tabId, root) => {
+        signal: (tabId, root, section) => {
           let held = takeovers.get(tabId)
           if (held === undefined || held.root !== root || held.controller.signal.aborted) {
+            held?.observer?.disconnect()
             held?.controller.abort()
-            held = { controller: new AbortController(), root }
+            held = { controller: new AbortController(), root, section: undefined, observer: undefined }
             takeovers.set(tabId, held)
           }
+          // The section watch lives at this scope, not the caller's: a body
+          // that unmounted cannot run another cleanup, but the record may
+          // still end — closing an already-hidden tab removes the section —
+          // and only an observer outliving the body sees that.
+          if (section !== undefined && held.section !== section) {
+            held.section = section
+            held.observer?.disconnect()
+            held.observer = new MutationObserver(() => {
+              if (!section.isConnected) endTakeover(tabId)
+            })
+            held.observer.observe(document, { childList: true, subtree: true })
+          }
+          if (held.section !== undefined && !held.section.isConnected) endTakeover(tabId)
           return held.controller.signal
         },
-        end: (tabId) => {
-          takeovers.get(tabId)?.controller.abort()
-          takeovers.delete(tabId)
-        },
+        end: endTakeover,
       },
     }
   }

@@ -59,11 +59,12 @@ upstream binds inside it arrives as a prop instead:
 - **Lifetime**: upstream rides the tab record's `signal`; the fork takes a
   controller from the inject product's takeover map, keyed by (tab, root).
   Deselecting or switching roots ends it at once; a body unmount does not —
-  opening a file deactivates the tab without ending its record, and the
-  deferred `section.isConnected` check ends the entry only when the tabHost
-  section leaves the document (the record's real end). Either way the abort
-  forgets the bucket and closes every watch, mirroring upstream's tab-close
-  path while matching its hidden-tab survival.
+  opening a file deactivates the tab without ending its record. The inject
+  product keeps a `MutationObserver` on the tabHost section each `signal()`
+  call hands it, so the entry ends whenever that section leaves the document
+  — the record's real end — even long after the body itself is gone. The
+  abort forgets the bucket and closes every watch, mirroring upstream's
+  tab-close path while matching its hidden-tab survival.
 - **Open route**: upstream calls `tab.actions.openResource`; the fork calls
   the injected `openFile`, bound to `sidebarRight.openResourceIn`, and
   computes the address as `fileAddressFor(sessionId, undefined, path)` —
