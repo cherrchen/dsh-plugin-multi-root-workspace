@@ -101,9 +101,9 @@ export class AuthorityClient {
     const id = randomUUID()
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.channel.destroy() }, 5000)
-      // Unreferenced: a hanging request must not hold the event loop hostage
-      // once the channel itself is the only reason the process stays alive.
-      timer.unref()
+      // Deliberately referenced: the Windows pipe polls on an unref'd interval,
+      // so this timer is what keeps a pending request alive there. Cancel and
+      // close clear it synchronously; a missed cancel is bounded by 5s.
       this.pending.set(id, { method, resolve, reject, timer })
       send(this.channel, { protocol: 1, store: this.store, epoch: this.epoch ?? null, id, method, args })
     })

@@ -23,6 +23,7 @@
   - **N4 [P3]**：R2 逐 key `applySnapshot` 时 publish 先于 `setRegistryAuthority`，订阅者看到旧 authority；改为每个 key 的应用也走同一批处理接缝，N 轮通知有界、接受。
   - **N5 [P3]**：owner 进入 quarantine 后仍持锁但关闭 server，follower 会以 `retryable` 低频重试至 owner 重启；接受，诊断文档注明。
   - **N6 [文档]**：架构文档 §3"无后台高频抢锁"、§6"按需重连"须随实现修订（已在 Documentation Impact）。
+  - **Windows CI 修正（2026-10-31，实施后）**：R4 原拟给 client request 定时器补 `unref()`，首轮 PR CI 的 Windows 全部 20 个版本因此失败——Windows `Pipe` 以 unref 的 20ms 轮询定时器收包、本身不持事件循环句柄（POSIX 的 `Socket` 持有），在途请求唯一的事件循环引用就是这个 5s 定时器；unref 后只剩待决 hello 的子进程事件循环清空，Node 以 13（unsettled top-level await）退出，波及 `authority-native`（ambient-deny 子进程）、`registry-semaphore-win32` 与 `shared-registry-multiprocess`。修正为定时器保持 ref：取消与关闭（两平台 `close` 均同步触发）同步清除它，取消未命中的残余上限即 request 超时 5s；回归改为断言取消路径清除该定时器。
   - 另澄清：空快照场景下 `publish()` 在比较签名**之前**写 `metadataPublished`，因此 scope 未被写但监听器/`notifyShared` 仍触发——回归须同时断言 scope 层真值，不能只数通知。
 
 ## Goal
@@ -160,7 +161,7 @@
 
 - 后台 tick 的 follower 连接尝试为 **1 次**（on-demand 保持 3 次有界循环）：`ensureAuthority` 保留唯一入口，传入调用来源（如 `{ background: true }`）在内部分流，复用同一 connect 代码。
 - **在途握手本地取消（rev.3 修正）**：`AuthorityClient.connect` 增加本地取消能力（如可选 `AbortSignal`/`cancel` 句柄——内部 API 调整，**协议帧不变**）；registry 记录本轮在途握手的 cancel，`releaseAuthority`/换代时调用 → 销毁候选 channel、立即使握手 reject。adopted 后的关闭沿用现有 `client?.close()`；取消落在握手完成之后则走 `connectionGeneration`/`adopted` 检查丢弃晚到 client。
-- **退出上限合同**：dispose 后可被取消的握手立即结束，`releaseAuthority` 不再排在在途连接之后；`protocol.ts` client request 定时器补 `unref()`（兜底：即便取消未命中，socket 之外不再另有 ref'd 定时器）。若某平台拒绝立即 channel 销毁，须把残余上限明确写成合同（如 ≤5s），而不是隐含承诺"零拖延"。
+- **退出上限合同**：dispose 后可被取消的握手立即结束，`releaseAuthority` 不再排在在途连接之后；`protocol.ts` client request 定时器**保持 ref**，取消/关闭同步清除，取消未命中时残余上限 ≤5s（request 超时）。（实施期修正：原拟补 `unref()` 兜底，Windows CI 证伪——见评审修订记录"Windows CI 修正"。）
 - owner 挂起时单 tick 占 `authorityChain` ≤ ~5s（单次连接）+ 同步时间；用户操作仍可能短暂排队，属可接受上限，评审确认。
 - **rev.5 实施细则**：`AuthorityClient.connect(..., signal?: AbortSignal)`。调用前已中止 ⇒ 立即 reject；`connectNative()` 返回时已中止 ⇒ 销毁 channel 后 reject；hello 期间中止 ⇒ `close()` 销毁 channel，握手以 `AuthorityRpcError('authority-cancelled', …)` reject；完成后移除 abort 监听。registry 为每次连接尝试新建 `AbortController` 并记录，`releaseAuthority()` 在排入 `authorityChain` **之前**中止它。POSIX 与 Windows 的 connect 都是同步建立通道、只在 hello 阶段等待，因此两平台取消形状一致；Windows 原生行为待 CI 证实。
 
@@ -177,7 +178,7 @@
 ## Implementation（评审通过后）
 
 - **Phase 0.5（阻塞修复，已落地）**：R0 介质绑定校验通过才赋值 `medium`，带先红后绿回归（`shared-registry.spec.ts` 错误锁名用例追加 `refresh()` 后断言）。
-- **Phase 1（前置修复，独立可合入）**：R0 的 `config` 终态早退随资格分类一起落地；其余为 R2 的 scope 真值签名（含空快照清边界回归）+ R3 全部（私有暂存、rev.4 顺序并集提交、scope 通知批处理覆盖 `subscribe()`、withheld 门控、日志去重）+ R4 的握手取消与 request 定时器 `unref` + R1 的结构化资格分类。每项带"修复前红、修复后绿"回归。
+- **Phase 1（前置修复，独立可合入）**：R0 的 `config` 终态早退随资格分类一起落地；其余为 R2 的 scope 真值签名（含空快照清边界回归）+ R3 全部（私有暂存、rev.4 顺序并集提交、scope 通知批处理覆盖 `subscribe()`、withheld 门控、日志去重）+ R4 的握手取消（request 定时器保持 ref、取消时同步清除）+ R1 的结构化资格分类。每项带"修复前红、修复后绿"回归。
 - **Phase 2（调度器 + 完成条件）**：R1 调度与合并/取消规则 + R2 投影同步（含失败集合重同步）。
 - **Phase 3（诊断与验收）**：R5 + 多进程 e2e + soak 复测。
 
@@ -215,7 +216,7 @@
 | 暂存污染 `cache` 可见面 | R3 本轮私有暂存，`cache` 只在提交时替换 |
 | 去重漏一处（含 `unknown-state` 重复调用路径） | `enterStorageFailed` withheld republish 统一门控；评审时枚举全部 `setAdditionalRoots` 调用点 |
 | owner 挂起时 tick 占 `authorityChain` 阻塞用户操作 | R4 单次连接 + ≤5s 上限；评审确认可接受 |
-| 恢复流程拖延进程退出 | R4 本地握手取消 + request 定时器 `unref`；残余上限写合同或断言 |
+| 恢复流程拖延进程退出 | R4 本地握手取消（request 定时器取消时同步清除）；残余上限 ≤5s 写入合同 |
 | 后台恢复被误读为合同保证 | 文档与诊断面明示 best-effort；任何授权仍以当次 admission 为准 |
 | quarantine 被误标"重试中"误导 operator | 结构化 `recoveryClass`，诊断按类显示 |
 
@@ -243,7 +244,7 @@ rev.1 六问按首轮评审建议转为决定（rev.3 维持不变，待最终�
 - [x] 技术评审通过（rev.4，2026-10-31），评审决定表签字。
 - [x] [ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md) 落地；批次已登记总账（实现与验收另计）。
 - [x] 实施前源码审核门（rev.5）完成；N1 阻塞缺陷已先红后绿修复（R0）。
-- [x] Phase 1 前置修复落地：scope 真值签名（空快照清边界回归）、私有暂存与 rev.4 顺序并集提交（scope `subscribe()` 纳入通知批处理）、withheld 门控、日志去重、握手本地取消与 request 定时器 `unref`、结构化资格分类，各带"先红后绿"回归（macOS 本机）。
+- [x] Phase 1 前置修复落地：scope 真值签名（空快照清边界回归）、私有暂存与 rev.4 顺序并集提交（scope `subscribe()` 纳入通知批处理）、withheld 门控、日志去重、握手本地取消（request 定时器保持 ref、取消时清除）、结构化资格分类，各带"先红后绿"回归（macOS 本机）。
 - [x] R1 调度 + R2 完成条件（含失败集合重同步）+ R4 tick 成本控制实施完成；fake-timer 单测与多进程 e2e 全绿，且用例遵守只读观测规则（macOS 本机；Linux/Windows 待 CI）。
 - [ ] 三平台 CI 通过；Windows semaphore 接管语义经原生验证（`registry-semaphore-win32.e2e.ts` 已加后台接管用例，未在 Windows 运行）。
 - [ ] soak 空闲降级资源有界；Issue #24 刷新循环无回归。本机部分已完成：`registry-recovery-soak.e2e.ts` 空闲降级 30s 实测尝试 5 次、scope 通知 0、CPU ≈40ms、heap 增长 1–3MB；Issue #24 静默用例通过。真实 dsh-tui `pnpm soak:tui-registry` 待隔离 TUI 环境。

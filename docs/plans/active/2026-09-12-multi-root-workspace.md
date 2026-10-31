@@ -1286,7 +1286,7 @@ PR 的 CI 以正式门禁覆盖全部 20 个精确版本与启用的四个 runne
 | 批次 | 范围 | 状态 |
 | --- | --- | --- |
 | F4-P0.5 | 实施前源码审核门（计划 rev.5）+ R0 阻塞修复：shared 介质/锁绑定校验通过后才记录介质，重试不再绕过校验接管同一介质 | 已实施（macOS 本机：`shared-registry.spec.ts` 修复前红、修复后绿，`registry.spec.ts` 同跑 75/75；Linux/Windows 待 CI） |
-| F4-P1 | 前置修复：scope 真值签名；私有暂存与并集提交（scope `subscribe()` 纳入通知批处理，`setAdditionalRoots()` 仍为唯一根写口）；withheld republish 门控；失败日志去重；`AuthorityClient.connect` 本地取消与 request 定时器 `unref`；结构化资格分类 | 已实施（macOS 本机：各项修复前红、修复后绿——空快照 scope 边界残留、takeover 订阅者见未落定 authority、暂存期 `list()` 物化磁盘 key、已删主根残留、dispose 等待 hello 4959ms→<1s、资格字段缺失；Linux/Windows 待 CI） |
+| F4-P1 | 前置修复：scope 真值签名；私有暂存与并集提交（scope `subscribe()` 纳入通知批处理，`setAdditionalRoots()` 仍为唯一根写口）；withheld republish 门控；失败日志去重；`AuthorityClient.connect` 本地取消（request 定时器保持 ref、取消时同步清除）；结构化资格分类 | 已实施（macOS 本机：各项修复前红、修复后绿——空快照 scope 边界残留、takeover 订阅者见未落定 authority、暂存期 `list()` 物化磁盘 key、已删主根残留、dispose 等待 hello 4959ms→<1s、资格字段缺失；首轮 PR CI Windows 全版本失败——request 定时器 `unref` 使 Windows 子进程在 hello 期间事件循环清空、退出码 13，已改为保持 ref；Linux/macOS CI 通过，Windows 待复跑） |
 | F4-P2 | 恢复调度器（退避/jitter、合并/取消、`unref`、默认开启 opt-out）+ follower 投影同步完成条件（失败集合清零） | 已实施（macOS 本机：`recovery.spec.ts` 12/12 fake timers；`shared-registry.spec.ts` 自动接管、两主根重连同步、部分同步失败、持续 listen 失败静默、dispose 停调度、opt-out、Issue #24 静默均只读观测通过；Linux/Windows 待 CI） |
 | F4-P3 | 诊断面 + 多进程 e2e + `pnpm soak:tui-registry` 口径复测 + 三平台/全版本验收 | 部分完成：`diagnostics` getter 与转换日志已实施；多进程 e2e（SIGKILL→新 epoch 自动接管、SIGSTOP→SIGCONT 原 epoch 重连且不夺锁/不重放）macOS 本机通过；本机空闲降级 30s 长稳（尝试 5 次、scope 通知 0、CPU ≈40ms、heap +1–3MB）通过；全量 `pnpm test` 947 passed / 86 skipped / 0 failed。待办：Windows 原生后台接管用例（已编写未运行）、三平台 CI、真实 dsh-tui soak |
 

@@ -186,7 +186,7 @@ nativeTest('keeps repeated catalog queries bounded without consuming the mutatio
   }
 })
 
-nativeTest('cancels an in-flight hello handshake locally and unrefs its request timer', async () => {
+nativeTest('cancels an in-flight hello handshake locally and clears its request timer', async () => {
   const root = mkdtempSync(join(tmpdir(), 'mrw-ipc-cancel-')), identity = storeIdentity(root)
   cleanups.push(() => rmSync(root, { recursive: true, force: true }))
   // Accepts channels but never answers: the hello exchange hangs until cancelled.
@@ -194,7 +194,7 @@ nativeTest('cancels an in-flight hello handshake locally and unrefs its request 
   cleanups.push(() => listener.close())
   await expect(AuthorityClient.connect(identity.endpoint, identity.id, 16, () => {}, () => {}, AbortSignal.abort()))
     .rejects.toMatchObject({ code: 'authority-cancelled' })
-  const timers = vi.spyOn(globalThis, 'setTimeout')
+  const timers = vi.spyOn(globalThis, 'setTimeout'), cleared = vi.spyOn(globalThis, 'clearTimeout')
   const controller = new AbortController()
   const started = Date.now()
   const connecting = AuthorityClient.connect(identity.endpoint, identity.id, 16, () => {}, () => {}, controller.signal)
@@ -205,7 +205,11 @@ nativeTest('cancels an in-flight hello handshake locally and unrefs its request 
   expect(Date.now() - started).toBeLessThan(500)
   const index = timers.mock.calls.findIndex(call => call[1] === 5000)
   expect(index, 'the pending-request timeout was not created').toBeGreaterThanOrEqual(0)
-  expect((timers.mock.results[index]!.value as { hasRef(): boolean }).hasRef()).toBe(false)
+  // Referenced on purpose (the Windows pipe holds no loop handle), so the
+  // cancel path must clear it rather than leave a 5s keep-alive behind.
+  const timer = timers.mock.results[index]!.value
+  expect((timer as { hasRef(): boolean }).hasRef()).toBe(true)
+  expect(cleared).toHaveBeenCalledWith(timer)
 }, 15_000)
 
 nativeTest('accepts a change in the same read buffer as its hello response', async () => {
