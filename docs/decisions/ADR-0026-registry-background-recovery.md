@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（合同定案；实现与三平台验收未完成）。本 ADR 在 ADR-0025 合同内增加"降级后自动恢复"的调度与通知保证，不改变 lease、准入、撤权、epoch 或 unknown-state 语义；F4 专项计划 rev.4 经技术评审通过后立项，rev.5 吸收实施前源码审核门的发现（第 8 条）。执行证据按批次记入[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。
+Accepted（合同定案；实现已完成并经 macOS 本机验证，三平台 CI 与真实 TUI soak 未完成）。本 ADR 在 ADR-0025 合同内增加"降级后自动恢复"的调度与通知保证，不改变 lease、准入、撤权、epoch 或 unknown-state 语义；F4 专项计划 rev.4 经技术评审通过后立项，rev.5 吸收实施前源码审核门的发现（第 8 条）。执行证据按批次记入[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。
 
 ## Date
 

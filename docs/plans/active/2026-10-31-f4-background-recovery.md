@@ -1,6 +1,6 @@
 # F4 — Registry 权威后台恢复与故障诊断（实施稿 rev.5）
 
-> **状态：Accepted / 实施中（[ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md)），验收未完成。**本文是[共享 Registry 计划](./2026-10-30-shared-registry-authority.md) F 表 **F4** 项的专项计划；rev.4 经三轮技术评审通过，rev.5 吸收实施前源码审核门（Phase 0）的发现，合同由 ADR-0026 定案，批次已登记入[进度总账](./2026-09-12-multi-root-workspace.md)。文中"Current State"逐条对应当前源码，"Design"为已采纳合同，实施完成前不得宣称能力已实现。
+> **状态：Accepted / Phase 1–3 已在 `feat/host-f4` 实施，macOS 本机验证通过；三平台 CI 与真实 TUI soak 未完成（[ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md)）。**本文是[共享 Registry 计划](./2026-10-30-shared-registry-authority.md) F 表 **F4** 项的专项计划；rev.4 经三轮技术评审通过，rev.5 吸收实施前源码审核门（Phase 0）的发现，合同由 ADR-0026 定案，批次已登记入[进度总账](./2026-09-12-multi-root-workspace.md)。文中"Current State"逐条对应当前源码，"Design"为已采纳合同，实施完成前不得宣称能力已实现。
 
 ## 评审修订记录
 
@@ -243,8 +243,8 @@ rev.1 六问按首轮评审建议转为决定（rev.3 维持不变，待最终�
 - [x] 技术评审通过（rev.4，2026-10-31），评审决定表签字。
 - [x] [ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md) 落地；批次已登记总账（实现与验收另计）。
 - [x] 实施前源码审核门（rev.5）完成；N1 阻塞缺陷已先红后绿修复（R0）。
-- [ ] Phase 1 前置修复落地：scope 真值签名（空快照清边界回归）、私有暂存与 rev.4 顺序并集提交（scope `subscribe()` 纳入通知批处理）、withheld 门控、日志去重、握手本地取消与 request 定时器 `unref`、结构化资格分类，各带"先红后绿"回归。
-- [ ] R1 调度 + R2 完成条件（含失败集合重同步）+ R4 tick 成本控制实施完成；fake-timer 单测与多进程 e2e 全绿，且用例遵守只读观测规则。
-- [ ] 三平台 CI 通过；Windows semaphore 接管语义经原生验证。
-- [ ] soak 空闲降级资源有界；Issue #24 刷新循环无回归。
-- [ ] 架构文档恢复节与 ADR-0025"按需恢复"表述同步；总账登记发布状态。
+- [x] Phase 1 前置修复落地：scope 真值签名（空快照清边界回归）、私有暂存与 rev.4 顺序并集提交（scope `subscribe()` 纳入通知批处理）、withheld 门控、日志去重、握手本地取消与 request 定时器 `unref`、结构化资格分类，各带"先红后绿"回归（macOS 本机）。
+- [x] R1 调度 + R2 完成条件（含失败集合重同步）+ R4 tick 成本控制实施完成；fake-timer 单测与多进程 e2e 全绿，且用例遵守只读观测规则（macOS 本机；Linux/Windows 待 CI）。
+- [ ] 三平台 CI 通过；Windows semaphore 接管语义经原生验证（`registry-semaphore-win32.e2e.ts` 已加后台接管用例，未在 Windows 运行）。
+- [ ] soak 空闲降级资源有界；Issue #24 刷新循环无回归。本机部分已完成：`registry-recovery-soak.e2e.ts` 空闲降级 30s 实测尝试 5 次、scope 通知 0、CPU ≈40ms、heap 增长 1–3MB；Issue #24 静默用例通过。真实 dsh-tui `pnpm soak:tui-registry` 待隔离 TUI 环境。
+- [x] 架构文档恢复节与 ADR-0025"按需恢复"表述同步；总账已登记实施状态（未发布）。

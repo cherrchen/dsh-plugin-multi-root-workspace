@@ -53,7 +53,7 @@ Registry `authority.kind`：`active` 为本进程管理介质，`follower` 为�
 
 新操作始终向核心请求 admission，本地 scope、缓存和通知只辅助显示/失效，不能单独批准。facade 用 owner 的原始三态记录，交本地 scope 与 Session mode、可信工具 cap 求交；owner 的工具配置不替 follower 决策。
 
-资源有界：帧/待发送缓冲 1 MiB，连接 32，每连接及整个服务的在途请求均至多 32，超时 5 秒；每连接保留最多 2048 个 mutation ID 的紧凑结果（不缓存完整根快照），到上限断线重同步，不淘汰后把同 ID 当新 mutation。相同 mutation ID 相同参数等待原结果，成功后返回最新视图而不重复写入；参数不同断线。只读请求不积累去重快照。握手启动重试最多三次，延迟 0/50/150ms；无后台高频抢锁。客户端超时/断线报告“结果不明”，不自动重放 mutation；先 refresh 对账，再处理冲突。内存去重不提供跨 epoch exactly-once。
+资源有界：帧/待发送缓冲 1 MiB，连接 32，每连接及整个服务的在途请求均至多 32，超时 5 秒；每连接保留最多 2048 个 mutation ID 的紧凑结果（不缓存完整根快照），到上限断线重同步，不淘汰后把同 ID 当新 mutation。相同 mutation ID 相同参数等待原结果，成功后返回最新视图而不重复写入；参数不同断线。只读请求不积累去重快照。按需握手最多三次，延迟 0/50/150ms；后台恢复每个 tick 只尝试一次连接，按 §6 的退避低频重试，不存在高频抢锁。客户端超时/断线报告“结果不明”，不自动重放 mutation；先 refresh 对账，再处理冲突。内存去重不提供跨 epoch exactly-once。
 
 ## 4. IPC 权限边界
 
@@ -93,17 +93,19 @@ DSH 的 bwrap/Landlock 执行通过 NoNewPrivs 限制；Windows ACL runner 使�
 
 ## 6. 故障、退出与接管
 
-断线立即停止新附加授权，保留最后已知记录与 withheld deny；Full-access/Workspace-write 主根范围且无共享 temp，显式 deny 优先。Files 即使缓存从未载入也拒绝未知外部读。下一次操作/refresh 按需重连；只允许安全 query 重试，mutation 不重放。
+断线立即停止新附加授权，保留最后已知记录与 withheld deny；Full-access/Workspace-write 主根范围且无共享 temp，显式 deny 优先。Files 即使缓存从未载入也拒绝未知外部读。恢复由后台调度与按需操作共同驱动（见下文"后台恢复"）；只允许安全 query 重试，mutation 不重放。
 
 Registry 卸载先标记 disposed、拒绝新操作并关闭 follower 连接；server 清理必须在 authority 队列中等待已开始的 acquire/open/listen 完成，再关闭监听及 peer、停止准入、排空 mutation、撤销发布、close domain、最后 release lease。不能在队列外只关闭“当前 server”：正在打开存储的任务稍后仍可创建新 listener，造成监听泄漏；Windows 遗留 pipe instance 还会阻止继任者创建首个监听。POSIX endpoint 清理核对 inode，旧 disposer 不删除继任者 socket。owner 崩溃后候选只用原内核锁竞选；胜者从磁盘打开并产生新 epoch。暂停的 owner 仍持锁，超时不会让其他 Host 夺权；旧实例重启后成为 follower 或重新正常竞选，不能复用旧 domain。
 
-存储打开失败继续持锁，修复后可 refresh 重试。已打开 domain 的写入若报 `unknown-state`，保留拒绝信息、断开共享服务并隔离至重启，不重新打开另一个内存快照。明确失败的写不发布新 grant。
+存储打开失败继续持锁，修复后由后台恢复或 refresh 重试。已打开 domain 的写入若报 `unknown-state`，保留拒绝信息、断开共享服务并隔离至重启，不重新打开另一个内存快照。明确失败的写不发布新 grant。
+
+**后台恢复（[ADR-0026](../decisions/ADR-0026-registry-background-recovery.md)）。** 降级状态带结构化资格：`contended`、follower 断线和 `storage-failed` 的 `retryable`（acquire 非争用失败、open/listen 失败）由 `RecoveryScheduler`（`authority/recovery.ts`）自动重试唯一入口 `ensureAuthority()`；`config`（leasePath/介质/锁名错配）与 `quarantine`（unknown-state）是终态，按需与后台都不重试。调度每实例一个 timer、一个在飞尝试，完成后才计时，退避 1s ×2 封顶 30s、±20% jitter，timer `unref`；重复降级不重置退避，恢复完成才归零。registry 行 `backgroundRecovery: false` 关闭后台恢复，按需路径不变。follower 连接被接纳不等于恢复：断线前已跟踪的主根逐 key 经 `snapshot` 在转场队列之外重新同步（空快照也会清掉旧 withheld 边界），失败 key 留待下一 tick，全部落地才算完成。同步只恢复投影，任何新操作仍逐次 admission。owner 重开时迁移与分类先写本轮私有暂存，listen 成功后在一个同步提交段里换 cache、逐 key 写 scope、落定 authority，再统一冲刷 scope 订阅者、IPC 广播与 Registry 监听器（scope 侧经 `multiRootScope.batch()`）；失败轮零通知。`releaseAuthority` 先停调度、再本地取消在途握手，退出不等 hello 超时。只读 `registry.diagnostics` 给出 `recoveryClass` 与 `phase`（idle/waiting/attempting/disabled/requires-restart），转换日志按 `(kind, class)` 去重。无心跳：owner 暂停而 follower 无在途请求时不会被察觉，属 F4b 候选。owner 被隔离时 follower 只能看到 contended，会低频重试至 owner 重启。
 
 Windows contender 在零超时等待失败后立即关闭 semaphore handle，连接期间不保留 waiter handle。关闭 handle 不恢复 count；崩溃恢复依赖最后一个 handle 关闭后对象销毁。不得改成长寿命 waiter；多候选崩溃用例必须在 Windows 原生执行。[Microsoft semaphore 语义](https://learn.microsoft.com/en-us/windows/win32/sync/semaphore-objects)。
 
 ## 7. 可重复验收
 
-`tests/shared-registry-multiprocess.e2e.ts` 通过独立 Node/V8、生产 Registry/JSON/fs 和真实 IPC 构造并发同/异主根 mutation、写入准入屏障、跨实例撤权、SIGKILL、多候选竞选、旧 holder 重启与暂停不夺锁。`tests/shared-registry.spec.ts` 补充丢通知、丢已提交应答不重放、失联嵌套操作与正常接管；`tests/shared-consumers.spec.ts` 覆盖同步/异步进程、复制 profile、PTY、Skills 缓存、Files/LSP 与 unknown-state。`tests/authority-native.spec.ts` 覆盖真实 peer gate、请求去重/冲突，按平台执行受限子进程攻击用例。旧 `registry-operation` 与 `skills-authority` 循环回归保留。
+`tests/shared-registry-multiprocess.e2e.ts` 通过独立 Node/V8、生产 Registry/JSON/fs 和真实 IPC 构造并发同/异主根 mutation、写入准入屏障、跨实例撤权、SIGKILL、多候选竞选、旧 holder 重启与暂停不夺锁。`tests/shared-registry.spec.ts` 补充丢通知、丢已提交应答不重放、失联嵌套操作与正常接管；`tests/shared-consumers.spec.ts` 覆盖同步/异步进程、复制 profile、PTY、Skills 缓存、Files/LSP 与 unknown-state。`tests/authority-native.spec.ts` 覆盖真实 peer gate、请求去重/冲突、握手本地取消，按平台执行受限子进程攻击用例。后台恢复由 `tests/recovery.spec.ts`（fake timers 调度规则）、`shared-registry.spec.ts`（只读观测的自动接管/重连同步/部分失败/持续失败静默/opt-out/诊断）、多进程 e2e 的 SIGKILL 新 epoch 接管与 SIGSTOP→SIGCONT 原 epoch 重连、`tests/registry-recovery-soak.e2e.ts`（空闲降级 30s 的尝试数/CPU/heap/通知上限）覆盖。旧 `registry-operation` 与 `skills-authority` 循环回归保留。
 
 CI build 后用 `registry:probe --required` 要求正常原生 runner 的共享能力成立；绑定/API 异常不能被吞为 capability skip。原生测试用 `nativeHostAvailability()` 明确探测外层沙箱/缺失 peer-pidfd 等能力；它只决定测试能否运行，不改变生产认证。behavior 与 packed 的同一 battery 还 boot 两个完整 Host profile，共享实际安装产物并验证撤权/接管；独立进程隔离由前述 e2e 覆盖。三平台 CI 仍运行同一套正式测试及 compose/behavior/journey/packed 门禁。未执行的版本/平台不得标为通过；真实 dsh-tui 的长期 OOM 复测与共享服务一致性测试分别报告，不能相互替代。
 
