@@ -1,6 +1,6 @@
 # F4 — Registry 权威后台恢复与故障诊断（实施稿 rev.5）
 
-> **状态：Accepted / Phase 1–3 已在 `feat/host-f4` 实施，macOS 本机验证通过；三平台 CI 与真实 TUI soak 未完成（[ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md)）。**本文是[共享 Registry 计划](./2026-10-30-shared-registry-authority.md) F 表 **F4** 项的专项计划；rev.4 经三轮技术评审通过，rev.5 吸收实施前源码审核门（Phase 0）的发现，合同由 ADR-0026 定案，批次已登记入[进度总账](./2026-09-12-multi-root-workspace.md)。文中"Current State"逐条对应当前源码，"Design"为已采纳合同，实施完成前不得宣称能力已实现。
+> **状态：Accepted / Phase 1–3 已在 `feat/host-f4` 实施，macOS 本机与三平台 CI 验证通过；真实 dsh-tui soak 暂缓（[ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md)）。**本文是[共享 Registry 计划](./2026-10-30-shared-registry-authority.md) F 表 **F4** 项的专项计划；rev.4 经三轮技术评审通过，rev.5 吸收实施前源码审核门（Phase 0）的发现，合同由 ADR-0026 定案，批次已登记入[进度总账](./2026-09-12-multi-root-workspace.md)。文中"Current State"逐条对应当前源码，"Design"为已采纳合同，实施完成前不得宣称能力已实现。
 
 ## 评审修订记录
 
@@ -163,7 +163,7 @@
 - **在途握手本地取消（rev.3 修正）**：`AuthorityClient.connect` 增加本地取消能力（如可选 `AbortSignal`/`cancel` 句柄——内部 API 调整，**协议帧不变**）；registry 记录本轮在途握手的 cancel，`releaseAuthority`/换代时调用 → 销毁候选 channel、立即使握手 reject。adopted 后的关闭沿用现有 `client?.close()`；取消落在握手完成之后则走 `connectionGeneration`/`adopted` 检查丢弃晚到 client。
 - **退出上限合同**：dispose 后可被取消的握手立即结束，`releaseAuthority` 不再排在在途连接之后；`protocol.ts` client request 定时器**保持 ref**，取消/关闭同步清除，取消未命中时残余上限 ≤5s（request 超时）。（实施期修正：原拟补 `unref()` 兜底，Windows CI 证伪——见评审修订记录"Windows CI 修正"。）
 - owner 挂起时单 tick 占 `authorityChain` ≤ ~5s（单次连接）+ 同步时间；用户操作仍可能短暂排队，属可接受上限，评审确认。
-- **rev.5 实施细则**：`AuthorityClient.connect(..., signal?: AbortSignal)`。调用前已中止 ⇒ 立即 reject；`connectNative()` 返回时已中止 ⇒ 销毁 channel 后 reject；hello 期间中止 ⇒ `close()` 销毁 channel，握手以 `AuthorityRpcError('authority-cancelled', …)` reject；完成后移除 abort 监听。registry 为每次连接尝试新建 `AbortController` 并记录，`releaseAuthority()` 在排入 `authorityChain` **之前**中止它。POSIX 与 Windows 的 connect 都是同步建立通道、只在 hello 阶段等待，因此两平台取消形状一致；Windows 原生行为待 CI 证实。
+- **rev.5 实施细则**：`AuthorityClient.connect(..., signal?: AbortSignal)`。调用前已中止 ⇒ 立即 reject；`connectNative()` 返回时已中止 ⇒ 销毁 channel 后 reject；hello 期间中止 ⇒ `close()` 销毁 channel，握手以 `AuthorityRpcError('authority-cancelled', …)` reject；完成后移除 abort 监听。registry 为每次连接尝试新建 `AbortController` 并记录，`releaseAuthority()` 在排入 `authorityChain` **之前**中止它。POSIX 与 Windows 的 connect 都是同步建立通道、只在 hello 阶段等待，因此两平台取消形状一致；Windows 原生行为已经 CI 证实（见"Windows CI 修正"）。
 
 ### R5 诊断面
 
@@ -245,7 +245,7 @@ rev.1 六问按首轮评审建议转为决定（rev.3 维持不变，待最终�
 - [x] [ADR-0026](../../decisions/ADR-0026-registry-background-recovery.md) 落地；批次已登记总账（实现与验收另计）。
 - [x] 实施前源码审核门（rev.5）完成；N1 阻塞缺陷已先红后绿修复（R0）。
 - [x] Phase 1 前置修复落地：scope 真值签名（空快照清边界回归）、私有暂存与 rev.4 顺序并集提交（scope `subscribe()` 纳入通知批处理）、withheld 门控、日志去重、握手本地取消（request 定时器保持 ref、取消时清除）、结构化资格分类，各带"先红后绿"回归（macOS 本机）。
-- [x] R1 调度 + R2 完成条件（含失败集合重同步）+ R4 tick 成本控制实施完成；fake-timer 单测与多进程 e2e 全绿，且用例遵守只读观测规则（macOS 本机；Linux/Windows 待 CI）。
-- [ ] 三平台 CI 通过；Windows semaphore 接管语义经原生验证（`registry-semaphore-win32.e2e.ts` 已加后台接管用例，未在 Windows 运行）。
-- [ ] soak 空闲降级资源有界；Issue #24 刷新循环无回归。本机部分已完成：`registry-recovery-soak.e2e.ts` 空闲降级 30s 实测尝试 5 次、scope 通知 0、CPU ≈40ms、heap 增长 1–3MB；Issue #24 静默用例通过。真实 dsh-tui `pnpm soak:tui-registry` 待隔离 TUI 环境。
+- [x] R1 调度 + R2 完成条件（含失败集合重同步）+ R4 tick 成本控制实施完成；fake-timer 单测与多进程 e2e 全绿，且用例遵守只读观测规则（macOS 本机与三平台 CI）。
+- [x] 三平台 CI 通过；Windows semaphore 接管语义经原生验证：PR #29 CI（`0468e9a`，run 41193188159）82/82 通过：20 个精确版本 × ubuntu-22.04 / ubuntu-latest / macOS / Windows，gate 通过；Windows runner 上 `registry-semaphore-win32.e2e.ts` 的后台接管用例实跑通过（无任何操作、owner 死亡后 follower 自动接管，约 2.5s）。`shared-registry-multiprocess.e2e.ts` 的 SIGKILL/SIGSTOP 三例按设计只在 POSIX 运行，Windows 的 owner 死亡接管由前述 semaphore 用例覆盖。首轮 CI 的 Windows 失败及修正见评审修订记录"Windows CI 修正"。
+- [ ] soak 空闲降级资源有界；Issue #24 刷新循环无回归。已完成：`registry-recovery-soak.e2e.ts` 空闲降级 30s（macOS 本机实测尝试 5 次、scope 通知 0、CPU ≈40ms、heap 增长 1–3MB）与 Issue #24 静默用例在本机及三平台 CI 全部通过。**暂缓**：真实 dsh-tui `pnpm soak:tui-registry`（2026-10-31 决定本批暂不运行，需隔离 TUI 环境）；在其完成前本项保持未勾选。
 - [x] 架构文档恢复节与 ADR-0025"按需恢复"表述同步；总账已登记实施状态（未发布）。

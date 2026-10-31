@@ -38,7 +38,7 @@ completed/
 
 active：
 
-- [2026-10-31-f4-background-recovery.md](./active/2026-10-31-f4-background-recovery.md) — F4 后台恢复与故障诊断专项计划（**rev.4 评审通过、ADR-0026 已立项，未实现**）：复用 `ensureAuthority` 的恢复调度、投影同步完成条件、整轮失败通知原子性（含 scope 订阅者批处理）、握手本地取消与诊断面；批次已登记总账。
+- [2026-10-31-f4-background-recovery.md](./active/2026-10-31-f4-background-recovery.md) — F4 后台恢复与故障诊断专项计划（**rev.4 评审通过、ADR-0026 已立项；已实施并经三平台 CI 验收，真实 TUI soak 暂缓，未发布**）：复用 `ensureAuthority` 的恢复调度、投影同步完成条件、整轮失败通知原子性（含 scope 订阅者批处理）、握手本地取消与诊断面；批次已登记总账。
 
 - [2026-10-30-shared-registry-authority.md](./active/2026-10-30-shared-registry-authority.md) — Issue #24 原始 Long-term 全目标、已发布基线与共享服务初版对照、六项 P1 审计、后续能力演进与退出条件；初版已随 `v0.1.12` 发版，剩余 Ubuntu 报告环境长跑复测与进度见总账。
 
