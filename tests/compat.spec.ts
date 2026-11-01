@@ -13,7 +13,7 @@
  *    with the offending versions named.
  */
 
-import { readFileSync, realpathSync } from 'node:fs'
+import { readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -223,6 +223,32 @@ describe('shared upstream packages resolve through the host, never a shipped cop
         `${name} must resolve to the copy dsh-sandbox-local itself carries`,
       ).toBe(realpathSync(host.resolve(`${name}/package.json`)))
     }
+  })
+})
+
+describe('koffi resolves through the host, never a second native image', () => {
+  // koffi is a shipped `dependencies` entry because FFI callers need a
+  // standalone fallback, but a packed install must still dlopen the HOST's
+  // copy: a second koffi.node image in one process SIGBUSes on darwin-arm64
+  // pointer authentication (packed-install smoke, 2026-11-01). Every FFI call
+  // site goes through `loadHostKoffi`, which anchors at `dsh-fs-local` — a
+  // required peer that carries koffi on every supported release.
+  it('keeps the single host-anchored loader as the only koffi import in src/', () => {
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry =>
+      entry.isDirectory() ? walk(join(dir, entry.name)) : entry.name.endsWith('.ts') ? [join(dir, entry.name)] : [])
+    for (const file of walk(join(REPO_ROOT, 'src'))) {
+      if (file.endsWith('compat/koffi.ts')) continue
+      expect(readFileSync(file, 'utf8'), `${file} must use loadHostKoffi() from compat/koffi.ts`).not.toMatch(/import\(['"]koffi['"]\)/u)
+    }
+  })
+
+  it('loadHostKoffi returns the copy dsh-fs-local itself resolves', async () => {
+    const own = createRequire(join(REPO_ROOT, 'package.json'))
+    const host = createRequire(own.resolve('@deepseek-ai/dsh-fs-local/package.json'))
+    const { pathToFileURL } = await import('node:url')
+    const hostCopy = (await import(pathToFileURL(host.resolve('koffi')).href)).default
+    const { loadHostKoffi } = await import('../src/compat/koffi.ts')
+    expect(await loadHostKoffi()).toBe(hostCopy)
   })
 })
 

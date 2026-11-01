@@ -4,6 +4,7 @@ import { closeSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, 
 import { join } from 'node:path'
 import { Socket } from 'node:net'
 import type { EventEmitter } from 'node:events'
+import { loadHostKoffi } from '../compat/koffi.ts'
 
 export interface Channel {
   on: EventEmitter['on']
@@ -30,7 +31,7 @@ export function storeIdentity(root: string): { root: string; id: string; endpoin
 type Call = ((...args: unknown[]) => number) & { async: (...args: unknown[]) => void }
 let posixPromise: Promise<Awaited<ReturnType<typeof loadPosix>>> | undefined
 async function loadPosix() {
-  const koffi = (await import('koffi')).default
+  const koffi = await loadHostKoffi()
   const libc = koffi.load(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6')
   const bind = (name: string, ret: string, args: string[]) => libc.func(name, ret, args) as unknown as Call
   const socketpair = bind('socketpair', 'int', ['int', 'int', 'int', 'void *'])
@@ -152,7 +153,7 @@ export async function nativeHostAvailability(): Promise<{ available: boolean; re
   if (process.platform === 'linux') {
     if (!/^NoNewPrivs:\s+0$/m.test(readFileSync('/proc/self/status', 'utf8'))) return { available: false, reason: 'the Host itself has NoNewPrivs; shared IPC refuses restricted peers' }
   } else if (process.platform === 'darwin') {
-    const koffi = (await import('koffi')).default
+    const koffi = await loadHostKoffi()
     const check = koffi.load('/usr/lib/libsandbox.dylib').func('int sandbox_check(int pid, const char *operation, int filter)')
     if (check(process.pid, null, 0) !== 0) return { available: false, reason: 'the Host itself is sandboxed; shared IPC refuses sandboxed peers' }
   }
