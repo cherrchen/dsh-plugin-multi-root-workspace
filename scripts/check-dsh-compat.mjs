@@ -90,7 +90,20 @@ for (const name of required) {
   if (!(name in peers)) fail(`${name} is a required core package but is not declared in peerDependencies`)
 }
 
-// 3. The development pin is one of the allowlisted releases. CI runs this pin,
+// 3. No @deepseek-ai/* package may be a shipped dependency. Peers resolve to
+//    the single copy the host carries; a shipped dep installs a SECOND copy
+//    into the profile — `dsh-sandbox-local` pulls schemastery/node-addon-system
+//    itself, so a private one only ever differs from the host's, and the
+//    launcher reports profile-core-mixed / profile-core-copy (issue #30).
+for (const field of ['dependencies', 'optionalDependencies']) {
+  for (const name of Object.keys(manifest[field] ?? {})) {
+    if (name.startsWith('@deepseek-ai/')) {
+      fail(`package.json ${field} contains ${name}: DSH core packages belong in peerDependencies so they resolve through the host`)
+    }
+  }
+}
+
+// 4. The development pin is one of the allowlisted releases. CI runs this pin,
 //    so a pin outside the allowlist means the list has no evidence behind it.
 const pinned = new Set()
 for (const [name, version] of Object.entries(devs)) {
@@ -106,7 +119,7 @@ if (pinned.size > 1) {
   else notes.push(`development pin: ${pin}`)
 }
 
-// 4. What is actually installed here agrees with itself and with the allowlist.
+// 5. What is actually installed here agrees with itself and with the allowlist.
 //    This mirrors the runtime gate, so `pnpm compat:check` reproduces a boot
 //    refusal without booting a harness.
 const installed = new Map()
