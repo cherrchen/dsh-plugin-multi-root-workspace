@@ -237,7 +237,7 @@ describe('koffi resolves through the host, never a second native image', () => {
     const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry =>
       entry.isDirectory() ? walk(join(dir, entry.name)) : entry.name.endsWith('.ts') ? [join(dir, entry.name)] : [])
     for (const file of walk(join(REPO_ROOT, 'src'))) {
-      if (file.endsWith('compat/koffi.ts')) continue
+      if (file.replaceAll('\\', '/').endsWith('/compat/koffi.ts')) continue
       expect(readFileSync(file, 'utf8'), `${file} must use loadHostKoffi() from compat/koffi.ts`).not.toMatch(/import\(['"]koffi['"]\)/u)
     }
   })
