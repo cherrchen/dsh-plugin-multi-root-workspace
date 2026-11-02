@@ -25,6 +25,7 @@ English: [README.en.md](./README.en.md)
 - [DSH 版本不在支持矩阵上](./unsupported-dsh-release.md) — `unsupported` / `mixed` / `incomplete` 三种判定、provider 不启动的原因，以及人工提升新版本的流程。
 - [安装停在构建授权](./install-stops-at-build-approval.md) — 首次 `dsh plugin add` 因 `koffi` 的构建脚本被 pnpm 拦下而失败，以及那一次 `allowBuilds` 表态怎么回。
 - [Files 页签根选择器退化](./files-switcher-degraded.md) — 上游 `data-files-*` 钩子不是槽位契约；选择器退回菜单形态时的三态目检与修法。
+- [启动器报 profile-core-mixed / profile-core-copy](./profile-core-mixed.md) — 旧版把共享上游包发成 `dependencies` 导致 profile 里出现第二份单例的根因与修法。
 
 - [Socket / CVE 依赖告警](./dependency-security-alerts.md) — 直接依赖补丁、上游精确 pin 与 Host 根项目 override 的修复边界。
 

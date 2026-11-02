@@ -93,7 +93,8 @@ function cordisRequiredBy(dshVersion) {
 
 /** Whether a dependency name belongs to the cordis ecosystem a DSH release declares beside its own packages. */
 function isEcosystemPackage(name) {
-  return name === '@deepseek-ai/schemastery' || name === '@deepseek-ai/cosmokit' || name.startsWith('@deepseek-ai/cordis-plugin-')
+  return name === '@deepseek-ai/schemastery' || name === '@deepseek-ai/cosmokit' || name === '@deepseek-ai/node-addon-system'
+    || name.startsWith('@deepseek-ai/cordis-plugin-')
 }
 
 /**
@@ -105,15 +106,20 @@ function isEcosystemPackage(name) {
  * `1.0.7-alpha.1` entry already in the lockfile, and the loader/cordis pair no
  * longer matches what that release shipped with (Settings volatile writes then
  * miss the live config). The ranges come from the release's own manifests:
- * `dsh` and `dsh-app-boot` (which declares the plugin trio as peers) and the
- * pinned cordis; the highest published version each range admits is the pin.
+ * `dsh` and `dsh-app-boot` (which declares the plugin trio as peers), the
+ * pinned cordis, and `dsh-sandbox-local` (which carries the schemastery /
+ * node-addon-system pairs this plugin shares with the host); the highest
+ * published version each range admits is the pin.
  * @param version - the exact `@deepseek-ai/dsh` release being pinned.
  * @param cordisVersion - the exact cordis version {@link cordisRequiredBy} returned.
  * @returns package name to exact version, sorted by name.
  */
 function ecosystemPins(version, cordisVersion) {
   const ranges = new Map()
-  for (const spec of [`@deepseek-ai/dsh@${version}`, `@deepseek-ai/dsh-app-boot@${version}`, `@deepseek-ai/cordis@${cordisVersion}`]) {
+  for (const spec of [
+    `@deepseek-ai/dsh@${version}`, `@deepseek-ai/dsh-app-boot@${version}`,
+    `@deepseek-ai/cordis@${cordisVersion}`, `@deepseek-ai/dsh-sandbox-local@${version}`,
+  ]) {
     for (const field of ['dependencies', 'peerDependencies']) {
       const raw = npmOutput(['view', spec, field, '--json']).trim()
       const declared = raw === '' ? {} : JSON.parse(raw)
@@ -131,12 +137,16 @@ function ecosystemPins(version, cordisVersion) {
 }
 
 /**
- * Repoint every DSH devDependency, and cordis to the version that release requires.
+ * Repoint every DSH devDependency, cordis to the version that release requires,
+ * and each ecosystem devDependency to that release's own resolved pin — a
+ * schemastery left at the newer line would install a private copy beside the
+ * repointed host's own one (issue #30's failure shape, in the probe lane).
  * @param version - the release to pin.
  * @param cordisVersion - the exact cordis version {@link cordisRequiredBy} returned.
+ * @param pins - the resolved ecosystem pins {@link ecosystemPins} returned.
  * @returns the packages that were changed.
  */
-function repointManifest(version, cordisVersion) {
+function repointManifest(version, cordisVersion, pins) {
   const source = readFileSync(MANIFEST, 'utf8')
   const manifest = JSON.parse(source)
   const changed = []
@@ -155,6 +165,14 @@ function repointManifest(version, cordisVersion) {
   if (manifest.devDependencies?.[cordisName] !== cordisVersion) {
     changed.push(`${cordisName}: ${manifest.devDependencies?.[cordisName]} → ${cordisVersion}`)
     manifest.devDependencies[cordisName] = cordisVersion
+  }
+  for (const name of Object.keys(manifest.devDependencies ?? {})) {
+    if (!isEcosystemPackage(name)) continue
+    const pin = pins[name]
+    if (pin === undefined) throw new Error(`[upgrade] ${name} is a devDependency but ${version} declares no range for it`)
+    if (manifest.devDependencies[name] === pin) continue
+    changed.push(`${name}: ${manifest.devDependencies[name]} → ${pin}`)
+    manifest.devDependencies[name] = pin
   }
   // Re-serialize with the trailing newline the repository's manifest carries, so
   // the only diff is the versions themselves.
@@ -176,9 +194,10 @@ function repointManifest(version, cordisVersion) {
  * the comments that explain why each allowance exists.
  * @param version - the release to pin.
  * @param cordisVersion - the exact cordis version to write into the cordis allowance.
+ * @param pins - the resolved ecosystem pins {@link ecosystemPins} returned.
  * @returns the number of rewritten entries.
  */
-function repointWorkspace(version, cordisVersion) {
+function repointWorkspace(version, cordisVersion, pins) {
   const source = readFileSync(WORKSPACE, 'utf8')
   let count = 0
   let updated = source.replace(/^(\s*- '@deepseek-ai\/dsh(?:-[\w-]+)?)@[^']+'$/gmu, (line, prefix) => {
@@ -206,7 +225,7 @@ function repointWorkspace(version, cordisVersion) {
     .map(match => match[1]))].sort()
   updated = updated.trimEnd() + `\n\n${marker}\noverrides:\n`
     + `  '@deepseek-ai/cordis': '${cordisVersion}'\n`
-    + Object.entries(ecosystemPins(version, cordisVersion)).map(([name, pin]) => `  '${name}': '${pin}'\n`).join('')
+    + Object.entries(pins).map(([name, pin]) => `  '${name}': '${pin}'\n`).join('')
     + names.map(name => `  '${name}': '${version}'\n`).join('')
     + '# END DSH probe overrides\n'
   writeFileSync(WORKSPACE, updated)
@@ -258,8 +277,9 @@ if (!/^\d+\.\d+\.\d+(?:-[\w.]+)?$/u.test(target)) {
 }
 
 const cordisVersion = cordisRequiredBy(target)
-const allowances = repointWorkspace(target, cordisVersion)
-const changed = repointManifest(target, cordisVersion)
+const pins = ecosystemPins(target, cordisVersion)
+const allowances = repointWorkspace(target, cordisVersion, pins)
+const changed = repointManifest(target, cordisVersion, pins)
 console.log(`[upgrade] cordis pin: ${cordisVersion}`)
 console.log(`[upgrade] pinned ${target}`)
 console.log(`[upgrade] devDependencies rewritten: ${changed.length}`)

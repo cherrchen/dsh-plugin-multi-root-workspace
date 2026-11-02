@@ -13,7 +13,8 @@
  *    with the offending versions named.
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, realpathSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -49,7 +50,10 @@ function reader(base: string | undefined, overrides: Record<string, string | und
 }
 
 const manifest = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
+  dependencies?: Record<string, string>
+  optionalDependencies?: Record<string, string>
   peerDependencies: Record<string, string>
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>
   devDependencies: Record<string, string>
 }
 
@@ -174,6 +178,77 @@ describe('peerDependencies and the allowlist agree', () => {
     for (const name of REQUIRED_CORE_PACKAGES) {
       expect(Object.keys(manifest.peerDependencies), `${name} must be a peer`).toContain(name)
     }
+  })
+})
+
+describe('shared upstream packages resolve through the host, never a shipped copy', () => {
+  // `dsh-sandbox-local` — a required core package — carries both of these on
+  // every supported release, so the composition always provides exactly one
+  // copy. Shipping either as a `dependencies` entry installs a SECOND copy
+  // into the profile, which the launcher reports as profile-core-mixed /
+  // profile-core-copy (issue #30).
+  const shared = ['@deepseek-ai/schemastery', '@deepseek-ai/node-addon-system'] as const
+
+  it('names no @deepseek-ai/* package as a shipped dependency', () => {
+    for (const field of ['dependencies', 'optionalDependencies'] as const) {
+      for (const name of Object.keys(manifest[field] ?? {})) {
+        expect(name.startsWith('@deepseek-ai/'), `${field} must not contain ${name}; DSH core packages belong in peerDependencies`).toBe(false)
+      }
+    }
+  })
+
+  it('declares both as required peers — the rows importing them mount unconditionally', () => {
+    for (const name of shared) {
+      expect(Object.keys(manifest.peerDependencies), `${name} must be a peer`).toContain(name)
+      expect(manifest.peerDependenciesMeta?.[name]?.optional, `${name} loads in every composition`).not.toBe(true)
+    }
+  })
+
+  it('promises the prerelease lines the supported hosts carry', () => {
+    // A bare `^3.18.x` range cannot match a prerelease, so pnpm would install
+    // a private copy beside the host's alpha — the exact `^3.18.2` dep that
+    // produced issue #30. The union names each alpha line the allowlisted
+    // releases resolve, the same shape the cordis peer already uses.
+    expect(manifest.peerDependencies['@deepseek-ai/schemastery'])
+      .toBe('>=3.18.2 <4.0.0 || 3.18.5-alpha.1 || 3.18.5-alpha.2 || 3.18.6-alpha.1')
+    expect(manifest.peerDependencies['@deepseek-ai/node-addon-system']).toBe('^0.1.2')
+  })
+
+  it('resolves each to the same file the host package itself loads', () => {
+    const own = createRequire(join(REPO_ROOT, 'package.json'))
+    const host = createRequire(own.resolve('@deepseek-ai/dsh-sandbox-local/package.json'))
+    for (const name of shared) {
+      expect(
+        realpathSync(own.resolve(`${name}/package.json`)),
+        `${name} must resolve to the copy dsh-sandbox-local itself carries`,
+      ).toBe(realpathSync(host.resolve(`${name}/package.json`)))
+    }
+  })
+})
+
+describe('koffi resolves through the host, never a second native image', () => {
+  // koffi is a shipped `dependencies` entry because FFI callers need a
+  // standalone fallback, but a packed install must still dlopen the HOST's
+  // copy: a second koffi.node image in one process SIGBUSes on darwin-arm64
+  // pointer authentication (packed-install smoke, 2026-11-01). Every FFI call
+  // site goes through `loadHostKoffi`, which anchors at `dsh-fs-local` — a
+  // required peer that carries koffi on every supported release.
+  it('keeps the single host-anchored loader as the only koffi import in src/', () => {
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry =>
+      entry.isDirectory() ? walk(join(dir, entry.name)) : entry.name.endsWith('.ts') ? [join(dir, entry.name)] : [])
+    for (const file of walk(join(REPO_ROOT, 'src'))) {
+      if (file.replaceAll('\\', '/').endsWith('/compat/koffi.ts')) continue
+      expect(readFileSync(file, 'utf8'), `${file} must use loadHostKoffi() from compat/koffi.ts`).not.toMatch(/import\(['"]koffi['"]\)/u)
+    }
+  })
+
+  it('loadHostKoffi returns the copy dsh-fs-local itself resolves', async () => {
+    const own = createRequire(join(REPO_ROOT, 'package.json'))
+    const host = createRequire(own.resolve('@deepseek-ai/dsh-fs-local/package.json'))
+    const { pathToFileURL } = await import('node:url')
+    const hostCopy = (await import(pathToFileURL(host.resolve('koffi')).href)).default
+    const { loadHostKoffi } = await import('../src/compat/koffi.ts')
+    expect(await loadHostKoffi()).toBe(hostCopy)
   })
 })
 

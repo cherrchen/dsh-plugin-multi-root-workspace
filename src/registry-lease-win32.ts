@@ -16,6 +16,7 @@
 import { createHash } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
+import { loadHostKoffi } from './compat/koffi.ts'
 
 const WAIT_OBJECT_0 = 0
 const WAIT_TIMEOUT = 258
@@ -36,8 +37,8 @@ let bindings: Kernel32 | undefined
 /** Load kernel32 through Koffi the first time a Windows process needs it. */
 async function kernel32(): Promise<Kernel32> {
   if (bindings !== undefined) return bindings
-  const loaded = await import('koffi')
-  const library = (loaded.default as { load: (name: string) => {
+  const koffi = await loadHostKoffi()
+  const library = (koffi as { load: (name: string) => {
     func: (convention: string, name: string, ret: string, args: readonly string[]) => Win32Fn
   } }).load('kernel32.dll')
   bindings = {

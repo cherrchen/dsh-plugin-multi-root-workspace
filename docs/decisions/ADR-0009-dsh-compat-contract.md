@@ -122,6 +122,8 @@ node_modules                resolved versions        本地实际装的
 
 它从 TypeScript 源码里**文本读取** allowlist 而不是 import：这个检查必须能在 `pnpm build` 之前、在没有 `lib/` 的干净 checkout 上运行。
 
+同一检查还有一条形状守卫：`dependencies` 与 `optionalDependencies` 不得出现任何 `@deepseek-ai/*` 名字。共享上游包（`cordis`、`schemastery`、`node-addon-system`）与 `dsh-*` 一样只能经 `peerDependencies` 由宿主供给——它们各有自己的版本线，不属于 allowlist 的精确或，但私带副本会在 profile 里装出第二份单例（issue #30：schemastery `3.18.5` 对宿主 `3.18.6-alpha.1`，启动器报 `profile-core-mixed`）。这类 peer 范围要覆盖每个受支持版本实际携带的版本，alpha 线须像 cordis peer 一样逐个具名——裸的 `^x.y.z` 不匹配 prerelease；对应的 `devDependencies` 钉开发宿主自带的精确版本，由 `upgrade-dsh.mjs` 随 ecosystemPins 重指。
+
 ### 7. 开发 pin 留在 `0.1.5-rc.2`，第二个版本由升级车道覆盖
 
 `devDependencies` 与 lockfile 的主 pin 保持 `0.1.5-rc.2`，CI 主车道验证这个基线；`0.1.6-alpha.1` 由 `upgrade.yml` 矩阵覆盖。两个版本都必须能跑通全部检查。

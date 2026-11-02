@@ -1,12 +1,13 @@
 /** Windows local pipes: tokens, never a caller-supplied PID or a bearer file. */
 import { EventEmitter } from 'node:events'
 import type { Channel, Listener } from './native.ts'
+import { loadHostKoffi } from '../compat/koffi.ts'
 
 class RestrictedRegistryPeerError extends Error {}
 
 let apiPromise: Promise<Awaited<ReturnType<typeof load>>> | undefined
 async function load() {
-  const koffi = (await import('koffi')).default
+  const koffi = await loadHostKoffi()
   const kernel = koffi.load('kernel32.dll'), advapi = koffi.load('advapi32.dll')
   type Fn = (...args: unknown[]) => number
   const k = (name: string, ret: string, args: string[]) => kernel.func('__stdcall', name, ret, args) as unknown as Fn

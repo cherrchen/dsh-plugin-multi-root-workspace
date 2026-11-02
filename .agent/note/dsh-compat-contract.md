@@ -13,19 +13,23 @@ src/compat/dsh-version.ts  →  SUPPORTED_DSH_RELEASES
 是**精确版本数组**，不是 semver 范围。当前：
 
 ```ts
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.2-alpha.2'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2'] as const
 ```
 
 改它的时候，下面四处必须同时一致，否则 `pnpm compat:check` 失败：
 
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   allowlist
-package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.4 || 0.2.2-alpha.2"
+package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-alpha.2"
 package.json                devDependencies          allowlist 中的某一项（当前 0.2.2-alpha.2）
 node_modules                实际解析到的版本          allowlist 中的某一项
 ```
 
 `scripts/check-dsh-compat.mjs` 是**文本读取** TypeScript 源码里的这个数组，不是 import。所以：**不要把它改成非 `export const NAME = [...]` 字面量形式**（比如从别处拼出来、或者加类型断言以外的表达式），否则静态检查会直接抛错。原因是这个检查必须能在 `pnpm build` 之前、在没有 `lib/` 的干净 checkout 上跑。
+
+非 `dsh-*` 的共享上游包（`cordis`、`schemastery`、`node-addon-system`）同样**只能是 peer**：它们是宿主树自带的单例——`dsh-sandbox-local` 在每个受支持版本上都直接依赖后两者，插件私带一份就是第二份。放进 `dependencies` 的实际后果（issue #30）：profile 里装出 schemastery `3.18.5` 对宿主 `3.18.6-alpha.1`、cosmokit `1.8.6` 对 `1.8.7-alpha.1` 和一份同版本的 node-addon-system，启动器依赖自检报 `profile-core-mixed` / `profile-core-copy`。机制要记牢：`^3.18.2` 这类范围**不匹配** prerelease（`3.18.6-alpha.1` 不满足它），所以 peer 范围必须像 cordis peer 那样"稳定线用范围 + alpha 线逐个具名"（`>=3.18.2 <4.0.0 || 3.18.5-alpha.1 || 3.18.5-alpha.2 || 3.18.6-alpha.1`），升版纳入新 alpha 线时同步扩并集；`devDependencies` 钉开发 pin 宿主自带的精确版本，由 `upgrade-dsh.mjs` 随 ecosystemPins 重指。`compat:check` 与 `tests/compat.spec.ts` 硬性检查 `dependencies` / `optionalDependencies` 里没有任何 `@deepseek-ai/*` 名字。
+
+同一单例规则对**原生镜像**也成立：`koffi` 仍是合法 `dependencies`（独立场景的兜底），但安装进 profile 后必须 dlopen 宿主那份——`dsh plugin add` 会在宿主已加载的 koffi 旁再装一份私有副本，两个 `koffi.node` 镜像同进程在 darwin-arm64 指针校验（PAC）下直接 SIGBUS，进程无声退出（2026-11-01 packed smoke 实锤；main 上同样崩，属 F4 既有回归）。全部 FFI 调用点统一走 `src/compat/koffi.ts` 的 `loadHostKoffi()`：以必需 peer `dsh-fs-local`（每个受支持版本都携带 koffi）为锚点解析宿主副本，解析不到才回退包内自带。`tests/compat.spec.ts` 扫描 `src/` 禁止 `compat/koffi.ts` 之外出现裸 `import('koffi')`。
 
 ## 2. 你写的测试可能因为门禁而失败——这是对的
 
@@ -144,7 +148,7 @@ pnpm install --frozen-lockfile                                     # node_module
 - **那句 `git checkout` 会把三个文件整体退回 HEAD**，连同你对它们的未提交修改。在脏的 manifest 上跑探测之前先提交或 stash。
 - 候选版本装上之后，`pnpm <script>` 的**依赖自检**会因为同一个 release-age 门禁判定"依赖不同步"并触发一次重装，而那次重装同样会失败，把 `node_modules` 撕成半截（`.bin` 消失、`.package-map.json` 只剩一条）。这时 `pnpm install` 会说 "Already up to date" 却修不好，唯一出路是 `rm -rf node_modules` 重装。要避免它，探测期间绕开 pnpm 的脚本包装，直接用 `PATH="$PWD/node_modules/.bin:$PATH"` 跑 `oxlint` / `tsc` / `vitest` / `node scripts/*.mjs`。
 
-**混树坑（2026-10-28 踩实）**：重指旧版本时，committed lockfile 里已有的 alpha 行 cordis 生态包会被 pnpm 优先沿用——`dsh-app-boot` 的 `cordis-plugin-loader` / `-group` / `-include` peer 范围同时接纳稳定版与 alpha，`rc.3` 树上的 `0.2.1` 运行时曾跑到 `1.0.7-alpha.1` 的 loader 上，Settings 的 volatile 写够不到 live Config（`tests/skills-settings.spec.ts` 的 enabled 断言静默留在 `true`）。`upgrade-dsh.mjs` 现在除了 DSH/cordis pin，还会从目标版本自身的 `dsh` / `dsh-app-boot` / `cordis` manifest 推导 `cordis-plugin-*`、`schemastery`、`cosmokit` 的精确版本，写进同一个临时 `overrides` 块；跨预发行线回退旧版本后，务必确认解析出的 loader/group/include 是该版本自带的稳定版再下结论。
+**混树坑（2026-10-28 踩实）**：重指旧版本时，committed lockfile 里已有的 alpha 行 cordis 生态包会被 pnpm 优先沿用——`dsh-app-boot` 的 `cordis-plugin-loader` / `-group` / `-include` peer 范围同时接纳稳定版与 alpha，`rc.3` 树上的 `0.2.1` 运行时曾跑到 `1.0.7-alpha.1` 的 loader 上，Settings 的 volatile 写够不到 live Config（`tests/skills-settings.spec.ts` 的 enabled 断言静默留在 `true`）。`upgrade-dsh.mjs` 现在除了 DSH/cordis pin，还会从目标版本自身的 `dsh` / `dsh-app-boot` / `cordis` / `dsh-sandbox-local` manifest 推导 `cordis-plugin-*`、`schemastery`、`cosmokit`、`node-addon-system` 的精确版本，写进同一个临时 `overrides` 块，并同步重指这些包留在 `devDependencies` 里的开发 pin；跨预发行线回退旧版本后，务必确认解析出的 loader/group/include 是该版本自带的稳定版再下结论。
 
 ## 7. journey smoke 的模型端点同时说两套 wire 协议
 
