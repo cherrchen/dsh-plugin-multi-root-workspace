@@ -66,3 +66,5 @@ Numbers increment; titles use lowercase kebab-case.
 - [ADR-0027-revive-target-and-protected-paths.md](./ADR-0027-revive-target-and-protected-paths.md) (Chinese) — Revive never changes the grant target; registration boundary and stored-record withholding for `$DSH_HOME`, the Registry medium and the lease directory (Accepted, P1 contract).
 
 - [ADR-0028-upstream-primary-identity-and-shared-only-registry.md](./ADR-0028-upstream-primary-identity-and-shared-only-registry.md) (Chinese) — Primary-root identity is the upstream spelling (MRW-01), denies win over the primary root; the Registry keeps only the shared mode (Accepted).
+
+- [ADR-0027-ops-file-authorization-and-activity-adapter.md](./ADR-0027-ops-file-authorization-and-activity-adapter.md) (Chinese) — OPS file-write enforcement, a per-operation authorization bridge, writable-root rejection fixes, and multi-target instruction activity; reassesses tool caps, unavailable authority, and Bash/PTC risks (Proposed; not accepted or implemented; awaiting review).

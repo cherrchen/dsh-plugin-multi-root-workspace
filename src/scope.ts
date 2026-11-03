@@ -24,9 +24,14 @@ import type {} from '@deepseek-ai/dsh-agent'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from '@deepseek-ai/dsh-tools'
+import type {} from './compat.ts'
+import type {} from './providers.ts'
 import { primaryKey, type RootAccess } from './roots.ts'
 import { currentRegistryOperation, rememberOperationProfile, operationPermitsProfile } from './registry-operation.ts'
 import { aroundTool } from './compat/tool-context.ts'
+import { createOpsProtectionState, opsDispatchBarrier } from './compat/ops-tools.ts'
+import type { OpsProtectionState } from './compat/ops-tools.ts'
 import { effectiveRootAccess } from './contract.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -335,6 +340,8 @@ export class MultiRootScopeService extends Service {
   private readonly listeners = new Set<() => void>()
   /** Enclosing {@link MultiRootScopeService.batch} depth; inner calls nest. */
   private batchDepth = 0
+  readonly opsProtection: OpsProtectionState = createOpsProtectionState()
+
   /** True when a batched write coalesced its notification into the flush. */
   private batchDirty = false
   private admissionProof: object | undefined
@@ -469,7 +476,16 @@ export class MultiRootScopeService extends Service {
     // capped inner dispatch (nesting only ever narrows). The tool name is read
     // once at entry — never from model-supplied arguments.
     aroundTool(ctx, (exec, next) => {
-      return toolCapStore.run({ capped: this.capForTool(exec.name) }, next)
+      return this.withToolCap(exec.name, async () => {
+        const denial = opsDispatchBarrier(ctx, this, exec)
+        if (denial !== undefined) throw new Error(denial)
+        return await next()
+      })
+    })
+
+    ctx.inject(['tools', 'sandboxPolicy', 'multiRootCompat', 'multiRootProviders'], (scoped: Context) => {
+      if (typeof scoped.tools.guard !== 'function') return
+      scoped.effect(() => scoped.tools.guard(exec => opsDispatchBarrier(ctx, this, exec)))
     })
 
     // The prompt contribution is a SOFT dependency: a composition without a
@@ -560,6 +576,10 @@ export class MultiRootScopeService extends Service {
   /** Read-only pending-dispatch projection. Does not mint an ALS execution grant. */
   previewForTool(policy: SandboxExecutionPolicy, toolName: string): FilesystemScope {
     return this.project(policy, this.capForTool(toolName))
+  }
+
+  withToolCap<T>(name: string, fn: () => T): T {
+    return toolCapStore.run({ capped: this.capForTool(name) }, fn)
   }
 
   /** Execution and review use exactly the same parent-narrowing rule. */

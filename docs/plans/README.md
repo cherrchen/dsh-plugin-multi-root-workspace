@@ -40,6 +40,8 @@ active：
 
 - [2026-11-05-root-authorization-security-fixes.md](./active/2026-11-05-root-authorization-security-fixes.md) — 根授权安全修复计划（**Accepted，已接受**）：Registry 管理授权、稳定 origin、home 与物理介质保护、默认权威及验收合同；实施与发布状态见[进度总账](./active/2026-09-12-multi-root-workspace.md#进度总账)。
 
+- [2026-11-01-ops-compatibility-adaptation.md](./active/2026-11-01-ops-compatibility-adaptation.md) — ADR-0027 的 OPS 兼容性适配开发计划（**Proposed，未接受、未启动，暂不执行**）：Full-access 全部 Worker 保护、Phase A 实时活动、独立 Auto Review 验收，以及 WW/RO、授权桥、持久化和后台维护的条件分支。
+
 - [2026-10-31-f4-background-recovery.md](./active/2026-10-31-f4-background-recovery.md) — F4 后台恢复与故障诊断专项计划（**rev.4 评审通过、ADR-0026 已立项；已实施并经三平台 CI 验收，真实 TUI soak 暂缓，随 `v0.1.13` 发版**）：复用 `ensureAuthority` 的恢复调度、投影同步完成条件、整轮失败通知原子性（含 scope 订阅者批处理）、握手本地取消与诊断面；批次已登记总账。
 
 - [2026-10-30-shared-registry-authority.md](./active/2026-10-30-shared-registry-authority.md) — Issue #24 原始 Long-term 全目标、已发布基线与共享服务初版对照、六项 P1 审计、后续能力演进与退出条件；初版已随 `v0.1.12` 发版，剩余 Ubuntu 报告环境长跑复测与进度见总账。

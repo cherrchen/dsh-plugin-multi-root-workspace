@@ -63,6 +63,9 @@
 | 第二期 | 插件详情页设置卡与富文本详情 | 「多根 Auto Review（实验性）」设置开关与 Loader 行等价（`setPluginEnabled` 持久化、热应用、restart-required Toast）；设置卡错误改 Toast；`refreshSeq` 修并发刷新竞态；locale `meta.detail` + `preview.svg` 富文本详情 | [本次记录](#插件详情页设置卡与富文本详情2026-11-05) | — | `220bc82` | 随 `v0.1.14` 发版 |
 | 安全修复 | 根授权安全修复 P0–P4 | BYP-01、MRW-01、BYP-02、home/物理介质保护与默认权威 | [专项计划](./2026-11-05-root-authorization-security-fixes.md)（含 P0 记录与维护者决定） | [0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)（P1）、[0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)（F3、移除单进程模式） | `b15b486`、`fix/audit-1105` 后续提交 | 2026-11-05：P0 静态证据已记录，维护者决定 P2（可信确认）不实施、BYP-01 作为残余风险保留、Skills migration 保持现状；P1 已实施；F3 改为以上游主根拼写为 key、拒写优先于主根，单进程 Registry 模式移除。PR #39 两条 P1 评审回归先红后绿：Follower 的 fs/进程准入同样收窄 home 授权，迁移后清空在刷新、准入和重启后均不恢复旧根（见两份 ADR 的同日修订）。macOS / Node `24.18.0` / DSH `0.2.2-rc.1` 的 `compat:check` 与完整 `verify:all` 通过：lint、双端 typecheck、build、Seatbelt 内核探针及显式要求实跑的测试（74 文件通过，1019 通过、86 平台跳过）、compose / behavior / journey（52 / 137 / 76）、pack 与 packed behavior（136）、Auto Review fork 检查；可选 Auto Review 集成按精确版本规则跳过。Linux/Windows 原生门禁仍待 CI。P2、F5 与 F4 执行侧 deny 按维护者决定不实施（上游对工作区内的 `$DSH_HOME` 本就不设例外）；未发布，不指定版本 |
 
+| 待评审 | OPS 兼容性适配（ADR-0027） | Full-access Worker 保护与实时文件活动；其他车道按前置条件分别推进 | [专项计划](./2026-11-01-ops-compatibility-adaptation.md) | [0027](../../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md)（Proposed） | — | **Proposed：未接受；直接授权实施中，P0–P4 子集已落地（见专项计划实施状态）；无发布安排** |
+
+
 ## 总体策略
 
 MVP 三个里程碑加一个硬化批次，每一项都独立可验证，且**第一步就建立"空根直通 = 上游行为"的安全网**，之后所有增量都在安全网内：

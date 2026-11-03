@@ -15,7 +15,7 @@
 并非所有项目都是 monorepo。一个开发项目往往由多个独立 Git 仓库组成，跨仓库干活原本得反复换会话。同类工具早已支持在一个工作区添加多个文件夹，本插件把同样的能力带给 DSH：把其他仓库登记为附加根，并按需授予只读、读写或不受限的访问级别，Agent 即可在授权范围内读写。
 
 - **不新增工具**：Agent 照旧使用原生 `read` / `write` / `edit` / `bash`，只是授权的目录变多了。
-- **沙箱约束**：附加根可继承会话（主目录）的权限设置，也可单独固定为只读或读写；在只读与读写下，约束不靠系统提示词，而由进程内文件围栏 + 内核级沙箱（macOS Seatbelt / Linux bwrap / Landlock / Windows ACL）执行，文件与 bash 共享同一份授权范围。
+- **沙箱约束**：附加根可继承会话（主目录）的权限设置，也可单独固定为只读或读写；在只读与读写下，约束不靠系统提示词，而由进程内文件围栏 + 内核级沙箱（macOS Seatbelt / Linux bwrap / Landlock / Windows ACL）执行，经本插件围栏的原生文件与 bash 共享同一份授权范围；自行启动 Worker 的第三方工具须单独验证，dsh-ops 的现存缺口见下方已知限制。
 - **Files 页签浏览附加根**：Files 页签头部可直接在主根与任一已登记附加根之间切换，附加根的目录树以与主根相同的原生 Files 视图呈现，打开文件、在外部应用打开、自动刷新等操作完全一致。
 - **可选 Auto review（默认关闭）**：fork 上游实验性「自动授权审查」，向 Reviewer 补充附加目录的审查上下文——当前工作区拓扑、各根访问级别与实时指令文件；出厂关闭，需在插件管理器的行列表中显式打开 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` 行后生效，启用时接管官方同名 bundle。
 - **附属根 Skills**：发现附属目录的 `.dsh/skills` 与 `.agents/skills`，附属根经 `/alias-id:skill-name` 命名空间调用原生 `skill` 工具；每根独立开关、可编辑 `aliasId`，全局设置默认开启。
@@ -299,7 +299,11 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 
 ## 已知限制
 
-- 附加根的指令文件按需到达模型：根目录顶层的那一份在会话第一步之前注入，子目录里的那一份在本会话**成功**触碰过该目录之后注入；nested 文件只会在其目录被考察到时重新检查（根层每一步，子目录依赖已投递或有新触碰），投递状态是进程内的（resume 后可能再告知一次），也只识别 `read` / `write` / `edit` 三个工具名。主根与 user-global 的指令链仍由上游负责，本插件不重复注入（[ADR-0010](./docs/decisions/ADR-0010-additional-root-instruction-scope.md)）。
+- **dsh-ops 只读限制绕过（F01，历史基线）**：审计版本在 Full-access 下，OPS Native `ops_write_file` 实际写入了显式只读附属根，而原生 fs 同次对照被拒。本轮有限适配在 Full-access 下使 explicit RO/cap deny 对 OPS Native 与真实 PTC 生效（deny 执行复验见[审计§16](./docs/reviews/dsh-ops-compatibility-audit.md#16-适配后复验)），版本、测试范围与原始证据见[兼容性审计](./docs/reviews/dsh-ops-compatibility-audit.md)。
+- **dsh-ops 的合法写入与子目录指令缺口（F04/F05，历史基线）**：WW 下 inherit/固定读写附属根及 RO 下固定读写附属根被 OPS 预检拒写的问题未解决；OPS 读取不触发子目录指令发现（F05）已在本轮 live 索引 + 真实 AgentLoop 下复验恢复（Native 与 PTC 成功触碰的子目录指令进入下一模型请求，见[审计§16](./docs/reviews/dsh-ops-compatibility-audit.md#16-适配后复验)）；不影响已验证的根级指令和 Skills 路径。
+- **Linux bwrap 的 WW batch/result 降级（F07）**：审计版本的共享 Registry 下，所有到达启动分支且取得有效 cache 的 `ops_batch` / `ops_result`（含 `page`）都会因 confine 后追加 bind 而失去 argv 归属证明，源码路径将拒绝 Worker 启动并报 `EXECUTOR_UNAVAILABLE`。函数级冲突已复现，Linux 端到端未测；普通 RO、Landlock 和无 cache 对照不在此结论内。需 OPS 提供 confine 前的 cache 声明接口，目前没有已验证的 MR 单侧缓解，见[审计 F07](./docs/reviews/dsh-ops-compatibility-audit.md#131-n1--f07confine-后的-cache-bind-与严格证明冲突)。
+- **其他 OPS 可用性边界**：共享 WW 下，调度外 purge 无有效 admission 时会被拒，结果缓存可能残留并告警；PTC 嵌套调用及后台 Bash 也有证明归属/过期导致的拒绝风险。上述完整生命周期与平台行为尚未实测，见[架构复核](./docs/reviews/dsh-ops-compatibility-audit.md#14-独立架构审计a1a13复核)。ADR-0027 仍为 Proposed（本轮直接授权实施首期子集），不能据此认为这些问题已修复。
+- 附加根的指令文件按需到达模型：根目录顶层的那一份在会话第一步之前注入，子目录里的那一份在本会话**成功**触碰过该目录之后注入；nested 文件只会在其目录被考察到时重新检查（根层每一步，子目录依赖已投递或有新触碰），投递状态是进程内的（resume 后可能再告知一次）；官方识别 `read` / `write` / `edit`，本轮新增 OPS 工具经 live 证据同样驱动投递（resume 后 OPS 历史缺 live 证据不参与投递）。主根与 user-global 的指令链仍由上游负责，本插件不重复注入（[ADR-0010](./docs/decisions/ADR-0010-additional-root-instruction-scope.md)）。
 - 多 Host 共享同一登记服务：只有一个 Host 管理存储，各实例逐操作取得授权；断线停止新附加授权，权威退出后按内核锁接管。限同机器、同用户及同锁命名空间；Linux 共享连接需要 SO_PEERPIDFD，Windows 限同登录会话。旧进程/PTY 保留启动快照（[共享架构](./docs/architecture/registry-authority-service.md)）。
 - 支持矩阵是精确版本 allowlist：宿主版本不在清单上、或核心包混装了不同版本时，`fs` / `sandbox` / `registry` / `instructions` / `lsp` / `workspace-files` 六行**不启动**，组合退化为"没装这个插件"（[ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)）。
 - Windows 多根 runner 继承上游 partial enforcement、caller-owned 目录及 private temp 分离条件；已启动进程保留启动时根集合，后续进程使用更新后的集合（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
@@ -310,6 +314,10 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 - 附加根文件树由 **Files 页签的根选择器**承载：头部入口列出主根与全部附加根，旁边仍显示选中根的完整路径；选中附加根时逐字节复刻的上游 Files 树体接管树区（懒加载目录、原生行式与图标、watch 自动刷新、文件点击进宿主 viewer、header 原位提供手动刷新），header 右侧「在应用中打开」按钮同时由逐字节复刻的上游控件顶替、对选中根而非主根发起打开；切回主根即恢复原生视图；对话框回归纯管理。该接管依赖上游 `data-*` DOM 钩子，钩子失效时静默退化为原生观感（[ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](./docs/decisions/ADR-0016-files-tab-native-tree-fork.md)）。LSP 按附加文件所在根初始化独立 workspace；需要宿主配置对应语言服务器（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - 命令的输出文案为英文（host 侧没有活动语言信息），面板文案中英双语跟随界面语言。
 - Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：`sidebar.footer.action` 是所有受支持版本都提供的插槽，而 `sidebar.panellist`/`main` 不是。
+
+## dsh-ops 适配现状（受限能力说明）
+
+当前仅新增 Full-access（danger-full-access）下的保护：explicit RO/cap deny 生效，authority unavailable、缺保护、unknown OPS、后台执行与 cache-overlap 准备一律拒绝；WW/RO 过渡维持现状不新增能力。OPS 活动恢复为 Phase A live 索引（多目标链可注入指令），无持久事件桥；会话 resume 后 OPS 历史缺 live 证据时 Review 技术失败；动态 pending（replace/batch/result/bash/unknown）使 Review 技术失败；非白名单诊断如 `ops_status` 亦保守受影响。此为受限适配，不是完整 OPS 兼容声明，不提升版本也不发布。
 
 ## 文档
 

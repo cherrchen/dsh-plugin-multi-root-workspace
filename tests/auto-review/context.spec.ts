@@ -232,6 +232,17 @@ describe('current host review context and real tool fences', () => {
       role:'fact',content:[{type:'text',text}],
     }))
   })
+  it('fails an OPS call before the reviewer when its dynamic targets are unknowable',async()=>{
+    const w=await world()
+    let bodies=0
+    w.ctx.tools.register({name:'ops_replace',description:'spec ops_replace',parameters:{type:'object',properties:{}},
+      output:{schema:{type:'object',properties:{}},render:()=>'ops_replace'},
+      execute:async()=>{bodies+=1;return {status:'completed'}},} as never)
+    const result=await w.run('ops_replace',{path:w.f.outside,pattern:'x',replacement:'y'})
+    expect(bodies).toBe(0)
+    expect(w.adapter.requests).toHaveLength(0)
+    expect(result.isError).not.toBe(false)
+  })
   it('re-reads updates, deletion and revocation, and ignores historical prose',async()=>{
     const w=await world();const path=join(w.f.outside,'AGENTS.md');writeFileSync(path,'old-rule')
     const before=await w.build();writeFileSync(path,'new-rule');expect((await w.build()).constraints[0]?.text).toBe('new-rule')

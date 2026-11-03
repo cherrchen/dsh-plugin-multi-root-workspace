@@ -53,6 +53,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
+import type { OpsFileActivityInput, OpsFileTarget } from './compat/instruction-activity.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { FileSystem } from '@deepseek-ai/dsh-fs'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
@@ -66,7 +67,7 @@ import { createInstructionMessage } from './compat/llm-message.ts'
 import { toolResultFailed } from './compat/tool-result.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
 import { aroundTool, type ToolCaller } from './compat/tool-context.ts'
-import { FILE_TOUCH_TOOL_NAMES, ptcFileActivity, replayedInstructionTargets, touchedPathOfToolCall } from './compat/instruction-activity.ts'
+import { FILE_TOUCH_TOOL_NAMES, normalizeOpsFileActivity, opsActivityEvidenceKey, ptcFileActivity, replayedInstructionTargets, stableOpsJson, touchedPathOfToolCall } from './compat/instruction-activity.ts'
 import { nativeInstructionCopies } from './compat/instruction-overlap.ts'
 import { isCanonicallyUnder } from './roots.ts'
 import type {} from './scope.ts'
@@ -75,7 +76,8 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     multiRootInstructions: {
       knownRoots(session: object): readonly string[]
-      snapshot(agent: Agent, roots: readonly string[], target: string | undefined, signal: AbortSignal): Promise<readonly CurrentRootInstruction[]>
+      snapshot(agent: Agent, roots: readonly string[], target: string | readonly string[] | undefined, signal: AbortSignal,
+        pending?: { readonly callId: string; readonly name: string; readonly arguments: unknown; readonly parent?: unknown }): Promise<readonly CurrentRootInstruction[]>
     }
   }
 }
@@ -107,6 +109,9 @@ export const DEFAULT_MAX_SOURCE_BYTES = 32768
 
 /** Cap on unanswered `tool/call` records remembered per session. */
 const MAX_PENDING_CALLS = 128
+const MAX_LIVE_OPS_CALLS = 128
+const MAX_LIVE_OPS_OBSERVED = 64
+const MAX_LIVE_OPS_EVIDENCE = 128
 
 /** Cap on touched paths remembered per session; beyond it, touches are dropped. */
 const MAX_TOUCHED_PATHS = 64
@@ -148,6 +153,8 @@ interface SessionState {
   readonly touched: Set<string>
   /** Successful work index retained independently of delivery deltas. */
   readonly worked: Set<string>
+  readonly liveOpsEvidence: Map<string, { readonly targets: readonly OpsFileTarget[]; readonly complete: boolean }>
+  activityIncomplete?: boolean
   overflow?: boolean
 }
 
@@ -299,11 +306,187 @@ export function apply(ctx: Context, config: Config = {}): void {
   const states = new WeakMap<object, SessionState>()
   const callsBySession = new WeakMap<object, PendingCalls>()
   const executions = new AsyncLocalStorage<ToolCaller>()
-  aroundTool(ctx, (exec, next) => executions.run(exec, next))
+
+  const fingerprintOf = (value: unknown): string => createHash('sha256').update(stableOpsJson(value)).digest('hex')
+  const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object'
+  interface LiveCall {
+    readonly exec: ToolCaller
+    readonly session: object
+    readonly agent: Agent
+    readonly token: object
+    readonly kind: 'native' | 'ptc'
+    readonly callId: string
+    readonly name: string
+    readonly args: unknown
+    readonly argsJson: string
+    readonly cwd: string | undefined
+    readonly observed: Set<string>
+    readonly signal?: AbortSignal | undefined
+    fingerprint?: string | undefined
+    incomplete?: boolean | undefined
+    abort?: (() => void) | undefined
+  }
+  const keyOf = (exec: ToolCaller): object => (exec.token ?? exec) as object
+  let disposed = false
+  const opsLive = new Map<object, LiveCall>()
+  const removeEntry = (key: object): LiveCall | undefined => {
+    const call = opsLive.get(key)
+    if (call === undefined) return undefined
+    if (call.signal !== undefined && call.abort !== undefined) call.signal.removeEventListener('abort', call.abort)
+    opsLive.delete(key)
+    return call
+  }
+  const boundedLiveSet = (key: object, call: LiveCall) => {
+    if (opsLive.size >= MAX_LIVE_OPS_CALLS) {
+      const oldest = opsLive.keys().next()
+      if (!oldest.done) {
+        const evicted = removeEntry(oldest.value)
+        if (evicted !== undefined) stateOf(evicted.session).activityIncomplete = true
+      }
+    }
+    opsLive.set(key, call)
+  }
+  const putEvidence = (state: SessionState, key: string, entry: { readonly targets: readonly OpsFileTarget[]; readonly complete: boolean }) => {
+    const existing = state.liveOpsEvidence.get(key)
+    if (existing !== undefined) {
+      const same = existing.complete === entry.complete && JSON.stringify(existing.targets) === JSON.stringify(entry.targets)
+      if (same) return
+      if (existing.complete === true) { state.activityIncomplete = true; return }
+    } else if (state.liveOpsEvidence.size >= MAX_LIVE_OPS_EVIDENCE) {
+      const oldest = state.liveOpsEvidence.keys().next()
+      if (!oldest.done) state.liveOpsEvidence.delete(oldest.value)
+      state.activityIncomplete = true
+    }
+    state.liveOpsEvidence.set(key, entry)
+  }
+  const mark = (call: LiveCall) => {
+    const state = stateOf(call.session)
+    state.activityIncomplete = true
+    try {
+      putEvidence(state, opsActivityEvidenceKey(call.kind, call.callId, call.name, call.args), { targets: [], complete: false })
+    } catch (error) {
+      ctx.logger.warn(`multi-root instructions: OPS activity key failed: ${(error as Error).message}`)
+    }
+  }
+  aroundTool(ctx, (exec, next) => executions.run(exec, () => runLive(exec, next)))
+  const runLive = async (exec: ToolCaller, next: () => Promise<unknown>): Promise<unknown> => {
+    const agent = exec.agent
+    const bare = exec.name.startsWith('ops_') ? exec.name.slice(4) : ''
+    if (bare === '' || bare === 'discover_tools' || bare === 'load_sdk' || agent === undefined || disposed) return await next()
+    let argsJson = ''
+    let incomplete = false
+    try {
+      argsJson = stableOpsJson(exec.arguments)
+    } catch {
+      incomplete = true
+    }
+    const directories = ctx.get('workingDirectory') as { ensure(agent: Agent, signal?: AbortSignal): Promise<string | undefined> } | undefined
+    const ensured = directories === undefined ? undefined : await directories.ensure(agent, exec.signal).catch(() => undefined)
+    const cwd = ensured ?? effectiveDirectory(ctx, agent.session) ?? agent.session?.header?.cwd
+    const call: LiveCall = {
+      exec, session: agent.session, agent, token: keyOf(exec),
+      kind: exec.parent === undefined ? 'native' : 'ptc',
+      callId: exec.callId, name: exec.name,
+      args: incomplete ? undefined : JSON.parse(argsJson) as unknown, argsJson, cwd,
+      observed: new Set(), incomplete, signal: exec.signal,
+    }
+    if (exec.signal?.aborted === true) {
+      mark(call)
+      return await next()
+    }
+    boundedLiveSet(call.token, call)
+    call.abort = () => {
+      const removed = removeEntry(call.token)
+      if (removed !== undefined) mark(removed)
+    }
+    call.signal?.addEventListener('abort', call.abort)
+    let result: unknown
+    try {
+      result = await next()
+    } catch (error) {
+      removeEntry(call.token)
+      throw error
+    }
+    try {
+      const raw = result !== null && typeof result === 'object' && 'value' in (result as object)
+        ? (result as { value?: unknown }).value : result
+      call.fingerprint = fingerprintOf(raw)
+    } catch {
+      call.incomplete = true
+      ctx.logger.warn('multi-root instructions: OPS activity fingerprint exceeded its budget')
+    }
+    return result
+  }
+  const onResult = ctx.on as unknown as (name: string, callback: (exec: ToolCaller, result: unknown) => void, options: { global: boolean }) => unknown
+  onResult.call(ctx, 'tools/result', (exec, result) => {
+    const call = removeEntry(keyOf(exec))
+    if (call === undefined) return
+    try {
+      const final = result as { value?: unknown; isError?: boolean }
+      const sameArgs = (() => { try { return stableOpsJson(exec.arguments) === call.argsJson } catch { return false } })()
+      const identity = exec === call.exec && keyOf(exec) === call.token && exec.agent?.session === call.session
+        && exec.name === call.name && exec.callId === call.callId && sameArgs
+        && exec.signal?.aborted !== true && !disposed && call.incomplete !== true
+      const effectNone = final.isError === true && record(final.value)
+        && record((final.value as Record<string, unknown>).error)
+        && (final.value as { error: { effectState?: unknown } }).error.effectState === 'none'
+      if (!identity || call.fingerprint === undefined) { mark(call); return }
+      let same = false
+      try {
+        same = fingerprintOf(final.value) === call.fingerprint
+      } catch {
+        ctx.logger.warn('multi-root instructions: OPS final fingerprint exceeded its budget')
+      }
+      if (!same) { mark(call); return }
+      if (final.isError === true) {
+        if (effectNone === true) {
+          try {
+            putEvidence(stateOf(call.session), opsActivityEvidenceKey(call.kind, call.callId, call.name, call.args), { targets: [], complete: true })
+          } catch {
+            mark(call)
+          }
+        } else mark(call)
+        return
+      }
+      const activity = normalizeOpsFileActivity({
+        name: call.name, args: call.args, cwd: call.cwd, finalValue: final.value,
+        observedPaths: [...call.observed],
+      } as OpsFileActivityInput)
+      const state = stateOf(call.session)
+      if (!activity.complete) state.activityIncomplete = true
+      for (const target of activity.targets) {
+        if (state.worked.size >= MAX_DELIVERED_SCOPES && !state.worked.has(target.path)) state.overflow = true
+        else state.worked.add(target.path)
+        if (state.touched.size >= MAX_TOUCHED_PATHS) state.overflow = true
+        else state.touched.add(target.path)
+      }
+      try {
+        putEvidence(state, opsActivityEvidenceKey(call.kind, call.callId, call.name, call.args), {
+          targets: activity.targets, complete: activity.complete,
+        })
+      } catch {
+        mark(call)
+      }
+    } catch (error) {
+      ctx.logger.warn(`multi-root instructions: live OPS activity observer failed: ${(error as Error).message}`)
+      mark(call)
+    }
+  }, { global: true })
+  const onDispose = ctx.on as unknown as (name: string, callback: (target: never) => void, options: { global: boolean }) => unknown
+  onDispose.call(ctx, 'agent/disposed', (payload: { agent: Agent }) => {
+    for (const [key, call] of [...opsLive]) if (call.agent === payload.agent) removeEntry(key)
+  }, { global: true })
+  onDispose.call(ctx, 'session/disposed', (session: object) => {
+    for (const [key, call] of [...opsLive]) if (call.session === session) removeEntry(key)
+  }, { global: true })
+  ctx.effect(() => () => {
+    disposed = true
+    for (const key of [...opsLive.keys()]) removeEntry(key)
+  })
   const stateOf = (session: object): SessionState => {
     const existing = states.get(session)
     if (existing !== undefined) return existing
-    const created: SessionState = { scopes: new Map(), provenanceRoots: new Set(), touched: new Set(), worked: new Set() }
+    const created: SessionState = { scopes: new Map(), provenanceRoots: new Set(), touched: new Set(), worked: new Set(), liveOpsEvidence: new Map() }
     states.set(session, created)
     return created
   }
@@ -350,16 +533,14 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.inject(['fs'], (scope: Context) => {
     scope.provide('multiRootInstructions', {
       knownRoots(session) { return [...(states.get(session)?.provenanceRoots ?? [])] },
-      async snapshot(agent, roots, target, signal) {
+      async snapshot(agent, roots, target, signal, pending) {
         return withRegistryRead(scope, scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot, 'instructions', async () => {
         const allowed = new Set(scope.multiRootScope.scopeOf(scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot))
         roots = roots.filter(root => allowed.has(root))
         signal.throwIfAborted()
-        if (roots.length === 0) return []
-        const api = await instructionsApi()
-        if (api === undefined) throw new Error('review-context: instruction discovery unavailable')
         const existing = states.get(agent.session)
         if (existing?.overflow) throw new Error('review-context: successful work index exceeded')
+        if (existing?.activityIncomplete === true) throw new Error('review-context: incomplete OPS file activity')
         // Copy the scope index; invalidate ONLY this copy's digests to collect
         // all current files, including unchanged and formerly native copies.
         const state: SessionState = {
@@ -367,12 +548,17 @@ export function apply(ctx: Context, config: Config = {}): void {
           provenanceRoots: new Set(existing?.provenanceRoots),
           touched: new Set([...(existing?.touched ?? []), ...(existing?.worked ?? [])]),
           worked: new Set(),
+          liveOpsEvidence: new Map(existing?.liveOpsEvidence ?? []),
         }
         // Seed events do not publish session/event on resume. Read their
         // successful activity without mutating the main agent's delivery index.
         // oxlint-disable-next-line typescript/no-deprecated -- No public activity projection exists.
-        for (const path of replayedInstructionTargets(agent.session.snapshotEvents(), agent.session.header.cwd)) state.touched.add(path)
-        if (target !== undefined) state.touched.add(target)
+        for (const path of replayedInstructionTargets(agent.session.snapshotEvents(), agent.session.header.cwd, existing?.liveOpsEvidence, pending)) state.touched.add(path)
+        const targets = typeof target === 'string' ? [target] : target ?? []
+        for (const item of targets) state.touched.add(item)
+        if (roots.length === 0) return []
+        const api = await instructionsApi()
+        if (api === undefined) throw new Error('review-context: instruction discovery unavailable')
         // Native discovery can already cover this directory before any file
         // tool succeeds. Recollect that chain before replacing native frames,
         // without recording cwd as successful activity or delivery state.
@@ -396,13 +582,21 @@ export function apply(ctx: Context, config: Config = {}): void {
     // Native tools report the actual canonical target with their execution as
     // actor. Prefer it over a pre-dispatch cwd snapshot: ensure() may recover a
     // missing cwd, and a directory change can race the tool's async resolution.
-    scope.on('fs/observed', (target, _observation, actor) => {
+    const onObserved = scope.on as unknown as (name: 'fs/observed', callback: (target: Parameters<typeof scope.fs.processPath>[0], observation: unknown, actor: unknown) => void, options: { global: boolean }) => void
+    onObserved.call(scope, 'fs/observed', (target, _observation, actor) => {
       const exec = executions.getStore()
-      if (exec?.agent === undefined || FILE_TOUCH_TOOL_NAMES[exec.name] !== true || actor !== exec) return
+      if (exec?.agent === undefined || actor !== exec) return
+      const live = opsLive.get(keyOf(exec))
+      if (live !== undefined) {
+        if (live.observed.size < MAX_LIVE_OPS_OBSERVED) live.observed.add(scope.fs.processPath(target))
+        else live.incomplete = true
+        return
+      }
+      if (FILE_TOUCH_TOOL_NAMES[exec.name] !== true) return
       const calls = callsBySession.get(exec.agent.session)
       const call = calls?.get(exec.callId) ?? calls?.get(`ptc:${exec.callId}`)
       if (call !== undefined) call.observedPath = scope.fs.processPath(target)
-    })
+    }, { global: true })
     scope.on('agent/pre-step', async ({ agent, messages, signal }, next) => {
       const decision = await next()
       // A rejected step never delivers: the touch stays queued for the step that
@@ -445,7 +639,7 @@ async function pending(
 ): Promise<UserMessage | undefined> {
   const session = agent.session
   const sourceEpoch = ctx.get('multiRootRegistry')?.epoch
-  const state: SessionState = states.get(session) ?? { scopes: new Map(), provenanceRoots: new Set(), touched: new Set(), worked: new Set() }
+  const state: SessionState = states.get(session) ?? { scopes: new Map(), provenanceRoots: new Set(), touched: new Set(), worked: new Set(), liveOpsEvidence: new Map() }
   states.set(session, state)
   const evaluatedTouches = new Set(state.touched)
   let retryTouches = false
