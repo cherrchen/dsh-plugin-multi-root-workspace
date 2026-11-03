@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-session'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { MultiRootScopeService } from '../scope.ts'
 import type { ToolCaller } from './tool-context.ts'
+import { opsCompatibilityToken } from './ops-settings.ts'
 
 export const OPS_TOOL_PREFIX = 'ops_'
 
@@ -134,6 +135,7 @@ export function assertOpsPosixCacheAdmission(deniedRoots: readonly string[]): vo
 const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 
 export function opsDispatchBarrier(ctx: Context, scope: MultiRootScopeService, exec: ToolCaller): string | undefined {
+  if (opsCompatibilityToken(ctx) === undefined) return undefined
   const kind = classifyOpsTool(exec.name)
   if (kind === 'other' || kind === 'publish') return undefined
   if (ctx.get('multiRootCompat') === undefined || ctx.get('multiRootProviders') === undefined) return undefined

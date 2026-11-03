@@ -34,46 +34,46 @@ describe('replayedInstructionTargets — OPS live-evidence contract',()=>{
   it('merges a proven native and PTC pair only with complete live evidence',()=>{
     const events=[opsCall('c1','ops_read_files'),opsResult('c1'),ptcStart('s2','ops_read_files'),ptcEnd('s2')]
     const map=new Map([...ev('native','c1','ops_read_files',{files:[{path:'/p/a'}]}),...ev('ptc','s2','ops_read_files',{files:[{path:'/p/a'}]})])
-    expect(replayedInstructionTargets(events,undefined,map)).toEqual([f])
-    expect(()=>replayedInstructionTargets(events,undefined)).toThrow('review-context')
+    expect(replayedInstructionTargets(events,undefined,map,undefined,{opsCompatibility:true})).toEqual([f])
+    expect(()=>replayedInstructionTargets(events,undefined,undefined,undefined,{opsCompatibility:true})).toThrow('review-context')
     const wrong=ev('native','c1','ops_read_files',{files:[{path:'/p/a'}]})
-    expect(()=>replayedInstructionTargets(events,undefined,wrong)).toThrow('review-context')
+    expect(()=>replayedInstructionTargets(events,undefined,wrong,undefined,{opsCompatibility:true})).toThrow('review-context')
   })
   it('keeps native and PTC identities with the same raw id apart, including ptc: named natives',()=>{
     const events=[opsCall('ptc:s2','ops_read_files'),opsResult('ptc:s2'),ptcStart('s2','ops_read_files'),ptcEnd('s2')]
     const map=new Map([...ev('native','ptc:s2','ops_read_files',{files:[{path:'/p/a'}]}),...ev('ptc','s2','ops_read_files',{files:[{path:'/p/a'}]})])
-    expect(replayedInstructionTargets(events,undefined,map)).toEqual([f])
+    expect(replayedInstructionTargets(events,undefined,map,undefined,{opsCompatibility:true})).toEqual([f])
     const onlyPtc=ev('ptc','s2','ops_read_files',{files:[{path:'/p/a'}]})
-    expect(()=>replayedInstructionTargets(events,undefined,onlyPtc)).toThrow('review-context')
+    expect(()=>replayedInstructionTargets(events,undefined,onlyPtc,undefined,{opsCompatibility:true})).toThrow('review-context')
   })
   it('rejects duplicate starts, stray ends and unsettled calls',()=>{
     const map=ev('native','c1','ops_read_files',{files:[{path:'/p/a'}]})
-    expect(()=>replayedInstructionTargets([opsCall('c1','ops_read_files'),opsCall('c1','ops_read_files')],undefined,map)).toThrow('review-context')
-    expect(()=>replayedInstructionTargets([opsResult('zzz')],undefined,map)).not.toThrow()
-    expect(()=>replayedInstructionTargets([opsCall('c1','ops_read_files'),opsResult('c1'),opsResult('c1')],undefined,map)).toThrow('review-context')
-    expect(()=>replayedInstructionTargets([opsCall('c9','ops_replace')],undefined,map)).toThrow('review-context')
+    expect(()=>replayedInstructionTargets([opsCall('c1','ops_read_files'),opsCall('c1','ops_read_files')],undefined,map,undefined,{opsCompatibility:true})).toThrow('review-context')
+    expect(()=>replayedInstructionTargets([opsResult('zzz')],undefined,map,undefined,{opsCompatibility:true})).not.toThrow()
+    expect(()=>replayedInstructionTargets([opsCall('c1','ops_read_files'),opsResult('c1'),opsResult('c1')],undefined,map,undefined,{opsCompatibility:true})).toThrow('review-context')
+    expect(()=>replayedInstructionTargets([opsCall('c9','ops_replace')],undefined,map,undefined,{opsCompatibility:true})).toThrow('review-context')
   })
   it('accepts effect-none complete-empty evidence on a failed call and rejects contradictions',()=>{
     const events=[opsCall('c1','ops_write_file'),opsResult('c1',true)]
     const empty=ev('native','c1','ops_write_file',{files:[{path:'/p/a'}]},true,[])
-    expect(replayedInstructionTargets(events,undefined,empty)).toEqual([])
+    expect(replayedInstructionTargets(events,undefined,empty,undefined,{opsCompatibility:true})).toEqual([])
     const success=ev('native','c1','ops_write_file',{files:[{path:'/p/a'}]},true,[{path:f,kind:'write'}])
-    expect(()=>replayedInstructionTargets(events,undefined,success)).toThrow('review-context')
+    expect(()=>replayedInstructionTargets(events,undefined,success,undefined,{opsCompatibility:true})).toThrow('review-context')
     const incomplete=ev('native','c1','ops_write_file',{files:[{path:'/p/a'}]},false,[])
-    expect(()=>replayedInstructionTargets(events,undefined,incomplete)).toThrow('review-context')
+    expect(()=>replayedInstructionTargets(events,undefined,incomplete,undefined,{opsCompatibility:true})).toThrow('review-context')
   })
   it('exempts only the exact pending exec, never an unstable or different-arg one',()=>{
     const events=[opsCall('cur','ops_read_files')]
     const pending={callId:'cur',name:'ops_read_files',arguments:{files:[{path:'/p/a'}]}}
-    expect(replayedInstructionTargets(events,undefined,new Map(),pending)).toEqual([])
-    expect(()=>replayedInstructionTargets(events,undefined,new Map(),{...pending,arguments:{files:[{path:'/p/b'}]}})).toThrow('review-context')
-    expect(()=>replayedInstructionTargets(events,undefined,new Map(),{...pending,arguments:{files:[{path:'/p/a'}],extra:undefined}})).toThrow('review-context')
+    expect(replayedInstructionTargets(events,undefined,new Map(),pending,{opsCompatibility:true})).toEqual([])
+    expect(()=>replayedInstructionTargets(events,undefined,new Map(),{...pending,arguments:{files:[{path:'/p/b'}]}},{opsCompatibility:true})).toThrow('review-context')
+    expect(()=>replayedInstructionTargets(events,undefined,new Map(),{...pending,arguments:{files:[{path:'/p/a'}],extra:undefined}},{opsCompatibility:true})).toThrow('review-context')
     const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic
-    expect(()=>replayedInstructionTargets(events,undefined,new Map(),{...pending,arguments:cyclic})).toThrow('review-context')
+    expect(()=>replayedInstructionTargets(events,undefined,new Map(),{...pending,arguments:cyclic},{opsCompatibility:true})).toThrow('review-context')
     let deep: unknown = 1; for (let i=0;i<30;i+=1) deep = [deep]
-    expect(()=>replayedInstructionTargets(events,undefined,new Map(),{...pending,arguments:deep})).toThrow('review-context')
-    expect(()=>replayedInstructionTargets(events,undefined,new Map(),{...pending,parent:{}})).toThrow('review-context')
-    expect(()=>replayedInstructionTargets([opsCall('cur','ops_read_files'),opsCall('ghost','ops_write_file')],undefined,new Map(),pending)).toThrow('review-context')
+    expect(()=>replayedInstructionTargets(events,undefined,new Map(),{...pending,arguments:deep},{opsCompatibility:true})).toThrow('review-context')
+    expect(()=>replayedInstructionTargets(events,undefined,new Map(),{...pending,parent:{}},{opsCompatibility:true})).toThrow('review-context')
+    expect(()=>replayedInstructionTargets([opsCall('cur','ops_read_files'),opsCall('ghost','ops_write_file')],undefined,new Map(),pending,{opsCompatibility:true})).toThrow('review-context')
   })
   it('bounds the OPS end index at 512 without touching official history',()=>{
     const events: unknown[]=[]
@@ -82,7 +82,7 @@ describe('replayedInstructionTargets — OPS live-evidence contract',()=>{
       events.push(opsCall(`op${index}`,'ops_read_files'),opsResult(`op${index}`))
       map.set(opsActivityEvidenceKey('native',`op${index}`,'ops_read_files',{files:[{path:'/p/a'}]}),{targets:[],complete:true})
     }
-    expect(()=>replayedInstructionTargets(events,undefined,map)).toThrow('review-context')
+    expect(()=>replayedInstructionTargets(events,undefined,map,undefined,{opsCompatibility:true})).toThrow('review-context')
     const official: unknown[]=[]
     for(let index=0;index<500;index+=1){
       official.push(opsCall(`f${index}`,'read',`{"file_path":"/p/f${index}"}`),opsResult(`f${index}`))
@@ -93,6 +93,6 @@ describe('replayedInstructionTargets — OPS live-evidence contract',()=>{
 
   it('lets pure publish tools pass without evidence',()=>{
     const events=[opsCall('pub','ops_discover_tools','{}'),opsResult('pub'),opsCall('sdk','ops_load_sdk','{}')]
-    expect(replayedInstructionTargets(events,undefined,new Map())).toEqual([])
+    expect(replayedInstructionTargets(events,undefined,new Map(),undefined,{opsCompatibility:true})).toEqual([])
   })
 })

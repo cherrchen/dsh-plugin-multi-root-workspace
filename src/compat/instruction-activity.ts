@@ -92,7 +92,9 @@ const OPS_PUBLISH: Record<string, true> = { ops_discover_tools: true, ops_load_s
 /** Rebuild read-only discovery candidates from successful durable activity after resume. */
 export function replayedInstructionTargets(events: readonly unknown[], origin: string | undefined,
   liveOpsEvidence?: ReadonlyMap<string, OpsActivityEvidence>,
-  pendingExec?: { readonly callId: string; readonly name: string; readonly arguments: unknown; readonly parent?: unknown }): readonly string[] {
+  pendingExec?: { readonly callId: string; readonly name: string; readonly arguments: unknown; readonly parent?: unknown },
+  options?: { readonly opsCompatibility?: boolean }): readonly string[] {
+  const opsOn = options?.opsCompatibility === true
   let cwd = origin
   const pending = new Map<string, { kind: 'native' | 'ptc'; id: string; name: string; arguments: string; directories: Set<string> }>()
   const eventsPrior = new Map<string, { name: string }>()
@@ -135,7 +137,7 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
       const kind = ptc?.kind === 'start' ? 'ptc' : 'native'
       const id = ptc?.kind === 'start' ? ptc.id.slice(4) : call.callId
       const key = JSON.stringify([kind, id])
-      if (call.name.startsWith('ops_') && (pending.has(key) || ended.has(key))) {
+      if (opsOn && call.name.startsWith('ops_') && (pending.has(key) || ended.has(key))) {
         throw new Error('review-context: duplicate durable OPS call')
       }
       pending.set(key, {
@@ -155,13 +157,13 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
     const call = pending.get(key)
     if (call === undefined) {
       const prior = eventsPrior.get(key)
-      if (prior !== undefined && prior.name.startsWith('ops_') && OPS_PUBLISH[prior.name] !== true) {
+      if (opsOn && prior !== undefined && prior.name.startsWith('ops_') && OPS_PUBLISH[prior.name] !== true) {
         throw new Error('review-context: duplicate durable OPS result')
       }
       continue
     }
     pending.delete(key)
-    if (call.name.startsWith('ops_') && OPS_PUBLISH[call.name] !== true) {
+    if (opsOn && call.name.startsWith('ops_') && OPS_PUBLISH[call.name] !== true) {
       eventsPrior.set(key, call)
       ended.add(key)
       if (ended.size > 512) throw new Error('review-context: durable OPS result index exceeded')
@@ -169,7 +171,7 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
     const failed = ptc?.kind === 'end'
       ? ptc.failed
       : event.data.error !== undefined || toolResultFailed(message ?? {})
-    if (call.name.startsWith('ops_') && OPS_PUBLISH[call.name] !== true) {
+    if (opsOn && call.name.startsWith('ops_') && OPS_PUBLISH[call.name] !== true) {
       const entry = opsEntry(call)
       if (failed && entry.targets.length > 0) {
         throw new Error('review-context: OPS activity contradicts its durable failure')
@@ -192,6 +194,7 @@ export function replayedInstructionTargets(events: readonly unknown[], origin: s
   }
   for (const call of pending.values()) {
     if (!call.name.startsWith('ops_') || OPS_PUBLISH[call.name] === true) continue
+    if (!opsOn) continue
     if (isCurrentExec(call)) continue
     throw new Error('review-context: OPS file activity has no final result')
   }

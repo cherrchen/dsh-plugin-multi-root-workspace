@@ -30,6 +30,8 @@
 - D2 Phase A实时成功活动正规化与附属子目录指令；Auto Review完整性接入作为独立验收任务。
 - 为这些能力建立明确的版本/平台/入口支持范围、失败语义和回归证据。
 
+首期能力统一通过插件设置 `multi-root-ops-compatibility.enabled` 显式启用，默认关闭，并标注实验性与可能存在的限制。关闭时不启用本轮 OPS 专属执行保护、活动采集和 Review 完整性增强，恢复原有 OPS 行为（包括显式只读根可能被 OPS 绕过的已知缺口）；不关闭普通多根围栏，也不代替 Auto Review 自身开关。开关切换不得使已进入保护域的调用裸执行，旧代次结果不得提交为新代次活动。
+
 ### 首期WW/RO过渡决定（R1）
 
 与ADR D1.1a一致，**选择“维持现状并披露”**：首期新增OPS profile、失权早拒和保护存活guard仅用于Full-access。WW/RO固定文件继续现有OPS写根/read_only检查；RO读不因新guard或失权规则被拒，原有MR/OPS拒绝仍保留。WW/RO的temp重叠、权威不可用及F07等残余继续披露，不纳入首期保护通过结论。
@@ -194,4 +196,5 @@ ADR-0027 保持 Proposed，未经维护者正式接受；本轮按直接授权�
 - P3 活动恢复：`src/compat/instruction-activity.ts`（stableOpsJson/opsActivityEvidenceKey/OPS receipt 规范化/重放），`src/instructions.ts`（有界 live index、fs/observed global:true、tools/result 指纹匹配、liveOpsEvidence、abort/throw/dispose 清理、观察者不更改业务结果）。测试 `tests/ops-activity.spec.ts`、`tests/ops-instruction-activity.spec.ts`、`tests/instruction-activity.spec.ts`。
 - P4 Review 集成：`src/review-context.ts`（pendingInstructionTargets + pending 身份绑定指纹），snapshot 沿用 liveOpsEvidence 并前置完整证据校验；历史 OPS 缺证据、动态目标、冲突证据均 review-context 技术失败。Host B 测试 `tests/auto-review/ops-context.spec.ts`（含真实 resume）与 `context.spec.ts` 回归。
 - 真实 AgentLoop 证据：`ops-adaptation-loop-host-a.json`（0.2.0-rc.2）与 `ops-adaptation-loop-host-b.json`（0.2.1-rc.2），`ops-adaptation-agent-loop.mjs` 未修改执行，三 checks 全部 pass（inspect 祖先链、partial read_files 2/3、真实 PTC run_code 双目录链）。
-- P5 适用验证：full suite / lint / typecheck / build / docs:check 一次通过（`final-*.log`）；Host B Review 规格 36/36 与精确 typecheck（`p4-hostb-rc2-*`）。smoke/pack/kernel probe 未运行，标 NOT_TESTED，不能据此宣称全计划验收完成。
+- 配置门禁：全部首期能力收进 Settings 行 `multi-root-ops-compatibility.enabled`（默认 `false`，实验性）；关闭时 OPS 恢复原行为、无新增兜底，显式只读根仍可能被 OPS 绕过。客户端配置卡与 Skills 开关共用 `plugins.bundle.config` 唯一注册（`BundleSettingsCard`，Skills 上 OPS 下），legacy `settings.plugin.item` 分 namespace 挂卡；证据 `tests/client-ops-settings.spec.tsx`、`tests/client-bundle.spec.ts` 构建物断言、`/tmp/ops-mode-ui.html` DOM 快照。回归覆盖真实 Settings 保存与重启、关闭路径、准备中切换、在途保护及跨代次结果，见 `tests/ops-settings.spec.ts`、`tests/ops-activity.spec.ts`、`tests/ops-compat.spec.ts` 与 `tests/auto-review/ops-context.spec.ts`。
+- 首轮仓库验证（非 P5/P6 完整验收）：full suite / lint / typecheck / build / docs:check 一次通过（`final-*.log`）；Host B Review 规格 36/36 与精确 typecheck（`p4-hostb-rc2-*`）。当时 smoke/pack/kernel probe 未运行。本开关变更已补 `pack:check`，其余平台、kernel 与 smoke 验收仍未完成，不能据此宣称全计划验收完成。审计 §16 历史复验在开关加入前完成，代表启用路径；复跑须显式 `enabled: true`。

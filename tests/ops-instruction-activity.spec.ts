@@ -348,10 +348,10 @@ describe('replayedInstructionTargets — OPS live evidence', () => {
       { type: 'tool/result', data: { message: { source: { callId: 'c1' }, content: [{ type: 'tool-result', toolCallId: 'c1', content: [], isError: false }] } } },
     ]
     const evidence = new Map([[key, { targets: [{ path: canonicalPath(a), kind: 'read' as const }], complete: true }]])
-    expect(replayedInstructionTargets(events, cwd, evidence)).toEqual([canonicalPath(a)])
-    expect(() => replayedInstructionTargets(events, cwd)).toThrow('review-context')
-    expect(() => replayedInstructionTargets(events, cwd, new Map())).toThrow('review-context')
-    expect(() => replayedInstructionTargets(events, cwd, new Map([[key, { targets: [], complete: false }]]))).toThrow('review-context')
+    expect(replayedInstructionTargets(events, cwd, evidence, undefined, { opsCompatibility: true })).toEqual([canonicalPath(a)])
+    expect(() => replayedInstructionTargets(events, cwd, undefined, undefined, { opsCompatibility: true })).toThrow('review-context')
+    expect(() => replayedInstructionTargets(events, cwd, new Map(), undefined, { opsCompatibility: true })).toThrow('review-context')
+    expect(() => replayedInstructionTargets(events, cwd, new Map([[key, { targets: [], complete: false }]]), undefined, { opsCompatibility: true })).toThrow('review-context')
     expect(createHash('sha256').update(stableOpsJson(args)).digest('hex').length).toBe(64)
   })
 
@@ -366,10 +366,10 @@ describe('replayedInstructionTargets — OPS live evidence', () => {
       { type: 'tool/call', data: { callId: 'cur', name: 'ops_write_file', arguments: JSON.stringify({ path: b }) } },
     ]
     const evidence = new Map([[ptcKey, { targets: [{ path: canonicalPath(a), kind: 'read' as const }], complete: true }]])
-    expect(replayedInstructionTargets(events, cwd, evidence, { callId: 'cur', name: 'ops_write_file', arguments: { path: b } }))
+    expect(replayedInstructionTargets(events, cwd, evidence, { callId: 'cur', name: 'ops_write_file', arguments: { path: b } }, { opsCompatibility: true }))
       .toEqual([canonicalPath(a)])
-    expect(() => replayedInstructionTargets(events, cwd, evidence)).toThrow('review-context')
-    expect(() => replayedInstructionTargets(events, cwd, evidence, { callId: 'other', name: 'ops_write_file', arguments: { path: b } })).toThrow('review-context')
+    expect(() => replayedInstructionTargets(events, cwd, evidence, undefined, { opsCompatibility: true })).toThrow('review-context')
+    expect(() => replayedInstructionTargets(events, cwd, evidence, { callId: 'other', name: 'ops_write_file', arguments: { path: b } }, { opsCompatibility: true })).toThrow('review-context')
   })
 
   it('honours effect-none evidence on a failed OPS call and still requires it', async () => {
@@ -380,7 +380,7 @@ describe('replayedInstructionTargets — OPS live evidence', () => {
       { type: 'tool/result', data: { error: { code: 'ACCESS_DENIED' }, message: { source: { callId: 'c2' }, content: [{ type: 'tool-result', toolCallId: 'c2', content: [], isError: true }] } } },
     ]
     const evidence = new Map([[key, { targets: [], complete: true }]])
-    expect(replayedInstructionTargets(events, cwd, evidence)).toEqual([])
-    expect(() => replayedInstructionTargets(events, cwd, new Map())).toThrow('review-context')
+    expect(replayedInstructionTargets(events, cwd, evidence, undefined, { opsCompatibility: true })).toEqual([])
+    expect(() => replayedInstructionTargets(events, cwd, new Map(), undefined, { opsCompatibility: true })).toThrow('review-context')
   })
 })

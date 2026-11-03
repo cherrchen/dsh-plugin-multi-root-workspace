@@ -14,6 +14,7 @@ import { assertAutoReviewRelease } from './compat/auto-review-contract.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
 import { DEFAULT_MAX_BYTES, touchedPathOfToolCall } from './instructions.ts'
 import { pendingInstructionTargets, stableOpsJson } from './compat/instruction-activity.ts'
+import { opsCompatibilityToken } from './compat/ops-settings.ts'
 import { isCanonicallyUnder } from './roots.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -93,19 +94,23 @@ export class MultiRootReviewContext extends Service {
             : 'only effective writable additional roots; explicit denies take precedence',
     }
     const official = touchedPathOfToolCall(exec.name, JSON.stringify(exec.arguments))
-    const candidates = pendingInstructionTargets(exec.name, exec.arguments)
+    const modeToken = opsCompatibilityToken(this.ctx)
+    const candidates = modeToken === undefined ? [] : pendingInstructionTargets(exec.name, exec.arguments)
     const targets: string[] = []
     for (const path of official === undefined ? candidates : [official]) {
       targets.push(this.ctx.fs.processPath(await this.ctx.fs.resolve(resolve(cwd, path), {signal})))
     }
-    const pending = exec.callId === undefined ? undefined
+    const pending = exec.callId === undefined || modeToken === undefined ? undefined
       : { callId: exec.callId, name: exec.name, arguments: exec.arguments, parent: exec.parent }
     const constraints = await this.ctx.multiRootInstructions.snapshot(agent, scope.authority === 'available' ? scope.additionalRoots : [], targets, signal, pending)
     signal.throwIfAborted()
+    if (opsCompatibilityToken(this.ctx) !== modeToken) throw new Error('review-context: OPS compatibility changed during the build; retry')
     const instructionProvenanceRoots = [...new Set([...scope.additionalRoots, ...this.ctx.multiRootInstructions.knownRoots(agent.session)])]
     const payload = { schemaVersion: 1 as const, environment, instructionProvenanceRoots, constraints, completeness: 'complete' as const }
     if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > DEFAULT_MAX_BYTES) throw new Error('review-context: context budget exceeded')
-    return { ...payload, fingerprint: createHash('sha256').update(JSON.stringify([payload,nativeInstructionFingerprint(agent.session),exec.name,stableOpsJson(exec.arguments)])).digest('hex') }
+    return { ...payload, fingerprint: createHash('sha256').update(JSON.stringify(modeToken === undefined
+      ? [payload, nativeInstructionFingerprint(agent.session)]
+      : [payload, nativeInstructionFingerprint(agent.session), exec.name, stableOpsJson(exec.arguments), (modeToken as { id?: unknown }).id])).digest('hex') }
   }
 
   async assertCurrent(exec: ReviewExecution, snapshot: ReviewContext, signal: AbortSignal): Promise<void> {

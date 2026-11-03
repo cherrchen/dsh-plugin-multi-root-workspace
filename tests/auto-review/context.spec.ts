@@ -22,6 +22,7 @@ import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import { MultiRootFileSystem } from '../../src/fs.ts'
 import * as Instructions from '../../src/instructions.ts'
 import ReviewContextService from '../../src/review-context.ts'
+import { MultiRootOpsCompatibility } from '../../src/ops-compatibility.ts'
 import { mountRegistryStack } from '../support/registry-stack.ts'
 import { createFixtureWorkspace, REPO_ROOT } from '../support/temp-workspace.ts'
 import * as Companion from '../../src/auto-review/fork.ts'
@@ -234,6 +235,7 @@ describe('current host review context and real tool fences', () => {
   })
   it('fails an OPS call before the reviewer when its dynamic targets are unknowable',async()=>{
     const w=await world()
+    await w.ctx.plugin(MultiRootOpsCompatibility, { enabled: true })
     let bodies=0
     w.ctx.tools.register({name:'ops_replace',description:'spec ops_replace',parameters:{type:'object',properties:{}},
       output:{schema:{type:'object',properties:{}},render:()=>'ops_replace'},

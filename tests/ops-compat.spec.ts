@@ -25,6 +25,8 @@ import { mountCompat } from './support/compat.ts'
 import { mountProviderGate } from './support/providers.ts'
 import { installToolExecutor, executeTool } from './support/tool-executor.ts'
 import { mountRegistryStack } from './support/registry-stack.ts'
+import { installOpsSetting } from './support/ops-settings.ts'
+import { MultiRootOpsCompatibility } from '../src/ops-compatibility.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -57,6 +59,7 @@ interface World {
   fenceFiber: Awaited<ReturnType<Context['plugin']>>
   scopeFiber: Awaited<ReturnType<Context['plugin']>>
   agent: Agent
+  setOpsEnabled: (value: boolean) => void
 }
 
 function seatbelt(): SandboxInternals { return { chain: ['seatbelt'] } }
@@ -89,6 +92,7 @@ async function mountWorld(options: {
   shared?: boolean
   toolsFirst?: boolean
   noFence?: boolean
+  enabled?: boolean
   beforeFence?: (ctx: Context) => Promise<void>
 } = {}): Promise<World> {
   const mode = options.mode ?? 'danger-full-access'
@@ -116,6 +120,8 @@ async function mountWorld(options: {
       },
     })
     stacks.push(stack)
+    const setOpsEnabled = installOpsSetting(stack.ctx, options.enabled !== false)
+    await stack.ctx.plugin(MultiRootOpsCompatibility, { enabled: options.enabled !== false })
     const ctx = stack.ctx
     const provider = ctx.sandbox as MultiRootSandboxProvider
     provider.internals = seatbelt()
@@ -128,7 +134,7 @@ async function mountWorld(options: {
     const fenceFiber = options.noFence === true ? undefined : await ctx.plugin(ProcessFence)
     if (options.toolsFirst !== true) await toolsMount()
     const agent = { id: 'ops-shared-agent', session: ctx.sessions.create(SessionId('ops-shared-session'), { meta: { cwd: fixture.workspace } }) } as unknown as Agent
-    return { ctx, provider, captured, fenceFiber: fenceFiber as World['fenceFiber'], scopeFiber: undefined as unknown as World['scopeFiber'], agent }
+    return { ctx, provider, captured, fenceFiber: fenceFiber as World['fenceFiber'], scopeFiber: undefined as unknown as World['scopeFiber'], agent, setOpsEnabled }
   }
   const ctx = new Context()
   const scopeFiber = await ctx.plugin(MultiRootScopeService, options.scopeConfig ?? {})
@@ -138,7 +144,9 @@ async function mountWorld(options: {
     await ctx.plugin(SandboxPolicyService, { mode, workspaceRoot: fixture.workspace }),
     scopeFiber,
   )
+  const setOpsEnabled = installOpsSetting(ctx, options.enabled !== false)
   await mountCompat(ctx)
+  fibers.push(await ctx.plugin(MultiRootOpsCompatibility, { enabled: options.enabled !== false }))
   fibers.push(await ctx.plugin(MultiRootSandboxProvider, {}))
   const provider = ctx.sandbox as MultiRootSandboxProvider
   provider.internals = seatbelt()
@@ -160,7 +168,7 @@ async function mountWorld(options: {
   const fenceFiber = options.noFence === true ? undefined : await ctx.plugin(ProcessFence)
   if (options.toolsFirst !== true) await toolsMount()
   const agent = { id: 'ops-agent', session: ctx.sessions.create(SessionId('ops-session'), { meta: { cwd: fixture.workspace } }) } as unknown as Agent
-  return { ctx, provider, captured, fenceFiber: fenceFiber as World['fenceFiber'], scopeFiber, agent }
+  return { ctx, provider, captured, fenceFiber: fenceFiber as World['fenceFiber'], scopeFiber, agent, setOpsEnabled }
 }
 
 function call(world: World, name: string, args: unknown = {}, agent: Agent | undefined = world.agent) {
@@ -313,6 +321,7 @@ describe('the protection lifecycle', () => {
       await ctx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: fixture.workspace }),
     )
     await mountCompat(ctx)
+    fibers.push(await ctx.plugin(MultiRootOpsCompatibility, { enabled: true }))
     fibers.push(await ctx.plugin(MultiRootSandboxProvider, {}))
     const provider = ctx.sandbox as MultiRootSandboxProvider
     provider.internals = seatbelt()
@@ -675,5 +684,88 @@ describe('nested OPS dispatch under a shared registry', () => {
       expect(world.captured.bodies, name).toEqual([])
       expect(world.captured.spawned, name).toEqual([])
     }
+  })
+})
+
+describe('OPS compatibility mode off', () => {
+  it('runs an OPS write through the generic dispatch without restricted confinement', async () => {
+    const world = await mountWorld({ mode: 'danger-full-access', enabled: false })
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    const spy = vi.spyOn(world.provider, 'restrictedExecution')
+    opsTool(world.ctx, 'ops_write_file', world.captured)
+    const result = await call(world, 'ops_write_file', { path: join(fixture.outside, 'x.txt') })
+    expect(isError(result)).toBe(false)
+    expect(world.captured.bodies).toEqual(['ops_write_file'])
+    expect(spy).not.toHaveBeenCalled()
+    expect(world.captured.spawned.length).toBeGreaterThan(0)
+  })
+
+  it('runs an unknown OPS name through the generic dispatch while off', async () => {
+    const world = await mountWorld({ mode: 'danger-full-access', enabled: false })
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    opsTool(world.ctx, 'ops_mystery', world.captured)
+    const result = await call(world, 'ops_mystery', { path: 'x' })
+    expect(isError(result)).toBe(false)
+    expect(world.captured.bodies).toEqual(['ops_mystery'])
+  })
+
+  it('confines and refuses the same calls once the mode is enabled', async () => {
+    const world = await mountWorld({ mode: 'danger-full-access' })
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    opsTool(world.ctx, 'ops_write_file', world.captured)
+    const result = await call(world, 'ops_write_file', { path: join(fixture.outside, 'x.txt') })
+    expect(result.isError).toBe(false)
+    expect(world.captured.spawned[0]!.argv.slice(0, 2)).toEqual(['sandbox-exec', '-p'])
+    opsTool(world.ctx, 'ops_mystery', world.captured)
+    const unknown = await call(world, 'ops_mystery', { path: 'x' })
+    expect(unknown.isError).toBe(true)
+  })
+})
+
+describe('OPS mode toggle lifecycle', () => {
+  it.each([false, true])('refuses a dispatch when the mode toggles during prepare (re-enable: %s)', async (reOn) => {
+    const world = await mountWorld({ mode: 'danger-full-access' })
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    let release!: () => void
+    let started!: () => void
+    const preparing = new Promise<void>(resolve => { started = resolve })
+    const gate = new Promise<{ argv: string[] }>(resolve => { release = () => resolve({ argv: ['sandbox-exec', '-p'] }) })
+    vi.spyOn(world.provider, 'restrictedExecution').mockImplementationOnce(() => { started(); return gate as never })
+    opsTool(world.ctx, 'ops_write_file', world.captured)
+    const pending = call(world, 'ops_write_file', { path: join(fixture.outside, 'x.txt') })
+    try {
+      await preparing
+      world.setOpsEnabled(false)
+      if (reOn) world.setOpsEnabled(true)
+      release()
+      const result = await pending
+      expect(result.isError).toBe(true)
+      expect(world.captured.bodies).toEqual([])
+      expect(world.captured.spawned).toEqual([])
+    } finally { release(); await pending }
+  })
+
+  it('keeps the entry-time profile for a body already running when the mode turns off', async () => {
+    const world = await mountWorld({ mode: 'danger-full-access' })
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    let release!: () => void
+    let started!: () => void
+    const entered = new Promise<void>(resolve => { started = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    opsTool(world.ctx, 'ops_write_file', world.captured, { run: () => { started(); return gate } })
+    const pending = call(world, 'ops_write_file', { path: join(fixture.outside, 'x.txt') })
+    try {
+      await entered
+      world.setOpsEnabled(false)
+      opsTool(world.ctx, 'ops_read_files', world.captured)
+      const second = await call(world, 'ops_read_files', { files: [] })
+      release()
+      const first = await pending
+      expect(second.isError).toBe(false)
+      expect(first.isError).toBe(false)
+      expect(world.captured.spawned).toHaveLength(2)
+      expect(world.captured.spawned[0]!.argv).toEqual(COMMAND)
+      expect(world.captured.spawned[1]!.argv.slice(0, 2)).toEqual(['sandbox-exec', '-p'])
+    } finally { release(); await pending }
   })
 })

@@ -76,6 +76,10 @@
         # or an unavailable registry authority), the scope appends this path
         # to the deny set, so fs writes and spawned processes refuse it.
         dshHome: !!js dshHomePath()
+    - id: multi-root-ops-compatibility
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/ops-compatibility'
+      config:
+        enabled: false
     - id: multi-root-registry
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/registry'
       config:

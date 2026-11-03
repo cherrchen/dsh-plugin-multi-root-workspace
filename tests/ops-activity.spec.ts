@@ -15,9 +15,12 @@ import { MultiRootFileSystem } from '../src/fs.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import * as LlmMessage from '../src/compat/llm-message.ts'
 import * as Instructions from '../src/instructions.ts'
+import { replayedInstructionTargets } from '../src/compat/instruction-activity.ts'
 import { mountCompat } from './support/compat.ts'
+import { MultiRootOpsCompatibility } from '../src/ops-compatibility.ts'
 import { mountProviderGate } from './support/providers.ts'
 import { installToolExecutor, executeTool } from './support/tool-executor.ts'
+import { installOpsSetting } from './support/ops-settings.ts'
 
 let base: string
 let workspace: string
@@ -63,32 +66,35 @@ interface World {
   readonly ctx: Context
   readonly session: InstanceType<typeof Session>
   readonly agent: Agent
+  readonly setOpsEnabled: (value: boolean) => void
   readonly step: () => Promise<string>
   readonly call: (name: string, args: unknown, options?: { signal?: AbortSignal; session?: Session.Session }) => Promise<{ isError?: boolean; value?: unknown }>
 }
 
-async function mountWorld(): Promise<World> {
+async function mountWorld(options: { mode?: string; enabled?: boolean } = {}): Promise<World> {
   const ctx = new Context()
   fibers.push(
     await ctx.plugin(SessionProjectionRegistry),
-    await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: workspace }),
+    await ctx.plugin(SandboxPolicyService, { mode: (options.mode ?? 'workspace-write') as never, workspaceRoot: workspace }),
     await ctx.plugin(MultiRootScopeService),
   )
   await mountCompat(ctx)
+  const setOpsEnabled = installOpsSetting(ctx, options.enabled !== false)
+  fibers.push(await ctx.plugin(MultiRootOpsCompatibility, { enabled: options.enabled !== false }))
   fibers.push(await ctx.plugin(MultiRootFileSystem, { cwd: workspace }))
   await mountProviderGate(ctx)
   fibers.push(await ctx.plugin(SystemPrompt, {}))
   fibers.push(await ctx.plugin(Tools, {}))
   fibers.push(await ctx.plugin(Instructions, {}))
   await installToolExecutor(ctx)
-  ctx.multiRootScope.setAdditionalRoots(workspace, [{ id: 'r1', path: root, recordedPath: canonicalPath(root), access: 'read-write' }])
+  ctx.multiRootScope.setAdditionalRoots(workspace, [{ id: 'r1', path: root, recordedPath: canonicalPath(root), access: options.mode === 'danger-full-access' ? 'read-only' : 'read-write' }])
   const sessionId = SessionId(`sess-ops-activity-${counter += 1}`)
   const session = Session.create(sessionId, undefined, {
     version: SESSION_FORMAT_VERSION, id: sessionId, createdAt: 0, isSeeded: false, cwd: workspace,
   })
   const agent = { session } as unknown as Agent
   return {
-    ctx, session, agent,
+    ctx, session, agent, setOpsEnabled,
     step: async () => {
       const decision = await ctx.waterfall('agent/pre-step' as never,
         { agent, messages: [], turn: 1, step: 1, signal: new AbortController().signal } as never,
@@ -256,5 +262,77 @@ describe('live OPS file activity index', () => {
     expect(result.isError).toBeFalsy()
     expect((result.value as { status?: string })?.status).toBe('completed')
     expect(await world.step()).not.toContain('NESTED-SENTINEL')
+  })
+})
+
+describe('OPS compatibility mode off', () => {
+  it.each([false, true])('does not commit an old result across a mode change (re-enable: %s)', async reOn => {
+    const world = await mountWorld()
+    const path = join(root, 'sub', 'a.txt')
+    const receipt = readFilesReceipt([fileReceipt(path)])
+    let started!: () => void
+    let release!: () => void
+    const entered = new Promise<void>(resolve => { started = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    opsTool(world.ctx, 'ops_read_files', receipt, {
+      observe: [path], run: () => { started(); return gate },
+    })
+    await world.step()
+    const pending = world.call('ops_read_files', { files: [{ path }] })
+    try {
+      await entered
+      world.setOpsEnabled(false)
+      if (reOn) world.setOpsEnabled(true)
+      release()
+      expect((await pending).value).toEqual(receipt)
+      expect(await world.step()).not.toContain('NESTED-SENTINEL')
+      if (!reOn) world.setOpsEnabled(true)
+      expect(await world.step()).not.toContain('NESTED-SENTINEL')
+    } finally { release(); await pending }
+  })
+
+  it('lets an OPS call run through the generic dispatch without new refusals', async () => {
+    const world = await mountWorld({ mode: 'danger-full-access', enabled: false })
+    let bodies = 0
+    opsTool(world.ctx, 'ops_write_file', { status: 'completed' }, { run: () => { bodies += 1 } })
+    const result = await world.call('ops_write_file', { path: join(root, 'sub', 'a.txt') })
+    expect(bodies).toBe(1)
+    expect(result.isError).not.toBe(true)
+  })
+
+  it('refuses the same call once the mode is enabled', async () => {
+    const world = await mountWorld({ mode: 'danger-full-access', enabled: true })
+    let bodies = 0
+    opsTool(world.ctx, 'ops_write_file', { status: 'completed' }, { run: () => { bodies += 1 } })
+    const result = await world.call('ops_write_file', { path: join(root, 'sub', 'a.txt') })
+    expect(result.isError).toBe(true)
+  })
+
+  it('does not inject nested instructions for OPS activity while off', async () => {
+    const world = await mountWorld({ enabled: false })
+    const sub = join(root, 'sub', 'a.txt')
+    opsTool(world.ctx, 'ops_read_files', readFilesReceipt([fileReceipt(sub)]), { observe: [sub] })
+    await world.step()
+    await world.call('ops_read_files', { files: [{ path: sub }] })
+    expect(await world.step()).not.toContain('NESTED-SENTINEL')
+  })
+
+  it('injects the nested chain when the mode is enabled', async () => {
+    const world = await mountWorld()
+    const sub = join(root, 'sub', 'a.txt')
+    opsTool(world.ctx, 'ops_read_files', readFilesReceipt([fileReceipt(sub)]), { observe: [sub] })
+    await world.step()
+    await world.call('ops_read_files', { files: [{ path: sub }] })
+    expect(await world.step()).toContain('NESTED-SENTINEL')
+  })
+
+  it('does not refuse replay for OPS history lacking live evidence while off', () => {
+    const events = [
+      { type: 'tool/call', data: { callId: 'ghost', name: 'ops_read_files', arguments: '{}' } },
+      { type: 'tool/result', data: { message: { source: { callId: 'ghost' }, isError: false } } },
+      { type: 'tool/call', data: { callId: 'unsettled', name: 'ops_write_file', arguments: '{}' } },
+    ]
+    expect(replayedInstructionTargets(events, undefined)).toEqual([])
+    expect(replayedInstructionTargets(events, undefined, undefined, undefined, { opsCompatibility: false })).toEqual([])
   })
 })

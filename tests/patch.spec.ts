@@ -121,6 +121,7 @@ describe('inserted rows', () => {
       'multi-root-sandbox',
       'multi-root-providers',
       'multi-root-scope',
+      'multi-root-ops-compatibility',
       'multi-root-registry',
       'multi-root-skills',
       'multi-root-instructions',

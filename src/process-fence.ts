@@ -67,6 +67,7 @@ import { withRegistryAdmission } from './registry-operation.ts'
 import { confineInstalled } from './compat/sandbox-confine.ts'
 import { hasConfinedProfile, originalProcessArgv } from './compat/process-profile.ts'
 import { aroundTool } from './compat/tool-context.ts'
+import { opsCompatibilityToken } from './compat/ops-settings.ts'
 import type { ToolCaller } from './compat/tool-context.ts'
 import {
   assertOpsPosixCacheAdmission, assertOpsProtectionOwner, claimOpsProtection,
@@ -125,6 +126,7 @@ export function apply(ctx: Context): void {
   const opsScope = ctx.get('multiRootScope')!
   const opsSandbox = ctx.sandbox as MultiRootSandboxProvider
   const runOpsDispatch = async (exec: ToolCaller, policy: SandboxExecutionPolicy, next: () => Promise<unknown>): Promise<unknown> => {
+    const modeToken = opsCompatibilityToken(ctx)
     const scope = opsScope
     const opsState = scope.opsProtection
     const token = enterOpsProtection(opsState)
@@ -156,6 +158,9 @@ export function apply(ctx: Context): void {
           }
         }
         assertOpsProtectionOwner(opsState, token)
+        if (opsCompatibilityToken(ctx) !== modeToken) {
+          throw new Error('multi-root workspace: the OPS compatibility mode changed during dispatch; refusing the execution')
+        }
         const store: PreparedDeny = { argvPrefix: facts?.argv ?? [], ops: true, opsState, active: true }
         try {
           return await processDenyStore.run(store, () =>
@@ -175,7 +180,7 @@ export function apply(ctx: Context): void {
 
   aroundTool(ctx, async (exec, next) => {
     const kind = classifyOpsTool(exec.name)
-    if (kind === 'other' || kind === 'publish') {
+    if (kind === 'other' || kind === 'publish' || opsCompatibilityToken(ctx) === undefined) {
       if (!ctx.get('multiRootRegistry')?.shared || exec.agent === undefined) return next()
       const policy = ctx.sandboxPolicy.resolve({ session: exec.agent.session })
       return opsScope.withToolCap(exec.name, () => withRegistryAdmission(ctx, policy, 'process', next))

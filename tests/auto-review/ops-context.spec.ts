@@ -13,7 +13,9 @@ import { MultiRootFileSystem } from '../../src/fs.ts'
 import * as Instructions from '../../src/instructions.ts'
 import ReviewContextService from '../../src/review-context.ts'
 import { mountRegistryStack } from '../support/registry-stack.ts'
+import { MultiRootOpsCompatibility } from '../../src/ops-compatibility.ts'
 import { createFixtureWorkspace } from '../support/temp-workspace.ts'
+import { installOpsSetting } from '../support/ops-settings.ts'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { vi.restoreAllMocks(); while (cleanup.length) await cleanup.pop()!() })
@@ -31,7 +33,7 @@ const readFilesReceipt = (items: readonly unknown[]) => ({
   total: items.length, truncated: false,
 })
 
-async function world() {
+async function world(enabled = true) {
   const f = createFixtureWorkspace('ops-review')
   const ro = join(f.base, 'readonly'); mkdirSync(ro)
   const stack = await mountRegistryStack(join(f.base, 'store'), {}, { beforeGate: async ctx => {
@@ -40,6 +42,8 @@ async function world() {
     await ctx.plugin(MultiRootFileSystem, { cwd: f.workspace })
   } })
   cleanup.push(async () => { await stack.dispose(); f.dispose() })
+  const setOpsEnabled = installOpsSetting(stack.ctx, enabled)
+  await stack.ctx.plugin(MultiRootOpsCompatibility, { enabled })
   const ctx = stack.ctx
   await ctx.plugin(WorkingDirectory)
   await ctx.plugin(Instructions, {})
@@ -80,7 +84,7 @@ async function world() {
   }
   const build = (name: string, args: unknown, callId?: string, parent?: unknown) =>
     ctx.multiRootReviewContext.build({ agent, callId, name, arguments: args, parent }, new AbortController().signal)
-  return { f, ctx, stack, session, agent, outside, opsTool, run, build }
+  return { f, ctx, stack, session, agent, outside, opsTool, run, build, setOpsEnabled }
 }
 
 const constraintText = (context: { constraints: readonly { path: string; text: string }[] }) =>
@@ -217,5 +221,68 @@ describe('OPS pending and durable activity in the review context', () => {
     const before = await w.build('ops_read_files', { files: [{ path: sub }] })
     const exec = { agent: w.agent, name: 'ops_read_files', arguments: { files: [{ path: other }] } }
     await expect(w.ctx.multiRootReviewContext.assertCurrent(exec, before, new AbortController().signal)).rejects.toThrow('changed')
+  })
+})
+
+describe('OPS compatibility mode off', () => {
+  it.each([false, true])('rejects a snapshot interrupted by a mode change (roots: %s)', async includeRoots => {
+    const w = await world()
+    const pending = w.ctx.multiRootInstructions.snapshot(w.agent, includeRoots ? [w.outside] : [], undefined, new AbortController().signal)
+    w.setOpsEnabled(false)
+    await expect(pending).rejects.toThrow('OPS compatibility changed')
+  })
+
+  it('invalidates approval after disabling and after re-enabling the mode', async () => {
+    const w = await world()
+    const exec = { agent: w.agent, name: 'bash', arguments: {} }
+    const snapshot = await w.build(exec.name, exec.arguments)
+    w.setOpsEnabled(false)
+    await expect(w.ctx.multiRootReviewContext.assertCurrent(exec, snapshot, new AbortController().signal)).rejects.toThrow('changed')
+    w.setOpsEnabled(true)
+    await expect(w.ctx.multiRootReviewContext.assertCurrent(exec, snapshot, new AbortController().signal)).rejects.toThrow('changed')
+  })
+
+  it('ignores the OPS incomplete flag for an ordinary review after disabling the mode', async () => {
+    const w = await world()
+    const path = join(w.outside, 'sub', 'a.txt')
+    w.opsTool('ops_read_files', { status: 'completed' }, [path])
+    await w.run('ops_read_files', { files: [{ path }] })
+    await expect(w.build('bash', {})).rejects.toThrow('incomplete OPS')
+    w.setOpsEnabled(false)
+    expect((await w.build('bash', {})).completeness).toBe('complete')
+  })
+
+  it('ignores dynamic pending targets and OPS history when explicitly disabled', async () => {
+    const w = await world(false)
+    w.session.append('tool/call', { turn: 1, step: 1, callId: 'off-ghost', name: 'ops_read_files', arguments: '{}' })
+    expect((await w.build('ops_replace', {})).completeness).toBe('complete')
+    expect((await w.build('ops_status', {})).completeness).toBe('complete')
+  })
+
+  it('does not refuse OPS pending or history while the service is absent', async () => {
+    const f = createFixtureWorkspace('ops-review-off')
+    const stack = await mountRegistryStack(join(f.base, 'store'), {}, { beforeGate: async ctx => {
+      await ctx.plugin(Sessions); await ctx.plugin(Projections); await ctx.plugin(SystemPrompt)
+      await ctx.plugin(Policy, { mode: 'danger-full-access', workspaceRoot: f.workspace })
+      await ctx.plugin(MultiRootFileSystem, { cwd: f.workspace })
+    } })
+    try {
+      const ctx = stack.ctx
+      await ctx.plugin(WorkingDirectory)
+      await ctx.plugin(Instructions, {})
+      await ctx.plugin(ReviewContextService)
+      const session = ctx.sessions.create(SessionId('ops-review-off-session'), { meta: { cwd: f.workspace } })
+      const agent = { id: session.id, session, ctx, options: {}, inject() {} } as unknown as Agent
+      mkdirSync(join(f.outside, 'sub'), { recursive: true })
+      writeFileSync(join(f.outside, 'AGENTS.md'), 'ROOT-RULES')
+      writeFileSync(join(f.outside, 'sub', 'AGENTS.md'), 'NESTED-RULES')
+      await stack.registry.add(f.workspace, { path: f.outside, access: 'read-write' })
+      session.append('tool/call', { turn: 1, step: 1, callId: 'ghost', name: 'ops_read_files', arguments: '{}' })
+      const context = await ctx.multiRootReviewContext.build({ agent, name: 'ops_replace', arguments: { path: f.outside } }, new AbortController().signal)
+      expect(context.constraints.map(item => item.text).join('|')).not.toContain('NESTED-RULES')
+      session.append('tool/result', { turn: 1, step: 1, message: { source: { kind: 'tool', callId: 'ghost' }, content: [{ type: 'tool-result', toolCallId: 'ghost', content: [], isError: false }] } }, { surfaceOp: 'append' })
+      const second = await ctx.multiRootReviewContext.build({ agent, name: 'ops_replace', arguments: { path: f.outside } }, new AbortController().signal)
+      expect(second).toBeDefined()
+    } finally { await stack.dispose(); f.dispose() }
   })
 })

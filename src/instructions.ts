@@ -68,6 +68,7 @@ import { toolResultFailed } from './compat/tool-result.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
 import { aroundTool, type ToolCaller } from './compat/tool-context.ts'
 import { FILE_TOUCH_TOOL_NAMES, normalizeOpsFileActivity, opsActivityEvidenceKey, ptcFileActivity, replayedInstructionTargets, stableOpsJson, touchedPathOfToolCall } from './compat/instruction-activity.ts'
+import { opsCompatibilityToken } from './compat/ops-settings.ts'
 import { nativeInstructionCopies } from './compat/instruction-overlap.ts'
 import { isCanonicallyUnder } from './roots.ts'
 import type {} from './scope.ts'
@@ -321,6 +322,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     readonly argsJson: string
     readonly cwd: string | undefined
     readonly observed: Set<string>
+    readonly mode: object
     readonly signal?: AbortSignal | undefined
     fingerprint?: string | undefined
     incomplete?: boolean | undefined
@@ -341,7 +343,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       const oldest = opsLive.keys().next()
       if (!oldest.done) {
         const evicted = removeEntry(oldest.value)
-        if (evicted !== undefined) stateOf(evicted.session).activityIncomplete = true
+        if (evicted !== undefined && evicted.mode === opsCompatibilityToken(ctx)) stateOf(evicted.session).activityIncomplete = true
       }
     }
     opsLive.set(key, call)
@@ -360,6 +362,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     state.liveOpsEvidence.set(key, entry)
   }
   const mark = (call: LiveCall) => {
+    if (call.mode !== opsCompatibilityToken(ctx)) return
     const state = stateOf(call.session)
     state.activityIncomplete = true
     try {
@@ -372,7 +375,8 @@ export function apply(ctx: Context, config: Config = {}): void {
   const runLive = async (exec: ToolCaller, next: () => Promise<unknown>): Promise<unknown> => {
     const agent = exec.agent
     const bare = exec.name.startsWith('ops_') ? exec.name.slice(4) : ''
-    if (bare === '' || bare === 'discover_tools' || bare === 'load_sdk' || agent === undefined || disposed) return await next()
+    const modeToken = opsCompatibilityToken(ctx)
+    if (bare === '' || bare === 'discover_tools' || bare === 'load_sdk' || agent === undefined || disposed || modeToken === undefined) return await next()
     let argsJson = ''
     let incomplete = false
     try {
@@ -382,13 +386,14 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
     const directories = ctx.get('workingDirectory') as { ensure(agent: Agent, signal?: AbortSignal): Promise<string | undefined> } | undefined
     const ensured = directories === undefined ? undefined : await directories.ensure(agent, exec.signal).catch(() => undefined)
+    if (disposed || opsCompatibilityToken(ctx) !== modeToken) return await next()
     const cwd = ensured ?? effectiveDirectory(ctx, agent.session) ?? agent.session?.header?.cwd
     const call: LiveCall = {
       exec, session: agent.session, agent, token: keyOf(exec),
       kind: exec.parent === undefined ? 'native' : 'ptc',
       callId: exec.callId, name: exec.name,
       args: incomplete ? undefined : JSON.parse(argsJson) as unknown, argsJson, cwd,
-      observed: new Set(), incomplete, signal: exec.signal,
+      observed: new Set(), incomplete, signal: exec.signal, mode: modeToken,
     }
     if (exec.signal?.aborted === true) {
       mark(call)
@@ -407,6 +412,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       removeEntry(call.token)
       throw error
     }
+    if (call.mode !== opsCompatibilityToken(ctx)) { removeEntry(call.token); return result }
     try {
       const raw = result !== null && typeof result === 'object' && 'value' in (result as object)
         ? (result as { value?: unknown }).value : result
@@ -421,6 +427,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   onResult.call(ctx, 'tools/result', (exec, result) => {
     const call = removeEntry(keyOf(exec))
     if (call === undefined) return
+    if (call.mode !== opsCompatibilityToken(ctx)) return
     try {
       const final = result as { value?: unknown; isError?: boolean }
       const sameArgs = (() => { try { return stableOpsJson(exec.arguments) === call.argsJson } catch { return false } })()
@@ -534,13 +541,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     scope.provide('multiRootInstructions', {
       knownRoots(session) { return [...(states.get(session)?.provenanceRoots ?? [])] },
       async snapshot(agent, roots, target, signal, pending) {
-        return withRegistryRead(scope, scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot, 'instructions', async () => {
+        const modeToken = opsCompatibilityToken(scope)
+        const snapshot = await withRegistryRead(scope, scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot, 'instructions', async () => {
+        if (opsCompatibilityToken(scope) !== modeToken) throw new Error('review-context: OPS compatibility changed during the snapshot; retry')
         const allowed = new Set(scope.multiRootScope.scopeOf(scope.sandboxPolicy.resolve({ session: agent.session }).workspaceRoot))
         roots = roots.filter(root => allowed.has(root))
         signal.throwIfAborted()
         const existing = states.get(agent.session)
         if (existing?.overflow) throw new Error('review-context: successful work index exceeded')
-        if (existing?.activityIncomplete === true) throw new Error('review-context: incomplete OPS file activity')
+        if (modeToken !== undefined && existing?.activityIncomplete === true) throw new Error('review-context: incomplete OPS file activity')
         // Copy the scope index; invalidate ONLY this copy's digests to collect
         // all current files, including unchanged and formerly native copies.
         const state: SessionState = {
@@ -553,7 +562,10 @@ export function apply(ctx: Context, config: Config = {}): void {
         // Seed events do not publish session/event on resume. Read their
         // successful activity without mutating the main agent's delivery index.
         // oxlint-disable-next-line typescript/no-deprecated -- No public activity projection exists.
-        for (const path of replayedInstructionTargets(agent.session.snapshotEvents(), agent.session.header.cwd, existing?.liveOpsEvidence, pending)) state.touched.add(path)
+        for (const path of replayedInstructionTargets(agent.session.snapshotEvents(), agent.session.header.cwd,
+          modeToken === undefined ? undefined : existing?.liveOpsEvidence,
+          modeToken === undefined ? undefined : pending,
+          { opsCompatibility: modeToken !== undefined })) state.touched.add(path)
         const targets = typeof target === 'string' ? [target] : target ?? []
         for (const item of targets) state.touched.add(item)
         if (roots.length === 0) return []
@@ -575,8 +587,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         signal.throwIfAborted()
         // Metadata counts too, and no partial constraint is ever returned.
         if (Buffer.byteLength(JSON.stringify(result), 'utf8') > maxBytes) throw new Error('review-context: instruction budget exceeded')
+        if (opsCompatibilityToken(scope) !== modeToken) throw new Error('review-context: OPS compatibility changed during the snapshot; retry')
         return result
         })
+        if (opsCompatibilityToken(scope) !== modeToken) throw new Error('review-context: OPS compatibility changed during the snapshot; retry')
+        return snapshot
       },
     })
     // Native tools report the actual canonical target with their execution as
@@ -587,7 +602,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       const exec = executions.getStore()
       if (exec?.agent === undefined || actor !== exec) return
       const live = opsLive.get(keyOf(exec))
-      if (live !== undefined) {
+      if (live !== undefined && live.mode === opsCompatibilityToken(ctx)) {
         if (live.observed.size < MAX_LIVE_OPS_OBSERVED) live.observed.add(scope.fs.processPath(target))
         else live.incomplete = true
         return
