@@ -134,6 +134,7 @@ class MultiRootScopeService extends Service {         // ctx.multiRootScope
 - `extends LocalFileSystem`（不 extends `SandboxedFileSystem`：其 `checkedTarget` 是 TS-private，跨包子类不能类型安全地复用或覆盖）。
 - 保留上游 `SandboxedFileSystem` 的对外行为：`sandboxMode` getter（供 `tool-fs` 的 `FsSandboxController` / escalation UI 使用）、`FS_SANDBOX_DENIED` 错误语义与升级指引文案。
 - `writeText` / `editText`：解析 scope → `read-only` 全拒、`workspace-write` 对 `[primaryRoot, ...writableRoots, /tmp, tmpdir()]` 逐个 containment 判定（`writableRoots` 已含 access 与工具 cap 的收窄；指向只读根的写入被拒并点名 `… is a read-only additional root`）、`danger-full-access` 放行。写路径本体（原子写、edit 临界区、锁）调用上游 `LocalFileSystem` 实现——**不重写 IO**。
+- 新版上游另有 `patchText` / `deleteFile` / `moveFile`：它们使用同一围栏，移动的两端在同一次准入内分别检查；旧版没有这些方法。见 [0.2.2 接口审查](../reference/dsh-0.2.2-migration.md#022-alpha3-后续审查2026-11-04)。
 - containment 判定使用插件内的本地实现，并在文件头注明来源 commit 与复制范围：上游 `isPathUnder` 只存在于 `@deepseek-ai/dsh-fs-sandbox/src/containment.ts`，而发布包不含 `src/`（见 [ADR-0002](../decisions/ADR-0002-upstream-coupling-policy.md)），深导入在安装形态下必然失败；等价性由差分 parity 测试钉住（§6）。
 - 多根 denial 文案列出全部允许根；escalation 沿用上游 API（只放宽 mode，不放宽根）。
 

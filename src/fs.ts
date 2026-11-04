@@ -4,7 +4,7 @@
  * It extends the local backend so every text-storage mechanic — resolve, stat,
  * read/stream, listing, the atomic write and the read-match-write edit critical
  * section — stays the upstream implementation's, verbatim; this class adds only
- * the per-call POLICY fence on the two mutations, exactly as the upstream
+ * the per-call POLICY fence on mutations, exactly as the upstream
  * `SandboxedFileSystem` does, widened from one workspace root to the scope's
  * root set.
  *
@@ -37,6 +37,7 @@ import { canonicalPath, writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from './compat.ts'
+import { installAdditionalMutations, type AdditionalMutation } from './compat/fs-patch.ts'
 import { isPathUnder } from './containment.ts'
 import { brandMultiRootProvider } from './providers.ts'
 import type { FilesystemScope } from './scope.ts'
@@ -61,6 +62,13 @@ export class MultiRootFileSystem extends LocalFileSystem {
   // which is a far louder failure than the documented "plugin not installed"
   // degradation (see src/compat.ts).
   static inject = ['sandboxPolicy', 'multiRootScope']
+
+  // Only the newer backend has these methods. Install wrappers by capability,
+  // rather than naming absent methods in the old backend's TypeScript surface.
+  static {
+    installAdditionalMutations(this.prototype, (receiver, method, args, invoke) =>
+      receiver.additionalMutation(method, args, invoke))
+  }
 
   private readonly defaultMode: SandboxMode
 
@@ -121,6 +129,20 @@ export class MultiRootFileSystem extends LocalFileSystem {
     const policy = structuredClone(sandboxPolicy ?? this.ctx.sandboxPolicy.resolve())
     return this.withOperation(policy, 'fs-edit', async scope =>
       super.editText(await this.checkedTarget(target, policy, scope), edit, expected, signal))
+  }
+
+  /** Fence every endpoint of a patch, delete, or move under one admission. */
+  private async additionalMutation(
+    method: AdditionalMutation, args: unknown[], invoke: (args: unknown[]) => unknown,
+  ): Promise<unknown> {
+    const policyIndex = method === 'deleteFile' ? 3 : 4
+    const policy = structuredClone((args[policyIndex] as SandboxExecutionPolicy | undefined) ?? this.ctx.sandboxPolicy.resolve())
+    return this.withOperation(policy, method === 'patchText' ? 'fs-edit' : 'fs-write', async scope => {
+      const checked = [...args]
+      checked[0] = await this.checkedTarget(args[0] as FsTarget, policy, scope)
+      if (method === 'moveFile') checked[1] = await this.checkedTarget(args[1] as FsTarget, policy, scope)
+      return await invoke(checked)
+    })
   }
 
   /** The provider must also work without the gated registry (ADR-0009). */

@@ -8,7 +8,7 @@
  * call and is logged.
  */
 
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -85,6 +85,33 @@ function writableInside(world: World): readonly string[] {
 }
 
 describe('per-tool write caps', () => {
+  it('caps every new patch mutation inside an apply_patch dispatch', async context => {
+    const world = await mountWorld({ apply_patch: 'read-only' })
+    const fs = world.ctx.fs as unknown as {
+      resolve(path: string): Promise<unknown>
+      patchText(target: unknown, hunks: unknown[]): Promise<unknown>
+      deleteFile(target: unknown): Promise<unknown>
+      moveFile(source: unknown, destination: unknown, options: object): Promise<unknown>
+    }
+    if (typeof fs.patchText !== 'function') context.skip('the installed backend has no patch API')
+    const primary = join(fixture.workspace, 'primary.txt')
+    const additional = join(fixture.outside, 'additional.txt')
+    writeFileSync(primary, 'before\n')
+    writeFileSync(additional, 'before\n')
+    const hunks = [{ lineNumber: 1, oldLines: ['before'], newLines: ['after'], isEndOfFile: false }]
+    await dispatch(world.ctx, 'apply_patch', async () => {
+      await expect(fs.patchText(await fs.resolve(additional), hunks)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      await expect(fs.deleteFile(await fs.resolve(additional))).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      await expect(fs.moveFile(await fs.resolve(primary), await fs.resolve(additional), {})).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      await expect(fs.moveFile(await fs.resolve(additional), await fs.resolve(primary), {})).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      await fs.patchText(await fs.resolve(primary), hunks)
+    })
+    expect(readFileSync(additional, 'utf8')).toBe('before\n')
+    expect(readFileSync(primary, 'utf8')).toBe('after\n')
+    await dispatch(world.ctx, 'write', async () => { await fs.deleteFile(await fs.resolve(additional)) })
+    expect(existsSync(additional)).toBe(false)
+  })
+
   it('caps every root policy in all three modes, including Full-access inheritance and fixed read-write', async () => {
     const world = await mountWorld({ bash: 'read-only' })
     for (const access of ['inherit', 'read-only', 'read-write'] as const) {

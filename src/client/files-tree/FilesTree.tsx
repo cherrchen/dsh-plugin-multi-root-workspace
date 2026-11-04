@@ -27,6 +27,7 @@ import {
   FileTypeIcon, IconFolderCloseRegular, IconFolderOpenRegular, classifyFileType,
 } from './primitives.ts'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
+import { nativeTreeInput, type NativeTreeRenderer } from '../../compat/files-tree.ts'
 import type { WorkspaceDirectoryEntry } from '@deepseek-ai/dsh-api-workspace-files/types'
 import { childPath } from './face.ts'
 import type { FilesInjected } from './face.ts'
@@ -55,6 +56,8 @@ export type FilesTreeProps =
     readonly signal: AbortSignal
     /** Open one `dsh-resource://file` address (the adapter's sidebarRight route). */
     readonly onOpen: (address: string) => void
+    /** Optional host-controlled tree Factory, available on the newer Files page. */
+    readonly nativeTree?: NativeTreeRenderer | undefined
   }
 
 /** Natural, case-insensitive name order, so `file2` precedes `file10`. */
@@ -164,7 +167,7 @@ function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
  * verbatim, with the root arriving as a prop instead of `useSessions(cwd)`.
  */
 export function FilesTree({
-  tabId, sessionId, root, signal, useStore, actions, start, toggle, onOpen, t,
+  tabId, sessionId, root, signal, useStore, actions, start, toggle, onOpen, t, nativeTree,
 }: FilesTreeProps): ReactNode {
   const state = useStore(store => store.byTab[tabId])
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -203,13 +206,18 @@ export function FilesTree({
     onOpen: (path) => { onOpen(fileAddressFor(sessionId, undefined, path)) },
     t,
   }
+  const legacy = <ul className={css.level}><Level path={state.root} tree={tree} /></ul>
+  const content = nativeTree === undefined ? legacy : nativeTree(
+    'sidebar.files.tree', nativeTreeInput(state, failure => failureLine(t, failure), tree.onToggle, tree.onOpen),
+    { fallback: legacy },
+  ) as ReactNode
   return (
     <div
       ref={bodyRef}
       className={css.body}
       onScroll={(event) => { scrollTopRef.current = event.currentTarget.scrollTop }}
     >
-      <ul className={css.level}><Level path={state.root} tree={tree} /></ul>
+      {content}
     </div>
   )
 }

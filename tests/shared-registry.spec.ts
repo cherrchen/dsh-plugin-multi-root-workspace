@@ -1,6 +1,6 @@
 import { nativeHostAvailability, listenNative, storeIdentity } from '../src/authority/native.ts'
 /** Production owner/follower facade over a real kernel lease and local IPC. */
-import { existsSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
@@ -66,6 +66,33 @@ nativeTest('orders a follower admission after owner revocation even with notific
   const path = join(fixture.outside, 'revoked.txt')
   await expect(follower.ctx.fs.writeText(await follower.ctx.fs.resolve(path), 'must not land')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
   expect(existsSync(path)).toBe(false)
+})
+
+nativeTest('orders every new patch mutation after a follower observes revocation', async context => {
+  const owner = await mount()
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  const follower = await mount()
+  const fs = follower.ctx.fs as unknown as {
+    resolve(path: string): Promise<unknown>
+    patchText(target: unknown, hunks: unknown[]): Promise<unknown>
+    deleteFile(target: unknown): Promise<unknown>
+    moveFile(source: unknown, destination: unknown, options: object): Promise<unknown>
+  }
+  if (typeof fs.patchText !== 'function') context.skip('the installed backend has no patch API')
+  const additional = join(fixture.outside, 'additional.txt')
+  const primary = join(fixture.workspace, 'primary.txt')
+  writeFileSync(additional, 'before\n')
+  writeFileSync(primary, 'before\n')
+  const internal = owner.registry as unknown as { server: { changed: (...args: unknown[]) => void } }
+  vi.spyOn(internal.server, 'changed').mockImplementation(() => {})
+  await owner.registry.setAccess(fixture.workspace, { kind: 'path', path: fixture.outside }, 'read-only')
+  const hunks = [{ lineNumber: 1, oldLines: ['before'], newLines: ['after'], isEndOfFile: false }]
+  await expect(fs.patchText(await fs.resolve(additional), hunks)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+  await expect(fs.deleteFile(await fs.resolve(additional))).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+  await expect(fs.moveFile(await fs.resolve(primary), await fs.resolve(additional), {})).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+  await expect(fs.moveFile(await fs.resolve(additional), await fs.resolve(primary), {})).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+  expect(readFileSync(additional, 'utf8')).toBe('before\n')
+  expect(readFileSync(primary, 'utf8')).toBe('before\n')
 })
 
 nativeTest('keeps an admitted write in flight without blocking revocation', async () => {

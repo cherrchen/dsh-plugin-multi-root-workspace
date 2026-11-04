@@ -53,3 +53,8 @@
 此前测试漏报的原因是：单测把 sessions 直接 provide 在根 context，绕过兄弟 fiber 的访问限制；真实 HTTP 冒烟则直接传 `primaryRoot`，绕过整个会话分支。现在单测通过独立的 sessions 插件注册服务，覆盖缺失服务、未知会话、请求途中删除会话；`smoke:journey` 的认证请求与 UI 一致，只带 `{ sessionId: 'journey-web' }`。
 
 本次验证：修改前兄弟服务回归用例失败，修改后通过；全套测试 213 项通过、3 项跳过，类型检查、构建、lint、文档检查通过；隔离 web/headless `smoke:journey` 的 34/34 项检查通过。
+
+
+## 0.2.2-alpha.3 / Cordis 4.0.6-alpha.2 的同症状
+
+新版 Cordis 改变了服务 getter 的上下文追踪：`connectionCtx.root.get('connection')` 仍可能让 Connection 的 `rpc` getter 捕获服务提供方上下文，进而在 `owner.webServer` 处缺少注入，路由再次返回 405。现在 `src/compat/connection-rpc.ts` 将公开 getter 绑定到同时注入 `connection` 与 `webServer` 的消费 fiber；路由随该 fiber 卸载。真实 HTTP 旅程和独立 fiber 生命周期回归覆盖此变化；接口差异见 [0.2.2 接口审查](../reference/dsh-0.2.2-migration.md#022-alpha3-后续审查2026-11-04)。上节 root 取值是旧版的历史修复，不再是当前实现。

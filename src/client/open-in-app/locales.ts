@@ -21,6 +21,17 @@ export const NS = 'open-in-app'
 
 /** Key domain of the `open-in-app` namespace (verbatim union of upstream's zh keys). */
 export type OpenInAppKey =
+  | 'menu.openInSidebar'
+  | 'menu.openInFloat'
+  | 'menu.finder'
+  | 'menu.reveal'
+  | 'menu.defaultApp'
+  | 'menu.external'
+  | 'menu.copyLink'
+  | 'menu.copyPath'
+  | 'menu.copyDirectoryPath'
+  | 'menu.copied'
+  | 'menu.copyFailed'
   | 'open.title'
   | 'path.appDefault'
   | 'path.appsError'

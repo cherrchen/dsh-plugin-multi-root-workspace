@@ -69,6 +69,18 @@ describe('the root-switcher rules', () => {
     )
   })
 
+  it('targets the new Files page without hiding rows or the replacement tree', () => {
+    const base = '[data-files-page]:has(.mrfw-rootSwitcher[data-root-kind="additional"])'
+    expect(STYLES).toContain(`${base} [data-files-content]`)
+    expect(STYLES).toContain(`${base} [data-files-reload]`)
+    expect(STYLES).toContain(`${base} [data-open-target="directory"]:not(.mrfw-openSplit)`)
+    expect(STYLES).toContain('[data-files-page]:has(.mrfw-rootSwitcher) [data-files-path]:not([data-files-entry])')
+    document.body.innerHTML = `<div data-files-page><span class="mrfw-rootSwitcher" data-root-kind="additional"></span><div data-files-content></div><div class="mrfw-ftBody"><li data-files-entry="file" data-files-path="/f"></li></div></div>`
+    expect(document.querySelector('[data-files-content]')?.matches(`${base} [data-files-content]`)).toBe(true)
+    expect(document.querySelector('.mrfw-ftBody')?.matches(`${base} [data-files-content]`)).toBe(false)
+    expect(document.querySelector('[data-files-entry]')?.matches('[data-files-page]:has(.mrfw-rootSwitcher) [data-files-path]:not([data-files-entry])')).toBe(false)
+  })
+
   it('gives the portaled tree the stretch-and-scroll recipe of the native body', () => {
     // The fork's own body class — never data-files-body, which the hide rule
     // above would switch off.

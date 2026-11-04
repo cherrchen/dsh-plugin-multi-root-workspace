@@ -152,6 +152,16 @@ export const STYLES = /* css */ `
   display: none;
 }
 
+/* Newer Files pages place the navigator beside the header instead of
+   wrapping both in data-files-root. Target the page without hiding the
+   portaled replacement or any of its rows. */
+[data-files-page]:has(.mrfw-fileLauncher) [data-files-path]:not([data-files-entry]) { order: -2; }
+[data-files-page]:has(.mrfw-rootSwitcher) [data-files-path]:not([data-files-entry]) { display: none; }
+[data-files-page]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-content],
+[data-files-page]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-reload] { display: none; }
+[data-files-page]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-slot="sidebar.right.tab.files.actions"] > *:has([data-open-target="directory"]:not(.mrfw-openSplit)),
+[data-files-page]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-open-target="directory"]:not(.mrfw-openSplit) { display: none; }
+
 /* While the switcher names an additional root, the native open-in-app split
    button hides too: its slot props carry the pane's primary root, so it
    would always open the primary root no matter what the switcher selected.

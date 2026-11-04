@@ -33,6 +33,7 @@ import { isAbsolute } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import { connectionRpcFor } from './compat/connection-rpc.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { effectiveRootAccess } from './contract.ts'
@@ -207,22 +208,16 @@ export function apply(ctx: Context, config: CommandConfig = {}): void {
   // Soft: a profile without the browser host half (headless, sdk) simply has no
   // panel to serve, and the registry is unaffected.
   //
-  // `webServer` MUST be in the dependency list so this callback only runs once
-  // the route table exists, and the service MUST be read off `ctx.root`:
-  // `connection.rpc.handle` resolves `webServer` as a property of the context
-  // the service was READ from, and cordis property resolution from a plugin
-  // fiber can only see that fiber's own injected services — a sibling row's
-  // `webServer` is invisible, the registration dies with `cannot get property
-  // "webServer" without inject`, and every panel request then falls through to
-  // the static SPA fallback as HTTP 405. Reading at the root (what the upstream
-  // connection tests do) resolves against the shared service store instead.
+  // Both services are required so the channel lives exactly as long as the
+  // consumer fiber. The compatibility adapter binds the RPC getter to that
+  // fiber even when Cordis traces service getters through the provider context.
   ctx.inject(['connection', 'webServer'], (connectionCtx) => {
-    const connection = connectionCtx.root.get('connection')
+    const connection = connectionCtx.get('connection')
     if (connection === undefined) {
       ctx.logger.warn('multi-root: connection resolved without the service; the panel channel is not mounted')
       return
     }
-    const dispose = connection.rpc.handle(PANEL_CHANNEL, async (endpoint, payload, signal) =>
+    const dispose = connectionRpcFor(connectionCtx, connection).handle(PANEL_CHANNEL, async (endpoint, payload, signal) =>
       await dispatchPanelRequest(ctx, endpoint, payload, signal))
     return () => { void dispose() }
   })
