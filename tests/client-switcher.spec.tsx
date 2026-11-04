@@ -138,7 +138,7 @@ interface Harness {
   readonly opens: OpenCall[]
   readonly registrations: Registration[]
   /** The `files.actions` occupant factory; call it with the slot owner. */
-  readonly occupant: (owner?: { absolutePath?: string }) => unknown
+  readonly occupant: (owner?: { absolutePath?: string; renderFactorySlot?: unknown }) => unknown
   setView: (view: RootsView) => void
   setSession: (sessionId: string | undefined) => void
   setListFails: (fails: boolean) => void
@@ -333,7 +333,7 @@ afterEach(() => {
  * itself inside a dockkit tab host. The returned `pane` is where the forked
  * tree must portal into.
  */
-function renderInPane(harness: Harness, owner = { absolutePath: '/repos/primary' }, strictMode = false): {
+function renderInPane(harness: Harness, owner: { absolutePath?: string; renderFactorySlot?: unknown } = { absolutePath: '/repos/primary' }, strictMode = false, modern = false): {
   pane: HTMLElement
   host: HTMLElement
   header: HTMLElement
@@ -343,7 +343,7 @@ function renderInPane(harness: Harness, owner = { absolutePath: '/repos/primary'
   const host = document.createElement('section')
   host.setAttribute('data-dockkit-content', 'tab-1')
   const pane = document.createElement('div')
-  pane.setAttribute('data-files-root', '')
+  pane.setAttribute(modern ? 'data-files-page' : 'data-files-root', '')
   const header = document.createElement('div')
   const path = document.createElement('span')
   path.setAttribute('data-files-path', '')
@@ -351,7 +351,7 @@ function renderInPane(harness: Harness, owner = { absolutePath: '/repos/primary'
   reload.setAttribute('data-files-reload', '')
   header.append(path, reload)
   const body = document.createElement('div')
-  body.setAttribute('data-files-body', '')
+  body.setAttribute(modern ? 'data-files-content' : 'data-files-body', '')
   pane.append(header, body)
   host.append(pane)
   document.body.append(host)
@@ -379,6 +379,28 @@ async function openMenu(): Promise<void> {
 }
 
 describe('the Files-tab root switcher', () => {
+  it('uses the host tree Factory in the newer Files page and routes its callbacks', async () => {
+    const harness = mount()
+    const factory = vi.fn((_name: string, _input: object, options: { fallback: ReactElement }) => options.fallback)
+    const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factory }, false, true)
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+    expect(switcherKind()).toBe('additional')
+    expect(factory).toHaveBeenCalled()
+    const call = factory.mock.calls.at(-1)!
+    expect(call[0]).toBe('sidebar.files.tree')
+    const input = call[1] as { root: string; entries: Array<{ path: string; name: string; meta: { kind: string } }>; onOpen: (entry: object) => void; onToggle: (entry: object) => void }
+    expect(input.root).toBe('/repos/payments')
+    const file = input.entries.find(entry => entry.path === '/repos/payments/notes.md')!
+    expect(file.meta.kind).toBe('file')
+    act(() => { input.onOpen(file) })
+    expect(harness.opens.at(-1)?.address).toContain('notes.md')
+    const directory = input.entries.find(entry => entry.path === '/repos/payments/src')!
+    act(() => { input.onToggle(directory) })
+    await waitFor(() => { expect(harness.treeCalls.some(call => call.path === '/repos/payments/src' && call.kind === 'list')).toBe(true) })
+  })
+
   it('loads and browses additional roots after StrictMode replays mount effects', async () => {
     const harness = mount()
     const { pane } = renderInPane(harness, undefined, true)

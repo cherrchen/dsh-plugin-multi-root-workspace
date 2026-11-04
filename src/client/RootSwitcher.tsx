@@ -48,6 +48,7 @@ import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings, maybeComponent } from '../compat/client-icons.ts'
 import type { RootsView, RootView } from '../contract.ts'
+import type { NativeTreeRenderer } from '../compat/files-tree.ts'
 import { FilesTree, type FilesTreeSurface } from './files-tree/adapter.tsx'
 import { OpenInAppAction, type OpenInAppAdapter } from './open-in-app/adapter.tsx'
 import {
@@ -74,6 +75,7 @@ export interface RootSwitcherProps extends Omit<WorkspaceFoldersActionProps, 'co
    * all, which is the same absence upstream's own tree produces.
    */
   readonly filesTree?: FilesTreeSurface | undefined
+  readonly nativeTree?: NativeTreeRenderer | undefined
 }
 
 /** The takeover's portal + lifetime, created while an additional root browses. */
@@ -134,7 +136,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
     setTabId((content !== undefined && content !== ''
       ? content
       : (fallbackTabId.current ??= `mrfw-${Math.random().toString(36).slice(2)}` as TabId)) as TabId)
-    setPane(wrapper?.closest<HTMLElement>('[data-files-root]') ?? null)
+    setPane(wrapper?.closest<HTMLElement>('[data-files-page]') ?? wrapper?.closest<HTMLElement>('[data-files-root]') ?? null)
   }, [])
 
   // The persisted selection, keyed by this pane's tab id; an absent entry is
@@ -349,6 +351,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
               toggle={filesTree.face.toggle}
               onOpen={filesTree.openFile}
               t={filesTree.t}
+              nativeTree={pane.hasAttribute('data-files-page') ? props.nativeTree : undefined}
             />,
             pane,
           )

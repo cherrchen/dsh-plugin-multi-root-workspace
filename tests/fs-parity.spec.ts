@@ -462,3 +462,109 @@ describe('configuration compatibility', () => {
     await expect(ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace, diffBasisMaxBytes: 0 })).rejects.toThrow()
   })
 })
+
+// Newer DSH backends add these methods; older supported releases have no
+// patch API and must continue to load without a synthetic implementation.
+describe.skipIf(typeof Reflect.get(SandboxedFileSystem.prototype, 'patchText') !== 'function')('patch mutation fences', () => {
+  const hunks = [{ lineNumber: 1, oldLines: ['before'], newLines: ['after'], isEndOfFile: false }]
+  type PatchFs = FileSystem & {
+    patchText: (target: FsTarget, hunks: unknown[]) => Promise<unknown>
+    deleteFile: (target: FsTarget) => Promise<unknown>
+    moveFile: (source: FsTarget, destination: FsTarget, options: object) => Promise<unknown>
+  }
+
+  it('fences patch, delete and both endpoints of a move without partial writes', async () => {
+    const fixture = createFixtureWorkspace('fs-patch')
+    const ours = await mount(MultiRootFileSystem, fixture, 'workspace-write', [])
+    const writable = join(fixture.base, 'writable')
+    const outside = join(fixture.base, 'unregistered')
+    await mkdir(writable)
+    await mkdir(outside)
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { id: 'rw', path: writable, recordedPath: canonicalPath(writable), access: 'read-write' },
+      { id: 'ro', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-only' },
+    ])
+    const fs = ours.fs as PatchFs
+    const primary = join(fixture.workspace, 'primary.txt')
+    const granted = join(writable, 'granted.txt')
+    const denied = join(fixture.outside, 'denied.txt')
+    const unknown = join(outside, 'unknown.txt')
+    for (const path of [primary, granted, denied, unknown]) await writeFile(path, 'before\n')
+    await fs.patchText(await fs.resolve(granted), hunks)
+    expect(await readFile(granted, 'utf8')).toBe('after\n')
+    for (const path of [denied, unknown]) {
+      await expect(fs.patchText(await fs.resolve(path), hunks)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      await expect(fs.deleteFile(await fs.resolve(path))).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      await expect(fs.moveFile(await fs.resolve(primary), await fs.resolve(path), {})).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      await expect(fs.moveFile(await fs.resolve(path), await fs.resolve(primary), {})).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      expect(await readFile(path, 'utf8')).toBe('before\n')
+      expect(await readFile(primary, 'utf8')).toBe('before\n')
+    }
+    const moved = join(writable, 'moved.txt')
+    await fs.moveFile(await fs.resolve(primary), await fs.resolve(moved), {})
+    expect(existsSync(primary)).toBe(false)
+    expect(await readFile(moved, 'utf8')).toBe('before\n')
+    await fs.deleteFile(await fs.resolve(moved))
+    expect(existsSync(moved)).toBe(false)
+  })
+
+  it('re-resolves stale patch targets before touching a read-only root in Full-access mode', async context => {
+    const reason = symlinkUnsupportedReason()
+    if (reason !== undefined) context.skip(reason)
+    const fixture = createFixtureWorkspace('fs-patch-redirect')
+    const ours = await mount(MultiRootFileSystem, fixture, 'danger-full-access', [])
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { id: 'ro', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-only' },
+    ])
+    const fs = ours.fs as PatchFs
+    const safe = join(fixture.workspace, 'safe')
+    const link = join(fixture.workspace, 'link')
+    const primary = join(fixture.workspace, 'primary.txt')
+    await mkdir(safe)
+    await writeFile(join(safe, 'file.txt'), 'before\n')
+    await writeFile(join(fixture.outside, 'file.txt'), 'before\n')
+    await writeFile(primary, 'before\n')
+    await symlink(safe, link, 'dir')
+    const stale = await fs.resolve(join(link, 'file.txt'))
+    await rm(link)
+    await symlink(fixture.outside, link, 'dir')
+    await expect(fs.patchText(stale, hunks)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    await expect(fs.deleteFile(stale)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    await expect(fs.moveFile(stale, await fs.resolve(primary), {})).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    await expect(fs.moveFile(await fs.resolve(primary), stale, {})).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(await readFile(join(fixture.outside, 'file.txt'), 'utf8')).toBe('before\n')
+    expect(await readFile(primary, 'utf8')).toBe('before\n')
+  })
+
+  it.each(['workspace-write', 'read-only', 'danger-full-access'] as const)(
+    'matches the upstream empty-root fence under %s', async mode => {
+      const upstream = await mount(SandboxedFileSystem, createFixtureWorkspace('fs-patch-up'), mode, [])
+      const ours = await mount(MultiRootFileSystem, createFixtureWorkspace('fs-patch-ours'), mode, [])
+      for (const backend of [upstream, ours]) {
+        await writeFile(join(backend.fixture.workspace, 'inside.txt'), 'before\n')
+        await writeFile(join(backend.fixture.outside, 'outside.txt'), 'before\n')
+      }
+      for (const operation of ['patch', 'delete', 'move-in', 'move-out'] as const) {
+        const run = async (backend: Backend): Promise<string> => {
+          const fs = backend.fs as PatchFs
+          const inside = join(backend.fixture.workspace, 'inside.txt')
+          const outside = join(backend.fixture.outside, 'outside.txt')
+          return outcome(async () => {
+            if (operation === 'patch') await fs.patchText(await fs.resolve(outside), hunks)
+            if (operation === 'delete') await fs.deleteFile(await fs.resolve(outside))
+            if (operation === 'move-in') await fs.moveFile(await fs.resolve(outside), await fs.resolve(inside), {})
+            if (operation === 'move-out') await fs.moveFile(await fs.resolve(inside), await fs.resolve(outside), {})
+          }, outside)
+        }
+        // Use a fresh fixture per comparison: a successful operation mutates it.
+        const up = await run(upstream)
+        const down = await run(ours)
+        expect(down.replaceAll(ours.fixture.base, '<fixture>')).toBe(up.replaceAll(upstream.fixture.base, '<fixture>'))
+        for (const backend of [upstream, ours]) {
+          await writeFile(join(backend.fixture.workspace, 'inside.txt'), 'before\n')
+          await writeFile(join(backend.fixture.outside, 'outside.txt'), 'before\n')
+        }
+      }
+    },
+  )
+})

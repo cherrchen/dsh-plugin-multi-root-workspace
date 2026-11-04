@@ -8,9 +8,13 @@ because the upstream component derives its root from the session's `cwd`,
 which is always the primary root and cannot be re-pointed.
 
 - **Source**: `deepseek-harness/packages/client/ui-sidebar-files/src/client/`
-- **Revision**: `f3803c9697` (release `0.2.2-alpha.2`, 2026-10-27) — matches
-  this package's dev pin and the `@deepseek-ai/dsh-api-workspace-files`
-  devDependency, which is the machine-readable record of the fork base.
+- **Legacy revision**: `f3803c9697` (release `0.2.2-alpha.2`). The legacy
+  listing store and row renderer are retained for older supported hosts.
+  The `0.2.2-alpha.3` host split the Files page into a pane navigator and a
+  controlled `sidebar.files.tree` Factory. On its `data-files-page` layout,
+  this plugin adapts its listing state to that public Factory, so the host owns
+  the row rendering and accessories; the legacy rows are its fallback. The
+  host's new pane navigation and context-menu integration are not forked.
   Between `0.2.1-rc.3` (`1f81c047fc`) and `0.2.2-alpha.2` the upstream
   `src/client/` tree changed only in `FilesBody.module.css` (hover rules
   wrapped in `@media (hover: hover)` — copied below and ported into
@@ -98,6 +102,14 @@ upstream binds inside it arrives as a prop instead:
   never writes `data-files-root`/`data-files-body`.
 
 ## Sync procedure (when the dev pin moves)
+
+The legacy files remain pinned to `0.2.2-alpha.2`, since replacing their
+store/face with the later pane-based API would drop older supported hosts.
+For newer releases compare their `FileTree` Factory input, `FilesBody` page
+hooks, locales and remote signatures against `src/compat/files-tree.ts` and
+the page selectors before changing this baseline. Re-copy the legacy files
+only when intentionally changing the legacy baseline; then perform the steps
+below. The Factory fallback must keep older or incomplete compositions usable.
 
 1. `cp` `directory-node.ts`, `face.ts`, `store.ts`, `FilesBody.module.css`,
    and `FilesBody.tsx` from the upstream checkout at the new pin.

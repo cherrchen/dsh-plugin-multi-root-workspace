@@ -13,21 +13,21 @@ src/compat/dsh-version.ts  →  SUPPORTED_DSH_RELEASES
 是**精确版本数组**，不是 semver 范围。当前：
 
 ```ts
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-alpha.3'] as const
 ```
 
 改它的时候，下面四处必须同时一致，否则 `pnpm compat:check` 失败：
 
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   allowlist
-package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-alpha.2"
-package.json                devDependencies          allowlist 中的某一项（当前 0.2.2-alpha.2）
+package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-alpha.2 || 0.2.2-alpha.3"
+package.json                devDependencies          allowlist 中的某一项（当前 0.2.2-alpha.3）
 node_modules                实际解析到的版本          allowlist 中的某一项
 ```
 
 `scripts/check-dsh-compat.mjs` 是**文本读取** TypeScript 源码里的这个数组，不是 import。所以：**不要把它改成非 `export const NAME = [...]` 字面量形式**（比如从别处拼出来、或者加类型断言以外的表达式），否则静态检查会直接抛错。原因是这个检查必须能在 `pnpm build` 之前、在没有 `lib/` 的干净 checkout 上跑。
 
-非 `dsh-*` 的共享上游包（`cordis`、`schemastery`、`node-addon-system`）同样**只能是 peer**：它们是宿主树自带的单例——`dsh-sandbox-local` 在每个受支持版本上都直接依赖后两者，插件私带一份就是第二份。放进 `dependencies` 的实际后果（issue #30）：profile 里装出 schemastery `3.18.5` 对宿主 `3.18.6-alpha.1`、cosmokit `1.8.6` 对 `1.8.7-alpha.1` 和一份同版本的 node-addon-system，启动器依赖自检报 `profile-core-mixed` / `profile-core-copy`。机制要记牢：`^3.18.2` 这类范围**不匹配** prerelease（`3.18.6-alpha.1` 不满足它），所以 peer 范围必须像 cordis peer 那样"稳定线用范围 + alpha 线逐个具名"（`>=3.18.2 <4.0.0 || 3.18.5-alpha.1 || 3.18.5-alpha.2 || 3.18.6-alpha.1`），升版纳入新 alpha 线时同步扩并集；`devDependencies` 钉开发 pin 宿主自带的精确版本，由 `upgrade-dsh.mjs` 随 ecosystemPins 重指。`compat:check` 与 `tests/compat.spec.ts` 硬性检查 `dependencies` / `optionalDependencies` 里没有任何 `@deepseek-ai/*` 名字。
+非 `dsh-*` 的共享上游包（`cordis`、`schemastery`、`node-addon-system`）同样**只能是 peer**：它们是宿主树自带的单例——`dsh-sandbox-local` 在每个受支持版本上都直接依赖后两者，插件私带一份就是第二份。放进 `dependencies` 的实际后果（issue #30）：profile 里装出 schemastery `3.18.5` 对宿主 `3.18.6-alpha.1`、cosmokit `1.8.6` 对 `1.8.7-alpha.1` 和一份同版本的 node-addon-system，启动器依赖自检报 `profile-core-mixed` / `profile-core-copy`。机制要记牢：`^3.18.2` 这类范围**不匹配** prerelease（`3.18.6-alpha.1` 不满足它），所以 peer 范围必须像 cordis peer 那样"稳定线用范围 + alpha 线逐个具名"（`>=3.18.2 <4.0.0 || 3.18.5-alpha.1 || 3.18.5-alpha.2 || 3.18.6-alpha.1 || 3.18.6-alpha.2`），升版纳入新 alpha 线时同步扩并集；`devDependencies` 钉开发 pin 宿主自带的精确版本，由 `upgrade-dsh.mjs` 随 ecosystemPins 重指。`compat:check` 与 `tests/compat.spec.ts` 硬性检查 `dependencies` / `optionalDependencies` 里没有任何 `@deepseek-ai/*` 名字。
 
 同一单例规则对**原生镜像**也成立：`koffi` 仍是合法 `dependencies`（独立场景的兜底），但安装进 profile 后必须 dlopen 宿主那份——`dsh plugin add` 会在宿主已加载的 koffi 旁再装一份私有副本，两个 `koffi.node` 镜像同进程在 darwin-arm64 指针校验（PAC）下直接 SIGBUS，进程无声退出（2026-11-01 packed smoke 实锤；main 上同样崩，属 F4 既有回归）。全部 FFI 调用点统一走 `src/compat/koffi.ts` 的 `loadHostKoffi()`：以必需 peer `dsh-fs-local`（每个受支持版本都携带 koffi）为锚点解析宿主副本，解析不到才回退包内自带。`tests/compat.spec.ts` 扫描 `src/` 禁止 `compat/koffi.ts` 之外出现裸 `import('koffi')`。
 
@@ -201,7 +201,7 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 ## 11. DSH 0.2.1 目录语义
 
-当前开发基线为 `0.2.2-alpha.2` / Cordis `4.0.6-alpha.1`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
+当前开发基线为 `0.2.2-alpha.3` / Cordis `4.0.6-alpha.2`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
 
 升级脚本接受单一 Cordis prerelease 版本，仍输出精确 pin。新的安装期 peer gate 需要在隔离候选 smoke profile 使用精确 allow-version 豁免；warn 模式下豁免在第一次 `add` 前授予（构建审批恢复路径内部的 remove+add 同样有版本 gate），只用于升级车道，正式矩阵和生产仍 enforce。当前 package 为 `0.1.6` 且 `v0.1.6` tag 已存在，本迁移不创建 release。
 
@@ -222,9 +222,9 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 提升上游版本时（升级车道跑完、人工验收阶段）必须目检三态：无附加根时 Files 页签是原生观感；选中一个附加根时树区换成逐字节复刻的原生 Files 树（行高/图标/缩进/空态/截断/失败行应与原生逐项一致）、原生 reload 由 header 内的同款 `.mrfw-switcherReload` 顶替、原生 open-in-app 按钮由复刻按钮顶替（点开 chevron 菜单应与原生同款）；切回主根时原生树、reload 与 open-in-app 完整还原。任一项失真先查这五个 `data-*` 属性还在不在对应 flex 项上（`.header` / `.body` 的 class 是 CSS-module hash，不能锚）。退化症状与修法见 [故障排查条目](../../docs/troubleshooting/files-switcher-degraded.md)，决策见 [ADR-0015](../../docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
 
-**files-tree 复刻面**：`src/client/files-tree/` 是上游 `ui-sidebar-files` 树体的逐字节 fork（基线 `f3803c9697` = `0.2.2-alpha.2`；清单、shim 对照、外壳 delta 与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——`directory-node.ts`/`face.ts`/`store.ts`/`FilesBody.module.css` 与 `FilesBody.tsx` 的行级定义必须字节级一致，许可差异只有外壳函数根源改写与 css specifier 的 `.ts` 后缀；同时检查上游 `locales.ts` 的 `zh` 键集（shim 的 `SidebarFilesKey` 联合须同步）、`workspaceFiles` remote 面与 `data-dockkit-content` 钩子。复刻体类名 `mrfw-ft*`、不携带 `data-files-root`/`data-files-body`（防本插件 `:has()` 隐藏规则误伤）； primitives 探针失败时整棵复刻树不渲染（同型降级，不崩）。**remote 面只能经 `ctx.get` 懒解析**：`remote.workspaceFiles` 是 cordis 嵌套服务，context 代理路径（`remote.workspaceFiles` 或 `ctx['remote.workspaceFiles']`）受 inject 守卫（未声明 fiber 直接抛 `without inject`），而本版 cordis 的 inject 条目全 required（声明会把整行 gate 在可选服务上）——`lazyFilesRemote` 用 `ctx.get('remote')`/`ctx.get('remote.workspaceFiles')` 免守卫直查 store，一切查找失败折叠成 `gateway/internal` 失败行（verbatim `load` 的 `.then` 无 `.catch`，逃逸 rejection 会静默钉死 loading）。**编译面同理钉在 dev-pin**：`0.2.0-rc.2` 之前 `workspaceFiles.changes` 是 2 参（session 级 watch），`tsconfig.client.json` 的 `paths` 把 `@deepseek-ai/dsh-api-remotes/client` 映射到 `client-remote.d.ts`（本地声明拼的是 path-watch 时代的 3 参签名），让 verbatim `face.ts` 在矩阵旧版本上也能过 typecheck——安全前提是 `files.actions` 槽位在旧版不存在、调用永不会执行。
+**files-tree 旧版复刻面**：`src/client/files-tree/` 保留旧宿主使用的上游 `ui-sidebar-files` 树体逐字节 fork（基线 `f3803c9697` = `0.2.2-alpha.2`；清单、shim 对照、外壳 delta 与同步步骤见该目录 `FORK.md`）。变更旧版基线时按 FORK.md 重拷并对照——`directory-node.ts`/`face.ts`/`store.ts`/`FilesBody.module.css` 与 `FilesBody.tsx` 的行级定义必须字节级一致，许可差异只有外壳函数根源改写与 css specifier 的 `.ts` 后缀；同时检查上游 `locales.ts` 的 `zh` 键集（shim 的 `SidebarFilesKey` 联合须同步）、`workspaceFiles` remote 面与 `data-dockkit-content` 钩子。复刻体类名 `mrfw-ft*`、不携带 `data-files-root`/`data-files-body`（防本插件 `:has()` 隐藏规则误伤）； primitives 探针失败时整棵复刻树不渲染（同型降级，不崩）。**remote 面只能经 `ctx.get` 懒解析**：`remote.workspaceFiles` 是 cordis 嵌套服务，context 代理路径（`remote.workspaceFiles` 或 `ctx['remote.workspaceFiles']`）受 inject 守卫（未声明 fiber 直接抛 `without inject`），而本版 cordis 的 inject 条目全 required（声明会把整行 gate 在可选服务上）——`lazyFilesRemote` 用 `ctx.get('remote')`/`ctx.get('remote.workspaceFiles')` 免守卫直查 store，一切查找失败折叠成 `gateway/internal` 失败行（verbatim `load` 的 `.then` 无 `.catch`，逃逸 rejection 会静默钉死 loading）。**编译面同理钉在 dev-pin**：`0.2.0-rc.2` 之前 `workspaceFiles.changes` 是 2 参（session 级 watch），`tsconfig.client.json` 的 `paths` 把 `@deepseek-ai/dsh-api-remotes/client` 映射到 `client-remote.d.ts`（本地声明拼的是 path-watch 时代的 3 参签名），让 verbatim `face.ts` 在矩阵旧版本上也能过 typecheck——安全前提是 `files.actions` 槽位在旧版不存在、调用永不会执行。
 
-**open-in-app 复刻面**：`src/client/open-in-app/` 是上游 `ui-open-in-app` client 包的逐字节 fork（基线 `f3803c9697` = `0.2.2-alpha.2`；清单、shim 对照与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——许可差异只有 `OpenTargetButton.tsx` 里 css specifier 的 `.ts` 后缀与 `open-toast.tsx` 的两行（丢 layout 副作用导入、`isMobileDevice` 改从 `./device.ts` 导入——它 re-export `src/compat/open-in-app-device.ts` 的探测 shim）；同时检查上游 `locales.ts` 的 `zh` 键集是否新增（shim 的 `OpenInAppKey` 联合须同步）、`shared.ts` 路由常量是否变化（devDep 版本即出处记录）、`OpenInAppActionInjected` 的 hook 名是否漂移。复刻组件拼写 `*Regular` 图标族：0.1.5/0.1.6 像素名运行时不建 adapter、不渲染按钮（同型降级，不崩）。
+**open-in-app 复刻面**：`src/client/open-in-app/` 是上游 `ui-open-in-app` client 包的逐字节 fork（基线 `05b1cae8db` = `0.2.2-alpha.3`；清单、shim 对照与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——许可差异只有 `OpenTargetButton.tsx` 里 css specifier 的 `.ts` 后缀与 `open-toast.tsx` 的两行（丢 layout 副作用导入、`isMobileDevice` 改从 `./device.ts` 导入——它 re-export `src/compat/open-in-app-device.ts` 的探测 shim）；同时检查上游 `locales.ts` 的 `zh` 键集是否新增（shim 的 `OpenInAppKey` 联合须同步）、`shared.ts` 路由常量是否变化（devDep 版本即出处记录）、`OpenInAppActionInjected` 的 hook 名是否漂移。复刻组件拼写 `*Regular` 图标族：0.1.5/0.1.6 像素名运行时不建 adapter、不渲染按钮（同型降级，不崩）。
 
 ## 13. B9 进程栅栏接缝（Full-access bypass）
 
@@ -247,3 +247,10 @@ PTY 的 agent/用户判别是 §13 唯一的静默 fail-open 接缝：`DSH_PTY_S
 - **Node ≥24.9**：0.2.2 起的 lanes 需要 Node 24；CI verify 按已知旧版前缀走 22.19.0、其余走 24.9.0。
 - **Auto Review 不动**：上游实验性 auto-review 在 0.2.2 有变化（每条历史一条请求消息、AutoReviewFailedError、卸载规则），但可选 fork 仍钉死 `0.2.1-rc.2` 基线，`AUTO_REVIEW_RELEASE` 不随开发 pin 走。
 - **上游 Skills 语义微调**：filesystem provider 把失败根报为 incomplete observation、tool-skill 发布 incomplete catalog；本插件的多根 skills provider 仍把嵌套 observation 当普通候选、忽略 `complete:false`——行为不变，记为已知后续观察点。
+
+
+## 15. DSH 0.2.2-alpha.3 接缝
+
+上游新增 patch、delete 和双端 move：不能直接继承而绕过围栏。结构适配器只在后端具备方法时安装包装，move 两端共享一次 Registry admission。Cordis 的 getter 追踪也改变，Connection 适配器将公开 RPC getter 绑定到消费 fiber。新版 Files 页面使用宿主文件树 Factory，旧界面保留 alpha.2 复刻树。见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#022-alpha3-后续审查2026-11-04)和各 fork 的同步步骤。
+
+升级探测遇到 vendor 预发布范围时取声明的精确基线，即使 npm 同范围还返回更新的预发布版本。alpha.1 Cordis 混入 alpha.2 loader 会破坏旧宿主；稳定版范围仍取原先的最高匹配版本。

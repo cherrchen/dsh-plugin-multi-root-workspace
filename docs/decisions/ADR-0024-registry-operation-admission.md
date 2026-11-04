@@ -46,3 +46,8 @@ A1 最初只有本地 fs 基础，不是多实例一致授权的完成证据。�
 - [ADR-0012：Session origin 与进程快照](./ADR-0012-session-origin-and-effective-cwd.md)
 - [ADR-0013：工具写权限上限](./ADR-0013-per-root-and-per-tool-access.md)
 - [共享 Registry 权威服务设计提案](../architecture/registry-authority-service.md)
+
+
+## 修订：上游 patch 文件操作（2026-11-04）
+
+上游新增的 `patchText`、`deleteFile` 与 `moveFile` 也各自获得一次准入；move 在同一份快照下分别检查源与目标，不能用两个可能跨撤权的快照。旧版后端不提供这些方法时不安装包装。接口细节见 [0.2.2 接口审查](../reference/dsh-0.2.2-migration.md#022-alpha3-后续审查2026-11-04)。

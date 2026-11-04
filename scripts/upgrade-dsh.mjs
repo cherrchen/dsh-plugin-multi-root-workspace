@@ -43,7 +43,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { npmOutput } from './lib/npm-cli.mjs'
-import { cordisPin } from './lib/cordis-pin.mjs'
+import { cordisPin, ecosystemPin } from './lib/cordis-pin.mjs'
 import { AUTO_REVIEW_DEVELOPMENT_PACKAGES, autoReviewRelease } from './lib/auto-review-development.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -108,8 +108,9 @@ function isEcosystemPackage(name) {
  * miss the live config). The ranges come from the release's own manifests:
  * `dsh` and `dsh-app-boot` (which declares the plugin trio as peers), the
  * pinned cordis, and `dsh-sandbox-local` (which carries the schemastery /
- * node-addon-system pairs this plugin shares with the host); the highest
- * published version each range admits is the pin.
+ * node-addon-system pairs this plugin shares with the host). A declared
+ * prerelease pins its exact base; otherwise use the highest admitted version.
+ * A later prerelease can be semver-compatible while changing the vendor API.
  * @param version - the exact `@deepseek-ai/dsh` release being pinned.
  * @param cordisVersion - the exact cordis version {@link cordisRequiredBy} returned.
  * @returns package name to exact version, sorted by name.
@@ -131,7 +132,7 @@ function ecosystemPins(version, cordisVersion) {
     const raw = npmOutput(['view', `${name}@${range}`, 'version', '--json']).trim()
     const admitted = [].concat(JSON.parse(raw))
     if (admitted.length === 0) throw new Error(`[upgrade] no published ${name} satisfies ${range}`)
-    pins[name] = admitted.at(-1)
+    pins[name] = ecosystemPin(range, admitted)
   }
   return pins
 }
