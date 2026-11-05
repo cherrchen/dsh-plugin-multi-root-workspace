@@ -8,6 +8,21 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.14] - 2026-11-05
+
+### Added
+
+- **Exact support for DSH `0.2.2-alpha.3` and `0.2.2-rc.1`**: the support matrix now covers 22 exact releases and the dev pin moves to `0.2.2-rc.1` (cordis `4.1.0` / Schemastery `3.19.0`). From `alpha.3` upstream routes `patchText` / `deleteFile` / `moveFile` through the same filesystem fence and Registry admission (a move's source and target share one admission snapshot), binds the Connection RPC getter to the consuming fiber that owns the routes (fixing the panel channel's HTTP 405 under the new Cordis), and switches the Files tab to the host-provided file-tree Factory; `rc.1` differs from `alpha.3` only in version numbers and vendor stabilization — no new interface shapes, so no new adapter branch. The upgrade script's stable-vendor selector now picks only the newest stable patch inside the host's declared minor line, keeping an old Cordis out of the new loader. The optional Auto Review entry stays pinned to its `0.2.1-rc.2` baseline ([interface review](./docs/reference/dsh-0.2.2-migration.md)).
+- **An experimental "Multi-root Auto Review" switch on the plugin detail page's settings card (off by default)**: equivalent to the same-named Loader row in Plugin Manager — it persists through `remote.pluginManager.setPluginEnabled`, applies hot, and shows a restart Toast when `restart-required`; the row is not rendered when the host has no pluginManager Remote or the composition does not list the optional row, and it shares the single `plugins.bundle.config` settings cell with additional-root Skills.
+- **Rich plugin-manager detail page**: localized `meta.detail` (`locale/en|zh.json` exposed through the `./locale/*.json` export) plus a self-contained 640×300 preview image (`detail/`), following the upstream plugin-detail convention.
+
+### Fixed
+
+- **The `profile-core-mixed` / `profile-core-copy` launcher warnings ([issue #30](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/issues/30))**: `schemastery` and `node-addon-system` moved into `peerDependencies` — the two shared upstream singletons are now supplied once by the host's `dsh-sandbox-local`; as `dependencies` they let the package manager install a second copy inside the profile (`^3.18.2` does not match the host prerelease, producing `3.18.5` plus `cosmokit@1.8.6`). `compat:check` and the tests now hard-reject any `@deepseek-ai/*` name in `dependencies` / `optionalDependencies`; profiles that already installed an older version need a remove + add to rebuild `node_modules` ([troubleshooting](./docs/troubleshooting/profile-core-mixed.md)).
+- **Silent SIGBUS exits of installed copies on darwin-arm64**: `koffi` is now always resolved to the host's copy through `loadHostKoffi()` (`src/compat/koffi.ts`, anchored on the required peer `dsh-fs-local`) — a profile install lays down a private koffi that, next to the `koffi.node` image the host already loaded, forms a second native image in one process and dies under pointer validation; only when no host copy resolves does it fall back to the bundled one.
+- **Settings-card concurrent-refresh race**: when a `plugin-manager/changed` refresh and the post-`setEnabled()` refresh overlap, the older response could land last and overwrite the new snapshot, leaving the switch on its pre-write value; a `refreshSeq` generation counter now drops every non-latest `listPlugins()` response.
+- **Settings-card error feedback moved to Toast banners**: the inline `role=alert` copy on the Auto Review and Skills rows is replaced by top Toast notices that dismiss themselves when their state source disappears.
+
 ## [0.1.13] - 2026-10-31
 
 ### Added
@@ -214,7 +229,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...v0.1.11

@@ -1,6 +1,6 @@
 # 开发路径文档：Multi-root Workspace（不改上游）
 
-> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；v0.1.9（Auto Review 多根上下文以主包内置可选行交付，默认关闭，ADR-0022）已发版；v0.1.10（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发版；v0.1.11（DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 支持矩阵提升、Issue #24 Registry／Skills 刷新循环 hot-fix）已发版；v0.1.12（多 Host 共享 Registry 权威服务与逐操作授权、DSH `0.2.1-rc.5` 支持矩阵提升）已发版；v0.1.13（F4 后台恢复与 Files 页签根选择修复）随 `v0.1.13` 发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
+> 状态：active（**进度总账 + 里程碑概览**）。MVP-v0.1.0（M1/M2/M3）已实施并以 `v0.1.0` 发版（2026-09-13）；v0.1.1 硬化批次（H1–H4）已实施、全绿并随 `v0.1.1` 发版（2026-09-16）；v0.1.2 支持矩阵提升（`0.1.6-alpha.2`、`0.1.7-alpha.1`）已实施并随 `v0.1.2` 发版（2026-09-22）；v0.1.3 支持矩阵提升（`0.1.7-alpha.2`、`0.1.7-rc.1`）已实施并随 `v0.1.3` 发版（2026-09-24）；v0.1.4 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版（2026-09-25）；v0.1.5 DSH 0.2 支持矩阵提升已发版；v0.1.6 已发版；v0.1.7（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发版；v0.1.8（DSH 0.2.0 `permissionPresets/catalog` 修复：可选包分类取证 + provider 行去门禁化）已发版；v0.1.9（Auto Review 多根上下文以主包内置可选行交付，默认关闭，ADR-0022）已发版；v0.1.10（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发版；v0.1.11（DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 支持矩阵提升、Issue #24 Registry／Skills 刷新循环 hot-fix）已发版；v0.1.12（多 Host 共享 Registry 权威服务与逐操作授权、DSH `0.2.1-rc.5` 支持矩阵提升）已发版；v0.1.13（F4 后台恢复与 Files 页签根选择修复）随 `v0.1.13` 发版；v0.1.14（Issue #30 依赖单例修复与 koffi 宿主锚定、DSH `0.2.2-alpha.3`/`0.2.2-rc.1` 兼容提升、插件详情页设置卡 Auto Review 开关与富文本详情）随 `v0.1.14` 发版；第二期（B 系列）范围见[需求文档 §4/§7](../../requirements/multi-root-workspace.md)。
 > 设计依据：[multi-root-workspace.md](../../architecture/multi-root-workspace.md)；验收标准见 [multi-root-workspace.md](../../requirements/multi-root-workspace.md) §5。
 > 产物是本仓库（`dsh-plugin-multi-root-workspace`，包 `@dsh-electron/dsh-plugin-multi-root-workspace`），经 `dsh plugin --profile <name> add <path|git>` 安装；对上游仓库（deepseek-harness）零改动。
 > 插件仓库自建门禁（上游 `verify-cordis-config` 等仓库 gates 不适用）：lint + typecheck + vitest 全绿 + patch 快照测试。
@@ -57,6 +57,10 @@
 | Long-term | 多 Host 共享 Registry 权威服务 | 实现完成；本机、最早同步基线、19 精确版本 × 三平台 CI 与 macOS 真实 TUI 长跑已验收；Ubuntu 报告环境长跑复测遗留 | [专项计划](./2026-10-30-shared-registry-authority.md)、[本次记录](#多-host-权威服务开发2026-10-29) | [0024](../../decisions/ADR-0024-registry-operation-admission.md)、[0025](../../decisions/ADR-0025-shared-registry-authority.md) | `abdb5c6` | `v0.1.12` |
 | Long-term | F4 后台恢复与故障诊断 | 自动恢复、投影同步与诊断；三平台 CI 验收，真实 TUI soak 暂缓 | [专项计划](./2026-10-31-f4-background-recovery.md)、[本次记录](#f4-后台恢复与故障诊断立项2026-10-31) | [0026](../../decisions/ADR-0026-registry-background-recovery.md) | `0b2102c`…`8b3f22b` | 随 `v0.1.13` 发版 |
 | 第二期 | Files 页签根选择修复 | 打开文件后的页签重挂载保留根选择与目录树状态 | [ADR 修订](../../decisions/ADR-0016-files-tab-native-tree-fork.md) | [0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md) | `4cb8822` | 随 `v0.1.13` 发版 |
+| hot-fix | Issue #30 DSH 核心包移出 dependencies | `schemastery` / `node-addon-system` 移入 `peerDependencies` 由宿主供给唯一副本；`koffi` 经 `loadHostKoffi()` 锚定宿主副本（darwin-arm64 SIGBUS）；`compat:check` 拒绝 `dependencies` 里的 `@deepseek-ai/*` | [本次记录](#issue-30dsh-核心包移出-dependencies2026-11-01)、[排查](../../troubleshooting/profile-core-mixed.md) | [0009 修订](../../decisions/ADR-0009-dsh-compat-contract.md) | `c9dc4a0` | 随 `v0.1.14` 发版 |
+| compat | DSH 0.2.2-alpha.3 提升 | fs `patchText`/`deleteFile`/`moveFile` 纳入围栏与 Registry admission；Connection RPC getter 绑定消费 fiber 修复 HTTP 405；Files 页签改用宿主文件树 Factory；开发 pin `0.2.2-alpha.3` / cordis `4.0.6-alpha.2` | [本次记录](#dsh-022-alpha3-兼容适配2026-11-04)、[接口审查](../../reference/dsh-0.2.2-migration.md) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md)、[0024 修订](../../decisions/ADR-0024-registry-operation-admission.md) | `9035ab0` | 随 `v0.1.14` 发版 |
+| compat | DSH 0.2.2-rc.1 提升 | 支持合同纳入 `0.2.2-rc.1`（22 个精确版本）；开发 pin `0.2.2-rc.1` / cordis `4.1.0` / schemastery `3.19.0`；稳定 vendor 选择器限宿主声明 minor 线；未新增适配分支 | [本次记录](#dsh-022-rc1-兼容适配2026-11-05)、[接口审查](../../reference/dsh-0.2.2-migration.md) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `1c025b2` | 随 `v0.1.14` 发版 |
+| 第二期 | 插件详情页设置卡与富文本详情 | 「多根 Auto Review（实验性）」设置开关与 Loader 行等价（`setPluginEnabled` 持久化、热应用、restart-required Toast）；设置卡错误改 Toast；`refreshSeq` 修并发刷新竞态；locale `meta.detail` + `preview.svg` 富文本详情 | [本次记录](#插件详情页设置卡与富文本详情2026-11-05) | — | `220bc82` | 随 `v0.1.14` 发版 |
 
 
 ## 总体策略
@@ -1300,7 +1304,9 @@ PR 的 CI 以正式门禁覆盖全部 20 个精确版本与启用的四个 runne
 
 修复：两包移入 `peerDependencies`，由宿主 `dsh-sandbox-local`（每个受支持版本都直接依赖二者）供给唯一副本；`koffi` / `zod` 非 `@deepseek-ai/*`，保留 `dependencies`。peer 范围按"稳定线范围 + alpha 线逐个具名"（cordis peer 同形态）：schemastery `>=3.18.2 <4.0.0 || 3.18.5-alpha.1 || 3.18.5-alpha.2 || 3.18.6-alpha.1`（覆盖 0.1.5-rc.2→0.2.2-alpha.2 全线宿主实带版本），node-addon-system `^0.1.2`；`devDependencies` 钉开发宿主自带的精确版 `3.18.6-alpha.1` / `0.1.2`。防回归：`check-dsh-compat.mjs` 新增形状检查拒绝 `dependencies` / `optionalDependencies` 里的任何 `@deepseek-ai/*`；`tests/compat.spec.ts` 新组钉 peer 形态、必需性与解析同一性（插件侧与 `dsh-sandbox-local` 侧 `createRequire` + `realpath` 必须是同一文件）。`upgrade-dsh.mjs` 的 ecosystemPins 增加 `dsh-sandbox-local` 来源并把 `node-addon-system` 纳入生态系统包集合，`repointManifest` 现在同步重指这些包的 devDeps 开发 pin（同版本自探测全 no-op、输出逐字节一致）。
 
-本机 macOS / Node `24.18.0` / DSH `0.2.2-alpha.2` 验收：`compat:check`、lint、双端 typecheck、build、docs:check、pack:check 全过；完整测试 **951 通过 / 86 跳过**（69 文件 / 4 跳过）；packed 行为 **135 通过**——tarball 经 `dsh plugin add` 装进 scratch profile 后 profile `node_modules` 仅 +4 包，无任何 `@deepseek-ai/*` 第二份副本，issue 形态在端到端验证中消除。修复前在同一工作树上复现过双副本（root `3.18.5` ↔ `dsh-settings` `3.18.6-alpha.1`），修复后 lockfile 中两包只余宿主一份解析。未提交 CI 矩阵；旧版已装 profile 的处理见[排查文档](../../troubleshooting/profile-core-mixed.md)。
+本机 macOS / Node `24.18.0` / DSH `0.2.2-alpha.2` 验收：`compat:check`、lint、双端 typecheck、build、docs:check、pack:check 全过；完整测试 **951 通过 / 86 跳过**（69 文件 / 4 跳过）；packed 行为 **135 通过**——tarball 经 `dsh plugin add` 装进 scratch profile 后 profile `node_modules` 仅 +4 包，无任何 `@deepseek-ai/*` 第二份副本，issue 形态在端到端验证中消除。修复前在同一工作树上复现过双副本（root `3.18.5` ↔ `dsh-settings` `3.18.6-alpha.1`），修复后 lockfile 中两包只余宿主一份解析。旧版已装 profile 的处理见[排查文档](../../troubleshooting/profile-core-mixed.md)。
+
+同一 PR（#31，合入提交 `c9dc4a0`）另含 `koffi` 原生镜像单例修复：profile 安装会再装一份私有 koffi，与宿主已加载的 `koffi.node` 构成同进程第二个原生镜像，在 darwin-arm64 指针校验下直接 SIGBUS 无声退出（F4 引入的既有回归，CI 0.1.5-rc.2 / 0.1.6-alpha.1 macOS lane 的 Packed smoke 实锤）。新增 `src/compat/koffi.ts` 的 `loadHostKoffi()`：以必需 peer `dsh-fs-local`（每个受支持版本都携带 koffi）为锚点解析宿主副本，解析不到才回退包内自带；`src/` 内全部裸 `import('koffi')` 收编到该入口，`tests/compat.spec.ts` 扫描禁绝回潮并断言锚定同源；`loadHostKoffi` 用 `require` 取 live exports 并校验 `.load`（`import()` 在宿主 addon loader 介入下 CJS 缓存项不可靠，0.2.1-rc.2 auto-review 实锤 `koffi.load is not a function`）。排查文档已同步该形态。合入提交的 [CI run 41380349540](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41380349540) 全绿；本批随 `v0.1.14` 发版。
 
 
 ## DSH 0.2.2-alpha.3 兼容适配（2026-11-04）
@@ -1308,6 +1314,8 @@ PR 的 CI 以正式门禁覆盖全部 20 个精确版本与启用的四个 runne
 对照上游 `0.2.2-alpha.2` 和 `0.2.1-rc.5` 的 patch，新增精确版本 `0.2.2-alpha.3`，开发 pin 为该版本与 Cordis `4.0.6-alpha.2`；可选 Auto Review 仍钉 `0.2.1-rc.2`，不创建发行版。文件变更接口、Connection 路由和新版 Files 页面适配见[接口审查](../../reference/dsh-0.2.2-migration.md#022-alpha3-后续审查2026-11-04)。
 
 macOS / Node `24.18.0` 候选 warn 验证：Registry 原生认证与 Seatbelt 探针可用；完整测试 959 通过、86 跳过（新增的回归另行通过），compose / behavior / journey 分别 52 / 136 / 76 通过，packed behavior 135 通过；Auto Review fork 检查通过，联合 smoke 按精确目标规则跳过。最初 journey 发现 RPC HTTP 405，修复后真实 HTTP 两种认证路径通过。正式 enforce 下 `compat:check` 与完整 `verify:all` 通过：测试 964 通过 / 86 跳过，三项 smoke 与 packed 分别 52 / 136 / 76 / 135 通过；随后补入真实 `apply_patch` 工具正反例和 Full-access 符号链接替换回归，最终完整测试 967 通过 / 86 跳过。macOS 隔离 Web 页面实机检查了零附加根、主根、附加根、切回主根、目录展开和刷新、打开附加根文件后返回及打开方式菜单；零根会话先经面板确认确无附加根。原有 20 个精确版本在独立 macOS / Node `24.18.0` 安装树中逐一通过 `compat:check`、双端 typecheck、文件系统 / Connection / Files / 工具封顶等关键回归及真实 web/headless journey（各 76 项）；`0.2.2-alpha.2` 起初因旧版 Cordis 混入新 loader 失败，修正预发布依赖选择后重跑通过。Linux、Windows 和旧版 Node 22 的原生 CI 尚待完成。
+
+经 PR #34 合入 `main`（`9035ab0`），其 [CI run 41775651417](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41775651417) 全绿覆盖全矩阵；本批随 `v0.1.14` 发版。
 
 ## DSH 0.2.2-rc.1 兼容适配（2026-11-05）
 
@@ -1349,11 +1357,22 @@ macOS / Node `24.18.0` 候选 warn 下完整 `verify:all` 通过：原生 Seatbe
 | `0.2.2-alpha.2` | `24.18.0` | 200 / 9 | 76 / 0 / 0 |
 | `0.2.2-alpha.3` | `24.18.0` | 208 / 1 | 76 / 0 / 0 |
 
-代码提交 `0ffb3e6` 的 [CI run 41960785058](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41960785058) 已重新覆盖旧版 vendor 修复；本文验收记录提交时仍在运行。PR 保持 Draft，最终跨平台结果以 PR 当前 HEAD 的 CI 为准，不创建发行版。
+代码提交 `0ffb3e6` 的 [CI run 41960785058](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41960785058) 已重新覆盖旧版 vendor 修复。经 PR #35 合入 `main`（`1c025b2`），最终 [CI run 41964828437](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41964828437) 全绿；本批随 `v0.1.14` 发版。
 
 
 ### Windows PID 握手竞态修复（2026-11-05）
 
 最终验收提交 `613223d` 的 [CI run 41961801526](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41961801526) 完成 88 个 verify：87 成功，仅 `0.1.6-alpha.1 × windows-latest` 的 `ancestor guard` 后代回收测试失败（最终 gate 随之失败）；rc.1 四个 runner 全部成功。
 
-失败诊断为 `Job descendant 0 outlived the drained runner`。夹具只等 PID 文件存在，可能在 `writeFileSync` 创建文件后、写入 PID 前读到空串；`Number('') === 0` 且 `Number.isInteger(0)` 为真，后续 signal-0 探针检查的是特殊 PID 0，而非真正的后代。跨平台回归以已创建的空文件确定复现旧逻辑误判（修复前红）。现将 PID 标记写入临时文件后原子 rename 发布，消费者等待完整的正安全整数 PID，缺失 / 空白 / 0 / 负数 / 非整数字节均不算 ready。原生 Job drain、后代已退出、延迟逃逸写入不存在、祖先 pin 释放的断言和时限保持不变；未修改产品运行时代码。本机回归修复后通过（1 通过 / 40 个 Windows 用例按平台跳过），lint、双端 typecheck、docs:check 均通过；Windows 原生结果以修复提交的 CI 为准。
+失败诊断为 `Job descendant 0 outlived the drained runner`。夹具只等 PID 文件存在，可能在 `writeFileSync` 创建文件后、写入 PID 前读到空串；`Number('') === 0` 且 `Number.isInteger(0)` 为真，后续 signal-0 探针检查的是特殊 PID 0，而非真正的后代。跨平台回归以已创建的空文件确定复现旧逻辑误判（修复前红）。现将 PID 标记写入临时文件后原子 rename 发布，消费者等待完整的正安全整数 PID，缺失 / 空白 / 0 / 负数 / 非整数字节均不算 ready。原生 Job drain、后代已退出、延迟逃逸写入不存在、祖先 pin 释放的断言和时限保持不变；未修改产品运行时代码。本机回归修复后通过（1 通过 / 40 个 Windows 用例按平台跳过），lint、双端 typecheck、docs:check 均通过；修复随 PR #35 合入，其 [CI run 41964828437](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41964828437) 在 `0.1.6-alpha.1 × windows-latest` 复跑通过。
+
+## 插件详情页设置卡与富文本详情（2026-11-05）
+
+经 PR #37 合入 `main`（`220bc82`），随 `v0.1.14` 发版。四项交付：
+
+- **「多根 Auto Review」设置开关（实验性，默认关闭）**：插件详情页设置卡在「附属根 Skills」开关下方新增同名开关，与插件管理页同名 Loader 行等价——经 `remote.pluginManager.setPluginEnabled` 持久化 `{id, disabled}` 覆盖并热应用，`restart-required` 时以 Toast 提示重启；宿主无 `pluginManager` Remote 或组合未列该可选行时该行不渲染；Skills 与 Auto Review 共用单一 `plugins.bundle.config` 设置单元格，legacy `settings.plugin.item` 保留 Skills 行。
+- **设置卡错误反馈改 Toast 横幅**：Auto Review 与 Skills 设置行的内联 `role=alert` 文案改为顶部 Toast——写入结果（保存失败/需重启）与读取失败、条目诊断均以横幅提示，状态源消失时自动撤下。
+- **并发刷新竞态修复（评审 P2）**：`AutoReviewSettingsClient.refresh()` 的 epoch 只在 attach/detach 时变化，无法区分同 epoch 内重叠请求；`plugin-manager/changed` 刷新与 `setEnabled()` 后刷新并发时旧响应后到会覆盖新快照、开关停留在写入前的值。新增 `refreshSeq` 代际计数，非最新 `listPlugins()` 响应直接丢弃。
+- **插件管理页富文本详情**：`locale/en|zh.json` 提供 `meta.title`/`description`/`detail`，`exports` 暴露 `./locale/*.json`，`files` 打包 `detail/` 与 `locale/`；DETAIL 文档遵循上游惯例——单行图片指向 640×300 自包含 `preview.svg`（`preview.zh.svg` 为中文版，文字经 fontkit 转曲）。`check-pack` 支持 exports 通配符目标，`plugin-detail` spec 固定 manifest/字典/文档/资产一致性契约。富文本详情在 DSH `0.2.2-alpha.2` 起生效，更早版本无此读取路径，locale/detail 文件为惰性资源无副作用。
+
+验收：PR [CI run 41992772063](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41992772063) 全绿；新增 `tests/client-auto-review-settings.spec.tsx`（开关持久化/热应用/restart-required/无 Remote 不渲染/并发刷新）与 `tests/plugin-detail.spec.ts`（manifest/字典/文档/资产契约）。

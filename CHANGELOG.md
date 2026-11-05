@@ -8,6 +8,21 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.14] - 2026-11-05
+
+### Added
+
+- **精确支持 DSH `0.2.2-alpha.3` 与 `0.2.2-rc.1`**：支持矩阵扩至 22 个精确版本，开发 pin 提升到 `0.2.2-rc.1`（cordis `4.1.0` / Schemastery `3.19.0`）。`alpha.3` 起上游把 `patchText` / `deleteFile` / `moveFile` 纳入同一文件系统围栏与 Registry admission（移动的源与目标共用同一准入快照）、Connection RPC getter 绑定拥有路由的消费 fiber（修复新版 Cordis 下面板通道 HTTP 405）、Files 页签改用宿主提供的文件树 Factory；`rc.1` 相对 `alpha.3` 仅有版本号与 vendor 稳定化，没有新接口形状，未新增适配分支。升级脚本的稳定 vendor 选择器改为只取宿主声明 minor 线内的最新稳定 patch，避免旧版 Cordis 混入新 loader。可选 Auto Review 仍钉 `0.2.1-rc.2` 基线（[接口审查](./docs/reference/dsh-0.2.2-migration.md)）。
+- **插件详情页「多根 Auto Review」设置开关（实验性，默认关闭）**：与插件管理页同名 Loader 行等价，经 `remote.pluginManager.setPluginEnabled` 持久化并热应用，`restart-required` 时以 Toast 提示重启；宿主无 pluginManager Remote 或组合未列该可选行时该行不渲染，与附属根 Skills 共用单一 `plugins.bundle.config` 设置单元格。
+- **插件管理页富文本详情**：本地化 `meta.detail`（`locale/en|zh.json` 经 `./locale/*.json` 导出）与 640×300 自包含预览图（`detail/`），遵循上游插件详情页惯例。
+
+### Fixed
+
+- **`profile-core-mixed` / `profile-core-copy` 启动器告警（[issue #30](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/issues/30)）**：`schemastery` 与 `node-addon-system` 移入 `peerDependencies`——两个共享上游单例改由宿主 `dsh-sandbox-local` 供给唯一副本；此前它们作为 `dependencies` 会让包管理器在 profile 里装出第二份（`^3.18.2` 不匹配宿主 prerelease，装出 `3.18.5` 连带 `cosmokit@1.8.6`）。`compat:check` 与测试现在硬性拒绝 `dependencies` / `optionalDependencies` 里的任何 `@deepseek-ai/*`；已装旧版的 profile 需 remove + add 重建 `node_modules`（[排查](./docs/troubleshooting/profile-core-mixed.md)）。
+- **darwin-arm64 上安装副本无声 SIGBUS 退出**：`koffi` 一律经 `loadHostKoffi()`（`src/compat/koffi.ts`，以必需 peer `dsh-fs-local` 为锚）解析宿主副本——profile 安装会再装一份私有 koffi，与宿主已加载的 `koffi.node` 构成同进程第二个原生镜像，在指针校验下直接 SIGBUS；解析不到宿主副本时才回退包内自带。
+- **设置卡并发刷新竞态**：`plugin-manager/changed` 刷新与 `setEnabled()` 后的刷新并发时，旧响应后到会覆盖新快照、开关停留在写入前的值；新增 `refreshSeq` 代际计数，非最新请求的结果直接丢弃。
+- **设置卡错误反馈改 Toast 横幅**：Auto Review 与 Skills 设置行的内联 `role=alert` 文案改为顶部 Toast 提示，状态源消失时自动撤下。
+
 ## [0.1.13] - 2026-10-31
 
 ### Added
@@ -214,7 +229,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.10...v0.1.11
