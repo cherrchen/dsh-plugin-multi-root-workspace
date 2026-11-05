@@ -217,7 +217,7 @@ describe('registration lifecycle', () => {
     dispose()
     await registry.add(primary, { path: extra })
 
-    expect(seen).toEqual([primary, primary])
+    expect(seen).toEqual([primaryKey(primary), primaryKey(primary)])
   })
 })
 
@@ -456,7 +456,7 @@ describe('revalidation without a restart', () => {
     await registry.refresh(primary)
 
     // One change per real transition: registration, disappearance.
-    expect(seen).toEqual([primary, primary])
+    expect(seen).toEqual([primaryKey(primary), primaryKey(primary)])
   })
 })
 
@@ -1581,6 +1581,16 @@ describe('the upstream primary spelling (F3/MRW-01)', () => {
     // writer produced for the symlinked cwd — `canonicalPath(spelling)`.
     await first.registry.add(real, { path: extra })
     await disposeAll()
+    // v0.1.14 wrote the exact `canonicalPath()` spelling — not case-folded —
+    // so re-key the seed to that legacy format (a no-op off Windows).
+    const legacyKey = canonicalPath(real)
+    const seeded = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+      tables: { roots: Record<string, unknown> }
+    }
+    const record = seeded.tables.roots[primaryKey(real)]
+    delete seeded.tables.roots[primaryKey(real)]
+    seeded.tables.roots[legacyKey] = record
+    writeFileSync(storeFile, JSON.stringify(seeded))
 
     const second = await mount()
     expect(second.registry.list(spelling)).toHaveLength(1)
@@ -1588,7 +1598,7 @@ describe('the upstream primary spelling (F3/MRW-01)', () => {
     const after = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: unknown[] }> }
     }
-    expect(Object.keys(after.tables.roots).sort()).toEqual([primaryKey(real), primaryKey(spelling)].sort())
-    expect(after.tables.roots[primaryKey(spelling)]).toEqual(after.tables.roots[primaryKey(real)])
+    expect(Object.keys(after.tables.roots).sort()).toEqual([legacyKey, primaryKey(spelling)].sort())
+    expect(after.tables.roots[primaryKey(spelling)]).toEqual(after.tables.roots[legacyKey])
   })
 })

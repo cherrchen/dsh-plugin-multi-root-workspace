@@ -1085,7 +1085,7 @@ export class MultiRootRegistry extends Service {
 
   /**
    * Observe registry changes.
-   * @param listener - called with the canonical primary root after each durable change.
+   * @param listener - called with the Registry key (`primaryKey()`, case-folded on Windows) after each durable change.
    * @returns the disposer that stops observing.
    */
   onChange(listener: (primaryRoot: string) => void): () => void {
