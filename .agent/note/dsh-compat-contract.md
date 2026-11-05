@@ -253,8 +253,8 @@ PTY 的 agent/用户判别是 §13 唯一的静默 fail-open 接缝：`DSH_PTY_S
 
 上游新增 patch、delete 和双端 move：不能直接继承而绕过围栏。结构适配器只在后端具备方法时安装包装，move 两端共享一次 Registry admission。Cordis 的 getter 追踪也改变，Connection 适配器将公开 RPC getter 绑定到消费 fiber。新版 Files 页面使用宿主文件树 Factory，旧界面保留 alpha.2 复刻树。见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#022-alpha3-后续审查2026-11-04)和各 fork 的同步步骤。
 
-升级探测遇到 vendor 预发布范围时取声明的精确基线，即使 npm 同范围还返回更新的预发布版本。alpha.1 Cordis 混入 alpha.2 loader 会破坏旧宿主；稳定版范围仍取原先的最高匹配版本。
+升级探测遇到 vendor 预发布范围时取声明的精确基线，即使 npm 同范围还返回更新的预发布版本。alpha.1 Cordis 混入 alpha.2 loader 会破坏旧宿主；alpha.3 阶段的稳定版范围仍取最高匹配版本（已由 §16 修订）。
 
 ## 16. DSH 0.2.2-rc.1 转稳定生态
 
-rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留旧宿主所需的具名 prerelease peer 分支；稳定 peer 范围已覆盖 Cordis 4.1.0 / Schemastery 3.19.0。开发树须整体重指，提交前移除临时 probe overrides。详见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#022-rc1-后续审查2026-11-05)；执行证据仍在路线账本，可选 Auto Review 仍钉 0.2.1-rc.2。
+rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留旧宿主所需的具名 prerelease peer 分支；稳定 peer 范围已覆盖 Cordis 4.1.0 / Schemastery 3.19.0。开发树须整体重指，提交前移除临时 probe overrides。稳定版 vendor 范围同样必须钉声明的精确基线：旧 loader peer `^1.0.3` 会接纳新发布的 `1.1.0`，却在 Cordis `4.0.2` 的 `fiber.entry` 处崩溃。升级 helper 现在对未发布基线或复合范围拒绝猜测，不再选择更新构建。详见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#022-rc1-后续审查2026-11-05)；执行证据仍在路线账本，可选 Auto Review 仍钉 0.2.1-rc.2。

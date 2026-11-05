@@ -59,10 +59,12 @@
 
 | 对照 | patch 范围 | 结论 |
 | --- | --- | --- |
-| alpha.3 → rc.1 | 387 个 `package.json`，各一行替换；所有源码和配置均无差异 | 378 个 DSH 包只更改版本号；9 个 vendor 包转入稳定版本，未引入新 API 形状 |
+| alpha.3 → rc.1 | 387 个 `package.json`，各一行替换；所有源码和配置均无差异 | 378 个 DSH 包只更改版本号；9 个 vendor 包转入稳定版本，相对 alpha.3 未引入新 API 形状 |
 | alpha.2 → rc.1 | 2315 个文件，87654 行新增 / 27240 行删除 | 包含上一节已审查并适配的 fs patch/delete/move、Connection getter、Files Factory 与 locale 变化；rc.1 未再改变这些接缝 |
 
 发布生态从 Cordis `4.0.6-alpha.2` / Schemastery `3.18.6-alpha.2` / Cosmokit `1.8.7-alpha.2` 转为 `4.1.0` / `3.19.0` / `1.9.0`；loader、include、group、hmr、logger-console 为 `1.1.0`，timer 为 `1.2.0`。现有 Cordis 与 Schemastery peer 的稳定版本范围已覆盖这些版本，不能为了新开发 pin 删除旧宿主所需的具名 prerelease 分支。开发树同步重指 DSH 及其共享生态，并去除候选探测的临时 overrides 与全局 release-age 豁免。
+
+稳定 vendor 发布暴露旧版回归安装树的宽范围陷阱：旧 DSH 的 loader `^1.0.3` 会接纳 `1.1.0`，但后者依赖新版 Cordis 的 `fiber.entry`，与 `4.0.2` 组合时 profile 启动失败。`scripts/lib/cordis-pin.mjs` 的 `ecosystemPin` 现对稳定版与 prerelease 一律选择宿主所声明的精确基线，未发布基线和复合范围直接拒绝。对应回归先红后绿；这属于矩阵安装工具修复，不在插件业务面新增版本判断。
 
 `confine` 的返回形状、方言 grant、工具 dispatch、PTY 标记、Session/projection、Registry storage、Skills、Connection RPC 和 bundle 行锚点都沿用 alpha.3 的实现，无需新增适配器分支。上游 Files 的 `data-files-page` / `data-files-content`、`sidebar.files.tree` Factory、dockkit 与 open-in-app 钩子未变。open-in-app 六个 fork 文件与 locale 键集保持一致，出处记录提升到 rc.1；旧版 files-tree 仍保留 alpha.2 基线。可选 Auto Review 仍钉 `0.2.1-rc.2`。
 

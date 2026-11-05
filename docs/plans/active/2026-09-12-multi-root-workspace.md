@@ -1318,3 +1318,5 @@ macOS / Node `24.18.0` 候选 warn 下完整 `verify:all` 通过：原生 Seatbe
 正式 enforce 下 `compat:check`、原生 Registry 认证探针（`--required`）、完整 `verify:all` 与 frozen 安装通过；计数与候选相同，Seatbelt 实跑。`docs:check` 为 **0 错误 / 0 警告**。隔离 Web profile 完成零附加根（面板确认空登记）、主根、附加根、切回主根的三态目检，目录展开、长名截断、刷新、附加根文件预览并返回、打开方式菜单正常，切回后原生树与按钮恢复。未运行真实 TUI 长期观察。
 
 原有 21 个精确版本正在独立安装树中按 CI 的 Node 22/24 分流执行类型检查、权限与客户端关键接缝回归及真实 web/headless journey；全精确版本 × 启用 OS 的 CI 沿用现有 allowlist 派生矩阵。Linux 与 Windows 原生执行尚待 CI，未执行的平台不得记为通过。
+
+本批首次 CI（`bee1a59`，[run 41959434977](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41959434977)）发现旧稳定线宽 vendor 范围混入新 loader `1.1.0`，并非 rc.1 本机回归。升级选择器已改为所有 vendor 范围钉宿主声明的精确基线；loader / timer 稳定线回归先红后绿，保留旧版支持并重跑矩阵。

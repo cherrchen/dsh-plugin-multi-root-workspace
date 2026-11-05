@@ -5,13 +5,10 @@ export function cordisPin(range) {
   return match[1]
 }
 
-/** Pin a declared prerelease to its base, rather than silently mixing a later vendor generation. */
+/** Pin the declared vendor baseline; semver-compatible releases can change Cordis contracts. */
 export function ecosystemPin(range, admitted) {
   if (!Array.isArray(admitted) || admitted.length === 0) throw new Error('no admitted ecosystem versions')
-  if (typeof range === 'string' && /^[\^~]?\d+\.\d+\.\d+-[\w.]+$/u.test(range)) {
-    const base = cordisPin(range)
-    if (!admitted.includes(base)) throw new Error(`declared ecosystem prerelease ${base} is not published`)
-    return base
-  }
-  return admitted.at(-1)
+  const base = cordisPin(range)
+  if (!admitted.includes(base)) throw new Error(`declared ecosystem baseline ${base} is not published`)
+  return base
 }
