@@ -1,6 +1,6 @@
 # dsh-ops × Multi-Root Workspace 兼容性审计
 
-> 证据交付说明（2026-11-05）：按用户要求，本目录只提交本 Markdown。文中的 `dsh-ops-audit-evidence/` 及“本地”文件名保留为历史核验索引，原始日志、JSON、临时脚本均未提交，也不保证在干净检出中可用。P5 可复跑程序见[本仓验证脚本](../../scripts/verify-ops-protection.mjs)；当前能力以 ADR 的 P5 修订及总账为准。
+> 证据交付说明（2026-11-05）：按用户要求，本目录只提交本 Markdown。文中的 `dsh-ops-audit-evidence/` 及“本地”文件名保留为历史核验索引，原始日志、JSON、临时脚本均未提交，也不保证在干净检出中可用。P5 可复跑程序见[本仓验证脚本](../../scripts/verify-ops-protection.mjs)；当前能力以 ADR 的最终范围及总账为准。
 
 首次审计：2026-10-31；架构复核更新：2026-11-01（Asia/Taipei）。范围：源码、隔离测试、报告；未修复实现、修改真实 profile、提交 commit/PR 或放宽外层沙箱。
 
@@ -383,11 +383,11 @@ p0-repro 会写其**自己创建**的临时标记文件，仅在获授权的隔�
 1. Registry admission 已经发生，不代表 deny profile 已经安装；但已准入操作可按 ADR-0024 使用当次快照完成，不能把准入后合法撤权一概叫作绕过。独立新调用、过期异步后代及新进程才需要对应的新准入/有效启动上下文。
 2. OPS `deny_roots` 由 `ops-protocol/src/lib.rs:125–145` 用于**拒绝读取和遍历**的 credential fence。不能直接将 Multi-Root 的写入 deniedRoots 填进去，否则会把只读附属根变成不可读。写授权桥必须区分 write-deny 与 read-deny；当前公开 integration/options 没有能替换固定文件授权算法的 hook，单靠扩大内核 grant 无法撤销 OPS 预检的误拒。
 
-待评审方案见 [ADR-0027](../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md)。该链接只表示存在 Proposed 提案，不表示已适配或已接受。
+待评审方案见 [ADR-0029](../decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md)。该链接只表示存在 Proposed 提案，不表示已适配或已接受。
 
 ## 12. 独立评审后的合同与证据复核（2026-11-01）
 
-已按独立评审R1–R11对照当前源码与既有记录做局部修订，**审计F01/F05等确认结论无需撤回，ADR-0027仍为Proposed**。没有实施适配器，也没有以合同修改代替适配后V1–V7验证。
+已按独立评审R1–R11对照当前源码与既有记录做局部修订，**审计F01/F05等确认结论无需撤回，ADR-0029仍为Proposed**。没有实施适配器，也没有以合同修改代替适配后V1–V7验证。
 
 ### 12.1 证据身份与确认程度
 
@@ -439,7 +439,7 @@ OPS src中其他settings runtime action、install/provision/build/upgrade/CLI re
 
 保护模式对authority unavailable的可能写盘OPS调用（含读Worker）拟在OPS invoke/prepare/cache正文之前拒绝；这依赖待实现适配器的早拒，不是当前spawn包装已经提供的能力。原生fs的primary-only与shared卸载后无frame进程拒绝须区分，见§14 A10。maintenance私有目录例外只列为**待审残余**，不得借此豁免任意裸Worker或允许跨越显式写拒根。
 
-源码编号与SHA256补证见 review-source-excerpts.txt（本地 `review-source-excerpts.txt`）。独立评审R1–R11逐项处理结果在[ADR的评审处理记录](../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md#独立评审处理记录)；V1–V7仍是后续原型/上游/平台验收义务，未因本轮修订升级为PASS。
+源码编号与SHA256补证见 review-source-excerpts.txt（本地 `review-source-excerpts.txt`）。独立评审R1–R11逐项处理结果在[ADR的评审处理记录](../decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#独立评审处理记录)；V1–V7仍是后续原型/上游/平台验收义务，未因本轮修订升级为PASS。
 
 ## 13. 第二轮评审：N1–N4 局部复核（2026-11-01）
 
@@ -484,7 +484,7 @@ ADR仍为Proposed。第二轮N1–N4的处理摘要在其评审记录，原型�
 
 ### 13.3 第三轮评审后的当前限制披露
 
-F07属于**现存代码组合的兼容缺陷**，不依赖ADR-0027是否实施。当前默认bundle启用sharedStorageRoot，满足§13.1的bwrap/tmpfs/cache条件时，严格证明可拒绝已改写argv；page虽是业务读动作，也可能经同一jobs/cache路径触发。函数级冲突已有证据；Linux端到端仍为CODE_RISK / NOT_TESTED，常规无tmpfs的RO profile等对照不被扩大为受影响。
+F07属于**现存代码组合的兼容缺陷**，不依赖ADR-0029是否实施。当前默认bundle启用sharedStorageRoot，满足§13.1的bwrap/tmpfs/cache条件时，严格证明可拒绝已改写argv；page虽是业务读动作，也可能经同一jobs/cache路径触发。函数级冲突已有证据；Linux端到端仍为CODE_RISK / NOT_TESTED，常规无tmpfs的RO profile等对照不被扩大为受影响。
 
 已在[中文README已知限制](../../README.md#已知限制)与[英文README Known Limitations](../../README.en.md#known-limitations)披露该车道降级。等待OPS公开confine前cache需求接缝期间，状态是**安全拒绝方向的误拒、尚未完整兼容**，没有干净且已验证的MR单侧临时缓解；不得以放宽profile校验或删除deny冒充修复。ADR D5已按车道明确双方责任。
 
@@ -587,3 +587,10 @@ A2适用范围补正：PTC的j-/r- page可打开.dsh-ops store，A4先拒绝仅�
 Phase B 继续关闭：当前 DSH Session 文档明文禁止外部插件调用 `appendPluginRecord`，没有合法持久记录接口可接入。恢复会话后，缺少逐项成功证据的 OPS 历史不会被当成成功 touch，Review 仍会技术失败。D3/F07、合法后台恢复与其他平台仍是后续事项。
 
 本次逐文件副作用、Native/PTC 和卸载验证通过本仓 `scripts/verify-ops-protection.mjs` 复跑，原始输出留在隔离宿主内，不提交证据目录。具体版本、通过数及仓库门禁只登记在[进度总账](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
+
+
+## 18. P6 限定范围最终验收（2026-11-05）
+
+用户明确将 P5 剩余功能无限期延后、排除于本次最终验收，当前与未来开放均限实验性能力。此次接受对象为已实现的保守拒写兜底、Phase A live 和受限 Review；完整 OPS 兼容恢复没有被验收。延期决定唯一归 [ADR-0029 最终范围](../decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#最终范围与无限期延后2026-11-05)，计划按有限交付范围移入 completed。
+
+本轮补验 Auto Review 精确宿主联合类型、91 项套件、源码和 tarball 的真实审查冒烟，以及 macOS 两个精确宿主的真实 OPS AgentLoop 多目标/partial/PTC 后续模型请求。版本、逐项通过数、平台来源、未触达与不适用入口，以及最终门禁统一登记在[总账 P6](../plans/active/2026-09-12-multi-root-workspace.md#ops-p6-最终验收2026-11-05)。原始记录仅保存在本地忽略目录，仍不提交本目录的证据文件夹；复跑脚本在 `scripts/`。

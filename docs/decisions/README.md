@@ -67,4 +67,4 @@ ADR-0002-short-title.md
 
 - [ADR-0028-upstream-primary-identity-and-shared-only-registry.md](./ADR-0028-upstream-primary-identity-and-shared-only-registry.md) — 主根身份以上游拼写为准（MRW-01），拒写优先于主根；Registry 只保留共享模式（Accepted）。
 
-- [ADR-0027-ops-file-authorization-and-activity-adapter.md](./ADR-0027-ops-file-authorization-and-activity-adapter.md) — OPS 文件写入执行兜底、逐操作授权桥、可写附属根误拒与多目标指令活动适配；重新分析工具封顶、权威不可用和 Bash/PTC 风险（Proposed，未接受、未实施，待评审）。
+- [ADR-0029-ops-file-authorization-and-activity-adapter.md](./ADR-0029-ops-file-authorization-and-activity-adapter.md) — OPS 实验性保守兜底、Phase A live 与受限 Review 的限定接受范围；P5 完整兼容恢复无限期延后，不纳入本次最终验收。

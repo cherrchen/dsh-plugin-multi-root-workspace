@@ -1,14 +1,41 @@
-# ADR-0027: OPS 文件写入兜底、统一授权桥与附属根文件活动适配
+# ADR-0029: OPS 文件写入兜底、统一授权桥与附属根文件活动适配
 
 ## Status
 
-**Proposed — 未接受，待评审。此处“未实施”描述的是初始修订；其后首轮已按直接授权实施首期子集（见[专项计划实施状态](../plans/active/2026-11-01-ops-compatibility-adaptation.md#本轮实施状态)），接受状态不变，完整决策不视为采纳。**
+**Accepted — 仅接受默认关闭、显式启用的实验性保守兜底、Phase A live 及受限 Review；P5 未实现的完整兼容恢复无限期延后，不纳入本次最终验收。**
 
-本文的 Decision 均为拟议决策，不修改当前支持声明、配置默认值、兼容 allowlist 或已接受 ADR。维护者评审通过前，不将任何方案描述成已上线、已验证安全或已解决 OPS 兼容性问题。（初始修订当轮只补充隔离取证和文档；直接授权实施见专项计划。首期实施经 Settings 行 `multi-root-ops-compatibility.enabled` 显式 opt-in，默认关闭、实验性标注——此配置门禁属于实现细节，不改变 Decision 的 Proposed 状态。）
+用户于 2026-11-05 明确要求完成 P6 与限定范围最终验收，排除 P5 剩余功能，并要求未来仅以实验性功能开放。本节及下方最终范围覆盖早期 Proposed 草案；未实现方案不因本 ADR 状态改变而获准或被声明完成。精确版本与平台证据仍以进度总账为唯一来源，不扩大 DSH allowlist、不改默认值、不作稳定支持或发布承诺。
 
 ## Date
 
-2026-10-31；2026-11-01 经独立架构审计A1–A13及ADR/计划联合复核R1–R4修订，状态仍为Proposed
+2026-10-31 创建；2026-11-01 独立审计及计划复核时为 Proposed；2026-11-05 按用户最终范围限定接受。
+
+## 最终范围与无限期延后（2026-11-05）
+
+### 本次接受范围
+
+- 保持 Registry → scope 唯一授权来源、tool cap 只收窄、同次 admission/profile 证明及同步 spawn 形状。macOS/Linux 的 FA 有 deny 时执行受限 Worker；Windows 同组合在准备前拒绝，不能把 Windows 早拒写成受限 Worker 可用。
+- WW/RO 有 deny、全部模式失权及无来源后台启动沿用 P5 保守拒绝；误拒、legacy WW/RO PTC 启动前拒绝及缓存残留是显式限制。单独卸载 fence 不撤掉 scope guard，已进入调用按原保护排空；整个 scope 卸载不在持续保护承诺内。
+- Phase A 仅消费可证明的实时成功目标，允许 partial 调用的合格子项驱动指令发现；恢复历史缺证、动态待审目标或快照变化时 Review 技术失败，不伪报 complete。Auto Review 自身仍只支持精确 `0.2.1-rc.2`，其开关独立。
+- `multi-root-ops-compatibility.enabled` 默认 `false`，只有显式 `true` 启用，UI 使用独立“实验性”Tag，配置字段保留 experimental 标记；缺失设置服务不隐式启用。关闭时保留原生围栏，但 OPS 原有只读根绕过风险仍需用户知晓。
+
+### 无限期延后清单（唯一真源）
+
+以下均未完成、无时间承诺、不作为本次 P6/最终验收门槛，不会在依赖接口出现后自动启动：
+
+| 延后能力 | 继续保留的边界 |
+| --- | --- |
+| WW/RO 固定文件与 PTC 的正常可用性恢复 | 无法证明安全时继续准备前或启动前拒绝，不能通过切换 mode、改 workspaceRoot 或信任私有协议恢复可用性 |
+| D3 统一写授权桥及合法附加根写入恢复 | 不创建无人消费的 provider；不修改 OPS host/envelope/Rust/batch，也不把读权限字段复用为写授权 |
+| F07 Linux cache 前置声明与 batch/result 完整可用性 | 保留严格 argv 证明，拒绝 confine 后增加的未批准挂载，不以兼容性为由覆盖 deny |
+| Phase B 持久活动及完整 resume/Review 恢复 | 不调用 DSH 禁止外部插件使用的实验记录 API，不普通 append、不私写日志；缺证保持技术失败 |
+| 合法后台 Bash、maintenance/purge 与 Windows 受保护 Worker 准备 | 不按目录名、进程名、cwd 或私有 stdin 豁免；继续早拒/拒绝启动并接受缓存残留，不声明合法后台与清理已恢复 |
+
+全功能 OPS 兼容及其完整验收随上述能力一并无限期延后。未来若重新启动这些能力，须另行明确授权并建立新的有限验收范围；即使实现，也只作为实验性能力开放，不能自动转为稳定功能。本次关闭的是已交付保守兜底计划，不隐含批准修改 OPS、扩大版本支持、发布 npm 或创建 tag。
+
+### 历史草案的解释
+
+下文保留初始 Decision、评审记录及 P5 修订的历史；只有与本最终范围一致且有验证证据的实现部分被接受。初始完整兼容路线的退出条件不再作为本次门槛，也不伪造通过记录。技术验收矩阵、门禁与结果见[总账 P6](../plans/active/2026-09-12-multi-root-workspace.md#ops-p6-最终验收2026-11-05)。
 
 ## Context
 
@@ -371,6 +398,8 @@ MR可先为D1 Full-access全部Worker保护和D2 Phase A live做原型，也可�
 
 ### D6. 评审与验收门槛
 
+本节及 V 表保留 2026-11-01 的原始草案与当时状态，不是当前验收状态。2026-11-05 的限定范围、排除项和实际结果分别以文首最终范围及总账 P6 为准；未执行或无限期延后的旧条件不视为通过。
+
 **接受本 ADR 前需明确的决策**：
 
 1. 是否同意先交付安全保护、将合法写入可用性作为独立状态，并接受保护无法构造时明确拒绝受影响的OPS调用。
@@ -480,7 +509,7 @@ A1–A13审计追加的最小实验X1–X7由[审计§14](../reviews/dsh-ops-com
 
 ## Related Documents
 
-- [OPS适配开发计划（Proposed；首期子集已实施）](../plans/active/2026-11-01-ops-compatibility-adaptation.md)
+- [OPS 实验性保守兜底已完成计划](../plans/completed/2026-11-01-ops-compatibility-adaptation.md)
 - [兼容性审计及补充取证](../reviews/dsh-ops-compatibility-audit.md)
 - [ADR-0002：上游耦合策略](./ADR-0002-upstream-coupling-policy.md)
 - [ADR-0009：DSH兼容性合同](./ADR-0009-dsh-compat-contract.md)
@@ -497,7 +526,7 @@ A1–A13审计追加的最小实验X1–X7由[审计§14](../reviews/dsh-ops-com
 
 ## P5 本仓保守兜底修订（2026-11-05，直接授权实施）
 
-本 ADR 仍为 Proposed；以下是用户本轮“不改 OPS、允许误拒、不允许只读附加根写入”授权下的实施边界，取代上文首期 WW/RO 维持现状的过渡规则，不表示 D3 或完整兼容已获验收。
+本节记录 P5 当时 ADR 仍为 Proposed 的直接授权实施；以下是用户当轮“不改 OPS、允许误拒、不允许只读附加根写入”授权下的实施边界，取代上文首期 WW/RO 维持现状的过渡规则，不表示 D3 或完整兼容已获验收。
 
 - 兼容模式仍默认关闭，只有显式 `enabled: true` 激活。WW/RO 的当次 scope 有 deny（含 inherit 在 RO 下不可写、工具 cap）时，在 invoke/host 准备之前拒绝整次 OPS 执行调用；无 deny 且权威健康时沿用原链。三个模式失权时均拒绝执行，纯发现/SDK 发布除外。guard 的 preview 只作拒绝；执行阶段在同次 admission 内重新判断，不能拿 preview 放行。
 - 不选择 D1.1d 的应用层信任路线，也不猜测 OPS 私有 temp/cache nonce。上述早拒牺牲正常读取和合法附加根写入的可用性，换取 host 准备也不触碰禁写根。

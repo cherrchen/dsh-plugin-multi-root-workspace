@@ -302,7 +302,7 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 - **dsh-ops 只读限制绕过（F01，历史基线）**：审计版本在 Full-access 下，OPS Native `ops_write_file` 实际写入了显式只读附属根，而原生 fs 同次对照被拒。启用 OPS 兼容模式时，本轮有限适配已在 Full-access 下复验 explicit RO/cap deny 对 OPS Native 与真实 PTC 生效（deny 执行复验见[审计§16](./docs/reviews/dsh-ops-compatibility-audit.md#16-适配后复验)），版本、测试范围与原始证据见[兼容性审计](./docs/reviews/dsh-ops-compatibility-audit.md)。
 - **dsh-ops 的合法写入与子目录指令缺口（F04/F05，历史基线）**：WW 下 inherit/固定读写附属根及 RO 下固定读写附属根被 OPS 预检拒写的问题未解决；OPS 读取不触发子目录指令发现（F05）已在启用模式的本轮 live 索引 + 真实 AgentLoop 下复验恢复（Native 与 PTC 成功触碰的子目录指令进入下一模型请求，见[审计§16](./docs/reviews/dsh-ops-compatibility-audit.md#16-适配后复验)）；不影响已验证的根级指令和 Skills 路径。
 - **Linux bwrap 的 WW batch/result 降级（F07）**：审计版本的共享 Registry 下，所有到达启动分支且取得有效 cache 的 `ops_batch` / `ops_result`（含 `page`）都会因 confine 后追加 bind 而失去 argv 归属证明，源码路径将拒绝 Worker 启动并报 `EXECUTOR_UNAVAILABLE`。函数级冲突已复现，Linux 端到端未测；普通 RO、Landlock 和无 cache 对照不在此结论内。需 OPS 提供 confine 前的 cache 声明接口，目前没有已验证的 MR 单侧缓解，见[审计 F07](./docs/reviews/dsh-ops-compatibility-audit.md#131-n1--f07confine-后的-cache-bind-与严格证明冲突)。
-- **其他 OPS 可用性边界**：共享 WW 下，调度外 purge 无有效 admission 时会被拒，结果缓存可能残留并告警；PTC 嵌套调用及后台 Bash 也有证明归属/过期导致的拒绝风险。上述完整生命周期与平台行为尚未实测，见[架构复核](./docs/reviews/dsh-ops-compatibility-audit.md#14-独立架构审计a1a13复核)。ADR-0027 仍为 Proposed（本轮直接授权实施首期子集），不能据此认为这些问题已修复。
+- **其他 OPS 可用性边界**：共享 WW 下，调度外 purge 无有效 admission 时会被拒，结果缓存可能残留并告警；PTC 嵌套调用及后台 Bash 也有证明归属/过期导致的拒绝风险。本轮已完成保守拒绝边界的三平台验证；正常后台与清理能力仍未恢复，且已无限期延后，见 [ADR-0029 最终范围](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#最终范围与无限期延后2026-11-05)。
 - 附加根的指令文件按需到达模型：根目录顶层的那一份在会话第一步之前注入，子目录里的那一份在本会话**成功**触碰过该目录之后注入；nested 文件只会在其目录被考察到时重新检查（根层每一步，子目录依赖已投递或有新触碰），投递状态是进程内的（resume 后可能再告知一次）；官方识别 `read` / `write` / `edit`，启用 OPS 兼容模式后，OPS 工具经 live 证据同样驱动投递（resume 后 OPS 历史缺 live 证据不参与投递）。主根与 user-global 的指令链仍由上游负责，本插件不重复注入（[ADR-0010](./docs/decisions/ADR-0010-additional-root-instruction-scope.md)）。
 - 多 Host 共享同一登记服务：只有一个 Host 管理存储，各实例逐操作取得授权；断线停止新附加授权，权威退出后按内核锁接管。限同机器、同用户及同锁命名空间；Linux 共享连接需要 SO_PEERPIDFD，Windows 限同登录会话。旧进程/PTY 保留启动快照（[共享架构](./docs/architecture/registry-authority-service.md)）。
 - 支持矩阵是精确版本 allowlist：宿主版本不在清单上、或核心包混装了不同版本时，`fs` / `sandbox` / `registry` / `instructions` / `lsp` / `workspace-files` 六行**不启动**，组合退化为"没装这个插件"（[ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)）。
@@ -317,15 +317,15 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 
 ## dsh-ops 适配现状（受限能力说明）
 
-本轮源码将首期适配收进 **OPS 兼容模式（实验性，可能存在限制）**：在 `Settings → Plugins → Multi-root Workspace` 中设置 `multi-root-ops-compatibility.enabled`，默认 `false`，必须显式开启。
+当前实现作为 **OPS 兼容模式（实验性，可能存在限制）** 开放：在 `Settings → Plugins → Multi-root Workspace` 中设置 `multi-root-ops-compatibility.enabled`，默认 `false`，必须显式开启。
 
 - **开启**：激活 OPS 执行保护、实时活动与 Review 增强。Full-access（`danger-full-access`）在已验证的 macOS/Linux 车道用内核围栏保护 explicit RO/cap deny；Windows 有 deny 时在 Worker 准备前保守拒绝 OPS 执行（包括读取），尚不支持该组合下的受保护准备与合法写入。WW/RO 一旦存在不可写附加根或工具只读上限，整次 OPS 执行调用（包括读取/page）会在准备与正文前拒绝。所有模式在 Registry 失权时拒绝 OPS 执行调用，纯发现/发布除外。没有执行域或当次有效 profile 证明的 subprocess 启动也会拒绝，防止后台清理绕过边界；这可能连带拒绝第三方后台进程，但不拦截面板中用户自己的终端。
 - **关闭**：OPS 恢复本轮适配前的行为，不提供这些兜底——**显式只读附加根可能被 OPS 写入**。普通多根功能、原生工具围栏和 Auto Review 自身开关不受影响。已投递的指令不会回溯抹除，已进入保护域的调用与已启动进程保留原快照；关闭后开始的新调用不再激活本次适配。
 - **实验限制**：仅提供 Phase A live 活动索引，无持久事件桥。开启时，resume 后 OPS 历史缺 live 证据、动态 pending（replace/batch/result/bash/unknown）会使 Review 技术失败；非白名单诊断如 `ops_status` 也受此保守规则影响。
 
-P5 的本仓兜底不修改 OPS：合法附加根写入仍可能被误拒，后台结果缓存可能因拒绝清理而残留；legacy 非共享模式下，WW/RO 的 PTC 也可能在启动代码进程前被拒。持久活动仍关闭：DSH 的 `appendPluginRecord` 明确禁止外部插件调用，不能用普通事件或私写日志代替。验证范围与后续依赖见[专项计划](./docs/plans/active/2026-11-01-ops-compatibility-adaptation.md)。
+P5 的本仓兜底不修改 OPS：合法附加根写入仍可能被误拒，后台结果缓存可能因拒绝清理而残留；legacy 非共享模式下，WW/RO 的 PTC 也可能在启动代码进程前被拒。持久活动仍关闭：DSH 的 `appendPluginRecord` 明确禁止外部插件调用，不能用普通事件或私写日志代替。P6 已按限定范围完成技术验收；P5 剩余功能及全功能兼容验收**无限期延后**，不构成本次完成条件，未来若恢复也仅以实验性能力开放。延期清单见 [ADR-0029](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#无限期延后清单唯一真源)，验收范围见[已完成计划](./docs/plans/completed/2026-11-01-ops-compatibility-adaptation.md)。
 
-这不是完整 OPS 兼容声明，不提升支持版本，也未发布。审计 §16 的历史复验发生在本开关加入之前，对应启用路径；后续复跑须显式 `enabled: true`。
+本次接受的是实验性保守兜底，不声明完整 OPS 兼容，不提升支持版本，也未发布。审计 §16 的历史复验发生在本开关加入之前，对应启用路径；后续复跑须显式 `enabled: true`。
 
 ## 文档
 

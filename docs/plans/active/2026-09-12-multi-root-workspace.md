@@ -62,7 +62,7 @@
 | compat | DSH 0.2.2-rc.1 提升 | 支持合同纳入 `0.2.2-rc.1`（22 个精确版本）；开发 pin `0.2.2-rc.1` / cordis `4.1.0` / schemastery `3.19.0`；稳定 vendor 选择器限宿主声明 minor 线；未新增适配分支 | [本次记录](#dsh-022-rc1-兼容适配2026-11-05)、[接口审查](../../reference/dsh-0.2.2-migration.md) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `1c025b2` | 随 `v0.1.14` 发版 |
 | 第二期 | 插件详情页设置卡与富文本详情 | 「多根 Auto Review（实验性）」设置开关与 Loader 行等价（`setPluginEnabled` 持久化、热应用、restart-required Toast）；设置卡错误改 Toast；`refreshSeq` 修并发刷新竞态；locale `meta.detail` + `preview.svg` 富文本详情 | [本次记录](#插件详情页设置卡与富文本详情2026-11-05) | — | `220bc82` | 随 `v0.1.14` 发版 |
 | 安全修复 | 根授权安全修复 P0–P4 | BYP-01、MRW-01、BYP-02、home/物理介质保护与默认权威 | [专项计划](./2026-11-05-root-authorization-security-fixes.md)（含 P0 记录与维护者决定） | [0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)（P1）、[0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)（F3、移除单进程模式） | `b15b486`、`fix/audit-1105` 后续提交 | 2026-11-05：P0 静态证据已记录，维护者决定 P2（可信确认）不实施、BYP-01 作为残余风险保留、Skills migration 保持现状；P1 已实施；F3 改为以上游主根拼写为 key、拒写优先于主根，单进程 Registry 模式移除。PR #39 两条 P1 评审回归先红后绿：Follower 的 fs/进程准入同样收窄 home 授权，迁移后清空在刷新、准入和重启后均不恢复旧根（见两份 ADR 的同日修订）。macOS / Node `24.18.0` / DSH `0.2.2-rc.1` 的 `compat:check` 与完整 `verify:all` 通过：lint、双端 typecheck、build、Seatbelt 内核探针及显式要求实跑的测试（74 文件通过，1019 通过、86 平台跳过）、compose / behavior / journey（52 / 137 / 76）、pack 与 packed behavior（136）、Auto Review fork 检查；可选 Auto Review 集成按精确版本规则跳过。Linux/Windows 原生门禁仍待 CI。P2、F5 与 F4 执行侧 deny 按维护者决定不实施（上游对工作区内的 `$DSH_HOME` 本就不设例外）；未发布，不指定版本 |
-| 待评审 | OPS 兼容性适配（ADR-0027） | Full-access Worker 保护、实时活动及 P5 本仓保守拒绝；恢复可用性按公开接缝推进 | [专项计划](./2026-11-01-ops-compatibility-adaptation.md) | [0027](../../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md)（Proposed） | — | **Proposed：未接受；P0–P4 子集及 P5 本仓安全兜底已落地为实验性 opt-in（`multi-root-ops-compatibility.enabled`，默认关闭；见下方 P5 验证记录及专项计划）；无发布安排** |
+| 待评审 | OPS 兼容性适配（ADR-0029） | Full-access Worker 保护、实时活动及 P5 本仓保守拒绝；恢复可用性按公开接缝推进 | [专项计划](../completed/2026-11-01-ops-compatibility-adaptation.md) | [0029](../../decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md)（Proposed） | — | **Proposed：未接受；P0–P4 子集及 P5 本仓安全兜底已落地为实验性 opt-in（`multi-root-ops-compatibility.enabled`，默认关闭；见下方 P5 验证记录及专项计划）；无发布安排** |
 
 
 ## 总体策略
@@ -1388,7 +1388,7 @@ macOS / Node `24.18.0` / DSH `0.2.2-rc.1`：`compat:check` 与完整 `verify:all
 
 ## OPS P5 本仓兜底验证（2026-11-05）
 
-按用户直接授权完成不依赖 OPS 修改的 P5 安全拒绝子集；允许误拒，不允许借恢复可用性扩大写范围。范围与决策见 [ADR-0027 P5 修订](../../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md#p5-本仓保守兜底修订2026-11-05直接授权实施)及[专项计划](./2026-11-01-ops-compatibility-adaptation.md#p5-本仓交付范围)。不开发布、不改 allowlist，不将全计划或 P6 标完成。
+按用户直接授权完成不依赖 OPS 修改的 P5 安全拒绝子集；允许误拒，不允许借恢复可用性扩大写范围。范围与决策见 [ADR-0029 P5 修订](../../decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#p5-本仓保守兜底修订2026-11-05直接授权实施)及[专项计划](../completed/2026-11-01-ops-compatibility-adaptation.md#p5-本仓交付范围)。不开发布、不改 allowlist，不将全计划或 P6 标完成。
 
 - 基线：MR 从 `56c1909` 开发；OPS `2c0b0397ce4b48436ff76cf5c5b039054240a45c` / `0.5.0-alpha3` 原样副本，Rust release Worker 本机编译。隔离组合为 DSH `0.2.0-rc.2` / cordis `4.0.4`，与 OPS peer 范围相容；本仓开发依赖仍为 DSH `0.2.2-rc.1` / cordis `4.1.0`，未拿它冒充 OPS 支持宿主。Node `24.18.0`，macOS arm64；没有运行 Linux/Windows 验证。
 - 真实 OPS 组合：`node --experimental-transform-types scripts/verify-ops-protection.mjs <isolated-host>` **76/76 PASS**。shared / legacy × FA / WW / RO，真实 Native 写入/新建/edit/replace/copy/双向 move/remove/符号链接路径，RO 文件 SHA256 与目录内容不变，失败 move 的可写源仍保留。FA Native 读取与主根合法写入为正对照，每个 shared/legacy FA 车道均实际启动 13 个进程，逐次保存 argv。
@@ -1409,7 +1409,7 @@ rebase 后完整 macOS 测试 **1127 passed / 87 skipped**；compat、lint、typ
 
 ### Windows P5 补验（2026-11-05）
 
-按用户要求完成 **P5 本仓保守兜底的 Windows 验证**，不改变生产保护策略，不代表 Windows 受保护 Worker 准备、完整 OPS 兼容或全计划退出。专项计划仍在 active，ADR-0027 保持 Proposed。
+按用户要求完成 **P5 本仓保守兜底的 Windows 验证**，不改变生产保护策略，不代表 Windows 受保护 Worker 准备、完整 OPS 兼容或全计划退出。专项计划仍在 active，ADR-0029 保持 Proposed。
 
 - **基线**：MR `913d168` 加本次验证脚本/测试修订；Windows `10.0.26200` x64、Node `24.14.0`，非打包便携 pwsh。隔离宿主统一 DSH `0.2.0-rc.2` / cordis `4.0.4`，运行时门禁通过；主工作树仍为 DSH `0.2.2-rc.1` / cordis `4.1.0`。OPS 原样检出 `2c0b0397ce4b48436ff76cf5c5b039054240a45c` / `0.5.0-alpha3`，公开构建通过且工作树干净；Windows Worker 取同版本官方 Release 包，tarball SHA256 与 `SHA256SUMS` 一致（`bed2baee8d277050095d6ea4d79056ccdb5d8cda22b16602f33dc0a16ea5dadb`），staged provenance 校验通过，Worker SHA256 为 `44da3344a980db0e973fe81848448797c9e67e1759c33dd84ddf67971aedaaba`。未改 OPS 源码、本仓 pin、allowlist 或真实用户 profile。
 - **组合验证**：扩展后的 `scripts/verify-ops-protection.mjs` **104/104 PASS**，shared / legacy × FA / WW / RO。Windows 在 deny 存在时早拒真实 Native 覆盖写、新建、edit、replace、copy、双向 move、remove 及 junction 别名写；逐次断言零 Worker 启动、零新增 cache confine、隔离 DSH_HOME 与业务树内容不变、失败 move 不移除可写源。三个模式另通过真实后台 Bash、Registry 卸载失权、系统 temp 根重叠的早拒检查；单独卸载 fence 后 scope 仍拒绝无来源 spawn。无 deny 正对照在六条车道真实读取成功，FA/WW 四条车道真实新建文件成功，证明未以坏 Worker 或整体不可启动制造拒绝。
@@ -1421,7 +1421,7 @@ rebase 后完整 macOS 测试 **1127 passed / 87 skipped**；compat、lint、typ
 
 ### Linux P5 补验（2026-11-05）
 
-按用户要求完成 **P5 本仓保守兜底的 Linux 验证**。本轮只扩展验证脚本、修正测试夹具及更新文档，生产保护策略未改；D3、F07、Phase B 和合法后台/maintenance 的上游依赖仍保留，专项计划仍在 active，ADR-0027 保持 Proposed。
+按用户要求完成 **P5 本仓保守兜底的 Linux 验证**。本轮只扩展验证脚本、修正测试夹具及更新文档，生产保护策略未改；D3、F07、Phase B 和合法后台/maintenance 的上游依赖仍保留，专项计划仍在 active，ADR-0029 保持 Proposed。
 
 - **基线**：MR `a2f6b20` 加本次验证修订；Ubuntu `24.04.4` / WSL2 Linux `6.6.87.2-microsoft-standard-WSL2` x64，Node `24.13.0`。隔离宿主统一 DSH `0.2.0-rc.2` / cordis `4.0.4`，锁文件中 268 个 DSH 条目均为该精确版本，每个组合的运行时兼容门禁均通过；主工作树仍为 DSH `0.2.2-rc.1` / cordis `4.1.0`。旧版 npm 可选 peer 求解失败后，显式固定 OPS 锁文件中的 DSH 包并用 `--legacy-peer-deps` 安装隔离宿主，未使用 warn 门禁。OPS 原样检出 `2c0b0397ce4b48436ff76cf5c5b039054240a45c` / `0.5.0-alpha3`，工作树干净，公开 JS build 通过。官方包只携带 Windows Worker，因此以隔离 Rust `1.88.0` 按 `native/Cargo.lock` 执行 `cargo build --release --locked`，公开 stage 校验 Linux x64 ELF/provenance 通过；Worker SHA256 为 `a569b3e11af5e612410fb9bbf66f749e390d3d3da1e6c3b0a794b5526dce2ecd`。未改 OPS 源码、本仓 pin、allowlist 或真实用户 profile。
 - **组合验证**：`scripts/verify-ops-protection.mjs <host> bwrap` 与 `<host> landlock` 各 **94/94 PASS**，均覆盖 shared / legacy × FA / WW / RO。FA 真实 Worker 拒绝覆盖写、新建、edit、replace、copy、双向 move、remove 及符号链接别名写；RO 文件 SHA256 与目录内容不变，失败 move 保留可写源。新增真实工具 cap 拒写 RW 根、未封顶 `ops_copy` 成功写入 RW 根、普通 `/tmp` 兄弟根到达受限 Worker 后拒写的对照；FA 读取及主根合法写入成功，每个 shared/legacy FA 组合实际启动 16 个进程并保存 argv。WW/RO 有 deny 时拒绝 Native 执行及读取，断言零 Worker、零新增 cache confine、隔离 DSH_HOME 与业务树不变。三个模式均通过 Registry 卸载失权及系统 temp 根重叠的准备前早拒；单独卸载 fence 后 scope 继续拒绝无来源 spawn。
@@ -1429,7 +1429,7 @@ rebase 后完整 macOS 测试 **1127 passed / 87 skipped**；compat、lint、typ
 - **maintenance 与未覆盖能力**：两次运行的 shared/legacy FA 都由真实 Session disposed 触发 purge，scope guard 拒绝无来源启动，进程数不增加、RO 文件不变，缓存可能残留。Linux 未发布 OPS Bash，真实后台 Bash 不适用；F07 的 WW batch/result 后置 cache bind 可用性和新的公开授权桥未在本轮恢复或验收，不以安全拒绝替代完整兼容结论。未重跑 Auto Review 精确 `0.2.1-rc.2` 实现套件。
 - **回归修订**：scope 重挂载会连带重建 sandbox provider，原用例仍假定重挂载前强制的 Seatbelt fixture 存活，在 Linux 错拿原生 bwrap argv 对比 Seatbelt 文本。现在在新 provider 上重新设置同一结构夹具，保留原有重挂载生命周期与拒写 profile 断言；真实 Linux runner 由组合程序和内核回归独立验证。
 - **仓库门禁**：完整测试 **1137 passed / 86 skipped**（81 个文件通过、2 个跳过），无失败；`compat:check`、lint、typecheck、build、`docs:check`、`auto-review:fork` 通过。`registry:probe --required` 确认原生 peer 认证可用；`kernel:probe` 确认 bwrap / Landlock 均可实际执行，测试及冒烟使用 `DSH_PROBE_VERIFIED_DIALECTS=bwrap,landlock`。compose **54/54**、behavior **137/137**、journey **76/76**，`pack:check`（176 个成员）与 `smoke:packed` 通过，安装副本行为 **136/136**，三个 smoke 与 packed 均无 skip。journey 使用此前隔离安装的 Git `2.48.1`，未更改系统 Git。
-- **本地证据**：忽略的 `.dsh-smoke/ops-p5-linux/` 保存隔离宿主、npm 锁、OPS 原样检出、Rust 工具链、Worker 与 provenance；`p5-results-bwrap.json` / `p5-results-landlock.json` 保存提交、源码/锁/Worker 摘要、每次 argv、准备 profile、业务夹具、cap/正对照结果及 PTC/maintenance 边界，普通 tmp 兄弟根夹具路径也在结果中。原始日志与 JSON 留本地，不纳入 Git；可复跑程序及参数说明见[专项计划](./2026-11-01-ops-compatibility-adaptation.md#p5-本仓交付范围)。
+- **本地证据**：忽略的 `.dsh-smoke/ops-p5-linux/` 保存隔离宿主、npm 锁、OPS 原样检出、Rust 工具链、Worker 与 provenance；`p5-results-bwrap.json` / `p5-results-landlock.json` 保存提交、源码/锁/Worker 摘要、每次 argv、准备 profile、业务夹具、cap/正对照结果及 PTC/maintenance 边界，普通 tmp 兄弟根夹具路径也在结果中。原始日志与 JSON 留本地，不纳入 Git；可复跑程序及参数说明见[专项计划](../completed/2026-11-01-ops-compatibility-adaptation.md#p5-本仓交付范围)。
 
 
 ### Windows/Linux 提交接入后的 macOS 回归（2026-11-05）
@@ -1439,3 +1439,43 @@ rebase 后完整 macOS 测试 **1127 passed / 87 skipped**；compat、lint、typ
 干净隔离宿主固定 DSH `0.2.0-rc.2` / cordis `4.0.4`（npm lock 中 278 个 DSH 条目同版本），补齐运行时 peer；OPS 原样 `2c0b0397ce4b48436ff76cf5c5b039054240a45c` / `0.5.0-alpha3`，检出干净，使用此前按其 Cargo.lock 本机构建的同一 macOS Worker，未修改 OPS。修复后真实组合 **94/94 PASS**：shared/legacy × 三模式；FA 每个组合实际启动 16 个进程，cap 拒写、未封顶 RW 正对照、普通 tmp 兄弟根到达受限 Worker 拒写及 temp 重叠准备前拒绝均通过。shared 三模式和 legacy FA 到达真实 PTC 子 dispatch；legacy WW/RO 仍启动前拒绝；shared/legacy FA 的真实 purge 均被拒。已有误拒、缓存残留、D3/F07/Phase B/合法后台与全计划/P6 边界不变。
 
 仓库检查：完整 macOS 测试 **1127 passed / 96 skipped**（新增九个 Windows 专属用例按平台跳过），compat、lint、typecheck、build、docs、Auto Review fork 通过；Seatbelt probe 成功，compose **54/54**、behavior **137/137**、journey **76/76**、pack 与 packed behavior **136/136** 通过，冒烟无跳过。未在本机重跑 Windows/Linux 或 Auto Review 精确基线套件；跨平台原始证据仍留在各设备。macOS 本轮结果与日志保存在忽略的 `.dsh-smoke/ops-p5-macos-followup/`，未提交；`docs/reviews/` 仍只跟踪现有审计 Markdown。
+
+
+## OPS P6 最终验收（2026-11-05）
+
+**结论：按用户明确缩小后的范围，实验性保守兜底的 P0–P6 与最终验收完成。** P5 尚未实现的功能及全功能 OPS 兼容验收无限期延后，不作为本次退出条件，也不标为通过。唯一延后清单和未来仅实验性开放的约束见 [ADR-0029 最终范围](../../decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#最终范围与无限期延后2026-11-05)。专项计划移至 [completed](../completed/2026-11-01-ops-compatibility-adaptation.md)；不修改 OPS、不提升支持版本、不创建发布或 tag。
+
+### 已交付范围与平台证据汇总
+
+下表汇总本节之前的独立平台运行，不将 Windows/Linux 历史证据写成本轮 macOS 执行。组合均为 DSH `0.2.0-rc.2` / cordis `4.0.4` 与原样 OPS `0.5.0-alpha3`（`2c0b0397ce4b48436ff76cf5c5b039054240a45c`），涵盖 shared/legacy × FA/WW/RO。
+
+| 平台与证据来源 | 组合结果 | 实际执行边界 |
+| --- | --- | --- |
+| macOS arm64；`22920a9` 共享脚本修正后的回跑 | 94/94 PASS | FA 有 deny 的真实 Worker 由 Seatbelt 拒写；WW/RO 有 deny 准备前拒绝。cap 拒写与未封顶 RW/主根合法写入有正对照，普通 tmp 兄弟根拒写、temp 重叠早拒 |
+| Windows x64；`a2f6b20` | 104/104 PASS | 三模式有 deny 均在准备前拒绝，零 Worker/新增 cache confine；无 deny 真实读取及 FA/WW 写入有正对照，不能声明受保护 Worker 可用 |
+| Linux x64；`8b633eb` | bwrap 与 Landlock 探测链各 94/94 PASS | FA 两次均实际使用 bwrap；shared WW/RO 的外层 PTC 分别实际使用 bwrap/Landlock。不能把探测参数写成 FA 的实际 runner |
+
+三平台均验证了失权拒绝、tool cap、单独卸载 fence 后 scope guard 继续拒绝无来源启动。shared 三模式及 legacy FA 的真实 PTC 子调用触达 OPS 后拒写；legacy WW/RO 在代码进程启动前拒绝，不计为子 dispatch 端到端成功。macOS/Linux shared/legacy FA 及 Windows legacy FA 的真实 purge 被拒；Windows shared FA 未注册 purge，记为不适用。缓存残留、误拒与合法后台未恢复继续披露。Linux 未发布 OPS Bash，不将其记作后台 Bash 通过。
+
+### 本轮补齐的实时活动与精确 Review 验证
+
+新增可复跑 `scripts/verify-ops-activity.mjs <isolated-host> <new-output.json>`（Node `--experimental-transform-types`；宿主准备方式同 `verify-ops-protection.mjs`，本脚本只验 macOS）。显式启用设置并确认 mode token，通过真实 AgentLoop、原样 OPS Worker、真实 PTC 子 dispatch，检查工具完成后的下一次实际模型请求：inspect 的完整祖先指令链；read_files 三项中两项成功的两条指令链且排除失败目录；PTC 内两个成功目标的指令链。DSH `0.2.0-rc.2` 与 `0.2.1-rc.2` 各 **3/3 PASS**，每宿主六次模型请求，所有实际 spawn 均带 Seatbelt write-deny。模型响应由脚本控制，验收的是实际调用链和消息内容，不是外部模型质量；本轮未在 Windows/Linux 重跑 live AgentLoop。
+
+Auto Review 独立宿主固定其精确基线 DSH `0.2.1-rc.2` / cordis `4.0.5`，未使用主开发 pin 替代。兼容门禁、host/client/fork 类型检查、build、fork 校验与 **91/91 实现测试**通过。补充了真实 reviewer 接收所有静态 OPS 目标指令链、历史 OPS 缺实时证据在模型请求和写入前技术失败的回归，并使动态目标测试显式启用 mode、断言准确拒绝原因。该静态测试用合成工具隔离 Review 参数传递，真实 OPS Worker 由前述 live 组合独立验证。
+
+`verify-auto-review.mjs` 完成源码/打包 × Web/Headless × 两种 bundle 加载顺序的 **8 个组合**，每个组合两次 reviewer/dispatch（合计 16 次），含默认关闭、显式启用、关闭/重启用排空恢复以及真实原生 RO 拒写。Review 接受业务调用不赋予越过原生 fence 的权限。以上不等于支持新版 Auto Review，也不等于恢复 Phase B。
+
+### P6 验收处置
+
+| 检查范围 | 结果与限制 |
+| --- | --- |
+| shared/legacy、三模式、cap、失权及生命周期 | 已有真实组合与回归通过；早拒如实记录，原生 fs/shell/PTC/PTY 边界继续有效 |
+| 无 OPS、空 scope、可选 peer 与原生消费者 | 主基线完整回归及源码/打包冒烟覆盖；不添加运行时必需依赖，不改变原生授权合同 |
+| 活动与 Review | 静态成功目标可达实际模型请求/reviewer；动态目标、恢复历史缺证和快照失效继续技术失败 |
+| 开放方式 | OPS 与 Auto Review 开关独立；OPS 默认 false，显式 true，配置 experimental 标记和双语独立“实验性”Tag 保留 |
+| 未交付能力 | ADR-0029 清单全部无限期延后、排除验收；不以误拒代替可用性通过，不设自动恢复触发条件 |
+| 文档与交付 | 专项计划归档，ADR 仅有限范围 Accepted，双语入口同步；无发布、无 tag、无 OPS/版本支持变更 |
+
+**本轮最终门禁**：macOS arm64 / Node `24.18.0`，主开发树 DSH `0.2.2-rc.1` / cordis `4.1.0`。`compat:check`、lint、host/client/fork typecheck、build、`docs:check`、`auto-review:fork` 全部通过；原生 `registry:probe --required` peer 认证可用，Seatbelt `kernel:probe` 实际执行成功。完整回归 **1127 passed / 96 skipped / 0 failed**；compose **54/54**、behavior **137/137**、journey **76/76**、`pack:check`（176 个成员）及 packed behavior **136/136** 均通过，三个 smoke 与 packed 无 skip。96 个回归跳过包含 Windows 专属与不适用精确基线的项目，Auto Review 实现另在正确基线以 91/91 取证，不把主开发树跳过当作通过。lint 扫到本地未跟踪历史证据脚本的既有 unused-vars 告警，无报错；仅导出暂存的交付文件后，直接运行同一 oxlint 与文档检查程序均通过；没有依赖本地未跟踪的证据目录补齐链接。
+
+**本地证据**：忽略的 `.dsh-smoke/ops-p6/` 保存本轮门禁日志、精确 Review 套件/类型/冒烟输出，以及两个 live 宿主的 `activity-rc0.json` / `activity-rc1.json`（版本、OPS commit/工作树、Worker/源码 SHA256、完整请求、结果与 argv）。隔离安装树留在本机临时目录，Windows/Linux 原始证据仍各留原设备；所有原始日志、JSON 和目录均不提交。`docs/reviews/` 只跟踪现有审计 Markdown。本轮生产 `src/`、pin、peer、allowlist 与 lockfile 相对 `22920a9` 无差异；新增内容仅为验收脚本、Review 回归及文档。

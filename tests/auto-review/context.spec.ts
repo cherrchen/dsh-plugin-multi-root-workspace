@@ -25,6 +25,7 @@ import ReviewContextService from '../../src/review-context.ts'
 import { MultiRootOpsCompatibility } from '../../src/ops-compatibility.ts'
 import { mountRegistryStack } from '../support/registry-stack.ts'
 import { createFixtureWorkspace, REPO_ROOT } from '../support/temp-workspace.ts'
+import { installOpsSetting } from '../support/ops-settings.ts'
 import * as Companion from '../../src/auto-review/fork.ts'
 
 const cleanup: Array<() => Promise<void>> = []
@@ -233,9 +234,46 @@ describe('current host review context and real tool fences', () => {
       role:'fact',content:[{type:'text',text}],
     }))
   })
+  it('sends every static OPS target chain through the actual reviewer before dispatch',async()=>{
+    const w=await world()
+    installOpsSetting(w.ctx,true)
+    await w.ctx.plugin(MultiRootOpsCompatibility,{enabled:true})
+    const denied=w.stack.registry.list(w.f.workspace).find(root=>root.path===w.ro)!
+    await w.stack.registry.remove(w.f.workspace,{kind:'id',id:denied.id})
+    const paths=['one','two'].map(dir=>{
+      const directory=join(w.f.outside,dir);mkdirSync(directory)
+      writeFileSync(join(directory,'AGENTS.md'),`OPS-${dir}-constraint`)
+      const file=join(directory,'file.txt');writeFileSync(file,dir);return file
+    })
+    let bodies=0
+    w.ctx.tools.register({name:'ops_read_files',description:'Read static OPS fixture targets',
+      parameters:{type:'object',properties:{files:{type:'array',items:{type:'object',properties:{path:{type:'string'}}}}}},
+      output:{schema:{type:'object',properties:{}},render:()=>'read'},
+      execute:async()=>{bodies++;return {status:'completed'}},} as never)
+    expect((await w.run('ops_read_files',{files:paths.map(path=>({path}))})).isError).toBe(false)
+    expect(bodies).toBe(1);expect(w.adapter.requests).toHaveLength(1)
+    const constraints=section(w.adapter.requests[0]!,'PROJECT_INSTRUCTIONS','FILTERED_HISTORY')
+    expect(constraints.map((item:any)=>item.text)).toEqual(['OPS-one-constraint','OPS-two-constraint'])
+    expect(constraints.every((item:any)=>item.role==='constraint')).toBe(true)
+  })
+  it('fails the actual review before a model request or write when OPS history lacks evidence',async()=>{
+    const w=await world()
+    installOpsSetting(w.ctx,true)
+    await w.ctx.plugin(MultiRootOpsCompatibility,{enabled:true})
+    const id=ToolCallId('missing-ops-evidence')
+    w.session.append('tool/call',{turn:0,step:0,callId:id,name:'ops_read_files',arguments:JSON.stringify({files:[{path:join(w.f.outside,'past.txt')}]})})
+    w.session.append('tool/result',{turn:0,step:0,message:createToolResultMessage({callId:id,isError:false,content:[{type:'text',text:'no canonical receipt'}]})},{surfaceOp:'append'})
+    const target=join(w.f.workspace,'never-written.txt')
+    const result=await w.run('write',{file_path:target,content:'no'})
+    expect(result.isError).toBe(true);expect(JSON.stringify(result)).toContain('OPS file activity lacks live evidence')
+    expect(w.adapter.requests).toHaveLength(0);expect(()=>readFileSync(target)).toThrow()
+  })
   it('fails an OPS call before the reviewer when its dynamic targets are unknowable',async()=>{
     const w=await world()
+    installOpsSetting(w.ctx, true)
     await w.ctx.plugin(MultiRootOpsCompatibility, { enabled: true })
+    const denied=w.stack.registry.list(w.f.workspace).find(root=>root.path===w.ro)!
+    await w.stack.registry.remove(w.f.workspace,{kind:'id',id:denied.id})
     let bodies=0
     w.ctx.tools.register({name:'ops_replace',description:'spec ops_replace',parameters:{type:'object',properties:{}},
       output:{schema:{type:'object',properties:{}},render:()=>'ops_replace'},
@@ -244,6 +282,7 @@ describe('current host review context and real tool fences', () => {
     expect(bodies).toBe(0)
     expect(w.adapter.requests).toHaveLength(0)
     expect(result.isError).not.toBe(false)
+    expect(JSON.stringify(result)).toContain('dynamic instruction targets')
   })
   it('re-reads updates, deletion and revocation, and ignores historical prose',async()=>{
     const w=await world();const path=join(w.f.outside,'AGENTS.md');writeFileSync(path,'old-rule')
