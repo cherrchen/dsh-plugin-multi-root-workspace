@@ -36,6 +36,8 @@ English: [README.en.md](./README.en.md)
 
 命令是文本入口，headless 组合下同样可用；子命令为 `list` / `add` / `remove` / `alias` / `access` / `reveal` / `isolate-profiles` / `help`，`/workspace-folders` 不带参数等同 `list`。
 
+`/add-dirs [absolute path] [--inherit|--read-only|--read-write]` 是 `/workspace-folders add` 的别名，添加一个附加根；路径解析、权限选项、目录选择器、校验和结果均复用原命令，包括错误文本中的 `/workspace-folders` 前缀。它通过同一个命令注册表提供给客户端，不接管 dsh-TUI 的内置 `/add-dir`。
+
 - `add` 不带路径时打开系统目录选择器（组合了目录选择器的 profile 才有），也可以 `add --read-only` 只给 flag 不给路径。
 - 路径可以带引号，`~` 会展开为家目录；登记前会先 canonical 化——与已有根重复、嵌套在已有根内部、或就是主根本身的路径会被拒绝。
 - `remove` / `access` / `alias` / `reveal` 的参数接受 `序号|路径`（序号即 `list` 输出的编号）。

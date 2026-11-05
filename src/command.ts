@@ -1,6 +1,6 @@
 /**
- * The user-facing surface: the `/workspace-folders` command and the panel's
- * RPC channel.
+ * The user-facing surface: the `/workspace-folders` command, its `/add-dirs`
+ * alias for adding a root, and the panel's RPC channel.
  *
  * They share one module because they are one thing — the operator-facing edge
  * over `ctx.multiRootRegistry`. The command serves the text surfaces (the
@@ -82,6 +82,9 @@ export const inject = ['commands', 'sandboxPolicy', 'multiRootRegistry']
 
 /** The command name, without the leading slash. */
 export const COMMAND_NAME = 'workspace-folders'
+
+/** The shortcut for `/workspace-folders add`, without the leading slash. */
+const ADD_COMMAND_NAME = 'add-dirs'
 
 /** One parsed command line. */
 export interface FoldersCommand {
@@ -203,6 +206,15 @@ export function apply(ctx: Context, config: CommandConfig = {}): void {
     description: 'List, add, remove, alias, or reveal the additional workspace roots of this session, or isolate DSH profile imports',
     input: { hint: '[list|add [path] [--inherit|--read-only|--read-write]|remove <n|path>|alias <n|path> [name]|alias-id <n|path> <id>|skills <n|path> on|off|access <n|path> <level>|reveal <n|path>|isolate-profiles [--apply]|help]' },
     handler: async invocation => await runCommand(ctx, invocation, config),
+  })
+  ctx.commands.register({
+    name: ADD_COMMAND_NAME,
+    description: `Add an additional workspace root (alias for /${COMMAND_NAME} add)`,
+    input: { hint: '[absolute path] [--inherit|--read-only|--read-write]' },
+    handler: async invocation => await runCommand(ctx, {
+      ...invocation,
+      rawInput: `add ${invocation.rawInput}`,
+    }, config),
   })
 
   // Soft: a profile without the browser host half (headless, sdk) simply has no
@@ -404,6 +416,7 @@ function helpText(): string {
     `/${COMMAND_NAME} — additional workspace roots of this session`,
     `  /${COMMAND_NAME} list`,
     `  /${COMMAND_NAME} add [absolute path] [--inherit|--read-only|--read-write]   (no path opens the directory picker when one is composed)`,
+    `  /${ADD_COMMAND_NAME} [absolute path] [--inherit|--read-only|--read-write]   (alias for /${COMMAND_NAME} add)`,
     `  /${COMMAND_NAME} remove <n|path>`,
     `  /${COMMAND_NAME} alias <n|path> [name]  (no name clears the alias)`,
     `  /${COMMAND_NAME} access <n|path> inherit|read-only|read-write`,
