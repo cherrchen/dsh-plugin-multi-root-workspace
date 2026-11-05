@@ -1308,3 +1308,52 @@ PR 的 CI 以正式门禁覆盖全部 20 个精确版本与启用的四个 runne
 对照上游 `0.2.2-alpha.2` 和 `0.2.1-rc.5` 的 patch，新增精确版本 `0.2.2-alpha.3`，开发 pin 为该版本与 Cordis `4.0.6-alpha.2`；可选 Auto Review 仍钉 `0.2.1-rc.2`，不创建发行版。文件变更接口、Connection 路由和新版 Files 页面适配见[接口审查](../../reference/dsh-0.2.2-migration.md#022-alpha3-后续审查2026-11-04)。
 
 macOS / Node `24.18.0` 候选 warn 验证：Registry 原生认证与 Seatbelt 探针可用；完整测试 959 通过、86 跳过（新增的回归另行通过），compose / behavior / journey 分别 52 / 136 / 76 通过，packed behavior 135 通过；Auto Review fork 检查通过，联合 smoke 按精确目标规则跳过。最初 journey 发现 RPC HTTP 405，修复后真实 HTTP 两种认证路径通过。正式 enforce 下 `compat:check` 与完整 `verify:all` 通过：测试 964 通过 / 86 跳过，三项 smoke 与 packed 分别 52 / 136 / 76 / 135 通过；随后补入真实 `apply_patch` 工具正反例和 Full-access 符号链接替换回归，最终完整测试 967 通过 / 86 跳过。macOS 隔离 Web 页面实机检查了零附加根、主根、附加根、切回主根、目录展开和刷新、打开附加根文件后返回及打开方式菜单；零根会话先经面板确认确无附加根。原有 20 个精确版本在独立 macOS / Node `24.18.0` 安装树中逐一通过 `compat:check`、双端 typecheck、文件系统 / Connection / Files / 工具封顶等关键回归及真实 web/headless journey（各 76 项）；`0.2.2-alpha.2` 起初因旧版 Cordis 混入新 loader 失败，修正预发布依赖选择后重跑通过。Linux、Windows 和旧版 Node 22 的原生 CI 尚待完成。
+
+## DSH 0.2.2-rc.1 兼容适配（2026-11-05）
+
+从 `main` 的 `9035ab0` 新建 `feat/adapt-1105`。分别检查上游 rc.1 与前两个版本 alpha.3 / alpha.2 的完整 patch；结论见[接口审查](../../reference/dsh-0.2.2-migration.md#022-rc1-后续审查2026-11-05)。新增精确支持 `0.2.2-rc.1`，保留原 21 个版本；开发 pin 为 DSH `0.2.2-rc.1` / Cordis `4.1.0` / Schemastery `3.19.0`。未新增适配器分支，可选 Auto Review 仍钉 `0.2.1-rc.2`，不创建发行版。
+
+macOS / Node `24.18.0` 候选 warn 下完整 `verify:all` 通过：原生 Seatbelt 探针可用且显式要求实跑；测试 **967 通过 / 86 跳过**，compose / behavior / journey 分别 **52 / 136 / 76 通过**，packed behavior **135 通过**，pack 与 Auto Review fork 检查通过；可选 Auto Review 集成按既有精确目标规则跳过。
+
+正式 enforce 下 `compat:check`、原生 Registry 认证探针（`--required`）、完整 `verify:all` 与 frozen 安装通过；计数与候选相同，Seatbelt 实跑。`docs:check` 为 **0 错误 / 0 警告**。隔离 Web profile 完成零附加根（面板确认空登记）、主根、附加根、切回主根的三态目检，目录展开、长名截断、刷新、附加根文件预览并返回、打开方式菜单正常，切回后原生树与按钮恢复。未运行真实 TUI 长期观察。
+
+原有 21 个精确版本已在独立安装树中逐一完成 enforce `compat:check`、双端 typecheck、build、13 个权限与客户端关键接缝测试文件及真实 web/headless journey；按 CI 同一版本分流规则使用 Node 22 / 24，Seatbelt 显式要求实跑。最早两版的修复复验另含选择器回归。主 worktree 始终保留 rc.1 开发树，最终 frozen 安装与原生 Registry 探针再次通过；临时 probe overrides 未进入提交。全精确版本 × 启用 OS 的 CI 沿用现有 allowlist 派生矩阵；Linux 与 Windows 的完整原生结果尚待当前 PR 的 CI，不以本机 macOS 结果代替。
+
+本批首次 CI（`bee1a59`，[run 41959434977](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41959434977)）发现旧稳定线宽 vendor 范围混入新 loader `1.1.0`，并非 rc.1 本机回归。升级选择器已改为稳定 vendor 限于宿主声明 minor 线内的最新稳定 patch，prerelease 仍钉精确基线；loader / timer 稳定线回归先红后绿，保留旧版支持并重跑矩阵。
+
+稳定 patch 规则在 `0.1.5-rc.2` 与 `0.1.6-alpha.1` 的 Node `22.23.1` 独立树通过类型检查、关键接缝测试及 web/headless journey（各 76 项）；loader 混装和 Schemastery codec 两种启动失败均消除。修复后 rc.1 的完整 enforce 验收为 **968 通过 / 86 跳过**，compose / behavior / journey / packed 仍为 **52 / 136 / 76 / 135 通过**；新增选择器回归另行通过，文档检查仍为 0 错误 / 0 警告。
+
+原有版本本机回归明细（测试列为关键测试的通过 / 跳过；journey 为通过 / 失败 / 跳过）：
+
+| DSH | Node | 关键测试 | web/headless journey |
+| --- | --- | --- | --- |
+| `0.1.5-rc.2` | `22.23.1` | 199 / 13 | 76 / 0 / 0 |
+| `0.1.6-alpha.1` | `22.23.1` | 199 / 13 | 76 / 0 / 0 |
+| `0.1.6-alpha.2` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.1.7-alpha.1` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.1.7-alpha.2` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.1.7-rc.1` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.1.7-rc.2` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.0-rc.1` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.0-rc.2` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.1-alpha.1` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.1-alpha.2` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.1-alpha.3` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.1-alpha.4` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.1-alpha.5` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.1-rc.1` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.1-rc.2` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.1-rc.3` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.1-rc.4` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.1-rc.5` | `22.23.1` | 196 / 13 | 76 / 0 / 0 |
+| `0.2.2-alpha.2` | `24.18.0` | 200 / 9 | 76 / 0 / 0 |
+| `0.2.2-alpha.3` | `24.18.0` | 208 / 1 | 76 / 0 / 0 |
+
+代码提交 `0ffb3e6` 的 [CI run 41960785058](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41960785058) 已重新覆盖旧版 vendor 修复；本文验收记录提交时仍在运行。PR 保持 Draft，最终跨平台结果以 PR 当前 HEAD 的 CI 为准，不创建发行版。
+
+
+### Windows PID 握手竞态修复（2026-11-05）
+
+最终验收提交 `613223d` 的 [CI run 41961801526](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41961801526) 完成 88 个 verify：87 成功，仅 `0.1.6-alpha.1 × windows-latest` 的 `ancestor guard` 后代回收测试失败（最终 gate 随之失败）；rc.1 四个 runner 全部成功。
+
+失败诊断为 `Job descendant 0 outlived the drained runner`。夹具只等 PID 文件存在，可能在 `writeFileSync` 创建文件后、写入 PID 前读到空串；`Number('') === 0` 且 `Number.isInteger(0)` 为真，后续 signal-0 探针检查的是特殊 PID 0，而非真正的后代。跨平台回归以已创建的空文件确定复现旧逻辑误判（修复前红）。现将 PID 标记写入临时文件后原子 rename 发布，消费者等待完整的正安全整数 PID，缺失 / 空白 / 0 / 负数 / 非整数字节均不算 ready。原生 Job drain、后代已退出、延迟逃逸写入不存在、祖先 pin 释放的断言和时限保持不变；未修改产品运行时代码。本机回归修复后通过（1 通过 / 40 个 Windows 用例按平台跳过），lint、双端 typecheck、docs:check 均通过；Windows 原生结果以修复提交的 CI 为准。

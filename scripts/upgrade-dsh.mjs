@@ -108,9 +108,10 @@ function isEcosystemPackage(name) {
  * miss the live config). The ranges come from the release's own manifests:
  * `dsh` and `dsh-app-boot` (which declares the plugin trio as peers), the
  * pinned cordis, and `dsh-sandbox-local` (which carries the schemastery /
- * node-addon-system pairs this plugin shares with the host). A declared
- * prerelease pins its exact base; otherwise use the highest admitted version.
- * A later prerelease can be semver-compatible while changing the vendor API.
+ * node-addon-system pairs this plugin shares with the host). Declared
+ * prereleases pin their exact base; stable ranges take the latest stable patch
+ * in their declared minor line. A newer vendor minor can satisfy semver while
+ * changing the Cordis API (loader 1.1.0 requires Cordis 4.1.0).
  * @param version - the exact `@deepseek-ai/dsh` release being pinned.
  * @param cordisVersion - the exact cordis version {@link cordisRequiredBy} returned.
  * @returns package name to exact version, sorted by name.
