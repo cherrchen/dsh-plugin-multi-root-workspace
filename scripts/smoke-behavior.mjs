@@ -396,6 +396,7 @@ async function registryBattery(ctx) {
   try {
     const run = async (line) => await ctx.commands.execute(agent, line, [], new AbortController().signal)
     results.set('the command is registered', String(ctx.commands.find(agent, 'workspace-folders') !== undefined))
+    results.set('the add alias is registered', String(ctx.commands.find(agent, 'add-dirs') !== undefined))
 
     const write = async (path) => {
       try {
@@ -409,7 +410,7 @@ async function registryBattery(ctx) {
     const deniedBefore = await write(join(extraRoot, 'registry-before.txt'))
     results.set('fs denies the extra root before it is registered', deniedBefore)
 
-    const added = await run(`/workspace-folders add ${extraRoot}`)
+    const added = await run(`/add-dirs ${extraRoot}`)
     results.set('the command reports success', String(added?.result?.kind))
     results.set('the command names the workspace root', String(added?.result?.text?.includes(canonical(primaryRoot))))
     const granted = projectedRoots(ctx, policy.workspaceRoot)
@@ -997,10 +998,12 @@ try {
       'the plugin profile mounts the root registry service')
     check.equal(String(registry.outcomes.get('the command is registered')), 'true',
       'the plugin profile registers /workspace-folders')
+    check.equal(String(registry.outcomes.get('the add alias is registered')), 'true',
+      'the plugin profile registers /add-dirs')
     check.contains(String(registry.outcomes.get('fs denies the extra root before it is registered')), 'FS_SANDBOX_DENIED',
       'the extra root is denied before the command registers it')
     check.equal(String(registry.outcomes.get('the command reports success')), 'success',
-      'the command adds the root', String(registry.outcomes.get('the command reports success')))
+      '/add-dirs adds the root', String(registry.outcomes.get('the command reports success')))
     check.equal(String(registry.outcomes.get('the command names the workspace root')), 'true',
       'the command output names the session workspace root')
     check.equal(String(registry.outcomes.get('the scope grants the command-registered root')), 'true',

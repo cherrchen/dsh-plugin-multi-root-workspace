@@ -210,6 +210,7 @@ dsh --profile web --dump-config | grep -A3 'multi-root'
 ```text
 /workspace-folders [list]                                                   # 列出主根与附加根（含每根访问级别与状态）
 /workspace-folders add <absolute path> [--inherit|--read-only|--read-write] # 不带路径时打开系统目录选择器；新登记默认 inherit
+/add-dirs [absolute path] [--inherit|--read-only|--read-write]              # /workspace-folders add 的快捷命令
 /workspace-folders access <order|path> inherit|read-only|read-write         # 切换访问级别（扩权要求该根此刻可用）
 /workspace-folders skills <order|path> on|off                               # 独立切换附属根 Skills，不改变写权限
 /workspace-folders alias-id <order|path> <kebab-case>                        # 编辑稳定 Skill 命名空间

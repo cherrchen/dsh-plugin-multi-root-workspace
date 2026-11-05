@@ -29,8 +29,8 @@ let primary: string
 let stacks: RegistryStack[] = []
 let contexts: Context[] = []
 
-/** The definition the module registered on a stub command registry. */
-let registered: CommandDefinition | undefined
+/** The definitions the module registered on a stub command registry. */
+const registered = new Map<string, CommandDefinition>()
 /** The channel handler the module handed to the stub Connection. */
 type PanelHandler = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<unknown>
 let handler: PanelHandler | undefined
@@ -54,12 +54,12 @@ async function mount(options: {
   const stack = await mountRegistryStack(storeRoot)
   stacks.push(stack)
   const ctx = stack.ctx
-  registered = undefined
+  registered.clear()
   handler = undefined
   spawned = []
   ctx.provide('commands', {
     register: (definition: CommandDefinition) => {
-      registered = definition
+      registered.set(definition.name, definition)
       return () => {}
     },
   } as never)
@@ -126,9 +126,10 @@ async function provideSessions(
 }
 
 /** Run one command line through the registered definition. */
-async function run(rawInput: string): Promise<{ kind: string; text?: string }> {
-  if (registered === undefined) throw new Error('the module registered no command')
-  const result = await registered.handler({
+async function run(rawInput: string, name = 'workspace-folders'): Promise<{ kind: string; text?: string }> {
+  const definition = registered.get(name)
+  if (definition === undefined) throw new Error(`the module registered no command named ${name}`)
+  const result = await definition.handler({
     commandId: 'cmd-1',
     agent: { session: { header: { cwd: primary } } },
     rawInput,
@@ -258,12 +259,87 @@ describe('revealAccepted', () => {
   })
 })
 
+describe('the /add-dirs alias', () => {
+  it('registers an add-only command with its own input hint', async () => {
+    await mount()
+    expect(registered.get('add-dirs')).toMatchObject({
+      name: 'add-dirs',
+      description: expect.stringContaining('/workspace-folders add'),
+      input: { hint: '[absolute path] [--inherit|--read-only|--read-write]' },
+    })
+    expect(registered.has('add-dir')).toBe(false)
+  })
+
+  it.each(['', '--inherit', '--read-only', '--read-write'])(
+    'shares quoted paths, access flags and the root table with the canonical command: %s',
+    async flag => {
+      const stack = await mount()
+      const extra = join(fixture.base, 'with space')
+      mkdirSync(extra)
+
+      const added = await run(`  "${extra}" ${flag}  `, 'add-dirs')
+      expect(added.kind).toBe('success')
+      expect(added.text).toContain(`(${flag === '' ? 'inherit' : flag.slice(2)})`)
+      expect((await run('list')).text).toBe(added.text)
+      expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+      expect(stack.scope.writableOf(primary)).toEqual(flag === '--read-only' ? [] : [canonicalPath(extra)])
+
+      const duplicate = await run(`add "${extra}"`)
+      expect(duplicate.kind).toBe('error')
+      expect(duplicate.text).toContain('duplicate')
+      expect((await run('remove 1')).kind).toBe('success')
+      expect(stack.scope.scopeOf(primary)).toEqual([])
+    },
+  )
+
+  it.each(['relative/dir', '--invalid-access', 'remove 1'])(
+    'returns the same validation error as the canonical add without executing another verb: %s',
+    async input => {
+      const stack = await mount()
+      expect(await run(input, 'add-dirs')).toEqual(await run(`add ${input}`))
+      expect((await run(input, 'add-dirs')).kind).toBe('error')
+      expect(stack.scope.scopeOf(primary)).toEqual([])
+    },
+  )
+
+  it('uses the same picker and no-picker failure when the path is omitted', async () => {
+    const stack = await mount({ withPicker: true })
+    const picked = join(fixture.base, 'picked')
+    mkdirSync(picked)
+    const added = await run('--read-only', 'add-dirs')
+    expect(added.kind).toBe('success')
+    expect(added.text).toContain(`${canonicalPath(picked)} (read-only)`)
+    expect(stack.scope.writableOf(primary)).toEqual([])
+
+    await mount()
+    const withoutPicker = await run('', 'add-dirs')
+    expect(withoutPicker.kind).toBe('error')
+    expect(withoutPicker).toEqual(await run('add'))
+  })
+
+  it('preserves a withheld root\'s read-only access when re-added without a flag', async () => {
+    const stack = await mount()
+    const extra = join(fixture.base, 'revived')
+    mkdirSync(extra)
+    await run(`add ${extra} --read-only`)
+    rmSync(extra, { recursive: true, force: true })
+    await run('list')
+    mkdirSync(extra)
+
+    const revived = await run(extra, 'add-dirs')
+    expect(revived.kind).toBe('success')
+    expect(revived.text).toContain(`${canonicalPath(extra)} (read-only)`)
+    expect(stack.scope.writableOf(primary)).toEqual([])
+  })
+})
+
 describe('the /workspace-folders command', () => {
   it('registers the command with a hint and an English description', async () => {
     await mount()
-    expect(registered?.name).toBe('workspace-folders')
-    expect(registered?.description.length).toBeGreaterThan(0)
-    expect(registered?.input?.hint).toContain('add')
+    const definition = registered.get('workspace-folders')
+    expect(definition?.name).toBe('workspace-folders')
+    expect(definition?.description.length).toBeGreaterThan(0)
+    expect(definition?.input?.hint).toContain('add')
   })
 
   it('lists, adds, aliases, moves nothing, removes, and reveals', async () => {
@@ -370,6 +446,7 @@ describe('the /workspace-folders command', () => {
     await mount()
     const text = (await run('help')).text ?? ''
     expect(text).toContain('/workspace-folders add')
+    expect(text).toContain('/add-dirs')
     expect(text).toContain('alias')
     expect(text).toContain('isolate-profiles')
   })

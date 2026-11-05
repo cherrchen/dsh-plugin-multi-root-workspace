@@ -208,6 +208,7 @@ The upstream `fs-sandbox` and `sandbox` rows are disabled and taken over by the 
 ```text
 /workspace-folders [list]                                                    # list the primary root and the additional roots (access and state included)
 /workspace-folders add <absolute path> [--inherit|--read-only|--read-write]  # no path opens the OS directory picker; new registrations default to inherit
+/add-dirs [absolute path] [--inherit|--read-only|--read-write]               # shortcut for /workspace-folders add
 /workspace-folders access <n|path> inherit|read-only|read-write              # switch access (widening requires the root to be available right now)
 /workspace-folders skills <n|path> on|off                                    # toggle additional-root Skills independently of write access
 /workspace-folders alias-id <n|path> <kebab-case>                             # edit the stable Skill namespace

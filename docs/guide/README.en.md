@@ -36,6 +36,8 @@ When running DSH from a source checkout, `dsh` is not on PATH — use `pnpm dsh`
 
 The command is the text entry point and works in headless compositions too. Subcommands: `list` / `add` / `remove` / `alias` / `access` / `reveal` / `isolate-profiles` / `help`; a bare `/workspace-folders` is `list`.
 
+`/add-dirs [absolute path] [--inherit|--read-only|--read-write]` is an alias for `/workspace-folders add` that adds one additional root. It shares the same path parsing, access options, directory picker, validation, and results, including the `/workspace-folders` prefix in error messages. Clients discover it through the same command registry; it does not replace dsh-TUI's built-in `/add-dir`.
+
 - `add` with no path opens the OS directory picker (where the composition provides one); `add --read-only` with no path works too.
 - Paths may be quoted, and `~` expands to the home directory; registration canonicalizes first — a path that duplicates an existing root, nests inside one, or is the workspace root itself is rejected.
 - `remove` / `access` / `alias` / `reveal` take `<n|path>` (n is the number `list` prints).
