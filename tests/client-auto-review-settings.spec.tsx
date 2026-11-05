@@ -118,6 +118,39 @@ describe('auto-review settings form', () => {
     for (const stop of stops.splice(0)) stop()
     expect(form.getSnapshot()).toEqual({ status: 'unavailable' })
   })
+
+  it('fences a stale listPlugins answer that lands after a newer refresh', async () => {
+    let listener: (() => void) | undefined
+    const pending: ((value: { ok: true; value: unknown[] }) => void)[] = []
+    const services: Record<string, unknown> = {
+      'remote.pluginManager': {
+        listPlugins: () => new Promise<{ ok: true; value: unknown[] }>(resolve => pending.push(resolve)),
+        setPluginEnabled: async () => ({ ok: true as const, value: { application: 'applied' } }),
+      },
+      remote: { $on: (_event: string, fn: () => void) => { listener = fn; return () => {} } },
+    }
+    const { ctx } = remoteCtx(services)
+    const form = installAutoReviewSettings(ctx as never)
+    await waitFor(() => expect(pending).toHaveLength(1))
+    pending[0]!({ ok: true, value: [ROW] })
+    await waitFor(() => expect(form.getSnapshot()).toMatchObject({ status: 'ready', row: { enabled: false } }))
+
+    // A changed-event refresh stays in flight while the write lands and the
+    // post-write refresh overtakes it.
+    listener?.()
+    await waitFor(() => expect(pending).toHaveLength(2))
+    const writing = form.setEnabled(true)
+    await waitFor(() => expect(pending).toHaveLength(3))
+    pending[2]!({ ok: true, value: [{ ...ROW, enabled: true }] })
+    expect(await writing).toBe('applied')
+    await waitFor(() => expect(form.getSnapshot()).toMatchObject({ row: { enabled: true } }))
+
+    // The older answer arrives last carrying pre-write state: it must not
+    // overwrite the newer refresh's snapshot.
+    pending[1]!({ ok: true, value: [ROW] })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(form.getSnapshot()).toMatchObject({ status: 'ready', row: { enabled: true } })
+  })
 })
 
 describe('AutoReviewSettingsCard', () => {

@@ -88,6 +88,9 @@ class AutoReviewSettingsForm implements AutoReviewForm {
   // Bumped on every attach/detach so a `listPlugins` answer that lands after
   // the namespace went away cannot publish a stale row.
   private epoch = 0
+  // Bumped on every refresh so only the newest `listPlugins` answer may
+  // publish: an older response landing last must not overwrite newer state.
+  private refreshSeq = 0
 
   getSnapshot(): AutoReviewSnapshot {
     return this.snapshot
@@ -131,9 +134,10 @@ class AutoReviewSettingsForm implements AutoReviewForm {
   private async refresh(): Promise<void> {
     const manager = this.manager
     const epoch = this.epoch
+    const seq = ++this.refreshSeq
     if (manager === undefined) return
     const result = await manager.listPlugins()
-    if (manager !== this.manager || epoch !== this.epoch) return
+    if (manager !== this.manager || epoch !== this.epoch || seq !== this.refreshSeq) return
     if (!result.ok) {
       this.publish({ status: 'error' })
       return
