@@ -1398,7 +1398,7 @@ macOS / Node `24.18.0` / DSH `0.2.2-rc.1`：`compat:check` 与完整 `verify:all
 - 证据交付：`docs/reviews/` 只纳入 `dsh-ops-compatibility-audit.md`；原始 JSON/日志/临时脚本保留本地，不纳入 Git。可复跑程序在 `scripts/`，其输出包含宿主、源码与 Worker 摘要，文件树和进程 argv 留在隔离宿主目录。
 - 仓库门禁：`compat:check`、lint、typecheck、build、`docs:check`、`auto-review:fork` 通过；macOS Seatbelt probe 实际启动成功。完整测试 **1101 passed / 87 skipped**（78 个文件通过、3 个按平台跳过）；compose **54/54**、behavior **136/136**、journey **76/76**；`pack:check` 通过，`smoke:packed` 的行为检查 **135/135**，无 kernel skip。Auto Review 精确 `0.2.1-rc.2` 实现套件未在本轮重跑，未把开发 pin 的跳过记成通过。
 
-该次 macOS 运行未验证其他平台；Windows 的后续补验见下文，Linux 仍为 NOT_TESTED。
+该次 macOS 运行未验证其他平台；Windows 与 Linux 的后续补验见下文。
 
 
 ### OPS 分支 rebase 与实验性标签（2026-11-05）
@@ -1418,3 +1418,15 @@ rebase 后完整 macOS 测试 **1127 passed / 87 skipped**；compat、lint、typ
 - **回归修订**：原 `tests/ops-compat.spec.ts` 中 35 个 POSIX profile/准备生命周期用例在 Windows 错把早拒当失败（含等待不存在的 prepare 导致超时）。将这些用例明确限定到 POSIX，并新增 9 个 Windows 用例：两种 Registry × 三模式遍历全部 OPS 执行能力、两种加载顺序的 Bash/未知工具、工具 cap 与未封顶 sibling 对照。其余跨平台生命周期与 scope guard 回归继续执行，未修改生产实现。
 - **仓库门禁**：完整 Windows 测试 **1119 passed / 104 skipped**（82 个文件通过、1 个跳过；104 包含上述 35 个 POSIX 用例及原有平台/基线跳过），无失败。`compat:check`、lint、typecheck、build、`docs:check`、`auto-review:fork` 通过；真实 `windows-acl` kernel probe 成功（工作区可写、兄弟目录拒写），后续测试使用 `DSH_PROBE_VERIFIED_DIALECTS=windows-acl`。compose **54/54**、behavior **144/144**、journey **76/76**，`pack:check` 与 `smoke:packed` 通过，安装副本行为 **143/143**，三个 smoke 与 packed 均无 skip。未重跑 Auto Review 精确 `0.2.1-rc.2` 套件，不将其开发 pin 跳过记为通过。
 - **本地证据**：隔离宿主与输出位于忽略的 `.dsh-smoke/ops-p5-windows/`，`p5-results.json` 保留提交、精确依赖树、锁摘要、Worker/源码摘要、业务夹具路径、准备 profile、argv、拒绝结果和各入口边界；`test.log`、各 smoke 日志及 `gates.json` 保留门禁结果。不纳入 Git，也不把本次 Windows 证据外推到 Linux。
+
+### Linux P5 补验（2026-11-05）
+
+按用户要求完成 **P5 本仓保守兜底的 Linux 验证**。本轮只扩展验证脚本、修正测试夹具及更新文档，生产保护策略未改；D3、F07、Phase B 和合法后台/maintenance 的上游依赖仍保留，专项计划仍在 active，ADR-0027 保持 Proposed。
+
+- **基线**：MR `a2f6b20` 加本次验证修订；Ubuntu `24.04.4` / WSL2 Linux `6.6.87.2-microsoft-standard-WSL2` x64，Node `24.13.0`。隔离宿主统一 DSH `0.2.0-rc.2` / cordis `4.0.4`，锁文件中 268 个 DSH 条目均为该精确版本，每个组合的运行时兼容门禁均通过；主工作树仍为 DSH `0.2.2-rc.1` / cordis `4.1.0`。旧版 npm 可选 peer 求解失败后，显式固定 OPS 锁文件中的 DSH 包并用 `--legacy-peer-deps` 安装隔离宿主，未使用 warn 门禁。OPS 原样检出 `2c0b0397ce4b48436ff76cf5c5b039054240a45c` / `0.5.0-alpha3`，工作树干净，公开 JS build 通过。官方包只携带 Windows Worker，因此以隔离 Rust `1.88.0` 按 `native/Cargo.lock` 执行 `cargo build --release --locked`，公开 stage 校验 Linux x64 ELF/provenance 通过；Worker SHA256 为 `a569b3e11af5e612410fb9bbf66f749e390d3d3da1e6c3b0a794b5526dce2ecd`。未改 OPS 源码、本仓 pin、allowlist 或真实用户 profile。
+- **组合验证**：`scripts/verify-ops-protection.mjs <host> bwrap` 与 `<host> landlock` 各 **94/94 PASS**，均覆盖 shared / legacy × FA / WW / RO。FA 真实 Worker 拒绝覆盖写、新建、edit、replace、copy、双向 move、remove 及符号链接别名写；RO 文件 SHA256 与目录内容不变，失败 move 保留可写源。新增真实工具 cap 拒写 RW 根、未封顶 `ops_copy` 成功写入 RW 根、普通 `/tmp` 兄弟根到达受限 Worker 后拒写的对照；FA 读取及主根合法写入成功，每个 shared/legacy FA 组合实际启动 16 个进程并保存 argv。WW/RO 有 deny 时拒绝 Native 执行及读取，断言零 Worker、零新增 cache confine、隔离 DSH_HOME 与业务树不变。三个模式均通过 Registry 卸载失权及系统 temp 根重叠的准备前早拒；单独卸载 fence 后 scope 继续拒绝无来源 spawn。
+- **实际 runner 与 PTC**：参数选择的是上游探测链。FA ambient-minus-deny 无法由 Landlock 表达，两次运行的 FA Worker 均按既有设计实际使用 bwrap，不声称纯 Landlock 提供该保护。shared WW/RO 的 `run_code` 外层分别真实使用 bwrap、Landlock；shared 三模式及 legacy FA 均触达 OPS 子 dispatch，内层拒写且 RO SHA256 不变。legacy WW/RO 均在代码进程启动前被 scope guard 拒绝（零启动），不计作子 dispatch 端到端通过。
+- **maintenance 与未覆盖能力**：两次运行的 shared/legacy FA 都由真实 Session disposed 触发 purge，scope guard 拒绝无来源启动，进程数不增加、RO 文件不变，缓存可能残留。Linux 未发布 OPS Bash，真实后台 Bash 不适用；F07 的 WW batch/result 后置 cache bind 可用性和新的公开授权桥未在本轮恢复或验收，不以安全拒绝替代完整兼容结论。未重跑 Auto Review 精确 `0.2.1-rc.2` 实现套件。
+- **回归修订**：scope 重挂载会连带重建 sandbox provider，原用例仍假定重挂载前强制的 Seatbelt fixture 存活，在 Linux 错拿原生 bwrap argv 对比 Seatbelt 文本。现在在新 provider 上重新设置同一结构夹具，保留原有重挂载生命周期与拒写 profile 断言；真实 Linux runner 由组合程序和内核回归独立验证。
+- **仓库门禁**：完整测试 **1137 passed / 86 skipped**（81 个文件通过、2 个跳过），无失败；`compat:check`、lint、typecheck、build、`docs:check`、`auto-review:fork` 通过。`registry:probe --required` 确认原生 peer 认证可用；`kernel:probe` 确认 bwrap / Landlock 均可实际执行，测试及冒烟使用 `DSH_PROBE_VERIFIED_DIALECTS=bwrap,landlock`。compose **54/54**、behavior **137/137**、journey **76/76**，`pack:check`（176 个成员）与 `smoke:packed` 通过，安装副本行为 **136/136**，三个 smoke 与 packed 均无 skip。journey 使用此前隔离安装的 Git `2.48.1`，未更改系统 Git。
+- **本地证据**：忽略的 `.dsh-smoke/ops-p5-linux/` 保存隔离宿主、npm 锁、OPS 原样检出、Rust 工具链、Worker 与 provenance；`p5-results-bwrap.json` / `p5-results-landlock.json` 保存提交、源码/锁/Worker 摘要、每次 argv、准备 profile、业务夹具、cap/正对照结果及 PTC/maintenance 边界，普通 tmp 兄弟根夹具路径也在结果中。原始日志与 JSON 留本地，不纳入 Git；可复跑程序及参数说明见[专项计划](./2026-11-01-ops-compatibility-adaptation.md#p5-本仓交付范围)。

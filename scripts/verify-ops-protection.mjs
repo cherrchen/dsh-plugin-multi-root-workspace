@@ -1,5 +1,5 @@
-/** macOS/Windows OPS P5 regression on an isolated, peer-compatible host.
- * node --experimental-transform-types scripts/verify-ops-protection.mjs <hostDir>
+/** macOS/Linux/Windows OPS P5 regression on an isolated, peer-compatible host.
+ * node --experimental-transform-types scripts/verify-ops-protection.mjs <hostDir> [bwrap|landlock]
  * hostDir contains node_modules and an unchanged ops-current checkout with lib/
  * and a staged native Worker. The current MR source is copied into that host.
  * Results and fixtures stay in hostDir; nothing writes a real user profile.
@@ -13,10 +13,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-assert(['darwin', 'win32'].includes(process.platform), 'this probe validates macOS and Windows only')
+assert(['darwin', 'linux', 'win32'].includes(process.platform), 'this probe requires macOS, Linux or Windows')
 const windows = process.platform === 'win32'
 const host = path.resolve(process.argv[2] ?? '')
 assert(process.argv[2], 'usage: verify-ops-protection.mjs <isolated-host-dir>')
+const dialect = process.argv[3]
+assert(dialect === undefined || (process.platform === 'linux' && ['bwrap', 'landlock'].includes(dialect)), 'explicit dialect requires Linux bwrap or landlock')
 const repo = fileURLToPath(new URL('..', import.meta.url))
 assert.notEqual(fs.realpathSync(host), fs.realpathSync(repo), 'use a separate host')
 // Isolate OPS shell preparation and caches from the real user's profile.
@@ -66,7 +68,9 @@ const dshTree = Object.entries(hostLock.packages).filter(([name]) => /node_modul
   .map(([location, entry]) => ({ location, version: entry.version }))
 const dshRelease = requireHost('@deepseek-ai/dsh/package.json').version
 assert(dshTree.length > 0 && dshTree.every(entry => entry.version === dshRelease), 'isolated DSH tree must use one exact release')
-const report = { platform: process.platform, os: os.release(), node: process.version, arch: process.arch,
+// This selects the upstream probe chain. FA ambient-minus-deny still uses
+// bwrap when Landlock cannot subtract a subtree; started[].argv is authoritative.
+const report = { platform: process.platform, os: os.release(), node: process.version, arch: process.arch, requestedDialect: dialect,
   repoCommit: git(repo, 'rev-parse', 'HEAD'), opsCommit: git(path.join(host, 'ops-current'), 'rev-parse', 'HEAD'),
   opsWorkingTree: git(path.join(host, 'ops-current'), 'status', '--short'),
   dsh: dshRelease, dshTree,
@@ -125,13 +129,14 @@ async function world(mode, shared) {
     const stopStarted = wrapMethod(ctx.get('subprocess'), 'spawn', original => function (spec) {
       data.started.push({ argv: spec.argv, cwd: spec.cwd }); return original.call(this, spec)
     })
-    await ctx.plugin(Scope, {})
+    await ctx.plugin(Scope, windows ? {} : { toolAccess: { ops_write_file: 'read-only' } })
     ctx.provide('settings', { installSection(_owner, ns, _schema, _initial, hooks) {
       if (ns === 'multi-root-ops-compatibility') hooks.setSource(() => ({ enabled: true }))
     } })
     await ctx.plugin(OpsMode, { enabled: true }); await ctx.plugin(Compat)
     assert(ctx.get('multiRootCompat'), 'compatible tree required')
     await ctx.plugin(MRFS, { cwd: primary }); await ctx.plugin(Sandbox, {}); await ctx.plugin(Providers)
+    if (dialect) ctx.sandbox.internals = { chain: [dialect] }
     data.profiles = []
     const stopProfiles = wrapMethod(ctx.get('sandbox'), 'confine', original => function (...args) {
       const record = { policy: args[1] }; data.profiles.push(record)
@@ -193,26 +198,73 @@ async function world(mode, shared) {
     for (const [name, args] of operations) await check(`${mode}/${shared}/${name}/${args.path}`, async () => {
       const before = data.started.length
       const profiles = data.profiles.length
-      const preparation = windows ? snapshot(process.env.DSH_HOME) : undefined
-      const business = windows ? [snapshot(primary), snapshot(ro), snapshot(rw)] : undefined
+      const earlyRefusal = windows || mode !== 'danger-full-access'
+      const preparation = earlyRefusal ? snapshot(process.env.DSH_HOME) : undefined
+      const business = earlyRefusal ? [snapshot(primary), snapshot(ro), snapshot(rw)] : undefined
       const result = await call(name, args)
       data.results ??= []; data.results.push({ name, args, result })
       assert(refused(result), JSON.stringify(result))
       assert.equal(sha(roFile), revision); assert.deepEqual(fs.readdirSync(ro), ['file.txt'])
       assert.equal(fs.readFileSync(primaryFile, 'utf8'), 'primary original\n', 'failed move removed source')
-      if (windows || mode !== 'danger-full-access') assert.equal(data.started.length, before, 'early refusal launched a Worker')
-      if (windows) {
+      if (earlyRefusal) {
+        assert.equal(data.started.length, before, 'early refusal launched a Worker')
         assert.equal(data.profiles.length, profiles, 'rejected call attempted cache confinement')
         assert.deepEqual(snapshot(process.env.DSH_HOME), preparation, 'rejected call changed OPS preparation')
         assert.deepEqual([snapshot(primary), snapshot(ro), snapshot(rw)], business, 'rejected call changed business files')
         assert.match(JSON.stringify(result), /OPS .*refused|OPS worker preparation|OPS execution is refused/)
+      } else {
+        assert(data.started.length > before, 'protected POSIX operation did not reach a real Worker')
       }
     })
     await check(`${mode}/${shared}/read`, async () => {
+      const earlyRefusal = windows || mode !== 'danger-full-access'
+      const before = data.started.length, profiles = data.profiles.length
+      const preparation = earlyRefusal ? snapshot(process.env.DSH_HOME) : undefined
       const result = await call('ops_read_files', { files: [{ path: roFile }] })
       assert(!windows && mode === 'danger-full-access' ? completed(result) : refused(result), JSON.stringify(result))
+      if (earlyRefusal) {
+        assert.equal(data.started.length, before)
+        assert.equal(data.profiles.length, profiles)
+        assert.deepEqual(snapshot(process.env.DSH_HOME), preparation)
+      }
     })
     if (mode === 'danger-full-access') {
+      if (!windows) {
+        await check(`${mode}/${shared}/tool-cap`, async () => {
+          const target = path.join(rw, 'capped.txt'), before = data.started.length
+          const result = await call('ops_write_file', { path: target, content: 'VIOLATION\n', expectedRevision: 'absent' })
+          data.capResult = result
+          assert(refused(result), JSON.stringify(result))
+          assert(data.started.length > before, 'cap test did not reach a protected Worker')
+          assert(!fs.existsSync(target), 'capped tool wrote the read-write root')
+        })
+        await check(`${mode}/${shared}/uncapped-sibling`, async () => {
+          const target = path.join(rw, 'uncapped.txt')
+          const result = await call('ops_copy', { path: primaryFile, to: target, expectedRevision: sha(primaryFile) })
+          data.uncappedResult = result
+          assert(completed(result), JSON.stringify(result))
+          assert.equal(fs.readFileSync(target, 'utf8'), 'primary original\n')
+        })
+        await check(`${mode}/${shared}/tmp-sibling`, async () => {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mr-ops-denied-'))
+          const target = path.join(directory, 'file.txt')
+          fs.writeFileSync(target, 'temporary readonly original\n')
+          const revision = sha(target)
+          const records = await ctx.multiRootRegistry.add(primary, { path: directory, access: 'read-only' })
+          const record = records.find(record => record.path === directory)
+          assert(record)
+          data.tmpSibling = { directory, revision }
+          try {
+            const before = data.started.length
+            const result = await call('ops_write_file', { path: target, content: 'VIOLATION\n', expectedRevision: revision })
+            data.tmpSibling.result = result
+            assert(refused(result), JSON.stringify(result))
+            assert(data.started.length > before, 'ordinary tmp sibling was refused before the protected Worker')
+            assert.equal(sha(target), revision)
+            assert.deepEqual(fs.readdirSync(directory), ['file.txt'])
+          } finally { await ctx.multiRootRegistry.remove(primary, { kind: 'id', id: record.id }) }
+        })
+      }
       await check(`${mode}/${shared}/legal-primary-write`, async () => {
         const result = await call('ops_write_file', { path: primaryFile, content: 'primary ok\n', expectedRevision: sha(primaryFile) })
         if (windows) {
@@ -269,7 +321,7 @@ async function world(mode, shared) {
       }
       assert.equal(sha(roFile), revision)
     })
-    if (windows) {
+    {
       await check(`${mode}/${shared}/tmp-overlap`, async () => {
         const records = await ctx.multiRootRegistry.add(primary, { path: os.tmpdir(), access: 'read-only' })
         const temp = records.find(record => record.path.toLowerCase() === os.tmpdir().toLowerCase())
@@ -285,7 +337,7 @@ async function world(mode, shared) {
           assert.equal(sha(roFile), revision)
         } finally { await ctx.multiRootRegistry.remove(primary, { kind: 'id', id: temp.id }) }
       })
-      await check(`${mode}/${shared}/background-bash`, async () => {
+      if (windows) await check(`${mode}/${shared}/background-bash`, async () => {
         const before = data.started.length, preparation = snapshot(process.env.DSH_HOME)
         const result = await call('ops_bash', { command: `echo VIOLATION > '${roFile.replaceAll('\\', '/')}'`, run_in_background: true })
         data.results.push({ name: 'ops_bash', result })
@@ -297,11 +349,17 @@ async function world(mode, shared) {
       })
       await check(`${mode}/${shared}/authority-unavailable`, async () => {
         await registry.dispose()
-        const before = data.started.length
+        const before = data.started.length, profiles = data.profiles.length
+        const preparation = snapshot(process.env.DSH_HOME)
+        const business = [snapshot(primary), snapshot(ro), snapshot(rw)]
         const result = await call('ops_read_files', { files: [{ path: primaryFile }] })
+        data.unavailableResult = result
         assert(refused(result), JSON.stringify(result))
         assert.match(JSON.stringify(result), /authority.*unavailable|protection.*not ready/)
         assert.equal(data.started.length, before)
+        assert.equal(data.profiles.length, profiles)
+        assert.deepEqual(snapshot(process.env.DSH_HOME), preparation)
+        assert.deepEqual([snapshot(primary), snapshot(ro), snapshot(rw)], business)
       })
     }
     await check(`${mode}/${shared}/fence-unload`, async () => {
@@ -317,7 +375,7 @@ async function world(mode, shared) {
 try {
   for (const shared of [false, true]) for (const mode of ['danger-full-access', 'workspace-write', 'read-only']) await world(mode, shared)
 } finally {
-  const output = path.join(host, 'p5-results.json')
+  const output = path.join(host, dialect ? `p5-results-${dialect}.json` : 'p5-results.json')
   fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n')
   console.log(JSON.stringify({ output, passed: report.checks.filter(row => row.pass).length, failed: report.checks.filter(row => !row.pass).length }))
 }

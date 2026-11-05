@@ -519,6 +519,10 @@ describe('the protection lifecycle', () => {
     const newState = world.ctx.get('multiRootScope')!.opsProtection
     expect(newState).not.toBe(oldState)
     for (let i = 0; i < 100 && newState.owner === undefined; i++) await new Promise(resolve => setTimeout(resolve, 20))
+    // Reloading scope remounts its dependent provider with native internals.
+    // Keep the same structural Seatbelt fixture on both sides of the reload.
+    const reloadedProvider = world.ctx.sandbox as MultiRootSandboxProvider
+    reloadedProvider.internals = seatbelt()
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     const next = await call(world, 'ops_write_file')
     expect(isError(next)).toBe(false)

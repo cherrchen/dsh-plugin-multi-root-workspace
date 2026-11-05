@@ -163,7 +163,7 @@ V1–V9的完整定义以[ADR D6](../../decisions/ADR-0027-ops-file-authorizatio
 
 实施后的仓库检查按[开发工作流](../../development/plugin-development-workflow.md)和ADR D6执行：相关单测及组合测试、`pnpm compat:check`、lint/typecheck/build、`pnpm docs:check`；在纳入声明的各OS运行 `kernel:probe`、三个smoke、`pack:check`、`smoke:packed`。涉及Auto Review还运行其fork校验及smoke。OPS升级时重跑已有cache-profile探针并复核提取边界，不能跳过断言。
 
-**基线说明：建计划与首期实施时尚未运行的 kernel/smoke/pack 检查属于历史状态；P5 的 macOS 与 Windows 结果以[总账](./2026-09-12-multi-root-workspace.md#ops-p5-本仓兜底验证2026-11-05)为准，不推定 Linux 通过。**
+**基线说明：建计划与首期实施时尚未运行的 kernel/smoke/pack 检查属于历史状态；P5 的 macOS、Windows 与 Linux 结果以[总账](./2026-09-12-multi-root-workspace.md#ops-p5-本仓兜底验证2026-11-05)为准，各平台按实际入口和 runner 分别记录。**
 
 ## Risks 与停止条件
 
@@ -209,8 +209,10 @@ ADR-0027 保持 Proposed，未经维护者正式接受；本轮按直接授权�
 
 ## P5 本仓交付范围
 
-代码：全模式 OPS admission 复核、WW/RO 有 deny 时准备前早拒、scope 存活的无来源 spawn 拦截、同步启动交接及过期拒绝、叠加包装的退役恢复。回归在 `tests/ops-compat.spec.ts` 与 `tests/method-wrapper.spec.ts`；真实 macOS / Windows 组合程序是 [verify-ops-protection.mjs](../../../scripts/verify-ops-protection.mjs)。Windows Full-access 有 deny 时同样在 OPS Worker 准备前拒绝，不声明受限 Worker 准备或合法写入已恢复。
+代码：全模式 OPS admission 复核、WW/RO 有 deny 时准备前早拒、scope 存活的无来源 spawn 拦截、同步启动交接及过期拒绝、叠加包装的退役恢复。回归在 `tests/ops-compat.spec.ts` 与 `tests/method-wrapper.spec.ts`；真实 macOS / Linux / Windows 组合程序是 [verify-ops-protection.mjs](../../../scripts/verify-ops-protection.mjs)。Windows Full-access 有 deny 时同样在 OPS Worker 准备前拒绝，不声明受限 Worker 准备或合法写入已恢复。
 
-复跑需隔离的 DSH/OPS peer 兼容宿主：`<host>/package.json` 与 `node_modules` 统一版本，保留 npm `package-lock.json`，`<host>/ops-current` 为原样 OPS 检出副本，完成其公开 build/build-ptc 与 stage（或使用同版本官方包中校验过 provenance 的 Worker，显式设置 `DSH_OPS_WORKER_BIN`）；不更改本仓 pin、OPS 源码或用户 profile。运行 `node --experimental-transform-types scripts/verify-ops-protection.mjs <host>`；Windows 先运行本仓 `pnpm build`，夹具需真实 Windows 原生进程与 junction 权限，PATH 首位使用非打包 pwsh。程序复制当前 MR 源码及 Windows runner 构建分片，设置隔离 `DSH_HOME`，保留文件树、准备 profile、argv、版本/源码摘要和 `p5-results.json`。Windows 额外检查无 deny 的真实读写正对照、后台 Bash、失权与 temp 重叠早拒；不把未触达的 PTC 子 dispatch 或未注册的 purge 算作端到端通过。实际结果见总账。
+复跑需隔离的 DSH/OPS peer 兼容宿主：`<host>/package.json` 与 `node_modules` 统一版本，保留 npm `package-lock.json`，`<host>/ops-current` 为原样 OPS 检出副本，完成其公开 build/build-ptc 与 stage（或使用同版本官方包中校验过 provenance 的 Worker，显式设置 `DSH_OPS_WORKER_BIN`）；不更改本仓 pin、OPS 源码或用户 profile。运行 `node --experimental-transform-types scripts/verify-ops-protection.mjs <host>`；Windows 先运行本仓 `pnpm build`，夹具需真实 Windows 原生进程与 junction 权限，PATH 首位使用非打包 pwsh。程序复制当前 MR 源码及 Windows runner 构建分片，设置隔离 `DSH_HOME`，保留文件树、准备 profile、argv、版本/源码摘要和 `p5-results.json`。三平台均检查失权与 temp 重叠的准备前早拒；POSIX 另实跑工具 cap、未封顶写入和普通 tmp 兄弟根拒写，Windows 另检查无 deny 的真实读写正对照及后台 Bash。不把未触达的 PTC 子 dispatch 或未注册的 purge 算作端到端通过。实际结果见总账。
 
-Phase B 因 DSH 明文禁止外部调用其实验记录 API 而关闭；MR 侧不创建一个没人消费的 D3 授权 provider，也不改写 OPS 私有协议来假装接入。D3、F07、合法后台/maintenance 和 Windows 受保护的 Worker 准备仍待公开接缝；Windows 本次验收的是保守拒绝，Linux 尚未验证。以上依赖解除前全计划仍留在 active，P6/发布不在本次完成声明中。
+Linux 可追加 `bwrap` 或 `landlock` 参数，分别输出 `p5-results-bwrap.json` / `p5-results-landlock.json`；这选择上游探测链，实际 runner 以 `worlds[].started[].argv` 为准。Landlock 不能表达 FA 的 ambient-minus-deny，该路径按既有实现转为 bwrap；shared WW/RO 的 PTC 外层可实际走 Landlock。使用隔离目录安装 Rust、按 OPS `native/Cargo.lock` 构建 Linux Worker 并通过公开 stage 校验；官方包未携带 Linux Worker 时不能用 Windows 二进制代替。OPS Bash 在 Linux 未发布，后台 Bash 的真实入口验收保持 Windows 专属。
+
+Phase B 因 DSH 明文禁止外部调用其实验记录 API 而关闭；MR 侧不创建一个没人消费的 D3 授权 provider，也不改写 OPS 私有协议来假装接入。D3、F07、合法后台/maintenance 和 Windows 受保护的 Worker 准备仍待公开接缝；三平台本次验收均限于本仓保守兜底，不代表这些上游依赖已解除。以上依赖解除前全计划仍留在 active，P6/发布不在本次完成声明中。
