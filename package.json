@@ -47,6 +47,7 @@
       "default": "./lib/client.js"
     },
     "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
     "./lsp": {
       "types": "./lib/types/lsp.d.ts",
       "default": "./lib/lsp.js"
@@ -81,6 +82,8 @@
     "lib/*.js.map",
     "lib/types/**/*.d.ts",
     "cordis.patch.yml",
+    "detail",
+    "locale",
     "README.md",
     "README.en.md",
     "CHANGELOG.md",
@@ -124,7 +127,8 @@
     "auto-review:fork": "node scripts/check-auto-review-fork.mjs",
     "smoke:auto-review": "node scripts/verify-auto-review.mjs",
     "registry:probe": "node scripts/check-registry-authority.mjs",
-    "soak:tui-registry": "node scripts/observe-tui-registry.mjs"
+    "soak:tui-registry": "node scripts/observe-tui-registry.mjs",
+    "preview:gen": "node scripts/gen-detail-preview.mjs"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -298,7 +302,8 @@
     "@deepseek-ai/dsh-session-query": "0.2.2-rc.1",
     "@deepseek-ai/dsh-tool-skill": "0.2.2-rc.1",
     "@deepseek-ai/node-addon-system": "0.1.2",
-    "@deepseek-ai/schemastery": "3.19.0"
+    "@deepseek-ai/schemastery": "3.19.0",
+    "fontkit": "2.0.4"
   },
   "dsh": {
     "bundle": {

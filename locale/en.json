@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Multi-root workspace",
+    "description": "Adds secondary working directories to a session: register a folder once and the agent reads and writes it beside the primary root through one shared sandbox scope — file tools, confined shells, and terminals included.",
+    "detail": "detail/DETAIL.en.md"
+  }
+}
