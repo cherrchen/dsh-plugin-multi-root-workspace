@@ -4,7 +4,23 @@
 
 **Accepted（已接受）**。2026-11-05 经维护者明确接受，纳入本轮审核补充。目录归属：`docs/plans/active/`；接受的是修复范围、阶段与验收合同，不表示已实施、已修复或已发布。实施进展：P0 静态证据已记录，维护者已就选型作出决定（见下文“维护者决定”）；P1 已实施（[ADR-0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)）；P3 的 F3（主根身份以上游为准）与废弃单进程模式已实施（[ADR-0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)）；P2、F5 与 F4 执行侧按维护者决定不实施；剩余为跨平台原生与打包门禁（P4）。验证状态以路线总账为准。下文“Current State”保留计划接受时的基线描述。
 
-日期：2026-11-05。实施批次已登记[路线进度总账](./2026-09-12-multi-root-workspace.md#进度总账)。后续实施遵循本文 P0 前置验证及阶段依赖；可信确认能力、跨 Host 能力传递、origin 持久绑定与迁移的具体合同仍须经验证和评审，不能以计划已接受代替技术证据。本次只更新计划与登记状态，不修改运行时代码、提升上游支持版本或发布；涉及现有 Accepted ADR 的语义变化须在实施时显式修订或以新 ADR 替代，保留历史决定。发布内容仍归 CHANGELOG 双语对。
+日期：2026-11-05。实施批次已登记[路线进度总账](./2026-09-12-multi-root-workspace.md#进度总账)。计划接受时只更新了计划与登记状态；之后的实施按下表与“维护者决定”执行，涉及现有 Accepted ADR 的语义变化均以修订说明或新 ADR 记录，保留历史决定。发布内容仍归 CHANGELOG 双语对。
+
+### 实施范围一览（2026-11-05 定稿）
+
+下文 Design 一节保留计划接受时的完整目标合同；**以本表为准**判断哪些已做、哪些明确不做。
+
+| 项 | 结论 | 依据 |
+| --- | --- | --- |
+| F2 revive 不改变 grant 目标（BYP-02） | **已实施** | [ADR-0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md) |
+| F4 登记边界：附加根不得覆盖 `$DSH_HOME`、Registry 介质与 lease 目录，存量 withheld 保留负边界 | **已实施** | [ADR-0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md) |
+| F3 主根身份（MRW-01） | **已实施，方案改为以上游拼写为 key**，拒写优先于主根；不建 origin 绑定表 | [ADR-0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)，维护者决定第 2 项 |
+| 单进程（legacy）Registry 模式 | **已移除**，`sharedStorageRoot` 必填 | [ADR-0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)，维护者决定第 3 项 |
+| F1 根管理写的可信人工确认（BYP-01，P2） | **明确不做**。上游没有独立于 owner cookie 的确认通道；BYP-01 作为已知残余风险保留 | 维护者决定第 1 项 |
+| 启动 Skills migration 的内部维护例外 | **明确不做**，保持 ADR-0023 现有行为 | 维护者决定第 4 项 |
+| F5 默认 authority 为 unavailable | **明确不做**，Registry 未启动时按不变量 7 退化为“插件未安装” | 维护者决定第 5 项 |
+| F4 执行侧：主根/temp 覆盖 `$DSH_HOME` 时拒写 home | **明确不做**，上游对工作区内的 `$DSH_HOME` 不设例外 | 维护者决定第 6 项 |
+| P4 跨平台原生、`smoke:journey`、打包门禁 | **未完成**，交由 PR CI 与后续验收 | [路线总账](./2026-09-12-multi-root-workspace.md#进度总账) |
 
 ## Goal
 
