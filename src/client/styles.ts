@@ -594,6 +594,11 @@ export const STYLES = /* css */ `
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
 .mrfw-skillsSettingsText { min-width: 0; }
+.mrfw-settingsTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .mrfw-skillsSettingsTitle { font-size: 14px; line-height: 20px; }
 .mrfw-skillsSettingsDescription {
   margin-top: 4px;

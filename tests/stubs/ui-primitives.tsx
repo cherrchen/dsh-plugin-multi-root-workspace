@@ -72,6 +72,15 @@ export function Switch(props: {
     onClick={() => props.onChange(!props.checked)} />
 }
 
+/** Minimal `Tag` mirror: the same `span[data-tone]` shape the host renders. */
+export function Tag(props: {
+  readonly tone?: string
+  readonly className?: string
+  readonly children?: ReactNode
+}): ReactNode {
+  return createElement('span', { 'data-tone': props.tone ?? 'outline', className: props.className }, props.children)
+}
+
 /** Minimal `classifyFileType` mirror: a kind string by extension. */
 export function classifyFileType(path: string): string {
   const name = path.split('/').pop() ?? path
