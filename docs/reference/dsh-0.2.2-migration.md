@@ -52,3 +52,18 @@
 - **其余接缝**：相对 alpha.2，workspace-files、sandbox、subprocess、terminal 的运行时代码未改变；系统提示新增 `TOOL_APPLY_PATCH` 顺序。上游保留 PTY 标记；Auto Review 仍以 `0.2.1-rc.2` 为独立精确基线。相对 rc.5 还包含 alpha.2 已审查的工具执行拆分、session projection 和原生额外可写根变化。
 
 执行证据、各平台与矩阵状态只记录在[路线图账本](../plans/active/2026-09-12-multi-root-workspace.md)。
+
+## 0.2.2-rc.1 后续审查（2026-11-05）
+
+上游 tag `dsh-v0.2.2-rc.1` 指向 `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`。本次分别检查前两个发布版本 `0.2.2-alpha.3`（`05b1cae8db`）和 `0.2.2-alpha.2`（`f3803c9697`）到 rc.1 的完整 diff patch。
+
+| 对照 | patch 范围 | 结论 |
+| --- | --- | --- |
+| alpha.3 → rc.1 | 387 个 `package.json`，各一行替换；所有源码和配置均无差异 | 378 个 DSH 包只更改版本号；9 个 vendor 包转入稳定版本，未引入新 API 形状 |
+| alpha.2 → rc.1 | 2315 个文件，87654 行新增 / 27240 行删除 | 包含上一节已审查并适配的 fs patch/delete/move、Connection getter、Files Factory 与 locale 变化；rc.1 未再改变这些接缝 |
+
+发布生态从 Cordis `4.0.6-alpha.2` / Schemastery `3.18.6-alpha.2` / Cosmokit `1.8.7-alpha.2` 转为 `4.1.0` / `3.19.0` / `1.9.0`；loader、include、group、hmr、logger-console 为 `1.1.0`，timer 为 `1.2.0`。现有 Cordis 与 Schemastery peer 的稳定版本范围已覆盖这些版本，不能为了新开发 pin 删除旧宿主所需的具名 prerelease 分支。开发树同步重指 DSH 及其共享生态，并去除候选探测的临时 overrides 与全局 release-age 豁免。
+
+`confine` 的返回形状、方言 grant、工具 dispatch、PTY 标记、Session/projection、Registry storage、Skills、Connection RPC 和 bundle 行锚点都沿用 alpha.3 的实现，无需新增适配器分支。上游 Files 的 `data-files-page` / `data-files-content`、`sidebar.files.tree` Factory、dockkit 与 open-in-app 钩子未变。open-in-app 六个 fork 文件与 locale 键集保持一致，出处记录提升到 rc.1；旧版 files-tree 仍保留 alpha.2 基线。可选 Auto Review 仍钉 `0.2.1-rc.2`。
+
+原生平台、正式门禁、旧版回归与浏览器目检证据见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#dsh-022-rc1-兼容适配2026-11-05)。

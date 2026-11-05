@@ -1308,3 +1308,13 @@ PR 的 CI 以正式门禁覆盖全部 20 个精确版本与启用的四个 runne
 对照上游 `0.2.2-alpha.2` 和 `0.2.1-rc.5` 的 patch，新增精确版本 `0.2.2-alpha.3`，开发 pin 为该版本与 Cordis `4.0.6-alpha.2`；可选 Auto Review 仍钉 `0.2.1-rc.2`，不创建发行版。文件变更接口、Connection 路由和新版 Files 页面适配见[接口审查](../../reference/dsh-0.2.2-migration.md#022-alpha3-后续审查2026-11-04)。
 
 macOS / Node `24.18.0` 候选 warn 验证：Registry 原生认证与 Seatbelt 探针可用；完整测试 959 通过、86 跳过（新增的回归另行通过），compose / behavior / journey 分别 52 / 136 / 76 通过，packed behavior 135 通过；Auto Review fork 检查通过，联合 smoke 按精确目标规则跳过。最初 journey 发现 RPC HTTP 405，修复后真实 HTTP 两种认证路径通过。正式 enforce 下 `compat:check` 与完整 `verify:all` 通过：测试 964 通过 / 86 跳过，三项 smoke 与 packed 分别 52 / 136 / 76 / 135 通过；随后补入真实 `apply_patch` 工具正反例和 Full-access 符号链接替换回归，最终完整测试 967 通过 / 86 跳过。macOS 隔离 Web 页面实机检查了零附加根、主根、附加根、切回主根、目录展开和刷新、打开附加根文件后返回及打开方式菜单；零根会话先经面板确认确无附加根。原有 20 个精确版本在独立 macOS / Node `24.18.0` 安装树中逐一通过 `compat:check`、双端 typecheck、文件系统 / Connection / Files / 工具封顶等关键回归及真实 web/headless journey（各 76 项）；`0.2.2-alpha.2` 起初因旧版 Cordis 混入新 loader 失败，修正预发布依赖选择后重跑通过。Linux、Windows 和旧版 Node 22 的原生 CI 尚待完成。
+
+## DSH 0.2.2-rc.1 兼容适配（2026-11-05）
+
+从 `main` 的 `9035ab0` 新建 `feat/adapt-1105`。分别检查上游 rc.1 与前两个版本 alpha.3 / alpha.2 的完整 patch；结论见[接口审查](../../reference/dsh-0.2.2-migration.md#022-rc1-后续审查2026-11-05)。新增精确支持 `0.2.2-rc.1`，保留原 21 个版本；开发 pin 为 DSH `0.2.2-rc.1` / Cordis `4.1.0` / Schemastery `3.19.0`。未新增适配器分支，可选 Auto Review 仍钉 `0.2.1-rc.2`，不创建发行版。
+
+macOS / Node `24.18.0` 候选 warn 下完整 `verify:all` 通过：原生 Seatbelt 探针可用且显式要求实跑；测试 **967 通过 / 86 跳过**，compose / behavior / journey 分别 **52 / 136 / 76 通过**，packed behavior **135 通过**，pack 与 Auto Review fork 检查通过；可选 Auto Review 集成按既有精确目标规则跳过。
+
+正式 enforce 下 `compat:check`、原生 Registry 认证探针（`--required`）、完整 `verify:all` 与 frozen 安装通过；计数与候选相同，Seatbelt 实跑。`docs:check` 为 **0 错误 / 0 警告**。隔离 Web profile 完成零附加根（面板确认空登记）、主根、附加根、切回主根的三态目检，目录展开、长名截断、刷新、附加根文件预览并返回、打开方式菜单正常，切回后原生树与按钮恢复。未运行真实 TUI 长期观察。
+
+原有 21 个精确版本正在独立安装树中按 CI 的 Node 22/24 分流执行类型检查、权限与客户端关键接缝回归及真实 web/headless journey；全精确版本 × 启用 OS 的 CI 沿用现有 allowlist 派生矩阵。Linux 与 Windows 原生执行尚待 CI，未执行的平台不得记为通过。
