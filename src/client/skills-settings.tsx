@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Switch } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { IconWarningOutlineRegular, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '@deepseek-ai/cordis'
 import { bindSkillsForm, clientInject, type SkillsForm } from '../compat/skills-client.ts'
 import { installAutoReviewSettings, type AutoReviewForm } from '../compat/auto-review-client.ts'
@@ -9,20 +9,37 @@ const BUNDLE_KEY = '@dsh-electron/dsh-plugin-multi-root-workspace'
 interface CardProps { form: SkillsForm; t: Translate }
 export function SkillsSettingsCard({ form, t }: CardProps) {
   const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
-  const [busy, setBusy] = useState(false), [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
   const mounted = useRef(true)
+  const toastSeq = useRef(0)
+  const [toast, setToast] = useState<{ seq: number; text: string } | null>(null)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const showToast = useCallback((text: string) => {
+    toastSeq.current += 1
+    setToast({ seq: toastSeq.current, text })
+  }, [])
   return <div className="mrfw-skillsSettings">
     <div className="mrfw-skillsSettingsText">
       <div className="mrfw-skillsSettingsTitle">{t('skills.globalEnable')}</div>
       <div className="mrfw-skillsSettingsDescription">{t('skills.globalHint')}</div>
-      {error ? <div role="alert">{error}</div> : null}
     </div>
     <Switch label={t('skills.globalEnable')} checked={snapshot.value?.enabled ?? true} disabled={busy || snapshot.status !== 'ready' || !snapshot.writable}
         onChange={enabled => {
-          setBusy(true); setError(undefined)
-          void form.mutate([{ op: 'set', path: ['enabled'], value: enabled }], snapshot.revision).then(ok => { if (mounted.current && !ok) setError(t('skills.settingsFailed')) }).catch(() => { if (mounted.current) setError(t('skills.settingsFailed')) }).finally(() => { if (mounted.current) setBusy(false) })
+          setBusy(true)
+          void form.mutate([{ op: 'set', path: ['enabled'], value: enabled }], snapshot.revision)
+            .then(ok => { if (mounted.current && !ok) showToast(t('skills.settingsFailed')) })
+            .catch(() => { if (mounted.current) showToast(t('skills.settingsFailed')) })
+            .finally(() => { if (mounted.current) setBusy(false) })
         }} />
+    {toast === null ? null : (
+      <Toast
+        key={toast.seq}
+        text={toast.text}
+        icon={<IconWarningOutlineRegular />}
+        holdMs={8000}
+        onDone={() => { setToast(null) }}
+      />
+    )}
   </div>
 }
 /**

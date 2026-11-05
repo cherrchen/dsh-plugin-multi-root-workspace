@@ -118,6 +118,10 @@ export function Tooltip(props: {
 export function Toast(props: {
   readonly text: string
   readonly icon?: ReactNode
+  readonly tone?: 'success'
+  readonly holdMs?: number
+  readonly anchor?: HTMLElement | null
+  readonly actions?: readonly { label: string; prefix?: string; onClick: () => void }[]
   readonly onDone: () => void
 }): ReactNode {
   return createElement(

@@ -165,11 +165,11 @@ describe('AutoReviewSettingsCard', () => {
     await waitFor(() => expect(screen.getByText('autoReview.restartRequired')).toBeTruthy())
     expect(writes).toEqual([false])
     fireEvent.click(screen.getByRole('switch', { name: 'autoReview.title' }))
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('autoReview.settingsFailed'))
+    await waitFor(() => expect(screen.getByText('autoReview.settingsFailed')).toBeTruthy())
     expect(writes).toEqual([false, true])
   })
 
-  it('keeps the switch disabled for read-only rows, loading, and error states', () => {
+  it('keeps the switch disabled for read-only rows, loading, and error states', async () => {
     for (const snapshot of [
       { status: 'ready' as const, row: { entryId: 'e', enabled: true, writable: false } },
       { status: 'loading' as const },
@@ -180,15 +180,15 @@ describe('AutoReviewSettingsCard', () => {
       unmount()
     }
     render(<AutoReviewSettingsCard form={formWith({ status: 'error' })} t={t} />)
-    expect(screen.getByRole('alert').textContent).toBe('autoReview.loadFailed')
+    await waitFor(() => expect(screen.getByText('autoReview.loadFailed')).toBeTruthy())
   })
 
-  it('shows the entry diagnostic while reporting it', () => {
+  it('reports the entry diagnostic through a toast', async () => {
     render(<AutoReviewSettingsCard form={formWith({
       status: 'ready',
       row: { entryId: 'e', enabled: true, writable: true, diagnostic: 'release mismatch' },
     })} t={t} />)
-    expect(screen.getByRole('alert').textContent).toBe('release mismatch')
+    await waitFor(() => expect(screen.getByText('release mismatch')).toBeTruthy())
   })
 })
 
