@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Switch } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SkillsForm } from '../compat/skills-client.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 export function OpsCompatibilitySettingsCard({ form, t }: { form: SkillsForm; t: Translate }) {
@@ -9,7 +9,10 @@ export function OpsCompatibilitySettingsCard({ form, t }: { form: SkillsForm; t:
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   return <div className="mrfw-skillsSettings">
     <div className="mrfw-skillsSettingsText">
-      <div className="mrfw-skillsSettingsTitle">{t('ops.compatibilityEnable')}</div>
+      <div className="mrfw-settingsTitleRow">
+        <span className="mrfw-skillsSettingsTitle">{t('ops.compatibilityEnable')}</span>
+        <Tag tone="info">{t('ops.experimental')}</Tag>
+      </div>
       <div className="mrfw-skillsSettingsDescription">{t('ops.compatibilityHint')}</div>
       {error ? <div role="alert">{error}</div> : null}
     </div>

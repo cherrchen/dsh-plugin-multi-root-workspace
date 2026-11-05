@@ -1399,3 +1399,10 @@ macOS / Node `24.18.0` / DSH `0.2.2-rc.1`：`compat:check` 与完整 `verify:all
 - 仓库门禁：`compat:check`、lint、typecheck、build、`docs:check`、`auto-review:fork` 通过；macOS Seatbelt probe 实际启动成功。完整测试 **1101 passed / 87 skipped**（78 个文件通过、3 个按平台跳过）；compose **54/54**、behavior **136/136**、journey **76/76**；`pack:check` 通过，`smoke:packed` 的行为检查 **135/135**，无 kernel skip。Auto Review 精确 `0.2.1-rc.2` 实现套件未在本轮重跑，未把开发 pin 的跳过记成通过。
 
 其他平台保持 NOT_TESTED，不以本机结果推断。
+
+
+### OPS 分支 rebase 与实验性标签（2026-11-05）
+
+OPS 分支已 rebase 到 `main` HEAD `a7a85b4`（含 `v0.1.14` 及 `/add-dirs`）。设置卡冲突合并保留 Skills、Auto Review、OPS 三行，仍只注册一个 bundle 卡片，三种开关分别走各自写路径；OPS 安全执行代码与 rebase 前一致。新增三开关同时渲染与写入隔离回归。OPS 标题的“实验性”括号文字改为与 Auto Review 相同的宿主 `Tag tone="info"`，复用 `mrfw-settingsTitleRow`，中英文标签独立呈现；配置字段原有 experimental 标记及默认关闭保持不变。
+
+rebase 后完整 macOS 测试 **1127 passed / 87 skipped**；compat、lint、typecheck、build、docs 检查通过，Seatbelt probe 成功，compose **54/54**、behavior **137/137**、journey **76/76** 以及 pack/packed 通过。标签改动另复核客户端设置卡与打包构建；未新增平台验证，`docs/reviews/` 仍只跟踪原审计 Markdown。

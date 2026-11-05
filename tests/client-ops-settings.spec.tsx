@@ -24,6 +24,7 @@ describe('OPS compatibility settings card', () => {
     const writes: unknown[] = []
     const form = opsForm({ value: { enabled: false }, status: 'ready', writable: true, revision: 3 }, writes)
     render(<OpsCompatibilitySettingsCard form={form} t={t} />)
+    expect(screen.getByText('ops.experimental').getAttribute('data-tone')).toBe('info')
     const toggle = screen.getByRole('switch', { name: 'ops.compatibilityEnable' })
     expect(toggle.getAttribute('aria-checked')).not.toBe('true')
     fireEvent.click(toggle)
