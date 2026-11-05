@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted（已接受）**。2026-11-05 经维护者明确接受，纳入本轮审核补充。目录归属：`docs/plans/active/`；接受的是修复范围、阶段与验收合同，不表示已实施、已修复或已发布。实施进展：P0 静态证据已记录，维护者已就选型作出决定（见下文“维护者决定”）；P1 已实施（[ADR-0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)）；P3 的 F3（主根身份以上游为准）与废弃单进程模式已实施（[ADR-0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)）；P2 按维护者决定不实施；F5 与 F4 执行侧 deny 尚未开始。验证状态以路线总账为准。下文“Current State”保留计划接受时的基线描述。
+**Accepted（已接受）**。2026-11-05 经维护者明确接受，纳入本轮审核补充。目录归属：`docs/plans/active/`；接受的是修复范围、阶段与验收合同，不表示已实施、已修复或已发布。实施进展：P0 静态证据已记录，维护者已就选型作出决定（见下文“维护者决定”）；P1 已实施（[ADR-0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)）；P3 的 F3（主根身份以上游为准）与废弃单进程模式已实施（[ADR-0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)）；P2、F5 与 F4 执行侧按维护者决定不实施；剩余为跨平台原生与打包门禁（P4）。验证状态以路线总账为准。下文“Current State”保留计划接受时的基线描述。
 
 日期：2026-11-05。实施批次已登记[路线进度总账](./2026-09-12-multi-root-workspace.md#进度总账)。后续实施遵循本文 P0 前置验证及阶段依赖；可信确认能力、跨 Host 能力传递、origin 持久绑定与迁移的具体合同仍须经验证和评审，不能以计划已接受代替技术证据。本次只更新计划与登记状态，不修改运行时代码、提升上游支持版本或发布；涉及现有 Accepted ADR 的语义变化须在实施时显式修订或以新 ADR 替代，保留历史决定。发布内容仍归 CHANGELOG 双语对。
 
@@ -181,6 +181,9 @@ P1 可作为先行缓解，但不等于 BYP-01、MRW-01 修完；F2 的显式删
 
 第 2、3 项的合同见 [ADR-0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)。
 
+5. **F5（默认 authority 为 unavailable）不实施。** 它只在 Registry 行根本未启动时生效（兼容门禁拒载、provider 冲突、无存储服务），而这些情形按不变量 7 应退化为“插件未安装”，Full-access 与上游一致；只读根作为插件功能随之失效，符合该语义。`scope` 初始值保持 `available`。
+6. **F4 执行侧（主根/temp 覆盖 `$DSH_HOME` 时拒写 home）不实施。** 上游设计本身不为 `$DSH_HOME` 开例外：`dsh-sandbox-local` 的 Seatbelt profile 是 `(deny file-write*)` 加对 `writableRoots(policy)` 的 `subpath` 放行，bwrap / Landlock / Windows ACL 同样只按可写根授权，没有 home 扣除；工作区包含 `$DSH_HOME` 时它在上游就是可写的。插件不在上游的主根授权上另加 home 限制。F4 只保留 P1 已实现的登记边界（附加根不得覆盖 home 与存储目录）和 ADR-0017 既有的受限 Full-access home 拒写。
+
 ## Validation（拟执行，本文未执行）
 
 仅在隔离 fixture `$DSH_HOME`、临时凭据、临时主根/额外根和本地测试 Host 中验证，断言实际字节、持久记录、scope/profile 与结果；不得使用日用凭据或配置。Linux 放置主根于 denied-root 祖先 pin 之外；负面目标同时放在主根/平台 temp 授权范围外，防止测试假阳性。
@@ -225,7 +228,7 @@ P1 可作为先行缓解，但不等于 BYP-01、MRW-01 修完；F2 的显式删
 - [ ] BYP-01 两入口、直接 Registry 和共享 owner/follower 的管理写均受可信人工授权保护，且同 cookie 无法自行回答审批。（维护者决定暂不实施，作为已知残余风险保留，见“维护者决定”第 1 项。）
 - [ ] redirected revive 不改 grant 目标；显式替换流程绑定用户确认的目标和策略。（P1 已完成前半：revive 只回原 grant，见 ADR-0027；显式替换的确认流程依赖 P2。）
 - [ ] 主根换名/重定向不丢 deny，不发替换目标 grant；重启与无法确认身份的情况有经验证的保守行为。（按维护者决定改为以上游拼写为身份：换名不丢 deny 已实现并有单测，见 ADR-0028；主根写授权是否跟随 symlink 属上游执行侧行为；原生方言矩阵未验证。）
-- [ ] home 与物理介质完整保护集合的新登记、存量、主根/temp 重叠与执行层边界一致，未知能力明确拒绝。（P1 已完成新登记与存量部分；主根/temp 重叠与执行层 deny 属于 P3。）
-- [ ] Registry 缺席时保守且基础 provider 服务存活；健康空表 parity 与幂等通知通过。
+- [ ] home 与物理介质完整保护集合的新登记、存量、主根/temp 重叠与执行层边界一致，未知能力明确拒绝。（P1 已完成新登记与存量部分；主根/temp 重叠的执行层 deny 按维护者决定不实施，见“维护者决定”第 6 项。）
+- [ ] Registry 缺席时保守且基础 provider 服务存活；健康空表 parity 与幂等通知通过。（维护者决定不实施 F5，见“维护者决定”第 5 项。）
 - [ ] 精确版本/原生平台/packed 制品门禁完成，结果与未覆盖项进入既有总账；用户文档与接受后的 ADR 同步。
 - [ ] 满足以上条件后再按计划生命周期迁移 completed；发布仍需独立走既有发布流程。
