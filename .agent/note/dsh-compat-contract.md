@@ -257,4 +257,4 @@ PTY 的 agent/用户判别是 §13 唯一的静默 fail-open 接缝：`DSH_PTY_S
 
 ## 16. DSH 0.2.2-rc.1 转稳定生态
 
-rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留旧宿主所需的具名 prerelease peer 分支；稳定 peer 范围已覆盖 Cordis 4.1.0 / Schemastery 3.19.0。开发树须整体重指，提交前移除临时 probe overrides。稳定版 vendor 范围同样必须钉声明的精确基线：旧 loader peer `^1.0.3` 会接纳新发布的 `1.1.0`，却在 Cordis `4.0.2` 的 `fiber.entry` 处崩溃。升级 helper 现在对未发布基线或复合范围拒绝猜测，不再选择更新构建。详见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#022-rc1-后续审查2026-11-05)；执行证据仍在路线账本，可选 Auto Review 仍钉 0.2.1-rc.2。
+rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留旧宿主所需的具名 prerelease peer 分支；稳定 peer 范围已覆盖 Cordis 4.1.0 / Schemastery 3.19.0。开发树须整体重指，提交前移除临时 probe overrides。稳定版 vendor 范围只能取声明 minor 线内的最新稳定 patch（prerelease 仍钉精确基线）：旧 loader peer `^1.0.3` 会接纳新发布的 `1.1.0`，却在 Cordis `4.0.2` 的 `fiber.entry` 处崩溃。升级 helper 现在对未发布基线或复合范围拒绝猜测，不跨入新的 vendor minor 或把 prerelease 混入稳定线。详见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#022-rc1-后续审查2026-11-05)；执行证据仍在路线账本，可选 Auto Review 仍钉 0.2.1-rc.2。

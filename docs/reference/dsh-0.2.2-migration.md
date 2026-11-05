@@ -64,7 +64,7 @@
 
 发布生态从 Cordis `4.0.6-alpha.2` / Schemastery `3.18.6-alpha.2` / Cosmokit `1.8.7-alpha.2` 转为 `4.1.0` / `3.19.0` / `1.9.0`；loader、include、group、hmr、logger-console 为 `1.1.0`，timer 为 `1.2.0`。现有 Cordis 与 Schemastery peer 的稳定版本范围已覆盖这些版本，不能为了新开发 pin 删除旧宿主所需的具名 prerelease 分支。开发树同步重指 DSH 及其共享生态，并去除候选探测的临时 overrides 与全局 release-age 豁免。
 
-稳定 vendor 发布暴露旧版回归安装树的宽范围陷阱：旧 DSH 的 loader `^1.0.3` 会接纳 `1.1.0`，但后者依赖新版 Cordis 的 `fiber.entry`，与 `4.0.2` 组合时 profile 启动失败。`scripts/lib/cordis-pin.mjs` 的 `ecosystemPin` 现对稳定版与 prerelease 一律选择宿主所声明的精确基线，未发布基线和复合范围直接拒绝。对应回归先红后绿；这属于矩阵安装工具修复，不在插件业务面新增版本判断。
+稳定 vendor 发布暴露旧版回归安装树的宽范围陷阱：旧 DSH 的 loader `^1.0.3` 会接纳 `1.1.0`，但后者依赖新版 Cordis 的 `fiber.entry`，与 `4.0.2` 组合时 profile 启动失败。`scripts/lib/cordis-pin.mjs` 的 `ecosystemPin` 现对稳定版选择宿主声明 minor 线内的最新稳定 patch，对 prerelease 钉精确基线，未发布基线和复合范围直接拒绝。稳定线保留 patch 修复也有必要：Schemastery `3.18.2` 本身不含旧 Host 所需的 zod codec 支持，`3.18.5` 可用；不能把全部稳定线一律退回范围下限。对应 loader / timer / Schemastery 回归先红后绿；这属于矩阵安装工具修复，不在插件业务面新增版本判断。
 
 `confine` 的返回形状、方言 grant、工具 dispatch、PTY 标记、Session/projection、Registry storage、Skills、Connection RPC 和 bundle 行锚点都沿用 alpha.3 的实现，无需新增适配器分支。上游 Files 的 `data-files-page` / `data-files-content`、`sidebar.files.tree` Factory、dockkit 与 open-in-app 钩子未变。open-in-app 六个 fork 文件与 locale 键集保持一致，出处记录提升到 rc.1；旧版 files-tree 仍保留 alpha.2 基线。可选 Auto Review 仍钉 `0.2.1-rc.2`。
 

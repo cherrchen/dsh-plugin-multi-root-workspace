@@ -1319,4 +1319,6 @@ macOS / Node `24.18.0` 候选 warn 下完整 `verify:all` 通过：原生 Seatbe
 
 原有 21 个精确版本正在独立安装树中按 CI 的 Node 22/24 分流执行类型检查、权限与客户端关键接缝回归及真实 web/headless journey；全精确版本 × 启用 OS 的 CI 沿用现有 allowlist 派生矩阵。Linux 与 Windows 原生执行尚待 CI，未执行的平台不得记为通过。
 
-本批首次 CI（`bee1a59`，[run 41959434977](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41959434977)）发现旧稳定线宽 vendor 范围混入新 loader `1.1.0`，并非 rc.1 本机回归。升级选择器已改为所有 vendor 范围钉宿主声明的精确基线；loader / timer 稳定线回归先红后绿，保留旧版支持并重跑矩阵。
+本批首次 CI（`bee1a59`，[run 41959434977](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41959434977)）发现旧稳定线宽 vendor 范围混入新 loader `1.1.0`，并非 rc.1 本机回归。升级选择器已改为稳定 vendor 限于宿主声明 minor 线内的最新稳定 patch，prerelease 仍钉精确基线；loader / timer 稳定线回归先红后绿，保留旧版支持并重跑矩阵。
+
+稳定 patch 规则在 `0.1.5-rc.2` 与 `0.1.6-alpha.1` 的 Node `22.23.1` 独立树通过类型检查、关键接缝测试及 web/headless journey（各 76 项）；loader 混装和 Schemastery codec 两种启动失败均消除。修复后 rc.1 的完整 enforce 验收为 **968 通过 / 86 跳过**，compose / behavior / journey / packed 仍为 **52 / 136 / 76 / 135 通过**；新增选择器回归另行通过，文档检查仍为 0 错误 / 0 警告。
