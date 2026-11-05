@@ -251,7 +251,8 @@ async function world(mode, shared) {
           fs.writeFileSync(target, 'temporary readonly original\n')
           const revision = sha(target)
           const records = await ctx.multiRootRegistry.add(primary, { path: directory, access: 'read-only' })
-          const record = records.find(record => record.path === directory)
+          const canonicalDirectory = fs.realpathSync.native(directory)
+          const record = records.find(record => record.path === canonicalDirectory)
           assert(record)
           data.tmpSibling = { directory, revision }
           try {
@@ -324,7 +325,12 @@ async function world(mode, shared) {
     {
       await check(`${mode}/${shared}/tmp-overlap`, async () => {
         const records = await ctx.multiRootRegistry.add(primary, { path: os.tmpdir(), access: 'read-only' })
-        const temp = records.find(record => record.path.toLowerCase() === os.tmpdir().toLowerCase())
+        // Registry paths are canonical. macOS tmpdir() commonly uses /var,
+        // while realpath and the Registry use /private/var for the same root.
+        const canonicalTemp = fs.realpathSync.native(os.tmpdir())
+        const temp = records.find(record => windows
+          ? record.path.toLowerCase() === canonicalTemp.toLowerCase()
+          : record.path === canonicalTemp)
         assert(temp, 'temporary deny root must be registered')
         try {
           const starts = data.started.length, profiles = data.profiles.length

@@ -1430,3 +1430,12 @@ rebase 后完整 macOS 测试 **1127 passed / 87 skipped**；compat、lint、typ
 - **回归修订**：scope 重挂载会连带重建 sandbox provider，原用例仍假定重挂载前强制的 Seatbelt fixture 存活，在 Linux 错拿原生 bwrap argv 对比 Seatbelt 文本。现在在新 provider 上重新设置同一结构夹具，保留原有重挂载生命周期与拒写 profile 断言；真实 Linux runner 由组合程序和内核回归独立验证。
 - **仓库门禁**：完整测试 **1137 passed / 86 skipped**（81 个文件通过、2 个跳过），无失败；`compat:check`、lint、typecheck、build、`docs:check`、`auto-review:fork` 通过。`registry:probe --required` 确认原生 peer 认证可用；`kernel:probe` 确认 bwrap / Landlock 均可实际执行，测试及冒烟使用 `DSH_PROBE_VERIFIED_DIALECTS=bwrap,landlock`。compose **54/54**、behavior **137/137**、journey **76/76**，`pack:check`（176 个成员）与 `smoke:packed` 通过，安装副本行为 **136/136**，三个 smoke 与 packed 均无 skip。journey 使用此前隔离安装的 Git `2.48.1`，未更改系统 Git。
 - **本地证据**：忽略的 `.dsh-smoke/ops-p5-linux/` 保存隔离宿主、npm 锁、OPS 原样检出、Rust 工具链、Worker 与 provenance；`p5-results-bwrap.json` / `p5-results-landlock.json` 保存提交、源码/锁/Worker 摘要、每次 argv、准备 profile、业务夹具、cap/正对照结果及 PTC/maintenance 边界，普通 tmp 兄弟根夹具路径也在结果中。原始日志与 JSON 留本地，不纳入 Git；可复跑程序及参数说明见[专项计划](./2026-11-01-ops-compatibility-adaptation.md#p5-本仓交付范围)。
+
+
+### Windows/Linux 提交接入后的 macOS 回归（2026-11-05）
+
+快进接入 Windows `a2f6b20` 与 Linux `8b633eb` 后复核：两次提交仅修改验证脚本、测试夹具与文档，`src/` 生产保护代码相对 `913d168` 无差异。macOS arm64 / Node `24.18.0` 回跑共享脚本，发现两处新增临时目录记录查找直接比较原始路径：macOS `tmpdir()` 的 `/var/...` 与 Registry 的 `/private/var/...` 是同一路径，导致两个 tmp-sibling 和六个 tmp-overlap 检查失败（86 通过 / 8 失败）；其中未找到 sibling 记录还使该登记未被移除，连带让后续注册 temp 根因包含关系被拒。修复仅将验证脚本的查找目标先经 `realpathSync.native()` 规范化，Windows 保留大小写归一，POSIX 按原大小写比较；不放宽任何业务拒写或 Registry 边界。
+
+干净隔离宿主固定 DSH `0.2.0-rc.2` / cordis `4.0.4`（npm lock 中 278 个 DSH 条目同版本），补齐运行时 peer；OPS 原样 `2c0b0397ce4b48436ff76cf5c5b039054240a45c` / `0.5.0-alpha3`，检出干净，使用此前按其 Cargo.lock 本机构建的同一 macOS Worker，未修改 OPS。修复后真实组合 **94/94 PASS**：shared/legacy × 三模式；FA 每个组合实际启动 16 个进程，cap 拒写、未封顶 RW 正对照、普通 tmp 兄弟根到达受限 Worker 拒写及 temp 重叠准备前拒绝均通过。shared 三模式和 legacy FA 到达真实 PTC 子 dispatch；legacy WW/RO 仍启动前拒绝；shared/legacy FA 的真实 purge 均被拒。已有误拒、缓存残留、D3/F07/Phase B/合法后台与全计划/P6 边界不变。
+
+仓库检查：完整 macOS 测试 **1127 passed / 96 skipped**（新增九个 Windows 专属用例按平台跳过），compat、lint、typecheck、build、docs、Auto Review fork 通过；Seatbelt probe 成功，compose **54/54**、behavior **137/137**、journey **76/76**、pack 与 packed behavior **136/136** 通过，冒烟无跳过。未在本机重跑 Windows/Linux 或 Auto Review 精确基线套件；跨平台原始证据仍留在各设备。macOS 本轮结果与日志保存在忽略的 `.dsh-smoke/ops-p5-macos-followup/`，未提交；`docs/reviews/` 仍只跟踪现有审计 Markdown。
