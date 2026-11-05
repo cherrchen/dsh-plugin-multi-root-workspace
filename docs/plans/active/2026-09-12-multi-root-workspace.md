@@ -1398,7 +1398,7 @@ macOS / Node `24.18.0` / DSH `0.2.2-rc.1`：`compat:check` 与完整 `verify:all
 - 证据交付：`docs/reviews/` 只纳入 `dsh-ops-compatibility-audit.md`；原始 JSON/日志/临时脚本保留本地，不纳入 Git。可复跑程序在 `scripts/`，其输出包含宿主、源码与 Worker 摘要，文件树和进程 argv 留在隔离宿主目录。
 - 仓库门禁：`compat:check`、lint、typecheck、build、`docs:check`、`auto-review:fork` 通过；macOS Seatbelt probe 实际启动成功。完整测试 **1101 passed / 87 skipped**（78 个文件通过、3 个按平台跳过）；compose **54/54**、behavior **136/136**、journey **76/76**；`pack:check` 通过，`smoke:packed` 的行为检查 **135/135**，无 kernel skip。Auto Review 精确 `0.2.1-rc.2` 实现套件未在本轮重跑，未把开发 pin 的跳过记成通过。
 
-其他平台保持 NOT_TESTED，不以本机结果推断。
+该次 macOS 运行未验证其他平台；Windows 的后续补验见下文，Linux 仍为 NOT_TESTED。
 
 
 ### OPS 分支 rebase 与实验性标签（2026-11-05）
@@ -1406,3 +1406,15 @@ macOS / Node `24.18.0` / DSH `0.2.2-rc.1`：`compat:check` 与完整 `verify:all
 OPS 分支已 rebase 到 `main` HEAD `a7a85b4`（含 `v0.1.14` 及 `/add-dirs`）。设置卡冲突合并保留 Skills、Auto Review、OPS 三行，仍只注册一个 bundle 卡片，三种开关分别走各自写路径；OPS 安全执行代码与 rebase 前一致。新增三开关同时渲染与写入隔离回归。OPS 标题的“实验性”括号文字改为与 Auto Review 相同的宿主 `Tag tone="info"`，复用 `mrfw-settingsTitleRow`，中英文标签独立呈现；配置字段原有 experimental 标记及默认关闭保持不变。
 
 rebase 后完整 macOS 测试 **1127 passed / 87 skipped**；compat、lint、typecheck、build、docs 检查通过，Seatbelt probe 成功，compose **54/54**、behavior **137/137**、journey **76/76** 以及 pack/packed 通过。标签改动另复核客户端设置卡与打包构建；未新增平台验证，`docs/reviews/` 仍只跟踪原审计 Markdown。
+
+### Windows P5 补验（2026-11-05）
+
+按用户要求完成 **P5 本仓保守兜底的 Windows 验证**，不改变生产保护策略，不代表 Windows 受保护 Worker 准备、完整 OPS 兼容或全计划退出。专项计划仍在 active，ADR-0027 保持 Proposed。
+
+- **基线**：MR `913d168` 加本次验证脚本/测试修订；Windows `10.0.26200` x64、Node `24.14.0`，非打包便携 pwsh。隔离宿主统一 DSH `0.2.0-rc.2` / cordis `4.0.4`，运行时门禁通过；主工作树仍为 DSH `0.2.2-rc.1` / cordis `4.1.0`。OPS 原样检出 `2c0b0397ce4b48436ff76cf5c5b039054240a45c` / `0.5.0-alpha3`，公开构建通过且工作树干净；Windows Worker 取同版本官方 Release 包，tarball SHA256 与 `SHA256SUMS` 一致（`bed2baee8d277050095d6ea4d79056ccdb5d8cda22b16602f33dc0a16ea5dadb`），staged provenance 校验通过，Worker SHA256 为 `44da3344a980db0e973fe81848448797c9e67e1759c33dd84ddf67971aedaaba`。未改 OPS 源码、本仓 pin、allowlist 或真实用户 profile。
+- **组合验证**：扩展后的 `scripts/verify-ops-protection.mjs` **104/104 PASS**，shared / legacy × FA / WW / RO。Windows 在 deny 存在时早拒真实 Native 覆盖写、新建、edit、replace、copy、双向 move、remove 及 junction 别名写；逐次断言零 Worker 启动、零新增 cache confine、隔离 DSH_HOME 与业务树内容不变、失败 move 不移除可写源。三个模式另通过真实后台 Bash、Registry 卸载失权、系统 temp 根重叠的早拒检查；单独卸载 fence 后 scope 仍拒绝无来源 spawn。无 deny 正对照在六条车道真实读取成功，FA/WW 四条车道真实新建文件成功，证明未以坏 Worker 或整体不可启动制造拒绝。
+- **PTC 边界**：shared 三模式与 legacy FA 均真实启动 `run_code` 并触达 OPS 子 dispatch，内层拒写且 RO SHA256 不变；legacy WW/RO 在代码进程启动前被 scope guard 拒绝，仍不计作子 dispatch 端到端通过。
+- **maintenance 边界**：legacy FA 由真实 Session disposed 触发 purge，scope guard 拒绝其无来源 spawn，进程启动数不增加。shared FA 的真实 cache 准备 profile 没有 `--temp-write-sid`，OPS 未形成私有结果缓存位置，因此未注册 purge；该车道的 purge **不适用，未声称已触发或恢复清理**。合法后台/maintenance 和受保护 Windows Worker 准备仍依赖上游公开接缝，缓存残留边界保留。
+- **回归修订**：原 `tests/ops-compat.spec.ts` 中 35 个 POSIX profile/准备生命周期用例在 Windows 错把早拒当失败（含等待不存在的 prepare 导致超时）。将这些用例明确限定到 POSIX，并新增 9 个 Windows 用例：两种 Registry × 三模式遍历全部 OPS 执行能力、两种加载顺序的 Bash/未知工具、工具 cap 与未封顶 sibling 对照。其余跨平台生命周期与 scope guard 回归继续执行，未修改生产实现。
+- **仓库门禁**：完整 Windows 测试 **1119 passed / 104 skipped**（82 个文件通过、1 个跳过；104 包含上述 35 个 POSIX 用例及原有平台/基线跳过），无失败。`compat:check`、lint、typecheck、build、`docs:check`、`auto-review:fork` 通过；真实 `windows-acl` kernel probe 成功（工作区可写、兄弟目录拒写），后续测试使用 `DSH_PROBE_VERIFIED_DIALECTS=windows-acl`。compose **54/54**、behavior **144/144**、journey **76/76**，`pack:check` 与 `smoke:packed` 通过，安装副本行为 **143/143**，三个 smoke 与 packed 均无 skip。未重跑 Auto Review 精确 `0.2.1-rc.2` 套件，不将其开发 pin 跳过记为通过。
+- **本地证据**：隔离宿主与输出位于忽略的 `.dsh-smoke/ops-p5-windows/`，`p5-results.json` 保留提交、精确依赖树、锁摘要、Worker/源码摘要、业务夹具路径、准备 profile、argv、拒绝结果和各入口边界；`test.log`、各 smoke 日志及 `gates.json` 保留门禁结果。不纳入 Git，也不把本次 Windows 证据外推到 Linux。

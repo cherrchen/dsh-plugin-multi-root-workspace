@@ -121,7 +121,7 @@
 
 ### P5：条件分支与上游协作
 
-2026-11-05 用户明确授权本仓部分：不修改 OPS，允许合法附加根操作被误拒，不允许只读附加根被写入；本轮只在 macOS 验证。按 [ADR 的 P5 修订](../../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md#p5-本仓保守兜底修订2026-11-05直接授权实施)收紧 WW/RO 与无来源进程启动，取代首期维持现状规则。下表恢复可用性所需的上游合同仍保留，不假装已接入。
+2026-11-05 用户明确授权本仓部分：不修改 OPS，允许合法附加根操作被误拒，不允许只读附加根被写入；首次实施仅验证 macOS，其后按用户要求补齐 Windows 保守拒绝验证，证据统一见[总账](./2026-09-12-multi-root-workspace.md#ops-p5-本仓兜底验证2026-11-05)。按 [ADR 的 P5 修订](../../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md#p5-本仓保守兜底修订2026-11-05直接授权实施)收紧 WW/RO 与无来源进程启动，取代首期维持现状规则。下表恢复可用性所需的上游合同仍保留，不假装已接入。
 
 
 | 分支 | 待完成工作 | 退出条件/对应证据 |
@@ -163,7 +163,7 @@ V1–V9的完整定义以[ADR D6](../../decisions/ADR-0027-ops-file-authorizatio
 
 实施后的仓库检查按[开发工作流](../../development/plugin-development-workflow.md)和ADR D6执行：相关单测及组合测试、`pnpm compat:check`、lint/typecheck/build、`pnpm docs:check`；在纳入声明的各OS运行 `kernel:probe`、三个smoke、`pack:check`、`smoke:packed`。涉及Auto Review还运行其fork校验及smoke。OPS升级时重跑已有cache-profile探针并复核提取边界，不能跳过断言。
 
-**基线说明：建计划与首期实施时尚未运行的 kernel/smoke/pack 检查属于历史状态；P5 本轮 macOS 结果以[总账](./2026-09-12-multi-root-workspace.md#ops-p5-本仓兜底验证2026-11-05)为准，不推定其他平台通过。**
+**基线说明：建计划与首期实施时尚未运行的 kernel/smoke/pack 检查属于历史状态；P5 的 macOS 与 Windows 结果以[总账](./2026-09-12-multi-root-workspace.md#ops-p5-本仓兜底验证2026-11-05)为准，不推定 Linux 通过。**
 
 ## Risks 与停止条件
 
@@ -209,8 +209,8 @@ ADR-0027 保持 Proposed，未经维护者正式接受；本轮按直接授权�
 
 ## P5 本仓交付范围
 
-代码：全模式 OPS admission 复核、WW/RO 有 deny 时准备前早拒、scope 存活的无来源 spawn 拦截、同步启动交接及过期拒绝、叠加包装的退役恢复。回归在 `tests/ops-compat.spec.ts` 与 `tests/method-wrapper.spec.ts`；真实 macOS 组合程序是 [verify-ops-protection.mjs](../../../scripts/verify-ops-protection.mjs)。
+代码：全模式 OPS admission 复核、WW/RO 有 deny 时准备前早拒、scope 存活的无来源 spawn 拦截、同步启动交接及过期拒绝、叠加包装的退役恢复。回归在 `tests/ops-compat.spec.ts` 与 `tests/method-wrapper.spec.ts`；真实 macOS / Windows 组合程序是 [verify-ops-protection.mjs](../../../scripts/verify-ops-protection.mjs)。Windows Full-access 有 deny 时同样在 OPS Worker 准备前拒绝，不声明受限 Worker 准备或合法写入已恢复。
 
-复跑需隔离的 DSH/OPS peer 兼容宿主：`<host>/package.json` 与 `node_modules` 统一版本，`<host>/ops-current` 为原样 OPS 检出副本，完成其公开 build/build-ptc 与 stage（或显式 `DSH_OPS_WORKER_BIN`）；不更改本仓 pin、OPS 源码或用户 profile。运行 `node --experimental-transform-types scripts/verify-ops-protection.mjs <host>`；程序复制当前 MR 源码到隔离宿主，保留文件树、argv 和 `p5-results.json`。实际通过数见总账。
+复跑需隔离的 DSH/OPS peer 兼容宿主：`<host>/package.json` 与 `node_modules` 统一版本，保留 npm `package-lock.json`，`<host>/ops-current` 为原样 OPS 检出副本，完成其公开 build/build-ptc 与 stage（或使用同版本官方包中校验过 provenance 的 Worker，显式设置 `DSH_OPS_WORKER_BIN`）；不更改本仓 pin、OPS 源码或用户 profile。运行 `node --experimental-transform-types scripts/verify-ops-protection.mjs <host>`；Windows 先运行本仓 `pnpm build`，夹具需真实 Windows 原生进程与 junction 权限，PATH 首位使用非打包 pwsh。程序复制当前 MR 源码及 Windows runner 构建分片，设置隔离 `DSH_HOME`，保留文件树、准备 profile、argv、版本/源码摘要和 `p5-results.json`。Windows 额外检查无 deny 的真实读写正对照、后台 Bash、失权与 temp 重叠早拒；不把未触达的 PTC 子 dispatch 或未注册的 purge 算作端到端通过。实际结果见总账。
 
-Phase B 因 DSH 明文禁止外部调用其实验记录 API 而关闭；MR 侧不创建一个没人消费的 D3 授权 provider，也不改写 OPS 私有协议来假装接入。D3、F07、合法后台/maintenance 和 Windows 准备仍待公开接缝；非 macOS 未验证。以上依赖解除前全计划仍留在 active，P6/发布不在本次完成声明中。
+Phase B 因 DSH 明文禁止外部调用其实验记录 API 而关闭；MR 侧不创建一个没人消费的 D3 授权 provider，也不改写 OPS 私有协议来假装接入。D3、F07、合法后台/maintenance 和 Windows 受保护的 Worker 准备仍待公开接缝；Windows 本次验收的是保守拒绝，Linux 尚未验证。以上依赖解除前全计划仍留在 active，P6/发布不在本次完成声明中。

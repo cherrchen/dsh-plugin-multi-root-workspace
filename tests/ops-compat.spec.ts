@@ -46,6 +46,10 @@ afterEach(async () => {
 })
 
 const COMMAND = ['ops-worker', '--run']
+// Windows deliberately refuses deny-bearing OPS calls before profile preparation.
+// The POSIX profile/lifecycle cases below cannot enter that domain on Windows;
+// the Windows matrix verifies the earlier boundary instead.
+const posixIt = it.skipIf(process.platform === 'win32')
 
 interface Captured {
   spawned: SubprocessSpawnSpec[]
@@ -178,8 +182,53 @@ function call(world: World, name: string, args: unknown = {}, agent: Agent | und
 const isError = (result: unknown): boolean => (result as { isError?: boolean }).isError === true
 const resultText = (result: unknown): string => JSON.stringify(result)
 
+describe.skipIf(process.platform !== 'win32')('Windows OPS preparation refusal', () => {
+  it.each([false, true].flatMap(shared =>
+    (['danger-full-access', 'workspace-write', 'read-only'] as const).map(mode => ({ shared, mode })),
+  ))('refuses all capabilities before preparation ($mode, shared: $shared)', async ({ shared, mode }) => {
+    const world = await mountWorld({ mode, shared })
+    if (shared) await world.ctx.multiRootRegistry.add(fixture.workspace, { path: fixture.outside, access: 'read-only' })
+    else world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    const prepare = vi.spyOn(world.provider, 'restrictedExecution')
+    for (const name of OPS_EXEC_NAMES) {
+      opsTool(world.ctx, name, world.captured)
+      const result = await call(world, name)
+      expect(isError(result), `${mode}/${name}`).toBe(true)
+      expect(resultText(result)).toContain(mode === 'danger-full-access'
+        ? 'OPS worker preparation is not verified on this platform' : `is refused in ${mode}`)
+    }
+    expect(prepare).not.toHaveBeenCalled()
+    expect(world.captured.bodies).toEqual([])
+    expect(world.captured.spawned).toEqual([])
+  })
+
+  it.each([false, true])('rejects foreground/background Bash and unknown tools in either load order (tools first: %s)', async (toolsFirst) => {
+    const world = await mountWorld({ toolsFirst })
+    for (const name of ['ops_bash', 'ops_mystery']) opsTool(world.ctx, name, world.captured)
+    expect(isError(await call(world, 'ops_bash'))).toBe(false)
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    expect(resultText(await call(world, 'ops_bash', { run_in_background: true }))).toContain('run_in_background is refused')
+    expect(resultText(await call(world, 'ops_bash'))).toContain('OPS worker preparation is not verified on this platform')
+    expect(resultText(await call(world, 'ops_mystery'))).toContain('unrecognized OPS capability')
+    expect(world.captured.bodies).toEqual(['ops_bash'])
+    expect(world.captured.spawned).toHaveLength(1)
+  })
+
+  it('refuses a capped tool before preparation while the uncapped sibling still executes', async () => {
+    const world = await mountWorld({ scopeConfig: { toolAccess: { ops_write_file: 'read-only' } } })
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-write')])
+    for (const name of ['ops_write_file', 'ops_stat']) opsTool(world.ctx, name, world.captured)
+    const prepare = vi.spyOn(world.provider, 'restrictedExecution')
+    expect(isError(await call(world, 'ops_write_file'))).toBe(true)
+    expect(isError(await call(world, 'ops_stat'))).toBe(false)
+    expect(prepare).not.toHaveBeenCalled()
+    expect(world.captured.bodies).toEqual(['ops_stat'])
+    expect(world.captured.spawned[0]!.argv).toEqual(COMMAND)
+  })
+})
+
 describe('the OPS dispatch barrier', () => {
-  it('confines an adapted OPS call to ambient-minus-deny under full access', async () => {
+  posixIt('confines an adapted OPS call to ambient-minus-deny under full access', async () => {
     const world = await mountWorld()
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     opsTool(world.ctx, 'ops_write_file', world.captured)
@@ -257,7 +306,7 @@ describe('the OPS dispatch barrier', () => {
     }
   })
 
-  it('refuses unrecognized and background OPS capabilities only where boundaries apply', async () => {
+  posixIt('refuses unrecognized and background OPS capabilities only where boundaries apply', async () => {
     const world = await mountWorld()
     for (const name of ['ops_mystery', 'ops_bash']) opsTool(world.ctx, name, world.captured)
     expect(isError(await call(world, 'ops_mystery'))).toBe(false)
@@ -290,7 +339,7 @@ describe('the OPS dispatch barrier', () => {
     await scope.dispose()
   })
 
-  it('caps only the configured OPS tool and leaves siblings alone', async () => {
+  posixIt('caps only the configured OPS tool and leaves siblings alone', async () => {
     const { mkdirSync } = await import('node:fs')
     const second = join(fixture.base, 'second')
     mkdirSync(second)
@@ -314,7 +363,7 @@ describe('the OPS dispatch barrier', () => {
     expect(world.captured.spawned).toHaveLength(2)
   })
 
-  it('installs the guard in either load order', async () => {
+  posixIt('installs the guard in either load order', async () => {
     for (const toolsFirst of [false, true]) {
       const world = await mountWorld({ toolsFirst })
       world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
@@ -325,7 +374,7 @@ describe('the OPS dispatch barrier', () => {
     }
   })
 
-  it.each(OPS_EXEC_NAMES)('runs adapted OPS capability %s inside a confined domain', async (name) => {
+  posixIt.each(OPS_EXEC_NAMES)('runs adapted OPS capability %s inside a confined domain', async (name) => {
     const world = await mountWorld()
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     opsTool(world.ctx, name, world.captured)
@@ -376,7 +425,7 @@ describe('the protection lifecycle', () => {
     expect(captured.spawned).toEqual([])
   })
 
-  it('refuses a call whose protection generation was replaced during preparation', async () => {
+  posixIt('refuses a call whose protection generation was replaced during preparation', async () => {
     const world = await mountWorld()
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     opsTool(world.ctx, 'ops_write_file', world.captured)
@@ -416,7 +465,7 @@ describe('the protection lifecycle', () => {
     expect(world.captured.bodies).toEqual([])
   })
 
-  it('drains an entered dispatch before the fence unloads; later calls refuse', async () => {
+  posixIt('drains an entered dispatch before the fence unloads; later calls refuse', async () => {
     const world = await mountWorld()
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     let release!: () => void
@@ -436,7 +485,7 @@ describe('the protection lifecycle', () => {
     expect(resultText(after)).toContain('protection is not installed')
   })
 
-  it('survives a stale cleanup: an older generation cannot revoke the newer claim', async () => {
+  posixIt('survives a stale cleanup: an older generation cannot revoke the newer claim', async () => {
     const world = await mountWorld()
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     opsTool(world.ctx, 'ops_write_file', world.captured)
@@ -448,7 +497,7 @@ describe('the protection lifecycle', () => {
     expect(world.captured.spawned[0]!.argv.join(' ')).toContain('(deny file-write*')
   })
 
-  it('finishes an in-flight call on its snapshot while the scope row is replaced', async () => {
+  posixIt('finishes an in-flight call on its snapshot while the scope row is replaced', async () => {
     const world = await mountWorld()
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     let release!: () => void
@@ -516,7 +565,7 @@ describe('the protection lifecycle', () => {
     expect(isError(second)).toBe(false)
   })
 
-  it('runs a nested OPS dispatch under its own confined profile', async () => {
+  posixIt('runs a nested OPS dispatch under its own confined profile', async () => {
     const world = await mountWorld()
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     opsTool(world.ctx, 'ops_stat', world.captured)
@@ -556,7 +605,7 @@ describe('the D1.1c POSIX cache preflight', () => {
     expect(classifyOpsTool('write')).toBe('other')
   })
 
-  it('refuses when a deny boundary covers tmpdir or the result-cache family', () => {
+  posixIt('refuses when a deny boundary covers tmpdir or the result-cache family', () => {
     const tmp = realpathSync.native(tmpdir())
     expect(() => assertOpsPosixCacheAdmission([tmp])).toThrow(/covers the temporary directory/)
     expect(() => assertOpsPosixCacheAdmission([join(tmp, '..')])).toThrow(/covers the temporary directory/)
@@ -585,7 +634,7 @@ describe('the D1.1c POSIX cache preflight', () => {
     expect(() => assertOpsPosixCacheAdmission([join(raw, 'ordinary-sibling')])).not.toThrow()
   })
 
-  it('reaches the restricted worker for an ordinary tmpdir sibling', async () => {
+  posixIt('reaches the restricted worker for an ordinary tmpdir sibling', async () => {
     const world = await mountWorld()
     const sibling = mkdtempSync(join(tmpdir(), 'ops-compat-sibling-'))
     try {
@@ -632,7 +681,7 @@ describe('the D1.1c POSIX cache preflight', () => {
 })
 
 describe('scoped carrier dispatch', () => {
-  it('applies cap and profile through the public pipeline for an agent with a real agent.ctx', async () => {
+  posixIt('applies cap and profile through the public pipeline for an agent with a real agent.ctx', async () => {
     const world = await mountWorld({ scopeConfig: { toolAccess: { ops_write_file: 'read-only' } } })
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-write')])
     opsTool(world.ctx, 'ops_write_file', world.captured)
@@ -650,7 +699,7 @@ describe('scoped carrier dispatch', () => {
 })
 
 describe('nested OPS dispatch under a shared registry', () => {
-  it('prepares an inner profile for a nested call and refuses a foreign confined argv', async () => {
+  posixIt('prepares an inner profile for a nested call and refuses a foreign confined argv', async () => {
     const world = await mountWorld({ shared: true })
     await world.ctx.multiRootRegistry.add(fixture.workspace, { path: fixture.outside, access: 'read-only' })
     const spy = vi.spyOn(world.provider, 'restrictedExecution')
@@ -739,7 +788,7 @@ describe('OPS compatibility mode off', () => {
     expect(world.captured.bodies).toEqual(['ops_mystery'])
   })
 
-  it('confines and refuses the same calls once the mode is enabled', async () => {
+  posixIt('confines and refuses the same calls once the mode is enabled', async () => {
     const world = await mountWorld({ mode: 'danger-full-access' })
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     opsTool(world.ctx, 'ops_write_file', world.captured)
@@ -753,7 +802,7 @@ describe('OPS compatibility mode off', () => {
 })
 
 describe('OPS mode toggle lifecycle', () => {
-  it.each([false, true])('refuses a dispatch when the mode toggles during prepare (re-enable: %s)', async (reOn) => {
+  posixIt.each([false, true])('refuses a dispatch when the mode toggles during prepare (re-enable: %s)', async (reOn) => {
     const world = await mountWorld({ mode: 'danger-full-access' })
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     let release!: () => void
@@ -775,7 +824,7 @@ describe('OPS mode toggle lifecycle', () => {
     } finally { release(); await pending }
   })
 
-  it('keeps the entry-time profile for a body already running when the mode turns off', async () => {
+  posixIt('keeps the entry-time profile for a body already running when the mode turns off', async () => {
     const world = await mountWorld({ mode: 'danger-full-access' })
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
     let release!: () => void
