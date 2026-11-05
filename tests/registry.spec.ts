@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DOMAIN_NAME, MAX_ALIAS_LENGTH } from '../src/registry.ts'
-import { entryRootRef, RootValidationError } from '../src/roots.ts'
+import { entryRootRef, primaryKey, RootValidationError } from '../src/roots.ts'
 import { mountRegistryStack, type RegistryStack, type RegistryStackOptions } from './support/registry-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -35,7 +35,7 @@ function storedPaths(root: string = primary): string[] {
   const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
     tables: { roots: Record<string, { roots: { path: string }[] } | undefined> }
   }
-  return (document.tables.roots[canonicalPath(root)]?.roots ?? []).map(entry => entry.path)
+  return (document.tables.roots[primaryKey(root)]?.roots ?? []).map(entry => entry.path)
 }
 
 /** Create a sibling directory usable as an additional root. */
@@ -299,7 +299,7 @@ describe('concurrent operations', () => {
     const stored = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: { path: string }[] }> }
     }
-    expect(stored.tables.roots[primary]?.roots.map(entry => entry.path)).toEqual([first, second])
+    expect(stored.tables.roots[primaryKey(primary)]?.roots.map(entry => entry.path)).toEqual([first, second])
   })
 
   it('does not resurrect a root that a concurrent removal deleted', async () => {
@@ -466,7 +466,7 @@ describe('a store with records that cannot be told apart', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: { id: string; path: string; recordedPath: string; addedAt: string }[] }> }
     }
-    const record = document.tables.roots[primary]!
+    const record = document.tables.roots[primaryKey(primary)]!
     const [entry] = record.roots
     const second = canonicalPath(join(fixture.base, 'twinned'))
     record.roots.push({ ...entry!, path: second, recordedPath: second })
@@ -518,7 +518,7 @@ describe('a store with records that cannot be told apart', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
     }
-    for (const entry of document.tables.roots[primary]!.roots) delete entry.recordedPath
+    for (const entry of document.tables.roots[primaryKey(primary)]!.roots) delete entry.recordedPath
     writeFileSync(storeFile, JSON.stringify(document))
 
     const second = await mount()
@@ -539,7 +539,7 @@ describe('a store with records that cannot be told apart', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
     }
-    delete document.tables.roots[primary]!.roots[0]!.recordedPath
+    delete document.tables.roots[primaryKey(primary)]!.roots[0]!.recordedPath
     writeFileSync(storeFile, JSON.stringify(document))
 
     const second = await mount()
@@ -833,7 +833,7 @@ describe('store that this build cannot read', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: { id: string; path: string; addedAt: string }[] }> }
     }
-    const record = document.tables.roots[primary]!
+    const record = document.tables.roots[primaryKey(primary)]!
     record.roots.push({ id: 'hand-written', path: inner, addedAt: '2026-09-12T00:00:00.000Z' })
     writeFileSync(storeFile, JSON.stringify(document))
 
@@ -868,7 +868,7 @@ describe('per-root access', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: Record<string, unknown>[] } | undefined> }
     }
-    return document.tables.roots[primary]?.roots ?? []
+    return document.tables.roots[primaryKey(primary)]?.roots ?? []
   }
 
   it('reads a legacy record — recordedPath only — as the inherit grant it now means', async () => {
@@ -930,7 +930,7 @@ describe('per-root access', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
     }
-    document.tables.roots[primary]!.roots[0]!.readOnlyRecordedPath = extra
+    document.tables.roots[primaryKey(primary)]!.roots[0]!.readOnlyRecordedPath = extra
     writeFileSync(storeFile, JSON.stringify(document))
 
     const second = await mount()
@@ -1187,8 +1187,8 @@ describe('a withheld root still reserves its recorded boundary', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
     }
-    const entry = document.tables.roots[primary]!.roots[0]!
-    document.tables.roots[primary]!.roots.push({ ...entry, id: 'twin' })
+    const entry = document.tables.roots[primaryKey(primary)]!.roots[0]!
+    document.tables.roots[primaryKey(primary)]!.roots.push({ ...entry, id: 'twin' })
     writeFileSync(storeFile, JSON.stringify(document))
 
     const second = await mount()
@@ -1226,7 +1226,7 @@ describe('a legacy overlapping store (membership-conflict)', () => {
       tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
     }
     const parent = { id: 'legacy-parent', path: cage, readWriteRecordedPath: cage, addedAt: '2026-09-12T00:00:00.000Z' }
-    const roots = document.tables.roots[primary]!.roots
+    const roots = document.tables.roots[primaryKey(primary)]!.roots
     if (order === 'parent-first') roots.unshift(parent)
     else roots.push(parent)
     writeFileSync(storeFile, JSON.stringify(document))
@@ -1299,7 +1299,7 @@ describe('a legacy overlapping store (membership-conflict)', () => {
       tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
     }
     const inner = canonicalPath(join(healthy, 'inner'))
-    document.tables.roots[primary]!.roots.push({
+    document.tables.roots[primaryKey(primary)]!.roots.push({
       id: 'corrupt', path: inner, recordedPath: inner, readOnlyRecordedPath: inner,
       addedAt: '2026-09-12T00:00:00.000Z',
     })
@@ -1320,7 +1320,7 @@ describe('revive never changes the grant target (F2)', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: Record<string, unknown>[] } | undefined> }
     }
-    return document.tables.roots[primary]?.roots ?? []
+    return document.tables.roots[primaryKey(primary)]?.roots ?? []
   }
 
   it('refuses a redirected revive at every grant encoding, leaving store bytes and grant fields untouched', async (context) => {
@@ -1374,7 +1374,7 @@ describe('revive never changes the grant target (F2)', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
     }
-    document.tables.roots[primary]!.roots[0]!.readOnlyRecordedPath = extra
+    document.tables.roots[primaryKey(primary)]!.roots[0]!.readOnlyRecordedPath = extra
     writeFileSync(storeFile, JSON.stringify(document))
 
     const second = await mount()
@@ -1588,7 +1588,7 @@ describe('the upstream primary spelling (F3/MRW-01)', () => {
     const after = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: unknown[] }> }
     }
-    expect(Object.keys(after.tables.roots).sort()).toEqual([real, spelling].sort())
-    expect(after.tables.roots[spelling]).toEqual(after.tables.roots[real])
+    expect(Object.keys(after.tables.roots).sort()).toEqual([primaryKey(real), primaryKey(spelling)].sort())
+    expect(after.tables.roots[primaryKey(spelling)]).toEqual(after.tables.roots[primaryKey(real)])
   })
 })

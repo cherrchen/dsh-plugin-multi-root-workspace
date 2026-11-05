@@ -7,6 +7,7 @@ import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import MultiRootFileSystem from '../src/fs.ts'
+import { primaryKey } from '../src/roots.ts'
 import type { RegistryOperation } from '../src/registry-operation.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -105,7 +106,7 @@ describe('local Registry operation admission', () => {
     const serialize = internal.serialize.bind(internal), queued = Promise.withResolvers<void>()
     vi.spyOn(internal, 'serialize').mockImplementation((key, job) => {
       const work = serialize(key, job)
-      if (key === canonicalPath(other)) queued.resolve()
+      if (key === primaryKey(other)) queued.resolve()
       return work
     })
     const resolve = vi.spyOn(stack.scope, 'resolve')

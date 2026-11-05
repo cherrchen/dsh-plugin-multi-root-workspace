@@ -11,6 +11,7 @@ import type { Snapshot } from '../src/authority/protocol.ts'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { DOMAIN_NAME } from '../src/registry.ts'
+import { primaryKey } from '../src/roots.ts'
 import { RegistryAuthorityLease } from '../src/registry-lease.ts'
 import type { Config as RegistryConfig } from '../src/registry.ts'
 import type { Config as ScopeConfig } from '../src/scope.ts'
@@ -437,7 +438,7 @@ nativeTest('commits a takeover atomically: callbacks only observe the committed 
     await follower.registry.refresh(fixture.workspace)
     expect(follower.registry.authority.kind).toBe('active')
     expect(scopeCalls).toBe(1)
-    expect(changedKeys.sort()).toEqual(primaries.map(([primary]) => canonicalPath(primary)).sort())
+    expect(changedKeys.sort()).toEqual(primaries.map(([primary]) => primaryKey(primary)).sort())
     expect(broadcast).toHaveLength(2)
     for (const snapshot of broadcast) expect(snapshot.roots.map(row => row.access)).toEqual(['read-only'])
   } finally { unsubscribe(); unsubscribeRegistry() }

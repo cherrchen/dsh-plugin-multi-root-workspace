@@ -19,6 +19,7 @@ import { AuthorityRpcError } from '../src/authority/protocol.ts'
 import * as CommandModule from '../src/command.ts'
 import { parseFoldersCommand, renderRootsReport, revealAccepted, revealArgv } from '../src/command.ts'
 import { PANEL_CHANNEL, type PanelRequest, type RootsView } from '../src/contract.ts'
+import { primaryKey } from '../src/roots.ts'
 import type { RootStatus } from '../src/roots.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -774,7 +775,7 @@ describe('the panel channel', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: { id: string; path: string; recordedPath: string; addedAt: string }[] }> }
     }
-    const record = document.tables.roots[primary]!
+    const record = document.tables.roots[primaryKey(primary)]!
     const [entry] = record.roots
     record.roots.push({ ...entry!, path: twinned, recordedPath: canonicalPath(twinned) })
     writeFileSync(storeFile, JSON.stringify(document))
@@ -811,8 +812,8 @@ describe('the panel channel', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: { id: string; path: string; recordedPath: string; addedAt: string }[] }> }
     }
-    const entry = document.tables.roots[primary]!.roots[0]!
-    document.tables.roots[primary]!.roots.push({ ...entry, path: second, recordedPath: canonicalPath(second) })
+    const entry = document.tables.roots[primaryKey(primary)]!.roots[0]!
+    document.tables.roots[primaryKey(primary)]!.roots.push({ ...entry, path: second, recordedPath: canonicalPath(second) })
     writeFileSync(storeFile, JSON.stringify(document))
     await stack.dispose()
     stacks = stacks.filter(candidate => candidate !== stack)

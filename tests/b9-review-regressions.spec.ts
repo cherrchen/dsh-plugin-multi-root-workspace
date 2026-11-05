@@ -24,6 +24,7 @@ import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MultiRootFileSystem } from '../src/fs.ts'
 import { DOMAIN_NAME } from '../src/registry.ts'
+import { primaryKey } from '../src/roots.ts'
 import type { Config as ScopeConfig } from '../src/scope.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason } from './support/temp-workspace.ts'
@@ -231,7 +232,7 @@ describe('a legacy overlapping store keeps its read-only boundary', () => {
     const document = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: Record<string, unknown>[] }> }
     }
-    document.tables.roots[canonicalPath(fixture.workspace)]!.roots.push({
+    document.tables.roots[primaryKey(fixture.workspace)]!.roots.push({
       id: 'legacy-parent',
       path: canonicalPath(cage),
       readWriteRecordedPath: canonicalPath(cage),
