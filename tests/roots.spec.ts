@@ -22,6 +22,7 @@ import {
   isCanonicallyUnder,
   isWindowsNetworkOrDevicePath,
   markProtectedPaths,
+  primaryKey,
   removeStatusAt,
   reservedRootBoundary,
   entryRootRef,
@@ -432,7 +433,8 @@ describe('classifyStoredRoots', () => {
     const inside = join(primary, 'inside')
     const statuses = classifyStoredRoots(primary, [stored(sibling, 'moved', inside)])
     expect(statuses[0]?.state).toBe('invalid')
-    expect(statuses[0]?.invalidReason).toBeUndefined()
+    // Trustworthy boundary: withheld, deny-only — never re-granted.
+    expect(statuses[0]?.invalidReason).toBe('primary-overlap')
     expect(statuses[0]?.detail).toContain('overlaps')
   })
 
@@ -704,5 +706,21 @@ describe('protected DSH directories', () => {
     expect(marked[0]?.invalidReason).toBe('protected-path')
     expect(marked[0]?.detail).toBe(direct[0]?.detail)
     expect(marked[1]?.state).toBe('available')
+  })
+})
+
+describe('primaryKey', () => {
+  it('normalizes lexically without touching the filesystem', () => {
+    const base = join(fixture.base, 'anything')
+    expect(primaryKey(`${base}/`)).toBe(primaryKey(base))
+    expect(primaryKey(join(base, 'sub', '..'))).toBe(primaryKey(base))
+    expect(primaryKey(join(base, 'a/../b'))).toBe(primaryKey(join(base, 'b')))
+    // Lexical only: no realpath — a symlink spelling keeps its own key.
+    expect(primaryKey(fixture.base)).not.toBe(canonicalPath(fixture.base) === fixture.base ? '' : '')
+  })
+
+  it('case-folds on Windows and nowhere else', () => {
+    expect(primaryKey('C:\\Repos\\WS', 'win32')).toBe(primaryKey('c:\\repos\\ws', 'win32'))
+    expect(primaryKey('/Repos/WS', 'linux')).not.toBe(primaryKey('/repos/ws', 'linux'))
   })
 })

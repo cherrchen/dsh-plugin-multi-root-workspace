@@ -5,6 +5,7 @@ import { mountRegistryStack, type RegistryStack } from './support/registry-stack
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { migrateRootSkills, skillsMetadataValid } from '../src/skills/metadata.ts'
 import { DOMAIN_NAME } from '../src/registry.ts'
+import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 
 let fixture: FixtureWorkspace, stack: RegistryStack, primary: string, store: string
 const ref = (id: string) => ({ kind: 'id' as const, id })
@@ -112,8 +113,10 @@ describe('Skills metadata on the production Registry', () => {
     await reopen(data => { delete data.tables.roots[primary].roots[0].aliasId })
     const contender = await mountRegistryStack(store)
     try {
-      expect(contender.registry.authority.kind).toBe('contended')
-      await expect(contender.registry.setSkillsEnabled(primary, { kind: 'ordinal', ordinal: 1 }, false)).rejects.toMatchObject({ code: 'registry-contended' })
+      expect(contender.registry.authority.kind).toBe('follower')
+      // A follower never opens the store — no migration — yet its mutations
+      // still reach the owner over IPC.
+      await contender.registry.setSkillsEnabled(primary, { kind: 'ordinal', ordinal: 1 }, false)
       await stack.dispose(); await contender.registry.refresh(primary)
       expect(contender.registry.list(primary)[0]?.aliasId).toBe('takeover')
     } finally { await contender.dispose() }
@@ -125,15 +128,17 @@ describe('Skills metadata on the production Registry', () => {
     const data = document(); delete data.tables.roots[primary].roots[0].aliasId
     writeFileSync(stack.storeFile, JSON.stringify(data))
     let writes = 0
-    stack = await mountRegistryStack(store, {}, { beforeGate: async ctx => {
-      const open = ctx.storageDomain.open.bind(ctx.storageDomain)
-      vi.spyOn(ctx.storageDomain, 'open').mockImplementation(async (...args) => {
-        const domain = await open(...args)
-        const table = domain.table('roots')
-        vi.spyOn(table, 'put').mockImplementation(async () => { writes++; throw new Error('disk full') })
-        return domain
-      })
-    } })
+    // The shared medium opens through a fresh DomainFacility per stack; the
+    // failing write is injected by wrapping the next facility's domain —
+    // the legacy `storageDomain` seam is gone with the single-process mode.
+    const open = DomainFacility.prototype.open
+    vi.spyOn(DomainFacility.prototype, 'open').mockImplementation(async function (...args) {
+      const domain = await open.apply(this as DomainFacility, args)
+      const table = domain.table('roots')
+      vi.spyOn(table, 'put').mockImplementation(async () => { writes++; throw new Error('disk full') })
+      return domain
+    })
+    stack = await mountRegistryStack(store)
     const rows = stack.registry.list(primary)
     expect(rows[0]).toMatchObject({ state: 'available' })
     expect(skillsMetadataValid(rows[0]!, rows)).toBe(false)

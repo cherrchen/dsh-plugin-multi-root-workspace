@@ -64,3 +64,5 @@ Numbers increment; titles use lowercase kebab-case.
 - [ADR-0026-registry-background-recovery.md](./ADR-0026-registry-background-recovery.md) (Chinese) — Registry authority background recovery and diagnostics: structured retry eligibility, scheduler invariants, projection-sync completion, scope truth signatures and commit notification atomicity, local handshake cancellation, and a diagnostics surface (Accepted contract; implementation pending).
 
 - [ADR-0027-revive-target-and-protected-paths.md](./ADR-0027-revive-target-and-protected-paths.md) (Chinese) — Revive never changes the grant target; registration boundary and stored-record withholding for `$DSH_HOME`, the Registry medium and the lease directory (Accepted, P1 contract).
+
+- [ADR-0028-upstream-primary-identity-and-shared-only-registry.md](./ADR-0028-upstream-primary-identity-and-shared-only-registry.md) (Chinese) — Primary-root identity is the upstream spelling (MRW-01), denies win over the primary root; the Registry keeps only the shared mode (Accepted).

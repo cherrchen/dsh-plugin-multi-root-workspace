@@ -692,3 +692,22 @@ nativeTest('withholds a root inside a follower\'s own home even while the owner 
   expect(follower.scope.scopeOf(fixture.workspace)).not.toContain(canonicalPath(followerHome))
   expect(owner.registry.list(fixture.workspace)[0]?.state).toBe('available')
 })
+
+nativeTest('round-trips a symlinked primary spelling through the owner by primaryKey', async (context) => {
+  const noSymlinks = symlinkUnsupportedReason()
+  if (noSymlinks !== undefined) context.skip(noSymlinks)
+  const owner = await mount()
+  const real = join(fixture.base, 'ws-real')
+  mkdirSync(real)
+  const spelling = join(fixture.base, 'ws-link')
+  symlinkSync(real, spelling)
+  const follower = await mount()
+  expect(follower.registry.authority.kind).toBe('follower')
+  await follower.registry.add(spelling, { path: fixture.outside })
+  // Both sides see the row under the SPELLING's key; the realpath target is a
+  // distinct primary with its own (empty) record set.
+  expect(follower.registry.list(spelling)).toHaveLength(1)
+  expect(owner.registry.list(spelling)).toHaveLength(1)
+  expect(owner.registry.list(real)).toEqual([])
+  expect(follower.registry.list(real)).toEqual([])
+})

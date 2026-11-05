@@ -281,14 +281,14 @@ describe('the /add-dirs alias', () => {
       expect(added.kind).toBe('success')
       expect(added.text).toContain(`(${flag === '' ? 'inherit' : flag.slice(2)})`)
       expect((await run('list')).text).toBe(added.text)
-      expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
-      expect(stack.scope.writableOf(primary)).toEqual(flag === '--read-only' ? [] : [canonicalPath(extra)])
+      expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(extra)])
+      expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual(flag === '--read-only' ? [] : [canonicalPath(extra)])
 
       const duplicate = await run(`add "${extra}"`)
       expect(duplicate.kind).toBe('error')
       expect(duplicate.text).toContain('duplicate')
       expect((await run('remove 1')).kind).toBe('success')
-      expect(stack.scope.scopeOf(primary)).toEqual([])
+      expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
     },
   )
 
@@ -298,7 +298,7 @@ describe('the /add-dirs alias', () => {
       const stack = await mount()
       expect(await run(input, 'add-dirs')).toEqual(await run(`add ${input}`))
       expect((await run(input, 'add-dirs')).kind).toBe('error')
-      expect(stack.scope.scopeOf(primary)).toEqual([])
+      expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
     },
   )
 
@@ -309,7 +309,7 @@ describe('the /add-dirs alias', () => {
     const added = await run('--read-only', 'add-dirs')
     expect(added.kind).toBe('success')
     expect(added.text).toContain(`${canonicalPath(picked)} (read-only)`)
-    expect(stack.scope.writableOf(primary)).toEqual([])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([])
 
     await mount()
     const withoutPicker = await run('', 'add-dirs')
@@ -329,7 +329,7 @@ describe('the /add-dirs alias', () => {
     const revived = await run(extra, 'add-dirs')
     expect(revived.kind).toBe('success')
     expect(revived.text).toContain(`${canonicalPath(extra)} (read-only)`)
-    expect(stack.scope.writableOf(primary)).toEqual([])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([])
   })
 })
 
@@ -351,7 +351,7 @@ describe('the /workspace-folders command', () => {
     const added = await run(`add ${extra}`)
     expect(added.kind).toBe('success')
     expect(added.text).toContain(canonicalPath(extra))
-    expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(extra)])
 
     const aliased = await run(`alias 1 payments`)
     expect(aliased.text).toContain('[payments]')
@@ -368,7 +368,7 @@ describe('the /workspace-folders command', () => {
 
     const removed = await run('remove 1')
     expect(removed.text).toContain('No additional roots')
-    expect(stack.scope.scopeOf(primary)).toEqual([])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
   })
 
   it('accepts a quoted path and a path reference', async () => {
@@ -377,9 +377,9 @@ describe('the /workspace-folders command', () => {
     mkdirSync(spaced)
 
     expect((await run(`add "${spaced}"`)).kind).toBe('success')
-    expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(spaced)])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(spaced)])
     expect((await run(`remove "${spaced}"`)).kind).toBe('success')
-    expect(stack.scope.scopeOf(primary)).toEqual([])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
   })
 
   it('reports failures as error results with the stable code', async () => {
@@ -429,17 +429,17 @@ describe('the /workspace-folders command', () => {
     const extra = join(fixture.base, 'extra')
     mkdirSync(extra)
     await run(`add ${extra}`)
-    expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(extra)])
 
     rmSync(extra, { recursive: true, force: true })
     const gone = await run('list')
     expect(gone.text).toContain('missing')
-    expect(stack.scope.scopeOf(primary)).toEqual([])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
 
     mkdirSync(extra)
     const back = await run('list')
     expect(back.text).not.toContain('missing')
-    expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(extra)])
   })
 
   it('explains itself on help', async () => {
@@ -688,12 +688,12 @@ describe('the panel channel', () => {
     rmSync(extra, { recursive: true, force: true })
     const gone = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(gone.value?.roots?.[0]?.state).toBe('missing')
-    expect(stack.scope.scopeOf(primary)).toEqual([])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
 
     mkdirSync(extra)
     const back = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(back.value?.roots?.[0]?.state).toBe('available')
-    expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(extra)])
   })
 
   it('withholds a root whose directory was swapped for a symlink', async (context) => {
@@ -718,7 +718,7 @@ describe('the panel channel', () => {
     // resolves now is reported as the reason, not as the path.
     expect(view.value?.roots?.[0]?.path).toBe(granted)
     expect(view.value?.roots?.[0]?.detail).toContain(elsewhere)
-    expect(stack.scope.scopeOf(primary)).toEqual([])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
     // Revealing reports what it revealed, and revealing is still allowed: it is
     // an operator action, not a grant.
     const revealed = await callPanel('reveal', { sessionId: PANEL_SESSION, id })
@@ -784,7 +784,7 @@ describe('the panel channel', () => {
 
     const listed = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(listed.value?.roots?.map(root => root.state)).toEqual(['invalid', 'invalid'])
-    expect(restarted.scope.scopeOf(primary)).toEqual([])
+    expect(restarted.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
 
     const listedEntry = listed.value!.roots![1]!
     const removed = await callPanel('remove', {
@@ -873,8 +873,8 @@ describe('per-root access on the command and the panel', () => {
     expect(added.text).toContain(`${canonicalPath(extra)} (read-only)`)
     // A read-only member stays registered but is not a writable root.
     expect(added.text).toContain('Writable additional roots under the current mode: 0 of 1.')
-    expect(stack.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
-    expect(stack.scope.writableOf(primary)).toEqual([])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(extra)])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([])
   })
 
   it('toggles access with `access <ref> read-only|read-write` and rejects other levels', async () => {
@@ -886,12 +886,12 @@ describe('per-root access on the command and the panel', () => {
     const downgraded = await run(`access 1 read-only`)
     expect(downgraded.kind).toBe('success')
     expect(downgraded.text).toContain('(read-only)')
-    expect(stack.scope.writableOf(primary)).toEqual([])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([])
 
     const upgraded = await run(`access 1 read-write`)
     expect(upgraded.kind).toBe('success')
     expect(upgraded.text).toContain('(read-write)')
-    expect(stack.scope.writableOf(primary)).toEqual([canonicalPath(extra)])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([canonicalPath(extra)])
 
     const bad = await run(`access 1 readwrite`)
     expect(bad.kind).toBe('error')
@@ -919,7 +919,7 @@ describe('per-root access on the command and the panel', () => {
     expect(revived.kind).toBe('success')
     expect(revived.text).toContain(`${canonicalPath(extra)} (read-only)`)
     expect(revived.text).not.toContain('(read-write)')
-    expect(stack.scope.writableOf(primary)).toEqual([])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([])
 
     // An explicit flag is the upgrade on the same revive path.
     rmSync(extra, { recursive: true, force: true })
@@ -928,7 +928,7 @@ describe('per-root access on the command and the panel', () => {
     const upgraded = await run(`add ${extra} --read-write`)
     expect(upgraded.kind).toBe('success')
     expect(upgraded.text).toContain(`${canonicalPath(extra)} (read-write)`)
-    expect(stack.scope.writableOf(primary)).toEqual([canonicalPath(extra)])
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([canonicalPath(extra)])
   })
 
   it('manages namespace and Skills through command and matching panel mutations', async () => {

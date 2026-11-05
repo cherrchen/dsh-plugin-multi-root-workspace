@@ -35,7 +35,6 @@ import type { ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import { connectionRpcFor } from './compat/connection-rpc.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
-import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { effectiveRootAccess } from './contract.ts'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
@@ -533,19 +532,22 @@ async function targetOf(
  *
  * @param ctx - the host context that may carry `sessions`.
  * @param sessionId - the id the panel sent; already required by the wire schema.
- * @returns the canonical cwd of that session.
+ * @returns the session's cwd spelling, verbatim — the Registry key.
  * @throws {RootValidationError} `session-not-found` when the service is absent,
  *   the id does not name a live session, or that session has no cwd.
  */
 export function resolvePanelPrimaryRoot(ctx: Context, sessionId: string): string {
   const session = ctx.get('sessions')?.get(sessionId as SessionId)
   const cwd = session?.header.cwd
-  if (session === undefined || cwd === undefined || cwd === '') {
+  // The Registry key is the upstream spelling verbatim — never re-resolved
+  // (ADR-0028 / MRW-01): a symlinked session and its realpath target are
+  // different identities with different record sets.
+  if (session === undefined || cwd === undefined || cwd === '' || !isAbsolute(cwd)) {
     throw new RootValidationError('session-not-found', `session "${sessionId}" is not an active host session`, {
       reference: sessionId,
     })
   }
-  return canonicalPath(cwd)
+  return cwd
 }
 
 /** Project one status into the panel's view. */

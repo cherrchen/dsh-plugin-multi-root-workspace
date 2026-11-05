@@ -24,7 +24,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-system-prompt'
-import type { RootAccess } from './roots.ts'
+import { primaryKey, type RootAccess } from './roots.ts'
 import { currentRegistryOperation, rememberOperationProfile, operationPermitsProfile } from './registry-operation.ts'
 import { aroundTool } from './compat/tool-context.ts'
 import { effectiveRootAccess } from './contract.ts'
@@ -568,8 +568,11 @@ export class MultiRootScopeService extends Service {
   }
 
   private project(policy: SandboxExecutionPolicy, capped: boolean, recorded?: readonly AdditionalWorkspaceRoot[], authority = this.registryAuthority): FilesystemScope {
+    // The upstream workspace spelling is the Registry key (primaryKey never
+    // re-resolves it); the canonical form stays geometry — it is what the
+    // sanitized member check and the returned `primaryRoot` compare against.
     const primaryRoot = canonicalPath(policy.workspaceRoot)
-    const registered = recorded ?? this.rootsByPrimary.get(primaryRoot) ?? []
+    const registered = recorded ?? this.rootsByPrimary.get(primaryKey(policy.workspaceRoot)) ?? []
     const roots = authority === 'unavailable' ? [] : sanitizeMembers(primaryRoot, registered)
     const writable = capped || authority === 'unavailable'
       ? []
@@ -577,8 +580,10 @@ export class MultiRootScopeService extends Service {
     // Use the recorded spelling, never re-resolve it into a replacement grant.
     // A disappeared directory must not become writable merely because it left
     // membership; explicit removal is what withdraws the negative boundary.
+    // Deny wins over the primary root too: a record whose recorded grant now
+    // coincides with the current primary target keeps its restriction.
     const denied = registered.filter(root => typeof root.recordedPath === 'string'
-      && root.recordedPath !== '' && root.recordedPath !== primaryRoot
+      && root.recordedPath !== ''
       && (capped || !effectivelyWritable(policy.mode, root.access)))
       .map(root => root.recordedPath)
     const deniedRoots = [...new Set(denied)]
@@ -674,10 +679,9 @@ export class MultiRootScopeService extends Service {
 
   /** The sanitized members of one primary root, in registry order. */
   private membersOf(primaryRoot: string): readonly ScopeRoot[] {
-    const key = canonicalPath(primaryRoot)
-    const registered = this.rootsByPrimary.get(key)
+    const registered = this.rootsByPrimary.get(primaryKey(primaryRoot))
     if (registered === undefined) return []
-    return sanitizeMembers(key, registered)
+    return sanitizeMembers(canonicalPath(primaryRoot), registered)
   }
 
   /**
@@ -686,11 +690,12 @@ export class MultiRootScopeService extends Service {
    * M1 uses this from tests and smoke scripts only; M3 feeds it from plugin
    * storage. It is a plain setter so the transition swaps the data source
    * without touching any provider.
-   * @param primaryRoot - canonical primary root to register roots under.
+   * @param primaryRoot - primary root the roots belong to; the Registry key
+   *   is its upstream spelling via {@link primaryKey}, never re-resolved.
    * @param roots - the additional roots, in display order.
    */
   setAdditionalRoots(primaryRoot: string, roots: readonly AdditionalWorkspaceRoot[]): void {
-    const key = canonicalPath(primaryRoot)
+    const key = primaryKey(primaryRoot)
     if (roots.length === 0) {
       this.rootsByPrimary.delete(key)
     } else {

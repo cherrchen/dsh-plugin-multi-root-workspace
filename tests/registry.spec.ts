@@ -9,7 +9,7 @@
  * handed to the kernel dialects.
  */
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { renameSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -98,7 +98,7 @@ describe('registration lifecycle', () => {
     expect(statuses).toHaveLength(1)
     expect(statuses[0]?.state).toBe('available')
     expect(statuses[0]?.path).toBe(extra)
-    expect(scope.scopeOf(primary)).toEqual([extra])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra])
     expect(registry.granted(primary)).toEqual([extra])
     expect(storedPaths()).toEqual([extra])
   })
@@ -117,17 +117,17 @@ describe('registration lifecycle', () => {
     // Move the last one in front of the first (what the panel's ↑ action does).
     await registry.move(primary, { kind: 'ordinal', ordinal: 3 }, { kind: 'ordinal', ordinal: 1 })
     expect(registry.granted(primary)).toEqual([third, first, second])
-    expect(scope.scopeOf(primary)).toEqual([third, first, second])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([third, first, second])
     expect(storedPaths()).toEqual([third, first, second])
 
     await disposeAll()
     const restarted = await mount()
-    expect(restarted.scope.scopeOf(primary)).toEqual([third, first, second])
+    expect(restarted.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([third, first, second])
 
     // No anchor moves it to the end.
     await restarted.registry.move(primary, { kind: 'ordinal', ordinal: 1 })
     expect(restarted.registry.granted(primary)).toEqual([first, second, third])
-    expect(restarted.scope.scopeOf(primary)).toEqual([first, second, third])
+    expect(restarted.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([first, second, third])
     expect(storedPaths()).toEqual([first, second, third])
   })
 
@@ -164,11 +164,11 @@ describe('registration lifecycle', () => {
 
     const afterFirst = await registry.remove(primary, { kind: 'path', path: first })
     expect(afterFirst.map(status => status.path)).toEqual([second])
-    expect(scope.scopeOf(primary)).toEqual([second])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([second])
 
     const empty = await registry.remove(primary, { kind: 'id', id: afterFirst[0]!.id })
     expect(empty).toEqual([])
-    expect(scope.scopeOf(primary)).toEqual([])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
     expect(storedPaths()).toEqual([])
   })
 
@@ -237,7 +237,7 @@ describe('durability across a restart', () => {
     expect(statuses.map(status => status.state)).toEqual(['available', 'available'])
     expect(statuses[0]?.alias).toBe('payments')
     expect(statuses[0]?.id).toBe(originalId)
-    expect(second.scope.scopeOf(primary)).toEqual([extra, other])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra, other])
   })
 
   it('withholds a registration whose directory is gone, and restores it on recheck', async () => {
@@ -252,12 +252,12 @@ describe('durability across a restart', () => {
     expect(status?.state).toBe('missing')
     expect(status?.detail).toBeDefined()
     expect(second.registry.granted(primary)).toEqual([])
-    expect(second.scope.scopeOf(primary)).toEqual([])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
 
     mkdirSync(extra)
     const rechecked = await second.registry.recheck(primary)
     expect(rechecked[0]?.state).toBe('available')
-    expect(second.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(extra)])
   })
 
   it('re-registering a withheld root revives it instead of reporting a duplicate', async () => {
@@ -295,7 +295,7 @@ describe('concurrent operations', () => {
     expect(firstResult).toHaveLength(1)
     expect(secondResult).toHaveLength(2)
     expect(registry.granted(primary)).toEqual([first, second])
-    expect(scope.scopeOf(primary)).toEqual([first, second])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([first, second])
     const stored = JSON.parse(readFileSync(storeFile, 'utf8')) as {
       tables: { roots: Record<string, { roots: { path: string }[] }> }
     }
@@ -316,7 +316,7 @@ describe('concurrent operations', () => {
 
     expect(registry.list(primary).map(status => status.path)).toEqual([fresh])
     expect(registry.granted(primary)).toEqual([fresh])
-    expect(scope.scopeOf(primary)).toEqual([fresh])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([fresh])
     expect(storedPaths()).toEqual([fresh])
   })
 
@@ -353,13 +353,13 @@ describe('revalidation without a restart', () => {
     const gone = await registry.refresh(primary)
     expect(gone[0]?.state).toBe('missing')
     expect(registry.granted(primary)).toEqual([])
-    expect(scope.scopeOf(primary)).toEqual([])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
 
     mkdirSync(extra)
     const back = await registry.refresh(primary)
     expect(back[0]?.state).toBe('available')
     expect(registry.granted(primary)).toEqual([canonicalPath(extra)])
-    expect(scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(extra)])
   })
 
   it('never rewrites the store on a read-path refresh', async () => {
@@ -389,15 +389,15 @@ describe('revalidation without a restart', () => {
     const replaced = await registry.refresh(primary)
     expect(replaced[0]?.state).toBe('redirected')
     expect(registry.granted(primary)).toEqual([])
-    expect(scope.scopeOf(primary)).toEqual([])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
     // The dangerous outcome would be the OTHER directory showing up here.
-    expect(scope.scopeOf(primary)).not.toContain(canonicalPath(elsewhere))
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).not.toContain(canonicalPath(elsewhere))
 
     unlinkSync(granted)
     mkdirSync(granted)
     const restored = await registry.refresh(primary)
     expect(restored[0]?.state).toBe('available')
-    expect(scope.scopeOf(primary)).toEqual([canonicalPath(granted)])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(granted)])
   })
 
   it('refuses re-registering a path that now resolves elsewhere — revive never changes the target', async (context) => {
@@ -420,7 +420,7 @@ describe('revalidation without a restart', () => {
     expect(registry.list(primary)).toHaveLength(1)
     expect(registry.list(primary)[0]?.state).toBe('redirected')
     expect(registry.granted(primary)).toEqual([])
-    expect(scope.scopeOf(primary)).toEqual([])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
   })
 
   it('judges a moved grant from the fresh classification, not the stale cache', async (context) => {
@@ -441,7 +441,7 @@ describe('revalidation without a restart', () => {
     expect(registry.list(primary)).toHaveLength(1)
     expect(storedPaths()).toEqual([granted])
     expect(registry.granted(primary)).toEqual([])
-    expect(scope.scopeOf(primary)).toEqual([])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
   })
 
   it('tells observers only when the effective grant changed', async () => {
@@ -487,7 +487,7 @@ describe('a store with records that cannot be told apart', () => {
     expect(statuses.map(status => status.state)).toEqual(['invalid', 'invalid'])
     expect(statuses.map(status => status.id)).toEqual([id, id])
     expect(second_.registry.granted(primary)).toEqual([])
-    expect(second_.scope.scopeOf(primary)).toEqual([])
+    expect(second_.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
 
     // Alias and move address one exact row as well; neither may fan out by id
     // or make sorting double as implicit data cleanup.
@@ -572,7 +572,7 @@ describe('fresh classification inside every mutation', () => {
     expect(storedPaths()).toEqual([outer])
     expect(registry.list(primary)[0]?.state).toBe('available')
     expect(registry.granted(primary)).toEqual([outer])
-    expect(scope.scopeOf(primary)).toEqual([outer])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([outer])
   })
 
   it('judges a nested add against the restored root even while the cache still says missing', async () => {
@@ -588,7 +588,7 @@ describe('fresh classification inside every mutation', () => {
     mkdirSync(inner, { recursive: true })
     await expect(registry.add(primary, { path: inner })).rejects.toMatchObject({ code: 'nested' })
     expect(storedPaths()).toEqual([outer])
-    expect(scope.scopeOf(primary)).toEqual([outer])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([outer])
   })
 
   it('revives a redirected registration against the fresh resolution when the original directory is back', async (context) => {
@@ -612,7 +612,7 @@ describe('fresh classification inside every mutation', () => {
     expect(statuses[0]?.state).toBe('available')
     expect(statuses[0]?.path).toBe(canonicalPath(granted))
     expect(registry.granted(primary)).toEqual([canonicalPath(granted)])
-    expect(scope.scopeOf(primary)).toEqual([canonicalPath(granted)])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(granted)])
   })
 
   it('publishes the restored grant exactly once when an alias lands on a root that came back', async () => {
@@ -630,7 +630,7 @@ describe('fresh classification inside every mutation', () => {
 
     expect(statuses[0]?.state).toBe('available')
     expect(statuses[0]?.alias).toBe('back')
-    expect(scope.scopeOf(primary)).toEqual([extra])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra])
     expect(publications).toBe(1)
   })
 
@@ -655,7 +655,7 @@ describe('fresh classification inside every mutation', () => {
 
     expect(publications).toBe(1)
     expect(registry.granted(primary)).toEqual([second, first])
-    expect(scope.scopeOf(primary)).toEqual([second, first])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([second, first])
   })
 
   it('serializes a concurrent add/remove/alias/move burst with no lost write', async () => {
@@ -698,7 +698,7 @@ describe('fresh classification inside every mutation', () => {
     // nothing beyond what the store still holds.
     expect(storedPaths()).toEqual([extra])
     expect(registry.list(primary).map(status => status.path)).toEqual([extra])
-    expect(scope.scopeOf(primary)).toEqual([extra])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra])
 
     // The queue is not poisoned: a later mutation proceeds normally.
     expect(await registry.remove(primary, { kind: 'path', path: extra })).toEqual([])
@@ -706,32 +706,23 @@ describe('fresh classification inside every mutation', () => {
 })
 
 describe('lease authority', () => {
-  it('rejects every mutation as registry-contended before touching the filesystem', async () => {
+  it('mounts a second Host as a follower whose mutations reach the owner', async () => {
     await mount()
     const second = await mount()
-    expect(second.registry.authority.kind).toBe('contended')
+    // Shared mode (the only mode now): a second mount is a follower — its
+    // mutations travel to the owner over IPC instead of being refused.
+    expect(second.registry.authority.kind).toBe('follower')
 
-    // The candidate does not exist: a contended process must report the lease,
-    // never a filesystem verdict it is not allowed to make.
-    const absent = join(fixture.base, 'never-created')
-    await expect(second.registry.add(primary, { path: absent })).rejects.toMatchObject({
-      code: 'registry-contended',
-    })
-    await expect(second.registry.removeAt(primary, { kind: 'ordinal', ordinal: 1 })).rejects.toMatchObject({
-      code: 'registry-contended',
-    })
-    await expect(second.registry.setAlias(primary, { kind: 'ordinal', ordinal: 1 }, 'x')).rejects.toMatchObject({
-      code: 'registry-contended',
-    })
-    await expect(second.registry.move(primary, { kind: 'ordinal', ordinal: 1 })).rejects.toMatchObject({
-      code: 'registry-contended',
-    })
+    const extra = makeRoot('extra')
+    const statuses = await second.registry.add(primary, { path: extra })
+    expect(statuses[0]?.state).toBe('available')
+    expect(storedPaths()).toEqual([extra])
   })
 
   it('takes over through refresh after the holder exits, then mutates normally', async () => {
     const first = await mount()
     const second = await mount()
-    expect(second.registry.authority.kind).toBe('contended')
+    expect(second.registry.authority.kind).toBe('follower')
 
     await first.dispose()
     stacks = stacks.filter(stack => stack !== first)
@@ -741,7 +732,7 @@ describe('lease authority', () => {
     expect(second.registry.authority.kind).toBe('active')
     const statuses = await second.registry.add(primary, { path: extra })
     expect(statuses[0]?.state).toBe('available')
-    expect(second.scope.scopeOf(primary)).toEqual([extra])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra])
   })
 })
 
@@ -795,7 +786,7 @@ describe('the additional-root limit', () => {
     expect(registry.unavailable).toContain('maxAdditionalRoots')
     expect(registry.unavailable).toContain(String(bad))
     expect(registry.list(primary)).toEqual([])
-    expect(scope.scopeOf(primary)).toEqual([])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
     await expect(registry.add(primary, { path: extra })).rejects.toMatchObject({ code: 'config-invalid' })
     await expect(registry.removeAt(primary, { kind: 'ordinal', ordinal: 1 })).rejects.toMatchObject({ code: 'config-invalid' })
     // The domain was never opened, so the store file may not exist at all.
@@ -816,7 +807,7 @@ describe('the additional-root limit', () => {
     expect(statuses).toHaveLength(20)
     expect(statuses.every(status => status.state === 'available')).toBe(true)
     expect(second.registry.granted(primary)).toHaveLength(20)
-    expect(second.scope.scopeOf(primary)).toHaveLength(20)
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toHaveLength(20)
 
     await expect(second.registry.add(primary, { path: makeRoot('fresh') })).rejects.toMatchObject({
       code: 'root-limit-reached',
@@ -851,7 +842,7 @@ describe('store that this build cannot read', () => {
     expect(statuses.map(status => status.state)).toEqual(['available', 'invalid'])
     expect(statuses[1]?.path).toBe(inner)
     expect(second.registry.granted(primary)).toEqual([outer])
-    expect(second.scope.scopeOf(primary)).toEqual([outer])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([outer])
   })
 
   it('degrades to an empty root set instead of failing activation when the store is corrupt', async () => {
@@ -863,7 +854,7 @@ describe('store that this build cannot read', () => {
 
     const second = await mount()
     expect(second.registry.list(primary)).toEqual([])
-    expect(second.scope.scopeOf(primary)).toEqual([])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
     expect(second.registry.unavailable).toContain('multi_root_workspace')
     await expect(second.registry.add(primary, { path: extra })).rejects.toMatchObject({
       code: 'storage-unavailable',
@@ -888,8 +879,8 @@ describe('per-root access', () => {
     expect(status?.access).toBe('inherit')
     expect(storedRecords()).toEqual([expect.objectContaining({ recordedPath: extra })])
     expect(storedRecords()[0]).not.toHaveProperty('readOnlyRecordedPath')
-    expect(scope.scopeOf(primary)).toEqual([extra])
-    expect(scope.writableOf(primary)).toEqual([extra])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([extra])
   })
 
   it('round-trips a read-only registration as readOnlyRecordedPath, never recordedPath', async () => {
@@ -898,8 +889,8 @@ describe('per-root access', () => {
     const statuses = await first.registry.add(primary, { path: extra, access: 'read-only' })
     expect(statuses[0]?.access).toBe('read-only')
     // A read-only root stays a workspace member but leaves the writable set.
-    expect(first.scope.scopeOf(primary)).toEqual([extra])
-    expect(first.scope.writableOf(primary)).toEqual([])
+    expect(first.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra])
+    expect(first.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([])
     expect(storedRecords()).toEqual([expect.objectContaining({ readOnlyRecordedPath: extra })])
     expect(storedRecords()[0]).not.toHaveProperty('recordedPath')
     await disposeAll()
@@ -908,8 +899,8 @@ describe('per-root access', () => {
     const [status] = second.registry.list(primary)
     expect(status?.access).toBe('read-only')
     expect(status?.state).toBe('available')
-    expect(second.scope.scopeOf(primary)).toEqual([extra])
-    expect(second.scope.writableOf(primary)).toEqual([])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([])
   })
 
   it('round-trips a fixed read-write registration as readWriteRecordedPath, never recordedPath', async () => {
@@ -928,7 +919,7 @@ describe('per-root access', () => {
     const [status] = second.registry.list(primary)
     expect(status?.access).toBe('read-write')
     expect(status?.state).toBe('available')
-    expect(second.scope.writableOf(primary)).toEqual([extra])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([extra])
   })
 
   it('reports a record carrying more than one grant field as invalid (ambiguous access)', async () => {
@@ -947,8 +938,8 @@ describe('per-root access', () => {
     expect(status?.state).toBe('invalid')
     expect(status?.detail).toContain('ambiguous access')
     // The ambiguity grants neither level: no member, nothing writable.
-    expect(second.scope.scopeOf(primary)).toEqual([])
-    expect(second.scope.writableOf(primary)).toEqual([])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([])
   })
 
   it('cannot be escalated by a downgrade: the old schema reads a read-only record as ungrantable', async () => {
@@ -1016,15 +1007,15 @@ describe('per-root access', () => {
 
     const ro = await registry.setAccess(primary, { kind: 'ordinal', ordinal: 1 }, 'read-only')
     expect(ro[0]?.access).toBe('read-only')
-    expect(scope.scopeOf(primary)).toEqual([extra])
-    expect(scope.writableOf(primary)).toEqual([])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([])
     // Not re-recorded: the granted directory moved fields, verbatim.
     expect(storedRecords()[0]).toMatchObject({ readOnlyRecordedPath: extra })
     expect(storedRecords()[0]).not.toHaveProperty('recordedPath')
 
     const rw = await registry.setAccess(primary, { kind: 'ordinal', ordinal: 1 }, 'read-write')
     expect(rw[0]?.access).toBe('read-write')
-    expect(scope.writableOf(primary)).toEqual([extra])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([extra])
     expect(storedRecords()[0]).toMatchObject({ readWriteRecordedPath: extra })
     expect(storedRecords()[0]).not.toHaveProperty('recordedPath')
     expect(storedRecords()[0]).not.toHaveProperty('readOnlyRecordedPath')
@@ -1079,13 +1070,13 @@ describe('per-root access', () => {
     rmSync(extra, { recursive: true })
     await first.registry.refresh(primary)
     const policy = { mode: 'danger-full-access' as const, workspaceRoot: primary }
-    expect(first.scope.resolve(policy).additionalRoots).toEqual([])
-    expect(first.scope.resolve(policy).deniedRoots).toEqual([extra])
+    expect(first.scope.snapshot(policy).additionalRoots).toEqual([])
+    expect(first.scope.snapshot(policy).deniedRoots).toEqual([extra])
     await disposeAll()
     const second = await mount()
-    expect(second.scope.resolve(policy).deniedRoots).toEqual([extra])
+    expect(second.scope.snapshot(policy).deniedRoots).toEqual([extra])
     await second.registry.removeAt(primary, entryRootRef(second.registry.list(primary)[0]!, 1))
-    expect(second.scope.resolve(policy).deniedRoots).toEqual([])
+    expect(second.scope.snapshot(policy).deniedRoots).toEqual([])
   })
 
   it('keeps the existing access on revive, and honors an explicit one', async () => {
@@ -1204,7 +1195,7 @@ describe('a withheld root still reserves its recorded boundary', () => {
     const statuses = second.registry.list(primary)
     expect(statuses.map(status => status.state)).toEqual(['invalid', 'invalid'])
     expect(statuses.every(status => status.invalidReason === 'membership-conflict')).toBe(true)
-    expect(second.scope.scopeOf(primary)).toEqual([])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
 
     // Re-adding the path revives only the FIRST matching row: the twin's
     // reservation survives, so the add is refused and the pair must be
@@ -1214,7 +1205,7 @@ describe('a withheld root still reserves its recorded boundary', () => {
     const after = await second.registry.removeAt(primary, { kind: 'ordinal', ordinal: 2 })
     expect(after[0]?.state).toBe('available')
     expect(after[0]?.invalidReason).toBeUndefined()
-    expect(second.scope.scopeOf(primary)).toEqual([extra])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra])
   })
 })
 
@@ -1259,10 +1250,10 @@ describe('a legacy overlapping store (membership-conflict)', () => {
       // Neither membership is granted; the read-only boundary still denies
       // under every mode, including Full-access.
       expect(stack.registry.granted(primary)).toEqual([])
-      expect(stack.scope.scopeOf(primary)).toEqual([])
-      expect(stack.scope.writableOf(primary)).toEqual([])
+      expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
+      expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).writableRoots).toEqual([])
       for (const mode of ['read-only', 'workspace-write', 'danger-full-access'] as const) {
-        expect(stack.scope.resolve({ mode, workspaceRoot: primary }).deniedRoots, mode).toEqual([denied])
+        expect(stack.scope.snapshot({ mode, workspaceRoot: primary }).deniedRoots, mode).toEqual([denied])
       }
     })
   }
@@ -1291,7 +1282,7 @@ describe('a legacy overlapping store (membership-conflict)', () => {
     await disposeAll()
     const reopened = await mount()
     expectConflicted(reopened.registry.list(primary))
-    expect(reopened.scope.resolve({ mode: 'danger-full-access', workspaceRoot: primary }).deniedRoots)
+    expect(reopened.scope.snapshot({ mode: 'danger-full-access', workspaceRoot: primary }).deniedRoots)
       .toEqual([denied])
   })
 
@@ -1318,8 +1309,8 @@ describe('a legacy overlapping store (membership-conflict)', () => {
     const statuses = second.registry.list(primary)
     expect(statuses.map(status => status.state)).toEqual(['available', 'invalid'])
     expect(statuses[1]?.invalidReason).toBeUndefined()
-    expect(second.scope.scopeOf(primary)).toEqual([healthy])
-    expect(second.scope.resolve({ mode: 'danger-full-access', workspaceRoot: primary }).deniedRoots).toEqual([])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([healthy])
+    expect(second.scope.snapshot({ mode: 'danger-full-access', workspaceRoot: primary }).deniedRoots).toEqual([])
   })
 })
 
@@ -1418,7 +1409,7 @@ describe('the protected DSH directories (F4)', () => {
     const extra = makeRoot('extra')
     const statuses = await registry.add(primary, { path: extra })
     expect(statuses[0]?.state).toBe('available')
-    expect(scope.scopeOf(primary)).toEqual([extra])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra])
   })
 
   it('refuses the lease/medium directory and any directory containing it, outside the home too', async () => {
@@ -1506,5 +1497,98 @@ describe('the protected DSH directories (F4)', () => {
     // the current canonical refuses the new one.
     await expect(registry.add(primary, { path: realHome })).rejects.toMatchObject({ code: 'protected-path' })
     await expect(registry.add(primary, { path: other })).rejects.toMatchObject({ code: 'protected-path' })
+  })
+})
+
+describe('the upstream primary spelling (F3/MRW-01)', () => {
+  it('fails closed config-invalid without sharedStorageRoot', async () => {
+    const stack = await mountRegistryStack(storeRoot, { sharedStorageRoot: '' })
+    stacks.push(stack)
+    expect(stack.registry.authority).toMatchObject({ kind: 'config-invalid' })
+    expect(stack.registry.unavailable).toContain('sharedStorageRoot')
+    await expect(stack.registry.add(primary, { path: makeRoot('extra') })).rejects.toMatchObject({ code: 'config-invalid' })
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).authority).toBe('unavailable')
+  })
+
+  it('keeps the deny of a read-only root a retargeted primary now covers', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
+    const home = join(fixture.base, 'dsh-home'); mkdirSync(home)
+    const { registry, scope } = await mount({}, { scopeConfig: { dshHome: home } })
+    const denied = makeRoot('denied')
+    await registry.add(primary, { path: denied, access: 'read-only' })
+
+    // Swap the workspace: the spelling now resolves to a directory that
+    // CONTAINS the recorded grant.
+    const renamed = join(fixture.base, 'ws-renamed')
+    renameSync(primary, renamed)
+    // fixture.workspace was a real dir; the spelling now resolves to a
+    // directory that CONTAINS the recorded grant — the boundary must not vanish.
+    symlinkSync(fixture.base, primary)
+    const statuses = await registry.refresh(primary)
+    expect(statuses[0]?.invalidReason).toBe('primary-overlap')
+    expect(statuses[0]?.state).toBe('invalid')
+    const deniedRoots = scope.snapshot({ mode: 'danger-full-access', workspaceRoot: primary }).deniedRoots
+    expect(deniedRoots).toContain(canonicalPath(denied))
+    expect(deniedRoots).toContain(canonicalPath(home))
+  })
+
+  it('keeps a read-only grant denied when the primary retargets onto an unrelated directory', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
+    const { registry, scope } = await mount()
+    const denied = makeRoot('denied')
+    await registry.add(primary, { path: denied, access: 'read-only' })
+    const renamed = join(fixture.base, 'ws-renamed')
+    const empty = join(fixture.base, 'ws-empty')
+    mkdirSync(empty)
+    renameSync(primary, renamed)
+    symlinkSync(empty, primary)
+    const statuses = await registry.refresh(primary)
+    // The grant still resolves — the record stays available — yet its
+    // recorded read-only restriction must outlive the primary retarget.
+    expect(statuses[0]?.state).toBe('available')
+    const deniedRoots = scope.snapshot({ mode: 'danger-full-access', workspaceRoot: primary }).deniedRoots
+    expect(deniedRoots).toContain(canonicalPath(denied))
+  })
+
+  it('treats a symlinked workspace and its realpath as distinct primaries', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
+    const { registry } = await mount()
+    const extra = makeRoot('extra')
+    const real = join(fixture.base, 'ws-real')
+    mkdirSync(real)
+    const spelling = join(fixture.base, 'ws-link')
+    symlinkSync(real, spelling)
+    await registry.add(spelling, { path: extra })
+    expect(registry.list(spelling)).toHaveLength(1)
+    expect(registry.list(real)).toEqual([])
+    expect(registry.list(spelling)[0]?.state).toBe('available')
+  })
+
+  it('migrates a canonical-keyed store forward on first serialized access', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
+    const first = await mount()
+    const real = join(fixture.base, 'ws-real')
+    mkdirSync(real)
+    const spelling = join(fixture.base, 'ws-link')
+    symlinkSync(real, spelling)
+    // Seed as the legacy writer did: the record under the CANONICAL key.
+    const extra = makeRoot('extra')
+    // `real` is canonical: `add(real)` lands under the same key a legacy
+    // writer produced for the symlinked cwd — `canonicalPath(spelling)`.
+    await first.registry.add(real, { path: extra })
+    await disposeAll()
+
+    const second = await mount()
+    expect(second.registry.list(spelling)).toHaveLength(1)
+    await second.registry.refresh(spelling)
+    const after = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+      tables: { roots: Record<string, { roots: unknown[] }> }
+    }
+    expect(Object.keys(after.tables.roots).sort()).toEqual([real, spelling].sort())
+    expect(after.tables.roots[spelling]).toEqual(after.tables.roots[real])
   })
 })

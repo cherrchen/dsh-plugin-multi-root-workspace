@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted（已接受）**。2026-11-05 经维护者明确接受，纳入本轮审核补充。目录归属：`docs/plans/active/`；接受的是修复范围、阶段与验收合同，不表示已实施、已修复或已发布。实施进展：P0 静态证据已记录（见下文“P0 记录”，选型待评审），P1 已实施（[ADR-0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)）；验证状态以路线总账为准。下文“Current State”保留计划接受时的基线描述。
+**Accepted（已接受）**。2026-11-05 经维护者明确接受，纳入本轮审核补充。目录归属：`docs/plans/active/`；接受的是修复范围、阶段与验收合同，不表示已实施、已修复或已发布。实施进展：P0 静态证据已记录，维护者已就选型作出决定（见下文“维护者决定”）；P1 已实施（[ADR-0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)）；P3 的 F3（主根身份以上游为准）与废弃单进程模式已实施（[ADR-0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)）；P2 按维护者决定不实施；F5 与 F4 执行侧 deny 尚未开始。验证状态以路线总账为准。下文“Current State”保留计划接受时的基线描述。
 
 日期：2026-11-05。实施批次已登记[路线进度总账](./2026-09-12-multi-root-workspace.md#进度总账)。后续实施遵循本文 P0 前置验证及阶段依赖；可信确认能力、跨 Host 能力传递、origin 持久绑定与迁移的具体合同仍须经验证和评审，不能以计划已接受代替技术证据。本次只更新计划与登记状态，不修改运行时代码、提升上游支持版本或发布；涉及现有 Accepted ADR 的语义变化须在实施时显式修订或以新 ADR 替代，保留历史决定。发布内容仍归 CHANGELOG 双语对。
 
@@ -172,6 +172,15 @@ P1 可作为先行缓解，但不等于 BYP-01、MRW-01 修完；F2 的显式删
 3. **legacy 介质**：P1 按 ADR-0007 配置合同把 lease 目录当作 legacy 介质目录保护，并在 ADR 中记录这一推定；若评审要求严格“无法证明即拒绝”，则 legacy 组合应拒绝全部新增登记。
 4. **Skills migration**：P2 需要把补 `skillsEnabled: true` 改为保持 withheld，待可信管理确认后启用，并把迁移从通用 `persist()` 中拆出；这会改变 ADR-0023 的 legacy 默认值。
 
+### 维护者决定（2026-11-05，取代上面四项待评审选型）
+
+1. **可信确认（F1 / P2）不实施，保持现状。** 上游 `0.2.2-rc.1` 没有独立于 owner cookie 的确认通道，插件侧也无法单独解决。BYP-01 作为已知残余风险保留：根管理写仍只靠现有会话校验，同用户进程伪造 cookie 后可以自行登记根。本计划的 P2 与“BYP-01 已修复”的完成项不再追求，直到上游提供可信的确认接缝。
+2. **主根身份以上游为准。** 上游 `dsh-sandbox-policy` 的 `workspaceRoot` 就是 `session.header.cwd` 的原样拼写（`resolveWorkspaceRoot` 不做 realpath），只有执行侧 provider 在每次 `confine` 时 canonicalize。插件不再自建 origin 绑定表；Registry 与 scope 的查找 key 改用上游原样拼写（只做词法规范化），canonical 路径只用于几何判断。原第 2 项候选方案作废。
+3. **废弃单进程（legacy）Registry 模式。** 不配置 `sharedStorageRoot` 的组合按配置错误 fail closed；物理介质因此总能由 `storeIdentity()` 证明，原第 3 项推定作废。
+4. **Skills migration 保持现状。** 它只作用于已登记的根，不新增目录、不扩大写权限，按 ADR-0023 的既定默认值执行；原第 4 项与 F1 中的内部迁移例外条款不再追求。
+
+第 2、3 项的合同见 [ADR-0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)。
+
 ## Validation（拟执行，本文未执行）
 
 仅在隔离 fixture `$DSH_HOME`、临时凭据、临时主根/额外根和本地测试 Host 中验证，断言实际字节、持久记录、scope/profile 与结果；不得使用日用凭据或配置。Linux 放置主根于 denied-root 祖先 pin 之外；负面目标同时放在主根/平台 temp 授权范围外，防止测试假阳性。
@@ -213,9 +222,9 @@ P1 可作为先行缓解，但不等于 BYP-01、MRW-01 修完；F2 的显式删
 ## Completion Criteria
 
 - [x] 计划于 2026-11-05 经维护者明确接受，纳入物理介质保护、提交分界与 recheck/迁移边界三项审核补充；以下实现验收项仍未完成。
-- [ ] BYP-01 两入口、直接 Registry 和共享 owner/follower 的管理写均受可信人工授权保护，且同 cookie 无法自行回答审批。
+- [ ] BYP-01 两入口、直接 Registry 和共享 owner/follower 的管理写均受可信人工授权保护，且同 cookie 无法自行回答审批。（维护者决定暂不实施，作为已知残余风险保留，见“维护者决定”第 1 项。）
 - [ ] redirected revive 不改 grant 目标；显式替换流程绑定用户确认的目标和策略。（P1 已完成前半：revive 只回原 grant，见 ADR-0027；显式替换的确认流程依赖 P2。）
-- [ ] 主根换名/重定向不丢 deny，不发替换目标 grant；重启与无法确认身份的情况有经验证的保守行为。
+- [ ] 主根换名/重定向不丢 deny，不发替换目标 grant；重启与无法确认身份的情况有经验证的保守行为。（按维护者决定改为以上游拼写为身份：换名不丢 deny 已实现并有单测，见 ADR-0028；主根写授权是否跟随 symlink 属上游执行侧行为；原生方言矩阵未验证。）
 - [ ] home 与物理介质完整保护集合的新登记、存量、主根/temp 重叠与执行层边界一致，未知能力明确拒绝。（P1 已完成新登记与存量部分；主根/temp 重叠与执行层 deny 属于 P3。）
 - [ ] Registry 缺席时保守且基础 provider 服务存活；健康空表 parity 与幂等通知通过。
 - [ ] 精确版本/原生平台/packed 制品门禁完成，结果与未覆盖项进入既有总账；用户文档与接受后的 ADR 同步。

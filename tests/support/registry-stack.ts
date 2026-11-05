@@ -74,7 +74,10 @@ export async function mountRegistryStack(storeRoot: string, registryConfig: Regi
   // whatever fs/sandbox the spec mounted and stubs the missing one (see
   // tests/support/providers.ts).
   await mountProviderGate(ctx)
-  const registryFiber = await ctx.plugin(MultiRootRegistry, { leasePath: `${storeRoot}/${DOMAIN_NAME}.lock`, ...registryConfig })
+  // The single-process mode is gone (ADR-0028): every stack is shared — the
+  // medium is the store root and the canonical lock sits beside the document.
+  // A spec covering the config-invalid path passes `sharedStorageRoot: ''`.
+  const registryFiber = await ctx.plugin(MultiRootRegistry, { leasePath: `${storeRoot}/${DOMAIN_NAME}.lock`, sharedStorageRoot: storeRoot, ...registryConfig })
   return {
     ctx,
     registry: ctx.multiRootRegistry,

@@ -9,16 +9,10 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import type { Fiber } from '@deepseek-ai/cordis'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
-import MultiRootRegistry, { DOMAIN_NAME, REGISTRY_CONTENDED_MESSAGE } from '../src/registry.ts'
+import { DOMAIN_NAME } from '../src/registry.ts'
 import { RegistryAuthorityLease, RegistryLeaseContendedError } from '../src/registry-lease.ts'
 import { leaseNameWin32 } from '../src/registry-lease-win32.ts'
-import { RootValidationError } from '../src/roots.ts'
-import MultiRootScopeService from '../src/scope.ts'
-import { mountCompat } from './support/compat.ts'
-import { mountProviderGate } from './support/providers.ts'
 import { shortPathName } from './support/windows.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -120,8 +114,9 @@ describe('RegistryAuthorityLease', () => {
           })
         })
       }))
+      // One owner; every other process is a follower over IPC (shared mode).
       expect(ready.filter(entry => entry.authority === 'active')).toHaveLength(1)
-      expect(ready.filter(entry => entry.authority === 'contended')).toHaveLength(2)
+      expect(ready.filter(entry => entry.authority === 'follower')).toHaveLength(2)
     } finally {
       for (const child of children) child.stdin?.end()
       for (const child of children) child.kill('SIGTERM')
@@ -156,26 +151,27 @@ describe('registry authority at the service boundary', () => {
     await registry.add(primary, { path: extra })
     expect(registry.authority).toEqual({ kind: 'active' })
     expect(registry.unavailable).toBeUndefined()
-    expect(scope.scopeOf(primary)).toHaveLength(1)
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toHaveLength(1)
   })
 
-  it('does not open a stale domain in a second stack sharing the store: empty grants, mutations reject', async () => {
+  it('does not open a second domain for the same store: the second stack is a follower whose reads and writes go through the owner', async () => {
     const first = await mount()
     const extra = makeRoot('extra')
     await first.registry.add(primary, { path: extra })
-    expect(first.scope.scopeOf(primary)).toHaveLength(1)
+    expect(first.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toHaveLength(1)
 
     const second = await mount()
-    expect(second.registry.authority).toEqual({ kind: 'contended' })
-    expect(second.registry.unavailable).toBe(REGISTRY_CONTENDED_MESSAGE)
-    expect(second.registry.list(primary)).toEqual([])
-    expect(second.scope.scopeOf(primary)).toEqual([])
-    expect(await second.registry.refresh(primary)).toEqual([])
-    await expect(second.registry.add(primary, { path: makeRoot('other') })).rejects.toMatchObject({
-      code: 'registry-contended',
-    } satisfies Partial<RootValidationError>)
-    // The first process still owns the grant; contention must not steal it.
-    expect(first.scope.scopeOf(primary)).toHaveLength(1)
+    expect(second.registry.authority.kind).toBe('follower')
+    expect(second.registry.unavailable).toBeUndefined()
+    // The follower never opens the medium: it sees the owner's durable record
+    // over IPC, and its own mutations are dispatched to the owner too.
+    expect((await second.registry.refresh(primary)).map(status => status.path)).toEqual([extra])
+    const other = makeRoot('other')
+    const statuses = await second.registry.add(primary, { path: other })
+    expect(statuses.map(status => status.path)).toEqual([extra, other])
+    // The owner's view and the follower's projection agree afterwards.
+    expect(first.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra, other])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([extra, other])
     expect(first.registry.authority).toEqual({ kind: 'active' })
   })
 
@@ -184,8 +180,7 @@ describe('registry authority at the service boundary', () => {
     const extra = makeRoot('extra')
     await first.registry.add(primary, { path: extra })
     const second = await mount()
-    expect(second.registry.authority.kind).toBe('contended')
-    expect(second.scope.scopeOf(primary)).toEqual([])
+    expect(second.registry.authority.kind).toBe('follower')
 
     await first.dispose()
     stacks = stacks.filter(stack => stack !== first)
@@ -194,7 +189,7 @@ describe('registry authority at the service boundary', () => {
     expect(second.registry.authority).toEqual({ kind: 'active' })
     expect(second.registry.unavailable).toBeUndefined()
     expect(statuses).toHaveLength(1)
-    expect(second.scope.scopeOf(primary)).toHaveLength(1)
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toHaveLength(1)
   })
 
   it('still degrades to storage-failed (not a stale grant) when the holder cannot parse the store', async () => {
@@ -204,7 +199,7 @@ describe('registry authority at the service boundary', () => {
     expect(registry.authority.kind).toBe('storage-failed')
     expect(registry.unavailable).toContain(DOMAIN_NAME)
     expect(registry.list(primary)).toEqual([])
-    expect(scope.scopeOf(primary)).toEqual([])
+    expect(scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([])
     await expect(registry.add(primary, { path: makeRoot('extra') })).rejects.toMatchObject({
       code: 'storage-unavailable',
     })
@@ -212,17 +207,17 @@ describe('registry authority at the service boundary', () => {
 
   it('marks the scope authority through every registry state transition', async () => {
     const policy: SandboxExecutionPolicy = { mode: 'danger-full-access', workspaceRoot: primary }
-    const authorityOf = (stack: RegistryStack) => stack.scope.resolve(policy).authority
+    const authorityOf = (stack: RegistryStack) => stack.scope.snapshot(policy).authority
 
     // Active: the accepted records published, so the scope is authoritative.
     const first = await mount()
     expect(first.registry.authority.kind).toBe('active')
     expect(authorityOf(first)).toBe('available')
 
-    // Contended: the empty scope must read as "restrictions unknown".
+    // Follower: once the projection is synced the scope is authoritative too.
     const second = await mount()
-    expect(second.registry.authority.kind).toBe('contended')
-    expect(authorityOf(second)).toBe('unavailable')
+    expect(second.registry.authority.kind).toBe('follower')
+    expect(authorityOf(second)).toBe('available')
 
     // Storage-failed: same fail-closed marking on a broken medium.
     const failed = await mountRegistryStack(join(fixture.base, 'broken'), { leasePath: '' })
@@ -252,132 +247,6 @@ describe('registry authority at the service boundary', () => {
     await second.registry.refresh(primary)
     expect(second.registry.authority.kind).toBe('active')
     expect(authorityOf(second)).toBe('available')
-  })
-})
-
-/** One registry mounted over a fake domain whose write and open steps can be interleaved by hand. */
-interface ControlledWorld {
-  readonly ctx: Context
-  /** The mounted root fiber; `dispose()` is the teardown under test. */
-  readonly fiber: Fiber
-  readonly registry: MultiRootRegistry
-  /** `put:start` / `put:end` / `close` / `open:start` / `open:end`, in the order they happened. */
-  readonly events: readonly string[]
-  /** Resolves once `put()` has been entered and is blocked. */
-  readonly putStarted: () => Promise<void>
-  /** Lets the blocked `put()` finish. */
-  readonly finishPut: () => void
-  /** Resolves once the gated `open()` has been entered and is blocked. */
-  readonly openStarted: () => Promise<void>
-  /** Lets the gated `open()` finish. */
-  readonly finishOpen: () => void
-}
-
-/**
- * Mount the registry over a FAKE storage domain, so a mutation and the teardown
- * can be interleaved deterministically. The lease is the REAL kernel lease: the
- * ordering asserted here is exactly what a second DSH process observes.
- * @param options - `gatePut` blocks the first `put()`; `gateFirstOpen` blocks the first `open()`.
- * @returns the mounted world.
- */
-async function mountWithControlledDomain(options: {
-  readonly gatePut?: boolean
-  readonly gateFirstOpen?: boolean
-} = {}): Promise<ControlledWorld> {
-  const events: string[] = []
-  const putEntered = Promise.withResolvers<void>()
-  const putGate = Promise.withResolvers<void>()
-  const openEntered = Promise.withResolvers<void>()
-  const openGate = Promise.withResolvers<void>()
-
-  const table = {
-    get: () => undefined,
-    entries: () => [][Symbol.iterator](),
-    put: async () => {
-      events.push('put:start')
-      putEntered.resolve()
-      if (options.gatePut === true) await putGate.promise
-      events.push('put:end')
-    },
-    delete: async () => undefined,
-  }
-  let opens = 0
-  const ctx = new Context()
-  await ctx.plugin(MultiRootScopeService)
-  ctx.provide('storageDomain', {
-    open: async () => {
-      opens += 1
-      if (options.gateFirstOpen === true && opens === 1) {
-        events.push('open:start')
-        openEntered.resolve()
-        await openGate.promise
-        events.push('open:end')
-      }
-      return { table: () => table, close: async () => { events.push('close') } }
-    },
-  })
-  await mountCompat(ctx)
-  await mountProviderGate(ctx)
-  const fiber = await ctx.plugin(MultiRootRegistry, { leasePath })
-  return {
-    ctx,
-    fiber,
-    registry: ctx.multiRootRegistry,
-    events,
-    putStarted: () => putEntered.promise,
-    finishPut: () => { putGate.resolve() },
-    openStarted: () => openEntered.promise,
-    finishOpen: () => { openGate.resolve() },
-  }
-}
-
-describe('authority teardown', () => {
-  it('drains an in-flight mutation before closing the domain, and closes it before the lease is free', async () => {
-    const world = await mountWithControlledDomain({ gatePut: true })
-    const extra = makeRoot('extra')
-    const add = world.registry.add(primary, { path: extra })
-    await world.putStarted()
-
-    const disposal = world.fiber.dispose()
-    // The teardown must be waiting for that write, not racing it.
-    await new Promise(resolve => setTimeout(resolve, 10))
-    expect(world.events).not.toContain('close')
-
-    world.finishPut()
-    await add
-    await disposal
-
-    expect(world.events.indexOf('put:end')).toBeGreaterThan(-1)
-    expect(world.events.indexOf('put:end')).toBeLessThan(world.events.indexOf('close'))
-    // And nothing holds the store afterwards: a successor can take it.
-    const successor = await RegistryAuthorityLease.acquire(leasePath)
-    await successor.release()
-  })
-
-  it('lets a waiting process take over after a disposal that overlapped its acquisition', async () => {
-    const first = await mountWithControlledDomain()
-    // While `first` holds the lease, `second` never opens: its gated open is
-    // consumed by the takeover below.
-    const second = await mountWithControlledDomain({ gateFirstOpen: true })
-    expect(second.registry.authority.kind).toBe('contended')
-
-    await first.fiber.dispose()
-
-    // The takeover acquires the real lease, then blocks inside openDomain().
-    const refreshing = second.registry.refresh(primary)
-    await second.openStarted()
-    const disposal = second.fiber.dispose()
-    second.finishOpen()
-    await disposal
-    await refreshing
-
-    // A torn-down registry must not have finished by opening a medium it will
-    // never close: the acquisition that overlapped the disposal is retired with
-    // it, not left claiming authority.
-    expect(second.registry.authority.kind).toBe('contended')
-    // Nothing may still hold the store: the successor is the new authority.
-    const successor = await RegistryAuthorityLease.acquire(leasePath)
-    await successor.release()
   })
 })
 

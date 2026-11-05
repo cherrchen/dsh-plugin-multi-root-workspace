@@ -46,7 +46,7 @@
 
 import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, join, sep } from 'node:path'
+import { isAbsolute, join, resolve, sep } from 'node:path'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 
 // The predicate lives in the standalone runner's contract module: its whole
@@ -182,13 +182,17 @@ export interface RootStatus extends RegisteredRoot {
    * overlaps another record's. `'protected-path'` means that same intact
    * grant overlaps a protected DSH directory (the home, the storage medium,
    * or the lease directory) — typically a store written before the boundary
-   * existed or on another layout. Both reasons mean the same thing: the
-   * boundary is intact and trustworthy, so {@link reservedRootBoundary}
-   * keeps it reserved and the registry publishes the root as a withheld,
-   * deny-only entry — only the membership is withheld. Every other `invalid`
-   * verdict left the grant unverifiable, so it contributes nothing.
+   * existed or on another layout. `'primary-overlap'` means the intact grant
+   * equals or overlaps the CURRENT canonical primary root — e.g. a primary
+   * spelling retargeted onto (or above) a read-only root — which withholds
+   * membership but must never drop the deny. All three reasons mean the same
+   * thing: the boundary is intact and trustworthy, so
+   * {@link reservedRootBoundary} keeps it reserved and the registry
+   * publishes the root as a withheld, deny-only entry — only the membership
+   * is withheld. Every other `invalid` verdict left the grant unverifiable,
+   * so it contributes nothing.
    */
-  readonly invalidReason?: 'membership-conflict' | 'protected-path'
+  readonly invalidReason?: 'membership-conflict' | 'protected-path' | 'primary-overlap'
 }
 
 /** One status together with the 1-based ordinal the surfaces accept for it. */
@@ -276,6 +280,23 @@ const CASE_SENSITIVE = process.platform !== 'win32'
 /** Compare two canonical path spellings under the platform's case convention. */
 function comparable(path: string): string {
   return CASE_SENSITIVE ? path : path.toLowerCase()
+}
+
+/**
+ * The Registry/scope lookup key of one primary root: the UPSTREAM spelling,
+ * normalized lexically by `path.resolve` and case-folded on Windows — never
+ * re-resolved. Upstream `dsh-sandbox-policy` sets `policy.workspaceRoot` to
+ * `session.header.cwd` verbatim, so the spelling IS the identity: a symlinked
+ * workspace and its realpath target are different sessions and different key
+ * spaces. Re-resolving here would let a replaced workspace directory
+ * silently re-key the record set onto another identity — the exact failure
+ * the redirect rules exist to prevent. This is the ONLY function allowed to
+ * turn a primary root into a Registry key; path geometry keeps using
+ * {@link canonicalRoot}.
+ */
+export function primaryKey(path: string, platform: NodeJS.Platform = process.platform): string {
+  const resolved = resolve(path)
+  return platform === 'win32' ? resolved.toLowerCase() : resolved
 }
 
 /** Whether two canonical paths name the same directory on this platform. */
@@ -521,12 +542,12 @@ export function classifyStoredRoots(
  */
 function markMembershipConflicts(statuses: readonly RootStatus[]): RootStatus[] {
   // A structurally invalid record carries no trustworthy boundary: its fields
-  // can claim nothing — no membership, and no deny either. A `protected-path`
-  // record is different: its grant is intact and trustworthy, so it still
-  // takes part in the conflict set — an overlapping non-invalid partner is a
-  // membership conflict — while keeping its own verdict (it is never
-  // re-marked by the conflict pass).
-  const boundaries = statuses.map(status => (status.state !== 'invalid' || status.invalidReason === 'protected-path' ? singleGrantOf(status) : undefined))
+  // can claim nothing — no membership, and no deny either. `protected-path`
+  // and `primary-overlap` records are different: their grants are intact and
+  // trustworthy, so they still take part in the conflict set — an
+  // overlapping non-invalid partner is a membership conflict — while each
+  // keeps its own verdict (it is never re-marked by the conflict pass).
+  const boundaries = statuses.map(status => (status.state !== 'invalid' || status.invalidReason === 'protected-path' || status.invalidReason === 'primary-overlap' ? singleGrantOf(status) : undefined))
   const conflicts = new Map<number, string[]>()
   for (let index = 0; index < boundaries.length; index += 1) {
     const boundary = boundaries[index]
@@ -545,7 +566,7 @@ function markMembershipConflicts(statuses: readonly RootStatus[]): RootStatus[] 
   if (conflicts.size === 0) return [...statuses]
   return statuses.map((status, index) => {
     const others = conflicts.get(index)
-    if (others === undefined || status.invalidReason === 'protected-path') return status
+    if (others === undefined || status.invalidReason === 'protected-path' || status.invalidReason === 'primary-overlap') return status
     const boundary = boundaries[index]!
     const partners = others.map(other => `"${other}"`).join(', ')
     return {
@@ -656,11 +677,22 @@ function classifyStoredRoot(
   // the recorded grant is not. A record whose grant was the workspace root —
   // or inside it, or containing it — is unusable no matter where `path`
   // points now.
+  // The recorded grant may not equal or overlap the CURRENT canonical
+  // primary — but it is still an intact, trustworthy boundary: membership is
+  // withheld while the deny stays (a read-only root a retargeted primary
+  // spelling now covers must not shed its restriction). Same class as the
+  // `protected-path` and `membership-conflict` verdicts.
+  const primaryOverlap = (detail: string): RootStatus => ({
+    ...record,
+    state: 'invalid',
+    invalidReason: 'primary-overlap',
+    detail: `${detail}; any recorded read-only restriction remains in force`,
+  })
   if (samePath(recorded, primary)) {
-    return invalid(`"${recorded}" is this session's workspace root`)
+    return primaryOverlap(`"${recorded}" is this session's workspace root`)
   }
   if (isCanonicallyUnder(recorded, primary) || isCanonicallyUnder(primary, recorded)) {
-    return invalid(`"${recorded}" overlaps this session's workspace root`)
+    return primaryOverlap(`"${recorded}" overlaps this session's workspace root`)
   }
   // The protected-directory rule judges the recorded grant too — again BEFORE
   // the redirect check resolves `path`. A record whose grant lies inside the
@@ -751,8 +783,9 @@ export function markProtectedPaths(statuses: readonly RootStatus[], protectedPat
  * registered for, which a new or revived registration may not overlap merely
  * because the root is currently unusable.
  *
- * `available`, `missing`, `redirected`, and both trustworthy-boundary
- * `invalid` verdicts (`membership-conflict` and `protected-path`) all carry
+ * `available`, `missing`, `redirected`, and the trustworthy-boundary
+ * `invalid` verdicts (`membership-conflict`, `protected-path`, and
+ * `primary-overlap`) all carry
  * an intact recorded grant; every other `invalid` verdict means the grant
  * could not be parsed at all, so it reserves — and denies — nothing. This is
  * not an independent authorization table: it derives the boundary from the

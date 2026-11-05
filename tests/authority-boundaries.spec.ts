@@ -56,7 +56,9 @@ describe('unknown registry authority never grants shared temp writes', () => {
       const file = join(temp, 'victim.txt')
       writeFileSync(file, 'original')
       second = await mount()
-      expect(second.registry.authority.kind).toBe('contended')
+      // A second Host is a follower: its admitted operations run against
+      // the owner's projection, so the recorded read-only root is denied.
+      expect(second.registry.authority.kind).toBe('follower')
       for (const stack of [first, second]) {
         const target = await stack.ctx.fs.resolve(file)
         await expect(stack.ctx.fs.writeText(target, 'bypass')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })

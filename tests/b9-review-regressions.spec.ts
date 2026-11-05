@@ -54,13 +54,15 @@ describe('an unknown registry authority is not "no restrictions"', () => {
         .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
 
       second = await stack(join(fixture.base, 'store'), fixture.workspace)
-      expect(second.registry.authority.kind).toBe('contended')
+      // A second Host is a follower: the unadmitted read path is still
+      // fail-closed (`unavailable`), while its admitted operations run
+      // against the owner's projection.
+      expect(second.registry.authority.kind).toBe('follower')
       expect(second.scope.resolve({ mode: 'danger-full-access', workspaceRoot: fixture.workspace }).authority)
         .toBe('unavailable')
 
-      // The store this process cannot read may hold `read-only`
-      // registrations — so instead of trusting the empty deny set,
-      // Full-access writes only the primary root and the temp grants here.
+      // The registered read-only boundary the owner holds is denied for the
+      // follower too — the deny travels with the snapshot.
       await expect(second.ctx.fs.writeText(await second.ctx.fs.resolve(file), 'bypass'))
         .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
       expect(readFileSync(file, 'utf8')).toBe('original')
@@ -68,10 +70,10 @@ describe('an unknown registry authority is not "no restrictions"', () => {
       // `fixture.base` is outside the platform temp grants by fixture
       // construction (`assertOutsideTempGrants`), outside the primary root,
       // and outside every registered root — ambient territory a real
-      // Full-access would write.
+      // Full-access writes, and a follower's admitted operation writes too.
       const stray = join(fixture.base, 'stray.txt')
-      await expect(second.ctx.fs.writeText(await second.ctx.fs.resolve(stray), 'stray'))
-        .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      await second.ctx.fs.writeText(await second.ctx.fs.resolve(stray), 'stray')
+      expect(readFileSync(stray, 'utf8')).toBe('stray')
 
       // The primary root stays writable: the downgrade is upstream
       // workspace-write semantics, not a lockout.
@@ -83,7 +85,9 @@ describe('an unknown registry authority is not "no restrictions"', () => {
       await first.dispose()
       await second.registry.refresh(fixture.workspace)
       expect(second.registry.authority.kind).toBe('active')
-      expect(second.scope.resolve({ mode: 'danger-full-access', workspaceRoot: fixture.workspace }).authority)
+      // The published projection reads available; the unadmitted `resolve()`
+      // path stays fail-closed in shared mode by design.
+      expect(second.scope.snapshot({ mode: 'danger-full-access', workspaceRoot: fixture.workspace }).authority)
         .toBe('available')
       await expect(second.ctx.fs.writeText(await second.ctx.fs.resolve(file), 'still denied'))
         .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
@@ -132,7 +136,9 @@ describe('the DSH-home boundary under Full-access', () => {
     mkdirSync(home)
     const service = await stack(join(fixture.base, 'store'), fixture.workspace, { dshHome: home })
     try {
-      service.scope.setRegistryAuthority(false)
+      // Unavailable authority for the admitted fs path means an unavailable
+      // REGISTRY — the scope flag alone no longer gates the admitted scope.
+      await service.registryFiber.dispose()
       const victim = join(home, 'victim.txt')
       writeFileSync(victim, 'config')
       await expect(service.ctx.fs.writeText(await service.ctx.fs.resolve(victim), 'tampered'))
@@ -242,12 +248,12 @@ describe('a legacy overlapping store keeps its read-only boundary', () => {
       const statuses = second.registry.list(fixture.workspace)
       expect(statuses.map(status => status.state)).toEqual(['invalid', 'invalid'])
       expect(statuses.every(status => status.invalidReason === 'membership-conflict')).toBe(true)
-      expect(second.scope.scopeOf(fixture.workspace)).toEqual([])
+      expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: fixture.workspace }).additionalRoots).toEqual([])
 
       mkdirSync(denied, { recursive: true })
       writeFileSync(victim, 'original')
       for (const mode of ['read-only', 'workspace-write', 'danger-full-access'] as const) {
-        expect(second.scope.resolve({ mode, workspaceRoot: fixture.workspace }).deniedRoots, mode)
+        expect(second.scope.snapshot({ mode, workspaceRoot: fixture.workspace }).deniedRoots, mode)
           .toEqual([canonicalPath(denied)])
       }
 

@@ -31,7 +31,7 @@ leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
 maxAdditionalRoots: 16
 ```
 
-共享 Registry 自己以公开 `JsonStorageBackend` / `DomainFacility` 打开显式介质，不猜测 host 的 storageDomain 路由。修改 Registry 存储目录时同时修改以上两条路径；其他领域的 `storage-json.root` 不改变此绑定。lease 必须是该物理目录下固定名 `multi_root_workspace.lock`；拒绝替代锁名。没有 `sharedStorageRoot` 的内部/旧组合仍按 ADR-0007 单持锁者授权运行。
+共享 Registry 自己以公开 `JsonStorageBackend` / `DomainFacility` 打开显式介质，不猜测 host 的 storageDomain 路由。修改 Registry 存储目录时同时修改以上两条路径；其他领域的 `storage-json.root` 不改变此绑定。lease 必须是该物理目录下固定名 `multi_root_workspace.lock`；拒绝替代锁名。`sharedStorageRoot` 为必填：单进程模式已移除，缺失时 Registry 进入 `config-invalid`，不取 lease、不开存储、不授予任何附加根（[ADR-0028](../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)）。Registry 行因此不再 inject `storageDomain`，改为 inject `storage`。未经 admission 包装的上游服务若在操作外自行 confine 子进程，只得到主根写权限，这是共享模式的既有设计。
 
 介质 ID 是 canonical 物理目录及其 dev/inode 的 SHA-256；Windows 路径折叠大小写。POSIX endpoint 位于 UID 所有且非符号链接的 0700 `/tmp/dsh-registry-<uid>/` 下，短哈希名不随 store 路径增长。Windows 使用本机 pipe。endpoint 不是凭据，知道它也不能越过认证。
 

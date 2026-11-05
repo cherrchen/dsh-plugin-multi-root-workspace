@@ -2,7 +2,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SkillLookupOptions } from '@deepseek-ai/dsh-skill'
-import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { isPackageInstalled } from './agent-instructions.ts'
 
 /** Never infer authority from cwd, a preset key, or a lookalike Agent. */
@@ -14,8 +13,10 @@ export function skillAgent(ctx: Context, options: SkillLookupOptions): Agent | u
 }
 
 export function skillOrigin(ctx: Context, options: SkillLookupOptions): string | undefined {
+  // The Registry primary is the upstream cwd spelling, verbatim — never
+  // re-resolved: a symlinked session has its own record set (MRW-01).
   const cwd = skillAgent(ctx, options)?.session.header.cwd
-  return typeof cwd === 'string' && cwd !== '' ? canonicalPath(cwd) : undefined
+  return typeof cwd === 'string' && cwd !== '' ? cwd : undefined
 }
 
 /** Absence is optional; a present but broken module must fail visibly. */
@@ -46,5 +47,5 @@ export async function observedSkillOrigin(ctx: Context, sessionId: string): Prom
   using observation = await query.observeSession(sessionId as Agent['id'])
   const cwd = observation.header.cwd
   if (typeof cwd !== 'string' || cwd === '') throw new Error('multi-root skills: Session has no origin')
-  return canonicalPath(cwd)
+  return cwd
 }

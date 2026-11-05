@@ -62,7 +62,8 @@ export class MultiRootReviewContext extends Service {
     const policy = this.ctx.sandboxPolicy.resolve({ session: agent.session })
     const primary = canonicalPath(policy.workspaceRoot)
     if (agent.session.header.cwd !== undefined && canonicalPath(agent.session.header.cwd) !== primary) throw new Error('review-context: inconsistent session origin')
-    await this.ctx.multiRootRegistry.refresh(primary)
+    // The Registry key is the upstream spelling, verbatim (MRW-01).
+    await this.ctx.multiRootRegistry.refresh(policy.workspaceRoot)
     signal.throwIfAborted()
     const cwd = effectiveDirectory(this.ctx, agent.session)
     if (cwd === undefined) throw new Error('review-context: missing effective cwd')
