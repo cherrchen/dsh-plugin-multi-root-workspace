@@ -14,15 +14,21 @@
  *    misconfiguration, not a path to guess at.
  * 2. `missing` — the directory does not exist.
  * 3. `not-a-directory` — it exists but is not a directory.
- * 4. `equals-primary` — the canonical candidate IS the session's workspace
+ * 4. `protected-path` — the canonical candidate equals, lies inside, or
+ *    contains a protected DSH directory (the DSH home, the registry's
+ *    physical storage medium, or the lease directory, supplied through
+ *    {@link RootCandidateContext.protectedPaths}): those hold the store,
+ *    the lease, profiles and user credentials, so no access level may
+ *    register them. Applies to every mode; no remote exemption exists.
+ * 5. `equals-primary` — the canonical candidate IS the session's workspace
  *    root, which is already granted by the upstream policy.
- * 5. `primary-overlap` — the candidate lies under the workspace root, or
+ * 6. `primary-overlap` — the candidate lies under the workspace root, or
  *    contains it. The union grants nothing new, and the displayed list would
  *    stop matching the enforced root set.
- * 6. `duplicate` — another registered root canonicalizes to the same path.
- * 7. `nested` — the candidate lies under a registered root, or contains one.
- *    Same reasoning as rule 5, applied to the additional roots.
- * 8. `unsupported-path` — on Windows, a network or device path (`\\server`,
+ * 7. `duplicate` — another registered root canonicalizes to the same path.
+ * 8. `nested` — the candidate lies under a registered root, or contains one.
+ *    Same reasoning as rule 6, applied to the additional roots.
+ * 9. `unsupported-path` — on Windows, a network or device path (`\\server`,
  *    `\\?\…`, `\\.\…`): the ACL confinement cannot be shown to cover it, so it
  *    is rejected lexically before any filesystem touch.
  *
@@ -79,6 +85,25 @@ export function additionalRootId(value: string): AdditionalRootId {
  *   `read-only` session; it does not widen anything beyond its own directory.
  */
 export type RootAccess = 'inherit' | 'read-write' | 'read-only'
+
+/**
+ * Which protected DSH directory one boundary belongs to: the harness home
+ * (`$DSH_HOME`), the registry's physical storage medium, or the directory the
+ * store-wide lease occupies.
+ */
+export type ProtectedPathKind = 'dsh-home' | 'registry-medium' | 'registry-lease'
+
+/**
+ * One directory no additional root may equal, lie inside, or contain. `path`
+ * is an absolute spelling — the configured one, the current canonical one, or
+ * a canonical value pinned the first time the boundary resolved — and is
+ * compared with {@link samePath}/{@link isCanonicallyUnder} exactly like
+ * every other boundary in this module.
+ */
+export interface ProtectedPath {
+  readonly kind: ProtectedPathKind
+  readonly path: string
+}
 
 /** One registered additional root exactly as it is persisted. */
 export interface RegisteredRoot {
@@ -154,13 +179,16 @@ export interface RootStatus extends RegisteredRoot {
    *
    * `'membership-conflict'` means the record passed every structural rule —
    * including an intact, absolute recorded grant — but its recorded boundary
-   * overlaps another record's. Neither membership may be granted while the
-   * conflict stands, yet the boundary remains a trustworthy negative
-   * restriction, so {@link reservedRootBoundary} keeps it reserved and the
-   * registry publishes the root as a withheld, deny-only entry. Every other
-   * `invalid` verdict left the grant unverifiable, so it contributes nothing.
+   * overlaps another record's. `'protected-path'` means that same intact
+   * grant overlaps a protected DSH directory (the home, the storage medium,
+   * or the lease directory) — typically a store written before the boundary
+   * existed or on another layout. Both reasons mean the same thing: the
+   * boundary is intact and trustworthy, so {@link reservedRootBoundary}
+   * keeps it reserved and the registry publishes the root as a withheld,
+   * deny-only entry — only the membership is withheld. Every other `invalid`
+   * verdict left the grant unverifiable, so it contributes nothing.
    */
-  readonly invalidReason?: 'membership-conflict'
+  readonly invalidReason?: 'membership-conflict' | 'protected-path'
 }
 
 /** One status together with the 1-based ordinal the surfaces accept for it. */
@@ -205,6 +233,9 @@ export type RootValidationCode =
   | 'session-not-found'
   | 'unsupported-path'
   | 'root-unavailable'
+  | 'protected-path'
+  | 'protected-boundary-unknown'
+  | 'revive-target-changed'
 
 /** A rejected root operation; `code` is the stable contract, `message` the fallback prose. */
 export class RootValidationError extends Error {
@@ -248,7 +279,7 @@ function comparable(path: string): string {
 }
 
 /** Whether two canonical paths name the same directory on this platform. */
-function samePath(left: string, right: string): boolean {
+export function samePath(left: string, right: string): boolean {
   return comparable(left) === comparable(right)
 }
 
@@ -303,6 +334,15 @@ export interface RootCandidateContext {
    * revived exempts only itself.
    */
   readonly existing: readonly string[]
+  /**
+   * The protected DSH directories — the home, the registry's storage medium,
+   * and the lease directory — that no candidate may equal, lie inside, or
+   * contain, at any access level and under any mode. Derived from the trusted
+   * host configuration by the registry; absent means "no protected set was
+   * provided" and is never a substitute for the boundary being unprovable
+   * (the caller refuses that case itself with `protected-boundary-unknown`).
+   */
+  readonly protectedPaths?: readonly ProtectedPath[]
 }
 
 /**
@@ -335,6 +375,18 @@ export function validateRootCandidate(raw: string, context: RootCandidateContext
     throw unsupportedPath(expanded)
   }
   assertDirectory(canonical, expanded)
+  // The protected DSH directories are judged BEFORE the primary-root rules:
+  // a candidate that could host the store, the lease, or user credentials is
+  // refused at every access level and in every mode — it is never merely an
+  // overlap with an already-granted tree.
+  const protectedConflict = protectedOverlap(canonical, context.protectedPaths ?? [])
+  if (protectedConflict !== undefined) {
+    throw new RootValidationError(
+      'protected-path',
+      `"${canonical}" overlaps the protected DSH directory "${protectedConflict.path}" (${protectedConflict.kind}) and cannot be registered`,
+      { conflict: protectedConflict.path, reference: canonical },
+    )
+  }
   const primaryRoot = canonicalRoot(context.primaryRoot)
   if (samePath(canonical, primaryRoot)) {
     throw new RootValidationError(
@@ -391,6 +443,21 @@ function unsupportedPath(asTyped: string): RootValidationError {
   )
 }
 
+/**
+ * The first protected directory `candidate` overlaps — equals, lies inside,
+ * or contains. Both sides must already be canonical (or absolute boundary
+ * spellings): the comparison is the same lexical three-way test the other
+ * boundary rules use, so a symlink alias can never route around it.
+ * @param candidate - the canonical candidate or recorded grant to test.
+ * @param protectedPaths - the protected DSH directories.
+ * @returns the overlapping protected path, or `undefined`.
+ */
+export function protectedOverlap(candidate: string, protectedPaths: readonly ProtectedPath[]): ProtectedPath | undefined {
+  return protectedPaths.find(boundary => samePath(candidate, boundary.path)
+    || isCanonicallyUnder(candidate, boundary.path)
+    || isCanonicallyUnder(boundary.path, candidate))
+}
+
 /** Assert that a canonical path is an existing directory. */
 function assertDirectory(canonical: string, asTyped: string): void {
   let stats
@@ -415,21 +482,25 @@ function assertDirectory(canonical: string, asTyped: string): void {
  * @param primaryRoot - the session workspace root the records belong to.
  * @param records - the stored records, in registry order.
  * @param platform - the platform the rules run for; defaults to `process.platform`.
+ * @param protectedPaths - the protected DSH directories a stored grant may not
+ *   overlap; a record that does is reported `invalid` with
+ *   `invalidReason: 'protected-path'` — withheld, never deleted, never re-granted.
  * @returns one status per record, in the same order.
  */
 export function classifyStoredRoots(
   primaryRoot: string,
   records: readonly RegisteredRoot[],
   platform: NodeJS.Platform = process.platform,
+  protectedPaths: readonly ProtectedPath[] = [],
 ): RootStatus[] {
   const primary = canonicalRoot(primaryRoot)
   const duplicated = duplicatedIds(records)
   // Pass one judges each record alone — structural trust, the primary-root
-  // rules on the RECORDED boundary, and current availability. Neither
-  // registration order nor another record's verdict participates, so a
-  // cosmetic `move` can never change who is granted.
+  // and protected-directory rules on the RECORDED boundary, and current
+  // availability. Neither registration order nor another record's verdict
+  // participates, so a cosmetic `move` can never change who is granted.
   const statuses = records.map((record, index) =>
-    classifyStoredRoot(record, primary, duplicated.has(record.id), index, platform))
+    classifyStoredRoot(record, primary, duplicated.has(record.id), index, platform, protectedPaths))
   return markMembershipConflicts(statuses)
 }
 
@@ -450,8 +521,12 @@ export function classifyStoredRoots(
  */
 function markMembershipConflicts(statuses: readonly RootStatus[]): RootStatus[] {
   // A structurally invalid record carries no trustworthy boundary: its fields
-  // can claim nothing — no membership, and no deny either.
-  const boundaries = statuses.map(status => (status.state === 'invalid' ? undefined : singleGrantOf(status)))
+  // can claim nothing — no membership, and no deny either. A `protected-path`
+  // record is different: its grant is intact and trustworthy, so it still
+  // takes part in the conflict set — an overlapping non-invalid partner is a
+  // membership conflict — while keeping its own verdict (it is never
+  // re-marked by the conflict pass).
+  const boundaries = statuses.map(status => (status.state !== 'invalid' || status.invalidReason === 'protected-path' ? singleGrantOf(status) : undefined))
   const conflicts = new Map<number, string[]>()
   for (let index = 0; index < boundaries.length; index += 1) {
     const boundary = boundaries[index]
@@ -470,7 +545,7 @@ function markMembershipConflicts(statuses: readonly RootStatus[]): RootStatus[] 
   if (conflicts.size === 0) return [...statuses]
   return statuses.map((status, index) => {
     const others = conflicts.get(index)
-    if (others === undefined) return status
+    if (others === undefined || status.invalidReason === 'protected-path') return status
     const boundary = boundaries[index]!
     const partners = others.map(other => `"${other}"`).join(', ')
     return {
@@ -490,7 +565,7 @@ function markMembershipConflicts(statuses: readonly RootStatus[]): RootStatus[] 
  * pass and {@link reservedRootBoundary}; the stored decoder is the source of
  * the access level, so this never cross-checks the field against `access`.
  */
-function singleGrantOf(record: {
+export function singleGrantOf(record: {
   readonly recordedPath?: string
   readonly readOnlyRecordedPath?: string
   readonly readWriteRecordedPath?: string
@@ -534,6 +609,7 @@ function classifyStoredRoot(
   duplicatedId: boolean,
   position: number,
   platform: NodeJS.Platform,
+  protectedPaths: readonly ProtectedPath[],
 ): RootStatus {
   const invalid = (detail: string): RootStatus => ({ ...record, state: 'invalid', detail })
   if (typeof record.path !== 'string' || record.path === '') return invalid('the record has no path')
@@ -586,6 +662,21 @@ function classifyStoredRoot(
   if (isCanonicallyUnder(recorded, primary) || isCanonicallyUnder(primary, recorded)) {
     return invalid(`"${recorded}" overlaps this session's workspace root`)
   }
+  // The protected-directory rule judges the recorded grant too — again BEFORE
+  // the redirect check resolves `path`. A record whose grant lies inside the
+  // DSH home or the registry's own storage can never be re-granted, yet its
+  // boundary is intact and trustworthy: the record stays registered and
+  // withheld — deny-only, the same class as a membership conflict — rather
+  // than deleted or re-authorized elsewhere.
+  const protectedConflict = protectedOverlap(recorded, protectedPaths)
+  if (protectedConflict !== undefined) {
+    return {
+      ...record,
+      state: 'invalid',
+      invalidReason: 'protected-path',
+      detail: protectedGrantDetail(recorded, protectedConflict),
+    }
+  }
   const canonical = canonicalRoot(record.path)
   if (!samePath(canonical, recorded)) {
     // The reported path stays the REGISTERED spelling. Substituting the new
@@ -619,23 +710,60 @@ export function availableRoots(statuses: readonly RootStatus[]): string[] {
   return statuses.filter(status => status.state === 'available').map(status => status.path)
 }
 
+/** The detail text the protected-path verdict carries, shared by both marking paths. */
+function protectedGrantDetail(grant: string, conflict: ProtectedPath): string {
+  return `the recorded grant "${grant}" overlaps the protected DSH directory "${conflict.path}" (${conflict.kind}); `
+    + 'it stays registered and withheld, and any recorded read-only restriction remains in force'
+}
+
+/**
+ * Apply the protected-path verdict to an already-classified list: a status
+ * whose recorded grant overlaps a protected directory becomes `invalid` with
+ * `invalidReason: 'protected-path'` — the same verdict the pass-one stored
+ * check produces, here applied by a consumer that classified elsewhere (a
+ * shared-registry follower re-judging an owner snapshot against ITS OWN
+ * protected set, which may differ from the owner's). Statuses already
+ * `invalid` keep their own verdict — a structural failure is never healed
+ * into a trustworthy boundary.
+ * @param statuses - the classified statuses to re-mark.
+ * @param protectedPaths - the caller's own protected DSH directories.
+ * @returns a new list with the verdict applied.
+ */
+export function markProtectedPaths(statuses: readonly RootStatus[], protectedPaths: readonly ProtectedPath[]): RootStatus[] {
+  if (protectedPaths.length === 0) return [...statuses]
+  return statuses.map(status => {
+    if (status.state === 'invalid') return status
+    const grant = singleGrantOf(status)
+    if (grant === undefined) return status
+    const conflict = protectedOverlap(grant, protectedPaths)
+    if (conflict === undefined) return status
+    return {
+      ...status,
+      state: 'invalid',
+      invalidReason: 'protected-path',
+      detail: protectedGrantDetail(grant, conflict),
+    }
+  })
+}
+
 /**
  * The recorded boundary one status still RESERVES: the grant it was
  * registered for, which a new or revived registration may not overlap merely
  * because the root is currently unusable.
  *
- * `available`, `missing`, `redirected`, and membership-conflict statuses all
- * carry an intact, trustworthy recorded grant; every other `invalid` verdict
- * means the grant could not be parsed at all, so it reserves — and denies —
- * nothing. This is not an independent authorization table: it derives the
- * boundary from the status list {@link classifyStoredRoots} produced, with
- * the same grant-extraction semantics, so its answer can never disagree with
+ * `available`, `missing`, `redirected`, and both trustworthy-boundary
+ * `invalid` verdicts (`membership-conflict` and `protected-path`) all carry
+ * an intact recorded grant; every other `invalid` verdict means the grant
+ * could not be parsed at all, so it reserves — and denies — nothing. This is
+ * not an independent authorization table: it derives the boundary from the
+ * status list {@link classifyStoredRoots} produced, with the same
+ * grant-extraction semantics, so its answer can never disagree with
  * classification.
  * @param status - one classified registration.
  * @returns the absolute recorded boundary, or `undefined` when there is none.
  */
 export function reservedRootBoundary(status: RootStatus): string | undefined {
-  if (status.state === 'invalid' && status.invalidReason !== 'membership-conflict') return undefined
+  if (status.state === 'invalid' && status.invalidReason === undefined) return undefined
   const boundary = singleGrantOf(status)
   return boundary !== undefined && isAbsolute(boundary) ? boundary : undefined
 }

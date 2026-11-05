@@ -61,8 +61,7 @@
 | compat | DSH 0.2.2-alpha.3 提升 | fs `patchText`/`deleteFile`/`moveFile` 纳入围栏与 Registry admission；Connection RPC getter 绑定消费 fiber 修复 HTTP 405；Files 页签改用宿主文件树 Factory；开发 pin `0.2.2-alpha.3` / cordis `4.0.6-alpha.2` | [本次记录](#dsh-022-alpha3-兼容适配2026-11-04)、[接口审查](../../reference/dsh-0.2.2-migration.md) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md)、[0024 修订](../../decisions/ADR-0024-registry-operation-admission.md) | `9035ab0` | 随 `v0.1.14` 发版 |
 | compat | DSH 0.2.2-rc.1 提升 | 支持合同纳入 `0.2.2-rc.1`（22 个精确版本）；开发 pin `0.2.2-rc.1` / cordis `4.1.0` / schemastery `3.19.0`；稳定 vendor 选择器限宿主声明 minor 线；未新增适配分支 | [本次记录](#dsh-022-rc1-兼容适配2026-11-05)、[接口审查](../../reference/dsh-0.2.2-migration.md) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `1c025b2` | 随 `v0.1.14` 发版 |
 | 第二期 | 插件详情页设置卡与富文本详情 | 「多根 Auto Review（实验性）」设置开关与 Loader 行等价（`setPluginEnabled` 持久化、热应用、restart-required Toast）；设置卡错误改 Toast；`refreshSeq` 修并发刷新竞态；locale `meta.detail` + `preview.svg` 富文本详情 | [本次记录](#插件详情页设置卡与富文本详情2026-11-05) | — | `220bc82` | 随 `v0.1.14` 发版 |
-
-| 安全修复 | 根授权安全修复 P0–P4 | BYP-01、MRW-01、BYP-02、home/物理介质保护与默认权威 | [专项计划](./2026-11-05-root-authorization-security-fixes.md) | 具体合同经 P0 验证后同步 ADR | — | 2026-11-05 计划已接受；P0–P4 均未开始，未实施、未验收、未发布；不指定版本 |
+| 安全修复 | 根授权安全修复 P0–P4 | BYP-01、MRW-01、BYP-02、home/物理介质保护与默认权威 | [专项计划](./2026-11-05-root-authorization-security-fixes.md)（含 P0 记录） | [0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)（P1）；P2/P3 合同待 P0 选型评审 | `fix/audit-1105` | 2026-11-05：P0 静态证据已记录，选型待评审，未做针对性实验；P1（F2 revive 不改目标 + F4 候选/存量保护目录）已实施，macOS 本机 `lint`/`typecheck`/`pnpm test`（74 文件，1012 通过、86 平台跳过）/`docs:check` 通过，未跑 smoke、packed 与 Linux/Windows 原生门禁；P2–P4 未开始；BYP-01、MRW-01 未修复；未发布，不指定版本 |
 
 ## 总体策略
 

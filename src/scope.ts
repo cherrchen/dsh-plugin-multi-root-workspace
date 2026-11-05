@@ -358,6 +358,13 @@ export class MultiRootScopeService extends Service {
    * treated as evidence.
    */
   private readonly dshHome: string | undefined
+  /**
+   * Whether the row carried a `dshHome` value at all — even an invalid one.
+   * The registry's protected-boundary set must tell "no home configured"
+   * (absent: nothing to protect) from "a home was supplied and rejected"
+   * (invalid: the boundary cannot be proven).
+   */
+  private readonly dshHomeSupplied: boolean
 
   /** Observe registry publications; consumers still resolve authority from scopeOf(). */
   subscribe(listener: () => void): () => void {
@@ -408,6 +415,21 @@ export class MultiRootScopeService extends Service {
     return this.capsInvalid
   }
 
+  /**
+   * The validated `dshHome` row config, classified for the registry's
+   * protected-boundary set: `absent` when the row carried no value (nothing
+   * to protect), `invalid` when it carried a value the constructor rejected
+   * (the boundary cannot be proven), `configured` with the accepted absolute
+   * path. Read-only — this changes no scope or `protectedHome` semantics.
+   */
+  get dshHomeConfig():
+    | { readonly kind: 'absent' }
+    | { readonly kind: 'invalid' }
+    | { readonly kind: 'configured'; readonly path: string } {
+    if (this.dshHome !== undefined) return { kind: 'configured', path: this.dshHome }
+    return this.dshHomeSupplied ? { kind: 'invalid' } : { kind: 'absent' }
+  }
+
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'multiRootScope')
 
@@ -432,6 +454,7 @@ export class MultiRootScopeService extends Service {
     }
 
     const dshHome = config.dshHome
+    this.dshHomeSupplied = dshHome !== undefined
     if (dshHome !== undefined && (typeof dshHome !== 'string' || dshHome.trim() === '' || !isAbsolute(dshHome))) {
       ctx.logger.error(
         'multi-root-workspace: invalid dshHome config '

@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted（已接受）**。2026-11-05 经维护者明确接受，纳入本轮审核补充。目录归属：`docs/plans/active/`；接受的是修复范围、阶段与验收合同，不表示已实施、已修复或已发布。
+**Accepted（已接受）**。2026-11-05 经维护者明确接受，纳入本轮审核补充。目录归属：`docs/plans/active/`；接受的是修复范围、阶段与验收合同，不表示已实施、已修复或已发布。实施进展：P0 静态证据已记录（见下文“P0 记录”，选型待评审），P1 已实施（[ADR-0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)）；验证状态以路线总账为准。下文“Current State”保留计划接受时的基线描述。
 
 日期：2026-11-05。实施批次已登记[路线进度总账](./2026-09-12-multi-root-workspace.md#进度总账)。后续实施遵循本文 P0 前置验证及阶段依赖；可信确认能力、跨 Host 能力传递、origin 持久绑定与迁移的具体合同仍须经验证和评审，不能以计划已接受代替技术证据。本次只更新计划与登记状态，不修改运行时代码、提升上游支持版本或发布；涉及现有 Accepted ADR 的语义变化须在实施时显式修订或以新 ADR 替代，保留历史决定。发布内容仍归 CHANGELOG 双语对。
 
@@ -149,6 +149,29 @@
 
 P1 可作为先行缓解，但不等于 BYP-01、MRW-01 修完；F2 的显式删除/新增流程依赖 P2 才能作为安全替换入口。P3 的安全主根 fallback 依赖稳定身份，不能先仅改 unavailable 就宣称 MRW-01 解决。
 
+### P0 记录（2026-11-05，静态证据；未做针对性实验）
+
+基线同上（`0.2.2-rc.1` 开发树，macOS）。以下只核对已安装上游制品与插件源码，**没有运行攻击、伪造请求或原生实验**；“结论”是静态结论，标为“待评审”的项必须经维护者选定后才能进入 P2/P3。
+
+| P0 问题 | 静态结论 | 证据 |
+| --- | --- | --- |
+| turn 外管理确认的公开接口 | **不存在可直接复用的接口**。`approval.request()` 在 session 无 open turn 时直接抛错，面板空闲与 turn 外命令都不满足；`ctx.authorization` 只服务凭据获取流程，由发起它的同一 surface 回答提示 | `dsh-user-approval@0.2.2-rc.1 / lib/index.js` 的 `request()`；`dsh-authorization / lib/types/index.d.ts` 的 `AuthorizationSession.prompt` |
+| 确认通道是否独立于 owner cookie | **不独立**。`approval/request` 由 `dsh-api-remotes` 以 waterfall 转发给远程事件源；`Principal` 在该版本只有 `kind: 'owner'`，有效浏览器 cookie 一律映射为共享的 `browserPeer`（owner，`interactions: 'answer'`），因此伪造 cookie 同样能领取并回答审批。ACP / JSON-RPC SDK 回答者同为远程 owner 通道 | `dsh-api-remotes / lib/index.js` 的 `API_REMOTE_FORWARDED_EVENTS`、`forwardWaterfall`；`dsh-client-connection / lib/index.js` 的 `HostConnectionService.admit`、`Peer`；`dsh-typert-protocol / lib/types/types.d.ts` 的 `PrincipalMap` |
+| 宿主本地交互能力 | 上游只有 web GUI 组合的 `directoryPicker` native 能力（在 Host 显示器上打开 OS 目录选择器），能证明“谁在本机选了哪个目录”，但不能表达 access 变化、删除或 Skills 开关的确认，headless/远程组合也没有。没有通用的原生确认对话框 | `dsh-host-directory-picker / lib/types/index.d.ts` 的 `DirectoryPickerNativeCapability` |
+| 跨 Host 能力传递 | 共享 IPC 只证明“对端是同 uid、未受沙箱的 Host 进程”（darwin 拒绝 `sandbox_check` 非零的 peer，Linux 拒绝 `NoNewPrivs` 非 0），不携带每次调用的人工证据，不能作为“已确认”位 | `src/authority/native.ts` 的 `authenticate` |
+| origin 持久绑定 | `SessionHeader` 只保留创建时的**词法** `cwd`，没有扩展字段；`SandboxExecutionPolicy` 可带可选 `sessionId`，但“只有 policy 的直接调用”不一定有。现状下所有入口都对 `workspaceRoot` 现算 `canonicalPath` 作为 Registry key | `dsh-session / lib/types/types.d.ts` 的 `SessionHeader`、`CreateSessionOptions.meta`；`dsh-sandbox / lib/types/index.d.ts` |
+| 物理介质保护集合 | 默认组合启用 `sharedStorageRoot`，介质由 `storeIdentity()` 以 `realpathSync.native` 解析，可证明物理落点（含 `storages` 指向 home 外的 symlink），lease 必须与介质同一目录。**legacy 组合**（无 `sharedStorageRoot`）经 `ctx.storageDomain.open()` 打开，上游公开接口不暴露 storage-json 的 `root`，只能依据 ADR-0007 的“lease 与 JSON 文档同目录”配置合同推定 | `src/registry.ts` 的 `ensureAuthority`；`src/authority/native.ts` 的 `storeIdentity`；`dsh-storage-json / lib/types/index.d.ts` |
+| 启动 Skills migration | **不满足**拟议的内部维护例外：`migrateRootSkills()` 给缺字段的 legacy 非只读行补 `skillsEnabled: true`，把“元数据缺失 → Skills withheld”变为启用，扩大了 Skills 的有效启用范围；且 `persist()` 在**每次** mutation（含 `recheck`）都重跑迁移 | `src/skills/metadata.ts` 的 `migrateRootSkills`；`src/registry.ts` 的 `openDomain`、`persist` |
+| `recheck` 的持久差异 | 写回重分类结果：available/missing 行的 `path` 改写为当前 canonical（redirected 行保留登记拼写），grant 字段不变，并附带上述迁移。确认合同须绑定这些实际差异 | `src/registry.ts` 的 `recheck`、`toPersistedRoot` |
+| 提交分界 | 现有 `persist()` 先落盘后发布；共享 follower 的 mutation 不重放丢失应答，已有“结果不明”雏形，但没有“确认消费点”这一概念 | `src/registry.ts` 的 `persist`、`refresh` 注释 |
+
+由此得出、**待维护者评审**的选型：
+
+1. **可信确认（P2 前置）**：上游无可用接缝，标准 Web approval 不能作为证据。候选方案是“Web 只提交提案，人工在本机终端用插件自带 CLI 经共享 IPC 确认”——IPC 已拒绝受沙箱 peer，因此受限的 agent 进程（workspace-write、或受限 Full-access 的 Seatbelt/bwrap 前缀）无法自我确认，纯 ambient Full-access 仍不在保证范围内。Windows 的 peer 判定、headless 组合与 legacy（无共享 IPC）组合需要单独结论；在评审通过前，备选缓解是对远程入口禁止根管理写。
+2. **origin 绑定（P3 前置）**：候选方案是在插件自有 storage domain 中按“词法 origin → 首次观察到的 canonical key”持久绑定，后续解析与绑定不一致即视为 unknown，保留旧负边界；升级前已被置换的布局无法追溯识别，不按新路径猜测。
+3. **legacy 介质**：P1 按 ADR-0007 配置合同把 lease 目录当作 legacy 介质目录保护，并在 ADR 中记录这一推定；若评审要求严格“无法证明即拒绝”，则 legacy 组合应拒绝全部新增登记。
+4. **Skills migration**：P2 需要把补 `skillsEnabled: true` 改为保持 withheld，待可信管理确认后启用，并把迁移从通用 `persist()` 中拆出；这会改变 ADR-0023 的 legacy 默认值。
+
 ## Validation（拟执行，本文未执行）
 
 仅在隔离 fixture `$DSH_HOME`、临时凭据、临时主根/额外根和本地测试 Host 中验证，断言实际字节、持久记录、scope/profile 与结果；不得使用日用凭据或配置。Linux 放置主根于 denied-root 祖先 pin 之外；负面目标同时放在主根/平台 temp 授权范围外，防止测试假阳性。
@@ -191,9 +214,9 @@ P1 可作为先行缓解，但不等于 BYP-01、MRW-01 修完；F2 的显式删
 
 - [x] 计划于 2026-11-05 经维护者明确接受，纳入物理介质保护、提交分界与 recheck/迁移边界三项审核补充；以下实现验收项仍未完成。
 - [ ] BYP-01 两入口、直接 Registry 和共享 owner/follower 的管理写均受可信人工授权保护，且同 cookie 无法自行回答审批。
-- [ ] redirected revive 不改 grant 目标；显式替换流程绑定用户确认的目标和策略。
+- [ ] redirected revive 不改 grant 目标；显式替换流程绑定用户确认的目标和策略。（P1 已完成前半：revive 只回原 grant，见 ADR-0027；显式替换的确认流程依赖 P2。）
 - [ ] 主根换名/重定向不丢 deny，不发替换目标 grant；重启与无法确认身份的情况有经验证的保守行为。
-- [ ] home 与物理介质完整保护集合的新登记、存量、主根/temp 重叠与执行层边界一致，未知能力明确拒绝。
+- [ ] home 与物理介质完整保护集合的新登记、存量、主根/temp 重叠与执行层边界一致，未知能力明确拒绝。（P1 已完成新登记与存量部分；主根/temp 重叠与执行层 deny 属于 P3。）
 - [ ] Registry 缺席时保守且基础 provider 服务存活；健康空表 parity 与幂等通知通过。
 - [ ] 精确版本/原生平台/packed 制品门禁完成，结果与未覆盖项进入既有总账；用户文档与接受后的 ADR 同步。
 - [ ] 满足以上条件后再按计划生命周期迁移 completed；发布仍需独立走既有发布流程。

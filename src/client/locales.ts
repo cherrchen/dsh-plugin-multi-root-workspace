@@ -67,6 +67,7 @@ export const zh = {
   'panel.copied': '已复制',
   'panel.reveal': '在文件管理器中显示',
   'panel.reRegister': '重新登记（保留原访问级别）',
+  'panel.redirectedHint': '目标已改变：请移除该登记后再显式添加新目录。',
   'panel.moveUp': '上移',
   'panel.moveDown': '下移',
   'access.inherit': '跟随会话',
@@ -103,6 +104,9 @@ export const zh = {
   'error.copy-failed': '无法写入剪贴板，请检查浏览器的剪贴板权限。',
   'error.session-not-found': '找不到该会话；请先打开一个工作区会话。',
   'error.unsupported-path': '该路径是网络或设备路径，Windows ACL 隔离无法覆盖它。',
+  'error.protected-path': '该目录与 DSH 主目录或根登记存储目录重叠，不能登记。',
+  'error.protected-boundary-unknown': '暂时无法确定 DSH 主目录等受保护目录的位置；恢复之前不能新增登记。',
+  'error.revive-target-changed': '该登记现在指向另一个目录；请先移除它，再显式添加新目录。',
   'error.fallback': '操作失败。',
 } satisfies Record<string, string>
 
@@ -164,6 +168,7 @@ export const en = {
   'panel.copied': 'Copied',
   'panel.reveal': 'Reveal in file manager',
   'panel.reRegister': 'Re-register (keeps its access level)',
+  'panel.redirectedHint': 'The target changed: remove this registration, then add the new folder explicitly.',
   'panel.moveUp': 'Move up',
   'panel.moveDown': 'Move down',
   'access.inherit': 'Inherit',
@@ -200,6 +205,9 @@ export const en = {
   'error.copy-failed': 'Could not write to the clipboard; check the browser\'s clipboard permission.',
   'error.session-not-found': 'That session is not active; open a workspace session first.',
   'error.unsupported-path': 'That is a network or device path, which Windows ACL confinement cannot cover.',
+  'error.protected-path': 'That directory overlaps the DSH home or the registry storage directories; it cannot be registered.',
+  'error.protected-boundary-unknown': 'The protected DSH directories cannot be resolved right now; no folder can be registered until they can.',
+  'error.revive-target-changed': 'That registration now resolves to a different directory; remove it, then add the new folder explicitly.',
   'error.fallback': 'The operation failed.',
 } satisfies Record<Key, string>
 

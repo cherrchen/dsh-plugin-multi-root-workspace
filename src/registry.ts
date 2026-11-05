@@ -46,6 +46,7 @@
 
 import { migrateRootSkills, validateAliasId } from './skills/metadata.ts'
 import { randomUUID } from 'node:crypto'
+import { statSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import { openAuthorityStorage } from './compat/authority-storage.ts'
 import { storeIdentity } from './authority/native.ts'
@@ -68,12 +69,18 @@ import {
   classifyStoredRoots,
   expandRootInput,
   isWindowsNetworkOrDevicePath,
+  markProtectedPaths,
+  protectedOverlap,
   removeStatusAt,
   reservedRootBoundary,
   resolveRootIndex,
   RootValidationError,
+  samePath,
+  singleGrantOf,
   validateRootCandidate,
   type AdditionalRootId,
+  type ProtectedPath,
+  type ProtectedPathKind,
   type RegisteredRoot,
   type RootAccess,
   type RootRef,
@@ -354,6 +361,13 @@ export class MultiRootRegistry extends Service {
   private readonly maxRoots: number
   /** Keys already warned about a historical over-limit store (one warning each). */
   private readonly warnedOverLimit = new Set<string>()
+  /**
+   * The canonical value each protected boundary resolved to the FIRST time it
+   * could be computed, keyed by boundary kind. Never re-pinned: a later
+   * rename or symlink swap of the DSH home (or of the lease directory) must
+   * not drop the boundary the registration rules were enforced under.
+   */
+  private readonly pinnedProtectedPaths = new Map<ProtectedPathKind, string>()
 
   /**
    * @param ctx - the host context; `storageDomain` and `multiRootScope` are injected.
@@ -621,6 +635,110 @@ export class MultiRootRegistry extends Service {
   }
 
   /**
+   * The spellings one protected boundary contributes: the configured path,
+   * its current canonical resolution, and the canonical value pinned the
+   * first time it resolved — never re-pinned, so a later rename or symlink
+   * swap of the protected directory cannot drop the boundary the
+   * registration rules were enforced under. The list is deduplicated by
+   * {@link samePath}.
+   */
+  private boundarySpellings(kind: ProtectedPathKind, configured: string): string[] {
+    const canonical = canonicalRoot(configured)
+    if (!this.pinnedProtectedPaths.has(kind)) this.pinnedProtectedPaths.set(kind, canonical)
+    const spellings: string[] = []
+    for (const spelling of [configured, canonical, this.pinnedProtectedPaths.get(kind)!]) {
+      if (!spellings.some(existing => samePath(existing, spelling))) spellings.push(spelling)
+    }
+    return spellings
+  }
+
+  /**
+   * The best-known protected-boundary set, plus whether it is COMPLETE.
+   *
+   * The set comes from trusted host configuration, never from a panel or
+   * shell claim: the scope row's `dshHome`, the physical medium
+   * `storeIdentity` bound (shared mode), and the lease directory — whose
+   * legacy composition also hosts the JSON document by the ADR-0007
+   * contract, so no separate medium entry exists without `sharedStorageRoot`.
+   * `complete` is false — and only NEW grants may then be refused — when a
+   * boundary cannot be proven: an invalid `dshHome` config, a configured
+   * home that is not a directory right now, or a shared medium that was
+   * never bound. Stored classification always consumes whatever IS known
+   * (pinned values included), so an unknown boundary never weakens the
+   * revalidation of existing records.
+   */
+  private protectedBoundarySet(): { readonly paths: readonly ProtectedPath[]; readonly complete: boolean } {
+    const paths: ProtectedPath[] = []
+    let complete = true
+    const home = this.ctx.multiRootScope.dshHomeConfig
+    switch (home.kind) {
+      case 'absent':
+        break
+      case 'invalid':
+        // A rejected home config proves no home boundary at all.
+        complete = false
+        break
+      case 'configured': {
+        let isDirectory = false
+        try { isDirectory = statSync(home.path).isDirectory() } catch { isDirectory = false }
+        if (isDirectory) {
+          for (const spelling of this.boundarySpellings('dsh-home', home.path)) paths.push({ kind: 'dsh-home', path: spelling })
+        } else {
+          // The boundary cannot be proven now; what is still KNOWN — the
+          // configured spelling and any canonical value pinned while the home
+          // resolved — keeps protecting stored records.
+          complete = false
+          paths.push({ kind: 'dsh-home', path: home.path })
+          const pinned = this.pinnedProtectedPaths.get('dsh-home')
+          if (pinned !== undefined && !samePath(pinned, home.path)) paths.push({ kind: 'dsh-home', path: pinned })
+        }
+        break
+      }
+    }
+    if (this.sharedStorageRoot !== undefined) {
+      // `storeIdentity` realpath'd the medium when it was bound; before that,
+      // the physical location cannot be proven.
+      if (this.medium === undefined) complete = false
+      else paths.push({ kind: 'registry-medium', path: this.medium.root })
+    }
+    if (this.leasePath !== undefined) {
+      for (const spelling of this.boundarySpellings('registry-lease', dirname(this.leasePath))) {
+        paths.push({ kind: 'registry-lease', path: spelling })
+      }
+    }
+    return { paths, complete }
+  }
+
+  /**
+   * The protected DSH directories this Host can prove right now, or
+   * `undefined` when the set cannot be proven. `undefined` blocks every NEW
+   * grant; it never weakens the classification of stored records.
+   */
+  private protectedPaths(): readonly ProtectedPath[] | undefined {
+    const { paths, complete } = this.protectedBoundarySet()
+    return complete ? paths : undefined
+  }
+
+  /**
+   * Every protected entry this Host can prove — used wherever a partial set
+   * must still protect stored records and received snapshots.
+   */
+  private knownProtectedPaths(): readonly ProtectedPath[] {
+    return this.protectedBoundarySet().paths
+  }
+
+  /**
+   * The one refusal shared by the owner mutation path and the follower
+   * pre-check: the protected set cannot be proven, so no new grant is safe.
+   */
+  private static protectedBoundaryUnknown(): RootValidationError {
+    return new RootValidationError(
+      'protected-boundary-unknown',
+      'the protected DSH directories cannot be resolved right now; no root can be registered until they can',
+    )
+  }
+
+  /**
    * Registers one additional root.
    * @param primaryRoot - the session workspace root the root belongs to.
    * @param input - the directory and optional alias.
@@ -629,10 +747,34 @@ export class MultiRootRegistry extends Service {
    */
   async add(primaryRoot: string, input: AddRootInput): Promise<readonly RootStatus[]> {
     await this.ensureAuthority()
-    if (this.client) return await this.remote('add', [primaryRoot, input])
+    if (this.client) {
+      // The owner runs the full validation against ITS protected set; a
+      // follower narrows first so a path inside ITS OWN protected
+      // directories never even reaches the owner — the two homes, and the
+      // stores they imply, may differ.
+      const protectedPaths = this.protectedPaths()
+      if (protectedPaths === undefined) throw MultiRootRegistry.protectedBoundaryUnknown()
+      const expanded = expandRootInput(input.path)
+      if (isAbsolute(expanded)) {
+        const candidate = canonicalRoot(expanded)
+        const conflict = protectedOverlap(candidate, protectedPaths)
+        if (conflict !== undefined) {
+          throw new RootValidationError(
+            'protected-path',
+            `"${candidate}" overlaps the protected DSH directory "${conflict.path}" (${conflict.kind}) and cannot be registered`,
+            { conflict: conflict.path, reference: candidate },
+          )
+        }
+      }
+      return await this.remote('add', [primaryRoot, input])
+    }
     this.requireActive()
     const key = canonicalRoot(primaryRoot)
     return await this.serialize(key, async () => {
+      // No new grant without a proven protected set; the boundary a store
+      // write could corrupt must be known before a root may cover it.
+      const protectedPaths = this.protectedPaths()
+      if (protectedPaths === undefined) throw MultiRootRegistry.protectedBoundaryUnknown()
       // Re-classify FIRST, from the stored records: the cached list may be
       // stale (a `missing` root whose directory came back, a `redirected` one
       // whose target moved), and a candidate judged against it would either be
@@ -650,15 +792,14 @@ export class MultiRootRegistry extends Service {
       // very directory an existing record names is the operator confirming it,
       // not a duplicate. The check looks at BOTH spellings of a registration —
       // the canonical path it is stored under, and the path it currently
-      // resolves to — so re-adding a directory that was replaced by a symlink
-      // updates that registration (re-recording what it is granted for)
-      // instead of piling a second record for the same operator-given path on
-      // top of it. A re-add revives when EITHER observation reports the record
+      // resolves to — so re-adding a path names its existing record instead of
+      // piling a second one for the same operator-given path on top of it.
+      // A re-add revives when EITHER observation reports the record
       // withheld — the fresh classification catches a root that degraded since
-      // the last one (a grant that is now `redirected` must revive, never
-      // duplicate), the last observation catches the operator re-confirming a
-      // root whose directory silently came back. Only a root that was granted
-      // then AND is granted now stays a `duplicate` refusal.
+      // the last one (a grant that is now `redirected` must revive or be
+      // refused, never duplicate), the last observation catches the operator
+      // re-confirming a root whose directory silently came back. Only a root
+      // that was granted then AND is granted now stays a `duplicate` refusal.
       const expanded = expandRootInput(input.path)
       // Revive matching must obey the same pre-I/O rejection as candidate
       // validation: even realpath of a UNC path can initiate SMB auth.
@@ -672,6 +813,27 @@ export class MultiRootRegistry extends Service {
         const before = earlier?.find(candidate => candidate.id === status.id)
         return status.state !== 'available' || (before !== undefined && before.state !== 'available')
       })
+      // A matched withheld record revives ONLY into the directory it was
+      // granted for: re-resolving a path is not re-authorizing it (ADR-0027).
+      // The revive is allowed when the record carries exactly ONE grant field
+      // — whichever of the three encodings — and the current canonical target
+      // still equals it. Anything else is a registration whose target moved
+      // (a replaced directory, a retargeted symlink) or a record too corrupt
+      // to name one boundary: both are refused rather than rewritten, so a
+      // single re-add can never migrate the old access onto a new directory.
+      // Replacing the target is explicit: remove the record, then add the new
+      // directory.
+      if (revived !== -1) {
+        const grant = singleGrantOf(statuses[revived]!)
+        if (grant === undefined || !samePath(preliminary!, grant)) {
+          throw new RootValidationError(
+            'revive-target-changed',
+            `the registration "${statuses[revived]!.path}" was granted for "${grant ?? '(unknown)'}"`
+              + ` but now resolves to "${preliminary!}"; remove it and add the new directory explicitly`,
+            { ...(grant === undefined ? {} : { conflict: grant }), reference: preliminary! },
+          )
+        }
+      }
       // The cap counts STORED records — every state, including withheld and
       // unusable ones — so it is stable and independent of the filesystem. A
       // revive re-confirms an existing record and never counts as new, which
@@ -686,6 +848,7 @@ export class MultiRootRegistry extends Service {
       }
       const canonical = validateRootCandidate(input.path, {
         primaryRoot: key,
+        protectedPaths,
         // The overlap rules judge every registration that still carries an
         // intact recorded grant — available, missing, redirected, and
         // membership-conflict records alike. A withheld root grants nothing,
@@ -957,7 +1120,7 @@ export class MultiRootRegistry extends Service {
    * staging uses it so a half-opened domain cannot materialize rows.
    */
   private classify(key: string, record: PersistedPrimaryRoot): readonly RootStatus[] {
-    const statuses = classifyStoredRoots(key, record.roots.map(toRegisteredRoot))
+    const statuses = classifyStoredRoots(key, record.roots.map(toRegisteredRoot), process.platform, this.knownProtectedPaths())
     // A historical over-limit store (the limit was lowered, or the document
     // was edited by hand) is never truncated and keeps granting exactly what
     // classification grants; it is reported once per key instead.
@@ -1036,7 +1199,7 @@ export class MultiRootRegistry extends Service {
       if (unknownStorageState(error)) this.enterStorageFailed('registry write result is unknown; restart and reconcile durable state', 'quarantine')
       throw error
     }
-    const classified = statuses.length === 0 ? [] : classifyStoredRoots(key, durable.roots.map(toRegisteredRoot))
+    const classified = statuses.length === 0 ? [] : classifyStoredRoots(key, durable.roots.map(toRegisteredRoot), process.platform, this.knownProtectedPaths())
     this.cache.set(key, classified)
     this.publish(key, classified)
     return classified
@@ -1132,12 +1295,13 @@ export class MultiRootRegistry extends Service {
       // A structurally `invalid` record publishes NOTHING — not even its deny
       // boundary: a record too corrupt to parse cannot state a trustworthy
       // restriction, so under Full-access its former path becomes
-      // ambient-writable again. A `membership-conflict` record is different:
-      // its recorded grant IS intact and trustworthy, so it still publishes —
-      // withheld, deny-only — and a read-only boundary inside a covering grant
-      // stays denied. The tradeoff is recorded in ADR-0017 (失效登记的负授权修订
-      // and its membership-conflict amendment).
-      if ((status.state === 'invalid' && status.invalidReason !== 'membership-conflict') || recorded === undefined) return []
+      // ambient-writable again. The trustworthy-boundary verdicts are
+      // different — `membership-conflict` and `protected-path` both carry an
+      // intact recorded grant, so they still publish — withheld, deny-only —
+      // and a read-only boundary inside a covering grant stays denied. The
+      // tradeoff is recorded in ADR-0017 (失效登记的负授权修订 and its
+      // membership-conflict amendment) and ADR-0027.
+      if ((status.state === 'invalid' && status.invalidReason === undefined) || recorded === undefined) return []
       return [{
         id: status.id,
         path: status.path,
@@ -1207,7 +1371,13 @@ export class MultiRootRegistry extends Service {
     const previous = this.remoteRevisions.get(snapshot.primary) ?? -1
     if (snapshot.revision < previous) return
     this.remoteRevisions.set(snapshot.primary, snapshot.revision)
-    const rows = snapshot.roots.map(row => Object.fromEntries(Object.entries({ ...row, id: additionalRootId(row.id) }).filter(([, value]) => value !== undefined))) as unknown as RootStatus[]
+    const rows = markProtectedPaths(
+      snapshot.roots.map(row => Object.fromEntries(Object.entries({ ...row, id: additionalRootId(row.id) }).filter(([, value]) => value !== undefined))) as unknown as RootStatus[],
+      // The owner's classification used the OWNER's protected set; this
+      // follower re-marks every row against its own, so a row inside the
+      // follower's own home is withheld here even when the owner granted it.
+      this.knownProtectedPaths(),
+    )
     // One commit per key: the projection and the authority fact land together,
     // so a subscriber never sees roots without their authority (or vice versa).
     this.commit(() => {

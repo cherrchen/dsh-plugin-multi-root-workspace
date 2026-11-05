@@ -13,6 +13,7 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { DOMAIN_NAME } from '../src/registry.ts'
 import { RegistryAuthorityLease } from '../src/registry-lease.ts'
 import type { Config as RegistryConfig } from '../src/registry.ts'
+import type { Config as ScopeConfig } from '../src/scope.ts'
 import MultiRootFileSystem from '../src/fs.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -24,9 +25,9 @@ const nativeTest = it.skipIf(!availability.available)
 let fixture: FixtureWorkspace, stacks: RegistryStack[]
 beforeEach(() => { fixture = createFixtureWorkspace('shared'); stacks = [] })
 afterEach(async () => { vi.restoreAllMocks(); for (const stack of stacks.reverse()) await stack.dispose(); fixture.dispose() })
-async function mount(config: RegistryConfig = {}) {
+async function mount(config: RegistryConfig = {}, scopeConfig: ScopeConfig = {}) {
   const root = join(fixture.base, 'store')
-  const stack = await mountRegistryStack(root, { sharedStorageRoot: root, ...config }, { beforeGate: async ctx => {
+  const stack = await mountRegistryStack(root, { sharedStorageRoot: root, ...config }, { scopeConfig, beforeGate: async ctx => {
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
     await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace })
@@ -669,4 +670,25 @@ nativeTest('marks config and quarantine classes as requires-restart', async () =
   await held.release()
   expect(off.registry.authority.kind).toBe('contended')
   expect(off.registry.diagnostics).toMatchObject({ recoveryClass: 'retryable', recovery: { phase: 'disabled' } })
+})
+
+nativeTest('withholds a root inside a follower\'s own home even while the owner grants it', async () => {
+  const ownerHome = join(fixture.base, 'owner-home'), followerHome = join(fixture.base, 'follower-home')
+  mkdirSync(ownerHome); mkdirSync(followerHome)
+  const owner = await mount({}, { dshHome: ownerHome })
+  const follower = await mount({}, { dshHome: followerHome })
+  expect(follower.registry.authority.kind).toBe('follower')
+  // The follower refuses the add LOCALLY: its own home is protected for it,
+  // never reaching the owner.
+  await expect(follower.registry.add(fixture.workspace, { path: followerHome })).rejects.toMatchObject({ code: 'protected-path' })
+  expect(owner.registry.list(fixture.workspace)).toEqual([])
+  // The owner can register the same directory (it is outside ITS home); the
+  // follower still withholds the row because it lands inside ITS home.
+  await owner.registry.add(fixture.workspace, { path: followerHome })
+  await follower.registry.refresh(fixture.workspace)
+  const row = follower.registry.list(fixture.workspace).find(entry => entry.path === canonicalPath(followerHome))
+  expect(row?.state).toBe('invalid')
+  expect(row?.invalidReason).toBe('protected-path')
+  expect(follower.scope.scopeOf(fixture.workspace)).not.toContain(canonicalPath(followerHome))
+  expect(owner.registry.list(fixture.workspace)[0]?.state).toBe('available')
 })

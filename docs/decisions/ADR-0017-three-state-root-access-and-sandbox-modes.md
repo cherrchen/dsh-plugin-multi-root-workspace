@@ -45,7 +45,7 @@ Phase 1 时本机外层沙箱拒绝 `sandbox_apply`，原生证据留待补齐�
 
 选 `readWriteRecordedPath` 的理由：与 `readOnlyRecordedPath` 完全对偶；不 reinterpret `recordedPath`；domain v1 单布局不引入 `access` 枚举字段（同 ADR-0013 的否决理由：枚举字段在旧代码剥离后会按 `recordedPath` 重建 grant）。**固定读写条目绝不同时写 `recordedPath`**——旧插件剥离未知键后只能看到 `recordedPath` 才算安全；只含新键的条目在旧代码下判 `invalid`（可见但不可用，fail closed）。降级验收按「不静默扩权」而非「守住 B9 只读边界」：旧插件在 Full-access 本就没有 confinement。
 
-`access` 的 wire / 命令值扩展为 `inherit | read-only | read-write`。`add` 不带 `--access` 保持 revive 语义（重登记恢复原策略）；全新登记的缺省策略为 `inherit`。宿主与客户端同包升级，`RootsView.access` 携带真值，不做有损映射。
+`access` 的 wire / 命令值扩展为 `inherit | read-only | read-write`。`add` 不带 `--access` 保持 revive 语义（重登记恢复原策略）；全新登记的缺省策略为 `inherit`。（2026-11-05 修订：revive 只能回到原 grant 目标，见 [ADR-0027](./ADR-0027-revive-target-and-protected-paths.md)。）宿主与客户端同包升级，`RootsView.access` 携带真值，不做有损映射。
 
 ### 进程与 fs 接缝
 
