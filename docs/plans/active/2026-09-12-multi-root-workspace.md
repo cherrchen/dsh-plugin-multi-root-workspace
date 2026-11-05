@@ -62,7 +62,7 @@
 | compat | DSH 0.2.2-rc.1 提升 | 支持合同纳入 `0.2.2-rc.1`（22 个精确版本）；开发 pin `0.2.2-rc.1` / cordis `4.1.0` / schemastery `3.19.0`；稳定 vendor 选择器限宿主声明 minor 线；未新增适配分支 | [本次记录](#dsh-022-rc1-兼容适配2026-11-05)、[接口审查](../../reference/dsh-0.2.2-migration.md) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `1c025b2` | 随 `v0.1.14` 发版 |
 | 第二期 | 插件详情页设置卡与富文本详情 | 「多根 Auto Review（实验性）」设置开关与 Loader 行等价（`setPluginEnabled` 持久化、热应用、restart-required Toast）；设置卡错误改 Toast；`refreshSeq` 修并发刷新竞态；locale `meta.detail` + `preview.svg` 富文本详情 | [本次记录](#插件详情页设置卡与富文本详情2026-11-05) | — | `220bc82` | 随 `v0.1.14` 发版 |
 | 安全修复 | 根授权安全修复 P0–P4 | BYP-01、MRW-01、BYP-02、home/物理介质保护与默认权威 | [专项计划](./2026-11-05-root-authorization-security-fixes.md)（含 P0 记录与维护者决定） | [0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)（P1）、[0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)（F3、移除单进程模式） | `b15b486`、`fix/audit-1105` 后续提交 | 2026-11-05：P0 静态证据已记录，维护者决定 P2（可信确认）不实施、BYP-01 作为残余风险保留、Skills migration 保持现状；P1 已实施；F3 改为以上游主根拼写为 key、拒写优先于主根，单进程 Registry 模式移除。PR #39 两条 P1 评审回归先红后绿：Follower 的 fs/进程准入同样收窄 home 授权，迁移后清空在刷新、准入和重启后均不恢复旧根（见两份 ADR 的同日修订）。macOS / Node `24.18.0` / DSH `0.2.2-rc.1` 的 `compat:check` 与完整 `verify:all` 通过：lint、双端 typecheck、build、Seatbelt 内核探针及显式要求实跑的测试（74 文件通过，1019 通过、86 平台跳过）、compose / behavior / journey（52 / 137 / 76）、pack 与 packed behavior（136）、Auto Review fork 检查；可选 Auto Review 集成按精确版本规则跳过。Linux/Windows 原生门禁仍待 CI。P2、F5 与 F4 执行侧 deny 按维护者决定不实施（上游对工作区内的 `$DSH_HOME` 本就不设例外）；未发布，不指定版本 |
-| 待评审 | OPS 兼容性适配（ADR-0027） | Full-access Worker 保护与实时文件活动；其他车道按前置条件分别推进 | [专项计划](./2026-11-01-ops-compatibility-adaptation.md) | [0027](../../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md)（Proposed） | — | **Proposed：未接受；首期子集已落地为实验性 opt-in（`multi-root-ops-compatibility.enabled`，默认关闭；见专项计划实施状态）；无发布安排** |
+| 待评审 | OPS 兼容性适配（ADR-0027） | Full-access Worker 保护、实时活动及 P5 本仓保守拒绝；恢复可用性按公开接缝推进 | [专项计划](./2026-11-01-ops-compatibility-adaptation.md) | [0027](../../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md)（Proposed） | — | **Proposed：未接受；P0–P4 子集及 P5 本仓安全兜底已落地为实验性 opt-in（`multi-root-ops-compatibility.enabled`，默认关闭；见下方 P5 验证记录及专项计划）；无发布安排** |
 
 
 ## 总体策略
@@ -1384,3 +1384,18 @@ macOS / Node `24.18.0` 候选 warn 下完整 `verify:all` 通过：原生 Seatbe
 [评审发现](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/39#discussion_r4482517586)已修复：follower 的候选预检补齐 owner 已有的 Windows 网络／设备路径词法拒绝，合同见 [ADR-0027 修订](../../decisions/ADR-0027-revive-target-and-protected-paths.md#修订follower-候选解析前拒绝-windows-网络与设备路径2026-11-06pr-39-评审)。`registry.spec.ts` 在真实 owner/follower 栈上覆盖 UNC 两种分隔符与设备路径，断言 `unsupported-path`、候选未被 `realpath` 解析、follower 未转发 `add`、存储不变；测试桩拦截危险候选，回归失败时也不实际访问网络。修复前 owner 通过、follower 因候选被解析而失败，修复后两者通过。
 
 macOS / Node `24.18.0` / DSH `0.2.2-rc.1`：`compat:check` 与完整 `verify:all` 通过，Seatbelt 探针可用并以 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt` 要求实跑；全量测试 **1020 通过 / 86 平台跳过**，compose / behavior / journey 分别 **52 / 137 / 76 通过**，packed behavior **136 通过**，均无失败或跳过。lint、双端 typecheck、build、pack 与 Auto Review fork 检查通过；可选 Auto Review 集成按精确版本规则跳过。Windows 路径分支在本机通过平台桩覆盖，不代替 Windows 原生 CI；未扩大支持集合、未发布。
+
+
+## OPS P5 本仓兜底验证（2026-11-05）
+
+按用户直接授权完成不依赖 OPS 修改的 P5 安全拒绝子集；允许误拒，不允许借恢复可用性扩大写范围。范围与决策见 [ADR-0027 P5 修订](../../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md#p5-本仓保守兜底修订2026-11-05直接授权实施)及[专项计划](./2026-11-01-ops-compatibility-adaptation.md#p5-本仓交付范围)。不开发布、不改 allowlist，不将全计划或 P6 标完成。
+
+- 基线：MR 从 `56c1909` 开发；OPS `2c0b0397ce4b48436ff76cf5c5b039054240a45c` / `0.5.0-alpha3` 原样副本，Rust release Worker 本机编译。隔离组合为 DSH `0.2.0-rc.2` / cordis `4.0.4`，与 OPS peer 范围相容；本仓开发依赖仍为 DSH `0.2.2-rc.1` / cordis `4.1.0`，未拿它冒充 OPS 支持宿主。Node `24.18.0`，macOS arm64；没有运行 Linux/Windows 验证。
+- 真实 OPS 组合：`node --experimental-transform-types scripts/verify-ops-protection.mjs <isolated-host>` **76/76 PASS**。shared / legacy × FA / WW / RO，真实 Native 写入/新建/edit/replace/copy/双向 move/remove/符号链接路径，RO 文件 SHA256 与目录内容不变，失败 move 的可写源仍保留。FA Native 读取与主根合法写入为正对照，每个 shared/legacy FA 车道均实际启动 13 个进程，逐次保存 argv。
+- PTC：shared 三模式及 legacy FA 真实 run_code 子 dispatch 触达 OPS 并被拒写；legacy WW/RO 在代码进程启动前被 scope spawn guard 拒绝（每车道 0 次启动），**不是子 dispatch 端到端通过**。该误拒作为本次安全退路保留。
+- maintenance：shared/legacy FA 均触发真实 OPS Session 清理 purge；缺少独立授权时拒绝启动，启动数不增加、RO 文件不变。单独卸载 fence 后 scope guard 仍拒绝无来源启动。缓存可能残留，不声明合法清理已恢复。
+- 持久活动：Phase B **未启用**。当前 DSH Session 文档明文禁止外部插件调用其实验记录 API；早期无 API 的车道同样不适用。不私写日志，恢复后缺证的 Review 继续技术失败。D3/F07 与合法后台恢复仍依赖上游公开合同；未提交无消费者的授权 provider。
+- 证据交付：`docs/reviews/` 只纳入 `dsh-ops-compatibility-audit.md`；原始 JSON/日志/临时脚本保留本地，不纳入 Git。可复跑程序在 `scripts/`，其输出包含宿主、源码与 Worker 摘要，文件树和进程 argv 留在隔离宿主目录。
+- 仓库门禁：`compat:check`、lint、typecheck、build、`docs:check`、`auto-review:fork` 通过；macOS Seatbelt probe 实际启动成功。完整测试 **1101 passed / 87 skipped**（78 个文件通过、3 个按平台跳过）；compose **54/54**、behavior **136/136**、journey **76/76**；`pack:check` 通过，`smoke:packed` 的行为检查 **135/135**，无 kernel skip。Auto Review 精确 `0.2.1-rc.2` 实现套件未在本轮重跑，未把开发 pin 的跳过记成通过。
+
+其他平台保持 NOT_TESTED，不以本机结果推断。

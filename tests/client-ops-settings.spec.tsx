@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { BundleSettingsCard, SkillsSettingsCard, installSkillsSettingsCard } from '../src/client/skills-settings.tsx'
+import { BundleSettingsCard, installSkillsSettingsCard } from '../src/client/skills-settings.tsx'
 import { OpsCompatibilitySettingsCard } from '../src/client/ops-settings.tsx'
 import { bindSettingsForm, bindSkillsForm, type SkillsForm } from '../src/compat/skills-client.ts'
 import type { Translate } from '../src/client/WorkspaceFoldersAction.tsx'

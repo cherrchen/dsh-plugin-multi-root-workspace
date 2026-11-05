@@ -319,9 +319,11 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 
 本轮源码将首期适配收进 **OPS 兼容模式（实验性，可能存在限制）**：在 `Settings → Plugins → Multi-root Workspace` 中设置 `multi-root-ops-compatibility.enabled`，默认 `false`，必须显式开启。
 
-- **开启**：激活首期 OPS 执行保护、实时活动与 Review 增强。其中新增执行保护仅用于 Full-access（`danger-full-access`）：explicit RO/cap deny 生效，authority unavailable、缺保护、unknown OPS、后台执行与 cache-overlap 准备按保护合同拒绝；WW/RO 的写授权行为维持现状。实时活动与 Review 增强同样受此开关控制，不限于 Full-access。
+- **开启**：激活 OPS 执行保护、实时活动与 Review 增强。Full-access（`danger-full-access`）继续用内核围栏保护 explicit RO/cap deny；WW/RO 一旦存在不可写附加根或工具只读上限，整次 OPS 执行调用（包括读取/page）会在准备与正文前拒绝。所有模式在 Registry 失权时拒绝 OPS 执行调用，纯发现/发布除外。没有执行域或当次有效 profile 证明的 subprocess 启动也会拒绝，防止后台清理绕过边界；这可能连带拒绝第三方后台进程，但不拦截面板中用户自己的终端。
 - **关闭**：OPS 恢复本轮适配前的行为，不提供这些兜底——**显式只读附加根可能被 OPS 写入**。普通多根功能、原生工具围栏和 Auto Review 自身开关不受影响。已投递的指令不会回溯抹除，已进入保护域的调用与已启动进程保留原快照；关闭后开始的新调用不再激活本次适配。
 - **实验限制**：仅提供 Phase A live 活动索引，无持久事件桥。开启时，resume 后 OPS 历史缺 live 证据、动态 pending（replace/batch/result/bash/unknown）会使 Review 技术失败；非白名单诊断如 `ops_status` 也受此保守规则影响。
+
+P5 的本仓兜底不修改 OPS：合法附加根写入仍可能被误拒，后台结果缓存可能因拒绝清理而残留；legacy 非共享模式下，WW/RO 的 PTC 也可能在启动代码进程前被拒。持久活动仍关闭：DSH 的 `appendPluginRecord` 明确禁止外部插件调用，不能用普通事件或私写日志代替。验证范围与后续依赖见[专项计划](./docs/plans/active/2026-11-01-ops-compatibility-adaptation.md)。
 
 这不是完整 OPS 兼容声明，不提升支持版本，也未发布。审计 §16 的历史复验发生在本开关加入之前，对应启用路径；后续复跑须显式 `enabled: true`。
 

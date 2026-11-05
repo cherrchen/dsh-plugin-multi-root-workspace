@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { realpathSync } from 'node:fs'
 import { tmpdir as osTmpdir } from 'node:os'
 import { isAbsolute as isPathAbsolute, relative as pathRelative } from 'node:path'
@@ -35,6 +36,20 @@ export interface OpsProtectionState {
   owner: object | undefined
   entered: number
   readonly drainWaiters: Set<() => void>
+}
+
+// A synchronous handoff from the enforcing spawn wrapper to the scope-owned
+// guard. It cannot be saved as argv or inherited by a later asynchronous task.
+const spawnPermit = new AsyncLocalStorage<{ state: OpsProtectionState; active: boolean }>()
+
+export function withOpsSpawnPermit<T>(state: OpsProtectionState, body: () => T): T {
+  const permit = { state, active: true }
+  try { return spawnPermit.run(permit, body) } finally { permit.active = false }
+}
+
+export function opsSpawnPermitted(state: OpsProtectionState): boolean {
+  const permit = spawnPermit.getStore()
+  return permit?.state === state && permit.active
 }
 
 export function createOpsProtectionState(): OpsProtectionState {
@@ -148,12 +163,14 @@ export function opsDispatchBarrier(ctx: Context, scope: MultiRootScopeService, e
   if (policy === undefined) {
     return `the OPS tool ${JSON.stringify(exec.name)} cannot be confirmed against a trusted session and policy`
   }
-  if (policy.mode !== 'danger-full-access') return undefined
   const preview = scope.previewForTool(policy, exec.name)
   if (preview.authority === 'unavailable') {
     return `the multi-root registry authority is unavailable; the OPS call ${JSON.stringify(exec.name)} is refused before dispatch`
   }
   if (preview.deniedRoots.length === 0) return undefined
+  if (policy.mode !== 'danger-full-access') {
+    return `the OPS call ${JSON.stringify(exec.name)} is refused in ${policy.mode}: private preparation and worker write boundaries cannot be proven without OPS integration`
+  }
   if (kind === 'unknown') {
     return `the unrecognized OPS capability ${JSON.stringify(exec.name)} is refused while write boundaries apply`
   }

@@ -12,7 +12,7 @@ const enabledField = volatileField(z.boolean().default(false))
 const experimental = (enabledField as { experimental?: () => typeof enabledField }).experimental
 const described = (typeof experimental === 'function' ? experimental.call(enabledField) : enabledField) as typeof enabledField
 export const Config = z.object({
-  enabled: described.description('OPS 兼容模式（实验性）：可能存在功能、版本和平台限制。启用首期 OPS 写保护、实时活动与 Review 增强；关闭时不提供这些 OPS 兜底，显式只读附加根可能被 OPS 写入。'),
+  enabled: described.description('OPS 兼容模式（实验性）：可能存在功能、版本和平台限制。启用 OPS 写保护、实时活动与 Review 增强；受限模式可能拒绝附加根操作（包括读取），后台缓存可能残留；关闭时显式只读附加根可能被 OPS 写入。'),
 })
 
 declare module '@deepseek-ai/cordis' {

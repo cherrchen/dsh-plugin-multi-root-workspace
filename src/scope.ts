@@ -30,8 +30,11 @@ import type {} from './providers.ts'
 import { primaryKey, type RootAccess } from './roots.ts'
 import { currentRegistryOperation, rememberOperationProfile, operationPermitsProfile } from './registry-operation.ts'
 import { aroundTool } from './compat/tool-context.ts'
-import { createOpsProtectionState, opsDispatchBarrier } from './compat/ops-tools.ts'
+import { createOpsProtectionState, opsDispatchBarrier, opsSpawnPermitted } from './compat/ops-tools.ts'
 import type { OpsProtectionState } from './compat/ops-tools.ts'
+import { opsCompatibilityToken } from './compat/ops-settings.ts'
+import { wrapMethod } from './method-wrapper.ts'
+import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { effectiveRootAccess } from './contract.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -486,6 +489,27 @@ export class MultiRootScopeService extends Service {
     ctx.inject(['tools', 'sandboxPolicy', 'multiRootCompat', 'multiRootProviders'], (scoped: Context) => {
       if (typeof scoped.tools.guard !== 'function') return
       scoped.effect(() => scoped.tools.guard(exec => opsDispatchBarrier(ctx, this, exec)))
+    })
+
+    // Maintenance has no trusted tool/session dispatch. Do not infer authority
+    // from a Worker filename, cwd, or private stdin envelope. This guard belongs
+    // to the scope so unloading the execution fence cannot expose a bare purge.
+    ctx.inject(['subprocess', 'multiRootCompat', 'multiRootProviders'], scoped => {
+      scoped.effect(() => {
+        let active = true
+        const restore = wrapMethod(scoped.get('subprocess') as typeof scoped.subprocess, 'spawn', original => {
+          const scope = this
+          return function (this: unknown, spec: SubprocessSpawnSpec) {
+            if (active && opsCompatibilityToken(scoped) !== undefined && scope.hasActiveDenyRoots()
+              && !opsSpawnPermitted(scope.opsProtection)
+              && !(scope.admissionRequired && scope.admissionPathsValid() && scope.permitsProfile(spec.argv))) {
+              throw new Error('multi-root workspace: an unattributed subprocess has no protected execution or live profile admission; refusing launch while OPS compatibility write boundaries apply')
+            }
+            return original.call(this, spec)
+          }
+        })
+        return () => { active = false; restore() }
+      })
     })
 
     // The prompt contribution is a SOFT dependency: a composition without a

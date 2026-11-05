@@ -1,6 +1,6 @@
 # OPS 兼容性适配开发计划
 
-> **状态：Proposed — ADR 未接受；直接授权实施中，P0–P4 本轮子集已落地（见[本轮实施状态](#本轮实施状态)），P5 完整退出尚未满足。**
+> **状态：Proposed — ADR 未接受；直接授权实施中，P0–P4 子集及 P5 本仓保守兜底已落地（见[本轮实施状态](#本轮实施状态)），P5 完整退出尚未满足。**
 > 创建日期：2026-11-01。创建时仅含计划与文档导航（无实现或适配证据）；其后的实现按直接授权推进。放入 `active/` 表示尚未完成的计划，不表示已验收。
 > 设计依据：[ADR-0027](../../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md)，同样保持 Proposed。实施与发布进度统一记入[进度总账](./2026-09-12-multi-root-workspace.md#进度总账)，本计划不指定发布版本或交付日期。
 
@@ -18,11 +18,13 @@
 
 事实、风险等级和原始证据以[兼容性审计](../../reviews/dsh-ops-compatibility-audit.md)及其§14架构复核为准，设计合同以ADR为准。本计划只组织后续任务、依赖和退出条件，不重新定义授权规则或复制完整发现清单。
 
-当前审计基线为MR `4e45e25`（v0.1.13）与OPS `2c0b039`；旧版OPS对照及精确宿主见审计§2。已有真实F01写入绕过、F04预检误拒、F05实时指令缺口及函数级接缝证据；**没有适配实现或适配后通过证据**。本仓DSH开发安装树超出当前OPS peer范围，不能直接用于证明组合兼容。
+建计划时的审计基线为MR `4e45e25`（v0.1.13）与OPS `2c0b039`；旧版OPS对照及精确宿主见审计§2。已有真实F01写入绕过、F04预检误拒、F05实时指令缺口及函数级接缝证据；**当时没有适配实现或适配后通过证据**；当前实现与实测见总账。本仓DSH开发安装树超出当前OPS peer范围，不能直接用于证明组合兼容。
 
 后续启动时重新核对实际HEAD、工作树、宿主依赖和源码形状；审计快照是对照基线，不是可以忽略代码变化的长期假设。
 
 ## Scope 与启动前决定
+
+本节保留首期决定；其中 WW/RO 过渡及失权范围已由 [P5](#p5条件分支与上游协作) 收紧，当前行为以 ADR 的 P5 修订为准。
 
 ### 首期拟实施范围
 
@@ -32,9 +34,9 @@
 
 首期能力统一通过插件设置 `multi-root-ops-compatibility.enabled` 显式启用，默认关闭，并标注实验性与可能存在的限制。关闭时不启用本轮 OPS 专属执行保护、活动采集和 Review 完整性增强，恢复原有 OPS 行为（包括显式只读根可能被 OPS 绕过的已知缺口）；不关闭普通多根围栏，也不代替 Auto Review 自身开关。开关切换不得使已进入保护域的调用裸执行，旧代次结果不得提交为新代次活动。
 
-### 首期WW/RO过渡决定（R1）
+### 首期WW/RO过渡决定（R1，历史；P5 已收紧）
 
-与ADR D1.1a一致，**选择“维持现状并披露”**：首期新增OPS profile、失权早拒和保护存活guard仅用于Full-access。WW/RO固定文件继续现有OPS写根/read_only检查；RO读不因新guard或失权规则被拒，原有MR/OPS拒绝仍保留。WW/RO的temp重叠、权威不可用及F07等残余继续披露，不纳入首期保护通过结论。
+首期与ADR D1.1a一致，**曾选择“维持现状并披露”**：首期新增OPS profile、失权早拒和保护存活guard仅用于Full-access。WW/RO固定文件继续现有OPS写根/read_only检查；RO读不因新guard或失权规则被拒，原有MR/OPS拒绝仍保留。WW/RO的temp重叠、权威不可用及F07等残余继续披露，不纳入首期保护通过结论。
 
 该选择已经写明供维护者评审，启动前需确认；它不等于接受D1.1d应用层信任路线，也不等于改为全模式早拒。后续若改变选择，先同步ADR和计划，不能在实现中隐式扩展。
 
@@ -57,7 +59,7 @@
 - 不自动扩大DSH allowlist、升级Auto Review固定宿主或改写已发布CHANGELOG。
 - 不把未来上游接口当成既有能力；不把函数级证据当成Linux/Windows或完整PTC验收。
 
-## Implementation（全部待启动）
+## Implementation（初始任务与退出条件）
 
 阶段编号使用本计划局部的P0–P6，与历史里程碑和审计严重度无关。依赖为 `P0 → P1 → P2`；P3的Native live可在P0后与P1/P2并行，PTC端到端需P1/P2的内层执行保护通过。P4在对应P3目标正规化可用后接入，Native/PTC分别验收；P5各分支只有在对应进入条件满足并获准后启动，P6按实际完成范围验收。
 
@@ -82,12 +84,12 @@
 - [ ] 用屏障验证guard通过后撤销、prepare中卸载、两监听器内外顺序、scope重载及Registry卸载。scope aroundTool复查ready，执行策略prepare后/next前复查代次；旧上下文drain，新scope从not-ready启动。单独卸载fence必须留下scope拒绝；整个scope卸载按插件未安装边界单列。
 - [ ] 保持同步spawn返回形状、caller this、属性描述符恢复、取消和可选依赖加载语义。
 
-**退出条件**：X2/X5对应的真实入口证明成立；FA有限制时单独卸载fence，新OPS调用由仍存活的scope guard拒绝，正文/准备/Worker均未启动，WW/RO无新增误拒。调度窗口与重载测试证明旧token不能复用；withToolCap双顺序、嵌套、异常/取消恢复一致。整个scope卸载不在持续保护承诺内。现有宿主接口足以实现此MR侧路径是待原型验证的选择；若guard语义不成立则回到维护者评审，不悄悄接受裸写残余。
+**退出条件**：X2/X5对应的真实入口证明成立；FA有限制时单独卸载fence，新OPS调用由仍存活的scope guard拒绝，正文/准备/Worker均未启动，WW/RO无新增误拒（首期条件，P5 改为有 deny 则安全早拒）。调度窗口与重载测试证明旧token不能复用；withToolCap双顺序、嵌套、异常/取消恢复一致。整个scope卸载不在持续保护承诺内。现有宿主接口足以实现此MR侧路径是待原型验证的选择；若guard语义不成立则回到维护者评审，不悄悄接受裸写残余。
 
 ### P2：Full-access读写Worker与准备副作用兜底
 
 - [ ] 有deny/cap时，对全部OPS Worker采用本次ambient-minus-deny边界；业务mutation分类仅用于动作语义和结果判断。
-- [ ] **仅Full-access**在authority unavailable时，于invoke/prepare/resultStorage前拒绝全部受适配OPS执行调用（含读/page和主根写，纯发现/发布除外）。分别验证shared与legacy；WW/RO保持上述过渡，不给RO读新增失权拒绝。
+- [x] P5 将失权早拒扩到**全部模式**：authority unavailable 时，于 invoke/prepare/resultStorage 前拒绝受适配 OPS 执行（含读/page 及主根写，纯发现/发布除外）；WW/RO 有 deny 时同样拒绝准备与正文。
 - [ ] 按ADR D1.1c的POSIX精确谓词检查host cache：deny覆盖canonical tmpdir或落在其直接cache族及后代时早拒；普通tmp兄弟根不误拒，Worker仍受deny保护。检查记录/规范路径、tmpdir别名与cache族子目录；其他准备写点逐点处理，不扩大此公式。
 - [ ] FA保护模式在可控入口早拒后台Bash；默认OPS Bash仅在Windows发布，macOS首期只做入口结构测试，Windows端到端单列V7，不能声称本机已验内核。purge不借普通dispatch证明启动。当前batch按同步run、await work测试，不假设其自动脱离dispatch。
 - [ ] 实写验证write_file/edit_file/replace/copy/move/remove及读/page附带副作用；区分源删除、目标发布、audit/cache/lock、部分完成与未知结果。
@@ -117,7 +119,10 @@
 
 **退出条件**：F06对应遗漏不再以complete返回，真实Review路径结果可审查；历史证据依赖尚未完成的Phase B时，必须验证失败关闭，不能伪称恢复完整。
 
-### P5：条件分支与上游协作（首期不自动纳入）
+### P5：条件分支与上游协作
+
+2026-11-05 用户明确授权本仓部分：不修改 OPS，允许合法附加根操作被误拒，不允许只读附加根被写入；本轮只在 macOS 验证。按 [ADR 的 P5 修订](../../decisions/ADR-0027-ops-file-authorization-and-activity-adapter.md#p5-本仓保守兜底修订2026-11-05直接授权实施)收紧 WW/RO 与无来源进程启动，取代首期维持现状规则。下表恢复可用性所需的上游合同仍保留，不假装已接入。
+
 
 | 分支 | 待完成工作 | 退出条件/对应证据 |
 | --- | --- | --- |
@@ -152,11 +157,13 @@ V1–V9的完整定义以[ADR D6](../../decisions/ADR-0027-ops-file-authorizatio
 | V6/V9 | P2及P5 | 区分普通tmp兄弟根内核用例与tmp/cache族准备早拒用例；另测重定向/链接/祖先变化 |
 | X1、V4 resume | P5 | 安全记录API和真实持久化生命周期 |
 
-每份记录包含commit、依赖清单、OS/runner、模式/根权限/cap、调用入口、准入生命周期、argv、业务和准备副作用、最终结果及复跑命令。沿用CONFIRMED（标明函数级或端到端）、CODE_RISK、PASS、NOT_TESTED；不适用需说明实际API/发布条件。新证据归入现有审计证据目录并由审计链接，阶段进度及发布状态只更新总账。
+本轮按用户要求，`docs/reviews/` 只提交审计 Markdown；证据目录保持本地、不提交，报告中的证据文件名是历史本地索引。可复跑的 P5 验证程序放在 `scripts/verify-ops-protection.mjs`，输出留在隔离宿主目录。
+
+每份记录包含commit、依赖清单、OS/runner、模式/根权限/cap、调用入口、准入生命周期、argv、业务和准备副作用、最终结果及复跑命令。沿用CONFIRMED（标明函数级或端到端）、CODE_RISK、PASS、NOT_TESTED；不适用需说明实际API/发布条件。历史证据不作为仓库交付物；阶段进度及发布状态只更新总账。
 
 实施后的仓库检查按[开发工作流](../../development/plugin-development-workflow.md)和ADR D6执行：相关单测及组合测试、`pnpm compat:check`、lint/typecheck/build、`pnpm docs:check`；在纳入声明的各OS运行 `kernel:probe`、三个smoke、`pack:check`、`smoke:packed`。涉及Auto Review还运行其fork校验及smoke。OPS升级时重跑已有cache-profile探针并复核提取边界，不能跳过断言。
 
-**基线说明：文档建立时仅运行文档检查，上述实施验证未触发；本轮已按直接授权实施子集，实际验证范围见[本轮实施状态](#本轮实施状态)（kernel:probe、三个 smoke、pack:check、smoke:packed 及 Auto Review fork 校验仍未运行）。**
+**基线说明：建计划与首期实施时尚未运行的 kernel/smoke/pack 检查属于历史状态；P5 本轮 macOS 结果以[总账](./2026-09-12-multi-root-workspace.md#ops-p5-本仓兜底验证2026-11-05)为准，不推定其他平台通过。**
 
 ## Risks 与停止条件
 
@@ -168,7 +175,7 @@ V1–V9的完整定义以[ADR D6](../../decisions/ADR-0027-ops-file-authorizatio
 | PTC内层frame、cap或工具来源不一致 | 拒绝启动，补真实链路证明；不能重登记任意外层argv |
 | 会话恢复/Review完整性被高估 | Phase B关闭或Review技术失败；不写不安全事件、不伪报complete |
 | 平台或版本不可测 | 标NOT_TESTED并排除相应兼容声明，不由另一平台推定 |
-| FA失权早拒影响全部受适配OPS执行调用（含读） | 在启用/支持说明中明确代价；WW/RO无新增早拒，与原生fs/进程不同降级路径分开描述 |
+| 所有模式失权及 WW/RO 有 deny 时拒绝 OPS 执行（含读） | 按 P5 在启用/支持说明中明确误拒代价，与原生 fs/进程降级路径分开描述 |
 
 ## Documentation Impact
 
@@ -184,7 +191,7 @@ V1–V9的完整定义以[ADR D6](../../decisions/ADR-0027-ops-file-authorizatio
 
 ## Completion Criteria
 
-计划当前已落地 P0–P4 本轮子集（见[本轮实施状态](#本轮实施状态)），尚无已验收阶段。后续完成需满足：获准的阶段具备退出证据；所有目标能力明确通过、拒绝支持或转入经维护者确认的后续范围；现存风险与能力边界在用户文档中一致披露；适用门禁通过，维护者完成交付评审。只有全计划范围已处置后才迁移至 `completed/`，不能因文档检查通过或首期原型完成提前归档。
+计划当前已落地 P0–P4 子集及 P5 本仓保守兜底（见[本轮实施状态](#本轮实施状态)），尚无已验收阶段。后续完成需满足：获准的阶段具备退出证据；所有目标能力明确通过、拒绝支持或转入经维护者确认的后续范围；现存风险与能力边界在用户文档中一致披露；适用门禁通过，维护者完成交付评审。只有全计划范围已处置后才迁移至 `completed/`，不能因文档检查通过或首期原型完成提前归档。
 
 ## 本轮实施状态
 
@@ -198,3 +205,12 @@ ADR-0027 保持 Proposed，未经维护者正式接受；本轮按直接授权�
 - 真实 AgentLoop 证据：`ops-adaptation-loop-host-a.json`（0.2.0-rc.2）与 `ops-adaptation-loop-host-b.json`（0.2.1-rc.2），`ops-adaptation-agent-loop.mjs` 未修改执行，三 checks 全部 pass（inspect 祖先链、partial read_files 2/3、真实 PTC run_code 双目录链）。
 - 配置门禁：全部首期能力收进 Settings 行 `multi-root-ops-compatibility.enabled`（默认 `false`，实验性）；关闭时 OPS 恢复原行为、无新增兜底，显式只读根仍可能被 OPS 绕过。客户端配置卡与 Skills 开关共用 `plugins.bundle.config` 唯一注册（`BundleSettingsCard`，Skills 上 OPS 下），legacy `settings.plugin.item` 分 namespace 挂卡；证据 `tests/client-ops-settings.spec.tsx`、`tests/client-bundle.spec.ts` 构建物断言、`/tmp/ops-mode-ui.html` DOM 快照。回归覆盖真实 Settings 保存与重启、关闭路径、准备中切换、在途保护及跨代次结果，见 `tests/ops-settings.spec.ts`、`tests/ops-activity.spec.ts`、`tests/ops-compat.spec.ts` 与 `tests/auto-review/ops-context.spec.ts`。
 - 首轮仓库验证（非 P5/P6 完整验收）：full suite / lint / typecheck / build / docs:check 一次通过（`final-*.log`）；Host B Review 规格 36/36 与精确 typecheck（`p4-hostb-rc2-*`）。当时 smoke/pack/kernel probe 未运行。本开关变更已补 `pack:check`，其余平台、kernel 与 smoke 验收仍未完成，不能据此宣称全计划验收完成。审计 §16 历史复验在开关加入前完成，代表启用路径；复跑须显式 `enabled: true`。
+
+
+## P5 本仓交付范围
+
+代码：全模式 OPS admission 复核、WW/RO 有 deny 时准备前早拒、scope 存活的无来源 spawn 拦截、同步启动交接及过期拒绝、叠加包装的退役恢复。回归在 `tests/ops-compat.spec.ts` 与 `tests/method-wrapper.spec.ts`；真实 macOS 组合程序是 [verify-ops-protection.mjs](../../../scripts/verify-ops-protection.mjs)。
+
+复跑需隔离的 DSH/OPS peer 兼容宿主：`<host>/package.json` 与 `node_modules` 统一版本，`<host>/ops-current` 为原样 OPS 检出副本，完成其公开 build/build-ptc 与 stage（或显式 `DSH_OPS_WORKER_BIN`）；不更改本仓 pin、OPS 源码或用户 profile。运行 `node --experimental-transform-types scripts/verify-ops-protection.mjs <host>`；程序复制当前 MR 源码到隔离宿主，保留文件树、argv 和 `p5-results.json`。实际通过数见总账。
+
+Phase B 因 DSH 明文禁止外部调用其实验记录 API 而关闭；MR 侧不创建一个没人消费的 D3 授权 provider，也不改写 OPS 私有协议来假装接入。D3、F07、合法后台/maintenance 和 Windows 准备仍待公开接缝；非 macOS 未验证。以上依赖解除前全计划仍留在 active，P6/发布不在本次完成声明中。

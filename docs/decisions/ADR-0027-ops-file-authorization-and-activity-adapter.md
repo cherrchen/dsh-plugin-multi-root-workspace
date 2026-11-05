@@ -493,3 +493,17 @@ A1–A13审计追加的最小实验X1–X7由[审计§14](../reviews/dsh-ops-com
 - [ADR-0021：Auto Review上下文](./ADR-0021-auto-review-context-companion.md)
 - [ADR-0024：操作准入](./ADR-0024-registry-operation-admission.md)
 - [ADR-0025：共享Registry权威](./ADR-0025-shared-registry-authority.md)
+
+
+## P5 本仓保守兜底修订（2026-11-05，直接授权实施）
+
+本 ADR 仍为 Proposed；以下是用户本轮“不改 OPS、允许误拒、不允许只读附加根写入”授权下的实施边界，取代上文首期 WW/RO 维持现状的过渡规则，不表示 D3 或完整兼容已获验收。
+
+- 兼容模式仍默认关闭，只有显式 `enabled: true` 激活。WW/RO 的当次 scope 有 deny（含 inherit 在 RO 下不可写、工具 cap）时，在 invoke/host 准备之前拒绝整次 OPS 执行调用；无 deny 且权威健康时沿用原链。三个模式失权时均拒绝执行，纯发现/SDK 发布除外。guard 的 preview 只作拒绝；执行阶段在同次 admission 内重新判断，不能拿 preview 放行。
+- 不选择 D1.1d 的应用层信任路线，也不猜测 OPS 私有 temp/cache nonce。上述早拒牺牲正常读取和合法附加根写入的可用性，换取 host 准备也不触碰禁写根。
+- scope 自身包装真实 `ctx.get('subprocess')` 的 `spawn`。在存在或无法排除 deny 时，没有当前保护域的同步启动交接，也没有同次 Registry admission 的精确 profile，则拒绝启动。不能按 Worker 文件名、cwd 或私有 stdin 判定授权；因此第三方调度外进程也可能受影响。`spawnTerminal` 的用户终端例外保持不变。
+- process-fence 完成既有 argv/根身份校验后才作同步交接；该许可带 scope identity，返回时立即失效，异步后代不能复用。scope 拦截在单独卸载 fence 后仍存活；整个 scope 卸载仍属于插件未安装边界。在途已进入的调用保持原保护直至完成。多层公开方法包装的清理跳过已退役层，避免重装旧 guard 或破坏原属性描述符。
+- 无独立 maintenance 接口时不恢复 purge 的可写性；安全拒绝并接受缓存残留。后台执行仍按既有边界拒绝，不伪造 launch/admission。
+- 本机安装的 DSH `0.2.2-rc.1` Session 文档明确写明外部插件不得调用 `appendPluginRecord`。Phase B 保持关闭；不使用普通 append、私写 jsonl 或副作用日志替代。resume 缺证时 Review 继续技术失败。D3、F07 和合法后台恢复仍依赖公开上游合同。
+
+实际阶段和平台验证结果只登记到[进度总账](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)。

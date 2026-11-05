@@ -44,6 +44,7 @@ const INSERTED = [
   // row below unmounted rather than granting on it.
   'multi-root-providers',
   'multi-root-scope',
+  'multi-root-ops-compatibility',
   'multi-root-registry',
   'multi-root-skills',
   'multi-root-instructions',

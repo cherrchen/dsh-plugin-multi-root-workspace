@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { realpathSync } from 'node:fs'
@@ -80,7 +80,7 @@ function opsTool(ctx: Context, name: string, captured: Captured, hooks: { run?: 
     execute: async () => {
       captured.bodies.push(name)
       await hooks.run?.()
-      ctx.subprocess.spawn({ argv: COMMAND, cwd: fixture.workspace })
+      if (classifyOpsTool(name) !== 'publish') ctx.subprocess.spawn({ argv: COMMAND, cwd: fixture.workspace })
       return { status: 'ok' }
     },
   } as never)
@@ -215,15 +215,45 @@ describe('the OPS dispatch barrier', () => {
     expect(opsDispatchBarrier(world.ctx, scope, exec)).toContain('cannot be confirmed')
   })
 
-  it('keeps workspace-write/read-only calls out of the barrier — no new refusals', async () => {
+  it.each(['workspace-write', 'read-only'] as const)('refuses %s before host preparation when a deny root exists', async (mode) => {
+    const world = await mountWorld({ mode })
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    const marker = join(fixture.outside, 'host-preparation')
+    for (const name of OPS_EXEC_NAMES) {
+      opsTool(world.ctx, name, world.captured, { run: () => writeFileSync(marker, 'violation') })
+      expect(isError(await call(world, name)), name).toBe(true)
+    }
+    expect(existsSync(marker)).toBe(false)
+    expect(world.captured.bodies).toEqual([])
+    expect(world.captured.spawned).toEqual([])
+  })
+
+  it.each(['workspace-write', 'read-only'] as const)('refuses %s reads and writes while authority is unavailable', async (mode) => {
+    const world = await mountWorld({ mode })
+    world.ctx.multiRootScope.setRegistryAuthority(false)
+    for (const name of ['ops_read_files', 'ops_write_file', 'ops_result', 'ops_mystery']) {
+      opsTool(world.ctx, name, world.captured)
+      expect(isError(await call(world, name)), name).toBe(true)
+    }
+    expect(world.captured.bodies).toEqual([])
+    expect(world.captured.spawned).toEqual([])
+  })
+
+  it.each(['workspace-write', 'read-only'] as const)('keeps healthy %s calls with no deny roots unchanged', async (mode) => {
+    const world = await mountWorld({ mode })
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-write')])
+    opsTool(world.ctx, 'ops_read_files', world.captured)
+    expect(isError(await call(world, 'ops_read_files'))).toBe(false)
+    expect(world.captured.spawned[0]!.argv).toEqual(COMMAND)
+  })
+
+  it('applies the WW refusal to inherited read-only roots and per-tool caps', async () => {
     for (const mode of ['workspace-write', 'read-only'] as const) {
-      const world = await mountWorld({ mode })
-      world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+      const world = await mountWorld({ mode, scopeConfig: { toolAccess: { ops_read_files: 'read-only' } } })
+      world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, mode === 'read-only' ? 'inherit' : 'read-write')])
       opsTool(world.ctx, 'ops_read_files', world.captured)
-      world.ctx.multiRootScope.setRegistryAuthority(false)
-      const result = await call(world, 'ops_read_files')
-      expect(isError(result), mode).toBe(false)
-      expect(world.captured.bodies).toEqual(['ops_read_files'])
+      expect(isError(await call(world, 'ops_read_files'))).toBe(true)
+      expect(world.captured.bodies).toEqual([])
     }
   })
 
@@ -660,10 +690,10 @@ describe('nested OPS dispatch under a shared registry', () => {
     expect(world.captured.bodies).toEqual(['ops_write_file', 'ops_edit_file'])
   })
 
-  it('refuses unknown and background OPS calls when a deny boundary appears at admission', async () => {
+  it.each(['danger-full-access', 'workspace-write', 'read-only'] as const)('rechecks %s when a deny boundary appears at admission', async (mode) => {
     for (const name of ['ops_mystery', 'ops_bash']) {
       const world = await mountWorld({
-        shared: true,
+        shared: true, mode,
         beforeFence: async (ctx) => {
           await ctx.plugin({
             name: 'admission-deny-injector',
@@ -767,5 +797,49 @@ describe('OPS mode toggle lifecycle', () => {
       expect(world.captured.spawned[0]!.argv).toEqual(COMMAND)
       expect(world.captured.spawned[1]!.argv.slice(0, 2)).toEqual(['sandbox-exec', '-p'])
     } finally { release(); await pending }
+  })
+})
+
+describe('scope-owned maintenance guard', () => {
+  it.each([false, true])('refuses unowned raw and fabricated-profile spawns (fence unloaded: %s)', async (unload) => {
+    const world = await mountWorld()
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    if (unload) await world.fenceFiber.dispose()
+    for (const argv of [COMMAND, ['sandbox-exec', '-p', '(version 1)(allow default)', ...COMMAND]]) {
+      expect(() => world.ctx.subprocess.spawn({ argv, cwd: fixture.workspace })).toThrow(/unattributed subprocess/)
+    }
+    expect(world.captured.spawned).toEqual([])
+    // The panel's user terminal is a separate public entry point.
+    expect(await world.ctx.subprocess.spawnTerminal({ argv: COMMAND, cwd: fixture.workspace } as never)).toEqual({ pid: 2 })
+  })
+
+  it('keeps a healthy zero-root spawn and an explicitly disabled mode unchanged', async () => {
+    const world = await mountWorld()
+    expect(world.ctx.subprocess.spawn({ argv: COMMAND, cwd: fixture.workspace })).toEqual({ pid: 1 })
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    world.setOpsEnabled(false)
+    expect(world.ctx.subprocess.spawn({ argv: COMMAND, cwd: fixture.workspace })).toEqual({ pid: 1 })
+    expect(world.captured.spawned).toHaveLength(2)
+  })
+
+  it('rejects an expired handoff even when the enforcing fence has unloaded', async () => {
+    const world = await mountWorld()
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    let launchLater!: () => void
+    let late = ''
+    // The fake underlying service schedules from inside the synchronous handoff.
+    // Capturing its async context cannot extend the permit lifetime.
+    const { withOpsSpawnPermit } = await import('../src/compat/ops-tools.ts')
+    withOpsSpawnPermit(world.ctx.multiRootScope.opsProtection, () => {
+      launchLater = () => setTimeout(() => {
+        try { world.ctx.subprocess.spawn({ argv: COMMAND, cwd: fixture.workspace }); late = 'spawned' }
+        catch (error) { late = (error as Error).message }
+      }, 0)
+      launchLater()
+    })
+    await world.fenceFiber.dispose()
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(late).toContain('unattributed subprocess')
+    expect(world.captured.spawned).toEqual([])
   })
 })

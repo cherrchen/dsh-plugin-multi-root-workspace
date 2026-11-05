@@ -72,7 +72,7 @@ import type { ToolCaller } from './compat/tool-context.ts'
 import {
   assertOpsPosixCacheAdmission, assertOpsProtectionOwner, claimOpsProtection,
   classifyOpsTool, drainOpsProtection, enterOpsProtection, leaveOpsProtection,
-  revokeOpsProtection,
+  revokeOpsProtection, withOpsSpawnPermit,
 } from './compat/ops-tools.ts'
 import { wrapMethod } from './method-wrapper.ts'
 import type { MultiRootSandboxProvider } from './sandbox.ts'
@@ -137,6 +137,9 @@ export function apply(ctx: Context): void {
           throw new Error('multi-root workspace: the registry authority is unavailable; refusing the OPS execution')
         }
         if (resolved.deniedRoots.length > 0) {
+          if (policy.mode !== 'danger-full-access') {
+            throw new Error(`multi-root workspace: the OPS execution is refused in ${policy.mode}: private preparation and worker write boundaries cannot be proven without OPS integration`)
+          }
           if (classifyOpsTool(exec.name) === 'unknown') {
             throw new Error(`multi-root workspace: the unrecognized OPS capability ${JSON.stringify(exec.name)} is refused while write boundaries apply`)
           }
@@ -189,9 +192,6 @@ export function apply(ctx: Context): void {
       throw new Error(`multi-root workspace: the OPS call ${JSON.stringify(exec.name)} cannot be confirmed against a trusted session`)
     }
     const policy = ctx.sandboxPolicy.resolve({ session: exec.agent.session })
-    if (policy.mode !== 'danger-full-access') {
-      return opsScope.withToolCap(exec.name, () => withRegistryAdmission(ctx, policy, 'process', next))
-    }
     return opsScope.withToolCap(exec.name, () => runOpsDispatch(exec, policy, next))
   })
   // Resolve the policy the same way the upstream consumer does: the spec's own
@@ -273,7 +273,11 @@ export function apply(ctx: Context): void {
           throw new Error('multi-root workspace: a confined spawn requires a profile from this live admission')
         }
       }
-      const handle = original.call(this, argv === spec.argv ? spec : { ...spec, argv })
+      const launch = () => original.call(this, argv === spec.argv ? spec : { ...spec, argv })
+      // Only the prepared domain or this admission's exact profile can cross
+      // the independent scope guard. Unknown maintenance has neither.
+      const handle = store !== undefined || admissionScope.admissionRequired && admissionScope.permitsProfile(argv)
+        ? withOpsSpawnPermit(opsState, launch) : launch()
       if (store === undefined) return handle
       // `collected.stderr.readFrom(0)` is cursor-free — a live shell handle's
       // only settle-time window into the denial text the executor's own
