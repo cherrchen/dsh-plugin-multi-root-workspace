@@ -109,6 +109,34 @@ async function waitFor(predicate: () => boolean, description: string, timeout = 
   }
 }
 
+/** Read the descendant's PID publication for the readiness handshake. */
+function readPidMarker(path: string): number | undefined {
+  let text: string
+  try { text = readFileSync(path, 'utf8').trim() } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
+  if (!/^[1-9]\d*$/.test(text)) return undefined
+  const pid = Number(text)
+  return Number.isSafeInteger(pid) ? pid : undefined
+}
+
+describe('ancestor guard PID marker', () => {
+  it('does not treat an existing but empty marker as a published process id', () => {
+    const fixture = createFixtureWorkspace('pid-marker')
+    const marker = join(fixture.workspace, 'descendant.pid')
+    try {
+      expect(readPidMarker(marker)).toBeUndefined()
+      for (const text of ['', '\n', '0', '-1', '1.5', '12partial', '9007199254740992']) {
+        writeFileSync(marker, text)
+        expect(readPidMarker(marker), JSON.stringify(text)).toBeUndefined()
+      }
+      writeFileSync(marker, `${process.pid}\n`)
+      expect(readPidMarker(marker)).toBe(process.pid)
+    } finally { fixture.dispose() }
+  })
+})
+
 /** Whether `pid` still names a live process (the signal-0 probe). */
 function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true } catch { return false }
@@ -1407,7 +1435,7 @@ describe.runIf(process.platform === 'win32')('ancestor guard', () => {
       // child's own exit. The descendant records its pid, then would write
       // the escape marker seconds later — past the runner's exit if the Job
       // drain is missing.
-      const descendant = `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(escaped)},'escaped'),3000)`
+      const descendant = `const fs=require('fs'),marker=${JSON.stringify(pidFile)};fs.writeFileSync(marker+'.pending',String(process.pid));fs.renameSync(marker+'.pending',marker);setTimeout(()=>fs.writeFileSync(${JSON.stringify(escaped)},'escaped'),3000)`
       const script = `const cp=require('child_process'),fs=require('fs');const d=cp.spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:'ignore'});d.unref();console.log('ready');const t=setInterval(()=>{if(fs.existsSync(${JSON.stringify(go)})){clearInterval(t);process.exit(0)}},50);setTimeout(()=>process.exit(9),60000)`
       const runner = spawnObserved([...prefix, process.execPath, '-e', script])
       try {
@@ -1415,9 +1443,16 @@ describe.runIf(process.platform === 'win32')('ancestor guard', () => {
         // The runner is demonstrably active (the direct child is still
         // running): the ancestor cannot be renamed.
         expectRenameBlocked(cage, `${cage}-moved`)
-        await waitFor(() => existsSync(pidFile), 'the descendant pid marker', 15_000)
-        const pid = Number(readFileSync(pidFile, 'utf8').trim())
-        expect(Number.isInteger(pid)).toBe(true)
+        // File creation precedes writeFileSync's bytes: an existence-only
+        // probe can read '' and Number('') is 0, not the descendant's PID.
+        // Publish by rename and wait for a positive PID before releasing the
+        // direct child; keep the Job-drain assertions below unchanged.
+        let pid = 0
+        await waitFor(() => {
+          pid = readPidMarker(pidFile) ?? 0
+          return pid > 0
+        }, 'the complete descendant pid marker', 15_000)
+        expect(pid).toBeGreaterThan(0)
         const observedAt = Date.now()
         // Release the direct child; the descendant outlives it inside the Job.
         writeFileSync(go, 'go')

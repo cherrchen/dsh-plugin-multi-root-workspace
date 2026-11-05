@@ -1350,3 +1350,10 @@ macOS / Node `24.18.0` 候选 warn 下完整 `verify:all` 通过：原生 Seatbe
 | `0.2.2-alpha.3` | `24.18.0` | 208 / 1 | 76 / 0 / 0 |
 
 代码提交 `0ffb3e6` 的 [CI run 41960785058](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41960785058) 已重新覆盖旧版 vendor 修复；本文验收记录提交时仍在运行。PR 保持 Draft，最终跨平台结果以 PR 当前 HEAD 的 CI 为准，不创建发行版。
+
+
+### Windows PID 握手竞态修复（2026-11-05）
+
+最终验收提交 `613223d` 的 [CI run 41961801526](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41961801526) 完成 88 个 verify：87 成功，仅 `0.1.6-alpha.1 × windows-latest` 的 `ancestor guard` 后代回收测试失败（最终 gate 随之失败）；rc.1 四个 runner 全部成功。
+
+失败诊断为 `Job descendant 0 outlived the drained runner`。夹具只等 PID 文件存在，可能在 `writeFileSync` 创建文件后、写入 PID 前读到空串；`Number('') === 0` 且 `Number.isInteger(0)` 为真，后续 signal-0 探针检查的是特殊 PID 0，而非真正的后代。跨平台回归以已创建的空文件确定复现旧逻辑误判（修复前红）。现将 PID 标记写入临时文件后原子 rename 发布，消费者等待完整的正安全整数 PID，缺失 / 空白 / 0 / 负数 / 非整数字节均不算 ready。原生 Job drain、后代已退出、延迟逃逸写入不存在、祖先 pin 释放的断言和时限保持不变；未修改产品运行时代码。本机回归修复后通过（1 通过 / 40 个 Windows 用例按平台跳过），lint、双端 typecheck、docs:check 均通过；Windows 原生结果以修复提交的 CI 为准。
