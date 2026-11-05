@@ -189,6 +189,9 @@ importers:
       clsx:
         specifier: ^2.0.0
         version: 2.1.1
+      fontkit:
+        specifier: 2.0.4
+        version: 2.0.4
       immer:
         specifier: ^10.2.0
         version: 10.2.0

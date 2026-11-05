@@ -182,6 +182,13 @@ function main() {
 
     for (const target of exportTargets(pkg.exports)) {
       if (!target.startsWith('./')) continue
+      if (target.includes('*')) {
+        // Subpath patterns (`./locale/*.json`) name a family: at least one
+        // packed member must match, and `*` may span `/`.
+        const pattern = new RegExp(`^package/${target.slice(2).split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+')}$`)
+        assert(names.some(name => pattern.test(name)), `exports target ${target} matches no packed member`)
+        continue
+      }
       assert(members.has(`package/${target.slice(2)}`), `exports target ${target} is not in the tarball`)
     }
 

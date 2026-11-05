@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "多根工作区",
+    "description": "为会话添加附属工作目录：登记一次，Agent 即可在主工作目录之外读写该目录——文件工具、受限 shell 和终端都纳入同一共享沙箱范围。",
+    "detail": "detail/DETAIL.md"
+  }
+}
