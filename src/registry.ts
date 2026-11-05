@@ -626,7 +626,7 @@ export class MultiRootRegistry extends Service {
       const snapshot = this.client
         ? await this.remoteSnapshot('admit', [key])
         : await this.captureSnapshot(key)
-      const scope = freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy, this.projectRoots(snapshot.roots as RootStatus[]), snapshot.available))
+      const scope = freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy, this.projectRoots(this.localSnapshotRoots(snapshot)), snapshot.available))
       return await runRegistryOperation(scope, kind, snapshot.epoch, snapshot.revision, body, this.operationProof, capturedPolicy.mode)
     }
     const admission = await this.serialize(key, () => {
@@ -1220,13 +1220,12 @@ export class MultiRootRegistry extends Service {
     const table = this.requireTable()
     const durable = persistedPrimaryRoot.parse({ roots: migrateRootSkills(statuses.map(toPersistedRoot)) })
     try {
-      if (statuses.length === 0) await table.delete(key)
-      else {
-        // Validate the COMPLETE document before crossing the durable boundary.
-        // In particular, legacy records keep an absent `recordedPath` absent;
-        // they must never be rewritten as the schema-invalid empty string.
-        await table.put(key, durable)
-      }
+      // Keep an empty spelling-keyed record as a durable migration marker.
+      // Deleting it would let lookupRecords() restore the legacy canonical
+      // entry (which may still serve another primary), reviving removed grants.
+      // The complete document is validated above; absent legacy grant fields
+      // stay absent rather than becoming schema-invalid empty strings.
+      await table.put(key, durable)
     } catch (error) {
       if (unknownStorageState(error)) this.enterStorageFailed('registry write result is unknown; restart and reconcile durable state', 'quarantine')
       throw error
@@ -1398,18 +1397,23 @@ export class MultiRootRegistry extends Service {
     for (const listener of this.listeners) listener(key)
   }
 
-  private applySnapshot(snapshot: Snapshot) {
-    if (!this.client || snapshot.store !== this.medium?.id || snapshot.epoch !== this.client.epoch) return
-    const previous = this.remoteRevisions.get(snapshot.primary) ?? -1
-    if (snapshot.revision < previous) return
-    this.remoteRevisions.set(snapshot.primary, snapshot.revision)
-    const rows = markProtectedPaths(
+  /** Narrow owner rows for this Host, identically for projection and admission. */
+  private localSnapshotRoots(snapshot: Snapshot): RootStatus[] {
+    return markProtectedPaths(
       snapshot.roots.map(row => Object.fromEntries(Object.entries({ ...row, id: additionalRootId(row.id) }).filter(([, value]) => value !== undefined))) as unknown as RootStatus[],
       // The owner's classification used the OWNER's protected set; this
       // follower re-marks every row against its own, so a row inside the
       // follower's own home is withheld here even when the owner granted it.
       this.knownProtectedPaths(),
     )
+  }
+
+  private applySnapshot(snapshot: Snapshot) {
+    if (!this.client || snapshot.store !== this.medium?.id || snapshot.epoch !== this.client.epoch) return
+    const previous = this.remoteRevisions.get(snapshot.primary) ?? -1
+    if (snapshot.revision < previous) return
+    this.remoteRevisions.set(snapshot.primary, snapshot.revision)
+    const rows = this.localSnapshotRoots(snapshot)
     // One commit per key: the projection and the authority fact land together,
     // so a subscriber never sees roots without their authority (or vice versa).
     this.commit(() => {

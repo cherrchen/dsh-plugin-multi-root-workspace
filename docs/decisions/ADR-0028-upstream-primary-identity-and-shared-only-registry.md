@@ -23,6 +23,10 @@ Accepted（2026-11-05 维护者决定，落实[根授权安全修复计划](../p
 5. **升级迁移。** `v0.1.14` 及之前的存储按 canonical 主根作 key。owner 在上游拼写 key 下找不到记录时，读取其 canonical key 下的记录，并在第一次串行访问时把它复制到新 key（旧 key 保留）。这是唯一一处按当前解析结果选记录的地方，只对尚未迁移的存储生效。
 6. **只保留共享模式。** Registry 必须配置 `sharedStorageRoot`，缺失即 `config-invalid` fail closed：不取 lease、不开存储、不授予任何附加根。物理介质总由 `storeIdentity()` 证明。Registry 行不再 inject `storageDomain`（改为 inject `storage`），存储只经 `openAuthorityStorage()` 打开。
 
+## 修订：清空后保留迁移标记（2026-11-05，PR #39 评审）
+
+第 5 条迁移后，删除最后一个附加根也必须在上游拼写 key 下保存 `{ roots: [] }`，不能删除整个 key。空记录表示“此主根已有自己的登记表，且已明确清空”，永久阻止该 key 再次回退读取保留的 legacy canonical 记录。所有清空写入都保留空记录，继续使用原 schema 和同一串行持久化路径，不增加第二份迁移状态。刷新、操作准入、重启以及后续路径重新解析均不能恢复已删除的附加根；保留的 canonical 记录仍可服务于它自己的主根身份。
+
 ## Alternatives Considered
 
 | 方案 | 不采用的原因 |

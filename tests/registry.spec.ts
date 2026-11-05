@@ -155,7 +155,7 @@ describe('registration lifecycle', () => {
       .rejects.toThrow(RootValidationError)
   })
 
-  it('revokes the grant when a root is removed, and empties the store with the last one', async () => {
+  it('revokes the grant when a root is removed, and keeps an empty root list after the last one', async () => {
     const { registry, scope } = await mount()
     const first = makeRoot('first')
     const second = makeRoot('second')
@@ -1600,5 +1600,53 @@ describe('the upstream primary spelling (F3/MRW-01)', () => {
     }
     expect(Object.keys(after.tables.roots).sort()).toEqual([legacyKey, primaryKey(spelling)].sort())
     expect(after.tables.roots[primaryKey(spelling)]).toEqual(after.tables.roots[legacyKey])
+  })
+
+  it('keeps a migrated primary empty after its last root is removed, including after restart', async (context) => {
+    const noSymlinks = symlinkUnsupportedReason()
+    if (noSymlinks !== undefined) context.skip(noSymlinks)
+    const real = makeRoot('ws-real'), spelling = join(fixture.base, 'ws-link')
+    symlinkSync(real, spelling)
+    const extra = makeRoot('extra'), first = await mount()
+    await first.registry.add(real, { path: extra })
+    await disposeAll()
+    // Seed the exact canonical spelling used by the legacy writer, including
+    // its case on Windows. The old entry must remain usable by that primary.
+    const legacyKey = canonicalPath(real)
+    const seeded = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+      tables: { roots: Record<string, unknown> }
+    }
+    const record = seeded.tables.roots[primaryKey(real)]
+    delete seeded.tables.roots[primaryKey(real)]
+    seeded.tables.roots[legacyKey] = record
+    writeFileSync(storeFile, JSON.stringify(seeded))
+
+    const second = await mount()
+    // Operation admission itself may be the first serialized migration.
+    const policy = { mode: 'workspace-write' as const, workspaceRoot: spelling }
+    await second.registry.withOperation(policy, 'fs-write', operation => {
+      expect(operation.scope.writableRoots).toContain(extra)
+    })
+    expect(await second.registry.remove(spelling, { kind: 'path', path: extra })).toEqual([])
+    expect(await second.registry.refresh(spelling)).toEqual([])
+    await second.registry.withOperation(policy, 'process', operation => {
+      expect(operation.scope.additionalRoots).toEqual([])
+      expect(operation.scope.writableRoots).not.toContain(extra)
+    })
+    const cleared = JSON.parse(readFileSync(storeFile, 'utf8')) as {
+      tables: { roots: Record<string, unknown> }
+    }
+    expect(cleared.tables.roots[primaryKey(spelling)]).toEqual({ roots: [] })
+    expect(cleared.tables.roots[legacyKey]).toEqual(record)
+    await disposeAll()
+
+    const third = await mount()
+    expect(await third.registry.refresh(spelling)).toEqual([])
+    await third.registry.withOperation(policy, 'fs-write', operation => {
+      expect(operation.scope.writableRoots).not.toContain(extra)
+    })
+    // Clearing the symlink spelling does not revoke the realpath primary.
+    expect(await third.registry.refresh(real)).toHaveLength(1)
+    expect(third.registry.granted(real)).toEqual([extra])
   })
 })

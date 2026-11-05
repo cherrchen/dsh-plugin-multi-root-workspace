@@ -692,6 +692,24 @@ nativeTest('withholds a root inside a follower\'s own home even while the owner 
   expect(row?.invalidReason).toBe('protected-path')
   expect(follower.scope.scopeOf(fixture.workspace)).not.toContain(canonicalPath(followerHome))
   expect(owner.registry.list(fixture.workspace)[0]?.state).toBe('available')
+
+  // Each new admission must narrow the owner's snapshot too, even if the
+  // cached projection already withheld the row. Both fs and process consumers
+  // must exclude the protected root from workspace-write grants.
+  const policy = { workspaceRoot: fixture.workspace, mode: 'workspace-write' as const }
+  for (const kind of ['fs-write', 'process'] as const) {
+    await owner.registry.withOperation(policy, kind, operation => {
+      expect(operation.scope.writableRoots).toContain(canonicalPath(followerHome))
+    })
+    await follower.registry.withOperation(policy, kind, operation => {
+      expect(operation.scope.additionalRoots).not.toContain(canonicalPath(followerHome))
+      expect(operation.scope.writableRoots).not.toContain(canonicalPath(followerHome))
+    })
+  }
+  const path = join(followerHome, 'denied.txt')
+  await expect(follower.ctx.fs.writeText(await follower.ctx.fs.resolve(path), 'must not land', undefined, undefined, policy))
+    .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+  expect(existsSync(path)).toBe(false)
 })
 
 nativeTest('round-trips a symlinked primary spelling through the owner by primaryKey', async (context) => {

@@ -25,6 +25,12 @@ Accepted（P1 合同）。本 ADR 落实[根授权安全修复计划](../plans/a
 6. **存量记录 withheld，负边界保留。** recorded grant 与保护集合重叠的存量记录判为 `invalid`，内部原因 `protected-path`，不删除、不自动重授。它和 `membership-conflict` 一样属于“边界可信、成员资格 withheld”：继续以 deny-only 形式发布，并在 `reservedRootBoundary` 中占位，原 read-only/cap 的拒绝信息不丢。保护集合部分未知时，存量分类使用已知部分（至少包含钉住值）；“未知”只阻止新授权，不削弱存量分类。
 7. **共享 follower 只做收窄。** owner 用自己的集合做最终校验；follower 在把 `add` 发给 owner 之前，先用自己的集合做本地拒绝，并在应用 owner 快照时把落入自己集合的行标为 `protected-path` withheld，因此 owner 与 follower 的 home 不同时也不会漏保护。IPC 快照的 `invalidReason` 枚举随之扩展；协议版本不变，旧 follower 解析新原因会失败并断线，按 fail-closed 处理。
 
+## 修订：Follower 的操作准入同样收窄（2026-11-05，PR #39 评审）
+
+第 7 条的本地保护分类必须同时作用于缓存/面板投影和每次操作准入的 owner 快照。两条路径共用同一个分类函数；`withOperation()` 仍从 owner 取得有序快照，再按当前 Host 的保护集合收窄，不能用缓存代替准入，也不能直接把未收窄的 owner 行交给 `resolveSnapshot()`。这使 fs 与进程等消费者获得同一组 withheld/deny 边界，避免面板显示 `invalid/protected-path` 而实际操作仍获得可写根。Owner 自己的授权集合不因 follower 的 home 不同而扩大或缩小。
+
+这落实的是附加根登记/存量 withheld 合同；主根或 temp 本来覆盖 home 时是否额外拒写，仍按专项计划的维护者决定第 6 项处理。
+
 ## Alternatives Considered
 
 | 方案 | 不采用的原因 |
