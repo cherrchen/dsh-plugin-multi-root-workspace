@@ -13,7 +13,7 @@ const rootSchema = z.object({
   id: z.string(), path: z.string(), access: z.enum(['inherit', 'read-only', 'read-write']), addedAt: z.string(),
   recordedPath: z.string().optional(), readOnlyRecordedPath: z.string().optional(), readWriteRecordedPath: z.string().optional(),
   alias: z.string().optional(), aliasId: z.unknown().optional(), skillsEnabled: z.unknown().optional(),
-  state: z.enum(['available', 'missing', 'redirected', 'invalid']), detail: z.string().optional(), invalidReason: z.literal('membership-conflict').optional(),
+  state: z.enum(['available', 'missing', 'redirected', 'invalid']), detail: z.string().optional(), invalidReason: z.enum(['membership-conflict', 'protected-path', 'primary-overlap']).optional(),
 }).strict()
 export const snapshotSchema = z.object({
   protocol: z.literal(1), store: z.string(), epoch: z.string(), revision: z.number().int().nonnegative().safe(),

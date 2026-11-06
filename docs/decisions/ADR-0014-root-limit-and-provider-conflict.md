@@ -38,6 +38,8 @@ Accepted
 
 所有 mutation 在序列化队列内先以存储记录重新分类再校验，不读缓存状态；revive 判定同样基于 fresh 分类（缓存 `available` → symlink 换向 → 重加原路径时必须 revive 同一条记录而非新建第二条）。详见 [ADR-0004 修订](./ADR-0004-root-registry-persistence-and-validation.md)。
 
+> **2026-11-05 修订**：上述“symlink 换向后重加原路径 revive 同一条记录”已被 [ADR-0027](./ADR-0027-revive-target-and-protected-paths.md) 取代——仍不新建第二条记录，但当前目标与原 grant 不一致时以 `revive-target-changed` 拒绝，不再把旧 access 改写到新目标；面板的“重新登记”入口只保留给 `missing` 行。
+
 ## Alternatives Considered
 
 - 上限按"可用根"计数：随目录生灭抖动，操作者无法预期；改按存储记录计数。

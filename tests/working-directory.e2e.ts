@@ -72,7 +72,7 @@ it.runIf(directoryModule !== undefined)('keeps origin grants and registry identi
     expect(effectiveDirectory(ctx, session)).toBe(canonicalPath(cwd))
     expect(wd.get(other)).toBe(fixture.workspace)
     expect(policy().workspaceRoot).toBe(fixture.workspace)
-    expect(ctx.multiRootScope.resolve(policy()).additionalRoots).toEqual([canonicalPath(fixture.outside)])
+    expect(ctx.multiRootScope.snapshot(policy()).additionalRoots).toEqual([canonicalPath(fixture.outside)])
     const target = await ctx.fs.resolve('relative.txt', { cwd: wd.get(session) })
     if (cwd === third) await expect(ctx.fs.writeText(target, 'bad', undefined, undefined, policy())).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
     else await ctx.fs.writeText(target, 'allowed', undefined, undefined, policy())
@@ -93,7 +93,7 @@ it.runIf(directoryModule !== undefined)('replays effective cwd and recovers a mi
   await wd.ensure({ ...agent, session: resumed })
   expect(wd.get(resumed)).toBe(fixture.workspace)
   expect(resumed.header.cwd).toBe(fixture.workspace)
-  expect(ctx.multiRootScope.resolve(ctx.sandboxPolicy.resolve({ session: resumed })).additionalRoots).toEqual([canonicalPath(fixture.outside)])
+  expect(ctx.multiRootScope.snapshot(ctx.sandboxPolicy.resolve({ session: resumed })).additionalRoots).toEqual([canonicalPath(fixture.outside)])
 })
 
 async function kernel(w: Awaited<ReturnType<typeof world>>, context: any) {
@@ -122,14 +122,15 @@ it.runIf(directoryModule !== undefined && worktreeModule !== undefined)('uses th
   }
   for (const [index, root] of [w.fixture.workspace, w.fixture.outside].entries()) {
     await w.wd.set(w.agent, root)
-    const created = await worktrees.create(w.agent, { name: `branch-${index}` })
+    const policy0 = w.ctx.sandboxPolicy.resolve({ session: w.session })
+    const created = await w.stack.registry.withOperation(policy0, 'process', async () => worktrees.create(w.agent, { name: `branch-${index}` }))
     expect(created.path).toBe(canonicalPath(join(root, '.agents/worktrees', `branch-${index}`)))
     expect(readFileSync(join(created.path, 'tracked.txt'), 'utf8')).toBe('seed')
     expect(readFileSync(join(created.path, '.git'), 'utf8').replaceAll('\\', '/')).toContain(join(root, '.git/worktrees').replaceAll('\\', '/'))
     const policy = w.ctx.sandboxPolicy.resolve({ session: w.session })
     await w.ctx.fs.writeText(await w.ctx.fs.resolve('new.txt', { cwd: w.wd.get(w.session) }), 'ok', undefined, undefined, policy)
-    expect(w.ctx.multiRootScope.resolve(policy).additionalRoots).toEqual([canonicalPath(w.fixture.outside)])
-    await expect(worktrees.create(w.agent, { name: `branch-${index}` })).rejects.toThrow('already exists')
+    expect(w.ctx.multiRootScope.snapshot(policy).additionalRoots).toEqual([canonicalPath(w.fixture.outside)])
+    await expect(w.stack.registry.withOperation(policy0, 'process', async () => worktrees.create(w.agent, { name: `branch-${index}` }))).rejects.toThrow('already exists')
     expect((await w.stack.registry.refresh(w.fixture.workspace))).toHaveLength(1)
     const control = new AbortController(); control.abort(new Error('canceled'))
     await expect(worktrees.create(w.agent, { name: 'canceled' }, control.signal)).rejects.toThrow('canceled')
@@ -138,7 +139,8 @@ it.runIf(directoryModule !== undefined && worktreeModule !== undefined)('uses th
     expect(w.wd.get(w.session)).toBe(w.fixture.workspace)
   }
   await w.wd.set(w.agent, w.third)
-  await expect(worktrees.create(w.agent, { name: 'denied' })).rejects.toThrow('Could not finish worktree')
+  const deniedPolicy = w.ctx.sandboxPolicy.resolve({ session: w.session })
+  await expect(w.stack.registry.withOperation(deniedPolicy, 'process', async () => worktrees.create(w.agent, { name: 'denied' }))).rejects.toThrow('Could not finish worktree')
   expect(existsSync(join(w.third, '.agents/worktrees/denied'))).toBe(false)
   expect((await w.stack.registry.refresh(w.fixture.workspace))).toHaveLength(1)
 }, 120000)
@@ -148,14 +150,14 @@ it.runIf(directoryModule !== undefined)('pins running process cwd and grants whi
   if (!await kernel(w, context)) return
   const policy = w.ctx.sandboxPolicy.resolve({ session: w.session })
   const code = `const fs=require('fs');console.log(process.cwd());setTimeout(()=>{fs.writeFileSync(${JSON.stringify(join(w.fixture.outside, 'snapshot.txt'))},'old grant');},500)`
-  const wrapped = await w.ctx.sandbox.confine([process.execPath, '-e', code], policy as never)
+  const wrapped = await w.stack.registry.withOperation(policy, 'process', async () => w.ctx.sandbox.confine([process.execPath, '-e', code], policy as never))
   const child = w.ctx.subprocess.spawn({ argv: wrapped.argv, cwd: w.fixture.workspace, graceMs: 500, stdio: { stdin: 'ignore', stdout: { maxBytes: 1024 }, stderr: { maxBytes: 1024 } } })
   await w.wd.set(w.agent, w.fixture.outside)
   await w.stack.registry.remove(w.fixture.workspace, { kind: 'ordinal', ordinal: 1 })
   expect((await child.done).exitCode).toBe(0)
   expect(child.collected!.stdout!.readFrom(0).text.trim()).toBe(w.fixture.workspace)
   expect(readFileSync(join(w.fixture.outside, 'snapshot.txt'), 'utf8')).toBe('old grant')
-  const next = await w.ctx.sandbox.confine([process.execPath, '-e', "try {require('fs').writeFileSync('new-process.txt','bad');process.exit(3)} catch {console.log('denied')}"], policy as never)
+  const next = await w.stack.registry.withOperation(policy, 'process', async () => w.ctx.sandbox.confine([process.execPath, '-e', "try {require('fs').writeFileSync('new-process.txt','bad');process.exit(3)} catch {console.log('denied')}"], policy as never))
   expect(runConfined(next, w.wd.get(w.session))).toEqual({ kind: 'ok', stdout: 'denied\n' })
   expect(existsSync(join(w.fixture.outside, 'new-process.txt'))).toBe(false)
   const target = await w.ctx.fs.resolve('native.txt', { cwd: w.wd.get(w.session) })
@@ -167,7 +169,7 @@ it.runIf(directoryModule !== undefined && process.platform !== 'win32')('leaves 
   if (!await kernel(w, context)) return
   const policy = w.ctx.sandboxPolicy.resolve({ session: w.session })
   const output = join(w.fixture.outside, 'pty-snapshot.txt')
-  const argv = await w.ctx.sandbox.confine(['bash', '-c', `sleep 0.5; printf '%s' "$PWD" > ${JSON.stringify(output)}; exit 23`], policy as never)
+  const argv = await w.stack.registry.withOperation(policy, 'pty', async () => w.ctx.sandbox.confine(['bash', '-c', `sleep 0.5; printf '%s' "$PWD" > ${JSON.stringify(output)}; exit 23`], policy as never))
   const terminal = await w.ctx.subprocess.spawnTerminal({ argv: argv.argv, cwd: w.fixture.workspace, rows: 24, cols: 80, terminalType: 'xterm-256color', graceMs: 500 })
   terminal.output.resume()
   try {

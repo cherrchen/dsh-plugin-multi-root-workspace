@@ -11,8 +11,10 @@ import type { Snapshot } from '../src/authority/protocol.ts'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { DOMAIN_NAME } from '../src/registry.ts'
+import { primaryKey } from '../src/roots.ts'
 import { RegistryAuthorityLease } from '../src/registry-lease.ts'
 import type { Config as RegistryConfig } from '../src/registry.ts'
+import type { Config as ScopeConfig } from '../src/scope.ts'
 import MultiRootFileSystem from '../src/fs.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -24,9 +26,9 @@ const nativeTest = it.skipIf(!availability.available)
 let fixture: FixtureWorkspace, stacks: RegistryStack[]
 beforeEach(() => { fixture = createFixtureWorkspace('shared'); stacks = [] })
 afterEach(async () => { vi.restoreAllMocks(); for (const stack of stacks.reverse()) await stack.dispose(); fixture.dispose() })
-async function mount(config: RegistryConfig = {}) {
+async function mount(config: RegistryConfig = {}, scopeConfig: ScopeConfig = {}) {
   const root = join(fixture.base, 'store')
-  const stack = await mountRegistryStack(root, { sharedStorageRoot: root, ...config }, { beforeGate: async ctx => {
+  const stack = await mountRegistryStack(root, { sharedStorageRoot: root, ...config }, { scopeConfig, beforeGate: async ctx => {
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
     await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace })
@@ -436,7 +438,7 @@ nativeTest('commits a takeover atomically: callbacks only observe the committed 
     await follower.registry.refresh(fixture.workspace)
     expect(follower.registry.authority.kind).toBe('active')
     expect(scopeCalls).toBe(1)
-    expect(changedKeys.sort()).toEqual(primaries.map(([primary]) => canonicalPath(primary)).sort())
+    expect(changedKeys.sort()).toEqual(primaries.map(([primary]) => primaryKey(primary)).sort())
     expect(broadcast).toHaveLength(2)
     for (const snapshot of broadcast) expect(snapshot.roots.map(row => row.access)).toEqual(['read-only'])
   } finally { unsubscribe(); unsubscribeRegistry() }
@@ -669,4 +671,62 @@ nativeTest('marks config and quarantine classes as requires-restart', async () =
   await held.release()
   expect(off.registry.authority.kind).toBe('contended')
   expect(off.registry.diagnostics).toMatchObject({ recoveryClass: 'retryable', recovery: { phase: 'disabled' } })
+})
+
+nativeTest('withholds a root inside a follower\'s own home even while the owner grants it', async () => {
+  const ownerHome = join(fixture.base, 'owner-home'), followerHome = join(fixture.base, 'follower-home')
+  mkdirSync(ownerHome); mkdirSync(followerHome)
+  const owner = await mount({}, { dshHome: ownerHome })
+  const follower = await mount({}, { dshHome: followerHome })
+  expect(follower.registry.authority.kind).toBe('follower')
+  // The follower refuses the add LOCALLY: its own home is protected for it,
+  // never reaching the owner.
+  await expect(follower.registry.add(fixture.workspace, { path: followerHome })).rejects.toMatchObject({ code: 'protected-path' })
+  expect(owner.registry.list(fixture.workspace)).toEqual([])
+  // The owner can register the same directory (it is outside ITS home); the
+  // follower still withholds the row because it lands inside ITS home.
+  await owner.registry.add(fixture.workspace, { path: followerHome })
+  await follower.registry.refresh(fixture.workspace)
+  const row = follower.registry.list(fixture.workspace).find(entry => entry.path === canonicalPath(followerHome))
+  expect(row?.state).toBe('invalid')
+  expect(row?.invalidReason).toBe('protected-path')
+  expect(follower.scope.scopeOf(fixture.workspace)).not.toContain(canonicalPath(followerHome))
+  expect(owner.registry.list(fixture.workspace)[0]?.state).toBe('available')
+
+  // Each new admission must narrow the owner's snapshot too, even if the
+  // cached projection already withheld the row. Both fs and process consumers
+  // must exclude the protected root from workspace-write grants.
+  const policy = { workspaceRoot: fixture.workspace, mode: 'workspace-write' as const }
+  for (const kind of ['fs-write', 'process'] as const) {
+    await owner.registry.withOperation(policy, kind, operation => {
+      expect(operation.scope.writableRoots).toContain(canonicalPath(followerHome))
+    })
+    await follower.registry.withOperation(policy, kind, operation => {
+      expect(operation.scope.additionalRoots).not.toContain(canonicalPath(followerHome))
+      expect(operation.scope.writableRoots).not.toContain(canonicalPath(followerHome))
+    })
+  }
+  const path = join(followerHome, 'denied.txt')
+  await expect(follower.ctx.fs.writeText(await follower.ctx.fs.resolve(path), 'must not land', undefined, undefined, policy))
+    .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+  expect(existsSync(path)).toBe(false)
+})
+
+nativeTest('round-trips a symlinked primary spelling through the owner by primaryKey', async (context) => {
+  const noSymlinks = symlinkUnsupportedReason()
+  if (noSymlinks !== undefined) context.skip(noSymlinks)
+  const owner = await mount()
+  const real = join(fixture.base, 'ws-real')
+  mkdirSync(real)
+  const spelling = join(fixture.base, 'ws-link')
+  symlinkSync(real, spelling)
+  const follower = await mount()
+  expect(follower.registry.authority.kind).toBe('follower')
+  await follower.registry.add(spelling, { path: fixture.outside })
+  // Both sides see the row under the SPELLING's key; the realpath target is a
+  // distinct primary with its own (empty) record set.
+  expect(follower.registry.list(spelling)).toHaveLength(1)
+  expect(owner.registry.list(spelling)).toHaveLength(1)
+  expect(owner.registry.list(real)).toEqual([])
+  expect(follower.registry.list(real)).toEqual([])
 })

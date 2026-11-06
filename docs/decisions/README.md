@@ -62,3 +62,7 @@ ADR-0002-short-title.md
 - [ADR-0025-shared-registry-authority.md](./ADR-0025-shared-registry-authority.md) — 多 Host 共享权威服务、IPC 权限隔离、同步消费与失败关闭接管（Accepted）。
 
 - [ADR-0026-registry-background-recovery.md](./ADR-0026-registry-background-recovery.md) — Registry 权威后台恢复与故障诊断：结构化重试资格、恢复调度不变量、投影同步完成条件、scope 真值签名与提交通知原子性、握手本地取消、诊断面（Accepted，合同定案，功能待实施）。
+
+- [ADR-0027-revive-target-and-protected-paths.md](./ADR-0027-revive-target-and-protected-paths.md) — revive 不改变授权目标；`$DSH_HOME`、Registry 介质与 lease 目录的登记边界与存量 withheld（Accepted，P1 合同）。
+
+- [ADR-0028-upstream-primary-identity-and-shared-only-registry.md](./ADR-0028-upstream-primary-identity-and-shared-only-registry.md) — 主根身份以上游拼写为准（MRW-01），拒写优先于主根；Registry 只保留共享模式（Accepted）。

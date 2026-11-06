@@ -7,6 +7,7 @@ import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import MultiRootFileSystem from '../src/fs.ts'
+import { primaryKey } from '../src/roots.ts'
 import type { RegistryOperation } from '../src/registry-operation.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -105,7 +106,7 @@ describe('local Registry operation admission', () => {
     const serialize = internal.serialize.bind(internal), queued = Promise.withResolvers<void>()
     vi.spyOn(internal, 'serialize').mockImplementation((key, job) => {
       const work = serialize(key, job)
-      if (key === canonicalPath(other)) queued.resolve()
+      if (key === primaryKey(other)) queued.resolve()
       return work
     })
     const resolve = vi.spyOn(stack.scope, 'resolve')
@@ -180,19 +181,35 @@ describe('local Registry operation admission', () => {
       await registry.add(fixture.workspace, { path: fixture.outside })
       expect((await capture(owner)).revision).toBeGreaterThan(initial.revision)
       const follower = await mount()
-      const unavailable = await follower.registry.withOperation(policy, 'fs-write', op => ({ identity: op.identity, scope: op.scope }))
-      expect(unavailable.identity.authorityEpoch).toBeUndefined()
-      expect(unavailable.scope).toMatchObject({ authority: 'unavailable', writableRoots: [] })
+      // A follower admits through the owner: the operation carries the
+      // owner's epoch and its projected (available) scope.
+      const admitted = await follower.registry.withOperation(policy, 'fs-write', op => ({ identity: op.identity, scope: op.scope }))
+      expect(admitted.identity.authorityEpoch).toBe(initial.authorityEpoch)
+      expect(admitted.scope).toMatchObject({ authority: 'available', writableRoots: [canonicalPath(fixture.outside)] })
       await owner.dispose()
+      // Takeover goes through refresh (the fail-closed re-elect path); the
+      // admitted epoch afterwards is the NEW owner's, not the old one's.
+      await follower.registry.refresh(fixture.workspace)
       const successor = await capture(follower)
       expect(successor.authorityEpoch).toBeTypeOf('string')
       expect(successor.authorityEpoch).not.toBe(initial.authorityEpoch)
     } finally { stop() }
   })
 
-  it('keeps primary-only fail-closed behavior under contention and after disposal', async () => {
+  it('keeps primary-only fail-closed behavior on an unavailable registry and after disposal', async () => {
     await mount()
-    const stack = await mount()
+    // An unavailable registry (storage-failed, `config` recovery) is the
+    // shared-mode equivalent of the legacy contended stack: nothing is
+    // granted and ambient writes stay refused in every mode.
+    const stack = await mountRegistryStack(join(fixture.base, 'broken'), { leasePath: '' }, {
+      beforeGate: async ctx => {
+        await ctx.plugin(SessionProjectionRegistry)
+        await ctx.plugin(SandboxPolicyService, policy)
+        await ctx.plugin(MultiRootFileSystem, { cwd: fixture.workspace })
+      },
+    })
+    stacks.push(stack)
+    expect(stack.registry.authority.kind).toBe('storage-failed')
     for (const mode of ['workspace-write', 'danger-full-access'] as const) {
       const target = await stack.ctx.fs.resolve(join(fixture.outside, `${mode}.txt`))
       await expect(stack.ctx.fs.writeText(target, 'denied', undefined, undefined, { ...policy, mode }))
@@ -204,11 +221,19 @@ describe('local Registry operation admission', () => {
     expect(body).not.toHaveBeenCalled()
   })
 
-  it('preserves the scope test/smoke write port and direct-call tool caps', async () => {
+  it('preserves the scope test/smoke write port for projections, while admission answers only the registry', async () => {
     const stack = await mount({ bash: 'read-only' })
+    await stack.registry.add(fixture.workspace, { path: fixture.outside, access: 'read-write' })
+    const smoke = join(fixture.base, 'smoke-grant')
+    mkdirSync(smoke)
     stack.scope.setAdditionalRoots(fixture.workspace, [{
-      id: 'test', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write',
+      id: 'test', path: smoke, recordedPath: canonicalPath(smoke), access: 'read-write',
     }])
+    // The write port still feeds the read projections…
+    expect(stack.scope.snapshot({ mode: 'workspace-write', workspaceRoot: fixture.workspace }).additionalRoots)
+      .toEqual([canonicalPath(smoke)])
+    // …but an admitted operation is scoped by the registry's own table —
+    // a direct write can never fake a grant through admission.
     await stack.registry.withOperation(policy, 'fs-write', op => {
       expect(op.scope.additionalRoots).toEqual([canonicalPath(fixture.outside)])
       expect(op.scope.writableRoots).toEqual([]) // unknown tool identity is capped

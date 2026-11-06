@@ -193,7 +193,9 @@ nativeTest.each([true, false])('bounds native Skills requery feedback with a sha
     const stable = changes
     for (let i = 0; i < 3; i++) { query(); await settle() }
     expect(changes).toBe(stable)
-    expect(follower.registry.authority.kind).toBe(sharedOwner ? 'follower' : 'contended')
+    // skillsStack(shared=false) is shared too since the legacy mode was
+    // removed — either way the second mount is a follower.
+    expect(follower.registry.authority.kind).toBe('follower')
     await owner.dispose()
     await follower.registry.refresh(fixture.workspace); await settle()
     expect(follower.registry.authority.kind).toBe('active')

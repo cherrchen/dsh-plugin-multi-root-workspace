@@ -485,12 +485,14 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   }, [manualPath, mutate, addAccess, accessChosen])
 
   /**
-   * Re-register one withheld or unusable root in place. The request carries
-   * the stored path and deliberately NO access: `registry.add` treats the call
-   * as a revive — it keeps the record's access, alias, and identity instead of
+   * Re-register one MISSING root in place. The request carries the stored
+   * path and deliberately NO access: `registry.add` treats the call as a
+   * revive — it keeps the record's access, alias, and identity instead of
    * creating a new registration — which is also why the root limit must not
-   * gate this button: a revive consumes no slot, and it is the panel's only
-   * repair route for a redirected entry.
+   * gate this button: a revive consumes no slot. Only `missing` rows get it:
+   * a `redirected` registration now names a different directory, and revive
+   * never changes the grant's target — replacing it is the explicit
+   * remove-then-add flow the redirected hint describes (ADR-0027).
    */
   const reRegister = useCallback(async (root: RootView) => {
     await mutate('add', { path: root.path })
@@ -666,14 +668,17 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     {t(stateKey(root.state))}
                   </span>
                 )}
-                {root.state === 'available' ? null : (
+                {root.state === 'missing' ? (
                   <IconButton
                     pending={state.busy}
                     onClick={() => { void reRegister(root) }}
                     icon={<IconRefresh />}
                     label={t('panel.reRegister')}
                   />
-                )}
+                ) : null}
+                {root.state === 'redirected' ? (
+                  <span className="mrfw-note">{t('panel.redirectedHint')}</span>
+                ) : null}
                 {root.skillsEnabled === undefined ? null : (
                   <IconButton
                     pending={state.busy}

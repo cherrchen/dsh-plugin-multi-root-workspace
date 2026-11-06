@@ -1028,3 +1028,20 @@ it('ignores a response belonging to the previous session after catalog selection
   expect(screen.queryByText('/repos/primary')).toBeNull()
   expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-2' })
 })
+
+it('offers re-register only for a missing root and explains a redirected one', async () => {
+  const harness = mount()
+  harness.setView({ primaryRoot: '/repos/primary', roots: [
+    ROOT_B,
+    ROOT_C,
+    { ...ROOT_A, ordinal: 3, id: 'd', path: '/repos/broken', state: 'invalid', detail: 'unusable' },
+  ], limit: 16, count: 3 })
+  renderPanel(harness)
+  fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+  await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
+  // Exactly one re-register button — for the missing row. The redirected row
+  // shows the inline hint instead, and the invalid row offers neither.
+  expect(screen.getAllByRole('button', { name: `${NS}.panel.reRegister` })).toHaveLength(1)
+  expect(screen.getByText(`${NS}.panel.redirectedHint`)).toBeTruthy()
+  expect(screen.getByText(`${NS}.state.invalid`)).toBeTruthy()
+})

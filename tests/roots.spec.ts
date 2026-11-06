@@ -21,12 +21,15 @@ import {
   indexedStatuses,
   isCanonicallyUnder,
   isWindowsNetworkOrDevicePath,
+  markProtectedPaths,
+  primaryKey,
   removeStatusAt,
   reservedRootBoundary,
   entryRootRef,
   resolveRootRef,
   RootValidationError,
   validateRootCandidate,
+  type ProtectedPath,
   type RegisteredRoot,
 } from '../src/roots.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -430,7 +433,8 @@ describe('classifyStoredRoots', () => {
     const inside = join(primary, 'inside')
     const statuses = classifyStoredRoots(primary, [stored(sibling, 'moved', inside)])
     expect(statuses[0]?.state).toBe('invalid')
-    expect(statuses[0]?.invalidReason).toBeUndefined()
+    // Trustworthy boundary: withheld, deny-only — never re-granted.
+    expect(statuses[0]?.invalidReason).toBe('primary-overlap')
     expect(statuses[0]?.detail).toContain('overlaps')
   })
 
@@ -603,5 +607,120 @@ describe('canonicalRoot', () => {
   it('returns the input unchanged when the path cannot be resolved', () => {
     const missing = join(fixture.base, 'missing', 'deep')
     expect(canonicalRoot(missing)).toBe(missing)
+  })
+})
+
+describe('protected DSH directories', () => {
+  // fixture only exists after the file-level beforeAll runs.
+  let home: string
+  let medium: string
+  beforeAll(() => {
+    home = join(fixture.base, 'dsh-home')
+    medium = join(fixture.base, 'medium')
+  })
+  const boundary = (path: string, kind: ProtectedPath['kind']): ProtectedPath => ({ kind, path: canonicalPath(path) })
+  /** One stored record: `path` as spelled, `recordedPath` as granted. */
+  const stored = (path: string, id = path): RegisteredRoot => ({
+    id: additionalRootId(id), path, access: 'read-write', recordedPath: path, addedAt: '2026-09-12T00:00:00.000Z',
+  })
+  /** The failure code of one candidate judged against a protected set. */
+  const protectedCodeOf = (raw: string, protectedPaths: readonly ProtectedPath[]): string => {
+    try {
+      validateRootCandidate(raw, { primaryRoot: primary, existing: [], protectedPaths })
+    } catch (error: unknown) {
+      if (error instanceof RootValidationError) return error.code
+      throw error
+    }
+    return 'accepted'
+  }
+
+  it('refuses the home itself, a descendant, and an ancestor — and accepts a sibling', () => {
+    mkdirSync(join(home, 'inner'), { recursive: true })
+    const protectedPaths = [boundary(home, 'dsh-home')]
+    expect(protectedCodeOf(home, protectedPaths)).toBe('protected-path')
+    expect(protectedCodeOf(join(home, 'inner'), protectedPaths)).toBe('protected-path')
+    expect(protectedCodeOf(fixture.base, protectedPaths)).toBe('protected-path')
+    expect(protectedCodeOf(sibling, protectedPaths)).toBe('accepted')
+  })
+
+  it('refuses a symlink alias into a protected directory, judged canonically', (context) => {
+    if (symlinkReason !== undefined) context.skip(symlinkReason)
+    mkdirSync(home, { recursive: true })
+    const link = join(fixture.base, 'home-alias')
+    symlinkSync(home, link)
+    expect(protectedCodeOf(link, [boundary(home, 'dsh-home')])).toBe('protected-path')
+  })
+
+  it('refuses a registry-medium directory outside the home the same way', () => {
+    mkdirSync(join(medium, 'inner'), { recursive: true })
+    const protectedPaths = [boundary(medium, 'registry-medium')]
+    expect(protectedCodeOf(medium, protectedPaths)).toBe('protected-path')
+    expect(protectedCodeOf(join(medium, 'inner'), protectedPaths)).toBe('protected-path')
+    expect(protectedCodeOf(fixture.base, protectedPaths)).toBe('protected-path')
+  })
+
+  it('marks a stored record inside a protected directory as protected-path invalid, for every grant encoding', () => {
+    mkdirSync(home, { recursive: true })
+    const inside = join(home, 'stored')
+    const protectedPaths = [{ kind: 'dsh-home', path: home } as const]
+    for (const field of ['recordedPath', 'readOnlyRecordedPath', 'readWriteRecordedPath'] as const) {
+      const record: RegisteredRoot = {
+        id: additionalRootId(field), path: inside, access: 'inherit', [field]: inside,
+        addedAt: '2026-09-12T00:00:00.000Z',
+      }
+      const [status] = classifyStoredRoots(primary, [record], process.platform, protectedPaths)
+      expect(status?.state).toBe('invalid')
+      expect(status?.invalidReason).toBe('protected-path')
+      expect(status?.detail).toContain('protected DSH directory')
+      // Deny-only: the intact boundary still reserves the tree.
+      expect(reservedRootBoundary(status!)).toBe(inside)
+    }
+  })
+
+  it('keeps a protected-path verdict while an overlapping partner becomes a membership conflict', () => {
+    // Protected path INSIDE record A's grant: partner B overlaps A without
+    // touching the protected path, so B alone earns the conflict verdict.
+    const inner = join(home, 'inner')
+    mkdirSync(inner, { recursive: true })
+    const other = join(home, 'other')
+    mkdirSync(other, { recursive: true })
+    const statuses = classifyStoredRoots(primary, [
+      stored(home, 'covering'),
+      stored(other, 'partner'),
+    ], process.platform, [{ kind: 'dsh-home', path: inner }])
+    expect(statuses.map(status => status.state)).toEqual(['invalid', 'invalid'])
+    expect(statuses[0]?.invalidReason).toBe('protected-path')
+    expect(statuses[0]?.detail).toContain('protected DSH directory')
+    expect(statuses[1]?.invalidReason).toBe('membership-conflict')
+  })
+
+  it('markProtectedPaths applies the same verdict to already-classified statuses', () => {
+    const inner = join(home, 'inner')
+    mkdirSync(inner, { recursive: true })
+    const records = [stored(home, 'covering'), stored(sibling, 'plain')]
+    const protectedPaths = [{ kind: 'dsh-home', path: inner } as const]
+    const marked = markProtectedPaths(classifyStoredRoots(primary, records), protectedPaths)
+    const direct = classifyStoredRoots(primary, records, process.platform, protectedPaths)
+    expect(marked.map(status => [status.state, status.invalidReason]))
+      .toEqual(direct.map(status => [status.state, status.invalidReason]))
+    expect(marked[0]?.invalidReason).toBe('protected-path')
+    expect(marked[0]?.detail).toBe(direct[0]?.detail)
+    expect(marked[1]?.state).toBe('available')
+  })
+})
+
+describe('primaryKey', () => {
+  it('normalizes lexically without touching the filesystem', () => {
+    const base = join(fixture.base, 'anything')
+    expect(primaryKey(`${base}/`)).toBe(primaryKey(base))
+    expect(primaryKey(join(base, 'sub', '..'))).toBe(primaryKey(base))
+    expect(primaryKey(join(base, 'a/../b'))).toBe(primaryKey(join(base, 'b')))
+    // Lexical only: no realpath — a symlink spelling keeps its own key.
+    expect(primaryKey(fixture.base)).not.toBe(canonicalPath(fixture.base) === fixture.base ? '' : '')
+  })
+
+  it('case-folds on Windows and nowhere else', () => {
+    expect(primaryKey('C:\\Repos\\WS', 'win32')).toBe(primaryKey('c:\\repos\\ws', 'win32'))
+    expect(primaryKey('/Repos/WS', 'linux')).not.toBe(primaryKey('/repos/ws', 'linux'))
   })
 })

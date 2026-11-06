@@ -126,19 +126,24 @@ describe('two DSH processes sharing one registry store', () => {
     expect(ready.granted).toEqual([canonicalPath(extra)])
 
     const second = await mountLocal()
-    expect(second.registry.authority.kind).toBe('contended')
-    expect(second.scope.scopeOf(primary)).toEqual([])
+    // The second process never opens the store: it is a follower whose reads
+    // and mutations travel to the owner over IPC.
+    expect(second.registry.authority.kind).toBe('follower')
+    // Reads stay local until the first remote snapshot syncs the key.
     expect(second.registry.list(primary)).toEqual([])
-    await expect(second.registry.add(primary, { path: join(fixture.base, 'other') })).rejects.toMatchObject({
-      code: 'registry-contended',
-    })
+    expect(await second.registry.refresh(primary)).toHaveLength(1)
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(extra)])
+    const other = join(fixture.base, 'other')
+    mkdirSync(other)
+    const statuses = await second.registry.add(primary, { path: other })
+    expect(statuses).toHaveLength(2)
   })
 
   it('hands authority to the waiter after a clean exit, reading the last durable mutation', async () => {
     const { child, ready } = await spawnAuthority({ extra })
     expect(ready.granted).toEqual([canonicalPath(extra)])
     const second = await mountLocal()
-    expect(second.registry.authority.kind).toBe('contended')
+    expect(second.registry.authority.kind).toBe('follower')
 
     child.stdin?.end()
     await waitExit(child)
@@ -146,14 +151,14 @@ describe('two DSH processes sharing one registry store', () => {
     const statuses = await second.registry.refresh(primary)
     expect(second.registry.authority.kind).toBe('active')
     expect(statuses.map(status => status.path)).toEqual([canonicalPath(extra)])
-    expect(second.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(extra)])
   })
 
   it('hands authority to the waiter after SIGKILL, reading the last durable mutation', async () => {
     const { child, ready } = await spawnAuthority({ extra })
     expect(ready.granted).toEqual([canonicalPath(extra)])
     const second = await mountLocal()
-    expect(second.registry.authority.kind).toBe('contended')
+    expect(second.registry.authority.kind).toBe('follower')
 
     const killed = child.kill('SIGKILL')
     expect(killed).toBe(true)
@@ -162,6 +167,6 @@ describe('two DSH processes sharing one registry store', () => {
     const statuses = await second.registry.refresh(primary)
     expect(second.registry.authority.kind).toBe('active')
     expect(statuses.map(status => status.path)).toEqual([canonicalPath(extra)])
-    expect(second.scope.scopeOf(primary)).toEqual([canonicalPath(extra)])
+    expect(second.scope.snapshot({ mode: 'workspace-write', workspaceRoot: primary }).additionalRoots).toEqual([canonicalPath(extra)])
   })
 })

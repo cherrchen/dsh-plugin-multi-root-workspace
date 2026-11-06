@@ -12,7 +12,7 @@
 # provider below without any plugin-side executor.
 #
 # The last two rows are additive and self-softening: `multi-root-registry` waits
-# for the storage domain (absent only in compositions that mount no storage at
+# for the storage hub (absent only in compositions that mount no storage at
 # all) and takes a store-wide kernel lease beside the JSON document so two DSH
 # processes sharing $DSH_HOME cannot each grant a stale snapshot (ADR-0007);
 # `multi-root-command` registers the `/workspace-folders` command

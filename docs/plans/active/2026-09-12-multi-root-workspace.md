@@ -61,7 +61,7 @@
 | compat | DSH 0.2.2-alpha.3 提升 | fs `patchText`/`deleteFile`/`moveFile` 纳入围栏与 Registry admission；Connection RPC getter 绑定消费 fiber 修复 HTTP 405；Files 页签改用宿主文件树 Factory；开发 pin `0.2.2-alpha.3` / cordis `4.0.6-alpha.2` | [本次记录](#dsh-022-alpha3-兼容适配2026-11-04)、[接口审查](../../reference/dsh-0.2.2-migration.md) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md)、[0024 修订](../../decisions/ADR-0024-registry-operation-admission.md) | `9035ab0` | 随 `v0.1.14` 发版 |
 | compat | DSH 0.2.2-rc.1 提升 | 支持合同纳入 `0.2.2-rc.1`（22 个精确版本）；开发 pin `0.2.2-rc.1` / cordis `4.1.0` / schemastery `3.19.0`；稳定 vendor 选择器限宿主声明 minor 线；未新增适配分支 | [本次记录](#dsh-022-rc1-兼容适配2026-11-05)、[接口审查](../../reference/dsh-0.2.2-migration.md) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `1c025b2` | 随 `v0.1.14` 发版 |
 | 第二期 | 插件详情页设置卡与富文本详情 | 「多根 Auto Review（实验性）」设置开关与 Loader 行等价（`setPluginEnabled` 持久化、热应用、restart-required Toast）；设置卡错误改 Toast；`refreshSeq` 修并发刷新竞态；locale `meta.detail` + `preview.svg` 富文本详情 | [本次记录](#插件详情页设置卡与富文本详情2026-11-05) | — | `220bc82` | 随 `v0.1.14` 发版 |
-
+| 安全修复 | 根授权安全修复 P0–P4 | BYP-01、MRW-01、BYP-02、home/物理介质保护与默认权威 | [专项计划](./2026-11-05-root-authorization-security-fixes.md)（含 P0 记录与维护者决定） | [0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)（P1）、[0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)（F3、移除单进程模式） | `b15b486`、`fix/audit-1105` 后续提交 | 2026-11-05：P0 静态证据已记录，维护者决定 P2（可信确认）不实施、BYP-01 作为残余风险保留、Skills migration 保持现状；P1 已实施；F3 改为以上游主根拼写为 key、拒写优先于主根，单进程 Registry 模式移除。PR #39 两条 P1 评审回归先红后绿：Follower 的 fs/进程准入同样收窄 home 授权，迁移后清空在刷新、准入和重启后均不恢复旧根（见两份 ADR 的同日修订）。macOS / Node `24.18.0` / DSH `0.2.2-rc.1` 的 `compat:check` 与完整 `verify:all` 通过：lint、双端 typecheck、build、Seatbelt 内核探针及显式要求实跑的测试（74 文件通过，1019 通过、86 平台跳过）、compose / behavior / journey（52 / 137 / 76）、pack 与 packed behavior（136）、Auto Review fork 检查；可选 Auto Review 集成按精确版本规则跳过。Linux/Windows 原生门禁仍待 CI。P2、F5 与 F4 执行侧 deny 按维护者决定不实施（上游对工作区内的 `$DSH_HOME` 本就不设例外）；未发布，不指定版本 |
 
 ## 总体策略
 
@@ -1376,3 +1376,9 @@ macOS / Node `24.18.0` 候选 warn 下完整 `verify:all` 通过：原生 Seatbe
 - **插件管理页富文本详情**：`locale/en|zh.json` 提供 `meta.title`/`description`/`detail`，`exports` 暴露 `./locale/*.json`，`files` 打包 `detail/` 与 `locale/`；DETAIL 文档遵循上游惯例——单行图片指向 640×300 自包含 `preview.svg`（`preview.zh.svg` 为中文版，文字经 fontkit 转曲）。`check-pack` 支持 exports 通配符目标，`plugin-detail` spec 固定 manifest/字典/文档/资产一致性契约。富文本详情在 DSH `0.2.2-alpha.2` 起生效，更早版本无此读取路径，locale/detail 文件为惰性资源无副作用。
 
 验收：PR [CI run 41992772063](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41992772063) 全绿；新增 `tests/client-auto-review-settings.spec.tsx`（开关持久化/热应用/restart-required/无 Remote 不渲染/并发刷新）与 `tests/plugin-detail.spec.ts`（manifest/字典/文档/资产契约）。
+
+## PR #39 Review P2：Follower 在解析前拒绝 Windows 网络路径（2026-11-06）
+
+[评审发现](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/39#discussion_r4482517586)已修复：follower 的候选预检补齐 owner 已有的 Windows 网络／设备路径词法拒绝，合同见 [ADR-0027 修订](../../decisions/ADR-0027-revive-target-and-protected-paths.md#修订follower-候选解析前拒绝-windows-网络与设备路径2026-11-06pr-39-评审)。`registry.spec.ts` 在真实 owner/follower 栈上覆盖 UNC 两种分隔符与设备路径，断言 `unsupported-path`、候选未被 `realpath` 解析、follower 未转发 `add`、存储不变；测试桩拦截危险候选，回归失败时也不实际访问网络。修复前 owner 通过、follower 因候选被解析而失败，修复后两者通过。
+
+macOS / Node `24.18.0` / DSH `0.2.2-rc.1`：`compat:check` 与完整 `verify:all` 通过，Seatbelt 探针可用并以 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt` 要求实跑；全量测试 **1020 通过 / 86 平台跳过**，compose / behavior / journey 分别 **52 / 137 / 76 通过**，packed behavior **136 通过**，均无失败或跳过。lint、双端 typecheck、build、pack 与 Auto Review fork 检查通过；可选 Auto Review 集成按精确版本规则跳过。Windows 路径分支在本机通过平台桩覆盖，不代替 Windows 原生 CI；未扩大支持集合、未发布。

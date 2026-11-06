@@ -284,12 +284,17 @@ describe('current host review context and real tool fences', () => {
   it('matches read-only preview to actual nested execution and isolates concurrent caps',async()=>{
     const w=await world({bash:'read-only'})
     const policy=w.ctx.sandboxPolicy.resolve({session:w.session})
-    expect(w.ctx.multiRootScope.resolve(policy).writableRoots).toEqual([])
+    // The 'bash' cap sees nothing writable; 'write' keeps the extra root.
+    expect(w.ctx.multiRootScope.previewForTool(policy,'bash').writableRoots).toEqual([])
     expect(w.ctx.multiRootScope.previewForTool(policy,'write').writableRoots).toContain(w.f.outside)
     const dispatch=(name:string,fn:()=>Promise<any>)=> (w.ctx.waterfall as any)('tools/execute',{name,callId:name,token:{}},fn)
     await Promise.all([dispatch('bash',async()=>{
       expect((await w.build()).environment.writableRoots).toEqual([])
-      await dispatch('write',async()=>expect(w.ctx.multiRootScope.resolve(policy)).toEqual(w.ctx.multiRootScope.previewForTool(policy,'write')))
+      // The waterfall hook itself is ambient — the tool's real execution runs
+      // inside registry admission, which is where the scope it obeys lives.
+      await dispatch('write',async()=>await w.stack.registry.withOperation(policy,'fs-write',async()=>{
+        expect(w.ctx.multiRootScope.resolve(policy)).toEqual(w.ctx.multiRootScope.previewForTool(policy,'write'))
+      }))
     }),dispatch('write',async()=>{expect((await w.build()).environment.writableRoots).toContain(w.f.outside)})])
   })
   it('reviews real PTC inner fs calls once and retains the outer run_code tool cap',async(test)=>{

@@ -46,6 +46,7 @@
 
 import { migrateRootSkills, validateAliasId } from './skills/metadata.ts'
 import { randomUUID } from 'node:crypto'
+import { statSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import { openAuthorityStorage } from './compat/authority-storage.ts'
 import { storeIdentity } from './authority/native.ts'
@@ -63,17 +64,23 @@ import { freezeOperationScope, runRegistryOperation, runPrimaryOperation } from 
 import type { RegistryOperation, RegistryOperationKind } from './registry-operation.ts'
 import {
   additionalRootId,
-  availableRoots,
   canonicalRoot,
   classifyStoredRoots,
   expandRootInput,
   isWindowsNetworkOrDevicePath,
+  markProtectedPaths,
+  primaryKey,
+  protectedOverlap,
   removeStatusAt,
   reservedRootBoundary,
   resolveRootIndex,
   RootValidationError,
+  samePath,
+  singleGrantOf,
   validateRootCandidate,
   type AdditionalRootId,
+  type ProtectedPath,
+  type ProtectedPathKind,
   type RegisteredRoot,
   type RootAccess,
   type RootRef,
@@ -158,7 +165,12 @@ class SharedConfigError extends Error {}
 export interface Config {
   /** Absolute path of the store-wide kernel lock file. */
   readonly leasePath?: string
-  /** Explicit medium binding for the multi-Host authority service. */
+  /**
+   * Medium binding for the multi-Host authority service — REQUIRED since the
+   * single-process mode was removed (ADR-0028). Absent or empty puts the
+   * registry in the fail-closed `config-invalid` state: no lease, no domain,
+   * no grants.
+   */
   readonly sharedStorageRoot?: string
   /**
    * Cap on STORED additional-root records per primary root (every state
@@ -298,7 +310,7 @@ export class MultiRootRegistry extends Service {
   // `multiRootProviders` is the provider-conflict gate: with a foreign `ctx.fs`
   // or `ctx.sandbox` it never starts, so this registry stays unmounted and the
   // scope keeps granting nothing (see src/providers.ts).
-  static inject = ['multiRootCompat', 'multiRootProviders', 'storageDomain', 'multiRootScope']
+  static inject = ['multiRootCompat', 'multiRootProviders', 'storage', 'multiRootScope']
 
   /** Absolute lock path; absent means the row was composed without `leasePath`. */
   private readonly leasePath: string | undefined
@@ -354,10 +366,17 @@ export class MultiRootRegistry extends Service {
   private readonly maxRoots: number
   /** Keys already warned about a historical over-limit store (one warning each). */
   private readonly warnedOverLimit = new Set<string>()
+  /**
+   * The canonical value each protected boundary resolved to the FIRST time it
+   * could be computed, keyed by boundary kind. Never re-pinned: a later
+   * rename or symlink swap of the DSH home (or of the lease directory) must
+   * not drop the boundary the registration rules were enforced under.
+   */
+  private readonly pinnedProtectedPaths = new Map<ProtectedPathKind, string>()
 
   /**
-   * @param ctx - the host context; `storageDomain` and `multiRootScope` are injected.
-   * @param config - the patch row's `leasePath` and `maxAdditionalRoots`.
+   * @param ctx - the host context; `storage` and `multiRootScope` are injected.
+   * @param config - the patch row's `sharedStorageRoot`, `leasePath`, and `maxAdditionalRoots`.
    */
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'multiRootRegistry')
@@ -383,6 +402,16 @@ export class MultiRootRegistry extends Service {
     // never as "nothing is restricted" — Full-access enforcement downgrades
     // to primary-root-only writes while this flag is out (ADR-0017 review amendment).
     this.ctx.multiRootScope.setRegistryAuthority(false)
+    if (this.sharedStorageRoot === undefined || this.sharedStorageRoot.trim() === '') {
+      // The single-process mode is gone (ADR-0028): without the shared
+      // medium there is no multi-Host authority, and a silent local store
+      // would grant unsynchronized snapshots. Fail closed exactly like a
+      // bad row config — no lease, no domain.
+      this.authorityState = {
+        kind: 'config-invalid',
+        reason: `${DOMAIN_NAME}: sharedStorageRoot is required; the single-process registry mode was removed (ADR-0028)`,
+      }
+    }
     const configured = config.maxAdditionalRoots === undefined ? DEFAULT_MAX_ADDITIONAL_ROOTS : config.maxAdditionalRoots
     if (Number.isInteger(configured) && configured >= 1 && configured <= MAX_ADDITIONAL_ROOTS_CEILING) {
       this.maxRoots = configured
@@ -433,7 +462,7 @@ export class MultiRootRegistry extends Service {
       case 'follower':
         return undefined
       case 'contended':
-        return this.shared && this.connectionFailure ? `shared registry is unavailable: ${this.connectionFailure}` : REGISTRY_CONTENDED_MESSAGE
+        return this.connectionFailure !== undefined ? `shared registry is unavailable: ${this.connectionFailure}` : REGISTRY_CONTENDED_MESSAGE
       case 'storage-failed':
       case 'config-invalid':
         return this.authorityState.reason
@@ -524,7 +553,7 @@ export class MultiRootRegistry extends Service {
    * @param primaryRoot - the session workspace root (any spelling).
    */
   overLimit(primaryRoot: string): boolean {
-    return this.statusesOf(canonicalRoot(primaryRoot)).length > this.maxRoots
+    return this.statusesOf(primaryKey(primaryRoot)).length > this.maxRoots
   }
 
   /**
@@ -536,7 +565,7 @@ export class MultiRootRegistry extends Service {
    * @returns the statuses; empty when nothing is registered.
    */
   list(primaryRoot: string): readonly RootStatus[] {
-    return this.statusesOf(canonicalRoot(primaryRoot))
+    return this.statusesOf(primaryKey(primaryRoot))
   }
 
   /**
@@ -574,7 +603,7 @@ export class MultiRootRegistry extends Service {
       }
     }
     if (this.authorityState.kind !== 'active') return []
-    const key = canonicalRoot(primaryRoot)
+    const key = primaryKey(primaryRoot)
     return await this.serialize(key, () => this.reclassify(key))
   }
 
@@ -592,20 +621,18 @@ export class MultiRootRegistry extends Service {
     // Copy policy before the first await; the trusted caller still owns it.
     const capturedPolicy = structuredClone(policy)
     await this.ensureAuthority()
-    const key = canonicalRoot(capturedPolicy.workspaceRoot)
-    if (this.shared && this.available) {
+    const key = primaryKey(capturedPolicy.workspaceRoot)
+    if (this.available) {
       const snapshot = this.client
         ? await this.remoteSnapshot('admit', [key])
         : await this.captureSnapshot(key)
-      const scope = freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy, this.projectRoots(snapshot.roots as RootStatus[]), snapshot.available))
+      const scope = freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy, this.projectRoots(this.localSnapshotRoots(snapshot)), snapshot.available))
       return await runRegistryOperation(scope, kind, snapshot.epoch, snapshot.revision, body, this.operationProof, capturedPolicy.mode)
     }
     const admission = await this.serialize(key, () => {
       if (this.disposed) throw new Error('multi-root registry: cannot admit an operation after disposal')
       return {
-        scope: freezeOperationScope(this.shared
-          ? this.ctx.multiRootScope.resolveSnapshot(capturedPolicy, this.projectRoots(this.cache.get(key) ?? []), false)
-          : this.ctx.multiRootScope.resolve(capturedPolicy)),
+        scope: freezeOperationScope(this.ctx.multiRootScope.resolveSnapshot(capturedPolicy, this.projectRoots(this.cache.get(key) ?? []), false)),
         epoch: this.operationEpoch,
         revision: this.operationRevision,
       }
@@ -616,8 +643,107 @@ export class MultiRootRegistry extends Service {
   withPrimaryOperation<T>(policy: SandboxExecutionPolicy, body: () => T): T {
     // No IPC, no additional grant, and no shared temp authority. This is only
     // the compatibility fallback for a public entry that must stay synchronous.
-    const scope = this.ctx.multiRootScope.resolveSnapshot(policy, this.projectRoots(this.cache.get(canonicalRoot(policy.workspaceRoot)) ?? []), false)
+    const scope = this.ctx.multiRootScope.resolveSnapshot(policy, this.projectRoots(this.cache.get(primaryKey(policy.workspaceRoot)) ?? []), false)
     return runPrimaryOperation(freezeOperationScope(scope), policy.mode, this.operationProof, body)
+  }
+
+  /**
+   * The spellings one protected boundary contributes: the configured path,
+   * its current canonical resolution, and the canonical value pinned the
+   * first time it resolved — never re-pinned, so a later rename or symlink
+   * swap of the protected directory cannot drop the boundary the
+   * registration rules were enforced under. The list is deduplicated by
+   * {@link samePath}.
+   */
+  private boundarySpellings(kind: ProtectedPathKind, configured: string): string[] {
+    const canonical = canonicalRoot(configured)
+    if (!this.pinnedProtectedPaths.has(kind)) this.pinnedProtectedPaths.set(kind, canonical)
+    const spellings: string[] = []
+    for (const spelling of [configured, canonical, this.pinnedProtectedPaths.get(kind)!]) {
+      if (!spellings.some(existing => samePath(existing, spelling))) spellings.push(spelling)
+    }
+    return spellings
+  }
+
+  /**
+   * The best-known protected-boundary set, plus whether it is COMPLETE.
+   *
+   * The set comes from trusted host configuration, never from a panel or
+   * shell claim: the scope row's `dshHome`, the physical medium
+   * `storeIdentity` bound, and the lease directory beside it.
+   * `complete` is false — and only NEW grants may then be refused — when a
+   * boundary cannot be proven: an invalid `dshHome` config, a configured
+   * home that is not a directory right now, or a medium that was never bound. Stored classification always consumes whatever IS known
+   * (pinned values included), so an unknown boundary never weakens the
+   * revalidation of existing records.
+   */
+  private protectedBoundarySet(): { readonly paths: readonly ProtectedPath[]; readonly complete: boolean } {
+    const paths: ProtectedPath[] = []
+    let complete = true
+    const home = this.ctx.multiRootScope.dshHomeConfig
+    switch (home.kind) {
+      case 'absent':
+        break
+      case 'invalid':
+        // A rejected home config proves no home boundary at all.
+        complete = false
+        break
+      case 'configured': {
+        let isDirectory = false
+        try { isDirectory = statSync(home.path).isDirectory() } catch { isDirectory = false }
+        if (isDirectory) {
+          for (const spelling of this.boundarySpellings('dsh-home', home.path)) paths.push({ kind: 'dsh-home', path: spelling })
+        } else {
+          // The boundary cannot be proven now; what is still KNOWN — the
+          // configured spelling and any canonical value pinned while the home
+          // resolved — keeps protecting stored records.
+          complete = false
+          paths.push({ kind: 'dsh-home', path: home.path })
+          const pinned = this.pinnedProtectedPaths.get('dsh-home')
+          if (pinned !== undefined && !samePath(pinned, home.path)) paths.push({ kind: 'dsh-home', path: pinned })
+        }
+        break
+      }
+    }
+    // `storeIdentity` realpath'd the medium when it was bound; before
+    // that, the physical location cannot be proven.
+    if (this.medium === undefined) complete = false
+    else paths.push({ kind: 'registry-medium', path: this.medium.root })
+    if (this.leasePath !== undefined) {
+      for (const spelling of this.boundarySpellings('registry-lease', dirname(this.leasePath))) {
+        paths.push({ kind: 'registry-lease', path: spelling })
+      }
+    }
+    return { paths, complete }
+  }
+
+  /**
+   * The protected DSH directories this Host can prove right now, or
+   * `undefined` when the set cannot be proven. `undefined` blocks every NEW
+   * grant; it never weakens the classification of stored records.
+   */
+  private protectedPaths(): readonly ProtectedPath[] | undefined {
+    const { paths, complete } = this.protectedBoundarySet()
+    return complete ? paths : undefined
+  }
+
+  /**
+   * Every protected entry this Host can prove — used wherever a partial set
+   * must still protect stored records and received snapshots.
+   */
+  private knownProtectedPaths(): readonly ProtectedPath[] {
+    return this.protectedBoundarySet().paths
+  }
+
+  /**
+   * The one refusal shared by the owner mutation path and the follower
+   * pre-check: the protected set cannot be proven, so no new grant is safe.
+   */
+  private static protectedBoundaryUnknown(): RootValidationError {
+    return new RootValidationError(
+      'protected-boundary-unknown',
+      'the protected DSH directories cannot be resolved right now; no root can be registered until they can',
+    )
   }
 
   /**
@@ -629,10 +755,39 @@ export class MultiRootRegistry extends Service {
    */
   async add(primaryRoot: string, input: AddRootInput): Promise<readonly RootStatus[]> {
     await this.ensureAuthority()
-    if (this.client) return await this.remote('add', [primaryRoot, input])
+    if (this.client) {
+      // The owner runs the full validation against ITS protected set; a
+      // follower narrows first so a path inside ITS OWN protected
+      // directories never even reaches the owner — the two homes, and the
+      // stores they imply, may differ.
+      const protectedPaths = this.protectedPaths()
+      if (protectedPaths === undefined) throw MultiRootRegistry.protectedBoundaryUnknown()
+      const expanded = expandRootInput(input.path)
+      // Reject before local realpath or IPC: even resolving a refused UNC
+      // candidate can initiate SMB authentication on this follower.
+      if (process.platform === 'win32' && isWindowsNetworkOrDevicePath(expanded)) {
+        throw new RootValidationError('unsupported-path', `Windows ACL confinement cannot cover network or device paths: ${expanded}`)
+      }
+      if (isAbsolute(expanded)) {
+        const candidate = canonicalRoot(expanded)
+        const conflict = protectedOverlap(candidate, protectedPaths)
+        if (conflict !== undefined) {
+          throw new RootValidationError(
+            'protected-path',
+            `"${candidate}" overlaps the protected DSH directory "${conflict.path}" (${conflict.kind}) and cannot be registered`,
+            { conflict: conflict.path, reference: candidate },
+          )
+        }
+      }
+      return await this.remote('add', [primaryRoot, input])
+    }
     this.requireActive()
-    const key = canonicalRoot(primaryRoot)
+    const key = primaryKey(primaryRoot)
     return await this.serialize(key, async () => {
+      // No new grant without a proven protected set; the boundary a store
+      // write could corrupt must be known before a root may cover it.
+      const protectedPaths = this.protectedPaths()
+      if (protectedPaths === undefined) throw MultiRootRegistry.protectedBoundaryUnknown()
       // Re-classify FIRST, from the stored records: the cached list may be
       // stale (a `missing` root whose directory came back, a `redirected` one
       // whose target moved), and a candidate judged against it would either be
@@ -644,21 +799,20 @@ export class MultiRootRegistry extends Service {
       // re-confirms a root that was withheld at their last observation" from
       // "the operator re-adds a root that was — and still is — granted".
       const earlier = this.cache.get(key)
-      const statuses = this.reclassify(key)
+      const statuses = await this.reclassify(key)
       const alias = normalizeAlias(input.alias)
       // Reviving is detected BEFORE the candidate is judged: re-registering the
       // very directory an existing record names is the operator confirming it,
       // not a duplicate. The check looks at BOTH spellings of a registration —
       // the canonical path it is stored under, and the path it currently
-      // resolves to — so re-adding a directory that was replaced by a symlink
-      // updates that registration (re-recording what it is granted for)
-      // instead of piling a second record for the same operator-given path on
-      // top of it. A re-add revives when EITHER observation reports the record
+      // resolves to — so re-adding a path names its existing record instead of
+      // piling a second one for the same operator-given path on top of it.
+      // A re-add revives when EITHER observation reports the record
       // withheld — the fresh classification catches a root that degraded since
-      // the last one (a grant that is now `redirected` must revive, never
-      // duplicate), the last observation catches the operator re-confirming a
-      // root whose directory silently came back. Only a root that was granted
-      // then AND is granted now stays a `duplicate` refusal.
+      // the last one (a grant that is now `redirected` must revive or be
+      // refused, never duplicate), the last observation catches the operator
+      // re-confirming a root whose directory silently came back. Only a root
+      // that was granted then AND is granted now stays a `duplicate` refusal.
       const expanded = expandRootInput(input.path)
       // Revive matching must obey the same pre-I/O rejection as candidate
       // validation: even realpath of a UNC path can initiate SMB auth.
@@ -672,6 +826,27 @@ export class MultiRootRegistry extends Service {
         const before = earlier?.find(candidate => candidate.id === status.id)
         return status.state !== 'available' || (before !== undefined && before.state !== 'available')
       })
+      // A matched withheld record revives ONLY into the directory it was
+      // granted for: re-resolving a path is not re-authorizing it (ADR-0027).
+      // The revive is allowed when the record carries exactly ONE grant field
+      // — whichever of the three encodings — and the current canonical target
+      // still equals it. Anything else is a registration whose target moved
+      // (a replaced directory, a retargeted symlink) or a record too corrupt
+      // to name one boundary: both are refused rather than rewritten, so a
+      // single re-add can never migrate the old access onto a new directory.
+      // Replacing the target is explicit: remove the record, then add the new
+      // directory.
+      if (revived !== -1) {
+        const grant = singleGrantOf(statuses[revived]!)
+        if (grant === undefined || !samePath(preliminary!, grant)) {
+          throw new RootValidationError(
+            'revive-target-changed',
+            `the registration "${statuses[revived]!.path}" was granted for "${grant ?? '(unknown)'}"`
+              + ` but now resolves to "${preliminary!}"; remove it and add the new directory explicitly`,
+            { ...(grant === undefined ? {} : { conflict: grant }), reference: preliminary! },
+          )
+        }
+      }
       // The cap counts STORED records — every state, including withheld and
       // unusable ones — so it is stable and independent of the filesystem. A
       // revive re-confirms an existing record and never counts as new, which
@@ -686,6 +861,7 @@ export class MultiRootRegistry extends Service {
       }
       const canonical = validateRootCandidate(input.path, {
         primaryRoot: key,
+        protectedPaths,
         // The overlap rules judge every registration that still carries an
         // intact recorded grant — available, missing, redirected, and
         // membership-conflict records alike. A withheld root grants nothing,
@@ -759,9 +935,9 @@ export class MultiRootRegistry extends Service {
     await this.ensureAuthority()
     if (this.client) return await this.remote('setAccess', [primaryRoot, ref, access])
     this.requireActive()
-    const key = canonicalRoot(primaryRoot)
+    const key = primaryKey(primaryRoot)
     return await this.serialize(key, async () => {
-      const statuses = this.reclassify(key)
+      const statuses = await this.reclassify(key)
       const targetIndex = resolveRootIndex(statuses, ref)
       const target = statuses[targetIndex]!
       if (target.access === access) return statuses
@@ -812,8 +988,8 @@ export class MultiRootRegistry extends Service {
     await this.ensureAuthority()
     if (this.client) return await this.remote('removeAt', [primaryRoot, ref])
     this.requireActive()
-    const key = canonicalRoot(primaryRoot)
-    return await this.serialize(key, async () => await this.persist(key, removeStatusAt(this.reclassify(key), ref)))
+    const key = primaryKey(primaryRoot)
+    return await this.serialize(key, async () => await this.persist(key, removeStatusAt(await this.reclassify(key), ref)))
   }
 
   /**
@@ -828,9 +1004,9 @@ export class MultiRootRegistry extends Service {
     await this.ensureAuthority()
     if (this.client) return await this.remote('setAlias', [primaryRoot, ref, alias ?? null])
     this.requireActive()
-    const key = canonicalRoot(primaryRoot)
+    const key = primaryKey(primaryRoot)
     return await this.serialize(key, async () => {
-      const statuses = this.reclassify(key)
+      const statuses = await this.reclassify(key)
       const targetIndex = resolveRootIndex(statuses, ref)
       const normalized = normalizeAlias(alias)
       const next = statuses.map((status, index) => {
@@ -859,9 +1035,9 @@ export class MultiRootRegistry extends Service {
   private async setSkillsMetadata(primaryRoot: string, ref: RootRef, patch: { skillsEnabled?: boolean; aliasId?: string }): Promise<readonly RootStatus[]> {
     await this.ensureAuthority()
     this.requireActive()
-    const key = canonicalRoot(primaryRoot)
+    const key = primaryKey(primaryRoot)
     return await this.serialize(key, async () => {
-      const statuses = this.reclassify(key)
+      const statuses = await this.reclassify(key)
       const target = resolveRootIndex(statuses, ref)
       if (patch.aliasId !== undefined) validateAliasId(patch.aliasId, statuses.filter((_row, index) => index !== target))
       return await this.persist(key, statuses.map((row, index) => index === target ? { ...row, ...patch } : row))
@@ -880,9 +1056,9 @@ export class MultiRootRegistry extends Service {
     await this.ensureAuthority()
     if (this.client) return await this.remote('move', [primaryRoot, ref, beforeRef ?? null])
     this.requireActive()
-    const key = canonicalRoot(primaryRoot)
+    const key = primaryKey(primaryRoot)
     return await this.serialize(key, async () => {
-      const statuses = this.reclassify(key)
+      const statuses = await this.reclassify(key)
       const targetIndex = resolveRootIndex(statuses, ref)
       const anchorIndex = beforeRef === undefined ? undefined : resolveRootIndex(statuses, beforeRef)
       if (anchorIndex === targetIndex) return statuses
@@ -908,13 +1084,13 @@ export class MultiRootRegistry extends Service {
     await this.ensureAuthority()
     if (this.client) return await this.remote('recheck', [primaryRoot])
     this.requireActive()
-    const key = canonicalRoot(primaryRoot)
-    return await this.serialize(key, async () => await this.persist(key, this.reclassify(key)))
+    const key = primaryKey(primaryRoot)
+    return await this.serialize(key, async () => await this.persist(key, await this.reclassify(key)))
   }
 
   /**
    * Observe registry changes.
-   * @param listener - called with the canonical primary root after each durable change.
+   * @param listener - called with the Registry key (`primaryKey()`, case-folded on Windows) after each durable change.
    * @returns the disposer that stops observing.
    */
   onChange(listener: (primaryRoot: string) => void): () => void {
@@ -928,9 +1104,7 @@ export class MultiRootRegistry extends Service {
    * @returns the canonical paths of every `available` root.
    */
   granted(primaryRoot: string): readonly string[] {
-    return this.shared
-      ? this.ctx.multiRootScope.snapshot({ workspaceRoot: primaryRoot, mode: 'workspace-write' }).additionalRoots
-      : availableRoots(this.statusesOf(canonicalRoot(primaryRoot)))
+    return this.ctx.multiRootScope.snapshot({ workspaceRoot: primaryRoot, mode: 'workspace-write' }).additionalRoots
   }
 
   /**
@@ -943,8 +1117,7 @@ export class MultiRootRegistry extends Service {
   }
 
   /** Classify one stored record set and cache it. */
-  private accept(primaryRoot: string, record: PersistedPrimaryRoot): readonly RootStatus[] {
-    const key = canonicalRoot(primaryRoot)
+  private accept(key: string, record: PersistedPrimaryRoot): readonly RootStatus[] {
     const statuses = this.classify(key, record)
     this.cache.set(key, statuses)
     this.publish(key, statuses)
@@ -957,7 +1130,7 @@ export class MultiRootRegistry extends Service {
    * staging uses it so a half-opened domain cannot materialize rows.
    */
   private classify(key: string, record: PersistedPrimaryRoot): readonly RootStatus[] {
-    const statuses = classifyStoredRoots(key, record.roots.map(toRegisteredRoot))
+    const statuses = classifyStoredRoots(canonicalRoot(key), record.roots.map(toRegisteredRoot), process.platform, this.knownProtectedPaths())
     // A historical over-limit store (the limit was lowered, or the document
     // was edited by hand) is never truncated and keeps granting exactly what
     // classification grants; it is reported once per key instead.
@@ -980,20 +1153,35 @@ export class MultiRootRegistry extends Service {
   private statusesOf(key: string): readonly RootStatus[] {
     const cached = this.cache.get(key)
     if (cached !== undefined) return cached
-    const record = this.lookupRecords(key)
-    if (record === undefined) return []
-    return this.accept(key, record)
+    const found = this.lookupRecords(key)
+    if (found === undefined) return []
+    return this.accept(key, found.record)
   }
 
   /**
-   * The stored record set of one key, or `undefined` when there is none (or
-   * when the store itself could not be read: an unusable store reads as
-   * "nothing registered" so reads stay answerable and the surfaces can explain
-   * the situation, while every write fails loudly in `requireTable()`).
+   * The stored record set of one key: `{ record, migrated: false }` when the
+   * spelling key holds it; `{ record, migrated: true }` when only the legacy
+   * CANONICAL key does — stores written before the upstream primary spelling
+   * became the key (v0.1.14 and earlier). The fallback follows the CURRENT
+   * resolution ONLY for such a not-yet-migrated store; the first serialized
+   * access copies the record forward under the spelling key (see
+   * {@link reclassify}), after which resolution can never re-key a grant.
+   * `undefined` when there is no record (or when the store itself could not
+   * be read: an unusable store reads as "nothing registered" so reads stay
+   * answerable and the surfaces can explain the situation, while every write
+   * fails loudly in `requireTable()`).
    */
-  private lookupRecords(key: string): PersistedPrimaryRoot | undefined {
+  private lookupRecords(key: string): { readonly record: PersistedPrimaryRoot; readonly migrated: boolean } | undefined {
     if (this.authorityState.kind !== 'active') return undefined
-    try { return this.table?.get(key) }
+    try {
+      const record = this.table?.get(key)
+      if (record !== undefined) return { record, migrated: false }
+      // v0.1.14 stored the exact `canonicalRoot()` spelling (not case-folded).
+      const legacy = canonicalRoot(key)
+      if (legacy === key) return undefined
+      const migrated = this.table?.get(legacy)
+      return migrated === undefined ? undefined : { record: migrated, migrated: true }
+    }
     catch (error) {
       if (unknownStorageState(error)) this.enterStorageFailed('registry storage state cannot be confirmed; restart and reconcile', 'quarantine')
       throw error
@@ -1006,14 +1194,26 @@ export class MultiRootRegistry extends Service {
    * directory. Updates the cache, republishes the scope, and returns the new
    * list — the shared body of the read-path re-checks.
    */
-  private reclassify(key: string): readonly RootStatus[] {
-    const record = this.lookupRecords(key)
-    if (record === undefined) {
+  private async reclassify(key: string): Promise<readonly RootStatus[]> {
+    const found = this.lookupRecords(key)
+    if (found === undefined) {
       this.cache.set(key, [])
       this.publish(key, [])
       return []
     }
-    return this.accept(key, record)
+    if (found.migrated) {
+      // Copy the legacy canonical-keyed record forward under the spelling
+      // key — the migration window closes at this first serialized access.
+      // The old entry stays untouched (it may still serve a spelling that
+      // resolves to the same canonical); the unknown-result handling is the
+      // same as persist().
+      try { await this.requireTable().put(key, found.record) }
+      catch (error) {
+        if (unknownStorageState(error)) this.enterStorageFailed('registry write result is unknown; restart and reconcile durable state', 'quarantine')
+        throw error
+      }
+    }
+    return this.accept(key, found.record)
   }
 
   /**
@@ -1025,18 +1225,17 @@ export class MultiRootRegistry extends Service {
     const table = this.requireTable()
     const durable = persistedPrimaryRoot.parse({ roots: migrateRootSkills(statuses.map(toPersistedRoot)) })
     try {
-      if (statuses.length === 0) await table.delete(key)
-      else {
-        // Validate the COMPLETE document before crossing the durable boundary.
-        // In particular, legacy records keep an absent `recordedPath` absent;
-        // they must never be rewritten as the schema-invalid empty string.
-        await table.put(key, durable)
-      }
+      // Keep an empty spelling-keyed record as a durable migration marker.
+      // Deleting it would let lookupRecords() restore the legacy canonical
+      // entry (which may still serve another primary), reviving removed grants.
+      // The complete document is validated above; absent legacy grant fields
+      // stay absent rather than becoming schema-invalid empty strings.
+      await table.put(key, durable)
     } catch (error) {
       if (unknownStorageState(error)) this.enterStorageFailed('registry write result is unknown; restart and reconcile durable state', 'quarantine')
       throw error
     }
-    const classified = statuses.length === 0 ? [] : classifyStoredRoots(key, durable.roots.map(toRegisteredRoot))
+    const classified = statuses.length === 0 ? [] : classifyStoredRoots(canonicalRoot(key), durable.roots.map(toRegisteredRoot), process.platform, this.knownProtectedPaths())
     this.cache.set(key, classified)
     this.publish(key, classified)
     return classified
@@ -1101,7 +1300,7 @@ export class MultiRootRegistry extends Service {
     // first classification of an empty key must not "publish" an empty grant
     // (and fire every listener) for a set that was already empty.
     const previousMetadata = this.metadataPublished.get(key)
-    const metadata = JSON.stringify(this.shared ? statuses : statuses.map(row => [row.id, row.aliasId, row.skillsEnabled, row.state]))
+    const metadata = JSON.stringify(statuses)
     this.metadataPublished.set(key, metadata)
     if ((this.published.get(key) ?? '') === signature) {
       if (previousMetadata !== metadata && (previousMetadata !== undefined || statuses.length > 0)) {
@@ -1132,12 +1331,13 @@ export class MultiRootRegistry extends Service {
       // A structurally `invalid` record publishes NOTHING — not even its deny
       // boundary: a record too corrupt to parse cannot state a trustworthy
       // restriction, so under Full-access its former path becomes
-      // ambient-writable again. A `membership-conflict` record is different:
-      // its recorded grant IS intact and trustworthy, so it still publishes —
-      // withheld, deny-only — and a read-only boundary inside a covering grant
-      // stays denied. The tradeoff is recorded in ADR-0017 (失效登记的负授权修订
-      // and its membership-conflict amendment).
-      if ((status.state === 'invalid' && status.invalidReason !== 'membership-conflict') || recorded === undefined) return []
+      // ambient-writable again. The trustworthy-boundary verdicts are
+      // different — `membership-conflict` and `protected-path` both carry an
+      // intact recorded grant, so they still publish — withheld, deny-only —
+      // and a read-only boundary inside a covering grant stays denied. The
+      // tradeoff is recorded in ADR-0017 (失效登记的负授权修订 and its
+      // membership-conflict amendment) and ADR-0027.
+      if ((status.state === 'invalid' && status.invalidReason === undefined) || recorded === undefined) return []
       return [{
         id: status.id,
         path: status.path,
@@ -1155,10 +1355,10 @@ export class MultiRootRegistry extends Service {
   }
 
   private async captureSnapshot(primary: string): Promise<Snapshot> {
-    const key = canonicalRoot(primary)
-    return await this.serialize(key, () => {
+    const key = primaryKey(primary)
+    return await this.serialize(key, async () => {
       this.requireActive()
-      this.reclassify(key)
+      await this.reclassify(key)
       return this.snapshotOf(key)
     })
   }
@@ -1202,12 +1402,23 @@ export class MultiRootRegistry extends Service {
     for (const listener of this.listeners) listener(key)
   }
 
+  /** Narrow owner rows for this Host, identically for projection and admission. */
+  private localSnapshotRoots(snapshot: Snapshot): RootStatus[] {
+    return markProtectedPaths(
+      snapshot.roots.map(row => Object.fromEntries(Object.entries({ ...row, id: additionalRootId(row.id) }).filter(([, value]) => value !== undefined))) as unknown as RootStatus[],
+      // The owner's classification used the OWNER's protected set; this
+      // follower re-marks every row against its own, so a row inside the
+      // follower's own home is withheld here even when the owner granted it.
+      this.knownProtectedPaths(),
+    )
+  }
+
   private applySnapshot(snapshot: Snapshot) {
     if (!this.client || snapshot.store !== this.medium?.id || snapshot.epoch !== this.client.epoch) return
     const previous = this.remoteRevisions.get(snapshot.primary) ?? -1
     if (snapshot.revision < previous) return
     this.remoteRevisions.set(snapshot.primary, snapshot.revision)
-    const rows = snapshot.roots.map(row => Object.fromEntries(Object.entries({ ...row, id: additionalRootId(row.id) }).filter(([, value]) => value !== undefined))) as unknown as RootStatus[]
+    const rows = this.localSnapshotRoots(snapshot)
     // One commit per key: the projection and the authority fact land together,
     // so a subscriber never sees roots without their authority (or vice versa).
     this.commit(() => {
@@ -1274,7 +1485,7 @@ export class MultiRootRegistry extends Service {
     let snapshot: Snapshot
     try { snapshot = snapshotSchema.parse(value) }
     catch (error) { client.close(); throw error }
-    if (generation !== this.connectionGeneration || client !== this.client || snapshot.store !== this.medium?.id || snapshot.epoch !== client.epoch || snapshot.primary !== canonicalRoot(String(args[0]))) {
+    if (generation !== this.connectionGeneration || client !== this.client || snapshot.store !== this.medium?.id || snapshot.epoch !== client.epoch || snapshot.primary !== primaryKey(String(args[0]))) {
       client.close(); throw new Error('stale registry connection or authority epoch')
     }
     this.applySnapshot(snapshot)
@@ -1382,10 +1593,11 @@ export class MultiRootRegistry extends Service {
         this.enterStorageFailed(`${DOMAIN_NAME}: leasePath must be an absolute path`, 'config')
         return
       }
-      if (this.sharedStorageRoot !== undefined && this.medium === undefined) {
+      if (this.medium === undefined) {
         try {
-          if (!isAbsolute(this.sharedStorageRoot)) throw new SharedConfigError('sharedStorageRoot must be absolute')
-          const medium = storeIdentity(this.sharedStorageRoot)
+          // Absent or empty was refused `config-invalid` in the constructor.
+          if (!isAbsolute(this.sharedStorageRoot!)) throw new SharedConfigError('sharedStorageRoot must be absolute')
+          const medium = storeIdentity(this.sharedStorageRoot!)
           if (storeIdentity(dirname(leasePath)).id !== medium.id || basename(leasePath) !== `${DOMAIN_NAME}.lock`) throw new SharedConfigError('shared registry requires its canonical medium lock, without alternate lock names')
           this.medium = medium
         } catch (error) { this.enterStorageFailed(String(error), error instanceof SharedConfigError ? 'config' : 'retryable'); return }
@@ -1449,8 +1661,7 @@ export class MultiRootRegistry extends Service {
   private async openDomain(): Promise<void> {
     let domain
     try {
-      domain = this.medium === undefined ? await this.ctx.storageDomain.open(multiRootDomainSpec)
-        : await openAuthorityStorage(this.authorityStorageContext, this.medium.root, multiRootDomainSpec)
+      domain = await openAuthorityStorage(this.authorityStorageContext, this.medium!.root, multiRootDomainSpec)
     } catch (error: unknown) {
       const reason = `${DOMAIN_NAME}: ${error instanceof Error ? error.message : String(error)}`
       if (this.lastOpenFailure !== reason) {
@@ -1487,7 +1698,8 @@ export class MultiRootRegistry extends Service {
             this.ctx.logger.warn(`multi-root skills: metadata migration failed; Skills remain withheld: ${String(error)}`)
           }
         }
-        const key = canonicalRoot(primaryRoot)
+        // Stored keys are themselves upstream spellings — re-keyed, never re-resolved.
+        const key = primaryKey(primaryRoot)
         staged.set(key, this.classify(key, accepted))
       }
     } catch (error) {
@@ -1534,8 +1746,7 @@ export class MultiRootRegistry extends Service {
   /** Fail closed: empty scope, no table, contended state. */
   private enterContended(): void {
     this.operationEpoch = undefined
-    if (this.shared) this.remoteUnavailable()
-    else this.withdrawPublished()
+    this.remoteUnavailable()
     this.ctx.multiRootScope.setRegistryAuthority(false)
     this.table = undefined
     this.authorityState = { kind: 'contended' }
@@ -1552,11 +1763,9 @@ export class MultiRootRegistry extends Service {
   private enterStorageFailed(reason: string, recovery: StorageFailureRecovery): void {
     this.operationEpoch = undefined
     this.ctx.multiRootScope.setRegistryAuthority(false)
-    if (this.shared) {
-      // Retain negative boundaries and cached lexical paths on uncertainty.
-      for (const [key, rows] of this.cache) this.withholdScope(key, rows)
-      this.server?.close(); this.server = undefined
-    } else this.withdrawPublished()
+    // Retain negative boundaries and cached lexical paths on uncertainty.
+    for (const [key, rows] of this.cache) this.withholdScope(key, rows)
+    this.server?.close(); this.server = undefined
     this.table = undefined
     this.authorityState = { kind: 'storage-failed', reason, recovery }
     this.noteRecoveryTransition()

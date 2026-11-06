@@ -5,6 +5,8 @@ import { mountRegistryStack, type RegistryStack } from './support/registry-stack
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { migrateRootSkills, skillsMetadataValid } from '../src/skills/metadata.ts'
 import { DOMAIN_NAME } from '../src/registry.ts'
+import { primaryKey } from '../src/roots.ts'
+import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 
 let fixture: FixtureWorkspace, stack: RegistryStack, primary: string, store: string
 const ref = (id: string) => ({ kind: 'id' as const, id })
@@ -84,8 +86,8 @@ describe('Skills metadata on the production Registry', () => {
   it('migrates legacy records before publication, once; refresh is write-free', async () => {
     await stack.registry.add(primary, { path: extra('中文') })
     await stack.registry.add(primary, { path: extra('other'), access: 'read-only' })
-    const original = document().tables.roots[primary].roots
-    await reopen(data => { for (const row of data.tables.roots[primary].roots) { delete row.aliasId; delete row.skillsEnabled; row.alias = 'same' } })
+    const original = document().tables.roots[primaryKey(primary)].roots
+    await reopen(data => { for (const row of data.tables.roots[primaryKey(primary)].roots) { delete row.aliasId; delete row.skillsEnabled; row.alias = 'same' } })
     const rows = stack.registry.list(primary)
     expect(rows.map(row => row.skillsEnabled)).toEqual([true, false])
     expect(new Set(rows.map(row => row.aliasId)).size).toBe(2)
@@ -98,7 +100,7 @@ describe('Skills metadata on the production Registry', () => {
 
   it('keeps corrupt metadata distinct from missing fields without revoking filesystem grants', async () => {
     await stack.registry.add(primary, { path: extra('corrupt') })
-    await reopen(data => { const row = data.tables.roots[primary].roots[0]; row.aliasId = 4; row.skillsEnabled = 'false' })
+    await reopen(data => { const row = data.tables.roots[primaryKey(primary)].roots[0]; row.aliasId = 4; row.skillsEnabled = 'false' })
     const rows = stack.registry.list(primary)
     expect(rows[0]).toMatchObject({ state: 'available', aliasId: 4, skillsEnabled: 'false' })
     expect(skillsMetadataValid(rows[0]!, rows)).toBe(false)
@@ -109,11 +111,13 @@ describe('Skills metadata on the production Registry', () => {
 
   it('does not migrate a contended store and migrates on authority takeover', async () => {
     await stack.registry.add(primary, { path: extra('takeover') })
-    await reopen(data => { delete data.tables.roots[primary].roots[0].aliasId })
+    await reopen(data => { delete data.tables.roots[primaryKey(primary)].roots[0].aliasId })
     const contender = await mountRegistryStack(store)
     try {
-      expect(contender.registry.authority.kind).toBe('contended')
-      await expect(contender.registry.setSkillsEnabled(primary, { kind: 'ordinal', ordinal: 1 }, false)).rejects.toMatchObject({ code: 'registry-contended' })
+      expect(contender.registry.authority.kind).toBe('follower')
+      // A follower never opens the store — no migration — yet its mutations
+      // still reach the owner over IPC.
+      await contender.registry.setSkillsEnabled(primary, { kind: 'ordinal', ordinal: 1 }, false)
       await stack.dispose(); await contender.registry.refresh(primary)
       expect(contender.registry.list(primary)[0]?.aliasId).toBe('takeover')
     } finally { await contender.dispose() }
@@ -122,18 +126,20 @@ describe('Skills metadata on the production Registry', () => {
   it('withholds Skills on migration write failure while preserving registered grants', async () => {
     await stack.registry.add(primary, { path: extra('write-failure') })
     await stack.dispose()
-    const data = document(); delete data.tables.roots[primary].roots[0].aliasId
+    const data = document(); delete data.tables.roots[primaryKey(primary)].roots[0].aliasId
     writeFileSync(stack.storeFile, JSON.stringify(data))
     let writes = 0
-    stack = await mountRegistryStack(store, {}, { beforeGate: async ctx => {
-      const open = ctx.storageDomain.open.bind(ctx.storageDomain)
-      vi.spyOn(ctx.storageDomain, 'open').mockImplementation(async (...args) => {
-        const domain = await open(...args)
-        const table = domain.table('roots')
-        vi.spyOn(table, 'put').mockImplementation(async () => { writes++; throw new Error('disk full') })
-        return domain
-      })
-    } })
+    // The shared medium opens through a fresh DomainFacility per stack; the
+    // failing write is injected by wrapping the next facility's domain —
+    // the legacy `storageDomain` seam is gone with the single-process mode.
+    const open = DomainFacility.prototype.open
+    vi.spyOn(DomainFacility.prototype, 'open').mockImplementation(async function (...args) {
+      const domain = await open.apply(this as DomainFacility, args)
+      const table = domain.table('roots')
+      vi.spyOn(table, 'put').mockImplementation(async () => { writes++; throw new Error('disk full') })
+      return domain
+    })
+    stack = await mountRegistryStack(store)
     const rows = stack.registry.list(primary)
     expect(rows[0]).toMatchObject({ state: 'available' })
     expect(skillsMetadataValid(rows[0]!, rows)).toBe(false)
@@ -145,7 +151,7 @@ describe('Skills metadata on the production Registry', () => {
     const [row] = await stack.registry.add(primary, { path: extra('downgrade') })
     await stack.registry.setSkillsEnabled(primary, ref(row!.id), false)
     await stack.registry.setAliasId(primary, ref(row!.id), 'manual')
-    await reopen(data => { for (const entry of data.tables.roots[primary].roots) { delete entry.aliasId; delete entry.skillsEnabled } })
+    await reopen(data => { for (const entry of data.tables.roots[primaryKey(primary)].roots) { delete entry.aliasId; delete entry.skillsEnabled } })
     expect(stack.registry.list(primary)[0]).toMatchObject({ aliasId: 'downgrade', skillsEnabled: true, recordedPath: row!.recordedPath })
   })
 

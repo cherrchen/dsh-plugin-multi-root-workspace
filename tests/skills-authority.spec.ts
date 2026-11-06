@@ -73,20 +73,26 @@ describe('Registry authority does not feed a native Skills refresh loop', () => 
     writeSkill(extra, 'review', 'TAKEOVER BODY')
     const row = registered ? (await holder.registry.add(primary, { path: extra }))[0]! : undefined
     const waiter = await mount(), agent = waiter.agent(primary)
-    expect(waiter.registry.authority.kind).toBe('contended')
+    // A second mount is a follower: authoritative through the owner's
+    // projection — and still quiet, no Skills-refresh loop.
+    expect(waiter.registry.authority.kind).toBe('follower')
     const client = autoClient(waiter, agent)
     try {
       client.query(); await client.settle()
       for (let i = 0; i < 3; i++) await waiter.registry.refresh(primary)
-      await expect(waiter.registry.add(primary, { path: extra })).rejects.toMatchObject({ code: 'registry-contended' })
       await client.settle()
-      expect(client.queries).toBe(1); expect(client.changes).toBe(0)
-      expect((await waiter.snapshot(agent)).skills).toEqual([])
-      expectWithheld(waiter, primary)
+      // A follower's refresh republishes its projection (`setAdditionalRoots`
+      // notifies on every write): bounded republishes, never the loop the
+      // 20-query cap would expose.
+      expect(client.queries).toBeLessThanOrEqual(4); expect(client.changes).toBeLessThanOrEqual(4)
+      expect((await waiter.snapshot(agent)).skills.map(skill => skill.name)).toEqual(registered ? [internalSkillName(primary, row!.id, 'review')] : [])
+      expect(waiter.scope.snapshot({ workspaceRoot: primary, mode: 'workspace-write' })).toMatchObject({
+        authority: 'available', additionalRoots: registered ? [extra] : [],
+      })
       expect(holder.registry.authority.kind).toBe('active')
 
       const authorities: string[] = []
-      const stop = waiter.scope.subscribe(() => { authorities.push(waiter.scope.resolve({ workspaceRoot: primary, mode: 'workspace-write' }).authority) })
+      const stop = waiter.scope.subscribe(() => { authorities.push(waiter.scope.snapshot({ workspaceRoot: primary, mode: 'workspace-write' }).authority) })
       try {
         await holder.dispose()
         await waiter.registry.refresh(primary)
@@ -94,7 +100,7 @@ describe('Registry authority does not feed a native Skills refresh loop', () => 
         expect(waiter.registry.authority.kind).toBe('active')
         expect(authorities.filter(value => value === 'available')).toHaveLength(1)
         expect(client.changes).toBeGreaterThan(0)
-        expect(waiter.scope.resolve({ workspaceRoot: primary, mode: 'workspace-write' })).toMatchObject({
+        expect(waiter.scope.snapshot({ workspaceRoot: primary, mode: 'workspace-write' })).toMatchObject({
           authority: 'available', writableRoots: registered ? [extra] : [],
         })
         const skills = (await waiter.snapshot(agent)).skills
@@ -134,7 +140,7 @@ describe('Registry authority does not feed a native Skills refresh loop', () => 
       await failed.registry.refresh(primary)
       await client.settle()
       expect(failed.registry.authority.kind).toBe('active')
-      expect(failed.scope.resolve({ workspaceRoot: primary, mode: 'workspace-write' }).writableRoots).toEqual([extra])
+      expect(failed.scope.snapshot({ workspaceRoot: primary, mode: 'workspace-write' }).writableRoots).toEqual([extra])
       expect((await failed.snapshot(agent)).skills.map(skill => skill.name)).toEqual([internalSkillName(primary, row!.id, 'review')])
       const changes = client.changes
       await failed.registry.refresh(primary); await client.settle()
