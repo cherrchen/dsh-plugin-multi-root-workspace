@@ -19,6 +19,15 @@
 - Phase A 仅消费可证明的实时成功目标，允许 partial 调用的合格子项驱动指令发现；恢复历史缺证、动态待审目标或快照变化时 Review 技术失败，不伪报 complete。Auto Review 自身仍只支持精确 `0.2.1-rc.2`，其开关独立。
 - `multi-root-ops-compatibility.enabled` 默认 `false`，只有显式 `true` 启用，UI 使用独立“实验性”Tag，配置字段保留 experimental 标记；缺失设置服务不隐式启用。关闭时保留原生围栏，但 OPS 原有只读根绕过风险仍需用户知晓。
 
+### OPS 版本范围修订（2026-11-06）
+
+维护者明确将本功能限制为 DSH `0.2.*`，不再适配 `0.1.*` 的 Settings UI。此项是功能开放策略，不是按版本猜测上游接口，也不改变主插件的精确支持矩阵：只有通过既有兼容与 provider 门禁、宿主版本属于 `0.2.*`、现代 Settings 服务可用且配置显式为 `true` 时，OPS 适配才启用。
+
+- 删除 OPS 的 `installSection` / namespace Settings 分支；现代接口仍按 `configure` 能力结构探测。设置服务缺失、卸载或只有旧接口时，OPS 保持关闭。
+- `0.1.*` 保留 Config 输入兼容，手工写入 `enabled: true` 不启用执行、活动或 Review 适配。该版本的字段不标为 volatile，因此现代 Settings 也不发布可编辑的 OPS namespace；客户端不绑定旧 `settingsScope`，表单 unavailable 时隐藏 OPS 卡片。Skills 的旧版设置不受影响。
+- `0.2.*` 保持默认关闭、显式开启、开关代次失效和在途调用保护语义。Auto Review 自身的精确版本限制不变。
+- 适配启用路径的集成测试只在 `0.2.*` 运行；旧版继续验证强制关闭、无设置入口及原生多根围栏，不把不适用的 OPS 启用路径记为通过。
+
 ### 无限期延后清单（唯一真源）
 
 以下均未完成、无时间承诺、不作为本次 P6/最终验收门槛，不会在依赖接口出现后自动启动：

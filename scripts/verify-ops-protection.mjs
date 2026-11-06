@@ -130,9 +130,7 @@ async function world(mode, shared) {
       data.started.push({ argv: spec.argv, cwd: spec.cwd }); return original.call(this, spec)
     })
     await ctx.plugin(Scope, windows ? {} : { toolAccess: { ops_write_file: 'read-only' } })
-    ctx.provide('settings', { installSection(_owner, ns, _schema, _initial, hooks) {
-      if (ns === 'multi-root-ops-compatibility') hooks.setSource(() => ({ enabled: true }))
-    } })
+    ctx.provide('settings', { configure: () => () => {} })
     await ctx.plugin(OpsMode, { enabled: true }); await ctx.plugin(Compat)
     assert(ctx.get('multiRootCompat'), 'compatible tree required')
     await ctx.plugin(MRFS, { cwd: primary }); await ctx.plugin(Sandbox, {}); await ctx.plugin(Providers)

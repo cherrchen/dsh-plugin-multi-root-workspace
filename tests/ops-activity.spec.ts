@@ -20,6 +20,8 @@ import { mountCompat } from './support/compat.ts'
 import { MultiRootOpsCompatibility } from '../src/ops-compatibility.ts'
 import { mountProviderGate } from './support/providers.ts'
 import { installToolExecutor, executeTool } from './support/tool-executor.ts'
+import { opsCompatibilityRelease } from '../src/compat/ops-settings.ts'
+import { readInstalledVersion } from '../src/compat/dsh-version.ts'
 import { installOpsSetting } from './support/ops-settings.ts'
 
 let base: string
@@ -131,7 +133,7 @@ function opsTool(ctx: Context, name: string, value: unknown, hooks: { observe?: 
   } as never)
 }
 
-describe('live OPS file activity index', () => {
+describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')))('live OPS file activity index', () => {
   it('delivers only the proven nested chain on the next pre-step', async () => {
     const world = await mountWorld()
     const sub = join(root, 'sub', 'a.txt')
@@ -265,7 +267,7 @@ describe('live OPS file activity index', () => {
   })
 })
 
-describe('OPS compatibility mode off', () => {
+describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')))('OPS compatibility mode off', () => {
   it.each([false, true])('does not commit an old result across a mode change (re-enable: %s)', async reOn => {
     const world = await mountWorld()
     const path = join(root, 'sub', 'a.txt')

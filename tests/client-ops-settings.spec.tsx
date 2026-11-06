@@ -38,6 +38,13 @@ describe('OPS compatibility settings card', () => {
     expect((screen.getByRole('switch', { name: 'ops.compatibilityEnable' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it('hides OPS when the host exposes no editable OPS namespace', () => {
+    const form = opsForm({ status: 'unavailable', writable: true })
+    render(<OpsCompatibilitySettingsCard form={form} t={t} />)
+    expect(screen.queryByRole('switch')).toBeNull()
+    expect(screen.queryByText('ops.experimental')).toBeNull()
+  })
+
   it('shows the OPS error when the write fails or throws', async () => {
     for (const outcome of [false, new Error('denied')]) {
       cleanup()
@@ -62,7 +69,7 @@ describe('OPS compatibility settings card', () => {
 })
 
 describe('bundle settings coordinator', () => {
-  it.each([true, false])('registers one bundle card and per-namespace items on both shapes (modern=%s)', (modern) => {
+  it.each([true, false])('keeps the legacy card Skills-only and adds OPS on modern forms (modern=%s)', (modern) => {
     const selected: string[] = []
     const registrations: { name: string; key: string; component: unknown }[] = []
     const skillsForm = opsForm({ value: { enabled: true }, status: 'ready', writable: true })
@@ -78,17 +85,40 @@ describe('bundle settings coordinator', () => {
     }
     expect(bindSettingsForm(ctx as never, 'multi-root-ops-compatibility')).toBe(ops)
     installSkillsSettingsCard(ctx as never, t)
-    expect(selected).toEqual(expect.arrayContaining(['multi-root-skills', 'multi-root-ops-compatibility']))
+    expect(selected).toContain('multi-root-skills')
     const bundle = registrations.filter(row => row.name === 'plugins.bundle.config')
     expect(bundle).toHaveLength(1)
     expect(bundle[0]!.key).toBe('@dsh-electron/dsh-plugin-multi-root-workspace')
     const items = registrations.filter(row => row.name === 'settings.plugin.item')
-    expect(items.map(row => row.key).sort()).toEqual(['multi-root-ops-compatibility', 'multi-root-skills'])
+    expect(items.map(row => row.key).sort()).toEqual(modern ? ['multi-root-ops-compatibility', 'multi-root-skills'] : ['multi-root-skills'])
     const Bundle = bundle[0]!.component as typeof BundleSettingsCard
-    const props = (bundle[0]! as { inject?: () => { form: SkillsForm; opsForm: SkillsForm; t: Translate } }).inject?.() ?? { form: skillsForm, opsForm: ops, t }
+    const props = (bundle[0]! as { inject?: () => { form: SkillsForm; opsForm: SkillsForm; t: Translate } }).inject?.() ?? { form: skillsForm, opsForm: modern ? ops : undefined, t }
     render(<Bundle {...props} />)
     expect(screen.getByRole('switch', { name: 'skills.globalEnable' })).not.toBeNull()
-    expect(screen.getByRole('switch', { name: 'ops.compatibilityEnable' })).not.toBeNull()
+    expect(screen.queryByRole('switch', { name: 'ops.compatibilityEnable' }) !== null).toBe(modern)
+  })
+
+  it('does not register an OPS settings item when the host omits its namespace', () => {
+    const registrations: { name: string; key: string }[] = []
+    const skills = opsForm({ value: { enabled: true }, status: 'ready', writable: true })
+    const ops = opsForm({ status: 'unavailable', writable: true })
+    const services = { configForms: { get: (id: string) => id === 'multi-root-skills' ? skills : ops } }
+    const ctx = {
+      get: (name: string) => name === 'configForms' ? services.configForms : undefined,
+      inject: (names: string[], callback: (ctx: unknown) => unknown) => {
+        if (names.every(name => name in services)) {
+          const stop = callback(ctx); if (typeof stop === 'function') cleanups.push(stop as () => void)
+        }
+      },
+      slots: {
+        inject: (_name: string, callback: () => unknown) => { callback(); return () => {} },
+        register: (options: { name: string; key: string }) => { registrations.push(options); return () => {} },
+      },
+      effect: (setup: () => unknown) => { const stop = setup(); if (typeof stop === 'function') cleanups.push(stop as () => void) },
+    }
+    installSkillsSettingsCard(ctx as never, t)
+    expect(registrations.map(row => row.key)).not.toContain('multi-root-ops-compatibility')
+    expect(registrations.map(row => row.key)).toContain('multi-root-skills')
   })
 
   it('clicking each switch only mutates its own form', async () => {

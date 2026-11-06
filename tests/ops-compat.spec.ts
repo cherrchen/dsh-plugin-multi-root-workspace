@@ -25,6 +25,8 @@ import { mountCompat } from './support/compat.ts'
 import { mountProviderGate } from './support/providers.ts'
 import { installToolExecutor, executeTool } from './support/tool-executor.ts'
 import { mountRegistryStack } from './support/registry-stack.ts'
+import { opsCompatibilityRelease } from '../src/compat/ops-settings.ts'
+import { readInstalledVersion } from '../src/compat/dsh-version.ts'
 import { installOpsSetting } from './support/ops-settings.ts'
 import { MultiRootOpsCompatibility } from '../src/ops-compatibility.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
@@ -182,7 +184,7 @@ function call(world: World, name: string, args: unknown = {}, agent: Agent | und
 const isError = (result: unknown): boolean => (result as { isError?: boolean }).isError === true
 const resultText = (result: unknown): string => JSON.stringify(result)
 
-describe.skipIf(process.platform !== 'win32')('Windows OPS preparation refusal', () => {
+describe.skipIf(process.platform !== 'win32' || !opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')))('Windows OPS preparation refusal', () => {
   it.each([false, true].flatMap(shared =>
     (['danger-full-access', 'workspace-write', 'read-only'] as const).map(mode => ({ shared, mode })),
   ))('refuses all capabilities before preparation ($mode, shared: $shared)', async ({ shared, mode }) => {
@@ -227,7 +229,7 @@ describe.skipIf(process.platform !== 'win32')('Windows OPS preparation refusal',
   })
 })
 
-describe('the OPS dispatch barrier', () => {
+describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')))('the OPS dispatch barrier', () => {
   posixIt('confines an adapted OPS call to ambient-minus-deny under full access', async () => {
     const world = await mountWorld()
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
@@ -385,7 +387,7 @@ describe('the OPS dispatch barrier', () => {
   })
 })
 
-describe('the protection lifecycle', () => {
+describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')))('the protection lifecycle', () => {
   it('refuses a call revoked after the guard passed but before dispatch', async () => {
     const ctx = new Context()
     ctx.on('tools/execute', async (exec, next) => {
@@ -400,6 +402,7 @@ describe('the protection lifecycle', () => {
       await ctx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: fixture.workspace }),
     )
     await mountCompat(ctx)
+    installOpsSetting(ctx)
     fibers.push(await ctx.plugin(MultiRootOpsCompatibility, { enabled: true }))
     fibers.push(await ctx.plugin(MultiRootSandboxProvider, {}))
     const provider = ctx.sandbox as MultiRootSandboxProvider
@@ -596,7 +599,7 @@ describe('the protection lifecycle', () => {
   })
 })
 
-describe('the D1.1c POSIX cache preflight', () => {
+describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')))('the D1.1c POSIX cache preflight', () => {
   const hex = 'a'.repeat(64)
   it('classifies the OPS tool surface conservatively', () => {
     expect(classifyOpsTool('ops_write_file')).toBe('exec')
@@ -684,7 +687,7 @@ describe('the D1.1c POSIX cache preflight', () => {
   })
 })
 
-describe('scoped carrier dispatch', () => {
+describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')))('scoped carrier dispatch', () => {
   posixIt('applies cap and profile through the public pipeline for an agent with a real agent.ctx', async () => {
     const world = await mountWorld({ scopeConfig: { toolAccess: { ops_write_file: 'read-only' } } })
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-write')])
@@ -702,7 +705,7 @@ describe('scoped carrier dispatch', () => {
   })
 })
 
-describe('nested OPS dispatch under a shared registry', () => {
+describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')))('nested OPS dispatch under a shared registry', () => {
   posixIt('prepares an inner profile for a nested call and refuses a foreign confined argv', async () => {
     const world = await mountWorld({ shared: true })
     await world.ctx.multiRootRegistry.add(fixture.workspace, { path: fixture.outside, access: 'read-only' })
@@ -770,7 +773,7 @@ describe('nested OPS dispatch under a shared registry', () => {
   })
 })
 
-describe('OPS compatibility mode off', () => {
+describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')))('OPS compatibility mode off', () => {
   it('runs an OPS write through the generic dispatch without restricted confinement', async () => {
     const world = await mountWorld({ mode: 'danger-full-access', enabled: false })
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
@@ -805,7 +808,7 @@ describe('OPS compatibility mode off', () => {
   })
 })
 
-describe('OPS mode toggle lifecycle', () => {
+describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')))('OPS mode toggle lifecycle', () => {
   posixIt.each([false, true])('refuses a dispatch when the mode toggles during prepare (re-enable: %s)', async (reOn) => {
     const world = await mountWorld({ mode: 'danger-full-access' })
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
@@ -853,7 +856,7 @@ describe('OPS mode toggle lifecycle', () => {
   })
 })
 
-describe('scope-owned maintenance guard', () => {
+describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')))('scope-owned maintenance guard', () => {
   it.each([false, true])('refuses unowned raw and fabricated-profile spawns (fence unloaded: %s)', async (unload) => {
     const world = await mountWorld()
     world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])

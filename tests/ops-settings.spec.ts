@@ -7,16 +7,19 @@ import { Context } from '@deepseek-ai/cordis'
 import { boot, initProfile, readProfilePatches } from '@deepseek-ai/dsh-app-boot'
 import Settings from '@deepseek-ai/dsh-settings'
 import { MultiRootOpsCompatibility, Config } from '../src/ops-compatibility.ts'
-import { OPS_SETTINGS_ID, opsCompatibilityToken } from '../src/compat/ops-settings.ts'
+import { OPS_SETTINGS_ID, opsCompatibilityToken, opsCompatibilityRelease } from '../src/compat/ops-settings.ts'
+import { installOpsSetting } from './support/ops-settings.ts'
+import { readInstalledVersion } from '../src/compat/dsh-version.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 
 const settingsRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh-app-boot/package.json'))
 let configEditorPath: string | undefined
 try { configEditorPath = settingsRequire.resolve('@deepseek-ai/dsh-config-editor') } catch { /* Old Settings use a namespace provider. */ }
 
-async function mount(enabled: unknown = {}): Promise<{ ctx: Context; service: MultiRootOpsCompatibility | undefined; fiber: { dispose(): Promise<unknown> } }> {
+async function mount(enabled: unknown = {}, release: string = '0.2.2-rc.1', withSettings = true): Promise<{ ctx: Context; service: MultiRootOpsCompatibility | undefined; fiber: { dispose(): Promise<unknown> } }> {
   const ctx = new Context()
-  ctx.provide('multiRootCompat', {}); ctx.provide('multiRootProviders', {}); ctx.provide('multiRootScope', {})
+  ctx.provide('multiRootCompat', { release } as never); ctx.provide('multiRootProviders', {}); ctx.provide('multiRootScope', {})
+  if (withSettings) ctx.provide('settings', { configure: () => () => {} } as never)
   const fiber = await ctx.plugin(MultiRootOpsCompatibility, enabled as never)
   return { ctx, service: ctx.get('multiRootOpsCompatibility'), fiber: fiber as never }
 }
@@ -47,57 +50,65 @@ describe('OPS compatibility settings row', () => {
     expect(meta?.description).toContain('显式只读附加根可能被 OPS 写入')
   })
 
-  it('supports legacy installSection arrival/removal and regenerates the token per generation', async () => {
-    const { ctx, service } = await mount()
-    let hooks!: { setSource(source: () => { enabled: boolean }): void; onChange(): void }
-    let enabled = false
-    const fiber = await ctx.plugin({ apply(scope: Context) { scope.provide('settings', { installSection: (_owner: unknown, ns: string, _schema: unknown, _value: unknown, callbacks: typeof hooks) => {
-      expect(ns).toBe(OPS_SETTINGS_ID); hooks = callbacks; hooks.setSource(() => ({ enabled }))
-    } } as never) } })
-    await new Promise(resolve => setTimeout(resolve, 0))
-    enabled = true; hooks.onChange()
+  it('tracks modern Settings arrival/removal and regenerates the token per generation', async () => {
+    const { ctx, fiber } = await mount({ enabled: true }, '0.2.2-rc.1', false)
+    expect(opsCompatibilityToken(ctx)).toBeUndefined()
+    let setEnabled!: (value: boolean) => void
+    const settings = await ctx.plugin({ apply(scope: Context) { setEnabled = installOpsSetting(scope) } })
     const first = opsCompatibilityToken(ctx); expect(first).toBeInstanceOf(Object)
-    enabled = false; hooks.onChange(); expect(opsCompatibilityToken(ctx)).toBeUndefined()
-    enabled = true; hooks.onChange()
+    setEnabled(false); expect(opsCompatibilityToken(ctx)).toBeUndefined()
+    setEnabled(true)
     const second = opsCompatibilityToken(ctx)
     expect(second).toBeInstanceOf(Object); expect(second).not.toBe(first)
-    expect((second as { id?: string }).id).not.toBe((first as { id?: string }).id)
-    await fiber.dispose()
+    await settings.dispose()
     expect(opsCompatibilityToken(ctx)).toBeUndefined()
-    void service
+    await fiber.dispose()
+  })
+
+  it.each(['0.1.5-rc.2', '0.1.6-alpha.2', '0.1.7-rc.2', '0.3.0', ''])('keeps explicit opt-in off on ineligible or unknown DSH %s', async release => {
+    // Even a modern-looking Settings service cannot override the release policy.
+    const { ctx, fiber } = await mount({ enabled: true }, release, true)
+    expect(opsCompatibilityToken(ctx)).toBeUndefined()
+    expect(ctx.multiRootOpsCompatibility.enabled).toBe(false)
+    await fiber.dispose()
+  })
+
+  it.each(['0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-rc.2', '0.2.2-rc.1'])('allows explicit opt-in on DSH %s', async release => {
+    const { ctx, fiber } = await mount({ enabled: true }, release)
+    expect(opsCompatibilityToken(ctx)).toBeInstanceOf(Object)
+    await fiber.dispose()
+  })
+
+  it('does not attach a legacy Settings section even on an eligible release', async () => {
+    const { ctx, fiber } = await mount({ enabled: true }, '0.2.0-rc.2', false)
+    let installed = false
+    const settings = await ctx.plugin({ apply(scope: Context) {
+      scope.provide('settings', { installSection: () => { installed = true } } as never)
+    } })
+    expect(installed).toBe(false)
+    expect(opsCompatibilityToken(ctx)).toBeUndefined()
+    await settings.dispose(); await fiber.dispose()
   })
 
   it('treats a missing service as off', async () => {
     const ctx = new Context()
     expect(opsCompatibilityToken(ctx)).toBeUndefined()
   })
-
-  it.skipIf(typeof (Settings.prototype as { installSection?: unknown }).installSection !== 'function')('writes through a real legacy Settings provider without remounting', async () => {
-    const { ctx } = await mount()
-    class LegacySettings extends (Settings as unknown as { new (...args: unknown[]): unknown }) { readonly writable = true; async load() { return {} } async persist() {} }
-    await ctx.plugin(LegacySettings as never)
-    const settings = ctx.get('settings') as { describe(): { ns: string }[]; mutate(ns: string, ops: unknown[]): Promise<void> }
-    expect(settings.describe().some(row => row.ns === OPS_SETTINGS_ID)).toBe(true)
-    await settings.mutate(OPS_SETTINGS_ID as never, [{ op: 'set', path: ['enabled'], value: true }])
-    expect(opsCompatibilityToken(ctx)).toBeInstanceOf(Object)
-    await settings.mutate(OPS_SETTINGS_ID as never, [{ op: 'set', path: ['enabled'], value: false }])
-    expect(opsCompatibilityToken(ctx)).toBeUndefined()
-  })
 })
 
 describe('OPS compatibility settings — real Loader/Settings', () => {
-  it.skipIf(configEditorPath === undefined)('exposes the descriptor, persists writes through the real Settings service, and survives restart', async () => {
+  it.skipIf(configEditorPath === undefined)('exposes live settings only on eligible hosts and persists their writes across restart', async () => {
     const fixture = createFixtureWorkspace('ops-settings')
     try {
       const deps = new Context()
-      deps.provide('multiRootCompat', {}); deps.provide('multiRootProviders', {}); deps.provide('multiRootScope', {})
+      deps.provide('multiRootCompat', { release: readInstalledVersion('@deepseek-ai/dsh') } as never); deps.provide('multiRootProviders', {}); deps.provide('multiRootScope', {})
       const directory = join(fixture.base, 'profile'), bundle = join(directory, 'node_modules/ops-fixture')
       initProfile(directory, ['ops-fixture']); mkdirSync(bundle, { recursive: true })
       writeFileSync(join(fixture.base, 'package.json'), '{"name":"ops-settings-home"}')
       writeFileSync(join(bundle, 'package.json'), JSON.stringify({ name: 'ops-fixture', version: '1.0.0', dsh: { bundle: { patch: 'cordis.patch.yml' } } }))
       writeFileSync(join(bundle, 'cordis.patch.yml'), JSON.stringify([{ insert: [
         { id: 'config-editor', name: 'cordis:editor' }, { id: 'settings', name: 'cordis:settings' },
-        { id: 'multi-root-deps', name: 'cordis:dependencies' }, { id: OPS_SETTINGS_ID, name: 'cordis:ops' },
+        { id: 'multi-root-deps', name: 'cordis:dependencies' }, { id: OPS_SETTINGS_ID, name: 'cordis:ops', enabled: !opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh')) },
       ] }]))
       writeFileSync(join(directory, 'cordis.yml'), '[]\n')
       const ConfigEditor = (await import(pathToFileURL(configEditorPath!).href)).default
@@ -114,6 +125,13 @@ describe('OPS compatibility settings — real Loader/Settings', () => {
       let instance = await bootProfile()
       try {
         const descriptor = instance.settings.describe().find((row: { ns: string }) => row.ns === OPS_SETTINGS_ID)
+        if (!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh'))) {
+          expect(descriptor).toBeUndefined()
+          expect(instance.multiRootOpsCompatibility.enabled).toBe(false)
+          expect(instance.multiRootOpsCompatibility.token).toBeUndefined()
+          expect(instance.settings.describe().some((row: { ns: string }) => row.ns === OPS_SETTINGS_ID)).toBe(false)
+          return
+        }
         expect(descriptor).toBeDefined()
         expect(JSON.stringify(descriptor)).toContain('OPS 兼容模式')
         expect(JSON.stringify(descriptor)).toContain('experimental')

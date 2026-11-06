@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { IconWarningOutlineRegular, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '@deepseek-ai/cordis'
-import { bindSettingsForm, bindSkillsForm, clientInject, type SkillsForm } from '../compat/skills-client.ts'
+import { bindSkillsForm, clientInject, type SkillsForm } from '../compat/skills-client.ts'
 import { installAutoReviewSettings, type AutoReviewForm } from '../compat/auto-review-client.ts'
 import { AutoReviewSettingsCard } from './auto-review-settings.tsx'
 import { OpsCompatibilitySettingsCard } from './ops-settings.tsx'
@@ -66,7 +66,8 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): void {
   const update = () => {
     const chosen = [...candidates.entries()].sort(([a], [b]) => Number(b.get('configForms' as never) !== undefined) - Number(a.get('configForms' as never) !== undefined))[0]
     const skillsForm = chosen?.[1].skills
-    const opsForm = chosen?.[1].ops
+    const opsCandidate = chosen?.[1].ops
+    const opsForm = opsCandidate?.getSnapshot().status === 'unavailable' ? undefined : opsCandidate
     // Mirror the row's own render rule: hidden while unavailable or once the
     // composition answers without the optional entry, so the cell never
     // registers an empty card.
@@ -97,10 +98,13 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): void {
   // exists; one explicit pass picks up whatever state it left behind.
   update()
   for (const service of ['settingsScope', 'configForms']) clientInject(ctx, [service], scope => {
-    const skills = bindSkillsForm(scope), ops = bindSettingsForm(scope, 'multi-root-ops-compatibility')
+    const skills = bindSkillsForm(scope)
+    const forms = scope.get('configForms' as never) as { get(id: string): SkillsForm } | undefined
+    const ops = forms?.get('multi-root-ops-compatibility')
     if (skills === undefined && ops === undefined) return
+    const stopOpsWatch = ops?.subscribe(update)
     candidates.set(scope, { skills, ops }); update()
-    return () => { candidates.delete(scope); update() }
+    return () => { stopOpsWatch?.(); candidates.delete(scope); update() }
   })
   ctx.effect(() => () => { stop?.(); stopAutoWatch(); candidates.clear() })
 }

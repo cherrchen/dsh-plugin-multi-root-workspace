@@ -88,9 +88,7 @@ try {
   ctx.storage.mount('domain', facility)
   ctx.provide('storageDomain', facility)
   await ctx.plugin(Scope, {})
-  ctx.provide('settings', { installSection(_owner, ns, _schema, _initial, hooks) {
-    if (ns === 'multi-root-ops-compatibility') hooks.setSource(() => ({ enabled: true }))
-  } })
+  ctx.provide('settings', { configure: () => () => {} })
   await ctx.plugin(OpsMode, { enabled: true })
   await ctx.plugin(Compat)
   await ctx.plugin(MRFS, { cwd: primary })

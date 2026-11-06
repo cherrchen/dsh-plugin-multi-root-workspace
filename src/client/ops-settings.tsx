@@ -7,6 +7,7 @@ export function OpsCompatibilitySettingsCard({ form, t }: { form: SkillsForm; t:
   const [busy, setBusy] = useState(false), [error, setError] = useState<string>()
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  if (snapshot.status === 'unavailable') return null
   return <div className="mrfw-skillsSettings">
     <div className="mrfw-skillsSettingsText">
       <div className="mrfw-settingsTitleRow">

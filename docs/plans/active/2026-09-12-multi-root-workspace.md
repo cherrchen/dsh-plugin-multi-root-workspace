@@ -1479,3 +1479,22 @@ Auto Review 独立宿主固定其精确基线 DSH `0.2.1-rc.2` / cordis `4.0.5`�
 **本轮最终门禁**：macOS arm64 / Node `24.18.0`，主开发树 DSH `0.2.2-rc.1` / cordis `4.1.0`。`compat:check`、lint、host/client/fork typecheck、build、`docs:check`、`auto-review:fork` 全部通过；原生 `registry:probe --required` peer 认证可用，Seatbelt `kernel:probe` 实际执行成功。完整回归 **1127 passed / 96 skipped / 0 failed**；compose **54/54**、behavior **137/137**、journey **76/76**、`pack:check`（176 个成员）及 packed behavior **136/136** 均通过，三个 smoke 与 packed 无 skip。96 个回归跳过包含 Windows 专属与不适用精确基线的项目，Auto Review 实现另在正确基线以 91/91 取证，不把主开发树跳过当作通过。lint 扫到本地未跟踪历史证据脚本的既有 unused-vars 告警，无报错；仅导出暂存的交付文件后，直接运行同一 oxlint 与文档检查程序均通过；没有依赖本地未跟踪的证据目录补齐链接。
 
 **本地证据**：忽略的 `.dsh-smoke/ops-p6/` 保存本轮门禁日志、精确 Review 套件/类型/冒烟输出，以及两个 live 宿主的 `activity-rc0.json` / `activity-rc1.json`（版本、OPS commit/工作树、Worker/源码 SHA256、完整请求、结果与 argv）。隔离安装树留在本机临时目录，Windows/Linux 原始证据仍各留原设备；所有原始日志、JSON 和目录均不提交。`docs/reviews/` 只跟踪现有审计 Markdown。本轮生产 `src/`、pin、peer、allowlist 与 lockfile 相对 `22920a9` 无差异；新增内容仅为验收脚本、Review 回归及文档。
+
+## OPS 启用版本范围收窄（2026-11-06）
+
+按维护者要求，功能开放范围收窄到 DSH `0.2.*`；策略与 Settings/UI 合同的唯一来源见 [ADR-0029 版本范围修订](../../decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#ops-版本范围修订2026-11-06)。不修改精确支持列表、开发 pin、peer 或锁文件，不构成发布或稳定支持提升。
+
+本机 macOS arm64 / Node `24.18.0`，开发树 DSH `0.2.2-rc.1` / cordis `4.1.0`：compat、lint、host/client 类型、build、`docs:check` 和 fork 校验通过；原生 Registry peer 认证及 Seatbelt 探针通过。完整测试 **1165 passed / 95 skipped / 0 failed**（80 个文件通过、3 个按平台跳过）。compose **54/54**、behavior **137/137**、journey **76/76**、`pack:check`（178 个成员）及 packed behavior **136/136** 通过，三个 smoke 与 packed 无跳过。lint 仍有本地未跟踪审计证据脚本的既有 unused-vars 告警，无错误。
+
+隔离安装树使用 Node `22.23.1`，没有从主工作树回退解析依赖；权限夹具仍放在自动 temp grant 之外。以下四个精确版本的 compat 和类型检查均通过：
+
+| DSH | Settings 定向结果 | 最终 OPS/Skills 客户端回归 |
+| --- | --- | --- |
+| `0.1.6-alpha.2` | 14 通过；真实现代 Loader 用例因接口不存在跳过，强制关闭及不注册旧 Settings section 通过 | 18/18 |
+| `0.1.7-rc.2` | 15/15；真实现代 Settings 不发布 OPS namespace，配置显式 true 仍关闭 | 18/18 |
+| `0.2.0-rc.2` | 15/15；真实 Settings 修改与重启持久化通过 | 18/18 |
+| `0.2.1-rc.2` | 15/15；真实 Settings 修改与重启持久化通过 | 18/18 |
+
+四版另跑适用的 OPS 执行/活动、Skills Settings、Registry lease 和跨进程回归；旧版不执行仅适用于 `0.2.*` 的 OPS 启用路径。删除旧 Settings 分支同时移除了 scope → ops-settings → skills 的运行时导入链；Node 22 直接导入 scope 成功，Registry 子进程不再因 Skills 文件的 `using` 语法在启动前失败。未通过更改 CI Node 版本或放宽门禁掩盖该问题。
+
+Auto Review 另在精确 DSH `0.2.1-rc.2` / cordis `4.0.5` 上通过联合类型检查、**91/91** 实现测试，以及源码/单一 tarball 的 web/headless × 官方前后顺序真实审查冒烟，保留默认关闭、live toggle、reload、owner drain 和恢复检查。本轮未在 Windows/Linux 重跑，也未重新触发远端 CI；隔离树和原始日志留本地，不提交 `docs/reviews/` 的证据目录。

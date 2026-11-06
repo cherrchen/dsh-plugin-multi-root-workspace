@@ -317,7 +317,7 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 
 ## dsh-ops 适配现状（受限能力说明）
 
-当前实现作为 **OPS 兼容模式（实验性，可能存在限制）** 开放：在 `Settings → Plugins → Multi-root Workspace` 中设置 `multi-root-ops-compatibility.enabled`，默认 `false`，必须显式开启。
+当前实现作为 **OPS 兼容模式（实验性，可能存在限制）** 开放：在 `Settings → Plugins → Multi-root Workspace` 中设置 `multi-root-ops-compatibility.enabled`，默认 `false`，必须显式开启。该功能仅允许在现有精确支持矩阵内的 DSH `0.2.*` 上启用；`0.1.*` 即使手工配置 `enabled: true` 也保持关闭，不提供旧版 Settings UI（[版本范围决定](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#ops-版本范围修订2026-11-06)）。
 
 - **开启**：激活 OPS 执行保护、实时活动与 Review 增强。Full-access（`danger-full-access`）在已验证的 macOS/Linux 车道用内核围栏保护 explicit RO/cap deny；Windows 有 deny 时在 Worker 准备前保守拒绝 OPS 执行（包括读取），尚不支持该组合下的受保护准备与合法写入。WW/RO 一旦存在不可写附加根或工具只读上限，整次 OPS 执行调用（包括读取/page）会在准备与正文前拒绝。所有模式在 Registry 失权时拒绝 OPS 执行调用，纯发现/发布除外。没有执行域或当次有效 profile 证明的 subprocess 启动也会拒绝，防止后台清理绕过边界；这可能连带拒绝第三方后台进程，但不拦截面板中用户自己的终端。
 - **关闭**：OPS 恢复本轮适配前的行为，不提供这些兜底——**显式只读附加根可能被 OPS 写入**。普通多根功能、原生工具围栏和 Auto Review 自身开关不受影响。已投递的指令不会回溯抹除，已进入保护域的调用与已启动进程保留原快照；关闭后开始的新调用不再激活本次适配。
