@@ -42,7 +42,8 @@ describe('namespaced Web Skills', () => {
       }
       expect(bindSkillsForm(ctx as never)).toBe(form)
       installSkillsSettingsCard(ctx as never, t)
-      expect(selected.every(key => key === 'multi-root-skills')).toBe(true)
+      expect(selected).toContain('multi-root-skills')
+      expect(selected.includes('multi-root-ops-compatibility')).toBe(modern)
       expect(registrations).toEqual([{ name: 'plugins.bundle.config', key: '@dsh-electron/dsh-plugin-multi-root-workspace', inject: expect.any(Function) }])
     }
   })

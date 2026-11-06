@@ -6,11 +6,15 @@ export interface ToolCaller {
   readonly agent?: Agent
   readonly callId: string
   readonly name: string
+  readonly arguments?: unknown
+  readonly signal?: AbortSignal
+  readonly parent?: unknown
+  readonly token?: object
 }
 
 export function aroundTool(ctx: Context, listener: (exec: ToolCaller, next: () => Promise<unknown>) => Promise<unknown>): void {
   // Stable subset of the public waterfall. Older releases have no event type
   // declaration, and no dispatch of it; registration there is inert.
-  const on = ctx.on as unknown as (name: string, callback: typeof listener) => unknown
-  on.call(ctx, 'tools/execute', listener)
+  const on = ctx.on as unknown as (name: string, callback: typeof listener, options?: { global?: boolean }) => unknown
+  on.call(ctx, 'tools/execute', listener, { global: true })
 }

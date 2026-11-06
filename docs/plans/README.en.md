@@ -51,6 +51,8 @@ active:
 
 completed:
 
+- [2026-11-01-ops-compatibility-adaptation.md](./completed/2026-11-01-ops-compatibility-adaptation.md) (Chinese) — Bounded P0–P6 implementation and final acceptance of experimental OPS safeguards; P5 compatibility recovery is deferred indefinitely, with the feature off by default. Status and evidence are in the progress ledger.
+
 - [2026-10-23-multi-root-skills.md](./completed/2026-10-23-multi-root-skills.md) (Chinese) — S1–S7 dependencies, tasks and exit criteria for ADR-0023: Registry, Session discovery and native cwd bypass prevention, on-demand invocation, caching/RPC, Web/Settings, and full release validation; implemented and released with `v0.1.10`, evidence in the roadmap ledger.
 - [2026-10-20-auto-review-in-package-review.md](./completed/2026-10-20-auto-review-in-package-review.md) (Chinese) — Requirements review for moving Auto Review into the main package: feasibility, minimal loader probes, takeover and restoration boundaries, proposed contract, and acceptance criteria; implemented and released with `v0.1.9`.
 - [2026-10-18-auto-review-context-adaptation.md](./completed/2026-10-18-auto-review-context-adaptation.md) (Chinese) — Phase 0–2 implementation plan: the explicit companion fork, shared permission preview, current constraints, joint verification, and migration to a formal upstream API; status and evidence belong to the roadmap ledger.

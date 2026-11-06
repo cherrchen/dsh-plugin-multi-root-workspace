@@ -13,6 +13,8 @@ import { nativeInstructionFingerprint } from './compat/review-session.ts'
 import { assertAutoReviewRelease } from './compat/auto-review-contract.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
 import { DEFAULT_MAX_BYTES, touchedPathOfToolCall } from './instructions.ts'
+import { pendingInstructionTargets, stableOpsJson } from './compat/instruction-activity.ts'
+import { opsCompatibilityToken } from './compat/ops-settings.ts'
 import { isCanonicallyUnder } from './roots.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -21,8 +23,10 @@ declare module '@deepseek-ai/cordis' {
 
 export interface ReviewExecution {
   readonly agent?: Agent
+  readonly callId?: string
   readonly name: string
   readonly arguments: unknown
+  readonly parent?: unknown
 }
 export interface ReviewContext {
   readonly schemaVersion: 1
@@ -89,14 +93,24 @@ export class MultiRootReviewContext extends Service {
             ? 'primary root, effective writable additional roots and upstream host temp grants; explicit denies take precedence'
             : 'only effective writable additional roots; explicit denies take precedence',
     }
-    const path = touchedPathOfToolCall(exec.name, JSON.stringify(exec.arguments))
-    const target = path === undefined ? undefined : this.ctx.fs.processPath(await this.ctx.fs.resolve(resolve(cwd, path), {signal}))
-    const constraints = await this.ctx.multiRootInstructions.snapshot(agent, scope.authority === 'available' ? scope.additionalRoots : [], target, signal)
+    const official = touchedPathOfToolCall(exec.name, JSON.stringify(exec.arguments))
+    const modeToken = opsCompatibilityToken(this.ctx)
+    const candidates = modeToken === undefined ? [] : pendingInstructionTargets(exec.name, exec.arguments)
+    const targets: string[] = []
+    for (const path of official === undefined ? candidates : [official]) {
+      targets.push(this.ctx.fs.processPath(await this.ctx.fs.resolve(resolve(cwd, path), {signal})))
+    }
+    const pending = exec.callId === undefined || modeToken === undefined ? undefined
+      : { callId: exec.callId, name: exec.name, arguments: exec.arguments, parent: exec.parent }
+    const constraints = await this.ctx.multiRootInstructions.snapshot(agent, scope.authority === 'available' ? scope.additionalRoots : [], targets, signal, pending)
     signal.throwIfAborted()
+    if (opsCompatibilityToken(this.ctx) !== modeToken) throw new Error('review-context: OPS compatibility changed during the build; retry')
     const instructionProvenanceRoots = [...new Set([...scope.additionalRoots, ...this.ctx.multiRootInstructions.knownRoots(agent.session)])]
     const payload = { schemaVersion: 1 as const, environment, instructionProvenanceRoots, constraints, completeness: 'complete' as const }
     if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > DEFAULT_MAX_BYTES) throw new Error('review-context: context budget exceeded')
-    return { ...payload, fingerprint: createHash('sha256').update(JSON.stringify([payload,nativeInstructionFingerprint(agent.session)])).digest('hex') }
+    return { ...payload, fingerprint: createHash('sha256').update(JSON.stringify(modeToken === undefined
+      ? [payload, nativeInstructionFingerprint(agent.session)]
+      : [payload, nativeInstructionFingerprint(agent.session), exec.name, stableOpsJson(exec.arguments), (modeToken as { id?: unknown }).id])).digest('hex') }
   }
 
   async assertCurrent(exec: ReviewExecution, snapshot: ReviewContext, signal: AbortSignal): Promise<void> {

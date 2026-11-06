@@ -240,6 +240,33 @@ describe('BundleSettingsCard composition', () => {
     expect(titles).toEqual(['skills.globalEnable', 'autoReview.title'])
   })
 
+  it('keeps Skills, Auto Review, and OPS visible with independent writes after composition', async () => {
+    const skillsWrites: unknown[] = [], opsWrites: unknown[] = [], reviewWrites: boolean[] = []
+    const skillsSnapshot = { value: { enabled: true }, status: 'ready', writable: true }
+    const opsSnapshot = { value: { enabled: false }, status: 'ready', writable: true }
+    const skillsForm = { getSnapshot: () => skillsSnapshot, subscribe: () => () => {}, mutate: async (...args: unknown[]) => { skillsWrites.push(args); return true } }
+    const opsForm = { getSnapshot: () => opsSnapshot, subscribe: () => () => {}, mutate: async (...args: unknown[]) => { opsWrites.push(args); return true } }
+    const autoSnapshot: AutoReviewSnapshot = { status: 'ready', row: { entryId: 'e', enabled: false, writable: true } }
+    const autoForm: AutoReviewForm = {
+      getSnapshot: () => autoSnapshot, subscribe: () => () => {},
+      setEnabled: async enabled => { reviewWrites.push(enabled); return 'applied' },
+    }
+    render(<BundleSettingsCard form={skillsForm} autoReviewForm={autoForm} opsForm={opsForm} t={t} />)
+    expect(screen.getAllByRole('switch')).toHaveLength(3)
+    fireEvent.click(screen.getByRole('switch', { name: 'ops.compatibilityEnable' }))
+    expect(opsWrites).toEqual([])
+    fireEvent.click(screen.getByRole('checkbox', { name: 'ops.confirmAcknowledge' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ops.confirmEnable' }))
+    await waitFor(() => expect(opsWrites).toHaveLength(1))
+    expect(skillsWrites).toEqual([]); expect(reviewWrites).toEqual([])
+    fireEvent.click(screen.getByRole('switch', { name: /autoReview.title/ }))
+    await waitFor(() => expect(reviewWrites).toEqual([true]))
+    expect(skillsWrites).toEqual([]); expect(opsWrites).toHaveLength(1)
+    fireEvent.click(screen.getByRole('switch', { name: 'skills.globalEnable' }))
+    await waitFor(() => expect(skillsWrites).toHaveLength(1))
+    expect(opsWrites).toHaveLength(1); expect(reviewWrites).toEqual([true])
+  })
+
   it('registers the bundle card for auto-review alone and drops it when the namespace leaves', async () => {
     interface Registration { options: { name: string; key: string; inject: () => Record<string, unknown> }; component: unknown }
     const registrations: Registration[] = []

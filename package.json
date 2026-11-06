@@ -75,6 +75,10 @@
     "./skills": {
       "types": "./lib/types/skills.d.ts",
       "default": "./lib/skills.js"
+    },
+    "./ops-compatibility": {
+      "types": "./lib/types/ops-compatibility.d.ts",
+      "default": "./lib/ops-compatibility.js"
     }
   },
   "files": [

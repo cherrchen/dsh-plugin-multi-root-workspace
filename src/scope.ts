@@ -24,9 +24,17 @@ import type {} from '@deepseek-ai/dsh-agent'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from '@deepseek-ai/dsh-tools'
+import type {} from './compat.ts'
+import type {} from './providers.ts'
 import { primaryKey, type RootAccess } from './roots.ts'
 import { currentRegistryOperation, rememberOperationProfile, operationPermitsProfile } from './registry-operation.ts'
 import { aroundTool } from './compat/tool-context.ts'
+import { createOpsProtectionState, opsDispatchBarrier, opsSpawnPermitted } from './compat/ops-tools.ts'
+import type { OpsProtectionState } from './compat/ops-tools.ts'
+import { opsCompatibilityToken } from './compat/ops-settings.ts'
+import { wrapMethod } from './method-wrapper.ts'
+import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { effectiveRootAccess } from './contract.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -335,6 +343,8 @@ export class MultiRootScopeService extends Service {
   private readonly listeners = new Set<() => void>()
   /** Enclosing {@link MultiRootScopeService.batch} depth; inner calls nest. */
   private batchDepth = 0
+  readonly opsProtection: OpsProtectionState = createOpsProtectionState()
+
   /** True when a batched write coalesced its notification into the flush. */
   private batchDirty = false
   private admissionProof: object | undefined
@@ -469,7 +479,37 @@ export class MultiRootScopeService extends Service {
     // capped inner dispatch (nesting only ever narrows). The tool name is read
     // once at entry — never from model-supplied arguments.
     aroundTool(ctx, (exec, next) => {
-      return toolCapStore.run({ capped: this.capForTool(exec.name) }, next)
+      return this.withToolCap(exec.name, async () => {
+        const denial = opsDispatchBarrier(ctx, this, exec)
+        if (denial !== undefined) throw new Error(denial)
+        return await next()
+      })
+    })
+
+    ctx.inject(['tools', 'sandboxPolicy', 'multiRootCompat', 'multiRootProviders'], (scoped: Context) => {
+      if (typeof scoped.tools.guard !== 'function') return
+      scoped.effect(() => scoped.tools.guard(exec => opsDispatchBarrier(ctx, this, exec)))
+    })
+
+    // Maintenance has no trusted tool/session dispatch. Do not infer authority
+    // from a Worker filename, cwd, or private stdin envelope. This guard belongs
+    // to the scope so unloading the execution fence cannot expose a bare purge.
+    ctx.inject(['subprocess', 'multiRootCompat', 'multiRootProviders'], scoped => {
+      scoped.effect(() => {
+        let active = true
+        const restore = wrapMethod(scoped.get('subprocess') as typeof scoped.subprocess, 'spawn', original => {
+          const scope = this
+          return function (this: unknown, spec: SubprocessSpawnSpec) {
+            if (active && opsCompatibilityToken(scoped) !== undefined && scope.hasActiveDenyRoots()
+              && !opsSpawnPermitted(scope.opsProtection)
+              && !(scope.admissionRequired && scope.admissionPathsValid() && scope.permitsProfile(spec.argv))) {
+              throw new Error('multi-root workspace: an unattributed subprocess has no protected execution or live profile admission; refusing launch while OPS compatibility write boundaries apply')
+            }
+            return original.call(this, spec)
+          }
+        })
+        return () => { active = false; restore() }
+      })
     })
 
     // The prompt contribution is a SOFT dependency: a composition without a
@@ -560,6 +600,10 @@ export class MultiRootScopeService extends Service {
   /** Read-only pending-dispatch projection. Does not mint an ALS execution grant. */
   previewForTool(policy: SandboxExecutionPolicy, toolName: string): FilesystemScope {
     return this.project(policy, this.capForTool(toolName))
+  }
+
+  withToolCap<T>(name: string, fn: () => T): T {
+    return toolCapStore.run({ capped: this.capForTool(name) }, fn)
   }
 
   /** Execution and review use exactly the same parent-narrowing rule. */

@@ -74,8 +74,8 @@ export class DshCompatUnsupportedError extends Error {
  * `./compat/` detect the shape they need STRUCTURALLY — whether a return value
  * is a thenable, which export name a module carries — because a structural
  * probe also survives upstream reshaping something within one release, while a
- * version comparison does not. The release string here is for the gate and for
- * diagnostics.
+ * version comparison does not. The release string here is for installation and
+ * feature-availability gates (such as the OPS 0.2.* policy), and diagnostics.
  */
 export class MultiRootCompatService extends Service {
   /** The verdict this composition started under. */

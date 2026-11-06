@@ -51,6 +51,8 @@ active：
 
 completed：
 
+- [2026-11-01-ops-compatibility-adaptation.md](./completed/2026-11-01-ops-compatibility-adaptation.md) — OPS 实验性保守兜底 P0–P6 限定范围实施与最终验收；P5 完整兼容恢复无限期延后，功能默认关闭，状态和证据见进度总账。
+
 - [2026-10-23-multi-root-skills.md](./completed/2026-10-23-multi-root-skills.md) — ADR-0023 的 S1–S7 实施依赖、任务与退出条件：Registry、Session 发现与 native cwd 旁路、按需调用、缓存/RPC、Web/Settings 和完整发布验收；已实施并随 `v0.1.10` 发版，证据见路线账本。
 - [2026-10-20-auto-review-in-package-review.md](./completed/2026-10-20-auto-review-in-package-review.md) — Auto Review 并入主包的需求评审：逐项可行性、loader 最小验证、接管与恢复边界、待验证合同及验收条件；已实施并随 `v0.1.9` 发版。
 - [2026-10-18-auto-review-context-adaptation.md](./completed/2026-10-18-auto-review-context-adaptation.md) — Auto Review 多根上下文适配（Phase 0–2）：显式 companion fork、同源权限投影、当前约束、联合验证与正式接口迁移边界；状态和证据见路线账本。

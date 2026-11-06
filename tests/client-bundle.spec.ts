@@ -109,3 +109,19 @@ function matches(pattern: string, file: string): boolean {
     .join('.*')
   return new RegExp(`^${escaped}$`).test(file)
 }
+
+describe('the OPS compatibility card in the artifact', () => {
+  it('ships the OPS card, its namespace, and both locale strings', () => {
+    const bytes = readFileSync(clientPath, 'utf8')
+    expect(bytes).toContain('multi-root-ops-compatibility')
+    expect(bytes).toContain('ops.compatibilityEnable')
+    expect(bytes).toContain('OPS 兼容模式')
+    expect(bytes).toContain('ops.experimental')
+    expect(bytes).toContain('ops.confirmDescription')
+    expect(bytes).toContain('RiskConfirmation')
+    expect(bytes).toContain('OPS compatibility mode')
+    expect(bytes).not.toContain('node:fs')
+    expect(bytes).not.toContain('node:crypto')
+    expect(bytes).not.toContain('node:async_hooks')
+  })
+})

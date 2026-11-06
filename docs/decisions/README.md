@@ -66,3 +66,5 @@ ADR-0002-short-title.md
 - [ADR-0027-revive-target-and-protected-paths.md](./ADR-0027-revive-target-and-protected-paths.md) — revive 不改变授权目标；`$DSH_HOME`、Registry 介质与 lease 目录的登记边界与存量 withheld（Accepted，P1 合同）。
 
 - [ADR-0028-upstream-primary-identity-and-shared-only-registry.md](./ADR-0028-upstream-primary-identity-and-shared-only-registry.md) — 主根身份以上游拼写为准（MRW-01），拒写优先于主根；Registry 只保留共享模式（Accepted）。
+
+- [ADR-0029-ops-file-authorization-and-activity-adapter.md](./ADR-0029-ops-file-authorization-and-activity-adapter.md) — OPS 实验性保守兜底、Phase A live 与受限 Review 的限定接受范围；P5 完整兼容恢复无限期延后，不纳入本次最终验收。

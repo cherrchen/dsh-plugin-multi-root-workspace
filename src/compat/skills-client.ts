@@ -8,11 +8,14 @@ export interface SkillsForm {
 interface SettingsScope { bind(input: { namespace: string }): SkillsForm }
 interface ConfigForms { get(entryId: string): SkillsForm }
 
-export function bindSkillsForm(ctx: Context): SkillsForm | undefined {
+export function bindSettingsForm(ctx: Context, entryId: string): SkillsForm | undefined {
   const modern = ctx.get('configForms' as never) as ConfigForms | undefined
-  if (modern !== undefined) return modern.get('multi-root-skills')
+  if (modern !== undefined) return modern.get(entryId)
   const legacy = ctx.get('settingsScope' as never) as SettingsScope | undefined
-  return legacy?.bind({ namespace: 'multi-root-skills' })
+  return legacy?.bind({ namespace: entryId })
+}
+export function bindSkillsForm(ctx: Context): SkillsForm | undefined {
+  return bindSettingsForm(ctx, 'multi-root-skills')
 }
 export function clientInject(ctx: Context, services: string[], callback: (scope: Context) => void | (() => void)): void {
   // Recording client fixtures may omit dynamic injection; real Cordis always supplies it.

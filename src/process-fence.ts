@@ -67,6 +67,13 @@ import { withRegistryAdmission } from './registry-operation.ts'
 import { confineInstalled } from './compat/sandbox-confine.ts'
 import { hasConfinedProfile, originalProcessArgv } from './compat/process-profile.ts'
 import { aroundTool } from './compat/tool-context.ts'
+import { opsCompatibilityToken } from './compat/ops-settings.ts'
+import type { ToolCaller } from './compat/tool-context.ts'
+import {
+  assertOpsPosixCacheAdmission, assertOpsProtectionOwner, claimOpsProtection,
+  classifyOpsTool, drainOpsProtection, enterOpsProtection, leaveOpsProtection,
+  revokeOpsProtection, withOpsSpawnPermit,
+} from './compat/ops-tools.ts'
 import { wrapMethod } from './method-wrapper.ts'
 import type { MultiRootSandboxProvider } from './sandbox.ts'
 import { decorateProcessOutcome } from './compat/process-result.ts'
@@ -87,6 +94,9 @@ export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootScope'
  */
 interface PreparedDeny {
   readonly argvPrefix: readonly string[]
+  readonly ops?: boolean
+  readonly opsState?: import('./compat/ops-tools.ts').OpsProtectionState
+  active?: boolean
   stderr?: (() => string | undefined) | undefined
 }
 
@@ -113,9 +123,76 @@ interface PolicyEntrypoint {
 }
 
 export function apply(ctx: Context): void {
+  const opsScope = ctx.get('multiRootScope')!
+  const opsSandbox = ctx.sandbox as MultiRootSandboxProvider
+  const runOpsDispatch = async (exec: ToolCaller, policy: SandboxExecutionPolicy, next: () => Promise<unknown>): Promise<unknown> => {
+    const modeToken = opsCompatibilityToken(ctx)
+    const scope = opsScope
+    const opsState = scope.opsProtection
+    const token = enterOpsProtection(opsState)
+    try {
+      const dispatch = async () => {
+        const resolved = scope.resolve(policy)
+        if (resolved.authority === 'unavailable') {
+          throw new Error('multi-root workspace: the registry authority is unavailable; refusing the OPS execution')
+        }
+        if (resolved.deniedRoots.length > 0) {
+          if (policy.mode !== 'danger-full-access') {
+            throw new Error(`multi-root workspace: the OPS execution is refused in ${policy.mode}: private preparation and worker write boundaries cannot be proven without OPS integration`)
+          }
+          if (classifyOpsTool(exec.name) === 'unknown') {
+            throw new Error(`multi-root workspace: the unrecognized OPS capability ${JSON.stringify(exec.name)} is refused while write boundaries apply`)
+          }
+          if (exec.name === 'ops_bash' && typeof exec.arguments === 'object' && exec.arguments !== null
+            && (exec.arguments as { run_in_background?: unknown }).run_in_background === true) {
+            throw new Error('multi-root workspace: run_in_background is refused while danger-full-access write boundaries apply')
+          }
+        }
+        let facts: ConfinedArgv | undefined
+        if (resolved.deniedRoots.length > 0) {
+          if (process.platform === 'win32') {
+            throw new Error('multi-root workspace: OPS worker preparation is not verified on this platform; refusing the call while write boundaries apply')
+          }
+          assertOpsPosixCacheAdmission(resolved.deniedRoots)
+          facts = await opsSandbox
+            .restrictedExecution(policy, resolved.deniedRoots, exec.signal, resolved.protectedHome)
+          if (facts === undefined || facts.argv.length === 0) {
+            throw new Error('multi-root workspace: the restricted runner could not be prepared; refusing the OPS execution')
+          }
+        }
+        assertOpsProtectionOwner(opsState, token)
+        if (opsCompatibilityToken(ctx) !== modeToken) {
+          throw new Error('multi-root workspace: the OPS compatibility mode changed during dispatch; refusing the execution')
+        }
+        const store: PreparedDeny = { argvPrefix: facts?.argv ?? [], ops: true, opsState, active: true }
+        try {
+          return await processDenyStore.run(store, () =>
+            facts === undefined
+              ? next()
+              : decorateProcessOutcome(next(), facts, policy, { stderr: () => store.stderr?.() }))
+        } finally {
+          store.active = false
+        }
+      }
+      if (ctx.get('multiRootRegistry')?.shared) return await withRegistryAdmission(ctx, policy, 'process', dispatch)
+      return await dispatch()
+    } finally {
+      leaveOpsProtection(opsState)
+    }
+  }
+
   aroundTool(ctx, async (exec, next) => {
-    if (!ctx.get('multiRootRegistry')?.shared || exec.agent === undefined) return next()
-    return withRegistryAdmission(ctx, ctx.sandboxPolicy.resolve({ session: exec.agent.session }), 'process', next)
+    const kind = classifyOpsTool(exec.name)
+    if (kind === 'other' || kind === 'publish' || opsCompatibilityToken(ctx) === undefined) {
+      if (!ctx.get('multiRootRegistry')?.shared || exec.agent === undefined) return next()
+      const policy = ctx.sandboxPolicy.resolve({ session: exec.agent.session })
+      return opsScope.withToolCap(exec.name, () => withRegistryAdmission(ctx, policy, 'process', next))
+    }
+    if (exec.agent === undefined) {
+      throw new Error(`multi-root workspace: the OPS call ${JSON.stringify(exec.name)} cannot be confirmed against a trusted session`)
+    }
+    const policy = ctx.sandboxPolicy.resolve({ session: exec.agent.session })
+    return opsScope.withToolCap(exec.name, () => runOpsDispatch(exec, policy, next))
   })
   // Resolve the policy the same way the upstream consumer does: the spec's own
   // resolved policy wins, the deployment/session resolution is the fallback.
@@ -160,20 +237,47 @@ export function apply(ctx: Context): void {
   // profile, so other spawns stay untouched — a nesting consumer can only ever
   // narrow, matching the tool-cap rule.
   ctx.inject(['subprocess'], (scope: Context) => {
-    scope.effect(() => wrapMethod(scope.subprocess, 'spawn', original => function (
+    const opsState = opsScope.opsProtection
+    scope.effect(() => {
+      const restore = wrapMethod(scope.get('subprocess') as typeof scope.subprocess, 'spawn', original => function (
       this: unknown,
       spec: SubprocessSpawnSpec,
     ) {
       const store = processDenyStore.getStore()
-      if (scope.multiRootScope.admissionRequired && scope.multiRootScope.hasAdmission() && !scope.multiRootScope.admissionPathsValid()) {
+      if (store?.ops === true && (store.active === false || store.opsState !== opsState)) {
+        throw new Error('multi-root workspace: the OPS execution domain has expired')
+      }
+      const admissionScope = store?.ops === true ? opsScope : scope.multiRootScope
+      if (admissionScope.admissionRequired && admissionScope.hasAdmission() && !admissionScope.admissionPathsValid()) {
         throw new Error('multi-root workspace: an admitted root was redirected before process launch')
       }
-      const argv = store === undefined ? spec.argv : [...store.argvPrefix, ...spec.argv]
-      if (scope.multiRootScope.admissionRequired && (store !== undefined || hasConfinedProfile(argv))
-        && !scope.multiRootScope.permitsProfile(argv)) {
-        throw new Error('multi-root workspace: a confined spawn requires a profile from this live admission')
+      let argv = spec.argv
+      if (store?.ops === true) {
+        const prefix = store.argvPrefix
+        if (hasConfinedProfile(spec.argv)) {
+          const matches = spec.argv.length > prefix.length && prefix.every((segment, index) => spec.argv[index] === segment)
+          if (!matches) {
+            throw new Error("multi-root workspace: a confined spawn inside an OPS execution domain must carry this domain's own profile")
+          }
+        } else {
+          argv = [...prefix, ...spec.argv]
+        }
+        if (opsScope.admissionRequired && (hasConfinedProfile(spec.argv) || prefix.length > 0)
+          && !opsScope.permitsProfile(argv)) {
+          throw new Error('multi-root workspace: a confined spawn requires a profile from this live admission')
+        }
+      } else {
+        argv = store === undefined ? spec.argv : [...store.argvPrefix, ...spec.argv]
+        if (scope.multiRootScope.admissionRequired && (store !== undefined || hasConfinedProfile(argv))
+          && !scope.multiRootScope.permitsProfile(argv)) {
+          throw new Error('multi-root workspace: a confined spawn requires a profile from this live admission')
+        }
       }
-      const handle = original.call(this, store === undefined ? spec : { ...spec, argv })
+      const launch = () => original.call(this, argv === spec.argv ? spec : { ...spec, argv })
+      // Only the prepared domain or this admission's exact profile can cross
+      // the independent scope guard. Unknown maintenance has neither.
+      const handle = store !== undefined || admissionScope.admissionRequired && admissionScope.permitsProfile(argv)
+        ? withOpsSpawnPermit(opsState, launch) : launch()
       if (store === undefined) return handle
       // `collected.stderr.readFrom(0)` is cursor-free — a live shell handle's
       // only settle-time window into the denial text the executor's own
@@ -187,9 +291,14 @@ export function apply(ctx: Context): void {
         try { return stderr.readFrom(0).text } catch { return undefined }
       }
       return handle
-    }))
+    })
+      return async () => {
+        await drainOpsProtection(opsState)
+        restore()
+      }
+    })
 
-    scope.effect(() => wrapMethod(scope.subprocess, 'spawnTerminal', original => async function (
+    scope.effect(() => wrapMethod(scope.get('subprocess') as typeof scope.subprocess, 'spawnTerminal', original => async function (
       this: unknown,
       spec: SubprocessTerminalSpawnSpec,
     ) {
@@ -234,6 +343,12 @@ export function apply(ctx: Context): void {
         return await original.call(this, { ...spec, argv: [...argvPrefix, ...spec.argv] })
       })
     }))
+
+    const token = claimOpsProtection(opsState)
+    scope.effect(() => async () => {
+      revokeOpsProtection(opsState, token)
+      await drainOpsProtection(opsState)
+    })
   })
 
   /**
