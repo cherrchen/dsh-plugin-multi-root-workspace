@@ -763,6 +763,11 @@ export class MultiRootRegistry extends Service {
       const protectedPaths = this.protectedPaths()
       if (protectedPaths === undefined) throw MultiRootRegistry.protectedBoundaryUnknown()
       const expanded = expandRootInput(input.path)
+      // Reject before local realpath or IPC: even resolving a refused UNC
+      // candidate can initiate SMB authentication on this follower.
+      if (process.platform === 'win32' && isWindowsNetworkOrDevicePath(expanded)) {
+        throw new RootValidationError('unsupported-path', `Windows ACL confinement cannot cover network or device paths: ${expanded}`)
+      }
       if (isAbsolute(expanded)) {
         const candidate = canonicalRoot(expanded)
         const conflict = protectedOverlap(candidate, protectedPaths)

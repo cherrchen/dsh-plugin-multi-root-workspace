@@ -1376,3 +1376,9 @@ macOS / Node `24.18.0` 候选 warn 下完整 `verify:all` 通过：原生 Seatbe
 - **插件管理页富文本详情**：`locale/en|zh.json` 提供 `meta.title`/`description`/`detail`，`exports` 暴露 `./locale/*.json`，`files` 打包 `detail/` 与 `locale/`；DETAIL 文档遵循上游惯例——单行图片指向 640×300 自包含 `preview.svg`（`preview.zh.svg` 为中文版，文字经 fontkit 转曲）。`check-pack` 支持 exports 通配符目标，`plugin-detail` spec 固定 manifest/字典/文档/资产一致性契约。富文本详情在 DSH `0.2.2-alpha.2` 起生效，更早版本无此读取路径，locale/detail 文件为惰性资源无副作用。
 
 验收：PR [CI run 41992772063](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/41992772063) 全绿；新增 `tests/client-auto-review-settings.spec.tsx`（开关持久化/热应用/restart-required/无 Remote 不渲染/并发刷新）与 `tests/plugin-detail.spec.ts`（manifest/字典/文档/资产契约）。
+
+## PR #39 Review P2：Follower 在解析前拒绝 Windows 网络路径（2026-11-06）
+
+[评审发现](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/39#discussion_r4482517586)已修复：follower 的候选预检补齐 owner 已有的 Windows 网络／设备路径词法拒绝，合同见 [ADR-0027 修订](../../decisions/ADR-0027-revive-target-and-protected-paths.md#修订follower-候选解析前拒绝-windows-网络与设备路径2026-11-06pr-39-评审)。`registry.spec.ts` 在真实 owner/follower 栈上覆盖 UNC 两种分隔符与设备路径，断言 `unsupported-path`、候选未被 `realpath` 解析、follower 未转发 `add`、存储不变；测试桩拦截危险候选，回归失败时也不实际访问网络。修复前 owner 通过、follower 因候选被解析而失败，修复后两者通过。
+
+macOS / Node `24.18.0` / DSH `0.2.2-rc.1`：`compat:check` 与完整 `verify:all` 通过，Seatbelt 探针可用并以 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt` 要求实跑；全量测试 **1020 通过 / 86 平台跳过**，compose / behavior / journey 分别 **52 / 137 / 76 通过**，packed behavior **136 通过**，均无失败或跳过。lint、双端 typecheck、build、pack 与 Auto Review fork 检查通过；可选 Auto Review 集成按精确版本规则跳过。Windows 路径分支在本机通过平台桩覆盖，不代替 Windows 原生 CI；未扩大支持集合、未发布。

@@ -31,6 +31,10 @@ Accepted（P1 合同）。本 ADR 落实[根授权安全修复计划](../plans/a
 
 这落实的是附加根登记/存量 withheld 合同；主根或 temp 本来覆盖 home 时是否额外拒写，仍按专项计划的维护者决定第 6 项处理。
 
+## 修订：Follower 候选解析前拒绝 Windows 网络与设备路径（2026-11-06，PR #39 评审）
+
+第 7 条的 follower 本地预检与 owner 一样，必须在输入展开后、对候选调用 `canonicalRoot()` 前，以词法检查拒绝 Windows 网络与设备路径（`unsupported-path`），且不得转发该登记请求。最终由 owner 拒绝并不足够：UNC 路径的本地 `realpath` 本身就可能触发 SMB 身份认证或阻塞于网络查询。该顺序不改变正常本地路径的保护集合校验。
+
 ## Alternatives Considered
 
 | 方案 | 不采用的原因 |

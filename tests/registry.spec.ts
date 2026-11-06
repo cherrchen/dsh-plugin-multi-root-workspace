@@ -73,19 +73,32 @@ afterEach(async () => {
 })
 
 describe('registration lifecycle', () => {
-  it('rejects Windows network/device candidates before revive matching can resolve them', async () => {
-    const { registry } = await mount()
+  it.each(['owner', 'follower'] as const)('rejects Windows network/device candidates before resolving or forwarding them on the %s', async (role) => {
+    const owner = await mount()
+    const { registry } = role === 'follower' ? await mount() : owner
+    expect(registry.authority.kind).toBe(role === 'follower' ? 'follower' : 'active')
+    const paths = ['//server/share', '\\\\server\\share', '//?/C:/x', '//./pipe/x']
+    const before = existsSync(storeFile) ? readFileSync(storeFile, 'utf8') : undefined
+    const ownerAdd = vi.spyOn(owner.registry, 'add')
     const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
-    const realpath = vi.spyOn(realpathSync, 'native')
+    const nativeRealpath = realpathSync.native
+    const realpath = vi.spyOn(realpathSync, 'native').mockImplementation((path, options) => {
+      // A regression must never actually contact a network share on Windows.
+      if (paths.includes(String(path))) throw new Error('unexpected network/device path resolution')
+      return nativeRealpath(path, options)
+    })
     try {
-      for (const path of ['//server/share', '\\\\server\\share', '//?/C:/x', '//./pipe/x']) {
+      for (const path of paths) {
         await expect(registry.add(primary, { path })).rejects.toMatchObject({ code: 'unsupported-path' })
         expect(realpath.mock.calls.some(([candidate]) => String(candidate) === path)).toBe(false)
       }
+      if (role === 'follower') expect(ownerAdd).not.toHaveBeenCalled()
       expect(registry.list(primary)).toEqual([])
+      expect(existsSync(storeFile) ? readFileSync(storeFile, 'utf8') : undefined).toBe(before)
     } finally {
       realpath.mockRestore()
       platform.mockRestore()
+      ownerAdd.mockRestore()
     }
   })
 
