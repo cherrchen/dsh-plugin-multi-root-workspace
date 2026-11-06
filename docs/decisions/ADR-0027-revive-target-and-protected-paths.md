@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（P1 合同）。本 ADR 落实[根授权安全修复计划](../plans/active/2026-11-05-root-authorization-security-fixes.md)中 F2 与 F4 的“候选/存量校验”部分，计划本身已于 2026-11-05 经维护者接受。它修订 [ADR-0014](./ADR-0014-root-limit-and-provider-conflict.md) 与 [ADR-0017](./ADR-0017-three-state-root-access-and-sandbox-modes.md) 中关于 revive 的描述，保留原文作为历史；F1 管理授权、F3 origin 绑定、F4 执行侧 deny 与 F5 默认 authority 不在本 ADR 范围内，仍以计划为准。legacy 组合的介质推定（第 4 条）是待评审项，见计划 P0 记录第 3 项。
+Accepted（P1 合同）。本 ADR 落实[根授权安全修复计划](../plans/completed/2026-11-05-root-authorization-security-fixes.md)中 F2 与 F4 的“候选/存量校验”部分，计划本身已于 2026-11-05 经维护者接受。它修订 [ADR-0014](./ADR-0014-root-limit-and-provider-conflict.md) 与 [ADR-0017](./ADR-0017-three-state-root-access-and-sandbox-modes.md) 中关于 revive 的描述，保留原文作为历史；F1 管理授权、F3 origin 绑定、F4 执行侧 deny 与 F5 默认 authority 不在本 ADR 范围内，仍以计划为准。legacy 组合的介质推定（第 4 条）是待评审项，见计划 P0 记录第 3 项。
 
 ## Date
 
@@ -53,7 +53,7 @@ Accepted（P1 合同）。本 ADR 落实[根授权安全修复计划](../plans/a
 
 ## Related Documents
 
-- [根授权安全修复计划](../plans/active/2026-11-05-root-authorization-security-fixes.md)
+- [根授权安全修复计划](../plans/completed/2026-11-05-root-authorization-security-fixes.md)
 - [ADR-0004 登记与校验](./ADR-0004-root-registry-persistence-and-validation.md)
 - [ADR-0007 Registry 租约](./ADR-0007-registry-authority-lease.md)
 - [ADR-0014 根上限与 provider 冲突](./ADR-0014-root-limit-and-provider-conflict.md)

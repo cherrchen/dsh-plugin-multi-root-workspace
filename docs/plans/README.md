@@ -38,18 +38,18 @@ completed/
 
 active：
 
-- [2026-11-05-root-authorization-security-fixes.md](./active/2026-11-05-root-authorization-security-fixes.md) — 根授权安全修复计划（**Accepted，已接受**）：Registry 管理授权、稳定 origin、home 与物理介质保护、默认权威及验收合同；实施与发布状态见[进度总账](./active/2026-09-12-multi-root-workspace.md#进度总账)。
-
 - [2026-10-31-f4-background-recovery.md](./active/2026-10-31-f4-background-recovery.md) — F4 后台恢复与故障诊断专项计划（**rev.4 评审通过、ADR-0026 已立项；已实施并经三平台 CI 验收，真实 TUI soak 暂缓，随 `v0.1.13` 发版**）：复用 `ensureAuthority` 的恢复调度、投影同步完成条件、整轮失败通知原子性（含 scope 订阅者批处理）、握手本地取消与诊断面；批次已登记总账。
 
 - [2026-10-30-shared-registry-authority.md](./active/2026-10-30-shared-registry-authority.md) — Issue #24 原始 Long-term 全目标、已发布基线与共享服务初版对照、六项 P1 审计、后续能力演进与退出条件；初版已随 `v0.1.12` 发版，剩余 Ubuntu 报告环境长跑复测与进度见总账。
 
 - [2026-10-16-branch-security-review-and-hardlink-isolation.md](./active/2026-10-16-branch-security-review-and-hardlink-isolation.md) — 分支安全审查证据与拟议修复：负授权、Windows 祖先改名、pnpm 硬链接隔离；Phase A（R2/R3 负授权）、B（R1 祖先钉扎）、C1（全根硬链接预检）与 C2（`/workspace-folders isolate-profiles` 命令、迁移与冒烟）已实施并验收，随 `v0.1.7` 发版。
 
-- [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace 开发路径与**进度总账**：MVP `v0.1.0` 的 M1/M2/M3 已实施并发版；`v0.1.1` 硬化批次 H1–H4 已实施并随 `v0.1.1` 发版；`v0.1.2` 支持矩阵提升已实施并随 `v0.1.2` 发版；`v0.1.3` 支持矩阵提升（`0.1.7-alpha.2` / `0.1.7-rc.1`）已实施并随 `v0.1.3` 发版；`v0.1.4` 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版；`v0.1.5`（DSH `0.2.0-rc.1` / `.2`）已发布；`v0.1.6`（DSH `0.2.1-alpha.1` / `.2`、B1–B3 与动态 cwd）已发布；`v0.1.7`（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发布；`v0.1.8`（DSH 0.2.0 `permissionPresets/catalog` 修复）已发布；`v0.1.9`（Auto Review 主包内置可选行）已发布；`v0.1.10`（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发布；`v0.1.11`（DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 兼容提升、Issue #24 Registry／Skills 刷新循环 hot-fix）已发布；`v0.1.12`（多 Host 共享 Registry 权威、逐操作授权与 DSH `0.2.1-rc.5`）已发布；`v0.1.13`（F4 后台恢复与 Files 页签根选择修复）随该版本发版；`v0.1.14`（Issue #30 依赖单例修复与 koffi 宿主锚定、DSH `0.2.2-alpha.3`/`0.2.2-rc.1` 兼容提升、插件详情页设置卡 Auto Review 开关与富文本详情）随该版本发版。
+- [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace 开发路径与**进度总账**：MVP `v0.1.0` 的 M1/M2/M3 已实施并发版；`v0.1.1` 硬化批次 H1–H4 已实施并随 `v0.1.1` 发版；`v0.1.2` 支持矩阵提升已实施并随 `v0.1.2` 发版；`v0.1.3` 支持矩阵提升（`0.1.7-alpha.2` / `0.1.7-rc.1`）已实施并随 `v0.1.3` 发版；`v0.1.4` 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版；`v0.1.5`（DSH `0.2.0-rc.1` / `.2`）已发布；`v0.1.6`（DSH `0.2.1-alpha.1` / `.2`、B1–B3 与动态 cwd）已发布；`v0.1.7`（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发布；`v0.1.8`（DSH 0.2.0 `permissionPresets/catalog` 修复）已发布；`v0.1.9`（Auto Review 主包内置可选行）已发布；`v0.1.10`（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发布；`v0.1.11`（DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 兼容提升、Issue #24 Registry／Skills 刷新循环 hot-fix）已发布；`v0.1.12`（多 Host 共享 Registry 权威、逐操作授权与 DSH `0.2.1-rc.5`）已发布；`v0.1.13`（F4 后台恢复与 Files 页签根选择修复）随该版本发版；`v0.1.14`（Issue #30 依赖单例修复与 koffi 宿主锚定、DSH `0.2.2-alpha.3`/`0.2.2-rc.1` 兼容提升、插件详情页设置卡 Auto Review 开关与富文本详情）随该版本发版；`v0.1.15`（`/add-dirs` 别名、根授权安全修复与 OPS 默认关闭的实验性兜底及开启风险确认）随该版本发版。
 
 
 completed：
+
+- [2026-11-05-root-authorization-security-fixes.md](./completed/2026-11-05-root-authorization-security-fixes.md) — 根授权安全修复限定范围完成：BYP-02、MRW-01、受保护目录登记边界与共享模式必填；排除项保留，实施证据和发布状态见[进度总账](./active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 - [2026-11-01-ops-compatibility-adaptation.md](./completed/2026-11-01-ops-compatibility-adaptation.md) — OPS 实验性保守兜底 P0–P6 限定范围实施与最终验收；P5 完整兼容恢复无限期延后，功能默认关闭，状态和证据见进度总账。
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-11-05 维护者决定，落实[根授权安全修复计划](../plans/active/2026-11-05-root-authorization-security-fixes.md)的 F3 / MRW-01）。修订 [ADR-0004](./ADR-0004-root-registry-persistence-and-validation.md)“键 = canonical 主根”的约定，取代 [ADR-0007](./ADR-0007-registry-authority-lease.md) 的单进程模式，并使 [ADR-0027](./ADR-0027-revive-target-and-protected-paths.md) 第 4 条（legacy 介质推定）失效。原文保留作为历史。
+Accepted（2026-11-05 维护者决定，落实[根授权安全修复计划](../plans/completed/2026-11-05-root-authorization-security-fixes.md)的 F3 / MRW-01）。修订 [ADR-0004](./ADR-0004-root-registry-persistence-and-validation.md)“键 = canonical 主根”的约定，取代 [ADR-0007](./ADR-0007-registry-authority-lease.md) 的单进程模式，并使 [ADR-0027](./ADR-0027-revive-target-and-protected-paths.md) 第 4 条（legacy 介质推定）失效。原文保留作为历史。
 
 ## Date
 
@@ -46,7 +46,7 @@ Accepted（2026-11-05 维护者决定，落实[根授权安全修复计划](../p
 
 ## Related Documents
 
-- [根授权安全修复计划](../plans/active/2026-11-05-root-authorization-security-fixes.md)
+- [根授权安全修复计划](../plans/completed/2026-11-05-root-authorization-security-fixes.md)
 - [ADR-0012 Session origin 与 effective cwd](./ADR-0012-session-origin-and-effective-cwd.md)
 - [ADR-0025 共享权威服务](./ADR-0025-shared-registry-authority.md)
 - [ADR-0027 revive 目标与受保护目录](./ADR-0027-revive-target-and-protected-paths.md)

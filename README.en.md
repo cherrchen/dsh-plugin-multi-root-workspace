@@ -21,7 +21,7 @@ Not every project is a monorepo. A real development project is usually several i
 - **Additional-root Skills**: discovers `.dsh/skills` and `.agents/skills` inside additional folders, invoked through the namespaced `/alias-id:skill-name` reference and the native `skill` tool; each root has an independent toggle and editable `aliasId`, with a global setting that defaults to on.
 - **Absent when absent**: with no additional root configured, its behavior is item-for-item identical to an uninstalled harness; every misconfiguration fails loudly instead of silently degrading.
 
-Current released version: `v0.1.14`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+Current released version: `v0.1.15`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Quick Start
 
@@ -94,8 +94,8 @@ This installs pre-built artifacts; the first install needs the `allowBuilds` add
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # or download the tgz from the GitHub Release assets, e.g.:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.14/dsh-electron-dsh-plugin-multi-root-workspace-0.1.14.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.14.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.15/dsh-electron-dsh-plugin-multi-root-workspace-0.1.15.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.15.tgz
 ```
 
 Also pre-built, handy for air-gapped or offline delivery; the first install needs the same `allowBuilds` addition.
@@ -114,10 +114,10 @@ allowBuilds:
   koffi: true
 ```
 
-Pinning a version (e.g. `#v0.1.14`) is recommended so a later push cannot silently change what actually runs:
+Pinning a version (e.g. `#v0.1.15`) is recommended so a later push cannot silently change what actually runs:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.14
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.15
 ```
 
 ### Install from a local clone
@@ -323,7 +323,7 @@ The implementation is available through **OPS compatibility mode (experimental; 
 
 The MR-only P5 safeguards require no OPS changes. Legal additional-root writes can still be rejected, and result caches may remain when cleanup is refused. In legacy mode without a shared Registry, WW/RO PTC can also be refused before its code process starts. Durable activity stays disabled: DSH explicitly prohibits external plugins from calling `appendPluginRecord`; ordinary events and direct log writes are not substitutes. P6 technical acceptance is complete for this bounded scope. Remaining P5 capabilities and full OPS compatibility acceptance are **deferred indefinitely** and excluded from this acceptance; any future recovery will remain experimental. The canonical deferred list is in [ADR-0029](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#无限期延后清单唯一真源), with scope recorded in the [completed plan](./docs/plans/completed/2026-11-01-ops-compatibility-adaptation.md) (Chinese).
 
-This is not a complete OPS compatibility claim, does not expand the support matrix, and has not been released. The audit §16 historical re-verification predates this switch and describes the enabled path; reruns require an explicit `enabled: true`.
+These experimental safeguards ship in `v0.1.15`; they do not claim complete OPS compatibility or expand the support matrix. The audit §16 historical re-verification predates this switch and describes the enabled path; reruns require an explicit `enabled: true`.
 
 ## Documentation
 

@@ -21,7 +21,7 @@
 - **附属根 Skills**：发现附属目录的 `.dsh/skills` 与 `.agents/skills`，附属根经 `/alias-id:skill-name` 命名空间调用原生 `skill` 工具；每根独立开关、可编辑 `aliasId`，全局设置默认开启。
 - **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
-当前发布版本 `v0.1.14`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
+当前发布版本 `v0.1.15`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
 
@@ -96,8 +96,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.14/dsh-electron-dsh-plugin-multi-root-workspace-0.1.14.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.14.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.15/dsh-electron-dsh-plugin-multi-root-workspace-0.1.15.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.15.tgz
 ```
 
 同样是预构建产物，适合内网或离线环境交付；首次安装同样需要添加 `allowBuilds`。
@@ -116,10 +116,10 @@ allowBuilds:
   koffi: true
 ```
 
-建议锁定版本（如 `#v0.1.14`），让后续推送无法悄悄改变实际运行的内容：
+建议锁定版本（如 `#v0.1.15`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.14
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.15
 ```
 
 ### 从本地源码安装
@@ -325,7 +325,7 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 
 P5 的本仓兜底不修改 OPS：合法附加根写入仍可能被误拒，后台结果缓存可能因拒绝清理而残留；legacy 非共享模式下，WW/RO 的 PTC 也可能在启动代码进程前被拒。持久活动仍关闭：DSH 的 `appendPluginRecord` 明确禁止外部插件调用，不能用普通事件或私写日志代替。P6 已按限定范围完成技术验收；P5 剩余功能及全功能兼容验收**无限期延后**，不构成本次完成条件，未来若恢复也仅以实验性能力开放。延期清单见 [ADR-0029](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#无限期延后清单唯一真源)，验收范围见[已完成计划](./docs/plans/completed/2026-11-01-ops-compatibility-adaptation.md)。
 
-本次接受的是实验性保守兜底，不声明完整 OPS 兼容，不提升支持版本，也未发布。审计 §16 的历史复验发生在本开关加入之前，对应启用路径；后续复跑须显式 `enabled: true`。
+本次实验性保守兜底随 `v0.1.15` 发版，不声明完整 OPS 兼容，不提升支持版本。审计 §16 的历史复验发生在本开关加入之前，对应启用路径；后续复跑须显式 `enabled: true`。
 
 ## 文档
 

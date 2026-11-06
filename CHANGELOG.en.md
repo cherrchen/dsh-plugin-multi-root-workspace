@@ -8,6 +8,24 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.15] - 2026-11-06
+
+### Changed
+
+- **Upgrade note for custom compositions: the Registry now requires shared mode**. `multi-root-registry` must configure `sharedStorageRoot`; without it, startup fails with `config-invalid` and neither single-process storage nor additional-root grants are opened. The default bundle has configured shared mode since `v0.1.12` and needs no change. Registry keys now follow the upstream Session's original primary-directory spelling, with migration from legacy canonical keys. Clearing a migrated root table persists an empty record so refreshes and restarts cannot revive old registrations ([ADR-0028](./docs/decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md), Chinese).
+
+### Added
+
+- **The `/add-dirs` alias**: `/add-dirs [absolute path] [--inherit|--read-only|--read-write]` reuses `/workspace-folders add` path parsing, directory picker, access options, and validation. It does not replace dsh-TUI's built-in `/add-dir`.
+- **OPS compatibility mode (experimental, off by default)**: explicitly enable `multi-root-ops-compatibility.enabled` in the plugin settings card on DSH `0.2.*` releases within the existing exact support matrix. On `0.1.*` the setting is unavailable and a manually configured `true` stays inactive. Each UI activation requires acknowledging and confirming the host's risk dialog; disabling saves directly. OPS and Auto Review have independent switches.
+- **Conservative execution protection and context while OPS mode is enabled**: on macOS/Linux, Full-access Workers receive kernel confinement when read-only roots or tool caps create deny boundaries. Windows calls with deny boundaries, WW/RO calls with non-writable roots or caps, and calls in any mode without Registry authority are conservatively refused before preparation; reads may also be refused. Proven live successful file targets can trigger additional-directory instruction discovery. Auto Review still requires exactly DSH `0.2.1-rc.2` and fails technically when historical evidence is missing, pending targets are dynamic, or the snapshot changes. **This is not full OPS compatibility**: false refusals, blocked background cleanup, retained caches, and the lack of durable activity remain; full compatibility recovery is deferred indefinitely. With the mode disabled, OPS may still write to explicitly read-only additional roots ([capabilities and limitations](./README.en.md#dsh-ops-adaptation-status-capability-notes), [ADR-0029](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md), Chinese).
+
+### Fixed
+
+- **Re-registering a root no longer transfers its grant to a replacement target (BYP-02)**: revival requires the original grant target. Changed targets must be removed and explicitly added again. The panel offers re-registration only for missing records, not redirected or invalid ones.
+- **Additional-root registration refuses protected directories**: new and revived roots cannot equal, contain, or sit inside `$DSH_HOME`, the physical Registry store, or its lease directory. Existing overlapping records are withheld while retaining deny boundaries. Shared followers apply their own protected set to every filesystem/process admission too; Windows network/device paths are refused before local resolution or forwarding ([ADR-0027](./docs/decisions/ADR-0027-revive-target-and-protected-paths.md), Chinese).
+- **Replacing the primary directory no longer drops existing deny boundaries (MRW-01)**: Registry/scope identity uses the upstream primary spelling, canonical paths serve geometry only, and deny boundaries take precedence over primary-root overlap. Write authority for the primary root itself still follows upstream semantics. Trusted human confirmation for root management (BYP-01) remains a known residual risk outside this release's fixes ([scope and maintainer decisions](./docs/plans/completed/2026-11-05-root-authorization-security-fixes.md), Chinese).
+
 ## [0.1.14] - 2026-11-05
 
 ### Added
@@ -229,7 +247,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.15...HEAD
+[0.1.15]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...v0.1.12

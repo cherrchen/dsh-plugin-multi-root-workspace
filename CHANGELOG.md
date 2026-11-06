@@ -8,6 +8,24 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.15] - 2026-11-06
+
+### Changed
+
+- **自定义组合升级注意：Registry 只保留共享模式**。`multi-root-registry` 必须配置 `sharedStorageRoot`；缺失时以 `config-invalid` 拒绝启动，不再打开单进程存储或授予附加根。默认 bundle 自 `v0.1.12` 起已配置共享模式，无需另行修改。主根登记表改为按上游 Session 原始目录拼写查找，升级时迁移旧 canonical key；清空后的空表会持久保留，防止刷新或重启复活旧登记（[ADR-0028](./docs/decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)）。
+
+### Added
+
+- **`/add-dirs` 命令别名**：`/add-dirs [absolute path] [--inherit|--read-only|--read-write]` 复用 `/workspace-folders add` 的路径解析、目录选择器、访问选项和校验，不接管 dsh-TUI 的内置 `/add-dir`。
+- **OPS 兼容模式（实验性，默认关闭）**：在插件设置卡中显式开启 `multi-root-ops-compatibility.enabled`，仅适用于现有精确支持矩阵内的 DSH `0.2.*`；`0.1.*` 不提供该设置入口，手工写入 `true` 也不启用。从 UI 开启须先在宿主风险弹窗中勾选并确认，每次重新开启都需确认；关闭直接保存，OPS 与 Auto Review 开关独立。
+- **启用 OPS 模式后的保守执行保护与上下文**：macOS/Linux 的 Full-access 有只读或 tool-cap 拒写边界时，以内核围栏保护 Worker；Windows 有拒写边界、WW/RO 有不可写根或 cap，以及所有模式 Registry 失权时，执行调用在准备前保守拒绝，读取也可能被拒。可证明的实时成功文件目标可触发附属目录指令发现；Auto Review 仍仅支持精确 DSH `0.2.1-rc.2`，缺少历史证据、动态待审目标或快照变化时技术失败。**不声明完整 OPS 兼容**：合法操作误拒、后台清理与缓存残留、无持久活动等限制保留，完整兼容恢复无限期延后；关闭模式后 OPS 仍可能写入显式只读附加根（[能力与限制](./README.md#dsh-ops-适配现状受限能力说明)、[ADR-0029](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md)）。
+
+### Fixed
+
+- **重新登记不再把旧授权转移到新目标（BYP-02）**：只有目录恢复到原 grant 目标时才能 revive；目标已改变的记录必须先移除再显式新增。面板只为 missing 记录提供重新登记，不为 redirected/invalid 记录提供该动作。
+- **附加根登记拒绝覆盖受保护目录**：新增与 revive 不得等于、包含或位于 `$DSH_HOME`、Registry 物理介质或 lease 目录；重叠存量记录 withheld 并保留拒写边界。共享 follower 在每次 fs/进程准入时同样按自己的保护集合收窄；Windows 网络/设备路径在本地解析和转发前拒绝（[ADR-0027](./docs/decisions/ADR-0027-revive-target-and-protected-paths.md)）。
+- **主根目录置换不再丢失已有拒写边界（MRW-01）**：Registry/scope 使用上游主根拼写作为身份，canonical 路径只用于几何判断，拒写边界优先于主根重叠。主根本身的写授权继续遵循上游语义；根管理的可信人工确认（BYP-01）仍是已知残余风险，不在本版修复范围（[范围与维护者决定](./docs/plans/completed/2026-11-05-root-authorization-security-fixes.md)）。
+
 ## [0.1.14] - 2026-11-05
 
 ### Added
@@ -229,7 +247,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.15...HEAD
+[0.1.15]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.11...v0.1.12
