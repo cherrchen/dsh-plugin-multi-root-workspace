@@ -68,3 +68,11 @@ Numbers increment; titles use lowercase kebab-case.
 - [ADR-0028-upstream-primary-identity-and-shared-only-registry.md](./ADR-0028-upstream-primary-identity-and-shared-only-registry.md) (Chinese) — Primary-root identity is the upstream spelling (MRW-01), denies win over the primary root; the Registry keeps only the shared mode (Accepted).
 
 - [ADR-0029-ops-file-authorization-and-activity-adapter.md](./ADR-0029-ops-file-authorization-and-activity-adapter.md) (Chinese) — Accepted only for experimental safeguards, Phase-A live activity, and bounded Review. Remaining P5 compatibility recovery is deferred indefinitely and excluded from this final acceptance.
+
+## Issue #32 · Multi-environment workspace decisions
+
+- [ADR-0030](./ADR-0030-environment-and-root-identity.md) — Environment identity, root grants and ordered admission in one session (Accepted).
+- [ADR-0031](./ADR-0031-filesystem-routing.md) — One filesystem entry point and environment-aware consumers (Accepted).
+- [ADR-0032](./ADR-0032-upstream-ssh-backend.md) — Reusing the upstream SSH providers, with distribution and platform evidence (Accepted).
+- [ADR-0033](./ADR-0033-remote-command-and-sandbox.md) — Explicit remote commands, sandbox guarantees and cancellation (Accepted).
+- [ADR-0034](./ADR-0034-binary-transfer.md) — Authorization, publication and failure semantics for binary transfers (Accepted).

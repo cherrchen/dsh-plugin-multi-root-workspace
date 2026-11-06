@@ -68,3 +68,11 @@ ADR-0002-short-title.md
 - [ADR-0028-upstream-primary-identity-and-shared-only-registry.md](./ADR-0028-upstream-primary-identity-and-shared-only-registry.md) — 主根身份以上游拼写为准（MRW-01），拒写优先于主根；Registry 只保留共享模式（Accepted）。
 
 - [ADR-0029-ops-file-authorization-and-activity-adapter.md](./ADR-0029-ops-file-authorization-and-activity-adapter.md) — OPS 实验性保守兜底、Phase A live 与受限 Review 的限定接受范围；P5 完整兼容恢复无限期延后，不纳入本次最终验收。
+
+## Issue #32 · 多执行环境架构决策
+
+- [ADR-0030](./ADR-0030-environment-and-root-identity.md) — 一个 Session 的环境身份、根登记和有序准入 (Accepted).
+- [ADR-0031](./ADR-0031-filesystem-routing.md) — 单一文件系统入口与消费者的环境归属 (Accepted).
+- [ADR-0032](./ADR-0032-upstream-ssh-backend.md) — DSH 官方 SSH 后端的公开入口、分发与平台边界 (Accepted).
+- [ADR-0033](./ADR-0033-remote-command-and-sandbox.md) — 显式远端命令、沙箱与取消语义 (Accepted).
+- [ADR-0034](./ADR-0034-binary-transfer.md) — 跨环境二进制复制的授权、发布与失败语义 (Accepted).
