@@ -78,3 +78,11 @@ ADR-0002-short-title.md
 - [ADR-0038-workspace-menu-folders-dialog.md](./ADR-0038-workspace-menu-folders-dialog.md) — 工作区 `...` 菜单的「管理工作区目录…」入口：经 apply 作用域的 dialog controller 复用 footer 对话框，当前 session 属于目标时直接打开、否则先经 `uiWorkspace.openWorkspace` 切换并确认 current；服务缺失置灰，`RootSwitcher` 零改动（Accepted，实施见计划）。
 
 - [ADR-0039-worktree-aware-root-suggestions.md](./ADR-0039-worktree-aware-root-suggestions.md) — 先做 worktree 附加根建议与手动清理（B），再做 linked worktree 的主 checkout 授权（A）。共用实验性、默认关闭的插件设置；提示按可见候选数量分流为单确认或勾选列表。Accepted，2026-11-10 第十九次修订；实施状态见路线账本。
+
+## Issue #32 · 多执行环境架构决策
+
+- [ADR-0030](./ADR-0030-environment-and-root-identity.md) — 一个 Session 的环境身份、根登记和有序准入 (Accepted).
+- [ADR-0031](./ADR-0031-filesystem-routing.md) — 单一文件系统入口与消费者的环境归属 (Accepted).
+- [ADR-0032](./ADR-0032-upstream-ssh-backend.md) — DSH 官方 SSH 后端的公开入口、分发与平台边界 (Accepted).
+- [ADR-0033](./ADR-0033-remote-command-and-sandbox.md) — 显式远端命令、沙箱与取消语义 (Accepted).
+- [ADR-0034](./ADR-0034-binary-transfer.md) — 跨环境二进制复制的授权、发布与失败语义 (Accepted).

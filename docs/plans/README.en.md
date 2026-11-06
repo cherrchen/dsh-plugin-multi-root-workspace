@@ -42,6 +42,8 @@ active:
 
 - [2026-11-08-workspace-menu-folders-dialog.md](./active/2026-11-08-workspace-menu-folders-dialog.md) (Chinese) — A "Manage workspace folders…" entry in the workspace `...` menu: a controller reusing the footer dialog, a `workspace` context-menu contribution (order 150), and switching/reusing the target workspace's blank session before opening with that fixed session; `RootSwitcher` and upstream `WorkspaceBrowser` stay untouched (decision in [ADR-0038](../decisions/ADR-0038-workspace-menu-folders-dialog.md)).
 
+- [Issue #32 implementation and verification plan](./active/2026-11-06-multi-environment-gates.md) (Chinese) — Accepted after external technical review; implementation pending. Covers PR dependencies, implementation details, fault injection and rollback.
+
 - [2026-10-31-f4-background-recovery.md](./active/2026-10-31-f4-background-recovery.md) (Chinese) — F4 background-recovery and diagnostics plan (**rev.4 review passed, adopted via ADR-0026; implemented and accepted on three-platform CI, real-TUI soak deferred, shipping in `v0.1.13`**): a recovery scheduler reusing `ensureAuthority`, a projection-sync completion contract, atomic failed-round publication (including scope-subscriber batching), local handshake cancellation, and a diagnostics surface; the batch is registered in the progress ledger.
 
 - [2026-10-30-shared-registry-authority.md](./active/2026-10-30-shared-registry-authority.md) (Chinese) — Full original Long-term scope for Issue #24, comparison of the released baseline and the initial shared-service commit, six P1 audit items, and future evolution with exit criteria; the initial version is released with `v0.1.12`, and the remaining Ubuntu report-environment soak retest plus progress stay in the roadmap ledger.

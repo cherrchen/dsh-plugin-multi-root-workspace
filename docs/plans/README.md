@@ -42,6 +42,8 @@ active：
 
 - [2026-11-08-workspace-menu-folders-dialog.md](./active/2026-11-08-workspace-menu-folders-dialog.md) — 工作区 `...` 菜单新增「管理工作区目录…」：复用 footer 对话框的 controller、`workspace` context-menu 贡献（order 150）、先切换/复用目标工作区 blank 再打开并固定 session；`RootSwitcher` 与上游 `WorkspaceBrowser` 零改动（决策见 [ADR-0038](../decisions/ADR-0038-workspace-menu-folders-dialog.md)）。
 
+- [Issue #32 多执行环境实施与验证计划](./active/2026-11-06-multi-environment-gates.md) — Accepted（外部评审通过，尚未实施）；含 PR 依赖、实施细节、故障注入与回滚验收。
+
 - [2026-10-31-f4-background-recovery.md](./active/2026-10-31-f4-background-recovery.md) — F4 后台恢复与故障诊断专项计划（**rev.4 评审通过、ADR-0026 已立项；已实施并经三平台 CI 验收，真实 TUI soak 暂缓，随 `v0.1.13` 发版**）：复用 `ensureAuthority` 的恢复调度、投影同步完成条件、整轮失败通知原子性（含 scope 订阅者批处理）、握手本地取消与诊断面；批次已登记总账。
 
 - [2026-10-30-shared-registry-authority.md](./active/2026-10-30-shared-registry-authority.md) — Issue #24 原始 Long-term 全目标、已发布基线与共享服务初版对照、六项 P1 审计、后续能力演进与退出条件；初版已随 `v0.1.12` 发版，剩余 Ubuntu 报告环境长跑复测与进度见总账。

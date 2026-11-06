@@ -78,3 +78,11 @@ Numbers increment; titles use lowercase kebab-case. ADR-0030–0034 are reserved
 - [ADR-0038-workspace-menu-folders-dialog.md](./ADR-0038-workspace-menu-folders-dialog.md) (Chinese) — The "Manage workspace folders…" entry in the workspace `...` menu: an apply-scoped dialog controller reuses the footer dialog, opening it directly when the current session already belongs to the target workspace and otherwise switching through `uiWorkspace.openWorkspace` and confirming the new current session; missing services disable the entry, and `RootSwitcher` stays untouched (Accepted; implementation in the plan).
 
 - [ADR-0039-worktree-aware-root-suggestions.md](./ADR-0039-worktree-aware-root-suggestions.md) (Chinese) — Worktree root suggestions and manual cleanup (B), followed by explicit access to shared Git metadata for linked worktrees (A). Both use a plugin setting enabled by default. Accepted, revision 18 (2026-11-09). Implementation status is tracked in the roadmap.
+
+## Issue #32 · Multi-environment workspace decisions
+
+- [ADR-0030](./ADR-0030-environment-and-root-identity.md) — Environment identity, root grants and ordered admission in one session (Accepted).
+- [ADR-0031](./ADR-0031-filesystem-routing.md) — One filesystem entry point and environment-aware consumers (Accepted).
+- [ADR-0032](./ADR-0032-upstream-ssh-backend.md) — Reusing the upstream SSH providers, with distribution and platform evidence (Accepted).
+- [ADR-0033](./ADR-0033-remote-command-and-sandbox.md) — Explicit remote commands, sandbox guarantees and cancellation (Accepted).
+- [ADR-0034](./ADR-0034-binary-transfer.md) — Authorization, publication and failure semantics for binary transfers (Accepted).
