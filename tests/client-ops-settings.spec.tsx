@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BundleSettingsCard, installSkillsSettingsCard } from '../src/client/skills-settings.tsx'
+import * as Confirmation from '../src/compat/ops-confirmation.ts'
+import { zh, en } from '../src/client/locales.ts'
 import { OpsCompatibilitySettingsCard } from '../src/client/ops-settings.tsx'
 import { bindSettingsForm, bindSkillsForm, type SkillsForm } from '../src/compat/skills-client.ts'
 import type { Translate } from '../src/client/WorkspaceFoldersAction.tsx'
 const t: Translate = key => key
 const cleanups: (() => void)[] = []
-afterEach(() => { cleanup(); for (const stop of cleanups.splice(0).reverse()) stop() })
+afterEach(() => { vi.restoreAllMocks(); cleanup(); for (const stop of cleanups.splice(0).reverse()) stop() })
 
 function opsForm(snapshot: { value?: { enabled?: boolean }; status: string; writable: boolean; revision?: number }, calls: unknown[] = []): SkillsForm & { listeners: (() => void)[] } {
   const listeners: (() => void)[] = []
@@ -20,7 +22,7 @@ function opsForm(snapshot: { value?: { enabled?: boolean }; status: string; writ
 }
 
 describe('OPS compatibility settings card', () => {
-  it('renders off by default and mutates only its own form', async () => {
+  it('keeps the setting off until the warning is acknowledged and confirmed', async () => {
     const writes: unknown[] = []
     const form = opsForm({ value: { enabled: false }, status: 'ready', writable: true, revision: 3 }, writes)
     render(<OpsCompatibilitySettingsCard form={form} t={t} />)
@@ -28,7 +30,18 @@ describe('OPS compatibility settings card', () => {
     const toggle = screen.getByRole('switch', { name: 'ops.compatibilityEnable' })
     expect(toggle.getAttribute('aria-checked')).not.toBe('true')
     fireEvent.click(toggle)
+    expect(screen.getByRole('dialog', { name: 'ops.confirmTitle' })).not.toBeNull()
+    expect(screen.getByText('ops.confirmDescription')).not.toBeNull()
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(writes).toEqual([])
+    const confirm = screen.getByRole('button', { name: 'ops.confirmEnable' }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    fireEvent.click(confirm)
+    expect(writes).toEqual([])
+    fireEvent.click(screen.getByRole('checkbox', { name: 'ops.confirmAcknowledge' }))
+    fireEvent.click(confirm)
     await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['enabled'], value: true }], 3]]))
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
@@ -53,8 +66,67 @@ describe('OPS compatibility settings card', () => {
       form.mutate = impl as never
       render(<OpsCompatibilitySettingsCard form={form} t={t} />)
       fireEvent.click(screen.getByRole('switch', { name: 'ops.compatibilityEnable' }))
+      fireEvent.click(screen.getByRole('checkbox', { name: 'ops.confirmAcknowledge' }))
+      fireEvent.click(screen.getByRole('button', { name: 'ops.confirmEnable' }))
       await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('ops.settingsFailed'))
     }
+  })
+
+  it.each(['cancel', 'close', 'escape', 'mask'])('keeps disabled without writing when dismissed by %s', method => {
+    const writes: unknown[] = []
+    render(<OpsCompatibilitySettingsCard form={opsForm({ value: { enabled: false }, status: 'ready', writable: true }, writes)} t={t} />)
+    const toggle = screen.getByRole('switch', { name: 'ops.compatibilityEnable' })
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'ops.confirmAcknowledge' }))
+    if (method === 'escape') fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    else if (method === 'mask') fireEvent.click(screen.getByTestId('risk-confirmation-mask'))
+    else fireEvent.click(screen.getByRole('button', { name: method === 'cancel' ? 'ops.confirmCancel' : 'ops.confirmClose' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(writes).toEqual([])
+    fireEvent.click(toggle)
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('turns an enabled setting off immediately without a confirmation', async () => {
+    const writes: unknown[] = []
+    render(<OpsCompatibilitySettingsCard form={opsForm({ value: { enabled: true }, status: 'ready', writable: true, revision: 4 }, writes)} t={t} />)
+    fireEvent.click(screen.getByRole('switch'))
+    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['enabled'], value: false }], 4]]))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('blocks enabling when the host cannot provide its warning dialog', () => {
+    vi.spyOn(Confirmation, 'opsRiskConfirmation').mockReturnValue(undefined)
+    const writes: unknown[] = []
+    render(<OpsCompatibilitySettingsCard form={opsForm({ value: { enabled: false }, status: 'ready', writable: true }, writes)} t={t} />)
+    expect((screen.getByRole('switch') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('switch'))
+    expect(writes).toEqual([])
+  })
+
+  it.each(['revision', 'unavailable', 'read-only', 'enabled', 'form'])('discards a pending confirmation when %s changes', change => {
+    const writes: unknown[] = []
+    let snapshot = { value: { enabled: false }, status: 'ready', writable: true, revision: 1 }
+    const listeners: (() => void)[] = []
+    const form = { getSnapshot: () => snapshot, subscribe: (listener: () => void) => { listeners.push(listener); return () => {} }, mutate: async (...args: unknown[]) => { writes.push(args); return true } }
+    const { rerender } = render(<OpsCompatibilitySettingsCard form={form} t={t} />)
+    fireEvent.click(screen.getByRole('switch'))
+    fireEvent.click(screen.getByRole('checkbox'))
+    if (change === 'form') rerender(<OpsCompatibilitySettingsCard form={{ ...form }} t={t} />)
+    else {
+      snapshot = { ...snapshot, ...(change === 'revision' ? { revision: 2 } : change === 'unavailable' ? { status: 'unavailable' } : change === 'read-only' ? { writable: false } : { value: { enabled: true } }) }
+      act(() => { for (const listener of listeners) listener() })
+    }
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(writes).toEqual([])
+  })
+
+  it.each([zh, en])('displays the translated warning and acknowledgement', copy => {
+    render(<OpsCompatibilitySettingsCard form={opsForm({ value: { enabled: false }, status: 'ready', writable: true })} t={key => copy[key as keyof typeof copy]} />)
+    fireEvent.click(screen.getByRole('switch'))
+    expect(screen.getByText(copy['ops.confirmDescription'])).not.toBeNull()
+    expect(screen.getByRole('checkbox', { name: copy['ops.confirmAcknowledge'] })).not.toBeNull()
   })
 
   it('re-renders on snapshot updates', async () => {
@@ -127,6 +199,9 @@ describe('bundle settings coordinator', () => {
     const ops = opsForm({ value: { enabled: false }, status: 'ready', writable: true, revision: 2 }, opsWrites)
     render(<BundleSettingsCard form={skillsForm} opsForm={ops} t={t} />)
     fireEvent.click(screen.getByRole('switch', { name: 'ops.compatibilityEnable' }))
+    expect(opsWrites).toEqual([])
+    fireEvent.click(screen.getByRole('checkbox', { name: 'ops.confirmAcknowledge' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ops.confirmEnable' }))
     await waitFor(() => expect(opsWrites).toHaveLength(1))
     expect(skillsWrites).toEqual([])
     fireEvent.click(screen.getByRole('switch', { name: 'skills.globalEnable' }))

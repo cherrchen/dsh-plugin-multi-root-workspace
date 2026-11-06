@@ -117,6 +117,8 @@ describe('the OPS compatibility card in the artifact', () => {
     expect(bytes).toContain('ops.compatibilityEnable')
     expect(bytes).toContain('OPS 兼容模式')
     expect(bytes).toContain('ops.experimental')
+    expect(bytes).toContain('ops.confirmDescription')
+    expect(bytes).toContain('RiskConfirmation')
     expect(bytes).toContain('OPS compatibility mode')
     expect(bytes).not.toContain('node:fs')
     expect(bytes).not.toContain('node:crypto')

@@ -1498,3 +1498,16 @@ Auto Review 独立宿主固定其精确基线 DSH `0.2.1-rc.2` / cordis `4.0.5`�
 四版另跑适用的 OPS 执行/活动、Skills Settings、Registry lease 和跨进程回归；旧版不执行仅适用于 `0.2.*` 的 OPS 启用路径。删除旧 Settings 分支同时移除了 scope → ops-settings → skills 的运行时导入链；Node 22 直接导入 scope 成功，Registry 子进程不再因 Skills 文件的 `using` 语法在启动前失败。未通过更改 CI Node 版本或放宽门禁掩盖该问题。
 
 Auto Review 另在精确 DSH `0.2.1-rc.2` / cordis `4.0.5` 上通过联合类型检查、**91/91** 实现测试，以及源码/单一 tarball 的 web/headless × 官方前后顺序真实审查冒烟，保留默认关闭、live toggle、reload、owner drain 和恢复检查。本轮未在 Windows/Linux 重跑，也未重新触发远端 CI；隔离树和原始日志留本地，不提交 `docs/reviews/` 的证据目录。
+
+
+## OPS UI 开启前风险确认（2026-11-06）
+
+本次交互合同见 [ADR-0029 UI 启用前风险确认](../../decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#ui-启用前风险确认2026-11-06)。设置卡复用宿主官方 `RiskConfirmation`，确认前不发送开启写入；保存仍走同一个 Settings form 与 revision，不增加持久数据或授权来源。
+
+macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.1`：compat、lint、host/client 类型、build、原生 Registry/Seatbelt 探针、fork 校验及 `docs:check` 通过。完整测试 **1178 passed / 95 skipped / 0 failed**；compose **54/54**、behavior **137/137**、journey **76/76**、`pack:check`（179 个成员）及 packed behavior **136/136** 通过，三个 smoke 与 packed 无跳过。lint 只有本地未跟踪历史证据脚本的既有 unused-vars 告警。
+
+隔离 DSH `0.1.6-alpha.2`、`0.2.0-rc.2`、`0.2.1-rc.2` 的类型检查与最终 OPS/Skills 客户端、双语字典回归均通过（每版 **37/37**，测试使用 Node `22.23.1`）。`0.2.1-rc.2` 的类型步骤包含精确 Auto Review 实现检查；本次未重跑其 91 项宿主实现测试，因为宿主和 Review 实现未改动。官方组件按导出结构探测，缺失时不能跳过警告直接开启；旧版类型树仍能编译。
+
+真实 DSH Web 使用独立临时 profile，通过 Playwright 验证官方组件：确认前 switch 未开启且确认按钮 disabled；Esc 取消后仍关闭；重新打开需要重新勾选；确认后 Settings 才持久化 true；关闭操作直接恢复默认 false。桌面 1280×720 与窄屏 390×844 截图检查通过。JSDOM 另覆盖取消按钮、关闭按钮、遮罩、双语文案、保存失败，以及 revision/表单/可写性/可用性/外部启用变化时废弃旧确认。截图与浏览器记录只留忽略目录，测试浏览器与隔离 Host 已关闭。
+
+本轮未在 Windows/Linux 实跑浏览器，不改变宿主兼容列表、OPS 功能范围或此前无限期延期决定；不把 UI 二次确认当作配置文件或 RPC 的独立授权通道。

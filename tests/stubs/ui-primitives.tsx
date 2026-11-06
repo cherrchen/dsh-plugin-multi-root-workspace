@@ -15,6 +15,7 @@
 
 import { Fragment, createElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import type { OpsConfirmationProps } from '../../src/compat/ops-confirmation.ts'
 
 /** Minimal `IconProps` mirror. */
 interface IconProps {
@@ -166,6 +167,26 @@ export function Modal(props: {
     ),
     document.body,
   )
+}
+
+/** The host risk dialog's acknowledgement, action, and dismissal contract. */
+export function RiskConfirmation(props: OpsConfirmationProps): ReactNode {
+  if (!props.open) return null
+  return createPortal(<div data-testid="risk-confirmation-mask" onClick={event => {
+    if (event.target === event.currentTarget) props.onCancel()
+  }}>
+    <section role="dialog" aria-label={props.title} onKeyDown={event => {
+      if (event.key === 'Escape') props.onCancel()
+    }}>
+      <h2>{props.title}</h2>
+      <button type="button" aria-label={props.closeLabel} onClick={props.onCancel}>×</button>
+      <p>{props.description}</p>
+      <label><input type="checkbox" checked={props.acknowledged} disabled={props.disabled}
+        onChange={event => props.onAcknowledgedChange(event.currentTarget.checked)} />{props.acknowledgeLabel}</label>
+      <button type="button" onClick={props.onCancel}>{props.cancelLabel}</button>
+      <button type="button" disabled={props.disabled || !props.acknowledged} onClick={props.onConfirm}>{props.confirmLabel}</button>
+    </section>
+  </div>, document.body)
 }
 
 /** Minimal `MenuItem` mirror (only the fields the panel uses). */
