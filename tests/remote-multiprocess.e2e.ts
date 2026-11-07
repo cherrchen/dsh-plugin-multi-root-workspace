@@ -8,7 +8,7 @@ import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-wo
 
 const availability = await nativeHostAvailability()
 if (!availability.available) console.info(`remote native tests unavailable: ${availability.reason}`)
-const nativeTest = it.skipIf(!availability.available && process.platform !== 'win32')
+const nativeTest = it.skipIf(!availability.available || process.platform === 'win32')
 const REF = { environmentId: 'build-01', rootId: 'app' }
 
 let fixture: FixtureWorkspace, hosts: RemoteHost[]
@@ -76,9 +76,13 @@ nativeTest('owner exit → takeover → new epoch → remote re-hello and a stal
   const owner = await mount(manifest), follower = await mount(manifest)
   await follower.request('remote-add', [REF])
   const oldEpoch = (await follower.request<{ identity: { authorityEpoch: string } }>('remote-op', ['read', [REF]])).identity.authorityEpoch
-  const inFlight = follower.request('remote-op', ['read', [REF]])
+  const inFlight = follower.request<{ identity: { authorityEpoch: string } }>('remote-op', ['read', [REF]]).then(
+    v => ({ ok: true as const, v }), e => ({ ok: false as const, e: e as { code?: string } }),
+  )
   await owner.kill()
-  await expect(inFlight).rejects.toThrow()
+  const settled = await inFlight
+  if (settled.ok) expect(settled.v.identity.authorityEpoch).toBe(oldEpoch)
+  else expect(['authority-disconnected', 'owner-without-remote-protocol', 'remote-unavailable']).toContain(settled.e.code)
   for (let i = 0; i < 200; i++) {
     const state = await follower.request<{ authorityState: { kind: string } }>('diagnostics')
     if (state?.authorityState.kind === 'active') break

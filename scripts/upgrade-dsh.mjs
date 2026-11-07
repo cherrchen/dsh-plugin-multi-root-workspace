@@ -50,6 +50,13 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MANIFEST = join(REPO_ROOT, 'package.json')
 const WORKSPACE = join(REPO_ROOT, 'pnpm-workspace.yaml')
 
+/** Read one `export const NAME = [...]` string array from a contract source. */
+function contractArray(source, name) {
+  const match = new RegExp(String.raw`export const ${name} = \[([^\]]*)\]`, 'u').exec(source)
+  if (match === null) throw new Error(`${name} is not declared as an array literal`)
+  return [...match[1].matchAll(/'([^']+)'/gu)].map(token => token[1])
+}
+
 /** Whether a dependency name belongs to the upstream harness. */
 function isDshPackage(name) {
   return name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')
@@ -157,8 +164,16 @@ function repointManifest(version, cordisVersion, pins) {
     if (version === forkRelease) manifest.devDependencies[name] = version
     else delete manifest.devDependencies[name]
   }
+  const sshSource = readFileSync(join(REPO_ROOT, 'src/compat/dsh-version.ts'), 'utf8')
+  const sshSupported = contractArray(sshSource, 'SUPPORTED_SSH_RELEASES')
+  const sshPeers = contractArray(sshSource, 'SSH_PEER_PACKAGES')
+  const sshNames = new Set(sshPeers)
+  for (const name of sshPeers) {
+    if (sshSupported.includes(version)) manifest.devDependencies[name] = version
+    else delete manifest.devDependencies[name]
+  }
   for (const name of Object.keys(manifest.devDependencies ?? {})) {
-    if (!isDshPackage(name)) continue
+    if (!isDshPackage(name) || sshNames.has(name)) continue
     if (manifest.devDependencies[name] === version) continue
     changed.push(`${name}: ${manifest.devDependencies[name]} → ${version}`)
     manifest.devDependencies[name] = version
