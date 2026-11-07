@@ -8,6 +8,7 @@ import { WorkspaceFiles } from '@deepseek-ai/dsh-api-workspace-files'
 import { Lsp, LspProviderId } from '@deepseek-ai/dsh-lsp'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { nativeHostAvailability } from '../src/authority/native.ts'
+import { seatbeltConfineCapable } from './support/seatbelt.ts'
 import MultiRootFileSystem from '../src/fs.ts'
 import MultiRootSandboxProvider from '../src/sandbox.ts'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
@@ -22,6 +23,10 @@ import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace
 const availability = await nativeHostAvailability()
 if (!availability.available) console.info(`shared Registry native tests unavailable: ${availability.reason}`)
 const nativeTest = it.skipIf(!availability.available)
+// The ledger cases need only an owner stack and a real confine — both still
+// work on a sandboxed host that refuses IPC peers, so they gate on the
+// cheaper Seatbelt probe rather than the full native capability.
+const seatbeltTest = it.skipIf(!seatbeltConfineCapable())
 let fixture: FixtureWorkspace, cleanups: Array<() => Promise<unknown>>
 beforeEach(() => { fixture = createFixtureWorkspace('shared-consumers'); cleanups = [] })
 afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.reverse()) await cleanup(); fixture.dispose() })
@@ -77,7 +82,7 @@ nativeTest('reauthorizes direct async shell/PTC and PTYs while preserving a sync
   expect(specs.at(-1)).toBe(controller)
 })
 
-nativeTest('launches an unadmitted confine→spawn while its publication is current and refuses stale or foreign argv', async () => {
+seatbeltTest('launches an unadmitted confine→spawn while its publication is current and refuses stale or foreign argv', async () => {
   const owner = await mount(), ctx = owner.ctx
   await owner.registry.add(fixture.workspace, { path: fixture.outside })
   const specs: unknown[] = []
@@ -92,6 +97,10 @@ nativeTest('launches an unadmitted confine→spawn while its publication is curr
   // A ledger profile is not owned by an operation frame either way: launching
   // it inside an unrelated live admission is the same publication-keyed act.
   await owner.registry.withOperation(policy(), 'process', () => ctx.subprocess.spawn({ argv: [...launched], cwd: fixture.workspace }))
+  // A same-content republish is not a publication: `refresh()` re-stats and
+  // republishes identical records, and the mint stays launchable.
+  await owner.registry.refresh(fixture.workspace)
+  expect(ctx.subprocess.spawn({ argv: [...launched], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
   // A republish supersedes the mint's authorization basis.
   const stale = await mint()
   await owner.registry.setAccess(fixture.workspace, { kind: 'path', path: fixture.outside }, 'read-only')
@@ -103,7 +112,7 @@ nativeTest('launches an unadmitted confine→spawn while its publication is curr
   expect(() => ctx.subprocess.spawn({ argv: ['sandbox-exec', '-p', '(version 1)', '--', 'true'], cwd: fixture.workspace })).toThrow('live admission')
 })
 
-nativeTest('stamps a mint at dispatch, so a publication landing mid-probe keeps it refused', async () => {
+seatbeltTest('stamps a mint at dispatch, so a publication landing mid-probe keeps it refused', async () => {
   const owner = await mount(), ctx = owner.ctx
   await owner.registry.add(fixture.workspace, { path: fixture.outside })
   ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
@@ -129,7 +138,7 @@ nativeTest('stamps a mint at dispatch, so a publication landing mid-probe keeps 
   } finally { release() }
 })
 
-nativeTest('drops a mint that outlived its admission instead of demoting it into the ledger', async () => {
+seatbeltTest('drops a mint that outlived its admission instead of demoting it into the ledger', async () => {
   const owner = await mount(), ctx = owner.ctx
   await owner.registry.add(fixture.workspace, { path: fixture.outside })
   ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
@@ -157,7 +166,20 @@ nativeTest('drops a mint that outlived its admission instead of demoting it into
   } finally { release() }
 })
 
-nativeTest.skipIf(symlinkUnsupportedReason() !== undefined)('mints an unadmitted profile without member grants, so a member redirect cannot invalidate it', async () => {
+seatbeltTest('refuses an ambient mint that never passed through resolve()', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
+  await ctx.plugin(ProcessFence)
+  // `restrictedExecution` is a public ambient-minus-denies mint that takes no
+  // scope: unadmitted it must not enter the ledger — its profile grants
+  // everything the upstream ambient baseline does, minus the caller's denies.
+  const ambient = (await (ctx.sandbox as MultiRootSandboxProvider).restrictedExecution(policy(), ['/nonexistent-deny'])).argv
+  expect(ambient.join(' ')).toContain('allow default')
+  expect(() => ctx.subprocess.spawn({ argv: [...ambient, 'bash', '-c', 'true'], cwd: fixture.workspace })).toThrow('live admission')
+})
+
+seatbeltTest.skipIf(symlinkUnsupportedReason() !== undefined)('mints an unadmitted profile without member grants, so a member redirect cannot invalidate it', async () => {
   const owner = await mount(), ctx = owner.ctx
   await owner.registry.add(fixture.workspace, { path: fixture.outside })
   ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
@@ -173,7 +195,7 @@ nativeTest.skipIf(symlinkUnsupportedReason() !== undefined)('mints an unadmitted
   expect(ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
 })
 
-nativeTest('admits the forge service entries it can reach while leaving generators and unknown entries unadmitted', async () => {
+seatbeltTest('admits the forge service entries it can reach while leaving generators and unknown entries unadmitted', async () => {
   const owner = await mount(), ctx = owner.ctx
   await owner.registry.add(fixture.workspace, { path: fixture.outside })
   ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)

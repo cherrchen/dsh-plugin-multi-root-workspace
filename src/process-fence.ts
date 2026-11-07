@@ -416,15 +416,31 @@ export function apply(ctx: Context): void {
       if (target === undefined) return
       for (const key of keys) {
         try {
-          if (!isAsyncProcessEntry(target[key])) continue
+          if (!isAsyncProcessEntry(target[key])) {
+            if (key in target) ctx.logger.warn(`multi-root workspace: foreign process entry ${service}.${key} exists but is not an async method; it keeps ledger coverage only`)
+            continue
+          }
           scope.effect(() => wrapMethod(
             target as Record<string, (this: unknown, first: unknown, ...rest: unknown[]) => unknown>,
             key,
-            original => function (this: unknown, first: unknown, ...rest: unknown[]) {
+            original => async function (this: unknown, first: unknown, ...rest: unknown[]) {
               const session = sessionOf(first)
               if (session === undefined) return original.call(this, first, ...rest)
               const policy = ctx.sandboxPolicy.resolve({ session })
-              return withRegistryAdmission(ctx, policy, 'process', () => original.call(this, first, ...rest))
+              // An admission that cannot be acquired (registry unreachable or
+              // disposed) must not fail a call that may not spawn at all: run
+              // it unadmitted, where any confined mint falls back to the
+              // clamped-ledger degrade. Errors thrown BY the call propagate.
+              let ran = false
+              try {
+                return await withRegistryAdmission(ctx, policy, 'process', () => {
+                  ran = true
+                  return original.call(this, first, ...rest)
+                })
+              } catch (error: unknown) {
+                if (ran) throw error
+                return original.call(this, first, ...rest)
+              }
             },
           ))
         } catch (error: unknown) {

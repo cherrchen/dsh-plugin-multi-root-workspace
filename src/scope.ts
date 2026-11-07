@@ -355,12 +355,24 @@ interface MintedProfile {
   readonly version: number
 }
 
+/**
+ * The baseline a mint resolved to. Only primary-bounded forms may join the
+ * unadmitted ledger: `clamped` (primary-root clamp) and `read-only` (the
+ * upstream read-only skeleton — never writable). `ambient` mints —
+ * `restrictedExecution`'s ambient-minus-denies profile, and any mint whose
+ * scope could not be proven unavailable — may only live bound to an
+ * admission frame, and otherwise die.
+ */
+export type MintForm = 'clamped' | 'read-only' | 'ambient'
+
 /** The authorization basis a mint carried at its synchronous entry, stamped onto its ledger entry. */
 export interface MintStamp {
   /** Publication generation the mint's authorization snapshot was resolved under. */
   readonly version: number
   /** Tool-cap basis at the same instant. */
   readonly capped: boolean
+  /** The profile form the mint produced; gates ledger admission. */
+  readonly form: MintForm
 }
 
 /** Bounded process-wide ledger of unadmitted mints; a burst cannot grow it without bound. */
@@ -612,9 +624,11 @@ export class MultiRootScopeService extends Service {
    * provider probe could run. An in-flight mint that crosses a real
    * publication keeps its entry generation, so the ledger refuses it rather
    * than re-stamping stale authorization under the current publication.
+   * @param form - the profile form the mint will produce (`clamped` and
+   *   `read-only` are the only ledger-eligible forms).
    */
-  captureMint(): MintStamp {
-    return { version: this.publicationVersion, capped: this.capped() }
+  captureMint(form: MintForm): MintStamp {
+    return { version: this.publicationVersion, capped: this.capped(), form }
   }
 
   /**
@@ -624,7 +638,9 @@ export class MultiRootScopeService extends Service {
    * the operation and it dies with it; an expired admission never bequeaths
    * one — a mint that outlived its operation is dropped, not demoted into
    * the ledger; only with NO admission frame at all does the profile join
-   * the publication-keyed ledger stamped with `mint`.
+   * the publication-keyed ledger stamped with `mint`, and only when the
+   * mint's form is primary-bounded — an `ambient` mint that arrives without
+   * a frame is dropped the same way.
    * @param argv - the confined argv just minted.
    * @param mint - the {@link captureMint} stamp taken at the mint's
    *   synchronous entry.
@@ -637,6 +653,7 @@ export class MultiRootScopeService extends Service {
       rememberOperationProfile(this.admissionProof, argv, mint.capped)
       return
     }
+    if (mint.form === 'ambient') return
     this.mintedProfiles.push({ argv: [...argv], capped: mint.capped, version: mint.version })
     if (this.mintedProfiles.length > MAX_MINTED_PROFILES) this.mintedProfiles.shift()
   }
@@ -667,7 +684,7 @@ export class MultiRootScopeService extends Service {
   private permitsMintedProfile(argv: readonly string[]): boolean {
     const capped = this.capped(), version = this.publicationVersion
     return this.mintedProfiles.some(entry => entry.version === version && entry.capped === capped
-      && entry.argv.length <= argv.length && entry.argv.every((arg, index) => argv[index] === arg))
+      && entry.argv.length > 0 && entry.argv.length <= argv.length && entry.argv.every((arg, index) => argv[index] === arg))
   }
 
   get admissionRequired(): boolean { return this.admissionProof !== undefined }

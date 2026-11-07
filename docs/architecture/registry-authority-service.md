@@ -81,7 +81,7 @@ DSH 的 bwrap/Landlock 执行通过 NoNewPrivs 限制；Windows ACL runner 使�
 | --- | --- |
 | fs write/edit | 每调用独立 admission；保留 recordedPath、执行时 canonical/stat 重检、每根权限与工具上限；普通 fs read 仍是上游的用户读权限 |
 | sandbox | `confine` 同步/异步形状由兼容层保留；只消费当次 scope；未知权威不给共享 temp；profile 在本次上下文登记 |
-| shell / PTC / sync spawn | 异步公开入口重新准入；同步入口借可信工具的异步 waterfall 上层。没有准入只收窄主根；直接调用同步 handle 的 Host 须显式 `await registry.withOperation(policy, 'process', async () => { const handle = shell.execute(spec); return handle.result() })`。旧/复制 argv 不在新上下文登记，拒绝复用；工具 cap 改变同样拒绝旧 profile |
+| shell / PTC / sync spawn | 异步公开入口重新准入；同步入口借可信工具的异步 waterfall 上层。没有准入只收窄主根；直接调用同步 handle 的 Host 须显式 `await registry.withOperation(policy, 'process', async () => { const handle = shell.execute(spec); return handle.result() })`。旧/复制 argv 不在新上下文登记，拒绝复用（修订见 ADR-0035：本进程铸造的钳制/read-only profile 在其铸造发布有效期内可无准入复用）；工具 cap 改变同样拒绝旧 profile |
 | agent PTY | `DSH_PTY_SESSION_ID` + live session 推导 policy；启动前新准入并重建 profile，检查路径身份；用户控制器终端透传。已启动 PTY 是快照例外 |
 | LSP | 每 query 新准入后路由；不改已有 server 进程的快照生命周期 |
 | Files | list/stat/read/readBytes 及存在的旧 readAll/readRelated 逐调用准入；related tail 检查；watch 开始与每帧重新准入，真实撤销/失联可取消旧附加根流 |

@@ -21,7 +21,7 @@ Accepted：撤权语义与本地操作准入合同。A1 最初仅接入 fs；后
 3. **一个 fs write/edit 调用就是一次准入。** 不依赖 `tools/execute` 必定存在；直接 `ctx.fs.writeText/editText` 同样进入 Registry。scope 捕获保留真实调度 ALS 中的工具封顶；调度外仍按既有未知工具身份规则收窄。没有 gated Registry 的组合继续走原 scope fence，provider 不增加 compat 硬注入。
 4. **执行身份与快照分开。** 本地 operation 身份含随机 `operationId`、Host 推导的 fs kind、每次成功打开介质新建的 `authorityEpoch` 和本轮 publication revision。snapshot 按值复制并冻结；operation handle 的 scope 仅在 callback 内可读取，成功、失败后均失效。这些身份不是可序列化、可复用的远程授权凭证；共享协议另以 store/epoch 与认证连接核验当次 admission。
 5. **revision 表示有效 publication，不代表完整远程授权协议。** scope grant/deny 或 Skills metadata 的真实 publication 才递增；重复刷新不增版、不通知。路径身份每次 scope 捕获仍重新检查；未触发 publication 的 filesystem 变化不依赖 revision 发现。未知权威的 operation 不带 epoch，scope 按原规则收窄。拆除开始后拒绝新的 operation，不再读取已经卸载的服务；原有排空 mutation → close domain → release lease 顺序不变。
-6. **进程继续遵循既有快照合同。** 旧 PTY 的下一条命令和旧进程派生的子进程仍可能继承旧权限；需要回收时必须结束或重建进程。不能把一个 turn、PTY 或缓存 profile 当作无限次新操作的许可。
+6. **进程继续遵循既有快照合同。** 旧 PTY 的下一条命令和旧进程派生的子进程仍可能继承旧权限；需要回收时必须结束或重建进程。不能把一个 turn、PTY 或缓存 profile 当作无限次新操作的许可。（修订见 [ADR-0035](./ADR-0035-unadmitted-confined-spawn.md)：本进程刚铸出的主根形态 profile 在其铸造发布未被超越期间可无准入复用；非本进程铸造或已被超越的缓存 profile 仍拒绝。）
 
 ## A1 的历史边界与后续接入
 

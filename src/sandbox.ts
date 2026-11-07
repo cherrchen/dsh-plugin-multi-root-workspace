@@ -92,8 +92,12 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
     // must not inherit the shared temp grants either.
     const scope = this.ctx.multiRootScope.resolve(policy)
     // The mint's authorization basis is this dispatch instant; an asynchronous
-    // probe that completes after a real publication must not re-stamp it.
-    const mint = this.ctx.multiRootScope.captureMint()
+    // probe that completes after a real publication must not re-stamp it. The
+    // ledger only accepts primary-bounded forms: an unavailable scope mints
+    // the clamp (workspace-write) or the read-only skeleton; anything else —
+    // including an ambient upstream result — stays frame-bound or dies.
+    const mint = this.ctx.multiRootScope.captureMint(scope.authority !== 'unavailable' ? 'ambient'
+      : policy.mode === 'read-only' ? 'read-only' : policy.mode === 'workspace-write' ? 'clamped' : 'ambient')
     const remember = (facts: ConfinedArgv): ConfinedArgv => { this.ctx.multiRootScope.rememberProfile(facts.argv, mint); return facts }
     if (policy.mode === 'workspace-write' && scope.authority === 'unavailable') {
       const prefix = this.clampedExecution(policy, scope.deniedRoots, signal)
@@ -207,7 +211,9 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
       workspaceRoot: policy.workspaceRoot,
       ...(policy.sessionId === undefined ? {} : { sessionId: policy.sessionId }),
     }
-    const mint = this.ctx.multiRootScope.captureMint()
+    // Ambient-minus-denies is not a ledger form: without a live admission this
+    // mint must not launch — `prepare` and OPS callers always hold a frame.
+    const mint = this.ctx.multiRootScope.captureMint('ambient')
     const base = super.confine as unknown as ConfineCall
     const probe = base.call(this, ['true'], probePolicy, signal)
     const restrict = (confined: ConfinedArgv): ConfinedArgv => {
@@ -256,7 +262,7 @@ export class MultiRootSandboxProvider extends LocalSandboxProvider {
       workspaceRoot: policy.workspaceRoot,
       ...(policy.sessionId === undefined ? {} : { sessionId: policy.sessionId }),
     }
-    const mint = this.ctx.multiRootScope.captureMint()
+    const mint = this.ctx.multiRootScope.captureMint('clamped')
     const base = super.confine as unknown as ConfineCall
     const probe = base.call(this, ['true'], probePolicy, signal)
     const clamp = (confined: ConfinedArgv): ConfinedArgv => {

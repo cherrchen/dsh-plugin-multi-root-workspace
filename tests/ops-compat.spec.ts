@@ -15,7 +15,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
 import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { MultiRootSandboxProvider } from '../src/sandbox.ts'
-import { nativeHostAvailability } from '../src/authority/native.ts'
+import { seatbeltConfineCapable } from './support/seatbelt.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import type { Config as ScopeConfig } from '../src/scope.ts'
 import * as ProcessFence from '../src/process-fence.ts'
@@ -53,8 +53,9 @@ const COMMAND = ['ops-worker', '--run']
 // The POSIX profile/lifecycle cases below cannot enter that domain on Windows;
 // the Windows matrix verifies the earlier boundary instead.
 const posixIt = it.skipIf(process.platform === 'win32')
-const availability = await nativeHostAvailability()
-const nativeIt = it.skipIf(!availability.available)
+// The ledger/OPS case needs only an owner stack and a real confine — the
+// cheaper Seatbelt probe, not the full native IPC capability.
+const seatbeltIt = it.skipIf(!seatbeltConfineCapable())
 
 interface Captured {
   spawned: SubprocessSpawnSpec[]
@@ -881,7 +882,7 @@ describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh'
     expect(world.captured.spawned).toHaveLength(2)
   })
 
-  nativeIt('refuses a ledger-minted profile while OPS roots are denied, then admits it when released', async () => {
+  seatbeltIt('refuses a ledger-minted profile while OPS roots are denied, then admits it when released', async () => {
     const world = await mountWorld({ shared: true, mode: 'workspace-write' })
     await world.ctx.multiRootRegistry.add(fixture.workspace, { path: fixture.outside, access: 'read-only' })
     const policy = world.ctx.sandboxPolicy.resolve({ session: world.agent.session })
