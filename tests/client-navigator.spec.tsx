@@ -172,6 +172,7 @@ interface Registration {
 
 const ROOT_A: RootView = { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', access: 'read-write', alias: 'payments' }
 const ROOT_B: RootView = { ordinal: 2, id: 'b', path: '/repos/website', addedAt: '2026-09-12T00:00:00.000Z', state: 'missing', access: 'read-only', detail: 'gone' }
+const ROOT_C: RootView = { ordinal: 3, id: 'c', path: '/repos/docs', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', access: 'read-only', alias: 'docs' }
 
 /** The stub listing's tree: `src` is the reveal path, `other/deep` is the off-path nested memory. */
 const LISTINGS: Record<string, { name: string; type: 'file' | 'directory' }[]> = {
@@ -179,6 +180,8 @@ const LISTINGS: Record<string, { name: string; type: 'file' | 'directory' }[]> =
   '/repos/payments/src': [{ name: 'inner.ts', type: 'file' }],
   '/repos/payments/other': [{ name: 'deep', type: 'directory' }, { name: 'loose.md', type: 'file' }],
   '/repos/payments/other/deep': [{ name: 'x.ts', type: 'file' }],
+  '/repos/docs': [{ name: 'guide', type: 'directory' }, { name: 'index.md', type: 'file' }],
+  '/repos/docs/guide': [{ name: 'intro.md', type: 'file' }],
 }
 
 interface Harness {
@@ -199,7 +202,7 @@ function mount(): Harness {
   const saves: { key: string; snapshot: unknown }[] = []
   const registrations: Registration[] = []
   const held = new Map<string, Promise<void>>()
-  const view: RootsView = { primaryRoot: '/repos/primary', primaryName: 'Platform', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 }
+  const view: RootsView = { primaryRoot: '/repos/primary', primaryName: 'Platform', roots: [ROOT_A, ROOT_B, ROOT_C], limit: 16, count: 3 }
   const currentSession = 'session-1'
   const connection = {
     rpc: {
@@ -344,6 +347,7 @@ interface PreviewMount {
   readonly header: HTMLElement
   readonly content: HTMLElement
   readonly host: HTMLElement
+  readonly setFile: (path: string) => void
   readonly unmount: () => void
 }
 
@@ -359,14 +363,18 @@ interface PreviewMount {
 function renderInPreview(
   harness: Harness,
   owner: Record<string, unknown> = {},
-  options: { file?: string; url?: string; tabId?: string; paneId?: string } = {},
+  options: { file?: string; url?: string; tabId?: string; paneId?: string; float?: boolean } = {},
 ): PreviewMount {
   const file = options.file ?? PREVIEWED
   const cell = document.createElement('div')
-  cell.setAttribute('data-dockkit-host', 'dock')
+  cell.setAttribute('data-dockkit-host', options.float === true ? 'float' : 'dock')
   const host = document.createElement('section')
   host.setAttribute('data-dockkit-content', options.tabId ?? 'tab-preview')
-  host.setAttribute('data-dockkit-pane', options.paneId ?? 'pane-1')
+  const paneId = options.paneId ?? 'pane-1'
+  // A floating pane's host carries `data-dockkit-float` instead of
+  // `data-dockkit-pane` — the other spelling a pane carrier can take.
+  if (options.float === true) host.setAttribute('data-dockkit-float', paneId)
+  else host.setAttribute('data-dockkit-pane', paneId)
   const preview = document.createElement('div')
   preview.setAttribute('data-textpreview-url', options.url ?? sessionFileAddress('session-1', file))
   const header = document.createElement('div')
@@ -382,13 +390,25 @@ function renderInPreview(
   appended.push(cell)
   const occupant = harness.occupant(owner) as ReactElement
   const mounted = render(occupant, { container: header })
-  return { cell, preview, header, content, host, unmount: () => { mounted.unmount() } }
+  return {
+    cell,
+    preview,
+    header,
+    content,
+    host,
+    /** Re-render the same occupant under a new previewed file and address. */
+    setFile: (path: string) => {
+      preview.setAttribute('data-textpreview-url', sessionFileAddress('session-1', path))
+      act(() => { mounted.rerender(harness.occupant({ ...owner, absolutePath: path }) as ReactElement) })
+    },
+    unmount: () => { mounted.unmount() },
+  }
 }
 
 /** Append the native navigator aside to the preview's content row. */
-function openNavigator(content: HTMLElement): { aside: HTMLElement; body: HTMLElement } {
+function openNavigator(content: HTMLElement, paneId = 'pane-1'): { aside: HTMLElement; body: HTMLElement } {
   const aside = document.createElement('aside')
-  aside.setAttribute('data-files-navigator', 'pane-1')
+  aside.setAttribute('data-files-navigator', paneId)
   aside.setAttribute('data-files-root', '/repos/primary')
   const body = document.createElement('div')
   body.setAttribute('data-files-body', '')
@@ -505,11 +525,16 @@ describe('the preview navigator retarget', () => {
     // Upstream's `replaceTab` closes the preview tab and mints a new one in
     // the same pane — one commit swaps the cells: the occupant unmounts,
     // the old tab host leaves, and the new host carries the same pane id.
-    // The pane's carrier never disappears, so its record lives.
-    first.unmount()
-    first.cell.remove()
-
-    const second = renderInPreview(harness, { absolutePath: '/repos/payments/other/loose.md' }, { tabId: 'tab-next', file: '/repos/payments/other/loose.md' })
+    // Doing the whole swap in one synchronous act is the observers' view
+    // of one commit: the pane's carrier never disappears, so its record
+    // lives.
+    let second!: PreviewMount
+    act(() => {
+      first.unmount()
+      first.cell.remove()
+      second = renderInPreview(harness, { absolutePath: '/repos/payments/other/loose.md' }, { tabId: 'tab-next', file: '/repos/payments/other/loose.md' })
+    })
+    await act(async () => {})
     const secondAside = openNavigator(second.content).aside
     await waitFor(() => { expect(secondAside.hasAttribute('data-mrfw-navigator')).toBe(true) })
     // The pane record carried the expansion across the tab's death.
@@ -744,5 +769,101 @@ describe('the preview navigator retarget', () => {
     await waitFor(() => { expect(secondAside.querySelector('[data-files-path="/repos/payments/other"]')).not.toBeNull() })
     // A pane that died keeps nothing: `other` never re-expands.
     expect(expanded(secondAside, '/repos/payments/other')).toBe(false)
+  })
+
+  it('keeps the record while a pane goes EMPTY before a new tab arrives', async () => {
+    const harness = mount()
+    const first = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const firstAside = openNavigator(first.content).aside
+    await waitFor(() => { expect(firstAside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await expandDir(firstAside, '/repos/payments/other', '/repos/payments/other/deep')
+
+    // The preview's tab closes while its pane survives — dockkit draws an
+    // empty `TabPanel`, which is itself a `data-dockkit-pane` carrier.
+    // Carrier never missing ⇒ record never dead.
+    const emptyPane = document.createElement('section')
+    emptyPane.setAttribute('data-dockkit-pane', 'pane-1')
+    act(() => {
+      first.unmount()
+      first.cell.remove()
+      document.body.append(emptyPane)
+      appended.push(emptyPane)
+    })
+    await act(async () => {})
+
+    let second!: PreviewMount
+    act(() => {
+      emptyPane.remove()
+      second = renderInPreview(harness, { absolutePath: PREVIEWED }, { tabId: 'tab-next' })
+    })
+    const secondAside = openNavigator(second.content).aside
+    await waitFor(() => { expect(secondAside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => { expect(expanded(secondAside, '/repos/payments/other')).toBe(true) })
+  })
+
+  it('drops the record when the pane dies AFTER the navigator closed', async () => {
+    const harness = mount()
+    const first = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const { aside } = openNavigator(first.content)
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await expandDir(aside, '/repos/payments/other', '/repos/payments/other/deep')
+
+    // The Folder toggle closes first — the hold ends, the memory is kept —
+    // and the pane dies afterwards: the death watch is the only thing left
+    // that can drop it, and it does.
+    act(() => { aside.remove() })
+    await act(async () => {})
+    act(() => { first.cell.remove() })
+    await act(async () => {})
+
+    const second = renderInPreview(harness, { absolutePath: '/repos/payments/notes.md' }, { tabId: 'tab-next', file: '/repos/payments/notes.md' })
+    const secondAside = openNavigator(second.content).aside
+    await waitFor(() => { expect(secondAside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => { expect(secondAside.querySelector('[data-files-path="/repos/payments/other"]')).not.toBeNull() })
+    expect(expanded(secondAside, '/repos/payments/other')).toBe(false)
+  })
+
+  it('treats a floating pane host as a pane carrier too', async () => {
+    const harness = mount()
+    const first = renderInPreview(harness, { absolutePath: PREVIEWED }, { float: true, paneId: 'pane-float' })
+    const { aside } = openNavigator(first.content, 'pane-float')
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    // The float carrier satisfies the survival check at arm time — a miss
+    // would abort the newborn takeover and the tree would never draw.
+    await waitFor(() => {
+      expect(aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+    })
+    await expandDir(aside, '/repos/payments/other', '/repos/payments/other/deep')
+
+    act(() => { aside.remove() })
+    await act(async () => {})
+    const second = openNavigator(first.content, 'pane-float')
+    await waitFor(() => { expect(second.aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => { expect(expanded(second.aside, '/repos/payments/other')).toBe(true) })
+  })
+
+  it('keeps each root\'s saved view under the same pane — switching preview files cannot smear them', async () => {
+    const harness = mount()
+    const first = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const { aside } = openNavigator(first.content)
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => {
+      expect(aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+    })
+    await expandDir(aside, '/repos/payments/other', '/repos/payments/other/deep')
+
+    // The preview navigates to a file under ANOTHER additional root: same
+    // pane, new root — the takeover re-keys under the same pane id.
+    act(() => { first.setFile('/repos/docs/guide/intro.md') })
+    await waitFor(() => { expect(aside.querySelector('[data-files-path="/repos/docs/guide"]')).not.toBeNull() })
+    // payments' expanded set never leaks into the docs record.
+    await waitFor(() => {
+      expect(harness.saves.some(save => (save.snapshot as { root?: string }).root === '/repos/docs'
+        && ((save.snapshot as { expanded?: readonly string[] }).expanded?.includes('/repos/payments/other') !== true))).toBe(true)
+    })
+
+    // Back to payments — its own record kept `other` expanded.
+    act(() => { first.setFile('/repos/payments/src/inner.ts') })
+    await waitFor(() => { expect(expanded(aside, '/repos/payments/other')).toBe(true) })
   })
 })

@@ -62,10 +62,10 @@ export type FilesTreeProps =
     /**
      * The owner's live scroll mirror — upstream's `scrolled` writing
      * `pane.scrollTop`: fired on every scroll and once more at unmount with
-     * the body's final offset, unless the takeover signal already aborted
-     * (a dead owner's cleanup reports nothing). The fork's own store still
-     * hears the offset only at unmount through `actions.scrolled`, as
-     * upstream.
+     * the body's final offset (the adapter refuses the write when the owner
+     * is already dead, so a normal close keeps its last position while a
+     * killed one cannot resurrect). The fork's own store still hears the
+     * offset only at unmount through `actions.scrolled`, as upstream.
      */
     readonly onScrollOffset?: ((offset: number) => void) | undefined
     /**
@@ -344,12 +344,14 @@ export function FilesTree({
     return () => { body.removeEventListener('scroll', scroll) }
   }, [seeded, onScrollOffset])
   useEffect(() => () => {
-    // The aborted owner's unmount reports nothing: a dropped record must
-    // not be resurrected by a cleanup that outlived its own death watch.
-    if (!signal.aborted) {
-      if (seeded) actions.scrolled(tabId, scrollTopRef.current)
-      onScrollOffset?.(scrollTopRef.current)
-    }
+    // The store write stays gated — `scrolled` would reseed the forgotten
+    // bucket — but the owner's mirror reports the final offset on every
+    // unmount: a closed takeover's last scroll event may never have fired
+    // (pending events die with the detached body), and the adapter refuses
+    // writes whose owner is already dead, so reporting unconditionally is
+    // what keeps a normal close's last offset.
+    if (seeded && !signal.aborted) actions.scrolled(tabId, scrollTopRef.current)
+    onScrollOffset?.(scrollTopRef.current)
   }, [seeded, signal, tabId, actions, onScrollOffset])
   useEffect(() => {
     // A bucket gone because the record aborted must not be re-seeded by a

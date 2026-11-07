@@ -109,11 +109,6 @@ interface Takeover {
 }
 
 /**
- * The marker that lives in the preview header and, while the file it names
- * sits under an additional root, lends the navigator aside to the forked
- * tree. It draws nothing of its own.
- */
-/**
  * A dockkit pane has no stable element: a non-empty pane's id rides on its
  * SELECTED tab's host (`data-dockkit-pane`), an empty pane's on its
  * `TabPanel`, and a floating pane's host carries `data-dockkit-float` —
@@ -129,6 +124,11 @@ function paneAlive(id: string): boolean {
   return false
 }
 
+/**
+ * The marker that lives in the preview header and, while the file it names
+ * sits under an additional root, lends the navigator aside to the forked
+ * tree. It draws nothing of its own.
+ */
 export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   const { absolutePath, sessionId, panel, filesTree } = props
   const anchorRef = useRef<HTMLSpanElement | null>(null)
@@ -265,20 +265,21 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   const takeoverCtl = filesTree.takeover
   const bucket = filesTree.useStore(store => (paneId === undefined ? undefined : store.byTab[paneId]))
   useEffect(() => {
-    if (bucket !== undefined && takeover !== null && paneId !== undefined && takeover.paneId === paneId && takeover.root === rootPath) {
-      takeoverCtl.save(paneId, { root: takeover.root, expanded: bucket.expanded })
+    if (bucket !== undefined && takeover !== null && takeover.paneId === paneId && takeover.root === rootPath) {
+      takeoverCtl.save(takeover.paneId, { root: takeover.root, expanded: bucket.expanded })
     }
   }, [bucket, takeover, paneId, rootPath, takeoverCtl])
 
   // The body's live scroll offset, reported by the fork itself through
   // `onScrollOffset` — the fork's store only hears the offset on body
   // unmount, but the pane record wants the value at close time, the same
-  // live `pane.scrollTop` upstream's `scrolled` maintains.
+  // live `pane.scrollTop` upstream's `scrolled` maintains. The write goes
+  // under the LIVE takeover's own key — never a stale paneId/rootPath from
+  // a switch still in flight — and the adapter refuses it entirely once
+  // the owner is dead.
   const onScrollOffset = useCallback((offset: number): void => {
-    if (paneId !== undefined && rootPath !== undefined) {
-      takeoverCtl.save(paneId, { root: rootPath, scrollTop: offset })
-    }
-  }, [takeoverCtl, paneId, rootPath])
+    if (takeover !== null) takeoverCtl.save(takeover.paneId, { root: takeover.root, scrollTop: offset })
+  }, [takeover, takeoverCtl])
 
   // The hold: while the aside exists AND the file belongs to an additional
   // root, the tree's lifetime is the aside's — exactly upstream's
@@ -308,10 +309,8 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   }, [aside, rootPath, paneId, takeoverCtl])
 
   const onRevealSettled = useCallback((path: string): void => {
-    if (paneId !== undefined && rootPath !== undefined) {
-      takeoverCtl.save(paneId, { root: rootPath, revealed: path })
-    }
-  }, [takeoverCtl, paneId, rootPath])
+    if (takeover !== null) takeoverCtl.save(takeover.paneId, { root: takeover.root, revealed: path })
+  }, [takeover, takeoverCtl])
 
   return (
     <>

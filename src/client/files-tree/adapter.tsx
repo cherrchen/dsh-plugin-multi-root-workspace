@@ -278,38 +278,50 @@ export function createFilesTreeSeats(ctx: ClientContext): {
     // it. The death watch is keyed apart from the hold itself — an `end()`
     // that disconnects it would make the drop unreachable: the owner's
     // death and the body's unmount land in the same upstream commit, and
-    // the cleanup's `end` always wins that race. One watcher per owner key;
-    // `signal()` re-arms it when a caller supplies a fresher check.
+    // the cleanup's `end` always wins that race. One shared observer serves
+    // every armed owner: pane carriers come and go through childList records
+    // AND through in-place `data-dockkit-*` rewrites (a selection change
+    // moves the id between hosts without touching any node), so both record
+    // kinds are observed and verdicts run only on batches that could change
+    // them. When no owner is left to watch the observer disconnects itself —
+    // it never outlives its own DOM.
     const savedTrees = new Map<TabId, Map<string, FilesTreeSaved>>()
-    const watchers = new Map<TabId, { alive: () => boolean; observer: MutationObserver }>()
+    const watchers = new Map<TabId, () => boolean>()
+    let watcherObserver: MutationObserver | undefined
     const endTakeover = (key: TabId, dropSaved = false): void => {
       const held = takeovers.get(key)
       held?.controller.abort()
       takeovers.delete(key)
       if (dropSaved) savedTrees.delete(key)
     }
-    const armDeathWatch = (key: TabId, alive: () => boolean): void => {
-      const watched = watchers.get(key)
-      if (watched === undefined) {
-        const entry = {
-          alive,
-          observer: new MutationObserver(() => {
-            if (!entry.alive()) {
-              watchers.delete(key)
-              entry.observer.disconnect()
-              endTakeover(key, true)
-            }
-          }),
+    const dropDeadOwners = (): void => {
+      for (const [key, alive] of watchers) {
+        if (!alive()) {
+          watchers.delete(key)
+          endTakeover(key, true)
         }
-        entry.observer.observe(document, { childList: true, subtree: true })
-        watchers.set(key, entry)
-      } else watched.alive = alive
-      const current = watchers.get(key)
-      if (current !== undefined && !current.alive()) {
-        watchers.delete(key)
-        current.observer.disconnect()
-        endTakeover(key, true)
       }
+      if (watchers.size === 0) {
+        watcherObserver?.disconnect()
+        watcherObserver = undefined
+      }
+    }
+    const armDeathWatch = (key: TabId, alive: () => boolean): void => {
+      watchers.set(key, alive)
+      if (watcherObserver === undefined) {
+        watcherObserver = new MutationObserver((mutations) => {
+          const relevant = mutations.some(mutation =>
+            mutation.type === 'attributes' || mutation.addedNodes.length !== 0 || mutation.removedNodes.length !== 0)
+          if (relevant) dropDeadOwners()
+        })
+        watcherObserver.observe(document, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['data-dockkit-pane', 'data-dockkit-float'],
+        })
+      }
+      dropDeadOwners()
     }
     return {
       face: face(sessionId, actions),
@@ -349,6 +361,10 @@ export function createFilesTreeSeats(ctx: ClientContext): {
         end: key => { endTakeover(key) },
         saved: (key, root) => savedTrees.get(key)?.get(root),
         save: (key, snapshot) => {
+          // A dead owner takes no writes: once the hold AND the watch are
+          // both gone, nothing live remains that could still report a value,
+          // and a cleanup racing the drop must not resurrect the record.
+          if (!takeovers.has(key) && !watchers.has(key)) return
           let perRoot = savedTrees.get(key)
           if (perRoot === undefined) savedTrees.set(key, perRoot = new Map())
           const previous = perRoot.get(snapshot.root)
