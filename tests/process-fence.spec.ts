@@ -31,6 +31,7 @@ import * as ProcessFence from '../src/process-fence.ts'
 import { mountCompat } from './support/compat.ts'
 import { mountProviderGate } from './support/providers.ts'
 import { confined } from './support/confine.ts'
+import { sbplSubpath } from './support/sbpl.ts'
 import { createFixtureWorkspace } from './support/temp-workspace.ts'
 import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
@@ -124,10 +125,6 @@ async function mountStack(
 function member(path: string, access: 'inherit' | 'read-only' | 'read-write', index = 0) {
   return { id: `root-${index}`, path, recordedPath: canonicalPath(path), access }
 }
-
-/** The SBPL spelling of a subpath literal — backslashes and quotes escaped. */
-const sbplSubpath = (path: string): string =>
-  `(subpath "${path.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}")`
 
 describe('the restricted argv prefix', () => {
   const policy = { mode: 'danger-full-access', workspaceRoot: '' } as unknown as SandboxPolicy

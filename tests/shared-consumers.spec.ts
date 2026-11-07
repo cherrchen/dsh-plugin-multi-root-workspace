@@ -17,6 +17,7 @@ import * as LspRouting from '../src/lsp.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { skillsStack, writeSkill } from './support/skills-stack.ts'
 import { internalSkillName } from '../src/skills/catalog.ts'
+import { sbplSubpath } from './support/sbpl.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
 
 const availability = await nativeHostAvailability()
@@ -159,8 +160,10 @@ it('drops a mint that outlived its admission instead of demoting it into the led
     release()
     const minted = (await pending).argv
     // The profile really did graft the operation's writable root — and must
-    // still not launch: an expired admission never bequeaths a profile.
-    expect(minted.join(' ')).toContain(fixture.outside)
+    // still not launch: an expired admission never bequeaths a profile. The
+    // profile escapes a Windows path's backslashes, so compare the SBPL
+    // spelling rather than the raw path.
+    expect(minted.join(' ')).toContain(sbplSubpath(fixture.outside))
     expect(() => ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toThrow('live admission')
   } finally { release() }
 })
@@ -189,7 +192,7 @@ it.skipIf(symlinkUnsupportedReason() !== undefined)('mints an unadmitted profile
   const minted = (await ctx.sandbox.confine(['bash', '-c', 'true'], policy())).argv
   // The Seatbelt profile spells its grants literally: the member path never
   // entered it — nothing grafted for the launch to honor after the redirect.
-  expect(minted.join(' ')).not.toContain(fixture.outside)
+  expect(minted.join(' ')).not.toContain(sbplSubpath(fixture.outside))
   renameSync(fixture.outside, join(fixture.base, 'saved')); symlinkSync(fixture.workspace, fixture.outside, 'dir')
   expect(ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
 })
