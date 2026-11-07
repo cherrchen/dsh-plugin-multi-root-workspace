@@ -15,6 +15,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
 import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { MultiRootSandboxProvider } from '../src/sandbox.ts'
+import { nativeHostAvailability } from '../src/authority/native.ts'
 import { MultiRootScopeService } from '../src/scope.ts'
 import type { Config as ScopeConfig } from '../src/scope.ts'
 import * as ProcessFence from '../src/process-fence.ts'
@@ -52,6 +53,8 @@ const COMMAND = ['ops-worker', '--run']
 // The POSIX profile/lifecycle cases below cannot enter that domain on Windows;
 // the Windows matrix verifies the earlier boundary instead.
 const posixIt = it.skipIf(process.platform === 'win32')
+const availability = await nativeHostAvailability()
+const nativeIt = it.skipIf(!availability.available)
 
 interface Captured {
   spawned: SubprocessSpawnSpec[]
@@ -876,6 +879,19 @@ describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh'
     world.setOpsEnabled(false)
     expect(world.ctx.subprocess.spawn({ argv: COMMAND, cwd: fixture.workspace })).toEqual({ pid: 1 })
     expect(world.captured.spawned).toHaveLength(2)
+  })
+
+  nativeIt('refuses a ledger-minted profile while OPS roots are denied, then admits it when released', async () => {
+    const world = await mountWorld({ shared: true, mode: 'workspace-write' })
+    await world.ctx.multiRootRegistry.add(fixture.workspace, { path: fixture.outside, access: 'read-only' })
+    const policy = world.ctx.sandboxPolicy.resolve({ session: world.agent.session })
+    const minted = (await world.ctx.sandbox.confine(['ledger-worker', '--run'], policy)).argv
+    // The mint is fresh and its publication is current — but the OPS protection
+    // window only honors a live admission, never the unadmitted ledger.
+    expect(() => world.ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toThrow(/unattributed subprocess/)
+    expect(world.captured.spawned).toEqual([])
+    world.setOpsEnabled(false)
+    expect(world.ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
   })
 
   it('rejects an expired handoff even when the enforcing fence has unloaded', async () => {

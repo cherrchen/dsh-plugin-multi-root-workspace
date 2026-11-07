@@ -28,7 +28,9 @@ import type {} from '@deepseek-ai/dsh-tools'
 import type {} from './compat.ts'
 import type {} from './providers.ts'
 import { primaryKey, type RootAccess } from './roots.ts'
-import { currentRegistryOperation, rememberOperationProfile, operationPermitsProfile } from './registry-operation.ts'
+import {
+  currentRegistryOperation, operationFrameState, rememberOperationProfile, operationPermitsProfile,
+} from './registry-operation.ts'
 import { aroundTool } from './compat/tool-context.ts'
 import { createOpsProtectionState, opsDispatchBarrier, opsSpawnPermitted } from './compat/ops-tools.ts'
 import type { OpsProtectionState } from './compat/ops-tools.ts'
@@ -353,6 +355,14 @@ interface MintedProfile {
   readonly version: number
 }
 
+/** The authorization basis a mint carried at its synchronous entry, stamped onto its ledger entry. */
+export interface MintStamp {
+  /** Publication generation the mint's authorization snapshot was resolved under. */
+  readonly version: number
+  /** Tool-cap basis at the same instant. */
+  readonly capped: boolean
+}
+
 /** Bounded process-wide ledger of unadmitted mints; a burst cannot grow it without bound. */
 const MAX_MINTED_PROFILES = 256
 
@@ -597,18 +607,37 @@ export class MultiRootScopeService extends Service {
   requireAdmission(proof: object): void { this.admissionProof = proof }
 
   /**
-   * Record a confined profile this host's provider just minted. Inside a live
-   * admission the profile binds to the operation and dies with it; outside one
-   * it joins the publication-keyed ledger and dies on the next republish.
-   * @param argv - the confined argv just minted.
+   * The stamp an asynchronously completing mint must carry: the publication
+   * generation and tool-cap basis at the mint's synchronous entry, before any
+   * provider probe could run. An in-flight mint that crosses a real
+   * publication keeps its entry generation, so the ledger refuses it rather
+   * than re-stamping stale authorization under the current publication.
    */
-  rememberProfile(argv: readonly string[]): void {
+  captureMint(): MintStamp {
+    return { version: this.publicationVersion, capped: this.capped() }
+  }
+
+  /**
+   * Record a confined profile this host's provider just minted. Only
+   * meaningful under the shared Registry (`admissionProof` set; without it
+   * `permitsProfile` never refuses): a live admission binds the profile to
+   * the operation and it dies with it; an expired admission never bequeaths
+   * one — a mint that outlived its operation is dropped, not demoted into
+   * the ledger; only with NO admission frame at all does the profile join
+   * the publication-keyed ledger stamped with `mint`.
+   * @param argv - the confined argv just minted.
+   * @param mint - the {@link captureMint} stamp taken at the mint's
+   *   synchronous entry.
+   */
+  rememberProfile(argv: readonly string[], mint: MintStamp): void {
     if (this.admissionProof === undefined) return
-    if (currentRegistryOperation(this.admissionProof) !== undefined) {
-      rememberOperationProfile(this.admissionProof, argv, this.capped())
+    const frame = operationFrameState(this.admissionProof)
+    if (frame === 'expired') return
+    if (frame === 'active') {
+      rememberOperationProfile(this.admissionProof, argv, mint.capped)
       return
     }
-    this.mintedProfiles.push({ argv: [...argv], capped: this.capped(), version: this.publicationVersion })
+    this.mintedProfiles.push({ argv: [...argv], capped: mint.capped, version: mint.version })
     if (this.mintedProfiles.length > MAX_MINTED_PROFILES) this.mintedProfiles.shift()
   }
 

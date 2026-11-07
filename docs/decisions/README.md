@@ -51,7 +51,7 @@ ADR-0001-short-title.md
 ADR-0002-short-title.md
 ```
 
-编号递增，标题使用小写中划线。
+编号递增，标题使用小写中划线。ADR-0030–0034 已分配给 `feat/ssh-workspace` 分支；主线在 ADR-0029 之后直接使用 0035 起跳，跳号属有意保留而非缺失。
 
 - [ADR-0022-auto-review-loader-entry.md](./ADR-0022-auto-review-loader-entry.md) — Auto Review 并入主包：默认关闭的单一 loader 行、运行时接管、并发导入防护、有序 owner 交接与单包构建（取代 ADR-0021 的交付结构）。
 
@@ -69,4 +69,4 @@ ADR-0002-short-title.md
 
 - [ADR-0029-ops-file-authorization-and-activity-adapter.md](./ADR-0029-ops-file-authorization-and-activity-adapter.md) — OPS 实验性保守兜底、Phase A live 与受限 Review 的限定接受范围；P5 完整兼容恢复无限期延后，不纳入本次最终验收。
 
-- [ADR-0035-unadmitted-confined-spawn.md](./ADR-0035-unadmitted-confined-spawn.md) — 准入外受限 spawn：铸造台账（发布代次键控、进程内有界）恢复「仅主根可写」降级，外部服务入口（forgePanel/worktrees）照常取真准入；OPS 域保持严格帧内铸造（Accepted）。
+- [ADR-0035-unadmitted-confined-spawn.md](./ADR-0035-unadmitted-confined-spawn.md) — 准入外受限 spawn：铸造台账（铸造时发布代次键控、进程内有界、过期帧不落账）恢复「仅主根可写」降级，外部服务入口（forgePanel/worktrees）照常取真准入；OPS 域与保护窗口对台账 mint 一律严格（Accepted）。

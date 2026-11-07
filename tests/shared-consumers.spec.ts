@@ -10,6 +10,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { nativeHostAvailability } from '../src/authority/native.ts'
 import MultiRootFileSystem from '../src/fs.ts'
 import MultiRootSandboxProvider from '../src/sandbox.ts'
+import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import * as ProcessFence from '../src/process-fence.ts'
 import * as FilesRouting from '../src/workspace-files.ts'
 import * as LspRouting from '../src/lsp.ts'
@@ -102,6 +103,60 @@ nativeTest('launches an unadmitted confine→spawn while its publication is curr
   expect(() => ctx.subprocess.spawn({ argv: ['sandbox-exec', '-p', '(version 1)', '--', 'true'], cwd: fixture.workspace })).toThrow('live admission')
 })
 
+nativeTest('stamps a mint at dispatch, so a publication landing mid-probe keeps it refused', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
+  await ctx.plugin(ProcessFence)
+  // Hold the upstream probe: the mint resolves its authorization snapshot at
+  // dispatch, then a real publication lands before the probe completes.
+  const originalConfine = LocalSandboxProvider.prototype.confine
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  vi.spyOn(LocalSandboxProvider.prototype, 'confine')
+    .mockImplementation(function (this: LocalSandboxProvider, ...args) {
+      return held.then(() => originalConfine.apply(this, args))
+    })
+  try {
+    const pending = ctx.sandbox.confine(['bash', '-c', 'true'], policy())
+    await owner.registry.setAccess(fixture.workspace, { kind: 'path', path: fixture.outside }, 'read-only')
+    release()
+    const minted = (await pending).argv
+    expect(() => ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toThrow('live admission')
+    // A mint issued under the current publication launches again.
+    const fresh = (await ctx.sandbox.confine(['bash', '-c', 'true'], policy())).argv
+    expect(ctx.subprocess.spawn({ argv: [...fresh], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
+  } finally { release() }
+})
+
+nativeTest('drops a mint that outlived its admission instead of demoting it into the ledger', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
+  await ctx.plugin(ProcessFence)
+  const originalConfine = LocalSandboxProvider.prototype.confine
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  vi.spyOn(LocalSandboxProvider.prototype, 'confine')
+    .mockImplementation(function (this: LocalSandboxProvider, ...args) {
+      return held.then(() => originalConfine.apply(this, args))
+    })
+  let pending!: ReturnType<typeof ctx.sandbox.confine>
+  try {
+    await owner.registry.withOperation(policy(), 'process', () => {
+      // A fire-and-forget mint inside the admission: its probe settles only
+      // after the operation's await body has already returned.
+      pending = ctx.sandbox.confine(['bash', '-c', 'true'], policy())
+    })
+    release()
+    const minted = (await pending).argv
+    // The profile really did graft the operation's writable root — and must
+    // still not launch: an expired admission never bequeaths a profile.
+    expect(minted.join(' ')).toContain(fixture.outside)
+    expect(() => ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toThrow('live admission')
+  } finally { release() }
+})
+
 nativeTest.skipIf(symlinkUnsupportedReason() !== undefined)('mints an unadmitted profile without member grants, so a member redirect cannot invalidate it', async () => {
   const owner = await mount(), ctx = owner.ctx
   await owner.registry.add(fixture.workspace, { path: fixture.outside })
@@ -111,6 +166,9 @@ nativeTest.skipIf(symlinkUnsupportedReason() !== undefined)('mints an unadmitted
   // is the clamped primary-root form and grants `fixture.outside` nothing.
   expect(ctx.multiRootScope.resolve(policy())).toMatchObject({ authority: 'unavailable', additionalRoots: [] })
   const minted = (await ctx.sandbox.confine(['bash', '-c', 'true'], policy())).argv
+  // The Seatbelt profile spells its grants literally: the member path never
+  // entered it — nothing grafted for the launch to honor after the redirect.
+  expect(minted.join(' ')).not.toContain(fixture.outside)
   renameSync(fixture.outside, join(fixture.base, 'saved')); symlinkSync(fixture.workspace, fixture.outside, 'dir')
   expect(ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
 })

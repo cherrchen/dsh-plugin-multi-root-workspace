@@ -55,7 +55,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ConfinedArgv, SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
-import type { Session, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session'
 import type { SubprocessSpawnSpec, SubprocessTerminalSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-subprocess'
@@ -79,6 +79,7 @@ import type { MultiRootSandboxProvider } from './sandbox.ts'
 import { decorateProcessOutcome } from './compat/process-result.ts'
 import { isAsyncProcessEntry, ptcEntrypoints, shellEntrypoints } from './compat/process-entrypoints.ts'
 import type { ProcessEntrypoint } from './compat/process-entrypoints.ts'
+import { FORGE_PROCESS_SERVICES, sessionOf } from './compat/forge-entrypoints.ts'
 
 // `multiRootProviders` is the provider-conflict gate: the restricted profile is
 // only meaningful when `ctx.sandbox` is THIS bundle's provider — a foreign one
@@ -274,9 +275,11 @@ export function apply(ctx: Context): void {
         }
       }
       const launch = () => original.call(this, argv === spec.argv ? spec : { ...spec, argv })
-      // Only the prepared domain or this admission's exact profile can cross
-      // the independent scope guard. Unknown maintenance has neither.
-      const handle = store !== undefined || admissionScope.admissionRequired && admissionScope.permitsProfile(argv)
+      // Only the prepared domain or a profile minted inside a live admission
+      // earns the OPS protection window's launch permit; a ledger mint still
+      // launches unadmitted — just unattributed, so the scope guard refuses
+      // it while OPS roots are denied.
+      const handle = store !== undefined || admissionScope.admissionRequired && admissionScope.permitsOperationProfile(argv)
         ? withOpsSpawnPermit(opsState, launch) : launch()
       if (store === undefined) return handle
       // `collected.stderr.readFrom(0)` is cursor-free — a live shell handle's
@@ -398,49 +401,38 @@ export function apply(ctx: Context): void {
 
   // Foreign services that compose `ctx.sandbox.confine` + `ctx.subprocess.spawn`
   // on their own code paths — the upstream experimental forge bundle's panel
-  // and worktree service. Their async public entries get the same ordered
-  // admission the wrapped executors receive; entries unreachable from here
-  // (background inspections, async generators, isolated mounts) stay covered
-  // by the minted-profile ledger instead. `ctx.inject` never fires for a
-  // service nobody mounted, so these hooks cost nothing without the bundle.
-  // The session is read from the first argument alone: a `Session`, or an
-  // `Agent`-shaped value carrying one. Anything else runs unadmitted rather
-  // than risk `sandboxPolicy.resolve` reading fields a foreign arg lacks.
-  const sessionOf = (first: unknown): Session | undefined => {
-    const candidate = object(first) && object(first.session) ? first.session : first
-    return object(candidate) && typeof candidate.id === 'string' && object(candidate.header)
-      ? candidate as unknown as Session : undefined
-  }
+  // and worktree service (`compat/forge-entrypoints.ts` owns the per-release
+  // service/key inventory and the session probe). Their async public entries
+  // get the same ordered admission the wrapped executors receive; entries
+  // unreachable from here (background inspections, async generators, isolated
+  // mounts) stay covered by the minted-profile ledger instead. `ctx.inject`
+  // never fires for a service nobody mounted, so these hooks cost nothing
+  // without the bundle. A key the mounted service exposes but cannot take a
+  // wrapper — a getter-only property rather than a plain method — is skipped
+  // with a warning rather than failing the whole hook.
   const admitCalls = (service: string, keys: readonly string[]): void => {
     ctx.inject([service], (scope: Context) => {
       const target = scope.get(service) as Record<string, unknown> | undefined
       if (target === undefined) return
       for (const key of keys) {
-        if (!isAsyncProcessEntry(target[key])) continue
-        scope.effect(() => wrapMethod(
-          target as Record<string, (this: unknown, first: unknown, ...rest: unknown[]) => unknown>,
-          key,
-          original => function (this: unknown, first: unknown, ...rest: unknown[]) {
-            const session = sessionOf(first)
-            if (session === undefined) return original.call(this, first, ...rest)
-            const policy = ctx.sandboxPolicy.resolve({ session })
-            return withRegistryAdmission(ctx, policy, 'process', () => original.call(this, first, ...rest))
-          },
-        ))
+        try {
+          if (!isAsyncProcessEntry(target[key])) continue
+          scope.effect(() => wrapMethod(
+            target as Record<string, (this: unknown, first: unknown, ...rest: unknown[]) => unknown>,
+            key,
+            original => function (this: unknown, first: unknown, ...rest: unknown[]) {
+              const session = sessionOf(first)
+              if (session === undefined) return original.call(this, first, ...rest)
+              const policy = ctx.sandboxPolicy.resolve({ session })
+              return withRegistryAdmission(ctx, policy, 'process', () => original.call(this, first, ...rest))
+            },
+          ))
+        } catch (error: unknown) {
+          ctx.logger.warn(`multi-root workspace: foreign process entry ${service}.${key} is not wrappable: `
+            + `${error instanceof Error ? error.message : String(error)}`)
+        }
       }
     })
   }
-  // `dsh-experimental-worktree` (`worktrees`): creation and restore spawn
-  // confined Git/Node commands under the calling Agent's session policy.
-  admitCalls('worktrees', ['create', 'restore'])
-  // `dsh-experimental-client-ui-forge` (`forgePanel`): every public entry whose
-  // first argument is the Session — each can run a confined Git read or launch
-  // maintenance-side worktree work. The `follow`/`changeRequestStates` async
-  // generators are skipped by the structural probe, and the detached
-  // `inspectOnce` they drive relies on the minted-profile ledger anyway.
-  admitCalls('forgePanel', [
-    'branches', 'track', 'dismiss', 'refresh', 'localDiff', 'localText',
-    'changeRequestChecks', 'changeRequestDiff', 'changeRequestText', 'submitReview', 'markReady', 'merge',
-    'requestWorktree', 'cancelWorktree', 'stopCreation', 'retryWorktree', 'restoreWorktree', 'continueInProject',
-  ])
+  for (const { service, keys } of FORGE_PROCESS_SERVICES) admitCalls(service, keys)
 }
