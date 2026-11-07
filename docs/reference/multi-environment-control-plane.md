@@ -70,3 +70,13 @@ v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 
 5. body 收到冻结的操作身份（operationId、purpose、toolName、sessionId、primaryRoot、epoch、revision、effectiveMode）；`endpoints` 在 body 结束后读取即抛错。排序轨迹以 debug 日志记录 operationId、阶段、epoch 与决定，不含路径内容、密钥或输出。
 
 `addRemote(primary, {environmentId, rootId})` 只接受这两个键；先在队列外调用经 `setRemoteEndpointVerifier()` 注入的校验器（本关生产环境没有，固定为 `endpoint-unverifiable`），平台不符为 `platform-mismatch`，入队后绑定摘要变化为 `binding-changed`，清单未授权为 `binding-not-authorized`。`removeRemote` 与 `remoteList` 在 follower 上经 `remote-1` 转发。
+
+## `remote_bash` 合同（G3，仅测试组合）
+
+`src/remote/exec.ts` 的 `runRemoteCommand` 与 `src/remote/exec-tool.ts` 的 `remoteBashTool` 不被任何生产行注册。参数 `{environmentId, rootId, cwdRelative?, command, timeoutMs}`；工具名、Session 与取消信号只取自调度。后端（G4 以后由连接管理器提供，测试为 fake）声明部署控制的 shell、环境变量、时限与 stdout/stderr 上限，实现 `confine` / `currentGeneration` / 同步 `spawn`。
+
+1. **准入 A**：`purpose: exec` 的远端准入；校验后端存在（`backend-unavailable`）、`cwdRelative`（空或相对 POSIX，无 `.`/`..`/空段/NUL/反斜杠，`invalid-cwd`）与时限（`invalid-timeout`）；以 `workspace-write`、端点 displayPath 和真实 sessionId 调用 `confine`，非 `enforced` 为 `sandbox-unverified`。
+2. **准入 B**：同一请求重新准入，比对 epoch、端点身份（displayPath、bindingDigest、verifiedTarget）、有效模式与后端代次，任一不同为 `admission-changed` 并丢弃 argv；`spawn` 只在 B 的回调内调用。A、B 之间的撤权使 B 拒绝且不调用 `spawn`。
+3. **结果**：`not-started{code}`；`admitted-may-start`（spawn 抛错或 `started` 失败）；`exited`（观察到直接退出、托管范围未确认）与 `scope-exited`（`waitForExit` 确认）；`unknown{reconcileId}`（启动后断线）。超时与取消各只 `terminate()` 一次并标 `termination`；输出按上限截断并标 `truncated`；从不重连或重跑。
+
+SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主锚定的 `loadHostSshPackages`）的检查器落点见[基线参考](./multi-environment-baseline.md#ssh-兼容门禁落地清单)。

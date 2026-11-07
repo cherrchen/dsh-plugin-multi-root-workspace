@@ -1695,7 +1695,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 ## 多执行环境 G1 本地委托（2026-11-07）
 
-**状态：G1 的 macOS arm64 本地格通过；Linux 与 Windows 本地格待 CI 复验，关卡整体尚未签收。** 本关只在测试组合中加入仅 local backend 的委托门面（`tests/support/local-fs-facade.ts`），生产 `ctx.fs`、`src/`、profile patch、peers/allowlist 与 lockfile 均未修改；没有 SSH peer、远端记录或面板。门面保留原 provider 的接收者、同步返回、品牌与可选方法存在性，只检查位置参数：未知或撤销的 `remote:`/`ssh:`/`sftp:` 等 URI 与带远端 targetKey/displayPath 的 target（含 move 两端、resolve 的 cwd）在任何本地 IO 之前以 `G1_REMOTE_REFERENCE_UNAVAILABLE` 拒绝。
+**状态：G1 本地委托通过：macOS arm64 含真实组合差分，Linux/Windows 经 CI 矩阵通过单元与差分用例；生产 `ctx.fs` 切换不在本关。** 本关只在测试组合中加入仅 local backend 的委托门面（`tests/support/local-fs-facade.ts`），生产 `ctx.fs`、`src/`、profile patch、peers/allowlist 与 lockfile 均未修改；没有 SSH peer、远端记录或面板。门面保留原 provider 的接收者、同步返回、品牌与可选方法存在性，只检查位置参数：未知或撤销的 `remote:`/`ssh:`/`sftp:` 等 URI 与带远端 targetKey/displayPath 的 target（含 move 两端、resolve 的 cwd）在任何本地 IO 之前以 `G1_REMOTE_REFERENCE_UNAVAILABLE` 拒绝。
 
 | 证据 | 结果 |
 | --- | --- |
@@ -1706,7 +1706,9 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 复验中发现并修复两个测试/取证侧问题，均不属产品行为差异：cordis `4.0.x` 的 traced 方法只从**自有** `ctx` 描述符恢复服务上下文，门面因此复制后端的 `ctx` 描述符；web prompt 中随机的 Web GUI 端口（rc.1 与旧版两种措辞）改为规范化后再取摘要。原始日志为 `.dsh-smoke/g1-close-*.log`。
 
-**未验证与下一步：** Linux/Windows 本地格须在 CI 的支持矩阵上复跑同一组 G1 用例后才能签收三平台退出条件；切换生产 `ctx.fs` 仍须按 ADR-0031 的门槛另行评审，本关不构成该结论。下一步进入 G1a 控制面（远端记录域与版本化准入），与真实 SSH 无关的部分可先用真实存储、双 Host 与无网络 fake 端点验证。
+**三平台 CI（df03e7e）：** 手动触发的 [CI run 42337702790](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/42337702790) 在全部 22 个支持版本 × ubuntu-22.04/ubuntu-latest/macos-latest/windows-latest 上 success（含 smoke 与 packed）。抽查日志：rc.1 的 ubuntu-latest 与 windows-latest 上 `local-fs-facade.spec.ts` **11/11**、`fs-parity.spec.ts` **21/21** 实跑无跳过（ubuntu 全量 1206 passed / 93 skipped）；`0.1.5-rc.2` 的 ubuntu-latest 与 windows-latest 上 facade **11/11**，fs-parity 仅五项旧版缺 patch API 跳过。真实 profile 采集器（`--local-facade`）不在 CI 中运行，Linux/Windows 的组合级 prompt/argv 差分仍只有 macOS 证据。
+
+**未验证与下一步：** 若需将 Linux/Windows 的组合级差分也签收，须在对应宿主上运行 `--local-facade` 采集；切换生产 `ctx.fs` 仍须按 ADR-0031 的门槛另行评审，本关不构成该结论。下一步进入 G1a 控制面（远端记录域与版本化准入），与真实 SSH 无关的部分可先用真实存储、双 Host 与无网络 fake 端点验证。
 
 ## 多执行环境 G1a 控制面（2026-11-07）
 
@@ -1723,3 +1725,19 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 设计取舍：remote-1 是 v1 之外的**第二**监听端点（`<store>.r1.sock`），旧 owner 没有该端点即天然表现为 `owner-without-remote-protocol`；owner 侧远端域在同一份 `serialize` 队列内以独立 `remoteRevision` 读写，不占用 v1 `operationRevision`；verifier 的校验在队列外执行、入队后重检 binding digest；`withRemoteOperation` 在发起侧按 Session 模式与 tool cap 先收窄再进 owner 准入，`local` 端点不带远端身份字段（`verifiedTarget`/`bindingDigest`/`configVersion` 为 `null`）。远端 grant 永不进入 `setAdditionalRoots`、scope、方言、指令或 Skills。
 
 **未验证与下一步：** Linux 与 Windows 本地格须在 CI 支持矩阵上复跑同一组用例；manifest 保护检查只覆盖 POSIX（`win32` 发起端整格 `platform-deferred`）；helper transport 与 sftp transport 的真实握手、hostKey 轮换、对象型 verifiedTarget 与双端 transfer 的真实消费侧留给 G2/G4；`remote-1` 尚不支持跨 Host 广播远端变更（本关不需要）。真实 SSH 能力仍无任何开关可达。
+
+## 多执行环境 G4 兼容门禁与 G3 远端命令合同（2026-11-07）
+
+**状态：macOS arm64 本地格实现并通过定向验证；关卡整体尚未签收。** 本轮为两个互不依赖的纯代码部分，未构造 `SshConnection`、未打开任何网络连接，真实 SSH 能力仍无入口。
+
+**G4 SSH 兼容门禁与宿主锚定装载。** `src/compat/dsh-version.ts` 新增 `SUPPORTED_SSH_RELEASES`（`['0.2.2-rc.1']`，`SUPPORTED_DSH_RELEASES` 的后缀）与 `SSH_PEER_PACKAGES` 四字面量，以及纯函数 `classifySshCapability`：平台（非 linux/darwin）→ `platform-deferred`、本地 verdict 非 supported → `local-compat-not-supported`、宿主低于 SSH 地板 → `host-below-floor`（静默，绝不影响本地 verdict）、SSH 包缺席 → `missing-optional-package`、版本不符或私有副本 → `identity-mismatch`。默认读取器先从 `@deepseek-ai/dsh` 宿主锚点解析、再回退本模块；仅宿主锚点不可见且命中本包根的解析才计为私有副本（开发树内宿主锚点同根时该判别自动放开，同 `insidePackageRoot` 的未知根语义）。四个 SSH 包以全量 allowlist range 进入 `peerDependencies` 并 `optional: true`（上游安装期检查按 peer 逐一通过），devDependencies 恰钉 `0.2.2-rc.1`；未进 `dependencies`。`check-dsh-compat.mjs` 保留全量 peer range 检查，§4 将 SSH dev pin 与核心 pin 分开验证、另验后缀关系与 optional meta、SSH 永不进入 §5 核心版本集合，缺 SSH 不失败；新增 `[compat] SSH floor` 行。`src/compat/ssh-packages.ts` 的 `loadHostSshPackages` 仅接受 `eligible` 闸门、只经宿主锚点解析（无 koffi 式回退），锚点在包外而解析落进包根即 `identity-mismatch`，对四个包只结构校验公开类（`SshConnection`、`SshFileSystem`、`SshSubprocessRuntime`、`SshSandboxProvider`，已与 rc.1 实际导出核对）而不实例化；暂无任何生产路径调用。
+
+**G3 `remote_bash` 双准入合同。** `src/remote/exec.ts` 定义部署/后端/句柄契约与 `runRemoteCommand`：准入 A 内完成 backend 查找、cwd/timeout 校验与 `confine`（`workspace-write` + 端点 displayPath + 真实 sessionId），非 `enforced` 即 `sandbox-unverified`；准入 B 以相同请求重入排序点，比对 epoch、displayPath、bindingDigest、verifiedTarget、effectiveMode 与后端 generation，任一变动即 `admission-changed` 且 argv 丢弃——spawn 只发生在 B 的体内。出队后等待：限幅 stdout/stderr、超时与取消各 `terminate()` 一次、`waitForExit` 区分 `scope-exited(confirmed)`/`exited(unconfirmed)`；`started` 失败为 `admitted-may-start`，`exited` 断线为 `unknown{reconcileId}`，绝不重连重放。`src/remote/exec-tool.ts` 把合同包成 `remote_bash` 工具定义（strict 参数、dispatch 的 session/name/signal 定身份），不注册于任何生产行、不在 `src/index.ts` 与 `cordis.patch.yml`。
+
+| 证据 | 结果 |
+| --- | --- |
+| G4 单元 | `tests/ssh-compat.spec.ts` **7/7**：各 classify 分支（win32/freebsd、本地不支持、`0.1.5-rc.2` 地板下且本地 verdict 仍 supported、缺包、版本混入、私有副本）、真实树 darwin eligible、装载器对非 eligible 闸门在不 import 前拒绝、四包类名核验不实例化。 |
+| G3 单元 | `tests/remote-exec.spec.ts` **9/9**：confine 阻塞期撤权 `endpoint-not-registered` 且 0 spawn、generation 变化 `admission-changed`、partial 执行面 `sandbox-unverified`、只读 `mode-denies` 与 0 confine、tool cap `tool-capped`、非法 cwd/timeout；spawn 后撤权在途完成而下次拒绝；scope-exited/exited、超时 terminate 一次 `timeout`、重复 cancel 一次 terminate、started/exited 断线分别 `admitted-may-start`/`unknown` 且恰 1 spawn、输出限幅截断、双 Session 互不取消；真实工具管线下未注册调用报错、伪造 `sessionId`/`toolName` 不影响到达 backend 的真实 sessionId。评审补充：`cwdRelative` 的 NUL 判定原误写为空串（使任何非空相对 cwd 被拒），已改为 `\0` 并补嵌套 cwd 正例（`build/out` → `/work/app/build/out`）及 NUL、反斜杠、`//` 负例。 |
+| 回归 | `process-entrypoints` / `optional-peers` / `static-ssh-imports` 与全部 remote-*.spec、registry-operation、shared-registry(-multiprocess)、tool-access、authority-native、shared-registry 共 **14 文件 134 passed / 5 skipped / 0 failed**；本地 PTY/PTC/shell 行为未变，`pnpm compat:check` 通过。 |
+
+**未验证与下一步：** Linux/Windows 格须 CI 复跑；`loadHostSshPackages` 尚无生产调用方，连接构造、真实部署绑定与 hostKey 轮换在 G4 后半；`remote_bash` 未暴露给任何组合，真实远端执行依赖受信部署与真实 SSH 端点证据。
