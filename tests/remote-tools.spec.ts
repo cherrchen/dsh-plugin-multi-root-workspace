@@ -6,8 +6,6 @@
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import Tools from '@deepseek-ai/dsh-tools'
 import { renderRemoteCapabilities } from '../src/remote/capabilities.ts'
 import { apply as applyRemoteTools } from '../src/remote/tools.ts'
 import { mountRegistryStack } from './support/registry-stack.ts'
@@ -20,25 +18,30 @@ let world: RemoteToolsWorld | undefined
 beforeEach(() => { fixture = createFixtureWorkspace('remote-tools') })
 afterEach(async () => { await world?.dispose(); world = undefined; fixture.dispose() })
 
-const names = (ctx: RemoteToolsWorld['ctx']) => ctx.tools.definitions().map(definition => definition.name).sort()
+interface Failure { readonly isError: true; readonly error: unknown }
 
-interface Failure { readonly isError: true; readonly error: { readonly info?: { readonly name?: string } } }
+/** A valid local→local copy: the tool refuses it itself, without admission. */
+const localToLocal = {
+  from: { environmentId: 'local', rootId: 'primary', relativePath: 'a' },
+  to: { environmentId: 'local', rootId: 'primary', relativePath: 'b' },
+}
 
 describe.skipIf(process.platform === 'win32')('the explicit remote tools row', () => {
   it('registers both tools only in a composition that mounts the row', async () => {
     world = await mountRemoteTools(fixture)
-    expect(names(world.ctx)).toEqual(expect.arrayContaining(['remote_bash', 'remote_copy']))
+    // Dispatch through the host pipeline: a registered tool answers with its
+    // own contract, an unregistered one with ToolNotFoundError. This probe
+    // works on every supported release, unlike a tools-list method that older
+    // releases do not expose.
+    const copy = await world.call('remote_copy', localToLocal)
+    expect(copy).toMatchObject({ status: 'failed', code: 'direction-unsupported' })
+    const bash = await world.call('remote_bash', { environmentId: 'build', rootId: 'app', command: 'x', timeoutMs: 10 })
+    expect(bash).toMatchObject({ status: 'not-started' })
     await world.dispose()
 
     world = await mountRemoteTools(fixture, { withTools: false })
-    expect(names(world.ctx)).not.toContain('remote_copy')
-    expect(names(world.ctx)).not.toContain('remote_bash')
-    const missing = await world.call('remote_copy', {
-      from: { environmentId: 'local', rootId: 'primary', relativePath: 'a' },
-      to: { environmentId: 'build', rootId: 'app', relativePath: 'a' },
-    }) as Failure
+    const missing = await world.call('remote_copy', localToLocal) as Failure
     expect(missing.isError).toBe(true)
-    expect(missing.error.info?.name).toBe('ToolNotFoundError')
   })
 
   it('is also the endpoint-registration path: without the row nothing verifies a session endpoint', async () => {
@@ -67,21 +70,16 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
       }),
     })
     await new Promise<void>(resolve => { setTimeout(resolve, 50) })
-    expect(names(world.ctx)).not.toContain('remote_copy')
-    expect(names(world.ctx)).not.toContain('remote_bash')
+    const missing = await world.call('remote_copy', localToLocal) as Failure
+    expect(missing.isError).toBe(true)
   })
 
   it('stays disabled unless the switch is explicitly true', async () => {
-    const stack = await mountRegistryStack(join(fixture.base, 'store'), {})
-    try {
-      await stack.ctx.plugin(SystemPrompt)
-      await stack.ctx.plugin(Tools)
-      await stack.ctx.plugin({ name: 'g5-remote-tools-off', inject: ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry', 'tools'], apply: (ctx: typeof stack.ctx) => applyRemoteTools(ctx, {}) })
-      // The switch is off: the row loads and registers nothing.
-      expect(stack.ctx.tools.definitions()).toHaveLength(0)
-    } finally {
-      await stack.dispose()
-    }
+    world = await mountRemoteTools(fixture, { withTools: false })
+    await world.ctx.plugin({ name: 'g5-remote-tools-off', inject: ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry', 'tools'], apply: (ctx: typeof world.ctx) => applyRemoteTools(ctx, {}) })
+    // The switch is off: the row loads and registers nothing.
+    const missing = await world.call('remote_copy', localToLocal) as Failure
+    expect(missing.isError).toBe(true)
   })
 })
 

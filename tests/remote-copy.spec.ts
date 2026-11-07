@@ -278,7 +278,10 @@ describe('runRemoteCopy local → remote(sftp)', () => {
   })
 })
 
-describe('runRemoteCopy remote(sftp) → local', () => {
+// remote -> local publishes through the POSIX-only local binary sink; the
+// Windows initiator is deferred (ADR-0030), and the local→remote and
+// remote→remote directions still run there.
+describe.skipIf(process.platform === 'win32')('runRemoteCopy remote(sftp) → local', () => {
   it('commits into the primary root and leaves no staging', async () => {
     fixture = createFixtureWorkspace('remote-download')
     const s = stack()
