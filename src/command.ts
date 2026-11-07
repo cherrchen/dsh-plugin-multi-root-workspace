@@ -58,6 +58,7 @@ import {
 import type {} from './skills.ts'
 import type { MultiRootRegistry } from './registry.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
+import { persistedSessionExists } from './compat/session-existence.ts'
 import {
   availableRoots,
   canonicalRoot,
@@ -550,6 +551,34 @@ export function resolvePanelPrimaryRoot(ctx: Context, sessionId: string): string
   return cwd
 }
 
+/**
+ * Whether the panel's resolver would now name a primary root for the session —
+ * the exact live-and-usable-cwd predicate, re-run so a resume that landed
+ * between a rejection and its classification is recognized instead of
+ * duplicating the cwd rule.
+ */
+function panelSessionResolvable(ctx: Context, sessionId: string): boolean {
+  try {
+    resolvePanelPrimaryRoot(ctx, sessionId)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether the sessions store names no live session for `sessionId` — or
+ * cannot even answer, in which case "not live" stays unproven and the
+ * caller keeps the code the flow already had.
+ */
+function liveSessionAbsent(ctx: Context, sessionId: string): boolean {
+  try {
+    return ctx.get('sessions')?.get(sessionId as SessionId) === undefined
+  } catch {
+    return false
+  }
+}
+
 /** Project one status into the panel's view. */
 function toRootView(status: RootStatus, index: number): RootView {
   return {
@@ -642,6 +671,7 @@ async function dispatchPanelRequest(
   payload: unknown,
   signal?: AbortSignal,
 ): Promise<ConnectionRpcResult<unknown>> {
+  let panelSessionId: string | undefined
   try {
     if ((SKILLS_ENDPOINTS as readonly string[]).includes(endpoint)) {
       const parsedSkills = skillsRequestSchema.safeParse(payload)
@@ -660,6 +690,7 @@ async function dispatchPanelRequest(
       return { ok: false, error: { code: 'panel/bad-request', message: parsed.message, details: {} } }
     }
     const request = parsed.value
+    panelSessionId = request.sessionId
     const registry = ctx.multiRootRegistry
     const primaryRoot = resolvePanelPrimaryRoot(ctx, request.sessionId)
     switch (request.endpoint) {
@@ -719,7 +750,27 @@ async function dispatchPanelRequest(
       }
     }
   } catch (error: unknown) {
-    if (error instanceof RootValidationError || error instanceof AuthorityRpcError) {
+    if (error instanceof RootValidationError) {
+      // `session-not-found` names three states — no sessions service, no live
+      // session, a live session without a usable cwd — and only the first two
+      // mean "exists but was not usable during this request". A resolver that
+      // would now succeed is a race that resolved between the throw and this
+      // catch; `stat` proving durable existence is writer-held or mid-resume.
+      // Both invite the retry `session-not-live` promises. A live session
+      // that still cannot name a root keeps `session-not-found`: it is live,
+      // not "not live", and retry cannot heal it. The reclassify is bound to
+      // this channel's own session resolution — AuthorityRpcError carries
+      // its own vocabulary and never enters it.
+      const code = error.code === 'session-not-found'
+        && panelSessionId !== undefined
+        && (panelSessionResolvable(ctx, panelSessionId)
+          || (liveSessionAbsent(ctx, panelSessionId)
+            && await persistedSessionExists(ctx, panelSessionId, signal)))
+        ? 'session-not-live'
+        : error.code
+      return { ok: false, error: { code, message: error.message, details: {} } }
+    }
+    if (error instanceof AuthorityRpcError) {
       return { ok: false, error: { code: error.code, message: error.message, details: {} } }
     }
     return {

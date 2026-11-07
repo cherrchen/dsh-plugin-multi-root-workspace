@@ -235,6 +235,8 @@ export type RootValidationCode =
   | 'config-invalid'
   | 'reveal-unavailable'
   | 'session-not-found'
+  /** Synthesized at the panel dispatch catch — the session existed but could not resolve a root during the request (writer-held, mid-resume, or a race resolved after the throw); no RootValidationError is constructed with it. */
+  | 'session-not-live'
   | 'unsupported-path'
   | 'root-unavailable'
   | 'protected-path'

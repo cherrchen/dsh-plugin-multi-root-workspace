@@ -45,10 +45,10 @@ Accepted
 3. **host 只有一个 resolver：**
 
    ```ts
-   resolvePanelPrimaryRoot(ctx, sessionId) → canonicalPath(session.header.cwd)
+   resolvePanelPrimaryRoot(ctx, sessionId) → session.header.cwd   // verbatim；canonical 只做几何判断（ADR-0028）
    ```
 
-   实现通过 `ctx.get('sessions')?.get(sessionId)` 读可选兄弟服务（属性访问会触发 `without inject`，见 [面板 HTTP 405](../troubleshooting/panel-channel-http-405.md)）。服务不存在、id 对不上、会话已被删除：一律 `session-not-found`。不再回退 `sandboxPolicy.resolve()`。
+   实现通过 `ctx.get('sessions')?.get(sessionId)` 读可选兄弟服务（属性访问会触发 `without inject`，见 [面板 HTTP 405](../troubleshooting/panel-channel-http-405.md)）。服务不存在、id 对不上、会话已被删除：拒绝（**2026-11-07 修订**：失败码按持久化存在性细分为 `session-not-live` / `session-not-found`，见文末修订节）。不再回退 `sandboxPolicy.resolve()`。
 
 4. **客户端没有当前 Session 时不调用 host。** 面板显示 "No active session" / "当前没有活动会话"，由操作者打开会话后再点重试。host 不替浏览器猜根。
 
@@ -71,6 +71,22 @@ Accepted
 - 没有活动会话时面板不可用（正确）。Retry 在会话出现后重新走同一条 resolver。
 - 通道单测必须把 `sessions` 做成兄弟插件（与真实组合相同），不能靠根 context `provide` 绕过 lookup，也不能再靠 `primaryRoot` 绕过会话分支。
 - `smoke:journey` 的认证 `list` 已经只带 `{ sessionId: 'journey-web' }`，与 UI 一致。
+
+## 修订：失败码按持久化存在性细分（2026-11-07，Amendment）
+
+Decision 第 3 条的"一律 `session-not-found`"细分出 `session-not-live`。authority 合同不变——仍然只有本进程 live session 能通过 resolver；变更的只是同一条拒绝路径上的失败码选择。
+
+**动机**：两个 DSH 实例共享 `$DSH_HOME` 时，实例 B 打开实例 A 持有的会话 S，S 的跨进程 writer 锁使 B 的 resume 失败（上游映射为 `session/writer-held`），S 因此不进入 B 的 `SessionStore`。面板把"持久化存在但非 live"报成"找不到该会话；请先打开一个工作区会话"——S 明明就在屏幕上，引导动作也不对（面板的 Retry 只重发 `list`，不会触发 follow/resume）。
+
+**细分规则**（在 `dispatchPanelRequest` 的 catch 统一完成，resolver 与 `rootsViewOf` 复查的 live-only 语义不变）：
+
+- catch 处先复跑 resolver：抛错到分类之间 resume 落地、resolver 已能给出主根时，请求期间的失败确实发生在"非 live"窗口——归 `session-not-live`，文案里的"仍在恢复/稍后重试"正是愈合步骤；
+- resolver 仍失败且会话非 live 时，`sessionPersistence.stat(sessionId)` 取到快照 → `session-not-live`（被另一 Host 持有、仍在恢复、或待迁移——`stat` 只读 header，三种状态都报快照）；
+- 会话 live 但仍无法给出主根（cwd 缺失或非绝对，resolver 同样抛 `session-not-found`）→ 维持 `session-not-found`：它是 live，"not live"不成立，且重试无法愈合；
+- `stat` 返回 `undefined`、服务或方法缺席、`stat` 抛错 → 维持 `session-not-found`（探测不能证明存在就保守回落；存在但损坏的会话因此仍报"找不到"，与探测前行为一致）；
+- 重分类只作用于本通道的 `RootValidationError`；`AuthorityRpcError` 自带词汇表，不参与。
+
+**有意不做**：不在客户端做"任意目录快照变化都刷新"（每次 activity/title 更新都会触发一轮 `registry.refresh()`）；不用 `api-session/error` 的 message 匹配 writer-held（结构化 code 在上游传递链中已丢，匹配脆弱）。"存在但非 live"的会话若要让面板直接可用，需要把 authority 从 live session 扩到 observed header——那是一次 authority 合同变更，不属于本修订。
 
 ## Related Documents
 

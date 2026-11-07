@@ -49,6 +49,8 @@ async function mount(options: {
   spawnExitCode?: number
   /** Session id → cwd. `false` leaves the sessions service absent. */
   sessions?: Record<string, string> | Map<string, string> | false
+  /** The `stat` the persisted-session probe consults; absent or `false` mounts no backend. */
+  sessionPersistence?: { stat: (id: string, options?: { signal?: AbortSignal }) => Promise<unknown> } | false
   /** The row's config, as the patch supplies it (`dshHome` for isolate-profiles). */
   config?: { dshHome?: string }
 } = {}): Promise<RegistryStack> {
@@ -104,6 +106,15 @@ async function mount(options: {
   void fiber
   if (options.withConnection === true && options.sessions !== false) {
     await provideSessions(ctx, options.sessions ?? { [PANEL_SESSION]: primary })
+  }
+  if (options.sessionPersistence !== undefined && options.sessionPersistence !== false) {
+    const persistence = options.sessionPersistence
+    await ctx.plugin({
+      name: 'sibling-session-persistence',
+      apply(fiber: Context) {
+        fiber.provide('sessionPersistence' as never, persistence as never)
+      },
+    })
   }
   return stack
 }
@@ -613,6 +624,197 @@ describe('the panel channel', () => {
     const result = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(result.ok).toBe(false)
     expect(result.error?.code).toBe('session-not-found')
+  })
+
+  it('reports session-not-live when the session persists but is not live in this process', async () => {
+    // A persisted session another Host still owns (or one still resuming)
+    // never enters this process's SessionStore; `stat` proves it exists, so
+    // the failure is classified by existence, not by the live lookup alone.
+    await mount({
+      withConnection: true,
+      sessions: { [PANEL_SESSION]: primary },
+      sessionPersistence: { stat: async id => id === 's-held' ? { header: { cwd: primary } } : undefined },
+    })
+
+    const held = await callPanel('list', { sessionId: 's-held' })
+    expect(held.ok).toBe(false)
+    expect(held.error?.code).toBe('session-not-live')
+
+    const heldAdd = await callPanel('add', { sessionId: 's-held', path: join(fixture.base, 'elsewhere') })
+    expect(heldAdd.ok).toBe(false)
+    expect(heldAdd.error?.code).toBe('session-not-live')
+  })
+
+  it('reports session-not-live when the sessions service is absent but the session persists', async () => {
+    // The same classification applies when the whole sessions service is
+    // missing: nothing here is live, but durable existence is still provable.
+    await mount({ withConnection: true, sessions: false, sessionPersistence: { stat: async () => ({ header: { cwd: primary } }) } })
+    const result = await callPanel('list', { sessionId: PANEL_SESSION })
+    expect(result.ok).toBe(false)
+    expect(result.error?.code).toBe('session-not-live')
+  })
+
+  it('keeps session-not-found when stat reports the session absent', async () => {
+    await mount({ withConnection: true, sessionPersistence: { stat: async () => undefined } })
+    const result = await callPanel('list', { sessionId: 's-gone' })
+    expect(result.ok).toBe(false)
+    expect(result.error?.code).toBe('session-not-found')
+  })
+
+  it('keeps session-not-found when the stat probe itself fails', async () => {
+    // A backend that cannot even read the header cannot prove existence; the
+    // classification falls back to the code the flow already had.
+    await mount({
+      withConnection: true,
+      sessionPersistence: { stat: async () => { throw new Error('corrupt header') } },
+    })
+    const result = await callPanel('list', { sessionId: 's-corrupt' })
+    expect(result.ok).toBe(false)
+    expect(result.error?.code).toBe('session-not-found')
+  })
+
+  it('reports session-not-live when the session closes mid-request but persists', async () => {
+    // Counter-backed store: live exactly once, so `resolvePanelPrimaryRoot`
+    // passes and the `rootsViewOf` re-check is the gate that trips — the same
+    // `session-not-found` code, produced by the second resolver.
+    const stack = await mount({
+      withConnection: true,
+      sessions: false,
+      sessionPersistence: { stat: async () => ({ header: { cwd: primary } }) },
+    })
+    let lookups = 0
+    await stack.ctx.plugin({
+      name: 'sibling-sessions-closing',
+      apply(fiber: Context) {
+        fiber.provide('sessions', {
+          get: () => ++lookups === 1 ? { header: { cwd: primary } } : undefined,
+        } as never)
+      },
+    })
+
+    const gone = await callPanel('list', { sessionId: PANEL_SESSION })
+    expect(gone.ok).toBe(false)
+    expect(gone.error?.code).toBe('session-not-live')
+  })
+
+  it('reports session-not-live when the session becomes resolvable before the failure is classified', async () => {
+    // Live on the first lookup, absent only for the `rootsViewOf` re-check,
+    // live again when the catch re-runs the resolver: a race that resolved —
+    // the request genuinely hit a non-live window, and the retry the new
+    // code promises is the healing step, not "open a session first".
+    const stack = await mount({ withConnection: true, sessions: false, sessionPersistence: { stat: async () => ({ header: { cwd: primary } }) } })
+    let lookups = 0
+    await stack.ctx.plugin({
+      name: 'sibling-sessions-flapping',
+      apply(fiber: Context) {
+        fiber.provide('sessions', {
+          get: () => ++lookups === 2 ? undefined : { header: { cwd: primary } },
+        } as never)
+      },
+    })
+
+    const flapped = await callPanel('list', { sessionId: PANEL_SESSION })
+    expect(flapped.ok).toBe(false)
+    expect(flapped.error?.code).toBe('session-not-live')
+  })
+
+  it('keeps session-not-found when the session is live but cannot name a workspace root', async () => {
+    // A session that IS live but has no usable cwd throws the same
+    // `session-not-found` at the resolver. `stat` could prove it exists on
+    // disk, but "not live" would be false — the live re-check exists for
+    // exactly this case, and the probe never runs.
+    const stat = vi.fn(async () => ({ header: { cwd: primary } }))
+    const stack = await mount({ withConnection: true, sessions: false, sessionPersistence: { stat } })
+    await stack.ctx.plugin({
+      name: 'sibling-sessions-broken',
+      apply(fiber: Context) {
+        fiber.provide('sessions', {
+          get: (id: string) => id === 's-nocwd' ? { header: {} }
+            : id === 's-relative' ? { header: { cwd: 'relative/path' } }
+            : undefined,
+        } as never)
+      },
+    })
+
+    for (const sessionId of ['s-nocwd', 's-relative']) {
+      const result = await callPanel('list', { sessionId })
+      expect(result.ok).toBe(false)
+      expect(result.error?.code).toBe('session-not-found')
+    }
+    expect(stat).not.toHaveBeenCalled()
+  })
+
+  it('reports session-not-live for a mutation whose session closed mid-request but persists', async () => {
+    // The mutation commits before the view re-check trips; the failure is
+    // classified the same way as `list` because both share the dispatch
+    // catch. Retry stays safe: the panel's Retry re-runs `list` (a
+    // reconciliation read), it does not replay the mutation.
+    const stack = await mount({
+      withConnection: true,
+      sessions: false,
+      sessionPersistence: { stat: async () => ({ header: { cwd: primary } }) },
+    })
+    const target = join(fixture.base, 'mid-request-add')
+    mkdirSync(target)
+    let lookups = 0
+    await stack.ctx.plugin({
+      name: 'sibling-sessions-closing',
+      apply(fiber: Context) {
+        fiber.provide('sessions', {
+          get: () => ++lookups === 1 ? { header: { cwd: primary } } : undefined,
+        } as never)
+      },
+    })
+
+    const added = await callPanel('add', { sessionId: PANEL_SESSION, path: target })
+    expect(added.ok).toBe(false)
+    expect(added.error?.code).toBe('session-not-live')
+    // Committed despite the error response: the root is already registered.
+    expect(stack.registry.list(primary).map(status => status.path)).toContain(canonicalPath(target))
+  })
+
+  it('passes authority errors through without consulting the persistence probe', async () => {
+    const stat = vi.fn(async () => ({ header: { cwd: primary } }))
+    const stack = await mount({ withConnection: true, sessionPersistence: { stat } })
+    vi.spyOn(stack.registry, 'refresh').mockRejectedValueOnce(new AuthorityRpcError('authority/contended', 'registry is contended'))
+
+    const contended = await callPanel('list', { sessionId: PANEL_SESSION })
+    expect(contended.ok).toBe(false)
+    expect(contended.error?.code).toBe('authority/contended')
+    expect(stat).not.toHaveBeenCalled()
+  })
+
+  it('keeps session-not-found when the live lookup itself throws during classification', async () => {
+    // First lookup answers "absent" so the resolver throws; the catch-time
+    // resolver re-run and the live re-check then throw — an unanswerable
+    // live state cannot prove "not live", so the probe never runs and the
+    // flow's own code stands.
+    const stat = vi.fn(async () => ({ header: { cwd: primary } }))
+    const stack = await mount({ withConnection: true, sessions: false, sessionPersistence: { stat } })
+    let lookups = 0
+    await stack.ctx.plugin({
+      name: 'sibling-sessions-exploding',
+      apply(fiber: Context) {
+        fiber.provide('sessions', {
+          get: () => { if (++lookups === 1) return undefined; throw new Error('sessions exploded') },
+        } as never)
+      },
+    })
+
+    const exploded = await callPanel('list', { sessionId: PANEL_SESSION })
+    expect(exploded.ok).toBe(false)
+    expect(exploded.error?.code).toBe('session-not-found')
+    expect(stat).not.toHaveBeenCalled()
+  })
+
+  it('does not probe persistence for non-session failures', async () => {
+    const stat = vi.fn(async () => ({ header: { cwd: primary } }))
+    await mount({ withConnection: true, sessionPersistence: { stat } })
+
+    const missing = await callPanel('add', { sessionId: PANEL_SESSION, path: join(fixture.base, 'does-not-exist') })
+    expect(missing.ok).toBe(false)
+    expect(missing.error?.code).toBe('missing')
+    expect(stat).not.toHaveBeenCalled()
   })
 
   it('carries the workspace title as primaryName when the registry knows it', async () => {
