@@ -1631,6 +1631,16 @@ export class MultiRootRegistry extends Service {
     return this.remotePlane.status
   }
 
+  /**
+   * The validated deployment manifest, once the remote experiment is enabled
+   * and the manifest parsed. The tools row builds its connection manager and
+   * capability projection from this value; `undefined` means the remote plane
+   * is disabled or invalid and no remote tool may be mounted.
+   */
+  get remoteManifest(): import('./remote/manifest.ts').DeploymentManifest | undefined {
+    return this.remotePlane.manifest
+  }
+
   /** Owner-side injection point for endpoint verification (none ships in G1a). */
   setRemoteEndpointVerifier(verifier: import('./remote/contract.ts').RemoteEndpointVerifier): () => void {
     this.remotePlane.verifier = verifier

@@ -37,6 +37,15 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import { connectionRpcFor } from './compat/connection-rpc.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { effectiveRootAccess } from './contract.ts'
+import { RemoteAdmissionError } from './remote/contract.ts'
+import {
+  parseRemoteRequest,
+  REMOTE_ENDPOINTS,
+  type RemoteCapabilitiesView,
+  type RemoteEndpointView,
+  type RemoteTransferView,
+  type RemotesView,
+} from './remote/panel-contract.ts'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -69,6 +78,7 @@ import {
   availableRoots,
   canonicalRoot,
   entryRootRef,
+  primaryKey,
   RootValidationError,
   resolveRootRef,
   type RootAccess,
@@ -688,6 +698,35 @@ function primaryStateOf(primaryRoot: string): 'present' | 'missing' | 'inaccessi
 }
 
 /**
+ * The effective capabilities of one deployment entry: declared actions and
+ * pairings, narrowed by the session mode and the two tools' caps. A withheld,
+ * revoked, or unregistered endpoint can do nothing at all.
+ */
+function remoteCapabilitiesOf(
+  state: RemoteEndpointView['state'],
+  actions: readonly ('read' | 'write' | 'exec')[],
+  transfers: readonly RemoteTransferView[],
+  mode: SandboxMode,
+  cappedTools: readonly string[],
+): RemoteCapabilitiesView {
+  const usable = state === 'registered'
+  const readOnly = mode === 'read-only'
+  const imports = transfers.filter(transfer => transfer.direction === 'import')
+  const exports = transfers.filter(transfer => transfer.direction === 'export')
+  return {
+    read: usable && actions.includes('read'),
+    write: usable && !readOnly && actions.includes('write'),
+    exec: usable && !readOnly && actions.includes('exec') && !cappedTools.includes('remote_bash'),
+    // Receiving always writes the remote root; sending reads it. A send whose
+    // only peers are local stays legal in a read-only session (the local
+    // destination is what the local sink will re-authorize).
+    receive: usable && !readOnly && actions.includes('write') && imports.length > 0 && !cappedTools.includes('remote_copy'),
+    send: usable && actions.includes('read') && exports.length > 0
+      && (!readOnly || exports.every(transfer => transfer.environmentId === 'local')),
+  }
+}
+
+/**
  * Explicit worktree cleanup: each id must be a tracked B mapping, and the
  * Registry owner re-verifies `rootId + path + addedAt` before anything is
  * deleted. The answer carries the refreshed roots view, so the panel never
@@ -700,6 +739,65 @@ async function cleanupWorktreeRoots(ctx: Context, sessionId: string, rootIds: re
   const primaryRoot = resolvePanelPrimaryRoot(ctx, sessionId)
   const roots = await rootsViewOf(ctx, ctx.multiRootRegistry, primaryRoot, { endpoint: 'list', sessionId }, false)
   return { removed: result.removed, skipped: result.skipped, roots }
+}
+
+/**
+ * Build the panel's remote section without creating a connection: the live
+ * control-plane state, the deployment entries for this session's primary root,
+ * and each entry's registered state. Only `addRemote` connects.
+ */
+async function remotesViewOf(
+  ctx: Context,
+  registry: MultiRootRegistry,
+  primaryRoot: string,
+  sessionId: string,
+): Promise<RemotesView> {
+  const session = ctx.get('sessions')?.get(sessionId as SessionId)
+  if (session === undefined) throw new RootValidationError('session-not-found', 'the panel session closed during the request')
+  const mode = ctx.sandboxPolicy.resolve({ session }).mode
+  const status = registry.remoteStatus
+  const base = { primaryRoot: canonicalRoot(primaryRoot), mode, status }
+  const manifest = registry.remoteManifest
+  if (manifest === undefined || status.state !== 'ready') {
+    return {
+      ...base,
+      endpoints: [],
+      ...(status.state === 'ready' ? {} : { unavailable: status.reason ?? status.state }),
+    }
+  }
+  const key = primaryKey(primaryRoot)
+  const snapshot = await registry.remoteList(primaryRoot).catch((error: unknown) => {
+    // Keep a stable refusal code the panel already localizes; wrap only an
+    // unexpected failure.
+    if (error instanceof RemoteAdmissionError) throw error
+    throw new RemoteAdmissionError('remote-unavailable', error instanceof Error ? error.message : String(error))
+  })
+  const capped = ctx.get('multiRootScope')?.toolCaps() ?? []
+  const endpoints = manifest.bindings
+    .filter(binding => primaryKey(binding.primary) === key)
+    .map((binding): RemoteEndpointView => {
+      const environment = manifest.environments.find(entry => entry.environmentId === binding.environmentId)!
+      const grant = snapshot.grants.find(entry => entry.environmentId === binding.environmentId && entry.rootId === binding.rootId)
+      const state = grant?.state ?? 'unregistered'
+      const transfers: RemoteTransferView[] = (binding.transfers ?? []).map(transfer => ({
+        direction: transfer.direction, environmentId: transfer.peer.environmentId, rootId: transfer.peer.rootId,
+      }))
+      return {
+        environmentId: binding.environmentId,
+        rootId: binding.rootId,
+        path: binding.path,
+        platform: environment.platform,
+        ...(environment.displayName === undefined ? {} : { displayName: environment.displayName }),
+        state,
+        actions: [...new Set(binding.actions)],
+        transfers,
+        capabilities: remoteCapabilitiesOf(state, binding.actions, transfers, mode, capped),
+        ...(state === 'unregistered' ? { reason: 'remote-unregistered' }
+          : state === 'withheld' ? { reason: 'remote-withheld' }
+          : state === 'revoked' ? { reason: 'remote-revoked' } : {}),
+      }
+    })
+  return { ...base, endpoints }
 }
 
 /**
@@ -763,6 +861,24 @@ async function dispatchPanelRequest(
         : endpoint === 'skillsPreview' ? await skills.previewSession(request.sessionId, request.name ?? '', signal)
         : await skills.changes(request.sessionId, request.generation ?? -1, signal)
       return { ok: true, value }
+    }
+    if ((REMOTE_ENDPOINTS as readonly string[]).includes(endpoint)) {
+      const parsedRemote = parseRemoteRequest(payload)
+      if (!parsedRemote.ok) {
+        return { ok: false, error: { code: 'panel/bad-request', message: parsedRemote.message, details: {} } }
+      }
+      const registry = ctx.multiRootRegistry
+      const { sessionId, environmentId, rootId } = parsedRemote.value
+      const primaryRoot = resolvePanelPrimaryRoot(ctx, sessionId)
+      if (endpoint !== 'remotes') {
+        if (environmentId === undefined || rootId === undefined) {
+          throw new RootValidationError('invalid-ref', 'environmentId and rootId are required')
+        }
+        const ref = { environmentId, rootId }
+        if (endpoint === 'addRemote') await registry.addRemote(primaryRoot, ref)
+        else await registry.removeRemote(primaryRoot, ref)
+      }
+      return { ok: true, value: await remotesViewOf(ctx, registry, primaryRoot, sessionId) }
     }
     const parsed = parsePanelCall(endpoint, payload)
     if (!parsed.ok) {
@@ -849,7 +965,7 @@ async function dispatchPanelRequest(
         : error.code
       return { ok: false, error: { code, message: error.message, details: {} } }
     }
-    if (error instanceof AuthorityRpcError || error instanceof WorktreeError) {
+    if (error instanceof AuthorityRpcError || error instanceof WorktreeError || error instanceof RemoteAdmissionError) {
       return { ok: false, error: { code: error.code, message: error.message, details: {} } }
     }
     return {
