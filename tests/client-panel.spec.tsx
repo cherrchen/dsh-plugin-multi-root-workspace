@@ -159,7 +159,7 @@ function mount(withFilesActions = false): Harness {
     slots: {
       inject: (name: string, callback: () => unknown) => {
         if (name === 'sidebar.right.tab.files.actions' && !withFilesActions) return () => {}
-        expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions', 'shell.overlay']).toContain(name)
+        expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions', 'sidebar.right.tab.document.actions', 'shell.overlay']).toContain(name)
         callback()
         return () => {}
       },

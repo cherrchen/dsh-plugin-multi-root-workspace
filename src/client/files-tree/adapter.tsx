@@ -40,7 +40,7 @@ import { NS } from './locales.ts'
 
 /** The `sidebarRight` face the fork uses to open a file resource. */
 interface SidebarRightOpen {
-  readonly openResourceIn?: (sessionId: SessionId, address: string) => void
+  readonly openResourceIn?: (sessionId: SessionId, address: string, options?: { readonly replaceTab?: TabId }) => void
 }
 
 /**
@@ -85,6 +85,14 @@ export interface FilesTreeInjected {
   /** Open one `dsh-resource://file` address in the host viewer. */
   readonly openFile: (address: string) => void
   /**
+   * Open one `dsh-resource://file` address replacing the given tab — the
+   * document-preview navigator's open route, where the native navigator's
+   * `onOpen` is `tab.actions.openResource(address, { replaceTab: true })`.
+   * @param tabId - the preview tab the opened file replaces.
+   * @param address - the file's `dsh-resource://file` address.
+   */
+  readonly openFileIn: (tabId: TabId, address: string) => void
+  /**
    * The reserved inject compartment: the slot renderer binds each source to a
    * `use<Name>` selector hook, so `treeSelection` reaches the component as
    * `useTreeSelection`, never as a prop under its own key.
@@ -108,6 +116,8 @@ export interface FilesTreeSurface {
   readonly actions: FilesTreeProps['actions']
   readonly face: FilesInjected
   readonly openFile: (address: string) => void
+  /** The preview navigator's replace-tab open route; see {@link FilesTreeInjected.openFileIn}. */
+  readonly openFileIn: FilesTreeInjected['openFileIn']
   readonly t: FilesTreeProps['t']
   /** Selector hook over this session's per-tab root selections. */
   readonly useTreeSelection: SnapshotSelectorHook<TreeSelection>
@@ -238,6 +248,10 @@ export function createFilesTreeSeats(ctx: ClientContext): {
         const sidebar = (ctx as unknown as { get(key: string): unknown }).get('sidebarRight') as SidebarRightOpen | undefined
         sidebar?.openResourceIn?.(sessionId, address)
       },
+      openFileIn: (tabId: TabId, address: string) => {
+        const sidebar = (ctx as unknown as { get(key: string): unknown }).get('sidebarRight') as SidebarRightOpen | undefined
+        sidebar?.openResourceIn?.(sessionId, address, { replaceTab: tabId })
+      },
       hooks: { treeSelection: selection },
       selectRoot: (tabId, root) => {
         const next: Record<string, RootView> = { ...selection.getSnapshot() }
@@ -292,6 +306,7 @@ export function createFilesTreeSurface(
     readonly actions: FilesTreeSurface['actions']
     readonly face: FilesInjected | undefined
     readonly openFile: ((address: string) => void) | undefined
+    readonly openFileIn: FilesTreeInjected['openFileIn'] | undefined
     readonly useTreeSelection: FilesTreeSurface['useTreeSelection'] | undefined
     readonly selectRoot: FilesTreeSurface['selectRoot'] | undefined
     readonly takeover: FilesTreeSurface['takeover'] | undefined
@@ -299,10 +314,10 @@ export function createFilesTreeSurface(
   t: FilesTreeProps['t'],
 ): FilesTreeSurface | undefined {
   if (!filesTreeSurfaceSupported()) return undefined
-  const { sessionId, useStore, actions, face, openFile, useTreeSelection, selectRoot, takeover } = props
-  if (face === undefined || openFile === undefined || useStore === undefined || actions === undefined
+  const { sessionId, useStore, actions, face, openFile, openFileIn, useTreeSelection, selectRoot, takeover } = props
+  if (face === undefined || openFile === undefined || openFileIn === undefined || useStore === undefined || actions === undefined
     || useTreeSelection === undefined || selectRoot === undefined || takeover === undefined) return undefined
-  return { sessionId, useStore, actions, face, openFile, useTreeSelection, selectRoot, takeover, t }
+  return { sessionId, useStore, actions, face, openFile, openFileIn, useTreeSelection, selectRoot, takeover, t }
 }
 
 export { filesTreeSurfaceSupported, NS as FILES_TREE_NS }

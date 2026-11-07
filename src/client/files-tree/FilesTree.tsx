@@ -16,7 +16,7 @@
  * plugin's switcher already owns. This fork takes all four as props and
  * draws only the body. See FORK.md.
  */
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
@@ -31,6 +31,7 @@ import { nativeTreeInput, type NativeTreeRenderer } from '../../compat/files-tre
 import type { WorkspaceDirectoryEntry } from '@deepseek-ai/dsh-api-workspace-files/types'
 import { childPath } from './face.ts'
 import type { FilesInjected } from './face.ts'
+import { locateFile, relativeUnderRoot } from './locate.ts'
 import type {} from './locales.ts'
 import type { createFilesStore, FilesTabState } from './store.ts'
 import css from './FilesBody.module.css.ts'
@@ -58,6 +59,23 @@ export type FilesTreeProps =
     readonly onOpen: (address: string) => void
     /** Optional host-controlled tree Factory, available on the newer Files page. */
     readonly nativeTree?: NativeTreeRenderer | undefined
+    /**
+     * The preview navigator's locate-current-file request: expand the file's
+     * ancestors, mark its row current, and scroll it into view — what the
+     * native navigator's `revealing`/`step()` does with `pane.current`. The
+     * sequence keys on the absolute path; a new preview of the same path
+     * settles the same way, so no revision is needed. Absent on the Files
+     * page, which has no current file.
+     */
+    readonly reveal?: { readonly path: string } | undefined
+    /**
+     * Expansion and scroll offset saved while this tree's owner was closed
+     * — the preview navigator's close/reopen memory, matching the pane
+     * record's surviving `expanded`/`scrollTop` upstream. Applied once,
+     * right after `start`, while the root's listing is still in flight, so
+     * the remembered directories re-expand as their levels land.
+     */
+    readonly saved?: { readonly expanded?: readonly string[]; readonly scrollTop?: number } | undefined
   }
 
 /** Natural, case-insensitive name order, so `file2` precedes `file10`. */
@@ -94,12 +112,16 @@ export function failureLine(t: TranslateNS<'sidebarFiles'>, failure: RemoteFailu
   }
 }
 
-/** What every level shares: the tab's tree and the two gestures. */
+/** What every level shares: the tab's tree, the two gestures, and the reveal's marks. */
 interface TreeContext {
   readonly state: FilesTabState
   readonly onToggle: (parent: string, path: string) => void
   readonly onOpen: (path: string) => void
   readonly t: TranslateNS<'sidebarFiles'>
+  /** The revealed file's tree key while its row is the current one. */
+  readonly current: string | undefined
+  /** Callback ref for the current row's button — the reveal's scroll target. */
+  readonly currentRef: ((row: unknown) => void) | undefined
 }
 
 /** One entry's row, and its children when it is an expanded directory. */
@@ -118,9 +140,20 @@ function Entry({ parent, entry, tree }: { parent: string; entry: WorkspaceDirect
     )
   }
   if (entry.type === 'file') {
+    // The reveal's current row: what the native tree draws as `.current` +
+    // `aria-current` — `data-files-current` is the fork's spelling of it, and
+    // the button carries the scroll target ref like upstream's `currentRef`.
+    const current = tree.current === path
     return (
       <li className={css.item} data-files-entry="file" data-files-path={path}>
-        <button type="button" className={css.row} onClick={() => { tree.onOpen(path) }}>
+        <button
+          type="button"
+          className={css.row}
+          onClick={() => { tree.onOpen(path) }}
+          ref={current ? tree.currentRef : undefined}
+          data-files-current={current ? '' : undefined}
+          aria-current={current ? true : undefined}
+        >
           <FileTypeIcon kind={classifyFileType(entry.name)} size={16} className={css.fileIcon} />
           <span className={css.name}>{entry.name}</span>
         </button>
@@ -167,11 +200,61 @@ function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
  * verbatim, with the root arriving as a prop instead of `useSessions(cwd)`.
  */
 export function FilesTree({
-  tabId, sessionId, root, signal, useStore, actions, start, toggle, onOpen, t, nativeTree,
+  tabId, sessionId, root, signal, useStore, actions, start, toggle, onOpen, t, nativeTree, reveal, saved,
 }: FilesTreeProps): ReactNode {
   const state = useStore(store => store.byTab[tabId])
   const bodyRef = useRef<HTMLDivElement>(null)
   const scrollTopRef = useRef(0)
+  // The reveal's settled mark — the row key `locateFile` reached once every
+  // ancestor was expanded; `undefined` while the walk is still underway.
+  const [current, setCurrent] = useState<string | undefined>(undefined)
+  // Expand requests dispatched for the active reveal target — plus the
+  // manual-collapse flag upstream calls the reveal's cancellation — so a
+  // store update that left the ancestor unexpanded cannot dispatch it
+  // forever, and a reader closing a directory mid-walk stops the walk.
+  const requested = useRef<{ key: string | undefined; paths: Set<string>; canceled: boolean }>({ key: undefined, paths: new Set(), canceled: false })
+  // The target key the walk last settled on; a manual collapse cancels only
+  // an unsettled walk, never a mark already placed.
+  const settledKey = useRef<string | undefined>(undefined)
+  // The native navigator scrolls the current row into view as its button
+  // mounts (`currentRef`); a stable callback means only mounts fire it.
+  const currentRef = useCallback((row: unknown) => {
+    if (row instanceof HTMLElement) row.scrollIntoView({ block: 'nearest' })
+  }, [])
+  const revealPath = reveal?.path
+  // The reveal target's identity for the whole walk — encoded, so a root
+  // and a path can never smear into another pair's spelling.
+  const revealKey = revealPath === undefined || state === undefined
+    ? undefined
+    : JSON.stringify([state.root, revealPath])
+  // The native navigator's `revealing`/`step()`: walk the listed levels
+  // toward the previewed file, expanding the first unexpanded ancestor each
+  // pass. The store updates landing underneath re-run the effect until
+  // every ancestor is open and the walk settles, then the file's row is
+  // current. A file outside the root, or a path the walk cannot reach,
+  // settles with no mark — the same end the native walk reaches.
+  useEffect(() => {
+    if (revealPath === undefined || revealKey === undefined || state === undefined || signal.aborted) { setCurrent(undefined); return }
+    if (requested.current.key !== revealKey) requested.current = { key: revealKey, paths: new Set(), canceled: false }
+    // Upstream marks the target revealed and stops stepping the moment the
+    // reader collapses anything mid-walk; the flag lands in `tree.onToggle`.
+    if (requested.current.canceled) { settledKey.current = revealKey; return }
+    const relative = relativeUnderRoot(revealPath, state.root)
+    const location = relative === undefined ? undefined : locateFile(state, relative)
+    const next = location?.ancestors.find(ancestor => !state.expanded.includes(ancestor.path))
+    if (location !== undefined && next !== undefined && !requested.current.paths.has(next.path)) {
+      requested.current.paths.add(next.path)
+      toggle(tabId, next.parent, next.path, state.expanded, signal)
+      setCurrent(undefined)
+      return
+    }
+    // `pending` means a level on the way is still listing; `next` still
+    // unexpanded after its request means the expand was dropped (the parent
+    // node is not live) — both end like a directory that failed: no mark.
+    const settled = location === undefined || location.pending || next !== undefined ? undefined : location.current
+    if (location === undefined || !location.pending) settledKey.current = revealKey
+    setCurrent(settled)
+  }, [revealKey, state, tabId, signal, toggle])
   // Come back where the reader was: loaded levels outlive the body in the
   // store, so a remounted tree lays out at its full height before this runs
   // and the stored offset re-lands exactly. A fresh tree stores 0.
@@ -194,21 +277,51 @@ export function FilesTree({
     // component that has not unmounted yet.
     if (state !== undefined || signal.aborted) return
     start(tabId, root, signal)
-  }, [state, root, tabId, signal, start])
+    // The owner-closed memory lands behind the seed through the verbatim
+    // `toggle`: each saved root-level directory is re-opened with the whole
+    // snapshot as its expansion prefs — the `root.setExpanded(next)` inside
+    // `toggle` is upstream's own restore channel, so nested directories
+    // follow as their parents' listings land, exactly like the kept
+    // `expanded` upstream hands a fresh directory node. The scroll offset
+    // waits for the seeded body's first layout to claim it.
+    if (saved?.expanded !== undefined) {
+      for (const path of saved.expanded) {
+        const relative = relativeUnderRoot(path, root)
+        if (relative !== undefined && !relative.includes('/')) {
+          toggle(tabId, root, path, saved.expanded.filter(value => value !== path), signal)
+        }
+      }
+    }
+    if (saved?.scrollTop !== undefined && saved.scrollTop > 0) actions.scrolled(tabId, saved.scrollTop)
+  }, [state, root, tabId, signal, start, toggle, saved, actions])
 
   if (state === undefined) return null
   const tree: TreeContext = {
     state,
-    onToggle: (parent, path) => { toggle(tabId, parent, path, state.expanded, signal) },
+    onToggle: (parent, path) => {
+      // The native navigator treats any manual collapse during an
+      // unsettled reveal as the reveal's cancellation (`revealed =
+      // revealing`): the walk stops wherever it stands instead of
+      // re-opening what the reader just closed.
+      if (revealKey !== undefined && state.expanded.includes(path) && settledKey.current !== revealKey) {
+        if (requested.current.key !== revealKey) requested.current = { key: revealKey, paths: new Set(), canceled: true }
+        else requested.current.canceled = true
+      }
+      toggle(tabId, parent, path, state.expanded, signal)
+    },
     // Every row carries an absolute path; the address leaves cwd undefined so
     // the host resolves the file as written — a cwd here would relativize it
     // against the session's primary root and open the wrong file.
     onOpen: (path) => { onOpen(fileAddressFor(sessionId, undefined, path)) },
     t,
+    current,
+    currentRef,
   }
   const legacy = <ul className={css.level}><Level path={state.root} tree={tree} /></ul>
   const content = nativeTree === undefined ? legacy : nativeTree(
-    'sidebar.files.tree', nativeTreeInput(state, failure => failureLine(t, failure), tree.onToggle, tree.onOpen),
+    'sidebar.files.tree',
+    nativeTreeInput(state, failure => failureLine(t, failure), tree.onToggle, tree.onOpen,
+      current === undefined ? undefined : { path: current, ref: currentRef }),
     { fallback: legacy },
   ) as ReactNode
   return (
