@@ -63,6 +63,8 @@ import { RegistryAuthorityLease, RegistryLeaseContendedError } from './registry-
 import { freezeOperationScope, runRegistryOperation, runPrimaryOperation } from './registry-operation.ts'
 import type { RegistryOperation, RegistryOperationKind } from './registry-operation.ts'
 import { RemoteAdmissionError, type RemoteOperation, type RemoteOperationIdentity, type RemoteOperationRequest, type RemoteStatus } from './remote/contract.ts'
+import { effectiveRootAccess } from './contract.ts'
+import type { LocalDestinationAuthority } from './remote/local-sink.ts'
 import { RemoteControlPlane, type RemoteConfig } from './remote/plane.ts'
 import { parseRemoteArguments, remoteAdmitSchema, remoteSnapshotSchema, type RemoteMethod } from './remote/protocol.ts'
 import type { RemoteEndpointRef, RemoteSnapshotReply } from './remote/contract.ts'
@@ -1751,6 +1753,59 @@ export class MultiRootRegistry extends Service {
       active = false
       trace('expired')
     }
+  }
+
+  /**
+   * Authorize one LOCAL binary write destination for the transfer port
+   * (ADR-0034). This is the same fence the filesystem mutations consult, minus
+   * the `ctx.fs` call: the named root must be a live `available` registration
+   * (or the primary root), its access level must permit a write at the
+   * operation's effective session mode, the calling tool must not be capped for
+   * additional-root writes, and the returned protected boundaries keep the
+   * staging file and the published name out of the DSH home, the storage
+   * medium, and the lease directory under every mode.
+   *
+   * A transfer must ask again immediately before publication; the authority is
+   * a snapshot, never a cached permit.
+   * @param primaryRoot - the session's primary root (any spelling).
+   * @param rootId - `primary` or the stable alias id of a registered root.
+   * @param effectiveMode - the operation's session mode, capped at workspace-write.
+   * @param toolName - the dispatching tool, whose per-tool cap narrows additional roots.
+   * @returns the canonical root and the protected boundaries to enforce.
+   * @throws {RemoteAdmissionError} with a stable refusal code.
+   */
+  localTransferDestination(
+    primaryRoot: string,
+    rootId: string,
+    effectiveMode: 'read-only' | 'workspace-write',
+    toolName: string,
+  ): LocalDestinationAuthority {
+    if (this.disposed) throw new RemoteAdmissionError('remote-unavailable', 'the registry is disposed')
+    if (typeof rootId !== 'string' || rootId === '') throw new RemoteAdmissionError('invalid-arguments', 'a local transfer destination requires a root id')
+    if (!this.available) {
+      throw new RemoteAdmissionError('local-authority-unavailable', 'the local registry authority is not live; additional roots are not granted here')
+    }
+    const deny = this.knownProtectedPaths().map(path => path.path)
+    if (rootId === 'primary') {
+      if (effectiveMode === 'read-only') throw new RemoteAdmissionError('mode-denies', 'a read-only session cannot write into the primary root')
+      return { rootId, root: canonicalRoot(primaryKey(primaryRoot)), access: 'primary', deny }
+    }
+    const status = this.list(primaryRoot).find(entry => entry.aliasId === rootId)
+    if (status === undefined || status.state !== 'available') {
+      throw new RemoteAdmissionError('local-root-unavailable', `local root "${rootId}" is not an available registered root of this primary`)
+    }
+    if (effectiveRootAccess(status.access, effectiveMode) === 'read-only') {
+      throw new RemoteAdmissionError(
+        status.access === 'read-only' ? 'local-destination-read-only' : 'mode-denies',
+        status.access === 'read-only'
+          ? `local root "${rootId}" is a read-only root and cannot receive a transfer`
+          : `a read-only session cannot write into the inherit local root "${rootId}"`,
+      )
+    }
+    if (this.ctx.multiRootScope.capsTool(toolName)) {
+      throw new RemoteAdmissionError('tool-capped', `tool "${toolName}" is capped to read-only and cannot write into local root "${rootId}"`)
+    }
+    return { rootId, root: status.path, access: status.access, deny }
   }
 
   /** The remote-1 listener's dispatch: same queue, same epoch as v1. */

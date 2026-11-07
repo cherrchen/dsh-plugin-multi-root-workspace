@@ -175,6 +175,37 @@ describe('remote control plane', () => {
     }), operation => operation.endpoints)).resolves.toHaveLength(2)
   })
 
+  async function transferStack(actions: { source: string[]; destination: string[] }): Promise<RegistryStack> {
+    const bindings = [
+      { primary: fixture.workspace, environmentId: 'build-01', rootId: 'src', path: '/work/src', actions: actions.source, transfers: [{ direction: 'export', peer: { environmentId: 'build-02', rootId: 'dst' } }] },
+      { primary: fixture.workspace, environmentId: 'build-02', rootId: 'dst', path: '/work/dst', actions: actions.destination, transfers: [{ direction: 'import', peer: { environmentId: 'build-01', rootId: 'src' } }] },
+    ]
+    const path = manifestFile({ bindings })
+    writeFileSync(path, readFileSync(path, 'utf8').replace('"namespace": "ns-build"', '"namespace": "ns-a"'))
+    const doc = JSON.parse(readFileSync(path, 'utf8'))
+    doc.environments.push({ environmentId: 'build-02', platform: 'linux', account: 'ci', hostKey: `SHA256:${'B'.repeat(43)}`, namespace: 'ns-b', transport: 'sftp', helper: null, connection: { host: 'vps' }, credentialIsolation: 'unattested' })
+    writeFileSync(path, JSON.stringify(doc))
+    const stack = await mount({ manifestPath: path })
+    stack.registry.setRemoteEndpointVerifier(verifier())
+    await stack.registry.addRemote(fixture.workspace, { environmentId: 'build-01', rootId: 'src' })
+    await stack.registry.addRemote(fixture.workspace, { environmentId: 'build-02', rootId: 'dst' })
+    return stack
+  }
+
+  it.skipIf(process.platform === 'win32')('requires the source read action for a transfer', async () => {
+    const stack = await transferStack({ source: ['write'], destination: ['write'] })
+    await expect(stack.registry.withRemoteOperation(op(stack, {
+      purpose: 'transfer', endpoints: [{ environmentId: 'build-01', rootId: 'src' }, { environmentId: 'build-02', rootId: 'dst' }],
+    }), () => {})).rejects.toMatchObject({ code: 'action-not-allowed' })
+  })
+
+  it.skipIf(process.platform === 'win32')('requires the destination write action for a transfer', async () => {
+    const stack = await transferStack({ source: ['read'], destination: ['read'] })
+    await expect(stack.registry.withRemoteOperation(op(stack, {
+      purpose: 'transfer', endpoints: [{ environmentId: 'build-01', rootId: 'src' }, { environmentId: 'build-02', rootId: 'dst' }],
+    }), () => {})).rejects.toMatchObject({ code: 'action-not-allowed' })
+  })
+
   it.skipIf(process.platform === 'win32')('keeps local authority working when the remote domain cannot open', async () => {
     const manifest = manifestFile()
     // A directory where the remote domain document belongs makes its open fail.

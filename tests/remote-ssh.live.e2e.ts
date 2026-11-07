@@ -3,7 +3,7 @@
  * Gated on DSH_MULTI_ROOT_SSH_LIVE (path to ~/.dsh-ssh-test/live.json) and a
  * POSIX initiator — without it the whole file skips cleanly.
  */
-import { chmodSync, linkSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, linkSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createHash, randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,6 +24,7 @@ const LIVE = process.env.DSH_MULTI_ROOT_SSH_LIVE
 const liveDescribe = describe.skipIf(LIVE === undefined || process.platform === 'win32')
 const live = LIVE === undefined ? {} as never : JSON.parse(readFileSync(LIVE, 'utf8')) as {
   hostKey: string; account: string; buildHost: string; xferHost: string
+  xfer2Host?: string; xfer2Account?: string
   nodePath: string; helperPath: string; helperSha256: string
   workspaceApp: string; workspaceLib: string; outsideSentinel: string
 }
@@ -48,6 +49,12 @@ function liveManifest(envOverrides: (env: Record<string, unknown>) => Record<str
         connection: { host: live.xferHost }, transfer: { maxBytes: 2 * 1024 * 1024, timeoutMs: 60_000 },
         credentialIsolation: 'unattested',
       }),
+      envOverrides({
+        environmentId: 'vps-xfer2', platform: 'linux', account: live.xfer2Account ?? 'dshxfer2',
+        hostKey: live.hostKey, namespace: 'ns-xfer2', transport: 'sftp', helper: null,
+        connection: { host: live.xfer2Host ?? 'dsh-vps-xfer2' }, transfer: { maxBytes: 2 * 1024 * 1024, timeoutMs: 60_000 },
+        credentialIsolation: 'unattested',
+      }),
     ] as never,
     bindings: [
       { primary: '', environmentId: 'vps-app', rootId: 'app', path: live.workspaceApp, actions: ['read', 'write', 'exec'] },
@@ -55,6 +62,13 @@ function liveManifest(envOverrides: (env: Record<string, unknown>) => Record<str
       { primary: '', environmentId: 'vps-xfer', rootId: 'import', path: '/import', actions: ['read', 'write'], transfers: [
         { direction: 'import', peer: { environmentId: 'local', rootId: 'primary' } },
         { direction: 'import', peer: { environmentId: 'local', rootId: 'xlib' } },
+        { direction: 'export', peer: { environmentId: 'local', rootId: 'primary' } },
+        { direction: 'export', peer: { environmentId: 'local', rootId: 'xlib' } },
+        { direction: 'export', peer: { environmentId: 'local', rootId: 'rodst' } },
+        { direction: 'export', peer: { environmentId: 'vps-xfer2', rootId: 'import' } },
+      ] },
+      { primary: '', environmentId: 'vps-xfer2', rootId: 'import', path: '/import', actions: ['read', 'write'], transfers: [
+        { direction: 'import', peer: { environmentId: 'vps-xfer', rootId: 'import' } },
       ] },
     ] as never,
   }
@@ -226,27 +240,41 @@ liveDescribe('remote_copy over the managed SFTP account', () => {
       to: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'dst.txt' },
       ...request,
     } as never, 'remote_copy', new AbortController().signal)
-  const remoteFile = async (m: Awaited<ReturnType<typeof mount>>, path: string) => {
-    const env = await m.manager.openSftp('vps-xfer')
+  const remoteFileOf = async (m: Awaited<ReturnType<typeof mount>>, environmentId: string, path: string) => {
+    const env = await m.manager.openSftp(environmentId)
     const h = await env.client.open(path, 1)
     const chunks: Buffer[] = []
     for (let off = 0;;) { const d = await env.client.read(h, off, 64 * 1024); if (d.length === 0) break; chunks.push(d); off += d.length }
     await env.client.close(h)
     return Buffer.concat(chunks)
   }
+  const remoteFile = (m: Awaited<ReturnType<typeof mount>>, path: string) => remoteFileOf(m, 'vps-xfer', path)
   const cleanupRemote = async (m: Awaited<ReturnType<typeof mount>>) => {
-    const env = await m.manager.openSftp('vps-xfer').catch(() => undefined)
-    if (env === undefined) return
-    for (const name of [...created]) await env.client.remove(`/import/${name}`).catch(() => {})
+    for (const environmentId of ['vps-xfer', 'vps-xfer2']) {
+      const env = await m.manager.openSftp(environmentId).catch(() => undefined)
+      if (env === undefined) continue
+      for (const entry of await env.client.readdir('/import').catch(() => [])) {
+        if (entry.name.startsWith('g2-')) await env.client.remove(`/import/${entry.name}`).catch(() => {})
+      }
+      const staging = (await env.client.readdir('/import').catch(() => [])).map(entry => entry.name).filter(name => name.startsWith('.dsh-staging-'))
+      expect(staging).toEqual([])
+    }
     created.clear()
-    const names = (await env.client.readdir('/import')).map(e => e.name).filter(n => n.startsWith('.dsh-staging-'))
-    expect(names).toEqual([])
   }
-  const seed = async (m: Awaited<ReturnType<typeof mount>>, name: string, data: Buffer | string) => {
-    const env = await m.manager.openSftp('vps-xfer')
-    const h = await env.client.open(`/import/${name}`, 0x02 | 0x08 | 0x20, 0o600)
-    await env.client.write(h, 0, Buffer.from(data)); await env.client.close(h)
+  const seed = async (m: Awaited<ReturnType<typeof mount>>, name: string, data: Buffer | string, environmentId = 'vps-xfer') => {
+    const env = await m.manager.openSftp(environmentId)
+    const payload = Buffer.from(data)
+    // P_WRITE | P_CREAT | P_TRUNC: overwrite a leftover from an interrupted
+    // run, and never put more than one bounded chunk into a single WRITE frame.
+    const h = await env.client.open(`/import/${name}`, 0x02 | 0x08 | 0x10, 0o600)
+    for (let offset = 0; offset < payload.length; offset += 32 * 1024) {
+      await env.client.write(h, offset, payload.subarray(offset, offset + 32 * 1024))
+    }
+    await env.client.close(h)
     created.add(name)
+  }
+  const addGrants = async (m: Awaited<ReturnType<typeof mount>>, ...refs: { environmentId: string; rootId: string }[]) => {
+    for (const ref of refs) await m.stack.registry.addRemote(fixture.workspace, ref)
   }
 
   it('copies primary and additional local roots and verifies sha256 remotely', async () => {
@@ -347,6 +375,117 @@ liveDescribe('remote_copy over the managed SFTP account', () => {
     expect((await remoteFile(m, '/import/g2-race.txt')).toString()).toMatch(/^winner-[AB]$/)
     await cleanupRemote(m)
   }, 120_000)
+
+  it('downloads from the managed SFTP account into the primary and an additional local root', async () => {
+    const m = await mount()
+    const extra = mkdtempSync(join(tmpdir(), 'g2-download-'))
+    try {
+      const statuses = await m.stack.registry.add(fixture.workspace, { path: extra })
+      await m.stack.registry.setAliasId(fixture.workspace, { kind: 'id', id: statuses[0]!.id }, 'xlib')
+      await addGrants(m, { environmentId: 'vps-xfer', rootId: 'import' })
+      const payload = randomBytes(96 * 1024)
+      await seed(m, 'g2-download-src.bin', payload)
+      const toPrimary = await copy(m, {
+        from: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'g2-download-src.bin' },
+        to: { environmentId: 'local', rootId: 'primary', relativePath: 'g2-downloaded.bin' },
+      })
+      expect(toPrimary).toMatchObject({ status: 'committed', bytes: payload.length, staging: 'removed' })
+      expect(readFileSync(join(fixture.workspace, 'g2-downloaded.bin')).equals(payload)).toBe(true)
+      const toExtra = await copy(m, {
+        from: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'g2-download-src.bin' },
+        to: { environmentId: 'local', rootId: 'xlib', relativePath: 'g2-downloaded.bin' },
+      })
+      expect(toExtra).toMatchObject({ status: 'committed', bytes: payload.length })
+      expect(readFileSync(join(extra, 'g2-downloaded.bin')).equals(payload)).toBe(true)
+      expect(readdirSync(fixture.workspace).filter(name => name.startsWith('.dsh-staging-'))).toEqual([])
+      expect(readdirSync(extra).filter(name => name.startsWith('.dsh-staging-'))).toEqual([])
+      await cleanupRemote(m)
+    } finally { rmSync(extra, { recursive: true, force: true }) }
+  }, 180_000)
+
+  it('refuses a read-only local destination and an existing local target', async () => {
+    const m = await mount()
+    const readOnly = mkdtempSync(join(tmpdir(), 'g2-readonly-'))
+    try {
+      const statuses = await m.stack.registry.add(fixture.workspace, { path: readOnly, access: 'read-only' })
+      await m.stack.registry.setAliasId(fixture.workspace, { kind: 'id', id: statuses[0]!.id }, 'rodst')
+      await addGrants(m, { environmentId: 'vps-xfer', rootId: 'import' })
+      await seed(m, 'g2-download-src.bin', 'payload')
+      const denied = await copy(m, {
+        from: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'g2-download-src.bin' },
+        to: { environmentId: 'local', rootId: 'rodst', relativePath: 'denied.bin' },
+      })
+      expect(denied).toMatchObject({ status: 'failed', code: 'local-destination-read-only', stage: 'admission' })
+      expect(readdirSync(readOnly)).toEqual([])
+
+      writeFileSync(join(fixture.workspace, 'g2-taken.bin'), 'keep-me')
+      const taken = await copy(m, {
+        from: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'g2-download-src.bin' },
+        to: { environmentId: 'local', rootId: 'primary', relativePath: 'g2-taken.bin' },
+      })
+      expect(taken).toMatchObject({ status: 'failed', code: 'target-exists', stage: 'preflight', staging: 'none' })
+      expect(readFileSync(join(fixture.workspace, 'g2-taken.bin'), 'utf8')).toBe('keep-me')
+      await cleanupRemote(m)
+    } finally { rmSync(readOnly, { recursive: true, force: true }) }
+  }, 180_000)
+
+  it('relays a file between two managed SFTP accounts and refuses an existing destination', async () => {
+    const m = await mount()
+    await addGrants(m, { environmentId: 'vps-xfer', rootId: 'import' }, { environmentId: 'vps-xfer2', rootId: 'import' })
+    const payload = randomBytes(96 * 1024)
+    await seed(m, 'g2-relay-src.bin', payload)
+    const relayed = await copy(m, {
+      from: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'g2-relay-src.bin' },
+      to: { environmentId: 'vps-xfer2', rootId: 'import', relativePath: 'g2-relay.bin' },
+    })
+    expect(relayed).toMatchObject({ status: 'committed', bytes: payload.length, staging: 'removed' })
+    expect((await remoteFileOf(m, 'vps-xfer2', '/import/g2-relay.bin')).equals(payload)).toBe(true)
+    expect((await remoteFile(m, '/import/g2-relay-src.bin')).equals(payload)).toBe(true)
+    const again = await copy(m, {
+      from: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'g2-relay-src.bin' },
+      to: { environmentId: 'vps-xfer2', rootId: 'import', relativePath: 'g2-relay.bin' },
+    })
+    expect(again).toMatchObject({ status: 'failed', code: 'target-exists', stage: 'preflight', staging: 'none' })
+    expect((await remoteFileOf(m, 'vps-xfer2', '/import/g2-relay.bin')).equals(payload)).toBe(true)
+    await cleanupRemote(m)
+  }, 180_000)
+
+  it('detects a remote source changed during the relay and leaves no destination staging', async () => {
+    const m = await mount()
+    await addGrants(m, { environmentId: 'vps-xfer', rootId: 'import' }, { environmentId: 'vps-xfer2', rootId: 'import' })
+    await seed(m, 'g2-mutate-src.bin', 'before')
+    const result = await copy(m, {
+      from: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'g2-mutate-src.bin' },
+      to: { environmentId: 'vps-xfer2', rootId: 'import', relativePath: 'g2-mutate.bin' },
+    }, async stage => {
+      if (stage !== 'staging') return
+      const env = await m.manager.openSftp('vps-xfer')
+      const h = await env.client.open('/import/g2-mutate-src.bin', 0x02 | 0x10)
+      // Overwrite the same number of bytes: only the mtime version check can
+      // notice this mutation.
+      await env.client.write(h, 0, Buffer.from('after!'))
+      await env.client.close(h)
+    })
+    expect(result).toMatchObject({ status: 'failed', code: 'source-changed' })
+    const env2 = await m.manager.openSftp('vps-xfer2')
+    const names = (await env2.client.readdir('/import')).map(entry => entry.name)
+    expect(names.filter(name => name.startsWith('.dsh-staging-'))).toEqual([])
+    expect(names).not.toContain('g2-mutate.bin')
+    await cleanupRemote(m)
+  }, 180_000)
+
+  it('refuses an over-budget remote source before the stream', async () => {
+    // A deployment-small cap keeps this evidence cheap over a high-latency link.
+    const m = await mount(env => env.transport === 'sftp' ? { ...env, transfer: { maxBytes: 1024, timeoutMs: 60_000 } } : env)
+    await addGrants(m, { environmentId: 'vps-xfer', rootId: 'import' }, { environmentId: 'vps-xfer2', rootId: 'import' })
+    await seed(m, 'g2-huge-src.bin', randomBytes(2048))
+    const huge = await copy(m, {
+      from: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'g2-huge-src.bin' },
+      to: { environmentId: 'vps-xfer2', rootId: 'import', relativePath: 'g2-huge.bin' },
+    })
+    expect(huge).toMatchObject({ status: 'failed', code: 'source-too-large', stage: 'source' })
+    await cleanupRemote(m)
+  }, 180_000)
 
   it('denies a read-only session before any SFTP session opens', async () => {
     const m = await mount()

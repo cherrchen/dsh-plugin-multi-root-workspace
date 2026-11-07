@@ -160,6 +160,15 @@ export class RemoteControlPlane {
       if (destination.environmentId !== 'local' && !findBinding(manifest, key, destination)!.binding.transfers?.some(
         transfer => transfer.direction === 'import' && transfer.peer.environmentId === source.environmentId && transfer.peer.rootId === source.rootId,
       )) throw new RemoteAdmissionError('transfer-pair-not-allowed', 'the destination binding does not import from this source')
+      // The transfer contract is read/export on the source and create/import on
+      // the destination: a declared pairing does not widen a binding that never
+      // declared the matching action (ADR-0034, "双端准入").
+      if (source.environmentId !== 'local' && !findBinding(manifest, key, source)!.binding.actions.includes('read')) {
+        throw new RemoteAdmissionError('action-not-allowed', 'the source binding does not allow "read"')
+      }
+      if (destination.environmentId !== 'local' && !findBinding(manifest, key, destination)!.binding.actions.includes('write')) {
+        throw new RemoteAdmissionError('action-not-allowed', 'the destination binding does not allow "write"')
+      }
     } else {
       if (request.endpoints.length !== 1 || request.endpoints[0]!.environmentId === 'local') {
         throw new RemoteAdmissionError('invalid-arguments', `${request.purpose} requires exactly one remote endpoint`)

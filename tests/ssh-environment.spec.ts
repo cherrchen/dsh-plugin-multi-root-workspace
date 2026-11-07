@@ -4,10 +4,10 @@ import { hostKeyFingerprint, parseSshConfig, SshEnvironmentManager } from '../sr
 import type { DeploymentManifest } from '../src/remote/manifest.ts'
 
 const SSH_G = [
-  'user dshbuild', 'hostname 64.118.149.252', 'userknownhostsfile /home/t/.dsh-ssh-test/known_hosts',
+  'user dshbuild', 'hostname 203.0.113.95', 'userknownhostsfile /home/t/.dsh-ssh-test/known_hosts',
   'stricthostkeychecking yes', 'forwardagent no', 'batchmode yes', 'identityfile ~/.dsh-ssh-test/dshbuild_ed25519',
 ].join('\n')
-const KEY_LINE = '64.118.149.252 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestFakeKeyDataForUnitTestOnly123456'
+const KEY_LINE = '203.0.113.95 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestFakeKeyDataForUnitTestOnly123456'
 const FP = 'SHA256:ZVJcb8gU2m2/IDlL0Zq4y2dzsJxbaMKHqm12KbIQ8D0'
 const environment = (over: object = {}) => ({
   environmentId: 'vps-app', platform: 'linux', account: 'dshbuild', hostKey: FP,
@@ -29,7 +29,7 @@ const eligible = { status: 'eligible' as const, release: '0.2.2-rc.1' }
 
 describe('parseSshConfig', () => {
   it('parses the fields that bind the host identity', () => {
-    expect(parseSshConfig(SSH_G)).toMatchObject({ user: 'dshbuild', hostname: '64.118.149.252', strictHostKeyChecking: 'yes', forwardAgent: 'no' })
+    expect(parseSshConfig(SSH_G)).toMatchObject({ user: 'dshbuild', hostname: '203.0.113.95', strictHostKeyChecking: 'yes', forwardAgent: 'no' })
     expect(() => parseSshConfig('hostname x\nstricthostkeychecking yes\nuser u')).not.toThrow()
     expect(() => parseSshConfig('user u\nhostname x\nstricthostkeychecking ask')).toThrowError(/strictHostKeyChecking/)
     expect(() => parseSshConfig('stricthostkeychecking yes')).toThrowError(/no user/)
@@ -38,7 +38,7 @@ describe('parseSshConfig', () => {
 
 describe('hostKeyFingerprint', () => {
   it('requires exactly one key and reports the fingerprint', async () => {
-    expect(await hostKeyFingerprint('64.118.149.252', ['/kh'], exec)).toEqual({ keys: 1, fingerprint: FP })
+    expect(await hostKeyFingerprint('203.0.113.95', ['/kh'], exec)).toEqual({ keys: 1, fingerprint: FP })
     expect(await hostKeyFingerprint('h', ['/kh'], async () => ({ stdout: '', stderr: '' }))).toEqual({ keys: 0, fingerprint: undefined })
     expect(await hostKeyFingerprint('h', ['/kh'], async (f, a) => a[0] === '-F' ? { stdout: `${KEY_LINE}\n${KEY_LINE}\n`, stderr: '' } : { stdout: '', stderr: '' })).toEqual({ keys: 2, fingerprint: undefined })
   })
