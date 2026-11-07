@@ -12,13 +12,14 @@
  * `data-textpreview-url` (the tab's content id) on the preview root,
  * `data-textpreview-content` on the row the NavigatorSeat renders into,
  * `aside[data-files-navigator={paneId}]` with a `[data-files-body]` inside
- * it, `data-dockkit-content` on the tab host, and `[data-dockkit-pane]` on
- * the pane section above it — because `closest` lookups and a
- * MutationObserver are what decide whether the forked tree exists at all.
- * The pane section survives tab replacement in the fixture exactly as it
- * does in dockkit: a `replaceTab` mints a new tab inside the same pane, and
- * the suite replays that by unmounting one host and mounting another under
- * the unchanged pane.
+ * it, and the dockkit tab host: one `section` carrying BOTH
+ * `data-dockkit-content` (its tab id) and `data-dockkit-pane` (the pane
+ * its tab is selected in), inside one `div.tabCell` — the real DockLayout
+ * shape, where a non-empty pane has no element of its own and the pane id
+ * rides on the selected tab's host. `replaceTab` mints a new tab inside
+ * the same pane, and the suite replays that by unmounting one cell and
+ * mounting another carrying the same pane id — or, for a pane that truly
+ * dies, mounting nothing at all.
  *
  * The harness plays the slot framework's part exactly as
  * `client-switcher.spec.tsx` does: it mints the registration's session
@@ -338,7 +339,7 @@ afterEach(() => {
 const PREVIEWED = '/repos/payments/src/inner.ts'
 
 interface PreviewMount {
-  readonly pane: HTMLElement
+  readonly cell: HTMLElement
   readonly preview: HTMLElement
   readonly header: HTMLElement
   readonly content: HTMLElement
@@ -347,26 +348,25 @@ interface PreviewMount {
 }
 
 /**
- * Render the occupant inside a preview that mirrors the upstream scaffold:
- * `data-textpreview-url` on the root, `data-textpreview-content` on the row
- * the navigator seat renders into, all inside one dockkit tab host inside
- * one dockkit pane. `tabId` changes between mounts but `pane` can be
- * shared — the same pair dockkit keeps across a `replaceTab`.
+ * Render the occupant inside a preview that mirrors the real DockLayout
+ * scaffold: `data-textpreview-url` on the root, `data-textpreview-content`
+ * on the row the navigator seat renders into, all inside one dockkit tab
+ * host — a `section` carrying `data-dockkit-content` (its tab id) AND
+ * `data-dockkit-pane` (the pane whose selected tab it is) inside one
+ * `div.tabCell`. A non-empty pane has no element of its own; the pane id
+ * moves with the selected host, and `replaceTab` swaps the whole cell.
  */
 function renderInPreview(
   harness: Harness,
   owner: Record<string, unknown> = {},
-  options: { file?: string; url?: string; tabId?: string; pane?: HTMLElement } = {},
+  options: { file?: string; url?: string; tabId?: string; paneId?: string } = {},
 ): PreviewMount {
   const file = options.file ?? PREVIEWED
-  const pane = options.pane ?? document.createElement('section')
-  if (options.pane === undefined) {
-    pane.setAttribute('data-dockkit-pane', 'pane-1')
-    document.body.append(pane)
-    appended.push(pane)
-  }
+  const cell = document.createElement('div')
+  cell.setAttribute('data-dockkit-host', 'dock')
   const host = document.createElement('section')
   host.setAttribute('data-dockkit-content', options.tabId ?? 'tab-preview')
+  host.setAttribute('data-dockkit-pane', options.paneId ?? 'pane-1')
   const preview = document.createElement('div')
   preview.setAttribute('data-textpreview-url', options.url ?? sessionFileAddress('session-1', file))
   const header = document.createElement('div')
@@ -377,10 +377,12 @@ function renderInPreview(
   content.append(body)
   preview.append(header, content)
   host.append(preview)
-  pane.append(host)
+  cell.append(host)
+  document.body.append(cell)
+  appended.push(cell)
   const occupant = harness.occupant(owner) as ReactElement
   const mounted = render(occupant, { container: header })
-  return { pane, preview, header, content, host, unmount: () => { mounted.unmount() } }
+  return { cell, preview, header, content, host, unmount: () => { mounted.unmount() } }
 }
 
 /** Append the native navigator aside to the preview's content row. */
@@ -501,12 +503,13 @@ describe('the preview navigator retarget', () => {
     await expandDir(firstAside, '/repos/payments/other', '/repos/payments/other/deep')
 
     // Upstream's `replaceTab` closes the preview tab and mints a new one in
-    // the same pane: the occupant unmounts, the tab host leaves the
-    // document, but the pane — and its `data-files-navigator` id — lives.
+    // the same pane — one commit swaps the cells: the occupant unmounts,
+    // the old tab host leaves, and the new host carries the same pane id.
+    // The pane's carrier never disappears, so its record lives.
     first.unmount()
-    first.host.remove()
+    first.cell.remove()
 
-    const second = renderInPreview(harness, { absolutePath: '/repos/payments/other/loose.md' }, { tabId: 'tab-next', pane: first.pane })
+    const second = renderInPreview(harness, { absolutePath: '/repos/payments/other/loose.md' }, { tabId: 'tab-next', file: '/repos/payments/other/loose.md' })
     const secondAside = openNavigator(second.content).aside
     await waitFor(() => { expect(secondAside.hasAttribute('data-mrfw-navigator')).toBe(true) })
     // The pane record carried the expansion across the tab's death.
@@ -675,5 +678,71 @@ describe('the preview navigator retarget', () => {
     await act(async () => {})
     expect(aside.hasAttribute('data-mrfw-navigator')).toBe(false)
     expect(harness.treeCalls.length).toBe(0)
+  })
+
+  it('re-keys the takeover when the aside moves panes in place', async () => {
+    const harness = mount()
+    const first = renderInPreview(harness, { absolutePath: PREVIEWED })
+    // Another selected tab keeps pane-1's carrier alive after the drag —
+    // the source pane still exists while it holds other tabs.
+    const sibling = document.createElement('section')
+    sibling.setAttribute('data-dockkit-pane', 'pane-1')
+    document.body.append(sibling)
+    appended.push(sibling)
+    const { aside } = openNavigator(first.content)
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => {
+      expect(aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+    })
+    await expandDir(aside, '/repos/payments/other', '/repos/payments/other/deep')
+
+    // Dragging the preview to another pane rewrites both ids in place —
+    // the same aside element and the same tab host, a new pane id on each.
+    act(() => {
+      aside.setAttribute('data-files-navigator', 'pane-2')
+      first.host.setAttribute('data-dockkit-pane', 'pane-2')
+    })
+    // pane-2's record is its own — empty — so `other` stays closed while
+    // the reveal opens `src` under the new pane's bookkeeping.
+    await waitFor(() => {
+      expect(aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+    })
+    expect(expanded(aside, '/repos/payments/other')).toBe(false)
+    await waitFor(() => { expect(harness.saves.some(save => save.key === 'pane-2')).toBe(true) })
+
+    // Dragging back lands on pane-1's kept record — its carrier, the
+    // sibling host, never left the document.
+    act(() => {
+      aside.setAttribute('data-files-navigator', 'pane-1')
+      first.host.setAttribute('data-dockkit-pane', 'pane-1')
+    })
+    await waitFor(() => { expect(expanded(aside, '/repos/payments/other')).toBe(true) })
+  })
+
+  it('drops the pane record when the pane leaves the layout — even before the body unmounts', async () => {
+    const harness = mount()
+    const first = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const { aside } = openNavigator(first.content)
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => {
+      expect(aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+    })
+    await expandDir(aside, '/repos/payments/other', '/repos/payments/other/deep')
+
+    // The pane's last tab closed: its only carrier leaves the document
+    // while the occupant's React tree still lives — detached, with no
+    // cleanup yet. The death watch drops the record first, so the body's
+    // unmount afterward cannot write a ghost back into the map.
+    first.cell.remove()
+    await act(async () => {})
+    first.unmount()
+    await act(async () => {})
+
+    const second = renderInPreview(harness, { absolutePath: '/repos/payments/notes.md' }, { tabId: 'tab-next', file: '/repos/payments/notes.md' })
+    const secondAside = openNavigator(second.content).aside
+    await waitFor(() => { expect(secondAside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => { expect(secondAside.querySelector('[data-files-path="/repos/payments/other"]')).not.toBeNull() })
+    // A pane that died keeps nothing: `other` never re-expands.
+    expect(expanded(secondAside, '/repos/payments/other')).toBe(false)
   })
 })

@@ -220,7 +220,7 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 | `sidebar.right.tab.document.actions` 槽（0.2.2-alpha.3 起 `documentpreview` 声明） | `navigator.tsx` 预览导航接管的挂载位，owner `absolutePath` 是被预览文件的宿主路径 | 宿主不声明该槽 → `slots.inject` 不注册，预览导航全程原生（该导航器本来就不存在）；槽在但 owner 字段改名 → occupant 拿不到路径、零渲染，原生树不受影响 |
 | 预览根上的 `data-textpreview-url`（tab contentId）与内容行上的 `data-textpreview-content` | `navigator.tsx` 的预览定位、跨会话校验（`parseFileAddress` 必须解析出本会话的 session-scope 地址）与 aside 观察范围 | 钩子缺席/改名 → 找不到预览或会话校验不通过，永不接管——原生导航树零影响 |
 | `aside[data-files-navigator]`（值为 dockkit pane id）与其内 `[data-files-body]` | `navigator.tsx` 的接管目标与 pane 记账键；`styles.ts` 的 `aside[data-mrfw-navigator] > [data-files-body]` 隐藏规则 | aside 不出现 → 永不接管（该导航器未开）；属性值不再是 pane id → bucket/快照改键、跨 `replaceTab` 的展开/滚动记忆丢失但功能不坏 |
-| dockkit pane 容器上的 `data-dockkit-pane`（tabHost 父级） | `navigator.tsx` 的 pane 死亡观察（section 离开文档才丢快照） | 钩子缺席 → 退回 tabHost 观察，`replaceTab` 会误杀快照——功能不坏，记忆降级 |
+| dockkit 的 pane 载体：非空 pane 的 id 骑在其**选中 tab 的 host**（`data-dockkit-pane`）上、空 pane 由 `TabPanel` 携带、浮动 pane 用 `data-dockkit-float`——pane 本体**没有**稳定元素 | `navigator.tsx` 的 pane 死亡观察是查询式的（文档中仍有携带该 id 的元素即存活），death-watch 独立于 takeover 生命周期、cleanup 永远赢不了它的竞速 | 载体属性的拼写/归属改变 → 存活判定失真：误报死会让快照提前丢弃（记忆降级、功能不坏）；误报活则快照留到会话结束 |
 
 ⚠️ `data-files-path` 有**双重含义**：表头 `PathLabel` 携带裸值（`"true"`），而**每个树行**（`data-files-entry` 的 `li`）也携带它、值是该行自己的绝对路径。任何想命中表头标签的选择器都必须写 `[data-files-path]:not([data-files-entry])`——不带限定符的 `display:none`/`order` 会作用到整棵原生树（曾真实发生：主根树区全空）。其余三个钩子（`root`/`body`/`reload`）各只出现一次。
 

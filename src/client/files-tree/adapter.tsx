@@ -83,14 +83,16 @@ export interface FilesTreeTakeover {
    * @param key - the owner's dockkit identity: the Files pane's tab id, or
    *   the preview navigator's pane id.
    * @param root - absolute path of the root being browsed.
-   * @param section - the dockkit section the caller mounted under; a live
-   *   entry keeps an observer on it that ends the takeover whenever the
-   *   section leaves the document — the record's real end — including when
-   *   the body that mounted it has long been unmounted itself. That end
-   *   also drops the saved memory: a dead owner keeps nothing.
+   * @param section - how the owner's survival is checked: an Element (kept
+   *   while `isConnected`) or a predicate (kept while it returns true —
+   *   the preview navigator's "some connected element still carries this
+   *   pane id" query, since a dockkit pane has no stable element across a
+   *   `replaceTab`). The watch lives at this scope and outlives `end()`:
+   *   ending the hold never disarms it, so the owner's real death drops
+   *   the saved memory even after the body that mounted it is gone.
    * @returns the signal the forked tree lives under.
    */
-  readonly signal: (key: TabId, root: string, section?: Element) => AbortSignal
+  readonly signal: (key: TabId, root: string, section?: Element | (() => boolean)) => AbortSignal
   /**
    * Abort and drop one owner's takeover: the reader deselected, switched
    * roots, or the owner's hold closed. The saved memory survives — ending
@@ -270,19 +272,44 @@ export function createFilesTreeSeats(ctx: ClientContext): {
     interface Held {
       readonly controller: AbortController
       readonly root: string
-      section: Element | undefined
-      observer: MutationObserver | undefined
     }
     const takeovers = new Map<TabId, Held>()
-    // The pane-record memory: a hold ending keeps it, the owner's section
-    // dying drops it — `end()` below versus the observer's `dropSaved` end.
+    // The pane-record memory: a hold ending keeps it, the owner dying drops
+    // it. The death watch is keyed apart from the hold itself — an `end()`
+    // that disconnects it would make the drop unreachable: the owner's
+    // death and the body's unmount land in the same upstream commit, and
+    // the cleanup's `end` always wins that race. One watcher per owner key;
+    // `signal()` re-arms it when a caller supplies a fresher check.
     const savedTrees = new Map<TabId, Map<string, FilesTreeSaved>>()
+    const watchers = new Map<TabId, { alive: () => boolean; observer: MutationObserver }>()
     const endTakeover = (key: TabId, dropSaved = false): void => {
       const held = takeovers.get(key)
-      held?.observer?.disconnect()
       held?.controller.abort()
       takeovers.delete(key)
       if (dropSaved) savedTrees.delete(key)
+    }
+    const armDeathWatch = (key: TabId, alive: () => boolean): void => {
+      const watched = watchers.get(key)
+      if (watched === undefined) {
+        const entry = {
+          alive,
+          observer: new MutationObserver(() => {
+            if (!entry.alive()) {
+              watchers.delete(key)
+              entry.observer.disconnect()
+              endTakeover(key, true)
+            }
+          }),
+        }
+        entry.observer.observe(document, { childList: true, subtree: true })
+        watchers.set(key, entry)
+      } else watched.alive = alive
+      const current = watchers.get(key)
+      if (current !== undefined && !current.alive()) {
+        watchers.delete(key)
+        current.observer.disconnect()
+        endTakeover(key, true)
+      }
     }
     return {
       face: face(sessionId, actions),
@@ -305,25 +332,18 @@ export function createFilesTreeSeats(ctx: ClientContext): {
         signal: (key, root, section) => {
           let held = takeovers.get(key)
           if (held === undefined || held.root !== root || held.controller.signal.aborted) {
-            held?.observer?.disconnect()
             held?.controller.abort()
-            held = { controller: new AbortController(), root, section: undefined, observer: undefined }
+            held = { controller: new AbortController(), root }
             takeovers.set(key, held)
           }
-          // The section watch lives at this scope, not the caller's: a body
-          // that unmounted cannot run another cleanup, but the record may
-          // still end — closing an already-hidden tab removes the section —
-          // and only an observer outliving the body sees that. This end is
-          // the owner's death: the saved memory goes with the record.
-          if (section !== undefined && held.section !== section) {
-            held.section = section
-            held.observer?.disconnect()
-            held.observer = new MutationObserver(() => {
-              if (!section.isConnected) endTakeover(key, true)
-            })
-            held.observer.observe(document, { childList: true, subtree: true })
+          if (section !== undefined) {
+            // Normalize the two caller shapes into one survival predicate.
+            // The watch outlives `end`: an owner dying drops its memory even
+            // though the body's cleanup — which always wins the unmount race
+            // — already ended the hold.
+            const alive = typeof section === 'function' ? section : () => section.isConnected
+            armDeathWatch(key, alive)
           }
-          if (held.section !== undefined && !held.section.isConnected) endTakeover(key, true)
           return held.controller.signal
         },
         end: key => { endTakeover(key) },

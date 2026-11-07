@@ -62,9 +62,10 @@ export type FilesTreeProps =
     /**
      * The owner's live scroll mirror — upstream's `scrolled` writing
      * `pane.scrollTop`: fired on every scroll and once more at unmount with
-     * the body's final offset, so a close-time save needs no React ordering
-     * guarantee to carry the live value. The fork's own store still hears
-     * the offset only at unmount through `actions.scrolled`, as upstream.
+     * the body's final offset, unless the takeover signal already aborted
+     * (a dead owner's cleanup reports nothing). The fork's own store still
+     * hears the offset only at unmount through `actions.scrolled`, as
+     * upstream.
      */
     readonly onScrollOffset?: ((offset: number) => void) | undefined
     /**
@@ -292,7 +293,12 @@ export function FilesTree({
     if (seeded && body !== null) {
       body.scrollTop = state.scrollTop
       scrollTopRef.current = body.scrollTop
-      if (body.parentElement?.contains(body.ownerDocument.activeElement) === true) body.focus()
+      // The handoff mirrors the native body taking the pane's focus — but
+      // only when the takeover's hidden native body was the focused one:
+      // the fork's parent can be a whole page (header controls included),
+      // which must never lose focus to the fork.
+      const nativeBody = body.parentElement?.querySelector('[data-files-body]')
+      if (nativeBody?.contains(body.ownerDocument.activeElement) === true) body.focus()
     }
   }, [seeded])
   // The offset a closed owner left behind can only land once the reseeded
@@ -326,6 +332,11 @@ export function FilesTree({
     const body = bodyRef.current
     if (body === null) return
     const scroll = (): void => {
+      // An offset the ref does not know is the reader's own scroll — a
+      // deferred restore must not land on top of it. Programmatic writes
+      // update the ref synchronously, so their (asynchronous) scroll event
+      // never cancels a pending restore.
+      if (body.scrollTop !== scrollTopRef.current && pendingScroll.current > 0) pendingScroll.current = 0
       scrollTopRef.current = body.scrollTop
       onScrollOffset?.(scrollTopRef.current)
     }
@@ -333,8 +344,12 @@ export function FilesTree({
     return () => { body.removeEventListener('scroll', scroll) }
   }, [seeded, onScrollOffset])
   useEffect(() => () => {
-    if (seeded && !signal.aborted) actions.scrolled(tabId, scrollTopRef.current)
-    onScrollOffset?.(scrollTopRef.current)
+    // The aborted owner's unmount reports nothing: a dropped record must
+    // not be resurrected by a cleanup that outlived its own death watch.
+    if (!signal.aborted) {
+      if (seeded) actions.scrolled(tabId, scrollTopRef.current)
+      onScrollOffset?.(scrollTopRef.current)
+    }
   }, [seeded, signal, tabId, actions, onScrollOffset])
   useEffect(() => {
     // A bucket gone because the record aborted must not be re-seeded by a
@@ -363,10 +378,15 @@ export function FilesTree({
       // The native navigator settles an in-flight reveal the moment the
       // reader collapses anything (`manual && collapsing → revealed =
       // revealing`): the walk stops wherever it stands instead of
-      // re-opening what the reader just closed.
-      if (revealKey !== undefined && !walk.current.settled && !walk.current.canceled
-          && revealSeed.current !== revealPath && state.expanded.includes(path) && revealPath !== undefined) {
-        walk.current.canceled = true
+      // re-opening what the reader just closed. A collapse that lands
+      // before the reveal effect has run — the request already changed,
+      // the ref still names the old key — pre-cancels the walk it would
+      // have started, so the effect's key reset cannot resurrect it.
+      if (revealPath !== undefined && revealKey !== undefined && revealSeed.current !== revealPath
+          && state.expanded.includes(path)
+          && (walk.current.key !== revealKey || (!walk.current.settled && !walk.current.canceled))) {
+        if (walk.current.key !== revealKey) walk.current = { key: revealKey, settled: false, canceled: true }
+        else walk.current.canceled = true
         revealSeed.current = undefined
         revealOnSettled?.(revealPath)
       }

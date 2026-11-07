@@ -59,6 +59,11 @@ export function relativeUnderRoot(path: string, root: string): string | undefine
   return normalized.split('/').some(part => part === '' || part === '.' || part === '..') ? undefined : normalized
 }
 
+/** One path's comparison spelling: separators unified, trailing slashes dropped. */
+function normalized(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
 /**
  * The additional root that owns one absolute file path: available roots
  * only, the longest matching root path winning when registrations nest.
@@ -67,11 +72,6 @@ export function relativeUnderRoot(path: string, root: string): string | undefine
  * @returns the owning root, or `undefined` when the file is outside every
  *   available additional root (the primary root included).
  */
-/** One path's comparison spelling: separators unified, trailing slashes dropped. */
-function normalized(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/, '')
-}
-
 export function rootForPath(view: RootsView, path: string): RootView | undefined {
   let best: RootView | undefined
   const primary = view.primaryRoot === undefined ? undefined : normalized(view.primaryRoot)

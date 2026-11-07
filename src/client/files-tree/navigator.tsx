@@ -35,10 +35,16 @@
  *   navigator closes the directory node — watches and listings end — while
  *   the pane record keeps `expanded`/`scrollTop`/`revealed` for the next
  *   open. Here the takeover `signal` is requested when the aside appears
- *   and ended when it leaves; the saved snapshot is written into the
- *   inject-side map BEFORE the end, so it survives both the hold and the
- *   component. A pane section leaving the document is the record's real
- *   end and drops the memory.
+ *   and ended when it leaves. The saved snapshot is written into the
+ *   inject-side map continuously — the bucket's expansion set mirrors into
+ *   it, the forked body reports its live scroll offset, and a settled
+ *   reveal records its file — so no cleanup ordering ever decides what is
+ *   remembered. A dockkit pane has no stable element (a non-empty pane's
+ *   id rides on its selected tab's host, which `replaceTab` swaps out), so
+ *   the owner's death is checked by query: the pane lives while some
+ *   connected element still carries its id, and the watch that drops the
+ *   memory outlives every `end` because the body's cleanup always wins
+ *   the unmount race.
  * - **Reveal.** The native navigator seeds `pane.revealing` with the drawn
  *   file's address — unless `pane.revealed` already names it — and steps
  *   the walk open (ancestors expanded one listing at a time, then the
@@ -107,18 +113,32 @@ interface Takeover {
  * sits under an additional root, lends the navigator aside to the forked
  * tree. It draws nothing of its own.
  */
+/**
+ * A dockkit pane has no stable element: a non-empty pane's id rides on its
+ * SELECTED tab's host (`data-dockkit-pane`), an empty pane's on its
+ * `TabPanel`, and a floating pane's host carries `data-dockkit-float` —
+ * `replaceTab` swaps the host while the pane lives on. The owner is
+ * therefore alive while some connected element still carries its id.
+ * @param id - the dockkit pane id the aside announced.
+ * @returns whether the document still contains a carrier of the id.
+ */
+function paneAlive(id: string): boolean {
+  for (const element of document.querySelectorAll<HTMLElement>('[data-dockkit-pane],[data-dockkit-float]')) {
+    if (element.dataset.dockkitPane === id || element.dataset.dockkitFloat === id) return true
+  }
+  return false
+}
+
 export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   const { absolutePath, sessionId, panel, filesTree } = props
   const anchorRef = useRef<HTMLSpanElement | null>(null)
   const sectionRef = useRef<HTMLElement | null>(null)
-  const paneRef = useRef<HTMLElement | null>(null)
   const fallbackPaneId = useRef<TabId | undefined>(undefined)
+  // Whether the pane id came from a real carrier attribute — the generated
+  // fallback names a pane no element can carry, so arming the death watch
+  // on it would drop the takeover the moment it was born.
+  const paneIdentified = useRef(false)
   const mounted = useRef(true)
-  // The pane-record mirrors: the bucket's expanded set and the body's live
-  // scroll offset, kept current so the close-time save needs no React
-  // ordering guarantee to be correct.
-  const expandedRef = useRef<readonly string[]>([])
-  const liveScrollRef = useRef(0)
   const [preview, setPreview] = useState<HTMLElement | null>(null)
   const [tabId, setTabId] = useState<TabId | undefined>(undefined)
   const [aside, setAside] = useState<HTMLElement | null>(null)
@@ -143,13 +163,6 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
     const anchor = anchorRef.current
     const previewEl = anchor?.closest<HTMLElement>('[data-textpreview-url]') ?? null
     sectionRef.current = anchor?.closest<HTMLElement>('[data-dockkit-content]') ?? null
-    // The tabHost carries `data-dockkit-pane` too (while its tab is the
-    // pane's selected one), so the pane container is found from the
-    // tabHost's PARENT — closest() alone would stop at the tabHost and the
-    // death-watch would fire on every `replaceTab` instead of on the pane's
-    // real end.
-    paneRef.current = sectionRef.current?.parentElement?.closest<HTMLElement>('[data-dockkit-pane]')
-      ?? sectionRef.current
     const content = sectionRef.current?.dataset.dockkitContent
     setTabId((content !== undefined && content !== ''
       ? content
@@ -188,13 +201,26 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   // the content section's own `data-dockkit-pane` is the backup, present
   // while this tab is the pane's selected one — the only state an occupant
   // can observe from. A generated fallback still keys correctly, just
-  // without cross-tab continuity.
+  // without cross-tab continuity. Both attributes are mutable IN PLACE —
+  // dragging the preview tab to another pane rewrites them on the same
+  // elements — so they are observed, not read once: a change re-keys the
+  // takeover, the bucket, and the saved memory under the new pane while the
+  // old pane keeps whatever it had saved for itself.
   useEffect(() => {
     if (aside === null) return
-    const identified = aside.dataset.filesNavigator ?? sectionRef.current?.dataset.dockkitPane
-    setPaneId((identified !== undefined && identified !== ''
-      ? identified
-      : (fallbackPaneId.current ??= `mrfw-nav-${Math.random().toString(36).slice(2)}` as TabId)) as TabId)
+    const read = (): void => {
+      const identified = aside.dataset.filesNavigator ?? sectionRef.current?.dataset.dockkitPane
+      paneIdentified.current = identified !== undefined && identified !== ''
+      setPaneId((identified !== undefined && identified !== ''
+        ? identified
+        : (fallbackPaneId.current ??= `mrfw-nav-${Math.random().toString(36).slice(2)}` as TabId)) as TabId)
+    }
+    read()
+    const observer = new MutationObserver(read)
+    observer.observe(aside, { attributes: true, attributeFilter: ['data-files-navigator'] })
+    const section = sectionRef.current
+    if (section !== null) observer.observe(section, { attributes: true, attributeFilter: ['data-dockkit-pane'] })
+    return () => { observer.disconnect() }
   }, [aside])
 
   // The root the previewed file belongs to: the session's registry view,
@@ -227,45 +253,56 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
     return () => { controller.abort() }
   }, [preview, aside, sessionId, panel, absolutePath])
 
-  // The forked bucket's expansion set, mirrored continuously so the
-  // close-time save carries the live value regardless of cleanup order.
+  // The pane-record memory is written continuously, not at cleanup: the
+  // bucket's expansion set mirrors into the inject-side map on every
+  // update — gated on the live takeover's root so the window between a
+  // root switch and the new hold cannot stamp the old root's set under
+  // the new one — and the forked body reports its live scroll offset as
+  // upstream's `scrolled` keeps `pane.scrollTop`. What the map holds is
+  // therefore always the live value; ending the hold only ends the hold,
+  // and nothing a cleanup writes can resurrect a dropped record.
+  const rootPath = root?.path
+  const takeoverCtl = filesTree.takeover
   const bucket = filesTree.useStore(store => (paneId === undefined ? undefined : store.byTab[paneId]))
   useEffect(() => {
-    if (bucket !== undefined) expandedRef.current = bucket.expanded
-  }, [bucket])
+    if (bucket !== undefined && takeover !== null && paneId !== undefined && takeover.paneId === paneId && takeover.root === rootPath) {
+      takeoverCtl.save(paneId, { root: takeover.root, expanded: bucket.expanded })
+    }
+  }, [bucket, takeover, paneId, rootPath, takeoverCtl])
 
   // The body's live scroll offset, reported by the fork itself through
   // `onScrollOffset` — the fork's store only hears the offset on body
   // unmount, but the pane record wants the value at close time, the same
-  // live `pane.scrollTop` upstream's `scrolled` maintains. Reading the DOM
-  // here instead would race the portal's first seeded render.
+  // live `pane.scrollTop` upstream's `scrolled` maintains.
   const onScrollOffset = useCallback((offset: number): void => {
-    liveScrollRef.current = offset
-  }, [])
+    if (paneId !== undefined && rootPath !== undefined) {
+      takeoverCtl.save(paneId, { root: rootPath, scrollTop: offset })
+    }
+  }, [takeoverCtl, paneId, rootPath])
 
   // The hold: while the aside exists AND the file belongs to an additional
   // root, the tree's lifetime is the aside's — exactly upstream's
   // `hold(paneId, cwd)` gated on the open flag. Ending it aborts the
-  // signal, which forgets the bucket and closes the watch tree; the save
-  // into the inject-side map happens first, so the pane-record memory
-  // survives both this hold and this component (a `replaceTab` open
-  // unmounts it entirely). The aside carries a marker while held so the
+  // signal, which forgets the bucket and closes the watch tree; the saved
+  // memory was written continuously, so the `end` carries no snapshot and
+  // the death watch — armed on the pane-carrier query, not on any element
+  // — owns the only drop. The aside carries a marker while held so the
   // stylesheet hides only its native body.
-  const rootPath = root?.path
-  const takeoverCtl = filesTree.takeover
   const savedTree = paneId === undefined || rootPath === undefined ? undefined : takeoverCtl.saved(paneId, rootPath)
   useEffect(() => {
     if (aside === null || rootPath === undefined || paneId === undefined || takeoverCtl === undefined) {
       setTakeover(null)
       return
     }
-    setTakeover({ signal: takeoverCtl.signal(paneId, rootPath, paneRef.current ?? sectionRef.current ?? undefined), paneId, root: rootPath })
+    setTakeover({
+      signal: takeoverCtl.signal(paneId, rootPath, paneIdentified.current ? () => paneAlive(paneId) : undefined),
+      paneId,
+      root: rootPath,
+    })
     aside.setAttribute('data-mrfw-navigator', '')
     const capturedPaneId = paneId
-    const capturedRoot = rootPath
     return () => {
       aside.removeAttribute('data-mrfw-navigator')
-      takeoverCtl.save(capturedPaneId, { root: capturedRoot, expanded: expandedRef.current, scrollTop: liveScrollRef.current })
       takeoverCtl.end(capturedPaneId)
     }
   }, [aside, rootPath, paneId, takeoverCtl])
