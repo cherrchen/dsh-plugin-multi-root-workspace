@@ -52,6 +52,7 @@ describe('panel dictionaries', () => {
       'registry-contended',
       'reveal-unavailable',
       'session-not-found',
+      'session-not-live',
       'unsupported-path',
       'unavailable',
       'copy-failed',
