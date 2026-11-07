@@ -417,7 +417,7 @@ export function apply(ctx: Context): void {
       for (const key of keys) {
         try {
           if (!isAsyncProcessEntry(target[key])) {
-            if (key in target) ctx.logger.warn(`multi-root workspace: foreign process entry ${service}.${key} exists but is not an async method; it keeps ledger coverage only`)
+            if (key in target) ctx.logger.warn(`multi-root workspace: foreign process entry ${service}.${key} exists but is not wrappable and stays outside the admission; any confined spawn it performs relies on the ledger`)
             continue
           }
           scope.effect(() => wrapMethod(
@@ -439,6 +439,8 @@ export function apply(ctx: Context): void {
                 })
               } catch (error: unknown) {
                 if (ran) throw error
+                ctx.logger.warn(`multi-root workspace: admission for ${service}.${key} is unavailable; running unadmitted: `
+                  + `${error instanceof Error ? error.message : String(error)}`)
                 return original.call(this, first, ...rest)
               }
             },

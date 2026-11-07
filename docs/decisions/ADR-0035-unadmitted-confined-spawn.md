@@ -36,14 +36,14 @@ forge bundle 走的是上游完全合法的 `ctx.sandbox.confine(...) → ctx.su
 ## Consequences
 
 - 无归属 `confine→spawn` 恢复为记载中的降级：**以主根钳制 profile 正常启动**，forge 面板 Git 检查、`worktrees` 直用、以及任何同样组合的第三方插件不再被硬拒。
-- 被包装的 forge 入口获得比其他外部路径更强的语义（有序快照 + 存活期帧内 profile，可携带真实附加根授权）；台账路径永远是钳制形态。
+- 被包装的 forge 入口获得比其他外部路径更强的语义（有序快照 + 存活期帧内 profile，可携带真实附加根授权）；台账路径永远是主根形态（`clamped`/`read-only`，均不可写附加根）。
 - 台账是**进程内可信运行时回退**而非跨进程安全边界：条目按 `argv` + `capped` + 铸造时版本绑定，不绑定发起调用方、primary 根或 mode——同一进程内任何调用方持有同一 argv 即视为同源 mint。它防的是陈旧、伪造、重定向或外来进程的 profile，不防御已在本进程内执行的任意恶意代码（同进程代码本可 spawn 裸 argv，这不是新增权限面）。这在「provider 只铸自己认可 profile」的前提下不引入跨调用方授权，但不提供逐调用归因。
 - 台账进程内、有界、随发布失效：profile 可用期从「operation 存活」放宽为「授权基线未被超越」，对钳制 profile 而言能力等价；容量按**条目数**计（上限 256），一次 unadmitted `confine` 写 prefix 与 prefix+command 两条，有效容量约 128 次 mint——突发淘汰按 FIFO，等待中的条目可能被挤出（此后 spawn 被拒，调用方重新 confine 即可）。
-- 包装纯状态 RPC 的代价被准入回退抵消：`dismiss`/`markReady` 这类本可纯本地完成的方法现在也要经 `withOperation` 的 lease/IPC 队列排队，但**准入获取失败**（registry 不可达/已 dispose/IPC 失联）时调用退回无准入执行——`withRegistryAdmission` 里被调体未运行即失败的判别由 `ran` 哨兵给出，方法体自身抛出的错误照常传播。退回无准入后任何 confined mint 落台账按主根钳制降级，语义一致；IPC 断联期间纯状态操作不再无谓失败。换得「任何 Session 首参入口都可能藏 confined spawn」的统一覆盖。
+- 包装纯状态 RPC 的代价被准入回退抵消：`dismiss`/`markReady` 这类本可纯本地完成的方法现在也要经 `withOperation` 的 lease/IPC 队列排队，但**准入获取失败**（registry 不可达/已 dispose/IPC 失联）时调用退回无准入执行——`withRegistryAdmission` 里被调体未运行即失败的判别由 `ran` 哨兵给出，方法体自身抛出的错误照常传播。退回无准入后 `clamped`/`read-only` mint 落台账降级，ambient mint 仍被拒——语义一致；回退打一条 warn 记录服务/方法名与原因，不留静默降级。IPC 断联期间纯状态操作不再无谓失败。换得「任何 Session 首参入口都可能藏 confined spawn」的统一覆盖。
 - 过期准入不再间接续命：异步 mint 在其操作结束后完成 → 直接丢弃；携带真实授权的 profile 与其操作同生死。
 - 上游新增未枚举的服务入口不崩溃也不放行——退化为台账语义，兼容清单按结构探测（`isAsyncProcessEntry`）而非版本号；清单内键存在但不可包装（getter-only、同步函数、绑定函数）逐键告警而非拖垮包装，静默丢失准入覆盖有诊断可循。
 
-确定性回归在 `tests/shared-consumers.spec.ts` 与 `tests/ops-compat.spec.ts`：台账放行/发布失效/伪造 argv 拒绝、铸造时戳记（跨发布 in-flight mint 被拒）、过期帧 mint 不落账（带真实授权的 profile 随操作死亡）、ambient mint 无帧不落账（`restrictedExecution` 复现）、`refresh()` 同内容重发布不清台账、成员重定向下无授权 mint 不可失效且 argv 明文断言、forge 形服务入口准入与生成器/未列名入口的旁路、OPS 保护窗口对台账 mint 的拒绝与解除后的放行。台账核心用例（只需 owner 栈 + 真实 confine）挂 `seatbeltConfineCapable()` 探测而非 `nativeHostAvailability()`——后者在自身沙箱化的宿主上误拒，而 owner-only 共享栈与嵌套 sandbox-exec 在那里仍可工作；follower/IPC 用例保留原门禁。
+确定性回归在 `tests/shared-consumers.spec.ts` 与 `tests/ops-compat.spec.ts`：台账放行/发布失效/伪造 argv 拒绝、铸造时戳记（跨发布 in-flight mint 被拒）、过期帧 mint 不落账（带真实授权的 profile 随操作死亡）、ambient mint 无帧不落账（`restrictedExecution` 复现）、`refresh()` 同内容重发布不清台账、成员重定向下无授权 mint 不可失效且 argv 明文断言、forge 形服务入口准入与生成器/未列名入口的旁路、包装入口准入获取失败回退（body 不重放、body 错误照常传播）、OPS 保护窗口对台账 mint 的拒绝与解除后的放行。台账核心用例无门禁：它们只需 owner 栈与一次成型 mint——`mount()` 的单元素 `chain: ['seatbelt']` 不执行 `sandbox-exec`、fake subprocess 也不启动真实进程——因此在沙箱化宿主与 Linux/Windows CI 上都可实跑；follower/IPC 用例保留 `nativeHostAvailability()` 门禁。
 
 ## Related Documents
 
