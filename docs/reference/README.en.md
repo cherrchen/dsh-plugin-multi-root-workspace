@@ -24,6 +24,7 @@ Only established, relatively stable factual reference content belongs here.
 ## Current State
 
 - [multi-environment-baseline.md](./multi-environment-baseline.md) (Chinese) — Reproducible G0 evidence collection, public tool seams, SSH compatibility check integration points, and the pending managed-SFTP primitive inventory.
+- [multi-environment-control-plane.md](./multi-environment-control-plane.md) (Chinese) — G1a remote control plane: deployment manifest format, the remote grant domain, the `remote-1` IPC entry, Host-side admission and denial codes.
 - [multi-root-skills-seams.md](./multi-root-skills-seams.md) (Chinese) — Verified Session, native-ID, effective-cwd, file parsing, Settings and Web seams for additional-root Skills, with a reproducible architecture probe.
 - [auto-review-compatibility.md](./auto-review-compatibility.md) (Chinese) — Review context, source roles, tool scheduling order, and external integration seams in Auto Review `0.2.1-rc.2`.
 - [multi-root-workspace-research.md](./multi-root-workspace-research.md) — Snapshot research of the upstream repository's Workspace / Sandbox / plugin system (master `c291e7961a`; §8 covers the supplementary research on the no-upstream-changes mechanism).

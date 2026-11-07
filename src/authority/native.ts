@@ -14,7 +14,7 @@ export interface Channel {
 }
 export interface Listener { close(): void }
 
-export function storeIdentity(root: string): { root: string; id: string; endpoint: string } {
+export function storeIdentity(root: string): { root: string; id: string; endpoint: string; remoteEndpoint?: string } {
   mkdirSync(root, { recursive: true, mode: 0o700 })
   const physical = realpathSync.native(root)
   const info = statSync(physical, { bigint: true })
@@ -25,7 +25,7 @@ export function storeIdentity(root: string): { root: string; id: string; endpoin
   try { mkdirSync(directory, { mode: 0o700 }) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
   const entry = lstatSync(directory)
   if (!entry.isDirectory() || entry.isSymbolicLink() || entry.uid !== process.getuid!() || (entry.mode & 0o077) !== 0) throw new Error('unsafe registry IPC directory')
-  return { root: physical, id, endpoint: join(directory, `${id.slice(0, 48)}.sock`) }
+  return { root: physical, id, endpoint: join(directory, `${id.slice(0, 48)}.sock`), remoteEndpoint: join(directory, `${id.slice(0, 48)}.r1.sock`) }
 }
 
 type Call = ((...args: unknown[]) => number) & { async: (...args: unknown[]) => void }

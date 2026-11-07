@@ -24,6 +24,7 @@ English: [README.en.md](./README.en.md)
 ## 当前状态
 
 - [multi-environment-baseline.md](./multi-environment-baseline.md) — 多执行环境 G0 的可重复取证入口、公开工具接缝、SSH 兼容检查落点与待测 SFTP 原语清单。
+- [multi-environment-control-plane.md](./multi-environment-control-plane.md) — 多执行环境 G1a 远端控制面：部署清单格式、远端记录域、`remote-1` IPC 入口、Host 侧准入与拒绝码。
 - [multi-root-skills-seams.md](./multi-root-skills-seams.md) — 附加根 Skills 的 Session、原生 ID、Effective CWD、文件解析、Settings 与 Web 接缝源码事实及可复现原型方法。
 - [auto-review-compatibility.md](./auto-review-compatibility.md) — Auto Review `0.2.1-rc.2` 的上下文、来源分类、工具调度时机与外部兼容接缝调研。
 - [multi-root-workspace-research.md](./multi-root-workspace-research.md) — 上游官方仓库 Workspace / Sandbox / 插件体系现状调研快照（master `c291e7961a`；§8 为"不改上游"机制的补充调研）。
