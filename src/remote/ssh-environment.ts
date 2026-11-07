@@ -13,6 +13,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { classifyInstallation, classifySshCapability, sshPackageVersion, sshPrivateCopy, type SshCapability } from '../compat/dsh-version.ts'
 import { loadHostSshPackages } from '../compat/ssh-packages.ts'
+import { SftpClient, type SftpVersion } from './sftp.ts'
 import type { DeploymentManifest, RemoteEnvironment } from './manifest.ts'
 
 export class SshEnvironmentError extends Error {
@@ -39,6 +40,15 @@ export interface SshEnvironment {
   readonly fs: unknown
   readonly sandbox: { confine(argv: readonly string[], policy: unknown, signal?: AbortSignal): Promise<{ argv: readonly string[]; enforcement: string }> }
   readonly subprocess: { spawn(spec: unknown): { done: Promise<unknown>; waitForExit(ms?: number): Promise<boolean>; terminate(): void; collected: unknown } }
+  dispose(): Promise<void>
+}
+
+/** One managed SFTP session — the G2 transfer endpoint's lifetime handle. */
+export interface SftpEnvironment {
+  readonly environmentId: string
+  readonly generation: string
+  readonly client: SftpClient
+  readonly version: SftpVersion
   dispose(): Promise<void>
 }
 
@@ -112,6 +122,8 @@ export class SshEnvironmentManager {
   private readonly readFile: (path: string) => string
   private readonly openings = new Map<string, Promise<SshEnvironment>>()
   private readonly resolved = new Map<string, SshEnvironment>()
+  private readonly sftpOpenings = new Map<string, Promise<SftpEnvironment>>()
+  private readonly sftpResolved = new Map<string, SftpEnvironment>()
 
   constructor(options: SshEnvironmentManagerOptions) {
     this.manifest = options.manifest
@@ -124,6 +136,9 @@ export class SshEnvironmentManager {
     this.exec = options.exec ?? defaultExec
     this.readFile = options.readFile ?? (path => readFileSync(path, 'utf8'))
   }
+
+  /** The verified deployment manifest this manager was built against. */
+  get deployment(): DeploymentManifest { return this.manifest }
 
   /** The live generation for an environment — a sentinel when none is open. */
   generationOf(environmentId: string): string {
@@ -161,6 +176,67 @@ export class SshEnvironmentManager {
   async disposeAll(): Promise<void> {
     const ids = [...this.openings.keys()]
     await Promise.all(ids.map(id => this.dispose(id)))
+    for (const id of [...this.sftpOpenings.keys()]) await this.disposeSftp(id)
+  }
+
+  /** The live SFTP generation — a sentinel when none is open. */
+  sftpGenerationOf(environmentId: string): string {
+    return this.sftpResolved.get(environmentId)?.generation ?? 'stale'
+  }
+
+  /** Open (or join the in-flight open of) one environment's SFTP session. */
+  async openSftp(environmentId: string): Promise<SftpEnvironment> {
+    const existing = this.sftpOpenings.get(environmentId)
+    if (existing !== undefined) return await existing
+    const promise = this.openSftpFresh(environmentId)
+    this.sftpOpenings.set(environmentId, promise)
+    try {
+      const env = await promise
+      this.sftpResolved.set(environmentId, env)
+      return env
+    } catch (error) { this.sftpOpenings.delete(environmentId); throw error }
+  }
+
+  markSftpStale(environmentId: string): void {
+    const opening = this.sftpOpenings.get(environmentId)
+    this.sftpOpenings.delete(environmentId)
+    this.sftpResolved.delete(environmentId)
+    void opening?.then(env => env.dispose()).catch(() => {})
+  }
+
+  async disposeSftp(environmentId: string): Promise<void> {
+    const opening = this.sftpOpenings.get(environmentId)
+    this.sftpOpenings.delete(environmentId)
+    this.sftpResolved.delete(environmentId)
+    if (opening !== undefined) await (await opening.catch(() => undefined))?.dispose()
+  }
+
+  /** Same ordered refusals as open(), then the SFTP handshake + publish extensions. */
+  private async openSftpFresh(environmentId: string): Promise<SftpEnvironment> {
+    const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
+    if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
+    if (this.gate.status !== 'eligible') {
+      throw new SshEnvironmentError(`ssh-capability-absent:${this.gate.status === 'absent' ? this.gate.reason : 'unknown'}`, 'SSH capability is not eligible on this host')
+    }
+    if (environment.transport !== 'sftp') throw new SshEnvironmentError('transport-not-sftp', `environment "${environmentId}" uses transport "${environment.transport}"`)
+    if (environment.credentialIsolation !== 'attested' && !this.allowUnattested) {
+      throw new SshEnvironmentError('credential-isolation-unattested', `environment "${environmentId}" is declared unattested; connections require an attested deployment`)
+    }
+    if (environment.transfer === undefined) throw new SshEnvironmentError('transfer-unavailable', `environment "${environmentId}" declares no transfer block`)
+    await this.verifyHostIdentity(environment)
+    const client = SftpClient.connect(environment.connection.host, { onLoss: () => this.markSftpStale(environmentId) })
+    try {
+      const version = await client.init()
+      if (version.extensions['hardlink@openssh.com'] === undefined || version.extensions['fsync@openssh.com'] === undefined) {
+        client.dispose()
+        throw new SshEnvironmentError('publish-unsupported', `environment "${environmentId}" lacks hardlink/fsync extensions`)
+      }
+      this.logger.debug(`[sftp-env] ${environmentId} ready extensions ${Object.keys(version.extensions).join(',')}`)
+      return { environmentId, generation: randomUUID(), client, version, dispose: async () => client.dispose() }
+    } catch (error) {
+      client.dispose()
+      throw error
+    }
   }
 
   /** The full ordered admission: gate → transport → isolation → identity → load → mount. */

@@ -20,6 +20,7 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
   constructor(private readonly manager: SshEnvironmentManager) {}
 
   async verify(environment: RemoteEnvironment, binding: RemoteBinding, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
+    if (environment.transport === 'sftp') return await this.verifySftp(environment, binding, signal)
     const env = await this.manager.open(environment.environmentId)
     const policy = { mode: 'read-only' as const, workspaceRoot: binding.path }
     const confined = await env.sandbox.confine([String(env.hello.executable), '-e',
@@ -42,5 +43,25 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
     if (!probe.isDirectory) throw new EndpointVerifyError('endpoint-unverifiable', `${binding.path} is not a directory`)
     if (probe.real !== binding.path) throw new EndpointVerifyError('endpoint-redirected', `${binding.path} resolves to "${probe.real}"`)
     return { platform: env.hello.platform as 'linux' | 'darwin', target: { kind: 'object', value: `${probe.dev}:${probe.ino}` } }
+  }
+
+  /**
+   * SFTP endpoints carry no helper handshake: realpath must equal the declared
+   * path and lstat must name a directory. Identity is path-only — SFTP v3 has
+   * no inode, so a same-name swap at publish time cannot be detected here; the
+   * manifest's declared platform stands in for the absent remote handshake.
+   */
+  private async verifySftp(environment: RemoteEnvironment, binding: RemoteBinding, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
+    const env = await this.manager.openSftp(environment.environmentId)
+    if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
+    const real = await env.client.realpath(binding.path).catch((error: unknown) => {
+      throw new EndpointVerifyError('endpoint-unverifiable', `realpath failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
+    if (real !== binding.path) throw new EndpointVerifyError('endpoint-redirected', `${binding.path} resolves to "${real}"`)
+    const attrs = await env.client.lstat(binding.path).catch((error: unknown) => {
+      throw new EndpointVerifyError('endpoint-unverifiable', `lstat failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
+    if ((attrs.permissions! & 0o170000) !== 0o040000) throw new EndpointVerifyError('endpoint-unverifiable', `${binding.path} is not a directory`)
+    return { platform: environment.platform as 'linux' | 'darwin', target: { kind: 'path', value: binding.path } }
   }
 }
