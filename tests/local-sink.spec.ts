@@ -18,7 +18,10 @@ const codeOf = (fn: () => unknown): string | undefined => {
   return undefined
 }
 
-describe('LocalBinarySink', () => {
+// The local binary sink is POSIX-only by contract (ADR-0034); Windows
+// initiators are deferred (ADR-0030). The direction is exercised on the
+// POSIX lanes and the refusal itself is covered by the transfer suite.
+describe.skipIf(process.platform === 'win32')('LocalBinarySink', () => {
   it('stages, verifies and publishes with a no-replace link', () => {
     const sink = LocalBinarySink.open(authority(), 'out.bin', 'op-1', 1024)
     try {
