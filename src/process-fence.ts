@@ -55,7 +55,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ConfinedArgv, SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session'
 import type { SubprocessSpawnSpec, SubprocessTerminalSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-subprocess'
@@ -263,7 +263,7 @@ export function apply(ctx: Context): void {
           argv = [...prefix, ...spec.argv]
         }
         if (opsScope.admissionRequired && (hasConfinedProfile(spec.argv) || prefix.length > 0)
-          && !opsScope.permitsProfile(argv)) {
+          && !opsScope.permitsOperationProfile(argv)) {
           throw new Error('multi-root workspace: a confined spawn requires a profile from this live admission')
         }
       } else {
@@ -395,4 +395,52 @@ export function apply(ctx: Context): void {
     if (runtime === undefined) return
     for (const key of ptcEntrypoints(runtime)) deniedEntry(scope, runtime, key)
   })
+
+  // Foreign services that compose `ctx.sandbox.confine` + `ctx.subprocess.spawn`
+  // on their own code paths — the upstream experimental forge bundle's panel
+  // and worktree service. Their async public entries get the same ordered
+  // admission the wrapped executors receive; entries unreachable from here
+  // (background inspections, async generators, isolated mounts) stay covered
+  // by the minted-profile ledger instead. `ctx.inject` never fires for a
+  // service nobody mounted, so these hooks cost nothing without the bundle.
+  // The session is read from the first argument alone: a `Session`, or an
+  // `Agent`-shaped value carrying one. Anything else runs unadmitted rather
+  // than risk `sandboxPolicy.resolve` reading fields a foreign arg lacks.
+  const sessionOf = (first: unknown): Session | undefined => {
+    const candidate = object(first) && object(first.session) ? first.session : first
+    return object(candidate) && typeof candidate.id === 'string' && object(candidate.header)
+      ? candidate as unknown as Session : undefined
+  }
+  const admitCalls = (service: string, keys: readonly string[]): void => {
+    ctx.inject([service], (scope: Context) => {
+      const target = scope.get(service) as Record<string, unknown> | undefined
+      if (target === undefined) return
+      for (const key of keys) {
+        if (!isAsyncProcessEntry(target[key])) continue
+        scope.effect(() => wrapMethod(
+          target as Record<string, (this: unknown, first: unknown, ...rest: unknown[]) => unknown>,
+          key,
+          original => function (this: unknown, first: unknown, ...rest: unknown[]) {
+            const session = sessionOf(first)
+            if (session === undefined) return original.call(this, first, ...rest)
+            const policy = ctx.sandboxPolicy.resolve({ session })
+            return withRegistryAdmission(ctx, policy, 'process', () => original.call(this, first, ...rest))
+          },
+        ))
+      }
+    })
+  }
+  // `dsh-experimental-worktree` (`worktrees`): creation and restore spawn
+  // confined Git/Node commands under the calling Agent's session policy.
+  admitCalls('worktrees', ['create', 'restore'])
+  // `dsh-experimental-client-ui-forge` (`forgePanel`): every public entry whose
+  // first argument is the Session — each can run a confined Git read or launch
+  // maintenance-side worktree work. The `follow`/`changeRequestStates` async
+  // generators are skipped by the structural probe, and the detached
+  // `inspectOnce` they drive relies on the minted-profile ledger anyway.
+  admitCalls('forgePanel', [
+    'branches', 'track', 'dismiss', 'refresh', 'localDiff', 'localText',
+    'changeRequestChecks', 'changeRequestDiff', 'changeRequestText', 'submitReview', 'markReady', 'merge',
+    'requestWorktree', 'cancelWorktree', 'stopCreation', 'retryWorktree', 'restoreWorktree', 'continueInProject',
+  ])
 }

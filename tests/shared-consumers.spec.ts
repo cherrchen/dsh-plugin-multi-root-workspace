@@ -76,6 +76,69 @@ nativeTest('reauthorizes direct async shell/PTC and PTYs while preserving a sync
   expect(specs.at(-1)).toBe(controller)
 })
 
+nativeTest('launches an unadmitted confine→spawn while its publication is current and refuses stale or foreign argv', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  const specs: unknown[] = []
+  ctx.provide('subprocess', { spawn: (spec: unknown) => { specs.push(spec); return { pid: 1 } }, spawnTerminal: async () => ({ pid: 2 }) } as never)
+  await ctx.plugin(ProcessFence)
+  const mint = async () => (await ctx.sandbox.confine(['bash', '-c', 'true'], policy())).argv
+  // A foreign consumer composes confine→spawn outside every wrapped entry, as
+  // the forge panel's Git inspection does.
+  const launched = await mint()
+  expect(ctx.subprocess.spawn({ argv: [...launched], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
+  expect(specs.at(-1)).toMatchObject({ argv: launched })
+  // A ledger profile is not owned by an operation frame either way: launching
+  // it inside an unrelated live admission is the same publication-keyed act.
+  await owner.registry.withOperation(policy(), 'process', () => ctx.subprocess.spawn({ argv: [...launched], cwd: fixture.workspace }))
+  // A republish supersedes the mint's authorization basis.
+  const stale = await mint()
+  await owner.registry.setAccess(fixture.workspace, { kind: 'path', path: fixture.outside }, 'read-only')
+  expect(() => ctx.subprocess.spawn({ argv: [...stale], cwd: fixture.workspace })).toThrow('live admission')
+  // Re-minting under the current publication launches again.
+  const fresh = await mint()
+  expect(ctx.subprocess.spawn({ argv: [...fresh], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
+  // An argv this host never minted is still refused outright.
+  expect(() => ctx.subprocess.spawn({ argv: ['sandbox-exec', '-p', '(version 1)', '--', 'true'], cwd: fixture.workspace })).toThrow('live admission')
+})
+
+nativeTest.skipIf(symlinkUnsupportedReason() !== undefined)('mints an unadmitted profile without member grants, so a member redirect cannot invalidate it', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
+  await ctx.plugin(ProcessFence)
+  // Unadmitted `resolve` already reports 'unavailable': the mint that follows
+  // is the clamped primary-root form and grants `fixture.outside` nothing.
+  expect(ctx.multiRootScope.resolve(policy())).toMatchObject({ authority: 'unavailable', additionalRoots: [] })
+  const minted = (await ctx.sandbox.confine(['bash', '-c', 'true'], policy())).argv
+  renameSync(fixture.outside, join(fixture.base, 'saved')); symlinkSync(fixture.workspace, fixture.outside, 'dir')
+  expect(ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
+})
+
+nativeTest('admits the forge service entries it can reach while leaving generators and unknown entries unadmitted', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
+  const id = SessionId('forge-panel-session')
+  const session = Session.create(id, [], { id, cwd: fixture.workspace, version: SESSION_FORMAT_VERSION, createdAt: 0, isSeeded: false })
+  const mintAndSpawn = async () => ctx.subprocess.spawn({ argv: (await ctx.sandbox.confine(['git', 'status'], policy())).argv, cwd: fixture.workspace })
+  ctx.provide('forgePanel', {
+    branches: async () => ({ admitted: ctx.multiRootScope.hasAdmission(), spawned: (await mintAndSpawn()) !== undefined }),
+    follow: async function* () { yield ctx.multiRootScope.hasAdmission() },
+    otherEntry: async () => ctx.multiRootScope.hasAdmission(),
+  } as never)
+  ctx.provide('worktrees', { create: async () => ({ admitted: ctx.multiRootScope.hasAdmission() }) } as never)
+  await ctx.plugin(ProcessFence)
+  const panel = ctx.get('forgePanel') as { branches(s: unknown): Promise<{ admitted: boolean; spawned: boolean }>; follow(): AsyncGenerator<boolean>; otherEntry(s: unknown): Promise<boolean> }
+  await expect(panel.branches(session)).resolves.toMatchObject({ admitted: true, spawned: true })
+  const tree = ctx.get('worktrees') as { create(agent: unknown): Promise<{ admitted: boolean }> }
+  await expect(tree.create({ session })).resolves.toMatchObject({ admitted: true })
+  // Async generators are not function entries: `follow` is untouched, and the
+  // detached inspections it drives rely on the ledger like any background path.
+  await expect(panel.follow()[Symbol.asyncIterator]().next()).resolves.toMatchObject({ value: false })
+  await expect(panel.otherEntry(session)).resolves.toBe(false)
+})
+
 nativeTest('does not reuse a native Skills cache after unnotified revocation, and remains quiet on repeated queries', async () => {
   const owner = await skillsStack(fixture.base, true), follower = await skillsStack(fixture.base, true)
   cleanups.push(owner.dispose, follower.dispose)
