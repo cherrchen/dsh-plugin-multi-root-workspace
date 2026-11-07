@@ -1,6 +1,6 @@
 # Issue #32 多执行环境实施与验证计划
 
-**状态** Accepted（外部技术评审通过，尚未开始实施） · 2026-11-06。本稿用于评审拆分、依赖和验收方法。架构基线为 [ADR-0030 至 ADR-0034](../../decisions/ADR-0030-environment-and-root-identity.md)。所有下述 PR、接口名与测试夹具均为候选；只有 ADR 中明确记载的源码核对和 Helper 探针已有证据。评审已决定：SSH 能力仅当宿主为 `0.2.2-rc.1` 及之后的支持成员时开放，更低的受支持宿主静默不开启该能力。
+**状态** In Progress（外部技术评审通过；2026-11-07 开始 G0） · 2026-11-06。G0 已增加[基线取证入口及接缝清单](../../reference/multi-environment-baseline.md)，G1 的本地委托对照沿用同一入口（`--local-facade`）；逐平台验证与关卡状态归[路线图总账](./2026-09-12-multi-root-workspace.md#多执行环境-g0-基线2026-11-07)，不代表真实 SSH 能力已验收。本稿用于评审拆分、依赖和验收方法。架构基线为 [ADR-0030 至 ADR-0034](../../decisions/ADR-0030-environment-and-root-identity.md)。除已落地的 G0 入口外，下述 PR、接口名与测试夹具仍为候选。评审已决定：SSH 能力仅当宿主为 `0.2.2-rc.1` 及之后的支持成员时开放，更低的受支持宿主静默不开启该能力。
 
 目标样例取自 [Issue #32](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/issues/32)。Issue 中的 Windows 发起端无限期延后。本期只在 Linux/macOS 发起端验证其余跨机流程，由一个 Session 先从两个本地根各复制一个源码文件到 Ubuntu，再显式执行构建，把产物从 Ubuntu 流式投送设备。设备具备已验证执行能力时再执行测试、读回日志；只有传输能力的设备应成功收件并明确拒绝执行。这样可以区分完成了哪一段，以及何时才算满足完整诉求。
 

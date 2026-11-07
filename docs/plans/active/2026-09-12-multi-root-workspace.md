@@ -1520,3 +1520,78 @@ macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.1`：compat、lint、host/client �
 合入后的 [PR #39 main CI](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/42165203436) 与 [PR #40 main CI](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/42183917954) 均为 success，覆盖支持版本与已启用的原生平台矩阵。根授权计划按维护者限定范围归档至 completed；BYP-01、F5 与 F4 执行侧等排除项不计为已修复，OPS 完整兼容恢复继续无限期延后。
 
 发版前在 macOS arm64 / Node `24.18.0` / pnpm `11.25.0` 重跑 `compat:check`、lint、双端类型检查、build、原生 `registry:probe --required`、Seatbelt `kernel:probe`、完整测试、三个 smoke、`pack:check`、`smoke:packed`、`auto-review:fork` 和 `docs:check`，均通过。探针确认 `seatbelt` 后显式传入 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt`，要求相关内核断言实跑。完整回归 **1178 passed / 95 skipped / 0 failed**；compose **54/54**、behavior **137/137**、journey **76/76** 与 packed behavior **136/136**，三个 smoke 与 packed 无跳过；可选 `smoke:auto-review` 在当前开发 pin 按精确版本规则跳过，不能计作本轮 Auto Review 集成通过，其独立基线证据见上方 OPS P6 与后续记录。本地日志仅存于忽略的 `.dsh-smoke/release-v0.1.15/`，不随发布提交。
+
+## 多执行环境 G0 基线（2026-11-07）
+
+**状态：G0 本地首批已实现，整体关卡验收仍开放。** 按[实施计划](./2026-11-06-multi-environment-gates.md)从基线开始；本轮没有开启或发布 SSH 能力，不修改生产 provider、scope、Registry、兼容 allowlist 或可选 peers。G1/G1a/G2/G3/G4/G5 尚未实施；G6、原生 Windows 发起端及其他已延期消费者不纳入本批。取证方法、公开工具接缝、兼容检查落点与 SFTP 待测清单归[基线参考](../../reference/multi-environment-baseline.md)。
+
+插件起点 `44c5e24c1b38e4177aa887377009028523cbb353`（`feat/ssh-workspace`、包 `0.1.15`），上游只读 checkout 为干净的 `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`。本机 macOS arm64 / Darwin `24.6.0` / Node `24.18.0` / pnpm `11.25.0`。`pnpm baseline:multi-environment --upstream ../deepseek-harness` 以最终源码生成报告：源码摘要 `fd601cf8faa5eb390ed093c40e6571ba8774c8f76a2376687735cb19e8bcb586`，定向 **48 passed / 0 failed / 0 skipped**，记录宿主工具/服务包版本、FS 方法存在性及四个 SSH peers 全部缺席。输出仅留忽略目录 `.dsh-smoke/multi-environment-g0-WwANP8/`，不是已发布制品或跨平台支持声明。
+
+八份实际 CLI 组合快照覆盖 web/headless × 原生/安装插件 × applyPatch false/true：rc.1 web 为 **196 → 211** 行、headless 为 **99 → 114** 行。`smoke:compose` 另验证只有两个上游 provider 行被 disabled、插入十五个既有插件行；开关字段出现在 dump 与实际注册是不同证据。真实 apply_patch 增删改移和 tool cap 由既有 e2e 证明；新增五项出树工具测试使用真实 SessionStore 和 execute pipeline 验证条件注册/卸载、不可伪造的调度身份、pre-execute 拒绝、两 Session 政策及取消信号。真实 Agent turn 继续由 web/headless journey 验证。
+
+| 本地安装树 | 验证结果 |
+| --- | --- |
+| 开发 pin DSH `0.2.2-rc.1` / cordis `4.1.0` | `compat:check`、lint、host/client 类型、build、原生 Seatbelt probe、完整 `verify:all` 通过。**1185 passed / 95 skipped / 0 failed**；compose **54/54**、behavior **137/137**、journey **76/76**、pack 完整性及静态 SSH 导入检查、packed behavior **136/136** 通过，四个 smoke 均无跳过。Auto Review fork 校验通过；可选 Auto Review smoke 因精确基线不同而跳过，不算该集成验收。 |
+| 隔离快照 DSH `0.1.5-rc.2` / cordis `4.0.2` | 使用现有 upgrade 脚本重指并独立安装，主工作树 pin/lock 不回退；兼容门禁保持 enforce。类型、build、原生 Seatbelt probe 与完整测试通过：**1078 passed / 202 skipped / 0 failed**。compose **54/54**、behavior **129/129**、journey **76/76**、pack 检查、packed behavior **128/128** 与 fork 校验通过，四个 smoke 均无跳过。该副本在 gitignore 目录内，oxlint 无法枚举文件，所以 lint 只在相同源码的主工作树通过，未声称旧副本的 `verify:all` 整条命令通过。 |
+
+最老 pin 另跑相同的 G0/FS/apply_patch/静态导入定向用例：**20 passed / 7 skipped / 0 failed**；七项均因后端没有 patchText/deleteFile/moveFile 而跳过（五项 FS patch、两项真实 apply_patch）。不为旧 pin 合成新 API。旧版完整测试/安装证据留 `.dsh-smoke/g0-old-pin-*.log` 与隔离快照；pnpm 在此临时树因脚本/安装元数据检查尝试重装，后续仅将其运行前检查设为 `warn`，真正的 `compat:check` 不放宽。
+
+初次在外层受控执行环境中，Seatbelt probe 被 `sandbox_apply: Operation not permitted` 拒绝，17 项 Registry follower 断言失败；不能据此验收。随后在允许原生 IPC/Seatbelt 的宿主环境重跑，确认 Seatbelt 实际执行、完整回归零失败。旧快照首次全测还因未复制 workflow/locale/detail 夹具失败，补齐同一仓库的资源后重跑通过；这些失败不计为产品缺陷或通过证据。所有原始日志仅留忽略目录。
+
+**未验证与下一步：** 本轮只有 macOS arm64 本地事实；Linux 与 Windows 本地回归尚未重跑。未取得受信部署清单、可丢弃 SSH/SFTP 目标、host key/Helper 绑定和 OS 身份隔离证据；SFTP EXCL、hardlink/no-replace、目标摘要及对象/父目录绑定均为待验证，没有方向被宣布 supported。缺少这些证据不阻止记录 G0 的本地结果，也不授权启动 G2/G4 的真实远端操作或开放 G5 工具。后续可按计划继续独立的 G1 本地委托、G1a 控制面实验，并在部署就绪后补齐远端取证。
+
+### G0 验收审查（2026-11-07）
+
+**结论：暂不通过 G0 完整验收；本地回归通过。** 本次按计划 G0 行及 G0/G1 细则核查前批产物，没有修改实现代码或提前实施下一关。以下是本轮验收决定；上方首批结果仍作为历史证据保留。
+
+| 验收项 | 结论与证据 |
+| --- | --- |
+| 变更范围 | 通过。生产 `src/`、profile patch、peer/allowlist 与 lockfile 均未被本批修改；只有测试、采集/打包检查和文档变更。 |
+| 当前证据完整性 | 通过。重新计算当前源码摘要、manifest/lock/patch 摘要及八份 rc.1 dump 摘要，全部匹配 `multi-environment-g0-WwANP8/report.json`；其 JSON 测试报告为 48 通过、零失败、零跳过。这份 rc.1 报告本身未发现被误记成旧 pin。 |
+| rc.1 完整门禁 | 本次重跑 `compat:check` 和 `verify:all` 通过：**1185 passed / 95 skipped / 0 failed**，Seatbelt 实际执行；compose **54/54**、behavior **137/137**、journey **76/76**、pack 检查与 packed behavior **136/136**，四个 smoke 无跳过。Auto Review 仍只计 fork 校验，不把精确版本跳过的集成 smoke 算成通过。日志为 `.dsh-smoke/g0-acceptance-compat.log`、`g0-acceptance-verify.log`。 |
+| 最老 pin 定向复验 | 本次在既有独立安装快照中重新 enforce compat，并重跑 G0、FS parity、apply_patch 与静态导入检查：**20 passed / 7 skipped / 0 failed**。七项依旧只因 patch API 不存在而跳过。日志及逐项 JSON 为 `.dsh-smoke/g0-acceptance-old-*`；旧版完整回归、原生内核和 smoke 证据已核对上方原始日志，本次没有声称又重跑了旧版完整链。 |
+| 静态 SSH 引用与兼容清单 | 通过本关的检查范围。打包门禁检查 ESM 静态 import/re-export；SSH 分类、peer range、独立 dev pin 与核心 mixed 判定隔离的待实现清单已写清楚。它们不是已实现的运行时 SSH 门禁。 |
+| 真实 profile 工具与执行基线 | **未通过，待补。** collector 只 dump 配置并校验 applyPatch 字段；未启动这八种组合读取实际工具清单或保存对应文件/进程效果。现有 apply_patch e2e 是专用 Context 的 true 配置，真实 journey 没有 apply_patch 调用；没有证明真实 web/headless 的 false 态不可调、true 态经实际工具执行并留下正确哨兵。旧 pin 留下测试/smoke 日志，没有同格式的逐 profile 快照包。新工具取消测试使用手动 AbortController 与测试 Agent carrier，尚未演练真实 Agent turn 的取消到达该工具。 |
+| 平台与受管 SFTP | 未验证。Linux/Windows 本地格、真实 SSH、SFTP 三项原语及部署隔离仍缺实际环境。计划明确允许缺 Host/凭据的格子标为未验证；这不是产品执行失败，也不授权对外宣称这些能力通过。 |
+
+两个采集器问题也需在关闭 G0 前处理，均可在无 SSH 的本地复现：
+
+1. **运行时归属混用（P2）。** 将 `DSH_CLI` 指向已有旧 pin 的 `node_modules/@deepseek-ai/dsh/lib/bin.js`，`runtimeRequire()` 所见版本为 `0.1.5-rc.2`；但 collector 静态导入的 LocalFileSystem 仍来自主工作树 rc.1，报告 patchText 存在，旧 runtime 的实际 fs-local 源码却没有该方法。collector 的 compat 子进程及多数测试静态依赖同样取主工作树。必须拒绝不一致的 override，或确保版本检查、方法探测、测试和 profile 全部绑定同一棵树，并补一个新旧树相反的负例；不能用当前 tests 结果为另一棵 runtime 作证。定位 `scripts/probe-multi-environment-baseline.mjs` 的静态 LocalFileSystem 导入、runtimeRequire、fsMethods 与测试子进程。
+2. **快照源码身份不可信（P2）。** 在本次使用的仓库内独立安装快照 `.dsh-smoke/g0-old-pin` 中执行 collector 的 Git 枚举逻辑：Git 向上找到主工作树，HEAD 返回 `44c5e24c…`，`src/scripts/tests` 的文件列表却为 **0 项**，源码摘要成为空数组的固定 SHA-256 `4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945`，未验证快照内容。应校验 Git top-level 与采集根相同且文件列表非空，或为无 Git 快照实现独立的内容枚举与明确 provenance；不满足时显式失败/未验证，不生成看似有效的源码身份。
+
+**复验退出条件：** 修复上述两个取证问题并补拒绝用例；为两个 pin 保存真实 profile 工具清单、applyPatch 两态适用的调用/拒绝与哨兵证据，明确旧版方法缺席；补真实 turn 取消链路。重跑受影响的 G0 采集和本地门禁后再作结论。SSH/SFTP 与其他 OS 可继续保持计划允许的未验证状态，但不得用本轮本地通过替代其以后各关的验收。
+
+### G0 缺项关闭与复验（2026-11-07）
+
+**验收结论：G0 通过，可以进入 G1。** 这次结论覆盖本机 macOS arm64 的本地基线，按计划保留其他 OS、真实 SSH/SFTP 与部署隔离格为未验证；没有签收或开放任何真实 SSH 能力。上次暂不通过的三个事项均已关闭：
+
+- 采集器在运行任何测试/安装前核对 `DSH_CLI` 与本树 CLI 的真实入口；跨树 override 显式失败。以两棵真实安装树双向复现，均为 exit 1、`G0_RUNTIME_MISMATCH`、0 个 checks、0 个 profiles。负例原始数据为 `.dsh-smoke/g0-close-runtime-guards.json`。
+- 源码指纹改为实际内容枚举；非空文件树是前置条件。父 Git 仓库不再给快照提供 HEAD：主工作树记 git-worktree，旧 pin 独立快照记 content-snapshot/sha=null。两棵树均枚举 **290** 个文件，源码摘要同为 `15f53b340472a186050a567f5496ae66c9c5522da0c8f2e792e5004a823a2dd6`；快照内容变化及空目录拒绝有自动回归。
+- 两个 pin 各保存 **8** 个真实组合的 CLI dump、实际覆盖层、执行 JSON 与子进程日志，共 **16** 个组合。Web 不再只改被禁用的顶层 tool-fs：实际 preset 行也被覆盖，其他字段和 `!!js` 条件保留。headless 使用原生 startup/runner 自己创建的 Agent。每组记录完整原生工具 schema、模型 wire 工具名、文件工具/直接 FS 的允许与拒绝、真实 shell 命令及根内/根外哨兵，以及原生 Agent turn 的取消链路。rc.1 的 patch 开态实际增删改移，关态调用被拒；最老 pin 两态均实际拒绝不存在的工具，文件保持不变。
+
+| 最终采集 | 结果 |
+| --- | --- |
+| rc.1：`.dsh-smoke/multi-environment-g0-v28J6m/` | 定向 **53 passed / 0 skipped / 0 failed**；8 个组合全部 passed。 |
+| 最老 pin：`.dsh-smoke/g0-old-pin/.dsh-smoke/multi-environment-g0-SGD5OK/` | 定向 **46 passed / 7 skipped / 0 failed**；七项仍为旧版缺 patch API 的适用性跳过，8 个真实组合全部 passed、没有跳过。 |
+| 两树的自动差分 | 每树的 web/headless × patch 两态均比较原生/插件工具 schema、wire 工具清单、服务可用性、raw FS 结果及最终哨兵，合计 **8/8** 差分通过。 |
+| 原生取消 | 16 个组合全部证实真实注册 Agent/Session、工具携带 AbortSignal、agent.cancel 后正文结束和 turn/end；web 与原生 headless 都覆盖。 |
+| 证据完整性 | 对两个最终 report 的每份 dump、overlay、执行 JSON 重新计算 SHA-256，全部匹配；旧版内容 provenance 没有借用父 Git 身份。 |
+
+修复后的 rc.1 完整 `verify:all` 通过：**1190 passed / 95 skipped / 0 failed**，原生 Seatbelt probe 成功；compose **54/54**、behavior **137/137**、journey **76/76**、pack 检查、packed behavior **136/136**，四个 smoke 均无跳过；Auto Review fork 校验通过，精确版本集成 smoke 仍按既有规则跳过。共享 SSE 帧提取由这次真实 journey 联测，两个 wire 协议另由两个 pin 的真实 profile 采集实际覆盖。日志 `.dsh-smoke/g0-close-verify.log`；最后新增的组合断言由上述最终采集覆盖。主工作树 pin/lock/生产 provider 仍未改变。
+
+下一阶段按计划选择 **G1 仅 local backend 委托 POC**；先进入 test composition，不替换生产 `ctx.fs`，不引入 SSH peers、远端记录或面板。G1 的三平台退出条件仍须独立验证。
+
+## 多执行环境 G1 本地委托（2026-11-07）
+
+**状态：G1 的 macOS arm64 本地格通过；Linux 与 Windows 本地格待 CI 复验，关卡整体尚未签收。** 本关只在测试组合中加入仅 local backend 的委托门面（`tests/support/local-fs-facade.ts`），生产 `ctx.fs`、`src/`、profile patch、peers/allowlist 与 lockfile 均未修改；没有 SSH peer、远端记录或面板。门面保留原 provider 的接收者、同步返回、品牌与可选方法存在性，只检查位置参数：未知或撤销的 `remote:`/`ssh:`/`sftp:` 等 URI 与带远端 targetKey/displayPath 的 target（含 move 两端、resolve 的 cwd）在任何本地 IO 之前以 `G1_REMOTE_REFERENCE_UNAVAILABLE` 拒绝。
+
+| 证据 | 结果 |
+| --- | --- |
+| 单元/差分 | `tests/local-fs-facade.spec.ts` 与 `tests/fs-parity.spec.ts` 的 G1 组 **32/32**：同步 target/fileUrl/contains、stat/stream/bytes/range/listDir、三种 Session 模式 × 三态访问、陈旧版本与 createIfAbsent、真实 tool-fs 的观察事件与意图回调、Registry 单次准入/撤权/销毁、tool cap，以及经 traced `ctx.fs` 输入同名本地哨兵时本地 IO 计数为零。 |
+| rc.1 真实组合 | `pnpm baseline:multi-environment --upstream ../deepseek-harness --local-facade`：`.dsh-smoke/multi-environment-g1-w42Jyh/`，定向 **67 passed / 0 skipped / 0 failed**；web/headless × applyPatch 两态 × 空根/本地根共 **8/8** 差分通过（工具 schema、wire 工具名、哨兵、服务、raw FS、scope、confine argv/enforcement、规范化 prompt 摘要、附加根写入与 shell 效果）。插件组合 web **212**、headless **115** 行（较既有插件各多一行候选行，原 `multi-root-fs` 行 disabled）。 |
+| 最老 pin `0.1.5-rc.2` | 独立快照 `.dsh-smoke/g0-old-pin/.dsh-smoke/multi-environment-g1-pEklgP/`：定向 **60 passed / 7 skipped / 0 failed**，8/8 差分通过。七项跳过均为旧后端缺 patchText/deleteFile/moveFile（五项 FS patch 围栏、两项真实 apply_patch）。 |
+| rc.1 完整门禁 | `verify:all` 通过：Seatbelt 实际执行；**1204 passed / 95 skipped / 0 failed**；compose **54/54**、behavior **137/137**、journey **76/76**、pack 检查、packed behavior **136/136**；Auto Review 仅 fork 校验计入。`docs:check` 零错误。 |
+
+复验中发现并修复两个测试/取证侧问题，均不属产品行为差异：cordis `4.0.x` 的 traced 方法只从**自有** `ctx` 描述符恢复服务上下文，门面因此复制后端的 `ctx` 描述符；web prompt 中随机的 Web GUI 端口（rc.1 与旧版两种措辞）改为规范化后再取摘要。原始日志为 `.dsh-smoke/g1-close-*.log`。
+
+**未验证与下一步：** Linux/Windows 本地格须在 CI 的支持矩阵上复跑同一组 G1 用例后才能签收三平台退出条件；切换生产 `ctx.fs` 仍须按 ADR-0031 的门槛另行评审，本关不构成该结论。下一步进入 G1a 控制面（远端记录域与版本化准入），与真实 SSH 无关的部分可先用真实存储、双 Host 与无网络 fake 端点验证。

@@ -26,6 +26,7 @@ import { join, posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
 import { parse } from 'yaml'
+import { staticSshImports } from './lib/static-ssh-imports.mjs'
 
 /** Repository root (this file lives in `scripts/`). */
 const REPO_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -218,7 +219,11 @@ function main() {
       const name = queue.pop()
       if (visited.has(name)) continue
       visited.add(name)
-      for (const specifier of importSpecifiers(members.get(name).toString('utf8'))) {
+      const source = members.get(name).toString('utf8')
+      for (const specifier of staticSshImports(source)) {
+        assert(false, `${name} statically imports ${specifier}: SSH peers must be host-anchored and loaded on demand`)
+      }
+      for (const specifier of importSpecifiers(source)) {
         if (!specifier.startsWith('.')) continue
         const resolved = resolveMember(name, specifier, members)
         assert(resolved !== undefined, `${name} imports ${specifier}, which is not in the tarball`)
