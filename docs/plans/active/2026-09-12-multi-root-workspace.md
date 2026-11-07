@@ -1779,4 +1779,6 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | 单元 | `tests/remote-copy.spec.ts` **9/9**（内存 SFTP 桩）：阶段顺序、各拒绝码、清理规则、hardlink 后失联 `unknown` 且只调用一次、代次变化后 `residual` 且不删除。评审补充两处修正：清理失败时不再把 staging 误报为 `removed`；对账 ID 改为操作 ID。 |
 | 回归 | `verify:all` **1285 passed / 109 skipped / 0 failed**，compose 54、journey 76、packed 136；`docs:check` 通过。 |
 
+CI：G4 接线（a42ea8c）的 [run 42345498762](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/42345498762) 与本节（79ce640）的 [run 42347187212](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/42347187212) 全部 success；CI 无 SSH 目标，实跑用例在其中按设计跳过，真实 SSH 证据只来自上述本机对 VPS 的运行。
+
 **未验证与限制：** 结果联合中的 `partial` 在单文件复制中没有产生路径。目录、覆盖、删除与远端 → 本地（需新的受 Registry/Scope 围栏保护的本地二进制发布端口）不在本批。端点对象与父目录绑定依赖部署前提：chroot 账户只有 `dshxfer` 一个写者；路径型 SFTP 本身不能排除其他写者的替换竞态，这一前提须由部署方保证。只在 Linux 目标与 macOS 发起端上验证。
