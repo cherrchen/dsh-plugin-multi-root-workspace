@@ -6,7 +6,13 @@
  */
 import type { RemoteEndpointVerifier } from './contract.ts'
 import type { RemoteBinding, RemoteEnvironment } from './manifest.ts'
-import type { SshEnvironmentManager } from './ssh-environment.ts'
+import type { SshEnvironment, SftpEnvironment } from './ssh-environment.ts'
+
+/** The two connection openings verification needs; the SSH manager implements it. */
+export interface SshEndpointManager {
+  open(environmentId: string): Promise<SshEnvironment>
+  openSftp(environmentId: string): Promise<SftpEnvironment>
+}
 
 /** Verification errors keep the registry's RemoteAdmissionError codes. */
 export class EndpointVerifyError extends Error {
@@ -17,7 +23,7 @@ export class EndpointVerifyError extends Error {
 }
 
 export class SshEndpointVerifier implements RemoteEndpointVerifier {
-  constructor(private readonly manager: SshEnvironmentManager) {}
+  constructor(private readonly manager: SshEndpointManager) {}
 
   async verify(environment: RemoteEnvironment, binding: RemoteBinding, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
     if (environment.transport === 'sftp') return await this.verifySftp(environment, binding, signal)

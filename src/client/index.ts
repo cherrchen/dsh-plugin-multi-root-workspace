@@ -34,6 +34,7 @@ import { nativeTreeRenderer } from '../compat/files-tree.ts'
 import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { createWorktreeClient } from './worktree-client.ts'
 import { WorktreePrompt } from './WorktreePrompt.tsx'
+import { createRemotesClient, type RemotesClient } from './remotes-client.ts'
 import { NS, en, zh } from './locales.ts'
 import { STYLES } from './styles.ts'
 import { HeroWorkspaceEntry } from './HeroWorkspaceEntry.tsx'
@@ -143,6 +144,9 @@ export function apply(ctx: ClientContext): void {
   const connectionHandle = ctx.get('connection')
   const panel: PanelClient | undefined = connectionHandle === undefined ? undefined : createPanelClient(connectionHandle)
   const worktreeClient = connectionHandle === undefined ? undefined : createWorktreeClient(connectionHandle)
+  // The remote section speaks its own contract over the same channel; a host
+  // without the remote experiment answers with a code the section renders.
+  const remotes: RemotesClient | undefined = connectionHandle === undefined ? undefined : createRemotesClient(connectionHandle)
   // The footer's dialog owner and the workspace menu share exactly one
   // controller for this apply() lifetime: the menu asks the footer to open
   // its dialog, and the menu entry is disabled while no footer owner exists
@@ -221,6 +225,7 @@ export function apply(ctx: ClientContext): void {
     const wide = (owner as { readonly wide?: boolean } | undefined)?.wide
     return createElement(WorkspaceFoldersAction, {
       panel,
+      remotes,
       pickDirectory,
       sessionId,
       subscribeSession,
@@ -298,7 +303,7 @@ export function apply(ctx: ClientContext): void {
     // never restarts because of it. `undefined` means the fork cannot mount.
     const filesTree = createFilesTreeSurface(props, filesTreeT)
     return absolutePath === undefined
-      ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, compact: true })
+      ? createElement(WorkspaceFoldersAction, { panel, remotes, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, compact: true })
       : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
   }))
   // Optional: the document preview's navigator seat exists only on runtimes

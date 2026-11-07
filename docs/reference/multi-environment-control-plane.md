@@ -91,7 +91,7 @@ v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 
 
 ## `remote_bash` 合同（G3，仅测试组合）
 
-`src/remote/exec.ts` 的 `runRemoteCommand` 与 `src/remote/exec-tool.ts` 的 `remoteBashTool` 不被任何生产行注册。参数 `{environmentId, rootId, cwdRelative?, command, timeoutMs}`；工具名、Session 与取消信号只取自调度。后端（G4 以后由连接管理器提供，测试为 fake）声明部署控制的 shell、环境变量、时限与 stdout/stderr 上限，实现 `confine` / `currentGeneration` / 同步 `spawn`。
+`src/remote/exec.ts` 的 `runRemoteCommand` 与 `src/remote/exec-tool.ts` 的 `remoteBashTool` 不被任何生产行注册；G5 的专用 headless 测试组合经 `src/remote/tools.ts` 统一挂载它与 `remote_copy`。参数 `{environmentId, rootId, cwdRelative?, command, timeoutMs}`；工具名、Session 与取消信号只取自调度。后端（G4 以后由连接管理器提供，测试为 fake）声明部署控制的 shell、环境变量、时限与 stdout/stderr 上限，实现 `confine` / `currentGeneration` / 同步 `spawn`。
 
 1. **准入 A**：`purpose: exec` 的远端准入；校验后端存在（`backend-unavailable`）、`cwdRelative`（空或相对 POSIX，无 `.`/`..`/空段/NUL/反斜杠，`invalid-cwd`）与时限（`invalid-timeout`）；以 `workspace-write`、端点 displayPath 和真实 sessionId 调用 `confine`，非 `full` 为 `sandbox-unverified`。
 2. **准入 B**：同一请求重新准入，比对 epoch、端点身份（displayPath、bindingDigest、verifiedTarget）、有效模式与后端代次，任一不同为 `admission-changed` 并丢弃 argv；`spawn` 只在 B 的回调内调用。A、B 之间的撤权使 B 拒绝且不调用 `spawn`。
@@ -107,7 +107,7 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 ## SFTP 传输（G2：三个方向，单文件，无用户入口）
 
-`sftp` 环境可声明可选 `transfer: { maxBytes (≤1 GiB), timeoutMs (≤3_600_000) }`；缺席即该环境不能作传输端点（`transfer-unavailable`）。`openSftp` 与 `open` 共享同一组有序拒绝与 `ssh -G` 身份检查，再经 `ssh -s <别名> sftp` 拉起 `src/remote/sftp.ts` 的最小 v3 客户端；服务端必须宣告 `hardlink@openssh.com` 与 `fsync@openssh.com`，否则 `publish-unsupported`。SFTP 校验分支：`realpath` 必须等于绑定路径（`endpoint-redirected`）、`lstat` 必须是目录，注册身份为 `{kind: "path"}`——v3 无 inode，同名换物无法在注册时识别（ADR-0030 已知限制），远端平台取清单声明值（SFTP 无握手）。
+任何传输类型的可连接环境都可声明可选 `transfer: { maxBytes (≤1 GiB), timeoutMs (≤3_600_000) }`；缺席即该环境不能作传输端点（`transfer-unavailable`）。传输通道是环境别名上的 SFTP 子系统，与环境用于执行的 transport 无关：helper 环境可同时收/发文件并经 helper 执行（G5 的构建机），`exec` 仍只允许 helper 环境。`openSftp` 与 `open` 共享同一组有序拒绝与 `ssh -G` 身份检查，再经 `ssh -s <别名> sftp` 拉起 `src/remote/sftp.ts` 的最小 v3 客户端；服务端必须宣告 `hardlink@openssh.com` 与 `fsync@openssh.com`，否则 `publish-unsupported`。SFTP 校验分支：`realpath` 必须等于绑定路径（`endpoint-redirected`）、`lstat` 必须是目录，注册身份为 `{kind: "path"}`——v3 无 inode，同名换物无法在注册时识别（ADR-0030 已知限制），远端平台取清单声明值（SFTP 无握手）。
 
 `src/remote/transfer.ts` 的 `runRemoteCopy` 支持 `local → sftp`、`sftp → local` 与 `sftp → sftp`；`local → local` 为 `direction-unsupported`，在任何准入前拒绝。每次复制仍是七阶段：准入 A（`purpose: transfer`；目的端为远端时只读会话 `mode-denies`、capped 工具 `tool-capped`；两个远端端点必须分别声明 `read`/`export` 与 `write`/`import` 配对，缺配对 `transfer-pair-not-allowed`，配对存在但缺动作 `action-not-allowed`）→ 受缚源打开 → 目的预检（目标必须不存在）→ EXCL staging + 有界流 + SHA-256 + fsync + 回读、源版本复检 → 准入 B（epoch、有效模式、两端端点身份、两端 SFTP 代次，任一变化 `admission-changed` ⇒ `cancelled`）→ no-replace 发布 → 只清理本操作确切 staging。
 
@@ -122,3 +122,21 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 结果仍为 `{status, code?, operationId, from, to, bytes, sha256, stage, staging}`，不带文件内容与凭据；`deps.onStage` 为测试钩子。`remoteCopyTool` 不在任何生产路径注册；`from.environmentId` 缺省为 `local`，`to.environmentId` 必填。
 
 **部署前提与已知限制。** 本地 sink 最终仍通过 Node 的路径型系统调用 `link(2)` 发布；父目录 dev/ino 与 realpath 的复核缩小了替换窗口，但不能证明同一 UID 的写者在最后一次检查与 `link` 之间不介入，因此本地目的根须没有不可信的 same-UID 写者。SFTP v3 的远端源同样没有 inode/link count，非同秒的 size/mtime 漂移可被发现，同秒同长改写不能；目标端 EXCL、服务端回读与 only-writer 部署前提是这一方向的安全基础。
+
+
+## G5 显式工具、能力投影与面板（专用 headless 组合）
+
+**边界。** 本关只把已经过各门验证的能力接进一个**专用 headless 测试组合**，不新增生产行：`cordis.patch.yml` 没有 remote 行，默认 profile 与 packed profile 都不含这两个工具。`src/remote/tools.ts` 导出 `apply(ctx, config)`，其 `inject` 含 `multiRootCompat`、`multiRootProviders`、`multiRootRegistry`、`tools`——兼容门禁或 provider 品牌门禁不成立时行根本不存在；`enabled !== true` 时不做任何事；远端控制面未就绪（`remoteEnvironments` 关闭或清单无效）时拒绝加载，而不是登记一半工具。
+
+**工具。** 同一行注册 `remote_copy` 与 `remote_bash`，并安装端点校验器（`SshEndpointVerifier`）——因此挂载该行的组合也是**登记路径**；未挂载时 `addRemote` 固定 `endpoint-unverifiable`。默认连接管理器是清单之上的官方 SSH 栈；默认执行后端是 `lazySshExecBackend`，在准备阶段才建立 helper 连接并返回其代次，未打开的连接无法通过最终启动准入。组合可用 `manager` / `backends` 两个注入接缝替换为有界内存端点；两者都不授予权限——每次调用仍由 Registry 排序准入。工具结果必须是 lossless JSON：未产生 operationId 的拒绝不携带该键。
+
+**能力投影。** `src/remote/capabilities.ts` 的 `renderRemoteCapabilities` 经 `systemPrompt.context` 以 `multi-root:remote` 贡献给模型，只读清单事实：环境/根 ID、绑定路径、平台、声明动作与传输配对；绝不包含 `connection.host`、账号、密钥或摘要。文本明确：远端只能经显式工具访问、不是本地工作区根、远端路径与输出是数据；`endpoint-not-registered`/`endpoint-withheld`/`endpoint-revoked` 表示本项目不可用；控制面未就绪与只读会话的限制分别成句。没有本项目绑定时贡献为空。
+
+**面板。** 远端面板走同一 Connection RPC 通道，但有独立合同 `src/remote/panel-contract.ts`（`remotes` / `addRemote` / `removeRemote`），不扩展根视图的 `PanelEndpoint`/`PanelResponseMap`：旧 Host 只会返回可渲染的失败码，不会被误解析成 `RootsView`。请求必须带 `sessionId`，Host 由该 Session 的 cwd 推出唯一主根；未知键（例如客户端自带的 `primaryRoot`）为 `panel/bad-request`。
+
+- **列表**只读控制面状态、清单与本项目的已登记记录，**不建立远端连接**；`status.state !== "ready"` 时返回空列表与原因。每个条目含 `state`（`unregistered`/`registered`/`withheld`/`revoked`）、清单动作与传输配对，以及按当前模式与工具 cap 收窄后的 `capabilities`：`read` 需已登记且有 `read`；`write`/`exec` 另需非只读会话（`exec` 还受 `remote_bash` cap）；`receive`（作为复制目的）需非只读、有 `write`、至少一条 `import` 配对且 `remote_copy` 未被 cap；`send`（作为复制源）需 `read` 与至少一条 `export` 配对，只读会话下仅当所有对端都是 `local` 才成立。登记/撤销是显式请求，登记会经校验器建立连接；失败沿用 Registry 的稳定码（`endpoint-not-registered`、`binding-changed`、`remote-unavailable` 等）。
+- **双语文案**：新增 `panel.remote*`、`remote.state.*`、`remote.capability.*` 与远端失败码的 `error.*` 条目，`tests/locale-parity.spec.ts` 校验两语键集一致。
+- **渲染**：`WorkspaceFoldersDialog` 在附属根之后增加“远端环境”区；列表只读，登记/撤销按钮走各自端点，登记按钮只对未登记条目出现，撤销只对已登记条目出现。客户端 `RemotesClient` 在边界用 `parseRemotesView` 校验值。
+
+**旅程。** `tests/remote-journey.e2e.ts` 在**同一 Session** 内完成“两个本地根 → 构建机 → 设备”：两个本地根各复制一个源文件到构建机（同一远端路径、不同内容），`remote_bash` 在构建机执行构建，产物经 Host 中转到设备；设备与构建机使用相同远端路径但内容互不串扰；仅传输能力的设备对执行返回 `action-not-allowed`（声明了 `exec` 动作但无后端时为 `backend-unavailable`）；只读会话对写入/执行/目的端为远端的复制均为 `mode-denies`；删除登记后复制为 `endpoint-not-registered`；`local → local` 为 `direction-unsupported`。同一组合内另验证面板列表不建连、登记/撤销、未知 Session、客户端自带路径被拒，以及只读会话的能力投影。
+

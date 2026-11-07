@@ -1781,3 +1781,22 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | 环境 | VPS 的两段传输分别使用独立 chroot 账户；`ssh -G` 解析、StrictHostKeyChecking、ForwardAgent no、单把 known_hosts 主机钥与清单一致；SFTP 服务宣告 `hardlink@openssh.com` 与 `fsync@openssh.com`。 |
 
 **未验证与限制：** 结果联合中的 `partial` 在单文件复制中没有产生路径；目录、覆盖、删除仍不在本批。远端 → 远端只在同一 VPS 的两个账户间验证，未使用第二台物理设备；macOS 目标、Linux 发起端、hostKey 轮换、真实断线注入、Windows 发起端（ADR-0030 无限期延后）不在本批。SFTP v3 无 inode/link count：远端源不能证明 `nlink===1`，同秒同长改写无法由 size/mtime 发现；目标端与父目录绑定依赖部署前提——chroot 账户是该目录唯一写者，路径型 SFTP 本身不能排除替换竞态。本地 sink 最终以路径型 `link(2)` 发布，父目录 dev/ino/realpath 复核缩小但不能消除 same-UID 写者的最后窗口；目的根须没有不可信的同 UID 写者。部署凭据隔离仍未证明（私钥、Control Socket 与 `ssh` 由发起端同一 OS 用户持有），故清单保持 `unattested`，按 ADR-0032 不得对模型开放；`remoteCopyTool` 仍未在任何生产路径注册。
+
+
+## 多执行环境 G5 显式工具、面板与单会话旅程（2026-11-07）
+
+**状态：显式工具、能力投影与远端面板已接入一个专用 headless 测试组合，并在同一 Session 内跑通“两个本地根 → 构建机 → 设备”；没有新增生产行，远端实验仍默认关闭、未对模型开放。** 旅程的两台远端由有界内存端点驱动（SFTP 与执行后端），准入、绑定/配对、staging、哈希、无覆盖发布与双准入命令合同全部走真实代码；真实 SSH 上的同一旅程、Web/Electron 组合与部署凭据隔离验收不在本轮。
+
+**实现（本轮增量）：** `src/remote/tools.ts` 新行 `apply(ctx, {enabled, manager?, backends?})`，`inject` 保持兼容门禁与 provider 品牌门禁；`enabled !== true` 时零动作，远端控制面未就绪（关闭/清单无效）时拒绝加载。该行统一注册 `remote_copy` 与 `remote_bash`、安装 `SshEndpointVerifier`（未挂载该行的组合登记固定 `endpoint-unverifiable`），默认连接管理器是清单之上的官方 SSH 栈，默认执行后端是新的 `lazySshExecBackend`（准备阶段才 `open`，未打开连接无法通过最终启动准入）。`src/remote/capabilities.ts` 通过 `systemPrompt.context` 贡献 `multi-root:remote`，只含环境/根 ID、绑定路径、平台、动作与传输配对，绝不含 host/账号/密钥。清单与连接层允许任意 transport 声明 `transfer`（传输适配器是同一别名的 SFTP 子系统），`exec` 仍仅 helper——这样一台构建机才能既收源码又执行构建。`src/remote/panel-contract.ts` 新增独立远端端点（`remotes`/`addRemote`/`removeRemote`），`src/command.ts` 按 Session 推导主根后提供列表与登记/撤销；列表只读状态/清单/记录、不建立任何远端连接，能力按会话模式与工具 cap 收窄；`src/client/remotes-client.ts` 与 Workspace Folders 面板的新“远端环境”区消费它，双语文案与失败码覆盖经 locale parity 校验。`remote_bash` 的未开始结果不再携带显式 `undefined` 的 `operationId`（工具输出必须 lossless JSON）。
+
+**专用组合与旅程：** `tests/support/fake-remote.ts` 提供每环境独立的文件表、SFTP v3 子集、verifier 探针应答与可识别 `build app`/`test app` 的执行后端；`tests/support/remote-tools.ts` 挂真实 Registry/Sessions/Policy/SystemPrompt/Tools/执行器、显式工具行与（可选）命令/面板行。`tests/remote-journey.e2e.ts` 在**同一 Session**：两个本地根各复制一个源文件到构建机（同一远端路径、不同内容）→ `remote_bash` 构建 → 产物经 Host 中转设备；设备与构建机同路径但内容互不串扰；仅传输设备执行拒绝、只读会话三向拒绝、撤销后 `endpoint-not-registered`、`local → local` `direction-unsupported`、面板列表零连接与登记/撤销、未知 Session 与客户端自带路径拒绝、只读能力投影，均有断言。
+
+| 证据 | 结果 |
+| --- | --- |
+| 单元 | `tests/remote-tools.spec.ts` **8/8**（仅组合挂载时注册、未挂载为 `ToolNotFoundError` 且登记 `endpoint-unverifiable`、控制面未就绪拒绝加载、开关关闭零注册、投影空/敏感字段/降级与只读文案、生产 patch 无该行）；`tests/remote-journey.e2e.ts` **8/8**；`tests/client-panel.spec.tsx` **60/60**（新增远端区四条：关闭状态不发起远端动作、登记后状态更新与请求形态、跨会话迟到应答被丢弃、飞行中重复点击只提交一次）；`tests/command.spec.ts` **58/58**（远端端点关闭态、严格请求体）。受影响批次 **221 passed / 4 skipped / 1 failed**，唯一失败是本会话沙箱下的 `remote-exec` 第二挂载（见下）。 |
+| 回归 | `pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm docs:check`、`pnpm pack:check`（**197 members**）通过；`smoke:compose` **54/0/0**、`smoke:behavior` **96/0/8**、`smoke:journey` **69/0/2**、`smoke:packed` **95/0/8**（packed 运行中首次 `pnpm add` 因构建审批中断未激活，smoke 自带 remove+add 恢复后通过）。`pnpm test` 为 **1254 passed / 185 skipped / 18 failed**（较 G2 增加 21 项新用例）；18 项失败与 G2 完全相同，全部是共享 Registry 的 follower/IPC 用例（`authority-boundaries`、`b9-review-regressions`、`registry-lease`、`registry-multiprocess`、`registry-operation`、`registry`、`skills-authority`、`skills-registry`、`remote-exec` 第二挂载），原因是本会话本身处于 DSH 沙箱，内核 peer 认证按设计拒绝“sandboxed peer”（`contended` / `owner-without-remote-protocol`），须由未沙箱化 CI 车道复验。 |
+| 实跑回归 | 用 G2/G4 的临时 VPS 与 `tests/remote-ssh.live.e2e.ts` 复跑 **19/19 通过**（约 504 s）：真实 SFTP 连接、三方向复制与 SSH 栈用例未受本轮 `transfer`/transport 规则放宽影响；该组仍只覆盖 Linux 目标与 `unattested` 部署。 |
+| 组合边界 | 工具行不在 `cordis.patch.yml`；默认与 packed profile 都不存在 `remote_copy`/`remote_bash`，`tests/remote-tools.spec.ts` 直接断言 patch 文本。面板区只在客户端 bundle 可达时出现；列表不建立远端连接，`add` 才经校验器连接。 |
+
+**未验证与限制：** 本轮旅程使用内存端点，不构成真实 SSH 证据；真实 G5 实跑须在无沙箱 CI 或受信部署上重复同一 Session 流程。`capabilities` 只描述部署声明与当前模式/工具 cap，具体调用仍逐次准入；`receive`/`send` 不替代本地目的根 access 检查。面板只投影当前主根的部署条目，Web/Electron 实际入口、第二台物理设备、macOS 目标、Windows 发起端与 hostKey 轮换未覆盖。凭据隔离仍为 `unattested`，按 ADR-0032 远端能力不得对模型开放；G6 的透明执行路由不在本批。
+

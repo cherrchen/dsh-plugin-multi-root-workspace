@@ -605,6 +605,19 @@ describe('the panel channel', () => {
     expect(spoof.error?.code).toBe('panel/bad-request')
   })
 
+  it('answers the remote section from the control plane and refuses remote actions while it is off', async () => {
+    await mount({ withConnection: true })
+    const listed = await callPanel('remotes', { sessionId: PANEL_SESSION })
+    expect(listed.ok).toBe(true)
+    expect(listed.value).toMatchObject({ status: { state: 'disabled' }, endpoints: [] })
+    const add = await callPanel('addRemote', { sessionId: PANEL_SESSION, environmentId: 'build', rootId: 'app' })
+    expect(add.ok).toBe(false)
+    expect(add.error?.code).toBe('remote-unavailable')
+    // The primary root is host-derived; a client-named path is out of contract.
+    const spoof = await callPanel('remotes', { sessionId: PANEL_SESSION, primaryRoot: '/elsewhere' })
+    expect(spoof.error?.code).toBe('panel/bad-request')
+  })
+
   it('rejects a panel call when the session disappears during the request', async () => {
     const table = new Map<string, string>([[PANEL_SESSION, primary]])
     await mount({ withConnection: true, sessions: table })

@@ -160,9 +160,11 @@ export function parseDeploymentManifest(text: string, manifestPath: string): { m
         throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": exec is only allowed for helper transport`)
       }
     }
-    if (environment.transport !== 'sftp' && environment.transfer !== undefined) {
-      throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": transfer is only allowed for sftp transport`)
-    }
+    // A transfer is served by the SFTP subsystem over the environment's own
+    // alias, so a helper environment may declare one too: the build machine
+    // receives sources through SFTP and executes through the helper (G5).
+    // `exec` stays helper-only, and a transfer still requires every SFTP
+    // publish guarantee at open time (`openSftp`).
     if (byId.has(environment.environmentId)) throw new ManifestError('duplicate-environment', `duplicate environmentId "${environment.environmentId}"`)
     byId.set(environment.environmentId, environment)
   }

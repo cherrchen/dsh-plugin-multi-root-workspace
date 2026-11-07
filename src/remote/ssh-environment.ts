@@ -218,7 +218,9 @@ export class SshEnvironmentManager {
     if (this.gate.status !== 'eligible') {
       throw new SshEnvironmentError(`ssh-capability-absent:${this.gate.status === 'absent' ? this.gate.reason : 'unknown'}`, 'SSH capability is not eligible on this host')
     }
-    if (environment.transport !== 'sftp') throw new SshEnvironmentError('transport-not-sftp', `environment "${environmentId}" uses transport "${environment.transport}"`)
+    // The SFTP session is the transfer adapter, not the environment's exec
+    // transport: a helper environment that declares `transfer` uses the same
+    // alias's SFTP subsystem, and a device may be SFTP-only.
     if (environment.credentialIsolation !== 'attested' && !this.allowUnattested) {
       throw new SshEnvironmentError('credential-isolation-unattested', `environment "${environmentId}" is declared unattested; connections require an attested deployment`)
     }

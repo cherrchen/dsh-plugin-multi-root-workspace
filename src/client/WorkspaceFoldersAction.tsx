@@ -42,9 +42,13 @@ import {
 } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
+import type { RemotesClient } from './remotes-client.ts'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
 import type { WorktreeClient } from './worktree-client.ts'
+
+import type { RootAccess, RootEntryView, RootState, RootView, RootsView } from '../contract.ts'
+import type { RemoteCapabilitiesView, RemoteEndpointView, RemotesView } from '../remote/panel-contract.ts'
 
 /** Translate one key of this plugin's namespace. */
 export type Translate = (key: Key, params?: Record<string, unknown>) => string
@@ -53,6 +57,8 @@ export type Translate = (key: Key, params?: Record<string, unknown>) => string
 export interface WorkspaceFoldersActionProps {
   /** The channel client; absent when this composition has no host Connection. */
   readonly panel: PanelClient | undefined
+  /** The remote-environment section's client; absent when this host cannot serve it. */
+  readonly remotes?: RemotesClient | undefined
   /** Opens the composed directory picker, when one is composed. */
   readonly pickDirectory: (() => Promise<string | null>) | undefined
   /** Bound translator for this plugin's namespace. */
@@ -355,6 +361,27 @@ function rowKey(root: RootView): string {
   return `${root.ordinal}\u0000${root.id}\u0000${root.path}\u0000${root.addedAt}`
 }
 
+/** The locale key for one remote registration state. */
+function remoteStateKey(state: RemoteEndpointView['state']): Key {
+  switch (state) {
+    case 'unregistered': return 'remote.state.unregistered'
+    case 'registered': return 'remote.state.registered'
+    case 'withheld': return 'remote.state.withheld'
+    case 'revoked': return 'remote.state.revoked'
+  }
+}
+
+/** Render the effective remote capabilities as one localized list. */
+function remoteCapabilityList(capabilities: RemoteCapabilitiesView, t: Translate): string {
+  const names: string[] = []
+  if (capabilities.read) names.push(t('remote.capability.read'))
+  if (capabilities.write) names.push(t('remote.capability.write'))
+  if (capabilities.exec) names.push(t('remote.capability.exec'))
+  if (capabilities.receive) names.push(t('remote.capability.receive'))
+  if (capabilities.send) names.push(t('remote.capability.send'))
+  return names.length === 0 ? t('panel.remoteNoCapabilities') : names.join(', ')
+}
+
 /**
  * The dialog: reads the view once per open, then after every mutation.
  *
@@ -392,8 +419,13 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const [menuFor, setMenuFor] = useState<string | undefined>(undefined)
   /** Tracked worktree roots awaiting the operator's inline cleanup confirmation. */
   const [cleanupFor, setCleanupFor] = useState<readonly string[] | undefined>(undefined)
+
+  /** The remote section, read independently of the roots view. */
+  const [remoteState, setRemoteState] = useState<{ view?: RemotesView; error?: PanelError }>({})
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const requestEpoch = useRef(0)
+  /** Fences remote-section answers independently of roots answers. */
+  const remoteEpoch = useRef(0)
   const mounted = useRef(true)
 
   useEffect(() => {
@@ -481,6 +513,53 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     }
   }, [panel, requestBase, props.worktrees])
 
+  /**
+   * Read the remote section. This never opens a remote connection: the host
+   * answers from the control-plane state, the deployment manifest, and the
+   * registered grants alone. The epoch fences an answer that arrives after a
+   * session switch or a newer read.
+   */
+  const refreshRemotes = useCallback(async (): Promise<void> => {
+    const client = props.remotes
+    if (client === undefined) return
+    const base = requestBase()
+    if (base === undefined) return
+    const epoch = ++remoteEpoch.current
+    try {
+      const view = await client.list(base.sessionId)
+      if (!mounted.current || epoch !== remoteEpoch.current || props.sessionId?.() !== base.sessionId) return
+      setRemoteState({ view })
+    } catch (error: unknown) {
+      if (!mounted.current || epoch !== remoteEpoch.current) return
+      setRemoteState({ error: asPanelError(error) })
+    }
+  }, [props.remotes, requestBase, props.sessionId])
+
+  /**
+   * Register or remove one deployment endpoint. Registration is the host's
+   * explicit verify-and-commit action; the section adopts the refreshed view.
+   */
+  const mutateRemote = useCallback(async (action: 'register' | 'remove', endpoint: RemoteEndpointView): Promise<void> => {
+    const client = props.remotes
+    if (client === undefined) return
+    const base = requestBase()
+    if (base === undefined) return
+    const epoch = ++remoteEpoch.current
+    setState(previous => ({ ...previous, busy: true }))
+    try {
+      const view = action === 'register'
+        ? await client.add(base.sessionId, endpoint.environmentId, endpoint.rootId)
+        : await client.remove(base.sessionId, endpoint.environmentId, endpoint.rootId)
+      if (!mounted.current || epoch !== remoteEpoch.current || props.sessionId?.() !== base.sessionId) return
+      setRemoteState({ view })
+    } catch (error: unknown) {
+      if (!mounted.current || epoch !== remoteEpoch.current) return
+      setRemoteState(previous => ({ ...previous, error: asPanelError(error) }))
+    } finally {
+      if (mounted.current) setState(previous => ({ ...previous, busy: false }))
+    }
+  }, [props.remotes, requestBase, props.sessionId])
+
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => {
     let previous = props.sessionId?.()
@@ -489,13 +568,19 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       if (current === previous) return
       previous = current
       requestEpoch.current += 1
+      remoteEpoch.current += 1
       setState({ view: undefined, error: undefined, busy: false, noSession: current === undefined })
       setMenuFor(undefined)
       setAliasFor(undefined)
       setCleanupFor(undefined)
+
+      setRemoteState({})
       void refresh()
+      void refreshRemotes()
     })
-  }, [props.subscribeSession, props.sessionId, refresh])
+  }, [props.subscribeSession, props.sessionId, refresh, refreshRemotes])
+
+  useEffect(() => { void refreshRemotes() }, [refreshRemotes])
 
   /**
    * Submit one change to the host and adopt the view it answers with.
@@ -876,6 +961,56 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               </div>
             })}
           </section>
+
+          {props.remotes === undefined ? null : (
+            <section className="mrfw-section">
+              <div className="mrfw-sectionTitleRow">
+                <span className="mrfw-sectionTitle">{t('panel.remote')}</span>
+                <span className="mrfw-sectionNote">{t('panel.remoteNote')}</span>
+              </div>
+              {remoteState.error === undefined ? null : (
+                <p role="alert" className="mrfw-alert">{t(errorKeyOf(remoteState.error.code))}</p>
+              )}
+              {remoteState.view === undefined
+                ? (remoteState.error === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null)
+                : remoteState.view.status.state !== 'ready' ? (
+                  <p className="mrfw-note">
+                    {t('panel.remoteUnavailable', { reason: remoteState.view.status.reason ?? remoteState.view.status.state })}
+                  </p>
+                ) : remoteState.view.endpoints.length === 0 ? (
+                  <p className="mrfw-note">{t('panel.remoteEmpty')}</p>
+                ) : remoteState.view.endpoints.map(endpoint => {
+                  const key = `${endpoint.environmentId}/${endpoint.rootId}`
+                  return (
+                    <div key={key} className="mrfw-row">
+                      <div className="mrfw-rootText">
+                        <span className="mrfw-rootName">
+                          <span className="mrfw-rootNameText">{endpoint.displayName ?? endpoint.environmentId}</span>
+                          <span className="mrfw-accessBadge">{endpoint.platform}</span>
+                          <span className="mrfw-accessBadge">{t(remoteStateKey(endpoint.state))}</span>
+                        </span>
+                        <span className="mrfw-rootPath" title={endpoint.path}>{endpoint.rootId} · {endpoint.path}</span>
+                        <span className="mrfw-note">
+                          {t('panel.remoteCapabilities', { capabilities: remoteCapabilityList(endpoint.capabilities, t) })}
+                        </span>
+                      </div>
+                      {endpoint.state === 'registered' ? (
+                        <IconButton
+                          pending={state.busy}
+                          onClick={() => { void mutateRemote('remove', endpoint) }}
+                          icon={<IconTrash />}
+                          label={t('panel.remoteRemove')}
+                        />
+                      ) : (
+                        <Action pending={state.busy} onClick={() => { void mutateRemote('register', endpoint) }}>
+                          {t('panel.remoteRegister')}
+                        </Action>
+                      )}
+                    </div>
+                  )
+                })}
+            </section>
+          )}
             </>
           )}
 

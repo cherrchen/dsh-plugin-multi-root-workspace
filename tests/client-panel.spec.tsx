@@ -16,6 +16,7 @@ import { createElement, StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PANEL_CHANNEL, type PanelRequest, type RevealedView, type RootView, type RootsView } from '../src/contract.ts'
+import type { RemoteEndpointView, RemotesView } from '../src/remote/panel-contract.ts'
 import * as client from '../src/client/index.ts'
 import { WorkspaceFoldersAction } from '../src/client/WorkspaceFoldersAction.tsx'
 import { createWorkspaceFoldersDialogController } from '../src/client/workspace-folders-dialog.ts'
@@ -55,8 +56,12 @@ interface Harness {
   setFailure: (failure: { code: string; message: string } | undefined) => void
   /** What the next `reveal` answers (the real host answers a `RevealedView`). */
   setRevealed: (value: unknown) => void
+  /** What the remote section reads (and re-reads after add/remove). */
+  setRemotes: (view: RemotesView) => void
   /** Make the NEXT channel call hang until `release` is called. */
   holdNextCall: () => void
+  /** Make the next call to ONE endpoint hang until `release` is called. */
+  holdEndpoint: (endpoint: string) => void
   /** Release a call held by `holdNextCall`. */
   release: () => void
 }
@@ -122,8 +127,10 @@ function mount(options: MountOptions = {}): Harness {
   let catalog: readonly { id: string; mainView?: number }[] | undefined
   let failure: { code: string; message: string } | undefined
   let revealed: unknown = { revealed: '/repos/payments' } satisfies RevealedView
+  let remoteView: RemotesView = { primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'disabled' }, endpoints: [] }
   let gate: Promise<void> | undefined
   let releaseGate: (() => void) | undefined
+  let holdFor: string | undefined
   const picked: string | null = '/repos/picked'
 
   const connection = {
@@ -131,7 +138,13 @@ function mount(options: MountOptions = {}): Harness {
       call: async (channel: string, endpoint: string, payload: PanelRequest) => {
         calls.push({ channel, endpoint, payload })
         const listedView = view
-        if (gate !== undefined) {
+        const remoteListed = remoteView
+        if (holdFor === endpoint) {
+          holdFor = undefined
+          const held = gate
+          gate = undefined
+          await held
+        } else if (gate !== undefined && holdFor === undefined) {
           const held = gate
           gate = undefined
           await held
@@ -149,10 +162,33 @@ function mount(options: MountOptions = {}): Harness {
             : [...without.slice(0, at), target, ...without.slice(at)]
           view = { ...view, roots: reordered.map((root, index) => ({ ...root, ordinal: index + 1 })) }
         }
+        if (endpoint === 'addRemote' || endpoint === 'removeRemote') {
+          const state = endpoint === 'addRemote' ? 'registered' as const : 'unregistered' as const
+          remoteView = {
+            ...remoteView,
+            endpoints: remoteView.endpoints.map(entry => (entry.environmentId === payload.environmentId && entry.rootId === payload.rootId
+              ? {
+                  ...entry,
+                  state,
+                  capabilities: state === 'registered'
+                    ? { read: true, write: true, exec: false, receive: true, send: false }
+                    : { read: false, write: false, exec: false, receive: false, send: false },
+                  ...(state === 'registered' ? {} : { reason: 'remote-unregistered' }),
+                }
+              : entry)),
+          }
+          return { ok: true, value: remoteView }
+        }
         // One shape per endpoint, exactly as the host sends them: `reveal`
-        // answers with the revealed path, everything else with the whole view.
-        // Answering a list for every endpoint is what used to hide the mismatch.
-        return { ok: true, value: endpoint === 'reveal' ? revealed : endpoint === 'list' ? listedView : view }
+        // answers with the revealed path, the remote endpoints answer a
+        // remotes view, everything else with the whole roots view. Answering a
+        // list for every endpoint is what used to hide the mismatch.
+        return {
+          ok: true,
+          value: endpoint === 'reveal' ? revealed
+            : endpoint === 'remotes' ? remoteListed
+            : endpoint === 'list' ? listedView : view,
+        }
       },
     },
   }
@@ -226,7 +262,9 @@ function mount(options: MountOptions = {}): Harness {
     setCatalog: rows => { catalog = rows },
     setFailure: next => { failure = next },
     setRevealed: next => { revealed = next },
-    holdNextCall: () => { gate = new Promise<void>(resolve => { releaseGate = resolve }) },
+    setRemotes: next => { remoteView = next },
+    holdNextCall: () => { holdFor = undefined; gate = new Promise<void>(resolve => { releaseGate = resolve }) },
+    holdEndpoint: endpoint => { holdFor = endpoint; gate = new Promise<void>(resolve => { releaseGate = resolve }) },
     release: () => { releaseGate?.(); releaseGate = undefined },
   }
 }
@@ -252,6 +290,11 @@ function renderHero(
   const registration = harness.registrations.find(item => item.options.name === 'conversation.hero.options')!
   const panel = createElement(registration.component as never, props)
   return render(strictMode ? createElement(StrictMode, null, panel) : panel)
+}
+
+/** The roots list calls, in order (the remote section reads independently). */
+function rootsListing(harness: Harness): Call[] {
+  return harness.calls.filter(call => call.endpoint === 'list')
 }
 
 beforeEach(() => {
@@ -593,7 +636,7 @@ describe('the panel dialog', () => {
     harness.setCatalog([{ id: 'session-main', mainView: 1 }])
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+    await waitFor(() => { expect(rootsListing(harness)).toHaveLength(1) })
 
     harness.setCatalog([
       { id: 'session-main' },
@@ -601,21 +644,21 @@ describe('the panel dialog', () => {
     ])
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
 
-    await waitFor(() => { expect(harness.calls.length).toBeGreaterThanOrEqual(2) })
-    expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-next' })
+    await waitFor(() => { expect(rootsListing(harness)).toHaveLength(2) })
+    expect(rootsListing(harness)[1]?.payload).toEqual({ sessionId: 'session-next' })
   })
 
   it('reads the current session again for each request', async () => {
     const harness = mount()
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+    await waitFor(() => { expect(rootsListing(harness)).toHaveLength(1) })
 
     act(() => { harness.setSession('session-2') })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
 
-    await waitFor(() => { expect(harness.calls.length).toBeGreaterThanOrEqual(2) })
-    expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-2' })
+    await waitFor(() => { expect(rootsListing(harness)).toHaveLength(2) })
+    expect(rootsListing(harness)[1]?.payload).toEqual({ sessionId: 'session-2' })
   })
 
   it('shows the upstream workspace title as the primary row name', async () => {
@@ -1284,14 +1327,14 @@ it('ignores a response belonging to the previous session after catalog selection
   harness.holdNextCall()
   renderPanel(harness)
   fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-  await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+  await waitFor(() => { expect(rootsListing(harness)).toHaveLength(1) })
   harness.setView({ primaryRoot: '/repos/second', effectiveCwd: '/repos/second/src', roots: [], limit: 16, count: 0 })
   act(() => { harness.setSession('session-2') })
   await waitFor(() => { expect(screen.getByText('/repos/second')).toBeDefined() })
   harness.release()
-  await waitFor(() => { expect(harness.calls).toHaveLength(2) })
+  await waitFor(() => { expect(rootsListing(harness)).toHaveLength(2) })
   expect(screen.queryByText('/repos/primary')).toBeNull()
-  expect(harness.calls[1]?.payload).toEqual({ sessionId: 'session-2' })
+  expect(rootsListing(harness)[1]?.payload).toEqual({ sessionId: 'session-2' })
 })
 
 it('offers re-register only for a missing root and explains a redirected one', async () => {
@@ -1310,3 +1353,87 @@ it('offers re-register only for a missing root and explains a redirected one', a
   expect(screen.getByText(`${NS}.panel.redirectedHint`)).toBeTruthy()
   expect(screen.getByText(`${NS}.state.invalid`)).toBeTruthy()
 })
+
+
+describe('the remote-environment section', () => {
+  const ENDPOINT: RemoteEndpointView = {
+    environmentId: 'build',
+    rootId: 'app',
+    path: '/srv/root',
+    platform: 'linux',
+    state: 'unregistered',
+    actions: ['read', 'write', 'exec'],
+    transfers: [{ direction: 'import', environmentId: 'local', rootId: 'primary' }],
+    capabilities: { read: false, write: false, exec: false, receive: false, send: false },
+    reason: 'remote-unregistered',
+  }
+
+  it('explains a disabled control plane and issues no remote action', async () => {
+    const harness = mount()
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'disabled' }, endpoints: [] })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText(/panel.remoteUnavailable/)).toBeTruthy() })
+    expect(harness.calls.filter(call => call.endpoint === 'addRemote' || call.endpoint === 'removeRemote')).toHaveLength(0)
+    // The listing is session-addressed and carries nothing else.
+    const listing = harness.calls.find(call => call.endpoint === 'remotes')
+    expect(listing?.payload).toEqual({ sessionId: 'session-1' })
+  })
+
+  it('registers a deployment endpoint and renders its new state', async () => {
+    const harness = mount()
+    harness.setRemotes({
+      primaryRoot: '/repos/primary',
+      mode: 'workspace-write',
+      status: { state: 'ready' },
+      endpoints: [ENDPOINT],
+    })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('app · /srv/root')).toBeTruthy() })
+    expect(screen.getByText(`${NS}.remote.state.unregistered`)).toBeTruthy()
+    expect(screen.getByText(`${NS}.panel.remoteCapabilities`)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.remoteRegister` }))
+    await waitFor(() => {
+      expect(harness.calls.some(call => call.endpoint === 'addRemote')).toBe(true)
+    })
+    expect(harness.calls.find(call => call.endpoint === 'addRemote')?.payload)
+      .toEqual({ sessionId: 'session-1', environmentId: 'build', rootId: 'app' })
+    await waitFor(() => { expect(screen.getByText(`${NS}.remote.state.registered`)).toBeTruthy() })
+  })
+
+  it('drops a remote answer that belongs to the previous session', async () => {
+    const harness = mount()
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'disabled' }, endpoints: [] })
+    harness.holdEndpoint('remotes')
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remotes')).toBe(true) })
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'ready' }, endpoints: [ENDPOINT] })
+    act(() => { harness.setSession('session-2') })
+    await waitFor(() => { expect(screen.getByText('app · /srv/root')).toBeTruthy() })
+    harness.release()
+    await new Promise<void>(resolve => { setTimeout(resolve, 20) })
+    // The late disabled answer must not replace the new session's view.
+    expect(screen.queryByText(/panel.remoteUnavailable/)).toBeNull()
+    expect(screen.getByText('app · /srv/root')).toBeTruthy()
+  })
+
+  it('submits one registration per click while the request is in flight', async () => {
+    const harness = mount()
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'ready' }, endpoints: [ENDPOINT] })
+    harness.holdEndpoint('addRemote')
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const register = await screen.findByRole('button', { name: `${NS}.panel.remoteRegister` })
+    fireEvent.click(register)
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'addRemote')).toBe(true) })
+    const pending = screen.getByRole('button', { name: `${NS}.panel.remoteRegister` })
+    expect(pending.getAttribute('aria-busy')).toBe('true')
+    fireEvent.click(pending)
+    harness.release()
+    await waitFor(() => { expect(screen.getByText(`${NS}.remote.state.registered`)).toBeTruthy() })
+    expect(harness.calls.filter(call => call.endpoint === 'addRemote')).toHaveLength(1)
+  })
+})
+

@@ -31,8 +31,7 @@ import {
   SSH_FX_NO_SUCH_FILE,
   SSH_FX_FAILURE,
 } from './sftp.ts'
-import type { SshEnvironmentManager } from './ssh-environment.ts'
-import type { RemoteEnvironment } from './manifest.ts'
+import type { RemoteEnvironment, DeploymentManifest } from './manifest.ts'
 import type { MultiRootRegistry } from '../registry.ts'
 import type { AdmittedRemoteEndpoint, RemoteOperationRequest, RemoteOperationSession } from './contract.ts'
 import {
@@ -83,8 +82,19 @@ export interface RemoteCopyResult {
   readonly reconcileId?: string
 }
 
+/**
+ * The connection manager a copy needs: the verified deployment plus the
+ * managed SFTP sessions. Structural on purpose — the SSH stack implements it,
+ * and a test composition can stand in without pretending to be the real one.
+ */
+export interface RemoteConnectionManager {
+  readonly deployment: DeploymentManifest
+  openSftp(environmentId: string): Promise<{ client: SftpClient; generation: string }>
+  sftpGenerationOf(environmentId: string): string
+}
+
 export interface RemoteCopyDeps {
-  readonly manager: SshEnvironmentManager
+  readonly manager: RemoteConnectionManager
   /** Awaited between stages; test-only injection for revocation/mutation. */
   readonly onStage?: (stage: RemoteCopyStage) => void | Promise<void>
   /** Test-only: an injected SFTP client instead of the managed session. */
@@ -209,10 +219,12 @@ async function admit(registry: MultiRootRegistry, request: RemoteCopyRequest, to
 /* Environment and connection helpers                                          */
 /* -------------------------------------------------------------------------- */
 
-function environmentOf(manager: SshEnvironmentManager, environmentId: string): RemoteEnvironment {
+function environmentOf(manager: RemoteConnectionManager, environmentId: string): RemoteEnvironment {
   const environment = manager.deployment.environments.find(entry => entry.environmentId === environmentId)
   if (environment === undefined) throw new RemoteCopyError('unknown-environment', `no environment "${environmentId}" is deployed`)
-  if (environment.transport !== 'sftp') throw new RemoteCopyError('transport-not-sftp', `environment "${environmentId}" uses transport "${environment.transport}"`)
+  // The transfer adapter is the environment's SFTP subsystem, independent of
+  // how execution reaches it: a helper environment with a `transfer` block
+  // serves copies through SFTP (G5's build machine).
   if (environment.transfer === undefined) throw new RemoteCopyError('transfer-unavailable', `environment "${environmentId}" declares no transfer block`)
   return environment
 }

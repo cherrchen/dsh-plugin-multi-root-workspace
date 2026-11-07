@@ -7,7 +7,14 @@
  */
 import type { RemoteEnvironment } from './manifest.ts'
 import { RemoteConnectionLost, type RemoteExecutionBackend, type RemoteExecDeployment, type RemoteProcessHandle } from './exec.ts'
-import type { SshEnvironment, SshEnvironmentManager } from './ssh-environment.ts'
+import type { SshEnvironment } from './ssh-environment.ts'
+
+/** The manager surface the exec adapters need; the SSH manager implements it. */
+export interface SshExecManager {
+  open(environmentId: string): Promise<SshEnvironment>
+  generationOf(environmentId: string): string
+  markStale(environmentId: string): void
+}
 
 /** The deployment block the manifest's `exec` stanza becomes. */
 function deploymentOf(environment: RemoteEnvironment): RemoteExecDeployment | undefined {
@@ -16,9 +23,39 @@ function deploymentOf(environment: RemoteEnvironment): RemoteExecDeployment | un
   return { shell, env, maxTimeoutMs, stdoutLimit, stderrLimit, terminateGraceMs }
 }
 
+/**
+ * A backend that opens its connection only when the first admission prepares
+ * the command. The registry is synchronous at registration time, so the
+ * connection cannot exist yet; generation checks keep a replaced connection
+ * from passing the final launch admission (`markStale` bumps the generation).
+ */
+export function lazySshExecBackend(
+  environment: RemoteEnvironment, manager: SshExecManager,
+): RemoteExecutionBackend | undefined {
+  const deployment = deploymentOf(environment)
+  if (deployment === undefined) return undefined
+  let opened: { env: SshEnvironment; backend: RemoteExecutionBackend } | undefined
+  const backend = async (): Promise<RemoteExecutionBackend> => {
+    const env = await manager.open(environment.environmentId)
+    if (opened?.env !== env) opened = { env, backend: sshExecBackend(environment, env, manager)! }
+    return opened.backend
+  }
+  return {
+    deployment,
+    async confine(argv, policy, signal) { return await (await backend()).confine(argv, policy, signal) },
+    currentGeneration() { return manager.generationOf(environment.environmentId) },
+    spawn(argv, options, sink) {
+      // The preparation admission always runs first; without it there is no
+      // bound connection and no launch.
+      if (opened === undefined) throw new RemoteConnectionLost('the remote environment was not opened during preparation')
+      return opened.backend.spawn(argv, options, sink)
+    },
+  }
+}
+
 /** Build the backend for one environment, or `undefined` when it has no exec. */
 export function sshExecBackend(
-  environment: RemoteEnvironment, env: SshEnvironment, manager: SshEnvironmentManager,
+  environment: RemoteEnvironment, env: SshEnvironment, manager: SshExecManager,
 ): RemoteExecutionBackend | undefined {
   const deployment = deploymentOf(environment)
   if (deployment === undefined) return undefined

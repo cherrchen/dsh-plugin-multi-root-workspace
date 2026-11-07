@@ -55,7 +55,12 @@ export interface RemoteCommandRequest {
 }
 
 interface Base {
-  readonly operationId: string | undefined
+  /**
+   * Absent before an operation id exists. Deliberately optional: a tool's
+   * canonical result must be lossless JSON, and an explicit `undefined` key is
+   * not.
+   */
+  readonly operationId?: string
   readonly environmentId: string
   readonly rootId: string
 }
@@ -75,7 +80,10 @@ export type RemoteCommandResult =
     })
   | (Base & { status: 'unknown'; reconcileId: string; reason: string; termination?: 'timeout' | 'cancelled' })
 
-const notStarted = (base: Base, code: string): RemoteCommandResult => ({ ...base, status: 'not-started', code })
+const notStarted = (base: Base, code: string): RemoteCommandResult =>
+  base.operationId === undefined
+    ? { environmentId: base.environmentId, rootId: base.rootId, status: 'not-started', code }
+    : { ...base, status: 'not-started', code }
 
 function checkCwdRelative(cwdRelative: string): boolean {
   return cwdRelative === '' || (!cwdRelative.startsWith('/') && !cwdRelative.includes('\0') && !cwdRelative.includes('\\')
@@ -103,7 +111,7 @@ export async function runRemoteCommand(
   toolName: string,
   signal: AbortSignal,
 ): Promise<RemoteCommandResult> {
-  const base: Base = { operationId: undefined, environmentId: request.environmentId, rootId: request.rootId }
+  const base: Base = { environmentId: request.environmentId, rootId: request.rootId }
   const endpoint: RemoteEndpointRef = { environmentId: request.environmentId, rootId: request.rootId }
   const admission = () => ({
     session: request.session, toolName, purpose: 'exec' as const, endpoints: [endpoint],
