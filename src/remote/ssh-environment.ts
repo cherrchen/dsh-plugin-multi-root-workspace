@@ -57,6 +57,13 @@ export interface SshEnvironmentManagerOptions {
   readonly logger: { debug(message: string): void; warn(message: string): void }
   readonly gate?: SshCapability
   readonly allowUnattestedForTesting?: boolean
+  /**
+   * This process is the credential broker, running under the dedicated
+   * account and owning the keys (ADR-0036). Custody is then the deployment's
+   * attestation, not this process's manifest flag — the Host's
+   * `attestBroker()` decides whether any model-facing tool may use it.
+   */
+  readonly custody?: 'broker'
   readonly exec?: (file: string, args: readonly string[], input?: string) => Promise<{ stdout: string; stderr: string }>
   readonly readFile?: (path: string) => string
 }
@@ -118,6 +125,7 @@ export class SshEnvironmentManager {
   private readonly logger: SshEnvironmentManagerOptions['logger']
   private readonly gate: SshCapability
   private readonly allowUnattested: boolean
+  private readonly brokerCustody: boolean
   private readonly exec: NonNullable<SshEnvironmentManagerOptions['exec']>
   private readonly readFile: (path: string) => string
   private readonly openings = new Map<string, Promise<SshEnvironment>>()
@@ -133,6 +141,7 @@ export class SshEnvironmentManager {
       readVersion: sshPackageVersion, privateCopy: sshPrivateCopy,
     })
     this.allowUnattested = options.allowUnattestedForTesting === true
+    this.brokerCustody = options.custody === 'broker'
     this.exec = options.exec ?? defaultExec
     this.readFile = options.readFile ?? (path => readFileSync(path, 'utf8'))
   }
@@ -221,7 +230,7 @@ export class SshEnvironmentManager {
     // The SFTP session is the transfer adapter, not the environment's exec
     // transport: a helper environment that declares `transfer` uses the same
     // alias's SFTP subsystem, and a device may be SFTP-only.
-    if (environment.credentialIsolation !== 'attested' && !this.allowUnattested) {
+    if (environment.credentialIsolation !== 'attested' && !this.allowUnattested && !this.brokerCustody) {
       throw new SshEnvironmentError('credential-isolation-unattested', `environment "${environmentId}" is declared unattested; connections require an attested deployment`)
     }
     if (environment.transfer === undefined) throw new SshEnvironmentError('transfer-unavailable', `environment "${environmentId}" declares no transfer block`)
@@ -249,7 +258,7 @@ export class SshEnvironmentManager {
       throw new SshEnvironmentError(`ssh-capability-absent:${this.gate.status === 'absent' ? this.gate.reason : 'unknown'}`, `SSH capability is not eligible on this host`)
     }
     if (environment.transport !== 'helper') throw new SshEnvironmentError('transport-not-helper', `environment "${environmentId}" uses transport "${environment.transport}"`)
-    if (environment.credentialIsolation !== 'attested' && !this.allowUnattested) {
+    if (environment.credentialIsolation !== 'attested' && !this.allowUnattested && !this.brokerCustody) {
       throw new SshEnvironmentError('credential-isolation-unattested', `environment "${environmentId}" is declared unattested; connections require an attested deployment`)
     }
     const identity = await this.verifyHostIdentity(environment)

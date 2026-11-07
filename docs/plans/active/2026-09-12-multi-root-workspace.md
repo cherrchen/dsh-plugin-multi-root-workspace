@@ -1800,3 +1800,21 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 **未验证与限制：** 本轮旅程使用内存端点，不构成真实 SSH 证据；真实 G5 实跑须在无沙箱 CI 或受信部署上重复同一 Session 流程。`capabilities` 只描述部署声明与当前模式/工具 cap，具体调用仍逐次准入；`receive`/`send` 不替代本地目的根 access 检查。面板只投影当前主根的部署条目，Web/Electron 实际入口、第二台物理设备、macOS 目标、Windows 发起端与 hostKey 轮换未覆盖。凭据隔离仍为 `unattested`，按 ADR-0032 远端能力不得对模型开放；G6 的透明执行路由不在本批。
 
+
+
+## 多执行环境 G5a 凭据隔离：本机凭据代理（2026-11-07）
+
+**状态：独立 OS 账户托管的凭据代理、经内核认证的本机接口、Host 侧证明与工具门禁已实现并通过单元/协议测试；本机无法创建第二个 OS 账户，因此“两个真实账户”的成功证明与 Agent 沙箱拒绝 socket 的部署证据尚未取得，工具仍未进入默认 patch、未对模型开放。** 合同见 [ADR-0036](../../decisions/ADR-0036-credential-broker.md)，接口与限制见[控制面参考](../../reference/multi-environment-control-plane.md#凭据隔离本机凭据代理adr-0036)。
+
+**实现（本轮增量）：** `src/remote/broker/protocol.ts` 定义 `protocol: 1` 的有界 JSON-lines（行 ≤ 2 MiB、二进制字段 ≤ 256 KiB、在飞请求 32、进程 8）与八个语义方法；`server.ts` 以专用账户运行，拒绝同 UID 启动与未声明 `attested` 的清单，对每条连接做内核 peer 认证（Host UID + 非沙箱/非 `NoNewPrivs`，Linux 用 `SO_PEERPIDFD`），只转发 SFTP 原语、`confine`、`spawn`/等待/终止/处置；`client.ts` 的 `BrokerEnvironmentManager` 保持官方 manager 的结构面，复制管线、`SshEndpointVerifier` 与双准入命令合同不改，命令输出在退出事件中携带 `scope` 确认；`attest.ts` 在打开任何环境前检查 UID 不同、凭据根对 Host 不可读、socket/目录属主与权限、`hello` 协议/UID/环境覆盖以及部署记录的受限探针；`tools.ts` 的 `broker` 配置先证明后挂载，失败只告警并保持工具缺席；`scripts/ssh-broker/install.sh` 以 root 创建账户、组、0700 凭据根、0750 socket 目录、0640 broker.json 与 launchd/systemd unit，不代建清单或远端公钥。`src/authority/native.ts` 的 peer 认证参数化出 `expectedUid` 与 `allowRestricted`（服务端生产路径绝不放宽）。`src/remote/ssh-environment.ts` 增加 `custody: "broker"`，使托管进程可以打开清单声明为 `unattested` 的端点（证明责任在 Host 侧），而 Host 进程没有这个开关。
+
+| 证据 | 结果 |
+| --- | --- |
+| 协议与边界 | `tests/remote-broker.spec.ts` **12/12**：同 UID 生产启动拒绝、world 目录拒绝、沙箱 peer 拒绝（本会话为沙箱 Host，未沙箱 CI 跳过该负例）、SFTP 原语往返（EXCL/写/fsync/读/硬链接/删除）、`confine`/`spawn` 代次与退出 scope、stale 代次不 spawn、协议方法与字段/长度上限、证明的同 UID/缺探针/凭据可读/socket 缺失/属主不符五类失败。 |
+| 工具门禁 | `tests/remote-tools.spec.ts` **9/9**：新增“证明失败不挂载 `remote_copy`/`remote_bash`”；原有“仅组合挂载时注册、未挂载 `ToolNotFoundError`、生产 patch 无该行”保持。 |
+| 静态门 | `pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm docs:check`、`pnpm pack:check`（**204 members**，新增 `lib/remote-broker.js`）通过；`sh -n scripts/ssh-broker/install.sh` 通过（安装器的真实执行需要 root 与第二个账户，未在本会话运行）。 |
+| 回归 | `pnpm test` 为 **1267 passed / 185 skipped / 18 failed**（较 G5 增加 13 项）；18 项失败与 G5 完全相同，仍是本会话沙箱下的共享 Registry follower/IPC 用例，须由未沙箱化 CI 复验。 |
+| 未取得 | 两个真实 OS 账户下的成功证明；Agent 沙箱内“读凭据根与连 socket 都失败”的部署探针记录；真实 SSH 复制的 broker 路径实跑。 |
+
+**未验证与限制：** 本机 Agent 与 Host 同 UID，托管进程的 socket 对未受限的同 UID 进程本身可达；“Agent 不能到达接口”只能由部署的沙箱路径拒绝（`confinementProbe`）证明，代码不能自证，缺少该证据时 `attestBroker` 返回 `confinement-unproven`。`danger-full-access` 与这些凭据互斥，但运行时不检查其他 Session 的模式。托管进程崩溃后 unit 会重启，Host 不自动重建连接，必须重走证明；没有撤销列表、速率限制与审计轮转。SFTP 语义代理只覆盖 transfer/verifier 使用的方法，没有 readdir/extended；命令输出在退出时一次性返回（受部署上限约束）。安装器只覆盖 Linux systemd 与 macOS launchd，未在真实机器上执行；默认 patch 未加入 broker 行或任何远端工具。
+

@@ -110,18 +110,45 @@ export class FakeRemote {
       sandbox: { async confine(argv: readonly string[]) { return { argv, enforcement: 'full' } } },
       subprocess: {
         spawn(spec: unknown) {
-          const argv = (spec as { argv: readonly string[] }).argv
-          const path = argv[argv.length - 1] ?? ''
-          const file = remote.files.get(path)
-          const body = JSON.stringify({
-            real: path, dev: identity.dev, ino: identity.ino,
-            isDirectory: file !== undefined && (file.permissions & 0o170000) === 0o040000,
+          const input = spec as { argv: readonly string[]; cwd?: string; stdio?: { stdout?: { maxBytes?: number }; stderr?: { maxBytes?: number } } }
+          const argv = input.argv
+          let collected = { stdout: '', stderr: '' }
+          // A shell command goes through the same grammar the exec backend
+          // understands; anything else is the verifier's node stat probe.
+          const command = argv.length >= 3 && argv[argv.length - 2] === '-c' ? argv[argv.length - 1]! : undefined
+          if (command !== undefined) {
+            remote.execCalls.push({ argv: [...argv], cwd: input.cwd ?? '', env: {} })
+          }
+          const done = Promise.resolve().then(() => {
+            if (command !== undefined) {
+              const run = COMMANDS[command]
+              if (run === undefined) {
+                collected = { stdout: '', stderr: `fake shell: unsupported command ${JSON.stringify(command)}\n` }
+                return { exitCode: 127, signal: null }
+              }
+              const result = run(remote, input.cwd ?? '')
+              collected = { stdout: result.stdout, stderr: '' }
+              return { exitCode: result.exitCode, signal: null }
+            }
+            const path = argv[argv.length - 1] ?? ''
+            const file = remote.files.get(path)
+            collected = {
+              stdout: JSON.stringify({
+                real: path, dev: identity.dev, ino: identity.ino,
+                isDirectory: file !== undefined && (file.permissions & 0o170000) === 0o040000,
+              }),
+              stderr: '',
+            }
+            return { exitCode: 0, signal: null }
           })
           return {
-            done: Promise.resolve({ exitCode: 0 }),
+            done,
             waitForExit: async () => true,
             terminate: () => {},
-            collected: { stdout: { readFrom: () => ({ text: body }) } },
+            collected: {
+              get stdout() { return { readFrom: () => ({ text: collected.stdout }) } },
+              get stderr() { return { readFrom: () => ({ text: collected.stderr }) } },
+            },
           }
         },
       },
@@ -190,6 +217,7 @@ export class FakeManager implements RemoteToolsManager {
   }
   sftpGenerationOf(environmentId: string): string { return this.remotes.get(environmentId)?.generation ?? 'stale' }
   async open(environmentId: string): Promise<SshEnvironment> { return this.remote(environmentId).helper() }
+  async disposeAll(): Promise<void> {}
   backend(environmentId: string): RemoteExecutionBackend | undefined { return this.backends.get(environmentId) }
 }
 
