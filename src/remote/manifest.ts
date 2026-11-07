@@ -165,6 +165,7 @@ function checkTrust(info: Stats, what: string): void {
  */
 export function loadDeploymentManifest(path: string): { manifest: DeploymentManifest; digest: string } {
   if (!isAbsolute(path)) throw new ManifestError('manifest-untrusted', `the deployment manifest path must be absolute: ${JSON.stringify(path)}`)
+  if (typeof process.getuid !== 'function') throw new ManifestError('manifest-untrusted', 'deployment manifest protection checks require a POSIX host')
   let info: Stats
   try {
     info = lstatSync(path)

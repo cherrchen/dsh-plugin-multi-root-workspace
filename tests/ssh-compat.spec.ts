@@ -32,6 +32,14 @@ const gate = (over: Partial<{
   ...over,
 } as never)
 
+const realGate = classifySshCapability({
+  platform: process.platform,
+  local: classifyInstallation(),
+  readVersion: sshPackageVersion,
+  privateCopy: sshPrivateCopy,
+})
+const realTree = it.skipIf(realGate.status !== 'eligible')
+
 describe('classifySshCapability', () => {
   it('is platform-deferred on win32 and other non-POSIX initiators', () => {
     expect(gate({ platform: 'win32' })).toMatchObject({ status: 'absent', reason: 'platform-deferred' })
@@ -64,7 +72,7 @@ describe('classifySshCapability', () => {
     expect(gate({ privateCopy: name => name === 'unrelated' })).toMatchObject({ status: 'eligible', release: '0.2.2-rc.1' })
   })
 
-  it('is eligible on the real installed tree (darwin)', () => {
+  realTree(`is eligible on the real installed tree (skipped: ${realGate.status === 'absent' ? realGate.reason : 'n/a'})`, () => {
     const capability = classifySshCapability({
       platform: 'darwin',
       local: classifyInstallation(),
@@ -86,7 +94,7 @@ describe('loadHostSshPackages', () => {
     expect(importer).not.toHaveBeenCalled()
   })
 
-  it('loads the four installed packages and finds their classes without constructing them', async () => {
+  realTree(`loads the four installed packages and finds their classes without constructing them (skipped: ${realGate.status === 'absent' ? realGate.reason : 'n/a'})`, async () => {
     const modules = await loadHostSshPackages({ status: 'eligible', release: '0.2.2-rc.1' })
     expect(Object.keys(modules).sort()).toEqual([...SSH_PEER_PACKAGES].sort())
     const expected: Record<string, string> = {

@@ -59,7 +59,7 @@ describe('deployment manifest', () => {
     else expect(run).toThrowError(expect.objectContaining({ code }) as Error)
   })
 
-  it('loads a protected manifest file and refuses untrusted ones', () => {
+  it.skipIf(process.platform === 'win32')('loads a protected manifest file and refuses untrusted ones', () => {
     const d = dir(), path = join(d, 'deploy.json')
     writeFileSync(path, text())
     const loaded = loadDeploymentManifest(path)
@@ -72,7 +72,7 @@ describe('deployment manifest', () => {
     expect(() => loadDeploymentManifest(link)).toThrowError(expect.objectContaining({ code: 'manifest-untrusted' }) as Error)
   })
 
-  it('refuses a manifest inside a bound local primary', () => {
+  it.skipIf(process.platform === 'win32')('refuses a manifest inside a bound local primary', () => {
     const d = dir(), primary = join(d, 'ws')
     mkdirSync(primary)
     const path = join(primary, 'deploy.json')

@@ -106,7 +106,7 @@ const run = (stack: RegistryStack, backend: RemoteExecutionBackend, request: Rec
     session: sessionOf(stack), environmentId: 'build-01', rootId: 'app', command: 'echo hi', timeoutMs: 5_000, ...request,
   } as never, 'remote_bash', signal)
 
-describe('the two-admission remote command contract', () => {
+describe.skipIf(process.platform === 'win32')('the two-admission remote command contract', () => {
   it('spawns through B only when nothing changed since A', async () => {
     const stack = await mount()
     const { backend, state } = fakeBackend()
@@ -244,7 +244,7 @@ describe('the two-admission remote command contract', () => {
   })
 })
 
-describe('remote_bash through the real tool pipeline', () => {
+describe.skipIf(process.platform === 'win32')('remote_bash through the real tool pipeline', () => {
   async function toolWorld() {
     const stack = await mount()
     await stack.ctx.plugin(SystemPrompt)

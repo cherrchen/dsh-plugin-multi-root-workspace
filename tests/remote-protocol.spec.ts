@@ -8,7 +8,7 @@ import { AuthorityRpcError, receive } from '../src/authority/protocol.ts'
 import { RemoteClient, RemoteServer } from '../src/remote/protocol.ts'
 
 const availability = await nativeHostAvailability()
-const nativeTest = it.skipIf(!availability.available)
+const nativeTest = it.skipIf(!availability.available || process.platform === 'win32')
 const dirs: string[] = [], servers: RemoteServer[] = []
 afterEach(() => { while (servers.length) servers.pop()!.close(); while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true }) })
 function endpoint() {

@@ -145,10 +145,15 @@ if (pinned.size > 1) {
   else if (!supported.includes(pin)) fail(`devDependencies pin ${pin}, which is not on the allowlist`)
   else notes.push(`development pin: ${pin}`)
 }
-for (const name of sshPeers) {
-  if (!(name in devs)) fail(`${name} is an SSH peer package but has no devDependencies pin`)
+const sshPresent = sshPeers.filter(name => name in devs)
+if (sshPresent.length > 0 && sshPresent.length !== sshPeers.length) {
+  fail(`devDependencies pin only some SSH packages (${sshPresent.join(', ')}); pin all or none`)
 }
-if (sshPinned.size > 1) {
+if (sshPresent.length === 0) {
+  const [corePin] = [...pinned]
+  if (sshSupported.includes(corePin)) fail('SSH dev packages are required when the core dev pin is a supported SSH release')
+  else notes.push('SSH development pin: absent (core pin is not a supported SSH release)')
+} else if (sshPinned.size > 1) {
   fail(`devDependencies pin several SSH releases (${[...sshPinned].sort().join(', ')}); pin exactly one`)
 } else {
   const [pin] = [...sshPinned]

@@ -69,7 +69,21 @@ describe('remote control plane', () => {
     await expect(stack.registry.withRemoteOperation(op(stack), () => {})).rejects.toMatchObject({ code: 'remote-unavailable' })
   })
 
-  it('rejects adds without a verifier, registers with one, and never leaks into local state', async () => {
+  it('reports platform-deferred on win32 and stays locally usable', async () => {
+    const stack = await mount({ manifestPath: manifestFile() })
+    if (process.platform === 'win32') {
+      expect(stack.registry.remoteStatus.state).toBe('platform-deferred')
+      await expect(stack.registry.addRemote(fixture.workspace, REF)).rejects.toMatchObject({ code: 'remote-unavailable' })
+      await expect(stack.registry.withRemoteOperation(op(stack), () => {})).rejects.toMatchObject({ code: 'remote-unavailable' })
+      expect(existsSync(join(fixture.base, 'store', `${REMOTE_DOMAIN_NAME}.json`))).toBe(false)
+    } else {
+      expect(stack.registry.remoteStatus.state).toBe('ready')
+    }
+    await stack.registry.add(fixture.workspace, { path: fixture.outside })
+    expect(stack.registry.list(fixture.workspace)).toHaveLength(1)
+  })
+
+  it.skipIf(process.platform === 'win32')('rejects adds without a verifier, registers with one, and never leaks into local state', async () => {
     const stack = await mount({ manifestPath: manifestFile() })
     expect(stack.registry.remoteStatus.state).toBe('ready')
     await expect(stack.registry.addRemote(fixture.workspace, REF)).rejects.toMatchObject({ code: 'endpoint-unverifiable' })
@@ -85,7 +99,7 @@ describe('remote control plane', () => {
     await expect(stack.registry.withRemoteOperation(op(stack, { purpose: 'write' }), operation => operation.endpoints[0]!.bindingDigest)).resolves.toBe(snapshot.grants[0]!.bindingDigest)
   })
 
-  it('rejects a rootId bound to a different primary and an access-shaped ref', async () => {
+  it.skipIf(process.platform === 'win32')('rejects a rootId bound to a different primary and an access-shaped ref', async () => {
     const stack = await mount({ manifestPath: manifestFile() })
     stack.registry.setRemoteEndpointVerifier(verifier())
     await expect(stack.registry.addRemote(fixture.workspace, { environmentId: 'build-01', rootId: 'other' }))
@@ -96,7 +110,7 @@ describe('remote control plane', () => {
       .rejects.toMatchObject({ code: 'invalid-arguments' })
   })
 
-  it('withholds on hostKey change, revokes on binding removal, and denies admission accordingly', async () => {
+  it.skipIf(process.platform === 'win32')('withholds on hostKey change, revokes on binding removal, and denies admission accordingly', async () => {
     const manifest = manifestFile()
     const stack = await mount({ manifestPath: manifest })
     stack.registry.setRemoteEndpointVerifier(verifier())
@@ -112,7 +126,7 @@ describe('remote control plane', () => {
     await expect(stack.registry.withRemoteOperation(op(stack), () => {})).rejects.toMatchObject({ code: 'endpoint-revoked' })
   })
 
-  it('applies the mode table, tool cap, and per-session policies', async () => {
+  it.skipIf(process.platform === 'win32')('applies the mode table, tool cap, and per-session policies', async () => {
     const stack = await mount({ manifestPath: manifestFile() }, { capped_tool: 'read-only' })
     stack.registry.setRemoteEndpointVerifier(verifier())
     await stack.registry.addRemote(fixture.workspace, REF)
@@ -131,7 +145,7 @@ describe('remote control plane', () => {
     expect(() => (held as { endpoints: unknown }).endpoints).toThrow('admission has expired')
   })
 
-  it('denies a transfer without declared pairing and admits a paired one', async () => {
+  it.skipIf(process.platform === 'win32')('denies a transfer without declared pairing and admits a paired one', async () => {
     const bindings = [
       { primary: fixture.workspace, environmentId: 'build-01', rootId: 'src', path: '/work/src', actions: ['read'], transfers: [{ direction: 'export', peer: { environmentId: 'build-02', rootId: 'dst' } }] },
       { primary: fixture.workspace, environmentId: 'build-02', rootId: 'dst', path: '/work/dst', actions: ['write'], transfers: [{ direction: 'import', peer: { environmentId: 'build-01', rootId: 'src' } }] },
@@ -160,7 +174,7 @@ describe('remote control plane', () => {
     }), operation => operation.endpoints)).resolves.toHaveLength(2)
   })
 
-  it('keeps local authority working when the remote domain cannot open', async () => {
+  it.skipIf(process.platform === 'win32')('keeps local authority working when the remote domain cannot open', async () => {
     const manifest = manifestFile()
     // A directory where the remote domain document belongs makes its open fail.
     mkdirSync(join(fixture.base, 'store', `${REMOTE_DOMAIN_NAME}.json`), { recursive: true })
@@ -172,7 +186,7 @@ describe('remote control plane', () => {
     await expect(stack.registry.addRemote(fixture.workspace, REF)).rejects.toMatchObject({ code: 'remote-unavailable' })
   })
 
-  it('keeps the v1 file intact across an enable/disable/remote lifecycle', async () => {
+  it.skipIf(process.platform === 'win32')('keeps the v1 file intact across an enable/disable/remote lifecycle', async () => {
     const manifest = manifestFile()
     const stack = await mount()
     await stack.registry.add(fixture.workspace, { path: fixture.outside })
@@ -196,7 +210,7 @@ describe('remote control plane', () => {
     expect((await back.registry.remoteList(fixture.workspace)).grants[0]!.state).toBe('revoked')
   })
 
-  it('orders a queued revocation ahead of a denied admission, and completes an admitted one', async () => {
+  it.skipIf(process.platform === 'win32')('orders a queued revocation ahead of a denied admission, and completes an admitted one', async () => {
     const stack = await mount({ manifestPath: manifestFile() })
     stack.registry.setRemoteEndpointVerifier(verifier())
     await stack.registry.addRemote(fixture.workspace, REF)
@@ -212,24 +226,27 @@ describe('remote control plane', () => {
     const removing = stack.registry.removeRemote(fixture.workspace, REF)
     await entered.promise
     const denied = stack.registry.withRemoteOperation(op(stack), () => {})
+    void denied.catch(() => {})
     release.resolve()
     await removing
     await expect(denied).rejects.toMatchObject({ code: 'endpoint-not-registered' })
     await stack.registry.addRemote(fixture.workspace, REF)
     const gate = Promise.withResolvers<void>()
     const admitted = stack.registry.withRemoteOperation(op(stack), () => gate.promise)
+    void admitted.catch(() => {})
     await stack.registry.removeRemote(fixture.workspace, REF)
     await expect(stack.registry.withRemoteOperation(op(stack), () => {})).rejects.toMatchObject({ code: 'endpoint-not-registered' })
     gate.resolve()
     await admitted
   })
 
-  it('refuses an add whose binding moved while the verifier ran', async () => {
+  it.skipIf(process.platform === 'win32')('refuses an add whose binding moved while the verifier ran', async () => {
     const manifest = manifestFile()
     const stack = await mount({ manifestPath: manifest })
     const gate = Promise.withResolvers<void>()
     stack.registry.setRemoteEndpointVerifier({ verify: async () => { await gate.promise; return { platform: 'linux' as const, target: { kind: 'path' as const, value: '/work/app' } } } })
     const adding = stack.registry.addRemote(fixture.workspace, REF)
+    void adding.catch(() => {})
     await new Promise(resolve => setTimeout(resolve, 10))
     plane(stack).manifest = JSON.parse(readFileSync(manifest, 'utf8').replace(`SHA256:${'A'.repeat(43)}`, `SHA256:${'C'.repeat(43)}`))
     gate.resolve()
