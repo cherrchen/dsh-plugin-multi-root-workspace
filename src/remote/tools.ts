@@ -58,6 +58,15 @@ export interface Config {
    * own factory accepts responsibility for the same admission contract.
    */
   readonly backends?: (environmentId: string) => RemoteExecutionBackend | undefined
+  /**
+   * The production broker path (ADR-0036). When present, the row attests the
+   * broker boundary FIRST and registers nothing until it passes: the manager
+   * (and every credential) lives under the dedicated OS account. An
+   * unavailable attestation leaves the tools absent — that is the gate that
+   * keeps the experiment `unattested` rather than silently falling back to
+   * in-process credentials.
+   */
+  readonly broker?: { readonly config: import('./broker/attest.ts').BrokerConfig }
 }
 
 // The compatibility and provider gates are preconditions, not collaborators:
@@ -71,15 +80,11 @@ export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootRegist
  * @param config - the switch plus the two composition seams.
  */
 export function apply(ctx: Context, config: Config = {}): void {
-  if (config.enabled !== true) return
   const registry = ctx.multiRootRegistry
-  const manifest = registry.remoteManifest
-  if (manifest === undefined) {
-    throw new Error('multi-root remote tools: the remote control plane is not ready (remoteEnvironments.enabled with a valid manifest is required)')
-  }
-  const manager: RemoteToolsManager = config.manager ?? new SshEnvironmentManager({ manifest, logger: ctx.logger })
-  const ownsManager = config.manager === undefined
-  const backendFor = config.backends ?? ((environmentId: string) => {
+
+  const backendForOf = (manager: RemoteToolsManager) => config.backends ?? ((environmentId: string) => {
+    const manifest = registry.remoteManifest
+    if (manifest === undefined) return undefined
     const environment = manifest.environments.find(entry => entry.environmentId === environmentId)
     // The SSH adapter needs a connection opening and a live generation. Probe
     // the structure, never the class: an injected manager that cannot open a
@@ -90,38 +95,79 @@ export function apply(ctx: Context, config: Config = {}): void {
       : lazySshExecBackend(environment, opening as SshEnvironmentManager)
   })
 
-  // Verification is the registration path: a host that mounts these tools can
-  // also register the deployment's endpoints, and it unpins the verifier on unload.
-  ctx.effect(() => {
-    const dispose = registry.setRemoteEndpointVerifier(new SshEndpointVerifier(manager))
-    return () => {
-      dispose()
-      if (ownsManager) void (manager as SshEnvironmentManager).disposeAll()
-    }
-  })
-  ctx.effect(() => ctx.tools.register(remoteCopyTool({ registry, deps: { manager } }) as never))
-  ctx.effect(() => ctx.tools.register(remoteBashTool({ registry, backendFor }) as never))
-
-  // The projection is a SOFT dependency: a composition without a system-prompt
-  // seam still gets the tools, it just never describes them. The contribution
-  // reads only manifest facts for the session's own primary root.
-  ctx.inject(['systemPrompt', 'sandboxPolicy'], scope => {
-    scope.systemPrompt.context({
-      name: REMOTE_CONTEXT_NAME,
-      order: scope.systemPrompt.getContextOrder('SANDBOX_POLICY') + 2,
-      text: assembly => {
-        const session = assembly.agent?.session
-        const cwd = session?.header.cwd
-        if (session === undefined || cwd === undefined || cwd === '') return ''
-        const key = primaryKey(cwd)
-        const bindings = manifest.bindings.filter(binding => primaryKey(binding.primary) === key)
-        return renderRemoteCapabilities({
-          bindings,
-          environments: manifest.environments,
-          mode: scope.sandboxPolicy.resolve({ session }).mode,
-          status: registry.remoteStatus,
-        })
-      },
+  const mount = (manager: RemoteToolsManager, ownsManager: boolean): void => {
+    const backendFor = backendForOf(manager)
+    // Verification is the registration path: a host that mounts these tools
+    // can also register the deployment's endpoints, and it unpins the verifier
+    // on unload.
+    ctx.effect(() => {
+      const dispose = registry.setRemoteEndpointVerifier(new SshEndpointVerifier(manager))
+      return () => {
+        dispose()
+        if (ownsManager) void (manager as SshEnvironmentManager).disposeAll()
+      }
     })
-  })
+    ctx.effect(() => ctx.tools.register(remoteCopyTool({ registry, deps: { manager } }) as never))
+    ctx.effect(() => ctx.tools.register(remoteBashTool({ registry, backendFor }) as never))
+
+    // The projection is a SOFT dependency: a composition without a
+    // system-prompt seam still gets the tools, it just never describes them.
+    // The contribution reads only manifest facts for the session's own primary.
+    ctx.inject(['systemPrompt', 'sandboxPolicy'], scope => {
+      scope.systemPrompt.context({
+        name: REMOTE_CONTEXT_NAME,
+        order: scope.systemPrompt.getContextOrder('SANDBOX_POLICY') + 2,
+        text: assembly => {
+          const session = assembly.agent?.session
+          const cwd = session?.header.cwd
+          if (session === undefined || cwd === undefined || cwd === '') return ''
+          const manifest = registry.remoteManifest
+          if (manifest === undefined) return ''
+          const key = primaryKey(cwd)
+          const bindings = manifest.bindings.filter(binding => primaryKey(binding.primary) === key)
+          return renderRemoteCapabilities({
+            bindings,
+            environments: manifest.environments,
+            mode: scope.sandboxPolicy.resolve({ session }).mode,
+            status: registry.remoteStatus,
+          })
+        },
+      })
+    })
+  }
+
+  // Production path: the credential broker must attest before anything mounts.
+  if (config.broker !== undefined) {
+    void ctx.effect(async function* () {
+      const manifest = registry.remoteManifest
+      if (manifest === undefined) {
+        ctx.logger.warn('multi-root remote tools: the remote control plane is not ready; broker tools stay unmounted')
+        return
+      }
+      const { attestBroker } = await import('./broker/attest.ts')
+      const attested = await attestBroker(config.broker!.config, manifest).catch(error => ({
+        status: 'unavailable' as const, code: 'broker-failed', reason: error instanceof Error ? error.message : String(error),
+      }))
+      if (attested.status !== 'attested') {
+        ctx.logger.warn(`multi-root remote tools: credential broker is unavailable (${attested.code}: ${attested.reason}); broker tools stay unmounted`)
+        return
+      }
+      try {
+        mount(attested.manager, false)
+        yield () => { void attested.manager.disposeAll() }
+      } catch (error) {
+        void attested.manager.disposeAll()
+        throw error
+      }
+    })
+    return
+  }
+
+  if (config.enabled !== true) return
+  const manifest = registry.remoteManifest
+  if (manifest === undefined) {
+    throw new Error('multi-root remote tools: the remote control plane is not ready (remoteEnvironments.enabled with a valid manifest is required)')
+  }
+  const manager: RemoteToolsManager = config.manager ?? new SshEnvironmentManager({ manifest, logger: ctx.logger })
+  mount(manager, config.manager === undefined)
 }

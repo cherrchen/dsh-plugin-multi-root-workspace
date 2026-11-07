@@ -14,6 +14,27 @@ export interface Channel {
 }
 export interface Listener { close(): void }
 
+/**
+ * Who may hold the other end of a kernel-authenticated channel.
+ *
+ * The default (an omitted policy) is the shared registry's rule: the peer must
+ * be THIS process's uid and must not be sandboxed or `NoNewPrivs`. The
+ * credential broker supplies the trusted Host's uid instead, because the
+ * broker itself runs under a different account.
+ */
+export interface PeerPolicy {
+  /** The uid the peer must report; defaults to this process's uid. */
+  readonly expectedUid?: number
+  /**
+   * Accept a sandboxed / `NoNewPrivs` peer. A server must never set this in
+   * production: a sandboxed peer is exactly the Agent process the boundary
+   * excludes. A client may set it when it already knows the peer is the
+   * trusted dedicated account (the credential broker) and only the uid check
+   * is meaningful there.
+   */
+  readonly allowRestricted?: boolean
+}
+
 export function storeIdentity(root: string): { root: string; id: string; endpoint: string; remoteEndpoint?: string } {
   mkdirSync(root, { recursive: true, mode: 0o700 })
   const physical = realpathSync.native(root)
@@ -57,11 +78,13 @@ async function loadPosix() {
     if (getsockopt(fd, level, name, bytes, length) !== 0 || length.readUInt32LE() !== size) throw new Error('kernel peer attestation is unavailable')
     return bytes
   }
-  function authenticate(fd: number): () => void {
-    const uid = process.getuid!()
+  function authenticate(fd: number, policy: PeerPolicy = {}): () => void {
+    const uid = policy.expectedUid ?? process.getuid!()
     if (process.platform === 'darwin') {
       const token = option(fd, 0, 6, 32) // LOCAL_PEERTOKEN, contains pidversion
-      if (token.readUInt32LE(4) !== uid || auditCheck!({ val: [...new Uint32Array(token.buffer, token.byteOffset, 8)] }, null, 0) !== 0) {
+      const restricted = policy.allowRestricted !== true
+        && auditCheck!({ val: [...new Uint32Array(token.buffer, token.byteOffset, 8)] }, null, 0) !== 0
+      if (token.readUInt32LE(4) !== uid || restricted) {
         throw new Error('registry IPC refuses a different user or sandboxed peer')
       }
       return () => {}
@@ -74,8 +97,9 @@ async function loadPosix() {
       const pfd = Buffer.alloc(8); pfd.writeInt32LE(pidfd); pfd.writeInt16LE(1, 4)
       const status = readFileSync(`/proc/${cred.readInt32LE()}/status`, 'utf8')
       const ids = /^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m.exec(status)
+      const restricted = policy.allowRestricted !== true && !/^NoNewPrivs:\s+0$/m.test(status)
       if (cred.readUInt32LE(4) !== uid || ids === null || ids.slice(1).some(value => Number(value) !== uid)
-        || !/^NoNewPrivs:\s+0$/m.test(status) || poll(pfd, 1, 0) !== 0) throw new Error('registry IPC refuses a different user, exited or restricted peer')
+        || restricted || poll(pfd, 1, 0) !== 0) throw new Error('registry IPC refuses a different user, exited or restricted peer')
       // Keep the pidfd until this connection closes. It is close-on-exec.
       return () => closeSync(pidfd)
     } catch (error) { closeSync(pidfd); throw error }
@@ -96,11 +120,11 @@ async function loadPosix() {
     }
     return fd
   }
-  function channel(fd: number): Channel {
+  function channel(fd: number, policy: PeerPolicy = {}): Channel {
     let cleanup: (() => void) | undefined
     try {
       if (fcntl(fd, 2, 1) !== 0 || fcntl(fd, 4, process.platform === 'darwin' ? 4 : 2048) !== 0) throw new Error('cannot make registry connection non-inheritable/non-blocking')
-      cleanup = authenticate(fd)
+      cleanup = authenticate(fd, policy)
       const result = new Socket({ fd, readable: true, writable: true })
       result.on('close', cleanup)
       result.on('error', () => {})
@@ -111,15 +135,15 @@ async function loadPosix() {
 }
 function posix() { return posixPromise ??= loadPosix() }
 
-export async function connectNative(endpoint: string): Promise<Channel> {
+export async function connectNative(endpoint: string, policy: PeerPolicy = {}): Promise<Channel> {
   if (process.platform === 'win32') return (await import('./native-win32.ts')).connectWindows(endpoint)
   const api = await posix(), address = api.address(endpoint), fd = api.open()
   if (api.connect(fd, address, address.length) !== 0) { closeSync(fd); throw new Error('registry authority is not ready') }
-  return api.channel(fd)
+  return api.channel(fd, policy)
 }
 
 /** Called only by the kernel lease holder. Never removes another epoch's socket. */
-export async function listenNative(endpoint: string, accepted: (channel: Channel) => void): Promise<Listener> {
+export async function listenNative(endpoint: string, accepted: (channel: Channel) => void, policy: PeerPolicy = {}): Promise<Listener> {
   if (process.platform === 'win32') return (await import('./native-win32.ts')).listenWindows(endpoint, accepted)
   const api = await posix(), address = api.address(endpoint), fd = api.open()
   try { unlinkSync(endpoint) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { closeSync(fd); throw error } }
@@ -134,7 +158,7 @@ export async function listenNative(endpoint: string, accepted: (channel: Channel
       try {
         // accept does not inherit FD_CLOEXEC from the listening descriptor.
         // channel owns the descriptor after attestation.
-        channel = api.channel(client)
+        channel = api.channel(client, policy)
         accepted(channel)
       } catch { channel?.destroy() /* authenticate closes rejected descriptors */ }
     }

@@ -140,3 +140,21 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 **旅程。** `tests/remote-journey.e2e.ts` 在**同一 Session** 内完成“两个本地根 → 构建机 → 设备”：两个本地根各复制一个源文件到构建机（同一远端路径、不同内容），`remote_bash` 在构建机执行构建，产物经 Host 中转到设备；设备与构建机使用相同远端路径但内容互不串扰；仅传输能力的设备对执行返回 `action-not-allowed`（声明了 `exec` 动作但无后端时为 `backend-unavailable`）；只读会话对写入/执行/目的端为远端的复制均为 `mode-denies`；删除登记后复制为 `endpoint-not-registered`；`local → local` 为 `direction-unsupported`。同一组合内另验证面板列表不建连、登记/撤销、未知 Session、客户端自带路径被拒，以及只读会话的能力投影。
 
+
+
+## 凭据隔离：本机凭据代理（ADR-0036）
+
+**边界。** `src/remote/broker/` 是一个独立进程：它以部署方创建的专用账户运行，凭据根（0700）内持有 SSH 私钥、`config`、`known_hosts`、ControlMaster 与 Helper 暂存；Host 账户只通过一个 0750 目录里的 0660 Unix socket 连接。托管进程拒绝以 Host 账户启动（同 UID 不构成隔离），也拒绝清单中任何未声明 `credentialIsolation: "attested"` 的环境（`broker-same-uid` / `manifest-unattested`），除非测试显式放宽。
+
+**协议。** `src/remote/broker/protocol.ts` 是一行一个 JSON 的有界协议（`protocol: 1`，行 ≤ 2 MiB，二进制字段 ≤ 256 KiB，每连接最多 32 个在飞请求、8 个进程）。方法只有八个：`openSftp`、`sftp`（realpath/lstat/open/read/write/close/remove/hardlink/fsync/dispose）、`open`、`confine`、`spawn`、`wait`、`terminate`、`dispose`。没有读取/导出密钥、修改配置、选择主机或任意 ssh 的方法；未知方法、未知字段、越界与超长行直接断连。
+
+**认证。** 托管进程对每条连接做内核 peer 认证（`SO_PEERCRED`/`LOCAL_PEERTOKEN`，Linux 上 `SO_PEERPIDFD` 钉住对端）：UID 必须等于配置的 Host UID，且对端不得处于沙箱或 `NoNewPrivs`（Agent 的命令正是这种对端）。Host 侧连接只校验托管进程的 UID（`allowRestricted`），因为托管进程的 confinement 是部署 unit 的事。`hello` 只返回协议版本、`brokerUid` 与环境 ID 列表，不含主机、账号、密钥或摘要。
+
+**Host 适配。** `src/remote/broker/client.ts` 的 `BrokerEnvironmentManager` 实现与官方 manager 相同的结构面（`deployment`、`open`/`openSftp`、代次、`markStale`、`disposeAll`），G2 的复制管线、`SshEndpointVerifier` 与 G3 的双准入命令合同不改。SFTP 是语义代理（句柄/数据以 base64 往返），命令的 `confine` 代次在 `spawn` 时复核，输出在退出时随 `exit` 事件（含 `scope` 确认）返回，因此 `remote_bash` 的 `scope-exited`/`exited` 与截断语义保持。
+
+**证明。（`src/remote/broker/attest.ts`）** 在打开任何环境之前检查：Host 与 broker 不是同一 UID；部署记录了通过的 `confinementProbe`；Host 对凭据根 `R_OK` 为 `EACCES`/`EPERM`；socket 是 socket、属主为 broker、无 world 权限、目录为 broker 属主且无 world 权限；连接后的 `hello` 协议与 UID 匹配且覆盖清单全部环境。任一失败返回 `unavailable` 与稳定 code，**不建立连接、不挂载工具**。`src/remote/tools.ts` 的 `broker` 配置走这条路径：异步证明通过后才注册 `remote_copy`/`remote_bash`/校验器/能力投影，失败只记一条 warn，工具保持缺席。
+
+**部署。** `scripts/ssh-broker/install.sh` 以 root 创建账户、客户端组、0700 凭据根、0750 socket 目录、`/etc/dsh-ssh-broker/broker.json`（0640 root:broker）与 launchd/systemd unit；清单由部署方放在 Host 不可写的位置。脚本不代部署方创建清单或授权远端公钥，并打印剩余步骤。
+
+**已知限制。** 托管账户持有全部密钥；Host 与 Agent 同 UID，因此“Agent 不能到达 socket”只能由部署的沙箱路径拒绝证明（`confinementProbe`），不能由本代码自证；`danger-full-access` 下 Agent 进程不受本机沙箱约束，必须与这些凭据互斥。socket 是长驻接口，进程崩溃后由 unit 重启，但 Host 不自动重建连接；重新启用必须重走证明。同 UID 测试模式（`allowSameUidForTesting`/`allowRestrictedForTesting`）只用于协议测试，生产入口没有开关。
+

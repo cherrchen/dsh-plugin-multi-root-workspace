@@ -57,6 +57,20 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
     }
   })
 
+  it('does not mount when the credential broker fails attestation', async () => {
+    world = await mountRemoteTools(fixture, { withTools: false })
+    const uid = process.getuid?.() ?? -1
+    await world.ctx.plugin({
+      name: 'g5-broker-gate', inject: ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry', 'tools'],
+      apply: (ctx: typeof world.ctx) => applyRemoteTools(ctx, {
+        broker: { config: { socketPath: '/nonexistent/broker.sock', brokerUid: uid, credentialRoot: '/nonexistent', confinementProbe: { verified: true } } },
+      }),
+    })
+    await new Promise<void>(resolve => { setTimeout(resolve, 50) })
+    expect(names(world.ctx)).not.toContain('remote_copy')
+    expect(names(world.ctx)).not.toContain('remote_bash')
+  })
+
   it('stays disabled unless the switch is explicitly true', async () => {
     const stack = await mountRegistryStack(join(fixture.base, 'store'), {})
     try {
