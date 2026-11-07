@@ -28,7 +28,9 @@ import type {} from '@deepseek-ai/dsh-tools'
 import type {} from './compat.ts'
 import type {} from './providers.ts'
 import { primaryKey, type RootAccess } from './roots.ts'
-import { currentRegistryOperation, rememberOperationProfile, operationPermitsProfile } from './registry-operation.ts'
+import {
+  currentRegistryOperation, operationFrameState, rememberOperationProfile, operationPermitsProfile,
+} from './registry-operation.ts'
 import { aroundTool } from './compat/tool-context.ts'
 import { createOpsProtectionState, opsDispatchBarrier, opsSpawnPermitted } from './compat/ops-tools.ts'
 import type { OpsProtectionState } from './compat/ops-tools.ts'
@@ -333,6 +335,50 @@ export interface Config {
 const toolCapStore = new AsyncLocalStorage<{ readonly capped: boolean }>()
 
 /**
+ * A confined profile this host's sandbox provider minted OUTSIDE a live
+ * admission. Upstream services that compose `ctx.sandbox.confine` with
+ * `ctx.subprocess.spawn` on their own code paths — the experimental forge
+ * panel's background Git inspection, the worktree service's own runner —
+ * have no wrapped entry to admit them. Such a mint is always the clamped
+ * primary-root form: `resolve()` narrows any unadmitted call to
+ * `authority: 'unavailable'`, so the entry carries no member grant a
+ * redirect could invalidate. The entry stays launchable only while the
+ * publication it was minted from is still current — a republish changes the
+ * deny table the clamp was computed against and supersedes it — so a minted
+ * profile can never outlive the authorization basis it was computed from,
+ * and launching one is indistinguishable from confining the same command
+ * now.
+ */
+interface MintedProfile {
+  readonly argv: readonly string[]
+  readonly capped: boolean
+  readonly version: number
+}
+
+/**
+ * The baseline a mint resolved to. Only primary-bounded forms may join the
+ * unadmitted ledger: `clamped` (primary-root clamp) and `read-only` (the
+ * upstream read-only skeleton — never writable). `ambient` mints —
+ * `restrictedExecution`'s ambient-minus-denies profile, and any mint whose
+ * scope could not be proven unavailable — may only live bound to an
+ * admission frame, and otherwise die.
+ */
+export type MintForm = 'clamped' | 'read-only' | 'ambient'
+
+/** The authorization basis a mint carried at its synchronous entry, stamped onto its ledger entry. */
+export interface MintStamp {
+  /** Publication generation the mint's authorization snapshot was resolved under. */
+  readonly version: number
+  /** Tool-cap basis at the same instant. */
+  readonly capped: boolean
+  /** The profile form the mint produced; gates ledger admission. */
+  readonly form: MintForm
+}
+
+/** Bounded process-wide ledger of unadmitted mints; a burst cannot grow it without bound. */
+const MAX_MINTED_PROFILES = 256
+
+/**
  * The `ctx.multiRootScope` service. Providers ask it — never the filesystem —
  * what the current scope is, which is what keeps the fs fence and every kernel
  * dialect on one permission world (requirement §13).
@@ -348,6 +394,14 @@ export class MultiRootScopeService extends Service {
   /** True when a batched write coalesced its notification into the flush. */
   private batchDirty = false
   private admissionProof: object | undefined
+  /**
+   * The publication generation the mint ledger is keyed on: bumped when a
+   * root-table write or an authority transition changes the authorization
+   * basis (a repeat publish of identical content is not a publication), so a
+   * minted profile dies with the state it was computed from.
+   */
+  private publicationVersion = 0
+  private mintedProfiles: MintedProfile[] = []
   /**
    * The registry-authority fact the registry row publishes. Defaults to
    * `available`: a composition without a registry row can never have
@@ -409,6 +463,12 @@ export class MultiRootScopeService extends Service {
   private notifySubscribers(): void {
     if (this.batchDepth > 0) { this.batchDirty = true; return }
     for (const listener of this.listeners) listener()
+  }
+
+  /** A publication superseded the authorization basis: every outstanding minted profile dies. */
+  private bumpPublication(): void {
+    this.publicationVersion += 1
+    this.mintedProfiles.length = 0
   }
 
   /**
@@ -502,7 +562,7 @@ export class MultiRootScopeService extends Service {
           return function (this: unknown, spec: SubprocessSpawnSpec) {
             if (active && opsCompatibilityToken(scoped) !== undefined && scope.hasActiveDenyRoots()
               && !opsSpawnPermitted(scope.opsProtection)
-              && !(scope.admissionRequired && scope.admissionPathsValid() && scope.permitsProfile(spec.argv))) {
+              && !(scope.admissionRequired && scope.admissionPathsValid() && scope.permitsOperationProfile(spec.argv))) {
               throw new Error('multi-root workspace: an unattributed subprocess has no protected execution or live profile admission; refusing launch while OPS compatibility write boundaries apply')
             }
             return original.call(this, spec)
@@ -558,11 +618,73 @@ export class MultiRootScopeService extends Service {
    */
   requireAdmission(proof: object): void { this.admissionProof = proof }
 
-  rememberProfile(argv: readonly string[]): void {
-    if (this.admissionProof !== undefined) rememberOperationProfile(this.admissionProof, argv, this.capped())
+  /**
+   * The stamp an asynchronously completing mint must carry: the publication
+   * generation and tool-cap basis at the mint's synchronous entry, before any
+   * provider probe could run. An in-flight mint that crosses a real
+   * publication keeps its entry generation, so the ledger refuses it rather
+   * than re-stamping stale authorization under the current publication.
+   * @param form - the profile form the mint will produce (`clamped` and
+   *   `read-only` are the only ledger-eligible forms).
+   */
+  captureMint(form: MintForm): MintStamp {
+    return { version: this.publicationVersion, capped: this.capped(), form }
   }
+
+  /**
+   * Record a confined profile this host's provider just minted. Only
+   * meaningful under the shared Registry (`admissionProof` set; without it
+   * `permitsProfile` never refuses): a live admission binds the profile to
+   * the operation and it dies with it; an expired admission never bequeaths
+   * one — a mint that outlived its operation is dropped, not demoted into
+   * the ledger; only with NO admission frame at all does the profile join
+   * the publication-keyed ledger stamped with `mint`, and only when the
+   * mint's form is primary-bounded — an `ambient` mint that arrives without
+   * a frame is dropped the same way.
+   * @param argv - the confined argv just minted.
+   * @param mint - the {@link captureMint} stamp taken at the mint's
+   *   synchronous entry.
+   */
+  rememberProfile(argv: readonly string[], mint: MintStamp): void {
+    if (this.admissionProof === undefined) return
+    const frame = operationFrameState(this.admissionProof)
+    if (frame === 'expired') return
+    if (frame === 'active') {
+      rememberOperationProfile(this.admissionProof, argv, mint.capped)
+      return
+    }
+    if (mint.form === 'ambient') return
+    this.mintedProfiles.push({ argv: [...argv], capped: mint.capped, version: mint.version })
+    if (this.mintedProfiles.length > MAX_MINTED_PROFILES) this.mintedProfiles.shift()
+  }
+
+  /**
+   * Whether a confined argv may launch now: a profile minted inside this live
+   * admission, or — for a `confine`→`spawn` composition with no wrapped entry
+   * to admit it — a profile this host minted while its authorization
+   * publication is still current. Cached argv, argv minted under a superseded
+   * publication, and argv minted elsewhere stay refused.
+   */
   permitsProfile(argv: readonly string[]): boolean {
-    return this.admissionProof === undefined || operationPermitsProfile(this.admissionProof, argv, this.capped())
+    return this.admissionProof === undefined
+      || this.permitsOperationProfile(argv)
+      || this.permitsMintedProfile(argv)
+  }
+
+  /**
+   * The strict form: only profiles minted inside this live admission. The OPS
+   * execution domain owns its profile exclusively and never honors the
+   * unadmitted mint ledger.
+   */
+  permitsOperationProfile(argv: readonly string[]): boolean {
+    return this.admissionProof === undefined
+      || operationPermitsProfile(this.admissionProof, argv, this.capped())
+  }
+
+  private permitsMintedProfile(argv: readonly string[]): boolean {
+    const capped = this.capped(), version = this.publicationVersion
+    return this.mintedProfiles.some(entry => entry.version === version && entry.capped === capped
+      && entry.argv.length > 0 && entry.argv.length <= argv.length && entry.argv.every((arg, index) => argv[index] === arg))
   }
 
   get admissionRequired(): boolean { return this.admissionProof !== undefined }
@@ -740,6 +862,10 @@ export class MultiRootScopeService extends Service {
    */
   setAdditionalRoots(primaryRoot: string, roots: readonly AdditionalWorkspaceRoot[]): void {
     const key = primaryKey(primaryRoot)
+    const existing = this.rootsByPrimary.get(key)
+    // Only a real publication supersedes minted profiles: a repeat publish of
+    // identical records leaves the basis — and the ledger — untouched.
+    if (!sameAdditionalRoots(existing ?? [], roots)) this.bumpPublication()
     if (roots.length === 0) {
       this.rootsByPrimary.delete(key)
     } else {
@@ -763,8 +889,20 @@ export class MultiRootScopeService extends Service {
     const next = available ? 'available' : 'unavailable'
     if (this.registryAuthority === next) return
     this.registryAuthority = next
+    this.bumpPublication()
     this.notifySubscribers()
   }
+}
+
+/** Whether two persisted member lists carry the same authorization basis, in registry order. */
+function sameAdditionalRoots(a: readonly AdditionalWorkspaceRoot[], b: readonly AdditionalWorkspaceRoot[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((root, index) => {
+    const next = b[index]
+    return next !== undefined && root.id === next.id && root.path === next.path
+      && root.recordedPath === next.recordedPath && root.access === next.access
+      && root.withheld === next.withheld && root.alias === next.alias
+  })
 }
 
 export default MultiRootScopeService

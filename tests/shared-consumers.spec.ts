@@ -10,17 +10,23 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { nativeHostAvailability } from '../src/authority/native.ts'
 import MultiRootFileSystem from '../src/fs.ts'
 import MultiRootSandboxProvider from '../src/sandbox.ts'
+import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import * as ProcessFence from '../src/process-fence.ts'
 import * as FilesRouting from '../src/workspace-files.ts'
 import * as LspRouting from '../src/lsp.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { skillsStack, writeSkill } from './support/skills-stack.ts'
 import { internalSkillName } from '../src/skills/catalog.ts'
+import { sbplSubpath } from './support/sbpl.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
 
 const availability = await nativeHostAvailability()
 if (!availability.available) console.info(`shared Registry native tests unavailable: ${availability.reason}`)
 const nativeTest = it.skipIf(!availability.available)
+// The ledger cases need only an owner stack and a profiled mint: `mount()`'s
+// single-element `chain: ['seatbelt']` never launches `sandbox-exec`, and the
+// fake subprocess never execs either — so they run ungated on every host,
+// including a sandboxed one that refuses IPC peers.
 let fixture: FixtureWorkspace, cleanups: Array<() => Promise<unknown>>
 beforeEach(() => { fixture = createFixtureWorkspace('shared-consumers'); cleanups = [] })
 afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.reverse()) await cleanup(); fixture.dispose() })
@@ -74,6 +80,178 @@ nativeTest('reauthorizes direct async shell/PTC and PTYs while preserving a sync
   const controller = { argv: ['bash'], cwd: fixture.workspace, env: { DSH_SESSION_ID: id } }
   await ctx.subprocess.spawnTerminal(controller as never)
   expect(specs.at(-1)).toBe(controller)
+})
+
+it('launches an unadmitted confine→spawn while its publication is current and refuses stale or foreign argv', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  const specs: unknown[] = []
+  ctx.provide('subprocess', { spawn: (spec: unknown) => { specs.push(spec); return { pid: 1 } }, spawnTerminal: async () => ({ pid: 2 }) } as never)
+  await ctx.plugin(ProcessFence)
+  const mint = async () => (await ctx.sandbox.confine(['bash', '-c', 'true'], policy())).argv
+  // A foreign consumer composes confine→spawn outside every wrapped entry, as
+  // the forge panel's Git inspection does.
+  const launched = await mint()
+  expect(ctx.subprocess.spawn({ argv: [...launched], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
+  expect(specs.at(-1)).toMatchObject({ argv: launched })
+  // A ledger profile is not owned by an operation frame either way: launching
+  // it inside an unrelated live admission is the same publication-keyed act.
+  await owner.registry.withOperation(policy(), 'process', () => ctx.subprocess.spawn({ argv: [...launched], cwd: fixture.workspace }))
+  // A same-content republish is not a publication: `refresh()` re-stats and
+  // republishes identical records, and the mint stays launchable.
+  await owner.registry.refresh(fixture.workspace)
+  expect(ctx.subprocess.spawn({ argv: [...launched], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
+  // A republish supersedes the mint's authorization basis.
+  const stale = await mint()
+  await owner.registry.setAccess(fixture.workspace, { kind: 'path', path: fixture.outside }, 'read-only')
+  expect(() => ctx.subprocess.spawn({ argv: [...stale], cwd: fixture.workspace })).toThrow('live admission')
+  // Re-minting under the current publication launches again.
+  const fresh = await mint()
+  expect(ctx.subprocess.spawn({ argv: [...fresh], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
+  // An argv this host never minted is still refused outright.
+  expect(() => ctx.subprocess.spawn({ argv: ['sandbox-exec', '-p', '(version 1)', '--', 'true'], cwd: fixture.workspace })).toThrow('live admission')
+})
+
+it('stamps a mint at dispatch, so a publication landing mid-probe keeps it refused', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
+  await ctx.plugin(ProcessFence)
+  // Hold the upstream probe: the mint resolves its authorization snapshot at
+  // dispatch, then a real publication lands before the probe completes.
+  const originalConfine = LocalSandboxProvider.prototype.confine
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  vi.spyOn(LocalSandboxProvider.prototype, 'confine')
+    .mockImplementation(function (this: LocalSandboxProvider, ...args) {
+      return held.then(() => originalConfine.apply(this, args))
+    })
+  try {
+    const pending = ctx.sandbox.confine(['bash', '-c', 'true'], policy())
+    await owner.registry.setAccess(fixture.workspace, { kind: 'path', path: fixture.outside }, 'read-only')
+    release()
+    const minted = (await pending).argv
+    expect(() => ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toThrow('live admission')
+    // A mint issued under the current publication launches again.
+    const fresh = (await ctx.sandbox.confine(['bash', '-c', 'true'], policy())).argv
+    expect(ctx.subprocess.spawn({ argv: [...fresh], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
+  } finally { release() }
+})
+
+it('drops a mint that outlived its admission instead of demoting it into the ledger', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
+  await ctx.plugin(ProcessFence)
+  const originalConfine = LocalSandboxProvider.prototype.confine
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  vi.spyOn(LocalSandboxProvider.prototype, 'confine')
+    .mockImplementation(function (this: LocalSandboxProvider, ...args) {
+      return held.then(() => originalConfine.apply(this, args))
+    })
+  let pending!: ReturnType<typeof ctx.sandbox.confine>
+  try {
+    await owner.registry.withOperation(policy(), 'process', () => {
+      // A fire-and-forget mint inside the admission: its probe settles only
+      // after the operation's await body has already returned.
+      pending = ctx.sandbox.confine(['bash', '-c', 'true'], policy())
+    })
+    release()
+    const minted = (await pending).argv
+    // The profile really did graft the operation's writable root — and must
+    // still not launch: an expired admission never bequeaths a profile. The
+    // profile escapes a Windows path's backslashes, so compare the SBPL
+    // spelling rather than the raw path.
+    expect(minted.join(' ')).toContain(sbplSubpath(fixture.outside))
+    expect(() => ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toThrow('live admission')
+  } finally { release() }
+})
+
+it('refuses an ambient mint that never passed through resolve()', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
+  await ctx.plugin(ProcessFence)
+  // `restrictedExecution` is a public ambient-minus-denies mint that takes no
+  // scope: unadmitted it must not enter the ledger — its profile grants
+  // everything the upstream ambient baseline does, minus the caller's denies.
+  const ambient = (await (ctx.sandbox as MultiRootSandboxProvider).restrictedExecution(policy(), ['/nonexistent-deny'])).argv
+  expect(ambient.join(' ')).toContain('allow default')
+  expect(() => ctx.subprocess.spawn({ argv: [...ambient, 'bash', '-c', 'true'], cwd: fixture.workspace })).toThrow('live admission')
+})
+
+it.skipIf(symlinkUnsupportedReason() !== undefined)('mints an unadmitted profile without member grants, so a member redirect cannot invalidate it', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
+  await ctx.plugin(ProcessFence)
+  // Unadmitted `resolve` already reports 'unavailable': the mint that follows
+  // is the clamped primary-root form and grants `fixture.outside` nothing.
+  expect(ctx.multiRootScope.resolve(policy())).toMatchObject({ authority: 'unavailable', additionalRoots: [] })
+  const minted = (await ctx.sandbox.confine(['bash', '-c', 'true'], policy())).argv
+  // The Seatbelt profile spells its grants literally: the member path never
+  // entered it — nothing grafted for the launch to honor after the redirect.
+  expect(minted.join(' ')).not.toContain(sbplSubpath(fixture.outside))
+  renameSync(fixture.outside, join(fixture.base, 'saved')); symlinkSync(fixture.workspace, fixture.outside, 'dir')
+  expect(ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
+})
+
+it('admits the forge service entries it can reach while leaving generators and unknown entries unadmitted', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
+  const id = SessionId('forge-panel-session')
+  const session = Session.create(id, [], { id, cwd: fixture.workspace, version: SESSION_FORMAT_VERSION, createdAt: 0, isSeeded: false })
+  const mintAndSpawn = async () => ctx.subprocess.spawn({ argv: (await ctx.sandbox.confine(['git', 'status'], policy())).argv, cwd: fixture.workspace })
+  ctx.provide('forgePanel', {
+    branches: async () => ({ admitted: ctx.multiRootScope.hasAdmission(), spawned: (await mintAndSpawn()) !== undefined }),
+    follow: async function* () { yield ctx.multiRootScope.hasAdmission() },
+    otherEntry: async () => ctx.multiRootScope.hasAdmission(),
+  } as never)
+  ctx.provide('worktrees', { create: async () => ({ admitted: ctx.multiRootScope.hasAdmission() }) } as never)
+  await ctx.plugin(ProcessFence)
+  const panel = ctx.get('forgePanel') as { branches(s: unknown): Promise<{ admitted: boolean; spawned: boolean }>; follow(): AsyncGenerator<boolean>; otherEntry(s: unknown): Promise<boolean> }
+  await expect(panel.branches(session)).resolves.toMatchObject({ admitted: true, spawned: true })
+  const tree = ctx.get('worktrees') as { create(agent: unknown): Promise<{ admitted: boolean }> }
+  await expect(tree.create({ session })).resolves.toMatchObject({ admitted: true })
+  // Async generators are not function entries: `follow` is untouched, and the
+  // detached inspections it drives rely on the ledger like any background path.
+  await expect(panel.follow()[Symbol.asyncIterator]().next()).resolves.toMatchObject({ value: false })
+  await expect(panel.otherEntry(session)).resolves.toBe(false)
+})
+
+it('degrades a wrapped entry to unadmitted when admission cannot be acquired, without replaying the body', async () => {
+  const owner = await mount(), ctx = owner.ctx
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  ctx.provide('subprocess', { spawn: () => ({ pid: 1 }), spawnTerminal: async () => ({ pid: 2 }) } as never)
+  const id = SessionId('forge-panel-session')
+  const session = Session.create(id, [], { id, cwd: fixture.workspace, version: SESSION_FORMAT_VERSION, createdAt: 0, isSeeded: false })
+  let calls = 0
+  ctx.provide('forgePanel', {
+    // Plain async methods: a `vi.fn(async …)` reads as `Function`, not
+    // `AsyncFunction`, and the wrapper would skip it.
+    branches: async () => (++calls, ctx.multiRootScope.hasAdmission()),
+    refresh: async () => { calls++; throw new Error('body failed') },
+  } as never)
+  await ctx.plugin(ProcessFence)
+  const panel = ctx.get('forgePanel') as { branches(s: unknown): Promise<boolean>; refresh(s: unknown): Promise<void> }
+  const refused = vi.spyOn(owner.registry, 'withOperation')
+  // An admission refused before the body ever ran → the call still executes
+  // once, unadmitted.
+  refused.mockRejectedValue(new Error('registry unreachable'))
+  await expect(panel.branches(session)).resolves.toBe(false)
+  expect(calls).toBe(1)
+  // Rejected after the body ran → the error propagates, the body is not
+  // replayed.
+  refused.mockImplementation(async (_policy, _kind, body) => { await body({} as never); throw new Error('settle failed') })
+  await expect(panel.branches(session)).rejects.toThrow('settle failed')
+  expect(calls).toBe(2)
+  // Inside a real admission an error thrown by the call itself propagates
+  // unchanged.
+  refused.mockRestore()
+  await expect(panel.refresh(session)).rejects.toThrow('body failed')
+  expect(calls).toBe(3)
 })
 
 nativeTest('does not reuse a native Skills cache after unnotified revocation, and remains quiet on repeated queries', async () => {

@@ -49,7 +49,7 @@ ADR-0001-short-title.md
 ADR-0002-short-title.md
 ```
 
-Numbers increment; titles use lowercase kebab-case.
+Numbers increment; titles use lowercase kebab-case. ADR-0030–0034 are reserved for the `feat/ssh-workspace` branch; mainline continues at 0035 after ADR-0029 — the gap is intentional, not missing entries.
 
 - [ADR-0021-auto-review-context-companion.md](./ADR-0021-auto-review-context-companion.md) — Optional Auto Review companion, shared tool permission preview, current constraints, native overlap, fail-closed checks and fork synchronization (Accepted).
 
@@ -68,3 +68,5 @@ Numbers increment; titles use lowercase kebab-case.
 - [ADR-0028-upstream-primary-identity-and-shared-only-registry.md](./ADR-0028-upstream-primary-identity-and-shared-only-registry.md) (Chinese) — Primary-root identity is the upstream spelling (MRW-01), denies win over the primary root; the Registry keeps only the shared mode (Accepted).
 
 - [ADR-0029-ops-file-authorization-and-activity-adapter.md](./ADR-0029-ops-file-authorization-and-activity-adapter.md) (Chinese) — Accepted only for experimental safeguards, Phase-A live activity, and bounded Review. Remaining P5 compatibility recovery is deferred indefinitely and excluded from this final acceptance.
+
+- [ADR-0035-unadmitted-confined-spawn.md](./ADR-0035-unadmitted-confined-spawn.md) (Chinese) — Unadmitted confined spawn: a minted-profile ledger (dispatch-time publication generation, process-local, expired frames never recorded) restores the documented primary-root-only degrade, and reachable foreign-service entries (forgePanel/worktrees) still take real admission; the OPS domain and protection window stay strict toward ledger mints (Accepted).

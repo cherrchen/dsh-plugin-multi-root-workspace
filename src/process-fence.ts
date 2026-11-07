@@ -79,6 +79,7 @@ import type { MultiRootSandboxProvider } from './sandbox.ts'
 import { decorateProcessOutcome } from './compat/process-result.ts'
 import { isAsyncProcessEntry, ptcEntrypoints, shellEntrypoints } from './compat/process-entrypoints.ts'
 import type { ProcessEntrypoint } from './compat/process-entrypoints.ts'
+import { FORGE_PROCESS_SERVICES, sessionOf } from './compat/forge-entrypoints.ts'
 
 // `multiRootProviders` is the provider-conflict gate: the restricted profile is
 // only meaningful when `ctx.sandbox` is THIS bundle's provider — a foreign one
@@ -263,7 +264,7 @@ export function apply(ctx: Context): void {
           argv = [...prefix, ...spec.argv]
         }
         if (opsScope.admissionRequired && (hasConfinedProfile(spec.argv) || prefix.length > 0)
-          && !opsScope.permitsProfile(argv)) {
+          && !opsScope.permitsOperationProfile(argv)) {
           throw new Error('multi-root workspace: a confined spawn requires a profile from this live admission')
         }
       } else {
@@ -274,9 +275,11 @@ export function apply(ctx: Context): void {
         }
       }
       const launch = () => original.call(this, argv === spec.argv ? spec : { ...spec, argv })
-      // Only the prepared domain or this admission's exact profile can cross
-      // the independent scope guard. Unknown maintenance has neither.
-      const handle = store !== undefined || admissionScope.admissionRequired && admissionScope.permitsProfile(argv)
+      // Only the prepared domain or a profile minted inside a live admission
+      // earns the OPS protection window's launch permit; a ledger mint still
+      // launches unadmitted — just unattributed, so the scope guard refuses
+      // it while OPS roots are denied.
+      const handle = store !== undefined || admissionScope.admissionRequired && admissionScope.permitsOperationProfile(argv)
         ? withOpsSpawnPermit(opsState, launch) : launch()
       if (store === undefined) return handle
       // `collected.stderr.readFrom(0)` is cursor-free — a live shell handle's
@@ -395,4 +398,59 @@ export function apply(ctx: Context): void {
     if (runtime === undefined) return
     for (const key of ptcEntrypoints(runtime)) deniedEntry(scope, runtime, key)
   })
+
+  // Foreign services that compose `ctx.sandbox.confine` + `ctx.subprocess.spawn`
+  // on their own code paths — the upstream experimental forge bundle's panel
+  // and worktree service (`compat/forge-entrypoints.ts` owns the per-release
+  // service/key inventory and the session probe). Their async public entries
+  // get the same ordered admission the wrapped executors receive; entries
+  // unreachable from here (background inspections, async generators, isolated
+  // mounts) stay covered by the minted-profile ledger instead. `ctx.inject`
+  // never fires for a service nobody mounted, so these hooks cost nothing
+  // without the bundle. A key the mounted service exposes but cannot take a
+  // wrapper — a getter-only property rather than a plain method — is skipped
+  // with a warning rather than failing the whole hook.
+  const admitCalls = (service: string, keys: readonly string[]): void => {
+    ctx.inject([service], (scope: Context) => {
+      const target = scope.get(service) as Record<string, unknown> | undefined
+      if (target === undefined) return
+      for (const key of keys) {
+        try {
+          if (!isAsyncProcessEntry(target[key])) {
+            if (key in target) ctx.logger.warn(`multi-root workspace: foreign process entry ${service}.${key} exists but is not wrappable and stays outside the admission; any confined spawn it performs relies on the ledger`)
+            continue
+          }
+          scope.effect(() => wrapMethod(
+            target as Record<string, (this: unknown, first: unknown, ...rest: unknown[]) => unknown>,
+            key,
+            original => async function (this: unknown, first: unknown, ...rest: unknown[]) {
+              const session = sessionOf(first)
+              if (session === undefined) return original.call(this, first, ...rest)
+              const policy = ctx.sandboxPolicy.resolve({ session })
+              // An admission that cannot be acquired (registry unreachable or
+              // disposed) must not fail a call that may not spawn at all: run
+              // it unadmitted, where any confined mint falls back to the
+              // clamped-ledger degrade. Errors thrown BY the call propagate.
+              let ran = false
+              try {
+                return await withRegistryAdmission(ctx, policy, 'process', () => {
+                  ran = true
+                  return original.call(this, first, ...rest)
+                })
+              } catch (error: unknown) {
+                if (ran) throw error
+                ctx.logger.warn(`multi-root workspace: admission for ${service}.${key} is unavailable; running unadmitted: `
+                  + `${error instanceof Error ? error.message : String(error)}`)
+                return original.call(this, first, ...rest)
+              }
+            },
+          ))
+        } catch (error: unknown) {
+          ctx.logger.warn(`multi-root workspace: foreign process entry ${service}.${key} is not wrappable: `
+            + `${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+    })
+  }
+  for (const { service, keys } of FORGE_PROCESS_SERVICES) admitCalls(service, keys)
 }

@@ -16,6 +16,17 @@ export function currentRegistryOperation(proof: object): RegistryOperation | und
   return frame?.active === true && frame.proof === proof ? frame.operation : undefined
 }
 
+/**
+ * The enclosing admission frame's mint disposition for this proof. `expired`
+ * frames still occupy the async context of their descendants; an expired
+ * admission must never bequeath a launchable profile.
+ */
+export type OperationFrameState = 'active' | 'expired' | 'absent'
+export function operationFrameState(proof: object): OperationFrameState {
+  const frame = operations.getStore()
+  return frame === undefined || frame.proof !== proof ? 'absent' : frame.active === true ? 'active' : 'expired'
+}
+
 export interface RegistryOperationIdentity {
   readonly operationId: string
   readonly kind: RegistryOperationKind

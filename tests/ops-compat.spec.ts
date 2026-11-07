@@ -52,6 +52,8 @@ const COMMAND = ['ops-worker', '--run']
 // The POSIX profile/lifecycle cases below cannot enter that domain on Windows;
 // the Windows matrix verifies the earlier boundary instead.
 const posixIt = it.skipIf(process.platform === 'win32')
+// The ledger/OPS case needs only an owner stack and a profiled mint — no real
+// confine launch — so it runs ungated, like the shared-consumers ledger cases.
 
 interface Captured {
   spawned: SubprocessSpawnSpec[]
@@ -876,6 +878,19 @@ describe.skipIf(!opsCompatibilityRelease(readInstalledVersion('@deepseek-ai/dsh'
     world.setOpsEnabled(false)
     expect(world.ctx.subprocess.spawn({ argv: COMMAND, cwd: fixture.workspace })).toEqual({ pid: 1 })
     expect(world.captured.spawned).toHaveLength(2)
+  })
+
+  it('refuses a ledger-minted profile while OPS roots are denied, then admits it when released', async () => {
+    const world = await mountWorld({ shared: true, mode: 'workspace-write' })
+    await world.ctx.multiRootRegistry.add(fixture.workspace, { path: fixture.outside, access: 'read-only' })
+    const policy = world.ctx.sandboxPolicy.resolve({ session: world.agent.session })
+    const minted = (await world.ctx.sandbox.confine(['ledger-worker', '--run'], policy)).argv
+    // The mint is fresh and its publication is current — but the OPS protection
+    // window only honors a live admission, never the unadmitted ledger.
+    expect(() => world.ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toThrow(/unattributed subprocess/)
+    expect(world.captured.spawned).toEqual([])
+    world.setOpsEnabled(false)
+    expect(world.ctx.subprocess.spawn({ argv: [...minted], cwd: fixture.workspace })).toMatchObject({ pid: 1 })
   })
 
   it('rejects an expired handoff even when the enforcing fence has unloaded', async () => {
