@@ -28,7 +28,7 @@ const replySchema = z.discriminatedUnion('type', [
 export class AuthorityRpcError extends Error {
   constructor(readonly code: string, message: string) { super(message) }
 }
-function receive(channel: Channel, body: (value: unknown) => void) {
+export function receive(channel: Channel, body: (value: unknown) => void) {
   let data = Buffer.alloc(0)
   channel.on('data', (chunk: Buffer) => {
     try {
@@ -43,7 +43,7 @@ function receive(channel: Channel, body: (value: unknown) => void) {
     } catch { channel.destroy() }
   })
 }
-function send(channel: Channel, value: unknown) {
+export function send(channel: Channel, value: unknown) {
   const text = JSON.stringify(value) + '\n'
   if (Buffer.byteLength(text) + (channel.writableLength ?? 0) > MAX_FRAME) { channel.destroy(); return false }
   channel.write(text)

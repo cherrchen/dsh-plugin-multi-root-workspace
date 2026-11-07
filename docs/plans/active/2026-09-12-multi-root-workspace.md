@@ -1595,3 +1595,19 @@ macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.1`：compat、lint、host/client �
 复验中发现并修复两个测试/取证侧问题，均不属产品行为差异：cordis `4.0.x` 的 traced 方法只从**自有** `ctx` 描述符恢复服务上下文，门面因此复制后端的 `ctx` 描述符；web prompt 中随机的 Web GUI 端口（rc.1 与旧版两种措辞）改为规范化后再取摘要。原始日志为 `.dsh-smoke/g1-close-*.log`。
 
 **未验证与下一步：** Linux/Windows 本地格须在 CI 的支持矩阵上复跑同一组 G1 用例后才能签收三平台退出条件；切换生产 `ctx.fs` 仍须按 ADR-0031 的门槛另行评审，本关不构成该结论。下一步进入 G1a 控制面（远端记录域与版本化准入），与真实 SSH 无关的部分可先用真实存储、双 Host 与无网络 fake 端点验证。
+
+## 多执行环境 G1a 控制面（2026-11-07）
+
+**状态：G1a 的 macOS arm64 本地格实现并通过定向验证；三平台退出条件与真实 SSH 无关的部分已用真实存储、双 Host 与无网络 fake 端点覆盖，关卡整体尚未签收。** 格式与拒绝码见[控制面参考](../../reference/multi-environment-control-plane.md)。本关在 `src/remote/` 新增控制面模块（manifest / records / protocol / plane / contract），`src/registry.ts` 仅做接线：配置行 `remoteEnvironments`、owner 的远端域与 remote-1 监听器开闭、follower 的 remote-1 hello、以及 `remoteStatus` / `remoteList` / `addRemote` / `removeRemote` / `withRemoteOperation` / `setRemoteEndpointVerifier` 六个服务入口。默认 `enabled !== true` 时 remote 状态为 `disabled`，v1 协议、v1 域、`ctx.multiRootScope` 与 prompt 逐字节不变；`win32` 发起端为 `platform-deferred`。本关没有 SSH 包、没有网络、没有面板/命令/工具暴露，也没有默认 verifier——生产上 `addRemote` 必然以 `endpoint-unverifiable` 拒绝。
+
+| 证据 | 结果 |
+| --- | --- |
+| 清单解析与保护 | `tests/remote-manifest.spec.ts` **24/24**：合法清单与稳定 digest；windows-target-unsupported / unsupported-platform / unknown-environment / duplicate-environment / duplicate-binding / alias-conflict（相等与嵌套）/ 非法路径（`..`、`//`、尾斜杠、相对、NUL、相对 primary）/ helper 与 transport 配对 / 多余键逐一拒绝；group-writable 文件、symlink、位于被绑定 primary 内三种保护拒绝。 |
+| 单 Host 注册表 | `tests/remote-registry.spec.ts` **10/10**：disabled 不产生远端域文件且 v1 行为不变；无 verifier 拒绝、fake verifier 注册只进 `multi_root_workspace_remote.json` 而不进 v1 文件/scope；跨项目同名 rootId `binding-not-authorized`、携带 `access` 键 `invalid-arguments`；hostKey 变更 `withheld`、binding 移除 `revoked` 且准入相应拒绝；只读会话禁写/执行、danger-full-access 收敛为 workspace-write、双 Session 不互串、tool cap 禁写、缺策略 `session-policy-unavailable`、操作句柄过期后读取抛错；远端域打开失败降级为 `storage-failed` 而本地 add/list 正常；enable→revoke→disable→restart→re-enable 后 v1 文件字节不变且 grant 保持 `revoked`；撤权排在准入前的 Promise barrier 拒绝、已准入体完成后下一次才拒绝、慢 verifier 期间 binding 变更 `binding-changed`。 |
+| remote-1 协议 | `tests/remote-protocol.spec.ts` **4/4**：hello 绑定 store/epoch/manifestDigest，digest 不符显式 `config-digest-mismatch`；未知 domain 显式 `unknown-domain` 且通道保持打开；mutation request-id 去重（同参幂等、换参毁链）；丢失回复以 `authority-disconnected` 拒绝且不重放。 |
+| 双 Host 矩阵 | `tests/remote-multiprocess.e2e.ts` **5/5**（与 shared-registry-multiprocess 同一原生可用性门）：新 owner+新 follower 准入与转发 add；新 owner+旧 follower（remote disabled）v1 正常；旧 owner+新 follower `owner-without-remote-protocol` 而 v1 正常；digest 不符仅 `config-digest-mismatch`；owner 退出→接管→新 epoch→remote 重新 hello，旧 epoch 在途请求被拒绝。 |
+| 既有定向回归 | `registry-operation` / `shared-registry(-multiprocess)` / `tool-access` / `authority-native` / `authority-boundaries` / `skills-authority` / `shared-registry` 全部通过，v1 wire 与域语义未变。 |
+
+设计取舍：remote-1 是 v1 之外的**第二**监听端点（`<store>.r1.sock`），旧 owner 没有该端点即天然表现为 `owner-without-remote-protocol`；owner 侧远端域在同一份 `serialize` 队列内以独立 `remoteRevision` 读写，不占用 v1 `operationRevision`；verifier 的校验在队列外执行、入队后重检 binding digest；`withRemoteOperation` 在发起侧按 Session 模式与 tool cap 先收窄再进 owner 准入，`local` 端点不带远端身份字段（`verifiedTarget`/`bindingDigest`/`configVersion` 为 `null`）。远端 grant 永不进入 `setAdditionalRoots`、scope、方言、指令或 Skills。
+
+**未验证与下一步：** Linux 与 Windows 本地格须在 CI 支持矩阵上复跑同一组用例；manifest 保护检查只覆盖 POSIX（`win32` 发起端整格 `platform-deferred`）；helper transport 与 sftp transport 的真实握手、hostKey 轮换、对象型 verifiedTarget 与双端 transfer 的真实消费侧留给 G2/G4；`remote-1` 尚不支持跨 Host 广播远端变更（本关不需要）。真实 SSH 能力仍无任何开关可达。
