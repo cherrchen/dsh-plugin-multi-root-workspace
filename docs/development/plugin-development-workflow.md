@@ -33,6 +33,7 @@
 ```sh
 pnpm install            # 安装（首次或改依赖后）
 pnpm compat:check       # DSH 兼容性契约：allowlist / peerDependencies / 开发 pin / 已安装树四者一致
+pnpm baseline:multi-environment # G0 本地取证（先 build）：版本/源码摘要、逐项测试、八份 web/headless 组合快照；不接 SSH
 pnpm lint               # oxlint（host 与 client 半部都扫）
 pnpm typecheck          # tsc -p tsconfig.host.json 与 -p tsconfig.client.json 各一次
 pnpm build              # tsc 出两面 lib/types/**/*.d.ts + tsdown 出 lib/*.js（host ESM）与 lib/client.js（浏览器闭包工厂）
