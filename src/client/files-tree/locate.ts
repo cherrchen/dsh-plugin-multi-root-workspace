@@ -67,12 +67,20 @@ export function relativeUnderRoot(path: string, root: string): string | undefine
  * @returns the owning root, or `undefined` when the file is outside every
  *   available additional root (the primary root included).
  */
+/** One path's comparison spelling: separators unified, trailing slashes dropped. */
+function normalized(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
 export function rootForPath(view: RootsView, path: string): RootView | undefined {
   let best: RootView | undefined
+  const primary = view.primaryRoot === undefined ? undefined : normalized(view.primaryRoot)
   for (const root of view.roots) {
     // A view that names the primary among its roots must never match it:
-    // the primary's files are the native navigator's own job.
-    if (root.state !== 'available' || root.path === view.primaryRoot) continue
+    // the primary's files are the native navigator's own job. The compare
+    // is normalized — separator and trailing-slash spellings of the same
+    // directory stay equal even where the registry keeps its own spelling.
+    if (root.state !== 'available' || (primary !== undefined && normalized(root.path) === primary)) continue
     if (underRoot(path, root.path) === undefined) continue
     if (best === undefined || root.path.length > best.path.length) best = root
   }

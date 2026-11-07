@@ -6,8 +6,7 @@
  * beside its body. Its root is hard-wired to the session's `cwd` — the
  * previewed file's absolute path is located against that root, so a file
  * that lives under an additional root lands outside every tree it can draw:
- * the navigator opens on the primary root, unexpanded and unmarked, the
- * primary root it was always going to show.
+ * the navigator opens on the primary root, unexpanded and unmarked.
  *
  * The Factory itself cannot be retargeted — it is a registration upstream
  * already owns, and its root is not an input. What CAN move is what its
@@ -20,23 +19,34 @@
  * The aside itself — its width, its push/overlay/fill modes, its resize
  * separator — stays native; only the tree inside is the fork's.
  *
+ * Everything is keyed by the dockkit PANE id (`data-files-navigator` on the
+ * aside, `data-dockkit-pane` on the content section), never by the preview
+ * tab: upstream's navigator records live in `store.byPane`, and the pane
+ * survives what the tab does not — `replaceTab` mints a fresh tab id, so
+ * opening a file from the retargeted tree destroys the preview tab that
+ * opened it. The inject-side takeover map holds the pane-record memory
+ * (`expanded`/`scrollTop`/`revealed`) across that death; the component's
+ * own refs only ever carry the live copy.
+ *
  * Three upstream behaviors are reproduced, not approximated:
  *
  * - **Hold lifetime.** The native navigator holds its pane tree only while
  *   it is open (`hold(paneId, cwd)` gated on `state.open`): closing the
  *   navigator closes the directory node — watches and listings end — while
- *   the pane record keeps `expanded` for the next open. Here the takeover
- *   `signal` is requested when the aside appears and ended when it leaves,
- *   and the occupant — which lives in the header and outlives the aside —
- *   keeps the last `expanded`/`scrollTop` snapshot, handed back to the tree
- *   as `saved` on the next open. Reopening restores expansion through the
- *   same restore-preferences mechanism upstream's `open()` uses.
+ *   the pane record keeps `expanded`/`scrollTop`/`revealed` for the next
+ *   open. Here the takeover `signal` is requested when the aside appears
+ *   and ended when it leaves; the saved snapshot is written into the
+ *   inject-side map BEFORE the end, so it survives both the hold and the
+ *   component. A pane section leaving the document is the record's real
+ *   end and drops the memory.
  * - **Reveal.** The native navigator seeds `pane.revealing` with the drawn
- *   file's address and steps the walk open (ancestors expanded one listing
- *   at a time, then the file's row marked current and scrolled into view).
- *   The forked tree's `reveal` prop drives the same sequence against the
- *   additional root, keyed on `absolutePath`, so navigating the preview to
- *   another file re-reveals exactly like upstream's `answerNavigation`.
+ *   file's address — unless `pane.revealed` already names it — and steps
+ *   the walk open (ancestors expanded one listing at a time, then the
+ *   file's row marked current and scrolled into view). The forked tree's
+ *   `reveal` prop drives the same sequence against the additional root,
+ *   with the saved `revealed` suppressing a repeat of a completed walk, so
+ *   collapsing a directory and reopening the navigator keeps the reader's
+ *   collapse exactly as upstream's pane record does.
  * - **Replace-tab open.** The native navigator's `onOpen` is
  *   `tab.actions.openResource(address, { replaceTab: true })` — the opened
  *   file takes the preview's own tab. The forked tree's opens route through
@@ -44,17 +54,17 @@
  *   `{ replaceTab: tabId }` against the preview's dockkit tab id.
  *
  * Every step degrades silently: no `[data-textpreview-url]` ancestor, no
- * dockkit tab id, no `panel`, a file outside every available additional
- * root (including the primary root's own files), an address naming another
- * session, or a fork that cannot render — each leaves the native navigator
- * completely untouched. Where the upstream hooks do not exist (a runtime
- * without this navigator), the marker span is the only trace the occupant
- * leaves, and it draws nothing.
+ * dockkit pane id, no `panel`, an address that is not a session file of
+ * THIS session, a file outside every available additional root (the
+ * primary root's own files included), or a fork that cannot render — each
+ * leaves the native navigator completely untouched. Where the upstream
+ * hooks do not exist (a runtime without this navigator), the marker span
+ * is the only trace the occupant leaves, and it draws nothing.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/files-tree/navigator
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import { parseFileAddress } from '@deepseek-ai/dsh-util-workspace-path'
@@ -73,11 +83,12 @@ export interface NavigatorRetargetProps {
   /** The channel client; absent when this composition has no host Connection. */
   readonly panel: PanelClient | undefined
   /**
-   * The forked tree's shared props, or `undefined` where the fork cannot
-   * render — the native navigator then keeps its tree, which is the same
-   * behavior an upstream Files page without the fork would produce.
+   * The forked tree's shared props; the registration gates on it, so the
+   * occupant only renders where the fork can — the native navigator keeping
+   * its tree is the same behavior an upstream Files page without the fork
+   * would produce.
    */
-  readonly filesTree: FilesTreeSurface | undefined
+  readonly filesTree: FilesTreeSurface
   readonly nativeTree?: NativeTreeRenderer | undefined
 }
 
@@ -85,24 +96,11 @@ export interface NavigatorRetargetProps {
 interface Takeover {
   /** Lifetime handed to the tree's face: aborting forgets the bucket and closes the watch tree. */
   readonly signal: AbortSignal
-  /** The store bucket's key — the preview's dockkit tab id where the hook exists, else a generated one. */
-  readonly tabId: TabId
+  /** The store bucket's key — the dockkit pane id where the hook exists, else a generated one. */
+  readonly paneId: TabId
   /** The root the tree lists. */
   readonly root: string
 }
-
-/** The expansion and scroll memory one closed navigator hands to its next open. */
-interface SavedTree {
-  /** The root this snapshot belongs to; a stale snapshot never crosses roots. */
-  readonly root: string
-  /** Expansion preferences at the moment the navigator closed. */
-  readonly expanded: readonly string[]
-  /** The body's scroll offset at the moment it unmounted. */
-  readonly scrollTop: number
-}
-
-/** Selector stand-in for a composition without the fork: nothing was ever listed. */
-const noFilesStore: NonNullable<NavigatorRetargetProps['filesTree']>['useStore'] = () => undefined as never
 
 /**
  * The marker that lives in the preview header and, while the file it names
@@ -113,13 +111,18 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   const { absolutePath, sessionId, panel, filesTree } = props
   const anchorRef = useRef<HTMLSpanElement | null>(null)
   const sectionRef = useRef<HTMLElement | null>(null)
-  const fallbackTabId = useRef<TabId | undefined>(undefined)
+  const paneRef = useRef<HTMLElement | null>(null)
+  const fallbackPaneId = useRef<TabId | undefined>(undefined)
   const mounted = useRef(true)
-  const requestEpoch = useRef(0)
-  const savedRef = useRef<SavedTree | undefined>(undefined)
+  // The pane-record mirrors: the bucket's expanded set and the body's live
+  // scroll offset, kept current so the close-time save needs no React
+  // ordering guarantee to be correct.
+  const expandedRef = useRef<readonly string[]>([])
+  const liveScrollRef = useRef(0)
   const [preview, setPreview] = useState<HTMLElement | null>(null)
   const [tabId, setTabId] = useState<TabId | undefined>(undefined)
   const [aside, setAside] = useState<HTMLElement | null>(null)
+  const [paneId, setPaneId] = useState<TabId | undefined>(undefined)
   const [root, setRoot] = useState<RootView | undefined>(undefined)
   const [takeover, setTakeover] = useState<Takeover | null>(null)
 
@@ -127,114 +130,163 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
     mounted.current = true
     return () => {
       mounted.current = false
-      requestEpoch.current += 1
     }
   }, [])
 
-  // Locate the preview root and the dockkit tab once, after mount — the
-  // same pair of upstream hooks the Files-page switcher locates, read from
+  // Locate the preview root, the dockkit tab, and the pane once, after
+  // mount — the upstream hooks the Files-page switcher locates, read from
   // the marker's own position inside the preview header. The
-  // `[data-textpreview-url]` ancestor also carries the tab's content id, the
-  // cross-session check's evidence; no ancestor means this header is not an
+  // `[data-textpreview-url]` ancestor also carries the address the
+  // cross-session check reads; no ancestor means this header is not an
   // upstream preview at all, and nothing below ever runs.
   useEffect(() => {
     const anchor = anchorRef.current
     const previewEl = anchor?.closest<HTMLElement>('[data-textpreview-url]') ?? null
     sectionRef.current = anchor?.closest<HTMLElement>('[data-dockkit-content]') ?? null
+    // The tabHost carries `data-dockkit-pane` too (while its tab is the
+    // pane's selected one), so the pane container is found from the
+    // tabHost's PARENT — closest() alone would stop at the tabHost and the
+    // death-watch would fire on every `replaceTab` instead of on the pane's
+    // real end.
+    paneRef.current = sectionRef.current?.parentElement?.closest<HTMLElement>('[data-dockkit-pane]')
+      ?? sectionRef.current
     const content = sectionRef.current?.dataset.dockkitContent
     setTabId((content !== undefined && content !== ''
       ? content
-      : (fallbackTabId.current ??= `mrfw-nav-${Math.random().toString(36).slice(2)}` as TabId)) as TabId)
+      : (fallbackPaneId.current ??= `mrfw-nav-${Math.random().toString(36).slice(2)}` as TabId)) as TabId)
     setPreview(previewEl)
   }, [])
 
-  // The root the previewed file belongs to: the session's registry view,
-  // matched by the same under-root rule the native navigator uses — with
-  // two guards on top. A session-scoped content id naming another session
-  // never takes over a tree for a file this session cannot open, and a file
-  // outside every available additional root — the primary root's own files
-  // included — never takes over at all.
+  // The aside mounts only while the navigator is open, so its presence is
+  // observed, not assumed: the content row the NavigatorSeat renders into
+  // is watched for `aside[data-files-navigator]`. A live aside skips the
+  // re-query — the forked rows mounting inside it would otherwise re-run a
+  // selector on every level.
+  const asideRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
-    if (preview === null || sessionId === undefined || sessionId === '' || panel === undefined) {
+    if (preview === null) { setAside(null); return }
+    const content = preview.querySelector<HTMLElement>('[data-textpreview-content]') ?? preview
+    const query = (): void => {
+      const current = asideRef.current
+      if (current !== null && current.isConnected) return
+      const found = content.querySelector<HTMLElement>('aside[data-files-navigator]')
+      if (found !== current) {
+        asideRef.current = found
+        setAside(found)
+      }
+    }
+    query()
+    const observer = new MutationObserver(query)
+    observer.observe(content, { childList: true, subtree: true })
+    return () => {
+      observer.disconnect()
+      asideRef.current = null
+    }
+  }, [preview])
+
+  // The pane id arrives with the aside (upstream writes it unconditionally);
+  // the content section's own `data-dockkit-pane` is the backup, present
+  // while this tab is the pane's selected one — the only state an occupant
+  // can observe from. A generated fallback still keys correctly, just
+  // without cross-tab continuity.
+  useEffect(() => {
+    if (aside === null) return
+    const identified = aside.dataset.filesNavigator ?? sectionRef.current?.dataset.dockkitPane
+    setPaneId((identified !== undefined && identified !== ''
+      ? identified
+      : (fallbackPaneId.current ??= `mrfw-nav-${Math.random().toString(36).slice(2)}` as TabId)) as TabId)
+  }, [aside])
+
+  // The root the previewed file belongs to: the session's registry view,
+  // matched by the same under-root rule the native navigator uses. The
+  // address is required to be a session file of THIS session — the same
+  // gate upstream's `relativeFileOf` runs — and the list is re-asked each
+  // time the aside opens and each time the previewed file changes while
+  // it is open, so a root added or removed between opens never feeds a
+  // stale match. No aside means no takeover is possible, so no list is
+  // asked either.
+  useEffect(() => {
+    if (preview === null || aside === null || sessionId === undefined || sessionId === '' || panel === undefined) {
       setRoot(undefined)
       return
     }
     const address = preview.dataset.textpreviewUrl === undefined
       ? undefined
       : parseFileAddress(preview.dataset.textpreviewUrl)
-    if (address?.scope === 'session' && address.sessionId !== sessionId) { setRoot(undefined); return }
-    const epoch = ++requestEpoch.current
-    let cancelled = false
-    void panel.call('list', { sessionId }).then((view) => {
-      if (cancelled || !mounted.current || epoch !== requestEpoch.current) return
+    if (address?.scope !== 'session' || address.sessionId !== sessionId) { setRoot(undefined); return }
+    const controller = new AbortController()
+    void panel.call('list', { sessionId }, controller.signal).then((view) => {
+      if (controller.signal.aborted || !mounted.current) return
       setRoot(rootForPath(view, absolutePath))
     }).catch(() => {
       // A failed list degrades to "no additional roots": the native
       // navigator keeps the file's preview exactly as upstream draws it.
-      if (cancelled || !mounted.current || epoch !== requestEpoch.current) return
+      if (controller.signal.aborted || !mounted.current) return
       setRoot(undefined)
     })
-    return () => { cancelled = true }
-  }, [preview, sessionId, panel, absolutePath])
+    return () => { controller.abort() }
+  }, [preview, aside, sessionId, panel, absolutePath])
 
-  // The aside mounts only while the navigator is open, so its presence is
-  // observed, not assumed: the content row the NavigatorSeat renders into
-  // is watched for `aside[data-files-navigator]`. Mutations inside the
-  // preview body re-run a one-selector query — cheap, and the only signal
-  // the DOM offers for a Factory-drawn element it never names in a slot.
+  // The forked bucket's expansion set, mirrored continuously so the
+  // close-time save carries the live value regardless of cleanup order.
+  const bucket = filesTree.useStore(store => (paneId === undefined ? undefined : store.byTab[paneId]))
   useEffect(() => {
-    if (preview === null) { setAside(null); return }
-    const content = preview.querySelector<HTMLElement>('[data-textpreview-content]') ?? preview
-    const query = (): void => { setAside(content.querySelector<HTMLElement>('aside[data-files-navigator]')) }
-    query()
-    const observer = new MutationObserver(query)
-    observer.observe(content, { childList: true, subtree: true })
-    return () => observer.disconnect()
-  }, [preview])
-
-  // The forked bucket's live expansion and scroll offset, kept current in a
-  // ref so a navigator close can hand them to the next open. The occupant
-  // outlives the aside — it sits in the header — so the memory survives the
-  // close the bucket does not.
-  const useFilesStore = filesTree?.useStore ?? noFilesStore
-  const bucket = useFilesStore(store => (tabId === undefined ? undefined : store.byTab[tabId]))
-  useEffect(() => {
-    if (bucket !== undefined) savedRef.current = { root: bucket.root, expanded: bucket.expanded, scrollTop: bucket.scrollTop }
+    if (bucket !== undefined) expandedRef.current = bucket.expanded
   }, [bucket])
+
+  // The body's live scroll offset, reported by the fork itself through
+  // `onScrollOffset` — the fork's store only hears the offset on body
+  // unmount, but the pane record wants the value at close time, the same
+  // live `pane.scrollTop` upstream's `scrolled` maintains. Reading the DOM
+  // here instead would race the portal's first seeded render.
+  const onScrollOffset = useCallback((offset: number): void => {
+    liveScrollRef.current = offset
+  }, [])
 
   // The hold: while the aside exists AND the file belongs to an additional
   // root, the tree's lifetime is the aside's — exactly upstream's
-  // `hold(paneId, cwd)` gated on the open flag. Ending it aborts the signal,
-  // which forgets the bucket and closes the watch tree; `savedRef` carries
-  // the expansion memory across to the next open, the fork's spelling of
-  // `state.tree` surviving `pane.root?.close()`. The aside carries a marker
-  // while held so the stylesheet hides only its native body.
+  // `hold(paneId, cwd)` gated on the open flag. Ending it aborts the
+  // signal, which forgets the bucket and closes the watch tree; the save
+  // into the inject-side map happens first, so the pane-record memory
+  // survives both this hold and this component (a `replaceTab` open
+  // unmounts it entirely). The aside carries a marker while held so the
+  // stylesheet hides only its native body.
   const rootPath = root?.path
-  const takeoverCtl = filesTree?.takeover
+  const takeoverCtl = filesTree.takeover
+  const savedTree = paneId === undefined || rootPath === undefined ? undefined : takeoverCtl.saved(paneId, rootPath)
   useEffect(() => {
-    if (aside === null || rootPath === undefined || tabId === undefined || takeoverCtl === undefined) {
+    if (aside === null || rootPath === undefined || paneId === undefined || takeoverCtl === undefined) {
       setTakeover(null)
       return
     }
-    setTakeover({ signal: takeoverCtl.signal(tabId, rootPath, sectionRef.current ?? undefined), tabId, root: rootPath })
+    setTakeover({ signal: takeoverCtl.signal(paneId, rootPath, paneRef.current ?? sectionRef.current ?? undefined), paneId, root: rootPath })
     aside.setAttribute('data-mrfw-navigator', '')
+    const capturedPaneId = paneId
+    const capturedRoot = rootPath
     return () => {
       aside.removeAttribute('data-mrfw-navigator')
-      takeoverCtl.end(tabId)
+      takeoverCtl.save(capturedPaneId, { root: capturedRoot, expanded: expandedRef.current, scrollTop: liveScrollRef.current })
+      takeoverCtl.end(capturedPaneId)
     }
-  }, [aside, rootPath, tabId, takeoverCtl])
+  }, [aside, rootPath, paneId, takeoverCtl])
+
+  const onRevealSettled = useCallback((path: string): void => {
+    if (paneId !== undefined && rootPath !== undefined) {
+      takeoverCtl.save(paneId, { root: rootPath, revealed: path })
+    }
+  }, [takeoverCtl, paneId, rootPath])
 
   return (
     <>
       {/* The anchor: an invisible header element whose position locates the
-          preview root and dockkit tab. The document-actions seat wraps each
-          occupant in the slot's own anchor, so this span must draw nothing
-          and own nothing. */}
+          preview root, the dockkit tab, and the pane. The document-actions
+          seat wraps each occupant in the slot's own anchor, so this span
+          must draw nothing and own nothing. */}
       <span ref={anchorRef} data-mrfw-navigator-anchor style={{ display: 'none' }} />
-      {aside !== null && takeover !== null && filesTree !== undefined
+      {aside !== null && takeover !== null
         ? createPortal(
             <FilesTree
-              tabId={takeover.tabId}
+              tabId={takeover.paneId}
               sessionId={filesTree.sessionId}
               root={takeover.root}
               signal={takeover.signal}
@@ -244,12 +296,18 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
               toggle={filesTree.face.toggle}
               // The native navigator opens with `replaceTab: true` — the
               // file takes the preview's own tab; `openFileIn` spells the
-              // same intent to `openResourceIn`.
-              onOpen={address => { filesTree.openFileIn(takeover.tabId, address) }}
+              // same intent to `openResourceIn`. A composition without the
+              // dockkit content hook has no tab to replace, so the row
+              // degrades to the plain open route like any other consumer.
+              onOpen={address => {
+                if (tabId === undefined) filesTree.openFile(address)
+                else filesTree.openFileIn(tabId, address)
+              }}
               t={filesTree.t}
               nativeTree={props.nativeTree}
-              reveal={{ path: absolutePath }}
-              saved={savedRef.current?.root === takeover.root ? savedRef.current : undefined}
+              onScrollOffset={onScrollOffset}
+              reveal={{ path: absolutePath, revealed: savedTree?.revealed, onSettled: onRevealSettled }}
+              saved={savedTree}
             />,
             aside,
           )

@@ -37,8 +37,10 @@ which is always the primary root and cannot be re-pointed.
 | `FilesBody.module.css` | none — kept verbatim as the diffable source; its rules are copied into `src/client/styles.ts` renamed to `mrfw-ft*` |
 
 `FilesTree.tsx` is **not** verbatim: it is upstream's `FilesBody.tsx` with
-the exported shell function rewritten and two reveal marks added inside the
-shared row definitions (see *Intentional deltas*). `Level`/`orderEntries`/
+the exported shell function rewritten and the file row's reveal marks
+(`ref`/`data-files-current`/`aria-current` on `Entry`'s file button, plus
+`TreeContext`'s `current`/`currentRef`) added inside the shared row
+definitions (see *Intentional deltas*). `Level`/`orderEntries`/
 `failureLine` are byte-identical — sync re-copies the whole file and
 re-applies the deltas, never hand-edits inside the verbatim definitions.
 
@@ -50,9 +52,9 @@ re-applies the deltas, never hand-edits inside the verbatim definitions.
 | `locales.ts` | upstream `locales.ts` | only `NS` + the `SidebarFilesKey` union + the `LocaleNamespaceMap` augmentation; dictionaries are NOT re-registered — `ctx.locale.bind('sidebarFiles')` consumes upstream's live namespace so strings track upstream automatically |
 | `client-remote.d.ts` | `@deepseek-ai/dsh-api-remotes/client`'s exported `ClientRemote` | `tsconfig.client.json` `paths` maps the specifier here so `face.ts`/`adapter.tsx`/`store.ts`/`FilesTree.tsx` (the only importers) compile against the dev-pin's `workspaceFiles` signatures on every supported manifest; on releases older than `0.2.0-rc.2` the real `changes` has two parameters (session-wide watch) and would fail the verbatim 3-argument call — safe because the `files.actions` slot does not exist there so the fork never mounts |
 | `primitives.ts` | the named primitives imports upstream spells | runtime-probes `IconFolderCloseRegular`/`IconFolderOpenRegular` (with `*16` pixel-era fallbacks), `FileTypeIcon`, and `classifyFileType` through `compat/client-icons`'s `maybeIcon`/`maybeComponent`; the adapter's gate turns a missing export into no tree at all — upstream's own absence shape |
-| `adapter.tsx` | upstream `apply`'s store/inject wiring | our wiring: `lazyFilesRemote` (`remote` and `remote.workspaceFiles` resolved per call through `ctx.get` — the inject-free store lookup, required because `remote.workspaceFiles` is a nested service whose context-proxy path throws "without inject" on undeclared fibers and this cordis treats every inject entry as required; every lookup failure — absent service, absent namespace, synchronous throw, or a rejected call — is folded into a settled `gateway/internal` RemoteResult/stream failure, because the verbatim `load` awaits `list` through `.then` with no `.catch` and an escaped rejection would die inside `DirectoryNode.task` pinning the level at `loading` forever), `createFilesTreeSeats` (the `store`/`inject` registration declarations: verbatim `filesFace` + session-bound `openFile`/`openFileIn` through `sidebarRight.openResourceIn` — the latter spelling the preview navigator's `replaceTab` route — plus the session-scoped `treeSelection` snapshot — exposed through the `hooks` compartment as `useTreeSelection` — and the (tab, root) takeover map that gives a body remount the native tree's occurrence-length lifetime), and `createFilesTreeSurface` (the prop-share assembly + the primitives gate) |
+| `adapter.tsx` | upstream `apply`'s store/inject wiring | our wiring: `lazyFilesRemote` (`remote` and `remote.workspaceFiles` resolved per call through `ctx.get` — the inject-free store lookup, required because `remote.workspaceFiles` is a nested service whose context-proxy path throws "without inject" on undeclared fibers and this cordis treats every inject entry as required; every lookup failure — absent service, absent namespace, synchronous throw, or a rejected call — is folded into a settled `gateway/internal` RemoteResult/stream failure, because the verbatim `load` awaits `list` through `.then` with no `.catch` and an escaped rejection would die inside `DirectoryNode.task` pinning the level at `loading` forever), `createFilesTreeSeats` (the `store`/`inject` registration declarations: verbatim `filesFace` + session-bound `openFile`/`openFileIn` through `sidebarRight.openResourceIn` — the latter spelling the preview navigator's `replaceTab` route — plus the session-scoped `treeSelection` snapshot — exposed through the `hooks` compartment as `useTreeSelection` — and the takeover map that gives a body remount the native tree's occurrence-length lifetime plus the per-owner `(expanded, scrollTop, revealed)` memory — the fork's spelling of upstream's pane record — kept while the hold closes but the owner's section lives), and `createFilesTreeSurface` (the prop-share assembly + the primitives gate) |
 | `locate.ts` | upstream navigator's `windowsRoot`/`underRoot`/`locateFile` + the `relativeFileOf` path math | path/level helpers the retargeted navigator reveal needs; `relativeUnderRoot`/`rootForPath` are ours — the containment check that picks the longest available additional root containing a previewed absolute path, skipping the primary root so primary files keep the native navigator |
-| `navigator.tsx` | upstream `FileNavigator`'s pane/body half | the preview-side retarget: a `sidebar.right.tab.document.actions` occupant finds the native `aside[data-files-navigator]` inside the preview's `data-dockkit-content` ancestor, marks it `data-mrfw-navigator` (styles.ts hides its `[data-files-body]` only), and portals the forked `FilesTree` in — rooted at the containing additional root, opening rows through `openFileIn` (`replaceTab`), revealing the previewed file, and restoring expansion/scroll memory across navigator collapses through the takeover map's owner-close snapshot |
+| `navigator.tsx` | upstream `FileNavigator`'s pane/body half | the preview-side retarget: a `sidebar.right.tab.document.actions` occupant finds the native `aside[data-files-navigator]` inside the preview's `data-dockkit-content` ancestor, marks it `data-mrfw-navigator` (styles.ts hides its `[data-files-body]` only), and portals the forked `FilesTree` in — rooted at the containing additional root, opening rows through `openFileIn` (`replaceTab`), and revealing the previewed file. Store bucket, takeover, and the saved `(expanded, scrollTop, revealed)` memory are all keyed by the dockkit PANE id (`data-files-navigator` on the aside), never by the preview tab — upstream's navigator records live in `store.byPane`, and the pane survives what a `replaceTab` open destroys |
 | `FORK.md` | — | this file |
 
 ## Intentional deltas (upstream `FilesBody.tsx` → `FilesTree.tsx`)
@@ -83,28 +85,50 @@ upstream binds inside it arrives as a prop instead:
   *primary* root). The preview navigator's `replaceTab` variant arrives as
   the injected `openFileIn` and is passed through `onOpen` unchanged, so
   the same `onOpen` prop serves both owners.
-- **Reveal**: upstream's navigator expands the previewed file's ancestors
-  one level per store update, marks its row `.current`, and scrolls it into
-  view. The fork replays that contract outside upstream's `FileNavigator`:
-  the optional `reveal` prop names the previewed absolute path; a shell
-  effect walks `locateFile` each update and toggles the first unexpanded
-  ancestor, and `TreeContext` gained `current`/`currentRef` so the file row
-  in `Entry` carries `data-files-current`/`aria-current` (the `mrfw-ft*`
-  rule in styles.ts paints the same active highlight upstream's `.current`
-  does) plus a callback ref that `scrollIntoView({block:'nearest'})`s once
-  when the row lands. A user collapse during an unsettled reveal cancels
-  it, matching upstream's manual-collapse stop. Those marks are the two
-  in-row deltas mentioned above; when the host `sidebar.files.tree` Factory
-  renders, `nativeTreeInput` hands it the same `current`/`currentRef` pair
-  so the native row shows its own highlight.
+- **Reveal**: upstream's navigator seeds `pane.revealing` with the drawn
+  file's address — unless `pane.revealed` already names it — and steps the
+  walk open (ancestors expanded one listing at a time, then the file's row
+  marked current and scrolled into view). The fork replays that contract
+  outside upstream's `FileNavigator`: the optional `reveal` prop names the
+  previewed absolute path plus the owner's remembered `revealed`; a shell
+  effect keeps the upstream walk state (`revealing` = in-flight target,
+  `revealed` = completed target, canceled on a mid-walk manual collapse —
+  upstream's `manual && collapsing → revealed = revealing`), steps the
+  first unexpanded ancestor per store update, and reports each settle
+  through `onSettled` so the owner can record `revealed`. A completed walk
+  suppresses re-stepping on reopen — the reader's collapse survives —
+  exactly upstream's `revealing = revealed === address ? undefined :
+  address`. `TreeContext` gained `current`/`currentRef` so the file row in
+  `Entry` carries `data-files-current`/`aria-current` (the `mrfw-ft*` rule
+  in styles.ts paints the same active highlight upstream's `.current`
+  does) plus a callback ref that `scrollIntoView({block:'nearest',
+  inline:'nearest'})`s once when the row lands — upstream's
+  `scrollToCurrent` flag replayed as `wantScroll`. Those marks are the
+  in-row deltas mentioned above; when the host `sidebar.files.tree`
+  Factory renders, `nativeTreeInput` hands it the same
+  `current`/`currentRef` pair so the native row shows its own highlight.
 - **Saved view state**: the optional `saved` prop hands back the
-  `(expanded, scrollTop)` snapshot the takeover map recorded while the
-  owner was closed. Re-expanding directories goes through the verbatim
+  `(expanded, scrollTop, revealed)` snapshot the takeover map recorded
+  while the owner was closed. Re-expanding goes through the verbatim
   `toggle` — its `root.setExpanded(next)` is upstream's own
-  restore-preference channel, so each saved root-level directory is
-  re-opened once with the whole snapshot as prefs and the nested ones
-  follow as their parents' listings land; the scroll offset is dispatched
-  before the seeded body's first layout reads it.
+  restore-preference channel — called once per remembered directory in
+  saved order (parents always precede their children), so nested
+  expansions land each level as it lists rather than only root-level
+  ones. The saved `scrollTop` is deferred until the reseeded body
+  overflows (a fresh bucket's `state.scrollTop` is 0 and would clamp the
+  write away); an in-flight walk owns the view meanwhile — the same
+  ordering upstream's restore-then-reveal produces. `revealed` seeds the
+  reveal's suppression.
+- **Scroll mirror**: the forked body's scroll is tracked by a NATIVE
+  `scroll` listener on the body element and reported through the optional
+  `onScrollOffset` prop (every scroll plus the final offset at unmount) —
+  upstream's `scrolled` writing `pane.scrollTop` live. React's `onScroll`
+  cannot serve here: the navigator portals the body outside its React
+  root's container, where delegated events never arrive.
+- **Body chrome**: the forked body carries upstream's `tabIndex={-1}`
+  reachability, and when the takeover hid a focused native body the
+  forked one takes the pane's focus (the body sits in the same aside as
+  its own parent — the handoff the native `bodyDrawn` performs).
 - **Header**: upstream draws `data-files-root`, `data-files-path`,
   `data-files-reload`, the auto-refresh control, and the
   `sidebar.right.tab.files.actions` slot; the fork draws none of them — the

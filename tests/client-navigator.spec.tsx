@@ -5,15 +5,20 @@
  * occupant is rendered inside a `[data-textpreview-url]` fixture, the
  * navigator aside is appended and removed the way the Folder toggle mounts
  * and unmounts it, and the takeover, reveal, replace-tab open route, and
- * close/reopen memory are observed through the stub Connection channel, the
+ * pane-record memory are observed through the stub Connection channel, the
  * stub `remote`/`sidebarRight` services, and the DOM.
  *
  * The preview fixture mirrors the upstream DOM shape the retarget reads —
  * `data-textpreview-url` (the tab's content id) on the preview root,
  * `data-textpreview-content` on the row the NavigatorSeat renders into,
- * `aside[data-files-navigator]` with a `[data-files-body]` inside it, and
- * `data-dockkit-content` on the tab host — because `closest` lookups and a
+ * `aside[data-files-navigator={paneId}]` with a `[data-files-body]` inside
+ * it, `data-dockkit-content` on the tab host, and `[data-dockkit-pane]` on
+ * the pane section above it — because `closest` lookups and a
  * MutationObserver are what decide whether the forked tree exists at all.
+ * The pane section survives tab replacement in the fixture exactly as it
+ * does in dockkit: a `replaceTab` mints a new tab inside the same pane, and
+ * the suite replays that by unmounting one host and mounting another under
+ * the unchanged pane.
  *
  * The harness plays the slot framework's part exactly as
  * `client-switcher.spec.tsx` does: it mints the registration's session
@@ -24,7 +29,7 @@
 import { createElement, useSyncExternalStore, type ReactElement } from 'react'
 import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { sessionFileAddress } from '@deepseek-ai/dsh-util-workspace-path'
+import { absoluteFileAddress, sessionFileAddress } from '@deepseek-ai/dsh-util-workspace-path'
 import type { StoreInstance } from '@deepseek-ai/dsh-client-store'
 import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from '../src/contract.ts'
 import type { FilesState } from '../src/client/files-tree/store.ts'
@@ -73,8 +78,9 @@ describe('the navigator path mechanics', () => {
     // The primary root's own files and outside paths match nothing.
     expect(rootForPath(view, '/repos/primary/a.ts')).toBeUndefined()
     expect(rootForPath(view, '/elsewhere/a.ts')).toBeUndefined()
-    // Even if a view ever listed the primary among its roots.
-    const odd: RootsView = { primaryRoot: '/repos/primary', roots: [{ ordinal: 1, id: 'p', path: '/repos/primary', addedAt: 't', state: 'available', access: 'read-write' }], limit: 16, count: 1 }
+    // Even if a view ever listed the primary among its roots — normalized
+    // spellings of the same directory compare equal too.
+    const odd: RootsView = { primaryRoot: '/repos/primary/', roots: [{ ordinal: 1, id: 'p', path: '/repos/primary', addedAt: 't', state: 'available', access: 'read-write' }], limit: 16, count: 1 }
     expect(rootForPath(odd, '/repos/primary/a.ts')).toBeUndefined()
   })
 
@@ -82,7 +88,7 @@ describe('the navigator path mechanics', () => {
     const tree = {
       root: '/r',
       levels: {
-        '/r': { kind: 'ready' as const, level: { entries: [{ name: 'src', type: 'directory' as const }, { name: 'top.ts', type: 'file' as const }], truncated: false }, failure: undefined },
+        '/r': { kind: 'ready' as const, level: { entries: [{ name: 'src', type: 'directory' as const }, { name: 'top.ts', type: 'file' }], truncated: false }, failure: undefined },
         '/r/src': { kind: 'loading' as const },
       },
     }
@@ -166,18 +172,32 @@ interface Registration {
 const ROOT_A: RootView = { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', access: 'read-write', alias: 'payments' }
 const ROOT_B: RootView = { ordinal: 2, id: 'b', path: '/repos/website', addedAt: '2026-09-12T00:00:00.000Z', state: 'missing', access: 'read-only', detail: 'gone' }
 
+/** The stub listing's tree: `src` is the reveal path, `other/deep` is the off-path nested memory. */
+const LISTINGS: Record<string, { name: string; type: 'file' | 'directory' }[]> = {
+  '/repos/payments': [{ name: 'src', type: 'directory' }, { name: 'other', type: 'directory' }, { name: 'notes.md', type: 'file' }],
+  '/repos/payments/src': [{ name: 'inner.ts', type: 'file' }],
+  '/repos/payments/other': [{ name: 'deep', type: 'directory' }, { name: 'loose.md', type: 'file' }],
+  '/repos/payments/other/deep': [{ name: 'x.ts', type: 'file' }],
+}
+
 interface Harness {
   readonly calls: Call[]
   readonly treeCalls: TreeCall[]
   readonly opens: OpenCall[]
-  readonly occupant: (owner?: { absolutePath?: string; sessionId?: string }) => unknown
+  /** Every `takeover.save` the occupant issued, in order. */
+  readonly saves: { key: string; snapshot: unknown }[]
+  /** Hold the next `workspaceFiles.list` for a path until its release runs. */
+  readonly holdList: (path: string) => () => void
+  readonly occupant: (owner?: Record<string, unknown>) => unknown
 }
 
 function mount(): Harness {
   const calls: Call[] = []
   const treeCalls: TreeCall[] = []
   const opens: OpenCall[] = []
+  const saves: { key: string; snapshot: unknown }[] = []
   const registrations: Registration[] = []
+  const held = new Map<string, Promise<void>>()
   const view: RootsView = { primaryRoot: '/repos/primary', primaryName: 'Platform', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 }
   const currentSession = 'session-1'
   const connection = {
@@ -192,15 +212,11 @@ function mount(): Harness {
     workspaceFiles: {
       list: async (sessionId: string, path: string) => {
         treeCalls.push({ kind: 'list', sessionId, path })
+        const gate = held.get(path)
+        if (gate !== undefined) await gate
         return {
           ok: true,
-          value: {
-            path,
-            truncated: false,
-            entries: path === '/repos/payments'
-              ? [{ name: 'src', type: 'directory' }, { name: 'notes.md', type: 'file' }]
-              : [{ name: 'inner.ts', type: 'file' }],
-          },
+          value: { path, truncated: false, entries: LISTINGS[path] ?? [{ name: 'inner.ts', type: 'file' }] },
         }
       },
       changes: (sessionId: string, path: string) => {
@@ -268,6 +284,11 @@ function mount(): Harness {
       const face = registration.options.inject?.(session, instance?.actions) ?? {}
       const { hooks, ...rest } = face
       product = { ...rest }
+      const takeover = product.takeover as { save?: (key: string, snapshot: unknown) => void } | undefined
+      if (takeover?.save !== undefined) {
+        const original = takeover.save
+        takeover.save = (key: string, snapshot: unknown) => { saves.push({ key, snapshot }); return original.call(takeover, key, snapshot) }
+      }
       for (const [name, source] of Object.entries(hooks as Record<string, Source> | undefined ?? {})) {
         product[`use${name.charAt(0).toUpperCase()}${name.slice(1)}`] = bindHook(source)
       }
@@ -279,6 +300,12 @@ function mount(): Harness {
     calls,
     treeCalls,
     opens,
+    saves,
+    holdList: (path: string) => {
+      let release: (() => void) | undefined
+      held.set(path, new Promise<void>(resolve => { release = resolve }))
+      return () => { held.delete(path); release?.() }
+    },
     occupant: owner => createElement(
       registration.component as (props: Record<string, unknown>) => ReactElement,
       {
@@ -310,23 +337,38 @@ afterEach(() => {
 /** The file the fixture previews: nested one directory under the additional root. */
 const PREVIEWED = '/repos/payments/src/inner.ts'
 
+interface PreviewMount {
+  readonly pane: HTMLElement
+  readonly preview: HTMLElement
+  readonly header: HTMLElement
+  readonly content: HTMLElement
+  readonly host: HTMLElement
+  readonly unmount: () => void
+}
+
 /**
  * Render the occupant inside a preview that mirrors the upstream scaffold:
  * `data-textpreview-url` on the root, `data-textpreview-content` on the row
- * the navigator seat renders into, all inside one dockkit tab host. The
- * `content` div is where the suite appends the navigator aside.
+ * the navigator seat renders into, all inside one dockkit tab host inside
+ * one dockkit pane. `tabId` changes between mounts but `pane` can be
+ * shared — the same pair dockkit keeps across a `replaceTab`.
  */
-function renderInPreview(harness: Harness, owner: { absolutePath?: string; sessionId?: string } = {}, file = PREVIEWED): {
-  preview: HTMLElement
-  header: HTMLElement
-  content: HTMLElement
-  host: HTMLElement
-  unmount: () => void
-} {
+function renderInPreview(
+  harness: Harness,
+  owner: Record<string, unknown> = {},
+  options: { file?: string; url?: string; tabId?: string; pane?: HTMLElement } = {},
+): PreviewMount {
+  const file = options.file ?? PREVIEWED
+  const pane = options.pane ?? document.createElement('section')
+  if (options.pane === undefined) {
+    pane.setAttribute('data-dockkit-pane', 'pane-1')
+    document.body.append(pane)
+    appended.push(pane)
+  }
   const host = document.createElement('section')
-  host.setAttribute('data-dockkit-content', 'tab-preview')
+  host.setAttribute('data-dockkit-content', options.tabId ?? 'tab-preview')
   const preview = document.createElement('div')
-  preview.setAttribute('data-textpreview-url', file === '' ? '' : sessionFileAddress('session-1', file))
+  preview.setAttribute('data-textpreview-url', options.url ?? sessionFileAddress('session-1', file))
   const header = document.createElement('div')
   const content = document.createElement('div')
   content.setAttribute('data-textpreview-content', '')
@@ -335,11 +377,10 @@ function renderInPreview(harness: Harness, owner: { absolutePath?: string; sessi
   content.append(body)
   preview.append(header, content)
   host.append(preview)
-  document.body.append(host)
-  appended.push(host)
+  pane.append(host)
   const occupant = harness.occupant(owner) as ReactElement
   const mounted = render(occupant, { container: header })
-  return { preview, header, content, host, unmount: () => { mounted.unmount() } }
+  return { pane, preview, header, content, host, unmount: () => { mounted.unmount() } }
 }
 
 /** Append the native navigator aside to the preview's content row. */
@@ -354,21 +395,43 @@ function openNavigator(content: HTMLElement): { aside: HTMLElement; body: HTMLEl
   return { aside, body }
 }
 
+/** The forked body the takeover portals into the aside. */
+function forkBody(aside: HTMLElement): HTMLElement {
+  const body = aside.querySelector<HTMLElement>('.mrfw-ftBody')
+  expect(body).not.toBeNull()
+  return body!
+}
+
+/** One directory row's expanded flag, by its path hook. */
+function expanded(aside: HTMLElement, path: string): boolean | undefined {
+  return aside.querySelector<HTMLElement>(`[data-files-path="${path}"] .mrfw-ftRow`)?.getAttribute('aria-expanded') === 'true'
+    ? true
+    : aside.querySelector(`[data-files-path="${path}"]`) === null ? undefined : false
+}
+
+/** Click one directory's row to toggle it, waiting for its child rows to land. */
+async function expandDir(aside: HTMLElement, path: string, child: string): Promise<void> {
+  const row = aside.querySelector<HTMLElement>(`[data-files-path="${path}"] .mrfw-ftRow`)
+  expect(row).not.toBeNull()
+  act(() => { row!.click() })
+  await waitFor(() => { expect(aside.querySelector(`[data-files-path="${child}"]`)).not.toBeNull() })
+}
+
 describe('the preview navigator retarget', () => {
   it('takes over the aside, reveals the previewed file, and routes opens through replaceTab', async () => {
     const harness = mount()
     const { content } = renderInPreview(harness, { absolutePath: PREVIEWED })
 
-    // The marker lives in the header immediately; the panel list decides.
+    // No aside → no list asked: the takeover cannot exist before the
+    // Folder toggle mounts the navigator.
+    expect(harness.calls.length).toBe(0)
+    expect(document.querySelector('aside[data-mrfw-navigator]')).toBeNull()
+
+    const { aside, body } = openNavigator(content)
     await waitFor(() => {
       expect(harness.calls.some(call => call.channel === PANEL_CHANNEL && call.endpoint === 'list'
         && call.payload.sessionId === 'session-1')).toBe(true)
     })
-
-    // Nothing happens before the Folder toggle mounts the aside.
-    expect(document.querySelector('aside[data-mrfw-navigator]')).toBeNull()
-
-    const { aside, body } = openNavigator(content)
     await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
 
     // The forked tree is portaled beside the (stylesheet-hidden) native body
@@ -398,82 +461,219 @@ describe('the preview navigator retarget', () => {
     expect(harness.opens.at(-1)?.options).toEqual({ replaceTab: 'tab-preview' })
   })
 
-  it('restores expansion and scroll across a navigator close and reopen', async () => {
+  it('restores nested off-path expansion across a navigator close and reopen', async () => {
     const harness = mount()
     const { content } = renderInPreview(harness, { absolutePath: PREVIEWED })
-    await waitFor(() => {
-      expect(harness.calls.some(call => call.endpoint === 'list')).toBe(true)
-    })
-
     const first = openNavigator(content)
-    await waitFor(() => {
-      expect(harness.treeCalls.some(call => call.kind === 'list' && call.path === '/repos/payments/src')).toBe(true)
-    })
+    await waitFor(() => { expect(first.aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
     await waitFor(() => {
       expect(first.aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
     })
 
-    // The Folder toggle closes: the aside leaves, the takeover ends.
-    act(() => { first.aside.remove() })
-    await waitFor(() => { expect(first.aside.hasAttribute('data-mrfw-navigator')).toBe(false) })
-    const listsAtClose = harness.treeCalls.filter(call => call.kind === 'list').length
+    // Expand a directory the reveal never walked — `other` and its nested
+    // `other/deep` — so this test cannot pass on the reveal's own stepping.
+    await expandDir(first.aside, '/repos/payments/other', '/repos/payments/other/deep')
+    await expandDir(first.aside, '/repos/payments/other/deep', '/repos/payments/other/deep/x.ts')
+    expect(expanded(first.aside, '/repos/payments/other/deep')).toBe(true)
 
-    // Reopened: a fresh aside, a fresh bucket — and the expansion memory
-    // restores `src` without any gesture (upstream's kept `expanded`).
+    act(() => { first.aside.remove() })
+    const callsAtClose = harness.treeCalls.length
+
     const second = openNavigator(content)
     await waitFor(() => { expect(second.aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    // Both directories come back expanded — the nested one's `toggled`
+    // write lands it in `expanded`, so the row draws open, and each level
+    // is re-listed in saved order (parents first).
     await waitFor(() => {
-      expect(harness.treeCalls.filter(call => call.kind === 'list').length).toBeGreaterThan(listsAtClose)
-      expect(harness.treeCalls.some(call => call.kind === 'list' && call.path === '/repos/payments/src'
-        && harness.treeCalls.indexOf(call) >= listsAtClose)).toBe(true)
+      expect(expanded(second.aside, '/repos/payments/other')).toBe(true)
+      expect(expanded(second.aside, '/repos/payments/other/deep')).toBe(true)
     })
+    await waitFor(() => { expect(second.aside.querySelector('[data-files-path="/repos/payments/other/deep/x.ts"]')).not.toBeNull() })
+    expect(harness.treeCalls.some((call, index) => call.kind === 'list' && call.path === '/repos/payments/other/deep'
+      && index >= callsAtClose)).toBe(true)
+  })
+
+  it('survives a replaceTab-style remount: same pane, new preview tab', async () => {
+    const harness = mount()
+    const first = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const firstAside = openNavigator(first.content).aside
+    await waitFor(() => { expect(firstAside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await expandDir(firstAside, '/repos/payments/other', '/repos/payments/other/deep')
+
+    // Upstream's `replaceTab` closes the preview tab and mints a new one in
+    // the same pane: the occupant unmounts, the tab host leaves the
+    // document, but the pane — and its `data-files-navigator` id — lives.
+    first.unmount()
+    first.host.remove()
+
+    const second = renderInPreview(harness, { absolutePath: '/repos/payments/other/loose.md' }, { tabId: 'tab-next', pane: first.pane })
+    const secondAside = openNavigator(second.content).aside
+    await waitFor(() => { expect(secondAside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    // The pane record carried the expansion across the tab's death.
+    await waitFor(() => { expect(expanded(secondAside, '/repos/payments/other')).toBe(true) })
+    // The new tab's opens replace ITS tab — the minted id, not the dead one.
+    const row = secondAside.querySelector<HTMLElement>('[data-files-path="/repos/payments/notes.md"] .mrfw-ftRow')
+    act(() => { row!.click() })
+    expect(harness.opens.at(-1)?.options).toEqual({ replaceTab: 'tab-next' })
+  })
+
+  it('keeps a post-settle manual collapse collapsed — including a restored ancestor', async () => {
+    const harness = mount()
+    const { content } = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const { aside } = openNavigator(content)
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
     await waitFor(() => {
-      expect(second.aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+      expect(aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+    })
+    // The walk settled. Collapsing the revealed file's ancestor must stay
+    // collapsed across later store updates — a settled walk never steps.
+    const srcRow = aside.querySelector<HTMLElement>('[data-files-path="/repos/payments/src"] .mrfw-ftRow')
+    act(() => { srcRow!.click() })
+    await waitFor(() => { expect(expanded(aside, '/repos/payments/src')).toBe(false) })
+    await expandDir(aside, '/repos/payments/other', '/repos/payments/other/deep')
+    expect(expanded(aside, '/repos/payments/src')).toBe(false)
+  })
+
+  it('honors a collapse across navigator close/reopen for the same file', async () => {
+    const harness = mount()
+    const { content } = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const first = openNavigator(content)
+    await waitFor(() => { expect(first.aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => {
+      expect(first.aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+    })
+    // The reader collapses the reveal's ancestor, then closes: the pane
+    // record's `revealed` must suppress re-stepping on reopen — without it
+    // the walk would reopen `src` as soon as its level lands.
+    act(() => { first.aside.querySelector<HTMLElement>('[data-files-path="/repos/payments/src"] .mrfw-ftRow')!.click() })
+    await waitFor(() => { expect(expanded(first.aside, '/repos/payments/src')).toBe(false) })
+    act(() => { first.aside.remove() })
+    const callsAtClose = harness.treeCalls.length
+
+    const second = openNavigator(content)
+    await waitFor(() => { expect(second.aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    // The file is revealed already: `src` comes back as a row but stays
+    // closed, and no listing is asked for it either.
+    await waitFor(() => { expect(second.aside.querySelector('[data-files-path="/repos/payments/src"]')).not.toBeNull() })
+    expect(expanded(second.aside, '/repos/payments/src')).toBe(false)
+    expect(harness.treeCalls.some((call, index) => call.kind === 'list' && call.path === '/repos/payments/src'
+      && index >= callsAtClose)).toBe(false)
+  })
+
+  it('restores the scroll offset saved at close once the body overflows', async () => {
+    const harness = mount()
+    const { content } = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const first = openNavigator(content)
+    await waitFor(() => { expect(first.aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => { expect(first.aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"]')).not.toBeNull() })
+    // The live scroll mirror, fed by the body's own scroll event.
+    const firstBody = forkBody(first.aside)
+    firstBody.scrollTop = 40
+    act(() => { firstBody.dispatchEvent(new Event('scroll')) })
+    act(() => { first.aside.remove() })
+    // The close-time save lands once the aside observer's microtask runs —
+    // and it must carry the live offset, not the stale zero.
+    await waitFor(() => {
+      expect(harness.saves.some(save => (save.snapshot as { scrollTop?: number }).scrollTop === 40)).toBe(true)
+    })
+
+    // jsdom has no layout — give every element an overflow so the deferred
+    // restore can land, then reopen.
+    const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
+    const originalClient = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get() { return this.clientHeight + 100 } })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return 100 } })
+    try {
+      const second = openNavigator(content)
+      await waitFor(() => { expect(second.aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+      await waitFor(() => { expect(forkBody(second.aside).scrollTop).toBe(40) })
+    } finally {
+      if (originalHeight !== undefined) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalHeight)
+      if (originalClient !== undefined) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalClient)
+    }
+  })
+
+  it('cancels an in-flight reveal when the reader collapses mid-walk', async () => {
+    const harness = mount()
+    const release = harness.holdList('/repos/payments/src')
+    try {
+      const { content } = renderInPreview(harness, { absolutePath: PREVIEWED })
+      const { aside } = openNavigator(content)
+      await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+      // `src` opened for the walk but its level is held: the reveal is
+      // pending — the reader's collapse now must stop it for good.
+      await waitFor(() => { expect(expanded(aside, '/repos/payments/src')).toBe(true) })
+      act(() => { aside.querySelector<HTMLElement>('[data-files-path="/repos/payments/src"] .mrfw-ftRow')!.click() })
+      await waitFor(() => { expect(expanded(aside, '/repos/payments/src')).toBe(false) })
+      release()
+      await waitFor(() => {
+        expect(harness.treeCalls.some(call => call.kind === 'list' && call.path === '/repos/payments/src')).toBe(true)
+      })
+      await act(async () => {})
+      // The listing landed, the walk stayed dead: `src` remains closed.
+      expect(expanded(aside, '/repos/payments/src')).toBe(false)
+    } finally {
+      release()
+    }
+  })
+
+  it('hands the native tree Factory the current row and its ref', async () => {
+    const harness = mount()
+    const captured: { name: string; input: { current?: string; currentRef?: unknown } }[] = []
+    const renderFactorySlot = (name: string, input: { current?: string; currentRef?: unknown }): null => {
+      captured.push({ name, input })
+      return null
+    }
+    const { content } = renderInPreview(harness, { absolutePath: PREVIEWED, renderFactorySlot })
+    const { aside } = openNavigator(content)
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => {
+      expect(captured.some(call => call.name === 'sidebar.files.tree' && call.input.current === '/repos/payments/src/inner.ts'
+        && typeof call.input.currentRef === 'function')).toBe(true)
     })
   })
 
   it('never touches the native navigator for files outside additional roots', async () => {
     const harness = mount()
-    const { content } = renderInPreview(harness, { absolutePath: '/repos/primary/README.md' }, '/repos/primary/README.md')
+    const { content } = renderInPreview(harness, { absolutePath: '/repos/primary/README.md' }, { file: '/repos/primary/README.md' })
+    const { aside } = openNavigator(content)
     await waitFor(() => {
       expect(harness.calls.some(call => call.endpoint === 'list')).toBe(true)
     })
-    const { aside } = openNavigator(content)
     await act(async () => {})
     expect(aside.hasAttribute('data-mrfw-navigator')).toBe(false)
     expect(aside.querySelector('.mrfw-ftBody')).toBeNull()
     expect(harness.treeCalls.length).toBe(0)
   })
 
-  it('refuses files under unavailable roots and other sessions', async () => {
+  it('refuses absolute-scope addresses and other sessions', async () => {
     const harness = mount()
-    // Under the 'missing' additional root: no takeover.
-    const missing = renderInPreview(harness, { absolutePath: '/repos/website/a.ts' }, '/repos/website/a.ts')
+    // An absolute-scope content id is not a session file: the retarget
+    // cannot prove the preview belongs to this session and stands down,
+    // exactly like upstream's `relativeFileOf` rejecting non-session scope.
+    const absolute = renderInPreview(harness, { absolutePath: PREVIEWED }, { url: absoluteFileAddress(PREVIEWED) })
+    const firstAside = openNavigator(absolute.content).aside
+    await act(async () => {})
+    expect(firstAside.hasAttribute('data-mrfw-navigator')).toBe(false)
+    expect(harness.calls.length).toBe(0)
+
+    // A session file of ANOTHER session never takes this one over.
+    const other = renderInPreview(harness, { absolutePath: PREVIEWED }, { url: sessionFileAddress('session-2', PREVIEWED), tabId: 'tab-other' })
+    const secondAside = openNavigator(other.content).aside
+    await act(async () => {})
+    expect(secondAside.hasAttribute('data-mrfw-navigator')).toBe(false)
+    expect(harness.treeCalls.length).toBe(0)
+  })
+
+  it('refuses files under unavailable roots', async () => {
+    const harness = mount()
+    const missing = renderInPreview(harness, { absolutePath: '/repos/website/a.ts' }, { file: '/repos/website/a.ts' })
+    const { aside } = openNavigator(missing.content)
     await waitFor(() => {
       expect(harness.calls.some(call => call.endpoint === 'list')).toBe(true)
     })
-    const firstAside = openNavigator(missing.content).aside
     await act(async () => {})
-    expect(firstAside.hasAttribute('data-mrfw-navigator')).toBe(false)
-
-    // A content id naming another session never takes this one over, even
-    // though the owner path would match.
-    const preview = document.createElement('div')
-    preview.setAttribute('data-textpreview-url', sessionFileAddress('session-2', '/repos/payments/src/inner.ts'))
-    const header = document.createElement('div')
-    const content = document.createElement('div')
-    content.setAttribute('data-textpreview-content', '')
-    const host = document.createElement('section')
-    host.setAttribute('data-dockkit-content', 'tab-other')
-    preview.append(header, content)
-    host.append(preview)
-    document.body.append(host)
-    appended.push(host)
-    render(harness.occupant({ absolutePath: '/repos/payments/src/inner.ts' }) as ReactElement, { container: header })
-    await act(async () => {})
-    const secondAside = openNavigator(content).aside
-    await act(async () => {})
-    expect(secondAside.hasAttribute('data-mrfw-navigator')).toBe(false)
+    expect(aside.hasAttribute('data-mrfw-navigator')).toBe(false)
     expect(harness.treeCalls.length).toBe(0)
   })
 })

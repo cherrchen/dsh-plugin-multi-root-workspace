@@ -60,22 +60,43 @@ export type FilesTreeProps =
     /** Optional host-controlled tree Factory, available on the newer Files page. */
     readonly nativeTree?: NativeTreeRenderer | undefined
     /**
+     * The owner's live scroll mirror — upstream's `scrolled` writing
+     * `pane.scrollTop`: fired on every scroll and once more at unmount with
+     * the body's final offset, so a close-time save needs no React ordering
+     * guarantee to carry the live value. The fork's own store still hears
+     * the offset only at unmount through `actions.scrolled`, as upstream.
+     */
+    readonly onScrollOffset?: ((offset: number) => void) | undefined
+    /**
      * The preview navigator's locate-current-file request: expand the file's
      * ancestors, mark its row current, and scroll it into view — what the
-     * native navigator's `revealing`/`step()` does with `pane.current`. The
-     * sequence keys on the absolute path; a new preview of the same path
-     * settles the same way, so no revision is needed. Absent on the Files
-     * page, which has no current file.
+     * native navigator's `revealing`/`step()`/`revealed` does with
+     * `pane.current` and `scrollToCurrent`. `revealed` is the owner's memory
+     * of the last completed walk: a path equal to it suppresses stepping —
+     * exactly upstream's `revealing = revealed === address ? undefined :
+     * address` on a body mount — while `onSettled` reports each completed
+     * walk (found, unreachable, or canceled) so the owner can record it.
+     * Absent on the Files page, which has no current file.
      */
-    readonly reveal?: { readonly path: string } | undefined
+    readonly reveal?: {
+      readonly path: string
+      readonly revealed?: string | undefined
+      readonly onSettled?: ((path: string) => void) | undefined
+    } | undefined
     /**
-     * Expansion and scroll offset saved while this tree's owner was closed
-     * — the preview navigator's close/reopen memory, matching the pane
-     * record's surviving `expanded`/`scrollTop` upstream. Applied once,
-     * right after `start`, while the root's listing is still in flight, so
-     * the remembered directories re-expand as their levels land.
+     * Expansion, scroll offset, and reveal memory saved while this tree's
+     * owner was closed — the pane record's surviving `expanded`/`scrollTop`/
+     * `revealed` upstream. `expanded` is replayed through `toggle` (the
+     * verbatim face's own restore-preferences channel) right after `start`,
+     * so every remembered directory re-expands as its level lands; the
+     * scroll offset is deferred until the body overflows, and `revealed`
+     * seeds the reveal's suppression.
      */
-    readonly saved?: { readonly expanded?: readonly string[]; readonly scrollTop?: number } | undefined
+    readonly saved?: {
+      readonly expanded?: readonly string[]
+      readonly scrollTop?: number
+      readonly revealed?: string
+    } | undefined
   }
 
 /** Natural, case-insensitive name order, so `file2` precedes `file10`. */
@@ -200,112 +221,154 @@ function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
  * verbatim, with the root arriving as a prop instead of `useSessions(cwd)`.
  */
 export function FilesTree({
-  tabId, sessionId, root, signal, useStore, actions, start, toggle, onOpen, t, nativeTree, reveal, saved,
+  tabId, sessionId, root, signal, useStore, actions, start, toggle, onOpen, t, nativeTree, reveal, saved, onScrollOffset,
 }: FilesTreeProps): ReactNode {
   const state = useStore(store => store.byTab[tabId])
   const bodyRef = useRef<HTMLDivElement>(null)
   const scrollTopRef = useRef(0)
-  // The reveal's settled mark — the row key `locateFile` reached once every
-  // ancestor was expanded; `undefined` while the walk is still underway.
+  // The reveal's current mark — the row key `locateFile` can name; kept in
+  // sync even while stepping so a suppressed or finished walk still marks.
   const [current, setCurrent] = useState<string | undefined>(undefined)
-  // Expand requests dispatched for the active reveal target — plus the
-  // manual-collapse flag upstream calls the reveal's cancellation — so a
-  // store update that left the ancestor unexpanded cannot dispatch it
-  // forever, and a reader closing a directory mid-walk stops the walk.
-  const requested = useRef<{ key: string | undefined; paths: Set<string>; canceled: boolean }>({ key: undefined, paths: new Set(), canceled: false })
-  // The target key the walk last settled on; a manual collapse cancels only
-  // an unsettled walk, never a mark already placed.
-  const settledKey = useRef<string | undefined>(undefined)
-  // The native navigator scrolls the current row into view as its button
-  // mounts (`currentRef`); a stable callback means only mounts fire it.
+  // The walk state, spelled like upstream's pane record: `key` is the
+  // in-flight target (`revealing`), `settled`/`canceled` mark its end, and
+  // `seed` is the mount-time `revealed` — suppressed once, then spent,
+  // because upstream's `revealed` is live rather than mount-frozen.
+  const walk = useRef<{ key: string | undefined; settled: boolean; canceled: boolean }>({ key: undefined, settled: false, canceled: false })
+  const revealSeed = useRef(saved?.revealed)
+  // Upstream's `scrollToCurrent`: a settled walk scrolls the row into view
+  // the next time it mounts — and only then; unrelated remounts never
+  // yank the view.
+  const wantScroll = useRef(false)
   const currentRef = useCallback((row: unknown) => {
-    if (row instanceof HTMLElement) row.scrollIntoView({ block: 'nearest' })
+    if (row instanceof HTMLElement && wantScroll.current) {
+      wantScroll.current = false
+      row.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    }
   }, [])
   const revealPath = reveal?.path
+  const revealOnSettled = reveal?.onSettled
   // The reveal target's identity for the whole walk — encoded, so a root
   // and a path can never smear into another pair's spelling.
   const revealKey = revealPath === undefined || state === undefined
     ? undefined
     : JSON.stringify([state.root, revealPath])
-  // The native navigator's `revealing`/`step()`: walk the listed levels
-  // toward the previewed file, expanding the first unexpanded ancestor each
-  // pass. The store updates landing underneath re-run the effect until
-  // every ancestor is open and the walk settles, then the file's row is
-  // current. A file outside the root, or a path the walk cannot reach,
-  // settles with no mark — the same end the native walk reaches.
+  // The native navigator's `step()`: while a walk is in flight, expand the
+  // first unexpanded ancestor each pass — store updates landing underneath
+  // re-run the effect — then settle (`revealing` cleared, `revealed`
+  // recorded). Once settled or suppressed there is no walk to step: the
+  // mark alone follows the loaded levels.
   useEffect(() => {
     if (revealPath === undefined || revealKey === undefined || state === undefined || signal.aborted) { setCurrent(undefined); return }
-    if (requested.current.key !== revealKey) requested.current = { key: revealKey, paths: new Set(), canceled: false }
-    // Upstream marks the target revealed and stops stepping the moment the
-    // reader collapses anything mid-walk; the flag lands in `tree.onToggle`.
-    if (requested.current.canceled) { settledKey.current = revealKey; return }
+    if (walk.current.key !== revealKey) walk.current = { key: revealKey, settled: false, canceled: false }
     const relative = relativeUnderRoot(revealPath, state.root)
     const location = relative === undefined ? undefined : locateFile(state, relative)
+    if (walk.current.settled || walk.current.canceled || revealSeed.current === revealPath) {
+      setCurrent(location?.current)
+      return
+    }
     const next = location?.ancestors.find(ancestor => !state.expanded.includes(ancestor.path))
-    if (location !== undefined && next !== undefined && !requested.current.paths.has(next.path)) {
-      requested.current.paths.add(next.path)
+    if (location !== undefined && next !== undefined) {
       toggle(tabId, next.parent, next.path, state.expanded, signal)
       setCurrent(undefined)
       return
     }
-    // `pending` means a level on the way is still listing; `next` still
-    // unexpanded after its request means the expand was dropped (the parent
-    // node is not live) — both end like a directory that failed: no mark.
-    const settled = location === undefined || location.pending || next !== undefined ? undefined : location.current
-    if (location === undefined || !location.pending) settledKey.current = revealKey
-    setCurrent(settled)
-  }, [revealKey, state, tabId, signal, toggle])
+    if (location?.pending === true) return
+    walk.current.settled = true
+    revealSeed.current = undefined
+    revealOnSettled?.(revealPath)
+    if (location?.current !== undefined) wantScroll.current = true
+    setCurrent(location?.current)
+  }, [revealKey, state, tabId, signal, toggle, revealPath, revealOnSettled])
+  const pendingScroll = useRef(0)
   // Come back where the reader was: loaded levels outlive the body in the
   // store, so a remounted tree lays out at its full height before this runs
-  // and the stored offset re-lands exactly. A fresh tree stores 0.
+  // and the stored offset re-lands exactly. A fresh tree stores 0. The
+  // focus handoff mirrors the native body taking the pane's focus: when the
+  // takeover hid a focused native body, the forked one — sitting in the
+  // same aside as the body's own parent — takes it over.
   const seeded = state !== undefined
   useLayoutEffect(() => {
     const body = bodyRef.current
     if (seeded && body !== null) {
       body.scrollTop = state.scrollTop
       scrollTopRef.current = body.scrollTop
+      if (body.parentElement?.contains(body.ownerDocument.activeElement) === true) body.focus()
     }
   }, [seeded])
-  // Scrolling only moves the ref; the store hears about it once, on unmount,
-  // so a scroll neither re-renders the tree nor writes after the owner's
-  // abort has forgotten the bucket.
+  // The offset a closed owner left behind can only land once the reseeded
+  // body overflows — reseeding drops every level, so the first layout is
+  // always short. It is declared after the seeded restore so the bucket's
+  // own `scrollTop` — 0 on a fresh reseed — never overwrites it when both
+  // fire on the same commit. An in-flight walk owns the view instead (its
+  // current row wins), matching upstream's restore-then-reveal-scroll
+  // ordering.
+  useLayoutEffect(() => {
+    const body = bodyRef.current
+    if (body === null || pendingScroll.current <= 0) return
+    const inFlight = revealPath !== undefined && !walk.current.settled && !walk.current.canceled && revealSeed.current !== revealPath
+    if (inFlight || body.scrollHeight > body.clientHeight) {
+      if (!inFlight) {
+        body.scrollTop = pendingScroll.current
+        scrollTopRef.current = body.scrollTop
+      }
+      pendingScroll.current = 0
+    }
+  })
+  // The scroll mirror is a native listener, not React's onScroll: the body
+  // can be portaled outside its React root's container, where delegated
+  // events never reach — a listener on the body itself always fires.
+  // Scrolling only moves the ref; the store hears about it once, on
+  // unmount, so a scroll neither re-renders the tree nor writes after the
+  // owner's abort has forgotten the bucket. The owner's live mirror hears
+  // it too — and once more at unmount with the final offset, even when the
+  // abort already silenced the store write.
+  useLayoutEffect(() => {
+    const body = bodyRef.current
+    if (body === null) return
+    const scroll = (): void => {
+      scrollTopRef.current = body.scrollTop
+      onScrollOffset?.(scrollTopRef.current)
+    }
+    body.addEventListener('scroll', scroll, { passive: true })
+    return () => { body.removeEventListener('scroll', scroll) }
+  }, [seeded, onScrollOffset])
   useEffect(() => () => {
     if (seeded && !signal.aborted) actions.scrolled(tabId, scrollTopRef.current)
-  }, [seeded, signal, tabId, actions])
+    onScrollOffset?.(scrollTopRef.current)
+  }, [seeded, signal, tabId, actions, onScrollOffset])
   useEffect(() => {
     // A bucket gone because the record aborted must not be re-seeded by a
     // component that has not unmounted yet.
     if (state !== undefined || signal.aborted) return
     start(tabId, root, signal)
     // The owner-closed memory lands behind the seed through the verbatim
-    // `toggle`: each saved root-level directory is re-opened with the whole
-    // snapshot as its expansion prefs — the `root.setExpanded(next)` inside
-    // `toggle` is upstream's own restore channel, so nested directories
-    // follow as their parents' listings land, exactly like the kept
-    // `expanded` upstream hands a fresh directory node. The scroll offset
-    // waits for the seeded body's first layout to claim it.
+    // `toggle` — its `root.setExpanded(next)` is upstream's own
+    // restore-preferences channel. Every remembered directory re-expands in
+    // saved order (parents always precede their children there), exactly
+    // like the `relisting` upstream runs on its kept `expanded`; the nested
+    // ones' `toggled` writes land them in `expanded` so the rows draw open.
     if (saved?.expanded !== undefined) {
       for (const path of saved.expanded) {
-        const relative = relativeUnderRoot(path, root)
-        if (relative !== undefined && !relative.includes('/')) {
-          toggle(tabId, root, path, saved.expanded.filter(value => value !== path), signal)
-        }
+        if (path === root || relativeUnderRoot(path, root) === undefined) continue
+        toggle(tabId, path.slice(0, path.lastIndexOf('/')), path, saved.expanded.filter(value => value !== path), signal)
       }
     }
-    if (saved?.scrollTop !== undefined && saved.scrollTop > 0) actions.scrolled(tabId, saved.scrollTop)
+    if (saved?.scrollTop !== undefined) pendingScroll.current = saved.scrollTop
   }, [state, root, tabId, signal, start, toggle, saved, actions])
 
   if (state === undefined) return null
   const tree: TreeContext = {
     state,
     onToggle: (parent, path) => {
-      // The native navigator treats any manual collapse during an
-      // unsettled reveal as the reveal's cancellation (`revealed =
+      // The native navigator settles an in-flight reveal the moment the
+      // reader collapses anything (`manual && collapsing → revealed =
       // revealing`): the walk stops wherever it stands instead of
       // re-opening what the reader just closed.
-      if (revealKey !== undefined && state.expanded.includes(path) && settledKey.current !== revealKey) {
-        if (requested.current.key !== revealKey) requested.current = { key: revealKey, paths: new Set(), canceled: true }
-        else requested.current.canceled = true
+      if (revealKey !== undefined && !walk.current.settled && !walk.current.canceled
+          && revealSeed.current !== revealPath && state.expanded.includes(path) && revealPath !== undefined) {
+        walk.current.canceled = true
+        revealSeed.current = undefined
+        revealOnSettled?.(revealPath)
       }
       toggle(tabId, parent, path, state.expanded, signal)
     },
@@ -328,7 +391,9 @@ export function FilesTree({
     <div
       ref={bodyRef}
       className={css.body}
-      onScroll={(event) => { scrollTopRef.current = event.currentTarget.scrollTop }}
+      // The native body is `tabIndex={-1}` — the pane's focus handoff lands
+      // on it; the fork keeps the same reachability.
+      tabIndex={-1}
     >
       {content}
     </div>

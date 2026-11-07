@@ -56,26 +56,64 @@ export type TreeSelection = Readonly<Record<string, RootView>>
  * native tree across a body remount (opening a file deactivates this tab,
  * unmounting its body without ending the record).
  */
+/**
+ * The tree-view memory one closed owner keeps for its next open — the
+ * fork's spelling of upstream's pane record: `expanded`/`scrollTop` survive
+ * the hold's end, and `revealed` is the last previewed file the reveal
+ * walk completed (upstream's `pane.revealed`). Entries live per
+ * (key, root), so one pane previewing files of different roots keeps each
+ * root's memory apart.
+ */
+export interface FilesTreeSaved {
+  /** The root this snapshot belongs to; a stale snapshot never crosses roots. */
+  readonly root: string
+  /** Expansion preferences at the moment the owner closed. */
+  readonly expanded?: readonly string[]
+  /** The body's scroll offset at the moment it closed. */
+  readonly scrollTop?: number
+  /** The last previewed file whose reveal completed — suppresses re-stepping. */
+  readonly revealed?: string
+}
+
 export interface FilesTreeTakeover {
   /**
-   * The live signal for (tabId, root); reuses the live entry so a remounted
+   * The live signal for (key, root); reuses the live entry so a remounted
    * body finds its bucket and watches intact. A different root — or an entry
    * already aborted — ends the previous controller before minting the next.
-   * @param tabId - the pane's dockkit tab id.
+   * @param key - the owner's dockkit identity: the Files pane's tab id, or
+   *   the preview navigator's pane id.
    * @param root - absolute path of the root being browsed.
-   * @param section - the dockkit tabHost section the caller mounted under; a
-   *   live entry keeps an observer on it that ends the takeover whenever the
-   *   section leaves the document — the record's real end — including when the
-   *   body that mounted it has long been unmounted itself.
+   * @param section - the dockkit section the caller mounted under; a live
+   *   entry keeps an observer on it that ends the takeover whenever the
+   *   section leaves the document — the record's real end — including when
+   *   the body that mounted it has long been unmounted itself. That end
+   *   also drops the saved memory: a dead owner keeps nothing.
    * @returns the signal the forked tree lives under.
    */
-  readonly signal: (tabId: TabId, root: string, section?: Element) => AbortSignal
+  readonly signal: (key: TabId, root: string, section?: Element) => AbortSignal
   /**
-   * Abort and drop one tab's takeover: the reader deselected or switched
-   * roots, or the tab record itself went away.
-   * @param tabId - the pane's dockkit tab id.
+   * Abort and drop one owner's takeover: the reader deselected, switched
+   * roots, or the owner's hold closed. The saved memory survives — ending
+   * the hold is not ending the owner (upstream's `pane.root?.close()`
+   * leaves `pane.tree` in the store).
+   * @param key - the owner's dockkit identity.
    */
-  readonly end: (tabId: TabId) => void
+  readonly end: (key: TabId) => void
+  /**
+   * The tree-view memory kept for (key, root) — `undefined` before the
+   * first close or after the owner's section died.
+   * @param key - the owner's dockkit identity.
+   * @param root - absolute path of the root the memory belongs to.
+   */
+  readonly saved: (key: TabId, root: string) => FilesTreeSaved | undefined
+  /**
+   * Merge memory for (key, snapshot.root): fields present in the snapshot
+   * overwrite, fields absent keep what was saved before — so a settle-time
+   * `revealed` write survives the close-time `expanded`/`scrollTop` write.
+   * @param key - the owner's dockkit identity.
+   * @param snapshot - the memory fields to record.
+   */
+  readonly save: (key: TabId, snapshot: FilesTreeSaved) => void
 }
 
 /** The inject face the registration composes onto the occupant's props. */
@@ -236,11 +274,15 @@ export function createFilesTreeSeats(ctx: ClientContext): {
       observer: MutationObserver | undefined
     }
     const takeovers = new Map<TabId, Held>()
-    const endTakeover = (tabId: TabId): void => {
-      const held = takeovers.get(tabId)
+    // The pane-record memory: a hold ending keeps it, the owner's section
+    // dying drops it — `end()` below versus the observer's `dropSaved` end.
+    const savedTrees = new Map<TabId, Map<string, FilesTreeSaved>>()
+    const endTakeover = (key: TabId, dropSaved = false): void => {
+      const held = takeovers.get(key)
       held?.observer?.disconnect()
       held?.controller.abort()
-      takeovers.delete(tabId)
+      takeovers.delete(key)
+      if (dropSaved) savedTrees.delete(key)
     }
     return {
       face: face(sessionId, actions),
@@ -260,30 +302,45 @@ export function createFilesTreeSeats(ctx: ClientContext): {
         selection.set(next)
       },
       takeover: {
-        signal: (tabId, root, section) => {
-          let held = takeovers.get(tabId)
+        signal: (key, root, section) => {
+          let held = takeovers.get(key)
           if (held === undefined || held.root !== root || held.controller.signal.aborted) {
             held?.observer?.disconnect()
             held?.controller.abort()
             held = { controller: new AbortController(), root, section: undefined, observer: undefined }
-            takeovers.set(tabId, held)
+            takeovers.set(key, held)
           }
           // The section watch lives at this scope, not the caller's: a body
           // that unmounted cannot run another cleanup, but the record may
           // still end — closing an already-hidden tab removes the section —
-          // and only an observer outliving the body sees that.
+          // and only an observer outliving the body sees that. This end is
+          // the owner's death: the saved memory goes with the record.
           if (section !== undefined && held.section !== section) {
             held.section = section
             held.observer?.disconnect()
             held.observer = new MutationObserver(() => {
-              if (!section.isConnected) endTakeover(tabId)
+              if (!section.isConnected) endTakeover(key, true)
             })
             held.observer.observe(document, { childList: true, subtree: true })
           }
-          if (held.section !== undefined && !held.section.isConnected) endTakeover(tabId)
+          if (held.section !== undefined && !held.section.isConnected) endTakeover(key, true)
           return held.controller.signal
         },
-        end: endTakeover,
+        end: key => { endTakeover(key) },
+        saved: (key, root) => savedTrees.get(key)?.get(root),
+        save: (key, snapshot) => {
+          let perRoot = savedTrees.get(key)
+          if (perRoot === undefined) savedTrees.set(key, perRoot = new Map())
+          const previous = perRoot.get(snapshot.root)
+          const merged: { -readonly [P in keyof FilesTreeSaved]: FilesTreeSaved[P] } = { root: snapshot.root }
+          const expanded = snapshot.expanded ?? previous?.expanded
+          const scrollTop = snapshot.scrollTop ?? previous?.scrollTop
+          const revealed = snapshot.revealed ?? previous?.revealed
+          if (expanded !== undefined) merged.expanded = expanded
+          if (scrollTop !== undefined) merged.scrollTop = scrollTop
+          if (revealed !== undefined) merged.revealed = revealed
+          perRoot.set(snapshot.root, merged)
+        },
       },
     }
   }
