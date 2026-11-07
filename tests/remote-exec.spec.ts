@@ -26,7 +26,7 @@ function manifestFile() {
   const path = join(fixture.base, 'deploy.json')
   writeFileSync(path, JSON.stringify({
     schemaVersion: 1, configVersion: 'cfg-1',
-    environments: [{ environmentId: 'build-01', platform: 'linux', account: 'ci', hostKey: `SHA256:${'A'.repeat(43)}`, namespace: 'ns', transport: 'sftp', helper: null }],
+    environments: [{ environmentId: 'build-01', platform: 'linux', account: 'ci', hostKey: `SHA256:${'A'.repeat(43)}`, namespace: 'ns', transport: 'sftp', helper: null, connection: { host: 'vps' }, credentialIsolation: 'unattested' }],
     bindings: [{ primary: fixture.workspace, environmentId: 'build-01', rootId: 'app', path: '/work/app', actions: ['read', 'write', 'exec'] }],
   }))
   chmodSync(path, 0o600)
@@ -47,7 +47,7 @@ class FakeHandle implements RemoteProcessHandle {
   async waitForExit() { return this.waitResult }
 }
 
-function fakeBackend(over: { enforcement?: 'enforced' | 'partial' | 'none' } = {}) {
+function fakeBackend(over: { enforcement?: 'full' | 'partial' } = {}) {
   const state = {
     generation: 'gen-1',
     confineCalls: [] as { argv: readonly string[]; policy: { sessionId: string } }[],
@@ -61,7 +61,7 @@ function fakeBackend(over: { enforcement?: 'enforced' | 'partial' | 'none' } = {
       const generation = state.generation
       state.confineCalls.push({ argv: [...argv], policy })
       await state.confineGate?.promise
-      return { argv, enforcement: over.enforcement ?? 'enforced', generation }
+      return { argv, enforcement: over.enforcement ?? 'full', generation }
     },
     currentGeneration: () => state.generation,
     spawn(argv, options, sink) {

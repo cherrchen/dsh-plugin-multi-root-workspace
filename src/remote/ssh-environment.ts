@@ -1,0 +1,250 @@
+/**
+ * The SSH environment manager: turns a verified manifest environment into a
+ * live `SshEnvironment` — host identity checked BEFORE any official class is
+ * constructed, the official stack mounted inside an isolated Context, and one
+ * connection per environment. A disposed or lost environment never blocks the
+ * others; reopening produces a new generation rather than a reconnect.
+ */
+import { randomUUID } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { Context } from '@deepseek-ai/cordis'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
+import { classifyInstallation, classifySshCapability, sshPackageVersion, sshPrivateCopy, type SshCapability } from '../compat/dsh-version.ts'
+import { loadHostSshPackages } from '../compat/ssh-packages.ts'
+import type { DeploymentManifest, RemoteEnvironment } from './manifest.ts'
+
+export class SshEnvironmentError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message)
+    this.name = 'SshEnvironmentError'
+  }
+}
+
+/** What `ssh -G <alias>` resolves this host to — the deployer's identity story. */
+export interface SshHostIdentity {
+  readonly user: string
+  readonly hostname: string
+  readonly knownHostsFiles: readonly string[]
+  readonly strictHostKeyChecking: string
+  readonly forwardAgent: string
+  readonly batchMode: string
+}
+
+export interface SshEnvironment {
+  readonly environmentId: string
+  readonly generation: string
+  readonly hello: Readonly<Record<string, unknown>>
+  readonly fs: unknown
+  readonly sandbox: { confine(argv: readonly string[], policy: unknown, signal?: AbortSignal): Promise<{ argv: readonly string[]; enforcement: string }> }
+  readonly subprocess: { spawn(spec: unknown): { done: Promise<unknown>; waitForExit(ms?: number): Promise<boolean>; terminate(): void; collected: unknown } }
+  dispose(): Promise<void>
+}
+
+export interface SshEnvironmentManagerOptions {
+  readonly manifest: DeploymentManifest
+  readonly logger: { debug(message: string): void; warn(message: string): void }
+  readonly gate?: SshCapability
+  readonly allowUnattestedForTesting?: boolean
+  readonly exec?: (file: string, args: readonly string[], input?: string) => Promise<{ stdout: string; stderr: string }>
+  readonly readFile?: (path: string) => string
+}
+
+const defaultExec = (file: string, args: readonly string[], input?: string) => new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+  const child = execFile(file, [...args], { encoding: 'utf8' }, (error, stdout, stderr) => {
+    if (error !== null && stdout === '') reject(error)
+    else resolve({ stdout: String(stdout), stderr: String(stderr) })
+  })
+  if (input !== undefined) child.stdin?.end(input)
+})
+
+/**
+ * Parse `ssh -G` output into the fields the deployer must prove: the login,
+ * the resolved hostname, every user known_hosts file, and the safety flags.
+ */
+export function parseSshConfig(stdout: string): SshHostIdentity {
+  const fields: Record<string, string> = {}
+  for (const line of stdout.split('\n')) {
+    const match = /^(\S+)\s+(.*)$/.exec(line.trim())
+    if (match !== null) fields[match[1]!.toLowerCase()] = match[2]!.trim()
+  }
+  if (fields.user === undefined || fields.hostname === undefined) {
+    throw new SshEnvironmentError('host-identity-unverifiable', `ssh -G resolved no user/hostname: ${JSON.stringify(stdout.slice(0, 200))}`)
+  }
+  const files = (fields.userknownhostsfile ?? '').split(/\s+/).filter(file => file !== '' && file !== '/dev/null' && file.toLowerCase() !== 'none')
+  const strict = (fields.stricthostkeychecking ?? '').toLowerCase()
+  if (strict !== 'true' && strict !== 'yes') {
+    throw new SshEnvironmentError('host-identity-unverifiable', `strictHostKeyChecking is "${fields.stricthostkeychecking ?? ''}", must be yes`)
+  }
+  return {
+    user: fields.user, hostname: fields.hostname, knownHostsFiles: files,
+    strictHostKeyChecking: strict, forwardAgent: (fields.forwardagent ?? '').toLowerCase(),
+    batchMode: (fields.batchmode ?? '').toLowerCase(),
+  }
+}
+
+/** The ssh-keygen -F + -lf pipeline, broken out so tests feed fixture text. */
+export async function hostKeyFingerprint(
+  hostname: string, files: readonly string[],
+  exec: NonNullable<SshEnvironmentManagerOptions['exec']>,
+): Promise<{ keys: number; fingerprint: string | undefined }> {
+  const keyLines: string[] = []
+  for (const file of files) {
+    const { stdout } = await exec('ssh-keygen', ['-F', hostname, '-f', file]).catch(() => ({ stdout: '', stderr: '' }))
+    for (const line of stdout.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed !== '' && !trimmed.startsWith('#') && /\s(?:ssh-|sk-|ecdsa|rsa)/u.test(trimmed)) keyLines.push(trimmed)
+    }
+  }
+  if (keyLines.length !== 1) return { keys: keyLines.length, fingerprint: undefined }
+  const { stdout } = await exec('ssh-keygen', ['-lf', '-'], keyLines[0])
+  const match = /SHA256:[A-Za-z0-9+/]{43}/u.exec(stdout)
+  return { keys: 1, fingerprint: match?.[0] }
+}
+
+export class SshEnvironmentManager {
+  private readonly manifest: DeploymentManifest
+  private readonly logger: SshEnvironmentManagerOptions['logger']
+  private readonly gate: SshCapability
+  private readonly allowUnattested: boolean
+  private readonly exec: NonNullable<SshEnvironmentManagerOptions['exec']>
+  private readonly readFile: (path: string) => string
+  private readonly openings = new Map<string, Promise<SshEnvironment>>()
+  private readonly resolved = new Map<string, SshEnvironment>()
+
+  constructor(options: SshEnvironmentManagerOptions) {
+    this.manifest = options.manifest
+    this.logger = options.logger
+    this.gate = options.gate ?? classifySshCapability({
+      platform: process.platform, local: classifyInstallation(),
+      readVersion: sshPackageVersion, privateCopy: sshPrivateCopy,
+    })
+    this.allowUnattested = options.allowUnattestedForTesting === true
+    this.exec = options.exec ?? defaultExec
+    this.readFile = options.readFile ?? (path => readFileSync(path, 'utf8'))
+  }
+
+  /** The live generation for an environment — a sentinel when none is open. */
+  generationOf(environmentId: string): string {
+    return this.resolved.get(environmentId)?.generation ?? 'stale'
+  }
+
+  /** Open (or join the in-flight open of) one environment's connection. */
+  async open(environmentId: string): Promise<SshEnvironment> {
+    const existing = this.openings.get(environmentId)
+    if (existing !== undefined) return await existing
+    const promise = this.openFresh(environmentId)
+    this.openings.set(environmentId, promise)
+    try {
+      const env = await promise
+      this.resolved.set(environmentId, env)
+      return env
+    } catch (error) { this.openings.delete(environmentId); throw error }
+  }
+
+  /** Mark an environment's connection as lost; the next open builds anew. */
+  markStale(environmentId: string): void {
+    const opening = this.openings.get(environmentId)
+    this.openings.delete(environmentId)
+    this.resolved.delete(environmentId)
+    void opening?.then(env => env.dispose()).catch(() => {})
+  }
+
+  async dispose(environmentId: string): Promise<void> {
+    const opening = this.openings.get(environmentId)
+    this.openings.delete(environmentId)
+    this.resolved.delete(environmentId)
+    if (opening !== undefined) await opening.then(env => env.dispose(), () => {})
+  }
+
+  async disposeAll(): Promise<void> {
+    const ids = [...this.openings.keys()]
+    await Promise.all(ids.map(id => this.dispose(id)))
+  }
+
+  /** The full ordered admission: gate → transport → isolation → identity → load → mount. */
+  private async openFresh(environmentId: string): Promise<SshEnvironment> {
+    const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
+    if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
+    if (this.gate.status !== 'eligible') {
+      throw new SshEnvironmentError(`ssh-capability-absent:${this.gate.status === 'absent' ? this.gate.reason : 'unknown'}`, `SSH capability is not eligible on this host`)
+    }
+    if (environment.transport !== 'helper') throw new SshEnvironmentError('transport-not-helper', `environment "${environmentId}" uses transport "${environment.transport}"`)
+    if (environment.credentialIsolation !== 'attested' && !this.allowUnattested) {
+      throw new SshEnvironmentError('credential-isolation-unattested', `environment "${environmentId}" is declared unattested; connections require an attested deployment`)
+    }
+    const identity = await this.verifyHostIdentity(environment)
+    const connection = environment.connection
+    const modules = await loadHostSshPackages(this.gate) as Record<string, Record<string, unknown> & { default?: Record<string, unknown> }>
+    const exported = (pkg: string, name: string) => modules[pkg]![name] ?? modules[pkg]!.default?.[name]
+    const ctx = new Context()
+    const mount = ctx.plugin.bind(ctx) as (plugin: unknown, config?: unknown) => { dispose(): Promise<void> }
+    const fibers = [
+      mount(SessionProjectionRegistry),
+      mount(SandboxPolicyService, { mode: 'read-only', workspaceRoot: connection.workspace! }),
+      mount(exported('@deepseek-ai/dsh-ssh', 'SshConnection'), {
+        host: connection.host,
+        launch: { kind: 'node-script', node: connection.nodePath! },
+        helper: connection.helperPath!, helperHash: environment.helper!.sha256,
+        workspace: connection.workspace!,
+      }),
+      mount(exported('@deepseek-ai/dsh-fs-ssh', 'SshFileSystem')),
+      mount(exported('@deepseek-ai/dsh-subprocess-ssh', 'SshSubprocessRuntime')),
+      mount(exported('@deepseek-ai/dsh-sandbox-ssh', 'SshSandboxProvider')),
+    ]
+    try {
+      await Promise.all(fibers)
+      const services = ctx as unknown as {
+        ssh: { ready: Promise<Record<string, unknown>> }
+        fs: unknown
+        sandbox: unknown
+        subprocess: unknown
+      }
+      const hello = await services.ssh.ready
+      if (hello.platform !== environment.platform) {
+        throw new SshEnvironmentError('platform-mismatch', `environment "${environmentId}" declares "${environment.platform}" but reports "${String(hello.platform)}"`)
+      }
+      this.logger.debug(`[ssh-env] ${environmentId} ready as ${identity.user}@${identity.hostname} protocol ${String(hello.protocol)}`)
+      const env: SshEnvironment = {
+        environmentId, generation: randomUUID(),
+        hello: { platform: hello.platform, workspace: hello.workspace, executable: hello.executable, protocol: hello.protocol },
+        fs: services.fs, sandbox: services.sandbox as SshEnvironment['sandbox'], subprocess: services.subprocess as SshEnvironment['subprocess'],
+        dispose: async () => { for (const fiber of [...fibers].reverse()) await fiber.dispose() },
+      }
+      return env
+    } catch (error) {
+      for (const fiber of [...fibers].reverse()) await fiber.dispose().catch(() => {})
+      throw error
+    }
+  }
+
+  /**
+   * Host identity binding: `ssh -G` resolves the alias the deployer named; the
+   * account and host key must be the ones the manifest declares — a resolved
+   * identity that drifts from the manifest is a refusal, never a hint.
+   */
+  private async verifyHostIdentity(environment: RemoteEnvironment): Promise<SshHostIdentity> {
+    const { host } = environment.connection
+    let stdout: string
+    try {
+      stdout = (await this.exec('ssh', ['-G', host])).stdout
+    } catch (error) {
+      throw new SshEnvironmentError('host-identity-unverifiable', `ssh -G ${host} failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    const identity = parseSshConfig(stdout)
+    if (identity.user !== environment.account) {
+      throw new SshEnvironmentError('account-mismatch', `manifest account "${environment.account}" but ssh resolves user "${identity.user}"`)
+    }
+    if (identity.forwardAgent !== 'no') {
+      throw new SshEnvironmentError('host-identity-unverifiable', `host "${host}" must set ForwardAgent no (resolved "${identity.forwardAgent}")`)
+    }
+    const files = identity.knownHostsFiles.filter(file => { try { this.readFile(file); return true } catch { return false } })
+    const { keys, fingerprint } = await hostKeyFingerprint(identity.hostname, files, this.exec)
+    if (keys !== 1) throw new SshEnvironmentError('host-identity-unverifiable', `host "${host}" resolves ${keys} known_hosts keys, exactly one required`)
+    if (fingerprint !== environment.hostKey) {
+      throw new SshEnvironmentError('host-key-mismatch', `manifest hostKey "${environment.hostKey}" but known_hosts verifies "${fingerprint ?? 'none'}"`)
+    }
+    return identity
+  }
+}

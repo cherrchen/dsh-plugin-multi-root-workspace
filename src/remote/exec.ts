@@ -26,7 +26,7 @@ export interface RemoteExecutionBackend {
     argv: readonly string[],
     policy: { mode: 'workspace-write'; workspaceRoot: string; sessionId: string },
     signal: AbortSignal,
-  ): Promise<{ argv: readonly string[]; enforcement: 'enforced' | 'partial' | 'none'; generation: string }>
+  ): Promise<{ argv: readonly string[]; enforcement: 'full' | 'partial'; generation: string }>
   currentGeneration(): string
   spawn(
     argv: readonly string[],
@@ -125,10 +125,13 @@ export async function runRemoteCommand(
       const admitted = operation.endpoints[0]!
       const remoteCwd = cwdRelative === '' ? admitted.displayPath : posix.join(admitted.displayPath, cwdRelative)
       const argv = [...deployment.shell, request.command]
-      const confined = await backend.confine(argv, {
-        mode: 'workspace-write', workspaceRoot: admitted.displayPath, sessionId: operation.identity.sessionId,
-      }, signal)
-      if (confined.enforcement !== 'enforced') return denied('sandbox-unverified')
+      let confined: Awaited<ReturnType<RemoteExecutionBackend['confine']>>
+      try {
+        confined = await backend.confine(argv, {
+          mode: 'workspace-write', workspaceRoot: admitted.displayPath, sessionId: operation.identity.sessionId,
+        }, signal)
+      } catch { return denied('confine-failed') }
+      if (confined.enforcement !== 'full') return denied('sandbox-unverified')
       return {
         epoch: operation.identity.authorityEpoch, effectiveMode: operation.identity.effectiveMode,
         endpoint: admitted, generation: confined.generation, argv: confined.argv, remoteCwd, deployment,

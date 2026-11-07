@@ -18,7 +18,7 @@ function manifestFile(name = 'deploy.json', mutate = (doc: Record<string, unknow
   const path = join(fixture.base, name)
   writeFileSync(path, JSON.stringify(mutate({
     schemaVersion: 1, configVersion: 'cfg-1',
-    environments: [{ environmentId: 'build-01', platform: 'linux', account: 'ci', hostKey: `SHA256:${'A'.repeat(43)}`, namespace: 'ns-build', transport: 'sftp', helper: null }],
+    environments: [{ environmentId: 'build-01', platform: 'linux', account: 'ci', hostKey: `SHA256:${'A'.repeat(43)}`, namespace: 'ns-build', transport: 'sftp', helper: null, connection: { host: 'vps' }, credentialIsolation: 'unattested' }],
     bindings: [{ primary: fixture.workspace, environmentId: 'build-01', rootId: 'app', path: '/work/app', actions: ['read', 'write', 'exec'] }],
   })))
   chmodSync(path, 0o600)
