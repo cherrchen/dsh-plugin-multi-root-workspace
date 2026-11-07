@@ -156,6 +156,25 @@ export const RUNNER_ANCHORED_PACKAGES = [
 /** The required package whose tree produces the upstream runner argv. */
 const RUNNER_ANCHOR_PACKAGE = '@deepseek-ai/dsh-sandbox-local'
 
+/**
+ * The upstream releases whose SSH packages this plugin may load, as EXACT
+ * version strings and always a suffix of {@link SUPPORTED_DSH_RELEASES} —
+ * remote capability is a narrower floor than local support, never wider.
+ */
+export const SUPPORTED_SSH_RELEASES = ['0.2.2-rc.1'] as const
+
+/**
+ * The optional SSH peers the multi-environment experiment loads. NOT part of
+ * {@link CORE_PACKAGES}: their absence, version drift, or a private copy only
+ * ever makes SSH absent — it never touches the local compat verdict.
+ */
+export const SSH_PEER_PACKAGES = [
+  '@deepseek-ai/dsh-ssh',
+  '@deepseek-ai/dsh-fs-ssh',
+  '@deepseek-ai/dsh-subprocess-ssh',
+  '@deepseek-ai/dsh-sandbox-ssh',
+] as const
+
 /** Every package the contract inspects, required first. */
 export const CORE_PACKAGES = [...REQUIRED_CORE_PACKAGES, ...OPTIONAL_CORE_PACKAGES] as const
 
@@ -249,7 +268,7 @@ function hostAnchorRequire(require: NodeRequire): NodeRequire | undefined {
  *   `exports` is tried first, then a walk up from this module's file.
  * @returns the package root, or `undefined` when neither anchor works.
  */
-function pluginPackageRoot(require: NodeRequire): string | undefined {
+export function pluginPackageRoot(require: NodeRequire): string | undefined {
   try {
     return dirname(require.resolve('@dsh-electron/dsh-plugin-multi-root-workspace/package.json'))
   } catch {
@@ -268,7 +287,7 @@ function pluginPackageRoot(require: NodeRequire): string | undefined {
  * mark of a private copy no composition can mount. An unknown root cannot
  * exclude anything, so it answers `false` rather than guessing.
  */
-function insidePackageRoot(manifestPath: string, root: string | undefined): boolean {
+export function insidePackageRoot(manifestPath: string, root: string | undefined): boolean {
   return root !== undefined && (manifestPath === root || manifestPath.startsWith(`${root}${sep}`))
 }
 
@@ -416,4 +435,98 @@ function report(
         'See docs/troubleshooting/unsupported-dsh-release.md',
       ]
   return { verdict, release, packages, message: body.join('\n') }
+}
+
+/** Why SSH capability is absent on an otherwise healthy installation. */
+export type SshAbsentReason =
+  | 'platform-deferred'
+  | 'local-compat-not-supported'
+  | 'host-below-floor'
+  | 'missing-optional-package'
+  | 'identity-mismatch'
+
+/** The SSH gate's verdict: loadable, or absent with exactly one reason. */
+export type SshCapability =
+  | { readonly status: 'eligible'; readonly release: string }
+  | {
+      readonly status: 'absent'
+      readonly reason: SshAbsentReason
+      readonly detail: string
+      readonly packages: readonly InspectedPackage[]
+    }
+
+export interface SshCapabilityInput {
+  readonly platform: NodeJS.Platform
+  readonly local: CompatReport
+  readonly readVersion: VersionReader
+  readonly privateCopy?: (packageName: string) => boolean
+}
+
+function sshAbsent(reason: SshAbsentReason, detail: string, packages: readonly InspectedPackage[]): SshCapability {
+  return { status: 'absent', reason, detail, packages }
+}
+
+/**
+ * Judge SSH capability SEPARATELY from the local verdict, and only ever
+ * narrower: an ineligible SSH gate must read as absence, never as a local
+ * compat failure. Checked in an order where each reason is well-defined:
+ * platform first, then the local verdict, the SSH floor, presence, identity.
+ * @param input - platform, the local {@link CompatReport}, a version reader,
+ *   and an optional private-copy predicate for the resolved location.
+ * @returns `eligible` only when every condition holds; otherwise `absent`.
+ */
+export function classifySshCapability(input: SshCapabilityInput): SshCapability {
+  const packages: InspectedPackage[] = SSH_PEER_PACKAGES.map(name => ({
+    name, version: input.readVersion(name), required: false,
+  }))
+  if (input.platform !== 'linux' && input.platform !== 'darwin') {
+    return sshAbsent('platform-deferred', `remote environments are deferred on ${input.platform}`, packages)
+  }
+  if (input.local.verdict !== 'supported') {
+    return sshAbsent('local-compat-not-supported', `the local compatibility verdict is "${input.local.verdict}"`, packages)
+  }
+  const release = input.local.release!
+  if (!(SUPPORTED_SSH_RELEASES as readonly string[]).includes(release)) {
+    return sshAbsent('host-below-floor', `DSH ${release} is below the SSH support floor (${SUPPORTED_SSH_RELEASES.join(', ')})`, packages)
+  }
+  const missing = packages.filter(entry => entry.version === undefined)
+  if (missing.length > 0) {
+    return sshAbsent('missing-optional-package', `SSH packages are not installed: ${missing.map(entry => entry.name).join(', ')}`, packages)
+  }
+  const off = packages.filter(entry => entry.version !== release || input.privateCopy?.(entry.name) === true)
+  if (off.length > 0) {
+    return sshAbsent('identity-mismatch', `SSH packages do not match the host release or resolve privately: ${off.map(entry => entry.name).join(', ')}`, packages)
+  }
+  return { status: 'eligible', release }
+}
+
+/**
+ * The default SSH version reader: the `@deepseek-ai/dsh` host anchor first —
+ * the copy the composition actually mounts — else this module. Whatever it
+ * finds is reported; deciding whether it counts is {@link sshPrivateCopy}'s job.
+ */
+export function sshPackageVersion(packageName: string): string | undefined {
+  const require = createRequire(import.meta.url)
+  const host = hostAnchorRequire(require)
+  const hostHit = host === undefined ? undefined : resolvePackageJson(host, packageName)
+  const hit = hostHit ?? resolvePackageJson(require, packageName)
+  return hit === undefined ? undefined : versionOfManifest(hit)
+}
+
+/**
+ * Whether the SSH package's resolved copy is a private one only this package
+ * can see: the host anchor cannot reach it AND the only resolvable copy lives
+ * inside this package's own root. When the composition itself sits inside
+ * this root (the development checkout), containment cannot separate the two
+ * cases, so nothing is flagged — same rule as an unknown root.
+ */
+export function sshPrivateCopy(packageName: string): boolean {
+  const require = createRequire(import.meta.url)
+  const root = pluginPackageRoot(require)
+  const anchor = resolvePackageJson(require, '@deepseek-ai/dsh')
+  if (anchor === undefined || insidePackageRoot(anchor, root)) return false
+  const host = createRequire(anchor)
+  if (resolvePackageJson(host, packageName) !== undefined) return false
+  const selfHit = resolvePackageJson(require, packageName)
+  return selfHit !== undefined && insidePackageRoot(selfHit, root)
 }

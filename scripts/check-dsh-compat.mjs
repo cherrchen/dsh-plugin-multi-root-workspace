@@ -65,7 +65,10 @@ const supported = readStringArray(contractSource, 'SUPPORTED_DSH_RELEASES')
 const required = readStringArray(contractSource, 'REQUIRED_CORE_PACKAGES')
 const optional = readStringArray(contractSource, 'OPTIONAL_CORE_PACKAGES')
 const hostService = readStringArray(contractSource, 'HOST_SERVICE_PACKAGES')
+const sshSupported = readStringArray(contractSource, 'SUPPORTED_SSH_RELEASES')
+const sshPeers = readStringArray(contractSource, 'SSH_PEER_PACKAGES')
 const core = [...required, ...optional]
+const sshNames = new Set(sshPeers)
 
 const manifest = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'))
 const peers = manifest.peerDependencies ?? {}
@@ -90,7 +93,27 @@ for (const name of required) {
   if (!(name in peers)) fail(`${name} is a required core package but is not declared in peerDependencies`)
 }
 
-// 3. No @deepseek-ai/* package may be a shipped dependency. Peers resolve to
+// 3a. The SSH floor is a suffix of the ordinary allowlist — remote capability
+//     can only ever be NARROWER than local support, never a release this
+//     plugin does not support at all.
+if (sshSupported.length === 0 || supported.slice(supported.length - sshSupported.length).join('|') !== sshSupported.join('|')) {
+  fail(`SUPPORTED_SSH_RELEASES (${sshSupported.join(', ')}) must be a non-empty suffix of SUPPORTED_DSH_RELEASES`)
+}
+
+// 3b. The SSH peers are declared exactly once each, all optional: missing SSH
+//     packages are a legitimate installation, never a boot failure.
+const declaredSsh = Object.keys(peers).filter(name => sshNames.has(name))
+if (declaredSsh.length !== sshPeers.length || new Set(declaredSsh).size !== sshPeers.length) {
+  fail(`peerDependencies must declare exactly the SSH peer packages (${sshPeers.join(', ')})`)
+}
+for (const name of sshPeers) {
+  if (manifest.peerDependenciesMeta?.[name]?.optional !== true) {
+    fail(`peerDependenciesMeta["${name}"].optional must be true — an absent SSH peer is legitimate`)
+  }
+  if (core.includes(name)) fail(`${name} is an SSH peer package and must never be classified as a core package`)
+}
+
+// 3c. No @deepseek-ai/* package may be a shipped dependency. Peers resolve to
 //    the single copy the host carries; a shipped dep installs a SECOND copy
 //    into the profile — `dsh-sandbox-local` pulls schemastery/node-addon-system
 //    itself, so a private one only ever differs from the host's, and the
@@ -105,10 +128,14 @@ for (const field of ['dependencies', 'optionalDependencies']) {
 
 // 4. The development pin is one of the allowlisted releases. CI runs this pin,
 //    so a pin outside the allowlist means the list has no evidence behind it.
+//    The SSH packages pin a release of their own floor instead — it may differ
+//    from the core pin while it stays a SUPPORTED_SSH_RELEASES member.
 const pinned = new Set()
+const sshPinned = new Set()
 for (const [name, version] of Object.entries(devs)) {
   if (name !== '@deepseek-ai/dsh' && !name.startsWith('@deepseek-ai/dsh-')) continue
-  pinned.add(version)
+  if (sshNames.has(name)) sshPinned.add(version)
+  else pinned.add(version)
 }
 if (pinned.size > 1) {
   fail(`devDependencies pin several dsh releases (${[...pinned].sort().join(', ')}); pin exactly one`)
@@ -118,10 +145,25 @@ if (pinned.size > 1) {
   else if (!supported.includes(pin)) fail(`devDependencies pin ${pin}, which is not on the allowlist`)
   else notes.push(`development pin: ${pin}`)
 }
+for (const name of sshPeers) {
+  if (!(name in devs)) fail(`${name} is an SSH peer package but has no devDependencies pin`)
+}
+if (sshPinned.size > 1) {
+  fail(`devDependencies pin several SSH releases (${[...sshPinned].sort().join(', ')}); pin exactly one`)
+} else {
+  const [pin] = [...sshPinned]
+  if (pin === undefined) fail('devDependencies pin no SSH release at all')
+  else if (!sshSupported.includes(pin)) fail(`devDependencies pin SSH ${pin}, which is not a supported SSH release`)
+  else notes.push(`SSH development pin: ${pin}`)
+}
 
 // 5. What is actually installed here agrees with itself and with the allowlist.
 //    This mirrors the runtime gate, so `pnpm compat:check` reproduces a boot
-//    refusal without booting a harness.
+//    refusal without booting a harness. SSH peers stay OUT of this set —
+//    a missing or deviating SSH copy never produces a local verdict here.
+if (sshPeers.some(name => core.includes(name))) {
+  fail('SSH packages must never enter the inspected core package set')
+}
 const installed = new Map()
 for (const name of core) {
   try {
@@ -147,6 +189,8 @@ if (releases.length > 1) {
 }
 
 // The optional integration's release is narrower than ordinary support.
+notes.push(`SSH floor: ${sshSupported.join(', ')}`)
+
 const autoReviewContract = readFileSync(join(REPO_ROOT, 'src/compat/auto-review-contract.ts'), 'utf8')
 const autoRelease = /AUTO_REVIEW_RELEASE = '([^']+)'/u.exec(autoReviewContract)?.[1]
 if (autoRelease === undefined || !supported.includes(autoRelease)) fail('Auto Review exact release must belong to the ordinary allowlist')
