@@ -1745,3 +1745,24 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 返工后 [CI run 42341613467](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/42341613467) 全部 **89/89** job success（22 个支持版本 × 四个 runner 与 gate）。抽查：rc.1 ubuntu-latest 上 remote-registry **11**、remote-exec **9**、remote-manifest **25**、ssh-compat **7**、remote-multiprocess **5**、remote-protocol **4** 全部实跑（全量 1267 passed / 93 skipped）；rc.1 windows-latest 上只执行 `platform-deferred` 用例与纯解析/注入式 classify，其余按设计跳过；`0.1.5-rc.2` ubuntu-latest 上远端控制面用例全部实跑，ssh-compat 仅两项真实树用例因低于 SSH 地板跳过。
 
 **未验证与下一步：** 当前控制面本身只受 `remoteEnvironments` 开关与平台约束，测试中可在低于 SSH 地板的宿主上运行；它在没有校验器和后端时不能登记或执行任何远端操作。G5 接线时须让控制面的启用同时服从 `classifySshCapability` 的 `eligible`，使低于地板的宿主静默缺席。`loadHostSshPackages` 尚无生产调用方，连接构造、真实部署绑定与 hostKey 轮换在 G4 后半；`remote_bash` 未暴露给任何组合，真实远端执行依赖受信部署与真实 SSH 端点证据。
+
+## 多执行环境真实 SSH 取证与 G4 接线（2026-11-07）
+
+**状态：在一台维护者临时提供、可丢弃的 VPS 上取得首批真实 SSH 证据，并把官方 SSH 组合接到 G1a/G3/G4 接缝；仍无任何用户入口，部署凭据隔离未证明（unattested）。** 目标：Ubuntu 24.04.5 x86_64、内核 6.8、OpenSSH 9.6p1，1 vCPU / 848 MB。发起端：macOS arm64 / Node 24.18.0 / DSH `0.2.2-rc.1`。凭据、主机别名配置与 `ssh` 包装脚本只存在于仓库外的 `~/.dsh-ssh-test/`（700）；不进仓库或 `.dsh-smoke` 日志。主机密钥按首次使用固定为 ED25519 `SHA256:ZVJcb8gU2m2/IDlL0Zq4y2dzsJxbaMKHqm12KbIQ8D0`，客户端 known_hosts 只含这一把。
+
+**部署：** `dshbuild`（普通账户，Helper/执行）与 `dshxfer`（`internal-sftp`、chroot `/srv/dsh/xfer`、仅 `/import` 可写、禁转发与 TTY）各用独立密钥；工作根 `/srv/dsh/work/{app,lib}`，根外哨兵 `/srv/dsh/outside/sentinel.txt`（root 0644）。Node 24.22.2 官方包校验 SHASUMS256 后装于 root 所有的 `/opt/node-v24`；`@deepseek-ai/dsh-ssh@0.2.2-rc.1` 以 `--omit=dev --ignore-scripts` 装于 root 所有的 `/opt/dsh-helper`，`lib/helper.js` SHA-256 `8cf436d3…f40e`，与本仓库安装物逐字节相同。Ubuntu 24.04 默认 `kernel.apparmor_restrict_unprivileged_userns=1` 使普通用户 bwrap 失败；加载系统自带的 `bwrap-userns-restrict` AppArmor profile 后 bwrap 可用，全局限制保持开启。
+
+| 证据（均为执行成功） | 结果 |
+| --- | --- |
+| 上游 live e2e | 上游干净 checkout `66491b05e`：`packages/ssh/ssh/tests/live.e2e.ts` **7 passed / 2 skipped / 0 failed**；两项跳过为未配置的 PTC bootstrap 与远端 LSP，不计通过。上游工作树未被修改。 |
+| 远端内核与逐调用策略 | hello：linux、protocol 3、workspace `/srv/dsh/work/app`。`confine` 的 workspace-write 与 read-only 均为 `enforcement: full`（bwrap）；danger-full-access 被拒绝。受限 shell：根内写成功；同机另一根 `/srv/dsh/work/lib` 与根外哨兵写入均 `Read-only file system`，哨兵摘要不变；`/tmp` 可写（后端私有临时区，如实披露）。FS 逐调用策略：read-only 写入拒绝、workspace-write 允许。 |
+| 受管 SFTP 原语（`scripts/probe-sftp-primitives.mjs`） | 服务器通告 `posix-rename`、`hardlink`、`fsync` 等扩展。`SSH_FXF_EXCL` 首次创建成功、同名二次创建被拒且原字节不变；0 字节与 96 KiB（3 次 WRITE）回读摘要一致；`hardlink` 到不存在目标成功（nlink 1→2），到已存在目标被拒且目标不变——**存在原子 no-replace 发布原语**；`posix-rename` 覆盖已存在目标，不能作 no-replace；`fsync` 可用。 |
+
+**G4 接线（`src/remote/`）：** 清单环境新增必填 `connection`（helper：别名、Node、Helper、默认 workspace；sftp：仅别名）、可选 `exec`（部署控制的 shell、环境变量、时限与输出上限）及必填 `credentialIsolation`。`SshEnvironmentManager` 在构造任何官方类之前依次检查：SSH 能力闸门 `eligible` → helper 传输 → 隔离声明为 `attested`（仅测试可显式放行 `unattested`）→ `ssh -G` 解析出的登录账户等于清单 `account`、StrictHostKeyChecking 开启、ForwardAgent 为 `no`、known_hosts 恰有一把密钥且指纹等于清单 `hostKey`；随后宿主锚定装载四包，在独立 Context 中按上游 live fixture 顺序挂载并核对 hello 平台。每个环境一个连接与代次，dispose 或失联只影响本环境，重开产生新代次。`SshEndpointVerifier` 以 read-only `full` 受限进程取登记目录的 realpath 与 `dev:ino`，路径被重定向即拒绝，登记为对象型身份。`sshExecBackend` 把 G3 合同接到官方 `confine` 与 `spawn`；G3 合同的执行面枚举改为上游实际的 `full`/`partial`，`confine` 失败报告 `not-started`。
+
+| 本仓库测试 | 结果 |
+| --- | --- |
+| `tests/remote-ssh.live.e2e.ts`（需 `DSH_MULTI_ROOT_SSH_LIVE` 与包装 PATH，CI 中跳过） | **5/5 实跑**：两个环境登记为对象身份；清单 hostKey 改一位或 account 不符在建连前拒绝；Helper 摘要不符由上游连接拒绝且未登记；经双准入的 `remote_bash` 根内写入并回读，根外哨兵与同机另一根写入失败且哨兵不变，退出码 7、输出截断、`sleep 30` 超时终止，只读会话 `mode-denies` 且零次 confine，完全访问会话收敛为 workspace-write 且仍 `full`；A/B 之间撤权零次 spawn；释放一个环境不影响另一个环境的在途命令，重开后旧代次 argv 被 `admission-changed` 拒绝；非 eligible 闸门在 `ssh -G` 前拒绝。 |
+| 单元与回归 | `ssh-environment` 5/5（`ssh -G` 解析与指纹比较用夹具）；远端批次 72/72；`verify:all` **1276 passed / 100 skipped / 0 failed**，compose 54、behavior 137、journey 76、packed 136。 |
+
+**未验证与限制：** 部署凭据隔离未证明：私钥、ControlMaster socket 与 `ssh` 由发起端同一 OS 用户持有，本地 Agent 的原生 bash/PTC 理论上可复用，故清单标为 `unattested`，按 ADR-0032 不得对模型开放。只验证了 Linux 目标；macOS 目标、Linux 发起端、其他 Ubuntu 版本、hostKey 轮换、真实断线中途注入均未覆盖。上游 `spawn` 无独立启动确认，`started` 在返回时即视为成立。G2 复制尚未实现，SFTP 原语只是端点能力证据。

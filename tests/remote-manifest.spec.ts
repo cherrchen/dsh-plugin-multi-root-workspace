@@ -11,7 +11,8 @@ const dir = () => { const d = mkdtempSync(join(tmpdir(), 'mrw-manifest-')); dirs
 
 const env = (over: Record<string, unknown> = {}) => ({
   environmentId: 'build-01', platform: 'linux', account: 'ci', hostKey: `SHA256:${'A'.repeat(43)}`,
-  namespace: 'ns-build', transport: 'sftp', helper: null, ...over,
+  namespace: 'ns-build', transport: 'sftp', helper: null,
+  connection: { host: 'vps' }, credentialIsolation: 'unattested', ...over,
 })
 const binding = (over: Record<string, unknown> = {}) => ({
   primary: '/ws/app', environmentId: 'build-01', rootId: 'app', path: '/work/app', actions: ['read', 'write'], ...over,
@@ -46,7 +47,13 @@ describe('deployment manifest', () => {
     ['relative primary', { bindings: [binding({ primary: 'ws/app' })] }, 'invalid-manifest'],
     ['helper transport without helper', { environments: [env({ transport: 'helper', helper: null })] }, 'invalid-manifest'],
     ['sftp transport with helper', { environments: [env({ transport: 'sftp', helper: { sha256: 'a'.repeat(64), protocol: 1 } })] }, 'invalid-manifest'],
-    ['helper transport with helper', { environments: [env({ transport: 'helper', helper: { sha256: 'a'.repeat(64), protocol: 1 } })] }, null],
+    ['helper transport with helper', { environments: [env({ transport: 'helper', helper: { sha256: 'a'.repeat(64), protocol: 1 }, connection: { host: 'vps', nodePath: '/opt/n/bin/node', helperPath: '/opt/h/helper.js', workspace: '/w' } }) ] }, null],
+    ['helper without connection paths', { environments: [env({ transport: 'helper', helper: { sha256: 'a'.repeat(64), protocol: 1 } })] }, 'invalid-manifest'],
+    ['sftp with nodePath', { environments: [env({ connection: { host: 'vps', nodePath: '/opt/n/bin/node' } })] }, 'invalid-manifest'],
+    ['sftp with exec', { environments: [env({ exec: { shell: ['/bin/sh'], env: {}, maxTimeoutMs: 10, stdoutLimit: 8, stderrLimit: 8, terminateGraceMs: 1 } })] }, 'invalid-manifest'],
+    ['exec with relative shell', { environments: [env({ transport: 'helper', helper: { sha256: 'a'.repeat(64), protocol: 1 }, connection: { host: 'vps', nodePath: '/opt/n/bin/node', helperPath: '/opt/h/helper.js', workspace: '/w' }, exec: { shell: ['sh'], env: {}, maxTimeoutMs: 10, stdoutLimit: 8, stderrLimit: 8, terminateGraceMs: 1 } })] }, 'invalid-manifest'],
+    ['missing connection', { environments: [env({ connection: undefined })] }, 'invalid-manifest'],
+    ['missing credentialIsolation', { environments: [env({ credentialIsolation: undefined })] }, 'invalid-manifest'],
     ['extra key', { environments: [env({ sneaky: true })] }, 'invalid-manifest'],
     ['binding unknown env', { bindings: [binding({ environmentId: 'missing' })] }, 'unknown-environment'],
     ['bad environmentId', { environments: [env({ environmentId: 'UPPER' })] }, 'invalid-manifest'],

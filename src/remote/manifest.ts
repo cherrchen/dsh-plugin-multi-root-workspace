@@ -19,6 +19,22 @@ export class ManifestError extends Error {
   }
 }
 
+const connectionSchema = z.object({
+  host: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/),
+  nodePath: z.string().min(1).optional(),
+  helperPath: z.string().min(1).optional(),
+  workspace: z.string().min(1).optional(),
+}).strict()
+
+const execSchema = z.object({
+  shell: z.array(z.string().min(1)).min(1).max(8),
+  env: z.record(z.string(), z.string()),
+  maxTimeoutMs: z.number().int().min(1).max(3_600_000),
+  stdoutLimit: z.number().int().min(1).max(16 * 1024 * 1024),
+  stderrLimit: z.number().int().min(1).max(16 * 1024 * 1024),
+  terminateGraceMs: z.number().int().min(0).max(60_000),
+}).strict()
+
 const environmentSchema = z.object({
   environmentId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,62}$/),
   displayName: z.string().max(120).optional(),
@@ -28,6 +44,9 @@ const environmentSchema = z.object({
   namespace: z.string().min(1).max(128),
   transport: z.enum(['helper', 'sftp']),
   helper: z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), protocol: z.number().int().min(1) }).strict().nullable(),
+  connection: connectionSchema,
+  exec: execSchema.optional(),
+  credentialIsolation: z.enum(['attested', 'unattested']),
 }).strict()
 
 const bindingSchema = z.object({
@@ -114,6 +133,28 @@ export function parseDeploymentManifest(text: string, manifestPath: string): { m
     }
     if ((environment.transport === 'helper') !== (environment.helper !== null)) {
       throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": helper is required exactly when transport is "helper"`)
+    }
+    const { nodePath, helperPath, workspace } = environment.connection
+    if (environment.transport === 'helper') {
+      if (nodePath === undefined || helperPath === undefined || workspace === undefined) {
+        throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": helper transport requires connection.nodePath, connection.helperPath and connection.workspace`)
+      }
+      checkRemotePath(nodePath)
+      checkRemotePath(helperPath)
+      checkRemotePath(workspace)
+      if (Object.keys(environment.exec?.env ?? {}).length > 64) {
+        throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": exec.env carries more than 64 keys`)
+      }
+      if (environment.exec !== undefined && !environment.exec.shell[0]!.startsWith('/')) {
+        throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": exec.shell[0] must be an absolute path`)
+      }
+    } else {
+      if (nodePath !== undefined || helperPath !== undefined || workspace !== undefined) {
+        throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": sftp transport allows only connection.host`)
+      }
+      if (environment.exec !== undefined) {
+        throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": exec is only allowed for helper transport`)
+      }
     }
     if (byId.has(environment.environmentId)) throw new ManifestError('duplicate-environment', `duplicate environmentId "${environment.environmentId}"`)
     byId.set(environment.environmentId, environment)

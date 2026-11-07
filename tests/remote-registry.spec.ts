@@ -25,6 +25,7 @@ function manifestFile(over: { platform?: string; hostKey?: string; bindings?: un
     environments: [{
       environmentId: 'build-01', platform: over.platform ?? 'linux', account: 'ci',
       hostKey: over.hostKey ?? `SHA256:${'A'.repeat(43)}`, namespace: 'ns-build', transport: 'sftp', helper: null,
+      connection: { host: 'vps' }, credentialIsolation: 'unattested',
     }],
     bindings: over.bindings ?? [{ primary: fixture.workspace, environmentId: 'build-01', rootId: 'app', path: '/work/app', actions: ['read', 'write', 'exec'] }],
   }))
@@ -154,7 +155,7 @@ describe('remote control plane', () => {
     writeFileSync(path, readFileSync(path, 'utf8').replace('"namespace": "ns-build"', '"namespace": "ns-a"'), )
     // second environment for build-02
     const doc = JSON.parse(readFileSync(path, 'utf8'))
-    doc.environments.push({ environmentId: 'build-02', platform: 'linux', account: 'ci', hostKey: `SHA256:${'B'.repeat(43)}`, namespace: 'ns-b', transport: 'sftp', helper: null })
+    doc.environments.push({ environmentId: 'build-02', platform: 'linux', account: 'ci', hostKey: `SHA256:${'B'.repeat(43)}`, namespace: 'ns-b', transport: 'sftp', helper: null, connection: { host: 'vps' }, credentialIsolation: 'unattested' })
     writeFileSync(path, JSON.stringify(doc))
     const stack = await mount({ manifestPath: path })
     stack.registry.setRemoteEndpointVerifier(verifier())
