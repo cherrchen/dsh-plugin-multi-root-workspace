@@ -105,8 +105,20 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 `src/remote/ssh-verifier.ts` 的 `SshEndpointVerifier` 以绑定路径为 `workspaceRoot` 执行只读 `full` 限定探针（远端 Node 打印 `{realpath, dev, ino, isDirectory}`），必须 isDirectory 且 realpath 等于声明路径（`endpoint-redirected`），注册目标为 `{kind: "object", value: "dev:ino"}`。`src/remote/ssh-exec-backend.ts` 的 `sshExecBackend` 把清单 `exec` 块映射为部署描述：`confine` 直通官方沙箱并携带环境代次，`currentGeneration` 取管理器当前代次（失联/已处置即永不匹配），`spawn` 无控制通道、收集双倍上限以便本地截断标志成立，`done` 的传输错误映射为 `RemoteConnectionLost` 并标记环境 stale。
 
-## SFTP 传输（G2：本地 → 远端，单文件，无用户入口）
+## SFTP 传输（G2：三个方向，单文件，无用户入口）
 
 `sftp` 环境可声明可选 `transfer: { maxBytes (≤1 GiB), timeoutMs (≤3_600_000) }`；缺席即该环境不能作传输端点（`transfer-unavailable`）。`openSftp` 与 `open` 共享同一组有序拒绝与 `ssh -G` 身份检查，再经 `ssh -s <别名> sftp` 拉起 `src/remote/sftp.ts` 的最小 v3 客户端；服务端必须宣告 `hardlink@openssh.com` 与 `fsync@openssh.com`，否则 `publish-unsupported`。SFTP 校验分支：`realpath` 必须等于绑定路径（`endpoint-redirected`）、`lstat` 必须是目录，注册身份为 `{kind: "path"}`——v3 无 inode，同名换物无法在注册时识别（ADR-0030 已知限制），远端平台取清单声明值（SFTP 无握手）。
 
-`src/remote/transfer.ts` 的 `runRemoteCopy` 只支持 `local → sftp`（其余 `direction-unsupported`），七阶段：准入 A（`purpose: transfer`，read-only ⇒ `mode-denies`）→ 受缚本地打开（`O_NOFOLLOW`、普通文件、`nlink===1` 即 `source-multilinked`、fd 与 lstat 同 inode、父目录 realpath 在根内即 `source-escapes-root`、≤`maxBytes` 即 `source-too-large`）→ 远端预检（目标必须 ENOENT 即 `target-exists`）→ EXCL 暂存 `.dsh-staging-<operationId>` 0600，32 KiB 分块流写 + SHA-256 + fsync，超时/取消受限；回读比对（`verify-mismatch`）并复检源 stat（`source-changed`）→ 准入 B 比对 epoch + 绑定摘要 + SFTP 代次（`admission-changed` ⇒ `cancelled`）→ `hardlink` 发布（目标已存在 ⇒ `failed`/`target-exists`；请求已发出后断线 ⇒ `unknown` + reconcileId，永不重放）→ 仅在同一代次内按精确名字清理暂存（代次已变 ⇒ `staging: 'residual'`，删除失败不撤销已提交）。结果 `{status, code?, operationId, from, to, bytes, sha256, stage, staging}` 不带文件内容与凭据；`deps.onStage` 为测试钩子。`remoteCopyTool` 不在任何生产路径注册。
+`src/remote/transfer.ts` 的 `runRemoteCopy` 支持 `local → sftp`、`sftp → local` 与 `sftp → sftp`；`local → local` 为 `direction-unsupported`，在任何准入前拒绝。每次复制仍是七阶段：准入 A（`purpose: transfer`；目的端为远端时只读会话 `mode-denies`、capped 工具 `tool-capped`；两个远端端点必须分别声明 `read`/`export` 与 `write`/`import` 配对，缺配对 `transfer-pair-not-allowed`，配对存在但缺动作 `action-not-allowed`）→ 受缚源打开 → 目的预检（目标必须不存在）→ EXCL staging + 有界流 + SHA-256 + fsync + 回读、源版本复检 → 准入 B（epoch、有效模式、两端端点身份、两端 SFTP 代次，任一变化 `admission-changed` ⇒ `cancelled`）→ no-replace 发布 → 只清理本操作确切 staging。
+
+**源。** 本地源沿用 `O_NOFOLLOW` 的单 inode 绑定（普通文件、`nlink===1`、fd 与 lstat 同 inode、父目录 realpath 在根内、≤`maxBytes`）。远端源先对父目录与目标各做一次 `realpath`（必须与拼写相等，拒绝 symlink 替换），再 `lstat` 必须为普通文件且不超过上限，`open(P_READ)` 后复检 size/mtime；读完整流后再复检 size/mtime 与父/目标 realpath（`source-changed`）。SFTP v3 没有 inode 与 link count：远端源无法证明 `nlink===1`，同名替换与多硬链接由部署账户隔离承担，与路径型目标同一前提。
+
+**目的（远端）。** `RemoteStage` 以 `SSH_FXF_EXCL` 创建 `.dsh-staging-<operationId>`（0600），分块写、`fsync`、服务端回读比对（`verify-mismatch`）、再次确认目标不存在，然后 `hardlink`（无覆盖）发布；发布请求送出后失联为 `unknown` + reconcileId，永不重放；代次已变时不按路径删除，报 `residual`。目标名不得以 `.dsh-staging-` 开头（`reserved-name`）。
+
+**目的（本地）。** `src/remote/local-sink.ts` 的 `LocalBinarySink` 是唯一的本地二进制写入端口；只有 `registry.localTransferDestination(primary, rootId, effectiveMode, toolName)` 签发的 `LocalDestinationAuthority` 能打开它。该 Registry 入口与 `ctx.fs` 写围栏同源：根必须 `available` 且 access 在本次有效模式下可写（主根在 `read-only` 拒绝即 `mode-denies`；`read-only` 根永远 `local-destination-read-only`；`inherit` 跟随模式；固定 `read-write` 在只读会话仍可写），capped 工具对 additional root 为 `tool-capped`，并返回 DSH home、存储介质与 lease 目录的受保护边界（目标父目录落在其中即 `protected-path`；比 `ctx.fs` 在 workspace-write 下更严格）。sink 在目标父目录内以 `O_EXCL|O_NOFOLLOW` 创建 0600 文件（与目标同一文件系统），逐级检查父目录不是 symlink、绑定父目录 dev/ino，写入、fsync、按同一 fd 回读校验，发布前复核父目录身份、目标仍不存在、staging 仍是本操作 inode，最后以 `link(2)` 无覆盖发布并清理 staging。发布后清理失败只报 `staging: "residual"`，不撤销已提交；`publish-unverified` 报 `unknown`。发布文件权限为 0600；不覆盖、不删除、不递归。
+
+**远端 → 远端。** 两边都是受管 SFTP 时，Host 只做有界中转：从源连接 `P_READ` 读 64 KiB 块，写入目标 staging，双方都不接触对端凭据；源读取与目标写入分别标记失联来源。源在发布前失联 ⇒ `failed`/`source-connection-lost` 并清理目标 staging；目标失联 ⇒ `unknown`/`destination-connection-lost`，staging `unknown`，不重放。
+
+结果仍为 `{status, code?, operationId, from, to, bytes, sha256, stage, staging}`，不带文件内容与凭据；`deps.onStage` 为测试钩子。`remoteCopyTool` 不在任何生产路径注册；`from.environmentId` 缺省为 `local`，`to.environmentId` 必填。
+
+**部署前提与已知限制。** 本地 sink 最终仍通过 Node 的路径型系统调用 `link(2)` 发布；父目录 dev/ino 与 realpath 的复核缩小了替换窗口，但不能证明同一 UID 的写者在最后一次检查与 `link` 之间不介入，因此本地目的根须没有不可信的 same-UID 写者。SFTP v3 的远端源同样没有 inode/link count，非同秒的 size/mtime 漂移可被发现，同秒同长改写不能；目标端 EXCL、服务端回读与 only-writer 部署前提是这一方向的安全基础。
