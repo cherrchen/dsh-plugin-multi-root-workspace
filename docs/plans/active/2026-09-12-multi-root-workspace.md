@@ -1654,3 +1654,17 @@ macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.1`：compat、lint、host/client �
 | 单元与回归 | `ssh-environment` 5/5（`ssh -G` 解析与指纹比较用夹具）；远端批次 72/72；`verify:all` **1276 passed / 100 skipped / 0 failed**，compose 54、behavior 137、journey 76、packed 136。 |
 
 **未验证与限制：** 部署凭据隔离未证明：私钥、ControlMaster socket 与 `ssh` 由发起端同一 OS 用户持有，本地 Agent 的原生 bash/PTC 理论上可复用，故清单标为 `unattested`，按 ADR-0032 不得对模型开放。只验证了 Linux 目标；macOS 目标、Linux 发起端、其他 Ubuntu 版本、hostKey 轮换、真实断线中途注入均未覆盖。上游 `spawn` 无独立启动确认，`started` 在返回时即视为成立。G2 复制尚未实现，SFTP 原语只是端点能力证据。
+
+## 多执行环境 G2 单文件复制：本地 → 受管 SFTP（2026-11-07）
+
+**状态：本地 → 远端（受管 SFTP）单文件复制在同一台临时 VPS 上实跑通过；远端 → 本地、远端 → 远端仍为 `direction-unsupported`。无用户入口，部署凭据隔离仍为 unattested。** 合同依据 ADR-0034，格式与拒绝码见[控制面参考](../../reference/multi-environment-control-plane.md)。
+
+**实现：** `src/remote/sftp.ts` 为最小 SFTP v3 客户端，经 PATH 上的 `ssh -o BatchMode=yes -s <alias> sftp` 连接。它限制在途请求数与入站帧大小，失联时拒绝所有在途请求且不重试；取证脚本 `probe-sftp-primitives.mjs` 改为复用该客户端。sftp 环境由 `SshEnvironmentManager.openSftp` 打开，拒绝顺序与 helper 环境相同，并共用同一套 `ssh -G` 身份核对；端点未通告 `hardlink@openssh.com` 与 `fsync@openssh.com` 即 `publish-unsupported`。校验器对 sftp 根要求 realpath 等于登记路径且为目录，登记为路径型身份（SFTP v3 无 inode，登记时不能识别同名替换，如实记录）。`runRemoteCopy` 依次执行：准入 A（会话模式、tool cap、清单 import 配对）→ 本地以 `O_NOFOLLOW` 绑定单一 inode（普通文件、nlink=1、fd 与 lstat 同一对象、父目录在根内、不超过 `maxBytes`）→ 远端预检（目标不存在）→ `SSH_FXF_EXCL` 创建本操作的 0600 staging、32 KiB 分块哈希、`fsync`、源再核对、staging 回读比对 → 准入 B（epoch、端点身份与 SFTP 代次不变）→ `hardlink` no-replace 发布 → 仅在同一代次内按本操作确切名称清理 staging。发布请求发出后失联报 `unknown`（对账 ID 为操作 ID），不重发；代次变化后不按路径删除，报 `residual`。
+
+| 证据 | 结果 |
+| --- | --- |
+| 实跑（`tests/remote-ssh.live.e2e.ts`，含 G4 五项） | **14/14 实跑、0 跳过**，约 257 s。primary 与带 aliasId 的附加本地根各上传一个文件到 `/import`，由独立 SFTP 读取逐文件比对 SHA-256，staging 无残留；0 字节与 1 MiB 随机二进制一致；已存在目标在 staging 前 `target-exists` 且字节不变；symlink 源被拒（`O_NOFOLLOW`，报 `source-unreadable`）、硬链接源 `source-multilinked`；staging 中改写源 `source-changed` 且不发布；staging 与发布之间撤权 `cancelled`、staging 已删、目标不存在；两个并发复制同一新目标恰一 `committed`、另一 `target-exists`；只读会话 `mode-denies` 且未打开 SFTP；未声明隔离且无测试放行时在 `ssh -G` 前拒绝。 |
+| 单元 | `tests/remote-copy.spec.ts` **9/9**（内存 SFTP 桩）：阶段顺序、各拒绝码、清理规则、hardlink 后失联 `unknown` 且只调用一次、代次变化后 `residual` 且不删除。评审补充两处修正：清理失败时不再把 staging 误报为 `removed`；对账 ID 改为操作 ID。 |
+| 回归 | `verify:all` **1285 passed / 109 skipped / 0 failed**，compose 54、journey 76、packed 136；`docs:check` 通过。 |
+
+**未验证与限制：** 结果联合中的 `partial` 在单文件复制中没有产生路径。目录、覆盖、删除与远端 → 本地（需新的受 Registry/Scope 围栏保护的本地二进制发布端口）不在本批。端点对象与父目录绑定依赖部署前提：chroot 账户只有 `dshxfer` 一个写者；路径型 SFTP 本身不能排除其他写者的替换竞态，这一前提须由部署方保证。只在 Linux 目标与 macOS 发起端上验证。

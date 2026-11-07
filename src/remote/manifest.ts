@@ -46,6 +46,10 @@ const environmentSchema = z.object({
   helper: z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), protocol: z.number().int().min(1) }).strict().nullable(),
   connection: connectionSchema,
   exec: execSchema.optional(),
+  transfer: z.object({
+    maxBytes: z.number().int().min(1).max(1024 * 1024 * 1024),
+    timeoutMs: z.number().int().min(1).max(3_600_000),
+  }).strict().optional(),
   credentialIsolation: z.enum(['attested', 'unattested']),
 }).strict()
 
@@ -155,6 +159,9 @@ export function parseDeploymentManifest(text: string, manifestPath: string): { m
       if (environment.exec !== undefined) {
         throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": exec is only allowed for helper transport`)
       }
+    }
+    if (environment.transport !== 'sftp' && environment.transfer !== undefined) {
+      throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": transfer is only allowed for sftp transport`)
     }
     if (byId.has(environment.environmentId)) throw new ManifestError('duplicate-environment', `duplicate environmentId "${environment.environmentId}"`)
     byId.set(environment.environmentId, environment)
