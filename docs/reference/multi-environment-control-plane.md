@@ -126,7 +126,7 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 ## G5 显式工具、能力投影与面板（专用 headless 组合）
 
-**边界。** 本关只把已经过各门验证的能力接进一个**专用 headless 测试组合**，不新增生产行：`cordis.patch.yml` 没有 remote 行，默认 profile 与 packed profile 都不含这两个工具。`src/remote/tools.ts` 导出 `apply(ctx, config)`，其 `inject` 含 `multiRootCompat`、`multiRootProviders`、`multiRootRegistry`、`tools`——兼容门禁或 provider 品牌门禁不成立时行根本不存在；`enabled !== true` 时不做任何事；远端控制面未就绪（`remoteEnvironments` 关闭或清单无效）时拒绝加载，而不是登记一半工具。
+**边界。** 本关只把已经过各门验证的能力接进一个**专用 headless 测试组合**，不新增生产行：`cordis.patch.yml` 没有 remote 行，默认 profile 与 packed profile 都不含这两个工具。`src/remote/tools.ts` 导出 `apply(ctx, config)`，其 `inject` 含 `multiRootCompat`、`multiRootProviders`、`multiRootRegistry`、`tools`——兼容门禁或 provider 品牌门禁不成立时行根本不存在；`enabled !== true` 时不做任何事；远端控制面未就绪（`remoteEnvironments` 关闭或清单无效）时拒绝加载，而不是登记一半工具。**该行的可命名入口已随包发出**：`./remote-tools` export → `lib/remote-tools.js`，因此部署方自写的组合可以直接列 `multi-root-remote-tools` 指向 `@dsh-electron/dsh-plugin-multi-root-workspace/remote-tools`——默认 patch 依旧不携带它；挂载它的完整启用清单见本节末"部署启用清单"。
 
 **工具。** 同一行注册 `remote_copy` 与 `remote_bash`，并安装端点校验器（`SshEndpointVerifier`）——因此挂载该行的组合也是**登记路径**；未挂载时 `addRemote` 固定 `endpoint-unverifiable`。默认连接管理器是清单之上的官方 SSH 栈；默认执行后端是 `lazySshExecBackend`，在准备阶段才建立 helper 连接并返回其代次，未打开的连接无法通过最终启动准入。组合可用 `manager` / `backends` 两个注入接缝替换为有界内存端点；两者都不授予权限——每次调用仍由 Registry 排序准入。工具结果必须是 lossless JSON：未产生 operationId 的拒绝不携带该键。
 
@@ -139,6 +139,8 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 - **渲染**：`WorkspaceFoldersDialog` 在附属根之后增加“远端环境”区；列表只读，登记/撤销按钮走各自端点，登记按钮只对未登记条目出现，撤销只对已登记条目出现。客户端 `RemotesClient` 在边界用 `parseRemotesView` 校验值。
 
 **旅程。** `tests/remote-journey.e2e.ts` 在**同一 Session** 内完成“两个本地根 → 构建机 → 设备”：两个本地根各复制一个源文件到构建机（同一远端路径、不同内容），`remote_bash` 在构建机执行构建，产物经 Host 中转到设备；设备与构建机使用相同远端路径但内容互不串扰；仅传输能力的设备对执行返回 `action-not-allowed`（声明了 `exec` 动作但无后端时为 `backend-unavailable`）；只读会话对写入/执行/目的端为远端的复制均为 `mode-denies`；删除登记后复制为 `endpoint-not-registered`；`local → local` 为 `direction-unsupported`。同一组合内另验证面板列表不建连、登记/撤销、未知 Session、客户端自带路径被拒，以及只读会话的能力投影。
+
+**部署启用清单。** 面板区、三个面板端点与客户端合约**随默认 patch 一起发货**——控制面未启用时区块如实渲染 `remote unavailable`。让一个真实组合看见并登记端点需要四步部署动作，全部由部署方完成、默认 patch 不动：① 用 `scripts/ssh-broker/install.sh` 建 `_dsh_ssh` 账户、凭据根与 unit（ADR-0036 拓扑）；② Registry 行配置加 `remoteEnvironments: { enabled: true, manifestPath: <部署清单绝对路径> }`——清单由部署方放 Host 不可写处，面板随即列出各端点与其 `unregistered` 状态；③ 组合加一行 `multi-root-remote-tools` → `./remote-tools`，`config.broker.config` 填 socket 路径、broker UID、凭据根与已验证的 `confinementProbe`——行挂载即钉住 `SshEndpointVerifier`，面板的"登记"按钮才从 `endpoint-unverifiable` 变成真实验证+登记（同一挂载也注册模型侧 `remote_copy`/`remote_bash`，二者不可分——这是该能力仍不进默认 patch 的原因）；④ 面板渲染的最终验收需要真实 GUI 宿主，headless 部署只能走到合约层。`enabled: true` 的直连路径是 `unattested` 开发形态：不持 broker 凭据隔离证明，不得作为生产启用方式。
 
 
 

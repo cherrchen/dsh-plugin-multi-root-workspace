@@ -46,6 +46,10 @@
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
     },
+    "./remote-tools": {
+      "types": "./lib/types/remote/tools.d.ts",
+      "default": "./lib/remote-tools.js"
+    },
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json",
     "./lsp": {
