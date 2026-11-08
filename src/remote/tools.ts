@@ -82,18 +82,26 @@ export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootRegist
 export function apply(ctx: Context, config: Config = {}): void {
   const registry = ctx.multiRootRegistry
 
-  const backendForOf = (manager: RemoteToolsManager) => config.backends ?? ((environmentId: string) => {
-    const manifest = registry.remoteManifest
-    if (manifest === undefined) return undefined
-    const environment = manifest.environments.find(entry => entry.environmentId === environmentId)
-    // The SSH adapter needs a connection opening and a live generation. Probe
-    // the structure, never the class: an injected manager that cannot open a
-    // connection simply has no execution backend.
-    const opening = manager as Partial<SshEnvironmentManager>
-    return environment === undefined || typeof opening.open !== 'function' || typeof opening.generationOf !== 'function'
-      ? undefined
-      : lazySshExecBackend(environment, opening as SshEnvironmentManager)
-  })
+  const backendForOf = (manager: RemoteToolsManager) => config.backends ?? (() => {
+    // Admission A (confine) and admission B (spawn) each call backendFor: the
+    // lazy adapter binds its connection inside confine, so both admissions
+    // must see the SAME instance — a fresh one would spawn with no bound env.
+    const cache = new Map<string, RemoteExecutionBackend | undefined>()
+    return (environmentId: string) => {
+      if (cache.has(environmentId)) return cache.get(environmentId)
+      const manifest = registry.remoteManifest
+      const environment = manifest?.environments.find(entry => entry.environmentId === environmentId)
+      // The SSH adapter needs a connection opening and a live generation. Probe
+      // the structure, never the class: an injected manager that cannot open a
+      // connection simply has no execution backend.
+      const opening = manager as Partial<SshEnvironmentManager>
+      const backend = environment === undefined || typeof opening.open !== 'function' || typeof opening.generationOf !== 'function'
+        ? undefined
+        : lazySshExecBackend(environment, opening as SshEnvironmentManager)
+      cache.set(environmentId, backend)
+      return backend
+    }
+  })()
 
   const mount = (manager: RemoteToolsManager, ownsManager: boolean): void => {
     const backendFor = backendForOf(manager)

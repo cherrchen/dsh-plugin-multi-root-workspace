@@ -44,6 +44,21 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
     expect(missing.isError).toBe(true)
   })
 
+  it('executes remote_bash through the default backend factory across both admissions', async () => {
+    // Regression: admission A (confine) and admission B (spawn) each call
+    // backendFor; the default factory must return the SAME lazy adapter or B
+    // spawns with no bound environment (admitted-may-start forever).
+    world = await mountRemoteTools(fixture, {
+      defaultBackends: true,
+      seed: { build: { '/srv/root/src/a.txt': 'a', '/srv/root/src/b.txt': 'b' } },
+    })
+    await registerRemote(world, 'build', 'app')
+    const built = await world.call('remote_bash', { environmentId: 'build', rootId: 'app', command: 'build app', timeoutMs: 5_000 })
+    expect(built, JSON.stringify(built)).toMatchObject({ status: 'scope-exited', scope: 'confirmed', exitCode: 0, stdout: 'built app\n' })
+    const again = await world.call('remote_bash', { environmentId: 'build', rootId: 'app', command: 'test app', timeoutMs: 5_000 })
+    expect(again, JSON.stringify(again)).toMatchObject({ status: 'scope-exited', exitCode: 0 })
+  })
+
   it('is also the endpoint-registration path: without the row nothing verifies a session endpoint', async () => {
     world = await mountRemoteTools(fixture, { withTools: false })
     await expect(registerRemote(world, 'build', 'app')).rejects.toThrow(/no remote endpoint verifier is configured/)
