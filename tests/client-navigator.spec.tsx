@@ -235,6 +235,8 @@ function mount(): Harness {
       const dispose = callback()
       return typeof dispose === 'function' ? dispose : () => {}
     },
+    // The preview-navigator spec does not exercise the workspace menu.
+    inject: () => () => {},
     locale: {
       register: () => () => {},
       bind: (ns: string) => (key: string) => `${ns}.${key}`,

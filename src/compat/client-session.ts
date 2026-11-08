@@ -44,6 +44,50 @@ export function currentSessionIdOf(sessions: unknown): string | undefined {
   return mainViewSessionId(snapshot.byId)
 }
 
+/**
+ * Whether one session is retained by the client's main view, read from the
+ * per-session retention snapshot when the service exposes one.
+ *
+ * `sessions.retainInfo(sessionId)` changes synchronously inside `retain()`,
+ * which is what the workspace navigation calls before it selects a session.
+ * The catalog row for a session the navigation just created can arrive later,
+ * so reading only the catalog would make a caller believe the navigation never
+ * selected its target. `undefined` means this surface has no readable probe;
+ * callers must then fall back to {@link currentSessionIdOf}.
+ * @param sessions - the client `sessions` service, or whatever this
+ *   composition provided under that name.
+ * @param sessionId - the session to inspect.
+ * @returns whether the main view currently retains it, or `undefined` when
+ *   this surface cannot answer that question.
+ */
+export function mainViewRetentionOf(sessions: unknown, sessionId: string): boolean | undefined {
+  if (sessions === null || typeof sessions !== 'object') return undefined
+  const retainInfo = (sessions as { retainInfo?: unknown }).retainInfo
+  if (typeof retainInfo !== 'function') return undefined
+  let info: unknown
+  try {
+    info = (retainInfo as (id: string) => unknown).call(sessions, sessionId)
+  } catch {
+    return undefined
+  }
+  if (info === null || typeof info !== 'object') return undefined
+  const getSnapshot = (info as { getSnapshot?: unknown }).getSnapshot
+  if (typeof getSnapshot !== 'function') return undefined
+  let snapshot: unknown
+  try {
+    snapshot = (getSnapshot as () => unknown).call(info)
+  } catch {
+    return undefined
+  }
+  if (snapshot === null || typeof snapshot !== 'object') return undefined
+  const retainedBy = (snapshot as { retainedBy?: unknown }).retainedBy
+  if (retainedBy === null || typeof retainedBy !== 'object') return undefined
+  const count = (retainedBy as { mainView?: unknown }).mainView
+  // A readable retention snapshot with no `mainView` entry means the main
+  // view does not retain this session; only an unreadable shape is unknown.
+  return typeof count === 'number' ? count > 0 : false
+}
+
 /** Observe native catalog changes when this surface provides a subscribable store. */
 export function subscribeSessions(sessions: unknown, listener: () => void): () => void {
   if (sessions === null || typeof sessions !== 'object') return () => {}

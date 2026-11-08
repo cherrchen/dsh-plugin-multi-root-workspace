@@ -17,6 +17,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PANEL_CHANNEL, type PanelRequest, type RevealedView, type RootView, type RootsView } from '../src/contract.ts'
 import * as client from '../src/client/index.ts'
+import { WorkspaceFoldersAction } from '../src/client/WorkspaceFoldersAction.tsx'
+import { createWorkspaceFoldersDialogController } from '../src/client/workspace-folders-dialog.ts'
 import { en, NS, zh } from '../src/client/locales.ts'
 
 // The jsdom environment has no file-URL `import.meta.url`, so the repository
@@ -159,6 +161,10 @@ function mount(options: MountOptions = {}): Harness {
       const dispose = callback()
       return typeof dispose === 'function' ? dispose : () => {}
     },
+    // This harness exercises the panel, not the workspace menu; a no-op inject
+    // keeps the optional context-menu contribution out of it. The menu has its
+    // own spec (`client-workspace-menu.spec.ts`).
+    inject: () => () => {},
     locale: {
       register: (ns: string, dicts: Record<string, unknown>) => {
         dictionaries.push({ ns, dicts })
@@ -298,6 +304,7 @@ describe('the client entry', () => {
   it('registers nothing when no sidebar declares the slot', () => {
     const ctx = {
       effect: () => () => {},
+      inject: () => () => {},
       locale: { register: () => () => {}, bind: () => (key: string) => key },
       slots: { inject: () => () => {}, register: () => () => {} },
       get: () => undefined,
@@ -1072,6 +1079,7 @@ describe('the panel dialog', () => {
     const registrations: Registration[] = []
     const ctx = {
       effect: (callback: () => unknown) => { callback(); return () => {} },
+      inject: () => () => {},
       locale: { register: () => () => {}, bind: () => (key: string) => key },
       slots: {
         inject: (_name: string, callback: () => unknown) => { callback(); return () => {} },
@@ -1088,6 +1096,137 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByRole('alert')).toBeTruthy() })
+  })
+})
+
+/**
+ * Render the footer action (or the compact Files launcher) against a
+ * recording panel client. The controller is returned so the spec can drive
+ * the external open path the workspace menu uses.
+ * @param options - omit the owner wiring for the compact launcher.
+ */
+function renderFoldersAction(options: { owner?: boolean; compact?: boolean } = {}): {
+  readonly calls: Call[]
+  readonly controller: ReturnType<typeof createWorkspaceFoldersDialogController>
+} {
+  const calls: Call[] = []
+  const view: RootsView = { primaryRoot: '/repos/primary', roots: [], limit: 16, count: 0 }
+  const panel = {
+    call: async (endpoint: string, payload: PanelRequest) => {
+      calls.push({ channel: PANEL_CHANNEL, endpoint, payload })
+      return view
+    },
+  }
+  const controller = createWorkspaceFoldersDialogController()
+  render(createElement(WorkspaceFoldersAction, {
+    panel: panel as never,
+    pickDirectory: undefined,
+    t: (key: string) => `${NS}.${key}`,
+    sessionId: () => 'session-1',
+    ...(options.owner === false ? {} : { dialogController: controller, dialogOwner: true }),
+    ...(options.compact === true ? { compact: true } : {}),
+  }))
+  return { calls, controller }
+}
+
+describe('the workspace-folders dialog controller', () => {
+  it('rejects opens until an owner registers, then delegates to it', () => {
+    const controller = createWorkspaceFoldersDialogController()
+    expect(controller.available.getSnapshot()).toBe(false)
+    expect(controller.open('s1')).toBe(false)
+    const opened: (string | undefined)[] = []
+    const release = controller.registerOwner((id) => { opened.push(id) })
+    expect(controller.available.getSnapshot()).toBe(true)
+    expect(controller.open('s1')).toBe(true)
+    expect(opened).toEqual(['s1'])
+    release()
+    expect(controller.available.getSnapshot()).toBe(false)
+    expect(controller.open('s2')).toBe(false)
+  })
+
+  it('keeps a newer owner when the replaced owner deregisters', () => {
+    const controller = createWorkspaceFoldersDialogController()
+    const first: string[] = []
+    const second: string[] = []
+    const releaseFirst = controller.registerOwner((id) => { first.push(id ?? '<current>') })
+    controller.registerOwner((id) => { second.push(id ?? '<current>') })
+    releaseFirst()
+    expect(controller.available.getSnapshot()).toBe(true)
+    expect(controller.open('s1')).toBe(true)
+    expect(first).toEqual([])
+    expect(second).toEqual(['s1'])
+  })
+
+  it('reports a throwing owner as "not opened" and stays available', () => {
+    const controller = createWorkspaceFoldersDialogController()
+    controller.registerOwner(() => { throw new Error('boom') })
+    expect(controller.open('s1')).toBe(false)
+    expect(controller.available.getSnapshot()).toBe(true)
+  })
+})
+
+describe('the footer-owned dialog and external opens', () => {
+  it('opens and closes the dialog from the footer button as before', async () => {
+    const { calls } = renderFoldersAction()
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await screen.findByRole('dialog')
+    await waitFor(() => {
+      expect(calls[0]).toMatchObject({ endpoint: 'list', payload: { sessionId: 'session-1' } })
+    })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.close` }))
+    await waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull() })
+  })
+
+  it('opens the dialog pinned to the session an external caller names', async () => {
+    const { calls, controller } = renderFoldersAction()
+    act(() => { expect(controller.open('session-9')).toBe(true) })
+    await screen.findByRole('dialog')
+    await waitFor(() => {
+      expect(calls.some(call => call.endpoint === 'list' && call.payload.sessionId === 'session-9')).toBe(true)
+    })
+  })
+
+  it('adopts a new target while the dialog is already open', async () => {
+    const { calls, controller } = renderFoldersAction()
+    act(() => { expect(controller.open('session-9')).toBe(true) })
+    await waitFor(() => {
+      expect(calls.some(call => call.endpoint === 'list' && call.payload.sessionId === 'session-9')).toBe(true)
+    })
+    act(() => { expect(controller.open('session-10')).toBe(true) })
+    await waitFor(() => {
+      expect(calls.some(call => call.endpoint === 'list' && call.payload.sessionId === 'session-10')).toBe(true)
+    })
+    expect(screen.getByRole('dialog')).toBeTruthy()
+  })
+
+  it('clears the pinned target when the dialog closes', async () => {
+    const { calls, controller } = renderFoldersAction()
+    act(() => { expect(controller.open('session-9')).toBe(true) })
+    await screen.findByRole('dialog')
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.close` }))
+    await waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull() })
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await screen.findByRole('dialog')
+    await waitFor(() => {
+      expect(calls.some(call => call.endpoint === 'list' && call.payload.sessionId === 'session-1')).toBe(true)
+    })
+  })
+
+  it('makes the controller unavailable again when the footer unmounts', () => {
+    const { controller } = renderFoldersAction()
+    expect(controller.available.getSnapshot()).toBe(true)
+    cleanup()
+    expect(controller.available.getSnapshot()).toBe(false)
+  })
+
+  it('does not register the compact Files launcher as a dialog owner', async () => {
+    const { calls, controller } = renderFoldersAction({ owner: false, compact: true })
+    expect(controller.available.getSnapshot()).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.action.title` }))
+    await screen.findByRole('dialog')
+    await waitFor(() => {
+      expect(calls[0]).toMatchObject({ endpoint: 'list', payload: { sessionId: 'session-1' } })
+    })
   })
 })
 

@@ -67,6 +67,9 @@ describe('the hero slot service probe', () => {
         const dispose = callback()
         return typeof dispose === 'function' ? dispose : () => {}
       },
+      // This probe covers the hero slot registration; the workspace menu's
+      // optional context-menu injection is out of scope.
+      inject: () => () => {},
       locale: { register: () => () => {}, bind: () => (key: string) => key },
       slots,
       get: () => undefined,
