@@ -140,6 +140,10 @@ liveDescribe('the real journey over broker custody', () => {
     await stack.registry.addRemote(live.primary, { environmentId: 'vps-app', rootId: 'app' })
     await stack.registry.addRemote(live.primary, { environmentId: 'vps-xfer', rootId: 'import' })
     try {
+      const dirs = await world.call('remote_bash', {
+        environmentId: 'vps-app', rootId: 'app', command: 'mkdir -p src dist', timeoutMs: 10_000,
+      })
+      expect(dirs, JSON.stringify(dirs)).toMatchObject({ status: 'scope-exited', exitCode: 0 })
       const seeded = await world.call('remote_copy', {
         from: { environmentId: 'local', rootId: 'primary', relativePath: 'src/a.txt' },
         to: { environmentId: 'vps-app', rootId: 'app', relativePath: 'src/a.txt' },
