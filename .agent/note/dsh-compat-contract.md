@@ -269,7 +269,7 @@ rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留�
 
 - **可用版本**：`0.2.1-alpha.3` 及更新；`0.1.5-rc.2` ～ `0.2.1-alpha.2` 没有该槽。
 - **缺席行为**：`ctx.slots.inject` 静默不触发，新会话页没有该入口；侧栏入口、host 侧、RPC 与授权语义全部不变。
-- **依赖形态**：只做 `import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'` 的 `SlotMap` 合并，并放在 `devDependencies` 的精确 pin；不要把它提升为 `dependencies` / `optionalDependencies` / `peerDependencies`，也不要写进 `dsh.client.inject`——那会让旧运行时也要求该包存在，破坏"缺席即无该入口"的降级。
+- **依赖形态**：**不依赖** `ui-conversation`（不 import 类型、不加 devDependency、不进 `dsh.client.inject`）。typecheck 矩阵包含 `0.2.1-alpha.3` 之前的版本，它们的 SlotMap 没有该键；注册走窄结构接口（`inject` + `specDynamic` + `register`），`specDynamic` 查不到声明就直接返回空 disposer。只有声明了该槽的版本会注册并显示入口；旧版本不显示，侧栏入口不受影响。
 - **会话权威**：槽是 `session` scope，composed props 的 `sessionId` 是确定值；不要在 hero occupant 里回退到全局 current-session 解析（侧栏 fallback 是另一条路径）。
 - **形态约束**：与相邻 workspace / 模式选择器同几何，但因打开对话框而非菜单**没有 chevron**；图标优先 `IconWorkspaceTreeOutlineRegular`，旧运行时经 `selectIconOr` 回退 `IconFolderOpen`（不使用像素时代名）；文字在左、icon 在右，以贴合该行右对齐的阅读顺序；trigger 另加 `margin-right: 4px`，因为上游行 padding 是 `0 16px 0 20px`，这样按钮盒与工作区选择器一样内缩 20px。hero 行没有容器祖先，`≤560px` 用视口媒体查询退化为 28×28 图标按钮。上游若改成容器查询，再同步切换。
 - **无 DOM 钩子**：入口只依赖槽位契约；上游改名或移除该槽时按上面的缺席路径静默退化，不需要目检表更新。

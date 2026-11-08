@@ -1538,7 +1538,7 @@ macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.1`：compat、lint、host/client �
 
 范围：
 
-- `@deepseek-ai/dsh-client-ui-conversation@0.2.2-rc.1` 仅作为 `devDependencies` 精确 pin，客户端只做 `import type {}` 的 `SlotMap` 合并；未进入运行时依赖、`dsh.client.inject` 或 peer/optional 依赖。
+- 不依赖 `@deepseek-ai/dsh-client-ui-conversation`：typecheck 矩阵的旧版本没有该 SlotMap 键，注册走窄结构接口（`inject` + `specDynamic` + `register`），槽位声明不存在时直接返回空 disposer；未进入运行时依赖、`dsh.client.inject` 或 peer/optional 依赖。
 - 新增 `src/client/HeroWorkspaceEntry.tsx`：icon + label 的 trigger，复用 `WorkspaceFoldersDialog`；无 chevron，`aria-haspopup="dialog"` 与 `aria-expanded`。
 - `src/client/index.ts` 新增 `HERO_SLOT_ID = 'multi-root-folders.hero'`、`HERO_ORDER = 10` 与独立的 `ctx.slots.inject('conversation.hero.options', ...)`；occupant 使用槽属性 `sessionId` 并 memoize；`sidebar.footer.action` 注册与 occupant 未改。
 - `src/client/styles.ts` 新增 `.mrfw-heroEntry*`：28px 高、`0 8px`、4px gap、`--dsw-radius-sm`、13px/20px/500、hover/展开 token、`max-width: min(100%, 240px)`；`@media (max-width: 560px)` 退化为 28×28 图标按钮。
@@ -1548,8 +1548,8 @@ macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.1`：compat、lint、host/client �
 验证（macOS arm64 / Node `24.18.0` / pnpm `11.25.0`，完整本机权限）：
 
 - `pnpm typecheck`、`pnpm lint`、`pnpm build`、`pnpm compat:check`、`pnpm docs:check` 均通过；`pnpm install` 只把该包加到 importer 的 devDependencies，解析图未变。
-- `pnpm test`：**1234 passed / 95 skipped / 0 failed**（81 个文件通过、3 个文件整体跳过；图标修订后新增 fallback、右内缩与不独占断言）。
+- `pnpm test`：rebase 到 main 后 **1263 passed / 95 skipped / 0 failed**（82 个文件通过、3 个文件整体跳过；rebase 前 1235；图标修订后新增 fallback、右内缩、不独占与槽位缺席断言）。
 - `pnpm verify:all`：通过。compose **54/54**、behavior **137/137**、journey **76/76**、packed behavior **136/136**；`pack:check` 校验 **184** 个成员；`auto-review:fork` 通过；`smoke:auto-review` 按精确版本规则跳过（可选集成基线仍为 `0.2.1-rc.2`）。
 - 在 DSH 工具沙箱内直接跑完整套件时，共享 Registry 的 follower/IPC 用例以 `contended` 失败（`shared IPC refuses sandboxed peers`）；同一用例在未改动的 main 基线工作树上以相同形状失败，确认是环境限制而非本批次回归。上述数字来自完整本机权限下的重跑，与 `v0.1.16` 发版验收的处理方式一致。
 - 文档对形态的承诺：与相邻 workspace / 模式选择器同几何、无 chevron、workspace tree 图标（旧运行时回退 folder）、`≤560px` 只显示图标、首条消息后 hero 行消失、旧运行时只有侧栏入口。
-- 目检修订（2026-11-08）：真实 GUI 目检发现首版 `IconSettings` 语义不符；改为 `IconWorkspaceTreeOutlineRegular`，旧运行时经 `selectIconOr` 回退 `IconFolderOpen`；随后按右对齐行顺序把文字放左、icon 放右，并补 DOM 顺序断言；再按上游行 `0 16px 0 20px` 的不对称内边距补 `margin-right: 4px`，使按钮盒与工作区选择器同为 20px 内缩。样式测试钉住 4px 右内缩，并断言入口不 grow、不绝对定位、不占满宽度，不会独占 list 槽。适配层与图标测试已更新；注册、RPC、授权与窄窗行为不变。
+- 目检修订（2026-11-08）：真实 GUI 目检发现首版 `IconSettings` 语义不符；改为 `IconWorkspaceTreeOutlineRegular`，旧运行时经 `selectIconOr` 回退 `IconFolderOpen`；随后按右对齐行顺序把文字放左、icon 放右，并补 DOM 顺序断言；再按上游行 `0 16px 0 20px` 的不对称内边距补 `margin-right: 4px`，使按钮盒与工作区选择器同为 20px 内缩。样式测试钉住 4px 右内缩，并断言入口不 grow、不绝对定位、不占满宽度，不会独占 list 槽。首轮 PR CI 在 `0.2.1-alpha.3` 之前的 lane 因 SlotMap 无该键而 typecheck 失败，最终改为零 `ui-conversation` 依赖的 `specDynamic` 显式门控；新增槽位缺席回归用例。适配层与图标测试已更新；注册、RPC、授权与窄窗行为不变。

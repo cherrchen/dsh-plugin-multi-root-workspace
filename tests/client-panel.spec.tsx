@@ -100,6 +100,12 @@ interface MountOptions {
   readonly filesActions?: boolean
   /** The New Session hero options slot exists (0.2.1-alpha.3+). */
   readonly heroOptions?: boolean
+  /**
+   * Make `slots.inject` fire the callback even when the hero slot was not
+   * declared. Proves the explicit `specDynamic` guard, not just inject's own
+   * declaration wait, keeps the entry out of a runtime without the slot.
+   */
+  readonly permissiveHeroInject?: boolean
 }
 
 /** Apply the real client entry to a recording stub context. */
@@ -165,9 +171,15 @@ function mount(options: MountOptions = {}): Harness {
         : `${ns}.${key}`,
     },
     slots: {
+      specDynamic: (name: string) => name === 'conversation.hero.options' && options.heroOptions === true
+        ? { kind: 'list', scope: 'session' }
+        : undefined,
       inject: (name: string, callback: () => unknown) => {
         if (name === 'sidebar.right.tab.files.actions' && options.filesActions !== true) return () => {}
-        if (name === 'conversation.hero.options' && options.heroOptions !== true) return () => {}
+        if (name === 'conversation.hero.options' && options.heroOptions !== true) {
+          if (options.permissiveHeroInject === true) callback()
+          return () => {}
+        }
         expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions', 'sidebar.right.tab.document.actions', 'shell.overlay', 'conversation.hero.options']).toContain(name)
         callback()
         return () => {}
@@ -328,6 +340,14 @@ describe('the New Session hero entry', () => {
     const harness = mount()
     expect(harness.registrations.some(item => item.options.name === 'conversation.hero.options')).toBe(false)
     // The old-runtime path is the sidebar entry, unchanged.
+    expect(harness.registrations.some(item => item.options.name === 'sidebar.footer.action')).toBe(true)
+  })
+
+  it('keeps the entry out even when inject fires without a declared slot', () => {
+    // A permissive inject must not be enough: the explicit specDynamic gate is
+    // the support boundary for `conversation.hero.options`.
+    const harness = mount({ permissiveHeroInject: true })
+    expect(harness.registrations.some(item => item.options.name === 'conversation.hero.options')).toBe(false)
     expect(harness.registrations.some(item => item.options.name === 'sidebar.footer.action')).toBe(true)
   })
 
