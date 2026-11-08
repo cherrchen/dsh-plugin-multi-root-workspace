@@ -147,6 +147,41 @@ describe.skipIf(!POSIX)('the credential broker boundary', () => {
     expect(() => parseBrokerRequest({ protocol: 2, id: 1, method: 'openSftp', params: {} })).toThrow()
     expect(() => encodeData(Buffer.alloc(MAX_DATA + 1))).toThrow(/budget/)
   })
+
+  it('reopens environments a closed connection released instead of serving the corpse', async () => {
+    // The real manager caches openings globally; per-connection disposal must
+    // go through it or the next connection is handed a dead environment.
+    const opens: string[] = []
+    const cache = new Map<string, { generation: string }>()
+    const counting = {
+      deployment: manager.deployment,
+      open: async (environmentId: string) => {
+        opens.push(environmentId)
+        const generation = `gen-${opens.length}`
+        cache.set(environmentId, { generation })
+        return { environmentId, generation, hello: {}, fs: {}, sandbox: { confine: async () => ({ argv: [], enforcement: 'full' }) }, subprocess: { spawn: () => { throw new Error('unused') } }, dispose: async () => {} }
+      },
+      generationOf: (environmentId: string) => cache.get(environmentId)?.generation ?? 'stale',
+      dispose: async (environmentId: string) => { cache.delete(environmentId) },
+      openSftp: async (environmentId: string) => { throw new Error(`no sftp ${environmentId}`) },
+      sftpGenerationOf: () => 'stale',
+      disposeSftp: async () => {},
+      disposeAll: async () => {},
+    }
+    server = new BrokerServer(startOptions(join(base, 'cycle.sock'), { manager: counting as unknown as SshEnvironmentManager }))
+    await server.start()
+    const first = await BrokerConnection.connect(join(base, 'cycle.sock'), uid, 5_000)
+    await new BrokerEnvironmentManager(manager.deployment, first).open('build')
+    first.close()
+    // closeConnection runs asynchronously on the socket 'close' event; wait
+    // for the manager-level dispose to land before reconnecting.
+    for (let i = 0; i < 100 && cache.has('build'); i++) await new Promise(resolve => setTimeout(resolve, 10))
+    expect(cache.has('build')).toBe(false)
+    connection = await BrokerConnection.connect(join(base, 'cycle.sock'), uid, 5_000)
+    await new BrokerEnvironmentManager(manager.deployment, connection).open('build')
+    expect(opens).toEqual(['build', 'build'])
+    expect(cache.get('build')?.generation).toBe('gen-2')
+  })
 })
 
 describe.skipIf(!POSIX || process.getuid?.() === 0)('the Host attestation', () => {
