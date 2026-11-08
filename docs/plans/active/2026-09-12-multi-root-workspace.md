@@ -1531,3 +1531,25 @@ macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.1`：compat、lint、host/client �
 发版前在 macOS arm64 / Node `24.18.0` / pnpm `11.25.0` 重跑 `compat:check`、lint、双端类型检查、build、原生 `kernel:probe`、`registry:probe --required`、完整测试、三个 smoke、`pack:check`、`smoke:packed`、`auto-review:fork`、`smoke:auto-review` 和 `docs:check`，均通过。探针确认本机可用方言为 `seatbelt`，并以 `DSH_PROBE_VERIFIED_DIALECTS=seatbelt` 要求内核断言实跑；`registry:probe --required` 确认共享 IPC 可以实跑。完整回归 **1221 passed / 95 skipped / 0 failed**（81 个文件通过、3 个文件整体跳过）；compose **54/54**、behavior **137/137**、journey **76/76** 与 packed behavior **136/136**，三个 smoke 与 packed 无跳过；`pack:check` 校验 **186** 个成员；可选 `smoke:auto-review` 按精确版本规则跳过，不能计作本轮 Auto Review 集成通过。
 
 首次运行位于 DSH 工具沙箱内时，嵌套 `sandbox-exec` 与共享 Registry 的 follower/IPC 用例被外层沙箱拒绝（探针报告 `sandbox_apply: Operation not permitted`），上述结果来自随后在完整本机权限下的重跑；两类失败均非本版代码回归。Linux/Windows 原生矩阵由 tag 触发的 `release.yml` verify 覆盖，不在本机结论内。本地日志仅存于忽略的 `.dsh-smoke/release-v0.1.16/`，不随发布提交。
+
+## 新会话 Hero 入口（2026-11-08）
+
+状态：已完成并通过完整门禁，随下一个版本发布；决策见 [ADR-0037](../../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)，实施记录见[计划](../completed/2026-11-08-workspace-folders-hero-entry.md)。侧栏 `Folders` 入口保留，退役不在本批次内。
+
+范围：
+
+- 不依赖 `@deepseek-ai/dsh-client-ui-conversation`：typecheck 矩阵的旧版本没有该 SlotMap 键，注册走窄结构接口（`inject` + `spec` + `register`），槽位声明不存在时直接返回空 disposer；未进入运行时依赖、`dsh.client.inject` 或 peer/optional 依赖。
+- 新增 `src/client/HeroWorkspaceEntry.tsx`：icon + label 的 trigger，复用 `WorkspaceFoldersDialog`；无 chevron，`aria-haspopup="dialog"` 与 `aria-expanded`。
+- `src/client/index.ts` 新增 `HERO_SLOT_ID = 'multi-root-folders.hero'`、`HERO_ORDER = 10` 与独立的 `ctx.slots.inject('conversation.hero.options', ...)`；occupant 使用槽属性 `sessionId` 并 memoize；`sidebar.footer.action` 注册与 occupant 未改。
+- `src/client/styles.ts` 新增 `.mrfw-heroEntry*`：28px 高、`0 8px`、4px gap、`--dsw-radius-sm`、13px/20px/500、hover/展开 token、`max-width: min(100%, 240px)`；`@media (max-width: 560px)` 退化为 28×28 图标按钮。
+- 测试：`tests/client-panel.spec.tsx` 的 harness 支持 `heroOptions`，覆盖注册、共存、旧运行时缺席、会话权威、无 chevron、StrictMode 重渲染不重发 `list`；`tests/client-styles.spec.ts` 覆盖几何、token、无字面颜色、560px 分支与禁止 chevron 规则。
+- 文档：README 双语、guide 双语、requirements §9/已知限制、architecture Client 半部、ADR-0037、CHANGELOG `[Unreleased]`、兼容笔记 §13 均已同步。
+
+验证（macOS arm64 / Node `24.18.0` / pnpm `11.25.0`，完整本机权限）：
+
+- `pnpm typecheck`、`pnpm lint`、`pnpm build`、`pnpm compat:check`、`pnpm docs:check` 均通过；`pnpm install` 只把该包加到 importer 的 devDependencies，解析图未变。
+- `pnpm test`：rebase 到 main 后 **1264 passed / 95 skipped / 0 failed**（83 个文件通过、3 个文件整体跳过；rebase 前 1235；图标修订后新增 fallback、右内缩、不独占、槽位缺席与真实 SlotRegistry probe 断言）。
+- `pnpm verify:all`：通过。compose **54/54**、behavior **137/137**、journey **76/76**、packed behavior **136/136**；`pack:check` 校验 **184** 个成员；`auto-review:fork` 通过；`smoke:auto-review` 按精确版本规则跳过（可选集成基线仍为 `0.2.1-rc.2`）。
+- 在 DSH 工具沙箱内直接跑完整套件时，共享 Registry 的 follower/IPC 用例以 `contended` 失败（`shared IPC refuses sandboxed peers`）；同一用例在未改动的 main 基线工作树上以相同形状失败，确认是环境限制而非本批次回归。上述数字来自完整本机权限下的重跑，与 `v0.1.16` 发版验收的处理方式一致。
+- 文档对形态的承诺：与相邻 workspace / 模式选择器同几何、无 chevron、workspace tree 图标（旧运行时回退 folder）、`≤560px` 只显示图标、首条消息后 hero 行消失、旧运行时只有侧栏入口。
+- 目检修订（2026-11-08）：真实 GUI 目检发现首版 `IconSettings` 语义不符；改为 `IconWorkspaceTreeOutlineRegular`，旧运行时经 `selectIconOr` 回退 `IconFolderOpen`；随后按右对齐行顺序把文字放左、icon 放右，并补 DOM 顺序断言；再按上游行 `0 16px 0 20px` 的不对称内边距补 `margin-right: 4px`，使按钮盒与工作区选择器同为 20px 内缩。样式测试钉住 4px 右内缩，并断言入口不 grow、不绝对定位、不占满宽度，不会独占 list 槽。首轮 PR CI 在 `0.2.1-alpha.3` 之前的 lane 因 SlotMap 无该键而 typecheck 失败，最终改为零 `ui-conversation` 依赖的 `spec` 显式门控；新增槽位缺席回归用例。 Review 进一步发现 `specDynamic` 是 `SlotCore` 内部方法、`SlotRegistry` 服务只公开 `spec`；已改为公开 `spec`，并以真实浏览器 bundle 的 `SlotRegistry` 测试与 `0.2.1-alpha.3` repointed 树上的实跑验证。适配层与图标测试已更新；注册、RPC、授权与窄窗行为不变。

@@ -70,3 +70,7 @@ ADR-0002-short-title.md
 - [ADR-0029-ops-file-authorization-and-activity-adapter.md](./ADR-0029-ops-file-authorization-and-activity-adapter.md) — OPS 实验性保守兜底、Phase A live 与受限 Review 的限定接受范围；P5 完整兼容恢复无限期延后，不纳入本次最终验收。
 
 - [ADR-0035-unadmitted-confined-spawn.md](./ADR-0035-unadmitted-confined-spawn.md) — 准入外受限 spawn：铸造台账（铸造时发布代次键控、进程内有界、过期帧不落账）恢复「仅主根可写」降级，外部服务入口（forgePanel/worktrees）照常取真准入；OPS 域与保护窗口对台账 mint 一律严格（Accepted）。
+
+- [ADR-0036-approved-escalation-override.md](./ADR-0036-approved-escalation-override.md) — 用户单次批准的一次性 `danger-full-access` 提权只对该调用解除只读根与 per-tool 封顶拒绝（`$DSH_HOME` 与 authority-unavailable 除外）；standing Full-access、嵌套/后续调用与 OPS 派发不受影响（Accepted）。
+
+- [ADR-0037-conversation-hero-workspace-folders-entry.md](./ADR-0037-conversation-hero-workspace-folders-entry.md) — 新会话 Hero 行的 Workspace Folders 增量入口：`conversation.hero.options`（`0.2.1-alpha.3+`）注册、与相邻选择器同几何但无 chevron、`≤560px` 视口图标降级、会话权威取槽属性；侧栏 `Folders` 入口保留，退役 Deferred（Accepted，已实施并验证）。

@@ -53,6 +53,26 @@ export function selectIcon(module: IconModule, names: readonly string[]): PanelI
 }
 
 /**
+ * Pick the first available glyph, or a required fallback when the release
+ * carries none of the names.
+ *
+ * The hero entry wants the workspace-tree glyph from the Regular family, which
+ * old pixel-era releases do not export; those releases fall back to the folder
+ * glyph instead of failing the client graph.
+ * @param module - the icon module to read.
+ * @param names - candidate export names, preferred first.
+ * @param fallback - the glyph used when none of the candidates exists.
+ * @returns the selected glyph.
+ */
+export function selectIconOr(module: IconModule, names: readonly string[], fallback: PanelIcon): PanelIcon {
+  for (const name of names) {
+    const found = module[name]
+    if (found !== undefined) return found
+  }
+  return fallback
+}
+
+/**
  * The same by-name probe for a decorative glyph a release may simply not
  * carry: absence degrades to no icon, not to a boot error. Required icons go
  * through `selectIcon` and fail loud; optional ones go through here.
@@ -87,6 +107,10 @@ export const IconEdit = icon('IconEditOutline16', 'IconEditOutlineRegular')
 export const IconEllipsis = icon('IconEllipsisOutline16', 'IconEllipsisOutlineRegular')
 export const IconFolderClose = icon('IconFolderClose16', 'IconFolderCloseRegular')
 export const IconFolderOpen = icon('IconFolderOpenOutline16', 'IconFolderOpenOutlineRegular')
+// The New Session hero entry's glyph. The Regular workspace-tree icon arrived
+// with the Regular weight family in 0.1.7-alpha.1; older releases fall back to
+// the folder glyph the sidebar action already uses, never to a pixel-era name.
+export const IconWorkspaceTree = selectIconOr(installed, ['IconWorkspaceTreeOutlineRegular'], IconFolderOpen)
 export const IconPlus = icon('IconPlusOutline16', 'IconPlusOutlineRegular')
 export const IconRefresh = icon('IconRefreshOutline16', 'IconRefreshOutlineRegular')
 export const IconSettings = icon('IconSettingsOutline16', 'IconSettingsOutlineRegular')

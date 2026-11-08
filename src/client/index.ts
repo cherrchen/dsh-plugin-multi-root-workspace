@@ -26,7 +26,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 // the inject factory's first parameter — the same merge upstream's Files
 // registration compiles against.
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
-import { createElement, useCallback } from 'react'
+import { createElement, useCallback, type ReactNode } from 'react'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { currentSessionIdOf, subscribeSessions, subscribeCurrentSession } from '../compat/client-session.ts'
@@ -34,6 +34,7 @@ import { nativeTreeRenderer } from '../compat/files-tree.ts'
 import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { NS, en, zh } from './locales.ts'
 import { STYLES } from './styles.ts'
+import { HeroWorkspaceEntry } from './HeroWorkspaceEntry.tsx'
 import { installSkillsClient } from './skills.tsx'
 import { installSkillsSettingsCard } from './skills-settings.tsx'
 import { RootSwitcher } from './RootSwitcher.tsx'
@@ -65,6 +66,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** The footer-action cell this plugin owns. */
 export const SLOT_ID = 'multi-root-folders'
 
+/**
+ * The New Session hero-row cell this plugin owns. It exists as soon as the
+ * runtime offers `conversation.hero.options` (`0.2.1-alpha.3+`); older
+ * runtimes never declare that slot, so the registration silently stays out
+ * and the sidebar footer action remains the only entry.
+ */
+export const HERO_SLOT_ID = 'multi-root-folders.hero'
+
+/** After the forge worktree entry, whose default order is 0. */
+export const HERO_ORDER = 10
+
 /** The document-preview navigator retarget's occupant id. */
 const NAVIGATOR_SLOT_ID = 'multi-root-navigator'
 
@@ -73,6 +85,27 @@ const STYLE_ELEMENT_ID = 'multi-root-workspace-styles'
 
 /** Services the client half needs before it may activate. */
 export const inject = ['slots', 'locale', 'connection']
+
+/**
+ * The slice of the slot service this entry uses.
+ *
+ * `conversation.hero.options` is declared by `ui-conversation` from
+ * `0.2.1-alpha.3`; the typecheck matrix also runs against older releases whose
+ * SlotMap predates the key, so the registration goes through this narrow
+ * structural face instead of the merged SlotMap. `spec` is the public
+ * declaration probe on the SlotRegistry service (`specDynamic` exists only on
+ * the internal SlotCore, not on `ctx.slots`); absence means the running DSH
+ * has no such seat.
+ */
+interface HeroOptionsSlotService {
+  /** Public declaration lookup on every supported SlotRegistry service. */
+  spec?(key: string): unknown
+  inject(key: string, callback: () => () => void): () => void
+  register(
+    options: { readonly name: string; readonly id: string; readonly order: number; readonly locale: string },
+    component: (props: { readonly sessionId: string }) => ReactNode,
+  ): () => void
+}
 
 /**
  * Register the panel.
@@ -160,6 +193,36 @@ export function apply(ctx: ClientContext): void {
       ...(wide === undefined ? {} : { wide }),
     })
   }))
+  // Optional and purely additive: the New Session hero row's options slot
+  // exists from 0.2.1-alpha.3; old runtimes never declare it, so the entry is
+  // simply not rendered there and the sidebar footer action above stays the
+  // only entry. `inject` itself waits for a declaration, and the explicit
+  // `spec` probe makes the version gate legible even for an inject
+  // implementation that fires before/without a declaration.
+  // The trigger is a dialog button, not a menu: no chevron, and the same
+  // WorkspaceFoldersDialog — no second manager, no second RPC surface. The
+  // session identity comes from the slot's composed props (this slot is
+  // session-scope); it is memoized so the dialog's refresh identity — and the
+  // list call it keys — stays stable across upstream store writes.
+  const heroSlots = ctx.slots as unknown as HeroOptionsSlotService
+  heroSlots.inject('conversation.hero.options', () => {
+    if (heroSlots.spec?.('conversation.hero.options') === undefined) return () => {}
+    return heroSlots.register({
+      name: 'conversation.hero.options',
+      id: HERO_SLOT_ID,
+      order: HERO_ORDER,
+      locale: NS,
+    }, function HeroOptionsOccupant(props: { readonly sessionId: string }) {
+      const composedSessionId = props.sessionId
+      const readSession = useCallback(() => composedSessionId, [composedSessionId])
+      return createElement(HeroWorkspaceEntry, {
+        panel,
+        pickDirectory,
+        sessionId: readSession,
+        t,
+      })
+    })
+  })
   // Optional: old surfaces without the Files actions slot retain the footer entry.
   ctx.slots.inject('sidebar.right.tab.files.actions', () => ctx.slots.register({
     name: 'sidebar.right.tab.files.actions', id: SLOT_ID, order: 50,

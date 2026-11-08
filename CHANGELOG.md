@@ -10,6 +10,10 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 ## [Unreleased]
 
+### Added
+
+- **新会话页工作区行的 Workspace Folders 入口**：DSH `0.2.1-alpha.3` 及更新的运行时上，blank session 工作区行右端（`conversation.hero.options`）新增 `工作区目录 / Folders` 入口。它与相邻的工作区/模式选择器同高、同字号、同 hover/展开底色，单击打开与侧栏入口同一个对话框（同一套 RPC、错误码与文案）；因为打开的是对话框而不是下拉菜单，它**没有 chevron**，图标使用 workspace tree（旧运行时回退 folder 字形），并按右对齐行的顺序把文字放在左、icon 放在右；右侧再补 4px，与工作区选择器的 20px 左内边距对称（图标/文字 ink 同为 28px）。该入口不 grow、不绝对定位，可与同槽其他条目并存。窗口宽度 `≤560px` 时只显示 28×28 图标，名称保留在 `aria-label` 与悬停提示中；`≥561px` 恢复文字并允许 label 省略号收缩。首条消息发出后 hero 行随整行消失，侧栏底部 `Folders` 入口与其行为完全不变；旧运行时没有该槽，注册静默不触发，行为与今天一致（[ADR-0037](./docs/decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)）。
+
 ### Changed
 
 - **已批准的一次性 Full-access 提权现在按批准语义执行**：当用户在一次工具调用上批准 `sandbox_permissions: 'danger-full-access'` 的升级（上游 `approveEscalation` → `approval.request` 返回 `'allowed-once'`）后，该调用不再被插件的两条负授权否决——显式 `read-only` 附加根（含 standing mode 下只读的 `inherit` 根）与 `toolAccess` per-tool 封顶（含非法配置的 cap-everything）仅对该调用解除。`$DSH_HOME` 恰在无提权时本应被拒的同一条件下保持拒绝，Registry 权威 `unavailable` 的主根钳制照旧，standing Full-access 会话、并发/嵌套/后续调用、已运行进程、持久终端、面板终端与 OPS 派发均不受影响（[ADR-0036](./docs/decisions/ADR-0036-approved-escalation-override.md)）。

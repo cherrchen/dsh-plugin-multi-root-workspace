@@ -176,3 +176,52 @@ describe('the open-in-app takeover', () => {
     expect(STYLES).toMatch(/\.mrfw-openMain:hover:not\(:disabled\)/s)
   })
 })
+
+describe('the New Session hero entry rules', () => {
+  it('mirrors the adjacent selectors’ geometry, minus the chevron', () => {
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*min-height:\s*28px/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*padding:\s*0 8px/s)
+    // The row pads 20px left / 16px right; the extra 4px makes the trigger's
+    // box sit at the same 20px inset as the workspace selector, so their
+    // icon/text ink lines match at 28px.
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*margin:\s*0 4px 0 0/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*gap:\s*4px/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*border-radius:\s*var\(--dsw-radius-sm\)/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*font-size:\s*13px/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*line-height:\s*20px/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*font-weight:\s*500/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*color:\s*var\(--dsw-alias-label-primary\)/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*max-width:\s*min\(100%,\s*240px\)/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntryIcon\s*\{[^}]*flex:\s*none/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntryLabel\s*\{[^}]*text-overflow:\s*ellipsis/s)
+  })
+
+  it('uses the adjacent selectors’ hover/open fill and no literal color', () => {
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\[aria-expanded='true'\]\s*\{[^}]*background:\s*var\(--dsw-alias-interactive-bg-hover\)/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntry:hover\s*\{[^}]*background:\s*var\(--dsw-alias-interactive-bg-hover\)/s)
+    const rules = [...STYLES.matchAll(/\.mrfw-heroEntry[^{]*\{[^}]*\}/g)].map(match => match[0]).join('\n')
+    expect(rules).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/)
+  })
+
+  it('drops to a 28px icon-only button below the host compact step', () => {
+    const media = STYLES.match(/@media \(max-width: 560px\)\s*\{([\s\S]*?)\n\}/)
+    expect(media).toBeTruthy()
+    expect(media![1]).toMatch(/\.mrfw-heroEntry\s*\{[^}]*width:\s*28px/s)
+    expect(media![1]).toMatch(/\.mrfw-heroEntry\s*\{[^}]*min-width:\s*28px/s)
+    expect(media![1]).toMatch(/\.mrfw-heroEntry\s*\{[^}]*padding:\s*0/s)
+    expect(media![1]).toMatch(/\.mrfw-heroEntryLabel\s*\{\s*display:\s*none/s)
+  })
+
+  it('does not claim the shared list slot', () => {
+    // `conversation.hero.options` is a list slot: entries render as direct
+    // flex children of `.heroOptions` through a display:contents outlet. The
+    // trigger must stay in flow and must not grow, so another plugin's entry
+    // can sit beside it instead of being pushed out.
+    const rule = STYLES.match(/\.mrfw-heroEntry\s*\{([^}]*)\}/s)?.[1] ?? ''
+    expect(rule).not.toMatch(/flex:\s*1|flex-grow:\s*[1-9]|position:\s*absolute|width:\s*100%/)
+  })
+
+  it('never reintroduces a chevron rule', () => {
+    expect(STYLES).not.toContain('.mrfw-heroEntryChevron')
+  })
+})

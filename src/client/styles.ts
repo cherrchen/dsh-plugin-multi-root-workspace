@@ -80,6 +80,77 @@ export const STYLES = /* css */ `
   justify-content: center;
 }
 
+/* New Session hero row: the Workspace Folders entry rides
+   conversation.hero.options at the row's right edge. Geometry mirrors the
+   adjacent workspace and agent-preset selectors (28px height, 0 8px padding,
+   4px gap, 13px/20px/500, the same hover/open fill) so the three read as one
+   control family. It opens a dialog, not a menu, so it carries no chevron. */
+.mrfw-heroEntry {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: min(100%, 240px);
+  min-height: 28px;
+  margin: 0 4px 0 0;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.mrfw-heroEntry[aria-expanded='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+@media (hover: hover) {
+  .mrfw-heroEntry:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.mrfw-heroEntryIcon {
+  flex: none;
+  display: inline-flex;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-heroEntryLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The hero row carries no container-type (upstream only gives the session
+   title row and the input card row containers), so the icon-only form is
+   viewport-driven. 560px is the host's own compact step
+   (InputBar.module.css); below it the entry is 28x28 and the name lives on
+   aria-label/title. If upstream later gives the row a container, switch this
+   to @container. */
+@media (max-width: 560px) {
+  .mrfw-heroEntry {
+    width: 28px;
+    min-width: 28px;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+  }
+
+  .mrfw-heroEntryLabel {
+    display: none;
+  }
+}
+
 /* Icon-only launcher inside the upstream Files tab header. Upstream's
    FilesBody renders .header as one flat flex row — PathLabel, then the
    reload button, then the files.actions slot occupants — and each of those
