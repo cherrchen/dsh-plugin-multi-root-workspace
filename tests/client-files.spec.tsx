@@ -2,10 +2,10 @@
 /**
  * The forked Files tree over the real store + face and a stub remote.
  *
- * `filesFace`/`createFilesStore` are the verbatim upstream seams — the spec
+ * `filesFace`/`createFilesStore` are the upstream baseline seams — the spec
  * plays the slot framework: it mints the store instance, binds `useStore`
- * to it, hands the face's `start`/`toggle` to the component, and records
- * the `workspaceFiles` traffic and the addresses `onOpen` emits. The stub
+ * to it, hands the face's `hold`/`release`/`toggle` to the component, and
+ * records the `workspaceFiles` traffic and the addresses `onOpen` emits. The stub
  * `$stream` has no reconnect supervision: `changes` yields `ready` once,
  * then whatever the spec pushes, until the takeover signal aborts.
  */
@@ -103,7 +103,11 @@ interface Harness {
   /** `FilesTree`'s `onOpen` spy — receives `dsh-resource://file` addresses. */
   readonly onOpen: ReturnType<typeof vi.fn<(address: string) => void>>
   /** The verbatim face — `refresh` exercises the reload seam directly. */
-  readonly face: { refresh: (tabId: TabId) => void }
+  readonly face: {
+    refresh: (tabId: TabId) => void
+    hold: (tabId: TabId, root: string, signal: AbortSignal, restore?: readonly string[]) => void
+    release: (tabId: TabId) => void
+  }
   /** The takeover lifetime — aborting must forget the bucket and stop watches. */
   readonly controller: AbortController
   /** The minted store instance, for bucket assertions. */
@@ -159,7 +163,8 @@ function mount(
       signal={controller.signal}
       useStore={useStore}
       actions={instance.actions}
-      start={face.start}
+      hold={face.hold}
+      release={face.release}
       toggle={face.toggle}
       onOpen={onOpen}
       t={(key: string) => key as never}
@@ -254,6 +259,28 @@ describe('the forked Files tree', () => {
       : { ok: true, value: { path, truncated: false, entries: [] } }))
     expect(await screen.findByText('empty')).toBeTruthy()
     expect(await screen.findByText('truncated')).toBeTruthy()
+  })
+
+  it('releases the watch but keeps the bucket, then resumes the same rows', async () => {
+    const harness = mount()
+    await screen.findByRole('button', { name: 'src' })
+    const listed = () => harness.calls.filter(call => call.kind === 'list').length
+
+    act(() => { harness.face.release(TAB) })
+    expect(harness.snapshot().byTab[TAB]).toBeDefined()
+    const listedAtRelease = listed()
+    act(() => { harness.watches.get(ROOT)!.push({ kind: 'change' }) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(listed()).toBe(listedAtRelease)
+
+    act(() => {
+      harness.face.hold(TAB, ROOT, harness.controller.signal, harness.snapshot().byTab[TAB]?.expanded)
+    })
+    // The kept level is still ready — no loading row while the resumed watch
+    // asks the host for a fresh listing.
+    expect(screen.queryByText('loading')).toBeNull()
+    expect(screen.getByRole('button', { name: 'src' })).toBeTruthy()
+    await waitFor(() => { expect(listed()).toBeGreaterThan(listedAtRelease) })
   })
 
   it('forgets the bucket and closes the watch when the signal aborts', async () => {

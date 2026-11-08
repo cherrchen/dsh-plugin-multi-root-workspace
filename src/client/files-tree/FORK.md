@@ -1,6 +1,6 @@
 # files-tree fork — provenance and sync
 
-This directory is a **verbatim fork** of upstream's
+This directory is a **baseline fork** of upstream's
 `@deepseek-ai/dsh-client-ui-sidebar-files` tree (the body half of its Files
 tab), taken to let the Files-tab root switcher browse an *additional*
 workspace root with exactly the native tree's appearance and behavior —
@@ -25,14 +25,15 @@ which is always the primary root and cannot be re-pointed.
   `src/client/styles.ts`), `index.ts` (more locale registrations — not
   forked), and `locales.ts` (new language dictionaries — the `zh` key set,
   and with it `SidebarFilesKey`, is unchanged). The component sources are
-  byte-identical to the previous baseline.
+  byte-identical to the previous baseline, except for the documented
+  `face.ts` hold/release lifecycle delta.
 
-## Verbatim files (copy-diff must stay empty)
+## Forked files (baseline copy + documented deltas)
 
 | File | Delta vs upstream |
 | --- | --- |
 | `directory-node.ts` | none — byte-identical |
-| `face.ts` | none — byte-identical |
+| `face.ts` | the hold/record lifecycle delta — `hold`/`release` keep the store bucket while a body is hidden, `start`/record-abort reseed/forget it (see *Intentional deltas*) |
 | `store.ts` | none — byte-identical |
 | `FilesBody.module.css` | none — kept verbatim as the diffable source; its rules are copied into `src/client/styles.ts` renamed to `mrfw-ft*` |
 
@@ -50,9 +51,9 @@ re-applies the deltas, never hand-edits inside the verbatim definitions.
 | --- | --- | --- |
 | `FilesBody.module.css.ts` | the css-module virtual module | exports the same `css.<name>` map → `mrfw-ft*` classes; rules live in styles.ts; header-only keys are unmapped because the fork draws no header |
 | `locales.ts` | upstream `locales.ts` | only `NS` + the `SidebarFilesKey` union + the `LocaleNamespaceMap` augmentation; dictionaries are NOT re-registered — `ctx.locale.bind('sidebarFiles')` consumes upstream's live namespace so strings track upstream automatically |
-| `client-remote.d.ts` | `@deepseek-ai/dsh-api-remotes/client`'s exported `ClientRemote` | `tsconfig.client.json` `paths` maps the specifier here so `face.ts`/`adapter.tsx`/`store.ts`/`FilesTree.tsx` (the only importers) compile against the dev-pin's `workspaceFiles` signatures on every supported manifest; on releases older than `0.2.0-rc.2` the real `changes` has two parameters (session-wide watch) and would fail the verbatim 3-argument call — safe because the `files.actions` slot does not exist there so the fork never mounts |
+| `client-remote.d.ts` | `@deepseek-ai/dsh-api-remotes/client`'s exported `ClientRemote` | `tsconfig.client.json` `paths` maps the specifier here so `face.ts`/`adapter.tsx`/`store.ts`/`FilesTree.tsx` (the only importers) compile against the dev-pin's `workspaceFiles` signatures on every supported manifest; on releases older than `0.2.0-rc.2` the real `changes` has two parameters (session-wide watch) and would fail the baseline 3-argument call — safe because the `files.actions` slot does not exist there so the fork never mounts |
 | `primitives.ts` | the named primitives imports upstream spells | runtime-probes `IconFolderCloseRegular`/`IconFolderOpenRegular` (with `*16` pixel-era fallbacks), `FileTypeIcon`, and `classifyFileType` through `compat/client-icons`'s `maybeIcon`/`maybeComponent`; the adapter's gate turns a missing export into no tree at all — upstream's own absence shape |
-| `adapter.tsx` | upstream `apply`'s store/inject wiring | our wiring: `lazyFilesRemote` (`remote` and `remote.workspaceFiles` resolved per call through `ctx.get` — the inject-free store lookup, required because `remote.workspaceFiles` is a nested service whose context-proxy path throws "without inject" on undeclared fibers and this cordis treats every inject entry as required; every lookup failure — absent service, absent namespace, synchronous throw, or a rejected call — is folded into a settled `gateway/internal` RemoteResult/stream failure, because the verbatim `load` awaits `list` through `.then` with no `.catch` and an escaped rejection would die inside `DirectoryNode.task` pinning the level at `loading` forever), `createFilesTreeSeats` (the `store`/`inject` registration declarations: verbatim `filesFace` + session-bound `openFile`/`openFileIn` through `sidebarRight.openResourceIn` — the latter spelling the preview navigator's `replaceTab` route — plus the session-scoped `treeSelection` snapshot — exposed through the `hooks` compartment as `useTreeSelection` — and the takeover map that gives a body remount the native tree's occurrence-length lifetime plus the per-owner `(expanded, scrollTop, revealed)` memory — the fork's spelling of upstream's pane record — written CONTINUOUSLY by the owner (bucket mirror, live scroll, settle reports) so `end` only ends the hold, while ONE shared document observer — armed per owner key and outliving every `end` — drops the record when the owner's survival predicate finally fails (a dockkit pane has no stable element, so the preview navigator's predicate asks whether any connected element still carries its id, `data-dockkit-pane` or `data-dockkit-float`), and `save` refuses writes once hold and watch are both gone so a racing cleanup can never resurrect a dropped record), and `createFilesTreeSurface` (the prop-share assembly + the primitives gate) |
+| `adapter.tsx` | upstream `apply`'s store/inject wiring | our wiring: `lazyFilesRemote` (`remote` and `remote.workspaceFiles` resolved per call through `ctx.get` — the inject-free store lookup, required because `remote.workspaceFiles` is a nested service whose context-proxy path throws "without inject" on undeclared fibers and this cordis treats every inject entry as required; every lookup failure — absent service, absent namespace, synchronous throw, or a rejected call — is folded into a settled `gateway/internal` RemoteResult/stream failure, because the `load` awaits `list` through `.then` with no `.catch` and an escaped rejection would die inside `DirectoryNode.task` pinning the level at `loading` forever), `createFilesTreeSeats` (the `store`/`inject` registration declarations: `filesFace` with the hold/release delta + session-bound `openFile`/`openFileIn` through `sidebarRight.openResourceIn` — the latter spelling the preview navigator's `replaceTab` route — plus the session-scoped `treeSelection` snapshot — exposed through the `hooks` compartment as `useTreeSelection` — and the takeover map that gives a body remount the native tree's occurrence-length lifetime plus the per-owner `(expanded, scrollTop, revealed)` memory — the fork's spelling of upstream's pane record — written CONTINUOUSLY by the owner (bucket mirror, live scroll, settle reports), while ONE shared document observer — armed per owner key and outliving every `end` — drops the record when the owner's survival predicate finally fails (a dockkit pane has no stable element, so the preview navigator's predicate asks whether any connected element still carries its id, `data-dockkit-pane` or `data-dockkit-float`), and `save` refuses writes once hold and watch are both gone so a racing cleanup can never resurrect a dropped record), and `createFilesTreeSurface` (the prop-share assembly + the primitives gate) |
 | `locate.ts` | upstream navigator's `windowsRoot`/`underRoot`/`locateFile` + the `relativeFileOf` path math | path/level helpers the retargeted navigator reveal needs; `relativeUnderRoot`/`rootForPath` are ours — the containment check that picks the longest available additional root containing a previewed absolute path, skipping the primary root so primary files keep the native navigator |
 | `navigator.tsx` | upstream `FileNavigator`'s pane/body half | the preview-side retarget: a `sidebar.right.tab.document.actions` occupant finds the native `aside[data-files-navigator]` inside the preview's `data-dockkit-content` ancestor, marks it `data-mrfw-navigator` (styles.ts hides its `[data-files-body]` only), and portals the forked `FilesTree` in — rooted at the containing additional root, opening rows through `openFileIn` (`replaceTab`), and revealing the previewed file. Store bucket, takeover, and the saved `(expanded, scrollTop, revealed)` memory are all keyed by the dockkit PANE id (`data-files-navigator` on the aside), never by the preview tab — upstream's navigator records live in `store.byPane`, and the pane survives what a `replaceTab` open destroys. The pane id is itself observed: an attributes MutationObserver on the aside re-keys everything when `data-files-navigator` is rewritten in place (a drag to another pane), each pane keeping the record it saved under its own id. The saved `revealed` sits one level finer than upstream — per (pane, root) instead of per pane — so each additional root remembers its own last-completed walk rather than sharing one address |
 | `FORK.md` | — | this file |
@@ -68,17 +69,26 @@ upstream binds inside it arrives as a prop instead:
   from the dockkit `data-dockkit-content` ancestor (or a generated
   fallback), so the store bucket, expansion state, and scroll memory are
   keyed exactly like a real Files tab.
-- **Lifetime**: upstream rides the tab record's `signal`; the fork takes a
-  controller from the inject product's takeover map, keyed by (tab, root).
-  Deselecting or switching roots ends it at once; a body unmount does not —
-  opening a file deactivates the tab without ending its record. The inject
-  product's death watch — a `MutationObserver` armed on the survival check
-  each `signal()` call hands it (an element to keep connected for the Files
-  page, a pane-carrier query for the preview navigator) — lives outside the
-  hold itself, so the record's real end still drops the saved memory even
-  though the body's cleanup always wins the unmount race. The abort forgets
-  the bucket and closes every watch, mirroring upstream's tab-close path
-  while matching its hidden-tab survival.
+- **Lifetime / hold**: upstream rides the tab record's `signal` and splits
+  its navigator into a `hold(paneId, cwd)` whose cleanup closes only the
+  `DirectoryNode`, leaving the store's tree in place. The fork mirrors that
+  split with the inject product's takeover map, keyed by (tab, root): the
+  map's signal is the RECORD lifetime (the Files page's tab, the preview
+  navigator's dockkit pane), while a mounted `FilesTree` is one hold. On
+  mount it calls `hold`, which reseeds a fresh root or resumes the same
+  root's kept bucket and reopens its expanded directories; on unmount it
+  calls `release`, which closes the node and every watch but keeps the
+  bucket, levels, expansion, and scroll. A ready level makes `loading` a
+  no-op, so the kept rows stay drawn while the resumed node re-lists them
+  in the background — no loading row replaces rows the reader already had.
+  Deselecting or switching roots and the record's real death abort the
+  signal, which closes the node and forgets the bucket, mirroring upstream's
+  tab-close path. The inject product's death watch — a `MutationObserver`
+  armed on the survival check each `signal()` call hands it (an element to
+  keep connected for the Files page, a pane-carrier query for the preview
+  navigator) — lives outside the hold itself, so the record's real end still
+  drops the saved memory even though the body's cleanup always wins the
+  unmount race.
 - **Open route**: upstream calls `tab.actions.openResource`; the fork calls
   the injected `openFile`, bound to `sidebarRight.openResourceIn`, and
   computes the address as `fileAddressFor(sessionId, undefined, path)` —
@@ -200,16 +210,19 @@ below. The Factory fallback must keep older or incomplete compositions usable.
    `failureLine` definitions must remain byte-identical to the new upstream
    file, so diff `FilesTree.tsx` against upstream and confirm the only
    differences are the shell, the css specifier, and the prop-driven seams.
-3. `diff` the four verbatim files — zero accepted differences. Anything
-   else means upstream moved: port the change instead of resolving the diff
-   by hand.
+3. `diff` the baseline files — `directory-node.ts`, `store.ts`, and
+   `FilesBody.module.css` must be byte-identical. `face.ts` carries the
+   deliberate hold/release delta; after copying the new upstream version,
+   re-apply that delta (the `FilesInjected` additions and the
+   `closeNode`/`forget`/`bindRecord`/`open` block) instead of resolving the
+   diff by hand. Anything else means upstream moved.
 4. Diff `FilesBody.module.css` — copy changed rules into `styles.ts`'s
    `mrfw-ft*` block keeping the rename (header-only rules stay unmapped).
 5. Diff upstream `locales.ts`'s `zh` key set — extend `SidebarFilesKey` for
    new keys (strings themselves are consumed live from upstream's
    namespace).
 6. Re-check `face.ts`'s `FilesInjected` members against `adapter.tsx` and
-   `FilesTree.tsx`'s `Pick<FilesInjected, 'start' | 'toggle'>`, and the
+   `FilesTree.tsx`'s `Pick<FilesInjected, 'hold' | 'release' | 'toggle'>`, and the
    `workspaceFiles` remote slice against `lazyFilesRemote` and
    `client-remote.d.ts` — the shim must keep spelling the new baseline's
    signatures, or the verbatim call sites drift.

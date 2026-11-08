@@ -1,7 +1,7 @@
 /**
  * The tree's asynchronous half: listing directories into the store.
  *
- * The component never awaits anything. It calls `start` / `refresh` / `toggle`, and
+ * The component never awaits anything. It calls `hold` / `release` / `refresh` / `toggle`, and
  * this face performs the listing and writes the outcome through the store's own
  * actions — the Slot-standard `inject` shape, so the session id is resolved by
  * the framework and the write set stays the store's.
@@ -17,6 +17,12 @@
  * `signal`: a request is not made for a record that already ended, and when the
  * record goes away the bucket and the tab's listing bookkeeping are forgotten,
  * so no later settlement writes to it.
+ *
+ * A hold can end without its record ending: `release` closes the hold's
+ * directory node and watches but keeps the listed levels and expansion, and
+ * the next `hold` reopens them. That is upstream's `hold(paneId, cwd)` —
+ * closing a navigator is not closing its pane, so reopening draws the kept
+ * rows instead of falling back to a loading row.
  */
 import type { ClientRemote, RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import type { BoundActions } from '@deepseek-ai/dsh-client-store'
@@ -119,12 +125,35 @@ export interface FilesInjected {
   /** Control automatic rereads without closing watches. @param tabId - owning tab. @param enabled - automatic-refresh setting. */
   readonly setAutoRefresh: (tabId: TabId, enabled: boolean) => void
   /**
-   * Seed this tab's tree and list its root.
+   * Seed this tab's tree and list its root. This is the record's first open:
+   * it always reseeds the store at `root`, so use {@link hold} for later holds.
    * @param tabId - the tab being drawn.
    * @param root - absolute path of the workspace root.
    * @param signal - the tab record's lifetime.
    */
   readonly start: (tabId: TabId, root: string, signal: AbortSignal) => void
+  /**
+   * Open one hold on this tab's tree and list its root.
+   *
+   * The store bucket is reused when it already belongs to `root`; its listed
+   * levels stay drawn while the reopened node's listings settle, so a navigator
+   * closed and reopened by the reader never flashes a loading row over rows it
+   * already had. A different root reseeds the bucket, exactly like `start`.
+   * @param tabId - the tab being drawn.
+   * @param root - absolute path of the workspace root.
+   * @param signal - the tab record's lifetime; aborting it still forgets the
+   *   bucket and closes the node.
+   * @param restore - expanded directories to reopen as their parent listing
+   *   returns (the kept tree's expansion preferences).
+   */
+  readonly hold: (tabId: TabId, root: string, signal: AbortSignal, restore?: readonly string[]) => void
+  /**
+   * End one hold: close its directory node and watches while keeping the store
+   * bucket and expansion for the next `hold`. The record's `signal` still owns
+   * the bucket; aborting it forgets the tree.
+   * @param tabId - the tab whose hold ends.
+   */
+  readonly release: (tabId: TabId) => void
   /**
    * List one directory into the store.
    * @param tabId - the tab being drawn.
@@ -160,6 +189,10 @@ export function filesFace(
     /** Per tab, per absolute path: the listing generation a settlement must match; the latest request wins. */
     const generations = new Map<TabId, Map<string, number>>()
     const roots = new Map<TabId, DirectoryNode>()
+    /** The root each tab's store bucket belongs to; kept while a hold is released. */
+    const buckets = new Map<TabId, string>()
+    /** The record signal each tab's store bucket answers to. */
+    const bindings = new Map<TabId, AbortSignal>()
     const nextGeneration = (tabId: TabId, path: string): number => {
       const byPath = generations.get(tabId) ?? new Map<string, number>()
       generations.set(tabId, byPath)
@@ -180,28 +213,58 @@ export function filesFace(
         return result.ok ? result.value : undefined
       })
     }
+    // One hold's node: the store bucket is separate, so closing a node must not
+    // touch the levels the next hold resumes from.
+    const closeNode = (tabId: TabId): void => {
+      const root = roots.get(tabId)
+      roots.delete(tabId)
+      generations.delete(tabId)
+      void root?.close()
+    }
+    // The record's death: close the hold and drop everything the record owned.
+    const forget = (tabId: TabId): void => {
+      closeNode(tabId)
+      buckets.delete(tabId)
+      bindings.delete(tabId)
+      actions.forget(tabId)
+    }
+    // One listener per record signal; a superseded binding is inert.
+    const bindRecord = (tabId: TabId, signal: AbortSignal): void => {
+      if (bindings.get(tabId) === signal) return
+      bindings.set(tabId, signal)
+      signal.addEventListener('abort', () => {
+        if (bindings.get(tabId) !== signal) return
+        forget(tabId)
+      }, { once: true })
+    }
+    // `reset` is `start`: a fresh store bucket even for a kept root. `hold`
+    // reuses the same root's bucket and reopens its expanded levels in place.
+    const open = (tabId: TabId, root: string, signal: AbortSignal, restore: readonly string[], reset: boolean): void => {
+      if (signal.aborted) return
+      closeNode(tabId)
+      bindRecord(tabId, signal)
+      if (reset || buckets.get(tabId) !== root) {
+        actions.start(tabId, root)
+        buckets.set(tabId, root)
+        restore = []
+      }
+      roots.set(tabId, new DirectoryNode(root,
+        (path, lifetime) => load(tabId, path, lifetime),
+        (path, lifetime) => watch(sessionId, path, lifetime),
+        (path, error) => {
+          if (!signal.aborted) actions.failed(tabId, path, new RemoteError('gateway/internal', error instanceof Error ? error.message : String(error), {}))
+        }, signal, restore,
+      ).open())
+    }
     return {
       refresh: (tabId) => { void roots.get(tabId)?.refreshTree() },
       setAutoRefresh: (tabId, enabled) => {
         actions.autoRefresh(tabId, enabled)
         roots.get(tabId)?.setAutomatic(enabled)
       },
-      start(tabId, root, signal) {
-        actions.start(tabId, root)
-        signal.addEventListener('abort', () => {
-          void roots.get(tabId)?.close()
-          roots.delete(tabId)
-          generations.delete(tabId)
-          actions.forget(tabId)
-        }, { once: true })
-        roots.set(tabId, new DirectoryNode(root,
-          (path, lifetime) => load(tabId, path, lifetime),
-          (path, lifetime) => watch(sessionId, path, lifetime),
-          (path, error) => {
-            if (!signal.aborted) actions.failed(tabId, path, new RemoteError('gateway/internal', error instanceof Error ? error.message : String(error), {}))
-          }, signal,
-        ).open())
-      },
+      start: (tabId, root, signal) => { open(tabId, root, signal, [], true) },
+      hold: (tabId, root, signal, restore = []) => { open(tabId, root, signal, restore, false) },
+      release: (tabId) => { closeNode(tabId) },
       load: (tabId, path, signal) => { void load(tabId, path, signal) },
       toggle(tabId, parentPath, path, expanded, signal) {
         if (signal.aborted) return

@@ -38,13 +38,13 @@ import css from './FilesBody.module.css.ts'
 
 /**
  * The fork's props: the store/locale shares verbatim from upstream's
- * composed props, `start`/`toggle` from the injected face, and the four
- * seams upstream binds inside `FilesBody` — tab id, lifetime, root, and the
- * resource-opening callback — supplied by the adapter instead.
+ * composed props, `hold`/`release`/`toggle` from the injected face, and the
+ * four seams upstream binds inside `FilesBody` — tab id, lifetime, root, and
+ * the resource-opening callback — supplied by the adapter instead.
  */
 export type FilesTreeProps =
   & PropsStore<ReturnType<typeof createFilesStore>>
-  & Pick<FilesInjected, 'start' | 'toggle'>
+  & Pick<FilesInjected, 'hold' | 'release' | 'toggle'>
   & PropsLocale<'sidebarFiles'>
   & {
     /** The store bucket this tree reads and writes — the pane's own dockkit tab id. */
@@ -53,7 +53,11 @@ export type FilesTreeProps =
     readonly sessionId: SessionId
     /** Absolute path of the root this tree lists (the selected additional root). */
     readonly root: string
-    /** Takeover lifetime: aborting forgets the bucket and closes the watch tree. */
+    /**
+     * The owner's record lifetime: aborting it forgets the bucket and closes
+     * the tree. A body unmount alone only ends the hold — the bucket, its
+     * listed levels, and its expansion stay for the next mount to resume.
+     */
     readonly signal: AbortSignal
     /** Open one `dsh-resource://file` address (the adapter's sidebarRight route). */
     readonly onOpen: (address: string) => void
@@ -222,7 +226,7 @@ function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
  * verbatim, with the root arriving as a prop instead of `useSessions(cwd)`.
  */
 export function FilesTree({
-  tabId, sessionId, root, signal, useStore, actions, start, toggle, onOpen, t, nativeTree, reveal, saved, onScrollOffset,
+  tabId, sessionId, root, signal, useStore, actions, hold, release, toggle, onOpen, t, nativeTree, reveal, saved, onScrollOffset,
 }: FilesTreeProps): ReactNode {
   const state = useStore(store => store.byTab[tabId])
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -310,6 +314,18 @@ export function FilesTree({
     setCurrent(location?.current)
   }, [revealKey, state, tabId, signal, toggle, revealPath, revealOnSettled, revealSaved])
   const pendingScroll = useRef(0)
+  // The live render's state and saved snapshot, read by the hold effect. They
+  // are refs rather than dependencies: a store write must not release and
+  // reopen the hold, and the snapshot is only consulted when this mount found
+  // no bucket to resume.
+  const stateRef = useRef(state)
+  const savedRef = useRef(saved)
+  // Layout phase, before the passive hold effect below: concurrent renders
+  // never observe a ref pointing at a state that did not commit.
+  useLayoutEffect(() => {
+    stateRef.current = state
+    savedRef.current = saved
+  })
   // Come back where the reader was: loaded levels outlive the body in the
   // store, so a remounted tree lays out at its full height before this runs
   // and the stored offset re-lands exactly. A fresh tree stores 0. The
@@ -393,24 +409,36 @@ export function FilesTree({
     onScrollOffset?.(scrollTopRef.current)
   }, [seeded, signal, tabId, actions, onScrollOffset])
   useEffect(() => {
-    // A bucket gone because the record aborted must not be re-seeded by a
-    // component that has not unmounted yet.
-    if (state !== undefined || signal.aborted) return
-    start(tabId, root, signal)
-    // The owner-closed memory lands behind the seed through the verbatim
-    // `toggle` — its `root.setExpanded(next)` is upstream's own
-    // restore-preferences channel. Every remembered directory re-expands in
-    // saved order (parents always precede their children there), exactly
-    // like the `relisting` upstream runs on its kept `expanded`; the nested
-    // ones' `toggled` writes land them in `expanded` so the rows draw open.
-    if (saved?.expanded !== undefined) {
-      for (const path of saved.expanded) {
-        if (path === root || relativeUnderRoot(path, root) === undefined) continue
-        toggle(tabId, path.slice(0, path.lastIndexOf('/')), path, saved.expanded.filter(value => value !== path), signal)
+    // The record died: the bucket is gone and there is nothing to resume.
+    if (signal.aborted) return
+    const current = stateRef.current
+    // Only this root's bucket resumes its own expansion; a fresh mount or a
+    // stale bucket from the outgoing root restores the owner-closed snapshot
+    // below. `hold` never reseeds a bucket of the same root, so the rows the
+    // reader had stay drawn while the reopened node's listings settle (the
+    // store's `loading` is a no-op for a ready level).
+    const resumed = current !== undefined && current.root === root
+    hold(tabId, root, signal, resumed ? current.expanded : undefined)
+    if (!resumed) {
+      // The owner-closed memory lands behind the seed through the verbatim
+      // `toggle` — its `root.setExpanded(next)` is upstream's own
+      // restore-preferences channel. Every remembered directory re-expands in
+      // saved order (parents always precede their children there), exactly
+      // like the `relisting` upstream runs on its kept `expanded`; the nested
+      // ones' `toggled` writes land them in `expanded` so the rows draw open.
+      const snapshot = savedRef.current
+      if (snapshot?.expanded !== undefined) {
+        for (const path of snapshot.expanded) {
+          if (path === root || relativeUnderRoot(path, root) === undefined) continue
+          toggle(tabId, path.slice(0, path.lastIndexOf('/')), path, snapshot.expanded.filter(value => value !== path), signal)
+        }
       }
+      if (snapshot?.scrollTop !== undefined) pendingScroll.current = snapshot.scrollTop
     }
-    if (saved?.scrollTop !== undefined) pendingScroll.current = saved.scrollTop
-  }, [state, root, tabId, signal, start, toggle, saved, actions])
+    // The body unmounting is a hold ending, not a record ending: close the
+    // node and watches, leave the bucket for the next mount.
+    return () => { release(tabId) }
+  }, [root, tabId, signal, hold, release, toggle])
 
   if (state === undefined) return null
   const tree: TreeContext = {

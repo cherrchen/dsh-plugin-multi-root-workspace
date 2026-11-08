@@ -77,9 +77,10 @@ export interface FilesTreeSaved {
 
 export interface FilesTreeTakeover {
   /**
-   * The live signal for (key, root); reuses the live entry so a remounted
-   * body finds its bucket and watches intact. A different root — or an entry
-   * already aborted — ends the previous controller before minting the next.
+   * The record signal for (key, root); reuses the live entry so a remounted
+   * body finds its tree bucket and resumes it. Only the record's end — the
+   * owner dying, or a different root superseding it — aborts the controller;
+   * a navigator closing is a hold ending and leaves this signal live.
    * @param key - the owner's dockkit identity: the Files pane's tab id, or
    *   the preview navigator's pane id.
    * @param root - absolute path of the root being browsed.
@@ -94,10 +95,11 @@ export interface FilesTreeTakeover {
    */
   readonly signal: (key: TabId, root: string, section?: Element | (() => boolean)) => AbortSignal
   /**
-   * Abort and drop one owner's takeover: the reader deselected, switched
-   * roots, or the owner's hold closed. The saved memory survives — ending
-   * the hold is not ending the owner (upstream's `pane.root?.close()`
-   * leaves `pane.tree` in the store).
+   * Abort and drop one owner's record: the owner died, the selection moved to
+   * another root, or a body with no pane carrier closed. A normal navigator
+   * close is not a record end — the body release keeps the bucket. The saved
+   * memory survives here because the death watch owns the only real drop;
+   * this method only guarantees a superseded record stops writing.
    * @param key - the owner's dockkit identity.
    */
   readonly end: (key: TabId) => void
@@ -250,9 +252,10 @@ export function lazyFilesRemote(ctx: ClientContext): ClientRemote {
 /**
  * The registration's `store`/`inject` declarations, built once in `apply`.
  *
- * The inject face nests the verbatim files face under `face` and adds the
- * session-bound `openFile` — keeping `FilesInjected` untouched means the
- * fork's call sites and the sync diff stay upstream-shaped.
+ * The inject face nests the files face under `face` and adds the
+ * session-bound `openFile`; the fork's call sites stay upstream-shaped, the
+ * one lifecycle delta being the hold/release pair the preview navigator needs
+ * (see FORK.md).
  * @param ctx - the client root context (the remote/sidebarRight lookups).
  * @returns the store handle and the inject factory for `register`.
  */

@@ -98,7 +98,15 @@ export interface NavigatorRetargetProps {
   readonly nativeTree?: NativeTreeRenderer | undefined
 }
 
-/** The portal's takeover record, mirroring {@link RootSwitcher}'s. */
+/**
+ * The portal's takeover record, mirroring {@link RootSwitcher}'s.
+ *
+ * `signal` is the dockkit PANE's record lifetime, not the Folder hold's: the
+ * native navigator's pane record outlives every open/close, so the fork's
+ * store bucket must too. Closing Folder only releases the hold (the body
+ * unmount closes its node and watches); the record ends when the pane dies,
+ * which is what aborts this signal.
+ */
 interface Takeover {
   /** Lifetime handed to the tree's face: aborting forgets the bucket and closes the watch tree. */
   readonly signal: AbortSignal
@@ -296,13 +304,15 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   }, [takeover, takeoverCtl])
 
   // The hold: while the aside exists AND the file belongs to an additional
-  // root, the tree's lifetime is the aside's — exactly upstream's
-  // `hold(paneId, cwd)` gated on the open flag. Ending it aborts the
-  // signal, which forgets the bucket and closes the watch tree; the saved
-  // memory was written continuously, so the `end` carries no snapshot and
-  // the death watch — armed on the pane-carrier query, not on any element
-  // — owns the only drop. The aside carries a marker while held so the
-  // stylesheet hides only its native body.
+  // root, the forked tree is mounted. Closing Folder must end only that hold:
+  // the body unmount releases the node and watches, while the dockkit pane's
+  // record signal stays live and keeps the bucket — exactly upstream's
+  // `hold(paneId, cwd)` against `pane.lifetime`, so reopening draws the kept
+  // rows instead of a fresh loading row. The signal is aborted only when the
+  // pane dies (the death watch) or the previewed file moves the takeover to
+  // another root, which aborts the superseded record in `signal()` itself.
+  // The aside carries a marker while held so the stylesheet hides only its
+  // native body.
   // The snapshot belongs to the LIVE hold's root, not the freshly matched
   // one: while a root switch is in flight the body still draws the old tree,
   // and handing it the new root's memory would pair one root's expansion set
@@ -320,9 +330,12 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
     })
     aside.setAttribute('data-mrfw-navigator', '')
     const capturedPaneId = paneId
+    // A generated fallback names no pane carrier, so no death watch can own
+    // its record: only that shape still ends the record with the hold.
+    const identified = paneIdentified.current
     return () => {
       aside.removeAttribute('data-mrfw-navigator')
-      takeoverCtl.end(capturedPaneId)
+      if (!identified) takeoverCtl.end(capturedPaneId)
     }
   }, [aside, rootPath, paneId, takeoverCtl])
 
@@ -356,7 +369,8 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
               signal={takeover.signal}
               useStore={filesTree.useStore}
               actions={filesTree.actions}
-              start={filesTree.face.start}
+              hold={filesTree.face.hold}
+              release={filesTree.face.release}
               toggle={filesTree.face.toggle}
               // The native navigator opens with `replaceTab: true` — the
               // file takes the preview's own tab; `openFileIn` spells the

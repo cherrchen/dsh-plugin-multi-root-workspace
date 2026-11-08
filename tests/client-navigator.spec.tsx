@@ -483,6 +483,35 @@ describe('the preview navigator retarget', () => {
     expect(harness.opens.at(-1)?.options).toEqual({ replaceTab: 'tab-preview' })
   })
 
+  it('reopens on the kept rows instead of a loading flash, then re-lists in the background', async () => {
+    const harness = mount()
+    const { content } = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const first = openNavigator(content)
+    await waitFor(() => { expect(first.aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => { expect(first.aside.querySelector('[data-files-path="/repos/payments/src"]')).not.toBeNull() })
+    const callsAtClose = harness.treeCalls.length
+    act(() => { first.aside.remove() })
+
+    // The pane record lives on, so the store bucket does too. Hold the root
+    // listing the reopened hold starts: a fresh bucket would render the
+    // loading row until this resolves, while the kept bucket draws its rows
+    // immediately.
+    const release = harness.holdList('/repos/payments')
+    try {
+      const second = openNavigator(content)
+      await waitFor(() => { expect(second.aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+      expect(second.aside.querySelector('[data-files-row="loading"]')).toBeNull()
+      expect(second.aside.querySelector('[data-files-path="/repos/payments/src"]')).not.toBeNull()
+      // The hold was genuinely reopened: its watch and root listing run again.
+      await waitFor(() => {
+        expect(harness.treeCalls.slice(callsAtClose).some(call => call.kind === 'changes'
+          && call.path === '/repos/payments')).toBe(true)
+        expect(harness.treeCalls.slice(callsAtClose).some(call => call.kind === 'list'
+          && call.path === '/repos/payments')).toBe(true)
+      })
+    } finally { release() }
+  })
+
   it('restores nested off-path expansion across a navigator close and reopen', async () => {
     const harness = mount()
     const { content } = renderInPreview(harness, { absolutePath: PREVIEWED })
