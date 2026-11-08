@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { currentSessionIdOf, subscribeCurrentSession } from '../src/compat/client-session.ts'
+import { currentSessionIdOf, mainViewRetentionOf, subscribeCurrentSession } from '../src/compat/client-session.ts'
 
 /** One catalog row the way 0.1.6-alpha.2 projects it. */
 function row(id: string, mainView?: number): { id: string; retainedBy: { mainView?: number } } {
@@ -21,6 +21,40 @@ function row(id: string, mainView?: number): { id: string; retainedBy: { mainVie
 function sessions(snapshot: unknown): { list: { getSnapshot: () => unknown } } {
   return { list: { getSnapshot: () => snapshot } }
 }
+
+describe('mainViewRetentionOf', () => {
+  /** A service whose per-session retention snapshot is exactly `snapshot`. */
+  function retained(snapshot: unknown): { retainInfo: (id: string) => { getSnapshot: () => unknown } } {
+    return { retainInfo: () => ({ getSnapshot: () => snapshot }) }
+  }
+
+  it('reads the synchronous per-session retention count', () => {
+    expect(mainViewRetentionOf(retained({ retainedBy: { mainView: 1 } }), 's1')).toBe(true)
+    expect(mainViewRetentionOf(retained({ retainedBy: { mainView: 2 } }), 's1')).toBe(true)
+    expect(mainViewRetentionOf(retained({ retainedBy: { mainView: 0 } }), 's1')).toBe(false)
+    // A readable snapshot without the source means "not retained"; only an
+    // unreadable shape is unknown.
+    expect(mainViewRetentionOf(retained({ retainedBy: {} }), 's1')).toBe(false)
+  })
+
+  it('returns undefined when the surface has no readable probe', () => {
+    expect(mainViewRetentionOf({ list: {} }, 's1')).toBeUndefined()
+    expect(mainViewRetentionOf(null, 's1')).toBeUndefined()
+    expect(mainViewRetentionOf({ retainInfo: () => { throw new Error('unknown session') } }, 's1')).toBeUndefined()
+    expect(mainViewRetentionOf(retained({}), 's1')).toBeUndefined()
+    expect(mainViewRetentionOf({ retainInfo: () => ({}) }, 's1')).toBeUndefined()
+  })
+
+  it('invokes retainInfo as a method so a store can read this', () => {
+    const service = {
+      marker: 'bound',
+      retainInfo(this: { marker: string }) {
+        return { getSnapshot: () => ({ retainedBy: { mainView: this.marker === 'bound' ? 1 : 0 } }) }
+      },
+    }
+    expect(mainViewRetentionOf(service, 's1')).toBe(true)
+  })
+})
 
 describe('currentSessionIdOf', () => {
   it.each(['legacy', 'retained'] as const)('only reports selection changes on the %s store', shape => {

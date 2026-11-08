@@ -41,6 +41,7 @@ import {
   IconTrash,
 } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
+import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView } from '../contract.ts'
 
@@ -65,6 +66,18 @@ export interface WorkspaceFoldersActionProps {
   readonly wide?: boolean
   /** Icon-only launcher in the upstream Files tab's public actions slot. */
   readonly compact?: boolean
+  /**
+   * The client-scoped dialog controller. Only the footer registration passes
+   * it, together with {@link dialogOwner}; the Files compact launcher and the
+   * Files-tab switcher keep their own local dialog state.
+   */
+  readonly dialogController?: WorkspaceFoldersDialogController
+  /**
+   * Whether this instance owns the shared dialog. Exactly one registration
+   * (the footer) sets it, so a second Files-tab instance never becomes a
+   * second owner.
+   */
+  readonly dialogOwner?: boolean
 }
 
 /** The visual family of one capsule button, mirroring the host Button kit. */
@@ -248,7 +261,36 @@ function workingRootOf(view: RootsView | undefined): string | undefined {
 /** The sidebar footer action plus the dialog it opens. */
 export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): ReactNode {
   const [open, setOpen] = useState(false)
+  /**
+   * The session an external caller (the workspace context menu) pinned this
+   * dialog to. `undefined` means "follow the current session", which is both
+   * the footer's own behavior and the fallback when no pin is active.
+   */
+  const [targetSessionId, setTargetSessionId] = useState<string | undefined>(undefined)
   const rail = props.wide === false
+  const openWith = useCallback((sessionId?: string) => {
+    setTargetSessionId(sessionId)
+    setOpen(true)
+  }, [])
+  const close = useCallback(() => {
+    setOpen(false)
+    setTargetSessionId(undefined)
+  }, [])
+  // Exactly one instance owns the shared dialog: the footer registration.
+  // The Files compact launcher and the Files-tab switcher keep their local
+  // state, so their registration must never overwrite this controller's
+  // owner (and their own dialog behavior stays untouched).
+  useEffect(() => {
+    if (props.dialogOwner !== true || props.dialogController === undefined) return
+    return props.dialogController.registerOwner(openWith)
+  }, [props.dialogOwner, props.dialogController, openWith])
+  // A changed identity is what makes the dialog re-read the pinned session:
+  // its own refresh effect keys on this function, and its stale-response
+  // guards compare the session the request was built for with this one.
+  const dialogSessionId = useCallback(
+    () => targetSessionId ?? props.sessionId?.(),
+    [targetSessionId, props.sessionId],
+  )
   return (
     <>
       {/* The row wrapper mirrors the host `.triggerRow`: its 2px side overhang
@@ -262,13 +304,18 @@ export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): Reac
           aria-label={props.compact === true ? props.t('action.title') : undefined}
           aria-haspopup="dialog"
           aria-expanded={open}
-          onClick={() => { setOpen(value => !value) }}
+          onClick={() => {
+            // The footer keeps its original toggle. Closing through it also
+            // drops an external pin, so the next open follows the selection.
+            if (open) close()
+            else openWith(undefined)
+          }}
         >
           <span className="mrfw-triggerIcon" aria-hidden="true"><IconSettings size={rail ? 18 : 16} /></span>
           {rail || props.compact === true ? null : <span className="mrfw-triggerLabel">{props.t('action.label')}</span>}
         </button>
       </div>
-      {open ? <WorkspaceFoldersDialog {...props} onClose={() => { setOpen(false) }} /> : null}
+      {open ? <WorkspaceFoldersDialog {...props} sessionId={dialogSessionId} onClose={close} /> : null}
     </>
   )
 }

@@ -37,6 +37,8 @@ import { STYLES } from './styles.ts'
 import { HeroWorkspaceEntry } from './HeroWorkspaceEntry.tsx'
 import { installSkillsClient } from './skills.tsx'
 import { installSkillsSettingsCard } from './skills-settings.tsx'
+import { createWorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
+import { installWorkspaceMenu, type UiWorkspaceClient, type WorkspacesClient } from './workspace-menu.ts'
 import { RootSwitcher } from './RootSwitcher.tsx'
 import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction.tsx'
 import { OPEN_IN_APP_NS, createOpenInAppAdapter } from './open-in-app/adapter.tsx'
@@ -133,8 +135,15 @@ export function apply(ctx: ClientContext): void {
     const connection = ctx.get('connection')
     return connection === undefined ? undefined : createPanelClient(connection)
   })()
+  // The footer's dialog owner and the workspace menu share exactly one
+  // controller for this apply() lifetime: the menu asks the footer to open
+  // its dialog, and the menu entry is disabled while no footer owner exists
+  // (ADR-0036). RootSwitcher deliberately keeps its own local dialog.
+  const dialogController = createWorkspaceFoldersDialogController()
   const pickDirectory = async (): Promise<string | null> => {
-    const workspace = readService<{ pickDirectory?: () => Promise<string | null> }>(ctx, 'uiWorkspace')
+    // Read per call, as before: the picker belongs to the surface and may be
+    // composed or replaced independently of this apply lifetime.
+    const workspace = readService<UiWorkspaceClient>(ctx, 'uiWorkspace')
     if (workspace?.pickDirectory === undefined) return null
     return await workspace.pickDirectory()
   }
@@ -190,6 +199,8 @@ export function apply(ctx: ClientContext): void {
       sessionId,
       subscribeSession,
       t,
+      dialogController,
+      dialogOwner: true,
       ...(wide === undefined ? {} : { wide }),
     })
   }))
@@ -290,6 +301,21 @@ export function apply(ctx: ClientContext): void {
       nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot),
     })
   }))
+  // The workspace row's `...` / context menu gains "Manage workspace folders…".
+  // Registration is soft on `contextMenus`; the entry itself is enabled only
+  // while every dependency (host channel, a live workspace record, upstream
+  // navigation, and the footer-owned dialog) is present.
+  // Optional services are read per resolve/run, not captured here: the
+  // workspace controller and ui-workspace may activate after this entry (the
+  // panel's own picker/session reads follow the same rule).
+  installWorkspaceMenu(ctx, {
+    panel,
+    workspaces: () => readService<WorkspacesClient>(ctx, 'workspaces'),
+    uiWorkspace: () => readService<UiWorkspaceClient>(ctx, 'uiWorkspace'),
+    sessions: () => readService(ctx, 'sessions'),
+    dialog: dialogController,
+    t,
+  })
 }
 
 /**
