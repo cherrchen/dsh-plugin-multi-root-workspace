@@ -49,6 +49,8 @@ active:
 
 completed:
 
+- [2026-11-08-workspace-folders-hero-entry.md](./completed/2026-11-08-workspace-folders-hero-entry.md) (Chinese) — An incremental Workspace Folders entry on the New Session hero row: a `conversation.hero.options` registration, the adjacent selectors' geometry without a chevron, and a `≤560px` viewport icon-only degrade; the sidebar entry remains. Completed 2026-11-08 and passed the full gate, shipping in the next release; decision: [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md).
+
 - [2026-11-05-root-authorization-security-fixes.md](./completed/2026-11-05-root-authorization-security-fixes.md) (Chinese) — Completed bounded root-authorization fixes: BYP-02, MRW-01, protected-directory registration, and required shared mode. Excluded work remains out of scope; evidence and release status live in the [progress ledger](./active/2026-09-12-multi-root-workspace.md#进度总账).
 
 - [2026-11-01-ops-compatibility-adaptation.md](./completed/2026-11-01-ops-compatibility-adaptation.md) (Chinese) — Bounded P0–P6 implementation and final acceptance of experimental OPS safeguards; P5 compatibility recovery is deferred indefinitely, with the feature off by default. Status and evidence are in the progress ledger.

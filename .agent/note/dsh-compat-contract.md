@@ -92,7 +92,7 @@ await mountCompat(ctx)
 | `src/compat/client-session.ts` | 当前会话：`list.current`（0.1.5 / 0.1.6-alpha.1）→ 目录行 `retainedBy.mainView > 0`（0.1.6-alpha.2 与 0.1.7-alpha.1 至 0.1.7-rc.2；0.1.7 挪走了别的目录字段，主视图谓词没变） |
 | `src/compat/llm-message.ts` | session format 3 及更早投 `{ kind: 'plugin', plugin, form: 'instructions' }`；format 4（`0.1.7` 的 `SESSION_FORMAT_VERSION`）拒绝 `kind: 'plugin'`，改投 `{ kind: 'multi-root-workspace', plugin, form: 'instructions' }`。探针是 session 包导出的格式常量，**不是** renderer 名字——0.1.6 已经改名却仍接受 `plugin`。不要用 `agent-instructions`：上游把那个 kind 的 `changes` 当自己的协调权威 |
 | `src/compat/tool-result.ts` | 失败位：0.1.5/0.1.6 在 `content[0].isError`，0.1.7 在消息自身的 `isError`。`event.data.error` 两边都还在 |
-| `src/compat/client-icons.ts` | 面板图标：0.1.5/0.1.6 是像素名（`IconFolderClose16`），0.1.7 是线宽名。上游 UI 用的是 Regular，不是 Medium。先取像素名，没有再取 Regular。纯装饰字形走 `maybeIcon` 软探测（缺失降级为无图标，不抛错）——权限字形 `IconWorkspaceWrite`/`IconReadOnly` 仅 0.1.7+ 存在 |
+| `src/compat/client-icons.ts` | 面板图标：0.1.5/0.1.6 是像素名（`IconFolderClose16`），0.1.7 是线宽名。上游 UI 用的是 Regular，不是 Medium。先取像素名，没有再取 Regular。纯装饰字形走 `maybeIcon` 软探测（缺失降级为无图标，不抛错），带必需 fallback 的可选字形走 `selectIconOr`——权限字形 `IconWorkspaceWrite`/`IconReadOnly` 仅 0.1.7+ 存在 |
 | `src/compat/process-entrypoints.ts` | 进程栅栏包装哪些公开入口：`ctx.shell` 上 `execute`/`run`/`start` 的存在性探测（`start` 存在于 0.1.6 及更早），`ctx.ptcRuntime` 只认公开 `run`（具体实现的 `execute` 是私有 helper，不作跨包接缝） |
 | `scripts/lib/profile-boot.mjs` | `healProfilesModuleFallback` 是函数就调用它；否则 `createRuntimeResolution`，并在 `boot` 的 prepare 里 `hostCtx.plugin(PluginPackages, { resolution })`。0.1.7 不再导出 heal |
 | `scripts/lib/shell-exec.mjs` | `shell.run` 存在就用它；否则 `shell.execute(spec)` 再 `execution.result()`。0.1.7 的 `SandboxBashExecutor` 改了名从 run 到 execute |
@@ -262,3 +262,14 @@ PTY 的 agent/用户判别是 §13 唯一的静默 fail-open 接缝：`DSH_PTY_S
 ## 16. DSH 0.2.2-rc.1 转稳定生态
 
 rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留旧宿主所需的具名 prerelease peer 分支；稳定 peer 范围已覆盖 Cordis 4.1.0 / Schemastery 3.19.0。开发树须整体重指，提交前移除临时 probe overrides。稳定版 vendor 范围只能取声明 minor 线内的最新稳定 patch（prerelease 仍钉精确基线）：旧 loader peer `^1.0.3` 会接纳新发布的 `1.1.0`，却在 Cordis `4.0.2` 的 `fiber.entry` 处崩溃。升级 helper 现在对未发布基线或复合范围拒绝猜测，不跨入新的 vendor minor 或把 prerelease 混入稳定线。详见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#022-rc1-后续审查2026-11-05)；执行证据仍在路线账本，可选 Auto Review 仍钉 0.2.1-rc.2。
+
+## 13. 新会话 Hero 入口（`conversation.hero.options`）
+
+`conversation.hero.options` 是 `list` / `session` 槽，`0.2.1-alpha.3` 起由 `ui-conversation` 声明（commit `3f1d5dfcfa`），渲染在 blank session 工作区行的 workspace / 模式选择器之后；`.heroOptions` 自带 `margin-left: auto`，条目组落在整行右端。本插件在其中注册 `multi-root-folders.hero`（order 10，无 `label`），occupant 直接使用 composed `sessionId` 并 memoize 成稳定回调，与侧栏 `sidebar.footer.action` 共用 `WorkspaceFoldersDialog`、RPC、错误码与文案。槽是 `list`，outlet 以 `display: contents` 挂在 `.heroOptions` 内，本入口不 grow/不绝对定位/不占满宽度，不会独占该槽；当前组合只有本入口是安装事实。
+
+- **可用版本**：`0.2.1-alpha.3` 及更新；`0.1.5-rc.2` ～ `0.2.1-alpha.2` 没有该槽。
+- **缺席行为**：`ctx.slots.inject` 静默不触发，新会话页没有该入口；侧栏入口、host 侧、RPC 与授权语义全部不变。
+- **依赖形态**：只做 `import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'` 的 `SlotMap` 合并，并放在 `devDependencies` 的精确 pin；不要把它提升为 `dependencies` / `optionalDependencies` / `peerDependencies`，也不要写进 `dsh.client.inject`——那会让旧运行时也要求该包存在，破坏"缺席即无该入口"的降级。
+- **会话权威**：槽是 `session` scope，composed props 的 `sessionId` 是确定值；不要在 hero occupant 里回退到全局 current-session 解析（侧栏 fallback 是另一条路径）。
+- **形态约束**：与相邻 workspace / 模式选择器同几何，但因打开对话框而非菜单**没有 chevron**；图标优先 `IconWorkspaceTreeOutlineRegular`，旧运行时经 `selectIconOr` 回退 `IconFolderOpen`（不使用像素时代名）；文字在左、icon 在右，以贴合该行右对齐的阅读顺序；trigger 另加 `margin-right: 4px`，因为上游行 padding 是 `0 16px 0 20px`，这样按钮盒与工作区选择器一样内缩 20px。hero 行没有容器祖先，`≤560px` 用视口媒体查询退化为 28×28 图标按钮。上游若改成容器查询，再同步切换。
+- **无 DOM 钩子**：入口只依赖槽位契约；上游改名或移除该槽时按上面的缺席路径静默退化，不需要目检表更新。

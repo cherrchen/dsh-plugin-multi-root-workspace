@@ -134,7 +134,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 7.14 **用户面板终端任何模式不受约束**：进程 fence 只 confine env 带 `DSH_PTY_SESSION_ID` 的 PTY spawn——每个受支持版本的 `dsh-terminal-bash` backend 启动 agent PTY 时都盖该标记；面板 controller 等不盖该标记的直接 `spawnTerminal` 调用（用户终端）任何模式直通——沙箱保护 agent 行为，不干预用户行为。`dsh-terminal` 在 web profile 上被组 `isolate`，registry 不是可达接缝，共享 `spawnTerminal` + env 判别覆盖两种挂载。
 7.15 **`$DSH_HOME` 受限 Full-access 负授权**：`danger-full-access` 且（deny 集非空或 authority `unavailable`）时，scope 把 canonical `dshHome`（patch 行 `dshHomePath()` 配置）追加进 `deniedRoots`（`protectedHome`）；`workspace-write` / `read-only` 与零根健康 authority 不追加；主根位于 home 内时 deny 胜出。非法（非绝对）`dshHome` 记 error 并忽略。见 ADR-0017 修订节。
 8. **失败要响亮**：misconfiguration（非绝对路径、重复 id、patch 行未按预期生效）在装载或首次 resolve 时抛错。
-9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias 可用；不显示上移/下移按钮，当前 UI 不提供排序入口，底层排序接口与逻辑保留，供后续拖动排序使用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制；浏览落点是 Files 页签根选择器（选中附加根以插件自绘树接管树区，头部各控件——刷新、「在应用中打开」——均作用于选中根，`data-*` 钩子失效即静默退化），见 ADR-0015。
+9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias 可用；不显示上移/下移按钮，当前 UI 不提供排序入口，底层排序接口与逻辑保留，供后续拖动排序使用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制；DSH `0.2.1-alpha.3` 起在 blank session 的新会话页工作区行 `conversation.hero.options` 增加同一对话框的增量入口（与相邻 workspace / 模式选择器同几何、无 chevron、`≤560px` 视口只显示图标；`session` scope 的 `sessionId` 取自槽属性；侧栏入口保留，旧运行时该槽缺席即无此入口），见 [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)；浏览落点是 Files 页签根选择器（选中附加根以插件自绘树接管树区，头部各控件——刷新、「在应用中打开」——均作用于选中根，`data-*` 钩子失效即静默退化），见 ADR-0015。
 10. **升级韧性**：`package.json` pin dsh 精确版本；仓库 CI 含"升级 smoke"脚本（对上游 demo 行为差异报警）；provider 子类只依赖上游公开方法面（不触碰 TS-private、不做原型替换）。
 11. **e2e**：需求 §22 场景实跑通过（跨 repo 读写、双 repo 测试、git diff），headless + web 双 profile —— 由 `pnpm smoke:journey` 覆盖：web 组合进程内启动 + 命令注册根 + 真实 agent 轮次，headless 组合以真实 CLI 子进程跑一次性任务，模型由内联的脚本化 OpenAI 兼容端点提供（无凭据）。受限 bash 在无法嵌套内核沙箱的宿主上显式 skip 并打印原因。
 
@@ -156,7 +156,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 ### 已知限制（M3）
 
 - 命令输出文案为英文（host 侧没有活动语言信息）；面板文案中英双语。
-- 面板是"侧栏底部动作 + 对话框"：`sidebar.panellist` / keyed `main` 全屏面板只有部分上游运行时提供，因此面板固定在两个受支持版本都有的 `sidebar.footer.action` 上（M3 当时的理由是保住已安装桌面运行时 `0.1.2-rc.1`；该运行时后来不在支持矩阵内，见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)，但结论不变——`footer.action` 才是交集）。
+- 面板是"侧栏底部动作 + 对话框"：`sidebar.panellist` / keyed `main` 全屏面板只有部分上游运行时提供，因此面板固定在两个受支持版本都有的 `sidebar.footer.action` 上（M3 当时的理由是保住已安装桌面运行时 `0.1.2-rc.1`；该运行时后来不在支持矩阵内，见 [ADR-0009](../decisions/ADR-0009-dsh-compat-contract.md)，但结论不变——`footer.action` 才是交集）。DSH `0.2.1-alpha.3` 起额外在新会话页 `conversation.hero.options` 挂一个增量入口：它只在 blank session 的工作区行存在（首条消息后随整行消失），与相邻两个选择器同几何但无 chevron，`≤560px` 视口下退化为 28×28 图标按钮；旧运行时该槽不存在，注册静默不触发，侧栏入口行为不变。侧栏入口的退役不在本变更内，另行决定（[ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)）。
 - 未接入 `sidebar.workspaces.directoryFlow` / `conversation.hero.workspace.directoryFlow`：那是"创建工作区"的洞，默认组合已有占用者（ADR-0005）。
 - e2e 的模型轮次由脚本驱动（用于断言世界状态），不能替代"真实模型能否自行发现附加根"的观察；拓扑快照的模型可见性由请求体断言覆盖。
 - 重新校验与内核调用之间仍存在 TOCTOU 窗口：本插件保证"按当前可见的解析结果授权"，不保证一个目录在 `stat` 之后被原子替换时内核仍按旧目标执行（那需要内核侧 fd 语义）。

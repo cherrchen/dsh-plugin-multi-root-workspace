@@ -94,8 +94,16 @@ function catalogSnapshot(rows: readonly { id: string; mainView?: number }[]): {
   return { ids: rows.map(row => row.id), byId, phase: 'ready' }
 }
 
+/** Which optional slots this harness's runtime declares. */
+interface MountOptions {
+  /** The Files-tab actions slot exists and the fork may mount. */
+  readonly filesActions?: boolean
+  /** The New Session hero options slot exists (0.2.1-alpha.3+). */
+  readonly heroOptions?: boolean
+}
+
 /** Apply the real client entry to a recording stub context. */
-function mount(withFilesActions = false): Harness {
+function mount(options: MountOptions = {}): Harness {
   const calls: Call[] = []
   const registrations: Registration[] = []
   const dictionaries: { ns: string; dicts: Record<string, unknown> }[] = []
@@ -158,8 +166,9 @@ function mount(withFilesActions = false): Harness {
     },
     slots: {
       inject: (name: string, callback: () => unknown) => {
-        if (name === 'sidebar.right.tab.files.actions' && !withFilesActions) return () => {}
-        expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions', 'sidebar.right.tab.document.actions', 'shell.overlay']).toContain(name)
+        if (name === 'sidebar.right.tab.files.actions' && options.filesActions !== true) return () => {}
+        if (name === 'conversation.hero.options' && options.heroOptions !== true) return () => {}
+        expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions', 'sidebar.right.tab.document.actions', 'shell.overlay', 'conversation.hero.options']).toContain(name)
         callback()
         return () => {}
       },
@@ -216,6 +225,17 @@ function renderPanel(harness: Harness, strictMode = false): void {
   render(strictMode ? createElement(StrictMode, null, panel) : panel)
 }
 
+/** Render the hero-row occupant the plugin registered. */
+function renderHero(
+  harness: Harness,
+  props: { readonly sessionId?: string } = { sessionId: 'session-1' },
+  strictMode = false,
+): ReturnType<typeof render> {
+  const registration = harness.registrations.find(item => item.options.name === 'conversation.hero.options')!
+  const panel = createElement(registration.component as never, props)
+  return render(strictMode ? createElement(StrictMode, null, panel) : panel)
+}
+
 beforeEach(() => {
   Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn(async () => {}) }, configurable: true })
 })
@@ -228,7 +248,7 @@ afterEach(() => {
 
 describe('the client entry', () => {
   it('opens the same session-derived panel from the optional Files actions slot', async () => {
-    const harness = mount(true)
+    const harness = mount({ filesActions: true })
     const registration = harness.registrations.find(item => item.options.name === 'sidebar.right.tab.files.actions')!
     expect(registration).toBeDefined()
     render(createElement(registration.component as never))
@@ -271,6 +291,92 @@ describe('the client entry', () => {
       get: () => undefined,
     }
     expect(() => { client.apply(ctx as never) }).not.toThrow()
+  })
+})
+
+describe('the New Session hero entry', () => {
+  it('registers its own hero cell and leaves the sidebar registration untouched', () => {
+    const harness = mount({ heroOptions: true })
+    const hero = harness.registrations.find(item => item.options.name === 'conversation.hero.options')
+    expect(hero?.options.id).toBe(client.HERO_SLOT_ID)
+    expect(hero?.options.order).toBe(client.HERO_ORDER)
+    expect(hero?.options.locale).toBe(NS)
+    // The hero slot's owner never projects a label; copy rides the trigger.
+    expect(hero?.options.label).toBeUndefined()
+    const footer = harness.registrations.find(item => item.options.name === 'sidebar.footer.action')
+    expect(footer?.options.id).toBe(client.SLOT_ID)
+    expect(footer?.options.order).toBe(50)
+  })
+
+  it('coexists with the sidebar footer entry and opens the same dialog', async () => {
+    const harness = mount({ heroOptions: true })
+    const footer = harness.registrations.find(item => item.options.name === 'sidebar.footer.action')!
+    const hero = harness.registrations.find(item => item.options.name === 'conversation.hero.options')!
+    render(createElement(footer.component as never))
+    render(createElement(hero.component as never, { sessionId: 'session-1' }))
+
+    expect(document.querySelector('.mrfw-trigger')).toBeTruthy()
+    const heroTrigger = document.querySelector('.mrfw-heroEntry') as HTMLButtonElement | null
+    expect(heroTrigger).toBeTruthy()
+    fireEvent.click(heroTrigger!)
+
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+    expect(harness.calls[0]).toEqual({ channel: PANEL_CHANNEL, endpoint: 'list', payload: { sessionId: 'session-1' } })
+  })
+
+  it('registers no hero cell on a runtime that never declares the slot', () => {
+    const harness = mount()
+    expect(harness.registrations.some(item => item.options.name === 'conversation.hero.options')).toBe(false)
+    // The old-runtime path is the sidebar entry, unchanged.
+    expect(harness.registrations.some(item => item.options.name === 'sidebar.footer.action')).toBe(true)
+  })
+
+  it('reads the composed hero session, never the global current selection', async () => {
+    const harness = mount({ heroOptions: true })
+    // The harness's global selection is session-1; the composed slot says
+    // session-9, and that is what the host must be asked to list.
+    renderHero(harness, { sessionId: 'session-9' })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.action.label` }))
+
+    await waitFor(() => { expect(harness.calls).toHaveLength(1) })
+    expect(harness.calls[0]).toEqual({ channel: PANEL_CHANNEL, endpoint: 'list', payload: { sessionId: 'session-9' } })
+  })
+
+  it('renders an icon and the visible label but no chevron', () => {
+    const harness = mount({ heroOptions: true })
+    const view = renderHero(harness)
+    const trigger = view.container.querySelector('.mrfw-heroEntry') as HTMLButtonElement
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(trigger.getAttribute('title')).toBe(`${NS}.action.title`)
+    // The accessible name survives the icon-only narrow form.
+    expect(trigger.getAttribute('aria-label')).toBe(`${NS}.action.label`)
+    expect(trigger.textContent).toBe(`${NS}.action.label`)
+    expect(view.container.querySelector('.mrfw-heroEntryIcon svg')).toBeTruthy()
+    expect(view.container.querySelector('.mrfw-heroEntryLabel')?.textContent).toBe(`${NS}.action.label`)
+    // The row is right-aligned, so the trigger reads label-then-icon: the
+    // leading text sits toward the row, and the glyph sits at the outer edge.
+    expect(Array.from(trigger.children).map(child => child.className)).toEqual([
+      'mrfw-heroEntryLabel',
+      'mrfw-heroEntryIcon',
+    ])
+    // A dialog button, not a dropdown: no chevron/arrow element at all.
+    expect(view.container.querySelector('.mrfw-heroEntryChevron')).toBeNull()
+    expect(view.container.querySelector('[class*="Chevron"], [class*="chevron"], [class*="Caret"]')).toBeNull()
+    expect(trigger.querySelectorAll('[aria-hidden="true"]')).toHaveLength(1)
+  })
+
+  it('does not re-issue list when StrictMode re-renders the hero occupant', async () => {
+    const harness = mount({ heroOptions: true })
+    const registration = harness.registrations.find(item => item.options.name === 'conversation.hero.options')!
+    const element = (): ReturnType<typeof createElement> => createElement(registration.component as never, { sessionId: 'session-1' })
+    const view = render(createElement(StrictMode, null, element()))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.action.label` }))
+    await waitFor(() => { expect(harness.calls.filter(call => call.endpoint === 'list').length).toBeGreaterThan(0) })
+    const before = harness.calls.filter(call => call.endpoint === 'list').length
+    view.rerender(createElement(StrictMode, null, element()))
+    await act(async () => { await Promise.resolve() })
+    expect(harness.calls.filter(call => call.endpoint === 'list')).toHaveLength(before)
   })
 })
 

@@ -22,6 +22,11 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
+// Merges the New Session hero-row slots (`conversation.hero.options`, from
+// `0.2.1-alpha.3`) into the SlotMap this entry registers against. Type-only:
+// a runtime that lacks the package still loads this client graph, and the
+// optional `slots.inject` below simply never fires there.
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Merges `sessionId` onto session-scope composed props and `SessionId` onto
 // the inject factory's first parameter — the same merge upstream's Files
 // registration compiles against.
@@ -34,6 +39,7 @@ import { nativeTreeRenderer } from '../compat/files-tree.ts'
 import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { NS, en, zh } from './locales.ts'
 import { STYLES } from './styles.ts'
+import { HeroWorkspaceEntry } from './HeroWorkspaceEntry.tsx'
 import { installSkillsClient } from './skills.tsx'
 import { installSkillsSettingsCard } from './skills-settings.tsx'
 import { RootSwitcher } from './RootSwitcher.tsx'
@@ -64,6 +70,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** The footer-action cell this plugin owns. */
 export const SLOT_ID = 'multi-root-folders'
+
+/**
+ * The New Session hero-row cell this plugin owns. It exists as soon as the
+ * runtime offers `conversation.hero.options` (`0.2.1-alpha.3+`); older
+ * runtimes never declare that slot, so the registration silently stays out
+ * and the sidebar footer action remains the only entry.
+ */
+export const HERO_SLOT_ID = 'multi-root-folders.hero'
+
+/** After the forge worktree entry, whose default order is 0. */
+export const HERO_ORDER = 10
 
 /** The document-preview navigator retarget's occupant id. */
 const NAVIGATOR_SLOT_ID = 'multi-root-navigator'
@@ -158,6 +175,29 @@ export function apply(ctx: ClientContext): void {
       subscribeSession,
       t,
       ...(wide === undefined ? {} : { wide }),
+    })
+  }))
+  // Optional and purely additive: the New Session hero row's options slot
+  // exists from 0.2.1-alpha.3; old runtimes never declare it, so this block is
+  // a no-op there and the sidebar footer action above stays the only entry.
+  // The trigger is a dialog button, not a menu: no chevron, and the same
+  // WorkspaceFoldersDialog — no second manager, no second RPC surface. The
+  // session identity comes from the slot's composed props (this slot is
+  // session-scope); it is memoized so the dialog's refresh identity — and the
+  // list call it keys — stays stable across upstream store writes.
+  ctx.slots.inject('conversation.hero.options', () => ctx.slots.register({
+    name: 'conversation.hero.options',
+    id: HERO_SLOT_ID,
+    order: HERO_ORDER,
+    locale: NS,
+  }, function HeroOptionsOccupant(props: { readonly sessionId: string }) {
+    const composedSessionId = props.sessionId
+    const readSession = useCallback(() => composedSessionId, [composedSessionId])
+    return createElement(HeroWorkspaceEntry, {
+      panel,
+      pickDirectory,
+      sessionId: readSession,
+      t,
     })
   }))
   // Optional: old surfaces without the Files actions slot retain the footer entry.
