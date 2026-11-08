@@ -293,9 +293,13 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
   sftpGenerationOf(environmentId: string): string { return this.sftpGenerations.get(environmentId) ?? 'stale' }
 
   async open(environmentId: string): Promise<SshEnvironment> {
-    const existing = this.environments.get(environmentId)
-    if (existing !== undefined) return existing
+    // The server is the generation authority: always ask. Its per-connection
+    // cache returns the same generation while the underlying env is alive and
+    // a fresh one after it rebuilt a killed connection — a cached proxy whose
+    // generation no longer matches must be replaced, never replayed.
     const opened = await this.connection.request<{ generation: string; hello: Readonly<Record<string, unknown>> }>('open', { environmentId })
+    const existing = this.environments.get(environmentId)
+    if (existing !== undefined && existing.generation === opened.generation) return existing
     const environment = {
       environmentId,
       generation: opened.generation,
