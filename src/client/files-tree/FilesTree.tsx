@@ -232,10 +232,16 @@ export function FilesTree({
   const [current, setCurrent] = useState<string | undefined>(undefined)
   // The walk state, spelled like upstream's pane record: `key` is the
   // in-flight target (`revealing`), `settled`/`canceled` mark its end, and
-  // `seed` is the mount-time `revealed` — suppressed once, then spent,
-  // because upstream's `revealed` is live rather than mount-frozen.
+  // `seed` is the target's remembered `revealed` — suppressed once, then
+  // spent, because upstream's `revealed` is live rather than mount-frozen.
   const walk = useRef<{ key: string | undefined; settled: boolean; canceled: boolean }>({ key: undefined, settled: false, canceled: false })
   const revealSeed = useRef(saved?.revealed)
+  // The `(root, reveal path)` identity the seed belongs to. The component
+  // outlives a root switch (the tree is re-rooted by props), so a seed read
+  // once at mount would replay the first root's memory on every return; a
+  // new identity re-reads its own snapshot instead, while store updates
+  // under the same identity leave the live seed alone.
+  const seededKey = useRef<string | undefined>(undefined)
   // Upstream's `scrollToCurrent`: a settled walk scrolls the row into view
   // the next time it mounts — and only then; unrelated remounts never
   // yank the view.
@@ -247,6 +253,7 @@ export function FilesTree({
     }
   }, [])
   const revealPath = reveal?.path
+  const revealSaved = saved?.revealed
   const revealOnSettled = reveal?.onSettled
   // The reveal target's identity for the whole walk — encoded, so a root
   // and a path can never smear into another pair's spelling.
@@ -259,10 +266,32 @@ export function FilesTree({
   // recorded). Once settled or suppressed there is no walk to step: the
   // mark alone follows the loaded levels.
   useEffect(() => {
-    if (revealPath === undefined || revealKey === undefined || state === undefined || signal.aborted) { setCurrent(undefined); return }
-    if (walk.current.key !== revealKey) walk.current = { key: revealKey, settled: false, canceled: false }
+    if (revealPath === undefined || revealKey === undefined || state === undefined || signal.aborted) {
+      // No live identity: the next one starts from its own snapshot.
+      seededKey.current = undefined
+      setCurrent(undefined)
+      return
+    }
+    if (walk.current.key !== revealKey || seededKey.current !== revealKey) {
+      // A different (root, path) pair — or a fresh bucket for the same one:
+      // seed from that pair's snapshot, never from the live seed of the pair
+      // this body last walked. Upstream's `revealing = revealed === address
+      // ? undefined : address` is the model; this snapshot is per
+      // (pane, root), so entering a pair has to re-read it.
+      walk.current = { key: revealKey, settled: false, canceled: false }
+      revealSeed.current = revealSaved
+      seededKey.current = revealKey
+      wantScroll.current = false
+    }
     const relative = relativeUnderRoot(revealPath, state.root)
-    const location = relative === undefined ? undefined : locateFile(state, relative)
+    if (relative === undefined) {
+      // The preview already names another root and the takeover is about to
+      // re-key: settling here would record the other root's address as this
+      // root's `revealed`, smearing the two roots' memories.
+      setCurrent(undefined)
+      return
+    }
+    const location = locateFile(state, relative)
     if (walk.current.settled || walk.current.canceled || revealSeed.current === revealPath) {
       setCurrent(location?.current)
       return
@@ -279,7 +308,7 @@ export function FilesTree({
     revealOnSettled?.(revealPath)
     if (location?.current !== undefined) wantScroll.current = true
     setCurrent(location?.current)
-  }, [revealKey, state, tabId, signal, toggle, revealPath, revealOnSettled])
+  }, [revealKey, state, tabId, signal, toggle, revealPath, revealOnSettled, revealSaved])
   const pendingScroll = useRef(0)
   // Come back where the reader was: loaded levels outlive the body in the
   // store, so a remounted tree lays out at its full height before this runs
@@ -307,11 +336,21 @@ export function FilesTree({
   // own `scrollTop` — 0 on a fresh reseed — never overwrites it when both
   // fire on the same commit. An in-flight walk owns the view instead (its
   // current row wins), matching upstream's restore-then-reveal-scroll
-  // ordering.
+  // ordering. The verdict is read for the identity the commit runs under,
+  // the same way the reveal effect will read it after the commit: an
+  // identity that has not been seeded yet (a root switch, or a fresh
+  // bucket) lets the snapshot decide — a remembered reveal means the saved
+  // offset lands, a new walk means it owns the viewport. Reading the
+  // previous identity's unsettled refs here would cancel a restore the
+  // suppressed new identity should have let through.
   useLayoutEffect(() => {
     const body = bodyRef.current
     if (body === null || pendingScroll.current <= 0) return
-    const inFlight = revealPath !== undefined && !walk.current.settled && !walk.current.canceled && revealSeed.current !== revealPath
+    const seededIdentity = seededKey.current === revealKey
+    const seed = seededIdentity ? revealSeed.current : revealSaved
+    const inFlight = revealPath !== undefined
+      && !(seededIdentity && (walk.current.settled || walk.current.canceled))
+      && seed !== revealPath
     if (inFlight || body.scrollHeight > body.clientHeight) {
       if (!inFlight) {
         body.scrollTop = pendingScroll.current
@@ -383,11 +422,15 @@ export function FilesTree({
       // re-opening what the reader just closed. A collapse that lands
       // before the reveal effect has run — the request already changed,
       // the ref still names the old key — pre-cancels the walk it would
-      // have started, so the effect's key reset cannot resurrect it.
-      if (revealPath !== undefined && revealKey !== undefined && revealSeed.current !== revealPath
+      // have started, so the effect's key reset cannot resurrect it. The
+      // suppression verdict uses the seed the rendered identity carries: a
+      // pair already revealed has no walk to cancel.
+      const seededIdentity = seededKey.current === revealKey
+      const seed = seededIdentity ? revealSeed.current : revealSaved
+      if (revealPath !== undefined && revealKey !== undefined && seed !== revealPath
           && state.expanded.includes(path)
-          && (walk.current.key !== revealKey || (!walk.current.settled && !walk.current.canceled))) {
-        if (walk.current.key !== revealKey) walk.current = { key: revealKey, settled: false, canceled: true }
+          && (!seededIdentity || (!walk.current.settled && !walk.current.canceled))) {
+        if (!seededIdentity) walk.current = { key: revealKey, settled: false, canceled: true }
         else walk.current.canceled = true
         revealSeed.current = undefined
         revealOnSettled?.(revealPath)

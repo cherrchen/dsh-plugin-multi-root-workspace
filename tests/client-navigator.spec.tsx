@@ -866,4 +866,75 @@ describe('the preview navigator retarget', () => {
     act(() => { first.setFile('/repos/payments/src/inner.ts') })
     await waitFor(() => { expect(expanded(aside, '/repos/payments/other')).toBe(true) })
   })
+
+  it('keeps a collapsed revealed ancestor and the saved viewport across a same-pane root switch', async () => {
+    const harness = mount()
+    const preview = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const { aside } = openNavigator(preview.content)
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => {
+      expect(aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+    })
+
+    // The walk settled; the reader collapses its only ancestor and scrolls
+    // the body. Payments' record now holds `revealed = inner.ts`, an
+    // expansion set without `src`, and the live offset.
+    act(() => { aside.querySelector<HTMLElement>('[data-files-path="/repos/payments/src"] .mrfw-ftRow')!.click() })
+    await waitFor(() => { expect(expanded(aside, '/repos/payments/src')).toBe(false) })
+    const firstBody = forkBody(aside)
+    firstBody.scrollTop = 40
+    act(() => { firstBody.dispatchEvent(new Event('scroll')) })
+    await waitFor(() => {
+      expect(harness.saves.some(save => (save.snapshot as { root?: string; scrollTop?: number }).root === '/repos/payments'
+        && (save.snapshot as { scrollTop?: number }).scrollTop === 40)).toBe(true)
+    })
+
+    // jsdom has no layout — give every element an overflow so the deferred
+    // restore can land once the return's body reseeds.
+    const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
+    const originalClient = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get() { return this.clientHeight + 100 } })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return 100 } })
+    try {
+      // Same pane, same preview tab, another additional root — then back.
+      // The tree component stays mounted across both (the root is a prop),
+      // so the return must re-read payments' own snapshot rather than keep
+      // the seed the component mounted with.
+      act(() => { preview.setFile('/repos/docs/guide/intro.md') })
+      await waitFor(() => {
+        expect(aside.querySelector('[data-files-path="/repos/docs/guide/intro.md"] [data-files-current]')).not.toBeNull()
+      })
+      // The outgoing switch must not stamp the new root's address onto the
+      // old root's record either: payments has only ever revealed inner.ts.
+      expect(harness.saves.some(save => (save.snapshot as { root?: string; revealed?: string }).root === '/repos/payments'
+        && (save.snapshot as { revealed?: string }).revealed === '/repos/docs/guide/intro.md')).toBe(false)
+
+      const callsBeforeReturn = harness.treeCalls.length
+      const savesBeforeReturn = harness.saves.length
+      scrolled.length = 0
+      act(() => { preview.setFile(PREVIEWED) })
+      // The root listing landing is what lets the reveal decide: a suppressed
+      // walk stops there (the file's row stays inside the collapsed ancestor
+      // and is never drawn), while a re-run first opens `src` and lists it.
+      // Flushing after the row is drawn leaves no walk anywhere in between.
+      await waitFor(() => {
+        expect(aside.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull()
+      })
+      await act(async () => {})
+      await act(async () => {})
+      // The completed walk is remembered: the reader's collapse survives, no
+      // ancestor is re-opened or even listed, no settle is reported again,
+      // and the viewport is the saved offset rather than the revealed row.
+      expect(expanded(aside, '/repos/payments/src')).toBe(false)
+      expect(harness.treeCalls.slice(callsBeforeReturn)
+        .some(call => call.kind === 'list' && call.path === '/repos/payments/src')).toBe(false)
+      expect(harness.saves.slice(savesBeforeReturn)
+        .some(save => 'revealed' in (save.snapshot as { revealed?: string }))).toBe(false)
+      expect(scrolled.length).toBe(0)
+      await waitFor(() => { expect(forkBody(aside).scrollTop).toBe(40) })
+    } finally {
+      if (originalHeight !== undefined) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalHeight)
+      if (originalClient !== undefined) Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalClient)
+    }
+  })
 })

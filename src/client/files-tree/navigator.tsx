@@ -144,6 +144,12 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   const [aside, setAside] = useState<HTMLElement | null>(null)
   const [paneId, setPaneId] = useState<TabId | undefined>(undefined)
   const [root, setRoot] = useState<RootView | undefined>(undefined)
+  // The previewed path the current root was resolved for. A path change
+  // re-asks the registry before re-rooting; until that answer lands, the
+  // reveal stays with the PREVIOUS path so the still-mounted old tree never
+  // settles the new file (which would record the new root's address in the
+  // old root's `revealed` memory).
+  const [resolvedPath, setResolvedPath] = useState<string | undefined>(undefined)
   const [takeover, setTakeover] = useState<Takeover | null>(null)
 
   useEffect(() => {
@@ -234,21 +240,29 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   useEffect(() => {
     if (preview === null || aside === null || sessionId === undefined || sessionId === '' || panel === undefined) {
       setRoot(undefined)
+      setResolvedPath(undefined)
       return
     }
     const address = preview.dataset.textpreviewUrl === undefined
       ? undefined
       : parseFileAddress(preview.dataset.textpreviewUrl)
-    if (address?.scope !== 'session' || address.sessionId !== sessionId) { setRoot(undefined); return }
+    if (address?.scope !== 'session' || address.sessionId !== sessionId) {
+      setRoot(undefined)
+      setResolvedPath(undefined)
+      return
+    }
+    const path = absolutePath
     const controller = new AbortController()
     void panel.call('list', { sessionId }, controller.signal).then((view) => {
       if (controller.signal.aborted || !mounted.current) return
-      setRoot(rootForPath(view, absolutePath))
+      setRoot(rootForPath(view, path))
+      setResolvedPath(path)
     }).catch(() => {
       // A failed list degrades to "no additional roots": the native
       // navigator keeps the file's preview exactly as upstream draws it.
       if (controller.signal.aborted || !mounted.current) return
       setRoot(undefined)
+      setResolvedPath(path)
     })
     return () => { controller.abort() }
   }, [preview, aside, sessionId, panel, absolutePath])
@@ -289,7 +303,11 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   // the death watch — armed on the pane-carrier query, not on any element
   // — owns the only drop. The aside carries a marker while held so the
   // stylesheet hides only its native body.
-  const savedTree = paneId === undefined || rootPath === undefined ? undefined : takeoverCtl.saved(paneId, rootPath)
+  // The snapshot belongs to the LIVE hold's root, not the freshly matched
+  // one: while a root switch is in flight the body still draws the old tree,
+  // and handing it the new root's memory would pair one root's expansion set
+  // with the other root's bucket.
+  const savedTree = takeover === null ? undefined : takeoverCtl.saved(takeover.paneId, takeover.root)
   useEffect(() => {
     if (aside === null || rootPath === undefined || paneId === undefined || takeoverCtl === undefined) {
       setTakeover(null)
@@ -311,6 +329,16 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
   const onRevealSettled = useCallback((path: string): void => {
     if (takeover !== null) takeoverCtl.save(takeover.paneId, { root: takeover.root, revealed: path })
   }, [takeover, takeoverCtl])
+
+  // The reveal is handed over only for the path the current root was
+  // resolved from, and only once the live hold IS that root. A path change
+  // re-asks the registry before re-rooting; during that window the old tree
+  // is still mounted, and letting it reveal the new file would settle that
+  // address in the old root's tree and overwrite its `revealed` memory.
+  // Waiting is invisible: the body keeps drawing the old root until the hold
+  // re-keys, then the new root's own snapshot seeds.
+  const revealLive = takeover !== null && rootPath !== undefined
+    && resolvedPath === absolutePath && takeover.root === rootPath
 
   return (
     <>
@@ -342,7 +370,9 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
               t={filesTree.t}
               nativeTree={props.nativeTree}
               onScrollOffset={onScrollOffset}
-              reveal={{ path: absolutePath, revealed: savedTree?.revealed, onSettled: onRevealSettled }}
+              reveal={revealLive
+                ? { path: absolutePath, revealed: savedTree?.revealed, onSettled: onRevealSettled }
+                : undefined}
               saved={savedTree}
             />,
             aside,

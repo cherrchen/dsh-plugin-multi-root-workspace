@@ -100,7 +100,14 @@ upstream binds inside it arrives as a prop instead:
   through `onSettled` so the owner can record `revealed`. A completed walk
   suppresses re-stepping on reopen — the reader's collapse survives —
   exactly upstream's `revealing = revealed === address ? undefined :
-  address`. `TreeContext` gained `current`/`currentRef` so the file row in
+  address`. The seed is re-read whenever the `(root, path)` identity
+  changes: the body outlives a root switch (the preview retarget re-roots
+  the same portal), so a mount-time seed would replay the first root's
+  walk on every return. A path that is not under the body's root is never
+  stepped or settled — a root switch keeps the old root mounted until the
+  refreshed registry list answers, and settling there would record the new
+  root's address under the old root's `revealed`. `TreeContext` gained
+  `current`/`currentRef` so the file row in
   `Entry` carries `data-files-current`/`aria-current` (the `mrfw-ft*` rule
   in styles.ts paints the same active highlight upstream's `.current`
   does) plus a callback ref that `scrollIntoView({block:'nearest',
@@ -122,10 +129,16 @@ upstream binds inside it arrives as a prop instead:
   overflows (a fresh bucket's `state.scrollTop` is 0 and would clamp the
   write away), and a reader's own scroll before that moment cancels the
   pending restore; an in-flight walk owns the view meanwhile — the same
-  ordering upstream's restore-then-reveal produces. `revealed` seeds the
-  reveal's suppression, and it is kept per (pane, root) — finer than
-  upstream's single pane-level address, so moving between roots never
-  smears one root's walk memory into another's.
+  ordering upstream's restore-then-reveal produces, with the walk verdict
+  read for the identity the render names so a previous root's unsettled
+  walk cannot cancel the offset the new (suppressed) one restores.
+  `revealed` seeds the reveal's suppression, and it is kept per (pane,
+  root) — finer than upstream's single pane-level address, so moving
+  between roots never smears one root's walk memory into another's. The
+  retarget passes the snapshot for the LIVE hold's root (not the freshly
+  matched one) and only hands the reveal to a body whose root is that
+  matched root, so a switch can never pair one root's memory with the
+  other root's tree.
 - **Scroll mirror**: the forked body's scroll is tracked by a NATIVE
   `scroll` listener on the body element and reported through the optional
   `onScrollOffset` prop (every scroll plus the final offset at unmount —
