@@ -267,12 +267,13 @@ export class BrokerServer {
         return {}
       }
       case 'dispose': {
-        const sftp = state.sftp.get(environmentId)
         state.sftp.delete(environmentId)
-        await sftp?.dispose().catch(() => {})
-        const environment = state.environments.get(environmentId)
         state.environments.delete(environmentId)
-        await environment?.dispose().catch(() => {})
+        // The manager owns the cache; disposing the env/session objects
+        // directly would leave corpses its openings maps keep serving.
+        const manager = await this.managerOrThrow()
+        await manager.disposeSftp(environmentId).catch(() => {})
+        await manager.dispose(environmentId).catch(() => {})
         return {}
       }
     }
@@ -284,17 +285,23 @@ export class BrokerServer {
   }
 
   private async openSftp(state: ConnectionState, environmentId: string): Promise<SftpEnvironment> {
+    const manager = await this.managerOrThrow()
+    // A per-connection entry whose manager cache entry is gone is a corpse:
+    // another connection's dispose already reclaimed it. Drop and reopen.
     const existing = state.sftp.get(environmentId)
-    if (existing !== undefined) return existing
-    const opened = await (await this.managerOrThrow()).openSftp(environmentId)
+    if (existing !== undefined && manager.sftpGenerationOf(environmentId) === existing.generation) return existing
+    state.sftp.delete(environmentId)
+    const opened = await manager.openSftp(environmentId)
     state.sftp.set(environmentId, opened)
     return opened
   }
 
   private async openEnvironment(state: ConnectionState, environmentId: string): Promise<SshEnvironment> {
+    const manager = await this.managerOrThrow()
     const existing = state.environments.get(environmentId)
-    if (existing !== undefined) return existing
-    const opened = await (await this.managerOrThrow()).open(environmentId)
+    if (existing !== undefined && manager.generationOf(environmentId) === existing.generation) return existing
+    state.environments.delete(environmentId)
+    const opened = await manager.open(environmentId)
     state.environments.set(environmentId, opened)
     return opened
   }
@@ -398,9 +405,9 @@ export class BrokerServer {
       try { process.handle.terminate() } catch { /* already gone */ }
       state.processes.delete(id)
     }
-    for (const session of state.sftp.values()) void session.dispose().catch(() => {})
+    for (const environmentId of state.sftp.keys()) void this.manager?.disposeSftp(environmentId).catch(() => {})
     state.sftp.clear()
-    for (const environment of state.environments.values()) void environment.dispose().catch(() => {})
+    for (const environmentId of state.environments.keys()) void this.manager?.dispose(environmentId).catch(() => {})
     state.environments.clear()
   }
 
