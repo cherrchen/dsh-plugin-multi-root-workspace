@@ -46,6 +46,7 @@ function manifest(overrides: (env: Record<string, unknown>) => Record<string, un
     namespace, transport: 'helper', helper: { sha256: live.helperSha256, protocol: 3 },
     connection: { host: live.buildHost, nodePath: live.nodePath, helperPath: live.helperPath, workspace: root },
     exec: { shell: ['/bin/bash', '-c'], env: { PATH: '/usr/bin:/bin' }, maxTimeoutMs: 60_000, stdoutLimit: 8 * 1024, stderrLimit: 4 * 1024, terminateGraceMs: 2_000 },
+    transfer: { maxBytes: 64 * 1024 * 1024, timeoutMs: 60_000 },
     credentialIsolation: 'unattested',
   })
   return {
