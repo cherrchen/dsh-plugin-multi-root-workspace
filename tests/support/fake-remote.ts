@@ -217,6 +217,8 @@ export class FakeManager implements RemoteToolsManager {
   }
   sftpGenerationOf(environmentId: string): string { return this.remotes.get(environmentId)?.generation ?? 'stale' }
   generationOf(environmentId: string): string { return this.remotes.get(environmentId)?.generation ?? 'stale' }
+  markStale(environmentId: string): void { this.stale.push(environmentId) }
+  readonly stale: string[] = []
   async open(environmentId: string): Promise<SshEnvironment> { return this.remote(environmentId).helper() }
   async disposeAll(): Promise<void> {}
   backend(environmentId: string): RemoteExecutionBackend | undefined { return this.backends.get(environmentId) }

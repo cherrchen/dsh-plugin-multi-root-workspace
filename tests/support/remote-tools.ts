@@ -52,6 +52,8 @@ export interface RemoteToolsWorldOptions {
   readonly deviceActions?: readonly ('read' | 'write' | 'exec')[]
   /** Mount the explicit-tools row; `false` leaves the composition tool-less. */
   readonly withTools?: boolean
+  /** Exercise the row's own default SSH-adapter factory instead of injected backends. */
+  readonly defaultBackends?: boolean
   /** Mount the command/panel row over a stub Connection; `panel()` then works. */
   readonly withPanel?: boolean
   /** Per-environment extra files, keyed by environment and absolute path. */
@@ -116,7 +118,10 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
   await installToolExecutor(stack.ctx)
   const manager = new FakeManager(stack.registry.remoteManifest!, remotes, backends)
   if (options.withTools !== false) {
-    await stack.ctx.plugin({ name: 'g5-remote-tools', inject: ['multiRootRegistry', 'multiRootCompat', 'multiRootProviders', 'tools'], apply: (ctx: Context) => applyRemoteTools(ctx, { enabled: true, manager, backends: id => backends.get(id) }) })
+    const row = options.defaultBackends === true
+      ? { enabled: true as const, manager }
+      : { enabled: true as const, manager, backends: (id: string) => backends.get(id) }
+    await stack.ctx.plugin({ name: 'g5-remote-tools', inject: ['multiRootRegistry', 'multiRootCompat', 'multiRootProviders', 'tools'], apply: (ctx: Context) => applyRemoteTools(ctx, row) })
   }
   let panelHandler: ((endpoint: string, payload: unknown, signal: AbortSignal) => Promise<PanelAnswer>) | undefined
   if (options.withPanel === true) {
