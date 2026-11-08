@@ -74,3 +74,5 @@ ADR-0002-short-title.md
 - [ADR-0036-approved-escalation-override.md](./ADR-0036-approved-escalation-override.md) — 用户单次批准的一次性 `danger-full-access` 提权只对该调用解除只读根与 per-tool 封顶拒绝（`$DSH_HOME` 与 authority-unavailable 除外）；standing Full-access、嵌套/后续调用与 OPS 派发不受影响（Accepted）。
 
 - [ADR-0037-conversation-hero-workspace-folders-entry.md](./ADR-0037-conversation-hero-workspace-folders-entry.md) — 新会话 Hero 行的 Workspace Folders 增量入口：`conversation.hero.options`（`0.2.1-alpha.3+`）注册、与相邻选择器同几何但无 chevron、`≤560px` 视口图标降级、会话权威取槽属性；侧栏 `Folders` 入口保留，退役 Deferred（Accepted，已实施并验证）。
+
+- [ADR-0038-workspace-menu-folders-dialog.md](./ADR-0038-workspace-menu-folders-dialog.md) — 工作区 `...` 菜单的「管理工作区目录…」入口：经 apply 作用域的 dialog controller 复用 footer 对话框，当前 session 属于目标时直接打开、否则先经 `uiWorkspace.openWorkspace` 切换并确认 current；服务缺失置灰，`RootSwitcher` 零改动（Accepted，实施见计划）。
