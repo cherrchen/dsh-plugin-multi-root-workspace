@@ -187,13 +187,13 @@ export function apply(ctx: Context): void {
     if (kind === 'other' || kind === 'publish' || opsCompatibilityToken(ctx) === undefined) {
       if (!ctx.get('multiRootRegistry')?.shared || exec.agent === undefined) return next()
       const policy = ctx.sandboxPolicy.resolve({ session: exec.agent.session })
-      return opsScope.withToolCap(exec.name, () => withRegistryAdmission(ctx, policy, 'process', next))
+      return opsScope.withToolCap(exec.name, () => withRegistryAdmission(ctx, policy, 'process', next), exec.callId)
     }
     if (exec.agent === undefined) {
       throw new Error(`multi-root workspace: the OPS call ${JSON.stringify(exec.name)} cannot be confirmed against a trusted session`)
     }
     const policy = ctx.sandboxPolicy.resolve({ session: exec.agent.session })
-    return opsScope.withToolCap(exec.name, () => runOpsDispatch(exec, policy, next))
+    return opsScope.withToolCap(exec.name, () => runOpsDispatch(exec, policy, next), exec.callId)
   })
   // Resolve the policy the same way the upstream consumer does: the spec's own
   // resolved policy wins, the deployment/session resolution is the fallback.

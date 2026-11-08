@@ -30,7 +30,7 @@ Phase 1 时本机外层沙箱拒绝 `sandbox_apply`，原生证据留待补齐�
 | `read-only` | 只读 | 只读 | 只读 |
 | `read-write` | 读写 | 读写 | 读写 |
 
-有效权限 = `resolve(policy)` 按「登记策略 × 会话模式」逐调用解析，工具 cap（`toolAccess`）对三档都只收窄：被封顶的调用对任何附加根不得写，包括继承到 Full-access 与固定读写的根。三档不是全序——`inherit` 在只读模式下弱于固定读写、在 Full-access 下强于它——`setAccess` 的「升级须 `available`」门槛与确认文案按方向分别判断：`inherit → read-write` 在 Full-access 会话是收窄、在只读会话是扩权；`read-write → inherit` 相反；`read-only → 任意` 维持「仅 `available` 可离开只读」。主根与未登记区域永远按会话模式判定，不得借「改写全局模式」近似实现。
+有效权限 = `resolve(policy)` 按「登记策略 × 会话模式」逐调用解析，工具 cap（`toolAccess`）对三档都只收窄：被封顶的调用对任何附加根不得写，包括继承到 Full-access 与固定读写的根。（2026-11-09 修订：用户针对**单次调用**批准的 `danger-full-access` 一次性提权解除该调用的只读根与 cap 拒绝——`$DSH_HOME` 与 authority-unavailable 降级除外——见 [ADR-0036](./ADR-0036-approved-escalation-override.md)；standing Full-access 会话与此矩阵不变。）三档不是全序——`inherit` 在只读模式下弱于固定读写、在 Full-access 下强于它——`setAccess` 的「升级须 `available`」门槛与确认文案按方向分别判断：`inherit → read-write` 在 Full-access 会话是收窄、在只读会话是扩权；`read-write → inherit` 相反；`read-only → 任意` 维持「仅 `available` 可离开只读」。主根与未登记区域永远按会话模式判定，不得借「改写全局模式」近似实现。
 
 ### 持久化编码（domain version 保持 1）
 

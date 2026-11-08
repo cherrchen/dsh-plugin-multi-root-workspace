@@ -342,7 +342,8 @@ describe('workspace topology context', () => {
       const assembly = await readOnly.systemPrompt.assemble({ agent: agent() })
       expect(assembly.contexts.find(context => context.name === MULTI_ROOT_CONTEXT_NAME)?.text).toBe(
         `Current DSH workspace roots: ${JSON.stringify([fixture.outside])} are additional roots of this session's `
-        + 'workspace and are readable; nothing is writable in read-only mode.',
+        + 'workspace and are readable; nothing is writable in read-only mode.'
+        + ' An approved one-shot danger-full-access escalation lifts the read-only-root and per-tool refusals for that call only.',
       )
       // The text names membership only: no root is called writable.
       expect(renderContextSnapshot(assembly)).toContain('nothing is writable in read-only mode')
