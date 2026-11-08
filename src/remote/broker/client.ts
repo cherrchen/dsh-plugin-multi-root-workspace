@@ -15,6 +15,7 @@ import { connectNative } from '../../authority/native.ts'
 import type { DeploymentManifest } from '../manifest.ts'
 import type { SshEnvironment, SftpEnvironment } from '../ssh-environment.ts'
 import type { SftpClient, SftpVersion } from '../sftp.ts'
+import { SftpConnectionLost, SftpStatusError } from '../sftp.ts'
 import { RemoteConnectionLost, type RemoteProcessHandle } from '../exec.ts'
 import type { RemoteToolsManager } from '../tools.ts'
 import {
@@ -210,6 +211,18 @@ class BrokerSftp {
   async init(): Promise<SftpVersion> { return this.version }
   private call<T>(op: string, params: Record<string, unknown>): Promise<T> {
     return this.connection.request<T>('sftp', { environmentId: this.environmentId, op, ...params }, 60_000)
+      .catch((error: unknown) => {
+        // The wire flattens SFTP errors into refusal codes: `sftp-status`
+        // carries `${SSH_FX_code}:${text}` and `connection-lost` the lost
+        // session. Reconstruct the typed errors so the transfer layer's
+        // `instanceof` branches keep their direct-path semantics.
+        if (error instanceof BrokerError && error.code === 'sftp-status') {
+          const match = /^(\d+):([\s\S]*)$/.exec(error.message)
+          if (match !== null) throw new SftpStatusError(Number(match[1]), match[2]!)
+        }
+        if (error instanceof BrokerError && error.code === 'connection-lost') throw new SftpConnectionLost(error.message)
+        throw error
+      })
   }
   async realpath(path: string): Promise<string> { return (await this.call<{ path: string }>('realpath', { path })).path }
   async lstat(path: string) { return await this.call<{ flags: number; size?: number; permissions?: number; mtime?: number }>('lstat', { path }) }
