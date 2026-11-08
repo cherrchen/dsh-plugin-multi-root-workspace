@@ -28,7 +28,7 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
   async verify(environment: RemoteEnvironment, binding: RemoteBinding, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
     if (environment.transport === 'sftp') return await this.verifySftp(environment, binding, signal)
     const env = await this.manager.open(environment.environmentId)
-    const policy = { mode: 'read-only' as const, workspaceRoot: binding.path }
+    const policy = { mode: 'read-only' as const, workspaceRoot: binding.path, sessionId: 'endpoint-verification' }
     const confined = await env.sandbox.confine([String(env.hello.executable), '-e',
       `const fs=require('node:fs');const s=fs.statSync(process.argv[1],{bigint:true});process.stdout.write(JSON.stringify({real:fs.realpathSync(process.argv[1]),dev:String(s.dev),ino:String(s.ino),isDirectory:s.isDirectory()}))`,
       binding.path], policy, signal)
