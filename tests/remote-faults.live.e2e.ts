@@ -112,13 +112,13 @@ async function mount(overrides?: (env: Record<string, unknown>) => Record<string
       { session: sessionOf(stack, workspace, seq), environmentId: 'vps-app', rootId: 'app', command: 'true', timeoutMs: 60_000, ...request } as never,
       'remote_bash', new AbortController().signal,
     ),
-    copy: (request: Record<string, unknown>, seq: number, onStage?: RemoteCopyDeps['onStage']) => runRemoteCopy(
+    copy: (request: Record<string, unknown>, seq: number, onStage?: RemoteCopyDeps['onStage'], signal?: AbortSignal) => runRemoteCopy(
       stack.registry, { manager, onStage }, {
         session: sessionOf(stack, workspace, seq),
         from: { environmentId: 'local', rootId: 'primary', relativePath: 'a.txt' },
         to: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'fault.txt' },
         ...request,
-      } as never, 'remote_copy', new AbortController().signal,
+      } as never, 'remote_copy', signal ?? new AbortController().signal,
     ),
     listing: async (environmentId: string, dir: string) => {
       const env = await manager.openSftp(environmentId)
@@ -170,6 +170,30 @@ liveDescribe('real-stack fault injection and rollback', () => {
     expect(names).not.toContain('killed-relay.bin')
     expect(names.filter(name => name.startsWith('.dsh-staging-'))).toEqual([])
     await m.run({ command: 'rm -f big.bin' }, 3)
+  }, 240_000)
+
+  it('in-flight abort: cancelling mid-transfer never commits and cleans staging', async () => {
+    const m = await mount()
+    await m.stack.registry.addRemote(m.workspace, { environmentId: 'vps-app', rootId: 'app' })
+    await m.stack.registry.addRemote(m.workspace, { environmentId: 'vps-xfer', rootId: 'import' })
+    await m.openBackend('vps-app')
+    const seeded = await m.run({ command: 'head -c 24M /dev/urandom > big2.bin && echo seeded' })
+    expect(seeded, JSON.stringify(seeded)).toMatchObject({ status: 'scope-exited', exitCode: 0 })
+    // A leftover from an earlier run would fail preflight before staging.
+    const purge = await m.manager.openSftp('vps-xfer')
+    await purge.client.remove('/import/cancel-relay.bin').catch(() => {})
+
+    const abort = new AbortController()
+    const cancelled = await m.copy({
+      from: { environmentId: 'vps-app', rootId: 'app', relativePath: 'big2.bin' },
+      to: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'cancel-relay.bin' },
+    }, 9, async stage => { if (stage === 'staging') abort.abort() }, abort.signal)
+    expect(cancelled, JSON.stringify(cancelled)).toMatchObject({ status: 'cancelled' })
+
+    const names = await m.listing('vps-xfer', '/import')
+    expect(names).not.toContain('cancel-relay.bin')
+    expect(names.filter(name => name.startsWith('.dsh-staging-'))).toEqual([])
+    await m.run({ command: 'rm -f big2.bin' }, 10)
   }, 240_000)
 
   it('killing the ssh session leaves no orphaned remote child', async () => {
