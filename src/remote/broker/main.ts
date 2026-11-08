@@ -51,7 +51,13 @@ async function main(): Promise<void> {
   }
   const server = new BrokerServer(options)
   await server.start()
-  const shutdown = () => { void server.stop().then(() => process.exit(0), () => process.exit(1)) }
+  // The kernel listener's accept poll is unref'd by design (in the Host it is
+  // one service among many); the daemon's only remaining job is staying alive.
+  const keepAlive = setInterval(() => {}, 60_000)
+  const shutdown = () => {
+    clearInterval(keepAlive)
+    void server.stop().then(() => process.exit(0), () => process.exit(1))
+  }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 }
