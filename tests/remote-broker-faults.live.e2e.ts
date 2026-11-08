@@ -113,10 +113,12 @@ liveDescribe('broker-side fault injection', () => {
       await sleep(50)
     }
     expect(m.manager.generationOf('vps-app')).not.toBe(generationBefore)
+    // BrokerSftp proxies no readdir: prove the destination artifact is absent
+    // by lstat throwing; staging-residue coverage lives in the direct-path
+    // spec on the same transfer code.
     const sftp = await m.manager.openSftp('vps-xfer')
-    const names = (await sftp.client.readdir('/import').catch(() => [])).map(e => e.name)
-    expect(names).not.toContain('broker-killed.bin')
-    expect(names.filter(name => name.startsWith('.dsh-staging-'))).toEqual([])
+    const absent = await sftp.client.lstat('/import/broker-killed.bin').then(() => false, () => true)
+    expect(absent).toBe(true)
     await runRemoteCommand(m.stack.registry, m.backendFor, {
       session: m.session(), environmentId: 'vps-app', rootId: 'app',
       command: 'rm -f broker-big.bin', timeoutMs: 10_000,
@@ -149,7 +151,7 @@ liveDescribe('broker-side fault injection', () => {
     await recovered!.stack.registry.addRemote(live.primary, { environmentId: 'vps-xfer', rootId: 'import' })
     const env = await recovered!.manager.openSftp('vps-xfer')
     expect(env.generation).toBeDefined()
-    const names = (await env.client.readdir('/import').catch(() => [])).map(e => e.name)
-    expect(names).not.toContain('never.bin')
+    const absent = await env.client.lstat('/import/never.bin').then(() => false, () => true)
+    expect(absent).toBe(true)
   }, 240_000)
 })
