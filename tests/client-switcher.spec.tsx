@@ -628,8 +628,9 @@ describe('the Files-tab root switcher', () => {
     // The remounted occupant rejoins the SAME pane inside the same tabHost
     // section (a fresh header — the body's new subtree): the persisted
     // selection makes it additional-root again, and the takeover entry never
-    // ended — the bucket and its watches survived — so the same rows are
-    // already there without a single new remote call.
+    // ended — so the bucket resumes with the same rows already drawn. The
+    // reopened hold starts its watch again and re-lists the kept levels in
+    // the background, exactly the native `hold` lifetime.
     const header2 = document.createElement('div')
     pane.prepend(header2)
     render(harness.occupant({ absolutePath: '/repos/primary' }) as ReactElement, { container: header2 })
@@ -637,7 +638,7 @@ describe('the Files-tab root switcher', () => {
     await waitFor(() => {
       expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull()
     })
-    expect(harness.treeCalls.length).toBe(traffic)
+    await waitFor(() => { expect(harness.treeCalls.length).toBeGreaterThan(traffic) })
     expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('payments')
   })
 

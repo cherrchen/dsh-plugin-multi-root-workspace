@@ -347,7 +347,8 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
               signal={takeover.signal}
               useStore={filesTree.useStore}
               actions={filesTree.actions}
-              start={filesTree.face.start}
+              hold={filesTree.face.hold}
+              release={filesTree.face.release}
               toggle={filesTree.face.toggle}
               onOpen={filesTree.openFile}
               t={filesTree.t}

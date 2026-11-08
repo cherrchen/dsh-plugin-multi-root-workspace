@@ -265,6 +265,27 @@ export const STYLES = /* css */ `
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/* The document preview's navigator aside, while the retarget holds it: the
+   native body hides (it lists the session's primary root regardless of the
+   previewed file), and the forked tree — portaled in as the aside's sibling
+   child — takes the same stretch item in the aside's column flex, right
+   down to the body's own padding and 2px scrollbar offset. The aside's
+   chrome is untouched: width, push/overlay/fill modes, and the resize
+   separator all stay native. The marker attribute is set only while a
+   takeover actually holds the aside, so a navigator we never matched — or
+   one whose plugin sheet is gone — renders exactly as upstream drew it. */
+aside[data-mrfw-navigator] > [data-files-body] {
+  display: none;
+}
+
+/* The reveal's current row, the fork's spelling of upstream's .current:
+   the interactive-active fill, kept under hover exactly as the native
+   tree's current row keeps it. */
+.mrfw-ftRow[data-files-current],
+.mrfw-ftRow[data-files-current]:hover {
+  background: var(--dsw-alias-interactive-bg-active);
+}
+
 /* ── files-tree fork (verbatim rules, renamed classes) ─────────────────────
    Copied from upstream's FilesBody.module.css (ui-sidebar-files @
    0.2.2-alpha.2) with local names mapped to mrfw-ft* so the rules cannot

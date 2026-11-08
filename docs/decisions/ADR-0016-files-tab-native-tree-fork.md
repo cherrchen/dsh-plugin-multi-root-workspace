@@ -29,7 +29,7 @@ Accepted
 
 附加根树改为 `src/client/files-tree/` 下对上游 `ui-sidebar-files` 树体的逐字节 fork（清单、shim 对照、delta 与同步步骤钉在该目录 `FORK.md`）：
 
-- `directory-node.ts` / `face.ts` / `store.ts` / `FilesBody.module.css` 与 `FilesBody.tsx` 的行级定义字节级一致；唯一改写是导出的外壳函数，四个缝改为 props：`root`（选中根绝对路径）、`tabId`（`data-dockkit-content`，缺席退回生成 id）、`signal`（takeover AbortController）、`onOpen`（inject 绑定的 `openResourceIn`）。
+- `directory-node.ts` / `face.ts` / `store.ts` / `FilesBody.module.css` 与 `FilesBody.tsx` 的行级定义字节级一致；唯一改写是导出的外壳函数，四个缝改为 props：`root`（选中根绝对路径）、`tabId`（`data-dockkit-content`，缺席退回生成 id）、`signal`（takeover AbortController）、`onOpen`（inject 绑定的 `openResourceIn`）。（**2026-11-08 修订**：预览侧导航器需要上游 `hold` 与 record 的分离，`face.ts` 因此增加 `hold`/`release` 生命周期 delta——Folder 关闭只关节点/watch、保留已列 levels；其余仍字节级，见 `src/client/files-tree/FORK.md`。）
 - `files.actions` 注册按上游同款声明 `store: createFilesStore()` + `inject: filesFace(createList(remote), createWatch(remote))`，框架按 session 实例化 store 并把 face 摊进合成 props。
 - 文件地址用 `fileAddressFor(sessionId, undefined, path)`——`cwd` 必须留 `undefined`：携带绝对路径的 session 地址按原样送达 host，传 cwd 反而把附加根路径按主根相对化、指错文件。
 - `remote` 经 `ctx.get('remote')` 惰性解析，缺席时 lazy proxy 折成 `gateway/internal` 失败行——复刻 face 无需第二条失败路径。

@@ -41,10 +41,20 @@ import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction
 import { OPEN_IN_APP_NS, createOpenInAppAdapter } from './open-in-app/adapter.tsx'
 import { OpenInAppToast } from './open-in-app/open-toast.tsx'
 import { FILES_TREE_NS, createFilesTreeSeats, createFilesTreeSurface } from './files-tree/adapter.tsx'
+import { NavigatorRetarget } from './files-tree/navigator.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     'sidebar.right.tab.files.actions': {
+      kind: 'list'
+      scope: 'session'
+      owner: { readonly absolutePath: string }
+    }
+    // The document preview's header seat, declared in
+    // `ui-sidebar-documentpreview`'s contract since `0.2.2-alpha.3`: one
+    // list occupant per session, owner `{ absolutePath }` — the previewed
+    // file's host path, the navigator retarget's only input.
+    'sidebar.right.tab.document.actions': {
       kind: 'list'
       scope: 'session'
       owner: { readonly absolutePath: string }
@@ -54,6 +64,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** The footer-action cell this plugin owns. */
 export const SLOT_ID = 'multi-root-folders'
+
+/** The document-preview navigator retarget's occupant id. */
+const NAVIGATOR_SLOT_ID = 'multi-root-navigator'
 
 /** The id of the `<style>` element carrying this plugin's sheet. */
 const STYLE_ELEMENT_ID = 'multi-root-workspace-styles'
@@ -185,6 +198,34 @@ export function apply(ctx: ClientContext): void {
     return absolutePath === undefined
       ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, compact: true })
       : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
+  }))
+  // Optional: the document preview's navigator seat exists only on runtimes
+  // whose `ui-sidebar-files` draws the Folder-toggle tree (0.2.2-alpha.3+);
+  // `slots.inject` swallows the registration where the surface never
+  // declares the slot — exactly the runtimes where the problem cannot
+  // exist. The occupant is invisible: it watches the preview's content row
+  // for the native navigator's aside and, while the previewed file sits
+  // under an available additional root, lends the aside's body to the same
+  // forked tree the Files page uses — with the native navigator's reveal
+  // (ancestors expanded, the file's row marked current and scrolled into
+  // view) and its replace-tab open route reproduced.
+  ctx.slots.inject('sidebar.right.tab.document.actions', () => ctx.slots.register({
+    name: 'sidebar.right.tab.document.actions', id: NAVIGATOR_SLOT_ID, order: 50,
+    store: filesTreeSeats.store,
+    inject: filesTreeSeats.inject,
+  }, function DocumentActionsOccupant(props) {
+    const absolutePath = (props as { readonly absolutePath?: string } | undefined)?.absolutePath
+    const filesTree = createFilesTreeSurface(props, filesTreeT)
+    // No host path or no fork → no marker at all: the native navigator
+    // keeps its tree untouched either way.
+    if (absolutePath === undefined || filesTree === undefined) return null
+    return createElement(NavigatorRetarget, {
+      absolutePath,
+      sessionId: (props as { readonly sessionId?: string } | undefined)?.sessionId,
+      panel,
+      filesTree,
+      nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot),
+    })
   }))
 }
 
