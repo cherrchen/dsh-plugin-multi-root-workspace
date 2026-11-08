@@ -159,7 +159,7 @@ describe.skipIf(!POSIX)('the credential broker boundary', () => {
         opens.push(environmentId)
         const generation = `gen-${opens.length}`
         cache.set(environmentId, { generation })
-        return { environmentId, generation, hello: {}, fs: {}, sandbox: { confine: async () => ({ argv: [], enforcement: 'full' }) }, subprocess: { spawn: () => { throw new Error('unused') } }, dispose: async () => {} }
+        return { environmentId, generation, hello: {}, fs: {}, sandbox: { confine: async () => ({ argv: [], enforcement: 'full' }) }, subprocess: { spawn: () => { throw new Error('unused') } }, assertAlive: () => {}, dispose: async () => {} }
       },
       generationOf: (environmentId: string) => cache.get(environmentId)?.generation ?? 'stale',
       dispose: async (environmentId: string) => { cache.delete(environmentId) },

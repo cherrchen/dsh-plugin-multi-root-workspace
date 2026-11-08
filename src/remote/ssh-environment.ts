@@ -40,6 +40,12 @@ export interface SshEnvironment {
   readonly fs: unknown
   readonly sandbox: { confine(argv: readonly string[], policy: unknown, signal?: AbortSignal): Promise<{ argv: readonly string[]; enforcement: string }> }
   readonly subprocess: { spawn(spec: unknown): { done: Promise<unknown>; waitForExit(ms?: number): Promise<boolean>; terminate(): void; collected: unknown } }
+  /**
+   * Cheap local liveness check — throws when the underlying connection is
+   * already closed or failed. A cached environment that throws here is a
+   * corpse: it must never be handed out again.
+   */
+  assertAlive(): void
   dispose(): Promise<void>
 }
 
@@ -157,7 +163,18 @@ export class SshEnvironmentManager {
   /** Open (or join the in-flight open of) one environment's connection. */
   async open(environmentId: string): Promise<SshEnvironment> {
     const existing = this.openings.get(environmentId)
-    if (existing !== undefined) return await existing
+    if (existing !== undefined) {
+      const env = await existing
+      // A killed ssh leaves a cached corpse behind (upstream only marks its
+      // connection failed; nothing clears our map). Revalidate before reuse —
+      // the next open then builds a genuinely new generation.
+      try {
+        env.assertAlive()
+        return env
+      } catch {
+        this.markStale(environmentId)
+      }
+    }
     const promise = this.openFresh(environmentId)
     this.openings.set(environmentId, promise)
     try {
@@ -283,7 +300,7 @@ export class SshEnvironmentManager {
     try {
       await Promise.all(fibers)
       const services = ctx as unknown as {
-        ssh: { ready: Promise<Record<string, unknown>> }
+        ssh: { ready: Promise<Record<string, unknown>>; assertOpen(): void }
         fs: unknown
         sandbox: unknown
         subprocess: unknown
@@ -297,6 +314,7 @@ export class SshEnvironmentManager {
         environmentId, generation: randomUUID(),
         hello: { platform: hello.platform, workspace: hello.workspace, executable: hello.executable, protocol: hello.protocol },
         fs: services.fs, sandbox: services.sandbox as SshEnvironment['sandbox'], subprocess: services.subprocess as SshEnvironment['subprocess'],
+        assertAlive: () => services.ssh.assertOpen(),
         dispose: async () => { for (const fiber of [...fibers].reverse()) await fiber.dispose() },
       }
       return env

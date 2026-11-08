@@ -105,6 +105,7 @@ export class FakeRemote {
     return {
       environmentId: this.environmentId,
       generation: this.generation,
+      assertAlive: () => {},
       hello: { platform: 'linux', workspace: '/srv/root', executable: '/opt/node/bin/node', protocol: 1 },
       fs: {},
       sandbox: { async confine(argv: readonly string[]) { return { argv, enforcement: 'full' } } },

@@ -119,6 +119,11 @@ export class BrokerConnection {
     return connection
   }
 
+  /** Throws when the connection is closed — the `assertOpen` peer of upstream. */
+  assertOpen(): void {
+    if (this.closed) throw new BrokerError('broker-disconnected', 'the broker connection is closed')
+  }
+
   /** Send one request and wait for its reply. */
   request<T = unknown>(method: BrokerMethod, params: Record<string, unknown>, timeoutMs = 30_000): Promise<T> {
     if (this.closed) return Promise.reject(new BrokerError('broker-disconnected', 'the broker connection is closed'))
@@ -308,6 +313,7 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
       subprocess: {
         spawn: (spec: unknown) => this.spawn(environmentId, spec),
       },
+      assertAlive: () => this.connection.assertOpen(),
       dispose: async () => {
         this.environments.delete(environmentId)
         this.generations.delete(environmentId)
