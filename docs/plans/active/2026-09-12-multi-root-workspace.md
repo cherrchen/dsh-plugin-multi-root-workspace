@@ -1750,7 +1750,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 **状态：在一台维护者临时提供、可丢弃的 VPS 上取得首批真实 SSH 证据，并把官方 SSH 组合接到 G1a/G3/G4 接缝；仍无任何用户入口，部署凭据隔离未证明（unattested）。** 目标：Ubuntu 24.04.5 x86_64、内核 6.8、OpenSSH 9.6p1，1 vCPU / 848 MB。发起端：macOS arm64 / Node 24.18.0 / DSH `0.2.2-rc.1`。凭据、主机别名配置与 `ssh` 包装脚本只存在于仓库外的 `~/.dsh-ssh-test/`（700）；不进仓库或 `.dsh-smoke` 日志。主机密钥按首次使用固定为 ED25519 `SHA256:ZVJcb8gU2m2/IDlL0Zq4y2dzsJxbaMKHqm12KbIQ8D0`，客户端 known_hosts 只含这一把。
 
-**部署：** `dshbuild`（普通账户，Helper/执行）与 `dshxfer`（`internal-sftp`、chroot `/srv/dsh/xfer`、仅 `/import` 可写、禁转发与 TTY）各用独立密钥；工作根 `/srv/dsh/work/{app,lib}`，根外哨兵 `/srv/dsh/outside/sentinel.txt`（root 0644）。Node 24.22.2 官方包校验 SHASUMS256 后装于 root 所有的 `/opt/node-v24`；`@deepseek-ai/dsh-ssh@0.2.2-rc.1` 以 `--omit=dev --ignore-scripts` 装于 root 所有的 `/opt/dsh-helper`，`lib/helper.js` SHA-256 `8cf436d3…f40e`，与本仓库安装物逐字节相同。Ubuntu 24.04 默认 `kernel.apparmor_restrict_unprivileged_userns=1` 使普通用户 bwrap 失败；加载系统自带的 `bwrap-userns-restrict` AppArmor profile 后 bwrap 可用，全局限制保持开启。
+**部署：** `dshbuild`（普通账户，Helper/执行）与 `dshxfer`（`internal-sftp`、chroot `/srv/dsh/xfer`、仅 `/import` 可写、禁转发与 TTY）各用独立密钥；工作根 `/srv/dsh/work/{app,lib}`，根外哨兵 `/srv/dsh/outside/sentinel.txt`（root 0644）。Node 24.22.2 官方包校验 SHASUMS256 后装于 root 所有的 `/opt/node-v24`；`@deepseek-ai/dsh-ssh@0.2.2-rc.1` 以 `--omit=dev --ignore-scripts` 装于 root 所有的 `/opt/dsh-helper`，`lib/helper.js` SHA-256 `8cf436d3…f40e`，与本仓库安装物逐字节相同。Ubuntu 24.04 默认 `kernel.apparmor_restrict_unprivileged_userns=1` 使普通用户 bwrap 失败；加载系统自带的 `bwrap-userns-restrict` AppArmor profile 后 bwrap 可用，全局限制保持开启。**发起端部署前提：** 受验账户的 ssh config 必须 `UpdateHostKeys no`——OpenSSH 默认会把对端其余主机密钥类型自动追加进 known_hosts（Ubuntu 上为 hashed 条目），使"恰有一把密钥"的身份校验拒绝建连；该要求同时适用于直连账户与 broker 凭据根内的 config。
 
 | 证据（均为执行成功） | 结果 |
 | --- | --- |
@@ -1765,11 +1765,11 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | `tests/remote-ssh.live.e2e.ts`（需 `DSH_MULTI_ROOT_SSH_LIVE` 与包装 PATH，CI 中跳过） | **5/5 实跑**：两个环境登记为对象身份；清单 hostKey 改一位或 account 不符在建连前拒绝；Helper 摘要不符由上游连接拒绝且未登记；经双准入的 `remote_bash` 根内写入并回读，根外哨兵与同机另一根写入失败且哨兵不变，退出码 7、输出截断、`sleep 30` 超时终止，只读会话 `mode-denies` 且零次 confine，完全访问会话收敛为 workspace-write 且仍 `full`；A/B 之间撤权零次 spawn；释放一个环境不影响另一个环境的在途命令，重开后旧代次 argv 被 `admission-changed` 拒绝；非 eligible 闸门在 `ssh -G` 前拒绝。 |
 | 单元与回归 | `ssh-environment` 5/5（`ssh -G` 解析与指纹比较用夹具）；远端批次 72/72；`verify:all` **1276 passed / 100 skipped / 0 failed**，compose 54、behavior 137、journey 76、packed 136。 |
 
-**未验证与限制：** 部署凭据隔离未证明：私钥、ControlMaster socket 与 `ssh` 由发起端同一 OS 用户持有，本地 Agent 的原生 bash/PTC 理论上可复用，故清单标为 `unattested`，按 ADR-0032 不得对模型开放。只验证了 Linux 目标；macOS 目标、Linux 发起端、其他 Ubuntu 版本、hostKey 轮换、真实断线中途注入均未覆盖。上游 `spawn` 无独立启动确认，`started` 在返回时即视为成立。G2 复制尚未实现，SFTP 原语只是端点能力证据。
+**未验证与限制：** 部署凭据隔离已由 G5a 的双账户 broker 部署证明（见下文 G5a 节）；直连路径本身仍以发起端同一 OS 用户持有私钥与 ControlMaster socket 运行，清单标为 `unattested`，按 ADR-0032 不得对模型开放。Linux 目标与 Linux 发起端（Ubuntu 24.04，`.87`→`.93`，19/19）均已覆盖；macOS 目标、macOS 发起端 broker 路径、其他 Ubuntu 版本、hostKey 轮换、真实断线中途注入均未覆盖。上游 `spawn` 无独立启动确认，`started` 在返回时即视为成立。G2 复制尚未实现，SFTP 原语只是端点能力证据。
 
 ## 多执行环境 G2 单文件复制：三个方向（2026-11-07）
 
-**状态：`local → sftp`、`sftp → local` 与 `sftp → sftp` 三条单文件方向均在同一台临时 VPS 上实跑通过；本地写入走受 Registry/Scope 围栏保护的二进制端口，远端 → 远端经 Host 有界中转。无用户入口，部署凭据隔离仍为 unattested；Windows 发起端、第二台物理设备与 macOS 目标未验证。** 合同依据 ADR-0034，格式与拒绝码见[控制面参考](../../reference/multi-environment-control-plane.md)。
+**状态：`local → sftp`、`sftp → local` 与 `sftp → sftp` 三条单文件方向均实跑通过；本地写入走受 Registry/Scope 围栏保护的二进制端口，远端 → 远端经 Host 有界中转。sftp→sftp 已由 broker 路径在两台物理机间复验（`vps-xfer`@.93 → `vps-xfer2`@.87）。无用户入口；直连路径清单仍为 unattested（broker 路径见 G5a），Windows 发起端与 macOS 目标未验证。** 合同依据 ADR-0034，格式与拒绝码见[控制面参考](../../reference/multi-environment-control-plane.md)。
 
 **实现（本轮增量）：** `src/remote/local-sink.ts` 新增 `LocalBinarySink`：只能由 `registry.localTransferDestination()` 签发的 `LocalDestinationAuthority` 打开；该 Registry 入口复用 `ctx.fs` 写围栏的根状态、三态 access、per-tool cap 与受保护边界。sink 在目标父目录内以 `EXCL|O_NOFOLLOW` 创建 0600 staging，绑定父目录 dev/ino，逐级拒绝 symlink，按 fd 回读校验，发布前复核父目录身份与目标仍不存在，最后 `link(2)` 无覆盖发布；发布后清理失败只报 `residual`，`publish-unverified` 报 `unknown`。`src/remote/transfer.ts` 按端点方向分派并保持七阶段；远端源先 realpath 父目录/目标、`lstat` 普通文件、`open(P_READ)` 后复检，读完整流后再复核 size/mtime/realpath。两远端端点时 Host 逐块中转，源/目标失联分别报 `source-connection-lost`（清理目标 staging）与 `destination-connection-lost`（`unknown`，不重放）。传输准入新增动作校验：源远端必须 `read`、目的远端必须 `write`，缺配对仍先报 `transfer-pair-not-allowed`。目标名占用 `.dsh-staging-` 前缀为 `reserved-name`。
 
@@ -1780,7 +1780,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | 回归 | `pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm docs:check`、`pnpm pack:check`（193 members）通过；`smoke:compose` **54/0/0**、`smoke:behavior` **96/0/8**、`smoke:journey` **69/0/2**、`smoke:packed` **95/0/8**。本机沙箱 Agent 会话中 `kernel:probe` 无法启动 Seatbelt（`sandbox_apply: Operation not permitted`），behavior/journey 的 8+2 项因此跳过，未计为通过。`pnpm test` 为 **1233 passed / 185 skipped / 18 failed**；18 项失败全部是共享 Registry 的 follower/IPC 用例（`registry-lease`、`registry-multiprocess`、`registry.spec`、`skills-*`、`remote-exec` 的第二挂载等），原因是该会话本身处于 DSH 沙箱，内核 peer 认证按设计拒绝“sandboxed peer”（`src/authority/native.ts`）；同一批用例在改动前以相同方式失败，不能作为本次回归结论，须由未沙箱化的 CI 车道复验。 |
 | 环境 | VPS 的两段传输分别使用独立 chroot 账户；`ssh -G` 解析、StrictHostKeyChecking、ForwardAgent no、单把 known_hosts 主机钥与清单一致；SFTP 服务宣告 `hardlink@openssh.com` 与 `fsync@openssh.com`。 |
 
-**未验证与限制：** 结果联合中的 `partial` 在单文件复制中没有产生路径；目录、覆盖、删除仍不在本批。远端 → 远端只在同一 VPS 的两个账户间验证，未使用第二台物理设备；macOS 目标、Linux 发起端、hostKey 轮换、真实断线注入、Windows 发起端（ADR-0030 无限期延后）不在本批。SFTP v3 无 inode/link count：远端源不能证明 `nlink===1`，同秒同长改写无法由 size/mtime 发现；目标端与父目录绑定依赖部署前提——chroot 账户是该目录唯一写者，路径型 SFTP 本身不能排除替换竞态。本地 sink 最终以路径型 `link(2)` 发布，父目录 dev/ino/realpath 复核缩小但不能消除 same-UID 写者的最后窗口；目的根须没有不可信的同 UID 写者。部署凭据隔离仍未证明（私钥、Control Socket 与 `ssh` 由发起端同一 OS 用户持有），故清单保持 `unattested`，按 ADR-0032 不得对模型开放；`remoteCopyTool` 仍未在任何生产路径注册。
+**未验证与限制：** 结果联合中的 `partial` 在单文件复制中没有产生路径；目录、覆盖、删除仍不在本批。直连路径的远端 → 远端仍是同机双账户（`vps-xfer`/`vps-xfer2` 均在 .93）；跨物理机方向由 broker live e2e 在 `.93`→`.87` 间复验。macOS 目标、hostKey 轮换、真实断线注入、Windows 发起端（ADR-0030 无限期延后）不在本批。SFTP v3 无 inode/link count：远端源不能证明 `nlink===1`，同秒同长改写无法由 size/mtime 发现；目标端与父目录绑定依赖部署前提——chroot 账户是该目录唯一写者，路径型 SFTP 本身不能排除替换竞态。本地 sink 最终以路径型 `link(2)` 发布，父目录 dev/ino/realpath 复核缩小但不能消除 same-UID 写者的最后窗口；目的根须没有不可信的同 UID 写者。直连路径的私钥、Control Socket 与 `ssh` 仍由发起端同一 OS 用户持有，清单标为 `unattested`；G5a 的双账户 broker 部署已取得凭据隔离实机证据（见下节）。按 ADR-0032 远端能力仍不得对模型开放；`remoteCopyTool` 仍未在任何生产路径注册。
 
 
 ## 多执行环境 G5 显式工具、面板与单会话旅程（2026-11-07）
@@ -1798,23 +1798,28 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | 实跑回归 | 用 G2/G4 的临时 VPS 与 `tests/remote-ssh.live.e2e.ts` 复跑 **19/19 通过**（约 504 s）：真实 SFTP 连接、三方向复制与 SSH 栈用例未受本轮 `transfer`/transport 规则放宽影响；该组仍只覆盖 Linux 目标与 `unattested` 部署。 |
 | 组合边界 | 工具行不在 `cordis.patch.yml`；默认与 packed profile 都不存在 `remote_copy`/`remote_bash`，`tests/remote-tools.spec.ts` 直接断言 patch 文本。面板区只在客户端 bundle 可达时出现；列表不建立远端连接，`add` 才经校验器连接。 |
 
-**未验证与限制：** 本轮旅程使用内存端点，不构成真实 SSH 证据；真实 G5 实跑须在无沙箱 CI 或受信部署上重复同一 Session 流程。`capabilities` 只描述部署声明与当前模式/工具 cap，具体调用仍逐次准入；`receive`/`send` 不替代本地目的根 access 检查。面板只投影当前主根的部署条目，Web/Electron 实际入口、第二台物理设备、macOS 目标、Windows 发起端与 hostKey 轮换未覆盖。凭据隔离仍为 `unattested`，按 ADR-0032 远端能力不得对模型开放；G6 的透明执行路由不在本批。
+**未验证与限制：** 本轮旅程使用内存端点，不构成真实 SSH 证据；真实 G5 实跑须在无沙箱 CI 或受信部署上重复同一 Session 流程（broker 路径的受信部署已就位，见 G5a）。`capabilities` 只描述部署声明与当前模式/工具 cap，具体调用仍逐次准入；`receive`/`send` 不替代本地目的根 access 检查。面板只投影当前主根的部署条目，Web/Electron 实际入口、macOS 目标、Windows 发起端与 hostKey 轮换未覆盖。凭据隔离实机证据已由 G5a 取得，但工具行仍未进入默认 patch，按 ADR-0032 远端能力不得对模型开放；G6 的透明执行路由不在本批。
 
 
 
 ## 多执行环境 G5a 凭据隔离：本机凭据代理（2026-11-07）
 
-**状态：独立 OS 账户托管的凭据代理、经内核认证的本机接口、Host 侧证明与工具门禁已实现并通过单元/协议测试；本机无法创建第二个 OS 账户，因此“两个真实账户”的成功证明与 Agent 沙箱拒绝 socket 的部署证据尚未取得，工具仍未进入默认 patch、未对模型开放。** 合同见 [ADR-0036](../../decisions/ADR-0036-credential-broker.md)，接口与限制见[控制面参考](../../reference/multi-environment-control-plane.md#凭据隔离本机凭据代理adr-0036)。
+**状态：凭据代理在两台真实 VPS 的双账户部署上完成首次实机验收——Ubuntu 24.04 发起端（`dshhost` Host + `_dsh_ssh` broker）× Ubuntu 24.04 被控端（`dshbuild`/`dshxfer`/`dshxfer2`），安装器真实执行、受限探针拒绝记录、socket 内核认证与三方向真实 SSH 复制全部通过；工具仍未进入默认 patch、未对模型开放。** 合同见 [ADR-0036](../../decisions/ADR-0036-credential-broker.md)，接口与限制见[控制面参考](../../reference/multi-environment-control-plane.md#凭据隔离本机凭据代理adr-0036)。
 
 **实现（本轮增量）：** `src/remote/broker/protocol.ts` 定义 `protocol: 1` 的有界 JSON-lines（行 ≤ 2 MiB、二进制字段 ≤ 256 KiB、在飞请求 32、进程 8）与八个语义方法；`server.ts` 以专用账户运行，拒绝同 UID 启动与未声明 `attested` 的清单，对每条连接做内核 peer 认证（Host UID + 非沙箱/非 `NoNewPrivs`，Linux 用 `SO_PEERPIDFD`），只转发 SFTP 原语、`confine`、`spawn`/等待/终止/处置；`client.ts` 的 `BrokerEnvironmentManager` 保持官方 manager 的结构面，复制管线、`SshEndpointVerifier` 与双准入命令合同不改，命令输出在退出事件中携带 `scope` 确认；`attest.ts` 在打开任何环境前检查 UID 不同、凭据根对 Host 不可读、socket/目录属主与权限、`hello` 协议/UID/环境覆盖以及部署记录的受限探针；`tools.ts` 的 `broker` 配置先证明后挂载，失败只告警并保持工具缺席；`scripts/ssh-broker/install.sh` 以 root 创建账户、组、0700 凭据根、0750 socket 目录、0640 broker.json 与 launchd/systemd unit，不代建清单或远端公钥。`src/authority/native.ts` 的 peer 认证参数化出 `expectedUid` 与 `allowRestricted`（服务端生产路径绝不放宽）。`src/remote/ssh-environment.ts` 增加 `custody: "broker"`，使托管进程可以打开清单声明为 `unattested` 的端点（证明责任在 Host 侧），而 Host 进程没有这个开关。
 
+**实机部署与首次跑通的修复：** 发起端 Ubuntu 24.04 VPS 上以 root 真实执行 `scripts/ssh-broker/install.sh`（systemd 分支），创建 `_dsh_ssh`（uid 996）、`dsh-ssh-clients` 组、0700 凭据根 `/var/lib/dsh-ssh-broker/.ssh`、0750 socket 目录 `/run/dsh-ssh-broker`、0640 `broker.json` 与 `dsh-ssh-broker.service`；仓库树置于服务账户可读的 `/srv/dsh-plugin-repo`（家目录 0700 会使 `_dsh_ssh` 无法遍历）。首次实跑暴露出五个单测盲区并各自修复：`broker/main.ts` 守护入口曾是 `attest.ts` 的误拷贝（`6410014`）；`listenNative()` 的 unref 轮询计时器使 standalone daemon 打印 listening 后即退出，`main.ts` 增加显式 keepalive（`17f1075`）；`SshEndpointVerifier` 的 `confine` 探针漏传 broker 线协议必填的 `sessionId`（`3634a5b`）；`closeConnection`/`dispose` 绕过 manager 直接 dispose 环境，下个连接的 `open()` 命中缓存拿到已卸载 Cordis fiber 的"尸体"并报 `cannot get required service "ssh" in inactive context`——一切释放改走 manager 并做代次校验（`183f76c`，含重开回归）；broker 线上把 `SftpStatusError`/`SftpConnectionLost` 压平成普通 `BrokerError`，使 transfer 的 `instanceof` 分流失效（缺源 vs 真失败、连接丢失语义），`BrokerSftp.call()` 还原类型化错误（`d4d8e71`）。
+
 | 证据 | 结果 |
 | --- | --- |
-| 协议与边界 | `tests/remote-broker.spec.ts` **12/12**：同 UID 生产启动拒绝、world 目录拒绝、沙箱 peer 拒绝（本会话为沙箱 Host，未沙箱 CI 跳过该负例）、SFTP 原语往返（EXCL/写/fsync/读/硬链接/删除）、`confine`/`spawn` 代次与退出 scope、stale 代次不 spawn、协议方法与字段/长度上限、证明的同 UID/缺探针/凭据可读/socket 缺失/属主不符五类失败。 |
+| 协议与边界 | `tests/remote-broker.spec.ts` **13/13**：同 UID 生产启动拒绝、world 目录拒绝、沙箱 peer 拒绝（本会话为沙箱 Host，未沙箱 CI 跳过该负例）、SFTP 原语往返（EXCL/写/fsync/读/硬链接/删除）、`confine`/`spawn` 代次与退出 scope、stale 代次不 spawn、协议方法与字段/长度上限、证明的同 UID/缺探针/凭据可读/socket 缺失/属主不符五类失败、连接关闭后重开环境拿到新代次而非尸体（`183f76c` 回归）。 |
 | 工具门禁 | `tests/remote-tools.spec.ts` **9/9**：新增“证明失败不挂载 `remote_copy`/`remote_bash`”；原有“仅组合挂载时注册、未挂载 `ToolNotFoundError`、生产 patch 无该行”保持。 |
-| 静态门 | `pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm docs:check`、`pnpm pack:check`（**204 members**，新增 `lib/remote-broker.js`）通过；`sh -n scripts/ssh-broker/install.sh` 通过（安装器的真实执行需要 root 与第二个账户，未在本会话运行）。 |
+| 静态门 | `pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm docs:check`、`pnpm pack:check`（**204 members**，新增 `lib/remote-broker.js`）通过；`sh -n scripts/ssh-broker/install.sh` 通过。 |
 | 回归 | `pnpm test` 为 **1267 passed / 185 skipped / 18 failed**（较 G5 增加 13 项）；18 项失败与 G5 完全相同，仍是本会话沙箱下的共享 Registry follower/IPC 用例，须由未沙箱化 CI 复验。 |
-| 未取得 | 两个真实 OS 账户下的成功证明；Agent 沙箱内“读凭据根与连 socket 都失败”的部署探针记录；真实 SSH 复制的 broker 路径实跑。 |
+| 实机部署（发起端 .87 → 被控 .93，均为 Ubuntu 24.04 x86_64 / kernel 6.8 / OpenSSH 9.6p1） | `install.sh` 以 root 真实执行（systemd）：`_dsh_ssh`(uid 996) / `dshhost`(uid 1000) 双账户成立；socket `srw-rw---- _dsh_ssh:dsh-ssh-clients`、父目录 0750；`dshhost` 读 `/var/lib/dsh-ssh-broker/.ssh/id_ed25519` 被拒绝。`dsh-ssh-broker.service` active，broker `hello` 正常。 |
+| 受限探针（发起端 Host 账户下的 `g5a/probe.log`） | bwrap + `NoNewPrivs`（已验证置位）下：读凭据根 `Permission denied`、连 broker socket 拒绝/零字节；未受限控制连接成功收到 `hello`。`confinementProbe` 记录据此置 `verified`。 |
+| broker live e2e（`tests/remote-broker.live.e2e.ts` + `DSH_MULTI_ROOT_BROKER_LIVE`，约 9.4 s） | **5/5 实跑**：证明后打开全部 4 个清单环境（`vps-app`/`vps-lib` helper @.93、`vps-xfer` sftp @.93、`vps-xfer2` sftp @.87）；confined 命令在被控端 enforcement `full` 执行；local→sftp、sftp→local 逐字节一致；sftp→sftp 由 Host 中转**跨物理机**（`vps-xfer`@.93 → `vps-xfer2`@.87）、`target-exists` 拒绝且目标字节不变、read-only 会话在准入前拒绝且零 SFTP 连接。 |
+| 直连路径补证（`tests/remote-ssh.live.e2e.ts` + `DSH_MULTI_ROOT_SSH_LIVE`，约 27 s） | **19/19 实跑**于 Linux 发起端 `.87`→`.93`（补齐此前只有 macOS 发起端的格子）：身份漂移（hostKey/account/Helper 摘要）建连前拒绝、confined 命令边界/截断/超时、撤权零 spawn、代次失效拒绝、三方向复制、并发同目标恰一提交、中转中同长改写 `source-changed`。注意部署前提：受验账户的 ssh config 必须 `UpdateHostKeys no`——OpenSSH 会把对端其余主机密钥类型自动追加进 known_hosts（Ubuntu 为 hashed 条目），使"恰有一把"校验拒绝。 |
 
-**未验证与限制：** 本机 Agent 与 Host 同 UID，托管进程的 socket 对未受限的同 UID 进程本身可达；“Agent 不能到达接口”只能由部署的沙箱路径拒绝（`confinementProbe`）证明，代码不能自证，缺少该证据时 `attestBroker` 返回 `confinement-unproven`。`danger-full-access` 与这些凭据互斥，但运行时不检查其他 Session 的模式。托管进程崩溃后 unit 会重启，Host 不自动重建连接，必须重走证明；没有撤销列表、速率限制与审计轮转。SFTP 语义代理只覆盖 transfer/verifier 使用的方法，没有 readdir/extended；命令输出在退出时一次性返回（受部署上限约束）。安装器只覆盖 Linux systemd 与 macOS launchd，未在真实机器上执行；默认 patch 未加入 broker 行或任何远端工具。
+**未验证与限制：** `danger-full-access` 与这些凭据互斥，但运行时不检查其他 Session 的模式。托管进程崩溃后 unit 会重启，Host 不自动重建连接，必须重走证明；没有撤销列表、速率限制与审计轮转。SFTP 语义代理只覆盖 transfer/verifier 使用的方法，没有 readdir/extended；命令输出在退出时一次性返回（受部署上限约束）。安装器只实机验证过 Linux systemd 分支，macOS launchd 分支未执行；macOS 发起端 broker、Windows 发起端、Host 进程崩溃/断线中途的真实注入未覆盖；默认 patch 未加入 broker 行或任何远端工具。
 
