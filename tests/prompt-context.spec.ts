@@ -39,7 +39,7 @@ describe('renderWorkspaceRootsContext', () => {
 
   it('describes writable and read-only members separately under workspace-write', () => {
     expect(render('linux', 'workspace-write', [A, B])).toMatchInlineSnapshot(
-      `"Current DSH workspace roots: ["/repos/a"] are writable additional roots and ["/repos/b"] are read-only additional roots (writes are refused) of this session's workspace. The session origin remains the primary root ("/work/primary"); changing the working directory does not change these grants. Grant changes apply to later operations and newly started processes, not to processes already running."`,
+      `"Current DSH workspace roots: ["/repos/a"] are writable additional roots and ["/repos/b"] are read-only additional roots (writes are refused) of this session's workspace. The session origin remains the primary root ("/work/primary"); changing the working directory does not change these grants. Grant changes apply to later operations and newly started processes, not to processes already running. An approved one-shot danger-full-access escalation lifts the read-only-root and per-tool refusals for that call only."`,
     )
   })
 
@@ -48,20 +48,20 @@ describe('renderWorkspaceRootsContext', () => {
       `"Current DSH workspace roots: ["/repos/a"] are writable additional roots of this session's workspace. The session origin remains the primary root ("/work/primary"); changing the working directory does not change these grants. Grant changes apply to later operations and newly started processes, not to processes already running."`,
     )
     expect(render('darwin', 'workspace-write', [B])).toMatchInlineSnapshot(
-      `"Current DSH workspace roots: ["/repos/b"] are read-only additional roots (writes are refused) of this session's workspace. The session origin remains the primary root ("/work/primary"); changing the working directory does not change these grants. Grant changes apply to later operations and newly started processes, not to processes already running."`,
+      `"Current DSH workspace roots: ["/repos/b"] are read-only additional roots (writes are refused) of this session's workspace. The session origin remains the primary root ("/work/primary"); changing the working directory does not change these grants. Grant changes apply to later operations and newly started processes, not to processes already running. An approved one-shot danger-full-access escalation lifts the read-only-root and per-tool refusals for that call only."`,
     )
   })
 
   it('names capped tools and never claims they can write a read-write member', () => {
     expect(render('linux', 'workspace-write', [A], ['bash'])).toMatchInlineSnapshot(
-      `"Current DSH workspace roots: ["/repos/a"] are writable additional roots of this session's workspace. The session origin remains the primary root ("/work/primary"); changing the working directory does not change these grants. Grant changes apply to later operations and newly started processes, not to processes already running. The tools ["bash"] cannot write additional roots even where they are writable."`,
+      `"Current DSH workspace roots: ["/repos/a"] are writable additional roots of this session's workspace. The session origin remains the primary root ("/work/primary"); changing the working directory does not change these grants. Grant changes apply to later operations and newly started processes, not to processes already running. The tools ["bash"] cannot write additional roots even where they are writable. An approved one-shot danger-full-access escalation lifts the read-only-root and per-tool refusals for that call only."`,
     )
   })
 
   it('names the fixed read-write members a read-only session keeps writable', () => {
     for (const platform of PLATFORMS) {
       expect(render(platform, 'read-only', [A, B])).toMatchInlineSnapshot(
-        `"Current DSH workspace roots: ["/repos/a"] are additional roots that stay writable even in read-only mode, and ["/repos/b"] are readable additional roots of this session's workspace; everything else is read-only."`,
+        `"Current DSH workspace roots: ["/repos/a"] are additional roots that stay writable even in read-only mode, and ["/repos/b"] are readable additional roots of this session's workspace; everything else is read-only. An approved one-shot danger-full-access escalation lifts the read-only-root and per-tool refusals for that call only."`,
       )
     }
   })
@@ -69,7 +69,7 @@ describe('renderWorkspaceRootsContext', () => {
   it('promises nothing writable under read-only when no member is pinned read-write', () => {
     for (const platform of PLATFORMS) {
       expect(render(platform, 'read-only', [C, B])).toMatchInlineSnapshot(
-        `"Current DSH workspace roots: ["/repos/c","/repos/b"] are additional roots of this session's workspace and are readable; nothing is writable in read-only mode."`,
+        `"Current DSH workspace roots: ["/repos/c","/repos/b"] are additional roots of this session's workspace and are readable; nothing is writable in read-only mode. An approved one-shot danger-full-access escalation lifts the read-only-root and per-tool refusals for that call only."`,
       )
     }
   })
@@ -87,10 +87,10 @@ describe('renderWorkspaceRootsContext', () => {
 
   it('adds the Windows restricted-token caveat only on win32 and only under workspace-write', () => {
     expect(render('win32', 'workspace-write', [A, B])).toMatchInlineSnapshot(
-      `"Current DSH workspace roots: ["/repos/a"] are writable additional roots and ["/repos/b"] are read-only additional roots (writes are refused) of this session's workspace. The session origin remains the primary root ("/work/primary"); changing the working directory does not change these grants. Grant changes apply to later operations and newly started processes, not to processes already running. Writable additional roots are enforced for shell processes by the upstream Windows ACL restricted-token sandbox, whose enforcement is reported as partial; reads are not confined by it."`,
+      `"Current DSH workspace roots: ["/repos/a"] are writable additional roots and ["/repos/b"] are read-only additional roots (writes are refused) of this session's workspace. The session origin remains the primary root ("/work/primary"); changing the working directory does not change these grants. Grant changes apply to later operations and newly started processes, not to processes already running. Writable additional roots are enforced for shell processes by the upstream Windows ACL restricted-token sandbox, whose enforcement is reported as partial; reads are not confined by it. An approved one-shot danger-full-access escalation lifts the read-only-root and per-tool refusals for that call only."`,
     )
     expect(render('win32', 'workspace-write', [A], ['bash'])).toMatchInlineSnapshot(
-      `"Current DSH workspace roots: ["/repos/a"] are writable additional roots of this session's workspace. The session origin remains the primary root ("/work/primary"); changing the working directory does not change these grants. Grant changes apply to later operations and newly started processes, not to processes already running. Writable additional roots are enforced for shell processes by the upstream Windows ACL restricted-token sandbox, whose enforcement is reported as partial; reads are not confined by it. The tools ["bash"] cannot write additional roots even where they are writable."`,
+      `"Current DSH workspace roots: ["/repos/a"] are writable additional roots of this session's workspace. The session origin remains the primary root ("/work/primary"); changing the working directory does not change these grants. Grant changes apply to later operations and newly started processes, not to processes already running. Writable additional roots are enforced for shell processes by the upstream Windows ACL restricted-token sandbox, whose enforcement is reported as partial; reads are not confined by it. The tools ["bash"] cannot write additional roots even where they are writable. An approved one-shot danger-full-access escalation lifts the read-only-root and per-tool refusals for that call only."`,
     )
     // The caveat is a confinement fact: it does not belong to the read-only
     // or danger-full-access sentences.

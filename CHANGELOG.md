@@ -8,6 +8,12 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [Unreleased]
+
+### Changed
+
+- **已批准的一次性 Full-access 提权现在按批准语义执行**：当用户在一次工具调用上批准 `sandbox_permissions: 'danger-full-access'` 的升级（上游 `approveEscalation` → `approval.request` 返回 `'allowed-once'`）后，该调用不再被插件的两条负授权否决——显式 `read-only` 附加根（含 standing mode 下只读的 `inherit` 根）与 `toolAccess` per-tool 封顶（含非法配置的 cap-everything）仅对该调用解除。`$DSH_HOME` 恰在无提权时本应被拒的同一条件下保持拒绝，Registry 权威 `unavailable` 的主根钳制照旧，standing Full-access 会话、并发/嵌套/后续调用、已运行进程、持久终端、面板终端与 OPS 派发均不受影响（[ADR-0036](./docs/decisions/ADR-0036-approved-escalation-override.md)）。
+
 ## [0.1.16] - 2026-11-08
 
 ### Added

@@ -23,6 +23,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import type { Session } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from './compat.ts'
@@ -64,7 +65,9 @@ export interface AdditionalWorkspaceRoot {
    * The write authority the registration carries (B9 three-state).
    * `read-only` roots remain workspace members — instructions, LSP,
    * workspace-file routing, and reads all still see them — but they are never
-   * part of `writableRoots` and never reach a write grant, under ANY mode.
+   * part of `writableRoots` and never reach a write grant, under ANY mode;
+   * the single exception is a user-approved one-shot `danger-full-access`
+   * escalation, which lifts the refusal for that call alone (ADR-0036).
    * `inherit` follows the session mode; fixed `read-write` stays writable even
    * under a read-only session.
    */
@@ -111,7 +114,10 @@ export interface FilesystemScope {
    * `read-only` roots under `danger-full-access` (and wherever another grant,
    * such as the platform temp area, would otherwise cover the same path), and
    * every member when the call is tool-capped. Read access is unaffected —
-   * these are all still workspace members.
+   * these are all still workspace members. An approved one-shot
+   * `danger-full-access` escalation empties this set for its own call alone,
+   * except `protectedHome` — which is appended exactly when the pre-override
+   * set would have been non-empty (ADR-0036).
    */
   deniedRoots: readonly string[]
   /**
@@ -211,6 +217,17 @@ export const REGISTRY_UNAVAILABLE_NOTE = 'The DSH multi-root registry is not ava
   + 'Explicit deny boundaries still take precedence.'
 
 /**
+ * The sentence appended wherever the topology text describes a refusal an
+ * approved one-shot `danger-full-access` escalation can lift (ADR-0036): the
+ * root-access and per-tool refusals under the confined modes. Full-access
+ * texts never take it — there the refusals are stated as standing mode facts
+ * the approved call already bypassed — and the authority downgrade can never
+ * be approved away.
+ */
+export const ESCALATION_OVERRIDE_NOTE = ' An approved one-shot danger-full-access escalation '
+  + 'lifts the read-only-root and per-tool refusals for that call only.'
+
+/**
  * The B9 effective-access rule (ADR-0017's nine-cell matrix): whether a root
  * with this registration policy is writable under this session mode.
  * `read-write` is writable everywhere; `inherit` follows the mode;
@@ -274,12 +291,14 @@ export function renderWorkspaceRootsContext(options: {
     const writable = options.toolAccessInvalid ? [] : roots.filter(root => root.access === 'read-write').map(root => root.path)
     if (writable.length === 0) {
       return prefix + `Current DSH workspace roots: ${members} are additional roots of this session's workspace and are readable; `
-        + 'nothing is writable in read-only mode.' + capNote
+        + 'nothing is writable in read-only mode.' + capNote + ESCALATION_OVERRIDE_NOTE
     }
     const readable = roots.filter(root => root.access !== 'read-write').map(root => root.path)
+    const overrideNote = readable.length > 0 || cappedTools.length > 0 || options.toolAccessInvalid === true
+      ? ESCALATION_OVERRIDE_NOTE : ''
     let text = `Current DSH workspace roots: ${JSON.stringify(writable)} are additional roots that stay writable even in read-only mode`
     if (readable.length > 0) text += `, and ${JSON.stringify(readable)} are readable additional roots`
-    return prefix + text + ' of this session\'s workspace; everything else is read-only.' + capNote
+    return prefix + text + ' of this session\'s workspace; everything else is read-only.' + capNote + overrideNote
   }
   if (mode === 'danger-full-access') {
     // The refused set mirrors the scope's deny set: explicit read-only roots
@@ -305,7 +324,9 @@ export function renderWorkspaceRootsContext(options: {
     text += ' Writable additional roots are enforced for shell processes by the upstream Windows ACL '
       + 'restricted-token sandbox, whose enforcement is reported as partial; reads are not confined by it.'
   }
-  return prefix + text + capNote
+  const overrideNote = readOnly.length > 0 || cappedTools.length > 0 || options.toolAccessInvalid === true
+    ? ESCALATION_OVERRIDE_NOTE : ''
+  return prefix + text + capNote + overrideNote
 }
 
 /**
@@ -331,8 +352,26 @@ export interface Config {
   readonly dshHome?: string
 }
 
+/**
+ * The reason prefix upstream `approveEscalation` stamps on the approval
+ * request (`escalate sandbox to ${mode}: ${justification}`) — the identity a
+ * granted one-shot escalation to `danger-full-access` is recognized by,
+ * because the escalated policy object itself carries no approval marker.
+ */
+const ESCALATION_REASON_PREFIX = 'escalate sandbox to danger-full-access: '
+
 /** The tool-dispatch cap carried across async boundaries by the waterfall. */
-const toolCapStore = new AsyncLocalStorage<{ readonly capped: boolean }>()
+const toolCapStore = new AsyncLocalStorage<{
+  readonly capped: boolean
+  /** The dispatch's tool-call id; an approval grant pins itself to it alone. */
+  readonly callId: string | undefined
+  /**
+   * The user approved a one-shot escalation to `danger-full-access` for THIS
+   * call (ADR-0036). Never inherited — a fresh store starts `false`, so a
+   * nested or sibling dispatch can never borrow the parent's grant.
+   */
+  approvedFullAccess: boolean
+}>()
 
 /**
  * A confined profile this host's sandbox provider minted OUTSIDE a live
@@ -543,12 +582,50 @@ export class MultiRootScopeService extends Service {
         const denial = opsDispatchBarrier(ctx, this, exec)
         if (denial !== undefined) throw new Error(denial)
         return await next()
-      })
+      }, exec.callId)
     })
 
     ctx.inject(['tools', 'sandboxPolicy', 'multiRootCompat', 'multiRootProviders'], (scoped: Context) => {
       if (typeof scoped.tools.guard !== 'function') return
       scoped.effect(() => scoped.tools.guard(exec => opsDispatchBarrier(ctx, this, exec)))
+    })
+
+    // The approved one-shot `danger-full-access` escalation (ADR-0036) is
+    // learned at the approval seam: upstream's escalated policy carries no
+    // approval marker, so the wrapper notes the grant on the dispatch's own
+    // tool-cap store, pinned by callId and the escalation reason prefix. The
+    // service is a SOFT dependency — a composition without it can never
+    // approve an escalation, so the wrapper simply never installs.
+    ctx.inject(['approval'], (scoped: Context) => {
+      const service = this
+      const approval = scoped.get('approval') as {
+        request(this: unknown, req: {
+          readonly agent?: { readonly session: Session }
+          readonly callId?: string
+          readonly reason?: string
+        }): Promise<string>
+      }
+      scoped.effect(() => wrapMethod(approval, 'request', original => async function (
+        this: unknown,
+        req: {
+          readonly agent?: { readonly session: Session }
+          readonly callId?: string
+          readonly reason?: string
+        },
+      ) {
+        const outcome = await original.call(this, req)
+        // The standing mode is the escalation's precondition: a session already
+        // at `danger-full-access` can never be granted a genuine one-shot
+        // escalation (upstream escalates nothing past it), so any request that
+        // claims one cannot mark this dispatch. Unprovable ⇒ fail closed.
+        const standingMode = req.agent?.session === undefined
+          ? undefined
+          : (scoped.get('sandboxPolicy') as
+            { resolve(input: { readonly session: Session }): { readonly mode: SandboxMode } } | undefined)
+            ?.resolve({ session: req.agent.session }).mode
+        service.noteApproval(req, outcome, standingMode)
+        return outcome
+      }))
     })
 
     // Maintenance has no trusted tool/session dispatch. Do not infer authority
@@ -714,7 +791,12 @@ export class MultiRootScopeService extends Service {
       const snapshot = operation.scope
       // The snapshot is already intersected with this Host's mode/tool cap.
       // Never widen it after admission; nested dispatch may only remove writes.
-      return this.capped() ? { ...snapshot, writableRoots: [], deniedRoots: [...new Set([...snapshot.deniedRoots, ...snapshot.additionalRoots])] } : snapshot
+      // An approved one-shot escalation's snapshot already carries its lifted
+      // boundaries — re-capping it would restore the refusals it was granted past.
+      const override = policy.mode === 'danger-full-access' && toolCapStore.getStore()?.approvedFullAccess === true
+      return this.capped() && !override
+        ? { ...snapshot, writableRoots: [], deniedRoots: [...new Set([...snapshot.deniedRoots, ...snapshot.additionalRoots])] }
+        : snapshot
     }
     return this.project(policy, true, undefined, 'unavailable')
   }
@@ -724,8 +806,49 @@ export class MultiRootScopeService extends Service {
     return this.project(policy, this.capForTool(toolName))
   }
 
-  withToolCap<T>(name: string, fn: () => T): T {
-    return toolCapStore.run({ capped: this.capForTool(name) }, fn)
+  /**
+   * Record the outcome of one approval request against the dispatch that made
+   * it (ADR-0036). Only a genuine one-shot `danger-full-access` grant counts:
+   * an `'allowed-once'` outcome whose request carries the upstream escalation
+   * reason prefix AND the callId of THIS dispatch's tool-cap store, made from
+   * a session whose standing mode is BELOW full-access — a standing
+   * `danger-full-access` session can never produce a genuine escalation
+   * (upstream escalates nothing past it), so an `allowed-once` carrying the
+   * prefix there is not an escalation grant, and an unprovable standing mode
+   * fails closed. Anything else — a rejection, a different reason, another
+   * call's approval, or a request outside any dispatch — leaves the store
+   * untouched.
+   * @param req - the request handed to the approval service.
+   * @param outcome - the outcome the service resolved.
+   * @param standingMode - the session's standing sandbox mode at the request.
+   */
+  noteApproval(req: { readonly callId?: string; readonly reason?: string }, outcome: string, standingMode?: SandboxMode): void {
+    if (outcome !== 'allowed-once') return
+    if (standingMode === undefined || standingMode === 'danger-full-access') return
+    if (typeof req.reason !== 'string' || !req.reason.startsWith(ESCALATION_REASON_PREFIX)) return
+    const store = toolCapStore.getStore()
+    if (store === undefined || store.callId === undefined || store.callId !== req.callId) return
+    store.approvedFullAccess = true
+  }
+
+  withToolCap<T>(name: string, fn: () => T, callId?: string): T {
+    const store = { capped: this.capForTool(name), callId, approvedFullAccess: false }
+    // The grant dies with its dispatch: AsyncLocalStorage keeps a captured
+    // store alive in continuations that outlive `fn`, so the flag must be
+    // revoked on settle — a fire-and-forget promise that keeps running after
+    // this call is no longer "that call".
+    const revoke = (): void => { store.approvedFullAccess = false }
+    try {
+      const result = toolCapStore.run(store, fn)
+      if (typeof (result as { readonly finally?: unknown } | null)?.finally === 'function') {
+        return (result as Promise<T>).finally(revoke) as T
+      }
+      revoke()
+      return result
+    } catch (error: unknown) {
+      revoke()
+      throw error
+    }
   }
 
   /** Execution and review use exactly the same parent-narrowing rule. */
@@ -740,29 +863,41 @@ export class MultiRootScopeService extends Service {
     const primaryRoot = canonicalPath(policy.workspaceRoot)
     const registered = recorded ?? this.rootsByPrimary.get(primaryKey(policy.workspaceRoot)) ?? []
     const roots = authority === 'unavailable' ? [] : sanitizeMembers(primaryRoot, registered)
-    const writable = capped || authority === 'unavailable'
+    // The approved one-shot escalation (ADR-0036): the user granted THIS call
+    // `danger-full-access`, so the root-access and per-tool refusals lift for
+    // this call alone. It never lifts the authority downgrade — an unreadable
+    // store cannot prove its registrations — and never drops the protected
+    // home boundary.
+    const override = authority !== 'unavailable'
+      && policy.mode === 'danger-full-access'
+      && toolCapStore.getStore()?.approvedFullAccess === true
+    const writable = capped && !override || authority === 'unavailable'
       ? []
-      : roots.filter(root => effectivelyWritable(policy.mode, root.access)).map(root => root.path)
+      : roots.filter(root => override || effectivelyWritable(policy.mode, root.access)).map(root => root.path)
     // Use the recorded spelling, never re-resolve it into a replacement grant.
     // A disappeared directory must not become writable merely because it left
     // membership; explicit removal is what withdraws the negative boundary.
     // Deny wins over the primary root too: a record whose recorded grant now
     // coincides with the current primary target keeps its restriction.
-    const denied = registered.filter(root => typeof root.recordedPath === 'string'
+    // `baseDenied` is computed from the standing rules — the override empties
+    // the published deny set but the pre-override set is what the protected
+    // home boundary keys on below.
+    const baseDenied = registered.filter(root => typeof root.recordedPath === 'string'
       && root.recordedPath !== ''
       && (capped || !effectivelyWritable(policy.mode, root.access)))
       .map(root => root.recordedPath)
-    const deniedRoots = [...new Set(denied)]
+    const deniedRoots = override ? [] : [...new Set(baseDenied)]
     // The DSH home joins the deny set only while restrictions apply under
-    // Full-access: a non-empty derived deny set, or an authority that cannot
-    // prove the set is empty. Zero roots with a healthy authority stay
-    // upstream-exact; confined modes never see it (containment already
-    // excludes the home). When the primary root sits inside the home the deny
-    // wins — the workspace is unwritable under Full-access rather than the
-    // boundary silently dropped.
+    // Full-access: a non-empty PRE-OVERRIDE deny set, or an authority that
+    // cannot prove the set is empty — an approved escalation lifts the
+    // workspace refusals but never the home. Zero roots with a healthy
+    // authority stay upstream-exact; confined modes never see it (containment
+    // already excludes the home). When the primary root sits inside the home
+    // the deny wins — the workspace is unwritable under Full-access rather
+    // than the boundary silently dropped.
     let protectedHome: string | undefined
     if (this.dshHome !== undefined && policy.mode === 'danger-full-access'
-      && (deniedRoots.length > 0 || authority === 'unavailable')) {
+      && (baseDenied.length > 0 || authority === 'unavailable')) {
       const home = canonicalPath(this.dshHome)
       if (!deniedRoots.includes(home)) {
         deniedRoots.push(home)

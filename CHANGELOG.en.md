@@ -8,6 +8,12 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [Unreleased]
+
+### Changed
+
+- **An approved one-shot Full-access escalation now executes as approved**: when the user approves a `sandbox_permissions: 'danger-full-access'` widening on a single tool call (upstream `approveEscalation` → `approval.request` returning `'allowed-once'`), that call is no longer vetoed by the plugin's two negative authorizations — explicit `read-only` additional roots (including `inherit` roots that are read-only under the standing mode) and `toolAccess` per-tool caps (including the invalid-config cap-everything case) are lifted for that call only. `$DSH_HOME` stays denied exactly when the pre-override deny set was non-empty, the unavailable-authority primary-root clamp is unchanged, and standing Full-access sessions, concurrent/nested/later calls, already-running processes, persistent terminals, panel terminals, and OPS dispatches are unaffected ([ADR-0036](./docs/decisions/ADR-0036-approved-escalation-override.md)).
+
 ## [0.1.16] - 2026-11-08
 
 ### Added

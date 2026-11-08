@@ -42,7 +42,7 @@ Windows runner 的 capability SID 只对「主根 + 可写附加根」这一个�
 
 ### read-only 是"写授权缺省"，不是"读 confinement"
 
-`read-only` 根仍是完整 workspace 成员：LSP、workspace-files、指令注入、路由、文件浏览、读操作全部照旧。它只从 writable 集缺席。模型侧文案把成员资格与可写性分开陈述，绝不把 read-only 根说成可写。
+`read-only` 根仍是完整 workspace 成员：LSP、workspace-files、指令注入、路由、文件浏览、读操作全部照旧。它只从 writable 集缺席。模型侧文案把成员资格与可写性分开陈述，绝不把 read-only 根说成可写。（2026-11-09 修订：唯一例外是用户批准的一次性 `danger-full-access` 提权——它只对该调用解除只读根与 per-tool 封顶的写拒绝，`$DSH_HOME` 与 authority-unavailable 保持不变，见 [ADR-0036](./ADR-0036-approved-escalation-override.md)。）
 
 ### per-tool 封顶的 AsyncLocalStorage 设计
 
