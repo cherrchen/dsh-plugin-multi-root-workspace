@@ -154,9 +154,12 @@ liveDescribe('the real SSH stack behind the registry seams', () => {
     await m.openBackend('vps-app')
     await expect(run(m, { command: 'echo live-ok > inside.txt && cat inside.txt' })).resolves.toMatchObject({ status: 'scope-exited', scope: 'confirmed', stdout: expect.stringContaining('live-ok') })
     await expect(run(m, { command: 'cat inside.txt' })).resolves.toMatchObject({ stdout: expect.stringContaining('live-ok') })
+    const before = await run(m, { command: `sha256sum ${live.outsideSentinel}` })
+    const beforeHash = before.status === 'scope-exited' || before.status === 'exited' ? /^[0-9a-f]{64}/u.exec(before.stdout)?.[0] : undefined
+    expect(beforeHash, 'the outside-root sentinel must be readable before the write attempt').toBeDefined()
     const sentinel = await run(m, { command: `echo owned > ${live.outsideSentinel}` })
     expect(sentinel.status === 'scope-exited' || sentinel.status === 'exited' ? sentinel.exitCode !== 0 : false).toBe(true)
-    await expect(run(m, { command: `sha256sum ${live.outsideSentinel}` })).resolves.toMatchObject({ stdout: expect.stringContaining('bed43df') })
+    await expect(run(m, { command: `sha256sum ${live.outsideSentinel}` })).resolves.toMatchObject({ stdout: expect.stringContaining(beforeHash!) })
     const escape = await run(m, { command: `echo x > ${live.workspaceLib}/escape.txt` })
     expect(escape.status === 'scope-exited' || escape.status === 'exited' ? escape.exitCode !== 0 : false).toBe(true)
     await expect(run(m, { command: 'exit 7' })).resolves.toMatchObject({ status: 'scope-exited', exitCode: 7 })
@@ -460,6 +463,9 @@ liveDescribe('remote_copy over the managed SFTP account', () => {
     }, async stage => {
       if (stage !== 'staging') return
       const env = await m.manager.openSftp('vps-xfer')
+      // SFTP v3 attrs carry second-granularity mtime: a same-size overwrite is
+      // only observable once the write lands in a later second than the seed.
+      await new Promise(resolve => setTimeout(resolve, 1_100))
       const h = await env.client.open('/import/g2-mutate-src.bin', 0x02 | 0x10)
       // Overwrite the same number of bytes: only the mtime version check can
       // notice this mutation.
