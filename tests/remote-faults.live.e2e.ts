@@ -184,11 +184,16 @@ liveDescribe('real-stack fault injection and rollback', () => {
     await purge.client.remove('/import/cancel-relay.bin').catch(() => {})
 
     const abort = new AbortController()
+    // 'staging' fires only after the stream finishes; arm the abort at the
+    // preflight boundary so it lands inside the read loop's aborted check.
     const cancelled = await m.copy({
       from: { environmentId: 'vps-app', rootId: 'app', relativePath: 'big2.bin' },
       to: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'cancel-relay.bin' },
-    }, 9, async stage => { if (stage === 'staging') abort.abort() }, abort.signal)
-    expect(cancelled, JSON.stringify(cancelled)).toMatchObject({ status: 'cancelled' })
+    }, 9, async stage => { if (stage === 'preflight') setTimeout(() => abort.abort(), 150).unref() }, abort.signal)
+    // The loop throws RemoteCopyError('cancelled') through the generic catch:
+    // status 'failed' with code 'cancelled' — the 'cancelled' status is only
+    // produced by the post-verify admission-changed path.
+    expect(cancelled, JSON.stringify(cancelled)).toMatchObject({ status: 'failed', code: 'cancelled' })
 
     const names = await m.listing('vps-xfer', '/import')
     expect(names).not.toContain('cancel-relay.bin')
