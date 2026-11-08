@@ -185,6 +185,9 @@ liveDescribe('real-stack fault injection and rollback', () => {
     const m = await mount()
     writeFileSync(join(m.workspace, 'a.txt'), 'rollback-payload\n')
     await m.stack.registry.addRemote(m.workspace, { environmentId: 'vps-xfer', rootId: 'import' })
+    // A leftover from an earlier interrupted run must not poison the drill.
+    const purge = await m.manager.openSftp('vps-xfer')
+    await purge.client.remove('/import/fault.txt').catch(() => {})
     const admitted = await m.copy({}, 6)
     expect(admitted, JSON.stringify(admitted)).toMatchObject({ status: 'committed' })
 

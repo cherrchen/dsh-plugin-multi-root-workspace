@@ -299,7 +299,12 @@ export class BrokerServer {
   private async openEnvironment(state: ConnectionState, environmentId: string): Promise<SshEnvironment> {
     const manager = await this.managerOrThrow()
     const existing = state.environments.get(environmentId)
-    if (existing !== undefined && manager.generationOf(environmentId) === existing.generation) return existing
+    if (existing !== undefined && manager.generationOf(environmentId) === existing.generation) {
+      try {
+        existing.assertAlive()
+        return existing
+      } catch { /* a killed connection leaves a corpse; reopen below */ }
+    }
     state.environments.delete(environmentId)
     const opened = await manager.open(environmentId)
     state.environments.set(environmentId, opened)
