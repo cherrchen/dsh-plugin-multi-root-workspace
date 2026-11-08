@@ -155,8 +155,14 @@ liveDescribe('real-stack fault injection and rollback', () => {
     expect(killed.status, JSON.stringify(killed)).not.toBe('committed')
     expect(['unknown', 'failed', 'cancelled'], JSON.stringify(killed)).toContain(killed.status)
 
-    // The killed connection is stale; the next open must be a fresh generation.
-    await m.manager.open('vps-app')
+    // The killed connection is stale; the next open must be a fresh
+    // generation. The upstream child-close event races our check — poll until
+    // the corpse is detected rather than assuming a fixed latency.
+    for (let i = 0; i < 100 && m.manager.generationOf('vps-app') === generationBefore; i++) {
+      await m.manager.open('vps-app').catch(() => {})
+      if (m.manager.generationOf('vps-app') !== generationBefore) break
+      await sleep(50)
+    }
     expect(m.manager.generationOf('vps-app')).not.toBe(generationBefore)
     // The destination never published the killed name and left no staging file.
     const names = await m.listing('vps-xfer', '/import')
@@ -188,6 +194,7 @@ liveDescribe('real-stack fault injection and rollback', () => {
     // A leftover from an earlier interrupted run must not poison the drill.
     const purge = await m.manager.openSftp('vps-xfer')
     await purge.client.remove('/import/fault.txt').catch(() => {})
+    await purge.client.remove('/import/fault-again.txt').catch(() => {})
     const admitted = await m.copy({}, 6)
     expect(admitted, JSON.stringify(admitted)).toMatchObject({ status: 'committed' })
 
@@ -198,9 +205,12 @@ liveDescribe('real-stack fault injection and rollback', () => {
     expect(refused).toMatchObject({ status: 'failed', code: 'endpoint-not-registered' })
 
     await m.stack.registry.addRemote(m.workspace, { environmentId: 'vps-xfer', rootId: 'import' })
-    const readmitted = await m.copy({}, 8)
+    // Re-admission restores admission; the publish itself still refuses to
+    // overwrite the committed name, so the proof lands under a fresh name.
+    const readmitted = await m.copy({ to: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'fault-again.txt' } }, 8)
     expect(readmitted, JSON.stringify(readmitted)).toMatchObject({ status: 'committed' })
     const env = await m.manager.openSftp('vps-xfer')
     await env.client.remove('/import/fault.txt').catch(() => {})
+    await env.client.remove('/import/fault-again.txt').catch(() => {})
   }, 180_000)
 })
