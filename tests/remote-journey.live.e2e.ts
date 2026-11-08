@@ -169,6 +169,7 @@ liveDescribe('the real journey over broker custody', () => {
       })
       expect(relayed, JSON.stringify(relayed)).toMatchObject({ status: 'committed', bytes: artifact.length, sha256: sha(artifact) })
 
+      mkdirSync(join(live.primary, 'downloads'), { recursive: true })
       const downloaded = await world.call('remote_copy', {
         from: { environmentId: 'vps-xfer', rootId: 'import', relativePath: 'journey-app.tar' },
         to: { environmentId: 'local', rootId: 'primary', relativePath: 'downloads/app.tar' },
