@@ -8,6 +8,17 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.16] - 2026-11-08
+
+### Added
+
+- **The preview Folder navigator now works for additional roots**: the document-preview Folder navigator introduced upstream in `0.2.2-alpha.3` is rooted at the session cwd, so previewing a file under an additional root and opening Folder showed the primary root without locating the file. The plugin now retargets the navigator's body to the longest additional root containing the previewed file and replicates the native reveal contract — expanding ancestors level by level, marking the current row with `aria-current` plus the active highlight, and scrolling it into view; opening a row keeps the native `replaceTab` semantics; closing and reopening Folder restores the expansion set and scroll offset. When no additional root matches (including primary-root files), the address belongs to another session, or the host does not mount that navigator, the native navigator is untouched ([ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md), [ADR-0016](./docs/decisions/ADR-0016-files-tab-native-tree-fork.md), Chinese).
+
+### Fixed
+
+- **Third-party unadmitted confined spawns are restored to the primary-clamped launch (forge bundle)**: since per-operation admission landed in `v0.1.12`, third-party consumers that call `ctx.sandbox.confine(...)` followed directly by `ctx.subprocess.spawn(...)` outside this plugin's wrapped seams — for example the experimental forge bundle's panel Git checks and worktrees service — were hard-rejected by the process fence as argv of unknown origin. The scope now keeps a bounded minted-profile ledger keyed by the **dispatch-time** publication: only a primary-bounded profile (`clamped` / `read-only`) minted by this process may launch without admission, and only while that publication stays current; any root-table content change or authority flip invalidates it. Reachable `worktrees` / `forgePanel` Session entry points now take a real ordered admission, falling back to unadmitted execution with a warning when admission is unreachable. Forged argv, argv from another process, profiles minted under a superseded publication, and leftovers from expired admission frames stay refused, and OPS protection windows still treat ledger mints as unowned spawns. Known limitation: when the session repository sits in an additional root, panel worktree creation/restoration still runs with the primary-clamped profile, so writes on the additional-root path are denied by the kernel; the model's worktree tool is unaffected ([ADR-0035](./docs/decisions/ADR-0035-unadmitted-confined-spawn.md), Chinese).
+- **The panel distinguishes sessions that exist but are not live in this instance**: when another DSH instance holds a session (cross-process writer lock), or it is still resuming or awaiting a format migration, it never enters this process's SessionStore, so the panel used to answer `session-not-found` ("That session is not active") even though the session is visible on screen — and its retry hint did not apply. `dispatchPanelRequest` now re-runs the resolver at the catch and probes `sessionPersistence.stat`, reclassifying to `session-not-live` only when a persisted snapshot proves existence, with actionable localized copy; a live session that still cannot name a root (missing or non-absolute cwd) and anything the probe cannot prove keep `session-not-found`. Authority is unchanged: only live sessions in this process resolve a primary root ([ADR-0008 amendment](./docs/decisions/ADR-0008-panel-session-derived-authority.md#修订失败码按持久化存在性细分2026-11-07amendment), Chinese).
+
 ## [0.1.15] - 2026-11-06
 
 ### Changed
@@ -247,7 +258,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.15...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.16...HEAD
+[0.1.16]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...v0.1.13

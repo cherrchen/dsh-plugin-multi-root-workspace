@@ -8,6 +8,17 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.16] - 2026-11-08
+
+### Added
+
+- **预览页 Folder 导航树支持附加根**：上游 `0.2.2-alpha.3` 引入的文档预览 Folder 导航树原本固定以会话 cwd 为树根，预览附加根中的文件时点开 Folder 看到的仍是主根目录、也不会定位当前文件。插件现在把该导航树的树体接管到被预览文件所在的最长前缀附加根，并复刻原生 reveal 契约：逐层展开祖先、以当前行标记与 `aria-current` 高亮并把该行滚动到可见位置；树内打开文件沿用 `replaceTab` 语义；关闭再打开 Folder 时恢复展开集合与滚动位置。没有匹配的附加根（含主根文件）、跨会话地址或宿主未挂载该导航树时，原生导航树完全不受影响（[ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](./docs/decisions/ADR-0016-files-tab-native-tree-fork.md)）。
+
+### Fixed
+
+- **第三方插件的准入外受限 spawn 恢复为主根钳制启动（forge bundle）**：自 `v0.1.12` 的逐操作准入起，不经过本插件包装接缝、直接 `ctx.sandbox.confine(...)` 后 `ctx.subprocess.spawn(...)` 的第三方消费者（如实验性 forge bundle 的面板 Git 检查与 worktrees 服务）会被进程围栏当作来源不明的受限 argv 硬性拒绝。现在 scope 维护按**铸造时**发布代次键控的有界铸造台账：只有本进程铸出的主根形态 profile（`clamped` / `read-only`）在铸造发布仍然有效时可无准入启动，根表内容变化或权威可用性翻转即失效；可到达的 `worktrees` / `forgePanel` Session 入口改经真实有序准入包装，准入不可达时退回无准入执行并告警。伪造 argv、他进程 argv、被超越发布或过期准入帧遗留的 profile 继续拒绝，OPS 保护窗口仍把台账 mint 按无归属 spawn 处理。已知局限：Session 仓库位于附加根时，面板的 worktree 创建/恢复仍以主根钳制 profile 执行，附加根路径的写入会被内核拒绝；模型的 worktree 工具不受影响（[ADR-0035](./docs/decisions/ADR-0035-unadmitted-confined-spawn.md)）。
+- **面板区分「会话存在但未在本实例激活」**：会话被另一个 DSH 实例持有（跨进程 writer 锁）、仍在恢复或等待格式迁移时不会进入本进程的 SessionStore，面板此前一律报 `session-not-found`（「找不到该会话」）——会话明明就在屏幕上，提示的重试动作也不适用。现在 `dispatchPanelRequest` 在失败处复跑 resolver 并探测 `sessionPersistence.stat`，只在能证明持久化快照存在时改报 `session-not-live`，并给出可操作的中英双语提示；活会话仍无法给出主根（cwd 缺失或非绝对）以及探测无法证明存在的情况保持 `session-not-found`。授权合同不变：仍然只有本进程的 live 会话能解析主根（[ADR-0008 修订](./docs/decisions/ADR-0008-panel-session-derived-authority.md#修订失败码按持久化存在性细分2026-11-07amendment)）。
+
 ## [0.1.15] - 2026-11-06
 
 ### Changed
@@ -247,7 +258,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.15...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.16...HEAD
+[0.1.16]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.12...v0.1.13

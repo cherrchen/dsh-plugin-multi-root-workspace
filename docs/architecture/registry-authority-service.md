@@ -1,6 +1,6 @@
 # 多 Host 共享 Registry 权威服务
 
-> 当前实现的架构与协议。决策：[ADR-0025](../decisions/ADR-0025-shared-registry-authority.md)，撤权语义：[ADR-0024](../decisions/ADR-0024-registry-operation-admission.md)。本文件从 2026-10-29 的 Proposed 审计演进；实现与平台验收是两件事，精确执行结果和待验证平台仅记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#多-host-权威服务开发2026-10-29)。未发布。
+> 当前实现的架构与协议。决策：[ADR-0025](../decisions/ADR-0025-shared-registry-authority.md)，撤权语义：[ADR-0024](../decisions/ADR-0024-registry-operation-admission.md)。本文件从 2026-10-29 的 Proposed 审计演进；实现与平台验收是两件事，精确执行结果和待验证平台仅记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#多-host-权威服务开发2026-10-29)。初版随 `v0.1.12` 发版；准入外受限 spawn 修订（[ADR-0035](../decisions/ADR-0035-unadmitted-confined-spawn.md)）随 `v0.1.16` 发版。
 
 ## 1. 边界与数据流
 
