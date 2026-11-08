@@ -89,6 +89,9 @@ export class SftpClient {
     this.child.on('error', error => lose(`sftp transport error: ${error.message}`))
     this.child.on('close', (code, signal) => lose(`sftp transport closed: code ${String(code)} signal ${String(signal)}`))
     this.child.stdout.on('end', () => lose('sftp transport EOF'))
+    // Writing to a killed ssh's stdin raises EPIPE on the pipe, not on the
+    // child — without this listener the host process dies on 'error' event.
+    this.child.stdin.on('error', error => lose(`sftp transport write failed: ${error.message}`))
   }
 
   static connect(alias: string, options: { ssh?: string; onLoss?: (error: SftpConnectionLost) => void } = {}): SftpClient {
