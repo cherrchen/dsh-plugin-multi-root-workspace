@@ -92,12 +92,14 @@ export const inject = ['slots', 'locale', 'connection']
  * `conversation.hero.options` is declared by `ui-conversation` from
  * `0.2.1-alpha.3`; the typecheck matrix also runs against older releases whose
  * SlotMap predates the key, so the registration goes through this narrow
- * structural face instead of the merged SlotMap. `specDynamic` is the
- * declaration probe; absence means the running DSH has no such seat.
+ * structural face instead of the merged SlotMap. `spec` is the public
+ * declaration probe on the SlotRegistry service (`specDynamic` exists only on
+ * the internal SlotCore, not on `ctx.slots`); absence means the running DSH
+ * has no such seat.
  */
 interface HeroOptionsSlotService {
-  /** Declaration lookup available on every supported slot registry. */
-  specDynamic?(key: string): unknown
+  /** Public declaration lookup on every supported SlotRegistry service. */
+  spec?(key: string): unknown
   inject(key: string, callback: () => () => void): () => void
   register(
     options: { readonly name: string; readonly id: string; readonly order: number; readonly locale: string },
@@ -195,7 +197,7 @@ export function apply(ctx: ClientContext): void {
   // exists from 0.2.1-alpha.3; old runtimes never declare it, so the entry is
   // simply not rendered there and the sidebar footer action above stays the
   // only entry. `inject` itself waits for a declaration, and the explicit
-  // `specDynamic` probe makes the version gate legible even for an inject
+  // `spec` probe makes the version gate legible even for an inject
   // implementation that fires before/without a declaration.
   // The trigger is a dialog button, not a menu: no chevron, and the same
   // WorkspaceFoldersDialog — no second manager, no second RPC surface. The
@@ -204,7 +206,7 @@ export function apply(ctx: ClientContext): void {
   // list call it keys — stays stable across upstream store writes.
   const heroSlots = ctx.slots as unknown as HeroOptionsSlotService
   heroSlots.inject('conversation.hero.options', () => {
-    if (heroSlots.specDynamic?.('conversation.hero.options') === undefined) return () => {}
+    if (heroSlots.spec?.('conversation.hero.options') === undefined) return () => {}
     return heroSlots.register({
       name: 'conversation.hero.options',
       id: HERO_SLOT_ID,

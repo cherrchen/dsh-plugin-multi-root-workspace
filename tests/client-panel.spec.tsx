@@ -102,7 +102,7 @@ interface MountOptions {
   readonly heroOptions?: boolean
   /**
    * Make `slots.inject` fire the callback even when the hero slot was not
-   * declared. Proves the explicit `specDynamic` guard, not just inject's own
+   * declared. Proves the explicit `spec` guard, not just inject's own
    * declaration wait, keeps the entry out of a runtime without the slot.
    */
   readonly permissiveHeroInject?: boolean
@@ -171,7 +171,7 @@ function mount(options: MountOptions = {}): Harness {
         : `${ns}.${key}`,
     },
     slots: {
-      specDynamic: (name: string) => name === 'conversation.hero.options' && options.heroOptions === true
+      spec: (name: string) => name === 'conversation.hero.options' && options.heroOptions === true
         ? { kind: 'list', scope: 'session' }
         : undefined,
       inject: (name: string, callback: () => unknown) => {
@@ -344,7 +344,7 @@ describe('the New Session hero entry', () => {
   })
 
   it('keeps the entry out even when inject fires without a declared slot', () => {
-    // A permissive inject must not be enough: the explicit specDynamic gate is
+    // A permissive inject must not be enough: the explicit spec gate is
     // the support boundary for `conversation.hero.options`.
     const harness = mount({ permissiveHeroInject: true })
     expect(harness.registrations.some(item => item.options.name === 'conversation.hero.options')).toBe(false)

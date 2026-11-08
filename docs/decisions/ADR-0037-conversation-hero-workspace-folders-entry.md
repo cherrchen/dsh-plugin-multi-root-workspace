@@ -38,7 +38,7 @@ Workspace Folders 目前只有一个入口：侧栏底部 `sidebar.footer.action
 
 6. **双入口共存，不做门控。** 新运行时同一页出现两个 `Folders`（新会话行 + 侧栏底部），指向同一对话框、同一套 RPC、同一份文案；旧运行时只有侧栏入口。不隐藏侧栏入口、不去重、不做优先级判断。
 
-7. **显式槽位门控，零运行时依赖。** `conversation.hero.options` 的注册走窄结构接口（`inject` + `specDynamic` + `register`），不把 `ui-conversation` 加入任何依赖：typecheck 矩阵包含 `0.2.1-alpha.3` 之前的版本，它们的 SlotMap 没有该键。`slots.inject` 只在槽位声明时触发；回调内再用 `specDynamic` 确认声明存在，查不到就直接返回空 disposer。因此只有声明了该槽的 DSH 版本才会显示入口；旧版本既不注册、也不渲染，侧栏入口不变。
+7. **显式槽位门控，零运行时依赖。** `conversation.hero.options` 的注册走窄结构接口（`inject` + `spec` + `register`），不把 `ui-conversation` 加入任何依赖：typecheck 矩阵包含 `0.2.1-alpha.3` 之前的版本，它们的 SlotMap 没有该键。`slots.inject` 只在槽位声明时触发；回调内再用 `spec` 确认声明存在，查不到就直接返回空 disposer。因此只有声明了该槽的 DSH 版本才会显示入口；旧版本既不注册、也不渲染，侧栏入口不变。
 
 ## Alternatives Considered
 
@@ -48,7 +48,7 @@ Workspace Folders 目前只有一个入口：侧栏底部 `sidebar.footer.action
 - **容器查询。** 否决：hero 行目前没有容器祖先；伪造一个容器会改变上游布局。560px 视口断点与宿主 compact 步进对齐，先接受近似。
 - **把管理器做成紧凑下拉。** 否决：对话框承担目录选择器、多行增删改、权限确认和错误展示；压缩成下拉会复制一套交互并失去既有可访问性。
 - **加 `conversation.session.header.utilities` 入口。** 推迟：本需求只要求新会话行；header utilities 是后续可选入口，不纳入本次范围。
-- **引入对 `ui-conversation` 的运行时依赖（或 type-only devDependency），或改 `dsh.client.inject`。** 否决：typecheck 矩阵的旧版本根本没有这个 SlotMap 键，type-only 合并仍需要额外 pin 与矩阵对齐；窄结构接口加显式 `specDynamic` 门控已经足够，且旧版本的 `inject` 本身就不会触发。运行时依赖更会让旧运行时要求该包存在，破坏“缺席即无该入口、侧栏不受影响”的降级。
+- **引入对 `ui-conversation` 的运行时依赖（或 type-only devDependency），或改 `dsh.client.inject`。** 否决：typecheck 矩阵的旧版本根本没有这个 SlotMap 键，type-only 合并仍需要额外 pin 与矩阵对齐；窄结构接口加显式 `spec` 门控已经足够，且旧版本的 `inject` 本身就不会触发。运行时依赖更会让旧运行时要求该包存在，破坏“缺席即无该入口、侧栏不受影响”的降级。
 
 ## Consequences
 
@@ -61,7 +61,8 @@ Workspace Folders 目前只有一个入口：侧栏底部 `sidebar.footer.action
 - 回滚：删除 hero 注册与 `HeroWorkspaceEntry` 即回到当前行为；无数据、协议或授权迁移。
 - 该入口**不独占** `conversation.hero.options`：槽是 `kind: 'list'`，slot outlet 以 `display: contents` 挂在 `.heroOptions` 内，条目是它的直接 flex 子项；trigger 保持 `display: inline-flex`、`min-width: 0`，不设 `flex: 1`、不绝对定位、不占满宽度，因此其他插件的条目（如 forge worktree）可以并排出现。当前隔离组合里只安装了本插件，所以视觉上只有一个条目——这是组合事实，不是 CSS 独占。
 - 首版实现使用 `IconSettings`；2026-11-08 的真实 GUI 目检确认齿轮的“设置”语义不符合该入口，改为 workspace tree 字形（`IconWorkspaceTreeOutlineRegular`，旧运行时回退 `IconFolderOpen`），并把 trigger 内顺序改为文字在左、icon 在右。这是纯表现层修正，不改变注册、RPC 或授权。
-- 首轮 PR CI 暴露了兼容性边界：`0.2.1-alpha.3` 之前的矩阵版本没有该 SlotMap 键，typecheck 失败。最终实现因此不使用 `ui-conversation` 的类型或依赖，而以 `specDynamic` 作为显式的“该版本是否有此槽”门控；旧版本不显示入口，符合“从第一个支持该槽的版本开始才可用”的要求。
+- 首轮 PR CI 暴露了兼容性边界：`0.2.1-alpha.3` 之前的矩阵版本没有该 SlotMap 键，typecheck 失败。最终实现因此不使用 `ui-conversation` 的类型或依赖，而以 `spec` 作为显式的“该版本是否有此槽”门控；旧版本不显示入口，符合“从第一个支持该槽的版本开始才可用”的要求。
+- Review 修正：`spec` 是 `SlotRegistry` 服务公开的声明查询；`specDynamic` 只存在于内部 `SlotCore`，服务不暴露。首版门控误用了后者，真实宿主上会永远返回 `undefined`，导致入口不注册。现在改用公开 `spec`，并以真实 `SlotRegistry`（加载浏览器 bundle）的回归测试钉住；同时在 `0.2.1-alpha.3` repointed 树上实测该槽声明可被探测、入口可注册。
 - 上游改名或移除该槽：`slots.inject` 静默不触发，新入口消失，侧栏入口不受影响。
 
 ## Related Documents

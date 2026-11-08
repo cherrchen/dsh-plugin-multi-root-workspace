@@ -134,7 +134,7 @@ hero 行没有 `container-type`（上游只给会话标题行和输入卡行设�
 ### 类型与依赖
 
 - 不把 `@deepseek-ai/dsh-client-ui-conversation` 加入任何依赖：typecheck 矩阵包含 `0.2.1-alpha.3` 之前的版本，其 SlotMap 没有 `conversation.hero.options`。
-- 注册走窄结构接口（`inject` + `specDynamic` + `register`）；`inject` 只在槽位声明时触发，回调内再用 `specDynamic` 确认，查不到就直接返回空 disposer。这样只有支持该槽的 DSH 版本会显示入口。
+- 注册走窄结构接口（`inject` + `spec` + `register`）；`inject` 只在槽位声明时触发，回调内再用 `spec` 确认，查不到就直接返回空 disposer。这样只有支持该槽的 DSH 版本会显示入口。
 - 不进入 `dependencies` / `optionalDependencies` / `peerDependencies`，也不写进 `dsh.client.inject`。
 
 ## Implementation
@@ -142,7 +142,7 @@ hero 行没有 `container-type`（上游只给会话标题行和输入卡行设�
 ### Phase 0 — 准备
 
 - [x] 确认 `conversation.hero.options` 的引入版本与旧矩阵的 SlotMap 差异。
-- [x] 以窄结构接口 + `specDynamic` 显式门控注册；`pnpm typecheck` 在当前 pin 通过。
+- [x] 以窄结构接口 + `spec` 显式门控注册；`pnpm typecheck` 在当前 pin 通过。
 
 ### Phase 1 — 组件与样式
 
@@ -212,7 +212,7 @@ pnpm pack:check && pnpm smoke:packed
 | 没有 chevron 后与两个选择器“看起来不一样” | 有意的语义差异：按钮 vs 下拉；同高/同字号/同 hover 保证同一视觉族 |
 | 双入口让用户疑惑 | 文案/图标一致，README 说明两者等价；退役决策在合入 main 后处理 |
 | 两份 trigger 漂移 | 共用对话框与 `t()`，只新增外观；样式测试钉住几何与断点 |
-| 旧运行时没有该槽 | 不注册、不渲染；`inject` 等待声明，回调内 `specDynamic` 再确认，侧栏入口不受影响 |
+| 旧运行时没有该槽 | 不注册、不渲染；`inject` 等待声明，回调内 `spec` 再确认，侧栏入口不受影响 |
 | 上游改名/移除该槽 | 注册静默缺席，侧栏入口不受影响 |
 
 回滚：删除 hero 注册与 `HeroWorkspaceEntry` 即回到当前行为；无数据/协议迁移。
@@ -237,17 +237,20 @@ pnpm pack:check && pnpm smoke:packed
 |---|---|---|
 | 前置事实核对 | 完成 | 上游 `contract/slots.ts`、`ConversationContent.tsx`、`ConversationRoot.module.css`；`git log -S` 确认 `3f1d5dfcfa` 为 `0.2.1-alpha.3` 引入 |
 | ADR-0037 | 完成 | `docs/decisions/ADR-0037-conversation-hero-workspace-folders-entry.md` |
-| Phase 0 | 完成 | 确认槽位引入版本与旧矩阵 SlotMap 差异；改为窄结构接口 + `specDynamic` 门控，`pnpm typecheck` 通过 |
+| Phase 0 | 完成 | 确认槽位引入版本与旧矩阵 SlotMap 差异；改为窄结构接口 + `spec` 门控，`pnpm typecheck` 通过 |
 | Phase 1 | 完成 | `HeroWorkspaceEntry.tsx`；`styles.ts` 的 `.mrfw-heroEntry*` 与 560px 媒体查询 |
 | Phase 2 | 完成 | `client/index.ts` 的 `HERO_SLOT_ID` / `HERO_ORDER` 与独立 `slots.inject`；侧栏注册未改 |
-| Phase 3 | 完成 | 新增 7 个 hero 用例、5 个样式用例与图标 fallback 用例；完整套件 rebase 到 main 后 1263 passed / 95 skipped / 0 failed（完整本机权限，含图标 fallback、右内缩、不独占与槽位缺席断言） |
+| Phase 3 | 完成 | 新增 7 个 hero 用例、5 个样式用例、图标 fallback 与真实 SlotRegistry probe 用例；完整套件 rebase 到 main 后 1264 passed / 95 skipped / 0 failed（完整本机权限，含图标 fallback、右内缩、不独占与槽位缺席断言） |
 | Phase 4 | 完成 | README、guide、requirements、architecture、ADR、CHANGELOG、兼容笔记已更新；计划归档与总账已登记 |
 | 完整验证 | 完成 | `pnpm verify:all` 通过；compose 54/54、behavior 137/137、journey 76/76、packed behavior 136/136；`smoke:auto-review` 按精确版本跳过 |
+| Review 修正 | 完成 | `specDynamic` 改为公开 `spec`；真实 SlotRegistry probe 用例；`0.2.1-alpha.3` repointed 树实跑通过 |
 | 真实 GUI 目检 | 完成 | 入口/对话框/两处共存与窄窗均可见；目检发现首版 `IconSettings` 语义不符，按反馈改为 workspace tree 字形并补 fallback；随后改为文字在左、icon 在右，并补 4px 右侧内缩对齐工作区选择器 |
 
 ### CI 矩阵修复（2026-11-08）
 
-首轮 PR CI 在 `0.2.1-alpha.3` 之前的 lane 于 typecheck 失败：这些版本的 SlotMap 没有 `conversation.hero.options`，即使 type-only 合并也无法让注册通过类型检查。最终改为**零 `ui-conversation` 依赖**的窄结构注册：`slots.inject` 只在槽位声明时触发，回调内再用 `specDynamic` 确认；没有该槽的版本直接不注册、不显示。新增“inject 触发但槽位未声明”的回归用例，确保只有支持该槽的版本才启用本次 UI。
+首轮 PR CI 在 `0.2.1-alpha.3` 之前的 lane 于 typecheck 失败：这些版本的 SlotMap 没有 `conversation.hero.options`，即使 type-only 合并也无法让注册通过类型检查。最终改为**零 `ui-conversation` 依赖**的窄结构注册：`slots.inject` 只在槽位声明时触发，回调内再用 `spec` 确认；没有该槽的版本直接不注册、不显示。新增“inject 触发但槽位未声明”的回归用例，确保只有支持该槽的版本才启用本次 UI。
+
+Review 修正：`specDynamic` 只存在于内部 `SlotCore`，`SlotRegistry` 服务只公开 `spec`；首版门控因此会在真实宿主上永远得到 `undefined`。改为公开 `spec`，并新增加载真实浏览器 bundle 的 `SlotRegistry` 回归测试（声明槽位 → apply → 断言 hero 注册）；另在 `0.2.1-alpha.3` repointed 树上实跑同一测试与类型检查。
 
 ### 目检修订（2026-11-08）
 
@@ -260,7 +263,8 @@ pnpm install          通过（锁文件已更新）
 pnpm typecheck        通过
 pnpm lint             通过（0 warnings / 0 errors）
 pnpm build            通过（lib/client.js 419.35 kB）
-pnpm test             完整本机权限：rebase 后 1263 passed / 95 skipped / 0 failed（rebase 前 1235）
+pnpm test             完整本机权限：rebase 后 1264 passed / 95 skipped / 0 failed（rebase 前 1235）
+0.2.1-alpha.3        真实 SlotRegistry probe 通过；host + client tsc --noEmit 通过
 0.1.5-rc.2 repoint   host + client tsc --noEmit 通过
 pnpm compat:check     通过（allowlist / peers / dev pin / installed tree 一致）
 pnpm docs:check       通过
@@ -273,6 +277,6 @@ pnpm verify:all       通过（含 kernel:probe、smoke、pack:check、smoke:pac
   smoke:auto-review   skipped（可选集成的精确基线为 DSH 0.2.1-rc.2）
 ```
 
-说明：在 DSH 工具沙箱内直接运行完整套件时，共享 Registry 的 follower/IPC 用例会以 `contended` 失败（日志报告 `shared IPC refuses sandboxed peers`）；同一用例在未改动的 main 基线工作树上以相同形状失败，确认是环境限制。上述 1263 passed（rebase 后；rebase 前 1235）是在完整本机权限下重跑的结果，与 `v0.1.16` 发版验收记录的处理方式一致。
+说明：在 DSH 工具沙箱内直接运行完整套件时，共享 Registry 的 follower/IPC 用例会以 `contended` 失败（日志报告 `shared IPC refuses sandboxed peers`）；同一用例在未改动的 main 基线工作树上以相同形状失败，确认是环境限制。上述 1264 passed（rebase 后；rebase 前 1235）是在完整本机权限下重跑的结果，与 `v0.1.16` 发版验收记录的处理方式一致。
 
 进度与发布状态的唯一真源仍是 [Multi-root Workspace 进度总账](../active/2026-09-12-multi-root-workspace.md#进度总账)；本表只记录本计划的阶段状态。
