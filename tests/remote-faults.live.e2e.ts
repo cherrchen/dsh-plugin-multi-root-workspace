@@ -5,7 +5,7 @@
  * refuses → re-admit recovers). Gated on DSH_MULTI_ROOT_SSH_LIVE — the same
  * deployment as remote-ssh.live.e2e.ts.
  */
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
@@ -82,13 +82,14 @@ afterAll(async () => {
 })
 
 async function mount(overrides?: (env: Record<string, unknown>) => Record<string, unknown>) {
-  const workspace = base(); dirs.push(workspace)
+  const root = base(); dirs.push(root)
+  const workspace = join(root, 'ws'); mkdirSync(workspace)
   const m = manifest(overrides)
   const doc = JSON.parse(JSON.stringify(m)) as { bindings: { primary: string }[] }
   for (const binding of doc.bindings) binding.primary = workspace
-  const manifestPath = join(workspace, 'manifest.json'); writeFileSync(manifestPath, JSON.stringify(doc)); chmodSync(manifestPath, 0o600)
+  const manifestPath = join(root, 'manifest.json'); writeFileSync(manifestPath, JSON.stringify(doc)); chmodSync(manifestPath, 0o600)
   const manager = new SshEnvironmentManager({ manifest: m, logger, allowUnattestedForTesting: true }); managers.push(manager)
-  const stack = await mountRegistryStack(join(workspace, 'store'), {
+  const stack = await mountRegistryStack(join(root, 'store'), {
     remoteEnvironments: { enabled: true, manifestPath },
   }, {
     beforeGate: async ctx => {
