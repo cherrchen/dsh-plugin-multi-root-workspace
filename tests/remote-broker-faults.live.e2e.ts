@@ -93,6 +93,10 @@ liveDescribe('broker-side fault injection', () => {
     expect(seeded, JSON.stringify(seeded)).toMatchObject({ status: 'scope-exited', exitCode: 0 })
 
     const generationBefore = m.manager.generationOf('vps-app')
+    // A previous run may have committed the destination: preflight refuses
+    // `target-exists` before streaming, which would also skip the trigger.
+    const sftp0 = await m.manager.openSftp('vps-xfer')
+    await sftp0.client.remove('/import/broker-killed.bin').catch(() => {})
     // onStage('staging') fires as the stream begins: the kill lands mid-flow.
     const killed = await runRemoteCopy(m.stack.registry, {
       manager: m.manager as never,
