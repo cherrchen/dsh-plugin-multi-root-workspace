@@ -28,7 +28,7 @@ Accepted：产品已批准的权限合同变更。修订 [ADR-0017](./ADR-0017-t
 
 3. **`resolve()` 的准入快照路径同步豁免再封顶。** 快照匹配分支的 `this.capped()` 收窄改为 `this.capped() && !override`——准入快照本身已按 override 计算，再封顶会把已解除的拒绝加回来。
 
-4. **范围恰好是「那一次调用」。** 标记存活在派发的 AsyncLocalStorage 动态域内：并发兄弟派发各有自己的存储；嵌套子派发（如 `run_code` 的子工具调用）由 `withToolCap` 新建存储，approved=false；派发结束后 ALS 上下文销毁，下一次派发重新计算。已运行进程、持久终端、面板/用户 PTY 不受影响（它们本就在派发外，按启动时的 deny 集运行）。OPS（`ops_*`）派发逻辑完全不动：OPS 工具自身不发起 `approveEscalation`，其派发存储不可能获得匹配 callId 的提权标记。
+4. **范围恰好是「那一次调用」。** 标记存活在派发的 AsyncLocalStorage 动态域内：并发兄弟派发各有自己的存储；嵌套子派发（如 `run_code` 的子工具调用）由 `withToolCap` 新建存储，approved=false；派发 `fn` 落定（同步返回、reject 或 promise settle）时 `withToolCap` 把本帧标记清回 `false`——ALS 会把 store 保留给派发内创建的异步延续，不显式撤销的话一个 fire-and-forget 任务在调用结束后仍持有授权，那已不是「那一次调用」；下一次派发重新计算。已运行进程、持久终端、面板/用户 PTY 不受影响（它们本就在派发外，按启动时的 deny 集运行）。OPS（`ops_*`）派发逻辑完全不动：OPS 工具自身不发起 `approveEscalation`，其派发存储不可能获得匹配 callId 的提权标记。
 
 5. **消费面不需要改动。** fs fence 的 `checkedTarget` 与进程围栏的 `prepare()` 只读 `deniedRoots`/`writableRoots`：override 后 deny 集为空时 `prepare()` 返回 `undefined` → 上游 ambient Full-access 直通；仅剩 `$DSH_HOME` 时 restricted runner 照常构建 [home] 拒绝集——这与「home 仍受保护」的合同一致，且在 Linux（Landlock 选 bwrap）/ Windows（broker runner）上 runner 不可构建时照旧失败关闭，绝不裸启动。
 

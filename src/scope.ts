@@ -832,7 +832,23 @@ export class MultiRootScopeService extends Service {
   }
 
   withToolCap<T>(name: string, fn: () => T, callId?: string): T {
-    return toolCapStore.run({ capped: this.capForTool(name), callId, approvedFullAccess: false }, fn)
+    const store = { capped: this.capForTool(name), callId, approvedFullAccess: false }
+    // The grant dies with its dispatch: AsyncLocalStorage keeps a captured
+    // store alive in continuations that outlive `fn`, so the flag must be
+    // revoked on settle — a fire-and-forget promise that keeps running after
+    // this call is no longer "that call".
+    const revoke = (): void => { store.approvedFullAccess = false }
+    try {
+      const result = toolCapStore.run(store, fn)
+      if (typeof (result as { readonly finally?: unknown } | null)?.finally === 'function') {
+        return (result as Promise<T>).finally(revoke) as T
+      }
+      revoke()
+      return result
+    } catch (error: unknown) {
+      revoke()
+      throw error
+    }
   }
 
   /** Execution and review use exactly the same parent-narrowing rule. */

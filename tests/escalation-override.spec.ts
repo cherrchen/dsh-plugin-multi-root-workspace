@@ -315,6 +315,22 @@ describe('the approved-escalation marker', () => {
     }, 'call-write-2')
   })
 
+  it('revokes the grant for async continuations that outlive the dispatch', async () => {
+    const { ctx, agent } = await mountScope()
+    ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
+    const escalated = policy('danger-full-access')
+    const denied: number[] = []
+    await dispatch(ctx, 'write', async () => {
+      await approvalService(ctx).request({ agent, callId: 'call-write', reason: ESCALATION_REASON })
+      expect(ctx.multiRootScope.resolve(escalated).deniedRoots).toEqual([])
+      // A task created inside the approved dispatch inherits its ALS store;
+      // once the dispatch settles the grant must no longer widen its scope.
+      setTimeout(() => denied.push(ctx.multiRootScope.resolve(escalated).deniedRoots.length), 10)
+    })
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(denied).toEqual([1])
+  })
+
   it('never produces the marker in a standing danger-full-access session', async () => {
     const { ctx, agent } = await mountScope({}, 'allowed-once', 'danger-full-access')
     ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [member(fixture.outside, 'read-only')])
