@@ -1,0 +1,146 @@
+{
+ "meta": {
+  "probe": "probe-remote-entry-isolation",
+  "runAt": "2026-11-09T15:27:56.981Z",
+  "platform": "linux/arm64",
+  "node": "v24.22.2",
+  "dshCli": "/opt/dsh-deploy/node_modules/@deepseek-ai/dsh/lib/bin.js",
+  "dshVersion": {
+   "ok": true,
+   "value": "0.2.2-rc.1"
+  },
+  "pluginVersion": {
+   "ok": true,
+   "value": "0.1.15"
+  }
+ },
+ "profile": "remote-exp",
+ "primary": "/home/dshhost/ws",
+ "credRoot": "/var/lib/dsh-ssh-broker",
+ "socket": "/run/dsh-ssh-broker/broker.sock",
+ "controls": {
+  "socket": {
+   "outcome": "hello",
+   "hello": {
+    "event": "hello",
+    "protocol": 2,
+    "brokerUid": 999,
+    "environmentIds": [
+     "probe-build",
+     "probe-xfer"
+    ],
+    "manifestDigest": "6647b6779b71921f1e3a554f03f220496b6b3dcebd3bcb89d8586ab25f2d081c"
+   }
+  },
+  "credRead": {
+   "ok": false,
+   "error": "EACCES: EACCES: permission denied, access '/var/lib/dsh-ssh-broker/.ssh/id_ed25519'"
+  },
+  "brokerConfigRead": {
+   "ok": false,
+   "error": "EACCES: EACCES: permission denied, access '/etc/dsh-ssh-broker/broker.json'"
+  },
+  "manifestRead": {
+   "ok": true,
+   "value": true
+  }
+ },
+ "presets": {
+  "defaultMode": "workspace-write",
+  "table": {
+   "read-only": {
+    "sandbox": "read-only",
+    "approval": "ask"
+   },
+   "workspace-write": {
+    "sandbox": "workspace-write",
+    "approval": "ask"
+   }
+  },
+  "hasFullAccess": false
+ },
+ "entries": {
+  "workspace-write": {
+   "resolvedMode": "workspace-write",
+   "bash": {
+    "exitCode": 0,
+    "denied": false,
+    "enforcement": "full",
+    "stdout": "CRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \nCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \nSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov  9 15:27 /run/dsh-ssh-broker/broker.sock \nCLIENTS:/usr/local/bin/node,\nSOCK:closed-no-data\n",
+    "stderr": ""
+   },
+   "pty": {
+    "label": "workspace-write",
+    "outcome": "done",
+    "exitCode": 0,
+    "output": "dshhost@5c3512c097b5:~/ws$ echo \"CRED_READ:$(cat '/var/lib/dsh-ssh-broker/.ssh/id_ed25519' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\recho PTY_DONE_MARKER; exit\r\nCRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \r\ndshhost@5c3512c097b5:~/ws$ echo \"CRED_LIST:$(ls '/var/lib/dsh-ssh-broker' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \r\ndshhost@5c3512c097b5:~/ws$ echo \"SOCK_STAT:$(ls -la '/run/dsh-ssh-broker/broker.sock' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov  9 15:27 /run/dsh-ssh-broker/broker.sock \r\ndshhost@5c3512c097b5:~/ws$ echo \"CLIENTS:$(command -v node socat python3 2>/dev/null | tr '\\n' ',')\"\r\n\rCLIENTS:/usr/local/bin/node,\r\ndshhost@5c3512c097b5:~/ws$ if command -v node >/dev/null 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"/run/dsh-ssh-broker/broker.sock\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s\rs.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=\r=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >/dev/null 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:/run/dsh-ssh-broker/broker.sock 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >/dev/null 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"/run/dsh-ssh-broker/broker.sock\");sys.stdout.write(\"SOCK:data:\"+s.re\recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndshhost@5c3512c097b5:~/ws$ echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+   },
+   "ptc": {
+    "status": "ok",
+    "value": "{\"keyDenied\":\"EACCES\",\"credListDenied\":\"EACCES\",\"sockStat\":true,\"sock\":\"closed-no-data\"}",
+    "sandbox": {
+     "mode": "workspace-write",
+     "denied": false,
+     "enforcement": "full"
+    }
+   }
+  },
+  "read-only": {
+   "resolvedMode": "read-only",
+   "bash": {
+    "exitCode": 0,
+    "denied": false,
+    "enforcement": "full",
+    "stdout": "CRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \nCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \nSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov  9 15:27 /run/dsh-ssh-broker/broker.sock \nCLIENTS:/usr/local/bin/node,\nSOCK:closed-no-data\n",
+    "stderr": ""
+   },
+   "pty": {
+    "label": "read-only",
+    "outcome": "done",
+    "exitCode": 0,
+    "output": "dshhost@5c3512c097b5:~/ws$ echo \"CRED_READ:$(cat '/var/lib/dsh-ssh-broker/.ssh/id_ed25519' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \r\ndshhost@5c3512c097b5:~/ws$ echo \"CRED_LIST:$(ls '/var/lib/dsh-ssh-broker' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \r\ndshhost@5c3512c097b5:~/ws$ echo \"SOCK_STAT:$(ls -la '/run/dsh-ssh-broker/broker.sock' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov  9 15:27 /run/dsh-ssh-broker/broker.sock \r\ndshhost@5c3512c097b5:~/ws$ echo \"CLIENTS:$(command -v node socat python3 2>/dev/null | tr '\\n' ',')\"\r\n\rCLIENTS:/usr/local/bin/node,\r\ndshhost@5c3512c097b5:~/ws$ if command -v node >/dev/null 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"/run/dsh-ssh-broker/broker.sock\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s\rs.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=\r=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >/dev/null 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:/run/dsh-ssh-broker/broker.sock 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >/dev/null 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"/run/dsh-ssh-broker/broker.sock\");sys.stdout.write(\"SOCK:data:\"+s.re\recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndshhost@5c3512c097b5:~/ws$ echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+   },
+   "ptc": {
+    "status": "ok",
+    "value": "{\"keyDenied\":\"EACCES\",\"credListDenied\":\"EACCES\",\"sockStat\":true,\"sock\":\"closed-no-data\"}",
+    "sandbox": {
+     "mode": "read-only",
+     "denied": false,
+     "enforcement": "full"
+    }
+   }
+  }
+ },
+ "escalation": {
+  "forgedMode": {
+   "resolved": "danger-full-access"
+  },
+  "fullAccessBash": {
+   "exitCode": 0,
+   "denied": false,
+   "enforcement": null,
+   "stdout": "CRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \nCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \nSOCK_STAT:srw-rw---- 1 _dsh_ssh dsh-ssh-clients 0 Nov  9 15:27 /run/dsh-ssh-broker/broker.\nCLIENTS:/usr/local/bin/node,\nSOCK:data:{\"event\":\"hello\",\"protocol\":2,\"brokerUid\":999,\"environmentIds\":[\"probe-build\",\"p\n",
+   "stderr": ""
+  },
+  "inSandboxTools": {
+   "exitCode": 0,
+   "stdout": "NONEVPRIVS:NoNewPrivs:\t1\nSUDO:bash: line 2: sudo: command not found \nSU:Password: su: Authentication failure \nSETUID_FILES:/usr/lib/openssh/ssh-keysign /usr/bin/umount /usr/bin/newgrp /usr/bin/mount /usr/bin/gpasswd \nUNSHARE:0 \n"
+  },
+  "otherProfiles": [
+   {
+    "profile": "remote-exp",
+    "mentionsFullAccess": false,
+    "patchPresent": true
+   }
+  ]
+ },
+ "tools": {
+  "mounted": true
+ },
+ "remoteStatus": {
+  "state": "ready"
+ },
+ "authority": {
+  "kind": "active"
+ }
+}

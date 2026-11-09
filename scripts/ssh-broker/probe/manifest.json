@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "configVersion": "probe-entry-isolation-1",
+  "environments": [
+    {
+      "environmentId": "probe-build",
+      "displayName": "probe build machine",
+      "platform": "linux",
+      "account": "dshbuild",
+      "hostKey": "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "namespace": "build",
+      "transport": "helper",
+      "helper": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "protocol": 1 },
+      "connection": {
+        "host": "probe-build",
+        "nodePath": "/opt/node-v24/bin/node",
+        "helperPath": "/opt/dsh-helper/helper.js",
+        "workspace": "/srv/dsh/work"
+      },
+      "exec": {
+        "shell": ["/bin/bash", "-c"],
+        "env": { "PATH": "/usr/local/bin:/usr/bin:/bin" },
+        "maxTimeoutMs": 60000,
+        "stdoutLimit": 8192,
+        "stderrLimit": 8192,
+        "terminateGraceMs": 10
+      },
+      "transfer": { "maxBytes": 1048576, "timeoutMs": 10000 },
+      "credentialIsolation": "attested"
+    },
+    {
+      "environmentId": "probe-xfer",
+      "displayName": "probe sftp device",
+      "platform": "linux",
+      "account": "dshxfer",
+      "hostKey": "SHA256:CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "namespace": "xfer",
+      "transport": "sftp",
+      "helper": null,
+      "connection": { "host": "probe-xfer" },
+      "transfer": { "maxBytes": 1048576, "timeoutMs": 10000 },
+      "credentialIsolation": "attested"
+    }
+  ],
+  "bindings": [
+    {
+      "primary": "/home/dshhost/ws",
+      "environmentId": "probe-build",
+      "rootId": "app",
+      "path": "/srv/dsh/work/app",
+      "actions": ["read", "write", "exec"],
+      "transfers": [
+        { "direction": "import", "peer": { "environmentId": "local", "rootId": "primary" } },
+        { "direction": "export", "peer": { "environmentId": "local", "rootId": "primary" } },
+        { "direction": "export", "peer": { "environmentId": "probe-xfer", "rootId": "out" } }
+      ]
+    },
+    {
+      "primary": "/home/dshhost/ws",
+      "environmentId": "probe-xfer",
+      "rootId": "out",
+      "path": "/srv/dsh/xfer/out",
+      "actions": ["read", "write"],
+      "transfers": [
+        { "direction": "import", "peer": { "environmentId": "probe-build", "rootId": "app" } }
+      ]
+    }
+  ]
+}
