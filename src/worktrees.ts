@@ -36,6 +36,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session'
 import { primaryKey, RootValidationError, samePath } from './roots.ts'
 import { inventoryWorktrees, type InventoryCandidate } from './worktrees/inventory.ts'
+import { commonCandidate, commonDiscoveryKey, type CommonCandidate } from './worktrees/common.ts'
 import { resolveRepo } from './worktrees/repository.ts'
 import { lstatEntry, MAX_POINTER_BYTES, readUtf8File, resolvePointerTarget } from './worktrees/fs-safe.ts'
 import type { WorktreeMapping } from './worktrees/sidecar.ts'
@@ -80,9 +81,12 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/** Either kind of suggestion the queue can hold. */
+type SuggestionCandidate = InventoryCandidate | CommonCandidate
+
 /** One queued prompt: the candidate, its owner expectation, and its stable id. */
 interface CandidateRecord {
-  readonly candidate: InventoryCandidate
+  readonly candidate: SuggestionCandidate
   readonly expected: PromptExpected
   readonly promptId: string
   readonly discoveryKey: string
@@ -105,7 +109,7 @@ interface WorkspaceState {
   activation: 'unactivated' | 'active' | 'lost'
   activationDetail?: string | undefined
   repo?: RepoSnapshot | undefined
-  /** Every proven inventory candidate, including filtered ones (watchers need them). */
+  /** Every proven B candidate, including filtered ones (watchers need them). */
   inventory: readonly InventoryCandidate[]
   candidates: Map<string, CandidateRecord>
   queue: CandidateRecord[]
@@ -279,7 +283,11 @@ export class MultiRootWorktrees extends Service {
         path: record.candidate.path,
         access: 'inherit',
         expected: record.expected,
-        track: { adminId: record.candidate.adminId, common: record.candidate.common },
+        // A roots carry no cleanup mapping: they are ordinary registrations
+        // with the ordinary Remove lifecycle (ADR-0039 §1 / §6).
+        ...(record.candidate.kind === 'worktree'
+          ? { track: { adminId: record.candidate.adminId, common: record.candidate.common } }
+          : {}),
       }
       try {
         await this.ctx.multiRootRegistry.addNew(workspace.primaryRoot, options)
@@ -525,8 +533,12 @@ export class MultiRootWorktrees extends Service {
     workspace.degraded = inventory.degraded
     const next = new Map<string, CandidateRecord>()
     const added: CandidateRecord[] = []
-    for (const candidate of inventory.candidates) {
-      const discoveryKey = discoveryKeyOf(candidate)
+    // A candidates share the queue and dedupe set with B; visibility is
+    // filtered per session mode when the queue is read.
+    const common = commonCandidate(repo)
+    const suggestions: SuggestionCandidate[] = common === undefined ? [...inventory.candidates] : [...inventory.candidates, common]
+    for (const candidate of suggestions) {
+      const discoveryKey = discoveryKeyFor(candidate)
       if (workspace.ignored.has(discoveryKey) || workspace.prompted.has(discoveryKey)) continue
       const probe = await this.probeAdd(workspace.primaryRoot, candidate.path)
       if (!probe.ok) {
@@ -681,7 +693,7 @@ export class MultiRootWorktrees extends Service {
     return {
       id: record.promptId,
       key: record.candidate.key,
-      kind: 'worktree',
+      kind: record.candidate.kind,
       path: record.candidate.path,
       primaryRoot: workspace.primaryRoot,
       access: 'inherit',
@@ -876,6 +888,11 @@ export function discoveryKeyOf(candidate: InventoryCandidate): string {
   return `worktree\u0000${candidate.path}`
 }
 
+/** The discovery key of either suggestion kind. */
+function discoveryKeyFor(candidate: SuggestionCandidate): string {
+  return candidate.kind === 'git-common' ? commonDiscoveryKey(candidate) : discoveryKeyOf(candidate)
+}
+
 /** Whether one path exists at all (a symlink counts as existing). */
 function pathExists(path: string): boolean {
   try {
@@ -922,7 +939,7 @@ function codeOf(error: unknown): string {
 }
 
 /** Build the owner expectation one prompt binds. */
-function expectedFor(workspace: WorkspaceState, candidate: InventoryCandidate): PromptExpected {
+function expectedFor(workspace: WorkspaceState, candidate: SuggestionCandidate): PromptExpected {
   const repo = workspace.repo
   if (repo === undefined) throw new Error('cannot build a prompt expectation without a primary snapshot')
   const primary: PromptPrimarySnapshot = {
@@ -936,7 +953,7 @@ function expectedFor(workspace: WorkspaceState, candidate: InventoryCandidate): 
     ...(repo.adminIdentity === undefined ? {} : { adminIdentity: repo.adminIdentity }),
   }
   const awaited: PromptCandidateSnapshot = {
-    kind: 'worktree',
+    kind: candidate.kind,
     canonical: candidate.path,
     common: candidate.common,
     adminId: candidate.adminId,

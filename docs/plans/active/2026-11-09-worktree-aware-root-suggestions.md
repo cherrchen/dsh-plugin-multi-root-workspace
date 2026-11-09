@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P7 完成；P8 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P8 完成；P9 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -162,7 +162,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 更新 B 的 requirements、双语 README、路线账本和实现文档；CHANGELOG 仅在实际发布时更新。完成 B 的验收和发布准备后进入 P8，是否拆成两次发布由路线账本记录。
 - 不修改上游；不新增 DSH 版本分支。
 
-### P8 A：common 候选与来源契约（未开始）
+### P8 A：common 候选与来源契约（完成）
 
 - 复用 P1/P2 的 linked primary 快照，按 ADR §1 识别 `git-common` 候选。绑定 canonical primary、admin、common 的稳定文件身份和 admin HEAD；应用 `probeAdd`、全局设置与 `workspace-write` 门禁。B 的 inventory 继续独立。
 - 验收：默认 pool 和外部 linked checkout 都能得到相同形态的 common 候选；普通主 checkout、仓库子目录、仅 effective cwd 切入 linked checkout、伪指针、不受支持布局、既有登记或根校验拒绝时不产生 A 提示。分离式 gitdir 反例验证候选永远不会变成 common 的父目录。
