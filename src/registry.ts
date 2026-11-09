@@ -288,6 +288,25 @@ export const multiRootDomainSpec = defineDomain({
   tables: { roots: domainTable<string, PersistedPrimaryRoot>(persistedPrimaryRoot) },
 })
 
+/** The advisory answer `probeAdd` gives discovery. */
+export type ProbeAddResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: string; readonly message: string }
+
+/** Parse the advisory answer a follower receives over IPC. */
+function parseProbeAddResult(value: unknown): ProbeAddResult {
+  if (typeof value !== 'object' || value === null || typeof (value as { ok?: unknown }).ok !== 'boolean') {
+    throw new Error('registry answered probeAdd with an unreadable result')
+  }
+  const candidate = value as { ok: boolean; code?: unknown; message?: unknown }
+  if (candidate.ok) return { ok: true }
+  return {
+    ok: false,
+    code: typeof candidate.code === 'string' ? candidate.code : 'registry-error',
+    message: typeof candidate.message === 'string' ? candidate.message : 'the registry refused the candidate',
+  }
+}
+
 /** Registration request for one new additional root. */
 export interface AddRootInput {
   /** The directory, as typed by the operator (a leading `~` is expanded). */
@@ -566,6 +585,54 @@ export class MultiRootRegistry extends Service {
    */
   list(primaryRoot: string): readonly RootStatus[] {
     return this.statusesOf(primaryKey(primaryRoot))
+  }
+
+  /**
+   * Advisory pre-check for one candidate directory: would `add()` accept it?
+   *
+   * This is discovery's filter, NOT a grant: it publishes nothing, writes
+   * nothing, and the authoritative check happens inside `addNew()` (or
+   * `add()`) on the serialized queue. A follower asks the owner, because the
+   * protected-boundary set and the stored records belong to the owner.
+   * @param primaryRoot - the session workspace root the candidate would join.
+   * @param path - the candidate directory.
+   * @returns whether the candidate passes every rule right now.
+   */
+  async probeAdd(primaryRoot: string, path: string): Promise<ProbeAddResult> {
+    await this.ensureAuthority()
+    if (!this.available) {
+      return { ok: false, code: 'registry-unavailable', message: this.unavailable ?? 'the root registry is unavailable' }
+    }
+    const key = primaryKey(primaryRoot)
+    const evaluate = (statuses: readonly RootStatus[]): ProbeAddResult => {
+      const protectedPaths = this.protectedPaths()
+      if (protectedPaths === undefined) {
+        return { ok: false, code: 'protected-boundary-unknown', message: 'the protected DSH directories cannot be resolved right now' }
+      }
+      if (statuses.length >= this.maxRoots) {
+        return { ok: false, code: 'root-limit-reached', message: `this workspace already has ${statuses.length} additional roots` }
+      }
+      try {
+        validateRootCandidate(path, {
+          primaryRoot: key,
+          protectedPaths,
+          existing: statuses.flatMap(status => {
+            const boundary = reservedRootBoundary(status)
+            return boundary === undefined ? [] : [boundary]
+          }),
+        })
+        return { ok: true }
+      } catch (error) {
+        if (error instanceof RootValidationError) return { ok: false, code: error.code, message: error.message }
+        throw error
+      }
+    }
+    if (this.client) return parseProbeAddResult(await this.remoteValue('probeAdd', [primaryRoot, path]))
+    return await this.serialize(key, async () => {
+      // A read-shaped probe never migrates the legacy key (that would write).
+      const found = this.lookupRecords(key)
+      return evaluate(found === undefined ? [] : this.classify(key, found.record))
+    })
   }
 
   /**
@@ -1478,6 +1545,18 @@ export class MultiRootRegistry extends Service {
     this.ctx.multiRootScope.setAdditionalRoots(key, roots)
   }
 
+  /** One request whose answer is NOT a snapshot; the caller validates it. */
+  private async remoteValue(method: Method, args: unknown[]): Promise<unknown> {
+    const client = this.client, generation = this.connectionGeneration
+    if (!client) throw new Error('registry authority is unavailable')
+    const value = await client.request(method, args)
+    if (generation !== this.connectionGeneration || client !== this.client) {
+      client.close()
+      throw new Error('stale registry connection or authority epoch')
+    }
+    return value
+  }
+
   private async remoteSnapshot(method: Method, args: unknown[]): Promise<Snapshot> {
     const client = this.client, generation = this.connectionGeneration
     if (!client) throw new Error('registry authority is unavailable')
@@ -1497,11 +1576,12 @@ export class MultiRootRegistry extends Service {
     return this.list(String(args[0]))
   }
 
-  private async dispatchShared(method: Method, values: unknown[]): Promise<Snapshot> {
+  private async dispatchShared(method: Method, values: unknown[]): Promise<unknown> {
     const args = parseArguments(method, values)
     const primary = String(args[0])
     if (!isAbsolute(primary)) throw new Error('registry primary must be absolute')
     if (method === 'snapshot' || method === 'admit') return this.captureSnapshot(primary)
+    if (method === 'probeAdd') return await this.probeAdd(primary, String(args[1]))
     // Only authenticated Host facades reach this dispatch; browsers still send
     // sessionId to their own Host, never a primary supplied by the browser.
     const ref = args[1] as RootRef

@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P0 文档完成；P1 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P2 完成；P3 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -85,7 +85,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - [x] 路线账本条目（P0 / P1 未开始）。
 - ADR 已满足 P1 的设计前置条件。
 
-### P1 元数据快照与解析器（未开始）
+### P1 元数据快照与解析器（完成）
 
 - 可信目录句柄逐段打开；中间目录/最终文件拒绝 symlink；`O_NOFOLLOW`/`O_NONBLOCK`；同 fd `fstat`；有界读取。
 - config 快照：include/core.worktree/worktreeConfig/relativeWorktrees/split/sparse/objectFormat/repositoryformatversion/core.bare；记录 precomposeUnicode/ignorecase。
@@ -95,7 +95,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 祖先链：两种形态、逐层 config/index、完整相对路径、阴性继续、无法排除 inactive。
 - 单测覆盖最终 index 换链、中间目录换链、FIFO、split/sparse 伪 index、NFC/NFD、祖先遮蔽、sha256/version 1。
 
-### P2 发现、激活、watcher 与 Host 设置（未开始）
+### P2 发现、激活、watcher 与 Host 设置（完成）
 
 - 在 `multi-root-worktrees` 行新增默认 `true` 的 `enabled`，复用附属根 Skills 的现代 volatile Config / 旧版 Settings namespace 适配；无 Settings UI 时读取 loader Config。Host 按 ADR §9 控制发现和专用清理，关闭时唤醒 waiter、清理资源并失效旧提示。P4 接通 owner 写入前门禁。
 - inventory、候选 key、`CommonState`/`WorkspaceState`、workspace 共享。

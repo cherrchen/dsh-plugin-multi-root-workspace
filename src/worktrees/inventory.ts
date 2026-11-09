@@ -1,0 +1,125 @@
+/**
+ * Controlled enumeration of the worktrees that share one common git dir.
+ *
+ * `git worktree list` is never run (ADR-0039 §3.1): the admin entries under
+ * `<common>/worktrees` are enumerated one by one, every pointer is read through
+ * the trusted-fd path, and every candidate must resolve through the SAME full
+ * activation snapshot the primary uses. A candidate that fails any check is
+ * simply absent — never a prompt, never a write.
+ *
+ * @module @dsh-electron/dsh-plugin-multi-root-workspace/worktrees/inventory
+ */
+
+import { readdirSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
+import {
+  lstatEntry,
+  MAX_POINTER_BYTES,
+  readUtf8File,
+  resolvePointerTarget,
+  SafeIoError,
+} from './fs-safe.ts'
+import { resolveRepo } from './repository.ts'
+import type { FileIdentity, RepoSnapshot } from './types.ts'
+
+/** One worktree the inventory proved. */
+export interface InventoryCandidate {
+  readonly kind: 'worktree'
+  /** `adminId + NUL + canonical root + NUL + canonical admin gitdir target`. */
+  readonly key: string
+  readonly path: string
+  readonly common: string
+  readonly adminId: string
+  readonly adminGitdir: string
+  /** The canonical path the admin `gitdir` pointer names (the candidate's `.git` file). */
+  readonly adminGitdirTarget: string
+  readonly adminHead: string
+  readonly rootIdentity: FileIdentity
+  readonly adminIdentity: FileIdentity
+  readonly repo: RepoSnapshot
+}
+
+/** The inventory verdict. */
+export interface InventoryResult {
+  readonly candidates: readonly InventoryCandidate[]
+  /** True when the admin cap was exceeded or an entry could not be listed. */
+  readonly degraded: boolean
+}
+
+/** A valid `worktrees/<id>` name. */
+function validAdminId(name: string): boolean {
+  return name !== '' && name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\\')
+}
+
+/** Read `<admin>/gitdir`, resolve it against the admin dir, and return its target. */
+function adminTarget(admin: string): string {
+  const pointer = join(admin, 'gitdir')
+  const entry = lstatEntry(pointer)
+  if (entry === undefined) throw new SafeIoError('missing', `${pointer} does not exist`)
+  if (entry.isSymbolicLink() || !entry.isFile()) throw new SafeIoError('not-file', `${pointer} is not a regular file`)
+  const text = readUtf8File(pointer, MAX_POINTER_BYTES)
+  const lines = text.split('\n').map(line => line.endsWith('\r') ? line.slice(0, -1) : line)
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  if (lines.length !== 1) throw new SafeIoError('invalid-encoding', `${pointer} is not a single line`)
+  return resolvePointerTarget(admin, lines[0]!)
+}
+
+/**
+ * Enumerate every worktree of one common git dir.
+ * @param common - canonical common git dir.
+ * @param platform - platform override for tests.
+ * @param options - `maxAdmins` caps the per-admin watcher/list work.
+ * @returns the candidates that passed the full snapshot, and whether the cap degraded enumeration.
+ */
+export function inventoryWorktrees(
+  common: string,
+  platform: NodeJS.Platform = process.platform,
+  options: { readonly maxAdmins?: number } = {},
+): InventoryResult {
+  const directory = join(common, 'worktrees')
+  const entry = lstatEntry(directory)
+  if (entry === undefined) return { candidates: [], degraded: false }
+  if (entry.isSymbolicLink() || !entry.isDirectory()) return { candidates: [], degraded: true }
+  let names: string[]
+  try {
+    names = readdirSync(directory, { encoding: 'utf8' })
+  } catch {
+    return { candidates: [], degraded: true }
+  }
+  names = names.filter(validAdminId).sort()
+  const limit = options.maxAdmins ?? Number.MAX_SAFE_INTEGER
+  const degraded = names.length > limit
+  const candidates: InventoryCandidate[] = []
+  for (const name of names.slice(0, limit)) {
+    const admin = join(directory, name)
+    try {
+      const adminEntry = lstatEntry(admin)
+      if (adminEntry === undefined || adminEntry.isSymbolicLink() || !adminEntry.isDirectory()) continue
+      const target = adminTarget(admin)
+      if (basename(target) !== '.git') continue
+      const root = dirname(target)
+      const result = resolveRepo(root, { platform })
+      if (!result.ok) continue
+      const repo = result.repo
+      if (repo.shape !== 'linked') continue
+      if (repo.adminId !== name) continue
+      if (repo.adminGitdir === undefined || repo.adminHead === undefined || repo.adminIdentity === undefined) continue
+      candidates.push({
+        kind: 'worktree',
+        key: `${name}\u0000${repo.canonical}\u0000${target}`,
+        path: repo.canonical,
+        common: repo.common,
+        adminId: name,
+        adminGitdir: repo.adminGitdir,
+        adminGitdirTarget: target,
+        adminHead: repo.adminHead,
+        rootIdentity: repo.rootIdentity,
+        adminIdentity: repo.adminIdentity,
+        repo,
+      })
+    } catch {
+      // An unreadable admin is skipped, never guessed at.
+    }
+  }
+  return { candidates, degraded }
+}

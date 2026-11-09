@@ -1,0 +1,741 @@
+/**
+ * `multi-root-worktrees`: worktree-aware additional-root suggestions (ADR-0039).
+ *
+ * The row is additive and compatibility-gated like every other widened-authority
+ * row. It owns the discovery state of each primary root (candidates, prompt
+ * queue, waiters, watchers), and it NEVER adds or removes a root on its own:
+ * a registration only happens when the operator confirms a prompt, through
+ * `addNew` on the Registry owner (phase P4).
+ *
+ * Activation is the full snapshot from `src/worktrees/repository.ts`:
+ *
+ * - `unactivated` — the first gate refused this workspace; no candidates, no
+ *   watchers, no sidecar writes and no background retry. Only an explicit
+ *   wait / reset / list may try again.
+ * - `active` — inventory and watchers are alive.
+ * - `lost` — the workspace WAS active and its snapshot no longer proves a
+ *   checkout; candidates are dropped, watchers released, waiters answered and
+ *   the workspace stays quiet until an explicit request re-detects it.
+ *
+ * @module @dsh-electron/dsh-plugin-multi-root-workspace/worktrees
+ */
+
+import { createHash, randomUUID } from 'node:crypto'
+import { lstatSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
+import { Context, Service } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
+import { configValue, volatileField } from './compat/skills.ts'
+import { installWorktreeSettings } from './compat/worktree-settings.ts'
+import { effectiveRootAccess, type WorkspaceMode } from './contract.ts'
+import type {} from './compat.ts'
+import type {} from './providers.ts'
+import type {} from './scope.ts'
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session'
+import { primaryKey } from './roots.ts'
+import { inventoryWorktrees, type InventoryCandidate } from './worktrees/inventory.ts'
+import { resolveRepo } from './worktrees/repository.ts'
+import { WorkspaceWatchSet, type WatchTargets } from './worktrees/watch.ts'
+import type {
+  PromptCandidateSnapshot,
+  PromptExpected,
+  PromptPrimarySnapshot,
+  RepoSnapshot,
+  WorktreePrompt,
+  WorktreePromptWaitResult,
+} from './worktrees/types.ts'
+
+/** Stable feature error codes; the panel localizes by code. */
+export class WorktreeError extends Error {
+  /**
+   * @param code - stable code (also the wire failure code).
+   * @param message - English fallback text.
+   */
+  constructor(readonly code: string, message: string) {
+    super(message)
+    this.name = 'WorktreeError'
+  }
+}
+
+/** The row's configuration. */
+export interface Config {
+  /** The live suggestion switch (also exposed through Settings). */
+  readonly enabled?: boolean
+  /** Long-poll budget; defaults to the ADR's 20s. */
+  readonly waitTimeoutMs?: number
+  /** Watcher debounce; defaults to the ADR's 150ms. */
+  readonly debounceMs?: number
+  /** Per-workspace admin watcher cap; defaults to the ADR's 128. */
+  readonly maxAdminWatchers?: number
+}
+
+/** The schemastery face of {@link Config}. */
+export const Config = z.object({
+  enabled: volatileField(z.boolean().default(true)),
+  waitTimeoutMs: z.number().default(20000),
+  debounceMs: z.number().default(150),
+  maxAdminWatchers: z.number().default(128),
+})
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    multiRootWorktrees: MultiRootWorktrees
+  }
+}
+
+/** One queued prompt: the candidate, its owner expectation, and its stable id. */
+interface CandidateRecord {
+  readonly candidate: InventoryCandidate
+  readonly expected: PromptExpected
+  readonly promptId: string
+  readonly discoveryKey: string
+}
+
+/** One long-poll waiter. */
+interface Waiter {
+  readonly sessionId: string
+  readonly seenPromptId: string | undefined
+  readonly seenViewRevision: string | undefined
+  readonly timer: ReturnType<typeof setTimeout>
+  readonly resolve: (result: WorktreePromptWaitResult) => void
+  readonly reject: (error: unknown) => void
+}
+
+/** Everything this Host knows about one primary root. */
+interface WorkspaceState {
+  readonly key: string
+  readonly primaryRoot: string
+  activation: 'unactivated' | 'active' | 'lost'
+  activationDetail?: string | undefined
+  repo?: RepoSnapshot | undefined
+  /** Every proven inventory candidate, including filtered ones (watchers need them). */
+  inventory: readonly InventoryCandidate[]
+  candidates: Map<string, CandidateRecord>
+  queue: CandidateRecord[]
+  /** Candidate keys that were already evaluated for this activation. */
+  evaluated: Set<string>
+  /** Discovery keys the operator handled or explicitly ignored. */
+  prompted: Set<string>
+  /** Discovery keys this workspace ignores (memory projection of the sidecar). */
+  ignored: Set<string>
+  waiters: Set<Waiter>
+  watchers?: WorkspaceWatchSet | undefined
+  degraded: boolean
+  revision: number
+  reconciling?: Promise<void> | undefined
+  pendingReconcile: boolean
+}
+
+/** The live session facts a prompt request is filtered by. */
+interface SessionView {
+  readonly sessionId: string
+  readonly primaryRoot: string
+  readonly mode: WorkspaceMode
+}
+
+/** The service: `ctx.multiRootWorktrees`. */
+export class MultiRootWorktrees extends Service {
+  static Config = Config
+  static provide = 'multiRootWorktrees'
+  static inject = ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry', 'multiRootScope']
+
+  private readonly config: Config
+  private readonly waitTimeoutMs: number
+  private readonly debounceMs: number
+  private readonly maxAdminWatchers: number
+  private readonly workspaces = new Map<string, WorkspaceState>()
+  private readonly ignored = new Map<string, Set<string>>()
+  private settingsRead: (() => unknown) | undefined
+  private revision = 0
+  private closing = false
+
+  /**
+   * @param ctx - the host context.
+   * @param config - the row config (switch, timeouts, watcher cap).
+   */
+  constructor(ctx: Context, config: Config = {}) {
+    super(ctx, 'multiRootWorktrees')
+    this.config = config
+    this.waitTimeoutMs = clamp(config.waitTimeoutMs, 10, 60000, 20000)
+    this.debounceMs = clamp(config.debounceMs, 0, 5000, 150)
+    this.maxAdminWatchers = clamp(config.maxAdminWatchers, 1, 1024, 128)
+  }
+
+  /** Whether the live switch allows any discovery or confirmation. */
+  get enabled(): boolean {
+    if (this.closing) return false
+    return configValue(this.settingsRead?.() ?? this.config.enabled) !== false
+  }
+
+  /** A monotonic generation for diagnostics and settings invalidation. */
+  get generation(): number { return this.revision }
+
+  /** Install the live settings seam and the registry change hook. */
+  protected async [Service.init](): Promise<void> {
+    const owner = this, ctx = this.ctx
+    await ctx.effect(async function* () {
+      const settings = installWorktreeSettings(ctx, () => owner.config.enabled, () => owner.invalidate())
+      owner.settingsRead = settings.read
+      yield settings.fiber.dispose
+      yield ctx.multiRootRegistry.onChange(key => { owner.registryChanged(key) })
+      yield () => { owner.disposeAll() }
+    }, 'multi-root worktrees: ordered owner')
+  }
+
+  /** Re-evaluate one session's prompt view once (no long poll). */
+  async prompt(sessionId: string): Promise<{ readonly prompt?: WorktreePrompt; readonly viewRevision: string }> {
+    this.requireEnabled()
+    const session = this.sessionView(sessionId)
+    const workspace = await this.ensureWorkspace(session.primaryRoot, true)
+    await this.revalidate(workspace)
+    const viewRevision = this.viewRevision(workspace, session.mode)
+    const head = this.visibleRecords(workspace, session.mode)[0]
+    return head === undefined
+      ? { viewRevision }
+      : { prompt: this.promptView(workspace, head, session.mode), viewRevision }
+  }
+
+  /**
+   * Long-poll one session's first visible prompt.
+   *
+   * The result is a discriminated union: `prompt` / `timeout` /
+   * `unactivated` / `lost` / `stale`. No branch carries a retry hint —
+   * `unactivated` and `lost` mean "stop", `timeout` means "mount again".
+   */
+  async wait(
+    sessionId: string,
+    seen: { readonly seenPromptId?: string | undefined; readonly seenViewRevision?: string | undefined } = {},
+    signal?: AbortSignal,
+  ): Promise<WorktreePromptWaitResult> {
+    this.requireEnabled()
+    signal?.throwIfAborted()
+    const session = this.sessionView(sessionId)
+    const workspace = await this.ensureWorkspace(session.primaryRoot, true)
+    // Every mount/timeout re-verifies the complete primary judgment before it
+    // trusts the cached activation (ADR-0039 §4.4).
+    await this.revalidate(workspace)
+    signal?.throwIfAborted()
+    const immediate = this.resultFor(workspace, session.mode, seen, false)
+    if (immediate !== undefined) return immediate
+    return await this.awaitPrompt(workspace, session, seen, signal)
+  }
+
+  /** Clear every prompt decision of one workspace and re-inventory it. */
+  async reset(sessionId: string): Promise<{ readonly cleared: boolean }> {
+    this.requireEnabled()
+    const session = this.sessionView(sessionId)
+    const workspace = await this.ensureWorkspace(session.primaryRoot, true)
+    workspace.candidates.clear()
+    workspace.queue = []
+    workspace.evaluated.clear()
+    workspace.prompted.clear()
+    this.ignored.delete(workspace.key)
+    workspace.revision++
+    if (workspace.activation === 'active') await this.refreshInventory(workspace)
+    this.wake(workspace)
+    return { cleared: workspace.activation === 'active' }
+  }
+
+  /**
+   * Confirm one prompt. Writes are enabled from phase P4 onward; until then
+   * the panel may render the preview but cannot submit it.
+   */
+  async resolve(
+    _sessionId: string,
+    _promptId: string,
+    _action: 'add' | 'dismiss',
+    _dontRemind?: boolean,
+  ): Promise<{ readonly viewRevision: string; readonly prompt?: WorktreePrompt }> {
+    throw new WorktreeError('worktree/not-enabled', 'worktree prompt confirmation is not enabled in this build')
+  }
+
+  /**
+   * The worktree badge facts for one primary root's registered roots. Empty
+   * while the feature is disabled or the workspace is not active.
+   * @param primaryRoot - the session workspace root.
+   */
+  describeRoots(primaryRoot: string): { readonly cleanupCount: number } | undefined {
+    void primaryRoot
+    void this.closing
+    return undefined
+  }
+
+  /** The active workspace state for diagnostics and tests. */
+  activationOf(primaryRoot: string): { readonly activation: string; readonly detail?: string; readonly candidates: number; readonly degraded: boolean; readonly watching: boolean } {
+    const workspace = this.workspaces.get(primaryKey(primaryRoot))
+    if (workspace === undefined) return { activation: 'unactivated', candidates: 0, degraded: false, watching: false }
+    return {
+      activation: workspace.activation,
+      ...(workspace.activationDetail === undefined ? {} : { detail: workspace.activationDetail }),
+      candidates: workspace.queue.length,
+      degraded: workspace.degraded,
+      watching: workspace.watchers !== undefined,
+    }
+  }
+
+  /** The session facts one request acts on, or the stable refusal. */
+  private sessionView(sessionId: string): SessionView {
+    const sessions = this.ctx.get('sessions')
+    const session = sessions?.get(sessionId as SessionId)
+    const cwd = session?.header?.cwd
+    if (session === undefined || typeof cwd !== 'string' || cwd === '') {
+      throw new WorktreeError('worktree/session-not-found', `session "${sessionId}" is not an active host session`)
+    }
+    const policy = this.ctx.get('sandboxPolicy')?.resolve({ session })
+    const mode: WorkspaceMode = policy?.mode === 'read-only' || policy?.mode === 'danger-full-access' ? policy.mode : 'workspace-write'
+    return { sessionId, primaryRoot: cwd, mode }
+  }
+
+  /** Throw when the live switch turned the feature off. */
+  private requireEnabled(): void {
+    if (!this.enabled) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled by this workspace configuration')
+  }
+
+  /** Load or create the workspace state. */
+  private async ensureWorkspace(primaryRoot: string, detect: boolean): Promise<WorkspaceState> {
+    const key = primaryKey(primaryRoot)
+    let workspace = this.workspaces.get(key)
+    if (workspace === undefined) {
+      workspace = {
+        key,
+        primaryRoot,
+        activation: 'unactivated',
+        inventory: [],
+        candidates: new Map(),
+        queue: [],
+        evaluated: new Set(),
+        prompted: new Set(),
+        ignored: this.ignored.get(key) ?? new Set(),
+        waiters: new Set(),
+        degraded: false,
+        revision: 0,
+        pendingReconcile: false,
+      }
+      this.workspaces.set(key, workspace)
+    }
+    // Only an explicit request may try a first activation again; background
+    // reconciliation never resurrects an `unactivated` or `lost` workspace.
+    if (detect && (workspace.activation === 'unactivated' || workspace.activation === 'lost')) await this.activate(workspace)
+    return workspace
+  }
+
+  /** Run the full primary snapshot and (re)build state. */
+  private async activate(workspace: WorkspaceState): Promise<void> {
+    const result = resolveRepo(workspace.primaryRoot)
+    if (!result.ok) {
+      this.transitionInactive(workspace, `${result.reason}: ${result.detail}`)
+      return
+    }
+    const previousCommon = workspace.repo?.common
+    const wasActive = workspace.activation === 'active'
+    workspace.activation = 'active'
+    workspace.repo = result.repo
+    delete workspace.activationDetail
+    if (!wasActive || previousCommon !== result.repo.common) {
+      // A new activation generation invalidates the transient queue and every
+      // prompt id; explicit ignore decisions stay.
+      workspace.queue = []
+      workspace.candidates.clear()
+      workspace.evaluated.clear()
+      workspace.revision++
+    }
+    workspace.ignored = new Set(this.ignored.get(workspace.key) ?? [])
+    await this.refreshInventory(workspace)
+    this.wake(workspace)
+  }
+
+  /**
+   * Re-run the complete primary snapshot for an already active workspace.
+   * A failure means the workspace WAS active and is now `lost`; the quiet
+   * state releases every watcher and waiter and never schedules a retry.
+   */
+  private async revalidate(workspace: WorkspaceState): Promise<void> {
+    if (workspace.activation !== 'active' || this.closing) return
+    const result = resolveRepo(workspace.primaryRoot)
+    if (!result.ok) {
+      this.transitionInactive(workspace, `${result.reason}: ${result.detail}`)
+      return
+    }
+    const commonChanged = workspace.repo?.common !== result.repo.common
+    workspace.repo = result.repo
+    if (commonChanged) {
+      workspace.queue = []
+      workspace.candidates.clear()
+      workspace.evaluated.clear()
+      workspace.revision++
+    }
+    await this.refreshInventory(workspace)
+  }
+
+  /** Move the workspace to its quiet state, release resources and wake waiters. */
+  private transitionInactive(workspace: WorkspaceState, detail: string): void {
+    // A workspace that was ever active stays `lost` across later failed
+    // re-detections: downgrading it to `unactivated` would lose the fact that
+    // the operator already saw prompts here.
+    workspace.activation = workspace.activation === 'unactivated' ? 'unactivated' : 'lost'
+    workspace.activationDetail = detail
+    workspace.repo = undefined
+    workspace.inventory = []
+    workspace.candidates.clear()
+    workspace.queue = []
+    workspace.evaluated.clear()
+    workspace.watchers?.close()
+    workspace.watchers = undefined
+    workspace.degraded = false
+    workspace.revision++
+    this.wake(workspace)
+  }
+
+  /** Re-run inventory, filters and watchers for an active workspace. */
+  private async refreshInventory(workspace: WorkspaceState): Promise<void> {
+    const repo = workspace.repo
+    if (repo === undefined || workspace.activation !== 'active' || this.closing || !this.enabled) return
+    const inventory = inventoryWorktrees(repo.common, process.platform, { maxAdmins: this.maxAdminWatchers })
+    workspace.inventory = inventory.candidates
+    workspace.degraded = inventory.degraded
+    const next = new Map<string, CandidateRecord>()
+    const added: CandidateRecord[] = []
+    for (const candidate of inventory.candidates) {
+      const discoveryKey = discoveryKeyOf(candidate)
+      if (workspace.ignored.has(discoveryKey) || workspace.prompted.has(discoveryKey)) continue
+      const probe = await this.probeAdd(workspace.primaryRoot, candidate.path)
+      if (!probe.ok) {
+        workspace.evaluated.add(candidate.key)
+        continue
+      }
+      const previous = workspace.candidates.get(candidate.key)
+      const record: CandidateRecord = previous ?? {
+        candidate,
+        expected: expectedFor(workspace, candidate),
+        promptId: randomUUID(),
+        discoveryKey,
+      }
+      next.set(candidate.key, record)
+      if (previous === undefined) added.push(record)
+    }
+    const changed = next.size !== workspace.queue.length || [...next.keys()].some(key => !workspace.candidates.has(key))
+    const ordered = workspace.queue.filter(record => next.has(record.candidate.key))
+      .map(record => next.get(record.candidate.key)!)
+    workspace.candidates = next
+    workspace.queue = [...ordered, ...added]
+    workspace.watchers?.close()
+    workspace.watchers = this.createWatchers(workspace)
+    if (changed) workspace.revision++
+    this.wake(workspace)
+  }
+
+  /** Ask the Registry whether a candidate could be registered at all (advisory). */
+  private async probeAdd(primaryRoot: string, path: string): Promise<{ readonly ok: boolean }> {
+    try {
+      return await this.ctx.multiRootRegistry.probeAdd(primaryRoot, path)
+    } catch {
+      // An unavailable registry can never grant; the candidate stays out.
+      return { ok: false }
+    }
+  }
+
+  /** Build (or rebuild) the watcher set for one active workspace. */
+  private createWatchers(workspace: WorkspaceState): WorkspaceWatchSet | undefined {
+    const repo = workspace.repo
+    if (repo === undefined) return undefined
+    const ancestors: string[] = []
+    let current = dirname(repo.canonical)
+    for (let depth = 0; depth < 64; depth++) {
+      try {
+        const entry = lstatOrUndefined(join(current, '.git'))
+        if (entry !== undefined) ancestors.push(current, join(current, '.git'))
+      } catch {
+        // Best effort only: an unreadable ancestor just means no event there.
+      }
+      const parent = dirname(current)
+      if (parent === current) break
+      current = parent
+    }
+    const parents: Array<{ directory: string; name: string }> = []
+    for (const candidate of workspace.inventory) {
+      parents.push({ directory: dirname(candidate.path), name: basename(candidate.path) })
+    }
+    for (const path of this.trackedRootPaths(workspace)) {
+      parents.push({ directory: dirname(path), name: basename(path) })
+    }
+    const targets: WatchTargets = {
+      common: repo.common,
+      worktrees: join(repo.common, 'worktrees'),
+      admins: workspace.inventory.map(candidate => candidate.adminGitdir),
+      primaryRoot: repo.canonical,
+      primaryGit: join(repo.canonical, '.git'),
+      ancestors,
+      parents,
+    }
+    return new WorkspaceWatchSet(targets, () => { this.reconcile(workspace) }, {
+      debounceMs: this.debounceMs,
+      maxAdmins: this.maxAdminWatchers,
+    })
+  }
+
+  /** B roots this workspace tracks for deletion watching (phase P4 fills this). */
+  private trackedRootPaths(workspace: WorkspaceState): readonly string[] {
+    void workspace
+    return []
+  }
+
+  /** Coalesce one reconcile per workspace. */
+  private reconcile(workspace: WorkspaceState): void {
+    if (this.closing || !this.enabled) return
+    if (workspace.activation !== 'active') return
+    workspace.pendingReconcile = true
+    if (workspace.reconciling !== undefined) return
+    workspace.reconciling = (async () => {
+      while (workspace.pendingReconcile && !this.closing && workspace.activation === 'active') {
+        workspace.pendingReconcile = false
+        try {
+          const result = resolveRepo(workspace.primaryRoot)
+          if (!result.ok) {
+            this.transitionInactive(workspace, `${result.reason}: ${result.detail}`)
+            return
+          }
+          workspace.repo = result.repo
+          await this.refreshInventory(workspace)
+        } catch (error) {
+          this.transitionInactive(workspace, `reconcile failed: ${error instanceof Error ? error.message : String(error)}`)
+          return
+        }
+      }
+    })().finally(() => { workspace.reconciling = undefined })
+  }
+
+  /** The records a session may see, in queue order. */
+  private visibleRecords(workspace: WorkspaceState, mode: WorkspaceMode): readonly CandidateRecord[] {
+    if (workspace.activation !== 'active') return []
+    return workspace.queue.filter(record => eligible(record.candidate.kind, mode))
+  }
+
+  /** Build the wire prompt view for one visible record. */
+  private promptView(workspace: WorkspaceState, record: CandidateRecord, mode: WorkspaceMode): WorktreePrompt {
+    const visible = this.visibleRecords(workspace, mode)
+    return {
+      id: record.promptId,
+      key: record.candidate.key,
+      kind: 'worktree',
+      path: record.candidate.path,
+      primaryRoot: workspace.primaryRoot,
+      access: 'inherit',
+      effectiveAccess: effectiveRootAccess('inherit', mode),
+      remaining: visible.length,
+      viewRevision: this.viewRevision(workspace, mode),
+    }
+  }
+
+  /** The stable digest of one session's visible view. */
+  private viewRevision(workspace: WorkspaceState, mode: WorkspaceMode): string {
+    const visible = this.visibleRecords(workspace, mode)
+    const head = visible[0]
+    const material = JSON.stringify({
+      activation: workspace.activation,
+      common: workspace.repo?.common ?? '',
+      head: head?.promptId ?? '',
+      effective: head === undefined ? '' : effectiveRootAccess('inherit', mode),
+      remaining: visible.length,
+      visible: visible.map(record => record.candidate.key),
+      prompted: [...workspace.prompted].sort(),
+      ignored: [...workspace.ignored].sort(),
+    })
+    return createHash('sha256').update(material).digest('hex').slice(0, 24)
+  }
+
+  /**
+   * The result a waiter should receive RIGHT NOW, or `undefined` to keep
+   * waiting. `mounting` distinguishes a first request (which returns an
+   * existing prompt) from a re-mount that already saw the same view.
+   */
+  private resultFor(
+    workspace: WorkspaceState,
+    mode: WorkspaceMode,
+    seen: { readonly seenPromptId?: string | undefined; readonly seenViewRevision?: string | undefined },
+    mounting: boolean,
+  ): WorktreePromptWaitResult | undefined {
+    const viewRevision = this.viewRevision(workspace, mode)
+    if (workspace.activation === 'unactivated') return { status: 'unactivated', viewRevision }
+    if (workspace.activation === 'lost') return { status: 'lost', viewRevision }
+    const visible = this.visibleRecords(workspace, mode)
+    if (seen.seenPromptId !== undefined && seen.seenPromptId !== '' && !visible.some(record => record.promptId === seen.seenPromptId)) {
+      return { status: 'stale', viewRevision, reason: 'prompt-gone' }
+    }
+    const head = visible[0]
+    if (head !== undefined) {
+      const same = seen.seenPromptId === head.promptId && seen.seenViewRevision === viewRevision
+      if (!same) return { status: 'prompt', prompt: this.promptView(workspace, head, mode), viewRevision }
+      return undefined
+    }
+    if (!mounting && seen.seenViewRevision !== undefined && seen.seenViewRevision !== viewRevision) {
+      // The view changed while waiting (a prompt was handled elsewhere); the
+      // client re-mounts immediately.
+      return { status: 'timeout', viewRevision }
+    }
+    return undefined
+  }
+
+  /** Register one waiter and resolve it on the next relevant change or timeout. */
+  private async awaitPrompt(
+    workspace: WorkspaceState,
+    session: SessionView,
+    seen: { readonly seenPromptId?: string | undefined; readonly seenViewRevision?: string | undefined },
+    signal?: AbortSignal,
+  ): Promise<WorktreePromptWaitResult> {
+    return await new Promise<WorktreePromptWaitResult>((resolve, reject) => {
+      // Declared before the closures only for typing; callbacks run after the
+      // assignment, never during it.
+      const waiter: Waiter = {
+        sessionId: session.sessionId,
+        seenPromptId: seen.seenPromptId,
+        seenViewRevision: seen.seenViewRevision,
+        timer: undefined as unknown as ReturnType<typeof setTimeout>,
+        resolve: () => {},
+        reject: () => {},
+      }
+      const finish = (result: WorktreePromptWaitResult) => {
+        clearTimeout(timer)
+        workspace.waiters.delete(waiter)
+        signal?.removeEventListener('abort', abort)
+        resolve(result)
+      }
+      const fail = (error: unknown) => {
+        clearTimeout(timer)
+        workspace.waiters.delete(waiter)
+        signal?.removeEventListener('abort', abort)
+        reject(error)
+      }
+      const abort = () => fail(signal?.reason ?? new WorktreeError('worktree/cancelled', 'worktree prompt wait was cancelled'))
+      const timer = setTimeout(() => {
+        finish({ status: 'timeout', viewRevision: this.viewRevision(workspace, session.mode) })
+      }, this.waitTimeoutMs)
+      timer.unref?.()
+      Object.assign(waiter, { timer, resolve: finish, reject: fail })
+      workspace.waiters.add(waiter)
+      if (signal !== undefined) {
+        if (signal.aborted) { abort(); return }
+        signal.addEventListener('abort', abort, { once: true })
+      }
+    })
+  }
+
+  /** Wake every waiter of one workspace and answer those whose view changed. */
+  private wake(workspace: WorkspaceState): void {
+    for (const waiter of [...workspace.waiters]) {
+      const session = this.trySessionView(waiter.sessionId)
+      if (session === undefined) {
+        workspace.waiters.delete(waiter)
+        clearTimeout(waiter.timer)
+        waiter.reject(new WorktreeError('worktree/session-not-found', `session "${waiter.sessionId}" is no longer active`))
+        continue
+      }
+      const result = this.resultFor(workspace, session.mode, waiter, false)
+      if (result === undefined) continue
+      workspace.waiters.delete(waiter)
+      clearTimeout(waiter.timer)
+      waiter.resolve(result)
+    }
+  }
+
+  /** A session view that answers `undefined` instead of throwing. */
+  private trySessionView(sessionId: string): SessionView | undefined {
+    try {
+      return this.sessionView(sessionId)
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Registry change hook: re-evaluate the affected active workspace only. */
+  private registryChanged(key: string): void {
+    const workspace = this.workspaces.get(key)
+    if (workspace !== undefined && workspace.activation === 'active') this.reconcile(workspace)
+  }
+
+  /** React to a live settings change. */
+  private invalidate(): void {
+    this.revision++
+    if (!this.enabled) {
+      this.disposeAll()
+      return
+    }
+    for (const workspace of this.workspaces.values()) {
+      if (workspace.activation === 'active') this.reconcile(workspace)
+    }
+  }
+
+  /** Close every workspace, rejecting waiters. Idempotent. */
+  private disposeAll(): void {
+    this.closing = true
+    for (const workspace of this.workspaces.values()) {
+      workspace.watchers?.close()
+      workspace.watchers = undefined
+      for (const waiter of workspace.waiters) {
+        clearTimeout(waiter.timer)
+        waiter.reject(new WorktreeError('worktree/not-enabled', 'worktree root suggestions were disabled'))
+      }
+      workspace.waiters.clear()
+    }
+    this.workspaces.clear()
+    this.ignored.clear()
+    this.closing = false
+  }
+}
+
+/** Read one `lstat` entry without throwing. */
+function lstatOrUndefined(path: string) {
+  try {
+    return lstatSync(path, { throwIfNoEntry: false })
+  } catch {
+    return undefined
+  }
+}
+
+/** Clamp one numeric config value. */
+function clamp(value: number | undefined, min: number, max: number, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback
+  return Math.min(max, Math.max(min, Math.trunc(value)))
+}
+
+/** Whether one candidate kind may be shown in one sandbox mode. */
+export function eligible(kind: 'worktree' | 'git-common', mode: WorkspaceMode): boolean {
+  if (mode === 'danger-full-access') return false
+  if (kind === 'git-common') return mode === 'workspace-write'
+  return true
+}
+
+/** The discovery key of one candidate; stable across admin moves for B. */
+export function discoveryKeyOf(candidate: InventoryCandidate): string {
+  return `worktree\u0000${candidate.path}`
+}
+
+/** Build the owner expectation one prompt binds. */
+function expectedFor(workspace: WorkspaceState, candidate: InventoryCandidate): PromptExpected {
+  const repo = workspace.repo
+  if (repo === undefined) throw new Error('cannot build a prompt expectation without a primary snapshot')
+  const primary: PromptPrimarySnapshot = {
+    shape: repo.shape,
+    canonical: repo.canonical,
+    common: repo.common,
+    ...(repo.adminId === undefined ? {} : { adminId: repo.adminId }),
+    ...(repo.adminGitdir === undefined ? {} : { adminGitdir: repo.adminGitdir }),
+    ...(repo.adminHead === undefined ? {} : { adminHead: repo.adminHead }),
+    rootIdentity: repo.rootIdentity,
+    ...(repo.adminIdentity === undefined ? {} : { adminIdentity: repo.adminIdentity }),
+  }
+  const awaited: PromptCandidateSnapshot = {
+    kind: 'worktree',
+    canonical: candidate.path,
+    common: candidate.common,
+    adminId: candidate.adminId,
+    adminGitdir: candidate.adminGitdir,
+    adminHead: candidate.adminHead,
+    rootIdentity: candidate.rootIdentity,
+    adminIdentity: candidate.adminIdentity,
+  }
+  return { primaryKey: workspace.key, primaryRoot: workspace.primaryRoot, primary, candidate: awaited, promptKey: candidate.key }
+}
+
+export default MultiRootWorktrees

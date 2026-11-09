@@ -105,6 +105,20 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/skills'
       config:
         enabled: true
+    # Worktree-aware suggestions (ADR-0039). Additive and compat-gated: this
+    # row never registers a root on its own, and it stays inert when disabled.
+    - id: multi-root-worktrees
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/worktrees'
+      config:
+        # The global switch the plugin-detail card also edits (default on).
+        enabled: true
+        # Long-poll budget for worktreePromptWait (bounded to 20s by default).
+        waitTimeoutMs: 20000
+        # fs.watch debounce for the shared inventory watchers.
+        debounceMs: 150
+        # Per-workspace admin/parent watcher cap; beyond it the workspace is
+        # marked degraded and only timeout reconciliation remains.
+        maxAdminWatchers: 128
     - id: multi-root-instructions
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/instructions'
       config:

@@ -95,3 +95,68 @@ export interface IndexEntry {
   readonly pathBytes: Buffer
   readonly mode: number
 }
+/** The two things a worktree prompt can offer (ADR-0039 §1). */
+export type WorktreePromptKind = 'worktree' | 'git-common'
+
+/** The effective authority the panel shows for a prompt. */
+export type WorktreeEffectiveAccess = 'read-only' | 'read-write' | 'full-access' | 'unavailable'
+
+/** One prompt as the panel renders it (wire shape lives in the contract module). */
+export interface WorktreePrompt {
+  readonly id: string
+  /** Discovery key: `CandidateKey` for B, `git-common\0<common>` for A. */
+  readonly key: string
+  readonly kind: WorktreePromptKind
+  /** The candidate checkout root (B) or the common git dir (A). */
+  readonly path: string
+  readonly primaryRoot: string
+  /** The persistence policy the registration would carry. */
+  readonly access: 'inherit'
+  /** `effectiveRootAccess('inherit', session mode)`. */
+  readonly effectiveAccess: WorktreeEffectiveAccess
+  /** How many candidates this session can still see, including this one. */
+  readonly remaining: number
+  /** Digest of this session's visible view. */
+  readonly viewRevision: string
+}
+
+/** The discriminated long-poll answer (ADR-0039 §7). */
+export type WorktreePromptWaitResult =
+  | { readonly status: 'prompt'; readonly prompt: WorktreePrompt; readonly viewRevision: string }
+  | { readonly status: 'timeout'; readonly viewRevision: string }
+  | { readonly status: 'unactivated'; readonly viewRevision: string }
+  | { readonly status: 'lost'; readonly viewRevision: string }
+  | { readonly status: 'stale'; readonly viewRevision: string; readonly reason: string }
+
+/** The primary half of an `addNew` expectation. */
+export interface PromptPrimarySnapshot {
+  readonly shape: CheckoutShape
+  readonly canonical: string
+  readonly common: string
+  readonly adminId?: string
+  readonly adminGitdir?: string
+  readonly adminHead?: string
+  readonly rootIdentity: FileIdentity
+  readonly adminIdentity?: FileIdentity
+}
+
+/** The candidate half of an `addNew` expectation. */
+export interface PromptCandidateSnapshot {
+  readonly kind: WorktreePromptKind
+  readonly canonical: string
+  readonly common: string
+  readonly adminId?: string
+  readonly adminGitdir?: string
+  readonly adminHead?: string
+  readonly rootIdentity: FileIdentity
+  readonly adminIdentity?: FileIdentity
+}
+
+/** The exact snapshot an owner re-verifies before writing a prompted root. */
+export interface PromptExpected {
+  readonly primaryKey: string
+  readonly primaryRoot: string
+  readonly primary: PromptPrimarySnapshot
+  readonly candidate: PromptCandidateSnapshot
+  readonly promptKey: string
+}

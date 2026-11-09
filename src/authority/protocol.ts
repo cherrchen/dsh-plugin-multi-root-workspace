@@ -6,7 +6,7 @@ import { connectNative, listenNative, type Listener } from './native.ts'
 
 const MAX_FRAME = 1024 * 1024, MAX_PENDING = 32
 const helloSchema = z.object({ protocol: z.literal(1), store: z.string(), epoch: z.string(), limit: z.number().int() }).strict()
-const methods = ['hello', 'snapshot', 'admit', 'add', 'removeAt', 'setAccess', 'setAlias', 'setSkillsEnabled', 'setAliasId', 'move', 'recheck'] as const
+const methods = ['hello', 'snapshot', 'admit', 'probeAdd', 'add', 'removeAt', 'setAccess', 'setAlias', 'setSkillsEnabled', 'setAliasId', 'move', 'recheck'] as const
 export type Method = typeof methods[number]
 const requestSchema = z.object({ protocol: z.literal(1), store: z.string(), id: z.string().uuid(), epoch: z.string().nullable(), method: z.enum(methods), args: z.array(z.unknown()).max(4) }).strict()
 const rootSchema = z.object({
@@ -143,7 +143,7 @@ export class AuthorityServer {
       if (this.inFlight >= MAX_PENDING) {
         send(channel, { type: 'error', id: request.id, code: 'authority-busy', message: 'registry is busy; request was not submitted' }); return
       }
-      const mutation = request.method !== 'snapshot' && request.method !== 'admit'
+      const mutation = request.method !== 'snapshot' && request.method !== 'admit' && request.method !== 'probeAdd'
       if (mutation && !seen.has(request.id) && seen.size >= 2048) { channel.destroy(); return }
       const fingerprint = createHash('sha256').update(JSON.stringify([request.method, request.args])).digest('hex')
       const entry = seen.get(request.id)
@@ -187,6 +187,7 @@ const ref = z.discriminatedUnion('kind', [
 const primary = z.string().min(1)
 const argumentSchemas = {
   hello: z.tuple([z.number().int()]), snapshot: z.tuple([primary]), admit: z.tuple([primary]), recheck: z.tuple([primary]),
+  probeAdd: z.tuple([primary, z.string().min(1)]),
   add: z.tuple([primary, z.object({ path: z.string(), alias: z.string().optional(), access: z.enum(['inherit', 'read-only', 'read-write']).optional() }).strict()]),
   removeAt: z.tuple([primary, ref]), setAccess: z.tuple([primary, ref, z.enum(['inherit', 'read-only', 'read-write'])]),
   setAlias: z.tuple([primary, ref, z.string().nullable()]), setSkillsEnabled: z.tuple([primary, ref, z.boolean()]),
