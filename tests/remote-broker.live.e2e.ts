@@ -28,6 +28,7 @@ const LIVE = process.env.DSH_MULTI_ROOT_BROKER_LIVE
 const liveDescribe = describe.skipIf(LIVE === undefined || process.platform === 'win32')
 const live = LIVE === undefined ? {} as never : JSON.parse(readFileSync(LIVE, 'utf8')) as {
   socketPath: string; brokerUid: number; credentialRoot: string; manifestPath: string
+  fullAccessDisabled?: boolean
   confinementProbe: { verified: boolean; evidence?: string }
   primary: string; outsideSentinel: string; workspaceApp: string; workspaceLib: string
 }
@@ -36,6 +37,7 @@ const brokerConfig: BrokerConfig = LIVE === undefined ? {} as never : {
   socketPath: live.socketPath,
   brokerUid: live.brokerUid,
   credentialRoot: live.credentialRoot,
+  fullAccessDisabled: live.fullAccessDisabled,
   confinementProbe: live.confinementProbe,
 }
 const manifestOf = () => loadDeploymentManifest(live.manifestPath).manifest
@@ -145,6 +147,12 @@ liveDescribe('the credential custody boundary on two real accounts', () => {
     const attestation = await attestBroker({ ...brokerConfig, confinementProbe: undefined }, manifestOf())
     expect(attestation).toMatchObject({ status: 'unavailable', code: 'confinement-unproven' })
   })
+
+  it('refuses a changed manifest even when the environment IDs match', async () => {
+    const manifest = manifestOf()
+    await expect(attestBroker(brokerConfig, { ...manifest, configVersion: manifest.configVersion + '-stale' }))
+      .resolves.toMatchObject({ status: 'unavailable', code: 'manifest-mismatch' })
+  })
 })
 
 liveDescribe('remote_bash and remote_copy through the broker', () => {
@@ -160,6 +168,9 @@ liveDescribe('remote_bash and remote_copy through the broker', () => {
     const sibling = await run(m, { command: `echo x > ${live.workspaceLib}/escape.txt` })
     expect(sibling.status === 'scope-exited' || sibling.status === 'exited' ? sibling.exitCode !== 0 : false).toBe(true)
     await expect(run(m, { command: 'exit 7' })).resolves.toMatchObject({ status: 'scope-exited', exitCode: 7 })
+    await expect(run(m, { command: 'head -c 98304 /dev/zero | tr "\\000" x' })).resolves.toMatchObject({
+      status: 'scope-exited', exitCode: 0, truncated: { stdout: true, stderr: false },
+    })
     const timeout = await run(m, { command: 'sleep 30', timeoutMs: 3_000 })
     expect(['exited', 'scope-exited']).toContain(timeout.status)
     const ro = sessionOf(m.stack, 'read-only')

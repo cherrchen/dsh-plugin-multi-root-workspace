@@ -14,7 +14,7 @@ import type { SftpClient } from '../../src/remote/sftp.ts'
 import { SftpStatusError } from '../../src/remote/sftp.ts'
 import type { DeploymentManifest, RemoteEnvironment } from '../../src/remote/manifest.ts'
 import type { RemoteExecutionBackend, RemoteExecDeployment, RemoteProcessHandle } from '../../src/remote/exec.ts'
-import type { RemoteToolsManager } from '../../src/remote/tools.ts'
+import type { RemoteToolsManager } from '../../src/remote/tools-registration.ts'
 import type { SshEnvironment, SftpEnvironment } from '../../src/remote/ssh-environment.ts'
 
 const P_WRITE = 0x02, P_CREAT = 0x08, P_EXCL = 0x20

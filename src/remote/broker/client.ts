@@ -17,8 +17,9 @@ import type { SshEnvironment, SftpEnvironment } from '../ssh-environment.ts'
 import type { SftpClient, SftpVersion } from '../sftp.ts'
 import { SftpConnectionLost, SftpStatusError } from '../sftp.ts'
 import { RemoteConnectionLost, type RemoteProcessHandle } from '../exec.ts'
-import type { RemoteToolsManager } from '../tools.ts'
+import type { RemoteToolsManager } from '../tools-registration.ts'
 import {
+  BROKER_PROTOCOL,
   BrokerError,
   decodeData,
   encodeData,
@@ -26,6 +27,7 @@ import {
   parseBrokerReply,
   readBrokerLines,
   writeBrokerLine,
+  type BrokerHello,
   type BrokerMethod,
 } from './protocol.ts'
 
@@ -56,7 +58,7 @@ export class BrokerConnection {
   private readonly orphans = new Map<number, OrphanEvent[]>()
   private readonly closeListeners = new Set<() => void>()
   private closed = false
-  hello: { readonly protocol: 1; readonly brokerUid: number; readonly environmentIds: readonly string[] } | undefined
+  hello: BrokerHello | undefined
 
   private constructor(
     private readonly channel: Channel,
@@ -87,9 +89,9 @@ export class BrokerConnection {
         if (typeof value === 'object' && value !== null && 'event' in value) {
           const event = parseBrokerEvent(value)
           if (event.event === 'hello') {
-            if (event.protocol !== 1) throw new BrokerError('protocol-mismatch', 'the broker speaks a different protocol')
             if (event.brokerUid !== expectedBrokerUid) throw new BrokerError('broker-uid-mismatch', 'the broker runs under an unexpected uid')
-            connection.hello = { protocol: 1, brokerUid: event.brokerUid, environmentIds: [...event.environmentIds] }
+            const { event: _, ...greeting } = event
+            connection.hello = greeting
             clearTimeout(timer)
             hello.resolve()
             return
@@ -106,6 +108,7 @@ export class BrokerConnection {
         else request.reject(new BrokerError(reply.code, reply.message))
       } catch (error) {
         connection.lose(error instanceof Error ? error : new Error(String(error)))
+        hello.reject(error)
         channel.destroy()
       }
     }, error => { connection.lose(error); channel.destroy() })
@@ -134,7 +137,7 @@ export class BrokerConnection {
         reject(new BrokerError('broker-timeout', `the broker did not answer ${method}`))
       }, timeoutMs)
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timer })
-      if (!writeBrokerLine(this.channel, { protocol: 1, id, method, params })) {
+      if (!writeBrokerLine(this.channel, { protocol: BROKER_PROTOCOL, id, method, params })) {
         clearTimeout(timer); this.pending.delete(id)
         reject(new BrokerError('broker-disconnected', 'the broker connection could not queue the request'))
       }
@@ -340,13 +343,8 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
   }
 
   async disposeAll(): Promise<void> {
-    for (const environmentId of [...this.environments.keys(), ...this.sftp.keys()]) {
-      await this.connection.request('dispose', { environmentId }).catch(() => {})
-    }
-    this.environments.clear()
-    this.sftp.clear()
-    this.generations.clear()
-    this.sftpGenerations.clear()
+    // Channel closure rejects new requests immediately. The broker releases
+    // the environments and terminates any remaining processes on close.
     this.connection.close()
   }
 

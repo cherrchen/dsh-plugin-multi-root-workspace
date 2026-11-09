@@ -31,11 +31,12 @@ const liveDescribe = describe.skipIf(LIVE === undefined || process.platform === 
 const live = LIVE === undefined ? {} as never : JSON.parse(readFileSync(LIVE, 'utf8')) as {
   manifestPath: string
   socketPath: string; brokerUid: number; credentialRoot: string
+  fullAccessDisabled?: boolean
   confinementProbe: { verified: boolean; log: string }
   primary: string
   triggerPath?: string
 }
-const brokerConfig = { socketPath: live.socketPath, brokerUid: live.brokerUid, credentialRoot: live.credentialRoot, confinementProbe: live.confinementProbe }
+const brokerConfig = { socketPath: live.socketPath, brokerUid: live.brokerUid, credentialRoot: live.credentialRoot, fullAccessDisabled: live.fullAccessDisabled, confinementProbe: live.confinementProbe }
 
 const TRIGGER = live.triggerPath ?? '/tmp/dsh-fault-trigger'
 const fire = (mode: 'broker-ssh' | 'broker-daemon') => writeFileSync(TRIGGER, mode)

@@ -20,7 +20,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
 import { REMOTE_CONTEXT_NAME } from '../src/remote/capabilities.ts'
 import { loadDeploymentManifest } from '../src/remote/manifest.ts'
-import { apply as applyRemoteTools } from '../src/remote/tools.ts'
+import { apply as applyRemoteTools, inject } from '../src/remote/tools.ts'
 import { attestBroker, type BrokerConfig } from '../src/remote/broker/attest.ts'
 import * as CommandModule from '../src/command.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
@@ -30,6 +30,7 @@ const LIVE = process.env.DSH_MULTI_ROOT_BROKER_LIVE
 const liveDescribe = describe.skipIf(LIVE === undefined || process.platform === 'win32')
 const live = LIVE === undefined ? {} as never : JSON.parse(readFileSync(LIVE, 'utf8')) as {
   socketPath: string; brokerUid: number; credentialRoot: string; manifestPath: string
+  fullAccessDisabled?: boolean
   confinementProbe: { verified: boolean; evidence?: string }
   primary: string; outsideSentinel: string; workspaceApp: string; workspaceLib: string
 }
@@ -37,6 +38,7 @@ const brokerConfig: BrokerConfig = LIVE === undefined ? {} as never : {
   socketPath: live.socketPath,
   brokerUid: live.brokerUid,
   credentialRoot: live.credentialRoot,
+  fullAccessDisabled: live.fullAccessDisabled,
   confinementProbe: live.confinementProbe,
 }
 
@@ -82,12 +84,13 @@ async function mount(withPanel = false) {
   stacks.push(stack)
   await stack.ctx.plugin(SystemPrompt)
   await stack.ctx.plugin(Tools)
+  stack.ctx.provide('permissionPresets', { names: [] } as never)
   await installToolExecutor(stack.ctx)
   // The production wiring: attest first, then mount both tools, the endpoint
   // verifier and the capability projection — nothing in-process holds a key.
   await stack.ctx.plugin({
     name: 'g5-live-remote-tools',
-    inject: ['multiRootRegistry', 'multiRootCompat', 'multiRootProviders', 'tools'],
+    inject,
     apply: (ctx: Context) => applyRemoteTools(ctx, { broker: { config: brokerConfig } }),
   })
   let panelHandler: PanelHandler | undefined

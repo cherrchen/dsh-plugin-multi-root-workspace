@@ -4,12 +4,12 @@
  * fallback to native bash or to a local path.
  */
 import { join } from 'node:path'
-import { readFileSync } from 'node:fs'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderRemoteCapabilities } from '../src/remote/capabilities.ts'
-import { apply as applyRemoteTools } from '../src/remote/tools.ts'
-import { mountRegistryStack } from './support/registry-stack.ts'
+import { apply as applyRemoteTools, inject } from '../src/remote/tools.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
+import { executeTool } from './support/tool-executor.ts'
 import { mountRemoteTools, registerRemote, type RemoteToolsWorld } from './support/remote-tools.ts'
 import type { DeploymentManifest } from '../src/remote/manifest.ts'
 
@@ -59,27 +59,71 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
     expect(again, JSON.stringify(again)).toMatchObject({ status: 'scope-exited', exitCode: 0 })
   })
 
+  it('renders operation results to the model through the host pipeline', async () => {
+    world = await mountRemoteTools(fixture)
+    for (const [name, args] of [
+      ['remote_copy', localToLocal],
+      ['remote_bash', { environmentId: 'build', rootId: 'app', command: 'true', timeoutMs: 10 }],
+    ] as const) {
+      const outcome = await executeTool(world.ctx, {
+        name, args, agent: world.agent, callId: name, signal: new AbortController().signal,
+      }) as { value: unknown; content: unknown }
+      expect(outcome.value).toHaveProperty('status')
+      expect(outcome.content).toEqual([{ type: 'text', text: JSON.stringify(outcome.value) }])
+    }
+  })
+
   it('is also the endpoint-registration path: without the row nothing verifies a session endpoint', async () => {
     world = await mountRemoteTools(fixture, { withTools: false })
     await expect(registerRemote(world, 'build', 'app')).rejects.toThrow(/no remote endpoint verifier is configured/)
   })
 
-  it('refuses to mount while the remote control plane is not ready', async () => {
-    const stack = await mountRegistryStack(join(fixture.base, 'store'), {})
+  it('stops new calls and drains staging before the tools row is removed', async () => {
+    world = await mountRemoteTools(fixture)
+    const mounted = world
+    await registerRemote(mounted, 'build', 'app')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'copy in flight')
+    const remote = mounted.remotes.get('build')!
+    const write = remote.sftp.write
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    vi.spyOn(remote.sftp, 'write').mockImplementation(async (...args) => {
+      await write(...args)
+      entered.resolve()
+      await release.promise
+    })
+    const copying = mounted.call('remote_copy', {
+      from: { environmentId: 'local', rootId: 'primary', relativePath: 'source.txt' },
+      to: { environmentId: 'build', rootId: 'app', relativePath: 'rollback.txt' },
+    })
+    await Promise.race([entered.promise, copying.then(result => { throw new Error(JSON.stringify(result)) })])
+    const unloaded = mounted.unmountTools()
     try {
-      const failure = await stack.ctx.plugin({ name: 'g5-remote-tools-disabled', inject: ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry'], apply: (ctx: typeof stack.ctx) => applyRemoteTools(ctx, { enabled: true }) })
-        .then(() => undefined, (error: unknown) => error instanceof Error ? error.message : String(error))
-      expect(failure).toMatch(/remote control plane is not ready/)
+      await expect.poll(() => mounted.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
     } finally {
-      await stack.dispose()
+      release.resolve()
     }
+    await expect(copying).resolves.toMatchObject({ code: 'cancelled', staging: 'removed' })
+    await unloaded
+    expect(remote.read('/srv/root/rollback.txt')).toBeUndefined()
+    expect(remote.sftpCalls.some(call => call.startsWith('hardlink '))).toBe(false)
+    await expect(registerRemote(mounted, 'build', 'app')).rejects.toThrow(/no remote endpoint verifier/)
+    expect(await mounted.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
+  })
+
+  it('refuses a declarative enabled switch without broker custody', async () => {
+    world = await mountRemoteTools(fixture, { withTools: false })
+    const directConfig = { enabled: true, broker: undefined }
+    await world.ctx.plugin({ name: 'g5-direct-refused', inject, apply: ctx => applyRemoteTools(ctx, directConfig) })
+    expect(await world.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
+    await expect(registerRemote(world, 'build', 'app')).rejects.toThrow(/no remote endpoint verifier/)
   })
 
   it('does not mount when the credential broker fails attestation', async () => {
     world = await mountRemoteTools(fixture, { withTools: false })
     const uid = process.getuid?.() ?? -1
     await world.ctx.plugin({
-      name: 'g5-broker-gate', inject: ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry', 'tools'],
+      name: 'g5-broker-gate', inject,
       apply: (ctx: typeof world.ctx) => applyRemoteTools(ctx, {
         broker: { config: { socketPath: '/nonexistent/broker.sock', brokerUid: uid, credentialRoot: '/nonexistent', confinementProbe: { verified: true } } },
       }),
@@ -89,9 +133,9 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
     expect(missing.isError).toBe(true)
   })
 
-  it('stays disabled unless the switch is explicitly true', async () => {
+  it('stays disabled without an explicit broker configuration', async () => {
     world = await mountRemoteTools(fixture, { withTools: false })
-    await world.ctx.plugin({ name: 'g5-remote-tools-off', inject: ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry', 'tools'], apply: (ctx: typeof world.ctx) => applyRemoteTools(ctx, {}) })
+    await world.ctx.plugin({ name: 'g5-remote-tools-off', inject, apply: (ctx: typeof world.ctx) => applyRemoteTools(ctx, {}) })
     // The switch is off: the row loads and registers nothing.
     const missing = await world.call('remote_copy', localToLocal) as Failure
     expect(missing.isError).toBe(true)

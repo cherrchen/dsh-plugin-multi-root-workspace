@@ -112,6 +112,7 @@ export async function runRemoteCommand(
   signal: AbortSignal,
 ): Promise<RemoteCommandResult> {
   const base: Base = { environmentId: request.environmentId, rootId: request.rootId }
+  if (signal.aborted) return notStarted(base, 'cancelled')
   const endpoint: RemoteEndpointRef = { environmentId: request.environmentId, rootId: request.rootId }
   const admission = () => ({
     session: request.session, toolName, purpose: 'exec' as const, endpoints: [endpoint],
@@ -159,6 +160,7 @@ export async function runRemoteCommand(
   try {
     launch = await registry.withRemoteOperation(admission(), operation => {
       const denied = (code: string) => ({ result: notStarted({ ...base, operationId: operation.identity.operationId }, code) })
+      if (signal.aborted) return denied('cancelled')
       const backend = backendFor(request.environmentId)
       if (backend === undefined) return denied('backend-unavailable')
       const admitted = operation.endpoints[0]!

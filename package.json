@@ -103,6 +103,7 @@
     "LICENSE",
     "scripts/windows-broker/*.ps1",
     "scripts/windows-broker/*.cs",
+    "scripts/ssh-broker/install.sh",
     "src/auto-review/FORK.md",
     "src/auto-review/LICENSE",
     "src/auto-review/README.md",

@@ -16,11 +16,12 @@
 import { appendFileSync, chmodSync, chownSync, lstatSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { listenNative, type Channel, type Listener } from '../../authority/native.ts'
-import { loadDeploymentManifest, type DeploymentManifest } from '../manifest.ts'
+import { loadDeploymentManifest, manifestDigest, type DeploymentManifest } from '../manifest.ts'
 import { SshEnvironmentManager, type SftpEnvironment, type SshEnvironment } from '../ssh-environment.ts'
 import { SftpConnectionLost, SftpStatusError } from '../sftp.ts'
 import {
   BROKER_PROTOCOL,
+  MAX_DATA,
   MAX_IN_FLIGHT,
   MAX_PROCESSES,
   parseBrokerRequest,
@@ -51,8 +52,6 @@ export interface BrokerServerOptions {
   /** Optional append-only audit file (0600, broker-owned). */
   readonly auditPath?: string
   readonly logger?: { debug(message: string): void; warn(message: string): void }
-  /** Require every manifest environment to declare `credentialIsolation: attested`. */
-  readonly requireAttested?: boolean
   /** TEST-ONLY: allow starting as the client uid (protocol tests only). */
   readonly allowSameUidForTesting?: boolean
   /** TEST-ONLY: allow a sandboxed / NoNewPrivs peer (this suite runs inside DSH). */
@@ -97,6 +96,7 @@ export class BrokerServer {
   private socketGroup: number | undefined
   private manager: SshEnvironmentManager | undefined
   private manifest: DeploymentManifest | undefined
+  private deploymentDigest = ''
   private readonly connections = new Set<ConnectionState>()
   private nextConnection = 1
   private stopped = false
@@ -120,11 +120,9 @@ export class BrokerServer {
     } else {
       const loaded = loadDeploymentManifest(this.options.manifestPath)
       this.manifest = loaded.manifest
-      if (this.options.requireAttested !== false) {
-        const unattested = this.manifest.environments.filter(environment => environment.credentialIsolation !== 'attested')
-        if (unattested.length > 0) {
-          throw new BrokerRefusal('manifest-unattested', `environments not declared attested: ${unattested.map(environment => environment.environmentId).join(', ')}`)
-        }
+      const unattested = this.manifest.environments.filter(environment => environment.credentialIsolation !== 'attested')
+      if (unattested.length > 0) {
+        throw new BrokerRefusal('manifest-unattested', `environments not declared attested: ${unattested.map(environment => environment.environmentId).join(', ')}`)
       }
       this.manager = new SshEnvironmentManager({
         manifest: this.manifest,
@@ -132,6 +130,7 @@ export class BrokerServer {
         custody: 'broker',
       })
     }
+    this.deploymentDigest = manifestDigest(this.manifest)
     this.prepareSocketDirectory()
     this.listener = await listenNative(this.options.socketPath, channel => this.accept(channel), {
       expectedUid: this.options.clientUid,
@@ -192,6 +191,7 @@ export class BrokerServer {
       protocol: BROKER_PROTOCOL,
       brokerUid: process.getuid!(),
       environmentIds: this.manifest?.environments.map(environment => environment.environmentId) ?? [],
+      manifestDigest: this.deploymentDigest,
     }
     if (!writeBrokerLine(channel, { event: 'hello', ...hello })) return
     channel.on('close', () => this.closeConnection(state))
@@ -359,9 +359,8 @@ export class BrokerServer {
     try {
       handle = environment.subprocess.spawn({
         argv: p.argv as string[], cwd: p.cwd as string, env: p.env as Record<string, string>,
-        // 2× the declared limit, matching the in-process adapter: overflow
-        // reaches the Host's sink so its truncation flag stays truthful.
-        stdio: { stdin: 'ignore', stdout: { maxBytes: stdoutLimit * 2 }, stderr: { maxBytes: stderrLimit * 2 } },
+        // The SSH adapter already requests twice the declared result limit.
+        stdio: { stdin: 'ignore', stdout: { maxBytes: stdoutLimit }, stderr: { maxBytes: stderrLimit } },
         graceMs: p.graceMs as number,
       }) as ProcessRecord['handle']
     } catch (error) {
@@ -380,8 +379,8 @@ export class BrokerServer {
       record.scope = scope
       // Output is delivered on exit: the Host's contract only reads it then.
       if (state.closed) return
-      if (record.stdout !== '') writeBrokerLine(state.channel, { event: 'stdout', process: id, data: Buffer.from(record.stdout).toString('base64') })
-      if (record.stderr !== '') writeBrokerLine(state.channel, { event: 'stderr', process: id, data: Buffer.from(record.stderr).toString('base64') })
+      if (record.stdout !== '') writeBrokerLine(state.channel, { event: 'stdout', process: id, data: Buffer.from(record.stdout).subarray(0, MAX_DATA).toString('base64') })
+      if (record.stderr !== '') writeBrokerLine(state.channel, { event: 'stderr', process: id, data: Buffer.from(record.stderr).subarray(0, MAX_DATA).toString('base64') })
       writeBrokerLine(state.channel, {
         event: 'exit', process: id,
         exitCode: typeof done.exitCode === 'number' ? done.exitCode : null,
@@ -405,6 +404,7 @@ export class BrokerServer {
   private closeConnection(state: ConnectionState): void {
     if (state.closed) return
     state.closed = true
+    state.channel.destroy()
     this.connections.delete(state)
     for (const [id, process] of state.processes) {
       try { process.handle.terminate() } catch { /* already gone */ }

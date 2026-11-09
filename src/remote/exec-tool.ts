@@ -32,7 +32,7 @@ export function remoteBashTool(options: {
     },
     output: {
       schema: { type: 'object' },
-      render: (result: RemoteCommandResult) => [{ type: 'text', text: JSON.stringify(result) }],
+      render: (_args: unknown, result: RemoteCommandResult) => [{ type: 'text', text: JSON.stringify(result) }],
     },
     execute: async (args: unknown, exec: ToolCaller): Promise<RemoteCommandResult> => {
       const { environmentId, rootId, cwdRelative, command, timeoutMs } = args as {

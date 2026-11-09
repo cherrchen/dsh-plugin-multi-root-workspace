@@ -1785,7 +1785,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 ## 多执行环境 G5 显式工具、面板与单会话旅程（2026-11-07）
 
-**状态：显式工具、能力投影与远端面板已接入一个专用 headless 测试组合；同一 Session 的"两个本地根 → 构建机 → 设备"旅程先在有界内存端点上跑通，随后已在生产 `broker:` 配置路径上完成真实 SSH 复跑（`tests/remote-journey.live.e2e.ts` 4/4，见 G5a 节）；没有新增生产行，远端实验仍默认关闭、未对模型开放。** 内存旅程的准入、绑定/配对、staging、哈希、无覆盖发布与双准入命令合同全部走真实代码；真实复跑暴露了默认 `backendFor` 工厂的双准入实例缺陷并已修复（`1f4f40a`）。Web/Electron 组合未覆盖（本部署为 headless VPS）。
+**状态：显式工具、能力投影与远端面板已接入一个专用 headless 测试组合；同一 Session 的"两个本地根 → 构建机 → 设备"旅程先在有界内存端点上跑通，随后已在生产 `broker:` 配置路径上完成真实 SSH 复跑（`tests/remote-journey.live.e2e.ts` 4/4，见 G5a 节）；没有新增生产行，远端实验仍默认关闭、未对模型开放。** 内存旅程的准入、绑定/配对、staging、哈希、无覆盖发布与双准入命令合同全部走真实代码；真实复跑暴露了默认 `backendFor` 工厂的双准入实例缺陷并已修复（`1f4f40a`）。该轮仅覆盖 headless VPS；Web 后续结果见[模型开放门槛](#多执行环境模型开放门槛2026-11-09)。
 
 **实现（本轮增量）：** `src/remote/tools.ts` 新行 `apply(ctx, {enabled, manager?, backends?})`，`inject` 保持兼容门禁与 provider 品牌门禁；`enabled !== true` 时零动作，远端控制面未就绪（关闭/清单无效）时拒绝加载。该行统一注册 `remote_copy` 与 `remote_bash`、安装 `SshEndpointVerifier`（未挂载该行的组合登记固定 `endpoint-unverifiable`），默认连接管理器是清单之上的官方 SSH 栈，默认执行后端是新的 `lazySshExecBackend`（准备阶段才 `open`，未打开连接无法通过最终启动准入）。`src/remote/capabilities.ts` 通过 `systemPrompt.context` 贡献 `multi-root:remote`，只含环境/根 ID、绑定路径、平台、动作与传输配对，绝不含 host/账号/密钥。清单与连接层允许任意 transport 声明 `transfer`（传输适配器是同一别名的 SFTP 子系统），`exec` 仍仅 helper——这样一台构建机才能既收源码又执行构建。`src/remote/panel-contract.ts` 新增独立远端端点（`remotes`/`addRemote`/`removeRemote`），`src/command.ts` 按 Session 推导主根后提供列表与登记/撤销；列表只读状态/清单/记录、不建立任何远端连接，能力按会话模式与工具 cap 收窄；`src/client/remotes-client.ts` 与 Workspace Folders 面板的新“远端环境”区消费它，双语文案与失败码覆盖经 locale parity 校验。`remote_bash` 的未开始结果不再携带显式 `undefined` 的 `operationId`（工具输出必须 lossless JSON）。
 
@@ -1827,3 +1827,17 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 **未验证与限制：** `danger-full-access` 与这些凭据互斥，但运行时不检查其他 Session 的模式。托管进程崩溃后 unit 会重启，Host 不自动重建连接，必须重走证明（已由 broker-daemon 用例实证）；没有撤销列表、速率限制与审计轮转。SFTP 语义代理只覆盖 transfer/verifier 使用的方法，没有 readdir/extended；命令输出在退出时一次性返回（受部署上限约束）。安装器只实机验证过 Linux systemd 分支，macOS launchd 分支未执行；macOS 发起端 broker、Windows 发起端未覆盖。回滚演练覆盖注册表层（撤销→历史引用拒绝→重新准入）与单操作在飞取消（AbortSignal→`cancelled` 语义），编排层（禁新准入排队、批量取消在飞任务、对账后恢复原 profile）未演练——目前不存在该编排队列实现。Web 面板的渲染侧需要真实 GUI 宿主（本部署为 headless VPS），面板合约只经 stub Connection 与内存旅程验证。默认 patch 未加入 broker 行或任何远端工具。
 
+
+## 多执行环境模型开放门槛（2026-11-09）
+
+**范围：先审查 DSH `0.2.2-rc.1` 的 Linux → Linux 专用实验 profile。** 默认组合保持关闭。此前 Ubuntu 双账户实机已覆盖三向复制、受限命令、故障注入和真实目标主机钥轮换。直连和内存后端的取证继续用于回归。逐项启用配置与回滚步骤见[控制面参考](../../reference/multi-environment-control-plane.md#部署启用清单)。
+
+| 开放前事项 | 当前证据与退出条件 |
+| --- | --- |
+| 工具与凭据边界 | 包入口只有 broker 路径。要求 Host 的 SSH 版本与可选包、provider 品牌、就绪的 Registry、受限默认模式与可选预设、部署侧隔离证明。协议 2 核对实际清单摘要；同名环境或协议旧版无法通过证明。生产部署仍须在其实际 bash/PTC/PTY 与权限提升入口取证，覆盖所有能以该 Host UID 执行 Agent 进程的 profile。 |
+| 安装、升级与回滚 | tarball 包含 broker 入口和安装脚本；Linux 安装器生成负责重建运行目录的 systemd unit。卸载取消并等待工具，复制在最终发布前复查取消，命令在最终 spawn 准入前复查取消。注册、覆盖拒绝、已提交物保留、未知结果对账与回到本地 profile 按部署手册验收。 |
+| Linux 实机复验 | Debian 12 arm64 双容器（内核 6.12.76、OpenSSH 9.2p1、Node 24.22.2、DSH 0.2.2-rc.1）使用真实 sshd、独立 Host/broker UID 与 chroot SFTP。Host 可读共享清单、不可读 broker 配置与私钥。普通 Host 收到 hello，bwrap 探针和打包 headless 的原生 `bash` 在只读、工作区可写两种模式下均读不到私钥、用不了 broker socket。真实 broker **6/6**、会话旅程 **4/4**、broker 故障注入 **2/2**、Linux 多 Host **5/5**，覆盖大输出截断、SSH 中断换代和 daemon 崩溃后重证。独立的 systemd 容器实跑安装、停服务删除运行目录、重新启动重建目录和 SIGKILL 自动重启，并核对 0750 目录、0660 socket 及属主。 |
+| 正式组合与 GUI | Linux 上通过 `dsh plugin add <tgz>` 安装并启动 headless/Web 组合。两者均实际挂载工具、登记 SSH 根，停用重启后远端能力消失、本地根及原生服务可用。headless 以 loopback 脚本模型完成真实回合，确认收到两项工具和 `remote_bash` 的退出状态、输出。Chromium 实际打开 Workspace Folders，SFTP 根的登记、能力更新和撤销均走真实 RPC。现有 Rivetdeck 工作树的 DSH 为 `0.2.1-rc.5`，低于 SSH 地板；可用桌面宿主另行验收。 |
+| 平台与评审 | macOS 发起端（含 launchd）与 macOS 目标按本批范围保留待验；原生 Windows 发起端仍按 ADR-0030 延后，G6 透明路由另行处理。只有在对应部署完成取证和外部评审后，才启用该部署的模型入口。 |
+
+真实模型回合发现两项工具的输出渲染误用了输入参数。改为读取宿主渲染回调的结果参数，并用调度管线分别断言两项工具的模型侧内容等于规范化结果。打包、兼容、类型、lint、文档检查通过；原生本地全量回归为 **1362 passed / 131 skipped / 0 failed**（Linux SSH 实跑单列）。新增结果渲染回归后 `remote-tools.spec.ts` 为 **12/12**。
