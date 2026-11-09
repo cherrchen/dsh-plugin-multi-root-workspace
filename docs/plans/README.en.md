@@ -38,7 +38,7 @@ Plans with long-term reference value should not be deleted.
 
 active:
 
-- [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) (Chinese) — Worktree-aware additional-root suggestions (v1 B only): external/pre-existing worktree discovery, `inherit` prompts, complete ancestor-chain checks, no-Git metadata snapshots, deletion lifecycle, sidecar/owner revalidation; **Accepted; P0 documentation complete, P1 not started**; decision: [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md).
+- [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) (Chinese) — P1–P7 cover worktree root suggestions, the plugin toggle, and manual cleanup (B). P8–P10 add explicit access to shared Git metadata for linked worktrees (A). See [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md) for the decision and the roadmap for progress.
 
 - [2026-11-08-workspace-menu-folders-dialog.md](./active/2026-11-08-workspace-menu-folders-dialog.md) (Chinese) — A "Manage workspace folders…" entry in the workspace `...` menu: a controller reusing the footer dialog, a `workspace` context-menu contribution (order 150), and switching/reusing the target workspace's blank session before opening with that fixed session; `RootSwitcher` and upstream `WorkspaceBrowser` stay untouched (decision in [ADR-0038](../decisions/ADR-0038-workspace-menu-folders-dialog.md)).
 

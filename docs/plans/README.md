@@ -38,7 +38,7 @@ completed/
 
 active：
 
-- [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) — Worktree 感知的附加根建议（v1 仅 B）：外部/预存在 worktree 发现、`inherit` 提示、完整祖先链、无 Git 元数据快照、删除生命周期与 sidecar/owner 复验；**Accepted；P0 文档完成，P1 未开始**；决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)。
+- [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) — P1–P7 实施 worktree 附加根建议、插件开关与手动清理（B），P8–P10 实施 linked worktree 的共享 Git 元数据授权（A）。决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)，进度见路线账本。
 
 - [2026-11-08-workspace-menu-folders-dialog.md](./active/2026-11-08-workspace-menu-folders-dialog.md) — 工作区 `...` 菜单新增「管理工作区目录…」：复用 footer 对话框的 controller、`workspace` context-menu 贡献（order 150）、先切换/复用目标工作区 blank 再打开并固定 session；`RootSwitcher` 与上游 `WorkspaceBrowser` 零改动（决策见 [ADR-0038](../decisions/ADR-0038-workspace-menu-folders-dialog.md)）。
 

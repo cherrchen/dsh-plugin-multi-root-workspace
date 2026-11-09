@@ -1,12 +1,16 @@
-# ADR-0039: Worktree 感知的附加根建议与删除生命周期
+# ADR-0039: Worktree 感知的附加根建议、Git 元数据授权与删除生命周期
 
 ## Status
 
-Accepted（2026-11-09 第十七次修订：本轮审核问题已处理；v1 仅启用 B，A 延后；实现与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准，本文接受设计，不表示已实现，不预承诺版本或发布）。
+Accepted（2026-11-09 第十八次修订）。先完成 B 的发现、确认和清理，再实施 A 的共享 Git 元数据授权。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
+
+## 第十八次修订（2026-11-09）
+
+第十七次修订接受了 B，并因无法证明 main checkout 身份而延后 A。本修订保留 B 的安全与生命周期边界，将 A 的目标收窄到 linked worktree 执行 Git 写操作所需的 common git dir，并新增 A/B 共用的插件设置开关。B 的 P0–P7 保留，A 从 P8 接续。此前复审中的「A 延后」属于历史决定，现行规则见 Decision §1 和 §9。
 
 ## 第十七次修订（2026-11-09）
 
-本轮按维护者补充的需求接受设计；实现尚未开始。取代前稿的四项规则：非 Git/非 checkout 根（包括曾 active 后失效）结束发现并停止后台重查；`lost` 不再携带 retry 字段；sidecar 全部写入由既有 Registry owner 串行执行，取代跨 Host read-merge/CAS 假设；旧 epoch 映射按新 owner 当前完整快照重新核对，取代“只允许同 epoch 修剪”。下文是修订后的规范，先前复审事实保留为历史依据。
+本轮按维护者补充的需求接受设计；实现尚未开始。取代前稿的四项规则：非 Git/非 checkout 根（包括曾 active 后失效）结束发现并停止后台重查；`lost` 不再携带 retry 字段；sidecar 全部写入由既有 Registry owner 串行执行，取代跨 Host read-merge/CAS 假设；旧 epoch 映射按新 owner 当前完整快照重新核对，取代“只允许同 epoch 修剪”。该版的复审事实保留为历史依据。
 
 ## Date
 
@@ -23,25 +27,25 @@ Accepted（2026-11-09 第十七次修订：本轮审核问题已处理；v1 仅�
 <main>/.git/worktrees/<name>  → 目录：含 commondir，指向 <main>/.git
 ```
 
-`git add` / `git commit` 需要写 common git dir 下的 `index`、`objects`、`refs`、`logs`、`worktrees/<name>/…`。如果这个目录在 workspace 的 primary root 之外，模型会被迫反复申请 `danger-full-access`，打断自主运行。
+`git add` / `git commit` 会写 linked worktree 私有 admin 下的 `index`、`HEAD` 等数据，也会写 common git dir 下的 `objects`、`refs` 和共享 reflog。若 common 在 primary root 之外，模型可能反复申请 `danger-full-access`。[Git worktree 手册](https://git-scm.com/docs/git-worktree#_details)
 
 同时，worktree 是临时目录：它会被 `git worktree remove`、`prune`、手动删除或移动。已经登记为附加根的 worktree 根随后会变成 `missing`，占用 `maxAdditionalRoots` 额度，并在面板中留下记录。
 
 因此本决策同时覆盖两件事：
 
-- **发现与授权**：何时提示把主 worktree 根或 worktree 根加为附加根；
+- **发现与授权**：何时提示登记共享 Git 元数据目录（A）或另一个 linked checkout（B）；
 - **删除生命周期**：worktree 消失/移动后，已登记根如何呈现、如何清理，以及哪些清理**永远不自动发生**。
 
 ### 2. 现有模型与事实
 
 - 本插件的 Workspace 模型是「一个 primary root + N 个 additional roots」。`validateRootCandidate` 双向拒绝候选与 primary root 的包含关系（`primary-overlap`，`src/roots.ts:421`），也拒绝附加根之间的嵌套。
-- worktree 插件的默认 pool 是 `.agents/worktrees`（相对 repo root，`relativePath` 禁止 `..`），因此默认 pool 的 worktree 位于主 worktree 根内。把主 worktree 根登记到该 worktree 的 session 会被 `primary-overlap` 拒绝；这是本决策选择“不做任何行为”的技术原因。
+- worktree 插件的默认 pool 是 `.agents/worktrees`（相对 repo root，`relativePath` 禁止 `..`），因此默认 pool 的 worktree 位于主 worktree 根内。把主 worktree 根登记到该 worktree 的 session 会被 `primary-overlap` 拒绝；而同仓库的 `<main>/.git` 与 pool checkout 互不包含，可以单独通过根几何校验。
 - Registry 对消失的登记目录保留记录、标记 `missing`、从 scope 撤销授予，但**不自动删除**；只要目录以相同 canonical 路径回来，`recordedPath` 匹配后会**自动恢复授予**（ADR-0004）。这是路径级恢复，不区分“同一个 worktree 恢复”与“同路径换了一个新目录”。
 - `maxAdditionalRoots` 统计所有存储记录，包括 `missing`（ADR-0014）。
 - 没有“workspace 删除”事件；Registry 按 `primaryKey(primaryRoot)` 存整组记录。`primaryKey` 是 `path.resolve` + Windows 小写折叠的**上游 verbatim 拼写**，永不 canonical 化（ADR-0028）。
 - ADR-0012 明确“外部 gitdir、逃逸 symlink、未登记 repository 或未授权的自定义 pool 不能通过扩大权限解决”。本决策不是静默扩大，而是**用户明确确认后的登记**；但它仍然不自动添加、不自动删除。
 - 客户端没有可供普通插件随时弹出的全局 Dialog 服务；Connection RPC 是请求/响应，浏览器没有通用 host→client stream。`shell.overlay` 槽位与 `Modal`/`Checkbox` primitive 可复用。
-- 上游 `dsh-experimental-worktree` 服务存在，但它只覆盖 DSH/插件创建的 worktree；用户可能用终端、IDE、forge 或其他 DSH 创建 worktree。B 的检测不能依赖 `ctx.worktrees` 或 `.agents/worktrees` 默认值；A 的 `mainRoot` 身份可以只读该服务的创建记录，但无记录时 A inactive。
+- 上游 `dsh-experimental-worktree` 服务存在，但它只覆盖 DSH/插件创建的 worktree；用户可能用终端、IDE、forge 或其他 DSH 创建 worktree。A/B 均使用 Git 磁盘布局，因而也覆盖用终端、IDE 或其他 Host 创建的 checkout。开发 pin 的公开 `create()` 返回的是创建当下的 source checkout `repositoryRoot`，可以是 linked checkout，也没有按 primary 查询任意既有 worktree 的记录接口。
 - Git 的磁盘布局是唯一能覆盖任意创建者的依据：`worktrees/<id>/gitdir` 指向 worktree 的 `.git` 文件，`worktree/.git` 反向指回 admin；linked worktree 的 admin 目录有 `commondir`，submodule 没有。`git worktree move` 只改 admin `gitdir` 的内容，`worktrees/` 目录本身不增删（macOS 原生探测确认）。
 
 ### 3. 复审二（2026-11-08）新增事实
@@ -99,11 +103,10 @@ Accepted（2026-11-09 第十七次修订：本轮审核问题已处理；v1 仅�
 
 ### 5. 约束与非目标
 
-- **v1 只启用 B**；A（main-worktree authorization）延后，需先有公开、可验证的 main checkout 记录来源和 source contract。
-- **B 的发现不依赖 `ctx.worktrees` / `.agents/worktrees`**；A 的未来记录只用于 mainRoot 身份，不参与 B 的发现。
+- **先交付 B 的完整行为，再接入 A**。A 使用 §1 的 common 来源契约；A/B 都不依赖 `ctx.worktrees` 或默认 pool 路径。
 - **不启动 Git、不运行 `git worktree list`**；候选由受控 inventory 逐个枚举；每个候选必须通过 2.4 的元数据快照（指针/config/HEAD/objects/refs）、primary/common/admin 的 HEAD 语法校验与 `admin/HEAD` 结构校验，并属于同一 common；**不解析 commit 对象**。
 - **只支持 `core.repositoryformatversion=0`**：`extensions.relativeWorktrees=true`、`--relative-paths` 产生的版本 1、`sha256`/其他 objectFormat 都 inactive；`--relative-paths` 布局不在 v1 范围。
-- **不支持 submodule（两种形态，以及“linked worktree 本身被登记为 submodule”）/ `--separate-git-dir` 主 checkout / bare repo / 启用 `extensions.worktreeConfig` 的布局**：`.git` 文件没有 `commondir` 时 inactive；旧式 `.git` 目录**与** `.git` 文件 + `commondir` 的 linked worktree 都用**所有祖先仓库 + 完整相对路径**的 index mode `160000` 判定，任一层命中即 inactive、阴性继续更外层；common 的 `core.bare` 为 true 时 inactive；extension 为 true 时 inactive。**从 `--separate-git-dir` 派生的 linked checkout（`.git` 文件 + `commondir`）支持 B**（但若被祖先登记为 `160000` 则 inactive）；主 checkout 自身 inactive，A 仍延后。
+- **不支持 submodule（两种形态，以及“linked worktree 本身被登记为 submodule”）/ `--separate-git-dir` 主 checkout / bare repo / 启用 `extensions.worktreeConfig` 的布局**：`.git` 文件没有 `commondir` 时 inactive；旧式 `.git` 目录**与** `.git` 文件 + `commondir` 的 linked worktree 都用**所有祖先仓库 + 完整相对路径**的 index mode `160000` 判定，任一层命中即 inactive、阴性继续更外层；common 的 `core.bare` 为 true 时 inactive；extension 为 true 时 inactive。**从 `--separate-git-dir` 派生的 linked checkout（`.git` 文件 + `commondir`）支持 B**（但若被祖先登记为 `160000` 则 inactive）；主 checkout 自身 inactive，派生 checkout 的 A 资格另按 §1 判断。
 - **对象/index 边界**：v1 不解析 commit 对象、不读 `objects`；`objects/info/alternates`/`http-alternates` 仍防御性拒绝；父 index 路径由指针/gitdir 直接得到（`<gitdir>/index`），用 `O_NOFOLLOW`/`O_NONBLOCK` 打开、同 fd `fstat`、限量读取，由插件解析 header/entries/extensions：`link`（split）/`sdir`（sparse）/`040000` 目录条目/version 非 2–4/解析失败 → inactive；`core.splitIndex`/`core.sparseCheckout`/`index.sparse` 也拒绝；**不运行 `ls-files`**，直接按字面完整路径查 `160000` 条目。
 - **parent probe 边界**：从 `dirname(root)` 向上遍历**所有**祖先 `.git`；每层只读 `.git`/config/index；任一层 config include/core.worktree/extensions 或探测失败 → 无法排除 gitlink → inactive；用该层根到 root 的完整相对路径按 2.4 的平台等价规则查 index，命中 `160000` 即 inactive，阴性继续更外层。
 - **workspace `.git` 门禁先执行**：普通仓库子目录/worktree 子目录在第一道门禁直接退出，不进入祖先探测。
@@ -113,49 +116,41 @@ Accepted（2026-11-09 第十七次修订：本轮审核问题已处理；v1 仅�
 
 ## Decision
 
-### 1. 提示模型（v1 仅 B；A 延后）
+### 1. 提示模型
 
-#### A. main-worktree authorization（v1 延后，不启用）
+#### A. Linked worktree 的共享 Git 元数据授权（B 完成后）
 
-v1 **不启用 A**，只做 B。原因：当前没有可验证的公开接口提供原始 main checkout；`ctx.worktrees` 只被测试用于 `create`，没有可依赖的 `repoRoot`/main-checkout 记录。没有可信记录时继续猜 `mainRoot` 会授权无关目录；因此 A 整体延后到有公开记录来源之后。
+A 为 **linked checkout 本身就是 session primary root** 的 `workspace-write` 会话提供一次显式确认，把其 **canonical common git dir（通常是主 checkout 的 `.git`）** 登记为 `inherit` 附加根。它覆盖当前 checkout 的 admin（`common/worktrees/<id>`）和 Git 共享写入。默认 pool 中，主 checkout 包含 primary，仍触发 `primary-overlap`；其 `.git` 与 primary 互不包含，符合条件时可以单独登记。外部 linked checkout 走同一规则。Session identity 始终来自 `session.header.cwd`，动态 cwd 切换只改变执行位置（ADR-0012）。
 
-未来 A 的 source contract（必须先满足才启用）：
+- **来源契约**：使用 §2.2–§2.4 的同一份受控快照。primary 的 `.git` 指向 `common/worktrees/<id>` 下的真实 admin，admin 的 `gitdir` 指回该 primary 的 `.git`，`commondir` 指向同一个 canonical common；复用全部 config/HEAD/祖先索引检查。A 只接受 canonical 末级为 `.git` 的目录，以该目录本身为唯一候选。文件名只是范围限制；双向绑定、完整快照和身份校验才证明它是当前 worktree 使用的 common。即使分离式 gitdir 恰好叫 `.git`，此判据也只证明 common 身份，无法证明其父目录是主 checkout。其他命名的 common 不提示 A。
+- **过滤**：common 已被 primary 或既有登记覆盖、根校验拒绝（含嵌套、受保护路径、额度）、ignore 命中或 Registry 不可用 → 不入队。既有只读、缺失、重定向等登记由原 Registry 规则处理，A 不修改权限或 revive。
+- **确认**：对话框明确显示实际授权路径、`inherit`、workspace 级持久性，以及范围涵盖共享配置、hooks、refs/objects 和所有 worktree 的 admin 数据。普通附加根的权限同样适用于其他受允许的工具；这些数据可能影响同仓库的其他 checkout。用户确认后才可登记；仅打开设置开关不会授予权限。A 复用 B 的提示、忽略、重置和 owner 串行写路径，候选类型为 `git-common`，无需枚举兄弟 checkout 来证明 A。
+- **失效与撤回**：resolve 与 owner 各重跑来源契约并核对 primary/admin/common 的文件系统身份及 admin HEAD 快照。路径移动、换链、替换、失去双向绑定或无法证明身份 → `worktree/prompt-stale`。成功登记后沿用普通根的路径级生命周期，可在工作区目录面板或命令中手动移除。A 不进入 B 的 `worktreeRoots`，linked worktree 删除也不触发 A 清理。
+- Git 在各 sandbox mode 下仍走既有 fs / kernel dialect 与 per-tool cap；A 不拦截 Git、不放宽其他目录、不增加 full-access 兜底。产品验收在真实受限 shell 中执行 Git；发现、预检和确认仍不启动 Git 子进程。
 
-```text
-mainRoot = <公开接口返回的原始 main checkout>   // 不使用 git worktree list
-```
-
-- 公开接口必须返回 worktree 的 main checkout（`repoRoot`）与 worktree id/path；本插件不通过 `git worktree list`、`dirname(common)`、`ls-files` 或文件名推导。
-- 绑定：记录中的 worktree path canonical == session primaryRoot；`repoRoot` canonical == mainRoot；记录的 common/admin 与当前 worktree 的 `common/admin` 一致。
-- 失效：worktree 被删除/移动、`repoRoot` 变化、common/admin 不一致、记录不存在 → A inactive；A 不因记录缺失回退到猜测。
-- A 仍只在 session mode `workspace-write` 提示，access 为 `inherit`，授权整个主 worktree 根（源码 + `.git` + hooks + 嵌套 worktree）；文案单独披露。
-- `primaryRoot` 等于/位于 `mainRoot` 内（默认 pool、嵌套 worktree）→ 不做任何行为；`mainRoot` 已被 primary/已授权根/registry 覆盖 → 不提示。
-
-A 延后意味着 worktree session 的 git 提权缺口仍然存在；用户可手动 `/workspace-folders add <mainRoot> --inherit`（或 common git dir）。B 不受影响，v1 的发现、登记、清理只围绕 B。
-
-#### B. worktree discovery（v1 唯一启用的提示）
+#### B. worktree discovery（先实施）
 
 从 `<common>/worktrees/<id>/gitdir` 枚举**所有** worktree，不区分创建者，包括 workspace 创建前已存在的、由终端/IDE/forge/其他 DSH 创建的。
 
-B 的入队条件（v1）：
+B 的入队条件：
 
 - 候选必须是**有效的 linked checkout 且属于同一 common**：`<candidate>/.git` 是普通文件、admin 在 `common/worktrees/<id>` 下、双向指针一致、`admin/HEAD` 与 common `HEAD` 通过 2.4 的 HEAD 快照语法校验，common 的 `config`/`objects`/`refs` 结构有效；失败 → 不入队、不提示、不写 registry。**不启动 Git、不解析 commit 对象**。
 - primary、common、admin 的 `HEAD` 共用同一语法校验；`admin/HEAD` 写成 `definitely-not-a-head`、空文件、CR/多行、错误长度 hex 都不接受。
 - v1 只接受 `core.repositoryformatversion=0`、`extensions.objectFormat` 缺省/`sha1`；`extensions.relativeWorktrees=true`、`git worktree add --relative-paths` 产生的版本 1、`sha256` 均 inactive。
 - submodule（`.git` 文件且无 `commondir`；旧式内嵌 `.git` 目录）→ 不提示；**本层 `.git` 门禁通过后，两种形态（含 `.git` 文件 + `commondir` 的 linked worktree）都遍历所有祖先仓库查完整相对路径的 index mode `160000`**；任一层命中即 inactive，阴性继续更外层；祖先 config/index/探测失败 → 无法排除 → 不提示。linked worktree 本身也可以是 submodule，不能因 `.git` 是文件跳过。
 - common 的 `objects/info/alternates`/`http-alternates` 非空 → 不提示；**不解析对象**，`objects/<prefix>` 的 symlink 不会被读取。
-- 主 checkout 自身的 `.git` 文件没有 `commondir`（submodule main / `--separate-git-dir` main）→ inactive；从 `--separate-git-dir` 派生的 linked checkout（`.git` 文件 + `commondir`）→ B 支持；A 仍延后。
+- 主 checkout 自身的 `.git` 文件没有 `commondir`（submodule main / `--separate-git-dir` main）→ inactive；从 `--separate-git-dir` 派生的 linked checkout（`.git` 文件 + `commondir`）→ B 支持；A 按 §1 单独判定。
 - 等于/位于 `primaryRoot` 内、位于已授权根内、包含 `primaryRoot` → 不提示。**没有“默认 pool 特殊排除”规则**：主仓库作为 primary 时，`.agents/worktrees/<id>` 位于 primary 内，按包含规则过滤；primary 本身是 pool worktree 时，另一个 pool worktree 属于同一 common 且通常互不包含，会正常进入 B 候选（再受 registry/上限/ignore 约束）。两种场景分别验收。
 - 已在 registry / 达到上限 / registry unavailable / 被 discovery ignore → 不提示。
 - 其余 → 提示把 `worktreeRoot` 加为 `inherit`。
 
-B 的宽授权是 worktree 的**源码树**；worktree 根里的 `.git` 只是指针文件，不包含主仓库的 hooks。A 在 v1 延后，A 的披露文案只保留在未来设计。
+B 的授权范围是 worktree 的**源码树**；worktree 根里的 `.git` 只是指针文件，指针所指的共享元数据需要按 A 单独确认。
 
 #### 模式规则
 
 | 提示 | workspace-write | read-only | danger-full-access |
 | --- | --- | --- | --- |
-| A | 延后，不提示 | 延后，不提示 | 延后，不提示 |
+| A | 提示（读写） | 不提示 | 不提示 |
 | B | 提示（读写） | 提示（只读） | 不提示 |
 
 有效权限由 `effectiveRootAccess('inherit', mode)` 计算；对话框显示当前有效权限与**持久登记策略 `inherit`**。B 的文案必须同时说明：其他读写 session 可以通过同一登记获得写权限，因为登记是 workspace 级、不是 session 级。
@@ -224,7 +219,7 @@ v1 **不启动任何 Git 子进程**：`rev-parse`、`config`、`ls-files`、`wo
   - 祖先 `.git` 是 symlink、无 `commondir` 的指针文件、config include/core.worktree/extensions、index `link`/`sdir`/`040000`/未知版本、或读取/判定失败 → **无法在读取边界内排除 gitlink → inactive**；
   - 直到没有更外层祖先 `.git` 且所有层都阴性 → 正常 repo。无祖先 → 正常 repo。
   **linked worktree 本身也可以是 submodule**，不能因 `.git` 是文件就跳过；普通仓库子目录仍在第一道 `.git` 门禁直接退出，不进入祖先链。
-- A 的 future mainRoot 同样只消费公开记录 + 同样的元数据快照；v1 A 延后。
+- A 直接复用 linked primary 的快照证明 common 身份，按 §1 过滤。
 
 **HEAD 快照**：
 
@@ -279,13 +274,13 @@ v1 B 的专门验收：
 - **显式恢复（P2）**：primary 恢复后仍无后台动作；用户执行面板/命令 `list` 或显式重新检测才激活。旧 prompt ID 失效；未处理候选以新 ID 出现，明确忽略的候选不出现。
 - 主仓库根正常添加 B（`primary.shape='main'`、`candidate.kind='worktree'`）必须 active；真实 linked worktree 根（B）必须 active。
 
-future A（v1 不启用）：`--separate-git-dir=/unrelated/.git` + `/unrelated/README.md` 同名反例、无公开可信记录、记录不匹配、`.git` 目录不等于 common → A inactive；这些只在 A 重新立项时验收，不阻塞 v1 B。
+A 的验收在 B 完成后进行：默认 pool 与外部 linked checkout 均可候选；伪指针、反向绑定失败或不可用身份均拒绝；`--separate-git-dir=/unrelated/.git` 加同名源码文件的反例也不得把 `/unrelated` 作为授权目标。
 
 ### 3. Inventory、候选身份与事件
 
 #### 3.1 Inventory
 
-workspace 创建/首次查询时做一次全量 inventory：受控枚举 `common/worktrees/*/gitdir`，按 2.2/2.3 解析并双向校验，包含所有已存在、任意创建者的 worktree。对每个候选先做对象库/submodule/index 防护，再做 `admin/HEAD` 与 common 结构校验；失败则跳过。**不启动 Git、不解析 commit 对象；不调用 `git worktree list`**。A 在 v1 延后；B 不依赖 mainRoot。
+workspace 创建/首次查询时做一次全量 inventory：受控枚举 `common/worktrees/*/gitdir`，按 2.2/2.3 解析并双向校验，包含所有已存在、任意创建者的 worktree。对每个候选先做对象库/submodule/index 防护，再做 `admin/HEAD` 与 common 结构校验；失败则跳过。**不启动 Git、不解析 commit 对象；不调用 `git worktree list`**。B 不依赖 A 的候选。
 
 #### 3.2 候选身份与 move/rebuild（P2-2）
 
@@ -296,7 +291,7 @@ type CandidateKey = string
 // = adminId + '\0' + canonical(worktreeRoot) + '\0' + canonical(adminGitdirTarget)
 ```
 
-- `evaluated` 使用 `CandidateKey`；`prompted` 使用 discovery key（B 由 `CandidateKey` 派生，A 为 `main-worktree\0<mainRoot>`）；两者都不是单一 `adminId`。
+- `evaluated` 使用 `CandidateKey`；`prompted` 使用 discovery key（B 由 `CandidateKey` 派生，A 为 `git-common\0<canonical common>`）。A 候选在每次 primary 复验时重算，直接进入共享提示队列。
 - 状态转换：
 
 | 之前 | 事件 | 之后 | 动作 |
@@ -345,7 +340,6 @@ interface WorkspaceState {
   primaryKey: string
   primaryRoot: string
   common: string
-  mainRoot?: string
   candidates: Map<CandidateKey, WorktreeCandidate>   // 共享 inventory 派生
   evaluated: Set<CandidateKey>
   prompted: Set<string>                              // discovery ignore/dedupe key
@@ -416,7 +410,7 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
   "primaryKey": "<verbatim primaryKey>",
   "primaryRoot": "<verbatim>",
   "ignored": [
-    { "key": "main-worktree\u0000<path>", "kind": "main-worktree", "path": "<path>", "addedAt": "..." }
+    { "key": "git-common\u0000<path>", "kind": "git-common", "path": "<path>", "addedAt": "..." }
   ],
   "worktreeRoots": [
     {
@@ -437,7 +431,7 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 - 文件名 `sha256(primaryKey)`；文件内保留 `primaryKey`/`primaryRoot` 便于诊断。不同 workspace 的写隔离，修复单文件跨 Host 丢失其他 workspace 映射的问题。
 - `revision` 是 sidecar 文档的单调版本；每次映射新增/删除/修剪都递增。每条 `worktreeRoots` 记录写入时的 `mapRevision`，以及 `addNew` 返回的 owner `registryEpoch`/`registryRevision`。
 - **映射修剪的并发边界**：唯一 owner 在既有 Registry 串行队列内读取最新 sidecar 与完整 Registry 快照，再修改并落盘；具体规则唯一见 §6.8。follower 只发操作请求，不提交文件快照或删除清单作为真源。
-- `ignored` 只服务于 A/B **发现**；`kind` 覆盖 `main-worktree` 与 `worktree`。清理/删除流程从不读取它。
+- `ignored` 只服务于 A/B **发现**；`kind` 覆盖 `git-common` 与 `worktree`。清理/删除流程从不读取它。
 - `worktreeRoots` 只记录**本功能通过 `addNew` 新建的 B 根**；A 根与用户手动添加/revive 的根不进入。每条含 `rootId`、`adminId`、`common`、`path`、`rootAddedAt`；`common` 用于诊断/展示，清理复验以 `record.path` 的存在性与 `addedAt` 绑定为准。
 - **唯一写者**：只有持有既有 store-wide kernel lease 的 Registry owner 能读写 sidecar；owner 本地请求和 follower IPC 请求进入与 Registry mutation 相同的串行队列。队列内读取最新文件 → 应用操作 → 临时文件 + `fsync` + `rename`，完成后才释放队列；rename 只保证完整文件替换，跨 Host 排序由 owner 保证，不依赖文件 CAS。内部使用已持队列的 helper，禁止嵌套排队死锁。
 - ignore/reset、映射新增/删除/prune 全部走该 owner 路径。`promptsRoot` 绑定同一 store 的固定 sidecar 目录，不能由 follower 指定；共享握手核对配置，不匹配拒绝。旧 owner 拆除时先 drain sidecar 写入再释放既有 lease；不新增第二把 lease。旧 epoch 请求拒绝，结果不明先对账，不自动重放。
@@ -479,11 +473,12 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
       common: string
       adminId?: string
       adminGitdir?: string
+      adminHead?: string // A 绑定 primary 的 admin HEAD
       rootIdentity?: FileIdentity
       adminIdentity?: FileIdentity
     }
     candidate: {
-      kind: 'main-worktree' | 'worktree'
+      kind: 'git-common' | 'worktree'
       canonical: string
       common: string
       adminId?: string
@@ -496,24 +491,25 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
   }
   ```
 
-  B 的 `promptKey` 是 `CandidateKey`；A 的 `promptKey` 是 `main-worktree\0<canonical mainRoot>`。B 可以从普通主仓库发起（`primary.shape='main'`），所以不能要求 `<primaryRoot>/.git` 指向 admin。
+  B 的 `promptKey` 是 `CandidateKey`；A 的 `promptKey` 是 `git-common\0<canonical common>`。B 可以从普通主仓库发起（`primary.shape='main'`），所以不能要求 `<primaryRoot>/.git` 指向 admin。
 
-- **checkout 文件系统身份（P1，复审十一）**：`FileIdentity = { dev, ino, birthtimeMs? }`。enqueue 时用 trusted fd 以 `O_DIRECTORY|O_NOFOLLOW` 打开 canonical root 目录与 admin 目录（`shape='main'`/`kind='main-worktree'` 用 common `.git` 目录），对同一 fd `fstat` 记录 `rootIdentity`/`adminIdentity`。owner 提交前重新打开同一 canonical 目录并比对；目录缺失、变成 symlink/非目录、或 `dev/ino`（可用时含 `birthtimeMs`）变化 → `prompt-stale`。这能区分“删除后在同一路径用同一提交/同一 adminId/同一 HEAD 重建”的 worktree；检查仅限提交前，不改变已登记根的路径级恢复策略。平台无法提供稳定 file ID（如 Windows 无 `ino`）时使用原生 file ID；取不到则不发提示/直接 `prompt-stale`，不回退到仅路径比较。
+- **checkout 文件系统身份（P1，复审十一）**：`FileIdentity = { dev, ino, birthtimeMs? }`。enqueue 时用 trusted fd 以 `O_DIRECTORY|O_NOFOLLOW` 打开 canonical root 目录与 admin 目录（`shape='main'` 的 admin 为 common `.git`；A candidate 的 `rootIdentity` 为 common 目录身份，admin 身份来自 linked primary），对同一 fd `fstat` 记录 `rootIdentity`/`adminIdentity`。owner 提交前重新打开同一 canonical 目录并比对；目录缺失、变成 symlink/非目录、或 `dev/ino`（可用时含 `birthtimeMs`）变化 → `prompt-stale`。这能区分“删除后在同一路径用同一提交/同一 adminId/同一 HEAD 重建”的 worktree；检查仅限提交前，不改变已登记根的路径级恢复策略。平台无法提供稳定 file ID（如 Windows 无 `ino`）时使用原生 file ID；取不到则不发提示/直接 `prompt-stale`，不回退到仅路径比较。
 - resolve 时：
   1. 重新解析 session 的 primaryRoot 与 mode；
-  2. 重新 `resolveRepo` + `inventory`；
+  2. 重新 `resolveRepo`，B 重算 inventory，A 重算 §1 的 common 候选；
   3. 按 `promptKey` 找到候选；`primary` 或 `candidate` 任一变化 → `worktree/prompt-stale`；
   4. 候选不再 eligible → `worktree/prompt-stale`；
   5. 只有全部一致才进入 `addNew`。
 - **只新建，不 revive**：Registry 新增内部方法 `addNew(primaryRoot, { path, access, expected })`，在 owner 串行队列内先复验 `expected` 再校验/写入：
-  - `expected` 含 `primary` 与 `candidate` 两部分；`primary` 描述 session 的 primary root（`shape`/canonical/common/admin/`rootIdentity`/`adminIdentity`），`candidate` 描述用户确认的目标（`kind`/canonical/common/admin/`rootIdentity`/`adminIdentity`，以及 enqueue 时读取的 `adminHead`）。
+  - `expected` 含 `primary` 与 `candidate` 两部分；`primary` 描述 session 的 primary root（`shape`/canonical/common/admin/`rootIdentity`/`adminIdentity`），`candidate` 描述用户确认的目标（`kind`/canonical/common/admin/`rootIdentity`/`adminIdentity`，以及 B 在 enqueue 时读取的 `adminHead`）。A 的 `adminHead` 属于 linked primary。
   - primary 复验：owner 必须重跑**完整的 primary 激活判据**（2.4），而不是只看 canonical/common。包括 `shape='main'/'linked'`、primary/common/admin 的 HEAD 语法、config/index、以及祖先 submodule probe；**两种 checkout 形态都查祖先 gitlink**（linked worktree 本身也可能是 submodule）；若等待期间 primary 被上级仓库登记为 `160000`，或祖先探测无法判定 → `worktree/prompt-stale`。primary `.git`/common/candidate 未变化不构成通过。
-  - candidate 复验：`candidate.canonical` 仍等于当前 canonical；`kind='worktree'` 时 `<candidate>/.git` 仍是普通文件、指向 `candidate.adminId`（admin 在 `candidate.common/worktrees` 下、`commondir` == `candidate.common`、`gitdir` 指回 `<candidate>/.git`），admin `HEAD` 与 common `HEAD` 通过 HEAD 语法校验，且 admin HEAD 内容 == `expected.adminHead`；**owner 重新打开 canonical root/admin 目录并比对 `rootIdentity`/`adminIdentity`**：目录缺失、变成 symlink/非目录、或 `dev/ino`（可用时含 `birthtimeMs`）变化 → `worktree/prompt-stale`（同路径删除重建会被抓住）；**owner 同时重跑 candidate 激活判据（含祖先 gitlink）**：candidate 在等待期间被上级索引登记为 `160000` 或祖先探测无法判定 → `worktree/prompt-stale`；`kind='main-worktree'` 时 `<candidate>/.git` 仍是目录且 canonical == `candidate.common`。
-  - owner 在串行队列内重新读取一份元数据快照（config/HEAD/admin 指针；不启动 Git），重跑 primary 激活判据（含祖先索引）、candidate 激活判据（含祖先索引）、primary/common/admin HEAD 与 checkout/admin 文件系统身份；失败或 owner 看不到候选路径 → `worktree/prompt-stale`。
+  - B candidate 复验：`candidate.canonical` 仍等于当前 canonical；`kind='worktree'` 时 `<candidate>/.git` 仍是普通文件、指向 `candidate.adminId`（admin 在 `candidate.common/worktrees` 下、`commondir` == `candidate.common`、`gitdir` 指回 `<candidate>/.git`），admin `HEAD` 与 common `HEAD` 通过 HEAD 语法校验，且 admin HEAD 内容 == `expected.adminHead`；**owner 重新打开 canonical root/admin 目录并比对 `rootIdentity`/`adminIdentity`**：目录缺失、变成 symlink/非目录、或 `dev/ino`（可用时含 `birthtimeMs`）变化 → `worktree/prompt-stale`（同路径删除重建会被抓住）；**owner 同时重跑 candidate 激活判据（含祖先 gitlink）**：candidate 在等待期间被上级索引登记为 `160000` 或祖先探测无法判定 → `worktree/prompt-stale`。
+  - A candidate 复验按 §1 重跑来源契约，确认 candidate canonical 等于当次 primary 快照的 common，并比对 common 身份及 primary 的 admin HEAD。
+  - owner 在串行队列内重新读取一份元数据快照（config/HEAD/admin 指针；不启动 Git），重跑上述 primary 和对应类型的 candidate 判据。失败或 owner 看不到候选路径 → `worktree/prompt-stale`。
   - 任一变化 → `worktree/prompt-stale`，不写入。
   - **校验与写入使用同一个 canonical 值**：owner 只 canonical 化一次，把该值作为 `addNew` 的 `path` 与最终记录路径，不在复验后从客户端/字符串重新解析；`recordedPath` 就是这个值。
   - 复验通过后使用与 `add` 相同的校验（protected paths、`primary-overlap`、nested、limit）；若已存在同路径记录（按 canonical 或 stored 拼写任一命中，任何状态）→ `duplicate`/`already-registered`，**不 revive、不改 access、不更新既有记录**；
-  - 成功时返回实际新建的记录与 owner 快照代次 `{ id, path, addedAt, registryEpoch, registryRevision }`；sidecar 条目写入这两个值，供后续核对与跨 epoch 诊断。
+  - 成功时返回实际新建的记录与 owner 快照代次 `{ id, path, addedAt, registryEpoch, registryRevision }`；B 的 sidecar 条目记录该 owner 快照代次，供后续核对与跨 epoch 诊断。
 - 服务只用 `addNew` 为 A/B 建根；`duplicate` 视为“已存在，按手动根处理”，**不写** `worktreeRoots` 映射。这样 cleanup 永远只追踪本功能新建的 B 根，不会误删手动记录或 revive 的记录。
 - **确认与提交之间的竞态**：即使服务侧已复验，owner 队列仍可能被阻塞；`addNew` 的 `expected` 复验必须在 owner 串行队列内执行。验收覆盖：
   - **主仓库正常添加 B**：`primary.shape='main'`，`candidate.kind='worktree'`；owner 分别复验 primary `.git` 目录与 candidate `.git`/admin，成功。
@@ -521,7 +517,7 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
   - **无效 admin（无 HEAD）**：admin 与外部普通目录 `.git` 互指、`commondir` 正确但无 `HEAD`；inventory 的 `admin/HEAD` 结构校验失败，不入队；若 owner 前被删除/替换，`admin/HEAD` 复验失败 → `prompt-stale`。
   - **index/对象 symlink**：父 `.git/index` symlink 或 `objects/<prefix>` symlink；index 用 `O_NOFOLLOW` 打开、同 fd `fstat`、插件解析，拒绝 `link`/`sdir`/`040000`；**不运行 `ls-files`**，因此 `core.fsmonitor` 不执行；v1 不解析 commit 对象，`objects` symlink 不读取；断言外部文件没有被读取。
   - **等待 owner 队列时把候选替换为指向另一目录的 symlink**：candidate canonical 变化 → `prompt-stale`。
-  - **A 的 separate-git-dir**：无 trusted mainRoot 或 `mainRoot` 不匹配 → A inactive / `prompt-stale`。
+  - **A 的来源变化**：等待期间切换 common、替换同路径 common/admin，或使 admin 不再指回 primary → `prompt-stale`；无 Registry 写入。
 - `add` 仍保留给命令/面板的显式 revive 语义。
 
 #### 6.4 清理资格的 owner 复验（复审三 P1-4 / 复审四 P2）
@@ -627,7 +623,7 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 
 - **v1 端点不包含 `workspaceForget`**：该命令/RPC/owner 删除路径延期，见 §6.7；未来单独计划/需求排期。v1 删除只走 `worktreeRootsCleanup` / `removeForDeletedWorktree`。
 - **面板 RPC 只在 `connection` + `webServer` 存在的 Web 组合挂载**；headless 不新增浏览器入口，也不要求面板 RPC 路由。Web 验收覆盖宿主/客户端 schema、确认和清理；headless 验收只覆盖组合启动、现有命令与 Registry 行为。
-- `WorktreePromptView` 含 `id`、`key`、`kind`、`path`、`primaryRoot`、`mainRoot?`、`worktreeRoot?`、`access`、`effectiveAccess`、`remaining`、`viewRevision`；`viewRevision` 是该 session 可见视图的摘要（见 4.2）。
+- `WorktreePromptView` 含 `id`、`key`、`kind`、`path`、`primaryRoot`、`access`、`effectiveAccess`、`remaining`、`viewRevision`；`path` 在 `git-common` 为 common 路径，在 `worktree` 为候选 checkout 路径；`viewRevision` 是该 session 可见视图的摘要（见 4.2）。
 - `WorktreePromptWaitResult` 是判别联合：`prompt`（prompt/viewRevision）、`timeout`（viewRevision，重挂）、`unactivated`/`lost`（viewRevision，停止）、`stale`（viewRevision/reason）。所有分支禁止 `retryAfterMs`，schema 双端一致；失效 workspace 不走 timeout/stale 自动重挂。
 - 客户端只发送 `sessionId`/`promptId`/`action`/`dontRemind`/`rootIds`/`seenPromptId`/`seenViewRevision`；不发送路径。
 - `worktreePromptWait` 在 `seenViewRevision` 变化、`seenPromptId` 不再可见、或 activation 变化时返回；`seenPromptId` 不再可见/已处理返回 `{ status:'stale', viewRevision, reason }`，客户端关闭对话框；正常超时返回 `{ status:'timeout', viewRevision }` 并立即重挂。
@@ -642,7 +638,7 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 - 不自动添加、不自动删除；cleanup 只删 mapped、`cleanupEligible`（路径确认缺失）的 B 根。
 - 路径只来自宿主；客户端只回传 id。`primary-overlap`、`protected-path`、`nested`、`root-limit-reached` 全部保留。
 - 元数据 I/O 先做 2.2 的路径防护，再按 2.4 的 trusted fd/`O_NOFOLLOW`/`O_NONBLOCK` 打开、`fstat`、限量读取；指针文件只接受普通文件；相对路径按 2.3 的基准解析；不启动 Git。
-- A 的宽授权（主仓库源码 + `.git` + hooks + 嵌套 worktree）与 B 的源码树授权分别披露。
+- A 的 Git 元数据授权与 B 的源码树授权分别披露，并复用现有面板身份边界。用户通过面板明确确认；owner cookie 的身份边界与 BYP-01 一致。[根授权安全修复计划](../plans/completed/2026-11-05-root-authorization-security-fixes.md#byp-01-两条入口与-cookie-链)
 - `fs.watch` 事件只是提示；每次事件后重新解析、`probeAdd`、用户确认。
 - sidecar 不是授权数据；损坏/丢失只影响提示与清理追踪。
 - 不把“无法访问”当作“已删除”：cleanup 在 owner 内复验，inaccessible → not-eligible。
@@ -663,16 +659,21 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
   - authority 不可用或完整快照失败时保留映射；所有写入/修剪由唯一 owner 排序。恢复和跨 epoch 核对见 §6.8，不使用客户端空列表或过期文件覆盖当前映射。
   - primary 激活判据失效 → 曾 active 返回 `lost`，否则 `unactivated`；二者都停止后台动作，释放资源、不写 sidecar、不改既有授权。仅显式操作重新检测，重新评估未处理候选。
   - primary 完整判据失败（含等待期间被上级仓库登记为 `160000`、祖先链探测无法判定）、candidate 元数据快照/HEAD 语法失败、index `O_NOFOLLOW`/格式门禁失败（`link`/`sdir`/`040000`/未知版本）、`objects/info/alternates`/`http-alternates` 非空、submodule 祖先链任一层无法判定或 mode `160000`、`core.repositoryformatversion=1`/`relativeWorktrees`/非 sha1、或 `.git`/admin 指针不一致 → 跳过/`prompt-stale`，不提示、不写 registry；**不启动 Git、不解析 commit 对象、不读外部 index/object**。
-  - A 在 v1 延后，不产生 A 提示；没有公开可信记录时也不在未来静默回退到猜测。
   - `addNew` 的 `expected` 在 owner 队列内变化（primary 或 candidate 任一，含 checkout/admin 文件身份与祖先索引）→ `prompt-stale`，不写入；candidate 路径被移走并重建普通目录、同路径删除重建、或 admin `HEAD` 消失/变化也走这条。
   - cleanup 时 worktree 恢复、`record.path` 仍存在但无法判定、旧 admin 缺失但 checkout 仍有效、不可访问 → `not-eligible`；不删除。
 - 默认：`promptsRoot` 必填（绝对路径）；父 watcher 开启；删除时清除 ignore；没有自动清理开关。
 
+#### 插件级开关
+
+- 「设置 → 插件 → Multi-root Workspace → 插件详情」新增 **启用 Worktree 附加根建议**（**Enable worktree root suggestions**），与「启用附属根 Skills」同一张配置卡、同样的 Switch 交互。独立使用 `multi-root-worktrees.enabled`，缺省 `true`，A 与 B 共用；Settings 接缝复用 [ADR-0023](./ADR-0023-multi-root-skill-discovery-and-invocation.md) 的现代行 Config / 旧版 namespace 适配。无 Settings UI 的组合从 loader Config 读取同一开关。
+- 关闭即时停止当前 Host 的发现、后台 watcher、重查和专用清理，唤醒 waiter、关闭提示并作废旧 ID。关闭后的新 worktree 请求返回 `worktree/not-enabled`，客户端停止重挂；宿主和客户端同时处理该结果。已确认的普通 Registry 根与 sidecar 决定保留；普通根管理始终可用。各客户端通过现有 Settings form 订阅同一设置变化。重新开启后按当前 live session 重新探测并使用新 ID。先前因 primary 失效进入 `lost` 的 workspace 仍须按 §4.4 显式恢复。
+- 调用 Host 在送交 owner 前复查本地开关、提示代次与 live session 模式。Registry owner 在队列内、持久化之前复查自己的开关。跨 Host 已送交 owner 的确认按 owner 队列结果对账。关闭当前 Host 的设置不会回滚已提交的确认，也不会更改其他 profile 的配置。B 的 P3 只读预览仍遵循实施计划中的写入门禁。
+
 ## Alternatives Considered
 
 - **只用文本条件（`HEAD` + `config`/`commondir`）做激活，不解析结构。** 复审已验证会把伪 `.git`、伪 admin、bare 派生的 linked worktree 误判为仓库；否决。v1 用插件的元数据快照（config parser + `HEAD`/`objects`/`refs` + admin/common 指针 + parent index parser）交叉校验，不启动 Git。
-- **用 `dirname(common)`、`worktree list` 第一条、`ls-files` 或文件名匹配推断 mainRoot。** `--separate-git-dir` + `/unrelated/README.md` 可让这些检查全部通过；否决（复审四 P1-1）。A 在 v1 延后，未来只使用公开可信记录；无记录即 inactive。
-- **A 在无公开可信记录时仍启用。** 无法独立证明主 checkout，会授权无关目录；否决（复审五 P2-2）。v1 延后 A，只做 B；A 重新立项前必须有 source contract。
+- **用 `dirname(common)`、`worktree list` 第一条、`ls-files` 或文件名匹配推断 mainRoot。** `--separate-git-dir` + `/unrelated/README.md` 可让这些检查全部通过；否决（复审四 P1-1）。A 只登记经 §1 证明并经用户确认的 common。
+- **A 登记整个主 checkout。** 其身份缺少可验证来源，且默认 pool 会触发 `primary-overlap`。A 只登记 Git 写入所需的 common，不以扩大授权绕开重叠校验。
 - **用 `git -C <primaryRoot> config --bool core.bare` 判定 bare。** worktree config 可以把 `core.bare` 覆盖为 false；否决（复审三 P1-1）。v1 解析 common 的 config 快照，不启动 Git。
 - **只检查 common config、仍允许 `extensions.worktreeConfig=true`。** `<admin>/config.worktree` 的 `include.path` 会被 Git 读取；否决（复审四 P1-2）。v1 由插件解析 common config 快照并直接拒绝启用该 extension 的布局，不启动 Git。
 - **只靠调用方复验后把 `{path, access}` 交给 owner。** 确认与提交之间候选可被 symlink 替换；否决（复审三 P1-3）。`addNew` 携带 expected 并在 owner 队列内复验。
@@ -686,12 +687,12 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 - **客户端 localStorage 存“不再提醒”。** 不符合“宿主持久化、以 workspace 为单位”；否决（Q3）。
 - **单个全局 sidecar 文件 + merge-on-write。** 跨 Host 不同 workspace 的写仍会互相覆盖；否决（P1）。改为按 `primaryKey` 分文件。
 - **session 级状态。** 同一 workspace 的两个 session 各建 watcher、各提示一次；否决（P3）。按 `primaryKey` 共享，session 只做 waiter/鉴权。
-- **依赖 `ctx.worktrees` 做发现/包装其 `create`/`restore`。** 只覆盖 DSH 创建的 worktree，漏掉终端/IDE/forge/其他 Host；B 的发现否决（D5）。A 在 v1 延后；未来只接受公开记录，不依赖 `ctx.worktrees` 的私有/缺失字段。
+- **依赖 `ctx.worktrees` 做发现/包装其 `create`/`restore`。** 只覆盖 DSH 创建的 worktree，漏掉终端/IDE/forge/其他 Host；A/B 均用各自的磁盘快照判据。
 - **用 `git worktree list` 做激活/发现（任何频率）。** 它会遍历并跟随其他 admin 的 `gitdir`/`locked` symlink，输出仓库外文件；否决（复审五 P1-1）。v1 不运行该命令，候选由受控 inventory 逐个枚举。
 - **只靠双向 `.git`/`gitdir`/`commondir` 判断 candidate。** 没有 admin `HEAD` 的伪 admin 仍能通过；否决（复审五 P1-2）。候选必须额外通过元数据快照与 `admin/HEAD`、common 结构校验；不启动 Git。
 - **只排除 `.git` 指针文件形态的 submodule。** 旧式内嵌 `.git` 目录会通过主仓库根判据；否决（复审五 P2-1 / 复审六 P1-1）。`.git` 文件无 `commondir` 的形态直接排除；`.git` 目录的形态用受控 parent probe + index mode `160000`；父仓库 config/include/探测失败 → 无法判定 → inactive。
 - **信任 Git 的对象解析或 `rev-parse`。** 会读外部 alternates、promisor fetch、跟随 `objects/<prefix>` symlink；否决（复审六 P1-2）。v1 不启动 Git、不解析 commit 对象、不读 `objects`；alternates 仅作防御性拒绝。
-- **整体拒绝 `--separate-git-dir`，包括派生的 linked checkout。** 这会把两个合法 linked worktree 也挡掉；否决（复审六 P2）。只拒绝主 checkout（`.git` 文件无 `commondir`）；派生的 linked checkout 支持 B，A 仍延后。
+- **整体拒绝 `--separate-git-dir`，包括派生的 linked checkout。** 这会把两个合法 linked worktree 也挡掉；否决（复审六 P2）。只拒绝主 checkout（`.git` 文件无 `commondir`）；派生的 linked checkout 支持 B，A 另按 §1 判定 common。
 - **直接对原 index 运行 `ls-files`，或复制后仍运行它。** split index 的 `sharedindex.*`、sparse index 的 tree 对象会被读取；副本调用还会执行父 `core.fsmonitor` 脚本；否决（复审七/九 P1）。v1 用 `O_NOFOLLOW` 打开源 index、同 fd 读取并由插件解析，不运行 `ls-files`。
 - **只拒绝 `sdir`/`core.sparseCheckout`。** 删除 `sdir`、保留 `040000` 目录条目的伪造 index 仍会被 Git 展开；否决（复审九 P1）。格式门禁无条件拒绝任何 `040000` 条目。
 - **`lstat` 后再按路径复制 index。** 检查与复制之间可换成 symlink；否决（复审九 P1）。用 `O_NOFOLLOW` 打开源文件，对同一 fd `fstat`、限量读取。
@@ -707,16 +708,13 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 
 ## Consequences
 
-- 外部/预存在/移动/修复的 worktree 都能被 **B** 识别，不依赖 DSH worktree 服务；v1 不产生 A 提示。
+- 外部/预存在/移动/修复的 worktree 都能被 **B** 识别，不依赖 DSH worktree 服务。A 在 B 后接入相同的提示流程。
 - 激活以**插件的元数据快照**为准，不启动 Git：伪 `.git`、伪 admin、admin 不在 `common/worktrees/`、bare 派生 worktree、普通/worktree 子目录、submodule 两种形态、`include`/非空 `core.worktree`/`extensions.worktreeConfig=true`、`--separate-git-dir` 主 checkout、非法 `HEAD` 都 inactive；**v1 只接受 `core.repositoryformatversion=0`**，`--relative-paths`/`extensions.relativeWorktrees=true` 的版本 1 也 inactive；代价是插件要维护 config/index/HEAD 解析器，解析失败即 inactive。
 - **对象/index 边界**：v1 不解析 commit 对象、不读 `objects`；`objects/info/alternates`/`http-alternates` 非空仍拒绝；父 index 路径由指针/gitdir 直接得到，`O_NOFOLLOW`/`O_NONBLOCK` 打开、同 fd `fstat`、限量读取，由插件解析并拒绝 `link`/`sdir`/`040000`/未知版本；**不运行 `ls-files`/Git**，因此不执行 `core.fsmonitor`、不读 sharedindex/tree；promisor remote 不补对象、不写 `.pack`。
 - **submodule 祖先链 probe**：从 `dirname(root)` 向上遍历**所有**祖先 `.git`，每层用完整相对路径按 2.4 的平台等价规则查 index，任一层 mode `160000` 即 inactive，阴性继续更外层；只读祖先 `.git`/config/index；任一层 config include/core.worktree/extensions 或探测失败 → 无法排除 → inactive；不使用 `--show-superproject-working-tree`，空输出不等于“没有 superproject”。
-- **`--separate-git-dir`**：主 checkout（`.git` 文件无 `commondir`）inactive；从同一分离式仓库派生的 linked checkout（`.git` 文件 + `commondir`）支持 B，可相互发现/提示；A 仍延后。
+- **`--separate-git-dir`**：主 checkout（`.git` 文件无 `commondir`）inactive；从同一分离式仓库派生的 linked checkout（`.git` 文件 + `commondir`）支持 B，可相互发现/提示；A 的候选只取符合 §1 的 common。
 - **不运行 `git worktree list`/任何 Git 子进程**：v1 用受控 inventory 逐个枚举，每个候选通过元数据快照、`admin/HEAD`、祖先链 probe 与 index 守卫；**不解析 commit 对象**，无效候选不提示、不登记。
-- **A 在 v1 延后**：没有公开可信的 main checkout 记录来源；worktree session 的 git 提权缺口仍在，用户可手动 `/workspace-folders add <mainRoot>`；A 重新立项前必须先有 source contract。
-- 发现与清理分离：发现是 B 对话框；清理是面板按钮；删除永不自动。
-- 默认 pool 的 worktree session 仍有 git 提权缺口（D1 的显式取舍）；可手动加 common git dir。
-- A 在 v1 延后；B 是源码树授权；B 的对话框说明 `inherit` 与其他读写 session 的可见性。A 的宽授权只在未来重新立项时披露。
+- A 经确认后覆盖默认 pool 和外部 linked checkout 的 Git 元数据写入。B 授权兄弟 checkout 源码树。专用清理仍只在面板由用户显式触发，并且只针对 B 根。
 - 清理资格在 owner 串行队列内复验：只有 `record.path` 确认缺失才清理；worktree 恢复、路径存在但无法判定、旧 admin 缺失但 checkout 仍有效 → `not-eligible`，保留普通 Remove；批量只认显式 `rootIds`，并绑定 `id + path + addedAt`。
 - 提示确认在 owner 内 `addNew`，分别携带 primary/candidate 的 Git 身份与 candidate `admin/HEAD`；symlink 替换、candidate 被 move 后原路径重建普通目录、admin `HEAD` 消失/变化、primary/candidate 任一变化、index/对象扇出 symlink → `prompt-stale`；**不解析 commit 对象**，校验与写入使用同一个 canonical 值；不会 revive 手动记录；只追踪本功能新建的 B 根。
 - L4 残余：清理前同路径新目录可能继承旧 B 根授权；同路径重建在无 watcher 时不可可靠区分；面板警告 + 本 ADR 记录；不引入自动清理/身份字段。
@@ -729,12 +727,14 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 - 宿主重启/无 client 时，发现靠下次 workspace 创建时的 inventory；删除状态靠 refresh/list 重算。
 - `git worktree move` 后旧根不自动迁移；旧根 cleanup、新路径 B 提示；不自动转移授权。
 - 不覆盖普通仓库子目录、submodule（两种形态）、`--separate-git-dir` 主 checkout、worktree 子目录、bare 派生 worktree；派生的 linked checkout 仍支持 B。
-- A 在 v1 延后；B 在 read-only 只读提示。
+- A 仅在 `workspace-write` 提示；B 在 `read-only` 仍可显示只读提示。
 - 没有 TUI/headless 对话框；面板/命令可用。
 - 不修改上游、不新增 DSH 版本；inactive 时与未安装本功能一致。
 - `addNew`/`removeForDeletedWorktree` 是 Registry 的新内部操作；共享 authority 的协议方法随包发布，不与旧版插件混用（ADR-0009/ADR-0025 的 fail-closed 原则）。
 
-## 复审落定
+## 第十七次修订的复审落定（历史）
+
+本表保留 B 验收及当时延后 A 的记录。A 的现行决策见 §1。
 
 | 复审项 | 落定 |
 | --- | --- |
@@ -783,5 +783,6 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 - [ADR-0025：共享 Registry Authority](./ADR-0025-shared-registry-authority.md)
 - [ADR-0027：revive 目标与受保护路径](./ADR-0027-revive-target-and-protected-paths.md)
 - [ADR-0028：上游主根身份与共享模式](./ADR-0028-upstream-primary-identity-and-shared-only-registry.md)
-- [需求文档](../requirements/multi-root-workspace.md)（P0 将增加 7.16/7.17）
+- [需求文档](../requirements/multi-root-workspace.md#7-行为约束)（§7.16–§7.18）
+- [实施计划](../plans/active/2026-11-09-worktree-aware-root-suggestions.md)
 - [路线账本](../plans/active/2026-09-12-multi-root-workspace.md)

@@ -1,21 +1,22 @@
-# Worktree 感知的附加根建议（v1 B）实施计划
+# Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**Accepted（2026-11-09，设计与实施计划审核通过）；P0 文档完成；P1 未开始**。本计划只定义实施边界、依赖、分期与验收，不包含实现代码。
-> 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十七次修订）。
-> 需求：[§7.16 / §7.17](../../requirements/multi-root-workspace.md#7-行为约束)。
+> 状态：**P0 文档完成；P1 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
+> 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
 ## Goal
 
-在不修改上游 DSH 仓库的前提下，为“workspace 是一个 Git linked worktree”补齐两件事：
+在插件内按以下顺序交付 worktree 支持：
 
 1. **B：worktree 发现与附加根建议。** primary root 是 main 或 linked checkout 时，发现同一 common 下外部/预存在/其他创建者的 worktree，提示用户把该 worktree 加为 `inherit` 附加根；**默认 pool 没有特殊排除**：主仓库作为 primary 时 `.agents/worktrees/<id>` 位于 primary 内，按包含规则过滤；primary 本身是 pool worktree 时，兄弟 pool worktree 仍是合法 B 候选（再受 registry/上限/ignore 约束）；永不自动添加。
-2. **删除生命周期。** 已登记的 B 根只有在 `record.path` 确认缺失时才提供专用清理入口；面板显示、用户显式触发、owner 复验、永不自动删除；缺失根占额度直到清理或手动删除。
+2. **B 的删除生命周期。** 已登记的 B 根只有在 `record.path` 确认缺失时才提供专用清理入口；面板显示、用户显式触发、owner 复验、永不自动删除；缺失根占额度直到清理或手动删除。
+3. **A：linked worktree 的共享 Git 元数据授权。** 用户确认后登记 canonical common git dir 为 `inherit` 根，解决默认 pool 和外部 linked checkout 的 `git add` / `git commit` 写入缺口。
 
-v1 **只做 B**；A（main-worktree authorization）延后，必须由公开可信记录证明，不从路径/文件名猜测。
+插件详情提供与「启用附属根 Skills」同款的全局开关，默认开启 A/B 建议及 B 专用清理。
 
 ## Background
 
-Worktree 是临时目录，会被 `git worktree remove`、`prune`、手动删除或移动。Session 的 workspace 若是 linked worktree，其 `.git` 是指向主仓库 admin 的文件，主仓库的 `index`/`objects`/`refs`/hooks 在 primary root 之外；模型做 `git add`/`commit` 会被迫反复申请 `danger-full-access`。B 的用户明确确认可以授权 worktree 源码树，同时保持“不自动扩大权限”。
+Worktree 可能被 Git 或手动删除、移动。B 解决兄弟 checkout 的源码树访问和已登记根清理。A 解决 linked checkout 作为 session primary 时的 Git 元数据写入：私有 `index` 在 admin 下，`objects`、`refs` 等位于共享 common，二者通常都在 primary 外。默认 pool 下主 checkout 包含 primary，按既有重叠规则不能登记整个主 checkout。
 
 ADR-0039 已经过多轮只读复审，覆盖：
 
@@ -28,14 +29,14 @@ ADR-0039 已经过多轮只读复审，覆盖：
 
 ## Current State
 
-- ADR-0039 与本计划已 **Accepted**；接受范围是设计和实施计划，本轮不启动 P1 实现。
-- 本计划、需求 §7.16/§7.17、路线账本条目属于 P0 文档。
+- ADR-0039 第十七次修订接受 B；第十八次修订确定 A 的授权边界与全局开关。P1 实现尚未开始。
+- 本计划、需求 §7.16–§7.18、路线账本条目属于 P0 文档。
 - 现有 Registry、scope、面板、`/workspace-folders` 命令与 Connection RPC 已经存在；本功能新增独立的 `multi-root-worktrees` 行与 `WORKTREE_ENDPOINTS`，不修改上游包。
-- 当前没有 worktree 发现、worktree 提示、`worktreeRoots` sidecar 或专用 cleanup 的实现。
+- 当前没有 worktree 发现、提示、全局开关、`worktreeRoots` sidecar、专用 cleanup 或 Git 元数据授权的实现。
 
 ## Scope
 
-### In scope（v1 B）
+### In scope（先 B，后 A）
 
 - primary 必须是 Git main 或 linked checkout 根；普通目录/仓库子目录不执行本功能动作，曾 active 后失效也停止后台活动，仅收尾旧提示/资源。
 - 受控枚举 `<common>/worktrees/*/gitdir`；包含 workspace 创建前已存在、由终端/IDE/forge/其他 DSH 创建的 worktree。
@@ -45,10 +46,12 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - `worktreePromptWait` 判别联合、`unactivated`/`active`/`lost` 三态、watcher 释放与恢复。
 - 完整祖先链、两种 checkout 形态、Unicode 路径等价、HEAD 语法、checkout/admin 身份、owner 复验。
 - 平台：macOS / Linux / Windows（Windows 的文件句柄/文件 ID 实现按平台能力；无法提供稳定身份时不发提示或 stale）。
+- A 仅在 linked primary 的 `workspace-write` 会话提示；通过完整快照绑定 primary/admin/common，显式确认后经 owner 新建普通 `inherit` 登记。
+- `multi-root-worktrees.enabled` 全局开关默认 `true`，位于插件详情卡，与附属根 Skills 的开关独立生效。
 
 ### Out of scope
 
-- A（main-worktree authorization）：v1 不提示、不登记、不回归到猜测；未来必须先有公开可信的 `repoRoot`/main checkout 记录与 source contract。
+- 授权整个主 checkout、通过 effective cwd 选择授权目标、修改现有附加根权限来绕过 A 门禁。
 - 自动添加、自动删除、自动清理；后台静默扩大授权。
 - `git worktree list` 或任何 Git 子进程。
 - 解析 commit 对象、读取 `objects`、执行 hooks/fsmonitor/attributes。
@@ -70,16 +73,17 @@ ADR-0039 已经过多轮只读复审，覆盖：
 | `worktrees/registry` | `addNew`/`removeForDeletedWorktree`、sidecar `worktreeRoots`、映射 prune | owner 串行队列；完整快照才 prune；不 revive 手动记录 |
 | `worktrees/owner` | primary/candidate 完整判据、HEAD 语法、checkout/admin 身份、祖先索引 | 写入使用同一 canonical 值；任何变化 `prompt-stale` |
 | `worktrees/client` | 对话框、面板行、RPC schema、`stale`/`lost` 客户端行为 | 不发送路径；宿主/客户端同时校验判别联合 |
+| Settings 与插件详情卡 | Host 开关、现代/旧版适配、卡片 Switch 与运行时失效 | 复用附属根 Skills 接缝与卡片，独立配置；Host 门禁先于后台活动和写入 |
 
 ## Implementation
 
 ### P0 文档（本阶段完成）
 
-- [x] ADR-0039 第十七次修订（Accepted）。
-- [x] 需求 §7.16/§7.17。
+- [x] ADR-0039 第十八次修订（Accepted）。
+- [x] 需求 §7.16–§7.18。
 - [x] 本计划。
 - [x] 路线账本条目（P0 / P1 未开始）。
-- ADR 转入 Accepted 只作为 **P1 前置条件**（见 Dependencies），不在 P0/P7 重复安排。
+- ADR 已满足 P1 的设计前置条件。
 
 ### P1 元数据快照与解析器（未开始）
 
@@ -91,16 +95,19 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 祖先链：两种形态、逐层 config/index、完整相对路径、阴性继续、无法排除 inactive。
 - 单测覆盖最终 index 换链、中间目录换链、FIFO、split/sparse 伪 index、NFC/NFD、祖先遮蔽、sha256/version 1。
 
-### P2 发现、激活与 watcher（未开始）
+### P2 发现、激活、watcher 与 Host 设置（未开始）
 
+- 在 `multi-root-worktrees` 行新增默认 `true` 的 `enabled`，复用附属根 Skills 的现代 volatile Config / 旧版 Settings namespace 适配；无 Settings UI 时读取 loader Config。Host 按 ADR §9 控制发现和专用清理，关闭时唤醒 waiter、清理资源并失效旧提示。P4 接通 owner 写入前门禁。
 - inventory、候选 key、`CommonState`/`WorkspaceState`、workspace 共享。
 - `activation` 三态；首次门禁拒绝不建 watcher/sidecar。
 - primary/ancestor watcher best-effort；active 时长轮询重挂复验；`lost` 清候选并释放 watcher/waiter/定时器，停止重挂。
 - 恢复只经用户面板/命令 `list` 或显式重新检测；禁止自动 wait、one-shot 与周期重查；重建时清 `evaluated`、保留明确 `prompted`。
 - 验收：普通目录/仓库子目录无后台；active→lost 停止后台→显式恢复新 ID；候选去重/上限/degraded。
 
-### P3 Prompt RPC 与 UI（未开始）
+### P3 Prompt RPC、UI 与插件设置开关（未开始）
 
+- 在「设置 → 插件 → Multi-root Workspace → 插件详情」现有卡片内，于「启用附属根 Skills」旁添加独立 Switch「启用 Worktree 附加根建议」/「Enable worktree root suggestions」。复用同一 Settings form 订阅与写入、revision、错误提示与旧版 `settings.plugin.item` 适配；支持即时生效和持久化，不另注册包级卡片。
+- 关闭时退出提示和专用清理 UI，处理 `worktree/not-enabled` 并停止轮询；开启后对当前 live session 重新检测，已 `lost` 的 workspace 仍走显式恢复。
 - `WorktreePromptWaitResult`：`prompt`/`timeout`/`unactivated`/`lost`/`stale`；所有分支禁止 `retryAfterMs`。
 - 宿主 `WorktreeResponseMap` 与客户端 schema 同时校验；拒绝缺字段/错误 status/多余 retry。
 - 面板/对话框：只展示 eligible 候选、`effectiveAccess`、remaining；**P3 只做只读预览，生产 `worktreePromptResolve`/确认按钮保持禁用（`worktree/not-enabled` 或路由未挂载），不得调用 Registry 写入**。
@@ -110,7 +117,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 
 > P4 是**首次可写阶段**：`addNew` 与完整 owner 复验必须在同一阶段实现；P3 的确认操作在 P4 验收通过前不启用。
 
-- `addNew(primaryRoot, { path, access, expected })`：owner 串行队列；分开 primary/candidate；复用 add 校验；只新建不 revive。
+- `addNew(primaryRoot, { path, access, expected })`：owner 串行队列；分开 primary/candidate；复用 add 校验；只新建不 revive。确认与专用写入同时接入 ADR §9 的设置门禁，覆盖在途 owner 请求的提交边界。
 - owner 复验：primary 完整判据（含完整祖先链）+ candidate 激活判据（含祖先 gitlink）；primary/common/admin HEAD 语法；candidate admin HEAD == expected；`rootIdentity`/`adminIdentity` 比对；任何变化 → `prompt-stale`。
 - `addNew` 在 owner 同一队列操作内先持久化登记再写 B 映射，返回 `{ id, path, addedAt, registryEpoch, registryRevision }`；禁止 follower 事后补写。保持跨文件崩溃窗口按手动根处理的降级。
 - `removeForDeletedWorktree`：`record.path` 确认缺失 + `rootId + path + addedAt`；路径存在/无法判定/inaccessible → not-eligible。
@@ -146,17 +153,36 @@ ADR-0039 已经过多轮只读复审，覆盖：
   - active→lost 停止后台→显式恢复新 ID；
   - 同路径删除重建 → stale；
   - `forget-workspace` 新入口不存在（延期），专用 cleanup 不依赖它。
+- Settings：覆盖默认开、关闭/开启即时生效、跨重启持久化、现代/旧版卡片不重复、已登记根保留、旧提示和未提交的异步任务失效。真实 Web 验证与 Skills 并列且相互独立；headless 验证 loader 显式关闭。
 - 平台：macOS 文件句柄/Unicode；Linux；Windows 文件 ID/reparse point；无法验证的行显式 skip 并打印原因。
 - 门禁：`pnpm lint`、`typecheck`、`test`、`build`、`docs:check`；需要时 `compat:check`。
 
-### P7 文档与发布（未开始）
+### P7 B 文档与发布准备（未开始）
 
-- 更新 requirements、README、CHANGELOG（仅发布时）、路线账本和实现文档；ADR 的 Accepted 状态只在 P1 前置处理，不在 P7 重复变更。
+- 更新 B 的 requirements、双语 README、路线账本和实现文档；CHANGELOG 仅在实际发布时更新。完成 B 的验收和发布准备后进入 P8，是否拆成两次发布由路线账本记录。
 - 不修改上游；不新增 DSH 版本分支。
+
+### P8 A：common 候选与来源契约（未开始）
+
+- 复用 P1/P2 的 linked primary 快照，按 ADR §1 识别 `git-common` 候选。绑定 canonical primary、admin、common 的稳定文件身份和 admin HEAD；应用 `probeAdd`、全局设置与 `workspace-write` 门禁。B 的 inventory 继续独立。
+- 验收：默认 pool 和外部 linked checkout 都能得到相同形态的 common 候选；普通主 checkout、仓库子目录、仅 effective cwd 切入 linked checkout、伪指针、不受支持布局、既有登记或根校验拒绝时不产生 A 提示。分离式 gitdir 反例验证候选永远不会变成 common 的父目录。
+- P8 只构造宿主候选；生产界面与确认在 P9 同阶段接通。
+
+### P9 A：提示、确认与 owner 提交（未开始）
+
+- 扩展 B 的提示联合、双端 schema、工作区去重/忽略与可见队列。对话框分别展示 A/B 文案，A 显示 canonical common、`inherit`、共享元数据范围及持久性。客户端沿用 `sessionId + promptId + action` 确认，无路径参数。
+- 同阶段接通 `addNew` 的 A 分支。请求 Host 和 owner 分别重跑来源与身份检查，owner 队列内按普通 Registry 规则新建；不 revive、不写 B 清理映射。开关关闭或 mode 变化时作废旧提示；已确认的普通根通过普通 Remove 撤回。
+- 验收：验证送交 owner 前的 mode 切换和设置关闭都会作废旧提示。用队列屏障在 owner 提交前替换 common/admin、修改反向指针或祖先索引，断言无写入。按 ADR §9 验证跨 Host 已送交 owner 请求的边界。A/B 同时可见时，一个 session 的 A 过滤不得堵住该 session 的 B 提示。
+
+### P10 A：受限 Git 旅程、回归与发布准备（未开始）
+
+- 在隔离夹具中分别用默认 pool 和外部 linked checkout 作为 live session primary。确认前，真实受限 shell 的 Git 写入因缺少元数据权限失败；确认后，在同一 `workspace-write` 模式、不走 `danger-full-access` 的条件下完成 `git add` 和 `git commit`，核对 index、commit/ref 产物。验证主 checkout 源码（当前 primary 之外）和无关目录仍拒写；普通 Remove 后，新进程再次无法写该 common。
+- 覆盖 `read-only`、`danger-full-access` 无 A 提示、per-tool cap、authority 不可用以及设置关闭/开启；删除 linked checkout 后，A 根保持普通 Registry 生命周期，专用清理只追踪 B 根。
+- 按现有 macOS / Linux / Windows 内核探测记录实跑与 skip 证据，回归 B 和完整门禁。更新实现文档、双语 README 与路线账本，实际发布时同步双语 CHANGELOG。
 
 ## Dependencies
 
-- ADR-0039 已 Accepted（P1 前置满足）；P1 仍未开始。
+- ADR-0039 已 Accepted；P8 以 B 的 P1–P7 完成为前置条件。
 - 现有 Registry、Connection RPC、panel controller、Registry owner 串行队列、scope/authority 语义。
 - 平台能力：POSIX `openat`/`O_NOFOLLOW`/`O_NONBLOCK`；Windows 文件 ID/reparse point；Node 版本按现有支持矩阵。
 - 无新增可选 peer；无上游改动。
@@ -168,7 +194,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - “外部文件没有被读取/脚本没有执行”用外部 marker/监控断言，不只无提示。
 - RPC 判别联合由宿主和客户端 schema 双重校验；错误 shape 必须拒绝。
 - 映射 prune 的 authority 空快照用例必须端到端覆盖。
-- 文档门禁：`pnpm --config.verifyDepsBeforeRun=false docs:check`。
+- 文档门禁：`pnpm docs:check`。
 
 ## Risks
 
@@ -184,7 +210,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 ## Documentation Impact
 
 - ADR-0039（状态与修订）。
-- 需求 §7.16 / §7.17（含 `forget-workspace` 延期）。
+- 需求 §7.16–§7.18（含 `forget-workspace` 延期）。
 - 本计划与 `docs/plans/README.md` active 列表。
 - 路线账本（唯一进度/发布状态来源）。
 - 发布时 `CHANGELOG.md` / `CHANGELOG.en.md`。
@@ -192,8 +218,9 @@ ADR-0039 已经过多轮只读复审，覆盖：
 
 ## Completion Criteria
 
-- ADR-0039 Accepted（P1 前置满足）；P1–P6 全部实现并有回归；P7 只做实现文档/发布记录。
-- v1 只产生 B 提示；A 不产生提示、不登记；默认 pool 按包含规则处理，另行验收兄弟 pool 候选。
+- P1–P7 的 B 行为验收后完成 P8–P10；默认 pool 的兄弟 checkout 与 A 的 common 分别验收。
+- A 经显式确认后，默认 pool 和外部 linked checkout 的受限 `git add` / `git commit` 均通过；主 checkout 源码和无关路径仍拒写。
+- 插件详情开关与 Skills 同卡、默认开启、实时生效并可持久化；关闭后客户端停止 worktree 请求，当前 Host 停止后台任务。已登记根仍可在普通根管理中操作。
 - P3 确认门禁生效；P4 才接通写路径，等待 owner 替换候选时 Registry 无写入。
 - 所有 inactive 布局在入队和 owner 提交都拒绝；owner 不接受过期提示。
 - 无 Git 子进程、无外部 index/object/config 读取；Web 宿主/客户端 RPC schema 一致，headless 只验证组合启动与现有命令/Registry 正常（不新增浏览器入口）。

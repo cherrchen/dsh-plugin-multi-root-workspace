@@ -77,4 +77,4 @@ ADR-0002-short-title.md
 
 - [ADR-0038-workspace-menu-folders-dialog.md](./ADR-0038-workspace-menu-folders-dialog.md) — 工作区 `...` 菜单的「管理工作区目录…」入口：经 apply 作用域的 dialog controller 复用 footer 对话框，当前 session 属于目标时直接打开、否则先经 `uiWorkspace.openWorkspace` 切换并确认 current；服务缺失置灰，`RootSwitcher` 零改动（Accepted，实施见计划）。
 
-- [ADR-0039-worktree-aware-root-suggestions.md](./ADR-0039-worktree-aware-root-suggestions.md) — Worktree 感知的附加根建议与手动清理（v1 仅 B，A 延后）：仅 checkout 根启用，失效后停止后台活动；sidecar 全部写入经既有 Registry owner 排序，跨 owner epoch 核对映射。Accepted，2026-11-09 第十七次修订；实施状态见路线账本。
+- [ADR-0039-worktree-aware-root-suggestions.md](./ADR-0039-worktree-aware-root-suggestions.md) — 先做 worktree 附加根建议与手动清理（B），再做 linked worktree 的共享 Git 元数据授权（A）。共用默认开启的插件设置。Accepted，2026-11-09 第十八次修订；实施状态见路线账本。
