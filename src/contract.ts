@@ -322,6 +322,13 @@ const rootsViewSchema = z.object({
 
 const revealedViewSchema = z.object({ revealed: z.string() })
 
+/** The cleanup answer; `roots` is re-validated by {@link parseRootsView}. */
+const worktreeCleanupSchema = z.object({
+  removed: z.array(z.string()),
+  skipped: z.array(z.object({ id: z.string(), code: z.string() }).strict()),
+  roots: z.unknown(),
+}).strict()
+
 const errorViewSchema = z.object({
   code: z.string(),
   message: z.string(),
@@ -369,6 +376,24 @@ export function parseRootsView(value: unknown): Parsed<RootsView> {
       ...(view.primaryState === undefined ? {} : { primaryState: view.primaryState }),
       ...(view.worktreeCleanupCount === undefined ? {} : { worktreeCleanupCount: view.worktreeCleanupCount }),
     },
+  }
+}
+
+/**
+ * Validate a `WorktreeCleanupView` when it arrives. The nested roots view is
+ * parsed by the same function the list endpoint uses, so a cleanup answer can
+ * never introduce a shape the list would have refused.
+ * @param value - the raw endpoint value.
+ * @returns the view, or the reason it is not one.
+ */
+export function parseWorktreeCleanupView(value: unknown): Parsed<WorktreeCleanupView> {
+  const parsed = worktreeCleanupSchema.safeParse(value)
+  if (!parsed.success) return { ok: false, message: `the answer is not a worktree cleanup view: ${firstIssue(parsed.error)}` }
+  const roots = parseRootsView(parsed.data.roots)
+  if (!roots.ok) return { ok: false, message: `the cleanup roots view is invalid: ${roots.message}` }
+  return {
+    ok: true,
+    value: { removed: parsed.data.removed, skipped: parsed.data.skipped, roots: roots.value },
   }
 }
 

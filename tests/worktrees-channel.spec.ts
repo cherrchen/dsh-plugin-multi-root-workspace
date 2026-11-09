@@ -1,6 +1,6 @@
 /** The worktree endpoints over the real panel channel dispatch. */
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { mountRegistryStack } from './support/registry-stack.ts'
@@ -34,7 +34,7 @@ afterEach(async () => {
   while (fixtures.length > 0) fixtures.pop()!.dispose()
 })
 
-async function mount(config: { enabled?: boolean } = {}): Promise<{ handler: Handler; area: FixtureWorkspace; main: string; waitTimeoutMs: number }> {
+async function mount(config: { enabled?: boolean } = {}): Promise<{ handler: Handler; area: FixtureWorkspace; main: string; stack: Awaited<ReturnType<typeof mountRegistryStack>> }> {
   const area = createFixtureWorkspace('worktrees-channel')
   fixtures.push(area)
   const main = join(area.base, 'main')
@@ -56,7 +56,7 @@ async function mount(config: { enabled?: boolean } = {}): Promise<{ handler: Han
   await ctx.plugin(MultiRootWorktrees, { enabled: config.enabled ?? true, waitTimeoutMs: 100 })
   await ctx.plugin(CommandModule, {})
   if (handler === undefined) throw new Error('the panel channel was not mounted')
-  return { handler, area, main, waitTimeoutMs: 100 }
+  return { handler, area, main, stack }
 }
 
 describe('worktree panel channel', () => {
@@ -70,13 +70,13 @@ describe('worktree panel channel', () => {
     expect((waited.value as WorktreeWaitView).status).toBe('prompt')
   })
 
-  it('keeps confirmation and cleanup behind the write gate in this phase', async () => {
+  it('confirms through the channel and refuses cleanup eligibility it cannot prove', async () => {
     const { handler } = await mount()
     const prompt = (await handler('worktreePrompt', { sessionId: SESSION }, new AbortController().signal)).value as { prompt: { id: string } }
-    expect(await handler('worktreePromptResolve', { sessionId: SESSION, promptId: prompt.prompt.id, action: 'add' }, new AbortController().signal))
-      .toMatchObject({ ok: false, error: { code: 'worktree/not-enabled' } })
-    expect(await handler('worktreeRootsCleanup', { sessionId: SESSION, rootIds: ['r1'] }, new AbortController().signal))
-      .toMatchObject({ ok: false, error: { code: 'worktree/not-enabled' } })
+    const resolved = await handler('worktreePromptResolve', { sessionId: SESSION, promptId: prompt.prompt.id, action: 'add' }, new AbortController().signal)
+    expect(resolved.ok).toBe(true)
+    const cleaned = await handler('worktreeRootsCleanup', { sessionId: SESSION, rootIds: ['r1'] }, new AbortController().signal)
+    expect(cleaned).toMatchObject({ ok: true, value: { removed: [], skipped: [{ id: 'r1', code: 'worktree/not-eligible' }] } })
   })
 
   it('answers stale when the seen prompt is gone and refuses malformed bodies', async () => {
@@ -101,6 +101,21 @@ describe('worktree panel channel', () => {
       expect(await handler(endpoint, payload, new AbortController().signal), endpoint)
         .toMatchObject({ ok: false, error: { code: 'worktree/not-enabled' } })
     }
+  })
+
+  it('cleans up a confirmed deleted worktree through the channel', async () => {
+    const { handler, stack, main, area } = await mount()
+    const prompt = (await handler('worktreePrompt', { sessionId: SESSION }, new AbortController().signal)).value as { prompt: { id: string } }
+    expect((await handler('worktreePromptResolve', { sessionId: SESSION, promptId: prompt.prompt.id, action: 'add' }, new AbortController().signal)).ok).toBe(true)
+    const [row] = stack.registry.list(main)
+    expect(row).toBeDefined()
+    rmSync(join(area.base, 'wt'), { recursive: true, force: true })
+    await stack.registry.refresh(main)
+    const cleaned = await handler('worktreeRootsCleanup', { sessionId: SESSION, rootIds: [row!.id] }, new AbortController().signal)
+    expect(cleaned).toMatchObject({
+      ok: true,
+      value: { removed: [row!.id], skipped: [], roots: { roots: [] } },
+    })
   })
 
   it('resets through the channel and reports the refreshed prompt', async () => {

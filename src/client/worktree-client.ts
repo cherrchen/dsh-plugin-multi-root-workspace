@@ -12,10 +12,12 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import {
   PANEL_CHANNEL,
   parseErrorView,
+  parseWorktreeCleanupView,
   worktreePromptAnswerSchema,
   worktreeResetAnswerSchema,
   worktreeResolveAnswerSchema,
   worktreeWaitViewSchema,
+  type WorktreeCleanupView,
   type WorktreePromptAnswerView,
   type WorktreePromptWaitView,
   type WorktreeResetAnswerView,
@@ -33,6 +35,7 @@ export interface WorktreeClient {
   prompt(sessionId: string, signal?: AbortSignal): Promise<WorktreePromptAnswerView>
   resolve(sessionId: string, promptId: string, action: 'add' | 'dismiss', dontRemind?: boolean, signal?: AbortSignal): Promise<WorktreeResolveAnswerView>
   reset(sessionId: string, signal?: AbortSignal): Promise<WorktreeResetAnswerView>
+  cleanup(sessionId: string, rootIds: readonly string[], signal?: AbortSignal): Promise<WorktreeCleanupView>
 }
 
 /**
@@ -55,6 +58,11 @@ export function createWorktreeClient(connection: ConnectionHandle): WorktreeClie
     },
     async reset(sessionId, signal) {
       return parse(worktreeResetAnswerSchema, await call(connection, 'worktreePromptReset', { sessionId }, signal), 'the worktree reset answer')
+    },
+    async cleanup(sessionId, rootIds, signal) {
+      const parsed = parseWorktreeCleanupView(await call(connection, 'worktreeRootsCleanup', { sessionId, rootIds }, signal))
+      if (!parsed.ok) throw new PanelError('panel/bad-response', parsed.message)
+      return parsed.value
     },
   }
 }

@@ -646,6 +646,7 @@ async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoo
   if (session === undefined) throw new RootValidationError('session-not-found', 'the panel session closed during the request')
   const policy = ctx.sandboxPolicy.resolve({ session })
   const scope = ctx.get('multiRootScope')
+  const worktreeInfo = await ctx.get('multiRootWorktrees')?.describeRoots(primaryRoot)
   return {
     primaryRoot: canonicalRoot(primaryRoot),
     ...(primaryName === undefined ? {} : { primaryName }),
@@ -653,13 +654,19 @@ async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoo
     mode: policy.mode,
     cappedTools: scope?.toolCaps() ?? [],
     toolAccessInvalid: scope?.toolAccessInvalid ?? false,
-    roots: statuses.map((status, index) => ({ ...toRootView(status, index),
-      effectiveAccess: status.state === 'available' ? effectiveRootAccess(status.access, policy.mode) : 'unavailable',
-    })),
+    roots: statuses.map((status, index) => {
+      const badge = worktreeInfo?.badges.get(status.id)
+      return {
+        ...toRootView(status, index),
+        effectiveAccess: status.state === 'available' ? effectiveRootAccess(status.access, policy.mode) : 'unavailable',
+        ...(badge === undefined ? {} : { worktree: badge }),
+      }
+    }),
     limit: registry.limit,
     count: statuses.length,
     ...(unavailable === undefined ? {} : { unavailable }),
     primaryState: primaryStateOf(primaryRoot),
+    ...(worktreeInfo === undefined ? {} : { worktreeCleanupCount: worktreeInfo.cleanupCount }),
   }
 }
 
@@ -679,14 +686,17 @@ function primaryStateOf(primaryRoot: string): 'present' | 'missing' | 'inaccessi
 
 /**
  * Explicit worktree cleanup: each id must be a tracked B mapping, and the
- * Registry owner re-verifies the path before anything is deleted. Implemented
- * with the Registry write phase (P4); until then the gate refuses.
+ * Registry owner re-verifies `rootId + path + addedAt` before anything is
+ * deleted. The answer carries the refreshed roots view, so the panel never
+ * needs a second round trip after a cleanup.
  */
 async function cleanupWorktreeRoots(ctx: Context, sessionId: string, rootIds: readonly string[]): Promise<WorktreeCleanupView> {
-  void ctx
-  void sessionId
-  void rootIds
-  throw new WorktreeError('worktree/not-enabled', 'worktree root cleanup is not enabled in this build')
+  const worktrees = ctx.get('multiRootWorktrees')
+  if (worktrees === undefined) throw new WorktreeError('worktree/not-available', 'worktree root suggestions are not mounted in this composition')
+  const result = await worktrees.cleanup(sessionId, rootIds)
+  const primaryRoot = resolvePanelPrimaryRoot(ctx, sessionId)
+  const roots = await rootsViewOf(ctx, ctx.multiRootRegistry, primaryRoot, { endpoint: 'list', sessionId })
+  return { removed: result.removed, skipped: result.skipped, roots }
 }
 
 /**

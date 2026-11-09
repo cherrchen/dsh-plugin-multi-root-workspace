@@ -92,7 +92,7 @@ const STYLE_ELEMENT_ID = 'multi-root-workspace-styles'
  * write path (P4) is in place. The host refuses the confirmation either way;
  * this constant only keeps the UI from offering a button that cannot work.
  */
-const WORKTREE_PREVIEW_ONLY = true
+const WORKTREE_PREVIEW_ONLY = false
 
 /** Services the client half needs before it may activate. */
 export const inject = ['slots', 'locale', 'connection']
@@ -215,6 +215,7 @@ export function apply(ctx: ClientContext): void {
       sessionId,
       subscribeSession,
       t,
+      worktrees: worktreeClient,
       dialogController,
       dialogOwner: true,
       ...(wide === undefined ? {} : { wide }),
@@ -247,6 +248,7 @@ export function apply(ctx: ClientContext): void {
         pickDirectory,
         sessionId: readSession,
         t,
+        worktrees: worktreeClient,
       })
     })
   })
@@ -286,8 +288,8 @@ export function apply(ctx: ClientContext): void {
     // never restarts because of it. `undefined` means the fork cannot mount.
     const filesTree = createFilesTreeSurface(props, filesTreeT)
     return absolutePath === undefined
-      ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, compact: true })
-      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
+      ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, compact: true })
+      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
   }))
   // Optional: the document preview's navigator seat exists only on runtimes
   // whose `ui-sidebar-files` draws the Folder-toggle tree (0.2.2-alpha.3+);

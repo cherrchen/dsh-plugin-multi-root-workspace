@@ -43,7 +43,8 @@ import {
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
 import type { Key } from './locales.ts'
-import type { RootAccess, RootEntryView, RootState, RootView, RootsView } from '../contract.ts'
+import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
+import type { WorktreeClient } from './worktree-client.ts'
 
 /** Translate one key of this plugin's namespace. */
 export type Translate = (key: Key, params?: Record<string, unknown>) => string
@@ -78,6 +79,11 @@ export interface WorkspaceFoldersActionProps {
    * second owner.
    */
   readonly dialogOwner?: boolean
+  /**
+   * The worktree endpoints' client. Optional: the dialog stays a plain root
+   * manager on compositions that do not mount the feature.
+   */
+  readonly worktrees?: WorktreeClient | undefined
 }
 
 /** The visual family of one capsule button, mirroring the host Button kit. */
@@ -193,6 +199,17 @@ function PathCopy(props: {
       <span className="mrfw-pathCopyIcon" aria-hidden="true"><IconCopy size={14} /></span>
     </button>
   )
+}
+
+/** The bilingual badge key for one worktree lifecycle state. */
+export function worktreeStateKey(state: WorktreeRootView['state']): Key {
+  switch (state) {
+    case 'directory-missing': return 'worktree.state.directory-missing'
+    case 'unregistered': return 'worktree.state.unregistered'
+    case 'moved': return 'worktree.state.moved'
+    case 'changed': return 'worktree.state.changed'
+    case 'active': return 'worktree.state.active'
+  }
 }
 
 /** The locale key for one reported root state. */
@@ -373,6 +390,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const [aliasField, setAliasField] = useState<'alias' | 'aliasId'>('alias')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
   const [menuFor, setMenuFor] = useState<string | undefined>(undefined)
+  /** Tracked worktree roots awaiting the operator's inline cleanup confirmation. */
+  const [cleanupFor, setCleanupFor] = useState<readonly string[] | undefined>(undefined)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const requestEpoch = useRef(0)
   const mounted = useRef(true)
@@ -469,6 +488,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       setState({ view: undefined, error: undefined, busy: false, noSession: current === undefined })
       setMenuFor(undefined)
       setAliasFor(undefined)
+      setCleanupFor(undefined)
       void refresh()
     })
   }, [props.subscribeSession, props.sessionId, refresh])
@@ -498,6 +518,32 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       return false
     }
   }, [panel, requestBase])
+
+  /**
+   * Clean up the exact tracked roots the operator selected. Only the worktree
+   * channel can perform this: the ids must be sidecar mappings and the owner
+   * re-verifies each path. Nothing is removed automatically.
+   */
+  const runCleanup = useCallback(async (ids: readonly string[]) => {
+    const worktrees = props.worktrees
+    if (worktrees === undefined || ids.length === 0) return
+    const base = requestBase()
+    if (base === undefined) {
+      setState({ view: undefined, error: undefined, busy: false, noSession: true })
+      return
+    }
+    const epoch = ++requestEpoch.current
+    setState(previous => ({ ...previous, busy: true, noSession: false }))
+    try {
+      const answer = await worktrees.cleanup(base.sessionId, ids)
+      if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
+      setState({ view: answer.roots, error: undefined, busy: false, noSession: false })
+      setCleanupFor(undefined)
+    } catch (error: unknown) {
+      if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
+      setState(previous => ({ ...previous, error: asPanelError(error), busy: false }))
+    }
+  }, [props.worktrees, props.sessionId, requestBase])
 
   /**
    * Open the composed picker and add whatever it returns. A picker that is not
@@ -646,6 +692,15 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           {state.view?.unavailable === undefined ? null : (
             <p role="alert" className="mrfw-alert">{state.view.unavailable}</p>
           )}
+          {cleanupFor === undefined ? null : (
+            <div className="mrfw-note" role="alert">
+              {t('worktree.cleanupConfirm', { count: cleanupFor.length })}
+              <Action variant="danger" pending={state.busy} onClick={() => { void runCleanup(cleanupFor) }}>
+                {t('worktree.cleanupDo')}
+              </Action>
+              <Action onClick={() => { setCleanupFor(undefined) }}>{t('panel.aliasCancel')}</Action>
+            </div>
+          )}
 
           <section className="mrfw-section">
             <div className="mrfw-sectionTitleRow">
@@ -715,6 +770,12 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     {t(stateKey(root.state))}
                   </span>
                 )}
+                {root.worktree !== undefined && root.worktree.state !== 'active' ? (
+                  <span className="mrfw-stateWarn">{t(worktreeStateKey(root.worktree.state))}</span>
+                ) : null}
+                {root.worktree?.cleanupEligible === true ? (
+                  <span className="mrfw-note">{t('worktree.pathReuse')}</span>
+                ) : null}
                 {root.state === 'missing' ? (
                   <IconButton
                     pending={state.busy}
@@ -751,6 +812,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     { id: 'access:inherit', label: t('panel.accessInherit'), icon: IconAccessInherit === undefined ? undefined : <IconAccessInherit />, disabled: state.busy || root.access === 'inherit' },
                     { id: 'access:read-only', label: t('panel.accessReadOnly'), icon: IconAccessReadOnly === undefined ? undefined : <IconAccessReadOnly />, disabled: state.busy || root.access === 'read-only' },
                     { id: 'access:read-write', label: t('panel.accessReadWrite'), icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />, disabled: state.busy || root.access === 'read-write' },
+                    ...(root.worktree?.cleanupEligible === true
+                      ? [{ id: 'worktree-cleanup', label: t('worktree.cleanup'), icon: <IconTrash />, danger: true, disabled: state.busy }]
+                      : []),
                     { id: 'remove', label: t('panel.remove'), icon: <IconTrash />, danger: true, disabled: state.busy },
                   ]}
                   onSelect={(id) => {
@@ -773,6 +837,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       if (widensAccess(root.access, access)) { setUpgradeFor({ root, access }); return }
                       void mutate('setAccess', { entry: entryOf(root), access })
                     }
+                    if (id === 'worktree-cleanup') setCleanupFor([root.id])
                     if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
                   }}
                   portal
@@ -898,6 +963,20 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               </>
             )}
             {atLimit ? <span className="mrfw-note">{t('panel.limitReached')}</span> : null}
+            {(state.view?.worktreeCleanupCount ?? 0) > 0 ? (
+              <Action
+                variant="danger"
+                pending={state.busy}
+                onClick={() => {
+                  const ids = (state.view?.roots ?? [])
+                    .filter(root => root.worktree?.cleanupEligible === true)
+                    .map(root => root.id)
+                  if (ids.length > 0) setCleanupFor(ids)
+                }}
+              >
+                {t('worktree.cleanupBatch', { count: state.view?.worktreeCleanupCount ?? 0 })}
+              </Action>
+            ) : null}
             <Action onClick={() => { void refresh() }} pending={state.busy} variant="outline">{t('panel.retry')}</Action>
           </div>
         </div>

@@ -27,16 +27,19 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { configValue, volatileField } from './compat/skills.ts'
 import { installWorktreeSettings } from './compat/worktree-settings.ts'
-import { effectiveRootAccess, type WorkspaceMode } from './contract.ts'
+import { effectiveRootAccess, type WorkspaceMode, type WorktreeRootView } from './contract.ts'
 import type {} from './compat.ts'
 import type {} from './providers.ts'
 import type {} from './scope.ts'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session'
-import { primaryKey } from './roots.ts'
+import { primaryKey, RootValidationError, samePath } from './roots.ts'
 import { inventoryWorktrees, type InventoryCandidate } from './worktrees/inventory.ts'
 import { resolveRepo } from './worktrees/repository.ts'
+import { lstatEntry, MAX_POINTER_BYTES, readUtf8File, resolvePointerTarget } from './worktrees/fs-safe.ts'
+import type { WorktreeMapping } from './worktrees/sidecar.ts'
+import type { AddNewRootOptions, DeletedWorktreeOptions } from './registry.ts'
 import { WorkspaceWatchSet, type WatchTargets } from './worktrees/watch.ts'
 import type {
   PromptCandidateSnapshot,
@@ -112,6 +115,13 @@ interface WorkspaceState {
   prompted: Set<string>
   /** Discovery keys this workspace ignores (memory projection of the sidecar). */
   ignored: Set<string>
+  /** B roots this feature currently tracks (sidecar mapping projection). */
+  mappings: readonly WorktreeMapping[]
+  /** Whether the read sidecar could be loaded; false keeps the mappings unknown. */
+  sidecarAvailable: boolean
+  /** Coalesced owner-sidecar reconciliation. */
+  sidecarPending: boolean
+  sidecarRunning?: Promise<void> | undefined
   waiters: Set<Waiter>
   watchers?: WorkspaceWatchSet | undefined
   degraded: boolean
@@ -172,7 +182,11 @@ export class MultiRootWorktrees extends Service {
       owner.settingsRead = settings.read
       yield settings.fiber.dispose
       yield ctx.multiRootRegistry.onChange(key => { owner.registryChanged(key) })
-      yield () => { owner.disposeAll() }
+      ctx.multiRootRegistry.setWorktreeGateProvider(() => owner.enabled)
+      yield () => {
+        ctx.multiRootRegistry.setWorktreeGateProvider(undefined)
+        owner.disposeAll()
+      }
     }, 'multi-root worktrees: ordered owner')
   }
 
@@ -224,6 +238,12 @@ export class MultiRootWorktrees extends Service {
     workspace.evaluated.clear()
     workspace.prompted.clear()
     this.ignored.delete(workspace.key)
+    try {
+      await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'reset' })
+      workspace.ignored.clear()
+    } catch {
+      workspace.ignored.clear()
+    }
     workspace.revision++
     if (workspace.activation === 'active') await this.refreshInventory(workspace)
     this.wake(workspace)
@@ -231,27 +251,140 @@ export class MultiRootWorktrees extends Service {
   }
 
   /**
-   * Confirm one prompt. Writes are enabled from phase P4 onward; until then
-   * the panel may render the preview but cannot submit it.
+   * Confirm or dismiss one visible prompt.
+   *
+   * `add` calls the Registry's `addNew` with the captured expectation: the
+   * OWNER re-runs the complete primary/candidate judgment and refuses a stale
+   * snapshot. `dismiss` writes nothing to the Registry; with `dontRemind` it
+   * records the workspace-wide discovery ignore in the owner's sidecar.
    */
   async resolve(
-    _sessionId: string,
-    _promptId: string,
-    _action: 'add' | 'dismiss',
-    _dontRemind?: boolean,
+    sessionId: string,
+    promptId: string,
+    action: 'add' | 'dismiss',
+    dontRemind?: boolean,
   ): Promise<{ readonly viewRevision: string; readonly prompt?: WorktreePrompt }> {
-    throw new WorktreeError('worktree/not-enabled', 'worktree prompt confirmation is not enabled in this build')
+    this.requireEnabled()
+    const session = this.sessionView(sessionId)
+    const workspace = await this.ensureWorkspace(session.primaryRoot, false)
+    if (workspace.activation !== 'active') {
+      throw new WorktreeError('worktree/prompt-stale', 'the workspace is no longer active')
+    }
+    const record = [...workspace.candidates.values()].find(candidate => candidate.promptId === promptId)
+    if (record === undefined || !eligible(record.candidate.kind, session.mode)) {
+      throw new WorktreeError('worktree/prompt-stale', 'the prompt is no longer visible')
+    }
+    if (action === 'add') {
+      const options: AddNewRootOptions = {
+        path: record.candidate.path,
+        access: 'inherit',
+        expected: record.expected,
+        track: { adminId: record.candidate.adminId, common: record.candidate.common },
+      }
+      try {
+        await this.ctx.multiRootRegistry.addNew(workspace.primaryRoot, options)
+      } catch (error) {
+        // A duplicate means the operator (or another Host) already registered
+        // this directory: treat it as handled, but never write a cleanup map.
+        if (error instanceof RootValidationError && error.code === 'duplicate') {
+          // handled below
+        } else if (error instanceof WorktreeError && error.code === 'worktree/not-enabled') {
+          throw error
+        } else if (error instanceof WorktreeError) {
+          throw new WorktreeError('worktree/prompt-stale', error.message)
+        } else if (error instanceof RootValidationError) {
+          throw new WorktreeError('worktree/prompt-stale', error.message)
+        } else {
+          throw error
+        }
+      }
+    } else if (dontRemind === true) {
+      await this.ignoreRecord(workspace, record)
+    }
+    workspace.prompted.add(record.discoveryKey)
+    workspace.candidates.delete(record.candidate.key)
+    workspace.queue = workspace.queue.filter(candidate => candidate.promptId !== promptId)
+    workspace.revision++
+    await this.loadSidecar(workspace)
+    this.wake(workspace)
+    const head = this.visibleRecords(workspace, session.mode)[0]
+    const viewRevision = this.viewRevision(workspace, session.mode)
+    return head === undefined ? { viewRevision } : { viewRevision, prompt: this.promptView(workspace, head, session.mode) }
+  }
+
+  /** Record one discovery ignore through the Registry owner and update memory. */
+  private async ignoreRecord(workspace: WorkspaceState, record: CandidateRecord): Promise<void> {
+    workspace.ignored.add(record.discoveryKey)
+    try {
+      await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, {
+        op: 'ignore',
+        key: record.discoveryKey,
+        kind: record.candidate.kind,
+        path: record.candidate.path,
+      })
+    } catch {
+      // Memory-only is a supported degradation; discovery still honors it.
+    }
   }
 
   /**
-   * The worktree badge facts for one primary root's registered roots. Empty
-   * while the feature is disabled or the workspace is not active.
+   * Clean up tracked B roots the panel explicitly selected. Every id must be a
+   * sidecar mapping; the Registry owner re-verifies `rootId + path + addedAt`
+   * and only deletes a CONFIRMED-missing directory.
+   */
+  async cleanup(sessionId: string, rootIds: readonly string[]): Promise<{
+    readonly removed: readonly string[]
+    readonly skipped: readonly { readonly id: string; readonly code: string }[]
+  }> {
+    this.requireEnabled()
+    const session = this.sessionView(sessionId)
+    const workspace = await this.ensureWorkspace(session.primaryRoot, false)
+    if (workspace.activation !== 'active') throw new WorktreeError('worktree/inactive', 'the workspace is no longer an active checkout')
+    await this.loadSidecar(workspace)
+    const removed: string[] = []
+    const skipped: Array<{ id: string; code: string }> = []
+    for (const id of [...new Set(rootIds)]) {
+      const mapping = workspace.mappings.find(candidate => candidate.rootId === id)
+      if (mapping === undefined) { skipped.push({ id, code: 'worktree/not-eligible' }); continue }
+      const options: DeletedWorktreeOptions = { rootId: id, expectedPath: mapping.path, expectedAddedAt: mapping.rootAddedAt }
+      try {
+        await this.ctx.multiRootRegistry.removeForDeletedWorktree(workspace.primaryRoot, options)
+        removed.push(id)
+      } catch (error) {
+        skipped.push({ id, code: codeOf(error) })
+      }
+    }
+    await this.loadSidecar(workspace)
+    workspace.revision++
+    this.wake(workspace)
+    return { removed, skipped }
+  }
+
+  /**
+   * The worktree badge facts for one primary root's registered roots. This is
+   * the one read that may trigger a first activation (the panel's list is an
+   * explicit request); while the feature is disabled it answers nothing.
    * @param primaryRoot - the session workspace root.
    */
-  describeRoots(primaryRoot: string): { readonly cleanupCount: number } | undefined {
-    void primaryRoot
-    void this.closing
-    return undefined
+  async describeRoots(primaryRoot: string): Promise<{
+    readonly badges: ReadonlyMap<string, WorktreeRootView>
+    readonly cleanupCount: number
+  } | undefined> {
+    if (!this.enabled) return undefined
+    const workspace = await this.ensureWorkspace(primaryRoot, true)
+    if (workspace.activation !== 'active') return undefined
+    await this.loadSidecar(workspace)
+    const statuses = this.ctx.multiRootRegistry.list(primaryRoot)
+    const badges = new Map<string, WorktreeRootView>()
+    let cleanupCount = 0
+    for (const mapping of workspace.mappings) {
+      const status = statuses.find(candidate => candidate.id === mapping.rootId)
+      if (status === undefined) continue
+      const badge = worktreeBadge(mapping, status)
+      badges.set(status.id, badge)
+      if (badge.cleanupEligible) cleanupCount++
+    }
+    return { badges, cleanupCount }
   }
 
   /** The active workspace state for diagnostics and tests. */
@@ -300,6 +433,9 @@ export class MultiRootWorktrees extends Service {
         evaluated: new Set(),
         prompted: new Set(),
         ignored: this.ignored.get(key) ?? new Set(),
+        mappings: [],
+        sidecarAvailable: false,
+        sidecarPending: false,
         waiters: new Set(),
         degraded: false,
         revision: 0,
@@ -333,7 +469,7 @@ export class MultiRootWorktrees extends Service {
       workspace.evaluated.clear()
       workspace.revision++
     }
-    workspace.ignored = new Set(this.ignored.get(workspace.key) ?? [])
+    await this.loadSidecar(workspace)
     await this.refreshInventory(workspace)
     this.wake(workspace)
   }
@@ -467,10 +603,45 @@ export class MultiRootWorktrees extends Service {
     })
   }
 
-  /** B roots this workspace tracks for deletion watching (phase P4 fills this). */
+  /** B roots this workspace tracks for deletion watching. */
   private trackedRootPaths(workspace: WorkspaceState): readonly string[] {
-    void workspace
-    return []
+    return workspace.mappings.map(mapping => mapping.path)
+  }
+
+  /**
+   * Load the workspace's sidecar through the Registry owner. An unavailable
+   * authority keeps the previous projection: an empty answer is NOT evidence
+   * that the mappings are gone.
+   */
+  private async loadSidecar(workspace: WorkspaceState): Promise<void> {
+    try {
+      const view = await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'read' })
+      if (!view.available) return
+      workspace.mappings = view.worktreeRoots
+      workspace.ignored = new Set(view.ignored.map(entry => entry.key))
+      workspace.sidecarAvailable = true
+    } catch {
+      // The mapping is cleanup bookkeeping only; discovery stays usable.
+    }
+  }
+
+  /** Ask the owner to prune/rebind mappings after a Registry change, coalesced. */
+  private reconcileSidecar(workspace: WorkspaceState): void {
+    if (workspace.sidecarRunning !== undefined) { workspace.sidecarPending = true; return }
+    workspace.sidecarRunning = (async () => {
+      do {
+        workspace.sidecarPending = false
+        try {
+          const view = await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'reconcile' })
+          if (view.available) {
+            workspace.mappings = view.worktreeRoots
+            workspace.sidecarAvailable = true
+          }
+        } catch {
+          return
+        }
+      } while (workspace.sidecarPending)
+    })().finally(() => { workspace.sidecarRunning = undefined })
   }
 
   /** Coalesce one reconcile per workspace. */
@@ -643,7 +814,9 @@ export class MultiRootWorktrees extends Service {
   /** Registry change hook: re-evaluate the affected active workspace only. */
   private registryChanged(key: string): void {
     const workspace = this.workspaces.get(key)
-    if (workspace !== undefined && workspace.activation === 'active') this.reconcile(workspace)
+    if (workspace === undefined || workspace.activation !== 'active') return
+    this.reconcile(workspace)
+    this.reconcileSidecar(workspace)
   }
 
   /** React to a live settings change. */
@@ -701,6 +874,51 @@ export function eligible(kind: 'worktree' | 'git-common', mode: WorkspaceMode): 
 /** The discovery key of one candidate; stable across admin moves for B. */
 export function discoveryKeyOf(candidate: InventoryCandidate): string {
   return `worktree\u0000${candidate.path}`
+}
+
+/** Whether one path exists at all (a symlink counts as existing). */
+function pathExists(path: string): boolean {
+  try {
+    return lstatEntry(path) !== undefined
+  } catch {
+    return false
+  }
+}
+
+/** The canonical target of one admin gitdir pointer, or undefined when unreadable. */
+function pointerTarget(admin: string): string | undefined {
+  try {
+    const text = readUtf8File(join(admin, 'gitdir'), MAX_POINTER_BYTES).trim()
+    if (text === '') return undefined
+    return resolvePointerTarget(admin, text)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The deletion badge for one tracked mapping (ADR-0039 §6.1). Deletion signals
+ * only decide the badge: cleanup is eligible ONLY when the record's own path is
+ * confirmed missing AND its `addedAt` still binds the mapping.
+ */
+function worktreeBadge(mapping: WorktreeMapping, status: { readonly id: string; readonly path: string; readonly addedAt: string }): WorktreeRootView {
+  const base = { adminId: mapping.adminId, path: status.path }
+  const bound = status.addedAt === mapping.rootAddedAt
+  if (!pathExists(status.path)) return { ...base, state: 'directory-missing', cleanupEligible: bound }
+  if (!bound) return { ...base, state: 'changed', cleanupEligible: false }
+  const admin = join(mapping.common, 'worktrees', mapping.adminId)
+  if (!pathExists(admin)) return { ...base, state: 'unregistered', cleanupEligible: false }
+  const target = pointerTarget(admin)
+  if (target !== undefined && !samePath(dirname(target), status.path)) {
+    return { ...base, state: 'moved', cleanupEligible: false }
+  }
+  return { ...base, state: 'active', cleanupEligible: false }
+}
+
+/** The stable code of one thrown failure. */
+function codeOf(error: unknown): string {
+  const code = (error as { code?: unknown } | undefined)?.code
+  return typeof code === 'string' && code !== '' ? code : 'worktree/not-eligible'
 }
 
 /** Build the owner expectation one prompt binds. */

@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P3 完成；P4 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P4 完成；P5 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -113,7 +113,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 面板/对话框：只展示 eligible 候选、`effectiveAccess`、remaining；**P3 只做只读预览，生产 `worktreePromptResolve`/确认按钮保持禁用（`worktree/not-enabled` 或路由未挂载），不得调用 Registry 写入**。
 - resolve 后旧 prompt 失效；`stale`/`lost` 的客户端行为按 ADR-0039 §4.3。
 
-### P4 Registry、owner 写路径与 sidecar/cleanup（未开始）
+### P4 Registry、owner 写路径与 sidecar/cleanup（完成）
 
 > P4 是**首次可写阶段**：`addNew` 与完整 owner 复验必须在同一阶段实现；P3 的确认操作在 P4 验收通过前不启用。
 
