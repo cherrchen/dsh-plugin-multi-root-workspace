@@ -146,7 +146,7 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 1. 将同一构建的 broker 入口、共享 JS chunk、Node 及其解析到的依赖安装到 Host 账号和 Agent 都不可写的位置。四个 SSH 可选包须在对应 DSH 宿主的解析树中与 DSH 精确同版。先由 root 写好完整部署清单，供 Host 与 broker 共同读取。
 2. 用 tarball 中的 `scripts/ssh-broker/install.sh` 创建专用账户、凭据根和服务。Linux 默认的 `/etc/dsh-ssh-broker` 属 root，Host 经客户端组可遍历目录和读取清单，`broker.json` 只开放给 root 和 broker 组。在连接前为 broker 配置受信的 OpenSSH 别名、固定主机钥和远端账户。
-3. 部署层禁止该 Host UID 下的 Agent 获取无沙箱执行，包括其他 profile、会话、终端与权限提升。用部署实际提供的受限入口验证凭据与 socket 拒绝、用正常 Host 验证正对照。仅在这些部署事实成立时配置 `fullAccessDisabled: true` 与 `confinementProbe.verified: true`。布尔值用于记录证据，无法改变 DSH 会话权限。
+3. 部署层禁止该 Host UID 下的 Agent 获取无沙箱执行，包括其他 profile、会话、终端与权限提升。用部署实际提供的受限入口验证凭据与 socket 拒绝、用正常 Host 验证正对照。仅在这些部署事实成立时配置 `fullAccessDisabled: true` 与 `confinementProbe.verified: true`。布尔值用于记录证据，无法改变 DSH 会话权限。仓库内 `scripts/probe-remote-entry-isolation.mjs` 与 `scripts/ssh-broker/probe/` 是该步的参考实现：在容器内复刻真实启用序列（install.sh、专用 profile、`dsh plugin add`、受限预设表），对 shell 公开执行器、`DSH_PTY_SESSION_ID` 标记的 Agent PTY 与 PTC `run` 三个入口在只读与工作区可写两种模式下逐一验证凭据根 `EACCES` 与 socket 拒绝，并记录伪造 `sandbox/mode: danger-full-access` 会话收到 broker hello 的互斥对照——原始结果样例见 `docs/reference/remote-entry-isolation-evidence.json`。
 4. 在专用 profile 的 `cordis.patch.yml` 加入以下配置。broker 行通过证明后才可登记端点，并同时注册 `remote_copy` 和 `remote_bash`。只有 Registry 配置时，面板可显示清单，登记返回 `endpoint-unverifiable`。
 
 ```yaml
@@ -182,6 +182,8 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 ```
 
 专用 profile 须使用受限默认模式和全新的会话存储。校验实际组合的权限预设表，确认任何预设名称下都没有 `sandbox: danger-full-access`，并禁用该 UID 下其他可绕过沙箱的入口。工具行在默认模式或任何可选预设允许完全访问时拒绝挂载。
+
+注意 profile patch 层的合并语义：同一行的 `config` 是**整体替换**而非按键合并，因此上面的 `multi-root-registry` 配置必须同时写出 `sharedStorageRoot`/`leasePath`——只写 `remoteEnvironments` 会让共享权威拿不到 medium，远端平面停在 `owner-without-remote-protocol`，工具行按设计拒绝挂载（不会静默降级）。
 
 两边更新清单或更换协议版本时，先按下面的步骤关闭，再用新清单重启 broker 与 Host。相同环境 ID 无法代替清单一致性。
 
