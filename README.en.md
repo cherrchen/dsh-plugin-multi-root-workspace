@@ -245,6 +245,18 @@ On upgrade, legacy `inherit` and `read-write` registrations start with Skills en
 
 See [ADR-0023](./docs/decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) for the architecture and acceptance boundaries, and the [progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23) for implementation and platform evidence.
 
+### Worktree root suggestions
+
+When the primary root is itself the root of a Git main or linked checkout, the plugin discovers the other worktrees that share this repository's common git dir — including worktrees that existed before the session, or were created by a terminal, an IDE, a forge, or another DSH instance — and, after confirmation, registers that worktree's source tree as an `inherit` additional root. Discovery only reads Git metadata the plugin opens and parses itself (the `.git` pointer, the admin dir, the common config/HEAD/index, and the full ancestor chain). It **starts no Git subprocess, resolves no commit object, and never adds or removes a root on its own.**
+
+There is no special rule for the default pool: with the main repository as primary, `.agents/worktrees/<id>` lies inside the primary and is filtered by the ordinary containment rule; with a pool worktree as primary, its sibling worktrees remain candidates (still subject to registration, the root limit, and "do not suggest again"). Submodules (including a linked worktree that is itself a submodule), bare-derived linked worktrees, a `--separate-git-dir` main checkout, `extensions.worktreeConfig`, `core.repositoryformatversion=1` / `--relative-paths`, and split/sparse indexes are never suggested.
+
+Prompts are workspace-shared and filtered by the session's sandbox mode: read-write sessions may confirm read-write, read-only sessions see read-only while the registration policy stays `inherit`, and Full-access gets no prompt. A registration is workspace-wide, so **other read-write sessions also gain write access to that folder**; the dialog says so explicitly. After confirmation the Registry owner re-runs the complete primary/candidate judgment (HEAD syntax and directory identities included) inside its existing serialized queue. Any change while the prompt is open invalidates it (`worktree/prompt-stale`) and nothing is written.
+
+When a worktree disappears or moves, the Workspace Folders panel shows a badge; **nothing is ever cleaned up automatically.** Only when the registered path is confirmed missing (`ENOENT`/`ENOTDIR`) and `rootId + path + addedAt` still match does the panel offer per-row or batch cleanup. An existing or inaccessible path — or a checkout whose old admin vanished but which is still valid — only offers the ordinary Remove. A missing root keeps consuming `maxAdditionalRoots` until it is cleaned up or removed manually, and until then a new directory at the same path can inherit the old grant; the panel shows that warning.
+
+**Enable worktree root suggestions**, on the same Settings → Plugins → Multi-root Workspace card, defaults to on and is independent of "Enable additional-root Skills". Turning it off stops discovery, prompts, and the dedicated cleanup UI; already registered roots stay under ordinary root management. See [ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md) for the decision and acceptance boundaries.
+
 ### Panel
 
 The **Folders** entry at the sidebar foot — and, on DSH `0.2.1-alpha.3` and newer, the same entry at the right edge of the New Session hero row — opens the same dialog, which lists the primary root and the additional roots and offers add, remove, alias, read-only/read-write switching, copy path, and reveal in the file manager. The hero entry shares the adjacent workspace and mode selectors' geometry and interaction, but it opens a dialog rather than a menu and therefore deliberately has **no chevron**; at `≤560px` it becomes an icon-only 28×28 button whose name stays on `aria-label` / the tooltip. The hero row disappears after the first message, leaving the sidebar entry in place; older runtimes only ever show the sidebar entry.
@@ -278,6 +290,9 @@ For multi-root reviewer context, enable the default-disabled [Auto Review row](.
 │   ├── compat.ts                     the multi-root-compat startup gate (version allowlist and mixed-install detection)
 │   ├── compat/                       the version-difference adapters: dsh-version / sandbox-confine / agent-instructions / llm-message, etc. (optional peers loaded on demand)
 │   ├── command.ts                    the /workspace-folders command and the host half of the panel RPC
+│   ├── worktrees.ts                 the worktree suggestion row: discovery/activation/watchers, the prompt queue and waiters, confirmation and explicit cleanup
+│   ├── worktrees/                   controlled Git metadata snapshots (config/HEAD/index/ancestor chain), inventory, the sidecar and owner re-verification (no Git subprocess)
+│   ├── worktrees-contract.ts         the worktree endpoints' strict two-sided contract (discriminated union, no retry field)
 │   ├── contract.ts                   the panel wire protocol (zod-validated on both ends, inlinable into the browser bundle)
 │   └── client/                       the browser half: sidebar action, the Folders dialog, the Files-tab root switcher, bilingual dictionaries
 ├── tests/                            differential parity, real-execution dialect matrix, contract round-trips, component and locale gates, cross-process lease e2e, instruction injection

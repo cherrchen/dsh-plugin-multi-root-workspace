@@ -247,6 +247,18 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 
 架构与验收边界见 [ADR-0023](./docs/decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md)，实施和平台状态见[路线账本](./docs/plans/active/2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23)。
 
+### Worktree 附加根建议
+
+primary root 本身是 Git main 或 linked checkout 根时，插件会发现与本仓库共享 common git dir 的其他 worktree —— 包括会话开始前就存在、由终端、IDE、forge 或其他 DSH 创建的 —— 并在用户确认后把该 worktree 的源码树登记为 `inherit` 附加根。发现只读取插件自己打开并解析的 Git 元数据（`.git` 指针、admin、common 的 config/HEAD/index 与完整祖先链），**不启动任何 Git 子进程，也不解析 commit 对象**，并且**不会自动添加或删除**。
+
+默认 pool 没有特殊规则：主仓库作为 primary 时 `.agents/worktrees/<id>` 位于 primary 内，按既有包含规则过滤；primary 本身是 pool worktree 时，兄弟 worktree 仍是候选（仍受登记、上限与「不再提示」约束）。submodule（含 linked worktree 本身是 submodule）、bare 派生的 linked worktree、`--separate-git-dir` 主 checkout、`extensions.worktreeConfig`、`core.repositoryformatversion=1` / `--relative-paths` 以及 split/sparse index 一律不提示。
+
+提示按 workspace 共享、按 session 的沙箱模式过滤：读写会话可确认读写，只读会话显示只读但登记策略仍是 `inherit`，Full-access 不提示。登记是 workspace 级的，**其他读写会话也会获得该目录的写权限**，对话框会明确说明。确认后由 Registry owner 在既有串行队列内再次复验 primary/candidate、primary/common/admin 的 HEAD 语法与目录身份；等待期间任何变化都会让提示失效（`worktree/prompt-stale`），不会写入。
+
+worktree 被删除或移动后，Workspace Folders 面板会显示徽标；**永不自动清理**。只有登记路径被确认缺失（`ENOENT`/`ENOTDIR`）且 `rootId + path + addedAt` 仍匹配时，面板才提供逐条或批量清理；目录仍存在、无法访问，或旧 admin 消失但 checkout 仍有效时只提供普通 Remove。缺失根会继续占用 `maxAdditionalRoots`，直到清理或手动移除；清理前，同一路径出现的新目录可能继承旧授权，面板会显示该提示。
+
+Settings → Plugins → Multi-root Workspace 同一张设置卡中的 **启用 Worktree 附加根建议** 默认开启，与「启用附属根 Skills」相互独立。关闭后停止发现、提示与专用清理，已有登记根仍按普通根管理。决策与验收边界见 [ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)。
+
 ### 面板
 
 侧栏底部的 **Folders** 入口，以及 DSH `0.2.1-alpha.3` 及更新运行时新会话页工作区行右端的同一入口，打开的是同一个对话框；它列出主根与附加根，支持添加、移除、别名、切换只读/可写、复制路径与在文件管理器中显示。新会话入口与相邻的工作区/模式选择器同一套几何与交互，但因为打开对话框而不是下拉菜单，**没有 chevron**；窗口宽度 `≤560px` 时只显示图标，名称仍由 `aria-label` / 悬停提示承载。首条消息发出后 hero 行消失，侧栏入口照常可用；旧运行时只有侧栏入口。
@@ -280,6 +292,9 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 │   ├── compat.ts                     multi-root-compat 启动门禁（版本 allowlist 与混装判定）
 │   ├── compat/                       版本差异适配层：dsh-version / sandbox-confine / agent-instructions / llm-message 等（可选 peer 按需加载）
 │   ├── command.ts                    /workspace-folders 命令与面板 RPC 的 host 半部
+│   ├── worktrees.ts                 Worktree 附加根建议行：发现/激活/watcher、prompt 队列与等待者、确认与显式清理
+│   ├── worktrees/                   受控 Git 元数据快照（config/HEAD/index/祖先链）、inventory、sidecar 与 owner 复验（不启动 Git）
+│   ├── worktrees-contract.ts         Worktree 端点的双端严格契约（判别联合，禁止 retry 字段）
 │   ├── contract.ts                   面板线协议（zod 双端校验，可内联进浏览器 bundle）
 │   └── client/                       浏览器半部：侧栏动作、Folders 对话框、Files 页签根切换器、双语词典
 ├── tests/                            差分 parity、方言真实执行矩阵、契约往返、组件与 locale 门禁、跨进程 lease e2e、指令注入

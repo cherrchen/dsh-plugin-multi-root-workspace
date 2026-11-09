@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P6 完成；P7 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P7 完成；P8 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -157,7 +157,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 平台：macOS 文件句柄/Unicode；Linux；Windows 文件 ID/reparse point；无法验证的行显式 skip 并打印原因。
 - 门禁：`pnpm lint`、`typecheck`、`test`、`build`、`docs:check`；需要时 `compat:check`。
 
-### P7 B 文档与发布准备（未开始）
+### P7 B 文档与发布准备（完成）
 
 - 更新 B 的 requirements、双语 README、路线账本和实现文档；CHANGELOG 仅在实际发布时更新。完成 B 的验收和发布准备后进入 P8，是否拆成两次发布由路线账本记录。
 - 不修改上游；不新增 DSH 版本分支。

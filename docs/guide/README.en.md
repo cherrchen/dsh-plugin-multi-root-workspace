@@ -11,6 +11,7 @@ The user-facing guide: the top-level README covers the "how"; this guide fills i
 - [Differences between install sources](#differences-between-install-sources)
 - [The full semantics of `/workspace-folders`](#the-full-semantics-of-workspace-folders)
 - [Access levels, the root limit, and per-tool caps](#access-levels-the-root-limit-and-per-tool-caps)
+- [Worktree root suggestions in full](#worktree-root-suggestions-in-full)
 - [What the composition actually does](#what-the-composition-actually-does)
 - [Model-side and panel-side behavior](#model-side-and-panel-side-behavior)
 
@@ -62,6 +63,20 @@ The Windows ambient deny runner uses an administrator-installed broker to assign
 Each primary root caps its additional roots (default 16, configurable up to 64 via the registry row's `maxAdditionalRoots`); new adds beyond the limit are refused while roots already stored retain their registration grants. Windows Full-access launches have a separate bounded deny-set capacity and refuse the whole launch beyond that budget; see [ADR-0020](../decisions/ADR-0020-windows-normal-deny-groups.md#协议容量与安装回滚修订2026-10-15) ([ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md)).
 
 A host may also set `toolAccess: { <tool>: 'read-only' }` on the `multi-root-scope` row so a given tool can never write any additional root (e.g. `{ bash: 'read-only' }` — bash can still write the primary root); an invalid configuration fails closed.
+
+## Worktree root suggestions in full
+
+**Activation gate.** The feature is enabled only when `<primaryRoot>/.git` itself exists — a real directory, or a pointer file with a `commondir`. Repository subdirectories, plain directories, fake `.git`/fake admins, submodules (both shapes), bare-derived worktrees, a `--separate-git-dir` main checkout, `include` / non-empty `core.worktree` / `extensions.worktreeConfig` / `relativeWorktrees`, format version 1, split/sparse indexes, UNC/device paths, and symlinked or FIFO metadata are all inactive. A first-gate refusal reports `unactivated`: no candidates, no watchers, no sidecar writes, and no background retry; only the panel/command list or a new explicit wait may try again. A workspace that WAS active and then fails revalidation reports `lost` and also stops background work; after the primary recovers it still needs an explicit trigger, and the old prompt ids are dead.
+
+**Discovery and identity.** Only `<common>/worktrees/*/gitdir` is enumerated; `git worktree list` is never run. A candidate must belong to the same common, keep its admin under `common/worktrees/<id>`, have a `.git` file and admin `gitdir` that point at each other, pass the primary/common/admin HEAD grammar, and expose a valid common structure. Its identity is `adminId + canonical root + canonical admin gitdir target`. All sessions of one workspace share the inventory, dedupe set, and watchers; presentation is filtered per session mode. A read-only session can still accept B (the registration policy is always `inherit`); Full-access gets no prompt.
+
+**Prompt and confirmation.** The dialog shows the actual path, the current effective access, `inherit`, and that the registration is workspace-wide; "do not suggest again" is persisted in the sidecar and applies to every session of the workspace. Confirmation runs the Registry owner's `addNew`: the owner re-runs the complete primary/candidate judgment, HEAD grammar, ancestor gitlink probe, and directory identities inside its serialized queue, and only then writes. It creates, never revives, and never accepts an existing record at that path. A `duplicate` is treated as already registered and retires the prompt, but writes no cleanup mapping.
+
+**Deletion and cleanup.** Deletion signals (admin gone, path missing, admin `gitdir` pointing elsewhere) only decide the badge. Cleanup eligibility depends solely on `record.path` being confirmed missing, bound to `rootId + path + addedAt`; an existing or inaccessible path, or a checkout that is still valid, returns `worktree/not-eligible` and the panel offers only the ordinary Remove. Batch cleanup accepts only the exact ids the panel listed and the operator confirmed. Cleanup is **never** invoked by a deletion event. A missing root keeps consuming the limit. Until cleanup a new directory at the same path can inherit the old grant — the documented L4 residual — and the panel says so.
+
+**Persistence and degradation.** `worktreeRoots` and `ignored` live in `$DSH_HOME/storages/multi_root_workspace.worktree-prompts/<sha256(primaryKey)>.json`. Only the Registry owner holding the store lease writes them; followers ask over authenticated IPC. Pruning consumes only a complete `RegistrySnapshotView` from the owner's queue: an `available=false` empty list keeps the mappings, while only an `available=true` empty snapshot may delete them. Across owner epochs mappings are rebound or pruned by `rootId + path + rootAddedAt`. A corrupt or unwritable sidecar degrades the owner to memory-only with a warning; authorization is unaffected, the B roots behave like manual roots, and the dedicated cleanup refuses.
+
+**Settings.** `multi-root-worktrees.enabled` defaults to `true` and shares the plugin-detail card with additional-root Skills while acting independently. Turning it off stops this Host's discovery, watchers, background rechecks, and dedicated cleanup, wakes waiters, and invalidates old prompts; new worktree requests answer `worktree/not-enabled` and the client stops re-mounting. Turning it back on re-detects the current live session; a workspace that already reached `lost` still needs explicit recovery. Confirmed ordinary Registry roots and sidecar decisions stay.
 
 ## What the composition actually does
 
