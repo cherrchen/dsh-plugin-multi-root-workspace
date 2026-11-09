@@ -47,6 +47,9 @@ const INSERTED = [
   'multi-root-ops-compatibility',
   'multi-root-registry',
   'multi-root-skills',
+  // Worktree-aware suggestions: additive, compat-gated, and inert until a
+  // confirmation; it never writes a root on its own (ADR-0039).
+  'multi-root-worktrees',
   'multi-root-instructions',
   'multi-root-lsp',
   'multi-root-workspace-files',

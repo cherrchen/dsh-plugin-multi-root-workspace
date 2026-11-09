@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P5 完成；P6 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P6 完成；P7 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -137,7 +137,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 平台：macOS 文件句柄/Unicode；Windows 文件 ID/reparse point；无法提供稳定身份时不发提示/直接 stale。
 - 验收等待 owner 时替换候选，断言 Registry 无写入；P3 确认在 P4 前不可用。
 
-### P6 验证与平台矩阵（未开始）
+### P6 验证与平台矩阵（完成）
 
 - 单测：metadata/activation/inventory/prompt/registry/sidecar/owner。
 - 集成（**Web**）：`connection` + `webServer` 存在的真实宿主 + 客户端 schema；确认、清理、`WorktreePromptWaitResult` 全链路。

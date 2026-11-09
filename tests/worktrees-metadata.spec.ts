@@ -268,6 +268,30 @@ describe('index snapshot', () => {
     expect(parseGitIndex(indexFile([v2Entry('a', 0o100644)], 5)).ok).toBe(false)
   })
 
+  it('refuses real split and sparse indexes through the parsed format gate', () => {
+    const area = fixture('metadata-real-indexes')
+    const split = join(area.base, 'split')
+    initRepo(split)
+    git(split, ['update-index', '--split-index'])
+    const splitIndex = parseGitIndex(readFileSync(join(split, '.git', 'index')))
+    expect(splitIndex.ok).toBe(false)
+    // A split index may present empty path names before the link extension is
+    // reachable; either refusal is the required conservative outcome.
+    if (!splitIndex.ok) expect(splitIndex.detail).toMatch(/link|empty path/)
+
+    const sparse = join(area.base, 'sparse')
+    initRepo(sparse)
+    mkdirSync(join(sparse, 'src', 'deep'), { recursive: true })
+    writeFileSync(join(sparse, 'src', 'deep', 'file.ts'), 'x\n')
+    git(sparse, ['add', '-A'])
+    git(sparse, ['commit', '-q', '-m', 'more'])
+    git(sparse, ['sparse-checkout', 'init', '--cone', '--sparse-index'])
+    git(sparse, ['sparse-checkout', 'set', 'src'])
+    const sparseIndex = parseGitIndex(readFileSync(join(sparse, '.git', 'index')))
+    expect(sparseIndex.ok).toBe(false)
+    if (!sparseIndex.ok) expect(sparseIndex.detail).toMatch(/sdir|040000/)
+  })
+
   it('parses a real version-4 index and matches literal paths', () => {
     const area = fixture('metadata-index')
     const repo = join(area.base, 'repo')
@@ -327,6 +351,26 @@ describe('ancestor chain', () => {
     git(repo, ['commit', '-q', '-m', 'add nested worktree as gitlink'])
     expect(readFileSync(join(linked, '.git'), 'utf8')).toContain('gitdir:')
     expectInactive(linked, 'submodule')
+  })
+
+  it('refuses a symlinked or FIFO ancestor index without reading or blocking', () => {
+    const reason = symlinkUnsupportedReason()
+    if (reason !== undefined) return
+    const area = fixture('metadata-ancestor-io')
+    const outer = join(area.base, 'outer')
+    initRepo(outer)
+    const nested = join(outer, 'nested')
+    initRepo(nested)
+    const external = join(area.base, 'external-index')
+    writeFileSync(external, 'outside')
+    rmSync(join(outer, '.git', 'index'))
+    symlinkSync(external, join(outer, '.git', 'index'))
+    expectInactive(nested, 'unprovable-ancestor')
+    if (process.platform !== 'win32') {
+      rmSync(join(outer, '.git', 'index'))
+      const made = spawnSync('mkfifo', [join(outer, '.git', 'index')])
+      if (made.status === 0) expectInactive(nested, 'unprovable-ancestor')
+    }
   })
 
   it('refuses an ancestor whose metadata cannot be read', () => {

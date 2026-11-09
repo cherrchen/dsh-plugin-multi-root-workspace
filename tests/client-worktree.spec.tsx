@@ -4,6 +4,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorktreePromptView } from '../src/contract.ts'
 import { WorktreePrompt } from '../src/client/WorktreePrompt.tsx'
+import { WorkspaceFoldersDialog } from '../src/client/WorkspaceFoldersAction.tsx'
+import type { PanelClient } from '../src/client/panel-client.ts'
+import type { RootsView } from '../src/contract.ts'
 import { BundleSettingsCard } from '../src/client/skills-settings.tsx'
 import type { WorktreeClient } from '../src/client/worktree-client.ts'
 import type { SkillsForm } from '../src/compat/skills-client.ts'
@@ -121,6 +124,39 @@ function fakeForm(mutate: (value: boolean) => Promise<boolean>): SkillsForm {
     },
   }
 }
+
+describe('panel cleanup controls', () => {
+  it('asks in place and cleans up the exact eligible ids', async () => {
+    const view: RootsView = {
+      primaryRoot: '/main',
+      roots: [{
+        ordinal: 1, id: 'r1', path: '/deleted-wt', addedAt: '2026-11-09', state: 'missing', access: 'inherit',
+        worktree: { adminId: 'id', path: '/deleted-wt', state: 'directory-missing', cleanupEligible: true },
+      }],
+      limit: 16,
+      count: 1,
+      worktreeCleanupCount: 1,
+    }
+    const empty: RootsView = { ...view, roots: [], count: 0, worktreeCleanupCount: 0 }
+    const panel = { call: async (endpoint: string) => endpoint === 'list' ? view : view } as unknown as PanelClient
+    const cleanup = vi.fn(async () => ({ removed: ['r1'], skipped: [], roots: empty }))
+    const worktrees = fakeClient({ cleanup })
+    render(<WorkspaceFoldersDialog
+      panel={panel}
+      pickDirectory={undefined}
+      t={t}
+      sessionId={() => 's1'}
+      onClose={() => {}}
+      worktrees={worktrees} />)
+    const batch = await screen.findByText('worktree.cleanupBatch')
+    fireEvent.click(batch)
+    // The confirmation is inline, not a second overlay dialog.
+    expect(screen.getByText('worktree.cleanupConfirm')).toBeDefined()
+    fireEvent.click(screen.getByText('worktree.cleanupDo'))
+    await waitFor(() => expect(cleanup).toHaveBeenCalledWith('s1', ['r1']))
+    await waitFor(() => expect(screen.queryByText('/deleted-wt')).toBeNull())
+  })
+})
 
 describe('plugin detail switches', () => {
   it('renders the worktree switch next to Skills and writes only its own form', async () => {
