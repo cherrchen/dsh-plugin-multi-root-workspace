@@ -257,6 +257,14 @@ When a worktree disappears or moves, the Workspace Folders panel shows a badge; 
 
 **Enable worktree root suggestions**, on the same Settings → Plugins → Multi-root Workspace card, defaults to on and is independent of "Enable additional-root Skills". Turning it off stops discovery, prompts, and the dedicated cleanup UI; already registered roots stay under ordinary root management. See [ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md) for the decision and acceptance boundaries.
 
+### Shared Git metadata authorization (A)
+
+When the session workspace is itself a linked worktree and the session is `workspace-write`, the plugin offers to register that checkout's canonical common git dir (usually the main checkout's `.git`) as an `inherit` additional root. The dialog shows the actual path and the scope: shared config, hooks, refs/objects, and every worktree's admin data, which may affect other checkouts of the same repository; the registration is still workspace-wide.
+
+A only appears when the primary's complete snapshot proves the common's identity, and only accepts a directory whose final component is `.git`; both the default pool and external linked checkouts qualify. It closes the metadata-write gap for `git add` / `git commit` in a confined `workspace-write` session, but it **does not authorize the main checkout's source tree** and widens no other directory. While the prompt is open, a changed primary/admin/common file-system identity, back-pointer, admin HEAD, ancestor index, or a replaced shared directory invalidates it and nothing is written.
+
+`read-only` and `danger-full-access` never prompt A; a mode change or turning the switch off invalidates an open prompt. A roots never enter the worktree cleanup mapping and deleting the linked checkout does not clean them up; use the ordinary Remove to revoke one. The real restricted-shell Git journey runs according to the kernel capability probe and skips explicitly with a reason on a host whose outer sandbox refuses nesting.
+
 ### Panel
 
 The **Folders** entry at the sidebar foot — and, on DSH `0.2.1-alpha.3` and newer, the same entry at the right edge of the New Session hero row — opens the same dialog, which lists the primary root and the additional roots and offers add, remove, alias, read-only/read-write switching, copy path, and reveal in the file manager. The hero entry shares the adjacent workspace and mode selectors' geometry and interaction, but it opens a dialog rather than a menu and therefore deliberately has **no chevron**; at `≤560px` it becomes an icon-only 28×28 button whose name stays on `aria-label` / the tooltip. The hero row disappears after the first message, leaving the sidebar entry in place; older runtimes only ever show the sidebar entry.

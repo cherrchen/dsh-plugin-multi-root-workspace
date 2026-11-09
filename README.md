@@ -259,6 +259,14 @@ worktree 被删除或移动后，Workspace Folders 面板会显示徽标；**永
 
 Settings → Plugins → Multi-root Workspace 同一张设置卡中的 **启用 Worktree 附加根建议** 默认开启，与「启用附属根 Skills」相互独立。关闭后停止发现、提示与专用清理，已有登记根仍按普通根管理。决策与验收边界见 [ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)。
 
+### 共享 Git 元数据授权（A）
+
+当 session 的 workspace 本身是 linked worktree、且当前为 `workspace-write` 时，插件会提示把该 checkout 的 canonical common git dir（通常是主 checkout 的 `.git`）登记为 `inherit` 附加根。对话框明确显示实际路径与范围：共享 config、hooks、refs/objects 以及所有 worktree 的 admin 数据，可能影响同仓库的其他 checkout；登记仍是 workspace 级。
+
+A 只在该 primary 的完整快照证明 common 身份时出现，并且只接受末级为 `.git` 的目录；默认 pool 与外部 linked checkout 都适用。它补上受限 `workspace-write` 会话执行 `git add` / `git commit` 的元数据写入缺口，但**不授权主 checkout 的源码树**，也不扩大任何其他目录。等待确认期间，primary/admin/common 的文件系统身份、双向指针、admin HEAD、祖先索引或共享目录被替换都会让提示失效，不会写入。
+
+`read-only` 与 `danger-full-access` 不提示 A；模式变化或关闭开关会作废旧提示。A 根不进入 worktree 清理映射，删除 linked checkout 也不会清理它；需要撤回时使用普通 Remove。受限 shell 的真实 Git 旅程按内核能力探针执行，宿主无法嵌套沙箱时显式 skip 并打印原因。
+
 ### 面板
 
 侧栏底部的 **Folders** 入口，以及 DSH `0.2.1-alpha.3` 及更新运行时新会话页工作区行右端的同一入口，打开的是同一个对话框；它列出主根与附加根，支持添加、移除、别名、切换只读/可写、复制路径与在文件管理器中显示。新会话入口与相邻的工作区/模式选择器同一套几何与交互，但因为打开对话框而不是下拉菜单，**没有 chevron**；窗口宽度 `≤560px` 时只显示图标，名称仍由 `aria-label` / 悬停提示承载。首条消息发出后 hero 行消失，侧栏入口照常可用；旧运行时只有侧栏入口。

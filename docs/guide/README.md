@@ -78,6 +78,8 @@ Windows Full-access 的局部拒写独立 runner 通过管理员安装的 broker
 
 **设置**：`multi-root-worktrees.enabled` 默认 `true`，与附属根 Skills 共用同一张插件详情设置卡但独立生效。关闭后当前 Host 停止发现、watcher、后台重查与专用清理，唤醒 waiter 并作废旧提示；新的 worktree 请求返回 `worktree/not-enabled`，客户端停止重挂。重新开启后按当前 live session 重新探测；此前已 `lost` 的 workspace 仍需显式恢复。已确认的普通 Registry 根与 sidecar 决定保留。
 
+**A：共享 Git 元数据授权。** 当 session primary 本身是 linked checkout 且处于 `workspace-write` 时，提示把 canonical common git dir 登记为 `inherit`。候选只接受末级为 `.git` 的目录，来源是同一份 primary 快照：primary `.git` 指向 `common/worktrees/<id>` 下的真实 admin，admin 的 `gitdir` 指回 primary，`commondir` 指向同一 canonical common。对话框必须说明范围：共享 config、hooks、refs/objects 与所有 worktree 的 admin 数据，可能影响同一仓库的其他 checkout；登记是 workspace 级，普通附加根权限同样适用于其他受允许的工具。A 不登记主 checkout 源码树，也不改变 `primary-overlap`/`maxAdditionalRoots`。等待期间 primary/admin/common 的 `dev/ino`（可用时含 birthtime）、admin HEAD、双向指针、祖先索引或 common 替换都会 `prompt-stale`。A 根没有 sidecar 清理映射：linked checkout 被删除不会触发清理，普通 Remove 即可撤回；专用清理只追踪 B 根。模式变化/关闭开关会作废旧提示；已提交的普通根不会因关闭开关回滚。受限 Git 旅程在真实内核沙箱下验证：授权前 `git add` 失败，授权后同一 `workspace-write` 完成 `add`/`commit`，主 checkout 源码与无关目录仍拒写；无可用 runner 时按既有 `kernel:probe` 规则 skip 并打印原因。
+
 ## 组合里实际发生了什么
 
 `dsh --profile web --dump-config` 的输出是按 bundle 分组的 YAML 行数组（每行 `id` / `name` / 可选 `disabled` / `config`），`# == <bundle>` 注释行标记来源、`patched by` 标记被 patch。装入本插件后的差异是：

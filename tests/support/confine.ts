@@ -27,3 +27,24 @@ export async function confined(
 ): Promise<ConfinedArgv> {
   return await (provider.confine(argv, policy) as ConfinedArgv | Promise<ConfinedArgv>)
 }
+
+/**
+ * Confine for a suite that reports an unusable runner as a SKIP instead of a
+ * failure. The refusal is the provider's own typed error, and its message names
+ * the runner detail the kernel gate expects.
+ * @param provider - the provider to ask.
+ * @param argv - the argv to confine.
+ * @param policy - the per-call policy.
+ * @returns the confined argv, or the unavailable verdict the caller skips on.
+ */
+export async function confineForTest(
+  provider: Pick<LocalSandboxProvider, 'confine'>,
+  argv: readonly string[],
+  policy: SandboxPolicy,
+): Promise<{ readonly kind: 'unavailable'; readonly detail: string } | ConfinedArgv> {
+  try {
+    return await confined(provider, argv, policy)
+  } catch (error) {
+    return { kind: 'unavailable', detail: error instanceof Error ? error.message : String(error) }
+  }
+}

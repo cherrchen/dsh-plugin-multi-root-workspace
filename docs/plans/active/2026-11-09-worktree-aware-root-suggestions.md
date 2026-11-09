@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P8 完成；P9 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P9 完成；P10 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -168,7 +168,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 验收：默认 pool 和外部 linked checkout 都能得到相同形态的 common 候选；普通主 checkout、仓库子目录、仅 effective cwd 切入 linked checkout、伪指针、不受支持布局、既有登记或根校验拒绝时不产生 A 提示。分离式 gitdir 反例验证候选永远不会变成 common 的父目录。
 - P8 只构造宿主候选；生产界面与确认在 P9 同阶段接通。
 
-### P9 A：提示、确认与 owner 提交（未开始）
+### P9 A：提示、确认与 owner 提交（完成）
 
 - 扩展 B 的提示联合、双端 schema、工作区去重/忽略与可见队列。对话框分别展示 A/B 文案，A 显示 canonical common、`inherit`、共享元数据范围及持久性。客户端沿用 `sessionId + promptId + action` 确认，无路径参数。
 - 同阶段接通 `addNew` 的 A 分支。请求 Host 和 owner 分别重跑来源与身份检查，owner 队列内按普通 Registry 规则新建；不 revive、不写 B 清理映射。开关关闭或 mode 变化时作废旧提示；已确认的普通根通过普通 Remove 撤回。
