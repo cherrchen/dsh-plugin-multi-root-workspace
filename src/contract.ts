@@ -31,9 +31,56 @@
 
 import { z } from 'zod'
 import type { SkillsResponseMap } from './skills-contract.ts'
+import type { WorktreePromptAnswerView, WorktreePromptWaitView, WorktreeResetAnswerView, WorktreeResolveAnswerView } from './worktrees-contract.ts'
 export { SKILLS_ENDPOINTS, skillsRequestSchema, skillsCatalogSchema, skillsPreviewSchema, skillsStatusSchema } from './skills-contract.ts'
 export type { SkillsEndpoint, SkillsStatusView, SkillsCatalogView, SkillsPreviewView } from './skills-contract.ts'
-export interface WorkspaceResponseMap extends PanelResponseMap, SkillsResponseMap {}
+export {
+  WORKTREE_ENDPOINTS,
+  worktreeRequestSchema,
+  worktreeWaitViewSchema,
+  worktreePromptAnswerSchema,
+  worktreeResolveAnswerSchema,
+  worktreeResetAnswerSchema,
+  parseWorktreeCall,
+} from './worktrees-contract.ts'
+export type {
+  WorktreeEndpoint,
+  WorktreeCall,
+  WorktreePromptView,
+  WorktreePromptWaitView,
+  WorktreePromptAnswerView,
+  WorktreeResolveAnswerView,
+  WorktreeResetAnswerView,
+  WorktreeRequest,
+  WorktreeEffectiveAccess,
+  WorktreePromptKind,
+} from './worktrees-contract.ts'
+
+/** One worktree deletion badge on a registered root (ADR-0039 §6.1). */
+export interface WorktreeRootView {
+  readonly adminId: string
+  readonly path: string
+  readonly state: 'active' | 'directory-missing' | 'unregistered' | 'moved' | 'changed'
+  readonly cleanupEligible: boolean
+}
+
+/** `worktreeRootsCleanup` answers this after the explicit per-id cleanup. */
+export interface WorktreeCleanupView {
+  readonly removed: readonly string[]
+  readonly skipped: readonly { readonly id: string; readonly code: string }[]
+  readonly roots: RootsView
+}
+
+/** The worktree endpoints' response types, merged into the workspace map. */
+export interface WorktreeResponseMap {
+  readonly worktreePrompt: WorktreePromptAnswerView
+  readonly worktreePromptWait: WorktreePromptWaitView
+  readonly worktreePromptResolve: WorktreeResolveAnswerView
+  readonly worktreePromptReset: WorktreeResetAnswerView
+  readonly worktreeRootsCleanup: WorktreeCleanupView
+}
+
+export interface WorkspaceResponseMap extends PanelResponseMap, SkillsResponseMap, WorktreeResponseMap {}
 
 /** The absolute logical channel both halves speak over. */
 export const PANEL_CHANNEL = '/multi-root-workspace'
@@ -90,6 +137,8 @@ export interface RootView {
   readonly effectiveAccess?: EffectiveRootAccess
   /** Why the root is not `available`; a code the panel localizes. */
   readonly detail?: string
+  /** Worktree lifecycle facts for a root this feature tracks (ADR-0039 §6). */
+  readonly worktree?: WorktreeRootView
 }
 
 /** Exact identity of one row in a returned list snapshot. */
@@ -126,6 +175,10 @@ export interface RootsView {
   readonly count: number
   /** Set when the store itself could not be read; the panel shows this verbatim. */
   readonly unavailable?: string
+  /** Host-derived state of the primary directory itself (ADR-0039 §6.7). */
+  readonly primaryState?: 'present' | 'missing' | 'inaccessible'
+  /** How many tracked worktree roots are cleanup-eligible right now. */
+  readonly worktreeCleanupCount?: number
 }
 
 /** What `reveal` answers with: the directory the host asked the file manager to show. */
@@ -242,6 +295,12 @@ const rootViewSchema = z.object({
   access: z.enum(['inherit', 'read-write', 'read-only']).optional(),
   detail: z.string().optional(),
   effectiveAccess: z.enum(['read-only', 'read-write', 'full-access', 'unavailable']).optional(),
+  worktree: z.object({
+    adminId: z.string(),
+    path: z.string(),
+    state: z.enum(['active', 'directory-missing', 'unregistered', 'moved', 'changed']),
+    cleanupEligible: z.boolean(),
+  }).optional(),
 })
 
 const rootsViewSchema = z.object({
@@ -257,6 +316,8 @@ const rootsViewSchema = z.object({
   limit: z.number().int().nonnegative().optional(),
   count: z.number().int().nonnegative().optional(),
   unavailable: z.string().optional(),
+  primaryState: z.enum(['present', 'missing', 'inaccessible']).optional(),
+  worktreeCleanupCount: z.number().int().nonnegative().optional(),
 })
 
 const revealedViewSchema = z.object({ revealed: z.string() })
@@ -305,6 +366,8 @@ export function parseRootsView(value: unknown): Parsed<RootsView> {
       limit: view.limit ?? Number.MAX_SAFE_INTEGER,
       count: view.count ?? view.roots.length,
       ...(view.unavailable === undefined ? {} : { unavailable: view.unavailable }),
+      ...(view.primaryState === undefined ? {} : { primaryState: view.primaryState }),
+      ...(view.worktreeCleanupCount === undefined ? {} : { worktreeCleanupCount: view.worktreeCleanupCount }),
     },
   }
 }
@@ -368,6 +431,7 @@ function narrowRootView(value: z.infer<typeof rootViewSchema>): RootView {
     ...(value.skillsEnabled === undefined ? {} : { skillsEnabled: value.skillsEnabled }),
     ...(value.alias === undefined ? {} : { alias: value.alias }),
     ...(value.detail === undefined ? {} : { detail: value.detail }),
+    ...(value.worktree === undefined ? {} : { worktree: value.worktree }),
   }
 }
 

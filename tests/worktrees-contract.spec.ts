@@ -1,0 +1,94 @@
+/** The worktree wire contract: strict unions, no retry hints, explicit required fields. */
+import { describe, expect, it } from 'vitest'
+import {
+  parseRootsView,
+  parseWorktreeCall,
+  worktreeWaitViewSchema,
+} from '../src/contract.ts'
+
+const prompt = {
+  id: 'p1',
+  key: 'worktree\u0000/wt',
+  kind: 'worktree' as const,
+  path: '/wt',
+  primaryRoot: '/main',
+  access: 'inherit' as const,
+  effectiveAccess: 'read-write' as const,
+  remaining: 1,
+  viewRevision: 'v1',
+}
+
+describe('worktree wait union', () => {
+  it('accepts every documented branch', () => {
+    for (const value of [
+      { status: 'prompt', prompt, viewRevision: 'v1' },
+      { status: 'timeout', viewRevision: 'v1' },
+      { status: 'unactivated', viewRevision: 'v1' },
+      { status: 'lost', viewRevision: 'v1' },
+      { status: 'stale', viewRevision: 'v1', reason: 'prompt-gone' },
+    ]) expect(worktreeWaitViewSchema.safeParse(value).success, JSON.stringify(value)).toBe(true)
+  })
+
+  it('refuses a retry hint on every branch', () => {
+    for (const status of ['prompt', 'timeout', 'unactivated', 'lost', 'stale']) {
+      const value = status === 'prompt' ? { status, prompt, viewRevision: 'v1', retryAfterMs: 1000 }
+        : status === 'stale' ? { status, viewRevision: 'v1', reason: 'x', retryAfterMs: 1000 }
+          : { status, viewRevision: 'v1', retryAfterMs: 1000 }
+      expect(worktreeWaitViewSchema.safeParse(value).success, status).toBe(false)
+    }
+  })
+
+  it('refuses an unknown status or a malformed prompt', () => {
+    expect(worktreeWaitViewSchema.safeParse({ status: 'waiting', viewRevision: 'v1' }).success).toBe(false)
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt: { ...prompt, kind: 'other' }, viewRevision: 'v1' }).success).toBe(false)
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt: { ...prompt, access: 'read-only' }, viewRevision: 'v1' }).success).toBe(false)
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', viewRevision: 'v1' }).success).toBe(false)
+  })
+})
+
+describe('worktree requests', () => {
+  it('requires sessionId and rejects unknown fields', () => {
+    expect(parseWorktreeCall('worktreePrompt', {})).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePrompt', { sessionId: 's', path: '/wt' })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePrompt', { sessionId: 's' })).toMatchObject({ ok: true, value: { sessionId: 's' } })
+  })
+
+  it('requires the fields each endpoint acts on', () => {
+    expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', action: 'add' })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptId: 'p' })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptId: 'p', action: 'add' })).toMatchObject({ ok: true })
+    expect(parseWorktreeCall('worktreeRootsCleanup', { sessionId: 's' })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreeRootsCleanup', { sessionId: 's', rootIds: ['r1'] })).toMatchObject({ ok: true })
+  })
+
+  it('carries the seen cursor and refuses an unknown endpoint', () => {
+    expect(parseWorktreeCall('worktreePromptWait', { sessionId: 's', seenPromptId: 'p', seenViewRevision: 'v' })).toMatchObject({
+      ok: true, value: { seenPromptId: 'p', seenViewRevision: 'v' },
+    })
+    expect(parseWorktreeCall('worktreeNope', { sessionId: 's' })).toMatchObject({ ok: false })
+  })
+})
+
+describe('roots view worktree fields', () => {
+  it('preserves the worktree badge, primary state and cleanup count', () => {
+    const view = {
+      primaryRoot: '/main',
+      roots: [{
+        ordinal: 1, id: 'r1', path: '/wt', addedAt: '2026-11-09', state: 'missing', access: 'inherit',
+        worktree: { adminId: 'id', path: '/wt', state: 'directory-missing', cleanupEligible: true },
+      }],
+      limit: 16, count: 1, primaryState: 'present', worktreeCleanupCount: 1,
+    }
+    const parsed = parseRootsView(view)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.value.primaryState).toBe('present')
+    expect(parsed.value.worktreeCleanupCount).toBe(1)
+    expect(parsed.value.roots[0]?.worktree).toMatchObject({ state: 'directory-missing', cleanupEligible: true })
+  })
+
+  it('rejects a malformed worktree badge without breaking the root view', () => {
+    const root = { ordinal: 1, id: 'r1', path: '/wt', addedAt: '2026-11-09', state: 'missing', worktree: { adminId: 'id', path: '/wt', state: 'gone', cleanupEligible: true } }
+    expect(parseRootsView({ primaryRoot: '/main', roots: [root] })).toMatchObject({ ok: false })
+  })
+})

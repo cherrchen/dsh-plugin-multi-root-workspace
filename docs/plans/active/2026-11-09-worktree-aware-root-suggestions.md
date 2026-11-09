@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P2 完成；P3 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P3 完成；P4 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -104,7 +104,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 恢复只经用户面板/命令 `list` 或显式重新检测；禁止自动 wait、one-shot 与周期重查；重建时清 `evaluated`、保留明确 `prompted`。
 - 验收：普通目录/仓库子目录无后台；active→lost 停止后台→显式恢复新 ID；候选去重/上限/degraded。
 
-### P3 Prompt RPC、UI 与插件设置开关（未开始）
+### P3 Prompt RPC、UI 与插件设置开关（完成）
 
 - 在「设置 → 插件 → Multi-root Workspace → 插件详情」现有卡片内，于「启用附属根 Skills」旁添加独立 Switch「启用 Worktree 附加根建议」/「Enable worktree root suggestions」。复用同一 Settings form 订阅与写入、revision、错误提示与旧版 `settings.plugin.item` 适配；支持即时生效和持久化，不另注册包级卡片。
 - 关闭时退出提示和专用清理 UI，处理 `worktree/not-enabled` 并停止轮询；开启后对当前 live session 重新检测，已 `lost` 的 workspace 仍走显式恢复。

@@ -47,17 +47,9 @@ import type {
   WorktreePromptWaitResult,
 } from './worktrees/types.ts'
 
-/** Stable feature error codes; the panel localizes by code. */
-export class WorktreeError extends Error {
-  /**
-   * @param code - stable code (also the wire failure code).
-   * @param message - English fallback text.
-   */
-  constructor(readonly code: string, message: string) {
-    super(message)
-    this.name = 'WorktreeError'
-  }
-}
+import { WorktreeError } from './worktrees/errors.ts'
+
+export { WorktreeError }
 
 /** The row's configuration. */
 export interface Config {
