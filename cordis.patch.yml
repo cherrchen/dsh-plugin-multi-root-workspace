@@ -87,6 +87,10 @@
         # Change both paths together for a custom Registry store (ADR-0025).
         sharedStorageRoot: !!js dshHomePath('storages')
         leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+        # The worktree prompt/ignore sidecar: one file per workspace key, written
+        # only by the Registry owner. Losing it only loses suggestions and
+        # cleanup tracking, never authorization (ADR-0039 §5).
+        promptsRoot: !!js dshHomePath('storages/multi_root_workspace.worktree-prompts')
         # Cap on stored additional-root records per primary root (integer,
         # 1..64; the count covers every state, so it is stable). A store that
         # already exceeds it keeps granting — only new adds are refused. Bench

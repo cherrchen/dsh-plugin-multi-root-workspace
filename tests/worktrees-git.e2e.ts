@@ -22,7 +22,7 @@ import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { confineForTest } from './support/confine.ts'
-import { runConfined } from './support/dialect-grants.ts'
+import { runConfined, type ConfinedOutcome } from './support/dialect-grants.ts'
 import { requireKernelRunner } from './support/kernel-runner.ts'
 
 function git(cwd: string, args: readonly string[]): string {
@@ -84,38 +84,55 @@ describe('restricted Git journey with the A root', () => {
     if (provider === undefined) throw new Error('the sandbox provider was not mounted')
 
     const policy = { mode: 'workspace-write', workspaceRoot: linked } as SandboxPolicy
-    const confined = await confineForTest(provider, ['/bin/sh', '-c', 'true'], policy)
-    if ('kind' in confined) return context.skip(requireKernelRunner(dialect(), confined.detail))
-    // The provider built an argv; executing it is the runner probe. A host whose
-    // outer sandbox refuses nesting reports runner-failed here and skips.
-    const probe = runConfined(confined, linked)
+
+    // The shared Registry authorizes a CONFINE call only inside an ordered
+    // admission frame (ADR-0024): an ambient `ctx.sandbox.confine` sees the
+    // unavailable scope by design. Each execution is therefore admitted, then
+    // confined and spawned inside that frame — exactly how the bash executor
+    // reaches this provider.
+    const admitted = async (argv: readonly string[]): Promise<ConfinedOutcome> =>
+      await stack.registry.withOperation(policy, 'process', async () => {
+        const confined = await confineForTest(provider!, argv, policy)
+        if ('kind' in confined) return confined
+        return runConfined(confined, linked)
+      })
+
+    const probe = await admitted(['/bin/sh', '-c', 'true'])
     if (probe.kind !== 'ok') return context.skip(requireKernelRunner(dialect(), 'detail' in probe ? probe.detail : 'no confined execution'))
 
     const gitPath = gitBinary()
 
     // 1. Before A: Git cannot write the admin index / shared objects.
-    const before = await confineForTest(provider, [gitPath, '-C', linked, 'add', 'feature.txt'], policy)
-    const beforeRun = runConfined(before, linked)
+    const beforeRun = await admitted([gitPath, '-C', linked, 'add', 'feature.txt'])
     expect(beforeRun.kind).not.toBe('ok')
 
     // 2. Grant the canonical common through the ordinary Registry.
     await stack.registry.add(linked, { path: common })
 
     // 3. The same workspace-write session can now stage and commit.
-    const add = runConfined(await confineForTest(provider, [gitPath, '-C', linked, 'add', 'feature.txt'], policy), linked)
+    const add = await admitted([gitPath, '-C', linked, 'add', 'feature.txt'])
     expect(add.kind, 'detail' in add ? add.detail : '').toBe('ok')
-    const commit = runConfined(await confineForTest(provider, [gitPath, '-C', linked, 'commit', '-q', '-m', 'feature'], policy), linked)
+    const commit = await admitted([gitPath, '-C', linked, 'commit', '-q', '-m', 'feature'])
     expect(commit.kind, 'detail' in commit ? commit.detail : '').toBe('ok')
     // The commit object lives in the shared object database.
     expect(git(linked, ['rev-parse', 'HEAD']).trim().length).toBeGreaterThan(0)
 
     // 4. The main checkout's SOURCE tree is still outside the grant.
-    const sourceWrite = runConfined(await confineForTest(provider, ['/bin/sh', '-c', 'echo nope > "' + join(main, 'outside.txt') + '"'], policy), linked)
+    const sourceWrite = await admitted(['/bin/sh', '-c', 'echo nope > "' + join(main, 'outside.txt') + '"'])
     expect(sourceWrite.kind).not.toBe('ok')
     expect(() => readFileSync(join(main, 'outside.txt'))).toThrow()
 
     // 5. An unrelated directory stays refused.
-    const unrelatedWrite = runConfined(await confineForTest(provider, ['/bin/sh', '-c', 'echo nope > "' + join(unrelated, 'x.txt') + '"'], policy), linked)
+    const unrelatedWrite = await admitted(['/bin/sh', '-c', 'echo nope > "' + join(unrelated, 'x.txt') + '"'])
     expect(unrelatedWrite.kind).not.toBe('ok')
+
+    // 6. After the ordinary Remove, a NEW confined attempt cannot write the
+    // common again: the grant really is the registration, not a cache.
+    const rows = stack.registry.list(linked)
+    expect(rows).toHaveLength(1)
+    await stack.registry.removeAt(linked, { kind: 'id', id: rows[0]!.id })
+    writeFileSync(join(linked, 'again.txt'), 'again\n')
+    const afterRemoval = await admitted([gitPath, '-C', linked, 'add', 'again.txt'])
+    expect(afterRemoval.kind).not.toBe('ok')
   })
 })

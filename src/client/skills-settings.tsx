@@ -5,11 +5,12 @@ import { bindSettingsForm, bindSkillsForm, clientInject, type SkillsForm } from 
 import { installAutoReviewSettings, type AutoReviewForm } from '../compat/auto-review-client.ts'
 import { AutoReviewSettingsCard } from './auto-review-settings.tsx'
 import { OpsCompatibilitySettingsCard } from './ops-settings.tsx'
+import type { Key } from './locales.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 const BUNDLE_KEY = '@dsh-electron/dsh-plugin-multi-root-workspace'
 
 /** One live boolean settings row; the Skills and worktree switches share it. */
-function SettingSwitchRow({ form, title, hint, t }: { form: SkillsForm; title: string; hint: string; t: Translate }) {
+function SettingSwitchRow({ form, title, hint, failureText, t }: { form: SkillsForm; title: string; hint: string; failureText: Key; t: Translate }) {
   const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
   const [busy, setBusy] = useState(false)
   const mounted = useRef(true)
@@ -29,8 +30,8 @@ function SettingSwitchRow({ form, title, hint, t }: { form: SkillsForm; title: s
       onChange={enabled => {
         setBusy(true)
         void form.mutate([{ op: 'set', path: ['enabled'], value: enabled }], snapshot.revision)
-          .then(ok => { if (mounted.current && !ok) showToast(t('skills.settingsFailed')) })
-          .catch(() => { if (mounted.current) showToast(t('skills.settingsFailed')) })
+          .then(ok => { if (mounted.current && !ok) showToast(t(failureText)) })
+          .catch(() => { if (mounted.current) showToast(t(failureText)) })
           .finally(() => { if (mounted.current) setBusy(false) })
       }} />
     {toast === null ? null : (
@@ -50,9 +51,9 @@ interface SkillsCardProps { form: SkillsForm; worktreeForm?: SkillsForm | undefi
 /** The plugin-detail card: root Skills and worktree suggestions, one cell. */
 export function SkillsSettingsCard({ form, worktreeForm, t }: SkillsCardProps) {
   return <>
-    <SettingSwitchRow form={form} title={t('skills.globalEnable')} hint={t('skills.globalHint')} t={t} />
+    <SettingSwitchRow form={form} title={t('skills.globalEnable')} hint={t('skills.globalHint')} failureText="skills.settingsFailed" t={t} />
     {worktreeForm === undefined ? null : (
-      <SettingSwitchRow form={worktreeForm} title={t('worktree.globalEnable')} hint={t('worktree.globalHint')} t={t} />
+      <SettingSwitchRow form={worktreeForm} title={t('worktree.globalEnable')} hint={t('worktree.globalHint')} failureText="worktree.settingsFailed" t={t} />
     )}
   </>
 }
@@ -76,7 +77,7 @@ export function BundleSettingsCard({ form, worktreeForm, autoReviewForm, opsForm
       ? null
       : <SkillsSettingsCard form={form} worktreeForm={worktreeForm} t={t} />}
     {form === undefined && worktreeForm !== undefined
-      ? <SettingSwitchRow form={worktreeForm} title={t('worktree.globalEnable')} hint={t('worktree.globalHint')} t={t} />
+      ? <SettingSwitchRow form={worktreeForm} title={t('worktree.globalEnable')} hint={t('worktree.globalHint')} failureText="worktree.settingsFailed" t={t} />
       : null}
     {autoReviewForm !== undefined ? <AutoReviewSettingsCard form={autoReviewForm} t={t} /> : null}
     {opsForm !== undefined ? <OpsCompatibilitySettingsCard form={opsForm} t={t} /> : null}

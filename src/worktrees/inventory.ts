@@ -65,16 +65,16 @@ function adminTarget(admin: string): string {
 }
 
 /**
- * Enumerate every worktree of one common git dir.
+ * Enumerate every worktree of one common git dir. The watcher cap is applied by
+ * the workspace, NOT here: discovery must never silently drop a candidate just
+ * because the host cannot afford one watcher per admin.
  * @param common - canonical common git dir.
  * @param platform - platform override for tests.
- * @param options - `maxAdmins` caps the per-admin watcher/list work.
- * @returns the candidates that passed the full snapshot, and whether the cap degraded enumeration.
+ * @returns every candidate that passed the full snapshot, and whether listing degraded.
  */
 export function inventoryWorktrees(
   common: string,
   platform: NodeJS.Platform = process.platform,
-  options: { readonly maxAdmins?: number } = {},
 ): InventoryResult {
   const directory = join(common, 'worktrees')
   const entry = lstatEntry(directory)
@@ -87,10 +87,9 @@ export function inventoryWorktrees(
     return { candidates: [], degraded: true }
   }
   names = names.filter(validAdminId).sort()
-  const limit = options.maxAdmins ?? Number.MAX_SAFE_INTEGER
-  const degraded = names.length > limit
+  const degraded = false
   const candidates: InventoryCandidate[] = []
-  for (const name of names.slice(0, limit)) {
+  for (const name of names) {
     const admin = join(directory, name)
     try {
       const adminEntry = lstatEntry(admin)

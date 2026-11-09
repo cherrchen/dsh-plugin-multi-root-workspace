@@ -190,6 +190,35 @@ describe('A candidate', () => {
     expect(stack.stack.registry.list(linked)).toHaveLength(0)
   })
 
+  it('never turns a separate-git-dir common into its parent directory', async () => {
+    const area = fixture('common-separate')
+    const main = join(area.base, 'main')
+    const store = join(area.base, 'unrelated', '.git')
+    mkdirSync(main, { recursive: true })
+    mkdirSync(join(area.base, 'unrelated'), { recursive: true })
+    git(main, ['init', '-q', '-b', 'main', '--separate-git-dir=' + store])
+    git(main, ['config', 'user.email', 'fixture@example.invalid'])
+    git(main, ['config', 'user.name', 'Fixture'])
+    writeFileSync(join(main, 'README.md'), 'x\n')
+    git(main, ['add', 'README.md'])
+    git(main, ['commit', '-q', '-m', 'initial'])
+    const linked = join(area.base, 'linked')
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const stack = await mount(area, linked)
+    const prompt = promptOf(await stack.worktrees.wait(stack.sessionId))
+    // The candidate is the separated common itself, never its parent.
+    expect(prompt.kind).toBe('git-common')
+    expect(prompt.path).toBe(realpathSync.native(store))
+    expect(prompt.path).not.toBe(realpathSync.native(join(area.base, 'unrelated')))
+    await stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')
+    const rows = stack.stack.registry.list(linked)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.path).toBe(realpathSync.native(store))
+    const granted = stack.stack.scope.snapshot({ workspaceRoot: linked, mode: 'workspace-write' }).additionalRoots
+    expect(granted).toContain(realpathSync.native(store))
+    expect(granted).not.toContain(realpathSync.native(join(area.base, 'unrelated')))
+  })
+
   it('drops the A prompt when the linked checkout loses its back-pointer', async () => {
     const area = fixture('common-lost')
     const main = join(area.base, 'main')

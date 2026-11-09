@@ -6,7 +6,7 @@ import { connectNative, listenNative, type Listener } from './native.ts'
 
 import { addNewSchema, deletedWorktreeSchema, sidecarOperationSchema } from '../worktrees/protocol.ts'
 
-const MAX_FRAME = 4 * 1024 * 1024, MAX_PENDING = 32
+const MAX_FRAME = 1024 * 1024, MAX_PENDING = 32
 const helloSchema = z.object({ protocol: z.literal(1), store: z.string(), epoch: z.string(), limit: z.number().int() }).strict()
 const methods = ['hello', 'snapshot', 'admit', 'probeAdd', 'add', 'removeAt', 'setAccess', 'setAlias', 'setSkillsEnabled', 'setAliasId', 'move', 'recheck', 'addNew', 'removeForDeletedWorktree', 'worktreeSidecar'] as const
 export type Method = typeof methods[number]

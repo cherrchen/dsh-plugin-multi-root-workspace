@@ -172,6 +172,8 @@ describe('discovery', () => {
     })
     await worktrees.wait(SESSION)
     expect(worktrees.activationOf(main).degraded).toBe(true)
+    // The watcher cap does not truncate discovery.
+    expect(worktrees.activationOf(main).candidates).toBe(2)
   }, 20_000)
 })
 
@@ -207,9 +209,12 @@ describe('activation lifecycle', () => {
       config: { waitTimeoutMs: 200, debounceMs: 20 },
     })
     const firstId = promptOf(await worktrees.wait(SESSION)).id
+    // macOS arms FSEvents asynchronously; give the debounced watcher set a
+    // moment before the event this case depends on.
+    await new Promise(resolve => setTimeout(resolve, 100))
     renameSync(join(main, '.git'), join(area.base, 'git-away'))
     // The watcher reconciles on its own: the workspace releases everything.
-    await vi.waitFor(() => { expect(worktrees.activationOf(main).activation).toBe('lost') }, { timeout: 5_000 })
+    await vi.waitFor(() => { expect(worktrees.activationOf(main).activation).toBe('lost') }, { timeout: 15_000, interval: 25 })
     // A re-mount sees lost and stops; it does not resurrect the workspace.
     expect((await worktrees.wait(SESSION)).status).toBe('lost')
     await new Promise(resolve => setTimeout(resolve, 100))

@@ -178,6 +178,7 @@ describe('inserted rows', () => {
   it('pins the registry lease beside the default JSON storage root', () => {
     const registry = inserted.find(row => row.id === 'multi-root-registry')
     expect(registry?.config).toMatchObject({
+      promptsRoot: "dshHomePath('storages/multi_root_workspace.worktree-prompts')",
       leasePath: "dshHomePath('storages/multi_root_workspace.lock')",
       maxAdditionalRoots: 16,
       backgroundRecovery: true,

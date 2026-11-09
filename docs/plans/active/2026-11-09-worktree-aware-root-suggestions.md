@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P9 完成；P10 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P1–P10 全部实施完成；未发版**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -29,10 +29,10 @@ ADR-0039 已经过多轮只读复审，覆盖：
 
 ## Current State
 
-- ADR-0039 第十七次修订接受 B；第十八次修订确定 A 的授权边界与全局开关。P1 实现尚未开始。
-- 本计划、需求 §7.16–§7.18、路线账本条目属于 P0 文档。
+- ADR-0039 第十七次修订接受 B；第十八次修订确定 A 的授权边界与全局开关。
+- P1–P10 已全部实施：B 的发现、激活、提示、开关、owner 串行写入、sidecar 与专用清理，以及 A 的 common 候选、确认与受限 Git 旅程用例。
 - 现有 Registry、scope、面板、`/workspace-folders` 命令与 Connection RPC 已经存在；本功能新增独立的 `multi-root-worktrees` 行与 `WORKTREE_ENDPOINTS`，不修改上游包。
-- 当前没有 worktree 发现、提示、全局开关、`worktreeRoots` sidecar、专用 cleanup 或 Git 元数据授权的实现。
+- 未创建 tag，也未更新 CHANGELOG：发布是维护者的独立动作。
 
 ## Scope
 
@@ -174,7 +174,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 同阶段接通 `addNew` 的 A 分支。请求 Host 和 owner 分别重跑来源与身份检查，owner 队列内按普通 Registry 规则新建；不 revive、不写 B 清理映射。开关关闭或 mode 变化时作废旧提示；已确认的普通根通过普通 Remove 撤回。
 - 验收：验证送交 owner 前的 mode 切换和设置关闭都会作废旧提示。用队列屏障在 owner 提交前替换 common/admin、修改反向指针或祖先索引，断言无写入。按 ADR §9 验证跨 Host 已送交 owner 请求的边界。A/B 同时可见时，一个 session 的 A 过滤不得堵住该 session 的 B 提示。
 
-### P10 A：受限 Git 旅程、回归与发布准备（未开始）
+### P10 A：受限 Git 旅程、回归与发布准备（完成）
 
 - 在隔离夹具中分别用默认 pool 和外部 linked checkout 作为 live session primary。确认前，真实受限 shell 的 Git 写入因缺少元数据权限失败；确认后，在同一 `workspace-write` 模式、不走 `danger-full-access` 的条件下完成 `git add` 和 `git commit`，核对 index、commit/ref 产物。验证主 checkout 源码（当前 primary 之外）和无关目录仍拒写；普通 Remove 后，新进程再次无法写该 common。
 - 覆盖 `read-only`、`danger-full-access` 无 A 提示、per-tool cap、authority 不可用以及设置关闭/开启；删除 linked checkout 后，A 根保持普通 Registry 生命周期，专用清理只追踪 B 根。

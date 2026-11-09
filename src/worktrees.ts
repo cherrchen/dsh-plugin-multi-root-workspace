@@ -70,7 +70,7 @@ export interface Config {
 /** The schemastery face of {@link Config}. */
 export const Config = z.object({
   enabled: volatileField(z.boolean().default(true)),
-  waitTimeoutMs: z.number().default(20000),
+  waitTimeoutMs: z.number().default(20_000),
   debounceMs: z.number().default(150),
   maxAdminWatchers: z.number().default(128),
 })
@@ -164,7 +164,8 @@ export class MultiRootWorktrees extends Service {
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'multiRootWorktrees')
     this.config = config
-    this.waitTimeoutMs = clamp(config.waitTimeoutMs, 10, 60000, 20000)
+    // The ADR bounds the long poll at 20s; a larger configured value is clamped.
+    this.waitTimeoutMs = clamp(config.waitTimeoutMs, 10, 20_000, 20_000)
     this.debounceMs = clamp(config.debounceMs, 0, 5000, 150)
     this.maxAdminWatchers = clamp(config.maxAdminWatchers, 1, 1024, 128)
   }
@@ -189,7 +190,7 @@ export class MultiRootWorktrees extends Service {
       ctx.multiRootRegistry.setWorktreeGateProvider(() => owner.enabled)
       yield () => {
         ctx.multiRootRegistry.setWorktreeGateProvider(undefined)
-        owner.disposeAll()
+        owner.disposeAll(true)
       }
     }, 'multi-root worktrees: ordered owner')
   }
@@ -478,6 +479,9 @@ export class MultiRootWorktrees extends Service {
       workspace.revision++
     }
     await this.loadSidecar(workspace)
+    // A new owner generation must rebind/prune its mappings only after an
+    // explicit workspace activation (ADR-0039 §6.8).
+    this.reconcileSidecar(workspace)
     await this.refreshInventory(workspace)
     this.wake(workspace)
   }
@@ -528,9 +532,10 @@ export class MultiRootWorktrees extends Service {
   private async refreshInventory(workspace: WorkspaceState): Promise<void> {
     const repo = workspace.repo
     if (repo === undefined || workspace.activation !== 'active' || this.closing || !this.enabled) return
-    const inventory = inventoryWorktrees(repo.common, process.platform, { maxAdmins: this.maxAdminWatchers })
+    const inventory = inventoryWorktrees(repo.common, process.platform)
     workspace.inventory = inventory.candidates
-    workspace.degraded = inventory.degraded
+    // Discovery is complete; the watcher set is what degrades past the cap.
+    workspace.degraded = inventory.degraded || inventory.candidates.length > this.maxAdminWatchers
     const next = new Map<string, CandidateRecord>()
     const added: CandidateRecord[] = []
     // A candidates share the queue and dedupe set with B; visibility is
@@ -562,6 +567,7 @@ export class MultiRootWorktrees extends Service {
     workspace.queue = [...ordered, ...added]
     workspace.watchers?.close()
     workspace.watchers = this.createWatchers(workspace)
+    if (workspace.watchers?.degraded === true) workspace.degraded = true
     if (changed) workspace.revision++
     this.wake(workspace)
   }
@@ -843,8 +849,11 @@ export class MultiRootWorktrees extends Service {
     }
   }
 
-  /** Close every workspace, rejecting waiters. Idempotent. */
-  private disposeAll(): void {
+  /**
+   * Close every workspace, rejecting waiters. Idempotent.
+   * @param permanent - true for the fiber teardown (the switch cannot come back).
+   */
+  private disposeAll(permanent = false): void {
     this.closing = true
     for (const workspace of this.workspaces.values()) {
       workspace.watchers?.close()
@@ -857,7 +866,7 @@ export class MultiRootWorktrees extends Service {
     }
     this.workspaces.clear()
     this.ignored.clear()
-    this.closing = false
+    if (!permanent) this.closing = false
   }
 }
 

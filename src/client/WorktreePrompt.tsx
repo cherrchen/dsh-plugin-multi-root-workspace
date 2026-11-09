@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorktreePromptView } from '../contract.ts'
-import { PanelError } from './panel-client.ts'
+import { errorKeyOf, PanelError } from './panel-client.ts'
 import type { WorktreeClient } from './worktree-client.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 
@@ -80,7 +80,8 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
           result = await client.wait(currentSession, seen, controller.signal)
         } catch (failure: unknown) {
           if (cancelled) return
-          if (failure instanceof PanelError && (failure.code === 'worktree/not-enabled' || failure.code === 'worktree/not-available')) {
+          if (failure instanceof PanelError && (failure.code === 'worktree/not-enabled'
+            || failure.code === 'worktree/not-available' || failure.code === 'worktree/session-not-found')) {
             setPrompt(undefined)
             return
           }
@@ -180,7 +181,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
             {t('worktree.dontRemind')}
           </label>
         )}
-        {error === undefined ? null : <p role="alert" className="mrfw-alert">{t('error.fallback')}</p>}
+        {error === undefined ? null : <p role="alert" className="mrfw-alert">{t(errorKeyOf(error))}</p>}
       </div>
     </Modal>
   )
