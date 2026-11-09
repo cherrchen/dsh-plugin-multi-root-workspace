@@ -474,7 +474,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       // An explicit list is also the host's explicit re-activation request:
       // it may have recovered a workspace whose remain prompt is `lost`. The
       // overlay cannot see that answer, so wake it to mount its wait again.
-      props.worktrees?.notify?.()
+      props.worktrees?.notify?.(base.sessionId)
     } catch (error: unknown) {
       if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
       setState({ view: undefined, error: asPanelError(error), busy: false, noSession: false })
@@ -779,6 +779,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 ) : null}
                 {root.worktree?.cleanupEligible === true ? (
                   <span className="mrfw-note">{t('worktree.pathReuse')}</span>
+                ) : root.worktree?.state === 'changed' ? (
+                  <span className="mrfw-note">{t('worktree.pathReused')}</span>
                 ) : null}
                 {root.state === 'missing' ? (
                   <IconButton

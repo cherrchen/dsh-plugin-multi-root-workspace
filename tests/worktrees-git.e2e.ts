@@ -16,22 +16,23 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { accessSync, constants, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { join } from 'node:path'
+import { delimiter, isAbsolute, join } from 'node:path'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import type { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { Context } from '@deepseek-ai/cordis'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { confineForTest } from './support/confine.ts'
-import { runConfined, type ConfinedOutcome } from './support/dialect-grants.ts'
-import { requireKernelRunner } from './support/kernel-runner.ts'
+import { parseConfined, runConfined, type ConfinedOutcome, type ParsedDialect } from './support/dialect-grants.ts'
+import { kernelRunnerRequired, requireKernelRunner } from './support/kernel-runner.ts'
 import MultiRootWorktrees from '../src/worktrees.ts'
 import type { WorktreePromptWaitResult } from '../src/worktrees/types.ts'
 import { resolveRepo } from '../src/worktrees/repository.ts'
 
 function git(cwd: string, args: readonly string[]): string {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
+  const result = spawnSync(gitBinary(), args, { cwd, encoding: 'utf8' })
   if (result.status !== 0) throw new Error('git ' + args.join(' ') + ' failed in ' + cwd + ': ' + result.stderr)
   return result.stdout
 }
@@ -46,14 +47,42 @@ function initRepo(path: string): void {
   git(path, ['commit', '-q', '-m', 'initial'])
 }
 
+let gitExecutable: string | undefined
 function gitBinary(): string {
-  const found = spawnSync('which', ['git'], { encoding: 'utf8' })
-  const path = found.stdout?.trim()
-  return path === undefined || path === '' ? '/usr/bin/git' : path
+  if (gitExecutable !== undefined) return gitExecutable
+  const name = process.platform === 'win32' ? 'git.exe' : 'git'
+  for (const entry of (process.env.PATH ?? '').split(delimiter)) {
+    const directory = entry.replace(/^"(.*)"$/, '$1')
+    if (!isAbsolute(directory)) continue
+    const path = join(directory, name)
+    try {
+      accessSync(path, constants.X_OK)
+      return gitExecutable = realpathSync.native(path)
+    } catch { /* Try the next PATH entry. */ }
+  }
+  throw new Error(`${name} was not found on PATH`)
 }
 
-function dialect(): string {
-  return process.platform === 'darwin' ? 'seatbelt' : process.platform === 'win32' ? 'windows-acl' : 'landlock'
+function unavailableRunner(dialect: ParsedDialect | undefined, detail: string): string {
+  if (dialect !== undefined && dialect !== 'unknown') return requireKernelRunner(dialect, detail)
+  // If confine failed before returning argv, it has not told us which
+  // dialect it picked. Never skip on a host with a verified local runner.
+  const local = process.platform === 'linux' ? ['bwrap', 'landlock']
+    : [process.platform === 'win32' ? 'windows-acl' : 'seatbelt']
+  return requireKernelRunner(local.find(kernelRunnerRequired) ?? local[0]!, detail)
+}
+
+function writeProbe(path: string): string[] {
+  const code = `
+    try {
+      require('node:fs').writeFileSync(process.argv[1], 'probe')
+      console.log('allowed')
+    } catch (error) {
+      if (!['EACCES', 'EPERM', 'EROFS'].includes(error.code)) throw error
+      console.log('denied')
+    }
+  `
+  return [process.execPath, '-e', code, path]
 }
 
 function promptOf(result: WorktreePromptWaitResult) {
@@ -102,7 +131,7 @@ describe.each(cases)('restricted Git journey with the A root: $label', ({ label,
   it('fails before the A confirmation and commits after it, while the source tree stays refused', async (context) => {
     const { area, main, linked, unrelated } = journey(label.replaceAll(' ', '-'), pool)
     const common = join(main, '.git')
-    let provider: { confine: (argv: readonly string[], policy: SandboxPolicy) => unknown } | undefined
+    let provider: Pick<LocalSandboxProvider, 'confine'> | undefined
     const stack = await mountRegistryStack(join(area.base, 'store'), {}, {
       beforeGate: async (ctx: Context) => {
         // The live session shape the panel and the worktree row read.
@@ -110,7 +139,7 @@ describe.each(cases)('restricted Git journey with the A root: $label', ({ label,
         ctx.provide('sessions', { get: (id: string) => id === SESSION ? { header: { cwd: linked } } : undefined } as never)
         const { MultiRootSandboxProvider } = await import('../src/sandbox.ts')
         await ctx.plugin(MultiRootSandboxProvider)
-        provider = ctx.sandbox as unknown as typeof provider
+        provider = ctx.sandbox
       },
     })
     stacks.push(stack)
@@ -121,15 +150,20 @@ describe.each(cases)('restricted Git journey with the A root: $label', ({ label,
     if (provider === undefined) throw new Error('the sandbox provider was not mounted')
 
     const policy = { mode: 'workspace-write', workspaceRoot: linked } as SandboxPolicy
+    let selected: ParsedDialect | undefined
     const admitted = async (argv: readonly string[]): Promise<ConfinedOutcome> =>
       await stack.registry.withOperation(policy, 'process', async () => {
         const confined = await confineForTest(provider!, argv, policy)
         if ('kind' in confined) return confined
+        selected = parseConfined(confined.argv, argv).dialect
         return runConfined(confined, linked)
       })
 
-    const probe = await admitted(['/bin/sh', '-c', 'true'])
-    if (probe.kind !== 'ok') return context.skip(requireKernelRunner(dialect(), 'detail' in probe ? probe.detail : 'no confined execution'))
+    const probe = await admitted(writeProbe(join(linked, 'probe.txt')))
+    if (probe.kind !== 'ok') return context.skip(unavailableRunner(selected, probe.detail))
+    expect(selected).not.toBe('unknown')
+    expect(probe.stdout.trim()).toBe('allowed')
+    expect(await admitted(writeProbe(join(unrelated, 'probe.txt')))).toMatchObject({ kind: 'ok', stdout: expect.stringMatching(/^denied\r?\n$/) })
 
     const gitPath = gitBinary()
     const repo = resolveRepo(linked)
@@ -171,13 +205,13 @@ describe.each(cases)('restricted Git journey with the A root: $label', ({ label,
     expect(git(linked, ['ls-files']).split('\n')).toContain('feature.txt')
 
     // 5. The main checkout's SOURCE tree is still outside the grant.
-    const sourceWrite = await admitted(['/bin/sh', '-c', 'echo nope > "' + join(main, 'outside.txt') + '"'])
-    expect(sourceWrite.kind).not.toBe('ok')
+    const sourceWrite = await admitted(writeProbe(join(main, 'outside.txt')))
+    expect(sourceWrite).toMatchObject({ kind: 'ok', stdout: expect.stringMatching(/^denied\r?\n$/) })
     expect(() => readFileSync(join(main, 'outside.txt'))).toThrow()
 
     // 6. An unrelated directory stays refused.
-    const unrelatedWrite = await admitted(['/bin/sh', '-c', 'echo nope > "' + join(unrelated, 'x.txt') + '"'])
-    expect(unrelatedWrite.kind).not.toBe('ok')
+    const unrelatedWrite = await admitted(writeProbe(join(unrelated, 'x.txt')))
+    expect(unrelatedWrite).toMatchObject({ kind: 'ok', stdout: expect.stringMatching(/^denied\r?\n$/) })
 
     // 7. After the ordinary Remove, a NEW confined attempt cannot write the
     // common again: the grant really is the registration, not a cache.

@@ -13,6 +13,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/worktrees/owner
  */
 
+import { basename } from 'node:path'
 import { primaryKey, samePath } from '../roots.ts'
 import { directoryIdentity } from './fs-safe.ts'
 import { resolveRepo, identityMatches } from './repository.ts'
@@ -74,12 +75,13 @@ export function verifyPromptExpected(primaryRoot: string, expected: PromptExpect
   if (!primary.ok) return stale('the primary checkout no longer activates: ' + primary.reason + ': ' + primary.detail)
   if (!primaryMatches(primary.repo, expected.primary)) return stale('the primary checkout changed while the prompt was open')
   if (expected.candidate.kind === 'git-common') {
-    if (primary.repo.shape !== 'linked') return stale('the primary is no longer a linked checkout')
+    if (primary.repo.shape !== 'linked' || basename(primary.repo.common) !== '.git') return stale('the primary no longer has an eligible shared common')
     if (!samePath(primary.repo.common, expected.candidate.canonical)) return stale('the shared common git dir changed')
     if (!samePath(primary.repo.common, expected.candidate.common)) return stale('the candidate common does not belong to this workspace')
     if ((primary.repo.adminId ?? '') !== (expected.candidate.adminId ?? '')) return stale('the linked admin changed')
     if (!sameOptionalPath(primary.repo.adminGitdir, expected.candidate.adminGitdir)) return stale('the linked admin moved')
     if ((primary.repo.adminHead ?? '') !== (expected.candidate.adminHead ?? '')) return stale('the admin HEAD changed')
+    if (!sameIdentity(primary.repo.adminIdentity, expected.candidate.adminIdentity)) return stale('the linked admin was replaced')
     const identity = directoryIdentity(primary.repo.common)
     if (!sameIdentity(identity, expected.candidate.rootIdentity)) return stale('the shared common git dir was replaced')
     return { ok: true }

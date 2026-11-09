@@ -2,9 +2,13 @@
 
 ## Status
 
-Accepted（2026-11-09 第十八次修订；同日实施审计返工 R1–R6）。先完成 B 的发现、确认和清理，再实施 A 的共享 Git 元数据授权。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
+Accepted（2026-11-09 第十八次修订；同日实施审计返工 R1–R6 与复审修正）。先完成 B 的发现、确认和清理，再实施 A 的共享 Git 元数据授权。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
 
-## 实施审计修正（2026-11-09）
+## 复审修正（2026-11-09）
+
+`db50de6` 的复审补充了指针词法、持续换链、队列内异步边界、生命周期与线协议反例。保留原授权决策，现行实现边界以 §2.2、§2.4、§4.4、§7 与 §9 为准。验收证据见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#worktree-感知建议-ba-实施2026-11-09)。
+
+## 首次实施审计修正（2026-11-09，历史）
 
 独立审计在 `ceb708e` 上复现的六类缺陷不改变本 ADR 的决策，只把实现收回已经写明的边界；返工条目见[实施计划](../plans/active/2026-11-09-worktree-aware-root-suggestions.md#r1r6-审计返工2026-11-09完成)。这里固定五条容易再次偏离的判据：
 
@@ -183,7 +187,7 @@ B 的授权范围是 worktree 的**源码树**；worktree 根里的 `.git` 只�
 
 1. 对 `<primaryRoot>/.git` 做 `lstat`：指针文件必须是**普通文件**，不得是 symlink；目录形态必须是**目录**，不得是 symlink。
 2. 读取 `<primaryRoot>/.git`、`<admin>/gitdir`、`<admin>/commondir` 时：有界读取（4 KiB），拒绝 NUL，按 UTF-8 解码失败即 inactive；只接受普通文件。
-3. 解析出目标路径后、任何 `stat`/`realpath` 之前，先做词法防护：必须是绝对路径（相对路径按解析基准补全），拒绝 UNC/设备/裸 `\\`/POSIX `//`/NUL；Windows 复用 `isWindowsNetworkOrDevicePath`（`src/roots.ts` 从 `windows-runner-contract.ts` 重导出）。
+3. 对原始 primary 和指针拼写先做词法防护。拒绝 UNC、设备、Windows 非完整盘符路径、POSIX `//` 和 NUL；相对指针以 §2.3 的基准拼接并保留各段。先验证每段再处理其后的 `..`，避免规范化把 Git 实际经过的 symlink 消掉。
 4. 指针链上的 admin 目录、common 目录、指针文件都不得是 symlink；这不是 Git 的通用限制，而是本功能的保守边界：宁可 inactive，也不跟随可能指向网络的链接。
 5. 通过防护后，才允许在 trusted fd 下读取/解析元数据；admin 必须是目录，common 必须是目录，`commondir` 必须指向目录，`gitdir` 必须指回 `<primaryRoot>/.git`；不启动 Git。
 
@@ -207,7 +211,8 @@ v1 **不启动任何 Git 子进程**：`rev-parse`、`config`、`ls-files`、`wo
 
 **元数据 I/O（所有指针/config/HEAD/index）**：
 
-- 从可信目录句柄逐段打开：POSIX 用 `openat`/`openat2`（`RESOLVE_NO_SYMLINKS`/逐级 `O_NOFOLLOW`），Windows 拒绝 symlink/reparse point；中间目录与最终文件都拒绝 symlink。
+- POSIX 从根目录句柄开始，逐级用 `openat` 和 `O_NOFOLLOW` 打开。相对于已打开的父目录检查最后一段的类型，读取和目录枚举使用得到的句柄。Darwin 用 `fstatat`，Linux 用 `statx`，能力缺失时判为 inactive。规范路径从内核句柄取得，再用独立的受控路径遍历核对身份。 [Darwin stat ABI](https://raw.githubusercontent.com/apple-oss-distributions/xnu/main/bsd/sys/stat.h) · [Linux statx ABI](https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/stat.h)
+- Windows 只接受可证明是本地卷的盘符。以卷 GUID 为遍历起点，持有每层目录的防重命名句柄，并拒绝同句柄报告的任何 reparse point；对已验证文件使用同一句柄读取。卷身份或句柄无法证明时判为 inactive。 [Windows 文件句柄](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew) · [卷 GUID 路径](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getvolumenameforvolumemountpointw)
 - 最终文件用 `O_NOFOLLOW|O_NONBLOCK` 打开（FIFO 不会阻塞），对**同一 fd** `fstat`，确认普通文件后限量读取；不按路径二次打开/复制。
 - 任何 symlink、非普通文件、FIFO/设备、读取超限、打开失败 → inactive。
 - P0 覆盖：最终文件换链、中间目录换链、FIFO。
@@ -223,7 +228,7 @@ v1 **不启动任何 Git 子进程**：`rev-parse`、`config`、`ls-files`、`wo
 - `.git` 是目录：`HEAD` 通过下面的 HEAD 快照校验；`config`；`objects` 目录；`refs` 目录；否则 inactive。
 - `.git` 是文件：`gitdir:` 指向 admin；admin 在 `common/worktrees/<id>` 下；admin `HEAD` 通过 HEAD 快照校验、`gitdir`/`commondir` 普通非 symlink；common 的 `config`/`HEAD`（通过 HEAD 快照校验）/`objects`/`refs` 有效；无 `commondir`（separate-git-dir main / submodule main）→ inactive；有 `commondir`（linked checkout，含 separate 派生）→ B 支持。
 - bare：common config `core.bare=true` → inactive。
-- submodule：`.git` 文件无 `commondir` → inactive（submodule main / separate main）。**本层 `.git` 门禁通过后，两种 checkout 形态都做祖先 gitlink 检查，并必须走完所有上级仓库，不能停在最近祖先**：`.git` 目录，以及 `.git` 文件 + `commondir` 的 linked worktree，都从 `dirname(root)` 向上逐级找祖先 `.git`；对每个祖先仓库读取 config/index 快照，用该祖先根到 root 的完整相对路径按平台等价规则查 index：
+- submodule：`.git` 文件无 `commondir` → inactive（submodule main / separate main）。**本层 `.git` 门禁通过后，两种 checkout 形态都做祖先 gitlink 检查，并必须走完所有上级仓库，不能停在最近祖先**：`.git` 目录，以及 `.git` 文件 + `commondir` 的 linked worktree，都从 `dirname(root)` 向上逐级找祖先 `.git`；对每个祖先仓库读取 config/index 快照，用该祖先根到 root 的完整相对路径按平台等价规则查 index，解码路径时保留文件名开头的 U+FEFF：
   - 任一祖先的条目 mode `160000` → submodule → inactive；
   - 该层没有匹配 → **继续检查下一层更外层的祖先**，不能因最近祖先阴性就放行（近层独立仓库可能遮住外层真正的 superproject）；
   - 祖先 `.git` 是 symlink、无 `commondir` 的指针文件、config include/core.worktree/extensions、index `link`/`sdir`/`040000`/未知版本、或读取/判定失败 → **无法在读取边界内排除 gitlink → inactive**；
@@ -400,7 +405,7 @@ interface WorkspaceState {
   - 所有 waiter 返回 `{ status:'lost', viewRevision }`；客户端关闭对话框、停止重挂并取消定时器；宿主取消剩余 waiter 和 activation recheck，不安排 one-shot 或周期恢复。
   - **已登记的附加根与 sidecar 不受影响**：不自动删除、不自动撤销授权；`primaryState` 仍独立表示根目录 missing/inaccessible；清理策略不变。
 - 恢复触发源：
-  - `lost`：只允许用户面板/命令 `list` 或显式重新检测触发；已有 waiter、自动重挂、超时、one-shot 都不能触发恢复。
+  - `lost`：只允许用户面板/命令 `list` 或显式重新检测触发；已有 waiter、自动重挂、超时、one-shot 和设置开关重启的轮询都不能触发恢复。开关和激活代次使在途发现失效，旧任务无法发布候选或重建 watcher。
   - `unactivated`：不后台重查，只由面板/命令 `list` 或新的显式 wait 触发。
 - 重新激活：primary 完整判据恢复 → `activation='active'`，重建 inventory/watcher，**重新评估所有未在 `prompted` 中的候选**（包括停用前已 `evaluated` 但尚未处理的）；只保留用户明确忽略/处理的 `prompted` 决定，旧 prompt ID 失效，新候选以新 prompt ID 出现；`viewRevision` 递增；旧对话框不会自动复活。
 - `lost`/`unactivated` 不订阅该 workspace 的 Registry change 来触发发现或映射核对；已排队但尚未执行的本功能任务失效。专用 cleanup/ignore/reset/reconcile 同样先检查 primary 激活门禁，失败仅返回 inactive/not-eligible，不写 sidecar；既有普通 Remove 仍可使用。新 owner 只在 workspace 显式重新激活后核对其映射，不遍历非 Git workspace 启动任务。
@@ -606,7 +611,7 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 
 ### 7. 契约
 
-- owner IPC 增加 sidecar 查询及 ignore/reset/reconcile 操作；严格 schema、store/epoch/配置绑定和既有内核认证均保留。映射新增/清理由 owner 的 Registry 操作内部完成，不暴露任意文件写入或客户端映射导入接口。
+- owner IPC 增加 sidecar 查询及 ignore/reset/reconcile 操作；严格 schema、store/epoch/配置绑定和既有内核认证均保留。能力协商及去重答复见[共享 Registry 线协议](../architecture/registry-authority-service.md#3-授权与版本协议)。映射新增/清理由 owner 的 Registry 操作内部完成，不暴露任意文件写入或客户端映射导入接口。
 - 新增独立 `WORKTREE_ENDPOINTS` + `worktreeRequestSchema`，在 dispatch 中像 `SKILLS_ENDPOINTS` 一样先分支处理；**不修改** `panelRequestSchema` 的 `.strict()`。
 - 新增 `WorktreeResponseMap` 并并入 `WorkspaceResponseMap`；`expectShape` 增加 worktree 分支，不再把所有非 `reveal` 端点按 `RootsView` 解析。
 - `RootView` 增加可选 `worktree`：
@@ -677,7 +682,7 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 
 - 「设置 → 插件 → Multi-root Workspace → 插件详情」新增 **启用 Worktree 附加根建议**（**Enable worktree root suggestions**），与「启用附属根 Skills」同一张配置卡、同样的 Switch 交互。独立使用 `multi-root-worktrees.enabled`，缺省 `true`，A 与 B 共用；Settings 接缝复用 [ADR-0023](./ADR-0023-multi-root-skill-discovery-and-invocation.md) 的现代行 Config / 旧版 namespace 适配。无 Settings UI 的组合从 loader Config 读取同一开关。
 - 关闭即时停止当前 Host 的发现、后台 watcher、重查和专用清理，唤醒 waiter、关闭提示并作废旧 ID。关闭后的新 worktree 请求返回 `worktree/not-enabled`，客户端停止重挂；宿主和客户端同时处理该结果。已确认的普通 Registry 根与 sidecar 决定保留；普通根管理始终可用。各客户端通过现有 Settings form 订阅同一设置变化。重新开启后按当前 live session 重新探测并使用新 ID。先前因 primary 失效进入 `lost` 的 workspace 仍须按 §4.4 显式恢复。
-- 调用 Host 在送交 owner 前复查本地开关、提示代次与 live session 模式。Registry owner 在队列内、持久化之前复查自己的开关。跨 Host 已送交 owner 的确认按 owner 队列结果对账。关闭当前 Host 的设置不会回滚已提交的确认，也不会更改其他 profile 的配置。B 的 P3 只读预览仍遵循实施计划中的写入门禁。
+- 调用 Host 在权威恢复之后、实际发送 IPC 前复查本地开关、提示代次、live session 和候选快照。Registry owner 在队列内完成最后一次异步 Registry 读取之后、开始持久化之前复查自己的开关和提交条件。跨 Host 已送交 owner 的确认按 owner 队列结果对账。关闭当前 Host 的设置不会回滚已提交的确认，也不会更改其他 profile 的配置。B 的 P3 只读预览仍遵循实施计划中的写入门禁。
 
 ## Alternatives Considered
 

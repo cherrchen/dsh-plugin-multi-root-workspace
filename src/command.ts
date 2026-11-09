@@ -257,8 +257,11 @@ async function runCommand(ctx: Context, invocation: CommandInvocation, config: C
     switch (parsed.verb) {
       case 'help':
         return { kind: 'success', text: helpText() }
-      case 'list':
-        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
+      case 'list': {
+        const reportText = await report(registry, primaryRoot, policy.mode)
+        await ctx.get('multiRootWorktrees')?.describeRoots(primaryRoot)
+        return { kind: 'success', text: reportText }
+      }
       case 'add': {
         const { text: rest, access } = splitAddAccess(parsed.rest)
         const typed = unquote(rest)
@@ -636,7 +639,7 @@ async function primaryNameOf(ctx: Context, primaryRoot: string, request: PanelCa
  * command uses, so "the list the operator sees" is always the list the scope
  * currently enforces.
  */
-async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoot: string, request: PanelCall): Promise<RootsView> {
+async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoot: string, request: PanelCall, detectWorktree = request.endpoint === 'list'): Promise<RootsView> {
   const statuses = await registry.refresh(primaryRoot)
   const unavailable = registry.unavailable
   const primaryName = await primaryNameOf(ctx, primaryRoot, request)
@@ -646,7 +649,7 @@ async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoo
   if (session === undefined) throw new RootValidationError('session-not-found', 'the panel session closed during the request')
   const policy = ctx.sandboxPolicy.resolve({ session })
   const scope = ctx.get('multiRootScope')
-  const worktreeInfo = await ctx.get('multiRootWorktrees')?.describeRoots(primaryRoot)
+  const worktreeInfo = await ctx.get('multiRootWorktrees')?.describeRoots(primaryRoot, detectWorktree)
   return {
     primaryRoot: canonicalRoot(primaryRoot),
     ...(primaryName === undefined ? {} : { primaryName }),
@@ -695,7 +698,7 @@ async function cleanupWorktreeRoots(ctx: Context, sessionId: string, rootIds: re
   if (worktrees === undefined) throw new WorktreeError('worktree/not-available', 'worktree root suggestions are not mounted in this composition')
   const result = await worktrees.cleanup(sessionId, rootIds)
   const primaryRoot = resolvePanelPrimaryRoot(ctx, sessionId)
-  const roots = await rootsViewOf(ctx, ctx.multiRootRegistry, primaryRoot, { endpoint: 'list', sessionId })
+  const roots = await rootsViewOf(ctx, ctx.multiRootRegistry, primaryRoot, { endpoint: 'list', sessionId }, false)
   return { removed: result.removed, skipped: result.skipped, roots }
 }
 

@@ -20,7 +20,7 @@
  */
 
 import { basename, dirname, isAbsolute, join, relative } from 'node:path'
-import { canonicalRoot, samePath } from '../roots.ts'
+import { samePath } from '../roots.ts'
 import { snapshotGitConfig } from './config.ts'
 import {
   canonicalExisting,
@@ -30,6 +30,7 @@ import {
   MAX_HEAD_BYTES,
   MAX_INDEX_BYTES,
   MAX_POINTER_BYTES,
+  readPointerLine,
   readRegularFile,
   readUtf8File,
   resolvePointerTarget,
@@ -95,22 +96,15 @@ function readHead(path: string, hexLength: number): { readonly ok: true; readonl
 
 /** Read a one-line pointer file (commondir / gitdir) and resolve it. */
 function readOneLinePointer(path: string, base: string): string {
-  const text = readUtf8File(path, MAX_POINTER_BYTES)
-  const lines = text.split('\n').map(line => line.endsWith('\r') ? line.slice(0, -1) : line)
-  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-  if (lines.length !== 1) throw new SafeIoError('invalid-encoding', `pointer file "${path}" is not a single line`)
-  return resolvePointerTarget(base, lines[0]!)
+  return resolvePointerTarget(base, readPointerLine(path))
 }
 
 /** Read `<root>/.git`, which must be a regular file, and resolve its admin. */
 function readGitFilePointer(gitFile: string, root: string): string {
-  const text = readUtf8File(gitFile, MAX_POINTER_BYTES)
-  const lines = text.split('\n').map(line => line.endsWith('\r') ? line.slice(0, -1) : line)
-  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-  if (lines.length !== 1) throw new SafeIoError('invalid-encoding', `${gitFile} is not a single gitdir line`)
-  const match = /^gitdir:\s*(\S.*)$/.exec(lines[0]!)
-  if (match === null) throw new SafeIoError('invalid-path', `${gitFile} is not a gitdir pointer`)
-  return resolvePointerTarget(root, match[1]!)
+  const line = readPointerLine(gitFile)
+  const prefix = 'gitdir: '
+  if (!line.startsWith(prefix)) throw new SafeIoError('invalid-path', `${gitFile} is not a gitdir pointer`)
+  return resolvePointerTarget(root, line.slice(prefix.length))
 }
 
 /** Refuse a common git dir whose object store can reach outside itself. */
@@ -119,14 +113,14 @@ function assertNoAlternates(common: string): void {
   const info = join(objects, 'info')
   const entry = lstatEntry(info)
   if (entry === undefined) return
-  if (entry.isSymbolicLink()) throw new SafeIoError('symlink', `${info} is a symlink`)
-  if (!entry.isDirectory()) throw new SafeIoError('not-directory', `${info} is not a directory`)
+  if (entry === 'symlink') throw new SafeIoError('symlink', `${info} is a symlink`)
+  if (entry !== 'directory') throw new SafeIoError('not-directory', `${info} is not a directory`)
   for (const name of ['alternates', 'http-alternates']) {
     const file = join(info, name)
     const alternate = lstatEntry(file)
     if (alternate === undefined) continue
-    if (alternate.isSymbolicLink()) throw new SafeIoError('symlink', `${file} is a symlink`)
-    if (!alternate.isFile()) throw new SafeIoError('not-file', `${file} is not a regular file`)
+    if (alternate === 'symlink') throw new SafeIoError('symlink', `${file} is a symlink`)
+    if (alternate !== 'file') throw new SafeIoError('not-file', `${file} is not a regular file`)
     const text = readUtf8File(file, MAX_ALTERNATES_BYTES)
     const meaningful = text.split('\n').map(line => line.trim()).filter(line => line !== '' && !line.startsWith('#'))
     if (meaningful.length > 0) throw new UnsupportedLayout(`${file} declares an alternate object store`)
@@ -172,7 +166,7 @@ function commonStructure(common: string, platform: NodeJS.Platform): ConfigSnaps
   for (const directory of ['objects', 'refs']) {
     const entry = lstatEntry(join(common, directory))
     if (entry === undefined) throw new UnsupportedLayout(`the common git dir has no ${directory} directory`)
-    if (entry.isSymbolicLink() || !entry.isDirectory()) throw new UnsafeMetadata(`the common ${directory} is not a real directory`)
+    if (entry === 'symlink' || entry !== 'directory') throw new UnsafeMetadata(`the common ${directory} is not a real directory`)
   }
   assertNoAlternates(common)
   return config.config
@@ -189,9 +183,9 @@ function resolveLayout(root: string, platform: NodeJS.Platform): CheckoutLayout 
   const gitEntry = join(root, '.git')
   const entry = lstatEntry(gitEntry)
   if (entry === undefined) throw new NotACheckout(`"${root}" has no .git entry`)
-  if (entry.isSymbolicLink()) throw new UnsafeMetadata(`"${gitEntry}" is a symlink`)
+  if (entry === 'symlink') throw new UnsafeMetadata(`"${gitEntry}" is a symlink`)
   const rootIdentity = requireIdentity(root)
-  if (entry.isDirectory()) {
+  if (entry === 'directory') {
     const config = commonStructure(gitEntry, platform)
     const head = readHead(join(gitEntry, 'HEAD'), 40)
     if (!head.ok) throw new InvalidHead(head.detail)
@@ -206,17 +200,17 @@ function resolveLayout(root: string, platform: NodeJS.Platform): CheckoutLayout 
       adminIdentity: requireIdentity(gitEntry),
     }
   }
-  if (!entry.isFile()) throw new UnsafeMetadata(`"${gitEntry}" is neither a directory nor a regular file`)
+  if (entry !== 'file') throw new UnsafeMetadata(`"${gitEntry}" is neither a directory nor a regular file`)
   const admin = readGitFilePointer(gitEntry, root)
   const adminEntry = lstatEntry(admin)
   if (adminEntry === undefined) throw new UnsafeMetadata(`the admin git dir "${admin}" does not exist`)
-  if (adminEntry.isSymbolicLink() || !adminEntry.isDirectory()) throw new UnsafeMetadata(`the admin git dir "${admin}" is not a real directory`)
+  if (adminEntry === 'symlink' || adminEntry !== 'directory') throw new UnsafeMetadata(`the admin git dir "${admin}" is not a real directory`)
   const commondir = join(admin, 'commondir')
   const commondirEntry = lstatEntry(commondir)
   if (commondirEntry === undefined) {
     throw new UnsupportedLayout('the checkout .git file has no admin commondir (submodule or --separate-git-dir main checkout)')
   }
-  if (commondirEntry.isSymbolicLink() || !commondirEntry.isFile()) throw new UnsafeMetadata(`"${commondir}" is not a regular file`)
+  if (commondirEntry === 'symlink' || commondirEntry !== 'file') throw new UnsafeMetadata(`"${commondir}" is not a regular file`)
   const common = readOneLinePointer(commondir, admin)
   const adminId = basename(admin)
   if (adminId === '' || adminId === '.' || adminId === '..' || !samePath(dirname(admin), join(common, 'worktrees'))) {
@@ -225,7 +219,7 @@ function resolveLayout(root: string, platform: NodeJS.Platform): CheckoutLayout 
   const gitdirFile = join(admin, 'gitdir')
   const gitdirEntry = lstatEntry(gitdirFile)
   if (gitdirEntry === undefined) throw new UnsupportedLayout('the admin git dir has no gitdir back-pointer')
-  if (gitdirEntry.isSymbolicLink() || !gitdirEntry.isFile()) throw new UnsafeMetadata(`"${gitdirFile}" is not a regular file`)
+  if (gitdirEntry === 'symlink' || gitdirEntry !== 'file') throw new UnsafeMetadata(`"${gitdirFile}" is not a regular file`)
   const back = readOneLinePointer(gitdirFile, admin)
   if (!samePath(back, gitEntry)) throw new UnsupportedLayout('the admin gitdir does not point back at this checkout')
   const config = commonStructure(common, platform)
@@ -260,18 +254,18 @@ function ancestorGitlink(ancestor: string, root: string, platform: NodeJS.Platfo
   const dotGit = join(ancestor, '.git')
   const entry = lstatEntry(dotGit)
   if (entry === undefined) return undefined
-  if (entry.isSymbolicLink()) throw new UnprovableAncestor(`"${dotGit}" is a symlink`)
+  if (entry === 'symlink') throw new UnprovableAncestor(`"${dotGit}" is a symlink`)
   let configDir: string
   let indexPath: string
-  if (entry.isDirectory()) {
+  if (entry === 'directory') {
     configDir = dotGit
     indexPath = join(dotGit, 'index')
-  } else if (entry.isFile()) {
+  } else if (entry === 'file') {
     const admin = readGitFilePointer(dotGit, ancestor)
     const commonFile = join(admin, 'commondir')
     const commonEntry = lstatEntry(commonFile)
     if (commonEntry === undefined) throw new UnprovableAncestor(`ancestor "${ancestor}" is a submodule or separate-git-dir checkout`)
-    if (commonEntry.isSymbolicLink() || !commonEntry.isFile()) throw new UnprovableAncestor(`"${commonFile}" is not a regular file`)
+    if (commonEntry === 'symlink' || commonEntry !== 'file') throw new UnprovableAncestor(`"${commonFile}" is not a regular file`)
     configDir = readOneLinePointer(commonFile, admin)
     indexPath = join(admin, 'index')
   } else {
@@ -284,8 +278,8 @@ function ancestorGitlink(ancestor: string, root: string, platform: NodeJS.Platfo
   // A repository with no index has registered no gitlink yet; that is a
   // negative observation, not an unprovable one.
   if (indexEntry === undefined) return undefined
-  if (indexEntry.isSymbolicLink()) throw new UnprovableAncestor(`ancestor index "${indexPath}" is a symlink`)
-  if (!indexEntry.isFile()) throw new UnprovableAncestor(`ancestor index "${indexPath}" is not a regular file`)
+  if (indexEntry === 'symlink') throw new UnprovableAncestor(`ancestor index "${indexPath}" is a symlink`)
+  if (indexEntry !== 'file') throw new UnprovableAncestor(`ancestor index "${indexPath}" is not a regular file`)
   const parsed = parseGitIndex(readRegularFile(indexPath, MAX_INDEX_BYTES))
   if (!parsed.ok) throw new UnprovableAncestor(`ancestor index "${indexPath}": ${parsed.detail}`)
   // POSIX keeps a literal backslash inside one file name; only Windows treats
@@ -355,9 +349,9 @@ function mapIoError(error: SafeIoError): { readonly reason: ActivationFailure; r
 export function resolveRepo(directory: string, options: { readonly platform?: NodeJS.Platform } = {}): ActivationResult {
   const platform = options.platform ?? process.platform
   try {
-    // The primary spelling is re-resolved for GEOMETRY only: identity stays the
-    // caller's verbatim key (ADR-0028). A missing directory is inactive.
-    const canonical = canonicalExisting(canonicalRoot(directory))
+    // Validate the verbatim primary before canonicalizing its geometry.
+    // The Registry key still belongs to the caller's upstream spelling.
+    const canonical = canonicalExisting(directory)
     const layout = resolveLayout(canonical, platform)
     assertNotSubmodule(canonical, platform)
     const repo: RepoSnapshot = {

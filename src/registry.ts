@@ -46,7 +46,7 @@
 
 import { migrateRootSkills, validateAliasId } from './skills/metadata.ts'
 import { randomUUID } from 'node:crypto'
-import { lstatSync, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import { openAuthorityStorage } from './compat/authority-storage.ts'
 import { storeIdentity } from './authority/native.ts'
@@ -90,6 +90,7 @@ import {
 // is injected, never constructed here.
 import type {} from './scope.ts'
 import { WorktreeError } from './worktrees/errors.ts'
+import { lstatEntry, SafeIoError } from './worktrees/fs-safe.ts'
 import { verifyPromptExpected, verifyWorkspaceActive } from './worktrees/owner.ts'
 import {
   readSidecar,
@@ -714,7 +715,14 @@ export class MultiRootRegistry extends Service {
         throw error
       }
     }
-    if (this.client) return parseProbeAddResult(await this.remoteValue('probeAdd', [primaryRoot, path]))
+    if (this.client) {
+      const protectedPaths = this.protectedPaths()
+      if (protectedPaths === undefined) return { ok: false, code: 'protected-boundary-unknown', message: 'the protected DSH directories cannot be resolved right now' }
+      if (protectedOverlap(path, protectedPaths) !== undefined) {
+        return { ok: false, code: 'protected-path', message: 'the candidate overlaps a protected DSH directory on this Host' }
+      }
+      return parseProbeAddResult(await this.remoteValue('probeAdd', [primaryRoot, path]))
+    }
     return await this.serialize(key, async () => {
       // A read-shaped probe never migrates the legacy key (that would write).
       const found = this.lookupRecords(key)
@@ -741,6 +749,7 @@ export class MultiRootRegistry extends Service {
    * @param primaryRoot - the workspace root.
    */
   async snapshotView(primaryRoot: string): Promise<RegistrySnapshotView> {
+    const unavailable = { roots: [], available: false, epoch: '', revision: 0 }
     await this.ensureAuthority()
     if (this.client) {
       const snapshot = await this.remoteSnapshot('snapshot', [primaryRoot])
@@ -749,16 +758,18 @@ export class MultiRootRegistry extends Service {
       // (ADR-0039 §6.8): a concurrent local write or a protected-path narrowing
       // must never masquerade as the owner's complete snapshot.
       return {
-        roots: this.localSnapshotRoots(snapshot),
+        roots: snapshotRoots(snapshot),
         available: snapshot.available,
         epoch: snapshot.epoch,
         revision: snapshot.revision,
       }
     }
-    if (this.authorityState.kind !== 'active') return { roots: [], available: false, epoch: '', revision: 0 }
+    if (this.authorityState.kind !== 'active') return unavailable
     const key = primaryKey(primaryRoot)
     return await this.serialize(key, async () => {
+      if (this.authorityState.kind !== 'active') return unavailable
       const roots = await this.reclassify(key)
+      if (this.authorityState.kind !== 'active') return unavailable
       return { roots, available: true, epoch: this.operationEpoch ?? '', revision: this.operationRevision }
     })
   }
@@ -770,26 +781,31 @@ export class MultiRootRegistry extends Service {
    * same canonical value is used for the check and the record.
    * @param primaryRoot - the workspace root the prompt belongs to.
    * @param options - the canonical path, the captured expectation, and B tracking facts.
+   * @param beforeSubmit - local Host guard, invoked after recovery or the owner's final queue read.
    * @returns the record the owner created, with its snapshot generation.
    */
-  async addNew(primaryRoot: string, options: AddNewRootOptions): Promise<AddedRoot> {
+  async addNew(primaryRoot: string, options: AddNewRootOptions, beforeSubmit?: () => void): Promise<AddedRoot> {
     await this.ensureAuthority()
     if (this.client) {
       const protectedPaths = this.protectedPaths()
       if (protectedPaths === undefined) throw MultiRootRegistry.protectedBoundaryUnknown()
+      const candidate = options.expected.candidate.canonical
+      const conflict = protectedOverlap(candidate, protectedPaths)
+      if (conflict !== undefined) {
+        throw new RootValidationError('protected-path', `"${candidate}" overlaps the protected DSH directory "${conflict.path}"`)
+      }
+      beforeSubmit?.()
       return parseAddedRoot(await this.remoteValue('addNew', [primaryRoot, options]))
     }
     this.requireActive()
     const key = primaryKey(primaryRoot)
     return await this.serialize(key, async () => {
-      // The switch must be re-read IN the serialized queue, immediately before
-      // the write. Checking it only on entry leaves a confirmation that was
-      // already waiting behind another owner operation able to commit after
-      // the operator turned the feature off (ADR-0039 §9).
-      if (this.worktreeGate?.() === false) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
-      const verdict = verifyPromptExpected(key, options.expected)
-      if (!verdict.ok) throw new WorktreeError('worktree/prompt-stale', verdict.detail)
+      this.requireWorktreesEnabled()
       const statuses = await this.reclassify(key)
+      beforeSubmit?.()
+      this.requireWorktreesEnabled()
+      const verdict = verifyPromptExpected(primaryRoot, options.expected)
+      if (!verdict.ok) throw new WorktreeError('worktree/prompt-stale', verdict.detail)
       const canonical = options.expected.candidate.canonical
       const duplicate = statuses.find(status => samePath(status.path, canonical) || sameResolvedPath(status.path, canonical))
       if (duplicate !== undefined) {
@@ -843,23 +859,24 @@ export class MultiRootRegistry extends Service {
    * inaccessible path — "cannot look" is never "deleted".
    * @param primaryRoot - the workspace root.
    * @param options - the mapping's identity.
+   * @param beforeSubmit - local Host guard, invoked before IPC or the owner's deletion.
    * @returns `{ removed: true }` after the record and its mapping are gone.
    */
-  async removeForDeletedWorktree(primaryRoot: string, options: DeletedWorktreeOptions): Promise<DeletedWorktreeResult> {
+  async removeForDeletedWorktree(primaryRoot: string, options: DeletedWorktreeOptions, beforeSubmit?: () => void): Promise<DeletedWorktreeResult> {
     await this.ensureAuthority()
-    if (this.client) return parseDeletedResult(await this.remoteValue('removeForDeletedWorktree', [primaryRoot, options]))
+    if (this.client) {
+      beforeSubmit?.()
+      return parseDeletedResult(await this.remoteValue('removeForDeletedWorktree', [primaryRoot, options]))
+    }
     this.requireActive()
     const key = primaryKey(primaryRoot)
     return await this.serialize(key, async () => {
-      // The dedicated cleanup is a worktree operation, and the OWNER is the
-      // final authority for every condition the panel used to select the row:
-      // the switch, the primary's activation judgment, and the current sidecar
-      // mapping. A caller that builds `rootId + path + addedAt` by hand (or one
-      // racing a manual remove) must not be able to delete an ordinary root.
-      if (this.worktreeGate?.() === false) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
+      this.requireWorktreesEnabled()
+      const statuses = await this.reclassify(key)
+      beforeSubmit?.()
+      this.requireWorktreesEnabled()
       const active = verifyWorkspaceActive(primaryRoot)
       if (!active.ok) throw new WorktreeError('worktree/not-eligible', active.detail)
-      const statuses = await this.reclassify(key)
       const found = statuses.find(status => status.id === options.rootId)
       if (found === undefined || !samePath(found.path, options.expectedPath) || found.addedAt !== options.expectedAddedAt) {
         throw new WorktreeError('worktree/not-eligible', 'the tracked root no longer matches its cleanup identity')
@@ -890,26 +907,22 @@ export class MultiRootRegistry extends Service {
    * same serialized queue as the Registry itself.
    * @param primaryRoot - the workspace root.
    * @param operation - the strict sidecar operation.
+   * @param beforeSubmit - local Host guard for a pending mutation.
    * @returns the owner's projection.
    */
-  async worktreeSidecar(primaryRoot: string, operation: WorktreeSidecarOperation): Promise<WorktreeSidecarView> {
+  async worktreeSidecar(primaryRoot: string, operation: WorktreeSidecarOperation, beforeSubmit?: () => void): Promise<WorktreeSidecarView> {
     await this.ensureAuthority()
-    if (this.client) return parseSidecarView(await this.remoteValue('worktreeSidecar', [primaryRoot, operation]))
+    if (this.client) {
+      beforeSubmit?.()
+      return parseSidecarView(await this.remoteValue('worktreeSidecar', [primaryRoot, operation]))
+    }
     const key = primaryKey(primaryRoot)
     if (this.authorityState.kind !== 'active') {
       if (operation.op !== 'read') throw new WorktreeError('worktree/registry-unavailable', REGISTRY_CONTENDED_MESSAGE)
       return { ignored: [], worktreeRoots: [], revision: 0, epoch: undefined, registryRevision: 0, available: false }
     }
     return await this.serialize(key, async () => {
-      if (operation.op !== 'read') {
-        // Every sidecar mutation is part of the worktree feature: the live
-        // switch and the primary activation are re-read in the queue, next to
-        // the write, so a task queued before the operator disabled the feature
-        // (or before the primary stopped activating) cannot still land.
-        if (this.worktreeGate?.() === false) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
-        const active = verifyWorkspaceActive(primaryRoot)
-        if (!active.ok) throw new WorktreeError('worktree/inactive', active.detail)
-      }
+      if (operation.op !== 'read') this.requireWorktreeMutation(primaryRoot, beforeSubmit)
       const document = this.loadSidecar(key, key)
       switch (operation.op) {
         case 'read':
@@ -934,12 +947,25 @@ export class MultiRootRegistry extends Service {
         }
         case 'reconcile': {
           const statuses = await this.reclassify(key)
+          this.requireWorktreeMutation(primaryRoot, beforeSubmit)
           const reconciled = this.reconcileMappings(document, statuses)
           if (reconciled !== document) this.saveSidecar(key, reconciled)
           return sidecarViewOf(reconciled, this.operationEpoch, this.operationRevision, true)
         }
       }
     })
+  }
+
+  private requireWorktreesEnabled(): void {
+    this.requireActive()
+    if (this.worktreeGate?.() === false) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
+  }
+
+  private requireWorktreeMutation(primaryRoot: string, beforeSubmit: (() => void) | undefined): void {
+    beforeSubmit?.()
+    this.requireWorktreesEnabled()
+    const active = verifyWorkspaceActive(primaryRoot)
+    if (!active.ok) throw new WorktreeError('worktree/inactive', active.detail)
   }
 
   /**
@@ -988,8 +1014,8 @@ export class MultiRootRegistry extends Service {
     const epoch = this.operationEpoch
     const mapping: WorktreeMapping = {
       rootId: record.id,
-      adminId: options.track.adminId,
-      common: options.track.common,
+      adminId: options.expected.candidate.adminId!,
+      common: options.expected.candidate.common,
       path: record.path,
       rootAddedAt: record.addedAt,
       addedAt: new Date().toISOString(),
@@ -1895,7 +1921,7 @@ export class MultiRootRegistry extends Service {
   /** Narrow owner rows for this Host, identically for projection and admission. */
   private localSnapshotRoots(snapshot: Snapshot): RootStatus[] {
     return markProtectedPaths(
-      snapshot.roots.map(row => Object.fromEntries(Object.entries({ ...row, id: additionalRootId(row.id) }).filter(([, value]) => value !== undefined))) as unknown as RootStatus[],
+      snapshotRoots(snapshot),
       // The owner's classification used the OWNER's protected set; this
       // follower re-marks every row against its own, so a row inside the
       // follower's own home is withheld here even when the owner granted it.
@@ -2381,14 +2407,18 @@ function sameResolvedPath(stored: string, canonical: string): boolean {
   }
 }
 
+/** Decode owner rows without applying the follower's local projection. */
+function snapshotRoots(snapshot: Snapshot): RootStatus[] {
+  return snapshot.roots.map(row =>
+    Object.fromEntries(Object.entries({ ...row, id: additionalRootId(row.id) }).filter(([, value]) => value !== undefined))) as unknown as RootStatus[]
+}
+
 /** Whether one path is confirmed missing, present, or not inspectable. */
 function pathMissing(path: string): true | false | 'inaccessible' {
   try {
-    lstatSync(path)
-    return false
+    return lstatEntry(path) === undefined
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    return code === 'ENOENT' || code === 'ENOTDIR' ? true : 'inaccessible'
+    return error instanceof SafeIoError && error.reason === 'not-directory' ? true : 'inaccessible'
   }
 }
 

@@ -223,6 +223,8 @@ describe('activation lifecycle', () => {
     renameSync(join(area.base, 'git-away'), join(main, '.git'))
     // Recovery is explicit: the OLD prompt id is dead (stale), and a fresh
     // request receives a NEW id for the re-evaluated candidate.
+    expect((await worktrees.wait(SESSION, { seenPromptId: firstId })).status).toBe('lost')
+    await worktrees.describeRoots(main)
     const stale = await worktrees.wait(SESSION, { seenPromptId: firstId })
     expect(stale.status).toBe('stale')
     const recovered = promptOf(await worktrees.wait(SESSION))

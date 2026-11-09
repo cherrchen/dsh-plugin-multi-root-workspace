@@ -62,11 +62,14 @@ export class WorkspaceWatchSet {
     for (const ancestor of targets.ancestors) {
       this.observe(ancestor, name => name === '.git' || name === 'index' || name === null, options.debounceMs)
     }
-    const seen = new Set<string>()
+    const parents = new Map<string, Set<string>>()
     for (const parent of targets.parents) {
-      if (seen.has(parent.directory)) continue
-      seen.add(parent.directory)
-      this.observe(parent.directory, name => name === null || name === parent.name, options.debounceMs)
+      const names = parents.get(parent.directory) ?? new Set<string>()
+      names.add(parent.name)
+      parents.set(parent.directory, names)
+    }
+    for (const [directory, names] of parents) {
+      this.observe(directory, name => name === null || names.has(name), options.debounceMs)
     }
   }
 

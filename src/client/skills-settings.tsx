@@ -86,6 +86,7 @@ export function BundleSettingsCard({ form, worktreeForm, autoReviewForm, opsForm
 
 /** The client-scoped signal that the worktree switch changed. */
 export interface WorktreeSettingsSignal {
+  enabled(): boolean
   /**
    * Subscribe to a change of the selected worktree form (attachment, detach,
    * or a value/revision update). The overlay uses it to remount its wait after
@@ -180,6 +181,7 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): WorktreeS
     watchedWorktree = undefined
   })
   return {
+    enabled: () => watchedWorktree?.getSnapshot().value?.enabled !== false,
     subscribe(listener) {
       listeners.add(listener)
       return () => { listeners.delete(listener) }

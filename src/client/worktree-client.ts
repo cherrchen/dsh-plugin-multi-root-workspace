@@ -41,9 +41,9 @@ export interface WorktreeClient {
    * re-activate a lost workspace on the host, but they carry no prompt payload;
    * this signal is what makes the same session mount its wait again.
    */
-  notify?(): void
+  notify?(sessionId: string): void
   /** Subscribe to {@link notify}; returns the unsubscribe function. */
-  subscribe?(listener: () => void): () => void
+  subscribe?(listener: (sessionId: string) => void): () => void
 }
 
 /**
@@ -52,10 +52,10 @@ export interface WorktreeClient {
  * @returns the client, with transport failures normalized to PanelError.
  */
 export function createWorktreeClient(connection: ConnectionHandle): WorktreeClient {
-  const listeners = new Set<() => void>()
+  const listeners = new Set<(sessionId: string) => void>()
   return {
-    notify() {
-      for (const listener of [...listeners]) listener()
+    notify(sessionId) {
+      for (const listener of [...listeners]) listener(sessionId)
     },
     subscribe(listener) {
       listeners.add(listener)

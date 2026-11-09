@@ -49,11 +49,13 @@ Registry `authority.kind`：`active` 为本进程管理介质，`follower` 为�
 { protocol: 1, store, epoch, revision, primary, roots, available }
 ```
 
+Worktree Host 通过 `hello` 的可选第二个参数协商 sidecar 目录（路径或 null）。新 owner 核对配置，只向协商过的 peer 回传 `promptsRoot`，旧版 `hello` 保持原答复。收到旧答复的新版 follower 仍可执行普通 Registry 请求，worktree 请求返回 `worktree/not-available`。新版双方配置不一致时拒绝握手。follower 的完整快照查询返回 owner 同次答复，权限投影另按本机保护目录收窄。
+
 每次成功打开产生随机 epoch；revision 覆盖有效状态、顺序和 Skills metadata 的真实 publication，重复同值刷新不增版、不通知。每个主根只接受同一连接/epoch 下不倒退的完整快照；跨主根不共享授权集合。连接建立先订阅再取 snapshot；通知携完整快照，跳过 revision 不要求重放增量。旧连接/epoch 的响应不能复活当前投影。
 
 新操作始终向核心请求 admission，本地 scope、缓存和通知只辅助显示/失效，不能单独批准。facade 用 owner 的原始三态记录，交本地 scope 与 Session mode、可信工具 cap 求交；owner 的工具配置不替 follower 决策。
 
-资源有界：帧/待发送缓冲 1 MiB，连接 32，每连接及整个服务的在途请求均至多 32，超时 5 秒；每连接保留最多 2048 个 mutation ID 的紧凑结果（不缓存完整根快照），到上限断线重同步，不淘汰后把同 ID 当新 mutation。相同 mutation ID 相同参数等待原结果，成功后返回最新视图而不重复写入；参数不同断线。只读请求不积累去重快照。按需握手最多三次，延迟 0/50/150ms；后台恢复每个 tick 只尝试一次连接，按 §6 的退避低频重试，不存在高频抢锁。客户端超时/断线报告“结果不明”，不自动重放 mutation；先 refresh 对账，再处理冲突。内存去重不提供跨 epoch exactly-once。
+资源有界：帧/待发送缓冲 1 MiB，连接 32，每连接及整个服务的在途请求均至多 32，超时 5 秒；每连接保留最多 2048 个 mutation ID 的紧凑结果（不缓存完整根快照），到上限断线重同步，不淘汰后把同 ID 当新 mutation。相同 mutation ID 相同参数等待原结果，成功后按原端点返回最新视图或原紧凑结果，写入只执行一次。Worktree 新增和清理重放原紧凑结果，sidecar mutation 重放当前 sidecar 视图。参数不同断线。只读请求不积累去重快照。按需握手最多三次，延迟 0/50/150ms；后台恢复每个 tick 只尝试一次连接，按 §6 的退避低频重试，不存在高频抢锁。客户端超时/断线报告“结果不明”，不自动重放 mutation；先 refresh 对账，再处理冲突。内存去重不提供跨 epoch exactly-once。
 
 ## 4. IPC 权限边界
 

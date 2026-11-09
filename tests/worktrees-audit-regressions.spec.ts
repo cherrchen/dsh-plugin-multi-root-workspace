@@ -10,15 +10,17 @@
  * @module tests/worktrees-audit-regressions
  */
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { mountWorktreeStack, readSidecarFile, type WorktreeStack } from './support/worktrees-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { primaryKey } from '../src/roots.ts'
 import { resolveRepo } from '../src/worktrees/repository.ts'
+import { canonicalExisting, readRegularFile } from '../src/worktrees/fs-safe.ts'
+import * as metadataNative from '../src/worktrees/native-io.ts'
 import { inventoryWorktrees } from '../src/worktrees/inventory.ts'
 import type { PromptExpected, RepoSnapshot, WorktreePromptWaitResult } from '../src/worktrees/types.ts'
 
@@ -327,5 +329,209 @@ describe('stale prompt identity (audit 5)', () => {
     expect(second.id).not.toBe(first.id)
     expect(second.kind).toBe('worktree')
     expect(storeText(stack.storeFile)).toBe('')
+  })
+})
+
+describe('second audit: metadata pathname semantics', () => {
+  it.skipIf(process.platform === 'win32')('rejects double-slash primary and pointer spellings before normalization', () => {
+    const { main, linked } = pair('audit-double-slash')
+    const admin = repoOf(linked).adminGitdir!
+    writeFileSync(join(linked, '.git'), 'gitdir: /' + admin + '\n')
+    expect(resolveRepo('/' + main)).toMatchObject({ ok: false, reason: 'unsafe-metadata' })
+    expect(resolveRepo(linked)).toMatchObject({ ok: false, reason: 'unsafe-metadata' })
+  })
+
+  it('rejects a symlink component even when followed by dot-dot', context => {
+    const reason = symlinkUnsupportedReason()
+    if (reason !== undefined) return context.skip(reason)
+    const { area, main, linked } = pair('audit-symlink-dotdot')
+    const outside = join(area.outside, 'inner')
+    mkdirSync(outside)
+    const alias = join(main, 'alias')
+    symlinkSync(outside, alias, 'dir')
+    const admin = repoOf(linked).adminId!
+    // Preserve the on-disk spelling instead of path.join folding out alias/...
+    const separator = process.platform === 'win32' ? '\\' : '/'
+    writeFileSync(join(linked, '.git'), 'gitdir: ' + alias + separator + '..' + separator + join('.git', 'worktrees', admin) + '\n')
+    expect(resolveRepo(linked)).toMatchObject({ ok: false, reason: 'unsafe-metadata' })
+  })
+
+  it.skipIf(process.platform === 'win32')('never opens the external leaf after a persistent parent swap', () => {
+    const area = fixture('audit-swap-open-parent')
+    const parent = join(area.workspace, 'pinned')
+    mkdirSync(parent)
+    writeFileSync(join(parent, 'HEAD'), 'original')
+    writeFileSync(join(area.outside, 'HEAD'), 'external')
+    const open = metadataNative.openMetadataRoot
+    let swapped = false
+    function observe(handle: metadataNative.NativeHandle): metadataNative.NativeHandle {
+      return {
+        ...handle,
+        directory() {
+          const directory = handle.directory()
+          return {
+            ...directory,
+            child(name) {
+              const child = directory.child(name)
+              if (!swapped && name === basename(parent)) {
+                swapped = true
+                renameSync(parent, join(dirname(parent), 'moved'))
+                symlinkSync(area.outside, parent, 'dir')
+              }
+              return observe(child)
+            },
+          }
+        },
+      }
+    }
+    const spy = vi.spyOn(metadataNative, 'openMetadataRoot').mockImplementation(root => observe(open(root)))
+    try {
+      expect(readRegularFile(join(parent, 'HEAD'), 16).toString()).toBe('original')
+      expect(swapped).toBe(true)
+      expect(() => canonicalExisting(join(parent, 'HEAD'))).toThrow(/symlink/)
+    } finally { spy.mockRestore() }
+  })
+
+  it.runIf(process.platform === 'win32')('refuses a junction in an admin pointer chain', () => {
+    const { area, linked } = pair('audit-windows-junction')
+    const admin = repoOf(linked).adminGitdir!
+    const alias = join(area.base, 'junction')
+    symlinkSync(dirname(admin), alias, 'junction')
+    writeFileSync(join(linked, '.git'), 'gitdir: ' + join(alias, basename(admin)) + '\n')
+    expect(resolveRepo(linked)).toMatchObject({ ok: false, reason: 'unsafe-metadata' })
+  })
+
+  it('preserves an initial U+FEFF in the index path of a gitlink', () => {
+    const area = fixture('audit-index-bom-name')
+    initRepo(area.workspace)
+    const name = '\ufeffnested'
+    initRepo(join(area.workspace, name))
+    git(area.workspace, ['add', '--', name])
+    expect(git(area.workspace, ['ls-files', '-s', '-z'])).toContain('160000 ')
+    expect(resolveRepo(join(area.workspace, name))).toMatchObject({ ok: false, reason: 'submodule' })
+  })
+})
+
+describe('second audit: owner commit and lifecycle', () => {
+  it.each(['disable', 'replace'] as const)('rechecks after the in-queue read when the caller can %s', async change => {
+    const { area, main, linked } = pair('audit-commit-' + change)
+    const stack = await mountRegistryStack(join(area.base, 'store'))
+    stacks.push(stack)
+    const expected = expectation(main, linked)
+    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+    const internal = stack.registry as unknown as { reclassify(key: string): Promise<unknown> }
+    const reclassify = internal.reclassify.bind(internal)
+    const spy = vi.spyOn(internal, 'reclassify').mockImplementation(async key => {
+      entered.resolve()
+      await release.promise
+      return await reclassify(key)
+    })
+    let enabled = true
+    stack.registry.setWorktreeGateProvider(() => enabled)
+    try {
+      const pending = stack.registry.addNew(main, { path: linked, expected })
+      await entered.promise
+      if (change === 'disable') enabled = false
+      else {
+        renameSync(linked, linked + '-old')
+        mkdirSync(linked)
+      }
+      release.resolve()
+      await expect(pending).rejects.toMatchObject({
+        code: change === 'disable' ? 'worktree/not-enabled' : 'worktree/prompt-stale',
+      })
+      expect(stack.registry.list(main)).toEqual([])
+      expect(storeText(stack.storeFile)).toBe('')
+    } finally { release.resolve(); spy.mockRestore() }
+  })
+
+  it('checks the session again after follower recovery, before sending IPC', async () => {
+    const { area, linked } = pair('audit-follower-submit')
+    let mode: 'workspace-write' | 'read-only' = 'workspace-write'
+    const { stack, worktrees, sessionId } = await worktreesOf(area, linked, { mode: () => mode })
+    const prompt = promptOf(await worktrees.wait(sessionId))
+    expect(prompt.kind).toBe('git-common')
+    const internal = stack.registry as unknown as {
+      ensureAuthority(): Promise<void>
+      client?: { request: () => Promise<unknown> } | undefined
+    }
+    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+    const request = vi.fn(async () => { throw new Error('unexpected submission') })
+    const spy = vi.spyOn(internal, 'ensureAuthority').mockImplementationOnce(async () => {
+      entered.resolve()
+      await release.promise
+      internal.client = { request }
+    })
+    try {
+      const pending = worktrees.resolve(sessionId, prompt.id, 'add')
+      await entered.promise
+      mode = 'read-only'
+      release.resolve()
+      await expect(pending).rejects.toMatchObject({ code: 'worktree/prompt-stale' })
+      expect(request).not.toHaveBeenCalled()
+    } finally {
+      release.resolve()
+      spy.mockRestore()
+      internal.client = undefined
+    }
+  })
+
+  it('cancels a suspended inventory when the setting is disabled', async () => {
+    const { area, main } = pair('audit-inflight-inventory')
+    const { worktrees, stack, sessionId, hooks } = await worktreesOf(area, main, { settings: true })
+    let enabled = true
+    hooks()!.setSource(() => ({ enabled }))
+    const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+    const original = stack.registry.probeAdd.bind(stack.registry)
+    const spy = vi.spyOn(stack.registry, 'probeAdd').mockImplementation(async (...args) => {
+      entered.resolve()
+      await release.promise
+      return await original(...args)
+    })
+    try {
+      const pending = worktrees.wait(sessionId)
+      await entered.promise
+      enabled = false
+      hooks()!.onChange()
+      release.resolve()
+      await expect(pending).rejects.toMatchObject({ code: 'worktree/not-enabled' })
+      expect(worktrees.activationOf(main)).toMatchObject({ watching: false, candidates: 0 })
+    } finally { release.resolve(); spy.mockRestore() }
+  })
+
+  it('preserves lost across a switch toggle until a user explicitly detects again', async () => {
+    const { area, main } = pair('audit-lost-toggle')
+    const { worktrees, sessionId, hooks } = await worktreesOf(area, main, { settings: true })
+    let enabled = true
+    hooks()!.setSource(() => ({ enabled }))
+    const prompt = promptOf(await worktrees.wait(sessionId))
+    renameSync(join(main, '.git'), join(area.base, 'git-away'))
+    expect((await worktrees.wait(sessionId)).status).toBe('lost')
+    renameSync(join(area.base, 'git-away'), join(main, '.git'))
+    enabled = false
+    hooks()!.onChange()
+    enabled = true
+    hooks()!.onChange()
+    expect((await worktrees.wait(sessionId)).status).toBe('lost')
+    expect((await worktrees.prompt(sessionId)).prompt?.id).not.toBe(prompt.id)
+    expect((await worktrees.wait(sessionId)).status).toBe('prompt')
+  })
+
+  it('keeps the warning after a tracked path is observed missing and then reused', async () => {
+    const { area, main, linked } = pair('audit-reused-root')
+    const { worktrees, stack, sessionId } = await worktreesOf(area, main)
+    const prompt = promptOf(await worktrees.wait(sessionId))
+    await worktrees.resolve(sessionId, prompt.id, 'add')
+    const [row] = stack.registry.list(main)
+    rmSync(linked, { recursive: true, force: true })
+    expect((await worktrees.describeRoots(main))?.badges.get(row!.id)).toMatchObject({
+      state: 'directory-missing', cleanupEligible: true,
+    })
+    mkdirSync(linked)
+    await stack.registry.refresh(main)
+    expect(stack.registry.list(main)[0]?.state).toBe('available')
+    expect((await worktrees.describeRoots(main))?.badges.get(row!.id)).toMatchObject({
+      state: 'changed', cleanupEligible: false,
+    })
   })
 })

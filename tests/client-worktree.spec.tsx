@@ -44,13 +44,14 @@ function promptThenWait(seenPrompt: WorktreePromptView = PROMPT): WorktreeClient
 }
 
 function fakeClient(overrides: Partial<WorktreeClient> = {}): WorktreeClient {
-  const listeners = new Set<() => void>()
+  const listeners = new Set<(sessionId: string) => void>()
   const base: WorktreeClient = {
     wait: async () => pendingWait(),
     prompt: async () => ({ viewRevision: 'v1' }),
     resolve: async () => ({ viewRevision: 'v2' }),
     reset: async () => ({ cleared: true }),
-    notify: () => { for (const listener of [...listeners]) listener() },
+    cleanup: async () => { throw new Error('unexpected cleanup') },
+    notify: sessionId => { for (const listener of [...listeners]) listener(sessionId) },
     subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
   }
   return { ...base, ...overrides }
@@ -135,6 +136,25 @@ describe('worktree prompt overlay', () => {
     expect(wait).toHaveBeenCalledTimes(3)
   })
 
+  it('aborts an open wait and sends no replacement while the form is disabled', async () => {
+    let enabled = true
+    let settingsListener: (() => void) | undefined
+    const wait = vi.fn(promptThenWait())
+    render(<WorktreePrompt client={fakeClient({ wait })} sessionId={() => 's1'}
+      subscribeSession={() => () => {}} t={t} previewOnly
+      readEnabled={() => enabled} subscribeEnabled={listener => {
+        settingsListener = listener
+        return () => { settingsListener = undefined }
+      }} />)
+    await screen.findByRole('dialog')
+    await waitFor(() => expect(wait).toHaveBeenCalledTimes(2))
+    const signal = wait.mock.calls[1]![2]!
+    act(() => { enabled = false; settingsListener?.() })
+    expect(signal.aborted).toBe(true)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(wait).toHaveBeenCalledTimes(2)
+  })
+
   it('remounts after an explicit panel action wakes it from lost', async () => {
     let calls = 0
     const wait = vi.fn(async (_sessionId: string, _seen: { seenPromptId?: string; seenViewRevision?: string }, signal?: AbortSignal) => {
@@ -147,7 +167,9 @@ describe('worktree prompt overlay', () => {
     renderPrompt(client, true)
     await waitFor(() => expect(wait).toHaveBeenCalledTimes(1))
     expect(screen.queryByRole('dialog')).toBeNull()
-    act(() => { client.notify?.() })
+    act(() => { client.notify?.('another-session') })
+    expect(wait).toHaveBeenCalledTimes(1)
+    act(() => { client.notify?.('s1') })
     const dialog = await screen.findByRole('dialog', { name: 'worktree.title' })
     expect(dialog).toBeDefined()
     expect(wait).toHaveBeenCalledTimes(3)
@@ -217,7 +239,7 @@ describe('panel cleanup controls', () => {
       sessionId={() => 's1'}
       onClose={() => {}}
       worktrees={fakeClient({ notify })} />)
-    await waitFor(() => expect(notify).toHaveBeenCalled())
+    await waitFor(() => expect(notify).toHaveBeenCalledWith('s1'))
   })
 })
 

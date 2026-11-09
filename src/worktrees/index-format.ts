@@ -46,7 +46,7 @@ const MAX_ENTRIES = 10_000_000
 function decodePath(bytes: Buffer): string | undefined {
   if (bytes.includes(0)) return undefined
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
   } catch {
     return undefined
   }

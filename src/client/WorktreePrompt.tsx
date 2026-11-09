@@ -29,6 +29,7 @@ export interface WorktreePromptProps {
    * remount the wait loop of THIS session; without it the overlay that stopped
    * on `worktree/not-enabled` would stay silent until the page remounts.
    */
+  readonly readEnabled?: (() => boolean) | undefined
   readonly subscribeEnabled?: ((listener: () => void) => () => void) | undefined
 }
 
@@ -49,7 +50,7 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
  */
 export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const { client, sessionId, subscribeSession, t, previewOnly } = props
-  const { subscribeEnabled } = props
+  const { readEnabled, subscribeEnabled } = props
   const [currentSession, setCurrentSession] = useState<string | undefined>(() => sessionId())
   const [prompt, setPrompt] = useState<WorktreePromptView | undefined>(undefined)
   const [busy, setBusy] = useState(false)
@@ -76,15 +77,17 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   // explicit panel list re-activated the workspace on the host).
   useEffect(() => {
     if (client?.subscribe === undefined) return
-    return client.subscribe(() => setTick(value => value + 1))
-  }, [client])
+    return client.subscribe(session => {
+      if (session === currentSession) setTick(value => value + 1)
+    })
+  }, [client, currentSession])
   useEffect(() => {
     if (subscribeEnabled === undefined) return
     return subscribeEnabled(() => setTick(value => value + 1))
   }, [subscribeEnabled])
 
   useEffect(() => {
-    if (client === undefined || currentSession === undefined || currentSession === '') {
+    if (client === undefined || currentSession === undefined || currentSession === '' || readEnabled?.() === false) {
       setPrompt(undefined)
       return
     }
@@ -134,7 +137,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     }
     void run()
     return () => { cancelled = true; controller?.abort() }
-  }, [client, currentSession, tick])
+  }, [client, currentSession, readEnabled, tick])
 
   const resolve = useCallback(async (action: 'add' | 'dismiss') => {
     if (client === undefined || currentSession === undefined || prompt === undefined) return

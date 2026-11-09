@@ -22,7 +22,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { lstatSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -38,8 +38,9 @@ import type {} from '@deepseek-ai/dsh-session'
 import { primaryKey, RootValidationError, samePath } from './roots.ts'
 import { inventoryWorktrees, type InventoryCandidate } from './worktrees/inventory.ts'
 import { commonCandidate, commonDiscoveryKey, type CommonCandidate } from './worktrees/common.ts'
+import { verifyPromptExpected } from './worktrees/owner.ts'
 import { resolveRepo } from './worktrees/repository.ts'
-import { lstatEntry, MAX_POINTER_BYTES, readUtf8File, resolvePointerTarget } from './worktrees/fs-safe.ts'
+import { lstatEntry, readPointerLine, resolvePointerTarget, SafeIoError } from './worktrees/fs-safe.ts'
 import type { WorktreeMapping } from './worktrees/sidecar.ts'
 import type { AddNewRootOptions, DeletedWorktreeOptions } from './registry.ts'
 import { WorkspaceWatchSet, type WatchTargets } from './worktrees/watch.ts'
@@ -109,6 +110,8 @@ interface WorkspaceState {
   readonly primaryRoot: string
   activation: 'unactivated' | 'active' | 'lost'
   activationDetail?: string | undefined
+  activationGeneration: number
+  readonly observedMissing: Set<string>
   repo?: RepoSnapshot | undefined
   /** Every proven B candidate, including filtered ones (watchers need them). */
   inventory: readonly InventoryCandidate[]
@@ -200,8 +203,10 @@ export class MultiRootWorktrees extends Service {
   async prompt(sessionId: string): Promise<{ readonly prompt?: WorktreePrompt; readonly viewRevision: string }> {
     this.requireEnabled()
     const session = this.sessionView(sessionId)
-    const workspace = await this.ensureWorkspace(session.primaryRoot, true)
+    const generation = this.generation
+    const workspace = await this.ensureWorkspace(session.primaryRoot, 'explicit')
     await this.revalidate(workspace)
+    this.requireGeneration(generation)
     const viewRevision = this.viewRevision(workspace, session.mode)
     const head = this.visibleRecords(workspace, session.mode)[0]
     return head === undefined
@@ -224,10 +229,12 @@ export class MultiRootWorktrees extends Service {
     this.requireEnabled()
     signal?.throwIfAborted()
     const session = this.sessionView(sessionId)
-    const workspace = await this.ensureWorkspace(session.primaryRoot, true)
+    const generation = this.generation
+    const workspace = await this.ensureWorkspace(session.primaryRoot, 'first')
     // Every mount/timeout re-verifies the complete primary judgment before it
     // trusts the cached activation (ADR-0039 §4.4).
     await this.revalidate(workspace)
+    this.requireGeneration(generation)
     signal?.throwIfAborted()
     const immediate = this.resultFor(workspace, session.mode, seen, false)
     if (immediate !== undefined) return immediate
@@ -238,7 +245,9 @@ export class MultiRootWorktrees extends Service {
   async reset(sessionId: string): Promise<{ readonly cleared: boolean }> {
     this.requireEnabled()
     const session = this.sessionView(sessionId)
-    const workspace = await this.ensureWorkspace(session.primaryRoot, true)
+    const generation = this.generation
+    const workspace = await this.ensureWorkspace(session.primaryRoot, 'explicit')
+    this.requireGeneration(generation)
     workspace.candidates.clear()
     workspace.queue = []
     workspace.evaluated.clear()
@@ -250,7 +259,7 @@ export class MultiRootWorktrees extends Service {
     // starts clean; the persisted ignores stay untouched.
     if (workspace.activation === 'active') {
       try {
-        await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'reset' })
+        await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'reset' }, this.workspaceGuard(workspace))
       } catch {
         // Memory-only is a supported degradation.
       }
@@ -259,6 +268,7 @@ export class MultiRootWorktrees extends Service {
     } else {
       workspace.revision++
     }
+    this.requireGeneration(generation)
     this.wake(workspace)
     return { cleared: workspace.activation === 'active' }
   }
@@ -279,7 +289,9 @@ export class MultiRootWorktrees extends Service {
   ): Promise<{ readonly viewRevision: string; readonly prompt?: WorktreePrompt }> {
     this.requireEnabled()
     const session = this.sessionView(sessionId)
-    const workspace = await this.ensureWorkspace(session.primaryRoot, false)
+    const generation = this.generation
+    const workspace = await this.ensureWorkspace(session.primaryRoot, 'none')
+    this.requireGeneration(generation)
     if (workspace.activation !== 'active') {
       throw new WorktreeError('worktree/prompt-stale', 'the workspace is no longer active')
     }
@@ -287,25 +299,17 @@ export class MultiRootWorktrees extends Service {
     if (record === undefined || !eligible(record.candidate.kind, session.mode)) {
       throw new WorktreeError('worktree/prompt-stale', 'the prompt is no longer visible')
     }
-    // The session facts are read again immediately before the mutation is sent
-    // to the owner. Everything above this line may have awaited background
-    // detection/bookkeeping, and the live mode/workspace may have changed while
-    // it did; a prompt captured for `workspace-write` must not survive into a
-    // `read-only` request (ADR-0039 §9).
-    const live = this.sessionView(sessionId)
-    if (primaryKey(live.primaryRoot) !== workspace.key) {
-      throw new WorktreeError('worktree/prompt-stale', 'the session workspace changed while the prompt was open')
+    const guard = this.workspaceGuard(workspace)
+    const beforeSubmit = () => {
+      guard()
+      const live = this.sessionView(sessionId)
+      if (primaryKey(live.primaryRoot) !== workspace.key || !eligible(record.candidate.kind, live.mode)
+        || workspace.candidates.get(record.candidate.key) !== record) {
+        throw new WorktreeError('worktree/prompt-stale', 'the live session or its prompt changed')
+      }
+      const verdict = verifyPromptExpected(live.primaryRoot, record.expected)
+      if (!verdict.ok) throw new WorktreeError('worktree/prompt-stale', verdict.detail)
     }
-    if (workspace.activation !== 'active') {
-      throw new WorktreeError('worktree/prompt-stale', 'the workspace is no longer active')
-    }
-    if (!eligible(record.candidate.kind, live.mode)) {
-      throw new WorktreeError('worktree/prompt-stale', 'the current session mode no longer allows this prompt')
-    }
-    if (workspace.candidates.get(record.candidate.key) !== record || !workspace.queue.includes(record)) {
-      throw new WorktreeError('worktree/prompt-stale', 'the prompt was replaced while it was open')
-    }
-    this.requireEnabled()
     if (action === 'add') {
       const options: AddNewRootOptions = {
         path: record.candidate.path,
@@ -318,7 +322,7 @@ export class MultiRootWorktrees extends Service {
           : {}),
       }
       try {
-        await this.ctx.multiRootRegistry.addNew(workspace.primaryRoot, options)
+        await this.ctx.multiRootRegistry.addNew(workspace.primaryRoot, options, beforeSubmit)
       } catch (error) {
         // A duplicate means the operator (or another Host) already registered
         // this directory: treat it as handled, but never write a cleanup map.
@@ -334,11 +338,17 @@ export class MultiRootWorktrees extends Service {
           throw error
         }
       }
-    } else if (dontRemind === true) {
-      await this.ignoreRecord(workspace, record)
+    } else {
+      beforeSubmit()
+      if (dontRemind === true) await this.ignoreRecord(workspace, record, beforeSubmit)
+    }
+    // An already-submitted owner operation keeps its result across a toggle,
+    // but must not republish or remove a prompt from a later activation.
+    if (this.generation !== generation || workspace.activation !== 'active') {
+      return { viewRevision: this.viewRevision(workspace, session.mode) }
     }
     workspace.prompted.add(record.discoveryKey)
-    workspace.candidates.delete(record.candidate.key)
+    if (workspace.candidates.get(record.candidate.key) === record) workspace.candidates.delete(record.candidate.key)
     workspace.queue = workspace.queue.filter(candidate => candidate.promptId !== promptId)
     workspace.revision++
     await this.loadSidecar(workspace)
@@ -349,7 +359,7 @@ export class MultiRootWorktrees extends Service {
   }
 
   /** Record one discovery ignore through the Registry owner and update memory. */
-  private async ignoreRecord(workspace: WorkspaceState, record: CandidateRecord): Promise<void> {
+  private async ignoreRecord(workspace: WorkspaceState, record: CandidateRecord, beforeSubmit: () => void): Promise<void> {
     workspace.ignored.add(record.discoveryKey)
     try {
       await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, {
@@ -357,8 +367,9 @@ export class MultiRootWorktrees extends Service {
         key: record.discoveryKey,
         kind: record.candidate.kind,
         path: record.candidate.path,
-      })
-    } catch {
+      }, beforeSubmit)
+    } catch (error) {
+      if (error instanceof WorktreeError) throw error
       // Memory-only is a supported degradation; discovery still honors it.
     }
   }
@@ -374,8 +385,17 @@ export class MultiRootWorktrees extends Service {
   }> {
     this.requireEnabled()
     const session = this.sessionView(sessionId)
-    const workspace = await this.ensureWorkspace(session.primaryRoot, false)
+    const generation = this.generation
+    const workspace = await this.ensureWorkspace(session.primaryRoot, 'none')
+    this.requireGeneration(generation)
     if (workspace.activation !== 'active') throw new WorktreeError('worktree/inactive', 'the workspace is no longer an active checkout')
+    const guard = this.workspaceGuard(workspace)
+    const beforeSubmit = () => {
+      guard()
+      if (primaryKey(this.sessionView(sessionId).primaryRoot) !== workspace.key) {
+        throw new WorktreeError('worktree/not-eligible', 'the session workspace changed')
+      }
+    }
     await this.loadSidecar(workspace)
     const removed: string[] = []
     const skipped: Array<{ id: string; code: string }> = []
@@ -384,7 +404,7 @@ export class MultiRootWorktrees extends Service {
       if (mapping === undefined) { skipped.push({ id, code: 'worktree/not-eligible' }); continue }
       const options: DeletedWorktreeOptions = { rootId: id, expectedPath: mapping.path, expectedAddedAt: mapping.rootAddedAt }
       try {
-        await this.ctx.multiRootRegistry.removeForDeletedWorktree(workspace.primaryRoot, options)
+        await this.ctx.multiRootRegistry.removeForDeletedWorktree(workspace.primaryRoot, options, beforeSubmit)
         removed.push(id)
       } catch (error) {
         skipped.push({ id, code: codeOf(error) })
@@ -402,25 +422,44 @@ export class MultiRootWorktrees extends Service {
    * explicit request); while the feature is disabled it answers nothing.
    * @param primaryRoot - the session workspace root.
    */
-  async describeRoots(primaryRoot: string): Promise<{
+  async describeRoots(primaryRoot: string, explicit = true): Promise<{
     readonly badges: ReadonlyMap<string, WorktreeRootView>
     readonly cleanupCount: number
   } | undefined> {
     if (!this.enabled) return undefined
-    const workspace = await this.ensureWorkspace(primaryRoot, true)
+    const generation = this.generation
+    const workspace = await this.ensureWorkspace(primaryRoot, explicit ? 'explicit' : 'none')
     if (workspace.activation !== 'active') return undefined
+    const activation = workspace.activationGeneration
+    if (explicit) await this.revalidate(workspace)
+    if (!this.current(workspace, generation, activation)) return undefined
     await this.loadSidecar(workspace)
-    const statuses = this.ctx.multiRootRegistry.list(primaryRoot)
-    const badges = new Map<string, WorktreeRootView>()
-    let cleanupCount = 0
-    for (const mapping of workspace.mappings) {
-      const status = statuses.find(candidate => candidate.id === mapping.rootId)
-      if (status === undefined) continue
-      const badge = worktreeBadge(mapping, status)
-      badges.set(status.id, badge)
-      if (badge.cleanupEligible) cleanupCount++
-    }
+    if (!this.current(workspace, generation, activation)) return undefined
+    const badges = this.observeTrackedRoots(workspace)
+    const cleanupCount = [...badges.values()].filter(badge => badge.cleanupEligible).length
     return { badges, cleanupCount }
+  }
+
+  /** Remember deletion already observed for this registration during this Host lifetime. */
+  private observeTrackedRoots(workspace: WorkspaceState): Map<string, WorktreeRootView> {
+    const statuses = this.ctx.multiRootRegistry.list(workspace.primaryRoot)
+    const badges = new Map<string, WorktreeRootView>()
+    const identities = new Set<string>()
+    for (const mapping of workspace.mappings) {
+      const identity = `${mapping.rootId}\u0000${mapping.rootAddedAt}`
+      identities.add(identity)
+      const status = statuses.find(candidate => candidate.id === mapping.rootId)
+      if (status === undefined || !samePath(status.path, mapping.path)) continue
+      const badge = worktreeBadge(mapping, status, workspace.observedMissing.has(identity))
+      if (badge.cleanupEligible) workspace.observedMissing.add(identity)
+      badges.set(status.id, badge)
+    }
+    if (workspace.sidecarAvailable && this.ctx.multiRootRegistry.available) {
+      for (const identity of workspace.observedMissing) {
+        if (!identities.has(identity)) workspace.observedMissing.delete(identity)
+      }
+    }
+    return badges
   }
 
   /** The active workspace state for diagnostics and tests. */
@@ -441,11 +480,13 @@ export class MultiRootWorktrees extends Service {
     const sessions = this.ctx.get('sessions')
     const session = sessions?.get(sessionId as SessionId)
     const cwd = session?.header?.cwd
-    if (session === undefined || typeof cwd !== 'string' || cwd === '') {
+    if (session === undefined || typeof cwd !== 'string' || !isAbsolute(cwd)) {
       throw new WorktreeError('worktree/session-not-found', `session "${sessionId}" is not an active host session`)
     }
-    const policy = this.ctx.get('sandboxPolicy')?.resolve({ session })
-    const mode: WorkspaceMode = policy?.mode === 'read-only' || policy?.mode === 'danger-full-access' ? policy.mode : 'workspace-write'
+    const mode = this.ctx.get('sandboxPolicy')?.resolve({ session })?.mode
+    if (mode !== 'read-only' && mode !== 'workspace-write' && mode !== 'danger-full-access') {
+      throw new WorktreeError('worktree/not-available', 'the live session sandbox mode is unavailable')
+    }
     return { sessionId, primaryRoot: cwd, mode }
   }
 
@@ -454,8 +495,28 @@ export class MultiRootWorktrees extends Service {
     if (!this.enabled) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled by this workspace configuration')
   }
 
+  private requireGeneration(generation: number): void {
+    this.requireEnabled()
+    if (this.generation !== generation) throw new WorktreeError('worktree/not-enabled', 'the worktree setting changed during this request')
+  }
+
+  private current(workspace: WorkspaceState, generation: number, activation: number): boolean {
+    return this.enabled && this.generation === generation && workspace.activation === 'active'
+      && workspace.activationGeneration === activation && this.workspaces.get(workspace.key) === workspace
+  }
+
+  private workspaceGuard(workspace: WorkspaceState): () => void {
+    const generation = this.generation, activation = workspace.activationGeneration
+    return () => {
+      this.requireGeneration(generation)
+      if (!this.current(workspace, generation, activation)) {
+        throw new WorktreeError('worktree/prompt-stale', 'the workspace activation changed')
+      }
+    }
+  }
+
   /** Load or create the workspace state. */
-  private async ensureWorkspace(primaryRoot: string, detect: boolean): Promise<WorkspaceState> {
+  private async ensureWorkspace(primaryRoot: string, detect: 'none' | 'first' | 'explicit'): Promise<WorkspaceState> {
     const key = primaryKey(primaryRoot)
     let workspace = this.workspaces.get(key)
     if (workspace === undefined) {
@@ -463,6 +524,8 @@ export class MultiRootWorktrees extends Service {
         key,
         primaryRoot,
         activation: 'unactivated',
+        activationGeneration: 0,
+        observedMissing: new Set(),
         inventory: [],
         candidates: new Map(),
         queue: [],
@@ -481,7 +544,8 @@ export class MultiRootWorktrees extends Service {
     }
     // Only an explicit request may try a first activation again; background
     // reconciliation never resurrects an `unactivated` or `lost` workspace.
-    if (detect && (workspace.activation === 'unactivated' || workspace.activation === 'lost')) await this.activate(workspace)
+    if (this.enabled && ((detect !== 'none' && workspace.activation === 'unactivated')
+      || (detect === 'explicit' && workspace.activation === 'lost'))) await this.activate(workspace)
     return workspace
   }
 
@@ -495,6 +559,7 @@ export class MultiRootWorktrees extends Service {
     const previousCommon = workspace.repo?.common
     const wasActive = workspace.activation === 'active'
     workspace.activation = 'active'
+    const generation = this.generation, activation = ++workspace.activationGeneration
     workspace.repo = result.repo
     delete workspace.activationDetail
     if (!wasActive || previousCommon !== result.repo.common) {
@@ -506,6 +571,7 @@ export class MultiRootWorktrees extends Service {
       workspace.revision++
     }
     await this.loadSidecar(workspace)
+    if (!this.current(workspace, generation, activation)) return
     // A new owner generation must rebind/prune its mappings only after an
     // explicit workspace activation (ADR-0039 §6.8).
     this.reconcileSidecar(workspace)
@@ -543,6 +609,7 @@ export class MultiRootWorktrees extends Service {
     // the operator already saw prompts here.
     workspace.activation = workspace.activation === 'unactivated' ? 'unactivated' : 'lost'
     workspace.activationDetail = detail
+    workspace.activationGeneration++
     workspace.repo = undefined
     workspace.inventory = []
     workspace.candidates.clear()
@@ -560,9 +627,7 @@ export class MultiRootWorktrees extends Service {
     const repo = workspace.repo
     if (repo === undefined || workspace.activation !== 'active' || this.closing || !this.enabled) return
     const inventory = inventoryWorktrees(repo.common, process.platform)
-    workspace.inventory = inventory.candidates
-    // Discovery is complete; the watcher set is what degrades past the cap.
-    workspace.degraded = inventory.degraded || inventory.candidates.length > this.maxAdminWatchers
+    const generation = this.generation, activation = workspace.activationGeneration
     const next = new Map<string, CandidateRecord>()
     const added: CandidateRecord[] = []
     let replaced = false
@@ -574,6 +639,7 @@ export class MultiRootWorktrees extends Service {
       const discoveryKey = discoveryKeyFor(candidate)
       if (workspace.ignored.has(discoveryKey) || workspace.prompted.has(discoveryKey)) continue
       const probe = await this.probeAdd(workspace.primaryRoot, candidate.path)
+      if (!this.current(workspace, generation, activation) || workspace.repo !== repo) return
       if (!probe.ok) {
         workspace.evaluated.add(candidate.key)
         continue
@@ -596,8 +662,11 @@ export class MultiRootWorktrees extends Service {
     const changed = replaced || next.size !== workspace.queue.length || [...next.keys()].some(key => !workspace.candidates.has(key))
     const ordered = workspace.queue.filter(record => next.has(record.candidate.key))
       .map(record => next.get(record.candidate.key)!)
+    workspace.inventory = inventory.candidates
+    workspace.degraded = inventory.degraded || inventory.candidates.length > this.maxAdminWatchers
     workspace.candidates = next
     workspace.queue = [...ordered, ...added]
+    this.observeTrackedRoots(workspace)
     workspace.watchers?.close()
     workspace.watchers = this.createWatchers(workspace)
     if (workspace.watchers?.degraded === true) workspace.degraded = true
@@ -679,11 +748,13 @@ export class MultiRootWorktrees extends Service {
   /** Ask the owner to prune/rebind mappings after a Registry change, coalesced. */
   private reconcileSidecar(workspace: WorkspaceState): void {
     if (workspace.sidecarRunning !== undefined) { workspace.sidecarPending = true; return }
+    const beforeSubmit = this.workspaceGuard(workspace)
     workspace.sidecarRunning = (async () => {
       do {
         workspace.sidecarPending = false
         try {
-          const view = await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'reconcile' })
+          const view = await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'reconcile' }, beforeSubmit)
+          beforeSubmit()
           if (view.available) {
             workspace.mappings = view.worktreeRoots
             workspace.sidecarAvailable = true
@@ -692,7 +763,10 @@ export class MultiRootWorktrees extends Service {
           return
         }
       } while (workspace.sidecarPending)
-    })().finally(() => { workspace.sidecarRunning = undefined })
+    })().finally(() => {
+      workspace.sidecarRunning = undefined
+      if (workspace.sidecarPending && this.enabled && workspace.activation === 'active') this.reconcileSidecar(workspace)
+    })
   }
 
   /** Coalesce one reconcile per workspace. */
@@ -701,8 +775,9 @@ export class MultiRootWorktrees extends Service {
     if (workspace.activation !== 'active') return
     workspace.pendingReconcile = true
     if (workspace.reconciling !== undefined) return
+    const generation = this.generation, activation = workspace.activationGeneration
     workspace.reconciling = (async () => {
-      while (workspace.pendingReconcile && !this.closing && workspace.activation === 'active') {
+      while (workspace.pendingReconcile && this.current(workspace, generation, activation)) {
         workspace.pendingReconcile = false
         try {
           const result = resolveRepo(workspace.primaryRoot)
@@ -713,11 +788,16 @@ export class MultiRootWorktrees extends Service {
           workspace.repo = result.repo
           await this.refreshInventory(workspace)
         } catch (error) {
-          this.transitionInactive(workspace, `reconcile failed: ${error instanceof Error ? error.message : String(error)}`)
+          if (this.current(workspace, generation, activation)) {
+            this.transitionInactive(workspace, `reconcile failed: ${error instanceof Error ? error.message : String(error)}`)
+          }
           return
         }
       }
-    })().finally(() => { workspace.reconciling = undefined })
+    })().finally(() => {
+      workspace.reconciling = undefined
+      if (workspace.pendingReconcile) this.reconcile(workspace)
+    })
   }
 
   /** The records a session may see, in queue order. */
@@ -896,10 +976,18 @@ export class MultiRootWorktrees extends Service {
         waiter.reject(new WorktreeError('worktree/not-enabled', 'worktree root suggestions were disabled'))
       }
       workspace.waiters.clear()
+      workspace.activationGeneration++
+      if (workspace.activation === 'active') workspace.activation = 'unactivated'
+      workspace.repo = undefined
+      workspace.inventory = []
+      workspace.queue = []
+      workspace.candidates.clear()
+      workspace.evaluated.clear()
+      workspace.pendingReconcile = false
+      workspace.sidecarPending = false
     }
-    this.workspaces.clear()
-    this.ignored.clear()
-    if (!permanent) this.closing = false
+    if (permanent) this.workspaces.clear()
+    else this.closing = false
   }
 }
 
@@ -935,21 +1023,18 @@ function discoveryKeyFor(candidate: SuggestionCandidate): string {
   return candidate.kind === 'git-common' ? commonDiscoveryKey(candidate) : discoveryKeyOf(candidate)
 }
 
-/** Whether one path exists at all (a symlink counts as existing). */
-function pathExists(path: string): boolean {
+function pathState(path: string): 'present' | 'missing' | 'inaccessible' {
   try {
-    return lstatEntry(path) !== undefined
-  } catch {
-    return false
+    return lstatEntry(path) === undefined ? 'missing' : 'present'
+  } catch (error) {
+    return error instanceof SafeIoError && error.reason === 'not-directory' ? 'missing' : 'inaccessible'
   }
 }
 
 /** The canonical target of one admin gitdir pointer, or undefined when unreadable. */
 function pointerTarget(admin: string): string | undefined {
   try {
-    const text = readUtf8File(join(admin, 'gitdir'), MAX_POINTER_BYTES).trim()
-    if (text === '') return undefined
-    return resolvePointerTarget(admin, text)
+    return resolvePointerTarget(admin, readPointerLine(join(admin, 'gitdir')))
   } catch {
     return undefined
   }
@@ -960,15 +1045,19 @@ function pointerTarget(admin: string): string | undefined {
  * only decide the badge: cleanup is eligible ONLY when the record's own path is
  * confirmed missing AND its `addedAt` still binds the mapping.
  */
-function worktreeBadge(mapping: WorktreeMapping, status: { readonly id: string; readonly path: string; readonly addedAt: string }): WorktreeRootView {
+function worktreeBadge(mapping: WorktreeMapping, status: { readonly id: string; readonly path: string; readonly addedAt: string }, previouslyMissing: boolean): WorktreeRootView {
   const base = { adminId: mapping.adminId, path: status.path }
   const bound = status.addedAt === mapping.rootAddedAt
-  if (!pathExists(status.path)) return { ...base, state: 'directory-missing', cleanupEligible: bound }
-  if (!bound) return { ...base, state: 'changed', cleanupEligible: false }
+  const observed = pathState(status.path)
+  if (observed === 'missing') return { ...base, state: 'directory-missing', cleanupEligible: bound }
+  if (!bound || previouslyMissing || observed === 'inaccessible') return { ...base, state: 'changed', cleanupEligible: false }
   const admin = join(mapping.common, 'worktrees', mapping.adminId)
-  if (!pathExists(admin)) return { ...base, state: 'unregistered', cleanupEligible: false }
+  const adminState = pathState(admin)
+  if (adminState === 'missing') return { ...base, state: 'unregistered', cleanupEligible: false }
+  if (adminState === 'inaccessible') return { ...base, state: 'changed', cleanupEligible: false }
   const target = pointerTarget(admin)
-  if (target !== undefined && !samePath(dirname(target), status.path)) {
+  if (target === undefined) return { ...base, state: 'changed', cleanupEligible: false }
+  if (!samePath(dirname(target), status.path)) {
     return { ...base, state: 'moved', cleanupEligible: false }
   }
   return { ...base, state: 'active', cleanupEligible: false }

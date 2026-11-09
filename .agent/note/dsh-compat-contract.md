@@ -29,7 +29,7 @@ node_modules                实际解析到的版本          allowlist 中的�
 
 非 `dsh-*` 的共享上游包（`cordis`、`schemastery`、`node-addon-system`）同样**只能是 peer**：它们是宿主树自带的单例——`dsh-sandbox-local` 在每个受支持版本上都直接依赖后两者，插件私带一份就是第二份。放进 `dependencies` 的实际后果（issue #30）：profile 里装出 schemastery `3.18.5` 对宿主 `3.18.6-alpha.1`、cosmokit `1.8.6` 对 `1.8.7-alpha.1` 和一份同版本的 node-addon-system，启动器依赖自检报 `profile-core-mixed` / `profile-core-copy`。机制要记牢：`^3.18.2` 这类范围**不匹配** prerelease（`3.18.6-alpha.1` 不满足它），所以 peer 范围必须像 cordis peer 那样"稳定线用范围 + alpha 线逐个具名"（`>=3.18.2 <4.0.0 || 3.18.5-alpha.1 || 3.18.5-alpha.2 || 3.18.6-alpha.1 || 3.18.6-alpha.2`），升版纳入新 alpha 线时同步扩并集；`devDependencies` 钉开发 pin 宿主自带的精确版本，由 `upgrade-dsh.mjs` 随 ecosystemPins 重指。`compat:check` 与 `tests/compat.spec.ts` 硬性检查 `dependencies` / `optionalDependencies` 里没有任何 `@deepseek-ai/*` 名字。
 
-同一单例规则对**原生镜像**也成立：`koffi` 仍是合法 `dependencies`（独立场景的兜底），但安装进 profile 后必须 dlopen 宿主那份——`dsh plugin add` 会在宿主已加载的 koffi 旁再装一份私有副本，两个 `koffi.node` 镜像同进程在 darwin-arm64 指针校验（PAC）下直接 SIGBUS，进程无声退出（2026-11-01 packed smoke 实锤；main 上同样崩，属 F4 既有回归）。全部 FFI 调用点统一走 `src/compat/koffi.ts` 的 `loadHostKoffi()`：以必需 peer `dsh-fs-local`（每个受支持版本都携带 koffi）为锚点解析宿主副本，解析不到才回退包内自带。`tests/compat.spec.ts` 扫描 `src/` 禁止 `compat/koffi.ts` 之外出现裸 `import('koffi')`。
+同一单例规则对**原生镜像**也成立：`koffi` 仍是合法 `dependencies`（独立场景的兜底），但安装进 profile 后必须 dlopen 宿主那份——`dsh plugin add` 会在宿主已加载的 koffi 旁再装一份私有副本，两个 `koffi.node` 镜像同进程在 darwin-arm64 指针校验（PAC）下直接 SIGBUS，进程无声退出（2026-11-01 packed smoke 实锤；main 上同样崩，属 F4 既有回归）。全部 FFI 调用点统一走 `src/compat/koffi.ts` 的 `loadHostKoffi()`；需要同步读取 Git 元数据的 Worktree 使用同一模块的 `loadHostKoffiSync()`。两者都以必需 peer `dsh-fs-local`（每个受支持版本都携带 koffi）为锚点解析宿主副本，解析不到才回退包内自带。`tests/compat.spec.ts` 扫描 `src/` 禁止 `compat/koffi.ts` 之外出现裸 `import('koffi')`。
 
 ## 2. 你写的测试可能因为门禁而失败——这是对的
 

@@ -10,13 +10,12 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/worktrees/inventory
  */
 
-import { readdirSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { samePath } from '../roots.ts'
 import {
   lstatEntry,
-  MAX_POINTER_BYTES,
-  readUtf8File,
+  readDirectory,
+  readPointerLine,
   resolvePointerTarget,
   SafeIoError,
 } from './fs-safe.ts'
@@ -57,12 +56,8 @@ function adminTarget(admin: string): string {
   const pointer = join(admin, 'gitdir')
   const entry = lstatEntry(pointer)
   if (entry === undefined) throw new SafeIoError('missing', `${pointer} does not exist`)
-  if (entry.isSymbolicLink() || !entry.isFile()) throw new SafeIoError('not-file', `${pointer} is not a regular file`)
-  const text = readUtf8File(pointer, MAX_POINTER_BYTES)
-  const lines = text.split('\n').map(line => line.endsWith('\r') ? line.slice(0, -1) : line)
-  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-  if (lines.length !== 1) throw new SafeIoError('invalid-encoding', `${pointer} is not a single line`)
-  return resolvePointerTarget(admin, lines[0]!)
+  if (entry === 'symlink' || entry !== 'file') throw new SafeIoError('not-file', `${pointer} is not a regular file`)
+  return resolvePointerTarget(admin, readPointerLine(pointer))
 }
 
 /**
@@ -80,10 +75,10 @@ export function inventoryWorktrees(
   const directory = join(common, 'worktrees')
   const entry = lstatEntry(directory)
   if (entry === undefined) return { candidates: [], degraded: false }
-  if (entry.isSymbolicLink() || !entry.isDirectory()) return { candidates: [], degraded: true }
+  if (entry === 'symlink' || entry !== 'directory') return { candidates: [], degraded: true }
   let names: string[]
   try {
-    names = readdirSync(directory, { encoding: 'utf8' })
+    names = readDirectory(directory)
   } catch {
     return { candidates: [], degraded: true }
   }
@@ -94,7 +89,7 @@ export function inventoryWorktrees(
     const admin = join(directory, name)
     try {
       const adminEntry = lstatEntry(admin)
-      if (adminEntry === undefined || adminEntry.isSymbolicLink() || !adminEntry.isDirectory()) continue
+      if (adminEntry === undefined || adminEntry === 'symlink' || adminEntry !== 'directory') continue
       const target = adminTarget(admin)
       if (basename(target) !== '.git') continue
       const root = dirname(target)
