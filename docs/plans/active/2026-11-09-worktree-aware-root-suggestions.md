@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P4 完成；P5 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P5 完成；P6 未开始**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -128,7 +128,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 清理后释放额度；不自动删除；`forget-workspace` 延期，不在本阶段实现。
 - 验收：等待 owner 时替换候选 → 无写入；authority 不可用 → 映射保留；owner 确认空 → prune；两个 Host 同时提交新增/删除/prune，通过 barrier 强制交错，验证串行执行且无覆盖/复活；旧空快照后新增的映射保留；owner 重启/接管后匹配旧映射重绑、不匹配修剪，旧 epoch 在飞请求拒绝。
 
-### P5 Owner 竞态与平台验收（未开始）
+### P5 Owner 竞态与平台验收（完成）
 
 > P5 不新增可写入口；写路径已在 P4 与 owner 复验同阶段落地。P5 只验证竞态、身份和平台行为。
 
