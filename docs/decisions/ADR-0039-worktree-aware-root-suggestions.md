@@ -2,7 +2,17 @@
 
 ## Status
 
-Accepted（2026-11-09 第十八次修订）。先完成 B 的发现、确认和清理，再实施 A 的共享 Git 元数据授权。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
+Accepted（2026-11-09 第十八次修订；同日实施审计返工 R1–R6）。先完成 B 的发现、确认和清理，再实施 A 的共享 Git 元数据授权。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
+
+## 实施审计修正（2026-11-09）
+
+独立审计在 `ceb708e` 上复现的六类缺陷不改变本 ADR 的决策，只把实现收回已经写明的边界；返工条目见[实施计划](../plans/active/2026-11-09-worktree-aware-root-suggestions.md#r1r6-审计返工2026-11-09完成)。这里固定五条容易再次偏离的判据：
+
+- B 候选必须绑定**正在枚举的 common 与 admin 条目**，owner 也必须要求 primary/candidate 的 common 相同；仅比较 admin 名称不足以证明属于同一仓库。
+- 指针目标先做**字面路径的逐段拒绝**，再做 `realpath`；`realpath` 结果还必须与拒绝前观察到的目录身份相同。admin/common 目标本身是 symlink 时一律 inactive。
+- POSIX 路径只以 `/` 分段，文件名中的字面反斜杠不是分隔符；祖先 index 查找同样保留它。
+- 开关与 live session 的提交边界：调用 Host 在**送交 owner 前**重读 primary/mode/开关/提示代次；owner 在**串行队列内、持久化前**重读自己的开关。只在入队前检查会放过已经排队的确认。
+- 专用清理的最终资格在 owner 内复验：primary 仍激活、当前 sidecar 有匹配的 B 映射、路径确认缺失；调用端选择不构成删除授权。提示 ID 只在完整 expectation 相同时复用。
 
 ## 第十八次修订（2026-11-09）
 

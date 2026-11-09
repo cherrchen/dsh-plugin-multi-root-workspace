@@ -12,6 +12,7 @@
 
 import { readdirSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { samePath } from '../roots.ts'
 import {
   lstatEntry,
   MAX_POINTER_BYTES,
@@ -101,6 +102,13 @@ export function inventoryWorktrees(
       if (!result.ok) continue
       const repo = result.repo
       if (repo.shape !== 'linked') continue
+      // The candidate must resolve through the SAME admin entry that was just
+      // enumerated, in the SAME common. Comparing only the admin NAME lets one
+      // repository plant an admin entry whose `gitdir` points at an unrelated
+      // repository's linked checkout with the same name.
+      if (!samePath(repo.common, common)) continue
+      if (!samePath(repo.adminGitdir ?? '', admin)) continue
+      if (!samePath(repo.canonical, dirname(target))) continue
       if (repo.adminId !== name) continue
       if (repo.adminGitdir === undefined || repo.adminHead === undefined || repo.adminIdentity === undefined) continue
       candidates.push({

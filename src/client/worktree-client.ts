@@ -36,6 +36,14 @@ export interface WorktreeClient {
   resolve(sessionId: string, promptId: string, action: 'add' | 'dismiss', dontRemind?: boolean, signal?: AbortSignal): Promise<WorktreeResolveAnswerView>
   reset(sessionId: string, signal?: AbortSignal): Promise<WorktreeResetAnswerView>
   cleanup(sessionId: string, rootIds: readonly string[], signal?: AbortSignal): Promise<WorktreeCleanupView>
+  /**
+   * Wake a stopped overlay. Panel reads are explicit user actions that can
+   * re-activate a lost workspace on the host, but they carry no prompt payload;
+   * this signal is what makes the same session mount its wait again.
+   */
+  notify?(): void
+  /** Subscribe to {@link notify}; returns the unsubscribe function. */
+  subscribe?(listener: () => void): () => void
 }
 
 /**
@@ -44,7 +52,15 @@ export interface WorktreeClient {
  * @returns the client, with transport failures normalized to PanelError.
  */
 export function createWorktreeClient(connection: ConnectionHandle): WorktreeClient {
+  const listeners = new Set<() => void>()
   return {
+    notify() {
+      for (const listener of [...listeners]) listener()
+    },
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
     async wait(sessionId, seen, signal) {
       return parse(worktreeWaitViewSchema, await call(connection, 'worktreePromptWait', { sessionId, ...seen }, signal), 'the worktree wait answer')
     },

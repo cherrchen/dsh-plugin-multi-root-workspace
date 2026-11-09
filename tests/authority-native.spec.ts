@@ -25,6 +25,20 @@ nativeTest('authenticates a same-user unrestricted Host and bounds requests to i
   expect(await client.request('snapshot', ['/primary'])).toEqual(['/primary'])
 })
 
+nativeTest('binds the sidecar root in the handshake', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mrw-ipc-prompts-')), identity = storeIdentity(root)
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }))
+  const server = await AuthorityServer.listen(identity.endpoint, identity.id, 'prompts-test', 16, async () => [], { promptsRoot: '/store/worktree-prompts' })
+  cleanups.push(() => server.close())
+  // A follower whose sidecar root differs must refuse the owner's envelope
+  // instead of reading another configuration's decisions (ADR-0039 §5).
+  await expect(AuthorityClient.connect(identity.endpoint, identity.id, 16, () => {}, () => {}, undefined, '/other/worktree-prompts'))
+    .rejects.toThrow(/configuration mismatch/)
+  const client = await AuthorityClient.connect(identity.endpoint, identity.id, 16, () => {}, () => {}, undefined, '/store/worktree-prompts')
+  cleanups.push(() => client.close())
+  expect(client.epoch).toBe('prompts-test')
+})
+
 nativeTest.runIf(process.platform === 'darwin')('refuses a sandboxed child even when it knows the endpoint and protocol', async () => {
   const { spawn } = await import('node:child_process')
   const root = mkdtempSync(join(tmpdir(), 'mrw-ipc-deny-')), identity = storeIdentity(root)

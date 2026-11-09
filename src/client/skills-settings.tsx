@@ -84,13 +84,27 @@ export function BundleSettingsCard({ form, worktreeForm, autoReviewForm, opsForm
   </>
 }
 
-export function installSkillsSettingsCard(ctx: Context, t: Translate): void {
+/** The client-scoped signal that the worktree switch changed. */
+export interface WorktreeSettingsSignal {
+  /**
+   * Subscribe to a change of the selected worktree form (attachment, detach,
+   * or a value/revision update). The overlay uses it to remount its wait after
+   * the operator turns the feature back on.
+   */
+  subscribe(listener: () => void): () => void
+}
+
+export function installSkillsSettingsCard(ctx: Context, t: Translate): WorktreeSettingsSignal {
   // One coordinator prevents duplicate cards if a host temporarily exposes both shapes.
   let currentSkills: SkillsForm | undefined
   let currentWorktree: SkillsForm | undefined
   let currentOps: SkillsForm | undefined
   let currentAutoReview = false
   let stop: (() => void) | undefined
+  const listeners = new Set<() => void>()
+  let watchedWorktree: SkillsForm | undefined
+  let stopWorktreeWatch: (() => void) | undefined
+  const notify = () => { for (const listener of [...listeners]) listener() }
   const candidates = new Map<Context, { skills?: SkillsForm | undefined; worktree?: SkillsForm | undefined; ops?: SkillsForm | undefined }>()
   const update = () => {
     const chosen = [...candidates.entries()].sort(([a], [b]) => Number(b.get('configForms' as never) !== undefined) - Number(a.get('configForms' as never) !== undefined))[0]
@@ -98,6 +112,14 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): void {
     const worktreeForm = chosen?.[1].worktree
     const opsCandidate = chosen?.[1].ops
     const opsForm = opsCandidate?.getSnapshot().status === 'unavailable' ? undefined : opsCandidate
+    // The overlay's own view of the switch follows the SAME form the card
+    // renders, including a late attach and a host that republished it.
+    if (watchedWorktree !== worktreeForm) {
+      stopWorktreeWatch?.()
+      watchedWorktree = worktreeForm
+      stopWorktreeWatch = worktreeForm?.subscribe(notify)
+      notify()
+    }
     // Mirror the row's own render rule: hidden while unavailable or once the
     // composition answers without the optional entry, so the cell never
     // registers an empty card.
@@ -149,5 +171,18 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): void {
     candidates.set(scope, { skills, worktree, ops }); update()
     return () => { stopOpsWatch?.(); candidates.delete(scope); update() }
   })
-  ctx.effect(() => () => { stop?.(); stopAutoWatch(); candidates.clear() })
+  ctx.effect(() => () => {
+    stop?.()
+    stopWorktreeWatch?.()
+    stopAutoWatch()
+    candidates.clear()
+    listeners.clear()
+    watchedWorktree = undefined
+  })
+  return {
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+  }
 }

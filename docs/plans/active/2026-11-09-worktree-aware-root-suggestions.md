@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P1–P10 全部实施完成；未发版**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P1–P10 全部实施完成；审计返工 R1–R6 已实施；未发版**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -31,6 +31,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 
 - ADR-0039 第十七次修订接受 B；第十八次修订确定 A 的授权边界与全局开关。
 - P1–P10 已全部实施：B 的发现、激活、提示、开关、owner 串行写入、sidecar 与专用清理，以及 A 的 common 候选、确认与受限 Git 旅程用例。
+- 2026-11-09 的独立审计在 `feat/worktree-find` 的 `ceb708e` 上复现了六类缺陷（候选/owner 未绑定同一 common、指针目标先 `realpath` 再检查、owner 门禁在入队前读取、清理资格只在调用端、旧提示 ID 复用、客户端轮询不恢复），另指出 P4 握手未绑定 `promptsRoot`、follower `snapshotView()` 混用本地列表与 owner envelope，以及 P10 没有走真实 A 确认。返工 `R1–R6` 已实施，逐项见下节。
 - 现有 Registry、scope、面板、`/workspace-folders` 命令与 Connection RPC 已经存在；本功能新增独立的 `multi-root-worktrees` 行与 `WORKTREE_ENDPOINTS`，不修改上游包。
 - 未创建 tag，也未更新 CHANGELOG：发布是维护者的独立动作。
 
@@ -179,6 +180,19 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 在隔离夹具中分别用默认 pool 和外部 linked checkout 作为 live session primary。确认前，真实受限 shell 的 Git 写入因缺少元数据权限失败；确认后，在同一 `workspace-write` 模式、不走 `danger-full-access` 的条件下完成 `git add` 和 `git commit`，核对 index、commit/ref 产物。验证主 checkout 源码（当前 primary 之外）和无关目录仍拒写；普通 Remove 后，新进程再次无法写该 common。
 - 覆盖 `read-only`、`danger-full-access` 无 A 提示、per-tool cap、authority 不可用以及设置关闭/开启；删除 linked checkout 后，A 根保持普通 Registry 生命周期，专用清理只追踪 B 根。
 - 按现有 macOS / Linux / Windows 内核探测记录实跑与 skip 证据，回归 B 和完整门禁。更新实现文档、双语 README 与路线账本，实际发布时同步双语 CHANGELOG。
+
+### R1–R6 审计返工（2026-11-09，完成）
+
+> 返工不改变 ADR-0039 的设计，只把实现收回第十八次修订已经写明的边界。回归集中在 `tests/worktrees-audit-regressions.spec.ts`，客户端恢复在 `tests/client-worktree.spec.tsx`，IPC 绑定在 `tests/authority-native.spec.ts` / `tests/shared-registry.spec.ts`。
+
+- **R1（审计 P1-a）候选与 owner 绑定同一 common。** `inventoryWorktrees()` 在 admin 名称之外要求候选解析出的 `common` 与正在枚举的 common 相同、admin 目录就是枚举项本身、候选 canonical 等于该 admin 指针的目标；`verifyPromptExpected()` 的 B 分支同时要求 `primary.common == candidate.common == 解析出的 common`，A 分支也要求 `candidate.common == primary.common`。回归：同仓库放置同名 admin 并指向另一仓库的真实 linked checkout；对 B 的伪造 `addNew` expectation 返回 `worktree/prompt-stale` 且 Registry 无写入。
+- **R2（审计 P1-b）元数据 I/O 先拒绝再解析。** `canonicalExisting()` 先在字面拼写上逐段 `lstat`（父链必须是真目录、任何一级 symlink 都拒绝），之后才 `realpath`，并用 dev/ino 证明解析结果仍是同一对象；指针目标、`commondir`、admin、common 都不再跟随 symlink。`readRegularFile()`/`directoryIdentity()` 逐段 `O_NOFOLLOW|O_DIRECTORY` 打开父目录并在最终 open 后复核句柄，最终文件用同 fd `fstat` 与 pre-open `lstat` 比对。POSIX 路径只按 `/` 分段，`vendor\lib` 这类字面反斜杠目录不再被当成 `vendor/lib`；祖先 index 查找同样只按平台分隔符拆段。回归：admin 指针/commondir 指向目录 symlink 均 inactive；反斜杠路径可激活；祖先 `160000` 条目能被命中。Node 没有公开 `openat`，最终 open 仍是路径型，剩余内核竞态在模块注释与验收中如实记录，未用路径比较掩盖。
+- **R3（审计 P1-c）提交门禁进入 owner 队列，调用端重读 live session。** `addNew()`、`removeForDeletedWorktree()` 与全部 sidecar mutation 在 `serialize()` 任务内、持久化前重读开关；`WorktreePrompt.resolve()` 在送交 owner 前重读 live session 的 primary、mode、开关与当前提示代次。回归：barrier 阻塞 owner 队列后关闭开关 → `worktree/not-enabled` 且无写入；A 提示在送交前切到 `read-only` → `worktree/prompt-stale` 且无写入。
+- **R4（审计 P2-a）清理资格在 owner 内复核。** 专用清理在队列内要求 primary 仍通过完整激活判据，并且当前 sidecar 存在 `rootId + path + rootAddedAt` 完全匹配的 B 映射；手动根、A 根、lost primary 一律 `worktree/not-eligible`。`reset` 在无 ignore 时不再制造 sidecar revision，inactive workspace 不再写 sidecar。回归：缺失的手动根不可清理；primary 失效时 tracked 根不可清理；普通目录/空 reset 不创建 sidecar。
+- **R5（审计 P2-b）快照变化必须换提示 ID。** `refreshInventory()` 只在完整 `PromptExpectation` 深相等时复用旧 record；key 不变但 admin HEAD、primary 快照或目录身份变化时生成新 promptId，并递增 revision、唤醒持有旧 ID 的 waiter。回归：合法切换 admin HEAD 后旧 ID 返回 `stale`，重新查询得到新 ID。
+- **R6（审计 P2-c）设置与显式面板操作恢复轮询。** `installSkillsSettingsCard()` 返回 worktree 开关订阅，overlay 用它重挂因 `worktree/not-enabled` 停止的循环；`WorktreeClient` 增加 `notify/subscribe`，面板成功执行显式 `list`（可恢复 `lost` workspace）后唤醒同一会话的 overlay。回归：设置信号与 `notify()` 都能让已停止的 overlay 重新拿到提示；面板 `list` 会发出该信号。
+- **P4 契约补齐。** IPC `hello` 绑定 `promptsRoot`，不匹配即拒绝（`tests/authority-native.spec.ts`）；follower `snapshotView()` 返回 owner 的同一份 envelope（roots/available/epoch/revision），不再在应用后回退本地 `list()`（`tests/shared-registry.spec.ts`）。
+- **P10 旅程重写。** `tests/worktrees-git.e2e.ts` 现在分别以默认 pool（`.agents/worktrees/w1`）与外部 linked checkout 作为 live session primary：先断言受限 `git add` 失败，再通过真实 `worktreePromptWait` 取 A 提示并 `resolve('add')`，随后在同一 `workspace-write` 下完成 add/commit，核对 index、HEAD 与 common 中的 branch ref；主 checkout 源码与无关目录仍拒写；普通 Remove 后新进程再次拒写。真实 Web 组合的证据补在 `smoke:journey` 的 web leg：同一进程启动真实浏览器组合，用真实 HTTP Connection RPC 完成 worktree 开关关闭/恢复、B 提示确认、B 删除清理与 A 提示确认（不是捕获 handler 的替身）；headless 仍只验证组合启动与现有命令。
 
 ## Dependencies
 

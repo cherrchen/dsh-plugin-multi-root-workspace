@@ -90,7 +90,7 @@ import {
 // is injected, never constructed here.
 import type {} from './scope.ts'
 import { WorktreeError } from './worktrees/errors.ts'
-import { verifyPromptExpected } from './worktrees/owner.ts'
+import { verifyPromptExpected, verifyWorkspaceActive } from './worktrees/owner.ts'
 import {
   readSidecar,
   writeSidecar,
@@ -744,7 +744,16 @@ export class MultiRootRegistry extends Service {
     await this.ensureAuthority()
     if (this.client) {
       const snapshot = await this.remoteSnapshot('snapshot', [primaryRoot])
-      return { roots: this.list(primaryRoot), available: snapshot.available, epoch: snapshot.epoch, revision: snapshot.revision }
+      // Return the OWNER's same envelope. Applying the snapshot to the local
+      // projection and then answering from `list()` would mix two observations
+      // (ADR-0039 §6.8): a concurrent local write or a protected-path narrowing
+      // must never masquerade as the owner's complete snapshot.
+      return {
+        roots: this.localSnapshotRoots(snapshot),
+        available: snapshot.available,
+        epoch: snapshot.epoch,
+        revision: snapshot.revision,
+      }
     }
     if (this.authorityState.kind !== 'active') return { roots: [], available: false, epoch: '', revision: 0 }
     const key = primaryKey(primaryRoot)
@@ -771,9 +780,13 @@ export class MultiRootRegistry extends Service {
       return parseAddedRoot(await this.remoteValue('addNew', [primaryRoot, options]))
     }
     this.requireActive()
-    if (this.worktreeGate?.() === false) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
     const key = primaryKey(primaryRoot)
     return await this.serialize(key, async () => {
+      // The switch must be re-read IN the serialized queue, immediately before
+      // the write. Checking it only on entry leaves a confirmation that was
+      // already waiting behind another owner operation able to commit after
+      // the operator turned the feature off (ADR-0039 §9).
+      if (this.worktreeGate?.() === false) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
       const verdict = verifyPromptExpected(key, options.expected)
       if (!verdict.ok) throw new WorktreeError('worktree/prompt-stale', verdict.detail)
       const statuses = await this.reclassify(key)
@@ -836,13 +849,28 @@ export class MultiRootRegistry extends Service {
     await this.ensureAuthority()
     if (this.client) return parseDeletedResult(await this.remoteValue('removeForDeletedWorktree', [primaryRoot, options]))
     this.requireActive()
-    if (this.worktreeGate?.() === false) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
     const key = primaryKey(primaryRoot)
     return await this.serialize(key, async () => {
+      // The dedicated cleanup is a worktree operation, and the OWNER is the
+      // final authority for every condition the panel used to select the row:
+      // the switch, the primary's activation judgment, and the current sidecar
+      // mapping. A caller that builds `rootId + path + addedAt` by hand (or one
+      // racing a manual remove) must not be able to delete an ordinary root.
+      if (this.worktreeGate?.() === false) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
+      const active = verifyWorkspaceActive(primaryRoot)
+      if (!active.ok) throw new WorktreeError('worktree/not-eligible', active.detail)
       const statuses = await this.reclassify(key)
       const found = statuses.find(status => status.id === options.rootId)
       if (found === undefined || !samePath(found.path, options.expectedPath) || found.addedAt !== options.expectedAddedAt) {
         throw new WorktreeError('worktree/not-eligible', 'the tracked root no longer matches its cleanup identity')
+      }
+      const document = this.loadSidecar(key, key)
+      const mapping = document.worktreeRoots.find(candidate =>
+        candidate.rootId === options.rootId
+        && samePath(candidate.path, found.path)
+        && candidate.rootAddedAt === found.addedAt)
+      if (mapping === undefined) {
+        throw new WorktreeError('worktree/not-eligible', 'the root is not tracked by this workspace worktree mapping')
       }
       const missing = pathMissing(found.path)
       if (missing !== true) {
@@ -873,12 +901,20 @@ export class MultiRootRegistry extends Service {
       return { ignored: [], worktreeRoots: [], revision: 0, epoch: undefined, registryRevision: 0, available: false }
     }
     return await this.serialize(key, async () => {
+      if (operation.op !== 'read') {
+        // Every sidecar mutation is part of the worktree feature: the live
+        // switch and the primary activation are re-read in the queue, next to
+        // the write, so a task queued before the operator disabled the feature
+        // (or before the primary stopped activating) cannot still land.
+        if (this.worktreeGate?.() === false) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
+        const active = verifyWorkspaceActive(primaryRoot)
+        if (!active.ok) throw new WorktreeError('worktree/inactive', active.detail)
+      }
       const document = this.loadSidecar(key, key)
       switch (operation.op) {
         case 'read':
           return sidecarViewOf(document, this.operationEpoch, this.operationRevision, true)
         case 'ignore': {
-          if (this.worktreeGate?.() === false) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
           const ignored = document.ignored.some(entry => entry.key === operation.key)
             ? document.ignored
             : [...document.ignored, { key: operation.key, kind: operation.kind, path: operation.path, addedAt: new Date().toISOString() }]
@@ -888,6 +924,10 @@ export class MultiRootRegistry extends Service {
           return sidecarViewOf(next, this.operationEpoch, this.operationRevision, true)
         }
         case 'reset': {
+          // Nothing to clear is not a write: `reset` on an active workspace
+          // with no ignores (or on a directory that never activated) must not
+          // manufacture a sidecar revision.
+          if (document.ignored.length === 0) return sidecarViewOf(document, this.operationEpoch, this.operationRevision, true)
           const next = { ...document, revision: document.revision + 1, ignored: [] }
           this.saveSidecar(key, next)
           return sidecarViewOf(next, this.operationEpoch, this.operationRevision, true)
@@ -2087,7 +2127,8 @@ export class MultiRootRegistry extends Service {
                 const client = await AuthorityClient.connect(this.medium.endpoint, this.medium.id, this.maxRoots,
                   snapshot => { if (adopted && generation === this.connectionGeneration) this.applySnapshot(snapshot) },
                   () => { if (adopted && generation === this.connectionGeneration) this.remoteUnavailable() },
-                  controller.signal)
+                  controller.signal,
+                  this.promptsRoot ?? null)
                 if (this.disposed || generation !== this.connectionGeneration) { client.close(); return }
                 this.client = client; adopted = true
                 this.connectionFailure = undefined
@@ -2177,7 +2218,8 @@ export class MultiRootRegistry extends Service {
     if (this.medium !== undefined) {
       try {
         server = await AuthorityServer.listen(this.medium.endpoint, this.medium.id, epoch, this.maxRoots,
-          (method, args) => this.dispatchShared(method, args))
+          (method, args) => this.dispatchShared(method, args),
+          { promptsRoot: this.promptsRoot ?? null })
       } catch (error) {
         await domain.close()
         this.enterStorageFailed(`cannot start shared registry: ${String(error)}`, 'retryable')

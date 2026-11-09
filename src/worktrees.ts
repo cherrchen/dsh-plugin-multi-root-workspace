@@ -23,6 +23,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { lstatSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { configValue, volatileField } from './compat/skills.ts'
@@ -243,14 +244,21 @@ export class MultiRootWorktrees extends Service {
     workspace.evaluated.clear()
     workspace.prompted.clear()
     this.ignored.delete(workspace.key)
-    try {
-      await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'reset' })
-      workspace.ignored.clear()
-    } catch {
-      workspace.ignored.clear()
+    workspace.ignored.clear()
+    // An inactive workspace has no sidecar writes (ADR-0039 §4.4). The
+    // in-memory decisions are still cleared so a later explicit activation
+    // starts clean; the persisted ignores stay untouched.
+    if (workspace.activation === 'active') {
+      try {
+        await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'reset' })
+      } catch {
+        // Memory-only is a supported degradation.
+      }
+      workspace.revision++
+      await this.refreshInventory(workspace)
+    } else {
+      workspace.revision++
     }
-    workspace.revision++
-    if (workspace.activation === 'active') await this.refreshInventory(workspace)
     this.wake(workspace)
     return { cleared: workspace.activation === 'active' }
   }
@@ -279,6 +287,25 @@ export class MultiRootWorktrees extends Service {
     if (record === undefined || !eligible(record.candidate.kind, session.mode)) {
       throw new WorktreeError('worktree/prompt-stale', 'the prompt is no longer visible')
     }
+    // The session facts are read again immediately before the mutation is sent
+    // to the owner. Everything above this line may have awaited background
+    // detection/bookkeeping, and the live mode/workspace may have changed while
+    // it did; a prompt captured for `workspace-write` must not survive into a
+    // `read-only` request (ADR-0039 §9).
+    const live = this.sessionView(sessionId)
+    if (primaryKey(live.primaryRoot) !== workspace.key) {
+      throw new WorktreeError('worktree/prompt-stale', 'the session workspace changed while the prompt was open')
+    }
+    if (workspace.activation !== 'active') {
+      throw new WorktreeError('worktree/prompt-stale', 'the workspace is no longer active')
+    }
+    if (!eligible(record.candidate.kind, live.mode)) {
+      throw new WorktreeError('worktree/prompt-stale', 'the current session mode no longer allows this prompt')
+    }
+    if (workspace.candidates.get(record.candidate.key) !== record || !workspace.queue.includes(record)) {
+      throw new WorktreeError('worktree/prompt-stale', 'the prompt was replaced while it was open')
+    }
+    this.requireEnabled()
     if (action === 'add') {
       const options: AddNewRootOptions = {
         path: record.candidate.path,
@@ -538,6 +565,7 @@ export class MultiRootWorktrees extends Service {
     workspace.degraded = inventory.degraded || inventory.candidates.length > this.maxAdminWatchers
     const next = new Map<string, CandidateRecord>()
     const added: CandidateRecord[] = []
+    let replaced = false
     // A candidates share the queue and dedupe set with B; visibility is
     // filtered per session mode when the queue is read.
     const common = commonCandidate(repo)
@@ -550,17 +578,22 @@ export class MultiRootWorktrees extends Service {
         workspace.evaluated.add(candidate.key)
         continue
       }
+      const expected = expectedFor(workspace, candidate)
       const previous = workspace.candidates.get(candidate.key)
-      const record: CandidateRecord = previous ?? {
-        candidate,
-        expected: expectedFor(workspace, candidate),
-        promptId: randomUUID(),
-        discoveryKey,
+      // The candidate KEY is stable across an admin HEAD change or a same-path
+      // rebuild; the prompt ID must not be. Reusing the whole record would hand
+      // the operator an ID whose owner expectation can never be confirmed.
+      const unchanged = previous !== undefined && isDeepStrictEqual(previous.expected, expected)
+      const record: CandidateRecord = unchanged
+        ? previous
+        : { candidate, expected, promptId: randomUUID(), discoveryKey }
+      if (!unchanged) {
+        if (previous === undefined) added.push(record)
+        else replaced = true
       }
       next.set(candidate.key, record)
-      if (previous === undefined) added.push(record)
     }
-    const changed = next.size !== workspace.queue.length || [...next.keys()].some(key => !workspace.candidates.has(key))
+    const changed = replaced || next.size !== workspace.queue.length || [...next.keys()].some(key => !workspace.candidates.has(key))
     const ordered = workspace.queue.filter(record => next.has(record.candidate.key))
       .map(record => next.get(record.candidate.key)!)
     workspace.candidates = next

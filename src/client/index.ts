@@ -161,14 +161,23 @@ export function apply(ctx: ClientContext): void {
   const subscribeSession = (listener: () => void): (() => void) => subscribeSessions(readService(ctx, 'sessions'), listener)
   const t = ctx.locale.bind(NS) as unknown as Translate
   installSkillsClient(ctx, t, listener => subscribeCurrentSession(readService(ctx, 'sessions'), listener))
-  installSkillsSettingsCard(ctx, t)
+  const worktreeSettings = installSkillsSettingsCard(ctx, t)
   // The worktree confirmation is a shell-level overlay: it must be able to
   // appear over any page, and it long-polls only while a live session exists.
+  // The settings signal is what remounts a loop that stopped when the switch
+  // was turned off.
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
     name: 'shell.overlay',
     id: 'multi-root-worktree-prompt',
     locale: NS,
-    inject: () => ({ client: worktreeClient, sessionId, subscribeSession, t, previewOnly: WORKTREE_PREVIEW_ONLY }),
+    inject: () => ({
+      client: worktreeClient,
+      sessionId,
+      subscribeSession,
+      subscribeEnabled: (listener: () => void) => worktreeSettings.subscribe(listener),
+      t,
+      previewOnly: WORKTREE_PREVIEW_ONLY,
+    }),
   }, WorktreePrompt))
   // The fork binds upstream's own open-in-app namespace — the same strings
   // the native button shows, upstream's dictionary updates included. The

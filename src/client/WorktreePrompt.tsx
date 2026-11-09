@@ -24,6 +24,12 @@ export interface WorktreePromptProps {
   readonly t: Translate
   /** Phase P3: preview only — the confirmation stays disabled until P4 lands. */
   readonly previewOnly: boolean
+  /**
+   * The live worktree-settings subscription. Turning the switch back on must
+   * remount the wait loop of THIS session; without it the overlay that stopped
+   * on `worktree/not-enabled` would stay silent until the page remounts.
+   */
+  readonly subscribeEnabled?: ((listener: () => void) => () => void) | undefined
 }
 
 /** Resolve after a delay, or early when the signal aborts. */
@@ -43,6 +49,7 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
  */
 export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const { client, sessionId, subscribeSession, t, previewOnly } = props
+  const { subscribeEnabled } = props
   const [currentSession, setCurrentSession] = useState<string | undefined>(() => sessionId())
   const [prompt, setPrompt] = useState<WorktreePromptView | undefined>(undefined)
   const [busy, setBusy] = useState(false)
@@ -63,6 +70,18 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     update()
     return subscribeSession(update)
   }, [sessionId, subscribeSession])
+
+  // Two explicit signals can restart a wait loop that stopped on
+  // `worktree/not-enabled` (the switch was turned back on) or on `lost` (an
+  // explicit panel list re-activated the workspace on the host).
+  useEffect(() => {
+    if (client?.subscribe === undefined) return
+    return client.subscribe(() => setTick(value => value + 1))
+  }, [client])
+  useEffect(() => {
+    if (subscribeEnabled === undefined) return
+    return subscribeEnabled(() => setTick(value => value + 1))
+  }, [subscribeEnabled])
 
   useEffect(() => {
     if (client === undefined || currentSession === undefined || currentSession === '') {

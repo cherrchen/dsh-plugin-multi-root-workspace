@@ -7,7 +7,7 @@ import { connectNative, listenNative, type Listener } from './native.ts'
 import { addNewSchema, deletedWorktreeSchema, sidecarOperationSchema } from '../worktrees/protocol.ts'
 
 const MAX_FRAME = 1024 * 1024, MAX_PENDING = 32
-const helloSchema = z.object({ protocol: z.literal(1), store: z.string(), epoch: z.string(), limit: z.number().int() }).strict()
+const helloSchema = z.object({ protocol: z.literal(1), store: z.string(), epoch: z.string(), limit: z.number().int(), promptsRoot: z.string().nullable() }).strict()
 const methods = ['hello', 'snapshot', 'admit', 'probeAdd', 'add', 'removeAt', 'setAccess', 'setAlias', 'setSkillsEnabled', 'setAliasId', 'move', 'recheck', 'addNew', 'removeForDeletedWorktree', 'worktreeSidecar'] as const
 export type Method = typeof methods[number]
 const requestSchema = z.object({ protocol: z.literal(1), store: z.string(), id: z.string().uuid(), epoch: z.string().nullable(), method: z.enum(methods), args: z.array(z.unknown()).max(4) }).strict()
@@ -55,7 +55,7 @@ export class AuthorityClient {
   private readonly pending = new Map<string, { method: Method; resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>()
   private closed = false
   epoch: string | undefined
-  private constructor(private readonly channel: Channel, private readonly store: string, private readonly limit: number, onChange: (snapshot: Snapshot) => void, disconnected: () => void) {
+  private constructor(private readonly channel: Channel, private readonly store: string, private readonly limit: number, private readonly promptsRoot: string | null, onChange: (snapshot: Snapshot) => void, disconnected: () => void) {
     channel.on('close', () => {
       if (this.closed) return
       this.closed = true
@@ -72,7 +72,7 @@ export class AuthorityClient {
         // A change may share the same read buffer as hello. Set identity here,
         // before resolving the Promise, rather than one microtask later.
         const hello = helloSchema.parse(reply.value)
-        if (hello.store !== store || hello.limit !== this.limit) throw new Error('registry configuration mismatch')
+        if (hello.store !== store || hello.limit !== this.limit || hello.promptsRoot !== this.promptsRoot) throw new Error('registry configuration mismatch')
         this.epoch = hello.epoch
       }
       this.pending.delete(reply.id); clearTimeout(request.timer)
@@ -80,16 +80,16 @@ export class AuthorityClient {
       else request.reject(new AuthorityRpcError(reply.code, reply.message))
     })
   }
-  static async connect(endpoint: string, store: string, limit: number, onChange: (snapshot: Snapshot) => void, disconnected: () => void, signal?: AbortSignal) {
+  static async connect(endpoint: string, store: string, limit: number, onChange: (snapshot: Snapshot) => void, disconnected: () => void, signal?: AbortSignal, promptsRoot: string | null = null) {
     if (signal?.aborted) throw new AuthorityRpcError('authority-cancelled', 'registry handshake was cancelled')
     const channel = await connectNative(endpoint)
     if (signal?.aborted) { channel.destroy(); throw new AuthorityRpcError('authority-cancelled', 'registry handshake was cancelled') }
-    const client = new AuthorityClient(channel, store, limit, onChange, disconnected)
+    const client = new AuthorityClient(channel, store, limit, promptsRoot, onChange, disconnected)
     const onAbort = () => client.close()
     signal?.addEventListener('abort', onAbort, { once: true })
     try {
       const hello = helloSchema.parse(await client.request('hello', [limit]))
-      if (hello.store !== store || hello.limit !== limit) throw new Error('registry configuration mismatch')
+      if (hello.store !== store || hello.limit !== limit || hello.promptsRoot !== promptsRoot) throw new Error('registry configuration mismatch')
       client.epoch = hello.epoch
       return client
     } catch (error) {
@@ -118,9 +118,9 @@ export class AuthorityServer {
   private readonly readyPeers = new Set<Channel>()
   private closed = false
   private inFlight = 0
-  private constructor(private readonly store: string, private readonly epoch: string, private readonly limit: number, private readonly dispatch: (method: Method, args: unknown[]) => Promise<unknown>) {}
-  static async listen(endpoint: string, store: string, epoch: string, limit: number, dispatch: (method: Method, args: unknown[]) => Promise<unknown>) {
-    const server = new AuthorityServer(store, epoch, limit, dispatch)
+  private constructor(private readonly store: string, private readonly epoch: string, private readonly limit: number, private readonly promptsRoot: string | null, private readonly dispatch: (method: Method, args: unknown[]) => Promise<unknown>) {}
+  static async listen(endpoint: string, store: string, epoch: string, limit: number, dispatch: (method: Method, args: unknown[]) => Promise<unknown>, options: { readonly promptsRoot?: string | null } = {}) {
+    const server = new AuthorityServer(store, epoch, limit, options.promptsRoot ?? null, dispatch)
     server.listener = await listenNative(endpoint, channel => server.accept(channel))
     return server
   }
@@ -141,7 +141,7 @@ export class AuthorityServer {
       if (request.method === 'hello') {
         if (ready || request.epoch !== null || request.args[0] !== this.limit) throw new Error('registry handshake mismatch')
         ready = true; this.readyPeers.add(channel); clearTimeout(timer)
-        send(channel, { type: 'reply', id: request.id, value: { protocol: 1, store: this.store, epoch: this.epoch, limit: this.limit } }); return
+        send(channel, { type: 'reply', id: request.id, value: { protocol: 1, store: this.store, epoch: this.epoch, limit: this.limit, promptsRoot: this.promptsRoot } }); return
       }
       if (!ready || request.epoch !== this.epoch) throw new Error('registry epoch mismatch')
       if (this.inFlight >= MAX_PENDING) {

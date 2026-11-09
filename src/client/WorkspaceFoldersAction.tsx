@@ -471,11 +471,15 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       const view = await panel.call('list', base)
       if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
       setState({ view, error: undefined, busy: false, noSession: false })
+      // An explicit list is also the host's explicit re-activation request:
+      // it may have recovered a workspace whose remain prompt is `lost`. The
+      // overlay cannot see that answer, so wake it to mount its wait again.
+      props.worktrees?.notify?.()
     } catch (error: unknown) {
       if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
       setState({ view: undefined, error: asPanelError(error), busy: false, noSession: false })
     }
-  }, [panel, requestBase])
+  }, [panel, requestBase, props.worktrees])
 
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => {

@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 /** The worktree prompt overlay and the two-switch plugin card. */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorktreePromptView } from '../src/contract.ts'
 import { WorktreePrompt } from '../src/client/WorktreePrompt.tsx'
 import { WorkspaceFoldersDialog } from '../src/client/WorkspaceFoldersAction.tsx'
-import type { PanelClient } from '../src/client/panel-client.ts'
+import { PanelError, type PanelClient } from '../src/client/panel-client.ts'
 import type { RootsView } from '../src/contract.ts'
 import { BundleSettingsCard } from '../src/client/skills-settings.tsx'
 import type { WorktreeClient } from '../src/client/worktree-client.ts'
@@ -44,17 +44,26 @@ function promptThenWait(seenPrompt: WorktreePromptView = PROMPT): WorktreeClient
 }
 
 function fakeClient(overrides: Partial<WorktreeClient> = {}): WorktreeClient {
+  const listeners = new Set<() => void>()
   const base: WorktreeClient = {
     wait: async () => pendingWait(),
     prompt: async () => ({ viewRevision: 'v1' }),
     resolve: async () => ({ viewRevision: 'v2' }),
     reset: async () => ({ cleared: true }),
+    notify: () => { for (const listener of [...listeners]) listener() },
+    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
   }
   return { ...base, ...overrides }
 }
 
-function renderPrompt(client: WorktreeClient, previewOnly: boolean) {
-  return render(<WorktreePrompt client={client} sessionId={() => 's1'} subscribeSession={() => () => {}} t={t} previewOnly={previewOnly} />)
+function renderPrompt(client: WorktreeClient, previewOnly: boolean, subscribeEnabled?: (listener: () => void) => () => void) {
+  return render(<WorktreePrompt
+    client={client}
+    sessionId={() => 's1'}
+    subscribeSession={() => () => {}}
+    t={t}
+    previewOnly={previewOnly}
+    {...(subscribeEnabled === undefined ? {} : { subscribeEnabled })} />)
 }
 
 describe('worktree prompt overlay', () => {
@@ -102,6 +111,46 @@ describe('worktree prompt overlay', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(wait).not.toHaveBeenCalled()
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('remounts its wait when the settings switch is turned back on', async () => {
+    let calls = 0
+    const wait = vi.fn(async (_sessionId: string, _seen: { seenPromptId?: string; seenViewRevision?: string }, signal?: AbortSignal) => {
+      calls++
+      if (calls === 1) throw new PanelError('worktree/not-enabled', 'off')
+      if (calls === 2) return { status: 'prompt' as const, prompt: PROMPT, viewRevision: 'v1' }
+      return await pendingWait(signal)
+    })
+    let settingsListener: (() => void) | undefined
+    renderPrompt(fakeClient({ wait }), true, listener => {
+      settingsListener = listener
+      return () => { settingsListener = undefined }
+    })
+    await waitFor(() => expect(wait).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    act(() => { settingsListener?.() })
+    const dialog = await screen.findByRole('dialog', { name: 'worktree.title' })
+    expect(dialog).toBeDefined()
+    // The loop immediately mounts a `seen` wait after rendering the prompt.
+    expect(wait).toHaveBeenCalledTimes(3)
+  })
+
+  it('remounts after an explicit panel action wakes it from lost', async () => {
+    let calls = 0
+    const wait = vi.fn(async (_sessionId: string, _seen: { seenPromptId?: string; seenViewRevision?: string }, signal?: AbortSignal) => {
+      calls++
+      if (calls === 1) return { status: 'lost' as const, viewRevision: 'v1' }
+      if (calls === 2) return { status: 'prompt' as const, prompt: PROMPT, viewRevision: 'v2' }
+      return await pendingWait(signal)
+    })
+    const client = fakeClient({ wait })
+    renderPrompt(client, true)
+    await waitFor(() => expect(wait).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    act(() => { client.notify?.() })
+    const dialog = await screen.findByRole('dialog', { name: 'worktree.title' })
+    expect(dialog).toBeDefined()
+    expect(wait).toHaveBeenCalledTimes(3)
   })
 })
 
@@ -155,6 +204,20 @@ describe('panel cleanup controls', () => {
     fireEvent.click(screen.getByText('worktree.cleanupDo'))
     await waitFor(() => expect(cleanup).toHaveBeenCalledWith('s1', ['r1']))
     await waitFor(() => expect(screen.queryByText('/deleted-wt')).toBeNull())
+  })
+
+  it('wakes the overlay after an explicit list can re-activate a lost workspace', async () => {
+    const view: RootsView = { primaryRoot: '/main', roots: [], limit: 16, count: 0 }
+    const panel = { call: async () => view } as unknown as PanelClient
+    const notify = vi.fn()
+    render(<WorkspaceFoldersDialog
+      panel={panel}
+      pickDirectory={undefined}
+      t={t}
+      sessionId={() => 's1'}
+      onClose={() => {}}
+      worktrees={fakeClient({ notify })} />)
+    await waitFor(() => expect(notify).toHaveBeenCalled())
   })
 })
 

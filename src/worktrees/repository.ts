@@ -288,7 +288,11 @@ function ancestorGitlink(ancestor: string, root: string, platform: NodeJS.Platfo
   if (!indexEntry.isFile()) throw new UnprovableAncestor(`ancestor index "${indexPath}" is not a regular file`)
   const parsed = parseGitIndex(readRegularFile(indexPath, MAX_INDEX_BYTES))
   if (!parsed.ok) throw new UnprovableAncestor(`ancestor index "${indexPath}": ${parsed.detail}`)
-  const path = relative(ancestor, root).split(/[\\/]+/).join('/')
+  // POSIX keeps a literal backslash inside one file name; only Windows treats
+  // it as a separator. Splitting every backslash would make `vendor\lib` look
+  // like `vendor/lib` and miss a real `160000` entry.
+  const relativePath = relative(ancestor, root)
+  const path = (platform === 'win32' ? relativePath.split(/[\\/]+/) : relativePath.split('/')).join('/')
   if (path === '' || path.startsWith('../') || path === '..' || isAbsolute(path)) {
     throw new UnprovableAncestor(`cannot express "${root}" relative to ancestor "${ancestor}"`)
   }

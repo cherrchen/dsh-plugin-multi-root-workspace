@@ -47,6 +47,20 @@ function primaryMatches(repo: RepoSnapshot, expected: PromptExpected['primary'])
 }
 
 /**
+ * Whether one workspace's primary checkout still passes the complete
+ * activation judgment. Cleanup and sidecar mutations use this before they
+ * write: an inactive workspace has no dedicated worktree actions (ADR-0039
+ * §4.4 / §6.4).
+ * @param primaryRoot - the Registry key's workspace root.
+ * @returns whether the primary still activates, or why it does not.
+ */
+export function verifyWorkspaceActive(primaryRoot: string): ExpectedVerdict {
+  const primary = resolveRepo(primaryRoot)
+  if (!primary.ok) return stale('the primary checkout no longer activates: ' + primary.reason + ': ' + primary.detail)
+  return { ok: true }
+}
+
+/**
  * Re-verify one prompt expectation against the current filesystem.
  * @param primaryRoot - the Registry key's workspace root.
  * @param expected - the snapshot captured at enqueue time.
@@ -62,6 +76,7 @@ export function verifyPromptExpected(primaryRoot: string, expected: PromptExpect
   if (expected.candidate.kind === 'git-common') {
     if (primary.repo.shape !== 'linked') return stale('the primary is no longer a linked checkout')
     if (!samePath(primary.repo.common, expected.candidate.canonical)) return stale('the shared common git dir changed')
+    if (!samePath(primary.repo.common, expected.candidate.common)) return stale('the candidate common does not belong to this workspace')
     if ((primary.repo.adminId ?? '') !== (expected.candidate.adminId ?? '')) return stale('the linked admin changed')
     if (!sameOptionalPath(primary.repo.adminGitdir, expected.candidate.adminGitdir)) return stale('the linked admin moved')
     if ((primary.repo.adminHead ?? '') !== (expected.candidate.adminHead ?? '')) return stale('the admin HEAD changed')
@@ -69,12 +84,20 @@ export function verifyPromptExpected(primaryRoot: string, expected: PromptExpect
     if (!sameIdentity(identity, expected.candidate.rootIdentity)) return stale('the shared common git dir was replaced')
     return { ok: true }
   }
+  // B is only a sibling checkout of the SAME common. Without this binding a
+  // forged expectation could register a worktree of an unrelated repository
+  // (even one whose admin name happens to match), so both the primary's common
+  // and the candidate's own common must agree.
+  if (!samePath(primary.repo.common, expected.candidate.common)) {
+    return stale('the candidate worktree does not belong to this workspace common')
+  }
   const candidate = resolveRepo(expected.candidate.canonical)
   if (!candidate.ok) return stale('the candidate checkout no longer activates: ' + candidate.reason + ': ' + candidate.detail)
   const repo = candidate.repo
   if (repo.shape !== 'linked') return stale('the candidate is no longer a linked checkout')
   if (!samePath(repo.canonical, expected.candidate.canonical)) return stale('the candidate canonical path changed')
   if (!samePath(repo.common, expected.candidate.common)) return stale('the candidate common git dir changed')
+  if (!samePath(repo.common, primary.repo.common)) return stale('the candidate moved to another common git dir')
   if ((repo.adminId ?? '') !== (expected.candidate.adminId ?? '')) return stale('the candidate admin changed')
   if (!sameOptionalPath(repo.adminGitdir, expected.candidate.adminGitdir)) return stale('the candidate admin moved')
   if ((repo.adminHead ?? '') !== (expected.candidate.adminHead ?? '')) return stale('the candidate admin HEAD changed')
