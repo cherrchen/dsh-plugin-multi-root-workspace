@@ -560,9 +560,9 @@ async function copyLocalToRemote(ctx: CopyContext, destinationEnvironment: Remot
     }
     await ctx.stage('verify')
     const again = await admit(ctx.registry, ctx.request, ctx.toolName).catch(() => undefined)
-    if (again === undefined || !sameAdmission(ctx.prepared, again) || endpoint.generationNow() !== endpoint.generation) {
+    if (ctx.signal.aborted || again === undefined || !sameAdmission(ctx.prepared, again) || endpoint.generationNow() !== endpoint.generation) {
       stagingStatus = await staging.cleanup()
-      return result('cancelled', { ...ctx.base, code: 'admission-changed', bytes: digest.bytes, sha256: digest.sha256, stage: 'publish', staging: stagingStatus })
+      return result('cancelled', { ...ctx.base, code: ctx.signal.aborted ? 'cancelled' : 'admission-changed', bytes: digest.bytes, sha256: digest.sha256, stage: 'publish', staging: stagingStatus })
     }
     let published: 'removed' | 'residual'
     try { published = await staging.publish() } catch (error) {
@@ -645,10 +645,10 @@ async function copyRemoteToLocal(ctx: CopyContext, sourceEnvironment: RemoteEnvi
         ctx.request.session.header.cwd, ctx.request.to.rootId, ctx.prepared.effectiveMode, ctx.toolName,
       )
     } catch { authorityAgain = undefined }
-    if (again === undefined || authorityAgain === undefined || !sameAdmission(ctx.prepared, again)
+    if (ctx.signal.aborted || again === undefined || authorityAgain === undefined || !sameAdmission(ctx.prepared, again)
       || authorityAgain.root !== authority.root || endpoint.generationNow() !== endpoint.generation) {
       stagingStatus = sink.cleanup()
-      return result('cancelled', { ...ctx.base, code: 'admission-changed', bytes: digest.bytes, sha256: digest.sha256, stage: 'publish', staging: stagingStatus })
+      return result('cancelled', { ...ctx.base, code: ctx.signal.aborted ? 'cancelled' : 'admission-changed', bytes: digest.bytes, sha256: digest.sha256, stage: 'publish', staging: stagingStatus })
     }
     try { stagingStatus = sink.publish() } catch (error) {
       if (error instanceof LocalTransferError && error.code === 'publish-unverified') {
@@ -736,10 +736,10 @@ async function copyRemoteToRemote(ctx: CopyContext): Promise<RemoteCopyResult> {
     }
     await ctx.stage('verify')
     const again = await admit(ctx.registry, ctx.request, ctx.toolName).catch(() => undefined)
-    if (again === undefined || !sameAdmission(ctx.prepared, again)
+    if (ctx.signal.aborted || again === undefined || !sameAdmission(ctx.prepared, again)
       || from.generationNow() !== from.generation || to.generationNow() !== to.generation) {
       stagingStatus = await stage.cleanup()
-      return result('cancelled', { ...ctx.base, code: 'admission-changed', bytes: digest.bytes, sha256: digest.sha256, stage: 'publish', staging: stagingStatus })
+      return result('cancelled', { ...ctx.base, code: ctx.signal.aborted ? 'cancelled' : 'admission-changed', bytes: digest.bytes, sha256: digest.sha256, stage: 'publish', staging: stagingStatus })
     }
     try { stagingStatus = await stage.publish() } catch (error) {
       if (error instanceof SftpConnectionLost) {
@@ -781,6 +781,7 @@ export async function runRemoteCopy(
   const base = () => ({ operationId, from: endpointLabel(request.from), to: endpointLabel(request.to) })
   const fail = (code: string, stageName: RemoteCopyStage, extra: Partial<RemoteCopyResult> = {}): RemoteCopyResult =>
     result('failed', { ...base(), code, bytes: 0, sha256: '', stage: stageName, staging: 'none', ...extra })
+  if (signal.aborted) return fail('cancelled', 'admission')
   const sourceLocal = request.from.environmentId === 'local'
   const destinationLocal = request.to.environmentId === 'local'
   try {
@@ -794,6 +795,7 @@ export async function runRemoteCopy(
   catch (error) { return fail(codeOf(error), 'admission') }
   operationId = prepared.operationId
   await stage('admission')
+  if (signal.aborted) return fail('cancelled', 'admission')
   const ctx: CopyContext = {
     registry, deps, request, toolName, signal, prepared, stage, fail,
     base: { operationId, from: endpointLabel(request.from), to: endpointLabel(request.to) },
@@ -834,7 +836,7 @@ export function remoteCopyTool(options: { registry: MultiRootRegistry; deps: Rem
       required: ['from', 'to'],
       additionalProperties: false,
     },
-    output: { schema: { type: 'object' }, render: (copy: RemoteCopyResult) => [{ type: 'text', text: JSON.stringify(copy) }] },
+    output: { schema: { type: 'object' }, render: (_args: unknown, copy: RemoteCopyResult) => [{ type: 'text', text: JSON.stringify(copy) }] },
     execute: async (args: unknown, exec: { agent?: { session?: RemoteOperationSession }; name: string; signal: AbortSignal }): Promise<RemoteCopyResult> => {
       const { from, to } = args as { from: { environmentId?: string; rootId: string; relativePath: string }; to: { environmentId: string; rootId: string; relativePath: string } }
       const source = { environmentId: from.environmentId ?? 'local', rootId: from.rootId, relativePath: from.relativePath }

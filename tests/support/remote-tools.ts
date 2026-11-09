@@ -15,7 +15,7 @@ import Policy from '@deepseek-ai/dsh-sandbox-policy'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
 import * as CommandModule from '../../src/command.ts'
-import { apply as applyRemoteTools } from '../../src/remote/tools.ts'
+import { mountRemoteTools as registerTools } from '../../src/remote/tools-registration.ts'
 import type { RemoteExecDeployment } from '../../src/remote/exec.ts'
 import { mountRegistryStack, type RegistryStack } from './registry-stack.ts'
 import { executeTool, installToolExecutor } from './tool-executor.ts'
@@ -33,6 +33,7 @@ export interface RemoteToolsWorld {
   call(name: 'remote_copy' | 'remote_bash', args: unknown, options?: { agent?: Agent; signal?: AbortSignal }): Promise<unknown>
   /** Call one panel endpoint through the registered channel handler. */
   panel(endpoint: string, payload: unknown): Promise<PanelAnswer>
+  unmountTools(): Promise<void>
   dispose(): Promise<void>
 }
 
@@ -115,14 +116,14 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
   })
   await stack.ctx.plugin(SystemPrompt)
   await stack.ctx.plugin(Tools)
+  stack.ctx.provide('permissionPresets', { names: [] } as never)
   await installToolExecutor(stack.ctx)
   const manager = new FakeManager(stack.registry.remoteManifest!, remotes, backends)
-  if (options.withTools !== false) {
-    const row = options.defaultBackends === true
-      ? { enabled: true as const, manager }
-      : { enabled: true as const, manager, backends: (id: string) => backends.get(id) }
-    await stack.ctx.plugin({ name: 'g5-remote-tools', inject: ['multiRootRegistry', 'multiRootCompat', 'multiRootProviders', 'tools'], apply: (ctx: Context) => applyRemoteTools(ctx, row) })
-  }
+  const tools = options.withTools === false ? undefined : await stack.ctx.plugin({
+    name: 'g5-remote-tools',
+    inject: ['multiRootRegistry', 'multiRootCompat', 'multiRootProviders', 'tools'],
+    apply: (ctx: Context) => registerTools(ctx, manager, options.defaultBackends === true ? undefined : id => backends.get(id)),
+  })
   let panelHandler: ((endpoint: string, payload: unknown, signal: AbortSignal) => Promise<PanelAnswer>) | undefined
   if (options.withPanel === true) {
     stack.ctx.provide('commands', { register: () => () => {} } as never)
@@ -156,6 +157,7 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
       if (panelHandler === undefined) throw new Error('the composition mounted no panel channel')
       return await panelHandler(endpoint, payload, new AbortController().signal)
     },
+    unmountTools: async () => { await tools?.dispose() },
     dispose: async () => { await stack.dispose() },
   }
 }

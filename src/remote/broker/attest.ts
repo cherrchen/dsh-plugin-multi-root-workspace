@@ -12,8 +12,9 @@
  */
 import { accessSync, constants, lstatSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { DeploymentManifest } from '../manifest.ts'
+import { manifestDigest, type DeploymentManifest } from '../manifest.ts'
 import { BrokerConnection, BrokerEnvironmentManager } from './client.ts'
+import { MAX_COMMAND_OUTPUT } from './protocol.ts'
 
 /** The deployment facts the Host's protected config carries. */
 export interface BrokerConfig {
@@ -23,6 +24,8 @@ export interface BrokerConfig {
   readonly brokerUid: number
   /** The broker's credential root; it must be UNREADABLE from this account. */
   readonly credentialRoot: string
+  /** The deployment prohibits unrestricted Agent processes under the Host UID. */
+  readonly fullAccessDisabled?: boolean
   /**
    * Deployment evidence that a command run under the Agent's sandbox mode
    * could neither read `credentialRoot` nor connect to `socketPath`. The
@@ -58,6 +61,13 @@ export async function attestBroker(config: BrokerConfig, manifest: DeploymentMan
   }
   if (config.confinementProbe?.verified !== true) {
     return unavailable('confinement-unproven', 'the deployment recorded no passing Agent-sandbox probe for the credential root and socket')
+  }
+  if (config.fullAccessDisabled !== true) {
+    return unavailable('full-access-unrestricted', 'the deployment has not excluded danger-full-access under the Host account')
+  }
+  if (manifest.environments.some(({ exec }) => exec !== undefined
+    && Math.max(exec.stdoutLimit, exec.stderrLimit) > MAX_COMMAND_OUTPUT)) {
+    return unavailable('broker-output-limit', `remote command output limits must be at most ${MAX_COMMAND_OUTPUT} bytes per stream with broker custody`)
   }
 
   // The decisive credential check comes first: this account must NOT be able
@@ -97,10 +107,9 @@ export async function attestBroker(config: BrokerConfig, manifest: DeploymentMan
     connection.close()
     return unavailable('broker-uid-mismatch', 'the broker hello did not report the configured account')
   }
-  const missing = manifest.environments.map(environment => environment.environmentId).filter(id => !hello.environmentIds.includes(id))
-  if (missing.length > 0) {
+  if (hello.manifestDigest !== manifestDigest(manifest)) {
     connection.close()
-    return unavailable('manifest-mismatch', `the broker does not serve: ${missing.join(', ')}`)
+    return unavailable('manifest-mismatch', 'the broker and Host loaded different deployment manifests')
   }
   return { status: 'attested', connection, manager: new BrokerEnvironmentManager(manifest, connection) }
 }

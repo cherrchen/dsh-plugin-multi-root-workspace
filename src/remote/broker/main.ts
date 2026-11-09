@@ -43,7 +43,6 @@ async function main(): Promise<void> {
     clientUid: uid(raw.clientUid, 'clientUid'),
     ...(raw.brokerUid === undefined ? {} : { brokerUid: uid(raw.brokerUid, 'brokerUid') }),
     ...(raw.auditPath === undefined ? {} : { auditPath: string(raw.auditPath, 'auditPath') }),
-    ...(raw.requireAttested === undefined ? {} : { requireAttested: raw.requireAttested === true }),
     logger: {
       debug: message => console.log(`dsh-ssh-broker: ${message}`),
       warn: message => console.warn(`dsh-ssh-broker: ${message}`),

@@ -126,7 +126,7 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 ## G5 显式工具、能力投影与面板（专用 headless 组合）
 
-**边界。** 本关只把已经过各门验证的能力接进一个**专用 headless 测试组合**，不新增生产行：`cordis.patch.yml` 没有 remote 行，默认 profile 与 packed profile 都不含这两个工具。`src/remote/tools.ts` 导出 `apply(ctx, config)`，其 `inject` 含 `multiRootCompat`、`multiRootProviders`、`multiRootRegistry`、`tools`——兼容门禁或 provider 品牌门禁不成立时行根本不存在；`enabled !== true` 时不做任何事；远端控制面未就绪（`remoteEnvironments` 关闭或清单无效）时拒绝加载，而不是登记一半工具。**该行的可命名入口已随包发出**：`./remote-tools` export → `lib/remote-tools.js`，因此部署方自写的组合可以直接列 `multi-root-remote-tools` 指向 `@dsh-electron/dsh-plugin-multi-root-workspace/remote-tools`——默认 patch 依旧不携带它；挂载它的完整启用清单见本节末"部署启用清单"。
+**边界。** 默认 profile 不挂载远端工具。部署方可以在单独的 profile 中用包的 `./remote-tools` 入口挂载可选行。宿主需满足兼容门禁、provider 品牌门禁和 SSH 可选包门禁，Registry 远端控制面需就绪，broker 凭据隔离需通过证明。任何一步失败，均不安装端点校验器、模型工具或能力投影。仅设置 `enabled: true` 不会启用工具。直连 SSH 和假后端只用于源码测试。
 
 **工具。** 同一行注册 `remote_copy` 与 `remote_bash`，并安装端点校验器（`SshEndpointVerifier`）——因此挂载该行的组合也是**登记路径**；未挂载时 `addRemote` 固定 `endpoint-unverifiable`。默认连接管理器是清单之上的官方 SSH 栈；默认执行后端是 `lazySshExecBackend`，在准备阶段才建立 helper 连接并返回其代次，未打开的连接无法通过最终启动准入。组合可用 `manager` / `backends` 两个注入接缝替换为有界内存端点；两者都不授予权限——每次调用仍由 Registry 排序准入。工具结果必须是 lossless JSON：未产生 operationId 的拒绝不携带该键。
 
@@ -140,23 +140,72 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 **旅程。** `tests/remote-journey.e2e.ts` 在**同一 Session** 内完成“两个本地根 → 构建机 → 设备”：两个本地根各复制一个源文件到构建机（同一远端路径、不同内容），`remote_bash` 在构建机执行构建，产物经 Host 中转到设备；设备与构建机使用相同远端路径但内容互不串扰；仅传输能力的设备对执行返回 `action-not-allowed`（声明了 `exec` 动作但无后端时为 `backend-unavailable`）；只读会话对写入/执行/目的端为远端的复制均为 `mode-denies`；删除登记后复制为 `endpoint-not-registered`；`local → local` 为 `direction-unsupported`。同一组合内另验证面板列表不建连、登记/撤销、未知 Session、客户端自带路径被拒，以及只读会话的能力投影。
 
-**部署启用清单。** 面板区、三个面板端点与客户端合约**随默认 patch 一起发货**——控制面未启用时区块如实渲染 `remote unavailable`。让一个真实组合看见并登记端点需要四步部署动作，全部由部署方完成、默认 patch 不动：① 用 `scripts/ssh-broker/install.sh` 建 `_dsh_ssh` 账户、凭据根与 unit（ADR-0036 拓扑）；② Registry 行配置加 `remoteEnvironments: { enabled: true, manifestPath: <部署清单绝对路径> }`——清单由部署方放 Host 不可写处，面板随即列出各端点与其 `unregistered` 状态；③ 组合加一行 `multi-root-remote-tools` → `./remote-tools`，`config.broker.config` 填 socket 路径、broker UID、凭据根与已验证的 `confinementProbe`——行挂载即钉住 `SshEndpointVerifier`，面板的"登记"按钮才从 `endpoint-unverifiable` 变成真实验证+登记（同一挂载也注册模型侧 `remote_copy`/`remote_bash`，二者不可分——这是该能力仍不进默认 patch 的原因）；④ 面板渲染的最终验收需要真实 GUI 宿主，headless 部署只能走到合约层。`enabled: true` 的直连路径是 `unattested` 开发形态：不持 broker 凭据隔离证明，不得作为生产启用方式。
+### 部署启用清单
 
+部署方在专用 profile 中按以下顺序启用。面板与面板端点随默认组合提供，关闭时显示远端不可用。
 
+1. 将同一构建的 broker 入口、共享 JS chunk、Node 及其解析到的依赖安装到 Host 账号和 Agent 都不可写的位置。四个 SSH 可选包须在对应 DSH 宿主的解析树中与 DSH 精确同版。先由 root 写好完整部署清单，供 Host 与 broker 共同读取。
+2. 用 tarball 中的 `scripts/ssh-broker/install.sh` 创建专用账户、凭据根和服务。Linux 默认的 `/etc/dsh-ssh-broker` 属 root，Host 经客户端组可遍历目录和读取清单，`broker.json` 只开放给 root 和 broker 组。在连接前为 broker 配置受信的 OpenSSH 别名、固定主机钥和远端账户。
+3. 部署层禁止该 Host UID 下的 Agent 获取无沙箱执行，包括其他 profile、会话、终端与权限提升。用部署实际提供的受限入口验证凭据与 socket 拒绝、用正常 Host 验证正对照。仅在这些部署事实成立时配置 `fullAccessDisabled: true` 与 `confinementProbe.verified: true`。布尔值用于记录证据，无法改变 DSH 会话权限。
+4. 在专用 profile 的 `cordis.patch.yml` 加入以下配置。broker 行通过证明后才可登记端点，并同时注册 `remote_copy` 和 `remote_bash`。只有 Registry 配置时，面板可显示清单，登记返回 `endpoint-unverifiable`。
+
+```yaml
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+- id: multi-root-registry
+  config:
+    sharedStorageRoot: !!js dshHomePath('storages')
+    leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+    remoteEnvironments:
+      enabled: true
+      manifestPath: /etc/dsh-ssh-broker/manifest.json
+- insert:
+    - id: multi-root-remote-tools
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/remote-tools'
+      config:
+        broker:
+          config:
+            socketPath: /run/dsh-ssh-broker/broker.sock
+            brokerUid: 996 # 替换为安装器报告的 UID
+            credentialRoot: /var/lib/dsh-ssh-broker
+            fullAccessDisabled: true
+            confinementProbe:
+              verified: true
+              evidence: '受限入口的部署验收记录编号'
+```
+
+专用 profile 须使用受限默认模式和全新的会话存储。校验实际组合的权限预设表，确认任何预设名称下都没有 `sandbox: danger-full-access`，并禁用该 UID 下其他可绕过沙箱的入口。工具行在默认模式或任何可选预设允许完全访问时拒绝挂载。
+
+两边更新清单或更换协议版本时，先按下面的步骤关闭，再用新清单重启 broker 与 Host。相同环境 ID 无法代替清单一致性。
+
+### 停用与回滚
+
+1. 停止把新任务派到该 profile，卸载可选工具行。该行拒绝新调用，解除端点校验器，取消并等待已进入的工具调用，然后关闭 broker 连接。已提交的文件应保留。记录 `unknown` 和暂存残留，按操作 ID 对账，确认前禁止重放。
+2. 移除 Registry 行的 `remoteEnvironments` 配置，重启原 profile。若该部署不再提供远端操作，停止 broker 服务。保留本地 v1 记录及独立的远端存储域供核对。
+3. 确认原生工具及本地根仍可用、远端工具和能力投影已消失，历史远端引用调用失败。需要重新启用时，重新证明凭据隔离及清单一致性，再按当前授权登记端点。
 
 ## 凭据隔离：本机凭据代理（ADR-0036）
 
 **边界。** `src/remote/broker/` 是一个独立进程：它以部署方创建的专用账户运行，凭据根（0700）内持有 SSH 私钥、`config`、`known_hosts`、ControlMaster 与 Helper 暂存；Host 账户只通过一个 0750 目录里的 0660 Unix socket 连接。托管进程拒绝以 Host 账户启动（同 UID 不构成隔离），也拒绝清单中任何未声明 `credentialIsolation: "attested"` 的环境（`broker-same-uid` / `manifest-unattested`），除非测试显式放宽。
 
-**协议。** `src/remote/broker/protocol.ts` 是一行一个 JSON 的有界协议（`protocol: 1`，行 ≤ 2 MiB，二进制字段 ≤ 256 KiB，每连接最多 32 个在飞请求、8 个进程）。方法只有八个：`openSftp`、`sftp`（realpath/lstat/open/read/write/close/remove/hardlink/fsync/dispose）、`open`、`confine`、`spawn`、`wait`、`terminate`、`dispose`。没有读取/导出密钥、修改配置、选择主机或任意 ssh 的方法；未知方法、未知字段、越界与超长行直接断连。
+**协议。** `src/remote/broker/protocol.ts` 是一行一个 JSON 的有界协议（`protocol: 2`，行 ≤ 2 MiB，二进制字段 ≤ 256 KiB，每连接最多 32 个在飞请求、8 个进程）。方法只有八个：`openSftp`、`sftp`（realpath/lstat/open/read/write/close/remove/hardlink/fsync/dispose）、`open`、`confine`、`spawn`、`wait`、`terminate`、`dispose`。没有读取/导出密钥、修改配置、选择主机或任意 ssh 的方法；未知方法、未知字段、越界与超长行直接断连。
 
-**认证。** 托管进程对每条连接做内核 peer 认证（`SO_PEERCRED`/`LOCAL_PEERTOKEN`，Linux 上 `SO_PEERPIDFD` 钉住对端）：UID 必须等于配置的 Host UID，且对端不得处于沙箱或 `NoNewPrivs`（Agent 的命令正是这种对端）。Host 侧连接只校验托管进程的 UID（`allowRestricted`），因为托管进程的 confinement 是部署 unit 的事。`hello` 只返回协议版本、`brokerUid` 与环境 ID 列表，不含主机、账号、密钥或摘要。
+托管部署的 `stdoutLimit` 与 `stderrLimit` 各至多 128 KiB。broker 为每个流保留最多两倍声明上限，Host 截断结果并报告相应标记。更大的预算在证明阶段返回 `broker-output-limit`。
+
+**认证。** 托管进程对每条连接做内核 peer 认证（`SO_PEERCRED`/`LOCAL_PEERTOKEN`，Linux 上 `SO_PEERPIDFD` 钉住对端）：UID 必须等于配置的 Host UID，且对端不得处于沙箱或 `NoNewPrivs`（Agent 的命令正是这种对端）。Host 侧连接只校验托管进程的 UID（`allowRestricted`），因为托管进程的 confinement 是部署 unit 的事。`hello` 只在认证通道上返回协议版本、`brokerUid`、环境 ID 列表和清单摘要。摘要仅用于 Host 与 broker 的配置比对，不进入模型投影。
 
 **Host 适配。** `src/remote/broker/client.ts` 的 `BrokerEnvironmentManager` 实现与官方 manager 相同的结构面（`deployment`、`open`/`openSftp`、代次、`markStale`、`disposeAll`），G2 的复制管线、`SshEndpointVerifier` 与 G3 的双准入命令合同不改。SFTP 是语义代理（句柄/数据以 base64 往返），命令的 `confine` 代次在 `spawn` 时复核，输出在退出时随 `exit` 事件（含 `scope` 确认）返回，因此 `remote_bash` 的 `scope-exited`/`exited` 与截断语义保持。
 
-**证明。（`src/remote/broker/attest.ts`）** 在打开任何环境之前检查：Host 与 broker 不是同一 UID；部署记录了通过的 `confinementProbe`；Host 对凭据根 `R_OK` 为 `EACCES`/`EPERM`；socket 是 socket、属主为 broker、无 world 权限、目录为 broker 属主且无 world 权限；连接后的 `hello` 协议与 UID 匹配且覆盖清单全部环境。任一失败返回 `unavailable` 与稳定 code，**不建立连接、不挂载工具**。`src/remote/tools.ts` 的 `broker` 配置走这条路径：异步证明通过后才注册 `remote_copy`/`remote_bash`/校验器/能力投影，失败只记一条 warn，工具保持缺席。
+**证明。（`src/remote/broker/attest.ts`）** 在打开任何环境之前检查：Host 与 broker 不是同一 UID；部署记录了通过的 `confinementProbe`；Host 对凭据根 `R_OK` 为 `EACCES`/`EPERM`；socket 是 socket、属主为 broker、无 world 权限、目录为 broker 属主且无 world 权限；部署声明排除了无沙箱的 Agent 执行，默认沙箱模式为受限模式，连接后的 `hello` 协议、UID 和清单摘要均匹配。任一失败返回 `unavailable` 与稳定 code，保持远端 SSH 连接和工具关闭。`src/remote/tools.ts` 的 `broker` 配置走这条路径：异步证明通过后才注册 `remote_copy`/`remote_bash`/校验器/能力投影，失败只记一条 warn，工具保持缺席。
 
-**部署。** `scripts/ssh-broker/install.sh` 以 root 创建账户、客户端组、0700 凭据根、0750 socket 目录、`/etc/dsh-ssh-broker/broker.json`（0640 root:broker）与 launchd/systemd unit；清单由部署方放在 Host 不可写的位置。脚本不代部署方创建清单或授权远端公钥，并打印剩余步骤。
+**部署。** `scripts/ssh-broker/install.sh` 以 root 创建账户、客户端组、0700 凭据根、0750 socket 目录、`/etc/dsh-ssh-broker/broker.json`（0640 root:broker）与 launchd/systemd unit。Linux unit 通过 `RuntimeDirectory` 在启动时重建 `/run` 下的 socket 目录。脚本不代部署方创建清单或授权远端公钥，并打印剩余步骤。
 
 **已知限制。** 托管账户持有全部密钥；Host 与 Agent 同 UID，因此“Agent 不能到达 socket”只能由部署的沙箱路径拒绝证明（`confinementProbe`），不能由本代码自证；`danger-full-access` 下 Agent 进程不受本机沙箱约束，必须与这些凭据互斥。socket 是长驻接口，进程崩溃后由 unit 重启，但 Host 不自动重建连接；重新启用必须重走证明。同 UID 测试模式（`allowSameUidForTesting`/`allowRestrictedForTesting`）只用于协议测试，生产入口没有开关。
 

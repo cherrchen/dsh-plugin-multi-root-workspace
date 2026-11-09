@@ -15,11 +15,13 @@ import { z } from 'zod'
 import type { Channel } from '../../authority/native.ts'
 
 /** The only protocol this broker speaks. */
-export const BROKER_PROTOCOL = 1
+export const BROKER_PROTOCOL = 2
 /** One line, including the newline, must fit this budget. */
 export const MAX_LINE = 2 * 1024 * 1024
 /** One binary field (SFTP data, stdout/stderr chunk) must fit this budget. */
 export const MAX_DATA = 256 * 1024
+/** A command keeps room for bytes beyond the declared result limit to detect truncation. */
+export const MAX_COMMAND_OUTPUT = MAX_DATA / 2
 /** Concurrent requests one connection may have in flight. */
 export const MAX_IN_FLIGHT = 32
 /** Concurrent child processes one connection may own. */
@@ -37,7 +39,7 @@ const policy = z.object({
   sessionId: z.string().min(1).max(256),
 }).strict()
 const argv = z.array(z.string().max(4096)).min(1).max(64)
-const bounded = z.number().int().nonnegative().max(16 * 1024 * 1024)
+const outputLimit = z.number().int().nonnegative().max(MAX_DATA)
 
 const sftpParams = z.discriminatedUnion('op', [
   z.object({ environmentId, op: z.literal('realpath'), path: z.string().max(4096) }).strict(),
@@ -62,8 +64,8 @@ const paramsByMethod = {
     argv,
     cwd: z.string().min(1).max(4096),
     env: z.record(z.string().max(256), z.string().max(8192)).refine(value => Object.keys(value).length <= 64, 'too many environment entries'),
-    stdoutLimit: bounded,
-    stderrLimit: bounded,
+    stdoutLimit: outputLimit,
+    stderrLimit: outputLimit,
     graceMs: z.number().int().nonnegative().max(60_000),
     generation: z.string().min(1).max(128),
   }).strict(),
@@ -72,13 +74,16 @@ const paramsByMethod = {
   dispose: z.object({ environmentId }).strict(),
 } as const
 
-const requestSchema = z.object({ protocol: z.literal(1), id: z.number().int().positive(), method: z.enum(METHODS), params: z.unknown() }).strict()
+const requestSchema = z.object({ protocol: z.literal(BROKER_PROTOCOL), id: z.number().int().positive(), method: z.enum(METHODS), params: z.unknown() }).strict()
 const replySchema = z.discriminatedUnion('ok', [
   z.object({ id: z.number().int().positive(), ok: z.literal(true), value: z.unknown() }).strict(),
   z.object({ id: z.number().int().positive(), ok: z.literal(false), code: z.string().min(1).max(128), message: z.string().max(4096) }).strict(),
 ])
 const eventSchema = z.discriminatedUnion('event', [
-  z.object({ event: z.literal('hello'), protocol: z.literal(1), brokerUid: z.number().int(), environmentIds: z.array(environmentId).max(256) }).strict(),
+  z.object({
+    event: z.literal('hello'), protocol: z.literal(BROKER_PROTOCOL), brokerUid: z.number().int(),
+    environmentIds: z.array(environmentId).max(256), manifestDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  }).strict(),
   z.object({ event: z.enum(['stdout', 'stderr']), process: z.number().int().positive(), data: base64 }).strict(),
   z.object({
     event: z.literal('exit'), process: z.number().int().positive(),
@@ -97,9 +102,10 @@ export interface BrokerRequest {
 
 /** The broker's first message on a new connection. */
 export interface BrokerHello {
-  readonly protocol: 1
+  readonly protocol: typeof BROKER_PROTOCOL
   readonly brokerUid: number
   readonly environmentIds: readonly string[]
+  readonly manifestDigest: string
 }
 
 /** A broker request reply. */
@@ -109,7 +115,7 @@ export type BrokerReply =
 
 /** A streamed broker event. */
 export type BrokerEvent =
-  | { readonly event: 'hello'; readonly protocol: 1; readonly brokerUid: number; readonly environmentIds: readonly string[] }
+  | ({ readonly event: 'hello' } & BrokerHello)
   | { readonly event: 'stdout' | 'stderr'; readonly process: number; readonly data: string }
   | { readonly event: 'exit'; readonly process: number; readonly exitCode: number | null; readonly signal: string | null; readonly scope: boolean }
 
@@ -129,7 +135,7 @@ export class BrokerError extends Error {
  */
 export function parseBrokerRequest(value: unknown): BrokerRequest {
   const parsed = requestSchema.safeParse(value)
-  if (!parsed.success) throw new BrokerError('protocol-invalid', 'the broker request is not a protocol-1 message')
+  if (!parsed.success) throw new BrokerError('protocol-invalid', 'invalid broker request or protocol version')
   const params = paramsByMethod[parsed.data.method].safeParse(parsed.data.params)
   if (!params.success) throw new BrokerError('protocol-invalid', `invalid ${parsed.data.method} params: ${params.error.issues[0]?.message ?? 'shape'}`)
   return { id: parsed.data.id, method: parsed.data.method, params: params.data }
@@ -138,14 +144,14 @@ export function parseBrokerRequest(value: unknown): BrokerRequest {
 /** Validate one reply line. */
 export function parseBrokerReply(value: unknown): BrokerReply {
   const parsed = replySchema.safeParse(value)
-  if (!parsed.success) throw new BrokerError('protocol-invalid', 'the broker reply is not a protocol-1 message')
+  if (!parsed.success) throw new BrokerError('protocol-invalid', 'invalid broker reply')
   return parsed.data
 }
 
 /** Validate one event line (including the required hello). */
 export function parseBrokerEvent(value: unknown): BrokerEvent {
   const parsed = eventSchema.safeParse(value)
-  if (!parsed.success) throw new BrokerError('protocol-invalid', 'the broker event is not a protocol-1 message')
+  if (!parsed.success) throw new BrokerError('protocol-invalid', 'invalid broker event or protocol version')
   return parsed.data
 }
 

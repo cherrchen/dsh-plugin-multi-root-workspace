@@ -28,6 +28,8 @@ id "$CLIENT_USER" >/dev/null 2>&1 || { echo "no such Host user: $CLIENT_USER" >&
 [ -f "$MANIFEST" ] || { echo "deployment manifest not found: $MANIFEST" >&2; exit 1; }
 
 CLIENT_UID=$(id -u "$CLIENT_USER")
+[ "$CLIENT_UID" -ne 0 ] || { echo "the Host must run under a non-root account" >&2; exit 1; }
+[ "$CLIENT_USER" != "$BROKER_USER" ] || { echo "the broker needs a separate account" >&2; exit 1; }
 
 case "$(uname -s)" in
   Linux)
@@ -38,7 +40,7 @@ case "$(uname -s)" in
     if ! id "$BROKER_USER" >/dev/null 2>&1; then
       useradd --system --create-home --home-dir "$HOME_DIR" --shell /usr/sbin/nologin "$BROKER_USER"
     fi
-    usermod -aG "$CLIENT_GROUP" "$BROKER_USER" >/dev/null 2>&1 || true
+    usermod -aG "$CLIENT_GROUP" "$BROKER_USER"
     usermod -aG "$CLIENT_GROUP" "$CLIENT_USER"
     ;;
   Darwin)
@@ -84,7 +86,7 @@ BROKER_HOME=$(dscl . -read "/Users/$BROKER_USER" NFSHomeDirectory 2>/dev/null | 
 install -d -m 0700 -o "$BROKER_USER" -g "$(id -gn "$BROKER_USER")" "$BROKER_HOME"
 install -d -m 0700 -o "$BROKER_USER" -g "$(id -gn "$BROKER_USER")" "$BROKER_HOME/.ssh"
 install -d -m 0750 -o "$BROKER_USER" -g "$CLIENT_GROUP" "$RUN_DIR"
-install -d -m 0750 -o root -g "$BROKER_USER" /etc/dsh-ssh-broker
+install -d -m 0750 -o root -g "$CLIENT_GROUP" /etc/dsh-ssh-broker
 
 # SSH material: generate only when absent; never overwrite.
 if [ ! -f "$BROKER_HOME/.ssh/id_ed25519" ]; then
@@ -99,8 +101,7 @@ cat > "$CONFIG" <<EOF
   "socketPath": "$RUN_DIR/broker.sock",
   "clientUid": $CLIENT_UID,
   "brokerUid": $BROKER_UID,
-  "auditPath": "$AUDIT",
-  "requireAttested": true
+  "auditPath": "$AUDIT"
 }
 EOF
 chown root:"$BROKER_USER" "$CONFIG"
@@ -118,7 +119,10 @@ After=network.target
 [Service]
 Type=simple
 User=$BROKER_USER
-Group=$(id -gn "$BROKER_USER")
+Group=$CLIENT_GROUP
+SupplementaryGroups=$(id -gn "$BROKER_USER")
+RuntimeDirectory=dsh-ssh-broker
+RuntimeDirectoryMode=0750
 ExecStart=$NODE_BIN $BROKER_JS --config $CONFIG
 Restart=on-failure
 # The broker owns its credentials; it must be able to read its home and write
@@ -180,6 +184,7 @@ Still required (deployer):
          socketPath: "$RUN_DIR/broker.sock",
          brokerUid: $BROKER_UID,
          credentialRoot: "$BROKER_HOME",
+         fullAccessDisabled: true,
          confinementProbe: { verified: true, evidence: "<probe record>" }
        } }
   5. Keep danger-full-access sessions and these credentials mutually exclusive.

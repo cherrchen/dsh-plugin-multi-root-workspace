@@ -12,7 +12,7 @@ import { nativeHostAvailability } from '../src/authority/native.ts'
 import { fakeExecBackend, FakeManager, FakeRemote, fakeManifest, FAKE_EXEC } from './support/fake-remote.ts'
 import { attestBroker, type BrokerConfig } from '../src/remote/broker/attest.ts'
 import { BrokerConnection, BrokerEnvironmentManager } from '../src/remote/broker/client.ts'
-import { encodeData, MAX_DATA, parseBrokerRequest } from '../src/remote/broker/protocol.ts'
+import { BROKER_PROTOCOL, encodeData, MAX_COMMAND_OUTPUT, MAX_DATA, parseBrokerRequest } from '../src/remote/broker/protocol.ts'
 import { BrokerServer } from '../src/remote/broker/server.ts'
 import type { SshEnvironmentManager } from '../src/remote/ssh-environment.ts'
 import { P_CREAT, P_EXCL, P_WRITE } from '../src/remote/sftp.ts'
@@ -141,9 +141,9 @@ describe.skipIf(!POSIX)('the credential broker boundary', () => {
   })
 
   it('bounds requests and data at the protocol edge', () => {
-    expect(parseBrokerRequest({ protocol: 1, id: 1, method: 'openSftp', params: { environmentId: 'build' } })).toMatchObject({ method: 'openSftp' })
-    expect(() => parseBrokerRequest({ protocol: 1, id: 1, method: 'steal-keys', params: {} })).toThrow(/protocol-1/)
-    expect(() => parseBrokerRequest({ protocol: 1, id: 1, method: 'openSftp', params: { environmentId: 'build', extra: true } })).toThrow()
+    expect(parseBrokerRequest({ protocol: BROKER_PROTOCOL, id: 1, method: 'openSftp', params: { environmentId: 'build' } })).toMatchObject({ method: 'openSftp' })
+    expect(() => parseBrokerRequest({ protocol: BROKER_PROTOCOL, id: 1, method: 'steal-keys', params: {} })).toThrow(/protocol version/)
+    expect(() => parseBrokerRequest({ protocol: BROKER_PROTOCOL, id: 1, method: 'openSftp', params: { environmentId: 'build', extra: true } })).toThrow()
     expect(() => parseBrokerRequest({ protocol: 2, id: 1, method: 'openSftp', params: {} })).toThrow()
     expect(() => encodeData(Buffer.alloc(MAX_DATA + 1))).toThrow(/budget/)
   })
@@ -189,6 +189,7 @@ describe.skipIf(!POSIX || process.getuid?.() === 0)('the Host attestation', () =
     socketPath,
     brokerUid: uid + 1,
     credentialRoot: join(base, 'keys'),
+    fullAccessDisabled: true,
     confinementProbe: { verified: true },
     ...overrides,
   })
@@ -199,6 +200,20 @@ describe.skipIf(!POSIX || process.getuid?.() === 0)('the Host attestation', () =
 
   it('requires the deployment confinement evidence', async () => {
     await expect(attestBroker(config({ confinementProbe: undefined }), manager.deployment)).resolves.toMatchObject({ status: 'unavailable', code: 'confinement-unproven' })
+  })
+
+  it('requires the deployment to exclude unrestricted local Agent processes', async () => {
+    await expect(attestBroker(config({ fullAccessDisabled: undefined }), manager.deployment))
+      .resolves.toMatchObject({ status: 'unavailable', code: 'full-access-unrestricted' })
+  })
+
+  it('refuses command output budgets that cannot fit broker frames', async () => {
+    const manifest = manager.deployment
+    const environments = manifest.environments.map(env => env.exec === undefined
+      ? env
+      : { ...env, exec: { ...env.exec, stdoutLimit: MAX_COMMAND_OUTPUT + 1 } })
+    await expect(attestBroker(config(), { ...manifest, environments }))
+      .resolves.toMatchObject({ status: 'unavailable', code: 'broker-output-limit' })
   })
 
   it('fails when the Host can read the credential root', async () => {
