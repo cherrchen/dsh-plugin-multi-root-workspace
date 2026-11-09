@@ -76,3 +76,5 @@ ADR-0002-short-title.md
 - [ADR-0037-conversation-hero-workspace-folders-entry.md](./ADR-0037-conversation-hero-workspace-folders-entry.md) — 新会话 Hero 行的 Workspace Folders 增量入口：`conversation.hero.options`（`0.2.1-alpha.3+`）注册、与相邻选择器同几何但无 chevron、`≤560px` 视口图标降级、会话权威取槽属性；侧栏 `Folders` 入口保留，退役 Deferred（Accepted，已实施并验证）。
 
 - [ADR-0038-workspace-menu-folders-dialog.md](./ADR-0038-workspace-menu-folders-dialog.md) — 工作区 `...` 菜单的「管理工作区目录…」入口：经 apply 作用域的 dialog controller 复用 footer 对话框，当前 session 属于目标时直接打开、否则先经 `uiWorkspace.openWorkspace` 切换并确认 current；服务缺失置灰，`RootSwitcher` 零改动（Accepted，实施见计划）。
+
+- [ADR-0039-worktree-aware-root-suggestions.md](./ADR-0039-worktree-aware-root-suggestions.md) — Worktree 感知的附加根建议与手动清理（v1 仅 B，A 延后）：仅 checkout 根启用，失效后停止后台活动；sidecar 全部写入经既有 Registry owner 排序，跨 owner epoch 核对映射。Accepted，2026-11-09 第十七次修订；实施状态见路线账本。
