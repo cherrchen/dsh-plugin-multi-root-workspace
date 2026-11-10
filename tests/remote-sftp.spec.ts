@@ -82,10 +82,22 @@ describe.skipIf(process.platform === 'win32')('SFTP wire validation', () => {
     const client = await fakeSsh([...version(), ...status(1, [0, 0, 0, 2])])
     await client.init()
     await expect(client.realpath('/x')).rejects.toBeInstanceOf(SftpConnectionLost)
-    const attrsReply = frame([104, ...be32(1), 0, 0, 0, 0x0f, 0, 0])
+    const attrsReply = frame([105, ...be32(1), 0, 0, 0, 0x0f, 0, 0])
     const second = await fakeSsh([...version(), ...attrsReply])
     await second.init()
     await expect(second.lstat('/x')).rejects.toBeInstanceOf(SftpConnectionLost)
+  })
+
+  it('accepts well-formed NAME (104) and ATTRS (105) replies', async () => {
+    // NAME: count=1, name "/real", empty longname, empty attrs — realpath's wire shape.
+    const name = [...be32(1), ...be32(5), ...'/real'.split('').map(c => c.charCodeAt(0)), ...be32(0), ...be32(0)]
+    const first = await fakeSsh([...version(), ...frame([104, ...be32(1), ...name])])
+    await first.init()
+    await expect(first.realpath('/x')).resolves.toBe('/real')
+    // ATTRS: flags=0 — lstat's wire shape.
+    const second = await fakeSsh([...version(), ...frame([105, ...be32(1), 0, 0, 0, 0])])
+    await second.init()
+    await expect(second.lstat('/x')).resolves.toEqual({ flags: 0 })
   })
 
   it('accepts a valid fragmented handshake and reply', async () => {
