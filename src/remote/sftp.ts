@@ -142,7 +142,14 @@ export class SftpClient {
 
   private constructor(ssh: string, alias: string, onLoss: (error: SftpConnectionLost) => void) {
     this.onLoss = onLoss
-    this.child = spawn(ssh, ['-o', 'BatchMode=yes', '-s', alias, 'sftp'], { stdio: ['pipe', 'pipe', 'ignore'] })
+    // ControlMaster is explicitly off: a multiplexed session shares fate with
+    // the master — another session's close would tear this channel down and
+    // break the per-session generation isolation the broker relies on.
+    this.child = spawn(ssh, [
+      '-o', 'BatchMode=yes',
+      '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
+      '-s', alias, 'sftp',
+    ], { stdio: ['pipe', 'pipe', 'ignore'] })
     this.child.stdout.on('data', (chunk: Buffer) => this.feed(chunk))
     const lose = (why: string) => this.lost(new SftpConnectionLost(why))
     this.child.on('error', error => lose(`sftp transport error: ${error.message}`))
