@@ -19,12 +19,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { accessSync, constants, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { delimiter, isAbsolute, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { Context } from '@deepseek-ai/cordis'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
-import { createFixtureWorkspace, REPO_ROOT, type FixtureWorkspace } from './support/temp-workspace.ts'
+import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { confineForTest } from './support/confine.ts'
 import { parseConfined, runConfined, type ConfinedOutcome, type ParsedDialect } from './support/dialect-grants.ts'
 import { kernelRunnerRequired, requireKernelRunner } from './support/kernel-runner.ts'
@@ -142,14 +141,7 @@ async function openJourney(label: string, pool: boolean): Promise<OpenJourney> {
       // The live session shape the panel and the worktree row read.
       ctx.provide('sandboxPolicy', { resolve: () => ({ mode: 'workspace-write', workspaceRoot: linked }) } as never)
       ctx.provide('sessions', { get: (id: string) => id === SESSION ? { header: { cwd: linked } } : undefined } as never)
-      // On Windows the confined argv names the standalone ACL runner beside
-      // the provider module. Under Vitest that module is `src/`, which ships no
-      // runner; execute the BUILT provider so it resolves `lib/windows-runner.js`
-      // (the CI builds before the suite, exactly like the native Windows tests).
-      const sandboxModule = process.platform === 'win32'
-        ? await import(pathToFileURL(join(REPO_ROOT, 'lib', 'sandbox.js')).href) as typeof import('../src/sandbox.ts')
-        : await import('../src/sandbox.ts')
-      const { MultiRootSandboxProvider } = sandboxModule
+      const { MultiRootSandboxProvider } = await import('../src/sandbox.ts')
       await ctx.plugin(MultiRootSandboxProvider)
       provider = ctx.sandbox
     },
@@ -170,7 +162,11 @@ async function openJourney(label: string, pool: boolean): Promise<OpenJourney> {
   return { area, main, linked, unrelated, common, stack, worktrees, admitted, selected: () => selected }
 }
 
-describe('restricted Git journey with the main-checkout A root', () => {
+// The Windows ACL runner is exercised by the native Windows suites; under
+// Vitest this file resolves the provider from `src/`, where the standalone
+// `windows-runner.js` does not exist, and the ACL/broker environment this
+// journey needs is not mounted. The POSIX lanes carry the real Git journey.
+describe.skipIf(process.platform === 'win32')('restricted Git journey with the main-checkout A root', () => {
   it('fails before A and commits after it, and now permits the main source tree', async (context) => {
     const { main, linked, unrelated, stack, worktrees, admitted, selected } = await openJourney('external', false)
     const probe = await admitted(writeProbe(join(linked, 'probe.txt')))
