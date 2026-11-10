@@ -4,7 +4,7 @@
  *
  * The dialog itself stays where it has always been — `WorkspaceFoldersAction`
  * owns its open/close state — because moving it into a global host would
- * rewrite the Files-tab switcher's local lifetime as well (see ADR-0036).
+ * rewrite the Files-tab switcher's local lifetime as well (see ADR-0038).
  * What the menu needs is narrower than that: a stable "the footer is mounted,
  * here is how to open it" fact, plus a way to pin the session the dialog
  * should manage.

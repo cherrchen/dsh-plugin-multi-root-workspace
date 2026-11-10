@@ -1,20 +1,20 @@
 /**
- * probe:remote-entry-isolation — deployment-side evidence that every Agent
- * process entry under the Host UID respects the credential-broker boundary
- * (ADR-0036 / the control-plane reference's confinementProbe).
+ * probe:remote-entry-isolation — deployment-side observations of supported
+ * Agent process seams under the Host UID and the credential-broker boundary
+ * (ADR-0039 / the control-plane reference's confinementProbe).
  *
  * Runs AS the Host user inside a provisioned deployment: the broker is up,
  * `dsh plugin add` installed this package into a dedicated profile, and the
  * profile carries the restricted preset table plus the broker-gated remote
  * tools row. The probe boots that real profile in-process (same mechanism as
  * smoke:behavior), then drives every Agent process entry — the shell
- * executor, an agent PTY (the `DSH_PTY_SESSION_ID` marker), and the PTC
- * runtime — under each restricted mode, attempting the two forbidden things:
+ * executor, an agent PTY (the `DSH_PTY_SESSION_ID` marker), the PTC runtime,
+ * and raw/LSP-like/job-like spawn seams — under each restricted mode:
  * reading the broker credential root and talking to the broker socket.
  * Escalation entries are audited too: the preset table, the default mode, a
- * forged `sandbox/mode` event (records why full access must stay impossible),
- * setuid/sudo inside the confined shell, and every other profile under the
- * same UID.
+ * forged `sandbox/mode` event (records the runtime guard refusal),
+ * setuid/sudo inside the confined shell, and a static inventory of other
+ * profiles under the same UID (not runtime isolation proof).
  *
  * Environment:
  *   DSH_HOME      scratch harness home containing the dedicated profile
@@ -55,12 +55,29 @@ const evidence = {
     platform: `${process.platform}/${process.arch}`,
     node: process.version,
     dshCli: process.env.DSH_CLI ?? null,
+    scope: 'supported service seams; other-profile inventory is static only; this record is not deployment certification',
   },
   profile: PROFILE, primary: PRIMARY, credRoot: CRED, socket: SOCK,
   controls: {}, presets: {}, entries: {}, escalation: {},
 }
 const check = (run) => {
   try { return { ok: true, value: run() } } catch (error) { return { ok: false, error: error instanceof Error ? `${error.code ?? error.name}: ${error.message}` : String(error) } }
+}
+
+function observeRawSpawn(ctx, argv) {
+  let handle
+  try {
+    handle = ctx.subprocess.spawn({
+      argv, cwd: PRIMARY, env: {},
+      stdio: { stdin: 'ignore', stdout: { maxBytes: 1024 }, stderr: { maxBytes: 1024 } },
+      graceMs: 500,
+    })
+  } catch (error) {
+    return { refusedByGuard: error?.code === 'remote-profile-unconfined-spawn', error: String(error?.message ?? error) }
+  }
+  void handle.done?.catch(() => {})
+  try { handle.terminate() } catch {}
+  return { refusedByGuard: false, unexpectedProcessHandle: true }
 }
 
 /** One JSON-lines broker hello over a fresh connection; settles on first line, error, or timeout. */
@@ -246,18 +263,22 @@ try {
     cell.bash = await driveBash(ctx, policy)
     cell.pty = await drivePty(ctx, session, mode).catch(error => ({ threw: String(error?.message ?? error) }))
     cell.ptc = await drivePtc(ctx, policy)
+    cell.rawSpawn = observeRawSpawn(ctx, ['/bin/true'])
+    cell.lspLikeSpawn = observeRawSpawn(ctx, [process.execPath, '-e', 'process.exit(0)', 'lsp-probe'])
+    cell.jobLikeSpawn = observeRawSpawn(ctx, [process.execPath, '-e', 'process.exit(0)', 'job-probe'])
     evidence.entries[mode] = cell
   }
 
   // ── Escalation audit ────────────────────────────────────────────────────
-  // A forged mode event: what does resolve() say, and does a full-access bash
-  // actually reach the socket? This is WHY the deployment must keep full
-  // access impossible — recorded, not asserted as pass/fail here.
+  // A forged mode event must be refused by the runtime guard; never launch
+  // an unrestricted command even if the deployment unexpectedly permits it.
   const full = ctx.sessions.create(/** @type {never} */ ('probe-full'), { meta: { cwd: PRIMARY } })
   full.append('sandbox/mode', { mode: 'danger-full-access' })
-  const fullPolicy = ctx.sandboxPolicy.resolve({ session: full })
-  evidence.escalation.forgedMode = { resolved: fullPolicy.mode }
-  evidence.escalation.fullAccessBash = await driveBash(ctx, fullPolicy)
+  const fullPolicy = check(() => ctx.sandboxPolicy.resolve({ session: full }))
+  evidence.escalation.forgedMode = fullPolicy.ok
+    ? { refusedByGuard: false, resolved: fullPolicy.value.mode }
+    : { refusedByGuard: fullPolicy.error.startsWith('remote-profile-full-access:'), error: fullPolicy.error }
+  evidence.escalation.fullAccessBash = { skipped: 'never launch an unrestricted command from this probe' }
 
   // In-sandbox escalation tools under the restricted mode.
   const restricted = ctx.sessions.create(/** @type {never} */ ('probe-esc'), { meta: { cwd: PRIMARY } })
@@ -276,13 +297,13 @@ try {
   })
   evidence.escalation.inSandboxTools = await runForeground(ctx.shell, escalationSpec).then(result => ({ exitCode: result.exitCode, stdout: result.stdout.text })).catch(error => String(error))
 
-  // Every profile under this UID: preset tables must not offer full access.
+  // Static profile text is inventory, not proof of effective runtime policy.
   evidence.escalation.otherProfiles = listProfiles().map(name => {
     const dir = join(HOME, 'profiles', name)
     const read = file => { try { return readFileSync(join(dir, file), 'utf8') } catch { return '' } }
     const patch = read('cordis.patch.yml')
     const pkg = read('package.json')
-    // Match effective config only — full-line `#` comments may name the mode
+    // Scan non-comment text only — full-line `#` comments may name the mode
     // (e.g. "can never resolve to danger-full-access") without granting it.
     const code = text => text.split('\n').filter(line => !line.trim().startsWith('#')).join('\n')
     return {

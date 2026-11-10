@@ -1,4 +1,4 @@
-# Deployment-side credential-isolation forensics rig (ADR-0036).
+# Deployment-side credential-isolation forensics rig (ADR-0039).
 #
 # Reproduces the documented Linux deployment inside one container:
 #   root          runs install.sh (systemd unit written, systemctl stubbed —

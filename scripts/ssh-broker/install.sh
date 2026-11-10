@@ -1,6 +1,6 @@
 #!/bin/sh
 # Provision the credential broker account, directories, config and service
-# (ADR-0036). Run as root on the Host machine, once per deployment:
+# (ADR-0039). Run as root on the Host machine, once per deployment:
 #
 #   sudo DSH_SSH_BROKER_JS=/path/to/plugin/lib/remote-broker.js \
 #        DSH_SSH_BROKER_MANIFEST=/etc/dsh-ssh-broker/manifest.json \
@@ -26,6 +26,22 @@ id "$CLIENT_USER" >/dev/null 2>&1 || { echo "no such Host user: $CLIENT_USER" >&
 [ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ] || { echo "node is required (set DSH_SSH_BROKER_NODE)" >&2; exit 1; }
 [ -f "$BROKER_JS" ] || { echo "broker entry not found: $BROKER_JS" >&2; exit 1; }
 [ -f "$MANIFEST" ] || { echo "deployment manifest not found: $MANIFEST" >&2; exit 1; }
+
+"$NODE_BIN" -e '
+  const { createRequire } = require("node:module")
+  const { resolve } = require("node:path")
+  const req = createRequire(resolve(process.argv[1]))
+  const needed = [
+    "@deepseek-ai/dsh", "@deepseek-ai/cordis",
+    "@deepseek-ai/dsh-ssh", "@deepseek-ai/dsh-fs-ssh",
+    "@deepseek-ai/dsh-subprocess-ssh", "@deepseek-ai/dsh-sandbox-ssh",
+  ]
+  const missing = needed.filter(name => { try { req.resolve(name === "@deepseek-ai/dsh" ? name + "/package.json" : name); return false } catch { return true } })
+  if (missing.length) { console.error("unresolvable from broker entry:", missing.join(", ")); process.exit(1) }
+' "$BROKER_JS" || {
+  echo "install aborted: the broker dependency tree at $BROKER_JS cannot resolve @deepseek-ai/dsh, @deepseek-ai/cordis, and all four SSH peer packages" >&2
+  exit 1
+}
 
 CLIENT_UID=$(id -u "$CLIENT_USER")
 [ "$CLIENT_UID" -ne 0 ] || { echo "the Host must run under a non-root account" >&2; exit 1; }
@@ -113,7 +129,7 @@ chmod 0644 "$MANIFEST"
 if [ "$(uname -s)" = Linux ]; then
   cat > /etc/systemd/system/dsh-ssh-broker.service <<EOF
 [Unit]
-Description=DSH SSH credential broker (ADR-0036)
+Description=DSH SSH credential broker (ADR-0039)
 After=network.target
 
 [Service]
@@ -187,5 +203,16 @@ Still required (deployer):
          fullAccessDisabled: true,
          confinementProbe: { verified: true, evidence: "<probe record>" }
        } }
-  5. Keep danger-full-access sessions and these credentials mutually exclusive.
+  5. Keep danger-full-access sessions and these credentials mutually exclusive;
+     one-shot escalations and raw LSP/job consumers stay excluded from the
+     dedicated profile.
+  6. The broker must run its OWN root-protected dependency tree resolving
+     @deepseek-ai/dsh, @deepseek-ai/cordis, and all four SSH peers at the exact
+     supported release; the preflight above enforces resolution only.
+  7. Broker ~/.ssh/config requires StrictHostKeyChecking yes, BatchMode yes,
+     ForwardAgent no, UpdateHostKeys no, and provisioned known_hosts verified
+     out of band — see the control-plane deployment checklist.
+
+Installation is not certification: the model-facing profile stays BLOCKED
+until Linux unit evidence, aggregate quotas, and audit rotation land.
 EOF

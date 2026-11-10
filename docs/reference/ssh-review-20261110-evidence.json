@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-10",
+  "scope": "local regression only; not Linux deployment or model-opening acceptance",
+  "platform": "darwin-arm64",
+  "node": "24.18.0",
+  "dsh": "0.2.2-rc.1",
+  "plugin": "0.1.17-ssh.1",
+  "git": {
+    "branch": "feat/ssh-workspace",
+    "rebasedHead": "897dd39e6b03e6b129da1a36ca70ffb690879b60",
+    "mainAndExperiment": "3e84d85da5597cc32eaf1f3541626a33c03a739b",
+    "remediationCommitted": false,
+    "pushed": false
+  },
+  "vitest": {
+    "command": "pnpm test --reporter=default --reporter=json --outputFile=.dsh-smoke/ssh-review-20261110/vitest-final.json",
+    "passed": 1545,
+    "skipped": 131,
+    "failed": 0,
+    "passedFiles": 106,
+    "skippedFiles": 8,
+    "rawReport": "ssh-review-20261110-vitest.json"
+  },
+  "lintDelta": {
+    "description": "Three unused test parameter names were prefixed with underscores after the full run; lint and the two affected test files were rerun.",
+    "passed": 48,
+    "failed": 0,
+    "rawReport": "ssh-review-20261110-lint-delta.json"
+  },
+  "checks": {
+    "compat:check": "passed",
+    "lint": "passed on recheck; original failure retained in log",
+    "typecheck": "passed; optional Auto Review exact-version implementation check skipped",
+    "build": "passed",
+    "kernel:probe": "Seatbelt executed; bwrap and Landlock unavailable on this host",
+    "smoke:compose": { "passed": 54, "failed": 0, "skipped": 0 },
+    "smoke:behavior": { "passed": 137, "failed": 0, "skipped": 0 },
+    "smoke:journey": { "passed": 76, "failed": 0, "skipped": 0 },
+    "pack:check": { "status": "passed", "members": 222 },
+    "smoke:packed": { "passed": 136, "failed": 0, "skipped": 0 },
+    "auto-review:fork": "passed",
+    "docs:check": "passed",
+    "installerPreflight": "shell syntax and isolated dependency-resolution positive/negative cases passed; provisioning not executed",
+    "entryProbeLocal": "syntax and isolated raw-spawn observations checked; Linux deployment probe not executed",
+    "smoke:auto-review": "skipped: installed DSH is not the optional 0.2.1-rc.2 target"
+  },
+  "checkLog": "ssh-review-20261110-checks.txt",
+  "sha256": {
+    "ssh-review-20261110-vitest.json": "f0814217c427a5b45cadc424cb1ff3944a664f044bd5eab9e889978cf91c4742",
+    "ssh-review-20261110-lint-delta.json": "2b90084310c5c6cbc0d87a6825be0765b0c292b62d49ac5502b1f0884c38b81d",
+    "ssh-review-20261110-checks.txt": "141b303786ad7148b8211da12ed90891e745c546834e836bac322a28bd159164"
+  },
+  "logTransformations": ["ephemeral web token redacted", "ANSI escapes removed", "trailing whitespace trimmed"],
+  "notProven": [
+    "Linux live SSH deployment",
+    "independent chroot SFTP-only destination and writer isolation",
+    "real systemd unit, PrivateTmp and ControlMaster/helper temporary directory controls",
+    "native Windows and other operating-system gates",
+    "Chromium/Electron GUI acceptance",
+    "disk-reloaded sessions and actual other-profile isolation",
+    "aggregate operation/byte budgets, audit rotation and automated revocation"
+  ],
+  "modelOpening": "BLOCKED"
+}

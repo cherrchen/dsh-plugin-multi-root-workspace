@@ -1,5 +1,5 @@
 /**
- * The credential broker daemon (ADR-0036): it runs under the dedicated OS
+ * The credential broker daemon (ADR-0039): it runs under the dedicated OS
  * account, owns the SSH keys/config/ControlMasters, and exposes ONLY the
  * semantic operations the Host needs — SFTP primitives, `confine`, `spawn`,
  * wait/terminate and dispose. There is no key, config, host or shell-selection
@@ -13,6 +13,7 @@
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/remote-broker/server
  */
+import { randomUUID } from 'node:crypto'
 import { appendFileSync, chmodSync, chownSync, lstatSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { listenNative, type Channel, type Listener } from '../../authority/native.ts'
@@ -84,10 +85,22 @@ interface ConnectionState {
   readonly sftp: Map<string, SftpEnvironment>
   readonly environments: Map<string, SshEnvironment>
   readonly processes: Map<number, ProcessRecord>
+  readonly tickets: Map<string, ConfinementTicket>
   inFlight: number
   closed: boolean
   nextProcess: number
 }
+
+interface ConfinementTicket {
+  readonly argv: readonly string[]
+  readonly environmentId: string
+  readonly generation: string
+  readonly workspaceRoot: string
+  readonly expiresAt: number
+}
+
+const TICKET_TTL_MS = 30_000
+const MAX_TICKETS = 256
 
 /** One broker daemon instance. */
 export class BrokerServer {
@@ -112,7 +125,7 @@ export class BrokerServer {
       throw new BrokerRefusal('broker-uid-mismatch', `the broker runs as uid ${uid}, not the configured ${brokerUid}`)
     }
     if (brokerUid === this.options.clientUid && this.options.allowSameUidForTesting !== true) {
-      throw new BrokerRefusal('broker-same-uid', 'the broker must run under an account other than the trusted Host user (ADR-0036)')
+      throw new BrokerRefusal('broker-same-uid', 'the broker must run under an account other than the trusted Host user (ADR-0039)')
     }
     if (this.options.manager !== undefined) {
       this.manager = this.options.manager
@@ -182,16 +195,21 @@ export class BrokerServer {
       sftp: new Map(),
       environments: new Map(),
       processes: new Map(),
+      tickets: new Map(),
       inFlight: 0,
       closed: false,
       nextProcess: 1,
     }
     this.connections.add(state)
+    const capability = (this.manager as { capability?: { eligible: boolean; reason?: string } } | undefined)?.capability
     const hello: BrokerHello = {
       protocol: BROKER_PROTOCOL,
       brokerUid: process.getuid!(),
       environmentIds: this.manifest?.environments.map(environment => environment.environmentId) ?? [],
       manifestDigest: this.deploymentDigest,
+      sshCapability: capability?.eligible === true
+        ? (capability.reason === undefined ? { eligible: true } : { eligible: true, reason: capability.reason })
+        : { eligible: false, reason: capability?.reason ?? 'capability-unreported' },
     }
     if (!writeBrokerLine(channel, { event: 'hello', ...hello })) return
     channel.on('close', () => this.closeConnection(state))
@@ -249,8 +267,13 @@ export class BrokerServer {
         const timer = setTimeout(() => controller.abort(), 60_000)
         try {
           const confined = await environment.sandbox.confine(p.argv as string[], p.policy as never, controller.signal)
-          return { argv: confined.argv, enforcement: confined.enforcement, generation: environment.generation }
+          const value: Record<string, unknown> = { argv: confined.argv, enforcement: confined.enforcement, generation: environment.generation }
+          if (confined.enforcement === 'full') {
+            value.confinementToken = this.issueTicket(state, environmentId, confined.argv, environment.generation, (p.policy as { workspaceRoot: string }).workspaceRoot)
+          }
+          return value
         } catch (error) {
+          if (error instanceof BrokerRefusal) throw error
           throw new BrokerRefusal('confine-failed', error instanceof Error ? error.message : String(error))
         } finally { clearTimeout(timer) }
       }
@@ -269,6 +292,7 @@ export class BrokerServer {
       case 'dispose': {
         state.sftp.delete(environmentId)
         state.environments.delete(environmentId)
+        for (const [token, ticket] of state.tickets) if (ticket.environmentId === environmentId) state.tickets.delete(token)
         // The manager owns the cache; disposing the env/session objects
         // directly would leave corpses its openings maps keep serving.
         const manager = await this.managerOrThrow()
@@ -313,7 +337,10 @@ export class BrokerServer {
 
   private async sftpCall(state: ConnectionState, p: Record<string, unknown>): Promise<unknown> {
     const environmentId = p.environmentId as string
-    const session = await this.openSftp(state, environmentId)
+    const session = state.sftp.get(environmentId)
+    if (session === undefined || session.generation !== p.generation || this.manager?.sftpGenerationOf(environmentId) !== session.generation) {
+      throw new BrokerRefusal('generation-changed', 'the SFTP session is stale or was never opened on this connection')
+    }
     const client = session.client
     try {
       switch (p.op) {
@@ -347,11 +374,46 @@ export class BrokerServer {
     }
   }
 
+  private issueTicket(state: ConnectionState, environmentId: string, argv: readonly string[], generation: string, workspaceRoot: string): string {
+    const now = Date.now()
+    for (const [token, ticket] of state.tickets) if (ticket.expiresAt <= now) state.tickets.delete(token)
+    if (state.tickets.size >= MAX_TICKETS) throw new BrokerRefusal('busy', 'too many live confinement tickets')
+    const token = randomUUID()
+    state.tickets.set(token, { argv: [...argv], environmentId, generation, workspaceRoot, expiresAt: now + TICKET_TTL_MS })
+    return token
+  }
+
+  private consumeTicket(state: ConnectionState, environmentId: string, generation: string, p: Record<string, unknown>): void {
+    const token = p.confinementToken as string
+    const ticket = state.tickets.get(token)
+    if (ticket === undefined) throw new BrokerRefusal('confinement-ticket-invalid', 'the confinement ticket is unknown or already consumed')
+    const deny = (code: string, message: string): never => { state.tickets.delete(token); throw new BrokerRefusal(code, message) }
+    if (ticket.expiresAt <= Date.now()) deny('confinement-ticket-expired', 'the confinement ticket expired')
+    if (ticket.environmentId !== environmentId || ticket.generation !== generation) {
+      deny('confinement-ticket-invalid', 'the confinement ticket does not name this environment and generation')
+    }
+    if (JSON.stringify(ticket.argv) !== JSON.stringify(p.argv)) {
+      deny('confinement-ticket-argv', 'the spawn argv does not match the confined argv')
+    }
+    const cwd = (p.cwd as string).replace(/\/+/g, '/').replace(/\/+$/, '') || '/'
+    const root = ticket.workspaceRoot.replace(/\/+$/, '') || '/'
+    if (!cwd.startsWith('/') || cwd.split('/').includes('..') || (root !== '/' && cwd !== root && !cwd.startsWith(`${root}/`))) {
+      deny('confinement-ticket-cwd', 'the spawn cwd does not stay under the confined workspace root')
+    }
+    state.tickets.delete(token)
+  }
+
   private async spawn(state: ConnectionState, environmentId: string, p: Record<string, unknown>): Promise<unknown> {
     if (state.processes.size >= MAX_PROCESSES) throw new BrokerRefusal('busy', 'too many remote processes')
     const environment = await this.openEnvironment(state, environmentId)
     if (environment.generation !== p.generation) {
       throw new BrokerRefusal('generation-changed', 'the remote connection changed since preparation')
+    }
+    this.consumeTicket(state, environmentId, environment.generation, p)
+    for (const [key, value] of Object.entries((p.env ?? {}) as Record<string, string>)) {
+      if (value !== '' && (key.startsWith('LD_') || key.startsWith('DYLD_') || key === 'NODE_OPTIONS' || key === 'NODE_PATH')) {
+        throw new BrokerRefusal('confinement-ticket-env', `the remote profile refuses spawn env.${key}`)
+      }
     }
     const stdoutLimit = p.stdoutLimit as number
     const stderrLimit = p.stderrLimit as number
@@ -414,6 +476,7 @@ export class BrokerServer {
     state.sftp.clear()
     for (const environmentId of state.environments.keys()) void this.manager?.dispose(environmentId).catch(() => {})
     state.environments.clear()
+    state.tickets.clear()
   }
 
   private audit(state: ConnectionState, method: BrokerMethod | 'protocol', outcome: string): void {

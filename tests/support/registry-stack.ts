@@ -17,6 +17,7 @@ import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import MultiRootRegistry, { DOMAIN_NAME, type Config as RegistryConfig } from '../../src/registry.ts'
+import { loadDeploymentManifest } from '../../src/remote/manifest.ts'
 import MultiRootScopeService from '../../src/scope.ts'
 import type { Config as ScopeConfig } from '../../src/scope.ts'
 import { mountCompat } from './compat.ts'
@@ -55,6 +56,16 @@ export interface RegistryStackOptions {
   beforeGate?: (ctx: Context) => Promise<void>
   /** `multi-root-scope` row config (toolAccess, dshHome); default `{}`. */
   scopeConfig?: ScopeConfig
+  /** TEST-ONLY: load the remote manifest with user-owned protection instead of the production root-only checks. */
+  allowUserOwnedRemoteManifestForTesting?: boolean
+}
+
+class TestOwnedManifestRegistry extends MultiRootRegistry {
+  constructor(ctx: Context, config: RegistryConfig) {
+    super(ctx, config, {
+      loadRemoteManifest: path => loadDeploymentManifest(path, { allowUserOwnedForTesting: true }),
+    })
+  }
 }
 
 export async function mountRegistryStack(storeRoot: string, registryConfig: RegistryConfig = {}, options: RegistryStackOptions = {}): Promise<RegistryStack> {
@@ -77,14 +88,17 @@ export async function mountRegistryStack(storeRoot: string, registryConfig: Regi
   // The single-process mode is gone (ADR-0028): every stack is shared — the
   // medium is the store root and the canonical lock sits beside the document.
   // A spec covering the config-invalid path passes `sharedStorageRoot: ''`.
-  const registryFiber = await ctx.plugin(MultiRootRegistry, {
-    // Phase P4: the owner-side worktree sidecar lives beside the store, so
-    // specs exercise the real file path unless they override it.
-    promptsRoot: `${storeRoot}/worktree-prompts`,
-    leasePath: `${storeRoot}/${DOMAIN_NAME}.lock`,
-    sharedStorageRoot: storeRoot,
-    ...registryConfig,
-  })
+  const registryFiber = await ctx.plugin(
+    options.allowUserOwnedRemoteManifestForTesting === true ? TestOwnedManifestRegistry : MultiRootRegistry,
+    {
+      // Phase P4: the owner-side worktree sidecar lives beside the store, so
+      // specs exercise the real file path unless they override it.
+      promptsRoot: `${storeRoot}/worktree-prompts`,
+      leasePath: `${storeRoot}/${DOMAIN_NAME}.lock`,
+      sharedStorageRoot: storeRoot,
+      ...registryConfig,
+    },
+  )
   // A bare Registry stack has no worktree row. The row's live switch is the
   // ONLY production caller of the worktree write path, so stand in for it as
   // "mounted and enabled"; a spec that covers the absent/disabled provider

@@ -28,9 +28,14 @@ export interface SshHostIdentity {
   readonly user: string
   readonly hostname: string
   readonly knownHostsFiles: readonly string[]
+  readonly globalKnownHostsFiles: readonly string[]
   readonly strictHostKeyChecking: string
   readonly forwardAgent: string
   readonly batchMode: string
+  readonly updateHostKeys: string
+  readonly port: string
+  readonly hostKeyAlias: string | undefined
+  readonly lookupHost: string
 }
 
 export interface SshEnvironment {
@@ -39,7 +44,7 @@ export interface SshEnvironment {
   readonly hello: Readonly<Record<string, unknown>>
   readonly fs: unknown
   readonly sandbox: { confine(argv: readonly string[], policy: unknown, signal?: AbortSignal): Promise<{ argv: readonly string[]; enforcement: string }> }
-  readonly subprocess: { spawn(spec: unknown): { done: Promise<unknown>; waitForExit(ms?: number): Promise<boolean>; terminate(): void; collected: unknown } }
+  readonly subprocess: { spawn(spec: unknown): { done: Promise<unknown>; waitForExit(signal?: AbortSignal): Promise<boolean>; terminate(): void; collected: unknown } }
   /**
    * Cheap local liveness check — throws when the underlying connection is
    * already closed or failed. A cached environment that throws here is a
@@ -65,7 +70,7 @@ export interface SshEnvironmentManagerOptions {
   readonly allowUnattestedForTesting?: boolean
   /**
    * This process is the credential broker, running under the dedicated
-   * account and owning the keys (ADR-0036). Custody is then the deployment's
+   * account and owning the keys (ADR-0039). Custody is then the deployment's
    * attestation, not this process's manifest flag — the Host's
    * `attestBroker()` decides whether any model-facing tool may use it.
    */
@@ -96,14 +101,29 @@ export function parseSshConfig(stdout: string): SshHostIdentity {
     throw new SshEnvironmentError('host-identity-unverifiable', `ssh -G resolved no user/hostname: ${JSON.stringify(stdout.slice(0, 200))}`)
   }
   const files = (fields.userknownhostsfile ?? '').split(/\s+/).filter(file => file !== '' && file !== '/dev/null' && file.toLowerCase() !== 'none')
+  const globalFiles = (fields.globalknownhostsfile ?? '').split(/\s+/).filter(file => file !== '' && file !== '/dev/null' && file.toLowerCase() !== 'none')
   const strict = (fields.stricthostkeychecking ?? '').toLowerCase()
   if (strict !== 'true' && strict !== 'yes') {
     throw new SshEnvironmentError('host-identity-unverifiable', `strictHostKeyChecking is "${fields.stricthostkeychecking ?? ''}", must be yes`)
   }
+  const batchMode = (fields.batchmode ?? '').toLowerCase()
+  if (batchMode !== 'yes') {
+    throw new SshEnvironmentError('host-identity-unverifiable', `batchMode is "${fields.batchmode ?? ''}", must be yes`)
+  }
+  const forwardAgent = (fields.forwardagent ?? '').toLowerCase()
+  if (forwardAgent !== 'no') {
+    throw new SshEnvironmentError('host-identity-unverifiable', `forwardAgent is "${fields.forwardagent ?? ''}", must be no`)
+  }
+  const updateHostKeys = (fields.updatehostkeys ?? 'no').toLowerCase()
+  if (updateHostKeys !== 'no') {
+    throw new SshEnvironmentError('host-identity-unverifiable', `updateHostKeys is "${fields.updatehostkeys ?? ''}", must be no`)
+  }
+  const port = fields.port ?? '22'
+  const hostKeyAlias = fields.hostkeyalias
+  const lookupHost = hostKeyAlias ?? (port === '22' ? fields.hostname : `[${fields.hostname}]:${port}`)
   return {
-    user: fields.user, hostname: fields.hostname, knownHostsFiles: files,
-    strictHostKeyChecking: strict, forwardAgent: (fields.forwardagent ?? '').toLowerCase(),
-    batchMode: (fields.batchmode ?? '').toLowerCase(),
+    user: fields.user, hostname: fields.hostname, knownHostsFiles: files, globalKnownHostsFiles: globalFiles,
+    strictHostKeyChecking: strict, forwardAgent, batchMode, updateHostKeys, port, hostKeyAlias, lookupHost,
   }
 }
 
@@ -154,6 +174,12 @@ export class SshEnvironmentManager {
 
   /** The verified deployment manifest this manager was built against. */
   get deployment(): DeploymentManifest { return this.manifest }
+
+  get capability(): { readonly eligible: boolean; readonly reason?: string } {
+    return this.gate.status === 'eligible'
+      ? { eligible: true }
+      : { eligible: false, reason: this.gate.status === 'absent' ? this.gate.reason : 'unknown' }
+  }
 
   /** The live generation for an environment — a sentinel when none is open. */
   generationOf(environmentId: string): string {
@@ -341,11 +367,9 @@ export class SshEnvironmentManager {
     if (identity.user !== environment.account) {
       throw new SshEnvironmentError('account-mismatch', `manifest account "${environment.account}" but ssh resolves user "${identity.user}"`)
     }
-    if (identity.forwardAgent !== 'no') {
-      throw new SshEnvironmentError('host-identity-unverifiable', `host "${host}" must set ForwardAgent no (resolved "${identity.forwardAgent}")`)
-    }
-    const files = identity.knownHostsFiles.filter(file => { try { this.readFile(file); return true } catch { return false } })
-    const { keys, fingerprint } = await hostKeyFingerprint(identity.hostname, files, this.exec)
+    const files = [...identity.knownHostsFiles, ...identity.globalKnownHostsFiles]
+      .filter(file => { try { this.readFile(file); return true } catch { return false } })
+    const { keys, fingerprint } = await hostKeyFingerprint(identity.lookupHost, files, this.exec)
     if (keys !== 1) throw new SshEnvironmentError('host-identity-unverifiable', `host "${host}" resolves ${keys} known_hosts keys, exactly one required`)
     if (fingerprint !== environment.hostKey) {
       throw new SshEnvironmentError('host-key-mismatch', `manifest hostKey "${environment.hostKey}" but known_hosts verifies "${fingerprint ?? 'none'}"`)

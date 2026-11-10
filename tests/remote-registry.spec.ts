@@ -37,6 +37,7 @@ async function mount(remote?: { manifestPath?: string; enabled?: boolean }, tool
   const stack = await mountRegistryStack(join(fixture.base, 'store'), {
     remoteEnvironments: remote === undefined ? undefined : { enabled: remote.enabled ?? true, manifestPath: remote.manifestPath },
   }, {
+    allowUserOwnedRemoteManifestForTesting: true,
     scopeConfig: toolAccess === undefined ? {} : { toolAccess },
     beforeGate: async ctx => {
       await ctx.plugin(Projections)
@@ -210,7 +211,7 @@ describe('remote control plane', () => {
     const manifest = manifestFile()
     // A directory where the remote domain document belongs makes its open fail.
     mkdirSync(join(fixture.base, 'store', `${REMOTE_DOMAIN_NAME}.json`), { recursive: true })
-    const stack = await mountRegistryStack(join(fixture.base, 'store'), { remoteEnvironments: { enabled: true, manifestPath: manifest } }, {})
+    const stack = await mountRegistryStack(join(fixture.base, 'store'), { remoteEnvironments: { enabled: true, manifestPath: manifest } }, { allowUserOwnedRemoteManifestForTesting: true })
     stacks.push(stack)
     expect(stack.registry.remoteStatus.state).toBe('storage-failed')
     await stack.registry.add(fixture.workspace, { path: fixture.outside })

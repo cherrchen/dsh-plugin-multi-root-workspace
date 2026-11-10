@@ -2,8 +2,27 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bindingDigest, loadDeploymentManifest, manifestDigest, parseDeploymentManifest } from '../src/remote/manifest.ts'
+import { RemoteControlPlane } from '../src/remote/plane.ts'
+
+const fakeStats = vi.hoisted(() => new Map<string, { uid: number; mode: number; kind: 'file' | 'dir' | 'link' }>())
+vi.mock('node:fs', async importOriginal => {
+  const real = await importOriginal<typeof import('node:fs')>()
+  return {
+    ...real,
+    lstatSync: (path: string, options?: unknown) => {
+      const fake = fakeStats.get(String(path))
+      if (fake === undefined) return real.lstatSync(path, options as never)
+      return {
+        uid: fake.uid, mode: fake.mode,
+        isSymbolicLink: () => fake.kind === 'link',
+        isFile: () => fake.kind === 'file',
+        isDirectory: () => fake.kind === 'dir',
+      }
+    },
+  }
+})
 
 const dirs: string[] = []
 afterEach(() => { while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true }) })
@@ -66,17 +85,27 @@ describe('deployment manifest', () => {
     else expect(run).toThrowError(expect.objectContaining({ code }) as Error)
   })
 
+  it('accepts the destination isolation declaration only as its literal', () => {
+    const isolated = env({ transfer: { maxBytes: 8, timeoutMs: 10, destinationIsolation: 'chroot-sftp' } })
+    expect(() => parseDeploymentManifest(text([isolated]), '/m.json')).not.toThrow()
+    const wrong = env({ transfer: { maxBytes: 8, timeoutMs: 10, destinationIsolation: 'sftp-chroot' } })
+    expect(() => parseDeploymentManifest(text([wrong]), '/m.json')).toThrowError(expect.objectContaining({ code: 'invalid-manifest' }) as Error)
+    const onPair = binding({ transfers: [{ direction: 'import', peer: { environmentId: 'b', rootId: 'r' }, destinationIsolation: 'chroot-sftp' }] })
+    expect(() => parseDeploymentManifest(text([isolated], [onPair]), '/m.json')).toThrowError(expect.objectContaining({ code: 'invalid-manifest' }) as Error)
+  })
+
   it.skipIf(process.platform === 'win32')('loads a protected manifest file and refuses untrusted ones', () => {
+    const testing = { allowUserOwnedForTesting: true }
     const d = dir(), path = join(d, 'deploy.json')
     writeFileSync(path, text())
-    const loaded = loadDeploymentManifest(path)
+    const loaded = loadDeploymentManifest(path, testing)
     expect(loaded.manifest.configVersion).toBe('cfg-1')
     chmodSync(path, 0o660)
-    expect(() => loadDeploymentManifest(path)).toThrowError(expect.objectContaining({ code: 'manifest-untrusted' }) as Error)
+    expect(() => loadDeploymentManifest(path, testing)).toThrowError(expect.objectContaining({ code: 'manifest-untrusted' }) as Error)
     chmodSync(path, 0o600)
     const link = join(d, 'link.json')
     symlinkSync(path, link)
-    expect(() => loadDeploymentManifest(link)).toThrowError(expect.objectContaining({ code: 'manifest-untrusted' }) as Error)
+    expect(() => loadDeploymentManifest(link, testing)).toThrowError(expect.objectContaining({ code: 'manifest-untrusted' }) as Error)
   })
 
   it.skipIf(process.platform === 'win32')('refuses a manifest inside a bound local primary', () => {
@@ -84,6 +113,35 @@ describe('deployment manifest', () => {
     mkdirSync(primary)
     const path = join(primary, 'deploy.json')
     writeFileSync(path, text([env()], [binding({ primary })]))
+    expect(() => loadDeploymentManifest(path, { allowUserOwnedForTesting: true })).toThrowError(expect.objectContaining({ code: 'manifest-untrusted' }) as Error)
+  })
+
+  it.skipIf(process.platform === 'win32')('refuses a non-root-owned manifest under the strict production checks', () => {
+    const d = dir(), path = join(d, 'deploy.json')
+    writeFileSync(path, text())
     expect(() => loadDeploymentManifest(path)).toThrowError(expect.objectContaining({ code: 'manifest-untrusted' }) as Error)
+  })
+
+  it.skipIf(process.platform === 'win32')('walks every ancestor under the strict production checks', () => {
+    const untrusted = expect.objectContaining({ code: 'manifest-untrusted' }) as Error
+    const file = '/etc/dsh-test/deploy.json'
+    try {
+      fakeStats.set(file, { uid: 0, mode: 0o600, kind: 'file' })
+      fakeStats.set('/etc/dsh-test', { uid: 0, mode: 0o755, kind: 'dir' })
+      fakeStats.set('/etc', { uid: 65_534, mode: 0o755, kind: 'dir' })
+      expect(() => loadDeploymentManifest(file)).toThrowError(untrusted)
+      fakeStats.set('/etc', { uid: 0, mode: 0o777, kind: 'dir' })
+      expect(() => loadDeploymentManifest(file)).toThrowError(untrusted)
+      fakeStats.set('/etc', { uid: 0, mode: 0o755, kind: 'dir' })
+      fakeStats.set('/etc/dsh-test', { uid: 0, mode: 0o755, kind: 'link' })
+      expect(() => loadDeploymentManifest(file)).toThrowError(untrusted)
+    } finally { fakeStats.clear() }
+  })
+
+  it.skipIf(process.platform === 'win32')('offers no config bypass for the strict production checks', () => {
+    const d = dir(), path = join(d, 'deploy.json')
+    writeFileSync(path, text())
+    const plane = new RemoteControlPlane({ enabled: true, manifestPath: path }, { warn: () => {} })
+    expect(plane.status.state).toBe('config-invalid')
   })
 })

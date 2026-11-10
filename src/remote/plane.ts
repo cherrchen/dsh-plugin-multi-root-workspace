@@ -38,14 +38,14 @@ export class RemoteControlPlane {
   private revision = 0
   verifier: RemoteEndpointVerifier | undefined
 
-  constructor(config: RemoteConfig | undefined, private readonly logger: { warn(message: string): unknown }) {
+  constructor(config: RemoteConfig | undefined, private readonly logger: { warn(message: string): unknown }, private readonly load: typeof loadDeploymentManifest = loadDeploymentManifest) {
     this.enabled = config?.enabled === true
     if (!this.enabled) { this.state = { state: 'disabled' }; return }
     if (process.platform === 'win32') { this.state = { state: 'platform-deferred' }; return }
     const path = config?.manifestPath
     try {
       if (path === undefined || path.trim() === '') throw new ManifestError('manifest-untrusted', 'remoteEnvironments.manifestPath is required when the remote experiment is enabled')
-      const loaded = loadDeploymentManifest(path)
+      const loaded = this.load(path)
       this.manifest = loaded.manifest
       this.manifestDigest = loaded.digest
       // Enabled and valid, but nothing remote has been connected/opened yet.

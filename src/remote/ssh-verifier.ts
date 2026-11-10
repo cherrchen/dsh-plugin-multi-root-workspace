@@ -27,28 +27,51 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
 
   async verify(environment: RemoteEnvironment, binding: RemoteBinding, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
     if (environment.transport === 'sftp') return await this.verifySftp(environment, binding, signal)
+    if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
     const env = await this.manager.open(environment.environmentId)
+    if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
     const policy = { mode: 'read-only' as const, workspaceRoot: binding.path, sessionId: 'endpoint-verification' }
     const confined = await env.sandbox.confine([String(env.hello.executable), '-e',
       `const fs=require('node:fs');const s=fs.statSync(process.argv[1],{bigint:true});process.stdout.write(JSON.stringify({real:fs.realpathSync(process.argv[1]),dev:String(s.dev),ino:String(s.ino),isDirectory:s.isDirectory()}))`,
       binding.path], policy, signal)
     if (confined.enforcement !== 'full') throw new EndpointVerifyError('endpoint-unverifiable', `read-only confinement on "${environment.environmentId}" is not full`)
+    if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
     const handle = env.subprocess.spawn({
       argv: confined.argv, cwd: binding.path,
       stdio: { stdin: 'ignore', stdout: { maxBytes: 8192 }, stderr: { maxBytes: 4096 } },
       graceMs: 500,
     })
-    const done = await Promise.race([
-      handle.done as Promise<{ exitCode: number }>,
-      new Promise<never>((_, reject) => { signal.addEventListener('abort', () => reject(new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')), { once: true }) }),
-      new Promise<never>((_, reject) => { setTimeout(() => reject(new EndpointVerifyError('endpoint-unverifiable', 'verification timed out')), 30_000) }),
-    ])
-    if (done.exitCode !== 0) throw new EndpointVerifyError('endpoint-unverifiable', `the remote stat probe exited ${done.exitCode}`)
-    const collected = handle.collected as { stdout?: { readFrom(offset: number): { text: string } } }
-    const probe = JSON.parse(collected.stdout!.readFrom(0).text) as { real: string; dev: string; ino: string; isDirectory: boolean }
-    if (!probe.isDirectory) throw new EndpointVerifyError('endpoint-unverifiable', `${binding.path} is not a directory`)
-    if (probe.real !== binding.path) throw new EndpointVerifyError('endpoint-redirected', `${binding.path} resolves to "${probe.real}"`)
-    return { platform: env.hello.platform as 'linux' | 'darwin', target: { kind: 'object', value: `${probe.dev}:${probe.ino}` } }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let onAbort: (() => void) | undefined
+    try {
+      const done = handle.done as Promise<{ exitCode: number }>
+      void done.catch(() => {})
+      const finished = await Promise.race([
+        done,
+        new Promise<never>((_, reject) => {
+          onAbort = () => reject(new EndpointVerifyError('endpoint-unverifiable', 'verification aborted'))
+          signal.addEventListener('abort', onAbort, { once: true })
+        }),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new EndpointVerifyError('endpoint-unverifiable', 'verification timed out')), 30_000) }),
+      ])
+      if (finished.exitCode !== 0) throw new EndpointVerifyError('endpoint-unverifiable', `the remote stat probe exited ${finished.exitCode}`)
+      const collected = handle.collected as { stdout?: { readFrom(offset: number): { text: string } } }
+      const probe = JSON.parse(collected.stdout!.readFrom(0).text) as { real: string; dev: string; ino: string; isDirectory: boolean }
+      if (!probe.isDirectory) throw new EndpointVerifyError('endpoint-unverifiable', `${binding.path} is not a directory`)
+      if (probe.real !== binding.path) throw new EndpointVerifyError('endpoint-redirected', `${binding.path} resolves to "${probe.real}"`)
+      return { platform: env.hello.platform as 'linux' | 'darwin', target: { kind: 'object', value: `${probe.dev}:${probe.ino}` } }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+      if (onAbort !== undefined) signal.removeEventListener('abort', onAbort)
+      try { handle.terminate() } catch { /* already gone */ }
+      let bound: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          handle.waitForExit(AbortSignal.timeout(500)).catch(() => false),
+          new Promise<boolean>(resolve => { bound = setTimeout(() => resolve(false), 550) }),
+        ])
+      } finally { if (bound !== undefined) clearTimeout(bound) }
+    }
   }
 
   /**

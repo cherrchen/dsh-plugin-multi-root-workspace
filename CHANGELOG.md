@@ -31,6 +31,10 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - **已批准的一次性 Full-access 提权现在按批准语义执行**：当用户在一次工具调用上批准 `sandbox_permissions: 'danger-full-access'` 的升级（上游 `approveEscalation` → `approval.request` 返回 `'allowed-once'`）后，该调用不再被插件的两条负授权否决——显式 `read-only` 附加根（含 standing mode 下只读的 `inherit` 根）与 `toolAccess` per-tool 封顶（含非法配置的 cap-everything）仅对该调用解除。`$DSH_HOME` 恰在无提权时本应被拒的同一条件下保持拒绝，Registry 权威 `unavailable` 的主根钳制照旧，standing Full-access 会话、并发/嵌套/后续调用、已运行进程、持久终端、面板终端与 OPS 派发均不受影响（[ADR-0036](./docs/decisions/ADR-0036-approved-escalation-override.md)）。
 
+### Security
+
+- **实验性 SSH workspace 外部评审整改**（`feat/ssh-workspace`，默认关闭、未发布）：部署清单信任链收紧（文件与每一级祖先属 root、非 symlink、不可 group/other 写；Host 与 broker 均不得 root；凭据根须 broker 属主、恰 0700、非 symlink 真实目录）；模型可见复制目的收窄为声明 `destinationIsolation: "chroot-sftp"` 的独立 sftp 账户，helper/同账号可执行环境不得作复制目的；broker 协议 3（`hello` 自报 SSH 能力、一次性 `confinementToken` 绑定受限 argv/代次/workspaceRoot、spawn 拒绝动态加载器环境键、每条 SFTP 请求复核服务端代次）；专用 profile 运行时守卫拒绝一切 `danger-full-access` 解析/策略/提权，未受票据约束的进程启动 fail-closed；远端路径遍历复核、断线 `unknown`+reconcileId 绝不重试、校验器有界清理、OpenSSH 身份解析收紧。模型入口维持关闭：聚合配额、审计轮转、吊销与 Linux/systemd/GUI 部署证据仍是开放前提（[ADR-0039](./docs/decisions/ADR-0039-credential-broker.md)、[控制面参考](./docs/reference/multi-environment-control-plane.md)）。
+
 ## [0.1.16] - 2026-11-08
 
 ### Added

@@ -66,6 +66,65 @@ function decodeAttrs(body: Buffer): { attrs: Attrs; end: number } {
   return { attrs, end: o }
 }
 
+function attrsBounds(body: Buffer): number {
+  let o = 0
+  const take = (n: number): boolean => { if (o + n > body.length) return false; o += n; return true }
+  const uint32 = (): number | undefined => take(4) ? body.readUInt32BE(o - 4) : undefined
+  const flags = uint32()
+  if (flags === undefined) return -1
+  if (flags & 1 && !take(8)) return -1
+  if (flags & 2 && !take(8)) return -1
+  if (flags & 4 && !take(4)) return -1
+  if (flags & 8 && !take(8)) return -1
+  if (flags & 0x80000000) {
+    const count = uint32()
+    if (count === undefined) return -1
+    for (let i = 0; i < count; i++) {
+      const nameLength = uint32()
+      if (nameLength === undefined || !take(nameLength)) return -1
+      const dataLength = uint32()
+      if (dataLength === undefined || !take(dataLength)) return -1
+    }
+  }
+  return o
+}
+
+function wellFormedReply(type: number, body: Buffer): boolean {
+  switch (type) {
+    case 101: {
+      if (body.length < 12) return false
+      const messageLength = body.readUInt32BE(4)
+      if (8 + messageLength + 4 > body.length) return false
+      const tagLength = body.readUInt32BE(8 + messageLength)
+      return 8 + messageLength + 4 + tagLength === body.length
+    }
+    case 102:
+    case 103:
+      return body.length >= 4 && 4 + body.readUInt32BE(0) === body.length
+    case 104:
+      return attrsBounds(body) === body.length
+    case 105: {
+      if (body.length < 4) return false
+      const count = body.readUInt32BE(0)
+      let o = 4
+      for (let i = 0; i < count; i++) {
+        if (o + 4 > body.length) return false
+        const nameLength = body.readUInt32BE(o)
+        o += 4 + nameLength
+        if (o + 4 > body.length) return false
+        const longLength = body.readUInt32BE(o)
+        o += 4 + longLength
+        const end = attrsBounds(body.subarray(o))
+        if (end < 0) return false
+        o += end
+      }
+      return o === body.length
+    }
+    case 201: return true
+    default: return false
+  }
+}
+
 export interface SftpDirEntry { readonly name: string; readonly longname: string; readonly attrs: Attrs }
 export interface SftpVersion { readonly version: number; readonly extensions: Readonly<Record<string, string>> }
 
@@ -76,7 +135,7 @@ export class SftpClient {
   private inFlight = 0
   private buf = Buffer.alloc(0)
   private version: { version: number; extensions: Record<string, string> } | undefined
-  private versionWaiters: Array<() => void> = []
+  private versionWaiters: Array<PromiseWithResolvers<SftpVersion>> = []
   private alive = true
   private readonly child
   private readonly onLoss: (error: SftpConnectionLost) => void
@@ -104,24 +163,38 @@ export class SftpClient {
     this.buf = Buffer.concat([this.buf, chunk])
     while (this.buf.length >= 4) {
       const len = this.buf.readUInt32BE(0)
-      if (len > MAX_FRAME || len < 1) { this.lost(new SftpConnectionLost(`sftp frame length ${len} out of bounds`)); return }
+      if (len > MAX_FRAME || len < 5) { this.lost(new SftpConnectionLost(`sftp frame length ${len} out of bounds`)); return }
       if (this.buf.length < 4 + len) return
       const msg = this.buf.subarray(4, 4 + len)
       this.buf = this.buf.subarray(4 + len)
       const type = msg.readUInt8(0)
       if (type === 2) {
-        this.version = { version: msg.readUInt32BE(1), extensions: {} }
-        for (let o = 5; o + 8 <= msg.length;) {
-          const nl = msg.readUInt32BE(o); const name = msg.toString('utf8', o + 4, o + 4 + nl); o += 4 + nl
-          const dl = msg.readUInt32BE(o); const data = msg.toString('utf8', o + 4, o + 4 + dl); o += 4 + dl
-          this.version.extensions[name] = data
+        if (this.version !== undefined) { this.lost(new SftpConnectionLost('duplicate SFTP VERSION frame')); return }
+        const extensions: Record<string, string> = {}
+        let o = 5
+        let malformed = false
+        while (o < msg.length) {
+          if (o + 4 > msg.length) { malformed = true; break }
+          const nameLength = msg.readUInt32BE(o)
+          if (o + 4 + nameLength + 4 > msg.length) { malformed = true; break }
+          const name = msg.toString('utf8', o + 4, o + 4 + nameLength)
+          const dataLength = msg.readUInt32BE(o + 4 + nameLength)
+          if (o + 4 + nameLength + 4 + dataLength > msg.length) { malformed = true; break }
+          extensions[name] = msg.toString('utf8', o + 4 + nameLength + 4, o + 4 + nameLength + 4 + dataLength)
+          o += 4 + nameLength + 4 + dataLength
         }
-        for (const waiter of this.versionWaiters.splice(0)) waiter()
+        if (malformed) { this.lost(new SftpConnectionLost('malformed SFTP VERSION frame')); return }
+        this.version = { version: msg.readUInt32BE(1), extensions }
+        for (const waiter of this.versionWaiters.splice(0)) waiter.resolve(this.version)
         continue
       }
       const id = msg.readUInt32BE(1)
       const entry = this.pending.get(id)
       if (entry === undefined) continue
+      if (!wellFormedReply(type, msg.subarray(5))) {
+        this.lost(new SftpConnectionLost(`malformed SFTP reply type ${type}`))
+        return
+      }
       this.pending.delete(id)
       this.inFlight--
       entry.resolve({ type, body: msg.subarray(5) })
@@ -136,6 +209,7 @@ export class SftpClient {
     for (const entry of this.pending.values()) entry.resolve({ type: -1, body: Buffer.alloc(0) })
     this.pending.clear()
     this.inFlight = 0
+    for (const waiter of this.versionWaiters.splice(0)) waiter.reject(error)
     for (const wake of this.queue.splice(0)) wake()
     try { this.child.kill() } catch { /* already gone */ }
     this.onLoss(error)
@@ -171,10 +245,13 @@ export class SftpClient {
 
   /** INIT + VERSION; resolves with the server's version and extension table. */
   async init(): Promise<SftpVersion> {
+    if (!this.alive) throw new SftpConnectionLost('sftp transport already lost')
+    if (this.version !== undefined) return this.version
     const body = Buffer.concat([Buffer.from([1]), be32(3)])
     this.child.stdin.write(Buffer.concat([be32(body.length), body]))
-    await new Promise<void>(resolve => this.versionWaiters.push(resolve))
-    return this.version!
+    const waiter = Promise.withResolvers<SftpVersion>()
+    this.versionWaiters.push(waiter)
+    return await waiter.promise
   }
 
   async open(path: string, pflags: number, permissions?: number): Promise<Buffer> {

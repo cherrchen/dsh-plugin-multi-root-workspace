@@ -29,3 +29,7 @@ Issue #32 的两段传输有不同的授权方向：开发机可向构建机交�
 - 可用部署方配置的 rsync/SSH 进行目录同步，适合初始源码树，但会引入递归、软硬链接、远端 shell 和删除语义。首期用有界文件清单逐文件复制即可演示最小构建。目录树作为后续独立能力：限制深度、条数、总字节数；逐文件双端验证；显式报告部分完成；覆盖须有目标版本守卫。禁止自动同步删除或提权设置权限位。
 - 可用官方 Helper 作为安全传输端点，待其提供有界二进制 sink、根约束、安全创建和发布公开 API 后优先替换 SFTP adapter。拒绝调用私有 RPC、拼接 scp/rsync 命令或将跨机 move 伪装成原子操作；这些路线均无法继承文本 FS 的版本和权限合同。
 - **验收与回滚**：Linux/macOS 本地导出、Ubuntu→设备的中转及反向下载须分别在真实端点证明；包括大于单个 RPC frame 的二进制、零字节、现存目标、并发抢占文件名、源中途变化、只读下载目的地、发布丢应答。未通过的一侧或方向禁用；关闭传输先拒绝新请求，再取消 staging、报告在飞结果，不删除已发布的用户文件。
+
+## 复制目的收窄（2026-11-10，外部评审修正）
+
+保留原 Accepted 决定（`remote_copy` 与 `remote_bash` 并存）不变，追加：模型可见的复制目的必须是独立的 chroot SFTP-only 账户——目的环境 `transfer` 声明 `destinationIsolation: "chroot-sftp"`，且不得与同 `namespace`+`account` 的 helper/带 `exec` 环境共存（证明期 `destination-isolation-required`）；helper 环境不能作复制目的，构建产物由该账户写入后经 export/中转取回。SFTP 内所见路径按 chroot 监狱内绝对路径理解（如 `/workspace`），非宿主机 realpath；父目录/staging 逐段检查是纵深防御而非 dirfd 级 TOCTOU 保证，真实的 chroot、属主与独立写者隔离仍属部署证据，清单声明本身不构成证明。

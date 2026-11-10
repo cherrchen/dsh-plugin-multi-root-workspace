@@ -6,8 +6,9 @@
  * an anchor whose own tree is outside this package's root resolving INTO that
  * root is a private copy and an identity mismatch.
  *
- * This module is deliberately imported by nothing yet: it is the G4 loading
- * seam, exercised by tests only. No class is ever constructed here.
+ * The SSH environment manager (`src/remote/ssh-environment.ts`) is the only
+ * importer, behind the `eligible` capability gate. No class is ever
+ * constructed here.
  */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'

@@ -23,7 +23,16 @@ class MemSftp {
   readCalls = 0
   private tick = 1_700_000_000
 
+  directory(path: string): void {
+    let cursor = ''
+    for (const part of path.split('/').filter(part => part !== '')) {
+      cursor += `/${part}`
+      if (!this.files.has(cursor)) this.files.set(cursor, { data: Buffer.alloc(0), mtime: ++this.tick, permissions: 0o040755 })
+    }
+  }
+
   seed(path: string, data: Buffer | string, permissions = 0o100644): void {
+    this.directory(path.slice(0, path.lastIndexOf('/')) || '/')
     this.files.set(path, { data: Buffer.from(data), mtime: ++this.tick, permissions })
   }
 
@@ -101,6 +110,11 @@ interface StackOptions {
 
 function stack(opts: StackOptions = {}) {
   const mems = opts.mems ?? { 'vps-a': new MemSftp(), 'vps-b': new MemSftp() }
+  for (const environmentId of Object.keys(mems)) {
+    for (const [key, dir] of Object.entries(DISPLAY)) {
+      if (key.startsWith(`${environmentId}/`)) mems[environmentId]!.directory(dir)
+    }
+  }
   const manifest = {
     environments: ['vps-a', 'vps-b'].map(environmentId => ({
       environmentId, platform: 'linux', account: 'a', hostKey: `SHA256:${'A'.repeat(43)}`, namespace: environmentId,
@@ -514,5 +528,116 @@ describe('runRemoteCopy remote(sftp) → remote(sftp)', () => {
     const result = await run(s, request({ from: { environmentId: 'local', rootId: 'primary', relativePath: 'a' }, to: { environmentId: 'local', rootId: 'primary', relativePath: 'b' } }))
     expect(result).toMatchObject({ status: 'failed', code: 'direction-unsupported' })
     expect(s.registry.admitCount()).toBe(0)
+  })
+})
+
+describe('remote destination path safety', () => {
+  const local = () => {
+    fixture = createFixtureWorkspace('remote-safety')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'payload')
+    return stack()
+  }
+  const noOutsideWrites = (mem: MemSftp) => {
+    const creates = mem.calls.filter(call => {
+      const match = /^open \S+ (\d+)$/.exec(call)
+      return match !== null && (Number(match[1]) & (8 | 32)) !== 0
+    })
+    expect(creates).toHaveLength(0)
+    expect(mem.hardlinkCalls).toBe(0)
+  }
+
+  it('refuses a symlinked parent component even when realpath agrees', async () => {
+    const s = local()
+    s.mem.seed('/import/linkdir', Buffer.alloc(0), 0o120777)
+    const result = await run(s, localToRemote({ to: { environmentId: 'vps-a', rootId: 'import', relativePath: 'linkdir/out.bin' } }))
+    expect(result).toMatchObject({ status: 'failed', code: 'destination-symlinked', stage: 'preflight' })
+    noOutsideWrites(s.mem)
+  })
+
+  it('refuses a symlinked ancestor and a redirected root', async () => {
+    const s = local()
+    s.mem.seed('/import/sub/link', Buffer.alloc(0), 0o120777)
+    const ancestor = await run(s, localToRemote({ to: { environmentId: 'vps-a', rootId: 'import', relativePath: 'sub/link/out.bin' } }))
+    expect(ancestor).toMatchObject({ status: 'failed', code: 'destination-symlinked' })
+    noOutsideWrites(s.mem)
+    const redirected = stack()
+    redirected.mem.realpath = async (p: string) => p === '/import' ? '/elsewhere' : p
+    const root = await run(redirected, localToRemote())
+    expect(root).toMatchObject({ status: 'failed', code: 'root-redirected' })
+    noOutsideWrites(redirected.mem)
+  })
+
+  it('refuses when the parent changes between staging, verify and publish', async () => {
+    const s = local()
+    let calls = 0
+    const deps = {
+      ...s.deps,
+      onStage: async (stage: string) => {
+        if (stage === 'staging' && calls++ === 0) {
+          s.mem.files.set('/import', { data: Buffer.alloc(0), mtime: 1, permissions: 0o120777 })
+        }
+      },
+    }
+    const result = await run(s, localToRemote(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'destination-symlinked' })
+    expect(s.mem.hardlinkCalls).toBe(0)
+    const later = stack()
+    const publishDeps = {
+      ...later.deps,
+      onStage: async (stage: string) => {
+        if (stage === 'verify') later.mem.files.set('/import', { data: Buffer.alloc(0), mtime: 1, permissions: 0o120777 })
+      },
+    }
+    const published = await run(later, localToRemote(), publishDeps as RemoteCopyDeps)
+    expect(published).toMatchObject({ status: 'failed', code: 'destination-symlinked', stage: 'publish' })
+    expect(later.mem.hardlinkCalls).toBe(0)
+    expect(later.mem.files.has('/import/dest.txt')).toBe(false)
+  })
+
+  it('refuses a staging object that is a symlink, a directory, or the wrong size', async () => {
+    for (const permissions of [0o120777, 0o040755] as const) {
+      const s = local()
+      const deps = {
+        ...s.deps,
+        onStage: async (stage: string) => {
+          if (stage === 'staging') s.mem.files.set('/import/.dsh-staging-op-1', { data: Buffer.alloc(0), mtime: 1, permissions })
+        },
+      }
+      const result = await run(s, localToRemote(), deps as RemoteCopyDeps)
+      expect(result).toMatchObject({ status: 'failed', code: 'staging-changed' })
+      expect(s.mem.hardlinkCalls).toBe(0)
+    }
+    const s = local()
+    const deps = {
+      ...s.deps,
+      onStage: async (stage: string) => {
+        if (stage === 'staging') s.mem.files.set('/import/.dsh-staging-op-1', { data: Buffer.from('payloadEXTRA'), mtime: 1, permissions: 0o100644 })
+      },
+    }
+    const result = await run(s, localToRemote(), deps as RemoteCopyDeps)
+    expect(result).toMatchObject({ status: 'failed', code: 'staging-changed' })
+    expect(s.mem.hardlinkCalls).toBe(0)
+    expect(s.mem.files.has('/import/dest.txt')).toBe(false)
+  })
+
+  it('commits a zero-byte file through the whole safety walk', async () => {
+    const s = local()
+    writeFileSync(join(fixture.workspace, 'source.txt'), '')
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'committed', bytes: 0, sha256: sha(''), staging: 'removed' })
+    expect(s.mem.files.get('/import/dest.txt')!.data.length).toBe(0)
+  })
+
+  it('reports committed with residual staging when the post-ack parent check loses the link', async () => {
+    const s = local()
+    const realHardlink = s.mem.hardlink.bind(s.mem)
+    s.mem.hardlink = async (oldP: string, newP: string) => {
+      await realHardlink(oldP, newP)
+      s.mem.realpath = async (_p: string) => { throw new SftpConnectionLost('link died after hardlink') }
+    }
+    const result = await run(s, localToRemote())
+    expect(result).toMatchObject({ status: 'committed', staging: 'residual' })
+    expect(s.mem.hardlinkCalls).toBe(1)
+    expect(s.mem.files.has('/import/dest.txt')).toBe(true)
   })
 })
