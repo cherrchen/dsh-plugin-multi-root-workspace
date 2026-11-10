@@ -257,7 +257,9 @@ describe('A candidate', () => {
     expect(granted).toContain(parent)
   })
 
-  it('drops the A prompt when the linked checkout loses its back-pointer', async () => {
+  // Windows holds a watched directory handle and refuses the rename this setup
+  // needs; the lost/recovery behavior itself is covered by the re-mount case.
+  it.skipIf(process.platform === 'win32')('drops the A prompt when the linked checkout loses its back-pointer', async () => {
     const area = fixture('common-lost')
     const main = join(area.base, 'main')
     const linked = join(area.base, 'linked')

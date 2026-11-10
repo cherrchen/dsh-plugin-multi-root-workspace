@@ -17,6 +17,7 @@ import { basename, dirname, join } from 'node:path'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { mountWorktreeStack, readSidecarFile, type WorktreeStack } from './support/worktrees-stack.ts'
 import { createFixtureWorkspace, symlinkUnsupportedReason, type FixtureWorkspace } from './support/temp-workspace.ts'
+import { linkedAdminGitdir, rewriteGitPointer } from './support/worktree-pointer.ts'
 import { primaryKey } from '../src/roots.ts'
 import { resolveRepo } from '../src/worktrees/repository.ts'
 import { canonicalExisting, readRegularFile } from '../src/worktrees/fs-safe.ts'
@@ -174,14 +175,16 @@ describe('candidate binding (audit 1)', () => {
 })
 
 describe('metadata no-follow and separators (audit 2)', () => {
-  it('refuses a .git pointer whose admin target is a directory symlink', () => {
+  it('refuses a .git pointer whose admin target is a directory symlink', context => {
     const reason = symlinkUnsupportedReason()
-    if (reason !== undefined) return
+    if (reason !== undefined) return context.skip(reason)
     const { area, linked } = pair('audit-symlink-admin')
-    const admin = repoOf(linked).adminGitdir!
+    const admin = linkedAdminGitdir(linked)
     const link = join(area.base, 'admin-link')
     symlinkSync(admin, link, 'dir')
-    writeFileSync(join(linked, '.git'), 'gitdir: ' + link + '\n')
+    if (!rewriteGitPointer(linked, 'gitdir: ' + link + '\n')) {
+      return context.skip('Windows refuses to rewrite the linked worktree .git pointer')
+    }
     expect(resolveRepo(linked).ok).toBe(false)
   })
 
@@ -352,10 +355,12 @@ describe('second audit: metadata pathname semantics', () => {
     mkdirSync(outside)
     const alias = join(main, 'alias')
     symlinkSync(outside, alias, 'dir')
-    const admin = repoOf(linked).adminId!
+    const admin = basename(linkedAdminGitdir(linked))
     // Preserve the on-disk spelling instead of path.join folding out alias/...
     const separator = process.platform === 'win32' ? '\\' : '/'
-    writeFileSync(join(linked, '.git'), 'gitdir: ' + alias + separator + '..' + separator + join('.git', 'worktrees', admin) + '\n')
+    if (!rewriteGitPointer(linked, 'gitdir: ' + alias + separator + '..' + separator + join('.git', 'worktrees', admin) + '\n')) {
+      return context.skip('Windows refuses to rewrite the linked worktree .git pointer')
+    }
     expect(resolveRepo(linked)).toMatchObject({ ok: false, reason: 'unsafe-metadata' })
   })
 
@@ -395,12 +400,14 @@ describe('second audit: metadata pathname semantics', () => {
     } finally { spy.mockRestore() }
   })
 
-  it.runIf(process.platform === 'win32')('refuses a junction in an admin pointer chain', () => {
+  it.runIf(process.platform === 'win32')('refuses a junction in an admin pointer chain', context => {
     const { area, linked } = pair('audit-windows-junction')
-    const admin = repoOf(linked).adminGitdir!
+    const admin = linkedAdminGitdir(linked)
     const alias = join(area.base, 'junction')
     symlinkSync(dirname(admin), alias, 'junction')
-    writeFileSync(join(linked, '.git'), 'gitdir: ' + join(alias, basename(admin)) + '\n')
+    if (!rewriteGitPointer(linked, 'gitdir: ' + join(alias, basename(admin)) + '\n')) {
+      return context.skip('Windows refuses to rewrite the linked worktree .git pointer')
+    }
     expect(resolveRepo(linked)).toMatchObject({ ok: false, reason: 'unsafe-metadata' })
   })
 
@@ -504,7 +511,9 @@ describe('second audit: owner commit and lifecycle', () => {
     } finally { release.resolve(); spy.mockRestore() }
   })
 
-  it('preserves lost across a switch toggle until a user explicitly detects again', async () => {
+  // Windows holds a watched directory handle and refuses the rename this setup
+  // needs; the lost/recovery behavior itself is covered by the re-mount case.
+  it.skipIf(process.platform === 'win32')('preserves lost across a switch toggle until a user explicitly detects again', async () => {
     const { area, main } = pair('audit-lost-toggle')
     const { worktrees, sessionId, hooks } = await worktreesOf(area, main, { settings: true })
     let enabled = true

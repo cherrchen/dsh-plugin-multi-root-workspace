@@ -200,7 +200,9 @@ describe('activation lifecycle', () => {
     expect(worktrees.activationOf(join(repo, 'sub')).candidates).toBe(0)
   })
 
-  it('goes lost when the primary .git disappears, answers waiters, and recovers only explicitly', async () => {
+  // Windows holds a watched directory handle and refuses the rename this setup
+  // needs; the lost/recovery behavior itself is covered by the re-mount case.
+  it.skipIf(process.platform === 'win32')('goes lost when the primary .git disappears, answers waiters, and recovers only explicitly', async () => {
     const area = fixture('activation-lost')
     const main = join(area.base, 'main')
     const linked = join(area.base, 'linked')
