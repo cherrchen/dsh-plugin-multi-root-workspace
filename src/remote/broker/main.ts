@@ -1,5 +1,5 @@
 /**
- * The credential broker daemon entry (ADR-0036). The deployer's unit file
+ * The credential broker daemon entry (ADR-0039). The deployer's unit file
  * starts `node remote-broker.js --config /etc/dsh-ssh-broker/broker.json`
  * under the dedicated account; custody, manifest loading, peer
  * authentication and socket permissions are all enforced by `BrokerServer`.

@@ -66,6 +66,7 @@ import { RemoteAdmissionError, type RemoteOperation, type RemoteOperationIdentit
 import { effectiveRootAccess } from './contract.ts'
 import type { LocalDestinationAuthority } from './remote/local-sink.ts'
 import { RemoteControlPlane, type RemoteConfig } from './remote/plane.ts'
+import type { loadDeploymentManifest } from './remote/manifest.ts'
 import { parseRemoteArguments, remoteAdmitSchema, remoteSnapshotSchema, type RemoteMethod } from './remote/protocol.ts'
 import type { RemoteEndpointRef, RemoteSnapshotReply } from './remote/contract.ts'
 import {
@@ -496,7 +497,7 @@ export class MultiRootRegistry extends Service {
    * @param ctx - the host context; `storage` and `multiRootScope` are injected.
    * @param config - the patch row's `sharedStorageRoot`, `leasePath`, and `maxAdditionalRoots`.
    */
-  constructor(ctx: Context, config: Config = {}) {
+  constructor(ctx: Context, config: Config = {}, internals: { loadRemoteManifest?: typeof loadDeploymentManifest } = {}) {
     super(ctx, 'multiRootRegistry')
     this.authorityStorageContext = ctx
     this.leasePath = config.leasePath
@@ -504,7 +505,7 @@ export class MultiRootRegistry extends Service {
     this.promptsRoot = typeof config.promptsRoot === 'string' && isAbsolute(config.promptsRoot) && config.promptsRoot !== ''
       ? config.promptsRoot
       : undefined
-    this.remotePlane = new RemoteControlPlane(config.remoteEnvironments, ctx.logger)
+    this.remotePlane = new RemoteControlPlane(config.remoteEnvironments, ctx.logger, internals.loadRemoteManifest)
     this.recovery = new RecoveryScheduler({
       enabled: config.backgroundRecovery !== false,
       eligible: () => !this.disposed && (this.authorityState.kind === 'contended'

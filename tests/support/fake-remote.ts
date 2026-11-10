@@ -32,8 +32,14 @@ export class FakeRemote {
 
   constructor(readonly environmentId: string) {}
 
-  /** Seed a directory; every ancestor of a seeded path must exist. */
-  directory(path: string): void { this.files.set(path, { data: Buffer.alloc(0), mtime: ++this.tick, permissions: 0o040755 }) }
+  /** Seed a directory and every missing ancestor; staging lstats the whole chain. */
+  directory(path: string): void {
+    let cursor = ''
+    for (const part of path.split('/').filter(part => part !== '')) {
+      cursor += `/${part}`
+      if (!this.files.has(cursor)) this.files.set(cursor, { data: Buffer.alloc(0), mtime: ++this.tick, permissions: 0o040755 })
+    }
+  }
 
   seed(path: string, data: Buffer | string): void {
     this.directory(posix.dirname(path))
@@ -218,9 +224,12 @@ export class FakeManager implements RemoteToolsManager {
   }
   sftpGenerationOf(environmentId: string): string { return this.remotes.get(environmentId)?.generation ?? 'stale' }
   generationOf(environmentId: string): string { return this.remotes.get(environmentId)?.generation ?? 'stale' }
+  readonly capability = { eligible: true }
   markStale(environmentId: string): void { this.stale.push(environmentId) }
   readonly stale: string[] = []
   async open(environmentId: string): Promise<SshEnvironment> { return this.remote(environmentId).helper() }
+  async disposeSftp(_environmentId: string): Promise<void> {}
+  async dispose(_environmentId: string): Promise<void> {}
   async disposeAll(): Promise<void> {}
   backend(environmentId: string): RemoteExecutionBackend | undefined { return this.backends.get(environmentId) }
 }

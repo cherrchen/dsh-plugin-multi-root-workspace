@@ -78,6 +78,7 @@ async function mount(toolAccess?: Record<string, 'read-only'>) {
   const stack = await mountRegistryStack(join(fixture.base, 'store'), {
     remoteEnvironments: { enabled: true, manifestPath: manifestFile() },
   }, {
+    allowUserOwnedRemoteManifestForTesting: true,
     scopeConfig: toolAccess === undefined ? {} : { toolAccess },
     beforeGate: async ctx => {
       await ctx.plugin(Projections)
@@ -192,6 +193,37 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     lost.state.handles[0]!.lose()
     await expect(hanging).resolves.toMatchObject({ status: 'unknown', reconcileId: expect.any(String) })
     expect(lost.state.spawnCalls).toHaveLength(1)
+  })
+
+  it('reports unknown with a reconcile id when the start acknowledgement is lost, and never retries', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const base = backend.spawn
+    backend.spawn = (argv, options, sink) => {
+      const handle = base(argv, options, sink)
+      const started = Promise.withResolvers<void>()
+      Object.defineProperty(handle, 'started', { get: () => started.promise })
+      started.reject(new RemoteConnectionLost('spawn reply lost'))
+      return handle
+    }
+    const result = await run(stack, backend)
+    expect(result).toMatchObject({ status: 'unknown', reconcileId: expect.any(String), operationId: expect.any(String) })
+    expect(state.spawnCalls).toHaveLength(1)
+    expect(state.handles[0]!.terminateCalls).toBe(0)
+  })
+
+  it('refuses a cwd the production verifyCwd rejects before any confine or spawn', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const seen: { cwd: string; root: string }[] = []
+    backend.verifyCwd = async (cwd, root) => {
+      seen.push({ cwd, root })
+      throw Object.assign(new Error('the remote cwd is a symlink'), { code: 'destination-symlinked' })
+    }
+    await expect(run(stack, backend)).resolves.toMatchObject({ status: 'not-started', code: 'destination-symlinked' })
+    expect(seen).toEqual([{ cwd: '/work/app', root: '/work/app' }])
+    expect(state.confineCalls).toHaveLength(0)
+    expect(state.spawnCalls).toHaveLength(0)
   })
 
   it('terminates once on timeout and once on repeated cancel', async () => {

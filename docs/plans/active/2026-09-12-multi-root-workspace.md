@@ -1785,6 +1785,8 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 ## 多执行环境 G5 显式工具、面板与单会话旅程（2026-11-07）
 
+> **历史性证据，未经 2026-11-10 外部评审复核**：本节计数与结论按历史记录保留——协议 2 已由协议 3 取代、helper 复制目的已被收窄拒绝；最终计数由维护者末轮验证后填写。
+
 **状态：显式工具、能力投影与远端面板已接入一个专用 headless 测试组合；同一 Session 的"两个本地根 → 构建机 → 设备"旅程先在有界内存端点上跑通，随后已在生产 `broker:` 配置路径上完成真实 SSH 复跑（`tests/remote-journey.live.e2e.ts` 4/4，见 G5a 节）；没有新增生产行，远端实验仍默认关闭、未对模型开放。** 内存旅程的准入、绑定/配对、staging、哈希、无覆盖发布与双准入命令合同全部走真实代码；真实复跑暴露了默认 `backendFor` 工厂的双准入实例缺陷并已修复（`1f4f40a`）。该轮仅覆盖 headless VPS；Web 后续结果见[模型开放门槛](#多执行环境模型开放门槛2026-11-09)。
 
 **实现（本轮增量）：** `src/remote/tools.ts` 新行 `apply(ctx, {enabled, manager?, backends?})`，`inject` 保持兼容门禁与 provider 品牌门禁；`enabled !== true` 时零动作，远端控制面未就绪（关闭/清单无效）时拒绝加载。该行统一注册 `remote_copy` 与 `remote_bash`、安装 `SshEndpointVerifier`（未挂载该行的组合登记固定 `endpoint-unverifiable`），默认连接管理器是清单之上的官方 SSH 栈，默认执行后端是新的 `lazySshExecBackend`（准备阶段才 `open`，未打开连接无法通过最终启动准入）。`src/remote/capabilities.ts` 通过 `systemPrompt.context` 贡献 `multi-root:remote`，只含环境/根 ID、绑定路径、平台、动作与传输配对，绝不含 host/账号/密钥。清单与连接层允许任意 transport 声明 `transfer`（传输适配器是同一别名的 SFTP 子系统），`exec` 仍仅 helper——这样一台构建机才能既收源码又执行构建。`src/remote/panel-contract.ts` 新增独立远端端点（`remotes`/`addRemote`/`removeRemote`），`src/command.ts` 按 Session 推导主根后提供列表与登记/撤销；列表只读状态/清单/记录、不建立任何远端连接，能力按会话模式与工具 cap 收窄；`src/client/remotes-client.ts` 与 Workspace Folders 面板的新“远端环境”区消费它，双语文案与失败码覆盖经 locale parity 校验。`remote_bash` 的未开始结果不再携带显式 `undefined` 的 `operationId`（工具输出必须 lossless JSON）。
@@ -1804,7 +1806,9 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 ## 多执行环境 G5a 凭据隔离：本机凭据代理（2026-11-07）
 
-**状态：凭据代理在两台真实 VPS 的双账户部署上完成首次实机验收——Ubuntu 24.04 发起端（`dshhost` Host + `_dsh_ssh` broker）× Ubuntu 24.04 被控端（`dshbuild`/`dshxfer`/`dshxfer2`），安装器真实执行、受限探针拒绝记录、socket 内核认证与三方向真实 SSH 复制全部通过；工具仍未进入默认 patch、未对模型开放。** 合同见 [ADR-0036](../../decisions/ADR-0036-credential-broker.md)，接口与限制见[控制面参考](../../reference/multi-environment-control-plane.md#凭据隔离本机凭据代理adr-0036)。
+> **历史性证据，未经 2026-11-10 外部评审复核**：本节 broker live/故障注入均为协议 2 时代实机记录，协议 3 票据、目的收窄与运行时守卫未取得实机证据；原始产物属历史附件而非现行绿色证据。
+
+**状态：凭据代理在两台真实 VPS 的双账户部署上完成首次实机验收——Ubuntu 24.04 发起端（`dshhost` Host + `_dsh_ssh` broker）× Ubuntu 24.04 被控端（`dshbuild`/`dshxfer`/`dshxfer2`），安装器真实执行、受限探针拒绝记录、socket 内核认证与三方向真实 SSH 复制全部通过；工具仍未进入默认 patch、未对模型开放。** 合同见 [ADR-0039](../../decisions/ADR-0039-credential-broker.md)，接口与限制见[控制面参考](../../reference/multi-environment-control-plane.md#凭据隔离本机凭据代理adr-0039)。
 
 **实现（本轮增量）：** `src/remote/broker/protocol.ts` 定义 `protocol: 1` 的有界 JSON-lines（行 ≤ 2 MiB、二进制字段 ≤ 256 KiB、在飞请求 32、进程 8）与八个语义方法；`server.ts` 以专用账户运行，拒绝同 UID 启动与未声明 `attested` 的清单，对每条连接做内核 peer 认证（Host UID + 非沙箱/非 `NoNewPrivs`，Linux 用 `SO_PEERPIDFD`），只转发 SFTP 原语、`confine`、`spawn`/等待/终止/处置；`client.ts` 的 `BrokerEnvironmentManager` 保持官方 manager 的结构面，复制管线、`SshEndpointVerifier` 与双准入命令合同不改，命令输出在退出事件中携带 `scope` 确认；`attest.ts` 在打开任何环境前检查 UID 不同、凭据根对 Host 不可读、socket/目录属主与权限、`hello` 协议/UID/环境覆盖以及部署记录的受限探针；`tools.ts` 的 `broker` 配置先证明后挂载，失败只告警并保持工具缺席；`scripts/ssh-broker/install.sh` 以 root 创建账户、组、0700 凭据根、0750 socket 目录、0640 broker.json 与 launchd/systemd unit，不代建清单或远端公钥。`src/authority/native.ts` 的 peer 认证参数化出 `expectedUid` 与 `allowRestricted`（服务端生产路径绝不放宽）。`src/remote/ssh-environment.ts` 增加 `custody: "broker"`，使托管进程可以打开清单声明为 `unattested` 的端点（证明责任在 Host 侧），而 Host 进程没有这个开关。
 
@@ -1830,6 +1834,8 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 ## 多执行环境模型开放门槛（2026-11-09）
 
+> **历史性证据，未经 2026-11-10 外部评审复核**：本节"1362 passed/131 skipped"、pack 211 members、"12/12"、Linux 12/12 与 GUI（stub 旅程、Chromium 叙述）均为历史断言——本轮无任何原始产物或重跑记录，最终验证计数由维护者冻结机器证据后填写。当前状态见下节：BLOCKED。
+
 **范围：先审查 DSH `0.2.2-rc.1` 的 Linux → Linux 专用实验 profile。** 默认组合保持关闭。此前 Ubuntu 双账户实机已覆盖三向复制、受限命令、故障注入和真实目标主机钥轮换。直连和内存后端的取证继续用于回归。逐项启用配置与回滚步骤见[控制面参考](../../reference/multi-environment-control-plane.md#部署启用清单)。
 
 | 开放前事项 | 当前证据与退出条件 |
@@ -1843,3 +1849,44 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 真实模型回合发现两项工具的输出渲染误用了输入参数。改为读取宿主渲染回调的结果参数，并用调度管线分别断言两项工具的模型侧内容等于规范化结果。打包、兼容、类型、lint、文档检查通过；原生本地全量回归为 **1362 passed / 131 skipped / 0 failed**（Linux SSH 实跑单列）。新增结果渲染回归后 `remote-tools.spec.ts` 为 **12/12**。
 
 **部署侧入口取证（同批次补全）**：`scripts/probe-remote-entry-isolation.mjs` 在 `scripts/ssh-broker/probe/` 的一次性容器（Debian 12 arm64、Node `24.22.2`、DSH `0.2.2-rc.1`、插件包 `0.1.15`）中实跑：root 真实执行打包 `install.sh`（systemctl 打桩、daemon 由编排脚本直接拉起），`_dsh_ssh`（uid 999）持有 0700 凭据根与 0750 socket 目录，`dshhost`（uid 1001）作为 Host UID 经 `dsh plugin add` 安装专用 `remote-exp` profile 并施加部署 patch。Registry 取得 shared 权威（`authority: active`）、远端平面 `ready`、broker 证明通过（协议 2 + 清单摘要）、`remote_copy`/`remote_bash` 挂载。Host 对照：socket hello 正常、凭据根 `EACCES`、`broker.json` `EACCES`、清单可读。两个受限模式 × 三个 Agent 进程入口——shell 公开执行器、`DSH_PTY_SESSION_ID` 标记的 Agent PTY（真实交互 bash 全程转录）、PTC `run`（run_code）——全部 `enforcement: full`（bwrap + `NoNewPrivs`）：读凭据根一律 `EACCES`，连 broker socket 一律 `closed-no-data`（连接经内核凭据检查被拒、无 hello）。预设表只含 `read-only`/`workspace-write`。提权面：伪造 `sandbox/mode: danger-full-access` 事件使 `sandboxPolicy.resolve` 解析出完全访问、shell 以 `enforcement: null` 无沙箱执行——凭据根仍 `EACCES`（账户隔离兜底），但 socket **收到 broker hello**，反向实证了完全访问会话必须与这些凭据互斥；沙箱内 `NoNewPrivs=1`、无 sudo、su 认证失败、`unshare -r` 只得命名空间内伪 root。原始证据：[remote-entry-isolation-evidence.json](../../reference/remote-entry-isolation-evidence.json)。另实踩并记录一个部署陷阱：profile patch 层对同一行的 `config` 是整体替换，`multi-root-registry` 必须重写 `sharedStorageRoot`/`leasePath`，否则 medium 缺席、远端平面停在 `owner-without-remote-protocol`、工具行正确拒挂。macOS 发起端/目标与 Electron 宿主仍待验；外部评审与 push/CI 待维护者指令。
+
+## 外部评审整改与开放阻断（2026-11-10）
+
+**当前状态：BLOCKED——模型入口保持关闭。** 本次外部评审的 F1–F21 整改为**工作树修复，尚未提交、未发布、未经维护者签收**（SSH 分支 43 个提交已全部 rebase 到 `main + experiment = 3e84d85`；备份引用与 pre-rebase bundle 保留，最终提交号由维护者注记）。本节之上的 G5 实机/测试证据均为**历史性、未经本轮复核**：协议 2 已被协议 3 取代、helper 复制目的已被收窄拒绝、此前"1362 passed / 131 skipped / 0 failed"、pack **211 members**、"12/12" 等计数全部作废待重跑，最终计数由维护者在末轮验证后填写。先前 GUI 断言（stub 旅程与 Chromium 记录）同样只有历史叙述、本轮无原始产物——当前仅有本地单元/DOM 覆盖，无 GUI 签收。
+
+| 编号 | 主题 | 处理 | 备注 |
+| --- | --- | --- | --- |
+| F1 | 远端父目录/staging 路径遍历 | fixed | `assertRemoteParent`/`assertRemoteStaging` 逐段 lstat 含终点；读后再检；属纵深防御，**不提供 dirfd 级 TOCTOU 保证**——生产目的端仍须独立 chroot SFTP-only 账户。 |
+| F2 | 断线语义与超时 | fixed | started 后丢线 `unknown`+reconcileId 绝不重试；发布后清理失败为 `residual`；请求超时销毁连接、在飞请求 typed-lost。 |
+| F3 | Full-access 运行时守卫 | fixed（代码） | `profile-guard.ts` 包裹 resolve/confine/spawn/spawnTerminal/approval：拒绝一切 `danger-full-access` 解析/策略/回放/单发升级，256 票据 FIFO+TTL 30s 绑定受限 argv 快照；标记 PTY 经 `DSH_SESSION_ID` 活体会话重新准入。 |
+| F4 | 原始 spawn 接缝与目的收窄 | fixed（代码） | 未受票据约束的 spawn（LSP/job 形、伪造/回放/突变 argv、过期票据）fail-closed；守卫覆盖受支持服务接缝，第三方 `node:child_process` 直引与用户终端标记属部署信任假设；`environment.transfer.destinationIsolation:"chroot-sftp"` + 证明期同账号 helper/exec 拒绝。 |
+| F5 | rebase 与版本标号 | fixed | SSH 分支 rebase 到 main+experiment；凭据 broker 决策定号 ADR-0039；包版本 `0.1.17-ssh.1` 未发布、无 tag/publish。 |
+| F6 | 清单加载信任链 | fixed | 生产要求文件与**每一级祖先** root 所有、非 symlink、不可被 group/other 写；Host/broker 均不得 root；测试内部加载器才放宽（无生产开关）。 |
+| F7 | OpenSSH 身份解析 | fixed | `HostKeyAlias` 逐字（含 `none`）、`[hostname]:port`、Strict/Batch/ForwardAgent/UpdateHostKeys 强制、全部 user+global 源合计恰一钥。 |
+| F8 | confine/spawn 绑定 | fixed | 票据绑定 confine **返回后**的 argv+代次+workspaceRoot；非空 `LD_*`/`DYLD_*`/`NODE_OPTIONS`/`NODE_PATH` env 拒绝；票据校验失败或使用消耗。 |
+| F9 | SFTP 代次权威 | fixed | 每请求服务端代次复核；旧 proxy 不路由新会话；dispose 不删更新缓存项。 |
+| F10 | 部署图/临时目录 | fixed（文档） | 凭据根只放密钥/config/known_hosts；ControlMaster/helper 暂存为 broker mkdtemp+PrivateTmp；unit 未经实机 systemctl 验证。 |
+| F11 | 校验器清理 | fixed | 中止/超时/完成均 terminate+有界 drain，timer/listener 必清。 |
+| F12 | 证据账本与实机 | narrowed / prerequisite | 既有 Linux/GUI 断言标为历史未复核；本轮本机原始日志与 JSON 已归档（见下），实机 unit、`ActiveState`、socket 私访探针仍待补证。 |
+| F13 | 配额/审计/吊销 | prerequisite | 未实现：仅单文件/在飞上限，无聚合时间窗预算、无审计轮转、无吊销清单——模型开放硬前提，见控制面参考"模型开放的前置阻断项"。 |
+| F14 | 安装器与部署手册 | fixed（本轮） | 依赖解析 preflight（`createRequire` 锚定 broker 入口，核验 dsh/cordis/四 SSH peer 可解析）、可复现依赖树命令与 ssh config 清单、out-of-band 指纹验证说明、logrotate 示例；安装是部署操作，**不构成**隔离认证。 |
+| F15 | broker 自报能力 | fixed | `hello.sshCapability` 由 broker 自身状态派生，缺席/为否/畸形即拒绝。 |
+| F16 | 凭据根证明 | fixed | lstat 真实非 symlink 目录、broker 属主、恰 0700，先于 `R_OK` 探针；root Host/broker 拒绝。 |
+| F17 | 陈旧注释 | fixed | exec/transfer 工具引言与 ssh-packages 引言已纠正。 |
+| F18 | 回归覆盖补齐 | fixed | 新增/扩充远端 manifest、broker 票据/代次/env、profile guard 单测与集成 spec、SFTP 帧与校验器用例；历史协议 2 样例与伪造 hello 记录标为反例，不作现行守卫证据。 |
+| F19 | SFTP 帧校验 | fixed | 短帧、截断 VERSION/STATUS/ATTRS、分片与 EOF 已覆盖；畸形帧 fail-closed。 |
+| F20 | 远端 cwd 校验 | fixed | `verifyCwd` 后端方法：准入 A 经 `assertRemoteParent` 复核远端 cwd，fake 后端可省、生产后端必提供。 |
+| F21 | 终端信任边界 | fixed（文档/行为） | `DSH_PTY_SESSION_ID` 标记的 Agent 终端走会话重准入；未标记为用户终端按部署信任假设放行。 |
+
+**仍未完成的开门前置（非本轮）**：聚合配额、审计轮转、吊销清单（F13）；Linux 实机 unit/`ActiveState`/socket 私访探针与 GUI 宿主证据（F12 及 GUI 行）；macOS 发起端/目标验收按既有矩阵延后。
+
+### 本轮本机证据
+
+本轮仅在 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.1` 执行，不替代 Linux→Linux 专用 profile 的部署验收。[机器证据清单](../../reference/ssh-review-20261110-evidence.json)、[完整 Vitest JSON](../../reference/ssh-review-20261110-vitest.json)、[检查日志](../../reference/ssh-review-20261110-checks.txt)保留本轮原始结果（日志仅隐去临时 Web token、去除 ANSI 颜色并清理行末空白）。
+
+- 全量：**1545 passed / 131 skipped / 0 failed**，106 个文件通过、8 个文件跳过；Linux live 与其他平台跳过项不计通过。
+- lint 首轮发现三个测试参数未使用；仅改为下划线参数名，lint 复查通过；受影响两文件的[增量复查](../../reference/ssh-review-20261110-lint-delta.json)为 **48 passed / 0 failed**。compat、host/client 类型、build、kernel probe（仅 Seatbelt 可用）通过。
+- smoke compose **54/0/0**、behavior **137/0/0**、journey **76/0/0**（通过/失败/跳过）；pack 为 **222 members**，packed behavior **136/0/0**。这不是沿用历史 211/213 的计数。
+- Auto Review fork 静态检查通过；运行 smoke 因本机不是其专用 `0.2.1-rc.2` 目标而跳过，不计通过。GUI、磁盘重载 Session、真实其他 profile 与 Linux unit/PrivateTmp/chroot 证据仍缺。
+- `docs:check` 通过；安装器通过 `sh -n` 与隔离的依赖解析正负例（未执行账户/unit 配置）。预检查发现 DSH 无根导出后已改用其公开 `package.json` 入口解析，原失败与修正后记录一并保留。
+- 入口探针已改为记录 Full-access 守卫拒绝并增加 raw/LSP-like/job-like 接缝观察；仅通过脚本语法和隔离观察函数检查，未在 Linux 运行；其他 profile 的静态文本清点不算运行时隔离证据。

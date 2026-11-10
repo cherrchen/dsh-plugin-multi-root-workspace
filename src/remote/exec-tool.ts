@@ -1,7 +1,8 @@
 /**
- * `remote_bash` as a tool definition. Nothing registers this in any
- * production row — G3 verifies the contract through test compositions only,
- * and the tool can only run where the remote control plane is ready anyway.
+ * `remote_bash` as a tool definition. The optional broker-attested remote
+ * tools row registers it (see `remote/tools.ts`); test compositions register
+ * it directly. The tool can only run where the remote control plane is ready
+ * anyway.
  * Remote stdout/stderr is data, never a local path reference.
  */
 import type { MultiRootRegistry } from '../registry.ts'

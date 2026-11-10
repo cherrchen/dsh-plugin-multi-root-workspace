@@ -150,7 +150,7 @@ export function apply(ctx: ClientContext): void {
   // The footer's dialog owner and the workspace menu share exactly one
   // controller for this apply() lifetime: the menu asks the footer to open
   // its dialog, and the menu entry is disabled while no footer owner exists
-  // (ADR-0036). RootSwitcher deliberately keeps its own local dialog.
+  // (ADR-0038). RootSwitcher deliberately keeps its own local dialog.
   const dialogController = createWorkspaceFoldersDialogController()
   const pickDirectory = async (): Promise<string | null> => {
     // Read per call, as before: the picker belongs to the surface and may be

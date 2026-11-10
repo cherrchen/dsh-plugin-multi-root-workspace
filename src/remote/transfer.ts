@@ -157,6 +157,51 @@ const isPosixUnder = (candidate: string, root: string): boolean =>
 
 const isRegular = (permissions: number | undefined): boolean =>
   permissions !== undefined && (permissions & 0o170000) === REGULAR_FILE
+const isDirectory = (permissions: number | undefined): boolean =>
+  permissions !== undefined && (permissions & 0o170000) === 0o040000
+const isSymlink = (permissions: number | undefined): boolean =>
+  permissions !== undefined && (permissions & 0o170000) === 0o120000
+
+export interface RemotePathProbe {
+  realpath(path: string): Promise<string>
+  lstat(path: string): Promise<{ permissions?: number; size?: number }>
+}
+
+export async function assertRemoteParent(client: RemotePathProbe, root: string, parent: string): Promise<void> {
+  if (!isPosixUnder(parent, root)) {
+    throw new RemoteCopyError('target-escapes-root', `${parent} leaves the granted remote root`)
+  }
+  const rootReal = await client.realpath(root)
+  if (rootReal !== root) {
+    throw new RemoteCopyError('root-redirected', `the granted remote root now resolves to "${rootReal}"`)
+  }
+  const parentReal = await client.realpath(parent)
+  if (parentReal !== parent) {
+    throw new RemoteCopyError('destination-symlinked', `the destination parent resolves to "${parentReal}"`)
+  }
+  const relative = parent === root ? '' : parent.slice(root.replace(/\/+$/, '').length + 1)
+  const chain = [root.replace(/\/+$/, '') || '/']
+  for (const segment of relative === '' ? [] : relative.split('/')) {
+    chain.push(posixJoin(chain[chain.length - 1]!, segment))
+  }
+  for (const entry of chain) {
+    const attrs = await client.lstat(entry).catch((error: unknown) => {
+      if (error instanceof SftpStatusError && error.code === SSH_FX_NO_SUCH_FILE) {
+        throw new RemoteCopyError('destination-parent-missing', `${entry} does not exist`)
+      }
+      throw error
+    })
+    if (isSymlink(attrs.permissions)) throw new RemoteCopyError('destination-symlinked', `${entry} is a symlink`)
+    if (!isDirectory(attrs.permissions)) throw new RemoteCopyError('destination-parent-not-directory', `${entry} is not a directory`)
+  }
+}
+
+async function assertRemoteStaging(client: RemotePathProbe, path: string, written: number, expectedBytes: number): Promise<void> {
+  const [attrs, real] = await Promise.all([client.lstat(path), client.realpath(path)])
+  if (real !== path || !isRegular(attrs.permissions) || attrs.size !== written || attrs.size !== expectedBytes) {
+    throw new RemoteCopyError('staging-changed', `the remote staging object ${path} changed`)
+  }
+}
 
 /** Result factory — every field stays truthful for the report. */
 function result(status: RemoteCopyResult['status'], partial: Omit<RemoteCopyResult, 'status'>): RemoteCopyResult {
@@ -396,10 +441,12 @@ class RemoteSource {
 /** One remote staging object; publication is the no-replace hardlink. */
 class RemoteStage {
   private handle: Buffer | undefined
+  private written = 0
 
   constructor(
     readonly endpoint: RemoteEndpoint,
     readonly target: string,
+    readonly parent: string,
     readonly path: string,
     handle: Buffer,
   ) { this.handle = handle }
@@ -410,7 +457,7 @@ class RemoteStage {
       throw new RemoteCopyError('reserved-name', `${target} uses the transfer staging prefix`)
     }
     const parent = posixParent(target)
-    if (!isPosixUnder(parent, endpoint.root)) throw new RemoteCopyError('target-escapes-root', `${target} leaves the granted remote root`)
+    await assertRemoteParent(endpoint.client, endpoint.root, parent)
     try {
       await endpoint.client.lstat(target)
       throw new RemoteCopyError('target-exists', `${target} already exists`)
@@ -423,12 +470,14 @@ class RemoteStage {
     try { handle = await endpoint.client.open(path, P_WRITE | P_CREAT | P_EXCL, 0o600) } catch (error) {
       throw new RemoteCopyError('staging-unavailable', `cannot create the remote staging object: ${error instanceof Error ? error.message : String(error)}`)
     }
-    return new RemoteStage(endpoint, target, path, handle)
+    return new RemoteStage(endpoint, target, parent, path, handle)
   }
 
   async write(offset: number, data: Uint8Array): Promise<void> {
     if (this.handle === undefined) throw new RemoteCopyError('staging-closed', 'the remote staging handle is already closed')
+    if (offset !== this.written) throw new RemoteCopyError('staging-changed', `non-contiguous staging write at offset ${offset}`)
     await this.endpoint.client.write(this.handle, offset, data)
+    this.written += data.length
   }
 
   async finish(): Promise<void> {
@@ -445,22 +494,32 @@ class RemoteStage {
 
   /** Read the staged bytes back from the server; never trusts the sender's hash. */
   async verify(expected: string, expectedBytes: number): Promise<boolean> {
+    await assertRemoteParent(this.endpoint.client, this.endpoint.root, this.parent)
+    await assertRemoteStaging(this.endpoint.client, this.path, this.written, expectedBytes)
     const handle = await this.endpoint.client.open(this.path, P_READ)
     const hash = createHash('sha256')
     let bytes = 0
     try {
-      for (let offset = 0;;) {
-        const data = await this.endpoint.client.read(handle, offset, CHUNK)
+      for (let offset = 0; offset < expectedBytes;) {
+        const data = await this.endpoint.client.read(handle, offset, Math.min(CHUNK, expectedBytes - offset))
         if (data.length === 0) break
         hash.update(data)
         bytes += data.length
         offset += data.length
       }
+      if (bytes === expectedBytes && (await this.endpoint.client.read(handle, expectedBytes, 1)).length !== 0) {
+        bytes = -1
+      }
     } finally { await this.endpoint.client.close(handle).catch(() => {}) }
+    if (bytes === expectedBytes) {
+      await assertRemoteParent(this.endpoint.client, this.endpoint.root, this.parent)
+      await assertRemoteStaging(this.endpoint.client, this.path, this.written, expectedBytes)
+    }
     return bytes === expectedBytes && hash.digest('hex') === expected
   }
 
   async checkPublishable(): Promise<void> {
+    await assertRemoteParent(this.endpoint.client, this.endpoint.root, this.parent)
     try {
       await this.endpoint.client.lstat(this.target)
       throw new RemoteCopyError('target-exists', `${this.target} appeared before publication`)
@@ -468,7 +527,12 @@ class RemoteStage {
       if (error instanceof RemoteCopyError) throw error
       if (!(error instanceof SftpStatusError && error.code === SSH_FX_NO_SUCH_FILE)) throw error
     }
-    try { await this.endpoint.client.lstat(this.path) } catch { throw new RemoteCopyError('staging-changed', 'the remote staging name disappeared before publication') }
+    try { await assertRemoteStaging(this.endpoint.client, this.path, this.written, this.written) } catch (error) {
+      if (error instanceof SftpStatusError && error.code === SSH_FX_NO_SUCH_FILE) {
+        throw new RemoteCopyError('staging-changed', 'the remote staging name disappeared before publication')
+      }
+      throw error
+    }
   }
 
   /**
@@ -492,6 +556,7 @@ class RemoteStage {
   /** Only this operation's exact name, only while the same SFTP generation lives. */
   async cleanup(): Promise<'removed' | 'residual'> {
     if (this.endpoint.generationNow() !== this.endpoint.generation) return 'residual'
+    try { await assertRemoteParent(this.endpoint.client, this.endpoint.root, this.parent) } catch { return 'residual' }
     try { await this.endpoint.client.remove(this.path); return 'removed' } catch (error) {
       return error instanceof SftpStatusError && error.code === SSH_FX_NO_SUCH_FILE ? 'removed' : 'residual'
     }
@@ -815,7 +880,7 @@ export async function runRemoteCopy(
   return await copyRemoteToRemote(ctx)
 }
 
-/** Build the `remote_copy` tool registration — nothing registers it in any production path. */
+/** Build the `remote_copy` tool registration — the optional broker-attested remote tools row registers it. */
 export function remoteCopyTool(options: { registry: MultiRootRegistry; deps: RemoteCopyDeps }) {
   const endpoint = (required: boolean) => ({
     type: 'object',

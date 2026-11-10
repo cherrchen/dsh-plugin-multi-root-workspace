@@ -5,7 +5,7 @@
  * the `workspace` context-menu target (`{ workspaceId, path, displayTitle }`).
  * This module adds one action at `order: 150` — between upstream's rename
  * (100), the open-in-app entry (200) and delete (300) — and routes it to the
- * Workspace Folders dialog the sidebar footer owns (see ADR-0036).
+ * Workspace Folders dialog the sidebar footer owns (see ADR-0038).
  *
  * The dialog's requests are session-derived (ADR-0008), so the entry cannot
  * simply open it: it first decides which session the dialog should manage.

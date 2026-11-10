@@ -30,9 +30,29 @@ const eligible = { status: 'eligible' as const, release: '0.2.2-rc.1' }
 describe('parseSshConfig', () => {
   it('parses the fields that bind the host identity', () => {
     expect(parseSshConfig(SSH_G)).toMatchObject({ user: 'dshbuild', hostname: '64.118.149.252', strictHostKeyChecking: 'yes', forwardAgent: 'no' })
-    expect(() => parseSshConfig('hostname x\nstricthostkeychecking yes\nuser u')).not.toThrow()
+    expect(() => parseSshConfig('hostname x\nstricthostkeychecking yes\nuser u\nbatchmode yes\nforwardagent no')).not.toThrow()
     expect(() => parseSshConfig('user u\nhostname x\nstricthostkeychecking ask')).toThrowError(/strictHostKeyChecking/)
     expect(() => parseSshConfig('stricthostkeychecking yes')).toThrowError(/no user/)
+  })
+
+  it('names the known_hosts lookup OpenSSH-style: HostKeyAlias verbatim else [hostname]:port', () => {
+    expect(parseSshConfig(SSH_G).lookupHost).toBe('64.118.149.252')
+    expect(parseSshConfig(`${SSH_G}\nport 2222`).lookupHost).toBe('[64.118.149.252]:2222')
+    expect(parseSshConfig(`${SSH_G}\nport 2222\nhostkeyalias deploy-key`).lookupHost).toBe('deploy-key')
+    expect(parseSshConfig(`${SSH_G}\nport 2222\nhostkeyalias none`).lookupHost).toBe('none')
+  })
+
+  it('refuses settings that could rewrite or bypass host-key verification', () => {
+    expect(() => parseSshConfig(`${SSH_G}\nupdatehostkeys yes`)).toThrowError(/updateHostKeys/)
+    expect(() => parseSshConfig(`${SSH_G}\nbatchmode no`)).toThrowError(/batchMode/)
+    expect(() => parseSshConfig(`${SSH_G}\nforwardagent yes`)).toThrowError(/forwardAgent/)
+    expect(() => parseSshConfig(`${SSH_G}\nstricthostkeychecking accept-new`)).toThrowError(/strictHostKeyChecking/)
+  })
+
+  it('collects every active user and global known_hosts source', () => {
+    const parsed = parseSshConfig(`${SSH_G}\nglobalknownhostsfile /etc/ssh/ssh_known_hosts /dev/null`)
+    expect(parsed.knownHostsFiles).toEqual(['/home/t/.dsh-ssh-test/known_hosts'])
+    expect(parsed.globalKnownHostsFiles).toEqual(['/etc/ssh/ssh_known_hosts'])
   })
 })
 
@@ -68,5 +88,47 @@ describe('SshEnvironmentManager refusal ordering', () => {
   it('refuses account and host-key drift after ssh -G but before loading modules', async () => {
     await expect(open({ allow: true, env: environment({ account: 'other' }) })).rejects.toMatchObject({ code: 'account-mismatch' })
     await expect(open({ allow: true, env: environment({ hostKey: `SHA256:${'B'.repeat(43)}` }) })).rejects.toMatchObject({ code: 'host-key-mismatch' })
+  })
+
+  it('verifies the key under HostKeyAlias verbatim and never under the resolved hostname', async () => {
+    const lookups: string[] = []
+    const execAlias = async (file: string, args: readonly string[]) => {
+      if (file === 'ssh' && args[0] === '-G') return { stdout: `${SSH_G}\nhostkeyalias deploy-key`, stderr: '' }
+      if (file === 'ssh-keygen' && args[0] === '-F') {
+        lookups.push(args[1]!)
+        return { stdout: args[1] === 'deploy-key' ? `${KEY_LINE}\n` : '', stderr: '' }
+      }
+      if (file === 'ssh-keygen' && args[0] === '-lf') return { stdout: `256 ${FP} comment (ED25519)\n`, stderr: '' }
+      return { stdout: '', stderr: '' }
+    }
+    const manager = new SshEnvironmentManager({
+      manifest: manifest(), logger, gate: eligible, allowUnattestedForTesting: true, exec: execAlias, readFile: () => KEY_LINE,
+    })
+    await expect(manager.open('vps-app')).rejects.toSatisfy((error: unknown) => {
+      const code = (error as { code?: string }).code ?? ''
+      return !code.startsWith('host-key') && !code.startsWith('host-identity') && !code.startsWith('account-')
+    })
+    expect(lookups).toEqual(['deploy-key'])
+  })
+
+  it('looks a non-22 port host up as [hostname]:port', async () => {
+    const lookups: string[] = []
+    const execPort = async (file: string, args: readonly string[]) => {
+      if (file === 'ssh' && args[0] === '-G') return { stdout: `${SSH_G}\nport 2222`, stderr: '' }
+      if (file === 'ssh-keygen' && args[0] === '-F') {
+        lookups.push(args[1]!)
+        return { stdout: args[1] === '[64.118.149.252]:2222' ? `${KEY_LINE}\n` : '', stderr: '' }
+      }
+      if (file === 'ssh-keygen' && args[0] === '-lf') return { stdout: `256 ${FP} comment (ED25519)\n`, stderr: '' }
+      return { stdout: '', stderr: '' }
+    }
+    const manager = new SshEnvironmentManager({
+      manifest: manifest(), logger, gate: eligible, allowUnattestedForTesting: true, exec: execPort, readFile: () => KEY_LINE,
+    })
+    await expect(manager.open('vps-app')).rejects.toSatisfy((error: unknown) => {
+      const code = (error as { code?: string }).code ?? ''
+      return !code.startsWith('host-key') && !code.startsWith('host-identity') && !code.startsWith('account-')
+    })
+    expect(lookups).toEqual(['[64.118.149.252]:2222'])
   })
 })

@@ -28,6 +28,7 @@ export interface RemoteExecutionBackend {
     signal: AbortSignal,
   ): Promise<{ argv: readonly string[]; enforcement: 'full' | 'partial'; generation: string }>
   currentGeneration(): string
+  verifyCwd?(cwd: string, root: string, signal: AbortSignal): Promise<void>
   spawn(
     argv: readonly string[],
     options: { cwd: string; env: Readonly<Record<string, string>>; generation: string },
@@ -134,6 +135,11 @@ export async function runRemoteCommand(
       const admitted = operation.endpoints[0]!
       const remoteCwd = cwdRelative === '' ? admitted.displayPath : posix.join(admitted.displayPath, cwdRelative)
       const argv = [...deployment.shell, request.command]
+      if (backend.verifyCwd !== undefined) {
+        try { await backend.verifyCwd(remoteCwd, admitted.displayPath, signal) } catch (error) {
+          return denied(typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'cwd-unverifiable')
+        }
+      }
       let confined: Awaited<ReturnType<RemoteExecutionBackend['confine']>>
       try {
         confined = await backend.confine(argv, {
@@ -193,6 +199,12 @@ export async function runRemoteCommand(
   try {
     await handle.started
   } catch (error) {
+    if (error instanceof RemoteConnectionLost) {
+      return {
+        ...base, operationId, status: 'unknown', reconcileId: operationId,
+        reason: error.message,
+      }
+    }
     return {
       ...base, operationId, status: 'admitted-may-start',
       reason: error instanceof Error ? error.message : String(error),

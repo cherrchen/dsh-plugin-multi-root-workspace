@@ -1,5 +1,5 @@
 /**
- * Host-side client of the credential broker (ADR-0036).
+ * Host-side client of the credential broker (ADR-0039).
  *
  * `BrokerConnection` speaks the bounded protocol over the kernel-attested
  * socket; `BrokerEnvironmentManager` exposes the same structural surface as
@@ -133,8 +133,8 @@ export class BrokerConnection {
     const id = this.nextId++
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id)
-        reject(new BrokerError('broker-timeout', `the broker did not answer ${method}`))
+        this.lose(new BrokerError('broker-timeout', `the broker did not answer ${method}`))
+        this.channel.destroy()
       }, timeoutMs)
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timer })
       if (!writeBrokerLine(this.channel, { protocol: BROKER_PROTOCOL, id, method, params })) {
@@ -213,23 +213,24 @@ class BrokerSftp {
     private readonly connection: BrokerConnection,
     readonly environmentId: string,
     version: SftpVersion,
+    private readonly generation: string,
   ) { this.version = version }
 
   get negotiated(): SftpVersion { return this.version }
   async init(): Promise<SftpVersion> { return this.version }
   private call<T>(op: string, params: Record<string, unknown>): Promise<T> {
-    return this.connection.request<T>('sftp', { environmentId: this.environmentId, op, ...params }, 60_000)
+    return this.connection.request<T>('sftp', { environmentId: this.environmentId, generation: this.generation, op, ...params }, 60_000)
       .catch((error: unknown) => {
-        // The wire flattens SFTP errors into refusal codes: `sftp-status`
-        // carries `${SSH_FX_code}:${text}` and `connection-lost` the lost
-        // session. Reconstruct the typed errors so the transfer layer's
-        // `instanceof` branches keep their direct-path semantics.
+        // `sftp-status` carries `${SSH_FX_code}:${text}`; only a well-formed
+        // one is a definite remote answer. Everything else is connection loss.
         if (error instanceof BrokerError && error.code === 'sftp-status') {
           const match = /^(\d+):([\s\S]*)$/.exec(error.message)
-          if (match !== null) throw new SftpStatusError(Number(match[1]), match[2]!)
+          const status = match === null ? NaN : Number(match[1])
+          if (match !== null && Number.isSafeInteger(status) && status >= 0 && status <= 0xFFFFFFFF) {
+            throw new SftpStatusError(status, match[2]!)
+          }
         }
-        if (error instanceof BrokerError && error.code === 'connection-lost') throw new SftpConnectionLost(error.message)
-        throw error
+        throw new SftpConnectionLost(error instanceof Error ? error.message : String(error))
       })
   }
   async realpath(path: string): Promise<string> { return (await this.call<{ path: string }>('realpath', { path })).path }
@@ -249,7 +250,20 @@ class BrokerSftp {
   async remove(path: string): Promise<void> { await this.call('remove', { path }) }
   async hardlink(oldPath: string, newPath: string): Promise<void> { await this.call('hardlink', { oldPath, newPath }) }
   async fsync(handle: Buffer): Promise<void> { await this.call('fsync', { handle: encodeData(handle) }) }
-  dispose(): void { void this.connection.request('sftp', { environmentId: this.environmentId, op: 'dispose' }).catch(() => {}) }
+  dispose(): void { void this.connection.request('sftp', { environmentId: this.environmentId, generation: this.generation, op: 'dispose' }).catch(() => {}) }
+}
+
+const DEFINITE_SPAWN_REFUSALS = new Set([
+  'busy', 'generation-changed', 'spawn-failed', 'unknown-environment', 'manifest-unattested',
+  'transport-not-helper', 'credential-isolation-unattested', 'host-identity-unverifiable',
+  'account-mismatch', 'host-key-mismatch', 'platform-mismatch',
+])
+
+function isDefiniteRefusal(error: unknown): boolean {
+  return error instanceof BrokerError
+    && (DEFINITE_SPAWN_REFUSALS.has(error.code)
+      || error.code.startsWith('ssh-capability-absent:')
+      || error.code.startsWith('confinement-ticket-'))
 }
 
 /** A broker-backed environment/connection manager with the SSH manager's surface. */
@@ -258,6 +272,7 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
   private readonly environments = new Map<string, SshEnvironment>()
   private readonly generations = new Map<string, string>()
   private readonly sftpGenerations = new Map<string, string>()
+  private readonly confinementTickets = new WeakMap<readonly string[], string>()
 
   constructor(
     readonly deployment: DeploymentManifest,
@@ -274,18 +289,18 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
   }
 
   async openSftp(environmentId: string): Promise<SftpEnvironment> {
-    const existing = this.sftp.get(environmentId)
-    if (existing !== undefined) return existing
     const opened = await this.connection.request<{ generation: string; version: SftpVersion }>('openSftp', { environmentId })
-    const client = new BrokerSftp(this.connection, environmentId, opened.version) as unknown as SftpClient
+    const existing = this.sftp.get(environmentId)
+    if (existing !== undefined && existing.generation === opened.generation) return existing
+    const client = new BrokerSftp(this.connection, environmentId, opened.version, opened.generation) as unknown as SftpClient
     const environment: SftpEnvironment = {
       environmentId,
       generation: opened.generation,
       client,
       version: opened.version,
       dispose: async () => {
-        this.sftp.delete(environmentId)
-        await this.connection.request('sftp', { environmentId, op: 'dispose' }).catch(() => {})
+        if (this.sftp.get(environmentId) === environment) this.sftp.delete(environmentId)
+        await this.connection.request('sftp', { environmentId, generation: opened.generation, op: 'dispose' }).catch(() => {})
       },
     }
     this.sftp.set(environmentId, environment)
@@ -310,11 +325,13 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
       fs: {},
       sandbox: {
         confine: async (argv: readonly string[], policy: unknown, signal?: AbortSignal) => {
-          const confined = await this.connection.request<{ argv: readonly string[]; enforcement: string; generation: string }>(
+          const confined = await this.connection.request<{ argv: readonly string[]; enforcement: string; generation: string; confinementToken?: string }>(
             'confine', { environmentId, argv: [...argv], policy }, 60_000,
           )
           if (signal?.aborted) throw new Error('confine cancelled')
-          return { argv: confined.argv, enforcement: confined.enforcement }
+          const result = { argv: confined.argv, enforcement: confined.enforcement }
+          if (typeof confined.confinementToken === 'string') this.confinementTickets.set(result.argv, confined.confinementToken)
+          return result
         },
       },
       subprocess: {
@@ -359,6 +376,24 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
   } {
     const input = spec as { argv: readonly string[]; cwd: string; env: Readonly<Record<string, string>>; stdio: { stdout?: { maxBytes?: number }; stderr?: { maxBytes?: number } }; graceMs?: number }
     const generation = this.generationOf(environmentId)
+    const confinementToken = this.confinementTickets.get(input.argv)
+    if (confinementToken === undefined) {
+      const id = Promise.withResolvers<number>()
+      const exit = Promise.withResolvers<{ exitCode: number | null; signal: string | null; scope: boolean }>()
+      const failure = new BrokerError('confinement-ticket-missing', 'the spawn argv was not confined on this connection')
+      id.reject(failure)
+      exit.reject(failure)
+      void exit.promise.catch(() => {})
+      const started = id.promise.then(() => undefined)
+      void started.catch(() => {})
+      return {
+        started,
+        done: exit.promise as Promise<{ exitCode: number | null; signal: string | null }>,
+        exited: exit.promise,
+        terminate: () => {},
+        waitForExit: async () => false,
+      } as never
+    }
     const exit = Promise.withResolvers<{ exitCode: number | null; signal: string | null; scope: boolean }>()
     let stdout = ''
     let stderr = ''
@@ -373,6 +408,7 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
       stderrLimit: input.stdio?.stderr?.maxBytes ?? 65_536,
       graceMs: input.graceMs ?? 0,
       generation,
+      confinementToken,
     }, 60_000).then(value => {
       id.resolve(value.process)
       this.connection.watchProcess(value.process, {
@@ -382,11 +418,17 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
         lost: error => exit.reject(error),
       })
     }, error => {
-      id.reject(error)
-      exit.reject(error)
+      const failure = isDefiniteRefusal(error)
+        ? error
+        : new RemoteConnectionLost(error instanceof Error ? error.message : String(error))
+      id.reject(failure)
+      exit.reject(failure)
     })
+    const started = id.promise.then(() => undefined)
+    void started.catch(() => {})
+    void exit.promise.catch(() => {})
     return {
-      started: id.promise.then(() => undefined),
+      started,
       // `done` is the official handle's name (the verifier awaits it); the
       // exec adapter uses `exited`. Both observe the same exit event.
       done: exit.promise,
@@ -396,7 +438,8 @@ export class BrokerEnvironmentManager implements RemoteToolsManager {
         terminated = true
         void id.promise.then(process => this.connection.request('terminate', { process }).catch(() => {}), () => {})
       },
-      waitForExit: async (timeoutMs: number) => {
+      waitForExit: async (budget: number | AbortSignal = 500) => {
+        const timeoutMs = typeof budget === 'number' ? budget : budget.aborted ? 0 : 500
         // The caller asks AFTER `exited` settles; the broker recorded the
         // scope confirmation in the exit event. Fall back to a live wait only
         // if the event has not arrived yet.

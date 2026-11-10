@@ -10,13 +10,14 @@ import type {} from '../compat.ts'
 import type {} from '../providers.ts'
 import { classifySshCapability, sshPackageVersion, sshPrivateCopy } from '../compat/dsh-version.ts'
 import type { BrokerConfig } from './broker/attest.ts'
+import { installRemoteProfileGuard } from './profile-guard.ts'
 import { mountRemoteTools } from './tools-registration.ts'
 
 export interface Config {
   readonly broker?: { readonly config: BrokerConfig }
 }
 
-export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry', 'tools', 'sandboxPolicy', 'permissionPresets']
+export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry', 'tools', 'sandboxPolicy', 'permissionPresets', 'sandbox', 'subprocess', 'sessions']
 
 export function apply(ctx: Context, config: Config = {}): void {
   const broker = config.broker
@@ -27,6 +28,9 @@ export function apply(ctx: Context, config: Config = {}): void {
     readVersion: sshPackageVersion, privateCopy: sshPrivateCopy,
   })
   if (capability.status !== 'eligible') return
+
+  const restoreGuard = installRemoteProfileGuard(ctx)
+  ctx.effect(() => () => restoreGuard())
 
   void ctx.effect(async function* () {
     const manifest = ctx.multiRootRegistry.remoteManifest

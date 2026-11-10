@@ -8,7 +8,9 @@ const { root, primary, manifest, mode } = JSON.parse(process.argv[2]!) as { root
 const stack = await mountRegistryStack(root, {
   sharedStorageRoot: root,
   remoteEnvironments: manifest === undefined ? undefined : { enabled: true, manifestPath: manifest },
-}, { beforeGate: async ctx => {
+}, {
+  allowUserOwnedRemoteManifestForTesting: true,
+  beforeGate: async ctx => {
   await ctx.plugin(Projections)
   await ctx.plugin(Sessions)
   await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: primary })

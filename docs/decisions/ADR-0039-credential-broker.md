@@ -1,4 +1,4 @@
-# ADR-0036：以独立 OS 账户托管 SSH 连接的本机凭据代理
+# ADR-0039：以独立 OS 账户托管 SSH 连接的本机凭据代理
 
 **状态** Proposed · 2026-11-07。本文只规定凭据隔离的实现合同与验收条件；远端实验仍默认关闭，是否对模型开放由部署方的隔离证据决定，不由本文自动授权。
 
@@ -9,6 +9,8 @@ ADR-0032 已确认：rc.1 的 `SshConnection` 构造时立即启动 OpenSSH，�
 G4 的实跑把一个 chroot SFTP 账户、一个 helper 账户和宿主的 `ssh` 放在同一卷上，因此部署保持 `unattested`，工具未对模型开放。本 ADR 定义把连接托管到**独立 OS 账户**的方案，以及 Host 与它之间的**经内核认证的本机接口**。
 
 ## 决策
+
+下方保留 2026-11-07 初稿的历史设计。其“ControlMaster/Helper 暂存全部位于 home”布局与协议 2 的 hello/准入条件已被本文件 2026-11-10 的修正段落取代；当前实现以[控制面参考](../reference/multi-environment-control-plane.md)为准，不应按旧段落部署或签收。
 
 ### 1. 托管进程与凭据边界
 
@@ -60,6 +62,20 @@ G4 的实跑把一个 chroot SFTP 账户、一个 helper 账户和宿主的 `ssh
 ## 协议修订（2026-11-09）
 
 首轮 Linux 实机使用协议 1，只比较环境 ID。未发布分支改用协议 2 绑定整份清单，避免凭据代理和 Host 在配置更新时各持一份不同的同名环境。协议 1 与 2 不互通，部署要一起更新两端。具体开关和停用顺序见[控制面参考](../reference/multi-environment-control-plane.md#部署启用清单)。
+
+## 协议修订（2026-11-10，协议 3）
+
+未发布分支改用协议 3，与协议 2 不互通，两端必须一起更新：`hello` 增加必填 `sshCapability`（broker 账户自己的 SSH 能力判定，Host 不代替）；`confine` 的 policy 只收 `read-only`/`workspace-write`（schema 层拒绝 `danger-full-access`），且仅 `full` 实施级返回一次性 `confinementToken`——单连接、绑定环境/精确 argv/代次/workspaceRoot、TTL 30 秒、上限 256 条，`spawn` 消费票据后才启动；每条 `sftp` 请求必须携带会话代次，服务端拒绝过期代次，不复用旧会话的句柄。
+
+## 收窄与运行时约束（2026-11-10，外部评审修正）
+
+保留原方案的历史动机，追加以下收窄；本 ADR 仍为 Proposed，不代表模型开放已经签收：
+
+- **票据绑定**精确到 confine **返回后**的受限 argv（不是提交的 argv）；`spawn` 还在原生启动前拒绝非空 `LD_*`/`DYLD_*`/`NODE_OPTIONS`/`NODE_PATH` 环境键（`confinement-ticket-env`），杜绝动态加载器注入先于 runner 沙箱生效。
+- **证明收窄**：Host 与 broker 均不得为 root（`broker-root-uid`）；凭据根经 `lstat` 必须是非 symlink 的真实目录、属 broker、恰为 0700；模型可见复制目的必须是声明 `destinationIsolation: "chroot-sftp"` 的 sftp 环境，且不得与同 `namespace`+`account` 的 helper/exec 环境共存（`destination-isolation-required`）——helper 环境不能作复制目的。
+- **运行时守卫**（`src/remote/profile-guard.ts`）：专用 profile 安装即包裹 `sandboxPolicy.resolve`、`sandbox.confine`、`subprocess.spawn`/`spawnTerminal` 与晚激活的 `approval.request`——拒绝任何 `danger-full-access` 解析/策略/单发升级，未受票据约束的 spawn（LSP/job 等）fail-closed，`DSH_PTY_SESSION_ID` 标记终端按 `DSH_SESSION_ID` 找活体 Session 并重新准入/限定；守卫覆盖受支持的服务接缝，第三方 `node:child_process` 直引与用户终端标记属部署信任假设。
+- **临时文件**：ControlMaster/Helper 暂存归 broker 账户 `mkdtemp` 私有目录，Linux unit 以 `PrivateTmp=yes` 隔离；unit 未在容器内真实执行，真实部署证据仍缺。
+- **证据状态**：容器内协议 2 样例与伪造 hello 记录为**历史性反例**，不构成现行守卫的绿色证据；模型开放仍需配额/审计轮转/吊销与 Linux/systemd/GUI 证据（详见控制面参考"模型开放的前置阻断项"）。
 
 ## 备选与未决
 

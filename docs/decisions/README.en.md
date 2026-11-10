@@ -49,7 +49,7 @@ ADR-0001-short-title.md
 ADR-0002-short-title.md
 ```
 
-Numbers increment; titles use lowercase kebab-case. ADR-0030–0034 are reserved for the `feat/ssh-workspace` branch; mainline continues at 0035 after ADR-0029 — the gap is intentional, not missing entries.
+Numbers increment; titles use lowercase kebab-case. ADR-0030–0034 and ADR-0039 are reserved for the `feat/ssh-workspace` branch; mainline continues at 0035 after ADR-0029 — the gap is intentional, not missing entries.
 
 - [ADR-0021-auto-review-context-companion.md](./ADR-0021-auto-review-context-companion.md) — Optional Auto Review companion, shared tool permission preview, current constraints, native overlap, fail-closed checks and fork synchronization (Accepted).
 
@@ -86,3 +86,4 @@ Numbers increment; titles use lowercase kebab-case. ADR-0030–0034 are reserved
 - [ADR-0032](./ADR-0032-upstream-ssh-backend.md) — Reusing the upstream SSH providers, with distribution and platform evidence (Accepted).
 - [ADR-0033](./ADR-0033-remote-command-and-sandbox.md) — Explicit remote commands, sandbox guarantees and cancellation (Accepted).
 - [ADR-0034](./ADR-0034-binary-transfer.md) — Authorization, publication and failure semantics for binary transfers (Accepted).
+- [ADR-0039](./ADR-0039-credential-broker.md) — A local credential broker holding SSH connections under a dedicated OS account, with kernel authentication and attestation conditions (Proposed).

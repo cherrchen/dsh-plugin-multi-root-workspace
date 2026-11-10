@@ -7,11 +7,13 @@
  */
 import type { RemoteEnvironment } from './manifest.ts'
 import { RemoteConnectionLost, type RemoteExecutionBackend, type RemoteExecDeployment, type RemoteProcessHandle } from './exec.ts'
-import type { SshEnvironment } from './ssh-environment.ts'
+import type { SshEnvironment, SftpEnvironment } from './ssh-environment.ts'
+import { assertRemoteParent } from './transfer.ts'
 
 /** The manager surface the exec adapters need; the SSH manager implements it. */
 export interface SshExecManager {
   open(environmentId: string): Promise<SshEnvironment>
+  openSftp(environmentId: string): Promise<SftpEnvironment>
   generationOf(environmentId: string): string
   markStale(environmentId: string): void
 }
@@ -44,6 +46,11 @@ export function lazySshExecBackend(
     deployment,
     async confine(argv, policy, signal) { return await (await backend()).confine(argv, policy, signal) },
     currentGeneration() { return manager.generationOf(environment.environmentId) },
+    async verifyCwd(cwd, root, signal) {
+      if (signal.aborted) throw new Error('cancelled')
+      const session = await manager.openSftp(environment.environmentId)
+      await assertRemoteParent(session.client, root, cwd)
+    },
     spawn(argv, options, sink) {
       // The preparation admission always runs first; without it there is no
       // bound connection and no launch.
@@ -97,17 +104,19 @@ export function sshExecBackend(
           if (bytes !== undefined) sink[name](new TextEncoder().encode(bytes.text))
         }
       }
+      const exited = (async () => {
+        try {
+          const done = await handle.done
+          feed()
+          return { exitCode: (done.exitCode ?? null) as number | null, signal: (done.signal ?? null) as string | null }
+        } catch (error) { feed(); throw lost(error) }
+      })() as Promise<{ exitCode: number | null; signal: string | null }>
+      void exited.catch(() => {})
       return {
         // The upstream spec has no separate start acknowledgement: spawn
         // returns a handle whose done is already tracked, so started is now.
-        started: Promise.resolve(),
-        exited: (async () => {
-          try {
-            const done = await handle.done
-            feed()
-            return { exitCode: (done.exitCode ?? null) as number | null, signal: (done.signal ?? null) as string | null }
-          } catch (error) { feed(); throw lost(error) }
-        })() as Promise<{ exitCode: number | null; signal: string | null }>,
+        started: (handle as { started?: Promise<void> }).started ?? Promise.resolve(),
+        exited,
         terminate: () => handle.terminate(),
         waitForExit: async (timeoutMs: number) => await Promise.race([
           handle.waitForExit(AbortSignal.timeout(timeoutMs)).catch(() => false),

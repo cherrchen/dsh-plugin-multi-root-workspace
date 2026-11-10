@@ -1,0 +1,1344 @@
+===== final-compat-check.txt =====
+✓ Lockfile passes supply-chain policies (verified 48m ago)
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+. prepare$ pnpm run bundle
+. prepare: $ node scripts/clean-lib.mjs && tsdown
+. prepare: [clean-lib] removed 56 JavaScript artifact(s); lib/types/ is left alone
+. prepare: ℹ tsdown v0.22.14 powered by rolldown v1.2.8
+. prepare: ℹ config file: /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh/tsdown.config.ts
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] entry: src/auto-review/entry.ts, src/index.ts, src/compat.ts, src/fs.ts, src/sandbox.ts, src/scope.ts, src/registry.ts, src/providers.ts, src/instructions.ts, src/skills.ts, src/ops-compatibility.ts, src/review-context.ts, src/command.ts, src/lsp.ts, src/workspace-files.ts, src/process-fence.ts, src/windows-runner.ts, src/remote/broker/main.ts, src/remote/tools.ts
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] target: es2024
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] entry: src/client/index.ts
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] target: es2024
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] tsconfig: tsconfig.host.json
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] tsconfig: tsconfig.client.json
+. prepare: ℹ Build start
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] Hint: consider adding deps.onlyBundle option to avoid unintended bundling of dependencies, or set deps.onlyBundle: false to disable this hint.
+. prepare: See more at https://tsdown.dev/options/dependencies#deps-onlybundle
+. prepare: Detected dependencies in bundle:
+. prepare: - @deepseek-ai/dsh-session-projection
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] Hint: consider adding deps.onlyBundle option to avoid unintended bundling of dependencies, or set deps.onlyBundle: false to disable this hint.
+. prepare: See more at https://tsdown.dev/options/dependencies#deps-onlybundle
+. prepare: Detected dependencies in bundle:
+. prepare: - zod
+. prepare: - @deepseek-ai/dsh-typert-protocol
+. prepare: - clsx
+. prepare: - @deepseek-ai/dsh-util-workspace-path
+. prepare: - @deepseek-ai/dsh-host-open-in-app
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] [CJS] lib/client.js      442.59 kB │ gzip: 106.25 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] [CJS] lib/client.js.map    1.02 MB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] [CJS] 2 files, total: 1.46 MB
+. prepare: ✔ [@dsh-electron/dsh-plugin-multi-root-workspace/client] Build complete in 134ms
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/remote-tools.js                       76.63 kB │ gzip: 18.13 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/remote-broker.js                      65.08 kB │ gzip: 18.18 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/windows-runner.js                     53.86 kB │ gzip: 15.61 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/scope.js                              33.63 kB │ gzip: 10.68 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/skills.js                             27.46 kB │ gzip:  7.58 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/process-fence.js                      23.94 kB │ gzip:  7.38 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/workspace-files.js                    11.78 kB │ gzip:  3.13 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/auto-review.js                         6.76 kB │ gzip:  2.39 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/providers.js                           4.17 kB │ gzip:  1.81 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/index.js                               3.92 kB │ gzip:  1.44 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/ops-compatibility.js                   2.19 kB │ gzip:  1.03 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/lsp.js                                 2.07 kB │ gzip:  0.85 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/registry.js                            0.56 kB │ gzip:  0.28 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/instructions.js                        0.34 kB │ gzip:  0.20 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/command.js                             0.34 kB │ gzip:  0.20 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/compat.js                              0.27 kB │ gzip:  0.17 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/sandbox.js                             0.17 kB │ gzip:  0.12 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/fs.js                                  0.15 kB │ gzip:  0.12 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/review-context.js                      0.15 kB │ gzip:  0.11 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/registry-BQxc4MUb.js                 115.34 kB │ gzip: 31.50 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/command-CuB4hxF-.js                   63.92 kB │ gzip: 19.01 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/instructions-DDiMNNAE.js              58.73 kB │ gzip: 15.57 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/fork-CzbeWxHp.js                      29.67 kB │ gzip:  9.10 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/dialects-CdlG3RF9.js                  26.25 kB │ gzip:  7.69 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/roots-CmaWxRVy.js                     25.71 kB │ gzip:  8.12 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/attest-BZ96WLFH.js                    22.82 kB │ gzip:  6.55 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/dsh-version-B_dxTEn5.js               19.82 kB │ gzip:  6.36 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/sandbox-aobdyQGi.js                   14.50 kB │ gzip:  4.57 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/manifest-BnjEBk4P.js                  12.29 kB │ gzip:  3.79 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/compat-BBRIjXDg.js                    11.78 kB │ gzip:  4.56 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/sftp-B7m6wcIM.js                      11.76 kB │ gzip:  3.34 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/fs-Uws0ZpmV.js                        11.21 kB │ gzip:  4.00 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/protocol-NteXCAE9.js                  11.13 kB │ gzip:  3.25 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/native-B4H8HMrf.js                    10.58 kB │ gzip:  3.66 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/contract-CStSEOcK.js                   9.52 kB │ gzip:  3.08 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/native-win32-Dhf0ZIkX.js               8.81 kB │ gzip:  2.53 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/protocol-Cfodqkvs.js                   7.86 kB │ gzip:  2.48 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/exec-Do3G2p2g.js                       7.73 kB │ gzip:  2.47 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/windows-runner-contract-B5R2K3mM.js    7.10 kB │ gzip:  2.58 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/ops-tools-L91jHXC1.js                  6.10 kB │ gzip:  2.17 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/review-context-DzOLHBvO.js             5.95 kB │ gzip:  2.20 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/agent-instructions-BXuKhOzr.js         5.90 kB │ gzip:  2.21 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/registry-operation-CIlmt6_c.js         4.18 kB │ gzip:  1.47 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/registry-lease-win32-CEn3cLyh.js       3.96 kB │ gzip:  1.66 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/skills-utyuvmwr.js                     3.70 kB │ gzip:  1.49 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/llm-message-CepyzEBQ.js                3.14 kB │ gzip:  1.34 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/metadata-99jgViHQ.js                   2.06 kB │ gzip:  0.97 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/ops-settings-D22hd6cN.js               1.62 kB │ gzip:  0.72 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/method-wrapper-D4oUCsEF.js             1.55 kB │ gzip:  0.66 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/workspace-routing-D_qwMUh-.js          1.01 kB │ gzip:  0.50 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/process-profile-CuSqaIJp.js            0.90 kB │ gzip:  0.47 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/auto-review-packages-nRjnb4pU.js       0.69 kB │ gzip:  0.42 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/session-directory-BLOstut1.js          0.38 kB │ gzip:  0.24 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/contract-Bcpl-lsO.js                   0.25 kB │ gzip:  0.17 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/tool-context-CCeY3mrK.js               0.18 kB │ gzip:  0.15 kB
+. prepare: ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] 55 files, total: 841.56 kB
+. prepare: ✔ [@dsh-electron/dsh-plugin-multi-root-workspace] Build complete in 148ms
+. prepare: Done
+Done in 2.1s using pnpm v11.25.0
+$ node scripts/check-dsh-compat.mjs
+[compat] allowlist: 0.1.5-rc.2, 0.1.6-alpha.1, 0.1.6-alpha.2, 0.1.7-alpha.1, 0.1.7-alpha.2, 0.1.7-rc.1, 0.1.7-rc.2, 0.2.0-rc.1, 0.2.0-rc.2, 0.2.1-alpha.1, 0.2.1-alpha.2, 0.2.1-alpha.3, 0.2.1-alpha.4, 0.2.1-alpha.5, 0.2.1-rc.1, 0.2.1-rc.2, 0.2.1-rc.3, 0.2.1-rc.4, 0.2.1-rc.5, 0.2.2-alpha.2, 0.2.2-alpha.3, 0.2.2-rc.1
+[compat] development pin: 0.2.2-rc.1
+[compat] SSH development pin: 0.2.2-rc.1
+[compat] installed tree: 0.2.2-rc.1
+[compat] SSH floor: 0.2.2-rc.1
+[compat] optional Auto Review release: 0.2.1-rc.2
+[compat] allowlist, peerDependencies, development pin and installed tree agree
+
+
+===== final-lint.txt =====
+$ oxlint
+tests/remote-profile-guard.spec.ts:152:32: error eslint(no-unused-vars): Parameter 'input' is declared but never used. Unused parameters should start with a '_'. help: Consider removing this parameter.
+tests/remote-profile-guard.spec.ts:167:32: error eslint(no-unused-vars): Parameter 'input' is declared but never used. Unused parameters should start with a '_'. help: Consider removing this parameter.
+tests/remote-copy.spec.ts:636:31: error eslint(no-unused-vars): Parameter 'p' is declared but never used. Unused parameters should start with a '_'. help: Consider removing this parameter.
+[ELIFECYCLE] Command failed with exit code 1.
+
+
+===== final-lint-recheck.txt =====
+$ oxlint
+
+
+===== final-typecheck.txt =====
+$ tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit && node scripts/build-auto-review.mjs
+[auto-review] exact-version implementation typecheck skipped; public Loader API and JS artifact are retained
+
+
+===== final-build.txt =====
+$ pnpm run build:types && pnpm run bundle
+$ tsc -p tsconfig.host.json && tsc -p tsconfig.client.json && node scripts/build-auto-review.mjs
+[auto-review] exact-version implementation typecheck skipped; public Loader API and JS artifact are retained
+$ node scripts/clean-lib.mjs && tsdown
+[clean-lib] removed 57 JavaScript artifact(s); lib/types/ is left alone
+ℹ tsdown v0.22.14 powered by rolldown v1.2.8
+ℹ config file: /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh/tsdown.config.ts
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] entry: src/auto-review/entry.ts, src/index.ts, src/compat.ts, src/fs.ts, src/sandbox.ts, src/scope.ts, src/registry.ts, src/providers.ts, src/instructions.ts, src/skills.ts, src/ops-compatibility.ts, src/review-context.ts, src/command.ts, src/lsp.ts, src/workspace-files.ts, src/process-fence.ts, src/windows-runner.ts, src/remote/broker/main.ts, src/remote/tools.ts
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] target: es2024
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] entry: src/client/index.ts
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] target: es2024
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] tsconfig: tsconfig.host.json
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] tsconfig: tsconfig.client.json
+ℹ Build start
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] Hint: consider adding deps.onlyBundle option to avoid unintended bundling of dependencies, or set deps.onlyBundle: false to disable this hint.
+See more at https://tsdown.dev/options/dependencies#deps-onlybundle
+Detected dependencies in bundle:
+- @deepseek-ai/dsh-session-projection
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] Hint: consider adding deps.onlyBundle option to avoid unintended bundling of dependencies, or set deps.onlyBundle: false to disable this hint.
+See more at https://tsdown.dev/options/dependencies#deps-onlybundle
+Detected dependencies in bundle:
+- zod
+- @deepseek-ai/dsh-typert-protocol
+- clsx
+- @deepseek-ai/dsh-util-workspace-path
+- @deepseek-ai/dsh-host-open-in-app
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] [CJS] lib/client.js      442.59 kB │ gzip: 106.25 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] [CJS] lib/client.js.map    1.02 MB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace/client] [CJS] 2 files, total: 1.46 MB
+✔ [@dsh-electron/dsh-plugin-multi-root-workspace/client] Build complete in 71ms
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/remote-tools.js                       76.63 kB │ gzip: 18.13 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/remote-broker.js                      65.08 kB │ gzip: 18.18 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/windows-runner.js                     53.86 kB │ gzip: 15.61 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/scope.js                              33.63 kB │ gzip: 10.68 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/skills.js                             27.46 kB │ gzip:  7.58 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/process-fence.js                      23.94 kB │ gzip:  7.38 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/workspace-files.js                    11.78 kB │ gzip:  3.13 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/auto-review.js                         6.76 kB │ gzip:  2.39 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/providers.js                           4.17 kB │ gzip:  1.81 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/index.js                               3.92 kB │ gzip:  1.44 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/ops-compatibility.js                   2.19 kB │ gzip:  1.03 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/lsp.js                                 2.07 kB │ gzip:  0.85 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/registry.js                            0.56 kB │ gzip:  0.28 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/instructions.js                        0.34 kB │ gzip:  0.20 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/command.js                             0.34 kB │ gzip:  0.20 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/compat.js                              0.27 kB │ gzip:  0.17 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/sandbox.js                             0.17 kB │ gzip:  0.12 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/fs.js                                  0.15 kB │ gzip:  0.12 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/review-context.js                      0.15 kB │ gzip:  0.11 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/registry-BQxc4MUb.js                 115.34 kB │ gzip: 31.50 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/command-CuB4hxF-.js                   63.92 kB │ gzip: 19.01 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/instructions-DDiMNNAE.js              58.73 kB │ gzip: 15.57 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/fork-CzbeWxHp.js                      29.67 kB │ gzip:  9.10 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/dialects-CdlG3RF9.js                  26.25 kB │ gzip:  7.69 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/roots-CmaWxRVy.js                     25.71 kB │ gzip:  8.12 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/attest-BZ96WLFH.js                    22.82 kB │ gzip:  6.55 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/dsh-version-B_dxTEn5.js               19.82 kB │ gzip:  6.36 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/sandbox-aobdyQGi.js                   14.50 kB │ gzip:  4.57 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/manifest-BnjEBk4P.js                  12.29 kB │ gzip:  3.79 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/compat-BBRIjXDg.js                    11.78 kB │ gzip:  4.56 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/sftp-B7m6wcIM.js                      11.76 kB │ gzip:  3.34 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/fs-Uws0ZpmV.js                        11.21 kB │ gzip:  4.00 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/protocol-NteXCAE9.js                  11.13 kB │ gzip:  3.25 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/native-B4H8HMrf.js                    10.58 kB │ gzip:  3.66 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/contract-CStSEOcK.js                   9.52 kB │ gzip:  3.08 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/native-win32-Dhf0ZIkX.js               8.81 kB │ gzip:  2.53 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/protocol-Cfodqkvs.js                   7.86 kB │ gzip:  2.48 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/exec-Do3G2p2g.js                       7.73 kB │ gzip:  2.47 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/windows-runner-contract-B5R2K3mM.js    7.10 kB │ gzip:  2.58 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/ops-tools-L91jHXC1.js                  6.10 kB │ gzip:  2.17 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/review-context-DzOLHBvO.js             5.95 kB │ gzip:  2.20 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/agent-instructions-BXuKhOzr.js         5.90 kB │ gzip:  2.21 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/registry-operation-CIlmt6_c.js         4.18 kB │ gzip:  1.47 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/registry-lease-win32-CEn3cLyh.js       3.96 kB │ gzip:  1.66 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/skills-utyuvmwr.js                     3.70 kB │ gzip:  1.49 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/llm-message-CepyzEBQ.js                3.14 kB │ gzip:  1.34 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/metadata-99jgViHQ.js                   2.06 kB │ gzip:  0.97 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/ops-settings-D22hd6cN.js               1.62 kB │ gzip:  0.72 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/method-wrapper-D4oUCsEF.js             1.55 kB │ gzip:  0.66 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/workspace-routing-D_qwMUh-.js          1.01 kB │ gzip:  0.50 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/process-profile-CuSqaIJp.js            0.90 kB │ gzip:  0.47 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/auto-review-packages-nRjnb4pU.js       0.69 kB │ gzip:  0.42 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/session-directory-BLOstut1.js          0.38 kB │ gzip:  0.24 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/contract-Bcpl-lsO.js                   0.25 kB │ gzip:  0.17 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] lib/tool-context-CCeY3mrK.js               0.18 kB │ gzip:  0.15 kB
+ℹ [@dsh-electron/dsh-plugin-multi-root-workspace] [ESM] 55 files, total: 841.56 kB
+✔ [@dsh-electron/dsh-plugin-multi-root-workspace] Build complete in 78ms
+
+
+===== final-kernel-probe.txt =====
+$ node scripts/check-kernel-runner.mjs
+[kernel:probe] confined-execution availability on this host:
+  - seatbelt: ok — a confined command executed
+  - bwrap: unavailable — spawnSync bwrap ENOENT
+  - landlock: unavailable — none of landlock-exec, landlock-run is installed
+[kernel:probe] usable: seatbelt — the assertions for THESE dialects must run; the others are not required here.
+
+
+===== final-test.txt =====
+$ vitest run --reporter=default --reporter=json --outputFile=.dsh-smoke/ssh-review-20261110/vitest-final.json
+
+ RUN  v4.1.12 /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh
+
+ ✓ tests/command.spec.ts (69 tests) 2063ms
+ ✓ tests/client-navigator.spec.tsx (23 tests) 582ms
+ ✓ tests/registry.spec.ts (80 tests) 4188ms
+     ✓ keeps a historical over-limit store fully classified and granted, refusing only new adds  456ms
+2:13:50 PM [vite] (ssr) warning: "./${"pipeline"}" is not exported under the conditions ["node", "development", "import"] from package /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh/node_modules/@deepseek-ai/dsh-tools (see exports field in /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh/node_modules/@deepseek-ai/dsh-tools/package.json)
+  Plugin: builtin:vite-resolve
+ ✓ tests/client-panel.spec.tsx (76 tests) 3125ms
+ ✓ tests/remote-multiprocess.e2e.ts (5 tests) 4804ms
+   ✓ new owner + new follower: remote admit and forwarded add work  1020ms
+   ✓ new owner + old follower (remote disabled): v1 works, no remote connect  635ms
+   ✓ old owner + new follower: owner-without-remote-protocol, v1 unaffected  678ms
+   ✓ digest mismatch between Hosts fails remote only  752ms
+   ✓ owner exit → takeover → new epoch → remote re-hello and a stale request rejected  1718ms
+ ✓ tests/fs-parity.spec.ts (21 tests) 941ms
+ ✓ tests/instructions.spec.ts (54 tests) 667ms
+ ✓ tests/ops-compat.spec.ts (76 tests | 9 skipped) 1158ms
+ ✓ tests/client-switcher.spec.tsx (23 tests) 659ms
+ ✓ tests/escalation-override.spec.ts (28 tests) 228ms
+ ✓ tests/registry-multiprocess.e2e.ts (3 tests) 846ms
+ ✓ tests/skills-invocation.spec.ts (19 tests) 1169ms
+ ✓ tests/remote-sftp.spec.ts (5 tests) 1717ms
+     ✓ rejects init when the frame length is 1-4 bytes or the connection dies before VERSION  429ms
+     ✓ rejects a VERSION frame whose extension lengths overread the payload  330ms
+     ✓ rejects a truncated STATUS and a truncated ATTRS instead of delivering out-of-bounds data  346ms
+     ✓ accepts a valid fragmented handshake and reply  316ms
+ ✓ tests/skills-registry.spec.ts (10 tests) 708ms
+ ✓ tests/client-workspace-menu.spec.ts (26 tests) 113ms
+ ✓ tests/working-directory.e2e.ts (6 tests) 2630ms
+   ✓ uses the upstream Worktree service in both roots, preserves grants, and rejects an unauthorized repository  936ms
+   ✓ pins running process cwd and grants while a later spawn observes removal  640ms
+   ✓ leaves a running PTY cwd and grant snapshot intact after a directory change  695ms
+ ✓ tests/ssh-environment.spec.ts (10 tests) 636ms
+     ✓ verifies the key under HostKeyAlias verbatim and never under the resolved hostname  344ms
+ ✓ tests/shared-consumers.spec.ts (15 tests) 1214ms
+   ✓ quarantines unknown write results, keeps the lease and known denials, and never grants from the old table  456ms
+ ✓ tests/registry-operation.spec.ts (15 tests) 505ms
+ ✓ tests/lsp-workspaces.e2e.ts (8 tests | 1 skipped) 785ms
+     ✓ cancels an in-flight query promptly and keeps the server usable  406ms
+ ✓ tests/remote-journey.e2e.ts (8 tests) 637ms
+ ✓ tests/registry-lease.spec.ts (11 tests | 1 skipped) 627ms
+     ✓ elects exactly one authority when three OS processes contend for one store  355ms
+ ✓ tests/parity-matrix.spec.ts (16 tests | 4 skipped) 763ms
+ ✓ tests/remote-exec.spec.ts (11 tests) 560ms
+ ✓ tests/remote-registry.spec.ts (13 tests) 472ms
+ ✓ tests/skills-authority.spec.ts (4 tests) 466ms
+ ✓ tests/client-auto-review-settings.spec.tsx (13 tests) 562ms
+ ✓ tests/sandbox-multi-root.spec.ts (24 tests) 410ms
+ ✓ tests/remote-broker.spec.ts (31 tests) 408ms
+ ✓ tests/local-fs-facade.spec.ts (11 tests) 408ms
+ ✓ tests/authority-boundaries.spec.ts (14 tests | 2 skipped) 538ms
+ ✓ tests/authority-native.spec.ts (11 tests | 5 skipped) 406ms
+ ✓ tests/ops-activity.spec.ts (18 tests) 409ms
+ ✓ tests/b9-review-regressions.spec.ts (6 tests) 329ms
+ ✓ tests/skills-discovery.spec.ts (6 tests) 313ms
+ ✓ tests/remote-copy.spec.ts (35 tests) 108ms
+ ✓ tests/workspace-routing.spec.ts (18 tests) 228ms
+ ✓ tests/local-transfer-authority.spec.ts (5 tests) 204ms
+ ✓ tests/tool-access.spec.ts (7 tests) 235ms
+ ✓ tests/process-fence.spec.ts (25 tests) 361ms
+ ✓ tests/remote-tools.spec.ts (12 tests) 315ms
+ ✓ tests/client-files.spec.tsx (12 tests) 334ms
+ ✓ tests/upstream-additional-roots.spec.ts (4 tests) 173ms
+ ✓ tests/skills-settings.spec.ts (3 tests | 1 skipped) 169ms
+ ✓ tests/optional-peers.spec.ts (2 tests) 200ms
+ ✓ tests/client-ops-settings.spec.tsx (25 tests) 262ms
+ ✓ tests/scope.spec.ts (38 tests) 141ms
+ ✓ tests/windows-multi-root.spec.ts (15 tests | 1 skipped) 127ms
+ ✓ tests/skills-channel.spec.ts (1 test) 149ms
+ ✓ tests/skills-observation.spec.ts (6 tests) 105ms
+ ✓ tests/ops-settings.spec.ts (15 tests) 77ms
+ ✓ tests/sandbox-passthrough.spec.ts (8 tests) 72ms
+ ✓ tests/multi-environment-baseline.spec.ts (5 tests) 85ms
+ ✓ tests/compat.spec.ts (40 tests | 1 skipped) 92ms
+ ✓ tests/provider-conflict.spec.ts (5 tests) 63ms
+ ✓ tests/client-open-in-app-toast.spec.tsx (9 tests) 87ms
+ ✓ tests/ssh-compat.spec.ts (7 tests) 56ms
+ ✓ tests/client-skills.spec.tsx (6 tests) 72ms
+ ✓ tests/npm-cli.spec.ts (2 tests) 2ms
+ ✓ tests/workflows.spec.ts (18 tests) 75ms
+ ✓ tests/apply-patch.e2e.ts (2 tests) 73ms
+ ✓ tests/skills-compat.spec.ts (5 tests) 47ms
+ ✓ tests/remote-profile-guard.integration.spec.ts (3 tests) 79ms
+ ✓ tests/local-sink.spec.ts (10 tests) 63ms
+ ✓ tests/profile-isolation.spec.ts (27 tests | 2 skipped) 63ms
+ ✓ tests/baseline-identity.spec.ts (3 tests) 39ms
+ ✓ tests/ops-instruction-activity.spec.ts (22 tests) 29ms
+ ✓ tests/windows-broker.spec.ts (21 tests) 47ms
+ ✓ tests/windows-native-adapter.spec.ts (33 tests | 7 skipped) 15ms
+ ✓ tests/roots.spec.ts (66 tests) 16ms
+ ✓ tests/scope-preview.spec.ts (1 test) 15ms
+ ✓ tests/ssh-verifier.spec.ts (5 tests) 6ms
+ ✓ tests/instruction-activity.spec.ts (9 tests) 10ms
+ ✓ tests/baseline-profile-patch.spec.ts (2 tests) 9ms
+ ✓ tests/client-styles.spec.ts (20 tests) 24ms
+ ✓ tests/recovery.spec.ts (12 tests) 12ms
+ ✓ tests/remote-profile-guard.spec.ts (13 tests) 14ms
+ ✓ tests/client-bundle.spec.ts (10 tests) 13ms
+ ✓ tests/remote-manifest.spec.ts (35 tests) 13ms
+ ✓ tests/prompt-context.spec.ts (14 tests) 10ms
+ ✓ tests/connection-rpc.spec.ts (2 tests) 5ms
+stdout | tests/smoke-cleanup.spec.ts > smoke scratch cleanup ownership > leaves the whole home to its explicit parent, including unrelated residue
+[smoke] deferred scratch home cleanup to parent after exit: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/smoke-cleanup-A3ZWye
+
+ ✓ tests/smoke-cleanup.spec.ts (5 tests | 2 skipped) 6ms
+ ✓ tests/plugin-detail.spec.ts (3 tests) 9ms
+ ✓ tests/locale-parity.spec.ts (6 tests) 7ms
+ ✓ tests/static-ssh-imports.spec.ts (2 tests) 8ms
+ ✓ tests/dialects.spec.ts (34 tests) 10ms
+ ✓ tests/missing-deny-root.spec.ts (6 tests | 3 skipped) 5ms
+ ✓ tests/llm-message.spec.ts (2 tests) 2ms
+ ✓ tests/contract.spec.ts (6 tests) 6ms
+ ✓ tests/client-slot-probe.spec.ts (1 test) 43ms
+ ✓ tests/process-result.spec.ts (6 tests) 3ms
+ ✓ tests/windows-native.e2e.ts (41 tests | 40 skipped) 4ms
+ ✓ tests/pty-marker.spec.ts (8 tests) 4ms
+ ✓ tests/method-wrapper.spec.ts (3 tests) 2ms
+ ✓ tests/patch.spec.ts (13 tests) 4ms
+ ✓ tests/kernel-outcome.spec.ts (2 tests) 2ms
+ ✓ tests/cordis-pin.spec.ts (3 tests) 2ms
+ ✓ tests/process-entrypoints.spec.ts (6 tests) 2ms
+ ✓ tests/client-icons.spec.ts (5 tests) 3ms
+ ✓ tests/client-open-in-app.spec.ts (5 tests) 2ms
+ ✓ tests/client-session.spec.ts (16 tests) 4ms
+ ✓ tests/tool-result.spec.ts (3 tests) 2ms
+ ↓ tests/registry-semaphore-win32.e2e.ts (2 tests | 2 skipped)
+ ↓ tests/remote-broker.live.e2e.ts (6 tests | 6 skipped)
+ ↓ tests/remote-broker-faults.live.e2e.ts (2 tests | 2 skipped)
+ ↓ tests/remote-faults.live.e2e.ts (5 tests | 5 skipped)
+ ↓ tests/remote-journey.live.e2e.ts (4 tests | 4 skipped)
+ ↓ tests/remote-ssh.live.e2e.ts (19 tests | 19 skipped)
+ ↓ tests/skills-linux.e2e.ts (7 tests | 7 skipped)
+ ↓ tests/skills-windows.e2e.ts (7 tests | 7 skipped)
+ ✓ tests/remote-protocol.spec.ts (4 tests) 5374ms
+   ✓ a lost mutation reply rejects authority-disconnected and never replays  5029ms
+ ✓ tests/shared-registry.spec.ts (30 tests) 24837ms
+   ✓ cancels an in-flight follower handshake when the Host is torn down  366ms
+   ✓ refuses a follower with a different shared root limit while the owner stays active  784ms
+   ✓ takes over automatically after the owner exits without any user action  1040ms
+   ✓ reconnects and resynchronizes withheld projections without a refresh  983ms
+   ✓ resynchronizes a failed primary on a later tick while a synced one already recovered  2912ms
+   ✓ stays silent across repeated failed takeover ticks and recovers when listen works again  7402ms
+   ✓ stops scheduling when the Host is torn down mid-backoff  2653ms
+   ✓ honours the backgroundRecovery opt-out  5307ms
+   ✓ reports structured recovery diagnostics through the degraded lifecycle  974ms
+ ✓ tests/shared-registry-multiprocess.e2e.ts (6 tests) 26529ms
+   ✓ serializes concurrent mutations from separate heaps without losing either primary  1578ms
+   ✓ allows pre-revocation admitted I/O, refuses the next write, and recovers after a crash  753ms
+   ✓ elects exactly one successor and gives a restarted old holder the new epoch  1651ms
+   ✓ never steals a lease from a stopped authority  5560ms
+   ✓ takes over with a fresh epoch after the owner is killed, without any operation  1605ms
+   ✓ returns to the same-owner epoch after a stopped authority resumes, without replay  15381ms
+ ✓ tests/registry-recovery-soak.e2e.ts (1 test) 30637ms
+   ✓ an idle contended host stays silent and cheap across the backoff ladder  30636ms
+
+ Test Files  106 passed | 8 skipped (114)
+      Tests  1545 passed | 131 skipped (1676)
+   Start at  14:13:45
+   Duration  30.98s (transform 3.10s, setup 0ms, import 14.53s, tests 127.95s, environment 5.34s)
+
+JSON report written to /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh/.dsh-smoke/ssh-review-20261110/vitest-final.json
+
+
+===== final-lint-delta.txt =====
+
+ RUN  v4.1.12 /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh
+
+ ✓ tests/remote-profile-guard.spec.ts (13 tests) 21ms
+ ✓ tests/remote-copy.spec.ts (35 tests) 116ms
+
+ Test Files  2 passed (2)
+      Tests  48 passed (48)
+   Start at  14:19:01
+   Duration  381ms (transform 217ms, setup 0ms, import 316ms, tests 137ms, environment 0ms)
+
+JSON report written to /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh/.dsh-smoke/ssh-review-20261110/vitest-lint-delta.json
+
+
+===== final-smoke-compose.txt =====
+$ node scripts/smoke-compose.mjs
+[smoke:compose] scratch home: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-multi-root-smoke/compose-15446
+dsh: initialized profile mr-baseline at /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-multi-root-smoke/compose-15446/profiles/mr-baseline
+Already up to date
+
+Done in 414ms using pnpm v11.28.5
+[dsh-runtime] first `dsh plugin add /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh` exited 0 — no build-approval stop
+
+[smoke:compose] 54 passed, 0 failed, 0 skipped
+
+
+===== final-smoke-behavior.txt =====
+$ node scripts/smoke-behavior.mjs
+[smoke:behavior] scratch home: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-multi-root-smoke/behavior-15476
+[smoke:behavior] fixture: /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh/.dsh-smoke/behavior-15476
+dsh: initialized profile mr-baseline at /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-multi-root-smoke/behavior-15476/profiles/mr-baseline
+Already up to date
+
+Done in 256ms using pnpm v11.28.5
+[dsh-runtime] first `dsh plugin add /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh` exited 0 — no build-approval stop
+(node:15476) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[smoke:behavior] 137 passed, 0 failed, 0 skipped
+
+
+===== final-smoke-journey.txt =====
+$ node scripts/smoke-journey.mjs
+[smoke:journey] scratch home: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-multi-root-smoke/journey-15843
+[smoke:journey] fixture: /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh/.dsh-smoke/journey-15843
+[dsh-runtime] first `dsh plugin add /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh` exited 0 — no build-approval stop
+dsh web: http://127.0.0.1:51993/?token=<redacted>
+[dsh-runtime] first `dsh plugin add /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh` exited 0 — no build-approval stop
+
+[smoke:journey] 76 passed, 0 failed, 0 skipped
+
+
+===== final-pack-check.txt =====
+$ node scripts/check-pack.mjs
+[pack:check] /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-pack-2E12mt/dsh-electron-dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgz
+[pack:check] 222 members:
+  package/CHANGELOG.en.md
+  package/CHANGELOG.md
+  package/LICENSE
+  package/README.en.md
+  package/README.md
+  package/cordis.patch.yml
+  package/detail/DETAIL.en.md
+  package/detail/DETAIL.md
+  package/detail/preview.svg
+  package/detail/preview.zh.svg
+  package/lib/agent-instructions-BXuKhOzr.js
+  package/lib/attest-BZ96WLFH.js
+  package/lib/auto-review-packages-nRjnb4pU.js
+  package/lib/auto-review.js
+  package/lib/client.js
+  package/lib/client.js.map
+  package/lib/command-CuB4hxF-.js
+  package/lib/command.js
+  package/lib/compat-BBRIjXDg.js
+  package/lib/compat.js
+  package/lib/contract-Bcpl-lsO.js
+  package/lib/contract-CStSEOcK.js
+  package/lib/dialects-CdlG3RF9.js
+  package/lib/dsh-version-B_dxTEn5.js
+  package/lib/exec-Do3G2p2g.js
+  package/lib/fork-CzbeWxHp.js
+  package/lib/fs-Uws0ZpmV.js
+  package/lib/fs.js
+  package/lib/index.js
+  package/lib/instructions-DDiMNNAE.js
+  package/lib/instructions.js
+  package/lib/llm-message-CepyzEBQ.js
+  package/lib/lsp.js
+  package/lib/manifest-BnjEBk4P.js
+  package/lib/metadata-99jgViHQ.js
+  package/lib/method-wrapper-D4oUCsEF.js
+  package/lib/native-B4H8HMrf.js
+  package/lib/native-win32-Dhf0ZIkX.js
+  package/lib/ops-compatibility.js
+  package/lib/ops-settings-D22hd6cN.js
+  package/lib/ops-tools-L91jHXC1.js
+  package/lib/process-fence.js
+  package/lib/process-profile-CuSqaIJp.js
+  package/lib/protocol-Cfodqkvs.js
+  package/lib/protocol-NteXCAE9.js
+  package/lib/providers.js
+  package/lib/registry-BQxc4MUb.js
+  package/lib/registry-lease-win32-CEn3cLyh.js
+  package/lib/registry-operation-CIlmt6_c.js
+  package/lib/registry.js
+  package/lib/remote-broker.js
+  package/lib/remote-tools.js
+  package/lib/review-context-DzOLHBvO.js
+  package/lib/review-context.js
+  package/lib/roots-CmaWxRVy.js
+  package/lib/sandbox-aobdyQGi.js
+  package/lib/sandbox.js
+  package/lib/scope.js
+  package/lib/session-directory-BLOstut1.js
+  package/lib/sftp-B7m6wcIM.js
+  package/lib/skills-utyuvmwr.js
+  package/lib/skills.js
+  package/lib/tool-context-CCeY3mrK.js
+  package/lib/types/authority/native-win32.d.ts
+  package/lib/types/authority/native.d.ts
+  package/lib/types/authority/protocol.d.ts
+  package/lib/types/authority/recovery.d.ts
+  package/lib/types/auto-review/entry.d.ts
+  package/lib/types/client/HeroWorkspaceEntry.d.ts
+  package/lib/types/client/RootSwitcher.d.ts
+  package/lib/types/client/WorkspaceFoldersAction.d.ts
+  package/lib/types/client/auto-review-settings.d.ts
+  package/lib/types/client/files-tree/FilesBody.module.css.d.ts
+  package/lib/types/client/files-tree/FilesTree.d.ts
+  package/lib/types/client/files-tree/adapter.d.ts
+  package/lib/types/client/files-tree/directory-node.d.ts
+  package/lib/types/client/files-tree/face.d.ts
+  package/lib/types/client/files-tree/locales.d.ts
+  package/lib/types/client/files-tree/locate.d.ts
+  package/lib/types/client/files-tree/navigator.d.ts
+  package/lib/types/client/files-tree/primitives.d.ts
+  package/lib/types/client/files-tree/store.d.ts
+  package/lib/types/client/index.d.ts
+  package/lib/types/client/locales.d.ts
+  package/lib/types/client/open-in-app/OpenInAppAction.d.ts
+  package/lib/types/client/open-in-app/OpenTargetButton.d.ts
+  package/lib/types/client/open-in-app/OpenTargetButton.module.css.d.ts
+  package/lib/types/client/open-in-app/adapter.d.ts
+  package/lib/types/client/open-in-app/applications.d.ts
+  package/lib/types/client/open-in-app/controller.d.ts
+  package/lib/types/client/open-in-app/device.d.ts
+  package/lib/types/client/open-in-app/locales.d.ts
+  package/lib/types/client/open-in-app/open-path.d.ts
+  package/lib/types/client/open-in-app/open-toast.d.ts
+  package/lib/types/client/open-in-app/outcome.d.ts
+  package/lib/types/client/ops-settings.d.ts
+  package/lib/types/client/panel-client.d.ts
+  package/lib/types/client/remotes-client.d.ts
+  package/lib/types/client/skills-client.d.ts
+  package/lib/types/client/skills-settings.d.ts
+  package/lib/types/client/skills.d.ts
+  package/lib/types/client/styles.d.ts
+  package/lib/types/client/workspace-folders-dialog.d.ts
+  package/lib/types/client/workspace-menu.d.ts
+  package/lib/types/command.d.ts
+  package/lib/types/compat.d.ts
+  package/lib/types/compat/agent-instructions.d.ts
+  package/lib/types/compat/authority-storage.d.ts
+  package/lib/types/compat/auto-review-client.d.ts
+  package/lib/types/compat/auto-review-contract.d.ts
+  package/lib/types/compat/auto-review-loader.d.ts
+  package/lib/types/compat/auto-review-packages.d.ts
+  package/lib/types/compat/client-icons.d.ts
+  package/lib/types/compat/client-session.d.ts
+  package/lib/types/compat/connection-rpc.d.ts
+  package/lib/types/compat/dsh-version.d.ts
+  package/lib/types/compat/files-tree.d.ts
+  package/lib/types/compat/forge-entrypoints.d.ts
+  package/lib/types/compat/fs-patch.d.ts
+  package/lib/types/compat/instruction-activity.d.ts
+  package/lib/types/compat/instruction-overlap.d.ts
+  package/lib/types/compat/koffi.d.ts
+  package/lib/types/compat/llm-message.d.ts
+  package/lib/types/compat/open-in-app-device.d.ts
+  package/lib/types/compat/open-in-app-routes.d.ts
+  package/lib/types/compat/ops-confirmation.d.ts
+  package/lib/types/compat/ops-settings.d.ts
+  package/lib/types/compat/ops-tools.d.ts
+  package/lib/types/compat/process-entrypoints.d.ts
+  package/lib/types/compat/process-profile.d.ts
+  package/lib/types/compat/process-result.d.ts
+  package/lib/types/compat/pty-marker.d.ts
+  package/lib/types/compat/review-session.d.ts
+  package/lib/types/compat/sandbox-confine.d.ts
+  package/lib/types/compat/session-directory.d.ts
+  package/lib/types/compat/session-existence.d.ts
+  package/lib/types/compat/skill-content.d.ts
+  package/lib/types/compat/skills-client.d.ts
+  package/lib/types/compat/skills-settings.d.ts
+  package/lib/types/compat/skills.d.ts
+  package/lib/types/compat/ssh-packages.d.ts
+  package/lib/types/compat/storage-zod.d.ts
+  package/lib/types/compat/tool-context.d.ts
+  package/lib/types/compat/tool-result.d.ts
+  package/lib/types/compat/windows-deny-preflight.d.ts
+  package/lib/types/compat/windows-native.d.ts
+  package/lib/types/compat/windows-path-guard.d.ts
+  package/lib/types/compat/workspace-files.d.ts
+  package/lib/types/containment.d.ts
+  package/lib/types/contract.d.ts
+  package/lib/types/dialects.d.ts
+  package/lib/types/fs.d.ts
+  package/lib/types/index.d.ts
+  package/lib/types/instructions.d.ts
+  package/lib/types/lsp.d.ts
+  package/lib/types/method-wrapper.d.ts
+  package/lib/types/ops-compatibility.d.ts
+  package/lib/types/process-fence.d.ts
+  package/lib/types/profile-isolation.d.ts
+  package/lib/types/providers.d.ts
+  package/lib/types/registry-lease-win32.d.ts
+  package/lib/types/registry-lease.d.ts
+  package/lib/types/registry-operation.d.ts
+  package/lib/types/registry.d.ts
+  package/lib/types/remote/broker/attest.d.ts
+  package/lib/types/remote/broker/client.d.ts
+  package/lib/types/remote/broker/main.d.ts
+  package/lib/types/remote/broker/protocol.d.ts
+  package/lib/types/remote/broker/server.d.ts
+  package/lib/types/remote/capabilities.d.ts
+  package/lib/types/remote/contract.d.ts
+  package/lib/types/remote/exec-tool.d.ts
+  package/lib/types/remote/exec.d.ts
+  package/lib/types/remote/local-sink.d.ts
+  package/lib/types/remote/manifest.d.ts
+  package/lib/types/remote/panel-contract.d.ts
+  package/lib/types/remote/plane.d.ts
+  package/lib/types/remote/profile-guard.d.ts
+  package/lib/types/remote/protocol.d.ts
+  package/lib/types/remote/records.d.ts
+  package/lib/types/remote/sftp.d.ts
+  package/lib/types/remote/ssh-environment.d.ts
+  package/lib/types/remote/ssh-exec-backend.d.ts
+  package/lib/types/remote/ssh-verifier.d.ts
+  package/lib/types/remote/tools-registration.d.ts
+  package/lib/types/remote/tools.d.ts
+  package/lib/types/remote/transfer.d.ts
+  package/lib/types/review-context.d.ts
+  package/lib/types/roots.d.ts
+  package/lib/types/sandbox.d.ts
+  package/lib/types/scope.d.ts
+  package/lib/types/skills-contract.d.ts
+  package/lib/types/skills.d.ts
+  package/lib/types/skills/catalog.d.ts
+  package/lib/types/skills/invocation.d.ts
+  package/lib/types/skills/metadata.d.ts
+  package/lib/types/skills/pool.d.ts
+  package/lib/types/skills/reader.d.ts
+  package/lib/types/skills/routing.d.ts
+  package/lib/types/windows-broker.d.ts
+  package/lib/types/windows-deny.d.ts
+  package/lib/types/windows-profile.d.ts
+  package/lib/types/windows-runner-contract.d.ts
+  package/lib/types/windows-runner.d.ts
+  package/lib/types/workspace-files.d.ts
+  package/lib/types/workspace-routing.d.ts
+  package/lib/windows-runner-contract-B5R2K3mM.js
+  package/lib/windows-runner.js
+  package/lib/workspace-files.js
+  package/lib/workspace-routing-D_qwMUh-.js
+  package/locale/en.json
+  package/locale/zh.json
+  package/package.json
+  package/scripts/ssh-broker/install.sh
+  package/scripts/windows-broker/install.ps1
+  package/scripts/windows-broker/rights.cs
+  package/scripts/windows-broker/service.cs
+  package/scripts/windows-broker/verify-install.ps1
+  package/src/auto-review/FORK.md
+  package/src/auto-review/LICENSE
+  package/src/auto-review/README.en.md
+  package/src/auto-review/README.md
+[pack:check] the packed artifact is complete
+(node:16085) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 78, column 18:
+
+        dshHome: !!js dshHomePath()
+                 ^^^^
+
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16085) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 88, column 28:
+
+        sharedStorageRoot: !!js dshHomePath('storages')
+                           ^^^^
+
+(node:16085) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 89, column 20:
+
+        leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+                   ^^^^
+
+(node:16085) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 145, column 18:
+
+        dshHome: !!js dshHomePath()
+                 ^^^^
+
+
+
+===== final-smoke-packed.txt =====
+$ node scripts/smoke-packed.mjs
+[smoke:packed] packed artifact: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-pack-kDH2zr/dsh-electron-dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgz
+[smoke:packed] scratch home root: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148
+[smoke:behavior] scratch home: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148/behavior-16198
+[smoke:behavior] fixture: /Volumes/西数2T/Chen/deepseek-harness/dsh-plugin-multi-root-workspace-ssh/.dsh-smoke/behavior-16198
+dsh: initialized profile mr-baseline at /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148/behavior-16198/profiles/mr-baseline
+Already up to date
+
+Done in 264ms using pnpm v11.28.5
+[dsh-runtime] first `dsh plugin add` stopped at build approval (exit 1); verbatim output:
+Progress: resolved 0, reused 1, downloaded 0, added 0
+[WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.
+Packages: +4
+++++
+Packages are copied from the content-addressable store to the virtual store.
+  Content-addressable store is at: /Users/m2/Library/pnpm/store/v11
+  Virtual store is at:             node_modules/.pnpm
+Progress: resolved 23, reused 4, downloaded 0, added 4, done
+
+dependencies:
++ @dsh-electron/dsh-plugin-multi-root-workspace 0.1.17-ssh.1
+
+[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: koffi@3.3.7
+
+Run "pnpm approve-builds" to pick which dependencies should be allowed to run scripts.
+dsh: initialized profile mr-plugin at /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148/behavior-16198/profiles/mr-plugin
+Command failed with exit code 1: pnpm add /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-pack-kDH2zr/dsh-electron-dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgzdsh: plugin command failed; diagnostics: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148/behavior-16198/profiles/mr-plugin/.plugin-manager/logs/operation-Fh3lbO/pnpm.log
+[dsh-runtime] applied the documented recovery: `koffi` allowBuild set to `true` in the scratch profile; re-running the same add
+[dsh-runtime] install succeeded after the allowBuilds recovery
+[dsh-runtime] @dsh-electron/dsh-plugin-multi-root-workspace was installed as a dependency but NOT activated in dsh.profile.bundles — the build-approval-interrupted first add left it already present, so the recovered add's reconcile skipped it; re-registering through a real `remove` + `add` cycle
+✓ Lockfile passes supply-chain policies (verified 936ms ago)
+Already up to date
+
+dependencies:
+- @dsh-electron/dsh-plugin-multi-root-workspace 0.1.17-ssh.1
+
+Done in 371ms using pnpm v11.28.5
+✓ Lockfile passes supply-chain policies (verified 531ms ago)
+Progress: resolved 0, reused 1, downloaded 0, added 0
+[WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.
+Packages: +4
+++++
+Packages are copied from the content-addressable store to the virtual store.
+  Content-addressable store is at: /Users/m2/Library/pnpm/store/v11
+  Virtual store is at:             node_modules/.pnpm
+Progress: resolved 23, reused 4, downloaded 0, added 4, done
+node_modules/koffi install$ node ./cnoke.cjs -P . -D src/koffi --prebuild --release
+node_modules/koffi install: Done
+
+dependencies:
++ @dsh-electron/dsh-plugin-multi-root-workspace 0.1.17-ssh.1
+
+Done in 949ms using pnpm v11.28.5
+[dsh-runtime] bundle activation confirmed after remove + add
+(node:16198) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[smoke:behavior] 136 passed, 0 failed, 0 skipped
+[smoke] deferred scratch home cleanup to parent after exit: /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-packed-16148/behavior-16198
+[smoke:packed] child closed; removing scratch home
+[smoke:packed] the packed artifact passed the behavior battery
+
+
+===== final-auto-review-fork.txt =====
+$ node scripts/check-auto-review-fork.mjs
+[auto-review:fork] baseline hash, explicit delta, policy, identity, roles, protocol and owner teardown verified
+
+
+===== final-smoke-auto-review.txt =====
+$ node scripts/verify-auto-review.mjs
+[auto-review] skipped: optional integration targets only 0.2.1-rc.2; ordinary gates remain active
+[auto-review] skipped: optional integration targets only 0.2.1-rc.2; ordinary gates remain active
+
+
+===== final-installer-preflight-initial.txt =====
+anchor=lib/remote-broker.js; expected=0; actual=1
+unresolvable from broker entry: @deepseek-ai/dsh
+Traceback (most recent call last):
+  File "<stdin>", line 9, in <module>
+AssertionError
+
+
+===== final-installer-preflight.txt =====
+anchor=lib/remote-broker.js; expected=0; actual=0
+anchor=/var/empty/dsh-no-deps/lib/entry.js; expected=1; actual=1
+unresolvable from broker entry: @deepseek-ai/dsh, @deepseek-ai/cordis, @deepseek-ai/dsh-ssh, @deepseek-ai/dsh-fs-ssh, @deepseek-ai/dsh-subprocess-ssh, @deepseek-ai/dsh-sandbox-ssh
+installer syntax and isolated dependency preflight checks passed; no installer provisioning executed
+
+
+===== final-latest-docs-check.txt =====
+$ node scripts/check-docs.mjs
+Documentation checks
+
+[PASS] README bilingual pairs
+[PASS] Agent note bilingual pairs
+[PASS] English document suffixes
+[PASS] README language navigation
+[PASS] Markdown local links
+[PASS] Absolute paths
+[PASS] Agent note filenames
+[PASS] Plan lifecycle
+[PASS] ADR naming
+[PASS] Empty documents
+
+0 errors, 0 warnings.
+
+Documentation checks passed.
+
+
+===== final-latest-pack-check.txt =====
+$ node scripts/check-pack.mjs
+[pack:check] /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-pack-yUguvA/dsh-electron-dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgz
+[pack:check] 222 members:
+  package/CHANGELOG.en.md
+  package/CHANGELOG.md
+  package/LICENSE
+  package/README.en.md
+  package/README.md
+  package/cordis.patch.yml
+  package/detail/DETAIL.en.md
+  package/detail/DETAIL.md
+  package/detail/preview.svg
+  package/detail/preview.zh.svg
+  package/lib/agent-instructions-BXuKhOzr.js
+  package/lib/attest-BZ96WLFH.js
+  package/lib/auto-review-packages-nRjnb4pU.js
+  package/lib/auto-review.js
+  package/lib/client.js
+  package/lib/client.js.map
+  package/lib/command-CuB4hxF-.js
+  package/lib/command.js
+  package/lib/compat-BBRIjXDg.js
+  package/lib/compat.js
+  package/lib/contract-Bcpl-lsO.js
+  package/lib/contract-CStSEOcK.js
+  package/lib/dialects-CdlG3RF9.js
+  package/lib/dsh-version-B_dxTEn5.js
+  package/lib/exec-Do3G2p2g.js
+  package/lib/fork-CzbeWxHp.js
+  package/lib/fs-Uws0ZpmV.js
+  package/lib/fs.js
+  package/lib/index.js
+  package/lib/instructions-DDiMNNAE.js
+  package/lib/instructions.js
+  package/lib/llm-message-CepyzEBQ.js
+  package/lib/lsp.js
+  package/lib/manifest-BnjEBk4P.js
+  package/lib/metadata-99jgViHQ.js
+  package/lib/method-wrapper-D4oUCsEF.js
+  package/lib/native-B4H8HMrf.js
+  package/lib/native-win32-Dhf0ZIkX.js
+  package/lib/ops-compatibility.js
+  package/lib/ops-settings-D22hd6cN.js
+  package/lib/ops-tools-L91jHXC1.js
+  package/lib/process-fence.js
+  package/lib/process-profile-CuSqaIJp.js
+  package/lib/protocol-Cfodqkvs.js
+  package/lib/protocol-NteXCAE9.js
+  package/lib/providers.js
+  package/lib/registry-BQxc4MUb.js
+  package/lib/registry-lease-win32-CEn3cLyh.js
+  package/lib/registry-operation-CIlmt6_c.js
+  package/lib/registry.js
+  package/lib/remote-broker.js
+  package/lib/remote-tools.js
+  package/lib/review-context-DzOLHBvO.js
+  package/lib/review-context.js
+  package/lib/roots-CmaWxRVy.js
+  package/lib/sandbox-aobdyQGi.js
+  package/lib/sandbox.js
+  package/lib/scope.js
+  package/lib/session-directory-BLOstut1.js
+  package/lib/sftp-B7m6wcIM.js
+  package/lib/skills-utyuvmwr.js
+  package/lib/skills.js
+  package/lib/tool-context-CCeY3mrK.js
+  package/lib/types/authority/native-win32.d.ts
+  package/lib/types/authority/native.d.ts
+  package/lib/types/authority/protocol.d.ts
+  package/lib/types/authority/recovery.d.ts
+  package/lib/types/auto-review/entry.d.ts
+  package/lib/types/client/HeroWorkspaceEntry.d.ts
+  package/lib/types/client/RootSwitcher.d.ts
+  package/lib/types/client/WorkspaceFoldersAction.d.ts
+  package/lib/types/client/auto-review-settings.d.ts
+  package/lib/types/client/files-tree/FilesBody.module.css.d.ts
+  package/lib/types/client/files-tree/FilesTree.d.ts
+  package/lib/types/client/files-tree/adapter.d.ts
+  package/lib/types/client/files-tree/directory-node.d.ts
+  package/lib/types/client/files-tree/face.d.ts
+  package/lib/types/client/files-tree/locales.d.ts
+  package/lib/types/client/files-tree/locate.d.ts
+  package/lib/types/client/files-tree/navigator.d.ts
+  package/lib/types/client/files-tree/primitives.d.ts
+  package/lib/types/client/files-tree/store.d.ts
+  package/lib/types/client/index.d.ts
+  package/lib/types/client/locales.d.ts
+  package/lib/types/client/open-in-app/OpenInAppAction.d.ts
+  package/lib/types/client/open-in-app/OpenTargetButton.d.ts
+  package/lib/types/client/open-in-app/OpenTargetButton.module.css.d.ts
+  package/lib/types/client/open-in-app/adapter.d.ts
+  package/lib/types/client/open-in-app/applications.d.ts
+  package/lib/types/client/open-in-app/controller.d.ts
+  package/lib/types/client/open-in-app/device.d.ts
+  package/lib/types/client/open-in-app/locales.d.ts
+  package/lib/types/client/open-in-app/open-path.d.ts
+  package/lib/types/client/open-in-app/open-toast.d.ts
+  package/lib/types/client/open-in-app/outcome.d.ts
+  package/lib/types/client/ops-settings.d.ts
+  package/lib/types/client/panel-client.d.ts
+  package/lib/types/client/remotes-client.d.ts
+  package/lib/types/client/skills-client.d.ts
+  package/lib/types/client/skills-settings.d.ts
+  package/lib/types/client/skills.d.ts
+  package/lib/types/client/styles.d.ts
+  package/lib/types/client/workspace-folders-dialog.d.ts
+  package/lib/types/client/workspace-menu.d.ts
+  package/lib/types/command.d.ts
+  package/lib/types/compat.d.ts
+  package/lib/types/compat/agent-instructions.d.ts
+  package/lib/types/compat/authority-storage.d.ts
+  package/lib/types/compat/auto-review-client.d.ts
+  package/lib/types/compat/auto-review-contract.d.ts
+  package/lib/types/compat/auto-review-loader.d.ts
+  package/lib/types/compat/auto-review-packages.d.ts
+  package/lib/types/compat/client-icons.d.ts
+  package/lib/types/compat/client-session.d.ts
+  package/lib/types/compat/connection-rpc.d.ts
+  package/lib/types/compat/dsh-version.d.ts
+  package/lib/types/compat/files-tree.d.ts
+  package/lib/types/compat/forge-entrypoints.d.ts
+  package/lib/types/compat/fs-patch.d.ts
+  package/lib/types/compat/instruction-activity.d.ts
+  package/lib/types/compat/instruction-overlap.d.ts
+  package/lib/types/compat/koffi.d.ts
+  package/lib/types/compat/llm-message.d.ts
+  package/lib/types/compat/open-in-app-device.d.ts
+  package/lib/types/compat/open-in-app-routes.d.ts
+  package/lib/types/compat/ops-confirmation.d.ts
+  package/lib/types/compat/ops-settings.d.ts
+  package/lib/types/compat/ops-tools.d.ts
+  package/lib/types/compat/process-entrypoints.d.ts
+  package/lib/types/compat/process-profile.d.ts
+  package/lib/types/compat/process-result.d.ts
+  package/lib/types/compat/pty-marker.d.ts
+  package/lib/types/compat/review-session.d.ts
+  package/lib/types/compat/sandbox-confine.d.ts
+  package/lib/types/compat/session-directory.d.ts
+  package/lib/types/compat/session-existence.d.ts
+  package/lib/types/compat/skill-content.d.ts
+  package/lib/types/compat/skills-client.d.ts
+  package/lib/types/compat/skills-settings.d.ts
+  package/lib/types/compat/skills.d.ts
+  package/lib/types/compat/ssh-packages.d.ts
+  package/lib/types/compat/storage-zod.d.ts
+  package/lib/types/compat/tool-context.d.ts
+  package/lib/types/compat/tool-result.d.ts
+  package/lib/types/compat/windows-deny-preflight.d.ts
+  package/lib/types/compat/windows-native.d.ts
+  package/lib/types/compat/windows-path-guard.d.ts
+  package/lib/types/compat/workspace-files.d.ts
+  package/lib/types/containment.d.ts
+  package/lib/types/contract.d.ts
+  package/lib/types/dialects.d.ts
+  package/lib/types/fs.d.ts
+  package/lib/types/index.d.ts
+  package/lib/types/instructions.d.ts
+  package/lib/types/lsp.d.ts
+  package/lib/types/method-wrapper.d.ts
+  package/lib/types/ops-compatibility.d.ts
+  package/lib/types/process-fence.d.ts
+  package/lib/types/profile-isolation.d.ts
+  package/lib/types/providers.d.ts
+  package/lib/types/registry-lease-win32.d.ts
+  package/lib/types/registry-lease.d.ts
+  package/lib/types/registry-operation.d.ts
+  package/lib/types/registry.d.ts
+  package/lib/types/remote/broker/attest.d.ts
+  package/lib/types/remote/broker/client.d.ts
+  package/lib/types/remote/broker/main.d.ts
+  package/lib/types/remote/broker/protocol.d.ts
+  package/lib/types/remote/broker/server.d.ts
+  package/lib/types/remote/capabilities.d.ts
+  package/lib/types/remote/contract.d.ts
+  package/lib/types/remote/exec-tool.d.ts
+  package/lib/types/remote/exec.d.ts
+  package/lib/types/remote/local-sink.d.ts
+  package/lib/types/remote/manifest.d.ts
+  package/lib/types/remote/panel-contract.d.ts
+  package/lib/types/remote/plane.d.ts
+  package/lib/types/remote/profile-guard.d.ts
+  package/lib/types/remote/protocol.d.ts
+  package/lib/types/remote/records.d.ts
+  package/lib/types/remote/sftp.d.ts
+  package/lib/types/remote/ssh-environment.d.ts
+  package/lib/types/remote/ssh-exec-backend.d.ts
+  package/lib/types/remote/ssh-verifier.d.ts
+  package/lib/types/remote/tools-registration.d.ts
+  package/lib/types/remote/tools.d.ts
+  package/lib/types/remote/transfer.d.ts
+  package/lib/types/review-context.d.ts
+  package/lib/types/roots.d.ts
+  package/lib/types/sandbox.d.ts
+  package/lib/types/scope.d.ts
+  package/lib/types/skills-contract.d.ts
+  package/lib/types/skills.d.ts
+  package/lib/types/skills/catalog.d.ts
+  package/lib/types/skills/invocation.d.ts
+  package/lib/types/skills/metadata.d.ts
+  package/lib/types/skills/pool.d.ts
+  package/lib/types/skills/reader.d.ts
+  package/lib/types/skills/routing.d.ts
+  package/lib/types/windows-broker.d.ts
+  package/lib/types/windows-deny.d.ts
+  package/lib/types/windows-profile.d.ts
+  package/lib/types/windows-runner-contract.d.ts
+  package/lib/types/windows-runner.d.ts
+  package/lib/types/workspace-files.d.ts
+  package/lib/types/workspace-routing.d.ts
+  package/lib/windows-runner-contract-B5R2K3mM.js
+  package/lib/windows-runner.js
+  package/lib/workspace-files.js
+  package/lib/workspace-routing-D_qwMUh-.js
+  package/locale/en.json
+  package/locale/zh.json
+  package/package.json
+  package/scripts/ssh-broker/install.sh
+  package/scripts/windows-broker/install.ps1
+  package/scripts/windows-broker/rights.cs
+  package/scripts/windows-broker/service.cs
+  package/scripts/windows-broker/verify-install.ps1
+  package/src/auto-review/FORK.md
+  package/src/auto-review/LICENSE
+  package/src/auto-review/README.en.md
+  package/src/auto-review/README.md
+[pack:check] the packed artifact is complete
+(node:17751) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 78, column 18:
+
+        dshHome: !!js dshHomePath()
+                 ^^^^
+
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:17751) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 88, column 28:
+
+        sharedStorageRoot: !!js dshHomePath('storages')
+                           ^^^^
+
+(node:17751) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 89, column 20:
+
+        leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+                   ^^^^
+
+(node:17751) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 145, column 18:
+
+        dshHome: !!js dshHomePath()
+                 ^^^^
+
+
+
+===== final-entry-probe-local.txt =====
+entry-probe syntax and isolated raw-spawn observation cases passed; no deployment probe executed
+
+
+===== ready-lint.txt =====
+$ oxlint
+
+
+===== ready-docs-check.txt =====
+$ node scripts/check-docs.mjs
+Documentation checks
+
+[PASS] README bilingual pairs
+[PASS] Agent note bilingual pairs
+[PASS] English document suffixes
+[PASS] README language navigation
+[PASS] Markdown local links
+[PASS] Absolute paths
+[PASS] Agent note filenames
+[PASS] Plan lifecycle
+[PASS] ADR naming
+[PASS] Empty documents
+
+0 errors, 0 warnings.
+
+Documentation checks passed.
+
+
+===== ready-pack-check.txt =====
+$ node scripts/check-pack.mjs
+[pack:check] /var/folders/31/m13kcsfx08lg3ld8kc5gh8cm0000gn/T/dsh-pack-ujStjy/dsh-electron-dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgz
+[pack:check] 222 members:
+  package/CHANGELOG.en.md
+  package/CHANGELOG.md
+  package/LICENSE
+  package/README.en.md
+  package/README.md
+  package/cordis.patch.yml
+  package/detail/DETAIL.en.md
+  package/detail/DETAIL.md
+  package/detail/preview.svg
+  package/detail/preview.zh.svg
+  package/lib/agent-instructions-BXuKhOzr.js
+  package/lib/attest-BZ96WLFH.js
+  package/lib/auto-review-packages-nRjnb4pU.js
+  package/lib/auto-review.js
+  package/lib/client.js
+  package/lib/client.js.map
+  package/lib/command-CuB4hxF-.js
+  package/lib/command.js
+  package/lib/compat-BBRIjXDg.js
+  package/lib/compat.js
+  package/lib/contract-Bcpl-lsO.js
+  package/lib/contract-CStSEOcK.js
+  package/lib/dialects-CdlG3RF9.js
+  package/lib/dsh-version-B_dxTEn5.js
+  package/lib/exec-Do3G2p2g.js
+  package/lib/fork-CzbeWxHp.js
+  package/lib/fs-Uws0ZpmV.js
+  package/lib/fs.js
+  package/lib/index.js
+  package/lib/instructions-DDiMNNAE.js
+  package/lib/instructions.js
+  package/lib/llm-message-CepyzEBQ.js
+  package/lib/lsp.js
+  package/lib/manifest-BnjEBk4P.js
+  package/lib/metadata-99jgViHQ.js
+  package/lib/method-wrapper-D4oUCsEF.js
+  package/lib/native-B4H8HMrf.js
+  package/lib/native-win32-Dhf0ZIkX.js
+  package/lib/ops-compatibility.js
+  package/lib/ops-settings-D22hd6cN.js
+  package/lib/ops-tools-L91jHXC1.js
+  package/lib/process-fence.js
+  package/lib/process-profile-CuSqaIJp.js
+  package/lib/protocol-Cfodqkvs.js
+  package/lib/protocol-NteXCAE9.js
+  package/lib/providers.js
+  package/lib/registry-BQxc4MUb.js
+  package/lib/registry-lease-win32-CEn3cLyh.js
+  package/lib/registry-operation-CIlmt6_c.js
+  package/lib/registry.js
+  package/lib/remote-broker.js
+  package/lib/remote-tools.js
+  package/lib/review-context-DzOLHBvO.js
+  package/lib/review-context.js
+  package/lib/roots-CmaWxRVy.js
+  package/lib/sandbox-aobdyQGi.js
+  package/lib/sandbox.js
+  package/lib/scope.js
+  package/lib/session-directory-BLOstut1.js
+  package/lib/sftp-B7m6wcIM.js
+  package/lib/skills-utyuvmwr.js
+  package/lib/skills.js
+  package/lib/tool-context-CCeY3mrK.js
+  package/lib/types/authority/native-win32.d.ts
+  package/lib/types/authority/native.d.ts
+  package/lib/types/authority/protocol.d.ts
+  package/lib/types/authority/recovery.d.ts
+  package/lib/types/auto-review/entry.d.ts
+  package/lib/types/client/HeroWorkspaceEntry.d.ts
+  package/lib/types/client/RootSwitcher.d.ts
+  package/lib/types/client/WorkspaceFoldersAction.d.ts
+  package/lib/types/client/auto-review-settings.d.ts
+  package/lib/types/client/files-tree/FilesBody.module.css.d.ts
+  package/lib/types/client/files-tree/FilesTree.d.ts
+  package/lib/types/client/files-tree/adapter.d.ts
+  package/lib/types/client/files-tree/directory-node.d.ts
+  package/lib/types/client/files-tree/face.d.ts
+  package/lib/types/client/files-tree/locales.d.ts
+  package/lib/types/client/files-tree/locate.d.ts
+  package/lib/types/client/files-tree/navigator.d.ts
+  package/lib/types/client/files-tree/primitives.d.ts
+  package/lib/types/client/files-tree/store.d.ts
+  package/lib/types/client/index.d.ts
+  package/lib/types/client/locales.d.ts
+  package/lib/types/client/open-in-app/OpenInAppAction.d.ts
+  package/lib/types/client/open-in-app/OpenTargetButton.d.ts
+  package/lib/types/client/open-in-app/OpenTargetButton.module.css.d.ts
+  package/lib/types/client/open-in-app/adapter.d.ts
+  package/lib/types/client/open-in-app/applications.d.ts
+  package/lib/types/client/open-in-app/controller.d.ts
+  package/lib/types/client/open-in-app/device.d.ts
+  package/lib/types/client/open-in-app/locales.d.ts
+  package/lib/types/client/open-in-app/open-path.d.ts
+  package/lib/types/client/open-in-app/open-toast.d.ts
+  package/lib/types/client/open-in-app/outcome.d.ts
+  package/lib/types/client/ops-settings.d.ts
+  package/lib/types/client/panel-client.d.ts
+  package/lib/types/client/remotes-client.d.ts
+  package/lib/types/client/skills-client.d.ts
+  package/lib/types/client/skills-settings.d.ts
+  package/lib/types/client/skills.d.ts
+  package/lib/types/client/styles.d.ts
+  package/lib/types/client/workspace-folders-dialog.d.ts
+  package/lib/types/client/workspace-menu.d.ts
+  package/lib/types/command.d.ts
+  package/lib/types/compat.d.ts
+  package/lib/types/compat/agent-instructions.d.ts
+  package/lib/types/compat/authority-storage.d.ts
+  package/lib/types/compat/auto-review-client.d.ts
+  package/lib/types/compat/auto-review-contract.d.ts
+  package/lib/types/compat/auto-review-loader.d.ts
+  package/lib/types/compat/auto-review-packages.d.ts
+  package/lib/types/compat/client-icons.d.ts
+  package/lib/types/compat/client-session.d.ts
+  package/lib/types/compat/connection-rpc.d.ts
+  package/lib/types/compat/dsh-version.d.ts
+  package/lib/types/compat/files-tree.d.ts
+  package/lib/types/compat/forge-entrypoints.d.ts
+  package/lib/types/compat/fs-patch.d.ts
+  package/lib/types/compat/instruction-activity.d.ts
+  package/lib/types/compat/instruction-overlap.d.ts
+  package/lib/types/compat/koffi.d.ts
+  package/lib/types/compat/llm-message.d.ts
+  package/lib/types/compat/open-in-app-device.d.ts
+  package/lib/types/compat/open-in-app-routes.d.ts
+  package/lib/types/compat/ops-confirmation.d.ts
+  package/lib/types/compat/ops-settings.d.ts
+  package/lib/types/compat/ops-tools.d.ts
+  package/lib/types/compat/process-entrypoints.d.ts
+  package/lib/types/compat/process-profile.d.ts
+  package/lib/types/compat/process-result.d.ts
+  package/lib/types/compat/pty-marker.d.ts
+  package/lib/types/compat/review-session.d.ts
+  package/lib/types/compat/sandbox-confine.d.ts
+  package/lib/types/compat/session-directory.d.ts
+  package/lib/types/compat/session-existence.d.ts
+  package/lib/types/compat/skill-content.d.ts
+  package/lib/types/compat/skills-client.d.ts
+  package/lib/types/compat/skills-settings.d.ts
+  package/lib/types/compat/skills.d.ts
+  package/lib/types/compat/ssh-packages.d.ts
+  package/lib/types/compat/storage-zod.d.ts
+  package/lib/types/compat/tool-context.d.ts
+  package/lib/types/compat/tool-result.d.ts
+  package/lib/types/compat/windows-deny-preflight.d.ts
+  package/lib/types/compat/windows-native.d.ts
+  package/lib/types/compat/windows-path-guard.d.ts
+  package/lib/types/compat/workspace-files.d.ts
+  package/lib/types/containment.d.ts
+  package/lib/types/contract.d.ts
+  package/lib/types/dialects.d.ts
+  package/lib/types/fs.d.ts
+  package/lib/types/index.d.ts
+  package/lib/types/instructions.d.ts
+  package/lib/types/lsp.d.ts
+  package/lib/types/method-wrapper.d.ts
+  package/lib/types/ops-compatibility.d.ts
+  package/lib/types/process-fence.d.ts
+  package/lib/types/profile-isolation.d.ts
+  package/lib/types/providers.d.ts
+  package/lib/types/registry-lease-win32.d.ts
+  package/lib/types/registry-lease.d.ts
+  package/lib/types/registry-operation.d.ts
+  package/lib/types/registry.d.ts
+  package/lib/types/remote/broker/attest.d.ts
+  package/lib/types/remote/broker/client.d.ts
+  package/lib/types/remote/broker/main.d.ts
+  package/lib/types/remote/broker/protocol.d.ts
+  package/lib/types/remote/broker/server.d.ts
+  package/lib/types/remote/capabilities.d.ts
+  package/lib/types/remote/contract.d.ts
+  package/lib/types/remote/exec-tool.d.ts
+  package/lib/types/remote/exec.d.ts
+  package/lib/types/remote/local-sink.d.ts
+  package/lib/types/remote/manifest.d.ts
+  package/lib/types/remote/panel-contract.d.ts
+  package/lib/types/remote/plane.d.ts
+  package/lib/types/remote/profile-guard.d.ts
+  package/lib/types/remote/protocol.d.ts
+  package/lib/types/remote/records.d.ts
+  package/lib/types/remote/sftp.d.ts
+  package/lib/types/remote/ssh-environment.d.ts
+  package/lib/types/remote/ssh-exec-backend.d.ts
+  package/lib/types/remote/ssh-verifier.d.ts
+  package/lib/types/remote/tools-registration.d.ts
+  package/lib/types/remote/tools.d.ts
+  package/lib/types/remote/transfer.d.ts
+  package/lib/types/review-context.d.ts
+  package/lib/types/roots.d.ts
+  package/lib/types/sandbox.d.ts
+  package/lib/types/scope.d.ts
+  package/lib/types/skills-contract.d.ts
+  package/lib/types/skills.d.ts
+  package/lib/types/skills/catalog.d.ts
+  package/lib/types/skills/invocation.d.ts
+  package/lib/types/skills/metadata.d.ts
+  package/lib/types/skills/pool.d.ts
+  package/lib/types/skills/reader.d.ts
+  package/lib/types/skills/routing.d.ts
+  package/lib/types/windows-broker.d.ts
+  package/lib/types/windows-deny.d.ts
+  package/lib/types/windows-profile.d.ts
+  package/lib/types/windows-runner-contract.d.ts
+  package/lib/types/windows-runner.d.ts
+  package/lib/types/workspace-files.d.ts
+  package/lib/types/workspace-routing.d.ts
+  package/lib/windows-runner-contract-B5R2K3mM.js
+  package/lib/windows-runner.js
+  package/lib/workspace-files.js
+  package/lib/workspace-routing-D_qwMUh-.js
+  package/locale/en.json
+  package/locale/zh.json
+  package/package.json
+  package/scripts/ssh-broker/install.sh
+  package/scripts/windows-broker/install.ps1
+  package/scripts/windows-broker/rights.cs
+  package/scripts/windows-broker/service.cs
+  package/scripts/windows-broker/verify-install.ps1
+  package/src/auto-review/FORK.md
+  package/src/auto-review/LICENSE
+  package/src/auto-review/README.en.md
+  package/src/auto-review/README.md
+[pack:check] the packed artifact is complete
+(node:19048) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 78, column 18:
+
+        dshHome: !!js dshHomePath()
+                 ^^^^
+
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:19048) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 88, column 28:
+
+        sharedStorageRoot: !!js dshHomePath('storages')
+                           ^^^^
+
+(node:19048) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 89, column 20:
+
+        leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+                   ^^^^
+
+(node:19048) [TAG_RESOLVE_FAILED] YAMLWarning: Unresolved tag: tag:yaml.org,2002:js at line 145, column 18:
+
+        dshHome: !!js dshHomePath()
+                 ^^^^
+
+
+
+===== ready-docs-final.txt =====
+$ node scripts/check-docs.mjs
+Documentation checks
+
+[PASS] README bilingual pairs
+[PASS] Agent note bilingual pairs
+[PASS] English document suffixes
+[PASS] README language navigation
+[PASS] Markdown local links
+[PASS] Absolute paths
+[PASS] Agent note filenames
+[PASS] Plan lifecycle
+[PASS] ADR naming
+[PASS] Empty documents
+
+0 errors, 0 warnings.
+
+Documentation checks passed.

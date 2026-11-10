@@ -1,5 +1,5 @@
 /**
- * The credential broker's local wire contract (ADR-0036).
+ * The credential broker's local wire contract (ADR-0039).
  *
  * One JSON object per line over the kernel-attested Unix socket; the broker
  * sends `hello` first and then answers requests and streams process output as
@@ -15,7 +15,7 @@ import { z } from 'zod'
 import type { Channel } from '../../authority/native.ts'
 
 /** The only protocol this broker speaks. */
-export const BROKER_PROTOCOL = 2
+export const BROKER_PROTOCOL = 3
 /** One line, including the newline, must fit this budget. */
 export const MAX_LINE = 2 * 1024 * 1024
 /** One binary field (SFTP data, stdout/stderr chunk) must fit this budget. */
@@ -34,24 +34,25 @@ export type BrokerMethod = typeof METHODS[number]
 const base64 = z.string().max(Math.ceil(MAX_DATA / 3) * 4 + 4)
 const environmentId = z.string().regex(/^[a-z0-9][a-z0-9-]{2,62}$/)
 const policy = z.object({
-  mode: z.enum(['read-only', 'workspace-write', 'danger-full-access']),
+  mode: z.enum(['read-only', 'workspace-write']),
   workspaceRoot: z.string().min(1).max(4096),
   sessionId: z.string().min(1).max(256),
 }).strict()
 const argv = z.array(z.string().max(4096)).min(1).max(64)
 const outputLimit = z.number().int().nonnegative().max(MAX_DATA)
+const generation = z.string().min(1).max(128)
 
 const sftpParams = z.discriminatedUnion('op', [
-  z.object({ environmentId, op: z.literal('realpath'), path: z.string().max(4096) }).strict(),
-  z.object({ environmentId, op: z.literal('lstat'), path: z.string().max(4096) }).strict(),
-  z.object({ environmentId, op: z.literal('open'), path: z.string().max(4096), flags: z.number().int().nonnegative(), permissions: z.number().int().nonnegative().optional() }).strict(),
-  z.object({ environmentId, op: z.literal('read'), handle: base64, offset: z.number().int().nonnegative(), length: z.number().int().positive().max(MAX_DATA) }).strict(),
-  z.object({ environmentId, op: z.literal('write'), handle: base64, offset: z.number().int().nonnegative(), data: base64 }).strict(),
-  z.object({ environmentId, op: z.literal('close'), handle: base64 }).strict(),
-  z.object({ environmentId, op: z.literal('remove'), path: z.string().max(4096) }).strict(),
-  z.object({ environmentId, op: z.literal('hardlink'), oldPath: z.string().max(4096), newPath: z.string().max(4096) }).strict(),
-  z.object({ environmentId, op: z.literal('fsync'), handle: base64 }).strict(),
-  z.object({ environmentId, op: z.literal('dispose') }).strict(),
+  z.object({ environmentId, generation, op: z.literal('realpath'), path: z.string().max(4096) }).strict(),
+  z.object({ environmentId, generation, op: z.literal('lstat'), path: z.string().max(4096) }).strict(),
+  z.object({ environmentId, generation, op: z.literal('open'), path: z.string().max(4096), flags: z.number().int().nonnegative(), permissions: z.number().int().nonnegative().optional() }).strict(),
+  z.object({ environmentId, generation, op: z.literal('read'), handle: base64, offset: z.number().int().nonnegative(), length: z.number().int().positive().max(MAX_DATA) }).strict(),
+  z.object({ environmentId, generation, op: z.literal('write'), handle: base64, offset: z.number().int().nonnegative(), data: base64 }).strict(),
+  z.object({ environmentId, generation, op: z.literal('close'), handle: base64 }).strict(),
+  z.object({ environmentId, generation, op: z.literal('remove'), path: z.string().max(4096) }).strict(),
+  z.object({ environmentId, generation, op: z.literal('hardlink'), oldPath: z.string().max(4096), newPath: z.string().max(4096) }).strict(),
+  z.object({ environmentId, generation, op: z.literal('fsync'), handle: base64 }).strict(),
+  z.object({ environmentId, generation, op: z.literal('dispose') }).strict(),
 ])
 
 const paramsByMethod = {
@@ -67,7 +68,8 @@ const paramsByMethod = {
     stdoutLimit: outputLimit,
     stderrLimit: outputLimit,
     graceMs: z.number().int().nonnegative().max(60_000),
-    generation: z.string().min(1).max(128),
+    generation,
+    confinementToken: z.string().uuid(),
   }).strict(),
   wait: z.object({ process: z.number().int().positive(), timeoutMs: z.number().int().nonnegative().max(60_000) }).strict(),
   terminate: z.object({ process: z.number().int().positive() }).strict(),
@@ -83,6 +85,7 @@ const eventSchema = z.discriminatedUnion('event', [
   z.object({
     event: z.literal('hello'), protocol: z.literal(BROKER_PROTOCOL), brokerUid: z.number().int(),
     environmentIds: z.array(environmentId).max(256), manifestDigest: z.string().regex(/^[0-9a-f]{64}$/),
+    sshCapability: z.object({ eligible: z.boolean(), reason: z.string().max(256).optional() }).strict(),
   }).strict(),
   z.object({ event: z.enum(['stdout', 'stderr']), process: z.number().int().positive(), data: base64 }).strict(),
   z.object({
@@ -106,6 +109,8 @@ export interface BrokerHello {
   readonly brokerUid: number
   readonly environmentIds: readonly string[]
   readonly manifestDigest: string
+  /** The broker-side SSH capability verdict; the Host never substitutes its own. */
+  readonly sshCapability: { readonly eligible: boolean; readonly reason?: string | undefined }
 }
 
 /** A broker request reply. */

@@ -49,6 +49,7 @@ const environmentSchema = z.object({
   transfer: z.object({
     maxBytes: z.number().int().min(1).max(1024 * 1024 * 1024),
     timeoutMs: z.number().int().min(1).max(3_600_000),
+    destinationIsolation: z.literal('chroot-sftp').optional(),
   }).strict().optional(),
   credentialIsolation: z.enum(['attested', 'unattested']),
 }).strict()
@@ -199,23 +200,46 @@ export function parseDeploymentManifest(text: string, manifestPath: string): { m
   return { manifest, digest: manifestDigest(manifest) }
 }
 
-/** Both the file and its parent must be owned by us (or root) and not group/world-writable. */
-function checkTrust(info: Stats, what: string): void {
+/** Production requires root ownership; the testing bypass relaxes to the current user or root. */
+function checkOwner(info: Stats, what: string, userOwned: boolean): void {
   const uid = process.getuid!()
-  if ((info.uid !== uid && info.uid !== 0) || (info.mode & 0o022) !== 0) {
-    throw new ManifestError('manifest-untrusted', `the deployment manifest ${what} must be owned by the current user (or root) and not be group/world-writable`)
+  const ownerOk = userOwned ? info.uid === uid || info.uid === 0 : info.uid === 0
+  if (!ownerOk || (info.mode & 0o022) !== 0) {
+    throw new ManifestError('manifest-untrusted', `the deployment manifest ${what} must be owned by ${userOwned ? 'the current user or ' : ''}root and not be group/world-writable`)
+  }
+}
+
+function checkAncestor(dir: string): void {
+  let info: Stats
+  try {
+    info = lstatSync(dir)
+  } catch (error) {
+    throw new ManifestError('manifest-untrusted', `the deployment manifest ancestor "${dir}" is unreadable: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    throw new ManifestError('manifest-untrusted', `the deployment manifest ancestor "${dir}" must be a real directory, not a symlink`)
+  }
+  if (info.uid !== 0) {
+    throw new ManifestError('manifest-untrusted', `the deployment manifest ancestor "${dir}" must be owned by root`)
+  }
+  if ((info.mode & 0o022) !== 0) {
+    throw new ManifestError('manifest-untrusted', `the deployment manifest ancestor "${dir}" is group/world-writable`)
   }
 }
 
 /**
  * Read and validate the manifest under its protection checks: absolute path,
  * regular non-symlink file in a trusted directory, never inside a bound local
- * primary. Any failure is a `ManifestError` — the caller maps it to the
- * `config-invalid` remote state.
+ * primary. In production the file and EVERY ancestor directory must be
+ * root-owned and not group/world-writable; `allowUserOwnedForTesting` relaxes
+ * the file and its immediate parent to the current user or root and skips the
+ * ancestor walk — test fixtures only. Any failure is a `ManifestError` — the
+ * caller maps it to the `config-invalid` remote state.
  */
-export function loadDeploymentManifest(path: string): { manifest: DeploymentManifest; digest: string } {
+export function loadDeploymentManifest(path: string, options: { allowUserOwnedForTesting?: boolean } = {}): { manifest: DeploymentManifest; digest: string } {
   if (!isAbsolute(path)) throw new ManifestError('manifest-untrusted', `the deployment manifest path must be absolute: ${JSON.stringify(path)}`)
   if (typeof process.getuid !== 'function') throw new ManifestError('manifest-untrusted', 'deployment manifest protection checks require a POSIX host')
+  const userOwned = options.allowUserOwnedForTesting === true
   let info: Stats
   try {
     info = lstatSync(path)
@@ -223,10 +247,19 @@ export function loadDeploymentManifest(path: string): { manifest: DeploymentMani
     throw new ManifestError('manifest-unreadable', `cannot read the deployment manifest: ${error instanceof Error ? error.message : String(error)}`)
   }
   if (info.isSymbolicLink() || !info.isFile()) throw new ManifestError('manifest-untrusted', 'the deployment manifest must be a regular file, not a symlink')
-  checkTrust(info, 'file')
-  const parent = lstatSync(dirname(path))
-  if (parent.isSymbolicLink() || !parent.isDirectory()) throw new ManifestError('manifest-untrusted', 'the deployment manifest directory must not be a symlink')
-  checkTrust(parent, 'directory')
+  checkOwner(info, 'file', userOwned)
+  if (userOwned) {
+    const parent = lstatSync(dirname(path))
+    if (parent.isSymbolicLink() || !parent.isDirectory()) throw new ManifestError('manifest-untrusted', 'the deployment manifest directory must not be a symlink')
+    checkOwner(parent, 'directory', true)
+  } else {
+    for (let dir = dirname(path);;) {
+      checkAncestor(dir)
+      const parent = dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  }
   const { manifest, digest } = parseDeploymentManifest(readFileSync(path, 'utf8'), path)
   const canonical = canonicalPath(path)
   for (const binding of manifest.bindings) {

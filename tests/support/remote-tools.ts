@@ -108,6 +108,7 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
   const stack = await mountRegistryStack(join(fixture.base, 'store'), {
     remoteEnvironments: { enabled: true, manifestPath },
   }, {
+    allowUserOwnedRemoteManifestForTesting: true,
     beforeGate: async ctx => {
       await ctx.plugin(Projections)
       await ctx.plugin(Sessions)
@@ -117,6 +118,17 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
   await stack.ctx.plugin(SystemPrompt)
   await stack.ctx.plugin(Tools)
   stack.ctx.provide('permissionPresets', { names: [] } as never)
+  if (stack.ctx.get('sandbox') === undefined) {
+    stack.ctx.provide('sandbox', { confine: async (argv: readonly string[]) => ({ argv, enforcement: 'full' }) } as never)
+  } else if (typeof stack.ctx.sandbox.confine !== 'function') {
+    Object.assign(stack.ctx.sandbox, { confine: async (argv: readonly string[]) => ({ argv, enforcement: 'full' }) })
+  }
+  if (stack.ctx.get('subprocess') === undefined) {
+    stack.ctx.provide('subprocess', {
+      spawn: () => { throw new Error('remote-tools fixture has no subprocess.spawn') },
+      spawnTerminal: () => { throw new Error('remote-tools fixture has no subprocess.spawnTerminal') },
+    } as never)
+  }
   await installToolExecutor(stack.ctx)
   const manager = new FakeManager(stack.registry.remoteManifest!, remotes, backends)
   const tools = options.withTools === false ? undefined : await stack.ctx.plugin({

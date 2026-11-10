@@ -1,6 +1,6 @@
 # 多执行环境 G1a：远端控制面参考
 
-本文是 [G1a](../plans/active/2026-11-06-multi-environment-gates.md) 已实现控制面的稳定技术参考：部署清单格式、远端记录域、`remote-1` 协议入口、Host 侧准入接口及拒绝码。架构合同归 [ADR-0030](../decisions/ADR-0030-environment-and-root-identity.md)；验证结果与关卡状态只归[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md#多执行环境-g1a-控制面2026-11-07)。本关**不含**任何 SSH 包、连接、端点校验器、面板、命令或模型工具：默认关闭，开启后也因没有校验器而无法登记远端根。
+本文是 [G1a](../plans/active/2026-11-06-multi-environment-gates.md) 已实现控制面的稳定技术参考：部署清单格式、远端记录域、`remote-1` 协议入口、Host 侧准入接口及拒绝码。架构合同归 [ADR-0030](../decisions/ADR-0030-environment-and-root-identity.md)；验证结果与关卡状态只归[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md#多执行环境-g1a-控制面2026-11-07)。可选的 broker 证明行（`remote-tools`）会安装端点校验器、`remote_copy`/`remote_bash` 与能力投影；默认组合不挂载任何模型可见的远端能力，且在 Linux/systemd/GUI 部署证据齐备前保持模型侧关闭。
 
 ## 开关与状态
 
@@ -18,7 +18,7 @@ Registry 行配置 `remoteEnvironments: { enabled?: boolean; manifestPath?: stri
 
 ## 部署清单
 
-Host 启动时用 `node:fs` 直接读取（不经 `ctx.fs` 或工作区读路径）。POSIX 保护检查：文件与父目录不是 symlink、属当前 uid 或 root、不可被 group/other 写；清单不得位于任何被绑定的本地 primary 之内。格式为严格 JSON（未知键即拒绝）：
+Host 启动时用 `node:fs` 直接读取（不经 `ctx.fs` 或工作区读路径）。POSIX 保护检查（生产路径）：清单文件与其**每一级祖先目录**都必须是非 symlink 的真实条目、属 root（uid 0）且不可被 group/other 写——文件由部署者以 root 安装，Host 与 broker 的运行账户均不得为 root；清单不得位于任何被绑定的本地 primary 之内。测试内部加载器才把文件与直接父目录放宽为"当前 uid 或 root"并跳过祖先遍历，生产配置没有对应开关。格式为严格 JSON（未知键即拒绝）：
 
 ```json
 {
@@ -64,7 +64,8 @@ Host 启动时用 `node:fs` 直接读取（不经 `ctx.fs` 或工作区读路径
 - `transport: "helper"` 必须带 `helper`，`"sftp"` 必须为 `helper: null`。
 - `connection` 必填：`"helper"` 传输为 `{host, nodePath, helperPath, workspace}`（host 为 OpenSSH 别名 `/^[A-Za-z0-9._-]{1,64}$/`，三个路径均为规范化 POSIX 绝对路径；`helper.sha256` 即 helperHash）；`"sftp"` 仅允许 `{host}`。
 - `exec` 可选且仅限 `"helper"`：`{shell(1..8, 首项绝对路径), env(≤64 键), maxTimeoutMs(1..3_600_000), stdoutLimit/stderrLimit(1..16MiB), terminateGraceMs(0..60000)}`；缺席即该环境无执行能力。
-- `credentialIsolation: "attested" | "unattested"` 必填：ADR-0032 的部署者声明——Agent 是否确实无法触及连接凭据/套接字/配置/ssh 二进制；`"unattested"` 的连接仅在测试选项 `allowUnattestedForTesting` 下建立，生产路径不接受（当前 VPS 证据即 unattested：本地同 UID 持有私钥）。
+- `credentialIsolation: "attested" | "unattested"` 必填：ADR-0032 的部署者声明——Agent 是否确实无法触及连接凭据/套接字/配置/ssh 二进制；`"unattested"` 的连接仅在测试选项 `allowUnattestedForTesting` 下建立，生产路径不接受（既有 VPS 记录即 unattested：本地同 UID 持有私钥——历史性记录，未经本次评审复核）。
+- `transfer` 可再声明 `destinationIsolation: "chroot-sftp"`：带 `import` 配对且 `actions` 含 `write` 的绑定，其模型可见目的端必须是 `transport: "sftp"` 且环境 `transfer` 声明该字面量；同时，任何共享该环境 `namespace`+`account` 的另一环境若带 helper 传输或 `exec`，证明即拒绝——复制目的账户必须是独立的 chroot SFTP-only 账户，helper 环境不能作复制目的。受 root 保护的清单是部署者声明，真实的 chroot/属主隔离仍须部署证据佐证。
 - `path` 为规范化 POSIX 绝对路径（无 `.`/`..`、`//`、尾斜杠、NUL，≤4096 字节）。
 - 拒绝重复 `environmentId`、引用未知环境、同一 primary 下重复 `(environmentId, rootId)`；同一 primary 下共享 `namespace` 的两条绑定路径相等或嵌套为 `alias-conflict`。
 - 清单摘要为解析结果按键排序后 JSON 的 SHA-256；绑定摘要覆盖该绑定及其环境（host key、账号、Helper、路径等）。绑定按 `primaryKey(primary)` 归属，跨项目复用 rootId 无效。
@@ -87,11 +88,11 @@ v1 线协议不变。远端请求走同一介质派生的**第二**监听端点 
 4. owner 在同一 `serialize` 队列内准入：`config-digest-mismatch`、`endpoint-not-registered`、`endpoint-revoked`、`endpoint-withheld`、`action-not-allowed`、`transfer-pair-not-allowed`、`invalid-arguments`（read/write/exec 恰一个远端端点；transfer 为 `[源, 目的]`，可含 `{environmentId: "local", rootId}`，至少一端远端，且两端远端绑定分别声明 export/import 配对）。回复 epoch 与当前通道不符为 `stale-epoch`。
 5. body 收到冻结的操作身份（operationId、purpose、toolName、sessionId、primaryRoot、epoch、revision、effectiveMode）；`endpoints` 在 body 结束后读取即抛错。排序轨迹以 debug 日志记录 operationId、阶段、epoch 与决定，不含路径内容、密钥或输出。
 
-`addRemote(primary, {environmentId, rootId})` 只接受这两个键；先在队列外调用经 `setRemoteEndpointVerifier()` 注入的校验器（本关生产环境没有，固定为 `endpoint-unverifiable`），平台不符为 `platform-mismatch`，入队后绑定摘要变化为 `binding-changed`，清单未授权为 `binding-not-authorized`。`removeRemote` 与 `remoteList` 在 follower 上经 `remote-1` 转发。
+`addRemote(primary, {environmentId, rootId})` 只接受这两个键；先在队列外调用经 `setRemoteEndpointVerifier()` 注入的校验器（broker 行挂载时安装 `SshEndpointVerifier`，未挂载固定为 `endpoint-unverifiable`），平台不符为 `platform-mismatch`，入队后绑定摘要变化为 `binding-changed`，清单未授权为 `binding-not-authorized`。`removeRemote` 与 `remoteList` 在 follower 上经 `remote-1` 转发。
 
-## `remote_bash` 合同（G3，仅测试组合）
+## `remote_bash` 合同（G3，可选 broker 行挂载）
 
-`src/remote/exec.ts` 的 `runRemoteCommand` 与 `src/remote/exec-tool.ts` 的 `remoteBashTool` 不被任何生产行注册；G5 的专用 headless 测试组合经 `src/remote/tools.ts` 统一挂载它与 `remote_copy`。参数 `{environmentId, rootId, cwdRelative?, command, timeoutMs}`；工具名、Session 与取消信号只取自调度。后端（G4 以后由连接管理器提供，测试为 fake）声明部署控制的 shell、环境变量、时限与 stdout/stderr 上限，实现 `confine` / `currentGeneration` / 同步 `spawn`。
+`src/remote/exec.ts` 的 `runRemoteCommand` 与 `src/remote/exec-tool.ts` 的 `remoteBashTool` 由可选的 broker 证明行统一挂载（测试组合直接注册同一注册函数）。参数 `{environmentId, rootId, cwdRelative?, command, timeoutMs}`；工具名、Session 与取消信号只取自调度。后端（G4 以后由连接管理器提供，测试为 fake）声明部署控制的 shell、环境变量、时限与 stdout/stderr 上限，实现 `confine` / `currentGeneration` / 同步 `spawn`。
 
 1. **准入 A**：`purpose: exec` 的远端准入；校验后端存在（`backend-unavailable`）、`cwdRelative`（空或相对 POSIX，无 `.`/`..`/空段/NUL/反斜杠，`invalid-cwd`）与时限（`invalid-timeout`）；以 `workspace-write`、端点 displayPath 和真实 sessionId 调用 `confine`，非 `full` 为 `sandbox-unverified`。
 2. **准入 B**：同一请求重新准入，比对 epoch、端点身份（displayPath、bindingDigest、verifiedTarget）、有效模式与后端代次，任一不同为 `admission-changed` 并丢弃 argv；`spawn` 只在 B 的回调内调用。A、B 之间的撤权使 B 拒绝且不调用 `spawn`。
@@ -101,7 +102,7 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 ## 官方 SSH 栈接入（S3a，无用户入口）
 
-`src/remote/ssh-environment.ts` 的 `SshEnvironmentManager` 把已验证清单环境变成一条 `SshEnvironment`：构造任何官方类之前依次过——SSH 门禁必须 `eligible`（`ssh-capability-absent:<reason>`）、环境必须 helper 传输（`transport-not-helper`）、`credentialIsolation` 必须 attested（否则须测试选项，`credential-isolation-unattested`）；随后 `ssh -G <别名>` 解析宿主身份（`user` 必须等于 `account`、`stricthostkeychecking` 必须 yes、`forwardagent` 必须为 no），所有 userknownhostsfile 合计恰一把主机钥且 `ssh-keygen -lf` 指纹等于 `hostKey`（`account-mismatch`/`host-key-mismatch`/`host-identity-unverifiable`）；再经 `loadHostSshPackages` 在独立 `Context` 中按 SessionProjectionRegistry→SandboxPolicyService(read-only)→SshConnection→SshFileSystem→SshSubprocessRuntime→SshSandboxProvider 挂载，`hello.platform` 不符即 `platform-mismatch` 并按逆序销毁。`open` 按环境记忆化（并发共享同一 Promise），命中缓存时先经 `env.assertAlive()`（上游 `SshConnection.assertOpen` 的本地存活性检查）验活——被杀的连接留下尸体代次，验活失败即走 `markStale` 后重新建连。返回 `{environmentId, generation, hello(净化字段), fs, sandbox, subprocess, assertAlive, dispose}`——从不暴露 Context、连接对象、套接字或 `ctx.ssh.request`；`dispose`/`markStale`/`disposeAll` 只影响单环境，重开产生新代次而不重连。
+`src/remote/ssh-environment.ts` 的 `SshEnvironmentManager` 把已验证清单环境变成一条 `SshEnvironment`：构造任何官方类之前依次过——SSH 门禁必须 `eligible`（`ssh-capability-absent:<reason>`）、环境必须 helper 传输（`transport-not-helper`）、`credentialIsolation` 必须 attested（否则须测试选项，`credential-isolation-unattested`）；随后 `ssh -G <别名>` 解析宿主身份（`user` 必须等于 `account`、`stricthostkeychecking`/`batchmode` 必须 yes、`forwardagent`/`updatehostkeys` 必须 no），known_hosts 查找名按 OpenSSH 规则取：显式 `hostkeyalias` 逐字（不加端口后缀，`none` 按 OpenSSH 语义也是逐字查找名），否则解析后的 hostname，非 22 端口写作 `[hostname]:port`；全部 userknownhostsfile 与 globalknownhostsfile 来源合计**恰一把**匹配钥且 `ssh-keygen -lf` 指纹等于 `hostKey`（`account-mismatch`/`host-key-mismatch`/`host-identity-unverifiable`）；再经 `loadHostSshPackages` 在独立 `Context` 中按 SessionProjectionRegistry→SandboxPolicyService(read-only)→SshConnection→SshFileSystem→SshSubprocessRuntime→SshSandboxProvider 挂载，`hello.platform` 不符即 `platform-mismatch` 并按逆序销毁。`open` 按环境记忆化（并发共享同一 Promise），命中缓存时先经 `env.assertAlive()`（上游 `SshConnection.assertOpen` 的本地存活性检查）验活——被杀的连接留下尸体代次，验活失败即走 `markStale` 后重新建连。返回 `{environmentId, generation, hello(净化字段), fs, sandbox, subprocess, assertAlive, dispose}`——从不暴露 Context、连接对象、套接字或 `ctx.ssh.request`；`dispose`/`markStale`/`disposeAll` 只影响单环境，重开产生新代次而不重连。
 
 `src/remote/ssh-verifier.ts` 的 `SshEndpointVerifier` 以绑定路径为 `workspaceRoot` 执行只读 `full` 限定探针（远端 Node 打印 `{realpath, dev, ino, isDirectory}`），必须 isDirectory 且 realpath 等于声明路径（`endpoint-redirected`），注册目标为 `{kind: "object", value: "dev:ino"}`。`src/remote/ssh-exec-backend.ts` 的 `sshExecBackend` 把清单 `exec` 块映射为部署描述：`confine` 直通官方沙箱并携带环境代次，`currentGeneration` 取管理器当前代次（失联/已处置即永不匹配），`spawn` 无控制通道、收集双倍上限以便本地截断标志成立，`done` 的传输错误映射为 `RemoteConnectionLost` 并标记环境 stale。
 
@@ -143,6 +144,42 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 ### 部署启用清单
 
 部署方在专用 profile 中按以下顺序启用。面板与面板端点随默认组合提供，关闭时显示远端不可用。
+
+#### broker 依赖树与 SSH 配置（可复现步骤）
+
+broker 运行**自己的** root 保护依赖树——与 Host/Agent 任何一方都不共享 node_modules。示例（路径/版本由部署者替换为其实际选定值；插件 tarball 是本地未发布的 `0.1.17-ssh.1` 构建，不从 npm 安装，上游包取支持矩阵中的精确版本）：
+
+```sh
+# root 执行；目录随后属 root、不可被 Host/broker 写
+mkdir -p /opt/dsh-broker && cd /opt/dsh-broker
+pnpm init
+pnpm add --save-exact /path/to/dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgz \
+  @deepseek-ai/dsh@0.2.2-rc.1 @deepseek-ai/cordis@4.1.0 \
+  @deepseek-ai/dsh-ssh@0.2.2-rc.1 @deepseek-ai/dsh-fs-ssh@0.2.2-rc.1 \
+  @deepseek-ai/dsh-subprocess-ssh@0.2.2-rc.1 @deepseek-ai/dsh-sandbox-ssh@0.2.2-rc.1
+chown -R root:root /opt/dsh-broker && chmod -R a-w /opt/dsh-broker
+```
+
+`install.sh` 的 preflight 以 broker 入口锚定 `createRequire` 复核 DSH、Cordis 与四个 SSH 包可解析，缺失即在改账户/unit 前中止——解析检查不等于认证。
+
+broker 账户的 `~/.ssh/config`（`$HOME` 0700；config 与 `known_hosts` 0600，属 broker）**最小且全部显式**——`<...>` 均为占位符，须替换为部署者显式提供的路径/主机/账号，不得留作运行值：
+
+```sshconfig
+Host <env-alias>
+  HostName <fixed-hostname>
+  User <fixed-remote-account>
+  IdentityFile <provisioned-key-path>
+  IdentitiesOnly yes
+  StrictHostKeyChecking yes
+  BatchMode yes
+  ForwardAgent no
+  UpdateHostKeys no
+  UserKnownHostsFile <broker-owned-known_hosts>
+  GlobalKnownHostsFile /dev/null
+  KnownHostsCommand none
+```
+
+`known_hosts` 由部署者**带外**提供并在置入前核对指纹——不用 `ssh-keyscan`、不执行任何读取密钥的命令；私钥由部署者显式放置，安装器不发现不读取。SFTP 端绑定路径按 chroot 监狱内绝对路径写（如 `/workspace`），不是宿主机 realpath；`import` 目的账户须为声明 `destinationIsolation: "chroot-sftp"` 的独立 sftp 账户——helper 账户与同账号可执行环境都不能作复制目的；构建产物须用独立上传账户落盘后，再经 export/中转取回。固定属主/chroot 与独立写者隔离属外部部署证据，清单声明不构成证明。
 
 1. 将同一构建的 broker 入口、共享 JS chunk、Node 及其解析到的依赖安装到 Host 账号和 Agent 都不可写的位置。四个 SSH 可选包须在对应 DSH 宿主的解析树中与 DSH 精确同版。先由 root 写好完整部署清单，供 Host 与 broker 共同读取。
 2. 用 tarball 中的 `scripts/ssh-broker/install.sh` 创建专用账户、凭据根和服务。Linux 默认的 `/etc/dsh-ssh-broker` 属 root，Host 经客户端组可遍历目录和读取清单，`broker.json` 只开放给 root 和 broker 组。在连接前为 broker 配置受信的 OpenSSH 别名、固定主机钥和远端账户。
@@ -189,15 +226,17 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 ### 停用与回滚
 
+现行入口探针会记录 Full-access 解析的守卫拒绝，并观察 raw/LSP-like/job-like spawn 接缝；不会为了反向对照而启动不受限命令。它的本机语法与观察函数已检查，但本轮没有 Linux 实跑结果。其他 profile 仍只做静态文本清点，不是其实际权限或隔离的证明；旧协议 2 JSON 仅保留作历史反例。
+
 1. 停止把新任务派到该 profile，卸载可选工具行。该行拒绝新调用，解除端点校验器，取消并等待已进入的工具调用，然后关闭 broker 连接。已提交的文件应保留。记录 `unknown` 和暂存残留，按操作 ID 对账，确认前禁止重放。
 2. 移除 Registry 行的 `remoteEnvironments` 配置，重启原 profile。若该部署不再提供远端操作，停止 broker 服务。保留本地 v1 记录及独立的远端存储域供核对。
 3. 确认原生工具及本地根仍可用、远端工具和能力投影已消失，历史远端引用调用失败。需要重新启用时，重新证明凭据隔离及清单一致性，再按当前授权登记端点。
 
-## 凭据隔离：本机凭据代理（ADR-0036）
+## 凭据隔离：本机凭据代理（ADR-0039）
 
-**边界。** `src/remote/broker/` 是一个独立进程：它以部署方创建的专用账户运行，凭据根（0700）内持有 SSH 私钥、`config`、`known_hosts`、ControlMaster 与 Helper 暂存；Host 账户只通过一个 0750 目录里的 0660 Unix socket 连接。托管进程拒绝以 Host 账户启动（同 UID 不构成隔离），也拒绝清单中任何未声明 `credentialIsolation: "attested"` 的环境（`broker-same-uid` / `manifest-unattested`），除非测试显式放宽。
+**边界。** `src/remote/broker/` 是一个独立进程：它以部署方创建的专用账户运行，凭据根（0700）内只持有 SSH 私钥、`config`、`known_hosts`；ControlMaster 与 Helper 暂存位于 broker 账户自己的 `mkdtemp`（`/tmp/dsh-ssh-*`，0700、属 broker），Linux unit 上以 `PrivateTmp=yes` 隔离该目录——unit 文件本身未被容器内 systemctl stub 真实执行过，真实 `ActiveState`、临时目录属主/模式与 socket 私访探针仍属待补部署证据。Host 账户只通过一个 0750 目录里的 0660 Unix socket 连接。托管进程拒绝以 Host 账户启动（同 UID 不构成隔离），也拒绝清单中任何未声明 `credentialIsolation: "attested"` 的环境（`broker-same-uid` / `manifest-unattested`），除非测试显式放宽。
 
-**协议。** `src/remote/broker/protocol.ts` 是一行一个 JSON 的有界协议（`protocol: 2`，行 ≤ 2 MiB，二进制字段 ≤ 256 KiB，每连接最多 32 个在飞请求、8 个进程）。方法只有八个：`openSftp`、`sftp`（realpath/lstat/open/read/write/close/remove/hardlink/fsync/dispose）、`open`、`confine`、`spawn`、`wait`、`terminate`、`dispose`。没有读取/导出密钥、修改配置、选择主机或任意 ssh 的方法；未知方法、未知字段、越界与超长行直接断连。
+**协议。** `src/remote/broker/protocol.ts` 是一行一个 JSON 的有界协议（`protocol: 3`，行 ≤ 2 MiB，二进制字段 ≤ 256 KiB，每连接最多 32 个在飞请求、8 个进程）。方法只有八个：`openSftp`、`sftp`（realpath/lstat/open/read/write/close/remove/hardlink/fsync/dispose）、`open`、`confine`、`spawn`、`wait`、`terminate`、`dispose`。没有读取/导出密钥、修改配置、选择主机或任意 ssh 的方法；未知方法、未知字段、越界与超长行直接断连。协议 3 与 2 不互通：`hello` 增加必填的 `sshCapability`（broker 账户自己的 SSH 能力判定，Host 不代替，缺席/为否/畸形即拒绝）；`confine` 的 policy 只收 `read-only`/`workspace-write`（`danger-full-access` 在 schema 层拒绝），仅 `full` 实施返回一次性 `confinementToken`——绑定环境、**返回后的**受限 argv、代次与 workspaceRoot，TTL 30 秒、每连接至多 256 张，`spawn` 校验 cwd 仍在受限根内且拒绝非空 `LD_*`/`DYLD_*`/`NODE_OPTIONS`/`NODE_PATH`，票据校验失败或成功使用都消耗该票据（并发上限与代次检查先于票据消耗）；每条 `sftp` 请求携带服务端代次，过期代次拒绝且不路由旧句柄。请求超时即销毁连接并拒绝所有在飞请求；发布类操作在应答丢失时由 Host 报 `unknown`+reconcileId，重放从不允许。
 
 托管部署的 `stdoutLimit` 与 `stderrLimit` 各至多 128 KiB。broker 为每个流保留最多两倍声明上限，Host 截断结果并报告相应标记。更大的预算在证明阶段返回 `broker-output-limit`。
 
@@ -205,9 +244,17 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 **Host 适配。** `src/remote/broker/client.ts` 的 `BrokerEnvironmentManager` 实现与官方 manager 相同的结构面（`deployment`、`open`/`openSftp`、代次、`markStale`、`disposeAll`），G2 的复制管线、`SshEndpointVerifier` 与 G3 的双准入命令合同不改。SFTP 是语义代理（句柄/数据以 base64 往返），命令的 `confine` 代次在 `spawn` 时复核，输出在退出时随 `exit` 事件（含 `scope` 确认）返回，因此 `remote_bash` 的 `scope-exited`/`exited` 与截断语义保持。
 
-**证明。（`src/remote/broker/attest.ts`）** 在打开任何环境之前检查：Host 与 broker 不是同一 UID；部署记录了通过的 `confinementProbe`；Host 对凭据根 `R_OK` 为 `EACCES`/`EPERM`；socket 是 socket、属主为 broker、无 world 权限、目录为 broker 属主且无 world 权限；部署声明排除了无沙箱的 Agent 执行，默认沙箱模式为受限模式，连接后的 `hello` 协议、UID 和清单摘要均匹配。任一失败返回 `unavailable` 与稳定 code，保持远端 SSH 连接和工具关闭。`src/remote/tools.ts` 的 `broker` 配置走这条路径：异步证明通过后才注册 `remote_copy`/`remote_bash`/校验器/能力投影，失败只记一条 warn，工具保持缺席。
+**证明。（`src/remote/broker/attest.ts`）** 在打开任何环境之前检查：Host 与 broker 都不是 root 且彼此不同 UID；部署记录了通过的 `confinementProbe`；部署声明排除了无沙箱的 Agent 执行；凭据根经 `lstat` 是非 symlink 的真实目录、属 broker、恰为 0700，随后 Host 对其 `R_OK` 必须是 `EACCES`/`EPERM`；socket 是 socket、属主为 broker、无 world 权限、目录为 broker 属主且无 world 权限；清单的模型可见复制目的满足 `destinationIsolation` 收窄（sftp 目的、chroot-sftp 声明、目的账户无 helper/exec 共享环境，`destination-isolation-required`）；连接后的 `hello` 协议、UID、清单摘要匹配且 `sshCapability.eligible` 为真。任一失败返回 `unavailable` 与稳定 code，保持远端 SSH 连接和工具关闭。`src/remote/tools.ts` 的 `broker` 配置走这条路径：异步证明通过后才注册 `remote_copy`/`remote_bash`/校验器/能力投影，失败只记一条 warn，工具保持缺席。
 
 **部署。** `scripts/ssh-broker/install.sh` 以 root 创建账户、客户端组、0700 凭据根、0750 socket 目录、`/etc/dsh-ssh-broker/broker.json`（0640 root:broker）与 launchd/systemd unit。Linux unit 通过 `RuntimeDirectory` 在启动时重建 `/run` 下的 socket 目录。脚本不代部署方创建清单或授权远端公钥，并打印剩余步骤。
 
 **已知限制。** 托管账户持有全部密钥；Host 与 Agent 同 UID，因此“Agent 不能到达 socket”只能由部署的沙箱路径拒绝证明（`confinementProbe`），不能由本代码自证；`danger-full-access` 下 Agent 进程不受本机沙箱约束，必须与这些凭据互斥。socket 是长驻接口，进程崩溃后由 unit 重启，但 Host 不自动重建连接；重新启用必须重走证明。同 UID 测试模式（`allowSameUidForTesting`/`allowRestrictedForTesting`）只用于协议测试，生产入口没有开关。
 
+## 模型开放的前置阻断项（当前状态：BLOCKED）
+
+以下均为**尚未实现/未验证**的开放前提，不是可选项；完成前 `remote-tools` 行不得对模型开放，当前维护者决定保持模型侧关闭：
+
+- **配额**：目前只有单文件/单请求/在飞数上限，**没有**按 Session 或时间窗聚合的字节与操作预算，也没有 on-disk 配额。开放前需实现并验证 enforced per-session/global time-window 的 operation 与 byte 预算。systemd `CPUQuota`/`MemoryMax`/`TasksMax` 属可选纵深，不构成替代。
+- **审计**：broker 审计为只追加文件，**没有**轮转与保留策略。示例（需随实际 unit 验证）：logrotate `daily`、`maxsize 8M`、`rotate 4`、`create 0600 broker brokergrp`——`appendFileSync` 每次写都重新 open，轮转兼容。
+- **吊销**：没有自动吊销清单；停用/移除清单绑定并重启 broker + Host 重新证明后，已记录的 `unknown` 只许对账，**绝不**重放。
+- **部署证据**：Linux 实机 unit（`ActiveState`、PrivateTmp、临时目录属主/模式）、socket 私访探针与 GUI 会话证据均未产出；容器内 systemctl stub 不算数。
