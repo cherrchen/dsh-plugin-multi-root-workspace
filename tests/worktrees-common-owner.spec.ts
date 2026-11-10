@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { mountWorktreeStack, readSidecarFile, type WorktreeStack } from './support/worktrees-stack.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -70,8 +70,9 @@ function expectedFor(primary: string): PromptExpected {
     || repo.adminHead === undefined || repo.adminIdentity === undefined) {
     throw new Error('fixture is not a supported linked checkout')
   }
-  const identity = directoryIdentity(repo.common)
-  if (identity === undefined) throw new Error('common has no identity')
+  const mainRoot = dirname(repo.common)
+  const identity = directoryIdentity(mainRoot)
+  if (identity === undefined) throw new Error('main checkout has no identity')
   return {
     primaryKey: primaryKey(primary),
     primaryRoot: primary,
@@ -81,11 +82,11 @@ function expectedFor(primary: string): PromptExpected {
       rootIdentity: repo.rootIdentity, adminIdentity: repo.adminIdentity,
     },
     candidate: {
-      kind: 'git-common', canonical: repo.common, common: repo.common,
+      kind: 'main-checkout', canonical: mainRoot, common: repo.common,
       adminId: repo.adminId, adminGitdir: repo.adminGitdir, adminHead: repo.adminHead,
       rootIdentity: identity, adminIdentity: repo.adminIdentity,
     },
-    promptKey: 'git-common\u0000' + repo.common,
+    promptKey: 'main-checkout\u0000' + repo.common,
   }
 }
 
@@ -94,12 +95,12 @@ function storeText(stack: RegistryStack): string {
 }
 
 describe('A owner confirmation', () => {
-  it('creates an ordinary inherit registration for the common, with no cleanup mapping', async () => {
+  it('creates an ordinary inherit registration for the main checkout, with no cleanup mapping', async () => {
     const input = setup('a-owner-add')
     const stack = await open(input)
     const expected = expectedFor(input.linked)
     const added = await stack.registry.addNew(input.linked, { path: expected.candidate.canonical, expected })
-    expect(added.path).toBe(realpathSync.native(join(input.main, '.git')))
+    expect(added.path).toBe(realpathSync.native(input.main))
     const rows = stack.registry.list(input.linked)
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ id: added.id, path: added.path, access: 'inherit', state: 'available' })
@@ -136,9 +137,10 @@ describe('A owner confirmation', () => {
     const expected = expectedFor(input.linked)
     const other = resolveRepo(otherLinked)
     if (!other.ok) throw new Error('second fixture is not active')
+    const otherMain = dirname(other.repo.common)
     await expect(stack.registry.addNew(input.linked, {
-      path: other.repo.common,
-      expected: { ...expected, candidate: { ...expected.candidate, canonical: other.repo.common, common: other.repo.common } },
+      path: otherMain,
+      expected: { ...expected, candidate: { ...expected.candidate, canonical: otherMain, common: other.repo.common } },
     })).rejects.toMatchObject({ code: 'worktree/prompt-stale' })
   })
 

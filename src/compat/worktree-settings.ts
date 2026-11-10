@@ -1,4 +1,8 @@
-/** The worktree suggestion switch: modern volatile Config and legacy namespace forms. */
+/**
+ * The worktree suggestion switch: modern volatile Config and legacy namespace
+ * forms. Experimental and OFF by default (ADR-0039 §9); the plugin-detail card
+ * carries the experimental tag next to the same switch.
+ */
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { configValue } from './skills.ts'
@@ -18,7 +22,7 @@ interface Settings {
 /**
  * Install the live `multi-root-worktrees.enabled` switch.
  * @param ctx - the host context.
- * @param initial - the loader Config value (read lazily).
+ * @param initial - the loader Config value (read lazily); absent means off.
  * @param changed - called on every settings change.
  * @returns the read accessor and the settings fiber.
  */
@@ -27,7 +31,7 @@ export function installWorktreeSettings(ctx: Context, initial: () => unknown, ch
   const fiber = ctx.inject(['settings'], scope => {
     const settings = scope.get('settings') as unknown as Settings
     if (typeof settings.installSection === 'function') {
-      settings.installSection(scope, WORKTREE_SETTINGS_ID, z.object({ enabled: z.boolean().default(true) }), { enabled: configValue(initial()) !== false }, {
+      settings.installSection(scope, WORKTREE_SETTINGS_ID, z.object({ enabled: z.boolean().default(false) }), { enabled: configValue(initial()) === true }, {
         setSource: current => { source = current },
         onChange: changed,
         validate: value => { if (typeof value.enabled !== 'boolean') throw new Error('multi-root worktrees: enabled must be boolean') },

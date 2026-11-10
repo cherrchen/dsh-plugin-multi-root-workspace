@@ -95,8 +95,12 @@ export interface IndexEntry {
   readonly pathBytes: Buffer
   readonly mode: number
 }
-/** The two things a worktree prompt can offer (ADR-0039 §1). */
-export type WorktreePromptKind = 'worktree' | 'git-common'
+/**
+ * The two things a worktree prompt can offer (ADR-0039 §1): another linked
+ * checkout's source root, or the main checkout's source root (which contains
+ * the shared `.git`).
+ */
+export type WorktreePromptKind = 'worktree' | 'main-checkout'
 
 /** The effective authority the panel shows for a prompt. */
 export type WorktreeEffectiveAccess = 'read-only' | 'read-write' | 'full-access' | 'unavailable'
@@ -104,10 +108,10 @@ export type WorktreeEffectiveAccess = 'read-only' | 'read-write' | 'full-access'
 /** One prompt as the panel renders it (wire shape lives in the contract module). */
 export interface WorktreePrompt {
   readonly id: string
-  /** Discovery key: `CandidateKey` for B, `git-common\0<common>` for A. */
+  /** Discovery key: `CandidateKey` for B, `main-checkout\0<common>` for A. */
   readonly key: string
   readonly kind: WorktreePromptKind
-  /** The candidate checkout root (B) or the common git dir (A). */
+  /** The candidate checkout root (B) or the main checkout root (A). */
   readonly path: string
   readonly primaryRoot: string
   /** The persistence policy the registration would carry. */
@@ -120,9 +124,16 @@ export interface WorktreePrompt {
   readonly viewRevision: string
 }
 
-/** The discriminated long-poll answer (ADR-0039 §7). */
+/**
+ * The discriminated long-poll answer (ADR-0039 §7).
+ *
+ * The wire keeps two visible shapes: `prompt` when the session can see exactly
+ * one candidate, and `prompts` when it can see several. The client renders the
+ * single confirmation for the first and the checkbox list for the second.
+ */
 export type WorktreePromptWaitResult =
   | { readonly status: 'prompt'; readonly prompt: WorktreePrompt; readonly viewRevision: string }
+  | { readonly status: 'prompts'; readonly prompts: readonly WorktreePrompt[]; readonly viewRevision: string }
   | { readonly status: 'timeout'; readonly viewRevision: string }
   | { readonly status: 'unactivated'; readonly viewRevision: string }
   | { readonly status: 'lost'; readonly viewRevision: string }

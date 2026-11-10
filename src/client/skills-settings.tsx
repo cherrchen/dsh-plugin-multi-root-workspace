@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { IconWarningOutlineRegular, Switch, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { IconWarningOutlineRegular, Switch, Tag, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '@deepseek-ai/cordis'
 import { bindSettingsForm, bindSkillsForm, clientInject, type SkillsForm } from '../compat/skills-client.ts'
 import { installAutoReviewSettings, type AutoReviewForm } from '../compat/auto-review-client.ts'
@@ -10,7 +10,17 @@ import type { Translate } from './WorkspaceFoldersAction.tsx'
 const BUNDLE_KEY = '@dsh-electron/dsh-plugin-multi-root-workspace'
 
 /** One live boolean settings row; the Skills and worktree switches share it. */
-function SettingSwitchRow({ form, title, hint, failureText, t }: { form: SkillsForm; title: string; hint: string; failureText: Key; t: Translate }) {
+function SettingSwitchRow({ form, title, hint, failureText, t, tag, defaultChecked = true }: {
+  form: SkillsForm
+  title: string
+  hint: string
+  failureText: Key
+  t: Translate
+  /** Optional label rendered beside the title (the experimental tag). */
+  tag?: ReactNode
+  /** The value shown before the form publishes one; the worktree row is off. */
+  defaultChecked?: boolean
+}) {
   const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
   const [busy, setBusy] = useState(false)
   const mounted = useRef(true)
@@ -23,10 +33,17 @@ function SettingSwitchRow({ form, title, hint, failureText, t }: { form: SkillsF
   }, [])
   return <div className="mrfw-skillsSettings">
     <div className="mrfw-skillsSettingsText">
-      <div className="mrfw-skillsSettingsTitle">{title}</div>
+      {tag === undefined
+        ? <div className="mrfw-skillsSettingsTitle">{title}</div>
+        : (
+            <div className="mrfw-settingsTitleRow">
+              <span className="mrfw-skillsSettingsTitle">{title}</span>
+              {tag}
+            </div>
+          )}
       <div className="mrfw-skillsSettingsDescription">{hint}</div>
     </div>
-    <Switch label={title} checked={snapshot.value?.enabled ?? true} disabled={busy || snapshot.status !== 'ready' || !snapshot.writable}
+    <Switch label={title} checked={snapshot.value?.enabled ?? defaultChecked} disabled={busy || snapshot.status !== 'ready' || !snapshot.writable}
       onChange={enabled => {
         setBusy(true)
         void form.mutate([{ op: 'set', path: ['enabled'], value: enabled }], snapshot.revision)
@@ -46,15 +63,29 @@ function SettingSwitchRow({ form, title, hint, failureText, t }: { form: SkillsF
   </div>
 }
 
+/**
+ * The worktree switch: experimental, off by default, and therefore the only
+ * row that carries a tag and a non-true fallback. Written once so the modern
+ * bundle card and the legacy per-namespace card can never disagree.
+ */
+function WorktreeSwitchRow({ form, t }: { form: SkillsForm; t: Translate }) {
+  return <SettingSwitchRow
+    form={form}
+    title={t('worktree.globalEnable')}
+    hint={t('worktree.globalHint')}
+    failureText="worktree.settingsFailed"
+    t={t}
+    defaultChecked={false}
+    tag={<Tag tone="info">{t('worktree.experimental')}</Tag>} />
+}
+
 interface SkillsCardProps { form: SkillsForm; worktreeForm?: SkillsForm | undefined; t: Translate }
 
 /** The plugin-detail card: root Skills and worktree suggestions, one cell. */
 export function SkillsSettingsCard({ form, worktreeForm, t }: SkillsCardProps) {
   return <>
     <SettingSwitchRow form={form} title={t('skills.globalEnable')} hint={t('skills.globalHint')} failureText="skills.settingsFailed" t={t} />
-    {worktreeForm === undefined ? null : (
-      <SettingSwitchRow form={worktreeForm} title={t('worktree.globalEnable')} hint={t('worktree.globalHint')} failureText="worktree.settingsFailed" t={t} />
-    )}
+    {worktreeForm === undefined ? null : <WorktreeSwitchRow form={worktreeForm} t={t} />}
   </>
 }
 
@@ -76,9 +107,7 @@ export function BundleSettingsCard({ form, worktreeForm, autoReviewForm, opsForm
     {form === undefined
       ? null
       : <SkillsSettingsCard form={form} worktreeForm={worktreeForm} t={t} />}
-    {form === undefined && worktreeForm !== undefined
-      ? <SettingSwitchRow form={worktreeForm} title={t('worktree.globalEnable')} hint={t('worktree.globalHint')} failureText="worktree.settingsFailed" t={t} />
-      : null}
+    {form === undefined && worktreeForm !== undefined ? <WorktreeSwitchRow form={worktreeForm} t={t} /> : null}
     {autoReviewForm !== undefined ? <AutoReviewSettingsCard form={autoReviewForm} t={t} /> : null}
     {opsForm !== undefined ? <OpsCompatibilitySettingsCard form={opsForm} t={t} /> : null}
   </>
@@ -181,7 +210,7 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): WorktreeS
     watchedWorktree = undefined
   })
   return {
-    enabled: () => watchedWorktree?.getSnapshot().value?.enabled !== false,
+    enabled: () => watchedWorktree?.getSnapshot().value?.enabled === true,
     subscribe(listener) {
       listeners.add(listener)
       return () => { listeners.delete(listener) }

@@ -60,11 +60,13 @@ async function mount(config: { enabled?: boolean } = {}): Promise<{ handler: Han
 }
 
 describe('worktree panel channel', () => {
-  it('serves the prompt and the strict wait union', async () => {
+  it('serves the visible list and the strict wait union', async () => {
     const { handler } = await mount()
     const immediate = await handler('worktreePrompt', { sessionId: SESSION }, new AbortController().signal)
     expect(immediate).toMatchObject({ ok: true })
-    expect((immediate.value as { prompt?: { path: string } }).prompt?.path).toContain('wt')
+    const prompts = (immediate.value as { prompts: { path: string }[] }).prompts
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]?.path).toContain('wt')
     const waited = await handler('worktreePromptWait', { sessionId: SESSION }, new AbortController().signal)
     expect(waited.ok).toBe(true)
     expect((waited.value as WorktreeWaitView).status).toBe('prompt')
@@ -72,16 +74,22 @@ describe('worktree panel channel', () => {
 
   it('confirms through the channel and refuses cleanup eligibility it cannot prove', async () => {
     const { handler } = await mount()
-    const prompt = (await handler('worktreePrompt', { sessionId: SESSION }, new AbortController().signal)).value as { prompt: { id: string } }
-    const resolved = await handler('worktreePromptResolve', { sessionId: SESSION, promptId: prompt.prompt.id, action: 'add' }, new AbortController().signal)
+    const prompts = (await handler('worktreePrompt', { sessionId: SESSION }, new AbortController().signal)).value as { prompts: { id: string }[] }
+    const resolved = await handler('worktreePromptResolve', { sessionId: SESSION, promptIds: [prompts.prompts[0]!.id], action: 'add' }, new AbortController().signal)
     expect(resolved.ok).toBe(true)
     const cleaned = await handler('worktreeRootsCleanup', { sessionId: SESSION, rootIds: ['r1'] }, new AbortController().signal)
     expect(cleaned).toMatchObject({ ok: true, value: { removed: [], skipped: [{ id: 'r1', code: 'worktree/not-eligible' }] } })
   })
 
-  it('answers stale when the seen prompt is gone and refuses malformed bodies', async () => {
+  it('closes with stale after the last candidate is handled and refuses malformed bodies', async () => {
     const { handler } = await mount()
-    const stale = await handler('worktreePromptWait', { sessionId: SESSION, seenPromptId: 'not-a-prompt' }, new AbortController().signal)
+    const prompts = (await handler('worktreePrompt', { sessionId: SESSION }, new AbortController().signal)).value as {
+      prompts: { id: string }[]
+      viewRevision: string
+    }
+    const first = prompts.prompts[0]!
+    expect((await handler('worktreePromptResolve', { sessionId: SESSION, promptIds: [first.id], action: 'dismiss' }, new AbortController().signal)).ok).toBe(true)
+    const stale = await handler('worktreePromptWait', { sessionId: SESSION, seenViewRevision: prompts.viewRevision }, new AbortController().signal)
     expect(stale).toMatchObject({ ok: true, value: { status: 'stale' } })
     expect(await handler('worktreePromptWait', { sessionId: SESSION, retryAfterMs: 1 }, new AbortController().signal))
       .toMatchObject({ ok: false, error: { code: 'panel/bad-request' } })
@@ -105,8 +113,8 @@ describe('worktree panel channel', () => {
 
   it('cleans up a confirmed deleted worktree through the channel', async () => {
     const { handler, stack, main, area } = await mount()
-    const prompt = (await handler('worktreePrompt', { sessionId: SESSION }, new AbortController().signal)).value as { prompt: { id: string } }
-    expect((await handler('worktreePromptResolve', { sessionId: SESSION, promptId: prompt.prompt.id, action: 'add' }, new AbortController().signal)).ok).toBe(true)
+    const prompts = (await handler('worktreePrompt', { sessionId: SESSION }, new AbortController().signal)).value as { prompts: { id: string }[] }
+    expect((await handler('worktreePromptResolve', { sessionId: SESSION, promptIds: [prompts.prompts[0]!.id], action: 'add' }, new AbortController().signal)).ok).toBe(true)
     const [row] = stack.registry.list(main)
     expect(row).toBeDefined()
     rmSync(join(area.base, 'wt'), { recursive: true, force: true })
@@ -122,6 +130,6 @@ describe('worktree panel channel', () => {
     const { handler } = await mount()
     expect(await handler('worktreePromptReset', { sessionId: SESSION }, new AbortController().signal))
       .toMatchObject({ ok: true, value: { cleared: true } })
-    expect(((await handler('worktreePrompt', { sessionId: SESSION }, new AbortController().signal)).value as { prompt?: unknown }).prompt).toBeDefined()
+    expect(((await handler('worktreePrompt', { sessionId: SESSION }, new AbortController().signal)).value as { prompts: unknown[] }).prompts).toHaveLength(1)
   })
 })

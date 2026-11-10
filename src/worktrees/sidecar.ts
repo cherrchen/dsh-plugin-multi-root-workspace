@@ -17,7 +17,7 @@ import { join } from 'node:path'
 /** One discovery decision the operator made ("do not suggest this again"). */
 export interface IgnoredCandidate {
   readonly key: string
-  readonly kind: 'worktree' | 'git-common'
+  readonly kind: 'worktree' | 'main-checkout'
   readonly path: string
   readonly addedAt: string
 }
@@ -75,8 +75,12 @@ function parseIgnored(value: unknown): IgnoredCandidate | undefined {
   const entry = objectOf(value)
   if (entry === undefined) return undefined
   if (typeof entry.key !== 'string' || typeof entry.path !== 'string' || typeof entry.addedAt !== 'string') return undefined
-  if (entry.kind !== 'worktree' && entry.kind !== 'git-common') return undefined
-  return { key: entry.key, kind: entry.kind, path: entry.path, addedAt: entry.addedAt }
+  // `git-common` is the pre-nineteenth-revision A kind. Read it as a legacy
+  // record (its key no longer matches, so it is inert) instead of refusing the
+  // whole document.
+  if (entry.kind !== 'worktree' && entry.kind !== 'main-checkout' && entry.kind !== 'git-common') return undefined
+  const kind = entry.kind === 'worktree' ? 'worktree' as const : 'main-checkout' as const
+  return { key: entry.key, kind, path: entry.path, addedAt: entry.addedAt }
 }
 
 function parseMapping(value: unknown): WorktreeMapping | undefined {

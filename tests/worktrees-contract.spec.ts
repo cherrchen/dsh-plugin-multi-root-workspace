@@ -22,6 +22,7 @@ describe('worktree wait union', () => {
   it('accepts every documented branch', () => {
     for (const value of [
       { status: 'prompt', prompt, viewRevision: 'v1' },
+      { status: 'prompts', prompts: [prompt, { ...prompt, id: 'p2', key: 'worktree\u0000/wt2', path: '/wt2' }], viewRevision: 'v1' },
       { status: 'timeout', viewRevision: 'v1' },
       { status: 'unactivated', viewRevision: 'v1' },
       { status: 'lost', viewRevision: 'v1' },
@@ -29,11 +30,19 @@ describe('worktree wait union', () => {
     ]) expect(worktreeWaitViewSchema.safeParse(value).success, JSON.stringify(value)).toBe(true)
   })
 
+  it('keeps the single and list shapes apart', () => {
+    // One candidate is always the single shape; the list branch starts at two.
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompts', prompts: [prompt], viewRevision: 'v1' }).success).toBe(false)
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompts: [prompt], viewRevision: 'v1' }).success).toBe(false)
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt, prompts: [prompt], viewRevision: 'v1' }).success).toBe(false)
+  })
+
   it('refuses a retry hint on every branch', () => {
-    for (const status of ['prompt', 'timeout', 'unactivated', 'lost', 'stale']) {
+    for (const status of ['prompt', 'prompts', 'timeout', 'unactivated', 'lost', 'stale']) {
       const value = status === 'prompt' ? { status, prompt, viewRevision: 'v1', retryAfterMs: 1000 }
-        : status === 'stale' ? { status, viewRevision: 'v1', reason: 'x', retryAfterMs: 1000 }
-          : { status, viewRevision: 'v1', retryAfterMs: 1000 }
+        : status === 'prompts' ? { status, prompts: [prompt, { ...prompt, id: 'p2' }], viewRevision: 'v1', retryAfterMs: 1000 }
+          : status === 'stale' ? { status, viewRevision: 'v1', reason: 'x', retryAfterMs: 1000 }
+            : { status, viewRevision: 'v1', retryAfterMs: 1000 }
       expect(worktreeWaitViewSchema.safeParse(value).success, status).toBe(false)
     }
   })
@@ -55,16 +64,26 @@ describe('worktree requests', () => {
 
   it('requires the fields each endpoint acts on', () => {
     expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', action: 'add' })).toMatchObject({ ok: false })
-    expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptId: 'p' })).toMatchObject({ ok: false })
-    expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptId: 'p', action: 'add' })).toMatchObject({ ok: true })
+    expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptIds: ['p'] })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptIds: ['p'], action: 'add' })).toMatchObject({ ok: true })
+    // The pre-list single-id field is gone: the client always sends an array.
+    expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptId: 'p', action: 'add' })).toMatchObject({ ok: false })
     expect(parseWorktreeCall('worktreeRootsCleanup', { sessionId: 's' })).toMatchObject({ ok: false })
     expect(parseWorktreeCall('worktreeRootsCleanup', { sessionId: 's', rootIds: ['r1'] })).toMatchObject({ ok: true })
   })
 
+  it('refuses duplicate or oversized prompt ids', () => {
+    expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptIds: ['p', 'p'], action: 'add' })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptIds: [], action: 'add' })).toMatchObject({ ok: false })
+    const tooMany = Array.from({ length: 65 }, (_, index) => `p${index}`)
+    expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptIds: tooMany, action: 'add' })).toMatchObject({ ok: false })
+  })
+
   it('carries the seen cursor and refuses an unknown endpoint', () => {
-    expect(parseWorktreeCall('worktreePromptWait', { sessionId: 's', seenPromptId: 'p', seenViewRevision: 'v' })).toMatchObject({
-      ok: true, value: { seenPromptId: 'p', seenViewRevision: 'v' },
+    expect(parseWorktreeCall('worktreePromptWait', { sessionId: 's', seenViewRevision: 'v' })).toMatchObject({
+      ok: true, value: { seenViewRevision: 'v' },
     })
+    expect(parseWorktreeCall('worktreePromptWait', { sessionId: 's', seenPromptId: 'p' })).toMatchObject({ ok: false })
     expect(parseWorktreeCall('worktreeNope', { sessionId: 's' })).toMatchObject({ ok: false })
   })
 })

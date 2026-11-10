@@ -122,46 +122,52 @@ function journey(label: string, pool: boolean): Journey {
 }
 
 const SESSION = 'session-git'
-const cases = [
-  { label: 'external linked checkout', pool: false },
-  { label: 'default pool checkout', pool: true },
-]
 
-describe.each(cases)('restricted Git journey with the A root: $label', ({ label, pool }) => {
-  it('fails before the A confirmation and commits after it, while the source tree stays refused', async (context) => {
-    const { area, main, linked, unrelated } = journey(label.replaceAll(' ', '-'), pool)
-    const common = join(main, '.git')
-    let provider: Pick<LocalSandboxProvider, 'confine'> | undefined
-    const stack = await mountRegistryStack(join(area.base, 'store'), {}, {
-      beforeGate: async (ctx: Context) => {
-        // The live session shape the panel and the worktree row read.
-        ctx.provide('sandboxPolicy', { resolve: () => ({ mode: 'workspace-write', workspaceRoot: linked }) } as never)
-        ctx.provide('sessions', { get: (id: string) => id === SESSION ? { header: { cwd: linked } } : undefined } as never)
-        const { MultiRootSandboxProvider } = await import('../src/sandbox.ts')
-        await ctx.plugin(MultiRootSandboxProvider)
-        provider = ctx.sandbox
-      },
+interface OpenJourney extends Journey {
+  readonly common: string
+  readonly stack: RegistryStack
+  readonly worktrees: MultiRootWorktrees
+  readonly admitted: (argv: readonly string[]) => Promise<ConfinedOutcome>
+  readonly selected: () => ParsedDialect | undefined
+}
+
+/** Mount the production discovery row over the real Registry + sandbox stack. */
+async function openJourney(label: string, pool: boolean): Promise<OpenJourney> {
+  const { area, main, linked, unrelated } = journey(label, pool)
+  const common = join(main, '.git')
+  let provider: Pick<LocalSandboxProvider, 'confine'> | undefined
+  const stack = await mountRegistryStack(join(area.base, 'store'), {}, {
+    beforeGate: async (ctx: Context) => {
+      // The live session shape the panel and the worktree row read.
+      ctx.provide('sandboxPolicy', { resolve: () => ({ mode: 'workspace-write', workspaceRoot: linked }) } as never)
+      ctx.provide('sessions', { get: (id: string) => id === SESSION ? { header: { cwd: linked } } : undefined } as never)
+      const { MultiRootSandboxProvider } = await import('../src/sandbox.ts')
+      await ctx.plugin(MultiRootSandboxProvider)
+      provider = ctx.sandbox
+    },
+  })
+  stacks.push(stack)
+  await stack.ctx.plugin(MultiRootWorktrees, { enabled: true, waitTimeoutMs: 200 })
+  const worktrees = stack.ctx.multiRootWorktrees
+  if (provider === undefined) throw new Error('the sandbox provider was not mounted')
+  const policy = { mode: 'workspace-write', workspaceRoot: linked } as SandboxPolicy
+  let selected: ParsedDialect | undefined
+  const admitted = async (argv: readonly string[]): Promise<ConfinedOutcome> =>
+    await stack.registry.withOperation(policy, 'process', async () => {
+      const confined = await confineForTest(provider!, argv, policy)
+      if ('kind' in confined) return confined
+      selected = parseConfined(confined.argv, argv).dialect
+      return runConfined(confined, linked)
     })
-    stacks.push(stack)
-    // The production discovery row, mounted over the same host services the
-    // e2e already proved.
-    await stack.ctx.plugin(MultiRootWorktrees, { waitTimeoutMs: 200 })
-    const worktrees = stack.ctx.multiRootWorktrees
-    if (provider === undefined) throw new Error('the sandbox provider was not mounted')
+  return { area, main, linked, unrelated, common, stack, worktrees, admitted, selected: () => selected }
+}
 
-    const policy = { mode: 'workspace-write', workspaceRoot: linked } as SandboxPolicy
-    let selected: ParsedDialect | undefined
-    const admitted = async (argv: readonly string[]): Promise<ConfinedOutcome> =>
-      await stack.registry.withOperation(policy, 'process', async () => {
-        const confined = await confineForTest(provider!, argv, policy)
-        if ('kind' in confined) return confined
-        selected = parseConfined(confined.argv, argv).dialect
-        return runConfined(confined, linked)
-      })
-
+describe('restricted Git journey with the main-checkout A root', () => {
+  it('fails before A and commits after it, and now permits the main source tree', async (context) => {
+    const { main, linked, unrelated, stack, worktrees, admitted, selected } = await openJourney('external', false)
     const probe = await admitted(writeProbe(join(linked, 'probe.txt')))
-    if (probe.kind !== 'ok') return context.skip(unavailableRunner(selected, probe.detail))
-    expect(selected).not.toBe('unknown')
+    if (probe.kind !== 'ok') return context.skip(unavailableRunner(selected(), probe.detail))
+    expect(selected()).not.toBe('unknown')
     expect(probe.stdout.trim()).toBe('allowed')
     expect(await admitted(writeProbe(join(unrelated, 'probe.txt')))).toMatchObject({ kind: 'ok', stdout: expect.stringMatching(/^denied\r?\n$/) })
 
@@ -177,18 +183,16 @@ describe.each(cases)('restricted Git journey with the A root: $label', ({ label,
     expect(beforeRun.kind).not.toBe('ok')
     expect(readFileSync(join(admin, 'index'))).toEqual(indexBefore)
 
-    // 2. The live session gets the real A prompt for the canonical common.
+    // 2. The live session gets the real A prompt for the MAIN CHECKOUT.
     const prompt = promptOf(await worktrees.wait(SESSION))
-    expect(prompt.kind).toBe('git-common')
-    expect(prompt.path).toBe(realpathSync.native(common))
+    expect(prompt.kind).toBe('main-checkout')
+    expect(prompt.path).toBe(realpathSync.native(main))
     expect(prompt.effectiveAccess).toBe('read-write')
-    // No B candidate may be confirmed in its place; the operator confirms the
-    // common the host actually offered.
     const resolved = await worktrees.resolve(SESSION, prompt.id, 'add')
     expect(resolved.viewRevision).toEqual(expect.any(String))
     const rows = stack.registry.list(linked)
     expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ path: realpathSync.native(common), access: 'inherit', state: 'available' })
+    expect(rows[0]).toMatchObject({ path: realpathSync.native(main), access: 'inherit', state: 'available' })
 
     // 3. The same workspace-write session can now stage and commit.
     const add = await admitted([gitPath, '-C', linked, 'add', 'feature.txt'])
@@ -204,10 +208,11 @@ describe.each(cases)('restricted Git journey with the A root: $label', ({ label,
     expect(git(main, ['rev-parse', 'feature']).trim()).toBe(headAfter)
     expect(git(linked, ['ls-files']).split('\n')).toContain('feature.txt')
 
-    // 5. The main checkout's SOURCE tree is still outside the grant.
+    // 5. The main checkout's SOURCE tree is now INSIDE the grant: this is the
+    // deliberate scope change of the main-checkout A target.
     const sourceWrite = await admitted(writeProbe(join(main, 'outside.txt')))
-    expect(sourceWrite).toMatchObject({ kind: 'ok', stdout: expect.stringMatching(/^denied\r?\n$/) })
-    expect(() => readFileSync(join(main, 'outside.txt'))).toThrow()
+    expect(sourceWrite).toMatchObject({ kind: 'ok', stdout: expect.stringMatching(/^allowed\r?\n$/) })
+    expect(readFileSync(join(main, 'outside.txt'), 'utf8')).toBe('probe')
 
     // 6. An unrelated directory stays refused.
     const unrelatedWrite = await admitted(writeProbe(join(unrelated, 'x.txt')))
@@ -220,5 +225,21 @@ describe.each(cases)('restricted Git journey with the A root: $label', ({ label,
     const afterRemoval = await admitted([gitPath, '-C', linked, 'add', 'again.txt'])
     expect(afterRemoval.kind).not.toBe('ok')
     expect(stack.registry.list(linked)).toHaveLength(0)
+  })
+
+  it('does not offer A for a default-pool checkout, so Git writes stay refused', async (context) => {
+    const { linked, stack, worktrees, admitted, selected } = await openJourney('pool', true)
+    const probe = await admitted(writeProbe(join(linked, 'probe.txt')))
+    if (probe.kind !== 'ok') return context.skip(unavailableRunner(selected(), probe.detail))
+    expect(selected()).not.toBe('unknown')
+
+    // `<main>` contains the pool primary, so the Registry refuses it as
+    // `primary-overlap` and no A prompt is produced.
+    expect((await worktrees.wait(SESSION)).status).toBe('timeout')
+    expect(stack.registry.list(linked)).toHaveLength(0)
+
+    writeFileSync(join(linked, 'feature.txt'), 'feature\n')
+    const add = await admitted([gitBinary(), '-C', linked, 'add', 'feature.txt'])
+    expect(add.kind).not.toBe('ok')
   })
 })

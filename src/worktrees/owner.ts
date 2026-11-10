@@ -13,9 +13,9 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/worktrees/owner
  */
 
-import { basename } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { primaryKey, samePath } from '../roots.ts'
-import { directoryIdentity } from './fs-safe.ts'
+import { canonicalExisting, directoryIdentity } from './fs-safe.ts'
 import { resolveRepo, identityMatches } from './repository.ts'
 import type { FileIdentity, PromptExpected, RepoSnapshot } from './types.ts'
 
@@ -74,16 +74,27 @@ export function verifyPromptExpected(primaryRoot: string, expected: PromptExpect
   const primary = resolveRepo(primaryRoot)
   if (!primary.ok) return stale('the primary checkout no longer activates: ' + primary.reason + ': ' + primary.detail)
   if (!primaryMatches(primary.repo, expected.primary)) return stale('the primary checkout changed while the prompt was open')
-  if (expected.candidate.kind === 'git-common') {
+  if (expected.candidate.kind === 'main-checkout') {
     if (primary.repo.shape !== 'linked' || basename(primary.repo.common) !== '.git') return stale('the primary no longer has an eligible shared common')
-    if (!samePath(primary.repo.common, expected.candidate.canonical)) return stale('the shared common git dir changed')
+    const mainRoot = dirname(primary.repo.common)
+    if (!samePath(mainRoot, expected.candidate.canonical)) return stale('the main checkout root changed')
     if (!samePath(primary.repo.common, expected.candidate.common)) return stale('the candidate common does not belong to this workspace')
     if ((primary.repo.adminId ?? '') !== (expected.candidate.adminId ?? '')) return stale('the linked admin changed')
     if (!sameOptionalPath(primary.repo.adminGitdir, expected.candidate.adminGitdir)) return stale('the linked admin moved')
     if ((primary.repo.adminHead ?? '') !== (expected.candidate.adminHead ?? '')) return stale('the admin HEAD changed')
     if (!sameIdentity(primary.repo.adminIdentity, expected.candidate.adminIdentity)) return stale('the linked admin was replaced')
-    const identity = directoryIdentity(primary.repo.common)
-    if (!sameIdentity(identity, expected.candidate.rootIdentity)) return stale('the shared common git dir was replaced')
+    try {
+      // The main root is only the same directory while its `.git` still is the
+      // common. A renamed/replaced checkout, a `.git` file (separate git dir),
+      // or a symlink invalidates the prompt.
+      const dotGit = join(mainRoot, '.git')
+      if (directoryIdentity(dotGit) === undefined) return stale('the main checkout lost its .git directory')
+      if (!samePath(canonicalExisting(dotGit), primary.repo.common)) return stale('the main checkout .git is no longer the shared common')
+    } catch {
+      return stale('the main checkout .git can no longer be inspected')
+    }
+    const identity = directoryIdentity(mainRoot)
+    if (!sameIdentity(identity, expected.candidate.rootIdentity)) return stale('the main checkout directory was replaced')
     return { ok: true }
   }
   // B is only a sibling checkout of the SAME common. Without this binding a

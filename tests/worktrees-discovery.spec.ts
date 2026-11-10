@@ -46,6 +46,8 @@ interface MountOptions {
   readonly mode?: () => 'read-only' | 'workspace-write' | 'danger-full-access'
   readonly session?: { readonly cwd: string } | undefined
   readonly settings?: boolean
+  /** Mount the real default (off) instead of the specs' enabled baseline. */
+  readonly defaultConfig?: boolean
 }
 
 const mounted: Mounted[] = []
@@ -76,7 +78,7 @@ async function mount(storeRoot: string, options: MountOptions = {}): Promise<Mou
       },
     } as never)
   }
-  await ctx.plugin(MultiRootWorktrees, options.config ?? {})
+  await ctx.plugin(MultiRootWorktrees, options.defaultConfig === true ? (options.config ?? {}) : { enabled: true, ...(options.config ?? {}) })
   const result = { stack, ctx, worktrees: ctx.multiRootWorktrees, storeFile: stack.storeFile }
   mounted.push(result)
   return result
@@ -223,10 +225,12 @@ describe('activation lifecycle', () => {
     renameSync(join(area.base, 'git-away'), join(main, '.git'))
     // Recovery is explicit: the OLD prompt id is dead (stale), and a fresh
     // request receives a NEW id for the re-evaluated candidate.
-    expect((await worktrees.wait(SESSION, { seenPromptId: firstId })).status).toBe('lost')
+    expect((await worktrees.wait(SESSION)).status).toBe('lost')
     await worktrees.describeRoots(main)
-    const stale = await worktrees.wait(SESSION, { seenPromptId: firstId })
-    expect(stale.status).toBe('stale')
+    // The old prompt id died with the activation; a fresh request receives a
+    // new id for the re-evaluated candidate.
+    const dead = await worktrees.resolve(SESSION, firstId, 'add')
+    expect(dead.skipped).toMatchObject([{ code: 'worktree/prompt-stale' }])
     const recovered = promptOf(await worktrees.wait(SESSION))
     expect(recovered.id).not.toBe(firstId)
     expect(recovered.path).toBe(realpathSync.native(linked))
@@ -254,6 +258,21 @@ describe('activation lifecycle', () => {
     await worktrees.reset(SESSION)
     const after = promptOf(await worktrees.wait(SESSION)).id
     expect(after).not.toBe(before)
+  })
+})
+
+describe('experimental default', () => {
+  it('defaults the live switch to off and performs no discovery or write', async () => {
+    const area = fixture('settings-default-off')
+    const main = join(area.base, 'main')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', join(area.base, 'wt'), '-b', 'wt'])
+    const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: main }, defaultConfig: true })
+    expect(worktrees.enabled).toBe(false)
+    await expect(worktrees.wait(SESSION)).rejects.toMatchObject({ code: 'worktree/not-enabled' })
+    // The switch is off, so no activation, watcher, prompt or sidecar write.
+    expect(worktrees.activationOf(main).activation).toBe('unactivated')
+    expect(stack.registry.list(main)).toHaveLength(0)
   })
 })
 

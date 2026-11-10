@@ -15,7 +15,7 @@ const primarySnapshot = z.object({
 }).strict()
 
 const candidateSnapshot = z.object({
-  kind: z.enum(['worktree', 'git-common']),
+  kind: z.enum(['worktree', 'main-checkout']),
   canonical: z.string().min(1),
   common: z.string().min(1),
   adminId: z.string().optional(),
@@ -52,7 +52,7 @@ export const deletedWorktreeSchema = z.object({
 /** `worktreeSidecar` arguments. */
 export const sidecarOperationSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('read') }).strict(),
-  z.object({ op: z.literal('ignore'), key: z.string().min(1), kind: z.enum(['worktree', 'git-common']), path: z.string().min(1) }).strict(),
+  z.object({ op: z.literal('ignore'), key: z.string().min(1), kind: z.enum(['worktree', 'main-checkout']), path: z.string().min(1) }).strict(),
   z.object({ op: z.literal('reset') }).strict(),
   z.object({ op: z.literal('reconcile') }).strict(),
 ])

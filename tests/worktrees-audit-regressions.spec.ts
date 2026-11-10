@@ -257,11 +257,12 @@ describe('commit boundary (audit 3)', () => {
     // post-await refresh the audit requires. A is only eligible in
     // `workspace-write`, so the live re-read must retire the prompt.
     const prompt = promptOf(await stack.worktrees.wait(stack.sessionId))
-    expect(prompt.kind).toBe('git-common')
+    expect(prompt.kind).toBe('main-checkout')
     reads = 0
     liveMode = 'read-only'
-    await expect(stack.worktrees.resolve(stack.sessionId, prompt.id, 'add'))
-      .rejects.toMatchObject({ code: 'worktree/prompt-stale' })
+    const answer = await stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')
+    expect(answer.resolved).toEqual([])
+    expect(answer.skipped).toMatchObject([{ id: prompt.id, code: 'worktree/prompt-stale' }])
     expect(stack.stack.registry.list(linked)).toHaveLength(0)
   })
 })
@@ -321,14 +322,16 @@ describe('stale prompt identity (audit 5)', () => {
     const first = promptOf(await stack.worktrees.wait(stack.sessionId))
     // A valid new HEAD: the checkout stays active, only the admin snapshot moves.
     git(linked, ['checkout', '-q', '-b', 'another'])
-    const stale = await stack.worktrees.wait(stack.sessionId, { seenPromptId: first.id, seenViewRevision: first.viewRevision })
-    expect(stale.status).toBe('stale')
-    await expect(stack.worktrees.resolve(stack.sessionId, first.id, 'add'))
-      .rejects.toMatchObject({ code: 'worktree/prompt-stale' })
+    // The changed expectation replaces the record under the same key: the wait
+    // delivers the NEW prompt id instead of reusing the dead one.
+    const changed = promptOf(await stack.worktrees.wait(stack.sessionId, { seenViewRevision: first.viewRevision }))
+    expect(changed.id).not.toBe(first.id)
+    expect(changed.kind).toBe('worktree')
+    const refused = await stack.worktrees.resolve(stack.sessionId, first.id, 'add')
+    expect(refused.skipped).toMatchObject([{ id: first.id, code: 'worktree/prompt-stale' }])
+    expect(storeText(stack.storeFile)).toBe('')
     const second = promptOf(await stack.worktrees.wait(stack.sessionId))
     expect(second.id).not.toBe(first.id)
-    expect(second.kind).toBe('worktree')
-    expect(storeText(stack.storeFile)).toBe('')
   })
 })
 
@@ -450,7 +453,7 @@ describe('second audit: owner commit and lifecycle', () => {
     let mode: 'workspace-write' | 'read-only' = 'workspace-write'
     const { stack, worktrees, sessionId } = await worktreesOf(area, linked, { mode: () => mode })
     const prompt = promptOf(await worktrees.wait(sessionId))
-    expect(prompt.kind).toBe('git-common')
+    expect(prompt.kind).toBe('main-checkout')
     const internal = stack.registry as unknown as {
       ensureAuthority(): Promise<void>
       client?: { request: () => Promise<unknown> } | undefined
@@ -467,8 +470,10 @@ describe('second audit: owner commit and lifecycle', () => {
       await entered.promise
       mode = 'read-only'
       release.resolve()
-      await expect(pending).rejects.toMatchObject({ code: 'worktree/prompt-stale' })
-      expect(request).not.toHaveBeenCalled()
+      const answer = await pending
+      expect(answer.resolved).toEqual([])
+      expect(answer.skipped).toMatchObject([{ id: prompt.id, code: 'worktree/prompt-stale' }])
+      expect(request.mock.calls.some(call => call[0] === 'addNew')).toBe(false)
     } finally {
       release.resolve()
       spy.mockRestore()

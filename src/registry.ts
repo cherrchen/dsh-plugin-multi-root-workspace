@@ -339,7 +339,7 @@ export interface WorktreeSidecarView {
 /** One sidecar operation; only the owner ever writes the file. */
 export type WorktreeSidecarOperation =
   | { readonly op: 'read' }
-  | { readonly op: 'ignore'; readonly key: string; readonly kind: 'worktree' | 'git-common'; readonly path: string }
+  | { readonly op: 'ignore'; readonly key: string; readonly kind: 'worktree' | 'main-checkout'; readonly path: string }
   | { readonly op: 'reset' }
   | { readonly op: 'reconcile' }
 
@@ -2467,8 +2467,13 @@ function parseSidecarView(value: unknown): WorktreeSidecarView {
   const ignored = entry.ignored.map(item => {
     const row = typeof item === 'object' && item !== null ? item as Record<string, unknown> : undefined
     if (row === undefined || typeof row.key !== 'string' || typeof row.path !== 'string' || typeof row.addedAt !== 'string'
-      || (row.kind !== 'worktree' && row.kind !== 'git-common')) throw new Error('the registry answered worktreeSidecar with an unreadable ignore entry')
-    return { key: row.key, kind: row.kind as 'worktree' | 'git-common', path: row.path, addedAt: row.addedAt }
+      || (row.kind !== 'worktree' && row.kind !== 'main-checkout' && row.kind !== 'git-common')) throw new Error('the registry answered worktreeSidecar with an unreadable ignore entry')
+    return {
+      key: row.key,
+      kind: row.kind === 'worktree' ? 'worktree' as const : 'main-checkout' as const,
+      path: row.path,
+      addedAt: row.addedAt,
+    }
   })
   const worktreeRoots = entry.worktreeRoots.map(item => {
     const row = typeof item === 'object' && item !== null ? item as Record<string, unknown> : undefined

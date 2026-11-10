@@ -45,7 +45,9 @@ export async function mountWorktreeStack(storeRoot: string, options: WorktreeSta
       installSection: (_owner: Context, _ns: string, _schema: unknown, _value: unknown, value: typeof hooks) => { hooks = value },
     } as never)
   }
-  await ctx.plugin(MultiRootWorktrees, options.config ?? {})
+  // Specs exercise the enabled feature; the default-off behavior has its
+  // own cases. An explicit config.enabled still wins.
+  await ctx.plugin(MultiRootWorktrees, { enabled: true, ...(options.config ?? {}) })
   return {
     stack,
     ctx,

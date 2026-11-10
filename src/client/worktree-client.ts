@@ -31,9 +31,9 @@ type ChannelResult =
 
 /** The callable face the prompt overlay receives. */
 export interface WorktreeClient {
-  wait(sessionId: string, seen: { seenPromptId?: string; seenViewRevision?: string }, signal?: AbortSignal): Promise<WorktreePromptWaitView>
+  wait(sessionId: string, seen: { seenViewRevision?: string }, signal?: AbortSignal): Promise<WorktreePromptWaitView>
   prompt(sessionId: string, signal?: AbortSignal): Promise<WorktreePromptAnswerView>
-  resolve(sessionId: string, promptId: string, action: 'add' | 'dismiss', dontRemind?: boolean, signal?: AbortSignal): Promise<WorktreeResolveAnswerView>
+  resolve(sessionId: string, promptIds: readonly string[], action: 'add' | 'dismiss', dontRemind?: boolean, signal?: AbortSignal): Promise<WorktreeResolveAnswerView>
   reset(sessionId: string, signal?: AbortSignal): Promise<WorktreeResetAnswerView>
   cleanup(sessionId: string, rootIds: readonly string[], signal?: AbortSignal): Promise<WorktreeCleanupView>
   /**
@@ -67,9 +67,9 @@ export function createWorktreeClient(connection: ConnectionHandle): WorktreeClie
     async prompt(sessionId, signal) {
       return parse(worktreePromptAnswerSchema, await call(connection, 'worktreePrompt', { sessionId }, signal), 'the worktree prompt answer')
     },
-    async resolve(sessionId, promptId, action, dontRemind, signal) {
+    async resolve(sessionId, promptIds, action, dontRemind, signal) {
       return parse(worktreeResolveAnswerSchema, await call(connection, 'worktreePromptResolve', {
-        sessionId, promptId, action, ...(dontRemind === undefined ? {} : { dontRemind }),
+        sessionId, promptIds, action, ...(dontRemind === undefined ? {} : { dontRemind }),
       }, signal), 'the worktree resolve answer')
     },
     async reset(sessionId, signal) {

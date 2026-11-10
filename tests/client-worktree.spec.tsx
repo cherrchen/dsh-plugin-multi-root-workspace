@@ -23,7 +23,19 @@ const PROMPT: WorktreePromptView = {
   primaryRoot: '/tmp/main',
   access: 'inherit',
   effectiveAccess: 'read-write',
-  remaining: 1,
+  remaining: 2,
+  viewRevision: 'v1',
+}
+
+const MAIN: WorktreePromptView = {
+  id: 'm1',
+  key: 'main-checkout\u0000/tmp/main/.git',
+  kind: 'main-checkout',
+  path: '/tmp/main',
+  primaryRoot: '/tmp/main',
+  access: 'inherit',
+  effectiveAccess: 'read-write',
+  remaining: 2,
   viewRevision: 'v1',
 }
 
@@ -43,12 +55,22 @@ function promptThenWait(seenPrompt: WorktreePromptView = PROMPT): WorktreeClient
   }
 }
 
+/** The multi-candidate shape on the first call, then a real long poll. */
+function listThenWait(prompts: readonly WorktreePromptView[] = [PROMPT, MAIN]): WorktreeClient['wait'] {
+  let calls = 0
+  return async (_sessionId, _seen, signal) => {
+    calls++
+    if (calls === 1) return { status: 'prompts', prompts, viewRevision: 'v1' }
+    return await pendingWait(signal)
+  }
+}
+
 function fakeClient(overrides: Partial<WorktreeClient> = {}): WorktreeClient {
   const listeners = new Set<(sessionId: string) => void>()
   const base: WorktreeClient = {
     wait: async () => pendingWait(),
-    prompt: async () => ({ viewRevision: 'v1' }),
-    resolve: async () => ({ viewRevision: 'v2' }),
+    prompt: async () => ({ prompts: [], viewRevision: 'v1' }),
+    resolve: async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }),
     reset: async () => ({ cleared: true }),
     cleanup: async () => { throw new Error('unexpected cleanup') },
     notify: sessionId => { for (const listener of [...listeners]) listener(sessionId) },
@@ -80,12 +102,71 @@ describe('worktree prompt overlay', () => {
   })
 
   it('confirms through the client when writes are enabled', async () => {
-    const resolve = vi.fn(async () => ({ viewRevision: 'v2' }))
+    const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
     const client = fakeClient({ wait: promptThenWait(), resolve })
     renderPrompt(client, false)
     await screen.findByRole('dialog', { name: 'worktree.title' })
     fireEvent.click(screen.getByText('worktree.add'))
-    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', 'p1', 'add', undefined))
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['p1'], 'add', undefined))
+  })
+
+  it('renders the checkbox list when several candidates are visible', async () => {
+    renderPrompt(fakeClient({ wait: listThenWait() }), false)
+    await screen.findByRole('dialog', { name: 'worktree.listTitle' })
+    expect(screen.getByText('/tmp/wt')).toBeDefined()
+    expect(screen.getByText('/tmp/main')).toBeDefined()
+    expect(screen.getByText('worktree.kind.worktree')).toBeDefined()
+    expect(screen.getByText('worktree.kind.main-checkout')).toBeDefined()
+    expect(screen.getByText('worktree.mainSeparate')).toBeDefined()
+    const boxes = screen.getAllByRole('checkbox')
+    // The linked checkout is pre-selected; the main checkout stays an explicit
+    // opt-in because it grants the source tree.
+    expect((boxes[0] as HTMLInputElement).checked).toBe(true)
+    expect((boxes[1] as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('adds the checked rows in one batch', async () => {
+    const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    renderPrompt(fakeClient({ wait: listThenWait(), resolve }), false)
+    await screen.findByRole('dialog', { name: 'worktree.listTitle' })
+    fireEvent.click(screen.getByText('worktree.addSelected'))
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['p1'], 'add', undefined))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('sends only the rows the operator selected', async () => {
+    const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    renderPrompt(fakeClient({ wait: listThenWait(), resolve }), false)
+    await screen.findByRole('dialog', { name: 'worktree.listTitle' })
+    const boxes = screen.getAllByRole('checkbox')
+    fireEvent.click(boxes[0]!)
+    fireEvent.click(boxes[1]!)
+    fireEvent.click(screen.getByText('worktree.addSelected'))
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['m1'], 'add', undefined))
+  })
+
+  it('keeps a refused row visible, unchecked, and reports its code', async () => {
+    const resolve = vi.fn(async () => ({
+      viewRevision: 'v2',
+      prompts: [PROMPT, MAIN],
+      resolved: [],
+      skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
+    }))
+    renderPrompt(fakeClient({ wait: listThenWait(), resolve }), false)
+    await screen.findByRole('dialog', { name: 'worktree.listTitle' })
+    fireEvent.click(screen.getByText('worktree.addSelected'))
+    await waitFor(() => expect(screen.getByText(/worktree.rowError/)).toBeDefined())
+    expect(screen.getByText(/error.worktree\/prompt-stale/)).toBeDefined()
+    const boxes = screen.getAllByRole('checkbox')
+    expect((boxes[0] as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('uses the main-checkout copy for a single main checkout prompt', async () => {
+    renderPrompt(fakeClient({ wait: promptThenWait(MAIN) }), false)
+    const dialog = await screen.findByRole('dialog', { name: 'worktree.mainTitle' })
+    expect(dialog).toBeDefined()
+    expect(screen.getByText('/tmp/main')).toBeDefined()
+    expect(screen.getByText('worktree.mainSeparate')).toBeDefined()
   })
 
   it('closes on lost and stops polling', async () => {
@@ -116,7 +197,7 @@ describe('worktree prompt overlay', () => {
 
   it('remounts its wait when the settings switch is turned back on', async () => {
     let calls = 0
-    const wait = vi.fn(async (_sessionId: string, _seen: { seenPromptId?: string; seenViewRevision?: string }, signal?: AbortSignal) => {
+    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => {
       calls++
       if (calls === 1) throw new PanelError('worktree/not-enabled', 'off')
       if (calls === 2) return { status: 'prompt' as const, prompt: PROMPT, viewRevision: 'v1' }
@@ -157,7 +238,7 @@ describe('worktree prompt overlay', () => {
 
   it('remounts after an explicit panel action wakes it from lost', async () => {
     let calls = 0
-    const wait = vi.fn(async (_sessionId: string, _seen: { seenPromptId?: string; seenViewRevision?: string }, signal?: AbortSignal) => {
+    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => {
       calls++
       if (calls === 1) return { status: 'lost' as const, viewRevision: 'v1' }
       if (calls === 2) return { status: 'prompt' as const, prompt: PROMPT, viewRevision: 'v2' }
@@ -261,6 +342,20 @@ describe('plugin detail switches', () => {
     fireEvent.click(switches[0]!)
     await waitFor(() => expect(skillsWrites).toEqual([false]))
     expect(worktreeWrites).toEqual([false])
+  })
+
+  it('shows the worktree switch off by default with the experimental tag', () => {
+    const snapshot = { value: undefined, status: 'ready' as const, writable: true, revision: 1 }
+    const empty = (): SkillsForm => ({
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      mutate: async () => true,
+    })
+    render(<BundleSettingsCard form={empty()} worktreeForm={empty()} t={t} />)
+    expect(screen.getByText('worktree.experimental')).toBeDefined()
+    const switches = screen.getAllByRole('switch')
+    expect(switches[0]?.getAttribute('aria-checked')).toBe('true')
+    expect(switches[1]?.getAttribute('aria-checked')).toBe('false')
   })
 
   it('still renders a worktree-only card when the Skills row is absent', () => {

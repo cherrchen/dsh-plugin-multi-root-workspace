@@ -1,4 +1,4 @@
-/** Phase P8/P9: the A candidate (shared common git dir), its modes, confirmation and staleness. */
+/** Phase P8/P9: the A candidate (main checkout root), its modes, confirmation and staleness. */
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -55,7 +55,7 @@ async function mount(area: FixtureWorkspace, primary: string, mode: () => 'read-
 }
 
 describe('A candidate', () => {
-  it('offers the canonical common git dir of an external linked checkout', async () => {
+  it('offers the main checkout root of an external linked checkout', async () => {
     const area = fixture('common-external')
     const main = join(area.base, 'main')
     const linked = join(area.base, 'linked')
@@ -63,29 +63,30 @@ describe('A candidate', () => {
     git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
     const stack = await mount(area, linked)
     const prompt = promptOf(await stack.worktrees.wait(stack.sessionId))
-    expect(prompt.kind).toBe('git-common')
-    expect(prompt.path).toBe(realpathSync.native(join(main, '.git')))
+    expect(prompt.kind).toBe('main-checkout')
+    expect(prompt.path).toBe(realpathSync.native(main))
     expect(prompt.effectiveAccess).toBe('read-write')
     const answer = await stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')
-    expect(answer.prompt).toBeUndefined()
+    expect(answer.prompts).toEqual([])
     const rows = stack.stack.registry.list(linked)
     expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ path: realpathSync.native(join(main, '.git')), access: 'inherit' })
+    expect(rows[0]).toMatchObject({ path: realpathSync.native(main), access: 'inherit' })
     // A roots never receive a B cleanup mapping.
     expect(readSidecarFile(stack.sidecarRoot, primaryKey(linked))?.worktreeRoots ?? []).toEqual([])
     expect((await stack.worktrees.wait(stack.sessionId)).status).toBe('timeout')
   })
 
-  it('offers the same candidate when the primary is a default-pool worktree', async () => {
+  it('does not offer A when the primary is a default-pool worktree', async () => {
     const area = fixture('common-pool')
     const main = join(area.base, 'main')
     initRepo(main)
     const pool = join(main, '.agents', 'worktrees', 'a')
     git(main, ['worktree', 'add', '-q', pool, '-b', 'a'])
     const stack = await mount(area, pool)
-    const prompt = promptOf(await stack.worktrees.wait(stack.sessionId))
-    expect(prompt.kind).toBe('git-common')
-    expect(prompt.path).toBe(realpathSync.native(join(main, '.git')))
+    // The main checkout contains the primary, so the Registry's
+    // `primary-overlap` rule refuses it: no A prompt is produced.
+    expect((await stack.worktrees.wait(stack.sessionId)).status).toBe('timeout')
+    expect(stack.stack.registry.list(pool)).toHaveLength(0)
   })
 
   it('is not offered in read-only or Full-access sessions', async () => {
@@ -98,7 +99,7 @@ describe('A candidate', () => {
     const stack = await mount(area, linked, () => mode)
     expect((await stack.worktrees.wait(stack.sessionId)).status).toBe('timeout')
     mode = 'workspace-write'
-    expect(promptOf(await stack.worktrees.wait(stack.sessionId)).kind).toBe('git-common')
+    expect(promptOf(await stack.worktrees.wait(stack.sessionId)).kind).toBe('main-checkout')
     mode = 'danger-full-access'
     expect((await stack.worktrees.wait(stack.sessionId)).status).toBe('timeout')
   })
@@ -113,8 +114,9 @@ describe('A candidate', () => {
     const stack = await mount(area, linked, () => mode)
     const prompt = promptOf(await stack.worktrees.wait(stack.sessionId))
     mode = 'read-only'
-    await expect(stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')).rejects
-      .toMatchObject({ code: 'worktree/prompt-stale' })
+    const answer = await stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')
+    expect(answer.resolved).toEqual([])
+    expect(answer.skipped).toMatchObject([{ id: prompt.id, code: 'worktree/prompt-stale' }])
     expect(stack.stack.registry.list(linked)).toHaveLength(0)
   })
 
@@ -133,18 +135,32 @@ describe('A candidate', () => {
     expect(stack.stack.registry.list(linked)).toHaveLength(0)
   })
 
-  it('is not offered when the common is already registered', async () => {
+  it('is not offered when the main checkout is already registered', async () => {
     const area = fixture('common-registered')
     const main = join(area.base, 'main')
     const linked = join(area.base, 'linked')
     initRepo(main)
     git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
     const stack = await mount(area, linked)
+    await stack.stack.registry.add(linked, { path: main })
+    expect((await stack.worktrees.wait(stack.sessionId)).status).toBe('timeout')
+  })
+
+  it('is not offered while a legacy .git root still exists', async () => {
+    const area = fixture('common-registered-legacy')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const stack = await mount(area, linked)
+    // Pre-nineteenth-revision installs registered `<main>/.git`; the main
+    // checkout is nested inside it, so the operator must remove the legacy root
+    // first (no automatic replacement).
     await stack.stack.registry.add(linked, { path: join(main, '.git') })
     expect((await stack.worktrees.wait(stack.sessionId)).status).toBe('timeout')
   })
 
-  it('keeps B visible when the session cannot see A, and queues A after B', async () => {
+  it('keeps B visible when the pool primary makes A unavailable', async () => {
     const area = fixture('common-mixed')
     const main = join(area.base, 'main')
     initRepo(main)
@@ -154,6 +170,7 @@ describe('A candidate', () => {
     git(main, ['worktree', 'add', '-q', a, '-b', 'a'])
     git(main, ['worktree', 'add', '-q', b, '-b', 'b'])
 
+    // A is never offered for a pool primary: `<main>` contains the primary.
     let mode: 'read-only' | 'workspace-write' = 'read-only'
     const readOnly = await mount(area, a, () => mode)
     const first = promptOf(await readOnly.worktrees.wait(readOnly.sessionId))
@@ -169,9 +186,28 @@ describe('A candidate', () => {
     const bPrompt = promptOf(await writable.worktrees.wait(writable.sessionId))
     expect(bPrompt.kind).toBe('worktree')
     await writable.worktrees.resolve(writable.sessionId, bPrompt.id, 'dismiss')
-    const aPrompt = promptOf(await writable.worktrees.wait(writable.sessionId))
-    expect(aPrompt.kind).toBe('git-common')
-    expect(aPrompt.path).toBe(realpathSync.native(join(main, '.git')))
+    expect((await writable.worktrees.wait(writable.sessionId)).status).toBe('timeout')
+  })
+
+  it('lists an external sibling and the main checkout, with B before A', async () => {
+    const area = fixture('common-external-list')
+    const main = join(area.base, 'main')
+    initRepo(main)
+    const a = join(area.base, 'a')
+    const b = join(area.base, 'b')
+    git(main, ['worktree', 'add', '-q', a, '-b', 'a'])
+    git(main, ['worktree', 'add', '-q', b, '-b', 'b'])
+    const stack = await mount(area, a)
+    const visible = await stack.worktrees.wait(stack.sessionId)
+    expect(visible.status).toBe('prompts')
+    if (visible.status !== 'prompts') throw new Error('expected a list')
+    expect(visible.prompts.map(prompt => prompt.kind)).toEqual(['worktree', 'main-checkout'])
+    expect(visible.prompts[0]?.path).toBe(realpathSync.native(b))
+    expect(visible.prompts[1]?.path).toBe(realpathSync.native(main))
+    await stack.worktrees.resolve(stack.sessionId, visible.prompts[0]!.id, 'dismiss')
+    const aPrompt = promptOf(await stack.worktrees.wait(stack.sessionId))
+    expect(aPrompt.kind).toBe('main-checkout')
+    expect(aPrompt.path).toBe(realpathSync.native(main))
   })
 
   it('refuses an A confirmation whose admin HEAD changed while the prompt was open', async () => {
@@ -185,12 +221,13 @@ describe('A candidate', () => {
     const repo = resolveRepo(linked)
     if (!repo.ok || repo.repo.adminGitdir === undefined) throw new Error('fixture is not a linked checkout')
     writeFileSync(join(repo.repo.adminGitdir, 'HEAD'), 'definitely-not-a-head\n')
-    await expect(stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')).rejects
-      .toMatchObject({ code: 'worktree/prompt-stale' })
+    const answer = await stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')
+    expect(answer.resolved).toEqual([])
+    expect(answer.skipped).toMatchObject([{ id: prompt.id, code: 'worktree/prompt-stale' }])
     expect(stack.stack.registry.list(linked)).toHaveLength(0)
   })
 
-  it('never turns a separate-git-dir common into its parent directory', async () => {
+  it('offers the derivable parent of a separate-git-dir store (documented ambiguity)', async () => {
     const area = fixture('common-separate')
     const main = join(area.base, 'main')
     const store = join(area.base, 'unrelated', '.git')
@@ -206,17 +243,18 @@ describe('A candidate', () => {
     git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
     const stack = await mount(area, linked)
     const prompt = promptOf(await stack.worktrees.wait(stack.sessionId))
-    // The candidate is the separated common itself, never its parent.
-    expect(prompt.kind).toBe('git-common')
-    expect(prompt.path).toBe(realpathSync.native(store))
-    expect(prompt.path).not.toBe(realpathSync.native(join(area.base, 'unrelated')))
+    // `dirname(common)` is the only derivable target. For a separate store that
+    // is the store's parent, not the real main checkout; the prompt discloses
+    // that ambiguity and the operator confirms the exact path.
+    const parent = realpathSync.native(join(area.base, 'unrelated'))
+    expect(prompt.kind).toBe('main-checkout')
+    expect(prompt.path).toBe(parent)
     await stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')
     const rows = stack.stack.registry.list(linked)
     expect(rows).toHaveLength(1)
-    expect(rows[0]?.path).toBe(realpathSync.native(store))
+    expect(rows[0]?.path).toBe(parent)
     const granted = stack.stack.scope.snapshot({ workspaceRoot: linked, mode: 'workspace-write' }).additionalRoots
-    expect(granted).toContain(realpathSync.native(store))
-    expect(granted).not.toContain(realpathSync.native(join(area.base, 'unrelated')))
+    expect(granted).toContain(parent)
   })
 
   it('drops the A prompt when the linked checkout loses its back-pointer', async () => {

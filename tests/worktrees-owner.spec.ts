@@ -56,7 +56,7 @@ function directoryIdentityOf(path: string): FileIdentity {
   return identity(repo.repo.adminIdentity ?? repo.repo.rootIdentity)
 }
 
-function expectation(primary: string, candidate: string, kind: 'worktree' | 'git-common' = 'worktree'): PromptExpected {
+function expectation(primary: string, candidate: string, kind: 'worktree' | 'main-checkout' = 'worktree'): PromptExpected {
   const p = repoOf(primary)
   const c = kind === 'worktree' ? repoOf(candidate) : undefined
   const canonical = kind === 'worktree' ? c!.canonical : p.common

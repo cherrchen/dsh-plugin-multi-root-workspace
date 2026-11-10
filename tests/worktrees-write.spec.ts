@@ -73,7 +73,7 @@ describe('confirmed registration', () => {
     const prompt = promptOf(await stack.worktrees.wait(stack.sessionId))
     const before = storeText(stack.storeFile)
     const answer = await stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')
-    expect(answer.prompt).toBeUndefined()
+    expect(answer.prompts).toEqual([])
     const rows = stack.stack.registry.list(main)
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ path: realpathSync.native(linked), access: 'inherit', state: 'available' })
@@ -85,9 +85,12 @@ describe('confirmed registration', () => {
       rootAddedAt: rows[0]!.addedAt,
     }])
     expect(storeText(stack.storeFile)).not.toBe(before)
-    // The same prompt cannot be answered twice.
-    await expect(stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')).rejects
-      .toMatchObject({ code: 'worktree/prompt-stale' })
+    // The same prompt cannot be answered twice: the batch reports it as a
+    // per-row refusal instead of writing again.
+    const duplicate = await stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')
+    expect(duplicate.resolved).toEqual([])
+    expect(duplicate.skipped).toMatchObject([{ id: prompt.id, code: 'worktree/prompt-stale' }])
+    expect(stack.stack.registry.list(main)).toHaveLength(1)
   })
 
   it('dismisses with a workspace-wide ignore that reset clears', async () => {
@@ -111,8 +114,9 @@ describe('confirmed registration', () => {
     // A rewritten admin HEAD invalidates the captured candidate snapshot.
     writeFileSync(join(repo.repo.adminGitdir!, 'HEAD'), 'definitely-not-a-head\n')
     const before = storeText(stack.storeFile)
-    await expect(stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')).rejects
-      .toMatchObject({ code: 'worktree/prompt-stale' })
+    const answer = await stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')
+    expect(answer.resolved).toEqual([])
+    expect(answer.skipped).toMatchObject([{ id: prompt.id, code: 'worktree/prompt-stale' }])
     expect(storeText(stack.storeFile)).toBe(before)
     expect(stack.stack.registry.list(main)).toHaveLength(0)
   })

@@ -738,14 +738,13 @@ async function dispatchPanelRequest(
           return {
             ok: true,
             value: await worktrees.wait(call.sessionId, {
-              ...(call.seenPromptId === undefined ? {} : { seenPromptId: call.seenPromptId }),
               ...(call.seenViewRevision === undefined ? {} : { seenViewRevision: call.seenViewRevision }),
             }, signal),
           }
         case 'worktreePromptResolve':
           return {
             ok: true,
-            value: await worktrees.resolve(call.sessionId, call.promptId ?? '', call.action ?? 'dismiss', call.dontRemind),
+            value: await worktrees.resolve(call.sessionId, call.promptIds ?? [], call.action ?? 'dismiss', call.dontRemind),
           }
         case 'worktreePromptReset':
           return { ok: true, value: await worktrees.reset(call.sessionId) }

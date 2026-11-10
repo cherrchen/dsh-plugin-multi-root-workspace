@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P1–P10 全部实施完成；两轮审计修复已实施；macOS 原生验证通过，Linux / Windows 待验证；未发版**。先完成 B（P1–P7），再实施 A（P8–P10）。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P1–P10 与第十九次修订变更全部实施完成；两轮审计修复已实施；macOS 原生验证通过，Linux / Windows 待验证；未发版**。先完成 B（P1–P7），再实施 A（P8–P10）；第十九次修订把 A 的目标改为主 checkout、开关改为实验性默认关闭，并加入单/多候选提示分流。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -12,7 +12,7 @@
 2. **B 的删除生命周期。** 已登记的 B 根只有在 `record.path` 确认缺失时才提供专用清理入口；面板显示、用户显式触发、owner 复验、永不自动删除；缺失根占额度直到清理或手动删除。
 3. **A：linked worktree 的共享 Git 元数据授权。** 用户确认后登记 canonical common git dir 为 `inherit` 根，解决默认 pool 和外部 linked checkout 的 `git add` / `git commit` 写入缺口。
 
-插件详情提供与「启用附属根 Skills」同款的全局开关，默认开启 A/B 建议及 B 专用清理。
+插件详情提供与「启用附属根 Skills」同款的全局开关，**实验性、默认关闭**（标题旁有“实验性”Tag）；显式开启后才启用 A/B 建议及 B 专用清理。
 
 ## Background
 
@@ -48,7 +48,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 完整祖先链、两种 checkout 形态、Unicode 路径等价、HEAD 语法、checkout/admin 身份、owner 复验。
 - 平台：macOS / Linux / Windows（Windows 的文件句柄/文件 ID 实现按平台能力；无法提供稳定身份时不发提示或 stale）。
 - A 仅在 linked primary 的 `workspace-write` 会话提示；通过完整快照绑定 primary/admin/common，显式确认后经 owner 新建普通 `inherit` 登记。
-- `multi-root-worktrees.enabled` 全局开关默认 `true`，位于插件详情卡，与附属根 Skills 的开关独立生效。
+- `multi-root-worktrees.enabled` 全局开关默认 `false`（实验性），位于插件详情卡，与附属根 Skills 的开关独立生效。
 
 ### Out of scope
 
@@ -154,7 +154,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
   - active→lost 停止后台→显式恢复新 ID；
   - 同路径删除重建 → stale；
   - `forget-workspace` 新入口不存在（延期），专用 cleanup 不依赖它。
-- Settings：覆盖默认开、关闭/开启即时生效、跨重启持久化、现代/旧版卡片不重复、已登记根保留、旧提示和未提交的异步任务失效。真实 Web 验证与 Skills 并列且相互独立；headless 验证 loader 显式关闭。
+- Settings：覆盖默认关闭、关闭/开启即时生效、跨重启持久化、现代/旧版卡片不重复、已登记根保留、旧提示和未提交的异步任务失效。真实 Web 验证与 Skills 并列且相互独立；headless 验证 loader 显式关闭。
 - 平台：macOS 文件句柄/Unicode；Linux；Windows 文件 ID/reparse point；无法验证的行显式 skip 并打印原因。
 - 门禁：`pnpm lint`、`typecheck`、`test`、`build`、`docs:check`；需要时 `compat:check`。
 
@@ -165,7 +165,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 
 ### P8 A：common 候选与来源契约（完成）
 
-- 复用 P1/P2 的 linked primary 快照，按 ADR §1 识别 `git-common` 候选。绑定 canonical primary、admin、common 的稳定文件身份和 admin HEAD；应用 `probeAdd`、全局设置与 `workspace-write` 门禁。B 的 inventory 继续独立。
+- 复用 P1/P2 的 linked primary 快照，按 ADR §1 识别 `main-checkout` 候选（主 checkout 根）。绑定 canonical primary、admin、common 与主根的稳定文件身份和 admin HEAD；应用 `probeAdd`、全局设置与 `workspace-write` 门禁。B 的 inventory 继续独立。默认 pool 的主根包含 primary，`primary-overlap` 使其没有 A。
 - 验收：默认 pool 和外部 linked checkout 都能得到相同形态的 common 候选；普通主 checkout、仓库子目录、仅 effective cwd 切入 linked checkout、伪指针、不受支持布局、既有登记或根校验拒绝时不产生 A 提示。分离式 gitdir 反例验证候选永远不会变成 common 的父目录。
 - P8 只构造宿主候选；生产界面与确认在 P9 同阶段接通。
 
@@ -201,6 +201,17 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - 发现与轮询按设置和激活代次失效，保留 lost 的显式恢复规则和已观察到的路径重建警告。回归覆盖在途关闭、开关切换和路径重建。
 - 补齐[共享 Registry 线协议](../../architecture/registry-authority-service.md#3-授权与版本协议)的旧版握手、Worktree 能力协商、重放答复和完整 owner 快照。
 - 两条受限 Git 旅程使用平台原生 Node 写入探针和 PATH 上的 Git。按 provider 返回的实际方言决定内核探针结果。实际执行和 skip 证据只记[路线账本](./2026-09-12-multi-root-workspace.md#worktree-感知建议-ba-实施2026-11-09)。
+
+### 第十九次修订实施（2026-11-10，完成）
+
+> 决策见 ADR-0039 第十九次修订。本阶段不改变 owner 串行写入、逐项复验或不启动 Git 的边界。
+
+- **A 目标**：`commonCandidate()` 从 `repo.common` 改为主 checkout 根 `dirname(repo.common)`；候选要求 `<main>/.git` 是真实目录且 canonical 等于 common，记录主根与 admin 身份。kind/`promptKey`/discovery key 改为 `main-checkout`；owner 复验新增 `<main>/.git` 回指与主根身份，旧 `.git` 根仍在时主根因嵌套不提示（需手动移除旧根）。
+- **默认 pool**：`<main>` 包含 primary，`probeAdd` 的 `primary-overlap` 拒绝，A 不进入队列；Git 写回到会失败，这是接受的限制。
+- **`--separate-git-dir`**：`dirname(common)` 是 store 父目录而非真正主 checkout，且无法从 linked checkout 元数据区分；对话框显示实际路径并披露歧义。
+- **开关**：`multi-root-worktrees.enabled` 缺省 `false`；`Config`、Settings schema、初始值、Host getter、客户端 overlay fallback 与 `cordis.patch.yml` 全部改为严格 `true` 才启用；插件详情卡标题旁显示“实验性”Tag（与 Auto Review 同款）。
+- **提示分流**：`worktreePromptWait` 恰好一个可见候选返回 `prompt`，两个及以上返回 `prompts`；列表行可勾选（B 默认勾选、A 默认不勾并内联共享元数据/separate 披露），`promptIds` 批量确认，逐项 stale 通过 `skipped` 返回，客户端按 key 标红并保持未勾选。`seenPromptId` 由 `seenViewRevision` 取代。
+- **验证**：worktree 专项 12 个 spec **131 通过、3 skip**；全量 vitest **1356 通过、17 个既有 lease/follower 环境失败**（与审计基线同一组，见路线账本）；`lint`、`typecheck`、`build`、`docs:check` 通过。真实 Web 冒烟的默认关闭、双候选列表、主 checkout A 确认与 `.git` 移除后的回归随 `smoke:journey` 的 web leg 执行。
 
 ## Dependencies
 
@@ -242,7 +253,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 
 - P1–P7 的 B 行为验收后完成 P8–P10；默认 pool 的兄弟 checkout 与 A 的 common 分别验收。
 - A 经显式确认后，默认 pool 和外部 linked checkout 的受限 `git add` / `git commit` 均通过；主 checkout 源码和无关路径仍拒写。
-- 插件详情开关与 Skills 同卡、默认开启、实时生效并可持久化；关闭后客户端停止 worktree 请求，当前 Host 停止后台任务。已登记根仍可在普通根管理中操作。
+- 插件详情开关与 Skills 同卡、实验性默认关闭、实时生效并可持久化；关闭后客户端停止 worktree 请求，当前 Host 停止后台任务。已登记根仍可在普通根管理中操作。
 - P3 确认门禁生效；P4 才接通写路径，等待 owner 替换候选时 Registry 无写入。
 - 所有 inactive 布局在入队和 owner 提交都拒绝；owner 不接受过期提示。
 - 无 Git 子进程、无外部 index/object/config 读取；Web 宿主/客户端 RPC schema 一致，headless 只验证组合启动与现有命令/Registry 正常（不新增浏览器入口）。

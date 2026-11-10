@@ -71,7 +71,7 @@ export interface Config {
 
 /** The schemastery face of {@link Config}. */
 export const Config = z.object({
-  enabled: volatileField(z.boolean().default(true)),
+  enabled: volatileField(z.boolean().default(false)),
   waitTimeoutMs: z.number().default(20_000),
   debounceMs: z.number().default(150),
   maxAdminWatchers: z.number().default(128),
@@ -97,7 +97,6 @@ interface CandidateRecord {
 /** One long-poll waiter. */
 interface Waiter {
   readonly sessionId: string
-  readonly seenPromptId: string | undefined
   readonly seenViewRevision: string | undefined
   readonly timer: ReturnType<typeof setTimeout>
   readonly resolve: (result: WorktreePromptWaitResult) => void
@@ -174,10 +173,15 @@ export class MultiRootWorktrees extends Service {
     this.maxAdminWatchers = clamp(config.maxAdminWatchers, 1, 1024, 128)
   }
 
-  /** Whether the live switch allows any discovery or confirmation. */
+  /**
+   * Whether the live switch allows any discovery or confirmation. Experimental
+   * and off by default (ADR-0039 §9): only an explicit `true` — the persisted
+   * setting or the loader row — enables it. A missing settings service means
+   * off, never an implicit opt-in.
+   */
   get enabled(): boolean {
     if (this.closing) return false
-    return configValue(this.settingsRead?.() ?? this.config.enabled) !== false
+    return configValue(this.settingsRead?.() ?? this.config.enabled) === true
   }
 
   /** A monotonic generation for diagnostics and settings invalidation. */
@@ -200,30 +204,30 @@ export class MultiRootWorktrees extends Service {
   }
 
   /** Re-evaluate one session's prompt view once (no long poll). */
-  async prompt(sessionId: string): Promise<{ readonly prompt?: WorktreePrompt; readonly viewRevision: string }> {
+  async prompt(sessionId: string): Promise<{ readonly prompts: readonly WorktreePrompt[]; readonly viewRevision: string }> {
     this.requireEnabled()
     const session = this.sessionView(sessionId)
     const generation = this.generation
     const workspace = await this.ensureWorkspace(session.primaryRoot, 'explicit')
     await this.revalidate(workspace)
     this.requireGeneration(generation)
-    const viewRevision = this.viewRevision(workspace, session.mode)
-    const head = this.visibleRecords(workspace, session.mode)[0]
-    return head === undefined
-      ? { viewRevision }
-      : { prompt: this.promptView(workspace, head, session.mode), viewRevision }
+    return {
+      prompts: this.promptViews(workspace, session.mode),
+      viewRevision: this.viewRevision(workspace, session.mode),
+    }
   }
 
   /**
-   * Long-poll one session's first visible prompt.
+   * Long-poll one session's visible candidates.
    *
-   * The result is a discriminated union: `prompt` / `timeout` /
-   * `unactivated` / `lost` / `stale`. No branch carries a retry hint —
-   * `unactivated` and `lost` mean "stop", `timeout` means "mount again".
+   * The result is a discriminated union: `prompt` (one candidate) /
+   * `prompts` (several) / `timeout` / `unactivated` / `lost` / `stale`. No
+   * branch carries a retry hint — `unactivated` and `lost` mean "stop",
+   * `timeout` means "mount again".
    */
   async wait(
     sessionId: string,
-    seen: { readonly seenPromptId?: string | undefined; readonly seenViewRevision?: string | undefined } = {},
+    seen: { readonly seenViewRevision?: string | undefined } = {},
     signal?: AbortSignal,
   ): Promise<WorktreePromptWaitResult> {
     this.requireEnabled()
@@ -236,7 +240,7 @@ export class MultiRootWorktrees extends Service {
     await this.revalidate(workspace)
     this.requireGeneration(generation)
     signal?.throwIfAborted()
-    const immediate = this.resultFor(workspace, session.mode, seen, false)
+    const immediate = this.resultFor(workspace, session.mode, seen)
     if (immediate !== undefined) return immediate
     return await this.awaitPrompt(workspace, session, seen, signal)
   }
@@ -274,20 +278,33 @@ export class MultiRootWorktrees extends Service {
   }
 
   /**
-   * Confirm or dismiss one visible prompt.
+   * Confirm or dismiss one or more visible prompts.
    *
-   * `add` calls the Registry's `addNew` with the captured expectation: the
-   * OWNER re-runs the complete primary/candidate judgment and refuses a stale
-   * snapshot. `dismiss` writes nothing to the Registry; with `dontRemind` it
-   * records the workspace-wide discovery ignore in the owner's sidecar.
+   * The batch is deliberately NOT a new write primitive: every row still calls
+   * `addNew` with its own captured expectation, so the OWNER re-runs the
+   * complete primary/candidate judgment per row and refuses a stale snapshot.
+   * `dismiss` writes nothing to the Registry; with `dontRemind` it records the
+   * workspace-wide discovery ignore in the owner's sidecar.
+   *
+   * A row that became stale is reported in `skipped` and the remaining rows
+   * continue. Authority/storage failures (and the switch turning off) stop the
+   * batch and throw: a partial registration set is still visible to the next
+   * wait, but is never disguised as a successful full batch.
    */
   async resolve(
     sessionId: string,
-    promptId: string,
+    promptIds: string | readonly string[],
     action: 'add' | 'dismiss',
     dontRemind?: boolean,
-  ): Promise<{ readonly viewRevision: string; readonly prompt?: WorktreePrompt }> {
+  ): Promise<{
+    readonly viewRevision: string
+    readonly prompts: readonly WorktreePrompt[]
+    readonly resolved: readonly { id: string; key: string; path: string; rootId?: string }[]
+    readonly skipped: readonly { id: string; key?: string; path?: string; code: string }[]
+  }> {
     this.requireEnabled()
+    const ids = [...new Set(typeof promptIds === 'string' ? [promptIds] : promptIds)]
+    if (ids.length === 0 || ids.length > 64) throw new WorktreeError('worktree/prompt-stale', 'no prompt was selected')
     const session = this.sessionView(sessionId)
     const generation = this.generation
     const workspace = await this.ensureWorkspace(session.primaryRoot, 'none')
@@ -295,67 +312,91 @@ export class MultiRootWorktrees extends Service {
     if (workspace.activation !== 'active') {
       throw new WorktreeError('worktree/prompt-stale', 'the workspace is no longer active')
     }
-    const record = [...workspace.candidates.values()].find(candidate => candidate.promptId === promptId)
-    if (record === undefined || !eligible(record.candidate.kind, session.mode)) {
-      throw new WorktreeError('worktree/prompt-stale', 'the prompt is no longer visible')
-    }
     const guard = this.workspaceGuard(workspace)
-    const beforeSubmit = () => {
-      guard()
-      const live = this.sessionView(sessionId)
-      if (primaryKey(live.primaryRoot) !== workspace.key || !eligible(record.candidate.kind, live.mode)
-        || workspace.candidates.get(record.candidate.key) !== record) {
-        throw new WorktreeError('worktree/prompt-stale', 'the live session or its prompt changed')
+    const byId = new Map<string, CandidateRecord>()
+    for (const record of workspace.queue) byId.set(record.promptId, record)
+    const resolved: { id: string; key: string; path: string; rootId?: string }[] = []
+    const skipped: { id: string; key?: string; path?: string; code: string }[] = []
+    for (const id of ids) {
+      if (this.generation !== generation || workspace.activation !== 'active') {
+        skipped.push({ id, code: 'worktree/prompt-stale' })
+        continue
       }
-      const verdict = verifyPromptExpected(live.primaryRoot, record.expected)
-      if (!verdict.ok) throw new WorktreeError('worktree/prompt-stale', verdict.detail)
-    }
-    if (action === 'add') {
-      const options: AddNewRootOptions = {
-        path: record.candidate.path,
-        access: 'inherit',
-        expected: record.expected,
-        // A roots carry no cleanup mapping: they are ordinary registrations
-        // with the ordinary Remove lifecycle (ADR-0039 §1 / §6).
-        ...(record.candidate.kind === 'worktree'
-          ? { track: { adminId: record.candidate.adminId, common: record.candidate.common } }
-          : {}),
+      const record = byId.get(id)
+      if (record === undefined) {
+        skipped.push({ id, code: 'worktree/prompt-stale' })
+        continue
+      }
+      const live = this.trySessionView(sessionId)
+      if (live === undefined || !eligible(record.candidate.kind, live.mode)
+        || workspace.candidates.get(record.candidate.key) !== record) {
+        skipped.push({ id, key: record.candidate.key, path: record.candidate.path, code: 'worktree/prompt-stale' })
+        continue
+      }
+      const beforeSubmit = () => {
+        guard()
+        const current = this.sessionView(sessionId)
+        if (primaryKey(current.primaryRoot) !== workspace.key || !eligible(record.candidate.kind, current.mode)
+          || workspace.candidates.get(record.candidate.key) !== record) {
+          throw new WorktreeError('worktree/prompt-stale', 'the live session or its prompt changed')
+        }
+        const verdict = verifyPromptExpected(current.primaryRoot, record.expected)
+        if (!verdict.ok) throw new WorktreeError('worktree/prompt-stale', verdict.detail)
       }
       try {
-        await this.ctx.multiRootRegistry.addNew(workspace.primaryRoot, options, beforeSubmit)
+        if (action === 'add') {
+          const options: AddNewRootOptions = {
+            path: record.candidate.path,
+            access: 'inherit',
+            expected: record.expected,
+            // A roots carry no cleanup mapping: they are ordinary
+            // registrations with the ordinary Remove lifecycle (ADR-0039 §1 / §6).
+            ...(record.candidate.kind === 'worktree'
+              ? { track: { adminId: record.candidate.adminId, common: record.candidate.common } }
+              : {}),
+          }
+          const added = await this.ctx.multiRootRegistry.addNew(workspace.primaryRoot, options, beforeSubmit)
+          resolved.push({ id, key: record.candidate.key, path: record.candidate.path, rootId: added.id })
+        } else {
+          beforeSubmit()
+          if (dontRemind === true) await this.ignoreRecord(workspace, record, beforeSubmit)
+          resolved.push({ id, key: record.candidate.key, path: record.candidate.path })
+        }
       } catch (error) {
-        // A duplicate means the operator (or another Host) already registered
-        // this directory: treat it as handled, but never write a cleanup map.
+        if (isFatalWorktreeFailure(error)) throw error
         if (error instanceof RootValidationError && error.code === 'duplicate') {
-          // handled below
-        } else if (error instanceof WorktreeError && error.code === 'worktree/not-enabled') {
-          throw error
-        } else if (error instanceof WorktreeError) {
-          throw new WorktreeError('worktree/prompt-stale', error.message)
-        } else if (error instanceof RootValidationError) {
-          throw new WorktreeError('worktree/prompt-stale', error.message)
+          // Already registered by the operator or another Host: treat the row
+          // as handled, but never write a cleanup map for a duplicate.
+          resolved.push({ id, key: record.candidate.key, path: record.candidate.path })
+        } else if (error instanceof WorktreeError || error instanceof RootValidationError) {
+          skipped.push({ id, key: record.candidate.key, path: record.candidate.path, code: error.code })
+          continue
         } else {
           throw error
         }
       }
-    } else {
-      beforeSubmit()
-      if (dontRemind === true) await this.ignoreRecord(workspace, record, beforeSubmit)
+      workspace.prompted.add(record.discoveryKey)
+      if (workspace.candidates.get(record.candidate.key) === record) workspace.candidates.delete(record.candidate.key)
+      workspace.queue = workspace.queue.filter(candidate => candidate.promptId !== id)
     }
-    // An already-submitted owner operation keeps its result across a toggle,
-    // but must not republish or remove a prompt from a later activation.
-    if (this.generation !== generation || workspace.activation !== 'active') {
-      return { viewRevision: this.viewRevision(workspace, session.mode) }
+    // A skipped row may have been replaced while the batch ran; re-inventory so
+    // the response carries the CURRENT ids instead of one the owner will keep
+    // refusing.
+    if (skipped.length > 0 && workspace.activation === 'active' && this.generation === generation) {
+      try { await this.refreshInventory(workspace) } catch { /* The waiter still re-syncs on the next request. */ }
     }
-    workspace.prompted.add(record.discoveryKey)
-    if (workspace.candidates.get(record.candidate.key) === record) workspace.candidates.delete(record.candidate.key)
-    workspace.queue = workspace.queue.filter(candidate => candidate.promptId !== promptId)
-    workspace.revision++
-    await this.loadSidecar(workspace)
+    if (workspace.activation === 'active') {
+      workspace.revision++
+      await this.loadSidecar(workspace)
+    }
     this.wake(workspace)
-    const head = this.visibleRecords(workspace, session.mode)[0]
-    const viewRevision = this.viewRevision(workspace, session.mode)
-    return head === undefined ? { viewRevision } : { viewRevision, prompt: this.promptView(workspace, head, session.mode) }
+    const mode = this.trySessionView(sessionId)?.mode ?? session.mode
+    return {
+      viewRevision: this.viewRevision(workspace, mode),
+      prompts: this.promptViews(workspace, mode),
+      resolved,
+      skipped,
+    }
   }
 
   /** Record one discovery ignore through the Registry owner and update memory. */
@@ -806,6 +847,11 @@ export class MultiRootWorktrees extends Service {
     return workspace.queue.filter(record => eligible(record.candidate.kind, mode))
   }
 
+  /** Build the wire views for every visible record, in queue order. */
+  private promptViews(workspace: WorkspaceState, mode: WorkspaceMode): readonly WorktreePrompt[] {
+    return this.visibleRecords(workspace, mode).map(record => this.promptView(workspace, record, mode))
+  }
+
   /** Build the wire prompt view for one visible record. */
   private promptView(workspace: WorkspaceState, record: CandidateRecord, mode: WorkspaceMode): WorktreePrompt {
     const visible = this.visibleRecords(workspace, mode)
@@ -825,14 +871,14 @@ export class MultiRootWorktrees extends Service {
   /** The stable digest of one session's visible view. */
   private viewRevision(workspace: WorkspaceState, mode: WorkspaceMode): string {
     const visible = this.visibleRecords(workspace, mode)
-    const head = visible[0]
     const material = JSON.stringify({
       activation: workspace.activation,
       common: workspace.repo?.common ?? '',
-      head: head?.promptId ?? '',
-      effective: head === undefined ? '' : effectiveRootAccess('inherit', mode),
-      remaining: visible.length,
-      visible: visible.map(record => record.candidate.key),
+      effective: visible.length === 0 ? '' : effectiveRootAccess('inherit', mode),
+      // Every id participates: replacing one candidate's expectation must
+      // change the digest even when the key set is unchanged, so the client
+      // never keeps an id the owner will refuse.
+      visible: visible.map(record => ({ id: record.promptId, key: record.candidate.key, kind: record.candidate.kind })),
       prompted: [...workspace.prompted].sort(),
       ignored: [...workspace.ignored].sort(),
     })
@@ -841,41 +887,38 @@ export class MultiRootWorktrees extends Service {
 
   /**
    * The result a waiter should receive RIGHT NOW, or `undefined` to keep
-   * waiting. `mounting` distinguishes a first request (which returns an
-   * existing prompt) from a re-mount that already saw the same view.
+   * waiting.
+   *
+   * `seenViewRevision` is the only "already shown" token: when it matches the
+   * current digest nothing is delivered (the dialog stays open); when it
+   * differs the whole visible view is delivered — one candidate as `prompt`,
+   * several as `prompts`, none as `stale` so the dialog closes.
    */
   private resultFor(
     workspace: WorkspaceState,
     mode: WorkspaceMode,
-    seen: { readonly seenPromptId?: string | undefined; readonly seenViewRevision?: string | undefined },
-    mounting: boolean,
+    seen: { readonly seenViewRevision?: string | undefined },
   ): WorktreePromptWaitResult | undefined {
     const viewRevision = this.viewRevision(workspace, mode)
     if (workspace.activation === 'unactivated') return { status: 'unactivated', viewRevision }
     if (workspace.activation === 'lost') return { status: 'lost', viewRevision }
     const visible = this.visibleRecords(workspace, mode)
-    if (seen.seenPromptId !== undefined && seen.seenPromptId !== '' && !visible.some(record => record.promptId === seen.seenPromptId)) {
-      return { status: 'stale', viewRevision, reason: 'prompt-gone' }
+    if (seen.seenViewRevision === viewRevision) return undefined
+    if (visible.length === 0) {
+      // A first mount (no seen revision) simply waits; a view that HAD
+      // candidates and now has none closes the dialog.
+      return seen.seenViewRevision === undefined ? undefined : { status: 'stale', viewRevision, reason: 'prompt-gone' }
     }
-    const head = visible[0]
-    if (head !== undefined) {
-      const same = seen.seenPromptId === head.promptId && seen.seenViewRevision === viewRevision
-      if (!same) return { status: 'prompt', prompt: this.promptView(workspace, head, mode), viewRevision }
-      return undefined
-    }
-    if (!mounting && seen.seenViewRevision !== undefined && seen.seenViewRevision !== viewRevision) {
-      // The view changed while waiting (a prompt was handled elsewhere); the
-      // client re-mounts immediately.
-      return { status: 'timeout', viewRevision }
-    }
-    return undefined
+    return visible.length === 1
+      ? { status: 'prompt', prompt: this.promptView(workspace, visible[0]!, mode), viewRevision }
+      : { status: 'prompts', prompts: visible.map(record => this.promptView(workspace, record, mode)), viewRevision }
   }
 
   /** Register one waiter and resolve it on the next relevant change or timeout. */
   private async awaitPrompt(
     workspace: WorkspaceState,
     session: SessionView,
-    seen: { readonly seenPromptId?: string | undefined; readonly seenViewRevision?: string | undefined },
+    seen: { readonly seenViewRevision?: string | undefined },
     signal?: AbortSignal,
   ): Promise<WorktreePromptWaitResult> {
     return await new Promise<WorktreePromptWaitResult>((resolve, reject) => {
@@ -883,7 +926,6 @@ export class MultiRootWorktrees extends Service {
       // assignment, never during it.
       const waiter: Waiter = {
         sessionId: session.sessionId,
-        seenPromptId: seen.seenPromptId,
         seenViewRevision: seen.seenViewRevision,
         timer: undefined as unknown as ReturnType<typeof setTimeout>,
         resolve: () => {},
@@ -925,7 +967,7 @@ export class MultiRootWorktrees extends Service {
         waiter.reject(new WorktreeError('worktree/session-not-found', `session "${waiter.sessionId}" is no longer active`))
         continue
       }
-      const result = this.resultFor(workspace, session.mode, waiter, false)
+      const result = this.resultFor(workspace, session.mode, waiter)
       if (result === undefined) continue
       workspace.waiters.delete(waiter)
       clearTimeout(waiter.timer)
@@ -1007,9 +1049,9 @@ function clamp(value: number | undefined, min: number, max: number, fallback: nu
 }
 
 /** Whether one candidate kind may be shown in one sandbox mode. */
-export function eligible(kind: 'worktree' | 'git-common', mode: WorkspaceMode): boolean {
+export function eligible(kind: 'worktree' | 'main-checkout', mode: WorkspaceMode): boolean {
   if (mode === 'danger-full-access') return false
-  if (kind === 'git-common') return mode === 'workspace-write'
+  if (kind === 'main-checkout') return mode === 'workspace-write'
   return true
 }
 
@@ -1020,7 +1062,25 @@ export function discoveryKeyOf(candidate: InventoryCandidate): string {
 
 /** The discovery key of either suggestion kind. */
 function discoveryKeyFor(candidate: SuggestionCandidate): string {
-  return candidate.kind === 'git-common' ? commonDiscoveryKey(candidate) : discoveryKeyOf(candidate)
+  return candidate.kind === 'main-checkout' ? commonDiscoveryKey(candidate) : discoveryKeyOf(candidate)
+}
+
+/**
+ * Whether a batch failure must stop the whole resolve instead of skipping one
+ * row: losing the switch, the authority, storage, or the session mid-batch is
+ * not a per-candidate condition.
+ */
+function isFatalWorktreeFailure(error: unknown): boolean {
+  if (error instanceof WorktreeError) {
+    return error.code === 'worktree/not-enabled'
+      || error.code === 'worktree/not-available'
+      || error.code === 'worktree/session-not-found'
+      || error.code === 'worktree/registry-unavailable'
+  }
+  if (error instanceof RootValidationError) {
+    return error.code === 'storage-unavailable' || error.code === 'registry-contended' || error.code === 'config-invalid'
+  }
+  return false
 }
 
 function pathState(path: string): 'present' | 'missing' | 'inaccessible' {

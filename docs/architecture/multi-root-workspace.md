@@ -223,13 +223,13 @@ bash 与 PTY 都**不掌握根集合**，它们的 confinement 全部委托给 `
 
 - `src/worktrees/fs-safe.ts`：词法防护、逐段目录检查、`O_NOFOLLOW`/`O_NONBLOCK` 打开、同 fd `fstat`、有界读取、目录身份。Node 无 `openat`，所以中间目录用 `lstat` 链校验、最终文件用 `O_NOFOLLOW` 打开；静态 symlink/FIFO 用例均拒绝。
 - `src/worktrees/config.ts` / `index-format.ts` / `repository.ts`：插件自己的 config/HEAD/index 解析与两种 checkout 形态；完整祖先链；split/sparse/040000/未知扩展/非法版本一律 inactive；不启动 Git、不解析 commit 对象、不读 `objects`（仅防御性拒绝 alternates）。
-- `src/worktrees/inventory.ts` / `common.ts`：受控枚举 `<common>/worktrees/*/gitdir` 与 linked primary 的 canonical common（A）；候选必须通过同一份完整快照。
+- `src/worktrees/inventory.ts` / `common.ts`：受控枚举 `<common>/worktrees/*/gitdir` 与 linked primary 的主 checkout 根 `<main> = dirname(common)`（A）；候选必须通过同一份完整快照，且 `<main>/.git` 必须 canonical 指向该 common。
 - `src/worktrees/watch.ts`：workspace 共享 watcher；debounce、`filename === null` reconcile、admin 上限降级；事件只是提示，任何变化都重跑完整判据。
 - `src/worktrees/sidecar.ts` + `src/registry.ts`：`worktree-prompts/<sha256(primaryKey)>.json` 只由持有 lease 的 Registry owner 在既有串行队列内读写；follower 经认证 IPC。prune 只消费 owner 的完整 `RegistrySnapshotView`，`available=false` 的空列表保留映射，`available=true` 的空快照才删除；跨 epoch 按 `rootId + path + rootAddedAt` 重绑/修剪。sidecar 不参与授权，损坏只退化为 memory-only。
 - `src/worktrees/owner.ts` + Registry `addNew`/`removeForDeletedWorktree`：owner 在队列内重跑 primary/candidate 完整判据、HEAD 语法、祖先索引与目录身份；成功写入的 canonical 就是复验使用的值；只新建、不 revive；清理绑定 `rootId + path + addedAt`，路径存在或不可访问一律 `not-eligible`。
-- `src/worktrees.ts`：workspace 状态机（`unactivated`/`active`/`lost`）、共享候选池与按 session 过滤的 waiter、显式恢复、设置门禁与面板徽标。删除信号只决定徽标；永不自动清理。
+- `src/worktrees.ts`：workspace 状态机（`unactivated`/`active`/`lost`）、共享候选池与按 session 过滤的 waiter、显式恢复、设置门禁与面板徽标。waiter 按可见数量返回单候选 `prompt` 或列表 `prompts`；批量 resolve 逐项复验。删除信号只决定徽标；永不自动清理。
 - `src/worktrees-contract.ts` / `contract.ts`：独立 `WORKTREE_ENDPOINTS`，两端严格判别联合（禁止 `retryAfterMs`）；根面板 schema 保持 `.strict()` 不变。
-- A：linked primary 且 `workspace-write` 时提示 canonical common（末级 `.git`），对话框披露共享 config/hooks/refs/objects 与所有 worktree admin 数据；登记是普通 `inherit` 根，无 B 清理映射，普通 Remove 撤回；只读/Full-access 不提示。
+- A：linked primary 且 `workspace-write` 时提示主 checkout 根 `<main> = dirname(common)`，对话框披露源码树、共享 config/hooks/refs/objects 与所有 worktree admin 数据；登记是普通 `inherit` 根，无 B 清理映射，普通 Remove 撤回；只读/Full-access 不提示。默认 pool 的主根包含 primary（`primary-overlap`），因此没有 A；`--separate-git-dir` 的路径歧义在对话框披露。开关实验性、默认关闭。
 
 失败方向：首次门禁失败 `unactivated`、曾 active 后失效 `lost`，二者都停止后台动作并释放 watcher；只有面板/命令 list 或新的显式 wait 能重新检测。等待 owner 期间任何身份/指针/HEAD/祖先索引变化都 `worktree/prompt-stale`，不写 Registry。完整决策、验收矩阵与实施证据见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)、[实施计划](../plans/active/2026-11-09-worktree-aware-root-suggestions.md) 与[进度总账](../plans/active/2026-09-12-multi-root-workspace.md#worktree-感知建议-ba-实施2026-11-09)。
 

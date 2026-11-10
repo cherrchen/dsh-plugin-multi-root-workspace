@@ -9,7 +9,9 @@
  * The one shape with a security role is {@link WorktreePromptWaitView}: it is a
  * STRICT discriminated union. Every branch is validated on both halves, and no
  * branch may carry a retry hint (ADR-0039 §4.3 / §9): `unactivated` and
- * `lost` mean stop, `timeout` means mount again.
+ * `lost` mean stop, `timeout` means mount again. A single visible candidate is
+ * delivered as `prompt`; two or more are delivered as `prompts` and rendered
+ * as a checkbox list.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/worktrees-contract
  */
@@ -34,7 +36,7 @@ export const WORKTREE_ENDPOINTS: readonly WorktreeEndpoint[] = [
 ]
 
 /** The kind of grant a prompt offers. */
-export type WorktreePromptKind = 'worktree' | 'git-common'
+export type WorktreePromptKind = 'worktree' | 'main-checkout'
 /** The effective authority the panel shows for one prompt. */
 export type WorktreeEffectiveAccess = 'read-only' | 'read-write' | 'full-access' | 'unavailable'
 
@@ -51,24 +53,51 @@ export interface WorktreePromptView {
   readonly viewRevision: string
 }
 
-/** The long-poll result: a strict discriminated union with NO retry field. */
+/**
+ * The long-poll result: a strict discriminated union with NO retry field.
+ *
+ * `prompt` is the single-candidate shape (the plain confirmation dialog);
+ * `prompts` is the multi-candidate shape (the checkbox list). They are
+ * mutually exclusive by construction.
+ */
 export type WorktreePromptWaitView
   = | { readonly status: 'prompt'; readonly prompt: WorktreePromptView; readonly viewRevision: string }
+    | { readonly status: 'prompts'; readonly prompts: readonly WorktreePromptView[]; readonly viewRevision: string }
     | { readonly status: 'timeout'; readonly viewRevision: string }
     | { readonly status: 'unactivated'; readonly viewRevision: string }
     | { readonly status: 'lost'; readonly viewRevision: string }
     | { readonly status: 'stale'; readonly viewRevision: string; readonly reason: string }
 
-/** `worktreePrompt` answers this. */
+/** `worktreePrompt` answers this (always the full visible list). */
 export interface WorktreePromptAnswerView {
-  readonly prompt?: WorktreePromptView | undefined
+  readonly prompts: readonly WorktreePromptView[]
   readonly viewRevision: string
+}
+
+/** One id the batch handled. */
+export interface WorktreeResolvedView {
+  readonly id: string
+  readonly key: string
+  readonly path: string
+  /** The new Registry record, present for an `add`. */
+  readonly rootId?: string | undefined
+}
+
+/** One id the batch refused, with the stable refusal code. */
+export interface WorktreeSkippedView {
+  readonly id: string
+  readonly key?: string | undefined
+  readonly path?: string | undefined
+  readonly code: string
 }
 
 /** `worktreePromptResolve` answers this. */
 export interface WorktreeResolveAnswerView {
   readonly viewRevision: string
-  readonly prompt?: WorktreePromptView | undefined
+  /** The still-visible candidates after the batch (may be empty). */
+  readonly prompts: readonly WorktreePromptView[]
+  readonly resolved: readonly WorktreeResolvedView[]
+  readonly skipped: readonly WorktreeSkippedView[]
 }
 
 /** `worktreePromptReset` answers this. */
@@ -79,11 +108,10 @@ export interface WorktreeResetAnswerView {
 /** What a client may send: never a path, only ids and the flags the ADR names. */
 export interface WorktreeRequest {
   readonly sessionId: string
-  readonly promptId?: string
+  readonly promptIds?: readonly string[]
   readonly action?: 'add' | 'dismiss'
   readonly dontRemind?: boolean
   readonly rootIds?: readonly string[]
-  readonly seenPromptId?: string
   readonly seenViewRevision?: string
 }
 
@@ -98,11 +126,10 @@ export type ParsedWorktree<T> = { readonly ok: true; readonly value: T } | { rea
 /** The one request body schema; unknown keys are refused. */
 export const worktreeRequestSchema = z.object({
   sessionId: z.string().min(1),
-  promptId: z.string().min(1).optional(),
+  promptIds: z.array(z.string().min(1)).min(1).max(64).optional(),
   action: z.enum(['add', 'dismiss']).optional(),
   dontRemind: z.boolean().optional(),
   rootIds: z.array(z.string().min(1)).max(256).optional(),
-  seenPromptId: z.string().min(1).optional(),
   seenViewRevision: z.string().min(1).optional(),
 }).strict()
 
@@ -110,7 +137,7 @@ export const worktreeRequestSchema = z.object({
 const promptSchema = z.object({
   id: z.string().min(1),
   key: z.string(),
-  kind: z.enum(['worktree', 'git-common']),
+  kind: z.enum(['worktree', 'main-checkout']),
   path: z.string(),
   primaryRoot: z.string(),
   access: z.literal('inherit'),
@@ -119,9 +146,27 @@ const promptSchema = z.object({
   viewRevision: z.string().min(1),
 }).strict()
 
+const promptListSchema = z.array(promptSchema).max(64)
+
+/** One batch outcome. */
+const resolvedSchema = z.object({
+  id: z.string().min(1),
+  key: z.string(),
+  path: z.string(),
+  rootId: z.string().min(1).optional(),
+}).strict()
+
+const skippedSchema = z.object({
+  id: z.string().min(1),
+  key: z.string().optional(),
+  path: z.string().optional(),
+  code: z.string().min(1),
+}).strict()
+
 /** The long-poll answer schema: every branch strict, no retry hint anywhere. */
 export const worktreeWaitViewSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('prompt'), prompt: promptSchema, viewRevision: z.string().min(1) }).strict(),
+  z.object({ status: z.literal('prompts'), prompts: promptListSchema.min(2), viewRevision: z.string().min(1) }).strict(),
   z.object({ status: z.literal('timeout'), viewRevision: z.string().min(1) }).strict(),
   z.object({ status: z.literal('unactivated'), viewRevision: z.string().min(1) }).strict(),
   z.object({ status: z.literal('lost'), viewRevision: z.string().min(1) }).strict(),
@@ -130,14 +175,16 @@ export const worktreeWaitViewSchema = z.discriminatedUnion('status', [
 
 /** `worktreePrompt` answer schema. */
 export const worktreePromptAnswerSchema = z.object({
-  prompt: promptSchema.optional(),
+  prompts: promptListSchema,
   viewRevision: z.string().min(1),
 }).strict()
 
 /** `worktreePromptResolve` answer schema. */
 export const worktreeResolveAnswerSchema = z.object({
   viewRevision: z.string().min(1),
-  prompt: promptSchema.optional(),
+  prompts: promptListSchema,
+  resolved: z.array(resolvedSchema),
+  skipped: z.array(skippedSchema),
 }).strict()
 
 /** `worktreePromptReset` answer schema. */
@@ -145,7 +192,7 @@ export const worktreeResetAnswerSchema = z.object({ cleared: z.boolean() }).stri
 
 /**
  * Validate the payload of one worktree endpoint, including the fields that
- * endpoint requires (so a resolve without `promptId` never reaches the host's
+ * endpoint requires (so a resolve without `promptIds` never reaches the host's
  * switch).
  * @param endpoint - the channel method.
  * @param payload - the raw payload.
@@ -160,8 +207,8 @@ export function parseWorktreeCall(endpoint: string, payload: unknown): ParsedWor
     return { ok: false, message: `the request body is invalid: ${path}${issue?.message ?? 'invalid'}` }
   }
   const value = parsed.data
-  if (value.promptId === undefined && (endpoint === 'worktreePromptResolve')) {
-    return { ok: false, message: 'promptId is required' }
+  if (value.promptIds === undefined && endpoint === 'worktreePromptResolve') {
+    return { ok: false, message: 'promptIds is required' }
   }
   if (value.action === undefined && endpoint === 'worktreePromptResolve') {
     return { ok: false, message: 'action is required' }
@@ -169,16 +216,18 @@ export function parseWorktreeCall(endpoint: string, payload: unknown): ParsedWor
   if (value.rootIds === undefined && endpoint === 'worktreeRootsCleanup') {
     return { ok: false, message: 'rootIds is required' }
   }
+  if (value.promptIds !== undefined && new Set(value.promptIds).size !== value.promptIds.length) {
+    return { ok: false, message: 'promptIds must be unique' }
+  }
   return {
     ok: true,
     value: {
       endpoint: endpoint as WorktreeEndpoint,
       sessionId: value.sessionId,
-      ...(value.promptId === undefined ? {} : { promptId: value.promptId }),
+      ...(value.promptIds === undefined ? {} : { promptIds: value.promptIds }),
       ...(value.action === undefined ? {} : { action: value.action }),
       ...(value.dontRemind === undefined ? {} : { dontRemind: value.dontRemind }),
       ...(value.rootIds === undefined ? {} : { rootIds: value.rootIds }),
-      ...(value.seenPromptId === undefined ? {} : { seenPromptId: value.seenPromptId }),
       ...(value.seenViewRevision === undefined ? {} : { seenViewRevision: value.seenViewRevision }),
     },
   }
