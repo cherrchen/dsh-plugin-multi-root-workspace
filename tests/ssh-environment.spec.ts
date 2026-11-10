@@ -43,7 +43,13 @@ describe('parseSshConfig', () => {
   })
 
   it('refuses settings that could rewrite or bypass host-key verification', () => {
-    expect(() => parseSshConfig(`${SSH_G}\nupdatehostkeys yes`)).toThrowError(/updateHostKeys/)
+    // `ssh -G` normalizes UpdateHostKeys: no->false, yes->true, ask->ask.
+    // Only the resolved "never rewrite" spellings pass.
+    expect(parseSshConfig(`${SSH_G}\nupdatehostkeys no`).updateHostKeys).toBe('no')
+    expect(parseSshConfig(`${SSH_G}\nupdatehostkeys false`).updateHostKeys).toBe('false')
+    for (const value of ['yes', 'true', 'ask']) {
+      expect(() => parseSshConfig(`${SSH_G}\nupdatehostkeys ${value}`)).toThrowError(/updateHostKeys/)
+    }
     expect(() => parseSshConfig(`${SSH_G}\nbatchmode no`)).toThrowError(/batchMode/)
     expect(() => parseSshConfig(`${SSH_G}\nforwardagent yes`)).toThrowError(/forwardAgent/)
     expect(() => parseSshConfig(`${SSH_G}\nstricthostkeychecking accept-new`)).toThrowError(/strictHostKeyChecking/)

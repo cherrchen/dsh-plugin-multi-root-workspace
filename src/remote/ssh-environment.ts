@@ -114,9 +114,11 @@ export function parseSshConfig(stdout: string): SshHostIdentity {
   if (forwardAgent !== 'no') {
     throw new SshEnvironmentError('host-identity-unverifiable', `forwardAgent is "${fields.forwardagent ?? ''}", must be no`)
   }
+  // OpenSSH -G normalizes `UpdateHostKeys no` to `false` (and `yes` to
+  // `true`, `ask` stays `ask`); accept both spellings of "never rewrite".
   const updateHostKeys = (fields.updatehostkeys ?? 'no').toLowerCase()
-  if (updateHostKeys !== 'no') {
-    throw new SshEnvironmentError('host-identity-unverifiable', `updateHostKeys is "${fields.updatehostkeys ?? ''}", must be no`)
+  if (updateHostKeys !== 'no' && updateHostKeys !== 'false') {
+    throw new SshEnvironmentError('host-identity-unverifiable', `updateHostKeys resolves "${fields.updatehostkeys ?? ''}", must be no`)
   }
   const port = fields.port ?? '22'
   const hostKeyAlias = fields.hostkeyalias

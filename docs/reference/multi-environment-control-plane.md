@@ -179,6 +179,8 @@ Host <env-alias>
   KnownHostsCommand none
 ```
 
+`ssh -G` 会把 `UpdateHostKeys no` 归一化为 `false`（`yes`→`true`，`ask` 保持 `ask`）；身份检查接受解析值 `no`/`false`，拒绝 `ask`/`true`，即清单里写 `no` 即可。
+
 `known_hosts` 由部署者**带外**提供并在置入前核对指纹——不用 `ssh-keyscan`、不执行任何读取密钥的命令；私钥由部署者显式放置，安装器不发现不读取。SFTP 端绑定路径按 chroot 监狱内绝对路径写（如 `/workspace`），不是宿主机 realpath；`import` 目的账户须为声明 `destinationIsolation: "chroot-sftp"` 的独立 sftp 账户——helper 账户与同账号可执行环境都不能作复制目的；构建产物须用独立上传账户落盘后，再经 export/中转取回。固定属主/chroot 与独立写者隔离属外部部署证据，清单声明不构成证明。
 
 1. 将同一构建的 broker 入口、共享 JS chunk、Node 及其解析到的依赖安装到 Host 账号和 Agent 都不可写的位置。四个 SSH 可选包须在对应 DSH 宿主的解析树中与 DSH 精确同版。先由 root 写好完整部署清单，供 Host 与 broker 共同读取。
