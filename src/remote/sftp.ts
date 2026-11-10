@@ -101,9 +101,7 @@ function wellFormedReply(type: number, body: Buffer): boolean {
     case 102:
     case 103:
       return body.length >= 4 && 4 + body.readUInt32BE(0) === body.length
-    case 104:
-      return attrsBounds(body) === body.length
-    case 105: {
+    case 104: {
       if (body.length < 4) return false
       const count = body.readUInt32BE(0)
       let o = 4
@@ -120,6 +118,8 @@ function wellFormedReply(type: number, body: Buffer): boolean {
       }
       return o === body.length
     }
+    case 105:
+      return attrsBounds(body) === body.length
     case 201: return true
     default: return false
   }
