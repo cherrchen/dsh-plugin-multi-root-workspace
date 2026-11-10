@@ -1,5 +1,5 @@
 /** F19: the SFTP frame parser refuses malformed wire data before it reaches a resolve callback. */
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -54,7 +54,7 @@ async function fakeSsh(bytes: number[], opts: { chunks?: number; exit?: boolean 
     })
   `)
   const wrapper = join(dir, 'fake-ssh.sh')
-  writeFileSync(wrapper, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`)
+  writeFileSync(wrapper, `#!/bin/sh\nprintf '%s\\n' "$@" > "${dir}/argv.log"\nexec "${process.execPath}" "${script}" "$@"\n`)
   chmodSync(wrapper, 0o755)
   const client = SftpClient.connect('fake-alias', { ssh: wrapper })
   clients.push(client)
@@ -100,5 +100,14 @@ describe.skipIf(process.platform === 'win32')('SFTP wire validation', () => {
     const client = await fakeSsh(version(), { exit: true })
     await client.init()
     await expect(client.realpath('/x')).rejects.toBeInstanceOf(SftpConnectionLost)
+  })
+
+  it('spawns ssh with ControlMaster disabled so sessions never share fate', async () => {
+    const client = await fakeSsh(version())
+    await client.init()
+    const argv = readFileSync(join(dir, 'argv.log'), 'utf8')
+    expect(argv).toContain('ControlMaster=no')
+    expect(argv).toContain('ControlPath=none')
+    expect(argv).toContain('BatchMode=yes')
   })
 })
