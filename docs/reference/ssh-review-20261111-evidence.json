@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-11",
+  "scope": "external review re-run at HEAD; local regression plus evidence cross-check; live deployments were not re-executed",
+  "platform": "darwin-arm64",
+  "node": "24.18.0",
+  "dsh": "0.2.2-rc.1",
+  "plugin": "0.1.17-ssh.1",
+  "git": {
+    "branch": "feat/ssh-workspace",
+    "head": "83b76e4",
+    "headFull": "83b76e41ec5f332499b232e6b25b276c437eb8b0",
+    "reviewedEvidenceHead": "336951d"
+  },
+  "vitest": {
+    "command": "pnpm test --reporter=json --outputFile=.review-tmp/vitest-head.json (outside the DSH Agent sandbox)",
+    "passed": 1562,
+    "skipped": 131,
+    "failed": 0,
+    "passedFiles": 106,
+    "skippedFiles": 8,
+    "totalFiles": 114,
+    "totalTests": 1693,
+    "rawReport": "ssh-review-20261111-vitest.json",
+    "sha256": "dd9e96700b00a51b04eb73b76b1b007847a2a7bf33ea2761ad1978800c0325b3",
+    "note": "The 2026-11-10 archived report is 1545 passed / pre-F13. The 1562 figure in the 2026-11-10 evidence manifest was therefore not backed by its raw report; this 2026-11-11 re-run at 83b76e4 confirms 1562/131/0 and is the current baseline."
+  },
+  "targetedF13": {
+    "command": "pnpm vitest run tests/remote-broker.spec.ts tests/remote-manifest.spec.ts tests/remote-tools.spec.ts tests/remote-profile-guard.spec.ts tests/remote-journey.e2e.ts",
+    "remoteBroker": "39/39",
+    "remoteManifest": "42/42",
+    "remoteTools": "12/12",
+    "remoteProfileGuard": "13/13",
+    "remoteJourney": "8/8",
+    "total": "114 passed / 0 failed"
+  },
+  "checks": {
+    "lint": "passed (0 warnings, 0 errors)",
+    "compat:check": "passed (allowlist, peerDependencies, dev pin and installed tree agree)",
+    "typecheck": "passed",
+    "build": "passed (55 files)",
+    "docs:check": "passed",
+    "pack:check": "passed (222 members)",
+    "registry:probe": "passed with --required outside the DSH Agent sandbox",
+    "kernel:probe": "Seatbelt executed a confined command; bwrap and Landlock unavailable on this host",
+    "smoke:packed": "136 passed / 0 failed / 0 skipped against the packed 0.1.17-ssh.1 tarball (koffi build-approval recovery exercised)"
+  },
+  "smokes": {
+    "smoke:compose": {
+      "passed": 54,
+      "failed": 0,
+      "skipped": 0
+    },
+    "smoke:behavior": {
+      "passed": 137,
+      "failed": 0,
+      "skipped": 0
+    },
+    "smoke:journey": {
+      "passed": 76,
+      "failed": 0,
+      "skipped": 0
+    },
+    "note": "Run outside the DSH Agent sandbox. Inside the sandbox Seatbelt and shared IPC are unavailable, so the same commands skip the kernel-runner and shared-authority cases; those skips are not acceptance evidence."
+  },
+  "environmentCaveat": "The DSH Agent sandbox makes the shared Registry IPC server refuse a sandboxed peer. A sandboxed full-suite run fails 18 shared-authority cases with `contended`; the unsandboxed run above passes 1562/131/0. The sandboxed failures are an environment artifact, not a product result.",
+  "evidenceCrossCheck": {
+    "entryIsolation": {
+      "record": "remote-entry-isolation-evidence-20261111.json",
+      "verdict": "reviewed; machine-generated; Linux host controls, three Agent entries x two restricted modes, forged full-access refusal, in-sandbox escalation audit, disk reload/tamper, second-profile audit",
+      "limits": "one synthetic persisted `sandbox/mode` event for the reload audit; the systemd unit is not exercised by this probe (its systemctl is a stub)",
+      "runLog": "remote-entry-isolation-run-20261111.txt"
+    },
+    "f13": {
+      "record": "remote-f13-probe-20261111/summary.json, client.json, audit.jsonl, production-audit-excerpt.txt; remote-broker-live-20261111.txt",
+      "verdict": "code and 39 + 42 targeted tests reviewed; the live .87 record is accepted as maintainer-attested",
+      "limits": "The original /tmp/f13-probe.mjs was not archived, but a controlled temp-broker probe reproduces quota/revocation/audit rotation and the production audit excerpt shows the quota refusals; remote-broker.live was re-run 6/6."
+    },
+    "gui": {
+      "record": "remote-gui-model-requests-20261111.txt, remote-gui-rpc-20261111.json, remote-gui-panel-final-20261111.png/.txt; original numeric/JSON record remains",
+      "verdict": "screenshot hash verified; Workspace Folders registration/capability/removal over the plugin RPC channel reviewed",
+      "limits": "The RPC capture temporarily pointed the test profile at the local macOS broker (5-environment manifest, digest 7e2c3c91...) to restore the verifier; the profile was restored afterwards. The original .87 front-end remains the record for the broker-custody boundary."
+    },
+    "macosWindows": {
+      "record": "remote-macos-matrix-evidence-20261111.json; tests/remote-manifest.spec.ts 42/42",
+      "verdict": "launchd broker, macOS target under seatbelt, Linux targets and Windows-target fail-closed covered; installer fixes match the code",
+      "limits": "No raw command transcript/audit/launchd capture; the restricted-profile entry-isolation probe was not rerun on macOS; native Windows initiator remains deferred per ADR-0030; Electron desktop host not covered."
+    },
+    "otherProfile": {
+      "record": "remote-entry-isolation-evidence-20261111.json otherProfileLive",
+      "verdict": "the stock profile really can resolve `danger-full-access`; the restricted patch removes it; confined stock spawns are still refused by the broker",
+      "limits": "this is hazard evidence, not proof that every Agent-reachable profile is restricted; the deployment-level condition is a maintainer sign-off item"
+    }
+  },
+  "notProven": [
+    "native Windows initiator (deferred per ADR-0030; only Windows-target fail-closed is covered)",
+    "Electron desktop host (DSH Web/Chromium is covered)",
+    "restricted-profile entry-isolation probe on macOS (the Linux probe is the evidence)",
+    "raw macOS command transcript and launchd/audit capture (the macOS matrix JSON remains the record)",
+    "CI run at the reviewed HEAD (the last CI success is 2026-11-10)"
+  ],
+  "review": {
+    "path": "../reviews/2026-11-11-model-entry-evidence-review.md",
+    "decision": "PASS",
+    "date": "2026-11-11",
+    "reviewer": "Devin (external review, maintainer-commissioned)"
+  },
+  "modelOpening": "REVIEW PASSED — model entry remains closed by default pending maintainer sign-off; remoteEnvironments is not enabled and remote-tools is not in cordis.patch.yml",
+  "r2R3R4": {
+    "r2": {
+      "f13Probe": "remote-f13-probe-20261111/summary.json",
+      "f13Client": "remote-f13-probe-20261111/client.json",
+      "f13Audit": [
+        "remote-f13-probe-20261111/audit.jsonl",
+        "remote-f13-probe-20261111/audit.jsonl.1",
+        "remote-f13-probe-20261111/audit.jsonl.2",
+        "remote-f13-probe-20261111/audit.jsonl.3"
+      ],
+      "productionAuditExcerpt": "remote-f13-probe-20261111/production-audit-excerpt.txt",
+      "remoteBrokerLive": "remote-broker-live-20261111.txt",
+      "liveConfig": "remote-broker-live-config-20261111.json"
+    },
+    "r3": {
+      "toolCatalog": "remote-gui-model-requests-20261111.txt",
+      "scriptedModel": "remote-gui-scripted-model-20261111.mjs",
+      "rpc": "remote-gui-rpc-20261111.json",
+      "panelScreenshot": "remote-gui-panel-final-20261111.png",
+      "panelText": "remote-gui-panel-final-20261111.txt"
+    },
+    "r4": {
+      "unitTranscript": "remote-linux-unit-evidence-20261111.txt",
+      "entryProbeRun": "remote-entry-isolation-run-20261111.txt",
+      "profilePatch": "remote-exp-patch-20261111.yml"
+    }
+  },
+  "r5": {
+    "deployment": "VM-TYO1-P3ZC876FD1 (64.118.150.87)",
+    "profiles": [
+      "remote-exp",
+      "stock-exp"
+    ],
+    "result": "both profiles have only read-only/workspace-write presets; forged danger-full-access is refused by remote-profile-full-access; no third profile directory; no Agent Host process was mounted",
+    "record": "remote-profile-audit-20261111.json",
+    "status": "verified for this deployment; maintainer sign-off must confirm no new unrestricted profile/entry is added",
+    "script": "remote-profile-audit-20261111.mjs"
+  },
+  "sha256": {
+    "remote-f13-probe-20261111/summary.json": "ce20d970eb8248c85a4958dbf4e15f6c977db25b4c54183d4a5d2ae29c02887d",
+    "remote-f13-probe-20261111/client.json": "3db9a80bf01b2945fdea75a07fecf05a47eba0b54c399d1670eedd600345ce59",
+    "remote-f13-probe-20261111/audit.jsonl": "21e2c62074aa80c9928f4178849c21a680aedc1b78adcc23bde9e343fef6e714",
+    "remote-f13-probe-20261111/production-audit-excerpt.txt": "5f37a745da75ad5bb7a32b9658e74a0c9b1fa7383c22200ae874ca9dd1e0db1d",
+    "remote-broker-live-20261111.txt": "632007e52fb597442c41b3777b712eaa8986e2af424a9b4755b02c0ee1c7b394",
+    "remote-linux-unit-evidence-20261111.txt": "e21f92cbaa07fd7f5759c47cfd8740482d2519b1a84fabb66185214083c4acb5",
+    "remote-entry-isolation-run-20261111.txt": "3e3b445435770474f9d1b8484466dabc37ca286c64d8b71e9f944a84d5389857",
+    "remote-gui-model-requests-20261111.txt": "910e79781d91d725c56e0f9b1604be089f9032c49aee51bb897debb0111e7617",
+    "remote-gui-rpc-20261111.json": "50fc26263c3ed075bfc4d14cbf1aab58ad41e1c098290cb638591ae523334147",
+    "remote-gui-panel-final-20261111.png": "8d449399776b79df976f5c3dd750881283d630d8c7feeeb0a55458d0c9efb0ca",
+    "remote-gui-panel-final-20261111.txt": "d241bdc444866e8c6ddd193ae21efd25babd6713fda91935469f8c0d1cbb83eb",
+    "remote-gui-scripted-model-20261111.mjs": "b029841f13df8c70c1c0ff0b71fa19bab193632c66ec55b1aa6e38770cfb58b4",
+    "remote-profile-audit-20261111.json": "63c333068842c9bf46126781724a59d9390390a8cae48797ef4ad1d8115384ce",
+    "remote-profile-audit-20261111.mjs": "a2c7506ea5d2810d33ec15f10a346350c2cb6af8c216026c4965f1b973a5c17d",
+    "remote-broker-live-config-20261111.json": "4320e972ad184dd83ea1343df7c58f8998190f6e785b09532704c14ec4309d89",
+    "remote-exp-patch-20261111.yml": "19f1ead74ed5951eeee532c977b2d7061d116a722cdc85ee0c63f17958b542b7",
+    "remote-f13-probe-20261111/broker-output.txt": "8dff6db6a39d398fec0f6c30d94893a80ada1dfc72b504c7b53fa7e12f062443"
+  }
+}

@@ -1,0 +1,100 @@
+新会话
+⌥
+⌘
+N
+插件
+自动化任务
+更多
+工作区
+默认工作区
+gui probe turn complete
+6小时
+工作区目录
+工作区目录
+主要工作目录
+会话原始项目，不可移除
+default-workspace
+当前Agent工作目录
+/Users/m2/Documents/deepseek-harness/default-workspace
+附属工作目录
+
+还没有附属工作目录。 添加后，Agent 可在同一会话中读写该目录，受限 shell 和终端同步生效。
+
+远端环境
+实验性 SSH 能力；列表只读控制面状态与部署清单，不建立连接。
+vps-app
+linux
+已登记
+app · /srv/dsh/work/app
+当前能力：读取, 写入, 执行, 发送
+vps-xfer
+linux
+已登记
+import · /import
+当前能力：读取, 写入, 接收, 发送
+mac-local
+darwin
+未登记
+mac · /Users/m2/dsh-ssh-target-workspace
+当前能力：不可用
+登记
+跟随会话
+添加
+重试
+更多
+gui probe turn complete
+对话
+轨迹
+list files
+14:42
+已完成
+已完成，用时 1秒
+
+gui probe turn complete
+
+用量 7 tok
+14:42
+ping again
+14:43
+已完成
+已完成，用时 1秒
+
+gui probe turn complete
+
+用量 7 tok
+14:43
+check tools
+14:50
+已完成
+已完成，用时 1秒
+
+gui probe turn complete
+
+用量 7 tok
+14:50
+post-disable check
+14:57
+已完成
+已完成，用时 1秒
+
+gui probe turn complete
+
+用量 7 tok
+14:57
+发消息或创建任务, / 调用指令, @ 文件或对话
+DeepSeek-V4.1-Flash
+High
+4 轮 4 步·800 tok/s
+28 tok·缓存命中 0%
+0%
+开始
+工作区文件
+浏览会话工作区的文件
+⌥
+⌘
+P
+新建终端
+在会话工作区运行命令
+⌃
+`
+更多工具

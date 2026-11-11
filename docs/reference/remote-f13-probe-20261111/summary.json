@@ -1,0 +1,180 @@
+{
+  "manifest": {
+    "path": "/etc/dsh-remote-f13/manifest.json",
+    "globalQuotas": {
+      "windowMs": 60000,
+      "maxOperations": 100,
+      "maxBytes": 1048576
+    },
+    "vpsXferQuotas": {
+      "windowMs": 60000,
+      "maxOperations": 3,
+      "maxBytes": 1048576
+    },
+    "revocations": [
+      {
+        "environmentId": "vps-xfer2",
+        "reason": "f13 review probe"
+      }
+    ]
+  },
+  "brokerLogTail": "dsh-ssh-broker: dsh-ssh-broker: listening on /tmp/f13-review/broker.sock for uid 1000\ndsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com\n\nSession terminated, killing shell... ...killed.\n",
+  "clientExit": 0,
+  "hello": {
+    "event": "hello",
+    "protocol": 3,
+    "brokerUid": 996,
+    "environmentIds": [
+      "vps-app",
+      "vps-lib",
+      "vps-xfer",
+      "vps-xfer2"
+    ],
+    "manifestDigest": "f0e95f3ddd819e97eaf7836031dcbde283ec751091a56a64f05ff13b2116bacd",
+    "sshCapability": {
+      "eligible": true
+    }
+  },
+  "quotaReplies": [
+    {
+      "id": 1,
+      "ok": true,
+      "value": {
+        "environmentId": "vps-xfer",
+        "generation": "c112bc12-98a8-42ec-bf57-df9bb9d9c5f7",
+        "version": {
+          "version": 3,
+          "extensions": {
+            "posix-rename@openssh.com": "1",
+            "statvfs@openssh.com": "2",
+            "fstatvfs@openssh.com": "2",
+            "hardlink@openssh.com": "1",
+            "fsync@openssh.com": "1",
+            "lsetstat@openssh.com": "1",
+            "limits@openssh.com": "1",
+            "expand-path@openssh.com": "1",
+            "copy-data": "1",
+            "home-directory": "1",
+            "users-groups-by-id@openssh.com": "1"
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "ok": true,
+      "value": {
+        "environmentId": "vps-xfer",
+        "generation": "c112bc12-98a8-42ec-bf57-df9bb9d9c5f7",
+        "version": {
+          "version": 3,
+          "extensions": {
+            "posix-rename@openssh.com": "1",
+            "statvfs@openssh.com": "2",
+            "fstatvfs@openssh.com": "2",
+            "hardlink@openssh.com": "1",
+            "fsync@openssh.com": "1",
+            "lsetstat@openssh.com": "1",
+            "limits@openssh.com": "1",
+            "expand-path@openssh.com": "1",
+            "copy-data": "1",
+            "home-directory": "1",
+            "users-groups-by-id@openssh.com": "1"
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "ok": true,
+      "value": {
+        "environmentId": "vps-xfer",
+        "generation": "c112bc12-98a8-42ec-bf57-df9bb9d9c5f7",
+        "version": {
+          "version": 3,
+          "extensions": {
+            "posix-rename@openssh.com": "1",
+            "statvfs@openssh.com": "2",
+            "fstatvfs@openssh.com": "2",
+            "hardlink@openssh.com": "1",
+            "fsync@openssh.com": "1",
+            "lsetstat@openssh.com": "1",
+            "limits@openssh.com": "1",
+            "expand-path@openssh.com": "1",
+            "copy-data": "1",
+            "home-directory": "1",
+            "users-groups-by-id@openssh.com": "1"
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "ok": false,
+      "code": "quota-exceeded",
+      "message": "the environment \"vps-xfer\" budget is exhausted for the current 60s window"
+    }
+  ],
+  "revocationReplies": [
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked",
+    "environment-revoked"
+  ],
+  "auditFiles": [
+    {
+      "name": "audit.jsonl",
+      "mode": "0o600",
+      "uid": 996,
+      "gid": 987,
+      "size": 411
+    },
+    {
+      "name": "audit.jsonl.1",
+      "mode": "0o600",
+      "uid": 996,
+      "gid": 987,
+      "size": 411
+    },
+    {
+      "name": "audit.jsonl.2",
+      "mode": "0o600",
+      "uid": 996,
+      "gid": 987,
+      "size": 411
+    },
+    {
+      "name": "audit.jsonl.3",
+      "mode": "0o600",
+      "uid": 996,
+      "gid": 987,
+      "size": 411
+    }
+  ]
+}

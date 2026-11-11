@@ -1,0 +1,14 @@
+# Production broker audit excerpt — quota refusals (2026-11-11)
+# source: /var/lib/dsh-ssh-broker/audit.jsonl{,.1,.2,.3} on .87
+# captured 2026-11-11T13:41:30Z
+
+/var/lib/dsh-ssh-broker/audit.jsonl:{"time":"2026-11-11T05:07:38.864Z","connection":5,"method":"openSftp","environment":"vps-xfer","outcome":"refused:quota-exceeded"}
+/var/lib/dsh-ssh-broker/audit.jsonl.1:{"time":"2026-11-11T05:07:37.752Z","connection":2,"method":"openSftp","environment":"vps-xfer","outcome":"refused:quota-exceeded"}
+/var/lib/dsh-ssh-broker/audit.jsonl.1:{"time":"2026-11-11T05:07:38.120Z","connection":3,"method":"openSftp","environment":"vps-xfer","outcome":"refused:quota-exceeded"}
+/var/lib/dsh-ssh-broker/audit.jsonl.1:{"time":"2026-11-11T05:07:38.492Z","connection":4,"method":"openSftp","environment":"vps-xfer","outcome":"refused:quota-exceeded"}
+/var/lib/dsh-ssh-broker/audit.jsonl.2:{"time":"2026-11-11T05:07:37.383Z","connection":1,"method":"sftp","environment":"vps-xfer","outcome":"refused:quota-exceeded"}
+/var/lib/dsh-ssh-broker/audit.jsonl.3:{"time":"2026-11-11T05:07:10.390Z","connection":1,"method":"sftp","environment":"vps-xfer","outcome":"refused:quota-exceeded"}
+/var/lib/dsh-ssh-broker/audit.jsonl.3:{"time":"2026-11-11T05:07:10.405Z","connection":1,"method":"sftp","environment":"vps-xfer","outcome":"refused:quota-exceeded"}
+/var/lib/dsh-ssh-broker/audit.jsonl.3:{"time":"2026-11-11T05:07:10.419Z","connection":1,"method":"sftp","environment":"vps-xfer","outcome":"refused:quota-exceeded"}
+/var/lib/dsh-ssh-broker/audit.jsonl.3:{"time":"2026-11-11T05:07:10.434Z","connection":1,"method":"sftp","environment":"vps-xfer","outcome":"refused:quota-exceeded"}
+/var/lib/dsh-ssh-broker/audit.jsonl.3:{"time":"2026-11-11T05:07:10.809Z","connection":2,"method":"openSftp","environment":"vps-xfer","outcome":"refused:quota-exceeded"}

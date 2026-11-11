@@ -75,7 +75,7 @@ G4 的实跑把一个 chroot SFTP 账户、一个 helper 账户和宿主的 `ssh
 - **证明收窄**：Host 与 broker 均不得为 root（`broker-root-uid`）；凭据根经 `lstat` 必须是非 symlink 的真实目录、属 broker、恰为 0700；模型可见复制目的必须是声明 `destinationIsolation: "chroot-sftp"` 的 sftp 环境，且不得与同 `namespace`+`account` 的 helper/exec 环境共存（`destination-isolation-required`）——helper 环境不能作复制目的。
 - **运行时守卫**（`src/remote/profile-guard.ts`）：专用 profile 安装即包裹 `sandboxPolicy.resolve`、`sandbox.confine`、`subprocess.spawn`/`spawnTerminal` 与晚激活的 `approval.request`——拒绝任何 `danger-full-access` 解析/策略/单发升级，未受票据约束的 spawn（LSP/job 等）fail-closed，`DSH_PTY_SESSION_ID` 标记终端按 `DSH_SESSION_ID` 找活体 Session 并重新准入/限定；守卫覆盖受支持的服务接缝，第三方 `node:child_process` 直引与用户终端标记属部署信任假设。
 - **临时文件**：ControlMaster/Helper 暂存归 broker 账户 `mkdtemp` 私有目录，Linux unit 以 `PrivateTmp=yes` 隔离；unit 未在容器内真实执行，真实部署证据仍缺。
-- **证据状态**：容器内协议 2 样例与伪造 hello 记录为**历史性反例**，不构成现行守卫的绿色证据；模型开放仍需配额/审计轮转/吊销与 Linux/systemd/GUI 证据（详见控制面参考"模型开放的前置阻断项"）。
+- **证据状态**：容器内协议 2 样例与伪造 hello 记录为**历史性反例**，不构成现行守卫的绿色证据；配额/审计轮转/吊销与 Linux/systemd/GUI 证据已于 2026-11-11 外部评审复核通过（[评审报告](../reviews/2026-11-11-model-entry-evidence-review.md)），模型入口仍默认关闭，开启需维护者签收（详见控制面参考"模型开放的前置阻断项"）。
 
 ## 备选与未决
 

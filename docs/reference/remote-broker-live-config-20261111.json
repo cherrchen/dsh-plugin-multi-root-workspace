@@ -1,0 +1,15 @@
+{
+  "socketPath": "/run/dsh-ssh-broker/broker.sock",
+  "brokerUid": 996,
+  "credentialRoot": "/var/lib/dsh-ssh-broker",
+  "manifestPath": "/etc/dsh-remote/manifest.json",
+  "fullAccessDisabled": true,
+  "confinementProbe": {
+    "verified": true,
+    "evidence": "live probe 2026-11-10 VM-TYO1-P3ZC876FD1: dshhost uid=1000 under bwrap --unshare-all (NoNewPrivs) — cred-root read EACCES; socket connect accepted then closed with 0 bytes (sandboxed peer refused); unconfined control received protocol-3 hello brokerUid=996 sshCapability eligible envs=4; unit dsh-ssh-broker PrivateTmp=yes ProtectSystem=strict; broker code root-owned /opt/dsh-broker"
+  },
+  "primary": "/home/dshhost/work/primary",
+  "outsideSentinel": "/srv/dsh/outside/sentinel.txt",
+  "workspaceApp": "/srv/dsh/work/app",
+  "workspaceLib": "/srv/dsh/work/lib"
+}

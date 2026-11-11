@@ -1,0 +1,481 @@
+{
+ "hello": {
+  "event": "hello",
+  "protocol": 3,
+  "brokerUid": 996,
+  "environmentIds": [
+   "vps-app",
+   "vps-lib",
+   "vps-xfer",
+   "vps-xfer2"
+  ],
+  "manifestDigest": "f0e95f3ddd819e97eaf7836031dcbde283ec751091a56a64f05ff13b2116bacd",
+  "sshCapability": {
+   "eligible": true
+  }
+ },
+ "exchanges": [
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer"
+   },
+   "reply": {
+    "id": 1,
+    "ok": true,
+    "value": {
+     "environmentId": "vps-xfer",
+     "generation": "c112bc12-98a8-42ec-bf57-df9bb9d9c5f7",
+     "version": {
+      "version": 3,
+      "extensions": {
+       "posix-rename@openssh.com": "1",
+       "statvfs@openssh.com": "2",
+       "fstatvfs@openssh.com": "2",
+       "hardlink@openssh.com": "1",
+       "fsync@openssh.com": "1",
+       "lsetstat@openssh.com": "1",
+       "limits@openssh.com": "1",
+       "expand-path@openssh.com": "1",
+       "copy-data": "1",
+       "home-directory": "1",
+       "users-groups-by-id@openssh.com": "1"
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer"
+   },
+   "reply": {
+    "id": 2,
+    "ok": true,
+    "value": {
+     "environmentId": "vps-xfer",
+     "generation": "c112bc12-98a8-42ec-bf57-df9bb9d9c5f7",
+     "version": {
+      "version": 3,
+      "extensions": {
+       "posix-rename@openssh.com": "1",
+       "statvfs@openssh.com": "2",
+       "fstatvfs@openssh.com": "2",
+       "hardlink@openssh.com": "1",
+       "fsync@openssh.com": "1",
+       "lsetstat@openssh.com": "1",
+       "limits@openssh.com": "1",
+       "expand-path@openssh.com": "1",
+       "copy-data": "1",
+       "home-directory": "1",
+       "users-groups-by-id@openssh.com": "1"
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer"
+   },
+   "reply": {
+    "id": 3,
+    "ok": true,
+    "value": {
+     "environmentId": "vps-xfer",
+     "generation": "c112bc12-98a8-42ec-bf57-df9bb9d9c5f7",
+     "version": {
+      "version": 3,
+      "extensions": {
+       "posix-rename@openssh.com": "1",
+       "statvfs@openssh.com": "2",
+       "fstatvfs@openssh.com": "2",
+       "hardlink@openssh.com": "1",
+       "fsync@openssh.com": "1",
+       "lsetstat@openssh.com": "1",
+       "limits@openssh.com": "1",
+       "expand-path@openssh.com": "1",
+       "copy-data": "1",
+       "home-directory": "1",
+       "users-groups-by-id@openssh.com": "1"
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer"
+   },
+   "reply": {
+    "id": 4,
+    "ok": false,
+    "code": "quota-exceeded",
+    "message": "the environment \"vps-xfer\" budget is exhausted for the current 60s window"
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 5,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 6,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 7,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 8,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 9,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 10,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 11,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 12,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 13,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 14,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 15,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 16,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 17,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 18,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 19,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 20,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 21,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 22,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 23,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 24,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 25,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 26,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 27,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 28,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 29,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 30,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 31,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 32,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 33,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  },
+  {
+   "method": "openSftp",
+   "params": {
+    "environmentId": "vps-xfer2"
+   },
+   "reply": {
+    "id": 34,
+    "ok": false,
+    "code": "environment-revoked",
+    "message": "the deployment revokes environment \"vps-xfer2\""
+   }
+  }
+ ]
+}

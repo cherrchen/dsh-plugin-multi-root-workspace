@@ -24,13 +24,14 @@
   },
   "vitest": {
     "command": "pnpm test --reporter=default --reporter=json --outputFile=.dsh-smoke/ssh-review-20261110/vitest-final.json",
-    "passed": 1562,
+    "passed": 1545,
     "skipped": 131,
     "failed": 0,
     "passedFiles": 106,
     "skippedFiles": 8,
     "rawReport": "ssh-review-20261110-vitest.json",
-    "note": "re-run at 336951d including F13 broker admission/quota/audit-rotation and manifest cases; prior 1545 baseline superseded"
+    "note": "Historical 2026-11-10 baseline: 1545 passed / 131 skipped / 0 failed. The 1562 figure in the 2026-11-10 revision of this manifest was not backed by this archived report; the F13-inclusive 2026-11-11 re-run at 83b76e4 confirmed 1562/131/0 and is archived as ssh-review-20261111-vitest.json.",
+    "head": "19ebb07"
   },
   "lintDelta": {
     "description": "Three unused test parameter names were prefixed with underscores after the full run; lint and the two affected test files were rerun.",
@@ -85,13 +86,14 @@
     "ANSI escapes removed",
     "trailing whitespace trimmed"
   ],
+  "notProvenNote": "This list is the 2026-11-10 assessment; it is superseded by the 2026-11-11 review in ssh-review-20261111-evidence.json.",
   "notProven": [
     "native Windows and other operating-system gates",
     "Chromium/Electron GUI acceptance",
     "disk-reloaded sessions and actual other-profile isolation",
     "aggregate operation/byte budgets, audit rotation and automated revocation"
   ],
-  "modelOpening": "BLOCKED",
+  "modelOpening": "REVIEW PASSED (2026-11-11) — model entry remains closed by default pending maintainer sign-off; default patch has no remote-tools and remoteEnvironments is not enabled",
   "linuxLive": {
     "date": "2026-11-10/2026-11-11",
     "topology": "initiator .87 (dshhost uid 1000 + _dsh_ssh broker uid 996) -> target .93 (dshbuild/dshxfer/dshxfer2), both Ubuntu 24.04 x86_64",
@@ -128,5 +130,12 @@
       "productionQuotasDeclared": "live manifest now declares env quotas {1h,20000 ops,512GiB} each and global {1h,50000 ops,1TiB}; remote-broker.live 6/6 re-verified under declared budgets (336951d binary).",
       "liveFoundDefect": "env-denied operations leaked into the broker-global window budget (admit order); fixed by check-all-windows-then-record (336951d)"
     }
+  },
+  "supersededBy": "ssh-review-20261111-evidence.json",
+  "note": "This manifest preserves the 2026-11-10 local regression. The F13/linuxLive blocks were appended on 2026-11-11; the F13-inclusive full-suite re-run is in ssh-review-20261111-evidence.json.",
+  "review": {
+    "path": "../reviews/2026-11-11-model-entry-evidence-review.md",
+    "decision": "PASS",
+    "date": "2026-11-11"
   }
 }

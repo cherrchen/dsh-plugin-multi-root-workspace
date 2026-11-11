@@ -1,0 +1,4 @@
+dsh-ssh-broker: dsh-ssh-broker: listening on /tmp/f13-review/broker.sock for uid 1000
+dsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+
+Session terminated, killing shell... ...killed.

@@ -1,0 +1,147 @@
+# Linux deployment unit evidence — 2026-11-11
+# captured from root@64.118.150.87 with the maintainer harness key
+
+## host
+VM-TYO1-P3ZC876FD1
+Wed Nov 11 01:09:54 PM UTC 2026
+uid=0(root) gid=0(root) groups=0(root)
+
+## unit status
+● dsh-ssh-broker.service - DSH SSH credential broker (ADR-0039)
+     Loaded: loaded (/etc/systemd/system/dsh-ssh-broker.service; enabled; preset: enabled)
+     Active: active (running) since Wed 2026-11-11 06:52:55 UTC; 6h ago
+   Main PID: 2816756 (MainThread)
+      Tasks: 11 (limit: 919)
+     Memory: 71.4M (peak: 81.7M swap: 2.2M swap peak: 2.2M)
+        CPU: 3min 14.490s
+     CGroup: /system.slice/dsh-ssh-broker.service
+             └─2816756 /opt/node-v24/bin/node /opt/dsh-broker/node_modules/@dsh-electron/dsh-plugin-multi-root-workspace/lib/remote-broker.js --config /etc/dsh-ssh-broker/broker.json
+
+Nov 11 06:56:21 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:44 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [ssh-env] vps-app ready as dshbuild@64.118.150.93 protocol 3
+Nov 11 13:07:45 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [ssh-env] vps-lib ready as dshbuild@64.118.150.93 protocol 3
+Nov 11 13:07:45 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-app ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:45 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-lib ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:46 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:47 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer2 ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:48 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [ssh-env] vps-app ready as dshbuild@64.118.150.93 protocol 3
+Nov 11 13:07:53 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:54 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer2 ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+
+## unit properties
+Restart=on-failure
+NRestarts=0
+ExecMainPID=2816756
+User=_dsh_ssh
+Group=dsh-ssh-clients
+SupplementaryGroups=_dsh_ssh
+ReadWritePaths=/var/lib/dsh-ssh-broker /run/dsh-ssh-broker
+PrivateTmp=yes
+ProtectSystem=strict
+NoNewPrivileges=no
+RuntimeDirectoryMode=0750
+RuntimeDirectory=dsh-ssh-broker
+ActiveState=active
+SubState=running
+
+## unit file
+[Unit]
+Description=DSH SSH credential broker (ADR-0039)
+After=network.target
+
+[Service]
+Type=simple
+User=_dsh_ssh
+Group=dsh-ssh-clients
+SupplementaryGroups=_dsh_ssh
+RuntimeDirectory=dsh-ssh-broker
+RuntimeDirectoryMode=0750
+ExecStart=/opt/node-v24/bin/node /opt/dsh-broker/node_modules/@dsh-electron/dsh-plugin-multi-root-workspace/lib/remote-broker.js --config /etc/dsh-ssh-broker/broker.json
+Restart=on-failure
+# The broker owns its credentials; it must be able to read its home and write
+# the socket/audit paths, and nothing else.
+ReadWritePaths=/var/lib/dsh-ssh-broker /run/dsh-ssh-broker
+ProtectSystem=strict
+PrivateTmp=yes
+NoNewPrivileges=no
+
+[Install]
+WantedBy=multi-user.target
+
+## accounts
+_dsh_ssh:x:996:986::/var/lib/dsh-ssh-broker:/usr/sbin/nologin
+dshhost:x:1000:1000::/home/dshhost:/bin/bash
+dsh-ssh-clients:x:987:_dsh_ssh,dshhost
+
+## paths
+/var/lib/dsh-ssh-broker mode=700 owner=_dsh_ssh:_dsh_ssh type=directory
+/var/lib/dsh-ssh-broker/.ssh mode=700 owner=_dsh_ssh:_dsh_ssh type=directory
+/run/dsh-ssh-broker mode=750 owner=_dsh_ssh:dsh-ssh-clients type=directory
+/run/dsh-ssh-broker/broker.sock mode=660 owner=_dsh_ssh:dsh-ssh-clients type=socket
+/etc/dsh-ssh-broker mode=750 owner=root:dsh-ssh-clients type=directory
+/etc/dsh-ssh-broker/broker.json mode=640 owner=root:_dsh_ssh type=regular file
+/etc/dsh-remote mode=755 owner=root:root type=directory
+/etc/dsh-remote/manifest.json mode=640 owner=root:dsh-ssh-clients type=regular file
+
+## credential root listing
+total 88
+drwx------  3 _dsh_ssh _dsh_ssh         4096 Nov 11 05:07 .
+drwxr-xr-x 46 root     root             4096 Nov  8 06:51 ..
+-rw-------  1 _dsh_ssh dsh-ssh-clients 51321 Nov 11 13:07 audit.jsonl
+-rw-------  1 _dsh_ssh dsh-ssh-clients   393 Nov 11 05:07 audit.jsonl.1
+-rw-------  1 _dsh_ssh dsh-ssh-clients   452 Nov 11 05:07 audit.jsonl.2
+-rw-------  1 _dsh_ssh dsh-ssh-clients   964 Nov 11 05:07 audit.jsonl.3
+-rw-r--r--  1 _dsh_ssh _dsh_ssh          220 Mar 31  2024 .bash_logout
+-rw-r--r--  1 _dsh_ssh _dsh_ssh         3771 Mar 31  2024 .bashrc
+-rw-r--r--  1 _dsh_ssh _dsh_ssh          807 Mar 31  2024 .profile
+drwx------  2 _dsh_ssh _dsh_ssh         4096 Nov 10 15:30 .ssh
+
+## audit chain
+-rw------- 1 _dsh_ssh dsh-ssh-clients 51321 Nov 11 13:07 /var/lib/dsh-ssh-broker/audit.jsonl
+-rw------- 1 _dsh_ssh dsh-ssh-clients   393 Nov 11 05:07 /var/lib/dsh-ssh-broker/audit.jsonl.1
+-rw------- 1 _dsh_ssh dsh-ssh-clients   452 Nov 11 05:07 /var/lib/dsh-ssh-broker/audit.jsonl.2
+-rw------- 1 _dsh_ssh dsh-ssh-clients   964 Nov 11 05:07 /var/lib/dsh-ssh-broker/audit.jsonl.3
+/var/lib/dsh-ssh-broker/audit.jsonl mode=600 owner=_dsh_ssh:dsh-ssh-clients size=51321
+/var/lib/dsh-ssh-broker/audit.jsonl.1 mode=600 owner=_dsh_ssh:dsh-ssh-clients size=393
+/var/lib/dsh-ssh-broker/audit.jsonl.2 mode=600 owner=_dsh_ssh:dsh-ssh-clients size=452
+/var/lib/dsh-ssh-broker/audit.jsonl.3 mode=600 owner=_dsh_ssh:dsh-ssh-clients size=964
+
+## private tmp
+drwx------ 3 root root 4096 Nov 11 06:52 /tmp/systemd-private-27a04639796944bb8defa56438713079-dsh-ssh-broker.service-dm6GK5
+
+## broker config
+{
+  "manifestPath": "/etc/dsh-remote/manifest.json",
+  "socketPath": "/run/dsh-ssh-broker/broker.sock",
+  "clientUid": 1000,
+  "brokerUid": 996,
+  "auditPath": "/var/lib/dsh-ssh-broker/audit.jsonl",
+  "auditMaxBytes": 8388608,
+  "auditKeep": 4
+}
+## recent journal
+Nov 11 05:09:10 VM-TYO1-P3ZC876FD1 node[2513128]: dsh-ssh-broker: [ssh-env] vps-app ready as dshbuild@64.118.150.93 protocol 3
+Nov 11 05:09:15 VM-TYO1-P3ZC876FD1 node[2513128]: dsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 05:09:15 VM-TYO1-P3ZC876FD1 node[2513128]: dsh-ssh-broker: [sftp-env] vps-xfer2 ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 05:10:27 VM-TYO1-P3ZC876FD1 node[2513128]: dsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 06:36:26 VM-TYO1-P3ZC876FD1 node[2513128]: dsh-ssh-broker: dsh-ssh-broker: protocol violation on connection 37: invalid broker request or protocol version
+Nov 11 06:46:34 VM-TYO1-P3ZC876FD1 node[2513128]: dsh-ssh-broker: dsh-ssh-broker: protocol violation on connection 38: invalid broker request or protocol version
+Nov 11 06:50:09 VM-TYO1-P3ZC876FD1 node[2513128]: dsh-ssh-broker: dsh-ssh-broker: protocol violation on connection 39: invalid broker request or protocol version
+Nov 11 06:52:54 VM-TYO1-P3ZC876FD1 systemd[1]: Stopping dsh-ssh-broker.service - DSH SSH credential broker (ADR-0039)...
+Nov 11 06:52:55 VM-TYO1-P3ZC876FD1 systemd[1]: dsh-ssh-broker.service: Deactivated successfully.
+Nov 11 06:52:55 VM-TYO1-P3ZC876FD1 systemd[1]: Stopped dsh-ssh-broker.service - DSH SSH credential broker (ADR-0039).
+Nov 11 06:52:55 VM-TYO1-P3ZC876FD1 systemd[1]: dsh-ssh-broker.service: Consumed 52.485s CPU time.
+Nov 11 06:52:55 VM-TYO1-P3ZC876FD1 systemd[1]: Started dsh-ssh-broker.service - DSH SSH credential broker (ADR-0039).
+Nov 11 06:52:56 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: dsh-ssh-broker: listening on /run/dsh-ssh-broker/broker.sock for uid 1000
+Nov 11 06:53:15 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: dsh-ssh-broker: protocol violation on connection 1: invalid broker request or protocol version
+Nov 11 06:55:12 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [ssh-env] vps-app ready as dshbuild@64.118.150.93 protocol 3
+Nov 11 06:56:21 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:44 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [ssh-env] vps-app ready as dshbuild@64.118.150.93 protocol 3
+Nov 11 13:07:45 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [ssh-env] vps-lib ready as dshbuild@64.118.150.93 protocol 3
+Nov 11 13:07:45 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-app ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:45 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-lib ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:46 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:47 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer2 ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:48 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [ssh-env] vps-app ready as dshbuild@64.118.150.93 protocol 3
+Nov 11 13:07:53 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com
+Nov 11 13:07:54 VM-TYO1-P3ZC876FD1 node[2816756]: dsh-ssh-broker: [sftp-env] vps-xfer2 ready extensions posix-rename@openssh.com,statvfs@openssh.com,fstatvfs@openssh.com,hardlink@openssh.com,fsync@openssh.com,lsetstat@openssh.com,limits@openssh.com,expand-path@openssh.com,copy-data,home-directory,users-groups-by-id@openssh.com

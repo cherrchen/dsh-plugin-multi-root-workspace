@@ -1,0 +1,77 @@
+{
+  "capturedAt": "2026-11-11T13:10:00Z",
+  "host": "VM-TYO1-P3ZC876FD1 (64.118.150.87)",
+  "home": "/home/dshhost/probe-home",
+  "profilesDirectory": "/home/dshhost/probe-home/profiles",
+  "command": "runuser -u dshhost -- env DSH_HOME=/home/dshhost/probe-home PRIMARY=/home/dshhost/work/primary DSH_CLI=/srv/dsh-plugin-repo/node_modules/@deepseek-ai/dsh/lib/bin.js /opt/node-v24/bin/node /tmp/audit-profile.mjs <profile>",
+  "profiles": [
+    {
+      "profile": "remote-exp",
+      "defaultMode": "workspace-write",
+      "presetNames": [
+        "read-only",
+        "workspace-write"
+      ],
+      "presets": {
+        "read-only": {
+          "sandbox": "read-only",
+          "approval": "ask"
+        },
+        "workspace-write": {
+          "sandbox": "workspace-write",
+          "approval": "ask"
+        }
+      },
+      "hasFullAccessPreset": false,
+      "forgedMode": {
+        "refused": "remote-profile-full-access: this profile never resolves danger-full-access"
+      },
+      "remoteTools": {
+        "copy": true,
+        "bash": true
+      },
+      "remoteStatus": {
+        "state": "ready"
+      },
+      "registryAuthority": {
+        "kind": "active"
+      }
+    },
+    {
+      "profile": "stock-exp",
+      "defaultMode": "workspace-write",
+      "presetNames": [
+        "read-only",
+        "workspace-write"
+      ],
+      "presets": {
+        "read-only": {
+          "sandbox": "read-only",
+          "approval": "ask"
+        },
+        "workspace-write": {
+          "sandbox": "workspace-write",
+          "approval": "ask"
+        }
+      },
+      "hasFullAccessPreset": false,
+      "forgedMode": {
+        "refused": "remote-profile-full-access: this profile never resolves danger-full-access"
+      },
+      "remoteTools": {
+        "copy": true,
+        "bash": true
+      },
+      "remoteStatus": {
+        "state": "ready"
+      },
+      "registryAuthority": {
+        "kind": "active"
+      }
+    }
+  ],
+  "otherProfileDirectories": [],
+  "activeHostProcesses": "only dsh-ssh-broker.service and the root fault-watcher were running; no Agent Host process was mounted",
+  "note": "The earlier entry-isolation evidence recorded stock-exp as the unpatched hazard control and then as the restricted control. The current profile patch on stock-exp is restricted; this runtime audit re-checks the effective preset table and forged-mode resolution. The deployment condition is satisfied for these two profiles; the maintainer sign-off must still confirm that no new unrestricted profile or Agent entry is added.",
+  "script": "remote-profile-audit-20261111.mjs"
+}

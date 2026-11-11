@@ -1834,7 +1834,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 ## 多执行环境模型开放门槛（2026-11-09）
 
-> **历史性证据，未经 2026-11-10 外部评审复核**：本节"1362 passed/131 skipped"、pack 211 members、"12/12"、Linux 12/12 与 GUI（stub 旅程、Chromium 叙述）均为历史断言——本轮无任何原始产物或重跑记录，最终验证计数由维护者冻结机器证据后填写。当前状态见下节：BLOCKED。
+> **历史性证据**：本节"1362 passed/131 skipped"、pack 211 members、"12/12"、Linux 12/12 与 GUI（stub 旅程、Chromium 叙述）均为历史断言；2026-11-10/11 的现行证据与 2026-11-11 外部评审见下方各节及[评审报告](../../reviews/2026-11-11-model-entry-evidence-review.md)。当前状态：评审通过；模型入口仍默认关闭，等待维护者签收与逐部署开启决定。
 
 **范围：先审查 DSH `0.2.2-rc.1` 的 Linux → Linux 专用实验 profile。** 默认组合保持关闭。此前 Ubuntu 双账户实机已覆盖三向复制、受限命令、故障注入和真实目标主机钥轮换。直连和内存后端的取证继续用于回归。逐项启用配置与回滚步骤见[控制面参考](../../reference/multi-environment-control-plane.md#部署启用清单)。
 
@@ -1852,7 +1852,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 ## 外部评审整改与开放阻断（2026-11-10）
 
-**当前状态：BLOCKED——模型入口保持关闭。** 本次外部评审的 F1–F21 整改为**工作树修复，尚未提交、未发布、未经维护者签收**（SSH 分支 43 个提交已全部 rebase 到 `main + experiment = 3e84d85`；备份引用与 pre-rebase bundle 保留，最终提交号由维护者注记）。本节之上的 G5 实机/测试证据均为**历史性、未经本轮复核**：协议 2 已被协议 3 取代、helper 复制目的已被收窄拒绝、此前"1362 passed / 131 skipped / 0 failed"、pack **211 members**、"12/12" 等计数全部作废待重跑，最终计数由维护者在末轮验证后填写。先前 GUI 断言（stub 旅程与 Chromium 记录）同样只有历史叙述、本轮无原始产物——当前仅有本地单元/DOM 覆盖，无 GUI 签收。
+**2026-11-10 状态：BLOCKED——模型入口保持关闭。**（2026-11-11 复核后状态见[评审报告](../../reviews/2026-11-11-model-entry-evidence-review.md)：证据达标，但模型入口仍默认关闭，等待维护者签收。）本次外部评审的 F1–F21 整改为**工作树修复，尚未提交、未发布、未经维护者签收**（SSH 分支 43 个提交已全部 rebase 到 `main + experiment = 3e84d85`；备份引用与 pre-rebase bundle 保留，最终提交号由维护者注记）。本节之上的 G5 实机/测试证据均为**历史性、未经本轮复核**：协议 2 已被协议 3 取代、helper 复制目的已被收窄拒绝、此前"1362 passed / 131 skipped / 0 failed"、pack **211 members**、"12/12" 等计数全部作废待重跑，最终计数由维护者在末轮验证后填写。先前 GUI 断言（stub 旅程与 Chromium 记录）同样只有历史叙述、本轮无原始产物——当前仅有本地单元/DOM 覆盖，无 GUI 签收。
 
 | 编号 | 主题 | 处理 | 备注 |
 | --- | --- | --- | --- |
@@ -1878,7 +1878,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | F20 | 远端 cwd 校验 | fixed | `verifyCwd` 后端方法：准入 A 经 `assertRemoteParent` 复核远端 cwd，fake 后端可省、生产后端必提供。 |
 | F21 | 终端信任边界 | fixed（文档/行为） | `DSH_PTY_SESSION_ID` 标记的 Agent 终端走会话重准入；未标记为用户终端按部署信任假设放行。 |
 
-**仍未完成的开门前置（非本轮）**：平台矩阵已于 2026-11-11 补齐——macOS 发起端/目标实机验证、Windows 目标在配置入口即拒、原生 Windows 发起端按 ADR-0030 延后不实施；F13 三项、磁盘重载会话与其他 profile 隔离、GUI 宿主均已实机验证。剩余前置 = 本批全部实机证据的外部评审复核与维护者签收。
+**开门前置状态**：平台矩阵已于 2026-11-11 补齐——macOS 发起端/目标实机验证、Windows 目标在配置入口即拒、原生 Windows 发起端按 ADR-0030 延后不实施；F13 三项、磁盘重载会话与其他 profile 隔离、GUI 宿主均已实机验证。**2026-11-11 外部评审已通过（PASS）**，见[评审报告](../../reviews/2026-11-11-model-entry-evidence-review.md)。剩余为维护者签收与逐部署开启决定；默认组合仍不挂 `remote-tools`、不启用 `remoteEnvironments`。
 
 **协议 3 实机复验（2026-11-10/11，`.87` 发起端 × `.93` 被控端，协议 3 + 目的收窄 + profile-guard 全部生效）**：打包 `0.1.17-ssh.1` 部署于 root 所有的 `/opt/dsh-broker` 依赖树；`dsh-ssh-broker.service` `ActiveState=active`/`SubState=running`、`PrivateTmp=yes`、`ProtectSystem=strict`、真私有 `/tmp/systemd-private-*`；凭据根 `0700 _dsh_ssh`、socket `0660`/`0750`、hello 协议 3（`sshCapability.eligible`，四环境）；bwrap `NoNewPrivs` 下探针：凭据根 `EACCES`、socket 连接零字节关闭。`remote-broker.live` **6/6**、`remote-broker-faults.live` **2/2**（root 侧 fault-watcher 消费触发文件，杀 `_dsh_ssh` 的 `vps-build` ssh 于 `preflight` 注入点——绝不 committed、尸体代次替换；SIGKILL daemon 后双代次转 `stale`、须重证）、`remote-ssh.live` **19/19**、`remote-journey.live` **4/4**（生产 `broker:` 路径；helper 目的 `remote_copy` 实机 `transfer-pair-not-allowed`，种子改走 `remote_bash`）。chroot 写者隔离：两个 xfer 账户各自 `/` 仅见自己的 `/import`，`/srv` 不存在，互不可见。本轮实跑另抓出并已修复四个缺陷：`UpdateHostKeys` 的 `-G` 归一化（`51d8f99`）、SFTP 会话继承 `ControlMaster auto` 破坏逐会话代次隔离（`adcf4df`）、`wellFormedReply` 把 NAME(104)/ATTRS(105) 写反致真帧误判断连（`56d972a`）、journey mount 缺 `subprocess` 注入致工具永不挂载与 faults 注入点/负载校准（`19ebb07`）。本段证据为现行有效，不再依赖协议 2 历史记录。
 
@@ -1890,7 +1890,9 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 **macOS 发起端/目标与 Windows 腿实机复验（2026-11-11，本机 macOS arm64 launchd 部署，原始证据 [`remote-macos-matrix-evidence-20261111.json`](../../reference/remote-macos-matrix-evidence-20261111.json)）**：`install.sh` Darwin 分支实跑抓出并修复两处真实缺陷——`next_id` 对 `/Groups` 错查 `UniqueID`（组记录用 `PrimaryGroupID`），产出无 GID 的用户/组记录使 `id` 无法解析；`DSH_SSH_BROKER_NODE` 指向宿主用户主目录内二进制时隐私框架拒系统 daemon 执行（launchd `access(X_OK)` EACCES → EX_CONFIG），node 复制到 `/usr/local/opt/dsh-broker/bin/node` 并在脚本头注释固化该约束。部署形态：`_dsh_ssh`（uid 502）+ `dsh-ssh-clients`（gid 702，含 m2）、凭据根 `/usr/local/var/dsh-ssh-broker` `0700`（Host 账户 `ls`/`cat` 实测 `EACCES`）、socket `/usr/local/var/run/dsh-ssh-broker/broker.sock` `srw-rw---- _dsh_ssh:dsh-ssh-clients`、`/etc/dsh-ssh-broker/broker.json` `0640 root:_dsh_ssh`（8MiB×4 审计）、root 属主生产清单（不经旁路加载，摘要 `7e2c3c91`）、`system/com.dsh.ssh-broker` 以 `_dsh_ssh` 常驻（RunAtLoad+KeepAlive）。hello：协议 3、`brokerUid:502`、五环境、`sshCapability.eligible:true`、摘要一致。实操：①`mac-local`（darwin 目标，`m2@127.0.0.1`）open→helper hello `{platform:"darwin"}`→confine 生成 seatbelt 段（仅 workspace+/private/tmp 可写）→spawn→stdout `Darwin arm64`/`m2`/`501`→exit `scope:true`；②`vps-app`（`.93` Linux 目标）open `{platform:"linux"}`→bwrap→`Linux x86_64`/`dshbuild`/`1000`→`scope:true`；③`vps-xfer`→`.93` 与 `vps-xfer2`→`.87` openSftp v3→`realpath /import`+`lstat`（chroot uid 1001）。Host 侧 `attestBroker` 对生产部署**全项通过**并 `manager.open('mac-local')` 成功。负向：未知环境 `unknown-environment`、未签发票据 `confinement-ticket-invalid`、cwd 逃逸 `confinement-ticket-cwd`、`danger-full-access` 在协议 schema 边缘即拒（仅 `read-only`/`workspace-write` 可表达）。审计 `audit.jsonl` `-rw------- _dsh_ssh` 如实记录每次 ok/refused/rejected。Windows 腿：`windows`/`win32` 目标在清单解析即 `windows-target-unsupported`、`freebsd` `unsupported-platform`（整份清单失效、不触网），`tests/remote-manifest.spec.ts` **42/42**；原生 Windows 发起端按 ADR-0030 延后（无自定义 SSH/SFTP 客户端、WSL 桥或 POSIX 转发）。未覆盖：受限 profile 的 Agent-sandbox 隔离探针在 macOS 未重跑（探针为 Linux 形态）、Electron 宿主、独立第二台 macOS 目标（本腿以 loopback `m2@127.0.0.1` 走完整 ssh+helper+seatbelt 路径）。`.87` 部署清单不声明 `mac-local`，各部署内部摘要自洽。
 
-本轮仅在 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.1` 执行，不替代 Linux→Linux 专用 profile 的部署验收。[机器证据清单](../../reference/ssh-review-20261110-evidence.json)、[完整 Vitest JSON](../../reference/ssh-review-20261110-vitest.json)、[检查日志](../../reference/ssh-review-20261110-checks.txt)保留本轮原始结果（日志仅隐去临时 Web token、去除 ANSI 颜色并清理行末空白）。
+本轮仅在 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.1` 执行，不替代 Linux→Linux 专用 profile 的部署验收。[机器证据清单](../../reference/ssh-review-20261110-evidence.json)、[完整 Vitest JSON](../../reference/ssh-review-20261110-vitest.json)、[检查日志](../../reference/ssh-review-20261110-checks.txt)保留本轮原始结果（日志仅隐去临时 Web token、去除 ANSI 颜色并清理行末空白）。2026-11-11 复核在 HEAD `83b76e4` 重跑为 **1562 passed / 131 skipped / 0 failed**，见[评审报告](../../reviews/2026-11-11-model-entry-evidence-review.md)与 [`ssh-review-20261111-vitest.json`](../../reference/ssh-review-20261111-vitest.json)。
+
+以下为 2026-11-10 本轮本机记录；现行复核基线见上句与评审报告。
 
 - 全量：**1545 passed / 131 skipped / 0 failed**，106 个文件通过、8 个文件跳过；Linux live 与其他平台跳过项不计通过。
 - lint 首轮发现三个测试参数未使用；仅改为下划线参数名，lint 复查通过；受影响两文件的[增量复查](../../reference/ssh-review-20261110-lint-delta.json)为 **48 passed / 0 failed**。compat、host/client 类型、build、kernel probe（仅 Seatbelt 可用）通过。
@@ -1898,3 +1900,11 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 - Auto Review fork 静态检查通过；运行 smoke 因本机不是其专用 `0.2.1-rc.2` 目标而跳过，不计通过。GUI 宿主证据已由上方"GUI 宿主实测"段取得；macOS/Windows 矩阵证据仍缺；磁盘重载 Session、真实其他 profile、Linux unit/PrivateTmp/chroot 证据见上方实机复验段。
 - `docs:check` 通过；安装器通过 `sh -n` 与隔离的依赖解析正负例（未执行账户/unit 配置）。预检查发现 DSH 无根导出后已改用其公开 `package.json` 入口解析，原失败与修正后记录一并保留。
 - 入口探针已改为记录 Full-access 守卫拒绝并增加 raw/LSP-like/job-like 接缝观察，且已扩展磁盘重载会话与其他 profile 实测段；2026-11-11 起在 `.87` 的 Linux 实机运行，原始证据见 [`remote-entry-isolation-evidence-20261111.json`](../../reference/remote-entry-isolation-evidence-20261111.json)。其他 profile 的静态文本清点保留作清单对照，运行时隔离结论以实测段为准。
+
+## 模型入口证据外部评审（2026-11-11）
+
+**状态：证据评审通过（PASS）；模型入口仍默认关闭，等待维护者签收与逐部署开启决定。** 详细结论、逐项证据、非阻断追溯缺口与签收条件见[评审报告](../../reviews/2026-11-11-model-entry-evidence-review.md)。复核基线为 `feat/ssh-workspace` @ `83b76e4`、包 `0.1.17-ssh.1`、DSH `0.2.2-rc.1`。
+
+- 全量回归在 DSH Agent 沙箱外重跑：**1562 passed / 131 skipped / 0 failed**（1693 tests，106 files passed / 8 skipped）；原始报告为 [`ssh-review-20261111-vitest.json`](../../reference/ssh-review-20261111-vitest.json)，复核日志为 [`ssh-review-20261111-checks.txt`](../../reference/ssh-review-20261111-checks.txt)。2026-11-10 清单中的 1562 计数此前没有对应的归档报告（其引用的原始报告是 F13 前的 1545）；本次重跑补上了原始产物，11-10 报告保留为历史。
+- 复核确认：Linux 入口隔离的机器记录、F13 代码与单测、GUI 面板 RPC 与截图、磁盘重载/篡改拒绝、其他 profile 的运行时审计、macOS/Windows 矩阵均与记录一致。F13 受控探针（临时 broker，配额/吊销/审计轮转）、`remote-broker.live` 6/6、真实 `.87` unit、GUI 工具目录/停用态与面板 RPC、入口探针原始日志均已归档（见[评审报告](../../reviews/2026-11-11-model-entry-evidence-review.md#复核产物)）。macOS 原始命令转录仍缺少（R6）。**其他 profile** 已在 `.87` 上运行时核实：`remote-exp`/`stock-exp` 都只有受限预设、伪造 `danger-full-access` 均被守卫拒、无第三个 profile，`stock-exp` 已不再是 unpatched 状态；维护者签收只需确认不新增 unrestricted profile/入口。
+- 默认组合未改动：`cordis.patch.yml` 不含 `remote-tools`，不配置 `remoteEnvironments`；开启是维护者对具体部署的人工决定，不是评审通过的直接结果。

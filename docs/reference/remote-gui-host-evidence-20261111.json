@@ -10,7 +10,14 @@
     "scope": "GUI-host rendering/RPC evidence under a scripted model endpoint; the credential broker is the live .87 service reached through a forwarded socket behind a local uid-996 front-end. This record is not deployment certification and does not cover the macOS-initiator matrix item.",
     "artifacts": {
       "screenshot": "remote-gui-host-evidence-20261111.png",
-      "screenshotSha256": "9532b01b8ffc58fc34749ae113ab8c03db4950ef5107c0475924600501ea1d42"
+      "screenshotSha256": "9532b01b8ffc58fc34749ae113ab8c03db4950ef5107c0475924600501ea1d42",
+      "modelRequestLog": "remote-gui-model-requests-20261111.txt",
+      "scriptedModel": "remote-gui-scripted-model-20261111.mjs",
+      "rpcCapture": "remote-gui-rpc-20261111.json",
+      "rpcCaptureNote": "captured after temporarily retargeting the test profile to the local macOS broker (5-environment manifest, digest 7e2c3c91...); the profile was restored afterwards; see the 2026-11-11 review R3",
+      "panelFinalScreenshot": "remote-gui-panel-final-20261111.png",
+      "panelFinalScreenshotSha256": "8d449399776b79df976f5c3dd750881283d630d8c7feeeb0a55458d0c9efb0ca",
+      "panelFinalText": "remote-gui-panel-final-20261111.txt"
     }
   },
   "deployment": {

@@ -114,6 +114,6 @@
   ],
   "notes": [
     "the .87 deployment manifest intentionally does not declare mac-local; each deployment's Host<->broker digest pair stays internally consistent",
-    "model-facing profile remains BLOCKED pending maintainer sign-off on the full evidence set"
+    "the model-facing profile remains closed by default pending maintainer sign-off; the 2026-11-11 external review of the full evidence set passed"
   ]
 }
