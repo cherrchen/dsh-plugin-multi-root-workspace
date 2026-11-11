@@ -372,7 +372,9 @@ try {
       evidence.sessionReload.persistError = 'ctx.sessionPersistence is not mounted'
     } else {
       const handle = await persistence.create({
+        ...(reloadSession.header ?? {}),
         id: 'probe-reload',
+        version: reloadSession.header?.version ?? 4,
         createdAt: reloadSession.header?.createdAt ?? Date.now(),
         cwd: PRIMARY,
       })
