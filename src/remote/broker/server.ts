@@ -119,18 +119,25 @@ class RollingQuota {
   private bytes = 0
   constructor(private readonly limit: RemoteQuota, private readonly scope: string) {}
 
-  /** Charge one operation carrying `bytes` payload, refusing past the budget. */
-  admit(bytes: number, now = Date.now()): void {
+  /**
+   * Whether one operation carrying `bytes` would exhaust this window.
+   * Pruning happens here so the check and {@link record} see the same set.
+   */
+  exceeds(bytes: number, now = Date.now()): boolean {
     const cutoff = now - this.limit.windowMs
     while (this.events.length > 0 && this.events[0]!.time <= cutoff) {
       this.bytes -= this.events.shift()!.bytes
     }
-    if (this.events.length >= this.limit.maxOperations || this.bytes + bytes > this.limit.maxBytes) {
-      throw new BrokerRefusal('quota-exceeded', `the ${this.scope} budget is exhausted for the current ${Math.round(this.limit.windowMs / 1000)}s window`)
-    }
+    return this.events.length >= this.limit.maxOperations || this.bytes + bytes > this.limit.maxBytes
+  }
+
+  /** Charge one operation carrying `bytes`; callers must {@link exceeds}-check first. */
+  record(bytes: number, now = Date.now()): void {
     this.events.push({ time: now, bytes })
     this.bytes += bytes
   }
+
+  describe(): string { return `the ${this.scope} budget is exhausted for the current ${Math.round(this.limit.windowMs / 1000)}s window` }
 }
 
 /** One broker daemon instance. */
@@ -367,9 +374,18 @@ export class BrokerServer {
       if (p.op === 'write') bytes = Buffer.from(p.data as string, 'base64').length
       else if (p.op === 'read') bytes = p.length as number
     }
+    // Check every window before charging any: a refusal must not leak into
+    // the other scope's budget (an env-denied op never consumed global room).
     const now = Date.now()
-    this.globalQuota?.admit(bytes, now)
-    this.envQuotas.get(environmentId)?.admit(bytes, now)
+    const global = this.globalQuota
+    const scoped = this.envQuotas.get(environmentId)
+    const globalOver = global?.exceeds(bytes, now) === true
+    const scopedOver = scoped?.exceeds(bytes, now) === true
+    if (globalOver || scopedOver) {
+      throw new BrokerRefusal('quota-exceeded', (scopedOver ? scoped! : global!).describe())
+    }
+    global?.record(bytes, now)
+    scoped?.record(bytes, now)
   }
 
   private async managerOrThrow(): Promise<SshEnvironmentManager> {

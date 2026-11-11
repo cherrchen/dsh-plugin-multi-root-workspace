@@ -533,6 +533,31 @@ describe.skipIf(!POSIX)('the credential broker boundary', () => {
     await expect(broker.openSftp('build')).rejects.toMatchObject({ code: 'quota-exceeded' })
   })
 
+  it('never leaks a refused operation into the other scope’s budget', async () => {
+    const baseDeployment = fakeManifest({ primary: '/tmp/primary' })
+    const deployment: DeploymentManifest = {
+      ...baseDeployment,
+      quotas: { windowMs: 60_000, maxOperations: 5, maxBytes: 1_000_000 },
+      environments: baseDeployment.environments.map(environment => environment.environmentId === 'build'
+        ? { ...environment, quotas: { windowMs: 60_000, maxOperations: 2, maxBytes: 1_000_000 } }
+        : environment),
+    }
+    server = new BrokerServer(startOptions(join(base, 'quota-leak.sock'), { manager: managed(deployment) }))
+    await server.start()
+    connection = await BrokerConnection.connect(join(base, 'quota-leak.sock'), uid, 5_000)
+    const broker = new BrokerEnvironmentManager(deployment, connection)
+    const sftp = await broker.openSftp('build')
+    await sftp.client.lstat('/srv/root')
+    // Two env-denied operations: the global window must still hold only the
+    // two admitted 'build' operations, so 'device' keeps three slots.
+    await expect(sftp.client.lstat('/srv/root/src')).rejects.toMatchObject({ code: 'quota-exceeded' })
+    await expect(sftp.client.lstat('/srv/root/src')).rejects.toMatchObject({ code: 'quota-exceeded' })
+    const other = await broker.openSftp('device')
+    await expect(other.client.realpath('/')).resolves.toBe('/')
+    await expect(other.client.realpath('/')).resolves.toBe('/')
+    await expect(other.client.realpath('/')).rejects.toMatchObject({ code: 'quota-exceeded' })
+  })
+
   it('readmits requests once the window rolls', async () => {
     const baseDeployment = fakeManifest({ primary: '/tmp/primary' })
     const deployment: DeploymentManifest = {
