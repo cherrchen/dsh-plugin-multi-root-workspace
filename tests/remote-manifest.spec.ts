@@ -85,6 +85,31 @@ describe('deployment manifest', () => {
     else expect(run).toThrowError(expect.objectContaining({ code }) as Error)
   })
 
+  it('accepts aggregate quotas and a revocation list inside the attested digest', () => {
+    const quota = { windowMs: 60_000, maxOperations: 100, maxBytes: 8 * 1024 * 1024 }
+    const isolated = env({ quotas: quota })
+    const parsed = parseDeploymentManifest(text([isolated], [binding()], { quotas: quota, revocations: [{ environmentId: 'build-01', reason: 'key rotation' }] }), '/m.json')
+    expect(parsed.manifest.quotas).toEqual(quota)
+    expect(parsed.manifest.environments[0]!.quotas).toEqual(quota)
+    expect(parsed.manifest.revocations).toEqual([{ environmentId: 'build-01', reason: 'key rotation' }])
+    // A manifest without the new fields still parses; the controls default off.
+    expect(() => parseDeploymentManifest(text(), '/m.json')).not.toThrow()
+  })
+
+  it.each([
+    ['revocation of unknown env', { revocations: [{ environmentId: 'ghost-01' }] }, 'unknown-environment'],
+    ['duplicate revocation', { revocations: [{ environmentId: 'build-01' }, { environmentId: 'build-01', reason: 'again' }] }, 'duplicate-revocation'],
+    ['revocation extra key', { revocations: [{ environmentId: 'build-01', sneaky: true }] }, 'invalid-manifest'],
+    ['global quota missing bound', { quotas: { windowMs: 60_000, maxOperations: 10 } }, 'invalid-manifest'],
+    ['global quota zero ops', { quotas: { windowMs: 60_000, maxOperations: 0, maxBytes: 8 } }, 'invalid-manifest'],
+    ['env quota extra key', { environments: [env({ quotas: { windowMs: 60_000, maxOperations: 10, maxBytes: 8, sneaky: 1 } })] }, 'invalid-manifest'],
+  ])('rejects %s', (_name, over, code) => {
+    const merged = { environments: [env()], bindings: [binding()], ...over }
+    const run = () => parseDeploymentManifest(JSON.stringify({ schemaVersion: 1, configVersion: 'cfg-1', ...merged }), '/m.json')
+    if (code === null) expect(run).not.toThrow()
+    else expect(run).toThrowError(expect.objectContaining({ code }) as Error)
+  })
+
   it('accepts the destination isolation declaration only as its literal', () => {
     const isolated = env({ transfer: { maxBytes: 8, timeoutMs: 10, destinationIsolation: 'chroot-sftp' } })
     expect(() => parseDeploymentManifest(text([isolated]), '/m.json')).not.toThrow()

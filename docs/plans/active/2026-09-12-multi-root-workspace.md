@@ -1829,7 +1829,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | broker 侧故障注入（`tests/remote-broker-faults.live.e2e.ts` + `DSH_MULTI_ROOT_BROKER_LIVE`，root watcher 消费触发文件代打信号） | **2/2 实跑**：杀 `_dsh_ssh` 全部 ssh（含 ControlMaster mux）——传输绝不 `committed`，服务端验出尸体并新代次重开，客户端 `open` 观察到新代次（服务端为代次权威），目的件缺失（BrokerSftp 无 readdir，以 lstat 断言）；SIGKILL broker 守护进程——所有在途/后续操作 fail-closed、双代次表清空为 `stale`，systemd `Restart=on-failure` 拉起后必须**重新 attest** 才恢复托管（无静默回退）。实跑抓出并已修复两个生产缺陷：①`SftpClient` 未监听 `child.stdin` 的 `error`——被杀 ssh 的 EPIPE 以未处理事件**令整个 broker 崩溃**（殃及所有环境），现按传输丢失处理（`sftp.ts`）；②broker 客户端 `open` 永远复用本地缓存 env——服务端重开新代次后客户端继续回放尸体代理，现每次询问服务端并按代次更替（`broker/client.ts`）。 |
 | 目标侧真实主机钥轮换 | **实机演练**：在 .93 真实重生成 `ssh_host_ed25519_key`（旧钥备份于 `/root/hk-backup`）后，`dshhost` 与 `_dsh_ssh` 双侧 ssh 均以真实的 `REMOTE HOST IDENTIFICATION HAS CHANGED` 拒绝——身份漂移拒绝不仅由清单指纹层产生；随后更新两账户 known_hosts 与 manifest/`ssh-live.json` 指纹（注意：`vps-xfer2` 连 .87 loopback，其 `hostKey` 必须是 .87 的指纹 `swMIQ4My`，不能随 .93 一并改）→ 连通恢复、双路径冒烟通过。 |
 
-**未验证与限制：** `danger-full-access` 与这些凭据互斥，但运行时不检查其他 Session 的模式。托管进程崩溃后 unit 会重启，Host 不自动重建连接，必须重走证明（已由 broker-daemon 用例实证）；没有撤销列表、速率限制与审计轮转。SFTP 语义代理只覆盖 transfer/verifier 使用的方法，没有 readdir/extended；命令输出在退出时一次性返回（受部署上限约束）。安装器只实机验证过 Linux systemd 分支，macOS launchd 分支未执行；macOS 发起端 broker、Windows 发起端未覆盖。回滚演练覆盖注册表层（撤销→历史引用拒绝→重新准入）与单操作在飞取消（AbortSignal→`cancelled` 语义），编排层（禁新准入排队、批量取消在飞任务、对账后恢复原 profile）未演练——目前不存在该编排队列实现。Web 面板的渲染侧需要真实 GUI 宿主（本部署为 headless VPS），面板合约只经 stub Connection 与内存旅程验证。默认 patch 未加入 broker 行或任何远端工具。
+**未验证与限制：** `danger-full-access` 与这些凭据互斥，但运行时不检查其他 Session 的模式。托管进程崩溃后 unit 会重启，Host 不自动重建连接，必须重走证明（已由 broker-daemon 用例实证）。聚合配额、吊销清单与审计轮转已实现（清单 `quotas`/`revocations` + `auditMaxBytes`/`auditKeep`），窗口随 broker 重启重置、吊销只随清单生效；on-disk 配额未实现，配额/轮转/吊销的实机证据仍待补。SFTP 语义代理只覆盖 transfer/verifier 使用的方法，没有 readdir/extended；命令输出在退出时一次性返回（受部署上限约束）。安装器只实机验证过 Linux systemd 分支，macOS launchd 分支未执行；macOS 发起端 broker、Windows 发起端未覆盖。回滚演练覆盖注册表层（撤销→历史引用拒绝→重新准入）与单操作在飞取消（AbortSignal→`cancelled` 语义），编排层（禁新准入排队、批量取消在飞任务、对账后恢复原 profile）未演练——目前不存在该编排队列实现。Web 面板的渲染侧需要真实 GUI 宿主（本部署为 headless VPS），面板合约只经 stub Connection 与内存旅程验证。默认 patch 未加入 broker 行或任何远端工具。
 
 
 ## 多执行环境模型开放门槛（2026-11-09）
@@ -1868,7 +1868,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | F10 | 部署图/临时目录 | fixed | 凭据根只放密钥/config/known_hosts；ControlMaster/helper 暂存为 broker mkdtemp+PrivateTmp；unit 于 2026-11-10/11 实机验证（`ActiveState=active`/`PrivateTmp=yes`/`ProtectSystem=strict`）。 |
 | F11 | 校验器清理 | fixed | 中止/超时/完成均 terminate+有界 drain，timer/listener 必清。 |
 | F12 | 证据账本与实机 | narrowed / partially verified | 既有 Linux/GUI 断言标为历史未复核；本轮本机原始日志与 JSON 已归档（见下）。**Linux 实机已于 2026-11-10/11 复验**（见本节末"协议 3 实机复验"）：真 systemd unit/`ActiveState`/`PrivateTmp`、socket 私访探针、chroot 写者隔离均已取得现行证据；GUI 宿主与跨平台矩阵仍待补证。 |
-| F13 | 配额/审计/吊销 | prerequisite | 未实现：仅单文件/在飞上限，无聚合时间窗预算、无审计轮转、无吊销清单——模型开放硬前提，见控制面参考"模型开放的前置阻断项"。 |
+| F13 | 配额/审计/吊销 | implemented（代码）/ 实机待证 | **已实现**：清单 `environments[].quotas` 与顶层 `quotas` 滚动时间窗预算（操作数 + SFTP 载字节，`quota-exceeded`）、清单 `revocations` 显式拒绝清单（`environment-revoked`，`dispose` 放行清理）、broker 内建审计轮转（`auditMaxBytes` 默认 8MiB × `auditKeep` 默认 4，0600，拒绝外国属主/symlink 占用）；确定拒绝在 SFTP 代理透传原 code，不再误报 `SftpConnectionLost`。`remote-broker.spec`/`remote-manifest.spec` 80+80 用例覆盖。仍待：生产清单声明预算值、Linux 实机配额/轮转/吊销证据（并入部署证据项）。 |
 | F14 | 安装器与部署手册 | fixed（本轮） | 依赖解析 preflight（`createRequire` 锚定 broker 入口，核验 dsh/cordis/四 SSH peer 可解析）、可复现依赖树命令与 ssh config 清单、out-of-band 指纹验证说明、logrotate 示例；安装是部署操作，**不构成**隔离认证。 |
 | F15 | broker 自报能力 | fixed | `hello.sshCapability` 由 broker 自身状态派生，缺席/为否/畸形即拒绝。 |
 | F16 | 凭据根证明 | fixed | lstat 真实非 symlink 目录、broker 属主、恰 0700，先于 `R_OK` 探针；root Host/broker 拒绝。 |
@@ -1878,7 +1878,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | F20 | 远端 cwd 校验 | fixed | `verifyCwd` 后端方法：准入 A 经 `assertRemoteParent` 复核远端 cwd，fake 后端可省、生产后端必提供。 |
 | F21 | 终端信任边界 | fixed（文档/行为） | `DSH_PTY_SESSION_ID` 标记的 Agent 终端走会话重准入；未标记为用户终端按部署信任假设放行。 |
 
-**仍未完成的开门前置（非本轮）**：聚合配额、审计轮转、吊销清单（F13）；GUI 宿主证据（F12 及 GUI 行）；磁盘重载会话与其他 profile 隔离实测；macOS 发起端/目标验收按既有矩阵延后。
+**仍未完成的开门前置（非本轮）**：F13 三项已落地为代码，剩**生产清单预算值声明与 Linux 实机验证**（配额命中/审计轮转/吊销生效证据）；GUI 宿主证据（F12 及 GUI 行）；磁盘重载会话与其他 profile 隔离实测；macOS 发起端/目标验收按既有矩阵延后。
 
 **协议 3 实机复验（2026-11-10/11，`.87` 发起端 × `.93` 被控端，协议 3 + 目的收窄 + profile-guard 全部生效）**：打包 `0.1.17-ssh.1` 部署于 root 所有的 `/opt/dsh-broker` 依赖树；`dsh-ssh-broker.service` `ActiveState=active`/`SubState=running`、`PrivateTmp=yes`、`ProtectSystem=strict`、真私有 `/tmp/systemd-private-*`；凭据根 `0700 _dsh_ssh`、socket `0660`/`0750`、hello 协议 3（`sshCapability.eligible`，四环境）；bwrap `NoNewPrivs` 下探针：凭据根 `EACCES`、socket 连接零字节关闭。`remote-broker.live` **6/6**、`remote-broker-faults.live` **2/2**（root 侧 fault-watcher 消费触发文件，杀 `_dsh_ssh` 的 `vps-build` ssh 于 `preflight` 注入点——绝不 committed、尸体代次替换；SIGKILL daemon 后双代次转 `stale`、须重证）、`remote-ssh.live` **19/19**、`remote-journey.live` **4/4**（生产 `broker:` 路径；helper 目的 `remote_copy` 实机 `transfer-pair-not-allowed`，种子改走 `remote_bash`）。chroot 写者隔离：两个 xfer 账户各自 `/` 仅见自己的 `/import`，`/srv` 不存在，互不可见。本轮实跑另抓出并已修复四个缺陷：`UpdateHostKeys` 的 `-G` 归一化（`51d8f99`）、SFTP 会话继承 `ControlMaster auto` 破坏逐会话代次隔离（`adcf4df`）、`wellFormedReply` 把 NAME(104)/ATTRS(105) 写反致真帧误判断连（`56d972a`）、journey mount 缺 `subprocess` 注入致工具永不挂载与 faults 注入点/负载校准（`19ebb07`）。本段证据为现行有效，不再依赖协议 2 历史记录。
 

@@ -21,6 +21,11 @@ function uid(value: unknown, name: string): number {
   return value as number
 }
 
+function positive(value: unknown, name: string): number {
+  if (!Number.isInteger(value) || (value as number) < 1) throw new Error(`broker config: ${name} must be a positive integer`)
+  return value as number
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
   const configArg = args.length === 2 && args[0] === '--config' ? args[1]
@@ -43,6 +48,8 @@ async function main(): Promise<void> {
     clientUid: uid(raw.clientUid, 'clientUid'),
     ...(raw.brokerUid === undefined ? {} : { brokerUid: uid(raw.brokerUid, 'brokerUid') }),
     ...(raw.auditPath === undefined ? {} : { auditPath: string(raw.auditPath, 'auditPath') }),
+    ...(raw.auditMaxBytes === undefined ? {} : { auditMaxBytes: positive(raw.auditMaxBytes, 'auditMaxBytes') }),
+    ...(raw.auditKeep === undefined ? {} : { auditKeep: positive(raw.auditKeep, 'auditKeep') }),
     logger: {
       debug: message => console.log(`dsh-ssh-broker: ${message}`),
       warn: message => console.warn(`dsh-ssh-broker: ${message}`),

@@ -35,6 +35,18 @@ const execSchema = z.object({
   terminateGraceMs: z.number().int().min(0).max(60_000),
 }).strict()
 
+/**
+ * An aggregate time-window budget the broker enforces per window: how many
+ * environment-bound operations and how many SFTP payload bytes may be
+ * admitted inside `windowMs`. These cap aggregate use; the single-file and
+ * per-request limits stay independent.
+ */
+const quotaSchema = z.object({
+  windowMs: z.number().int().min(1_000).max(86_400_000),
+  maxOperations: z.number().int().min(1).max(1_000_000),
+  maxBytes: z.number().int().min(1).max(1024 * 1024 * 1024 * 1024),
+}).strict()
+
 const environmentSchema = z.object({
   environmentId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,62}$/),
   displayName: z.string().max(120).optional(),
@@ -51,6 +63,7 @@ const environmentSchema = z.object({
     timeoutMs: z.number().int().min(1).max(3_600_000),
     destinationIsolation: z.literal('chroot-sftp').optional(),
   }).strict().optional(),
+  quotas: quotaSchema.optional(),
   credentialIsolation: z.enum(['attested', 'unattested']),
 }).strict()
 
@@ -71,10 +84,23 @@ const manifestSchema = z.object({
   configVersion: z.string().min(1).max(128),
   environments: z.array(environmentSchema),
   bindings: z.array(bindingSchema),
+  /** A broker-global budget applied to every environment-bound request. */
+  quotas: quotaSchema.optional(),
+  /**
+   * Environments the broker refuses even while their definitions and
+   * bindings remain present: the deployer's explicit deny list, carried
+   * inside the digest-attested manifest so Host and broker agree on it.
+   */
+  revocations: z.array(z.object({
+    environmentId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,62}$/),
+    reason: z.string().min(1).max(256).optional(),
+  }).strict()).max(256).optional(),
 }).strict()
 
+export type RemoteQuota = z.infer<typeof quotaSchema>
 export type RemoteEnvironment = z.infer<typeof environmentSchema>
 export type RemoteBinding = z.infer<typeof bindingSchema>
+export type RemoteRevocation = NonNullable<DeploymentManifest['revocations']>[number]
 export type DeploymentManifest = z.infer<typeof manifestSchema>
 
 /** Deterministic serialization: sorted object keys, array order preserved. */
@@ -186,6 +212,16 @@ export function parseDeploymentManifest(text: string, manifestPath: string): { m
     const list = byPrimary.get(primary) ?? []
     list.push(binding)
     byPrimary.set(primary, list)
+  }
+  const revoked = new Set<string>()
+  for (const revocation of manifest.revocations ?? []) {
+    if (!byId.has(revocation.environmentId)) {
+      throw new ManifestError('unknown-environment', `revocation names unknown environment "${revocation.environmentId}"`)
+    }
+    if (revoked.has(revocation.environmentId)) {
+      throw new ManifestError('duplicate-revocation', `duplicate revocation for "${revocation.environmentId}"`)
+    }
+    revoked.add(revocation.environmentId)
   }
   for (const list of byPrimary.values()) {
     for (let i = 0; i < list.length; i++) {

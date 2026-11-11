@@ -222,7 +222,9 @@ class BrokerSftp {
     return this.connection.request<T>('sftp', { environmentId: this.environmentId, generation: this.generation, op, ...params }, 60_000)
       .catch((error: unknown) => {
         // `sftp-status` carries `${SSH_FX_code}:${text}`; only a well-formed
-        // one is a definite remote answer. Everything else is connection loss.
+        // one is a definite remote answer. A definite broker refusal means
+        // the operation was never attempted and reports its own code; every
+        // other failure is connection loss — `unknown`, never replayed.
         if (error instanceof BrokerError && error.code === 'sftp-status') {
           const match = /^(\d+):([\s\S]*)$/.exec(error.message)
           const status = match === null ? NaN : Number(match[1])
@@ -230,6 +232,7 @@ class BrokerSftp {
             throw new SftpStatusError(status, match[2]!)
           }
         }
+        if (isDefiniteRefusal(error)) throw error
         throw new SftpConnectionLost(error instanceof Error ? error.message : String(error))
       })
   }
@@ -256,7 +259,7 @@ class BrokerSftp {
 const DEFINITE_SPAWN_REFUSALS = new Set([
   'busy', 'generation-changed', 'spawn-failed', 'unknown-environment', 'manifest-unattested',
   'transport-not-helper', 'credential-isolation-unattested', 'host-identity-unverifiable',
-  'account-mismatch', 'host-key-mismatch', 'platform-mismatch',
+  'account-mismatch', 'host-key-mismatch', 'platform-mismatch', 'quota-exceeded', 'environment-revoked',
 ])
 
 function isDefiniteRefusal(error: unknown): boolean {
