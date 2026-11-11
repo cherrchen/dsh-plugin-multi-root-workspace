@@ -19,9 +19,10 @@ Not every project is a monorepo. A real development project is usually several i
 - **Browse additional roots in the Files tab**: the Files tab header switches between the primary root and any registered additional root; an additional root's directory renders in the same native Files view, with open-file, open-in-app, and auto-refresh behaving identically. The document preview's Folder navigator tree lands on the root containing the previewed file too — locating, expanding, and highlighting exactly as the native navigator does.
 - **Optional Auto review (off by default)**: a fork of upstream's experimental auto-review that gives the reviewer the additional directories' context — the current workspace topology, each root's access level, and live instruction files; it ships disabled and only takes effect once the `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` row is explicitly enabled in the Plugin Manager row list, taking over the official bundle while on.
 - **Additional-root Skills**: discovers `.dsh/skills` and `.agents/skills` inside additional folders, invoked through the namespaced `/alias-id:skill-name` reference and the native `skill` tool; each root has an independent toggle and editable `aliasId`, with a global setting that defaults to on.
+- **Worktree root suggestions (experimental, off by default)**: when the primary root is a Git main checkout or a linked checkout, the plugin discovers other worktrees sharing the same common Git directory and, after the user confirms, registers their source trees as `inherit` additional roots. Discovery reads only Git metadata the plugin parses itself — no Git subprocess, no automatic add or remove. A linked worktree can also explicitly authorize the main checkout root, closing the shared-metadata write gap for confined `git add` / `git commit` ([ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md), Chinese).
 - **Absent when absent**: with no additional root configured, its behavior is item-for-item identical to an uninstalled harness; every misconfiguration fails loudly instead of silently degrading.
 
-Current released version: `v0.1.16`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+Current released version: `v0.1.17`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Quick Start
 
@@ -94,8 +95,8 @@ This installs pre-built artifacts; the first install needs the `allowBuilds` add
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # or download the tgz from the GitHub Release assets, e.g.:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.16/dsh-electron-dsh-plugin-multi-root-workspace-0.1.16.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.16.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.17/dsh-electron-dsh-plugin-multi-root-workspace-0.1.17.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.17.tgz
 ```
 
 Also pre-built, handy for air-gapped or offline delivery; the first install needs the same `allowBuilds` addition.
@@ -114,10 +115,10 @@ allowBuilds:
   koffi: true
 ```
 
-Pinning a version (e.g. `#v0.1.16`) is recommended so a later push cannot silently change what actually runs:
+Pinning a version (e.g. `#v0.1.17`) is recommended so a later push cannot silently change what actually runs:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.16
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.17
 ```
 
 ### Install from a local clone

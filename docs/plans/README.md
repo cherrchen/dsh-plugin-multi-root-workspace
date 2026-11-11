@@ -38,7 +38,7 @@ completed/
 
 active：
 
-- [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) — P1–P7 实施 worktree 附加根建议、实验性默认关闭的插件开关与手动清理（B），P8–P10 实施 linked worktree 的主 checkout 授权（A）；第十九次修订加入单/多候选提示分流。决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)，进度见路线账本。
+- [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) — P1–P7 实施 worktree 附加根建议、实验性默认关闭的插件开关与手动清理（B），P8–P10 实施 linked worktree 的主 checkout 授权（A）；第十九次修订加入单/多候选提示分流。决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)，进度见路线账本；随 `v0.1.17` 发版。
 
 - [2026-11-08-workspace-menu-folders-dialog.md](./active/2026-11-08-workspace-menu-folders-dialog.md) — 工作区 `...` 菜单新增「管理工作区目录…」：复用 footer 对话框的 controller、`workspace` context-menu 贡献（order 150）、先切换/复用目标工作区 blank 再打开并固定 session；`RootSwitcher` 与上游 `WorkspaceBrowser` 零改动（决策见 [ADR-0038](../decisions/ADR-0038-workspace-menu-folders-dialog.md)）。
 
@@ -48,12 +48,12 @@ active：
 
 - [2026-10-16-branch-security-review-and-hardlink-isolation.md](./active/2026-10-16-branch-security-review-and-hardlink-isolation.md) — 分支安全审查证据与拟议修复：负授权、Windows 祖先改名、pnpm 硬链接隔离；Phase A（R2/R3 负授权）、B（R1 祖先钉扎）、C1（全根硬链接预检）与 C2（`/workspace-folders isolate-profiles` 命令、迁移与冒烟）已实施并验收，随 `v0.1.7` 发版。
 
-- [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace 开发路径与**进度总账**：MVP `v0.1.0` 的 M1/M2/M3 已实施并发版；`v0.1.1` 硬化批次 H1–H4 已实施并随 `v0.1.1` 发版；`v0.1.2` 支持矩阵提升已实施并随 `v0.1.2` 发版；`v0.1.3` 支持矩阵提升（`0.1.7-alpha.2` / `0.1.7-rc.1`）已实施并随 `v0.1.3` 发版；`v0.1.4` 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版；`v0.1.5`（DSH `0.2.0-rc.1` / `.2`）已发布；`v0.1.6`（DSH `0.2.1-alpha.1` / `.2`、B1–B3 与动态 cwd）已发布；`v0.1.7`（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发布；`v0.1.8`（DSH 0.2.0 `permissionPresets/catalog` 修复）已发布；`v0.1.9`（Auto Review 主包内置可选行）已发布；`v0.1.10`（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发布；`v0.1.11`（DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 兼容提升、Issue #24 Registry／Skills 刷新循环 hot-fix）已发布；`v0.1.12`（多 Host 共享 Registry 权威、逐操作授权与 DSH `0.2.1-rc.5`）已发布；`v0.1.13`（F4 后台恢复与 Files 页签根选择修复）随该版本发版；`v0.1.14`（Issue #30 依赖单例修复与 koffi 宿主锚定、DSH `0.2.2-alpha.3`/`0.2.2-rc.1` 兼容提升、插件详情页设置卡 Auto Review 开关与富文本详情）随该版本发版；`v0.1.15`（`/add-dirs` 别名、根授权安全修复与 OPS 默认关闭的实验性兜底及开启风险确认）随该版本发版；`v0.1.16`（准入外受限 spawn 修复、面板会话存在性细分与预览页 Folder 导航树附加根接管）随该版本发版。
+- [2026-09-12-multi-root-workspace.md](./active/2026-09-12-multi-root-workspace.md) — Multi-root Workspace 开发路径与**进度总账**：MVP `v0.1.0` 的 M1/M2/M3 已实施并发版；`v0.1.1` 硬化批次 H1–H4 已实施并随 `v0.1.1` 发版；`v0.1.2` 支持矩阵提升已实施并随 `v0.1.2` 发版；`v0.1.3` 支持矩阵提升（`0.1.7-alpha.2` / `0.1.7-rc.1`）已实施并随 `v0.1.3` 发版；`v0.1.4` 支持矩阵提升（`0.1.7-rc.2`）已实施并随 `v0.1.4` 发版；`v0.1.5`（DSH `0.2.0-rc.1` / `.2`）已发布；`v0.1.6`（DSH `0.2.1-alpha.1` / `.2`、B1–B3 与动态 cwd）已发布；`v0.1.7`（第二期 B 系列、Files 页签附加根浏览、DSH `0.2.1-alpha.3`–`0.2.1-rc.2`）已发布；`v0.1.8`（DSH 0.2.0 `permissionPresets/catalog` 修复）已发布；`v0.1.9`（Auto Review 主包内置可选行）已发布；`v0.1.10`（附属根 Skills、Workspace Folders 面板对齐与 DSH `0.2.1-rc.3`）已发布；`v0.1.11`（DSH `0.2.1-rc.4` 与 `0.2.2-alpha.2` 兼容提升、Issue #24 Registry／Skills 刷新循环 hot-fix）已发布；`v0.1.12`（多 Host 共享 Registry 权威、逐操作授权与 DSH `0.2.1-rc.5`）已发布；`v0.1.13`（F4 后台恢复与 Files 页签根选择修复）随该版本发版；`v0.1.14`（Issue #30 依赖单例修复与 koffi 宿主锚定、DSH `0.2.2-alpha.3`/`0.2.2-rc.1` 兼容提升、插件详情页设置卡 Auto Review 开关与富文本详情）随该版本发版；`v0.1.15`（`/add-dirs` 别名、根授权安全修复与 OPS 默认关闭的实验性兜底及开启风险确认）随该版本发版；`v0.1.16`（准入外受限 spawn 修复、面板会话存在性细分与预览页 Folder 导航树附加根接管）随该版本发版；`v0.1.17`（Worktree 附加根建议与 linked worktree 主 checkout 授权、新会话 Hero 与工作区菜单 Workspace Folders 入口、已批准的一次性 Full-access 提权）随该版本发版。
 
 
 completed：
 
-- [2026-11-08-workspace-folders-hero-entry.md](./completed/2026-11-08-workspace-folders-hero-entry.md) — 新会话 Hero 行的 Workspace Folders 增量入口：`conversation.hero.options` 注册、与相邻选择器同几何但无 chevron、`≤560px` 视口图标降级；侧栏入口保留。已完成（2026-11-08）并通过完整门禁，随下一个版本发布；决策见 [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)。
+- [2026-11-08-workspace-folders-hero-entry.md](./completed/2026-11-08-workspace-folders-hero-entry.md) — 新会话 Hero 行的 Workspace Folders 增量入口：`conversation.hero.options` 注册、与相邻选择器同几何但无 chevron、`≤560px` 视口图标降级；侧栏入口保留。已完成（2026-11-08）并通过完整门禁，随 `v0.1.17` 发版；决策见 [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)。
 
 - [2026-11-05-root-authorization-security-fixes.md](./completed/2026-11-05-root-authorization-security-fixes.md) — 根授权安全修复限定范围完成：BYP-02、MRW-01、受保护目录登记边界与共享模式必填；排除项保留，实施证据和发布状态见[进度总账](./active/2026-09-12-multi-root-workspace.md#进度总账)。
 

@@ -1,6 +1,6 @@
 # 工作区菜单入口与 Workspace Folders 对话框复用（实施计划）
 
-> **状态：已实施并在隔离 Web 宿主完成核心场景目检（`feat/workspace-menu-ui`，2026-11-08），决策见 [ADR-0038](../../decisions/ADR-0038-workspace-menu-folders-dialog.md)。** Phase 0–3 与文档/测试/门禁已完成；等待维护者最终目检。本计划只覆盖"工作区 `...` 菜单新增管理工作区目录入口"这一件事；`RootSwitcher`、上游 `WorkspaceBrowser`、对话框内部逻辑均不在改动范围内。
+> **状态：已实施并在隔离 Web 宿主完成核心场景目检（`feat/workspace-menu-ui`，2026-11-08），决策见 [ADR-0038](../../decisions/ADR-0038-workspace-menu-folders-dialog.md)。** Phase 0–3 与文档/测试/门禁已完成，随 `v0.1.17` 发版。本计划只覆盖"工作区 `...` 菜单新增管理工作区目录入口"这一件事；`RootSwitcher`、上游 `WorkspaceBrowser`、对话框内部逻辑均不在改动范围内。
 
 ## Goal
 

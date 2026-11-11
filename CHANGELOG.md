@@ -8,10 +8,12 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
-## [Unreleased]
+## [0.1.17] - 2026-11-11
 
 ### Added
 
+- **Worktree 附加根建议（实验性，默认关闭）**：当主根本身是 Git main checkout 或 linked worktree 时，插件会发现与该仓库共享同一 common git dir 的其他 worktree——包括会话开始前就存在、由终端、IDE、forge 或其他 DSH 实例创建的——并在用户确认后把其源码树登记为 `inherit` 附加根。发现只读取插件自己打开并解析的 Git 元数据（`.git` 指针、admin、common 的 config/HEAD/index 与完整祖先链），**不启动任何 Git 子进程、不解析 commit 对象，也永不自动添加或删除**。可见候选恰好一个时显示确认对话框，两个及以上时显示可勾选列表并一次确认多个目录；登记是 workspace 级的，其他读写会话也会获得该目录的写权限，对话框会明确披露。worktree 被删除或移动后，面板显示徽标并只提供显式清理（要求登记路径确认缺失且 `rootId + path + addedAt` 仍匹配），缺失根继续占用 `maxAdditionalRoots`；submodule、bare 派生、`--separate-git-dir`、`worktreeConfig`、仓库格式版本 1 与 split/sparse index 等一律不提示。开关位于插件详情卡（与附属根 Skills 同卡、独立生效），默认关闭，关闭后已有登记根仍按普通根管理（[ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+- **Linked worktree 的主 checkout 授权（A）**：当 session 的 workspace 本身是 linked worktree 且当前为 `workspace-write` 时，插件还会提示把该仓库的主 checkout 根 `<main>`（共享 common 的父目录）登记为 `inherit` 附加根，补上受限会话执行 `git add` / `git commit` 的共享 Git 元数据写入缺口；对话框会显示实际路径与范围（主 checkout 源码树、共享 config/hooks/refs/objects 与所有 worktree 的 admin 数据）。提示只在完整快照证明 common 身份、双向指针、admin HEAD、主根身份与 `<main>/.git` 均一致时出现，等待确认期间任何变化都会以 `worktree/prompt-stale` 使该项失效。默认 pool 因 `primary-overlap` 不提供 A；`read-only` / `danger-full-access` 与关闭开关后不提示。A 根不进入 worktree 清理映射，撤回使用普通 Remove（[ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
 - **新会话页工作区行的 Workspace Folders 入口**：DSH `0.2.1-alpha.3` 及更新的运行时上，blank session 工作区行右端（`conversation.hero.options`）新增 `工作区目录 / Folders` 入口。它与相邻的工作区/模式选择器同高、同字号、同 hover/展开底色，单击打开与侧栏入口同一个对话框（同一套 RPC、错误码与文案）；因为打开的是对话框而不是下拉菜单，它**没有 chevron**，图标使用 workspace tree（旧运行时回退 folder 字形），并按右对齐行的顺序把文字放在左、icon 放在右；右侧再补 4px，与工作区选择器的 20px 左内边距对称（图标/文字 ink 同为 28px）。该入口不 grow、不绝对定位，可与同槽其他条目并存。窗口宽度 `≤560px` 时只显示 28×28 图标，名称保留在 `aria-label` 与悬停提示中；`≥561px` 恢复文字并允许 label 省略号收缩。首条消息发出后 hero 行随整行消失，侧栏底部 `Folders` 入口与其行为完全不变；旧运行时没有该槽，注册静默不触发，行为与今天一致（[ADR-0037](./docs/decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)）。
 - **工作区 `...` 菜单的「管理工作区目录…」入口**：工作区行菜单与右键菜单在「重命名」与「在 Finder 中显示」之间新增一项，图标使用 workspace tree。当前会话已属于该工作区时直接打开 Workspace Folders 对话框；否则先经上游 `openWorkspace` 打开/复用该工作区的空白页，确认它成为当前会话后，再以该会话打开对话框。导航失败、被后续切换取代或目标没有成为当前会话时不弹窗；宿主通道、工作区记录、`uiWorkspace.openWorkspace` 或 footer 对话框任一缺失时该项置灰，`contextMenus` 缺席时整个入口不存在。菜单复用 footer 的现有对话框（经 `apply()` 作用域的 controller），不新增对话框实例；Files 页签的根选择器与服务端管理行为均不变。入口以 `contextMenu.icon` 槽位为门：该槽位与 `contextMenus`/`workspace` target 自 DSH `0.2.2-alpha.3` 起才存在，更早的受支持版本上本次 UI 修改完全不出现（[ADR-0038](./docs/decisions/ADR-0038-workspace-menu-folders-dialog.md)）。
 
@@ -269,7 +271,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.16...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.17...HEAD
+[0.1.17]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.13...v0.1.14

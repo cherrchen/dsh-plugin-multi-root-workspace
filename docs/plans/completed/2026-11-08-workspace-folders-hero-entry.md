@@ -1,6 +1,6 @@
 # Workspace Folders Hero 入口（`conversation.hero.options`）
 
-> 状态：已完成（2026-11-08），ADR-0037 已定案；随下一个版本发布（CHANGELOG `[Unreleased]`）。
+> 状态：已完成（2026-11-08），ADR-0037 已定案；随 `v0.1.17` 发版。
 
 ## Goal
 

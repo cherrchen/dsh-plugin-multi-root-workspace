@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P1–P10 与第十九次修订变更全部实施完成；两轮审计修复与 Devin Review 两条修复已实施；macOS 原生验证通过，Linux / Windows 待验证；未发版**。先完成 B（P1–P7），再实施 A（P8–P10）；第十九次修订把 A 的目标改为主 checkout、开关改为实验性默认关闭，并加入单/多候选提示分流。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P1–P10 与第十九次修订变更全部实施完成；两轮审计修复与 Devin Review 两条修复已实施；macOS 原生验证与 PR #48 的 Linux / Windows CI 均通过；随 `v0.1.17` 发版**。先完成 B（P1–P7），再实施 A（P8–P10）；第十九次修订把 A 的目标改为主 checkout、开关改为实验性默认关闭，并加入单/多候选提示分流。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
