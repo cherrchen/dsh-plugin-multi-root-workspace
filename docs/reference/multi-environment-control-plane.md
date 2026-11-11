@@ -187,7 +187,7 @@ Host <env-alias>
 
 1. 将同一构建的 broker 入口、共享 JS chunk、Node 及其解析到的依赖安装到 Host 账号和 Agent 都不可写的位置。四个 SSH 可选包须在对应 DSH 宿主的解析树中与 DSH 精确同版。先由 root 写好完整部署清单，供 Host 与 broker 共同读取。
 2. 用 tarball 中的 `scripts/ssh-broker/install.sh` 创建专用账户、凭据根和服务。Linux 默认的 `/etc/dsh-ssh-broker` 属 root，Host 经客户端组可遍历目录和读取清单，`broker.json` 只开放给 root 和 broker 组。在连接前为 broker 配置受信的 OpenSSH 别名、固定主机钥和远端账户。
-3. 部署层禁止该 Host UID 下的 Agent 获取无沙箱执行，包括其他 profile、会话、终端与权限提升。用部署实际提供的受限入口验证凭据与 socket 拒绝、用正常 Host 验证正对照。仅在这些部署事实成立时配置 `fullAccessDisabled: true` 与 `confinementProbe.verified: true`。布尔值用于记录证据，无法改变 DSH 会话权限。仓库内 `scripts/probe-remote-entry-isolation.mjs` 与 `scripts/ssh-broker/probe/` 是该步的参考实现：在容器内复刻真实启用序列（install.sh、专用 profile、`dsh plugin add`、受限预设表），对 shell 公开执行器、`DSH_PTY_SESSION_ID` 标记的 Agent PTY 与 PTC `run` 三个入口在只读与工作区可写两种模式下逐一验证凭据根 `EACCES` 与 socket 拒绝，并记录伪造 `sandbox/mode: danger-full-access` 会话收到 broker hello 的互斥对照——原始结果样例见 `docs/reference/remote-entry-isolation-evidence.json`。
+3. 部署层禁止该 Host UID 下的 Agent 获取无沙箱执行，包括其他 profile、会话、终端与权限提升。用部署实际提供的受限入口验证凭据与 socket 拒绝、用正常 Host 验证正对照。仅在这些部署事实成立时配置 `fullAccessDisabled: true` 与 `confinementProbe.verified: true`。布尔值用于记录证据，无法改变 DSH 会话权限。仓库内 `scripts/probe-remote-entry-isolation.mjs` 与 `scripts/ssh-broker/probe/` 是该步的参考实现：在容器内复刻真实启用序列（install.sh、专用 profile、`dsh plugin add`、受限预设表），对 shell 公开执行器、`DSH_PTY_SESSION_ID` 标记的 Agent PTY 与 PTC `run` 三个入口在只读与工作区可写两种模式下逐一验证凭据根 `EACCES` 与 socket 拒绝，记录伪造 `sandbox/mode: danger-full-access` 的守卫拒绝，并审计磁盘重载会话（持久化工件重放仍受限、篡改声明被 `remote-profile-full-access` 拒）与同 UID 第二 profile（受限进程同样被拒、可解析 `danger-full-access` 的 profile 不得承载 Agent 入口）——Linux 实机原始结果见 `docs/reference/remote-entry-isolation-evidence-20261111.json`；早期协议 2 容器样例 `remote-entry-isolation-evidence.json` 仅作历史反例。
 4. 在专用 profile 的 `cordis.patch.yml` 加入以下配置。broker 行通过证明后才可登记端点，并同时注册 `remote_copy` 和 `remote_bash`。只有 Registry 配置时，面板可显示清单，登记返回 `endpoint-unverifiable`。
 
 ```yaml
@@ -230,7 +230,7 @@ Host <env-alias>
 
 ### 停用与回滚
 
-现行入口探针会记录 Full-access 解析的守卫拒绝，并观察 raw/LSP-like/job-like spawn 接缝；不会为了反向对照而启动不受限命令。它的本机语法与观察函数已检查，但本轮没有 Linux 实跑结果。其他 profile 仍只做静态文本清点，不是其实际权限或隔离的证明；旧协议 2 JSON 仅保留作历史反例。
+现行入口探针记录 Full-access 解析的守卫拒绝，观察 raw/LSP-like/job-like spawn 接缝，并实机审计磁盘重载会话与第二 profile；不会为了反向对照而启动不受限命令。2026-11-11 起有 Linux 实机结果（`.87`，`linux/x64`，DSH `0.2.2-rc.1`）：磁盘重放的会话仍受限、篡改磁盘的 `danger-full-access` 声明被守卫拒、同 UID 第二 profile 的受限进程同样被 socket 拒而其预设表可含 `danger-full-access`——证明每个承载 Agent 入口的 profile 都必须受限（原始记录 `docs/reference/remote-entry-isolation-evidence-20261111.json`）。静态文本清点仅作清单对照；旧协议 2 JSON 仅保留作历史反例。
 
 1. 停止把新任务派到该 profile，卸载可选工具行。该行拒绝新调用，解除端点校验器，取消并等待已进入的工具调用，然后关闭 broker 连接。已提交的文件应保留。记录 `unknown` 和暂存残留，按操作 ID 对账，确认前禁止重放。
 2. 移除 Registry 行的 `remoteEnvironments` 配置，重启原 profile。若该部署不再提供远端操作，停止 broker 服务。保留本地 v1 记录及独立的远端存储域供核对。
