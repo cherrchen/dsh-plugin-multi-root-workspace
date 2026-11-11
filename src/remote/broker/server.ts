@@ -14,10 +14,10 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/remote-broker/server
  */
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, chmodSync, chownSync, lstatSync, mkdirSync } from 'node:fs'
+import { appendFileSync, chmodSync, chownSync, lstatSync, mkdirSync, renameSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { listenNative, type Channel, type Listener } from '../../authority/native.ts'
-import { loadDeploymentManifest, manifestDigest, type DeploymentManifest } from '../manifest.ts'
+import { loadDeploymentManifest, manifestDigest, type DeploymentManifest, type RemoteQuota } from '../manifest.ts'
 import { SshEnvironmentManager, type SftpEnvironment, type SshEnvironment } from '../ssh-environment.ts'
 import { SftpConnectionLost, SftpStatusError } from '../sftp.ts'
 import {
@@ -50,8 +50,12 @@ export interface BrokerServerOptions {
   readonly clientUid: number
   /** The broker account; defaults to this process's uid and must equal it. */
   readonly brokerUid?: number
-  /** Optional append-only audit file (0600, broker-owned). */
+  /** Optional append-only audit file (0600, broker-owned). Rotated at `auditMaxBytes`, keeping `auditKeep` rotated files. */
   readonly auditPath?: string
+  /** Audit rotation size budget; defaults to 8 MiB. */
+  readonly auditMaxBytes?: number
+  /** How many rotated audit files to keep; defaults to 4. */
+  readonly auditKeep?: number
   readonly logger?: { debug(message: string): void; warn(message: string): void }
   /** TEST-ONLY: allow starting as the client uid (protocol tests only). */
   readonly allowSameUidForTesting?: boolean
@@ -101,6 +105,33 @@ interface ConfinementTicket {
 
 const TICKET_TTL_MS = 30_000
 const MAX_TICKETS = 256
+const DEFAULT_AUDIT_MAX_BYTES = 8 * 1024 * 1024
+const DEFAULT_AUDIT_KEEP = 4
+
+/**
+ * One rolling time-window budget. Events are a chronological queue of
+ * `{time, bytes}` records; anything older than `windowMs` is pruned before
+ * admission, so a client can never hold the window open by timing its
+ * requests. Bounds come from the manifest — never from client input.
+ */
+class RollingQuota {
+  private readonly events: { time: number; bytes: number }[] = []
+  private bytes = 0
+  constructor(private readonly limit: RemoteQuota, private readonly scope: string) {}
+
+  /** Charge one operation carrying `bytes` payload, refusing past the budget. */
+  admit(bytes: number, now = Date.now()): void {
+    const cutoff = now - this.limit.windowMs
+    while (this.events.length > 0 && this.events[0]!.time <= cutoff) {
+      this.bytes -= this.events.shift()!.bytes
+    }
+    if (this.events.length >= this.limit.maxOperations || this.bytes + bytes > this.limit.maxBytes) {
+      throw new BrokerRefusal('quota-exceeded', `the ${this.scope} budget is exhausted for the current ${Math.round(this.limit.windowMs / 1000)}s window`)
+    }
+    this.events.push({ time: now, bytes })
+    this.bytes += bytes
+  }
+}
 
 /** One broker daemon instance. */
 export class BrokerServer {
@@ -113,6 +144,13 @@ export class BrokerServer {
   private readonly connections = new Set<ConnectionState>()
   private nextConnection = 1
   private stopped = false
+  /** The deployer's deny list; every environment-bound request is refused. */
+  private readonly revoked = new Set<string>()
+  /** The manifest's broker-global window, if declared. */
+  private globalQuota: RollingQuota | undefined
+  /** Per-environment windows, built from the manifest at start. */
+  private readonly envQuotas = new Map<string, RollingQuota>()
+  private auditSize = 0
 
   constructor(private readonly options: BrokerServerOptions) {}
 
@@ -144,6 +182,12 @@ export class BrokerServer {
       })
     }
     this.deploymentDigest = manifestDigest(this.manifest)
+    for (const revocation of this.manifest.revocations ?? []) this.revoked.add(revocation.environmentId)
+    if (this.manifest.quotas !== undefined) this.globalQuota = new RollingQuota(this.manifest.quotas, 'broker-global')
+    for (const environment of this.manifest.environments) {
+      if (environment.quotas !== undefined) this.envQuotas.set(environment.environmentId, new RollingQuota(environment.quotas, `environment "${environment.environmentId}"`))
+    }
+    this.prepareAuditFile()
     this.prepareSocketDirectory()
     this.listener = await listenNative(this.options.socketPath, channel => this.accept(channel), {
       expectedUid: this.options.clientUid,
@@ -236,20 +280,22 @@ export class BrokerServer {
       return
     }
     state.inFlight++
+    const environmentId = (request.params as { environmentId?: string }).environmentId
     void this.dispatch(state, request.method, request.params).then(value => {
       if (!state.closed) writeBrokerLine(channel, { id: request.id, ok: true, value })
-      this.audit(state, request.method, 'ok')
+      this.audit(state, request.method, 'ok', environmentId)
     }, error => {
       const refusal = error instanceof BrokerRefusal ? error
         : new BrokerRefusal(codeOf(error), error instanceof Error ? error.message : String(error))
       if (!state.closed) writeBrokerLine(channel, { id: request.id, ok: false, code: refusal.code, message: refusal.message })
-      this.audit(state, request.method, `refused:${refusal.code}`)
+      this.audit(state, request.method, `refused:${refusal.code}`, environmentId)
     }).finally(() => { state.inFlight-- })
   }
 
   private async dispatch(state: ConnectionState, method: BrokerMethod, params: unknown): Promise<unknown> {
     const p = params as Record<string, unknown>
     const environmentId = p.environmentId as string
+    this.admit(method, p)
     switch (method) {
       case 'openSftp': {
         const opened = await this.openSftp(state, environmentId)
@@ -301,6 +347,29 @@ export class BrokerServer {
         return {}
       }
     }
+  }
+
+  /**
+   * The deployment's admission gate: revocations deny the environment
+   * outright; the manifest's rolling windows then charge every
+   * environment-bound request one operation plus its SFTP payload bytes.
+   * `dispose` (and the SFTP `dispose` op) stay admissible — cleanup must be
+   * able to run even on a revoked environment.
+   */
+  private admit(method: BrokerMethod, p: Record<string, unknown>): void {
+    const environmentId = p.environmentId as string | undefined
+    if (environmentId === undefined) return
+    if (method !== 'dispose' && !(method === 'sftp' && p.op === 'dispose') && this.revoked.has(environmentId)) {
+      throw new BrokerRefusal('environment-revoked', `the deployment revokes environment "${environmentId}"`)
+    }
+    let bytes = 0
+    if (method === 'sftp') {
+      if (p.op === 'write') bytes = Buffer.from(p.data as string, 'base64').length
+      else if (p.op === 'read') bytes = p.length as number
+    }
+    const now = Date.now()
+    this.globalQuota?.admit(bytes, now)
+    this.envQuotas.get(environmentId)?.admit(bytes, now)
   }
 
   private async managerOrThrow(): Promise<SshEnvironmentManager> {
@@ -479,10 +548,52 @@ export class BrokerServer {
     state.tickets.clear()
   }
 
-  private audit(state: ConnectionState, method: BrokerMethod | 'protocol', outcome: string): void {
+  /**
+   * Validate the audit sink before serving: if a file already sits at
+   * `auditPath` it must be the broker's own regular file (a planted symlink
+   * would point `appendFileSync` wherever the broker can write), and its
+   * current size seeds the rotation budget.
+   */
+  private prepareAuditFile(): void {
     if (this.options.auditPath === undefined) return
+    let entry
+    try { entry = lstatSync(this.options.auditPath) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') { this.auditSize = 0; return }
+      throw new BrokerRefusal('unsafe-audit-file', `the audit file is unreadable: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (!entry.isFile() || entry.isSymbolicLink() || entry.uid !== process.getuid!()) {
+      throw new BrokerRefusal('unsafe-audit-file', `${this.options.auditPath} must be a real file owned by the broker account`)
+    }
+    if ((entry.mode & 0o077) !== 0) chmodSync(this.options.auditPath, 0o600)
+    this.auditSize = entry.size
+  }
+
+  /** Rotate `audit` → `audit.1`, shifting `audit.N` → `audit.N+1` and dropping the oldest. */
+  private rotateAudit(path: string, keep: number): void {
+    for (let index = keep; index > 1; index--) {
+      try { renameSync(`${path}.${index - 1}`, `${path}.${index}`) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+    }
+    try { renameSync(path, `${path}.1`) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    this.auditSize = 0
+  }
+
+  private audit(state: ConnectionState, method: BrokerMethod | 'protocol', outcome: string, environmentId?: string): void {
+    if (this.options.auditPath === undefined) return
+    const line = JSON.stringify({
+      time: new Date().toISOString(), connection: state.id, method,
+      ...(environmentId === undefined ? {} : { environment: environmentId }),
+      outcome,
+    }) + '\n'
+    const bytes = Buffer.byteLength(line)
+    const max = this.options.auditMaxBytes ?? DEFAULT_AUDIT_MAX_BYTES
     try {
-      appendFileSync(this.options.auditPath, JSON.stringify({ time: new Date().toISOString(), connection: state.id, method, outcome }) + '\n', { mode: 0o600 })
+      if (this.auditSize + bytes > max) this.rotateAudit(this.options.auditPath, this.options.auditKeep ?? DEFAULT_AUDIT_KEEP)
+      appendFileSync(this.options.auditPath, line, { mode: 0o600 })
+      this.auditSize += bytes
     } catch (error) {
       this.options.logger?.warn(`dsh-ssh-broker: audit write failed: ${error instanceof Error ? error.message : String(error)}`)
     }

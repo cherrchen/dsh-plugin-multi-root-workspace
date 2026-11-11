@@ -66,6 +66,8 @@ Host 启动时用 `node:fs` 直接读取（不经 `ctx.fs` 或工作区读路径
 - `exec` 可选且仅限 `"helper"`：`{shell(1..8, 首项绝对路径), env(≤64 键), maxTimeoutMs(1..3_600_000), stdoutLimit/stderrLimit(1..16MiB), terminateGraceMs(0..60000)}`；缺席即该环境无执行能力。
 - `credentialIsolation: "attested" | "unattested"` 必填：ADR-0032 的部署者声明——Agent 是否确实无法触及连接凭据/套接字/配置/ssh 二进制；`"unattested"` 的连接仅在测试选项 `allowUnattestedForTesting` 下建立，生产路径不接受（既有 VPS 记录即 unattested：本地同 UID 持有私钥——历史性记录，未经本次评审复核）。
 - `transfer` 可再声明 `destinationIsolation: "chroot-sftp"`：带 `import` 配对且 `actions` 含 `write` 的绑定，其模型可见目的端必须是 `transport: "sftp"` 且环境 `transfer` 声明该字面量；同时，任何共享该环境 `namespace`+`account` 的另一环境若带 helper 传输或 `exec`，证明即拒绝——复制目的账户必须是独立的 chroot SFTP-only 账户，helper 环境不能作复制目的。受 root 保护的清单是部署者声明，真实的 chroot/属主隔离仍须部署证据佐证。
+- `quotas` 可选（环境与顶层各一份）：`{windowMs(1_000..86_400_000), maxOperations(1..1_000_000), maxBytes(1..1TiB)}`——broker 端按滚动时间窗对**每个**环境绑定请求计 1 次操作、对 `sftp` 的 `read`/`write` 计费载字节；顶层 `quotas` 为 broker 全局窗口，与每环境窗口同时扣减，任一耗尽即 `quota-exceeded`。窗口在 broker 进程内、随重启重置；缺席即不启用该预算，单文件/单请求/在飞上限保持不变。
+- `revocations` 可选：`[{environmentId, reason?}]`（≤256 条）——部署者的显式拒绝清单，随清单摘要一起被 Host 与 broker 双方校验；被吊销环境的一切环境绑定方法（`open`/`openSftp`/`sftp` 非 `dispose` 操作/`confine`/`spawn`）拒绝 `environment-revoked`，仅 `dispose` 放行以便清理。引用未知环境为 `unknown-environment`，重复条目为 `duplicate-revocation`。
 - `path` 为规范化 POSIX 绝对路径（无 `.`/`..`、`//`、尾斜杠、NUL，≤4096 字节）。
 - 拒绝重复 `environmentId`、引用未知环境、同一 primary 下重复 `(environmentId, rootId)`；同一 primary 下共享 `namespace` 的两条绑定路径相等或嵌套为 `alias-conflict`。
 - 清单摘要为解析结果按键排序后 JSON 的 SHA-256；绑定摘要覆盖该绑定及其环境（host key、账号、Helper、路径等）。绑定按 `primaryKey(primary)` 归属，跨项目复用 rootId 无效。
@@ -242,6 +244,10 @@ Host <env-alias>
 
 托管部署的 `stdoutLimit` 与 `stderrLimit` 各至多 128 KiB。broker 为每个流保留最多两倍声明上限，Host 截断结果并报告相应标记。更大的预算在证明阶段返回 `broker-output-limit`。
 
+**准入（配额与吊销）。** 每个环境绑定请求先过部署级准入门，再做方法分派：清单 `revocations` 中被吊销的环境除 `dispose`/SFTP `dispose` 外一律拒绝 `environment-revoked`；随后 `RollingQuota` 对该请求计一次操作并预扣 `sftp read`/`write` 的载字节，顶层（broker 全局）与环境级滚动窗口各扣一次，任一窗口耗尽即 `quota-exceeded`——拒绝先于任何远端动作，被拒请求不扣预算，窗口按到达时间滚动恢复。配额与吊销都是 broker 进程内判定、只随清单重启更新；确定拒绝（`quota-exceeded`/`environment-revoked`/`generation-changed` 等）在 Host 侧按确定失败上报，`SftpConnectionLost` 仍只保留给真失联的 `unknown`+reconcileId 语义。
+
+**审计。** `auditPath` 开启时每个请求追加一行 `{time, connection, method, environment?, outcome}`（0600、broker 属主；启动时拒绝外国属主或 symlink 的占用文件）。broker 内建轮转：追加会使文件超过 `auditMaxBytes`（默认 8 MiB，`broker.json` 可调）时先把现有文件滚为 `audit.jsonl.1..auditKeep`（默认留 4，链式移位、最旧丢弃），再向新文件追加——`appendFileSync` 每次写重新 open，与外部 logrotate 也兼容。审计只记方法、环境与结果，不记负载内容。
+
 **认证。** 托管进程对每条连接做内核 peer 认证（`SO_PEERCRED`/`LOCAL_PEERTOKEN`，Linux 上 `SO_PEERPIDFD` 钉住对端）：UID 必须等于配置的 Host UID，且对端不得处于沙箱或 `NoNewPrivs`（Agent 的命令正是这种对端）。Host 侧连接只校验托管进程的 UID（`allowRestricted`），因为托管进程的 confinement 是部署 unit 的事。`hello` 只在认证通道上返回协议版本、`brokerUid`、环境 ID 列表和清单摘要。摘要仅用于 Host 与 broker 的配置比对，不进入模型投影。
 
 **Host 适配。** `src/remote/broker/client.ts` 的 `BrokerEnvironmentManager` 实现与官方 manager 相同的结构面（`deployment`、`open`/`openSftp`、代次、`markStale`、`disposeAll`），G2 的复制管线、`SshEndpointVerifier` 与 G3 的双准入命令合同不改。SFTP 是语义代理（句柄/数据以 base64 往返），命令的 `confine` 代次在 `spawn` 时复核，输出在退出时随 `exit` 事件（含 `scope` 确认）返回，因此 `remote_bash` 的 `scope-exited`/`exited` 与截断语义保持。
@@ -256,7 +262,7 @@ Host <env-alias>
 
 以下均为**尚未实现/未验证**的开放前提，不是可选项；完成前 `remote-tools` 行不得对模型开放，当前维护者决定保持模型侧关闭：
 
-- **配额**：目前只有单文件/单请求/在飞数上限，**没有**按 Session 或时间窗聚合的字节与操作预算，也没有 on-disk 配额。开放前需实现并验证 enforced per-session/global time-window 的 operation 与 byte 预算。systemd `CPUQuota`/`MemoryMax`/`TasksMax` 属可选纵深，不构成替代。
-- **审计**：broker 审计为只追加文件，**没有**轮转与保留策略。示例（需随实际 unit 验证）：logrotate `daily`、`maxsize 8M`、`rotate 4`、`create 0600 broker brokergrp`——`appendFileSync` 每次写都重新 open，轮转兼容。
-- **吊销**：没有自动吊销清单；停用/移除清单绑定并重启 broker + Host 重新证明后，已记录的 `unknown` 只许对账，**绝不**重放。
-- **部署证据**：Linux 实机 unit（`ActiveState`、PrivateTmp、临时目录属主/模式）、socket 私访探针与 GUI 会话证据均未产出；容器内 systemctl stub 不算数。
+- **配额**：**已实现**——broker 端 `RollingQuota` 滚动时间窗预算（清单 `environments[].quotas` 每环境 + 顶层 `quotas` 全局），对每个环境绑定请求计操作数、对 `sftp read`/`write` 计费载字节，耗尽即 `quota-exceeded`，窗口随到达时间滚动恢复；单文件/单请求/在飞数上限不变。仍属开放前置：生产清单需实际声明预算值并经 Linux live 验证；on-disk 配额未实现（部署者可另以 systemd `CPUQuota`/`MemoryMax`/`TasksMax` 与文件系统配额作纵深，不构成替代）。
+- **审计**：**已实现**——broker 内建按 `auditMaxBytes`（默认 8 MiB）+ `auditKeep`（默认 4）的链式轮转，`audit.jsonl.N` 0600 broker 属主，启动拒绝外国属主/symlink 占用；与外部 logrotate 兼容（`appendFileSync` 每次写都重新 open）。仍属开放前置：实机 unit 上的轮转/保留证据。
+- **吊销**：**已实现**——清单 `revocations` 显式拒绝清单随摘要双方校验，被吊销环境的一切环境绑定方法拒绝 `environment-revoked`（`dispose` 放行清理）；停用/移除绑定并重启 broker + Host 重新证明后，已记录的 `unknown` 只许对账，**绝不**重放。仍属开放前置：实机吊销流程证据。
+- **部署证据**：Linux 实机 unit（`ActiveState`、PrivateTmp、socket 私访探针）已有 2026-11-11 协议 3 记录；GUI 会话与跨平台证据仍未产出；上述配额/审计/吊销三项的实机验证并入此项。

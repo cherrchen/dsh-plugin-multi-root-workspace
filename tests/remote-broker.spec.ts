@@ -370,7 +370,8 @@ describe.skipIf(!POSIX)('the credential broker boundary', () => {
     const second = await broker.openSftp('build')
     expect(second).not.toBe(first)
     expect(second.generation).toBe('gen-2')
-    await expect(first.client.lstat('/srv/root')).rejects.toMatchObject({ name: 'SftpConnectionLost' })
+    // A stale generation is a definite refusal: the operation never ran.
+    await expect(first.client.lstat('/srv/root')).rejects.toMatchObject({ code: 'generation-changed' })
     await first.dispose()
     await expect(second.client.lstat('/srv/root')).resolves.toBeTruthy()
   })
@@ -464,6 +465,124 @@ describe.skipIf(!POSIX)('the credential broker boundary', () => {
     await new BrokerEnvironmentManager(manager.deployment, connection).open('build')
     expect(opens).toEqual(['build', 'build'])
     expect(cache.get('build')?.generation).toBe('gen-2')
+  })
+
+  const managed = (deployment: DeploymentManifest) =>
+    new FakeManager(deployment, new Map([['build', build], ['device', new FakeRemote('device')]]), new Map([['build', fakeExecBackend(build, FAKE_EXEC)]])) as unknown as SshEnvironmentManager
+
+  it('refuses work on a revoked environment even though its bindings stay', async () => {
+    const deployment: DeploymentManifest = { ...fakeManifest({ primary: '/tmp/primary' }), revocations: [{ environmentId: 'device', reason: 'credential rotated' }] }
+    server = new BrokerServer(startOptions(join(base, 'revoked.sock'), { manager: managed(deployment) }))
+    await server.start()
+    connection = await BrokerConnection.connect(join(base, 'revoked.sock'), uid, 5_000)
+    const broker = new BrokerEnvironmentManager(deployment, connection)
+    await expect(broker.openSftp('device')).rejects.toMatchObject({ code: 'environment-revoked' })
+    await expect(broker.open('device')).rejects.toMatchObject({ code: 'environment-revoked' })
+    await expect(connection.request('dispose', { environmentId: 'device' })).resolves.toBeTruthy()
+    const sftp = await broker.openSftp('build')
+    await expect(sftp.client.lstat('/srv/root')).resolves.toBeTruthy()
+  })
+
+  it('charges every environment-bound operation against its rolling window', async () => {
+    const baseDeployment = fakeManifest({ primary: '/tmp/primary' })
+    const deployment: DeploymentManifest = {
+      ...baseDeployment,
+      environments: baseDeployment.environments.map(environment => environment.environmentId === 'build'
+        ? { ...environment, quotas: { windowMs: 60_000, maxOperations: 3, maxBytes: 1_000_000 } }
+        : environment),
+    }
+    server = new BrokerServer(startOptions(join(base, 'quota-ops.sock'), { manager: managed(deployment) }))
+    await server.start()
+    connection = await BrokerConnection.connect(join(base, 'quota-ops.sock'), uid, 5_000)
+    const broker = new BrokerEnvironmentManager(deployment, connection)
+    const sftp = await broker.openSftp('build')
+    await sftp.client.lstat('/srv/root')
+    await sftp.client.lstat('/srv/root/src')
+    await expect(sftp.client.lstat('/srv/root/dist')).rejects.toMatchObject({ code: 'quota-exceeded' })
+    // A different environment has its own window and keeps answering.
+    const other = await broker.openSftp('device')
+    await expect(other.client.realpath('/')).resolves.toBe('/')
+  })
+
+  it('charges SFTP payload bytes against the same window', async () => {
+    const baseDeployment = fakeManifest({ primary: '/tmp/primary' })
+    const deployment: DeploymentManifest = {
+      ...baseDeployment,
+      environments: baseDeployment.environments.map(environment => environment.environmentId === 'build'
+        ? { ...environment, quotas: { windowMs: 60_000, maxOperations: 1_000, maxBytes: 8 } }
+        : environment),
+    }
+    server = new BrokerServer(startOptions(join(base, 'quota-bytes.sock'), { manager: managed(deployment) }))
+    await server.start()
+    connection = await BrokerConnection.connect(join(base, 'quota-bytes.sock'), uid, 5_000)
+    const broker = new BrokerEnvironmentManager(deployment, connection)
+    const sftp = await broker.openSftp('build')
+    const handle = await sftp.client.open('/srv/root/quota.bin', P_WRITE | P_CREAT | P_EXCL, 0o600)
+    await sftp.client.write(handle, 0, Buffer.from('12345'))
+    await expect(sftp.client.write(handle, 5, Buffer.from('6789'))).rejects.toMatchObject({ code: 'quota-exceeded' })
+  })
+
+  it('applies the broker-global window across every environment', async () => {
+    const deployment: DeploymentManifest = { ...fakeManifest({ primary: '/tmp/primary' }), quotas: { windowMs: 60_000, maxOperations: 2, maxBytes: 1_000_000 } }
+    server = new BrokerServer(startOptions(join(base, 'quota-global.sock'), { manager: managed(deployment) }))
+    await server.start()
+    connection = await BrokerConnection.connect(join(base, 'quota-global.sock'), uid, 5_000)
+    const broker = new BrokerEnvironmentManager(deployment, connection)
+    await broker.openSftp('build')
+    await broker.openSftp('device')
+    await expect(broker.openSftp('build')).rejects.toMatchObject({ code: 'quota-exceeded' })
+  })
+
+  it('readmits requests once the window rolls', async () => {
+    const baseDeployment = fakeManifest({ primary: '/tmp/primary' })
+    const deployment: DeploymentManifest = {
+      ...baseDeployment,
+      environments: baseDeployment.environments.map(environment => environment.environmentId === 'build'
+        ? { ...environment, quotas: { windowMs: 1_000, maxOperations: 2, maxBytes: 1_000_000 } }
+        : environment),
+    }
+    server = new BrokerServer(startOptions(join(base, 'quota-roll.sock'), { manager: managed(deployment) }))
+    await server.start()
+    connection = await BrokerConnection.connect(join(base, 'quota-roll.sock'), uid, 5_000)
+    const broker = new BrokerEnvironmentManager(deployment, connection)
+    const sftp = await broker.openSftp('build')
+    await sftp.client.lstat('/srv/root')
+    await expect(sftp.client.lstat('/srv/root/src')).rejects.toMatchObject({ code: 'quota-exceeded' })
+    vi.useFakeTimers()
+    try {
+      vi.advanceTimersByTime(1_100)
+      await expect(sftp.client.lstat('/srv/root/src')).resolves.toBeTruthy()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('rotates the append-only audit at its size budget, keeping it broker-private', async () => {
+    const auditPath = join(base, 'audit.jsonl')
+    server = new BrokerServer(startOptions(join(base, 'audit.sock'), { auditPath, auditMaxBytes: 640, auditKeep: 2 }))
+    await server.start()
+    connection = await BrokerConnection.connect(join(base, 'audit.sock'), uid, 5_000)
+    const broker = new BrokerEnvironmentManager(manager.deployment, connection)
+    const sftp = await broker.openSftp('build')
+    for (let i = 0; i < 24; i++) await sftp.client.lstat('/srv/root')
+    const { readdirSync, statSync } = await import('node:fs')
+    const rotated = readdirSync(base).filter(name => name.startsWith('audit.jsonl')).sort()
+    expect(rotated).toContain('audit.jsonl.1')
+    expect(rotated).not.toContain('audit.jsonl.3')
+    for (const name of rotated) {
+      const info = statSync(join(base, name))
+      expect(info.mode & 0o777).toBe(0o600)
+      expect(info.size).toBeLessThanOrEqual(640)
+    }
+  })
+
+  it('refuses to start when the audit path is a planted foreign file', async () => {
+    const auditPath = join(base, 'planted.jsonl')
+    fakeStats.set(auditPath, { uid: uid + 1, mode: 0o600, kind: 'file' })
+    const instance = new BrokerServer(startOptions(join(base, 'audit-refused.sock'), { auditPath }))
+    await expect(instance.start()).rejects.toThrow(/real file owned by the broker/)
+    fakeStats.set(auditPath, { uid, mode: 0o600, kind: 'link' })
+    const linked = new BrokerServer(startOptions(join(base, 'audit-refused2.sock'), { auditPath }))
+    await expect(linked.start()).rejects.toThrow(/real file owned by the broker/)
+    fakeStats.delete(auditPath)
   })
 })
 

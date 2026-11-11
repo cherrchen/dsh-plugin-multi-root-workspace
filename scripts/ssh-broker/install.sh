@@ -117,7 +117,9 @@ cat > "$CONFIG" <<EOF
   "socketPath": "$RUN_DIR/broker.sock",
   "clientUid": $CLIENT_UID,
   "brokerUid": $BROKER_UID,
-  "auditPath": "$AUDIT"
+  "auditPath": "$AUDIT",
+  "auditMaxBytes": 8388608,
+  "auditKeep": 4
 }
 EOF
 chown root:"$BROKER_USER" "$CONFIG"
@@ -214,5 +216,6 @@ Still required (deployer):
      out of band — see the control-plane deployment checklist.
 
 Installation is not certification: the model-facing profile stays BLOCKED
-until Linux unit evidence, aggregate quotas, and audit rotation land.
+until the remaining control-plane gates land (see
+docs/reference/multi-environment-control-plane.md).
 EOF
