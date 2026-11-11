@@ -99,6 +99,7 @@ async function mount(overrides?: (env: Record<string, unknown>) => Record<string
   const stack = await mountRegistryStack(join(fixture.base, `store-${stacks.length}`), {
     remoteEnvironments: { enabled: true, manifestPath: manifestFile(manifest) },
   }, {
+    allowUserOwnedRemoteManifestForTesting: true,
     beforeGate: async ctx => {
       await ctx.plugin(Projections); await ctx.plugin(Sessions)
       await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
