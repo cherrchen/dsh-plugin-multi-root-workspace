@@ -98,7 +98,7 @@ rc.2 未发布，不能按 normal lane 安装；因此用一个**一次性候选
 
 - `compat:check`：allowlist、peer、开发 pin、安装树一致；
 - 双端 `tsc --noEmit`：通过；宿主 bundle 与 `pack:check`：通过；
-- 完整 `vitest`：**1368 通过 / 162 跳过 / 17 失败**。17 个失败全部是共享 authority 的核内 IPC 用例（`registry-*` / `authority-boundaries` / `b9-review-regressions` / `skills-authority` / `skills-registry`）：本会话运行在 DSH 自身的 Seatbelt 内，Peer 凭据被识别为 sandboxed peer，rc.1 基线在同一环境同样失败 **17** 个（**1364 通过 / 166 跳过**，同一工作树）；rc.2 比 rc.1 多通过的 4 个正是本次新增、只在 rc.2 执行的用例（两个 `registerWritableRoot`、一个 `search` admission、一个 Windows ACL 进程授权）。真实三 OS 矩阵、真实 Host smoke、浏览器目检与 Windows ACL 原生结果待 rc.2 发布后由 CI 给出。
+- 完整 `vitest`：**1368 通过 / 162 跳过 / 17 失败**。17 个失败全部是共享 authority 的核内 IPC 用例（`registry-*` / `authority-boundaries` / `b9-review-regressions` / `skills-authority` / `skills-registry`）：本会话运行在 DSH 自身的 Seatbelt 内，Peer 凭据被识别为 sandboxed peer，rc.1 基线在同一环境同样失败 **17** 个（**1364 通过 / 166 跳过**，同一工作树）；rc.2 比 rc.1 多通过的 4 个正是本次新增、在 rc.1 上跳过而在 rc.2 上执行的用例（两个 `registerWritableRoot`、一个 `search` admission、一个 Windows ACL 进程授权；后者在 alpha.2–rc.1 跳过是因为上游当时会拒绝额外根，更早的版本不拒绝，因而也会执行）。真实三 OS 矩阵、真实 Host smoke、浏览器目检与 Windows ACL 原生结果待 rc.2 发布后由 CI 给出。
 
 ### 提升步骤（发布后）
 

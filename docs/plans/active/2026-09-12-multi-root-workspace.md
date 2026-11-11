@@ -1608,13 +1608,13 @@ PR #48 的 91 条 CI 检查全部 success，覆盖全部支持 DSH 版本 × mac
 - `src/workspace-files.ts`：把 rc.2 新增的 `workspaceFiles.search` 纳入共享 authority 的 `withOperation(..., 'files', ...)` admission（与 list/stat/read 同一排序），不路由（搜索根是 Session cwd，附加根没有搜索 UI）；旧版没有该方法时结构性跳过。
 - `src/client/styles.ts`：接管附加根时隐藏 rc.2 导航器新增的原生搜索条、状态行与 Files 页搜索开关（原生 body 已隐藏，搜索主根的结果无处显示）；primary 根浏览保持上游原样。
 - `src/compat/dsh-version.ts`：新增 `@deepseek-ai/dsh-error` 到 `OPTIONAL_CORE_PACKAGES` 与 `HOST_SERVICE_PACKAGES`（只经宿主锚点作证，发现跨包单例混装），不列为 peer（rc.1 无此包）。
-- 测试：`tests/upstream-additional-roots.spec.ts` 增加两个 rc.2-only 用例（Session 注册根进入 POSIX 方言与 fs fence、scope read-only deny 仍胜出）；`tests/sandbox-multi-root.spec.ts` 增加 rc.2-only 的 Windows ACL 组合用例（scope 根进入进程 profile，上游额外根不进入）；`tests/workspace-routing.spec.ts` 增加 search admission 用例；`tests/client-styles.spec.ts` 增加搜索条/页头开关的 DOM 回归。
+- 测试：`tests/upstream-additional-roots.spec.ts` 增加两个 rc.2-only 用例（Session 注册根进入 POSIX 方言与 fs fence、scope read-only deny 仍胜出）；`tests/sandbox-multi-root.spec.ts` 增加 Windows ACL 组合用例（scope 根进入进程 profile，上游额外根不进入；alpha.2–rc.1 结构跳过）；`tests/workspace-routing.spec.ts` 增加 search admission 用例；`tests/client-styles.spec.ts` 增加搜索条/页头开关的 DOM 回归。
 - 文档：迁移审查新增 §0.2.2-rc.2，兼容笔记双语 §17，reference README 双语索引；files-tree 旧版随宿主不变，open-in-app fork 继续钉 rc.1。
 
 候选验证（rc.2 未发布，不能按 normal lane 安装）：从 tag 构建 rc.2 的 sandbox / subprocess / workspace-files / working-directory / session-projection / fs / llm 包（宿主 `tsc` + `tsdown`），以平铺真实目录装进一次性插件副本，并临时把 allowlist / peer / dev pin 指向 rc.2 跑 enforce。该树不入库、不改上游 checkout。
 
 - `compat:check`：allowlist、peer、开发 pin、安装树一致；双端 `tsc --noEmit` 与 `pack:check`：通过。
-- 完整 `vitest`：**1368 通过 / 162 跳过 / 17 失败**；17 个失败全部是本会话 Seatbelt 下的 sandboxed-peer registry IPC 用例，rc.1 基线在同一环境同样失败 **17** 个（**1364 通过 / 166 跳过**）。rc.2 比 rc.1 多通过的 4 个正是本轮新增、只在 rc.2 执行的用例。失败形状与 v0.1.17 记录的既有环境限制一致。
+- 完整 `vitest`：**1368 通过 / 162 跳过 / 17 失败**；17 个失败全部是本会话 Seatbelt 下的 sandboxed-peer registry IPC 用例，rc.1 基线在同一环境同样失败 **17** 个（**1364 通过 / 166 跳过**）。rc.2 比 rc.1 多通过的 4 个正是本轮新增、在 rc.1 上跳过而在 rc.2 上执行的用例（Windows ACL 组合用例在 alpha.2–rc.1 因上游拒绝额外根而跳过，更早版本不拒绝，会执行）。失败形状与 v0.1.17 记录的既有环境限制一致。
 - 尚未执行：真实三 OS 矩阵、三个 Host smoke、浏览器实机目检与 Windows ACL 原生复验；这些必须在 rc.2 发布后的 CI / 本机完整权限下补齐。
 
 提升待办（发布后按迁移审查的步骤执行）：`upgrade-dsh.mjs 0.2.2-rc.2` 重指依赖与 release-age、allowlist/peer/dev pin 同步、刷新 lockfile、重拷 open-in-app 复刻源并移动 FORK.md 基线到 `ddac96760b`、`verify:all` 与完整矩阵、README/AGENTS/CHANGELOG 同步。本分支因此以 Draft PR 提交，不合并到 `main`，不改变发布状态。
