@@ -31,6 +31,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { accessSync, constants } from 'node:fs'
 import { join } from 'node:path'
 import { connect } from 'node:net'
+import { zstdCompressSync, zstdDecompressSync, constants as zlibConstants } from 'node:zlib'
 import { bootProfile } from './lib/profile-boot.mjs'
 import { installPluginProfile, runtimeRequire } from './lib/dsh-runtime.mjs'
 import { runForeground } from './lib/shell-exec.mjs'
@@ -176,6 +177,49 @@ async function drivePty(ctx, session, label) {
   return { label, ...outcome, output: stripAnsi(output).slice(-4000) }
 }
 
+// ── Persisted-session helpers (disk-reload audit) ───────────────────────
+// The persistence backend lays logs out as <root>/<project>/<id>/<gen>.jsonl[.zstd]:
+// a plaintext-or-compressed header line, then one JSON event record per line
+// (zstd frames concatenate when compression is configured).
+function* walkFiles(dir, depth = 0) {
+  if (depth > 8) return
+  let entries
+  try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+  for (const entry of entries) {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) yield* walkFiles(path, depth + 1)
+    else if (entry.isFile()) yield path
+  }
+}
+
+function findSessionArtifact(home, id) {
+  for (const path of walkFiles(home)) {
+    if (path.includes(id) && /\.jsonl(\.zstd)?$/.test(path)) return path
+  }
+  return undefined
+}
+
+function readSessionLog(path) {
+  const raw = readFileSync(path)
+  const compressed = path.endsWith('.zstd')
+  const text = compressed ? zstdDecompressSync(raw).toString('utf8') : raw.toString('utf8')
+  const lines = text.split('\n').filter(line => line.trim() !== '')
+  const header = JSON.parse(lines[0])
+  const events = lines.slice(1).map(line => {
+    const record = JSON.parse(line)
+    // The persistence codec may wrap events; replay the innermost event shape.
+    return record?.event !== undefined ? record.event : record
+  })
+  return { header, events, text, compressed }
+}
+
+function writeSessionLog(path, text, compressed) {
+  const body = Buffer.from(text, 'utf8')
+  writeFileSync(path, compressed
+    ? zstdCompressSync(body, { params: { [zlibConstants.ZSTD_c_checksumFlag]: 1 } })
+    : body)
+}
+
 async function drivePtc(ctx, policy) {
   try {
     const spec = ctx.ptcRuntime.resolve({
@@ -312,11 +356,157 @@ try {
       patchPresent: patch !== '',
     }
   })
+
+  // ── Disk-reload phase A: create the session and wait for its artifact ──
+  // The persisted log is what the next boot replays; a session whose state
+  // never reaches disk is recorded as such rather than silently skipped.
+  evidence.sessionReload = { id: 'probe-reload', cwd: PRIMARY }
+  const reloadSession = ctx.sessions.create(/** @type {never} */ ('probe-reload'), { meta: { cwd: PRIMARY } })
+  reloadSession.append('sandbox/mode', { mode: 'workspace-write' })
+  for (let i = 0; i < 60 && evidence.sessionReload.artifact === undefined; i++) {
+    const found = findSessionArtifact(HOME, 'probe-reload')
+    if (found !== undefined) {
+      try {
+        const log = readSessionLog(found)
+        if (log.events.some(event => event?.type === 'sandbox/mode')) {
+          evidence.sessionReload.artifact = found
+          evidence.sessionReload.persistedEvents = log.events.length
+          evidence.sessionReload.compressed = log.compressed
+        }
+      } catch { /* still flushing */ }
+    }
+    await new Promise(resolve => setTimeout(resolve, 250))
+  }
 } finally {
   // The composed tree keeps fibers and the broker socket open; a clean exit
   // needs the explicit dispose when the runtime exposes one, else the probe
   // reports and the process is reaped by exit below.
   try { await ctx.dispose?.() } catch { /* best effort */ }
+}
+
+// ── Disk-reload phase B: restore the persisted session in a fresh boot ───
+// Replays the on-disk log through the store's own restore seam
+// (sessions.prepare(..., eventState:'detached') via create) exactly as a
+// host-side session re-open does, then re-checks confinement for the
+// RESTORED session: policy resolution stays restricted and its Agent PTY
+// still gets a fully enforced confined argv.
+async function restoreAndProbe(reloadEvidence, label) {
+  const cell = { label }
+  try {
+    const { ctx: ctx2 } = await bootProfile(PROFILE, HOME)
+    try {
+      const log = readSessionLog(reloadEvidence.artifact)
+      cell.logEvents = log.events.length
+      const restored = ctx2.sessions.create(/** @type {never} */ ('probe-reload'), {
+        seed: log.events,
+        meta: log.header,
+        eventState: 'detached',
+      })
+      const resolved = check(() => ctx2.sandboxPolicy.resolve({ session: restored }))
+      if (resolved.ok) {
+        cell.resolvedMode = resolved.value.mode
+        cell.pty = await drivePty(ctx2, restored, label).catch(error => ({ threw: String(error?.message ?? error) }))
+      } else {
+        cell.resolveRefused = resolved.error
+      }
+    } finally {
+      try { await ctx2.dispose?.() } catch { /* best effort */ }
+    }
+  } catch (error) {
+    cell.threw = error instanceof Error ? error.message : String(error)
+  }
+  return cell
+}
+
+if (evidence.sessionReload.artifact !== undefined) {
+  evidence.sessionReload.restored = await restoreAndProbe(evidence.sessionReload, 'reloaded')
+  // Phase C: tamper the persisted log so the session claims danger-full-access
+  // on disk, then reload. The guard must refuse resolution (or the persistence
+  // reader must reject the log); either way the claim never reaches a spawn.
+  try {
+    const log = readSessionLog(evidence.sessionReload.artifact)
+    const lines = log.text.split('\n')
+    const target = lines.findIndex(line => line.includes('sandbox/mode') && line.includes('workspace-write'))
+    if (target >= 0) {
+      lines[target] = lines[target].replace('workspace-write', 'danger-full-access')
+      writeSessionLog(evidence.sessionReload.artifact, lines.join('\n'), log.compressed)
+      evidence.sessionReload.tamperedWrite = 'sandbox/mode payload rewritten to danger-full-access'
+    } else {
+      evidence.sessionReload.tamperedWrite = 'no sandbox/mode line carrying workspace-write found'
+    }
+  } catch (error) {
+    evidence.sessionReload.tamperedWrite = String(error instanceof Error ? error.message : error)
+  }
+  if (evidence.sessionReload.tamperedWrite?.startsWith('sandbox/mode payload')) {
+    evidence.sessionReload.tampered = await restoreAndProbe(evidence.sessionReload, 'tampered')
+  }
+} else {
+  evidence.sessionReload.restored = { skipped: 'no persisted artifact reached disk in 15s' }
+}
+
+// ── Other-profile live audit ─────────────────────────────────────────────
+// Boot a second REAL profile under the same UID. A stock profile has no
+// remote-tools row, hence no profile guard: recording whether its preset
+// table/policy resolution can yield danger-full-access is deployment-hazard
+// evidence (such a profile must never host Agent entry points). Its CONFINED
+// spawn still has to be refused at the broker socket — the broker denies
+// sandboxed peers regardless of which profile minted the process. When
+// DSH_OTHER_RESTRICTED_PATCH is provided the same profile is then patched to
+// the restricted table and re-measured.
+const OTHER = process.env.DSH_OTHER_PROFILE
+if (OTHER !== undefined) {
+  const otherEvidence = { profile: OTHER }
+  evidence.otherProfileLive = otherEvidence
+  if (process.env.DSH_OTHER_INSTALL !== undefined) {
+    otherEvidence.installExit = await installPluginProfile(OTHER, HOME, process.env.DSH_OTHER_INSTALL)
+  }
+  const otherPatch = process.env.DSH_OTHER_PATCH
+  if (otherPatch !== undefined) {
+    const { copyFileSync } = await import('node:fs')
+    copyFileSync(otherPatch, join(HOME, 'profiles', OTHER, 'cordis.patch.yml'))
+  }
+  const auditOther = async label => {
+    const cell = { label }
+    try {
+      const { ctx: octx } = await bootProfile(OTHER, HOME)
+      try {
+        cell.defaultMode = octx.sandboxPolicy?.defaultMode
+        const names = octx.permissionPresets?.names ?? []
+        cell.presetNames = names
+        cell.hasFullAccessPreset = names.some(name => {
+          try { return octx.permissionPresets.resolve(name).sandbox === 'danger-full-access' } catch { return false }
+        })
+        const forged = octx.sessions.create(/** @type {never} */ (`other-${label}-forged`), { meta: { cwd: PRIMARY } })
+        forged.append('sandbox/mode', { mode: 'danger-full-access' })
+        const resolved = check(() => octx.sandboxPolicy.resolve({ session: forged }))
+        cell.forgedMode = resolved.ok
+          ? { resolved: resolved.value.mode }
+          : { refusedByGuard: resolved.error.startsWith('remote-profile-full-access:'), error: resolved.error }
+        const work = octx.sessions.create(/** @type {never} */ (`other-${label}-work`), { meta: { cwd: PRIMARY } })
+        work.append('sandbox/mode', { mode: 'workspace-write' })
+        const workPolicy = check(() => octx.sandboxPolicy.resolve({ session: work }))
+        if (workPolicy.ok) {
+          cell.resolvedMode = workPolicy.value.mode
+          cell.bash = await driveBash(octx, workPolicy.value)
+          cell.pty = await drivePty(octx, work, `other-${label}`).catch(error => ({ threw: String(error?.message ?? error) }))
+        } else {
+          cell.workRefused = workPolicy.error
+        }
+      } finally {
+        try { await octx.dispose?.() } catch { /* best effort */ }
+      }
+    } catch (error) {
+      cell.threw = error instanceof Error ? error.message : String(error)
+    }
+    return cell
+  }
+  otherEvidence.entries = [await auditOther('stock')]
+  const restrictedPatch = process.env.DSH_OTHER_RESTRICTED_PATCH
+  if (restrictedPatch !== undefined) {
+    const { copyFileSync } = await import('node:fs')
+    copyFileSync(restrictedPatch, join(HOME, 'profiles', OTHER, 'cordis.patch.yml'))
+    otherEvidence.entries.push(await auditOther('restricted'))
+  }
 }
 
 mkdirSync(join(HOME, 'probe'), { recursive: true })
