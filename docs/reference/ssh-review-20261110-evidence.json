@@ -8,10 +8,17 @@
   "plugin": "0.1.17-ssh.1",
   "git": {
     "branch": "feat/ssh-workspace",
-    "rebasedHead": "897dd39e6b03e6b129da1a36ca70ffb690879b60",
+    "head": "19ebb07e035a3a6f747e0d1af543c85a063837bd",
+    "remediationCommits": [
+      "eb1792a",
+      "51d8f99",
+      "adcf4df",
+      "56d972a",
+      "19ebb07"
+    ],
     "mainAndExperiment": "3e84d85da5597cc32eaf1f3541626a33c03a739b",
-    "remediationCommitted": false,
-    "pushed": false
+    "remediationCommitted": true,
+    "pushed": true
   },
   "vitest": {
     "command": "pnpm test --reporter=default --reporter=json --outputFile=.dsh-smoke/ssh-review-20261110/vitest-final.json",
@@ -34,11 +41,30 @@
     "typecheck": "passed; optional Auto Review exact-version implementation check skipped",
     "build": "passed",
     "kernel:probe": "Seatbelt executed; bwrap and Landlock unavailable on this host",
-    "smoke:compose": { "passed": 54, "failed": 0, "skipped": 0 },
-    "smoke:behavior": { "passed": 137, "failed": 0, "skipped": 0 },
-    "smoke:journey": { "passed": 76, "failed": 0, "skipped": 0 },
-    "pack:check": { "status": "passed", "members": 222 },
-    "smoke:packed": { "passed": 136, "failed": 0, "skipped": 0 },
+    "smoke:compose": {
+      "passed": 54,
+      "failed": 0,
+      "skipped": 0
+    },
+    "smoke:behavior": {
+      "passed": 137,
+      "failed": 0,
+      "skipped": 0
+    },
+    "smoke:journey": {
+      "passed": 76,
+      "failed": 0,
+      "skipped": 0
+    },
+    "pack:check": {
+      "status": "passed",
+      "members": 222
+    },
+    "smoke:packed": {
+      "passed": 136,
+      "failed": 0,
+      "skipped": 0
+    },
     "auto-review:fork": "passed",
     "docs:check": "passed",
     "installerPreflight": "shell syntax and isolated dependency-resolution positive/negative cases passed; provisioning not executed",
@@ -51,15 +77,44 @@
     "ssh-review-20261110-lint-delta.json": "2b90084310c5c6cbc0d87a6825be0765b0c292b62d49ac5502b1f0884c38b81d",
     "ssh-review-20261110-checks.txt": "141b303786ad7148b8211da12ed90891e745c546834e836bac322a28bd159164"
   },
-  "logTransformations": ["ephemeral web token redacted", "ANSI escapes removed", "trailing whitespace trimmed"],
+  "logTransformations": [
+    "ephemeral web token redacted",
+    "ANSI escapes removed",
+    "trailing whitespace trimmed"
+  ],
   "notProven": [
-    "Linux live SSH deployment",
-    "independent chroot SFTP-only destination and writer isolation",
-    "real systemd unit, PrivateTmp and ControlMaster/helper temporary directory controls",
     "native Windows and other operating-system gates",
     "Chromium/Electron GUI acceptance",
     "disk-reloaded sessions and actual other-profile isolation",
     "aggregate operation/byte budgets, audit rotation and automated revocation"
   ],
-  "modelOpening": "BLOCKED"
+  "modelOpening": "BLOCKED",
+  "linuxLive": {
+    "date": "2026-11-10/2026-11-11",
+    "topology": "initiator .87 (dshhost uid 1000 + _dsh_ssh broker uid 996) -> target .93 (dshbuild/dshxfer/dshxfer2), both Ubuntu 24.04 x86_64",
+    "deployment": {
+      "package": "0.1.17-ssh.1 packed tarball deployed under root-owned /opt/dsh-broker with exact dependency tree (cordis 4.1.0, dsh 0.2.2-rc.1, four ssh peers, dsh-sandbox/-policy/-session added when the new chunk graph required them)",
+      "unit": "dsh-ssh-broker.service ActiveState=active SubState=running, PrivateTmp=yes, ProtectSystem=strict, User=_dsh_ssh; real private tmp at /tmp/systemd-private-*-dsh-ssh-broker.service-*",
+      "credentialRoot": "/var/lib/dsh-ssh-broker drwx------ _dsh_ssh:_dsh_ssh",
+      "socket": "/run/dsh-ssh-broker drwxr-x--- _dsh_ssh:dsh-ssh-clients, broker.sock srw-rw----",
+      "manifest": "/etc/dsh-remote/manifest.json root-owned; helper import bindings removed (destination-isolation-required observed live); transfer.maxBytes 512MiB for fault-injection payload",
+      "brokerHello": "protocol 3, brokerUid 996, environments vps-app/vps-lib/vps-xfer/vps-xfer2, sshCapability.eligible",
+      "confinementProbe": "dshhost under bwrap --unshare-all: credential root EACCES, broker socket connect closed with 0 bytes"
+    },
+    "suites": {
+      "remote-broker.live.e2e": "6/6 passed",
+      "remote-broker-faults.live.e2e": "2/2 passed; mid-transfer pkill of vps-build ssh lands at preflight stage (256MiB payload), never committed, corpse generation replaced; daemon SIGKILL severs custody, generations stale, re-attestation required",
+      "remote-ssh.live.e2e": "19/19 passed",
+      "remote-journey.live.e2e": "4/4 passed on production broker: path; helper-destination remote_copy refused transfer-pair-not-allowed (narrowing live-verified); seeds via remote_bash"
+    },
+    "chrootIsolation": "sftp to vps-xfer and vps-xfer2 each see only their own /import inside chroot /srv/dsh/xfer{,2}; /srv nonexistent in chroot; cross-account visibility impossible",
+    "faultsScaffolding": "root-side dsh-fault-watcher.service (systemd-run transient) consumes /tmp/dsh-fault-trigger: broker-ssh -> pkill -9 -u _dsh_ssh -f vps-build; broker-daemon -> systemctl kill -s SIGKILL",
+    "liveFoundDefects": [
+      "UpdateHostKeys: ssh -G normalizes \"no\" to \"false\"; verifier accepted both (51d8f99)",
+      "SFTP transports inherited ControlMaster auto -> per-session generation isolation broken; each session now spawns ssh with ControlMaster=no ControlPath=none (adcf4df)",
+      "wellFormedReply had SSH_FXP_NAME(104) and SSH_FXP_ATTRS(105) swapped; every real OpenSSH reply was rejected as malformed and the transport lost mid-request (56d972a)",
+      "journey mount missed the subprocess service in remote-tools inject; plugin fiber stayed pending and tools never mounted (19ebb07 test fix)",
+      "faults trigger fired at stage \"staging\" which runs after the stream loop; moved to \"preflight\" and payload raised to 256MiB so the kill provably lands mid-transfer (19ebb07)"
+    ]
+  }
 }

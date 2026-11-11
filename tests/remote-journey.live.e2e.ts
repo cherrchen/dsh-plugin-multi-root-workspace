@@ -85,6 +85,17 @@ async function mount(withPanel = false) {
   await stack.ctx.plugin(SystemPrompt)
   await stack.ctx.plugin(Tools)
   stack.ctx.provide('permissionPresets', { names: [] } as never)
+  if (stack.ctx.get('sandbox') === undefined) {
+    stack.ctx.provide('sandbox', { confine: async (argv: readonly string[]) => ({ argv, enforcement: 'full' }) } as never)
+  } else if (typeof stack.ctx.sandbox.confine !== 'function') {
+    Object.assign(stack.ctx.sandbox, { confine: async (argv: readonly string[]) => ({ argv, enforcement: 'full' }) })
+  }
+  if (stack.ctx.get('subprocess') === undefined) {
+    stack.ctx.provide('subprocess', {
+      spawn: () => { throw new Error('live journey has no local subprocess') },
+      spawnTerminal: () => { throw new Error('live journey has no local subprocess') },
+    } as never)
+  }
   await installToolExecutor(stack.ctx)
   // The production wiring: attest first, then mount both tools, the endpoint
   // verifier and the capability projection — nothing in-process holds a key.
@@ -147,16 +158,17 @@ liveDescribe('the real journey over broker custody', () => {
         environmentId: 'vps-app', rootId: 'app', command: 'mkdir -p src dist', timeoutMs: 10_000,
       })
       expect(dirs, JSON.stringify(dirs)).toMatchObject({ status: 'scope-exited', exitCode: 0 })
-      const seeded = await world.call('remote_copy', {
-        from: { environmentId: 'local', rootId: 'primary', relativePath: 'src/a.txt' },
-        to: { environmentId: 'vps-app', rootId: 'app', relativePath: 'src/a.txt' },
-      })
-      expect(seeded, JSON.stringify(seeded)).toMatchObject({ status: 'committed', bytes: Buffer.byteLength(SOURCE_A) })
-      const seededB = await world.call('remote_copy', {
-        from: { environmentId: 'local', rootId: 'xlib', relativePath: 'src/b.txt' },
-        to: { environmentId: 'vps-app', rootId: 'app', relativePath: 'src/b.txt' },
-      })
-      expect(seededB, JSON.stringify(seededB)).toMatchObject({ status: 'committed', bytes: Buffer.byteLength(SOURCE_B) })
+      // Helper environments are never copy destinations (the narrowed import
+      // surface): seed the builder's sources through remote_bash instead.
+      const seedFile = async (relativePath: string, content: string) => {
+        const seeded = await world.call('remote_bash', {
+          environmentId: 'vps-app', rootId: 'app', timeoutMs: 10_000,
+          command: `echo ${Buffer.from(content).toString('base64')} | base64 -d > ${relativePath}`,
+        })
+        expect(seeded, JSON.stringify(seeded)).toMatchObject({ status: 'scope-exited', exitCode: 0 })
+      }
+      await seedFile('src/a.txt', SOURCE_A)
+      await seedFile('src/b.txt', SOURCE_B)
 
       const built = await world.call('remote_bash', {
         environmentId: 'vps-app', rootId: 'app', timeoutMs: 15_000,
