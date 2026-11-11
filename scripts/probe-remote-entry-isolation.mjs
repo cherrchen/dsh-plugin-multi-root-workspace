@@ -56,7 +56,7 @@ const evidence = {
     platform: `${process.platform}/${process.arch}`,
     node: process.version,
     dshCli: process.env.DSH_CLI ?? null,
-    scope: 'supported service seams; other-profile inventory is static only; this record is not deployment certification',
+    scope: 'supported service seams plus live disk-reload and other-profile audits; this record is not deployment certification',
   },
   profile: PROFILE, primary: PRIMARY, credRoot: CRED, socket: SOCK,
   controls: {}, presets: {}, entries: {}, escalation: {},
