@@ -130,6 +130,28 @@ describe('addNew owner verification', () => {
     expect(stack.registry.list(main)).toHaveLength(0)
   })
 
+  it('refuses every worktree mutation when no owner switch is mounted at all', async () => {
+    const area = fixture('owner-gate-absent')
+    const { stack, main, linked } = await mount(area)
+    // The bundle always mounts the worktree row; a composition (or a row that
+    // was just disposed) can leave the Registry without it. "No switch" is
+    // "off", never "unconstrained": a negotiated IPC peer must not write here.
+    stack.registry.setWorktreeGateProvider(undefined)
+    const expected = expectation(main, linked)
+    await expect(stack.registry.addNew(main, { path: expected.candidate.canonical, expected })).rejects
+      .toMatchObject({ code: 'worktree/not-enabled' })
+    await expect(stack.registry.worktreeSidecar(main, {
+      op: 'ignore', key: 'worktree\u0000' + expected.candidate.canonical, kind: 'worktree', path: expected.candidate.canonical,
+    })).rejects.toMatchObject({ code: 'worktree/not-enabled' })
+    await expect(stack.registry.removeForDeletedWorktree(main, {
+      rootId: 'absent', expectedPath: expected.candidate.canonical, expectedAddedAt: '2026-01-01T00:00:00.000Z',
+    })).rejects.toMatchObject({ code: 'worktree/not-enabled' })
+    // The read side stays available, so a disabled owner can still be read.
+    const read = await stack.registry.worktreeSidecar(main, { op: 'read' })
+    expect(read).toMatchObject({ available: true, ignored: [], worktreeRoots: [] })
+    expect(stack.registry.list(main)).toHaveLength(0)
+  })
+
   it('refuses when the primary checkout moved after the expectation was captured', async () => {
     const area = fixture('owner-primary-moved')
     const { stack, main, linked } = await mount(area)

@@ -85,6 +85,11 @@ export async function mountRegistryStack(storeRoot: string, registryConfig: Regi
     sharedStorageRoot: storeRoot,
     ...registryConfig,
   })
+  // A bare Registry stack has no worktree row. The row's live switch is the
+  // ONLY production caller of the worktree write path, so stand in for it as
+  // "mounted and enabled"; a spec that covers the absent/disabled provider
+  // overrides or clears it explicitly.
+  ctx.multiRootRegistry.setWorktreeGateProvider(() => true)
   return {
     ctx,
     registry: ctx.multiRootRegistry,

@@ -86,3 +86,65 @@ describe('namespaced Web Skills', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 })
+
+describe('worktree settings signal', () => {
+  /** The client context the card installer needs; cleanup is registered globally. */
+  function cardContext(services: Record<string, unknown>): Record<string, unknown> {
+    const stops: (() => void)[] = []
+    const ctx: Record<string, unknown> = {
+      get: (name: string) => services[name],
+      inject: (names: string[], callback: (scope: unknown) => unknown) => {
+        if (names.every(name => name in services)) {
+          const stop = callback(ctx)
+          if (typeof stop === 'function') stops.push(stop as () => void)
+        }
+      },
+      slots: {
+        inject: (_name: string, callback: () => unknown) => { callback(); return () => {} },
+        register: () => () => {},
+      },
+      effect: (setup: () => unknown) => { const stop = setup(); if (typeof stop === 'function') stops.push(stop as () => void) },
+    }
+    cleanups.push(() => { for (const stop of stops.splice(0).reverse()) stop() })
+    return ctx
+  }
+
+  function formOf(snapshot: () => { value?: { enabled?: boolean }; status: string; writable: boolean }) {
+    return { getSnapshot: snapshot, subscribe: () => () => {}, mutate: async () => true }
+  }
+
+  function servicesOf(form: ReturnType<typeof formOf> | undefined) {
+    return {
+      configForms: { get: (id: string) => id === 'multi-root-worktrees' ? form : undefined },
+      settingsScope: { bind: () => undefined },
+    }
+  }
+
+  it('treats a composition without any settings form as unknown, not disabled', () => {
+    // The loader row can enable suggestions on a host that composes no browser
+    // settings form; the host's own switch must get the chance to answer.
+    const signal = installSkillsSettingsCard(cardContext({}) as never, t)
+    expect(signal.enabled()).toBe(true)
+  })
+
+  it.each(['loading', 'unavailable', 'error'])('treats a %s form as unknown', status => {
+    const signal = installSkillsSettingsCard(cardContext(servicesOf(
+      formOf(() => ({ status, writable: false })),
+    ) as never) as never, t)
+    expect(signal.enabled()).toBe(true)
+  })
+
+  it('suppresses the overlay only when a ready form reports the switch off', () => {
+    let snapshot: { value?: { enabled?: boolean }; status: string; writable: boolean } = { value: { enabled: false }, status: 'ready', writable: true }
+    const signal = installSkillsSettingsCard(cardContext(servicesOf(
+      formOf(() => snapshot),
+    ) as never) as never, t)
+    expect(signal.enabled()).toBe(false)
+    snapshot = { value: { enabled: true }, status: 'ready', writable: true }
+    expect(signal.enabled()).toBe(true)
+    // A ready form that has not published a value yet is still unknown: the
+    // loader configuration (not the missing browser value) decides.
+    snapshot = { value: {}, status: 'ready', writable: true }
+    expect(signal.enabled()).toBe(true)
+  })
+})

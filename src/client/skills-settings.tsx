@@ -210,7 +210,16 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): WorktreeS
     watchedWorktree = undefined
   })
   return {
-    enabled: () => watchedWorktree?.getSnapshot().value?.enabled === true,
+    // Unknown is not "off": the loader row can enable suggestions without any
+    // browser settings form, and the host's own switch is the only authority.
+    // Only a READY form that reports a definite value may suppress the overlay
+    // here; every other state polls and lets `worktree/not-enabled` stop the
+    // loop (the overlay already handles that code).
+    enabled: () => {
+      const snapshot = watchedWorktree?.getSnapshot()
+      if (snapshot?.status !== 'ready' || snapshot.value?.enabled === undefined) return true
+      return snapshot.value.enabled === true
+    },
     subscribe(listener) {
       listeners.add(listener)
       return () => { listeners.delete(listener) }

@@ -696,6 +696,8 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 - 「设置 → 插件 → Multi-root Workspace → 插件详情」新增 **启用 Worktree 附加根建议**（**Enable worktree root suggestions**），与「启用附属根 Skills」同一张配置卡、同样的 Switch 交互，标题旁显示**实验性** Tag（与多根 Auto Review 一致）。独立使用 `multi-root-worktrees.enabled`，**缺省 `false`**，A 与 B 共用；只有显式的持久化 `true` 或 loader `true` 才启用，缺失 Settings 服务视为关闭。Settings 接缝复用 [ADR-0023](./ADR-0023-multi-root-skill-discovery-and-invocation.md) 的现代行 Config / 旧版 namespace 适配。插件行仍加载但关闭时完全惰性。
 - 关闭即时停止当前 Host 的发现、后台 watcher、重查和专用清理，唤醒 waiter、关闭提示并作废旧 ID。关闭后的新 worktree 请求返回 `worktree/not-enabled`，客户端停止重挂；宿主和客户端同时处理该结果。已确认的普通 Registry 根与 sidecar 决定保留；普通根管理始终可用。各客户端通过现有 Settings form 订阅同一设置变化。重新开启后按当前 live session 重新探测并使用新 ID。先前因 primary 失效进入 `lost` 的 workspace 仍须按 §4.4 显式恢复。
 - 调用 Host 在权威恢复之后、实际发送 IPC 前复查本地开关、提示代次、live session 和候选快照。Registry owner 在队列内完成最后一次异步 Registry 读取之后、开始持久化之前复查自己的开关和提交条件。跨 Host 已送交 owner 的确认按 owner 队列结果对账。关闭当前 Host 的设置不会回滚已提交的确认，也不会更改其他 profile 的配置。B 的 P3 只读预览仍遵循实施计划中的写入门禁。
+- **客户端信号区分“未知”与“关闭”**：`installSkillsSettingsCard()` 返回的 `enabled()` 只在已绑定、`status === 'ready'` 且已发布布尔值的 form 上按值抑制 overlay；没有 form（例如 loader `enabled: true` 但浏览器组合没有 `configForms`/`settingsScope`）、form 未 ready 或 unavailable 一律视为未知，照常轮询，由宿主的 `worktree/not-enabled` 结束循环。缺失的浏览器 form 不得被读成“关闭”。
+- **owner 开关 fail closed**：`multi-root-worktrees` 行在 init 时安装 `setWorktreeGateProvider()`、dispose 时清除；provider 缺失（行未挂载或已销毁）一律按**关闭**处理，只有显式 `true` 才允许 `addNew`、`removeForDeletedWorktree` 与 sidecar mutation。read 形状的 sidecar 操作不受此门禁影响。缺少 owner 开关不是放宽授权的理由。
 
 ## Alternatives Considered
 

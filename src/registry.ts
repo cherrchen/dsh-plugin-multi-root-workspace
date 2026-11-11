@@ -958,7 +958,10 @@ export class MultiRootRegistry extends Service {
 
   private requireWorktreesEnabled(): void {
     this.requireActive()
-    if (this.worktreeGate?.() === false) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
+    // Fail closed: the mounted worktree row is the only owner of this switch,
+    // so a missing provider (row not mounted, or already disposed) is OFF, not
+    // unconstrained. A read-shaped sidecar operation never reaches this check.
+    if (this.worktreeGate?.() !== true) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
   }
 
   private requireWorktreeMutation(primaryRoot: string, beforeSubmit: (() => void) | undefined): void {

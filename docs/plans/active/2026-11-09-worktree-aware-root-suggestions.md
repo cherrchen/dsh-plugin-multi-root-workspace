@@ -1,6 +1,6 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P1–P10 与第十九次修订变更全部实施完成；两轮审计修复已实施；macOS 原生验证通过，Linux / Windows 待验证；未发版**。先完成 B（P1–P7），再实施 A（P8–P10）；第十九次修订把 A 的目标改为主 checkout、开关改为实验性默认关闭，并加入单/多候选提示分流。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：**P1–P10 与第十九次修订变更全部实施完成；两轮审计修复与 Devin Review 两条修复已实施；macOS 原生验证通过，Linux / Windows 待验证；未发版**。先完成 B（P1–P7），再实施 A（P8–P10）；第十九次修订把 A 的目标改为主 checkout、开关改为实验性默认关闭，并加入单/多候选提示分流。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
 > 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
@@ -212,6 +212,14 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - **开关**：`multi-root-worktrees.enabled` 缺省 `false`；`Config`、Settings schema、初始值、Host getter、客户端 overlay fallback 与 `cordis.patch.yml` 全部改为严格 `true` 才启用；插件详情卡标题旁显示“实验性”Tag（与 Auto Review 同款）。
 - **提示分流**：`worktreePromptWait` 恰好一个可见候选返回 `prompt`，两个及以上返回 `prompts`；列表行可勾选（B 默认勾选、A 默认不勾并内联共享元数据/separate 披露），`promptIds` 批量确认，逐项 stale 通过 `skipped` 返回，客户端按 key 标红并保持未勾选。`seenPromptId` 由 `seenViewRevision` 取代。
 - **验证**：worktree 专项 12 个 spec **131 通过、3 skip**；全量 vitest **1356 通过、17 个既有 lease/follower 环境失败**（与审计基线同一组，见路线账本）；`lint`、`typecheck`、`build`、`docs:check` 通过。真实 Web 冒烟的默认关闭、双候选列表、主 checkout A 确认与 `.git` 移除后的回归随 `smoke:journey` 的 web leg 执行。
+
+### Devin Review 修复（2026-11-11，完成）
+
+> PR #48 的 Devin Review 在 `78e6d47` 上提出两条 finding（当时均未解决）。修复不改变 ADR-0039 的其余边界，只把两条已写明的边界收回实现。
+
+- **客户端“未知”语义（BUG，`src/client/skills-settings.tsx`）**：`enabled()` 原先只从绑定的 Settings form 取值，没有 form 时返回 `false`；loader `enabled: true` 而没有浏览器 `configForms`/`settingsScope` 的组合因此永远不会发起 `worktreePromptWait`。现在只有 ready 且已发布布尔值的 form 才按值抑制，其余状态（无 form、loading/unavailable/error、ready 但无值）返回 `true`，由宿主的 `worktree/not-enabled` 决定并停止循环。回归：`tests/client-skills.spec.tsx` 的无 form、三种非 ready 状态、ready 明确 false/true 与 ready 空值用例。
+- **owner 门禁 fail closed（SEC，`src/registry.ts`）**：`requireWorktreesEnabled()` 原先只在 provider 返回 `false` 时拒绝，provider 缺失（worktree 行未挂载或已 dispose）即放行；协商过 `promptsRoot` 的 IPC peer 可在 owner 没有开关时提交 `addNew`、`removeForDeletedWorktree` 和 sidecar mutation。现在要求 provider 显式返回 `true`，缺失一律 `worktree/not-enabled`；read 形状的 sidecar 操作不受影响。`tests/support/registry-stack.ts` 为裸 Registry 栈安装 `() => true` 的替身（生产中的唯一调用者是 worktree 行），`tests/worktrees-owner.spec.ts` 覆盖 absent provider 下三条写路径全部拒绝且 read 仍可用。
+- **验证**：worktree 相关 spec 与 `client-worktree`/`authority-native` 实跑 **134 通过、44 环境 skip**；全量 vitest **1362 通过、17 个既有 lease/follower 环境失败**（与审计基线同一组，均因当前 Host 被沙箱化而无法协商共享 IPC）；`lint`、`typecheck`、`build`、`docs:check` 通过。
 
 ## Dependencies
 
