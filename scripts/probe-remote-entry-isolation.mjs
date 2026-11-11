@@ -215,9 +215,14 @@ function readSessionLog(path) {
 
 function writeSessionLog(path, text, compressed) {
   const body = Buffer.from(text, 'utf8')
-  writeFileSync(path, compressed
-    ? zstdCompressSync(body, { params: { [zlibConstants.ZSTD_c_checksumFlag]: 1 } })
-    : body)
+  if (!compressed) { writeFileSync(path, body); return }
+  // The backend expects the header alone in the first frame, events in the
+  // following frame(s); one monolithic frame is refused as corrupt.
+  const nl = text.indexOf('\n')
+  const header = Buffer.from(nl >= 0 ? text.slice(0, nl + 1) : text, 'utf8')
+  const events = Buffer.from(nl >= 0 ? text.slice(nl + 1) : '', 'utf8')
+  const options = { params: { [zlibConstants.ZSTD_c_checksumFlag]: 1 } }
+  writeFileSync(path, Buffer.concat([zstdCompressSync(header, options), zstdCompressSync(events, options)]))
 }
 
 async function drivePtc(ctx, policy) {
