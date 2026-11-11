@@ -4,7 +4,12 @@
 #
 #   sudo DSH_SSH_BROKER_JS=/path/to/plugin/lib/remote-broker.js \
 #        DSH_SSH_BROKER_MANIFEST=/etc/dsh-ssh-broker/manifest.json \
+#        DSH_SSH_BROKER_NODE=/usr/local/bin/node \
 #        ./install.sh <dsh-host-user>
+#
+# On Darwin, DSH_SSH_BROKER_NODE must resolve outside any user home: the
+# privacy framework denies system daemons exec into /Users/* regardless of
+# DAC permissions, so a nvm/mise-managed node silently exits EX_CONFIG.
 #
 # It creates a dedicated system account + client group, a 0700 credential
 # home, a 0750 socket directory, /etc/dsh-ssh-broker/broker.json and the
@@ -64,18 +69,20 @@ case "$(uname -s)" in
     RUN_DIR=/usr/local/var/run/dsh-ssh-broker
     AUDIT=$HOME_DIR/audit.jsonl
     next_id() {
-      dscl . -list "$1" UniqueID 2>/dev/null | awk '{print $2+0}' | sort -n | tail -1 | \
-        awk '{value = ($1 >= 400 ? $1 + 1 : 401); print value}'
+      # $1 record collection, $2 its numeric id attribute (users use UniqueID,
+      # groups use PrimaryGroupID — asking /Groups for UniqueID lists nothing).
+      dscl . -list "$1" "$2" 2>/dev/null | \
+        awk '{n = $2+0; if (n > max) max = n} END {print (max >= 400 ? max + 1 : 401)}'
     }
     if ! dscl . -read "/Groups/$CLIENT_GROUP" >/dev/null 2>&1; then
-      GROUP_ID=$(next_id /Groups)
+      GROUP_ID=$(next_id /Groups PrimaryGroupID)
       dscl . -create "/Groups/$CLIENT_GROUP"
       dscl . -create "/Groups/$CLIENT_GROUP" PrimaryGroupID "$GROUP_ID"
       dscl . -create "/Groups/$CLIENT_GROUP" RealName "DSH SSH Broker Clients"
     fi
     if ! dscl . -read "/Users/$BROKER_USER" >/dev/null 2>&1; then
-      USER_ID=$(next_id /Users)
-      BROKER_GROUP_ID=$(next_id /Groups)
+      USER_ID=$(next_id /Users UniqueID)
+      BROKER_GROUP_ID=$(next_id /Groups PrimaryGroupID)
       dscl . -create "/Groups/$BROKER_USER"
       dscl . -create "/Groups/$BROKER_USER" PrimaryGroupID "$BROKER_GROUP_ID"
       dscl . -create "/Users/$BROKER_USER"
