@@ -274,3 +274,14 @@ rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留�
 - **会话权威**：槽是 `session` scope，composed props 的 `sessionId` 是确定值；不要在 hero occupant 里回退到全局 current-session 解析（侧栏 fallback 是另一条路径）。
 - **形态约束**：与相邻 workspace / 模式选择器同几何，但因打开对话框而非菜单**没有 chevron**；图标优先 `IconWorkspaceTreeOutlineRegular`，旧运行时经 `selectIconOr` 回退 `IconFolderOpen`（不使用像素时代名）；文字在左、icon 在右，以贴合该行右对齐的阅读顺序；trigger 另加 `margin-right: 4px`，因为上游行 padding 是 `0 16px 0 20px`，这样按钮盒与工作区选择器一样内缩 20px。hero 行没有容器祖先，`≤560px` 用视口媒体查询退化为 28×28 图标按钮。上游若改成容器查询，再同步切换。
 - **无 DOM 钩子**：入口只依赖槽位契约；上游改名或移除该槽时按上面的缺席路径静默退化，不需要目检表更新。
+
+## 17. DSH 0.2.2-rc.2 候选与发布会话
+
+- **状态**：上游 tag `dsh-v0.2.2-rc.2` 指向 `ddac96760b`，但 npm 的 `latest` / `next` 仍是 `0.2.2-rc.1`，该精确版本不可安装。`SUPPORTED_DSH_RELEASES`、peer 范围与开发 pin 因此**保持不变**；适配代码先落 `feat/adapt-1111-rc2`，提升按 §16 与[迁移审查](../../docs/reference/dsh-0.2.2-migration.md#022-rc2-后续审查2026-11-11)的步骤在发布后执行。
+- **新增接缝**：`dsh-sandbox` 用 `SandboxPreparationError` / `SandboxEscalationError` 取代未编码错误，Windows ACL 不再因额外根报错而是进程侧忽略；`SandboxPolicyService.registerWritableRoot` 让 Session 把目录并入 `resolve()` 的额外根；`workspaceFiles.search` 用打包 rg 经 `ctx.subprocess` 搜索；`dsh-error` 成为 `HarnessError` 的新共享基类；`dsh-subprocess` 与 `working-directory` 改为编码错误，后者新增 `working-directory/access` waterfall。插件均按结构消费，未新增版本判断。
+- **安静陷阱 1（Windows ACL 语义翻转）**：上游在 Windows 进程侧**忽略** `additionalWritableRoots`，只让文件工具执行；插件自己 scope 根的进程授予仍来自 `widenWindowsProfile` 拼进的 ACE 参数，两者不可混为一谈。`tests/upstream-additional-roots.spec.ts` 的 per-Session 小节钉住“原生注册根可被 fs fence 写入、scope read-only deny 仍胜出”。
+- **安静陷阱 2（authority 降级优先）**：`registerWritableRoot` 的根随 policy 进入 `writableRoots()` 与 POSIX profile，但插件在 authority unavailable 时仍只保留主根与显式 deny；不要把“上游已授权”当作可用 authority 的证据。
+- **安静陷阱 3（搜索根）**：`workspaceFiles.search` 只做共享 authority 的 admission，不做多根路由——搜索根是 Session cwd。接管附加根时原生搜索条、状态行与 Files 页开关随原生 body 一起隐藏；primary 根浏览保持上游原样。
+- **安静陷阱 4（fork 基线）**：rc.2 的 `ui-open-in-app` 复刻源只改注释并新增 `menu.openIn`；fork 继续钉 rc.1，提升时按 `src/client/open-in-app/FORK.md` 重拷并把 baseline 移到 `ddac96760b`。files-tree 旧版复刻仍钉 alpha.2。
+- **契约检查**：`@deepseek-ai/dsh-error` 已加入 `OPTIONAL_CORE_PACKAGES` 与 `HOST_SERVICE_PACKAGES`（只经宿主锚点作证，发现跨包单例混装）；**不要**把它写进 `peerDependencies`——rc.1 没有该包，会让旧宿主安装失败。
+- **候选验证**：在从 tag 构建的一次性树（宿主 `tsc` + `tsdown`，平铺安装）上临时把 allowlist / peer / dev pin 指向 rc.2 跑 enforce：`compat:check`、双端 typecheck、完整 vitest（**1368 通过 / 162 跳过 / 17 失败**）与 `pack:check` 通过。17 个失败全部是当前 Seatbelt 会话的 sandboxed-peer registry IPC 用例；rc.1 基线在同一环境同样失败 17 个（1364 / 166）。三 OS 矩阵、真实 Host smoke、浏览器目检与 Windows ACL 原生结果仍待发布后的 CI。

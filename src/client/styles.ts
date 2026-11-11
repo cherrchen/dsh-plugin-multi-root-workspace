@@ -349,6 +349,24 @@ aside[data-mrfw-navigator] > [data-files-body] {
   display: none;
 }
 
+/* Upstream 0.2.2-rc.2 added the navigator's workspace search bar above the
+   tree, plus a Files-page header toggle that opens it. The bar searches the
+   SESSION's working directory and draws its results into the native body;
+   while a takeover shows another root's tree that body is hidden, so the bar
+   would offer a search rooted at the primary root whose result can never
+   appear. Hide the bar and its status line with the native body they belong
+   to, and the header toggle under the same additional-root condition as the
+   native reload. Primary-root browsing keeps the untouched upstream bar. */
+aside[data-mrfw-navigator] > div:has([data-files-search]),
+aside[data-mrfw-navigator] > [data-files-search-status] {
+  display: none;
+}
+
+[data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-search-toggle],
+[data-files-page]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-search-toggle] {
+  display: none;
+}
+
 /* The reveal's current row, the fork's spelling of upstream's .current:
    the interactive-active fill, kept under hover exactly as the native
    tree's current row keeps it. */

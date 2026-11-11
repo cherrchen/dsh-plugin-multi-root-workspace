@@ -19,6 +19,7 @@ import { Context } from '@deepseek-ai/cordis'
 import * as sandboxPackage from '@deepseek-ai/dsh-sandbox'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import type { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import type { SandboxInternals } from '@deepseek-ai/dsh-sandbox-local'
@@ -40,6 +41,23 @@ const COMMAND = ['bash', '-c', 'echo hi']
 
 const hasUpstreamAdditionalRoots = typeof (sandboxPackage as Record<string, unknown>).workspaceWritableRoots === 'function'
 
+/**
+ * 0.2.2-rc.2 added the per-Session grant seam on the policy service. Probe
+ * the prototype by name: on an older release the member is absent and the
+ * section skips with that reason instead of pretending the composition exists.
+ */
+const hasRegisterWritableRoot = typeof (SandboxPolicyService.prototype as unknown as {
+  registerWritableRoot?: unknown
+}).registerWritableRoot === 'function'
+
+/** The structural face of the rc.2 Session grant, used without depending on its declaration. */
+interface SessionWritableRoots {
+  registerWritableRoot(session: Session, directory: string): () => void
+}
+
+/** The directory a registered Session grant points at, beside the fixture workspace. */
+let sessionRoot = ''
+
 const fibers: Array<Awaited<ReturnType<Context['plugin']>>> = []
 let fixture: FixtureWorkspace
 /** The native extra writable root (X) and the outside-neither root (Z). */
@@ -50,8 +68,10 @@ beforeEach(async () => {
   fixture = createFixtureWorkspace('upstream-roots')
   nativeRoot = join(fixture.base, 'native')
   outsideEvery = join(fixture.base, 'neither')
+  sessionRoot = join(fixture.base, 'session-grant')
   await mkdir(nativeRoot, { recursive: true })
   await mkdir(outsideEvery, { recursive: true })
+  await mkdir(sessionRoot, { recursive: true })
 })
 
 afterEach(async () => {
@@ -154,6 +174,66 @@ describe.skipIf(!hasUpstreamAdditionalRoots)('native additionalWritableRoots com
     expect(await write(join(fixture.outside, 'fence-scope.txt')), 'scope additional root').toBe('allow')
     expect(await write(join(fixture.workspace, 'fence-primary.txt')), 'primary root').toBe('allow')
     expect(await write(join(outsideEvery, 'fence-outside.txt')), 'outside every root').toBe('deny')
+  })
+})
+
+describe.skipIf(!hasRegisterWritableRoot)('native per-Session writable roots composed with the scope (POSIX runner argv only)', () => {
+  /**
+   * Mount the plugin world and register one Session-scoped directory through
+   * the rc.2 policy seam, exactly as an upstream consumer would.
+   * @param dialect - the forced runner dialect.
+   * @returns the mounted world and the Session holding the grant.
+   */
+  async function sessionWorld(dialect: Dialect): Promise<{ world: World; session: Session }> {
+    const world = await mountWorld(dialect)
+    const id = SessionId('sess-native-writable-root')
+    const session = Session.create(id, undefined, {
+      version: SESSION_FORMAT_VERSION,
+      id,
+      createdAt: 0,
+      isSeeded: false,
+      cwd: fixture.workspace,
+    })
+    ;(world.ctx.sandboxPolicy as unknown as SessionWritableRoots).registerWritableRoot(session, sessionRoot)
+    return { world, session }
+  }
+
+  it('spells the registered directory beside the scope root as a writable grant, per dialect', async () => {
+    for (const dialect of DIALECTS) {
+      const { world, session } = await sessionWorld(dialect)
+      const resolved = world.ctx.sandboxPolicy.resolve({ session })
+      expect(resolved.additionalWritableRoots, `${dialect}: the policy resolves the registration`).toContain(canonicalPath(sessionRoot))
+      const ours = await confined(world.provider, COMMAND, resolved)
+      const grants = parseConfined(ours.argv, COMMAND)
+      expect(grants.dialect, dialect).toBe(dialect)
+      expect(grants.subpaths, `${dialect}: Session-registered root`).toContain(canonicalPath(sessionRoot))
+      expect(grants.subpaths, `${dialect}: scope additional root`).toContain(canonicalPath(fixture.outside))
+      expect(grants.subpaths.filter(path => path === canonicalPath(sessionRoot)), dialect).toHaveLength(1)
+    }
+  })
+
+  it('lets the fs fence write the registered directory, while a scope read-only denial still wins', async () => {
+    const { world, session } = await sessionWorld('seatbelt')
+    const policy = world.ctx.sandboxPolicy.resolve({ session })
+    const write = async (path: string): Promise<'allow' | 'deny'> => {
+      const target = await world.ctx.fs.resolve(path)
+      try {
+        await world.ctx.fs.writeText(target, 'payload', undefined, undefined, policy)
+        return 'allow'
+      } catch (error: unknown) {
+        if (error instanceof FsError && (error as FsError & { code?: string }).code === 'FS_SANDBOX_DENIED') return 'deny'
+        throw error
+      }
+    }
+    expect(await write(join(sessionRoot, 'fence-native.txt')), 'the registered directory is upstream-writable and fence-visible').toBe('allow')
+    // The same directory as an explicit read-only scope root: deny precedes
+    // containment, so the native grant must not carry the write.
+    world.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [
+      { id: 'root-0', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' },
+      { id: 'root-1', path: sessionRoot, recordedPath: canonicalPath(sessionRoot), access: 'read-only' },
+    ])
+    expect(await write(join(sessionRoot, 'fence-denied.txt')), 'a scope read-only denial outranks the native registration').toBe('deny')
+    expect(existsSync(join(sessionRoot, 'fence-denied.txt'))).toBe(false)
   })
 })
 

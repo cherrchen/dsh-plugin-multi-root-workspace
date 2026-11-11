@@ -136,7 +136,13 @@ export function apply(ctx: Context): void {
       const admissionRestores: Array<() => void> = []
       {
         const methods = service as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
-        for (const key of ['list', 'stat', 'read', 'readBytes', 'readAll', 'readRelated']) {
+        // 'search' arrived at 0.2.2-rc.2. It is admitted like every other
+        // read so a shared-authority Host orders it at the owner, but it is
+        // deliberately NOT routed: the upstream search is rooted at the
+        // Session's cwd and the plugin offers no additional-root search UI,
+        // so there is no path to translate (see the takeover rules in
+        // client/styles.ts for the hidden native bar).
+        for (const key of ['list', 'stat', 'read', 'readBytes', 'readAll', 'readRelated', 'search']) {
           if (typeof methods[key] !== 'function') continue
           admissionRestores.push(wrapMethod(methods, key, original => async function(this: unknown, ...args: unknown[]) {
             const request = args[0] as WorkspaceFileScope

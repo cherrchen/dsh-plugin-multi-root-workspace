@@ -69,3 +69,43 @@
 `confine` 的返回形状、方言 grant、工具 dispatch、PTY 标记、Session/projection、Registry storage、Skills、Connection RPC 和 bundle 行锚点都沿用 alpha.3 的实现，无需新增适配器分支。上游 Files 的 `data-files-page` / `data-files-content`、`sidebar.files.tree` Factory、dockkit 与 open-in-app 钩子未变。open-in-app 六个 fork 文件与 locale 键集保持一致，出处记录提升到 rc.1；旧版 files-tree 仍保留 alpha.2 基线。可选 Auto Review 仍钉 `0.2.1-rc.2`。
 
 原生平台、正式门禁、旧版回归与浏览器目检证据见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#dsh-022-rc1-兼容适配2026-11-05)。
+
+## 0.2.2-rc.2 后续审查（2026-11-11）
+
+上游 tag `dsh-v0.2.2-rc.2` 指向 `ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`。发布状态必须先说明：本审查时 npm 的 `latest` / `next` 仍指向 `0.2.2-rc.1`，`@deepseek-ai/dsh@0.2.2-rc.2` 在 registry 上返回 `PACKAGE_NOT_FOUND`。因此本分支只落**适配**，不提升 `SUPPORTED_DSH_RELEASES`、peer 范围与开发 pin；提升仍按 ADR-0009 在精确发布包上跑完升级车道与矩阵后进行（步骤见文末与 `.agent/note/dsh-compat-contract.md` §17）。
+
+对照 `0.2.2-rc.1`（`66491b05e3`），rc.2 的仓库 patch 涉及 4645 个文件；下列是插件实际依赖的接缝。
+
+| 接缝 / 上游源码 | 变化 | 分类与插件处理 |
+|---|---|---|
+| `dsh-sandbox` / `dsh-sandbox-local` / `dsh-sandbox-policy` / `dsh-sandbox-windows-acl` | `SandboxUnsupportedPolicyError` 删除，新增 `SandboxPreparationError`（`SANDBOX_PREPARATION_FAILED` / `SANDBOX_INVALID_TEMP_ROOT`，保留 `cause`）与 `SandboxEscalationError`（`SANDBOX_ESCALATION_*`）；Windows ACL 不再因 `additionalWritableRoots` 拒绝执行，进程侧忽略这些额外根、文件工具仍执行；`isTempRootInsideWorkspace` 与 `assertTempRootOutsideWorkspace` 并存；`workspaceWritableRoots` 的额外根比较改用 `relative()`（接受 Windows 大小写/分隔符差异），`writableRoots`、`SandboxExecutionPolicy`、`confine` 形状未变 | 无需新适配分支：插件 fs fence 从 `writableRoots(policy)` 起算，上游额外根自动进入文件写入集；deny 仍先于包含判断；authority unavailable 仍钳制到主根；Windows 进程 profile 只拼接插件 scope 根。`SandboxPreparationError`/新增 escalation 码只影响上游错误分类，插件不按错误类路由；真实 ACL 失败仍 fail-closed。结构化回归：`tests/upstream-additional-roots.spec.ts` 的 per-Session 小节，以及 `tests/sandbox-multi-root.spec.ts` 的 Windows ACL 组合用例（scope 根进入进程 profile，上游额外根不进入） |
+| `dsh-sandbox-policy` 会话级授权 | 新增 `registerWritableRoot(session, directory): () => void`；`resolve({ session })` 把配置根与当前 Session 的活注册合并进 `additionalWritableRoots`，注册是运行时事实、恢复/分叉后不自动恢复；`sessionWorkspaceRoot` 对非法 cwd 抛 `SandboxInvalidRootError` | 上游第三个原生可写根通道。插件不设置该字段，但继承的 provider 与 fs fence 会消费它：POSIX 方言把注册根写进同一 profile，fs fence 允许其写入；scope 的 `read-only` deny 仍在包含判断前拒绝（回归钉住“deny 胜过原生注册”）；Windows 进程侧按上游语义忽略，文件工具仍生效；authority unavailable 时插件仍只保留主根。未新增公开 API，仅在兼容审查与契约文档记录 |
+| `dsh-api-workspace-files` + `dsh-util-ripgrep` | 新增 `WorkspaceFiles.search(scope, request, signal)`：打包 `rg --files`，经 `ctx.subprocess` 执行，新增 `search` 预算配置与 `workspace-file/search-failed`，并新增 `@deepseek-ai/dsh-util-ripgrep` / `@vscode/ripgrep` 依赖；`/types` 增加搜索请求、匹配与结果类型 | `src/workspace-files.ts` 把 `search` 纳入共享 authority 的 `withOperation(..., 'files', ...)` 排序（与其他文件读同一 admission），但**不路由**：搜索根是 Session cwd，插件没有附加根搜索 UI，路由无目标。未改上游 codec 与读取上限 |
+| `ui-sidebar-files` | 新增导航器搜索条/结果树/搜索设置，store actions `searchBarShown`/`queried`/`searching`/`searched`/`searchToggled`，`FilesInjected` 增加 `setQuery`/`toggleSearch`/`retrySearch`/`setSearchPreferences`/`searchDrawn` 与 `keyedHooks.searchPreferences`；`sidebar.files.tree` Factory 增加可选 `highlight`、目录状态增加 `omitted`；页面新增 `data-files-search`、`data-files-search-status`、`data-files-search-toggle`、`data-files-view`；`focus()` 改为聚焦搜索框，Files 页搜索条由页头开关控制 | 旧版复刻树仍钉 alpha.2，行级定义不变；接管（Files 页附加根、预览导航重定向）时原生 body 已隐藏，搜索条、状态行与页头开关随 body 一起隐藏，避免“搜索主根、结果画进隐藏 body”的死控件；primary 根浏览保持上游原样。`focus()` 不再把键盘交给被接管的树（树行仍可 Tab/点击），作为已知降级记录；新增 CSS 规则与 DOM 回归见 `tests/client-styles.spec.ts` |
+| `ui-open-in-app` | 两个复刻源只改注释；locale 新增 `menu.openIn`；Session header 入口迁往 context menu / `session-open-with`（不在 fork 范围） | fork 仍钉 rc.1 基线；下一次开发 pin 移动时按 `src/client/open-in-app/FORK.md` 重拷并移动 baseline。当前不拷注释，避免 provenance 与 dev pin 分叉 |
+| `ui-slots` / `ui-context-menu` / `ui-primitives` / `ui-renderer` | 新增 `hoc` slot kind 与 `contextMenu.button` Factory；`contextMenus.open` 增加 options、`registeredKinds`；移除 `useAnchoredPosition`，新增 `anchorPoint`、图标与 markdown 面 | 插件只使用 `slots.register`、`contextMenus.register`、`Menu`/primitives 的已探测导出；`open` 的调用面未使用，无适配 |
+| `dsh-error`（新包） | `HarnessError` 基类迁入新共享包；`dsh-llm` re-export；`dsh-sandbox`、`dsh-subprocess`、`dsh-working-directory` 直接使用。跨包 `instanceof` 依赖宿主单例 | 加入 `OPTIONAL_CORE_PACKAGES` + `HOST_SERVICE_PACKAGES`，只经宿主锚点作证，用于发现混装；**不**列入 `peerDependencies`（rc.1 不存在该包，列入会让旧宿主安装失败）。插件不 import 它 |
+| `dsh-subprocess` | 新增 `SubprocessError` / `SUBPROCESS_*`、`subprocessSpawnFailure`；`SubprocessExecutableNotFoundError` 改为编码错误；Linux launch 请求新增 `pipeFds`；Windows runner IPC 失败改为编码错误 | 插件 spawn 包装只改 argv 或按已铸造 profile 拒绝，按结构探测，不解析错误类；无适配 |
+| `dsh-session` / `session-projection` / `working-directory` | `Session.append` 增加数组 overload；`working-directory/access` waterfall 与 `WorkingDirectoryError` 码；projection `stateVersion` 文档收紧 | 插件不包装 `Session.append`、不消费 `working-directory/access`；无适配 |
+| `dsh-fs` | 新增 `fsErrorFromErrno`、`FS_ALREADY_EXISTS`，`FsError` 显式设置 `name` | 插件不按错误名或新码路由；无适配 |
+| runtime-context 提醒、plugin-manager `BundleInfo.update`、`TerminalBackendCleanupError`、attachment 错误码、tool-fs/read_image | 各自语义变化 | 不在插件接缝；插件 runtime-context 贡献仍走上游公开 API，自动继承 reminder 包装 |
+
+环境要求与 rc.1 相同：Node `>=24.9`、Cordis `4.1.0`、Schemastery `3.19.0`；可选 Auto Review 仍钉 `0.2.1-rc.2`。
+
+### 本分支的验证（候选发布尚未上 npm）
+
+rc.2 未发布，不能按 normal lane 安装；因此用一个**一次性候选树**执行真实代码验证：从 tag 构建 rc.2 的沙箱、subprocess、workspace-files、working-directory、session-projection、fs、llm 包（宿主面 `tsc` + `tsdown`），把候选包以平铺真实目录装进插件副本的 `node_modules`，再临时把 allowlist / peer / dev pin 指向 rc.2 跑 enforce 车道。该候选树不入库、不改上游 checkout。
+
+- `compat:check`：allowlist、peer、开发 pin、安装树一致；
+- 双端 `tsc --noEmit`：通过；宿主 bundle 与 `pack:check`：通过；
+- 完整 `vitest`：**1368 通过 / 162 跳过 / 17 失败**。17 个失败全部是共享 authority 的核内 IPC 用例（`registry-*` / `authority-boundaries` / `b9-review-regressions` / `skills-authority` / `skills-registry`）：本会话运行在 DSH 自身的 Seatbelt 内，Peer 凭据被识别为 sandboxed peer，rc.1 基线在同一环境同样失败 **17** 个（**1364 通过 / 166 跳过**，同一工作树）；rc.2 比 rc.1 多通过的 4 个正是本次新增、只在 rc.2 执行的用例（两个 `registerWritableRoot`、一个 `search` admission、一个 Windows ACL 进程授权）。真实三 OS 矩阵、真实 Host smoke、浏览器目检与 Windows ACL 原生结果待 rc.2 发布后由 CI 给出。
+
+### 提升步骤（发布后）
+
+1. 确认 npm 上 `0.2.2-rc.2` 可解析，`node scripts/upgrade-dsh.mjs 0.2.2-rc.2` 重指 devDependencies / release-age / 生态 pin；
+2. 在 `SUPPORTED_DSH_RELEASES` 末尾加入 `0.2.2-rc.2`，同步所有 DSH peer 的精确或列表与 dev pin；刷新 lockfile（不要提交 probe overrides）；
+3. 重拷 open-in-app 复刻源并移动 FORK.md 基线到 `ddac96760b`（rc.2 只有注释与 `menu.openIn` 差异）；
+4. `DSH_MULTI_ROOT_COMPAT=warn pnpm verify:all`，再以 enforce 重跑 `compat:check` 与完整矩阵；三 OS 的 registry IPC 用例必须全绿；
+5. 更新 `README` 的支持矩阵、`AGENTS.md` 的发布清单、CHANGELOG（按发布流程）与路线账本的执行证据。
+
+执行证据、平台覆盖与发布状态只维护在[路线图账本](../plans/active/2026-09-12-multi-root-workspace.md)。

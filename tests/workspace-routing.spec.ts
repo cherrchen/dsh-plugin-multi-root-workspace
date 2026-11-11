@@ -103,6 +103,9 @@ function hasPathWatch(service: WorkspaceFiles): boolean {
 // takes a plain range. Newer hosts fold readRelated into readBytes options.
 const supportsBaseFile = typeof (WorkspaceFiles.prototype as WorkspaceFiles & { readRelated?: unknown }).readRelated !== 'function'
 
+/** `workspaceFiles.search` arrived at 0.2.2-rc.2; older releases never declare it. */
+const hasUpstreamSearch = typeof (WorkspaceFiles.prototype as unknown as { search?: unknown }).search === 'function'
+
 describe('workspace-files isolation', () => {
   it('lists each root through the original caps and rejects unrelated directories', async () => {
     const { service, scope } = await files()
@@ -235,6 +238,35 @@ describe('workspace-files isolation', () => {
     expect(Object.getOwnPropertyDescriptor(service, 'readBytes')).toBeUndefined()
     const file = join(fixture.outside, 'same.ts')
     expect((await service.stat(scope, file, new AbortController().signal)).absolutePath).toBe(canonicalPath(file))
+  })
+
+  it.skipIf(!hasUpstreamSearch)('admits workspace search at the shared Registry like every other file read', async () => {
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    // The seam under test is admission, not ripgrep execution: answer a
+    // settled empty result and let the wrapper be the observable.
+    Object.defineProperty(raw, 'search', {
+      configurable: true,
+      writable: true,
+      value: async () => ({ matches: [], truncated: false, incomplete: false }),
+    })
+    await ctx.plugin(FilesRouting)
+    const calls: Array<{ readonly kind: string; readonly policy: unknown }> = []
+    ctx.provide('multiRootRegistry', {
+      shared: true,
+      withOperation: async (policy: unknown, kind: string, body: () => Promise<unknown>) => {
+        calls.push({ kind, policy })
+        return body()
+      },
+    } as never)
+    const answer = await ctx.workspaceFiles.search(
+      { sessionId: 's' as never, workspaceRoot: fixture.workspace },
+      { query: 'x', excludedPaths: [], includeHidden: false, respectGitignore: false },
+      new AbortController().signal,
+    )
+    expect(answer).toEqual({ matches: [], truncated: false, incomplete: false })
+    // The admission names the session's primary root and the Files operation
+    // kind, exactly like list/stat/read; the wrapper never rewrites the call.
+    expect(calls).toEqual([{ kind: 'files', policy: { workspaceRoot: fixture.workspace, mode: 'read-only' } }])
   })
 
   it.skipIf(!supportsBaseFile)('refuses slash, backslash and mixed tails into a withheld root', async () => {
