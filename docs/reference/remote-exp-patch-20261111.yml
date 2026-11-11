@@ -1,0 +1,29 @@
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+- id: multi-root-registry
+  config:
+    sharedStorageRoot: !!js dshHomePath('storages')
+    leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+    remoteEnvironments:
+      enabled: true
+      manifestPath: /etc/dsh-remote/manifest.json
+- insert:
+  - id: multi-root-remote-tools
+    name: '@dsh-electron/dsh-plugin-multi-root-workspace/remote-tools'
+    config:
+      broker:
+        config:
+          socketPath: /run/dsh-ssh-broker/broker.sock
+          brokerUid: 996
+          credentialRoot: /var/lib/dsh-ssh-broker
+          fullAccessDisabled: true
+          confinementProbe:
+            verified: true
+            evidence: 'vps-20261111-entry-isolation'

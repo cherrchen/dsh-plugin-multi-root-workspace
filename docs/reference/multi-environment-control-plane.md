@@ -1,6 +1,6 @@
 # 多执行环境 G1a：远端控制面参考
 
-本文是 [G1a](../plans/active/2026-11-06-multi-environment-gates.md) 已实现控制面的稳定技术参考：部署清单格式、远端记录域、`remote-1` 协议入口、Host 侧准入接口及拒绝码。架构合同归 [ADR-0030](../decisions/ADR-0030-environment-and-root-identity.md)；验证结果与关卡状态只归[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md#多执行环境-g1a-控制面2026-11-07)。可选的 broker 证明行（`remote-tools`）会安装端点校验器、`remote_copy`/`remote_bash` 与能力投影；默认组合不挂载任何模型可见的远端能力，且在 Linux/systemd/GUI 部署证据齐备前保持模型侧关闭。
+本文是 [G1a](../plans/active/2026-11-06-multi-environment-gates.md) 已实现控制面的稳定技术参考：部署清单格式、远端记录域、`remote-1` 协议入口、Host 侧准入接口及拒绝码。架构合同归 [ADR-0030](../decisions/ADR-0030-environment-and-root-identity.md)；验证结果与关卡状态只归[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md#多执行环境-g1a-控制面2026-11-07)。可选的 broker 证明行（`remote-tools`）会安装端点校验器、`remote_copy`/`remote_bash` 与能力投影；默认组合不挂载任何模型可见的远端能力。2026-11-11 外部评审通过后，模型侧仍默认关闭；是否为具体部署开启由维护者签收后决定。
 
 ## 开关与状态
 
@@ -258,11 +258,12 @@ Host <env-alias>
 
 **已知限制。** 托管账户持有全部密钥；Host 与 Agent 同 UID，因此“Agent 不能到达 socket”只能由部署的沙箱路径拒绝证明（`confinementProbe`），不能由本代码自证；`danger-full-access` 下 Agent 进程不受本机沙箱约束，必须与这些凭据互斥。socket 是长驻接口，进程崩溃后由 unit 重启，但 Host 不自动重建连接；重新启用必须重走证明。同 UID 测试模式（`allowSameUidForTesting`/`allowRestrictedForTesting`）只用于协议测试，生产入口没有开关。
 
-## 模型开放的前置阻断项（当前状态：BLOCKED）
+## 模型开放的前置阻断项（当前状态：评审通过；模型入口仍默认关闭，维护者签收待定）
 
-以下均为开放前提，不是可选项；各项标注其实现与验证状态。全部满足前 `remote-tools` 行不得对模型开放，当前维护者决定保持模型侧关闭：
+以下均为开放前提，不是可选项；各项标注其实现与验证状态。2026-11-11 外部评审已复核通过（[评审报告](../reviews/2026-11-11-model-entry-evidence-review.md)），但 `remote-tools` 行仍不得自动开放：默认组合不启用 `remoteEnvironments`，是否为具体部署开启由维护者签收后决定。
 
 - **配额**：**已实现并实机验证**（2026-11-11 `.87`）——broker 端 `RollingQuota` 滚动时间窗预算（清单 `environments[].quotas` 每环境 + 顶层 `quotas` 全局），对每个环境绑定请求计操作数、对 `sftp read`/`write` 计费载字节，耗尽即 `quota-exceeded`，窗口随到达时间滚动恢复、被拒请求不计费；单文件/单请求/在飞数上限不变。生产清单已声明预算（env `{1h,20000 ops,512GiB}`、全局 `{1h,50000 ops,1TiB}`），live 复验 6/6；on-disk 配额未实现（部署者可另以 systemd `CPUQuota`/`MemoryMax`/`TasksMax` 与文件系统配额作纵深，不构成替代）。
 - **审计**：**已实现并实机验证**（2026-11-11 `.87`）——broker 内建按 `auditMaxBytes`（默认 8 MiB）+ `auditKeep`（默认 4）的链式轮转，`audit.jsonl.N` 0600 broker 属主，启动拒绝外国属主/symlink 占用；实机观察到 2.1MB 追加文件按预算轮转、`.1-.N` 保留上限成立；与外部 logrotate 兼容（`appendFileSync` 每次写都重新 open）。
 - **吊销**：**已实现并实机验证**（2026-11-11 `.87`）——清单 `revocations` 显式拒绝清单随摘要双方校验，被吊销环境的一切环境绑定方法拒绝 `environment-revoked`（`dispose` 放行清理）；停用/移除绑定并重启 broker + Host 重新证明后，已记录的 `unknown` 只许对账，**绝不**重放。
-- **部署证据**：Linux 实机 unit（`ActiveState`、PrivateTmp、socket 私访探针）已有 2026-11-10/11 协议 3 记录，配额/审计/吊销三项已于 2026-11-11 实机验证；GUI 宿主证据已于 2026-11-11 在本机 DSH Web 实测取得（[`remote-gui-host-evidence-20261111.json`](remote-gui-host-evidence-20261111.json)：attestation 通过、工具入模型目录、Workspace Folders 面板登记/撤销走真实 RPC、停用后能力消失）；跨平台矩阵已于 2026-11-11 实机补齐（[`remote-macos-matrix-evidence-20261111.json`](remote-macos-matrix-evidence-20261111.json)：macOS launchd 发起端（`install.sh` Darwin 分支实跑修复两处缺陷）、macOS 目标 `platform:"darwin"` 经完整 ssh+helper+seatbelt 路径、Windows 目标在清单解析即 `windows-target-unsupported`；原生 Windows 发起端按 ADR-0030 延后）。
+- **部署证据**：Linux 实机 unit（`ActiveState`、PrivateTmp、socket 私访探针）已有 2026-11-10/11 协议 3 记录，配额/审计/吊销三项已于 2026-11-11 实机验证；GUI 宿主证据已于 2026-11-11 在本机 DSH Web 实测取得（[`remote-gui-host-evidence-20261111.json`](remote-gui-host-evidence-20261111.json)：attestation 通过、工具入模型目录、Workspace Folders 面板登记/撤销走真实 RPC、停用后能力消失）；跨平台矩阵已于 2026-11-11 实机补齐（[`remote-macos-matrix-evidence-20261111.json`](remote-macos-matrix-evidence-20261111.json)：macOS launchd 发起端（`install.sh` Darwin 分支实跑修复两处缺陷）、macOS 目标 `platform:"darwin"` 经完整 ssh+helper+seatbelt 路径、Windows 目标在清单解析即 `windows-target-unsupported`；原生 Windows 发起端按 ADR-0030 延后）。2026-11-11 外部评审复核了上述记录与 HEAD 回归，结论为证据达标（PASS），但默认组合仍保持关闭。
+- **默认关闭与签收**：评审通过不等于开启。默认 `cordis.patch.yml` 不包含 `remote-tools`，也不配置 `remoteEnvironments`；开启仅限维护者签收后的具体部署专用 profile。2026-11-11 的运行时审计已在 `.87` 上核实 `remote-exp`/`stock-exp` 均只有受限预设、伪造 `danger-full-access` 被守卫拒、无第三个 profile（[`remote-profile-audit-20261111.json`](remote-profile-audit-20261111.json)），`stock-exp` 已不再是 unpatched 状态；签收时确认不新增 unrestricted profile/Agent 入口，并按“停用与回滚”步骤保留退路。

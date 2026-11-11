@@ -1,0 +1,73 @@
+# 2026-11-11 external review re-run
+
+- branch: feat/ssh-workspace
+- head: 83b76e41ec5f332499b232e6b25b276c437eb8b0
+- package: @dsh-electron/dsh-plugin-multi-root-workspace 0.1.17-ssh.1
+- DSH: 0.2.2-rc.1
+- Node: 24.18.0
+- host: macOS arm64 (Darwin 25.1.0), outside the DSH Agent sandbox
+
+The DSH Agent sandbox makes shared Registry IPC refuse sandboxed peers:
+`pnpm registry:probe` reports "the Host itself is sandboxed". A sandboxed
+`pnpm test` therefore fails 18 shared-authority cases with `contended`; that
+run is an environment artifact, not a product result. The commands below were
+run with a one-shot wider sandbox so the kernel peer check is meaningful.
+
+## Full suite
+
+command: `pnpm test --reporter=json --outputFile=.review-tmp/vitest-head.json`
+result: **1562 passed / 131 skipped / 0 failed** (1693 tests; 106 files passed, 8 skipped, 114 total)
+raw report: `ssh-review-20261111-vitest.json`
+sha256: dd9e96700b00a51b04eb73b76b1b007847a2a7bf33ea2761ad1978800c0325b3
+
+`pnpm registry:probe --required` passes outside the sandbox; it fails the
+required check inside the Agent sandbox with:
+"the Host itself is sandboxed; shared IPC refuses sandboxed peers".
+
+## F13 targeted tests
+
+command: `pnpm vitest run tests/remote-broker.spec.ts tests/remote-manifest.spec.ts tests/remote-tools.spec.ts tests/remote-profile-guard.spec.ts tests/remote-journey.e2e.ts`
+
+- tests/remote-broker.spec.ts: 39/39
+- tests/remote-manifest.spec.ts: 42/42
+- tests/remote-tools.spec.ts: 12/12
+- tests/remote-profile-guard.spec.ts: 13/13
+- tests/remote-journey.e2e.ts: 8/8
+- total: **114 passed / 0 failed**
+
+## Repository checks
+
+- `pnpm lint`: 0 warnings / 0 errors
+- `pnpm compat:check`: allowlist, peerDependencies, dev pin and installed tree agree
+- `pnpm typecheck`: passed (optional Auto Review exact-version implementation check skipped, as designed)
+- `pnpm build`: passed (55 files)
+- `pnpm docs:check`: passed
+- `pnpm pack:check`: passed, 222 members
+- `pnpm kernel:probe`: Seatbelt executed a confined command; bwrap/Landlock unavailable on this host
+- `pnpm smoke:packed`: 136 passed / 0 failed / 0 skipped against the packed `0.1.17-ssh.1` tarball (the documented koffi build-approval recovery was exercised)
+
+## Smokes (outside the Agent sandbox)
+
+- `pnpm smoke:compose`: 54 passed / 0 failed / 0 skipped
+- `pnpm smoke:behavior`: 137 passed / 0 failed / 0 skipped
+- `pnpm smoke:journey`: 76 passed / 0 failed / 0 skipped
+
+The same smokes inside the Agent sandbox skip the kernel-runner cases
+(Seatbelt unavailable, shared IPC refuses sandboxed peers); those skips are
+not acceptance evidence.
+
+## Live evidence cross-check (not re-executed by this review)
+
+- `docs/reference/remote-entry-isolation-evidence-20261111.json`:
+  machine-generated Linux probe; host controls, three Agent entry points x
+  two restricted modes, forged full-access refusal, in-sandbox escalation
+  audit, disk reload + tamper refusal, second-profile live audit.
+- `docs/reference/remote-gui-host-evidence-20261111.json` + `.png`:
+  DSH Web/Chromium panel registration/removal over the plugin RPC channel;
+  screenshot sha256 verified against the record.
+- `docs/reference/remote-macos-matrix-evidence-20261111.json`:
+  macOS launchd broker, macOS target under seatbelt, Linux targets, and
+  Windows-target manifest rejection (`tests/remote-manifest.spec.ts` 42/42).
+- F13 `.87` socket probe and `remote-broker.live` 6/6 are maintainer live
+  records; the probe script/output was not archived in the repository. Code
+  and unit tests were reviewed and pass.

@@ -1,0 +1,9 @@
+# Scripted model endpoint request log (tool catalog only)
+# source: /tmp/dsh-model-requests.log on the GUI host
+# source sha256: 10282426fedf4fe8c9e0cca8361e84255ba5fb77929860c17e304ff4993636d1
+# request bodies omitted; the TOOLS line is the raw parsed tool-name list
+
+2026-11-11T06:43:45.332Z POST /v1/messages  ["ask_user_question","bash","create_goal","edit","get_goal","glob","grep","interrupt_agent","job_kill","job_list","job_output","list_agents","list_subagent_models","plugin_manager","present","read","read_image","schedule_create","schedule_edit","schedule_list","schedule_view","send_message","skill","subagent","subagent_fork","todo_write","update_goal","web_fetch","web_search","workflow","working_directory","write"]
+2026-11-11T06:50:48.955Z POST /v1/messages  ["ask_user_question","bash","create_goal","edit","get_goal","glob","grep","interrupt_agent","job_kill","job_list","job_output","list_agents","list_subagent_models","plugin_manager","present","read","read_image","schedule_create","schedule_edit","schedule_list","schedule_view","send_message","skill","subagent","subagent_fork","todo_write","update_goal","web_fetch","web_search","workflow","working_directory","write","remote_bash","remote_copy"]
+2026-11-11T06:57:51.329Z POST /v1/messages  ["ask_user_question","bash","create_goal","edit","get_goal","glob","grep","interrupt_agent","job_kill","job_list","job_output","list_agents","list_subagent_models","plugin_manager","present","read","read_image","schedule_create","schedule_edit","schedule_list","schedule_view","send_message","skill","subagent","subagent_fork","todo_write","update_goal","web_fetch","web_search","workflow","working_directory","write"]
+
