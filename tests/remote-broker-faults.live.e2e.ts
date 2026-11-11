@@ -89,7 +89,7 @@ liveDescribe('broker-side fault injection', () => {
     await m.stack.registry.addRemote(live.primary, { environmentId: 'vps-xfer', rootId: 'import' })
     const seeded = await runRemoteCommand(m.stack.registry, m.backendFor, {
       session: m.session(), environmentId: 'vps-app', rootId: 'app',
-      command: 'head -c 24M /dev/urandom > broker-big.bin && echo seeded', timeoutMs: 30_000,
+      command: 'head -c 256M /dev/urandom > broker-big.bin && echo seeded', timeoutMs: 30_000,
     } as never, 'remote_bash', new AbortController().signal)
     expect(seeded, JSON.stringify(seeded)).toMatchObject({ status: 'scope-exited', exitCode: 0 })
 
@@ -98,10 +98,11 @@ liveDescribe('broker-side fault injection', () => {
     // `target-exists` before streaming, which would also skip the trigger.
     const sftp0 = await m.manager.openSftp('vps-xfer')
     await sftp0.client.remove('/import/broker-killed.bin').catch(() => {})
-    // onStage('staging') fires as the stream begins: the kill lands mid-flow.
+    // onStage('preflight') fires right before the stream loop begins: the
+    // kill lands mid-flow rather than after the staging write completed.
     const killed = await runRemoteCopy(m.stack.registry, {
       manager: m.manager as never,
-      onStage: async stage => { if (stage === 'staging') fire('broker-ssh') },
+      onStage: async stage => { if (stage === 'preflight') fire('broker-ssh') },
     }, {
       session: m.session(),
       from: { environmentId: 'vps-app', rootId: 'app', relativePath: 'broker-big.bin' },
