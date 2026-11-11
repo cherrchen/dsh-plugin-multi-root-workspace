@@ -1,0 +1,262 @@
+{
+ "meta": {
+  "probe": "probe-remote-entry-isolation",
+  "runAt": "2026-11-11T06:22:04.804Z",
+  "platform": "linux/x64",
+  "node": "v24.22.2",
+  "dshCli": "/srv/dsh-plugin-repo/node_modules/@deepseek-ai/dsh/lib/bin.js",
+  "scope": "supported service seams plus live disk-reload and other-profile audits; this record is not deployment certification",
+  "dshVersion": {
+   "ok": true,
+   "value": "0.2.2-rc.1"
+  },
+  "pluginVersion": {
+   "ok": true,
+   "value": "0.1.17-ssh.1"
+  }
+ },
+ "profile": "remote-exp",
+ "primary": "/home/dshhost/work/primary",
+ "credRoot": "/var/lib/dsh-ssh-broker",
+ "socket": "/run/dsh-ssh-broker/broker.sock",
+ "controls": {
+  "socket": {
+   "outcome": "hello",
+   "hello": {
+    "event": "hello",
+    "protocol": 3,
+    "brokerUid": 996,
+    "environmentIds": [
+     "vps-app",
+     "vps-lib",
+     "vps-xfer",
+     "vps-xfer2"
+    ],
+    "manifestDigest": "9ad5926a1ebb5a015f5db9454789532ea252ffc2bd66b82da4c36d1e258c3be3",
+    "sshCapability": {
+     "eligible": true
+    }
+   }
+  },
+  "credRead": {
+   "ok": false,
+   "error": "EACCES: EACCES: permission denied, access '/var/lib/dsh-ssh-broker/.ssh/id_ed25519'"
+  },
+  "brokerConfigRead": {
+   "ok": false,
+   "error": "EACCES: EACCES: permission denied, access '/etc/dsh-ssh-broker/broker.json'"
+  },
+  "manifestRead": {
+   "ok": true,
+   "value": true
+  }
+ },
+ "presets": {
+  "defaultMode": "workspace-write",
+  "table": {
+   "read-only": {
+    "sandbox": "read-only",
+    "approval": "ask"
+   },
+   "workspace-write": {
+    "sandbox": "workspace-write",
+    "approval": "ask"
+   }
+  },
+  "hasFullAccess": false
+ },
+ "entries": {
+  "workspace-write": {
+   "resolvedMode": "workspace-write",
+   "bash": {
+    "exitCode": 0,
+    "denied": false,
+    "enforcement": "full",
+    "stdout": "CRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \nCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \nSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 /run/dsh-ssh-broker/broker.sock \nCLIENTS:/usr/local/bin/node,/usr/bin/python3,\nSOCK:closed-no-data\n",
+    "stderr": ""
+   },
+   "pty": {
+    "label": "workspace-write",
+    "outcome": "done",
+    "exitCode": 0,
+    "output": "dshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CRED_READ:$(cat '/var/lib/dsh-ssh-broker/.ssh/id_ed25519' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\recho PTY_DONE_MARKER; exit\r\nCRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CRED_LIST:$(ls '/var/lib/dsh-ssh-broker' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"SOCK_STAT:$(ls -la '/run/dsh-ssh-broker/broker.sock' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 /run/dsh-ssh-broker/broker.sock \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CLIENTS:$(command -v node socat python3 2>/dev/null | tr '\\n' ',')\"\r\n\rCLIENTS:/usr/local/bin/node,/usr/bin/python3,\r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ if command -v node >/dev/null 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"/run/dsh-ssh-broker/broker.sock\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >/dev/null 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:/run/dsh-ssh-broker/broker.sock 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >/dev/null 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"/run/dsh-ssh-broker/broker.sock\");sys.stdout.write(\"SOCK:data:\"+s.recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+   },
+   "ptc": {
+    "status": "ok",
+    "value": "{\"keyDenied\":\"EACCES\",\"credListDenied\":\"EACCES\",\"sockStat\":true,\"sock\":\"closed-no-data\"}",
+    "sandbox": {
+     "mode": "workspace-write",
+     "denied": false,
+     "enforcement": "full"
+    }
+   },
+   "rawSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   },
+   "lspLikeSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   },
+   "jobLikeSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   }
+  },
+  "read-only": {
+   "resolvedMode": "read-only",
+   "bash": {
+    "exitCode": 0,
+    "denied": false,
+    "enforcement": "full",
+    "stdout": "CRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \nCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \nSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 /run/dsh-ssh-broker/broker.sock \nCLIENTS:/usr/local/bin/node,/usr/bin/python3,\nSOCK:closed-no-data\n",
+    "stderr": ""
+   },
+   "pty": {
+    "label": "read-only",
+    "outcome": "done",
+    "exitCode": 0,
+    "output": "dshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CRED_READ:$(cat '/var/lib/dsh-ssh-broker/.ssh/id_ed25519' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\recho PTY_DONE_MARKER; exit\r\nCRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CRED_LIST:$(ls '/var/lib/dsh-ssh-broker' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"SOCK_STAT:$(ls -la '/run/dsh-ssh-broker/broker.sock' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 /run/dsh-ssh-broker/broker.sock \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CLIENTS:$(command -v node socat python3 2>/dev/null | tr '\\n' ',')\"\r\n\rCLIENTS:/usr/local/bin/node,/usr/bin/python3,\r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ if command -v node >/dev/null 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"/run/dsh-ssh-broker/broker.sock\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >/dev/null 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:/run/dsh-ssh-broker/broker.sock 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >/dev/null 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"/run/dsh-ssh-broker/broker.sock\");sys.stdout.write(\"SOCK:data:\"+s.recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+   },
+   "ptc": {
+    "status": "ok",
+    "value": "{\"keyDenied\":\"EACCES\",\"credListDenied\":\"EACCES\",\"sockStat\":true,\"sock\":\"closed-no-data\"}",
+    "sandbox": {
+     "mode": "read-only",
+     "denied": false,
+     "enforcement": "full"
+    }
+   },
+   "rawSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   },
+   "lspLikeSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   },
+   "jobLikeSpawn": {
+    "refusedByGuard": true,
+    "error": "remote-profile-unconfined-spawn: subprocess.spawn requires a live confined argv minted by this profile"
+   }
+  }
+ },
+ "escalation": {
+  "forgedMode": {
+   "refusedByGuard": true,
+   "error": "remote-profile-full-access: remote-profile-full-access: this profile never resolves danger-full-access"
+  },
+  "fullAccessBash": {
+   "skipped": "never launch an unrestricted command from this probe"
+  },
+  "inSandboxTools": {
+   "exitCode": 0,
+   "stdout": "NONEVPRIVS:NoNewPrivs:\t1\nSUDO:sudo: /etc/sudo.conf is owned by uid 65534, should be 0 sudo: The \"no new privil\nSU:Password: su: Authentication failure \nSETUID_FILES:/usr/bin/sudo /usr/bin/gpasswd /usr/bin/fusermount3 /usr/bin/mount /usr/bin/chfn \nUNSHARE:unshare: write failed /proc/self/uid_map: Operation not permitted \n"
+  },
+  "otherProfiles": [
+   {
+    "profile": "remote-exp",
+    "mentionsFullAccess": false,
+    "patchPresent": true
+   },
+   {
+    "profile": "stock-exp",
+    "mentionsFullAccess": false,
+    "patchPresent": false
+   }
+  ]
+ },
+ "tools": {
+  "mounted": true
+ },
+ "remoteStatus": {
+  "state": "ready"
+ },
+ "authority": {
+  "kind": "active"
+ },
+ "sessionReload": {
+  "id": "probe-reload",
+  "cwd": "/home/dshhost/work/primary",
+  "persistedEvents": 1,
+  "artifact": "/home/dshhost/probe-home/sessions/--home-dshhost-work-primary--/probe-reload/session.v4.jsonl.zstd",
+  "restored": {
+   "label": "reloaded",
+   "backendEvents": 1,
+   "eventState": "shared-frozen",
+   "resolvedMode": "workspace-write",
+   "pty": {
+    "label": "reloaded",
+    "outcome": "done",
+    "exitCode": 0,
+    "output": "dshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CRED_READ:$(cat '/var/lib/dsh-ssh-broker/.ssh/id_ed25519' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CRED_LIST:$(ls '/var/lib/dsh-ssh-broker' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"SOCK_STAT:$(ls -la '/run/dsh-ssh-broker/broker.sock' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 /run/dsh-ssh-broker/broker.sock \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CLIENTS:$(command -v node socat python3 2>/dev/null | tr '\\n' ',')\"\r\n\rCLIENTS:/usr/local/bin/node,/usr/bin/python3,\r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ if command -v node >/dev/null 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"/run/dsh-ssh-broker/broker.sock\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >/dev/null 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:/run/dsh-ssh-broker/broker.sock 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >/dev/null 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"/run/dsh-ssh-broker/broker.sock\");sys.stdout.write(\"SOCK:data:\"+s.recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+   }
+  },
+  "tamperedWrite": "sandbox/mode payload rewritten to danger-full-access",
+  "tampered": {
+   "label": "tampered",
+   "backendEvents": 1,
+   "eventState": "shared-frozen",
+   "resolveRefused": "remote-profile-full-access: remote-profile-full-access: this profile never resolves danger-full-access"
+  }
+ },
+ "otherProfileLive": {
+  "profile": "stock-exp",
+  "entries": [
+   {
+    "label": "stock",
+    "defaultMode": "workspace-write",
+    "presetNames": [
+     "read-only",
+     "workspace-write",
+     "danger-full-access"
+    ],
+    "hasFullAccessPreset": true,
+    "forgedMode": {
+     "resolved": "danger-full-access"
+    },
+    "resolvedMode": "workspace-write",
+    "bash": {
+     "exitCode": 0,
+     "denied": false,
+     "enforcement": "full",
+     "stdout": "CRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \nCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \nSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 /run/dsh-ssh-broker/broker.sock \nCLIENTS:/usr/local/bin/node,/usr/bin/python3,\nSOCK:closed-no-data\n",
+     "stderr": ""
+    },
+    "pty": {
+     "label": "other-stock",
+     "outcome": "done",
+     "exitCode": 0,
+     "output": "dshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CRED_READ:$(cat '/var/lib/dsh-ssh-broker/.ssh/id_ed25519' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\recho PTY_DONE_MARKER; exit\r\nCRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CRED_LIST:$(ls '/var/lib/dsh-ssh-broker' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"SOCK_STAT:$(ls -la '/run/dsh-ssh-broker/broker.sock' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 /run/dsh-ssh-broker/broker.sock \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CLIENTS:$(command -v node socat python3 2>/dev/null | tr '\\n' ',')\"\r\n\rCLIENTS:/usr/local/bin/node,/usr/bin/python3,\r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ if command -v node >/dev/null 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"/run/dsh-ssh-broker/broker.sock\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >/dev/null 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:/run/dsh-ssh-broker/broker.sock 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >/dev/null 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"/run/dsh-ssh-broker/broker.sock\");sys.stdout.write(\"SOCK:data:\"+s.recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+    }
+   },
+   {
+    "label": "restricted",
+    "defaultMode": "workspace-write",
+    "presetNames": [
+     "read-only",
+     "workspace-write"
+    ],
+    "hasFullAccessPreset": false,
+    "forgedMode": {
+     "refusedByGuard": true,
+     "error": "remote-profile-full-access: remote-profile-full-access: this profile never resolves danger-full-access"
+    },
+    "resolvedMode": "workspace-write",
+    "bash": {
+     "exitCode": 0,
+     "denied": false,
+     "enforcement": "full",
+     "stdout": "CRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \nCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \nSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 /run/dsh-ssh-broker/broker.sock \nCLIENTS:/usr/local/bin/node,/usr/bin/python3,\nSOCK:closed-no-data\n",
+     "stderr": ""
+    },
+    "pty": {
+     "label": "other-restricted",
+     "outcome": "done",
+     "exitCode": 0,
+     "output": "dshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CRED_READ:$(cat '/var/lib/dsh-ssh-broker/.ssh/id_ed25519' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\recho PTY_DONE_MARKER; exit\r\nCRED_READ:cat: /var/lib/dsh-ssh-broker/.ssh/id_ed25519: Permission denied \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CRED_LIST:$(ls '/var/lib/dsh-ssh-broker' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rCRED_LIST:ls: cannot open directory '/var/lib/dsh-ssh-broker': Permission denied \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"SOCK_STAT:$(ls -la '/run/dsh-ssh-broker/broker.sock' 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\rSOCK_STAT:srw-rw---- 1 nobody nogroup 0 Nov 11 05:08 /run/dsh-ssh-broker/broker.sock \r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo \"CLIENTS:$(command -v node socat python3 2>/dev/null | tr '\\n' ',')\"\r\n\rCLIENTS:/usr/local/bin/node,/usr/bin/python3,\r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ if command -v node >/dev/null 2>&1; then\r\n\r>   node -e 'const s=require(\"net\").connect(\"/run/dsh-ssh-broker/broker.sock\");let d=\"\";let done=false;const fin=v=>{if(!done){done=true;console.log(\"SOCK:\"+v);s.destroy()}};const t=setTimeout(()=>fin(\"timeout\"),2000);s.on(\"data\",c=>{d+=c;if(d.includes(\"\\n\")){clearTimeout(t);fin(\"data:\"+d.slice(0,80))}});s.on(\"error\",e=>{clearTimeout(t);fin(\"err:\"+(e.code||e.message))});s.on(\"close\",()=>{clearTimeout(t);fin(d===\"\"?\"closed-no-data\":\"eof:\"+d.slice(0,80))})'\r\n\r> elif command -v socat >/dev/null 2>&1; then\r\n\r>   echo \"SOCK:$(echo '' | timeout 2 socat - UNIX-CONNECT:/run/dsh-ssh-broker/broker.sock 2>&1 | head -c 80 | tr '\\n' ' ')\"\r\n\r> elif command -v python3 >/dev/null 2>&1; then\r\n\r>   python3 -c 'import socket,sys;s=socket.socket(socket.AF_UNIX);s.settimeout(2);s.connect(\"/run/dsh-ssh-broker/broker.sock\");sys.stdout.write(\"SOCK:data:\"+s.recv(200).decode(\"utf-8\",\"replace\")[:80])' 2>&1 | head -c 120\r\n\r> else\r\n\r>   echo \"SOCK:no-client-available\"\r\n\r> fi\r\n\rSOCK:closed-no-data\r\ndshhost@VM-TYO1-P3ZC876FD1:~/work/primary$ echo PTY_DONE_MARKER; exit\r\n\rPTY_DONE_MARKER\r\nexit\r\n"
+    }
+   }
+  ]
+ }
+}

@@ -1878,11 +1878,13 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | F20 | 远端 cwd 校验 | fixed | `verifyCwd` 后端方法：准入 A 经 `assertRemoteParent` 复核远端 cwd，fake 后端可省、生产后端必提供。 |
 | F21 | 终端信任边界 | fixed（文档/行为） | `DSH_PTY_SESSION_ID` 标记的 Agent 终端走会话重准入；未标记为用户终端按部署信任假设放行。 |
 
-**仍未完成的开门前置（非本轮）**：GUI 宿主证据（F12 及 GUI 行）；磁盘重载会话与其他 profile 隔离实测；macOS 发起端/目标验收按既有矩阵延后。F13 三项已实现并实机验证（生产清单含声明预算）。
+**仍未完成的开门前置（非本轮）**：GUI 宿主证据（F12 及 GUI 行）；macOS 发起端/目标验收按既有矩阵延后。F13 三项已实现并实机验证（生产清单含声明预算）；磁盘重载会话与其他 profile 隔离已实机验证（见下）。
 
 **协议 3 实机复验（2026-11-10/11，`.87` 发起端 × `.93` 被控端，协议 3 + 目的收窄 + profile-guard 全部生效）**：打包 `0.1.17-ssh.1` 部署于 root 所有的 `/opt/dsh-broker` 依赖树；`dsh-ssh-broker.service` `ActiveState=active`/`SubState=running`、`PrivateTmp=yes`、`ProtectSystem=strict`、真私有 `/tmp/systemd-private-*`；凭据根 `0700 _dsh_ssh`、socket `0660`/`0750`、hello 协议 3（`sshCapability.eligible`，四环境）；bwrap `NoNewPrivs` 下探针：凭据根 `EACCES`、socket 连接零字节关闭。`remote-broker.live` **6/6**、`remote-broker-faults.live` **2/2**（root 侧 fault-watcher 消费触发文件，杀 `_dsh_ssh` 的 `vps-build` ssh 于 `preflight` 注入点——绝不 committed、尸体代次替换；SIGKILL daemon 后双代次转 `stale`、须重证）、`remote-ssh.live` **19/19**、`remote-journey.live` **4/4**（生产 `broker:` 路径；helper 目的 `remote_copy` 实机 `transfer-pair-not-allowed`，种子改走 `remote_bash`）。chroot 写者隔离：两个 xfer 账户各自 `/` 仅见自己的 `/import`，`/srv` 不存在，互不可见。本轮实跑另抓出并已修复四个缺陷：`UpdateHostKeys` 的 `-G` 归一化（`51d8f99`）、SFTP 会话继承 `ControlMaster auto` 破坏逐会话代次隔离（`adcf4df`）、`wellFormedReply` 把 NAME(104)/ATTRS(105) 写反致真帧误判断连（`56d972a`）、journey mount 缺 `subprocess` 注入致工具永不挂载与 faults 注入点/负载校准（`19ebb07`）。本段证据为现行有效，不再依赖协议 2 历史记录。
 
 **F13 实机复验（2026-11-11，`.87`，`f02501a`/`336951d` 部署件，socket 直探针 `/tmp/f13-probe.mjs`）**：配额——清单 `vps-xfer` env 窗口 `{60s,3 ops,1MiB}` + 顶层全局 `{60s,6 ops,16MiB}`：openSftp+2 realpath 准入后第 4 次操作 `refused:quota-exceeded`（env 窗口）；`vps-xfer2` 在全局窗口第 7 次（跨连接累计）命中；被拒操作不计费（记账泄漏修复 `336951d` 前后对比可证）。吊销——清单 `revocations:[{environmentId:"vps-xfer2"}]`（新摘要 `b4df5c73bf4e` 已生效）：`openSftp vps-xfer2` → `environment-revoked`，`vps-xfer` 不受影响。审计轮转——`auditMaxBytes`/`auditKeep` 实机生效：重启后首写即把 2.1MB 追加文件滚为 `audit.jsonl.1`；`512B×keep3` 下 `.1-.3` 全为 `0600 _dsh_ssh`、`.4` 不出现；审计行现含 `environment` 字段。恢复后生产清单已声明预算（env `{1h,20000 ops,512GiB}`、全局 `{1h,50000 ops,1TiB}`，摘要 `9ad5926a1ebb`），broker.json 显式 `8MiB×4`；`remote-broker.live` 在声明预算下复验 **6/6**。
+
+**磁盘重载会话与其他 profile 实机复验（2026-11-11，`.87`，`93c37d5` 起探针在真实 `dsh plugin add` 部署上运行，原始证据 [`remote-entry-isolation-evidence-20261111.json`](../../reference/remote-entry-isolation-evidence-20261111.json)）**：scratch `DSH_HOME` 下 `remote-exp`（受限 patch + remote-tools 行）与 `stock-exp`（同插件、无 patch）双 profile，协议 3 attestation 后 `remote_copy`/`remote_bash` 挂载。受限入口矩阵（bash/PTY/PTC × workspace-write/read-only）与伪造 `sandbox/mode` 守卫拒绝重验一致（凭据根 `EACCES`、socket `closed-no-data`、NoNewPrivs 生效、su/sudo/unshare 均无出路）。磁盘重载——经 `ctx.sessionPersistence` 真实后端落盘 `sessions/.../probe-reload/session.v4.jsonl.zstd`，新 boot 经 `open('read')` 读回并以 `eventState: shared-frozen` 重放进 store：解析仍 `workspace-write`、该会话 Agent PTY 仍受限、socket 拒。篡改对照——同型 zstd 双帧重写 `sandbox/mode` 为 `danger-full-access` 后重载：后端读路径接受格式良好事件，`sandboxPolicy.resolve` 被守卫 `remote-profile-full-access` 拒绝，盘上状态无法洗白提权。其他 profile——`stock-exp` 实机显示其预设表含 `danger-full-access`、伪造模式可解析（部署危害实证：此类 profile 绝不可承载 Agent 入口）；其受限 spawn 仍凭据根 `EACCES`+socket `closed-no-data`（broker 按沙箱态拒绝，不认 profile 名）；打同一受限 patch 后预设表仅两项受限、`forgedMode` 由守卫拒。
 
 ### 本轮本机证据
 
@@ -1891,6 +1893,6 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 - 全量：**1545 passed / 131 skipped / 0 failed**，106 个文件通过、8 个文件跳过；Linux live 与其他平台跳过项不计通过。
 - lint 首轮发现三个测试参数未使用；仅改为下划线参数名，lint 复查通过；受影响两文件的[增量复查](../../reference/ssh-review-20261110-lint-delta.json)为 **48 passed / 0 failed**。compat、host/client 类型、build、kernel probe（仅 Seatbelt 可用）通过。
 - smoke compose **54/0/0**、behavior **137/0/0**、journey **76/0/0**（通过/失败/跳过）；pack 为 **222 members**，packed behavior **136/0/0**。这不是沿用历史 211/213 的计数。
-- Auto Review fork 静态检查通过；运行 smoke 因本机不是其专用 `0.2.1-rc.2` 目标而跳过，不计通过。GUI、磁盘重载 Session、真实其他 profile 与 Linux unit/PrivateTmp/chroot 证据仍缺。
+- Auto Review fork 静态检查通过；运行 smoke 因本机不是其专用 `0.2.1-rc.2` 目标而跳过，不计通过。GUI 宿主与 macOS/Windows 矩阵证据仍缺；磁盘重载 Session、真实其他 profile、Linux unit/PrivateTmp/chroot 证据见上方实机复验段。
 - `docs:check` 通过；安装器通过 `sh -n` 与隔离的依赖解析正负例（未执行账户/unit 配置）。预检查发现 DSH 无根导出后已改用其公开 `package.json` 入口解析，原失败与修正后记录一并保留。
-- 入口探针已改为记录 Full-access 守卫拒绝并增加 raw/LSP-like/job-like 接缝观察；仅通过脚本语法和隔离观察函数检查，未在 Linux 运行；其他 profile 的静态文本清点不算运行时隔离证据。
+- 入口探针已改为记录 Full-access 守卫拒绝并增加 raw/LSP-like/job-like 接缝观察，且已扩展磁盘重载会话与其他 profile 实测段；2026-11-11 起在 `.87` 的 Linux 实机运行，原始证据见 [`remote-entry-isolation-evidence-20261111.json`](../../reference/remote-entry-isolation-evidence-20261111.json)。其他 profile 的静态文本清点保留作清单对照，运行时隔离结论以实测段为准。
