@@ -1865,9 +1865,9 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | F7 | OpenSSH 身份解析 | fixed | `HostKeyAlias` 逐字（含 `none`）、`[hostname]:port`、Strict/Batch/ForwardAgent/UpdateHostKeys 强制、全部 user+global 源合计恰一钥。 |
 | F8 | confine/spawn 绑定 | fixed | 票据绑定 confine **返回后**的 argv+代次+workspaceRoot；非空 `LD_*`/`DYLD_*`/`NODE_OPTIONS`/`NODE_PATH` env 拒绝；票据校验失败或使用消耗。 |
 | F9 | SFTP 代次权威 | fixed | 每请求服务端代次复核；旧 proxy 不路由新会话；dispose 不删更新缓存项。 |
-| F10 | 部署图/临时目录 | fixed（文档） | 凭据根只放密钥/config/known_hosts；ControlMaster/helper 暂存为 broker mkdtemp+PrivateTmp；unit 未经实机 systemctl 验证。 |
+| F10 | 部署图/临时目录 | fixed | 凭据根只放密钥/config/known_hosts；ControlMaster/helper 暂存为 broker mkdtemp+PrivateTmp；unit 于 2026-11-10/11 实机验证（`ActiveState=active`/`PrivateTmp=yes`/`ProtectSystem=strict`）。 |
 | F11 | 校验器清理 | fixed | 中止/超时/完成均 terminate+有界 drain，timer/listener 必清。 |
-| F12 | 证据账本与实机 | narrowed / prerequisite | 既有 Linux/GUI 断言标为历史未复核；本轮本机原始日志与 JSON 已归档（见下），实机 unit、`ActiveState`、socket 私访探针仍待补证。 |
+| F12 | 证据账本与实机 | narrowed / partially verified | 既有 Linux/GUI 断言标为历史未复核；本轮本机原始日志与 JSON 已归档（见下）。**Linux 实机已于 2026-11-10/11 复验**（见本节末"协议 3 实机复验"）：真 systemd unit/`ActiveState`/`PrivateTmp`、socket 私访探针、chroot 写者隔离均已取得现行证据；GUI 宿主与跨平台矩阵仍待补证。 |
 | F13 | 配额/审计/吊销 | prerequisite | 未实现：仅单文件/在飞上限，无聚合时间窗预算、无审计轮转、无吊销清单——模型开放硬前提，见控制面参考"模型开放的前置阻断项"。 |
 | F14 | 安装器与部署手册 | fixed（本轮） | 依赖解析 preflight（`createRequire` 锚定 broker 入口，核验 dsh/cordis/四 SSH peer 可解析）、可复现依赖树命令与 ssh config 清单、out-of-band 指纹验证说明、logrotate 示例；安装是部署操作，**不构成**隔离认证。 |
 | F15 | broker 自报能力 | fixed | `hello.sshCapability` 由 broker 自身状态派生，缺席/为否/畸形即拒绝。 |
@@ -1878,7 +1878,9 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | F20 | 远端 cwd 校验 | fixed | `verifyCwd` 后端方法：准入 A 经 `assertRemoteParent` 复核远端 cwd，fake 后端可省、生产后端必提供。 |
 | F21 | 终端信任边界 | fixed（文档/行为） | `DSH_PTY_SESSION_ID` 标记的 Agent 终端走会话重准入；未标记为用户终端按部署信任假设放行。 |
 
-**仍未完成的开门前置（非本轮）**：聚合配额、审计轮转、吊销清单（F13）；Linux 实机 unit/`ActiveState`/socket 私访探针与 GUI 宿主证据（F12 及 GUI 行）；macOS 发起端/目标验收按既有矩阵延后。
+**仍未完成的开门前置（非本轮）**：聚合配额、审计轮转、吊销清单（F13）；GUI 宿主证据（F12 及 GUI 行）；磁盘重载会话与其他 profile 隔离实测；macOS 发起端/目标验收按既有矩阵延后。
+
+**协议 3 实机复验（2026-11-10/11，`.87` 发起端 × `.93` 被控端，协议 3 + 目的收窄 + profile-guard 全部生效）**：打包 `0.1.17-ssh.1` 部署于 root 所有的 `/opt/dsh-broker` 依赖树；`dsh-ssh-broker.service` `ActiveState=active`/`SubState=running`、`PrivateTmp=yes`、`ProtectSystem=strict`、真私有 `/tmp/systemd-private-*`；凭据根 `0700 _dsh_ssh`、socket `0660`/`0750`、hello 协议 3（`sshCapability.eligible`，四环境）；bwrap `NoNewPrivs` 下探针：凭据根 `EACCES`、socket 连接零字节关闭。`remote-broker.live` **6/6**、`remote-broker-faults.live` **2/2**（root 侧 fault-watcher 消费触发文件，杀 `_dsh_ssh` 的 `vps-build` ssh 于 `preflight` 注入点——绝不 committed、尸体代次替换；SIGKILL daemon 后双代次转 `stale`、须重证）、`remote-ssh.live` **19/19**、`remote-journey.live` **4/4**（生产 `broker:` 路径；helper 目的 `remote_copy` 实机 `transfer-pair-not-allowed`，种子改走 `remote_bash`）。chroot 写者隔离：两个 xfer 账户各自 `/` 仅见自己的 `/import`，`/srv` 不存在，互不可见。本轮实跑另抓出并已修复四个缺陷：`UpdateHostKeys` 的 `-G` 归一化（`51d8f99`）、SFTP 会话继承 `ControlMaster auto` 破坏逐会话代次隔离（`adcf4df`）、`wellFormedReply` 把 NAME(104)/ATTRS(105) 写反致真帧误判断连（`56d972a`）、journey mount 缺 `subprocess` 注入致工具永不挂载与 faults 注入点/负载校准（`19ebb07`）。本段证据为现行有效，不再依赖协议 2 历史记录。
 
 ### 本轮本机证据
 
