@@ -260,9 +260,9 @@ Host <env-alias>
 
 ## 模型开放的前置阻断项（当前状态：BLOCKED）
 
-以下均为**尚未实现/未验证**的开放前提，不是可选项；完成前 `remote-tools` 行不得对模型开放，当前维护者决定保持模型侧关闭：
+以下均为开放前提，不是可选项；各项标注其实现与验证状态。全部满足前 `remote-tools` 行不得对模型开放，当前维护者决定保持模型侧关闭：
 
-- **配额**：**已实现**——broker 端 `RollingQuota` 滚动时间窗预算（清单 `environments[].quotas` 每环境 + 顶层 `quotas` 全局），对每个环境绑定请求计操作数、对 `sftp read`/`write` 计费载字节，耗尽即 `quota-exceeded`，窗口随到达时间滚动恢复；单文件/单请求/在飞数上限不变。仍属开放前置：生产清单需实际声明预算值并经 Linux live 验证；on-disk 配额未实现（部署者可另以 systemd `CPUQuota`/`MemoryMax`/`TasksMax` 与文件系统配额作纵深，不构成替代）。
-- **审计**：**已实现**——broker 内建按 `auditMaxBytes`（默认 8 MiB）+ `auditKeep`（默认 4）的链式轮转，`audit.jsonl.N` 0600 broker 属主，启动拒绝外国属主/symlink 占用；与外部 logrotate 兼容（`appendFileSync` 每次写都重新 open）。仍属开放前置：实机 unit 上的轮转/保留证据。
-- **吊销**：**已实现**——清单 `revocations` 显式拒绝清单随摘要双方校验，被吊销环境的一切环境绑定方法拒绝 `environment-revoked`（`dispose` 放行清理）；停用/移除绑定并重启 broker + Host 重新证明后，已记录的 `unknown` 只许对账，**绝不**重放。仍属开放前置：实机吊销流程证据。
-- **部署证据**：Linux 实机 unit（`ActiveState`、PrivateTmp、socket 私访探针）已有 2026-11-11 协议 3 记录；GUI 会话与跨平台证据仍未产出；上述配额/审计/吊销三项的实机验证并入此项。
+- **配额**：**已实现并实机验证**（2026-11-11 `.87`）——broker 端 `RollingQuota` 滚动时间窗预算（清单 `environments[].quotas` 每环境 + 顶层 `quotas` 全局），对每个环境绑定请求计操作数、对 `sftp read`/`write` 计费载字节，耗尽即 `quota-exceeded`，窗口随到达时间滚动恢复、被拒请求不计费；单文件/单请求/在飞数上限不变。生产清单已声明预算（env `{1h,20000 ops,512GiB}`、全局 `{1h,50000 ops,1TiB}`），live 复验 6/6；on-disk 配额未实现（部署者可另以 systemd `CPUQuota`/`MemoryMax`/`TasksMax` 与文件系统配额作纵深，不构成替代）。
+- **审计**：**已实现并实机验证**（2026-11-11 `.87`）——broker 内建按 `auditMaxBytes`（默认 8 MiB）+ `auditKeep`（默认 4）的链式轮转，`audit.jsonl.N` 0600 broker 属主，启动拒绝外国属主/symlink 占用；实机观察到 2.1MB 追加文件按预算轮转、`.1-.N` 保留上限成立；与外部 logrotate 兼容（`appendFileSync` 每次写都重新 open）。
+- **吊销**：**已实现并实机验证**（2026-11-11 `.87`）——清单 `revocations` 显式拒绝清单随摘要双方校验，被吊销环境的一切环境绑定方法拒绝 `environment-revoked`（`dispose` 放行清理）；停用/移除绑定并重启 broker + Host 重新证明后，已记录的 `unknown` 只许对账，**绝不**重放。
+- **部署证据**：Linux 实机 unit（`ActiveState`、PrivateTmp、socket 私访探针）已有 2026-11-10/11 协议 3 记录，配额/审计/吊销三项已于 2026-11-11 实机验证；GUI 会话与跨平台证据仍未产出。
