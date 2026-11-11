@@ -357,25 +357,35 @@ try {
     }
   })
 
-  // ── Disk-reload phase A: create the session and wait for its artifact ──
-  // The persisted log is what the next boot replays; a session whose state
-  // never reaches disk is recorded as such rather than silently skipped.
+  // ── Disk-reload phase A: persist the session through the real backend ──
+  // A bare sessions.create carries no provider/model lifecycle, so no live
+  // write handle attaches to it. Mint the events on a live session, then
+  // durably write them through ctx.sessionPersistence — the same backend a
+  // host reload reads — and confirm the artifact physically reaches disk.
   evidence.sessionReload = { id: 'probe-reload', cwd: PRIMARY }
-  const reloadSession = ctx.sessions.create(/** @type {never} */ ('probe-reload'), { meta: { cwd: PRIMARY } })
-  reloadSession.append('sandbox/mode', { mode: 'workspace-write' })
-  for (let i = 0; i < 60 && evidence.sessionReload.artifact === undefined; i++) {
-    const found = findSessionArtifact(HOME, 'probe-reload')
-    if (found !== undefined) {
-      try {
-        const log = readSessionLog(found)
-        if (log.events.some(event => event?.type === 'sandbox/mode')) {
-          evidence.sessionReload.artifact = found
-          evidence.sessionReload.persistedEvents = log.events.length
-          evidence.sessionReload.compressed = log.compressed
-        }
-      } catch { /* still flushing */ }
+  try {
+    const reloadSession = ctx.sessions.create(/** @type {never} */ ('probe-reload'), { meta: { cwd: PRIMARY } })
+    reloadSession.append('sandbox/mode', { mode: 'workspace-write' })
+    const events = reloadSession.snapshotEvents()
+    const persistence = ctx.get('sessionPersistence')
+    if (persistence === undefined) {
+      evidence.sessionReload.persistError = 'ctx.sessionPersistence is not mounted'
+    } else {
+      const handle = await persistence.create({
+        id: 'probe-reload',
+        createdAt: reloadSession.header?.createdAt ?? Date.now(),
+        cwd: PRIMARY,
+      })
+      await handle.append([...events])
+      await handle.flush()
+      await handle.close().catch(() => {})
+      evidence.sessionReload.persistedEvents = events.length
+      const found = findSessionArtifact(join(HOME, 'sessions'), 'probe-reload')
+      if (found !== undefined) evidence.sessionReload.artifact = found
+      else evidence.sessionReload.artifact = '(flushed but not located under $DSH_HOME/sessions)'
     }
-    await new Promise(resolve => setTimeout(resolve, 250))
+  } catch (error) {
+    evidence.sessionReload.persistError = error instanceof Error ? error.message : String(error)
   }
 } finally {
   // The composed tree keeps fibers and the broker socket open; a clean exit
@@ -395,12 +405,26 @@ async function restoreAndProbe(reloadEvidence, label) {
   try {
     const { ctx: ctx2 } = await bootProfile(PROFILE, HOME)
     try {
-      const log = readSessionLog(reloadEvidence.artifact)
-      cell.logEvents = log.events.length
+      const persistence = ctx2.get('sessionPersistence')
+      if (persistence === undefined) {
+        cell.threw = 'ctx.sessionPersistence is not mounted'
+        return cell
+      }
+      // Read the on-disk log back through the real backend: format validation
+      // (header/version/record vocabulary) happens here, before any replay.
+      const readHandle = await persistence.open('probe-reload', 'read')
+      let stored
+      try {
+        stored = await readHandle.read()
+      } finally {
+        await readHandle.close().catch(() => {})
+      }
+      cell.backendEvents = stored.events?.length
+      cell.eventState = stored.eventState
       const restored = ctx2.sessions.create(/** @type {never} */ ('probe-reload'), {
-        seed: log.events,
-        meta: log.header,
-        eventState: 'detached',
+        seed: stored.events,
+        meta: readHandle.header ?? stored.header,
+        eventState: stored.eventState ?? 'detached',
       })
       const resolved = check(() => ctx2.sandboxPolicy.resolve({ session: restored }))
       if (resolved.ok) {
@@ -418,7 +442,7 @@ async function restoreAndProbe(reloadEvidence, label) {
   return cell
 }
 
-if (evidence.sessionReload.artifact !== undefined) {
+if (evidence.sessionReload.artifact !== undefined && !String(evidence.sessionReload.artifact).startsWith('(')) {
   evidence.sessionReload.restored = await restoreAndProbe(evidence.sessionReload, 'reloaded')
   // Phase C: tamper the persisted log so the session claims danger-full-access
   // on disk, then reload. The guard must refuse resolution (or the persistence
@@ -441,7 +465,7 @@ if (evidence.sessionReload.artifact !== undefined) {
     evidence.sessionReload.tampered = await restoreAndProbe(evidence.sessionReload, 'tampered')
   }
 } else {
-  evidence.sessionReload.restored = { skipped: 'no persisted artifact reached disk in 15s' }
+  evidence.sessionReload.restored = { skipped: evidence.sessionReload.persistError ?? 'no artifact under $DSH_HOME/sessions after flush' }
 }
 
 // ── Other-profile live audit ─────────────────────────────────────────────
