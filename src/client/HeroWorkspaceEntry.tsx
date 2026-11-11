@@ -14,6 +14,7 @@
 import { useState, type ReactNode } from 'react'
 import { IconWorkspaceTree } from '../compat/client-icons.ts'
 import type { PanelClient } from './panel-client.ts'
+import type { WorktreeClient } from './worktree-client.ts'
 import { WorkspaceFoldersDialog, type Translate } from './WorkspaceFoldersAction.tsx'
 
 /** What the hero seat passes to its trigger. */
@@ -30,6 +31,8 @@ export interface HeroWorkspaceEntryProps {
   readonly sessionId: () => string | undefined
   /** Bound translator for this plugin's namespace. */
   readonly t: Translate
+  /** The worktree channel client, when the composition mounts it. */
+  readonly worktrees?: WorktreeClient | undefined
 }
 
 /**

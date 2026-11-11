@@ -38,6 +38,8 @@ completed/
 
 active：
 
+- [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) — P1–P7 实施 worktree 附加根建议、实验性默认关闭的插件开关与手动清理（B），P8–P10 实施 linked worktree 的主 checkout 授权（A）；第十九次修订加入单/多候选提示分流。决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)，进度见路线账本。
+
 - [2026-11-08-workspace-menu-folders-dialog.md](./active/2026-11-08-workspace-menu-folders-dialog.md) — 工作区 `...` 菜单新增「管理工作区目录…」：复用 footer 对话框的 controller、`workspace` context-menu 贡献（order 150）、先切换/复用目标工作区 blank 再打开并固定 session；`RootSwitcher` 与上游 `WorkspaceBrowser` 零改动（决策见 [ADR-0038](../decisions/ADR-0038-workspace-menu-folders-dialog.md)）。
 
 - [2026-10-31-f4-background-recovery.md](./active/2026-10-31-f4-background-recovery.md) — F4 后台恢复与故障诊断专项计划（**rev.4 评审通过、ADR-0026 已立项；已实施并经三平台 CI 验收，真实 TUI soak 暂缓，随 `v0.1.13` 发版**）：复用 `ensureAuthority` 的恢复调度、投影同步完成条件、整轮失败通知原子性（含 scope 订阅者批处理）、握手本地取消与诊断面；批次已登记总账。

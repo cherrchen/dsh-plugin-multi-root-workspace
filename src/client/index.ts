@@ -32,6 +32,8 @@ import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/cli
 import { currentSessionIdOf, subscribeSessions, subscribeCurrentSession } from '../compat/client-session.ts'
 import { nativeTreeRenderer } from '../compat/files-tree.ts'
 import { createPanelClient, type PanelClient } from './panel-client.ts'
+import { createWorktreeClient } from './worktree-client.ts'
+import { WorktreePrompt } from './WorktreePrompt.tsx'
 import { NS, en, zh } from './locales.ts'
 import { STYLES } from './styles.ts'
 import { HeroWorkspaceEntry } from './HeroWorkspaceEntry.tsx'
@@ -85,6 +87,13 @@ const NAVIGATOR_SLOT_ID = 'multi-root-navigator'
 /** The id of the `<style>` element carrying this plugin's sheet. */
 const STYLE_ELEMENT_ID = 'multi-root-workspace-styles'
 
+/**
+ * Phase P3 gate: the prompt renders as a read-only preview until the Registry
+ * write path (P4) is in place. The host refuses the confirmation either way;
+ * this constant only keeps the UI from offering a button that cannot work.
+ */
+const WORKTREE_PREVIEW_ONLY = false
+
 /** Services the client half needs before it may activate. */
 export const inject = ['slots', 'locale', 'connection']
 
@@ -131,10 +140,9 @@ export function apply(ctx: ClientContext): void {
 
   // Cordis binds `this.ctx` to the *caller's* fiber for the registry methods, so
   // reading the injected services here keeps them owned by this plugin.
-  const panel: PanelClient | undefined = (() => {
-    const connection = ctx.get('connection')
-    return connection === undefined ? undefined : createPanelClient(connection)
-  })()
+  const connectionHandle = ctx.get('connection')
+  const panel: PanelClient | undefined = connectionHandle === undefined ? undefined : createPanelClient(connectionHandle)
+  const worktreeClient = connectionHandle === undefined ? undefined : createWorktreeClient(connectionHandle)
   // The footer's dialog owner and the workspace menu share exactly one
   // controller for this apply() lifetime: the menu asks the footer to open
   // its dialog, and the menu entry is disabled while no footer owner exists
@@ -153,7 +161,25 @@ export function apply(ctx: ClientContext): void {
   const subscribeSession = (listener: () => void): (() => void) => subscribeSessions(readService(ctx, 'sessions'), listener)
   const t = ctx.locale.bind(NS) as unknown as Translate
   installSkillsClient(ctx, t, listener => subscribeCurrentSession(readService(ctx, 'sessions'), listener))
-  installSkillsSettingsCard(ctx, t)
+  const worktreeSettings = installSkillsSettingsCard(ctx, t)
+  // The worktree confirmation is a shell-level overlay: it must be able to
+  // appear over any page, and it long-polls only while a live session exists.
+  // The settings signal is what remounts a loop that stopped when the switch
+  // was turned off.
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: 'multi-root-worktree-prompt',
+    locale: NS,
+    inject: () => ({
+      client: worktreeClient,
+      sessionId,
+      subscribeSession,
+      readEnabled: worktreeSettings.enabled,
+      subscribeEnabled: worktreeSettings.subscribe,
+      t,
+      previewOnly: WORKTREE_PREVIEW_ONLY,
+    }),
+  }, WorktreePrompt))
   // The fork binds upstream's own open-in-app namespace — the same strings
   // the native button shows, upstream's dictionary updates included. The
   // adapter is undefined where the fork cannot render (pixel-era glyph
@@ -199,6 +225,7 @@ export function apply(ctx: ClientContext): void {
       sessionId,
       subscribeSession,
       t,
+      worktrees: worktreeClient,
       dialogController,
       dialogOwner: true,
       ...(wide === undefined ? {} : { wide }),
@@ -231,6 +258,7 @@ export function apply(ctx: ClientContext): void {
         pickDirectory,
         sessionId: readSession,
         t,
+        worktrees: worktreeClient,
       })
     })
   })
@@ -270,8 +298,8 @@ export function apply(ctx: ClientContext): void {
     // never restarts because of it. `undefined` means the fork cannot mount.
     const filesTree = createFilesTreeSurface(props, filesTreeT)
     return absolutePath === undefined
-      ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, compact: true })
-      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
+      ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, compact: true })
+      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
   }))
   // Optional: the document preview's navigator seat exists only on runtimes
   // whose `ui-sidebar-files` draws the Folder-toggle tree (0.2.2-alpha.3+);

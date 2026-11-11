@@ -31,6 +31,26 @@ const pick = (candidate: unknown): Koffi | undefined => {
   return undefined
 }
 
+/** Synchronous access for bounded metadata reads. Node's require(esm) can
+ * load the host ESM entry, which is synchronous, if its CJS facade is partial. */
+export function loadHostKoffiSync(): Koffi {
+  const ownRequire = createRequire(import.meta.url)
+  let anchor: string
+  try {
+    anchor = ownRequire.resolve('@deepseek-ai/dsh-fs-local/package.json')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'MODULE_NOT_FOUND') throw error
+    const own = pick(ownRequire('koffi'))
+    if (own !== undefined) return own
+    throw new Error('Koffi is unavailable')
+  }
+  const hostRequire = createRequire(anchor)
+  const entry = hostRequire.resolve('koffi')
+  const host = pick(hostRequire(entry)) ?? pick(hostRequire(join(dirname(entry), 'index.js')))
+  if (host === undefined) throw new Error('the host Koffi entry is unavailable')
+  return host
+}
+
 export async function loadHostKoffi(): Promise<Koffi> {
   try {
     const anchor = createRequire(import.meta.url).resolve('@deepseek-ai/dsh-fs-local/package.json')

@@ -87,6 +87,10 @@
         # Change both paths together for a custom Registry store (ADR-0025).
         sharedStorageRoot: !!js dshHomePath('storages')
         leasePath: !!js dshHomePath('storages/multi_root_workspace.lock')
+        # The worktree prompt/ignore sidecar: one file per workspace key, written
+        # only by the Registry owner. Losing it only loses suggestions and
+        # cleanup tracking, never authorization (ADR-0039 §5).
+        promptsRoot: !!js dshHomePath('storages/multi_root_workspace.worktree-prompts')
         # Cap on stored additional-root records per primary root (integer,
         # 1..64; the count covers every state, so it is stable). A store that
         # already exceeds it keeps granting — only new adds are refused. Bench
@@ -105,6 +109,22 @@
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/skills'
       config:
         enabled: true
+    # Worktree-aware suggestions (ADR-0039), EXPERIMENTAL and off by default.
+    # Additive and compat-gated: this row never registers a root on its own,
+    # and it stays inert until the operator turns the plugin-detail switch on.
+    - id: multi-root-worktrees
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/worktrees'
+      config:
+        # The global switch the plugin-detail card also edits (default off;
+        # a persisted Settings value overrides this loader default).
+        enabled: false
+        # Long-poll budget for worktreePromptWait (bounded to 20s by default).
+        waitTimeoutMs: 20000
+        # fs.watch debounce for the shared inventory watchers.
+        debounceMs: 150
+        # Per-workspace admin/parent watcher cap; beyond it the workspace is
+        # marked degraded and only timeout reconciliation remains.
+        maxAdminWatchers: 128
     - id: multi-root-instructions
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/instructions'
       config:

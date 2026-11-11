@@ -1,4 +1,7 @@
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
+import { EventEmitter } from 'node:events'
+import { randomUUID } from 'node:crypto'
+import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { nativeHostAvailability } from '../src/authority/native.ts'
 /** Real local transports, including the kernel peer gate. */
@@ -23,6 +26,20 @@ nativeTest('authenticates a same-user unrestricted Host and bounds requests to i
   const client = await AuthorityClient.connect(identity.endpoint, identity.id, 16, () => {}, () => {})
   cleanups.push(() => client.close())
   expect(await client.request('snapshot', ['/primary'])).toEqual(['/primary'])
+})
+
+nativeTest('binds the sidecar root in the handshake', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mrw-ipc-prompts-')), identity = storeIdentity(root)
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }))
+  const server = await AuthorityServer.listen(identity.endpoint, identity.id, 'prompts-test', 16, async () => [], { promptsRoot: '/store/worktree-prompts' })
+  cleanups.push(() => server.close())
+  // A follower whose sidecar root differs must refuse the owner's envelope
+  // instead of reading another configuration's decisions (ADR-0039 §5).
+  await expect(AuthorityClient.connect(identity.endpoint, identity.id, 16, () => {}, () => {}, undefined, '/other/worktree-prompts'))
+    .rejects.toThrow(/configuration mismatch/)
+  const client = await AuthorityClient.connect(identity.endpoint, identity.id, 16, () => {}, () => {}, undefined, '/store/worktree-prompts')
+  cleanups.push(() => client.close())
+  expect(client.epoch).toBe('prompts-test')
 })
 
 nativeTest.runIf(process.platform === 'darwin')('refuses a sandboxed child even when it knows the endpoint and protocol', async () => {
@@ -59,7 +76,6 @@ nativeTest.runIf(process.platform === 'linux')('refuses a same-user NoNewPrivs c
 })
 
 nativeTest('deduplicates a request and disconnects a peer that reuses its ID with different arguments', async () => {
-  const { randomUUID } = await import('node:crypto')
   const { connectNative } = await import('../src/authority/native.ts')
   const root = mkdtempSync(join(tmpdir(), 'mrw-ipc-dedup-')), identity = storeIdentity(root)
   cleanups.push(() => rmSync(root, { recursive: true, force: true }))
@@ -260,4 +276,90 @@ nativeTest.runIf(process.platform === 'win32')('recovers a disconnected pending 
   expect(next).toBeDefined()
   if (next) { cleanups.push(() => next.close()); expect(await next.request('snapshot', ['/primary'])).toEqual([]) }
   expect(await first.request('snapshot', ['/primary'])).toEqual([])
+})
+
+// Exercise the real frame parser and dispatcher without weakening the native
+// authentication gate on development hosts that cannot connect to it.
+class ProtocolChannel extends EventEmitter {
+  readonly sent: Array<{ type: string; value?: unknown; code?: string }> = []
+  write(message: string): boolean {
+    this.sent.push(JSON.parse(message))
+    return true
+  }
+  destroy(): void { this.emit('close') }
+  receive(frame: unknown): void {
+    this.emit('data', Buffer.from(JSON.stringify(frame) + '\n'))
+  }
+}
+
+it('keeps v1 Registry peers compatible and requires a matched worktree capability', async () => {
+  const Server = AuthorityServer as unknown as new (
+    store: string, epoch: string, limit: number, promptsRoot: string, dispatch: (method: string) => Promise<unknown>,
+  ) => AuthorityServer & { accept(channel: ProtocolChannel): void }
+  const dispatch = vi.fn(async () => 'registry result')
+  const server = new Server('store', 'epoch', 16, '/expected', dispatch)
+  cleanups.push(() => server.close())
+  const legacy = new ProtocolChannel(), mismatched = new ProtocolChannel()
+  for (const channel of [legacy, mismatched]) server.accept(channel)
+  const request = (method: string, args: unknown[], epoch: string | null) =>
+    ({ protocol: 1, store: 'store', epoch, method, args, id: randomUUID() })
+  legacy.receive(request('hello', [16], null))
+  expect(legacy.sent[0]?.value).toEqual({ protocol: 1, store: 'store', epoch: 'epoch', limit: 16 })
+  legacy.receive(request('snapshot', ['/primary'], 'epoch'))
+  legacy.receive(request('probeAdd', ['/primary', '/worktree'], 'epoch'))
+  mismatched.receive(request('hello', [16, '/different'], null))
+  await setImmediate()
+  expect(legacy.sent).toContainEqual(expect.objectContaining({ code: 'worktree/not-available' }))
+  expect(dispatch).toHaveBeenCalledExactlyOnceWith('snapshot', ['/primary'])
+  expect(mismatched.sent[0]?.code).toBe('authority-config-mismatch')
+
+  // Old owners accepted the limit in args[0] and returned the original
+  // envelope. The new client keeps ordinary operations available.
+  const Client = AuthorityClient as unknown as new (
+    channel: ProtocolChannel, store: string, limit: number, promptsRoot: string, changed: () => void, disconnected: () => void,
+  ) => AuthorityClient
+  const oldOwner = new ProtocolChannel()
+  const client = new Client(oldOwner, 'store', 16, '/expected', () => {}, () => {})
+  cleanups.push(() => client.close())
+  const hello = client.request('hello', [16, '/expected'])
+  const { id } = oldOwner.sent[0] as unknown as { id: string }
+  oldOwner.receive({ type: 'reply', id, value: { protocol: 1, store: 'store', epoch: 'old-owner', limit: 16 } })
+  await hello
+  expect(client.epoch).toBe('old-owner')
+  await expect(client.request('probeAdd', ['/primary', '/worktree'])).rejects.toMatchObject({ code: 'worktree/not-available' })
+  expect(oldOwner.sent).toHaveLength(1)
+})
+
+it('replies to duplicate worktree requests in the original shape without repeating writes', async () => {
+  const Server = AuthorityServer as unknown as new (
+    store: string, epoch: string, limit: number, promptsRoot: string, dispatch: (method: string, args: unknown[]) => Promise<unknown>,
+  ) => AuthorityServer & { accept(channel: ProtocolChannel): void }
+  const removal = { removed: true }
+  const sidecar = { ignored: [], worktreeRoots: [], revision: 2, available: true }
+  const dispatch = vi.fn(async (method: string, args: unknown[]) => {
+    if (method === 'removeForDeletedWorktree') return removal
+    if (method === 'worktreeSidecar') return sidecar
+    throw new Error('unexpected replay: ' + JSON.stringify(args))
+  })
+  const server = new Server('store', 'epoch', 16, '/prompts', dispatch)
+  cleanups.push(() => server.close())
+  const channel = new ProtocolChannel()
+  server.accept(channel)
+  const request = (method: string, args: unknown[], epoch: string | null) =>
+    ({ protocol: 1, store: 'store', epoch, method, args, id: randomUUID() })
+  channel.receive(request('hello', [16, '/prompts'], null))
+  const remove = request('removeForDeletedWorktree', ['/primary', { rootId: 'id', expectedPath: '/root', expectedAddedAt: 'time' }], 'epoch')
+  const reset = request('worktreeSidecar', ['/primary', { op: 'reset' }], 'epoch')
+  channel.receive(remove)
+  channel.receive(reset)
+  await setImmediate()
+  channel.receive(remove)
+  channel.receive(reset)
+  await setImmediate()
+  expect(channel.sent.slice(1).map(reply => reply.value)).toEqual([removal, sidecar, removal, sidecar])
+  expect(dispatch.mock.calls).toEqual([
+    [remove.method, remove.args],
+    [reset.method, reset.args],
+    ['worktreeSidecar', ['/primary', { op: 'read' }]],
+  ])
 })

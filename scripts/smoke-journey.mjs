@@ -530,6 +530,85 @@ async function runWebLeg() {
       })
       observed.channelList = listed.status
       observed.channelView = listed.status === 200 ? (await listed.json())?.result : undefined
+
+      // ---- worktree A/B over the same real HTTP channel ---------------------
+      // The audit's P6 gap: settings switch, prompt confirmation and cleanup
+      // must be exercised by the browser composition, not by a captured
+      // handler. One linked checkout becomes the live session primary; a
+      // sibling checkout is the B prompt, then the shared common is the A
+      // prompt after the B root is cleaned up.
+      const linkedRoot = join(fixtureRoot, 'repo-a-wt')
+      const siblingRoot = join(fixtureRoot, 'repo-a-wt2')
+      execFileSync('git', ['-C', primaryRepo, 'worktree', 'add', '-q', linkedRoot, '-b', 'journey-wt'], { stdio: 'pipe' })
+      execFileSync('git', ['-C', primaryRepo, 'worktree', 'add', '-q', siblingRoot, '-b', 'journey-wt2'], { stdio: 'pipe' })
+      const worktreeSelection = ctx.agentDefaultModel.currentSelection()
+      const worktreePresetId = presets === undefined ? undefined : (await presets.resolve(undefined)).id
+      const worktreeHandle = await ctx.agents.create({
+        sessionId: 'journey-worktree',
+        meta: { cwd: linkedRoot, ...(worktreePresetId === undefined ? {} : { agentPreset: worktreePresetId }) },
+        agentOptions: { provider: worktreeSelection.provider, model: worktreeSelection.model },
+        setup: async (agentCtx) => {
+          installModelSelection(agentCtx, { current: worktreeSelection, assembled: undefined })
+          if (presets !== undefined && worktreePresetId !== undefined) await presets.mount(agentCtx, worktreePresetId)
+        },
+      })
+      try {
+        let rpcSequence = 0
+        const channel = async (endpoint, payload) => {
+          const response = await fetch(new URL(`/multi-root-workspace/${endpoint}`, base), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...(cookie === undefined ? {} : { cookie }) },
+            body: JSON.stringify({ type: 'client-request', rpcId: `journey-worktree-${++rpcSequence}`, method: endpoint, payload }),
+          })
+          return { status: response.status, body: await response.json().catch(() => undefined) }
+        }
+        observed.worktreeSibling = canonical(siblingRoot)
+        observed.worktreeCommon = canonical(primaryRepo)
+        const descriptor = ctx.settings.describe().find(entry => entry.ns === 'multi-root-worktrees')
+        observed.worktreeSettingPresent = descriptor !== undefined
+        // The feature is experimental and OFF by default: the first request must
+        // be refused, and only an explicit Settings opt-in enables it.
+        const off = await channel('worktreePrompt', { sessionId: 'journey-worktree' })
+        observed.worktreeDefaultOff = off.body?.result?.error?.code
+        await ctx.settings.mutate('multi-root-worktrees', [{ op: 'set', path: ['enabled'], value: true }])
+        const first = await channel('worktreePrompt', { sessionId: 'journey-worktree' })
+        observed.worktreePromptStatus = first.status
+        const firstPrompts = first.body?.result?.value?.prompts ?? []
+        observed.worktreePromptCount = firstPrompts.length
+        const bPrompt = firstPrompts.find(prompt => prompt.kind === 'worktree' && prompt.path === canonical(siblingRoot))
+        observed.worktreePromptKind = bPrompt?.kind
+        observed.worktreePromptPath = bPrompt?.path
+        const confirmedB = await channel('worktreePromptResolve', { sessionId: 'journey-worktree', promptIds: [bPrompt?.id], action: 'add' })
+        observed.worktreeConfirmedB = confirmedB.body?.result?.ok === true
+        const listedWorktrees = await channel('list', { sessionId: 'journey-worktree' })
+        const mapped = listedWorktrees.body?.result?.value?.roots?.find(row => row.path === canonical(siblingRoot))
+        observed.worktreeMappedB = mapped !== undefined && mapped?.worktree?.state === 'active'
+        const rootId = mapped?.id
+        rmSync(siblingRoot, { recursive: true, force: true })
+        const cleaned = await channel('worktreeRootsCleanup', { sessionId: 'journey-worktree', rootIds: [rootId] })
+        observed.worktreeCleaned = Array.isArray(cleaned.body?.result?.value?.removed) && cleaned.body.result.value.removed.includes(rootId)
+        const next = await channel('worktreePrompt', { sessionId: 'journey-worktree' })
+        const nextPrompt = next.body?.result?.value?.prompts?.[0]
+        observed.worktreeCommonKind = nextPrompt?.kind
+        observed.worktreeCommonPath = nextPrompt?.path
+        const commonId = nextPrompt?.id
+        await ctx.settings.mutate('multi-root-worktrees', [{ op: 'set', path: ['enabled'], value: false }])
+        const disabled = await channel('worktreePrompt', { sessionId: 'journey-worktree' })
+        observed.worktreeDisabledCode = disabled.body?.result?.error?.code
+        await ctx.settings.mutate('multi-root-worktrees', [{ op: 'set', path: ['enabled'], value: true }])
+        const restored = await channel('worktreePromptWait', { sessionId: 'journey-worktree' })
+        const restoredValue = restored.body?.result?.value
+        const restoredPrompt = restoredValue?.prompt ?? restoredValue?.prompts?.[0]
+        observed.worktreeRestoredKind = restoredPrompt?.kind
+        observed.worktreeNewId = restoredPrompt?.id !== commonId
+        const confirmedA = await channel('worktreePromptResolve', {
+          sessionId: 'journey-worktree', promptIds: [restoredPrompt?.id], action: 'add',
+        })
+        observed.worktreeConfirmedA = confirmedA.body?.result?.ok === true
+        observed.worktreeCommonRegistered = ctx.multiRootRegistry.list(linkedRoot).some(row => row.path === canonical(primaryRepo))
+      } finally {
+        await worktreeHandle.dispose()
+      }
     } finally {
       await handle.dispose()
     }
@@ -636,6 +715,22 @@ try {
     check.ok(web.channelView?.ok === true, 'web: the channel answers with an ok envelope', JSON.stringify(web.channelView)?.slice(0, 400))
     check.contains(JSON.stringify(web.channelView?.value), jsonText(canonical(additionalRepo)), 'web: the channel view lists the registered additional root', JSON.stringify(web.channelView)?.slice(0, 400))
     check.contains(JSON.stringify(web.channelView?.value), jsonText(canonical(primaryRepo)), 'web: the channel view names the primary root', JSON.stringify(web.channelView)?.slice(0, 400))
+    check.equal(web.worktreeDefaultOff, 'worktree/not-enabled', 'web: the experimental worktree feature defaults to off')
+    check.equal(web.worktreePromptStatus, 200, 'web: the worktree prompt answers over real HTTP', `status ${String(web.worktreePromptStatus)}`)
+    check.equal(web.worktreePromptCount, 2, 'web: the popup lists the sibling checkout and the main checkout together')
+    check.equal(web.worktreePromptKind, 'worktree', 'web: the sibling linked checkout is listed as a B candidate')
+    check.equal(web.worktreePromptPath, web.worktreeSibling, 'web: the B candidate names the sibling checkout')
+    check.ok(web.worktreeConfirmedB, 'web: the B confirmation registers through the real channel')
+    check.ok(web.worktreeMappedB, 'web: the confirmed B root is listed with an active worktree badge')
+    check.ok(web.worktreeCleaned, 'web: the deleted B root is cleaned through the real channel')
+    check.equal(web.worktreeCommonKind, 'main-checkout', 'web: the A prompt follows the B cleanup')
+    check.equal(web.worktreeCommonPath, web.worktreeCommon, 'web: the A prompt names the main checkout root')
+    check.ok(web.worktreeSettingPresent, 'web: the worktree switch is a live Settings namespace')
+    check.equal(web.worktreeDisabledCode, 'worktree/not-enabled', 'web: turning the switch off retires the live prompt')
+    check.equal(web.worktreeRestoredKind, 'main-checkout', 'web: turning the switch back on re-detects the live session')
+    check.ok(web.worktreeNewId, 'web: the restored prompt has a new ID')
+    check.ok(web.worktreeConfirmedA, 'web: the A confirmation registers the main checkout through the real channel')
+    check.ok(web.worktreeCommonRegistered, 'web: the A root is the main checkout root')
     check.equal(readFileSync(join(additionalRepo, 'README.md'), 'utf8'), EDITED_README, 'web: the additional root carries the agent\'s write')
     check.equal(readFileSync(join(primaryRepo, 'README.md'), 'utf8'), PRIMARY_README, 'web: the primary repository is byte-identical')
     check.equal(readFileSync(join(outsideRoot, 'keep.txt'), 'utf8'), 'untouched\n', 'web: a file outside every root is byte-identical')

@@ -770,6 +770,42 @@ aside[data-mrfw-navigator] > [data-files-body] {
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* The multi-candidate worktree list: a scrollable stack of selectable rows. */
+.mrfw-worktreeList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.mrfw-worktreeRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.mrfw-worktreeRowHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.mrfw-worktreeKind {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-worktreeRow .mrfw-rootPath { overflow-wrap: anywhere; }
+
 .mrfw-stateWarn {
   font-size: 12px;
   line-height: 18px;

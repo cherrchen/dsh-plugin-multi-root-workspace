@@ -11,6 +11,7 @@ English: [README.en.md](./README.en.md)
 - [各安装来源的差异](#各安装来源的差异)
 - [`/workspace-folders` 命令的完整语义](#workspace-folders-命令的完整语义)
 - [访问级别、数量上限与 per-tool 封顶](#访问级别数量上限与-per-tool-封顶)
+- [Worktree 附加根建议的完整语义](#worktree-附加根建议的完整语义)
 - [组合里实际发生了什么](#组合里实际发生了什么)
 - [模型侧与面板侧的行为](#模型侧与面板侧的行为)
 
@@ -62,6 +63,22 @@ Windows Full-access 的局部拒写独立 runner 通过管理员安装的 broker
 每个主根的附加根数量有上限（默认 16，经注册表行配置 `maxAdditionalRoots` 可调至 64）；超限的新增被拒绝，历史超限记录仍保留其登记授权；Windows Full-access 新进程另有有界拒写集容量，超限时整次启动被明确拒绝，见 [ADR-0020](../decisions/ADR-0020-windows-normal-deny-groups.md#协议容量与安装回滚修订2026-10-15)（[ADR-0014](../decisions/ADR-0014-root-limit-and-provider-conflict.md)）。
 
 宿主还可以在 `multi-root-scope` 行配置 `toolAccess: { <工具名>: 'read-only' }`，让某个工具永远不能写任何附加根（例如 `{ bash: 'read-only' }`——bash 仍可写主根）；非法配置 fail closed。
+
+## Worktree 附加根建议的完整语义
+
+**激活门禁**：只有 `<primaryRoot>/.git` 本身存在（普通目录，或带 `commondir` 的指针文件）时才启用。仓库子目录、普通目录、伪 `.git`/伪 admin、submodule（两种形态）、bare 派生、`--separate-git-dir` 主 checkout、`include`/非空 `core.worktree`/`extensions.worktreeConfig`/`relativeWorktrees`、版本 1、split/sparse index、UNC/设备路径、symlink/FIFO 元数据都 inactive。首次门禁失败返回 `unactivated`：不建候选、不挂 watcher、不写 sidecar、不后台重查；只有面板/命令 list 或新的显式 wait 能重新尝试。曾经 active 后复验失败返回 `lost`，同样停止后台活动；primary 恢复后仍须显式触发，旧提示 ID 作废。
+
+**发现与身份**：只枚举 `<common>/worktrees/*/gitdir`，不运行 `git worktree list`。候选必须属于同一 common、admin 在 `common/worktrees/<id>` 下、`.git` 文件与 admin 的 `gitdir` 双向一致、admin/common HEAD 通过语法校验且 common 结构有效。候选身份是 `adminId + canonical root + canonical admin gitdir target`；同一 workspace 的多个 session 共享 inventory、去重与 watcher，展示按 session 的 mode 过滤。只读会话可以处理 B（登记策略始终 `inherit`），Full-access 不提示。可见候选恰好一个时返回 `prompt`（原确认对话框），两个及以上返回 `prompts`（可勾选列表）；`seenViewRevision` 是唯一的已展示游标。
+
+**提示与确认**：确认对话框显示实际路径、当前有效权限、`inherit` 与 workspace 级持久性；勾选「不再提示」写入 sidecar，对该 workspace 的所有 session 生效。确认走 Registry owner 的 `addNew`：owner 在串行队列内重跑完整 primary/candidate 判据、HEAD 语法、祖先 gitlink 与目录身份，只有全部一致才写；只新建，不 revive，不存在同路径记录。`duplicate` 视为已登记并停止提示，但不写清理映射。
+
+**删除与清理**：删除信号（admin 消失、路径缺失、admin `gitdir` 指向新路径）只决定徽标。清理资格只看 `record.path` 是否确认缺失，并绑定 `rootId + path + addedAt`；路径存在、不可访问、或 checkout 仍有效时返回 `worktree/not-eligible`，面板只提供普通 Remove。批量清理只接受面板列出并显式确认的精确 id。**永不在删除事件上自动调用清理**。缺失根继续占额度。清理前同路径新目录可能继承旧授权，这是已记录的 L4 残余，面板会提示。
+
+**持久化与降级**：`worktreeRoots` 与 `ignored` 保存在 `$DSH_HOME/storages/multi_root_workspace.worktree-prompts/<sha256(primaryKey)>.json`，只有持有 store lease 的 Registry owner 写入，follower 通过认证 IPC 请求。prune 只消费 owner 队列内的完整 `RegistrySnapshotView`：`available=false` 的空列表保留映射，`available=true` 的空快照才允许删除；跨 epoch 按 `rootId + path + rootAddedAt` 重绑或修剪。sidecar 损坏/不可写时 owner 退化为 memory-only 并告警，不影响授权；B 根按手动根处理，专用清理拒绝。
+
+**设置**：`multi-root-worktrees.enabled` **实验性、默认 `false`**，与附属根 Skills 共用同一张插件详情设置卡但独立生效；标题旁显示“实验性”Tag，只有显式持久化 `true` 或 loader `true` 才启用，缺失 Settings 视为关闭。关闭后当前 Host 停止发现、watcher、后台重查与专用清理，唤醒 waiter 并作废旧提示；新的 worktree 请求返回 `worktree/not-enabled`，客户端停止重挂（`session-not-found`/`not-available` 这类瞬时失败会有限退避重试，不再要求先打开面板）。重新开启后按当前 live session 重新探测；此前已 `lost` 的 workspace 仍需显式恢复。已确认的普通 Registry 根与 sidecar 决定保留。
+
+**A：主 checkout 授权。** 当 session primary 本身是 linked checkout 且处于 `workspace-write` 时，提示把**主 checkout 根 `<main> = dirname(canonical common)`** 登记为 `inherit`；`<main>/.git` 随主根一起授权。候选要求 `basename(common) === '.git'`、`<main>/.git` 是真实目录且 canonical 等于 common，并记录主根与 admin 身份；来源是同一份 primary 快照。对话框必须说明范围：主 checkout 源码树、共享 config、hooks、refs/objects 与所有 worktree 的 admin 数据，可能影响同一仓库的其他 checkout；登记是 workspace 级。**默认 pool 的主根包含 primary，`primary-overlap` 使其没有 A**；外部 linked checkout 适用。`--separate-git-dir` 时推导路径可能是 store 的父目录而非真正主 checkout，对话框显示实际路径并提示核对。等待期间 primary/admin/common 的 `dev/ino`（可用时含 birthtime）、admin HEAD、双向指针、祖先索引、主根身份或 `<main>/.git` 替换都会 `prompt-stale`。A 根没有 sidecar 清理映射：linked checkout 被删除不会触发清理，普通 Remove 即可撤回；专用清理只追踪 B 根。模式变化/关闭开关会作废旧提示；已提交的普通根不会因关闭开关回滚。受限 Git 旅程在真实内核沙箱下验证：授权前 `git add` 失败，授权后同一 `workspace-write` 完成 `add`/`commit`；主 checkout 源码现在在授权内，无关目录仍拒写；无可用 runner 时按既有 `kernel:probe` 规则 skip 并打印原因。
 
 ## 组合里实际发生了什么
 

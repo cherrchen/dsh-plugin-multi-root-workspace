@@ -4,10 +4,16 @@ import { z } from 'zod'
 import type { Channel } from './native.ts'
 import { connectNative, listenNative, type Listener } from './native.ts'
 
+import { addNewSchema, deletedWorktreeSchema, sidecarOperationSchema } from '../worktrees/protocol.ts'
+
 const MAX_FRAME = 1024 * 1024, MAX_PENDING = 32
-const helloSchema = z.object({ protocol: z.literal(1), store: z.string(), epoch: z.string(), limit: z.number().int() }).strict()
-const methods = ['hello', 'snapshot', 'admit', 'add', 'removeAt', 'setAccess', 'setAlias', 'setSkillsEnabled', 'setAliasId', 'move', 'recheck'] as const
+const helloSchema = z.object({ protocol: z.literal(1), store: z.string(), epoch: z.string(), limit: z.number().int(), promptsRoot: z.string().nullable().optional() }).strict()
+const methods = ['hello', 'snapshot', 'admit', 'probeAdd', 'add', 'removeAt', 'setAccess', 'setAlias', 'setSkillsEnabled', 'setAliasId', 'move', 'recheck', 'addNew', 'removeForDeletedWorktree', 'worktreeSidecar'] as const
 export type Method = typeof methods[number]
+const worktreeMethods = new Set<Method>(['probeAdd', 'addNew', 'removeForDeletedWorktree', 'worktreeSidecar'])
+type MutationOutcome =
+  | { readonly ok: true; readonly result?: unknown }
+  | { readonly ok: false; readonly code: string; readonly message: string }
 const requestSchema = z.object({ protocol: z.literal(1), store: z.string(), id: z.string().uuid(), epoch: z.string().nullable(), method: z.enum(methods), args: z.array(z.unknown()).max(4) }).strict()
 const rootSchema = z.object({
   id: z.string(), path: z.string(), access: z.enum(['inherit', 'read-only', 'read-write']), addedAt: z.string(),
@@ -53,7 +59,8 @@ export class AuthorityClient {
   private readonly pending = new Map<string, { method: Method; resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>()
   private closed = false
   epoch: string | undefined
-  private constructor(private readonly channel: Channel, private readonly store: string, private readonly limit: number, onChange: (snapshot: Snapshot) => void, disconnected: () => void) {
+  private worktrees = false
+  private constructor(private readonly channel: Channel, private readonly store: string, private readonly limit: number, private readonly promptsRoot: string | null, onChange: (snapshot: Snapshot) => void, disconnected: () => void) {
     channel.on('close', () => {
       if (this.closed) return
       this.closed = true
@@ -70,7 +77,8 @@ export class AuthorityClient {
         // A change may share the same read buffer as hello. Set identity here,
         // before resolving the Promise, rather than one microtask later.
         const hello = helloSchema.parse(reply.value)
-        if (hello.store !== store || hello.limit !== this.limit) throw new Error('registry configuration mismatch')
+        if (hello.store !== store || hello.limit !== this.limit || (hello.promptsRoot !== undefined && hello.promptsRoot !== this.promptsRoot)) throw new Error('registry configuration mismatch')
+        this.worktrees = hello.promptsRoot !== undefined
         this.epoch = hello.epoch
       }
       this.pending.delete(reply.id); clearTimeout(request.timer)
@@ -78,17 +86,17 @@ export class AuthorityClient {
       else request.reject(new AuthorityRpcError(reply.code, reply.message))
     })
   }
-  static async connect(endpoint: string, store: string, limit: number, onChange: (snapshot: Snapshot) => void, disconnected: () => void, signal?: AbortSignal) {
+  static async connect(endpoint: string, store: string, limit: number, onChange: (snapshot: Snapshot) => void, disconnected: () => void, signal?: AbortSignal, promptsRoot: string | null = null) {
     if (signal?.aborted) throw new AuthorityRpcError('authority-cancelled', 'registry handshake was cancelled')
     const channel = await connectNative(endpoint)
     if (signal?.aborted) { channel.destroy(); throw new AuthorityRpcError('authority-cancelled', 'registry handshake was cancelled') }
-    const client = new AuthorityClient(channel, store, limit, onChange, disconnected)
+    const client = new AuthorityClient(channel, store, limit, promptsRoot, onChange, disconnected)
     const onAbort = () => client.close()
     signal?.addEventListener('abort', onAbort, { once: true })
     try {
-      const hello = helloSchema.parse(await client.request('hello', [limit]))
-      if (hello.store !== store || hello.limit !== limit) throw new Error('registry configuration mismatch')
-      client.epoch = hello.epoch
+      // A v1 owner predating worktrees ignores the second argument and
+      // returns the original envelope. Keep its ordinary Registry usable.
+      helloSchema.parse(await client.request('hello', [limit, promptsRoot]))
       return client
     } catch (error) {
       client.close()
@@ -98,6 +106,9 @@ export class AuthorityClient {
   }
   request(method: Method, args: readonly unknown[]): Promise<unknown> {
     if (this.closed || this.pending.size >= MAX_PENDING) return Promise.reject(new AuthorityRpcError('authority-unavailable', 'registry connection is unavailable or busy'))
+    if (!this.worktrees && worktreeMethods.has(method)) {
+      return Promise.reject(new AuthorityRpcError('worktree/not-available', 'the Registry owner did not negotiate worktree support'))
+    }
     const id = randomUUID()
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.channel.destroy() }, 5000)
@@ -116,34 +127,51 @@ export class AuthorityServer {
   private readonly readyPeers = new Set<Channel>()
   private closed = false
   private inFlight = 0
-  private constructor(private readonly store: string, private readonly epoch: string, private readonly limit: number, private readonly dispatch: (method: Method, args: unknown[]) => Promise<unknown>) {}
-  static async listen(endpoint: string, store: string, epoch: string, limit: number, dispatch: (method: Method, args: unknown[]) => Promise<unknown>) {
-    const server = new AuthorityServer(store, epoch, limit, dispatch)
+  private constructor(private readonly store: string, private readonly epoch: string, private readonly limit: number, private readonly promptsRoot: string | null, private readonly dispatch: (method: Method, args: unknown[]) => Promise<unknown>) {}
+  static async listen(endpoint: string, store: string, epoch: string, limit: number, dispatch: (method: Method, args: unknown[]) => Promise<unknown>, options: { readonly promptsRoot?: string | null } = {}) {
+    const server = new AuthorityServer(store, epoch, limit, options.promptsRoot ?? null, dispatch)
     server.listener = await listenNative(endpoint, channel => server.accept(channel))
     return server
   }
   private accept(channel: Channel) {
     if (this.closed || this.peers.size >= 32) { channel.destroy(); return }
     this.peers.add(channel)
-    let ready = false, pending = 0
-    const seen = new Map<string, { fingerprint: string; outcome: Promise<{ ok: true } | { ok: false; code: string; message: string }> }>()
+    let ready = false, worktrees = false, pending = 0
+    const seen = new Map<string, { fingerprint: string; outcome: Promise<MutationOutcome> }>()
     const timer = setTimeout(() => { if (!ready) channel.destroy() }, 5000)
     timer.unref()
     channel.on('close', () => { clearTimeout(timer); this.peers.delete(channel); this.readyPeers.delete(channel) })
     channel.on('error', () => channel.destroy())
     receive(channel, value => {
       const request = requestSchema.parse(value)
+      // The frame budget is per message, not per request: addNew carries one
+      // expected snapshot, not a root table.
       if (request.store !== this.store || pending >= MAX_PENDING) throw new Error('registry peer violated protocol')
       if (request.method === 'hello') {
-        if (ready || request.epoch !== null || request.args[0] !== this.limit) throw new Error('registry handshake mismatch')
+        const [limit, promptsRoot] = parseArguments('hello', request.args)
+        if (ready || request.epoch !== null || limit !== this.limit) throw new Error('registry handshake mismatch')
+        worktrees = promptsRoot !== undefined
+        if (worktrees && promptsRoot !== this.promptsRoot) {
+          send(channel, { type: 'error', id: request.id, code: 'authority-config-mismatch', message: 'registry worktree configuration mismatch' })
+          return
+        }
         ready = true; this.readyPeers.add(channel); clearTimeout(timer)
-        send(channel, { type: 'reply', id: request.id, value: { protocol: 1, store: this.store, epoch: this.epoch, limit: this.limit } }); return
+        send(channel, { type: 'reply', id: request.id, value: {
+          protocol: 1, store: this.store, epoch: this.epoch, limit: this.limit,
+          ...(worktrees ? { promptsRoot: this.promptsRoot } : {}),
+        } }); return
       }
       if (!ready || request.epoch !== this.epoch) throw new Error('registry epoch mismatch')
+      if (!worktrees && worktreeMethods.has(request.method)) {
+        send(channel, { type: 'error', id: request.id, code: 'worktree/not-available', message: 'the peer did not negotiate worktree support' })
+        return
+      }
       if (this.inFlight >= MAX_PENDING) {
         send(channel, { type: 'error', id: request.id, code: 'authority-busy', message: 'registry is busy; request was not submitted' }); return
       }
-      const mutation = request.method !== 'snapshot' && request.method !== 'admit'
+      const sidecarRead = request.method === 'worktreeSidecar' &&
+        (request.args[1] as { op?: unknown } | null | undefined)?.op === 'read'
+      const mutation = !sidecarRead && request.method !== 'snapshot' && request.method !== 'admit' && request.method !== 'probeAdd'
       if (mutation && !seen.has(request.id) && seen.size >= 2048) { channel.destroy(); return }
       const fingerprint = createHash('sha256').update(JSON.stringify([request.method, request.args])).digest('hex')
       const entry = seen.get(request.id)
@@ -154,11 +182,14 @@ export class AuthorityServer {
       const run = entry
         ? entry.outcome.then(outcome => {
             if (!outcome.ok) throw new AuthorityRpcError(outcome.code, outcome.message)
+            if (request.method === 'addNew' || request.method === 'removeForDeletedWorktree') return outcome.result
+            if (request.method === 'worktreeSidecar') return this.dispatch('worktreeSidecar', [request.args[0], { op: 'read' }])
             return this.dispatch('snapshot', [request.args[0]])
           })
         : this.dispatch(request.method, request.args)
       if (mutation && !entry) seen.set(request.id, { fingerprint, outcome: run.then(
-        () => ({ ok: true as const }),
+        result => request.method === 'addNew' || request.method === 'removeForDeletedWorktree'
+          ? { ok: true as const, result } : { ok: true as const },
         error => ({ ok: false as const, code: String(error?.code ?? 'registry-error').slice(0, 120), message: String(error?.message ?? error).slice(0, 4096) }),
       ) })
       void run.then(result => send(channel, { type: 'reply', id: request.id, value: result }), error => send(channel, {
@@ -186,7 +217,10 @@ const ref = z.discriminatedUnion('kind', [
 ])
 const primary = z.string().min(1)
 const argumentSchemas = {
-  hello: z.tuple([z.number().int()]), snapshot: z.tuple([primary]), admit: z.tuple([primary]), recheck: z.tuple([primary]),
+  hello: z.union([z.tuple([z.number().int()]), z.tuple([z.number().int(), z.string().nullable()])]), snapshot: z.tuple([primary]), admit: z.tuple([primary]), recheck: z.tuple([primary]),
+  probeAdd: z.tuple([primary, z.string().min(1)]),
+  addNew: z.tuple([primary, addNewSchema]), removeForDeletedWorktree: z.tuple([primary, deletedWorktreeSchema]),
+  worktreeSidecar: z.tuple([primary, sidecarOperationSchema]),
   add: z.tuple([primary, z.object({ path: z.string(), alias: z.string().optional(), access: z.enum(['inherit', 'read-only', 'read-write']).optional() }).strict()]),
   removeAt: z.tuple([primary, ref]), setAccess: z.tuple([primary, ref, z.enum(['inherit', 'read-only', 'read-write'])]),
   setAlias: z.tuple([primary, ref, z.string().nullable()]), setSkillsEnabled: z.tuple([primary, ref, z.boolean()]),

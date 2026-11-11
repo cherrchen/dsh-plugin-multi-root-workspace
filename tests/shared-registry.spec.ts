@@ -57,6 +57,22 @@ nativeTest('lets two Hosts use the same registered roots while opening only one 
   expect(follower.registry.list(fixture.workspace)).toHaveLength(1)
 })
 
+nativeTest('answers the owner snapshot envelope instead of the local projection', async () => {
+  const owner = await mount()
+  await owner.registry.add(fixture.workspace, { path: fixture.outside })
+  const follower = await mount()
+  const internal = follower.registry as unknown as {
+    cache: Map<string, unknown>
+    remoteRevisions: Map<string, number>
+  }
+  // Simulate a follower projection that was replaced behind the snapshot
+  // fetch: the envelope must still answer the OWNER's roots (ADR-0039 §6.8).
+  internal.cache.delete(primaryKey(fixture.workspace))
+  internal.remoteRevisions.set(primaryKey(fixture.workspace), Number.MAX_SAFE_INTEGER)
+  const view = await follower.registry.snapshotView(fixture.workspace)
+  expect(view).toMatchObject({ available: true, roots: [{ path: canonicalPath(fixture.outside) }] })
+})
+
 nativeTest('orders a follower admission after owner revocation even with notifications dropped', async () => {
   const owner = await mount()
   await owner.registry.add(fixture.workspace, { path: fixture.outside })

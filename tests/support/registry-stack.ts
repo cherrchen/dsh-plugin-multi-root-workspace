@@ -77,7 +77,19 @@ export async function mountRegistryStack(storeRoot: string, registryConfig: Regi
   // The single-process mode is gone (ADR-0028): every stack is shared — the
   // medium is the store root and the canonical lock sits beside the document.
   // A spec covering the config-invalid path passes `sharedStorageRoot: ''`.
-  const registryFiber = await ctx.plugin(MultiRootRegistry, { leasePath: `${storeRoot}/${DOMAIN_NAME}.lock`, sharedStorageRoot: storeRoot, ...registryConfig })
+  const registryFiber = await ctx.plugin(MultiRootRegistry, {
+    // Phase P4: the owner-side worktree sidecar lives beside the store, so
+    // specs exercise the real file path unless they override it.
+    promptsRoot: `${storeRoot}/worktree-prompts`,
+    leasePath: `${storeRoot}/${DOMAIN_NAME}.lock`,
+    sharedStorageRoot: storeRoot,
+    ...registryConfig,
+  })
+  // A bare Registry stack has no worktree row. The row's live switch is the
+  // ONLY production caller of the worktree write path, so stand in for it as
+  // "mounted and enabled"; a spec that covers the absent/disabled provider
+  // overrides or clears it explicitly.
+  ctx.multiRootRegistry.setWorktreeGateProvider(() => true)
   return {
     ctx,
     registry: ctx.multiRootRegistry,

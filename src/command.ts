@@ -29,6 +29,7 @@
  */
 
 import { AuthorityRpcError } from './authority/protocol.ts'
+import { statSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
@@ -47,15 +48,20 @@ import type {} from '@deepseek-ai/dsh-workspace'
 import {
   PANEL_CHANNEL,
   SKILLS_ENDPOINTS,
-  skillsRequestSchema,
+  WORKTREE_ENDPOINTS,
   parsePanelCall,
+  parseWorktreeCall,
+  skillsRequestSchema,
   type PanelCall,
   type RevealedView,
   type RootEntryView,
   type RootView,
   type RootsView,
+  type WorktreeCleanupView,
 } from './contract.ts'
 import type {} from './skills.ts'
+import type {} from './worktrees.ts'
+import { WorktreeError } from './worktrees/errors.ts'
 import type { MultiRootRegistry } from './registry.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
 import { persistedSessionExists } from './compat/session-existence.ts'
@@ -251,8 +257,11 @@ async function runCommand(ctx: Context, invocation: CommandInvocation, config: C
     switch (parsed.verb) {
       case 'help':
         return { kind: 'success', text: helpText() }
-      case 'list':
-        return { kind: 'success', text: await report(registry, primaryRoot, policy.mode) }
+      case 'list': {
+        const reportText = await report(registry, primaryRoot, policy.mode)
+        await ctx.get('multiRootWorktrees')?.describeRoots(primaryRoot)
+        return { kind: 'success', text: reportText }
+      }
       case 'add': {
         const { text: rest, access } = splitAddAccess(parsed.rest)
         const typed = unquote(rest)
@@ -630,7 +639,7 @@ async function primaryNameOf(ctx: Context, primaryRoot: string, request: PanelCa
  * command uses, so "the list the operator sees" is always the list the scope
  * currently enforces.
  */
-async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoot: string, request: PanelCall): Promise<RootsView> {
+async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoot: string, request: PanelCall, detectWorktree = request.endpoint === 'list'): Promise<RootsView> {
   const statuses = await registry.refresh(primaryRoot)
   const unavailable = registry.unavailable
   const primaryName = await primaryNameOf(ctx, primaryRoot, request)
@@ -640,6 +649,7 @@ async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoo
   if (session === undefined) throw new RootValidationError('session-not-found', 'the panel session closed during the request')
   const policy = ctx.sandboxPolicy.resolve({ session })
   const scope = ctx.get('multiRootScope')
+  const worktreeInfo = await ctx.get('multiRootWorktrees')?.describeRoots(primaryRoot, detectWorktree)
   return {
     primaryRoot: canonicalRoot(primaryRoot),
     ...(primaryName === undefined ? {} : { primaryName }),
@@ -647,13 +657,49 @@ async function rootsViewOf(ctx: Context, registry: MultiRootRegistry, primaryRoo
     mode: policy.mode,
     cappedTools: scope?.toolCaps() ?? [],
     toolAccessInvalid: scope?.toolAccessInvalid ?? false,
-    roots: statuses.map((status, index) => ({ ...toRootView(status, index),
-      effectiveAccess: status.state === 'available' ? effectiveRootAccess(status.access, policy.mode) : 'unavailable',
-    })),
+    roots: statuses.map((status, index) => {
+      const badge = worktreeInfo?.badges.get(status.id)
+      return {
+        ...toRootView(status, index),
+        effectiveAccess: status.state === 'available' ? effectiveRootAccess(status.access, policy.mode) : 'unavailable',
+        ...(badge === undefined ? {} : { worktree: badge }),
+      }
+    }),
     limit: registry.limit,
     count: statuses.length,
     ...(unavailable === undefined ? {} : { unavailable }),
+    primaryState: primaryStateOf(primaryRoot),
+    ...(worktreeInfo === undefined ? {} : { worktreeCleanupCount: worktreeInfo.cleanupCount }),
   }
+}
+
+/**
+ * The host's own fact about the primary directory: present, missing, or
+ * inaccessible. Not derived from an additional root, and never a substitute
+ * for the Registry's authority state (ADR-0039 §6.7).
+ */
+function primaryStateOf(primaryRoot: string): 'present' | 'missing' | 'inaccessible' {
+  try {
+    return statSync(primaryRoot).isDirectory() ? 'present' : 'missing'
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'inaccessible'
+  }
+}
+
+/**
+ * Explicit worktree cleanup: each id must be a tracked B mapping, and the
+ * Registry owner re-verifies `rootId + path + addedAt` before anything is
+ * deleted. The answer carries the refreshed roots view, so the panel never
+ * needs a second round trip after a cleanup.
+ */
+async function cleanupWorktreeRoots(ctx: Context, sessionId: string, rootIds: readonly string[]): Promise<WorktreeCleanupView> {
+  const worktrees = ctx.get('multiRootWorktrees')
+  if (worktrees === undefined) throw new WorktreeError('worktree/not-available', 'worktree root suggestions are not mounted in this composition')
+  const result = await worktrees.cleanup(sessionId, rootIds)
+  const primaryRoot = resolvePanelPrimaryRoot(ctx, sessionId)
+  const roots = await rootsViewOf(ctx, ctx.multiRootRegistry, primaryRoot, { endpoint: 'list', sessionId }, false)
+  return { removed: result.removed, skipped: result.skipped, roots }
 }
 
 /**
@@ -673,6 +719,39 @@ async function dispatchPanelRequest(
 ): Promise<ConnectionRpcResult<unknown>> {
   let panelSessionId: string | undefined
   try {
+    // Worktree endpoints are a separate contract with their own strict schema;
+    // they never pass through the roots panel schema (ADR-0039 §7).
+    if ((WORKTREE_ENDPOINTS as readonly string[]).includes(endpoint)) {
+      const parsedWorktree = parseWorktreeCall(endpoint, payload)
+      if (!parsedWorktree.ok) {
+        return { ok: false, error: { code: 'panel/bad-request', message: parsedWorktree.message, details: {} } }
+      }
+      const call = parsedWorktree.value
+      const worktrees = ctx.get('multiRootWorktrees')
+      if (worktrees === undefined) {
+        throw new WorktreeError('worktree/not-available', 'worktree root suggestions are not mounted in this composition')
+      }
+      switch (call.endpoint) {
+        case 'worktreePrompt':
+          return { ok: true, value: await worktrees.prompt(call.sessionId) }
+        case 'worktreePromptWait':
+          return {
+            ok: true,
+            value: await worktrees.wait(call.sessionId, {
+              ...(call.seenViewRevision === undefined ? {} : { seenViewRevision: call.seenViewRevision }),
+            }, signal),
+          }
+        case 'worktreePromptResolve':
+          return {
+            ok: true,
+            value: await worktrees.resolve(call.sessionId, call.promptIds ?? [], call.action ?? 'dismiss', call.dontRemind),
+          }
+        case 'worktreePromptReset':
+          return { ok: true, value: await worktrees.reset(call.sessionId) }
+        case 'worktreeRootsCleanup':
+          return { ok: true, value: await cleanupWorktreeRoots(ctx, call.sessionId, call.rootIds ?? []) }
+      }
+    }
     if ((SKILLS_ENDPOINTS as readonly string[]).includes(endpoint)) {
       const parsedSkills = skillsRequestSchema.safeParse(payload)
       if (!parsedSkills.success) return { ok: false, error: { code: 'panel/bad-request', message: 'invalid Skills request', details: {} } }
@@ -770,7 +849,7 @@ async function dispatchPanelRequest(
         : error.code
       return { ok: false, error: { code, message: error.message, details: {} } }
     }
-    if (error instanceof AuthorityRpcError) {
+    if (error instanceof AuthorityRpcError || error instanceof WorktreeError) {
       return { ok: false, error: { code: error.code, message: error.message, details: {} } }
     }
     return {

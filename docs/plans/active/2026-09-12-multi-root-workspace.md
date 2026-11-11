@@ -67,8 +67,42 @@
 | 兼容协作 | 准入外受限 spawn 修复（forge bundle Git 面板报错） | `v0.1.12` 起 forge 等第三方插件的「裸 `confine→spawn`」被进程围栏硬拒；scope 增加按**铸造时**发布代次键控的台账（放行 = 本进程刚铸出的无帧主根形态 profile 且授权基线未被超越；`operationFrameState` 三态分流：过期准入帧的 mint 直接丢弃不落账；`captureMint` 形态标记机械限定台账只收 `clamped`/`read-only`，`restrictedExecution` 等 ambient mint 无帧即死），同时 `ctx.inject` 按 `compat/forge-entrypoints.ts` 清单包装上游 `worktrees`/`forgePanel` 可达入口取真准入（准入获取失败退回无准入执行，方法体错误照常传播）；OPS 域与保护窗口对台账 mint 一律严格（只认存活准入帧内铸造） | — | [0035](../../decisions/ADR-0035-unadmitted-confined-spawn.md) | `59b2e03`、`16f2a2a`（复审加固）、`c235bee`（二次复审）、`0dd7009`（三次复审）、`afb6c1f`（PR #41） | 随 `v0.1.16` 发版；验证环境为 macOS 宿主（Seatbelt 可用、`nativeHostAvailability` 通过）：lint / typecheck / 全量 vitest（含台账竞态、ambient 落账拒绝、同内容重发布保留、准入回退与 OPS 守卫新回归）通过；台账核心用例无能力门禁（单元素 confine 链不执行 `sandbox-exec`），受限宿主与 Linux/Windows CI 均可实跑；存在与本次无关的 follower/lease 环境性失败 |
 | hot-fix | 面板「存在但非 live」会话细分 | 会话被另一 Host 的 writer 锁持有、仍在恢复或待迁移时不再误报 `session-not-found`；catch 处复跑 resolver 并探测 `sessionPersistence.stat`，仅在能证明持久化快照存在时改报 `session-not-live`，授权仍只认本进程 live 会话 | [本次记录](#v0116-发版验收2026-11-08) | [0008 修订](../../decisions/ADR-0008-panel-session-derived-authority.md#修订失败码按持久化存在性细分2026-11-07amendment) | `bd1320f`（PR #42） | 随 `v0.1.16` 发版 |
 | 第二期 | 预览页 Folder 导航树附加根接管 | 上游 `0.2.2-alpha.3` 的文档预览 Folder 导航树固定会话 cwd；接管 aside 树体到被预览文件所在最长前缀附加根，复刻 reveal（逐层展开、当前行高亮、滚动到位）、`replaceTab` 打开与关闭/重开的展开、滚动记忆；无匹配根时原生树不受影响 | [本次记录](#v0116-发版验收2026-11-08) | [0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[0016](../../decisions/ADR-0016-files-tab-native-tree-fork.md) | `48ef357`…`a3bb4d3`（PR #43） | 随 `v0.1.16` 发版 |
+| 第二期 | Worktree 感知的附加根建议与主 checkout 授权 | P1–P7 先完成 B（同 common 的 worktree 建议、手动清理及实验性默认关闭的插件开关），P8–P10 再实施 A（linked primary 的主 checkout 根授权、owner 复验与受限 Git 旅程）；第十九次修订加入单/多候选提示分流 | [计划](./2026-11-09-worktree-aware-root-suggestions.md) | [0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md) | `feat/worktree-find`（审计基线 `ceb708e`） | P0–P10、两轮审计修复、第十九次修订与 Devin Review 两条修复已实施。macOS 原生全量、受限 Git 旅程、共享 IPC 与组合/打包冒烟通过。Linux / Windows 原生矩阵待验证，未发版。详见[本次记录](#worktree-感知建议-ba-实施2026-11-09) |
 | 第二期 | 工作区菜单「管理工作区目录…」 | 工作区 `...` / 右键菜单复用 footer 对话框：`apply()` 作用域 controller、`workspace` contribution（order 150）、当前会话属于目标时直接打开，否则先经 `openWorkspace` 打开/复用 blank 并确认 current 后固定 session；服务缺失置灰，`RootSwitcher` 与上游 `WorkspaceBrowser` 零改动 | [计划](./2026-11-08-workspace-menu-folders-dialog.md) | [0038](../../decisions/ADR-0038-workspace-menu-folders-dialog.md) | `feat/workspace-menu-ui` | 未发布；已 rebase 到 `main`（含 #44/#45），完整门禁通过，隔离 Web 宿主目检完成；待维护者确认 |
 
+
+### Worktree 感知建议 B/A 实施（2026-11-09）
+
+ADR-0039 第十八次修订的 B（P1–P7）与 A（P8–P10）均已落地。以下保留首次审计返工的阶段记录，现行验证见末条复审记录。
+
+- **P1 元数据快照**：插件自己以 trusted-fd/有界读取打开并解析 config、HEAD、index 与两种 checkout 形态；完整祖先链、Unicode NFC/NFD、split/sparse index、祖先 gitlink、alternates、FIFO/symlink 全部 fail closed；不启动 Git、不解析 commit 对象。单测覆盖真实 Git 夹具（含 linked worktree、separate-git-dir、bare 派生、版本 1、祖先遮蔽、linked worktree 本身是 submodule）。
+- **P2 发现与激活**：受控枚举 `<common>/worktrees/*/gitdir`，默认 pool 无特殊规则；`unactivated`/`active`/`lost` 三态、显式恢复、watcher 去抖与 admin 上限降级；实验性默认关闭的 Host 设置复用附属根 Skills 的 Settings 接缝。
+- **P3 Prompt RPC/UI**：`WORKTREE_ENDPOINTS` 与双端严格判别联合（禁止 retry 字段）、设置卡第二个 Switch（第十九次修订后带实验性 Tag、默认关闭）、shell overlay；P3 曾以只读预览提交，P4 后确认按钮启用。
+- **P4 写路径**：Registry owner 串行队列内的 `addNew`（primary/candidate 完整复验、identity、HEAD、祖先索引、duplicate 不 revive）与 `removeForDeletedWorktree`（`rootId + path + addedAt`，仅确认缺失）；`promptsRoot` 按 `sha256(primaryKey)` 分文件，全部写入在 owner 队列内，损坏即 memory-only；面板徽标、逐条与批量显式清理。
+- **P5 竞态**：同路径删除重建、primary `.git` 移走、admin HEAD 变化、候选换 symlink、等待 owner 期间祖先新增 `160000` 均 `worktree/prompt-stale`，且断言 Registry 无写入。
+- **P6 验证（首次返工 `db50de6`）**：worktree 专项 11 个 spec（metadata/discovery/contract/channel/write/owner/sidecar/client/common/common-owner/audit-regressions）另有受限 Git e2e，覆盖 ADR §2.5 的布局矩阵与 §5/§6.8 的映射规则；专项 **109 通过、0 失败**，2 个受限 Git 旅程按外层沙箱 `requireKernelRunner` 显式 skip。全量 vitest **1332 通过、161 跳过、17 失败**；17 个失败仍是审计基线同一组共享 IPC / lease 环境失败（当前 Host 自身被沙箱化，follower 无法接管），本次新增用例全部通过。真实 Web 组合的开关关闭/恢复、B 提示确认+清理、A 提示确认已在 `smoke:journey` 的 web leg 通过真实 HTTP Connection RPC 实跑（83 通过、2 skip，skip 为外层沙箱禁止嵌套内核执行）。`smoke:compose` 56 通过；`smoke:behavior` 96 通过、8 按能力 skip。
+- **P8 A 候选**：linked primary 的主 checkout 根 `<main> = dirname(common)` 与 B 共用候选池；仅 `workspace-write` 可见，按 session 过滤；`<main>/.git` 必须 canonical 指向 common。默认 pool 的主根包含 primary，`primary-overlap` 使其没有 A；外部 linked checkout 覆盖。
+- **P9 A 确认**：owner 重跑完整 primary/common/admin 身份、双向指针、HEAD 语法与祖先索引；A 根为普通 `inherit` 登记，无 sidecar 清理映射，普通 Remove 撤回；等待期间 admin HEAD/反向指针/模式/开关变化都会 `prompt-stale` 或 `not-enabled`。
+- **P10 受限 Git 旅程（审计后重写，第十九次修订调整）**：`tests/worktrees-git.e2e.ts` 以外部 linked checkout 为 live session primary；先断言受限 `git add` 写 admin index 被拒，再通过真实 `worktreePromptWait` 取主 checkout 的 A 提示并 `resolve('add')`，然后在同一 `workspace-write` 下完成 `add`/`commit`，核对 index、HEAD 与 common 中的 branch ref；主 checkout 源码现在**在授权内**（可写），无关目录仍拒写；普通 Remove 后新进程再次拒写。默认 pool 用例改为断言无 A 且 `git add` 仍拒写。每一步都通过 `Registry.withOperation` 取得有序准入，再在准入帧内 `confine` 并 spawn（ambient `confine` 按 ADR-0024 看到 unavailable scope）。本机外层沙箱禁止嵌套 Seatbelt，两个用例按 `requireKernelRunner` 显式 skip；Linux/Windows/CI 保持同等门禁。
+- **R1 候选 common 绑定**：inventory 要求候选 common 等于枚举 common、admin 就是枚举项、canonical 与 admin 指针目标一致；owner 的 B/A 分支都要求 candidate.common 与 primary.common 相同。回归覆盖同名 admin 指向另一仓库与伪造 expectation。
+- **R2 元数据先拒绝再解析（首次返工）**：指针目标在 `realpath` 前逐段拒绝 symlink；父链用 `O_NOFOLLOW|O_DIRECTORY` 打开并复核；POSIX 只按 `/` 分段，祖先 index 保留字面反斜杠；最终文件同 fd `fstat` 与 pre-open `lstat` 比对。
+- **R3 提交边界**：`addNew`/`removeForDeletedWorktree`/sidecar mutation 在 owner 队列内、持久化前复查开关；Host 在送交前重读 live session 的 primary、mode、开关与提示代次。
+- **R4 清理资格**：owner 内要求 primary 仍激活且当前 sidecar 有 `rootId + path + rootAddedAt` 匹配的 B 映射；inactive reset 与空 reset 不再写 sidecar。
+- **R5 提示 ID**：仅完整 expectation 深相等时复用提示；admin HEAD/primary/目录身份变化生成新 ID 并唤醒旧 waiter。
+- **R6 客户端恢复**：worktree 设置订阅与面板显式 `list` 的 `notify()` 都能重挂已停止的 overlay；`stale` 后旧 ID 不再重复出现。
+- **P4 契约**：IPC `hello` 绑定 `promptsRoot`；follower `snapshotView()` 返回 owner 同一 envelope。
+- **第二轮复审验证**：修复原生句柄读取、实际提交边界、发现失效与路径重建警告、IPC 协商及重放和跨平台旅程。逐项实现见[计划](./2026-11-09-worktree-aware-root-suggestions.md#第二轮复审修复2026-11-09)。macOS 原生全量 vitest **1428 通过、96 跳过、0 失败**，包括默认 pool 和外部 linked checkout 的真实 Seatbelt Git 旅程，以及共享 Registry IPC。组合冒烟 **56 通过**、行为 **137 通过**、Web/headless 旅程 **90 通过**、tarball 安装行为 **136 通过**，均无失败或跳过。`lint`、`typecheck`、`build`、`compat:check`、`docs:check`、`pack:check` 通过。Linux / Windows 原生矩阵和实际浏览器设置操作尚待验证。
+
+### 第十九次修订验收（2026-11-10）
+
+- **A 目标**：`main-checkout` 候选 = `dirname(common)`；`<main>/.git` 回指、主根与 admin 身份由 owner 复验；外部 linked checkout 的 A 路径与 Registry 行均为主 checkout 根。
+- **默认 pool**：`probeAdd` 因 `primary-overlap` 拒绝主根，`worktrees-common` 与 Git e2e 均断言 pool 无 A、`git add` 仍失败。
+- **`--separate-git-dir`**：回归改为断言提示 `dirname(store)`（store 父目录）并在文案中披露歧义；这是本次明确接受的风险。
+- **默认关闭/实验性**：`Config` 默认 `false`；发现 spec 新增“默认关闭不激活、不写”用例；客户端新增“worktree 行默认未勾选 + 实验性 Tag”用例；`cordis.patch.yml` 为 `enabled: false`。
+- **列表**：`worktrees-contract` 覆盖 `prompt`/`prompts` 两分支与 `promptIds` 去重/上限；`client-worktree` 覆盖默认勾选（B 勾、A 不勾）、批量添加、只提交所选、skipped 行保持未勾选并显示 code；`worktrees-common` 覆盖外部 B+A 列表顺序与 pool 无 A。
+- **验证**：worktree 专项 12 个 spec **131 通过、3 skip**；全量 vitest **1356 通过、17 个既有 lease/follower 环境失败**（与审计基线同一组）；`smoke:journey` 的 web leg 覆盖默认关闭、双候选列表、删除 B 后 A 确认与 `.git` 旧根阻塞。
+- **迁移**：旧版 `<main>/.git` 根不会被自动替换；主根因嵌套被拒，先在面板手动移除旧根。sidecar 的旧 `git-common` ignore 作为 legacy 读取但不匹配新 key。
+- **Devin Review 修复（PR #48，2026-11-11）**：客户端 `enabled()` 不再把缺失或非 ready 的 Settings form 读成“关闭”（只有 ready 的显式值才抑制，宿主 `worktree/not-enabled` 决定）；owner `requireWorktreesEnabled()` 对缺失 provider fail closed。回归见 `tests/client-skills.spec.tsx`、`tests/worktrees-owner.spec.ts`；worktree 相关 spec 与 `client-worktree`/`authority-native` 实跑 134 通过、44 环境 skip，全量 vitest 1362 通过、17 个既有 lease/follower 环境失败（与审计基线同一组）；逐项见[计划](./2026-11-09-worktree-aware-root-suggestions.md#devin-review-修复2026-11-11完成)。
 
 ## 总体策略
 

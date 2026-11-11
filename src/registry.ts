@@ -89,6 +89,18 @@ import {
 // Type-only: publishes the `ctx.multiRootScope` augmentation. The scope service
 // is injected, never constructed here.
 import type {} from './scope.ts'
+import { WorktreeError } from './worktrees/errors.ts'
+import { lstatEntry, SafeIoError } from './worktrees/fs-safe.ts'
+import { verifyPromptExpected, verifyWorkspaceActive } from './worktrees/owner.ts'
+import {
+  readSidecar,
+  writeSidecar,
+  emptySidecar,
+  type IgnoredCandidate,
+  type WorktreeMapping,
+  type WorktreeSidecarDocument,
+} from './worktrees/sidecar.ts'
+import type { PromptExpected } from './worktrees/types.ts'
 
 /** Operator/test capability diagnostics; never bypasses peer authentication. */
 export { nativeHostAvailability } from './authority/native.ts'
@@ -188,6 +200,12 @@ export interface Config {
    * recovery to on-demand calls (refresh, the panel Retry button).
    */
   readonly backgroundRecovery?: boolean
+  /**
+   * Absolute directory the worktree sidecar writes to (ADR-0039 §5). Absent or
+   * invalid keeps the sidecar memory-only with a warning: losing prompt
+   * decisions and cleanup tracking never changes authorization.
+   */
+  readonly promptsRoot?: string
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -288,6 +306,82 @@ export const multiRootDomainSpec = defineDomain({
   tables: { roots: domainTable<string, PersistedPrimaryRoot>(persistedPrimaryRoot) },
 })
 
+/** The advisory answer `probeAdd` gives discovery. */
+export type ProbeAddResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: string; readonly message: string }
+
+/** Parse the advisory answer a follower receives over IPC. */
+function parseProbeAddResult(value: unknown): ProbeAddResult {
+  if (typeof value !== 'object' || value === null || typeof (value as { ok?: unknown }).ok !== 'boolean') {
+    throw new Error('registry answered probeAdd with an unreadable result')
+  }
+  const candidate = value as { ok: boolean; code?: unknown; message?: unknown }
+  if (candidate.ok) return { ok: true }
+  return {
+    ok: false,
+    code: typeof candidate.code === 'string' ? candidate.code : 'registry-error',
+    message: typeof candidate.message === 'string' ? candidate.message : 'the registry refused the candidate',
+  }
+}
+
+
+/** The owner-confirmed sidecar projection (ADR-0039 §5). */
+export interface WorktreeSidecarView {
+  readonly ignored: readonly IgnoredCandidate[]
+  readonly worktreeRoots: readonly WorktreeMapping[]
+  readonly revision: number
+  readonly epoch: string | undefined
+  readonly registryRevision: number
+  readonly available: boolean
+}
+
+/** One sidecar operation; only the owner ever writes the file. */
+export type WorktreeSidecarOperation =
+  | { readonly op: 'read' }
+  | { readonly op: 'ignore'; readonly key: string; readonly kind: 'worktree' | 'main-checkout'; readonly path: string }
+  | { readonly op: 'reset' }
+  | { readonly op: 'reconcile' }
+
+/** Registration request from a confirmed worktree prompt. */
+export interface AddNewRootOptions {
+  readonly path: string
+  /** The ADR fixes this to `inherit`; anything else is refused. */
+  readonly access?: RootAccess
+  readonly expected: PromptExpected
+  /** B-only tracking facts; A roots never receive a cleanup mapping. */
+  readonly track?: { readonly adminId: string; readonly common: string }
+}
+
+/** The new record a confirmed prompt produced. */
+export interface AddedRoot {
+  readonly id: string
+  readonly path: string
+  readonly addedAt: string
+  readonly registryEpoch: string
+  readonly registryRevision: number
+}
+
+/** Cleanup request for one tracked B root. */
+export interface DeletedWorktreeOptions {
+  readonly rootId: string
+  readonly expectedPath: string
+  readonly expectedAddedAt: string
+}
+
+/** One owner-complete Registry snapshot; only this envelope may drive pruning. */
+export interface RegistrySnapshotView {
+  readonly roots: readonly RootStatus[]
+  readonly available: boolean
+  readonly epoch: string
+  readonly revision: number
+}
+
+/** One owner verdict for cleanup. */
+export interface DeletedWorktreeResult {
+  readonly removed: true
+}
+
 /** Registration request for one new additional root. */
 export interface AddRootInput {
   /** The directory, as typed by the operator (a leading `~` is expanded). */
@@ -364,6 +458,16 @@ export class MultiRootRegistry extends Service {
   private disposed = false
   /** The validated per-primary-root cap (the default when the row omits it). */
   private readonly maxRoots: number
+  /** Validated sidecar directory, or undefined when the row did not supply one. */
+  private readonly promptsRoot: string | undefined
+  /** Sidecar documents already read/written by this owner. */
+  private readonly sidecarMemory = new Map<string, WorktreeSidecarDocument>()
+  /** Keys whose sidecar is corrupt or unwritable: memory-only from then on. */
+  private readonly sidecarMemoryOnly = new Set<string>()
+  /** Keys already warned about, so a broken sidecar logs once. */
+  private readonly sidecarWarned = new Set<string>()
+  /** The live worktree switch, published by the worktree row (owner-side gate). */
+  private worktreeGate: (() => boolean) | undefined
   /** Keys already warned about a historical over-limit store (one warning each). */
   private readonly warnedOverLimit = new Set<string>()
   /**
@@ -383,6 +487,9 @@ export class MultiRootRegistry extends Service {
     this.authorityStorageContext = ctx
     this.leasePath = config.leasePath
     this.sharedStorageRoot = config.sharedStorageRoot
+    this.promptsRoot = typeof config.promptsRoot === 'string' && isAbsolute(config.promptsRoot) && config.promptsRoot !== ''
+      ? config.promptsRoot
+      : undefined
     this.recovery = new RecoveryScheduler({
       enabled: config.backgroundRecovery !== false,
       eligible: () => !this.disposed && (this.authorityState.kind === 'contended'
@@ -566,6 +673,418 @@ export class MultiRootRegistry extends Service {
    */
   list(primaryRoot: string): readonly RootStatus[] {
     return this.statusesOf(primaryKey(primaryRoot))
+  }
+
+  /**
+   * Advisory pre-check for one candidate directory: would `add()` accept it?
+   *
+   * This is discovery's filter, NOT a grant: it publishes nothing, writes
+   * nothing, and the authoritative check happens inside `addNew()` (or
+   * `add()`) on the serialized queue. A follower asks the owner, because the
+   * protected-boundary set and the stored records belong to the owner.
+   * @param primaryRoot - the session workspace root the candidate would join.
+   * @param path - the candidate directory.
+   * @returns whether the candidate passes every rule right now.
+   */
+  async probeAdd(primaryRoot: string, path: string): Promise<ProbeAddResult> {
+    await this.ensureAuthority()
+    if (!this.available) {
+      return { ok: false, code: 'registry-unavailable', message: this.unavailable ?? 'the root registry is unavailable' }
+    }
+    const key = primaryKey(primaryRoot)
+    const evaluate = (statuses: readonly RootStatus[]): ProbeAddResult => {
+      const protectedPaths = this.protectedPaths()
+      if (protectedPaths === undefined) {
+        return { ok: false, code: 'protected-boundary-unknown', message: 'the protected DSH directories cannot be resolved right now' }
+      }
+      if (statuses.length >= this.maxRoots) {
+        return { ok: false, code: 'root-limit-reached', message: `this workspace already has ${statuses.length} additional roots` }
+      }
+      try {
+        validateRootCandidate(path, {
+          primaryRoot: key,
+          protectedPaths,
+          existing: statuses.flatMap(status => {
+            const boundary = reservedRootBoundary(status)
+            return boundary === undefined ? [] : [boundary]
+          }),
+        })
+        return { ok: true }
+      } catch (error) {
+        if (error instanceof RootValidationError) return { ok: false, code: error.code, message: error.message }
+        throw error
+      }
+    }
+    if (this.client) {
+      const protectedPaths = this.protectedPaths()
+      if (protectedPaths === undefined) return { ok: false, code: 'protected-boundary-unknown', message: 'the protected DSH directories cannot be resolved right now' }
+      if (protectedOverlap(path, protectedPaths) !== undefined) {
+        return { ok: false, code: 'protected-path', message: 'the candidate overlaps a protected DSH directory on this Host' }
+      }
+      return parseProbeAddResult(await this.remoteValue('probeAdd', [primaryRoot, path]))
+    }
+    return await this.serialize(key, async () => {
+      // A read-shaped probe never migrates the legacy key (that would write).
+      const found = this.lookupRecords(key)
+      return evaluate(found === undefined ? [] : this.classify(key, found.record))
+    })
+  }
+
+
+  /**
+   * Publish the live worktree switch to the owner's write path. The worktree
+   * row installs it at startup, so a confirmation that reaches the owner after
+   * the switch was turned off is refused HERE too (ADR-0039 §9).
+   * @param provider - the live predicate, or `undefined` to clear it.
+   */
+  setWorktreeGateProvider(provider: (() => boolean) | undefined): void {
+    this.worktreeGate = provider
+  }
+
+  /**
+   * The owner-complete snapshot the worktree mapping prune may consume. A
+   * follower returns the OWNER's same envelope, never its local list; an
+   * unavailable authority returns `available: false` with an empty list, which
+   * must NOT be read as "the store is empty".
+   * @param primaryRoot - the workspace root.
+   */
+  async snapshotView(primaryRoot: string): Promise<RegistrySnapshotView> {
+    const unavailable = { roots: [], available: false, epoch: '', revision: 0 }
+    await this.ensureAuthority()
+    if (this.client) {
+      const snapshot = await this.remoteSnapshot('snapshot', [primaryRoot])
+      // Return the OWNER's same envelope. Applying the snapshot to the local
+      // projection and then answering from `list()` would mix two observations
+      // (ADR-0039 §6.8): a concurrent local write or a protected-path narrowing
+      // must never masquerade as the owner's complete snapshot.
+      return {
+        roots: snapshotRoots(snapshot),
+        available: snapshot.available,
+        epoch: snapshot.epoch,
+        revision: snapshot.revision,
+      }
+    }
+    if (this.authorityState.kind !== 'active') return unavailable
+    const key = primaryKey(primaryRoot)
+    return await this.serialize(key, async () => {
+      if (this.authorityState.kind !== 'active') return unavailable
+      const roots = await this.reclassify(key)
+      if (this.authorityState.kind !== 'active') return unavailable
+      return { roots, available: true, epoch: this.operationEpoch ?? '', revision: this.operationRevision }
+    })
+  }
+
+  /**
+   * Register one root a worktree prompt confirmed. The owner re-runs the full
+   * prompt expectation inside the serialized queue, then validates the
+   * candidate exactly like `add()` — it only creates, never revives, and the
+   * same canonical value is used for the check and the record.
+   * @param primaryRoot - the workspace root the prompt belongs to.
+   * @param options - the canonical path, the captured expectation, and B tracking facts.
+   * @param beforeSubmit - local Host guard, invoked after recovery or the owner's final queue read.
+   * @returns the record the owner created, with its snapshot generation.
+   */
+  async addNew(primaryRoot: string, options: AddNewRootOptions, beforeSubmit?: () => void): Promise<AddedRoot> {
+    await this.ensureAuthority()
+    if (this.client) {
+      const protectedPaths = this.protectedPaths()
+      if (protectedPaths === undefined) throw MultiRootRegistry.protectedBoundaryUnknown()
+      const candidate = options.expected.candidate.canonical
+      const conflict = protectedOverlap(candidate, protectedPaths)
+      if (conflict !== undefined) {
+        throw new RootValidationError('protected-path', `"${candidate}" overlaps the protected DSH directory "${conflict.path}"`)
+      }
+      beforeSubmit?.()
+      return parseAddedRoot(await this.remoteValue('addNew', [primaryRoot, options]))
+    }
+    this.requireActive()
+    const key = primaryKey(primaryRoot)
+    return await this.serialize(key, async () => {
+      this.requireWorktreesEnabled()
+      const statuses = await this.reclassify(key)
+      beforeSubmit?.()
+      this.requireWorktreesEnabled()
+      const verdict = verifyPromptExpected(primaryRoot, options.expected)
+      if (!verdict.ok) throw new WorktreeError('worktree/prompt-stale', verdict.detail)
+      const canonical = options.expected.candidate.canonical
+      const duplicate = statuses.find(status => samePath(status.path, canonical) || sameResolvedPath(status.path, canonical))
+      if (duplicate !== undefined) {
+        throw new RootValidationError('duplicate', `"${canonical}" is already registered`, { conflict: duplicate.path, reference: canonical })
+      }
+      if (statuses.length >= this.maxRoots) {
+        throw new RootValidationError(
+          'root-limit-reached',
+          `this workspace already has ${statuses.length} additional roots; the configured limit is ${this.maxRoots}`,
+          { reference: String(this.maxRoots) },
+        )
+      }
+      const protectedPaths = this.protectedPaths()
+      if (protectedPaths === undefined) throw MultiRootRegistry.protectedBoundaryUnknown()
+      const validated = validateRootCandidate(canonical, {
+        primaryRoot: key,
+        protectedPaths,
+        existing: statuses.flatMap(status => {
+          const boundary = reservedRootBoundary(status)
+          return boundary === undefined ? [] : [boundary]
+        }),
+      })
+      if (!samePath(validated, canonical)) {
+        throw new WorktreeError('worktree/prompt-stale', 'the candidate resolves to a different directory than the prompt captured')
+      }
+      const addedAt = new Date().toISOString()
+      const record: RootStatus = {
+        id: additionalRootId(randomUUID()),
+        path: validated,
+        access: 'inherit',
+        recordedPath: validated,
+        skillsEnabled: true,
+        state: 'available',
+        addedAt,
+      }
+      await this.persist(key, [...statuses, record])
+      this.trackAddedRoot(key, record, options)
+      return {
+        id: record.id,
+        path: record.path,
+        addedAt: record.addedAt,
+        registryEpoch: this.operationEpoch ?? '',
+        registryRevision: this.operationRevision,
+      }
+    })
+  }
+
+  /**
+   * Remove one tracked B root only when its directory is CONFIRMED missing.
+   * The owner binds `rootId + path + addedAt` and refuses an existing or
+   * inaccessible path — "cannot look" is never "deleted".
+   * @param primaryRoot - the workspace root.
+   * @param options - the mapping's identity.
+   * @param beforeSubmit - local Host guard, invoked before IPC or the owner's deletion.
+   * @returns `{ removed: true }` after the record and its mapping are gone.
+   */
+  async removeForDeletedWorktree(primaryRoot: string, options: DeletedWorktreeOptions, beforeSubmit?: () => void): Promise<DeletedWorktreeResult> {
+    await this.ensureAuthority()
+    if (this.client) {
+      beforeSubmit?.()
+      return parseDeletedResult(await this.remoteValue('removeForDeletedWorktree', [primaryRoot, options]))
+    }
+    this.requireActive()
+    const key = primaryKey(primaryRoot)
+    return await this.serialize(key, async () => {
+      this.requireWorktreesEnabled()
+      const statuses = await this.reclassify(key)
+      beforeSubmit?.()
+      this.requireWorktreesEnabled()
+      const active = verifyWorkspaceActive(primaryRoot)
+      if (!active.ok) throw new WorktreeError('worktree/not-eligible', active.detail)
+      const found = statuses.find(status => status.id === options.rootId)
+      if (found === undefined || !samePath(found.path, options.expectedPath) || found.addedAt !== options.expectedAddedAt) {
+        throw new WorktreeError('worktree/not-eligible', 'the tracked root no longer matches its cleanup identity')
+      }
+      const document = this.loadSidecar(key, key)
+      const mapping = document.worktreeRoots.find(candidate =>
+        candidate.rootId === options.rootId
+        && samePath(candidate.path, found.path)
+        && candidate.rootAddedAt === found.addedAt)
+      if (mapping === undefined) {
+        throw new WorktreeError('worktree/not-eligible', 'the root is not tracked by this workspace worktree mapping')
+      }
+      const missing = pathMissing(found.path)
+      if (missing !== true) {
+        throw new WorktreeError('worktree/not-eligible', missing === 'inaccessible'
+          ? 'the tracked root path cannot be inspected right now'
+          : 'the tracked root path still exists; use the ordinary removal instead')
+      }
+      await this.persist(key, statuses.filter(status => status.id !== options.rootId))
+      this.untrackRemovedRoot(key, options.rootId, found.path)
+      return { removed: true }
+    })
+  }
+
+  /**
+   * Read or mutate one workspace's sidecar. Reads answer even while the
+   * authority is unavailable; mutations refuse. Every mutation runs inside the
+   * same serialized queue as the Registry itself.
+   * @param primaryRoot - the workspace root.
+   * @param operation - the strict sidecar operation.
+   * @param beforeSubmit - local Host guard for a pending mutation.
+   * @returns the owner's projection.
+   */
+  async worktreeSidecar(primaryRoot: string, operation: WorktreeSidecarOperation, beforeSubmit?: () => void): Promise<WorktreeSidecarView> {
+    await this.ensureAuthority()
+    if (this.client) {
+      beforeSubmit?.()
+      return parseSidecarView(await this.remoteValue('worktreeSidecar', [primaryRoot, operation]))
+    }
+    const key = primaryKey(primaryRoot)
+    if (this.authorityState.kind !== 'active') {
+      if (operation.op !== 'read') throw new WorktreeError('worktree/registry-unavailable', REGISTRY_CONTENDED_MESSAGE)
+      return { ignored: [], worktreeRoots: [], revision: 0, epoch: undefined, registryRevision: 0, available: false }
+    }
+    return await this.serialize(key, async () => {
+      if (operation.op !== 'read') this.requireWorktreeMutation(primaryRoot, beforeSubmit)
+      const document = this.loadSidecar(key, key)
+      switch (operation.op) {
+        case 'read':
+          return sidecarViewOf(document, this.operationEpoch, this.operationRevision, true)
+        case 'ignore': {
+          const ignored = document.ignored.some(entry => entry.key === operation.key)
+            ? document.ignored
+            : [...document.ignored, { key: operation.key, kind: operation.kind, path: operation.path, addedAt: new Date().toISOString() }]
+          if (ignored === document.ignored) return sidecarViewOf(document, this.operationEpoch, this.operationRevision, true)
+          const next = { ...document, revision: document.revision + 1, ignored }
+          this.saveSidecar(key, next)
+          return sidecarViewOf(next, this.operationEpoch, this.operationRevision, true)
+        }
+        case 'reset': {
+          // Nothing to clear is not a write: `reset` on an active workspace
+          // with no ignores (or on a directory that never activated) must not
+          // manufacture a sidecar revision.
+          if (document.ignored.length === 0) return sidecarViewOf(document, this.operationEpoch, this.operationRevision, true)
+          const next = { ...document, revision: document.revision + 1, ignored: [] }
+          this.saveSidecar(key, next)
+          return sidecarViewOf(next, this.operationEpoch, this.operationRevision, true)
+        }
+        case 'reconcile': {
+          const statuses = await this.reclassify(key)
+          this.requireWorktreeMutation(primaryRoot, beforeSubmit)
+          const reconciled = this.reconcileMappings(document, statuses)
+          if (reconciled !== document) this.saveSidecar(key, reconciled)
+          return sidecarViewOf(reconciled, this.operationEpoch, this.operationRevision, true)
+        }
+      }
+    })
+  }
+
+  private requireWorktreesEnabled(): void {
+    this.requireActive()
+    // Fail closed: the mounted worktree row is the only owner of this switch,
+    // so a missing provider (row not mounted, or already disposed) is OFF, not
+    // unconstrained. A read-shaped sidecar operation never reaches this check.
+    if (this.worktreeGate?.() !== true) throw new WorktreeError('worktree/not-enabled', 'worktree root suggestions are disabled here')
+  }
+
+  private requireWorktreeMutation(primaryRoot: string, beforeSubmit: (() => void) | undefined): void {
+    beforeSubmit?.()
+    this.requireWorktreesEnabled()
+    const active = verifyWorkspaceActive(primaryRoot)
+    if (!active.ok) throw new WorktreeError('worktree/inactive', active.detail)
+  }
+
+  /**
+   * Prune/rebind tracked mappings against ONE complete owner snapshot. A
+   * mapping survives only when `rootId + path + rootAddedAt` still matches a
+   * stored record; everything else is dropped (the Registry record itself is
+   * never touched). The snapshot is the caller's own `reclassify` inside the
+   * same queue, so no write can interleave.
+   */
+  private reconcileMappings(document: WorktreeSidecarDocument, statuses: readonly RootStatus[]): WorktreeSidecarDocument {
+    const epoch = this.operationEpoch
+    const revision = this.operationRevision
+    let changed = false
+    const worktreeRoots: WorktreeMapping[] = []
+    for (const mapping of document.worktreeRoots) {
+      const status = statuses.find(candidate => candidate.id === mapping.rootId)
+      if (status === undefined || !samePath(status.path, mapping.path) || status.addedAt !== mapping.rootAddedAt) {
+        changed = true
+        continue
+      }
+      if (mapping.registryEpoch !== epoch || mapping.registryRevision !== revision) {
+        changed = true
+        const { registryEpoch: _previousEpoch, ...rest } = mapping
+        worktreeRoots.push({
+          ...rest,
+          ...(epoch === undefined ? {} : { registryEpoch: epoch }),
+          registryRevision: revision,
+          mapRevision: document.revision + 1,
+        })
+      } else {
+        worktreeRoots.push(mapping)
+      }
+    }
+    if (!changed) return document
+    return { ...document, revision: document.revision + 1, worktreeRoots }
+  }
+
+  /** Write the B mapping for one freshly confirmed root, and clear its ignore. */
+  private trackAddedRoot(key: string, record: RootStatus, options: AddNewRootOptions): void {
+    const document = this.loadSidecar(key, key)
+    const ignored = document.ignored.filter(entry => entry.key !== options.expected.promptKey && !samePath(entry.path, record.path))
+    if (options.expected.candidate.kind !== 'worktree' || options.track === undefined) {
+      if (ignored.length !== document.ignored.length) this.saveSidecar(key, { ...document, revision: document.revision + 1, ignored })
+      return
+    }
+    const epoch = this.operationEpoch
+    const mapping: WorktreeMapping = {
+      rootId: record.id,
+      adminId: options.expected.candidate.adminId!,
+      common: options.expected.candidate.common,
+      path: record.path,
+      rootAddedAt: record.addedAt,
+      addedAt: new Date().toISOString(),
+      mapRevision: document.revision + 1,
+      ...(epoch === undefined ? {} : { registryEpoch: epoch }),
+      registryRevision: this.operationRevision,
+    }
+    this.saveSidecar(key, {
+      ...document,
+      revision: document.revision + 1,
+      ignored,
+      worktreeRoots: [...document.worktreeRoots, mapping],
+    })
+  }
+
+  /** Drop one removed root's mapping and the ignore of its path. */
+  private untrackRemovedRoot(key: string, rootId: string, path: string): void {
+    const document = this.loadSidecar(key, key)
+    const worktreeRoots = document.worktreeRoots.filter(mapping => mapping.rootId !== rootId)
+    const ignored = document.ignored.filter(entry => !samePath(entry.path, path))
+    if (worktreeRoots.length === document.worktreeRoots.length && ignored.length === document.ignored.length) return
+    this.saveSidecar(key, { ...document, revision: document.revision + 1, worktreeRoots, ignored })
+  }
+
+  /** Load one sidecar document, falling back to memory-only on any failure. */
+  private loadSidecar(key: string, primaryRoot: string): WorktreeSidecarDocument {
+    const cached = this.sidecarMemory.get(key)
+    if (cached !== undefined) return cached
+    if (this.promptsRoot === undefined) {
+      const document = emptySidecar(key, primaryRoot)
+      this.sidecarMemory.set(key, document)
+      this.sidecarMemoryOnly.add(key)
+      this.warnSidecar(key, 'promptsRoot is not configured; worktree prompt decisions are memory-only')
+      return document
+    }
+    const result = readSidecar(this.promptsRoot, key, primaryRoot)
+    if (!result.ok) {
+      const document = emptySidecar(key, primaryRoot)
+      this.sidecarMemory.set(key, document)
+      this.sidecarMemoryOnly.add(key)
+      this.warnSidecar(key, result.detail + '; worktree prompt decisions are memory-only')
+      return document
+    }
+    this.sidecarMemory.set(key, result.document)
+    return result.document
+  }
+
+  /** Persist one sidecar document; a failure degrades to memory-only, never throws. */
+  private saveSidecar(key: string, document: WorktreeSidecarDocument): boolean {
+    this.sidecarMemory.set(key, document)
+    if (this.promptsRoot === undefined || this.sidecarMemoryOnly.has(key)) return false
+    try {
+      writeSidecar(this.promptsRoot, key, document)
+      return true
+    } catch (error) {
+      this.sidecarMemoryOnly.add(key)
+      this.warnSidecar(key, 'the sidecar cannot be written: ' + (error instanceof Error ? error.message : String(error)))
+      return false
+    }
+  }
+
+  /** One warning per workspace and lifetime. */
+  private warnSidecar(key: string, detail: string): void {
+    if (this.sidecarWarned.has(key)) return
+    this.sidecarWarned.add(key)
+    this.ctx.logger.warn(`multi-root worktrees: ${key}: ${detail}`)
   }
 
   /**
@@ -1405,7 +1924,7 @@ export class MultiRootRegistry extends Service {
   /** Narrow owner rows for this Host, identically for projection and admission. */
   private localSnapshotRoots(snapshot: Snapshot): RootStatus[] {
     return markProtectedPaths(
-      snapshot.roots.map(row => Object.fromEntries(Object.entries({ ...row, id: additionalRootId(row.id) }).filter(([, value]) => value !== undefined))) as unknown as RootStatus[],
+      snapshotRoots(snapshot),
       // The owner's classification used the OWNER's protected set; this
       // follower re-marks every row against its own, so a row inside the
       // follower's own home is withheld here even when the owner granted it.
@@ -1478,6 +1997,18 @@ export class MultiRootRegistry extends Service {
     this.ctx.multiRootScope.setAdditionalRoots(key, roots)
   }
 
+  /** One request whose answer is NOT a snapshot; the caller validates it. */
+  private async remoteValue(method: Method, args: unknown[]): Promise<unknown> {
+    const client = this.client, generation = this.connectionGeneration
+    if (!client) throw new Error('registry authority is unavailable')
+    const value = await client.request(method, args)
+    if (generation !== this.connectionGeneration || client !== this.client) {
+      client.close()
+      throw new Error('stale registry connection or authority epoch')
+    }
+    return value
+  }
+
   private async remoteSnapshot(method: Method, args: unknown[]): Promise<Snapshot> {
     const client = this.client, generation = this.connectionGeneration
     if (!client) throw new Error('registry authority is unavailable')
@@ -1497,11 +2028,15 @@ export class MultiRootRegistry extends Service {
     return this.list(String(args[0]))
   }
 
-  private async dispatchShared(method: Method, values: unknown[]): Promise<Snapshot> {
+  private async dispatchShared(method: Method, values: unknown[]): Promise<unknown> {
     const args = parseArguments(method, values)
     const primary = String(args[0])
     if (!isAbsolute(primary)) throw new Error('registry primary must be absolute')
     if (method === 'snapshot' || method === 'admit') return this.captureSnapshot(primary)
+    if (method === 'probeAdd') return await this.probeAdd(primary, String(args[1]))
+    if (method === 'addNew') return await this.addNew(primary, args[1] as AddNewRootOptions)
+    if (method === 'removeForDeletedWorktree') return await this.removeForDeletedWorktree(primary, args[1] as DeletedWorktreeOptions)
+    if (method === 'worktreeSidecar') return await this.worktreeSidecar(primary, args[1] as WorktreeSidecarOperation)
     // Only authenticated Host facades reach this dispatch; browsers still send
     // sessionId to their own Host, never a primary supplied by the browser.
     const ref = args[1] as RootRef
@@ -1621,7 +2156,8 @@ export class MultiRootRegistry extends Service {
                 const client = await AuthorityClient.connect(this.medium.endpoint, this.medium.id, this.maxRoots,
                   snapshot => { if (adopted && generation === this.connectionGeneration) this.applySnapshot(snapshot) },
                   () => { if (adopted && generation === this.connectionGeneration) this.remoteUnavailable() },
-                  controller.signal)
+                  controller.signal,
+                  this.promptsRoot ?? null)
                 if (this.disposed || generation !== this.connectionGeneration) { client.close(); return }
                 this.client = client; adopted = true
                 this.connectionFailure = undefined
@@ -1711,7 +2247,8 @@ export class MultiRootRegistry extends Service {
     if (this.medium !== undefined) {
       try {
         server = await AuthorityServer.listen(this.medium.endpoint, this.medium.id, epoch, this.maxRoots,
-          (method, args) => this.dispatchShared(method, args))
+          (method, args) => this.dispatchShared(method, args),
+          { promptsRoot: this.promptsRoot ?? null })
       } catch (error) {
         await domain.close()
         this.enterStorageFailed(`cannot start shared registry: ${String(error)}`, 'retryable')
@@ -1860,6 +2397,111 @@ export class MultiRootRegistry extends Service {
     const run = previous.then(job)
     this.authorityChain = run.then(() => undefined, () => undefined)
     return await run
+  }
+}
+
+
+/** Whether a stored spelling still resolves to the canonical candidate. */
+function sameResolvedPath(stored: string, canonical: string): boolean {
+  try {
+    return samePath(canonicalRoot(stored), canonical)
+  } catch {
+    return false
+  }
+}
+
+/** Decode owner rows without applying the follower's local projection. */
+function snapshotRoots(snapshot: Snapshot): RootStatus[] {
+  return snapshot.roots.map(row =>
+    Object.fromEntries(Object.entries({ ...row, id: additionalRootId(row.id) }).filter(([, value]) => value !== undefined))) as unknown as RootStatus[]
+}
+
+/** Whether one path is confirmed missing, present, or not inspectable. */
+function pathMissing(path: string): true | false | 'inaccessible' {
+  try {
+    return lstatEntry(path) === undefined
+  } catch (error) {
+    return error instanceof SafeIoError && error.reason === 'not-directory' ? true : 'inaccessible'
+  }
+}
+
+/** Build one sidecar projection. */
+function sidecarViewOf(document: WorktreeSidecarDocument, epoch: string | undefined, revision: number, available: boolean): WorktreeSidecarView {
+  return {
+    ignored: document.ignored,
+    worktreeRoots: document.worktreeRoots,
+    revision: document.revision,
+    epoch,
+    registryRevision: revision,
+    available,
+  }
+}
+
+/** Parse the owner's `addNew` answer on a follower. */
+function parseAddedRoot(value: unknown): AddedRoot {
+  const entry = typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined
+  if (entry === undefined || typeof entry.id !== 'string' || typeof entry.path !== 'string'
+    || typeof entry.addedAt !== 'string' || typeof entry.registryEpoch !== 'string' || typeof entry.registryRevision !== 'number') {
+    throw new Error('the registry answered addNew with an unreadable result')
+  }
+  return {
+    id: entry.id,
+    path: entry.path,
+    addedAt: entry.addedAt,
+    registryEpoch: entry.registryEpoch,
+    registryRevision: entry.registryRevision,
+  }
+}
+
+/** Parse the owner's cleanup answer on a follower. */
+function parseDeletedResult(value: unknown): DeletedWorktreeResult {
+  const entry = typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined
+  if (entry === undefined || entry.removed !== true) throw new Error('the registry answered removeForDeletedWorktree with an unreadable result')
+  return { removed: true }
+}
+
+/** Parse the owner's sidecar projection on a follower. */
+function parseSidecarView(value: unknown): WorktreeSidecarView {
+  const entry = typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined
+  if (entry === undefined || !Array.isArray(entry.ignored) || !Array.isArray(entry.worktreeRoots)
+    || typeof entry.revision !== 'number' || typeof entry.registryRevision !== 'number' || typeof entry.available !== 'boolean') {
+    throw new Error('the registry answered worktreeSidecar with an unreadable result')
+  }
+  const ignored = entry.ignored.map(item => {
+    const row = typeof item === 'object' && item !== null ? item as Record<string, unknown> : undefined
+    if (row === undefined || typeof row.key !== 'string' || typeof row.path !== 'string' || typeof row.addedAt !== 'string'
+      || (row.kind !== 'worktree' && row.kind !== 'main-checkout' && row.kind !== 'git-common')) throw new Error('the registry answered worktreeSidecar with an unreadable ignore entry')
+    return {
+      key: row.key,
+      kind: row.kind === 'worktree' ? 'worktree' as const : 'main-checkout' as const,
+      path: row.path,
+      addedAt: row.addedAt,
+    }
+  })
+  const worktreeRoots = entry.worktreeRoots.map(item => {
+    const row = typeof item === 'object' && item !== null ? item as Record<string, unknown> : undefined
+    if (row === undefined || typeof row.rootId !== 'string' || typeof row.adminId !== 'string' || typeof row.common !== 'string'
+      || typeof row.path !== 'string' || typeof row.rootAddedAt !== 'string' || typeof row.addedAt !== 'string'
+      || typeof row.mapRevision !== 'number') throw new Error('the registry answered worktreeSidecar with an unreadable mapping')
+    return {
+      rootId: row.rootId,
+      adminId: row.adminId,
+      common: row.common,
+      path: row.path,
+      rootAddedAt: row.rootAddedAt,
+      addedAt: row.addedAt,
+      mapRevision: row.mapRevision,
+      ...(typeof row.registryEpoch === 'string' ? { registryEpoch: row.registryEpoch } : {}),
+      ...(typeof row.registryRevision === 'number' ? { registryRevision: row.registryRevision } : {}),
+    }
+  })
+  return {
+    ignored,
+    worktreeRoots,
+    revision: entry.revision,
+    epoch: typeof entry.epoch === 'string' ? entry.epoch : undefined,
+    registryRevision: entry.registryRevision,
+    available: entry.available,
   }
 }
 
