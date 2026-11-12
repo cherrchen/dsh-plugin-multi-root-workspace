@@ -99,7 +99,7 @@
 - `compat:check`：allowlist、peer、开发 pin、安装树一致（23 个精确版本）；
 - lint、双端 `tsc --noEmit`、`build`、`docs:check`、`pack:check`、`auto-review:fork`：通过；
 - 完整 `vitest`：**1368 通过 / 162 跳过 / 17 失败**。17 个失败全部是共享 authority 的核内 IPC 用例（`registry-*` / `authority-boundaries` / `b9-review-regressions` / `skills-authority` / `skills-registry`）：本会话运行在 DSH 自身的 Seatbelt 内，Peer 凭据被识别为 sandboxed peer；未改动的 rc.1 基线在同一环境同样失败 17 个（1364 通过 / 166 跳过），因此不是 rc.2 回归。
-- 三个 Host smoke 与 packed：compose **56/56**、behavior **96 通过 / 8 跳过**、journey **85 通过 / 2 跳过**、packed **95 通过 / 8 跳过**，0 失败；跳过项是 Seatbelt 内无可用内核 runner 与共享 IPC。真实三 OS 矩阵与 Windows ACL 原生结果由 PR 的 CI 给出（[run 43213164748](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43213164748)，94/94 jobs）；浏览器目检不是 CI 项，按路线账本的人工记录。
+- 三个 Host smoke 与 packed：compose **56/56**、behavior **96 通过 / 8 跳过**、journey **85 通过 / 2 跳过**、packed **95 通过 / 8 跳过**，0 失败；跳过项是 Seatbelt 内无可用内核 runner 与共享 IPC。真实三 OS 矩阵与 Windows ACL 原生结果由 PR 的 CI 给出（[run 43227479998](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43227479998)，94/94 jobs）；浏览器目检不是 CI 项，按路线账本的人工记录。
 
 ### 提升步骤（本分支已执行）
 
