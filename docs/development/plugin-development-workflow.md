@@ -7,7 +7,7 @@
 
 | 项 | 值 | 说明 |
 | --- | --- | --- |
-| 开发目标版本（基线） | `0.2.2-rc.1` | 精确 pin 在 `devDependencies`；CI 主车道对全部支持版本与启用的 OS 做笛卡尔积验证 |
+| 开发目标版本（基线） | `0.2.2-rc.2` | 精确 pin 在 `devDependencies`；CI 主车道对全部支持版本与启用的 OS 做笛卡尔积验证 |
 | 支持矩阵 | [`SUPPORTED_DSH_RELEASES`](../../src/compat/dsh-version.ts) | **精确版本 allowlist**；`peerDependencies` 逐项或，不承诺未来版本 |
 | 实测证据 | [路线图兼容提升记录](../plans/active/2026-09-12-multi-root-workspace.md#dsh-021-rc3-兼容提升2026-10-23)（历次记录同档） | 升级与旧版回归都运行完整矩阵；`upgrade.yml` 只探测候选，不自动扩大 allowlist |
 | 运行时门禁 | `multi-root-compat` 行 | 版本不在 allowlist 或核心包混装时，四个安全相关行根本不启动（ADR-0009） |
