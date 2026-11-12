@@ -122,8 +122,11 @@ export function apply(ctx: Context): void {
           }
           return
         }
-        const route = await withRegistryRead(scope, request.workspaceRoot, 'files', () => routeWorkspacePath(scope, request.workspaceRoot, path, signal))
-        if (route !== undefined && underWithheldRoot(scope, route.primaryRoot, route.absolutePath)) throw await outside(path)
+        const route = await withRegistryRead(scope, request.workspaceRoot, 'files', async () => {
+          const resolved = await routeWorkspacePath(scope, request.workspaceRoot, path, signal)
+          if (resolved !== undefined && underWithheldRoot(scope, resolved.primaryRoot, resolved.absolutePath)) throw await outside(path)
+          return resolved
+        })
         if (route === undefined || route.workspaceRoot === route.primaryRoot) {
           // Directory targets are confined by the host's own check either
           // way; file watches are uncontained upstream, so a stale row
