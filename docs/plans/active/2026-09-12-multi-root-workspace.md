@@ -1609,7 +1609,7 @@ PR #48 的 91 条 CI 检查全部 success，覆盖全部支持 DSH 版本 × mac
 - `src/workspace-files.ts`：把 rc.2 新增的 `workspaceFiles.search` 纳入共享 authority 的 `withOperation(..., 'files', ...)` admission（与 list/stat/read 同一排序），并对其根应用 `canonicalRoot` 级 withheld 检查（与 `list`/`changes` 同一条规则：根落在在册未授权边界下时在枚举/启动 `rg` 前拒绝）；不路由（搜索根是 Session cwd，附加根没有搜索 UI）；旧版没有该方法时结构性跳过。
 - `src/client/styles.ts`：接管附加根时隐藏 rc.2 导航器新增的原生搜索条、状态行与 Files 页搜索开关（原生 body 已隐藏，搜索主根的结果无处显示）；primary 根浏览保持上游原样。
 - `src/compat/dsh-version.ts`：新增 `@deepseek-ai/dsh-error` 到 `OPTIONAL_CORE_PACKAGES` 与 `HOST_SERVICE_PACKAGES`（只经宿主锚点作证，发现跨包单例混装），不列为 peer（rc.1 无此包）；allowlist 末尾加入 `0.2.2-rc.2`。
-- 测试：`tests/upstream-additional-roots.spec.ts` 增加两个 rc.2-only 用例（Session 注册根进入 POSIX 方言与 fs fence、scope read-only deny 仍胜出）；`tests/sandbox-multi-root.spec.ts` 增加 Windows ACL 组合用例（scope 根进入进程 profile，上游额外根不进入；alpha.2–rc.1 结构跳过）；`tests/workspace-routing.spec.ts` 增加 search admission 用例与 `list`/`changes`/`search` 根级 withheld 回归（canonical 根拒绝、词法覆盖但解析在外的反向放行）；`tests/client-styles.spec.ts` 增加搜索条/页头开关的 DOM 回归。
+- 测试：`tests/upstream-additional-roots.spec.ts` 增加两个 rc.2-only 用例（Session 注册根进入 POSIX 方言与 fs fence、scope read-only deny 仍胜出）；`tests/sandbox-multi-root.spec.ts` 增加 Windows ACL 组合用例（scope 根进入进程 profile，上游额外根不进入；alpha.2–rc.1 结构跳过）；`tests/workspace-routing.spec.ts` 增加 search admission 用例与 `list`/`changes`/`search` 的 withheld 回归（canonical 目标拒绝、词法覆盖但解析在外的反向放行、主根在 withheld 内时已授权附加根仍可列/监听）；`tests/client-styles.spec.ts` 增加搜索条/页头开关的 DOM 回归。
 - 复刻源：按 `src/client/open-in-app/FORK.md` 重拷 `OpenInAppAction.tsx` / `controller.ts`（rc.2 只有注释变化），FORK.md 基线移到 `ddac96760b`，`OpenInAppKey` 补 `menu.openIn`；files-tree 旧版复刻仍钉 alpha.2。
 - 文档：迁移审查的 rc.2 小节、兼容笔记双语 §17、README 支持矩阵与开发 pin、AGENTS.md 兼容契约段、`docs/development/plugin-development-workflow.md`。
 
@@ -1621,6 +1621,6 @@ PR #48 的 91 条 CI 检查全部 success，覆盖全部支持 DSH 版本 × mac
 - Host smoke 与 packed（本机，0 失败）：compose **56/56**、behavior **96 通过 / 8 跳过**、journey **85 通过 / 2 跳过**、packed **95 通过 / 8 跳过**；跳过项是 Seatbelt 内无可用内核 runner 与共享 IPC。
 - PR CI（HEAD `94d6b8c`，[run 43213164748](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43213164748)）：**94/94 jobs 通过**，覆盖 23 个精确版本 × macOS / Ubuntu 22.04 / Ubuntu latest / Windows；Windows lane 含原生 ACL 探针与门禁。本机结果与 CI 结果一致。浏览器实机目检不是 CI 项，按实际执行记录单独列出；本轮未执行则保留为合入前唯一人工项。
 
-评审返工（2026-11-12）：Devin Review 指出 `workspaceFiles.search` 未应用根级 withholding。已把 `canonicalRoot` 根检查统一到 `list`/`changes`/`search`，并在 `tests/workspace-routing.spec.ts` 补四条回归（search 拒绝、canonical 反向放行、list 拒绝、path watch 拒绝）；显式路径读取仍按词法规则。同一返工按实际 CI run 更新本节与进度总账的状态。
+评审返工（2026-11-12）：Devin Review 指出 `workspaceFiles.search` 未应用根级 withholding。已把 `canonicalRoot` 检查放到实际目标上：`search` 按 Session 根，`list`/`changes` 按路径解析后的所选目录；并在 `tests/workspace-routing.spec.ts` 补回归（search 拒绝、canonical 反向放行、list 拒绝、path watch 拒绝，以及主根落在 withheld 内时仍可列/监听已授权附加根）；显式路径读取仍按词法规则。同一返工按实际 CI run 更新本节与进度总账的状态。
 
 本分支以 PR #49（`feat/adapt-1111-rc2`）等待合入；不创建版本号或 tag，也不改变 `v0.1.17` 的发布状态。

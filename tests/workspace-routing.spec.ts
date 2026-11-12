@@ -354,6 +354,54 @@ describe('workspace-files isolation', () => {
     await expect(stream.next()).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
   })
 
+  it.skipIf(symlinkUnsupportedReason() !== undefined)('lists a granted additional root while the primary resolves inside a withheld registration', async () => {
+    const withheld = join(fixture.base, 'withheld')
+    mkdirSync(join(withheld, 'sub'), { recursive: true })
+    const active = join(fixture.base, 'active')
+    mkdirSync(active)
+    writeFileSync(join(active, 'live.txt'), 'live')
+    const linked = join(fixture.base, 'linked-primary')
+    symlinkSync(join(withheld, 'sub'), linked, 'dir')
+    ctx.multiRootScope.setAdditionalRoots(linked, [{ id: 'active', path: canonicalPath(active), recordedPath: canonicalPath(active), access: 'read-write' }])
+    const { service } = await files()
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === linked
+        ? [withheldRegistration(canonicalPath(withheld)), { id: 'active', path: canonicalPath(active), recordedPath: canonicalPath(active), access: 'read-write' }]
+        : [],
+    } as never)
+    const listing = await service.list({ sessionId: 's' as never, workspaceRoot: linked }, active, new AbortController().signal)
+    expect(listing.entries.map(entry => entry.name)).toContain('live.txt')
+  })
+
+  it.skipIf(!hasPathWatchSignature || symlinkUnsupportedReason() !== undefined)('watches a granted additional root while the primary resolves inside a withheld registration', async () => {
+    const withheld = join(fixture.base, 'withheld')
+    mkdirSync(join(withheld, 'sub'), { recursive: true })
+    const active = join(fixture.base, 'active')
+    mkdirSync(active)
+    const linked = join(fixture.base, 'linked-primary')
+    symlinkSync(join(withheld, 'sub'), linked, 'dir')
+    ctx.multiRootScope.setAdditionalRoots(linked, [{ id: 'active', path: canonicalPath(active), recordedPath: canonicalPath(active), access: 'read-write' }])
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    let watchedRoot: string | undefined
+    Object.defineProperty(raw, 'changes', {
+      configurable: true,
+      writable: true,
+      value: async function*(request: { workspaceRoot: string }, _path: string, _signal: AbortSignal) {
+        watchedRoot = request.workspaceRoot
+        yield { kind: 'ready' }
+      },
+    })
+    await ctx.plugin(FilesRouting)
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === linked
+        ? [withheldRegistration(canonicalPath(withheld)), { id: 'active', path: canonicalPath(active), recordedPath: canonicalPath(active), access: 'read-write' }]
+        : [],
+    } as never)
+    const stream = ctx.workspaceFiles.changes({ sessionId: 's' as never, workspaceRoot: linked }, active, new AbortController().signal)[Symbol.asyncIterator]()
+    expect(await stream.next()).toMatchObject({ value: { kind: 'ready' } })
+    expect(watchedRoot).toBe(canonicalPath(active))
+  })
+
   it.skipIf(!supportsBaseFile)('refuses slash, backslash and mixed tails into a withheld root', async () => {
     const { service, scope } = await files()
     ctx.provide('multiRootRegistry', { list: () => [{ path: canonicalPath(fixture.outside) }] } as never)
