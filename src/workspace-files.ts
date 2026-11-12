@@ -7,7 +7,7 @@ import type {} from './compat.ts'
 import type {} from './providers.ts'
 import type { MultiRootRegistry } from './registry.ts'
 import { adaptPathWatch, resolveRelatedWorkspacePath } from './compat/workspace-files.ts'
-import { isCanonicallyUnder } from './roots.ts'
+import { canonicalRoot, isCanonicallyUnder } from './roots.ts'
 import { routeWorkspacePath } from './workspace-routing.ts'
 import { withRegistryRead } from './registry-operation.ts'
 import { wrapMethod } from './method-wrapper.ts'
@@ -96,10 +96,14 @@ export function apply(ctx: Context): void {
         : undefined
       const restoreWatch = adaptPathWatch(service, originalChanges => async function*(this: WorkspaceFiles, request, path, signal) {
         const check = async () => {
-          const routed = await withRegistryRead(scope, request.workspaceRoot, 'files', () => routeRead(scope, request, path, signal))
-          if (routed === 'deny') throw await outside(path)
+          await withRegistryRead(scope, request.workspaceRoot, 'files', async () => {
+            if (rootWithheld(scope, request.workspaceRoot)) throw await outside(request.workspaceRoot)
+            const routed = await routeRead(scope, request, path, signal)
+            if (routed === 'deny') throw await outside(path)
+          })
         }
         if (scope.get('multiRootRegistry')?.shared) await check()
+        else if (rootWithheld(scope, request.workspaceRoot)) throw await outside(request.workspaceRoot)
 
         if (scope.multiRootScope.snapshot({ workspaceRoot: request.workspaceRoot, mode: 'read-only' }).additionalRoots.length === 0 && registeredRoots(scope, request.workspaceRoot).length === 0) {
           for await (const frame of originalChanges.call(this, request, path, signal)) {
@@ -137,16 +141,27 @@ export function apply(ctx: Context): void {
       {
         const methods = service as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
         // 'search' arrived at 0.2.2-rc.2. It is admitted like every other
-        // read so a shared-authority Host orders it at the owner, but it is
-        // deliberately NOT routed: the upstream search is rooted at the
-        // Session's cwd and the plugin offers no additional-root search UI,
-        // so there is no path to translate (see the takeover rules in
-        // client/styles.ts for the hidden native bar).
+        // read so a shared-authority Host orders it at the owner. It is not
+        // routed (the upstream search is rooted at the Session's cwd and the
+        // plugin offers no additional-root search UI), but its tree is
+        // root-bounded like `list`: a search root inside a withheld
+        // registration is refused before ripgrep starts (see the takeover
+        // rules in client/styles.ts for the hidden native bar).
+        const rootGuarded = new Set(['list', 'search'])
         for (const key of ['list', 'stat', 'read', 'readBytes', 'readAll', 'readRelated', 'search']) {
           if (typeof methods[key] !== 'function') continue
           admissionRestores.push(wrapMethod(methods, key, original => async function(this: unknown, ...args: unknown[]) {
             const request = args[0] as WorkspaceFileScope
-            return withRegistryRead(scope, request.workspaceRoot, 'files', () => original.apply(this, args))
+            return withRegistryRead(scope, request.workspaceRoot, 'files', async () => {
+              // A tree operation has no path to bound: its root IS the tree.
+              // Refuse before upstream lists or searches it, inside the same
+              // admission as the operation itself. (The path watch applies the
+              // same root check in its own admitted check.)
+              if (rootGuarded.has(key) && rootWithheld(scope, request.workspaceRoot)) {
+                throw await outside(request.workspaceRoot)
+              }
+              return original.apply(this, args)
+            })
           }))
         }
       }
@@ -230,6 +245,31 @@ function underWithheldRoot(scope: Context, primaryRoot: string, path: string): b
   if (candidates.length === 0) return false
   const granted = new Set(scope.multiRootScope.scopeOf(primaryRoot))
   return candidates.some(status => !granted.has(status.path))
+}
+
+/**
+ * Whether a tree operation starts inside a registered but withheld root.
+ *
+ * `list`, `changes`, and `search` take no path to check: they enumerate the
+ * root itself. The comparison therefore uses the canonical root — the
+ * directory the backend actually walks — because a primary spelling that was
+ * replaced by a symlink into a withheld root still passes a lexical test on
+ * itself. A withheld root's current target is deliberately not followed:
+ * re-resolving a registration does not re-authorize it, and an
+ * attacker-replaced directory must not turn the primary's own tree into a
+ * refusal.
+ * @param scope - the context carrying the scope and the registry.
+ * @param primaryRoot - the workspace root the operation starts from.
+ * @returns whether the operation's canonical root is inside a withheld registration.
+ */
+function rootWithheld(scope: Context, primaryRoot: string): boolean {
+  const statuses = registeredRoots(scope, primaryRoot)
+  if (statuses.length === 0) return false
+  // A healthy grant set has nothing to resolve for: skip the canonical
+  // lookup on every directory listing and search in the common case.
+  const granted = new Set(scope.multiRootScope.scopeOf(primaryRoot))
+  if (statuses.every(status => granted.has(status.path))) return false
+  return underWithheldRoot(scope, primaryRoot, canonicalRoot(primaryRoot))
 }
 
 /**
