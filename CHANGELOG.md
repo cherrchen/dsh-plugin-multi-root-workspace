@@ -8,6 +8,16 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.18] - 2026-11-12
+
+### Added
+
+- **精确支持 DSH `0.2.2-rc.2`**：支持矩阵扩至 23 个精确版本，开发 pin 提升到 `0.2.2-rc.2`（cordis `4.1.0` / Schemastery `3.19.0`）。`rc.2` 新增的 `workspaceFiles.search` 与插件已有的文件访问走同一共享 Registry 逐操作准入与根边界；上游在 Windows ACL 进程 profile 中改为忽略额外根（文件工具仍按额外根放行），插件以组合用例钉住该语义；未新增适配分支（[接口审查](./docs/reference/dsh-0.2.2-migration.md#022-rc2-后续审查2026-11-11)、[ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)）。
+
+### Fixed
+
+- **Files 页签搜索遵守根边界**：`workspaceFiles.search` 与 `list` / `stat` / `read` 一样取共享 Registry 的 `files` 准入；搜索根（Session cwd）落在在册但未授权的边界下时，在启动 `rg` 前直接拒绝。`list` 与目录 `changes` 按路径解析后的所选目录判断，显式路径读取仍按词法规则。原生搜索没有附加根入口，接管附加根浏览时隐藏导航器新增的搜索条、状态行与页签搜索开关，避免展示主根结果；主根浏览与更早的受支持版本保持上游原样。
+
 ## [0.1.17] - 2026-11-11
 
 ### Added
@@ -271,7 +281,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.18...HEAD
+[0.1.18]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.14...v0.1.15

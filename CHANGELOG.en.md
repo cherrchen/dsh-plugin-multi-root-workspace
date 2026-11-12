@@ -8,6 +8,16 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.18] - 2026-11-12
+
+### Added
+
+- **Exact support for DSH `0.2.2-rc.2`**: the support matrix grows to 23 exact releases and the development pin moves to `0.2.2-rc.2` (cordis `4.1.0` / Schemastery `3.19.0`). The `workspaceFiles.search` surface introduced in `rc.2` now passes through the same shared-Registry per-operation admission and root boundaries as the plugin's existing file access; upstream's Windows ACL process profile now ignores extra roots (the file tools still honor them), and a combination test pins that semantics. No new adapter branch was needed ([interface review](./docs/reference/dsh-0.2.2-migration.md#022-rc2-后续审查2026-11-11), [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md), Chinese).
+
+### Fixed
+
+- **Files-tab search honors the root boundary**: `workspaceFiles.search` now takes the shared Registry's `files` admission like `list` / `stat` / `read`, and refuses before starting `rg` when the search root (the session cwd) sits under a registered but withheld boundary. `list` and directory `changes` judge the resolved selected directory, while explicit paths keep the lexical rule. Because the native search has no additional-root entry, retargeting an additional root hides the navigator's search bar, status line, and tab search toggle so primary-root results are not shown; primary-root browsing and earlier supported releases keep upstream behavior.
+
 ## [0.1.17] - 2026-11-11
 
 ### Added
@@ -271,7 +281,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.18...HEAD
+[0.1.18]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.14...v0.1.15
