@@ -7,7 +7,7 @@ native one shows — because the upstream occupant always receives the primary
 root through its slot props and cannot be re-pointed.
 
 - **Source**: `deepseek-harness/packages/client/ui-open-in-app/src/client/`
-- **Revision**: `66491b05e3` (release `0.2.2-rc.1`, 2026-11-04) — matches
+- **Revision**: `ddac96760b` (release `0.2.2-rc.2`, 2026-11-11) — matches
   this package's dev pin and the `@deepseek-ai/dsh-host-open-in-app`
   devDependency, which is the machine-readable record of the fork base.
   Between `0.2.1-rc.3` (`1f81c047fc`) and `0.2.2-alpha.2` the upstream
@@ -24,8 +24,10 @@ root through its slot props and cannot be re-pointed.
   (`OpenPathAction.tsx`, `OpenPathEmptyAction.tsx`, `FileRouteAction.tsx`,
   `file-applications.ts`, its own `open-path.ts` controller) which this
   fork does not copy — the switcher only mounts the directory control.
-  The six forked files are unchanged from alpha.2 through rc.1; alpha.3 adds
-  context-menu features and locale keys outside this directory control.
+  The six forked files changed only in comments from rc.1 through rc.2
+  (`OpenInAppAction.tsx` and `controller.ts`), and `locales.ts` gained the
+  `menu.openIn` key; alpha.3 adds context-menu features and locale keys
+  outside this directory control.
 
 ## Verbatim files (copy-diff must stay empty)
 

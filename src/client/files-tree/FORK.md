@@ -188,6 +188,13 @@ upstream binds inside it arrives as a prop instead:
   The retarget only hides the aside's `[data-files-body]` while it hosts
   the forked tree, so a root that leaves the additional set (or a host
   whose navigator never mounts) falls straight back to the native body.
+  Since `0.2.2-rc.2` the native navigator also draws a workspace search bar
+  and status line above that body, and the Files page header a
+  `[data-files-search-toggle]` button. Their search root is the Session cwd,
+  so while a takeover shows another root they are hidden together with the
+  native body (`src/client/styles.ts`); primary-root browsing keeps them
+  untouched. Re-check those selectors whenever the upstream navigator gains
+  a new `data-files-search*` hook.
 - The `sidebarFiles` dictionaries — the fork binds, never registers.
 - The session-scope `data-files-*` DOM contract — the fork reads those hooks
   (`closest('[data-files-root]')`, `closest('[data-dockkit-content]')`) but

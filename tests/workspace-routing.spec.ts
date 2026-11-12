@@ -103,6 +103,17 @@ function hasPathWatch(service: WorkspaceFiles): boolean {
 // takes a plain range. Newer hosts fold readRelated into readBytes options.
 const supportsBaseFile = typeof (WorkspaceFiles.prototype as WorkspaceFiles & { readRelated?: unknown }).readRelated !== 'function'
 
+/** `workspaceFiles.search` arrived at 0.2.2-rc.2; older releases never declare it. */
+const hasUpstreamSearch = typeof (WorkspaceFiles.prototype as unknown as { search?: unknown }).search === 'function'
+
+/** A 3-arity `changes` is the path-watch signature; older releases watch a whole session. */
+const hasPathWatchSignature = WorkspaceFiles.prototype.changes.length >= 3
+
+/** One registry status for a withheld additional root. */
+function withheldRegistration(path: string): object {
+  return { id: 'withheld', path, recordedPath: path, access: 'read-write' }
+}
+
 describe('workspace-files isolation', () => {
   it('lists each root through the original caps and rejects unrelated directories', async () => {
     const { service, scope } = await files()
@@ -235,6 +246,160 @@ describe('workspace-files isolation', () => {
     expect(Object.getOwnPropertyDescriptor(service, 'readBytes')).toBeUndefined()
     const file = join(fixture.outside, 'same.ts')
     expect((await service.stat(scope, file, new AbortController().signal)).absolutePath).toBe(canonicalPath(file))
+  })
+
+  it.skipIf(!hasUpstreamSearch)('admits workspace search at the shared Registry like every other file read', async () => {
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    // The seam under test is admission, not ripgrep execution: answer a
+    // settled empty result and let the wrapper be the observable.
+    Object.defineProperty(raw, 'search', {
+      configurable: true,
+      writable: true,
+      value: async () => ({ matches: [], truncated: false, incomplete: false }),
+    })
+    await ctx.plugin(FilesRouting)
+    const calls: Array<{ readonly kind: string; readonly policy: unknown }> = []
+    ctx.provide('multiRootRegistry', {
+      shared: true,
+      list: () => [],
+      withOperation: async (policy: unknown, kind: string, body: () => Promise<unknown>) => {
+        calls.push({ kind, policy })
+        return body()
+      },
+    } as never)
+    const answer = await ctx.workspaceFiles.search(
+      { sessionId: 's' as never, workspaceRoot: fixture.workspace },
+      { query: 'x', excludedPaths: [], includeHidden: false, respectGitignore: false },
+      new AbortController().signal,
+    )
+    expect(answer).toEqual({ matches: [], truncated: false, incomplete: false })
+    // The admission names the session's primary root and the Files operation
+    // kind, exactly like list/stat/read; the wrapper never rewrites the call.
+    expect(calls).toEqual([{ kind: 'files', policy: { workspaceRoot: fixture.workspace, mode: 'read-only' } }])
+  })
+
+  it.skipIf(!hasUpstreamSearch || symlinkUnsupportedReason() !== undefined)('refuses a search when its canonical root sits in a withheld registration', async () => {
+    const withheld = join(fixture.base, 'withheld')
+    mkdirSync(join(withheld, 'sub'), { recursive: true })
+    const linked = join(fixture.base, 'linked-primary')
+    symlinkSync(join(withheld, 'sub'), linked, 'dir')
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    let searches = 0
+    Object.defineProperty(raw, 'search', {
+      configurable: true,
+      writable: true,
+      value: async () => { searches += 1; return { matches: [], truncated: false, incomplete: false } },
+    })
+    await ctx.plugin(FilesRouting)
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === linked ? [withheldRegistration(canonicalPath(withheld))] : [],
+    } as never)
+    await expect(ctx.workspaceFiles.search(
+      { sessionId: 's' as never, workspaceRoot: linked },
+      { query: 'x', excludedPaths: [], includeHidden: false, respectGitignore: false },
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    expect(searches).toBe(0)
+  })
+
+  it.skipIf(!hasUpstreamSearch || symlinkUnsupportedReason() !== undefined)('keeps a search root that resolves outside the registration it is lexically spelled under', async () => {
+    const withheld = join(fixture.base, 'withheld')
+    const elsewhere = join(fixture.base, 'elsewhere')
+    mkdirSync(withheld)
+    mkdirSync(elsewhere)
+    const linked = join(withheld, 'linked-primary')
+    symlinkSync(elsewhere, linked, 'dir')
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    let searches = 0
+    Object.defineProperty(raw, 'search', {
+      configurable: true,
+      writable: true,
+      value: async () => { searches += 1; return { matches: [], truncated: false, incomplete: false } },
+    })
+    await ctx.plugin(FilesRouting)
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === linked ? [withheldRegistration(canonicalPath(withheld))] : [],
+    } as never)
+    await expect(ctx.workspaceFiles.search(
+      { sessionId: 's' as never, workspaceRoot: linked },
+      { query: 'x', excludedPaths: [], includeHidden: false, respectGitignore: false },
+      new AbortController().signal,
+    )).resolves.toEqual({ matches: [], truncated: false, incomplete: false })
+    expect(searches).toBe(1)
+  })
+
+  it.skipIf(symlinkUnsupportedReason() !== undefined)('refuses to list a tree whose canonical root sits in a withheld registration', async () => {
+    const withheld = join(fixture.base, 'withheld')
+    mkdirSync(join(withheld, 'sub'), { recursive: true })
+    const linked = join(fixture.base, 'linked-primary')
+    symlinkSync(join(withheld, 'sub'), linked, 'dir')
+    const { service } = await files()
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === linked ? [withheldRegistration(canonicalPath(withheld))] : [],
+    } as never)
+    await expect(service.list({ sessionId: 's' as never, workspaceRoot: linked }, linked, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+  })
+
+  it.skipIf(!hasPathWatchSignature || symlinkUnsupportedReason() !== undefined)('refuses a path watch whose canonical root sits in a withheld registration', async () => {
+    const withheld = join(fixture.base, 'withheld')
+    mkdirSync(join(withheld, 'sub'), { recursive: true })
+    const linked = join(fixture.base, 'linked-primary')
+    symlinkSync(join(withheld, 'sub'), linked, 'dir')
+    const { service } = await files()
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === linked ? [withheldRegistration(canonicalPath(withheld))] : [],
+    } as never)
+    const stream = service.changes({ sessionId: 's' as never, workspaceRoot: linked }, linked, new AbortController().signal)[Symbol.asyncIterator]()
+    await expect(stream.next()).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+  })
+
+  it.skipIf(symlinkUnsupportedReason() !== undefined)('lists a granted additional root while the primary resolves inside a withheld registration', async () => {
+    const withheld = join(fixture.base, 'withheld')
+    mkdirSync(join(withheld, 'sub'), { recursive: true })
+    const active = join(fixture.base, 'active')
+    mkdirSync(active)
+    writeFileSync(join(active, 'live.txt'), 'live')
+    const linked = join(fixture.base, 'linked-primary')
+    symlinkSync(join(withheld, 'sub'), linked, 'dir')
+    ctx.multiRootScope.setAdditionalRoots(linked, [{ id: 'active', path: canonicalPath(active), recordedPath: canonicalPath(active), access: 'read-write' }])
+    const { service } = await files()
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === linked
+        ? [withheldRegistration(canonicalPath(withheld)), { id: 'active', path: canonicalPath(active), recordedPath: canonicalPath(active), access: 'read-write' }]
+        : [],
+    } as never)
+    const listing = await service.list({ sessionId: 's' as never, workspaceRoot: linked }, active, new AbortController().signal)
+    expect(listing.entries.map(entry => entry.name)).toContain('live.txt')
+  })
+
+  it.skipIf(!hasPathWatchSignature || symlinkUnsupportedReason() !== undefined)('watches a granted additional root while the primary resolves inside a withheld registration', async () => {
+    const withheld = join(fixture.base, 'withheld')
+    mkdirSync(join(withheld, 'sub'), { recursive: true })
+    const active = join(fixture.base, 'active')
+    mkdirSync(active)
+    const linked = join(fixture.base, 'linked-primary')
+    symlinkSync(join(withheld, 'sub'), linked, 'dir')
+    ctx.multiRootScope.setAdditionalRoots(linked, [{ id: 'active', path: canonicalPath(active), recordedPath: canonicalPath(active), access: 'read-write' }])
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    let watchedRoot: string | undefined
+    Object.defineProperty(raw, 'changes', {
+      configurable: true,
+      writable: true,
+      value: async function*(request: { workspaceRoot: string }, _path: string, _signal: AbortSignal) {
+        watchedRoot = request.workspaceRoot
+        yield { kind: 'ready' }
+      },
+    })
+    await ctx.plugin(FilesRouting)
+    ctx.provide('multiRootRegistry', {
+      list: (primary: string) => primary === linked
+        ? [withheldRegistration(canonicalPath(withheld)), { id: 'active', path: canonicalPath(active), recordedPath: canonicalPath(active), access: 'read-write' }]
+        : [],
+    } as never)
+    const stream = ctx.workspaceFiles.changes({ sessionId: 's' as never, workspaceRoot: linked }, active, new AbortController().signal)[Symbol.asyncIterator]()
+    expect(await stream.next()).toMatchObject({ value: { kind: 'ready' } })
+    expect(watchedRoot).toBe(canonicalPath(active))
   })
 
   it.skipIf(!supportsBaseFile)('refuses slash, backslash and mixed tails into a withheld root', async () => {

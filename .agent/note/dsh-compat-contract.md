@@ -13,15 +13,15 @@ src/compat/dsh-version.ts  →  SUPPORTED_DSH_RELEASES
 是**精确版本数组**，不是 semver 范围。当前：
 
 ```ts
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2'] as const
 ```
 
 改它的时候，下面四处必须同时一致，否则 `pnpm compat:check` 失败：
 
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   allowlist
-package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-alpha.2 || 0.2.2-alpha.3 || 0.2.2-rc.1"
-package.json                devDependencies          allowlist 中的某一项（当前 0.2.2-rc.1）
+package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-alpha.2 || 0.2.2-alpha.3 || 0.2.2-rc.1 || 0.2.2-rc.2"
+package.json                devDependencies          allowlist 中的某一项（当前 0.2.2-rc.2）
 node_modules                实际解析到的版本          allowlist 中的某一项
 ```
 
@@ -201,7 +201,7 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 ## 11. DSH 0.2.1 目录语义
 
-当前开发基线为 `0.2.2-rc.1` / Cordis `4.1.0`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
+当前开发基线为 `0.2.2-rc.2` / Cordis `4.1.0`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
 
 升级脚本接受单一 Cordis prerelease 版本，仍输出精确 pin。新的安装期 peer gate 需要在隔离候选 smoke profile 使用精确 allow-version 豁免；warn 模式下豁免在第一次 `add` 前授予（构建审批恢复路径内部的 remove+add 同样有版本 gate），只用于升级车道，正式矩阵和生产仍 enforce。当前 package 为 `0.1.6` 且 `v0.1.6` tag 已存在，本迁移不创建 release。
 
@@ -228,7 +228,7 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 **files-tree 旧版复刻面**：`src/client/files-tree/` 保留旧宿主使用的上游 `ui-sidebar-files` 树体逐字节 fork（基线 `f3803c9697` = `0.2.2-alpha.2`；清单、shim 对照、外壳 delta 与同步步骤见该目录 `FORK.md`）。变更旧版基线时按 FORK.md 重拷并对照——`directory-node.ts`/`store.ts`/`FilesBody.module.css` 与 `FilesBody.tsx` 的行级定义必须字节级一致；`face.ts` 带 hold/release 生命周期 delta（`start`/record-abort 重播或丢弃 bucket，`hold`/`release` 让 Folder 关闭只关节点/watch、保留已列 levels），其余部分保持字节级。许可差异有：外壳函数根源改写、css specifier 的 `.ts` 后缀、文件行的 reveal 标记（`Entry` 按钮上的 `ref`/`data-files-current`/`aria-current` 与 `TreeContext` 的 `current`/`currentRef`）、`reveal`/`saved`/`onScrollOffset` 三个 prop 及其外壳逻辑、body 的 `tabIndex` 与原生 `scroll` 监听（portal 外的事件委托到不了，必须用元素自身监听）；同时检查上游 `locales.ts` 的 `zh` 键集（shim 的 `SidebarFilesKey` 联合须同步）、`workspaceFiles` remote 面与 `data-dockkit-content` 钩子。复刻体类名 `mrfw-ft*`、不携带 `data-files-root`/`data-files-body`（防本插件 `:has()` 隐藏规则误伤）； primitives 探针失败时整棵复刻树不渲染（同型降级，不崩）。**remote 面只能经 `ctx.get` 懒解析**：`remote.workspaceFiles` 是 cordis 嵌套服务，context 代理路径（`remote.workspaceFiles` 或 `ctx['remote.workspaceFiles']`）受 inject 守卫（未声明 fiber 直接抛 `without inject`），而本版 cordis 的 inject 条目全 required（声明会把整行 gate 在可选服务上）——`lazyFilesRemote` 用 `ctx.get('remote')`/`ctx.get('remote.workspaceFiles')` 免守卫直查 store，一切查找失败折叠成 `gateway/internal` 失败行（verbatim `load` 的 `.then` 无 `.catch`，逃逸 rejection 会静默钉死 loading）。**编译面同理钉在 dev-pin**：`0.2.0-rc.2` 之前 `workspaceFiles.changes` 是 2 参（session 级 watch），`tsconfig.client.json` 的 `paths` 把 `@deepseek-ai/dsh-api-remotes/client` 映射到 `client-remote.d.ts`（本地声明拼的是 path-watch 时代的 3 参签名），让 verbatim `face.ts` 在矩阵旧版本上也能过 typecheck——安全前提是 `files.actions` 槽位在旧版不存在、调用永不会执行。
 
-**open-in-app 复刻面**：`src/client/open-in-app/` 是上游 `ui-open-in-app` client 包的逐字节 fork（基线 `66491b05e3` = `0.2.2-rc.1`；清单、shim 对照与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——许可差异只有 `OpenTargetButton.tsx` 里 css specifier 的 `.ts` 后缀与 `open-toast.tsx` 的两行（丢 layout 副作用导入、`isMobileDevice` 改从 `./device.ts` 导入——它 re-export `src/compat/open-in-app-device.ts` 的探测 shim）；同时检查上游 `locales.ts` 的 `zh` 键集是否新增（shim 的 `OpenInAppKey` 联合须同步）、`shared.ts` 路由常量是否变化（devDep 版本即出处记录）、`OpenInAppActionInjected` 的 hook 名是否漂移。复刻组件拼写 `*Regular` 图标族：0.1.5/0.1.6 像素名运行时不建 adapter、不渲染按钮（同型降级，不崩）。
+**open-in-app 复刻面**：`src/client/open-in-app/` 是上游 `ui-open-in-app` client 包的逐字节 fork（基线 `ddac96760b` = `0.2.2-rc.2`；清单、shim 对照与同步步骤见该目录 `FORK.md`）。升版时按 FORK.md 重拷并对照——许可差异只有 `OpenTargetButton.tsx` 里 css specifier 的 `.ts` 后缀与 `open-toast.tsx` 的两行（丢 layout 副作用导入、`isMobileDevice` 改从 `./device.ts` 导入——它 re-export `src/compat/open-in-app-device.ts` 的探测 shim）；同时检查上游 `locales.ts` 的 `zh` 键集是否新增（shim 的 `OpenInAppKey` 联合须同步）、`shared.ts` 路由常量是否变化（devDep 版本即出处记录）、`OpenInAppActionInjected` 的 hook 名是否漂移。复刻组件拼写 `*Regular` 图标族：0.1.5/0.1.6 像素名运行时不建 adapter、不渲染按钮（同型降级，不崩）。
 
 ## 13. B9 进程栅栏接缝（Full-access bypass）
 
@@ -274,3 +274,14 @@ rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留�
 - **会话权威**：槽是 `session` scope，composed props 的 `sessionId` 是确定值；不要在 hero occupant 里回退到全局 current-session 解析（侧栏 fallback 是另一条路径）。
 - **形态约束**：与相邻 workspace / 模式选择器同几何，但因打开对话框而非菜单**没有 chevron**；图标优先 `IconWorkspaceTreeOutlineRegular`，旧运行时经 `selectIconOr` 回退 `IconFolderOpen`（不使用像素时代名）；文字在左、icon 在右，以贴合该行右对齐的阅读顺序；trigger 另加 `margin-right: 4px`，因为上游行 padding 是 `0 16px 0 20px`，这样按钮盒与工作区选择器一样内缩 20px。hero 行没有容器祖先，`≤560px` 用视口媒体查询退化为 28×28 图标按钮。上游若改成容器查询，再同步切换。
 - **无 DOM 钩子**：入口只依赖槽位契约；上游改名或移除该槽时按上面的缺席路径静默退化，不需要目检表更新。
+
+## 17. DSH 0.2.2-rc.2 支持与发布
+
+- **状态**：上游 tag `dsh-v0.2.2-rc.2` 指向 `ddac96760b`，npm 已发布（`next` 指向该版本，`latest` 仍为 `0.2.2-rc.1`）。本分支已把 `SUPPORTED_DSH_RELEASES`、全部 DSH peer 与开发 pin 提升到 `0.2.2-rc.2`（23 个精确版本），并用 `scripts/upgrade-dsh.mjs 0.2.2-rc.2` 整体重指开发树；临时 probe overrides 已移除，新增的 10 个传递包（`dsh-agent-team`、`dsh-client-ui-account-notifications`、`dsh-client-ui-agent-team`、`dsh-error`、`dsh-mcp-manager`、`dsh-office-kit`、`dsh-terminal-panel`、`dsh-tool-agent-team`、`dsh-tool-office`、`dsh-util-ripgrep`）已补 `minimumReleaseAgeExclude`，否则 frozen install 会被发布年龄门禁拒绝。
+- **新增接缝**：`dsh-sandbox` 用 `SandboxPreparationError` / `SandboxEscalationError` 取代未编码错误，Windows ACL 不再因额外根报错而是进程侧忽略；`SandboxPolicyService.registerWritableRoot` 让 Session 把目录并入 `resolve()` 的额外根；`workspaceFiles.search` 用打包 rg 经 `ctx.subprocess` 搜索；`dsh-error` 成为 `HarnessError` 的新共享基类；`dsh-subprocess` 与 `working-directory` 改为编码错误，后者新增 `working-directory/access` waterfall。插件均按结构消费，未新增版本判断。
+- **安静陷阱 1（Windows ACL 语义翻转）**：上游在 Windows 进程侧**忽略** `additionalWritableRoots`，只让文件工具执行；插件自己 scope 根的进程授予仍来自 `widenWindowsProfile` 拼进的 ACE 参数，两者不可混为一谈。`tests/upstream-additional-roots.spec.ts` 的 per-Session 小节钉住“原生注册根可被 fs fence 写入、scope read-only deny 仍胜出”。
+- **安静陷阱 2（authority 降级优先）**：`registerWritableRoot` 的根随 policy 进入 `writableRoots()` 与 POSIX profile，但插件在 authority unavailable 时仍只保留主根与显式 deny；不要把“上游已授权”当作可用 authority 的证据。
+- **安静陷阱 3（搜索根）**：`workspaceFiles.search` 做共享 authority 的 admission，不做事先的多根路由——搜索根是 Session cwd；但它的 **Session 根**受 withheld 检查：canonical 搜索根落在在册未授权边界下时在启动 `rg` 前拒绝。接管附加根时原生搜索条、状态行与 Files 页开关随原生 body 一起隐藏；primary 根浏览保持上游原样。
+- **安静陷阱 4（fork 基线）**：rc.2 的 `ui-open-in-app` 复刻源只有两处注释变化并新增 `menu.openIn`；本分支已按 FORK.md 重拷 `OpenInAppAction.tsx` / `controller.ts`、把 baseline 移到 `ddac96760b`，并在 `OpenInAppKey` 补 `menu.openIn`。files-tree 旧版复刻仍钉 alpha.2。
+- **契约检查**：`@deepseek-ai/dsh-error` 已加入 `OPTIONAL_CORE_PACKAGES` 与 `HOST_SERVICE_PACKAGES`（只经宿主锚点作证，发现跨包单例混装）；**不要**把它写进 `peerDependencies`——rc.1 没有该包，会让旧宿主安装失败。
+- **验证（已发布包）**：在已发布的 `0.2.2-rc.2` 开发树上，`compat:check`、lint、双端 typecheck、`build`、`docs:check`、`pack:check` 与 `auto-review:fork` 通过；完整 vitest 为 **1368 通过 / 162 跳过 / 17 失败**。17 个失败全部是当前 Seatbelt 会话的 sandboxed-peer registry IPC 用例；rc.1 基线在同一环境同样失败 17 个（1364 / 166），不是 rc.2 回归。本机 `smoke:compose` **56/56**、`smoke:behavior` **96 通过 / 8 跳过**、`smoke:journey` **85 通过 / 2 跳过**、`smoke:packed` **95 通过 / 8 跳过**，均 0 失败（跳过项是 Seatbelt 内无可用内核 runner 与共享 IPC）。三 OS 矩阵与 Windows ACL 原生结果由 PR 的 CI 给出（[run 43227479998](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43227479998)，94/94 jobs）；浏览器目检不是 CI 项，按路线账本的人工记录。

@@ -225,3 +225,39 @@ describe('the New Session hero entry rules', () => {
     expect(STYLES).not.toContain('.mrfw-heroEntryChevron')
   })
 })
+
+describe('the navigator search takeover (0.2.2-rc.2)', () => {
+  it('hides the native search bar and status line only while the preview retarget holds the aside', () => {
+    // The rc.2 navigator draws a workspace search above the body; the retarget
+    // hides the body it belongs to, so the bar must go with it. The :has()
+    // anchor is the input rc.2 marks as data-files-search, and the status line
+    // is a direct sibling. Primary-root browsing carries no marker.
+    expect(STYLES).toMatch(/aside\[data-mrfw-navigator\]\s*>\s*div:has\(\[data-files-search\]\)[\s\S]*?display:\s*none/s)
+    expect(STYLES).toContain('aside[data-mrfw-navigator] > [data-files-search-status]')
+    document.body.innerHTML = `
+      <aside data-mrfw-navigator>
+        <div class="searchBar"><div class="searchField"><input data-files-search></div></div>
+        <p data-files-search-status></p>
+        <div data-files-body></div>
+        <div class="mrfw-ftBody"></div>
+      </aside>
+      <aside><div class="searchBar"><input data-files-search></div><p data-files-search-status></p></aside>`
+    const [held, native] = [...document.querySelectorAll('aside')]
+    expect(held!.querySelector('.searchBar')!.matches('aside[data-mrfw-navigator] > div:has([data-files-search])')).toBe(true)
+    expect(held!.querySelector('[data-files-search-status]')!.matches('aside[data-mrfw-navigator] > [data-files-search-status]')).toBe(true)
+    expect(native!.querySelector('.searchBar')!.matches('aside[data-mrfw-navigator] > div:has([data-files-search])')).toBe(false)
+    // The forked body must never match the search-bar selector.
+    expect(held!.querySelector('.mrfw-ftBody')!.matches('aside[data-mrfw-navigator] > div:has([data-files-search])')).toBe(false)
+  })
+
+  it('hides the Files-page search toggle under an additional root only', () => {
+    const base = '[data-files-page]:has(.mrfw-rootSwitcher[data-root-kind="additional"])'
+    expect(STYLES).toContain(`${base} [data-files-search-toggle]`)
+    expect(STYLES).toContain('[data-files-root]:has(.mrfw-rootSwitcher[data-root-kind="additional"]) [data-files-search-toggle]')
+    document.body.innerHTML = `<div data-files-page><span class="mrfw-rootSwitcher" data-root-kind="additional"></span><button data-files-search-toggle></button></div>`
+    const selector = `${base} [data-files-search-toggle]`
+    expect(document.querySelector('[data-files-search-toggle]')!.matches(selector)).toBe(true)
+    document.querySelector('.mrfw-rootSwitcher')!.setAttribute('data-root-kind', 'primary')
+    expect(document.querySelector('[data-files-search-toggle]')!.matches(selector)).toBe(false)
+  })
+})

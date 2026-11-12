@@ -14,6 +14,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import * as sandboxPackage from '@deepseek-ai/dsh-sandbox'
 import { canonicalPath, SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
@@ -30,6 +31,14 @@ import type { FixtureWorkspace } from './support/temp-workspace.ts'
 
 let fixture: FixtureWorkspace
 const fibers: Array<Awaited<ReturnType<Context['plugin']>>> = []
+
+/**
+ * Up to 0.2.2-rc.1 the Windows ACL provider REFUSED
+ * `additionalWritableRoots`; rc.2 removed that error and ignores the field
+ * for process confinement (file tools still honor it). Probe the removed
+ * class by name so the older releases skip instead of failing on the throw.
+ */
+const upstreamRejectsWindowsAdditionalRoots = 'SandboxUnsupportedPolicyError' in sandboxPackage
 
 beforeEach(() => {
   fixture = createFixtureWorkspace('sandbox-multi')
@@ -217,6 +226,23 @@ describe('the Windows ACL rung', () => {
     expect(result.argv).toContain(canonicalPath(fixture.outside))
     expect(result.argv.slice(-COMMAND.length)).toEqual(COMMAND)
     expect({ ...result, argv: expected.argv }).toEqual(expected)
+  })
+
+  it.skipIf(upstreamRejectsWindowsAdditionalRoots)('grants a scope root while an upstream additional root stays out of the process profile', async () => {
+    // 0.2.2-rc.2: upstream's windows-acl argv ignores `additionalWritableRoots`
+    // (they apply to harness file tools only), so only the plugin's scope
+    // widening may add a `--additional-root`. The base profile must not carry
+    // the native root, or the plugin would silently promote a file-tool grant
+    // to a process grant on Windows.
+    const nativeRoot = join(fixture.base, 'native-process')
+    mkdirSync(nativeRoot, { recursive: true })
+    const ours = await mount(MultiRootSandboxProvider, 'workspace-write', internalsFor('windows-acl'))
+    ours.ctx.multiRootScope.setAdditionalRoots(fixture.workspace, [{ id: 'root-0', path: fixture.outside, recordedPath: canonicalPath(fixture.outside), access: 'read-write' }])
+    const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: fixture.workspace, additionalWritableRoots: [nativeRoot] }
+    const result = await confined(ours.provider, COMMAND, policy)
+    expect(result.argv).toContain('--additional-root')
+    expect(result.argv).toContain(canonicalPath(fixture.outside))
+    expect(result.argv).not.toContain(canonicalPath(nativeRoot))
   })
 })
 
