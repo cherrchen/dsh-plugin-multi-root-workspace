@@ -1970,3 +1970,20 @@ rebase 的集成处理：
 - **用户文档。** README 双语 "SSH 远端环境" 段重写：三档保护与不保护什么、个人模式 GUI 走通流程、指针至参考与控制面清单。`ssh-remote-environments.md` 增 GUI 节与 exec/transfer 默认值。
 
 本机 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.2`：`compat:check`、lint（0 警告）、双端 typecheck、build（59 文件）通过；触达 spec 157 例（panel 82 + ops-settings 34 + ssh-panel 13 + locale/styles 28）；全量 `pnpm test` **1791 passed / 132 skipped / 0 failed**（122 个文件）；`smoke:compose` **58 passed**；`docs:check` 0 错误 0 警告。
+
+## SSH 远端管理面板抽离（2026-11-13）
+
+**问题。** ADR-0041 §6 的个人管理区、托管档位选择器与部署端点列表全部内联在 Workspace Folders 面板的“远端环境”区块：列表、全局 SSH 设置、凭据、环境、绑定混在同一滚动区，个人模式下体积过大，工作区面板的主要职责被挤占。上一节记录的“设置卡常驻三档单选”在 `28ece12` 已把档位与 team 字段移入面板，实际形态与文字不再一致。
+
+**决定。** Workspace Folders 远端区块只保留：(a) 远端工作区列表（沿用附属工作目录行样式，平台显示实际系统名称 Linux / macOS，保留登记/移除）；(b) “添加 SSH 远端…”与“管理 SSH 远端…”两枚入口。新增独立 `SshManagementDialog`（`src/client/ssh-panel.tsx`），由 ui-primitives `Modal` 承载，四个 Tab：添加连接、已有连接、SSH Key、模式设置。计划见 [2026-11-13-ssh-management-dialog.md](../completed/2026-11-13-ssh-management-dialog.md)。
+
+- **添加连接。** personal 显示分步引导表单（目标 → 凭据 → 远端目录与能力 → 主机密钥扫描/指纹单选），保存沿用既有 `sshEnvironmentSave` 的 revision/token/fingerprint 语义；team/hardened 显示部署清单/broker 引导，不渲染个人表单，也不调用 `sshState`；模式设置 Tab 的档位选择决定引导分支。
+- **已有连接。** personal 保留链接横幅、环境行（测试连接/helper/访问密钥/编辑/行内删除）与“本项目绑定”（本地传输对端仍为 `primary` + 各可用根 `aliasId`）；team/hardened 显示部署端点只读列表。
+- **SSH Key。** personal 保留凭据行、复制公钥、行内删除与三个添加表单；秘密输入提交即清且永不由状态回填；访问密钥仍显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管。
+- **模式设置。** 复用 `RemoteCustodyModeControl` 与同一个 `multi-root-remote-tools` form/CAS；同时显示档位对“添加连接”引导方式的说明。
+- **兼容与刷新。** `SegmentedTabs` 仅在 `0.1.7-alpha.1+` 提供，客户端经 `maybeComponent` 探测并降级为同 ARIA/DOM 契约的本地 tablist；对话框只通过父级 `onChanged` 触发 `remotes.list`，不建立第二个数据源；会话切换清空旧 `sshState` 并重读。
+- **不改 Host。** 没有新增/修改 RPC、线形、准入或凭据语义；team/hardened 的 broker 证明与清单来源保持不变。
+
+**测试。** `client-ssh-panel.spec` 重写为 23 例：内联管理区消失、入口分别打开四个 Tab、平台显示 Linux/macOS、team/hardened 不调用 `sshState`、模式引导、链接横幅、秘密清理、hostKeyScan→保存、exec/transfer 默认值、编辑/删除/绑定、CAS 冲突重取、连接测试、mutation 后父面板刷新、对话框关闭不影响外层。`client-panel.spec` 的远端区块用例保持通过。
+
+本机 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.2`：`compat:check`、lint（0 警告）、双端 typecheck、build、`docs:check`、`pack:check`（254 members）、`kernel:probe`、Auto Review 检查通过；`smoke` compose 58 / behavior 96（8 skip）/ journey 85（2 skip），`smoke:packed` 通过。特性相关 client/locale/styles spec **168 passed**；全量 `pnpm test` 在本会话的 DSH Agent 沙箱内因共享 Registry IPC 拒绝沙箱 peer，10 个既有 authority 文件失败（**1713 passed / 207 skipped / 20 failed**，其余全部通过），排除这些文件后为 **1570 passed / 201 skipped / 0 failed**；完整套件由干净 runner 上的 CI 覆盖。

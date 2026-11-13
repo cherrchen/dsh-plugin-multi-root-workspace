@@ -1054,6 +1054,98 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   gap: 10px;
 }
 
+/* The standalone SSH management dialog. The card is wider than the primitive's
+   380px default; the content column scrolls so the body never clips controls. */
+.mrfw-sshDialog {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 48px);
+}
+
+.mrfw-sshDialogContent {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mrfw-sshDialogPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.mrfw-sshTabs {
+  margin-top: 4px;
+}
+
+/* Fallback for runtimes whose ui-primitives predates SegmentedTabs. The DOM
+   contract matches the primitive's tablist, including keyboard navigation. */
+.mrfw-sshTabsFallback {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm);
+}
+
+.mrfw-sshTab {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-xs);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.mrfw-sshTab:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-sshTabActive {
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-sshTab:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.mrfw-sshGuide {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.mrfw-sshStep {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.mrfw-sshStep:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.mrfw-sshStepTitle {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
 .mrfw-sshForm {
   display: flex;
   flex-direction: column;
@@ -1061,6 +1153,12 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   padding: 10px;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
+}
+
+.mrfw-sshEdit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .mrfw-sshForm textarea.mrfw-input {

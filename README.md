@@ -20,7 +20,7 @@
 - **可选 Auto review（默认关闭）**：fork 上游实验性「自动授权审查」，向 Reviewer 补充附加目录的审查上下文——当前工作区拓扑、各根访问级别与实时指令文件；出厂关闭，需在插件管理器的行列表中显式打开 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` 行后生效，启用时接管官方同名 bundle。
 - **附属根 Skills**：发现附属目录的 `.dsh/skills` 与 `.agents/skills`，附属根经 `/alias-id:skill-name` 命名空间调用原生 `skill` 工具；每根独立开关、可编辑 `aliasId`，全局设置默认开启。
 - **Worktree 附加根建议（实验性，默认关闭）**：primary 是 Git main 或 linked checkout 时，发现同 common 的其他 worktree，经用户确认后把其源码树登记为 `inherit` 附加根；发现只读取插件自己解析的 Git 元数据，不启动 Git 子进程、不自动增删。linked worktree 还可显式授权主 checkout 根，补齐受限 `git add` / `git commit` 的共享元数据写入缺口（[ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
-- **SSH 远端环境（实验性，默认关闭，未发布）**：插件详情卡的"SSH 远端环境"开关（实验性警示标签，开启需风险确认）按部署清单打开 Registry 远端控制面；配合部署方提供的 broker 凭据隔离证明后，Agent 获得 `remote_copy` / `remote_bash` 与 Workspace Folders 面板的远端区块，每次调用仍经 Registry 准入。开关关闭时无任何模型可见的远端能力。
+- **SSH 远端环境（实验性，默认关闭，未发布）**：插件详情卡的"SSH 远端环境"开关（实验性警示标签，开启需风险确认）按部署清单打开 Registry 远端控制面；配合部署方提供的 broker 凭据隔离证明后，Agent 获得 `remote_copy` / `remote_bash`；Workspace Folders 面板显示远端工作区列表并提供独立的 SSH 远端管理对话框，每次调用仍经 Registry 准入。开关关闭时无任何模型可见的远端能力。
 - **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
 当前发布版本 `v0.1.18`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
@@ -271,15 +271,15 @@ A 只在该 primary 的完整快照证明 common 身份、且 `<main>/.git` 仍�
 
 ### SSH 远端环境（实验性，默认关闭，未发布）
 
-Issue #32 的多执行环境能力以实验性开关形式随默认组合发货：插件详情设置卡的 **SSH 远端环境** 带"实验性"警示标签并**默认关闭**，开启前须阅读风险确认（Agent 可在配置的远端主机执行命令与复制文件，凭据由部署方托管），取消或关闭弹窗不保存。设置卡常驻**凭据托管档位**单选，三档互斥：
+Issue #32 的多执行环境能力以实验性开关形式随默认组合发货：插件详情设置卡的 **SSH 远端环境** 带"实验性"警示标签并**默认关闭**，开启前须阅读风险确认（Agent 可在配置的远端主机执行命令与复制文件，凭据的持有方由托管档位决定），取消或关闭弹窗不保存。设置卡只保留启用开关；**凭据托管档位**在 Workspace Folders 面板的“管理 SSH 远端”对话框 →“模式设置”中切换，三档互斥：
 
 - **个人（默认）**：凭据由本机 Host 进程直接持有，**不承诺 Agent 拿不到密钥**；适合个人机器、一次性 VM 或可信 Agent。
 - **团队**：独立 broker 账户托管凭据，复制目的须为 chroot SFTP；显示四个 broker 字段（manifestPath / socketPath / brokerUid / credentialRoot）可就地保存。适合共享构建机。
 - **硬化**：broker + 配额/审计/吊销 + 专用账户与独立写者，由部署 profile 配置，设置卡只显示只读说明。
 
-开关开启时向更低隔离档位切换会再次经过风险确认。Registry 按档位读取清单来源（personal → `remoteEnvironments.personalPath`；team/hardened → `remoteEnvironments.manifestPath`，默认 `/etc/dsh-ssh-broker/manifest.json`）并建立远端控制面；Workspace Folders 面板的"远端环境"区块随档位显示：personal 为完整管理区，team/hardened 为清单端点登记/撤销列表。
+开关开启时向更低隔离档位切换会再次经过风险确认。Registry 按档位读取清单来源（personal → `remoteEnvironments.personalPath`；team/hardened → `remoteEnvironments.manifestPath`，默认 `/etc/dsh-ssh-broker/manifest.json`）并建立远端控制面。Workspace Folders 面板的“远端环境”区块只保留**远端工作区列表**（沿用附属工作目录的行样式，平台显示为 Linux / macOS，保留登记/移除）和“添加 SSH 远端…”/“管理 SSH 远端…”两枚入口；新增连接、已有连接、SSH Key 与模式设置都在独立对话框的四个 Tab 中完成。
 
-**个人模式走通一次**（全部在面板内完成）：添加凭据（生成密钥 / 导入私钥 / 保存密码）→ 添加环境（主机、账号、平台、远端工作目录，按需勾选允许命令执行 / 允许文件传输）→ 扫描主机钥并选择指纹 → 若使用托管凭据，点击横幅把 `Include` 写入 `~/.ssh/config`（自动备份）→ 测试连接 → 安装 helper（可选，走 SFTP 时可跳过）→ 密码凭据可再装访问密钥 → 添加本项目绑定（选择本地根与远端路径、动作与传输方向）→ 在端点列表点击 Register → 此后 Agent 才能用 `remote_copy` / `remote_bash` 触达该远端。秘密输入提交即清，任何 RPC 应答都不含私钥或密码字节。
+**个人模式走通一次**（在“管理 SSH 远端”对话框中完成）：打开 Workspace Folders →“添加 SSH 远端…”→ 在“添加连接”Tab 填写主机、账号、平台（Linux / macOS）与远端工作目录，按需勾选允许命令执行 / 允许文件传输 → 选择 ssh-config 别名或托管凭据；没有凭据时切到“SSH Key”Tab 生成密钥 / 导入私钥 / 保存密码 → 扫描主机钥并选择指纹 → 若使用托管凭据，在“已有连接”Tab 点击横幅把 `Include` 写入 `~/.ssh/config`（自动备份）→ 测试连接 → 安装 helper（可选，走 SFTP 时可跳过）→ 密码凭据可再装访问密钥 → 在“已有连接”Tab 添加本项目绑定（选择本地根与远端路径、动作与传输方向）→ 回到 Workspace Folders 的远端工作区列表点击 Register → 此后 Agent 才能用 `remote_copy` / `remote_bash` 触达该远端。秘密输入提交即清，任何 RPC 应答都不含私钥或密码字节。
 
 模型侧的 `remote_copy` / `remote_bash` 与能力投影在 team/hardened 下还要通过 broker 凭据隔离证明：broker 块由部署方在专用 profile（hardened）或设置卡字段（team）提供，任何一步失败（SSH 兼容门禁、控制面未就绪、`danger-full-access` 会话仅对 hardened 拒绝、证明失败）都不安装工具。每次远端调用仍由 Registry 排序准入。关闭开关即卸载全部远端子树并把控制面恢复为 `disabled`（无 `remote-1` 监听、无远端域）。各档保护边界、文件布局、RPC 拒绝码见 [SSH 远端环境参考](./docs/reference/ssh-remote-environments.md)；team/hardened 的部署步骤与回滚见[控制面参考](./docs/reference/multi-environment-control-plane.md)。
 
