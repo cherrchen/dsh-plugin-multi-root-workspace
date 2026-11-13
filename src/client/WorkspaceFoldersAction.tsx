@@ -46,8 +46,7 @@ import type { WorkspaceFoldersDialogController } from './workspace-folders-dialo
 import type { RemotesClient } from './remotes-client.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
 import type { SshClient } from './ssh-client.ts'
-import { SshPersonalArea } from './ssh-panel.tsx'
-import { SshCustodySection } from './remote-custody.tsx'
+import { platformLabel, SshManagementDialog, type SshDialogTab } from './ssh-panel.tsx'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
 import type { WorktreeClient } from './worktree-client.ts'
@@ -436,6 +435,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const [cleanupFor, setCleanupFor] = useState<readonly string[] | undefined>(undefined)
   /** The remote section, read independently of the roots view. */
   const [remoteState, setRemoteState] = useState<{ view?: RemotesView; error?: PanelError }>({})
+  /** The standalone SSH management dialog's requested tab; undefined when closed. */
+  const [sshDialog, setSshDialog] = useState<SshDialogTab | undefined>(undefined)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const requestEpoch = useRef(0)
   /** Fences remote-section answers independently of roots answers. */
@@ -464,7 +465,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       // listener closes just that layer, and this handler must not close the
       // dialog underneath it — the portaled dropdown and Modal bubble their
       // events through this dialog's React tree too.
-      if (menuFor !== undefined || accessMenuOpen || upgradeFor !== undefined) return
+      if (menuFor !== undefined || accessMenuOpen || upgradeFor !== undefined || sshDialog !== undefined) return
       event.stopPropagation()
       props.onClose()
       return
@@ -474,7 +475,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     // its own focus trap. The portaled Modal still bubbles keys through this
     // dialog's React tree (like Escape above), and trapping here would yank
     // focus to a control behind the active confirmation.
-    if (upgradeFor !== undefined) return
+    if (upgradeFor !== undefined || sshDialog !== undefined) return
     const dialog = dialogRef.current
     if (dialog === null) return
     const focusable = Array.from(
@@ -548,6 +549,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       setRemoteState({ error: asPanelError(error) })
     }
   }, [props.remotes, requestBase, props.sessionId])
+
+  /** The dialog's "state changed" signal; keeps one refresh path for the section. */
+  const refreshRemoteSection = useCallback(() => { void refreshRemotes() }, [refreshRemotes])
 
   /**
    * Register or remove one deployment endpoint. Registration is the host's
@@ -1001,17 +1005,24 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               {remoteState.error === undefined ? null : (
                 <p role="alert" className="mrfw-alert">{t(errorKeyOf(remoteState.error.code))}</p>
               )}
-              {remoteState.view === undefined || remoteState.view.status.state === 'disabled' ? null : (
-                <SshCustodySection
-                  control={props.remoteMode}
-                  currentMode={remoteState.view.custodyMode}
-                  onChanged={() => { void refreshRemotes() }}
-                  t={t}
-                />
-              )}
-              {props.ssh === undefined || remoteState.view?.custodyMode !== 'personal' || remoteState.view.status.state !== 'ready' ? null : (
-                <SshPersonalArea ssh={props.ssh} sessionId={requestBase()?.sessionId} roots={state.view} t={t} />
-              )}
+              <div className="mrfw-sshAddRow">
+                <Action
+                  variant="outline"
+                  disabled={remoteState.view === undefined}
+                  onClick={() => { setSshDialog('add') }}
+                >
+                  {t('panel.remoteAdd')}
+                </Action>
+                <Action
+                  disabled={remoteState.view === undefined}
+                  onClick={() => { setSshDialog('connections') }}
+                >
+                  {t('panel.remoteManage')}
+                </Action>
+              </div>
+              <div className="mrfw-sectionTitleRow">
+                <span className="mrfw-sectionTitle">{t('panel.remoteList')}</span>
+              </div>
               {remoteState.view === undefined
                 ? (remoteState.error === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null)
                 : remoteState.view.status.state !== 'ready' ? (
@@ -1027,7 +1038,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       <div className="mrfw-rootText">
                         <span className="mrfw-rootName">
                           <span className="mrfw-rootNameText">{endpoint.displayName ?? endpoint.environmentId}</span>
-                          <span className="mrfw-accessBadge">{endpoint.platform}</span>
+                          <span className="mrfw-accessBadge">{platformLabel(endpoint.platform, t)}</span>
                           <span className="mrfw-accessBadge">{t(remoteStateKey(endpoint.state))}</span>
                         </span>
                         <span className="mrfw-rootPath" title={endpoint.path}>{endpoint.rootId} · {endpoint.path}</span>
@@ -1050,6 +1061,21 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     </div>
                   )
                 })}
+              {sshDialog === undefined ? null : (
+                <SshManagementDialog
+                  initialTab={sshDialog}
+                  ssh={props.ssh}
+                  sessionId={requestBase()?.sessionId}
+                  custodyMode={remoteState.view?.custodyMode}
+                  status={remoteState.view?.status}
+                  endpoints={remoteState.view?.endpoints ?? []}
+                  roots={state.view}
+                  remoteMode={props.remoteMode}
+                  onClose={() => { setSshDialog(undefined) }}
+                  onChanged={refreshRemoteSection}
+                  t={t}
+                />
+              )}
             </section>
           )}
             </>

@@ -4,7 +4,7 @@
 
 ## 托管档位
 
-`multi-root-remote-tools` 设置的 `mode` 字段决定凭据托管方式。UI 入口在 Workspace Folders 面板的 SSH 区域（`src/client/remote-custody.tsx`）；插件设置卡只保留启用开关。
+`multi-root-remote-tools` 设置的 `mode` 字段决定凭据托管方式。UI 入口在 Workspace Folders 面板的“管理 SSH 远端”对话框 →“模式设置”Tab（`src/client/ssh-panel.tsx`，控件见 `src/client/remote-custody.tsx`）；插件设置卡只保留启用开关。
 
 | 档位 | 凭据 | 部署证明 | 说明 |
 | --- | --- | --- | --- |
@@ -67,18 +67,25 @@ Registry 的 owner 是唯一打开远程域和 `remote-1` 监听的 Host。若�
 
 ## GUI 管理面板（个人模式）
 
-两处 GUI 入口：
+GUI 入口有两处：
 
 - **插件详情设置卡**（`RemoteSwitchRow`）：只保留开关与启用风险确认。开启后 Host 的远程控制面按当前 `mode` 启动；开关关闭立即卸载。
-- **Workspace Folders 面板远端区块**：标题行显示托管档位徽标（`RemotesView.custodyMode`）。控制面 `ready` 时先渲染托管档位区（`src/client/remote-custody.tsx`）：三档单选（个人/团队/硬化，各带一行说明）；`team` 显示四个 broker 字段（`manifestPath`/`socketPath`/`brokerUid`/`credentialRoot`）并以"保存团队配置"逐项 `set` 写入 `team.*`；`hardened` 显示只读提示（broker 参数来自部署 profile）。开关开启时向**更低隔离档位**切换（hardened→team/personal、team→personal）走同一个风险确认组件，文案按目标档位区分；升级或关闭状态下的切换直接写 `mode`。档位写入与设置卡共用同一个 `multi-root-remote-tools` 配置 form 与 CAS revision，不另建写入路径；档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源），面板只是它的 workspace 入口。
-- 个人档位额外渲染个人管理区（`src/client/ssh-panel.tsx`，经 `src/client/ssh-client.ts` 调 `ssh*` 端点）；team/hardened 仍是只读端点列表 + 登记/撤销。
+- **Workspace Folders 面板远端区块**（`src/client/WorkspaceFoldersAction.tsx`）：只保留远端工作区列表与 SSH 管理入口。标题行显示托管档位徽标（`RemotesView.custodyMode`）；列表沿用附属工作目录的行样式（名称、平台徽标、登记状态、`rootId · path`、当前能力），保留登记/移除动作。列表上方是两枚入口：
+  - `panel.remoteAdd`（添加 SSH 远端…）：打开管理对话框的“添加连接”Tab；
+  - `panel.remoteManage`（管理 SSH 远端…）：打开管理对话框的“已有连接”Tab。
 
-个人管理区自上而下：
+  远端列表的平台徽标显示实际系统名称（Linux / macOS），不是清单里的 `linux`/`darwin`。
 
-1. **链接横幅**：存在 managed 环境且 `linked === false` 时显示，说明单行 `Include` 语义与备份行为，按钮调 `sshConfigLink`。
-2. **凭据**：行显示标签、类型徽标、指纹；密钥凭据有"复制公钥"，删除需行内确认。访问密钥（`purpose: 'access-key'`）不在此列出，而显示在其所属环境下。三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）的**秘密输入提交后立即清空**（无论成败），且永不由状态回填。
-3. **环境**：行显示名称/ID、`user@host:port`、平台、helper 有无、凭据来源。操作：测试连接（显示平台与 node 版本）、安装 helper（可选绝对 node 路径）、安装访问密钥（仅密码凭据）、编辑、删除（行内确认，提示绑定一并移除）。新增/编辑表单含 environmentId、显示名、hostname、port（默认 22）、user、platform、凭据来源（ssh-config 别名 或 托管凭据下拉）、workspace；主机密钥步骤为"扫描主机钥"→ 列出指纹 → 单选一个 → 保存时携带 `hostKeyToken` + `fingerprint`（`ssh-config` 来源同样走扫描展示，但指纹由 Host 按 known_hosts 核对，不需要 token）。
-4. **本项目绑定**：行显示环境、rootId、远端路径、动作与传输；新增表单的环境下拉来自 `sshState.environments`，本地传输对端复选框恰好是本地传输汇能解析的 rootId 集合——`primary` 加各可用根的 `aliasId`。保存后端点列表按既有流程显示为未登记，仍需显式 Register。
+### SSH 远端管理对话框
+
+独立对话框 `SshManagementDialog`（`src/client/ssh-panel.tsx`）由 ui-primitives `Modal` 承载，经 `src/client/ssh-client.ts` 调 `ssh*` 端点；Tab 条优先使用 `SegmentedTabs`，旧运行时降级为同 DOM 契约的本地 tablist。四个 Tab：
+
+1. **添加连接**：personal 档位显示分步表单——连接目标（环境 ID、显示名、hostname、port、user、平台）→ 凭据（ssh-config 别名或托管凭据；无托管凭据时可直接跳到 SSH Key Tab）→ 远端目录与能力（workspace、exec/transfer）→ 主机密钥（“扫描主机钥”→ 指纹单选）。保存沿用 `sshEnvironmentSave` 的 revision、`hostKeyToken` + `fingerprint` 语义；保存成功后草稿与扫描状态清空，连接出现在“已有连接”，但远端工作区仍需在 Workspace Folders 列表中显式登记。team/hardened 显示部署清单/broker 引导，不渲染个人表单，并提供“打开模式设置”入口；控制面未 `ready` 时显示不可用原因。
+2. **已有连接**：personal 显示链接横幅（managed 环境存在且 `linked === false` 时，按钮调 `sshConfigLink`）、已保存环境行（名称/ID、实际平台名、helper、`user@host:port`、workspace、凭据来源、访问密钥）、测试连接/安装 helper/安装访问密钥/编辑/行内删除；编辑复用添加表单。其下是“本项目绑定”：行显示环境、rootId、远端路径、动作与传输，本地传输对端恰为 `primary` 加各可用根的 `aliasId`。team/hardened 显示部署清单中的端点只读列表与登记状态。
+3. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管，GUI 不读取、不创建。
+4. **模式设置**：复用 `src/client/remote-custody.tsx` 的三档单选、team 四个 broker 字段与降级风险确认，写入同一个 `multi-root-remote-tools` form 与 CAS revision，不另建写入路径；同时说明档位如何决定“添加连接”的引导方式（personal 图形化表单、team 部署清单 + broker、hardened 部署 profile + 全量证明）。档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源）。
+
+所有变更请求携带当前 `revision`；`personal-config-conflict` 时前端先重取 `sshState` 再显示本地化冲突文案。服务端错误一律经 `error.*` 本地化渲染。对话框关闭不影响 Workspace Folders 对话框；打开期间会话切换会清空旧会话的 `sshState` 并重新读取。
 
 **开关默认值**（GUI 勾选"允许命令执行"/"允许文件传输"时写入的完整节，见上文文件 schema）：
 

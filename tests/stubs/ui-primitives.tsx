@@ -152,6 +152,8 @@ export function Modal(props: {
   readonly title: string
   readonly description?: string
   readonly closeLabel: string
+  readonly className?: string
+  readonly contentClassName?: string
   readonly footer?: ReactNode
   readonly children?: ReactNode
 }): ReactNode {
@@ -159,10 +161,11 @@ export function Modal(props: {
   return createPortal(
     createElement(
       'div',
-      { role: 'dialog', 'aria-label': props.title },
+      { role: 'dialog', 'aria-label': props.title, className: props.className },
       createElement('h2', null, props.title),
+      createElement('button', { type: 'button', 'aria-label': props.closeLabel, onClick: props.onClose }, '×'),
       props.description === undefined ? null : createElement('p', null, props.description),
-      props.children,
+      props.contentClassName === undefined ? props.children : createElement('div', { className: props.contentClassName }, props.children),
       props.footer,
     ),
     document.body,

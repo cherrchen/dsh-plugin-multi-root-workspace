@@ -55,6 +55,8 @@ active:
 
 completed:
 
+- [2026-11-13-ssh-management-dialog.md](./completed/2026-11-13-ssh-management-dialog.md) (Chinese) — Extracts the inline SSH management from the Workspace Folders panel into a standalone four-tab dialog (Add connection / Connections / SSH keys / Mode), leaving the Workspace Folders panel with only the remote-workspace list and Add/Manage entries; platforms display as Linux / macOS and the custody mode drives the Add guidance. Completed 2026-11-13 after local static gates, smokes, and feature specs; the full suite and CI are verified on a clean runner.
+
 - [2026-11-08-workspace-folders-hero-entry.md](./completed/2026-11-08-workspace-folders-hero-entry.md) (Chinese) — An incremental Workspace Folders entry on the New Session hero row: a `conversation.hero.options` registration, the adjacent selectors' geometry without a chevron, and a `≤560px` viewport icon-only degrade; the sidebar entry remains. Completed 2026-11-08 and passed the full gate, shipping in `v0.1.17`; decision: [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md).
 
 - [2026-11-05-root-authorization-security-fixes.md](./completed/2026-11-05-root-authorization-security-fixes.md) (Chinese) — Completed bounded root-authorization fixes: BYP-02, MRW-01, protected-directory registration, and required shared mode. Excluded work remains out of scope; evidence and release status live in the [progress ledger](./active/2026-09-12-multi-root-workspace.md#进度总账).
