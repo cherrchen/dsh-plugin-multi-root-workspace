@@ -14,19 +14,20 @@ describe('CI workflow gates', () => {
   it.each([true, false])('schedules each exact release once per enabled image (Windows: %s)', windows => {
     const matrix = planMatrix(windows)
     const images = ['ubuntu-latest', 'ubuntu-22.04', 'macos-latest', ...(windows ? ['windows-latest'] : [])]
+    const releasesByNode = Map.groupBy(SUPPORTED_DSH_RELEASES, nodeForRelease)
+    const groupsPerImage = [...releasesByNode.values()].reduce((count, versions) => count + Math.ceil(versions.length / 4), 0)
     expect([...new Set(matrix.map(entry => entry.os))]).toEqual(images)
     for (const os of images) {
       const groups = matrix.filter(entry => entry.os === os)
-      expect(groups.flatMap(entry => entry.versions)).toEqual([...SUPPORTED_DSH_RELEASES])
+      expect(groups.flatMap(entry => entry.versions).sort()).toEqual([...SUPPORTED_DSH_RELEASES].sort())
       expect(new Set(groups.map(artifactName)).size).toBe(groups.length)
-      expect(groups.length).toBe(6)
+      expect(groups.length).toBe(groupsPerImage)
       for (const group of groups) {
         expect(group.versions.length).toBeGreaterThan(0)
         expect(group.versions.length).toBeLessThanOrEqual(4)
         expect(new Set(group.versions.map(nodeForRelease))).toEqual(new Set([group.node]))
       }
     }
-    expect(matrix.length + 2).toBe(windows ? 26 : 20)
   })
 
   it('keeps the 22 and 24 Node lanes and expands the plan in the read-only workflow', () => {

@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { readFileSync } from 'node:fs'
 import { autoReviewRelease } from '../lib/auto-review-development.mjs'
 
 export const nodeForRelease = version => /^(?:0\.1\.|0\.2\.[01](?:-|$))/u.test(version) ? '22.19.0' : '24.9.0'
