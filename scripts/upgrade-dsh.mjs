@@ -216,10 +216,17 @@ function repointManifest(version, cordisVersion, pins) {
  */
 function repointWorkspace(version, cordisVersion, pins) {
   const source = readFileSync(WORKSPACE, 'utf8')
+  // The SSH packages exist only from their own floor: below it their
+  // allowances (and therefore their probe overrides) would name releases
+  // npm never published, so those lines are dropped for this probe.
+  const sshSource = readFileSync(join(REPO_ROOT, 'src/compat/dsh-version.ts'), 'utf8')
+  const sshNames = new Set(contractArray(sshSource, 'SSH_PEER_PACKAGES'))
+  const sshSupported = contractArray(sshSource, 'SUPPORTED_SSH_RELEASES').includes(version)
   let count = 0
-  let updated = source.replace(/^(\s*- '@deepseek-ai\/dsh(?:-[\w-]+)?)@[^']+'$/gmu, (line, prefix) => {
+  let updated = source.replace(/^(\s*- '(@deepseek-ai\/dsh(?:-[\w-]+)?))@[^']+'\n/gmu, (line, prefix, name) => {
+    if (sshNames.has(name) && !sshSupported) return ''
     count += 1
-    return `${prefix}@${version}'`
+    return `${prefix}@${version}'\n`
   })
   const cordisLine = /^(\s*- '@deepseek-ai\/cordis@)[^']+'$/mu
   if (!cordisLine.test(updated)) {
