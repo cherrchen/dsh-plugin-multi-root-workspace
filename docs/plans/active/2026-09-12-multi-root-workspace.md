@@ -1921,3 +1921,16 @@ rebase 的集成处理：
 - 包版本改为未发布的 `0.1.19-ssh.1`。
 
 本机 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.2`：`compat:check`、lint、双端类型检查、build、`kernel:probe`（仅 Seatbelt）、`docs:check` 通过；全量 `pnpm test` **1717 passed / 132 skipped / 0 failed**（118 个文件通过、8 个跳过）。
+
+## 模型入口以实验性开关开放（2026-11-13）
+
+**决定：维护者批准将 Issue #32 模型入口以"默认关闭的实验性开关"形式开放。** `remote-tools` 行从此随默认 `cordis.patch.yml` 发货（`enabled: false`、无 broker 块，排在 worktrees 行之后），Registry 行默认携带 `remoteEnvironments.manifestPath: /etc/dsh-ssh-broker/manifest.json` 但**不写** `enabled`。这一节取代 11-11 评审记录中"默认组合不含 remote-tools"的状态描述（该节按日期保留为历史）。
+
+- **live 开关。** 新增 `multi-root-remote-tools` Settings 命名空间（`src/compat/remote-settings.ts`，与 worktree 同一套 modern `installSection` + legacy `configure`/`settings/document-updated` 适配），字段 `enabled` 为 volatile、默认 `false`；行配置 `enabled` 为初值，缺省时回落到 `registry.remoteEnabled`（`remoteEnvironments.enabled`），持久化值覆盖两者。
+- **控制面跟随开关。** `MultiRootRegistry.configureRemote(enabled)` 在既有 `serializeAuthority` 权威转移队列内执行：拆除 follower/owner 远端状态 → `RemoteControlPlane.configure`（有效开启 = live 开关且 `manifestPath` 已配置；关闭恢复精确 `disabled`，无 `remote-1` 监听、无远端域）→ 按当前权威 `openOwner`/`connectFollower`；本地 v1 注册表不受影响。
+- **行内门控。** `src/remote/tools.ts` 始终安装 Settings 命名空间，但只在 live 值为 true 时经串行化的 `sync()` 挂载受管子树（SSH 能力分类、profile 守卫、清单/就绪检查、`danger-full-access` 拒绝、broker 证明、校验器与 `remote_copy`/`remote_bash`、能力投影）；任何一步失败不挂载，关闭先卸子树再 `configureRemote(false)`。broker 块缺席时开关打开也不注册工具。
+- **设置卡与面板。** 插件详情新增"SSH 远端环境 / SSH remote environments"卡，`<Tag tone="warning">` 实验性标签，开启前走与 OPS 同款风险确认（勾选已了解→确认，取消/Esc/关闭不保存），关闭即时生效；Workspace Folders 面板在控制面 `disabled` 时不渲染远端区块。
+- **专用 profile 语义。** `remoteEnvironments.enabled: true` 保留为开关初值；broker profile patch 改为按 id **替换**已发货行的整个 `config`（不再 `- insert` 同名行）。
+- **测试。** 新增 `tests/remote-tools-switch.spec.ts`（mock broker 证明）：默认组合开关关闭→平面 `disabled`、无任何注册；拨开后 `configureRemote(true)`+证明→工具注册并可调用；再关闭→工具注销、平面回 `disabled`、v1 行为不变；证明失败不注册。`patch.spec`/`smoke-compose` 行清单与断言、`client-panel`（disabled 不渲染远端区）、`client-ops-settings`（警示标签+确认流）同步更新。
+
+本机 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.2`：`compat:check`、lint（0 警告）、双端类型检查、build、`docs:check` 通过；`smoke:compose` **58 passed**；全量 `pnpm test` **1743 passed / 132 skipped / 0 failed**（119 个文件通过、8 个跳过）。

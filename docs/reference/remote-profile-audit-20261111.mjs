@@ -1,5 +1,4 @@
 /** Read-only runtime audit of one profile under one DSH_HOME on .87. */
-import { join } from 'node:path'
 import { bootProfile } from '/srv/dsh-plugin-repo/scripts/lib/profile-boot.mjs'
 
 const HOME = process.env.DSH_HOME

@@ -50,6 +50,10 @@ const INSERTED = [
   // Worktree-aware suggestions: additive, compat-gated, and inert until a
   // confirmation; it never writes a root on its own (ADR-0039).
   'multi-root-worktrees',
+  // SSH remote environments: mounted so the plugin-detail switch exists, but
+  // EXPERIMENTAL and inert while `multi-root-remote-tools.enabled` is off —
+  // no tool, verifier, projection, or remote plane is exposed (ADR-0030).
+  'multi-root-remote-tools',
   'multi-root-instructions',
   'multi-root-lsp',
   'multi-root-workspace-files',

@@ -26,7 +26,8 @@ type Medium = ReturnType<typeof storeIdentity>
 
 /** Evaluate the row config once at construction; failures map to a remote-only state. */
 export class RemoteControlPlane {
-  readonly enabled: boolean
+  /** The live switch; `remoteEnvironments.enabled` is only its initial value. */
+  enabled: boolean
   /** The validated deployment manifest; undefined unless remote is enabled and valid. */
   manifest: DeploymentManifest | undefined
   manifestDigest: string | undefined
@@ -38,20 +39,33 @@ export class RemoteControlPlane {
   private revision = 0
   verifier: RemoteEndpointVerifier | undefined
 
-  constructor(config: RemoteConfig | undefined, private readonly logger: { warn(message: string): unknown }, private readonly load: typeof loadDeploymentManifest = loadDeploymentManifest) {
-    this.enabled = config?.enabled === true
-    if (!this.enabled) { this.state = { state: 'disabled' }; return }
-    if (process.platform === 'win32') { this.state = { state: 'platform-deferred' }; return }
-    const path = config?.manifestPath
+  constructor(private readonly config: RemoteConfig | undefined, private readonly logger: { warn(message: string): unknown }, private readonly load: typeof loadDeploymentManifest = loadDeploymentManifest) {
+    this.state = { state: 'disabled' }
+    this.enabled = false
+    this.configure(config?.enabled === true)
+  }
+
+  /**
+   * Re-evaluate the plane against a new live flag: manifest and digest are
+   * reparsed (or dropped) and the state is recomputed. The caller owns the
+   * remote teardown and re-open — this method only rebinds the static facts.
+   */
+  configure(enabled: boolean): void {
+    this.enabled = enabled
+    this.manifest = undefined
+    this.manifestDigest = undefined
+    if (!enabled) { this.setState('disabled'); return }
+    if (process.platform === 'win32') { this.setState('platform-deferred'); return }
+    const path = this.config?.manifestPath
     try {
       if (path === undefined || path.trim() === '') throw new ManifestError('manifest-untrusted', 'remoteEnvironments.manifestPath is required when the remote experiment is enabled')
       const loaded = this.load(path)
       this.manifest = loaded.manifest
       this.manifestDigest = loaded.digest
       // Enabled and valid, but nothing remote has been connected/opened yet.
-      this.state = { state: 'owner-without-remote-protocol' }
+      this.setState('owner-without-remote-protocol')
     } catch (error) {
-      this.state = { state: 'config-invalid', reason: error instanceof Error ? error.message : String(error) }
+      this.setState('config-invalid', error instanceof Error ? error.message : String(error))
     }
   }
 

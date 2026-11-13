@@ -266,9 +266,9 @@ if (PLUGIN_SOURCE !== undefined) {
   }
 }
 // The deployment patch layer lands after `dsh plugin add` materializes the
-// profile: restricted presets, remoteEnvironments, and the broker-gated
-// remote-tools insert. This is the file a deployment writes for the profile,
-// exactly as the control-plane checklist describes.
+// profile: restricted presets, remoteEnvironments, and the broker block on
+// the shipped remote-tools row. This is the file a deployment writes for the
+// profile, exactly as the control-plane checklist describes.
 if (PROFILE_PATCH !== undefined) {
   const { copyFileSync } = await import('node:fs')
   copyFileSync(PROFILE_PATCH, join(HOME, 'profiles', PROFILE, 'cordis.patch.yml'))
@@ -476,13 +476,13 @@ if (evidence.sessionReload.artifact !== undefined && !String(evidence.sessionRel
 }
 
 // ── Other-profile live audit ─────────────────────────────────────────────
-// Boot a second REAL profile under the same UID. A stock profile has no
-// remote-tools row, hence no profile guard: recording whether its preset
-// table/policy resolution can yield danger-full-access is deployment-hazard
-// evidence (such a profile must never host Agent entry points). Its CONFINED
-// spawn still has to be refused at the broker socket — the broker denies
-// sandboxed peers regardless of which profile minted the process. When
-// DSH_OTHER_RESTRICTED_PATCH is provided the same profile is then patched to
+// Boot a second REAL profile under the same UID. A stock profile's
+// remote-tools row is inert (default-off), hence no profile guard: recording
+// whether its preset table/policy resolution can yield danger-full-access is
+// deployment-hazard evidence (such a profile must never host Agent entry
+// points). Its CONFINED spawn still has to be refused at the broker socket —
+// the broker denies sandboxed peers regardless of which profile minted the
+// process. When DSH_OTHER_RESTRICTED_PATCH is provided the same profile is then patched to
 // the restricted table and re-measured.
 const OTHER = process.env.DSH_OTHER_PROFILE
 if (OTHER !== undefined) {

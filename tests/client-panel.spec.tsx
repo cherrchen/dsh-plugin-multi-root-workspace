@@ -1368,16 +1368,30 @@ describe('the remote-environment section', () => {
     reason: 'remote-unregistered',
   }
 
-  it('explains a disabled control plane and issues no remote action', async () => {
+  it('hides the section entirely while the control plane is disabled and issues no remote action', async () => {
     const harness = mount()
     harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'disabled' }, endpoints: [] })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByText(/panel.remoteUnavailable/)).toBeTruthy() })
+    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remotes')).toBe(true) })
+    // `disabled` is the operator's switch being off, not a failure: the whole
+    // section is suppressed rather than explained as unavailable.
+    expect(screen.queryByText(`${NS}.panel.remote`)).toBeNull()
+    expect(screen.queryByText(/panel.remoteUnavailable/)).toBeNull()
     expect(harness.calls.filter(call => call.endpoint === 'addRemote' || call.endpoint === 'removeRemote')).toHaveLength(0)
     // The listing is session-addressed and carries nothing else.
     const listing = harness.calls.find(call => call.endpoint === 'remotes')
     expect(listing?.payload).toEqual({ sessionId: 'session-1' })
+  })
+
+  it('still explains a degraded control plane that is not disabled', async () => {
+    const harness = mount()
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'config-invalid', reason: 'bad manifest' }, endpoints: [] })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText(`${NS}.panel.remote`)).toBeTruthy() })
+    expect(screen.getByText(/panel.remoteUnavailable/)).toBeTruthy()
+    expect(harness.calls.filter(call => call.endpoint === 'addRemote' || call.endpoint === 'removeRemote')).toHaveLength(0)
   })
 
   it('registers a deployment endpoint and renders its new state', async () => {

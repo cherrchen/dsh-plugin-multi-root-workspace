@@ -958,7 +958,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             })}
           </section>
 
-          {props.remotes === undefined ? null : (
+          {props.remotes === undefined || remoteState.view?.status.state === 'disabled' ? null : (
             <section className="mrfw-section">
               <div className="mrfw-sectionTitleRow">
                 <span className="mrfw-sectionTitle">{t('panel.remote')}</span>

@@ -3,6 +3,7 @@ import { IconWarningOutlineRegular, Switch, Tag, Toast } from '@deepseek-ai/dsh-
 import type { Context } from '@deepseek-ai/cordis'
 import { bindSettingsForm, bindSkillsForm, clientInject, type SkillsForm } from '../compat/skills-client.ts'
 import { installAutoReviewSettings, type AutoReviewForm } from '../compat/auto-review-client.ts'
+import { remoteRiskConfirmation } from '../compat/ops-confirmation.ts'
 import { AutoReviewSettingsCard } from './auto-review-settings.tsx'
 import { OpsCompatibilitySettingsCard } from './ops-settings.tsx'
 import type { Key } from './locales.ts'
@@ -79,6 +80,82 @@ function WorktreeSwitchRow({ form, t }: { form: SkillsForm; t: Translate }) {
     tag={<Tag tone="info">{t('worktree.experimental')}</Tag>} />
 }
 
+/**
+ * The SSH remote-environments switch: experimental and off by default, so it
+ * carries the WARNING-tone tag and — unlike the worktree switch — asks for a
+ * risk confirmation before enabling, exactly like the OPS card. Disabling is
+ * immediate.
+ */
+export function RemoteSwitchRow({ form, t }: { form: SkillsForm; t: Translate }) {
+  const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
+  const [busy, setBusy] = useState(false), [error, setError] = useState<string>()
+  const [confirmation, setConfirmation] = useState<{ form: SkillsForm; revision: number | undefined }>()
+  const [acknowledged, setAcknowledged] = useState(false)
+  const saving = useRef(false)
+  const mounted = useRef(true)
+  const RiskConfirmation = remoteRiskConfirmation()
+  const canConfirm = confirmation !== undefined && confirmation.form === form
+    && confirmation.revision === snapshot.revision && snapshot.status === 'ready'
+    && snapshot.writable && snapshot.value?.enabled !== true && RiskConfirmation !== undefined
+  const dismiss = () => { setConfirmation(undefined); setAcknowledged(false) }
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  useEffect(() => {
+    if (confirmation !== undefined && !canConfirm) {
+      setConfirmation(undefined); setAcknowledged(false)
+    }
+  }, [confirmation, canConfirm])
+  const save = async (enabled: boolean, revision: number | undefined) => {
+    if (saving.current) return
+    saving.current = true
+    setBusy(true); setError(undefined)
+    try {
+      const ok = await form.mutate([{ op: 'set', path: ['enabled'], value: enabled }], revision)
+      if (mounted.current && !ok) setError(t('remote.settingsFailed'))
+    } catch {
+      if (mounted.current) setError(t('remote.settingsFailed'))
+    } finally {
+      saving.current = false
+      if (mounted.current) setBusy(false)
+    }
+  }
+  if (snapshot.status === 'unavailable') return null
+  return <div className="mrfw-skillsSettings">
+    <div className="mrfw-skillsSettingsText">
+      <div className="mrfw-settingsTitleRow">
+        <span className="mrfw-skillsSettingsTitle">{t('remote.settingsEnable')}</span>
+        <Tag tone="warning">{t('remote.experimental')}</Tag>
+      </div>
+      <div className="mrfw-skillsSettingsDescription">{t('remote.settingsHint')}</div>
+      {error ? <div role="alert">{error}</div> : null}
+    </div>
+    <Switch label={t('remote.settingsEnable')} checked={snapshot.value?.enabled === true} disabled={busy || confirmation !== undefined || snapshot.status !== 'ready' || !snapshot.writable || (snapshot.value?.enabled !== true && RiskConfirmation === undefined)}
+        onChange={enabled => {
+          if (!enabled) { void save(false, snapshot.revision); return }
+          setError(undefined); setAcknowledged(false)
+          setConfirmation({ form, revision: snapshot.revision })
+        }} />
+    {RiskConfirmation === undefined ? null : <RiskConfirmation
+      open={canConfirm}
+      title={t('remote.confirmTitle')}
+      description={t('remote.confirmDescription')}
+      acknowledgeLabel={t('remote.confirmAcknowledge')}
+      cancelLabel={t('remote.confirmCancel')}
+      closeLabel={t('remote.confirmClose')}
+      confirmLabel={t('remote.confirmEnable')}
+      acknowledged={acknowledged}
+      disabled={busy || !canConfirm}
+      onAcknowledgedChange={setAcknowledged}
+      onCancel={dismiss}
+      onConfirm={() => {
+        if (!canConfirm || !acknowledged || saving.current) return
+        const revision = confirmation.revision
+        dismiss()
+        void save(true, revision)
+      }}
+    />}
+  </div>
+}
+
 interface SkillsCardProps { form: SkillsForm; worktreeForm?: SkillsForm | undefined; t: Translate }
 
 /** The plugin-detail card: root Skills and worktree suggestions, one cell. */
@@ -96,11 +173,12 @@ export function SkillsSettingsCard({ form, worktreeForm, t }: SkillsCardProps) {
  * its namespace, Auto Review through the Plugin Manager's Loader-row enablement —
  * so one cell never serializes their state.
  */
-export function BundleSettingsCard({ form, worktreeForm, autoReviewForm, opsForm, t }: {
+export function BundleSettingsCard({ form, worktreeForm, autoReviewForm, opsForm, remoteForm, t }: {
   form?: SkillsForm | undefined
   worktreeForm?: SkillsForm | undefined
   autoReviewForm?: AutoReviewForm | undefined
   opsForm?: SkillsForm | undefined
+  remoteForm?: SkillsForm | undefined
   t: Translate
 }) {
   return <>
@@ -110,6 +188,7 @@ export function BundleSettingsCard({ form, worktreeForm, autoReviewForm, opsForm
     {form === undefined && worktreeForm !== undefined ? <WorktreeSwitchRow form={worktreeForm} t={t} /> : null}
     {autoReviewForm !== undefined ? <AutoReviewSettingsCard form={autoReviewForm} t={t} /> : null}
     {opsForm !== undefined ? <OpsCompatibilitySettingsCard form={opsForm} t={t} /> : null}
+    {remoteForm !== undefined ? <RemoteSwitchRow form={remoteForm} t={t} /> : null}
   </>
 }
 
@@ -129,19 +208,22 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): WorktreeS
   let currentSkills: SkillsForm | undefined
   let currentWorktree: SkillsForm | undefined
   let currentOps: SkillsForm | undefined
+  let currentRemote: SkillsForm | undefined
   let currentAutoReview = false
   let stop: (() => void) | undefined
   const listeners = new Set<() => void>()
   let watchedWorktree: SkillsForm | undefined
   let stopWorktreeWatch: (() => void) | undefined
   const notify = () => { for (const listener of [...listeners]) listener() }
-  const candidates = new Map<Context, { skills?: SkillsForm | undefined; worktree?: SkillsForm | undefined; ops?: SkillsForm | undefined }>()
+  const candidates = new Map<Context, { skills?: SkillsForm | undefined; worktree?: SkillsForm | undefined; ops?: SkillsForm | undefined; remote?: SkillsForm | undefined }>()
   const update = () => {
     const chosen = [...candidates.entries()].sort(([a], [b]) => Number(b.get('configForms' as never) !== undefined) - Number(a.get('configForms' as never) !== undefined))[0]
     const skillsForm = chosen?.[1].skills
     const worktreeForm = chosen?.[1].worktree
     const opsCandidate = chosen?.[1].ops
     const opsForm = opsCandidate?.getSnapshot().status === 'unavailable' ? undefined : opsCandidate
+    const remoteCandidate = chosen?.[1].remote
+    const remoteForm = remoteCandidate?.getSnapshot().status === 'unavailable' ? undefined : remoteCandidate
     // The overlay's own view of the switch follows the SAME form the card
     // renders, including a late attach and a host that republished it.
     if (watchedWorktree !== worktreeForm) {
@@ -156,21 +238,21 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): WorktreeS
     const autoSnapshot = autoForm.getSnapshot()
     const autoAvailable = autoSnapshot.status === 'loading' || autoSnapshot.status === 'error'
       || (autoSnapshot.status === 'ready' && autoSnapshot.row !== undefined)
-    if (skillsForm === undefined && worktreeForm === undefined && opsForm === undefined && !autoAvailable) {
-      if (currentSkills !== undefined || currentWorktree !== undefined || currentOps !== undefined || currentAutoReview) {
-        stop?.(); stop = undefined; currentSkills = undefined; currentWorktree = undefined; currentOps = undefined; currentAutoReview = false
+    if (skillsForm === undefined && worktreeForm === undefined && opsForm === undefined && remoteForm === undefined && !autoAvailable) {
+      if (currentSkills !== undefined || currentWorktree !== undefined || currentOps !== undefined || currentRemote !== undefined || currentAutoReview) {
+        stop?.(); stop = undefined; currentSkills = undefined; currentWorktree = undefined; currentOps = undefined; currentRemote = undefined; currentAutoReview = false
       }
       return
     }
-    if (currentSkills === skillsForm && currentWorktree === worktreeForm && currentOps === opsForm && currentAutoReview === autoAvailable) return
+    if (currentSkills === skillsForm && currentWorktree === worktreeForm && currentOps === opsForm && currentRemote === remoteForm && currentAutoReview === autoAvailable) return
     const slots = (ctx as unknown as { slots?: { inject(name: string, callback: () => unknown): () => void; register(options: object, component: unknown): () => void } }).slots
     // Leave `current*` untouched so a later publish retries once slots exists.
     if (slots === undefined) return
     stop?.(); stop = undefined
-    currentSkills = skillsForm; currentWorktree = worktreeForm; currentOps = opsForm; currentAutoReview = autoAvailable
+    currentSkills = skillsForm; currentWorktree = worktreeForm; currentOps = opsForm; currentRemote = remoteForm; currentAutoReview = autoAvailable
     const disposers = [slots.inject('plugins.bundle.config', () => slots.register({
       name: 'plugins.bundle.config', key: BUNDLE_KEY,
-      inject: () => ({ form: skillsForm, worktreeForm, autoReviewForm: autoForm, opsForm, t }),
+      inject: () => ({ form: skillsForm, worktreeForm, autoReviewForm: autoForm, opsForm, remoteForm, t }),
     }, BundleSettingsCard))]
     // Legacy hosts render one item per namespace: the Skills card carries both
     // switches, so the worktree feature never registers a second package card.
@@ -181,6 +263,7 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): WorktreeS
       }, SkillsSettingsCard)))
     }
     if (opsForm !== undefined) disposers.push(slots.inject('settings.plugin.item', () => slots.register({ name: 'settings.plugin.item', key: 'multi-root-ops-compatibility', inject: () => ({ form: opsForm, t }) }, OpsCompatibilitySettingsCard)))
+    if (remoteForm !== undefined) disposers.push(slots.inject('settings.plugin.item', () => slots.register({ name: 'settings.plugin.item', key: 'multi-root-remote-tools', inject: () => ({ form: remoteForm, t }) }, RemoteSwitchRow)))
     stop = () => { for (const dispose of disposers) dispose() }
   }
   // `autoForm` is created up front and publishes on every attach/detach/read,
@@ -196,10 +279,12 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): WorktreeS
     const worktree = bindSettingsForm(scope, 'multi-root-worktrees')
     const forms = scope.get('configForms' as never) as { get(id: string): SkillsForm } | undefined
     const ops = forms?.get('multi-root-ops-compatibility')
-    if (skills === undefined && worktree === undefined && ops === undefined) return
+    const remote = forms?.get('multi-root-remote-tools')
+    if (skills === undefined && worktree === undefined && ops === undefined && remote === undefined) return
     const stopOpsWatch = ops?.subscribe(update)
-    candidates.set(scope, { skills, worktree, ops }); update()
-    return () => { stopOpsWatch?.(); candidates.delete(scope); update() }
+    const stopRemoteWatch = remote?.subscribe(update)
+    candidates.set(scope, { skills, worktree, ops, remote }); update()
+    return () => { stopOpsWatch?.(); stopRemoteWatch?.(); candidates.delete(scope); update() }
   })
   ctx.effect(() => () => {
     stop?.()
