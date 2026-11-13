@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { apply as applyRemoteTools, inject } from '../src/remote/tools.ts'
+import { classifyInstallation, classifySshCapability, sshPackageVersion, sshPrivateCopy } from '../src/compat/dsh-version.ts'
 import type { RemoteExecutionBackend } from '../src/remote/exec.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { mountRemoteTools, registerRemote, type RemoteToolsWorld } from './support/remote-tools.ts'
@@ -49,6 +50,22 @@ vi.mock('../src/remote/ssh-environment.ts', async (importOriginal) => {
   }
   return { ...original, SshEnvironmentManager: TestManager }
 })
+
+/**
+ * The gate tools.ts evaluates with the REAL installation report: on a lane
+ * below the SSH floor the gated subtree never mounts, so the specs asserting
+ * attestation/tools skip with the gate's reason instead of failing. The two
+ * "mounts nothing" specs below keep running on every lane — the plane opens
+ * and nothing model-visible exists on either side of the floor.
+ */
+const realGate = classifySshCapability({
+  platform: process.platform,
+  local: classifyInstallation(),
+  readVersion: sshPackageVersion,
+  privateCopy: sshPrivateCopy,
+})
+const gated = it.skipIf(realGate.status !== 'eligible')
+const gateSkipped = realGate.status === 'eligible' ? '' : ` (skipped: ${realGate.status === 'absent' ? realGate.reason : 'n/a'})`
 
 let fixture: FixtureWorkspace
 let world: RemoteToolsWorld | undefined
@@ -115,7 +132,7 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     await expect(registerRemote(world!, 'build', 'app')).rejects.toMatchObject({ code: 'remote-unavailable' })
   })
 
-  it('drives configureRemote and mounts the gated subtree when the switch turns on', async () => {
+  gated(`drives configureRemote and mounts the gated subtree when the switch turns on${gateSkipped}`, async () => {
     const { hooks, live } = await mountRow({ remote: {}, config: { enabled: false } })
     await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
     expect(world!.stack.registry.remoteStatus.state).toBe('disabled')
@@ -131,7 +148,7 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     await registerRemote(world!, 'build', 'app')
   })
 
-  it('unmounts the subtree and restores the exact disabled state when the switch turns off', async () => {
+  gated(`unmounts the subtree and restores the exact disabled state when the switch turns off${gateSkipped}`, async () => {
     const { hooks, live } = await mountRow({ remote: {}, config: { enabled: false } })
     await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
     live.enabled = true
@@ -150,7 +167,7 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     expect(world!.stack.registry.list(world!.session.header.cwd!)).toEqual([])
   })
 
-  it('opens the plane but mounts nothing when the broker fails attestation', async () => {
+  gated(`opens the plane but mounts nothing when the broker fails attestation${gateSkipped}`, async () => {
     const { hooks, live } = await mountRow({ remote: {}, config: { enabled: false } })
     await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
     probe.fail = true
@@ -161,7 +178,7 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     expect(await world!.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
   })
 
-  it('adopts the registry remoteEnabled as the initial switch for dedicated profiles', async () => {
+  gated(`adopts the registry remoteEnabled as the initial switch for dedicated profiles${gateSkipped}`, async () => {
     // remoteEnvironments.enabled: true is the registry row's INITIAL live
     // value; a tools row without its own `enabled` inherits it, and a source
     // with no persisted override reports that same initial.
@@ -182,7 +199,7 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     expect(await world!.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
   })
 
-  it('mounts the personal host manager and admits remote_copy end-to-end', async () => {
+  gated(`mounts the personal host manager and admits remote_copy end-to-end${gateSkipped}`, async () => {
     const personalPath = join(fixture.base, 'remote-personal.json')
     const credentialRoot = join(fixture.base, 'cred')
     writeFileSync(personalPath, JSON.stringify({

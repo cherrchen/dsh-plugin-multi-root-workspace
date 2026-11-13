@@ -4,8 +4,7 @@
  * rendering/linking, relaxed parseSshConfig, and personal-mode RPC refusals.
  * POSIX-only: the file-protection checks require a POSIX uid.
  */
-import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -107,7 +106,7 @@ describe.skipIf(process.platform === 'win32')('managed ssh files', () => {
     renderSshConfig({ schemaVersion: 1, revision: 0, environments: [managed], bindings: [] }, root)
     const rendered = readFileSync(join(root, 'ssh_config'), 'utf8')
     expect(rendered).toContain('Host dsh-dev-box')
-    expect((readFileSync(join(root, 'ssh_config')) as unknown as { mode?: number }) && (Number.parseInt(execFileSync('stat', ['-f', '%Lp', join(root, 'ssh_config')]).toString().trim(), 8) & 0o077)).toBe(0)
+    expect(statSync(join(root, 'ssh_config')).mode & 0o077).toBe(0)
   })
 
   it('link() prepends the Include line once and backs up the original', () => {
@@ -125,7 +124,7 @@ describe.skipIf(process.platform === 'win32')('managed ssh files', () => {
     expect(linkStatus(root, home).linked).toBe(true)
     link(root, home)
     expect(readFileSync(join(ssh, 'config'), 'utf8')).toBe(content)
-    const backups = execFileSync('ls', [ssh]).toString().trim().split('\n').filter(file => file.startsWith('config.dsh-backup-'))
+    const backups = readdirSync(ssh).filter(file => file.startsWith('config.dsh-backup-'))
     expect(backups.length).toBe(1)
   })
 })
