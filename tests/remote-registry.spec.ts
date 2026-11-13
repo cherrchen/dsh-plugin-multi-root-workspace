@@ -86,7 +86,7 @@ describe('remote control plane', () => {
 
     // The live switch opening: the owner re-opens its remote domain and
     // remote-1 listener, and admission works under the same verifier path.
-    await stack.registry.configureRemote(true)
+    await stack.registry.configureRemote({ enabled: true, mode: 'hardened' })
     expect(stack.registry.remoteEnabled).toBe(true)
     expect(stack.registry.remoteStatus.state).toBe('ready')
     stack.registry.setRemoteEndpointVerifier(verifier())
@@ -95,7 +95,7 @@ describe('remote control plane', () => {
 
     // Closing restores the exact disabled state — no remote domain stays
     // open, no remote work is admitted — while the local registry is untouched.
-    await stack.registry.configureRemote(false)
+    await stack.registry.configureRemote({ enabled: false, mode: 'hardened' })
     expect(stack.registry.remoteEnabled).toBe(false)
     expect(stack.registry.remoteStatus.state).toBe('disabled')
     await expect(stack.registry.remoteList(fixture.workspace)).rejects.toMatchObject({ code: 'remote-unavailable' })
@@ -106,10 +106,10 @@ describe('remote control plane', () => {
   it.skipIf(process.platform === 'win32')('configureRemote without a manifestPath fails closed to config-invalid and back', async () => {
     const stack = await mount({ enabled: null })
     expect(stack.registry.remoteStatus.state).toBe('disabled')
-    await stack.registry.configureRemote(true)
+    await stack.registry.configureRemote({ enabled: true, mode: 'hardened' })
     expect(stack.registry.remoteStatus.state).toBe('config-invalid')
     await expect(stack.registry.remoteList(fixture.workspace)).rejects.toMatchObject({ code: 'remote-unavailable' })
-    await stack.registry.configureRemote(false)
+    await stack.registry.configureRemote({ enabled: false, mode: 'hardened' })
     expect(stack.registry.remoteStatus.state).toBe('disabled')
   })
 

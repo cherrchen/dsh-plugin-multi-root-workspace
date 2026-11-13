@@ -74,7 +74,7 @@ export interface SshEnvironmentManagerOptions {
    * attestation, not this process's manifest flag — the Host's
    * `attestBroker()` decides whether any model-facing tool may use it.
    */
-  readonly custody?: 'broker'
+  readonly custody?: 'broker' | 'personal'
   readonly exec?: (file: string, args: readonly string[], input?: string) => Promise<{ stdout: string; stderr: string }>
   readonly readFile?: (path: string) => string
 }
@@ -91,7 +91,7 @@ const defaultExec = (file: string, args: readonly string[], input?: string) => n
  * Parse `ssh -G` output into the fields the deployer must prove: the login,
  * the resolved hostname, every user known_hosts file, and the safety flags.
  */
-export function parseSshConfig(stdout: string): SshHostIdentity {
+export function parseSshConfig(stdout: string, options: { relaxed?: boolean } = {}): SshHostIdentity {
   const fields: Record<string, string> = {}
   for (const line of stdout.split('\n')) {
     const match = /^(\S+)\s+(.*)$/.exec(line.trim())
@@ -103,22 +103,27 @@ export function parseSshConfig(stdout: string): SshHostIdentity {
   const files = (fields.userknownhostsfile ?? '').split(/\s+/).filter(file => file !== '' && file !== '/dev/null' && file.toLowerCase() !== 'none')
   const globalFiles = (fields.globalknownhostsfile ?? '').split(/\s+/).filter(file => file !== '' && file !== '/dev/null' && file.toLowerCase() !== 'none')
   const strict = (fields.stricthostkeychecking ?? '').toLowerCase()
-  if (strict !== 'true' && strict !== 'yes') {
-    throw new SshEnvironmentError('host-identity-unverifiable', `strictHostKeyChecking is "${fields.stricthostkeychecking ?? ''}", must be yes`)
-  }
   const batchMode = (fields.batchmode ?? '').toLowerCase()
-  if (batchMode !== 'yes') {
-    throw new SshEnvironmentError('host-identity-unverifiable', `batchMode is "${fields.batchmode ?? ''}", must be yes`)
-  }
   const forwardAgent = (fields.forwardagent ?? '').toLowerCase()
-  if (forwardAgent !== 'no') {
-    throw new SshEnvironmentError('host-identity-unverifiable', `forwardAgent is "${fields.forwardagent ?? ''}", must be no`)
-  }
   // OpenSSH -G normalizes `UpdateHostKeys no` to `false` (and `yes` to
   // `true`, `ask` stays `ask`); accept both spellings of "never rewrite".
   const updateHostKeys = (fields.updatehostkeys ?? 'no').toLowerCase()
-  if (updateHostKeys !== 'no' && updateHostKeys !== 'false') {
-    throw new SshEnvironmentError('host-identity-unverifiable', `updateHostKeys resolves "${fields.updatehostkeys ?? ''}", must be no`)
+  // Personal custody (ADR-0041 §2): upstream already forces BatchMode /
+  // StrictHostKeyChecking / ForwardAgent on its own command line, so the
+  // user's config need not prove them. Account and host-key checks stay.
+  if (options.relaxed !== true) {
+    if (strict !== 'true' && strict !== 'yes') {
+      throw new SshEnvironmentError('host-identity-unverifiable', `strictHostKeyChecking is "${fields.stricthostkeychecking ?? ''}", must be yes`)
+    }
+    if (batchMode !== 'yes') {
+      throw new SshEnvironmentError('host-identity-unverifiable', `batchMode is "${fields.batchmode ?? ''}", must be yes`)
+    }
+    if (forwardAgent !== 'no') {
+      throw new SshEnvironmentError('host-identity-unverifiable', `forwardAgent is "${fields.forwardagent ?? ''}", must be no`)
+    }
+    if (updateHostKeys !== 'no' && updateHostKeys !== 'false') {
+      throw new SshEnvironmentError('host-identity-unverifiable', `updateHostKeys resolves "${fields.updatehostkeys ?? ''}", must be no`)
+    }
   }
   const port = fields.port ?? '22'
   const hostKeyAlias = fields.hostkeyalias
@@ -154,6 +159,7 @@ export class SshEnvironmentManager {
   private readonly gate: SshCapability
   private readonly allowUnattested: boolean
   private readonly brokerCustody: boolean
+  private readonly personalCustody: boolean
   private readonly exec: NonNullable<SshEnvironmentManagerOptions['exec']>
   private readonly readFile: (path: string) => string
   private readonly openings = new Map<string, Promise<SshEnvironment>>()
@@ -168,8 +174,9 @@ export class SshEnvironmentManager {
       platform: process.platform, local: classifyInstallation(),
       readVersion: sshPackageVersion, privateCopy: sshPrivateCopy,
     })
-    this.allowUnattested = options.allowUnattestedForTesting === true
+    this.allowUnattested = options.allowUnattestedForTesting === true || options.custody === 'personal'
     this.brokerCustody = options.custody === 'broker'
+    this.personalCustody = options.custody === 'personal'
     this.exec = options.exec ?? defaultExec
     this.readFile = options.readFile ?? (path => readFileSync(path, 'utf8'))
   }
@@ -365,7 +372,12 @@ export class SshEnvironmentManager {
     } catch (error) {
       throw new SshEnvironmentError('host-identity-unverifiable', `ssh -G ${host} failed: ${error instanceof Error ? error.message : String(error)}`)
     }
-    const identity = parseSshConfig(stdout)
+    const identity = parseSshConfig(stdout, { relaxed: this.personalCustody })
+    // A managed `dsh-*` alias that resolves to itself means the Include link
+    // is absent (ADR-0041 §2): refuse with the actionable code.
+    if (this.personalCustody && host.startsWith('dsh-') && identity.hostname === host) {
+      throw new SshEnvironmentError('ssh-config-not-linked', `managed alias "${host}" is not linked into ~/.ssh/config`)
+    }
     if (identity.user !== environment.account) {
       throw new SshEnvironmentError('account-mismatch', `manifest account "${environment.account}" but ssh resolves user "${identity.user}"`)
     }

@@ -1944,3 +1944,17 @@ rebase 的集成处理：
 **测试。** `client-panel.spec` 新增"四个入口的统一面板"五例：footer、workspace-menu→footer owner、Files 紧凑启动器、Files `RootSwitcher`、hero 各自打开后面板的 `.mrfw-overlay` 均为 `document.body` 直接子节点，且给定相同假客户端时远端区块与 worktree 清理按钮一致出现；hero 组合会话测试改为断言 `list` 与 `remotes` 均以组合 `sessionId` 发出。
 
 本机 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.2`：lint（0 警告）、双端类型检查、build、`docs:check` 通过；全量 `pnpm test` **1748 passed / 132 skipped / 0 failed**（119 个文件通过、8 个跳过）。
+
+## SSH 三档托管模式：Host 侧（2026-11-13）
+
+**决定（ADR-0041，Accepted）。** SSH 远端环境的凭据托管分三档：`personal`（默认；Host 进程内直跑官方 SSH 栈，用户 `~/.ssh` 别名或插件凭据根）、`team`（broker 托管，放宽 `confinement-unproven`/`full-access-unrestricted`/独立写者检查，`chroot-sftp` 目的隔离保留）、`hardened`（ADR-0040 全量证据原路径）。本步实现 Host 侧全部机制；GUI（6b）与专用 profile 组合后续。
+
+- **Settings。** `multi-root-remote-tools` 命名空间扩为 `{ enabled, mode, team? }`（schemastery + zod 校验）；未知/非法值 fail closed 为 `enabled:false` 并告警；`read()` 返回整个对象。settings `mode` 优先于行 `mode`，两者都缺省时：有 broker 块 → `hardened`（专用 profile 兼容），否则 → `personal`。
+- **Registry/Plane。** `configureRemote(next: { enabled, mode, manifestPath? })` 取代布尔签名；行配置加 `personalPath`/`credentialRoot`（默认组合写入 `$DSH_HOME/storages/` 下两路径）。personal 经 `loadPersonalManifest`（缺失文件 = 空清单，照常 `ready`）；`registry.remoteMode`/`remoteManifestDigest` 暴露，`RemotesView` 增 `custodyMode`。每次远端 op 前 `refreshPersonal()` 按 stat 身份重载；摘要变化时 owner 换摘要重听 `remote-1`、follower 重连，授权不迁移。
+- **个人基础设施。** `src/remote/personal/`：config（zod schema、权限检查、CAS `savePersonalConfig`、`toDeploymentManifest` 等形转换）、credentials（生成/导入去口令/密码/in-use 拒绝/元数据列表，绝不返回秘密）、ssh-files（托管 `ssh_config`/`known_hosts` 渲染、首行 `Include` 链接+备份）、operations（keyscan 60 秒令牌、连接测试、helper npm 安装+SHA-256 对比、askpass 访问密钥引导）。`SshEnvironmentManager` 增 `custody:'personal'`：`ssh -G` 放宽四项 flag 检查，未链接 managed 别名报 `ssh-config-not-linked`。
+- **行内分派。** `tools.ts` mount 按 mode 分派：personal 无 broker 无守卫直接挂载 manager；team 以 settings `team` 覆盖行 broker 并 `attestBroker(mode:'team')`；hardened 原样。`onRemoteChange` 通知驱动按摘要重挂载（通知仅在真实 rebind 时发出，否则自反馈死循环——测试实测发现）。
+- **RPC。** `src/remote/personal-contract.ts` + `src/remote/personal-endpoints.ts`：14 个 `ssh*` 端点，全部要 `sessionId`、严格 schema、非 personal/未开启一律 `remote-personal-unavailable`；变更返回刷新 `sshState`；秘密字节不出 RPC。`src/client/ssh-client.ts` 解析全部应答；zh/en `error.*` 键补齐。
+- **文档。** ADR-0041 入库（编号 0041 并入分支保留段）；新参考 `docs/reference/ssh-remote-environments.md`；控制面参考加托管档位指针与 `personalPath`/`credentialRoot`；AGENTS.md Issue #32 段落更新。
+- **测试。** `tests/remote-personal.spec.ts`（10 例）：缺文件空清单、权限/符号链接/父目录拒绝、CAS 冲突、manifest 转换、ssh_config 渲染+Include 幂等+备份、relaxed `parseSshConfig`、fail-closed 设置、端点 schema、密码凭据列表不泄露+in-use 拒绝。`remote-tools-switch.spec` 增 `mode` 选项；专用 profile 默认值回归修正。
+
+本机 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.2`：验证数字见提交说明。

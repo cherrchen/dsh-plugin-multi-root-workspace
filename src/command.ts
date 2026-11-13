@@ -46,6 +46,8 @@ import {
   type RemoteTransferView,
   type RemotesView,
 } from './remote/panel-contract.ts'
+import { parseSshCall, SSH_ENDPOINTS, type SshEndpoint } from './remote/personal-contract.ts'
+import { handlePersonalEndpoint } from './remote/personal-endpoints.ts'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -756,7 +758,7 @@ async function remotesViewOf(
   if (session === undefined) throw new RootValidationError('session-not-found', 'the panel session closed during the request')
   const mode = ctx.sandboxPolicy.resolve({ session }).mode
   const status = registry.remoteStatus
-  const base = { primaryRoot: canonicalRoot(primaryRoot), mode, status }
+  const base = { primaryRoot: canonicalRoot(primaryRoot), mode, custodyMode: registry.remoteMode, status }
   const manifest = registry.remoteManifest
   if (manifest === undefined || status.state !== 'ready') {
     return {
@@ -861,6 +863,14 @@ async function dispatchPanelRequest(
         : endpoint === 'skillsPreview' ? await skills.previewSession(request.sessionId, request.name ?? '', signal)
         : await skills.changes(request.sessionId, request.generation ?? -1, signal)
       return { ok: true, value }
+    }
+    if ((SSH_ENDPOINTS as readonly string[]).includes(endpoint)) {
+      const parsedSsh = parseSshCall(endpoint as SshEndpoint, payload)
+      if (!parsedSsh.ok) {
+        return { ok: false, error: { code: 'panel/bad-request', message: parsedSsh.message, details: {} } }
+      }
+      const primaryRoot = resolvePanelPrimaryRoot(ctx, parsedSsh.value.sessionId)
+      return { ok: true, value: await handlePersonalEndpoint(ctx, ctx.multiRootRegistry, primaryRoot, parsedSsh.value) }
     }
     if ((REMOTE_ENDPOINTS as readonly string[]).includes(endpoint)) {
       const parsedRemote = parseRemoteRequest(payload)

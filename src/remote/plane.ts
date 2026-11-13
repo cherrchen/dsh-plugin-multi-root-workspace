@@ -14,12 +14,29 @@ import type {
 } from './contract.ts'
 import { RemoteAdmissionError } from './contract.ts'
 import { bindingDigest, loadDeploymentManifest, ManifestError, type DeploymentManifest } from './manifest.ts'
+import { loadPersonalManifest, statIdentity, sameIdentity, type PersonalFileIdentity } from './personal/config.ts'
 import { findBinding, grantState, remoteDomainSpec, REMOTE_TABLE_NAME, type PersistedRemoteGrants } from './records.ts'
 import { RemoteClient, RemoteServer } from './protocol.ts'
+import { statSync } from 'node:fs'
+
+/** The three SSH custody modes (ADR-0041). */
+export type RemoteMode = 'personal' | 'team' | 'hardened'
 
 export interface RemoteConfig {
   readonly enabled?: boolean
   readonly manifestPath?: string
+  /** Personal-mode config file (user-owned); also enables personal mode. */
+  readonly personalPath?: string
+  /** Personal-mode credential root (0700, user-owned). */
+  readonly credentialRoot?: string
+}
+
+/** One live re-evaluation of the plane (ADR-0041 §5). */
+export interface RemoteLiveConfig {
+  readonly enabled: boolean
+  readonly mode: RemoteMode
+  /** Live override for the manifest path; falls back to the row's. */
+  readonly manifestPath?: string | undefined
 }
 
 type Medium = ReturnType<typeof storeIdentity>
@@ -28,9 +45,16 @@ type Medium = ReturnType<typeof storeIdentity>
 export class RemoteControlPlane {
   /** The live switch; `remoteEnvironments.enabled` is only its initial value. */
   enabled: boolean
+  /** The live custody mode (ADR-0041); personal is the default. */
+  mode: RemoteMode = 'personal'
   /** The validated deployment manifest; undefined unless remote is enabled and valid. */
   manifest: DeploymentManifest | undefined
   manifestDigest: string | undefined
+  /** The live manifest-path override in effect (for the same-config check). */
+  liveManifestPath: string | undefined
+  /** Personal mode: the config revision and file identity we loaded. */
+  personalRevision = 0
+  private personalIdentity: PersonalFileIdentity | undefined
   private state: RemoteStatus
   private domain: { close(): Promise<void> } | undefined
   private table: KvTable<string, PersistedRemoteGrants> | undefined
@@ -42,31 +66,77 @@ export class RemoteControlPlane {
   constructor(private readonly config: RemoteConfig | undefined, private readonly logger: { warn(message: string): unknown }, private readonly load: typeof loadDeploymentManifest = loadDeploymentManifest) {
     this.state = { state: 'disabled' }
     this.enabled = false
-    this.configure(config?.enabled === true)
+    this.configure({ enabled: config?.enabled === true, mode: 'hardened', manifestPath: config?.manifestPath })
   }
 
   /**
-   * Re-evaluate the plane against a new live flag: manifest and digest are
+   * Re-evaluate the plane against new live facts: manifest and digest are
    * reparsed (or dropped) and the state is recomputed. The caller owns the
    * remote teardown and re-open — this method only rebinds the static facts.
    */
-  configure(enabled: boolean): void {
-    this.enabled = enabled
+  configure(next: RemoteLiveConfig): void {
+    this.enabled = next.enabled
+    this.mode = next.mode
+    this.liveManifestPath = next.manifestPath
     this.manifest = undefined
     this.manifestDigest = undefined
-    if (!enabled) { this.setState('disabled'); return }
+    this.personalRevision = 0
+    this.personalIdentity = undefined
+    if (!next.enabled) { this.setState('disabled'); return }
     if (process.platform === 'win32') { this.setState('platform-deferred'); return }
-    const path = this.config?.manifestPath
     try {
-      if (path === undefined || path.trim() === '') throw new ManifestError('manifest-untrusted', 'remoteEnvironments.manifestPath is required when the remote experiment is enabled')
-      const loaded = this.load(path)
-      this.manifest = loaded.manifest
-      this.manifestDigest = loaded.digest
+      if (next.mode === 'personal') {
+        const path = next.manifestPath ?? this.config?.personalPath
+        if (path === undefined || path.trim() === '') throw new ManifestError('manifest-untrusted', 'remoteEnvironments.personalPath is required when personal custody is enabled')
+        // A missing file is the empty manifest, not an error.
+        const loaded = loadPersonalManifest(path)
+        this.manifest = loaded.manifest
+        this.manifestDigest = loaded.digest
+        this.personalRevision = loaded.revision
+        this.personalIdentity = loaded.identity
+      } else {
+        const path = next.manifestPath ?? this.config?.manifestPath
+        if (path === undefined || path.trim() === '') throw new ManifestError('manifest-untrusted', 'remoteEnvironments.manifestPath is required when the remote experiment is enabled')
+        const loaded = this.load(path)
+        this.manifest = loaded.manifest
+        this.manifestDigest = loaded.digest
+      }
       // Enabled and valid, but nothing remote has been connected/opened yet.
       this.setState('owner-without-remote-protocol')
     } catch (error) {
       this.setState('config-invalid', error instanceof Error ? error.message : String(error))
     }
+  }
+
+  /**
+   * Personal mode: cheap stat-identity check before every remote operation.
+   * @returns 'unchanged' | 'reloaded' (digest may or may not differ — the
+   *   caller decides whether a re-listen/re-hello is needed) | 'disabled'.
+   */
+  refreshPersonal(path?: string): 'unchanged' | 'reloaded' | 'disabled' | 'missing' {
+    if (!this.enabled || this.mode !== 'personal') return 'disabled'
+    const target = path ?? this.config?.personalPath
+    if (target === undefined) return 'disabled'
+    try {
+      const identity = statIdentity(statSync(target))
+      if (this.personalIdentity !== undefined && sameIdentity(identity, this.personalIdentity)) return 'unchanged'
+    } catch {
+      if (this.personalIdentity === undefined || (this.personalIdentity.dev === 0 && this.personalIdentity.size === 0)) return 'unchanged'
+      // The file vanished: reload to the empty manifest.
+    }
+    let loaded: ReturnType<typeof loadPersonalManifest>
+    try {
+      loaded = loadPersonalManifest(target)
+    } catch (error) {
+      this.setState('config-invalid', error instanceof Error ? error.message : String(error))
+      return 'reloaded'
+    }
+    const changed = loaded.digest !== this.manifestDigest
+    this.manifest = loaded.manifest
+    this.manifestDigest = loaded.digest
+    this.personalRevision = loaded.revision
+    this.personalIdentity = loaded.identity
+    return changed ? 'reloaded' : 'unchanged'
   }
 
   get status(): RemoteStatus { return this.state }

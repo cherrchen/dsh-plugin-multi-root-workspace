@@ -113,7 +113,7 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
 
   it('refuses a declarative enabled switch without broker custody', async () => {
     world = await mountRemoteTools(fixture, { withTools: false })
-    const directConfig = { enabled: true, broker: undefined }
+    const directConfig = { enabled: true, mode: 'hardened' as const, broker: undefined }
     await world.ctx.plugin({ name: 'g5-direct-refused', inject, apply: ctx => applyRemoteTools(ctx, directConfig) })
     expect(await world.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
     await expect(registerRemote(world, 'build', 'app')).rejects.toThrow(/no remote endpoint verifier/)
