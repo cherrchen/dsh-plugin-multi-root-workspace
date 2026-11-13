@@ -4,46 +4,64 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { SUPPORTED_DSH_RELEASES } from '../src/compat/dsh-version.ts'
 import { waitForMainCI } from '../scripts/verify-release-ci.mjs'
+import { planMatrix, nodeForRelease } from '../scripts/ci/plan.mjs'
+import { artifactName, verifyResults } from '../scripts/ci/gate.mjs'
+import ubuntuOnly from '../scripts/ci/ubuntu-only.json' with { type: 'json' }
 
 const read = (path: string): string => readFileSync(path, 'utf8')
 
 describe('CI workflow gates', () => {
-  it('runs every supported exact release on every enabled OS, with distinct logs', () => {
-    const ci = parse(read('.github/workflows/ci.yml'))
-    expect(JSON.parse(execFileSync(process.execPath, ['scripts/list-dsh-releases.mjs'], { encoding: 'utf8' })))
-      .toEqual([...SUPPORTED_DSH_RELEASES])
-    expect(ci.jobs.verify.needs).toBe('releases')
-    expect(ci.jobs.verify.strategy.matrix.dsh).toBe('${{ fromJSON(needs.releases.outputs.versions) }}')
-    expect(ci.jobs.verify.env.DSH_MATRIX_VERSION).toBe('${{ matrix.dsh }}')
-    const install = ci.jobs.verify.steps.find((step: { name?: string }) => step.name === 'Install the exact matrix release')
-    expect(install.run).toContain('node scripts/upgrade-dsh.mjs "$DSH_MATRIX_VERSION"')
-    expect(install.run).not.toContain('${{')
-    expect(read('.github/workflows/ci.yml')).toContain('name: vitest-log-${{ matrix.os }}-${{ matrix.dsh }}')
-    expect(read('.github/workflows/ci.yml')).toContain('name: smoke-log-${{ matrix.os }}-${{ matrix.dsh }}')
+  it.each([true, false])('schedules each exact release once per enabled image (Windows: %s)', windows => {
+    const matrix = planMatrix(windows)
+    const images = ['ubuntu-latest', 'ubuntu-22.04', 'macos-latest', ...(windows ? ['windows-latest'] : [])]
+    expect([...new Set(matrix.map(entry => entry.os))]).toEqual(images)
+    for (const os of images) {
+      const groups = matrix.filter(entry => entry.os === os)
+      expect(groups.flatMap(entry => entry.versions)).toEqual([...SUPPORTED_DSH_RELEASES])
+      expect(new Set(groups.map(artifactName)).size).toBe(groups.length)
+      expect(groups.length).toBe(6)
+      for (const group of groups) {
+        expect(group.versions.length).toBeGreaterThan(0)
+        expect(group.versions.length).toBeLessThanOrEqual(4)
+        expect(new Set(group.versions.map(nodeForRelease))).toEqual(new Set([group.node]))
+      }
+    }
+    expect(matrix.length + 2).toBe(windows ? 26 : 20)
   })
-  it('probes kernel dialects before the unit suite uses the exported result', () => {
-    const ci = read('.github/workflows/ci.yml')
-    expect(ci.indexOf('run: pnpm kernel:probe')).toBeLessThan(ci.indexOf('name: Run the unit suite'))
+
+  it('keeps the 22 and 24 Node lanes and expands the plan in the read-only workflow', () => {
+    for (const version of ['0.1.5-rc.2', '0.2.0', '0.2.1-rc.5']) expect(nodeForRelease(version)).toBe('22.19.0')
+    for (const version of ['0.2.2-rc.2', '0.2.2', '0.2.10', '1.0.0']) expect(nodeForRelease(version)).toBe('24.9.0')
+    const ci = parse(read('.github/workflows/ci.yml'))
+    expect(ci.on.workflow_dispatch).toBeNull()
+    expect(ci.permissions).toEqual({ contents: 'read' })
+    expect(ci.jobs.verify.strategy).toEqual({
+      'fail-fast': false,
+      matrix: '${{ fromJSON(needs.releases.outputs.matrix) }}',
+    })
+    expect(ci.jobs.verify.steps.find((step: { uses?: string }) => step.uses === 'actions/setup-node@v4').with['node-version'])
+      .toBe('${{ matrix.node }}')
+    expect(ci.jobs.releases.steps.find((step: { id?: string }) => step.id === 'contract').env.DSH_WINDOWS_CI)
+      .toBe('${{ vars.DSH_WINDOWS_CI }}')
     const upgrade = read('.github/workflows/upgrade.yml')
+    expect(upgrade).toContain('node-version: 24.9.0')
     expect(upgrade.indexOf('run: pnpm kernel:probe')).toBeLessThan(upgrade.indexOf('run: pnpm test'))
   })
 
-  it('omits the Windows runner from the matrix unless its repository switch is enabled', () => {
-    const ci = read('.github/workflows/ci.yml')
-    expect(ci).toContain("fromJSON(vars.DSH_WINDOWS_CI == '1'")
-    expect(ci).toContain("'[\"ubuntu-latest\",\"ubuntu-22.04\",\"macos-latest\"]'")
-  })
-
-  it('runs 0.2.2+ matrix releases on Node 24 while older releases stay on 22', () => {
-    const ci = read('.github/workflows/ci.yml')
-    // Releases through 0.2.1 run on Node 22; 0.2.2 declares engines
-    // node >=24.9 — so the expression names the releases that keep 22.19.0
-    // and defaults every newer release (a stable 0.2.2 included) to 24.9.0.
-    expect(ci).toContain("node-version: ${{ (startsWith(matrix.dsh, '0.1.') || startsWith(matrix.dsh, '0.2.0') || startsWith(matrix.dsh, '0.2.1')) && '22.19.0' || '24.9.0' }}")
-    const upgrade = read('.github/workflows/upgrade.yml')
-    // The upgrade lane probes the newest prerelease, which requires 24.9.
-    expect(upgrade).toContain('node-version: 24.9.0')
-    expect(upgrade).not.toContain('node-version: 22.19.0')
+  it('keeps native and mixed suites, and runs all install and journey smokes on every image', () => {
+    expect(ubuntuOnly).toEqual(expect.arrayContaining(['tests/client-*.spec.{ts,tsx}', 'tests/workflows.spec.ts']))
+    for (const prefix of ['authority-', 'registry', 'shared-', 'windows-', 'worktrees-git', 'working-directory',
+      'parity-matrix', 'sandbox-multi-root', 'tool-access', 'upstream-additional-roots', 'skills-linux',
+      'skills-windows', 'lsp-workspaces', 'profile-isolation', 'auto-review/']) {
+      expect(ubuntuOnly.some(pattern => pattern.startsWith('tests/' + prefix))).toBe(false)
+    }
+    const runner = read('scripts/ci/run-group.mjs')
+    expect(runner).toContain("['registry:probe', '--required']")
+    expect(runner.indexOf("['kernel:probe']")).toBeLessThan(runner.indexOf("await step('vitest'"))
+    expect(runner).toContain('{ ...env, GITHUB_ENV: probe }')
+    for (const script of ['smoke:compose', 'smoke:behavior', 'smoke:journey', 'pack:check', 'smoke:packed', 'smoke:auto-review']) {
+      expect(runner).toContain("['" + script + "'")
+    }
   })
 
   it('derives the upgrade set from the package manifest', () => {
@@ -55,10 +73,20 @@ describe('CI workflow gates', () => {
     expect(script).toContain("name.startsWith('@deepseek-ai/dsh-')")
   })
 
-  it('checks the compatibility contract before anything it would invalidate', () => {
-    const ci = read('.github/workflows/ci.yml')
-    expect(ci.indexOf('run: pnpm compat:check')).toBeGreaterThan(-1)
-    expect(ci.indexOf('run: pnpm compat:check')).toBeLessThan(ci.indexOf('run: pnpm lint'))
+  it('checks exact installations before building and runs shared static checks once', () => {
+    const ci = parse(read('.github/workflows/ci.yml'))
+    const commands = ci.jobs.releases.steps.flatMap((step: { run?: string }) => step.run ? [step.run] : [])
+    expect(commands).toEqual([
+      'node scripts/ci/plan.mjs', 'pnpm install --frozen-lockfile', 'pnpm compat:check', 'pnpm lint',
+      'pnpm docs:check',
+    ])
+    const runner = read('scripts/ci/run-group.mjs')
+    expect(runner).toContain("version === pin ? '--frozen-lockfile' : '--no-frozen-lockfile'")
+    expect(runner).toContain("['scripts/upgrade-dsh.mjs', version]")
+    expect(runner.indexOf("['compat:check']")).toBeLessThan(runner.indexOf("['build']"))
+    expect(runner).toContain("if (full && version === reviewPin) await step('auto-review-fork'")
+    expect(runner).toContain("if (version === reviewPin) await step('smoke-auto-review'")
+    expect(runner).not.toContain('DSH_MULTI_ROOT_COMPAT')
   })
 
   it('runs the upgrade lane weekly, not only on demand', () => {
@@ -93,56 +121,47 @@ describe('CI workflow gates', () => {
     expect(read('.github/workflows/upgrade.yml')).not.toContain('run: pnpm compat:check')
   })
 
-  it('runs the kernel probe and every smoke on Windows too', () => {
+  it('serializes Windows versions and cleans up the broker before uploading even after failure', () => {
     const ci = parse(read('.github/workflows/ci.yml'))
-    const steps = ci.jobs.verify.steps as Array<{ name?: string; if?: string; run?: string; shell?: string }>
-    // The Windows path is native (the real windows-acl runner, the pwsh tool),
-    // so no verify step may still skip `windows-latest` outright.
-    for (const step of steps) expect(step.if ?? '').not.toContain("matrix.os != 'windows-latest'")
-    const probe = steps.find(step => step.name === 'Probe which kernel dialects this host can really run')!
-    expect(probe.run).toBe('pnpm kernel:probe')
-    for (const name of ['Composition gate', 'Behavior battery', 'Cross-repository journey']) {
-      expect(steps.some(step => step.name === name)).toBe(true)
-    }
-    // The packed artifact gates run on every OS.
-    expect(steps.some(step => step.run === 'pnpm pack:check')).toBe(true)
-    expect(steps.some(step => (step.run ?? '').includes('pnpm smoke:packed'))).toBe(true)
+    const steps = ci.jobs.verify.steps as Array<{ name?: string; if?: string; uses?: string }>
+    const install = steps.findIndex(step => step.name === 'Install the B9 deny-token broker')
+    const verify = steps.findIndex(step => step.name === 'Verify exact releases in isolated checkouts')
+    const uninstall = steps.findIndex(step => step.name === 'Uninstall the B9 broker and revoke installation rights')
+    const upload = steps.findIndex(step => step.uses === 'actions/upload-artifact@v4')
+    expect(install).toBeGreaterThan(-1)
+    expect(install).toBeLessThan(verify)
+    expect(verify).toBeLessThan(uninstall)
+    expect(uninstall).toBeLessThan(upload)
+    expect(steps[uninstall]!.if).toBe("always() && runner.os == 'Windows'")
+    expect(steps[upload]!.if).toBe('always()')
+    const runner = read('scripts/ci/run-group.mjs')
+    expect(runner).toContain('const concurrent = full ? 2 : 1')
+    expect(runner).toContain("['smoke:packed'], 15")
   })
 
-  it('streams and captures the behavior smoke, and uploads smoke logs unconditionally', () => {
-    const ci = parse(read('.github/workflows/ci.yml'))
-    const steps = ci.jobs.verify.steps as Array<{ name?: string; if?: string; run?: string; shell?: string; uses?: string }>
-    const behavior = steps.find(step => step.name === 'Behavior battery')!
-    expect(behavior.shell).toBe('bash')
-    expect(behavior.run).toContain('set -o pipefail')
-    expect(behavior.run).toContain('tee smoke-behavior.log')
-    const smokeUpload = steps.find(step => step.name === 'Upload the smoke logs')!
-    expect(smokeUpload.if).toBe('always()')
-    const testUpload = steps.find(step => step.name === 'Upload the test log')!
-    expect(testUpload.if).toBe('always()')
-  })
-
-  it('bounds packed smoke while preserving time for logs and broker cleanup', () => {
-    const ci = parse(read('.github/workflows/ci.yml'))
-    const packed = ci.jobs.verify.steps.find((step: { name?: string }) => step.name === 'Packed smoke')
-    expect(packed['timeout-minutes']).toBe(15)
-    expect(ci.jobs.verify['timeout-minutes']).toBe(45)
-    const uninstall = ci.jobs.verify.steps.find((step: { name?: string }) =>
-      step.name === 'Uninstall the B9 broker and revoke installation rights')
-    expect(uninstall.if).toBe("always() && runner.os == 'Windows'")
-  })
-
-  it('ends with a gate job that fails unless every upstream job is exactly success', () => {
-    const ci = parse(read('.github/workflows/ci.yml'))
-    const gate = ci.jobs.gate
-    expect(gate).toBeDefined()
+  it('ends with an always-run gate requiring success of both jobs and every planned combination', () => {
+    const gate = parse(read('.github/workflows/ci.yml')).jobs.gate
     expect(gate.needs).toEqual(['releases', 'verify'])
     expect(gate.if).toBe('always()')
-    const body = (gate.steps as Array<{ run?: string }>).map(step => step.run ?? '').join('\n')
-    expect(body).toContain('needs.releases.result')
-    expect(body).toContain('needs.verify.result')
-    // A skipped or cancelled matrix must never read as green.
-    expect(body).toContain('"success"')
+    expect(gate.steps.at(-1).env).toEqual({
+      CI_MATRIX: '${{ needs.releases.outputs.matrix }}',
+      PLAN_RESULT: '${{ needs.releases.result }}',
+      VERIFY_RESULT: '${{ needs.verify.result }}',
+    })
+    const plan = planMatrix(true)
+    const sha = 'a'.repeat(40)
+    const records = plan.flatMap(entry => entry.versions.map(version => ({
+      artifact: artifactName(entry),
+      record: { ...entry, version, sha, status: 'success' },
+    })))
+    expect(verifyResults(plan, sha, records)).toBe(SUPPORTED_DSH_RELEASES.length * 4)
+    const [first, ...rest] = records
+    expect(() => verifyResults(plan, sha, rest)).toThrow('Missing result')
+    expect(() => verifyResults(plan, sha, [...records, first])).toThrow('duplicate result')
+    expect(() => verifyResults(plan, sha, records.map(result => ({
+      ...result, record: { ...result.record, status: 'cancelled' },
+    })))).toThrow('Unsuccessful or mismatched result')
+    expect(() => verifyResults(plan, 'b'.repeat(40), records)).toThrow('Unsuccessful or mismatched result')
   })
 
   it('drops stale push branches and keeps main', () => {

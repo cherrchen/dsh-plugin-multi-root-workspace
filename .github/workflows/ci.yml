@@ -14,169 +14,81 @@ jobs:
   releases:
     runs-on: ubuntu-latest
     outputs:
-      versions: ${{ steps.contract.outputs.versions }}
+      matrix: ${{ steps.contract.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: 22.19.0
-      - id: contract
-        run: echo "versions=$(node scripts/list-dsh-releases.mjs)" >> "$GITHUB_OUTPUT"
-
-  verify:
-    needs: releases
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        dsh: ${{ fromJSON(needs.releases.outputs.versions) }}
-        # `DSH_WINDOWS_CI=1` adds the Windows lane. It is ENABLED for this
-        # repository (the variable is set): standard runners are free on public
-        # repositories, and this lane is the only evidence for the
-        # platform-independent claims the plugin makes on Windows. Unset the
-        # variable to park it again.
-        # Repository variables are available while expanding a matrix, unlike
-        # `matrix.*` in a job-level condition.
-        os: ${{ fromJSON(vars.DSH_WINDOWS_CI == '1' && '["ubuntu-latest","ubuntu-22.04","macos-latest","windows-latest"]' || '["ubuntu-latest","ubuntu-22.04","macos-latest"]') }}
-    runs-on: ${{ matrix.os }}
-    env:
-      # Readable, non-interactive failures: no TTY to wrap, no spinner rewrites.
-      CI: 'true'
-      FORCE_COLOR: '0'
-      TERM: dumb
-      DSH_MATRIX_VERSION: ${{ matrix.dsh }}
-    steps:
-      - uses: actions/checkout@v4
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
           version: 11.25.0
       - uses: actions/setup-node@v4
         with:
-          # Releases through 0.2.1 stay on the 22 lane; 0.2.2 and anything
-          # newer requires Node >=24.9, so the default must be the 24 lane.
-          node-version: ${{ (startsWith(matrix.dsh, '0.1.') || startsWith(matrix.dsh, '0.2.0') || startsWith(matrix.dsh, '0.2.1')) && '22.19.0' || '24.9.0' }}
+          node-version: 24.9.0
           cache: pnpm
-      - name: Install the exact matrix release
-        run: |
-          pin=$(node -p "require('./package.json').devDependencies['@deepseek-ai/dsh']")
-          if [ "$DSH_MATRIX_VERSION" = "$pin" ]; then
-            pnpm install --frozen-lockfile
-          else
-            node scripts/upgrade-dsh.mjs "$DSH_MATRIX_VERSION"
-            # The repointed tree resolves the newest upstream builds by design.
-            # pnpm re-verifies lockfile package ages inside `install` itself and
-            # again before every `pnpm run`, reading THIS file — so the intended
-            # bypass lives in config, not a one-shot CLI flag. This checkout is
-            # throwaway; nothing lands back in the repository.
-            echo 'minimumReleaseAge: 0' >> pnpm-workspace.yaml
-            pnpm install --no-frozen-lockfile
-          fi
-        shell: bash
-      # Before anything else: the allowlist, peerDependencies, the development
-      # pin and the installed tree must agree. Every later step's result is only
-      # meaningful as evidence for a release the contract actually claims, so a
-      # drifted manifest is reported here rather than as a confusing test
-      # failure. See docs/decisions/ADR-0009-dsh-compat-contract.md.
-      - name: DSH compatibility contract
-        run: pnpm compat:check
-      - name: Lint
-        run: pnpm lint
-      - name: Typecheck both faces
-        run: pnpm typecheck
-      # Build BEFORE the tests: `tests/client-bundle.spec.ts` asserts the BUILT
-      # browser artifact, and `lib/` is not in Git (see .gitignore), so a clean
-      # checkout has nothing to assert until this step has run.
-      - name: Build the package (before the tests that read lib/)
-        run: pnpm build
+      - id: contract
+        env:
+          DSH_WINDOWS_CI: ${{ vars.DSH_WINDOWS_CI }}
+        run: node scripts/ci/plan.mjs
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm compat:check
+      - run: pnpm lint
+      - run: pnpm docs:check
 
-      - name: Require shared Registry peer authentication on native runners
-        run: pnpm registry:probe --required
+  verify:
+    name: verify (${{ matrix.os }}, group ${{ matrix.group }}, Node ${{ matrix.node }})
+    needs: releases
+    timeout-minutes: 185
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.releases.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    env:
+      CI: 'true'
+      FORCE_COLOR: '0'
+      TERM: dumb
+      CI_GROUP: ${{ toJSON(matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
 
       # 22.04 provides native bwrap evidence; latest retains the Landlock lane.
       # Do not disable AppArmor/user-namespace policy on the latest image.
       - if: runner.os == 'Linux'
         name: Install the bwrap kernel runner
+        timeout-minutes: 5
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
-
-      # Export the verified dialect set BEFORE unit tests decide whether their
-      # real-runner cases may skip. On Windows this probes the REAL upstream
-      # windows-acl runner and exports `windows-acl` when it can actually deny.
-      - name: Probe which kernel dialects this host can really run
-        run: pnpm kernel:probe
 
       - if: runner.os == 'Windows'
         name: Install the B9 deny-token broker
         shell: pwsh
         run: ./scripts/windows-broker/install.ps1
 
-      # The test log is captured as well as streamed, and uploaded when the step
-      # fails. A red run has to be diagnosable from the run page alone — an
-      # unreproducible failure with no log is a failure nobody can fix.
-      - name: Run the unit suite
-        run: |
-          set -o pipefail
-          pnpm test 2>&1 | tee vitest.log
-        shell: bash
-      - name: Upload the test log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: vitest-log-${{ matrix.os }}-${{ matrix.dsh }}
-          path: |
-            vitest.log
-            *.log
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Composition gate
-        run: pnpm smoke:compose
-      # Streamed AND captured: `pipefail` makes the tee'd pipeline report the
-      # smoke's own exit code.
-      - name: Behavior battery
-        run: |
-          set -o pipefail
-          pnpm smoke:behavior 2>&1 | tee smoke-behavior.log
-        shell: bash
-      - name: Cross-repository journey
-        run: |
-          set -o pipefail
-          pnpm smoke:journey 2>&1 | tee smoke-journey.log
-        shell: bash
-
-      # The packed artifact is what a release ships; prove its completeness and
-      # run the behavior battery against the INSTALLED tarball on every OS.
-      - name: Packed artifact verification
-        run: pnpm pack:check
-      - name: Packed smoke
-        # Includes installation and parent cleanup. A hung child or native
-        # filesystem operation must still leave time to upload logs/uninstall.
-        timeout-minutes: 15
-        run: |
-          set -o pipefail
-          pnpm smoke:packed 2>&1 | tee smoke-packed.log
-        shell: bash
-
-      - name: Upload the smoke logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: smoke-log-${{ matrix.os }}-${{ matrix.dsh }}
-          path: |
-            smoke-behavior.log
-            smoke-journey.log
-            smoke-packed.log
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Optional Auto Review fork and joint gates
-        run: pnpm auto-review:fork && pnpm smoke:auto-review
-
-      - run: pnpm docs:check
+      - name: Verify exact releases in isolated checkouts
+        run: node scripts/ci/run-group.mjs
 
       - if: always() && runner.os == 'Windows'
         name: Uninstall the B9 broker and revoke installation rights
         shell: pwsh
         run: ./scripts/windows-broker/install.ps1 -Uninstall
+
+      - name: Upload per-version results and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-group-${{ matrix.os }}-${{ matrix.group }}
+          path: ${{ runner.temp }}/ci-results
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
 
   # Release checks this job on the same commit's main push run.
   gate:
@@ -184,12 +96,17 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Require exact success upstream
-        run: |
-          releases="${{ needs.releases.result }}"
-          verify="${{ needs.verify.result }}"
-          echo "releases=${releases} verify=${verify}"
-          if [ "$releases" != "success" ] || [ "$verify" != "success" ]; then
-            echo "::error::CI gate failed: releases=${releases} verify=${verify} (both must be exactly 'success')"
-            exit 1
-          fi
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        if: needs.releases.result == 'success' && needs.verify.result == 'success'
+        with:
+          pattern: ci-group-*
+          path: ci-results
+      - name: Require exact success for every planned image and version
+        env:
+          CI_MATRIX: ${{ needs.releases.outputs.matrix }}
+          PLAN_RESULT: ${{ needs.releases.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+        run: node scripts/ci/gate.mjs ci-results
