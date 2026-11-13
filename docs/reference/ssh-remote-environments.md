@@ -78,7 +78,11 @@ GUI 入口有两处：
 
 ### SSH 远端管理对话框
 
-独立对话框 `SshManagementDialog`（`src/client/ssh-panel.tsx`）由 ui-primitives `Modal` 承载，经 `src/client/ssh-client.ts` 调 `ssh*` 端点；Tab 条优先使用 `SegmentedTabs`，旧运行时降级为同 DOM 契约的本地 tablist。四个 Tab：
+独立对话框 `SshManagementDialog`（`src/client/ssh-panel.tsx`）由 ui-primitives `Modal` 承载，经 `src/client/ssh-client.ts` 调 `ssh*` 端点；Tab 条优先使用 `SegmentedTabs`，旧运行时降级为同 DOM 契约的本地 tablist。
+
+**控件与布局。** 表单文本输入使用 primitives `Input`，动作按钮使用 `Button`，平台/helper/状态徽标使用 `Tag`（三者从 0.1.5 起可用）。`Checkbox` 与 `SegmentedControl` 自 `0.1.7-alpha.1` 起使用 primitives，旧版本回退为同语义的本地自绘控件（`.mrfw-sshCheckbox` / `.mrfw-sshRadioOption`）。宿主没有 Select primitive，原生 `<select>` 使用固定 32px 高的 `.mrfw-sshSelectControl`。字段采用两列 grid + 持久 label；对话框内不再使用为横向行设计的 `.mrfw-input`——其 `flex: 1 1 220px` 在纵向容器里会变成 220px 高度基准，曾把输入框拉成巨块。
+
+四个 Tab：
 
 1. **添加连接**：personal 档位显示分步表单——连接目标（环境 ID、显示名、hostname、port、user、平台）→ 凭据（ssh-config 别名或托管凭据；无托管凭据时可直接跳到 SSH Key Tab）→ 远端目录与能力（workspace、exec/transfer）→ 主机密钥（“扫描主机钥”→ 指纹单选）。保存沿用 `sshEnvironmentSave` 的 revision、`hostKeyToken` + `fingerprint` 语义；保存成功后草稿与扫描状态清空，连接出现在“已有连接”，但远端工作区仍需在 Workspace Folders 列表中显式登记。team/hardened 显示部署清单/broker 引导，不渲染个人表单，并提供“打开模式设置”入口；控制面未 `ready` 时显示不可用原因。
 2. **已有连接**：personal 显示链接横幅（managed 环境存在且 `linked === false` 时，按钮调 `sshConfigLink`）、已保存环境行（名称/ID、实际平台名、helper、`user@host:port`、workspace、凭据来源、访问密钥）、测试连接/安装 helper/安装访问密钥/编辑/行内删除；编辑复用添加表单。其下是“本项目绑定”：行显示环境、rootId、远端路径、动作与传输，本地传输对端恰为 `primary` 加各可用根的 `aliasId`。team/hardened 显示部署清单中的端点只读列表与登记状态。

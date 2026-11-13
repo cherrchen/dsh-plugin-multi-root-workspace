@@ -237,8 +237,20 @@ ADR-0041 为 SSH 远端环境增加了三档凭据托管模式，并在 Workspac
 | `pnpm smoke` | compose 58 passed；behavior 96 passed / 8 skipped；journey 85 passed / 2 skipped |
 | `pnpm smoke:packed` | 通过（scratch profile 安装、build-approval 恢复、behavior 95 passed / 8 skipped） |
 | `pnpm auto-review:fork` / `pnpm smoke:auto-review` | 通过（可选集成目标按既有版本条件 skip） |
-| 特性相关 spec | client-ssh-panel 23、client-panel 82、client-ops-settings 35、client-styles 22、locale-parity 6；共 168 passed |
+| 特性相关 spec | client-ssh-panel 23、client-panel 82、client-ops-settings 35、client-styles 23、locale-parity 6；共 169 passed |
 | 全量 `pnpm test` | 1570 passed / 201 skipped / 0 failed（排除本会话无法运行共享 Registry IPC 的 10 个既有 authority 文件）；完整套件的未过滤运行中，这 10 个文件因“Host itself is sandboxed; shared IPC refuses sandboxed peers”失败，属执行环境限制，由干净 runner 上的 CI 覆盖 |
 | CI（手动触发） | [run 43447653166](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43447653166) @ `be5a489`：**26/26 jobs success，0 failed**；抽查 `0.2.1-rc.2` / ubuntu-latest 产物为 **1875 passed / 156 skipped**（含 `client-ssh-panel.spec` 23 passed） |
 
 本会话运行在 DSH Agent 文件沙箱内，`registry IPC refuses a different user or sandboxed peer` 是仓库既有的 fail-closed 设计；过滤运行明确保留了所有与本改动相关的 client、locale、style、build、smoke 与打包用例。
+
+## Follow-up（2026-11-13）：表单控件 primitives 化与高度修复
+
+用户目检发现“添加连接”表单的输入框被拉成 220px 级巨块。根因是 [`styles.ts`](../../../src/client/styles.ts) 的 `.mrfw-input { flex: 1 1 220px; height: 32px }` 原本服务于横向 flex 行；迁移到纵向 `.mrfw-sshForm` 后，220px 从宽度基准变成高度基准。jsdom 不做布局，原测试无法发现。
+
+修复：
+
+- 文本/密码/数字字段改用 primitives `Input`；动作按钮改用 `Button`；平台/helper/状态徽标改用 `Tag`。`Checkbox` 与 `SegmentedControl` 自 `0.1.7-alpha.1` 起使用 primitives，旧版本回退到显式自绘控件。
+- 原生 `<select>`（宿主无 Select primitive）使用固定 32px 的 `.mrfw-sshSelectControl`；私钥 textarea 使用 `.mrfw-sshTextarea`。
+- 表单改为两列 grid + 持久可见 label；窄视口退化为单列。对话框内不再出现 `.mrfw-input`，并保留 `.mrfw-sshForm .mrfw-input { flex: 0 0 auto }` 作为安全网。
+- `RemoteCustodyModeControl` 的 team 字段同样改用 `Input`/`Button`，修复模式设置里的同一高度问题。
+- 回归：`client-styles.spec` 增加网格 / 不继承 220px flex 的断言；`client-ssh-panel.spec` 增加“无 `.mrfw-input`、有 `.mrfw-sshInput` 包装和 `.mrfw-sshGrid`、可见字段 label”的断言。特性相关 spec 共 169 passed。

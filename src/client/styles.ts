@@ -1149,8 +1149,8 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
 .mrfw-sshForm {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  gap: 12px;
+  padding: 12px;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
 }
@@ -1161,10 +1161,193 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   gap: 8px;
 }
 
-.mrfw-sshForm textarea.mrfw-input {
+/* The old panel class was designed for horizontal rows: flex-basis 220px is
+   a width there, but a height basis in a column. Keep it from ever stretching
+   a control inside the dialog forms. */
+.mrfw-sshForm .mrfw-input {
+  flex: 0 0 auto;
+  width: 100%;
+}
+
+.mrfw-sshGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.mrfw-sshField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mrfw-sshFieldWide {
+  grid-column: 1 / -1;
+}
+
+.mrfw-sshTag {
+  flex: none;
+}
+
+.mrfw-sshFieldLabel {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-sshFieldHint {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.mrfw-sshInput {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+}
+
+.mrfw-sshSelect {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+}
+
+.mrfw-sshSelectControl {
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  outline: none;
+}
+
+.mrfw-sshSelectControl:focus {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.mrfw-sshTextarea {
+  box-sizing: border-box;
+  width: 100%;
   min-height: 72px;
+  padding: 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
   font-family: monospace;
+  font-size: 13px;
+  line-height: 20px;
+  outline: none;
   resize: vertical;
+}
+
+.mrfw-sshTextarea:focus {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.mrfw-sshCheckRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.mrfw-sshCheckbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.mrfw-sshCheckbox input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--dsw-alias-brand-primary);
+  cursor: inherit;
+}
+
+.mrfw-sshRadioGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.mrfw-sshRadioOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.mrfw-sshRadioOption input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--dsw-alias-brand-primary);
+  cursor: inherit;
+}
+
+.mrfw-sshInlineNote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mrfw-sshTransferRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mrfw-sshTransferPeer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.mrfw-sshDanger {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.mrfw-sshHelperInput {
+  box-sizing: border-box;
+  display: flex;
+  flex: 0 0 220px;
+  width: 220px;
+}
+
+.mrfw-teamInput {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .mrfw-sshGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .mrfw-sshFieldWide {
+    grid-column: auto;
+  }
 }
 
 .mrfw-sshRowActions {

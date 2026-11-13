@@ -250,6 +250,16 @@ describe('the navigator search takeover (0.2.2-rc.2)', () => {
     expect(held!.querySelector('.mrfw-ftBody')!.matches('aside[data-mrfw-navigator] > div:has([data-files-search])')).toBe(false)
   })
 
+  it('lays the SSH form out in a field grid instead of a column of row-sized inputs', () => {
+    // .mrfw-input was a horizontal-row control: its flex-basis is a width
+    // there, but a height in a column. The form must never inherit it, and the
+    // fields themselves must sit in a real grid.
+    expect(STYLES).toMatch(/\.mrfw-sshForm \.mrfw-input\s*\{[^}]*flex:\s*0 0 auto/s)
+    expect(STYLES).toMatch(/\.mrfw-sshGrid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s)
+    expect(STYLES).toMatch(/\.mrfw-sshInput\s*\{[^}]*width:\s*100%/s)
+    expect(STYLES).toMatch(/\.mrfw-sshField\s*\{[^}]*flex-direction:\s*column/s)
+  })
+
   it('hides the Files-page search toggle under an additional root only', () => {
     const base = '[data-files-page]:has(.mrfw-rootSwitcher[data-root-kind="additional"])'
     expect(STYLES).toContain(`${base} [data-files-search-toggle]`)

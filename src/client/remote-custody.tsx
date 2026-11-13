@@ -8,6 +8,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/remote-custody
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import { remoteRiskConfirmation } from '../compat/ops-confirmation.ts'
 import type { RemoteModeControl, SkillsForm } from '../compat/skills-client.ts'
 import type { Key } from './locales.ts'
@@ -158,8 +159,8 @@ export function RemoteCustodyModeControl(props: {
         {REMOTE_TEAM_FIELDS.map(field => (
           <label key={field} className="mrfw-teamField">
             <span className="mrfw-modeOptionTitle">{t(`remote.team.${field}` as Key)}</span>
-            <input
-              className="mrfw-input"
+            <Input
+              className="mrfw-teamInput"
               type={field === 'brokerUid' ? 'number' : 'text'}
               value={teamDraft[field]}
               disabled={busy || !snapshot.writable}
@@ -167,11 +168,11 @@ export function RemoteCustodyModeControl(props: {
             />
           </label>
         ))}
-        <button type="button" className="mrfw-btn mrfw-btnOutline"
+        <Button variant="outline" size="sm"
           disabled={busy || !snapshot.writable || !Number.isInteger(teamUid) || teamUid < 0}
           onClick={saveTeam}>
           {t('remote.team.save')}
-        </button>
+        </Button>
       </div>
     ) : null}
     {mode === 'hardened' ? <div className="mrfw-skillsSettingsDescription">{t('remote.mode.hardenedNote')}</div> : null}

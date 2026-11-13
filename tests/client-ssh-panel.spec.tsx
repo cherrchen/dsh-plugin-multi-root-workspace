@@ -217,6 +217,12 @@ describe('the SSH management dialog', () => {
     expect(within(dialog).getByRole('tab', { name: 'ssh.tab.connections' })).toBeTruthy()
     expect(within(dialog).getByRole('tab', { name: 'ssh.tab.keys' })).toBeTruthy()
     expect(within(dialog).getByRole('tab', { name: 'ssh.tab.mode' })).toBeTruthy()
+    // The form uses the primitive Input wrappers and a real field grid; the
+    // old row-only .mrfw-input class must not reach a column form again.
+    expect(dialog.querySelector('.mrfw-sshGrid')).toBeTruthy()
+    expect(dialog.querySelector('.mrfw-sshInput input')).toBeTruthy()
+    expect(dialog.querySelectorAll('input.mrfw-input, select.mrfw-input, textarea.mrfw-input')).toHaveLength(0)
+    expect(within(dialog).getByText('ssh.field.hostname')).toBeTruthy()
   })
 
   it('renders Linux and macOS for the platform options instead of raw codes', async () => {

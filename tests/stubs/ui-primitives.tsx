@@ -44,6 +44,28 @@ export const IconRefreshOutline16 = icon('refresh')
 export const IconSettingsOutline16 = icon('settings')
 export const IconTrashOutline16 = icon('trash')
 
+/** Minimal `Button` mirror: a native button with the host variant metadata. */
+export function Button(props: {
+  readonly variant?: string
+  readonly size?: string
+  readonly icon?: ReactNode
+  readonly className?: string
+  readonly children?: ReactNode
+} & Record<string, unknown>): ReactNode {
+  const { variant, size, icon: _icon, className, children, ...rest } = props
+  return createElement('button', {
+    type: 'button',
+    className: ['mrfw-stub-button', variant, size, className].filter(value => value !== undefined && value !== '').join(' '),
+    ...rest,
+  }, children)
+}
+
+/** Minimal `Input` mirror: a wrapper span around the native input. */
+export function Input(props: { readonly className?: string; readonly icon?: ReactNode } & Record<string, unknown>): ReactNode {
+  const { className, icon: _icon, ...rest } = props
+  return createElement('span', { className }, createElement('input', rest))
+}
+
 // The *Regular family the open-in-app fork spells verbatim (0.1.7+ names).
 export const IconChevronDownOutlineRegular = icon('chevron-down')
 export const IconRightUpOutlineRegular = icon('right-up')
