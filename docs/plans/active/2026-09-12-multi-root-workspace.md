@@ -1934,3 +1934,13 @@ rebase 的集成处理：
 - **测试。** 新增 `tests/remote-tools-switch.spec.ts`（mock broker 证明）：默认组合开关关闭→平面 `disabled`、无任何注册；拨开后 `configureRemote(true)`+证明→工具注册并可调用；再关闭→工具注销、平面回 `disabled`、v1 行为不变；证明失败不注册。`patch.spec`/`smoke-compose` 行清单与断言、`client-panel`（disabled 不渲染远端区）、`client-ops-settings`（警示标签+确认流）同步更新。
 
 本机 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.2`：`compat:check`、lint（0 警告）、双端类型检查、build、`docs:check` 通过；`smoke:compose` **58 passed**；全量 `pnpm test` **1743 passed / 132 skipped / 0 failed**（119 个文件通过、8 个跳过）。
+
+## 四个入口的面板统一（2026-11-13）
+
+**问题（实测）。** Workspace Folders 面板随打开入口不同而表现不同。四个入口都把 `WorkspaceFoldersDialog` 渲染在槽位 DOM 内：`.mrfw-overlay` 是 `position: fixed; inset: 0`，但右侧边栏/dockkit 祖先带 `transform`/`backdrop-filter`，使 fixed 相对该窗格定位，面板被裁切并落在错误的层叠上下文；同时 `RootSwitcher` 不传 `remotes`/`worktrees`、`HeroWorkspaceEntry` 不传 `remotes`/`subscribeSession`，远端区块与 worktree 清理只在部分入口出现。
+
+**修复。** 面板 overlay 一律经 `createPortal` 挂到 `document.body`（access-upgrade Modal 原样不动；`onDialogKeyDown` 已有 `stopPropagation`，React 合成事件照常冒泡，DOM 级上游窗格监听不受影响）。`src/client/index.ts` 建立单一 `dialogDeps = { panel, remotes, pickDirectory, subscribeSession, t, worktrees }` 传给全部四个入口；`RootSwitcher`/`HeroWorkspaceEntry` 接受并转发 `remotes`/`worktrees`/`subscribeSession`，会话身份仍各走各的（footer 当前/钉住会话、Files 窗格会话、hero 组合会话），触发器外观不变，`RootSwitcher` 关闭后重新列表不变。ADR-0037/0038 未声称对话框就地渲染，无文档变更。
+
+**测试。** `client-panel.spec` 新增"四个入口的统一面板"五例：footer、workspace-menu→footer owner、Files 紧凑启动器、Files `RootSwitcher`、hero 各自打开后面板的 `.mrfw-overlay` 均为 `document.body` 直接子节点，且给定相同假客户端时远端区块与 worktree 清理按钮一致出现；hero 组合会话测试改为断言 `list` 与 `remotes` 均以组合 `sessionId` 发出。
+
+本机 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.2`：lint（0 警告）、双端类型检查、build、`docs:check` 通过；全量 `pnpm test` **1748 passed / 132 skipped / 0 failed**（119 个文件通过、8 个跳过）。

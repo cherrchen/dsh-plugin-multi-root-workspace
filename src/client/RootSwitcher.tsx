@@ -360,9 +360,11 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
       {dialogOpen ? (
         <WorkspaceFoldersDialog
           panel={props.panel}
+          {...(props.remotes === undefined ? {} : { remotes: props.remotes })}
           pickDirectory={props.pickDirectory}
           {...(props.sessionId === undefined ? {} : { sessionId: props.sessionId })}
           {...(props.subscribeSession === undefined ? {} : { subscribeSession: props.subscribeSession })}
+          {...(props.worktrees === undefined ? {} : { worktrees: props.worktrees })}
           t={t}
           onClose={() => {
             setDialogOpen(false)

@@ -408,8 +408,13 @@ describe('the New Session hero entry', () => {
     renderHero(harness, { sessionId: 'session-9' })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.action.label` }))
 
-    await waitFor(() => { expect(harness.calls).toHaveLength(1) })
-    expect(harness.calls[0]).toEqual({ channel: PANEL_CHANNEL, endpoint: 'list', payload: { sessionId: 'session-9' } })
+    await waitFor(() => {
+      expect(harness.calls.some(call => call.endpoint === 'list')).toBe(true)
+    })
+    // Every section of the shared dialog targets the composed session too.
+    expect(harness.calls.find(call => call.endpoint === 'list'))
+      .toEqual({ channel: PANEL_CHANNEL, endpoint: 'list', payload: { sessionId: 'session-9' } })
+    expect(harness.calls.find(call => call.endpoint === 'remotes')?.payload).toEqual({ sessionId: 'session-9' })
   })
 
   it('renders an icon and the visible label but no chevron', () => {
@@ -1451,3 +1456,71 @@ describe('the remote-environment section', () => {
   })
 })
 
+
+describe('the shared dialog across the four entries', () => {
+  // Whatever opened it, the panel is identical: the overlay portals to
+  // document.body — transform/backdrop-filter on the dockkit panes would
+  // clip a fixed overlay rendered beside the trigger — and every entry
+  // forwards the same dependency bundle, so the remote section and the
+  // worktree cleanup affordance appear from each trigger.
+  const READY: RemotesView = {
+    primaryRoot: '/repos/primary', mode: 'workspace-write',
+    status: { state: 'ready' }, endpoints: [],
+  }
+  const overlay = (): Element | null => document.body.querySelector(':scope > .mrfw-overlay')
+  const expectSharedSections = async (): Promise<void> => {
+    await waitFor(() => { expect(screen.getByText(`${NS}.panel.remote`)).toBeTruthy() })
+    expect(screen.getByRole('button', { name: `${NS}.worktree.cleanupBatch` })).toBeTruthy()
+  }
+
+  it('portals the footer dialog to document.body with the shared sections', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', roots: [], limit: 16, count: 0, worktreeCleanupCount: 1 })
+    harness.setRemotes(READY)
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await screen.findByRole('dialog')
+    expect(overlay()?.parentElement).toBe(document.body)
+    await expectSharedSections()
+  })
+
+  it('portals the footer-owned dialog opened through the workspace-menu controller', async () => {
+    const { controller } = renderFoldersAction()
+    act(() => { expect(controller.open('session-9')).toBe(true) })
+    await screen.findByRole('dialog')
+    expect(overlay()?.parentElement).toBe(document.body)
+  })
+
+  it('portals the Files compact launcher dialog to document.body', async () => {
+    const harness = mount({ filesActions: true })
+    const registration = harness.registrations.find(item => item.options.name === 'sidebar.right.tab.files.actions')!
+    render(createElement(registration.component as never))
+    fireEvent.click(screen.getByRole('button', { name: /action.title/ }))
+    await screen.findByRole('dialog')
+    expect(overlay()?.parentElement).toBe(document.body)
+  })
+
+  it('portals the Files root-switcher dialog with the shared sections', async () => {
+    const harness = mount({ filesActions: true })
+    harness.setView({ primaryRoot: '/repos/primary', roots: [], limit: 16, count: 0, worktreeCleanupCount: 1 })
+    harness.setRemotes(READY)
+    const registration = harness.registrations.find(item => item.options.name === 'sidebar.right.tab.files.actions')!
+    render(createElement(registration.component as never, { absolutePath: '/repos/primary', sessionId: 'session-1' }))
+    fireEvent.click(document.querySelector('.mrfw-rootSwitchBtn')!)
+    fireEvent.click(await screen.findByRole('button', { name: `${NS}.switcher.manage` }))
+    await screen.findByRole('dialog')
+    expect(overlay()?.parentElement).toBe(document.body)
+    await expectSharedSections()
+  })
+
+  it('portals the hero dialog with the shared sections', async () => {
+    const harness = mount({ heroOptions: true })
+    harness.setView({ primaryRoot: '/repos/primary', roots: [], limit: 16, count: 0, worktreeCleanupCount: 1 })
+    harness.setRemotes(READY)
+    renderHero(harness)
+    fireEvent.click(document.querySelector('.mrfw-heroEntry') as HTMLButtonElement)
+    await screen.findByRole('dialog')
+    expect(overlay()?.parentElement).toBe(document.body)
+    await expectSharedSections()
+  })
+})
