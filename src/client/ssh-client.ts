@@ -8,7 +8,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/ssh-client
  */
 import { PANEL_CHANNEL } from '../contract.ts'
-import { parseSshAnswer, type SshEndpoint, type SshStateView, type CredentialPublicView } from '../remote/personal-contract.ts'
+import { parseSshAnswer, type SshEndpoint, type SshStateView, type CredentialPublicView, type SshEnvironmentView, type SshBindingView } from '../remote/personal-contract.ts'
 import { PanelError } from './panel-client.ts'
 
 interface Channel {
@@ -37,7 +37,7 @@ export interface SshClient {
   configLink(sessionId: string, signal?: AbortSignal): Promise<SshStateView>
 }
 
-export type { CredentialPublicView, SshStateView }
+export type { CredentialPublicView, SshStateView, SshEnvironmentView, SshBindingView }
 
 /**
  * Build the personal-mode client; every wire failure is a `PanelError`.

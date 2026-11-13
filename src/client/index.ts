@@ -35,6 +35,7 @@ import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { createWorktreeClient } from './worktree-client.ts'
 import { WorktreePrompt } from './WorktreePrompt.tsx'
 import { createRemotesClient, type RemotesClient } from './remotes-client.ts'
+import { createSshClient, type SshClient } from './ssh-client.ts'
 import { NS, en, zh } from './locales.ts'
 import { STYLES } from './styles.ts'
 import { HeroWorkspaceEntry } from './HeroWorkspaceEntry.tsx'
@@ -147,6 +148,10 @@ export function apply(ctx: ClientContext): void {
   // The remote section speaks its own contract over the same channel; a host
   // without the remote experiment answers with a code the section renders.
   const remotes: RemotesClient | undefined = connectionHandle === undefined ? undefined : createRemotesClient(connectionHandle)
+  // Personal-custody management speaks its own contract over the same channel;
+  // a host in another mode answers `remote-personal-unavailable` and the area
+  // simply never mounts (the view's custodyMode gates it).
+  const ssh: SshClient | undefined = connectionHandle === undefined ? undefined : createSshClient(connectionHandle)
   // The footer's dialog owner and the workspace menu share exactly one
   // controller for this apply() lifetime: the menu asks the footer to open
   // its dialog, and the menu entry is disabled while no footer owner exists
@@ -168,7 +173,7 @@ export function apply(ctx: ClientContext): void {
   // entries (footer + the menu's shared owner, Files switcher/launcher, hero):
   // the panel must render identical sections no matter which trigger opened
   // it; each entry still supplies its own session identity and look.
-  const dialogDeps = { panel, remotes, pickDirectory, subscribeSession, t, worktrees: worktreeClient }
+  const dialogDeps = { panel, remotes, ssh, pickDirectory, subscribeSession, t, worktrees: worktreeClient }
   installSkillsClient(ctx, t, listener => subscribeCurrentSession(readService(ctx, 'sessions'), listener))
   const worktreeSettings = installSkillsSettingsCard(ctx, t)
   // The worktree confirmation is a shell-level overlay: it must be able to

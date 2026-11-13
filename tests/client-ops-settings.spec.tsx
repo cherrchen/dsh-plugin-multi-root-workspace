@@ -279,4 +279,67 @@ describe('SSH remote-environments settings card', () => {
     expect(opsWrites).toEqual([])
     expect(screen.getByRole('switch', { name: 'ops.compatibilityEnable' })).not.toBeNull()
   })
+
+  it('writes a custody-mode change directly while the switch is off', async () => {
+    const writes: unknown[] = []
+    const form = opsForm({ value: { enabled: false }, status: 'ready', writable: true, revision: 3 }, writes)
+    render(<RemoteSwitchRow form={form} t={t} />)
+    fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.team/ }))
+    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'team' }], 3]]))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('shows the four team broker fields only in team mode and saves them with the form revision', async () => {
+    const writes: unknown[] = []
+    const form = opsForm({ value: { enabled: false, mode: 'team' } as never, status: 'ready', writable: true, revision: 5 }, writes)
+    render(<RemoteSwitchRow form={form} t={t} />)
+    fireEvent.change(screen.getByLabelText('remote.team.manifestPath'), { target: { value: '/etc/dsh/remote.json' } })
+    fireEvent.change(screen.getByLabelText('remote.team.socketPath'), { target: { value: '/run/dsh/broker.sock' } })
+    fireEvent.change(screen.getByLabelText('remote.team.brokerUid'), { target: { value: '1001' } })
+    fireEvent.change(screen.getByLabelText('remote.team.credentialRoot'), { target: { value: '/var/lib/dsh/ssh' } })
+    fireEvent.click(screen.getByRole('button', { name: 'remote.team.save' }))
+    await waitFor(() => expect(writes).toEqual([[[
+      { op: 'set', path: ['team', 'manifestPath'], value: '/etc/dsh/remote.json' },
+      { op: 'set', path: ['team', 'socketPath'], value: '/run/dsh/broker.sock' },
+      { op: 'set', path: ['team', 'brokerUid'], value: 1001 },
+      { op: 'set', path: ['team', 'credentialRoot'], value: '/var/lib/dsh/ssh' },
+    ], 5]]))
+    cleanup()
+    render(<RemoteSwitchRow form={opsForm({ value: { enabled: false }, status: 'ready', writable: true })} t={t} />)
+    expect(screen.queryByLabelText('remote.team.manifestPath')).toBeNull()
+  })
+
+  it('shows the read-only deployment note in hardened mode and no team fields', () => {
+    const form = opsForm({ value: { enabled: false, mode: 'hardened' } as never, status: 'ready', writable: true })
+    render(<RemoteSwitchRow form={form} t={t} />)
+    expect(screen.getByText('remote.mode.hardenedNote')).not.toBeNull()
+    expect(screen.queryByLabelText('remote.team.manifestPath')).toBeNull()
+  })
+
+  it('routes a less isolated switch while enabled through the risk confirmation with mode-specific copy', async () => {
+    const writes: unknown[] = []
+    const form = opsForm({ value: { enabled: true, mode: 'hardened' } as never, status: 'ready', writable: true, revision: 6 }, writes)
+    const tParams: Translate = (key, params) => params === undefined ? key : `${key}(${JSON.stringify(params)})`
+    render(<RemoteSwitchRow form={form} t={tParams} />)
+    fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.personal/ }))
+    expect(writes).toEqual([])
+    await screen.findByRole('dialog', { name: 'remote.downgradeTitle' })
+    expect(screen.getByText(/remote\.downgrade\.personal/)).not.toBeNull()
+    const confirm = screen.getByRole('button', { name: 'remote.downgradeConfirm' }) as HTMLButtonElement
+    fireEvent.click(confirm)
+    expect(writes).toEqual([])
+    fireEvent.click(screen.getByRole('checkbox', { name: 'remote.downgradeAcknowledge' }))
+    fireEvent.click(confirm)
+    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'personal' }], 6]]))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('applies a mode upgrade and any mode change while disabled without confirmation', async () => {
+    const writes: unknown[] = []
+    const form = opsForm({ value: { enabled: true, mode: 'personal' } as never, status: 'ready', writable: true, revision: 8 }, writes)
+    render(<RemoteSwitchRow form={form} t={t} />)
+    fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.hardened/ }))
+    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'hardened' }], 8]]))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
 })

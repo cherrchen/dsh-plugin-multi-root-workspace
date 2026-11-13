@@ -995,4 +995,111 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
 .mrfw-actions .mrfw-iconBtn {
   width: 32px;
 }
+
+/* The custody-mode radio group (settings card) and the personal SSH forms. */
+.mrfw-modeGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.mrfw-modeOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.mrfw-modeOption input {
+  margin-top: 2px;
+}
+
+.mrfw-modeOptionText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mrfw-modeOptionTitle {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--dsw-alias-label);
+}
+
+.mrfw-teamFields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mrfw-teamField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mrfw-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.mrfw-sshArea {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mrfw-sshForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.mrfw-sshForm textarea.mrfw-input {
+  min-height: 72px;
+  font-family: monospace;
+  resize: vertical;
+}
+
+.mrfw-sshRowActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mrfw-sshAddRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mrfw-sshEnvRow {
+  align-items: flex-start;
+}
+
+.mrfw-sshEnvRow .mrfw-sshRowActions {
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.mrfw-sshScanRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mrfw-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 `
