@@ -254,3 +254,4 @@ ADR-0041 为 SSH 远端环境增加了三档凭据托管模式，并在 Workspac
 - 表单改为两列 grid + 持久可见 label；窄视口退化为单列。对话框内不再出现 `.mrfw-input`，并保留 `.mrfw-sshForm .mrfw-input { flex: 0 0 auto }` 作为安全网。
 - `RemoteCustodyModeControl` 的 team 字段同样改用 `Input`/`Button`，修复模式设置里的同一高度问题。
 - 回归：`client-styles.spec` 增加网格 / 不继承 220px flex 的断言；`client-ssh-panel.spec` 增加“无 `.mrfw-input`、有 `.mrfw-sshInput` 包装和 `.mrfw-sshGrid`、可见字段 label”的断言。特性相关 spec 共 169 passed。
+- 本地门禁：lint、双端 typecheck、build、docs:check、compat:check、pack:check、`smoke:compose`、`smoke:packed` 通过；过滤后的全量测试 **1571 passed / 201 skipped / 0 failed**。按维护者指示，UI-only follow-up 不触发 CI（已取消误触发的 run 43456982757）。
