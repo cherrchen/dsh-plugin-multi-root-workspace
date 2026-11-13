@@ -1,9 +1,6 @@
 name: CI
 
 on:
-  # Reusable-verify entry point for release.yml: the tag build must pass the
-  # same gates (lint, typecheck, build, probe, tests, smokes, docs) as main.
-  workflow_call:
   workflow_dispatch:
   pull_request:
   push:
@@ -181,9 +178,7 @@ jobs:
         shell: pwsh
         run: ./scripts/windows-broker/install.ps1 -Uninstall
 
-  # The result the reusable workflow hands a caller: a skipped or cancelled
-  # matrix must never read as green, so `publish` in release.yml sees a failed
-  # verify unless BOTH upstream jobs ended in exactly `success`.
+  # Release checks this job on the same commit's main push run.
   gate:
     needs: [releases, verify]
     if: always()

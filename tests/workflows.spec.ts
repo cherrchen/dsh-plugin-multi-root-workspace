@@ -3,6 +3,7 @@ import { parse } from 'yaml'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { SUPPORTED_DSH_RELEASES } from '../src/compat/dsh-version.ts'
+import { waitForMainCI } from '../scripts/verify-release-ci.mjs'
 
 const read = (path: string): string => readFileSync(path, 'utf8')
 
@@ -155,11 +156,18 @@ describe('CI workflow gates', () => {
 
 
 describe('release workflow gating', () => {
-  it('publishes only after the reusable CI gate, and verifies the pack through check-pack', () => {
+  it('publishes the verified commit and verifies the pack through check-pack', () => {
     const release = parse(read('.github/workflows/release.yml'))
-    // publish depends on the reusable workflow call; the gate job INSIDE
-    // ci.yml is what makes that call fail on a skipped or cancelled matrix.
-    expect(release.jobs.verify.uses).toBe('./.github/workflows/ci.yml')
+    expect(parse(read('.github/workflows/ci.yml')).on.workflow_call).toBeUndefined()
+    expect(release.on.push.tags).toEqual(['v*'])
+    expect(release.on.workflow_dispatch).toBeUndefined()
+    expect(release.jobs.verify.permissions).toEqual({ actions: 'read', contents: 'read' })
+    expect(release.jobs.verify.steps.find((step: { id?: string }) => step.id === 'tag').run)
+      .toContain('${GITHUB_REF}^{tag}')
+    expect(release.jobs.verify.steps.some((step: { run?: string }) =>
+      step.run?.includes('node scripts/verify-release-ci.mjs'))).toBe(true)
+    expect(release.jobs.publish.steps[0].with.ref).toBe('${{ needs.verify.outputs.commit }}')
+    expect(release.jobs.publish.permissions).toEqual({ contents: 'write', 'id-token': 'write' })
     expect(release.jobs.publish.needs).toBe('verify')
     const body = (release.jobs.publish.steps as Array<{ run?: string }>).map(step => step.run ?? '').join('\n')
     expect(body).toContain('node scripts/check-pack.mjs')
@@ -186,5 +194,94 @@ describe('upgrade workflow input handling', () => {
         stdio: 'pipe',
       })).toThrow()
     }
+  })
+})
+
+describe('main push CI evidence for release', () => {
+  const commit = 'a'.repeat(40)
+  const path = '.github/workflows/ci.yml'
+  const run = {
+    id: 73, workflow_id: 42, path, event: 'push', head_branch: 'main', head_sha: commit,
+    run_attempt: 2, status: 'completed', conclusion: 'success', html_url: 'https://github.com/o/r/actions/runs/73',
+  }
+  const gate = { id: 82, name: 'gate', run_id: 73, run_attempt: 2, head_sha: commit, status: 'completed', conclusion: 'success' }
+  const runsPath = '/actions/workflows/42/runs?branch=main&event=push&head_sha=' + commit + '&page=1&per_page=100'
+  const jobsPath = '/actions/runs/73/attempts/2/jobs?page=1&per_page=100'
+
+  function fakeApi({
+    listings = [[run]], details = [run], jobs = [gate],
+  }: { listings?: Array<Array<typeof run>>; details?: Array<typeof run>; jobs?: Array<typeof gate> } = {}) {
+    const calls: string[] = []
+    const log: string[] = []
+    let time = 0
+    let listing = 0
+    let detail = 0
+    const result = waitForMainCI(commit, {
+      now: () => time,
+      timeoutMs: 4,
+      pause: async () => { time++ },
+      report: (message: string) => { log.push(message) },
+      async get(url: string) {
+        calls.push(url)
+        if (url === '/actions/workflows/ci.yml') return { id: 42, path }
+        if (url === runsPath) {
+          const workflow_runs = listings[Math.min(listing++, listings.length - 1)]!
+          return { workflow_runs, total_count: workflow_runs.length }
+        }
+        if (url === jobsPath) return { jobs, total_count: jobs.length }
+        if (url === '/actions/runs/73') return details[Math.min(detail++, details.length - 1)]
+        throw new Error('Unexpected request ' + url)
+      },
+    })
+    return { result, calls, log }
+  }
+
+  it('accepts an already successful run and gate for the exact attempt immediately', async () => {
+    const { result, calls, log } = fakeApi()
+    await expect(result).resolves.toMatchObject({ runId: 73, attempt: 2 })
+    expect(calls).toEqual(['/actions/workflows/ci.yml', runsPath, jobsPath, '/actions/runs/73'])
+    expect(log.join('\n')).toContain('https://github.com/o/r/actions/runs/73/attempts/2')
+  })
+
+  it('waits when the tag arrives before main CI appears and completes', async () => {
+    const running = { ...run, status: 'in_progress', conclusion: '' }
+    const { result, calls } = fakeApi({ listings: [[], [running]], details: [running, run] })
+    await expect(result).resolves.toMatchObject({ attempt: 2 })
+    expect(calls.filter(url => url === runsPath)).toHaveLength(2)
+    expect(calls.filter(url => url === jobsPath)).toHaveLength(1)
+  })
+
+  it('rejects other SHAs, PRs, dispatches, branches and workflows even if the API returns them', async () => {
+    const { result, calls } = fakeApi({ listings: [[
+      { ...run, head_sha: 'b'.repeat(40) }, { ...run, event: 'pull_request' },
+      { ...run, event: 'workflow_dispatch' }, { ...run, head_branch: 'feature' },
+      { ...run, workflow_id: 43 }, { ...run, path: '.github/workflows/other.yml' },
+    ]] })
+    await expect(result).rejects.toThrow('Timed out')
+    expect(calls).not.toContain(jobsPath)
+  })
+
+  it.each(['failure', 'cancelled', 'skipped'])('blocks a CI run concluded %s', async conclusion => {
+    const { result, calls } = fakeApi({ listings: [[{ ...run, conclusion }]] })
+    await expect(result).rejects.toThrow('concluded ' + conclusion)
+    expect(calls).not.toContain(jobsPath)
+  })
+
+  it.each([[], [{ ...gate, conclusion: 'failure' }], [{ ...gate, conclusion: 'cancelled' }],
+    [{ ...gate, conclusion: 'skipped' }], [{ ...gate, run_attempt: 1 }], [gate, gate],
+  ].map(jobs => ({ jobs })))('blocks missing, unsuccessful, stale or duplicate gates ($jobs)', async ({ jobs }) => {
+    await expect(fakeApi({ jobs }).result).rejects.toThrow('no successful final gate')
+  })
+
+  it('does not authorize a previous success after a rerun has started', async () => {
+    const { result } = fakeApi({ details: [{ ...run, run_attempt: 3, status: 'in_progress' }] })
+    await expect(result).rejects.toThrow('Timed out')
+  })
+
+  it('fails closed on an API error', async () => {
+    await expect(waitForMainCI(commit, {
+      report() {},
+      async get() { throw new Error('Actions API unavailable') },
+    })).rejects.toThrow('Actions API unavailable')
   })
 })
