@@ -9,7 +9,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { apply as applyRemoteTools, inject } from '../src/remote/tools.ts'
+import { apply as applyRemoteTools, Config as RemoteToolsConfig, inject } from '../src/remote/tools.ts'
 import { classifyInstallation, classifySshCapability, sshPackageVersion, sshPrivateCopy } from '../src/compat/dsh-version.ts'
 import type { RemoteExecutionBackend } from '../src/remote/exec.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -82,11 +82,12 @@ interface SwitchHooks {
 }
 
 /** A minimal Settings host: the persisted value is `live`, flipped by the test. */
-function installSettings(ctx: Context, live: { enabled: boolean }): () => SwitchHooks | undefined {
+function installSettings(ctx: Context, live: { enabled: boolean }, seeds?: unknown[]): () => SwitchHooks | undefined {
   let hooks: SwitchHooks | undefined
   ctx.provide('settings', {
-    installSection: (_owner: Context, ns: string, _schema: unknown, _value: unknown, callbacks: SwitchHooks) => {
+    installSection: (_owner: Context, ns: string, _schema: unknown, value: unknown, callbacks: SwitchHooks) => {
       if (ns !== 'multi-root-remote-tools') return
+      seeds?.push(value)
       hooks = callbacks
       callbacks.setSource(() => live)
     },
@@ -130,6 +131,30 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     expect(probe.calls).toBe(0)
     expect(await world!.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
     await expect(registerRemote(world!, 'build', 'app')).rejects.toMatchObject({ code: 'remote-unavailable' })
+  })
+
+  it('unwraps the Schemastery volatile row config before configuring the plane', async () => {
+    const seeds: unknown[] = []
+    world = await mountRemoteTools(fixture, {
+      withTools: false,
+      remote: { enabled: false, personalPath: join(fixture.base, 'personal.json'), credentialRoot: join(fixture.base, 'cred') },
+    })
+    installSettings(world.ctx, { enabled: false }, seeds)
+    // The real row config a loader hands to apply(): Schemastery wraps the
+    // volatile `enabled`/`mode` fields, so passing it through unchanged used to
+    // make the plane's mode the wrapper object and the panel's custodyMode
+    // unreadable.
+    const validated = (RemoteToolsConfig as unknown as (value: unknown) => Record<string, unknown>)({ enabled: true, mode: 'personal' })
+    await world.ctx.plugin({
+      name: 'remote-tools-volatile-config',
+      inject,
+      apply: (ctx: Context) => applyRemoteTools(ctx, { ...validated, broker: { config: BROKER } } as never),
+    })
+    await expect.poll(() => seeds[0], { timeout: 2_000 }).toMatchObject({ enabled: true, mode: 'personal' })
+    await expect.poll(() => world!.stack.registry.remoteMode, { timeout: 2_000 }).toBe('personal')
+    // The bound Settings source still says off; the seed only fixes the initial
+    // value the Settings UI starts from.
+    expect(world!.stack.registry.remoteStatus.state).toBe('disabled')
   })
 
   gated(`drives configureRemote and mounts the gated subtree when the switch turns on${gateSkipped}`, async () => {

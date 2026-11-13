@@ -102,7 +102,14 @@ const endpointViewSchema = z.object({
 const remotesViewSchema = z.object({
   primaryRoot: z.string(),
   mode: z.enum(['read-only', 'workspace-write', 'danger-full-access']),
-  custodyMode: z.enum(['personal', 'team', 'hardened']).optional(),
+  // The custody mode is optional metadata: a host that predates ADR-0041
+  // omits it, and a newer host may send a mode this client does not know. One
+  // unreadable optional field must not invalidate the whole remote section —
+  // treat it as absent and keep the endpoints/list rendering.
+  custodyMode: z.preprocess(
+    value => value === 'personal' || value === 'team' || value === 'hardened' ? value : undefined,
+    z.enum(['personal', 'team', 'hardened']).optional(),
+  ),
   status: z.object({ state: z.string(), reason: z.string().optional() }),
   endpoints: z.array(endpointViewSchema),
   unavailable: z.string().optional(),

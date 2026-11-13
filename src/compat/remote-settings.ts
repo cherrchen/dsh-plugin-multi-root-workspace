@@ -25,17 +25,43 @@ interface Settings {
   configure?: (presentation: { auto: boolean }, owner: unknown) => () => void
 }
 
-const REMOTE_MODES = new Set(['personal', 'team', 'hardened'])
+/** The three custody modes (ADR-0041). */
+export type RemoteMode = 'personal' | 'team' | 'hardened'
+
+const REMOTE_MODES = new Set<string>(['personal', 'team', 'hardened'])
+
+/**
+ * Unwrap one Schemastery volatile field. A row config validated by its
+ * Schemastery schema carries `volatileField` values as wrapper objects with a
+ * `get()`; the wrapper is not the value. `configValue` leaves plain values
+ * alone, so this is safe for both loader and Settings sources.
+ * @param value - a plain value or a volatile wrapper.
+ * @returns the mode when the unwrapped value is one of the three modes.
+ */
+export function remoteModeOf(value: unknown): RemoteMode | undefined {
+  const unwrapped = configValue(value)
+  return typeof unwrapped === 'string' && REMOTE_MODES.has(unwrapped) ? unwrapped as RemoteMode : undefined
+}
+
+/** Unwrap every volatile field of a raw settings/row-config value. */
+function unwrapSettings(value: RemoteSettingsValue | undefined): RemoteSettingsValue {
+  return {
+    enabled: configValue(value?.enabled),
+    mode: configValue(value?.mode),
+    team: configValue(value?.team),
+  }
+}
 
 /** Fail closed: an unknown mode makes the whole read act disabled (ADR-0041). */
-export function readRemoteSettingsValue(value: RemoteSettingsValue | undefined, warn: (message: string) => void): { enabled: boolean; mode?: 'personal' | 'team' | 'hardened' | undefined; team?: unknown } {
-  const enabled = value?.enabled === true
-  if (enabled && value?.mode !== undefined && (typeof value.mode !== 'string' || !REMOTE_MODES.has(value.mode))) {
-    warn(`multi-root remote tools: unknown mode ${JSON.stringify(value.mode)}; acting disabled`)
+export function readRemoteSettingsValue(value: RemoteSettingsValue | undefined, warn: (message: string) => void): { enabled: boolean; mode?: RemoteMode | undefined; team?: unknown } {
+  const current = unwrapSettings(value)
+  const enabled = current.enabled === true
+  if (enabled && current.mode !== undefined && (typeof current.mode !== 'string' || !REMOTE_MODES.has(current.mode))) {
+    warn(`multi-root remote tools: unknown mode ${JSON.stringify(current.mode)}; acting disabled`)
     return { enabled: false }
   }
-  const mode = typeof value?.mode === 'string' && REMOTE_MODES.has(value.mode) ? value.mode as 'personal' | 'team' | 'hardened' : undefined
-  const team = value?.team !== null && typeof value?.team === 'object' ? value.team : undefined
+  const mode = remoteModeOf(current.mode)
+  const team = current.team !== null && typeof current.team === 'object' ? current.team : undefined
   return { enabled, ...(mode === undefined ? {} : { mode }), ...(team === undefined ? {} : { team }) }
 }
 
@@ -50,7 +76,7 @@ export function installRemoteSettings(ctx: Context, initial: () => unknown, chan
   let source: (() => RemoteSettingsValue) | undefined
   const initialValue = (): RemoteSettingsValue => {
     const value = configValue(initial())
-    return typeof value === 'object' && value !== null ? value as RemoteSettingsValue : { enabled: value === true }
+    return typeof value === 'object' && value !== null ? unwrapSettings(value as RemoteSettingsValue) : { enabled: value === true }
   }
   const fiber = ctx.inject(['settings'], scope => {
     const settings = scope.get('settings') as unknown as Settings
