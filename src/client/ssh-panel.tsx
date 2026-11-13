@@ -137,6 +137,15 @@ export function SshPersonalArea(props: { ssh: SshClient; sessionId: string | und
 
   const sessionId = props.sessionId
   if (sessionId === undefined) return null
+  // Nothing management-shaped renders before the first state answer: an
+  // empty list must mean "none configured", never "not loaded yet".
+  if (view === undefined) {
+    return <div className="mrfw-sshArea">
+      {error === undefined
+        ? <p className="mrfw-note">{t('ssh.loading')}</p>
+        : <p role="alert" className="mrfw-alert">{t(errorKeyOf(error.code))}</p>}
+    </div>
+  }
 
   const clearSecretInputs = () => { setPrivateKey(''); setPassphrase(''); setPassword('') }
   const userCredentials = (view?.credentials ?? []).filter(credential => credential.purpose !== 'access-key')
