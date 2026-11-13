@@ -58,3 +58,29 @@ Host dsh-<environmentId>
 ## 模式切换
 
 切换 `mode` 走 `configureRemote`：远程域与 `remote-1` 监听按旧事实拆除，新模式下重读清单来源（personal → `personalPath`；team/hardened → `manifestPath` 覆盖或行配置），再按当前 authority 重开 owner/重连 follower。摘要变化后既有授权一律 withheld，需重新登记。
+
+## GUI 管理面板（个人模式）
+
+两处 GUI 入口：
+
+- **插件详情设置卡**（`RemoteSwitchRow`）：开关与启用风险确认之外，常驻三档单选（个人/团队/硬化，各带一行说明）。`team` 显示四个 broker 字段（`manifestPath`/`socketPath`/`brokerUid`/`credentialRoot`）并以"保存团队配置"逐项 `set` 写入 `team.*`；`hardened` 显示只读提示（broker 参数来自部署 profile）。开关开启时向**更低隔离档位**切换（hardened→team/personal、team→personal）走同一个风险确认组件，文案按目标档位区分；升级或关闭状态下的切换直接写 `mode`。
+- **Workspace Folders 面板远端区块**：标题行显示托管档位徽标（`RemotesView.custodyMode`）。仅当档位为 `personal` 且控制面 `ready` 时渲染个人管理区（`src/client/ssh-panel.tsx`，经 `src/client/ssh-client.ts` 调 `ssh*` 端点）；team/hardened 仍是只读端点列表 + 登记/撤销。
+
+个人管理区自上而下：
+
+1. **链接横幅**：存在 managed 环境且 `linked === false` 时显示，说明单行 `Include` 语义与备份行为，按钮调 `sshConfigLink`。
+2. **凭据**：行显示标签、类型徽标、指纹；密钥凭据有"复制公钥"，删除需行内确认。访问密钥（`purpose: 'access-key'`）不在此列出，而显示在其所属环境下。三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）的**秘密输入提交后立即清空**（无论成败），且永不由状态回填。
+3. **环境**：行显示名称/ID、`user@host:port`、平台、helper 有无、凭据来源。操作：测试连接（显示平台与 node 版本）、安装 helper（可选绝对 node 路径）、安装访问密钥（仅密码凭据）、编辑、删除（行内确认，提示绑定一并移除）。新增/编辑表单含 environmentId、显示名、hostname、port（默认 22）、user、platform、凭据来源（ssh-config 别名 或 托管凭据下拉）、workspace；主机密钥步骤为"扫描主机钥"→ 列出指纹 → 单选一个 → 保存时携带 `hostKeyToken` + `fingerprint`（`ssh-config` 来源同样走扫描展示，但指纹由 Host 按 known_hosts 核对，不需要 token）。
+4. **本项目绑定**：行显示环境、rootId、远端路径、动作与传输；新增表单的环境下拉来自 `sshState.environments`，本地传输对端复选框恰好是本地传输汇能解析的 rootId 集合——`primary` 加各可用根的 `aliasId`。保存后端点列表按既有流程显示为未登记，仍需显式 Register。
+
+**开关默认值**（GUI 勾选"允许命令执行"/"允许文件传输"时写入的完整节，见上文文件 schema）：
+
+```jsonc
+// exec
+{ "shell": ["/bin/sh", "-c"], "env": { "PATH": "/usr/local/bin:/usr/bin:/bin" },
+  "maxTimeoutMs": 600000, "stdoutLimit": 1048576, "stderrLimit": 262144, "terminateGraceMs": 2000 }
+// transfer
+{ "maxBytes": 268435456, "timeoutMs": 600000 }
+```
+
+所有变更请求携带当前 `revision`；`personal-config-conflict` 时前端先重取 `sshState` 再显示本地化冲突文案。服务端错误一律经 `error.*` 本地化渲染。

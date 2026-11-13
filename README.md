@@ -271,9 +271,17 @@ A 只在该 primary 的完整快照证明 common 身份、且 `<main>/.git` 仍�
 
 ### SSH 远端环境（实验性，默认关闭，未发布）
 
-Issue #32 的多执行环境能力以实验性开关形式随默认组合发货：插件详情设置卡的 **SSH 远端环境** 带"实验性"警示标签并**默认关闭**，开启前须阅读风险确认（Agent 可在配置的远端主机执行命令与复制文件，凭据由部署方托管），取消或关闭弹窗不保存。打开开关后，Registry 按 `remoteEnvironments.manifestPath`（默认 `/etc/dsh-ssh-broker/manifest.json`）读取部署清单并建立远端控制面；Workspace Folders 面板随之显示"远端环境"区块，可登记/撤销清单声明的端点。
+Issue #32 的多执行环境能力以实验性开关形式随默认组合发货：插件详情设置卡的 **SSH 远端环境** 带"实验性"警示标签并**默认关闭**，开启前须阅读风险确认（Agent 可在配置的远端主机执行命令与复制文件，凭据由部署方托管），取消或关闭弹窗不保存。设置卡常驻**凭据托管档位**单选，三档互斥：
 
-模型侧的 `remote_copy` / `remote_bash` 与能力投影还要通过 broker 凭据隔离证明：broker 块由部署方在专用 profile 中提供，任何一步失败（SSH 兼容门禁、控制面未就绪、`danger-full-access` 会话、证明失败）都不安装工具。每次远端调用仍由 Registry 排序准入。关闭开关即卸载全部远端子树并把控制面恢复为 `disabled`（无 `remote-1` 监听、无远端域）。部署步骤与回滚见[控制面参考](./docs/reference/multi-environment-control-plane.md)。
+- **个人（默认）**：凭据由本机 Host 进程直接持有，**不承诺 Agent 拿不到密钥**；适合个人机器、一次性 VM 或可信 Agent。
+- **团队**：独立 broker 账户托管凭据，复制目的须为 chroot SFTP；显示四个 broker 字段（manifestPath / socketPath / brokerUid / credentialRoot）可就地保存。适合共享构建机。
+- **硬化**：broker + 配额/审计/吊销 + 专用账户与独立写者，由部署 profile 配置，设置卡只显示只读说明。
+
+开关开启时向更低隔离档位切换会再次经过风险确认。Registry 按档位读取清单来源（personal → `remoteEnvironments.personalPath`；team/hardened → `remoteEnvironments.manifestPath`，默认 `/etc/dsh-ssh-broker/manifest.json`）并建立远端控制面；Workspace Folders 面板的"远端环境"区块随档位显示：personal 为完整管理区，team/hardened 为清单端点登记/撤销列表。
+
+**个人模式走通一次**（全部在面板内完成）：添加凭据（生成密钥 / 导入私钥 / 保存密码）→ 添加环境（主机、账号、平台、远端工作目录，按需勾选允许命令执行 / 允许文件传输）→ 扫描主机钥并选择指纹 → 若使用托管凭据，点击横幅把 `Include` 写入 `~/.ssh/config`（自动备份）→ 测试连接 → 安装 helper（可选，走 SFTP 时可跳过）→ 密码凭据可再装访问密钥 → 添加本项目绑定（选择本地根与远端路径、动作与传输方向）→ 在端点列表点击 Register → 此后 Agent 才能用 `remote_copy` / `remote_bash` 触达该远端。秘密输入提交即清，任何 RPC 应答都不含私钥或密码字节。
+
+模型侧的 `remote_copy` / `remote_bash` 与能力投影在 team/hardened 下还要通过 broker 凭据隔离证明：broker 块由部署方在专用 profile（hardened）或设置卡字段（team）提供，任何一步失败（SSH 兼容门禁、控制面未就绪、`danger-full-access` 会话仅对 hardened 拒绝、证明失败）都不安装工具。每次远端调用仍由 Registry 排序准入。关闭开关即卸载全部远端子树并把控制面恢复为 `disabled`（无 `remote-1` 监听、无远端域）。各档保护边界、文件布局、RPC 拒绝码见 [SSH 远端环境参考](./docs/reference/ssh-remote-environments.md)；team/hardened 的部署步骤与回滚见[控制面参考](./docs/reference/multi-environment-control-plane.md)。
 
 ### 面板
 

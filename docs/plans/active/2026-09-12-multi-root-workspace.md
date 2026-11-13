@@ -1958,3 +1958,15 @@ rebase 的集成处理：
 - **测试。** `tests/remote-personal.spec.ts`（10 例）：缺文件空清单、权限/符号链接/父目录拒绝、CAS 冲突、manifest 转换、ssh_config 渲染+Include 幂等+备份、relaxed `parseSshConfig`、fail-closed 设置、端点 schema、密码凭据列表不泄露+in-use 拒绝。`remote-tools-switch.spec` 增 `mode` 选项；专用 profile 默认值回归修正。
 
 本机 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.2`：验证数字见提交说明。
+
+## SSH 三档托管模式：GUI（2026-11-13）
+
+**决定（ADR-0041 §6 落地）。** 三档托管模式的用户面补齐：设置卡档位选择 + Workspace Folders 个人管理区 + 用户文档。`ssh*` RPC、秘密卫生、fail-closed 语义沿用 Host 侧提交（`9d0e4b8`/`942b131`/`6e482ee`），本步不加新 Host 行为，除一处测试暴露的线形修正。
+
+- **设置卡（`RemoteSwitchRow`）。** 开关与启用风险确认不变；常驻三档单选（个人/团队/硬化，各带一行说明，`REMOTE_ISOLATION` 排序 personal<team<hardened）。team 显示四个 broker 字段并以 `remote.team.save` 逐项 `set` 写 `team.*`；hardened 显示只读部署提示。开关开启时降到更低档位走同一风险确认组件，文案按目标档位（`remote.downgrade.personal`/`remote.downgrade.team`）；升级或未开启时直接写 `mode`。
+- **面板远端区块。** 标题行显示 `custodyMode` 徽标；仅 personal + `ready` 时挂 `SshPersonalArea`（`src/client/ssh-panel.tsx`），team/hardened 保持只读端点列表。管理区含：`linked` 横幅（managed 环境存在时）、凭据行与三个添加表单（秘密输入提交即清、访问密钥列于所属环境而非凭据列表）、环境行（测试连接/helper/访问密钥/编辑/行内删除）、环境编辑器（ssh-config 别名或托管凭据、keyscan→指纹单选→token+fingerprint 保存、exec/transfer 开关写出文档默认值）、本项目绑定表单（本地传输对端恰为 `primary` + 各可用根 `aliasId`）。所有变更带 `revision`；`personal-config-conflict` 先重取 `sshState` 再提示。
+- **接线。** `createSshClient` 进 `dialogDeps`（四个入口一致）；`RootSwitcher`/`HeroWorkspaceEntry` 转发 `ssh`。`personal-contract.ts` 补 `SshEnvironmentView`/`SshBindingView`/`CredentialPublicView`（含 `purpose`/`environmentId`）公开视图类型；测试发现环境草稿的 `exec` 线形缺 `shell`/`env`/`maxTimeoutMs`/`terminateGraceMs` 字段，保存必被 Host 语义校验拒绝——已按 `personal/config.ts` 校验边界补全。
+- **测试。** `client-ops-settings.spec` 新增五例：关闭状态下直接写 `mode`、team 字段保存带 revision、hardened 只读提示、enabled+hardened→personal 的风险确认与档位文案、升级无需确认。`client-ssh-panel.spec`（13 例，假 `SshClient`）：挂载条件（仅 personal+ready+有 client）、链接横幅显隐、密码/私钥提交即清且 DOM 无秘密字节、scan→选指纹→token+fingerprint 保存、exec/transfer 默认值、行内删除确认、绑定本地对端取自 RootsView、`personal-config-conflict` 重取、连接测试结果显示。
+- **用户文档。** README 双语 "SSH 远端环境" 段重写：三档保护与不保护什么、个人模式 GUI 走通流程、指针至参考与控制面清单。`ssh-remote-environments.md` 增 GUI 节与 exec/transfer 默认值。
+
+本机 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.2`：`compat:check`、lint（0 警告）、双端 typecheck、build（59 文件）通过；触达 spec 157 例（panel 82 + ops-settings 34 + ssh-panel 13 + locale/styles 28）；全量 `pnpm test` **1791 passed / 132 skipped / 0 failed**（122 个文件）；`smoke:compose` **58 passed**；`docs:check` 0 错误 0 警告。
