@@ -78,6 +78,8 @@ export type RemoteStateKind =
 export interface RemoteStatus {
   readonly state: RemoteStateKind
   readonly reason?: string
+  /** Stable diagnostic code for a state whose raw reason is not user-facing. */
+  readonly code?: string
 }
 
 /** The session fields remote admission keys on — header cwd only, never effective cwd. */

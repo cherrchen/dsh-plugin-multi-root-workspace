@@ -32,3 +32,17 @@
 - 回归测试：`tests/remote-personal.spec.ts` 覆盖 volatile 解包与坏 `custodyMode`；`tests/remote-tools-switch.spec.ts` 用真实 Schemastery 校验后的行配置断言 `registry.remoteMode === 'personal'`。
 
 修复后同一真实 Host 的应答为 `"custodyMode":"personal"`，`sshState` 返回空配置状态，SSH 管理区正常挂载。
+
+## 同区块的另外两个现象
+
+### 在设置中开启后必须重启才生效
+
+旧版 Settings 服务没有 `installSection`，`installRemoteSettings` 走 `settings.configure` 兼容路径。该路径只监听 `settings/document-updated`，但 `read()` 始终回退到启动时的 loader 配置（没有 `setSource` 推送）。因此写入成功、事件也触发，`sync()` 仍读到旧值；只有重启后 loader 重新组合才把新值带进配置。
+
+修复：兼容路径在每次读取时调用 `settings.describe()`，找到 `multi-root-remote-tools` 的实时 `value`；启动时的 loader 配置只在 `describe` 不可用时回退。回归测试见 `tests/remote-personal.spec.ts` 的 “reads the live namespace on the legacy configure path”。
+
+### `registry authority is not ready`
+
+这是 Registry 的 follower 连接 owner 的 `remote-1` socket 失败。只有持有 store lease 的 Host 会打开远程域和 `remote-1`；若另一个 DSH 实例持有 lease、但它的 profile 没有挂载 `multi-root-remote-tools`（例如桌面端主插件仍是 mainline），follower 永远无法就绪，重启 follower 也不会改变 owner。
+
+修复：`connectFollower` 把这个具体错误映射为 `status.code = 'owner-without-remote-plane'`，面板显示可操作的双语提示；同时写一条 Host 日志。真正恢复 SSH 需要退出另一个实例，或让启用 SSH 的 profile 成为唯一 Host。

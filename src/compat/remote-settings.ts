@@ -23,6 +23,13 @@ interface Settings {
     setSource(source: () => RemoteSettingsValue): void; onChange(): void; validate(value: RemoteSettingsValue): void
   }) => void
   configure?: (presentation: { auto: boolean }, owner: unknown) => () => void
+  /**
+   * The modern settings service's live view. The legacy `configure` path has
+   * no `setSource` push, so the row must read the namespace's effective value
+   * here after a write; otherwise it keeps replaying the boot-time loader
+   * config until restart.
+   */
+  describe?: () => readonly { readonly ns: string; readonly value?: unknown }[]
 }
 
 /** The three custody modes (ADR-0041). */
@@ -74,6 +81,7 @@ export function readRemoteSettingsValue(value: RemoteSettingsValue | undefined, 
  */
 export function installRemoteSettings(ctx: Context, initial: () => unknown, changed: () => void): { read(): unknown; fiber: Fiber } {
   let source: (() => RemoteSettingsValue) | undefined
+  let live: (() => RemoteSettingsValue | undefined) | undefined
   const initialValue = (): RemoteSettingsValue => {
     const value = configValue(initial())
     return typeof value === 'object' && value !== null ? unwrapSettings(value as RemoteSettingsValue) : { enabled: value === true }
@@ -110,9 +118,25 @@ export function installRemoteSettings(ctx: Context, initial: () => unknown, chan
     }
     if (typeof settings.configure !== 'function') throw new Error('multi-root remote tools: unsupported Settings service')
     const stop = settings.configure({ auto: false }, scope.fiber)
+    // The legacy service pushes a document-updated event but no setSource. Read
+    // the namespace's effective value from describe() on every re-sync; the
+    // boot-time loader config is only the fallback when this service cannot
+    // answer (older hosts, a not-yet-ready settings provider).
+    const readLive = (): RemoteSettingsValue | undefined => {
+      try {
+        const row = settings.describe?.().find(entry => entry.ns === REMOTE_SETTINGS_ID)
+        return row?.value as RemoteSettingsValue | undefined
+      } catch {
+        return undefined
+      }
+    }
+    live = readLive
     // Events are service-owned on newer hosts; the compat boundary narrows the shared name.
     const stopEvent = (scope.on as (...args: any[]) => () => void)('settings/document-updated', (id: string) => { if (id === REMOTE_SETTINGS_ID) changed() })
-    return () => { stopEvent(); stop() }
+    // The inject callback may run after the row's first sync; re-read now that
+    // the live source exists so a persisted value is not lost until restart.
+    changed()
+    return () => { stopEvent(); stop(); if (live === readLive) live = undefined }
   })
-  return { fiber, read: () => source === undefined ? initialValue() : source() }
+  return { fiber, read: () => source === undefined ? (live?.() ?? initialValue()) : source() }
 }

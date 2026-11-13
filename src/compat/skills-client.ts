@@ -5,6 +5,19 @@ export interface SkillsForm {
   subscribe(listener: () => void): () => void
   mutate(ops: readonly { op: 'set'; path: string[]; value: boolean }[], revision?: number): Promise<boolean>
 }
+
+/**
+ * The live remote-tools settings form as the Workspace panel consumes it. The
+ * generic SkillsForm face is boolean-shaped; the remote namespace also carries
+ * `mode` and `team`, so the panel narrows the same form through this face
+ * rather than creating a second settings path.
+ */
+export interface RemoteModeControl {
+  /** The current form, or undefined until the settings service attaches it. */
+  form(): SkillsForm | undefined
+  /** Subscribe to form attach/detach and value changes. */
+  subscribe(listener: () => void): () => void
+}
 interface SettingsScope { bind(input: { namespace: string }): SkillsForm }
 interface ConfigForms { get(entryId: string): SkillsForm }
 

@@ -15,7 +15,7 @@ import {
 import { CredentialStore } from '../src/remote/personal/credentials.ts'
 import { link, linkStatus, renderHostBlock, renderSshConfig } from '../src/remote/personal/ssh-files.ts'
 import { parseSshConfig } from '../src/remote/ssh-environment.ts'
-import { readRemoteSettingsValue } from '../src/compat/remote-settings.ts'
+import { installRemoteSettings, readRemoteSettingsValue } from '../src/compat/remote-settings.ts'
 import { parseRemotesView } from '../src/remote/panel-contract.ts'
 import { parseSshCall, SSH_ENDPOINTS } from '../src/remote/personal-contract.ts'
 
@@ -163,6 +163,29 @@ describe('relaxed ssh -G parsing and fail-closed settings', () => {
     expect(warnings.length).toBe(1)
   })
 
+  it('reads the live namespace on the legacy configure path', async () => {
+    const { Context } = await import('@deepseek-ai/cordis')
+    const ctx = new Context()
+    const live = { enabled: false, mode: 'personal' }
+    let changes = 0
+    ctx.provide('settings', {
+      configure: () => () => {},
+      describe: () => [{ ns: 'multi-root-remote-tools', value: live }],
+    } as never)
+    const settings = installRemoteSettings(ctx, () => ({ enabled: false }), () => { changes += 1 })
+    try {
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(settings.read()).toEqual({ enabled: false, mode: 'personal' })
+      live.enabled = true
+      ctx.emit('settings/document-updated', 'multi-root-remote-tools', 1)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(settings.read()).toEqual({ enabled: true, mode: 'personal' })
+      expect(changes).toBeGreaterThan(0)
+    } finally {
+      settings.fiber.dispose()
+    }
+  })
+
   it('treats an unreadable optional custodyMode as absent, not a bad view', () => {
     const view = parseRemotesView({
       primaryRoot: '/w',
@@ -173,6 +196,17 @@ describe('relaxed ssh -G parsing and fail-closed settings', () => {
     })
     expect(view.ok).toBe(true)
     if (view.ok) expect(view.value.custodyMode).toBeUndefined()
+  })
+
+  it('keeps the remote status diagnostic code on the wire', () => {
+    const view = parseRemotesView({
+      primaryRoot: '/w',
+      mode: 'workspace-write',
+      status: { state: 'owner-without-remote-protocol', reason: 'registry authority is not ready', code: 'owner-without-remote-plane' },
+      endpoints: [],
+    })
+    expect(view.ok).toBe(true)
+    if (view.ok) expect(view.value.status.code).toBe('owner-without-remote-plane')
   })
 
   it('every personal endpoint parses sessionId and rejects unknown keys', () => {
