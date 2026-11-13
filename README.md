@@ -277,7 +277,7 @@ Issue #32 的多执行环境能力以实验性开关形式随默认组合发货�
 - **团队**：独立 broker 账户托管凭据，复制目的须为 chroot SFTP；显示四个 broker 字段（manifestPath / socketPath / brokerUid / credentialRoot）可就地保存。适合共享构建机。
 - **硬化**：broker + 配额/审计/吊销 + 专用账户与独立写者，由部署 profile 配置，“模式设置”只显示只读说明。
 
-开关开启时向更低隔离档位切换会再次经过风险确认。Registry 按档位读取清单来源（personal → `remoteEnvironments.personalPath`；team/hardened → `remoteEnvironments.manifestPath`，默认 `/etc/dsh-ssh-broker/manifest.json`）并建立远端控制面。Workspace Folders 面板的“远端环境”区块只保留**远端工作区列表**（沿用附属工作目录的行样式，平台显示为 Linux / macOS，保留登记/移除）和“添加 SSH 远端…”/“管理 SSH 远端…”两枚入口；新增连接、已有连接、SSH Key 与模式设置都在独立对话框的四个 Tab 中完成。
+开关开启时向更低隔离档位切换会再次经过风险确认。Registry 按档位读取清单来源（personal → `remoteEnvironments.personalPath`；team/hardened → `remoteEnvironments.manifestPath`，默认 `/etc/dsh-ssh-broker/manifest.json`）并建立远端控制面。Workspace Folders 面板的“远端环境”区块只保留**远端工作区列表**（沿用附属工作目录的行样式，平台显示为 Linux / macOS，保留登记/移除）和“添加 SSH 远端…”/“管理 SSH 远端…”两枚入口；新增连接、已有连接、SSH Key 与模式设置都在独立对话框的四个 Tab 中完成。对话框表单复用宿主 primitives：`Input`/`Button`/`Tag` 在所有受支持版本可用，`Checkbox`/`SegmentedControl` 在新版本使用、旧版本回退为同语义自绘控件；字段采用两列 grid 与持久 label。
 
 **个人模式走通一次**（在“管理 SSH 远端”对话框中完成）：打开 Workspace Folders →“添加 SSH 远端…”→ 在“添加连接”Tab 填写主机、账号、平台（Linux / macOS）与远端工作目录，按需勾选允许命令执行 / 允许文件传输 → 选择 ssh-config 别名或托管凭据；没有凭据时切到“SSH Key”Tab 生成密钥 / 导入私钥 / 保存密码 → 扫描主机钥并选择指纹 → 若使用托管凭据，在“已有连接”Tab 点击横幅把 `Include` 写入 `~/.ssh/config`（自动备份）→ 测试连接 → 安装 helper（可选，走 SFTP 时可跳过）→ 密码凭据可再装访问密钥 → 在“已有连接”Tab 添加本项目绑定（选择本地根与远端路径、动作与传输方向）→ 回到 Workspace Folders 的远端工作区列表点击 Register → 此后 Agent 才能用 `remote_copy` / `remote_bash` 触达该远端。秘密输入提交即清，任何 RPC 应答都不含私钥或密码字节。
 
