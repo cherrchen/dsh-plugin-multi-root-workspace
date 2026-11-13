@@ -4,7 +4,9 @@
 
 ## 开关与状态
 
-用户入口是 live 开关 `multi-root-remote-tools.enabled`：随 `multi-root-remote-tools` 行挂到 Settings 命名空间（插件详情设置卡带"实验性"警示标签，开启需风险确认；持久化值覆盖行配置 `enabled`）。Registry 行配置 `remoteEnvironments: { enabled?: boolean; manifestPath?: string }`：默认组合写 `manifestPath: /etc/dsh-ssh-broker/manifest.json` 但**不写** `enabled`——`enabled` 只是开关的**初值**（供保留旧语义的专用 profile 使用），实际开合由 `registry.configureRemote(live)` 在权威转移队列内重评估：开启要求 live 开关为 true **且** `manifestPath` 已配置，关闭时恢复精确 `disabled`（无 `remote-1` 监听、无远端域打开），本地 v1 注册表不受影响。`registry.remoteStatus.state`：
+用户入口是 live 开关 `multi-root-remote-tools.enabled`：随 `multi-root-remote-tools` 行挂到 Settings 命名空间（插件详情设置卡带"实验性"警示标签，开启需风险确认；持久化值覆盖行配置 `enabled`）。Registry 行配置 `remoteEnvironments: { enabled?: boolean; manifestPath?: string }`：默认组合写 `manifestPath: /etc/dsh-ssh-broker/manifest.json` 但**不写** `enabled`——`enabled` 只是开关的**初值**（供保留旧语义的专用 profile 使用），实际开合由 `registry.configureRemote(live)` 在权威转移队列内重评估：开启要求 live 开关为 true **且** `manifestPath` 已配置，关闭时恢复精确 `disabled`（无 `remote-1` 监听、无远端域打开），本地 v1 注册表不受影响。
+
+**凭据托管档位（ADR-0041）。** live 设置另有 `mode`（`personal`/`team`/`hardened`，默认 `personal`；未知或非法值使该次读取按 `enabled:false` 处理并告警）与可选 `team` 块（`manifestPath`/`socketPath`/`brokerUid`/`credentialRoot` 逐项覆盖行内 `broker.config`，hardened 忽略之）。Registry 行配置扩为 `remoteEnvironments: { enabled?, manifestPath?, personalPath?, credentialRoot? }`：personal 模式从 `personalPath` 读用户配置（文件缺失 = 空清单，照常到 `ready`），team/hardened 仍读 `manifestPath`（live `team.manifestPath` 覆盖行值）。三档对比、个人配置/凭据文件布局、RPC 端点与拒绝码、托管 `ssh_config` 模板、Include 链接、helper 安装与密码引导见 [ssh-remote-environments.md](./ssh-remote-environments.md)；模式切换与文件变更检测均走 `configureRemote`/`refreshRemotePersonal` 串行化。`registry.remoteStatus.state`：
 
 | 状态 | 含义 |
 | --- | --- |

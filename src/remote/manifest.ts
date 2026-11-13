@@ -67,7 +67,7 @@ const environmentSchema = z.object({
   credentialIsolation: z.enum(['attested', 'unattested']),
 }).strict()
 
-const bindingSchema = z.object({
+export const bindingSchema = z.object({
   primary: z.string().min(1),
   environmentId: z.string().min(1),
   rootId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),

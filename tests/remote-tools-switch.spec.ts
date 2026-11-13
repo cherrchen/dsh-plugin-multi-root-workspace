@@ -70,7 +70,7 @@ const localToLocal = {
 const BROKER = { socketPath: '/broker/broker.sock', brokerUid: 999, credentialRoot: '/broker/credentials' }
 
 async function mountRow(
-  options: { remote?: { enabled?: boolean }; config?: { enabled?: boolean; broker?: boolean }; persisted?: boolean } = {},
+  options: { remote?: { enabled?: boolean }; config?: { enabled?: boolean; broker?: boolean; mode?: 'personal' | 'team' | 'hardened' }; persisted?: boolean } = {},
 ): Promise<{ hooks: () => SwitchHooks | undefined; live: { enabled: boolean } }> {
   world = await mountRemoteTools(fixture, { withTools: false, ...(options.remote === undefined ? {} : { remote: options.remote }) })
   probe.remotes = world.remotes
@@ -81,6 +81,7 @@ async function mountRow(
   const hooks = installSettings(world.ctx, live)
   const config = {
     ...(options.config?.enabled === undefined ? {} : { enabled: options.config.enabled }),
+    ...(options.config?.mode === undefined ? {} : { mode: options.config.mode }),
     ...(options.config?.broker === false ? {} : { broker: { config: BROKER } }),
   }
   await world.ctx.plugin({ name: 'remote-tools-switch', inject, apply: (ctx: Context) => applyRemoteTools(ctx, config) })
@@ -156,7 +157,7 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
   })
 
   it('still mounts nothing without a broker block even while the plane opens', async () => {
-    const { hooks, live } = await mountRow({ remote: {}, config: { enabled: false, broker: false } })
+    const { hooks, live } = await mountRow({ remote: {}, config: { enabled: false, broker: false, mode: 'hardened' } })
     await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
     live.enabled = true
     hooks()!.onChange()

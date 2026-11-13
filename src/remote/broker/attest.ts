@@ -45,7 +45,7 @@ const refuse = (reason: string): never => {
   throw Object.assign(new Error(reason), { code: 'destination-isolation-required' })
 }
 
-export function assertBrokerDestinations(manifest: DeploymentManifest): void {
+export function assertBrokerDestinations(manifest: DeploymentManifest, options: { relaxed?: boolean } = {}): void {
   const byId = new Map(manifest.environments.map(environment => [environment.environmentId, environment]))
   for (const binding of manifest.bindings) {
     const imports = (binding.transfers ?? []).filter(transfer => transfer.direction === 'import')
@@ -55,6 +55,9 @@ export function assertBrokerDestinations(manifest: DeploymentManifest): void {
       || destination.transfer?.destinationIsolation !== 'chroot-sftp') {
       refuse(`import binding "${binding.environmentId}/${binding.rootId}" requires an sftp destination declared destinationIsolation chroot-sftp`)
     }
+    // Team mode (ADR-0041 §3) accepts the shared build account also hosting
+    // execution: the independent-writer loop is skipped, chroot-sftp stays.
+    if (options.relaxed === true) continue
     for (const other of manifest.environments) {
       if (other.environmentId !== destination!.environmentId
         && other.namespace === destination!.namespace && other.account === destination!.account
@@ -75,7 +78,7 @@ function codeOf(error: unknown): string {
  * @param manifest - the same deployment manifest the broker reads (protected).
  * @returns an attested manager, or the first failed check.
  */
-export async function attestBroker(config: BrokerConfig, manifest: DeploymentManifest): Promise<BrokerAttestation> {
+export async function attestBroker(config: BrokerConfig, manifest: DeploymentManifest, options: { mode?: 'team' | 'hardened' } = {}): Promise<BrokerAttestation> {
   if (process.platform === 'win32') return unavailable('unsupported-platform', 'the credential broker is POSIX-only')
   const uid = process.getuid?.()
   if (uid === undefined) return unavailable('unsupported-platform', 'the Host has no POSIX uid')
@@ -84,10 +87,14 @@ export async function attestBroker(config: BrokerConfig, manifest: DeploymentMan
   if (config.brokerUid === uid) {
     return unavailable('broker-same-uid', 'the broker runs under the Host account; custody is not isolated')
   }
-  if (config.confinementProbe?.verified !== true) {
+  // ADR-0041 §3: team custody skips the deployment-evidence requirements
+  // (confinement probe, full-access exclusion) and the independent-writer
+  // loop; the chroot-sftp destination requirement stays. Hardened is §4.
+  const team = options.mode === 'team'
+  if (!team && config.confinementProbe?.verified !== true) {
     return unavailable('confinement-unproven', 'the deployment recorded no passing Agent-sandbox probe for the credential root and socket')
   }
-  if (config.fullAccessDisabled !== true) {
+  if (!team && config.fullAccessDisabled !== true) {
     return unavailable('full-access-unrestricted', 'the deployment has not excluded danger-full-access under the Host account')
   }
   if (manifest.environments.some(({ exec }) => exec !== undefined
@@ -95,7 +102,7 @@ export async function attestBroker(config: BrokerConfig, manifest: DeploymentMan
     return unavailable('broker-output-limit', `remote command output limits must be at most ${MAX_COMMAND_OUTPUT} bytes per stream with broker custody`)
   }
   try {
-    assertBrokerDestinations(manifest)
+    assertBrokerDestinations(manifest, { relaxed: team })
   } catch (error) {
     return unavailable(codeOf(error), error instanceof Error ? error.message : String(error))
   }

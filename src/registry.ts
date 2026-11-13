@@ -505,6 +505,7 @@ export class MultiRootRegistry extends Service {
     this.promptsRoot = typeof config.promptsRoot === 'string' && isAbsolute(config.promptsRoot) && config.promptsRoot !== ''
       ? config.promptsRoot
       : undefined
+    this.remoteConfig = config.remoteEnvironments
     this.remotePlane = new RemoteControlPlane(config.remoteEnvironments, ctx.logger, internals.loadRemoteManifest)
     this.recovery = new RecoveryScheduler({
       enabled: config.backgroundRecovery !== false,
@@ -1649,25 +1650,66 @@ export class MultiRootRegistry extends Service {
    * instead of the row config so a dedicated profile's `enabled: true` also
    * serves as their live default.
    */
+  private readonly remoteConfig: RemoteConfig | undefined
+
   get remoteEnabled(): boolean {
     return this.remotePlane.enabled
   }
 
+  /** The live custody mode (ADR-0041): personal | team | hardened. */
+  get remoteMode(): import('./remote/plane.ts').RemoteMode {
+    return this.remotePlane.mode
+  }
+
+  /** The loaded manifest digest (personal or deployment), when ready. */
+  get remoteManifestDigest(): string | undefined {
+    return this.remotePlane.manifestDigest
+  }
+
+  private readonly remoteListeners = new Set<() => void>()
+
+  /** Subscribe to remote plane rebinds (config, mode, manifest digest). */
+  onRemoteChange(listener: () => void): () => void {
+    this.remoteListeners.add(listener)
+    return () => { this.remoteListeners.delete(listener) }
+  }
+
+  private notifyRemoteChange(): void {
+    for (const listener of this.remoteListeners) {
+      try { listener() } catch (error) {
+        this.ctx.logger.warn(`multi-root registry: remote-change listener failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+
+  /** The personal-mode config path, when this row provides one. */
+  get remotePersonalPath(): string | undefined {
+    return this.remoteConfig?.personalPath
+  }
+
+  /** The personal-mode credential root, when this row provides one. */
+  get remoteCredentialRoot(): string | undefined {
+    return this.remoteConfig?.credentialRoot
+  }
+
   /**
-   * Re-evaluate the remote plane against a new live flag, serialized with
+   * Re-evaluate the remote plane against new live facts, serialized with
    * every other authority transition: teardown (remote-1 listener / remote
-   * domain / follower channel) runs against the old facts, the flag rebinds,
+   * domain / follower channel) runs against the old facts, the facts rebind,
    * then the owner or follower remote open runs for the current authority
    * shape. Disabling restores the exact `disabled` state — no remote-1
    * listener and no remote domain stays open — while v1 keeps working.
    */
-  async configureRemote(enabled: boolean): Promise<void> {
+  async configureRemote(next: import('./remote/plane.ts').RemoteLiveConfig): Promise<void> {
+    let rebound = false
     await this.serializeAuthority(async () => {
       if (this.disposed) return
-      if (this.remotePlane.enabled === enabled) return
+      const same = this.remotePlane.enabled === next.enabled && this.remotePlane.mode === next.mode
+      if (same && (!next.enabled || next.manifestPath === undefined || next.manifestPath === this.remotePlane.liveManifestPath)) return
+      rebound = true
       this.remotePlane.dropFollower()
       await this.remotePlane.closeOwner()
-      this.remotePlane.configure(enabled)
+      this.remotePlane.configure(next)
       if (this.authorityState.kind === 'follower') {
         await this.remotePlane.connectFollower(this.medium!, this.authorityState.epoch)
       } else if (this.authorityState.kind === 'active') {
@@ -1675,6 +1717,36 @@ export class MultiRootRegistry extends Service {
           (method, args) => this.dispatchRemote(method as RemoteMethod, args))
       }
     })
+    // Notify only on a real rebind — a no-op read must not re-queue the
+    // listener's own sync (it would loop forever).
+    if (rebound) this.notifyRemoteChange()
+  }
+
+  /**
+   * Personal mode (ADR-0041 §2): before every remote snapshot/list/admit/
+   * add/remove on BOTH authority shapes, re-stat the personal config. A
+   * changed file reloads in place; a changed digest makes the owner close and
+   * re-listen remote-1 (the domain stays open) and makes the follower drop
+   * and reconnect — all inside this queue.
+   */
+  async refreshRemotePersonal(): Promise<void> {
+    if (this.remotePlane.mode !== 'personal' || !this.remotePlane.enabled) return
+    let reloaded = false
+    await this.serializeAuthority(async () => {
+      if (this.disposed) return
+      const result = this.remotePlane.refreshPersonal()
+      if (result !== 'reloaded') return
+      reloaded = true
+      if (this.authorityState.kind === 'follower') {
+        this.remotePlane.dropFollower()
+        await this.remotePlane.connectFollower(this.medium!, this.authorityState.epoch)
+      } else if (this.authorityState.kind === 'active') {
+        // The domain and its records stay; only the listener re-binds the digest.
+        await this.remotePlane.openOwner(this.authorityStorageContext, this.medium!, this.operationEpoch!,
+          (method, args) => this.dispatchRemote(method as RemoteMethod, args))
+      }
+    })
+    if (reloaded) this.notifyRemoteChange()
   }
 
   /** Owner-side injection point for endpoint verification (none ships in G1a). */
@@ -1699,6 +1771,7 @@ export class MultiRootRegistry extends Service {
    */
   async remoteList(primaryRoot: string): Promise<RemoteSnapshotReply> {
     await this.ensureAuthority()
+    await this.refreshRemotePersonal()
     this.requireRemote()
     const key = primaryKey(primaryRoot)
     if (this.client) return remoteSnapshotSchema.parse(await this.remotePlane.remoteRequest('remote-snapshot', [key])) as RemoteSnapshotReply
@@ -1713,6 +1786,7 @@ export class MultiRootRegistry extends Service {
    */
   async addRemote(primaryRoot: string, ref: RemoteEndpointRef): Promise<RemoteSnapshotReply> {
     await this.ensureAuthority()
+    await this.refreshRemotePersonal()
     this.requireRemote()
     if (typeof ref?.environmentId !== 'string' || ref.environmentId === '' || typeof ref?.rootId !== 'string' || ref.rootId === '' || Object.keys(ref).length !== 2) {
       throw new RemoteAdmissionError('invalid-arguments', 'a remote endpoint reference is exactly { environmentId, rootId }')
@@ -1727,6 +1801,7 @@ export class MultiRootRegistry extends Service {
   /** Remove one remote grant. */
   async removeRemote(primaryRoot: string, ref: RemoteEndpointRef): Promise<RemoteSnapshotReply> {
     await this.ensureAuthority()
+    await this.refreshRemotePersonal()
     this.requireRemote()
     if (this.client) return remoteSnapshotSchema.parse(await this.remotePlane.remoteRequest('remote-remove', [primaryRoot, ref])) as RemoteSnapshotReply
     this.requireActive()
@@ -1754,6 +1829,7 @@ export class MultiRootRegistry extends Service {
     }
     if (this.disposed) deny('remote-unavailable', 'the registry is disposed')
     await this.ensureAuthority()
+    try { await this.refreshRemotePersonal() } catch { /* a reload failure lands in status.reason below */ }
     if (this.remotePlane.status.state !== 'ready') {
       deny('remote-unavailable', `the remote control plane is ${this.remotePlane.status.state}${this.remotePlane.status.reason === undefined ? '' : `: ${this.remotePlane.status.reason}`}`)
     }
