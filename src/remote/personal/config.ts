@@ -6,6 +6,7 @@
  * records and remote-1 never fork. POSIX only.
  */
 import { existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeSync, type Stats, closeSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { dirname, isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
@@ -71,14 +72,20 @@ export interface PersonalFileIdentity {
   readonly ino: number
   readonly size: number
   readonly mtimeMs: number
+  /**
+   * SHA-256 of the bytes: stat alone misses a same-size in-place rewrite
+   * inside one mtime tick (coarse-timestamp filesystems), so the content
+   * decides. The file is small; reading it per refresh is cheap.
+   */
+  readonly hash: string
 }
 
-export function statIdentity(info: Stats): PersonalFileIdentity {
-  return { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs }
+export function statIdentity(info: Stats, content: string | Buffer): PersonalFileIdentity {
+  return { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs, hash: createHash('sha256').update(content).digest('hex') }
 }
 
 export function sameIdentity(a: PersonalFileIdentity, b: PersonalFileIdentity): boolean {
-  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs
+  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.hash === b.hash
 }
 
 /**
@@ -184,7 +191,7 @@ export function loadPersonalConfig(path: string): PersonalConfig {
 export function loadPersonalManifest(path: string): PersonalManifest {
   if (!existsSync(path)) {
     const empty = toDeploymentManifest({ schemaVersion: 1, revision: 0, environments: [], bindings: [] }, path)
-    return { ...empty, revision: 0, identity: { dev: 0, ino: 0, size: 0, mtimeMs: 0 } }
+    return { ...empty, revision: 0, identity: { dev: 0, ino: 0, size: 0, mtimeMs: 0, hash: '' } }
   }
   const text = readFileSync(path, 'utf8')
   let data: unknown
@@ -199,7 +206,7 @@ export function loadPersonalManifest(path: string): PersonalManifest {
   }
   checkPersonalFileProtection(path, parsed.data.bindings)
   const { manifest, digest } = toDeploymentManifest(parsed.data, path)
-  return { manifest, digest, revision: parsed.data.revision, identity: statIdentity(statSync(path)) }
+  return { manifest, digest, revision: parsed.data.revision, identity: statIdentity(statSync(path), text) }
 }
 
 /**

@@ -17,7 +17,7 @@ import { bindingDigest, loadDeploymentManifest, ManifestError, type DeploymentMa
 import { loadPersonalManifest, statIdentity, sameIdentity, type PersonalFileIdentity } from './personal/config.ts'
 import { findBinding, grantState, remoteDomainSpec, REMOTE_TABLE_NAME, type PersistedRemoteGrants } from './records.ts'
 import { RemoteClient, RemoteServer } from './protocol.ts'
-import { statSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 
 /** The three SSH custody modes (ADR-0041). */
 export type RemoteMode = 'personal' | 'team' | 'hardened'
@@ -120,7 +120,7 @@ export class RemoteControlPlane {
     const target = path ?? this.config?.personalPath
     if (target === undefined) return 'disabled'
     try {
-      const identity = statIdentity(statSync(target))
+      const identity = statIdentity(statSync(target), readFileSync(target))
       if (this.personalIdentity !== undefined && sameIdentity(identity, this.personalIdentity)) return 'unchanged'
     } catch {
       if (this.personalIdentity === undefined || (this.personalIdentity.dev === 0 && this.personalIdentity.size === 0)) return 'unchanged'
