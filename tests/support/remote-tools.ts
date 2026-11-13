@@ -61,8 +61,9 @@ export interface RemoteToolsWorldOptions {
    * The registry's `remoteEnvironments` overlay. Default `{ enabled: true }`;
    * `{}` ships `manifestPath` WITHOUT `enabled` (the default-bundle shape, so
    * the live switch owns the plane), `{ enabled: false }` sets it explicitly.
+   * `personalPath`/`credentialRoot` feed the personal-custody plane.
    */
-  readonly remote?: { readonly enabled?: boolean }
+  readonly remote?: { readonly enabled?: boolean; readonly personalPath?: string; readonly credentialRoot?: string }
   /** Per-environment extra files, keyed by environment and absolute path. */
   readonly seed?: Readonly<Record<string, Readonly<Record<string, string>> | undefined>>
 }

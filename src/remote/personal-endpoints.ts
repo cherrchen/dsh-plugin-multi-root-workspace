@@ -15,6 +15,18 @@ import { link, linkStatus, recordKnownHost, renderSshConfig } from './personal/s
 import { primaryKey } from '../roots.ts'
 
 const scans = new HostKeyScans(defaultExec)
+const injectedScans = new WeakMap<ExecFile, HostKeyScans>()
+const scansFor = (exec: ExecFile): HostKeyScans => {
+  if (exec === defaultExec) return scans
+  let entry = injectedScans.get(exec)
+  if (entry === undefined) { entry = new HostKeyScans(exec); injectedScans.set(exec, entry) }
+  return entry
+}
+
+/** Test seam: inject the exec used for every external command. */
+export interface PersonalDeps {
+  readonly exec?: ExecFile
+}
 
 /** Serialize personal mutations per Host (R8); CAS still guards cross-Host races. */
 let mutationChain: Promise<unknown> = Promise.resolve()
@@ -79,19 +91,21 @@ function findEnvironment(config: PersonalConfig, environmentId: string): Persona
  * @returns the answer value (`sshState`, scan keys, or a connection test).
  */
 export async function handlePersonalEndpoint(
-  ctx: Context, registry: MultiRootRegistry, primary: string, call: SshCall,
+  ctx: Context, registry: MultiRootRegistry, primary: string, call: SshCall, deps: PersonalDeps = {},
 ): Promise<unknown> {
   if (call.endpoint !== 'sshState' && call.endpoint !== 'sshHostKeyScan' && call.endpoint !== 'sshEnvironmentTest') {
-    return await enqueueMutation(async () => await runPersonalEndpoint(ctx, registry, primary, call))
+    return await enqueueMutation(async () => await runPersonalEndpoint(ctx, registry, primary, call, deps))
   }
-  return await runPersonalEndpoint(ctx, registry, primary, call)
+  return await runPersonalEndpoint(ctx, registry, primary, call, deps)
 }
 
 async function runPersonalEndpoint(
-  ctx: Context, registry: MultiRootRegistry, primary: string, call: SshCall,
+  ctx: Context, registry: MultiRootRegistry, primary: string, call: SshCall, deps: PersonalDeps,
 ): Promise<unknown> {
   const paths = requirePersonal(registry)
-  const store = new CredentialStore(paths.credentialRoot)
+  const exec = deps.exec ?? defaultExec
+  const activeScans = scansFor(exec)
+  const store = new CredentialStore(paths.credentialRoot, exec)
   const after = async () => await sshState(registry, paths, primary)
   switch (call.endpoint) {
     case 'sshState':
@@ -113,7 +127,7 @@ async function runPersonalEndpoint(
       return await after()
     }
     case 'sshHostKeyScan': {
-      const { token, keys } = await scans.scan(call.hostname, call.port)
+      const { token, keys } = await activeScans.scan(call.hostname, call.port)
       return { token, keys: keys.map(({ type, fingerprint }) => ({ type, fingerprint })) }
     }
     case 'sshEnvironmentSave': {
@@ -125,7 +139,7 @@ async function runPersonalEndpoint(
         // time, then check the fingerprint against the SAME known_hosts set.
         const { hostKeyFingerprint, parseSshConfig } = await import('./ssh-environment.ts')
         const execAdapter = async (file: string, args: readonly string[], input?: string) =>
-          await defaultExec(file, args, { ...(input === undefined ? {} : { input }) })
+          await exec(file, args, { ...(input === undefined ? {} : { input }) })
         let identity
         try {
           identity = parseSshConfig((await execAdapter('ssh', ['-G', draft.credential.alias])).stdout, { relaxed: true })
@@ -144,7 +158,7 @@ async function runPersonalEndpoint(
         if (call.hostKeyToken === undefined) {
           throw new RemoteAdmissionError('host-key-token-required', 'a managed environment requires a host key scan token')
         }
-        const lines = scans.resolve(call.hostKeyToken, call.fingerprint)
+        const lines = activeScans.resolve(call.hostKeyToken, call.fingerprint)
         recordKnownHost(paths.credentialRoot, draft.endpoint.hostname, draft.endpoint.port, lines)
         hostKey = call.fingerprint
       }
@@ -180,7 +194,7 @@ async function runPersonalEndpoint(
     }
     case 'sshEnvironmentTest': {
       const config = loadPersonalConfig(paths.personalPath)
-      return await testConnection(defaultExec, findEnvironment(config, call.environmentId), paths.credentialRoot)
+      return await testConnection(exec, findEnvironment(config, call.environmentId), paths.credentialRoot)
     }
     case 'sshHelperInstall': {
       const config = loadPersonalConfig(paths.personalPath)
@@ -191,7 +205,7 @@ async function runPersonalEndpoint(
       const hostHelperPath = require.resolve('@deepseek-ai/dsh-ssh/lib/helper.js')
       const version = sshPackageVersion('@deepseek-ai/dsh-ssh')
       if (version === undefined) throw new RemoteAdmissionError('helper-install-failed', 'the host dsh-ssh version is unknown')
-      const helper = await installHelper(defaultExec, environment, paths.credentialRoot, { sshVersion: version, hostHelperPath, nodePath: call.nodePath })
+      const helper = await installHelper(exec, environment, paths.credentialRoot, { sshVersion: version, hostHelperPath, nodePath: call.nodePath })
       return await mutate(registry, primary, paths, call.revision, current => ({
         ...current,
         environments: current.environments.map(entry => entry.environmentId === call.environmentId
@@ -209,7 +223,7 @@ async function runPersonalEndpoint(
       if (secretFile === undefined) throw new RemoteAdmissionError('credential-not-found', 'the credential secret is missing')
       const accessKey = await store.generate(`env-${environment.environmentId}`, { purpose: 'access-key', environmentId: environment.environmentId })
       try {
-        await installAccessKey(defaultExec, environment, paths.credentialRoot, { publicKey: accessKey.publicKey ?? '' }, secretFile)
+        await installAccessKey(exec, environment, paths.credentialRoot, { publicKey: accessKey.publicKey ?? '' }, secretFile)
       } catch (error) {
         try { store.remove(accessKey.id, () => false) } catch { /* best effort: no orphan key */ }
         throw error

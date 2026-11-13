@@ -24,6 +24,8 @@ export type RemoteMode = 'personal' | 'team' | 'hardened'
 
 export interface RemoteConfig {
   readonly enabled?: boolean
+  /** Initial custody mode; the live value always comes through configure(). */
+  readonly mode?: RemoteMode
   readonly manifestPath?: string
   /** Personal-mode config file (user-owned); also enables personal mode. */
   readonly personalPath?: string
@@ -66,7 +68,7 @@ export class RemoteControlPlane {
   constructor(private readonly config: RemoteConfig | undefined, private readonly logger: { warn(message: string): unknown }, private readonly load: typeof loadDeploymentManifest = loadDeploymentManifest) {
     this.state = { state: 'disabled' }
     this.enabled = false
-    this.configure({ enabled: config?.enabled === true, mode: 'hardened', manifestPath: config?.manifestPath })
+    this.configure({ enabled: config?.enabled === true, mode: config?.mode ?? 'hardened', manifestPath: config?.manifestPath })
   }
 
   /**

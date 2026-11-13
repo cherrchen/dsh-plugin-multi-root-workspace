@@ -5,6 +5,8 @@
  * gated tool subtree (guard, attestation, tools, verifier, projection)
  * together.
  */
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { apply as applyRemoteTools, inject } from '../src/remote/tools.ts'
@@ -32,6 +34,20 @@ vi.mock('../src/remote/broker/attest.ts', async () => {
       return { status: 'attested', connection: {}, manager: new FakeManager(manifest, probe.remotes, probe.backends) }
     },
   }
+})
+
+// Personal custody builds its manager directly (no broker); the fake manager
+// stands in so admission runs end-to-end without touching ssh(1).
+vi.mock('../src/remote/ssh-environment.ts', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../src/remote/ssh-environment.ts')>()
+  const { FakeManager } = await import('./support/fake-remote.ts')
+  class TestManager {
+    constructor(options: { manifest: never }) {
+      if (probe.remotes === undefined || probe.backends === undefined) throw new Error('test fake remotes not installed')
+      return new FakeManager(options.manifest, probe.remotes, probe.backends) as never
+    }
+  }
+  return { ...original, SshEnvironmentManager: TestManager }
 })
 
 let fixture: FixtureWorkspace
@@ -70,7 +86,7 @@ const localToLocal = {
 const BROKER = { socketPath: '/broker/broker.sock', brokerUid: 999, credentialRoot: '/broker/credentials' }
 
 async function mountRow(
-  options: { remote?: { enabled?: boolean }; config?: { enabled?: boolean; broker?: boolean; mode?: 'personal' | 'team' | 'hardened' }; persisted?: boolean } = {},
+  options: { remote?: { enabled?: boolean; personalPath?: string; credentialRoot?: string }; config?: { enabled?: boolean; broker?: boolean; mode?: 'personal' | 'team' | 'hardened' }; persisted?: boolean } = {},
 ): Promise<{ hooks: () => SwitchHooks | undefined; live: { enabled: boolean } }> {
   world = await mountRemoteTools(fixture, { withTools: false, ...(options.remote === undefined ? {} : { remote: options.remote }) })
   probe.remotes = world.remotes
@@ -164,5 +180,49 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     await expect.poll(() => world!.stack.registry.remoteStatus.state, { timeout: 5_000 }).toBe('ready')
     await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(0)
     expect(await world!.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
+  })
+
+  it('mounts the personal host manager and admits remote_copy end-to-end', async () => {
+    const personalPath = join(fixture.base, 'remote-personal.json')
+    const credentialRoot = join(fixture.base, 'cred')
+    writeFileSync(personalPath, JSON.stringify({
+      schemaVersion: 1, revision: 0,
+      environments: [{
+        environmentId: 'build', platform: 'linux',
+        endpoint: { hostname: 'build.internal', port: 22, user: 'builder' },
+        credential: { kind: 'ssh-config', alias: 'build-host' },
+        hostKey: `SHA256:${'A'.repeat(43)}`, helper: null,
+        workspace: '/srv/root',
+        transfer: { maxBytes: 1024 * 1024, timeoutMs: 10_000 },
+      }],
+      bindings: [{
+        primary: fixture.workspace, environmentId: 'build', rootId: 'app', path: '/srv/root',
+        actions: ['read', 'write', 'exec'],
+        transfers: [
+          { direction: 'import', peer: { environmentId: 'local', rootId: 'primary' } },
+          { direction: 'export', peer: { environmentId: 'local', rootId: 'primary' } },
+        ],
+      }],
+    }), { mode: 0o600 })
+    const { hooks, live } = await mountRow({
+      remote: { enabled: false, personalPath, credentialRoot },
+      config: { enabled: false, broker: false, mode: 'personal' },
+    })
+    await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
+    world!.remotes.get('build')!.seed('/srv/root/src/a.txt', 'personal bytes\n')
+
+    live.enabled = true
+    hooks()!.onChange()
+    await expect.poll(() => world!.stack.registry.remoteStatus.state, { timeout: 5_000 }).toBe('ready')
+    expect(world!.stack.registry.remoteMode).toBe('personal')
+    // Personal custody never talks to a broker.
+    expect(probe.calls).toBe(0)
+
+    await registerRemote(world!, 'build', 'app')
+    const copy = await world!.call('remote_copy', {
+      from: { environmentId: 'build', rootId: 'app', relativePath: 'src/a.txt' },
+      to: { environmentId: 'local', rootId: 'primary', relativePath: 'imported.txt' },
+    })
+    expect(copy, JSON.stringify(copy)).toMatchObject({ status: 'committed' })
   })
 })

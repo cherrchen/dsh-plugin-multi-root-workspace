@@ -107,6 +107,7 @@ export function link(credentialRoot: string, home: string = homedir()): LinkStat
 
 /** The askpass helper (0700): prints the credential-root secret to stdout. */
 export function renderAskpass(credentialRoot: string): void {
+  if (!existsSync(credentialRoot)) mkdirSync(credentialRoot, { recursive: true, mode: 0o700 })
   writeFileSync(join(credentialRoot, 'askpass.sh'),
     '#!/bin/sh\nexec cat "$DSH_SSH_SECRET_FILE"\n',
     { mode: 0o700 })
