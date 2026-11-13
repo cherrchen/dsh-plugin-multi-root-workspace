@@ -125,7 +125,7 @@ export function bindingDigest(environment: RemoteEnvironment, binding: RemoteBin
 }
 
 /** The remote-path rule: POSIX absolute, normalized, bounded. */
-function checkRemotePath(path: string): void {
+export function checkRemotePath(path: string): void {
   const bad = !path.startsWith('/') || path.includes('\0')
     || path.split('/').slice(1).some(segment => segment === '' || segment === '.' || segment === '..')
   if (bad) throw new ManifestError('invalid-manifest', `a binding path must be a normalized absolute POSIX path: ${JSON.stringify(path)}`)

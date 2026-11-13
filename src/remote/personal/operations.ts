@@ -10,6 +10,7 @@ import { createRequire } from 'node:module'
 import type { ExecFile } from './credentials.ts'
 import { managedHostAlias, renderAskpass } from './ssh-files.ts'
 import type { PersonalEnvironment } from './config.ts'
+import { checkRemotePath } from '../manifest.ts'
 
 export class RemoteOperationError extends Error {
   constructor(readonly code: string, message: string) {
@@ -90,7 +91,7 @@ export async function testConnection(exec: ExecFile, environment: PersonalEnviro
   const { stdout } = await exec('ssh', [...args, 'uname -s; command -v node || true; node -v 2>/dev/null || true'], { timeoutMs: 30_000 })
   const [uname = '', nodePath = '', nodeVersion = ''] = stdout.split('\n').map(line => line.trim())
   return {
-    platform: uname === '' ? 'unknown' : uname.toLowerCase() === 'darwin' ? 'darwin' : 'linux',
+    platform: uname === 'Linux' ? 'linux' : uname === 'Darwin' ? 'darwin' : 'unsupported',
     nodePath: nodePath === '' ? undefined : nodePath,
     nodeVersion: nodeVersion === '' ? undefined : nodeVersion,
   }
@@ -118,9 +119,14 @@ export interface HelperInstallResult {
   readonly sha256: string
 }
 
+/** Single-quote a value for a remote command string. */
+const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`
+
 /**
  * npm-install the host's exact dsh-ssh version on the remote and verify the
- * remote helper.js hash against the HOST's resolved copy.
+ * remote helper.js hash against the HOST's resolved copy. The recorded
+ * nodePath is always an absolute normalized POSIX path — resolved with the
+ * same remote `command -v node` as `testConnection` when not supplied.
  */
 export async function installHelper(
   exec: ExecFile,
@@ -131,19 +137,33 @@ export async function installHelper(
   const version = options.sshVersion
   const dir = `.dsh-helper/${version}`
   const args = sshArgs(environment, credentialRoot, ['-o', 'BatchMode=yes'])
-  const node = options.nodePath ?? 'node'
-  const install = `mkdir -p ~/${dir} && npm install --prefix ~/${dir} --no-audit --no-fund --omit=dev @deepseek-ai/dsh-ssh@${version}`
+  let nodePath = options.nodePath
+  if (nodePath === undefined) {
+    const { stdout } = await exec('ssh', [...args, 'command -v node'], { timeoutMs: 15_000 })
+    nodePath = stdout.split('\n')[0]!.trim()
+  }
+  try {
+    checkRemotePath(nodePath)
+  } catch {
+    throw new RemoteOperationError('helper-node-missing', `the remote node path is missing or not an absolute POSIX path: ${JSON.stringify(nodePath)}`)
+  }
+  const install = `mkdir -p ~/${shellQuote(dir)} && npm install --prefix ~/${shellQuote(dir)} --no-audit --no-fund --omit=dev ${shellQuote(`@deepseek-ai/dsh-ssh@${version}`)}`
   await exec('ssh', [...args, install], { timeoutMs: 300_000 })
-  const helperPath = `~/${dir}/node_modules/@deepseek-ai/dsh-ssh/lib/helper.js`
-  const { stdout } = await exec('ssh', [...args, `sha256sum ${helperPath} 2>/dev/null || shasum -a 256 ${helperPath}`], { timeoutMs: 30_000 })
+  const { stdout: home } = await exec('ssh', [...args, 'printf %s "$HOME"'], { timeoutMs: 15_000 })
+  const helperAbs = `${home.trim()}/${dir}/node_modules/@deepseek-ai/dsh-ssh/lib/helper.js`
+  try {
+    checkRemotePath(helperAbs)
+  } catch {
+    throw new RemoteOperationError('helper-install-failed', 'the remote $HOME did not resolve to an absolute path')
+  }
+  const { stdout } = await exec('ssh', [...args, `sha256sum ${shellQuote(helperAbs)} 2>/dev/null || shasum -a 256 ${shellQuote(helperAbs)}`], { timeoutMs: 30_000 })
   const remoteHash = /^[0-9a-f]{64}/.exec(stdout.trim())?.[0]
   if (remoteHash === undefined) throw new RemoteOperationError('helper-install-failed', 'the remote helper hash could not be read')
   const hostHash = createHash('sha256').update(readFileSync(options.hostHelperPath)).digest('hex')
   if (remoteHash !== hostHash) {
     throw new RemoteOperationError('helper-hash-mismatch', `the remote helper.js hash does not match the host's ${version} copy`)
   }
-  const { stdout: home } = await exec('ssh', [...args, 'printf %s "$HOME"'], { timeoutMs: 15_000 })
-  return { nodePath: node, helperPath: `${home.trim()}/${dir}/node_modules/@deepseek-ai/dsh-ssh/lib/helper.js`, sha256: remoteHash }
+  return { nodePath, helperPath: helperAbs, sha256: remoteHash }
 }
 
 /**

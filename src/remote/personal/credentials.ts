@@ -25,6 +25,9 @@ export interface CredentialView {
   readonly publicKey?: string | undefined
   readonly fingerprint?: string | undefined
   readonly createdAt: string
+  /** Set on auto-generated per-environment access keys; the UI groups them. */
+  readonly purpose?: 'access-key' | undefined
+  readonly environmentId?: string | undefined
 }
 
 interface CredentialRecord extends CredentialView {
@@ -74,15 +77,15 @@ export class CredentialStore {
   }
 
   /** Generate an ed25519 keypair with an empty passphrase. */
-  async generate(label: string): Promise<CredentialView> {
+  async generate(label: string, meta?: { purpose: 'access-key'; environmentId: string }): Promise<CredentialView> {
     const id = newId()
     const keyPath = join(this.root, 'keys', id)
     await this.exec('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', `dsh-${id}`, '-f', keyPath], { timeoutMs: 30_000 })
     const publicKey = readFileSync(`${keyPath}.pub`, 'utf8').trim()
     const fingerprint = await this.fingerprintOf(keyPath)
-    const record: CredentialRecord = { id, label, kind: 'key', publicKey, fingerprint, createdAt: new Date().toISOString() }
+    const record: CredentialRecord = { id, label, kind: 'key', publicKey, fingerprint, createdAt: new Date().toISOString(), ...(meta === undefined ? {} : meta) }
     this.save([...this.records(), record])
-    return { id, label, kind: 'key', publicKey, fingerprint, createdAt: record.createdAt }
+    return { id, label, kind: 'key', publicKey, fingerprint, createdAt: record.createdAt, ...(meta === undefined ? {} : meta) }
   }
 
   /**
