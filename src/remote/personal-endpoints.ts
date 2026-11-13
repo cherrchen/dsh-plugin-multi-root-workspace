@@ -16,6 +16,14 @@ import { primaryKey } from '../roots.ts'
 
 const scans = new HostKeyScans(defaultExec)
 
+/** Serialize personal mutations per Host (R8); CAS still guards cross-Host races. */
+let mutationChain: Promise<unknown> = Promise.resolve()
+const enqueueMutation = <T>(job: () => Promise<T>): Promise<T> => {
+  const result = mutationChain.then(job)
+  mutationChain = result.then(() => undefined, () => undefined)
+  return result
+}
+
 interface PersonalPaths {
   readonly personalPath: string
   readonly credentialRoot: string
@@ -73,6 +81,15 @@ function findEnvironment(config: PersonalConfig, environmentId: string): Persona
 export async function handlePersonalEndpoint(
   ctx: Context, registry: MultiRootRegistry, primary: string, call: SshCall,
 ): Promise<unknown> {
+  if (call.endpoint !== 'sshState' && call.endpoint !== 'sshHostKeyScan' && call.endpoint !== 'sshEnvironmentTest') {
+    return await enqueueMutation(async () => await runPersonalEndpoint(ctx, registry, primary, call))
+  }
+  return await runPersonalEndpoint(ctx, registry, primary, call)
+}
+
+async function runPersonalEndpoint(
+  ctx: Context, registry: MultiRootRegistry, primary: string, call: SshCall,
+): Promise<unknown> {
   const paths = requirePersonal(registry)
   const store = new CredentialStore(paths.credentialRoot)
   const after = async () => await sshState(registry, paths, primary)
@@ -100,18 +117,25 @@ export async function handlePersonalEndpoint(
       return { token, keys: keys.map(({ type, fingerprint }) => ({ type, fingerprint })) }
     }
     case 'sshEnvironmentSave': {
-      const draft = call.environment
+      const draft = { ...call.environment, endpoint: { ...call.environment.endpoint } }
       let hostKey: string
       if (draft.credential.kind === 'ssh-config') {
-        // The user's own alias: the fingerprint must match THEIR known_hosts.
-        const { hostKeyFingerprint } = await import('./ssh-environment.ts')
-        const { homedir } = await import('node:os')
-        const { join } = await import('node:path')
-        const exec: ExecFile = defaultExec
-        const files = [join(homedir(), '.ssh', 'known_hosts')]
-        const lookup = draft.endpoint.port === 22 ? draft.endpoint.hostname : `[${draft.endpoint.hostname}]:${draft.endpoint.port}`
-        const { fingerprint } = await hostKeyFingerprint(lookup, files,
-          async (file, args, input) => await exec(file, args, { ...(input === undefined ? {} : { input }) }))
+        // R4: never trust the draft's endpoint — resolve the user's own alias
+        // with ssh -G (relaxed parse) exactly as the manager does at connect
+        // time, then check the fingerprint against the SAME known_hosts set.
+        const { hostKeyFingerprint, parseSshConfig } = await import('./ssh-environment.ts')
+        const execAdapter = async (file: string, args: readonly string[], input?: string) =>
+          await defaultExec(file, args, { ...(input === undefined ? {} : { input }) })
+        let identity
+        try {
+          identity = parseSshConfig((await execAdapter('ssh', ['-G', draft.credential.alias])).stdout, { relaxed: true })
+        } catch (error) {
+          throw new RemoteAdmissionError('host-identity-unverifiable', error instanceof Error ? error.message : String(error))
+        }
+        draft.endpoint = { hostname: identity.hostname, port: Number.parseInt(identity.port, 10) || 22, user: identity.user }
+        const files = [...identity.knownHostsFiles, ...identity.globalKnownHostsFiles]
+        const { keys, fingerprint } = await hostKeyFingerprint(identity.lookupHost, files, execAdapter)
+        if (keys !== 1) throw new RemoteAdmissionError('host-identity-unverifiable', `host "${identity.lookupHost}" resolves ${keys} known_hosts keys, exactly one required`)
         if (fingerprint !== call.fingerprint) {
           throw new RemoteAdmissionError('host-key-mismatch', 'the confirmed fingerprint does not match the user known_hosts')
         }
@@ -128,16 +152,32 @@ export async function handlePersonalEndpoint(
         ...config,
         environments: [
           ...config.environments.filter(environment => environment.environmentId !== draft.environmentId),
-          { ...draft, environmentId: draft.environmentId, hostKey, helper: config.environments.find(environment => environment.environmentId === draft.environmentId)?.helper ?? null } as PersonalEnvironment,
+          { ...draft, environmentId: draft.environmentId, hostKey, helper: (() => {
+              const previous = config.environments.find(environment => environment.environmentId === draft.environmentId)
+              if (previous === undefined) return null
+              const sameTarget = previous.endpoint.hostname === draft.endpoint.hostname
+                && previous.endpoint.port === draft.endpoint.port
+                && previous.endpoint.user === draft.endpoint.user
+                && previous.credential.kind === draft.credential.kind
+              return sameTarget ? previous.helper : null
+            })() } as PersonalEnvironment,
         ],
       }))
     }
-    case 'sshEnvironmentRemove':
-      return await mutate(registry, primary, paths, call.revision, config => ({
+    case 'sshEnvironmentRemove': {
+      const removed = loadPersonalConfig(paths.personalPath).environments.find(environment => environment.environmentId === call.environmentId)
+      const state = await mutate(registry, primary, paths, call.revision, config => ({
         ...config,
         environments: config.environments.filter(environment => environment.environmentId !== call.environmentId),
         bindings: config.bindings.filter(binding => binding.environmentId !== call.environmentId),
       }))
+      // R6: the removed environment's access key is best-effort cleanup.
+      const accessKeyId = removed?.credential.kind === 'managed' ? removed.credential.accessKeyId : undefined
+      if (accessKeyId !== undefined) {
+        try { store.remove(accessKeyId, () => false) } catch { /* already gone */ }
+      }
+      return state
+    }
     case 'sshEnvironmentTest': {
       const config = loadPersonalConfig(paths.personalPath)
       return await testConnection(defaultExec, findEnvironment(config, call.environmentId), paths.credentialRoot)
@@ -167,8 +207,13 @@ export async function handlePersonalEndpoint(
       }
       const secretFile = store.secretFileOf(environment.credential.credentialId)
       if (secretFile === undefined) throw new RemoteAdmissionError('credential-not-found', 'the credential secret is missing')
-      const accessKey = await store.generate(`env-${environment.environmentId}`)
-      await installAccessKey(defaultExec, environment, paths.credentialRoot, { publicKey: accessKey.publicKey ?? '' }, secretFile)
+      const accessKey = await store.generate(`env-${environment.environmentId}`, { purpose: 'access-key', environmentId: environment.environmentId })
+      try {
+        await installAccessKey(defaultExec, environment, paths.credentialRoot, { publicKey: accessKey.publicKey ?? '' }, secretFile)
+      } catch (error) {
+        try { store.remove(accessKey.id, () => false) } catch { /* best effort: no orphan key */ }
+        throw error
+      }
       return await mutate(registry, primary, paths, call.revision, current => ({
         ...current,
         environments: current.environments.map(entry => entry.environmentId === call.environmentId

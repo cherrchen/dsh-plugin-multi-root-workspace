@@ -221,6 +221,17 @@ export function savePersonalConfig(path: string, next: PersonalConfig, expectedR
   } else if (expectedRevision !== 0) {
     throw new ManifestError('personal-config-conflict', `the personal config was created concurrently (expected revision ${expectedRevision}); reload and retry`)
   }
+  // Validate BEFORE writing: a config that fails the schema or the manifest
+  // semantics must never land on disk (it would fail the whole plane).
+  const checked = personalConfigSchema.safeParse(next)
+  if (!checked.success) {
+    throw new ManifestError('personal-config-invalid', `${path}: ${checked.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`)
+  }
+  try {
+    toDeploymentManifest(checked.data, path)
+  } catch (error) {
+    throw new ManifestError('personal-config-invalid', `${path}: ${error instanceof Error ? error.message : String(error)}`)
+  }
   const dir = dirname(path)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
   const temp = `${path}.tmp-${process.pid}`

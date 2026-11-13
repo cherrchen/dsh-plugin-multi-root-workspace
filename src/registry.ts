@@ -1936,6 +1936,8 @@ export class MultiRootRegistry extends Service {
     if (method === 'hello') return null
     const primary = String(args[0])
     if (!isAbsolute(primary)) throw new RemoteAdmissionError('invalid-arguments', 'remote primary must be absolute')
+    // R7: follower-issued requests must see a changed personal file too.
+    await this.refreshRemotePersonal()
     const key = primaryKey(primary)
     switch (method) {
       case 'remote-snapshot': return await this.serialize(key, async () => this.remotePlane.snapshot(key, this.operationEpoch!))
