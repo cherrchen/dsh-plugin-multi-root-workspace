@@ -110,3 +110,36 @@
 5. 更新 `README` 的支持矩阵、`AGENTS.md` 的兼容契约段与路线账本的执行证据；`CHANGELOG` 条目随实际发版的发布流程写入，本分支不创建版本号或 tag。
 
 执行证据、平台覆盖与发布状态只维护在[路线图账本](../plans/active/2026-09-12-multi-root-workspace.md)。
+
+## 0.2.2-rc.3 后续审查（2026-11-13）
+
+上游 tag `dsh-v0.2.2-rc.3` 指向 `38a6a5c965aa99ab525161efb7cc5cf1fe62fced`，npm 已发布该精确版本（`next` 指向它，`latest` 仍为 `0.2.2-rc.1`）。本分支按 ADR-0009 完成提升：`SUPPORTED_DSH_RELEASES`、全部 DSH peer 与开发 pin 都指向 `0.2.2-rc.3`（24 个精确版本），开发树由 `scripts/upgrade-dsh.mjs 0.2.2-rc.3` 整体重指，候选期的临时 probe overrides 已移除。
+
+对照 `0.2.2-rc.2`（`ddac96760b`），rc.3 只有 6 个提交、515 个文件、10988 行新增 / 669 行删除；其中 380 个 `package.json` 只替换版本号，其余改动集中在下列面。插件实际依赖的 sandbox、fs、tools、session、storage、skills、lsp、workspace-files 与 Connection 运行时源码**全部未变**。
+
+| 接缝 / 上游源码 | 变化 | 分类与插件处理 |
+|---|---|---|
+| `ui-sidebar` | 新增 `sidebar.session.action`（`hoc`）槽包住新会话行内容；`SidebarRoot.module.css` 把该行的边距/动画移到新的 `.newSessionRow` 外层，`data-slot='sidebar.session.action'` 作为无盒锚点；`sidebar.footer.action` 契约未变 | 纯新增。插件只注册 `sidebar.footer.action`，新会话行的 DOM/CSS 变化不触及页脚动作 seat；无适配 |
+| `ui-workspace` | 新增 `workspace.picker` Factory（`SlotFactoryMap`）与第三个 directory-flow 洞 `workspace.picker.directoryFlow`；`WorkspacePicker` 抽出 `surfaceFlow` 供 slot 与 Factory 共用；新增只读类型导出 `WorkspacePickerInput` / `WorkspacePickerFactoryProps`，`WorkspacePickerProps` 与 `WorkspacePickerInjected` 未变 | 纯新增。插件只对 `@deepseek-ai/dsh-client-ui-slots` 做自身槽位的类型合并，不注册也不使用该 Factory；无适配 |
+| `ui-directory-picker-browse` / `ui-directory-picker-native` | 两个 flow 包改为向三个 directory-flow 洞事务性注册（嵌套 `slots.inject`） | 插件不使用目录选择器；无适配 |
+| `ui-primitives` | 新增 `IconUploadOutlineRegular` / `IconUploadOutlineMedium` 与 artwork 条目 | 纯新增导出；插件的图标探测按名字存在性判断，旧宿主照常回退；无适配 |
+| `packages/experimental/deepseek-chat-import`（新包） | 可选实验 bundle：owner-only 上传 Remote `deepseekChatImport.limits`、内存内解压、逐会话导入；新增外部依赖 `fflate` 与 `zod 4.6.6`；`official-bundles` 把它列入 `OPTIONAL_BUNDLES` / `MORE_BUNDLES` / `EXPERIMENTAL_BUNDLES`，`apps/cli` 作为可选依赖携带 | 默认不挂载，与插件的围栏、Registry、范围无任何接缝；**不**加入 `OPTIONAL_CORE_PACKAGES`（该清单只登记会与插件交叉的副本）。新增的 `zod 4.6.6` 是它自己的精确 pin，不影响 `dsh-storage-domain` 的 `4.4.3` 与插件的 `storage-zod` 路径 |
+| `session-log-export` | zip 导出对不可读附件降级：跳过 `ATTACHMENT_NOT_FOUND` / `INVALID_ATTACHMENT_REF` 并写入 `attachments-missing.txt`，其余失败仍整体失败 | 插件不消费会话导出；无适配 |
+| `tool-cordis` `api-catalog` / `cordis-client-runner` `slot-catalog` | 生成目录随新 Remote 与槽位声明更新 | 纯生成物；插件不读取这些目录 |
+| `apps/desktop` restart-status、`scripts/ci-verified-download.sh`、CI workflow | Windows 安装器重启状态目录锁修复；CI 下载校验 | 安装器/CI 面，不在插件运行时接缝 |
+
+环境要求与 rc.1/rc.2 相同：Node `>=24.9`、Cordis `4.1.0`、Schemastery `3.19.0`；可选 Auto Review 仍钉 `0.2.1-rc.2`。open-in-app 与 files-tree 的复刻源在 rc.3 未变，基线保持 `ddac96760b`（open-in-app）与 `f3803c9697`（files-tree 旧版）。
+
+### 提升步骤（本分支已执行）
+
+1. 确认 npm 上 `0.2.2-rc.3` 可解析（`next` 指向它），执行 `node scripts/upgrade-dsh.mjs 0.2.2-rc.3` 重指 devDependencies / release-age / 生态 pin；
+2. 在 `SUPPORTED_DSH_RELEASES` 末尾加入 `0.2.2-rc.3`，同步 28 个 DSH peer 列表与 dev pin；移除 probe overrides，`pnpm install --frozen-lockfile` 后 lockfile 中不再有任何 `0.2.2-rc.2` 包副本；
+3. 把 rc.3 新增的唯一传递包 `@deepseek-ai/dsh-deepseek-chat-import` 补进 `minimumReleaseAgeExclude` 的精确传递包块；
+4. 以 enforce 重跑 `compat:check`、lint、双端类型检查、构建、文档与打包检查；完整矩阵、Host smoke 与三 OS 原生结果由 PR 的 CI 覆盖；
+5. 更新 README 支持矩阵、`AGENTS.md` 兼容契约段、兼容笔记双语 §18 与路线账本；`CHANGELOG` 条目随实际发版的发布流程写入，本分支不创建版本号或 tag。
+
+### 安静陷阱（开发树）
+
+- **peer-only 副本会留在 lockfile**：升级脚本只重指直接依赖与 release-age 条目。rc.2 → rc.3 之后，`@deepseek-ai/dsh-permission-presets` 与 `@deepseek-ai/dsh-util-values` 仍以 rc.2 副本满足 peer 边（rc.3 各包声明的是精确 peer），`pnpm peers check` 因此报 unmet peer；`pnpm dedupe`、`--force` 与 `--lockfile-only` 都不会改写这类仍“看似有效”的边。落地前必须让它们升到同一精确版本，最终 `pnpm peers check` 输出 `No peer dependency issues found`，lockfile 中 `0.2.2-rc.2` 只作为 peer 范围字符串出现。
+- **新包不是契约成员**：`@deepseek-ai/dsh-deepseek-chat-import` 默认不挂载，与插件的授权面没有交点；把它写进 `CORE_PACKAGES` 只会让最小组合误报 `incomplete`。
+- **升级脚本只重指既有条目**：`minimumReleaseAgeExclude` 的新增传递包仍需手工补一行，否则在启用发布年龄门禁的环境里 frozen install 会被拒绝。

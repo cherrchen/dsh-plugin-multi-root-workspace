@@ -21,7 +21,7 @@ export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alp
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   allowlist
 package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-alpha.2 || 0.2.2-alpha.3 || 0.2.2-rc.1 || 0.2.2-rc.2"
-package.json                devDependencies          allowlist 中的某一项（当前 0.2.2-rc.2）
+package.json                devDependencies          allowlist 中的某一项（当前 0.2.2-rc.3）
 node_modules                实际解析到的版本          allowlist 中的某一项
 ```
 
@@ -201,7 +201,7 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 ## 11. DSH 0.2.1 目录语义
 
-当前开发基线为 `0.2.2-rc.2` / Cordis `4.1.0`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
+当前开发基线为 `0.2.2-rc.3` / Cordis `4.1.0`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
 
 升级脚本接受单一 Cordis prerelease 版本，仍输出精确 pin。新的安装期 peer gate 需要在隔离候选 smoke profile 使用精确 allow-version 豁免；warn 模式下豁免在第一次 `add` 前授予（构建审批恢复路径内部的 remove+add 同样有版本 gate），只用于升级车道，正式矩阵和生产仍 enforce。当前 package 为 `0.1.6` 且 `v0.1.6` tag 已存在，本迁移不创建 release。
 
@@ -285,3 +285,14 @@ rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留�
 - **安静陷阱 4（fork 基线）**：rc.2 的 `ui-open-in-app` 复刻源只有两处注释变化并新增 `menu.openIn`；本分支已按 FORK.md 重拷 `OpenInAppAction.tsx` / `controller.ts`、把 baseline 移到 `ddac96760b`，并在 `OpenInAppKey` 补 `menu.openIn`。files-tree 旧版复刻仍钉 alpha.2。
 - **契约检查**：`@deepseek-ai/dsh-error` 已加入 `OPTIONAL_CORE_PACKAGES` 与 `HOST_SERVICE_PACKAGES`（只经宿主锚点作证，发现跨包单例混装）；**不要**把它写进 `peerDependencies`——rc.1 没有该包，会让旧宿主安装失败。
 - **验证（已发布包）**：在已发布的 `0.2.2-rc.2` 开发树上，`compat:check`、lint、双端 typecheck、`build`、`docs:check`、`pack:check` 与 `auto-review:fork` 通过；完整 vitest 为 **1368 通过 / 162 跳过 / 17 失败**。17 个失败全部是当前 Seatbelt 会话的 sandboxed-peer registry IPC 用例；rc.1 基线在同一环境同样失败 17 个（1364 / 166），不是 rc.2 回归。本机 `smoke:compose` **56/56**、`smoke:behavior` **96 通过 / 8 跳过**、`smoke:journey` **85 通过 / 2 跳过**、`smoke:packed` **95 通过 / 8 跳过**，均 0 失败（跳过项是 Seatbelt 内无可用内核 runner 与共享 IPC）。三 OS 矩阵与 Windows ACL 原生结果由 PR 的 CI 给出（[run 43227479998](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43227479998)，94/94 jobs）；浏览器目检不是 CI 项，按路线账本的人工记录。
+
+## 18. DSH 0.2.2-rc.3 支持
+
+- **状态**：上游 tag `dsh-v0.2.2-rc.3` 指向 `38a6a5c965`，npm 已发布（`next` 指向该版本，`latest` 仍为 `0.2.2-rc.1`）。本分支把 `SUPPORTED_DSH_RELEASES`、28 个 DSH peer 与开发 pin 提升到 `0.2.2-rc.3`（24 个精确版本），并用 `scripts/upgrade-dsh.mjs 0.2.2-rc.3` 重指开发树；probe overrides 已移除，唯一新增的传递包 `dsh-deepseek-chat-import` 已补进 `minimumReleaseAgeExclude`。
+- **上游差异**：rc.3 只有 6 个提交、515 个文件；380 个 `package.json` 只改版本号，其余集中在 `ui-sidebar` 的新会话行 HOC 槽、`ui-workspace` 的 `workspace.picker` Factory 与第三个 directory-flow 洞、两个目录选择器包、`ui-primitives` 的上传图标、可选实验 bundle `dsh-deepseek-chat-import`、`session-log-export` 的不可读附件降级，以及桌面安装器与 CI。插件的沙箱、fs、tools、session、storage、skills、lsp、workspace-files 与 Connection 接缝没有任何改动，**未新增 adapter 分支**。
+- **安静陷阱 1（peer-only 副本）**：升级后 `dsh-permission-presets` / `dsh-util-values` 仍可能以 rc.2 副本满足 peer 边（rc.3 各包声明的是精确 peer），`pnpm peers check` 必须为 0；`pnpm dedupe`、`--force`、`--lockfile-only` 都不会改写这类“看似有效”的边。落地前要让它们升到同一精确版本，最终 lockfile 中 `0.2.2-rc.2` 只作为 peer 范围字符串出现。
+- **安静陷阱 2（新包不是契约成员）**：`dsh-deepseek-chat-import` 默认不挂载、与插件授权面没有交点，不加入 `OPTIONAL_CORE_PACKAGES`；它自带的 `zod 4.6.6` 与 `dsh-storage-domain` 的 `4.4.3` 是两份独立副本，域 schema 仍只经 `storage-zod` 构建。
+- **安静陷阱 3（目录选择器第三个洞）**：`workspace.picker.directoryFlow` 由 `workspace.picker` Factory 声明；插件没有 occupant，也不要往宿主的新会话/选择器流里挂自己的根 UI。
+- **安静陷阱 4（新会话行 DOM）**：`sidebar.session.action` 用 `display: contents` 锚点夹在 `.newSessionRow` 与按钮之间，`sidebar.footer.action` 在页脚、不受影响；将来若要注册该 HOC 槽，必须原样返回 `children`，不要多套一层盒子。
+- **fork 基线**：rc.3 未改 `ui-open-in-app` / `ui-sidebar-files` 的 `src/client/`，open-in-app 基线保持 `ddac96760b`、files-tree 旧版保持 `f3803c9697`；`FORK.md` 只记录 dev pin 已前移、基线不变。
+- **验证（已发布包）**：`compat:check`（allowlist / peer / 开发 pin / 安装树一致，24 个精确版本；`pnpm peers check` 无问题）、lint、双端 typecheck、`build`、`docs:check`、`pack:check`（210 成员）与 `auto-review:fork` 通过；完整 vitest **1386 通过 / 162 跳过 / 17 失败**，17 个失败仍全部是本会话 Seatbelt 下的 sandboxed-peer registry IPC 用例（与 rc.2 基线的 17 个同形）。本机 `smoke:compose` **56/56**、`smoke:behavior` **96 通过 / 8 跳过**、`smoke:journey` **85 通过 / 2 跳过**、`smoke:packed` **95 通过 / 8 跳过**，0 失败。三 OS 矩阵与 Windows ACL 原生结果由 PR 的 CI 给出。

@@ -61,6 +61,7 @@
 | compat | DSH 0.2.2-alpha.3 提升 | fs `patchText`/`deleteFile`/`moveFile` 纳入围栏与 Registry admission；Connection RPC getter 绑定消费 fiber 修复 HTTP 405；Files 页签改用宿主文件树 Factory；开发 pin `0.2.2-alpha.3` / cordis `4.0.6-alpha.2` | [本次记录](#dsh-022-alpha3-兼容适配2026-11-04)、[接口审查](../../reference/dsh-0.2.2-migration.md) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md)、[0024 修订](../../decisions/ADR-0024-registry-operation-admission.md) | `9035ab0` | 随 `v0.1.14` 发版 |
 | compat | DSH 0.2.2-rc.1 提升 | 支持合同纳入 `0.2.2-rc.1`（22 个精确版本）；开发 pin `0.2.2-rc.1` / cordis `4.1.0` / schemastery `3.19.0`；稳定 vendor 选择器限宿主声明 minor 线；未新增适配分支 | [本次记录](#dsh-022-rc1-兼容适配2026-11-05)、[接口审查](../../reference/dsh-0.2.2-migration.md) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | `1c025b2` | 随 `v0.1.14` 发版 |
 | compat | DSH 0.2.2-rc.2 提升 | 支持合同纳入 `0.2.2-rc.2`（23 个精确版本）；开发 pin `0.2.2-rc.2` / cordis `4.1.0` / schemastery `3.19.0`；`registerWritableRoot`、`workspaceFiles.search`、Windows ACL 语义翻转审查与回归；open-in-app fork 基线 `ddac96760b`；未新增适配分支 | [本次记录](#dsh-022-rc2-兼容提升2026-11-12)、[接口审查](../../reference/dsh-0.2.2-migration.md#022-rc2-后续审查2026-11-11) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | PR #49 | 评审返工 HEAD `eafabcb` 的全矩阵 CI 已通过：[run 43227479998](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43227479998)，**94/94 jobs**（23 个精确版本 × macOS / Ubuntu 22.04 / Ubuntu latest / Windows）；其后仅文档状态更新；随 `v0.1.18` 发版 |
+| compat | DSH 0.2.2-rc.3 提升 | 支持合同纳入 `0.2.2-rc.3`（24 个精确版本）；开发 pin `0.2.2-rc.3` / cordis `4.1.0` / schemastery `3.19.0`；上游差异全部为新增（新会话行 HOC 槽、`workspace.picker` Factory 与第三个 directory-flow 洞、上传图标、可选实验 bundle `dsh-deepseek-chat-import`），沙箱/fs/tools/session/storage 运行时源码未变，未新增适配分支；open-in-app 与 files-tree 复刻基线不变 | [本次记录](#dsh-022-rc3-兼容提升2026-11-13)、[接口审查](../../reference/dsh-0.2.2-migration.md#022-rc3-后续审查2026-11-13) | [0009](../../decisions/ADR-0009-dsh-compat-contract.md) | 本分支 | 本机门禁已通过（compat / lint / 双端 typecheck / build / docs / pack / auto-review / 完整 vitest 与三个 smoke）；三 OS 矩阵与原生 ACL 结果由 PR 的 CI 给出 |
 | 第二期 | 插件详情页设置卡与富文本详情 | 「多根 Auto Review（实验性）」设置开关与 Loader 行等价（`setPluginEnabled` 持久化、热应用、restart-required Toast）；设置卡错误改 Toast；`refreshSeq` 修并发刷新竞态；locale `meta.detail` + `preview.svg` 富文本详情 | [本次记录](#插件详情页设置卡与富文本详情2026-11-05) | — | `220bc82` | 随 `v0.1.14` 发版 |
 | 安全修复 | 根授权安全修复 P0–P4 | BYP-01、MRW-01、BYP-02、home/物理介质保护与默认权威 | [专项计划](../completed/2026-11-05-root-authorization-security-fixes.md)（含 P0 记录与维护者决定） | [0027](../../decisions/ADR-0027-revive-target-and-protected-paths.md)（P1）、[0028](../../decisions/ADR-0028-upstream-primary-identity-and-shared-only-registry.md)（F3、移除单进程模式） | `a492976`（PR #39） | 2026-11-05：P0 静态证据已记录，维护者决定 P2（可信确认）不实施、BYP-01 作为残余风险保留、Skills migration 保持现状；P1 已实施；F3 改为以上游主根拼写为 key、拒写优先于主根，单进程 Registry 模式移除。PR #39 两条 P1 评审回归先红后绿：Follower 的 fs/进程准入同样收窄 home 授权，迁移后清空在刷新、准入和重启后均不恢复旧根（见两份 ADR 的同日修订）。macOS / Node `24.18.0` / DSH `0.2.2-rc.1` 的 `compat:check` 与完整 `verify:all` 通过：lint、双端 typecheck、build、Seatbelt 内核探针及显式要求实跑的测试（74 文件通过，1019 通过、86 平台跳过）、compose / behavior / journey（52 / 137 / 76）、pack 与 packed behavior（136）、Auto Review fork 检查；可选 Auto Review 集成按精确版本规则跳过。Linux/Windows 原生门禁见下述合入 CI。P2、F5 与 F4 执行侧 deny 按维护者决定不实施（上游对工作区内的 `$DSH_HOME` 本就不设例外）；合入 PR #39（`a492976`），[main CI 42165203436](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/42165203436) 全矩阵通过；随 `v0.1.15` 发版 |
 | 兼容协作 | OPS 实验性保守兜底（ADR-0029） | 默认关闭；DSH `0.2.*` 显式启用与 UI 风险确认；受限执行、Phase A 实时活动及精确基线 Review | [已完成计划](../completed/2026-11-01-ops-compatibility-adaptation.md)、[P6 验收](#ops-p6-最终验收2026-11-05) | [0029](../../decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md)（限定范围 Accepted） | `3fdf12d`（PR #40） | P0–P6 限定范围已验收，[main CI 42183917954](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/42183917954) 全矩阵通过；完整兼容恢复无限期延后；随 `v0.1.15` 发版 |
@@ -1632,3 +1633,28 @@ PR #48 的 91 条 CI 检查全部 success，覆盖全部支持 DSH 版本 × mac
 PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43227479998)），覆盖 23 个精确版本 × macOS / Ubuntu 22.04 / Ubuntu latest / Windows；内容与 `main` 上的 `e17ace4` 相同。
 
 准备提交只改文档与 CHANGELOG；正式提交只改 `package.json` 的 `version`，tag 指向正式提交。本次在本机 macOS arm64 / Node `24.18.0` 对准备提交后的树运行 `docs:check`（0 错误 0 警告）、`compat:check`（allowlist / peer / 开发 pin / 安装树一致，23 个精确版本）、`lint`（0 警告 0 错误）、双端 `tsc --noEmit`、`build` 与 `pack:check`（210 个成员），均通过；完整 `vitest` 与三个 smoke 未在本次准备提交上重跑，由 PR #49 的 CI 覆盖。发布矩阵与 GitHub Release 由 tag 触发的 `release.yml` 完成，本机不发布。
+
+## DSH 0.2.2-rc.3 兼容提升（2026-11-13）
+
+从 `main` 的 `50fb77b`（`v0.1.18`）新建 `feat/adapt-1113`。上游 tag `dsh-v0.2.2-rc.3` 指向 `38a6a5c965aa99ab525161efb7cc5cf1fe62fced`，npm 已发布该精确版本（`next` 指向它，`latest` 仍为 `0.2.2-rc.1`），因此本分支按 ADR-0009 完成提升：`SUPPORTED_DSH_RELEASES`、全部 DSH peer 与开发 pin 都指向 `0.2.2-rc.3`（24 个精确版本），开发树由 `scripts/upgrade-dsh.mjs 0.2.2-rc.3` 整体重指，probe overrides 已移除，唯一的新传递包 `@deepseek-ai/dsh-deepseek-chat-import` 已补进 `minimumReleaseAgeExclude`。
+
+rc.3 只有 6 个提交（三次合并、一次发布提交、实验性 DeepSeek 会话导入、桌面安装器重启状态修复与 CI 下载校验），515 个文件；380 个 `package.json` 只替换版本号。逐项接缝分类见[接口审查](../../reference/dsh-0.2.2-migration.md#022-rc3-后续审查2026-11-13)。落到本分支的改动只有：
+
+- `src/compat/dsh-version.ts`：allowlist 末尾加入 `0.2.2-rc.3`；`CORE_PACKAGES` 不变——新包 `dsh-deepseek-chat-import` 是默认不挂载的可选实验 bundle，与插件授权面没有交点。
+- `package.json`：28 个 DSH peer 各追加 `0.2.2-rc.3`，全部 DSH devDependency 由升级脚本重指；`cordis 4.1.0` / `schemastery 3.19.0` / `node-addon-system 0.1.2` 与 Auto Review 基线 `0.2.1-rc.2` 不变。
+- `pnpm-workspace.yaml`：release-age 条目整体重指到 `0.2.2-rc.3`，删除探测期的 probe overrides，补入新传递包。
+- `pnpm-lock.yaml`：`pnpm install --frozen-lockfile` 通过，`0.2.2-rc.2` 包副本为 0（只剩 peer 范围字符串），`pnpm peers check` 输出 `No peer dependency issues found`；非 DSH 差异只有 rolldown `1.2.8` 与新版本的去重。
+- 复刻源：rc.3 未改 `ui-open-in-app` / `ui-sidebar-files` 的 `src/client/`，open-in-app 基线保持 `ddac96760b`、files-tree 旧版保持 `f3803c9697`；`FORK.md` 只记录 dev pin 前移、基线不变。
+- 文档：迁移审查的 rc.3 小节、兼容笔记双语 §18、README 支持矩阵与开发 pin、`AGENTS.md` 兼容契约段、`docs/development/plugin-development-workflow.md` 与 `docs/reference/README` 双语条目。
+
+安静陷阱（开发树）：升级脚本只重指直接依赖与 release-age；`@deepseek-ai/dsh-permission-presets` 与 `@deepseek-ai/dsh-util-values` 在 rc.2 → rc.3 后仍一度以 rc.2 副本满足 peer 边，`dedupe` / `--force` / `--lockfile-only` 都不改写这类仍“看似有效”的边，必须显式强制到同一精确版本后 frozen install 才一致。
+
+本机验证（macOS arm64 / Node `24.18.0` / pnpm `11.25.0`，`0.2.2-rc.3` 开发树，enforce 车道）：
+
+- `compat:check`：allowlist、28 个 peer、开发 pin、安装树一致（24 个精确版本）；`pnpm peers check` 无问题；
+- lint（0 警告 0 错误）、双端 `tsc --noEmit`、`build`、`docs:check`、`pack:check`（210 个成员）、`auto-review:fork`：通过；
+- 完整 `vitest`：**1386 通过 / 162 跳过 / 17 失败**（99 个文件，85 通过 / 8 失败 / 6 跳过）。17 个失败全部是共享 Registry 的核内 IPC/租约用例（`contended` 而非 `follower`），本会话运行在 DSH 自身的 Seatbelt 内、Peer 凭据被识别为 sandboxed peer；与 rc.2 基线同形的 17 个失败，不是 rc.3 回归；
+- Host smoke 与 packed（0 失败）：compose **56/56**、behavior **96 通过 / 8 跳过**、journey **85 通过 / 2 跳过**、packed **95 通过 / 8 跳过**；跳过项是 Seatbelt 内无可用内核 runner 与共享 IPC；
+- 三 OS 矩阵、Windows ACL 原生探针与旧版回归由 PR 的 CI 给出（24 个精确版本 × macOS / Ubuntu 22.04 / Ubuntu latest / Windows）；浏览器实机目检不是 CI 项，本轮未执行，保留为合入前的人工项。
+
+`CHANGELOG` 条目与版本号由后续发版流程写入，本分支不创建 tag。
