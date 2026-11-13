@@ -55,7 +55,7 @@ active：
 
 completed：
 
-- [2026-11-13-ssh-management-dialog.md](./completed/2026-11-13-ssh-management-dialog.md) — 把 Workspace Folders 面板内联的 SSH 管理抽离为独立四 Tab 对话框（添加连接 / 已有连接 / SSH Key / 模式设置），工作区面板只保留远端工作区列表与新增/管理入口；平台显示 Linux / macOS，托管档位决定添加引导。已完成（2026-11-13）并通过本机静态门禁、smoke 与特性测试，完整测试与 CI 由干净 runner 验证。
+- [2026-11-13-ssh-management-dialog.md](./completed/2026-11-13-ssh-management-dialog.md) — 把 Workspace Folders 面板内联的 SSH 管理抽离为独立四 Tab 对话框（添加连接 / 已有连接 / SSH Key / 模式设置），工作区面板只保留远端工作区列表与新增/管理入口；平台显示 Linux / macOS，托管档位决定添加引导。已完成（2026-11-13）：本机静态门禁、smoke 与特性测试通过，[CI run 43447653166](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43447653166) 26/26 job success。
 
 - [2026-11-08-workspace-folders-hero-entry.md](./completed/2026-11-08-workspace-folders-hero-entry.md) — 新会话 Hero 行的 Workspace Folders 增量入口：`conversation.hero.options` 注册、与相邻选择器同几何但无 chevron、`≤560px` 视口图标降级；侧栏入口保留。已完成（2026-11-08）并通过完整门禁，随 `v0.1.17` 发版；决策见 [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)。
 
