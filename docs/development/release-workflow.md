@@ -11,12 +11,12 @@
 pnpm release patch --tag   # ② 改版本号 → commit → tag v<version>
 git push origin main --follow-tags
         ↓ 触发 .github/workflows/release.yml
-verify（复用 ci.yml 全部门禁） → publish（npm publish + GitHub Release）
+verify（查证同一提交的 main CI） → publish（npm publish + GitHub Release）
 ```
 
 ## 发版前的准备
 
-发版由 tag 触发，所以一切准备都发生在打 tag **之前**，并且必须与 tag 在同一次推送里到位：
+发版由 tag 触发，所以一切准备都发生在打 tag **之前**，并且必须包含在 tag 指向的提交中：
 
 1. **同步发布状态文档**。发布状态的唯一真源是[路线图 §进度总账](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)，先把那里从"未发版"改成"随 `vX.Y.Z` 发版"；README 的支持版本说明、tarball 与 tag 示例，以及 `docs/` 下各 README 的版本句，随之对齐。发版后**不要**再回头补这些句子，否则 tag 指向的树与它自己的文档不一致。
 2. **写 CHANGELOG 条目**。在 [`CHANGELOG.md`](../../CHANGELOG.md)（英文对应 [`CHANGELOG.en.md`](../../CHANGELOG.en.md)）中新增 `## [X.Y.Z] - YYYY-MM-DD`，按 Added / Changed / Fixed 归类**使用者可见**的变更，不兼容变更单独成段写在最前；末尾的比较链接要指向新 tag。中英两份必须同批更新——它们是同一份逻辑文档，中文为准。
@@ -58,13 +58,13 @@ node scripts/release-notes.mjs v0.1.1   # 本地预览，输出 markdown
 ## Tag 规范与版本一致性
 
 - tag 形如 `v0.1.1`，必须等于 `v` + `package.json` 的 `version`。`release.yml` 在 publish 前强制校验，不一致直接失败——tag 与包内容永不错位。
-- 推送方式：`git push origin main --follow-tags`。
+- 可用 `git push origin main --follow-tags` 同时推送，也可先推 main 等 CI 成功，再单独推 annotated tag。
 
 ## `release.yml` 流程
 
-1. **verify**：`uses: ./.github/workflows/ci.yml`，完整复用 CI 门禁（支持版本 × Linux/macOS/Windows 矩阵、kernel probe、三个 smoke、`pack:check` / `smoke:packed`、docs:check）。CI 末尾的 `gate` job（`if: always()`）只在 `releases` 与 `verify` 都恰好 `success` 时通过——矩阵被跳过或取消时 gate 失败，整个 called workflow 也随之失败。
+1. **verify** 使用 `contents: read` 与 `actions: read`。解析 annotated tag 得到 commit SHA，通过本仓库的 Actions API 查找由 main 分支 push 触发、`head_sha` 精确匹配的 `ci.yml`。同推 main 和 tag 时，最多等 90 分钟，涵盖 CI 尚未登记和运行中的情况。匹配后在日志及摘要记录 run ID、attempt 和链接。仅当该次尝试的 CI 运行与唯一的最终 `gate` job 都已完成且结论为 `success` 时放行。失败、取消、跳过、缺少 gate、API 查证错误或超时都会阻断发布。若 main CI 需要重跑，先确认它的新尝试和该次 gate 均成功，再重跑 Release 的 verify。PR、手动运行、其他分支或 workflow 的结果不作为发布凭据。
 2. **publish**（`needs: verify`，ubuntu-latest）：
-   - 校验 tag 与 `package.json` 版本一致；
+   - 检出 verify 查证的 commit，校验 tag 与 `package.json` 版本一致；
    - `pnpm install --frozen-lockfile && pnpm build`（`lib/` 不进 git，tarball 必须现构建；client 制品须在 pack 前就绪）；
    - `node scripts/check-pack.mjs` 校验 tarball：必备文件（含 `lib/windows-runner.js`——缺它 Windows 受限多根就不存在）、每个 `exports` 目标、`cordis.patch.yml` 引用的每个模块、传递依赖的共享 chunk 全部在内（见 [client-bundle-not-in-boot-graph](../troubleshooting/client-bundle-not-in-boot-graph.md)）；
    - `pnpm publish --no-git-checks --provenance` 发布（`--no-git-checks` 是因为 Actions 中处于 detached HEAD）；认证走 npm trusted publishing（OIDC），`package.json` 的 `repository` 字段与 job 的 `id-token: write` 权限是它的前提；

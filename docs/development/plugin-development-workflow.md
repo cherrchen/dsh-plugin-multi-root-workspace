@@ -7,9 +7,9 @@
 
 | 项 | 值 | 说明 |
 | --- | --- | --- |
-| 开发目标版本（基线） | `0.2.2-rc.2` | 精确 pin 在 `devDependencies`；CI 主车道对全部支持版本与启用的 OS 做笛卡尔积验证 |
+| 开发目标版本（基线） | `0.2.2-rc.2` | 精确 pin 在 `devDependencies`；CI 主车道对每个精确版本覆盖通用和适用的原生验证 |
 | 支持矩阵 | [`SUPPORTED_DSH_RELEASES`](../../src/compat/dsh-version.ts) | **精确版本 allowlist**；`peerDependencies` 逐项或，不承诺未来版本 |
-| 实测证据 | [路线图兼容提升记录](../plans/active/2026-09-12-multi-root-workspace.md#dsh-021-rc3-兼容提升2026-10-23)（历次记录同档） | 升级与旧版回归都运行完整矩阵；`upgrade.yml` 只探测候选，不自动扩大 allowlist |
+| 实测证据 | [路线图兼容提升记录](../plans/active/2026-09-12-multi-root-workspace.md#dsh-021-rc3-兼容提升2026-10-23)（历次记录同档） | 升级车道跑候选的完整套件，旧版回归覆盖所有受支持版本；`upgrade.yml` 只探测候选，不自动扩大 allowlist |
 | 运行时门禁 | `multi-root-compat` 行 | 版本不在 allowlist 或核心包混装时，四个安全相关行根本不启动（ADR-0009） |
 | cordis | 基线 `4.1.0`；旧版按 `dsh` 声明的范围下限精确 pin | `upgrade-dsh.mjs` 同步重指，并从精确 release-age 条目派生 workspace-only 的 DSH probe overrides 与 cordis 生态 pin（`cordis-plugin-*` / `schemastery` / `cosmokit`，取自目标版本自身 manifest），避免预发布范围导致混装、重复副本导致工具调度 Symbol 不一致或生态版本错代。已有自定义 overrides 时拒绝覆盖；探测后恢复保存的 workspace |
 
@@ -19,7 +19,7 @@
 
 | 用途 | 工具 | 配置 |
 | --- | --- | --- |
-| Node.js | `24.9.0`（0.2.2 车道及以后）；旧版回归按 CI 同一表达式用 `22.19.0` | `ci.yml` verify 按已知旧版前缀分流：仅 `0.1.*` / `0.2.0` / `0.2.1` 用 22 |
+| Node.js | `24.9.0`（0.2.2 车道及以后）；旧版回归按 CI 同一路由用 `22.19.0` | `scripts/ci/plan.mjs` 按已知旧版前缀分流：仅 `0.1.*` / `0.2.0` / `0.2.1` 用 22 |
 | 包管理 | pnpm `11.25.0` | `package.json#packageManager` |
 | 类型检查与声明产出 | TypeScript `6.x` | `tsconfig.host.json`（strict、`exactOptionalPropertyTypes`、`noUncheckedIndexedAccess`、`verbatimModuleSyntax`、`rewriteRelativeImportExtensions`） |
 | 打包 | tsdown（rolldown） | `tsdown.config.ts`：逐入口 ESM bundle 到 `lib/`，`@deepseek-ai/*` 与 cordis 保持 external |
@@ -52,9 +52,9 @@ pnpm soak:tui-registry --help # 真实 TUI / 独立 Host 长期观测；手工�
 
 三个冒烟都要求 `lib/` 已构建（冒烟脚本会检查并提示 `pnpm build`）。
 
-`pnpm verify:all` **故意不含** `compat:check`：升级车道需要在一个还不在 allowlist 上的候选版本上跑完整矩阵，而静态门禁按设计会拒绝那棵树。CI 主车道单独跑 `compat:check`，位置在 lint 之前（见 §9）。
+`pnpm verify:all` **故意不含** `compat:check`：升级车道需要在一个还不在 allowlist 上的候选版本上跑完整矩阵，而静态门禁按设计会拒绝那棵树。CI 主车道在安装后先跑 `compat:check`（见 §7）。
 
-**`pnpm test` 必须在 `pnpm build` 之后**：`tests/client-bundle.spec.ts` 断言的是**构建产物** `lib/client.js`（浏览器闭包工厂形态、模块表依赖清单）；`tests/windows-multi-root.spec.ts` 的原生执行用例加载 `lib/sandbox.js`，以便 provider 的 `import.meta.url` 定位同目录的 `lib/windows-runner.js`。从源码加载 provider 会指向不存在的 `src/windows-runner.js`，不能作为发布制品的执行验证。`/lib/` 被 gitignore，`prepare` 只预构建 JS，完整类型产物仍需 `pnpm build`；CI 与升级工作流都按 `lint → typecheck → build → test` 排序。
+**`pnpm test` 必须在 `pnpm build` 之后**：`tests/client-bundle.spec.ts` 断言的是**构建产物** `lib/client.js`（浏览器闭包工厂形态、模块表依赖清单）；`tests/windows-multi-root.spec.ts` 的原生执行用例加载 `lib/sandbox.js`，以便 provider 的 `import.meta.url` 定位同目录的 `lib/windows-runner.js`。从源码加载 provider 会指向不存在的 `src/windows-runner.js`，不能作为发布制品的执行验证。`/lib/` 被 gitignore，`prepare` 只预构建 JS，完整类型产物仍需 `pnpm build`；主 CI 与升级车道都在 Vitest 前构建；各车道的检查分工见 §7。
 
 ## 4. 冒烟机制
 
@@ -197,36 +197,34 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 
 ## 7. CI
 
-`.github/workflows/ci.yml` 的 `releases` job 用 `scripts/list-dsh-releases.mjs` 从 `SUPPORTED_DSH_RELEASES` 读取版本轴，`verify` 将该轴与启用的 OS 做笛卡尔积。开发 pin 使用 frozen lockfile，其他版本先用 `upgrade-dsh.mjs` 重指 DSH / cordis 后重新安装；制品名同时含 OS 与 DSH 版本。主车道在 `ubuntu-latest`、`ubuntu-22.04`、`macos-latest` 与 `windows-latest`（变量见下）上执行**同一份全部门禁**：**`compat:check`** → `lint` → `typecheck` → **`build`** → **`kernel:probe`** → `test` → `smoke:compose` → `smoke:behavior` → `smoke:journey` → `pack:check` → `smoke:packed` → `docs:check`。`compat:check` 放在最前，因为后续每一步的结果只有对"契约真正声明的版本"才算证据。探针必须先于单测，否则它导出的方言集无法约束本次单测的 skip。
+[CI workflow](../../.github/workflows/ci.yml) 响应 main push、PR 和手动触发，权限为 `contents: read`。在 GitHub Actions 的 CI 页面可选择分支后点 **Run workflow**，也可用 `gh workflow run ci.yml --ref <branch>` 验证分支。
 
-最后一个 `gate` job（`needs: [releases, verify]`，`if: always()`）只在两个上游 job 都恰好 `success` 时通过：矩阵被跳过、取消或部分失败都不能再显示为绿。release 的 `publish` 依赖的正是这个 gate（见[发版流程](./release-workflow.md)）。
+- `releases` 通过 [list-dsh-releases.mjs](../../scripts/list-dsh-releases.mjs) 读取精确契约，按 Node 版本分桶，再把每个桶切成最多四个版本一组。当前 23 个版本在每个启用镜像形成六组（Node 22 五组、Node 24 一组）。该 job 也在 frozen 开发树校验契约，并各跑一次 lint 和 docs:check。
+- 每组从同一个 Git commit 解包。源码目录与原 checkout 同级，父目录链禁止有 `node_modules`。每个版本独享 manifest、lockfile、依赖树、`lib/`、探针文件、DSH scratch 与日志。依赖下载共享 pnpm 的内容寻址缓存。源码及其中的内核拒绝夹具位于 `/tmp` 和本机 temp grant 之外；DSH scratch 在平台临时区中分配，保留各方言对原生临时目录的语义。开发 pin 走 frozen lockfile，其余复用 `upgrade-dsh.mjs`，仅在该副本内关闭 release-age 等待。
+- `ubuntu-latest` 对每版跑 `compat:check`、双端 typecheck、build、完整 Vitest 和冒烟，保留原生 Landlock。每组并行最多两版，各用最多两个 Vitest worker。其他镜像按版本串行，各用最多四个 worker；每版做精确契约检查、构建和原生套件。Auto Review fork 差分只在 Ubuntu 的 Auto Review 精确基线跑一次，Auto Review 混合套件和真实安装集成仍只在该基线、每个启用镜像上执行。
+- [Ubuntu 独占套件清单](../../scripts/ci/ubuntu-only.json) 记录从其他镜像迁移的 Vitest 文件。客户端、RPC 和合同、locale 与快照、纯方言 argv、指令与 OPS 活动归属、恢复调度器、打包元数据及工作流等检查集中在 Ubuntu。含平台断言的混合文件整组保留，包括 Registry/IPC/lease 和跨进程接管、实际内核执行、Windows ACL / PowerShell / ConPTY、LSP、worktree Git 和路径边界。所有镜像继续运行真实安装的 `smoke:compose`、`smoke:behavior`、`smoke:journey`、`pack:check` 与 `smoke:packed`。
+- 每个版本先运行强制 Registry 认证探针和内核探针，再启动测试。Linux 22.04 提供 bwrap，macOS 提供 Seatbelt，Windows 探针用真实上游 ACL runner 验证允许写和兄弟目录拒写。探针把实跑方言写到该版本的私有文件，由该版本后续命令读取为 `DSH_PROBE_VERIFIED_DIALECTS`。探针证明可用的方言必须实跑，其他按原有能力判断和 skip 原因处理。`DSH_REQUIRE_KERNEL_RUNNER=1` 仍可在本地强制要求方言。
+- 一个版本失败后继续本组其余版本。摘要按镜像和精确版本列出耗时、结论和探针方言。每组上传 `ci-group-<image>-<group>`，每版目录内含阶段日志、Vitest 用例状态和 `context.skip(note)` 原因，以及 `result.json`。末尾 `gate` 要求两个上游 job 成功，并逐项核对计划中每个镜像 × 精确版本的同 SHA 成功记录；缺失、重复、失败或取消都阻断。发布查证见[发版流程](./release-workflow.md)。
 
-`.github/workflows/upgrade.yml` 是**按周**运行的升级车道（也可手动触发指定版本）：解析 `@deepseek-ai/dsh` 最新 pre-release → 重指 pin → 安装 → 与主车道同样顺序的完整矩阵，全程 `DSH_MULTI_ROOT_COMPAT=warn`。它的权限是 `contents: read`，不提交、不推送、不碰 allowlist；成功时只在 step summary 里写出人工提升的三步。它**不**跑 `compat:check`（候选按设计不在 allowlist 上）。这些性质由 `tests/workflows.spec.ts` 钉住。 手动版本输入及 candidate output 只通过 step `env` 传入 shell，禁止把 GitHub 表达式直接嵌进 `run`；写入 `$GITHUB_OUTPUT` 前校验为单行版本，避免 shell 代码执行与多行输出注入。
-
-Linux 覆盖 bwrap / Landlock 的方言选择与 argv 等价，macOS 覆盖 Seatbelt。**"没跑"不会被记成通过**，机制分两层，而且**按方言**判定：
-
-1. `pnpm kernel:probe`（`scripts/check-kernel-runner.mjs`）用原始机制逐个探测本机能否受限执行（`sandbox-exec` + allow profile / `bwrap` 绑定 flags / Landlock launcher；Windows 上换成 `windows-acl`——直接运行**真实上游 runner**，同时验证一次允许写与一次兄弟目录被拒，只放不放的不算 sandbox），把**确实跑通的那几个方言**写进 `$GITHUB_ENV` 的 `DSH_PROBE_VERIFIED_DIALECTS`；一个都跑不通时打印每条机制的原因。
-2. `tests/parity-matrix.spec.ts` 与 `smoke:behavior` 的内核断言：**探针证明本机跑得通的方言必须真跑**（runner 不可用即失败），本机没有的方言永不要求（在 macOS 上要求 bwrap、或在 Linux 上要求 Seatbelt，都只会制造与本插件无关的红灯），未跑探针时一律不要求（开发机照旧打印原因后 skip）。判定集中在 `tests/support/kernel-runner.ts`；`DSH_REQUIRE_KERNEL_RUNNER=1` 可强制要求全部方言，用来检查 skip 本身是否诚实。
+[Upgrade workflow](../../.github/workflows/upgrade.yml) 仍按周或手动验证一个候选版本。它重指并安装候选，运行该车道原有的完整验证，保留 `DSH_MULTI_ROOT_COMPAT=warn`，不运行 `compat:check`。权限为 `contents: read`，成功仅记录提升指引。手动版本输入经 step 环境变量传递，写入输出前验证为单行精确版本。工作流约束由 [workflows.spec.ts](../../tests/workflows.spec.ts) 验证。
 
 ### Windows 验证腿
 
-`ci.yml` 在仓库变量 `DSH_WINDOWS_CI=1` 时才把 `windows-latest` 加入动态矩阵。自 B1–B3 加固批起 Windows 与其他两平台跑**同一份门禁**：`kernel:probe`（`windows-acl` 探针，见上）、`smoke:compose` / `smoke:behavior` / `smoke:journey`（以 `SandboxPwshExecutor` 与 pwsh 工具原生执行——**不经 Git Bash**，行为 battery 的多根断言用受限 pwsh 实写）、`pack:check` / `smoke:packed`（安装副本在 Windows 上真的经 `lib/windows-runner.js` 做一次受限多根 pwsh 写），外加 `tests/windows-native.e2e.ts` 的原生组：restricted-token Node、PowerShell 与 ConPTY 覆盖两根可写、第三目录拒绝、read-only、移除根/foreign-owned/junction/8.3 别名、撤销快照、并发 private temp、退出码与流镜像、ConPTY Ctrl+C 与 Git Bash parity；`tests/windows-multi-root.spec.ts` 的结构用例同样实跑。POSIX 方言的真实执行断言在该平台按方言显式 skip。目录 symlink 无权限时，仅省略矩阵中依赖该链接的行（junction 取代），workspace-write 与 read-only 使用同一条件，其余行继续验证。
+`ci.yml` 在仓库变量 `DSH_WINDOWS_CI=1` 时才把 `windows-latest` 加入动态矩阵。Windows 每组安装一次 deny-token broker，并在组失败时也执行卸载。每版保留：`kernel:probe`（`windows-acl` 探针，见上）、`smoke:compose` / `smoke:behavior` / `smoke:journey`（以 `SandboxPwshExecutor` 与 pwsh 工具原生执行——**不经 Git Bash**，行为 battery 的多根断言用受限 pwsh 实写）、`pack:check` / `smoke:packed`（安装副本在 Windows 上真的经 `lib/windows-runner.js` 做一次受限多根 pwsh 写），外加 `tests/windows-native.e2e.ts` 的原生组：restricted-token Node、PowerShell 与 ConPTY 覆盖两根可写、第三目录拒绝、read-only、移除根/foreign-owned/junction/8.3 别名、撤销快照、并发 private temp、退出码与流镜像、ConPTY Ctrl+C 与 Git Bash parity；`tests/windows-multi-root.spec.ts` 的结构用例同样实跑。POSIX 方言的真实执行断言在该平台按方言显式 skip。目录 symlink 无权限时，仅省略矩阵中依赖该链接的行（junction 取代），workspace-write 与 read-only 使用同一条件，其余行继续验证。
 
-该变量**当前已置 1**：本仓库是公开仓库，标准 runner 在公开仓库上不计费（计费的 2× 倍率只作用于私有仓库），因此这条腿没有理由停着。清掉变量即回到两 OS 矩阵。
+该变量**当前已置 1**：本仓库是公开仓库，标准 runner 在公开仓库上不计费（计费的 2× 倍率只作用于私有仓库），因此这条腿没有理由停着。清掉变量即回到两个 Linux 镜像和 macOS。
 
 它抓的是"只在某个平台成立"的假设——最典型的一类是**期望值里的路径分隔符**：产品侧一律交回 `canonicalPath()` 的结果（Windows 是 `\`），而测试里用 `` `${base}/third` `` 拼出来的期望只在 POSIX 上等于它。写这类断言时用 `canonicalPath(...)` 或 `join(...)`，不要用字符串拼接。
 
 LSP 源码回传断言应比较读盘得到的完整源码。夹具里的路径经 `JSON.stringify()` 写入源码时，Windows 的反斜杠已转义，不能再用未转义的原始路径作子串断言。B1–B3 各版本和平台的验收证据只记在[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#b1b3第二期-p12026-10-02)。
 
-失败可诊断：`test` 与各冒烟的输出同时写入 `vitest.log` / `smoke-*.log`（`tee` + `set -o pipefail`，红不会被吞成绿），由 `actions/upload-artifact@v4` 以 `if: always()` 上传——成功与失败的日志都能下载，公共仓库无需管理员权限。
-
-`smoke:packed` 的 scratch home 由父进程在行为子进程的 `close` 之后严格删除：父进程显式设置 `DSH_SMOKE_DEFER_HOME_CLEANUP=1`，行为子进程不先尝试删除 home。Windows 会把从安装副本加载的 `koffi.node` 映射到子进程退出为止，进程自身重试删除不能解除映射。仅设置 `DSH_SMOKE_HOME` 不转交清理责任；`DSH_SMOKE_KEEP=1` 仍保留调试现场。`scripts/lib/smoke-cleanup.mjs` 对整棵树最多删除四次、间隔 250 ms，每次递归删除禁用内层重试（`maxRetries: 0`），持久锁或权限错误仍使冒烟失败；不得把失败文件名包含 `.node` 当作清理成功。Node 的递归重试会在锁定文件的每层祖先重复放大等待，曾使 Windows packed battery 已通过后仍等待约 118 分钟。CI 将 Packed smoke 限为 15 分钟、verify job 限为 45 分钟，step 超时后仍执行日志上传和 broker 卸载；这些超时不替代实际清理与行为断言。
+`smoke:packed` 的 scratch home 由父进程在行为子进程的 `close` 之后严格删除：父进程显式设置 `DSH_SMOKE_DEFER_HOME_CLEANUP=1`，行为子进程不先尝试删除 home。Windows 会把从安装副本加载的 `koffi.node` 映射到子进程退出为止，进程自身重试删除不能解除映射。仅设置 `DSH_SMOKE_HOME` 不转交清理责任；`DSH_SMOKE_KEEP=1` 仍保留调试现场。`scripts/lib/smoke-cleanup.mjs` 对整棵树最多删除四次、间隔 250 ms，每次递归删除禁用内层重试（`maxRetries: 0`），持久锁或权限错误仍使冒烟失败；不得把失败文件名包含 `.node` 当作清理成功。Node 的递归重试会在锁定文件的每层祖先重复放大等待，曾使 Windows packed battery 已通过后仍等待约 118 分钟。CI 将 packed smoke 限为 15 分钟、单版本命令总时长限为 42 分钟、每组 job 限为 185 分钟。单版超时终止该命令树，记录失败并继续其余版本；broker 卸载和日志上传各用独立的 always 步骤。
 
 Windows 的 foreign-owned ACL 夹具按**先 DACL、后 owner**搭建：用 `whoami /user` 的数字 SID 显式保留读/执行、`WRITE_DAC` 与 `WRITE_OWNER`，移除继承并加 Everyone 的写/删除 deny 后，最后把 owner 转交 SYSTEM 的数字 SID。这样后续 ACL 编辑和清理不依赖 elevated token 的 restore 特权；测试同时读回 SYSTEM owner 与 deny ACE，并执行真实受限写断言。任何搭建失败在 CI 仍是失败，不以整项 retry 或 skip 掩盖。若未来出现新的瞬态故障，应先按日志区分夹具、进程/管道、内核断言与安装网络问题；只有已确定可恢复的夹具或清理操作适合有次数上限的重试。
 
 原生 piped 子进程探针在 `close` 而非 `exit` 事件拼接输出：Node 的 `exit` 不保证 stdout/stderr 已关闭，过早解析会把完整 verdict 截断；`close` 才能证明输出管道已经结束。见 [Node child_process 文档](https://nodejs.org/api/child_process.html#event-close)。
 
-CI 的日志捕获使用 Git Bash，其 PATH 可能让同名 GNU 命令覆盖 Windows 工具。ACL 夹具的 `whoami.exe` / `icacls.exe` / `takeown.exe` 均按 `%SystemRoot%/System32` 绝对路径执行；不要用裸 `whoami /user`，否则命中 GNU whoami 后参数会被拒绝。
+Windows runner 的 PATH 可能让同名 GNU 命令覆盖 Windows 工具。ACL 夹具的 `whoami.exe` / `icacls.exe` / `takeown.exe` 均按 `%SystemRoot%/System32` 绝对路径执行；不要用裸 `whoami /user`，否则命中 GNU whoami 后参数会被拒绝。
 
 ## 8. 常见失败与处置
 

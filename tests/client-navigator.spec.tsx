@@ -762,8 +762,8 @@ describe('the preview navigator retarget', () => {
     // the reveal opens `src` under the new pane's bookkeeping.
     await waitFor(() => {
       expect(aside.querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+      expect(expanded(aside, '/repos/payments/other')).toBe(false)
     })
-    expect(expanded(aside, '/repos/payments/other')).toBe(false)
     await waitFor(() => { expect(harness.saves.some(save => save.key === 'pane-2')).toBe(true) })
 
     // Dragging back lands on pane-1's kept record — its carrier, the

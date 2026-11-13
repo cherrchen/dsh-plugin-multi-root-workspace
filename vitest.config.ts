@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { configDefaults, defineConfig } from 'vitest/config'
+import ubuntuOnly from './scripts/ci/ubuntu-only.json' with { type: 'json' }
+
+const baseline = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).devDependencies['@deepseek-ai/dsh'] === '0.2.1-rc.2'
 
 export default defineConfig({
   resolve: {
@@ -12,7 +15,12 @@ export default defineConfig({
     },
   },
   test: {
-    exclude: [...configDefaults.exclude, 'node_modules/**', ...(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).devDependencies['@deepseek-ai/dsh'] === '0.2.1-rc.2' ? [] : ['tests/auto-review/**'])],
+    exclude: [
+      ...configDefaults.exclude,
+      'node_modules/**',
+      ...(baseline ? [] : ['tests/auto-review/**']),
+      ...(process.env.DSH_CI_NATIVE_TESTS === '1' ? ubuntuOnly : []),
+    ],
     include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx', 'tests/**/*.e2e.ts'],
     pool: 'forks',
     testTimeout: 30_000,
