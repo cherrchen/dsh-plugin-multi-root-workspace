@@ -164,6 +164,11 @@ export function apply(ctx: ClientContext): void {
   const sessionId = (): string | undefined => currentSessionIdOf(readService(ctx, 'sessions'))
   const subscribeSession = (listener: () => void): (() => void) => subscribeSessions(readService(ctx, 'sessions'), listener)
   const t = ctx.locale.bind(NS) as unknown as Translate
+  // One dependency bundle for the Workspace Folders dialog across all four
+  // entries (footer + the menu's shared owner, Files switcher/launcher, hero):
+  // the panel must render identical sections no matter which trigger opened
+  // it; each entry still supplies its own session identity and look.
+  const dialogDeps = { panel, remotes, pickDirectory, subscribeSession, t, worktrees: worktreeClient }
   installSkillsClient(ctx, t, listener => subscribeCurrentSession(readService(ctx, 'sessions'), listener))
   const worktreeSettings = installSkillsSettingsCard(ctx, t)
   // The worktree confirmation is a shell-level overlay: it must be able to
@@ -224,13 +229,8 @@ export function apply(ctx: ClientContext): void {
   }, owner => {
     const wide = (owner as { readonly wide?: boolean } | undefined)?.wide
     return createElement(WorkspaceFoldersAction, {
-      panel,
-      remotes,
-      pickDirectory,
+      ...dialogDeps,
       sessionId,
-      subscribeSession,
-      t,
-      worktrees: worktreeClient,
       dialogController,
       dialogOwner: true,
       ...(wide === undefined ? {} : { wide }),
@@ -259,11 +259,8 @@ export function apply(ctx: ClientContext): void {
       const composedSessionId = props.sessionId
       const readSession = useCallback(() => composedSessionId, [composedSessionId])
       return createElement(HeroWorkspaceEntry, {
-        panel,
-        pickDirectory,
+        ...dialogDeps,
         sessionId: readSession,
-        t,
-        worktrees: worktreeClient,
       })
     })
   })
@@ -303,8 +300,8 @@ export function apply(ctx: ClientContext): void {
     // never restarts because of it. `undefined` means the fork cannot mount.
     const filesTree = createFilesTreeSurface(props, filesTreeT)
     return absolutePath === undefined
-      ? createElement(WorkspaceFoldersAction, { panel, remotes, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, compact: true })
-      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
+      ? createElement(WorkspaceFoldersAction, { ...dialogDeps, sessionId: paneSessionId, compact: true })
+      : createElement(RootSwitcher, { ...dialogDeps, primaryPath: absolutePath, sessionId: paneSessionId, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
   }))
   // Optional: the document preview's navigator seat exists only on runtimes
   // whose `ui-sidebar-files` draws the Folder-toggle tree (0.2.2-alpha.3+);

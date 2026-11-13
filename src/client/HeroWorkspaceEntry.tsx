@@ -14,6 +14,7 @@
 import { useState, type ReactNode } from 'react'
 import { IconWorkspaceTree } from '../compat/client-icons.ts'
 import type { PanelClient } from './panel-client.ts'
+import type { RemotesClient } from './remotes-client.ts'
 import type { WorktreeClient } from './worktree-client.ts'
 import { WorkspaceFoldersDialog, type Translate } from './WorkspaceFoldersAction.tsx'
 
@@ -31,6 +32,10 @@ export interface HeroWorkspaceEntryProps {
   readonly sessionId: () => string | undefined
   /** Bound translator for this plugin's namespace. */
   readonly t: Translate
+  /** The remote-environment section's client, when the composition mounts it. */
+  readonly remotes?: RemotesClient | undefined
+  /** Session-change subscription, forwarded to the dialog like the footer's. */
+  readonly subscribeSession?: (listener: () => void) => () => void
   /** The worktree channel client, when the composition mounts it. */
   readonly worktrees?: WorktreeClient | undefined
 }

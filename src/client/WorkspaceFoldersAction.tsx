@@ -24,6 +24,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   IconAccessInherit,
@@ -731,6 +732,13 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const workingRoot = workingRootOf(state.view)
   return (
     <>
+    {/* The overlay lives under document.body, not beside the trigger: the
+        right sidebar / dockkit panes apply transform/backdrop-filter, which
+        would make position:fixed relative to the pane and clip the dialog.
+        Key events still reach onDialogKeyDown through React's portal
+        bubbling, and the handler's stopPropagation keeps them off upstream
+        pane listeners. */}
+    {createPortal(
     <div className="mrfw-overlay" role="presentation">
       <div
         className="mrfw-mask"
@@ -1118,7 +1126,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
+    )}
     {/* A widening access change asks first: a host-modal confirmation layered
         over this dialog — cancel or a mask click dismisses, the red button
         commits the setAccess mutation. Narrowing changes skip it entirely. */}
