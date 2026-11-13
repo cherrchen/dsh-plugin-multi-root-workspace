@@ -70,7 +70,7 @@ export interface SshEnvironmentManagerOptions {
   readonly allowUnattestedForTesting?: boolean
   /**
    * This process is the credential broker, running under the dedicated
-   * account and owning the keys (ADR-0039). Custody is then the deployment's
+   * account and owning the keys (ADR-0040). Custody is then the deployment's
    * attestation, not this process's manifest flag — the Host's
    * `attestBroker()` decides whether any model-facing tool may use it.
    */

@@ -1,5 +1,5 @@
 /**
- * The credential broker daemon (ADR-0039): it runs under the dedicated OS
+ * The credential broker daemon (ADR-0040): it runs under the dedicated OS
  * account, owns the SSH keys/config/ControlMasters, and exposes ONLY the
  * semantic operations the Host needs — SFTP primitives, `confine`, `spawn`,
  * wait/terminate and dispose. There is no key, config, host or shell-selection
@@ -170,7 +170,7 @@ export class BrokerServer {
       throw new BrokerRefusal('broker-uid-mismatch', `the broker runs as uid ${uid}, not the configured ${brokerUid}`)
     }
     if (brokerUid === this.options.clientUid && this.options.allowSameUidForTesting !== true) {
-      throw new BrokerRefusal('broker-same-uid', 'the broker must run under an account other than the trusted Host user (ADR-0039)')
+      throw new BrokerRefusal('broker-same-uid', 'the broker must run under an account other than the trusted Host user (ADR-0040)')
     }
     if (this.options.manager !== undefined) {
       this.manager = this.options.manager

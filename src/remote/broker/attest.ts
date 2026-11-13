@@ -1,5 +1,5 @@
 /**
- * Host-side attestation for the credential broker (ADR-0039).
+ * Host-side attestation for the credential broker (ADR-0040).
  *
  * Nothing here trusts the broker's self-description: the socket's owner and
  * mode, the unreadability of the credential root from THIS account, the

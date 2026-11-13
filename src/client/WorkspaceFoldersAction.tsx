@@ -46,8 +46,6 @@ import type { RemotesClient } from './remotes-client.ts'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
 import type { WorktreeClient } from './worktree-client.ts'
-
-import type { RootAccess, RootEntryView, RootState, RootView, RootsView } from '../contract.ts'
 import type { RemoteCapabilitiesView, RemoteEndpointView, RemotesView } from '../remote/panel-contract.ts'
 
 /** Translate one key of this plugin's namespace. */
@@ -419,7 +417,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const [menuFor, setMenuFor] = useState<string | undefined>(undefined)
   /** Tracked worktree roots awaiting the operator's inline cleanup confirmation. */
   const [cleanupFor, setCleanupFor] = useState<readonly string[] | undefined>(undefined)
-
   /** The remote section, read independently of the roots view. */
   const [remoteState, setRemoteState] = useState<{ view?: RemotesView; error?: PanelError }>({})
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -573,7 +570,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       setMenuFor(undefined)
       setAliasFor(undefined)
       setCleanupFor(undefined)
-
       setRemoteState({})
       void refresh()
       void refreshRemotes()

@@ -1,5 +1,5 @@
 /**
- * Host-side client of the credential broker (ADR-0039).
+ * Host-side client of the credential broker (ADR-0040).
  *
  * `BrokerConnection` speaks the bounded protocol over the kernel-attested
  * socket; `BrokerEnvironmentManager` exposes the same structural surface as

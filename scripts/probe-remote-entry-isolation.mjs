@@ -1,7 +1,7 @@
 /**
  * probe:remote-entry-isolation — deployment-side observations of supported
  * Agent process seams under the Host UID and the credential-broker boundary
- * (ADR-0039 / the control-plane reference's confinementProbe).
+ * (ADR-0040 / the control-plane reference's confinementProbe).
  *
  * Runs AS the Host user inside a provisioned deployment: the broker is up,
  * `dsh plugin add` installed this package into a dedicated profile, and the

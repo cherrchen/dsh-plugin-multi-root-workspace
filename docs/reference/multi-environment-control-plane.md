@@ -149,16 +149,16 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 #### broker 依赖树与 SSH 配置（可复现步骤）
 
-broker 运行**自己的** root 保护依赖树——与 Host/Agent 任何一方都不共享 node_modules。示例（路径/版本由部署者替换为其实际选定值；插件 tarball 是本地未发布的 `0.1.17-ssh.1` 构建，不从 npm 安装，上游包取支持矩阵中的精确版本）：
+broker 运行**自己的** root 保护依赖树——与 Host/Agent 任何一方都不共享 node_modules。示例（路径/版本由部署者替换为其实际选定值；插件 tarball 是本地未发布的 `0.1.19-ssh.1` 构建，不从 npm 安装，上游包取支持矩阵中的精确版本）：
 
 ```sh
 # root 执行；目录随后属 root、不可被 Host/broker 写
 mkdir -p /opt/dsh-broker && cd /opt/dsh-broker
 pnpm init
-pnpm add --save-exact /path/to/dsh-plugin-multi-root-workspace-0.1.17-ssh.1.tgz \
-  @deepseek-ai/dsh@0.2.2-rc.1 @deepseek-ai/cordis@4.1.0 \
-  @deepseek-ai/dsh-ssh@0.2.2-rc.1 @deepseek-ai/dsh-fs-ssh@0.2.2-rc.1 \
-  @deepseek-ai/dsh-subprocess-ssh@0.2.2-rc.1 @deepseek-ai/dsh-sandbox-ssh@0.2.2-rc.1
+pnpm add --save-exact /path/to/dsh-plugin-multi-root-workspace-0.1.19-ssh.1.tgz \
+  @deepseek-ai/dsh@0.2.2-rc.2 @deepseek-ai/cordis@4.1.0 \
+  @deepseek-ai/dsh-ssh@0.2.2-rc.2 @deepseek-ai/dsh-fs-ssh@0.2.2-rc.2 \
+  @deepseek-ai/dsh-subprocess-ssh@0.2.2-rc.2 @deepseek-ai/dsh-sandbox-ssh@0.2.2-rc.2
 chown -R root:root /opt/dsh-broker && chmod -R a-w /opt/dsh-broker
 ```
 
@@ -236,7 +236,7 @@ Host <env-alias>
 2. 移除 Registry 行的 `remoteEnvironments` 配置，重启原 profile。若该部署不再提供远端操作，停止 broker 服务。保留本地 v1 记录及独立的远端存储域供核对。
 3. 确认原生工具及本地根仍可用、远端工具和能力投影已消失，历史远端引用调用失败。需要重新启用时，重新证明凭据隔离及清单一致性，再按当前授权登记端点。
 
-## 凭据隔离：本机凭据代理（ADR-0039）
+## 凭据隔离：本机凭据代理（ADR-0040）
 
 **边界。** `src/remote/broker/` 是一个独立进程：它以部署方创建的专用账户运行，凭据根（0700）内只持有 SSH 私钥、`config`、`known_hosts`；ControlMaster 与 Helper 暂存位于 broker 账户自己的 `mkdtemp`（`/tmp/dsh-ssh-*`，0700、属 broker），Linux unit 上以 `PrivateTmp=yes` 隔离该目录。helper 连接的 `ControlMaster` 复用仅对 `confine`/`spawn` 生效：每个 SFTP 传输以 `ControlMaster=no`/`ControlPath=none` 独立建连——共享 master 会让一次会话的关闭波及其他在飞会话，破坏逐会话代次隔离。unit 文件本身未被容器内 systemctl stub 真实执行过，真实 `ActiveState`、临时目录属主/模式与 socket 私访探针仍属待补部署证据。Host 账户只通过一个 0750 目录里的 0660 Unix socket 连接。托管进程拒绝以 Host 账户启动（同 UID 不构成隔离），也拒绝清单中任何未声明 `credentialIsolation: "attested"` 的环境（`broker-same-uid` / `manifest-unattested`），除非测试显式放宽。
 

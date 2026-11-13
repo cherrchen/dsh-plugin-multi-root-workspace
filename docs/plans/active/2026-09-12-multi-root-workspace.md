@@ -1808,7 +1808,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 
 > **历史性证据，未经 2026-11-10 外部评审复核**：本节 broker live/故障注入均为协议 2 时代实机记录，协议 3 票据、目的收窄与运行时守卫未取得实机证据；原始产物属历史附件而非现行绿色证据。
 
-**状态：凭据代理在两台真实 VPS 的双账户部署上完成首次实机验收——Ubuntu 24.04 发起端（`dshhost` Host + `_dsh_ssh` broker）× Ubuntu 24.04 被控端（`dshbuild`/`dshxfer`/`dshxfer2`），安装器真实执行、受限探针拒绝记录、socket 内核认证与三方向真实 SSH 复制全部通过；工具仍未进入默认 patch、未对模型开放。** 合同见 [ADR-0039](../../decisions/ADR-0039-credential-broker.md)，接口与限制见[控制面参考](../../reference/multi-environment-control-plane.md#凭据隔离本机凭据代理adr-0039)。
+**状态：凭据代理在两台真实 VPS 的双账户部署上完成首次实机验收——Ubuntu 24.04 发起端（`dshhost` Host + `_dsh_ssh` broker）× Ubuntu 24.04 被控端（`dshbuild`/`dshxfer`/`dshxfer2`），安装器真实执行、受限探针拒绝记录、socket 内核认证与三方向真实 SSH 复制全部通过；工具仍未进入默认 patch、未对模型开放。** 合同见 [ADR-0040](../../decisions/ADR-0040-credential-broker.md)，接口与限制见[控制面参考](../../reference/multi-environment-control-plane.md#凭据隔离本机凭据代理adr-0039)。
 
 **实现（本轮增量）：** `src/remote/broker/protocol.ts` 定义 `protocol: 1` 的有界 JSON-lines（行 ≤ 2 MiB、二进制字段 ≤ 256 KiB、在飞请求 32、进程 8）与八个语义方法；`server.ts` 以专用账户运行，拒绝同 UID 启动与未声明 `attested` 的清单，对每条连接做内核 peer 认证（Host UID + 非沙箱/非 `NoNewPrivs`，Linux 用 `SO_PEERPIDFD`），只转发 SFTP 原语、`confine`、`spawn`/等待/终止/处置；`client.ts` 的 `BrokerEnvironmentManager` 保持官方 manager 的结构面，复制管线、`SshEndpointVerifier` 与双准入命令合同不改，命令输出在退出事件中携带 `scope` 确认；`attest.ts` 在打开任何环境前检查 UID 不同、凭据根对 Host 不可读、socket/目录属主与权限、`hello` 协议/UID/环境覆盖以及部署记录的受限探针；`tools.ts` 的 `broker` 配置先证明后挂载，失败只告警并保持工具缺席；`scripts/ssh-broker/install.sh` 以 root 创建账户、组、0700 凭据根、0750 socket 目录、0640 broker.json 与 launchd/systemd unit，不代建清单或远端公钥。`src/authority/native.ts` 的 peer 认证参数化出 `expectedUid` 与 `allowRestricted`（服务端生产路径绝不放宽）。`src/remote/ssh-environment.ts` 增加 `custody: "broker"`，使托管进程可以打开清单声明为 `unattested` 的端点（证明责任在 Host 侧），而 Host 进程没有这个开关。
 
@@ -1860,7 +1860,7 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 | F2 | 断线语义与超时 | fixed | started 后丢线 `unknown`+reconcileId 绝不重试；发布后清理失败为 `residual`；请求超时销毁连接、在飞请求 typed-lost。 |
 | F3 | Full-access 运行时守卫 | fixed（代码） | `profile-guard.ts` 包裹 resolve/confine/spawn/spawnTerminal/approval：拒绝一切 `danger-full-access` 解析/策略/回放/单发升级，256 票据 FIFO+TTL 30s 绑定受限 argv 快照；标记 PTY 经 `DSH_SESSION_ID` 活体会话重新准入。 |
 | F4 | 原始 spawn 接缝与目的收窄 | fixed（代码） | 未受票据约束的 spawn（LSP/job 形、伪造/回放/突变 argv、过期票据）fail-closed；守卫覆盖受支持服务接缝，第三方 `node:child_process` 直引与用户终端标记属部署信任假设；`environment.transfer.destinationIsolation:"chroot-sftp"` + 证明期同账号 helper/exec 拒绝。 |
-| F5 | rebase 与版本标号 | fixed | SSH 分支 rebase 到 main+experiment；凭据 broker 决策定号 ADR-0039；包版本 `0.1.17-ssh.1` 未发布、无 tag/publish。 |
+| F5 | rebase 与版本标号 | fixed | SSH 分支 rebase 到 main+experiment；凭据 broker 决策定号 ADR-0040（原 0039，与主线 worktree ADR 撞号后改号）；包版本 `0.1.17-ssh.1` 未发布、无 tag/publish。 |
 | F6 | 清单加载信任链 | fixed | 生产要求文件与**每一级祖先** root 所有、非 symlink、不可被 group/other 写；Host/broker 均不得 root；测试内部加载器才放宽（无生产开关）。 |
 | F7 | OpenSSH 身份解析 | fixed | `HostKeyAlias` 逐字（含 `none`）、`[hostname]:port`、Strict/Batch/ForwardAgent/UpdateHostKeys 强制、全部 user+global 源合计恰一钥。 |
 | F8 | confine/spawn 绑定 | fixed | 票据绑定 confine **返回后**的 argv+代次+workspaceRoot；非空 `LD_*`/`DYLD_*`/`NODE_OPTIONS`/`NODE_PATH` env 拒绝；票据校验失败或使用消耗。 |
@@ -1908,3 +1908,16 @@ PR #49 的 94 条 CI 检查全部通过（[run 43227479998](https://github.com/c
 - 全量回归在 DSH Agent 沙箱外重跑：**1562 passed / 131 skipped / 0 failed**（1693 tests，106 files passed / 8 skipped）；原始报告为 [`ssh-review-20261111-vitest.json`](../../reference/ssh-review-20261111-vitest.json)，复核日志为 [`ssh-review-20261111-checks.txt`](../../reference/ssh-review-20261111-checks.txt)。2026-11-10 清单中的 1562 计数此前没有对应的归档报告（其引用的原始报告是 F13 前的 1545）；本次重跑补上了原始产物，11-10 报告保留为历史。
 - 复核确认：Linux 入口隔离的机器记录、F13 代码与单测、GUI 面板 RPC 与截图、磁盘重载/篡改拒绝、其他 profile 的运行时审计、macOS/Windows 矩阵均与记录一致。F13 受控探针（临时 broker，配额/吊销/审计轮转）、`remote-broker.live` 6/6、真实 `.87` unit、GUI 工具目录/停用态与面板 RPC、入口探针原始日志均已归档（见[评审报告](../../reviews/2026-11-11-model-entry-evidence-review.md#复核产物)）。macOS 原始命令转录仍缺少（R6）。**其他 profile** 已在 `.87` 上运行时核实：`remote-exp`/`stock-exp` 都只有受限预设、伪造 `danger-full-access` 均被守卫拒、无第三个 profile，`stock-exp` 已不再是 unpatched 状态；维护者签收只需确认不新增 unrestricted profile/入口。
 - 默认组合未改动：`cordis.patch.yml` 不含 `remote-tools`，不配置 `remoteEnvironments`；开启是维护者对具体部署的人工决定，不是评审通过的直接结果。
+
+## SSH 分支 rebase 到 v0.1.18 之后的主线（2026-11-13）
+
+`experiment` 落后 `main` 且无独有提交，按快进追平到 `50fb77b`（`v0.1.18` 之后合并的 CI 分组提交 #51，减少 runner 数量）；`feat/ssh-workspace` 随后 rebase 到其上。分支末尾两笔 CI 提交（bubblewrap apt 重试与镜像回退）连同其回滚一起在 rebase 中丢弃：对应失败是 runner 级 DNS 故障，`azure.archive.ubuntu.com` 与 `archive.ubuntu.com` 均不可解析，重试与回退均无济于事，只拉长了失败作业；CI 工作流现与主线完全一致。
+
+rebase 的集成处理：
+
+- **ADR 撞号。** 主线把 ADR-0039 用于 worktree 附加根建议，分支的凭据 broker ADR 改号为 [ADR-0040](../../decisions/ADR-0040-credential-broker.md)，分支侧源码、脚本与文档引用随之更新；已归档的实机日志（`docs/reference/*-evidence-*.txt/json`）保持原文不改。
+- **SSH 地板随主线 pin 前移。** 主线开发 pin 升到 `0.2.2-rc.2` 后，`SUPPORTED_SSH_RELEASES` 必须仍是 allowlist 的后缀，因此扩为 `['0.2.2-rc.1', '0.2.2-rc.2']`，四个 SSH 开发包 pin 到 `0.2.2-rc.2` 并加入 `minimumReleaseAgeExclude`。rc.1 → rc.2 的 SSH 包有源码变化（`dsh-ssh` 的 helper/协议/schema，`dsh-fs-ssh` 与 `dsh-subprocess-ssh` 的入口）；`tests/ssh-compat.spec.ts` 的真实安装树断言改为跟随已安装版本，而不是写死 rc.1。
+- **代码冲突。** `registry.ts`（`promptsRoot` 与 `remoteEnvironments`/`loadRemoteManifest` 并存）、`command.ts`（worktree 清理与远端视图并存，`WorktreeError`/`RemoteAdmissionError` 共用失败映射）、客户端入口与面板（worktree 客户端与 remotes 客户端并存）均按两侧都保留合并。
+- 包版本改为未发布的 `0.1.19-ssh.1`。
+
+本机 macOS arm64 / Node `24.18.0` / DSH `0.2.2-rc.2`：`compat:check`、lint、双端类型检查、build、`kernel:probe`（仅 Seatbelt）、`docs:check` 通过；全量 `pnpm test` **1717 passed / 132 skipped / 0 failed**（118 个文件通过、8 个跳过）。

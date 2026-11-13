@@ -161,7 +161,7 @@ const RUNNER_ANCHOR_PACKAGE = '@deepseek-ai/dsh-sandbox-local'
  * version strings and always a suffix of {@link SUPPORTED_DSH_RELEASES} —
  * remote capability is a narrower floor than local support, never wider.
  */
-export const SUPPORTED_SSH_RELEASES = ['0.2.2-rc.1'] as const
+export const SUPPORTED_SSH_RELEASES = ['0.2.2-rc.1', '0.2.2-rc.2'] as const
 
 /**
  * The optional SSH peers the multi-environment experiment loads. NOT part of

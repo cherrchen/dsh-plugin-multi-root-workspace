@@ -12,7 +12,7 @@
 
 初版远端集成候选 pin 为已核对的 DSH `0.2.2-rc.1`。旧 pin 只承担原本的本地回归。实现时从宿主解析 SSH 可选 peers，延迟到通过平台、兼容性、品牌及部署检查后才加载；禁用态应可在完全没有 SSH peers 的 packed profile 中启动。单独记录“缺可选包”“身份不符”“能力不足”和“结果未知”，使用户能区分无法开始与可能已经产生效果。
 
-**SSH 兼容门禁（评审决定）。** 远端能力仅对 `SUPPORTED_SSH_RELEASES` 内的宿主开放：`src/compat/dsh-version.ts` 新增该常量（现 `['0.2.2-rc.1']`，须保持为 `SUPPORTED_DSH_RELEASES` 后缀）及 `SSH_PEER_PACKAGES` 分类。宿主不在集合内、SSH 包缺席或版本不符时能力静默缺席——compat 行不失败、不产生 mixed、不影响既有本地行为。上游安装期兼容检查对清单中**每一个** `dsh-*` peer（含 optional）都要求宿主版本满足其 range，因此四个 SSH 包若进 `peerDependencies`，range 必须与全量 allowlist 一致；收窄只发生在运行时地板，不在 manifest 区间。`@deepseek-ai/dsh` 自身依赖不含任何 SSH 包，packed profile 默认即无 SSH peers，缺席按“缺可选包”记录。SSH 包动态加载并经宿主锚定解析（仿 `loadHostKoffi()`），不计入 `CORE_PACKAGES`；`check-dsh-compat.mjs` 对本类排除版本混合检查，单独要求其 dev pin 恰好钉住一个 `SUPPORTED_SSH_RELEASES` 成员（可与核心 pin 并存），并互查 peer 声明与分类名单一致。
+**SSH 兼容门禁（评审决定）。** 远端能力仅对 `SUPPORTED_SSH_RELEASES` 内的宿主开放：`src/compat/dsh-version.ts` 新增该常量（现 `['0.2.2-rc.1', '0.2.2-rc.2']`，须保持为 `SUPPORTED_DSH_RELEASES` 后缀）及 `SSH_PEER_PACKAGES` 分类。宿主不在集合内、SSH 包缺席或版本不符时能力静默缺席——compat 行不失败、不产生 mixed、不影响既有本地行为。上游安装期兼容检查对清单中**每一个** `dsh-*` peer（含 optional）都要求宿主版本满足其 range，因此四个 SSH 包若进 `peerDependencies`，range 必须与全量 allowlist 一致；收窄只发生在运行时地板，不在 manifest 区间。`@deepseek-ai/dsh` 自身依赖不含任何 SSH 包，packed profile 默认即无 SSH peers，缺席按“缺可选包”记录。SSH 包动态加载并经宿主锚定解析（仿 `loadHostKoffi()`），不计入 `CORE_PACKAGES`；`check-dsh-compat.mjs` 对本类排除版本混合检查，单独要求其 dev pin 恰好钉住一个 `SUPPORTED_SSH_RELEASES` 成员（可与核心 pin 并存），并互查 peer 声明与分类名单一致。
 
 ## 每一关的改动与退出条件
 
