@@ -4,7 +4,7 @@
 
 ## 托管档位
 
-`multi-root-remote-tools` 设置的 `mode` 字段决定凭据托管方式：
+`multi-root-remote-tools` 设置的 `mode` 字段决定凭据托管方式。UI 入口在 Workspace Folders 面板的 SSH 区域（`src/client/remote-custody.tsx`）；插件设置卡只保留启用开关。
 
 | 档位 | 凭据 | 部署证明 | 说明 |
 | --- | --- | --- | --- |
@@ -59,12 +59,19 @@ Host dsh-<environmentId>
 
 切换 `mode` 走 `configureRemote`：远程域与 `remote-1` 监听按旧事实拆除，新模式下重读清单来源（personal → `personalPath`；team/hardened → `manifestPath` 覆盖或行配置），再按当前 authority 重开 owner/重连 follower。摘要变化后既有授权一律 withheld，需重新登记。
 
+设置写入走 Host 的 `settings` 服务；旧版 `configure` 路径没有 `setSource` 推送，行必须通过 `settings.describe()` 读取实时值，否则只有重启后 loader 重新组合才生效（本页“实时开关”回归覆盖）。
+
+## follower 与 remote-1
+
+Registry 的 owner 是唯一打开远程域和 `remote-1` 监听的 Host。若另一个 DSH 实例持有 lease，但它的 profile 没有挂载 `multi-root-remote-tools`（例如桌面端主插件仍是 mainline），follower 的 `connectFollower` 会收到 `registry authority is not ready`；面板显示 `remote.status.ownerWithoutRemotePlane` 的可操作提示。重启 follower 不能改变 owner；需要退出另一个实例，或让启用 SSH 的 profile 成为唯一 Host。
+
 ## GUI 管理面板（个人模式）
 
 两处 GUI 入口：
 
-- **插件详情设置卡**（`RemoteSwitchRow`）：开关与启用风险确认之外，常驻三档单选（个人/团队/硬化，各带一行说明）。`team` 显示四个 broker 字段（`manifestPath`/`socketPath`/`brokerUid`/`credentialRoot`）并以"保存团队配置"逐项 `set` 写入 `team.*`；`hardened` 显示只读提示（broker 参数来自部署 profile）。开关开启时向**更低隔离档位**切换（hardened→team/personal、team→personal）走同一个风险确认组件，文案按目标档位区分；升级或关闭状态下的切换直接写 `mode`。
-- **Workspace Folders 面板远端区块**：标题行显示托管档位徽标（`RemotesView.custodyMode`）。仅当档位为 `personal` 且控制面 `ready` 时渲染个人管理区（`src/client/ssh-panel.tsx`，经 `src/client/ssh-client.ts` 调 `ssh*` 端点）；team/hardened 仍是只读端点列表 + 登记/撤销。
+- **插件详情设置卡**（`RemoteSwitchRow`）：只保留开关与启用风险确认。开启后 Host 的远程控制面按当前 `mode` 启动；开关关闭立即卸载。
+- **Workspace Folders 面板远端区块**：标题行显示托管档位徽标（`RemotesView.custodyMode`）。控制面 `ready` 时先渲染托管档位区（`src/client/remote-custody.tsx`）：三档单选（个人/团队/硬化，各带一行说明）；`team` 显示四个 broker 字段（`manifestPath`/`socketPath`/`brokerUid`/`credentialRoot`）并以"保存团队配置"逐项 `set` 写入 `team.*`；`hardened` 显示只读提示（broker 参数来自部署 profile）。开关开启时向**更低隔离档位**切换（hardened→team/personal、team→personal）走同一个风险确认组件，文案按目标档位区分；升级或关闭状态下的切换直接写 `mode`。档位写入与设置卡共用同一个 `multi-root-remote-tools` 配置 form 与 CAS revision，不另建写入路径；档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源），面板只是它的 workspace 入口。
+- 个人档位额外渲染个人管理区（`src/client/ssh-panel.tsx`，经 `src/client/ssh-client.ts` 调 `ssh*` 端点）；team/hardened 仍是只读端点列表 + 登记/撤销。
 
 个人管理区自上而下：
 

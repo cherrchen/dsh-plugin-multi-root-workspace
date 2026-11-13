@@ -13,6 +13,7 @@ import Sessions from '@deepseek-ai/dsh-session'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Policy from '@deepseek-ai/dsh-sandbox-policy'
 import { RemoteControlPlane } from '../src/remote/plane.ts'
+import { RemoteClient } from '../src/remote/protocol.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { mountRemoteTools, type RemoteToolsWorld } from './support/remote-tools.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
@@ -282,6 +283,29 @@ describe.skipIf(process.platform === 'win32')('team attestation shape and plane 
     expect(hardened.status).toBe('unavailable')
     if (hardened.status === 'unavailable') {
       expect(['confinement-unproven', 'full-access-unrestricted']).toContain(hardened.code)
+    }
+  })
+
+  it('labels a follower whose owner does not serve the remote-1 plane', async () => {
+    const dir = tmp()
+    const personalPath = join(dir, 'remote-personal.json')
+    writeConfig(personalPath, CONFIG())
+    const plane = new RemoteControlPlane(
+      { enabled: true, mode: 'personal', personalPath, credentialRoot: join(dir, 'cred') },
+      { warn: () => {} },
+    )
+    const spy = vi.spyOn(RemoteClient, 'connect').mockRejectedValue(new Error('registry authority is not ready'))
+    try {
+      await plane.connectFollower({
+        id: 'store', root: dir, endpoint: join(dir, 'v1.sock'), remoteEndpoint: join(dir, 'remote-1.sock'),
+      }, 'epoch')
+      expect(plane.status).toMatchObject({
+        state: 'owner-without-remote-protocol',
+        reason: 'registry authority is not ready',
+        code: 'owner-without-remote-plane',
+      })
+    } finally {
+      spy.mockRestore()
     }
   })
 

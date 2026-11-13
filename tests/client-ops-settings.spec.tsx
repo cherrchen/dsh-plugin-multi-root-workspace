@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BundleSettingsCard, installSkillsSettingsCard, RemoteSwitchRow } from '../src/client/skills-settings.tsx'
+import { RemoteCustodyModeControl } from '../src/client/remote-custody.tsx'
 import * as Confirmation from '../src/compat/ops-confirmation.ts'
 import { zh, en } from '../src/client/locales.ts'
 import { OpsCompatibilitySettingsCard } from '../src/client/ops-settings.tsx'
@@ -171,6 +172,32 @@ describe('bundle settings coordinator', () => {
     expect(screen.queryByRole('switch', { name: 'ops.compatibilityEnable' }) !== null).toBe(modern)
   })
 
+  it('exposes the remote-tools form to the Workspace panel', () => {
+    const remote = opsForm({ value: { enabled: false }, status: 'ready', writable: true })
+    const registrations: { name: string; key: string }[] = []
+    const ctx = {
+      get: (name: string) => name === 'configForms' ? { get: (id: string) => id === 'multi-root-remote-tools' ? remote : undefined } : undefined,
+      inject: (names: string[], callback: (ctx: unknown) => unknown) => {
+        if (names.every(name => name === 'configForms' || name === 'settingsScope')) {
+          const stop = callback(ctx); if (typeof stop === 'function') cleanups.push(stop as () => void)
+        }
+      },
+      slots: {
+        inject: (_name: string, callback: () => unknown) => { callback(); return () => {} },
+        register: (options: { name: string; key: string }) => { registrations.push(options); return () => {} },
+      },
+      effect: (setup: () => unknown) => { const stop = setup(); if (typeof stop === 'function') cleanups.push(stop as () => void) },
+    }
+    const signal = installSkillsSettingsCard(ctx as never, t)
+    expect(signal.remoteForm()).toBe(remote)
+    let notified = 0
+    const stop = signal.subscribeRemote(() => { notified += 1 })
+    for (const listener of remote.listeners) listener()
+    expect(notified).toBeGreaterThan(0)
+    stop()
+    expect(registrations.some(row => row.key === 'multi-root-remote-tools')).toBe(true)
+  })
+
   it('does not register an OPS settings item when the host omits its namespace', () => {
     const registrations: { name: string; key: string }[] = []
     const skills = opsForm({ value: { enabled: true }, status: 'ready', writable: true })
@@ -224,7 +251,7 @@ describe('bundle settings coordinator', () => {
   })
 })
 
-describe('SSH remote-environments settings card', () => {
+describe('SSH remote-environments settings and custody control', () => {
   it('carries the warning-tone tag and keeps the setting off until acknowledged and confirmed', async () => {
     const writes: unknown[] = []
     const form = opsForm({ value: { enabled: false }, status: 'ready', writable: true, revision: 3 }, writes)
@@ -283,7 +310,7 @@ describe('SSH remote-environments settings card', () => {
   it('writes a custody-mode change directly while the switch is off', async () => {
     const writes: unknown[] = []
     const form = opsForm({ value: { enabled: false }, status: 'ready', writable: true, revision: 3 }, writes)
-    render(<RemoteSwitchRow form={form} t={t} />)
+    render(<RemoteCustodyModeControl form={form} t={t} />)
     fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.team/ }))
     await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'team' }], 3]]))
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -292,7 +319,7 @@ describe('SSH remote-environments settings card', () => {
   it('shows the four team broker fields only in team mode and saves them with the form revision', async () => {
     const writes: unknown[] = []
     const form = opsForm({ value: { enabled: false, mode: 'team' } as never, status: 'ready', writable: true, revision: 5 }, writes)
-    render(<RemoteSwitchRow form={form} t={t} />)
+    render(<RemoteCustodyModeControl form={form} t={t} />)
     fireEvent.change(screen.getByLabelText('remote.team.manifestPath'), { target: { value: '/etc/dsh/remote.json' } })
     fireEvent.change(screen.getByLabelText('remote.team.socketPath'), { target: { value: '/run/dsh/broker.sock' } })
     fireEvent.change(screen.getByLabelText('remote.team.brokerUid'), { target: { value: '1001' } })
@@ -305,13 +332,13 @@ describe('SSH remote-environments settings card', () => {
       { op: 'set', path: ['team', 'credentialRoot'], value: '/var/lib/dsh/ssh' },
     ], 5]]))
     cleanup()
-    render(<RemoteSwitchRow form={opsForm({ value: { enabled: false }, status: 'ready', writable: true })} t={t} />)
+    render(<RemoteCustodyModeControl form={opsForm({ value: { enabled: false }, status: 'ready', writable: true })} t={t} />)
     expect(screen.queryByLabelText('remote.team.manifestPath')).toBeNull()
   })
 
   it('shows the read-only deployment note in hardened mode and no team fields', () => {
     const form = opsForm({ value: { enabled: false, mode: 'hardened' } as never, status: 'ready', writable: true })
-    render(<RemoteSwitchRow form={form} t={t} />)
+    render(<RemoteCustodyModeControl form={form} t={t} />)
     expect(screen.getByText('remote.mode.hardenedNote')).not.toBeNull()
     expect(screen.queryByLabelText('remote.team.manifestPath')).toBeNull()
   })
@@ -320,7 +347,7 @@ describe('SSH remote-environments settings card', () => {
     const writes: unknown[] = []
     const form = opsForm({ value: { enabled: true, mode: 'hardened' } as never, status: 'ready', writable: true, revision: 6 }, writes)
     const tParams: Translate = (key, params) => params === undefined ? key : `${key}(${JSON.stringify(params)})`
-    render(<RemoteSwitchRow form={form} t={tParams} />)
+    render(<RemoteCustodyModeControl form={form} t={tParams} />)
     fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.personal/ }))
     expect(writes).toEqual([])
     await screen.findByRole('dialog', { name: 'remote.downgradeTitle' })
@@ -337,7 +364,7 @@ describe('SSH remote-environments settings card', () => {
   it('applies a mode upgrade and any mode change while disabled without confirmation', async () => {
     const writes: unknown[] = []
     const form = opsForm({ value: { enabled: true, mode: 'personal' } as never, status: 'ready', writable: true, revision: 8 }, writes)
-    render(<RemoteSwitchRow form={form} t={t} />)
+    render(<RemoteCustodyModeControl form={form} t={t} />)
     fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.hardened/ }))
     await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'hardened' }], 8]]))
     expect(screen.queryByRole('dialog')).toBeNull()

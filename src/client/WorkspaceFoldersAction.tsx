@@ -44,8 +44,10 @@ import {
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
 import type { RemotesClient } from './remotes-client.ts'
+import type { RemoteModeControl } from '../compat/skills-client.ts'
 import type { SshClient } from './ssh-client.ts'
 import { SshPersonalArea } from './ssh-panel.tsx'
+import { SshCustodySection } from './remote-custody.tsx'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
 import type { WorktreeClient } from './worktree-client.ts'
@@ -62,6 +64,8 @@ export interface WorkspaceFoldersActionProps {
   readonly remotes?: RemotesClient | undefined
   /** The personal-custody management client; absent when this host cannot serve it. */
   readonly ssh?: SshClient | undefined
+  /** The shared remote-tools settings form; absent when the host exposes no config form. */
+  readonly remoteMode?: RemoteModeControl | undefined
   /** Opens the composed directory picker, when one is composed. */
   readonly pickDirectory: (() => Promise<string | null>) | undefined
   /** Bound translator for this plugin's namespace. */
@@ -364,6 +368,14 @@ function rowKey(root: RootView): string {
   return `${root.ordinal}\u0000${root.id}\u0000${root.path}\u0000${root.addedAt}`
 }
 
+/** The operator-facing reason for one remote control-plane state. */
+function remoteStatusText(status: RemotesView['status'], t: Translate): string {
+  // A stable host code wins over the raw socket/connect text; the raw reason
+  // stays available for diagnostics but is not the operator-facing sentence.
+  if (status.code === 'owner-without-remote-plane') return t('remote.status.ownerWithoutRemotePlane')
+  return status.reason ?? status.state
+}
+
 /** The locale key for one remote registration state. */
 function remoteStateKey(state: RemoteEndpointView['state']): Key {
   switch (state) {
@@ -582,6 +594,13 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   }, [props.subscribeSession, props.sessionId, refresh, refreshRemotes])
 
   useEffect(() => { void refreshRemotes() }, [refreshRemotes])
+  // The settings switch lives on another surface. Follow the shared remote
+  // form so an open dialog reflects an enable/disable or custody-mode write
+  // immediately, instead of waiting for a remount or a DSH restart.
+  useEffect(() => {
+    if (props.remoteMode === undefined) return
+    return props.remoteMode.subscribe(() => { void refreshRemotes() })
+  }, [props.remoteMode, refreshRemotes])
 
   /**
    * Submit one change to the host and adopt the view it answers with.
@@ -982,6 +1001,14 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               {remoteState.error === undefined ? null : (
                 <p role="alert" className="mrfw-alert">{t(errorKeyOf(remoteState.error.code))}</p>
               )}
+              {remoteState.view === undefined || remoteState.view.status.state === 'disabled' ? null : (
+                <SshCustodySection
+                  control={props.remoteMode}
+                  currentMode={remoteState.view.custodyMode}
+                  onChanged={() => { void refreshRemotes() }}
+                  t={t}
+                />
+              )}
               {props.ssh === undefined || remoteState.view?.custodyMode !== 'personal' || remoteState.view.status.state !== 'ready' ? null : (
                 <SshPersonalArea ssh={props.ssh} sessionId={requestBase()?.sessionId} roots={state.view} t={t} />
               )}
@@ -989,7 +1016,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 ? (remoteState.error === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null)
                 : remoteState.view.status.state !== 'ready' ? (
                   <p className="mrfw-note">
-                    {t('panel.remoteUnavailable', { reason: remoteState.view.status.reason ?? remoteState.view.status.state })}
+                    {t('panel.remoteUnavailable', { reason: remoteStatusText(remoteState.view.status, t) })}
                   </p>
                 ) : remoteState.view.endpoints.length === 0 ? (
                   <p className="mrfw-note">{t('panel.remoteEmpty')}</p>

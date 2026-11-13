@@ -72,7 +72,7 @@ export interface RemotesView {
   /** The live credential custody mode (ADR-0041); absent on pre-ADR-0041 hosts. */
   readonly custodyMode?: 'personal' | 'team' | 'hardened' | undefined
   /** The control plane's live state; only `ready` admits remote work. */
-  readonly status: { readonly state: string; readonly reason?: string | undefined }
+  readonly status: { readonly state: string; readonly reason?: string | undefined; readonly code?: string | undefined }
   readonly endpoints: readonly RemoteEndpointView[]
   /** Set when the state itself could not be read; the panel shows this verbatim. */
   readonly unavailable?: string | undefined
@@ -110,7 +110,7 @@ const remotesViewSchema = z.object({
     value => value === 'personal' || value === 'team' || value === 'hardened' ? value : undefined,
     z.enum(['personal', 'team', 'hardened']).optional(),
   ),
-  status: z.object({ state: z.string(), reason: z.string().optional() }),
+  status: z.object({ state: z.string(), reason: z.string().optional(), code: z.string().optional() }),
   endpoints: z.array(endpointViewSchema),
   unavailable: z.string().optional(),
 })

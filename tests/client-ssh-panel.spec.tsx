@@ -8,13 +8,14 @@
  */
 
 import { createElement } from 'react'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { RootView, RootsView } from '../src/contract.ts'
 import type { RemotesView } from '../src/remote/panel-contract.ts'
 import { PanelError } from '../src/client/panel-client.ts'
 import { WorkspaceFoldersDialog, type Translate } from '../src/client/WorkspaceFoldersAction.tsx'
 import type { SshClient, SshEnvironmentView, SshStateView } from '../src/client/ssh-client.ts'
+import type { RemoteModeControl } from '../src/compat/skills-client.ts'
 
 const t: Translate = key => key
 afterEach(cleanup)
@@ -124,23 +125,28 @@ function renderDialog(options: {
   ssh?: SshClient
   custodyMode?: 'personal' | 'team' | 'hardened'
   state?: RemotesView['status']['state']
+  status?: RemotesView['status']
+  remoteMode?: RemoteModeControl
+  t?: Translate
+  onList?: () => void
 } = {}): void {
   const remotesView: RemotesView = {
     primaryRoot: '/repos/primary',
     mode: 'workspace-write',
-    status: { state: options.state ?? 'ready' },
+    status: options.status ?? { state: options.state ?? 'ready' },
     custodyMode: options.custodyMode ?? 'personal',
     endpoints: [],
   } as RemotesView
   const panel = { call: async () => ROOTS }
-  const remotes = { list: async () => remotesView }
+  const remotes = { list: async () => { options.onList?.(); return remotesView } }
   render(createElement(WorkspaceFoldersDialog, {
     panel: panel as never,
     remotes: remotes as never,
     ssh: options.ssh,
+    remoteMode: options.remoteMode,
     pickDirectory: undefined,
     sessionId: () => 'session-1',
-    t,
+    t: options.t ?? t,
     onClose: () => {},
   }))
 }
@@ -170,6 +176,68 @@ describe('the personal-custody management area', () => {
     expect(screen.getByText('Production')).toBeTruthy()
     expect(screen.getByText(/deploy@prod\.internal:22/)).toBeTruthy()
     expect(await callsOf(ssh, 'state')).toEqual([['session-1']])
+  })
+
+  it('renders the shared custody-mode control in the SSH area and writes the form', async () => {
+    const writes: unknown[] = []
+    const snapshot = { value: { enabled: true, mode: 'personal' }, status: 'ready', writable: true, revision: 2 }
+    const form = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      mutate: async (...args: unknown[]) => { writes.push(args); return true },
+    }
+    renderDialog({
+      ssh: fakeSsh(sshState()),
+      remoteMode: { form: () => form, subscribe: () => () => {} },
+    })
+    await screen.findByText('ssh.custodyMode')
+    fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.team/ }))
+    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'team' }], 2]]))
+  })
+
+  it('renders the actionable owner-without-remote-plane diagnostic', async () => {
+    const tParams: Translate = (key, params) => params === undefined ? key : `${key}:${String(params.reason ?? '')}`
+    renderDialog({
+      ssh: fakeSsh(sshState()),
+      status: {
+        state: 'owner-without-remote-protocol',
+        reason: 'registry authority is not ready',
+        code: 'owner-without-remote-plane',
+      },
+      t: tParams,
+    })
+    await screen.findByText(/remote\.status\.ownerWithoutRemotePlane/)
+  })
+
+  it('refreshes the remote section when the shared settings form changes', async () => {
+    const listeners: (() => void)[] = []
+    const snapshot = { value: { enabled: true, mode: 'personal' }, status: 'ready', writable: true, revision: 1 }
+    const form = { getSnapshot: () => snapshot, subscribe: () => () => {}, mutate: async () => true }
+    let lists = 0
+    renderDialog({
+      ssh: fakeSsh(sshState()),
+      remoteMode: {
+        form: () => form,
+        subscribe: listener => { listeners.push(listener); return () => {} },
+      },
+      onList: () => { lists += 1 },
+    })
+    await screen.findByText('ssh.custodyMode')
+    await waitFor(() => expect(lists).toBe(1))
+    act(() => { for (const listener of listeners) listener() })
+    await waitFor(() => expect(lists).toBeGreaterThan(1))
+  })
+
+  it('keeps the custody control available when the plane is config-invalid', async () => {
+    const snapshot = { value: { enabled: true, mode: 'team' }, status: 'ready', writable: true, revision: 1 }
+    const form = { getSnapshot: () => snapshot, subscribe: () => () => {}, mutate: async () => true }
+    renderDialog({
+      ssh: fakeSsh(sshState()),
+      status: { state: 'config-invalid', reason: 'missing manifest' },
+      remoteMode: { form: () => form, subscribe: () => () => {} },
+    })
+    await screen.findByText('ssh.custodyMode')
+    expect(screen.getByRole('radio', { name: /remote\.mode\.personal/ })).toBeTruthy()
   })
 
   it('does not mount for team/hardened custody or without an ssh client', async () => {

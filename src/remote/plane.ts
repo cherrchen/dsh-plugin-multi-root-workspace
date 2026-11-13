@@ -143,8 +143,12 @@ export class RemoteControlPlane {
 
   get status(): RemoteStatus { return this.state }
 
-  private setState(state: RemoteStatus['state'], reason?: string): void {
-    this.state = reason === undefined ? { state } : { state, reason }
+  private setState(state: RemoteStatus['state'], reason?: string, code?: string): void {
+    this.state = {
+      state,
+      ...(reason === undefined ? {} : { reason }),
+      ...(code === undefined ? {} : { code }),
+    }
   }
 
   private grantsOf(key: string): readonly RemoteGrant[] {
@@ -346,8 +350,17 @@ export class RemoteControlPlane {
       this.setState('ready')
     } catch (error) {
       const code = (error as { code?: unknown })?.code
+      const message = error instanceof Error ? error.message : String(error)
       if (code === 'config-digest-mismatch') this.setState('config-digest-mismatch', 'the owner serves a different deployment manifest')
-      else this.setState('owner-without-remote-protocol', error instanceof Error ? error.message : String(error))
+      else if (message === 'registry authority is not ready') {
+        // The v1 lease is held by another Host, but that owner never opened
+        // the remote-1 listener. This is the common "desktop host owns the
+        // store, web host runs the SSH plugin" shape; a restart of the
+        // follower cannot heal it. Surface an actionable diagnostic instead
+        // of the raw socket-connect text.
+        this.logger.warn('multi-root remote: the Registry owner does not serve the SSH remote plane; quit the other DSH instance or run the SSH-enabled profile as the only Host')
+        this.setState('owner-without-remote-protocol', message, 'owner-without-remote-plane')
+      } else this.setState('owner-without-remote-protocol', message)
     }
   }
 

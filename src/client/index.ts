@@ -169,13 +169,19 @@ export function apply(ctx: ClientContext): void {
   const sessionId = (): string | undefined => currentSessionIdOf(readService(ctx, 'sessions'))
   const subscribeSession = (listener: () => void): (() => void) => subscribeSessions(readService(ctx, 'sessions'), listener)
   const t = ctx.locale.bind(NS) as unknown as Translate
+  // The settings card owns the same remote-tools form the Workspace panel's
+  // SSH area renders; install it first so the dialog dependency bundle can
+  // expose that shared form.
+  const worktreeSettings = installSkillsSettingsCard(ctx, t)
   // One dependency bundle for the Workspace Folders dialog across all four
   // entries (footer + the menu's shared owner, Files switcher/launcher, hero):
   // the panel must render identical sections no matter which trigger opened
   // it; each entry still supplies its own session identity and look.
-  const dialogDeps = { panel, remotes, ssh, pickDirectory, subscribeSession, t, worktrees: worktreeClient }
+  const dialogDeps = {
+    panel, remotes, ssh, pickDirectory, subscribeSession, t, worktrees: worktreeClient,
+    remoteMode: { form: worktreeSettings.remoteForm, subscribe: worktreeSettings.subscribeRemote },
+  }
   installSkillsClient(ctx, t, listener => subscribeCurrentSession(readService(ctx, 'sessions'), listener))
-  const worktreeSettings = installSkillsSettingsCard(ctx, t)
   // The worktree confirmation is a shell-level overlay: it must be able to
   // appear over any page, and it long-polls only while a live session exists.
   // The settings signal is what remounts a loop that stopped when the switch
