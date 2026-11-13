@@ -51,7 +51,7 @@ ADR-0001-short-title.md
 ADR-0002-short-title.md
 ```
 
-编号递增，标题使用小写中划线。ADR-0030–0034 与 ADR-0039 已分配给 `feat/ssh-workspace` 分支；主线在 ADR-0029 之后直接使用 0035 起跳，跳号属有意保留而非缺失。
+编号递增，标题使用小写中划线。ADR-0030–0034 与 ADR-0040 已分配给 `feat/ssh-workspace` 分支；主线在 ADR-0029 之后直接使用 0035 起跳，跳号属有意保留而非缺失。ADR-0040 原在分支上编号为 0039，与主线的 worktree ADR 撞号后在 rebase 时改号。
 
 - [ADR-0022-auto-review-loader-entry.md](./ADR-0022-auto-review-loader-entry.md) — Auto Review 并入主包：默认关闭的单一 loader 行、运行时接管、并发导入防护、有序 owner 交接与单包构建（取代 ADR-0021 的交付结构）。
 
@@ -86,4 +86,4 @@ ADR-0002-short-title.md
 - [ADR-0032](./ADR-0032-upstream-ssh-backend.md) — DSH 官方 SSH 后端的公开入口、分发与平台边界 (Accepted).
 - [ADR-0033](./ADR-0033-remote-command-and-sandbox.md) — 显式远端命令、沙箱与取消语义 (Accepted).
 - [ADR-0034](./ADR-0034-binary-transfer.md) — 跨环境二进制复制的授权、发布与失败语义 (Accepted).
-- [ADR-0039](./ADR-0039-credential-broker.md) — 独立 OS 账户托管 SSH 连接的本机凭据代理、认证与证明条件 (Proposed).
+- [ADR-0040](./ADR-0040-credential-broker.md) — 独立 OS 账户托管 SSH 连接的本机凭据代理、认证与证明条件 (Proposed).

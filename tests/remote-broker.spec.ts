@@ -1,5 +1,5 @@
 /**
- * The credential broker's local interface (ADR-0039): framing and bounds,
+ * The credential broker's local interface (ADR-0040): framing and bounds,
  * same-uid refusal, kernel peer authentication, the SFTP/exec proxies over a
  * real socket, and the attestation failures that keep the remote tools
  * unmounted. The success path of attestation needs a real second OS account

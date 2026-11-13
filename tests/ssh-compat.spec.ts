@@ -79,8 +79,10 @@ describe('classifySshCapability', () => {
       readVersion: sshPackageVersion,
       privateCopy: sshPrivateCopy,
     })
-    expect(capability).toMatchObject({ status: 'eligible', release: '0.2.2-rc.1' })
-    for (const name of SSH_PEER_PACKAGES) expect(sshPackageVersion(name), `${name} must resolve`).toBe('0.2.2-rc.1')
+    const installed = classifyInstallation().release
+    expect(SUPPORTED_SSH_RELEASES).toContain(installed)
+    expect(capability).toMatchObject({ status: 'eligible', release: installed })
+    for (const name of SSH_PEER_PACKAGES) expect(sshPackageVersion(name), `${name} must resolve`).toBe(installed)
   })
 })
 
@@ -95,7 +97,7 @@ describe('loadHostSshPackages', () => {
   })
 
   realTree(`loads the four installed packages and finds their classes without constructing them (skipped: ${realGate.status === 'absent' ? realGate.reason : 'n/a'})`, async () => {
-    const modules = await loadHostSshPackages({ status: 'eligible', release: '0.2.2-rc.1' })
+    const modules = await loadHostSshPackages({ status: 'eligible', release: classifyInstallation().release! })
     expect(Object.keys(modules).sort()).toEqual([...SSH_PEER_PACKAGES].sort())
     const expected: Record<string, string> = {
       '@deepseek-ai/dsh-ssh': 'SshConnection',

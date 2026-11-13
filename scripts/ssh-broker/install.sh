@@ -1,6 +1,6 @@
 #!/bin/sh
 # Provision the credential broker account, directories, config and service
-# (ADR-0039). Run as root on the Host machine, once per deployment:
+# (ADR-0040). Run as root on the Host machine, once per deployment:
 #
 #   sudo DSH_SSH_BROKER_JS=/path/to/plugin/lib/remote-broker.js \
 #        DSH_SSH_BROKER_MANIFEST=/etc/dsh-ssh-broker/manifest.json \
@@ -138,7 +138,7 @@ chmod 0644 "$MANIFEST"
 if [ "$(uname -s)" = Linux ]; then
   cat > /etc/systemd/system/dsh-ssh-broker.service <<EOF
 [Unit]
-Description=DSH SSH credential broker (ADR-0039)
+Description=DSH SSH credential broker (ADR-0040)
 After=network.target
 
 [Service]
