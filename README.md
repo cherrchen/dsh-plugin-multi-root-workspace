@@ -20,6 +20,7 @@
 - **可选 Auto review（默认关闭）**：fork 上游实验性「自动授权审查」，向 Reviewer 补充附加目录的审查上下文——当前工作区拓扑、各根访问级别与实时指令文件；出厂关闭，需在插件管理器的行列表中显式打开 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` 行后生效，启用时接管官方同名 bundle。
 - **附属根 Skills**：发现附属目录的 `.dsh/skills` 与 `.agents/skills`，附属根经 `/alias-id:skill-name` 命名空间调用原生 `skill` 工具；每根独立开关、可编辑 `aliasId`，全局设置默认开启。
 - **Worktree 附加根建议（实验性，默认关闭）**：primary 是 Git main 或 linked checkout 时，发现同 common 的其他 worktree，经用户确认后把其源码树登记为 `inherit` 附加根；发现只读取插件自己解析的 Git 元数据，不启动 Git 子进程、不自动增删。linked worktree 还可显式授权主 checkout 根，补齐受限 `git add` / `git commit` 的共享元数据写入缺口（[ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+- **SSH 远端环境（实验性，默认关闭，未发布）**：插件详情卡的"SSH 远端环境"开关（实验性警示标签，开启需风险确认）按部署清单打开 Registry 远端控制面；配合部署方提供的 broker 凭据隔离证明后，Agent 获得 `remote_copy` / `remote_bash` 与 Workspace Folders 面板的远端区块，每次调用仍经 Registry 准入。开关关闭时无任何模型可见的远端能力。
 - **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
 当前发布版本 `v0.1.18`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
@@ -267,6 +268,12 @@ Settings → Plugins → Multi-root Workspace 同一张设置卡中的 **启用 
 A 只在该 primary 的完整快照证明 common 身份、且 `<main>/.git` 仍是该 common 的真实目录时出现。它补上受限 `workspace-write` 会话执行 `git add` / `git commit` 的写入缺口，同时**把主 checkout 的源码树纳入授权**。默认 pool 的 primary 位于 `<main>` 内，`primary-overlap` 会拒绝，因此 pool 没有 A；`--separate-git-dir` 时推导出的路径可能是 store 的父目录而非真正主 checkout，对话框会显示实际路径并提示核对。等待确认期间，primary/admin/common 的文件系统身份、双向指针、admin HEAD、祖先索引、主根身份或 `<main>/.git` 被替换都会让提示失效，不会写入。
 
 `read-only` 与 `danger-full-access` 不提示 A；模式变化或关闭开关会作废旧提示。A 根不进入 worktree 清理映射，删除 linked checkout 也不会清理它；需要撤回时使用普通 Remove。受限 shell 的真实 Git 旅程按内核能力探针执行，宿主无法嵌套沙箱时显式 skip 并打印原因。
+
+### SSH 远端环境（实验性，默认关闭，未发布）
+
+Issue #32 的多执行环境能力以实验性开关形式随默认组合发货：插件详情设置卡的 **SSH 远端环境** 带"实验性"警示标签并**默认关闭**，开启前须阅读风险确认（Agent 可在配置的远端主机执行命令与复制文件，凭据由部署方托管），取消或关闭弹窗不保存。打开开关后，Registry 按 `remoteEnvironments.manifestPath`（默认 `/etc/dsh-ssh-broker/manifest.json`）读取部署清单并建立远端控制面；Workspace Folders 面板随之显示"远端环境"区块，可登记/撤销清单声明的端点。
+
+模型侧的 `remote_copy` / `remote_bash` 与能力投影还要通过 broker 凭据隔离证明：broker 块由部署方在专用 profile 中提供，任何一步失败（SSH 兼容门禁、控制面未就绪、`danger-full-access` 会话、证明失败）都不安装工具。每次远端调用仍由 Registry 排序准入。关闭开关即卸载全部远端子树并把控制面恢复为 `disabled`（无 `remote-1` 监听、无远端域）。部署步骤与回滚见[控制面参考](./docs/reference/multi-environment-control-plane.md)。
 
 ### 面板
 

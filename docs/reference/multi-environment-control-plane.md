@@ -1,10 +1,10 @@
 # 多执行环境 G1a：远端控制面参考
 
-本文是 [G1a](../plans/active/2026-11-06-multi-environment-gates.md) 已实现控制面的稳定技术参考：部署清单格式、远端记录域、`remote-1` 协议入口、Host 侧准入接口及拒绝码。架构合同归 [ADR-0030](../decisions/ADR-0030-environment-and-root-identity.md)；验证结果与关卡状态只归[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md#多执行环境-g1a-控制面2026-11-07)。可选的 broker 证明行（`remote-tools`）会安装端点校验器、`remote_copy`/`remote_bash` 与能力投影；默认组合不挂载任何模型可见的远端能力。2026-11-11 外部评审通过后，模型侧仍默认关闭；是否为具体部署开启由维护者签收后决定。
+本文是 [G1a](../plans/active/2026-11-06-multi-environment-gates.md) 已实现控制面的稳定技术参考：部署清单格式、远端记录域、`remote-1` 协议入口、Host 侧准入接口及拒绝码。架构合同归 [ADR-0030](../decisions/ADR-0030-environment-and-root-identity.md)；验证结果与关卡状态只归[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md#多执行环境-g1a-控制面2026-11-07)。`remote-tools` 行随默认组合发货，但只在实验性开关 `multi-root-remote-tools.enabled` 打开且 broker 证明通过后才安装端点校验器、`remote_copy`/`remote_bash` 与能力投影；默认组合不暴露任何模型可见的远端能力。2026-11-11 外部评审通过后，2026-11-13 维护者批准以"默认关闭的实验性开关"形式开放模型入口；是否为具体部署开启由部署方决定。
 
 ## 开关与状态
 
-Registry 行配置 `remoteEnvironments: { enabled?: boolean; manifestPath?: string }`，默认组合不写此字段。`registry.remoteStatus.state`：
+用户入口是 live 开关 `multi-root-remote-tools.enabled`：随 `multi-root-remote-tools` 行挂到 Settings 命名空间（插件详情设置卡带"实验性"警示标签，开启需风险确认；持久化值覆盖行配置 `enabled`）。Registry 行配置 `remoteEnvironments: { enabled?: boolean; manifestPath?: string }`：默认组合写 `manifestPath: /etc/dsh-ssh-broker/manifest.json` 但**不写** `enabled`——`enabled` 只是开关的**初值**（供保留旧语义的专用 profile 使用），实际开合由 `registry.configureRemote(live)` 在权威转移队列内重评估：开启要求 live 开关为 true **且** `manifestPath` 已配置，关闭时恢复精确 `disabled`（无 `remote-1` 监听、无远端域打开），本地 v1 注册表不受影响。`registry.remoteStatus.state`：
 
 | 状态 | 含义 |
 | --- | --- |
@@ -129,7 +129,7 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 ## G5 显式工具、能力投影与面板（专用 headless 组合）
 
-**边界。** 默认 profile 不挂载远端工具。部署方可以在单独的 profile 中用包的 `./remote-tools` 入口挂载可选行。宿主需满足兼容门禁、provider 品牌门禁和 SSH 可选包门禁，Registry 远端控制面需就绪，broker 凭据隔离需通过证明。任何一步失败，均不安装端点校验器、模型工具或能力投影。仅设置 `enabled: true` 不会启用工具。直连 SSH 和假后端只用于源码测试。
+**边界。** `remote-tools` 行随默认 profile 挂载，但在 live 开关关闭时完全惰性：不注册工具、校验器、能力投影或 profile 守卫，并把远端控制面压在 `disabled`。开关打开后仍需满足：宿主兼容门禁、provider 品牌门禁、SSH 可选包门禁、Registry 远端控制面就绪、broker 凭据隔离通过证明。任何一步失败，均不安装端点校验器、模型工具或能力投影。关闭开关即整子树卸载并把平面恢复为精确 `disabled`。直连 SSH 和假后端只用于源码测试。
 
 **工具。** 同一行注册 `remote_copy` 与 `remote_bash`，并安装端点校验器（`SshEndpointVerifier`）——因此挂载该行的组合也是**登记路径**；未挂载时 `addRemote` 固定 `endpoint-unverifiable`。默认连接管理器是清单之上的官方 SSH 栈；默认执行后端是 `lazySshExecBackend`，在准备阶段才建立 helper 连接并返回其代次，未打开的连接无法通过最终启动准入。组合可用 `manager` / `backends` 两个注入接缝替换为有界内存端点；两者都不授予权限——每次调用仍由 Registry 排序准入。工具结果必须是 lossless JSON：未产生 operationId 的拒绝不携带该键。
 
@@ -145,7 +145,7 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 ### 部署启用清单
 
-部署方在专用 profile 中按以下顺序启用。面板与面板端点随默认组合提供，关闭时显示远端不可用。
+部署方在专用 profile 中按以下顺序启用。`multi-root-remote-tools` 行已随默认组合发货（`enabled: false`、无 broker 块）；面板与面板端点同样随默认组合提供，控制面 `disabled` 时面板不显示远端区块。对只想要面板可见性的部署，插件详情页的"SSH 远端环境"开关就是全部用户入口；需要模型工具时仍须完成下面的 broker 部署。
 
 #### broker 依赖树与 SSH 配置（可复现步骤）
 
@@ -188,7 +188,7 @@ Host <env-alias>
 1. 将同一构建的 broker 入口、共享 JS chunk、Node 及其解析到的依赖安装到 Host 账号和 Agent 都不可写的位置。四个 SSH 可选包须在对应 DSH 宿主的解析树中与 DSH 精确同版。先由 root 写好完整部署清单，供 Host 与 broker 共同读取。
 2. 用 tarball 中的 `scripts/ssh-broker/install.sh` 创建专用账户、凭据根和服务。Linux 默认的 `/etc/dsh-ssh-broker` 属 root，Host 经客户端组可遍历目录和读取清单，`broker.json` 只开放给 root 和 broker 组。在连接前为 broker 配置受信的 OpenSSH 别名、固定主机钥和远端账户。
 3. 部署层禁止该 Host UID 下的 Agent 获取无沙箱执行，包括其他 profile、会话、终端与权限提升。用部署实际提供的受限入口验证凭据与 socket 拒绝、用正常 Host 验证正对照。仅在这些部署事实成立时配置 `fullAccessDisabled: true` 与 `confinementProbe.verified: true`。布尔值用于记录证据，无法改变 DSH 会话权限。仓库内 `scripts/probe-remote-entry-isolation.mjs` 与 `scripts/ssh-broker/probe/` 是该步的参考实现：在容器内复刻真实启用序列（install.sh、专用 profile、`dsh plugin add`、受限预设表），对 shell 公开执行器、`DSH_PTY_SESSION_ID` 标记的 Agent PTY 与 PTC `run` 三个入口在只读与工作区可写两种模式下逐一验证凭据根 `EACCES` 与 socket 拒绝，记录伪造 `sandbox/mode: danger-full-access` 的守卫拒绝，并审计磁盘重载会话（持久化工件重放仍受限、篡改声明被 `remote-profile-full-access` 拒）与同 UID 第二 profile（受限进程同样被拒、可解析 `danger-full-access` 的 profile 不得承载 Agent 入口）——Linux 实机原始结果见 `docs/reference/remote-entry-isolation-evidence-20261111.json`；早期协议 2 容器样例 `remote-entry-isolation-evidence.json` 仅作历史反例。
-4. 在专用 profile 的 `cordis.patch.yml` 加入以下配置。broker 行通过证明后才可登记端点，并同时注册 `remote_copy` 和 `remote_bash`。只有 Registry 配置时，面板可显示清单，登记返回 `endpoint-unverifiable`。
+4. 在专用 profile 的 `cordis.patch.yml` 加入以下配置。`remoteEnvironments.enabled: true` 是该 profile 的开关初值（持久化开关仍可覆盖）；broker 块**替换**已发货工具行的整个 `config`——不要再 `- insert` 一个同名行。开关开启且 broker 通过证明后才可登记端点，并同时注册 `remote_copy` 和 `remote_bash`。只有 Registry 配置时，面板可显示清单，登记返回 `endpoint-unverifiable`。
 
 ```yaml
 - id: permission
@@ -207,24 +207,22 @@ Host <env-alias>
     remoteEnvironments:
       enabled: true
       manifestPath: /etc/dsh-ssh-broker/manifest.json
-- insert:
-    - id: multi-root-remote-tools
-      name: '@dsh-electron/dsh-plugin-multi-root-workspace/remote-tools'
+- id: multi-root-remote-tools
+  config:
+    broker:
       config:
-        broker:
-          config:
-            socketPath: /run/dsh-ssh-broker/broker.sock
-            brokerUid: 996 # 替换为安装器报告的 UID
-            credentialRoot: /var/lib/dsh-ssh-broker
-            fullAccessDisabled: true
-            confinementProbe:
-              verified: true
-              evidence: '受限入口的部署验收记录编号'
+        socketPath: /run/dsh-ssh-broker/broker.sock
+        brokerUid: 996 # 替换为安装器报告的 UID
+        credentialRoot: /var/lib/dsh-ssh-broker
+        fullAccessDisabled: true
+        confinementProbe:
+          verified: true
+          evidence: '受限入口的部署验收记录编号'
 ```
 
 专用 profile 须使用受限默认模式和全新的会话存储。校验实际组合的权限预设表，确认任何预设名称下都没有 `sandbox: danger-full-access`，并禁用该 UID 下其他可绕过沙箱的入口。工具行在默认模式或任何可选预设允许完全访问时拒绝挂载。
 
-注意 profile patch 层的合并语义：同一行的 `config` 是**整体替换**而非按键合并，因此上面的 `multi-root-registry` 配置必须同时写出 `sharedStorageRoot`/`leasePath`——只写 `remoteEnvironments` 会让共享权威拿不到 medium，远端平面停在 `owner-without-remote-protocol`，工具行按设计拒绝挂载（不会静默降级）。
+注意 profile patch 层的合并语义：同一行的 `config` 是**整体替换**而非按键合并，因此上面的 `multi-root-registry` 配置必须同时写出 `sharedStorageRoot`/`leasePath`——只写 `remoteEnvironments` 会让共享权威拿不到 medium，远端平面停在 `owner-without-remote-protocol`，工具行按设计拒绝挂载（不会静默降级）。同理，上面的 `multi-root-remote-tools` 配置整体替换发货值 `{ enabled: false }`：省略 `enabled` 意味着该 profile 的开关初值回落到 `remoteEnvironments.enabled`；要强制该行保持关闭，显式写 `enabled: false`。
 
 两边更新清单或更换协议版本时，先按下面的步骤关闭，再用新清单重启 broker 与 Host。相同环境 ID 无法代替清单一致性。
 
@@ -232,8 +230,8 @@ Host <env-alias>
 
 现行入口探针记录 Full-access 解析的守卫拒绝，观察 raw/LSP-like/job-like spawn 接缝，并实机审计磁盘重载会话与第二 profile；不会为了反向对照而启动不受限命令。2026-11-11 起有 Linux 实机结果（`.87`，`linux/x64`，DSH `0.2.2-rc.1`）：磁盘重放的会话仍受限、篡改磁盘的 `danger-full-access` 声明被守卫拒、同 UID 第二 profile 的受限进程同样被 socket 拒而其预设表可含 `danger-full-access`——证明每个承载 Agent 入口的 profile 都必须受限（原始记录 `docs/reference/remote-entry-isolation-evidence-20261111.json`）。静态文本清点仅作清单对照；旧协议 2 JSON 仅保留作历史反例。
 
-1. 停止把新任务派到该 profile，卸载可选工具行。该行拒绝新调用，解除端点校验器，取消并等待已进入的工具调用，然后关闭 broker 连接。已提交的文件应保留。记录 `unknown` 和暂存残留，按操作 ID 对账，确认前禁止重放。
-2. 移除 Registry 行的 `remoteEnvironments` 配置，重启原 profile。若该部署不再提供远端操作，停止 broker 服务。保留本地 v1 记录及独立的远端存储域供核对。
+1. 停止把新任务派到该 profile，并在插件详情关闭"SSH 远端环境"开关（或在该行配置显式 `enabled: false`）。开关关闭即拒绝新调用，解除端点校验器，取消并等待已进入的工具调用，远端控制面恢复 `disabled`（无 `remote-1` 监听、无远端域），然后可安全停止 broker 连接。已提交的文件应保留。记录 `unknown` 和暂存残留，按操作 ID 对账，确认前禁止重放。
+2. 若连面板可见性也要移除，删除 Registry 行的 `remoteEnvironments` 配置（连同 broker 块一起），重启原 profile。若该部署不再提供远端操作，停止 broker 服务。保留本地 v1 记录及独立的远端存储域供核对。
 3. 确认原生工具及本地根仍可用、远端工具和能力投影已消失，历史远端引用调用失败。需要重新启用时，重新证明凭据隔离及清单一致性，再按当前授权登记端点。
 
 ## 凭据隔离：本机凭据代理（ADR-0040）
@@ -258,12 +256,12 @@ Host <env-alias>
 
 **已知限制。** 托管账户持有全部密钥；Host 与 Agent 同 UID，因此“Agent 不能到达 socket”只能由部署的沙箱路径拒绝证明（`confinementProbe`），不能由本代码自证；`danger-full-access` 下 Agent 进程不受本机沙箱约束，必须与这些凭据互斥。socket 是长驻接口，进程崩溃后由 unit 重启，但 Host 不自动重建连接；重新启用必须重走证明。同 UID 测试模式（`allowSameUidForTesting`/`allowRestrictedForTesting`）只用于协议测试，生产入口没有开关。
 
-## 模型开放的前置阻断项（当前状态：评审通过；模型入口仍默认关闭，维护者签收待定）
+## 模型开放的前置阻断项（当前状态：评审通过；模型入口以实验性默认关闭开关开放）
 
-以下均为开放前提，不是可选项；各项标注其实现与验证状态。2026-11-11 外部评审已复核通过（[评审报告](../reviews/2026-11-11-model-entry-evidence-review.md)），但 `remote-tools` 行仍不得自动开放：默认组合不启用 `remoteEnvironments`，是否为具体部署开启由维护者签收后决定。
+以下均为开放前提，不是可选项；各项标注其实现与验证状态。2026-11-11 外部评审已复核通过（[评审报告](../reviews/2026-11-11-model-entry-evidence-review.md)），2026-11-13 维护者批准以"默认关闭的实验性开关"形式开放模型入口：`remote-tools` 行随默认组合发货但完全惰性，`remoteEnvironments` 只写 `manifestPath` 不写 `enabled`，开启由操作者在插件详情确认风险后完成。
 
 - **配额**：**已实现并实机验证**（2026-11-11 `.87`）——broker 端 `RollingQuota` 滚动时间窗预算（清单 `environments[].quotas` 每环境 + 顶层 `quotas` 全局），对每个环境绑定请求计操作数、对 `sftp read`/`write` 计费载字节，耗尽即 `quota-exceeded`，窗口随到达时间滚动恢复、被拒请求不计费；单文件/单请求/在飞数上限不变。生产清单已声明预算（env `{1h,20000 ops,512GiB}`、全局 `{1h,50000 ops,1TiB}`），live 复验 6/6；on-disk 配额未实现（部署者可另以 systemd `CPUQuota`/`MemoryMax`/`TasksMax` 与文件系统配额作纵深，不构成替代）。
 - **审计**：**已实现并实机验证**（2026-11-11 `.87`）——broker 内建按 `auditMaxBytes`（默认 8 MiB）+ `auditKeep`（默认 4）的链式轮转，`audit.jsonl.N` 0600 broker 属主，启动拒绝外国属主/symlink 占用；实机观察到 2.1MB 追加文件按预算轮转、`.1-.N` 保留上限成立；与外部 logrotate 兼容（`appendFileSync` 每次写都重新 open）。
 - **吊销**：**已实现并实机验证**（2026-11-11 `.87`）——清单 `revocations` 显式拒绝清单随摘要双方校验，被吊销环境的一切环境绑定方法拒绝 `environment-revoked`（`dispose` 放行清理）；停用/移除绑定并重启 broker + Host 重新证明后，已记录的 `unknown` 只许对账，**绝不**重放。
 - **部署证据**：Linux 实机 unit（`ActiveState`、PrivateTmp、socket 私访探针）已有 2026-11-10/11 协议 3 记录，配额/审计/吊销三项已于 2026-11-11 实机验证；GUI 宿主证据已于 2026-11-11 在本机 DSH Web 实测取得（[`remote-gui-host-evidence-20261111.json`](remote-gui-host-evidence-20261111.json)：attestation 通过、工具入模型目录、Workspace Folders 面板登记/撤销走真实 RPC、停用后能力消失）；跨平台矩阵已于 2026-11-11 实机补齐（[`remote-macos-matrix-evidence-20261111.json`](remote-macos-matrix-evidence-20261111.json)：macOS launchd 发起端（`install.sh` Darwin 分支实跑修复两处缺陷）、macOS 目标 `platform:"darwin"` 经完整 ssh+helper+seatbelt 路径、Windows 目标在清单解析即 `windows-target-unsupported`；原生 Windows 发起端按 ADR-0030 延后）。2026-11-11 外部评审复核了上述记录与 HEAD 回归，结论为证据达标（PASS），但默认组合仍保持关闭。
-- **默认关闭与签收**：评审通过不等于开启。默认 `cordis.patch.yml` 不包含 `remote-tools`，也不配置 `remoteEnvironments`；开启仅限维护者签收后的具体部署专用 profile。2026-11-11 的运行时审计已在 `.87` 上核实 `remote-exp`/`stock-exp` 均只有受限预设、伪造 `danger-full-access` 被守卫拒、无第三个 profile（[`remote-profile-audit-20261111.json`](remote-profile-audit-20261111.json)），`stock-exp` 已不再是 unpatched 状态；签收时确认不新增 unrestricted profile/Agent 入口，并按“停用与回滚”步骤保留退路。
+- **默认关闭**：评审通过不等于自动开启。默认 `cordis.patch.yml` 发货 `remote-tools` 行但 `enabled: false`、无 broker 块，`remoteEnvironments` 只写 `manifestPath` 不写 `enabled`——开关关闭时无工具、无校验器、无能力投影、控制面 `disabled`。开启需要操作者在插件详情卡确认风险，且模型工具另需 broker 部署通过证明；`remoteEnvironments.enabled: true` 仅作专用 profile 的开关初值。2026-11-11 的运行时审计已在 `.87` 上核实 `remote-exp`/`stock-exp` 均只有受限预设、伪造 `danger-full-access` 被守卫拒、无第三个 profile（[`remote-profile-audit-20261111.json`](remote-profile-audit-20261111.json)），`stock-exp` 已不再是 unpatched 状态；开启时确认不新增 unrestricted profile/Agent 入口，并按“停用与回滚”步骤保留退路。

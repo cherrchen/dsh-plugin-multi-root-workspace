@@ -2,8 +2,9 @@
 # (`remote-exp`), applied after every bundle layer. Mirrors the control-plane
 # enablement checklist: a restricted preset table that can never resolve to
 # danger-full-access, the remoteEnvironments row pointed at the deployment
-# manifest, and the broker-gated remote-tools insert. `__BROKER_UID__` is
-# substituted by the container run script with `id -u _dsh_ssh`.
+# manifest, and the deployment-supplied broker block on the shipped
+# remote-tools row. `__BROKER_UID__` is substituted by the container run
+# script with `id -u _dsh_ssh`.
 - id: permission
   config:
     presets:
@@ -26,16 +27,19 @@
     remoteEnvironments:
       enabled: true
       manifestPath: /etc/dsh-ssh-broker/manifest.json
-- insert:
-    - id: multi-root-remote-tools
-      name: "@dsh-electron/dsh-plugin-multi-root-workspace/remote-tools"
+# The bundle already ships `multi-root-remote-tools`; a deployment supplies
+# its broker block by REPLACING that row's config (patch configs replace
+# wholesale), not by inserting a second row. `enabled` is intentionally left
+# out: the plane's `remoteEnvironments.enabled: true` above is the initial
+# live value, and the persisted switch may still turn the row off.
+- id: multi-root-remote-tools
+  config:
+    broker:
       config:
-        broker:
-          config:
-            socketPath: /run/dsh-ssh-broker/broker.sock
-            brokerUid: __BROKER_UID__
-            credentialRoot: /var/lib/dsh-ssh-broker
-            fullAccessDisabled: true
-            confinementProbe:
-              verified: true
-              evidence: probe-remote-entry-isolation container run
+        socketPath: /run/dsh-ssh-broker/broker.sock
+        brokerUid: __BROKER_UID__
+        credentialRoot: /var/lib/dsh-ssh-broker
+        fullAccessDisabled: true
+        confinementProbe:
+          verified: true
+          evidence: probe-remote-entry-isolation container run

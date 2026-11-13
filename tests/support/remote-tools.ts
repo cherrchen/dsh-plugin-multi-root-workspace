@@ -57,6 +57,12 @@ export interface RemoteToolsWorldOptions {
   readonly defaultBackends?: boolean
   /** Mount the command/panel row over a stub Connection; `panel()` then works. */
   readonly withPanel?: boolean
+  /**
+   * The registry's `remoteEnvironments` overlay. Default `{ enabled: true }`;
+   * `{}` ships `manifestPath` WITHOUT `enabled` (the default-bundle shape, so
+   * the live switch owns the plane), `{ enabled: false }` sets it explicitly.
+   */
+  readonly remote?: { readonly enabled?: boolean }
   /** Per-environment extra files, keyed by environment and absolute path. */
   readonly seed?: Readonly<Record<string, Readonly<Record<string, string>> | undefined>>
 }
@@ -106,7 +112,7 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
   if (options.deviceExec === true) backends.set('device', fakeExecBackend(remotes.get('device')!, FAKE_EXEC))
 
   const stack = await mountRegistryStack(join(fixture.base, 'store'), {
-    remoteEnvironments: { enabled: true, manifestPath },
+    remoteEnvironments: { ...(options.remote ?? { enabled: true }), manifestPath },
   }, {
     allowUserOwnedRemoteManifestForTesting: true,
     beforeGate: async ctx => {

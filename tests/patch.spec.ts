@@ -125,6 +125,7 @@ describe('inserted rows', () => {
       'multi-root-registry',
       'multi-root-skills',
       'multi-root-worktrees',
+      'multi-root-remote-tools',
       'multi-root-instructions',
       'multi-root-lsp',
       'multi-root-workspace-files',
@@ -139,7 +140,7 @@ describe('inserted rows', () => {
     const ids = inserted.map(row => row.id)
     const gate = ids.indexOf('multi-root-compat')
     expect(gate).toBe(0)
-    for (const gated of ['multi-root-fs', 'multi-root-sandbox', 'multi-root-registry', 'multi-root-worktrees', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files', 'multi-root-process-fence']) {
+    for (const gated of ['multi-root-fs', 'multi-root-sandbox', 'multi-root-registry', 'multi-root-worktrees', 'multi-root-remote-tools', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files', 'multi-root-process-fence']) {
       expect(ids.indexOf(gated), `${gated} must come after the gate`).toBeGreaterThan(gate)
     }
   })
@@ -148,7 +149,7 @@ describe('inserted rows', () => {
     const ids = inserted.map(row => row.id)
     const providers = ids.indexOf('multi-root-providers')
     expect(providers).toBeGreaterThan(-1)
-    for (const gated of ['multi-root-registry', 'multi-root-skills', 'multi-root-worktrees', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files', 'multi-root-process-fence']) {
+    for (const gated of ['multi-root-registry', 'multi-root-skills', 'multi-root-worktrees', 'multi-root-remote-tools', 'multi-root-instructions', 'multi-root-lsp', 'multi-root-workspace-files', 'multi-root-process-fence']) {
       expect(ids.indexOf(gated), `${gated} must come after the provider-conflict gate`).toBeGreaterThan(providers)
     }
   })
@@ -182,7 +183,21 @@ describe('inserted rows', () => {
       leasePath: "dshHomePath('storages/multi_root_workspace.lock')",
       maxAdditionalRoots: 16,
       backgroundRecovery: true,
+      remoteEnvironments: { manifestPath: '/etc/dsh-ssh-broker/manifest.json' },
     })
+    // `enabled` stays absent: the plane is opened by the live switch, not by
+    // the row, so the default composition boots `disabled` (ADR-0030).
+    const remoteConfig = (registry?.config as { remoteEnvironments?: Record<string, unknown> } | undefined)?.remoteEnvironments
+    expect(remoteConfig).not.toHaveProperty('enabled')
+  })
+
+  it('ships the remote-tools row inert behind the default-off live switch', () => {
+    const remote = inserted.find(row => row.id === 'multi-root-remote-tools')
+    expect(remote?.name).toBe('@dsh-electron/dsh-plugin-multi-root-workspace/remote-tools')
+    expect(remote?.disabled).not.toBe(true)
+    expect(remote?.config).toMatchObject({ enabled: false })
+    // The broker block is deployment-supplied; the default row must not carry one.
+    expect(remote?.config).not.toHaveProperty('broker')
   })
 
   it('defaults the scope row to no per-tool caps and wires the DSH-home boundary', () => {

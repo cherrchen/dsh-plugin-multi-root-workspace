@@ -100,6 +100,14 @@
         # follower reconnect, retryable storage failure); on by default.
         # Set false for on-demand recovery only (refresh still works).
         backgroundRecovery: true
+        # The SSH remote control plane (ADR-0030). `manifestPath` alone does
+        # NOT open it: `remoteEnvironments.enabled` — deliberately absent here —
+        # is only the INITIAL value of the `multi-root-remote-tools.enabled`
+        # live switch, so the plane stays `disabled` until the operator turns
+        # that switch on. A dedicated broker profile may set `enabled: true`
+        # and point at its own manifest instead.
+        remoteEnvironments:
+          manifestPath: /etc/dsh-ssh-broker/manifest.json
     # Upstream `agent-instructions` only discovers instruction files from the
     # session cwd upward, so an additional root's own AGENTS.md is invisible to
     # the model. This row closes that gap for the additional roots only; the
@@ -125,6 +133,21 @@
         # Per-workspace admin/parent watcher cap; beyond it the workspace is
         # marked degraded and only timeout reconciliation remains.
         maxAdminWatchers: 128
+    # SSH remote environments (ADR-0030, Issue #32), EXPERIMENTAL and off by
+    # default. The row is mounted so the plugin-detail switch exists, but it is
+    # inert while `enabled` is false: no remote tool, verifier, capability
+    # projection, or profile guard is registered, and the registry's remote
+    # control plane stays `disabled` — nothing is model-visible until the
+    # operator turns the plugin-detail switch on (the settings card asks for a
+    # risk confirmation first). The credential-broker block stays
+    # deployment-supplied: even with the switch on, `broker.config` absent
+    # still means no tools, and every call goes through Registry admission.
+    - id: multi-root-remote-tools
+      name: '@dsh-electron/dsh-plugin-multi-root-workspace/remote-tools'
+      config:
+        # The live switch the plugin-detail card also edits (default off;
+        # a persisted Settings value overrides this loader default).
+        enabled: false
     - id: multi-root-instructions
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/instructions'
       config:

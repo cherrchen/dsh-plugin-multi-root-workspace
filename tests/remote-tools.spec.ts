@@ -181,9 +181,14 @@ describe('the model-facing capability projection', () => {
       .toBe(renderRemoteCapabilities({ bindings, environments: manifest.environments, mode: 'workspace-write', status: { state: 'ready' } }))
   })
 
-  it('stays out of the production profile patch', () => {
+  it('ships in the default patch behind the default-off live switch', () => {
     const patch = readFileSync(join(import.meta.dirname, '..', 'cordis.patch.yml'), 'utf8')
-    expect(patch).not.toContain('remote-tools')
-    expect(patch).not.toMatch(/id: multi-root-remote/)
+    // The row is mounted so the plugin-detail switch exists, but the shipped
+    // config keeps it inert; the broker block stays deployment-supplied.
+    expect(patch).toMatch(/id: multi-root-remote-tools\n\s+name: '@dsh-electron\/dsh-plugin-multi-root-workspace\/remote-tools'\n\s+config:\n(?:\s+#.*\n)*\s+enabled: false/)
+    // The registry row carries manifestPath but no enabled flag: the switch
+    // — not the row — opens the remote plane.
+    expect(patch).toMatch(/remoteEnvironments:\n\s+manifestPath: \/etc\/dsh-ssh-broker\/manifest\.json/)
+    expect(patch).not.toMatch(/remoteEnvironments:\n(?:\s+#.*\n)*\s+.*enabled/)
   })
 })

@@ -33,9 +33,14 @@ function manifestFile(over: { platform?: string; hostKey?: string; bindings?: un
   return path
 }
 
-async function mount(remote?: { manifestPath?: string; enabled?: boolean }, toolAccess?: Record<string, 'read-only'>): Promise<RegistryStack> {
+async function mount(remote?: { manifestPath?: string; enabled?: boolean | null }, toolAccess?: Record<string, 'read-only'>): Promise<RegistryStack> {
   const stack = await mountRegistryStack(join(fixture.base, 'store'), {
-    remoteEnvironments: remote === undefined ? undefined : { enabled: remote.enabled ?? true, manifestPath: remote.manifestPath },
+    // `enabled: null` ships the key absent — the default-bundle shape, where
+    // only the live switch opens the plane.
+    remoteEnvironments: remote === undefined ? undefined : {
+      ...(remote.enabled === null ? {} : { enabled: remote.enabled ?? true }),
+      manifestPath: remote.manifestPath,
+    },
   }, {
     allowUserOwnedRemoteManifestForTesting: true,
     scopeConfig: toolAccess === undefined ? {} : { toolAccess },
@@ -69,6 +74,43 @@ describe('remote control plane', () => {
     expect(existsSync(join(fixture.base, 'store', `${REMOTE_DOMAIN_NAME}.json`))).toBe(false)
     await expect(stack.registry.remoteList(fixture.workspace)).rejects.toMatchObject({ code: 'remote-unavailable' })
     await expect(stack.registry.withRemoteOperation(op(stack), () => {})).rejects.toMatchObject({ code: 'remote-unavailable' })
+  })
+
+  it.skipIf(process.platform === 'win32')('manifestPath without enabled stays disabled until configureRemote opens and closes the plane', async () => {
+    const stack = await mount({ manifestPath: manifestFile(), enabled: null })
+    expect(stack.registry.remoteEnabled).toBe(false)
+    expect(stack.registry.remoteStatus.state).toBe('disabled')
+    await stack.registry.add(fixture.workspace, { path: fixture.outside })
+    expect(existsSync(join(fixture.base, 'store', `${REMOTE_DOMAIN_NAME}.json`))).toBe(false)
+    await expect(stack.registry.remoteList(fixture.workspace)).rejects.toMatchObject({ code: 'remote-unavailable' })
+
+    // The live switch opening: the owner re-opens its remote domain and
+    // remote-1 listener, and admission works under the same verifier path.
+    await stack.registry.configureRemote(true)
+    expect(stack.registry.remoteEnabled).toBe(true)
+    expect(stack.registry.remoteStatus.state).toBe('ready')
+    stack.registry.setRemoteEndpointVerifier(verifier())
+    const snapshot = await stack.registry.addRemote(fixture.workspace, REF)
+    expect(snapshot.grants).toHaveLength(1)
+
+    // Closing restores the exact disabled state — no remote domain stays
+    // open, no remote work is admitted — while the local registry is untouched.
+    await stack.registry.configureRemote(false)
+    expect(stack.registry.remoteEnabled).toBe(false)
+    expect(stack.registry.remoteStatus.state).toBe('disabled')
+    await expect(stack.registry.remoteList(fixture.workspace)).rejects.toMatchObject({ code: 'remote-unavailable' })
+    await expect(stack.registry.withRemoteOperation(op(stack), () => {})).rejects.toMatchObject({ code: 'remote-unavailable' })
+    expect(stack.registry.list(fixture.workspace)).toHaveLength(1)
+  })
+
+  it.skipIf(process.platform === 'win32')('configureRemote without a manifestPath fails closed to config-invalid and back', async () => {
+    const stack = await mount({ enabled: null })
+    expect(stack.registry.remoteStatus.state).toBe('disabled')
+    await stack.registry.configureRemote(true)
+    expect(stack.registry.remoteStatus.state).toBe('config-invalid')
+    await expect(stack.registry.remoteList(fixture.workspace)).rejects.toMatchObject({ code: 'remote-unavailable' })
+    await stack.registry.configureRemote(false)
+    expect(stack.registry.remoteStatus.state).toBe('disabled')
   })
 
   it('reports platform-deferred on win32 and stays locally usable', async () => {

@@ -1642,6 +1642,41 @@ export class MultiRootRegistry extends Service {
     return this.remotePlane.manifest
   }
 
+  /**
+   * The plane's live switch. `remoteEnvironments.enabled` on this row is only
+   * the INITIAL value — the remote-tools row's settings switch rewrites it
+   * through {@link MultiRootRegistry.configureRemote}. Other rows read this
+   * instead of the row config so a dedicated profile's `enabled: true` also
+   * serves as their live default.
+   */
+  get remoteEnabled(): boolean {
+    return this.remotePlane.enabled
+  }
+
+  /**
+   * Re-evaluate the remote plane against a new live flag, serialized with
+   * every other authority transition: teardown (remote-1 listener / remote
+   * domain / follower channel) runs against the old facts, the flag rebinds,
+   * then the owner or follower remote open runs for the current authority
+   * shape. Disabling restores the exact `disabled` state — no remote-1
+   * listener and no remote domain stays open — while v1 keeps working.
+   */
+  async configureRemote(enabled: boolean): Promise<void> {
+    await this.serializeAuthority(async () => {
+      if (this.disposed) return
+      if (this.remotePlane.enabled === enabled) return
+      this.remotePlane.dropFollower()
+      await this.remotePlane.closeOwner()
+      this.remotePlane.configure(enabled)
+      if (this.authorityState.kind === 'follower') {
+        await this.remotePlane.connectFollower(this.medium!, this.authorityState.epoch)
+      } else if (this.authorityState.kind === 'active') {
+        await this.remotePlane.openOwner(this.authorityStorageContext, this.medium!, this.operationEpoch!,
+          (method, args) => this.dispatchRemote(method as RemoteMethod, args))
+      }
+    })
+  }
+
   /** Owner-side injection point for endpoint verification (none ships in G1a). */
   setRemoteEndpointVerifier(verifier: import('./remote/contract.ts').RemoteEndpointVerifier): () => void {
     this.remotePlane.verifier = verifier
