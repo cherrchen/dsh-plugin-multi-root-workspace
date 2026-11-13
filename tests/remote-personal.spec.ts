@@ -16,6 +16,7 @@ import { CredentialStore } from '../src/remote/personal/credentials.ts'
 import { link, linkStatus, renderHostBlock, renderSshConfig } from '../src/remote/personal/ssh-files.ts'
 import { parseSshConfig } from '../src/remote/ssh-environment.ts'
 import { readRemoteSettingsValue } from '../src/compat/remote-settings.ts'
+import { parseRemotesView } from '../src/remote/panel-contract.ts'
 import { parseSshCall, SSH_ENDPOINTS } from '../src/remote/personal-contract.ts'
 
 const fixture = { dirs: [] as string[] }
@@ -146,6 +147,32 @@ describe('relaxed ssh -G parsing and fail-closed settings', () => {
     expect(read.enabled).toBe(false)
     expect(warnings.length).toBe(1)
     expect(readRemoteSettingsValue({ enabled: true, mode: 'team' }, () => {}).enabled).toBe(true)
+  })
+
+  it('unwraps Schemastery volatile settings fields', () => {
+    const volatile = (value: unknown) => ({
+      get: () => value,
+      [Symbol.for('cosmokit.volatile.write')]: () => value,
+    })
+    const read = readRemoteSettingsValue({ enabled: volatile(true), mode: volatile('team') }, () => {})
+    expect(read).toEqual({ enabled: true, mode: 'team' })
+    // The wrapper is not a mode; an enabled document with one still fails closed.
+    const warnings: string[] = []
+    expect(readRemoteSettingsValue({ enabled: true, mode: volatile({}) }, message => warnings.push(message)))
+      .toEqual({ enabled: false })
+    expect(warnings.length).toBe(1)
+  })
+
+  it('treats an unreadable optional custodyMode as absent, not a bad view', () => {
+    const view = parseRemotesView({
+      primaryRoot: '/w',
+      mode: 'workspace-write',
+      custodyMode: {},
+      status: { state: 'ready' },
+      endpoints: [],
+    })
+    expect(view.ok).toBe(true)
+    if (view.ok) expect(view.value.custodyMode).toBeUndefined()
   })
 
   it('every personal endpoint parses sessionId and rejects unknown keys', () => {

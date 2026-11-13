@@ -15,7 +15,7 @@ import type {} from '../compat.ts'
 import type {} from '../providers.ts'
 import { configValue, volatileField } from '../compat/skills.ts'
 import { classifySshCapability, sshPackageVersion, sshPrivateCopy } from '../compat/dsh-version.ts'
-import { installRemoteSettings, readRemoteSettingsValue, type RemoteSettingsValue } from '../compat/remote-settings.ts'
+import { installRemoteSettings, readRemoteSettingsValue, remoteModeOf, type RemoteSettingsValue } from '../compat/remote-settings.ts'
 import type { BrokerConfig } from './broker/attest.ts'
 import { installRemoteProfileGuard } from './profile-guard.ts'
 import type { RemoteMode } from './plane.ts'
@@ -66,8 +66,11 @@ export function apply(ctx: Context, config: Config = {}): void {
       message => ctx.logger.warn(message),
     )
     // Settings `mode` wins; absent means the row's own default — a profile
-    // with a broker block and no mode keeps 'hardened'.
-    const mode = value.mode ?? config.mode ?? (broker === undefined ? 'personal' : 'hardened')
+    // with a broker block and no mode keeps 'hardened'. The row config is
+    // Schemastery-validated, so its `mode` is a volatile wrapper object unless
+    // unwrapped here; leaking it would make `registry.remoteMode` non-string
+    // and the panel's `custodyMode` unreadable.
+    const mode = value.mode ?? remoteModeOf(config.mode) ?? (broker === undefined ? 'personal' : 'hardened')
     return { enabled: value.enabled, mode, ...(value.team === undefined ? { ...(config.team === undefined ? {} : { team: config.team }) } : { team: value.team as TeamConfig }) }
   }
 
@@ -179,9 +182,10 @@ export function apply(ctx: Context, config: Config = {}): void {
   // initial value; a dedicated profile without this row's own `enabled`
   // keeps its behavior by falling through to the plane's initial flag, and
   // a profile without a `mode` but with a broker block stays 'hardened'.
+  const configuredEnabled = configValue(config.enabled)
   const settings = installRemoteSettings(ctx, (): RemoteSettingsValue => ({
-    enabled: config.enabled ?? ctx.multiRootRegistry.remoteEnabled,
-    mode: config.mode ?? (broker === undefined ? 'personal' : 'hardened'),
+    enabled: typeof configuredEnabled === 'boolean' ? configuredEnabled : ctx.multiRootRegistry.remoteEnabled,
+    mode: remoteModeOf(config.mode) ?? (broker === undefined ? 'personal' : 'hardened'),
     ...(config.team === undefined ? {} : { team: config.team }),
   }), changed)
   const read = settings.read
