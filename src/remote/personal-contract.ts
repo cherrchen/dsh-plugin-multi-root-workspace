@@ -54,9 +54,17 @@ export const environmentDraftSchema = z.object({
   endpoint: endpointDraft,
   credential: credentialDraft,
   workspace: z.string().min(1).max(4096),
+  // The draft carries the FULL exec stanza — the client materializes the
+  // documented defaults and the host stores them verbatim (the same shape
+  // `PersonalEnvironment.exec` validates on write).
   exec: z.object({
-    stdoutLimit: z.number().int().min(1), stderrLimit: z.number().int().min(1), timeoutMs: z.number().int().min(1),
-  }).optional(),
+    shell: z.array(z.string().min(1)).min(1).max(8),
+    env: z.record(z.string(), z.string()),
+    maxTimeoutMs: z.number().int().min(1).max(3_600_000),
+    stdoutLimit: z.number().int().min(1).max(16 * 1024 * 1024),
+    stderrLimit: z.number().int().min(1).max(16 * 1024 * 1024),
+    terminateGraceMs: z.number().int().min(0).max(60_000),
+  }).strict().optional(),
   transfer: z.object({
     maxBytes: z.number().int().min(1), timeoutMs: z.number().int().min(1),
   }).optional(),
@@ -123,7 +131,78 @@ export interface CredentialPublicView {
   readonly publicKey?: string | undefined
   readonly fingerprint?: string | undefined
   readonly createdAt: string
+  /** Set on auto-generated per-environment access keys; the UI groups them. */
+  readonly purpose?: 'access-key' | undefined
+  readonly environmentId?: string | undefined
 }
+
+/** What the panel sees of one personal environment (mirrors the file shape). */
+export interface SshEnvironmentView {
+  readonly environmentId: string
+  readonly displayName?: string | undefined
+  readonly platform: 'linux' | 'darwin'
+  readonly endpoint: { readonly hostname: string; readonly port: number; readonly user: string }
+  readonly credential:
+    | { readonly kind: 'ssh-config'; readonly alias: string }
+    | { readonly kind: 'managed'; readonly credentialId: string; readonly accessKeyId?: string | undefined }
+  readonly hostKey: string
+  readonly helper: {
+    readonly nodePath: string
+    readonly helperPath: string
+    readonly sha256: string
+    readonly protocol: number
+  } | null
+  readonly workspace: string
+  readonly exec?: {
+    readonly shell: readonly string[]
+    readonly env: Record<string, string>
+    readonly maxTimeoutMs: number
+    readonly stdoutLimit: number
+    readonly stderrLimit: number
+    readonly terminateGraceMs: number
+  } | undefined
+  readonly transfer?: { readonly maxBytes: number; readonly timeoutMs: number } | undefined
+}
+
+/** What the panel sees of one personal binding for its primary. */
+export interface SshBindingView {
+  readonly environmentId: string
+  readonly rootId: string
+  readonly path: string
+  readonly actions: readonly ('read' | 'write' | 'exec')[]
+  readonly transfers?: readonly {
+    readonly direction: 'import' | 'export'
+    readonly peer: { readonly environmentId: string; readonly rootId: string }
+  }[] | undefined
+}
+
+const environmentViewSchema = z.object({
+  environmentId: z.string(),
+  displayName: z.string().optional(),
+  platform: z.enum(['linux', 'darwin']),
+  endpoint: z.object({ hostname: z.string(), port: z.number().int(), user: z.string() }),
+  credential: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('ssh-config'), alias: z.string() }),
+    z.object({ kind: z.literal('managed'), credentialId: z.string(), accessKeyId: z.string().optional() }),
+  ]),
+  hostKey: z.string(),
+  helper: z.object({ nodePath: z.string(), helperPath: z.string(), sha256: z.string(), protocol: z.number() }).nullable(),
+  workspace: z.string(),
+  exec: z.object({
+    shell: z.array(z.string()), env: z.record(z.string(), z.string()),
+    maxTimeoutMs: z.number(), stdoutLimit: z.number(), stderrLimit: z.number(), terminateGraceMs: z.number(),
+  }).optional(),
+  transfer: z.object({ maxBytes: z.number(), timeoutMs: z.number() }).optional(),
+})
+
+const bindingViewSchema = z.object({
+  environmentId: z.string(), rootId: z.string(), path: z.string(),
+  actions: z.array(z.enum(['read', 'write', 'exec'])),
+  transfers: z.array(z.object({
+    direction: z.enum(['import', 'export']),
+    peer: z.object({ environmentId: z.string(), rootId: z.string() }),
+  })).optional(),
+})
 
 /** The personal-mode section state every mutation answers. */
 export interface SshStateView {
@@ -133,10 +212,10 @@ export interface SshStateView {
   readonly linked: boolean
   /** The personal config revision for CAS writes. */
   readonly revision: number
-  readonly environments: readonly unknown[]
+  readonly environments: readonly SshEnvironmentView[]
   readonly credentials: readonly CredentialPublicView[]
   /** Bindings for THIS session's primary root only. */
-  readonly bindings: readonly unknown[]
+  readonly bindings: readonly SshBindingView[]
 }
 
 const sshStateSchema = z.object({
@@ -144,12 +223,13 @@ const sshStateSchema = z.object({
   enabled: z.boolean(),
   linked: z.boolean(),
   revision: z.number().int().min(0),
-  environments: z.array(z.unknown()),
+  environments: z.array(environmentViewSchema),
   credentials: z.array(z.object({
     id: z.string(), label: z.string(), kind: z.enum(['key', 'password']),
     publicKey: z.string().optional(), fingerprint: z.string().optional(), createdAt: z.string(),
+    purpose: z.literal('access-key').optional(), environmentId: z.string().optional(),
   })),
-  bindings: z.array(z.unknown()),
+  bindings: z.array(bindingViewSchema),
 })
 
 const hostKeySchema = z.object({ type: z.string(), fingerprint: z.string() })

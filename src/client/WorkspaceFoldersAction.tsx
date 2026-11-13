@@ -44,6 +44,8 @@ import {
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
 import type { RemotesClient } from './remotes-client.ts'
+import type { SshClient } from './ssh-client.ts'
+import { SshPersonalArea } from './ssh-panel.tsx'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
 import type { WorktreeClient } from './worktree-client.ts'
@@ -58,6 +60,8 @@ export interface WorkspaceFoldersActionProps {
   readonly panel: PanelClient | undefined
   /** The remote-environment section's client; absent when this host cannot serve it. */
   readonly remotes?: RemotesClient | undefined
+  /** The personal-custody management client; absent when this host cannot serve it. */
+  readonly ssh?: SshClient | undefined
   /** Opens the composed directory picker, when one is composed. */
   readonly pickDirectory: (() => Promise<string | null>) | undefined
   /** Bound translator for this plugin's namespace. */
@@ -970,10 +974,16 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             <section className="mrfw-section">
               <div className="mrfw-sectionTitleRow">
                 <span className="mrfw-sectionTitle">{t('panel.remote')}</span>
+                {remoteState.view?.custodyMode === undefined ? null : (
+                  <span className="mrfw-accessBadge">{t('ssh.custody', { mode: t(`remote.mode.${remoteState.view.custodyMode}` as Key) })}</span>
+                )}
                 <span className="mrfw-sectionNote">{t('panel.remoteNote')}</span>
               </div>
               {remoteState.error === undefined ? null : (
                 <p role="alert" className="mrfw-alert">{t(errorKeyOf(remoteState.error.code))}</p>
+              )}
+              {props.ssh === undefined || remoteState.view?.custodyMode !== 'personal' || remoteState.view.status.state !== 'ready' ? null : (
+                <SshPersonalArea ssh={props.ssh} sessionId={requestBase()?.sessionId} roots={state.view} t={t} />
               )}
               {remoteState.view === undefined
                 ? (remoteState.error === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null)
