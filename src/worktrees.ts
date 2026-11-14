@@ -28,7 +28,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { configValue, volatileField } from './compat/skills.ts'
 import { installWorktreeSettings } from './compat/worktree-settings.ts'
-import { effectiveRootAccess, type WorkspaceMode, type WorktreeRootView } from './contract.ts'
+import { effectiveRootAccess, type WorktreeRootView, type WorktreeSnoozeChoice, type WorkspaceMode } from './contract.ts'
 import type {} from './compat.ts'
 import type {} from './providers.ts'
 import type {} from './scope.ts'
@@ -41,8 +41,8 @@ import { commonCandidate, commonDiscoveryKey, type CommonCandidate } from './wor
 import { verifyPromptExpected } from './worktrees/owner.ts'
 import { resolveRepo } from './worktrees/repository.ts'
 import { lstatEntry, readPointerLine, resolvePointerTarget, SafeIoError } from './worktrees/fs-safe.ts'
-import type { WorktreeMapping } from './worktrees/sidecar.ts'
-import type { AddNewRootOptions, DeletedWorktreeOptions } from './registry.ts'
+import { liveSnoozes, mergeSnoozeRecords, snoozedDiscoveries, snoozeActive, type WorktreeMapping, type WorktreeSnooze } from './worktrees/sidecar.ts'
+import type { DeletedWorktreeOptions } from './registry.ts'
 import { WorkspaceWatchSet, type WatchTargets } from './worktrees/watch.ts'
 import type {
   PromptCandidateSnapshot,
@@ -120,8 +120,34 @@ interface WorkspaceState {
   evaluated: Set<string>
   /** Discovery keys the operator handled or explicitly ignored. */
   prompted: Set<string>
+  /**
+   * Discovery keys the operator was already SHOWN during this Host lifetime.
+   * Host memory only: it never persists, never authorizes, and clearing it
+   * (reset, a Host restart, the switch going off) only means the next
+   * automatic check may announce the candidate again (ADR-0039 §6.2).
+   */
+  offered: Set<string>
   /** Discovery keys this workspace ignores (memory projection of the sidecar). */
   ignored: Set<string>
+  /** The pending reminder delays (memory projection of the sidecar, §6.4). */
+  snoozes: readonly WorktreeSnooze[]
+  /**
+   * Release tokens (`delay identity + discovery key`) of reminder records
+   * whose claims were already released. The sidecar deliberately keeps an
+   * expired record, so every later explicit read observes the SAME record
+   * again; releasing twice would delete claims the operator made after the
+   * renewed notice (PR #55 review). The token deliberately excludes the key
+   * SET: a per-key merge may split a record into a residual that keeps the
+   * same identity, and that residual was already processed. Host memory only,
+   * like `offered` itself.
+   */
+  snoozeExpired: Set<string>
+  /**
+   * True while the workspace was activated by a READ-ONLY check only: no
+   * watchers were installed and no owner-side reconciliation was scheduled.
+   * Explicit requests (the Dialog, panel list, reset) promote it once.
+   */
+  passive: boolean
   /** B roots this feature currently tracks (sidecar mapping projection). */
   mappings: readonly WorktreeMapping[]
   /** Whether the read sidecar could be loaded; false keeps the mappings unknown. */
@@ -203,18 +229,82 @@ export class MultiRootWorktrees extends Service {
     }, 'multi-root worktrees: ordered owner')
   }
 
-  /** Re-evaluate one session's prompt view once (no long poll). */
-  async prompt(sessionId: string): Promise<{ readonly prompts: readonly WorktreePrompt[]; readonly viewRevision: string }> {
+  /**
+   * Re-evaluate one session's prompt view once (no long poll).
+   *
+   * `fresh: true` is the ONE automatic check of the second revision of the
+   * trigger model (ADR-0039 第二十次修订): it answers only the candidates the
+   * operator has NOT already been shown and no active snooze covers, and it
+   * writes NOTHING — no offered claim, no sidecar, no Registry — so a duplicate
+   * mount (React StrictMode, a reconnect) is idempotent. `fresh: false` (the
+   * default) answers the complete visible list the confirmation Dialog renders.
+   */
+  async prompt(
+    sessionId: string,
+    options: { readonly fresh?: boolean } = {},
+  ): Promise<{ readonly prompts: readonly WorktreePrompt[]; readonly viewRevision: string }> {
     this.requireEnabled()
     const session = this.sessionView(sessionId)
     const generation = this.generation
-    const workspace = await this.ensureWorkspace(session.primaryRoot, 'explicit')
-    await this.revalidate(workspace)
+    // `'first'` — never `'explicit'`: an automatic check must not revive a
+    // `lost` workspace. Only the panel/command list or an explicit reset may
+    // re-detect it (ADR-0039 §4.4).
+    // A fresh query is the ONE automatic check and therefore stays passive:
+    // it reads metadata and the sidecar without installing watchers or
+    // scheduling owner-side reconciliation (ADR-0039 §20.4).
+    const passive = options.fresh === true
+    const workspace = await this.ensureWorkspace(session.primaryRoot, 'first', passive)
+    await this.revalidate(workspace, passive)
     this.requireGeneration(generation)
+    if (passive && workspace.activation === 'active') {
+      // The reminder projection is shared workspace state: another Host on the
+      // same store may have snoozed a candidate after this Host activated the
+      // workspace, and snooze writes never change the Registry roots. Re-read
+      // the owner's projection (a read-only sidecar op) before the automatic
+      // filter so a shared decision is honored (PR #55 review).
+      await this.loadSidecar(workspace)
+      this.requireGeneration(generation)
+    }
+    const workspaceCurrent = this.workspaces.get(primaryKey(session.primaryRoot)) === workspace
+    const records = options.fresh === true && workspaceCurrent
+      ? this.freshRecords(workspace, session.mode)
+      : this.visibleRecords(workspace, session.mode)
     return {
-      prompts: this.promptViews(workspace, session.mode),
+      prompts: records.map(record => this.promptView(workspace, record, session.mode)),
       viewRevision: this.viewRevision(workspace, session.mode),
     }
+  }
+
+  /**
+   * Claim that the operator was SHOWN these candidates. Host memory only: the
+   * discovery keys join `offered` so the next automatic check stays quiet, and
+   * nothing is written to the sidecar or the Registry (ADR-0039 §6.2).
+   *
+   * Ids that no longer name a visible record are silently ignored — a stale
+   * Toast must never keep a candidate quiet that the operator cannot act on.
+   * @param sessionId - the live session whose overlay showed the notice.
+   * @param promptIds - the prompt ids the notice listed.
+   * @returns how many ids were claimed.
+   */
+  async seen(sessionId: string, promptIds: readonly string[]): Promise<{ readonly seen: number }> {
+    this.requireEnabled()
+    const session = this.sessionView(sessionId)
+    const generation = this.generation
+    const workspace = await this.ensureWorkspace(session.primaryRoot, 'none')
+    this.requireGeneration(generation)
+    if (workspace.activation !== 'active') return { seen: 0 }
+    const byId = new Map<string, CandidateRecord>()
+    for (const record of workspace.queue) byId.set(record.promptId, record)
+    let seen = 0
+    for (const id of new Set(promptIds)) {
+      const record = byId.get(id)
+      if (record === undefined) continue
+      if (!eligible(record.candidate.kind, session.mode)) continue
+      if (workspace.candidates.get(record.candidate.key) !== record) continue
+      workspace.offered.add(record.discoveryKey)
+      seen++
+    }
+    return { seen }
   }
 
   /**
@@ -256,6 +346,11 @@ export class MultiRootWorktrees extends Service {
     workspace.queue = []
     workspace.evaluated.clear()
     workspace.prompted.clear()
+    // The explicit reset also forgets what this Host already announced and the
+    // reminder delay: "reset" means the operator wants to be asked again, and
+    // the owner clears the persisted snooze in the same sidecar operation.
+    workspace.offered.clear()
+    workspace.snoozes = []
     this.ignored.delete(workspace.key)
     workspace.ignored.clear()
     // An inactive workspace has no sidecar writes (ADR-0039 §4.4). The
@@ -268,7 +363,9 @@ export class MultiRootWorktrees extends Service {
         // Memory-only is a supported degradation.
       }
       workspace.revision++
-      await this.refreshInventory(workspace)
+      // A reset is an explicit request but needs no watchers: keep the
+      // workspace's current posture instead of promoting it.
+      await this.refreshInventory(workspace, workspace.passive)
     } else {
       workspace.revision++
     }
@@ -278,13 +375,17 @@ export class MultiRootWorktrees extends Service {
   }
 
   /**
-   * Confirm or dismiss one or more visible prompts.
+   * Confirm, dismiss or snooze one or more visible prompts.
    *
    * The batch is deliberately NOT a new write primitive: every row still calls
    * `addNew` with its own captured expectation, so the OWNER re-runs the
    * complete primary/candidate judgment per row and refuses a stale snapshot.
    * `dismiss` writes nothing to the Registry; with `dontRemind` it records the
-   * workspace-wide discovery ignore in the owner's sidecar.
+   * workspace-wide discovery ignore in the owner's sidecar. `snooze` records a
+   * reminder delay in the same sidecar and never touches the Registry — the
+   * candidate stays in the queue so the operator can still add it from the
+   * Dialog (ADR-0039 §6.3). Only ids and a mode travel from the browser: the
+   * discovery keys are derived HERE from the queue records.
    *
    * A row that became stale is reported in `skipped` and the remaining rows
    * continue. Authority/storage failures (and the switch turning off) stop the
@@ -294,8 +395,8 @@ export class MultiRootWorktrees extends Service {
   async resolve(
     sessionId: string,
     promptIds: string | readonly string[],
-    action: 'add' | 'dismiss',
-    dontRemind?: boolean,
+    action: 'add' | 'dismiss' | 'snooze',
+    options: { readonly dontRemind?: boolean; readonly snooze?: WorktreeSnoozeChoice } = {},
   ): Promise<{
     readonly viewRevision: string
     readonly prompts: readonly WorktreePrompt[]
@@ -305,6 +406,14 @@ export class MultiRootWorktrees extends Service {
     this.requireEnabled()
     const ids = [...new Set(typeof promptIds === 'string' ? [promptIds] : promptIds)]
     if (ids.length === 0 || ids.length > 64) throw new WorktreeError('worktree/prompt-stale', 'no prompt was selected')
+    const snooze = action === 'snooze' ? options.snooze : undefined
+    if (action === 'snooze' && snooze === undefined) {
+      throw new WorktreeError('worktree/bad-request', 'a snooze action requires a reminder mode')
+    }
+    if (action !== 'snooze' && snooze !== undefined) {
+      throw new WorktreeError('worktree/bad-request', 'a reminder mode only belongs to the snooze action')
+    }
+    const dontRemind = action === 'dismiss' ? options.dontRemind : undefined
     const session = this.sessionView(sessionId)
     const generation = this.generation
     const workspace = await this.ensureWorkspace(session.primaryRoot, 'none')
@@ -313,10 +422,22 @@ export class MultiRootWorktrees extends Service {
       throw new WorktreeError('worktree/prompt-stale', 'the workspace is no longer active')
     }
     const guard = this.workspaceGuard(workspace)
+    // A guard for the one batch-level write (the snooze record) that is not
+    // bound to a single row: the workspace activation and the live session's
+    // primary root must still be the ones this batch started with.
+    const batchGuard = () => {
+      guard()
+      if (primaryKey(this.sessionView(sessionId).primaryRoot) !== workspace.key) {
+        throw new WorktreeError('worktree/prompt-stale', 'the live session or its prompt changed')
+      }
+    }
     const byId = new Map<string, CandidateRecord>()
     for (const record of workspace.queue) byId.set(record.promptId, record)
     const resolved: { id: string; key: string; path: string; rootId?: string }[] = []
     const skipped: { id: string; key?: string; path?: string; code: string }[] = []
+    // The discovery keys of the rows this batch will actually snooze. Derived
+    // from the queue records, never from the browser (ADR-0039 §6.3).
+    const snoozedKeys: string[] = []
     for (const id of ids) {
       if (this.generation !== generation || workspace.activation !== 'active') {
         skipped.push({ id, code: 'worktree/prompt-stale' })
@@ -345,7 +466,7 @@ export class MultiRootWorktrees extends Service {
       }
       try {
         if (action === 'add') {
-          const options: AddNewRootOptions = {
+          const added = await this.ctx.multiRootRegistry.addNew(workspace.primaryRoot, {
             path: record.candidate.path,
             access: 'inherit',
             expected: record.expected,
@@ -354,9 +475,14 @@ export class MultiRootWorktrees extends Service {
             ...(record.candidate.kind === 'worktree'
               ? { track: { adminId: record.candidate.adminId, common: record.candidate.common } }
               : {}),
-          }
-          const added = await this.ctx.multiRootRegistry.addNew(workspace.primaryRoot, options, beforeSubmit)
+          }, beforeSubmit)
           resolved.push({ id, key: record.candidate.key, path: record.candidate.path, rootId: added.id })
+        } else if (action === 'snooze') {
+          // Everything is re-verified before the delay is recorded; the write
+          // itself happens once for the whole batch, below.
+          beforeSubmit()
+          snoozedKeys.push(record.discoveryKey)
+          resolved.push({ id, key: record.candidate.key, path: record.candidate.path })
         } else {
           beforeSubmit()
           if (dontRemind === true) await this.ignoreRecord(workspace, record, beforeSubmit)
@@ -375,15 +501,22 @@ export class MultiRootWorktrees extends Service {
           throw error
         }
       }
+      // A snooze is NOT a handled candidate: it stays queued and confirmable
+      // from the Dialog, and it never joins `prompted` (ADR-0039 §6.3).
+      if (action === 'snooze') continue
       workspace.prompted.add(record.discoveryKey)
       if (workspace.candidates.get(record.candidate.key) === record) workspace.candidates.delete(record.candidate.key)
       workspace.queue = workspace.queue.filter(candidate => candidate.promptId !== id)
+    }
+    if (action === 'snooze' && snoozedKeys.length > 0 && snooze !== undefined && workspace.activation === 'active'
+      && this.generation === generation) {
+      await this.snoozeRecords(workspace, snoozedKeys, snooze, batchGuard)
     }
     // A skipped row may have been replaced while the batch ran; re-inventory so
     // the response carries the CURRENT ids instead of one the owner will keep
     // refusing.
     if (skipped.length > 0 && workspace.activation === 'active' && this.generation === generation) {
-      try { await this.refreshInventory(workspace) } catch { /* The waiter still re-syncs on the next request. */ }
+      try { await this.refreshInventory(workspace, workspace.passive) } catch { /* The waiter still re-syncs on the next request. */ }
     }
     if (workspace.activation === 'active') {
       workspace.revision++
@@ -396,6 +529,46 @@ export class MultiRootWorktrees extends Service {
       prompts: this.promptViews(workspace, mode),
       resolved,
       skipped,
+    }
+  }
+
+  /**
+   * Record one reminder delay through the Registry owner. The delay takes
+   * effect in memory FIRST: a sidecar that cannot be written degrades exactly
+   * like an ignored candidate does — the notice closes, and only the next Host
+   * restart forgets the delay (ADR-0039 §6.3 / §9).
+   * @param workspace - the workspace the notice belongs to.
+   * @param keys - discovery keys the host derived from the confirmed ids.
+   * @param choice - the browser's mode; the host clock derives the instant.
+   * @param beforeSubmit - the owner-queue guard.
+   */
+  private async snoozeRecords(
+    workspace: WorkspaceState,
+    keys: readonly string[],
+    choice: WorktreeSnoozeChoice,
+    beforeSubmit: () => void,
+  ): Promise<void> {
+    const at = Date.now()
+    const record: WorktreeSnooze = choice.mode === 'until-new-worktree'
+      ? { mode: 'until-new-worktree', keys: [...keys], at: new Date(at).toISOString() }
+      : {
+          mode: 'until',
+          // The HOST clock decides: the browser's clock is not trusted for a
+          // persistence decision (ADR-0039 §6.4).
+          until: new Date(at + (choice.mode === '7d' ? 7 : 30) * 86_400_000).toISOString(),
+          keys: [...keys],
+          at: new Date(at).toISOString(),
+        }
+    // Merge locally first (memory-only degradation) so the same merge rule the
+    // owner applies is what this Host observes even when the write fails. The
+    // observation also releases the keys of a record the bounded list evicted.
+    this.observeSnoozes(workspace, mergeSnoozeRecords(workspace.snoozes, record))
+    try {
+      const view = await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'snooze', snooze: record }, beforeSubmit)
+      if (view.available) this.observeSnoozes(workspace, view.snoozes)
+    } catch (error) {
+      if (error instanceof WorktreeError) throw error
+      // Memory-only is a supported degradation; discovery still honors it.
     }
   }
 
@@ -556,8 +729,14 @@ export class MultiRootWorktrees extends Service {
     }
   }
 
-  /** Load or create the workspace state. */
-  private async ensureWorkspace(primaryRoot: string, detect: 'none' | 'first' | 'explicit'): Promise<WorkspaceState> {
+  /**
+   * Load or create the workspace state.
+   * @param primaryRoot - the session workspace root.
+   * @param detect - how much this request may (re)detect the workspace.
+   * @param passive - true for the read-only automatic check: a first
+   *   activation then installs no watchers and schedules no reconciliation.
+   */
+  private async ensureWorkspace(primaryRoot: string, detect: 'none' | 'first' | 'explicit', passive = false): Promise<WorkspaceState> {
     const key = primaryKey(primaryRoot)
     let workspace = this.workspaces.get(key)
     if (workspace === undefined) {
@@ -572,7 +751,11 @@ export class MultiRootWorktrees extends Service {
         queue: [],
         evaluated: new Set(),
         prompted: new Set(),
+        offered: new Set(),
         ignored: this.ignored.get(key) ?? new Set(),
+        snoozes: [],
+        snoozeExpired: new Set(),
+        passive: true,
         mappings: [],
         sidecarAvailable: false,
         sidecarPending: false,
@@ -586,12 +769,18 @@ export class MultiRootWorktrees extends Service {
     // Only an explicit request may try a first activation again; background
     // reconciliation never resurrects an `unactivated` or `lost` workspace.
     if (this.enabled && ((detect !== 'none' && workspace.activation === 'unactivated')
-      || (detect === 'explicit' && workspace.activation === 'lost'))) await this.activate(workspace)
+      || (detect === 'explicit' && workspace.activation === 'lost'))) await this.activate(workspace, passive)
     return workspace
   }
 
-  /** Run the full primary snapshot and (re)build state. */
-  private async activate(workspace: WorkspaceState): Promise<void> {
+  /**
+   * Run the full primary snapshot and (re)build state.
+   * @param workspace - the workspace to (re)activate.
+   * @param passive - true for the automatic read-only check: the sidecar is
+   *   only READ and inventory runs without installing watchers. Persistent
+   *   discovery starts with the first explicit request (ADR-0039 §20.4).
+   */
+  private async activate(workspace: WorkspaceState, passive = false): Promise<void> {
     const result = resolveRepo(workspace.primaryRoot)
     if (!result.ok) {
       this.transitionInactive(workspace, `${result.reason}: ${result.detail}`)
@@ -600,6 +789,7 @@ export class MultiRootWorktrees extends Service {
     const previousCommon = workspace.repo?.common
     const wasActive = workspace.activation === 'active'
     workspace.activation = 'active'
+    workspace.passive = passive
     const generation = this.generation, activation = ++workspace.activationGeneration
     workspace.repo = result.repo
     delete workspace.activationDetail
@@ -611,12 +801,14 @@ export class MultiRootWorktrees extends Service {
       workspace.evaluated.clear()
       workspace.revision++
     }
+    // A read-backed load only: the automatic check must never write the
+    // sidecar (ADR-0039 §20.4).
     await this.loadSidecar(workspace)
     if (!this.current(workspace, generation, activation)) return
     // A new owner generation must rebind/prune its mappings only after an
     // explicit workspace activation (ADR-0039 §6.8).
-    this.reconcileSidecar(workspace)
-    await this.refreshInventory(workspace)
+    if (!passive) this.reconcileSidecar(workspace)
+    await this.refreshInventory(workspace, passive)
     this.wake(workspace)
   }
 
@@ -624,8 +816,11 @@ export class MultiRootWorktrees extends Service {
    * Re-run the complete primary snapshot for an already active workspace.
    * A failure means the workspace WAS active and is now `lost`; the quiet
    * state releases every watcher and waiter and never schedules a retry.
+   * @param workspace - the active workspace.
+   * @param passive - true for the automatic read-only check: no watcher
+   *   churn and no owner-side reconciliation.
    */
-  private async revalidate(workspace: WorkspaceState): Promise<void> {
+  private async revalidate(workspace: WorkspaceState, passive = false): Promise<void> {
     if (workspace.activation !== 'active' || this.closing) return
     const result = resolveRepo(workspace.primaryRoot)
     if (!result.ok) {
@@ -640,7 +835,13 @@ export class MultiRootWorktrees extends Service {
       workspace.evaluated.clear()
       workspace.revision++
     }
-    await this.refreshInventory(workspace)
+    // The first explicit request promotes a read-only workspace to persistent
+    // discovery: its mappings are reconciled and its watchers installed once.
+    if (!passive && workspace.passive) {
+      workspace.passive = false
+      this.reconcileSidecar(workspace)
+    }
+    await this.refreshInventory(workspace, passive)
   }
 
   /** Move the workspace to its quiet state, release resources and wake waiters. */
@@ -663,8 +864,14 @@ export class MultiRootWorktrees extends Service {
     this.wake(workspace)
   }
 
-  /** Re-run inventory, filters and watchers for an active workspace. */
-  private async refreshInventory(workspace: WorkspaceState): Promise<void> {
+  /**
+   * Re-run inventory, filters and watchers for an active workspace.
+   * @param workspace - the active workspace.
+   * @param passive - true to rebuild the candidate queue WITHOUT closing or
+   *   installing watchers and without touching cleanup bookkeeping; the
+   *   automatic fresh check must stay a read (ADR-0039 §20.4).
+   */
+  private async refreshInventory(workspace: WorkspaceState, passive = false): Promise<void> {
     const repo = workspace.repo
     if (repo === undefined || workspace.activation !== 'active' || this.closing || !this.enabled) return
     const inventory = inventoryWorktrees(repo.common, process.platform)
@@ -704,13 +911,16 @@ export class MultiRootWorktrees extends Service {
     const ordered = workspace.queue.filter(record => next.has(record.candidate.key))
       .map(record => next.get(record.candidate.key)!)
     workspace.inventory = inventory.candidates
-    workspace.degraded = inventory.degraded || inventory.candidates.length > this.maxAdminWatchers
+    workspace.degraded = inventory.degraded || (!passive && inventory.candidates.length > this.maxAdminWatchers)
     workspace.candidates = next
     workspace.queue = [...ordered, ...added]
-    this.observeTrackedRoots(workspace)
-    workspace.watchers?.close()
-    workspace.watchers = this.createWatchers(workspace)
-    if (workspace.watchers?.degraded === true) workspace.degraded = true
+    if (!passive) {
+      workspace.passive = false
+      this.observeTrackedRoots(workspace)
+      workspace.watchers?.close()
+      workspace.watchers = this.createWatchers(workspace)
+      if (workspace.watchers?.degraded === true) workspace.degraded = true
+    }
     if (changed) workspace.revision++
     this.wake(workspace)
   }
@@ -780,6 +990,7 @@ export class MultiRootWorktrees extends Service {
       if (!view.available) return
       workspace.mappings = view.worktreeRoots
       workspace.ignored = new Set(view.ignored.map(entry => entry.key))
+      this.observeSnoozes(workspace, view.snoozes)
       workspace.sidecarAvailable = true
     } catch {
       // The mapping is cleanup bookkeeping only; discovery stays usable.
@@ -798,6 +1009,7 @@ export class MultiRootWorktrees extends Service {
           beforeSubmit()
           if (view.available) {
             workspace.mappings = view.worktreeRoots
+            this.observeSnoozes(workspace, view.snoozes)
             workspace.sidecarAvailable = true
           }
         } catch {
@@ -827,7 +1039,7 @@ export class MultiRootWorktrees extends Service {
             return
           }
           workspace.repo = result.repo
-          await this.refreshInventory(workspace)
+          await this.refreshInventory(workspace, workspace.passive)
         } catch (error) {
           if (this.current(workspace, generation, activation)) {
             this.transitionInactive(workspace, `reconcile failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -845,6 +1057,99 @@ export class MultiRootWorktrees extends Service {
   private visibleRecords(workspace: WorkspaceState, mode: WorkspaceMode): readonly CandidateRecord[] {
     if (workspace.activation !== 'active') return []
     return workspace.queue.filter(record => eligible(record.candidate.kind, mode))
+  }
+
+  /**
+   * The candidates one automatic check may still announce: visible to this
+   * session, not already offered to the operator during this Host lifetime,
+   * and not covered by an active reminder delay.
+   *
+   * This is a pure filter — it claims nothing, so two mounts of the same
+   * overlay observe the same answer (ADR-0039 §6.1).
+   */
+  private freshRecords(workspace: WorkspaceState, mode: WorkspaceMode): readonly CandidateRecord[] {
+    this.observeSnoozes(workspace, workspace.snoozes)
+    const suppressed = snoozedDiscoveries(workspace.snoozes, Date.now())
+    return this.visibleRecords(workspace, mode).filter(record =>
+      !workspace.offered.has(record.discoveryKey) && suppressed?.has(record.discoveryKey) !== true)
+  }
+
+  /**
+   * Adopt one reminder-delay projection and give back what it no longer holds.
+   *
+   * Called for the automatic filter, every sidecar read (fresh activation,
+   * panel list, confirmation, cleanup) and this Host's own memory-only merge.
+   * A record that is not pending any more must release the `seen` claims its
+   * keys covered, or a timed choice silently degrades into permanent
+   * suppression for this Host's lifetime. Two ways a record stops being
+   * pending:
+   *
+   * - its `until` passed — the deadline itself gives the candidates back;
+   * - the bounded owner list evicted it (`MAX_SNOOZE_RECORDS`) — it is gone
+   *   from every later projection, so the expiry path can never observe it
+   *   and the claims would stay stuck (PR #55 review).
+   *
+   * Release is deduplicated per delay identity + discovery key: the sidecar
+   * deliberately keeps expired records and a per-key merge may split one into
+   * a residual with the same identity, so observing it again must not delete a
+   * claim the operator made after the renewed notice. The persisted records
+   * are left alone: automatic paths never write the sidecar, and the ADR does
+   * not require actively pruning expired records (§20.7).
+   * @param workspace - the workspace whose stored delays are examined.
+   * @param persisted - the projection to adopt, from the owner or from memory.
+   */
+  private observeSnoozes(workspace: WorkspaceState, persisted: readonly WorktreeSnooze[]): void {
+    const now = Date.now()
+    const live = liveSnoozes(persisted, now)
+    for (const snooze of persisted) {
+      if (!snoozeActive(snooze, now)) this.releaseSnoozeOnce(workspace, snooze)
+    }
+    if (workspace.snoozes.length > 0) {
+      // A record this Host held but the new projection does not: the bounded
+      // owner list evicted it, so nothing suppresses its keys any more.
+      const covered = new Set<string>()
+      for (const snooze of live) for (const key of snooze.keys) covered.add(key)
+      for (const snooze of workspace.snoozes) {
+        const dropped = snooze.keys.filter(key => !covered.has(key))
+        if (dropped.length > 0) this.releaseSnoozeKeysOnce(workspace, snooze, dropped)
+      }
+    }
+    workspace.snoozes = live
+  }
+
+  /**
+   * Release the claims of one record at most once per key.
+   *
+   * The persisted record is not cleared (automatic paths never write the
+   * sidecar), so the same projection is read back by every later explicit
+   * load. Only the FIRST observation releases each key; repeating it would
+   * delete the acknowledgement the renewed notice received.
+   * @param workspace - the workspace whose claims are released.
+   * @param snooze - the record that stopped being pending.
+   */
+  private releaseSnoozeOnce(workspace: WorkspaceState, snooze: WorktreeSnooze): void {
+    this.releaseSnoozeKeysOnce(workspace, snooze, snooze.keys)
+  }
+
+  /**
+   * Release the claims of SOME keys of one record, at most once per key.
+   *
+   * The delay identity is every persisted field EXCEPT the key set, so a
+   * residual produced by a per-key merge (same `mode`/`until`/`at`, fewer
+   * keys) counts as the same already-processed delay, while a genuinely new
+   * choice (its `at` differs) releases its own keys when it stops pending.
+   * @param workspace - the workspace whose claims are released.
+   * @param snooze - the record that stopped being pending or lost these keys.
+   * @param keys - the keys to give back.
+   */
+  private releaseSnoozeKeysOnce(workspace: WorkspaceState, snooze: WorktreeSnooze, keys: readonly string[]): void {
+    const identity = snoozeIdentity(snooze)
+    for (const key of keys) {
+      const token = identity + '\u0000' + key
+      if (workspace.snoozeExpired.has(token)) continue
+      workspace.snoozeExpired.add(token)
+      workspace.offered.delete(key)
+    }
   }
 
   /** Build the wire views for every visible record, in queue order. */
@@ -989,7 +1294,9 @@ export class MultiRootWorktrees extends Service {
     const workspace = this.workspaces.get(key)
     if (workspace === undefined || workspace.activation !== 'active') return
     this.reconcile(workspace)
-    this.reconcileSidecar(workspace)
+    // A read-only (passive) workspace owns no cleanup bookkeeping yet: a
+    // registry change must not make the automatic check write the sidecar.
+    if (!workspace.passive) this.reconcileSidecar(workspace)
   }
 
   /** React to a live settings change. */
@@ -1025,6 +1332,10 @@ export class MultiRootWorktrees extends Service {
       workspace.queue = []
       workspace.candidates.clear()
       workspace.evaluated.clear()
+      // offered/snooze are UI state of THIS Host: teardown forgets them so a
+      // later re-enable starts from what the operator can be asked again.
+      workspace.offered.clear()
+      workspace.snoozes = []
       workspace.pendingReconcile = false
       workspace.sidecarPending = false
     }
@@ -1040,6 +1351,23 @@ function lstatOrUndefined(path: string) {
   } catch {
     return undefined
   }
+}
+
+
+/**
+ * The stable identity of one persisted reminder DELAY, without its key set.
+ *
+ * Every field the sidecar stores except `keys`: a per-key merge keeps the
+ * original `mode`/`until`/`at` on the residual it splits off, so the expiry
+ * release must treat that residual as the same already-processed delay
+ * instead of a new one (PR #55 review). Two writes in the same millisecond
+ * would share an identity; their keys are still released independently, so
+ * neither can suppress the other.
+ * @param snooze - one persisted reminder record.
+ * @returns a comparable delay identity.
+ */
+function snoozeIdentity(snooze: WorktreeSnooze): string {
+  return JSON.stringify([snooze.mode, snooze.until ?? '', snooze.at])
 }
 
 /** Clamp one numeric config value. */

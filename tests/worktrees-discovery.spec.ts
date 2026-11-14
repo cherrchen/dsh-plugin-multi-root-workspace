@@ -7,12 +7,14 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
+import { readSidecarFile } from './support/worktrees-stack.ts'
+import { primaryKey } from '../src/roots.ts'
 import MultiRootWorktrees, { WorktreeError, type Config } from '../src/worktrees.ts'
 import type { WorktreePromptWaitResult } from '../src/worktrees/types.ts'
 
@@ -261,6 +263,490 @@ describe('activation lifecycle', () => {
     const after = promptOf(await worktrees.wait(SESSION)).id
     expect(after).not.toBe(before)
   })
+})
+
+describe('fresh check and operator memory', () => {
+  it('answers the same fresh view twice without claiming or writing anything', async () => {
+    const area = fixture('fresh-pure')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const { worktrees, stack, storeFile } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+    const before = existsSync(storeFile) ? readFileSync(storeFile, 'utf8') : ''
+    const full = await worktrees.prompt(SESSION)
+    expect(full.prompts).toHaveLength(1)
+    const first = await worktrees.prompt(SESSION, { fresh: true })
+    const second = await worktrees.prompt(SESSION, { fresh: true })
+    expect(first.prompts.map(prompt => prompt.id)).toEqual(second.prompts.map(prompt => prompt.id))
+    expect(first.prompts[0]?.path).toBe(realpathSync.native(linked))
+    // A pure query claims nothing: the full Dialog list and the Registry are
+    // untouched, and no sidecar file was created.
+    expect((await worktrees.prompt(SESSION)).prompts).toHaveLength(1)
+    expect(existsSync(storeFile) ? readFileSync(storeFile, 'utf8') : '').toBe(before)
+    expect(readSidecarFile(join(area.base, 'store', 'worktree-prompts'), primaryKey(main))).toBeUndefined()
+    expect(stack.registry.list(main)).toHaveLength(0)
+  }, 20_000)
+
+  it('claims the shown ids so the next fresh check stays quiet, until reset', async () => {
+    const area = fixture('fresh-seen')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+    const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+    expect(await worktrees.seen(SESSION, [shown.id])).toEqual({ seen: 1 })
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    // An unknown or repeated id changes nothing.
+    expect(await worktrees.seen(SESSION, [shown.id])).toEqual({ seen: 1 })
+    expect(await worktrees.seen(SESSION, ['not-a-prompt'])).toEqual({ seen: 0 })
+    // The Dialog list still shows it: `offered` only filters the automatic check.
+    expect((await worktrees.prompt(SESSION)).prompts).toHaveLength(1)
+    await worktrees.reset(SESSION)
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+  }, 20_000)
+
+  it('snoozes the recorded keys, keeps the candidate confirmable, and lets a new worktree through', async () => {
+    const area = fixture('snooze-until-new')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+    const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+    const answer = await worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: 'until-new-worktree' } })
+    expect(answer.resolved).toHaveLength(1)
+    // Still queued and visible in the Dialog: a snooze is not a confirmation.
+    expect(answer.prompts.map(prompt => prompt.path)).toEqual([realpathSync.native(linked)])
+    expect(worktrees.activationOf(main).candidates).toBe(1)
+    expect(stack.registry.list(main)).toHaveLength(0)
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    // A NEW worktree is a new discovery key, so it is not covered.
+    const later = join(area.base, 'later')
+    git(main, ['worktree', 'add', '-q', later, '-b', 'later'])
+    const fresh = await worktrees.prompt(SESSION, { fresh: true })
+    expect(fresh.prompts.map(prompt => prompt.path)).toEqual([realpathSync.native(later)])
+    // The old key stays suppressed.
+    expect(fresh.prompts.some(prompt => prompt.path === shown.path)).toBe(false)
+  }, 20_000)
+
+  it('suppresses until its instant expires, measured by the host clock', async () => {
+    const area = fixture('snooze-until')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      await worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: '7d' } })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      clock.mockReturnValue(now + 7 * 86_400_000 - 1_000)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+    } finally {
+      clock.mockRestore()
+    }
+  }, 20_000)
+
+  it('forgets offered ids on a Host restart but keeps the persisted snooze', async () => {
+    const area = fixture('snooze-restart')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const storeRoot = join(area.base, 'store')
+    const first = await mount(storeRoot, { session: { cwd: main } })
+    const shown = (await first.worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+    await first.worktrees.seen(SESSION, [shown.id])
+    expect((await first.worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    await first.stack.dispose()
+    mounted.splice(mounted.indexOf(first), 1)
+    // `offered` is Host memory: a new Host may announce it once more.
+    const second = await mount(storeRoot, { session: { cwd: main } })
+    const again = (await second.worktrees.prompt(SESSION, { fresh: true })).prompts[0]
+    expect(again?.id).toBeDefined()
+    await second.worktrees.resolve(SESSION, again!.id, 'snooze', { snooze: { mode: 'until-new-worktree' } })
+    await second.stack.dispose()
+    mounted.splice(mounted.indexOf(second), 1)
+    // The delay is sidecar state, so the new Host honors it.
+    const third = await mount(storeRoot, { session: { cwd: main } })
+    expect((await third.worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+  }, 30_000)
+
+  it('does not revive a lost workspace from the automatic fresh check', async () => {
+    const area = fixture('fresh-lost')
+    const main = join(area.base, 'main')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', join(area.base, 'wt'), '-b', 'wt'])
+    const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+    // Removing the primary .git is allowed while the watcher holds the
+    // directory; renaming it is not (Windows refuses the rename). Producing
+    // the lost state this way keeps the case runnable on every platform.
+    rmSync(join(main, '.git'), { recursive: true })
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    expect(worktrees.activationOf(main).activation).toBe('lost')
+    // A re-mount re-validates and keeps reporting lost; only the explicit
+    // panel/command list may re-detect the workspace (covered by the
+    // lost/recovery case above).
+    expect((await worktrees.wait(SESSION)).status).toBe('lost')
+  }, 20_000)
+  it('forgets a persisted reminder delay when reset clears it', async () => {
+    const area = fixture('snooze-reset-restart')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const storeRoot = join(area.base, 'store')
+    const first = await mount(storeRoot, { session: { cwd: main } })
+    const shown = (await first.worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+    await first.worktrees.seen(SESSION, [shown.id])
+    await first.worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: '30d' } })
+    expect((await first.worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    await first.worktrees.reset(SESSION)
+    expect((await first.worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+    await first.stack.dispose()
+    mounted.splice(mounted.indexOf(first), 1)
+    // The cleared delay is durable: the next Host must not restore it.
+    const second = await mount(storeRoot, { session: { cwd: main } })
+    expect((await second.worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+  }, 30_000)
+
+  it('runs the automatic fresh check without persistent discovery or sidecar reconciliation', async () => {
+    const area = fixture('fresh-passive')
+    const main = join(area.base, 'main')
+    const registered = join(area.base, 'registered')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', registered, '-b', 'registered'])
+    const storeRoot = join(area.base, 'store')
+    const sidecarRoot = join(storeRoot, 'worktree-prompts')
+    // The first Host registers one checkout, so the sidecar carries a B
+    // mapping bound to an owner epoch the next Host would reconcile.
+    const one = await mount(storeRoot, { session: { cwd: main } })
+    const first = promptOf(await one.worktrees.wait(SESSION))
+    expect(first.path).toBe(realpathSync.native(registered))
+    await one.worktrees.resolve(SESSION, first.id, 'add')
+    await one.stack.dispose()
+    mounted.splice(mounted.indexOf(one), 1)
+    // A second Host starts cold on the same store; its first request is the
+    // automatic fresh check the overlay performs on session activation.
+    const candidate = join(area.base, 'candidate')
+    git(main, ['worktree', 'add', '-q', candidate, '-b', 'candidate'])
+    const two = await mount(storeRoot, { session: { cwd: main } })
+    const spy = vi.spyOn(two.stack.registry, 'worktreeSidecar')
+    try {
+      const sidecarBefore = readSidecarFile(sidecarRoot, primaryKey(main))
+      const fresh = await two.worktrees.prompt(SESSION, { fresh: true })
+      expect(fresh.prompts.map(prompt => prompt.path)).toEqual([realpathSync.native(candidate)])
+      // The fresh check is a read: no watcher set, no owner-side reconcile,
+      // no sidecar revision.
+      expect(two.worktrees.activationOf(main).watching).toBe(false)
+      // The fresh path may read the sidecar twice (activation + the shared
+      // reminder projection), but never writes or reconciles it.
+      const freshOps = spy.mock.calls.map(call => (call[1] as { op: string }).op)
+      expect(freshOps.length).toBeGreaterThan(0)
+      expect(freshOps.every(op => op === 'read')).toBe(true)
+      expect(readSidecarFile(sidecarRoot, primaryKey(main))).toEqual(sidecarBefore)
+      // Without a watcher a later worktree is not discovered in the
+      // background: only the next explicit check sees it.
+      git(main, ['worktree', 'add', '-q', join(area.base, 'later'), '-b', 'later'])
+      await new Promise(resolve => setTimeout(resolve, 400))
+      expect(two.worktrees.activationOf(main).candidates).toBe(1)
+      expect(spy.mock.calls.some(call => (call[1] as { op: string }).op === 'reconcile')).toBe(false)
+      // Opening the Dialog is the explicit lifecycle that promotes the
+      // workspace to persistent discovery.
+      await two.worktrees.prompt(SESSION)
+      expect(two.worktrees.activationOf(main).watching).toBe(true)
+      await vi.waitFor(() => {
+        expect(spy.mock.calls.some(call => (call[1] as { op: string }).op === 'reconcile')).toBe(true)
+      })
+    } finally {
+      spy.mockRestore()
+    }
+  }, 30_000)
+
+  it('resumes a timed reminder after expiry even though the notice claimed its ids', async () => {
+    const area = fixture('snooze-seen-expiry')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      // The browser sequence: the notice claims its ids first, then the
+      // operator picks the seven-day delay from the notice dropdown.
+      expect(await worktrees.seen(SESSION, [shown.id])).toEqual({ seen: 1 })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      await worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: '7d' } })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      const resumed = await worktrees.prompt(SESSION, { fresh: true })
+      expect(resumed.prompts.map(prompt => prompt.path)).toEqual([realpathSync.native(linked)])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 20_000)
+
+  it('keeps a reminder recoverable when a sidecar reload observes the expiry first', async () => {
+    const area = fixture('snooze-reload-expiry')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      expect(await worktrees.seen(SESSION, [shown.id])).toEqual({ seen: 1 })
+      await worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: '7d' } })
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      // An explicit panel/command read reloads the sidecar BEFORE the next
+      // automatic check observes the expiry. Dropping the expired record here
+      // must release the claim it covered, not just forget the delay: the
+      // next fresh check has no record left to expire.
+      await worktrees.describeRoots(main)
+      const resumed = await worktrees.prompt(SESSION, { fresh: true })
+      expect(resumed.prompts.map(prompt => prompt.path)).toEqual([realpathSync.native(linked)])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 20_000)
+
+  it('does not release a renewed claim when the same expired record is reloaded', async () => {
+    const area = fixture('snooze-reload-twice')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      expect(await worktrees.seen(SESSION, [shown.id])).toEqual({ seen: 1 })
+      await worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: '7d' } })
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      // The first check after expiry releases the original claim and shows the
+      // renewed notice, which the operator acknowledges again.
+      const renewed = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      expect(renewed.path).toBe(realpathSync.native(linked))
+      expect(await worktrees.seen(SESSION, [renewed.id])).toEqual({ seen: 1 })
+      // Opening the panel reloads the SAME expired record from the sidecar.
+      // It was already processed, so it must not release the renewed claim and
+      // the next activation must stay quiet.
+      await worktrees.describeRoots(main)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 20_000)
+
+  it('keeps an earlier timed reminder when a later snooze covers new candidates', async () => {
+    const area = fixture('snooze-two-reminders')
+    const main = join(area.base, 'main')
+    const first = join(area.base, 'first')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', first, '-b', 'first'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const a = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      expect(await worktrees.seen(SESSION, [a.id])).toEqual({ seen: 1 })
+      await worktrees.resolve(SESSION, a.id, 'snooze', { snooze: { mode: '7d' } })
+      // One day later a second worktree appears and gets its own seven days.
+      clock.mockReturnValue(now + 86_400_000)
+      const second = join(area.base, 'second')
+      git(main, ['worktree', 'add', '-q', second, '-b', 'second'])
+      const b = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      expect(b.path).toBe(realpathSync.native(second))
+      expect(await worktrees.seen(SESSION, [b.id])).toEqual({ seen: 1 })
+      await worktrees.resolve(SESSION, b.id, 'snooze', { snooze: { mode: '7d' } })
+      // A's deadline passes while B's is still running: only A comes back.
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      const resumedA = (await worktrees.prompt(SESSION, { fresh: true })).prompts
+      expect(resumedA.map(prompt => prompt.path)).toEqual([realpathSync.native(first)])
+      // The operator acknowledges A's renewed notice; B stays pending.
+      expect(await worktrees.seen(SESSION, [resumedA[0]!.id])).toEqual({ seen: 1 })
+      // Then B's own deadline passes.
+      clock.mockReturnValue(now + 8 * 86_400_000 + 1_000)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts.map(prompt => prompt.path))
+        .toEqual([realpathSync.native(second)])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 30_000)
+
+  it('honors a reminder another Host persisted before filtering the fresh list', async () => {
+    const area = fixture('snooze-foreign-host')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+    // This Host activates the workspace first, so it caches the (empty) delay
+    // projection; a second Host then snoozes the candidate through the owner.
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+    const now = Date.now()
+    await stack.registry.worktreeSidecar(main, {
+      op: 'snooze',
+      snooze: {
+        mode: 'until',
+        until: new Date(now + 86_400_000).toISOString(),
+        keys: ['worktree\u0000' + realpathSync.native(linked)],
+        at: new Date(now).toISOString(),
+      },
+    })
+    // The shared decision is persisted, not in this Host's memory: the next
+    // fresh check must read it from the owner before filtering.
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+  }, 30_000)
+
+  it('keeps a partially overlapping reminder suppressed until its own deadline', async () => {
+    const area = fixture('snooze-partial-overlap')
+    const main = join(area.base, 'main')
+    const first = join(area.base, 'first')
+    const second = join(area.base, 'second')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', first, '-b', 'first'])
+    git(main, ['worktree', 'add', '-q', second, '-b', 'second'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    const iso = (at: number) => new Date(at).toISOString()
+    const keyOf = (path: string) => 'worktree\u0000' + realpathSync.native(path)
+    try {
+      const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(2)
+      // Another Host's notice snoozed BOTH candidates for two days.
+      await stack.registry.worktreeSidecar(main, {
+        op: 'snooze',
+        snooze: {
+          mode: 'until',
+          until: iso(now + 2 * 86_400_000),
+          keys: [keyOf(first), keyOf(second)],
+          at: iso(now),
+        },
+      })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      // This Host's Dialog re-snoozes only the first candidate: the second
+      // keeps the shared record's deadline and stays quiet.
+      const dialog = await worktrees.prompt(SESSION)
+      const row = dialog.prompts.find(prompt => prompt.path === realpathSync.native(first))!
+      await worktrees.resolve(SESSION, row.id, 'snooze', { snooze: { mode: '7d' } })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      // The shared deadline passes: only the untouched candidate returns.
+      clock.mockReturnValue(now + 2 * 86_400_000 + 1_000)
+      const resumed = (await worktrees.prompt(SESSION, { fresh: true })).prompts
+      expect(resumed.map(prompt => prompt.path)).toEqual([realpathSync.native(second)])
+      expect(await worktrees.seen(SESSION, [resumed[0]!.id])).toEqual({ seen: 1 })
+      // The re-snoozed candidate keeps its own seven days.
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts.map(prompt => prompt.path))
+        .toEqual([realpathSync.native(first)])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 30_000)
+
+
+  it('keeps a renewed claim when a split expired reminder is reloaded', async () => {
+    const area = fixture('snooze-split-expired')
+    const main = join(area.base, 'main')
+    const first = join(area.base, 'first')
+    const second = join(area.base, 'second')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', first, '-b', 'first'])
+    git(main, ['worktree', 'add', '-q', second, '-b', 'second'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    const iso = (at: number) => new Date(at).toISOString()
+    const keyOf = (path: string) => 'worktree\u0000' + realpathSync.native(path)
+    try {
+      const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(2)
+      // Another Host silenced both candidates for two days.
+      await stack.registry.worktreeSidecar(main, {
+        op: 'snooze',
+        snooze: { mode: 'until', until: iso(now + 2 * 86_400_000), keys: [keyOf(first), keyOf(second)], at: iso(now) },
+      })
+      // At the shared deadline the renewed notice is announced and acknowledged.
+      clock.mockReturnValue(now + 2 * 86_400_000 + 1_000)
+      const renewed = (await worktrees.prompt(SESSION, { fresh: true })).prompts
+      expect(renewed).toHaveLength(2)
+      expect(await worktrees.seen(SESSION, renewed.map(prompt => prompt.id))).toEqual({ seen: 2 })
+      // A read-only Host only sees the worktree, so it re-snoozes just that
+      // key. The owner keeps the untouched candidate as a residual of the
+      // expired shared record (same `at` and deadline, fewer keys).
+      await stack.registry.worktreeSidecar(main, {
+        op: 'snooze',
+        snooze: {
+          mode: 'until',
+          until: iso(now + 2 * 86_400_000 + 1_000 + 7 * 86_400_000),
+          keys: [keyOf(first)],
+          at: iso(now + 2 * 86_400_000 + 1_000),
+        },
+      })
+      // A panel read reloads the split projection. The residual is the SAME
+      // delay the expiry already handled, so it must not release the renewed
+      // acknowledgement of the untouched candidate: the next activation stays
+      // quiet for it while the re-snoozed worktree remains delayed.
+      await worktrees.describeRoots(main)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 30_000)
+
+  it('releases a claim when a later delay evicts its record from the bounded list', async () => {
+    const area = fixture('snooze-capped-eviction')
+    const main = join(area.base, 'main')
+    const first = join(area.base, 'first')
+    const second = join(area.base, 'second')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', first, '-b', 'first'])
+    git(main, ['worktree', 'add', '-q', second, '-b', 'second'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    const iso = (at: number) => new Date(at).toISOString()
+    try {
+      const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts
+      expect(shown).toHaveLength(2)
+      expect(await worktrees.seen(SESSION, shown.map(prompt => prompt.id))).toEqual({ seen: 2 })
+      // This Host silences the worktree for seven days.
+      const delayed = shown.find(prompt => prompt.path === realpathSync.native(first))!
+      await worktrees.resolve(SESSION, delayed.id, 'snooze', { snooze: { mode: '7d' } })
+      // Another Host fills the bounded reminder list: the owner keeps only
+      // the newest 32 choices, so this Host's record is evicted and vanishes
+      // from every later projection.
+      for (let index = 0; index < 32; index += 1) {
+        await stack.registry.worktreeSidecar(main, {
+          op: 'snooze',
+          snooze: {
+            mode: 'until',
+            until: iso(now + 30 * 86_400_000),
+            keys: ['worktree\u0000/other-' + index],
+            at: iso(now + 1_000 + index),
+          },
+        })
+      }
+      // The eviction gives the candidate back instead of turning the timed
+      // choice into permanent suppression: the next activation announces it.
+      const resumed = (await worktrees.prompt(SESSION, { fresh: true })).prompts
+      expect(resumed.map(prompt => prompt.path)).toEqual([realpathSync.native(first)])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 30_000)
 })
 
 describe('experimental default', () => {

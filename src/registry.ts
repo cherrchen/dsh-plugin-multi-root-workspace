@@ -93,12 +93,15 @@ import { WorktreeError } from './worktrees/errors.ts'
 import { lstatEntry, SafeIoError } from './worktrees/fs-safe.ts'
 import { verifyPromptExpected, verifyWorkspaceActive } from './worktrees/owner.ts'
 import {
+  mergeSnoozeRecords,
+  parseSidecarSnoozes,
   readSidecar,
   writeSidecar,
   emptySidecar,
   type IgnoredCandidate,
   type WorktreeMapping,
   type WorktreeSidecarDocument,
+  type WorktreeSnooze,
 } from './worktrees/sidecar.ts'
 import type { PromptExpected } from './worktrees/types.ts'
 
@@ -330,6 +333,8 @@ function parseProbeAddResult(value: unknown): ProbeAddResult {
 export interface WorktreeSidecarView {
   readonly ignored: readonly IgnoredCandidate[]
   readonly worktreeRoots: readonly WorktreeMapping[]
+  /** The still-persisted reminder delays (ADR-0039 §6.4). */
+  readonly snoozes: readonly WorktreeSnooze[]
   readonly revision: number
   readonly epoch: string | undefined
   readonly registryRevision: number
@@ -342,6 +347,7 @@ export type WorktreeSidecarOperation =
   | { readonly op: 'ignore'; readonly key: string; readonly kind: 'worktree' | 'main-checkout'; readonly path: string }
   | { readonly op: 'reset' }
   | { readonly op: 'reconcile' }
+  | { readonly op: 'snooze'; readonly snooze: WorktreeSnooze }
 
 /** Registration request from a confirmed worktree prompt. */
 export interface AddNewRootOptions {
@@ -919,7 +925,7 @@ export class MultiRootRegistry extends Service {
     const key = primaryKey(primaryRoot)
     if (this.authorityState.kind !== 'active') {
       if (operation.op !== 'read') throw new WorktreeError('worktree/registry-unavailable', REGISTRY_CONTENDED_MESSAGE)
-      return { ignored: [], worktreeRoots: [], revision: 0, epoch: undefined, registryRevision: 0, available: false }
+      return { ignored: [], worktreeRoots: [], snoozes: [], revision: 0, epoch: undefined, registryRevision: 0, available: false }
     }
     return await this.serialize(key, async () => {
       if (operation.op !== 'read') this.requireWorktreeMutation(primaryRoot, beforeSubmit)
@@ -938,10 +944,25 @@ export class MultiRootRegistry extends Service {
         }
         case 'reset': {
           // Nothing to clear is not a write: `reset` on an active workspace
-          // with no ignores (or on a directory that never activated) must not
-          // manufacture a sidecar revision.
-          if (document.ignored.length === 0) return sidecarViewOf(document, this.operationEpoch, this.operationRevision, true)
-          const next = { ...document, revision: document.revision + 1, ignored: [] }
+          // with no ignores and no pending delay (or on a directory that never
+          // activated) must not manufacture a sidecar revision. The check
+          // reads the ORIGINAL document: testing a copy without the delays
+          // would always pass and silently keep a snooze-only record alive.
+          if (document.ignored.length === 0 && (document.snoozes ?? []).length === 0) {
+            return sidecarViewOf(document, this.operationEpoch, this.operationRevision, true)
+          }
+          const next = { ...withoutSnoozes(document), revision: document.revision + 1, ignored: [] }
+          this.saveSidecar(key, next)
+          return sidecarViewOf(next, this.operationEpoch, this.operationRevision, true)
+        }
+        case 'snooze': {
+          // A reminder delay is bookkeeping, not authorization: it is written by
+          // the owner inside this queue and never touches the Registry itself.
+          // A choice for DIFFERENT candidates must not replace an outstanding
+          // earlier reminder, so the records are merged: only overlapping keys
+          // supersede their own record (PR #55 review).
+          const snoozes = mergeSnoozeRecords(document.snoozes ?? [], operation.snooze)
+          const next = { ...document, revision: document.revision + 1, snoozes }
           this.saveSidecar(key, next)
           return sidecarViewOf(next, this.operationEpoch, this.operationRevision, true)
         }
@@ -2430,11 +2451,18 @@ function sidecarViewOf(document: WorktreeSidecarDocument, epoch: string | undefi
   return {
     ignored: document.ignored,
     worktreeRoots: document.worktreeRoots,
+    snoozes: document.snoozes ?? [],
     revision: document.revision,
     epoch,
     registryRevision: revision,
     available,
   }
+}
+
+/** Copy one document without its pending delays (a `reset` drops them). */
+function withoutSnoozes(document: WorktreeSidecarDocument): WorktreeSidecarDocument {
+  const { snoozes: _snoozes, ...rest } = document
+  return rest
 }
 
 /** Parse the owner's `addNew` answer on a follower. */
@@ -2495,9 +2523,14 @@ function parseSidecarView(value: unknown): WorktreeSidecarView {
       ...(typeof row.registryRevision === 'number' ? { registryRevision: row.registryRevision } : {}),
     }
   })
+  // A corrupt UI-only projection must not make the whole owner answer
+  // unreadable: the lenient parser drops bad entries and keeps
+  // ignores/mappings intact.
+  const snoozes = parseSidecarSnoozes(entry.snoozes, entry.snooze)
   return {
     ignored,
     worktreeRoots,
+    snoozes,
     revision: entry.revision,
     epoch: typeof entry.epoch === 'string' ? entry.epoch : undefined,
     registryRevision: entry.registryRevision,

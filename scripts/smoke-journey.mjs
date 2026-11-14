@@ -571,11 +571,27 @@ async function runWebLeg() {
         const off = await channel('worktreePrompt', { sessionId: 'journey-worktree' })
         observed.worktreeDefaultOff = off.body?.result?.error?.code
         await ctx.settings.mutate('multi-root-worktrees', [{ op: 'set', path: ['enabled'], value: true }])
-        const first = await channel('worktreePrompt', { sessionId: 'journey-worktree' })
-        observed.worktreePromptStatus = first.status
-        const firstPrompts = first.body?.result?.value?.prompts ?? []
+        // The second revision of the trigger model (ADR-0039 第二十次修订): the
+        // client performs ONE read-only fresh check when the session becomes
+        // active, shows a non-modal notice, and calls seen; the Dialog list is
+        // a separate, path-free request. This leg drives exactly those client
+        // calls over the real HTTP channel - the same sequence the browser
+        // overlay issues - instead of an internal handler.
+        const firstFresh = await channel('worktreePrompt', { sessionId: 'journey-worktree', fresh: true })
+        observed.worktreePromptStatus = firstFresh.status
+        const firstPrompts = firstFresh.body?.result?.value?.prompts ?? []
+        const seen = await channel('worktreePromptSeen', {
+          sessionId: 'journey-worktree', promptIds: firstPrompts.map(prompt => prompt.id),
+        })
+        observed.worktreeSeen = seen.body?.result?.value?.seen
+        const quiet = await channel('worktreePrompt', { sessionId: 'journey-worktree', fresh: true })
+        observed.worktreeFreshQuiet = (quiet.body?.result?.value?.prompts ?? []).length === 0
         observed.worktreePromptCount = firstPrompts.length
-        const bPrompt = firstPrompts.find(prompt => prompt.kind === 'worktree' && prompt.path === canonical(siblingRoot))
+        // "View": the Dialog asks for the complete visible list (no fresh flag).
+        const dialogList = await channel('worktreePrompt', { sessionId: 'journey-worktree' })
+        const dialogPrompts = dialogList.body?.result?.value?.prompts ?? []
+        observed.worktreeDialogCount = dialogPrompts.length
+        const bPrompt = dialogPrompts.find(prompt => prompt.kind === 'worktree' && prompt.path === canonical(siblingRoot))
         observed.worktreePromptKind = bPrompt?.kind
         observed.worktreePromptPath = bPrompt?.path
         const confirmedB = await channel('worktreePromptResolve', { sessionId: 'journey-worktree', promptIds: [bPrompt?.id], action: 'add' })
@@ -596,9 +612,12 @@ async function runWebLeg() {
         const disabled = await channel('worktreePrompt', { sessionId: 'journey-worktree' })
         observed.worktreeDisabledCode = disabled.body?.result?.error?.code
         await ctx.settings.mutate('multi-root-worktrees', [{ op: 'set', path: ['enabled'], value: true }])
-        const restored = await channel('worktreePromptWait', { sessionId: 'journey-worktree' })
-        const restoredValue = restored.body?.result?.value
-        const restoredPrompt = restoredValue?.prompt ?? restoredValue?.prompts?.[0]
+        // Turning the switch back on does NOT push a notice by itself. The next
+        // session activation performs the one fresh check: the switch teardown
+        // dropped the Host's offered memory, so the main checkout is announced
+        // once more under a NEW prompt id.
+        const restored = await channel('worktreePrompt', { sessionId: 'journey-worktree', fresh: true })
+        const restoredPrompt = (restored.body?.result?.value?.prompts ?? [])[0]
         observed.worktreeRestoredKind = restoredPrompt?.kind
         observed.worktreeNewId = restoredPrompt?.id !== commonId
         const confirmedA = await channel('worktreePromptResolve', {
@@ -717,7 +736,10 @@ try {
     check.contains(JSON.stringify(web.channelView?.value), jsonText(canonical(primaryRepo)), 'web: the channel view names the primary root', JSON.stringify(web.channelView)?.slice(0, 400))
     check.equal(web.worktreeDefaultOff, 'worktree/not-enabled', 'web: the experimental worktree feature defaults to off')
     check.equal(web.worktreePromptStatus, 200, 'web: the worktree prompt answers over real HTTP', `status ${String(web.worktreePromptStatus)}`)
-    check.equal(web.worktreePromptCount, 2, 'web: the popup lists the sibling checkout and the main checkout together')
+    check.equal(web.worktreePromptCount, 2, 'web: the automatic fresh check announces the sibling checkout and the main checkout together')
+    check.equal(web.worktreeSeen, 2, 'web: the shown notice claims both ids through the real channel')
+    check.ok(web.worktreeFreshQuiet, 'web: a second fresh check after the claim stays quiet (no duplicate notice)')
+    check.equal(web.worktreeDialogCount, 2, 'web: the explicit View request lists the complete visible set')
     check.equal(web.worktreePromptKind, 'worktree', 'web: the sibling linked checkout is listed as a B candidate')
     check.equal(web.worktreePromptPath, web.worktreeSibling, 'web: the B candidate names the sibling checkout')
     check.ok(web.worktreeConfirmedB, 'web: the B confirmation registers through the real channel')
@@ -727,7 +749,7 @@ try {
     check.equal(web.worktreeCommonPath, web.worktreeCommon, 'web: the A prompt names the main checkout root')
     check.ok(web.worktreeSettingPresent, 'web: the worktree switch is a live Settings namespace')
     check.equal(web.worktreeDisabledCode, 'worktree/not-enabled', 'web: turning the switch off retires the live prompt')
-    check.equal(web.worktreeRestoredKind, 'main-checkout', 'web: turning the switch back on re-detects the live session')
+    check.equal(web.worktreeRestoredKind, 'main-checkout', 'web: the next session activation announces the main checkout again')
     check.ok(web.worktreeNewId, 'web: the restored prompt has a new ID')
     check.ok(web.worktreeConfirmedA, 'web: the A confirmation registers the main checkout through the real channel')
     check.ok(web.worktreeCommonRegistered, 'web: the A root is the main checkout root')

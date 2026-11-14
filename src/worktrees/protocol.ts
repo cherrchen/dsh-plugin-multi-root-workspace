@@ -49,10 +49,30 @@ export const deletedWorktreeSchema = z.object({
   expectedAddedAt: z.string().min(1),
 }).strict()
 
+/**
+ * One reminder delay as the Registry owner persists it. The host that derived
+ * the keys has already converted `7d`/`30d` into an absolute instant with its
+ * own clock; `until` is required exactly for the `until` mode.
+ */
+export const snoozeRecordSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('until-new-worktree'),
+    keys: z.array(z.string().min(1)).min(1).max(64),
+    at: z.string().min(1),
+  }).strict(),
+  z.object({
+    mode: z.literal('until'),
+    until: z.string().min(1),
+    keys: z.array(z.string().min(1)).min(1).max(64),
+    at: z.string().min(1),
+  }).strict(),
+])
+
 /** `worktreeSidecar` arguments. */
 export const sidecarOperationSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('read') }).strict(),
   z.object({ op: z.literal('ignore'), key: z.string().min(1), kind: z.enum(['worktree', 'main-checkout']), path: z.string().min(1) }).strict(),
   z.object({ op: z.literal('reset') }).strict(),
   z.object({ op: z.literal('reconcile') }).strict(),
+  z.object({ op: z.literal('snooze'), snooze: snoozeRecordSchema }).strict(),
 ])

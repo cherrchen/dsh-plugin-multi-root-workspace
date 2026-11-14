@@ -1,7 +1,7 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P1–P10 与第十九次修订变更全部实施完成；两轮审计修复与 Devin Review 两条修复已实施；macOS 原生验证与 PR #48 的 Linux / Windows CI 均通过；随 `v0.1.17` 发版**。先完成 B（P1–P7），再实施 A（P8–P10）；第十九次修订把 A 的目标改为主 checkout、开关改为实验性默认关闭，并加入单/多候选提示分流。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
-> 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
+> 状态：**P1–P10 与第十九次修订随 `v0.1.17` 发版；第二十次修订（会话激活时一次只读检查 + 非模态 Toast + 显式确认 Dialog + snooze）已实施，验证状态以[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)为准**。先完成 B（P1–P7），再实施 A（P8–P10）；第十九次修订把 A 的目标改为主 checkout、开关改为实验性默认关闭，并加入单/多候选提示分流；第二十次修订把自动发现从常驻长轮询收敛为会话激活时一次只读检查。
+> 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-14 第二十次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
 ## Goal
@@ -220,6 +220,76 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - **客户端“未知”语义（BUG，`src/client/skills-settings.tsx`）**：`enabled()` 原先只从绑定的 Settings form 取值，没有 form 时返回 `false`；loader `enabled: true` 而没有浏览器 `configForms`/`settingsScope` 的组合因此永远不会发起 `worktreePromptWait`。现在只有 ready 且已发布布尔值的 form 才按值抑制，其余状态（无 form、loading/unavailable/error、ready 但无值）返回 `true`，由宿主的 `worktree/not-enabled` 决定并停止循环。回归：`tests/client-skills.spec.tsx` 的无 form、三种非 ready 状态、ready 明确 false/true 与 ready 空值用例。
 - **owner 门禁 fail closed（SEC，`src/registry.ts`）**：`requireWorktreesEnabled()` 原先只在 provider 返回 `false` 时拒绝，provider 缺失（worktree 行未挂载或已 dispose）即放行；协商过 `promptsRoot` 的 IPC peer 可在 owner 没有开关时提交 `addNew`、`removeForDeletedWorktree` 和 sidecar mutation。现在要求 provider 显式返回 `true`，缺失一律 `worktree/not-enabled`；read 形状的 sidecar 操作不受影响。`tests/support/registry-stack.ts` 为裸 Registry 栈安装 `() => true` 的替身（生产中的唯一调用者是 worktree 行），`tests/worktrees-owner.spec.ts` 覆盖 absent provider 下三条写路径全部拒绝且 read 仍可用。
 - **验证**：worktree 相关 spec 与 `client-worktree`/`authority-native` 实跑 **134 通过、44 环境 skip**；全量 vitest **1362 通过、17 个既有 lease/follower 环境失败**（与审计基线同一组，均因当前 Host 被沙箱化而无法协商共享 IPC）；`lint`、`typecheck`、`build`、`docs:check` 通过。
+
+### 第二十次修订实施（2026-11-14，完成）
+
+> 决策见 ADR-0039 第二十次修订。授权语义不变：不自动添加/删除根，`addNew` 仍是唯一写入路径，owner 复验与 `worktree/prompt-stale` 行为不变。本阶段记录实施范围与验收清单；实际验证证据只记[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)，不在本小节预写。
+
+- [x] **宿主：`fresh` 只读检查**。`worktreePrompt` 增加可选 `fresh`（默认 `false`，strict）；`fresh: true` 只返回「未被 Host `offered` 认领且不被当前 snooze 覆盖」的候选，纯查询、无副作用；`prompt()` 的 `ensureWorkspace` 固定 `'first'`，自动检查不复活 `lost`；返回 `{ prompts, viewRevision }` 不变。
+- [x] **宿主：`worktreePromptSeen` 与 `offered`**。新增端点，把命中当前 queue 且仍 eligible 的 `promptIds` 的 discovery key 写入 Host 内存 `WorkspaceState.offered`；不写 sidecar/Registry、不要求 owner 队列；`offered` 按 workspace 共享，`reset`/`disposeAll`/Host 重启清空，不持久化。
+- [x] **宿主：sidecar snooze**。`WorktreeSidecarDocument`/`WorktreeSidecarView` 增加可选 `snooze`（`mode: 'until-new-worktree' | 'until'`、`until?`、`keys`、`at`，`version` 仍 1）；`emptySidecar` 默认无该字段；`readSidecar` 把损坏值视为 `undefined`，不拒绝整份 sidecar；`worktreeSidecar` 增加 `{ op: 'snooze', snooze }`，只在 owner 串行队列内写并通过 `requireWorktreeMutation`/`worktreeGate`；`ignore`/`reconcile`/映射增删保留 `snooze`；`reset` 同时清空 `ignored` 与 `snooze`，无可清内容时不制造 revision。
+- [x] **宿主：resolve snooze 与生效规则**。`worktreePromptResolve` 接受 `action: 'snooze'` + `snooze`；复验 session/mode/switch/queue/eligibility，失效 id 进 `skipped`；有效 id 由宿主从 `promptIds` 派生 discovery keys 写 sidecar，不写 Registry、不加入 `prompted`；`7d`/`30d` 用宿主时钟换算 `until`，`until` 到期前抑制 keys，`until-new-worktree` 只抑制记录中的 keys。
+- [x] **契约**。双端 schema 同步（strict、拒绝多余字段）；`worktreePromptSeen` 端点、`worktreePrompt` 的 `fresh`、`worktreePromptResolve` 的 `action`/`snooze` 互斥校验齐全；`promptIds` 必填、去重、上限 64；`WorktreeResolveAnswerView` 形状复用。
+- [x] **客户端：Toast/Dialog 拆分**。overlay 不再常驻长轮询：session 从空/其他变为有效 session 时调用一次 `worktreePrompt(sessionId, { fresh: true })`，有候选显示非模态 Toast（无 backdrop、无 focus trap、不阻塞页面与输入框），否则不渲染；Toast 操作「查看」「稍后（下拉：直到出现新 worktree（默认）/ 7 天 / 30 天）」「×」，默认常驻不自动消失；A/B 共用中性文案。
+- [x] **客户端：Dialog 与调用**。只有「查看」打开现有 Dialog；打开时 `worktreePrompt(sessionId)`（不带 `fresh`）取全量可见候选，再启动 `worktreePromptWait(sessionId, { seenViewRevision })`，关闭立即 abort；Toast 显示后与 Dialog 打开后各调用一次 `seen`；「稍后」调用 `client.snooze`，「添加所选」继续 `resolve('add')`；X/ESC 关闭不写状态。
+- [x] **面板/样式/词典 + journey**。面板 `list` 与 `worktrees.notify()` 不触发自动检查；`src/client/styles.ts` 增加 Toast 样式（`mrfw-` 前缀、`var(--dsw-*)` token）；词典补齐 Toast 文案与稍后选项；`smoke:journey` 的 web leg 走真实 HTTP 通道的 fresh → 查看 → 确认序列；`tests/worktrees-git.e2e.ts` 若直接调用 wait 可保持。
+- [x] **单测与客户端测试**。宿主覆盖 `fresh`/`seen`/snooze 语义、sidecar 往返与降级、owner 拒绝路径；客户端覆盖触发收敛、Toast/Dialog、下拉、StrictMode 幂等；契约测试覆盖 strict/互斥/枚举/去重/上限。
+- [x] **文档**。ADR-0039 第二十次修订与本计划小节；[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)由维护者在验证后写入实际证据。
+
+**验收**（按 ADR-0039 第二十次修订的契约与失败方向；证据只记路线账本）：
+
+- 客户端：
+  - session 激活 + `fresh` 有候选 → 显示 Toast，且不渲染 `role="dialog"`；无候选 → 不显示任何内容；
+  - 点「查看」→ Dialog 含全部可见候选（A+B）；
+  - 默认「稍后」→ `snooze.mode` 为 `until-new-worktree`，Toast 关闭，Registry 无写入；
+  - 「7 天」「30 天」→ `until` 分别为宿主当前时间 + 7/30 天；
+  - 永久「不再提醒」→ `action: 'dismiss'` + `dontRemind`；
+  - 切换 session → Toast/Dialog 关闭且 wait abort；
+  - 关闭设置开关 → Toast/Dialog 隐藏；重新开启 → 不自动弹；
+  - 面板 `list` / `notify()` → 不自动弹；
+  - Dialog 关闭 → wait abort；
+  - `fresh` 空候选 → 无 Toast；
+  - 只有 A 时 Toast 文案仍为中性；
+  - StrictMode 重复挂载 → 只检查一次/幂等。
+- 宿主：
+  - `fresh` 只返回未被 `offered`/当前 snooze 覆盖的候选，且查询无副作用（无 sidecar/Registry 写入、无 `offered`/`prompted`/queue 变化）；
+  - `seen` 后同一候选 `fresh` 为空，`reset` 后恢复；
+  - `until-new-worktree`：同 key 抑制；新 key 可见，旧 key 仍抑制；
+  - `until`：到期前抑制，到期后可见（宿主时钟）；
+  - snooze 不写 Registry、不加入 `prompted`，候选仍留在队列、可在 Dialog 中显式添加；
+  - 开关关闭/inactive/lost 时 snooze 拒绝且 sidecar 无写入；
+  - sidecar 往返保留 `ignored`/mappings，坏 `snooze` 视为 `undefined`；
+  - `prompt()` 不复活 `lost`；
+  - 多 Host/follower 经 owner 串行写入，view 带回 `snooze`。
+- 契约：
+  - `fresh` 为可选布尔且 strict；
+  - `snooze` 与 `action` 的互斥/必填、mode 枚举；
+  - `seen` 的 `promptIds` 必填、去重、上限 64；
+  - 双端 schema 同步，宿主与客户端同时拒绝多余字段。
+- E2E/冒烟：
+  - `tests/worktrees-git.e2e.ts` 若直接调用 `worktreePromptWait` 可保持；
+  - `smoke:journey` 的 web leg 必须走真实 HTTP 通道：先 `fresh` prompt 判定有候选（等价于 Toast 显示），再「查看」等价的 `prompt`（不带 `fresh`）拿全量列表，再确认；
+  - 现有 add/resolve/cleanup/owner 测试保持通过。
+
+### 第二十次修订返工（2026-11-14，Code Review，完成）
+
+> PR #55 的代码审查复现了十三处实现偏离（ADR §20.3–§20.10；Devin 六条 + Codex 七条 P2），均先写失败回归再修复；授权语义不变。
+
+- **snooze-only reset 落盘**：`worktreeSidecar` 的 `reset` 空态判断改为针对原始文档（同时看 `ignored` 与 `snooze`）；只清 snooze 也写一次 revision，无内容时仍不制造 revision。回归：sidecar snooze-only reset 持久化（重开 owner 读回为空、二次 reset 不制造 revision）+ 服务层 reset 后重启不恢复。
+- **fresh 保持只读**：新增 `WorkspaceState.passive`；`prompt(fresh)` 的首次激活与重新 inventory 走被动路径——只读 `resolveRepo` 与 sidecar、只重建候选队列，不安装 watcher、不调度 owner 侧 reconcile、不写 sidecar；首个显式请求（Dialog 的 `prompt()`/`wait`/面板 list/reset）提升为持久发现一次并恢复映射核对，settings/registry 触发的 reconcile 沿用当前姿态。回归：fresh 作为第二个 Host 的首个调用时 `watching === false`、sidecar 操作只有 `read`、文件逐字不变、后台不发现新 worktree；打开 Dialog 后 watcher 与 reconcile 才出现。
+- **定时 snooze 到期释放提醒**：新增 `expireSnooze`（到期时丢弃内存记录并把 keys 从 `offered` 释放）与 `liveSnooze`（sidecar 读回过期记录不再激活）；sidecar 不主动清理过期记录。回归：`seen` → 7d snooze → 到期后同一 Host 重新提示。
+- **sidecar 读回先观察到到期也要释放**：`liveSnooze` 丢弃过期记录时会丢失释放；改为统一 `adoptSnooze`，任何 sidecar 读回（`loadSidecar`/`reconcileSidecar`/snooze 写入回读）观察到到期都先释放 `offered` 中的 keys 再丢弃记录，`expireSnooze` 复用同一 helper。回归：`seen` → 7d snooze → 到期 → 先 `describeRoots`（面板打开等价）→ 下一次 fresh 仍重新提示。
+- **每条过期记录只释放一次**：sidecar 有意保留过期记录，重复读取不能重复释放，否则会删掉操作者在重新提示之后通过 `seen` 做出的新认领、导致下一次激活重复提示。Workspace 内存按记录指纹（mode/until/at/keys）记录已处理记录，只有首次观察释放；`expireSnooze`/`adoptSnooze` 共用。回归：到期 → fresh 重新提示 → `seen` → `describeRoots` → 下一次 fresh 保持安静。
+- **多个待处理提醒共存**：sidecar 从单条 `snooze` 改为 `snoozes` 列表；新记录只取代 keys 有交集的旧记录，不相交的记录保留各自期限（上限 32，读取兼容旧单对象）。回归：A(7d) → B(7d) → A 到期只回 A → `seen(A)` → B 到期只回 B。
+- **fresh 前重读共享提醒投影**：`fresh: true` 在过滤前从 owner 只读重读 `snoozes`，否则已激活的 Host 会忽略另一 Host 刚写入的延迟（snooze 不改变 Registry roots、不触发变更刷新）。回归：先以空投影激活 → owner 写入延迟 → 下一次 fresh 为空。
+- **部分重叠按 key 拆分**：新选择只点名旧记录的一部分候选时，旧记录未被点名的 keys 拆成一条残余记录并保留原期限/原 `at`，完全覆盖的记录才删除。回归：sidecar 部分重叠（until 与 until-new-worktree）保留残余记录；服务层 A(7d)/B(2d) 部分重叠后 B 原期限前安静、到期只回 B、A 的新期限到期再回 A。
+- **残余记录不重复释放**：到期去重从「整条记录指纹（含 keys）」改为「延迟身份（mode/until/at，不含 keys）+ 单个发现 key」。共享记录 `{A,B}` 到期释放后，另一 Host 只对 A 再选「稍后」，owner 拆出的 `{B}` 残余记录身份不变；原先指纹不同会再次释放 B、冲掉重新提示后的 `seen` 认领。回归：到期 → fresh 重提示 → `seen` → 另一 Host 只对 A 再选 7d → `describeRoots` 读回残余 → 下一次 fresh 保持安静。
+- **淘汰记录释放认领**：`observeSnoozes` 统一处理自动过滤、任何 sidecar 读回与本地合并；到期记录释放 keys，本 Host 记得但新投影不再覆盖其 key 的记录（`MAX_SNOOZE_RECORDS = 32` 淘汰）同样释放，避免被淘汰的定时选择退化为永久抑制。回归：`seen` → 7d → 另一 Host 写入 32 条不相交延迟触发淘汰 → 下一次 fresh 重新提示。
+- **客户端处理 `skipped`**：`applyLater`/`snoozeNotice` 不再丢弃成功响应里的 `skipped` 直接关闭。Toast 只为未处理行保留提示（刷新后的 id，select 以 id 集合为 key 重新武装），Dialog 保留刷新后的行 + 行错误 + skipped 计数（与「添加所选」一致）；transport/authority 失败仍静默关闭、不自动重试。回归：client 的 Toast(7d) 与 Dialog(7d/permanent) 三条。
+- **定时选择的完成路径不拥有后续会话的提示**：`snoozeNotice` 的失败路径只检查组件是否挂载，成功路径只比较 session id。A 会话选择 7 天后切到 B，A 的请求拒绝会清掉 B 刚显示、其候选已被 `seen` 认领的 Toast；A→B→A 往返后旧请求成功也会清掉第二次激活的提示。改为调用时捕获 `workEpoch`，两个完成路径都要求 `mounted && epoch === workEpoch.current`（成功路径仍校验 session）才修改 Toast，生命周期已变的完成一律丢弃；同生命周期内失败仍静默关闭、不重试。回归：`tests/client-worktree.spec.tsx` 的跨会话失败与同会话往返成功两条。
+- **请求批次与完整响应**：`seen`（Toast/Dialog）与 snooze/resolve 原先一次发送整个可见集合；仓库超过 64 个 worktree 时请求会被 `promptIds` 的 64 上限拒绝。更早的失败点是响应 schema 同样 `max(64)`：真实客户端整份拒绝回答，Toast 完全不出现（自动检查静默失败）、Dialog 关闭——因此 review 描述的直接请求溢出在旧代码中先被响应解析挡住，但根因相同且影响更糟。改为响应可携带完整可见列表（请求上限仍 64），`WorktreeClient` 的 `seen`/`resolve`/`snooze` 按 64 个 id 顺序分批并合并答复（`seen` 求和；`resolved`/`skipped` 合并；`viewRevision`/`prompts` 取最后一批）。回归：合同 65 项响应、客户端 65/100/130 个 id 的分批、真实客户端 + 65 候选的 Toast 与两批 `seen`。
+- **广泛审查：异步完成的归属**：`confirmAdd`/`applyLater` 也捕获 `workEpoch`，A→B→A 后旧 Dialog 的 resolve 完成不再关闭或改写第二次激活的 Dialog；`openDialog` 与 Toast 的「×」立即递增 epoch，打开 Dialog 或显式关闭 Toast 之后的旧 snooze 完成不能再改 UI。回归：Dialog 的 add/later 往返两条，以及关闭 Toast 后部分 refused 的 snooze 不重新出现。
+- **验证**：worktree + client + locale + authority-native + `worktree-client` 专项 15 文件 **204 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build`、`docs:check`、`compat:check`、`pack:check` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
 
 ## Dependencies
 

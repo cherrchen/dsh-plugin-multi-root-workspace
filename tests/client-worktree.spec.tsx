@@ -1,18 +1,22 @@
 // @vitest-environment jsdom
-/** The worktree prompt overlay and the two-switch plugin card. */
+/** The worktree notice/Dialog overlay and the two-switch plugin card. */
+import { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { WorktreePromptView } from '../src/contract.ts'
+import type { RootsView, WorktreePromptView } from '../src/contract.ts'
 import { WorktreePrompt } from '../src/client/WorktreePrompt.tsx'
 import { WorkspaceFoldersDialog } from '../src/client/WorkspaceFoldersAction.tsx'
 import { PanelError, type PanelClient } from '../src/client/panel-client.ts'
-import type { RootsView } from '../src/contract.ts'
 import { BundleSettingsCard } from '../src/client/skills-settings.tsx'
-import type { WorktreeClient } from '../src/client/worktree-client.ts'
+import { createWorktreeClient, type WorktreeClient } from '../src/client/worktree-client.ts'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { SkillsForm } from '../src/compat/skills-client.ts'
 import type { Translate } from '../src/client/WorkspaceFoldersAction.tsx'
 
-const t: Translate = (key) => key
+const t: Translate = key => key
+/** A translator that keeps its parameters, so a test can see the notice count. */
+const tWithParams: Translate = (key, params) =>
+  params === undefined ? key : key + ':' + Object.values(params).join(',')
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 const PROMPT: WorktreePromptView = {
@@ -39,121 +43,242 @@ const MAIN: WorktreePromptView = {
   viewRevision: 'v1',
 }
 
+/** A second worktree row, used to make one session's candidate set countable. */
+const OTHER: WorktreePromptView = {
+  ...PROMPT,
+  id: 'p2',
+  key: 'worktree\u0000/wt2',
+  path: '/tmp/wt2',
+}
+
+/** A candidate list larger than the contract's 64-id request cap. */
+function manyPrompts(count = 65): WorktreePromptView[] {
+  return Array.from({ length: count }, (_, index) => ({
+    ...PROMPT,
+    id: `p${index}`,
+    key: `worktree\u0000/wt${index}`,
+    path: `/tmp/wt${index}`,
+  }))
+}
+
+/** One full prompt answer, as the host builds it. */
+function answer(prompts: readonly WorktreePromptView[], viewRevision = 'v1') {
+  return Promise.resolve({ prompts, viewRevision })
+}
+
+/** A long poll that never answers; only abort settles it. */
 function pendingWait(signal?: AbortSignal): Promise<never> {
   return new Promise((_resolve, reject) => {
+    if (signal?.aborted === true) { reject(new Error('aborted')); return }
     signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
   })
 }
 
-/** One prompt on the first call, then a real long poll (as the host behaves). */
-function promptThenWait(seenPrompt: WorktreePromptView = PROMPT): WorktreeClient['wait'] {
-  let calls = 0
-  return async (_sessionId, _seen, signal) => {
-    calls++
-    if (calls === 1) return { status: 'prompt', prompt: seenPrompt, viewRevision: 'v1' }
-    return await pendingWait(signal)
-  }
-}
-
-/** The multi-candidate shape on the first call, then a real long poll. */
-function listThenWait(prompts: readonly WorktreePromptView[] = [PROMPT, MAIN]): WorktreeClient['wait'] {
-  let calls = 0
-  return async (_sessionId, _seen, signal) => {
-    calls++
-    if (calls === 1) return { status: 'prompts', prompts, viewRevision: 'v1' }
-    return await pendingWait(signal)
-  }
-}
-
+/** The full client surface the new overlay talks to. */
 function fakeClient(overrides: Partial<WorktreeClient> = {}): WorktreeClient {
-  const listeners = new Set<(sessionId: string) => void>()
-  const base: WorktreeClient = {
-    wait: async () => pendingWait(),
-    prompt: async () => ({ prompts: [], viewRevision: 'v1' }),
+  return {
+    prompt: async () => answer([]),
+    seen: async () => ({ seen: 0 }),
+    wait: (_sessionId, _seen, signal) => pendingWait(signal),
     resolve: async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }),
+    snooze: async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }),
     reset: async () => ({ cleared: true }),
     cleanup: async () => { throw new Error('unexpected cleanup') },
-    notify: sessionId => { for (const listener of [...listeners]) listener(sessionId) },
-    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    ...overrides,
   }
-  return { ...base, ...overrides }
 }
 
-function renderPrompt(client: WorktreeClient, previewOnly: boolean, subscribeEnabled?: (listener: () => void) => () => void) {
+/** The composed props the shell.overlay registration supplies. */
+function renderPrompt(client: WorktreeClient, previewOnly = false) {
   return render(<WorktreePrompt
     client={client}
     sessionId={() => 's1'}
     subscribeSession={() => () => {}}
     t={t}
-    previewOnly={previewOnly}
-    {...(subscribeEnabled === undefined ? {} : { subscribeEnabled })} />)
+    previewOnly={previewOnly} />)
 }
 
-describe('worktree prompt overlay', () => {
-  it('renders the confirmation preview with the path and effective access', async () => {
-    const client = fakeClient({ wait: promptThenWait() })
-    renderPrompt(client, true)
-    const dialog = await screen.findByRole('dialog', { name: 'worktree.title' })
-    expect(dialog).toBeDefined()
-    expect(screen.getByText('/tmp/wt')).toBeDefined()
-    expect(screen.getByText('worktree.previewOnly')).toBeDefined()
-    expect(screen.queryByText('worktree.add')).toBeNull()
-    expect(screen.getByText('worktree.previewClose')).toBeDefined()
+/** Render the overlay and open the Dialog through the notice's View action. */
+async function openDialog(client: WorktreeClient, previewOnly = false): Promise<void> {
+  renderPrompt(client, previewOnly)
+  const view = await screen.findByText('worktree.toastView')
+  fireEvent.click(view)
+  await screen.findByRole('dialog')
+}
+
+interface SessionHarness {
+  readonly read: () => string | undefined
+  readonly subscribe: (listener: () => void) => () => void
+  readonly switchTo: (session: string | undefined) => void
+}
+
+function sessionHarness(initial: string | undefined): SessionHarness {
+  let current = initial
+  let listener: (() => void) | undefined
+  return {
+    read: () => current,
+    subscribe: (next) => {
+      listener = next
+      return () => { listener = undefined }
+    },
+    switchTo: (session) => {
+      current = session
+      act(() => { listener?.() })
+    },
+  }
+}
+
+describe('worktree notice: the one automatic check', () => {
+  it('shows a non-modal notice for a non-empty fresh answer and claims the ids', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
+    const seen = vi.fn(async () => ({ seen: 2 }))
+    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => pendingWait(signal))
+    render(<WorktreePrompt client={fakeClient({ prompt, seen, wait })} sessionId={() => 's1'}
+      subscribeSession={() => () => {}} t={tWithParams} previewOnly={false} />)
+    expect(await screen.findByText('worktree.toast:2')).toBeDefined()
+    // The notice is not a dialog: no backdrop, no focus trap, no aria-modal.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(prompt).toHaveBeenCalledWith('s1', { fresh: true }, expect.any(AbortSignal))
+    await waitFor(() => expect(seen).toHaveBeenCalledWith('s1', ['p1', 'm1']))
+    // The Dialog's long poll never runs before the operator asks to view.
+    expect(wait).not.toHaveBeenCalled()
   })
 
-  it('confirms through the client when writes are enabled', async () => {
-    const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
-    const client = fakeClient({ wait: promptThenWait(), resolve })
-    renderPrompt(client, false)
-    await screen.findByRole('dialog', { name: 'worktree.title' })
-    fireEvent.click(screen.getByText('worktree.add'))
-    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['p1'], 'add', undefined))
+  it('stays silent for an empty fresh answer and calls no wait', async () => {
+    const prompt = vi.fn(async () => answer([]))
+    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => pendingWait(signal))
+    renderPrompt(fakeClient({ prompt, wait }))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('worktree.toast')).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(wait).not.toHaveBeenCalled()
   })
 
-  it('renders the checkbox list when several candidates are visible', async () => {
-    renderPrompt(fakeClient({ wait: listThenWait() }), false)
-    await screen.findByRole('dialog', { name: 'worktree.listTitle' })
+  it('renders nothing and sends no request without a client', async () => {
+    render(<WorktreePrompt client={undefined} sessionId={() => 's1'}
+      subscribeSession={() => () => {}} t={t} previewOnly={false} />)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen.queryByText('worktree.toast')).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('stays silent without a session and never calls the host', async () => {
+    const prompt = vi.fn(async () => answer([]))
+    render(<WorktreePrompt client={fakeClient({ prompt })} sessionId={() => undefined}
+      subscribeSession={() => () => {}} t={t} previewOnly={false} />)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(prompt).not.toHaveBeenCalled()
+    expect(screen.queryByText('worktree.toast')).toBeNull()
+  })
+
+  it('never retries a failed automatic check', async () => {
+    const prompt = vi.fn(async () => { throw new PanelError('worktree/session-not-found', 'gone') })
+    renderPrompt(fakeClient({ prompt }))
+    await new Promise(resolve => setTimeout(resolve, 40))
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('worktree.toast')).toBeNull()
+  })
+
+  it('keeps the neutral notice copy for a single main-checkout candidate', async () => {
+    const prompt = vi.fn(async () => answer([MAIN]))
+    renderPrompt(fakeClient({ prompt }))
+    expect(await screen.findByText('worktree.toast')).toBeDefined()
+    expect(screen.getByText('worktree.toastView')).toBeDefined()
+  })
+
+  it('shows a notice beyond 64 candidates and claims its ids in request-sized batches', async () => {
+    const prompts = manyPrompts()
+    const calls: { endpoint: string; payload: { promptIds?: readonly string[] } }[] = []
+    const connection = {
+      rpc: {
+        async call(_channel: string, endpoint: string, payload: { promptIds?: readonly string[] }) {
+          calls.push({ endpoint, payload })
+          if (endpoint === 'worktreePrompt') return { ok: true, value: { prompts, viewRevision: 'v1' } }
+          if (endpoint === 'worktreePromptSeen') return { ok: true, value: { seen: payload.promptIds?.length ?? 0 } }
+          throw new Error('unexpected endpoint ' + endpoint)
+        },
+      },
+    } as unknown as ConnectionHandle
+    render(<WorktreePrompt client={createWorktreeClient(connection)} sessionId={() => 's1'}
+      subscribeSession={() => () => {}} t={tWithParams} previewOnly={false} />)
+    // A response is allowed to carry the full visible list; only its ids travel
+    // back in requests, where the contract caps every batch at 64.
+    expect(await screen.findByText('worktree.toast:65')).toBeDefined()
+    await waitFor(() => expect(calls.filter(call => call.endpoint === 'worktreePromptSeen')).toHaveLength(2))
+    expect(calls.filter(call => call.endpoint === 'worktreePromptSeen').map(call => call.payload.promptIds?.length))
+      .toEqual([64, 1])
+  })
+})
+
+describe('worktree notice: View opens the Dialog', () => {
+  it('lists every visible candidate and starts the long poll only after View', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
+    const seen = vi.fn(async () => ({ seen: 2 }))
+    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => pendingWait(signal))
+    const client = fakeClient({ prompt, seen, wait })
+    await openDialog(client)
+    expect(screen.getByRole('dialog', { name: 'worktree.listTitle' })).toBeDefined()
     expect(screen.getByText('/tmp/wt')).toBeDefined()
     expect(screen.getByText('/tmp/main')).toBeDefined()
-    expect(screen.getByText('worktree.kind.worktree')).toBeDefined()
-    expect(screen.getByText('worktree.kind.main-checkout')).toBeDefined()
+    expect(prompt).toHaveBeenCalledTimes(2)
+    expect(prompt.mock.calls[1]![0]).toBe('s1')
+    expect(prompt.mock.calls[1]![1]).toBeUndefined()
+    expect(seen).toHaveBeenCalledWith('s1', ['p1', 'm1'])
+    await waitFor(() => expect(wait).toHaveBeenCalledTimes(1))
+    expect(wait.mock.calls[0]![0]).toBe('s1')
+  })
+
+  it('opens a single confirmation with the path and effective access copy', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    await openDialog(fakeClient({ prompt }))
+    expect(screen.getByRole('dialog', { name: 'worktree.title' })).toBeDefined()
+    expect(screen.getByText('/tmp/wt')).toBeDefined()
+    expect(screen.getByText('worktree.policy')).toBeDefined()
+    expect(screen.getByText('worktree.shared')).toBeDefined()
+    expect(screen.getByText('worktree.add')).toBeDefined()
+  })
+
+  it('uses the main-checkout copy for a single main checkout candidate', async () => {
+    const prompt = vi.fn(async () => answer([MAIN]))
+    await openDialog(fakeClient({ prompt }))
+    expect(screen.getByRole('dialog', { name: 'worktree.mainTitle' })).toBeDefined()
+    expect(screen.getByText('/tmp/main')).toBeDefined()
+    expect(screen.getByText('worktree.mainDescription')).toBeDefined()
+    expect(screen.getByText('worktree.mainPolicy')).toBeDefined()
     expect(screen.getByText('worktree.mainSeparate')).toBeDefined()
+  })
+
+  it('pre-selects worktree rows and leaves the main checkout an explicit opt-in', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
+    await openDialog(fakeClient({ prompt }))
     const boxes = screen.getAllByRole('checkbox')
-    // The linked checkout is pre-selected; the main checkout stays an explicit
-    // opt-in because it grants the source tree.
     expect((boxes[0] as HTMLInputElement).checked).toBe(true)
     expect((boxes[1] as HTMLInputElement).checked).toBe(false)
   })
 
-  it('adds the checked rows in one batch', async () => {
+  it('adds only the rows the operator selected', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
     const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
-    renderPrompt(fakeClient({ wait: listThenWait(), resolve }), false)
-    await screen.findByRole('dialog', { name: 'worktree.listTitle' })
-    fireEvent.click(screen.getByText('worktree.addSelected'))
-    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['p1'], 'add', undefined))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-  })
-
-  it('sends only the rows the operator selected', async () => {
-    const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
-    renderPrompt(fakeClient({ wait: listThenWait(), resolve }), false)
-    await screen.findByRole('dialog', { name: 'worktree.listTitle' })
+    await openDialog(fakeClient({ prompt, resolve }))
     const boxes = screen.getAllByRole('checkbox')
     fireEvent.click(boxes[0]!)
     fireEvent.click(boxes[1]!)
     fireEvent.click(screen.getByText('worktree.addSelected'))
-    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['m1'], 'add', undefined))
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['m1'], 'add'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
   it('keeps a refused row visible, unchecked, and reports its code', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
     const resolve = vi.fn(async () => ({
       viewRevision: 'v2',
       prompts: [PROMPT, MAIN],
       resolved: [],
       skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
     }))
-    renderPrompt(fakeClient({ wait: listThenWait(), resolve }), false)
-    await screen.findByRole('dialog', { name: 'worktree.listTitle' })
+    await openDialog(fakeClient({ prompt, resolve }))
     fireEvent.click(screen.getByText('worktree.addSelected'))
     await waitFor(() => expect(screen.getByText(/worktree.rowError/)).toBeDefined())
     expect(screen.getByText(/error.worktree\/prompt-stale/)).toBeDefined()
@@ -161,99 +286,496 @@ describe('worktree prompt overlay', () => {
     expect((boxes[0] as HTMLInputElement).checked).toBe(false)
   })
 
-  it('uses the main-checkout copy for a single main checkout prompt', async () => {
-    renderPrompt(fakeClient({ wait: promptThenWait(MAIN) }), false)
-    const dialog = await screen.findByRole('dialog', { name: 'worktree.mainTitle' })
-    expect(dialog).toBeDefined()
-    expect(screen.getByText('/tmp/main')).toBeDefined()
-    expect(screen.getByText('worktree.mainSeparate')).toBeDefined()
-  })
-
   it('closes on lost and stops polling', async () => {
     let calls = 0
-    const client = fakeClient({
-      wait: async () => {
-        calls++
-        return calls === 1
-          ? { status: 'prompt', prompt: PROMPT, viewRevision: 'v1' }
-          : { status: 'lost', viewRevision: 'v2' }
-      },
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const wait = vi.fn(async () => {
+      calls += 1
+      return { status: 'lost' as const, viewRevision: 'v2' }
     })
-    renderPrompt(client, true)
-    await screen.findByRole('dialog', { name: 'worktree.title' })
+    await openDialog(fakeClient({ prompt, wait }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     const after = calls
     await new Promise(resolve => setTimeout(resolve, 30))
     expect(calls).toBe(after)
   })
 
-  it('stays silent when the session is missing', async () => {
-    const wait = vi.fn(async () => ({ status: 'timeout' as const, viewRevision: 'v1' }))
-    render(<WorktreePrompt client={fakeClient({ wait })} sessionId={() => undefined} subscribeSession={() => () => {}} t={t} previewOnly />)
-    await new Promise(resolve => setTimeout(resolve, 20))
-    expect(wait).not.toHaveBeenCalled()
-    expect(screen.queryByRole('dialog')).toBeNull()
-  })
-
-  it('remounts its wait when the settings switch is turned back on', async () => {
+  it('closes the Dialog without retrying when the long poll raises a PanelError', async () => {
     let calls = 0
-    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => {
-      calls++
-      if (calls === 1) throw new PanelError('worktree/not-enabled', 'off')
-      if (calls === 2) return { status: 'prompt' as const, prompt: PROMPT, viewRevision: 'v1' }
-      return await pendingWait(signal)
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const wait = vi.fn(async () => {
+      calls += 1
+      throw new PanelError('worktree/inactive', 'gone')
     })
-    let settingsListener: (() => void) | undefined
-    renderPrompt(fakeClient({ wait }), true, listener => {
-      settingsListener = listener
-      return () => { settingsListener = undefined }
-    })
-    await waitFor(() => expect(wait).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('dialog')).toBeNull()
-    act(() => { settingsListener?.() })
-    const dialog = await screen.findByRole('dialog', { name: 'worktree.title' })
-    expect(dialog).toBeDefined()
-    // The loop immediately mounts a `seen` wait after rendering the prompt.
-    expect(wait).toHaveBeenCalledTimes(3)
+    await openDialog(fakeClient({ prompt, wait }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(calls).toBe(1)
   })
 
-  it('aborts an open wait and sends no replacement while the form is disabled', async () => {
+  it('closes the Dialog on a stale long poll instead of remounting it', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const wait = vi.fn(async () => ({ status: 'stale' as const, viewRevision: 'v2', reason: 'empty' }))
+    await openDialog(fakeClient({ prompt, wait }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const after = wait.mock.calls.length
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(wait.mock.calls.length).toBe(after)
+  })
+
+  it('previews without a write button and closes through the preview action', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    await openDialog(fakeClient({ prompt }), true)
+    expect(screen.getByRole('dialog', { name: 'worktree.title' })).toBeDefined()
+    expect(screen.getByText('worktree.previewOnly')).toBeDefined()
+    expect(screen.getByText('worktree.previewClose')).toBeDefined()
+    expect(screen.queryByText('worktree.add')).toBeNull()
+    expect(screen.queryByLabelText('worktree.snoozeLabel')).toBeNull()
+  })
+})
+
+describe('worktree notice: the operator closes or delays it', () => {
+  it('snoozes with the default until-new-worktree mode and writes no registration', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    renderPrompt(fakeClient({ prompt, snooze, resolve }))
+    const select = await screen.findByLabelText('worktree.toastLater')
+    fireEvent.change(select, { target: { value: 'until-new-worktree' } })
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: 'until-new-worktree' }))
+    await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
+    expect(resolve).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it.each(['7d', '30d'] as const)('snoozes with the %s mode', async mode => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
+    const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    renderPrompt(fakeClient({ prompt, snooze }))
+    const select = await screen.findByLabelText('worktree.toastLater')
+    fireEvent.change(select, { target: { value: mode } })
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1', 'm1'], { mode }))
+    await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
+  })
+
+  it('the close button only dismisses the notice', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const snooze = vi.fn()
+    const resolve = vi.fn()
+    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => pendingWait(signal))
+    renderPrompt(fakeClient({ prompt, snooze, resolve, wait } as Partial<WorktreeClient>))
+    await screen.findByLabelText('worktree.toastClose')
+    fireEvent.click(screen.getByLabelText('worktree.toastClose'))
+    await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
+    expect(snooze).not.toHaveBeenCalled()
+    expect(resolve).not.toHaveBeenCalled()
+    expect(wait).not.toHaveBeenCalled()
+  })
+
+  it('a failed snooze still closes the notice without retrying', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const snooze = vi.fn(async () => { throw new PanelError('worktree/not-enabled', 'off') })
+    renderPrompt(fakeClient({ prompt, snooze }))
+    const select = await screen.findByLabelText('worktree.toastLater')
+    fireEvent.change(select, { target: { value: '7d' } })
+    await waitFor(() => expect(snooze).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(snooze).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a new session notice when the previous session snooze fails', async () => {
+    const session = sessionHarness('s1')
+    let rejectSnooze: ((reason?: unknown) => void) | undefined
+    const snooze = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['snooze']>>>((_resolve, reject) => {
+      rejectSnooze = reject
+    }))
+    const prompt = vi.fn(async (sessionId: string) => answer(sessionId === 's1' ? [PROMPT] : [MAIN, OTHER]))
+    render(<WorktreePrompt client={fakeClient({ prompt, snooze })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={tWithParams} previewOnly={false} />)
+    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: '7d' }))
+    session.switchTo('s2')
+    await screen.findByText('worktree.toast:2')
+    // s1's request settles only after s2 has shown its own notice. It must not
+    // clear a notice its lifecycle no longer owns: s2's candidates were already
+    // claimed through `seen`, so the operator would never see them again.
+    await act(async () => { rejectSnooze?.(new PanelError('worktree/prompt-stale', 'stale')) })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen.getByText('worktree.toast:2')).toBeDefined()
+  })
+
+  it('keeps a re-shown notice when an earlier snooze succeeds after a session round trip', async () => {
+    const session = sessionHarness('s1')
+    let finishSnooze: ((answer: Awaited<ReturnType<WorktreeClient['snooze']>>) => void) | undefined
+    const snooze = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['snooze']>>>((resolve) => {
+      finishSnooze = resolve
+    }))
+    const prompt = vi.fn(async (sessionId: string) => answer(sessionId === 's1' ? [PROMPT] : []))
+    render(<WorktreePrompt client={fakeClient({ prompt, snooze })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={tWithParams} previewOnly={false} />)
+    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: '7d' }))
+    session.switchTo('s2')
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(2))
+    prompt.mockImplementation(async (sessionId: string) => answer(sessionId === 's1' ? [MAIN, OTHER] : []))
+    session.switchTo('s1')
+    await screen.findByText('worktree.toast:2')
+    // The old snooze belongs to the first s1 activation. Its completion must not
+    // close the notice the second activation owns, even though the session id is
+    // the same again.
+    await act(async () => {
+      finishSnooze?.({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] })
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen.getByText('worktree.toast:2')).toBeDefined()
+  })
+
+  it('keeps the notice for a reminder choice the host skipped so it can be retried', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const refreshed: WorktreePromptView = { ...PROMPT, id: 'p2', viewRevision: 'v2' }
+    const snooze = vi.fn(async () => ({
+      viewRevision: 'v2',
+      prompts: [refreshed],
+      resolved: [],
+      skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
+    }))
+    renderPrompt(fakeClient({ prompt, snooze }))
+    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await waitFor(() => expect(snooze).toHaveBeenCalledTimes(1))
+    // Nothing was delayed: the notice must stay for the still-unresolved
+    // candidate (with its refreshed id) instead of silently hiding it for the
+    // rest of this Host lifetime.
+    await waitFor(() => expect(screen.getByText('worktree.toast')).toBeDefined())
+    expect(screen.getByText('worktree.toastView')).toBeDefined()
+  })
+})
+
+describe('worktree Dialog: later / do not remind', () => {
+  it('turns the permanent option into one dismiss-with-dontRemind batch', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
+    const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    await openDialog(fakeClient({ prompt, resolve, snooze }))
+    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: 'permanent' } })
+    fireEvent.click(screen.getByText('worktree.notNow'))
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['p1', 'm1'], 'dismiss', { dontRemind: true }))
+    expect(snooze).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('turns the 7d option into one snooze batch', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
+    const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    await openDialog(fakeClient({ prompt, resolve, snooze }))
+    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: '7d' } })
+    fireEvent.click(screen.getByText('worktree.notNow'))
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1', 'm1'], { mode: '7d' }))
+    expect(resolve).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('reports a failed later batch inside the Dialog and keeps it open', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const resolve = vi.fn(async () => { throw new PanelError('worktree/prompt-stale', 'stale') })
+    await openDialog(fakeClient({ prompt, resolve }))
+    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: 'permanent' } })
+    fireEvent.click(screen.getByText('worktree.dismiss'))
+    await waitFor(() => expect(screen.getByText('error.worktree/prompt-stale')).toBeDefined())
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
+
+  it('keeps a skipped later-batch row in the Dialog with its refreshed id', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const refreshed: WorktreePromptView = { ...PROMPT, id: 'p2', viewRevision: 'v2' }
+    const snooze = vi.fn(async () => ({
+      viewRevision: 'v2',
+      prompts: [refreshed],
+      resolved: [],
+      skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
+    }))
+    await openDialog(fakeClient({ prompt, snooze }))
+    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: '7d' } })
+    fireEvent.click(screen.getByText('worktree.dismiss'))
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: '7d' }))
+    // The row changed while the Dialog was open and the host applied no delay:
+    // closing would lose the choice and keep the `seen` claim hiding the
+    // candidate. Keep the refreshed row plus the failure for a retry.
+    await waitFor(() => expect(screen.getByText(/worktree.rowError/)).toBeDefined())
+    expect(screen.getByText(/error.worktree\/prompt-stale/)).toBeDefined()
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
+
+  it('keeps a partially skipped permanent batch open with the failure reported', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
+    const refreshed: WorktreePromptView = { ...PROMPT, id: 'p2', viewRevision: 'v2' }
+    const resolve = vi.fn(async () => ({
+      viewRevision: 'v2',
+      prompts: [refreshed, { ...MAIN, id: 'm2', viewRevision: 'v2' }],
+      resolved: [],
+      skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
+    }))
+    await openDialog(fakeClient({ prompt, resolve }))
+    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: 'permanent' } })
+    fireEvent.click(screen.getByText('worktree.notNow'))
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['p1', 'm1'], 'dismiss', { dontRemind: true }))
+    await waitFor(() => expect(screen.getByText(/worktree.skipped/)).toBeDefined())
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
+  it('closes the Dialog when the host answers that the feature is off', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const resolve = vi.fn(async () => { throw new PanelError('worktree/not-enabled', 'off') })
+    await openDialog(fakeClient({ prompt, resolve }))
+    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: 'permanent' } })
+    fireEvent.click(screen.getByText('worktree.dismiss'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+})
+
+describe('worktree overlay: completion ownership', () => {
+  it('keeps the new Dialog open when an earlier add completes after a session round trip', async () => {
+    const session = sessionHarness('s1')
+    let finishAdd: ((answer: Awaited<ReturnType<WorktreeClient['resolve']>>) => void) | undefined
+    const resolve = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['resolve']>>>((done) => {
+      finishAdd = done
+    }))
+    const prompt = vi.fn(async (sessionId: string) => answer(sessionId === 's1' ? [PROMPT] : []))
+    render(<WorktreePrompt client={fakeClient({ prompt, resolve })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={t} previewOnly={false} />)
+    fireEvent.click(await screen.findByText('worktree.toastView'))
+    await screen.findByRole('dialog')
+    fireEvent.click(screen.getByText('worktree.add'))
+    await waitFor(() => expect(resolve).toHaveBeenCalledTimes(1))
+    session.switchTo('s2')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    session.switchTo('s1')
+    fireEvent.click(await screen.findByText('worktree.toastView'))
+    await screen.findByRole('dialog')
+    // The first add belongs to the first s1 activation. Its zero-row answer
+    // would close the Dialog in the old completion, whose session check passes.
+    await act(async () => {
+      finishAdd?.({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] })
+    })
+    await new Promise(done => setTimeout(done, 20))
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
+
+  it('keeps the new Dialog open when an earlier later-batch completes after a session round trip', async () => {
+    const session = sessionHarness('s1')
+    let finishSnooze: ((answer: Awaited<ReturnType<WorktreeClient['snooze']>>) => void) | undefined
+    const snooze = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['snooze']>>>((done) => {
+      finishSnooze = done
+    }))
+    const prompt = vi.fn(async (sessionId: string) => answer(sessionId === 's1' ? [PROMPT] : []))
+    render(<WorktreePrompt client={fakeClient({ prompt, snooze })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={t} previewOnly={false} />)
+    fireEvent.click(await screen.findByText('worktree.toastView'))
+    await screen.findByRole('dialog')
+    fireEvent.click(screen.getByText('worktree.dismiss'))
+    await waitFor(() => expect(snooze).toHaveBeenCalledTimes(1))
+    session.switchTo('s2')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    session.switchTo('s1')
+    fireEvent.click(await screen.findByText('worktree.toastView'))
+    await screen.findByRole('dialog')
+    await act(async () => {
+      finishSnooze?.({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] })
+    })
+    await new Promise(done => setTimeout(done, 20))
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
+
+  it('keeps a closed notice closed when a pending snooze reports a skipped row', async () => {
+    let finishSnooze: ((answer: Awaited<ReturnType<WorktreeClient['snooze']>>) => void) | undefined
+    const snooze = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['snooze']>>>((done) => {
+      finishSnooze = done
+    }))
+    const prompt = vi.fn(async () => answer([PROMPT, OTHER]))
+    renderPrompt(fakeClient({ prompt, snooze }))
+    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await waitFor(() => expect(snooze).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByLabelText('worktree.toastClose'))
+    await waitFor(() => expect(screen.queryByLabelText('worktree.toastLater')).toBeNull())
+    // The operator closed the notice; a partial refusal must not reopen it.
+    await act(async () => {
+      finishSnooze?.({
+        viewRevision: 'v2',
+        prompts: [PROMPT, OTHER],
+        resolved: [],
+        skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
+      })
+    })
+    await new Promise(done => setTimeout(done, 20))
+    expect(screen.queryByLabelText('worktree.toastLater')).toBeNull()
+  })
+})
+
+describe('worktree overlay: session and settings lifetime', () => {
+  it('aborts the old session check and runs a new one after a session switch', async () => {
+    const session = sessionHarness('s1')
+    const prompt = vi.fn((sessionId: string, _query?: { fresh?: boolean }, signal?: AbortSignal) => {
+      if (sessionId === 's1') return pendingWait(signal)
+      return answer([PROMPT])
+    })
+    render(<WorktreePrompt client={fakeClient({ prompt })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={t} previewOnly={false} />)
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1))
+    const firstSignal = prompt.mock.calls[0]![2]
+    session.switchTo('s2')
+    await waitFor(() => expect(firstSignal?.aborted).toBe(true))
+    expect(await screen.findByText('worktree.toast')).toBeDefined()
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(2))
+    expect(prompt.mock.calls[1]![0]).toBe('s2')
+    expect(prompt.mock.calls[1]![1]).toEqual({ fresh: true })
+  })
+
+  it('closes the notice when the session switches away', async () => {
+    const session = sessionHarness('s1')
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    render(<WorktreePrompt client={fakeClient({ prompt })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={t} previewOnly={false} />)
+    await screen.findByText('worktree.toast')
+    prompt.mockImplementation(async () => answer([]))
+    session.switchTo('s2')
+    await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
+    // Two prompts: the first session's, then s2's (empty) activation.
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(2))
+  })
+
+  it('closes the Dialog and aborts its wait when the session switches', async () => {
+    const session = sessionHarness('s1')
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => pendingWait(signal))
+    render(<WorktreePrompt client={fakeClient({ prompt, wait })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={t} previewOnly={false} />)
+    fireEvent.click(await screen.findByText('worktree.toastView'))
+    await screen.findByRole('dialog')
+    await waitFor(() => expect(wait).toHaveBeenCalledTimes(1))
+    const waitSignal = wait.mock.calls[0]![2]
+    session.switchTo('s2')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(waitSignal?.aborted).toBe(true)
+    const after = wait.mock.calls.length
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(wait.mock.calls.length).toBe(after)
+  })
+
+  it('hides the notice when the settings switch turns off and does not re-check on enable', async () => {
     let enabled = true
     let settingsListener: (() => void) | undefined
-    const wait = vi.fn(promptThenWait())
-    render(<WorktreePrompt client={fakeClient({ wait })} sessionId={() => 's1'}
-      subscribeSession={() => () => {}} t={t} previewOnly
-      readEnabled={() => enabled} subscribeEnabled={listener => {
-        settingsListener = listener
-        return () => { settingsListener = undefined }
-      }} />)
-    await screen.findByRole('dialog')
-    await waitFor(() => expect(wait).toHaveBeenCalledTimes(2))
-    const signal = wait.mock.calls[1]![2]!
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    render(<WorktreePrompt client={fakeClient({ prompt })} sessionId={() => 's1'}
+      subscribeSession={() => () => {}} t={t} previewOnly={false}
+      readEnabled={() => enabled}
+      subscribeEnabled={(listener) => { settingsListener = listener; return () => { settingsListener = undefined } }} />)
+    await screen.findByText('worktree.toast')
     act(() => { enabled = false; settingsListener?.() })
-    expect(signal.aborted).toBe(true)
-    expect(screen.queryByRole('dialog')).toBeNull()
-    expect(wait).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
+    act(() => { enabled = true; settingsListener?.() })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('worktree.toast')).toBeNull()
   })
 
-  it('remounts after an explicit panel action wakes it from lost', async () => {
-    let calls = 0
-    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => {
-      calls++
-      if (calls === 1) return { status: 'lost' as const, viewRevision: 'v1' }
-      if (calls === 2) return { status: 'prompt' as const, prompt: PROMPT, viewRevision: 'v2' }
-      return await pendingWait(signal)
-    })
-    const client = fakeClient({ wait })
-    renderPrompt(client, true)
+  it('aborts an open Dialog wait when the settings switch turns off', async () => {
+    let enabled = true
+    let settingsListener: (() => void) | undefined
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => pendingWait(signal))
+    render(<WorktreePrompt client={fakeClient({ prompt, wait })} sessionId={() => 's1'}
+      subscribeSession={() => () => {}} t={t} previewOnly={false}
+      readEnabled={() => enabled}
+      subscribeEnabled={(listener) => { settingsListener = listener; return () => { settingsListener = undefined } }} />)
+    fireEvent.click(await screen.findByText('worktree.toastView'))
+    await screen.findByRole('dialog')
     await waitFor(() => expect(wait).toHaveBeenCalledTimes(1))
+    const waitSignal = wait.mock.calls[0]![2]
+    act(() => { enabled = false; settingsListener?.() })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(waitSignal?.aborted).toBe(true)
+  })
+
+  it('closes the Dialog and aborts the in-flight wait on an explicit close', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => pendingWait(signal))
+    // The preview's close action is the Dialog's state-free explicit close: it
+    // aborts the wait without writing any prompt decision.
+    await openDialog(fakeClient({ prompt, wait }), true)
+    await waitFor(() => expect(wait).toHaveBeenCalledTimes(1))
+    const waitSignal = wait.mock.calls[0]![2]
+    fireEvent.click(screen.getByText('worktree.previewClose'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(waitSignal?.aborted).toBe(true)
+    const after = wait.mock.calls.length
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(wait.mock.calls.length).toBe(after)
+    expect(prompt).toHaveBeenCalledTimes(2)
     expect(screen.queryByRole('dialog')).toBeNull()
-    act(() => { client.notify?.('another-session') })
-    expect(wait).toHaveBeenCalledTimes(1)
-    act(() => { client.notify?.('s1') })
-    const dialog = await screen.findByRole('dialog', { name: 'worktree.title' })
-    expect(dialog).toBeDefined()
-    expect(wait).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps a single notice under React StrictMode', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const seen = vi.fn(async () => ({ seen: 1 }))
+    render(<StrictMode>
+      <WorktreePrompt client={fakeClient({ prompt, seen })} sessionId={() => 's1'}
+        subscribeSession={() => () => {}} t={t} previewOnly={false} />
+    </StrictMode>)
+    await screen.findByText('worktree.toast')
+    expect(screen.getAllByText('worktree.toast').length).toBe(1)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(prompt.mock.calls.length).toBeLessThanOrEqual(2)
+    await waitFor(() => expect(seen).toHaveBeenCalled())
+  })
+})
+
+describe('panel cleanup controls', () => {
+  it('asks in place and cleans up the exact eligible ids', async () => {
+    const view: RootsView = {
+      primaryRoot: '/main',
+      roots: [{
+        ordinal: 1, id: 'r1', path: '/deleted-wt', addedAt: '2026-11-09', state: 'missing', access: 'inherit',
+        worktree: { adminId: 'id', path: '/deleted-wt', state: 'directory-missing', cleanupEligible: true },
+      }],
+      limit: 16,
+      count: 1,
+      worktreeCleanupCount: 1,
+    }
+    const empty: RootsView = { ...view, roots: [], count: 0, worktreeCleanupCount: 0 }
+    const panel = { call: async () => view } as unknown as PanelClient
+    const cleanup = vi.fn(async () => ({ removed: ['r1'], skipped: [], roots: empty }))
+    const worktrees = fakeClient({ cleanup })
+    render(<WorkspaceFoldersDialog
+      panel={panel}
+      pickDirectory={undefined}
+      t={t}
+      sessionId={() => 's1'}
+      onClose={() => {}}
+      worktrees={worktrees} />)
+    const batch = await screen.findByText('worktree.cleanupBatch')
+    fireEvent.click(batch)
+    // The confirmation is inline, not a second overlay dialog.
+    expect(screen.getByText('worktree.cleanupConfirm')).toBeDefined()
+    fireEvent.click(screen.getByText('worktree.cleanupDo'))
+    await waitFor(() => expect(cleanup).toHaveBeenCalledWith('s1', ['r1']))
+    await waitFor(() => expect(screen.queryByText('/deleted-wt')).toBeNull())
+  })
+
+  it('does not run the automatic worktree check when the panel renders', async () => {
+    const view: RootsView = { primaryRoot: '/main', roots: [], limit: 16, count: 0 }
+    let listed = false
+    const panel = { call: async () => { listed = true; return view } } as unknown as PanelClient
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    render(<WorkspaceFoldersDialog
+      panel={panel}
+      pickDirectory={undefined}
+      t={t}
+      sessionId={() => 's1'}
+      onClose={() => {}}
+      worktrees={fakeClient({ prompt })} />)
+    await waitFor(() => expect(listed).toBe(true))
+    expect(prompt).not.toHaveBeenCalled()
+    expect(screen.queryByText('worktree.toast')).toBeNull()
   })
 })
 
@@ -276,53 +798,6 @@ function fakeForm(mutate: (value: boolean) => Promise<boolean>): SkillsForm {
     },
   }
 }
-
-describe('panel cleanup controls', () => {
-  it('asks in place and cleans up the exact eligible ids', async () => {
-    const view: RootsView = {
-      primaryRoot: '/main',
-      roots: [{
-        ordinal: 1, id: 'r1', path: '/deleted-wt', addedAt: '2026-11-09', state: 'missing', access: 'inherit',
-        worktree: { adminId: 'id', path: '/deleted-wt', state: 'directory-missing', cleanupEligible: true },
-      }],
-      limit: 16,
-      count: 1,
-      worktreeCleanupCount: 1,
-    }
-    const empty: RootsView = { ...view, roots: [], count: 0, worktreeCleanupCount: 0 }
-    const panel = { call: async (endpoint: string) => endpoint === 'list' ? view : view } as unknown as PanelClient
-    const cleanup = vi.fn(async () => ({ removed: ['r1'], skipped: [], roots: empty }))
-    const worktrees = fakeClient({ cleanup })
-    render(<WorkspaceFoldersDialog
-      panel={panel}
-      pickDirectory={undefined}
-      t={t}
-      sessionId={() => 's1'}
-      onClose={() => {}}
-      worktrees={worktrees} />)
-    const batch = await screen.findByText('worktree.cleanupBatch')
-    fireEvent.click(batch)
-    // The confirmation is inline, not a second overlay dialog.
-    expect(screen.getByText('worktree.cleanupConfirm')).toBeDefined()
-    fireEvent.click(screen.getByText('worktree.cleanupDo'))
-    await waitFor(() => expect(cleanup).toHaveBeenCalledWith('s1', ['r1']))
-    await waitFor(() => expect(screen.queryByText('/deleted-wt')).toBeNull())
-  })
-
-  it('wakes the overlay after an explicit list can re-activate a lost workspace', async () => {
-    const view: RootsView = { primaryRoot: '/main', roots: [], limit: 16, count: 0 }
-    const panel = { call: async () => view } as unknown as PanelClient
-    const notify = vi.fn()
-    render(<WorkspaceFoldersDialog
-      panel={panel}
-      pickDirectory={undefined}
-      t={t}
-      sessionId={() => 's1'}
-      onClose={() => {}}
-      worktrees={fakeClient({ notify })} />)
-    await waitFor(() => expect(notify).toHaveBeenCalledWith('s1'))
-  })
-})
 
 describe('plugin detail switches', () => {
   it('renders the worktree switch next to Skills and writes only its own form', async () => {

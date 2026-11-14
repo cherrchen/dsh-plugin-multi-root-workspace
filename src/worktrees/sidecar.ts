@@ -39,6 +39,21 @@ export interface WorktreeMapping {
   readonly registryRevision?: number
 }
 
+/**
+ * One reminder delay the operator chose. `until-new-worktree` needs no
+ * instant: the keys it names stay quiet, and any key it does NOT name is a
+ * newly appeared candidate that surfaces immediately (ADR-0039 §6.4).
+ */
+export interface WorktreeSnooze {
+  readonly mode: 'until-new-worktree' | 'until'
+  /** ISO instant; present exactly when `mode === 'until'`. */
+  readonly until?: string
+  /** Discovery keys the host derived from the confirmed prompt ids. */
+  readonly keys: readonly string[]
+  /** When the delay was recorded. */
+  readonly at: string
+}
+
 /** The whole sidecar document. */
 export interface WorktreeSidecarDocument {
   readonly version: 1
@@ -47,6 +62,99 @@ export interface WorktreeSidecarDocument {
   readonly primaryRoot: string
   readonly ignored: readonly IgnoredCandidate[]
   readonly worktreeRoots: readonly WorktreeMapping[]
+  /**
+   * Pending reminder delays, one per operator choice. A corrupt entry is
+   * ignored, not fatal; the legacy single `snooze` object is read as one
+   * entry (PR #55 review).
+   */
+  readonly snoozes?: readonly WorktreeSnooze[]
+}
+
+/**
+ * Upper bound on pending reminder records. Snoozes are rare; the cap keeps a
+ * pathological sequence from growing the sidecar without limit, dropping the
+ * OLDEST choice first. The service releases that record's `offered` claims
+ * when it observes the eviction, so the dropped timed choice becomes
+ * eligible again instead of degrading into permanent suppression.
+ */
+export const MAX_SNOOZE_RECORDS = 32
+
+/**
+ * Whether one reminder delay still applies at `now`.
+ * @param snooze - the stored delay.
+ * @param now - the host clock instant, milliseconds since the epoch.
+ */
+export function snoozeActive(snooze: WorktreeSnooze, now: number): boolean {
+  if (snooze.mode === 'until-new-worktree') return true
+  const until = Date.parse(snooze.until ?? '')
+  return Number.isFinite(until) && now < until
+}
+
+/**
+ * The still-pending reminder records at `now`. An expired or unreadable
+ * record is not pending any more; the caller releases its claims (once) and
+ * drops it.
+ * @param snoozes - the stored delays.
+ * @param now - the host clock instant, milliseconds since the epoch.
+ */
+export function liveSnoozes(snoozes: readonly WorktreeSnooze[], now: number): readonly WorktreeSnooze[] {
+  return snoozes.filter(snooze => snoozeActive(snooze, now))
+}
+
+/**
+ * The discovery keys the pending delays currently suppress.
+ *
+ * Each `until` is evaluated against the HOST clock (the caller passes `now`);
+ * `until-new-worktree` keeps exactly its recorded keys quiet, so a key no
+ * record names is a new worktree and shows immediately. Expired or unreadable
+ * records suppress nothing.
+ * @param snoozes - the stored delays, if any.
+ * @param now - the host clock instant, milliseconds since the epoch.
+ * @returns the still-suppressed keys, or `undefined` when no delay applies.
+ */
+export function snoozedDiscoveries(snoozes: readonly WorktreeSnooze[] | undefined, now: number): ReadonlySet<string> | undefined {
+  if (snoozes === undefined || snoozes.length === 0) return undefined
+  const suppressed = new Set<string>()
+  for (const snooze of snoozes) {
+    if (!snoozeActive(snooze, now)) continue
+    for (const key of snooze.keys) suppressed.add(key)
+  }
+  return suppressed.size === 0 ? undefined : suppressed
+}
+
+/**
+ * Merge one new operator choice into the pending set.
+ *
+ * Each choice keeps its own deadline, so a later snooze of DIFFERENT
+ * candidates must not replace an outstanding earlier reminder (that would
+ * silently turn it into permanent suppression).
+ *
+ * Overlap is handled per KEY, not per record: the keys the new choice names
+ * are superseded, while the remaining keys of a partially overlapping shared
+ * record keep their ORIGINAL deadline. Two Hosts can hold notices covering
+ * different candidate sets, so deleting the whole record would drop a
+ * deadline nobody re-chose (PR #55 review).
+ * @param existing - the pending records.
+ * @param record - the operator's new choice.
+ * @returns the merged pending set, capped at {@link MAX_SNOOZE_RECORDS};
+ *   the caller must give back the claims of a record the cap dropped.
+ */
+export function mergeSnoozeRecords(existing: readonly WorktreeSnooze[], record: WorktreeSnooze): readonly WorktreeSnooze[] {
+  const claimed = new Set(record.keys)
+  const kept: WorktreeSnooze[] = []
+  for (const entry of existing) {
+    const remaining = entry.keys.filter(key => !claimed.has(key))
+    if (remaining.length === entry.keys.length) {
+      kept.push(entry)
+      continue
+    }
+    if (remaining.length === 0) continue
+    kept.push(entry.mode === 'until'
+      ? { mode: 'until', ...(entry.until === undefined ? {} : { until: entry.until }), keys: remaining, at: entry.at }
+      : { mode: 'until-new-worktree', keys: remaining, at: entry.at })
+  }
+  const merged = [...kept, record]
+  return merged.length <= MAX_SNOOZE_RECORDS ? merged : merged.slice(merged.length - MAX_SNOOZE_RECORDS)
 }
 
 /** The directory name under the store root. */
@@ -81,6 +189,45 @@ function parseIgnored(value: unknown): IgnoredCandidate | undefined {
   if (entry.kind !== 'worktree' && entry.kind !== 'main-checkout' && entry.kind !== 'git-common') return undefined
   const kind = entry.kind === 'worktree' ? 'worktree' as const : 'main-checkout' as const
   return { key: entry.key, kind, path: entry.path, addedAt: entry.addedAt }
+}
+
+/**
+ * Parse ONE reminder record LENIENTLY. A broken UI-only delay must never take
+ * `ignored` and `worktreeRoots` down with it: the whole document stays
+ * readable and only that entry is dropped.
+ */
+function parseSnoozeRecord(value: unknown): WorktreeSnooze | undefined {
+  const entry = objectOf(value)
+  if (entry === undefined) return undefined
+  if (entry.mode !== 'until-new-worktree' && entry.mode !== 'until') return undefined
+  if (typeof entry.at !== 'string' || !Array.isArray(entry.keys)) return undefined
+  if (!entry.keys.every(key => typeof key === 'string' && key !== '')) return undefined
+  if (entry.mode === 'until') {
+    if (typeof entry.until !== 'string' || !Number.isFinite(Date.parse(entry.until))) return undefined
+    return { mode: 'until', until: entry.until, keys: entry.keys, at: entry.at }
+  }
+  return { mode: 'until-new-worktree', keys: entry.keys, at: entry.at }
+}
+
+/**
+ * Parse the optional reminder projection LENIENTLY. Entries that do not
+ * parse are dropped individually, and a legacy single-object `snooze` field
+ * is read as one pending record.
+ * @param value - the `snoozes` array, as persisted.
+ * @param legacy - the pre-list single `snooze` object, if present.
+ */
+export function parseSidecarSnoozes(value: unknown, legacy?: unknown): readonly WorktreeSnooze[] {
+  if (Array.isArray(value)) {
+    const parsed: WorktreeSnooze[] = []
+    for (const entry of value) {
+      const record = parseSnoozeRecord(entry)
+      if (record !== undefined) parsed.push(record)
+      if (parsed.length >= MAX_SNOOZE_RECORDS) break
+    }
+    if (parsed.length > 0) return parsed
+  }
+  const single = parseSnoozeRecord(legacy)
+  return single === undefined ? [] : [single]
 }
 
 function parseMapping(value: unknown): WorktreeMapping | undefined {
@@ -138,6 +285,7 @@ export function readSidecar(promptsRoot: string, primaryKey: string, primaryRoot
     if (mapping === undefined) return { ok: false, detail: 'sidecar has an invalid worktreeRoots entry' }
     worktreeRoots.push(mapping)
   }
+  const snoozes = parseSidecarSnoozes(entry.snoozes, entry.snooze)
   return {
     ok: true,
     exists: true,
@@ -148,6 +296,7 @@ export function readSidecar(promptsRoot: string, primaryKey: string, primaryRoot
       primaryRoot: typeof entry.primaryRoot === 'string' ? entry.primaryRoot : primaryRoot,
       ignored,
       worktreeRoots,
+      ...(snoozes.length === 0 ? {} : { snoozes }),
     },
   }
 }
