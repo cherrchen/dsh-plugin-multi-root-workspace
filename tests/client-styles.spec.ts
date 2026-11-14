@@ -181,19 +181,40 @@ describe('the New Session hero entry rules', () => {
   it('mirrors the adjacent selectors’ geometry, minus the chevron', () => {
     expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*min-height:\s*28px/s)
     expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*padding:\s*0 8px/s)
-    // The row pads 20px left / 16px right; the extra 4px makes the trigger's
-    // box sit at the same 20px inset as the workspace selector, so their
-    // icon/text ink lines match at 28px.
-    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*margin:\s*0 4px 0 0/s)
     expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*gap:\s*4px/s)
     expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*border-radius:\s*var\(--dsw-radius-sm\)/s)
     expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*font-size:\s*13px/s)
     expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*line-height:\s*20px/s)
     expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*font-weight:\s*500/s)
     expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*color:\s*var\(--dsw-alias-label-primary\)/s)
-    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*max-width:\s*min\(100%,\s*240px\)/s)
     expect(STYLES).toMatch(/\.mrfw-heroEntryIcon\s*\{[^}]*flex:\s*none/s)
     expect(STYLES).toMatch(/\.mrfw-heroEntryLabel\s*\{[^}]*text-overflow:\s*ellipsis/s)
+  })
+
+  it('takes its width from the measured room, capped at the 240px selector width', () => {
+    // The room is measured, never assumed: 100% would resolve against the
+    // content-sized options container and constrain nothing.
+    expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*max-width:\s*min\(240px,\s*var\(--mrfw-hero-entry-room,\s*240px\)\)/s)
+  })
+
+  it('keeps the row inset on the seat, which is the element the probe pins', () => {
+    // The row pads 20px left / 16px right; the extra 4px makes the trigger's
+    // box sit at the same 20px inset as the workspace selector, so their
+    // icon/text ink lines match at 28px. It rides the seat so the probe can
+    // pin the button alone without moving the button's margin box.
+    expect(STYLES).toMatch(/\.mrfw-heroEntrySeat\s*\{[^}]*margin:\s*0 4px 0 0/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntrySeat\s*\{[^}]*display:\s*inline-flex/s)
+    expect(STYLES).toMatch(/\.mrfw-heroEntrySeat\s*\{[^}]*min-width:\s*0/s)
+  })
+
+  it('draws the measured and icon-only forms as one 28x28 box', () => {
+    const pinned = STYLES.match(/\.mrfw-heroEntrySeat:is\(\[data-measuring\],\s*\[data-size='compact'\]\) \.mrfw-heroEntry\s*\{([^}]*)\}/s)?.[1] ?? ''
+    expect(pinned).toMatch(/width:\s*28px/)
+    expect(pinned).toMatch(/min-width:\s*28px/)
+    expect(pinned).toMatch(/max-width:\s*28px/)
+    expect(pinned).toMatch(/padding:\s*0\b/)
+    expect(pinned).toMatch(/gap:\s*0\b/)
+    expect(STYLES).toMatch(/\.mrfw-heroEntrySeat:is\(\[data-measuring\],\s*\[data-size='compact'\]\) \.mrfw-heroEntryLabel\s*\{\s*display:\s*none/s)
   })
 
   it('uses the adjacent selectors’ hover/open fill and no literal color', () => {
@@ -203,13 +224,17 @@ describe('the New Session hero entry rules', () => {
     expect(rules).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/)
   })
 
-  it('drops to a 28px icon-only button below the host compact step', () => {
+  it('keeps the viewport step only as the fallback for an unreadable row', () => {
+    // A probe that cannot identify the row leaves data-size off; only then may
+    // the viewport approximation apply. A measured room always wins, because
+    // the column narrows without the viewport doing so (sidebar, preview pane).
     const media = STYLES.match(/@media \(max-width: 560px\)\s*\{([\s\S]*?)\n\}/)
     expect(media).toBeTruthy()
-    expect(media![1]).toMatch(/\.mrfw-heroEntry\s*\{[^}]*width:\s*28px/s)
-    expect(media![1]).toMatch(/\.mrfw-heroEntry\s*\{[^}]*min-width:\s*28px/s)
-    expect(media![1]).toMatch(/\.mrfw-heroEntry\s*\{[^}]*padding:\s*0/s)
-    expect(media![1]).toMatch(/\.mrfw-heroEntryLabel\s*\{\s*display:\s*none/s)
+    expect(media![1]).toMatch(/\.mrfw-heroEntrySeat:not\(\[data-size\]\) \.mrfw-heroEntry\s*\{[^}]*width:\s*28px/s)
+    expect(media![1]).toMatch(/\.mrfw-heroEntrySeat:not\(\[data-size\]\) \.mrfw-heroEntry\s*\{[^}]*padding:\s*0/s)
+    expect(media![1]).toMatch(/\.mrfw-heroEntrySeat:not\(\[data-size\]\) \.mrfw-heroEntryLabel\s*\{\s*display:\s*none/s)
+    // A measured entry must never be dragged back by the viewport rule.
+    expect(media![1]).not.toMatch(/\n\s*\.mrfw-heroEntry\s*\{/)
   })
 
   it('does not claim the shared list slot', () => {
