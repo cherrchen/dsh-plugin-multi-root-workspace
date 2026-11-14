@@ -26,12 +26,14 @@
 
 ## 快速开始
 
-插件已发布到 [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace)。在 DSH 侧栏的**插件**页点**添加插件**、填入包名 `@dsh-electron/dsh-plugin-multi-root-workspace` 即可安装；也可以用命令行两步装完：
+插件已发布到 [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace)。命令行 profile（`web` / `headless` 等）用两步装完：
 
 ```sh
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 dsh --profile web       # --profile 按你的启动方式选择，可选值见 DSH 文档
 ```
+
+**DSH Desktop 用户**：如果插件页显示已安装，但 `dsh.profile.bundles` 里没有本包，或一启用就报 `fs` / `sandbox` 重复注册，请按[安装](#安装)的 DSH Desktop 小节用 Desktop 自带的 `dsh` 恢复并冷启动。
 
 tarball、GitHub、本地源码等其他安装方式见[安装](#安装)。
 
@@ -64,9 +66,28 @@ DSH 版本不在表内、或 `@deepseek-ai/dsh-*` 各包版本不一致时，插
 
 ## 安装
 
-不使用命令行时，DSH 侧栏的**插件**页提供同一安装入口：点**添加插件**，填入 npm 包名（或 Git 地址、tarball、本地绝对路径）。
+### DSH Desktop：用自带 CLI 安装或恢复
 
-`dsh plugin` 支持四种安装来源。以下均以 web profile 为例；桌面端（Electron）把 `--profile web` 换成 `--profile desktop`，安装方式同源。
+DSH Desktop 的插件页和 CLI **不是等价入口**：插件页的「添加插件」可能只写 `dependencies`，`dsh.profile.bundles` 由随后的「立即启用」单独写入；在运行中的宿主里热启用本插件还可能撞上旧 provider 的重复注册。
+
+1. 完全退出 Desktop，包括托盘图标。
+2. 在命令行中使用 Desktop 安装目录内 `resources/runtime/cli/bin` 随附的 `dsh`（必要时把该目录加入 `PATH`）。新装：
+   ```sh
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.19
+   ```
+3. 已安装但缺少 bundle 登记：先 `remove` 再 `add`（只重跑 `add` 不会补登记）：
+   ```sh
+   dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.19
+   ```
+4. 打开 `$DSH_HOME/profiles/desktop/package.json`（未设置 `DSH_HOME` 时通常是 `~/.dsh/profiles/desktop/package.json`），确认 `dsh.profile.bundles` 包含本包。
+5. 重新打开 Desktop（冷启动）。
+
+首次安装若报 `[ERR_PNPM_IGNORED_BUILDS]`，按[安装停在构建授权](./docs/troubleshooting/install-stops-at-build-approval.md)补 `allowBuilds`，再执行 `remove` + `add`。热启用冲突的原因、复现记录和实际写入者调查见[故障排查](./docs/troubleshooting/desktop-install-missing-bundle.md)。
+
+### CLI profile 的四种安装来源
+
+`dsh plugin` 支持四种安装来源。以下均以 `web` profile 为例；`headless` 等 CLI profile 同理。DSH Desktop 请使用上一节的 `dsh` 和 `desktop` profile；用 npm 安装的 `dsh` 不能管理 Desktop 的保留 profile。
 
 | 来源 | 命令 | 说明 |
 | --- | --- | --- |
