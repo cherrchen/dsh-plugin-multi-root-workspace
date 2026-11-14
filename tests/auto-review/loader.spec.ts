@@ -15,9 +15,21 @@ async function fixture(delay = 0, failOfficial = false) {
   ctx.baseUrl = import.meta.url
   await ctx.plugin(Loader)
   cleanup.push(() => ctx.fiber.dispose())
-  // cordis loader 1.0.x persisted through `write`; 1.1.0 moved persistence to
-  // the tree's `commit` hook, so the old spy only exists on the earlier shape.
-  const write = 'write' in ctx.loader ? vi.spyOn(ctx.loader as unknown as { write: (...args: unknown[]) => unknown }, 'write') : undefined
+  // cordis loader 1.0.x persisted through `Loader.write()`; 1.1.0 replaced it
+  // with `Loader.commit(change)`. Observe whichever shape this loader exposes,
+  // and fail loudly when neither exists, so the zero-persistence assertions
+  // below can never pass vacuously.
+  const loaderShape = ctx.loader as unknown as {
+    write?: (...args: unknown[]) => unknown
+    commit?: (...args: unknown[]) => unknown
+  }
+  const write = typeof loaderShape.write === 'function' ? vi.spyOn(loaderShape, 'write') : undefined
+  const commit = typeof loaderShape.commit === 'function' ? vi.spyOn(loaderShape, 'commit') : undefined
+  if (write === undefined && commit === undefined) {
+    throw new Error('the installed cordis loader exposes no persistence hook to observe')
+  }
+  const persisted = () => [...(write?.mock.calls ?? []), ...(commit?.mock.calls ?? [])]
+  const resetPersistence = () => { write?.mockClear(); commit?.mockClear() }
   const errors = vi.spyOn(ctx.logger, 'error')
   let owner: string | undefined
   const events: string[] = []
@@ -68,10 +80,28 @@ async function fixture(delay = 0, failOfficial = false) {
     await ctx.loader.root.update(config)
     await ctx.loader.await()
   }
-  return {ctx, write, errors, events, imports, rows, update, owner: () => owner}
+  return {ctx, persisted, resetPersistence, errors, events, imports, rows, update, owner: () => owner}
 }
 
 describe('Auto Review Loader takeover', () => {
+  it('observes the loader persistence hook before trusting a zero-persistence takeover', async () => {
+    const f = await fixture()
+    // `EntryTree.create/remove` are the loader's own explicit tree mutations;
+    // both generations report them through the persistence hook (`write()` on
+    // 1.0.x, `commit(change)` on 1.1.0). Seeing those calls proves the spy is
+    // wired to real traffic, so the zero below is evidence rather than noise.
+    const id = await f.ctx.loader.create({ name: 'other-module', disabled: true })
+    expect(f.persisted().length).toBeGreaterThan(0)
+    f.ctx.loader.remove(id)
+    expect(f.persisted().length).toBeGreaterThan(1)
+    f.resetPersistence()
+
+    await f.update(f.rows(true))
+    expect(f.owner()).toBe('fork')
+    expect(f.persisted()).toHaveLength(0)
+    expect(f.errors).not.toHaveBeenCalled()
+  })
+
   for (const first of [true, false]) for (const delay of [0, 20]) {
     it(`prevents duplicate owners across cold start and reload (official first=${first}, import delay=${delay})`, async () => {
       const f = await fixture(delay)
@@ -81,7 +111,7 @@ describe('Auto Review Loader takeover', () => {
       expect(f.owner()).toBe('fork')
       expect([...f.ctx.loader.entries()].some(e => e.options.name === OFFICIAL_AUTO_REVIEW)).toBe(false)
       expect(f.errors).not.toHaveBeenCalled()
-      expect(f.write?.mock.calls ?? []).toHaveLength(0)
+      expect(f.persisted()).toHaveLength(0)
     })
   }
 
@@ -97,7 +127,7 @@ describe('Auto Review Loader takeover', () => {
     expect(f.owner()).toBe('official')
     expect(Object.getOwnPropertyDescriptor(f.ctx.loader.root, 'update')).toEqual(descriptor)
     expect(f.events).toEqual(['claim:official', 'release:official', 'claim:fork', 'release:fork', 'claim:official'])
-    expect(f.write?.mock.calls ?? []).toHaveLength(0)
+    expect(f.persisted()).toHaveLength(0)
     expect(f.errors).not.toHaveBeenCalled()
   })
 
