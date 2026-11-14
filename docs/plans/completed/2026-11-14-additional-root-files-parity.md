@@ -1,8 +1,9 @@
 # 附加根 Files 树与主根原生 File 完全对齐（行右键菜单 + 工作区搜索）
 
-> 状态：进行中（2026-11-14）。本文件既是开发计划也是执行账本：每阶段结束把命令与结果写入 §7。
+> 状态：已完成（2026-11-14）。实现、测试与本地门禁已完成；Draft PR 与 CI 跟踪见 §P6 与 §7。
 >
 > 关联文档：`docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md`、`docs/decisions/ADR-0016-files-tab-native-tree-fork.md`、
+> `docs/decisions/ADR-0040-additional-root-workspace-search.md`、`docs/decisions/ADR-0041-additional-root-row-context-menus.md`、
 > `src/client/files-tree/FORK.md`、`docs/reference/dsh-0.2.2-migration.md`。
 
 ## Goal
@@ -301,10 +302,17 @@
 
 | 阶段 | 状态 | 提交 | 证据（命令/结果） |
 | --- | --- | --- | --- |
-| P0 | 进行中 | — | 本文件 + tag 级审计 |
-| P1 | 待开始 | — | — |
-| P2 | 待开始 | — | — |
-| P3 | 待开始 | — | — |
-| P4 | 待开始 | — | — |
-| P5 | 待开始 | — | — |
-| P6 | 待开始 | — | — |
+| P0 | 已完成 | `5237281 docs(plan)` | 本文件 + 24 个受支持 release 的 tag 级审计（`git show/grep dsh-v0.2.2-{alpha.3,rc.1,rc.2,rc.3}`）；结构边界 = alpha.3（Factory/行菜单）与 rc.2（search/highlight/omitted/hidden 过滤） |
+| P1 | 已完成 | `0d865a0 feat(client)` | `vitest run tests/client-files.spec.tsx tests/client-switcher.spec.tsx tests/client-navigator.spec.tsx` → 68 passed（后随 P3 扩到 70）；`pnpm lint` 0；`pnpm typecheck` 0；`pnpm build` 绿；`pnpm compat:check` 绿。新增断言：file/directory target 携带绝对路径与会话、无 seat 时 DOM 不变、kind 无贡献不绑定、Factory 输入透传、预览 retarget target |
+| P2 | 已完成 | `1ca4b8b feat(host)` | `vitest run tests/command.spec.ts tests/workspace-routing.spec.ts tests/contract.spec.ts` → 73+28+9 passed（授权矩阵：未登记/被扣留/redirect/authority-unavailable 拒绝，单次主根准入，内部 primaryRoot 标记不出 wire，旧 host 无 search → search-unavailable）；lint/typecheck/build/compat 绿；`pnpm kernel:probe` 在本沙箱报告无可用内核 runner（预期） |
+| P3 | 已完成 | `6b364e3 feat(client search)` | 客户端套件 255 passed：`client-search.spec.tsx` 12（payload/abort/结果/高亮/笔记/失败重试/偏好/键盘/重挂载/隐藏过滤/绝对地址打开）、`client-search-rules` 97、`client-search-tree` 10、`client-search-preferences` 22、`client-styles` 35、`client-switcher` 31、`client-navigator` 24、`client-files` 17、`client-bundle` 10；lint/typecheck/build/pack:check 绿 |
+| P4 | 已完成 | （并入 P1/P3 提交） | 预览 retarget 的右键 target 已有 spec（`client-navigator.spec.tsx`）；`src/client/styles.ts` 仍隐藏原生搜索条/开关（rules 见 FORK.md）；预览无搜索是文档化边界（ADR-0040 §D4、FORK.md） |
+| P5 | 已完成 | `docs` 提交（PR 分支） | ADR-0040/0041 + decisions 索引；FORK.md（新 delta、搜索同步义务、同步步骤 8–10）；README 双语、architecture、requirements、`docs/reference/dsh-0.2.2-migration.md`、`.agent/note/dsh-compat-contract`（双）+ 进度总账；`pnpm docs:check` 绿 |
+| P6 | 进行中 | — | 本地：lint ✅ / typecheck ✅ / build ✅ / compat:check ✅ / docs:check ✅ / pack:check ✅ / smoke:compose 56 passed / smoke:behavior 96 passed + 8 env-skip / smoke:journey 85 passed + 2 env-skip；`pnpm test` 1590 passed，17 failed 均为 authority/lease/follower 家族——**同一沙箱内基线提交 `8c09c7b` 逐项复现**（`smoke:behavior` 同一原因：Host 自身在沙箱内，shared Registry native IPC 拒绝 sandboxed peer），与本次改动无关，CI 拥有该信号。Draft PR 打开后跟踪 releases/verify/gate 直至全绿 |
+
+### 已知本地环境限制
+
+本机（macOS + DSH 文件沙箱）无法执行内核受限命令（seatbelt `sandbox_apply: Operation not permitted`），也无法建立
+shared Registry 的 native IPC（Host 自身被沙箱化）。因此 `kernel:probe`、受限 bash 断言与 17 个 authority/lease/follower
+测试在本机失败；用基线提交 `8c09c7b` 在**同一**沙箱运行同样的测试得到相同的 17 个失败，`smoke:behavior` 也直接报告
+同一 IPC 原因。这些项由 CI 在非沙箱 runner 上验证，本 PR 不通过降低/跳过测试来"通过"本地门禁。

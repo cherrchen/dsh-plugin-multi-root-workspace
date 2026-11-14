@@ -137,7 +137,7 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 7.17 **删除 worktree 的生命周期**：已登记 B 根只有 `record.path` 确认缺失时才提供面板专用清理；用户显式触发、永不自动删除，owner 复验 `rootId + path + addedAt`，缺失根继续占额度。sidecar 所有写入由既有 Registry owner 串行处理，follower 不写文件；修剪依据队列内当前完整快照，不可用时保留映射，owner 重启/接管后核对旧 epoch 映射，不得覆盖并发新增。详细协议与验收唯一见 [ADR-0039 §5 / §6.8](../decisions/ADR-0039-worktree-aware-root-suggestions.md)。`forget-workspace` 新命令/RPC/owner 删除路径 v1 延期，专用清理不依赖它。
 7.18 **主 checkout 授权（A，在 B 完成后，实验性、默认关闭）**：当 linked checkout 本身是 session primary 且处于 `workspace-write` 时，用户可确认将经宿主复验的主 checkout 根 `<main> = dirname(canonical common)` 登记为 `inherit`，使外部 linked checkout 能在受限沙箱中完成 `git add` / `git commit`。授权范围包含主 checkout 源码树与共享 Git 元数据；`<main>/.git` 必须仍是 canonical common。默认 pool 的 `<main>` 包含 primary，`primary-overlap` 使其没有 A。`--separate-git-dir` 时路径可能是 store 的父目录，对话框必须披露该歧义。A/B 共用「启用 Worktree 附加根建议」插件设置，**实验性、默认关闭**，与「启用附属根 Skills」同卡并显示实验性 Tag。关闭后停止提示和专用清理，已登记根继续由普通根管理。来源契约、失败边界和开关行为见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)。
 8. **失败要响亮**：misconfiguration（非绝对路径、重复 id、patch 行未按预期生效）在装载或首次 resolve 时抛错。
-9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias 可用；不显示上移/下移按钮，当前 UI 不提供排序入口，底层排序接口与逻辑保留，供后续拖动排序使用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制；DSH `0.2.1-alpha.3` 起在 blank session 的新会话页工作区行 `conversation.hero.options` 增加同一对话框的增量入口（与相邻 workspace / 模式选择器同几何、无 chevron、随行内可用余量收缩且余量不足 88px 时只显示图标，任何列宽下不越过输入卡右缘；`session` scope 的 `sessionId` 取自槽属性；侧栏入口保留，旧运行时该槽缺席即无此入口），见 [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)；浏览落点是 Files 页签根选择器（选中附加根以插件自绘树接管树区，头部各控件——刷新、「在应用中打开」——均作用于选中根，`data-*` 钩子失效即静默退化），见 ADR-0015。
+9. **UI**：Folders 列表区分主根/附加根；Add Folder 走组合好的 `directoryPicker` 能力（面板 `uiWorkspace.pickDirectory()` / 命令侧 host native `pick`）；Remove/Reveal/Copy Path/Alias 可用；不显示上移/下移按钮，当前 UI 不提供排序入口，底层排序接口与逻辑保留，供后续拖动排序使用；双语（zh/en 键集相等由 `tests/locale-parity.spec.ts` 钉住）。落点是侧栏底部动作 + 对话框，见 ADR-0005 与下方已知限制；DSH `0.2.1-alpha.3` 起在 blank session 的新会话页工作区行 `conversation.hero.options` 增加同一对话框的增量入口（与相邻 workspace / 模式选择器同几何、无 chevron、随行内可用余量收缩且余量不足 88px 时只显示图标，任何列宽下不越过输入卡右缘；`session` scope 的 `sessionId` 取自槽属性；侧栏入口保留，旧运行时该槽缺席即无此入口），见 [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)；浏览落点是 Files 页签根选择器（选中附加根以插件自绘树接管树区，头部各控件——刷新、「在应用中打开」、搜索钮——均作用于选中根，`data-*` 钩子失效即静默退化）；附加根上的行右键菜单与工作区搜索只在宿主暴露对应结构时出现（`useContextMenu` 与 `workspaceFiles.search`，即 DSH `0.2.2-alpha.3` / `0.2.2-rc.2` 起），更早宿主上附加根视图与 `v0.1.19` 逐字节一致，见 ADR-0015、[ADR-0040](../decisions/ADR-0040-additional-root-workspace-search.md) 与 [ADR-0041](../decisions/ADR-0041-additional-root-row-context-menus.md)。
 10. **升级韧性**：`package.json` pin dsh 精确版本；仓库 CI 含"升级 smoke"脚本（对上游 demo 行为差异报警）；provider 子类只依赖上游公开方法面（不触碰 TS-private、不做原型替换）。
 11. **e2e**：需求 §22 场景实跑通过（跨 repo 读写、双 repo 测试、git diff），headless + web 双 profile —— 由 `pnpm smoke:journey` 覆盖：web 组合进程内启动 + 命令注册根 + 真实 agent 轮次，headless 组合以真实 CLI 子进程跑一次性任务，模型由内联的脚本化 OpenAI 兼容端点提供（无凭据）。受限 bash 在无法嵌套内核沙箱的宿主上显式 skip 并打印原因。
 
@@ -164,6 +164,14 @@ MVP 之后、第二期之前插入的一批"把已有能力做扎实"的工作�
 - e2e 的模型轮次由脚本驱动（用于断言世界状态），不能替代"真实模型能否自行发现附加根"的观察；拓扑快照的模型可见性由请求体断言覆盖。
 - 重新校验与内核调用之间仍存在 TOCTOU 窗口：本插件保证"按当前可见的解析结果授权"，不保证一个目录在 `stat` 之后被原子替换时内核仍按旧目标执行（那需要内核侧 fd 语义）。
 - 主根自身被解析到别处（例如 `policy.workspaceRoot` 指向的路径被替换）属于上游 `sandboxPolicy` 的行为，不在本插件的重新授权范围内。
+
+### 已知限制（附加根 Files 视图，2026-11-14）
+
+- 附加根行右键菜单要求宿主组合提供 `useContextMenu`（DSH `0.2.2-alpha.3` 起）；更早宿主不绑定菜单，附加根视图与 `v0.1.19` 逐字节一致。菜单项本身来自宿主贡献方，插件只提供 target（附加根绝对路径）与触发绑定，宿主菜单变化自动跟随。
+- 附加根工作区搜索要求宿主暴露 `workspaceFiles.search`（DSH `0.2.2-rc.2` 起），页头搜索钮是受支持入口；更早宿主不渲染搜索钮/栏、不调用 `search` 端点。搜索语义（结果、限额、错误码、ignore 规则、命中高亮）复用上游实现，插件只补“命名附加根”的传输。
+- 原生 Files 快捷键（Cmd+P）仍聚焦被接管隐藏的原生搜索框，因此不把原生快捷键当作附加根搜索入口：接管期它操作的仍是被隐藏的原生搜索面。
+- 文档预览的 Folder 导航器只获得行右键，没有搜索：其搜索态由上游 `sidebar.files.navigator` face 与快捷键驱动，接管树不参与该 face；单独加入口会形成与原生不一致的第二入口。
+- 隐藏项过滤（默认隐藏 dotfile、“只有隐藏项”说明）从 `0.2.2-rc.2` 起跟随原生偏好；更早宿主没有该行为。搜索偏好按根保存在宿主同名 localStorage 键，只存与默认值的差异，删除插件代码不影响原生读取。
 
 ## 6. 非目标（明确不做）
 

@@ -80,3 +80,7 @@ ADR-0002-short-title.md
 - [ADR-0039-worktree-aware-root-suggestions.md](./ADR-0039-worktree-aware-root-suggestions.md) — 先做 worktree 附加根建议与手动清理（B），再做 linked worktree 的主 checkout 授权（A）。共用实验性、默认关闭的插件设置；提示按可见候选数量分流为单确认或勾选列表。Accepted，2026-11-10 第十九次修订；实施状态见路线账本。
 
 - [ADR-0040-auto-review-multi-baseline.md](./ADR-0040-auto-review-multi-baseline.md) — Auto Review 联合合同从单一精确发布扩展为两个源码基线的 9 个精确发布：按基线保存逐字节 fork、按车道动态加载、按编译 pin 做实现类型检查、alpha.2 请求身份例外与约束插入位置（Accepted，修订 ADR-0021/0022 的单基线结论）。
+
+- [ADR-0041-additional-root-workspace-search.md](./ADR-0041-additional-root-workspace-search.md) — 附加根工作区搜索：上游 wire 无法命名根，故在插件通道上新增 `search` 端点（rootId 由刷新后的 Registry 解析、单次主根准入、帧内复核授予）；客户端按 `workspaceFiles.search` 结构门控，状态按 (tab, root) 存 inject product，偏好沿用上游 localStorage 键；旧宿主零影响（Accepted，实施见计划）。
+
+- [ADR-0042-additional-root-row-context-menus.md](./ADR-0042-additional-root-row-context-menus.md) — 附加根 Files 行右键菜单与 viewer 置灰：结构读取根级 `useContextMenu` 并把 `rowTriggerProps`/`canOpen` 转发进宿主 Factory（旧行同语义），target 用绝对路径；不新增 `ui-context-menu` 依赖（upgrade 矩阵会改写 devDep 致老 lane 安装失败）（Accepted，实施见计划）。

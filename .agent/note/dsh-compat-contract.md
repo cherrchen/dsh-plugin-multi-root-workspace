@@ -291,8 +291,20 @@ rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留�
 - **状态**：上游 tag `dsh-v0.2.2-rc.3` 指向 `38a6a5c965`，npm 已发布（`next` 指向该版本，`latest` 仍为 `0.2.2-rc.1`）。本分支把 `SUPPORTED_DSH_RELEASES`、28 个 DSH peer 与开发 pin 提升到 `0.2.2-rc.3`（24 个精确版本），并用 `scripts/upgrade-dsh.mjs 0.2.2-rc.3` 重指开发树；probe overrides 已移除，唯一新增的传递包 `dsh-deepseek-chat-import` 已补进 `minimumReleaseAgeExclude`。
 - **上游差异**：rc.3 只有 6 个提交、515 个文件；380 个 `package.json` 只改版本号，其余集中在 `ui-sidebar` 的新会话行 HOC 槽、`ui-workspace` 的 `workspace.picker` Factory 与第三个 directory-flow 洞、两个目录选择器包、`ui-primitives` 的上传图标、可选实验 bundle `dsh-deepseek-chat-import`、`session-log-export` 的不可读附件降级，以及桌面安装器与 CI。插件的沙箱、fs、tools、session、storage、skills、lsp、workspace-files 与 Connection 接缝没有任何改动，**未新增 adapter 分支**。
 - **安静陷阱 1（peer-only 副本）**：升级后 `dsh-permission-presets` / `dsh-util-values` 仍可能以 rc.2 副本满足 peer 边（rc.3 各包声明的是精确 peer），`pnpm peers check` 必须为 0；`pnpm dedupe`、`--force`、`--lockfile-only` 都不会改写这类“看似有效”的边。落地前要让它们升到同一精确版本，最终 lockfile 中 `0.2.2-rc.2` 只作为 peer 范围字符串出现。
+
 - **安静陷阱 2（新包不是契约成员）**：`dsh-deepseek-chat-import` 默认不挂载、与插件授权面没有交点，不加入 `OPTIONAL_CORE_PACKAGES`；它自带的 `zod 4.6.6` 与 `dsh-storage-domain` 的 `4.4.3` 是两份独立副本，域 schema 仍只经 `storage-zod` 构建。
 - **安静陷阱 3（目录选择器第三个洞）**：`workspace.picker.directoryFlow` 由 `workspace.picker` Factory 声明；插件没有 occupant，也不要往宿主的新会话/选择器流里挂自己的根 UI。
 - **安静陷阱 4（新会话行 DOM）**：`sidebar.session.action` 用 `display: contents` 锚点夹在 `.newSessionRow` 与按钮之间，`sidebar.footer.action` 在页脚、不受影响；将来若要注册该 HOC 槽，必须原样返回 `children`，不要多套一层盒子。
 - **fork 基线**：rc.3 未改 `ui-open-in-app` / `ui-sidebar-files` 的 `src/client/`，open-in-app 基线保持 `ddac96760b`、files-tree 旧版保持 `f3803c9697`；`FORK.md` 只记录 dev pin 已前移、基线不变。
 - **验证（已发布包）**：`compat:check`（allowlist / peer / 开发 pin / 安装树一致，24 个精确版本；`pnpm peers check` 无问题）、lint、双端 typecheck、`build`、`docs:check`、`pack:check`（210 成员）与 `auto-review:fork` 通过；完整 vitest **1386 通过 / 162 跳过 / 17 失败**，17 个失败仍全部是本会话 Seatbelt 下的 sandboxed-peer registry IPC 用例（与 rc.2 基线的 17 个同形）。本机 `smoke:compose` **56/56**、`smoke:behavior` **96 通过 / 8 跳过**、`smoke:journey` **85 通过 / 2 跳过**、`smoke:packed` **95 通过 / 8 跳过**，0 失败。三 OS 矩阵与 Windows ACL 原生结果由 PR 的 CI 给出。
+
+## 19. 附加根 Files 的行右键与工作区搜索（2026-11-14）
+
+两个宿主面都是 `0.2.2` 线新增，插件按结构门控：**不要**改成版本字符串比较，也**不要**把上游 client 包加进任何依赖——`scripts/upgrade-dsh.mjs` 会把每个 `@deepseek-ai/dsh*` devDependency 改写到目标 release，`0.2.2-alpha.3` 之前不存在的包会让 20 个老版本 lane 在 `pnpm install` 阶段死亡。
+
+- **行右键（`0.2.2-alpha.3` 起）**：renderer 的根级 composed prop `useContextMenu` 提供 `getTriggerProps`，插件从 slot occupant 直接取；seat 由 `src/client/files-tree/context-menu.ts` 取，经 `src/compat/files-tree.ts` 的 `rowTriggerProps`/`canOpen` 转发进 `sidebar.files.tree` Factory，旧行渲染路径 spread 同一组 handlers。target 是 `{ kind: 'file' | 'directory', value: { sessionId, path: 绝对路径 } }`；**必须传绝对路径**——宿主贡献方按 Session cwd 解析相对路径，会把附加根行指向主根同名文件。没有 `useContextMenu`（更早宿主）→ 不绑定、DOM 不变。
+- **`contextMenus.registeredKinds`（`0.2.2-rc.2` 起）**：可选探测。没有该成员时直接绑定（alpha.3 原生已注册 file/directory 贡献），不要把“探不到 kinds”误判成“没有菜单”而丢掉 alpha.3 的右键。
+- **工作区搜索（`0.2.2-rc.2` 起）**：客户端探测 `typeof remote.workspaceFiles.search === 'function'`，宿主探测 `typeof service.search === 'function'`；缺席时不渲染页头搜索钮/搜索栏、不调用端点（端点会答 `search-unavailable`）。搜索根在 wire 上无法命名（request 只有 SessionId），所以走插件通道 `/multi-root-workspace` 的 `search` 端点：`rootId` 解析自**刷新后的** Registry（稳定 id，不是路径），以 host 内部 scope 命名附加根，单次以主根为 key 的 Registry 准入；`scopeOf()` 的授权复核必须在准入帧内——共享权威 Host 的帧外答案是空，帧外检查会把所有搜索拒掉。
+- **`highlight` / `omitted` 与隐藏项过滤（`0.2.2-rc.2` 起）**：结果树给 Factory 传 `highlight`，旧行路径用 `<mark>`；树态在绘制期过滤隐藏项（`src/client/files-tree/hidden.ts`），隐藏目录下的已列层级丢弃、只含隐藏项的目录用 `omitted: 'hidden'` 画说明，搜索把同一偏好作为 `includeHidden` 上送。偏好与上游同一个 localStorage 键 `dsh.sidebar-files.workspace-search.v1`，只存与默认值的差异；删掉插件代码不影响原生读取。
+- **两条已知边界**：原生 Files 快捷键（Cmd+P）仍聚焦被接管隐藏的原生搜索框，附加根搜索的受支持入口是页头搜索钮；文档预览的 Folder 导航器只获得行右键、不获得搜索（其搜索态由上游 `sidebar.files.navigator` face 与快捷键驱动，接管树不参与该 face）。
+- **升级目检**：更早宿主上附加根树零变化（没有菜单、没有搜索钮）；rc.2+ 上右键 target 命中附加根真实路径、搜索结果与主根原生同构。结构边界与证据见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#附加根-files-视图消费的两个接口面2026-11-14)与 [ADR-0040](../../docs/decisions/ADR-0040-additional-root-workspace-search.md)、[ADR-0041](../../docs/decisions/ADR-0041-additional-root-row-context-menus.md)。
