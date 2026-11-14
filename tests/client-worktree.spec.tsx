@@ -42,6 +42,14 @@ const MAIN: WorktreePromptView = {
   viewRevision: 'v1',
 }
 
+/** A second worktree row, used to make one session's candidate set countable. */
+const OTHER: WorktreePromptView = {
+  ...PROMPT,
+  id: 'p2',
+  key: 'worktree\u0000/wt2',
+  path: '/tmp/wt2',
+}
+
 /** One full prompt answer, as the host builds it. */
 function answer(prompts: readonly WorktreePromptView[], viewRevision = 'v1') {
   return Promise.resolve({ prompts, viewRevision })
@@ -340,6 +348,53 @@ describe('worktree notice: the operator closes or delays it', () => {
     await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(snooze).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a new session notice when the previous session snooze fails', async () => {
+    const session = sessionHarness('s1')
+    let rejectSnooze: ((reason?: unknown) => void) | undefined
+    const snooze = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['snooze']>>>((_resolve, reject) => {
+      rejectSnooze = reject
+    }))
+    const prompt = vi.fn(async (sessionId: string) => answer(sessionId === 's1' ? [PROMPT] : [MAIN, OTHER]))
+    render(<WorktreePrompt client={fakeClient({ prompt, snooze })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={tWithParams} previewOnly={false} />)
+    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: '7d' }))
+    session.switchTo('s2')
+    await screen.findByText('worktree.toast:2')
+    // s1's request settles only after s2 has shown its own notice. It must not
+    // clear a notice its lifecycle no longer owns: s2's candidates were already
+    // claimed through `seen`, so the operator would never see them again.
+    await act(async () => { rejectSnooze?.(new PanelError('worktree/prompt-stale', 'stale')) })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen.getByText('worktree.toast:2')).toBeDefined()
+  })
+
+  it('keeps a re-shown notice when an earlier snooze succeeds after a session round trip', async () => {
+    const session = sessionHarness('s1')
+    let finishSnooze: ((answer: Awaited<ReturnType<WorktreeClient['snooze']>>) => void) | undefined
+    const snooze = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['snooze']>>>((resolve) => {
+      finishSnooze = resolve
+    }))
+    const prompt = vi.fn(async (sessionId: string) => answer(sessionId === 's1' ? [PROMPT] : []))
+    render(<WorktreePrompt client={fakeClient({ prompt, snooze })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={tWithParams} previewOnly={false} />)
+    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: '7d' }))
+    session.switchTo('s2')
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(2))
+    prompt.mockImplementation(async (sessionId: string) => answer(sessionId === 's1' ? [MAIN, OTHER] : []))
+    session.switchTo('s1')
+    await screen.findByText('worktree.toast:2')
+    // The old snooze belongs to the first s1 activation. Its completion must not
+    // close the notice the second activation owns, even though the session id is
+    // the same again.
+    await act(async () => {
+      finishSnooze?.({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] })
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen.getByText('worktree.toast:2')).toBeDefined()
   })
 
   it('keeps the notice for a reminder choice the host skipped so it can be retried', async () => {

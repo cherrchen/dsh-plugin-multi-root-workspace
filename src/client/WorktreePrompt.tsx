@@ -428,22 +428,30 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setDialogOpen(true)
   }, [client, currentSession, notice])
 
-  /** Record the notice's reminder delay; the notice only closes on success. */
+  /**
+   * Record the notice's reminder delay; only the lifecycle that showed the
+   * notice may close or shrink it afterwards.
+   */
   const snoozeNotice = useCallback((mode: WorktreeSnoozeMode) => {
     const current = notice
     if (client === undefined || current === undefined) { setNotice(undefined); return }
     if (current.session !== currentSession || sessionIdRef.current() !== current.session) { setNotice(undefined); return }
+    const epoch = workEpoch.current
     void (async () => {
       let answer: Awaited<ReturnType<WorktreeClient['snooze']>>
       try {
         answer = await client.snooze(current.session, current.prompts.map(prompt => prompt.id), { mode })
       } catch {
-        // A transport/authority failure is still silence: the notice closes and
-        // this Host never retries it automatically.
-        if (mounted.current) setNotice(undefined)
+        // A transport/authority failure is still silence for the activation that
+        // showed this notice: it closes and this Host never retries it
+        // automatically. But a completion after the session/settings lifecycle
+        // moved on owns nothing — clearing the CURRENT notice would hide a new
+        // activation's candidates that `seen` already claimed for this Host.
+        if (!mounted.current || epoch !== workEpoch.current) return
+        setNotice(undefined)
         return
       }
-      if (!mounted.current || sessionIdRef.current() !== current.session) return
+      if (!mounted.current || epoch !== workEpoch.current || sessionIdRef.current() !== current.session) return
       if (answer.skipped.length === 0) { setNotice(undefined); return }
       // The host refused some rows (they changed since the notice rendered) and
       // recorded no delay for them. Keep the notice for exactly those rows,
