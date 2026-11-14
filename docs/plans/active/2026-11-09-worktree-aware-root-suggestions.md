@@ -1,7 +1,7 @@
 # Worktree 感知的附加根建议与 Git 元数据授权实施计划
 
-> 状态：**P1–P10 与第十九次修订变更全部实施完成；两轮审计修复与 Devin Review 两条修复已实施；macOS 原生验证与 PR #48 的 Linux / Windows CI 均通过；随 `v0.1.17` 发版**。先完成 B（P1–P7），再实施 A（P8–P10）；第十九次修订把 A 的目标改为主 checkout、开关改为实验性默认关闭，并加入单/多候选提示分流。实施与验证状态见[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
-> 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-09 第十八次修订）。
+> 状态：**P1–P10 与第十九次修订随 `v0.1.17` 发版；第二十次修订（会话激活时一次只读检查 + 非模态 Toast + 显式确认 Dialog + snooze）已实施，验证状态以[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)为准**。先完成 B（P1–P7），再实施 A（P8–P10）；第十九次修订把 A 的目标改为主 checkout、开关改为实验性默认关闭，并加入单/多候选提示分流；第二十次修订把自动发现从常驻长轮询收敛为会话激活时一次只读检查。
+> 决策：[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（Accepted，2026-11-14 第二十次修订）。
 > 需求：[§7.16–§7.18](../../requirements/multi-root-workspace.md#7-行为约束)。
 
 ## Goal
@@ -220,6 +220,56 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - **客户端“未知”语义（BUG，`src/client/skills-settings.tsx`）**：`enabled()` 原先只从绑定的 Settings form 取值，没有 form 时返回 `false`；loader `enabled: true` 而没有浏览器 `configForms`/`settingsScope` 的组合因此永远不会发起 `worktreePromptWait`。现在只有 ready 且已发布布尔值的 form 才按值抑制，其余状态（无 form、loading/unavailable/error、ready 但无值）返回 `true`，由宿主的 `worktree/not-enabled` 决定并停止循环。回归：`tests/client-skills.spec.tsx` 的无 form、三种非 ready 状态、ready 明确 false/true 与 ready 空值用例。
 - **owner 门禁 fail closed（SEC，`src/registry.ts`）**：`requireWorktreesEnabled()` 原先只在 provider 返回 `false` 时拒绝，provider 缺失（worktree 行未挂载或已 dispose）即放行；协商过 `promptsRoot` 的 IPC peer 可在 owner 没有开关时提交 `addNew`、`removeForDeletedWorktree` 和 sidecar mutation。现在要求 provider 显式返回 `true`，缺失一律 `worktree/not-enabled`；read 形状的 sidecar 操作不受影响。`tests/support/registry-stack.ts` 为裸 Registry 栈安装 `() => true` 的替身（生产中的唯一调用者是 worktree 行），`tests/worktrees-owner.spec.ts` 覆盖 absent provider 下三条写路径全部拒绝且 read 仍可用。
 - **验证**：worktree 相关 spec 与 `client-worktree`/`authority-native` 实跑 **134 通过、44 环境 skip**；全量 vitest **1362 通过、17 个既有 lease/follower 环境失败**（与审计基线同一组，均因当前 Host 被沙箱化而无法协商共享 IPC）；`lint`、`typecheck`、`build`、`docs:check` 通过。
+
+### 第二十次修订实施（2026-11-14，完成）
+
+> 决策见 ADR-0039 第二十次修订。授权语义不变：不自动添加/删除根，`addNew` 仍是唯一写入路径，owner 复验与 `worktree/prompt-stale` 行为不变。本阶段记录实施范围与验收清单；实际验证证据只记[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)，不在本小节预写。
+
+- [x] **宿主：`fresh` 只读检查**。`worktreePrompt` 增加可选 `fresh`（默认 `false`，strict）；`fresh: true` 只返回「未被 Host `offered` 认领且不被当前 snooze 覆盖」的候选，纯查询、无副作用；`prompt()` 的 `ensureWorkspace` 固定 `'first'`，自动检查不复活 `lost`；返回 `{ prompts, viewRevision }` 不变。
+- [x] **宿主：`worktreePromptSeen` 与 `offered`**。新增端点，把命中当前 queue 且仍 eligible 的 `promptIds` 的 discovery key 写入 Host 内存 `WorkspaceState.offered`；不写 sidecar/Registry、不要求 owner 队列；`offered` 按 workspace 共享，`reset`/`disposeAll`/Host 重启清空，不持久化。
+- [x] **宿主：sidecar snooze**。`WorktreeSidecarDocument`/`WorktreeSidecarView` 增加可选 `snooze`（`mode: 'until-new-worktree' | 'until'`、`until?`、`keys`、`at`，`version` 仍 1）；`emptySidecar` 默认无该字段；`readSidecar` 把损坏值视为 `undefined`，不拒绝整份 sidecar；`worktreeSidecar` 增加 `{ op: 'snooze', snooze }`，只在 owner 串行队列内写并通过 `requireWorktreeMutation`/`worktreeGate`；`ignore`/`reconcile`/映射增删保留 `snooze`；`reset` 同时清空 `ignored` 与 `snooze`，无可清内容时不制造 revision。
+- [x] **宿主：resolve snooze 与生效规则**。`worktreePromptResolve` 接受 `action: 'snooze'` + `snooze`；复验 session/mode/switch/queue/eligibility，失效 id 进 `skipped`；有效 id 由宿主从 `promptIds` 派生 discovery keys 写 sidecar，不写 Registry、不加入 `prompted`；`7d`/`30d` 用宿主时钟换算 `until`，`until` 到期前抑制 keys，`until-new-worktree` 只抑制记录中的 keys。
+- [x] **契约**。双端 schema 同步（strict、拒绝多余字段）；`worktreePromptSeen` 端点、`worktreePrompt` 的 `fresh`、`worktreePromptResolve` 的 `action`/`snooze` 互斥校验齐全；`promptIds` 必填、去重、上限 64；`WorktreeResolveAnswerView` 形状复用。
+- [x] **客户端：Toast/Dialog 拆分**。overlay 不再常驻长轮询：session 从空/其他变为有效 session 时调用一次 `worktreePrompt(sessionId, { fresh: true })`，有候选显示非模态 Toast（无 backdrop、无 focus trap、不阻塞页面与输入框），否则不渲染；Toast 操作「查看」「稍后（下拉：直到出现新 worktree（默认）/ 7 天 / 30 天）」「×」，默认常驻不自动消失；A/B 共用中性文案。
+- [x] **客户端：Dialog 与调用**。只有「查看」打开现有 Dialog；打开时 `worktreePrompt(sessionId)`（不带 `fresh`）取全量可见候选，再启动 `worktreePromptWait(sessionId, { seenViewRevision })`，关闭立即 abort；Toast 显示后与 Dialog 打开后各调用一次 `seen`；「稍后」调用 `client.snooze`，「添加所选」继续 `resolve('add')`；X/ESC 关闭不写状态。
+- [x] **面板/样式/词典 + journey**。面板 `list` 与 `worktrees.notify()` 不触发自动检查；`src/client/styles.ts` 增加 Toast 样式（`mrfw-` 前缀、`var(--dsw-*)` token）；词典补齐 Toast 文案与稍后选项；`smoke:journey` 的 web leg 走真实 HTTP 通道的 fresh → 查看 → 确认序列；`tests/worktrees-git.e2e.ts` 若直接调用 wait 可保持。
+- [x] **单测与客户端测试**。宿主覆盖 `fresh`/`seen`/snooze 语义、sidecar 往返与降级、owner 拒绝路径；客户端覆盖触发收敛、Toast/Dialog、下拉、StrictMode 幂等；契约测试覆盖 strict/互斥/枚举/去重/上限。
+- [x] **文档**。ADR-0039 第二十次修订与本计划小节；[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)由维护者在验证后写入实际证据。
+
+**验收**（按 ADR-0039 第二十次修订的契约与失败方向；证据只记路线账本）：
+
+- 客户端：
+  - session 激活 + `fresh` 有候选 → 显示 Toast，且不渲染 `role="dialog"`；无候选 → 不显示任何内容；
+  - 点「查看」→ Dialog 含全部可见候选（A+B）；
+  - 默认「稍后」→ `snooze.mode` 为 `until-new-worktree`，Toast 关闭，Registry 无写入；
+  - 「7 天」「30 天」→ `until` 分别为宿主当前时间 + 7/30 天；
+  - 永久「不再提醒」→ `action: 'dismiss'` + `dontRemind`；
+  - 切换 session → Toast/Dialog 关闭且 wait abort；
+  - 关闭设置开关 → Toast/Dialog 隐藏；重新开启 → 不自动弹；
+  - 面板 `list` / `notify()` → 不自动弹；
+  - Dialog 关闭 → wait abort；
+  - `fresh` 空候选 → 无 Toast；
+  - 只有 A 时 Toast 文案仍为中性；
+  - StrictMode 重复挂载 → 只检查一次/幂等。
+- 宿主：
+  - `fresh` 只返回未被 `offered`/当前 snooze 覆盖的候选，且查询无副作用（无 sidecar/Registry 写入、无 `offered`/`prompted`/queue 变化）；
+  - `seen` 后同一候选 `fresh` 为空，`reset` 后恢复；
+  - `until-new-worktree`：同 key 抑制；新 key 可见，旧 key 仍抑制；
+  - `until`：到期前抑制，到期后可见（宿主时钟）；
+  - snooze 不写 Registry、不加入 `prompted`，候选仍留在队列、可在 Dialog 中显式添加；
+  - 开关关闭/inactive/lost 时 snooze 拒绝且 sidecar 无写入；
+  - sidecar 往返保留 `ignored`/mappings，坏 `snooze` 视为 `undefined`；
+  - `prompt()` 不复活 `lost`；
+  - 多 Host/follower 经 owner 串行写入，view 带回 `snooze`。
+- 契约：
+  - `fresh` 为可选布尔且 strict；
+  - `snooze` 与 `action` 的互斥/必填、mode 枚举；
+  - `seen` 的 `promptIds` 必填、去重、上限 64；
+  - 双端 schema 同步，宿主与客户端同时拒绝多余字段。
+- E2E/冒烟：
+  - `tests/worktrees-git.e2e.ts` 若直接调用 `worktreePromptWait` 可保持；
+  - `smoke:journey` 的 web leg 必须走真实 HTTP 通道：先 `fresh` prompt 判定有候选（等价于 Toast 显示），再「查看」等价的 `prompt`（不带 `fresh`）拿全量列表，再确认；
+  - 现有 add/resolve/cleanup/owner 测试保持通过。
 
 ## Dependencies
 
