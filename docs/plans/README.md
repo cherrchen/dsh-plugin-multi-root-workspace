@@ -38,6 +38,8 @@ completed/
 
 active：
 
+- [2026-11-14-hero-entry-adaptive-width.md](./active/2026-11-14-hero-entry-adaptive-width.md) — 新会话 Hero 入口按行内可用宽度自适应：探针测量行内剩余空间、`max-width` 夹取到余量、余量 < 88px 退化为 28×28 图标；不改 DSH、探针失败回落到 `v0.1.19` 形态。决策修订见 [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)。
+
 - [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) — P1–P7 实施 worktree 附加根建议、实验性默认关闭的插件开关与手动清理（B），P8–P10 实施 linked worktree 的主 checkout 授权（A）；第十九次修订加入单/多候选提示分流。决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)，进度见路线账本；随 `v0.1.17` 发版。
 
 - [2026-11-08-workspace-menu-folders-dialog.md](./active/2026-11-08-workspace-menu-folders-dialog.md) — 工作区 `...` 菜单新增「管理工作区目录…」：复用 footer 对话框的 controller、`workspace` context-menu 贡献（order 150）、先切换/复用目标工作区 blank 再打开并固定 session；`RootSwitcher` 与上游 `WorkspaceBrowser` 零改动（决策见 [ADR-0038](../decisions/ADR-0038-workspace-menu-folders-dialog.md)）。

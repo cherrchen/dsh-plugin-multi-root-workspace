@@ -84,16 +84,32 @@ export const STYLES = /* css */ `
    conversation.hero.options at the row's right edge. Geometry mirrors the
    adjacent workspace and agent-preset selectors (28px height, 0 8px padding,
    4px gap, 13px/20px/500, the same hover/open fill) so the three read as one
-   control family. It opens a dialog, not a menu, so it carries no chevron. */
+   control family. It opens a dialog, not a menu, so it carries no chevron.
+
+   The seat carries the row inset that keeps this trigger's box 20px from the
+   card edge, mirroring the workspace selector's 20px left inset, and it is
+   the element the room probe pins. */
+.mrfw-heroEntrySeat {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 4px 0 0;
+}
+
+/* The row's options container is flex: none, so this entry cannot shrink the
+   way its neighbors do; hero-entry-room.ts measures the room the row leaves
+   after them and the sheet clamps the button to it. The label ellipsizes down
+   to HERO_ENTRY_LABEL_MIN_PX, then the icon-only form takes over. */
 .mrfw-heroEntry {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  max-width: min(100%, 240px);
+  max-width: min(240px, var(--mrfw-hero-entry-room, 240px));
   min-height: 28px;
-  margin: 0 4px 0 0;
+  margin: 0;
   padding: 0 8px;
   border: none;
   border-radius: var(--dsw-radius-sm);
@@ -131,14 +147,31 @@ export const STYLES = /* css */ `
   white-space: nowrap;
 }
 
-/* The hero row carries no container-type (upstream only gives the session
-   title row and the input card row containers), so the icon-only form is
-   viewport-driven. 560px is the host's own compact step
-   (InputBar.module.css); below it the entry is 28x28 and the name lives on
-   aria-label/title. If upstream later gives the row a container, switch this
-   to @container. */
+/* Icon-only form, and the probe's pin: data-measuring holds the seat at that
+   width for the one synchronous read of the row, so the controls before it
+   show their natural widths rather than the ones the label already squeezed.
+   Both states are the same 28x28 box, so the probe never changes the layout
+   it restores. */
+.mrfw-heroEntrySeat:is([data-measuring], [data-size='compact']) .mrfw-heroEntry {
+  width: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
+}
+
+.mrfw-heroEntrySeat:is([data-measuring], [data-size='compact']) .mrfw-heroEntryLabel {
+  display: none;
+}
+
+/* Fallback while the probe cannot identify the hero row (an upstream DOM
+   change, or a tree without layout): the entry keeps its content-sized max
+   width, and 560px — the host's own compact step in InputBar.module.css —
+   still degrades it to the icon alone. The measured form scopes this rule
+   out, so a real room always wins over the viewport approximation. */
 @media (max-width: 560px) {
-  .mrfw-heroEntry {
+  .mrfw-heroEntrySeat:not([data-size]) .mrfw-heroEntry {
     width: 28px;
     min-width: 28px;
     padding: 0;
@@ -146,7 +179,7 @@ export const STYLES = /* css */ `
     gap: 0;
   }
 
-  .mrfw-heroEntryLabel {
+  .mrfw-heroEntrySeat:not([data-size]) .mrfw-heroEntryLabel {
     display: none;
   }
 }

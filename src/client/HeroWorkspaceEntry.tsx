@@ -8,11 +8,17 @@
  * deliberately carries no chevron. The sidebar footer action keeps its own
  * trigger; both open the same `WorkspaceFoldersDialog` over the same channel.
  *
+ * The upstream options container is `flex: none`, so this entry cannot shrink
+ * the way its neighbors do; it measures the room the row leaves for it and
+ * clamps itself into it instead (see `hero-entry-room.ts`). Below
+ * `HERO_ENTRY_LABEL_MIN_PX` the label gives way to the icon alone.
+ *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/HeroWorkspaceEntry
  */
 
-import { useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { IconWorkspaceTree } from '../compat/client-icons.ts'
+import { heroEntryForm, heroRowOf, heroRowWidthTargets, measureHeroEntryRoom } from './hero-entry-room.ts'
 import type { PanelClient } from './panel-client.ts'
 import type { WorktreeClient } from './worktree-client.ts'
 import { WorkspaceFoldersDialog, type Translate } from './WorkspaceFoldersAction.tsx'
@@ -36,26 +42,62 @@ export interface HeroWorkspaceEntryProps {
 }
 
 /**
+ * The measured room as the stylesheet's width cap. React's property type has
+ * no index signature for custom properties, hence the cast of this literal.
+ */
+function roomStyle(room: number | null): CSSProperties | undefined {
+  if (room === null) return undefined
+  return { '--mrfw-hero-entry-room': `${room}px` } as CSSProperties
+}
+
+/**
  * The hero-row trigger plus the shared Workspace Folders dialog.
  * @param props - the panel face, the composed session reader, and the translator.
  * @returns the trigger and, while open, the dialog.
  */
 export function HeroWorkspaceEntry(props: HeroWorkspaceEntryProps): ReactNode {
   const [open, setOpen] = useState(false)
+  const [room, setRoom] = useState<number | null>(null)
+  const seat = useRef<HTMLSpanElement | null>(null)
+
+  // Probe after every commit: a workspace title or locale change moves the
+  // room without resizing the row, so width observation alone would go stale.
+  // `measureHeroEntryRoom` pins and restores the seat synchronously, before
+  // the browser paints, so the probe never shows the floor form.
+  useLayoutEffect(() => {
+    const element = seat.current
+    if (element === null) return
+    setRoom(measureHeroEntryRoom(element))
+  })
+
+  // Row-width observation for the changes the probe cannot be told about.
+  useLayoutEffect(() => {
+    const element = seat.current
+    if (element === null) return undefined
+    const row = heroRowOf(element)
+    if (row === null) return undefined
+    const observer = new ResizeObserver(() => { setRoom(measureHeroEntryRoom(element)) })
+    for (const target of heroRowWidthTargets(row, element)) observer.observe(target)
+    return () => { observer.disconnect() }
+  }, [])
+
+  const form = heroEntryForm(room)
   return (
     <>
-      <button
-        type="button"
-        className="mrfw-heroEntry"
-        title={props.t('action.title')}
-        aria-label={props.t('action.label')}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => { setOpen(value => !value) }}
-      >
-        <span className="mrfw-heroEntryLabel">{props.t('action.label')}</span>
-        <span className="mrfw-heroEntryIcon" aria-hidden="true"><IconWorkspaceTree size={16} /></span>
-      </button>
+      <span className="mrfw-heroEntrySeat" ref={seat} data-size={form} style={roomStyle(room)}>
+        <button
+          type="button"
+          className="mrfw-heroEntry"
+          title={props.t('action.title')}
+          aria-label={props.t('action.label')}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onClick={() => { setOpen(value => !value) }}
+        >
+          <span className="mrfw-heroEntryLabel">{props.t('action.label')}</span>
+          <span className="mrfw-heroEntryIcon" aria-hidden="true"><IconWorkspaceTree size={16} /></span>
+        </button>
+      </span>
       {open ? <WorkspaceFoldersDialog {...props} onClose={() => { setOpen(false) }} /> : null}
     </>
   )

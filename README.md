@@ -270,7 +270,7 @@ A 只在该 primary 的完整快照证明 common 身份、且 `<main>/.git` 仍�
 
 ### 面板
 
-侧栏底部的 **Folders** 入口，以及 DSH `0.2.1-alpha.3` 及更新运行时新会话页工作区行右端的同一入口，打开的是同一个对话框；它列出主根与附加根，支持添加、移除、别名、切换只读/可写、复制路径与在文件管理器中显示。新会话入口与相邻的工作区/模式选择器同一套几何与交互，但因为打开对话框而不是下拉菜单，**没有 chevron**；窗口宽度 `≤560px` 时只显示图标，名称仍由 `aria-label` / 悬停提示承载。首条消息发出后 hero 行消失，侧栏入口照常可用；旧运行时只有侧栏入口。
+侧栏底部的 **Folders** 入口，以及 DSH `0.2.1-alpha.3` 及更新运行时新会话页工作区行右端的同一入口，打开的是同一个对话框；它列出主根与附加根，支持添加、移除、别名、切换只读/可写、复制路径与在文件管理器中显示。新会话入口与相邻的工作区/模式选择器同一套几何与交互，但因为打开对话框而不是下拉菜单，**没有 chevron**；它随工作区行的可用宽度收缩（label 省略号），余量不足 88px 时只保留 28×28 图标（名称仍由 `aria-label` / 悬停提示承载），任何列宽下都不会越过输入卡右缘。首条消息发出后 hero 行消失，侧栏入口照常可用；旧运行时只有侧栏入口。
 
 ### 模型侧
 
@@ -337,7 +337,7 @@ A 只在该 primary 的完整快照证明 common 身份、且 `<main>/.git` 仍�
 - **上游选择 Landlock 的 Linux 主机上，受限 Full-access 需要 bwrap**：Landlock 的 allowlist 表达不了「全部可写、除这些根」，该组合改选 bubblewrap 拼出拒写边界；主机没有可用的 bwrap（未安装或禁用非特权 userns）时，存在任何拒写边界（只读根或受保护的 `$DSH_HOME`）的 Full-access 命令在启动前失败关闭。启用 bwrap，或在该主机上避免在 Full-access 下使用显式只读根（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
 - 附加根文件树由 **Files 页签的根选择器**承载：头部入口列出主根与全部附加根，旁边仍显示选中根的完整路径；选中附加根时逐字节复刻的上游 Files 树体接管树区（懒加载目录、原生行式与图标、watch 自动刷新、文件点击进宿主 viewer、header 原位提供手动刷新），header 右侧「在应用中打开」按钮同时由逐字节复刻的上游控件顶替、对选中根而非主根发起打开；切回主根即恢复原生视图；对话框回归纯管理。该接管依赖上游 `data-*` DOM 钩子，钩子失效时静默退化为原生观感（[ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](./docs/decisions/ADR-0016-files-tab-native-tree-fork.md)）。LSP 按附加文件所在根初始化独立 workspace；需要宿主配置对应语言服务器（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
 - 命令的输出文案为英文（host 侧没有活动语言信息），面板文案中英双语跟随界面语言。
-- Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：`sidebar.footer.action` 是所有受支持版本都提供的插槽，而 `sidebar.panellist`/`main` 不是。DSH `0.2.1-alpha.3` 起额外在新会话页的 `conversation.hero.options` 槽挂一个增量入口：它与相邻的工作区/模式选择器同几何、无 chevron，`≤560px` 视口下退化为 28×28 图标按钮；该槽在旧运行时缺席时注册静默不触发，侧栏入口不受影响（[ADR-0037](./docs/decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)）。
+- Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：`sidebar.footer.action` 是所有受支持版本都提供的插槽，而 `sidebar.panellist`/`main` 不是。DSH `0.2.1-alpha.3` 起额外在新会话页的 `conversation.hero.options` 槽挂一个增量入口：它与相邻的工作区/模式选择器同几何、无 chevron，按工作区行内实测的可用余量收缩，余量不足 88px 时退化为 28×28 图标按钮（上游 options 容器是 `flex: none`，插件不改 DSH，只测余量并夹住自己；探针认不出行结构时回落到 560px 视口兜底）；该槽在旧运行时缺席时注册静默不触发，侧栏入口不受影响（[ADR-0037](./docs/decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)）。
 
 ## dsh-ops 适配现状（受限能力说明）
 
