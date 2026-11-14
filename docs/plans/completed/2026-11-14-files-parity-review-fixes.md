@@ -1,6 +1,6 @@
 # 附加根 Files code review 修复（4 项）
 
-> 状态：进行中（2026-11-14）。本文件既是修复计划也是执行账本：每阶段结束把命令与结果写入 §7。
+> 状态：已完成（2026-11-14）。本文件既是修复计划也是执行账本：每阶段结束把命令与结果写入 §7。
 >
 > 分支：`feat/addtional-file-tree-1114`（PR [#56](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/56)，Draft）。
 > 关联：[ADR-0041](../../decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0042](../../decisions/ADR-0042-additional-root-row-context-menus.md)、
@@ -131,8 +131,17 @@
 | P1+P2 | 已完成 | `eb8a430` | `vitest run tests/client-search.spec.tsx tests/client-search-state.spec.ts` → 14 + 5 passed；新增回归：settings toggle 关闭保存草稿、remount 不新增 run 且折叠/scrollTop 保留、请求身份 6 字段独立、失败重试不会自动循环；`pnpm lint` 0；`pnpm typecheck` 0 |
 | P3 | 已完成 | `909ec2e` | `vitest run tests/command.spec.ts` → 75 passed（新增：`workspace-file/outside-workspace` 与 `search-failed` 原码透传、未知异常仍 `panel/internal`）；`tests/workspace-routing.spec.ts` 28 passed；typecheck 0 |
 | P4 | 已完成 | `83a87f5` | 客户端套件 137 passed（`client-search` 14、`client-search-state` 5、`client-search-ownership` 3、files 17、switcher 29、navigator 24、styles 35、bundle 10）；ownership 覆盖：session 隔离、tab 死亡清空该 tab 全部根记录、body unmount 保留；lint 0；typecheck 0 |
-| P5 | 进行中 | 待推送 | 全门禁与 CI 结果见下方"最终证据" |
-| P6 | 已完成 | `P6 提交` | ownership 3 passed；变异（store 提到 factory 作用域）时隔离用例 1 failed，还原后 3 passed；lint/typecheck 绿 |
+| P5 | 已完成 | `9708d81`、`6ca20ac` | 全门禁：`pnpm lint` 0、`typecheck` 0、`build` 绿、`docs:check` 0 errors、`pack:check` 绿；`pnpm test` 1703 passed（17 个既有 sandbox-IPC authority/lease 失败，基线同因）；PR #56 的 CI 在 `64a4868` 上 31/31 checks 全绿（run [43599694607](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43599694607)） |
+| P6 | 已完成 | `64a4868` | ownership 3 passed；变异（store 提到 factory 作用域）时隔离用例 1 failed，还原后 3 passed；lint/typecheck 绿 |
 
 > 说明：P1 与 P2 共用 `pane.tsx`/`search-state.ts` 的同一处 effect 语义，拆成两个提交会让中途一个提交的测试红，故合并为 `eb8a430`；
 > P3/P4 各自单提交。
+
+### 最终证据（2026-11-14）
+
+- 分支 `feat/addtional-file-tree-1114`，PR [#56](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/56)（已由作者从 Draft 转为可评审）。
+- 本批提交：`00c29e8`（计划）、`eb8a430`（R1+R2）、`909ec2e`（R3）、`83a87f5`（R4）、`9708d81`（设计说明/阶段证据）、
+  `6ca20ac`（旧 lane 竞态测试修正）、`64a4868`（R5 测试边界）。
+- CI：head `64a4868` 的 run [43599694607](' + RUN + ') 在 releases + 24 条 release/image verify 中全部通过，gate 成功，合计 31/31 checks；
+  更早两条 head（`420849b`、`430481a`）同样全绿，仅本批 review 修复产生的新 head 需要重新验证一次矩阵。
+- 本机保留的 17 个沙箱 IPC 失败与基线 `8c09c7b` 一致，CI 的非沙箱 runner 全部通过，详见[完成计划](../completed/2026-11-14-additional-root-files-parity.md) §7 的"已知本地环境限制"。
