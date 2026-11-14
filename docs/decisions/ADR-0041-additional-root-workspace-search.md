@@ -89,6 +89,10 @@ DSH 0.2.2-rc.2 给右侧 Files 页签加了工作区搜索：搜索栏、结果�
 - **记录所有权**：搜索记录随 session 的 inject product 创建（每 session 一份，不跨会话共享），
   并带 `forgetTab(tabId)`；adapter 的 owner 死亡清理在 `endTakeover(key, true)` 后调用它，
   body-only unmount（`end(key)`）保留记录。session 结束时记录随 product 回收。
+- **页头 reload 与活动搜索**：reload 先保持 `filesTree.face.refresh(tabId)` 的树内 re-list；展示搜索结果时
+  `FilesTree` 未挂载、face 无可刷新节点，故同一按钮再对搜索记录调用 `store.refresh(key)`：非空查询会
+  清空 `settledKey` 并递增 `attempt`（旧结果与位置保留到新答案结算），使搜索无需改查询/筛选即可刷新；
+  空查询不动作，树由 face 的 re-list 负责。
 - **失败码**：search 端点的 host 错误在通道边界保留上游 `workspace-file/*` 词汇（白名单集合），
   客户端据此本地化；未知异常仍归一 `panel/internal`。
 
