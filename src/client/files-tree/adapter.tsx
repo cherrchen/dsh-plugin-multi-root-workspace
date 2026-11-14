@@ -362,10 +362,6 @@ export function createFilesTreeSeats(
   const readService = <T,>(name: string): T | undefined =>
     (ctx as unknown as { get(key: string): unknown }).get(name) as T | undefined
   const menuKinds: FilesMenuKinds = () => readService<ClientMenuRegistry>('contextMenus')?.registeredKinds?.getSnapshot?.()
-  // The search records are pane state, not listing state: they live beside the
-  // forked store (which stays byte-identical to upstream) and survive a body
-  // remount through the inject product's lifetime.
-  const searchStore = createSearchPaneStore()
   // The host's own search call is the structural probe for the whole feature:
   // the endpoint exists in this same package, so a host that lacks the Remote
   // method lacks the feature rather than answering a failure.
@@ -399,6 +395,11 @@ export function createFilesTreeSeats(
     // an opened file causes (the file tab takes the pane, the Files body
     // unmounts, and component state would otherwise reset to 'primary').
     const selection = createSnapshotStore<TreeSelection>({})
+    // The pane search records are pane state, not listing state: they live at
+    // the inject product's scope — one instance per session — so they survive
+    // the body remount an opened file causes but are not shared across
+    // sessions, and the owner-death cleanup below drops a closed tab's trees.
+    const searchStore = createSearchPaneStore()
     interface Held {
       readonly controller: AbortController
       readonly root: string
@@ -429,6 +430,10 @@ export function createFilesTreeSeats(
         if (!alive()) {
           watchers.delete(key)
           endTakeover(key, true)
+          // The tab is gone, not merely hidden: releasing its result trees is
+          // the difference between a body remount (which keeps them) and a
+          // closed pane (which must not accumulate for the plugin's lifetime).
+          searchStore.forgetTab(key)
         }
       }
       if (watchers.size === 0) {

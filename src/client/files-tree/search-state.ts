@@ -186,6 +186,13 @@ export interface SearchPaneStore {
    */
   retry(key: string): void
   /**
+   * Drop every root's record for one tab — its owner is gone (the tab closed,
+   * or its session ended). Body-only unmounts must NOT call this: the record
+   * is what restores the search when the Files body is drawn again.
+   * @param tabId - the pane's dockkit identity.
+   */
+  forgetTab(tabId: string): void
+  /**
    * Drop one pane root's record — the pane or the root is gone.
    * @param key - the record key.
    */
@@ -231,6 +238,13 @@ export function createSearchPaneStore(): SearchPaneStore {
     scrolled: (key, scrollTop) => { write(key, { scrollTop }) },
     retry: key => {
       write(key, { pending: true, result: undefined, expanded: [], scrollTop: 0, settledKey: '', attempt: read(key).attempt + 1 })
+    },
+    forgetTab: tabId => {
+      const prefix = `${tabId}\u0000`
+      const kept = Object.fromEntries(
+        Object.entries(snapshot.getSnapshot()).filter(([key]) => !key.startsWith(prefix)),
+      )
+      snapshot.set(kept)
     },
     forget: key => {
       const { [key]: _dropped, ...rest } = snapshot.getSnapshot()

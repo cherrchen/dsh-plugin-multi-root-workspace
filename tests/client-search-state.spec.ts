@@ -94,3 +94,26 @@ describe('the search pane store', () => {
     expect(store.state(key).expanded.length).toBe(expanded.length - 1)
   })
 })
+
+describe('the per-tab cleanup', () => {
+  it('drops every root of one tab and keeps the other tabs', () => {
+    const store = createSearchPaneStore()
+    const tabA = 'tab-a'
+    const tabB = 'tab-b'
+    const keyA1 = searchStateKey(tabA, '/repos/a')
+    const keyA2 = searchStateKey(tabA, '/repos/b')
+    const keyB = searchStateKey(tabB, '/repos/a')
+    for (const key of [keyA1, keyA2, keyB]) {
+      store.barOpen(key, true)
+      store.setQuery(key, 'config')
+    }
+    expect(Object.keys(store.snapshot.getSnapshot())).toHaveLength(3)
+
+    store.forgetTab(tabA)
+    expect(store.state(keyA1)).toMatchObject({ barOpen: false, query: '' })
+    expect(store.state(keyA2)).toMatchObject({ barOpen: false, query: '' })
+    expect(store.state(keyB)).toMatchObject({ barOpen: true, query: 'config' })
+    expect(Object.keys(store.snapshot.getSnapshot())).toEqual([keyB])
+  })
+})
+
