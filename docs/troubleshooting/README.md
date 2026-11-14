@@ -24,6 +24,7 @@ English: [README.en.md](./README.en.md)
 - [根目录登记被另一个 DSH 进程占用](./registry-owned-by-another-process.md) — 两进程共用 `$DSH_HOME` 时的 fail-closed lease 与接管方式。
 - [DSH 版本不在支持矩阵上](./unsupported-dsh-release.md) — `unsupported` / `mixed` / `incomplete` 三种判定、provider 不启动的原因，以及人工提升新版本的流程。
 - [安装停在构建授权](./install-stops-at-build-approval.md) — 首次 `dsh plugin add` 因 `koffi` 的构建脚本被 pnpm 拦下而失败，以及那一次 `allowBuilds` 表态怎么回。
+- [DSH Desktop 安装后缺少 bundle 登记](./desktop-install-missing-bundle.md) — 插件页只写 `dependencies`、热启用撞上旧 provider 的重复注册，以及用 Desktop 自带 CLI 做 `remove` + `add` 的恢复路径。
 - [Files 页签根选择器退化](./files-switcher-degraded.md) — 上游 `data-files-*` 钩子不是槽位契约；选择器退回菜单形态时的三态目检与修法。
 - [启动器报 profile-core-mixed / profile-core-copy](./profile-core-mixed.md) — 旧版把共享上游包发成 `dependencies` 导致 profile 里出现第二份单例的根因与修法。
 

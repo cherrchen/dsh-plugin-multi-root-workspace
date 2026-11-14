@@ -26,12 +26,14 @@ Current released version: `v0.1.19`. The user-visible changes of each version li
 
 ## Quick Start
 
-The plugin is published on [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace). Open the **Plugins** page in the sidebar, choose **Add plugin**, and paste the package name `@dsh-electron/dsh-plugin-multi-root-workspace` — or install it in two commands:
+The plugin is published on [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace). For CLI profiles (`web`, `headless`, ...), install it in two commands:
 
 ```sh
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 dsh --profile web       # pick the --profile for how you launch DSH; see its docs for the values
 ```
+
+**DSH Desktop users**: if the Plugins page says the plugin is installed but `dsh.profile.bundles` does not list it, or enabling it fails with duplicate `fs` / `sandbox` registration, follow the DSH Desktop steps under [Installation](#installation) and use Desktop's bundled `dsh` before starting Desktop cold.
 
 Once it is up, the **Folders** action (`🗂`) appears at the sidebar foot; on DSH `0.2.1-alpha.3` and newer, the same entry also appears at the right edge of the New Session hero row (same height and type scale as the adjacent workspace and mode selectors, no dropdown chevron, icon-only in narrow windows) — or, straight in a session:
 
@@ -62,9 +64,28 @@ The plugin does not start — as if it were not installed — when the DSH relea
 
 ## Installation
 
-The same install is available without the CLI: open **Plugins** in the sidebar, choose **Add plugin**, and enter the npm package name (or a Git address, tarball, or absolute local path).
+### DSH Desktop: install or recover with the bundled CLI
 
-`dsh plugin` supports four install sources. All commands below use the web profile as the example; for the Electron desktop swap `--profile web` for `--profile desktop` — the install method is the same.
+On DSH Desktop the Plugins page and the CLI are **not equivalent entry points**: **Add plugin** may write only `dependencies`, while the separate **Enable now** action writes `dsh.profile.bundles`; enabling the plugin hot in a running Host can also collide with the old providers.
+
+1. Fully quit Desktop, including the tray icon.
+2. In a terminal, use the `dsh` under `<Desktop install directory>/resources/runtime/cli/bin` (add that directory to `PATH` if needed). Fresh install:
+   ```sh
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.19
+   ```
+3. Already installed but missing the bundle entry: `remove`, then `add` (re-running only `add` does not register it):
+   ```sh
+   dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.19
+   ```
+4. Open `$DSH_HOME/profiles/desktop/package.json` (normally `~/.dsh/profiles/desktop/package.json` when `DSH_HOME` is unset) and confirm `dsh.profile.bundles` contains the package.
+5. Start Desktop again (cold start).
+
+If the first install reports `[ERR_PNPM_IGNORED_BUILDS]`, add `allowBuilds` as described in [the build-approval note](./docs/troubleshooting/install-stops-at-build-approval.md), then run `remove` + `add`. The hot-enable cause, reproduction, and the investigation of profile writes are in [troubleshooting](./docs/troubleshooting/desktop-install-missing-bundle.md) (Chinese).
+
+### Four install sources for CLI profiles
+
+`dsh plugin` supports four install sources. All commands below use the web profile as the example; `headless` and other CLI profiles work the same way. For DSH Desktop use the `dsh` and `desktop` profile from the previous section; a `dsh` installed from npm cannot manage Desktop's reserved profile.
 
 | Source | Command | Notes |
 | --- | --- | --- |

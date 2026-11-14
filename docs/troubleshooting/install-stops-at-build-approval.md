@@ -64,3 +64,4 @@ dsh: pnpm failed in profile directory <$DSH_HOME>/profiles/<name>
 
 - [README §安装](../../README.md)（四种安装来源与 `allowBuilds` 说明）
 - [故障排查：DSH 版本不在支持矩阵上](./unsupported-dsh-release.md)（装完之后插件仍不生效的另一种原因）
+- [故障排查：DSH Desktop 安装后缺少 bundle 登记](./desktop-install-missing-bundle.md)（Desktop 自带 CLI 的 `remove` + `add` 恢复路径）
