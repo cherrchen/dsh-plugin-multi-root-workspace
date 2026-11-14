@@ -11,6 +11,12 @@
  * upstream edits copy, the string values follow automatically; only a NEW key
  * requires extending the union below.
  *
+ * The `search.*` and `settings.*` groups, plus `emptyHidden`, arrived with
+ * `0.2.2-rc.2`'s workspace search and hidden-entry filtering. Every one of
+ * them is read only on a host whose `workspaceFiles.search` probe passes: the
+ * search UI and its settings panel never mount on an older release, so no
+ * older composition is asked to resolve them.
+ *
  * Sync: `SidebarFilesKey` must equal `keyof typeof zh` in upstream's
  * `locales.ts`. See FORK.md.
  */
@@ -27,6 +33,7 @@ export type SidebarFilesKey =
   | 'guide.description'
   | 'loading'
   | 'empty'
+  | 'emptyHidden'
   | 'truncated'
   | 'noWorkspace'
   | 'reload'
@@ -42,6 +49,37 @@ export type SidebarFilesKey =
   | 'error.outsideWorkspace'
   | 'error.notDirectory'
   | 'error.unavailable'
+  | 'search.placeholder'
+  | 'search.settings'
+  | 'search.clear'
+  | 'search.showHidden'
+  | 'search.results'
+  | 'search.empty'
+  | 'search.emptyHint.hidden'
+  | 'search.emptyHint.excluded'
+  | 'search.emptyHint.both'
+  | 'search.emptyHint.ignored'
+  | 'search.emptyHint.hiddenIgnored'
+  | 'search.emptyHint.excludedIgnored'
+  | 'search.emptyHint.all'
+  | 'search.emptyHint.label'
+  | 'search.truncated'
+  | 'search.incomplete'
+  | 'search.failed'
+  | 'search.retry'
+  | 'settings.title'
+  | 'settings.description'
+  | 'settings.respectGitignore'
+  | 'settings.add'
+  | 'settings.close'
+  | 'settings.restore'
+  | 'settings.remove'
+  | 'settings.toggle'
+  | 'settings.invalid.empty'
+  | 'settings.invalid.nul'
+  | 'settings.invalid.absolute'
+  | 'settings.invalid.parent'
+  | 'settings.invalid.glob'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {

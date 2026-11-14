@@ -53,6 +53,8 @@ async function mount(options: {
   sessionPersistence?: { stat: (id: string, options?: { signal?: AbortSignal }) => Promise<unknown> } | false
   /** The row's config, as the patch supplies it (`dshHome` for isolate-profiles). */
   config?: { dshHome?: string }
+  /** A `workspaceFiles` service face; its `search` is the seam the search endpoint calls. */
+  workspaceSearch?: (scope: unknown, request: unknown, signal: AbortSignal) => Promise<unknown>
 } = {}): Promise<RegistryStack> {
   const stack = await mountRegistryStack(storeRoot)
   stacks.push(stack)
@@ -102,6 +104,9 @@ async function mount(options: {
     } as never)
   }
   const fiber = await ctx.plugin(CommandModule, options.config ?? {})
+  if (options.workspaceSearch !== undefined) {
+    ctx.provide('workspaceFiles', { search: options.workspaceSearch } as never)
+  }
   contexts.push(ctx)
   void fiber
   if (options.withConnection === true && options.sessions !== false) {
@@ -154,7 +159,13 @@ async function run(rawInput: string, name = 'workspace-folders'): Promise<{ kind
 /** What one channel call answered. The value is shaped per endpoint. */
 interface PanelAnswer {
   readonly ok: boolean
-  readonly value?: Partial<RootsView> & Partial<{ revealed: string }>
+  readonly value?: Partial<RootsView> & Partial<{
+    revealed: string
+    root: string
+    matches: readonly unknown[]
+    truncated: boolean
+    incomplete: boolean
+  }>
   readonly error?: { code: string }
 }
 
@@ -1188,3 +1199,132 @@ it.each(['duplicate', 'authority-disconnected'])('preserves shared authority err
     expect(await callPanel('add', { sessionId: PANEL_SESSION, path: fixture.outside })).toMatchObject({ ok: false, error: { code, message } })
   } finally { spy.mockRestore() }
 })
+
+describe('the additional-root search endpoint', () => {
+  /** Add one additional root and answer its registration id. */
+  async function addRoot(stack: RegistryStack, name: string): Promise<{ readonly id: string; readonly path: string }> {
+    const directory = join(fixture.base, name)
+    mkdirSync(directory)
+    const statuses = await stack.registry.add(primary, { path: directory })
+    const status = statuses.find(row => row.path === canonicalPath(directory))
+    if (status === undefined) throw new Error('the root was not registered')
+    return { id: status.id, path: status.path }
+  }
+
+  /** The answer of one search call, with the endpoint's own value type. */
+  async function search(payload: Record<string, unknown>): Promise<PanelAnswer> {
+    return await callPanel('search', { sessionId: PANEL_SESSION, ...payload })
+  }
+
+  it('searches a registered additional root, mapping the query and the answer', async () => {
+    const captured: Array<{ readonly scope: unknown; readonly request: unknown }> = []
+    const stack = await mount({
+      withConnection: true,
+      workspaceSearch: async (scope, request) => {
+        captured.push({ scope, request })
+        return { matches: [{ path: 'src/a.ts', type: 'file' }], truncated: true, incomplete: false }
+      },
+    })
+    const root = await addRoot(stack, 'searchme')
+    const answer = await search({
+      rootId: root.id,
+      query: '  a.ts  ',
+      excludedPaths: ['dist'],
+      includeHidden: true,
+    })
+    expect(answer.ok).toBe(true)
+    expect(answer.value).toEqual({
+      root: root.path,
+      matches: [{ path: 'src/a.ts', type: 'file' }],
+      truncated: true,
+      incomplete: false,
+    })
+    // The endpoint hands the wrapped service the additional root plus the
+    // host-internal primary marker; the wrapper, not this endpoint, admits it.
+    expect(captured).toEqual([{
+      scope: { sessionId: PANEL_SESSION, workspaceRoot: root.path, primaryRoot: primary },
+      request: { query: 'a.ts', excludedPaths: ['dist'], includeHidden: true, respectGitignore: true },
+    }])
+  })
+
+  it('refuses a blank query or a missing root id before any search runs', async () => {
+    let searches = 0
+    const stack = await mount({
+      withConnection: true,
+      workspaceSearch: async () => { searches += 1; return { matches: [], truncated: false, incomplete: false } },
+    })
+    const root = await addRoot(stack, 'blank')
+    expect((await search({ rootId: root.id, query: '   ' })).error?.code).toBe('invalid-ref')
+    expect((await search({ query: 'a' })).error?.code).toBe('invalid-ref')
+    expect((await search({ rootId: '', query: 'a' })).error?.code).toBe('panel/bad-request')
+    expect(searches).toBe(0)
+  })
+
+  it('refuses an unregistered root id and an unavailable directory before any search runs', async () => {
+    let searches = 0
+    const stack = await mount({
+      withConnection: true,
+      workspaceSearch: async () => { searches += 1; return { matches: [], truncated: false, incomplete: false } },
+    })
+    expect((await search({ rootId: 'nope', query: 'a' })).error?.code).toBe('not-found')
+
+    const missing = await addRoot(stack, 'later-missing')
+    rmSync(missing.path, { recursive: true, force: true })
+    expect((await search({ rootId: missing.id, query: 'a' })).error?.code).toBe('root-unavailable')
+    expect(searches).toBe(0)
+  })
+
+  it('reports search-unavailable on a host without the upstream search method', async () => {
+    const stack = await mount({ withConnection: true })
+    const root = await addRoot(stack, 'old-host')
+    const answer = await search({ rootId: root.id, query: 'a' })
+    expect(answer.ok).toBe(false)
+    expect(answer.error?.code).toBe('search-unavailable')
+  })
+
+  it('relays an upstream workspace-file refusal instead of normalizing it', async () => {
+    // The search endpoint runs the upstream implementation in-process, so the
+    // admission refusal and the search's own failures arrive as RemoteErrors
+    // from the workspace-file vocabulary the panel localizes.
+    const { RemoteError } = await import('@deepseek-ai/dsh-typert-protocol')
+    const stack = await mount({
+      withConnection: true,
+      workspaceSearch: async () => {
+        throw new RemoteError('workspace-file/outside-workspace', '"x" is no longer in this workspace', { path: 'x' })
+      },
+    })
+    const root = await addRoot(stack, 'denied')
+    const answer = await search({ rootId: root.id, query: 'a' })
+    expect(answer.ok).toBe(false)
+    expect(answer.error?.code).toBe('workspace-file/outside-workspace')
+    expect(answer.error?.message).toBe('"x" is no longer in this workspace')
+  })
+
+  it('relays search-failed and still normalizes an unrecognized rejection', async () => {
+    const { RemoteError } = await import('@deepseek-ai/dsh-typert-protocol')
+    let call = 0
+    const stack = await mount({
+      withConnection: true,
+      workspaceSearch: async () => {
+        call += 1
+        if (call === 1) throw new RemoteError('workspace-file/search-failed', 'Workspace file search requires a subprocess provider', {})
+        throw new Error('boom')
+      },
+    })
+    const root = await addRoot(stack, 'search-failures')
+    const failed = await search({ rootId: root.id, query: 'a' })
+    expect(failed.ok).toBe(false)
+    expect(failed.error?.code).toBe('workspace-file/search-failed')
+
+    const unknown = await search({ rootId: root.id, query: 'b' })
+    expect(unknown.error?.code).toBe('panel/internal')
+  })
+
+  it('keeps the panel session authority and rejects an unknown wire field', async () => {
+    await mount({ withConnection: true, workspaceSearch: async () => ({ matches: [], truncated: false, incomplete: false }) })
+    expect((await callPanel('search', { rootId: 'x', query: 'a' })).error?.code).toBe('panel/bad-request')
+    expect((await callPanel('search', { sessionId: 'ghost', rootId: 'x', query: 'a' })).error?.code).toBe('session-not-found')
+    expect((await search({ rootId: 'x', query: 'a', rootPath: primary })).error?.code).toBe('panel/bad-request')
+  })
+})
+

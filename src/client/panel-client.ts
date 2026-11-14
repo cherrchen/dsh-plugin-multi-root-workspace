@@ -24,6 +24,7 @@ import {
   parseErrorView,
   parseRevealedView,
   parseRootsView,
+  parseSearchView,
   type PanelEndpoint,
   type PanelRequest,
   type PanelResponseMap,
@@ -115,7 +116,11 @@ export function createPanelClient(connection: ConnectionHandle): PanelClient {
  * @throws {PanelError} `panel/bad-response` when the value is not that shape.
  */
 function expectShape<E extends PanelEndpoint>(endpoint: E, value: unknown): PanelResponseMap[E] {
-  const parsed = endpoint === 'reveal' ? parseRevealedView(value) : parseRootsView(value)
+  // The endpoint union is closed here, so the two answers that are not a roots
+  // view are named explicitly; everything else keeps the roots-view contract.
+  const parsed = endpoint === 'reveal' ? parseRevealedView(value)
+    : endpoint === 'search' ? parseSearchView(value)
+      : parseRootsView(value)
   if (!parsed.ok) throw new PanelError('panel/bad-response', parsed.message)
   return parsed.value as PanelResponseMap[E]
 }

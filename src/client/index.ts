@@ -46,6 +46,7 @@ import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction
 import { OPEN_IN_APP_NS, createOpenInAppAdapter } from './open-in-app/adapter.tsx'
 import { OpenInAppToast } from './open-in-app/open-toast.tsx'
 import { FILES_TREE_NS, createFilesTreeSeats, createFilesTreeSurface } from './files-tree/adapter.tsx'
+import { createSearchPreferenceBook } from './files-tree/search-preferences.ts'
 import { NavigatorRetarget } from './files-tree/navigator.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -203,7 +204,7 @@ export function apply(ctx: ClientContext): void {
   // Files registration makes, plus the session-bound open route. The fork
   // binds upstream's `sidebarFiles` namespace so its rows say exactly what
   // the native tree says.
-  const filesTreeSeats = createFilesTreeSeats(ctx)
+  const filesTreeSeats = createFilesTreeSeats(ctx, { panel, preferences: createSearchPreferenceBook(readBrowserStorage()) })
   const filesTreeT = ctx.locale.bind(FILES_TREE_NS)
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
@@ -296,7 +297,7 @@ export function apply(ctx: ClientContext): void {
     // framework-stable prop or an apply-level constant, so the switcher's
     // takeover effect — which keys on the selection, not the wrapper —
     // never restarts because of it. `undefined` means the fork cannot mount.
-    const filesTree = createFilesTreeSurface(props, filesTreeT)
+    const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeSeats)
     return absolutePath === undefined
       ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, compact: true })
       : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
@@ -317,7 +318,7 @@ export function apply(ctx: ClientContext): void {
     inject: filesTreeSeats.inject,
   }, function DocumentActionsOccupant(props) {
     const absolutePath = (props as { readonly absolutePath?: string } | undefined)?.absolutePath
-    const filesTree = createFilesTreeSurface(props, filesTreeT)
+    const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeSeats)
     // No host path or no fork → no marker at all: the native navigator
     // keeps its tree untouched either way.
     if (absolutePath === undefined || filesTree === undefined) return null
@@ -344,6 +345,22 @@ export function apply(ctx: ClientContext): void {
     dialog: dialogController,
     t,
   })
+}
+
+/**
+ * The browser storage the search preferences persist in.
+ *
+ * Storage can be denied outright (private browsing, a sandboxed frame); the
+ * preference book then keeps its entries in memory for this page's lifetime
+ * instead of failing the client graph.
+ * @returns the storage, or `undefined` where this window has none.
+ */
+function readBrowserStorage(): Storage | undefined {
+  try {
+    return typeof window === 'undefined' ? undefined : window.localStorage
+  } catch {
+    return undefined
+  }
 }
 
 /**

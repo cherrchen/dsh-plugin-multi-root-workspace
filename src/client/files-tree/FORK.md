@@ -14,7 +14,11 @@ which is always the primary root and cannot be re-pointed.
   controlled `sidebar.files.tree` Factory. On its `data-files-page` layout,
   this plugin adapts its listing state to that public Factory, so the host owns
   the row rendering and accessories; the legacy rows are its fallback. The
-  host's context-menu integration is not forked. The alpha.3 preview-side
+  host's context-menu integration is consumed through the root-provided
+  `useContextMenu` prop rather than forked (ADR-0042). From `0.2.2-rc.2` the
+  fork also carries its own workspace search surface for additional roots
+  (ADR-0041): a toggle in the switcher header plus a bar/results/settings view
+  that draws results with the same tree code. The alpha.3 preview-side
   navigator (`sidebar.files.navigator` inside the document preview) keeps a
   tree rooted at the session `cwd` only; `navigator.tsx` retargets its body
   when the previewed file sits under an additional root, reusing this fork —
@@ -36,6 +40,9 @@ which is always the primary root and cannot be re-pointed.
 | `face.ts` | the hold/record lifecycle delta — `hold`/`release` keep the store bucket while a body is hidden, `start`/record-abort reseed/forget it (see *Intentional deltas*) |
 | `store.ts` | none — byte-identical |
 | `FilesBody.module.css` | none — kept verbatim as the diffable source; its rules are copied into `src/client/styles.ts` renamed to `mrfw-ft*` |
+| `tree-view.tsx` | upstream's row definitions (`Entry`/`Level`/`TreeContext`/`orderEntries`/`failureLine`) moved out of `FilesTree.tsx` so the listed tree and the search results draw with the same code; the documented deltas add `highlight` marks, `hiddenOnly`/`unmatched` lines, and the row context-menu spread (see *Intentional deltas*) |
+| `hidden.ts` | plugin-owned: upstream's draw-time hidden-entry filtering (`workspaceEntries`/`workspaceDirectories` with `showHidden`, hidden-directory subtree rule, "only hidden entries" state) applied to the fork's absolute-path store; no upstream file to copy from, but its semantics are pinned to `ui-sidebar-files` `workspace-tree.ts` at the same pin |
+| `pane.tsx` + `search-rules.ts`/`search-tree.ts`/`search-preferences.ts`/`search-state.ts`/`search-client.ts`/`context-menu.ts` | plugin-owned search and menu surface; the first three are semantic copies of upstream's `0.2.2-rc.2` modules (see *Search surface: sync obligations*), the rest are this plugin's own |
 
 `FilesTree.tsx` is **not** verbatim: it is upstream's `FilesBody.tsx` with
 the exported shell function rewritten and the file row's reveal marks
@@ -177,6 +184,23 @@ upstream binds inside it arrives as a prop instead:
   instead of `./FilesBody.module.css` because this toolchain resolves real
   files, not CSS-module virtual modules (same one-line delta as the
   open-in-app fork).
+- **Row context menus** (`0.2.2-alpha.3+`): `TreeView` forwards the pane's
+  `menu` seat into the Factory input's `rowTriggerProps` (and spreads the same
+  handlers on the legacy rows). The target is `{ kind, value: { sessionId,
+  path: <absolute path> } }`: a workspace-relative path would resolve against
+  the primary root in every host contribution (ADR-0042).
+- **Viewer verdicts** (`0.2.2-alpha.3+`): the Factory input's `canOpen` is
+  supplied from `ctx.sidebarRightTabs.candidates`, re-read whenever the
+  registry notifies; `TreeView` forwards it, the legacy rows keep every file
+  openable (the pre-Factory behavior).
+- **Search marks** (`0.2.2-rc.2+`): `Name` wraps the occurrences of the search
+  text in `<mark class="mrfw-ftMatch">`; `nativeTreeInput` also forwards the
+  Factory's own `highlight`. Names are otherwise upstream's.
+- **Selection lines** (`0.2.2-rc.2+`): a directory whose entries are a search
+  selection draws nothing instead of "empty" (`omitted: 'unmatched'`); a listed
+  directory whose entries were all filtered as hidden draws the "only hidden
+  entries" line (`omitted: 'hidden'`, from `hidden.ts`). Both use upstream's
+  own strings through the live locale namespace.
 
 ## What upstream keeps owning
 
@@ -193,12 +217,48 @@ upstream binds inside it arrives as a prop instead:
   `[data-files-search-toggle]` button. Their search root is the Session cwd,
   so while a takeover shows another root they are hidden together with the
   native body (`src/client/styles.ts`); primary-root browsing keeps them
-  untouched. Re-check those selectors whenever the upstream navigator gains
-  a new `data-files-search*` hook.
+  untouched. The additional root's own search lives in `pane.tsx` behind
+  `[data-mrfw-files-search-toggle]`/`[data-mrfw-files-search]` (deliberately
+  NOT the `data-files-search*` hooks, which the hide rules target), and the
+  preview navigator keeps no search at all — its search state is driven by
+  upstream's own `FileNavigator` face, which the retarget does not join.
+  Re-check those selectors whenever the upstream navigator gains a new
+  `data-files-search*` hook.
 - The `sidebarFiles` dictionaries — the fork binds, never registers.
 - The session-scope `data-files-*` DOM contract — the fork reads those hooks
   (`closest('[data-files-root]')`, `closest('[data-dockkit-content]')`) but
   never writes `data-files-root`/`data-files-body`.
+
+## Search surface: sync obligations
+
+The additional-root search is plugin-owned UI over upstream semantics, not a
+verbatim copy. Three modules are **semantic** copies of upstream's
+`0.2.2-rc.3` `ui-sidebar-files` sources and must be diffed whenever the pin
+moves (upstream may change rule validation, ignore handling, or the
+relative-path/tree construction):
+
+| Module | Upstream source | Copy delta |
+| --- | --- | --- |
+| `search-rules.ts` | `search-rules.ts` | logic verbatim; JSDoc condensed |
+| `search-tree.ts` | `search-tree.ts` | `buildSearchTree` returns this fork's `FilesTabState` and imports `childPath` from `face.ts` |
+| `search-preferences.ts` | `search-preferences.ts` | plugin-owned Storage seam (same localStorage key and stored format) instead of `@deepseek-ai/dsh-client-store` persist; no upstream runtime import |
+
+Everything else is ours: `search-state.ts` (per-(tab, root) records, plus the
+request identity that lets a body remount reuse a settled answer and
+`forgetTab` for owner death), `search-client.ts` (the channel call's
+request/answer), `pane.tsx` (bar, status, results, notes, settings popover,
+keyboard) and `context-menu.ts` (the structural `useContextMenu` adapter).
+One store belongs to one session's inject product — records are not shared
+across sessions — and the adapter's owner-death cleanup calls `forgetTab`
+when a tab really closes; a body-only unmount keeps the record (that is what
+restores expansion and scroll after a file view). Their visual rules are copied from
+upstream's `FilesBody.module.css` search block into `styles.ts` as
+`mrfw-fs*` (and `.match`/`.hidden`/`.inactive` as `mrfw-ft*`), keeping only
+`var(--dsw-*)` tokens. Behavior that must be re-checked against upstream:
+per-keystroke search with abort, blank query ends the search, `pending` keeps
+the last result except a failed one, a new result starts expanded at its top,
+preference changes re-run the query, and the eye toggle filters the listed tree
+as well as the search.
 
 ## Sync procedure (when the dev pin moves)
 
@@ -236,3 +296,17 @@ below. The Factory fallback must keep older or incomplete compositions usable.
 7. Re-probe the glyph names: if upstream's named imports change, update
    `primitives.ts`'s candidate lists (and the gate) rather than the
    component.
+8. Diff upstream `FileTree.tsx` against `tree-view.tsx`: the row bodies,
+   `Name`/`<mark>`, the `omitted` handling, and the input names
+   (`rowTriggerProps`/`canOpen`/`highlight`) must match the new pin; re-copy
+   the row definitions and re-apply the documented deltas, never hand-edit
+   inside them.
+9. Diff upstream `FileNavigator.tsx`'s search half against `pane.tsx`
+   (bar/status/results/notes/keyboard/settings) and upstream
+   `SearchSettings.tsx` against the settings view; update `styles.ts`'s
+   `mrfw-fs*` block from the same pin's `FilesBody.module.css`.
+10. Diff upstream `search-rules.ts`/`search-tree.ts`/`search-preferences.ts`
+    against the local copies; a semantic change means the copies move too.
+    Re-check the `data-mrfw-files-search*` DOM contract against the hide rules
+    in `styles.ts` — the takeover must keep the native bar and status hidden
+    while drawing its own.

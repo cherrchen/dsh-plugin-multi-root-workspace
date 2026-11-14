@@ -369,6 +369,32 @@ export const STYLES = /* css */ `
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/* The takeover's own search toggle, standing exactly where the native one sat
+   (after the reload): the same upstream .tool recipe verbatim as the reload
+   above — 28px hit area, 15px glyph from the icon prop, secondary voice, and
+   the same hover fill. It renders only where the host exposes workspace
+   search, and it opens the forked bar, not the native one. */
+.mrfw-switcherSearch {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mrfw-switcherSearch:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
 /* The document preview's navigator aside, while the retarget holds it: the
    native body hides (it lists the session's primary root regardless of the
    previewed file), and the forked tree — portaled in as the aside's sibling
@@ -409,14 +435,15 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
 }
 
 /* ── files-tree fork (verbatim rules, renamed classes) ─────────────────────
-   Copied from upstream's FilesBody.module.css (ui-sidebar-files @
-   0.2.2-alpha.2) with local names mapped to mrfw-ft* so the rules cannot
-   collide with host DOM — and so the fork's own body (which must NOT carry
-   data-files-body) stays visible while the rules above hide the native one.
-   The header-only rules (root/header/path/tool/status/statusLine/titleIcon)
-   belong to the upstream shell this fork drops and are not mapped. Fork sync
-   re-diffs the upstream file and re-applies the rename — see
-   src/client/files-tree/FORK.md. */
+   Copied from upstream's FilesBody.module.css and FileTree.module.css
+   (ui-sidebar-files @ 0.2.2-rc.3) with local names mapped to mrfw-ft* so the
+   rules cannot collide with host DOM — and so the fork's own body (which must
+   NOT carry data-files-body) stays visible while the rules above hide the
+   native one. The header-only rules (root/header/path/tool/status/statusLine/
+   titleIcon) belong to the upstream shell this fork drops and are not mapped.
+   The tree's hidden, inactive, and match rules arrived with 0.2.2-rc.2's
+   search. Fork sync re-diffs the upstream files and re-applies the rename —
+   see src/client/files-tree/FORK.md. */
 
 /* The pane's own .root already supplies the flex column, color, and font;
    the fork's body takes the same stretch item the hidden native body held,
@@ -491,6 +518,12 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   text-overflow: ellipsis;
 }
 
+/* An entry the caller marks hidden: subdued, with the secondary ink that stays
+   readable in both themes (upstream FileTree .hidden). */
+.mrfw-ftHidden {
+  color: var(--dsw-alias-label-secondary);
+}
+
 /* Neither a file nor a directory: shown so the directory is reported whole,
    greyed so nobody tries to open it. */
 .mrfw-ftOther {
@@ -498,7 +531,10 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   cursor: default;
 }
 
+/* A refused row never lights up on hover (upstream FileTree .inactive);
+   .mrfw-ftOther is this fork's legacy spelling of that same row. */
 @media (hover: hover) {
+  .mrfw-ftInactive:hover,
   .mrfw-ftOther:hover {
     background: transparent;
   }
@@ -509,6 +545,358 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   padding: 3px 10px;
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
+}
+
+/* The occurrences of the highlighted search text in a name (upstream FileTree
+   .match): the business-primary ink on the row's own fill. */
+.mrfw-ftMatch {
+  color: var(--dsw-alias-state-business-primary);
+  background: transparent;
+}
+
+/* ── files search fork (upstream 0.2.2-rc.2 rules, renamed classes) ────────
+   Upstream 0.2.2-rc.2 added workspace search to the Files navigator: a bar
+   above the tree, its result status, the results' notes, and a floating
+   settings panel for the exclusion rules. Copied from upstream's
+   FilesBody.module.css (ui-sidebar-files @ 0.2.2-rc.3) with local names
+   mapped to mrfw-fs* so the rules cannot collide with host DOM. The pane
+   wrapper is ours — the native navigator that supplied the column and the
+   bar-height variable is not forked — and the fork reuses mrfw-ftBody for
+   the scrolling result body. Fork sync re-diffs the upstream file and
+   re-applies the rename — see src/client/files-tree/FORK.md. */
+
+/* The forked pane around the search bar, status, results, and settings: the
+   native navigator's column context and stretch item, plus the bar height the
+   floating settings panel is placed against. It is positioned so that panel
+   anchors to the pane exactly as upstream's .settings anchors to the
+   navigator. */
+.mrfw-fsPane {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  --files-search-bar-height: 42px;
+}
+
+/* "No matches" with the information button whose tooltip names the filters. */
+.mrfw-fsEmptyNote {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* The information button keeps the note's line height. */
+.mrfw-fsInfoBtn {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-block: -2px;
+  padding: 0;
+  color: var(--dsw-alias-label-caption);
+}
+
+/* The results status between the bar and the results: the count, and a spinner
+   while a search is under way. */
+.mrfw-fsStatus {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+  min-height: 18px;
+  margin: 0;
+  padding: 2px 18px 0;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+
+/* One sentence of the results status: the count. */
+.mrfw-fsStatusLine {
+  display: block;
+  min-width: 0;
+}
+
+.mrfw-fsSpinner {
+  flex: none;
+}
+
+/* A failed search in the results' place: the reason, and the retry control
+   below it on the note's inset. */
+.mrfw-fsFailure {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  padding-bottom: 6px;
+}
+
+.mrfw-fsRetry {
+  margin-left: 10px;
+}
+
+/* The .gitignore choice above the add field, at a rule's height. */
+.mrfw-fsSettingsOption {
+  border-top: none;
+}
+
+/* The live region stays mounted while the query is blank, without taking
+   room. */
+.mrfw-fsStatusIdle {
+  min-height: 0;
+  padding: 0;
+}
+
+/* The settings panel floats over the tree below the search bar, inside the
+   pane. */
+.mrfw-fsSettings {
+  position: absolute;
+  top: var(--files-search-bar-height);
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 6px 4px 6px 10px;
+  background: var(--dsw-alias-bg-base);
+  border-radius: var(--dsw-radius-lg);
+  outline: none;
+  box-shadow: var(--dsw-elevation-prominent);
+}
+
+.mrfw-fsSettingsHeader {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  align-items: center;
+}
+
+.mrfw-fsSettingsTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.mrfw-fsSettingsDesc {
+  flex: 0 0 auto;
+  margin: 0 0 4px;
+  padding-right: 6px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+
+/* The search bar above the tree: the settings control, the field, the
+   hidden-entry control, and the clear control in one bordered box, drawn like
+   the shared Input atom. */
+.mrfw-fsBar {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: var(--files-search-bar-height);
+  padding: 8px 8px 4px;
+}
+
+.mrfw-fsField {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 2px;
+  background: var(--dsw-alias-bg-layer-1);
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+}
+
+.mrfw-fsField:focus-within {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+/* The settings panel's header controls: the navigator's icon-button recipe
+   (28px hit area around a 15px glyph, secondary voice, hover fill). */
+.mrfw-fsToolBtn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1;
+  background: transparent;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  cursor: pointer;
+}
+
+.mrfw-fsToolBtn svg {
+  width: 15px;
+  height: 15px;
+}
+
+@media (hover: hover) {
+  .mrfw-fsToolBtn:hover {
+    color: var(--dsw-alias-label-primary);
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.mrfw-fsToolBtn[aria-pressed='true'],
+.mrfw-fsToolBtn[aria-expanded='true'] {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* The bar's icon controls: the header tool at a size that fits inside the
+   field. */
+.mrfw-fsTool {
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+}
+
+.mrfw-fsTool svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mrfw-fsInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 4px;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.mrfw-fsInput::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+/* The bar's own clear control replaces the browser's. */
+.mrfw-fsInput::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* One rule, and the add field above them at the same height. */
+.mrfw-fsRule {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 0 0 2px;
+  border-top: 0.5px solid var(--dsw-alias-border-l3);
+}
+
+.mrfw-fsAddRule {
+  padding-right: 6px;
+}
+
+/* The add row's plus glyph rides the tertiary ink, as the tree's folder glyph
+   does. */
+.mrfw-fsAddRule .mrfw-fsIcon {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The add field draws no box of its own, so its row's rule marks where typing
+   goes. */
+.mrfw-fsAddRule:focus-within {
+  border-top-color: var(--dsw-alias-state-business-primary);
+}
+
+.mrfw-fsRuleInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.mrfw-fsRuleInput::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.mrfw-fsSettingsError {
+  flex: 0 0 auto;
+  margin: 0 0 4px;
+  color: var(--dsw-alias-state-error-primary);
+  font: var(--dsw-font-xxs-12);
+}
+
+/* Only the list scrolls; the header and the add field stay put. */
+.mrfw-fsRules {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  overscroll-behavior: contain;
+}
+
+.mrfw-fsRuleLabel {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.mrfw-fsRuleCheck {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin: 0 1px;
+  accent-color: var(--dsw-alias-state-business-primary);
+}
+
+.mrfw-fsRuleCheck:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+
+.mrfw-fsRuleName {
+  min-width: 0;
+  padding: 6px 0;
+  overflow-wrap: anywhere;
+}
+
+/* A rule the reader turned off stays listed, in the tertiary ink. */
+.mrfw-fsRuleOff .mrfw-fsRuleName {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Coarse pointers: bigger targets, a taller bar, and a 16px field so mobile
+   browsers do not zoom the page when the field takes focus. */
+@media (pointer: coarse) {
+  .mrfw-fsTool {
+    width: 32px;
+    height: 32px;
+  }
+
+  .mrfw-fsPane {
+    --files-search-bar-height: 50px;
+  }
+
+  .mrfw-fsRule {
+    min-height: 44px;
+  }
+
+  .mrfw-fsInput,
+  .mrfw-fsRuleInput {
+    font-size: 16px;
+  }
 }
 
 /* ── open-in-app fork (verbatim rules, renamed classes) ───────────────────

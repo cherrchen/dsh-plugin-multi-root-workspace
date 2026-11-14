@@ -87,7 +87,7 @@ export type {
 } from './roots.ts'
 export { COMMAND_NAME, parseFoldersCommand, renderRootsReport, resolvePanelPrimaryRoot, revealArgv } from './command.ts'
 export type { FoldersCommand } from './command.ts'
-export { PANEL_CHANNEL, PANEL_ENDPOINTS, parsePanelCall, parseRevealedView, parseRootsView } from './contract.ts'
+export { PANEL_CHANNEL, PANEL_ENDPOINTS, parsePanelCall, parseRevealedView, parseRootsView, parseSearchView } from './contract.ts'
 export type {
   PanelCall,
   PanelEndpoint,
@@ -97,7 +97,10 @@ export type {
   RevealedView,
   RootView,
   RootsView,
+  SearchMatchView,
+  SearchView,
 } from './contract.ts'
+export { searchAdditionalRoot } from './files-search.ts'
 
 /**
  * Carrier plugin face for the bare-package-name loader row (see the module

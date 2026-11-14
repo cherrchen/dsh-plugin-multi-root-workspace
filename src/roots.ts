@@ -239,6 +239,7 @@ export type RootValidationCode =
   | 'session-not-live'
   | 'unsupported-path'
   | 'root-unavailable'
+  | 'search-unavailable'
   | 'protected-path'
   | 'protected-boundary-unknown'
   | 'revive-target-changed'

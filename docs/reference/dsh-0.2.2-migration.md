@@ -143,3 +143,16 @@
 - **peer-only 副本会留在 lockfile**：升级脚本只重指直接依赖与 release-age 条目。rc.2 → rc.3 之后，`@deepseek-ai/dsh-permission-presets` 与 `@deepseek-ai/dsh-util-values` 仍以 rc.2 副本满足 peer 边（rc.3 各包声明的是精确 peer），`pnpm peers check` 因此报 unmet peer；`pnpm dedupe`、`--force` 与 `--lockfile-only` 都不会改写这类仍“看似有效”的边。落地前必须让它们升到同一精确版本，最终 `pnpm peers check` 输出 `No peer dependency issues found`，lockfile 中 `0.2.2-rc.2` 只作为 peer 范围字符串出现。
 - **新包不是契约成员**：`@deepseek-ai/dsh-deepseek-chat-import` 默认不挂载，与插件的授权面没有交点；把它写进 `CORE_PACKAGES` 只会让最小组合误报 `incomplete`。
 - **升级脚本只重指既有条目**：`minimumReleaseAgeExclude` 的新增传递包仍需手工补一行，否则在启用发布年龄门禁的环境里 frozen install 会被拒绝。
+
+## 附加根 Files 视图消费的两个接口面（2026-11-14）
+
+本节记录 `0.2.2` 线里本插件**本轮开始转发/实现**的两个宿主面，并取代 rc.2 小节表格中“不路由 / 没有附加根搜索 UI”的当时结论；上游历史差异本身的记录不变。
+
+| 接口面 | 引入版本 | 插件消费方式 | 缺席时 |
+|---|---|---|---|
+| `sidebar.files.tree` Factory 的 `rowTriggerProps` / `canOpen` 输入；renderer 根级 composed prop `useContextMenu`（`getTriggerProps`） | `0.2.2-alpha.3` | 从 slot occupant 的 composed prop 取 seat，经 `NativeTreeOptions` 转发给 Factory，并在旧行渲染路径 spread 同一组 handlers；target 为 file/directory 与 `{ sessionId, path: 绝对路径 }` | 不绑定菜单、不传 `canOpen`；DOM 与旧宿主一致（旧原生同样没有菜单） |
+| `contextMenus.registeredKinds` | `0.2.2-rc.2` | 可选探测：仅在对 kind 已注册时绑定，避免空菜单 | alpha.3 没有该成员，直接绑定（该版本原生已注册 file/directory 贡献） |
+| `workspaceFiles.search(scope, request, signal)`；wire request 无根字段 | `0.2.2-rc.2` | 插件自有 `search` 端点以 host 内部 scope 命名附加根，复用同一实现与同一限额/错误码；`typeof service.search === 'function'` 探测 | 客户端不渲染搜索钮/栏、不调用端点（端点答 `search-unavailable`） |
+| `FileTreeInput.highlight`、`TreeDirectoryState.omitted`（`'hidden'` / `'unmatched'`）；搜索条/状态行/设置浮层与隐藏项偏好 | `0.2.2-rc.2` | 结果树复用同一 `TreeView` 传 `highlight`；树态在绘制期过滤隐藏项、用 `omitted: 'hidden'` 画“只有隐藏项”；偏好读写宿主同名 localStorage 键 | 不传这两个输入（旧 Factory 忽略未知键）；不改变旧宿主树的绘制 |
+
+**为什么探测都是结构性的**：这些面在旧 release 上不存在，而 `scripts/upgrade-dsh.mjs` 会把每个 `@deepseek-ai/dsh*` devDependency 改写到目标 release——把新包加进依赖会让 `0.2.2-alpha.3` 之前的 20 个 lane 在 `pnpm install` 阶段死亡；因此类型用本地最小声明（`src/client/files-tree/context-menu.ts`、`search-surface.d.ts`、`src/client/open-in-app/upstream-surface.d.ts` 同型），运行时只认 `props.useContextMenu` 可调用、`props.useContextMenu().getTriggerProps` 取得到、`remote.workspaceFiles.search`/`service.search` 是函数。`renderFactorySlot` 自 `0.1.6-alpha.2` 就存在，不能用来判断 Factory 是否存在；插件沿用 `0.2.2-alpha.3` 起才有的 `data-files-page` DOM 钩子做版本分界（与[架构文档 §7](../architecture/multi-root-workspace.md) 的接管判定同一处）。版本字符串比较、新增 npm 依赖与改动上游包都不允许（ADR-0009）。

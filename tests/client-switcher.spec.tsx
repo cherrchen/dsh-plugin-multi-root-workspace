@@ -138,14 +138,26 @@ interface Harness {
   readonly opens: OpenCall[]
   readonly registrations: Registration[]
   /** The `files.actions` occupant factory; call it with the slot owner. */
-  readonly occupant: (owner?: { absolutePath?: string; renderFactorySlot?: unknown }) => unknown
+  readonly occupant: (owner?: { absolutePath?: string; renderFactorySlot?: unknown; useContextMenu?: unknown }) => unknown
   setView: (view: RootsView) => void
   setSession: (sessionId: string | undefined) => void
   setListFails: (fails: boolean) => void
 }
 
+/** Optional host services a spec can put behind `ctx.get`. */
+interface HostServices {
+  readonly contextMenus?: unknown
+  readonly sidebarRightTabs?: unknown
+}
+
+/** Optional host capabilities the stub remote exposes. */
+interface MountOptions {
+  /** Give the stub `workspaceFiles` the `0.2.2-rc.2` search method (the search seat's probe). */
+  readonly workspaceSearch?: boolean
+}
+
 /** Apply the real client entry to a recording stub context. */
-function mount(withConnection = true): Harness {
+function mount(withConnection = true, services: HostServices = {}, options: MountOptions = {}): Harness {
   const calls: Call[] = []
   const treeCalls: TreeCall[] = []
   const opens: OpenCall[] = []
@@ -160,6 +172,9 @@ function mount(withConnection = true): Harness {
         calls.push({ channel, endpoint, payload })
         if (endpoint === 'list' && listFails) {
           return { ok: false, error: { code: 'registry-contended', message: 'registry busy' } }
+        }
+        if (endpoint === 'search') {
+          return { ok: true, value: { root: '/repos/payments', matches: [], truncated: false, incomplete: false } }
         }
         return { ok: true, value: view }
       },
@@ -184,6 +199,14 @@ function mount(withConnection = true): Harness {
         treeCalls.push({ kind: 'changes', sessionId, path })
         return watchStub({ push: () => {}, stop: () => {} })
       },
+      ...(options.workspaceSearch === true
+        ? {
+          search: async (_sessionId: string, _request: { readonly query: string }) => ({
+            ok: true as const,
+            value: { root: '/repos/payments', matches: [], truncated: false, incomplete: false },
+          }),
+        }
+        : {}),
     },
     $stream: streamStub,
   }
@@ -214,6 +237,8 @@ function mount(withConnection = true): Harness {
       if (name === 'sidebarRight') {
         return { openResourceIn: (sessionId: string, address: string) => { opens.push({ sessionId, address }) } }
       }
+      if (name === 'contextMenus') return services.contextMenus
+      if (name === 'sidebarRightTabs') return services.sidebarRightTabs
       if (name === 'sessions') {
         return {
           list: {
@@ -335,7 +360,7 @@ afterEach(() => {
  * itself inside a dockkit tab host. The returned `pane` is where the forked
  * tree must portal into.
  */
-function renderInPane(harness: Harness, owner: { absolutePath?: string; renderFactorySlot?: unknown } = { absolutePath: '/repos/primary' }, strictMode = false, modern = false): {
+function renderInPane(harness: Harness, owner: { absolutePath?: string; renderFactorySlot?: unknown; useContextMenu?: unknown } = { absolutePath: '/repos/primary' }, strictMode = false, modern = false): {
   pane: HTMLElement
   host: HTMLElement
   header: HTMLElement
@@ -892,3 +917,152 @@ describe('the forked open-in-app control', () => {
     expect(document.querySelector('[data-open-target="directory"]')).toBeNull()
   })
 })
+
+describe('the Files-tab switcher host-parity wiring', () => {
+  /** A renderer stub that always draws the plugin's legacy fallback. */
+  function factoryStub() {
+    return vi.fn((_name: string, _input: object, options: { fallback: ReactElement }) => options.fallback)
+  }
+
+  /** Select the 'payments' additional root and wait for its rows to land. */
+  async function selectPayments(pane: HTMLElement): Promise<void> {
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+  }
+
+  it('forwards the occupant row menu into the host tree Factory with absolute targets', async () => {
+    const getTriggerProps = vi.fn((_target: unknown) => ({ 'data-menu': 'row' }))
+    const harness = mount(true)
+    const factory = factoryStub()
+    const { pane } = renderInPane(harness, {
+      absolutePath: '/repos/primary',
+      renderFactorySlot: factory,
+      useContextMenu: () => ({ getTriggerProps }),
+    }, false, true)
+    await selectPayments(pane)
+    const input = factory.mock.calls.at(-1)![1] as {
+      rowTriggerProps?: (entry: { path: string }, kind: 'file' | 'directory') => unknown
+    }
+    expect(input.rowTriggerProps).toBeTypeOf('function')
+    expect(input.rowTriggerProps!({ path: '/repos/payments/notes.md' }, 'file')).toEqual({ 'data-menu': 'row' })
+    // Absolute paths are the whole point: the host contributions resolve them
+    // through workspaceFiles.stat, which this plugin routes to the additional root.
+    expect(getTriggerProps).toHaveBeenCalledWith({
+      kind: 'file',
+      value: { sessionId: 'session-1', path: '/repos/payments/notes.md' },
+    })
+    expect(getTriggerProps).toHaveBeenCalledWith({
+      kind: 'directory',
+      value: { sessionId: 'session-1', path: '/repos/payments/src' },
+    })
+  })
+
+  it('leaves the row menu off a kind the host registers no contributions for', async () => {
+    const getTriggerProps = vi.fn((_target: unknown) => ({ 'data-menu': 'row' }))
+    const harness = mount(true, { contextMenus: { registeredKinds: { getSnapshot: () => ['file'] } } })
+    const factory = factoryStub()
+    const { pane } = renderInPane(harness, {
+      absolutePath: '/repos/primary',
+      renderFactorySlot: factory,
+      useContextMenu: () => ({ getTriggerProps }),
+    }, false, true)
+    await selectPayments(pane)
+    const input = factory.mock.calls.at(-1)![1] as {
+      rowTriggerProps?: (entry: { path: string }, kind: 'file' | 'directory') => unknown
+    }
+    expect(input.rowTriggerProps!({ path: '/repos/payments/notes.md' }, 'file')).toEqual({ 'data-menu': 'row' })
+    // An empty popup would be worse than the browser menu: directory has no
+    // registered contribution on this host, so the row keeps its default.
+    expect(input.rowTriggerProps!({ path: '/repos/payments/src' }, 'directory')).toBeUndefined()
+  })
+
+  it('degrades to no menu input when the occupant carries no menu hook', async () => {
+    const harness = mount(true)
+    const factory = factoryStub()
+    const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factory }, false, true)
+    await selectPayments(pane)
+    const input = factory.mock.calls.at(-1)![1] as Record<string, unknown>
+    expect('rowTriggerProps' in input).toBe(false)
+    expect('canOpen' in input).toBe(false)
+  })
+
+  it('hands the Factory the viewer registry verdict for absolute addresses', async () => {
+    const harness = mount(true, {
+      sidebarRightTabs: {
+        candidates: (address: string) => address.endsWith('/notes.md') ? [{ id: 'documentPreview' }] : [],
+        subscribe: () => () => {},
+      },
+    })
+    const factory = factoryStub()
+    const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factory }, false, true)
+    await selectPayments(pane)
+    const input = factory.mock.calls.at(-1)![1] as { canOpen?: (entry: { path: string }) => boolean }
+    expect(input.canOpen).toBeTypeOf('function')
+    expect(input.canOpen!({ path: '/repos/payments/notes.md' })).toBe(true)
+    expect(input.canOpen!({ path: '/repos/payments/other.md' })).toBe(false)
+  })
+})
+
+
+describe('the Files-tab search surface', () => {
+  /** A renderer stub that always draws the plugin's legacy fallback. */
+  function factoryStub() {
+    return vi.fn((_name: string, _input: object, options: { fallback: ReactElement }) => options.fallback)
+  }
+
+  it('shows the search toggle and searches the selected root through the channel', async () => {
+    const harness = mount(true, {}, { workspaceSearch: true })
+    const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factoryStub() }, false, true)
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+
+    const toggle = document.querySelector<HTMLElement>('[data-mrfw-files-search-toggle]')
+    expect(toggle).not.toBeNull()
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle!)
+    const input = await screen.findByRole('searchbox')
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true')
+
+    fireEvent.change(input, { target: { value: 'notes' } })
+    await waitFor(() => {
+      expect(harness.calls.some(call => call.endpoint === 'search'
+        && (call.payload as { rootId?: string }).rootId === 'a'
+        && (call.payload as { query?: string }).query === 'notes')).toBe(true)
+    })
+    await waitFor(() => { expect(document.querySelector('[data-files-row="search-empty"]')).not.toBeNull() })
+  })
+
+  it('keeps the search toggle out on a host without the upstream search call', async () => {
+    const harness = mount(true)
+    const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factoryStub() }, false, true)
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+    expect(document.querySelector('[data-mrfw-files-search-toggle]')).toBeNull()
+    expect(screen.queryByRole('searchbox')).toBeNull()
+  })
+
+  it('re-runs the active search when the header reload is clicked', async () => {
+    const harness = mount(true, {}, { workspaceSearch: true })
+    const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factoryStub() }, false, true)
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+
+    fireEvent.click(document.querySelector<HTMLElement>('[data-mrfw-files-search-toggle]')!)
+    const input = await screen.findByRole('searchbox')
+    fireEvent.change(input, { target: { value: 'notes' } })
+    const searchCalls = () => harness.calls.filter(call => call.endpoint === 'search')
+    await waitFor(() => { expect(searchCalls().length).toBe(1) })
+
+    // Search results replace the tree, so the face refresh alone is a no-op;
+    // the header reload must re-run the same request for fresh matches.
+    fireEvent.click(document.querySelector<HTMLElement>('.mrfw-switcherReload')!)
+    await waitFor(() => { expect(searchCalls().length).toBe(2) })
+    const last = searchCalls().at(-1)!
+    expect(last.payload).toMatchObject({ rootId: 'a', query: 'notes' })
+  })
+})
+
