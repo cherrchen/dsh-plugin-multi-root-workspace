@@ -832,7 +832,7 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]!)
 
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.fallback`) })
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toContain(`${NS}.error.panel/bad-response`) })
   })
 
   it('reports a clipboard that refuses the copy', async () => {
