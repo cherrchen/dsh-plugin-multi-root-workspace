@@ -353,6 +353,9 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
               onOpen={filesTree.openFile}
               t={filesTree.t}
               nativeTree={pane.hasAttribute('data-files-page') ? props.nativeTree : undefined}
+              menu={filesTree.menu}
+              canOpen={filesTree.canOpen}
+              useCanOpen={filesTree.useCanOpen}
             />,
             pane,
           )

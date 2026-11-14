@@ -34,6 +34,7 @@ import { RemoteError, type RemoteFailure } from '@deepseek-ai/dsh-typert-protoco
 import { createList, createWatch, filesFace, type FilesInjected } from './face.ts'
 import { createFilesStore } from './store.ts'
 import { filesTreeSurfaceSupported } from './primitives.ts'
+import { filesMenuHookOf, filesMenuSeat, type FilesMenuKinds, type FilesMenuSeat } from './context-menu.ts'
 import type { FilesTreeProps } from './FilesTree.tsx'
 import type { RootView } from '../../contract.ts'
 import { NS } from './locales.ts'
@@ -41,6 +42,21 @@ import { NS } from './locales.ts'
 /** The `sidebarRight` face the fork uses to open a file resource. */
 interface SidebarRightOpen {
   readonly openResourceIn?: (sessionId: SessionId, address: string, options?: { readonly replaceTab?: TabId }) => void
+}
+
+/**
+ * The slice of the right-sidebar tab registry the tree reads: whether some
+ * registered viewer claims a resource address, and its change notification
+ * (`0.2.2-alpha.3+`; the service is absent before the Factory exists).
+ */
+interface ClientViewerRegistry {
+  candidates(address: string): readonly object[]
+  subscribe(listener: () => void): () => void
+}
+
+/** The slice of the host context-menu registry the row binding reads (`registeredKinds`, `0.2.2-rc.2+`). */
+interface ClientMenuRegistry {
+  readonly registeredKinds?: { readonly getSnapshot?: () => readonly string[] | undefined } | undefined
 }
 
 /**
@@ -139,7 +155,15 @@ export interface FilesTreeInjected {
    * `use<Name>` selector hook, so `treeSelection` reaches the component as
    * `useTreeSelection`, never as a prop under its own key.
    */
-  readonly hooks: { readonly treeSelection: HostObservable<TreeSelection> }
+  readonly hooks: {
+    readonly treeSelection: HostObservable<TreeSelection>
+    /**
+     * The viewer registry's change counter (`0.2.2-alpha.3+`): increments
+     * whenever the right-sidebar tab types change, so a pane re-reads its rows'
+     * `canOpen` verdicts. Constant in a composition without the registry.
+     */
+    readonly canOpen: HostObservable<number>
+  }
   /**
    * Persist one pane's selected root; `'primary'` drops its entry. The
    * session-scoped snapshot survives the body remount a file open causes.
@@ -167,6 +191,22 @@ export interface FilesTreeSurface {
   readonly selectRoot: FilesTreeInjected['selectRoot']
   /** The forked tree's lifetimes; see {@link FilesTreeTakeover}. */
   readonly takeover: FilesTreeTakeover
+  /**
+   * Row context menus for this pane, pre-bound to the Session. `undefined`
+   * where the host has no context-menu service (before `0.2.2-alpha.3`, or a
+   * trimmed composition): rows then keep the native browser menu, exactly the
+   * native tree's absence there.
+   */
+  readonly menu: FilesMenuSeat | undefined
+  /**
+   * Whether the host's registered viewers can open one file address, or
+   * `undefined` where the right-sidebar viewer registry does not exist (every
+   * release before the `sidebar.files.tree` Factory, which is also every
+   * release whose tree cannot consume the input).
+   */
+  readonly canOpen: ((address: string) => boolean) | undefined
+  /** Selector hook over the viewer registry's change counter; a constant without the registry. */
+  readonly useCanOpen: SnapshotSelectorHook<number>
 }
 
 /** The failure every lazy-remote path reports when the carrier is absent. */
@@ -262,10 +302,42 @@ export function lazyFilesRemote(ctx: ClientContext): ClientRemote {
 export function createFilesTreeSeats(ctx: ClientContext): {
   readonly store: ReturnType<typeof createFilesStore>
   readonly inject: (sessionId: SessionId, actions: BoundActions<ReturnType<typeof createFilesStore>>) => FilesTreeInjected
+  /** Reads the host menu registry's registered target kinds; `undefined` where it has no such snapshot. */
+  readonly menuKinds: FilesMenuKinds
+  /** The live viewer predicate, re-read after every registry change. */
+  readonly canOpenViewer: () => ((address: string) => boolean) | undefined
 } {
   const store = createFilesStore()
   const remote = lazyFilesRemote(ctx)
   const face = filesFace(createList(remote), createWatch(remote))
+  // The two optional host registries behind the tree-parity inputs. Both are
+  // read through `ctx.get` because neither may gate this row: the tree exists
+  // (legacy rows) on hosts that never had them.
+  // `<T,>` because this is a TSX module: a bare `<T>` starts a JSX element.
+  const readService = <T,>(name: string): T | undefined =>
+    (ctx as unknown as { get(key: string): unknown }).get(name) as T | undefined
+  const menuKinds: FilesMenuKinds = () => readService<ClientMenuRegistry>('contextMenus')?.registeredKinds?.getSnapshot?.()
+  // The viewer registry may activate after this plugin; the nested injection
+  // waits for it without gating the row, and the counter it feeds lets every
+  // drawn pane re-read its rows' `canOpen` verdicts when tab types change.
+  const canOpenEpoch = createSnapshotStore(0)
+  let canOpenViewer: ((address: string) => boolean) | undefined
+  const readViewer = (service: ClientViewerRegistry | undefined): void => {
+    canOpenViewer = service === undefined || typeof service.candidates !== 'function'
+      ? undefined
+      : address => service.candidates(address).length > 0
+  }
+  readViewer(readService<ClientViewerRegistry>('sidebarRightTabs'))
+  ;(ctx as unknown as { inject(names: readonly string[], callback: (scope: ClientContext) => void): void })
+    .inject(['sidebarRightTabs'], (scope) => {
+      const service = (scope as unknown as { get(key: string): unknown }).get('sidebarRightTabs') as ClientViewerRegistry | undefined
+      readViewer(service)
+      if (service === undefined || typeof service.subscribe !== 'function') return
+      ;(scope as unknown as { effect(body: () => () => void, label: string): void }).effect(() => {
+        const unsubscribe = service.subscribe(() => { canOpenEpoch.set(canOpenEpoch.getSnapshot() + 1) })
+        return () => { unsubscribe(); readViewer(undefined) }
+      }, 'multi-root workspace: sidebar viewer registry')
+    })
   const inject = (sessionId: SessionId, actions: BoundActions<ReturnType<typeof createFilesStore>>): FilesTreeInjected => {
     // Both live at the inject product's scope — one instance per session — so
     // the selection and the controllers it runs under survive the body remount
@@ -336,7 +408,7 @@ export function createFilesTreeSeats(ctx: ClientContext): {
         const sidebar = (ctx as unknown as { get(key: string): unknown }).get('sidebarRight') as SidebarRightOpen | undefined
         sidebar?.openResourceIn?.(sessionId, address, { replaceTab: tabId })
       },
-      hooks: { treeSelection: selection },
+      hooks: { treeSelection: selection, canOpen: canOpenEpoch },
       selectRoot: (tabId, root) => {
         const next: Record<string, RootView> = { ...selection.getSnapshot() }
         if (root === 'primary') delete next[tabId]
@@ -383,7 +455,7 @@ export function createFilesTreeSeats(ctx: ClientContext): {
       },
     }
   }
-  return { store, inject }
+  return { store, inject, menuKinds, canOpenViewer: () => canOpenViewer }
 }
 
 /**
@@ -395,6 +467,17 @@ export function createFilesTreeSeats(ctx: ClientContext): {
  * @param t - the `sidebarFiles`-bound translate.
  * @returns the stable surface, or `undefined` when the fork cannot mount.
  */
+/** The optional host seats the surface reads; absent members keep the native absence. */
+export interface FilesTreeSurfaceDeps {
+  /** Reads the menu registry's registered target kinds (`registeredKinds`, `0.2.2-rc.2+`). */
+  readonly menuKinds: FilesMenuKinds
+  /** The live viewer predicate, or `undefined` where the host has no viewer registry. */
+  readonly canOpenViewer: () => ((address: string) => boolean) | undefined
+}
+
+/** Selector hook stand-in for a composition without the viewer registry: a constant zero. */
+const noViewerSource: SnapshotSelectorHook<number> = selector => selector(0)
+
 export function createFilesTreeSurface(
   props: {
     readonly sessionId: SessionId
@@ -406,14 +489,23 @@ export function createFilesTreeSurface(
     readonly useTreeSelection: FilesTreeSurface['useTreeSelection'] | undefined
     readonly selectRoot: FilesTreeSurface['selectRoot'] | undefined
     readonly takeover: FilesTreeSurface['takeover'] | undefined
+    readonly useCanOpen?: SnapshotSelectorHook<number> | undefined
+    /** The occupant's composed props, read structurally for `useContextMenu`. */
+    readonly useContextMenu?: unknown
   },
   t: FilesTreeProps['t'],
+  deps: FilesTreeSurfaceDeps,
 ): FilesTreeSurface | undefined {
   if (!filesTreeSurfaceSupported()) return undefined
   const { sessionId, useStore, actions, face, openFile, openFileIn, useTreeSelection, selectRoot, takeover } = props
   if (face === undefined || openFile === undefined || openFileIn === undefined || useStore === undefined || actions === undefined
     || useTreeSelection === undefined || selectRoot === undefined || takeover === undefined) return undefined
-  return { sessionId, useStore, actions, face, openFile, openFileIn, useTreeSelection, selectRoot, takeover, t }
+  return {
+    sessionId, useStore, actions, face, openFile, openFileIn, useTreeSelection, selectRoot, takeover, t,
+    menu: filesMenuSeat(filesMenuHookOf(props), sessionId, deps.menuKinds),
+    canOpen: deps.canOpenViewer(),
+    useCanOpen: props.useCanOpen ?? noViewerSource,
+  }
 }
 
 export { filesTreeSurfaceSupported, NS as FILES_TREE_NS }

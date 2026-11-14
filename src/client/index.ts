@@ -296,7 +296,7 @@ export function apply(ctx: ClientContext): void {
     // framework-stable prop or an apply-level constant, so the switcher's
     // takeover effect — which keys on the selection, not the wrapper —
     // never restarts because of it. `undefined` means the fork cannot mount.
-    const filesTree = createFilesTreeSurface(props, filesTreeT)
+    const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeSeats)
     return absolutePath === undefined
       ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, compact: true })
       : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
@@ -317,7 +317,7 @@ export function apply(ctx: ClientContext): void {
     inject: filesTreeSeats.inject,
   }, function DocumentActionsOccupant(props) {
     const absolutePath = (props as { readonly absolutePath?: string } | undefined)?.absolutePath
-    const filesTree = createFilesTreeSurface(props, filesTreeT)
+    const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeSeats)
     // No host path or no fork → no marker at all: the native navigator
     // keeps its tree untouched either way.
     if (absolutePath === undefined || filesTree === undefined) return null

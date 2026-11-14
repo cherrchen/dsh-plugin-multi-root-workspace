@@ -383,6 +383,9 @@ export function NavigatorRetarget(props: NavigatorRetargetProps): ReactNode {
               }}
               t={filesTree.t}
               nativeTree={props.nativeTree}
+              menu={filesTree.menu}
+              canOpen={filesTree.canOpen}
+              useCanOpen={filesTree.useCanOpen}
               onScrollOffset={onScrollOffset}
               reveal={revealLive
                 ? { path: absolutePath, revealed: savedTree?.revealed, onSettled: onRevealSettled }

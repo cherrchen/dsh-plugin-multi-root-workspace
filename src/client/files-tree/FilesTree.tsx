@@ -27,7 +27,8 @@ import {
   FileTypeIcon, IconFolderCloseRegular, IconFolderOpenRegular, classifyFileType,
 } from './primitives.ts'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
-import { nativeTreeInput, type NativeTreeRenderer } from '../../compat/files-tree.ts'
+import { nativeTreeInput, type NativeTreeEntry, type NativeTreeRenderer } from '../../compat/files-tree.ts'
+import type { FilesMenuSeat } from './context-menu.ts'
 import type { WorkspaceDirectoryEntry } from '@deepseek-ai/dsh-api-workspace-files/types'
 import { childPath } from './face.ts'
 import type { FilesInjected } from './face.ts'
@@ -63,6 +64,26 @@ export type FilesTreeProps =
     readonly onOpen: (address: string) => void
     /** Optional host-controlled tree Factory, available on the newer Files page. */
     readonly nativeTree?: NativeTreeRenderer | undefined
+    /**
+     * Row context menus (`0.2.2-alpha.3+`): the pane's seat, pre-bound to the
+     * Session, handed every row's absolute path and kind. Absent where the host
+     * has no context-menu service — rows then keep the native browser menu,
+     * exactly the native tree's absence there.
+     */
+    readonly menu?: FilesMenuSeat | undefined
+    /**
+     * Whether the host's registered viewers can open one file address
+     * (`0.2.2-alpha.3+`); the Factory dims a file row it refuses. Absent leaves
+     * every file openable, the pre-Factory native behavior.
+     */
+    readonly canOpen?: ((address: string) => boolean) | undefined
+    /**
+     * Selector hook over the viewer registry's change counter. Reading it
+     * re-renders the tree whenever a tab type registers or withdraws, so the
+     * `canOpen` verdicts below are never a boot-time snapshot. Absent in a
+     * composition without the registry.
+     */
+    readonly useCanOpen?: ((selector: (version: number) => number) => number) | undefined
     /**
      * The owner's live scroll mirror — upstream's `scrolled` writing
      * `pane.scrollTop`: fired on every scroll and once more at unmount with
@@ -148,6 +169,8 @@ interface TreeContext {
   readonly current: string | undefined
   /** Callback ref for the current row's button — the reveal's scroll target. */
   readonly currentRef: ((row: unknown) => void) | undefined
+  /** The pane's row context menus, or `undefined` where the host has none. */
+  readonly menu: FilesMenuSeat | undefined
 }
 
 /** One entry's row, and its children when it is an expanded directory. */
@@ -157,7 +180,8 @@ function Entry({ parent, entry, tree }: { parent: string; entry: WorkspaceDirect
     const expanded = tree.state.expanded.includes(path)
     return (
       <li className={css.item} data-files-entry="directory" data-files-path={path}>
-        <button type="button" className={css.row} aria-expanded={expanded} onClick={() => { tree.onToggle(parent, path) }}>
+        <button type="button" className={css.row} aria-expanded={expanded} onClick={() => { tree.onToggle(parent, path) }}
+          {...(tree.menu === undefined ? {} : tree.menu.trigger(path, 'directory'))}>
           {expanded ? <IconFolderOpenRegular className={css.icon} /> : <IconFolderCloseRegular className={css.icon} />}
           <span className={css.name}>{entry.name}</span>
         </button>
@@ -179,6 +203,7 @@ function Entry({ parent, entry, tree }: { parent: string; entry: WorkspaceDirect
           ref={current ? tree.currentRef : undefined}
           data-files-current={current ? '' : undefined}
           aria-current={current ? true : undefined}
+          {...(tree.menu === undefined ? {} : tree.menu.trigger(path, 'file'))}
         >
           <FileTypeIcon kind={classifyFileType(entry.name)} size={16} className={css.fileIcon} />
           <span className={css.name}>{entry.name}</span>
@@ -227,7 +252,11 @@ function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
  */
 export function FilesTree({
   tabId, sessionId, root, signal, useStore, actions, hold, release, toggle, onOpen, t, nativeTree, reveal, saved, onScrollOffset,
+  menu, canOpen, useCanOpen,
 }: FilesTreeProps): ReactNode {
+  // The canOpen verdicts below are read per row at render time; this subscription
+  // is what re-renders the rows when the viewer registry changes.
+  useCanOpen?.(version => version)
   const state = useStore(store => store.byTab[tabId])
   const bodyRef = useRef<HTMLDivElement>(null)
   const scrollTopRef = useRef(0)
@@ -472,12 +501,26 @@ export function FilesTree({
     t,
     current,
     currentRef,
+    menu,
   }
   const legacy = <ul className={css.level}><Level path={state.root} tree={tree} /></ul>
+  // The host Factory's optional inputs (`0.2.2-alpha.3+` for the menu and viewer
+  // inputs): older Factories ignore keys they do not know, so the same call serves
+  // every release. Rows carry absolute keys here, so a menu target names the
+  // additional root's file rather than the primary root's same-named path.
+  const rowTriggerProps = menu === undefined
+    ? undefined
+    : (entry: NativeTreeEntry, kind: 'file' | 'directory') => menu.trigger(entry.path, kind)
+  const canOpenEntry = canOpen === undefined
+    ? undefined
+    : (entry: NativeTreeEntry) => canOpen(fileAddressFor(sessionId, undefined, entry.path))
   const content = nativeTree === undefined ? legacy : nativeTree(
     'sidebar.files.tree',
-    nativeTreeInput(state, failure => failureLine(t, failure), tree.onToggle, tree.onOpen,
-      current === undefined ? undefined : { path: current, ref: currentRef }),
+    nativeTreeInput(state, failure => failureLine(t, failure), tree.onToggle, tree.onOpen, {
+      ...(current === undefined ? {} : { current: { path: current, ref: currentRef } }),
+      ...(rowTriggerProps === undefined ? {} : { rowTriggerProps }),
+      ...(canOpenEntry === undefined ? {} : { canOpen: canOpenEntry }),
+    }),
     { fallback: legacy },
   ) as ReactNode
   return (

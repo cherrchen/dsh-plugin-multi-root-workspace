@@ -29,7 +29,7 @@
 
 import { createElement, useSyncExternalStore, type ReactElement } from 'react'
 import { act, cleanup, render, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { absoluteFileAddress, sessionFileAddress } from '@deepseek-ai/dsh-util-workspace-path'
 import type { StoreInstance } from '@deepseek-ai/dsh-client-store'
 import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from '../src/contract.ts'
@@ -969,3 +969,34 @@ describe('the preview navigator retarget', () => {
     }
   })
 })
+
+describe('the retargeted tree host-parity wiring', () => {
+  it('binds the preview navigator rows to the host menu with absolute targets', async () => {
+    const getTriggerProps = vi.fn((_target: unknown) => ({ 'data-menu': 'row' }))
+    const factory = vi.fn((_name: string, _input: object, options: { fallback: ReactElement }) => options.fallback)
+    const harness = mount()
+    const { content } = renderInPreview(harness, {
+      absolutePath: PREVIEWED,
+      renderFactorySlot: factory,
+      useContextMenu: () => ({ getTriggerProps }),
+    })
+    const { aside } = openNavigator(content)
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => {
+      const call = factory.mock.calls.at(-1)
+      expect(call?.[0]).toBe('sidebar.files.tree')
+    })
+    const input = factory.mock.calls.at(-1)![1] as {
+      rowTriggerProps?: (entry: { path: string }, kind: 'file' | 'directory') => unknown
+    }
+    expect(input.rowTriggerProps).toBeTypeOf('function')
+    expect(input.rowTriggerProps!({ path: PREVIEWED }, 'file')).toEqual({ 'data-menu': 'row' })
+    // The previewed file lives under the additional root; the menu must act on
+    // that absolute path, not on a primary-root path of the same name.
+    expect(getTriggerProps).toHaveBeenCalledWith({
+      kind: 'file',
+      value: { sessionId: 'session-1', path: PREVIEWED },
+    })
+  })
+})
+
