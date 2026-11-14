@@ -20,13 +20,20 @@ export interface SshHostKey {
   readonly fingerprint: string
 }
 
+export interface SshScanResult {
+  readonly token: string
+  readonly keys: readonly SshHostKey[]
+  /** Present on alias scans: the `ssh -G` resolved target the key was proven against. */
+  readonly endpoint?: { readonly hostname: string; readonly port: number; readonly user: string }
+}
+
 export interface SshClient {
   state(sessionId: string, signal?: AbortSignal): Promise<SshStateView>
   credentialGenerate(sessionId: string, label: string, signal?: AbortSignal): Promise<SshStateView>
   credentialImport(sessionId: string, label: string, privateKey: string, passphrase?: string, signal?: AbortSignal): Promise<SshStateView>
   credentialPassword(sessionId: string, label: string, password: string, signal?: AbortSignal): Promise<SshStateView>
   credentialRemove(sessionId: string, id: string, signal?: AbortSignal): Promise<SshStateView>
-  hostKeyScan(sessionId: string, hostname: string, port: number, signal?: AbortSignal): Promise<{ token: string; keys: readonly SshHostKey[] }>
+  hostKeyScan(sessionId: string, target: { hostname?: string; port?: number; alias?: string }, signal?: AbortSignal): Promise<SshScanResult>
   environmentSave(sessionId: string, revision: number, environment: unknown, fingerprint: string, hostKeyToken?: string, signal?: AbortSignal): Promise<SshStateView>
   environmentRemove(sessionId: string, revision: number, environmentId: string, signal?: AbortSignal): Promise<SshStateView>
   environmentTest(sessionId: string, environmentId: string, signal?: AbortSignal): Promise<{ platform: string; nodePath?: string; nodeVersion?: string }>
@@ -68,7 +75,12 @@ export function createSshClient(connection: Channel): SshClient {
     credentialImport: async (sessionId, label, privateKey, passphrase, signal) => await call('sshCredentialImport', { sessionId, label, privateKey, ...(passphrase === undefined ? {} : { passphrase }) }, signal),
     credentialPassword: async (sessionId, label, password, signal) => await call('sshCredentialPassword', { sessionId, label, password }, signal),
     credentialRemove: async (sessionId, id, signal) => await call('sshCredentialRemove', { sessionId, id }, signal),
-    hostKeyScan: async (sessionId, hostname, port, signal) => await call('sshHostKeyScan', { sessionId, hostname, port }, signal),
+    hostKeyScan: async (sessionId, target, signal) => await call('sshHostKeyScan', {
+      sessionId,
+      port: target.port ?? 22,
+      ...(target.hostname === undefined ? {} : { hostname: target.hostname }),
+      ...(target.alias === undefined ? {} : { alias: target.alias }),
+    }, signal),
     environmentSave: async (sessionId, revision, environment, fingerprint, hostKeyToken, signal) => await call('sshEnvironmentSave', { sessionId, revision, environment, fingerprint, ...(hostKeyToken === undefined ? {} : { hostKeyToken }) }, signal),
     environmentRemove: async (sessionId, revision, environmentId, signal) => await call('sshEnvironmentRemove', { sessionId, revision, environmentId }, signal),
     environmentTest: async (sessionId, environmentId, signal) => await call('sshEnvironmentTest', { sessionId, environmentId }, signal),

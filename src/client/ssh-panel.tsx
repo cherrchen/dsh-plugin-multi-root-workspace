@@ -20,7 +20,7 @@ import type { RootsView } from '../contract.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
 import { maybeComponent } from '../compat/client-icons.ts'
 import { errorHasDetail, errorKeyOf, PanelError } from './panel-client.ts'
-import type { CredentialPublicView, SshBindingView, SshClient, SshEnvironmentView, SshStateView } from './ssh-client.ts'
+import type { CredentialPublicView, SshBindingView, SshClient, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
 import { SshCustodySection, type RemoteCustodyMode } from './remote-custody.tsx'
 import type { Key } from './locales.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
@@ -54,7 +54,7 @@ export function platformLabel(platform: string, t: Translate): string {
 }
 
 /** One parsed host-key scan answer. */
-type ScanState = { readonly token: string; readonly keys: readonly { readonly type: string; readonly fingerprint: string }[] }
+type ScanState = SshScanResult
 
 /** The two credential sources a personal environment can use. */
 type CredentialMode = 'alias' | 'managed'
@@ -384,7 +384,7 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
     <section className="mrfw-sshStep">
       <span className="mrfw-sshStepTitle">{t('ssh.add.stepHostKey')}</span>
       <div className="mrfw-sshScanRow">
-        <Button variant="outline" size="sm" disabled={busy || draft.hostname.trim() === ''} onClick={props.onScan}>
+        <Button variant="outline" size="sm" disabled={busy || (draft.credentialSource === 'alias' ? draft.alias.trim() === '' : draft.hostname.trim() === '')} onClick={props.onScan}>
           {t('ssh.scan')}
         </Button>
         {props.scan === undefined ? null : (
@@ -585,15 +585,25 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     }
   }
 
-  const scanHost = async (draft: EditorDraft): Promise<void> => {
+  const scanHost = async (draft: EditorDraft, applyPatch: (patch: Partial<EditorDraft>) => void): Promise<void> => {
     if (ssh === undefined || sessionId === undefined) return
     const port = Number.parseInt(draft.port, 10)
+    const alias = draft.credentialSource === 'alias' && draft.alias.trim() !== '' ? draft.alias.trim() : undefined
     setBusy(true)
     try {
-      const result = await ssh.hostKeyScan(sessionId, draft.hostname.trim(), Number.isInteger(port) ? port : 22)
+      const result = await ssh.hostKeyScan(sessionId, {
+        port: Number.isInteger(port) ? port : 22,
+        ...(alias === undefined ? { hostname: draft.hostname.trim() } : { alias }),
+      })
       if (mounted.current) {
         setScan(result)
         setFingerprint(result.keys[0]?.fingerprint)
+        // Alias scans resolve `ssh -G` on the host: copy the proven target
+        // back into the form so the fingerprint the user confirms is the
+        // one `sshEnvironmentSave` re-verifies.
+        if (result.endpoint !== undefined) {
+          applyPatch({ hostname: result.endpoint.hostname, port: String(result.endpoint.port), user: result.endpoint.user })
+        }
       }
     } catch (cause: unknown) {
       if (mounted.current) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
@@ -953,7 +963,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
             credentials={userCredentials}
             scan={scan}
             fingerprint={fingerprint}
-            onScan={() => { void scanHost(editDraft) }}
+            onScan={() => { void scanHost(editDraft, patch => { setEditDraft(current => current === undefined ? current : { ...current, ...patch }) }) }}
             onFingerprint={setFingerprint}
             onSave={() => { void saveEnvironment(editDraft) }}
             onCancel={() => { setEditDraft(undefined); setScan(undefined); setFingerprint(undefined) }}
@@ -1018,7 +1028,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         credentials={userCredentials}
         scan={scan}
         fingerprint={fingerprint}
-        onScan={() => { void scanHost(addDraft) }}
+        onScan={() => { void scanHost(addDraft, patch => { setAddDraft(current => ({ ...current, ...patch })) }) }}
         onFingerprint={setFingerprint}
         onSave={() => { void saveEnvironment(addDraft) }}
         onCancel={() => { setAddDraft(blankEditor()); setScan(undefined); setFingerprint(undefined); setSaved(false) }}
