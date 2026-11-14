@@ -37,7 +37,7 @@
     },
     {
       "files": [
-        "tests/auto-review/upstream.spec.ts"
+        "tests/auto-review/**/upstream.spec.ts"
       ],
       "rules": {
         "no-throw-literal": "off"

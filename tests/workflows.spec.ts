@@ -87,8 +87,9 @@ describe('CI workflow gates', () => {
     expect(runner).toContain("version === pin ? '--frozen-lockfile' : '--no-frozen-lockfile'")
     expect(runner).toContain("['scripts/upgrade-dsh.mjs', version]")
     expect(runner.indexOf("['compat:check']")).toBeLessThan(runner.indexOf("['build']"))
-    expect(runner).toContain("if (full && version === reviewPin) await step('auto-review-fork'")
-    expect(runner).toContain("if (version === reviewPin) await step('smoke-auto-review'")
+    expect(runner).toContain("if (full && jointRelease) await step('auto-review-fork'")
+    expect(runner).toContain("if (jointRelease) await step('smoke-auto-review'")
+    expect(runner).toContain("const jointRelease = AUTO_REVIEW_CONTRACT_DATA.releases.includes(version)")
     expect(runner).not.toContain('DSH_MULTI_ROOT_COMPAT')
   })
 

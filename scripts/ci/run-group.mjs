@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { createInterface } from 'node:readline'
 import { nodeForRelease } from './plan.mjs'
-import { autoReviewRelease } from '../lib/auto-review-development.mjs'
+import { AUTO_REVIEW_CONTRACT_DATA } from '../lib/auto-review-development.mjs'
 
 const minute = 60_000
 const { CI_GROUP, GITHUB_SHA: sha, GITHUB_WORKSPACE, GITHUB_STEP_SUMMARY, RUNNER_TEMP } = process.env
@@ -31,7 +31,6 @@ for (const root of [tmpdir(), '/tmp']) {
   }
 }
 const pin = JSON.parse(readFileSync(join(workspace, 'package.json'), 'utf8')).devDependencies['@deepseek-ai/dsh']
-const reviewPin = autoReviewRelease(readFileSync(join(workspace, 'src/compat/auto-review-contract.ts'), 'utf8'))
 const scratch = mkdtempSync(join(parent, 'mr-'))
 const archive = join(scratch, 'source.tar')
 
@@ -72,6 +71,10 @@ function run(command, args, { cwd, env, log, prefix, timeout }) {
 }
 
 async function verify(version) {
+  // Every joint Auto Review release runs the source-only fork gate on the full
+  // image and the composed smoke on every image. The lane's development packages
+  // were materialized by upgrade-dsh for its own baseline.
+  const jointRelease = AUTO_REVIEW_CONTRACT_DATA.releases.includes(version)
   const output = join(resultRoot, version)
   mkdirSync(output, { recursive: true })
   const cwd = join(scratch, version)
@@ -108,7 +111,7 @@ async function verify(version) {
     await step('install', 'pnpm', ['install', version === pin ? '--frozen-lockfile' : '--no-frozen-lockfile'])
     await step('compat', 'pnpm', ['compat:check'])
     if (full) await step('typecheck', 'pnpm', ['typecheck'])
-    if (full && version === reviewPin) await step('auto-review-fork', 'pnpm', ['auto-review:fork'])
+    if (full && jointRelease) await step('auto-review-fork', 'pnpm', ['auto-review:fork'])
     await step('build', 'pnpm', ['build'])
     await step('registry-probe', 'pnpm', ['registry:probe', '--required'])
     const probe = join(temp, 'kernel.env')
@@ -127,7 +130,7 @@ async function verify(version) {
     await step('smoke-journey', 'pnpm', ['smoke:journey'])
     await step('pack', 'pnpm', ['pack:check'])
     await step('smoke-packed', 'pnpm', ['smoke:packed'], 15)
-    if (version === reviewPin) await step('smoke-auto-review', 'pnpm', ['smoke:auto-review'])
+    if (jointRelease) await step('smoke-auto-review', 'pnpm', ['smoke:auto-review'])
     record.status = 'success'
   } catch (error) {
     record.failure = `${stage}: ${error.message}`

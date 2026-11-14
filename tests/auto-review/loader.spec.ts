@@ -15,7 +15,9 @@ async function fixture(delay = 0, failOfficial = false) {
   ctx.baseUrl = import.meta.url
   await ctx.plugin(Loader)
   cleanup.push(() => ctx.fiber.dispose())
-  const write = vi.spyOn(ctx.loader, 'write')
+  // cordis loader 1.0.x persisted through `write`; 1.1.0 moved persistence to
+  // the tree's `commit` hook, so the old spy only exists on the earlier shape.
+  const write = 'write' in ctx.loader ? vi.spyOn(ctx.loader as unknown as { write: (...args: unknown[]) => unknown }, 'write') : undefined
   const errors = vi.spyOn(ctx.logger, 'error')
   let owner: string | undefined
   const events: string[] = []
@@ -79,7 +81,7 @@ describe('Auto Review Loader takeover', () => {
       expect(f.owner()).toBe('fork')
       expect([...f.ctx.loader.entries()].some(e => e.options.name === OFFICIAL_AUTO_REVIEW)).toBe(false)
       expect(f.errors).not.toHaveBeenCalled()
-      expect(f.write).not.toHaveBeenCalled()
+      expect(f.write?.mock.calls ?? []).toHaveLength(0)
     })
   }
 
@@ -95,7 +97,7 @@ describe('Auto Review Loader takeover', () => {
     expect(f.owner()).toBe('official')
     expect(Object.getOwnPropertyDescriptor(f.ctx.loader.root, 'update')).toEqual(descriptor)
     expect(f.events).toEqual(['claim:official', 'release:official', 'claim:fork', 'release:fork', 'claim:official'])
-    expect(f.write).not.toHaveBeenCalled()
+    expect(f.write?.mock.calls ?? []).toHaveLength(0)
     expect(f.errors).not.toHaveBeenCalled()
   })
 
