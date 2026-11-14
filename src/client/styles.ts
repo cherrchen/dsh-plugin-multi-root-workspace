@@ -995,4 +995,94 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
 .mrfw-actions .mrfw-iconBtn {
   width: 32px;
 }
+
+/* The worktree prompt's non-modal notice (ADR-0039 第二十次修订 §20.3).
+   The shell.overlay container is click-through, so the card re-enables pointer
+   events for itself only: the page and its inputs stay usable behind it. It
+   never fades or times out — only an explicit action or a session/settings
+   change closes it. */
+.mrfw-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1000;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 48px));
+  padding: 14px 16px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: var(--dsw-elevation-prominent);
+  color: var(--dsw-alias-label-primary);
+  pointer-events: auto;
+}
+
+.mrfw-toastText {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-toastActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The reminder-delay dropdown: the same border/background/ink recipe as the
+   text inputs, in the compact capsule height the notice's buttons use. */
+.mrfw-select {
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 6px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.mrfw-select:focus {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.mrfw-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.mrfw-toastSelect {
+  flex: none;
+  min-width: 0;
+  max-width: 180px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The Dialog footer's combined "later / do not remind" control row. The
+   Modal's own footer is a single justify-end line without wrapping; the
+   dropdown plus two capsule buttons may need a second line on a narrow card. */
+.mrfw-worktreeActions {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.mrfw-snoozeSelect {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
 `
