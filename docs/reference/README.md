@@ -25,6 +25,7 @@ English: [README.en.md](./README.en.md)
 
 - [multi-root-skills-seams.md](./multi-root-skills-seams.md) — 附加根 Skills 的 Session、原生 ID、Effective CWD、文件解析、Settings 与 Web 接缝源码事实及可复现原型方法。
 - [auto-review-compatibility.md](./auto-review-compatibility.md) — Auto Review `0.2.1-rc.2` 的上下文、来源分类、工具调度时机与外部兼容接缝调研。
+- [auto-review-0.2.2-migration.md](./auto-review-0.2.2-migration.md) — Auto Review 从 `0.2.1-rc.2` 之后到 `0.2.2-rc.3` 的版本拓扑、源码代际差异、被消费接缝变化与多基线分组结论。
 - [multi-root-workspace-research.md](./multi-root-workspace-research.md) — 上游官方仓库 Workspace / Sandbox / 插件体系现状调研快照（master `c291e7961a`；§8 为"不改上游"机制的补充调研）。
 
 ## 推荐命名

@@ -38,6 +38,8 @@ Plans with long-term reference value should not be deleted.
 
 active:
 
+- [2026-11-14-auto-review-multi-baseline.md](./active/2026-11-14-auto-review-multi-baseline.md) (Chinese) — The optional Auto Review joint contract grows from a single `0.2.1-rc.2` baseline to two source baselines covering nine exact releases (`0.2.1-rc.2`–`rc.5`, `0.2.2-alpha.2`–`rc.3`): per-baseline verbatim forks, lane-scoped dynamic loading, implementation typechecking at each baseline's compile pin, cross-generation tests/smoke/CI gates, and documentation; decision in [ADR-0040](../decisions/ADR-0040-auto-review-multi-baseline.md).
+
 - [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) (Chinese) — P1–P7 cover worktree root suggestions, the plugin toggle, and manual cleanup (B). P8–P10 add explicit access to shared Git metadata for linked worktrees (A). See [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md) for the decision and the roadmap for progress; shipping in `v0.1.17`.
 
 - [2026-11-08-workspace-menu-folders-dialog.md](./active/2026-11-08-workspace-menu-folders-dialog.md) (Chinese) — A "Manage workspace folders…" entry in the workspace `...` menu: a controller reusing the footer dialog, a `workspace` context-menu contribution (order 150), and switching/reusing the target workspace's blank session before opening with that fixed session; `RootSwitcher` and upstream `WorkspaceBrowser` stay untouched (decision in [ADR-0038](../decisions/ADR-0038-workspace-menu-folders-dialog.md)).

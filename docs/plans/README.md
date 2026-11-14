@@ -38,6 +38,8 @@ completed/
 
 active：
 
+- [2026-11-14-auto-review-multi-baseline.md](./active/2026-11-14-auto-review-multi-baseline.md) — Auto Review 联合合同从单一 `0.2.1-rc.2` 扩展为两个源码基线的 9 个精确发布（`0.2.1-rc.2`–`rc.5`、`0.2.2-alpha.2`–`rc.3`）：按基线保存逐字节 fork、按车道动态加载、按编译 pin 做实现类型检查、跨代测试/冒烟/CI 门禁与文档收尾；决策见 [ADR-0040](../decisions/ADR-0040-auto-review-multi-baseline.md)。
+
 - [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) — P1–P7 实施 worktree 附加根建议、实验性默认关闭的插件开关与手动清理（B），P8–P10 实施 linked worktree 的主 checkout 授权（A）；第十九次修订加入单/多候选提示分流。决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)，进度见路线账本；随 `v0.1.17` 发版。
 
 - [2026-11-08-workspace-menu-folders-dialog.md](./active/2026-11-08-workspace-menu-folders-dialog.md) — 工作区 `...` 菜单新增「管理工作区目录…」：复用 footer 对话框的 controller、`workspace` context-menu 贡献（order 150）、先切换/复用目标工作区 blank 再打开并固定 session；`RootSwitcher` 与上游 `WorkspaceBrowser` 零改动（决策见 [ADR-0038](../decisions/ADR-0038-workspace-menu-folders-dialog.md)）。

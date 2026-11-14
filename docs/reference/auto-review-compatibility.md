@@ -2,6 +2,8 @@
 
 调研日期：2026-10-18。本文记录已核实的上游源码事实；适配设计与实施步骤见[适配计划](../plans/completed/2026-10-18-auto-review-context-adaptation.md)。进度和支持声明只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
+> 2026-11-14 更新：本文的事实范围仍固定在上游 `dsh-v0.2.1-rc.2`（即基线 A）。联合合同已扩展为 `0.2.1-rc.2`–`rc.5` 与 `0.2.2-alpha.2`–`rc.3` 两个源码基线；`0.2.2` 线的 reviewer 输入模型、请求身份与失败语义差异见[多基线接口审查](./auto-review-0.2.2-migration.md)，设计与阶段验收见[多基线适配计划](../plans/active/2026-11-14-auto-review-multi-baseline.md)。
+
 ## 基线与证据范围
 
 | 对象 | 本次核对基线 |
