@@ -63,6 +63,18 @@ export function errorKeyOf(code: string): Key {
   return (candidate in zh ? candidate : 'error.fallback') as Key
 }
 
+/**
+ * Whether the host's own message adds diagnosis the localized key omits.
+ * Transport and protocol failures carry their detail in the message text,
+ * and a code this build has no key for can say nothing else; a code with a
+ * translated key already says what it means, so the host prose stays off.
+ * @param code - the failure code.
+ * @returns whether to render `error.message` after the localized key.
+ */
+export function errorHasDetail(code: string): boolean {
+  return code === 'unavailable' || code.startsWith('panel/') || errorKeyOf(code) === 'error.fallback'
+}
+
 /** The panel's callable face, injected into its component. */
 export interface PanelClient {
   /**

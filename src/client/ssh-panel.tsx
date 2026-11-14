@@ -19,7 +19,7 @@ import { Button, Input, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives
 import type { RootsView } from '../contract.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
 import { maybeComponent } from '../compat/client-icons.ts'
-import { errorKeyOf, PanelError } from './panel-client.ts'
+import { errorHasDetail, errorKeyOf, PanelError } from './panel-client.ts'
 import type { CredentialPublicView, SshBindingView, SshClient, SshEnvironmentView, SshStateView } from './ssh-client.ts'
 import { SshCustodySection, type RemoteCustodyMode } from './remote-custody.tsx'
 import type { Key } from './locales.ts'
@@ -1076,7 +1076,12 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     contentClassName="mrfw-sshDialogContent"
   >
     <SshTabStrip value={tab} onChange={changeTab} t={t} />
-    {error === undefined ? null : <p role="alert" className="mrfw-alert">{t(errorKeyOf(error.code))}</p>}
+    {error === undefined ? null : (
+      <p role="alert" className="mrfw-alert">
+        {t(errorKeyOf(error.code))}
+        {errorHasDetail(error.code) ? ` (${error.message})` : ''}
+      </p>
+    )}
     <div id={panelId} role="tabpanel" aria-labelledby={tabId} className="mrfw-sshDialogPanel">
       {panel()}
     </div>

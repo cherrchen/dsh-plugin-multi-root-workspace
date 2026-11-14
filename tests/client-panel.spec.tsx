@@ -942,7 +942,11 @@ describe('the panel dialog', () => {
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.fallback`) })
+    // The unknown code still earns its host detail: the generic key alone
+    // would say nothing about what actually failed.
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.fallback (unexpected)`)
+    })
   })
 
   it('shows the store failure the host reported', async () => {
