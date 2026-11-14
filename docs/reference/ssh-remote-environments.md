@@ -25,7 +25,7 @@
 
 面板通道 `PANEL_CHANNEL` 上的 `ssh*` 端点（`src/remote/personal-contract.ts`）：每个请求携带 `sessionId`，Host 由会话解析主根；未知字段即 `panel/bad-request`。所有端点在开关未开或 `mode !== 'personal'` 时拒绝 `remote-personal-unavailable`；所有变更端点返回刷新后的 `sshState`。
 
-`sshState`、`sshCredentialGenerate`、`sshCredentialImport`、`sshCredentialPassword`、`sshCredentialRemove`（`credential-in-use`）、`sshHostKeyScan`（60 秒有界令牌，`host-key-token-expired` / `host-key-mismatch`）、`sshEnvironmentSave`（托管凭据需 `hostKeyToken` + `fingerprint`；`ssh-config` 凭据的指纹必须匹配用户 known_hosts）、`sshEnvironmentRemove`、`sshEnvironmentTest`、`sshHelperInstall`（`helper-hash-mismatch`）、`sshAccessKeyInstall`、`sshBindingSave`（主根由 Host 注入）、`sshBindingRemove`、`sshConfigLink`。
+`sshState`、`sshCredentialGenerate`、`sshCredentialImport`、`sshCredentialPassword`、`sshCredentialRemove`（`credential-in-use`）、`sshHostKeyScan`（直连 `hostname`/`port` 触网探测，返回 60 秒有界令牌，`host-key-token-expired` / `host-key-mismatch`；`alias` 形式经 `ssh -G` 在 Host 解析并返回用户 known_hosts 指纹与解析出的 endpoint，不触网、无令牌）、`sshEnvironmentSave`（托管凭据需 `hostKeyToken` + `fingerprint`；`ssh-config` 凭据的指纹必须匹配用户 known_hosts）、`sshEnvironmentRemove`、`sshEnvironmentTest`、`sshHelperInstall`（`helper-hash-mismatch`）、`sshAccessKeyInstall`、`sshBindingSave`（主根由 Host 注入）、`sshBindingRemove`、`sshConfigLink`。
 
 无任何端点返回私钥或密码字节。
 
@@ -89,7 +89,7 @@ GUI 入口有两处：
 3. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管，GUI 不读取、不创建。
 4. **模式设置**：复用 `src/client/remote-custody.tsx` 的三档单选、team 四个 broker 字段与降级风险确认，写入同一个 `multi-root-remote-tools` form 与 CAS revision，不另建写入路径；同时说明档位如何决定“添加连接”的引导方式（personal 图形化表单、team 部署清单 + broker、hardened 部署 profile + 全量证明）。档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源）。
 
-所有变更请求携带当前 `revision`；`personal-config-conflict` 时前端先重取 `sshState` 再显示本地化冲突文案。服务端错误一律经 `error.*` 本地化渲染。对话框关闭不影响 Workspace Folders 对话框；打开期间会话切换会清空旧会话的 `sshState` 并重新读取。
+所有变更请求携带当前 `revision`；`personal-config-conflict` 时前端先重取 `sshState` 再显示本地化冲突文案。服务端错误一律经 `error.*` 本地化渲染；带后缀的错误码（`code:detail`）按前缀取键并附 Host 原文。对话框关闭不影响 Workspace Folders 对话框；打开期间会话切换会清空旧会话的 `sshState` 并重新读取；`sshState` 读取失败显示可重试的错误态；对话框自身不随远端开关或控制面状态卸载，表单草稿保留。
 
 **开关默认值**（GUI 勾选"允许命令执行"/"允许文件传输"时写入的完整节，见上文文件 schema）：
 
