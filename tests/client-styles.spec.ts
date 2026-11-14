@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /**
  * The stylesheet rules that position this plugin's launcher inside the
- * upstream Files tab header.
+ * upstream Files tab header, and the rules that dress the fork's
+ * additional-root tree and workspace search.
  *
  * The launcher's place in that header is a CSS `order` effect, not a slot
  * registration property: upstream sorts `files.actions` occupants inside
@@ -284,5 +285,169 @@ describe('the navigator search takeover (0.2.2-rc.2)', () => {
     expect(document.querySelector('[data-files-search-toggle]')!.matches(selector)).toBe(true)
     document.querySelector('.mrfw-rootSwitcher')!.setAttribute('data-root-kind', 'primary')
     expect(document.querySelector('[data-files-search-toggle]')!.matches(selector)).toBe(false)
+  })
+})
+
+describe('the additional-root search styles (0.2.2-rc.2)', () => {
+  /** The stylesheet with its comments stripped: every match below is a rule. */
+  const CSS = STYLES.replace(/\/\*[\s\S]*?\*\//g, '')
+
+  // One entry per upstream rule the fork renames, so a dropped rule fails here
+  // even when no other assertion names it.
+  const SEARCH_CLASSES = [
+    'mrfw-fsPane',
+    'mrfw-fsBar',
+    'mrfw-fsField',
+    'mrfw-fsTool',
+    'mrfw-fsInput',
+    'mrfw-fsStatus',
+    'mrfw-fsStatusIdle',
+    'mrfw-fsStatusLine',
+    'mrfw-fsSpinner',
+    'mrfw-fsFailure',
+    'mrfw-fsRetry',
+    'mrfw-fsEmptyNote',
+    'mrfw-fsInfoBtn',
+    'mrfw-fsSettings',
+    'mrfw-fsSettingsHeader',
+    'mrfw-fsSettingsTitle',
+    'mrfw-fsSettingsDesc',
+    'mrfw-fsSettingsError',
+    'mrfw-fsSettingsOption',
+    'mrfw-fsRules',
+    'mrfw-fsRule',
+    'mrfw-fsRuleOff',
+    'mrfw-fsRuleLabel',
+    'mrfw-fsRuleCheck',
+    'mrfw-fsRuleName',
+    'mrfw-fsRuleInput',
+    'mrfw-fsAddRule',
+    'mrfw-fsToolBtn',
+    'mrfw-fsIcon',
+  ] as const
+
+  /** Every rule block whose selector names one class. */
+  const blocks = (className: string): string[] =>
+    [...CSS.matchAll(new RegExp(`\\.${className}(?![\\w-])[^{}]*\\{[^}]*\\}`, 'g'))].map(match => match[0])
+
+  /** One rule's declarations, whitespace-normalized, for recipe equality. */
+  const declarationsOf = (rule: string | undefined): string => {
+    if (rule === undefined) return ''
+    return rule.slice(rule.indexOf('{') + 1, rule.lastIndexOf('}'))
+      .split(';')
+      .map(part => part.replace(/\s+/g, ' ').trim())
+      .filter(part => part !== '')
+      .join(';')
+  }
+
+  it('maps every upstream search rule into the mrfw-fs* namespace', () => {
+    for (const className of SEARCH_CLASSES) expect(CSS).toContain(`.${className}`)
+    // The tree's rc.2 additions and the header toggle live outside mrfw-fs*.
+    for (const className of ['mrfw-ftMatch', 'mrfw-ftHidden', 'mrfw-ftInactive', 'mrfw-switcherSearch']) {
+      expect(CSS).toContain(`.${className}`)
+    }
+  })
+
+  it('draws the pane as the navigator column that owns the bar height', () => {
+    const pane = blocks('mrfw-fsPane')[0]
+    expect(pane).toBeDefined()
+    expect(pane).toMatch(/display:\s*flex/)
+    expect(pane).toMatch(/flex-direction:\s*column/)
+    expect(pane).toMatch(/flex:\s*1 1 auto/)
+    expect(pane).toMatch(/min-height:\s*0/)
+    expect(pane).toMatch(/--files-search-bar-height:\s*42px/)
+    // The settings panel is absolute; without a positioned pane it would
+    // anchor to the page and float over the header instead of the tree.
+    expect(pane).toMatch(/position:\s*relative/)
+  })
+
+  it('reproduces the coarse-pointer targets, bar, rules, and field size', () => {
+    expect(CSS).toContain('@media (pointer: coarse)')
+    const coarse = CSS.slice(CSS.indexOf('@media (pointer: coarse)'))
+    expect(coarse).toMatch(/\.mrfw-fsTool\s*\{[^}]*width:\s*32px[^}]*height:\s*32px/s)
+    expect(coarse).toMatch(/\.mrfw-fsPane\s*\{[^}]*--files-search-bar-height:\s*50px/s)
+    expect(coarse).toMatch(/\.mrfw-fsRule\s*\{[^}]*min-height:\s*44px/s)
+    expect(coarse).toMatch(/\.mrfw-fsInput,\s*\.mrfw-fsRuleInput\s*\{[^}]*font-size:\s*16px/s)
+  })
+
+  it('keeps the bar, field, tool, and settings geometry on the upstream recipe', () => {
+    expect(blocks('mrfw-fsBar')[0]).toMatch(/height:\s*var\(--files-search-bar-height\)/)
+    expect(blocks('mrfw-fsField')[0]).toMatch(/background:\s*var\(--dsw-alias-bg-layer-1\)/)
+    expect(CSS).toMatch(/\.mrfw-fsField:focus-within\s*\{[^}]*border-color:\s*var\(--dsw-alias-state-business-primary\)/s)
+    expect(CSS).toMatch(/\.mrfw-fsTool svg\s*\{[^}]*width:\s*14px[^}]*height:\s*14px/s)
+    expect(CSS).toMatch(/\.mrfw-fsInput::-webkit-search-cancel-button\s*\{\s*display:\s*none/s)
+    const settings = blocks('mrfw-fsSettings')[0]
+    expect(settings).toMatch(/position:\s*absolute/)
+    expect(settings).toMatch(/top:\s*var\(--files-search-bar-height\)/)
+    expect(settings).toMatch(/box-shadow:\s*var\(--dsw-elevation-prominent\)/)
+    expect(blocks('mrfw-fsSettingsOption')[0]).toMatch(/border-top:\s*none/)
+  })
+
+  it('gives the settings header controls the header tool recipe', () => {
+    const tool = blocks('mrfw-fsToolBtn')[0]
+    expect(tool).toMatch(/width:\s*28px/)
+    expect(tool).toMatch(/height:\s*28px/)
+    expect(tool).toMatch(/padding:\s*6px/)
+    expect(tool).toMatch(/color:\s*var\(--dsw-alias-label-secondary\)/)
+    expect(CSS).toMatch(/\.mrfw-fsToolBtn:hover\s*\{[^}]*background:\s*var\(--dsw-alias-interactive-bg-hover\)/s)
+    expect(CSS).toMatch(/\.mrfw-fsToolBtn\[aria-pressed='true'\]/)
+  })
+
+  it('flattens the nested helpers onto the names the pane applies', () => {
+    expect(CSS).toMatch(/\.mrfw-fsAddRule \.mrfw-fsIcon\s*\{[^}]*color:\s*var\(--dsw-alias-label-tertiary\)/s)
+    expect(CSS).toMatch(/\.mrfw-fsAddRule:focus-within\s*\{[^}]*border-top-color:\s*var\(--dsw-alias-state-business-primary\)/s)
+    expect(CSS).toMatch(/\.mrfw-fsRuleOff \.mrfw-fsRuleName\s*\{[^}]*color:\s*var\(--dsw-alias-label-tertiary\)/s)
+  })
+
+  it('maps the tree hidden, inactive, and match rules onto the mrfw-ft* names', () => {
+    expect(blocks('mrfw-ftHidden')[0]).toMatch(/color:\s*var\(--dsw-alias-label-secondary\)/)
+    // The refused row keeps cancelling the row hover fill, under the new
+    // upstream name and the fork's legacy spelling alike.
+    expect(CSS).toMatch(/@media \(hover: hover\)\s*\{\s*\.mrfw-ftInactive:hover,\s*\.mrfw-ftOther:hover\s*\{[^}]*background:\s*transparent/s)
+    // The current-file fill stays the fork's, not upstream's .match rule.
+    expect(CSS).toMatch(/\.mrfw-ftRow\[data-files-current\]/)
+  })
+
+  it('marks search matches with the business primary ink', () => {
+    const match = blocks('mrfw-ftMatch')[0]
+    expect(match).toMatch(/color:\s*var\(--dsw-alias-state-business-primary\)/)
+    expect(match).toMatch(/background:\s*transparent/)
+  })
+
+  it('gives the header search toggle the reload recipe verbatim', () => {
+    const [reload, reloadHover] = blocks('mrfw-switcherReload')
+    const [search, searchHover] = blocks('mrfw-switcherSearch')
+    expect(search).toBeDefined()
+    expect(searchHover).toBeDefined()
+    expect(declarationsOf(search)).toBe(declarationsOf(reload))
+    expect(declarationsOf(searchHover)).toBe(declarationsOf(reloadHover))
+    // The button sits where the native search toggle sat, right after the
+    // reload replacement.
+    expect(CSS.indexOf('.mrfw-switcherSearch')).toBeGreaterThan(CSS.indexOf('.mrfw-switcherReload'))
+  })
+
+  it('keeps every new color, background, and font declaration on host tokens', () => {
+    const newRules = [
+      CSS.slice(CSS.indexOf('.mrfw-fsPane'), CSS.indexOf('.mrfw-openMenuAnchor')),
+      ...['mrfw-ftMatch', 'mrfw-ftHidden', 'mrfw-ftInactive', 'mrfw-switcherSearch'].flatMap(name => blocks(name)),
+    ].join('\n')
+    expect(newRules.trim()).not.toBe('')
+    // No literal color format and no CSS named color may reach the sheet.
+    expect(newRules).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/)
+    expect(newRules).not.toMatch(/\b(?:white|black|red|blue|green|gray|grey|yellow|orange|purple|pink|brown|cyan|magenta|silver|maroon|navy|olive|teal|aqua|lime|fuchsia)\b/i)
+    const declarations = [...newRules.matchAll(/(?:^|[;{])\s*([a-z-]+)\s*:\s*([^;}]+)/g)]
+    for (const declaration of declarations) {
+      const property = declaration[1]
+      const value = declaration[2]?.trim() ?? ''
+      if (property === undefined) continue
+      const colorProperty = property === 'color' || property === 'background' || property === 'background-color'
+        || property === 'accent-color' || property === 'outline-color'
+        || (property.startsWith('border') && property.endsWith('-color'))
+      if (colorProperty) expect(value).toMatch(/^(?:var\(--dsw-[^)]*\)|transparent)$/)
+      if (property === 'font' || property === 'font-family') expect(value).toMatch(/^(?:var\(--dsw-[^)]*\)|inherit)$/)
+      if (property === 'outline') expect(value).toMatch(/^(?:var\(--dsw-|none$)/)
+      if (property === 'box-shadow') expect(value).toMatch(/^var\(--dsw-/)
+      if (property.startsWith('border') && !property.endsWith('-color') && value.includes('solid')) expect(value).toContain('var(--dsw-')
+    }
   })
 })

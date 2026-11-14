@@ -61,6 +61,17 @@ export const IconFolderOpen16 = icon('folder-open')
 export const PermissionIconWorkspaceWriteRegular = icon('workspace-write')
 export const PermissionIconReadOnlyRegular = icon('read-only')
 
+// The Regular glyph family the workspace-search surface spells verbatim
+// (0.2.2-rc.2, where the feature itself arrived).
+export const IconSearchOutlineRegular = icon('search')
+export const IconEyeOutlineRegular = icon('eye')
+export const IconEyeOffOutlineRegular = icon('eye-off')
+export const IconCloseOutlineRegular = icon('close')
+export const IconInfoOutlineRegular = icon('info')
+export const IconPlusOutlineRegular = icon('plus')
+export const IconTrashOutlineRegular = icon('trash')
+export const IconRefreshOutlineRegular = icon('refresh')
+
 /** Controlled host Switch mirror, preserving its accessible button contract. */
 export function Switch(props: {
   checked: boolean
@@ -71,6 +82,34 @@ export function Switch(props: {
   return <button type="button" role="switch" aria-label={props.label}
     aria-checked={props.checked} disabled={props.disabled}
     onClick={() => props.onChange(!props.checked)} />
+}
+
+/** Minimal `Button` mirror: a real button, with every extra prop forwarded (data-*, aria-*). */
+export function Button(props: {
+  readonly variant?: string
+  readonly size?: string
+  readonly className?: string
+  readonly onClick?: () => void
+  readonly children?: ReactNode
+} & Record<string, unknown>): ReactNode {
+  const { variant, size, className, onClick, children, ...rest } = props
+  return createElement('button', {
+    type: 'button',
+    'data-variant': variant,
+    'data-size': size,
+    className,
+    onClick,
+    ...rest,
+  }, children)
+}
+
+/** Minimal `StateDot` mirror: the state rides a data attribute. */
+export function StateDot(props: {
+  readonly state: string
+  readonly size?: number
+  readonly className?: string
+}): ReactNode {
+  return createElement('span', { 'data-state-dot': props.state, className: props.className })
 }
 
 /** Minimal `Tag` mirror: the same `span[data-tone]` shape the host renders. */

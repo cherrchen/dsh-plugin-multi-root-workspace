@@ -150,8 +150,14 @@ interface HostServices {
   readonly sidebarRightTabs?: unknown
 }
 
+/** Optional host capabilities the stub remote exposes. */
+interface MountOptions {
+  /** Give the stub `workspaceFiles` the `0.2.2-rc.2` search method (the search seat's probe). */
+  readonly workspaceSearch?: boolean
+}
+
 /** Apply the real client entry to a recording stub context. */
-function mount(withConnection = true, services: HostServices = {}): Harness {
+function mount(withConnection = true, services: HostServices = {}, options: MountOptions = {}): Harness {
   const calls: Call[] = []
   const treeCalls: TreeCall[] = []
   const opens: OpenCall[] = []
@@ -166,6 +172,9 @@ function mount(withConnection = true, services: HostServices = {}): Harness {
         calls.push({ channel, endpoint, payload })
         if (endpoint === 'list' && listFails) {
           return { ok: false, error: { code: 'registry-contended', message: 'registry busy' } }
+        }
+        if (endpoint === 'search') {
+          return { ok: true, value: { root: '/repos/payments', matches: [], truncated: false, incomplete: false } }
         }
         return { ok: true, value: view }
       },
@@ -190,6 +199,14 @@ function mount(withConnection = true, services: HostServices = {}): Harness {
         treeCalls.push({ kind: 'changes', sessionId, path })
         return watchStub({ push: () => {}, stop: () => {} })
       },
+      ...(options.workspaceSearch === true
+        ? {
+          search: async (_sessionId: string, _request: { readonly query: string }) => ({
+            ok: true as const,
+            value: { root: '/repos/payments', matches: [], truncated: false, incomplete: false },
+          }),
+        }
+        : {}),
     },
     $stream: streamStub,
   }
@@ -984,6 +1001,47 @@ describe('the Files-tab switcher host-parity wiring', () => {
     expect(input.canOpen).toBeTypeOf('function')
     expect(input.canOpen!({ path: '/repos/payments/notes.md' })).toBe(true)
     expect(input.canOpen!({ path: '/repos/payments/other.md' })).toBe(false)
+  })
+})
+
+
+describe('the Files-tab search surface', () => {
+  /** A renderer stub that always draws the plugin's legacy fallback. */
+  function factoryStub() {
+    return vi.fn((_name: string, _input: object, options: { fallback: ReactElement }) => options.fallback)
+  }
+
+  it('shows the search toggle and searches the selected root through the channel', async () => {
+    const harness = mount(true, {}, { workspaceSearch: true })
+    const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factoryStub() }, false, true)
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+
+    const toggle = document.querySelector<HTMLElement>('[data-mrfw-files-search-toggle]')
+    expect(toggle).not.toBeNull()
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle!)
+    const input = await screen.findByRole('searchbox')
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true')
+
+    fireEvent.change(input, { target: { value: 'notes' } })
+    await waitFor(() => {
+      expect(harness.calls.some(call => call.endpoint === 'search'
+        && (call.payload as { rootId?: string }).rootId === 'a'
+        && (call.payload as { query?: string }).query === 'notes')).toBe(true)
+    })
+    await waitFor(() => { expect(document.querySelector('[data-files-row="search-empty"]')).not.toBeNull() })
+  })
+
+  it('keeps the search toggle out on a host without the upstream search call', async () => {
+    const harness = mount(true)
+    const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factoryStub() }, false, true)
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+    expect(document.querySelector('[data-mrfw-files-search-toggle]')).toBeNull()
+    expect(screen.queryByRole('searchbox')).toBeNull()
   })
 })
 

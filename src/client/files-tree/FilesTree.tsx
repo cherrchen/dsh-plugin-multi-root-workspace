@@ -18,23 +18,18 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import clsx from 'clsx'
-import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
-import type { PropsLocale, PropsStore, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsLocale, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import {
-  FileTypeIcon, IconFolderCloseRegular, IconFolderOpenRegular, classifyFileType,
-} from './primitives.ts'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
-import { nativeTreeInput, type NativeTreeEntry, type NativeTreeRenderer } from '../../compat/files-tree.ts'
+import type { NativeTreeRenderer } from '../../compat/files-tree.ts'
 import type { FilesMenuSeat } from './context-menu.ts'
-import type { WorkspaceDirectoryEntry } from '@deepseek-ai/dsh-api-workspace-files/types'
-import { childPath } from './face.ts'
 import type { FilesInjected } from './face.ts'
 import { locateFile, relativeUnderRoot } from './locate.ts'
 import type {} from './locales.ts'
-import type { createFilesStore, FilesTabState } from './store.ts'
+import type { createFilesStore } from './store.ts'
+import { drawnTree } from './hidden.ts'
+import { TreeView } from './tree-view.tsx'
 import css from './FilesBody.module.css.ts'
 
 /**
@@ -85,6 +80,13 @@ export type FilesTreeProps =
      */
     readonly useCanOpen?: ((selector: (version: number) => number) => number) | undefined
     /**
+     * Whether hidden entries are drawn, the workspace search's eye toggle
+     * (`0.2.2-rc.2+`). Absent draws every entry, which is the pre-rc.2 native
+     * behavior and the only behavior on releases without the search UI.
+     * @default true
+     */
+    readonly showHidden?: boolean | undefined
+    /**
      * The owner's live scroll mirror — upstream's `scrolled` writing
      * `pane.scrollTop`: fired on every scroll and once more at unmount with
      * the body's final offset (the adapter refuses the write when the owner
@@ -125,126 +127,6 @@ export type FilesTreeProps =
     } | undefined
   }
 
-/** Natural, case-insensitive name order, so `file2` precedes `file10`. */
-const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
-
-/**
- * Order one level's entries for display: directories first, then everything
- * else, each group by name. The endpoint's order is a listing fact; this is the
- * reader's.
- * @param entries - the listing as the endpoint returned it.
- * @returns a new array, directories first, then by name within each group.
- */
-export function orderEntries(entries: readonly WorkspaceDirectoryEntry[]): WorkspaceDirectoryEntry[] {
-  return [...entries].sort((left, right) => {
-    const group = Number(right.type === 'directory') - Number(left.type === 'directory')
-    return group !== 0 ? group : byName.compare(left.name, right.name)
-  })
-}
-
-/**
- * Say why a directory could not be listed, in terms of the directory.
- * @param t - namespace-bound translate.
- * @param failure - the settled Remote failure.
- * @returns the line to show under the directory.
- */
-export function failureLine(t: TranslateNS<'sidebarFiles'>, failure: RemoteFailure): string {
-  switch (failure.code) {
-    case 'workspace-file/not-found': return t('error.notFound')
-    case 'workspace-file/outside-workspace': return t('error.outsideWorkspace')
-    case 'workspace-file/not-directory': return t('error.notDirectory')
-    // Carrier and unclassified host failures reach the reader as themselves:
-    // this tree knows nothing useful to add to a transport-level message.
-    default: return t('error.unavailable', { message: failure.message })
-  }
-}
-
-/** What every level shares: the tab's tree, the two gestures, and the reveal's marks. */
-interface TreeContext {
-  readonly state: FilesTabState
-  readonly onToggle: (parent: string, path: string) => void
-  readonly onOpen: (path: string) => void
-  readonly t: TranslateNS<'sidebarFiles'>
-  /** The revealed file's tree key while its row is the current one. */
-  readonly current: string | undefined
-  /** Callback ref for the current row's button — the reveal's scroll target. */
-  readonly currentRef: ((row: unknown) => void) | undefined
-  /** The pane's row context menus, or `undefined` where the host has none. */
-  readonly menu: FilesMenuSeat | undefined
-}
-
-/** One entry's row, and its children when it is an expanded directory. */
-function Entry({ parent, entry, tree }: { parent: string; entry: WorkspaceDirectoryEntry; tree: TreeContext }): ReactNode {
-  const path = childPath(parent, entry.name)
-  if (entry.type === 'directory') {
-    const expanded = tree.state.expanded.includes(path)
-    return (
-      <li className={css.item} data-files-entry="directory" data-files-path={path}>
-        <button type="button" className={css.row} aria-expanded={expanded} onClick={() => { tree.onToggle(parent, path) }}
-          {...(tree.menu === undefined ? {} : tree.menu.trigger(path, 'directory'))}>
-          {expanded ? <IconFolderOpenRegular className={css.icon} /> : <IconFolderCloseRegular className={css.icon} />}
-          <span className={css.name}>{entry.name}</span>
-        </button>
-        {expanded && <ul className={css.level}><Level path={path} tree={tree} /></ul>}
-      </li>
-    )
-  }
-  if (entry.type === 'file') {
-    // The reveal's current row: what the native tree draws as `.current` +
-    // `aria-current` — `data-files-current` is the fork's spelling of it, and
-    // the button carries the scroll target ref like upstream's `currentRef`.
-    const current = tree.current === path
-    return (
-      <li className={css.item} data-files-entry="file" data-files-path={path}>
-        <button
-          type="button"
-          className={css.row}
-          onClick={() => { tree.onOpen(path) }}
-          ref={current ? tree.currentRef : undefined}
-          data-files-current={current ? '' : undefined}
-          aria-current={current ? true : undefined}
-          {...(tree.menu === undefined ? {} : tree.menu.trigger(path, 'file'))}
-        >
-          <FileTypeIcon kind={classifyFileType(entry.name)} size={16} className={css.fileIcon} />
-          <span className={css.name}>{entry.name}</span>
-        </button>
-      </li>
-    )
-  }
-  return (
-    <li className={css.item} data-files-entry="other" data-files-path={path}>
-      <span className={clsx(css.row, css.other)} aria-disabled="true" title={tree.t('entry.other')}>
-        <span className={css.name}>{entry.name}</span>
-      </span>
-    </li>
-  )
-}
-
-/** One directory's rows: its state while listing, its entries once listed. */
-function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
-  const { state, t } = tree
-  const level = state.levels[path]
-  if (level === undefined || level.kind === 'loading') {
-    return <li className={css.note} data-files-row="loading">{t('loading')}</li>
-  }
-  if (level.kind === 'failed') {
-    return (
-      <li className={css.note} data-files-row="failed" data-files-code={level.failure.code}>
-        {failureLine(t, level.failure)}
-      </li>
-    )
-  }
-  const entries = orderEntries(level.level.entries)
-  return (
-    <>
-      {level.failure !== undefined && <li className={css.note} data-files-row="failed">{failureLine(t, level.failure)}</li>}
-      {entries.length === 0 && <li className={css.note} data-files-row="empty">{t('empty')}</li>}
-      {entries.map(entry => <Entry key={entry.name} parent={path} entry={entry} tree={tree} />)}
-      {level.level.truncated && <li className={css.note} data-files-row="truncated">{t('truncated')}</li>}
-    </>
-  )
-}
-
 /**
  * The additional-root tree's body: the selected root and whatever the reader
  * has opened under it — the upstream body's scroll, seed, and render logic
@@ -252,7 +134,7 @@ function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
  */
 export function FilesTree({
   tabId, sessionId, root, signal, useStore, actions, hold, release, toggle, onOpen, t, nativeTree, reveal, saved, onScrollOffset,
-  menu, canOpen, useCanOpen,
+  menu, canOpen, useCanOpen, showHidden = true,
 }: FilesTreeProps): ReactNode {
   // The canOpen verdicts below are read per row at render time; this subscription
   // is what re-renders the rows when the viewer registry changes.
@@ -470,59 +352,10 @@ export function FilesTree({
   }, [root, tabId, signal, hold, release, toggle])
 
   if (state === undefined) return null
-  const tree: TreeContext = {
-    state,
-    onToggle: (parent, path) => {
-      // The native navigator settles an in-flight reveal the moment the
-      // reader collapses anything (`manual && collapsing → revealed =
-      // revealing`): the walk stops wherever it stands instead of
-      // re-opening what the reader just closed. A collapse that lands
-      // before the reveal effect has run — the request already changed,
-      // the ref still names the old key — pre-cancels the walk it would
-      // have started, so the effect's key reset cannot resurrect it. The
-      // suppression verdict uses the seed the rendered identity carries: a
-      // pair already revealed has no walk to cancel.
-      const seededIdentity = seededKey.current === revealKey
-      const seed = seededIdentity ? revealSeed.current : revealSaved
-      if (revealPath !== undefined && revealKey !== undefined && seed !== revealPath
-          && state.expanded.includes(path)
-          && (!seededIdentity || (!walk.current.settled && !walk.current.canceled))) {
-        if (!seededIdentity) walk.current = { key: revealKey, settled: false, canceled: true }
-        else walk.current.canceled = true
-        revealSeed.current = undefined
-        revealOnSettled?.(revealPath)
-      }
-      toggle(tabId, parent, path, state.expanded, signal)
-    },
-    // Every row carries an absolute path; the address leaves cwd undefined so
-    // the host resolves the file as written — a cwd here would relativize it
-    // against the session's primary root and open the wrong file.
-    onOpen: (path) => { onOpen(fileAddressFor(sessionId, undefined, path)) },
-    t,
-    current,
-    currentRef,
-    menu,
-  }
-  const legacy = <ul className={css.level}><Level path={state.root} tree={tree} /></ul>
-  // The host Factory's optional inputs (`0.2.2-alpha.3+` for the menu and viewer
-  // inputs): older Factories ignore keys they do not know, so the same call serves
-  // every release. Rows carry absolute keys here, so a menu target names the
-  // additional root's file rather than the primary root's same-named path.
-  const rowTriggerProps = menu === undefined
-    ? undefined
-    : (entry: NativeTreeEntry, kind: 'file' | 'directory') => menu.trigger(entry.path, kind)
-  const canOpenEntry = canOpen === undefined
-    ? undefined
-    : (entry: NativeTreeEntry) => canOpen(fileAddressFor(sessionId, undefined, entry.path))
-  const content = nativeTree === undefined ? legacy : nativeTree(
-    'sidebar.files.tree',
-    nativeTreeInput(state, failure => failureLine(t, failure), tree.onToggle, tree.onOpen, {
-      ...(current === undefined ? {} : { current: { path: current, ref: currentRef } }),
-      ...(rowTriggerProps === undefined ? {} : { rowTriggerProps }),
-      ...(canOpenEntry === undefined ? {} : { canOpen: canOpenEntry }),
-    }),
-    { fallback: legacy },
-  ) as ReactNode
+  // Hidden entries are filtered here, not in the store: the listing keeps every
+  // entry so the eye toggle can bring them back without a relist, exactly like
+  // the native navigator's `workspaceEntries(levels, showHidden)`.
+  const drawn = drawnTree(state, showHidden)
   return (
     <div
       ref={bodyRef}
@@ -531,7 +364,42 @@ export function FilesTree({
       // on it; the fork keeps the same reachability.
       tabIndex={-1}
     >
-      {content}
+      <TreeView
+        state={drawn.state}
+        t={t}
+        sessionId={sessionId}
+        nativeTree={nativeTree}
+        menu={menu}
+        canOpen={canOpen}
+        hiddenOnly={drawn.hiddenOnly}
+        current={current === undefined ? undefined : { path: current, ref: currentRef }}
+        onToggle={(parent, path) => {
+          // The native navigator settles an in-flight reveal the moment the
+          // reader collapses anything (`manual && collapsing → revealed =
+          // revealing`): the walk stops wherever it stands instead of
+          // re-opening what the reader just closed. A collapse that lands
+          // before the reveal effect has run — the request already changed,
+          // the ref still names the old key — pre-cancels the walk it would
+          // have started, so the effect's key reset cannot resurrect it. The
+          // suppression verdict uses the seed the rendered identity carries: a
+          // pair already revealed has no walk to cancel.
+          const seededIdentity = seededKey.current === revealKey
+          const seed = seededIdentity ? revealSeed.current : revealSaved
+          if (revealPath !== undefined && revealKey !== undefined && seed !== revealPath
+              && state.expanded.includes(path)
+              && (!seededIdentity || (!walk.current.settled && !walk.current.canceled))) {
+            if (!seededIdentity) walk.current = { key: revealKey, settled: false, canceled: true }
+            else walk.current.canceled = true
+            revealSeed.current = undefined
+            revealOnSettled?.(revealPath)
+          }
+          toggle(tabId, parent, path, state.expanded, signal)
+        }}
+        // Every row carries an absolute path; the address leaves cwd undefined so
+        // the host resolves the file as written — a cwd here would relativize it
+        // against the session's primary root and open the wrong file.
+        onOpen={(path) => { onOpen(fileAddressFor(sessionId, undefined, path)) }}
+      />
     </div>
   )
 }

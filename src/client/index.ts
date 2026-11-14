@@ -46,6 +46,7 @@ import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction
 import { OPEN_IN_APP_NS, createOpenInAppAdapter } from './open-in-app/adapter.tsx'
 import { OpenInAppToast } from './open-in-app/open-toast.tsx'
 import { FILES_TREE_NS, createFilesTreeSeats, createFilesTreeSurface } from './files-tree/adapter.tsx'
+import { createSearchPreferenceBook } from './files-tree/search-preferences.ts'
 import { NavigatorRetarget } from './files-tree/navigator.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -203,7 +204,7 @@ export function apply(ctx: ClientContext): void {
   // Files registration makes, plus the session-bound open route. The fork
   // binds upstream's `sidebarFiles` namespace so its rows say exactly what
   // the native tree says.
-  const filesTreeSeats = createFilesTreeSeats(ctx)
+  const filesTreeSeats = createFilesTreeSeats(ctx, { panel, preferences: createSearchPreferenceBook(readBrowserStorage()) })
   const filesTreeT = ctx.locale.bind(FILES_TREE_NS)
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
@@ -344,6 +345,22 @@ export function apply(ctx: ClientContext): void {
     dialog: dialogController,
     t,
   })
+}
+
+/**
+ * The browser storage the search preferences persist in.
+ *
+ * Storage can be denied outright (private browsing, a sandboxed frame); the
+ * preference book then keeps its entries in memory for this page's lifetime
+ * instead of failing the client graph.
+ * @returns the storage, or `undefined` where this window has none.
+ */
+function readBrowserStorage(): Storage | undefined {
+  try {
+    return typeof window === 'undefined' ? undefined : window.localStorage
+  } catch {
+    return undefined
+  }
 }
 
 /**

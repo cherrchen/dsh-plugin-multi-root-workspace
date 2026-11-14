@@ -46,10 +46,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from 'react-dom'
 import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
-import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings, maybeComponent } from '../compat/client-icons.ts'
+import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings, maybeComponent, maybeIcon } from '../compat/client-icons.ts'
+import {
+  searchStateKey, type SearchFailureInfo, type SearchPaneStates,
+} from './files-tree/search-state.ts'
+import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-store'
+import { errorKeyOf } from './panel-client.ts'
 import type { RootsView, RootView } from '../contract.ts'
 import type { NativeTreeRenderer } from '../compat/files-tree.ts'
-import { FilesTree, type FilesTreeSurface } from './files-tree/adapter.tsx'
+import { type FilesTreeSurface } from './files-tree/adapter.tsx'
+import { FilesPane } from './files-tree/pane.tsx'
 import { OpenInAppAction, type OpenInAppAdapter } from './open-in-app/adapter.tsx'
 import {
   basename,
@@ -95,6 +101,17 @@ interface Takeover {
  * path stays readable and hoverable, only the dir/file typography differs.
  */
 const PathLabel = maybeComponent<(props: { path: string; className?: string | undefined }) => ReactNode>(['PathLabel'])
+
+/**
+ * The header search toggle's glyph. It exists from the Regular weight family
+ * on, and the toggle itself renders only where the host has workspace search
+ * (`0.2.2-rc.2+`), so a missing glyph can only mean a composition that would
+ * not draw the button at all.
+ */
+const IconSearch = maybeIcon(['IconSearchOutlineRegular'])
+
+/** The selector hook a composition without the search seat reads: always "nothing". */
+const NO_SEARCH_STATES: SnapshotSelectorHook<SearchPaneStates> = selector => selector({})
 
 /** Selector hook for a composition without the fork: nothing was ever selectable. */
 const noTreeSelection: NonNullable<RootSwitcherProps['filesTree']>['useTreeSelection'] = () => undefined as never
@@ -215,7 +232,22 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   // data-root-kind never hides controls the takeover did not replace.
   const treeVisible = selected !== 'primary' && panel !== undefined && pane !== null && filesTree !== undefined
   const selectedPath = selected === 'primary' ? undefined : selected.path
+  const selectedId = selected === 'primary' ? undefined : selected.id
 
+  // The search bar's open state for this pane root: the header toggle and the
+  // pane read the same record, so the toggle's aria-expanded cannot drift.
+  // The hook is called unconditionally — the seat appears on compositions that
+  // have search at all, but the takeover record lands one render later, and a
+  // conditional call would change the hook order exactly then.
+  const searchSeat = filesTree?.search
+  const useSearchState = searchSeat?.useSearchState ?? NO_SEARCH_STATES
+  const searchKey = takeover === null || searchSeat === undefined ? undefined : searchStateKey(takeover.tabId, takeover.root)
+  const searchBarOpen = useSearchState(states => searchKey !== undefined && states[searchKey]?.barOpen === true)
+  /** Localize a failed search's panel code; the tree's own codes keep its vocabulary. */
+  const describeSearchFailure = useCallback((failure: SearchFailureInfo): string | undefined => {
+    const key = errorKeyOf(failure.code)
+    return key === 'error.fallback' ? undefined : t(key)
+  }, [t])
   const takeoverCtl = filesTree?.takeover
   // While an additional root is selected the pane's body area belongs to the
   // forked tree: the takeover keeps one controller per (tab, root) in the
@@ -327,6 +359,26 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
             <IconRefresh size={15} />
           </button>
         ) : null}
+        {/* The header's search toggle, in the position the native one occupies
+            (after the reload). It toggles THIS pane root's bar, whose query and
+            results live in the inject product; the native toggle stays hidden
+            because its own search is rooted at the Session cwd. */}
+        {treeVisible && searchSeat !== undefined && IconSearch !== undefined ? (
+          <button
+            type="button"
+            className="mrfw-switcherSearch"
+            aria-label={filesTree.t('search.placeholder')}
+            aria-expanded={searchBarOpen}
+            title={filesTree.t('search.placeholder')}
+            data-mrfw-files-search-toggle
+            onClick={() => {
+              if (searchKey === undefined) return
+              searchSeat.store.barOpen(searchKey, !searchBarOpen)
+            }}
+          >
+            <IconSearch size={15} />
+          </button>
+        ) : null}
         {/* The takeover hides the native open-in-app split button (its slot
             props only ever carry the primary root), so the header gets the
             plugin's verbatim fork of that same control, pointed at the
@@ -340,22 +392,18 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
       </span>
       {treeVisible && takeover !== null && filesTree !== undefined
         ? createPortal(
-            <FilesTree
+            <FilesPane
+              filesTree={filesTree}
+              stateKey={searchKey ?? ''}
+              rootId={selectedId ?? ''}
               tabId={takeover.tabId}
-              sessionId={filesTree.sessionId}
               root={takeover.root}
               signal={takeover.signal}
               useStore={filesTree.useStore}
               actions={filesTree.actions}
-              hold={filesTree.face.hold}
-              release={filesTree.face.release}
-              toggle={filesTree.face.toggle}
-              onOpen={filesTree.openFile}
-              t={filesTree.t}
+              onOpenFile={filesTree.openFile}
               nativeTree={pane.hasAttribute('data-files-page') ? props.nativeTree : undefined}
-              menu={filesTree.menu}
-              canOpen={filesTree.canOpen}
-              useCanOpen={filesTree.useCanOpen}
+              describeFailure={describeSearchFailure}
             />,
             pane,
           )

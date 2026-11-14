@@ -61,6 +61,13 @@ export interface NativeTreeOptions {
    * as search matches instead of a complete listing (`0.2.2-rc.2+`).
    */
   readonly omitted?: 'hidden' | 'unmatched' | undefined
+  /**
+   * Directories whose listed entries were all filtered out as hidden. Their
+   * state carries `omitted: 'hidden'` so the Factory draws the "only hidden
+   * entries" line instead of claiming the directory is empty. Only meaningful
+   * when the caller pre-filtered the levels.
+   */
+  readonly hiddenOnly?: ReadonlySet<string> | undefined
 }
 
 /** The factory consumes absolute, slash-separated keys and already-localized errors. */
@@ -85,6 +92,7 @@ export function nativeTreeInput<F>(
       if (level.failure !== undefined) status.failure = failureLine(level.failure)
       if (level.level.truncated) status.truncated = true
       if (options.omitted !== undefined) status.omitted = options.omitted
+      else if (options.hiddenOnly?.has(path) === true) status.omitted = 'hidden'
       directories[key] = status
       for (const entry of level.level.entries) entries.push({
         path: `${path.replace(/[/\\]+$/, '')}/${entry.name}`, name: entry.name, meta: { kind: entry.type },
