@@ -271,6 +271,15 @@ ADR-0039 已经过多轮只读复审，覆盖：
   - `smoke:journey` 的 web leg 必须走真实 HTTP 通道：先 `fresh` prompt 判定有候选（等价于 Toast 显示），再「查看」等价的 `prompt`（不带 `fresh`）拿全量列表，再确认；
   - 现有 add/resolve/cleanup/owner 测试保持通过。
 
+### 第二十次修订返工（2026-11-14，Code Review，完成）
+
+> PR #55 的代码审查复现了三处实现偏离（ADR §20.4/§20.7），均先写失败回归再修复；授权语义不变。
+
+- **snooze-only reset 落盘**：`worktreeSidecar` 的 `reset` 空态判断改为针对原始文档（同时看 `ignored` 与 `snooze`）；只清 snooze 也写一次 revision，无内容时仍不制造 revision。回归：sidecar snooze-only reset 持久化（重开 owner 读回为空、二次 reset 不制造 revision）+ 服务层 reset 后重启不恢复。
+- **fresh 保持只读**：新增 `WorkspaceState.passive`；`prompt(fresh)` 的首次激活与重新 inventory 走被动路径——只读 `resolveRepo` 与 sidecar、只重建候选队列，不安装 watcher、不调度 owner 侧 reconcile、不写 sidecar；首个显式请求（Dialog 的 `prompt()`/`wait`/面板 list/reset）提升为持久发现一次并恢复映射核对，settings/registry 触发的 reconcile 沿用当前姿态。回归：fresh 作为第二个 Host 的首个调用时 `watching === false`、sidecar 操作只有 `read`、文件逐字不变、后台不发现新 worktree；打开 Dialog 后 watcher 与 reconcile 才出现。
+- **定时 snooze 到期释放提醒**：新增 `expireSnooze`（到期时丢弃内存记录并把 keys 从 `offered` 释放）与 `liveSnooze`（sidecar 读回过期记录不再激活）；sidecar 不主动清理过期记录。回归：`seen` → 7d snooze → 到期后同一 Host 重新提示。
+- **验证**：worktree + client + locale + authority-native 专项 14 文件 **179 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
+
 ## Dependencies
 
 - ADR-0039 已 Accepted；P8 以 B 的 P1–P7 完成为前置条件。
