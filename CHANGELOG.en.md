@@ -8,6 +8,12 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.19] - 2026-11-14
+
+### Added
+
+- **Exact support for DSH `0.2.2-rc.3`**: the support matrix grows to 24 exact releases and the development pin moves to `0.2.2-rc.3` (cordis `4.1.0` / Schemastery `3.19.0`). Everything `rc.3` adds over `rc.2` is additive: a New-session HOC slot, the `workspace.picker` Factory and a third directory-flow hole, upload icons, the optional experimental `dsh-deepseek-chat-import` bundle that is not mounted by default, and an attachment-missing fallback for session export. The sandbox, fs, tools, session, storage, Skills, LSP, workspace-files, and Connection runtime sources the plugin consumes are unchanged, so no adapter branch was added and the open-in-app and files-tree fork baselines stay put ([interface review](./docs/reference/dsh-0.2.2-migration.md#022-rc3-后续审查2026-11-13), [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md), Chinese).
+
 ## [0.1.18] - 2026-11-12
 
 ### Added
@@ -281,7 +287,8 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.19...HEAD
+[0.1.19]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.15...v0.1.16
