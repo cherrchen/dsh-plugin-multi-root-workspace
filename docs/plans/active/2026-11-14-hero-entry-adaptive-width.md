@@ -1,6 +1,6 @@
 # 新会话 Hero 入口按可用宽度自适应（Workspace Folders）
 
-> 状态：**P1/P2 已完成，P3 进行中**（2026-11-14）。P0 取证、P1 实施与 P2 文档已完成；决策修订见 [ADR-0037](../../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md) 文末修订节。
+> 状态：**P1–P3 已完成**（2026-11-14），Draft PR [#53](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/53) 待评审；真实 GUI 复核留给评审者/用户。决策修订见 [ADR-0037](../../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md) 文末修订节。
 
 ## Goal
 
@@ -146,7 +146,7 @@
 - [x] `pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm docs:check`、`pnpm compat:check`、`pnpm pack:check` 通过。
 - [x] `pnpm test` 的 client 面全绿：18 个 `tests/client-*` 文件、316 项。完整套件在本机 DSH 工具沙箱内另有 17 项既有失败（见下），与本变更无关。
 - [ ] 真实 GUI 复核（手工，留给评审者/用户）：宽列全宽 label；缩窄时省略号；再窄时 28×28 图标且不越过输入卡右缘；打开右侧预览面板（列宽变窄但视口不变）同样生效；切换长标题工作区/语言后仍不溢出。
-- [x] `git push` + Draft PR，描述含根因、机制、探针事实、退化路径与验证记录。
+- [x] `git push` + Draft PR [#53](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/53)，描述含根因、机制、探针事实、退化路径与验证记录。
 
 **沙箱限制（既有，非本变更引入）**：DSH 工具沙箱内 `nativeHostAvailability()` 返回 `{ available: false, reason: "the Host itself is sandboxed; shared IPC refuses sandboxed peers" }`，因此共享 Registry 的 follower/IPC 用例（`registry-lease`、`registry.spec` 的 follower 分支、`registry-multiprocess`、`skills-*`、`authority-boundaries`、`b9-review-regressions`）以 `contended` 失败。把本变更 stash 后在未改动的基线树上重跑其中三个代表文件，出现同样形状的 8 项失败；完整件 `v0.1.17` 的计划也记录了同一限制。一次带完整本机权限的重跑尝试因本会话没有可用的批准应答者而未执行（命令未启动），因此本计划不声称"完整套件全绿"。
 
@@ -218,4 +218,4 @@ pnpm docs:check && pnpm compat:check && pnpm pack:check
 | P0 取证与计划 | 完成 | 上文实测表；原型在 430/450/480/560/700px 列宽下的入口宽度与行溢出；ADR-0037 修订节；提交 `docs(plan): investigate the hero entry's width overflow and record the plan` |
 | P1 几何与组件 | 完成 | `src/client/hero-entry-room.ts`、`HeroWorkspaceEntry.tsx`、`styles.ts`；`tests/client-hero-room.spec.ts`（15）、`tests/client-hero-entry.spec.tsx`（8）、`tests/client-styles.spec.ts`（25）；生产模块 + 生产样式表的 Chromium 表见上；提交 `fix(client): fit the hero entry to the row's leftover width` |
 | P2 文档 | 完成 | ADR-0037 修订节、decisions README 双语索引、README/README.en、guide 双语、requirements、architecture、compat note 双语；`pnpm docs:check` 通过 |
-| P3 门禁与 PR | 进行中 | lint / typecheck / build / docs:check / compat:check / pack:check 通过；client 面 316 项通过；完整套件只剩 17 项既有沙箱失败（见 Phase 3 的沙箱限制节）；Draft PR 见下 |
+| P3 门禁与 PR | 完成 | lint / typecheck / build / docs:check / compat:check / pack:check 通过；client 面 316 项通过；完整套件只剩 17 项既有沙箱失败（见 Phase 3 的沙箱限制节）；Draft PR [#53](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/53) |
