@@ -1,6 +1,6 @@
 /** Phase P6: sidecar ownership, cross-epoch reconciliation and empty-snapshot semantics. */
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
@@ -8,6 +8,7 @@ import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-wo
 import { primaryKey } from '../src/roots.ts'
 import { resolveRepo } from '../src/worktrees/repository.ts'
 import { readSidecarFile } from './support/worktrees-stack.ts'
+import { sidecarPath } from '../src/worktrees/sidecar.ts'
 import type { PromptExpected, RepoSnapshot } from '../src/worktrees/types.ts'
 
 function git(cwd: string, args: readonly string[]): void {
@@ -192,6 +193,102 @@ describe('sidecar availability semantics', () => {
     ])
     const view = await stack.registry.worktreeSidecar(fixture.main, { op: 'read' })
     expect(view.ignored.map(entry => entry.key).sort()).toEqual(['worktree\u0000/a', 'worktree\u0000/b'])
+  })
+})
+
+describe('sidecar snooze', () => {
+  const record = (mode: 'until-new-worktree' | 'until' = 'until-new-worktree') => ({
+    mode,
+    ...(mode === 'until' ? { until: new Date(Date.now() + 86_400_000).toISOString() } : {}),
+    keys: ['worktree\u0000/x'],
+    at: new Date().toISOString(),
+  })
+
+  it('round-trips one snooze and preserves ignores and mappings', async () => {
+    const fixture = await setup('snooze-roundtrip')
+    const stack = await open(fixture)
+    const expected = expectation(fixture.main, fixture.linked)
+    const repo = repoOf(fixture.linked)
+    const added = await stack.registry.addNew(fixture.main, {
+      path: expected.candidate.canonical,
+      expected,
+      track: { adminId: repo.adminId!, common: repo.common },
+    })
+    await stack.registry.worktreeSidecar(fixture.main, { op: 'ignore', key: 'worktree\u0000/ignored', kind: 'worktree', path: '/ignored' })
+    const snooze = record('until')
+    const view = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze })
+    expect(view.snooze).toEqual(snooze)
+    expect(view.ignored.map(entry => entry.key)).toEqual(['worktree\u0000/ignored'])
+    expect(view.worktreeRoots.map(mapping => mapping.rootId)).toEqual([added.id])
+    const file = readSidecarFile(join(fixture.area.base, 'store', 'worktree-prompts'), primaryKey(fixture.main))
+    expect(file!.snooze).toEqual(snooze)
+    // Another operation that rewrites the document (a reconcile) keeps it.
+    const reconciled = await stack.registry.worktreeSidecar(fixture.main, { op: 'reconcile' })
+    expect(reconciled.snooze).toEqual(snooze)
+    expect(reconciled.worktreeRoots.map(mapping => mapping.rootId)).toEqual([added.id])
+  })
+
+  it('does not let a corrupt snooze take the ignores and mappings down', async () => {
+    const fixture = await setup('snooze-corrupt')
+    const first = await open(fixture)
+    const expected = expectation(fixture.main, fixture.linked)
+    const repo = repoOf(fixture.linked)
+    await first.registry.addNew(fixture.main, {
+      path: expected.candidate.canonical,
+      expected,
+      track: { adminId: repo.adminId!, common: repo.common },
+    })
+    await first.registry.worktreeSidecar(fixture.main, { op: 'ignore', key: 'worktree\u0000/ignored', kind: 'worktree', path: '/ignored' })
+    const promptsRoot = join(fixture.area.base, 'store', 'worktree-prompts')
+    const file = sidecarPath(promptsRoot, primaryKey(fixture.main))
+    // Valid rows, a broken UI-only field: this must stay readable.
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+    raw.snooze = { mode: 'soon', keys: 'not-a-list', at: 42 }
+    writeFileSync(file, JSON.stringify(raw))
+    await first.dispose()
+    stacks.splice(stacks.indexOf(first), 1)
+    const second = await open(fixture)
+    const read = await second.registry.worktreeSidecar(fixture.main, { op: 'read' })
+    expect(read).toMatchObject({ available: true })
+    expect(read.snooze).toBeUndefined()
+    expect(read.ignored).toHaveLength(1)
+    expect(read.worktreeRoots).toHaveLength(1)
+  })
+
+  it('clears the snooze on reset together with the ignores, without a second revision', async () => {
+    const fixture = await setup('snooze-reset')
+    const stack = await open(fixture)
+    await stack.registry.worktreeSidecar(fixture.main, { op: 'ignore', key: 'worktree\u0000/ignored', kind: 'worktree', path: '/ignored' })
+    const snoozed = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: record() })
+    const reset = await stack.registry.worktreeSidecar(fixture.main, { op: 'reset' })
+    expect(reset.ignored).toEqual([])
+    expect(reset.snooze).toBeUndefined()
+    expect(reset.revision).toBe(snoozed.revision + 1)
+    // Nothing left to clear is not a write.
+    const again = await stack.registry.worktreeSidecar(fixture.main, { op: 'reset' })
+    expect(again.revision).toBe(reset.revision)
+    const file = readSidecarFile(join(fixture.area.base, 'store', 'worktree-prompts'), primaryKey(fixture.main))
+    expect(file!.snooze).toBeUndefined()
+  })
+
+  it('refuses the write while the worktree gate is off, the workspace is inactive, or the authority is unavailable', async () => {
+    const fixture = await setup('snooze-refusals')
+    const stack = await open(fixture)
+    const snooze = record()
+    const promptsRoot = join(fixture.area.base, 'store', 'worktree-prompts')
+    stack.registry.setWorktreeGateProvider(() => false)
+    await expect(stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze }))
+      .rejects.toMatchObject({ code: 'worktree/not-enabled' })
+    expect(readSidecarFile(promptsRoot, primaryKey(fixture.main))).toBeUndefined()
+    stack.registry.setWorktreeGateProvider(() => true)
+    // A directory that is not a checkout has no active workspace to snooze for.
+    const plain = join(fixture.area.base, 'plain')
+    mkdirSync(plain, { recursive: true })
+    await expect(stack.registry.worktreeSidecar(plain, { op: 'snooze', snooze }))
+      .rejects.toMatchObject({ code: 'worktree/inactive' })
+    const unresolvable = await open(fixture, { sharedStorageRoot: '' })
+    await expect(unresolvable.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze }))
+      .rejects.toMatchObject({ code: 'worktree/registry-unavailable' })
   })
 })
 

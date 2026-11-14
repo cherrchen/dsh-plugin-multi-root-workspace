@@ -31,7 +31,7 @@
 
 import { z } from 'zod'
 import type { SkillsResponseMap } from './skills-contract.ts'
-import type { WorktreePromptAnswerView, WorktreePromptWaitView, WorktreeResetAnswerView, WorktreeResolveAnswerView } from './worktrees-contract.ts'
+import type { WorktreePromptAnswerView, WorktreePromptWaitView, WorktreeResetAnswerView, WorktreeResolveAnswerView, WorktreeSeenAnswerView } from './worktrees-contract.ts'
 export { SKILLS_ENDPOINTS, skillsRequestSchema, skillsCatalogSchema, skillsPreviewSchema, skillsStatusSchema } from './skills-contract.ts'
 export type { SkillsEndpoint, SkillsStatusView, SkillsCatalogView, SkillsPreviewView } from './skills-contract.ts'
 export {
@@ -41,6 +41,8 @@ export {
   worktreePromptAnswerSchema,
   worktreeResolveAnswerSchema,
   worktreeResetAnswerSchema,
+  worktreeSeenAnswerSchema,
+  worktreeSnoozeChoiceSchema,
   parseWorktreeCall,
 } from './worktrees-contract.ts'
 export type {
@@ -54,6 +56,9 @@ export type {
   WorktreeRequest,
   WorktreeEffectiveAccess,
   WorktreePromptKind,
+  WorktreeSeenAnswerView,
+  WorktreeSnoozeChoice,
+  WorktreeSnoozeMode,
 } from './worktrees-contract.ts'
 
 /** One worktree deletion badge on a registered root (ADR-0039 §6.1). */
@@ -74,6 +79,7 @@ export interface WorktreeCleanupView {
 /** The worktree endpoints' response types, merged into the workspace map. */
 export interface WorktreeResponseMap {
   readonly worktreePrompt: WorktreePromptAnswerView
+  readonly worktreePromptSeen: WorktreeSeenAnswerView
   readonly worktreePromptWait: WorktreePromptWaitView
   readonly worktreePromptResolve: WorktreeResolveAnswerView
   readonly worktreePromptReset: WorktreeResetAnswerView

@@ -93,12 +93,14 @@ import { WorktreeError } from './worktrees/errors.ts'
 import { lstatEntry, SafeIoError } from './worktrees/fs-safe.ts'
 import { verifyPromptExpected, verifyWorkspaceActive } from './worktrees/owner.ts'
 import {
+  parseSidecarSnooze,
   readSidecar,
   writeSidecar,
   emptySidecar,
   type IgnoredCandidate,
   type WorktreeMapping,
   type WorktreeSidecarDocument,
+  type WorktreeSnooze,
 } from './worktrees/sidecar.ts'
 import type { PromptExpected } from './worktrees/types.ts'
 
@@ -330,6 +332,8 @@ function parseProbeAddResult(value: unknown): ProbeAddResult {
 export interface WorktreeSidecarView {
   readonly ignored: readonly IgnoredCandidate[]
   readonly worktreeRoots: readonly WorktreeMapping[]
+  /** The stored reminder delay, when one applies (ADR-0039 §6.4). */
+  readonly snooze?: WorktreeSnooze
   readonly revision: number
   readonly epoch: string | undefined
   readonly registryRevision: number
@@ -342,6 +346,7 @@ export type WorktreeSidecarOperation =
   | { readonly op: 'ignore'; readonly key: string; readonly kind: 'worktree' | 'main-checkout'; readonly path: string }
   | { readonly op: 'reset' }
   | { readonly op: 'reconcile' }
+  | { readonly op: 'snooze'; readonly snooze: WorktreeSnooze }
 
 /** Registration request from a confirmed worktree prompt. */
 export interface AddNewRootOptions {
@@ -938,10 +943,20 @@ export class MultiRootRegistry extends Service {
         }
         case 'reset': {
           // Nothing to clear is not a write: `reset` on an active workspace
-          // with no ignores (or on a directory that never activated) must not
-          // manufacture a sidecar revision.
-          if (document.ignored.length === 0) return sidecarViewOf(document, this.operationEpoch, this.operationRevision, true)
-          const next = { ...document, revision: document.revision + 1, ignored: [] }
+          // with no ignores and no snooze (or on a directory that never
+          // activated) must not manufacture a sidecar revision.
+          const current = document.snooze === undefined ? document : withoutSnooze(document)
+          if (current.ignored.length === 0 && current.snooze === undefined) {
+            return sidecarViewOf(document, this.operationEpoch, this.operationRevision, true)
+          }
+          const next = { ...current, revision: document.revision + 1, ignored: [] }
+          this.saveSidecar(key, next)
+          return sidecarViewOf(next, this.operationEpoch, this.operationRevision, true)
+        }
+        case 'snooze': {
+          // A reminder delay is bookkeeping, not authorization: it is written by
+          // the owner inside this queue and never touches the Registry itself.
+          const next = { ...document, revision: document.revision + 1, snooze: operation.snooze }
           this.saveSidecar(key, next)
           return sidecarViewOf(next, this.operationEpoch, this.operationRevision, true)
         }
@@ -2430,11 +2445,18 @@ function sidecarViewOf(document: WorktreeSidecarDocument, epoch: string | undefi
   return {
     ignored: document.ignored,
     worktreeRoots: document.worktreeRoots,
+    ...(document.snooze === undefined ? {} : { snooze: document.snooze }),
     revision: document.revision,
     epoch,
     registryRevision: revision,
     available,
   }
+}
+
+/** Copy one document without its optional snooze (a `reset` drops it). */
+function withoutSnooze(document: WorktreeSidecarDocument): WorktreeSidecarDocument {
+  const { snooze: _snooze, ...rest } = document
+  return rest
 }
 
 /** Parse the owner's `addNew` answer on a follower. */
@@ -2495,9 +2517,13 @@ function parseSidecarView(value: unknown): WorktreeSidecarView {
       ...(typeof row.registryRevision === 'number' ? { registryRevision: row.registryRevision } : {}),
     }
   })
+  // A corrupt UI-only snooze must not make the whole owner answer unreadable:
+  // the lenient parser drops it and keeps ignores/mappings intact.
+  const snooze = parseSidecarSnooze(entry.snooze)
   return {
     ignored,
     worktreeRoots,
+    ...(snooze === undefined ? {} : { snooze }),
     revision: entry.revision,
     epoch: typeof entry.epoch === 'string' ? entry.epoch : undefined,
     registryRevision: entry.registryRevision,

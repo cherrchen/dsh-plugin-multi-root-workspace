@@ -733,7 +733,9 @@ async function dispatchPanelRequest(
       }
       switch (call.endpoint) {
         case 'worktreePrompt':
-          return { ok: true, value: await worktrees.prompt(call.sessionId) }
+          return { ok: true, value: await worktrees.prompt(call.sessionId, { fresh: call.fresh === true }) }
+        case 'worktreePromptSeen':
+          return { ok: true, value: await worktrees.seen(call.sessionId, call.promptIds ?? []) }
         case 'worktreePromptWait':
           return {
             ok: true,
@@ -744,7 +746,10 @@ async function dispatchPanelRequest(
         case 'worktreePromptResolve':
           return {
             ok: true,
-            value: await worktrees.resolve(call.sessionId, call.promptIds ?? [], call.action ?? 'dismiss', call.dontRemind),
+            value: await worktrees.resolve(call.sessionId, call.promptIds ?? [], call.action ?? 'dismiss', {
+              ...(call.dontRemind === undefined ? {} : { dontRemind: call.dontRemind }),
+              ...(call.snooze === undefined ? {} : { snooze: call.snooze }),
+            }),
           }
         case 'worktreePromptReset':
           return { ok: true, value: await worktrees.reset(call.sessionId) }

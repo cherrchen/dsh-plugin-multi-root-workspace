@@ -7,12 +7,14 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
+import { readSidecarFile } from './support/worktrees-stack.ts'
+import { primaryKey } from '../src/roots.ts'
 import MultiRootWorktrees, { WorktreeError, type Config } from '../src/worktrees.ts'
 import type { WorktreePromptWaitResult } from '../src/worktrees/types.ts'
 
@@ -261,6 +263,136 @@ describe('activation lifecycle', () => {
     const after = promptOf(await worktrees.wait(SESSION)).id
     expect(after).not.toBe(before)
   })
+})
+
+describe('fresh check and operator memory', () => {
+  it('answers the same fresh view twice without claiming or writing anything', async () => {
+    const area = fixture('fresh-pure')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const { worktrees, stack, storeFile } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+    const before = existsSync(storeFile) ? readFileSync(storeFile, 'utf8') : ''
+    const full = await worktrees.prompt(SESSION)
+    expect(full.prompts).toHaveLength(1)
+    const first = await worktrees.prompt(SESSION, { fresh: true })
+    const second = await worktrees.prompt(SESSION, { fresh: true })
+    expect(first.prompts.map(prompt => prompt.id)).toEqual(second.prompts.map(prompt => prompt.id))
+    expect(first.prompts[0]?.path).toBe(realpathSync.native(linked))
+    // A pure query claims nothing: the full Dialog list and the Registry are
+    // untouched, and no sidecar file was created.
+    expect((await worktrees.prompt(SESSION)).prompts).toHaveLength(1)
+    expect(existsSync(storeFile) ? readFileSync(storeFile, 'utf8') : '').toBe(before)
+    expect(readSidecarFile(join(area.base, 'store', 'worktree-prompts'), primaryKey(main))).toBeUndefined()
+    expect(stack.registry.list(main)).toHaveLength(0)
+  }, 20_000)
+
+  it('claims the shown ids so the next fresh check stays quiet, until reset', async () => {
+    const area = fixture('fresh-seen')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+    const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+    expect(await worktrees.seen(SESSION, [shown.id])).toEqual({ seen: 1 })
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    // An unknown or repeated id changes nothing.
+    expect(await worktrees.seen(SESSION, [shown.id])).toEqual({ seen: 1 })
+    expect(await worktrees.seen(SESSION, ['not-a-prompt'])).toEqual({ seen: 0 })
+    // The Dialog list still shows it: `offered` only filters the automatic check.
+    expect((await worktrees.prompt(SESSION)).prompts).toHaveLength(1)
+    await worktrees.reset(SESSION)
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+  }, 20_000)
+
+  it('snoozes the recorded keys, keeps the candidate confirmable, and lets a new worktree through', async () => {
+    const area = fixture('snooze-until-new')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+    const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+    const answer = await worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: 'until-new-worktree' } })
+    expect(answer.resolved).toHaveLength(1)
+    // Still queued and visible in the Dialog: a snooze is not a confirmation.
+    expect(answer.prompts.map(prompt => prompt.path)).toEqual([realpathSync.native(linked)])
+    expect(worktrees.activationOf(main).candidates).toBe(1)
+    expect(stack.registry.list(main)).toHaveLength(0)
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    // A NEW worktree is a new discovery key, so it is not covered.
+    const later = join(area.base, 'later')
+    git(main, ['worktree', 'add', '-q', later, '-b', 'later'])
+    const fresh = await worktrees.prompt(SESSION, { fresh: true })
+    expect(fresh.prompts.map(prompt => prompt.path)).toEqual([realpathSync.native(later)])
+    // The old key stays suppressed.
+    expect(fresh.prompts.some(prompt => prompt.path === shown.path)).toBe(false)
+  }, 20_000)
+
+  it('suppresses until its instant expires, measured by the host clock', async () => {
+    const area = fixture('snooze-until')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      await worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: '7d' } })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      clock.mockReturnValue(now + 7 * 86_400_000 - 1_000)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+    } finally {
+      clock.mockRestore()
+    }
+  }, 20_000)
+
+  it('forgets offered ids on a Host restart but keeps the persisted snooze', async () => {
+    const area = fixture('snooze-restart')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const storeRoot = join(area.base, 'store')
+    const first = await mount(storeRoot, { session: { cwd: main } })
+    const shown = (await first.worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+    await first.worktrees.seen(SESSION, [shown.id])
+    expect((await first.worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    await first.stack.dispose()
+    mounted.splice(mounted.indexOf(first), 1)
+    // `offered` is Host memory: a new Host may announce it once more.
+    const second = await mount(storeRoot, { session: { cwd: main } })
+    const again = (await second.worktrees.prompt(SESSION, { fresh: true })).prompts[0]
+    expect(again?.id).toBeDefined()
+    await second.worktrees.resolve(SESSION, again!.id, 'snooze', { snooze: { mode: 'until-new-worktree' } })
+    await second.stack.dispose()
+    mounted.splice(mounted.indexOf(second), 1)
+    // The delay is sidecar state, so the new Host honors it.
+    const third = await mount(storeRoot, { session: { cwd: main } })
+    expect((await third.worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+  }, 30_000)
+
+  it('does not revive a lost workspace from the automatic fresh check', async () => {
+    const area = fixture('fresh-lost')
+    const main = join(area.base, 'main')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', join(area.base, 'wt'), '-b', 'wt'])
+    const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+    renameSync(join(main, '.git'), join(area.base, 'git-away'))
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    expect(worktrees.activationOf(main).activation).toBe('lost')
+    renameSync(join(area.base, 'git-away'), join(main, '.git'))
+    // Only the explicit panel/command list may re-detect the workspace.
+    await worktrees.describeRoots(main)
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+  }, 20_000)
 })
 
 describe('experimental default', () => {

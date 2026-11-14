@@ -39,6 +39,21 @@ export interface WorktreeMapping {
   readonly registryRevision?: number
 }
 
+/**
+ * One reminder delay the operator chose. `until-new-worktree` needs no
+ * instant: the keys it names stay quiet, and any key it does NOT name is a
+ * newly appeared candidate that surfaces immediately (ADR-0039 §6.4).
+ */
+export interface WorktreeSnooze {
+  readonly mode: 'until-new-worktree' | 'until'
+  /** ISO instant; present exactly when `mode === 'until'`. */
+  readonly until?: string
+  /** Discovery keys the host derived from the confirmed prompt ids. */
+  readonly keys: readonly string[]
+  /** When the delay was recorded. */
+  readonly at: string
+}
+
 /** The whole sidecar document. */
 export interface WorktreeSidecarDocument {
   readonly version: 1
@@ -47,6 +62,28 @@ export interface WorktreeSidecarDocument {
   readonly primaryRoot: string
   readonly ignored: readonly IgnoredCandidate[]
   readonly worktreeRoots: readonly WorktreeMapping[]
+  /** An optional UI-only delay; a corrupt value is ignored, not fatal. */
+  readonly snooze?: WorktreeSnooze
+}
+
+/**
+ * The discovery keys a snooze currently suppresses.
+ *
+ * `until` is evaluated against the HOST clock (the caller passes `now`);
+ * `until-new-worktree` keeps exactly its recorded keys quiet, so a key the
+ * record does not name is a new worktree and shows immediately. An expired or
+ * unreadable record suppresses nothing.
+ * @param snooze - the stored delay, if any.
+ * @param now - the host clock instant, milliseconds since the epoch.
+ * @returns the still-suppressed keys, or `undefined` when no delay applies.
+ */
+export function snoozedDiscoveries(snooze: WorktreeSnooze | undefined, now: number): ReadonlySet<string> | undefined {
+  if (snooze === undefined) return undefined
+  if (snooze.mode === 'until') {
+    const until = Date.parse(snooze.until ?? '')
+    if (!Number.isFinite(until) || now >= until) return undefined
+  }
+  return new Set(snooze.keys)
 }
 
 /** The directory name under the store root. */
@@ -81,6 +118,24 @@ function parseIgnored(value: unknown): IgnoredCandidate | undefined {
   if (entry.kind !== 'worktree' && entry.kind !== 'main-checkout' && entry.kind !== 'git-common') return undefined
   const kind = entry.kind === 'worktree' ? 'worktree' as const : 'main-checkout' as const
   return { key: entry.key, kind, path: entry.path, addedAt: entry.addedAt }
+}
+
+/**
+ * Parse the optional snooze field LENIENTLY. A broken UI-only delay must never
+ * take `ignored` and `worktreeRoots` down with it: the whole document stays
+ * readable and only the delay is dropped.
+ */
+export function parseSidecarSnooze(value: unknown): WorktreeSnooze | undefined {
+  const entry = objectOf(value)
+  if (entry === undefined) return undefined
+  if (entry.mode !== 'until-new-worktree' && entry.mode !== 'until') return undefined
+  if (typeof entry.at !== 'string' || !Array.isArray(entry.keys)) return undefined
+  if (!entry.keys.every(key => typeof key === 'string' && key !== '')) return undefined
+  if (entry.mode === 'until') {
+    if (typeof entry.until !== 'string' || !Number.isFinite(Date.parse(entry.until))) return undefined
+    return { mode: 'until', until: entry.until, keys: entry.keys, at: entry.at }
+  }
+  return { mode: 'until-new-worktree', keys: entry.keys, at: entry.at }
 }
 
 function parseMapping(value: unknown): WorktreeMapping | undefined {
@@ -138,6 +193,7 @@ export function readSidecar(promptsRoot: string, primaryKey: string, primaryRoot
     if (mapping === undefined) return { ok: false, detail: 'sidecar has an invalid worktreeRoots entry' }
     worktreeRoots.push(mapping)
   }
+  const snooze = parseSidecarSnooze(entry.snooze)
   return {
     ok: true,
     exists: true,
@@ -148,6 +204,7 @@ export function readSidecar(promptsRoot: string, primaryKey: string, primaryRoot
       primaryRoot: typeof entry.primaryRoot === 'string' ? entry.primaryRoot : primaryRoot,
       ignored,
       worktreeRoots,
+      ...(snooze === undefined ? {} : { snooze }),
     },
   }
 }

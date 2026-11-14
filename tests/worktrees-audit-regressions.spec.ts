@@ -527,7 +527,14 @@ describe('second audit: owner commit and lifecycle', () => {
     enabled = true
     hooks()!.onChange()
     expect((await worktrees.wait(sessionId)).status).toBe('lost')
-    expect((await worktrees.prompt(sessionId)).prompt?.id).not.toBe(prompt.id)
+    // A prompt query never revives a lost workspace; the explicit panel/command
+    // list is the recovery entry (ADR-0039 §4.4).
+    expect((await worktrees.prompt(sessionId, { fresh: true })).prompts).toEqual([])
+    expect((await worktrees.wait(sessionId)).status).toBe('lost')
+    await worktrees.describeRoots(main)
+    const recovered = (await worktrees.prompt(sessionId, { fresh: true })).prompts
+    expect(recovered).toHaveLength(1)
+    expect(recovered[0]!.id).not.toBe(prompt.id)
     expect((await worktrees.wait(sessionId)).status).toBe('prompt')
   })
 

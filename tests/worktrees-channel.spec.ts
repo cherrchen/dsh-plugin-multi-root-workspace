@@ -99,12 +99,60 @@ describe('worktree panel channel', () => {
       .toMatchObject({ ok: false, error: { code: 'panel/bad-request' } })
   })
 
+  it('serves the one automatic check, the seen claim and the snooze batch', async () => {
+    const { handler, stack, main } = await mount()
+    const signal = new AbortController().signal
+    const full = (await handler('worktreePrompt', { sessionId: SESSION }, signal)).value as {
+      prompts: { id: string; path: string }[]
+      viewRevision: string
+    }
+    expect(full.prompts).toHaveLength(1)
+    const fresh = (await handler('worktreePrompt', { sessionId: SESSION, fresh: true }, signal)).value as {
+      prompts: { id: string; path: string }[]
+    }
+    expect(fresh.prompts.map(prompt => prompt.id)).toEqual(full.prompts.map(prompt => prompt.id))
+    expect(await handler('worktreePromptSeen', { sessionId: SESSION, promptIds: [fresh.prompts[0]!.id] }, signal))
+      .toMatchObject({ ok: true, value: { seen: 1 } })
+    const quiet = (await handler('worktreePrompt', { sessionId: SESSION, fresh: true }, signal)).value as { prompts: unknown[] }
+    expect(quiet.prompts).toEqual([])
+    // The Dialog list is unaffected by the claim.
+    expect(((await handler('worktreePrompt', { sessionId: SESSION }, signal)).value as { prompts: unknown[] }).prompts).toHaveLength(1)
+    // A snooze never registers a root and keeps the candidate confirmable.
+    const snoozed = await handler('worktreePromptResolve', {
+      sessionId: SESSION, promptIds: [full.prompts[0]!.id], action: 'snooze', snooze: { mode: '30d' },
+    }, signal)
+    expect(snoozed).toMatchObject({ ok: true })
+    expect((snoozed.value as { prompts: unknown[] }).prompts).toHaveLength(1)
+    expect(stack.registry.list(main)).toHaveLength(0)
+  })
+
+  it('refuses cross-endpoint fields and malformed snooze modes', async () => {
+    const { handler } = await mount()
+    const signal = new AbortController().signal
+    for (const [endpoint, payload] of [
+      ['worktreePrompt', { sessionId: SESSION, fresh: 'yes' }],
+      ['worktreePrompt', { sessionId: SESSION, snooze: { mode: '7d' } }],
+      ['worktreePromptSeen', { sessionId: SESSION }],
+      ['worktreePromptSeen', { sessionId: SESSION, promptIds: ['a', 'a'] }],
+      ['worktreePromptResolve', { sessionId: SESSION, promptIds: ['p'], action: 'snooze' }],
+      ['worktreePromptResolve', { sessionId: SESSION, promptIds: ['p'], action: 'add', snooze: { mode: '7d' } }],
+      ['worktreePromptResolve', { sessionId: SESSION, promptIds: ['p'], action: 'dismiss', dontRemind: true, snooze: { mode: '7d' } }],
+      ['worktreePromptResolve', { sessionId: SESSION, promptIds: ['p'], action: 'snooze', snooze: { mode: 'soon' } }],
+      ['worktreePromptResolve', { sessionId: SESSION, promptIds: ['p'], action: 'add', dontRemind: true }],
+    ] as const) {
+      expect(await handler(endpoint, payload, signal), endpoint + ' ' + JSON.stringify(payload))
+        .toMatchObject({ ok: false, error: { code: 'panel/bad-request' } })
+    }
+  })
+
   it('refuses every endpoint while the live switch is off', async () => {
     const { handler } = await mount({ enabled: false })
     for (const [endpoint, payload] of [
       ['worktreePrompt', { sessionId: SESSION }],
+      ['worktreePromptSeen', { sessionId: SESSION, promptIds: ['p'] }],
       ['worktreePromptWait', { sessionId: SESSION }],
       ['worktreePromptReset', { sessionId: SESSION }],
+      ['worktreePromptResolve', { sessionId: SESSION, promptIds: ['p'], action: 'snooze', snooze: { mode: '7d' } }],
     ] as const) {
       expect(await handler(endpoint, payload, new AbortController().signal), endpoint)
         .toMatchObject({ ok: false, error: { code: 'worktree/not-enabled' } })
