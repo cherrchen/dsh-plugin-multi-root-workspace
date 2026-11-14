@@ -683,6 +683,19 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       ? <p className="mrfw-note">{t('panel.loading')}</p>
       : <p className="mrfw-note">{t('panel.remoteUnavailable', { reason: statusText(status, t) })}</p>
 
+  /**
+   * The first `sshState` read failed: the alert above names the failure, the
+   * tab says so and offers a retry — without it the effect would not re-fire
+   * and the tab would keep showing "loading" until the dialog reopened.
+   */
+  const renderLoadState = (): ReactNode =>
+    error === undefined
+      ? <p className="mrfw-note">{t('ssh.add.loading')}</p>
+      : <div className="mrfw-sshArea">
+          <p className="mrfw-note">{t('ssh.loadFailed')}</p>
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => { void load() }}>{t('panel.retry')}</Button>
+        </div>
+
   const renderCredentials = (): ReactNode => <section className="mrfw-subsection">
     <div className="mrfw-sectionTitleRow"><span className="mrfw-sectionTitle">{t('ssh.credentials')}</span></div>
     <p className="mrfw-note">{t('ssh.keys.personalGuide')}</p>
@@ -995,7 +1008,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     }
     if (ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
     if (sessionId === undefined) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
-    if (view === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
+    if (view === undefined) return renderLoadState()
     return <div className="mrfw-sshArea">
       <p className="mrfw-note">{t('ssh.add.personalGuide')}</p>
       {saved ? <p className="mrfw-note" role="status">{t('ssh.add.saved')}</p> : null}
@@ -1033,7 +1046,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     }
     if (ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
     if (sessionId === undefined) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
-    if (view === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
+    if (view === undefined) return renderLoadState()
     return <div className="mrfw-sshArea">{renderCredentials()}</div>
   }
 
@@ -1043,7 +1056,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     if (custodyMode !== 'personal') return renderDeploymentConnections()
     if (ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
     if (sessionId === undefined) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
-    if (view === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
+    if (view === undefined) return renderLoadState()
     return renderConnections()
   }
 
