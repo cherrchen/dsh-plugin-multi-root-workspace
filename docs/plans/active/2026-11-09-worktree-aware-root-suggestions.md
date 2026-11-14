@@ -279,7 +279,8 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - **fresh 保持只读**：新增 `WorkspaceState.passive`；`prompt(fresh)` 的首次激活与重新 inventory 走被动路径——只读 `resolveRepo` 与 sidecar、只重建候选队列，不安装 watcher、不调度 owner 侧 reconcile、不写 sidecar；首个显式请求（Dialog 的 `prompt()`/`wait`/面板 list/reset）提升为持久发现一次并恢复映射核对，settings/registry 触发的 reconcile 沿用当前姿态。回归：fresh 作为第二个 Host 的首个调用时 `watching === false`、sidecar 操作只有 `read`、文件逐字不变、后台不发现新 worktree；打开 Dialog 后 watcher 与 reconcile 才出现。
 - **定时 snooze 到期释放提醒**：新增 `expireSnooze`（到期时丢弃内存记录并把 keys 从 `offered` 释放）与 `liveSnooze`（sidecar 读回过期记录不再激活）；sidecar 不主动清理过期记录。回归：`seen` → 7d snooze → 到期后同一 Host 重新提示。
 - **sidecar 读回先观察到到期也要释放**：`liveSnooze` 丢弃过期记录时会丢失释放；改为统一 `adoptSnooze`，任何 sidecar 读回（`loadSidecar`/`reconcileSidecar`/snooze 写入回读）观察到到期都先释放 `offered` 中的 keys 再丢弃记录，`expireSnooze` 复用同一 helper。回归：`seen` → 7d snooze → 到期 → 先 `describeRoots`（面板打开等价）→ 下一次 fresh 仍重新提示。
-- **验证**：worktree + client + locale + authority-native 专项 14 文件 **180 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
+- **每条过期记录只释放一次**：sidecar 有意保留过期记录，重复读取不能重复释放，否则会删掉操作者在重新提示之后通过 `seen` 做出的新认领、导致下一次激活重复提示。Workspace 内存按记录指纹（mode/until/at/keys）记录已处理记录，只有首次观察释放；`expireSnooze`/`adoptSnooze` 共用。回归：到期 → fresh 重新提示 → `seen` → `describeRoots` → 下一次 fresh 保持安静。
+- **验证**：worktree + client + locale + authority-native 专项 14 文件 **181 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
 
 ## Dependencies
 
