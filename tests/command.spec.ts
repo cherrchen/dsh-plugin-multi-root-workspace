@@ -1282,6 +1282,44 @@ describe('the additional-root search endpoint', () => {
     expect(answer.error?.code).toBe('search-unavailable')
   })
 
+  it('relays an upstream workspace-file refusal instead of normalizing it', async () => {
+    // The search endpoint runs the upstream implementation in-process, so the
+    // admission refusal and the search's own failures arrive as RemoteErrors
+    // from the workspace-file vocabulary the panel localizes.
+    const { RemoteError } = await import('@deepseek-ai/dsh-typert-protocol')
+    const stack = await mount({
+      withConnection: true,
+      workspaceSearch: async () => {
+        throw new RemoteError('workspace-file/outside-workspace', '"x" is no longer in this workspace', { path: 'x' })
+      },
+    })
+    const root = await addRoot(stack, 'denied')
+    const answer = await search({ rootId: root.id, query: 'a' })
+    expect(answer.ok).toBe(false)
+    expect(answer.error?.code).toBe('workspace-file/outside-workspace')
+    expect(answer.error?.message).toBe('"x" is no longer in this workspace')
+  })
+
+  it('relays search-failed and still normalizes an unrecognized rejection', async () => {
+    const { RemoteError } = await import('@deepseek-ai/dsh-typert-protocol')
+    let call = 0
+    const stack = await mount({
+      withConnection: true,
+      workspaceSearch: async () => {
+        call += 1
+        if (call === 1) throw new RemoteError('workspace-file/search-failed', 'Workspace file search requires a subprocess provider', {})
+        throw new Error('boom')
+      },
+    })
+    const root = await addRoot(stack, 'search-failures')
+    const failed = await search({ rootId: root.id, query: 'a' })
+    expect(failed.ok).toBe(false)
+    expect(failed.error?.code).toBe('workspace-file/search-failed')
+
+    const unknown = await search({ rootId: root.id, query: 'b' })
+    expect(unknown.error?.code).toBe('panel/internal')
+  })
+
   it('keeps the panel session authority and rejects an unknown wire field', async () => {
     await mount({ withConnection: true, workspaceSearch: async () => ({ matches: [], truncated: false, incomplete: false }) })
     expect((await callPanel('search', { rootId: 'x', query: 'a' })).error?.code).toBe('panel/bad-request')
