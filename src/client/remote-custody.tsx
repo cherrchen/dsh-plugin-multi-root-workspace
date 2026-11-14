@@ -176,7 +176,7 @@ export function RemoteCustodyModeControl(props: {
       </div>
     ) : null}
     {mode === 'hardened' ? <div className="mrfw-skillsSettingsDescription">{t('remote.mode.hardenedNote')}</div> : null}
-    {error ? <div role="alert">{error}</div> : null}
+    {error ? <div role="alert" className="mrfw-alert">{error}</div> : null}
     {RiskConfirmation === undefined ? null : <RiskConfirmation
       open={canConfirm}
       title={t('remote.downgradeTitle')}

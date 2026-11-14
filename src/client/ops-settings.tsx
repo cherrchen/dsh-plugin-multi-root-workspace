@@ -43,7 +43,7 @@ export function OpsCompatibilitySettingsCard({ form, t }: { form: SkillsForm; t:
         <Tag tone="info">{t('ops.experimental')}</Tag>
       </div>
       <div className="mrfw-skillsSettingsDescription">{t('ops.compatibilityHint')}</div>
-      {error ? <div role="alert">{error}</div> : null}
+      {error ? <div role="alert" className="mrfw-alert">{error}</div> : null}
     </div>
     <Switch label={t('ops.compatibilityEnable')} checked={snapshot.value?.enabled === true} disabled={busy || confirmation !== undefined || snapshot.status !== 'ready' || !snapshot.writable || (snapshot.value?.enabled !== true && RiskConfirmation === undefined)}
         onChange={enabled => {

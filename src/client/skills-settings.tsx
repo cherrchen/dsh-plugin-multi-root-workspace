@@ -129,7 +129,7 @@ export function RemoteSwitchRow({ form, t }: { form: SkillsForm; t: Translate })
         <Tag tone="warning">{t('remote.experimental')}</Tag>
       </div>
       <div className="mrfw-skillsSettingsDescription">{t('remote.settingsHint')}</div>
-      {error ? <div role="alert">{error}</div> : null}
+      {error ? <div role="alert" className="mrfw-alert">{error}</div> : null}
     </div>
     <Switch label={t('remote.settingsEnable')} checked={enabled} disabled={busy || confirmation !== undefined || snapshot.status !== 'ready' || !snapshot.writable || (!enabled && RiskConfirmation === undefined)}
         onChange={next => {
