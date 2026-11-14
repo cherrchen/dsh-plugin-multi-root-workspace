@@ -273,7 +273,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 
 ### 第二十次修订返工（2026-11-14，Code Review，完成）
 
-> PR #55 的代码审查复现了八处实现偏离（ADR §20.4/§20.7；Devin 五条 + Codex 三条 P2），均先写失败回归再修复；授权语义不变。
+> PR #55 的代码审查复现了十一处实现偏离（ADR §20.4/§20.7/§20.8；Devin 六条 + Codex 五条 P2），均先写失败回归再修复；授权语义不变。
 
 - **snooze-only reset 落盘**：`worktreeSidecar` 的 `reset` 空态判断改为针对原始文档（同时看 `ignored` 与 `snooze`）；只清 snooze 也写一次 revision，无内容时仍不制造 revision。回归：sidecar snooze-only reset 持久化（重开 owner 读回为空、二次 reset 不制造 revision）+ 服务层 reset 后重启不恢复。
 - **fresh 保持只读**：新增 `WorkspaceState.passive`；`prompt(fresh)` 的首次激活与重新 inventory 走被动路径——只读 `resolveRepo` 与 sidecar、只重建候选队列，不安装 watcher、不调度 owner 侧 reconcile、不写 sidecar；首个显式请求（Dialog 的 `prompt()`/`wait`/面板 list/reset）提升为持久发现一次并恢复映射核对，settings/registry 触发的 reconcile 沿用当前姿态。回归：fresh 作为第二个 Host 的首个调用时 `watching === false`、sidecar 操作只有 `read`、文件逐字不变、后台不发现新 worktree；打开 Dialog 后 watcher 与 reconcile 才出现。
@@ -283,7 +283,10 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - **多个待处理提醒共存**：sidecar 从单条 `snooze` 改为 `snoozes` 列表；新记录只取代 keys 有交集的旧记录，不相交的记录保留各自期限（上限 32，读取兼容旧单对象）。回归：A(7d) → B(7d) → A 到期只回 A → `seen(A)` → B 到期只回 B。
 - **fresh 前重读共享提醒投影**：`fresh: true` 在过滤前从 owner 只读重读 `snoozes`，否则已激活的 Host 会忽略另一 Host 刚写入的延迟（snooze 不改变 Registry roots、不触发变更刷新）。回归：先以空投影激活 → owner 写入延迟 → 下一次 fresh 为空。
 - **部分重叠按 key 拆分**：新选择只点名旧记录的一部分候选时，旧记录未被点名的 keys 拆成一条残余记录并保留原期限/原 `at`，完全覆盖的记录才删除。回归：sidecar 部分重叠（until 与 until-new-worktree）保留残余记录；服务层 A(7d)/B(2d) 部分重叠后 B 原期限前安静、到期只回 B、A 的新期限到期再回 A。
-- **验证**：worktree + client + locale + authority-native 专项 14 文件 **188 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
+- **残余记录不重复释放**：到期去重从「整条记录指纹（含 keys）」改为「延迟身份（mode/until/at，不含 keys）+ 单个发现 key」。共享记录 `{A,B}` 到期释放后，另一 Host 只对 A 再选「稍后」，owner 拆出的 `{B}` 残余记录身份不变；原先指纹不同会再次释放 B、冲掉重新提示后的 `seen` 认领。回归：到期 → fresh 重提示 → `seen` → 另一 Host 只对 A 再选 7d → `describeRoots` 读回残余 → 下一次 fresh 保持安静。
+- **淘汰记录释放认领**：`observeSnoozes` 统一处理自动过滤、任何 sidecar 读回与本地合并；到期记录释放 keys，本 Host 记得但新投影不再覆盖其 key 的记录（`MAX_SNOOZE_RECORDS = 32` 淘汰）同样释放，避免被淘汰的定时选择退化为永久抑制。回归：`seen` → 7d → 另一 Host 写入 32 条不相交延迟触发淘汰 → 下一次 fresh 重新提示。
+- **客户端处理 `skipped`**：`applyLater`/`snoozeNotice` 不再丢弃成功响应里的 `skipped` 直接关闭。Toast 只为未处理行保留提示（刷新后的 id，select 以 id 集合为 key 重新武装），Dialog 保留刷新后的行 + 行错误 + skipped 计数（与「添加所选」一致）；transport/authority 失败仍静默关闭、不自动重试。回归：client 的 Toast(7d) 与 Dialog(7d/permanent) 三条。
+- **验证**：worktree + client + locale + authority-native 专项 14 文件 **193 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
 
 ## Dependencies
 
