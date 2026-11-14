@@ -1,6 +1,6 @@
 # 附加根搜索：reload 按钮应刷新正在展示的搜索（R6）
 
-> 状态：进行中（2026-11-14）。本文件是修复计划与执行账本。
+> 状态：已完成（2026-11-14）。本文件是修复计划与执行账本。
 >
 > 分支：`feat/addtional-file-tree-1114`（PR [#56](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/56)）。
 > 关联：[ADR-0041](../../decisions/ADR-0041-additional-root-workspace-search.md)、[上一轮 review 修复](../completed/2026-11-14-files-parity-review-fixes.md)。
@@ -59,6 +59,11 @@ Codex review（PR #56，reviewed commit `13d8ae6`）结论**成立**：
 
 | 阶段 | 状态 | 提交 | 证据 |
 | --- | --- | --- | --- |
-| P0 | 进行中 | — | — |
-| P1 | 待开始 | — | — |
-| P2 | 待开始 | — | — |
+| P0 | 已完成 | `1dbb201` | 本文件；`pnpm docs:check` 0 errors |
+| P1 | 已完成 | `79a902b` | store `refresh`（有查询才动作、保留结果/展开/滚动，attempt+1、settledKey 清空）+ RootSwitcher reload 接线；`vitest run tests/client-search-state.spec.ts tests/client-switcher.spec.ts` → 7 + 30 passed；相邻套件 58 passed；lint 0；typecheck 0；build 绿 |
+| P2 | 已完成 | `待 docs 提交` | 计划收尾、ADR 注记、总账与 PR 描述；CI run [https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43606644577](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43606644577) 在 `79a902b` 上 31/31 checks 全绿 |
+
+## 8. 最终证据
+
+- 提交：`1dbb201`（计划）、`79a902b`（R6 修复）；均在同一 PR 分支上。
+- CI：head `79a902b` 的 run [https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43606644577](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43606644577) 通过 releases + 24 条 release/image verify 与 gate，合计 31/31 checks；本机残留的 17 个 sandbox-IPC authority/lease 失败与基线 `8c09c7b` 同因，CI 的非沙箱 runner 全部通过。
