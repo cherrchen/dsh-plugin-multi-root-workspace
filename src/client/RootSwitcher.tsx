@@ -354,7 +354,15 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
             className="mrfw-switcherReload"
             aria-label={filesTree.t('reload')}
             title={filesTree.t('reload')}
-            onClick={() => { if (takeover !== null) filesTree.face.refresh(takeover.tabId) }}
+            onClick={() => {
+              if (takeover === null) return
+              // The drawn tree is refreshed in place first; when search results
+              // replace the tree there is no directory node to relist, so the
+              // active search request is re-run instead — otherwise a settled
+              // answer keeps its identity and stale matches survive the reload.
+              filesTree.face.refresh(takeover.tabId)
+              if (searchKey !== undefined && searchSeat !== undefined) searchSeat.store.refresh(searchKey)
+            }}
           >
             <IconRefresh size={15} />
           </button>

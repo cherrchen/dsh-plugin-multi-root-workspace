@@ -186,6 +186,15 @@ export interface SearchPaneStore {
    */
   retry(key: string): void
   /**
+   * Re-run the active search for a fresh answer (the header reload): a
+   * non-blank query bumps the attempt and clears the retained-answer marker,
+   * keeping the drawn result and the reader's position until the replacement
+   * settles. A blank query does nothing — the listed tree's own reload covers
+   * that case.
+   * @param key - the record key.
+   */
+  refresh(key: string): void
+  /**
    * Drop every root's record for one tab — its owner is gone (the tab closed,
    * or its session ended). Body-only unmounts must NOT call this: the record
    * is what restores the search when the Files body is drawn again.
@@ -238,6 +247,11 @@ export function createSearchPaneStore(): SearchPaneStore {
     scrolled: (key, scrollTop) => { write(key, { scrollTop }) },
     retry: key => {
       write(key, { pending: true, result: undefined, expanded: [], scrollTop: 0, settledKey: '', attempt: read(key).attempt + 1 })
+    },
+    refresh: key => {
+      const state = read(key)
+      if (state.query.trim() === '') return
+      write(key, { pending: true, settledKey: '', attempt: state.attempt + 1 })
     },
     forgetTab: tabId => {
       const prefix = `${tabId}\u0000`

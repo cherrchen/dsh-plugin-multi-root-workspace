@@ -1043,5 +1043,26 @@ describe('the Files-tab search surface', () => {
     expect(document.querySelector('[data-mrfw-files-search-toggle]')).toBeNull()
     expect(screen.queryByRole('searchbox')).toBeNull()
   })
+
+  it('re-runs the active search when the header reload is clicked', async () => {
+    const harness = mount(true, {}, { workspaceSearch: true })
+    const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factoryStub() }, false, true)
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+
+    fireEvent.click(document.querySelector<HTMLElement>('[data-mrfw-files-search-toggle]')!)
+    const input = await screen.findByRole('searchbox')
+    fireEvent.change(input, { target: { value: 'notes' } })
+    const searchCalls = () => harness.calls.filter(call => call.endpoint === 'search')
+    await waitFor(() => { expect(searchCalls().length).toBe(1) })
+
+    // Search results replace the tree, so the face refresh alone is a no-op;
+    // the header reload must re-run the same request for fresh matches.
+    fireEvent.click(document.querySelector<HTMLElement>('.mrfw-switcherReload')!)
+    await waitFor(() => { expect(searchCalls().length).toBe(2) })
+    const last = searchCalls().at(-1)!
+    expect(last.payload).toMatchObject({ rootId: 'a', query: 'notes' })
+  })
 })
 

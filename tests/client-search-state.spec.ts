@@ -117,3 +117,34 @@ describe('the per-tab cleanup', () => {
   })
 })
 
+describe('the reload refresh', () => {
+  it('re-runs the active search while keeping the drawn answer and position', () => {
+    const store = createSearchPaneStore()
+    const key = searchStateKey('tab-1', ROOT)
+    const settled = searchRequestKey(request())
+    store.setQuery(key, 'config')
+    store.searched(key, found(), settled)
+    store.scrolled(key, 96)
+    const expandedBefore = store.state(key).expanded
+    expect(expandedBefore.length).toBeGreaterThan(0)
+
+    store.refresh(key)
+    const refreshed = store.state(key)
+    expect(refreshed.attempt).toBe(1)
+    expect(refreshed.settledKey).toBe('')
+    expect(refreshed.pending).toBe(true)
+    // The replacement request runs under the old rows: the drawn answer and
+    // the reader's position stay until the new answer settles.
+    expect(refreshed.result?.kind).toBe('found')
+    expect(refreshed.expanded).toEqual(expandedBefore)
+    expect(refreshed.scrollTop).toBe(96)
+  })
+
+  it('does nothing when no search is active', () => {
+    const store = createSearchPaneStore()
+    const key = searchStateKey('tab-1', ROOT)
+    store.barOpen(key, true)
+    store.refresh(key)
+    expect(store.state(key)).toMatchObject({ attempt: 0, pending: false, settledKey: '' })
+  })
+})
