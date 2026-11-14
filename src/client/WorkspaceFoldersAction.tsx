@@ -41,7 +41,7 @@ import {
   IconSettings,
   IconTrash,
 } from '../compat/client-icons.ts'
-import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
+import { errorHasDetail, errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
 import type { RemotesClient } from './remotes-client.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
@@ -806,7 +806,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           {state.error === undefined ? null : (
             <p role="alert" className="mrfw-alert">
               {t(errorKeyOf(state.error.code))}
-              {(state.error.code === 'unavailable' || state.error.code === 'panel/internal') ? ` (${state.error.message})` : ''}
+              {errorHasDetail(state.error.code) ? ` (${state.error.message})` : ''}
             </p>
           )}
           {state.view?.unavailable === undefined ? null : (
@@ -1003,7 +1003,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 <span className="mrfw-sectionNote">{t('panel.remoteNote')}</span>
               </div>
               {remoteState.error === undefined ? null : (
-                <p role="alert" className="mrfw-alert">{t(errorKeyOf(remoteState.error.code))}</p>
+                <p role="alert" className="mrfw-alert">
+                  {t(errorKeyOf(remoteState.error.code))}
+                  {errorHasDetail(remoteState.error.code) ? ` (${remoteState.error.message})` : ''}
+                </p>
               )}
               <div className="mrfw-sshAddRow">
                 <Action
