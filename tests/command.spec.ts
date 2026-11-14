@@ -645,6 +645,8 @@ describe('the panel channel', () => {
     // A malformed personal config makes sshState throw ManifestError; its
     // stable code must survive the channel so the client can localize it —
     // collapsing to panel/internal is the failure this regression watches.
+    // On Windows the CredentialStore constructor fires first (no getuid), so
+    // the passthrough code differs; what must never appear is panel/internal.
     const personalPath = join(fixture.base, 'personal.json')
     writeFileSync(personalPath, '{ not json', { mode: 0o600 })
     const stack = await mount({
@@ -654,7 +656,7 @@ describe('the panel channel', () => {
     expect(stack.registry.remoteMode).toBe('personal')
     const answer = await callPanel('sshState', { sessionId: PANEL_SESSION })
     expect(answer.ok).toBe(false)
-    expect(answer.error?.code).toBe('invalid-manifest')
+    expect(answer.error?.code).toBe(process.platform === 'win32' ? 'credential-root-unsafe' : 'invalid-manifest')
   })
 
   it('reports session-not-live when the session persists but is not live in this process', async () => {
