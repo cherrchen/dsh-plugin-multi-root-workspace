@@ -491,6 +491,32 @@ describe('fresh check and operator memory', () => {
     }
   }, 20_000)
 
+  it('keeps a reminder recoverable when a sidecar reload observes the expiry first', async () => {
+    const area = fixture('snooze-reload-expiry')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      expect(await worktrees.seen(SESSION, [shown.id])).toEqual({ seen: 1 })
+      await worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: '7d' } })
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      // An explicit panel/command read reloads the sidecar BEFORE the next
+      // automatic check observes the expiry. Dropping the expired record here
+      // must release the claim it covered, not just forget the delay: the
+      // next fresh check has no record left to expire.
+      await worktrees.describeRoots(main)
+      const resumed = await worktrees.prompt(SESSION, { fresh: true })
+      expect(resumed.prompts.map(prompt => prompt.path)).toEqual([realpathSync.native(linked)])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 20_000)
+
 })
 
 describe('experimental default', () => {

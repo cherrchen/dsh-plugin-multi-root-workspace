@@ -541,7 +541,7 @@ export class MultiRootWorktrees extends Service {
     workspace.snooze = record
     try {
       const view = await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'snooze', snooze: record }, beforeSubmit)
-      if (view.available) workspace.snooze = view.snooze ?? record
+      if (view.available) this.adoptSnooze(workspace, view.snooze ?? record)
     } catch (error) {
       if (error instanceof WorktreeError) throw error
       // Memory-only is a supported degradation; discovery still honors it.
@@ -964,7 +964,7 @@ export class MultiRootWorktrees extends Service {
       if (!view.available) return
       workspace.mappings = view.worktreeRoots
       workspace.ignored = new Set(view.ignored.map(entry => entry.key))
-      workspace.snooze = liveSnooze(view.snooze)
+      this.adoptSnooze(workspace, view.snooze)
       workspace.sidecarAvailable = true
     } catch {
       // The mapping is cleanup bookkeeping only; discovery stays usable.
@@ -983,7 +983,7 @@ export class MultiRootWorktrees extends Service {
           beforeSubmit()
           if (view.available) {
             workspace.mappings = view.worktreeRoots
-            workspace.snooze = liveSnooze(view.snooze)
+            this.adoptSnooze(workspace, view.snooze)
             workspace.sidecarAvailable = true
           }
         } catch {
@@ -1066,6 +1066,29 @@ export class MultiRootWorktrees extends Service {
     const until = Date.parse(snooze.until ?? '')
     if (Number.isFinite(until) && Date.now() < until) return
     workspace.snooze = undefined
+    this.releaseSnoozeClaims(workspace, snooze)
+  }
+
+  /**
+   * Adopt the reminder-delay projection the owner reported.
+   *
+   * An expired timed record is dropped HERE and its discovery claims released,
+   * exactly like the in-memory expiry path: an explicit request (the panel
+   * list, a confirmation, cleanup) may read the sidecar between the expiry
+   * instant and the next automatic check, and dropping the record without the
+   * release would leave `offered` hiding the candidates with no record left
+   * for `expireSnooze` to expire (PR #55 review).
+   * @param workspace - the workspace the projection belongs to.
+   * @param persisted - the record the owner reported, if any.
+   */
+  private adoptSnooze(workspace: WorkspaceState, persisted: WorktreeSnooze | undefined): void {
+    const live = liveSnooze(persisted)
+    if (persisted !== undefined && live === undefined) this.releaseSnoozeClaims(workspace, persisted)
+    workspace.snooze = live
+  }
+
+  /** Release the discovery claims one dropped reminder delay covered. */
+  private releaseSnoozeClaims(workspace: WorkspaceState, snooze: WorktreeSnooze): void {
     for (const key of snooze.keys) workspace.offered.delete(key)
   }
 
