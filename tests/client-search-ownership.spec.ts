@@ -24,12 +24,11 @@ function seats() {
   return createFilesTreeSeats(ctx, { preferences: createSearchPreferenceBook(undefined) })
 }
 
-/** One session's inject product. */
-function product(sessionId: string) {
-  const handle = seats()
-  const instance = handle.store.create(sessionId)
-  const injected = handle.inject(sessionId as SessionId, instance.actions)
-  return { handle, injected }
+/** One session's inject product from a FACTORY the caller provides. */
+function product(factory: ReturnType<typeof seats>, sessionId: string) {
+  const instance = factory.store.create(sessionId)
+  const injected = factory.inject(sessionId as SessionId, instance.actions)
+  return { factory, injected }
 }
 
 afterEach(() => {
@@ -37,16 +36,22 @@ afterEach(() => {
 })
 
 describe('the search records ownership', () => {
-  it('gives every session its own store', () => {
-    const a = product('session-a').injected
-    const b = product('session-b').injected
+  it('gives every session its own store on the shared production factory', () => {
+    // Production has ONE factory per plugin apply and injects a product per
+    // session; a store that crept up to the factory scope would leak every
+    // session's records into the next. Two products of the same factory must
+    // therefore own different stores.
+    const factory = seats()
+    const a = product(factory, 'session-a').injected
+    const b = product(factory, 'session-b').injected
     expect(a.search).not.toBe(b.search)
     a.search.barOpen(searchStateKey(TAB_A, ROOT), true)
     expect(b.search.state(searchStateKey(TAB_A, ROOT)).barOpen).toBe(false)
+    expect(a.search.state(searchStateKey(TAB_A, ROOT)).barOpen).toBe(true)
   })
 
   it("drops one closed tab's records and keeps the other tab's", () => {
-    const { injected } = product('session-a')
+    const { injected } = product(seats(), 'session-a')
     const keyA = searchStateKey(TAB_A, ROOT)
     const otherRoot = searchStateKey(TAB_A, '/repos/other')
     const keyB = searchStateKey(TAB_B, ROOT)
@@ -63,7 +68,7 @@ describe('the search records ownership', () => {
   })
 
   it("keeps a tab's records when only the body unmounts", () => {
-    const { injected } = product('session-a')
+    const { injected } = product(seats(), 'session-a')
     const key = searchStateKey(TAB_B, ROOT)
     injected.search.setQuery(key, 'config')
     const carrier = document.createElement('div')

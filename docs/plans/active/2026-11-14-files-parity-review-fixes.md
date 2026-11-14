@@ -109,6 +109,20 @@
 - A5 全量门禁通过，且 PR #56 的 CI 在最终提交上全绿（run URL 记录于 §7）；
 - 计划、ADR 修订、FORK.md、总账与 PR 描述齐备。
 
+## 8. 追加 review（R5）：会话隔离测试的工厂边界
+
+| # | Review 结论 | 位置 | 判定 |
+| --- | --- | --- | --- |
+| R5 | `tests/client-search-ownership.spec.ts` 的 session 隔离用例为每个 session 各建一个 `createFilesTreeSeats` 工厂，工厂级共享 store 的错误实现也能通过 | `tests/client-search-ownership.spec.ts` 旧 `product()` 辅助 | 成立（测试强度不足，非产品缺陷）。生产只有 **一个** factory（`src/client/index.ts` 的 `filesTreeSeats`），按 session 调 `inject`；原测试没有复现该边界。 |
+
+**修复**：`product(factory, sessionId)` 接受调用方给的工厂；隔离用例显式用**同一个** factory 调两次 `inject`，断言两 product 的 store 不同、记录互不可见；其余所有权用例同样从同一 factory 取 product。并做了**变异验证**：把 `searchStore` 挪回 factory 作用域（临时改动、随后还原）时该用例失败，还原后通过——证明测试现在真的钉住了这条边界。
+
+## 9. 阶段补充
+
+| 阶段 | 提交 | 内容 | 退出闸门 |
+| --- | --- | --- | --- |
+| P6 | `test(client): isolate the session-ownership boundary on one factory` | R5：修复测试边界 + 变异验证结论 | focused vitest（ownership 3 passed；变异时 1 failed）+ lint/typecheck 绿 |
+
 ## 7. 进度与证据
 
 | 阶段 | 状态 | 提交 | 证据 |
@@ -118,6 +132,7 @@
 | P3 | 已完成 | `909ec2e` | `vitest run tests/command.spec.ts` → 75 passed（新增：`workspace-file/outside-workspace` 与 `search-failed` 原码透传、未知异常仍 `panel/internal`）；`tests/workspace-routing.spec.ts` 28 passed；typecheck 0 |
 | P4 | 已完成 | `83a87f5` | 客户端套件 137 passed（`client-search` 14、`client-search-state` 5、`client-search-ownership` 3、files 17、switcher 29、navigator 24、styles 35、bundle 10）；ownership 覆盖：session 隔离、tab 死亡清空该 tab 全部根记录、body unmount 保留；lint 0；typecheck 0 |
 | P5 | 进行中 | 待推送 | 全门禁与 CI 结果见下方"最终证据" |
+| P6 | 已完成 | `P6 提交` | ownership 3 passed；变异（store 提到 factory 作用域）时隔离用例 1 failed，还原后 3 passed；lint/typecheck 绿 |
 
 > 说明：P1 与 P2 共用 `pane.tsx`/`search-state.ts` 的同一处 effect 语义，拆成两个提交会让中途一个提交的测试红，故合并为 `eb8a430`；
 > P3/P4 各自单提交。
