@@ -1,6 +1,6 @@
 # Auto Review 多基线适配计划（DSH 0.2.1-rc.2 之后）
 
-> 状态：执行中。上游事实见[多基线接口审查](../../reference/auto-review-0.2.2-migration.md)；既有能力基线见 [ADR-0021](../../decisions/ADR-0021-auto-review-context-companion.md) 与 [ADR-0022](../../decisions/ADR-0022-auto-review-loader-entry.md)，本批的多基线合同见 [ADR-0040](../../decisions/ADR-0040-auto-review-multi-baseline.md)。进度、平台证据与发布状态唯一真源是[路线账本](./2026-09-12-multi-root-workspace.md#进度总账)。
+> 状态：已完成（2026-11-14）。上游事实见[多基线接口审查](../../reference/auto-review-0.2.2-migration.md)；既有能力基线见 [ADR-0021](../../decisions/ADR-0021-auto-review-context-companion.md) 与 [ADR-0022](../../decisions/ADR-0022-auto-review-loader-entry.md)，本批的多基线合同见 [ADR-0040](../../decisions/ADR-0040-auto-review-multi-baseline.md)。进度、平台证据与发布状态唯一真源是[路线账本](../active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## Goal
 
@@ -198,3 +198,20 @@ ADR-0021/0022 的上下文契约、来源身份、freshness、协议与生命周
 ## 实施落点
 
 当前分支 `feat/auto-review-adapt-1114`，开发 pin `@deepseek-ai/dsh` `0.2.2-rc.3`（cordis `4.1.0`，Node `24.18.0`，macOS 本机）。每个阶段的提交、命令与结果记录在路线账本的新章节；只有全部阶段验收通过后才准备 Draft PR。
+
+## 实施结果（2026-11-14）
+
+本计划按两个实现提交与一个收尾提交落地，阶段与提交的对应关系如下（P1 与 P2 合并为一个提交：合同、分发、构建目标与两份实现属于同一个可编译单元，拆开会在中间提交上留下无法构建的树）：
+
+| 计划阶段 | 提交 | 结果 |
+| --- | --- | --- |
+| P0 调研与计划 | `3abd15d` docs(auto-review): plan multi-baseline support for DSH 0.2.1-rc.2 and later | 上游审查、ADR-0040、适配计划与索引更新；文档检查通过 |
+| P1 + P2 合同、车道模型、基线 B 实现 | `5abf849` feat(auto-review): support the 0.2.1 and 0.2.2 reviewer generations | 两个基线的逐字节副本与 fork、按车道动态加载、按编译 pin 类型检查、差分门禁/冒烟/构建/升级脚本的联合集合化；本机 `compat:check`/`lint`/`typecheck`/`build`/`docs:check`/`pack:check`/`auto-review:fork` 通过，`smoke:auto-review` 在 `0.2.2-rc.3` 全部通过 |
+| P3 基线 B 测试套件 | `96a544b` test(auto-review): cover the 0.2.2 baseline across the review contract | `current/upstream.spec.ts`（官方回归副本）与 `current/context.spec.ts`（消息模型下的上下文/围栏/PTC）新增；`loader.spec.ts` 适配 loader 1.1.0，`ops-context.spec.ts` 改为结构探测执行器桥接；本机两代车道全部通过 |
+| P4 CI、文档与最终验收 | 收尾提交 | CI 计划与运行器按联合集合执行、README/AGENTS/FORK/迁移审查/开发工作流/路线账本更新、完整本机门禁与基线树对照 |
+
+退出验收的执行证据（含 17 个环境性失败的基线对照、基线 A 独立工作树与冒烟结果）只记[路线账本](../active/2026-09-12-multi-root-workspace.md#auto-review-多基线适配2026-11-14)。`CHANGELOG` 与版本号按既有发版流程在实际发版时写入，本批未创建 tag。
+
+## 后续
+
+`0.2.2-rc.3` 之后的发布需要重新核对：若 `0.2.1` / `0.2.2` 线的 reviewer 源码再次分叉，就新增第三份基线而不是在现有基线上做条件分支；正式 context contribution API 落地后，两代 fork 一起替换为 collector，保留同一套联合测试。支持集合的提升仍是人工行为：绿色车道是证据，不是授权。

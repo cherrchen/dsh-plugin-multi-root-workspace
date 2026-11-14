@@ -1,6 +1,6 @@
 # Auto Review 多基线接口审查（DSH 0.2.1-rc.2 之后）
 
-2026-11-14 对上游发布 tag 做只读源码对照，范围是 Auto Review 可选集成从 `0.2.1-rc.2` 之后的全部受支持发布：`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5`、`0.2.2-alpha.2`、`0.2.2-alpha.3`、`0.2.2-rc.1`、`0.2.2-rc.2`、`0.2.2-rc.3`。执行进度、平台证据与支持声明只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)，适配设计与阶段验收见[适配计划](../plans/active/2026-11-14-auto-review-multi-baseline.md)。本文件不修改上游 checkout。
+2026-11-14 对上游发布 tag 做只读源码对照，范围是 Auto Review 可选集成从 `0.2.1-rc.2` 之后的全部受支持发布：`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5`、`0.2.2-alpha.2`、`0.2.2-alpha.3`、`0.2.2-rc.1`、`0.2.2-rc.2`、`0.2.2-rc.3`。执行进度、平台证据与支持声明只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)，适配设计与阶段验收见[适配计划](../plans/completed/2026-11-14-auto-review-multi-baseline.md)。本文件不修改上游 checkout。
 
 ## 版本拓扑与基线分组
 

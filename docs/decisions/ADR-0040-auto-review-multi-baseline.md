@@ -68,6 +68,6 @@ Accepted
 
 ## Related Documents
 
-- [多基线适配计划](../plans/active/2026-11-14-auto-review-multi-baseline.md)
+- [多基线适配计划](../plans/completed/2026-11-14-auto-review-multi-baseline.md)
 - [多基线接口审查](../reference/auto-review-0.2.2-migration.md)
 - [ADR-0009](./ADR-0009-dsh-compat-contract.md)、[ADR-0021](./ADR-0021-auto-review-context-companion.md)、[ADR-0022](./ADR-0022-auto-review-loader-entry.md)

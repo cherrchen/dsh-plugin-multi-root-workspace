@@ -201,7 +201,7 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 
 - `releases` 通过 [list-dsh-releases.mjs](../../scripts/list-dsh-releases.mjs) 读取精确契约，按 Node 版本分桶，再把每个桶切成最多四个版本一组。当前 24 个版本在每个启用镜像形成七组（Node 22 五组、Node 24 两组）。该 job 也在 frozen 开发树校验契约，并各跑一次 lint 和 docs:check。
 - 每组从同一个 Git commit 解包。源码目录与原 checkout 同级，父目录链禁止有 `node_modules`。每个版本独享 manifest、lockfile、依赖树、`lib/`、探针文件、DSH scratch 与日志。依赖下载共享 pnpm 的内容寻址缓存。源码及其中的内核拒绝夹具位于 `/tmp` 和本机 temp grant 之外；DSH scratch 在平台临时区中分配，保留各方言对原生临时目录的语义。开发 pin 走 frozen lockfile，其余复用 `upgrade-dsh.mjs`，仅在该副本内关闭 release-age 等待。
-- `ubuntu-latest` 对每版跑 `compat:check`、双端 typecheck、build、完整 Vitest 和冒烟，保留原生 Landlock。每组并行最多两版，各用最多两个 Vitest worker。其他镜像按版本串行，各用最多四个 worker；每版做精确契约检查、构建和原生套件。Auto Review fork 差分只在 Ubuntu 的 Auto Review 精确基线跑一次，Auto Review 混合套件和真实安装集成仍只在该基线、每个启用镜像上执行。
+- `ubuntu-latest` 对每版跑 `compat:check`、双端 typecheck、build、完整 Vitest 和冒烟，保留原生 Landlock。每组并行最多两版，各用最多两个 Vitest worker。其他镜像按版本串行，各用最多四个 worker；每版做精确契约检查、构建和原生套件。Auto Review 联合合同的每个发布都是独立车道：该版本按自身基线做实现类型检查、完整单测与差分门禁（Ubuntu 完整镜像），并在每个启用镜像上执行联合冒烟；其他版本照常显式跳过并退出 0。
 - [Ubuntu 独占套件清单](../../scripts/ci/ubuntu-only.json) 记录从其他镜像迁移的 Vitest 文件。客户端、RPC 和合同、locale 与快照、纯方言 argv、指令与 OPS 活动归属、恢复调度器、打包元数据及工作流等检查集中在 Ubuntu。含平台断言的混合文件整组保留，包括 Registry/IPC/lease 和跨进程接管、实际内核执行、Windows ACL / PowerShell / ConPTY、LSP、worktree Git 和路径边界。所有镜像继续运行真实安装的 `smoke:compose`、`smoke:behavior`、`smoke:journey`、`pack:check` 与 `smoke:packed`。
 - 每个版本先运行强制 Registry 认证探针和内核探针，再启动测试。Linux 22.04 提供 bwrap，macOS 提供 Seatbelt，Windows 探针用真实上游 ACL runner 验证允许写和兄弟目录拒写。探针把实跑方言写到该版本的私有文件，由该版本后续命令读取为 `DSH_PROBE_VERIFIED_DIALECTS`。探针证明可用的方言必须实跑，其他按原有能力判断和 skip 原因处理。`DSH_REQUIRE_KERNEL_RUNNER=1` 仍可在本地强制要求方言。
 - 一个版本失败后继续本组其余版本。摘要按镜像和精确版本列出耗时、结论和探针方言。每组上传 `ci-group-<image>-<group>`，每版目录内含阶段日志、Vitest 用例状态和 `context.skip(note)` 原因，以及 `result.json`。末尾 `gate` 要求两个上游 job 成功，并逐项核对计划中每个镜像 × 精确版本的同 SHA 成功记录；缺失、重复、失败或取消都阻断。发布查证见[发版流程](./release-workflow.md)。
@@ -259,11 +259,11 @@ B9 的 Linux 原生执行证据分两类：latest 保留实际 Landlock 选择�
 
 装配与生命周期见 [ADR-0022](../decisions/ADR-0022-auto-review-loader-entry.md)，使用与旧 companion 迁移见 [Auto Review README](../../src/auto-review/README.md)。原约束、快照与审查语义继续由 [ADR-0021](../decisions/ADR-0021-auto-review-context-companion.md) 说明。
 
-主包 patch 只增加一条默认 disabled 的 `multi-root-auto-review`。它拥有 context 和 reviewer，不需要第二个 context 开关、独立包或 configure。主包 `bundle` 总是生成 `lib/auto-review.js` 及其共享 chunks；`prepare` 的 git 安装路径也包含它。host 类型检查排除 `src/auto-review/**`，`scripts/build-auto-review.mjs` 在精确联合 pin 上单独检查实现类型，并为全部普通车道保留相同的公开 Loader 声明；原始 `upstream.ts` 不参与编译或构建。
+主包 patch 只增加一条默认 disabled 的 `multi-root-auto-review`。它拥有 context 和 reviewer，不需要第二个 context 开关、独立包或 configure。主包 `bundle` 总是生成 `lib/auto-review.js`、两份基线实现 chunk（`lib/auto-review-legacy.js`、`lib/auto-review-current.js`）及其共享 chunks；`prepare` 的 git 安装路径也包含它们。host 类型检查排除 `src/auto-review/**`，`scripts/build-auto-review.mjs` 在开发 pin 等于当前基线的编译 pin 时用对应 tsconfig 单独检查实现类型，并为全部普通车道保留相同的公开 Loader 声明；入口按已安装发布动态加载自己的实现，两份 `upstream.ts` 不参与编译或构建。
 
-原 companion 的开发/测试依赖并入主开发 manifest。`scripts/lib/auto-review-development.mjs` 记录其归属；普通旧版 probe 删除这些仅供 fork 使用的 dev 条目，避免安装尚未发布的旧版本包，恢复精确 fork pin 时重新补齐。它们不是第二个支持版本列表；精确 release 门禁仍在 `src/compat/auto-review-contract.ts`。回退 probe 文件时仍禁止覆盖未提交修改。
+两代基线的开发/测试依赖并入主开发 manifest。`scripts/lib/auto-review-development.mjs` 按基线记录其归属（`0.2.2` 线的 tool-executor/testkit 包在 `0.2.1` 线不存在）；升级脚本只安装目标发布所属基线的清单、删除其余条目。它们不是第二个支持版本列表；精确 release 门禁仍在 `src/compat/auto-review-contract.ts`。回退 probe 文件时仍禁止覆盖未提交修改。
 
-`pnpm auto-review:fork` 重放显式差异并钉住 policy、身份、角色、协议和 owner teardown。`pnpm smoke:auto-review` 验证 source/link 与单一 tarball、web/headless × 官方前后顺序、默认零挂载、重复 reload 不写配置、真实请求/围栏、live disable/restore/re-enable 和重启。`tests/auto-review/loader.spec.ts` 额外模拟延迟 import 与异步 drain；普通旧版跳过联合集成测试，继续原有门禁。
+`pnpm auto-review:fork` 对每个基线重放显式差异并钉住上游哈希、policy、身份、角色、协议、owner teardown、注入面与渲染结构。`pnpm smoke:auto-review` 在当前车道（发布属于联合合同）验证 source/link 与单一 tarball、web/headless × 官方前后顺序、默认零挂载、重复 reload 不写配置、真实请求/围栏、live disable/restore/re-enable 和重启；冒烟电池跨两代解析 reviewer 消息，并按结构探测 `ctx.tools.execute` 的批量/单发形态。`tests/auto-review/loader.spec.ts` 额外模拟延迟 import 与异步 drain，`ops-context.spec.ts` 与 `overlap.spec.ts` 在两代车道都执行；其余发布显式跳过联合集成，继续原有门禁。
 
 不再维护第二个版本、发布清单或 tarball。平台执行证据与发布状态只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#auto-review-内置入口迁移2026-10-20)。
 

@@ -249,7 +249,7 @@ PTY 的 agent/用户判别是 §13 唯一的静默 fail-open 接缝：`DSH_PTY_S
 - **Sandbox 原生第三路可写根**：`SandboxExecutionPolicy.additionalWritableRoots` + `workspaceWritableRoots`（policy service 配置键 `sandboxPolicy.additionalWritableRoots`）由 Seatbelt/bwrap/Landlock/fs-sandbox 原生消费；windows-acl 以 `SandboxUnsupportedPolicyError` 拒绝。本插件不设该字段，宽授权照旧来自自身 scope；两路 grant 的复合由 `tests/upstream-additional-roots.spec.ts` 钉住（旧版本按 `workspaceWritableRoots` 导出存在性结构性跳过）。
 - **Session/store**：store 持有的 Session 在 `session/created` 完成前拒绝 append——插件测试用独立 Session，不受影响。`dsh-storage-domain` 新增 `deleteRecords`/`deleteMany` 与 `unknown-state` 隔离，均为新增面。
 - **Node ≥24.9**：0.2.2 起的 lanes 需要 Node 24；CI verify 按已知旧版前缀走 22.19.0、其余走 24.9.0。
-- **Auto Review 不动**：上游实验性 auto-review 在 0.2.2 有变化（每条历史一条请求消息、AutoReviewFailedError、卸载规则），但可选 fork 仍钉死 `0.2.1-rc.2` 基线，`AUTO_REVIEW_RELEASE` 不随开发 pin 走。
+- **Auto Review 双基线**：上游实验性 auto-review 在 `0.2.2-alpha.2` 重写了输入模型（固定 system + 每条保留项一条请求消息、逐项 schema、前缀复用、`AutoReviewFailedError`、卸载规则），`alpha.3` 又加了 `sessionId`/`purpose` 与 `LlmRequestPurposeMap`。因此联合合同改为两个冻结源码基线（`0.2.1-rc.2`–`rc.5` 用 legacy fork，`0.2.2-alpha.2`–`rc.3` 用 current fork），按车道动态加载、按基线编译 pin 做实现类型检查；`0.2.2-alpha.2` 的 purpose 仍是闭集，不发送该字段（ADR-0040）。
 - **上游 Skills 语义微调**：filesystem provider 把失败根报为 incomplete observation、tool-skill 发布 incomplete catalog；本插件的多根 skills provider 仍把嵌套 observation 当普通候选、忽略 `complete:false`——行为不变，记为已知后续观察点。
 
 
@@ -261,7 +261,7 @@ PTY 的 agent/用户判别是 §13 唯一的静默 fail-open 接缝：`DSH_PTY_S
 
 ## 16. DSH 0.2.2-rc.1 转稳定生态
 
-rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留旧宿主所需的具名 prerelease peer 分支；稳定 peer 范围已覆盖 Cordis 4.1.0 / Schemastery 3.19.0。开发树须整体重指，提交前移除临时 probe overrides。稳定版 vendor 范围只能取声明 minor 线内的最新稳定 patch（prerelease 仍钉精确基线）：旧 loader peer `^1.0.3` 会接纳新发布的 `1.1.0`，却在 Cordis `4.0.2` 的 `fiber.entry` 处崩溃。升级 helper 现在对未发布基线或复合范围拒绝猜测，不跨入新的 vendor minor 或把 prerelease 混入稳定线。详见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#022-rc1-后续审查2026-11-05)；执行证据仍在路线账本，可选 Auto Review 仍钉 0.2.1-rc.2。
+rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留旧宿主所需的具名 prerelease peer 分支；稳定 peer 范围已覆盖 Cordis 4.1.0 / Schemastery 3.19.0。开发树须整体重指，提交前移除临时 probe overrides。稳定版 vendor 范围只能取声明 minor 线内的最新稳定 patch（prerelease 仍钉精确基线）：旧 loader peer `^1.0.3` 会接纳新发布的 `1.1.0`，却在 Cordis `4.0.2` 的 `fiber.entry` 处崩溃。升级 helper 现在对未发布基线或复合范围拒绝猜测，不跨入新的 vendor minor 或把 prerelease 混入稳定线。详见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#022-rc1-后续审查2026-11-05)；执行证据仍在路线账本，可选 Auto Review 的联合合同见 ADR-0040（两个源码基线）。
 
 ## 13. 新会话 Hero 入口（`conversation.hero.options`）
 
