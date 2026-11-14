@@ -113,7 +113,7 @@ interface WorktreeSnooze {
 
 - `WorktreeSidecarDocument` 增加可选 `snoozes: WorktreeSnooze[]`；`WorktreeSidecarView` 暴露 `snoozes`（始终是数组），`sidecarViewOf`/`parseSidecarView` 同步。字段名从第二十次修订早期的单对象 `snooze` 迁移而来：读侧同时接受旧字段并按一条记录处理，写侧只写 `snoozes`。
 - `readSidecar` 解析失败时按**单条记录**宽容：坏记录丢弃、其余记录与 `ignored`/`worktreeRoots` 保持可读，不因一个可选 UI 字段损坏而拒绝整个 sidecar。
-- `worktreeSidecar` 增加 `{ op: 'snooze', snooze }`（一次一个记录），只在 owner 串行队列内写，仍走 `requireWorktreeMutation`/`worktreeGate`；inactive/开关关闭/authority 不可用时拒绝且不写。owner 把它**合并**进待处理集合：与本次 keys 有交集的旧记录被取代（操作者刚对同一批候选重新表态），不相交的记录保留——所以「先给 A 选 7 天、再给稍后出现的 B 选 7 天」不会把 A 的期限吞掉。集合上限 `MAX_SNOOZE_RECORDS = 32`，超出时丢最旧的记录（其 keys 自然恢复可提示）。
+- `worktreeSidecar` 增加 `{ op: 'snooze', snooze }`（一次一个记录），只在 owner 串行队列内写，仍走 `requireWorktreeMutation`/`worktreeGate`；inactive/开关关闭/authority 不可用时拒绝且不写。owner 把它**按 key 合并**进待处理集合：本次选择点名的 key 被新记录取代（操作者刚对它们重新表态），旧记录中**未被点名的剩余 keys 保留原期限与原 `at`**（部分重叠时把旧记录拆成一条残余记录，而不是整条删除）——两个 Host 可能持有覆盖不同候选集合的提示，整条删除会丢掉没人重新选择过的期限。完全被覆盖的记录才消失，不相交的记录原样保留；集合上限 `MAX_SNOOZE_RECORDS = 32`，超出时丢最旧的记录（其 keys 自然恢复可提示）。
 - `ignore`/`reconcile`/映射增删必须保留 `snoozes`。
 - sidecar 的 `reset` 同时清空 `ignored` 与 `snoozes`；没有可清内容时仍不制造 revision。
 - 生效规则：
@@ -155,7 +155,7 @@ worktreePromptReset   { sessionId }                                          →
 
 ### 20.11 实施返工（2026-11-14，代码审查）
 
-PR #55 的代码审查复现了七处实现偏离 §20.4/§20.7 的问题，全部已修复并各自留下回归：
+PR #55 的代码审查复现了八处实现偏离 §20.4/§20.7 的问题，全部已修复并各自留下回归：
 
 1. **snooze-only 的 `reset` 不落盘。** `worktreeSidecar` 的 `reset` 用「去掉 snooze 的副本」做空态判断，判断永远通过，于是只有 snooze、没有 `ignored` 的工作区在 reset 时直接返回：内存清了，sidecar 仍留着延迟，重启后旧提醒复活。改为对**原始文档**判断 `ignored.length === 0 && snooze === undefined`；只清 snooze 也会写一次 revision，无内容时仍不写。回归：`tests/worktrees-sidecar.spec.ts` 的 snooze-only reset（写后重开 owner 读回为空、二次 reset 不再制造 revision）与 `tests/worktrees-discovery.spec.ts` 的服务层 reset 后重启不恢复。
 2. **`fresh` 自动检查启动了持久发现。** `prompt(fresh)` 走完整 `activate`：安装 watcher、调度 owner 侧 `reconcile`（有映射时可能写 sidecar），违反「纯查询、无副作用」。改为**被动激活/被动 inventory**：只读 `resolveRepo` 与 sidecar、只重建候选队列，不装 watcher、不调度 reconcile、不写 sidecar；首个显式请求（Dialog 的 `prompt()`、`wait`、面板 list、reset）把工作区提升为持久发现一次（并恢复映射核对），统计/registry change 的 reconcile 也沿用当前姿态。回归：`tests/worktrees-discovery.spec.ts` 以 fresh 为第二个 Host 的首个调用，断言 `watching === false`、sidecar 操作只有 `read`、文件逐字不变、后台不发现新 worktree；打开 Dialog 后 watcher 与 reconcile 才出现。
@@ -168,7 +168,9 @@ PR #55 的代码审查复现了七处实现偏离 §20.4/§20.7 的问题，全�
 6. **后一个 snooze 吞掉先前的定时提醒。** 单条 sidecar 记录模型下，先给 A 选 7 天、之后给新出现的 B 选 7 天，会把记录替换成只含 B 的 keys：A 仍在 `offered`，但它的期限与 keys 已不在任何记录里，于是 A 在本 Host 生命周期内**永远不会**再提醒（从「稍后」退化成永久抑制）。改为 `snoozes` 记录列表 + 合并语义：新记录只**取代 keys 有交集**的旧记录，不相交的记录保留各自期限；`MAX_SNOOZE_RECORDS = 32` 兜底，读取兼容旧单对象 `snooze`。回归：A(7d) → 一天后 B(7d) → A 到期只回 A → `seen(A)` → B 到期只回 B（重启后两条记录仍在 sidecar）。
 7. **共享工作区里 fresh 忽略其他 Host 的提醒。** 已激活的 Host 在后续 `fresh` 只重跑 `revalidate`（inventory），不重读 sidecar；另一 Host 新写入的 snooze 又不改变 Registry roots、不触发变更刷新，于是 B 的会话激活仍会提示 A 已选「稍后」的候选。改为每次 `fresh: true` 在过滤前从 owner 重读当前提醒投影（只读 sidecar op，不写、不建 watcher、不调度 reconcile）。回归：Host 先以空投影激活；通过 owner 写入延迟记录；下一次 fresh 必须为空（Dialog 全量列表仍可见）。
 
-七处都不改变授权语义：`addNew` 仍是唯一写路径，owner 复验与 `prompt-stale` 不变，`offered`/snooze 仍只是 UI 状态。
+8. **部分重叠的提醒被整条删除。** 按记录合并只在「不相交」时正确：两个 Host 的提示覆盖不同候选集合时，B 的提示只含 A、A 的提示含 {A,B}；B 对 A 选「稍后」会把整条 `{A,B}` 记录替换成 `{A}`，B 的期限随之消失（它仍在 A 的 `offered` 里），本 Host 生命周期内不再提醒。改为**按 key** 处理重叠：新选择点名的 key 进入新记录，旧记录未被点名的剩余 keys 拆成一条残余记录并保留原期限/原 `at`；完全覆盖的记录才删除，不相交记录不变。回归：sidecar 部分重叠（until 与 until-new-worktree 两种）保留残余记录与原期限；服务层 A 的 7d 记录 + B 的 2d 记录部分重叠后，B 原期限前保持安静、到期只回 B、A 的新期限到期再回 A。
+
+八处都不改变授权语义：`addNew` 仍是唯一写路径，owner 复验与 `prompt-stale` 不变，`offered`/snooze 仍只是 UI 状态。
 
 ## 第十八次修订（2026-11-09）
 

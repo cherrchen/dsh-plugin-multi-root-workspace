@@ -273,7 +273,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 
 ### 第二十次修订返工（2026-11-14，Code Review，完成）
 
-> PR #55 的代码审查复现了七处实现偏离（ADR §20.4/§20.7；Devin 五条 + Codex 两条 P2），均先写失败回归再修复；授权语义不变。
+> PR #55 的代码审查复现了八处实现偏离（ADR §20.4/§20.7；Devin 五条 + Codex 三条 P2），均先写失败回归再修复；授权语义不变。
 
 - **snooze-only reset 落盘**：`worktreeSidecar` 的 `reset` 空态判断改为针对原始文档（同时看 `ignored` 与 `snooze`）；只清 snooze 也写一次 revision，无内容时仍不制造 revision。回归：sidecar snooze-only reset 持久化（重开 owner 读回为空、二次 reset 不制造 revision）+ 服务层 reset 后重启不恢复。
 - **fresh 保持只读**：新增 `WorkspaceState.passive`；`prompt(fresh)` 的首次激活与重新 inventory 走被动路径——只读 `resolveRepo` 与 sidecar、只重建候选队列，不安装 watcher、不调度 owner 侧 reconcile、不写 sidecar；首个显式请求（Dialog 的 `prompt()`/`wait`/面板 list/reset）提升为持久发现一次并恢复映射核对，settings/registry 触发的 reconcile 沿用当前姿态。回归：fresh 作为第二个 Host 的首个调用时 `watching === false`、sidecar 操作只有 `read`、文件逐字不变、后台不发现新 worktree；打开 Dialog 后 watcher 与 reconcile 才出现。
@@ -282,7 +282,8 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - **每条过期记录只释放一次**：sidecar 有意保留过期记录，重复读取不能重复释放，否则会删掉操作者在重新提示之后通过 `seen` 做出的新认领、导致下一次激活重复提示。Workspace 内存按记录指纹（mode/until/at/keys）记录已处理记录，只有首次观察释放；`expireSnooze`/`adoptSnooze` 共用。回归：到期 → fresh 重新提示 → `seen` → `describeRoots` → 下一次 fresh 保持安静。
 - **多个待处理提醒共存**：sidecar 从单条 `snooze` 改为 `snoozes` 列表；新记录只取代 keys 有交集的旧记录，不相交的记录保留各自期限（上限 32，读取兼容旧单对象）。回归：A(7d) → B(7d) → A 到期只回 A → `seen(A)` → B 到期只回 B。
 - **fresh 前重读共享提醒投影**：`fresh: true` 在过滤前从 owner 只读重读 `snoozes`，否则已激活的 Host 会忽略另一 Host 刚写入的延迟（snooze 不改变 Registry roots、不触发变更刷新）。回归：先以空投影激活 → owner 写入延迟 → 下一次 fresh 为空。
-- **验证**：worktree + client + locale + authority-native 专项 14 文件 **185 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
+- **部分重叠按 key 拆分**：新选择只点名旧记录的一部分候选时，旧记录未被点名的 keys 拆成一条残余记录并保留原期限/原 `at`，完全覆盖的记录才删除。回归：sidecar 部分重叠（until 与 until-new-worktree）保留残余记录；服务层 A(7d)/B(2d) 部分重叠后 B 原期限前安静、到期只回 B、A 的新期限到期再回 A。
+- **验证**：worktree + client + locale + authority-native 专项 14 文件 **188 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
 
 ## Dependencies
 
