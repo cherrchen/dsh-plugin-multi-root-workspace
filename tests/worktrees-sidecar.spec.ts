@@ -252,6 +252,39 @@ describe('sidecar snooze', () => {
     expect(file!.snoozes).toHaveLength(2)
   })
 
+  it('keeps the unclaimed keys of a partially overlapping reminder', async () => {
+    const fixture = await setup('snooze-partial-overlap')
+    const stack = await open(fixture)
+    const shared = record('until', ['worktree\u0000/a', 'worktree\u0000/b'], 2)
+    await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: shared })
+    // A later choice overlaps only part of the shared record: the untouched
+    // key keeps the shared deadline instead of being deleted with it.
+    const aOnly = record('until', ['worktree\u0000/a'], 5)
+    const view = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: aOnly })
+    expect(view.snoozes).toHaveLength(2)
+    expect(view.snoozes.find(entry => entry.keys.includes('worktree\u0000/a'))).toEqual(aOnly)
+    expect(view.snoozes.find(entry => entry.keys.includes('worktree\u0000/b'))).toEqual({
+      mode: 'until', until: shared.until, keys: ['worktree\u0000/b'], at: shared.at,
+    })
+    // A fully overlapping choice still replaces its record (no residual keys).
+    const both = record('until', ['worktree\u0000/a', 'worktree\u0000/b'], 9)
+    const replaced = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: both })
+    expect(replaced.snoozes).toEqual([both])
+  })
+
+  it('keeps the unclaimed keys of a partially overlapping open-ended reminder', async () => {
+    const fixture = await setup('snooze-partial-open')
+    const stack = await open(fixture)
+    const shared = record('until-new-worktree', ['worktree\u0000/a', 'worktree\u0000/b'])
+    await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: shared })
+    const aOnly = record('until', ['worktree\u0000/a'], 5)
+    const view = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: aOnly })
+    expect(view.snoozes).toHaveLength(2)
+    expect(view.snoozes.find(entry => entry.keys.includes('worktree\u0000/b'))).toEqual({
+      mode: 'until-new-worktree', keys: ['worktree\u0000/b'], at: shared.at,
+    })
+  })
+
   it('drops only the corrupt reminder entries and keeps the rest readable', async () => {
     const fixture = await setup('snooze-corrupt')
     const first = await open(fixture)

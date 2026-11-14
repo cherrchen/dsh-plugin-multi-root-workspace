@@ -125,16 +125,31 @@ export function snoozedDiscoveries(snoozes: readonly WorktreeSnooze[] | undefine
  *
  * Each choice keeps its own deadline, so a later snooze of DIFFERENT
  * candidates must not replace an outstanding earlier reminder (that would
- * silently turn it into permanent suppression). Only records whose keys
- * overlap the new choice are superseded: the operator just spoke about those
- * same candidates.
+ * silently turn it into permanent suppression).
+ *
+ * Overlap is handled per KEY, not per record: the keys the new choice names
+ * are superseded, while the remaining keys of a partially overlapping shared
+ * record keep their ORIGINAL deadline. Two Hosts can hold notices covering
+ * different candidate sets, so deleting the whole record would drop a
+ * deadline nobody re-chose (PR #55 review).
  * @param existing - the pending records.
  * @param record - the operator's new choice.
  * @returns the merged pending set, capped at {@link MAX_SNOOZE_RECORDS}.
  */
 export function mergeSnoozeRecords(existing: readonly WorktreeSnooze[], record: WorktreeSnooze): readonly WorktreeSnooze[] {
   const claimed = new Set(record.keys)
-  const kept = existing.filter(entry => !entry.keys.some(key => claimed.has(key)))
+  const kept: WorktreeSnooze[] = []
+  for (const entry of existing) {
+    const remaining = entry.keys.filter(key => !claimed.has(key))
+    if (remaining.length === entry.keys.length) {
+      kept.push(entry)
+      continue
+    }
+    if (remaining.length === 0) continue
+    kept.push(entry.mode === 'until'
+      ? { mode: 'until', ...(entry.until === undefined ? {} : { until: entry.until }), keys: remaining, at: entry.at }
+      : { mode: 'until-new-worktree', keys: remaining, at: entry.at })
+  }
   const merged = [...kept, record]
   return merged.length <= MAX_SNOOZE_RECORDS ? merged : merged.slice(merged.length - MAX_SNOOZE_RECORDS)
 }

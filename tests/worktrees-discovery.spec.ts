@@ -611,6 +611,52 @@ describe('fresh check and operator memory', () => {
     expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
   }, 30_000)
 
+  it('keeps a partially overlapping reminder suppressed until its own deadline', async () => {
+    const area = fixture('snooze-partial-overlap')
+    const main = join(area.base, 'main')
+    const first = join(area.base, 'first')
+    const second = join(area.base, 'second')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', first, '-b', 'first'])
+    git(main, ['worktree', 'add', '-q', second, '-b', 'second'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    const iso = (at: number) => new Date(at).toISOString()
+    const keyOf = (path: string) => 'worktree\u0000' + realpathSync.native(path)
+    try {
+      const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(2)
+      // Another Host's notice snoozed BOTH candidates for two days.
+      await stack.registry.worktreeSidecar(main, {
+        op: 'snooze',
+        snooze: {
+          mode: 'until',
+          until: iso(now + 2 * 86_400_000),
+          keys: [keyOf(first), keyOf(second)],
+          at: iso(now),
+        },
+      })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      // This Host's Dialog re-snoozes only the first candidate: the second
+      // keeps the shared record's deadline and stays quiet.
+      const dialog = await worktrees.prompt(SESSION)
+      const row = dialog.prompts.find(prompt => prompt.path === realpathSync.native(first))!
+      await worktrees.resolve(SESSION, row.id, 'snooze', { snooze: { mode: '7d' } })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      // The shared deadline passes: only the untouched candidate returns.
+      clock.mockReturnValue(now + 2 * 86_400_000 + 1_000)
+      const resumed = (await worktrees.prompt(SESSION, { fresh: true })).prompts
+      expect(resumed.map(prompt => prompt.path)).toEqual([realpathSync.native(second)])
+      expect(await worktrees.seen(SESSION, [resumed[0]!.id])).toEqual({ seen: 1 })
+      // The re-snoozed candidate keeps its own seven days.
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts.map(prompt => prompt.path))
+        .toEqual([realpathSync.native(first)])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 30_000)
+
 })
 
 describe('experimental default', () => {
