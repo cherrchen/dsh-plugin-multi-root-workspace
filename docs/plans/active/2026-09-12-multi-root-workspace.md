@@ -1661,8 +1661,10 @@ rc.3 只有 6 个提交（三次合并、一次发布提交、实验性 DeepSeek
 
 ## v0.1.19 发版验收（2026-11-14）
 
-本次按“文档准备提交 → 仅版本号的正式提交 → 正式提交上的 annotated tag”发版。自 `v0.1.18`（`dde20cf`）以来 `main` 有两笔提交：PR #51（`50fb77b`）把精确版本按 Node 分桶分组验证，并让 tag 触发的发布复用同一次 main push 门禁；PR #52（`cbda993`）精确支持 DSH `0.2.2-rc.3`（24 个精确版本，开发 pin `0.2.2-rc.3` / cordis `4.1.0` / schemastery `3.19.0`）。前者不改变插件运行时与用户可见行为；后者只有支持矩阵提升，rc.3 对插件消费的接缝全部为新增，未新增适配分支。没有配置或协议变更，也没有不兼容变更。
+本次按“文档准备提交 → 仅版本号的正式提交 → 正式提交上的 annotated tag”发版。自 `v0.1.18`（`dde20cf`）以来 `main` 先有两笔提交：PR #51（`50fb77b`）把精确版本按 Node 分桶分组验证，并让 tag 触发的发布复用同一次 main push 门禁；PR #52（`cbda993`）精确支持 DSH `0.2.2-rc.3`（24 个精确版本，开发 pin `0.2.2-rc.3` / cordis `4.1.0` / schemastery `3.19.0`）。前者不改变插件运行时与用户可见行为；后者只有支持矩阵提升，rc.3 对插件消费的接缝全部为新增，未新增适配分支。没有配置或协议变更，也没有不兼容变更。
 
 `main` 在 `cbda993` 上的 push CI 通过：[run 43469327214](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43469327214)，**30/30 jobs**（`releases` + 28 个 `verify` 组 + `gate`，覆盖 24 个精确版本 × macOS / Ubuntu 22.04 / Ubuntu latest / Windows，含 Windows 原生 ACL 门禁）。
 
-准备提交只改文档与 CHANGELOG；正式提交只改 `package.json` 的 `version`，tag 指向正式提交。本次在本机 macOS arm64 / Node `24.18.0` 对准备提交后的树运行 `docs:check`（0 错误 0 警告）、`compat:check`（allowlist / peer / 开发 pin / 安装树一致，24 个精确版本）、`lint`（0 警告 0 错误）、双端 `tsc --noEmit`、`build` 与 `pack:check`（210 个成员），均通过；完整 `vitest` 与三个 smoke 未在本次准备提交上重跑，由 `cbda993` 的 CI 覆盖。发布矩阵与 GitHub Release 由 tag 触发的 `release.yml` 完成，本机不发布。
+首次 tag 推送暴露了 #51 引入的 verify 缺陷：`actions/checkout` 在 `fetch-depth: 0` 检出 tag 时把 `refs/tags/v0.1.19` 重指到被检出的提交，旧步骤的 `^{tag}` 剥离因此失败（[run 43545226397](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43545226397)：`verify` 失败、`publish` 跳过，未发布任何内容）。修复以第三笔提交 `ci(release): restore the annotated tag ref after checkout` 落在 `main`：verify 先从 origin 取回 annotated tag 对象再剥离，并新增在临时仓库中模拟该重指的回归测试；`v0.1.19` 重新打在该提交上，tag 与 `package.json` 的 `0.1.19` 仍然一致。修复提交的 main push CI 由 `release.yml` 的 verify 等待。
+
+准备提交只改文档与 CHANGELOG；正式提交只改 `package.json` 的 `version`。本次在本机 macOS arm64 / Node `24.18.0` 对准备提交后的树运行 `docs:check`（0 错误 0 警告）、`compat:check`（allowlist / peer / 开发 pin / 安装树一致，24 个精确版本）、`lint`（0 警告 0 错误）、双端 `tsc --noEmit`、`build` 与 `pack:check`（210 个成员），均通过；完整 `vitest` 与三个 smoke 未在本次准备提交上重跑，由 `cbda993` 的 CI 覆盖；修复提交另跑 `tests/workflows.spec.ts`、`lint` 与 `docs:check`。发布矩阵与 GitHub Release 由 tag 触发的 `release.yml` 完成，本机不发布。

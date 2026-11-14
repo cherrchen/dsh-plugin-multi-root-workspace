@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process'
 import { parse } from 'yaml'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { SUPPORTED_DSH_RELEASES } from '../src/compat/dsh-version.ts'
 import { waitForMainCI } from '../scripts/verify-release-ci.mjs'
@@ -182,8 +184,10 @@ describe('release workflow gating', () => {
     expect(release.on.push.tags).toEqual(['v*'])
     expect(release.on.workflow_dispatch).toBeUndefined()
     expect(release.jobs.verify.permissions).toEqual({ actions: 'read', contents: 'read' })
-    expect(release.jobs.verify.steps.find((step: { id?: string }) => step.id === 'tag').run)
-      .toContain('${GITHUB_REF}^{tag}')
+    const resolveTag = release.jobs.verify.steps
+      .find((step: { id?: string }) => step.id === 'tag') as { run: string }
+    expect(resolveTag.run).toContain('git fetch --force --no-tags origin')
+    expect(resolveTag.run).toContain('${GITHUB_REF}^{tag}')
     expect(release.jobs.verify.steps.some((step: { run?: string }) =>
       step.run?.includes('node scripts/verify-release-ci.mjs'))).toBe(true)
     expect(release.jobs.publish.steps[0].with.ref).toBe('${{ needs.verify.outputs.commit }}')
@@ -195,6 +199,50 @@ describe('release workflow gating', () => {
     // The shipped runner is required, not optional: it is what confines the
     // multi-root pwsh write on Windows.
     expect(read('scripts/check-pack.mjs')).toContain('package/lib/windows-runner.js')
+  })
+
+  it('restores the annotated tag object that checkout points at the commit', () => {
+    const release = parse(read('.github/workflows/release.yml'))
+    const resolve = release.jobs.verify.steps
+      .find((step: { id?: string }) => step.id === 'tag') as { run: string }
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-release-tag-'))
+    try {
+      const origin = join(dir, 'origin.git')
+      execFileSync('git', ['init', '-q', '--bare', origin], { stdio: 'pipe' })
+      const work = join(dir, 'work')
+      execFileSync('git', ['init', '-q', work], { stdio: 'pipe' })
+      const git = (...args: string[]): string =>
+        execFileSync('git', args, { cwd: work, stdio: 'pipe' }).toString().trim()
+      git('config', 'user.email', 'ci@example.com')
+      git('config', 'user.name', 'CI')
+      git('config', 'commit.gpgsign', 'false')
+      git('config', 'tag.gpgsign', 'false')
+      git('remote', 'add', 'origin', origin)
+      writeFileSync(join(work, 'file.txt'), 'release\n')
+      git('add', '.')
+      git('commit', '-q', '-m', 'release')
+      const commit = git('rev-parse', 'HEAD')
+      git('tag', '-a', 'v0.1.19', '-m', 'v0.1.19')
+      git('push', '-q', 'origin', 'HEAD:refs/heads/main', 'refs/tags/v0.1.19')
+      // actions/checkout re-points the tag ref at the commit it checked out.
+      git('update-ref', 'refs/tags/v0.1.19', commit)
+      expect(() => git('rev-parse', '--verify', 'refs/tags/v0.1.19^{tag}')).toThrow()
+      const output = join(dir, 'github-output')
+      writeFileSync(output, '')
+      execFileSync('bash', ['-e', '-c', resolve.run], {
+        cwd: work,
+        env: {
+          ...process.env,
+          GITHUB_REF: 'refs/tags/v0.1.19',
+          GITHUB_SHA: commit,
+          GITHUB_OUTPUT: output,
+        },
+        stdio: 'pipe',
+      })
+      expect(readFileSync(output, 'utf8').trim()).toBe(`commit=${commit}`)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
