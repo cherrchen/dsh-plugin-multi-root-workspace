@@ -50,6 +50,7 @@ const tabKey = (tab: SshDialogTab): Key => `ssh.tab.${tab}` as Key
 export function platformLabel(platform: string, t: Translate): string {
   if (platform === 'linux') return t('ssh.platform.linux')
   if (platform === 'darwin') return t('ssh.platform.darwin')
+  if (platform === 'unsupported') return t('ssh.platform.unsupported')
   return platform
 }
 

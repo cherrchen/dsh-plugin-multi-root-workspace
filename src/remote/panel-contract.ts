@@ -74,8 +74,6 @@ export interface RemotesView {
   /** The control plane's live state; only `ready` admits remote work. */
   readonly status: { readonly state: string; readonly reason?: string | undefined; readonly code?: string | undefined }
   readonly endpoints: readonly RemoteEndpointView[]
-  /** Set when the state itself could not be read; the panel shows this verbatim. */
-  readonly unavailable?: string | undefined
 }
 
 const transferViewSchema = z.object({
@@ -112,7 +110,8 @@ const remotesViewSchema = z.object({
   ),
   status: z.object({ state: z.string(), reason: z.string().optional(), code: z.string().optional() }),
   endpoints: z.array(endpointViewSchema),
-  unavailable: z.string().optional(),
+  // An unavailable remote plane reports its reason on `status.reason`; a
+  // separate top-level field would render the same string twice.
 })
 
 /** One parse result, mirroring the roots contract's vocabulary. */
