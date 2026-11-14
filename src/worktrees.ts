@@ -132,6 +132,14 @@ interface WorkspaceState {
   /** The stored reminder delay (memory projection of the sidecar, §6.4). */
   snooze?: WorktreeSnooze | undefined
   /**
+   * Fingerprints of expired reminder records whose claims were already
+   * released. The sidecar deliberately keeps an expired record, so every
+   * later explicit read observes the SAME record again; releasing twice would
+   * delete claims the operator made after the renewed notice (PR #55 review).
+   * Host memory only, like `offered` itself.
+   */
+  snoozeExpired: Set<string>
+  /**
    * True while the workspace was activated by a READ-ONLY check only: no
    * watchers were installed and no owner-side reconciliation was scheduled.
    * Explicit requests (the Dialog, panel list, reset) promote it once.
@@ -729,6 +737,7 @@ export class MultiRootWorktrees extends Service {
         prompted: new Set(),
         offered: new Set(),
         ignored: this.ignored.get(key) ?? new Set(),
+        snoozeExpired: new Set(),
         passive: true,
         mappings: [],
         sidecarAvailable: false,
@@ -1066,25 +1075,47 @@ export class MultiRootWorktrees extends Service {
     const until = Date.parse(snooze.until ?? '')
     if (Number.isFinite(until) && Date.now() < until) return
     workspace.snooze = undefined
-    this.releaseSnoozeClaims(workspace, snooze)
+    this.releaseSnoozeOnce(workspace, snooze)
   }
 
   /**
    * Adopt the reminder-delay projection the owner reported.
    *
-   * An expired timed record is dropped HERE and its discovery claims released,
-   * exactly like the in-memory expiry path: an explicit request (the panel
-   * list, a confirmation, cleanup) may read the sidecar between the expiry
-   * instant and the next automatic check, and dropping the record without the
-   * release would leave `offered` hiding the candidates with no record left
-   * for `expireSnooze` to expire (PR #55 review).
+   * An expired timed record is dropped HERE and its discovery claims released
+   * (at most once per record), exactly like the in-memory expiry path: an
+   * explicit request (the panel list, a confirmation, cleanup) may read the
+   * sidecar between the expiry instant and the next automatic check, and
+   * dropping the record without the release would leave `offered` hiding the
+   * candidates with no record left for `expireSnooze` to expire (PR #55
+   * review). A record that was already processed stays processed: the sidecar
+   * keeps it, so a later reload must not release a claim the operator made
+   * after the renewed notice.
    * @param workspace - the workspace the projection belongs to.
    * @param persisted - the record the owner reported, if any.
    */
   private adoptSnooze(workspace: WorkspaceState, persisted: WorktreeSnooze | undefined): void {
     const live = liveSnooze(persisted)
-    if (persisted !== undefined && live === undefined) this.releaseSnoozeClaims(workspace, persisted)
+    if (persisted !== undefined && live === undefined) this.releaseSnoozeOnce(workspace, persisted)
     workspace.snooze = live
+  }
+
+  /**
+   * Release the claims of one expired record at most once.
+   *
+   * The persisted record is not cleared (automatic paths never write the
+   * sidecar), so the same expired projection is read back by every later
+   * panel/confirmation load. Only the FIRST observation releases; repeating
+   * it would delete the acknowledgement the renewed notice received.
+   * The fingerprint covers every persisted field, so a genuinely new delay
+   * (a new write has a new `at`) is processed on its own.
+   * @param workspace - the workspace whose claims are released.
+   * @param snooze - the expired record that was observed.
+   */
+  private releaseSnoozeOnce(workspace: WorkspaceState, snooze: WorktreeSnooze): void {
+    const fingerprint = snoozeFingerprint(snooze)
+    if (workspace.snoozeExpired.has(fingerprint)) return
+    workspace.snoozeExpired.add(fingerprint)
+    this.releaseSnoozeClaims(workspace, snooze)
   }
 
   /** Release the discovery claims one dropped reminder delay covered. */
@@ -1306,6 +1337,18 @@ function liveSnooze(snooze: WorktreeSnooze | undefined): WorktreeSnooze | undefi
   if (snooze === undefined || snooze.mode !== 'until') return snooze
   const until = Date.parse(snooze.until ?? '')
   return Number.isFinite(until) && Date.now() >= until ? undefined : snooze
+}
+
+/**
+ * The stable identity of one persisted reminder record: every field the
+ * sidecar stores, with the key set ordered so a reordered read still
+ * matches. Two records with this identical identity ARE the same persisted
+ * delay for the once-per-record expiry release.
+ * @param snooze - one persisted reminder record.
+ * @returns a comparable fingerprint.
+ */
+function snoozeFingerprint(snooze: WorktreeSnooze): string {
+  return JSON.stringify([snooze.mode, snooze.until ?? '', snooze.at, [...snooze.keys].sort()])
 }
 
 /** Clamp one numeric config value. */

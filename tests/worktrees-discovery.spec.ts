@@ -517,6 +517,35 @@ describe('fresh check and operator memory', () => {
     }
   }, 20_000)
 
+  it('does not release a renewed claim when the same expired record is reloaded', async () => {
+    const area = fixture('snooze-reload-twice')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      expect(await worktrees.seen(SESSION, [shown.id])).toEqual({ seen: 1 })
+      await worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: '7d' } })
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      // The first check after expiry releases the original claim and shows the
+      // renewed notice, which the operator acknowledges again.
+      const renewed = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      expect(renewed.path).toBe(realpathSync.native(linked))
+      expect(await worktrees.seen(SESSION, [renewed.id])).toEqual({ seen: 1 })
+      // Opening the panel reloads the SAME expired record from the sidecar.
+      // It was already processed, so it must not release the renewed claim and
+      // the next activation must stay quiet.
+      await worktrees.describeRoots(main)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 20_000)
+
 })
 
 describe('experimental default', () => {
