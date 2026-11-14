@@ -341,6 +341,25 @@ describe('worktree notice: the operator closes or delays it', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(snooze).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps the notice for a reminder choice the host skipped so it can be retried', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const refreshed: WorktreePromptView = { ...PROMPT, id: 'p2', viewRevision: 'v2' }
+    const snooze = vi.fn(async () => ({
+      viewRevision: 'v2',
+      prompts: [refreshed],
+      resolved: [],
+      skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
+    }))
+    renderPrompt(fakeClient({ prompt, snooze }))
+    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await waitFor(() => expect(snooze).toHaveBeenCalledTimes(1))
+    // Nothing was delayed: the notice must stay for the still-unresolved
+    // candidate (with its refreshed id) instead of silently hiding it for the
+    // rest of this Host lifetime.
+    await waitFor(() => expect(screen.getByText('worktree.toast')).toBeDefined())
+    expect(screen.getByText('worktree.toastView')).toBeDefined()
+  })
 })
 
 describe('worktree Dialog: later / do not remind', () => {
@@ -378,6 +397,43 @@ describe('worktree Dialog: later / do not remind', () => {
     expect(screen.getByRole('dialog')).toBeDefined()
   })
 
+  it('keeps a skipped later-batch row in the Dialog with its refreshed id', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const refreshed: WorktreePromptView = { ...PROMPT, id: 'p2', viewRevision: 'v2' }
+    const snooze = vi.fn(async () => ({
+      viewRevision: 'v2',
+      prompts: [refreshed],
+      resolved: [],
+      skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
+    }))
+    await openDialog(fakeClient({ prompt, snooze }))
+    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: '7d' } })
+    fireEvent.click(screen.getByText('worktree.dismiss'))
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: '7d' }))
+    // The row changed while the Dialog was open and the host applied no delay:
+    // closing would lose the choice and keep the `seen` claim hiding the
+    // candidate. Keep the refreshed row plus the failure for a retry.
+    await waitFor(() => expect(screen.getByText(/worktree.rowError/)).toBeDefined())
+    expect(screen.getByText(/error.worktree\/prompt-stale/)).toBeDefined()
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
+
+  it('keeps a partially skipped permanent batch open with the failure reported', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
+    const refreshed: WorktreePromptView = { ...PROMPT, id: 'p2', viewRevision: 'v2' }
+    const resolve = vi.fn(async () => ({
+      viewRevision: 'v2',
+      prompts: [refreshed, { ...MAIN, id: 'm2', viewRevision: 'v2' }],
+      resolved: [],
+      skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
+    }))
+    await openDialog(fakeClient({ prompt, resolve }))
+    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: 'permanent' } })
+    fireEvent.click(screen.getByText('worktree.notNow'))
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['p1', 'm1'], 'dismiss', { dontRemind: true }))
+    await waitFor(() => expect(screen.getByText(/worktree.skipped/)).toBeDefined())
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
   it('closes the Dialog when the host answers that the feature is off', async () => {
     const prompt = vi.fn(async () => answer([PROMPT]))
     const resolve = vi.fn(async () => { throw new PanelError('worktree/not-enabled', 'off') })

@@ -657,6 +657,96 @@ describe('fresh check and operator memory', () => {
     }
   }, 30_000)
 
+
+  it('keeps a renewed claim when a split expired reminder is reloaded', async () => {
+    const area = fixture('snooze-split-expired')
+    const main = join(area.base, 'main')
+    const first = join(area.base, 'first')
+    const second = join(area.base, 'second')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', first, '-b', 'first'])
+    git(main, ['worktree', 'add', '-q', second, '-b', 'second'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    const iso = (at: number) => new Date(at).toISOString()
+    const keyOf = (path: string) => 'worktree\u0000' + realpathSync.native(path)
+    try {
+      const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(2)
+      // Another Host silenced both candidates for two days.
+      await stack.registry.worktreeSidecar(main, {
+        op: 'snooze',
+        snooze: { mode: 'until', until: iso(now + 2 * 86_400_000), keys: [keyOf(first), keyOf(second)], at: iso(now) },
+      })
+      // At the shared deadline the renewed notice is announced and acknowledged.
+      clock.mockReturnValue(now + 2 * 86_400_000 + 1_000)
+      const renewed = (await worktrees.prompt(SESSION, { fresh: true })).prompts
+      expect(renewed).toHaveLength(2)
+      expect(await worktrees.seen(SESSION, renewed.map(prompt => prompt.id))).toEqual({ seen: 2 })
+      // A read-only Host only sees the worktree, so it re-snoozes just that
+      // key. The owner keeps the untouched candidate as a residual of the
+      // expired shared record (same `at` and deadline, fewer keys).
+      await stack.registry.worktreeSidecar(main, {
+        op: 'snooze',
+        snooze: {
+          mode: 'until',
+          until: iso(now + 2 * 86_400_000 + 1_000 + 7 * 86_400_000),
+          keys: [keyOf(first)],
+          at: iso(now + 2 * 86_400_000 + 1_000),
+        },
+      })
+      // A panel read reloads the split projection. The residual is the SAME
+      // delay the expiry already handled, so it must not release the renewed
+      // acknowledgement of the untouched candidate: the next activation stays
+      // quiet for it while the re-snoozed worktree remains delayed.
+      await worktrees.describeRoots(main)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 30_000)
+
+  it('releases a claim when a later delay evicts its record from the bounded list', async () => {
+    const area = fixture('snooze-capped-eviction')
+    const main = join(area.base, 'main')
+    const first = join(area.base, 'first')
+    const second = join(area.base, 'second')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', first, '-b', 'first'])
+    git(main, ['worktree', 'add', '-q', second, '-b', 'second'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    const iso = (at: number) => new Date(at).toISOString()
+    try {
+      const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts
+      expect(shown).toHaveLength(2)
+      expect(await worktrees.seen(SESSION, shown.map(prompt => prompt.id))).toEqual({ seen: 2 })
+      // This Host silences the worktree for seven days.
+      const delayed = shown.find(prompt => prompt.path === realpathSync.native(first))!
+      await worktrees.resolve(SESSION, delayed.id, 'snooze', { snooze: { mode: '7d' } })
+      // Another Host fills the bounded reminder list: the owner keeps only
+      // the newest 32 choices, so this Host's record is evicted and vanishes
+      // from every later projection.
+      for (let index = 0; index < 32; index += 1) {
+        await stack.registry.worktreeSidecar(main, {
+          op: 'snooze',
+          snooze: {
+            mode: 'until',
+            until: iso(now + 30 * 86_400_000),
+            keys: ['worktree\u0000/other-' + index],
+            at: iso(now + 1_000 + index),
+          },
+        })
+      }
+      // The eviction gives the candidate back instead of turning the timed
+      // choice into permanent suppression: the next activation announces it.
+      const resumed = (await worktrees.prompt(SESSION, { fresh: true })).prompts
+      expect(resumed.map(prompt => prompt.path)).toEqual([realpathSync.native(first)])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 30_000)
 })
 
 describe('experimental default', () => {

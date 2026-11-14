@@ -73,7 +73,9 @@ export interface WorktreeSidecarDocument {
 /**
  * Upper bound on pending reminder records. Snoozes are rare; the cap keeps a
  * pathological sequence from growing the sidecar without limit, dropping the
- * OLDEST choice first (its keys then simply become eligible again).
+ * OLDEST choice first. The service releases that record's `offered` claims
+ * when it observes the eviction, so the dropped timed choice becomes
+ * eligible again instead of degrading into permanent suppression.
  */
 export const MAX_SNOOZE_RECORDS = 32
 
@@ -134,7 +136,8 @@ export function snoozedDiscoveries(snoozes: readonly WorktreeSnooze[] | undefine
  * deadline nobody re-chose (PR #55 review).
  * @param existing - the pending records.
  * @param record - the operator's new choice.
- * @returns the merged pending set, capped at {@link MAX_SNOOZE_RECORDS}.
+ * @returns the merged pending set, capped at {@link MAX_SNOOZE_RECORDS};
+ *   the caller must give back the claims of a record the cap dropped.
  */
 export function mergeSnoozeRecords(existing: readonly WorktreeSnooze[], record: WorktreeSnooze): readonly WorktreeSnooze[] {
   const claimed = new Set(record.keys)

@@ -85,6 +85,20 @@ function rowErrorMap(
   return errors
 }
 
+/** The stable row keys of the ids a resolve refused, resolved from the rows shown. */
+function skippedKeys(
+  shown: readonly WorktreePromptView[],
+  skipped: readonly { readonly id: string; readonly key?: string | undefined; readonly code: string }[],
+): Set<string> {
+  const byId = new Map(shown.map(row => [row.id, row]))
+  const keys = new Set<string>()
+  for (const entry of skipped) {
+    const key = entry.key ?? byId.get(entry.id)?.key
+    if (key !== undefined) keys.add(key)
+  }
+  return keys
+}
+
 /**
  * The prompt overlay.
  * @param props - the composed slot props.
@@ -363,15 +377,31 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const applyLater = useCallback(async (): Promise<void> => {
     const session = dialogSession.current
     if (client === undefined || session === undefined || !dialogOpen || rows === undefined) return
-    const ids = rows.map(row => row.id)
+    const visible = rows
+    const ids = visible.map(row => row.id)
     if (ids.length === 0) return
     setBusy(true)
     setError(undefined)
     try {
-      if (laterMode === 'permanent') await client.resolve(session, ids, 'dismiss', { dontRemind: true })
-      else await client.snooze(session, ids, { mode: laterMode })
+      const answer = laterMode === 'permanent'
+        ? await client.resolve(session, ids, 'dismiss', { dontRemind: true })
+        : await client.snooze(session, ids, { mode: laterMode })
       if (!mounted.current || sessionIdRef.current() !== session) return
-      closeDialog()
+      appliedRevision.current = answer.viewRevision
+      seenRevision.current = answer.viewRevision
+      if (answer.skipped.length === 0) { closeDialog(); return }
+      // A candidate can change between rendering the Dialog and submitting the
+      // choice; the host then reports that row in `skipped` instead of failing
+      // the request, and NOTHING was recorded for it. Closing here would both
+      // lose the operator's decision and leave the `seen` claim hiding the
+      // candidate for the rest of this Host lifetime, so keep the Dialog open
+      // with the refreshed rows and the per-row failure, like `confirmAdd`.
+      const errors = rowErrorMap(visible, answer.skipped)
+      setRowErrors(errors)
+      setSkippedCount(answer.skipped.length)
+      if (answer.prompts.length === 0) { closeDialog(); return }
+      setRows(answer.prompts)
+      setSelected(previous => reconcileSelection(previous, answer.prompts, errors))
     } catch (failure: unknown) {
       if (!mounted.current || sessionIdRef.current() !== session) return
       if (failure instanceof PanelError && failure.code === 'worktree/not-enabled') { closeDialog(); return }
@@ -398,13 +428,31 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setDialogOpen(true)
   }, [client, currentSession, notice])
 
-  /** Record the notice's reminder delay; closing never depends on its answer. */
+  /** Record the notice's reminder delay; the notice only closes on success. */
   const snoozeNotice = useCallback((mode: WorktreeSnoozeMode) => {
     const current = notice
-    setNotice(undefined)
-    if (client === undefined || current === undefined) return
-    if (current.session !== currentSession || sessionIdRef.current() !== current.session) return
-    void client.snooze(current.session, current.prompts.map(prompt => prompt.id), { mode }).catch(() => {})
+    if (client === undefined || current === undefined) { setNotice(undefined); return }
+    if (current.session !== currentSession || sessionIdRef.current() !== current.session) { setNotice(undefined); return }
+    void (async () => {
+      let answer: Awaited<ReturnType<WorktreeClient['snooze']>>
+      try {
+        answer = await client.snooze(current.session, current.prompts.map(prompt => prompt.id), { mode })
+      } catch {
+        // A transport/authority failure is still silence: the notice closes and
+        // this Host never retries it automatically.
+        if (mounted.current) setNotice(undefined)
+        return
+      }
+      if (!mounted.current || sessionIdRef.current() !== current.session) return
+      if (answer.skipped.length === 0) { setNotice(undefined); return }
+      // The host refused some rows (they changed since the notice rendered) and
+      // recorded no delay for them. Keep the notice for exactly those rows,
+      // with their refreshed ids, so the operator can pick a delay again
+      // instead of losing the candidate for this Host lifetime.
+      const refused = skippedKeys(current.prompts, answer.skipped)
+      const remaining = answer.prompts.filter(prompt => refused.has(prompt.key))
+      setNotice(remaining.length === 0 ? undefined : { session: current.session, prompts: remaining })
+    })()
   }, [client, currentSession, notice])
 
   const visibleNotice = notice !== undefined && notice.session === currentSession ? notice : undefined
@@ -426,6 +474,9 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
           <div className="mrfw-toastActions">
             <button type="button" className="mrfw-btn mrfw-btnPrimary" onClick={openDialog}>{t('worktree.toastView')}</button>
             <select
+              // A retried choice re-arms the dropdown: the notice's prompt ids
+              // change when the host refreshes a skipped row.
+              key={visibleNotice.prompts.map(prompt => prompt.id).join(',')}
               className="mrfw-select mrfw-toastSelect"
               aria-label={t('worktree.toastLater')}
               defaultValue=""
