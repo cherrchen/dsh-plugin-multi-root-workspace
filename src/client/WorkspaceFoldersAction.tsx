@@ -1067,22 +1067,25 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     </div>
                   )
                 })}
-              {sshDialog === undefined ? null : (
-                <SshManagementDialog
-                  initialTab={sshDialog}
-                  ssh={props.ssh}
-                  sessionId={requestBase()?.sessionId}
-                  custodyMode={remoteState.view?.custodyMode}
-                  status={remoteState.view?.status}
-                  endpoints={remoteState.view?.endpoints ?? []}
-                  roots={state.view}
-                  remoteMode={props.remoteMode}
-                  onClose={() => { setSshDialog(undefined) }}
-                  onChanged={refreshRemoteSection}
-                  t={t}
-                />
-              )}
             </section>
+          )}
+          {/* The dialog outlives the section's own render gate: a remote
+              switch-off must not unmount it mid-form and lose the operator's
+              drafts — `canManage` inside degrades to an unavailable note. */}
+          {sshDialog === undefined ? null : (
+            <SshManagementDialog
+              initialTab={sshDialog}
+              ssh={props.ssh}
+              sessionId={requestBase()?.sessionId}
+              custodyMode={remoteState.view?.custodyMode}
+              status={remoteState.view?.status}
+              endpoints={remoteState.view?.endpoints ?? []}
+              roots={state.view}
+              remoteMode={props.remoteMode}
+              onClose={() => { setSshDialog(undefined) }}
+              onChanged={refreshRemoteSection}
+              t={t}
+            />
           )}
             </>
           )}
