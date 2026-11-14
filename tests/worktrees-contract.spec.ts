@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   parseRootsView,
   parseWorktreeCall,
+  worktreePromptAnswerSchema,
+  worktreeResolveAnswerSchema,
   worktreeWaitViewSchema,
 } from '../src/contract.ts'
 
@@ -52,6 +54,26 @@ describe('worktree wait union', () => {
     expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt: { ...prompt, kind: 'other' }, viewRevision: 'v1' }).success).toBe(false)
     expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt: { ...prompt, access: 'read-only' }, viewRevision: 'v1' }).success).toBe(false)
     expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', viewRevision: 'v1' }).success).toBe(false)
+  })
+})
+
+describe('worktree responses', () => {
+  it('carries the full visible list beyond the 64-id request cap', () => {
+    const prompts = Array.from({ length: 65 }, (_, index) => ({
+      ...prompt,
+      id: `p${index}`,
+      key: `worktree\u0000/wt${index}`,
+      path: `/wt${index}`,
+    }))
+    // Discovery is not capped, so the response must not silently reject a
+    // repository with more than 64 worktrees; only request batches are capped.
+    expect(worktreePromptAnswerSchema.safeParse({ prompts, viewRevision: 'v1' }).success).toBe(true)
+    expect(worktreeResolveAnswerSchema.safeParse({
+      viewRevision: 'v1', prompts, resolved: [], skipped: [],
+    }).success).toBe(true)
+    expect(parseWorktreeCall('worktreePromptSeen', {
+      sessionId: 's', promptIds: prompts.map(item => item.id),
+    })).toMatchObject({ ok: false })
   })
 })
 

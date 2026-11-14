@@ -8,7 +8,8 @@ import { WorktreePrompt } from '../src/client/WorktreePrompt.tsx'
 import { WorkspaceFoldersDialog } from '../src/client/WorkspaceFoldersAction.tsx'
 import { PanelError, type PanelClient } from '../src/client/panel-client.ts'
 import { BundleSettingsCard } from '../src/client/skills-settings.tsx'
-import type { WorktreeClient } from '../src/client/worktree-client.ts'
+import { createWorktreeClient, type WorktreeClient } from '../src/client/worktree-client.ts'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { SkillsForm } from '../src/compat/skills-client.ts'
 import type { Translate } from '../src/client/WorkspaceFoldersAction.tsx'
 
@@ -48,6 +49,16 @@ const OTHER: WorktreePromptView = {
   id: 'p2',
   key: 'worktree\u0000/wt2',
   path: '/tmp/wt2',
+}
+
+/** A candidate list larger than the contract's 64-id request cap. */
+function manyPrompts(count = 65): WorktreePromptView[] {
+  return Array.from({ length: count }, (_, index) => ({
+    ...PROMPT,
+    id: `p${index}`,
+    key: `worktree\u0000/wt${index}`,
+    path: `/tmp/wt${index}`,
+  }))
 }
 
 /** One full prompt answer, as the host builds it. */
@@ -175,6 +186,29 @@ describe('worktree notice: the one automatic check', () => {
     renderPrompt(fakeClient({ prompt }))
     expect(await screen.findByText('worktree.toast')).toBeDefined()
     expect(screen.getByText('worktree.toastView')).toBeDefined()
+  })
+
+  it('shows a notice beyond 64 candidates and claims its ids in request-sized batches', async () => {
+    const prompts = manyPrompts()
+    const calls: { endpoint: string; payload: { promptIds?: readonly string[] } }[] = []
+    const connection = {
+      rpc: {
+        async call(_channel: string, endpoint: string, payload: { promptIds?: readonly string[] }) {
+          calls.push({ endpoint, payload })
+          if (endpoint === 'worktreePrompt') return { ok: true, value: { prompts, viewRevision: 'v1' } }
+          if (endpoint === 'worktreePromptSeen') return { ok: true, value: { seen: payload.promptIds?.length ?? 0 } }
+          throw new Error('unexpected endpoint ' + endpoint)
+        },
+      },
+    } as unknown as ConnectionHandle
+    render(<WorktreePrompt client={createWorktreeClient(connection)} sessionId={() => 's1'}
+      subscribeSession={() => () => {}} t={tWithParams} previewOnly={false} />)
+    // A response is allowed to carry the full visible list; only its ids travel
+    // back in requests, where the contract caps every batch at 64.
+    expect(await screen.findByText('worktree.toast:65')).toBeDefined()
+    await waitFor(() => expect(calls.filter(call => call.endpoint === 'worktreePromptSeen')).toHaveLength(2))
+    expect(calls.filter(call => call.endpoint === 'worktreePromptSeen').map(call => call.payload.promptIds?.length))
+      .toEqual([64, 1])
   })
 })
 
@@ -496,6 +530,84 @@ describe('worktree Dialog: later / do not remind', () => {
     fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: 'permanent' } })
     fireEvent.click(screen.getByText('worktree.dismiss'))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+})
+
+describe('worktree overlay: completion ownership', () => {
+  it('keeps the new Dialog open when an earlier add completes after a session round trip', async () => {
+    const session = sessionHarness('s1')
+    let finishAdd: ((answer: Awaited<ReturnType<WorktreeClient['resolve']>>) => void) | undefined
+    const resolve = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['resolve']>>>((done) => {
+      finishAdd = done
+    }))
+    const prompt = vi.fn(async (sessionId: string) => answer(sessionId === 's1' ? [PROMPT] : []))
+    render(<WorktreePrompt client={fakeClient({ prompt, resolve })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={t} previewOnly={false} />)
+    fireEvent.click(await screen.findByText('worktree.toastView'))
+    await screen.findByRole('dialog')
+    fireEvent.click(screen.getByText('worktree.add'))
+    await waitFor(() => expect(resolve).toHaveBeenCalledTimes(1))
+    session.switchTo('s2')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    session.switchTo('s1')
+    fireEvent.click(await screen.findByText('worktree.toastView'))
+    await screen.findByRole('dialog')
+    // The first add belongs to the first s1 activation. Its zero-row answer
+    // would close the Dialog in the old completion, whose session check passes.
+    await act(async () => {
+      finishAdd?.({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] })
+    })
+    await new Promise(done => setTimeout(done, 20))
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
+
+  it('keeps the new Dialog open when an earlier later-batch completes after a session round trip', async () => {
+    const session = sessionHarness('s1')
+    let finishSnooze: ((answer: Awaited<ReturnType<WorktreeClient['snooze']>>) => void) | undefined
+    const snooze = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['snooze']>>>((done) => {
+      finishSnooze = done
+    }))
+    const prompt = vi.fn(async (sessionId: string) => answer(sessionId === 's1' ? [PROMPT] : []))
+    render(<WorktreePrompt client={fakeClient({ prompt, snooze })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={t} previewOnly={false} />)
+    fireEvent.click(await screen.findByText('worktree.toastView'))
+    await screen.findByRole('dialog')
+    fireEvent.click(screen.getByText('worktree.dismiss'))
+    await waitFor(() => expect(snooze).toHaveBeenCalledTimes(1))
+    session.switchTo('s2')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    session.switchTo('s1')
+    fireEvent.click(await screen.findByText('worktree.toastView'))
+    await screen.findByRole('dialog')
+    await act(async () => {
+      finishSnooze?.({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] })
+    })
+    await new Promise(done => setTimeout(done, 20))
+    expect(screen.getByRole('dialog')).toBeDefined()
+  })
+
+  it('keeps a closed notice closed when a pending snooze reports a skipped row', async () => {
+    let finishSnooze: ((answer: Awaited<ReturnType<WorktreeClient['snooze']>>) => void) | undefined
+    const snooze = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['snooze']>>>((done) => {
+      finishSnooze = done
+    }))
+    const prompt = vi.fn(async () => answer([PROMPT, OTHER]))
+    renderPrompt(fakeClient({ prompt, snooze }))
+    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await waitFor(() => expect(snooze).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByLabelText('worktree.toastClose'))
+    await waitFor(() => expect(screen.queryByLabelText('worktree.toastLater')).toBeNull())
+    // The operator closed the notice; a partial refusal must not reopen it.
+    await act(async () => {
+      finishSnooze?.({
+        viewRevision: 'v2',
+        prompts: [PROMPT, OTHER],
+        resolved: [],
+        skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
+      })
+    })
+    await new Promise(done => setTimeout(done, 20))
+    expect(screen.queryByLabelText('worktree.toastLater')).toBeNull()
   })
 })
 

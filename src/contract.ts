@@ -52,11 +52,13 @@ export type {
   WorktreePromptWaitView,
   WorktreePromptAnswerView,
   WorktreeResolveAnswerView,
+  WorktreeResolvedView,
   WorktreeResetAnswerView,
   WorktreeRequest,
   WorktreeEffectiveAccess,
   WorktreePromptKind,
   WorktreeSeenAnswerView,
+  WorktreeSkippedView,
   WorktreeSnoozeChoice,
   WorktreeSnoozeMode,
 } from './worktrees-contract.ts'

@@ -198,7 +198,14 @@ const promptSchema = z.object({
   viewRevision: z.string().min(1),
 }).strict()
 
-const promptListSchema = z.array(promptSchema).max(64)
+/**
+ * A response carries the FULL visible candidate list, so it is deliberately not
+ * bounded by the 64-id REQUEST cap. Discovery is not capped (a repository may
+ * have hundreds of worktrees); bounding the response would make the client
+ * reject the whole answer and silently hide every candidate. Callers that send
+ * ids back batch them at `worktreeRequestSchema`'s cap instead.
+ */
+const promptListSchema = z.array(promptSchema)
 
 /** One batch outcome. */
 const resolvedSchema = z.object({

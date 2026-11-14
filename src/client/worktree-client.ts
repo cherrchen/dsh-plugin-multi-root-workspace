@@ -31,10 +31,13 @@ import {
   worktreeWaitViewSchema,
   type WorktreeCleanupView,
   type WorktreePromptAnswerView,
+  type WorktreePromptView,
   type WorktreePromptWaitView,
   type WorktreeResetAnswerView,
   type WorktreeResolveAnswerView,
+  type WorktreeResolvedView,
   type WorktreeSeenAnswerView,
+  type WorktreeSkippedView,
   type WorktreeSnoozeChoice,
 } from '../contract.ts'
 import { PanelError } from './panel-client.ts'
@@ -61,13 +64,13 @@ export interface WorktreeResolveOptions {
 export interface WorktreeClient {
   /** One read-only view: `fresh` for the automatic check, otherwise the full list. */
   prompt(sessionId: string, query?: WorktreePromptQuery, signal?: AbortSignal): Promise<WorktreePromptAnswerView>
-  /** Claim the candidates the notice showed (Host memory; idempotent). */
+  /** Claim the candidates the notice showed (Host memory; idempotent). Batched at the request cap. */
   seen(sessionId: string, promptIds: readonly string[], signal?: AbortSignal): Promise<WorktreeSeenAnswerView>
   /** Long-poll the Dialog's visible list. */
   wait(sessionId: string, seen: { seenViewRevision?: string }, signal?: AbortSignal): Promise<WorktreePromptWaitView>
-  /** Confirm (`add`), ignore (`dismiss`) or delay (`snooze`) the selected ids. */
+  /** Confirm (`add`), ignore (`dismiss`) or delay (`snooze`) the selected ids. Batched at the request cap. */
   resolve(sessionId: string, promptIds: readonly string[], action: 'add' | 'dismiss' | 'snooze', options?: WorktreeResolveOptions, signal?: AbortSignal): Promise<WorktreeResolveAnswerView>
-  /** Record a reminder delay; the host derives the discovery keys. */
+  /** Record a reminder delay; the host derives the discovery keys. Batched at the request cap. */
   snooze(sessionId: string, promptIds: readonly string[], choice: WorktreeSnoozeChoice, signal?: AbortSignal): Promise<WorktreeResolveAnswerView>
   /** Clear every prompt decision of the workspace (explicit operator action). */
   reset(sessionId: string, signal?: AbortSignal): Promise<WorktreeResetAnswerView>
@@ -92,23 +95,20 @@ export function createWorktreeClient(connection: ConnectionHandle): WorktreeClie
       }, signal), 'the worktree prompt answer')
     },
     async seen(sessionId, promptIds, signal) {
-      return parse(worktreeSeenAnswerSchema, await call(connection, 'worktreePromptSeen', {
-        sessionId, promptIds,
-      }, signal), 'the worktree seen answer')
+      let seen = 0
+      for (const batch of promptBatches(promptIds)) {
+        const answer = parse(worktreeSeenAnswerSchema, await call(connection, 'worktreePromptSeen', {
+          sessionId, promptIds: batch,
+        }, signal), 'the worktree seen answer')
+        seen += answer.seen
+      }
+      return { seen }
     },
     async resolve(sessionId, promptIds, action, options, signal) {
-      return parse(worktreeResolveAnswerSchema, await call(connection, 'worktreePromptResolve', {
-        sessionId,
-        promptIds,
-        action,
-        ...(options?.dontRemind === undefined ? {} : { dontRemind: options.dontRemind }),
-        ...(options?.snooze === undefined ? {} : { snooze: options.snooze }),
-      }, signal), 'the worktree resolve answer')
+      return resolveBatched(connection, sessionId, promptIds, action, options, signal)
     },
     async snooze(sessionId, promptIds, choice, signal) {
-      return parse(worktreeResolveAnswerSchema, await call(connection, 'worktreePromptResolve', {
-        sessionId, promptIds, action: 'snooze', snooze: choice,
-      }, signal), 'the worktree snooze answer')
+      return resolveBatched(connection, sessionId, promptIds, 'snooze', { snooze: choice }, signal)
     },
     async reset(sessionId, signal) {
       return parse(worktreeResetAnswerSchema, await call(connection, 'worktreePromptReset', { sessionId }, signal), 'the worktree reset answer')
@@ -119,6 +119,62 @@ export function createWorktreeClient(connection: ConnectionHandle): WorktreeClie
       return parsed.value
     },
   }
+}
+
+/** The per-request prompt-id cap owned by `worktreeRequestSchema`. */
+const PROMPT_ID_BATCH = 64
+
+/**
+ * Split ids into request-sized batches, preserving order.
+ *
+ * An empty list stays one (empty) call so the host can answer it exactly as it
+ * did before batching; the component never sends one.
+ */
+function promptBatches(promptIds: readonly string[]): readonly (readonly string[])[] {
+  if (promptIds.length === 0) return [[]]
+  const batches: string[][] = []
+  for (let index = 0; index < promptIds.length; index += PROMPT_ID_BATCH) {
+    batches.push(promptIds.slice(index, index + PROMPT_ID_BATCH))
+  }
+  return batches
+}
+
+/**
+ * Send one resolve operation in request-sized batches.
+ *
+ * The host applies every batch per row (a stale row is `skipped`), so merging
+ * the answers matches one oversized batch that the request schema would have
+ * refused. `viewRevision` and `prompts` come from the LAST batch: they describe
+ * the state after every accepted row. A batch failure rejects the whole call;
+ * earlier batches may already have been applied, exactly like a transport
+ * failure halfway through any other multi-step operation.
+ */
+async function resolveBatched(
+  connection: ConnectionHandle,
+  sessionId: string,
+  promptIds: readonly string[],
+  action: 'add' | 'dismiss' | 'snooze',
+  options: WorktreeResolveOptions | undefined,
+  signal?: AbortSignal,
+): Promise<WorktreeResolveAnswerView> {
+  const resolved: WorktreeResolvedView[] = []
+  const skipped: WorktreeSkippedView[] = []
+  let viewRevision = ''
+  let prompts: readonly WorktreePromptView[] = []
+  for (const batch of promptBatches(promptIds)) {
+    const answer = parse(worktreeResolveAnswerSchema, await call(connection, 'worktreePromptResolve', {
+      sessionId,
+      promptIds: batch,
+      action,
+      ...(options?.dontRemind === undefined ? {} : { dontRemind: options.dontRemind }),
+      ...(options?.snooze === undefined ? {} : { snooze: options.snooze }),
+    }, signal), 'the worktree resolve answer')
+    viewRevision = answer.viewRevision
+    prompts = answer.prompts
+    resolved.push(...answer.resolved)
+    skipped.push(...answer.skipped)
+  }
+  return { viewRevision, prompts, resolved, skipped }
 }
 
 async function call(connection: ConnectionHandle, endpoint: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {

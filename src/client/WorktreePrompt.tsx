@@ -248,6 +248,12 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     })
   }, [subscribeEnabled])
 
+  /** Close the notice explicitly; a pending reminder completion must not reopen it. */
+  const closeNotice = useCallback(() => {
+    workEpoch.current += 1
+    setNotice(undefined)
+  }, [])
+
   /** Close the Dialog and abort its long poll immediately (X, Escape, mask). */
   const closeDialog = useCallback(() => {
     workEpoch.current += 1
@@ -351,11 +357,12 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     const session = dialogSession.current
     if (client === undefined || session === undefined || !dialogOpen || rows === undefined || ids.length === 0) return
     const visible = rows
+    const epoch = workEpoch.current
     setBusy(true)
     setError(undefined)
     try {
       const answer = await client.resolve(session, ids, 'add')
-      if (!mounted.current || sessionIdRef.current() !== session) return
+      if (!mounted.current || epoch !== workEpoch.current || sessionIdRef.current() !== session) return
       appliedRevision.current = answer.viewRevision
       seenRevision.current = answer.viewRevision
       const errors = rowErrorMap(visible, answer.skipped)
@@ -365,11 +372,11 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
       setRows(answer.prompts)
       setSelected(previous => reconcileSelection(previous, answer.prompts, errors))
     } catch (failure: unknown) {
-      if (!mounted.current || sessionIdRef.current() !== session) return
+      if (!mounted.current || epoch !== workEpoch.current || sessionIdRef.current() !== session) return
       if (failure instanceof PanelError && failure.code === 'worktree/not-enabled') { closeDialog(); return }
       setError(failure instanceof PanelError ? failure.code : 'fallback')
     } finally {
-      if (mounted.current) setBusy(false)
+      if (mounted.current && epoch === workEpoch.current) setBusy(false)
     }
   }, [client, closeDialog, dialogOpen, rows])
 
@@ -380,13 +387,14 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     const visible = rows
     const ids = visible.map(row => row.id)
     if (ids.length === 0) return
+    const epoch = workEpoch.current
     setBusy(true)
     setError(undefined)
     try {
       const answer = laterMode === 'permanent'
         ? await client.resolve(session, ids, 'dismiss', { dontRemind: true })
         : await client.snooze(session, ids, { mode: laterMode })
-      if (!mounted.current || sessionIdRef.current() !== session) return
+      if (!mounted.current || epoch !== workEpoch.current || sessionIdRef.current() !== session) return
       appliedRevision.current = answer.viewRevision
       seenRevision.current = answer.viewRevision
       if (answer.skipped.length === 0) { closeDialog(); return }
@@ -403,11 +411,11 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
       setRows(answer.prompts)
       setSelected(previous => reconcileSelection(previous, answer.prompts, errors))
     } catch (failure: unknown) {
-      if (!mounted.current || sessionIdRef.current() !== session) return
+      if (!mounted.current || epoch !== workEpoch.current || sessionIdRef.current() !== session) return
       if (failure instanceof PanelError && failure.code === 'worktree/not-enabled') { closeDialog(); return }
       setError(failure instanceof PanelError ? failure.code : 'fallback')
     } finally {
-      if (mounted.current) setBusy(false)
+      if (mounted.current && epoch === workEpoch.current) setBusy(false)
     }
   }, [client, closeDialog, dialogOpen, laterMode, rows])
 
@@ -416,6 +424,9 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     const current = notice
     if (client === undefined || current === undefined) return
     if (current.session !== currentSession || sessionIdRef.current() !== current.session) return
+    // Opening the Dialog ends the notice's lifecycle immediately: a toast
+    // completion still in flight must never touch it afterwards.
+    workEpoch.current += 1
     setNotice(undefined)
     dialogSession.current = current.session
     setRows(undefined)
@@ -502,7 +513,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
               type="button"
               className="mrfw-btn mrfw-btnGhost mrfw-iconBtn"
               aria-label={t('worktree.toastClose')}
-              onClick={() => { setNotice(undefined) }}
+              onClick={closeNotice}
             >
               <span aria-hidden="true">×</span>
             </button>
