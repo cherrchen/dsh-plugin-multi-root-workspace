@@ -1,6 +1,6 @@
 # 新会话 Hero 入口按可用宽度自适应（Workspace Folders）
 
-> 状态：**P1 实施中**（2026-11-14）。P0 取证与计划已完成；决策修订见 [ADR-0037](../../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md) 文末修订节。
+> 状态：**P1/P2 已完成，P3 进行中**（2026-11-14）。P0 取证、P1 实施与 P2 文档已完成；决策修订见 [ADR-0037](../../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md) 文末修订节。
 
 ## Goal
 
@@ -121,31 +121,34 @@
 
 ### Phase 1 — 几何模块与组件接入
 
-- [ ] 新增 `src/client/hero-entry-room.ts`（常量、行探针、余量测量、形态函数），导出 JSDoc 覆盖参数/返回/前提。
-- [ ] `HeroWorkspaceEntry.tsx`：seat 包装、`data-size`、`--mrfw-hero-entry-room`、layout effect 探针、`ResizeObserver` 观察集与释放；注册、对话框、`aria-*`、`title` 不变。
-- [ ] `styles.ts`：seat 包装、room 变量、`:is([data-measuring],[data-size='compact'])` 图标形态、回退媒体查询作用域改到 `:not([data-size])`。
-- [ ] `tests/client-hero-room.spec.ts`：行识别、contents 下钻、gap、余量夹取、`null` 退化、形态阈值边界（87/88/89）。
-- [ ] `tests/client-panel.spec.tsx`：包装与状态属性、图标形态、回退形态、重测（RO 回调）、卸载断开、StrictMode。
-- [ ] `tests/client-styles.spec.ts`：新规则与回退作用域；删除旧的 560px 无条件断言。
+- [x] 新增 `src/client/hero-entry-room.ts`（常量、行探针、余量测量、形态函数），导出 JSDoc 覆盖参数/返回/前提。
+- [x] `HeroWorkspaceEntry.tsx`：seat 包装、`data-size`、`--mrfw-hero-entry-room`、layout effect 探针、`ResizeObserver` 观察集与释放；注册、对话框、`aria-*`、`title` 不变。
+- [x] `styles.ts`：seat 包装、room 变量、`:is([data-measuring],[data-size='compact'])` 图标形态、回退媒体查询作用域改到 `:not([data-size])`。
+- [x] `tests/client-hero-room.spec.ts`：行识别、contents 下钻、组预算、同槽条目扣除、gap、`null` 退化、形态阈值边界（87/88/89）。
+- [x] `tests/client-hero-entry.spec.tsx`：包装与状态属性、图标形态、回退形态、重测（RO 回调与重渲染）、观察集、卸载断开、StrictMode。
+- [x] `tests/client-styles.spec.ts`：新规则与回退作用域；删除旧的 560px 无条件断言。
 
-**退出条件**：`pnpm lint`、`pnpm typecheck` 通过；新增/更新的 client 测试通过（`pnpm build && pnpm test`）；样式测试钉住"未测出 = 旧行为"。
+**退出条件**：`pnpm lint`、`pnpm typecheck` 通过；新增/更新的 client 测试通过（`pnpm build && pnpm test`）；样式测试钉住"未测出 = 旧行为"。**已满足**：lint/typecheck 通过；18 个 `tests/client-*` 文件 316 项通过；生产模块 + 生产样式表的 Chromium 复核见下。
 
 ### Phase 2 — 文档与决策
 
-- [ ] ADR-0037 修订节：机制（测余量、不挤压上游、阈值）、为何不用容器查询/媒体查询、对上游 DOM 的三条探针事实、失败退化。
-- [ ] `docs/decisions/README.md` / `.en.md` 索引行更新。
-- [ ] `README.md` / `README.en.md`：删掉"`≤560px` 只显示图标"，改为"随行内可用宽度收缩，余量不足 88px 时只显示图标"。
-- [ ] `docs/guide/README.md` / `.en.md`、`docs/requirements/multi-root-workspace.md`、`docs/architecture/multi-root-workspace.md` 同步。
-- [ ] `docs/plans/README.md` / `.en.md` 的 active 列表登记本计划。
-- [ ] （如需）`.agent/note/dsh-compat-contract.md` / `.en.md`：hero 行结构探针与支持版本的关系。
+- [x] ADR-0037 修订节：机制（测余量、不挤压上游、阈值）、为何不用容器查询/媒体查询、对上游 DOM 的三条探针事实、失败退化。
+- [x] `docs/decisions/README.md` / `.en.md` 索引行更新。
+- [x] `README.md` / `README.en.md`：删掉"`≤560px` 只显示图标"，改为"随行内可用宽度收缩，余量不足 88px 时只显示图标"。
+- [x] `docs/guide/README.md` / `.en.md`、`docs/requirements/multi-root-workspace.md`、`docs/architecture/multi-root-workspace.md` 同步。
+- [x] `docs/plans/README.md` / `.en.md` 的 active 列表登记本计划。
+- [x] `.agent/note/dsh-compat-contract.md` / `.en.md`：hero 行结构探针与支持版本的关系。
 
-**退出条件**：`pnpm docs:check` 通过；文档不再承诺视口断点，且明确"不改 DSH"。
+**退出条件**：`pnpm docs:check` 通过；文档不再承诺视口断点，且明确"不改 DSH"。**已满足**。
 
 ### Phase 3 — 门禁、真实 GUI 复核与 Draft PR
 
-- [ ] `pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm docs:check && pnpm compat:check && pnpm pack:check`。
-- [ ] 真实 GUI 复核（手工）：宽列全宽 label；缩窄时省略号；再窄时 28×28 图标且不越过输入卡右缘；打开右侧预览面板（列宽变窄但视口不变）同样生效；切换长标题工作区/语言后仍不溢出。
-- [ ] `git push` + `gh pr create --draft`，PR 描述按仓库模板写清根因、机制、探针事实、退化路径与验证记录。
+- [x] `pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm docs:check`、`pnpm compat:check`、`pnpm pack:check` 通过。
+- [x] `pnpm test` 的 client 面全绿：18 个 `tests/client-*` 文件、316 项。完整套件在本机 DSH 工具沙箱内另有 17 项既有失败（见下），与本变更无关。
+- [ ] 真实 GUI 复核（手工，留给评审者/用户）：宽列全宽 label；缩窄时省略号；再窄时 28×28 图标且不越过输入卡右缘；打开右侧预览面板（列宽变窄但视口不变）同样生效；切换长标题工作区/语言后仍不溢出。
+- [x] `git push` + Draft PR，描述含根因、机制、探针事实、退化路径与验证记录。
+
+**沙箱限制（既有，非本变更引入）**：DSH 工具沙箱内 `nativeHostAvailability()` 返回 `{ available: false, reason: "the Host itself is sandboxed; shared IPC refuses sandboxed peers" }`，因此共享 Registry 的 follower/IPC 用例（`registry-lease`、`registry.spec` 的 follower 分支、`registry-multiprocess`、`skills-*`、`authority-boundaries`、`b9-review-regressions`）以 `contended` 失败。把本变更 stash 后在未改动的基线树上重跑其中三个代表文件，出现同样形状的 8 项失败；完整件 `v0.1.17` 的计划也记录了同一限制。一次带完整本机权限的重跑尝试因本会话没有可用的批准应答者而未执行（命令未启动），因此本计划不声称"完整套件全绿"。
 
 **退出条件**：上述命令全绿；手工复核项逐条记录；Draft PR 已创建并链接本计划。
 
@@ -155,6 +158,25 @@
 pnpm lint && pnpm typecheck && pnpm build && pnpm test
 pnpm docs:check && pnpm compat:check && pnpm pack:check
 ```
+
+### P1 验证（生产几何模块 + 生产样式表，Chromium）
+
+把 `src/client/hero-entry-room.ts` 用 esbuild 编成 IIFE、把 `src/client/styles.ts` 的样式表原文，连同上游 rc.3 的行规则一起加载到 Chromium，按组件的方式写 `data-size` 与自定义属性后测量：
+
+| 列宽 | room | 形态 | 入口宽 | 行溢出 |
+| --- | --- | --- | --- | --- |
+| 700 / 620 / 560 / 520 | 341 / 261 / 201 / 161 | full | 149（自然宽度） | −4 |
+| 480 | 121 | full | 121（省略号） | −4 |
+| 450 | 91 | full | 91（省略号） | −4 |
+| 430 | 71 | compact | 28 | −4 |
+| 400 / 380 / 340 | 41 / 28 / 28 | compact | 28 | −4 |
+| 300 | 28 | compact | 28 | 29 |
+
+- 负的"行溢出"表示按钮盒在行的内容右缘以内 4px（seat 的右外边距）；`430` 起入口不再贡献溢出。
+- `300px` 的 29px 溢出与入口无关：上游 workspace chip（207）+ 模式选择器（54，已到 icon+chevron 下限）+ 入口（28）+ gap/padding 本身已超过列宽；入口此时已是图标下限。
+- 长标题（360px workspace chip）：620px 列宽 room 107 → full 且省略号、无溢出；560/520 退化为图标、无溢出；460px 列宽 22px 溢出同样来自上游三件套的下限。
+- 同槽另一个条目（93px，模拟 forge worktree）：700px 列宽入口仍为自然 149px；560px 时 room 106 → 省略号；520px 时 room 66 → 图标；全程无溢出。扣除规则正确。
+- 两次连续探针的 room 与入口宽一致（无抖动）。
 
 手工验收（真实 GUI）：
 
@@ -193,7 +215,7 @@ pnpm docs:check && pnpm compat:check && pnpm pack:check
 
 | 阶段 | 状态 | 证据 |
 | --- | --- | --- |
-| P0 取证与计划 | 完成 | 上文实测表；原型在 430/450/480/560/700px 列宽下的入口宽度与行溢出；ADR-0037 修订节 |
-| P1 几何与组件 | 进行中 | — |
-| P2 文档 | 待开始 | — |
-| P3 门禁与 PR | 待开始 | — |
+| P0 取证与计划 | 完成 | 上文实测表；原型在 430/450/480/560/700px 列宽下的入口宽度与行溢出；ADR-0037 修订节；提交 `docs(plan): investigate the hero entry's width overflow and record the plan` |
+| P1 几何与组件 | 完成 | `src/client/hero-entry-room.ts`、`HeroWorkspaceEntry.tsx`、`styles.ts`；`tests/client-hero-room.spec.ts`（15）、`tests/client-hero-entry.spec.tsx`（8）、`tests/client-styles.spec.ts`（25）；生产模块 + 生产样式表的 Chromium 表见上；提交 `fix(client): fit the hero entry to the row's leftover width` |
+| P2 文档 | 完成 | ADR-0037 修订节、decisions README 双语索引、README/README.en、guide 双语、requirements、architecture、compat note 双语；`pnpm docs:check` 通过 |
+| P3 门禁与 PR | 进行中 | lint / typecheck / build / docs:check / compat:check / pack:check 通过；client 面 316 项通过；完整套件只剩 17 项既有沙箱失败（见 Phase 3 的沙箱限制节）；Draft PR 见下 |
