@@ -446,7 +446,11 @@ describe('fresh check and operator memory', () => {
       // The fresh check is a read: no watcher set, no owner-side reconcile,
       // no sidecar revision.
       expect(two.worktrees.activationOf(main).watching).toBe(false)
-      expect(spy.mock.calls.map(call => (call[1] as { op: string }).op)).toEqual(['read'])
+      // The fresh path may read the sidecar twice (activation + the shared
+      // reminder projection), but never writes or reconciles it.
+      const freshOps = spy.mock.calls.map(call => (call[1] as { op: string }).op)
+      expect(freshOps.length).toBeGreaterThan(0)
+      expect(freshOps.every(op => op === 'read')).toBe(true)
       expect(readSidecarFile(sidecarRoot, primaryKey(main))).toEqual(sidecarBefore)
       // Without a watcher a later worktree is not discovered in the
       // background: only the next explicit check sees it.
@@ -545,6 +549,67 @@ describe('fresh check and operator memory', () => {
       clock.mockRestore()
     }
   }, 20_000)
+
+  it('keeps an earlier timed reminder when a later snooze covers new candidates', async () => {
+    const area = fixture('snooze-two-reminders')
+    const main = join(area.base, 'main')
+    const first = join(area.base, 'first')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', first, '-b', 'first'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const a = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      expect(await worktrees.seen(SESSION, [a.id])).toEqual({ seen: 1 })
+      await worktrees.resolve(SESSION, a.id, 'snooze', { snooze: { mode: '7d' } })
+      // One day later a second worktree appears and gets its own seven days.
+      clock.mockReturnValue(now + 86_400_000)
+      const second = join(area.base, 'second')
+      git(main, ['worktree', 'add', '-q', second, '-b', 'second'])
+      const b = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      expect(b.path).toBe(realpathSync.native(second))
+      expect(await worktrees.seen(SESSION, [b.id])).toEqual({ seen: 1 })
+      await worktrees.resolve(SESSION, b.id, 'snooze', { snooze: { mode: '7d' } })
+      // A's deadline passes while B's is still running: only A comes back.
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      const resumedA = (await worktrees.prompt(SESSION, { fresh: true })).prompts
+      expect(resumedA.map(prompt => prompt.path)).toEqual([realpathSync.native(first)])
+      // The operator acknowledges A's renewed notice; B stays pending.
+      expect(await worktrees.seen(SESSION, [resumedA[0]!.id])).toEqual({ seen: 1 })
+      // Then B's own deadline passes.
+      clock.mockReturnValue(now + 8 * 86_400_000 + 1_000)
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts.map(prompt => prompt.path))
+        .toEqual([realpathSync.native(second)])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 30_000)
+
+  it('honors a reminder another Host persisted before filtering the fresh list', async () => {
+    const area = fixture('snooze-foreign-host')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+    // This Host activates the workspace first, so it caches the (empty) delay
+    // projection; a second Host then snoozes the candidate through the owner.
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+    const now = Date.now()
+    await stack.registry.worktreeSidecar(main, {
+      op: 'snooze',
+      snooze: {
+        mode: 'until',
+        until: new Date(now + 86_400_000).toISOString(),
+        keys: ['worktree\u0000' + realpathSync.native(linked)],
+        at: new Date(now).toISOString(),
+      },
+    })
+    // The shared decision is persisted, not in this Host's memory: the next
+    // fresh check must read it from the owner before filtering.
+    expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+  }, 30_000)
 
 })
 

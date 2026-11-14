@@ -41,7 +41,7 @@ import { commonCandidate, commonDiscoveryKey, type CommonCandidate } from './wor
 import { verifyPromptExpected } from './worktrees/owner.ts'
 import { resolveRepo } from './worktrees/repository.ts'
 import { lstatEntry, readPointerLine, resolvePointerTarget, SafeIoError } from './worktrees/fs-safe.ts'
-import { snoozedDiscoveries, type WorktreeMapping, type WorktreeSnooze } from './worktrees/sidecar.ts'
+import { liveSnoozes, mergeSnoozeRecords, snoozedDiscoveries, snoozeActive, type WorktreeMapping, type WorktreeSnooze } from './worktrees/sidecar.ts'
 import type { DeletedWorktreeOptions } from './registry.ts'
 import { WorkspaceWatchSet, type WatchTargets } from './worktrees/watch.ts'
 import type {
@@ -129,8 +129,8 @@ interface WorkspaceState {
   offered: Set<string>
   /** Discovery keys this workspace ignores (memory projection of the sidecar). */
   ignored: Set<string>
-  /** The stored reminder delay (memory projection of the sidecar, §6.4). */
-  snooze?: WorktreeSnooze | undefined
+  /** The pending reminder delays (memory projection of the sidecar, §6.4). */
+  snoozes: readonly WorktreeSnooze[]
   /**
    * Fingerprints of expired reminder records whose claims were already
    * released. The sidecar deliberately keeps an expired record, so every
@@ -253,7 +253,17 @@ export class MultiRootWorktrees extends Service {
     const workspace = await this.ensureWorkspace(session.primaryRoot, 'first', passive)
     await this.revalidate(workspace, passive)
     this.requireGeneration(generation)
-    const records = options.fresh === true
+    if (passive && workspace.activation === 'active') {
+      // The reminder projection is shared workspace state: another Host on the
+      // same store may have snoozed a candidate after this Host activated the
+      // workspace, and snooze writes never change the Registry roots. Re-read
+      // the owner's projection (a read-only sidecar op) before the automatic
+      // filter so a shared decision is honored (PR #55 review).
+      await this.loadSidecar(workspace)
+      this.requireGeneration(generation)
+    }
+    const workspaceCurrent = this.workspaces.get(primaryKey(session.primaryRoot)) === workspace
+    const records = options.fresh === true && workspaceCurrent
       ? this.freshRecords(workspace, session.mode)
       : this.visibleRecords(workspace, session.mode)
     return {
@@ -337,7 +347,7 @@ export class MultiRootWorktrees extends Service {
     // reminder delay: "reset" means the operator wants to be asked again, and
     // the owner clears the persisted snooze in the same sidecar operation.
     workspace.offered.clear()
-    workspace.snooze = undefined
+    workspace.snoozes = []
     this.ignored.delete(workspace.key)
     workspace.ignored.clear()
     // An inactive workspace has no sidecar writes (ADR-0039 §4.4). The
@@ -546,10 +556,12 @@ export class MultiRootWorktrees extends Service {
           keys: [...keys],
           at: new Date(at).toISOString(),
         }
-    workspace.snooze = record
+    // Merge locally first (memory-only degradation) so the same merge rule the
+    // owner applies is what this Host observes even when the write fails.
+    workspace.snoozes = mergeSnoozeRecords(workspace.snoozes, record)
     try {
       const view = await this.ctx.multiRootRegistry.worktreeSidecar(workspace.primaryRoot, { op: 'snooze', snooze: record }, beforeSubmit)
-      if (view.available) this.adoptSnooze(workspace, view.snooze ?? record)
+      if (view.available) this.adoptSnoozes(workspace, view.snoozes)
     } catch (error) {
       if (error instanceof WorktreeError) throw error
       // Memory-only is a supported degradation; discovery still honors it.
@@ -737,6 +749,7 @@ export class MultiRootWorktrees extends Service {
         prompted: new Set(),
         offered: new Set(),
         ignored: this.ignored.get(key) ?? new Set(),
+        snoozes: [],
         snoozeExpired: new Set(),
         passive: true,
         mappings: [],
@@ -973,7 +986,7 @@ export class MultiRootWorktrees extends Service {
       if (!view.available) return
       workspace.mappings = view.worktreeRoots
       workspace.ignored = new Set(view.ignored.map(entry => entry.key))
-      this.adoptSnooze(workspace, view.snooze)
+      this.adoptSnoozes(workspace, view.snoozes)
       workspace.sidecarAvailable = true
     } catch {
       // The mapping is cleanup bookkeeping only; discovery stays usable.
@@ -992,7 +1005,7 @@ export class MultiRootWorktrees extends Service {
           beforeSubmit()
           if (view.available) {
             workspace.mappings = view.worktreeRoots
-            this.adoptSnooze(workspace, view.snooze)
+            this.adoptSnoozes(workspace, view.snoozes)
             workspace.sidecarAvailable = true
           }
         } catch {
@@ -1051,52 +1064,57 @@ export class MultiRootWorktrees extends Service {
    * overlay observe the same answer (ADR-0039 §6.1).
    */
   private freshRecords(workspace: WorkspaceState, mode: WorkspaceMode): readonly CandidateRecord[] {
-    this.expireSnooze(workspace)
-    const suppressed = snoozedDiscoveries(workspace.snooze, Date.now())
+    this.expireSnoozes(workspace)
+    const suppressed = snoozedDiscoveries(workspace.snoozes, Date.now())
     return this.visibleRecords(workspace, mode).filter(record =>
       !workspace.offered.has(record.discoveryKey) && suppressed?.has(record.discoveryKey) !== true)
   }
 
   /**
-   * A timed reminder that has run out gives its candidates back.
+   * Every timed reminder that has run out gives its candidates back.
    *
    * The notice claims its ids (`seen`) BEFORE the operator picks a delay, so
    * the claim alone would keep them quiet for the rest of this Host lifetime.
-   * Once the stored `until` instant passes, the delay is dropped in memory and
-   * the keys it covered are released from `offered`, so the next automatic
-   * check announces them again. The persisted record is left alone: after a
-   * restart the same expiry check applies, and the ADR does not require
-   * actively pruning expired records from the sidecar (ADR-0039 §20.7).
-   * @param workspace - the workspace whose stored delay is examined.
+   * Each pending record keeps its own deadline: once an `until` passes, THAT
+   * record is dropped in memory and the keys it covered are released from
+   * `offered`, so the next automatic check announces them again while the
+   * other outstanding choices stay pending. The persisted records are left
+   * alone: after a restart the same expiry check applies, and the ADR does not
+   * require actively pruning expired records from the sidecar (§20.7).
+   * @param workspace - the workspace whose stored delays are examined.
    */
-  private expireSnooze(workspace: WorkspaceState): void {
-    const snooze = workspace.snooze
-    if (snooze === undefined || snooze.mode !== 'until') return
-    const until = Date.parse(snooze.until ?? '')
-    if (Number.isFinite(until) && Date.now() < until) return
-    workspace.snooze = undefined
-    this.releaseSnoozeOnce(workspace, snooze)
+  private expireSnoozes(workspace: WorkspaceState): void {
+    if (workspace.snoozes.length === 0) return
+    const now = Date.now()
+    const live = liveSnoozes(workspace.snoozes, now)
+    if (live.length === workspace.snoozes.length) return
+    for (const snooze of workspace.snoozes) {
+      if (!snoozeActive(snooze, now)) this.releaseSnoozeOnce(workspace, snooze)
+    }
+    workspace.snoozes = live
   }
 
   /**
    * Adopt the reminder-delay projection the owner reported.
    *
-   * An expired timed record is dropped HERE and its discovery claims released
-   * (at most once per record), exactly like the in-memory expiry path: an
-   * explicit request (the panel list, a confirmation, cleanup) may read the
-   * sidecar between the expiry instant and the next automatic check, and
-   * dropping the record without the release would leave `offered` hiding the
-   * candidates with no record left for `expireSnooze` to expire (PR #55
-   * review). A record that was already processed stays processed: the sidecar
-   * keeps it, so a later reload must not release a claim the operator made
-   * after the renewed notice.
+   * Expired records are dropped HERE and their discovery claims released (at
+   * most once per record), exactly like the in-memory expiry path: an explicit
+   * request (the panel list, a confirmation, cleanup) may read the sidecar
+   * between the expiry instant and the next automatic check, and dropping a
+   * record without the release would leave `offered` hiding its candidates
+   * with no record left for `expireSnoozes` to expire (PR #55 review). A
+   * record that was already processed stays processed: the sidecar keeps it,
+   * so a later reload must not release a claim the operator made after the
+   * renewed notice.
    * @param workspace - the workspace the projection belongs to.
-   * @param persisted - the record the owner reported, if any.
+   * @param persisted - the records the owner reported, if any.
    */
-  private adoptSnooze(workspace: WorkspaceState, persisted: WorktreeSnooze | undefined): void {
-    const live = liveSnooze(persisted)
-    if (persisted !== undefined && live === undefined) this.releaseSnoozeOnce(workspace, persisted)
-    workspace.snooze = live
+  private adoptSnoozes(workspace: WorkspaceState, persisted: readonly WorktreeSnooze[]): void {
+    const now = Date.now()
+    for (const snooze of persisted) {
+      if (!snoozeActive(snooze, now)) this.releaseSnoozeOnce(workspace, snooze)
+    }
+    workspace.snoozes = liveSnoozes(persisted, now)
   }
 
   /**
@@ -1306,7 +1324,7 @@ export class MultiRootWorktrees extends Service {
       // offered/snooze are UI state of THIS Host: teardown forgets them so a
       // later re-enable starts from what the operator can be asked again.
       workspace.offered.clear()
-      workspace.snooze = undefined
+      workspace.snoozes = []
       workspace.pendingReconcile = false
       workspace.sidecarPending = false
     }
@@ -1324,20 +1342,6 @@ function lstatOrUndefined(path: string) {
   }
 }
 
-/**
- * The stored reminder delay as memory uses it: an expired timed record is
- * forgotten instead of being restored by a later sidecar read. The sidecar
- * keeps it (no automatic write), and the expiry check would drop it anyway;
- * reading it back as active would re-claim candidates the operator just saw
- * again (ADR-0039 §20.7).
- * @param snooze - the persisted delay, if any.
- * @returns the still-active record, or undefined once its instant has passed.
- */
-function liveSnooze(snooze: WorktreeSnooze | undefined): WorktreeSnooze | undefined {
-  if (snooze === undefined || snooze.mode !== 'until') return snooze
-  const until = Date.parse(snooze.until ?? '')
-  return Number.isFinite(until) && Date.now() >= until ? undefined : snooze
-}
 
 /**
  * The stable identity of one persisted reminder record: every field the

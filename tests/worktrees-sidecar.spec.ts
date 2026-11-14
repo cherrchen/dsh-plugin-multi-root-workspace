@@ -197,11 +197,15 @@ describe('sidecar availability semantics', () => {
 })
 
 describe('sidecar snooze', () => {
-  const record = (mode: 'until-new-worktree' | 'until' = 'until-new-worktree') => ({
+  const record = (
+    mode: 'until-new-worktree' | 'until' = 'until-new-worktree',
+    keys: readonly string[] = ['worktree\u0000/x'],
+    days = 1,
+  ) => ({
     mode,
-    ...(mode === 'until' ? { until: new Date(Date.now() + 86_400_000).toISOString() } : {}),
-    keys: ['worktree\u0000/x'],
-    at: new Date().toISOString(),
+    ...(mode === 'until' ? { until: new Date(Date.now() + days * 86_400_000).toISOString() } : {}),
+    keys: [...keys],
+    at: new Date(Date.now()).toISOString(),
   })
 
   it('round-trips one snooze and preserves ignores and mappings', async () => {
@@ -217,18 +221,38 @@ describe('sidecar snooze', () => {
     await stack.registry.worktreeSidecar(fixture.main, { op: 'ignore', key: 'worktree\u0000/ignored', kind: 'worktree', path: '/ignored' })
     const snooze = record('until')
     const view = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze })
-    expect(view.snooze).toEqual(snooze)
+    expect(view.snoozes).toEqual([snooze])
     expect(view.ignored.map(entry => entry.key)).toEqual(['worktree\u0000/ignored'])
     expect(view.worktreeRoots.map(mapping => mapping.rootId)).toEqual([added.id])
     const file = readSidecarFile(join(fixture.area.base, 'store', 'worktree-prompts'), primaryKey(fixture.main))
-    expect(file!.snooze).toEqual(snooze)
-    // Another operation that rewrites the document (a reconcile) keeps it.
+    expect(file!.snoozes).toEqual([snooze])
+    // Another operation that rewrites the document (a reconcile) keeps them.
     const reconciled = await stack.registry.worktreeSidecar(fixture.main, { op: 'reconcile' })
-    expect(reconciled.snooze).toEqual(snooze)
+    expect(reconciled.snoozes).toEqual([snooze])
     expect(reconciled.worktreeRoots.map(mapping => mapping.rootId)).toEqual([added.id])
   })
 
-  it('does not let a corrupt snooze take the ignores and mappings down', async () => {
+  it('keeps outstanding reminders and supersedes only an overlapping choice', async () => {
+    const fixture = await setup('snooze-merge')
+    const stack = await open(fixture)
+    const a = record('until', ['worktree\u0000/a'], 1)
+    const b = record('until', ['worktree\u0000/b'], 2)
+    let view = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: a })
+    view = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: b })
+    // A choice for DIFFERENT candidates must not replace an outstanding one.
+    expect(view.snoozes).toHaveLength(2)
+    expect(view.snoozes.map(entry => entry.keys.join(','))).toEqual(['worktree\u0000/a', 'worktree\u0000/b'])
+    // Speaking again about the same candidate supersedes only that record.
+    const aAgain = record('until', ['worktree\u0000/a'], 3)
+    view = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: aAgain })
+    expect(view.snoozes).toHaveLength(2)
+    expect(view.snoozes.find(entry => entry.keys.includes('worktree\u0000/a'))).toEqual(aAgain)
+    expect(view.snoozes.find(entry => entry.keys.includes('worktree\u0000/b'))).toEqual(b)
+    const file = readSidecarFile(join(fixture.area.base, 'store', 'worktree-prompts'), primaryKey(fixture.main))
+    expect(file!.snoozes).toHaveLength(2)
+  })
+
+  it('drops only the corrupt reminder entries and keeps the rest readable', async () => {
     const fixture = await setup('snooze-corrupt')
     const first = await open(fixture)
     const expected = expectation(fixture.main, fixture.linked)
@@ -239,46 +263,67 @@ describe('sidecar snooze', () => {
       track: { adminId: repo.adminId!, common: repo.common },
     })
     await first.registry.worktreeSidecar(fixture.main, { op: 'ignore', key: 'worktree\u0000/ignored', kind: 'worktree', path: '/ignored' })
+    await first.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: record('until') })
     const promptsRoot = join(fixture.area.base, 'store', 'worktree-prompts')
     const file = sidecarPath(promptsRoot, primaryKey(fixture.main))
-    // Valid rows, a broken UI-only field: this must stay readable.
+    // Valid rows, one broken reminder entry: the document stays readable and
+    // only that entry is dropped.
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
-    raw.snooze = { mode: 'soon', keys: 'not-a-list', at: 42 }
+    raw.snoozes = [...(raw.snoozes as unknown[]), { mode: 'soon', keys: 'not-a-list', at: 42 }]
     writeFileSync(file, JSON.stringify(raw))
     await first.dispose()
     stacks.splice(stacks.indexOf(first), 1)
     const second = await open(fixture)
     const read = await second.registry.worktreeSidecar(fixture.main, { op: 'read' })
     expect(read).toMatchObject({ available: true })
-    expect(read.snooze).toBeUndefined()
+    expect(read.snoozes).toHaveLength(1)
     expect(read.ignored).toHaveLength(1)
     expect(read.worktreeRoots).toHaveLength(1)
   })
 
-  it('clears the snooze on reset together with the ignores, without a second revision', async () => {
+  it('reads a legacy single snooze object as one pending record', async () => {
+    const fixture = await setup('snooze-legacy')
+    const first = await open(fixture)
+    await first.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: record('until') })
+    const file = sidecarPath(join(fixture.area.base, 'store', 'worktree-prompts'), primaryKey(fixture.main))
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+    const legacy = (raw.snoozes as unknown[])[0]
+    delete raw.snoozes
+    raw.snooze = legacy
+    writeFileSync(file, JSON.stringify(raw))
+    await first.dispose()
+    stacks.splice(stacks.indexOf(first), 1)
+    const second = await open(fixture)
+    const read = await second.registry.worktreeSidecar(fixture.main, { op: 'read' })
+    expect(read.snoozes).toEqual([legacy])
+  })
+
+  it('clears every pending delay on reset together with the ignores, without a second revision', async () => {
     const fixture = await setup('snooze-reset')
     const stack = await open(fixture)
     await stack.registry.worktreeSidecar(fixture.main, { op: 'ignore', key: 'worktree\u0000/ignored', kind: 'worktree', path: '/ignored' })
-    const snoozed = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: record() })
+    await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: record('until', ['worktree\u0000/a']) })
+    const snoozed = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: record('until', ['worktree\u0000/b']) })
+    expect(snoozed.snoozes).toHaveLength(2)
     const reset = await stack.registry.worktreeSidecar(fixture.main, { op: 'reset' })
     expect(reset.ignored).toEqual([])
-    expect(reset.snooze).toBeUndefined()
+    expect(reset.snoozes).toEqual([])
     expect(reset.revision).toBe(snoozed.revision + 1)
     // Nothing left to clear is not a write.
     const again = await stack.registry.worktreeSidecar(fixture.main, { op: 'reset' })
     expect(again.revision).toBe(reset.revision)
     const file = readSidecarFile(join(fixture.area.base, 'store', 'worktree-prompts'), primaryKey(fixture.main))
-    expect(file!.snooze).toBeUndefined()
+    expect(file!.snoozes).toBeUndefined()
   })
 
-  it('clears a snooze that has no ignores and persists the cleared document', async () => {
+  it('clears a snooze-only document and persists it across a restarted owner', async () => {
     const fixture = await setup('snooze-reset-only')
     const stack = await open(fixture)
     const snoozed = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: record('until') })
-    expect(snoozed.snooze).toBeDefined()
+    expect(snoozed.snoozes).toHaveLength(1)
     const reset = await stack.registry.worktreeSidecar(fixture.main, { op: 'reset' })
     expect(reset.ignored).toEqual([])
-    expect(reset.snooze).toBeUndefined()
+    expect(reset.snoozes).toEqual([])
     expect(reset.revision).toBe(snoozed.revision + 1)
     // A snooze-only reset must reach the file: a restarted owner reading the
     // same store must not restore the cleared delay.
@@ -286,7 +331,7 @@ describe('sidecar snooze', () => {
     stacks.splice(stacks.indexOf(stack), 1)
     const second = await open(fixture)
     const reread = await second.registry.worktreeSidecar(fixture.main, { op: 'read' })
-    expect(reread.snooze).toBeUndefined()
+    expect(reread.snoozes).toEqual([])
     expect(reread.revision).toBe(reset.revision)
     // Nothing left to clear is not a write.
     const again = await second.registry.worktreeSidecar(fixture.main, { op: 'reset' })
