@@ -38,6 +38,9 @@ import { connectionRpcFor } from './compat/connection-rpc.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { effectiveRootAccess } from './contract.ts'
 import { RemoteAdmissionError } from './remote/contract.ts'
+import { ManifestError } from './remote/manifest.ts'
+import { CredentialError } from './remote/personal/credentials.ts'
+import { RemoteOperationError } from './remote/personal/operations.ts'
 import {
   parseRemoteRequest,
   REMOTE_ENDPOINTS,
@@ -975,7 +978,11 @@ async function dispatchPanelRequest(
         : error.code
       return { ok: false, error: { code, message: error.message, details: {} } }
     }
-    if (error instanceof AuthorityRpcError || error instanceof WorktreeError || error instanceof RemoteAdmissionError) {
+    // Every coded domain error keeps its stable code: the panel localizes it
+    // and `submit` branches on it (a `personal-config-conflict` reloads the
+    // state). Laundering any of these into `panel/internal` loses both.
+    if (error instanceof AuthorityRpcError || error instanceof WorktreeError || error instanceof RemoteAdmissionError
+      || error instanceof ManifestError || error instanceof CredentialError || error instanceof RemoteOperationError) {
       return { ok: false, error: { code: error.code, message: error.message, details: {} } }
     }
     return {
