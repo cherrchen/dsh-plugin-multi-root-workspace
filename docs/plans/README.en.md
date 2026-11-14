@@ -38,6 +38,8 @@ Plans with long-term reference value should not be deleted.
 
 active:
 
+- [2026-11-14-hero-entry-adaptive-width.md](./active/2026-11-14-hero-entry-adaptive-width.md) (Chinese) — The New Session hero entry now fits the room the row leaves for it: a probe measures that room, `max-width` clamps to it, and under 88px the entry degrades to a 28×28 icon. No DSH change; an unrecognized row structure falls back to the `v0.1.19` form. Decision amendment in [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md).
+
 - [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) (Chinese) — P1–P7 cover worktree root suggestions, the plugin toggle, and manual cleanup (B). P8–P10 add explicit access to shared Git metadata for linked worktrees (A). See [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md) for the decision and the roadmap for progress; shipping in `v0.1.17`.
 
 - [2026-11-08-workspace-menu-folders-dialog.md](./active/2026-11-08-workspace-menu-folders-dialog.md) (Chinese) — A "Manage workspace folders…" entry in the workspace `...` menu: a controller reusing the footer dialog, a `workspace` context-menu contribution (order 150), and switching/reusing the target workspace's blank session before opening with that fixed session; `RootSwitcher` and upstream `WorkspaceBrowser` stay untouched (decision in [ADR-0038](../decisions/ADR-0038-workspace-menu-folders-dialog.md)).
