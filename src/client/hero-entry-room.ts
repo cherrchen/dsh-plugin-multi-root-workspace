@@ -101,8 +101,12 @@ function trailingBoxRight(element: Element): number | null {
  * The boxes of the options group's other occupants.
  *
  * A `display: contents` outlet has no box of its own, so the occupants are
- * flattened to the boxes that take part in the flex layout. The entry's own
- * subtree is left out: its width is what this measurement is solving for.
+ * flattened to the boxes that take part in the flex layout. The slot renderer
+ * emits exactly one such outlet per render site and every occupant of the slot
+ * lives inside it, which puts a sibling entry in the same anchor as the seat:
+ * the walk therefore descends through any wrapper that contains the seat
+ * instead of skipping it, and only the seat's own subtree is left out (its
+ * width is what this measurement is solving for).
  *
  * @param options - the options container holding the seat.
  * @param seat - the entry's seat element.
@@ -111,8 +115,12 @@ function trailingBoxRight(element: Element): number | null {
 function groupBoxes(options: HTMLElement, seat: HTMLElement): HTMLElement[] {
   const boxes: HTMLElement[] = []
   const visit = (element: Element): void => {
-    if (element === seat || element.contains(seat)) return
-    if (isContents(displayOf(element))) {
+    if (element === seat) return
+    if (element.contains(seat) || isContents(displayOf(element))) {
+      // The wrapper holding the seat is normally the shared outlet, whose
+      // children are sibling flex items. A box around the entries does not
+      // occur today; descending there keeps those entries visible and errs
+      // toward a smaller room, which is the safe direction.
       for (const child of element.children) visit(child)
       return
     }

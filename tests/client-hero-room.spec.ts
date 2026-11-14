@@ -4,7 +4,11 @@
  *
  * The geometry is pure DOM math, so the fixtures carry real inline styles
  * (jsdom resolves those) and fixed viewport boxes (stubbed, because jsdom has
- * no layout). What the stylesheet does with the result is pinned separately by
+ * no layout). The DOM shape mirrors the slot renderer: ONE `display: contents`
+ * outlet per render site holds every occupant of the slot, so a same-slot
+ * entry is a sibling of the seat inside the seat's own anchor.
+ *
+ * What the stylesheet does with the result is pinned separately by
  * `client-hero-entry.spec.tsx` and `client-styles.spec.ts`.
  */
 
@@ -32,28 +36,42 @@ const ROW_PADDING_LEFT = 20
 const ROW_PADDING_RIGHT = 16
 const ROW_GAP = 2
 const CHIP_WIDTH = 207
+const PRESET_WIDTH = 108
+
+/** What shape to build around the seat. */
+interface RowOptions {
+  readonly rowWidth?: number
+  /** Widths of same-slot occupants, in document order. */
+  readonly occupants?: readonly number[]
+  /** Put the occupants in their own contents wrapper instead of the seat's. */
+  readonly separateOutlet?: boolean
+  /** Put a control after the options group. */
+  readonly trailing?: boolean
+}
 
 /**
- * One synthetic row: chip, preset anchor, then the options group holding an
- * optional same-slot occupant and the entry seat inside `display: contents`
- * outlets — the DOM the slot renderer produces.
+ * One synthetic row: chip, preset anchor, then the options group. By default
+ * the occupants and the seat share one `display: contents` outlet, exactly as
+ * the renderer emits for a list slot.
  */
-function mountRow(options: { readonly rowWidth?: number; readonly occupant?: number; readonly trailing?: boolean } = {}): {
+function mountRow(options: RowOptions = {}): {
   readonly row: HTMLElement
   readonly seat: HTMLElement
   readonly chip: HTMLElement
-  readonly occupant: HTMLElement | null
+  readonly occupants: HTMLElement[]
 } {
+  const widths = options.occupants ?? []
+  const shared = options.separateOutlet !== true
+  const occupantMarkup = widths.map((_, index) => `<button data-occupant="${index}">entry ${index}</button>`).join('')
   const root = document.createElement('div')
   root.innerHTML = `
     <div data-row style="display: flex; column-gap: ${ROW_GAP}px; padding: 0 ${ROW_PADDING_RIGHT}px 0 ${ROW_PADDING_LEFT}px">
       <button data-chip>marketing-website-preview</button>
       <span data-preset style="display: inline-flex"><button>Research</button></span>
       <div data-options style="display: flex; column-gap: ${ROW_GAP}px; margin-left: auto">
-        <div data-occupant-anchor style="display: contents">
-          <button data-occupant>Use worktree</button>
-        </div>
-        <div data-anchor style="display: contents">
+        ${shared ? '' : `<div data-other-outlet style="display: contents">${occupantMarkup}</div>`}
+        <div data-outlet style="display: contents">
+          ${shared ? occupantMarkup : ''}
           <span data-seat style="display: inline-flex; margin: 0 4px 0 0"><button>workspace folders</button></span>
         </div>
       </div>
@@ -64,18 +82,17 @@ function mountRow(options: { readonly rowWidth?: number; readonly occupant?: num
   const chip = root.querySelector('[data-chip]') as HTMLElement
   const preset = root.querySelector('[data-preset]') as HTMLElement
   const seat = root.querySelector('[data-seat]') as HTMLElement
-  const occupant = root.querySelector('[data-occupant]') as HTMLElement
+  const occupants = Array.from(root.querySelectorAll<HTMLElement>('[data-occupant]'))
   const width = options.rowWidth ?? ROW_WIDTH
   stubRect(row, 0, width)
   stubRect(chip, ROW_PADDING_LEFT, CHIP_WIDTH)
   // Chip (20..227) + 2px gap, preset 108 wide → the group's start is 339.
-  stubRect(preset, ROW_PADDING_LEFT + CHIP_WIDTH + ROW_GAP, 108)
+  stubRect(preset, ROW_PADDING_LEFT + CHIP_WIDTH + ROW_GAP, PRESET_WIDTH)
   // The seat sits at the row's right edge while the probe pins it to the floor.
   stubRect(seat, width - ROW_PADDING_RIGHT - 4 - HERO_ENTRY_ICON_PX, HERO_ENTRY_ICON_PX)
-  stubRect(occupant, 340, options.occupant ?? 93)
-  if (options.occupant === undefined) occupant.closest('[data-occupant-anchor]')?.remove()
+  for (const [index, occupant] of occupants.entries()) stubRect(occupant, 340, widths[index] ?? 0)
   if (options.trailing !== true) root.querySelector('[data-trailing]')?.remove()
-  return { row, seat, chip, occupant: options.occupant === undefined ? null : occupant }
+  return { row, seat, chip, occupants }
 }
 
 describe('the hero row lookup', () => {
@@ -100,12 +117,6 @@ describe('the hero row lookup', () => {
     expect(targets).toContain(row.querySelector('[data-options]'))
     expect(targets).not.toContain(seat)
   })
-
-  it('watches a same-slot occupant so its width changes trigger a re-measure', () => {
-    const { row, seat, occupant } = mountRow({ occupant: 93 })
-    expect(occupant).not.toBeNull()
-    expect(heroRowWidthTargets(row, seat)).toContain(occupant)
-  })
 })
 
 describe('the measured room', () => {
@@ -116,10 +127,31 @@ describe('the measured room', () => {
     expect(measureHeroEntryRoom(seat)).toBe(141)
   })
 
-  it('subtracts the other occupants of the options group and their gaps', () => {
-    // 145 - 93 (occupant) - 2 (group gap) - 4 (inset).
-    const { seat } = mountRow({ occupant: 93 })
+  it('subtracts a same-slot occupant that shares the seat\'s own outlet anchor', () => {
+    // The renderer's real shape: one display:contents outlet for the whole
+    // slot, so the sibling entry is a child of the seat's anchor. 145 - 93 - 2
+    // (group gap) - 4 (inset).
+    const { seat, occupants } = mountRow({ occupants: [93] })
+    expect(occupants).toHaveLength(1)
     expect(measureHeroEntryRoom(seat)).toBe(46)
+  })
+
+  it('subtracts every occupant of the shared outlet, with one gap between each', () => {
+    // 145 - (93 + 40) - 2 gaps x 2 - 4 leaves 4, below the icon floor.
+    const { seat } = mountRow({ occupants: [93, 40] })
+    expect(measureHeroEntryRoom(seat)).toBe(HERO_ENTRY_ICON_PX)
+  })
+
+  it('subtracts an occupant that sits in its own contents wrapper too', () => {
+    // Not the renderer's current shape, but a valid one for any outlet that
+    // groups occupancy differently; the accounting must not depend on it.
+    const { seat } = mountRow({ occupants: [93], separateOutlet: true })
+    expect(measureHeroEntryRoom(seat)).toBe(46)
+  })
+
+  it('watches a same-outlet occupant so its width changes trigger a re-measure', () => {
+    const { row, seat, occupants } = mountRow({ occupants: [93] })
+    expect(heroRowWidthTargets(row, seat)).toContain(occupants[0])
   })
 
   it('falls back to the row content edge when nothing precedes the group', () => {

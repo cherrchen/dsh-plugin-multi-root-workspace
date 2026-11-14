@@ -51,7 +51,7 @@ class StubResizeObserver {
 }
 
 /** Viewport facts the stubbed layout answers with. */
-const layout = { rowWidth: 500 }
+const layout = { rowWidth: 500, occupantWidth: 0 }
 
 /** The left/width the stub reports for one element. */
 function boxOf(element: Element): { left: number; width: number } | null {
@@ -60,6 +60,7 @@ function boxOf(element: Element): { left: number; width: number } | null {
   }
   if (element.getAttribute('data-testid') === 'row') return { left: 0, width: layout.rowWidth }
   if (element.getAttribute('data-testid') === 'chip') return { left: 20, width: 207 }
+  if (element.getAttribute('data-testid') === 'forge') return { left: 229, width: layout.occupantWidth }
   return null
 }
 
@@ -73,18 +74,23 @@ const props = {
 
 /**
  * Render the entry inside a hero row shaped like the upstream one: padded flex
- * row, the workspace chip, then the options container and the slot outlet's
- * contents anchor. The stylesheet is not loaded here, so the seat's own 4px
- * inset is absent and the room is the group budget itself.
+ * row, the workspace chip, then the options container and ONE slot outlet
+ * anchor holding every occupant (the renderer's shape for a list slot). The
+ * stylesheet is not loaded here, so the seat's own 4px inset is absent and the
+ * room is the group budget itself.
  * @param view - what the component renders; defaults to the hero entry.
+ * @param occupantWidth - width of a same-outlet occupant to stage before the
+ * entry, or undefined for none.
  * @returns the render result.
  */
-function renderInRow(view?: ReactNode): ReturnType<typeof render> {
+function renderInRow(view?: ReactNode, occupantWidth?: number): ReturnType<typeof render> {
+  layout.occupantWidth = occupantWidth ?? 0
   return render(
     <div data-testid="row" style={{ display: 'flex', columnGap: '2px', padding: '0 16px 0 20px' }}>
       <span data-testid="chip">marketing-website-preview</span>
-      <div style={{ display: 'flex', marginLeft: 'auto' }}>
+      <div style={{ display: 'flex', columnGap: '2px', marginLeft: 'auto' }}>
         <div style={{ display: 'contents' }}>
+          {occupantWidth === undefined ? null : <span data-testid="forge">Use worktree</span>}
           {view ?? <HeroWorkspaceEntry {...props} />}
         </div>
       </div>
@@ -100,6 +106,7 @@ function seatOf(container: HTMLElement): HTMLElement {
 beforeEach(() => {
   observers.length = 0
   layout.rowWidth = 500
+  layout.occupantWidth = 0
   vi.stubGlobal('ResizeObserver', StubResizeObserver)
   const original = Element.prototype.getBoundingClientRect
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
@@ -142,6 +149,24 @@ describe('the hero entry inside a hero row', () => {
     expect(trigger.getAttribute('title')).toBe('action.title')
   })
 
+  it('subtracts an occupant that shares the seat\'s own outlet anchor', () => {
+    // 20..484 content, group starts at 229 → 255 available; the 93px sibling
+    // and one 2px group gap come off it.
+    const view = renderInRow(undefined, 93)
+    const seat = seatOf(view.container)
+    expect(seat.getAttribute('data-size')).toBe('full')
+    expect(seat.style.getPropertyValue('--mrfw-hero-entry-room')).toBe('160px')
+  })
+
+  it('degrades when a same-outlet occupant leaves less than the label minimum', () => {
+    layout.rowWidth = 300
+    // 20..284 content → 55 available, already under the occupant's share.
+    const view = renderInRow(undefined, 93)
+    const seat = seatOf(view.container)
+    expect(seat.getAttribute('data-size')).toBe('compact')
+    expect(seat.style.getPropertyValue('--mrfw-hero-entry-room')).toBe('28px')
+  })
+
   it('observes the row, its controls and the options group, never the seat', () => {
     const view = renderInRow()
     const row = view.container.querySelector('[data-testid="row"]') as HTMLElement
@@ -174,7 +199,7 @@ describe('the hero entry inside a hero row', () => {
     view.rerender(
       <div data-testid="row" style={{ display: 'flex', columnGap: '2px', padding: '0 16px 0 20px' }}>
         <span data-testid="chip">marketing-website-preview</span>
-        <div style={{ display: 'flex', marginLeft: 'auto' }}>
+        <div style={{ display: 'flex', columnGap: '2px', marginLeft: 'auto' }}>
           <div style={{ display: 'contents' }}>
             <HeroWorkspaceEntry {...props} t={key => `next.${key}`} />
           </div>
