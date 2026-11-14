@@ -73,7 +73,7 @@ Workspace Folders 目前只有一个入口：侧栏底部 `sidebar.footer.action
 
 **机制**（`src/client/hero-entry-room.ts` + `src/client/HeroWorkspaceEntry.tsx`）：
 
-1. **探针**把 seat 临时置为图标下限（`data-measuring`：28px、隐藏 label），同步读取 options 组的预算——从 options 容器之前那个控件（含 flex gap）到行内容右缘——再减去组内其他条目的宽度、条目之间的 gap 与 seat 自己的外边距。pin 在同一次提交内恢复，浏览器不会绘制该形态；pin 也保证上游控件报告自然宽度，而不是已被我们的 label 挤压后的宽度。
+1. **探针**把 seat 临时置为图标下限（`data-measuring`：28px、隐藏 label），同步读取 options 组的预算——从 options 容器之前那个控件（含 flex gap）到行内容右缘——再减去组内其他条目的宽度、条目之间的 gap 与 seat 自己的外边距。槽渲染器每个渲染点只发一个 `display: contents` outlet，同槽条目因此与 seat 同处一个包装内；探针沿 seat 的包装向下展开、按扁平后的 flex item 计数，包装本身不算条目。pin 在同一次提交内恢复，浏览器不会绘制该形态；pin 也保证上游控件报告自然宽度，而不是已被我们的 label 挤压后的宽度。
 2. **夹取**：结果写入 `--mrfw-hero-entry-room`，样式以 `max-width: min(240px, var(--mrfw-hero-entry-room, 240px))` 限制按钮；余量耗尽时按钮正好贴住左邻，不再溢出。
 3. **阈值**：`room < 88px`（16 icon + 4 gap + 16 padding + 4×13px 文字）时 `data-size="compact"`，28×28 图标；名称保留在 `aria-label` / `title`。
 4. **重测**：`ResizeObserver` 观察行、行内其他控件、options 容器与同槽其他条目；每次提交的 layout effect 也重测（locale、工作区标题变化）。探针对自身宽度无依赖，重复测量结果稳定。
@@ -81,9 +81,11 @@ Workspace Folders 目前只有一个入口：侧栏底部 `sidebar.footer.action
 
 **有意不做**：不改 `.heroOptions` 的 `flex` 或上游任何 DOM/样式；不伪造 `container-type`；不挤压上游控件（入口只取上游控件自然宽度之外的余量；窗口继续变窄时先由上游选择器按自己的 `flex-shrink` 收缩，余量归零后入口退化为图标）；不为布局引入浏览器测试依赖。
 
-**已知耦合**：探针依赖三条结构事实——options 容器是 flex 子项、slot outlet 是 `display: contents`、options 组是行内最后一项。它们在 `0.2.1-alpha.3`–`0.2.2-rc.3` 的已安装源码中一致；任何一条不成立时探针返回 `null`，入口回落到旧形态而不是报错或消失。若上游给 hero 行加容器或允许 `.heroOptions` 收缩，应重新评估本节。
+**已知耦合**：探针依赖四条结构事实——options 容器是 flex 子项、slot outlet 是 `display: contents`、同槽条目与 seat 处于同一个 outlet 包装（探针沿包装下钻，不把包装当条目）、options 组是行内最后一项。它们在 `0.2.1-alpha.3`–`0.2.2-rc.3` 的已安装源码中一致；任何一条不成立时探针返回 `null`（或保守地少算余量），入口回落到旧形态而不是报错或消失。若上游给 hero 行加容器或允许 `.heroOptions` 收缩，应重新评估本节。
 
-**验证**：几何逻辑用 jsdom + 桩矩形单测（`tests/client-hero-room.spec.ts`、`tests/client-hero-entry.spec.tsx`），样式用 `tests/client-styles.spec.ts` 钉住；真实布局以 Chromium 复刻页（上游 rc.3 规则 + 生产样式表 + 生产几何模块）测量，数据与过程见[计划](../plans/active/2026-11-14-hero-entry-adaptive-width.md)。
+**验证**：几何逻辑用 jsdom + 桩矩形单测（`tests/client-hero-room.spec.ts`、`tests/client-hero-entry.spec.tsx`，夹具按渲染器的单 outlet 共享包装形状搭建），样式用 `tests/client-styles.spec.ts` 钉住；真实布局以 Chromium 复刻页（上游 rc.3 规则 + 生产样式表 + 生产几何模块）测量，含同槽条目场景，数据与过程见[计划](../plans/active/2026-11-14-hero-entry-adaptive-width.md)。
+
+**Review 修正（2026-11-14）**：首版 `groupBoxes` 对包含 seat 的包装直接返回，导致同处一个 outlet 的其他条目被跳过——而渲染器正是每个渲染点只发一个 outlet，真实宿主里 forge 的 worktree 条目会让余量被高估、在窄列仍保留溢出 label。已改为沿包装下钻计数（Chromium 复刻：520px 列宽 + 93px 同槽条目的行溢出由 +26px 变为 0），夹具与用例同步换成共享包装形状。
 
 ## Related Documents
 

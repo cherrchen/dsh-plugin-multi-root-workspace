@@ -175,7 +175,8 @@ pnpm docs:check && pnpm compat:check && pnpm pack:check
 - 负的"行溢出"表示按钮盒在行的内容右缘以内 4px（seat 的右外边距）；`430` 起入口不再贡献溢出。
 - `300px` 的 29px 溢出与入口无关：上游 workspace chip（207）+ 模式选择器（54，已到 icon+chevron 下限）+ 入口（28）+ gap/padding 本身已超过列宽；入口此时已是图标下限。
 - 长标题（360px workspace chip）：620px 列宽 room 107 → full 且省略号、无溢出；560/520 退化为图标、无溢出；460px 列宽 22px 溢出同样来自上游三件套的下限。
-- 同槽另一个条目（93px，模拟 forge worktree）：700px 列宽入口仍为自然 149px；560px 时 room 106 → 省略号；520px 时 room 66 → 图标；全程无溢出。扣除规则正确。
+- 同槽另一个条目（93px，模拟 forge worktree）与入口**同处一个 `display: contents` outlet**（渲染器的真实形状）：700px 列宽入口仍为自然 149px；620px room 166；560px room 106 → 省略号；520px room 66 → 图标；480/450px → 图标；全程无溢出。
+- 首版在同一形状下曾高估余量（520px room 161、入口 149、行溢出 **+26px**；480px **+43px**；450px **+73px**），原因是 `groupBoxes` 对"包含 seat 的包装"直接返回，把共享 outlet 里的同槽条目一并跳过。修正后同表变为 room 66 / 28 / 28、溢出 0，见下方 Review 修正节。
 - 两次连续探针的 room 与入口宽一致（无抖动）。
 
 手工验收（真实 GUI）：
@@ -185,6 +186,19 @@ pnpm docs:check && pnpm compat:check && pnpm pack:check
 3. 余量 < 88px：28×28 图标，`aria-label` / `title` 仍可识别。
 4. 打开右侧预览面板（列宽变窄、视口不变）：同样按列宽退化 —— 这正是旧视口断点失效的场景。
 5. 切换到长标题工作区或切换界面语言：重新测量，不溢出。
+
+## Review 修正（2026-11-14）
+
+**Finding（有效）**：Code Review 指出 "Shared outlet occupants escape width accounting"——同槽条目与入口同处一个 `display: contents` 包装时，`groupBoxes` 因该包装 `contains(seat)` 而整体跳过，条目宽度不计入余量；测验夹具用的是"每条目各一个包装"，掩盖了该形状。宿主真实 DOM 正是共享包装：`SlotOutlet` 每个渲染点只渲染一个 `[data-slot]` anchor（`display: contents`），list 槽的所有条目都是它的直接子项。
+
+**影响**：余量被高估，窄列下入口保留溢出的 label。Chromium 复刻（上游 rc.3 规则 + 生产模块 + 生产样式表，93px 同槽条目）：520px 列宽 room 161（应为 66）、入口 149、行溢出 **+26px**；480px **+43px**；450px **+73px**。
+
+**修正**：
+- `groupBoxes` 改为沿包含 seat 的包装继续下钻，只跳过 seat 自身；`display: contents` 包装本身不算条目。若上游把条目套进盒子，下钻只会少算组跨度（保守），不会高估余量。
+- `heroRowWidthTargets` 因此重新观察到共享 outlet 里的同槽条目（宽度变化触发重测）。
+- 夹具改为渲染器形状（单个共享 outlet 同时容纳同槽条目与 seat），并补两条回归：共享 outlet 单条目的扣减、共享 outlet 两条目的扣减；另保留"独立包装"用例，确认计数不依赖包装分组。
+
+**修正后实测**（同形状）：700 / 620 / 560 / 520 / 480 / 450px 列宽 → room 246 / 166 / 106 / 66 / 30 / 30，入口 149 / 149 / 106 / 28 / 28 / 28，行溢出全部 −4（按钮盒在内容右缘内 4px）。单元测试：`client-hero-room` 17 项、`client-hero-entry` 10 项通过。
 
 ## Risks
 
@@ -216,6 +230,6 @@ pnpm docs:check && pnpm compat:check && pnpm pack:check
 | 阶段 | 状态 | 证据 |
 | --- | --- | --- |
 | P0 取证与计划 | 完成 | 上文实测表；原型在 430/450/480/560/700px 列宽下的入口宽度与行溢出；ADR-0037 修订节；提交 `docs(plan): investigate the hero entry's width overflow and record the plan` |
-| P1 几何与组件 | 完成 | `src/client/hero-entry-room.ts`、`HeroWorkspaceEntry.tsx`、`styles.ts`；`tests/client-hero-room.spec.ts`（15）、`tests/client-hero-entry.spec.tsx`（8）、`tests/client-styles.spec.ts`（25）；生产模块 + 生产样式表的 Chromium 表见上；提交 `fix(client): fit the hero entry to the row's leftover width` |
+| P1 几何与组件 | 完成 | `src/client/hero-entry-room.ts`、`HeroWorkspaceEntry.tsx`、`styles.ts`；`tests/client-hero-room.spec.ts`（17，含共享 outlet 形状）、`tests/client-hero-entry.spec.tsx`（10）、`tests/client-styles.spec.ts`（25）；生产模块 + 生产样式表的 Chromium 表见上；提交 `fix(client): fit the hero entry to the row's leftover width`，Review 修正见 `fix(client): count same-outlet occupants in the hero room probe` |
 | P2 文档 | 完成 | ADR-0037 修订节、decisions README 双语索引、README/README.en、guide 双语、requirements、architecture、compat note 双语；`pnpm docs:check` 通过 |
 | P3 门禁与 PR | 完成 | lint / typecheck / build / docs:check / compat:check / pack:check 通过；client 面 316 项通过；完整套件只剩 17 项既有沙箱失败（见 Phase 3 的沙箱限制节）；Draft PR [#53](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/53) |
