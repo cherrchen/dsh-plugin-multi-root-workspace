@@ -53,8 +53,10 @@ async function mount(options: {
   sessionPersistence?: { stat: (id: string, options?: { signal?: AbortSignal }) => Promise<unknown> } | false
   /** The row's config, as the patch supplies it (`dshHome` for isolate-profiles). */
   config?: { dshHome?: string }
+  /** Overlay onto the registry row's own config (`remoteEnvironments` etc.). */
+  registry?: Parameters<typeof mountRegistryStack>[1]
 } = {}): Promise<RegistryStack> {
-  const stack = await mountRegistryStack(storeRoot)
+  const stack = await mountRegistryStack(storeRoot, options.registry)
   stacks.push(stack)
   const ctx = stack.ctx
   registered.clear()
@@ -637,6 +639,22 @@ describe('the panel channel', () => {
     const result = await callPanel('list', { sessionId: PANEL_SESSION })
     expect(result.ok).toBe(false)
     expect(result.error?.code).toBe('session-not-found')
+  })
+
+  it('passes personal-domain error codes through dispatch instead of laundering them', async () => {
+    // A malformed personal config makes sshState throw ManifestError; its
+    // stable code must survive the channel so the client can localize it —
+    // collapsing to panel/internal is the failure this regression watches.
+    const personalPath = join(fixture.base, 'personal.json')
+    writeFileSync(personalPath, '{ not json', { mode: 0o600 })
+    const stack = await mount({
+      withConnection: true,
+      registry: { remoteEnvironments: { enabled: true, mode: 'personal', personalPath, credentialRoot: join(fixture.base, 'cred') } },
+    })
+    expect(stack.registry.remoteMode).toBe('personal')
+    const answer = await callPanel('sshState', { sessionId: PANEL_SESSION })
+    expect(answer.ok).toBe(false)
+    expect(answer.error?.code).toBe('invalid-manifest')
   })
 
   it('reports session-not-live when the session persists but is not live in this process', async () => {

@@ -60,7 +60,15 @@ export class PanelError extends Error {
  */
 export function errorKeyOf(code: string): Key {
   const candidate = `error.${code}`
-  return (candidate in zh ? candidate : 'error.fallback') as Key
+  if (candidate in zh) return candidate as Key
+  // A suffixed code (`ssh-capability-absent:<gate reason>`) localizes by its
+  // prefix; the suffix is host detail `errorHasDetail` keeps visible.
+  const colon = code.indexOf(':')
+  if (colon > 0) {
+    const prefixed = `error.${code.slice(0, colon)}`
+    if (prefixed in zh) return prefixed as Key
+  }
+  return 'error.fallback'
 }
 
 /**
@@ -72,7 +80,9 @@ export function errorKeyOf(code: string): Key {
  * @returns whether to render `error.message` after the localized key.
  */
 export function errorHasDetail(code: string): boolean {
-  return code === 'unavailable' || code.startsWith('panel/') || errorKeyOf(code) === 'error.fallback'
+  // A code with no exact key (transport, suffixed, or unknown) means the
+  // localized text cannot name the failure; the host message must show.
+  return code === 'unavailable' || code.startsWith('panel/') || !(`error.${code}` in zh)
 }
 
 /** The panel's callable face, injected into its component. */

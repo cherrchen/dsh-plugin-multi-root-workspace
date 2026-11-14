@@ -10,6 +10,8 @@
  * dictionaries off the same module the bundle builds from and compares them.
  */
 
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { NS, en, zh } from '../src/client/locales.ts'
 
@@ -61,6 +63,36 @@ describe('panel dictionaries', () => {
       'fallback',
     ]) {
       expect(Object.keys(zh), `error.${code} must be translated`).toContain(`error.${code}`)
+    }
+  })
+
+  it('translates every literal error code the host can emit', () => {
+    // Codes reach the panel verbatim inside `error.<code>` lookups; a code
+    // without a key silently renders as `error.fallback`. Enumerate the
+    // throw sites instead of a hand-maintained list so a new code fails
+    // here the day it lands.
+    const codedErrors = new Set([
+      'AuthorityRpcError',
+      'CredentialError',
+      'ManifestError',
+      'PanelError',
+      'RemoteAdmissionError',
+      'RemoteOperationError',
+      'RootValidationError',
+      'SshEnvironmentError',
+      'WorktreeError',
+    ])
+    const source = join(import.meta.dirname, '..', 'src')
+    const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry =>
+      entry.isDirectory() ? files(join(dir, entry.name)) : entry.name.endsWith('.ts') ? [join(dir, entry.name)] : [])
+    const thrown = new Set<string>()
+    const pattern = new RegExp(`new (?:${[...codedErrors].join('|')})\\(\\s*['"\`]([a-zA-Z][a-zA-Z0-9/_-]*)`, 'g')
+    for (const file of files(source)) {
+      for (const match of readFileSync(file, 'utf8').matchAll(pattern)) thrown.add(match[1]!)
+    }
+    expect(thrown.size).toBeGreaterThan(30)
+    for (const code of thrown) {
+      expect(Object.keys(zh), `error.${code} must be translated (${code})`).toContain(`error.${code}`)
     }
   })
 
