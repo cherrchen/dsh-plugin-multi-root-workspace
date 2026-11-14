@@ -153,11 +153,12 @@ worktreePromptReset   { sessionId }                                          →
 
 - `worktreePrompt` 增加 `fresh`；新增 `worktreePromptSeen`；`worktreePromptResolve` 增加 `action: 'snooze'` 与 `snooze`。
 - 双端 schema 同步：strict，拒绝多余字段；`promptIds` 必填、去重、上限 64。
+- 64 上限属于**请求批次**：响应必须能携带完整可见列表（发现不设候选上限），否则客户端会整份拒绝、提示完全不出现。`WorktreeClient` 对 `seen`/`resolve`/`snooze` 按 64 个 id 顺序分批，并合并答复（`seen` 求和；`resolved`/`skipped` 合并；`viewRevision`/`prompts` 取最后一批）。
 - `worktreePromptReset`/`worktreeRootsCleanup` 形状不变；`WorktreePromptView` 不新增字段。
 
 ### 20.11 实施返工（2026-11-14，代码审查）
 
-PR #55 的代码审查复现了十二处实现偏离 §20.3–§20.8 的问题，全部已修复并各自留下回归：
+PR #55 的代码审查复现了十三处实现偏离 §20.3–§20.10 的问题，全部已修复并各自留下回归：
 
 1. **snooze-only 的 `reset` 不落盘。** `worktreeSidecar` 的 `reset` 用「去掉 snooze 的副本」做空态判断，判断永远通过，于是只有 snooze、没有 `ignored` 的工作区在 reset 时直接返回：内存清了，sidecar 仍留着延迟，重启后旧提醒复活。改为对**原始文档**判断 `ignored.length === 0 && snooze === undefined`；只清 snooze 也会写一次 revision，无内容时仍不写。回归：`tests/worktrees-sidecar.spec.ts` 的 snooze-only reset（写后重开 owner 读回为空、二次 reset 不再制造 revision）与 `tests/worktrees-discovery.spec.ts` 的服务层 reset 后重启不恢复。
 2. **`fresh` 自动检查启动了持久发现。** `prompt(fresh)` 走完整 `activate`：安装 watcher、调度 owner 侧 `reconcile`（有映射时可能写 sidecar），违反「纯查询、无副作用」。改为**被动激活/被动 inventory**：只读 `resolveRepo` 与 sidecar、只重建候选队列，不装 watcher、不调度 reconcile、不写 sidecar；首个显式请求（Dialog 的 `prompt()`、`wait`、面板 list、reset）把工作区提升为持久发现一次（并恢复映射核对），统计/registry change 的 reconcile 也沿用当前姿态。回归：`tests/worktrees-discovery.spec.ts` 以 fresh 为第二个 Host 的首个调用，断言 `watching === false`、sidecar 操作只有 `read`、文件逐字不变、后台不发现新 worktree；打开 Dialog 后 watcher 与 reconcile 才出现。
@@ -176,8 +177,11 @@ PR #55 的代码审查复现了十二处实现偏离 §20.3–§20.8 的问题�
 10. **有界列表淘汰记录后没有释放认领。** `MAX_SNOOZE_RECORDS = 32` 淘汰最旧记录后，该记录从后续所有投影中消失；只依赖「到期」的释放路径再也看不到它，于是它覆盖的候选被 `offered` 永久压制到 reset 或 Host 重启。改为 `observeSnoozes` 统一处理三种来源（自动过滤、任何 sidecar 读回、本 Host 的本地合并）：到期记录释放其 keys；本 Host 记得、但新投影不再覆盖其 key 的记录（被上限淘汰）同样释放。本地合并先写回内存，所以淘汰发生在本地 `mergeSnoozeRecords` 时也能立即释放。回归：`tests/worktrees-discovery.spec.ts` 的「`seen` → 7d → 另一 Host 写入 32 条不相交延迟触发淘汰 → 下一次 fresh 重新提示」。
 11. **客户端丢弃 `skipped` 响应并关闭 Dialog/Toast。** 候选在渲染后发生变化时，宿主把该行放进**成功**响应的 `skipped` 而不是拒绝请求；客户端 `applyLater`/`snoozeNotice` 原先不检查就直接关闭。对「稍后」这意味着 `seen` 认领没有对应期限（本 Host 生命周期内不再提示），对「永久不再提醒」意味着 ignore 未落盘却已关闭。改为与 `confirmAdd` 一致：检查 `skipped`，Toast 只为未处理行保留提示（刷新后的 id），Dialog 保留刷新后的行 + 行错误 + skipped 计数，供操作者重试；transport/authority 失败仍静默关闭且不自动重试。回归：`tests/client-worktree.spec.tsx` 的 Toast 与 Dialog 两条（7d 与 permanent）。
 12. **客户端定时选择的完成路径清掉后续生命周期的提示。** `snoozeNotice` 的失败路径只检查 `mounted`，成功路径只比较 session id：A 会话选择 7 天后切到 B，A 的请求 reject 会清掉 B 刚显示、候选已被 `seen` 认领的 Toast；A→B→A 往返后旧请求成功也会清掉第二次激活的 Toast。改为调用时捕获 `workEpoch`，两个完成路径只在 `mounted && epoch === workEpoch.current`（成功路径仍校验 session）时修改 Toast，生命周期已变的完成一律丢弃；同生命周期的失败仍静默关闭、不重试。回归：`tests/client-worktree.spec.tsx` 的跨会话失败与同会话往返成功两条。
+13. **请求批次超过 64 个 id，且响应被同一上限误伤。** `seen`（Toast/Dialog）与 snooze/resolve 一次发送整个可见集合；仓库超过 64 个 worktree 时请求会被 `promptIds` 的 64 上限拒绝，而发现本身不设上限。更早的失败点是响应 schema 同样 `max(64)`：真实客户端会整份拒绝回答，Toast 完全不出现（自动检查静默失败），Dialog 也会关闭——因此 review 描述的「`seen` 被拒后已显示候选不入 `offered`」在旧代码中先被响应解析挡住，但根因相同且影响更糟。修复分两层：响应 schema 不再限制列表长度（请求上限保留 64），`WorktreeClient` 的 `seen`/`resolve`/`snooze` 按 64 个 id 顺序分批并合并答复（`seen` 求和；`resolved`/`skipped` 合并；`viewRevision`/`prompts` 取最后一批）。回归：合同响应 65 项、客户端 65/100/130 个 id 的分批、真实客户端 + 65 候选的 Toast 与两批 `seen`。
 
-十二处都不改变授权语义：`addNew` 仍是唯一写路径，owner 复验与 `prompt-stale` 不变，`offered`/snooze 仍只是 UI 状态。
+同一轮对 `src/client/WorktreePrompt.tsx` 的广泛审查还收紧了异步完成的归属：`confirmAdd`/`applyLater` 也捕获 `workEpoch`，A→B→A 后旧 Dialog 的 resolve 完成不再关闭或改写第二次激活的 Dialog；`openDialog` 与 Toast 的「×」立即递增 epoch，打开 Dialog 或显式关闭 Toast 之后的旧 snooze 完成不能再改 UI。回归：Dialog 的 add/later 往返两条，以及关闭 Toast 后部分 refused 的 snooze 不重新出现。
+
+十三处都不改变授权语义：`addNew` 仍是唯一写路径，owner 复验与 `prompt-stale` 不变，`offered`/snooze 仍只是 UI 状态。
 
 ## 第十八次修订（2026-11-09）
 

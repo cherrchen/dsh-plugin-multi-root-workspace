@@ -273,7 +273,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 
 ### 第二十次修订返工（2026-11-14，Code Review，完成）
 
-> PR #55 的代码审查复现了十二处实现偏离（ADR §20.3–§20.8；Devin 六条 + Codex 六条 P2），均先写失败回归再修复；授权语义不变。
+> PR #55 的代码审查复现了十三处实现偏离（ADR §20.3–§20.10；Devin 六条 + Codex 七条 P2），均先写失败回归再修复；授权语义不变。
 
 - **snooze-only reset 落盘**：`worktreeSidecar` 的 `reset` 空态判断改为针对原始文档（同时看 `ignored` 与 `snooze`）；只清 snooze 也写一次 revision，无内容时仍不制造 revision。回归：sidecar snooze-only reset 持久化（重开 owner 读回为空、二次 reset 不制造 revision）+ 服务层 reset 后重启不恢复。
 - **fresh 保持只读**：新增 `WorkspaceState.passive`；`prompt(fresh)` 的首次激活与重新 inventory 走被动路径——只读 `resolveRepo` 与 sidecar、只重建候选队列，不安装 watcher、不调度 owner 侧 reconcile、不写 sidecar；首个显式请求（Dialog 的 `prompt()`/`wait`/面板 list/reset）提升为持久发现一次并恢复映射核对，settings/registry 触发的 reconcile 沿用当前姿态。回归：fresh 作为第二个 Host 的首个调用时 `watching === false`、sidecar 操作只有 `read`、文件逐字不变、后台不发现新 worktree；打开 Dialog 后 watcher 与 reconcile 才出现。
@@ -287,7 +287,9 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - **淘汰记录释放认领**：`observeSnoozes` 统一处理自动过滤、任何 sidecar 读回与本地合并；到期记录释放 keys，本 Host 记得但新投影不再覆盖其 key 的记录（`MAX_SNOOZE_RECORDS = 32` 淘汰）同样释放，避免被淘汰的定时选择退化为永久抑制。回归：`seen` → 7d → 另一 Host 写入 32 条不相交延迟触发淘汰 → 下一次 fresh 重新提示。
 - **客户端处理 `skipped`**：`applyLater`/`snoozeNotice` 不再丢弃成功响应里的 `skipped` 直接关闭。Toast 只为未处理行保留提示（刷新后的 id，select 以 id 集合为 key 重新武装），Dialog 保留刷新后的行 + 行错误 + skipped 计数（与「添加所选」一致）；transport/authority 失败仍静默关闭、不自动重试。回归：client 的 Toast(7d) 与 Dialog(7d/permanent) 三条。
 - **定时选择的完成路径不拥有后续会话的提示**：`snoozeNotice` 的失败路径只检查组件是否挂载，成功路径只比较 session id。A 会话选择 7 天后切到 B，A 的请求拒绝会清掉 B 刚显示、其候选已被 `seen` 认领的 Toast；A→B→A 往返后旧请求成功也会清掉第二次激活的提示。改为调用时捕获 `workEpoch`，两个完成路径都要求 `mounted && epoch === workEpoch.current`（成功路径仍校验 session）才修改 Toast，生命周期已变的完成一律丢弃；同生命周期内失败仍静默关闭、不重试。回归：`tests/client-worktree.spec.tsx` 的跨会话失败与同会话往返成功两条。
-- **验证**：worktree + client + locale + authority-native 专项 14 文件 **195 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build`、`docs:check`、`compat:check`、`pack:check` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
+- **请求批次与完整响应**：`seen`（Toast/Dialog）与 snooze/resolve 原先一次发送整个可见集合；仓库超过 64 个 worktree 时请求会被 `promptIds` 的 64 上限拒绝。更早的失败点是响应 schema 同样 `max(64)`：真实客户端整份拒绝回答，Toast 完全不出现（自动检查静默失败）、Dialog 关闭——因此 review 描述的直接请求溢出在旧代码中先被响应解析挡住，但根因相同且影响更糟。改为响应可携带完整可见列表（请求上限仍 64），`WorktreeClient` 的 `seen`/`resolve`/`snooze` 按 64 个 id 顺序分批并合并答复（`seen` 求和；`resolved`/`skipped` 合并；`viewRevision`/`prompts` 取最后一批）。回归：合同 65 项响应、客户端 65/100/130 个 id 的分批、真实客户端 + 65 候选的 Toast 与两批 `seen`。
+- **广泛审查：异步完成的归属**：`confirmAdd`/`applyLater` 也捕获 `workEpoch`，A→B→A 后旧 Dialog 的 resolve 完成不再关闭或改写第二次激活的 Dialog；`openDialog` 与 Toast 的「×」立即递增 epoch，打开 Dialog 或显式关闭 Toast 之后的旧 snooze 完成不能再改 UI。回归：Dialog 的 add/later 往返两条，以及关闭 Toast 后部分 refused 的 snooze 不重新出现。
+- **验证**：worktree + client + locale + authority-native + `worktree-client` 专项 15 文件 **204 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build`、`docs:check`、`compat:check`、`pack:check` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
 
 ## Dependencies
 
