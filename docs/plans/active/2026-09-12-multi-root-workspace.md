@@ -1691,5 +1691,7 @@ rc.3 只有 6 个提交（三次合并、一次发布提交、实验性 DeepSeek
 - 基线 A 车道证据：在独立工作树把开发 pin 重指 `0.2.1-rc.5`（该基线编译 pin）后，`auto-review:fork`、`typecheck`（含 `tsconfig.auto-review-legacy.json`）、`build`、`tests/auto-review`（`legacy/upstream.spec.ts` 31、`legacy/context.spec.ts` 26 + 1 平台跳过、`ops-context.spec.ts` 18、`loader.spec.ts` 10、`overlap.spec.ts` 6）与 `smoke:auto-review` 全部通过；该车道完整 `vitest` 为 1461 通过 / 179 跳过 / 17 失败，失败集合同样是与环境相关的共享 Registry 用例。`0.2.1-rc.2` 车道因类型声明与 rc.5 逐字节相同未重复重指，其发布由 CI 矩阵覆盖。
 - 三 OS 矩阵、`0.2.2-alpha.2`–`rc.3` 的逐发布运行、Windows ACL 与旧版回归由 PR 的 CI 给出；本机不把 macOS 单机结论写成跨平台通过。
 
+收尾后追加 `e046f00`：入口在挂载动态加载的基线实现前校验其 `inject` 声明（缺失时不再以误导性的 cordis “without inject” 诊断启动失败），复跑 `lint`/`typecheck`/`build`/`auto-review:fork`/`smoke:auto-review` 通过。
+
 已知边界：`0.2.2-alpha.2` 的闭集 `purpose` 使同一份 current 源码无法在该发布的 .d.ts 下通过类型检查，因此该发布只做运行时验证（完整单测 + 联合冒烟），编译验证在基线 B 的编译 pin `0.2.2-rc.3`；这是 ADR-0040 的显式取舍。发布说明（`CHANGELOG`）与版本号不在本批写入，按既有发版流程在实际发版时补。
 

@@ -208,7 +208,7 @@ ADR-0021/0022 的上下文契约、来源身份、freshness、协议与生命周
 | P0 调研与计划 | `3abd15d` docs(auto-review): plan multi-baseline support for DSH 0.2.1-rc.2 and later | 上游审查、ADR-0040、适配计划与索引更新；文档检查通过 |
 | P1 + P2 合同、车道模型、基线 B 实现 | `5abf849` feat(auto-review): support the 0.2.1 and 0.2.2 reviewer generations | 两个基线的逐字节副本与 fork、按车道动态加载、按编译 pin 类型检查、差分门禁/冒烟/构建/升级脚本的联合集合化；本机 `compat:check`/`lint`/`typecheck`/`build`/`docs:check`/`pack:check`/`auto-review:fork` 通过，`smoke:auto-review` 在 `0.2.2-rc.3` 全部通过 |
 | P3 基线 B 测试套件 | `96a544b` test(auto-review): cover the 0.2.2 baseline across the review contract | `current/upstream.spec.ts`（官方回归副本）与 `current/context.spec.ts`（消息模型下的上下文/围栏/PTC）新增；`loader.spec.ts` 适配 loader 1.1.0，`ops-context.spec.ts` 改为结构探测执行器桥接；本机两代车道全部通过 |
-| P4 CI、文档与最终验收 | 收尾提交 | CI 计划与运行器按联合集合执行、README/AGENTS/FORK/迁移审查/开发工作流/路线账本更新、完整本机门禁与基线树对照 |
+| P4 CI、文档与最终验收 | `b201926` docs(auto-review): record the multi-baseline contract and its evidence（另追加 `e046f00` 入口 `inject` 声明校验） | CI 计划与运行器按联合集合执行、README/AGENTS/FORK/迁移审查/开发工作流/路线账本更新、完整本机门禁与基线树对照 |
 
 退出验收的执行证据（含 17 个环境性失败的基线对照、基线 A 独立工作树与冒烟结果）只记[路线账本](../active/2026-09-12-multi-root-workspace.md#auto-review-多基线适配2026-11-14)。`CHANGELOG` 与版本号按既有发版流程在实际发版时写入，本批未创建 tag。
 
