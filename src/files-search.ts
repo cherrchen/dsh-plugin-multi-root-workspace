@@ -18,10 +18,9 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/files-search
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type { WorkspaceFileSearchRequest } from '@deepseek-ai/dsh-api-workspace-files'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PanelCall, SearchView } from './contract.ts'
-import { workspaceSearchOf, type RoutedSearchScope } from './compat/workspace-files.ts'
+import { workspaceSearchOf, type RoutedSearchScope, type WorkspaceFileSearchRequest } from './compat/workspace-files.ts'
 import { RootValidationError, canonicalRoot } from './roots.ts'
 import type {} from './registry.ts'
 import type {} from './scope.ts'

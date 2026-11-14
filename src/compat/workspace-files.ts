@@ -1,5 +1,5 @@
 /** Old releases watch a session; newer ones watch a path. Probe arity, never version. */
-import type { WorkspaceFileScope, WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileWatchFrame, WorkspaceFiles } from '@deepseek-ai/dsh-api-workspace-files'
+import type { WorkspaceFileScope, WorkspaceFileWatchFrame, WorkspaceFiles } from '@deepseek-ai/dsh-api-workspace-files'
 import { posix, win32 } from 'node:path'
 import { wrapMethod } from '../method-wrapper.ts'
 
@@ -13,6 +13,32 @@ export function adaptPathWatch(service: WorkspaceFiles, wrap: (original: PathWat
 export function resolveRelatedWorkspacePath(absoluteBase: string, tail: string): string {
   const paths = absoluteBase.startsWith('/') ? posix : win32
   return paths.resolve(paths.dirname(absoluteBase), tail.replace(/\\/g, '/'))
+}
+
+/**
+ * Upstream's search request, declared here rather than imported: the type
+ * arrives with the method in `0.2.2-rc.2`, and a named import would fail the
+ * type check of every earlier supported pin even though this module only ever
+ * reaches the call behind a structural probe.
+ */
+export interface WorkspaceFileSearchRequest {
+  readonly query: string
+  readonly excludedPaths: readonly string[]
+  readonly includeHidden: boolean
+  readonly respectGitignore: boolean
+}
+
+/** One entry a workspace search found, relative to the searched root. */
+export interface WorkspaceFileSearchMatch {
+  readonly path: string
+  readonly type: 'file' | 'directory' | 'other'
+}
+
+/** The outcome of one workspace search (same reason for the local declaration). */
+export interface WorkspaceFileSearchResult {
+  readonly matches: readonly WorkspaceFileSearchMatch[]
+  readonly truncated: boolean
+  readonly incomplete: boolean
 }
 
 /**
