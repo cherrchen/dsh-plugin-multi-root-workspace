@@ -80,6 +80,18 @@ DSH 0.2.2-rc.2 给右侧 Files 页签加了工作区搜索：搜索栏、结果�
   （`drawnTree`：过滤项、丢弃隐藏目录下的已列层级、给"只有隐藏项"的目录画说明），并把
   `includeHidden = showHidden` 传给搜索。
 
+### D3 修订（2026-11-14，code review）：请求身份与记录所有权
+
+- **请求身份**：`search-state.ts` 以 `searchRequestKey({rootId, query, excludedPaths, includeHidden, respectGitignore, attempt})`
+  标识"同一次请求"。已结算答案保存该身份；body 重挂载时身份相同则复用，不重跑、不重置展开与滚动
+  （打开文件再返回的路径）。查询/筛选/重试 attempt 变化必然改变身份并重跑，失败答案同样算已结算——
+  重试是按钮的显式 attempt，不是 effect 落定后的自动循环。
+- **记录所有权**：搜索记录随 session 的 inject product 创建（每 session 一份，不跨会话共享），
+  并带 `forgetTab(tabId)`；adapter 的 owner 死亡清理在 `endTakeover(key, true)` 后调用它，
+  body-only unmount（`end(key)`）保留记录。session 结束时记录随 product 回收。
+- **失败码**：search 端点的 host 错误在通道边界保留上游 `workspace-file/*` 词汇（白名单集合），
+  客户端据此本地化；未知异常仍归一 `panel/internal`。
+
 ### D4 已知边界
 
 - 原生 Files 快捷键（Cmd+P）走的是上游 `sidebar.files.navigator` face 的 `focus()`，接管期它聚焦的是被隐藏的

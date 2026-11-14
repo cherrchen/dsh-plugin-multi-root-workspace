@@ -243,10 +243,15 @@ relative-path/tree construction):
 | `search-tree.ts` | `search-tree.ts` | `buildSearchTree` returns this fork's `FilesTabState` and imports `childPath` from `face.ts` |
 | `search-preferences.ts` | `search-preferences.ts` | plugin-owned Storage seam (same localStorage key and stored format) instead of `@deepseek-ai/dsh-client-store` persist; no upstream runtime import |
 
-Everything else is ours: `search-state.ts` (per-(tab, root) records),
-`search-client.ts` (the channel call's request/answer), `pane.tsx` (bar,
-status, results, notes, settings popover, keyboard) and `context-menu.ts`
-(the structural `useContextMenu` adapter). Their visual rules are copied from
+Everything else is ours: `search-state.ts` (per-(tab, root) records, plus the
+request identity that lets a body remount reuse a settled answer and
+`forgetTab` for owner death), `search-client.ts` (the channel call's
+request/answer), `pane.tsx` (bar, status, results, notes, settings popover,
+keyboard) and `context-menu.ts` (the structural `useContextMenu` adapter).
+One store belongs to one session's inject product — records are not shared
+across sessions — and the adapter's owner-death cleanup calls `forgetTab`
+when a tab really closes; a body-only unmount keeps the record (that is what
+restores expansion and scroll after a file view). Their visual rules are copied from
 upstream's `FilesBody.module.css` search block into `styles.ts` as
 `mrfw-fs*` (and `.match`/`.hidden`/`.inactive` as `mrfw-ft*`), keeping only
 `var(--dsw-*)` tokens. Behavior that must be re-checked against upstream:

@@ -113,9 +113,11 @@
 
 | 阶段 | 状态 | 提交 | 证据 |
 | --- | --- | --- | --- |
-| P0 | 进行中 | — | — |
-| P1 | 待开始 | — | — |
-| P2 | 待开始 | — | — |
-| P3 | 待开始 | — | — |
-| P4 | 待开始 | — | — |
-| P5 | 待开始 | — | — |
+| P0 | 已完成 | `00c29e8` | 本文件四条核验 + D1–D4；`pnpm docs:check` 0 errors（链接修正后） |
+| P1+P2 | 已完成 | `eb8a430` | `vitest run tests/client-search.spec.tsx tests/client-search-state.spec.ts` → 14 + 5 passed；新增回归：settings toggle 关闭保存草稿、remount 不新增 run 且折叠/scrollTop 保留、请求身份 6 字段独立、失败重试不会自动循环；`pnpm lint` 0；`pnpm typecheck` 0 |
+| P3 | 已完成 | `909ec2e` | `vitest run tests/command.spec.ts` → 75 passed（新增：`workspace-file/outside-workspace` 与 `search-failed` 原码透传、未知异常仍 `panel/internal`）；`tests/workspace-routing.spec.ts` 28 passed；typecheck 0 |
+| P4 | 已完成 | `83a87f5` | 客户端套件 137 passed（`client-search` 14、`client-search-state` 5、`client-search-ownership` 3、files 17、switcher 29、navigator 24、styles 35、bundle 10）；ownership 覆盖：session 隔离、tab 死亡清空该 tab 全部根记录、body unmount 保留；lint 0；typecheck 0 |
+| P5 | 进行中 | 待推送 | 全门禁与 CI 结果见下方"最终证据" |
+
+> 说明：P1 与 P2 共用 `pane.tsx`/`search-state.ts` 的同一处 effect 语义，拆成两个提交会让中途一个提交的测试红，故合并为 `eb8a430`；
+> P3/P4 各自单提交。
