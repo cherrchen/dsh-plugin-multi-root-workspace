@@ -764,11 +764,7 @@ async function remotesViewOf(
   const base = { primaryRoot: canonicalRoot(primaryRoot), mode, custodyMode: registry.remoteMode, status }
   const manifest = registry.remoteManifest
   if (manifest === undefined || status.state !== 'ready') {
-    return {
-      ...base,
-      endpoints: [],
-      ...(status.state === 'ready' ? {} : { unavailable: status.reason ?? status.state }),
-    }
+    return { ...base, endpoints: [] }
   }
   const key = primaryKey(primaryRoot)
   const snapshot = await registry.remoteList(primaryRoot).catch((error: unknown) => {
