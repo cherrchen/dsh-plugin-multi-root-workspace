@@ -44,11 +44,14 @@ import ToolRuntime, { RUN_CODE_NAME, TOOL_ABORTED_BEFORE_DISPATCH, type PreToolD
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import ApprovalService, { setApprovalPolicy, type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import * as AutoReview from '../../../src/auto-review/current/fork.ts'
+import { autoReviewRequestIdentity, type AutoReviewRelease } from '../../../src/compat/auto-review-contract.ts'
 
 // The fork's execution-copy gate compares the host release the compat service
 // reports; this suite mounts the reviewer without the plugin's compat row, so
-// the stub carries the lane's development pin.
-const INSTALLED_RELEASE: string = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).devDependencies['@deepseek-ai/dsh']
+// the stub carries the lane's development pin. The review request's identity
+// fields are release-dependent (0.2.2-alpha.2 predates the purpose map).
+const INSTALLED_RELEASE: AutoReviewRelease = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).devDependencies['@deepseek-ai/dsh']
+const REQUEST_IDENTITY = autoReviewRequestIdentity(INSTALLED_RELEASE)
 
 const EXPECTED_REVIEW_POLICY = `REVIEW_POLICY
 You are the final authorization reviewer for exactly one pending tool call. Your decision replaces human approval for this call. If you allow it, the call executes immediately with full host access and no later confirmation.
@@ -430,9 +433,15 @@ describe('native review request', () => {
       model: 'same-model',
       system: EXPECTED_REVIEW_POLICY,
       temperature: 0,
-      sessionId: session.id,
-      purpose: 'auto-review',
+      ...REQUEST_IDENTITY === 'session-and-purpose' ? { sessionId: session.id, purpose: 'auto-review' } : {},
     })
+    if (REQUEST_IDENTITY === 'none') {
+      // 0.2.2-alpha.2 predates LlmRequestPurposeMap: its purpose union is closed
+      // and the provider forwards the field, so the fork keeps that release's
+      // official request shape (ADR-0040).
+      expect(request).not.toHaveProperty('sessionId')
+      expect(request).not.toHaveProperty('purpose')
+    }
     expect(request.maxTokens).toBeUndefined()
     expect(request.tools).toBeUndefined()
     for (const message of request.messages) {
