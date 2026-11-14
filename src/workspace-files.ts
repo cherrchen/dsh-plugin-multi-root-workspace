@@ -154,33 +154,51 @@ export function apply(ctx: Context): void {
       const admissionRestores: Array<() => void> = []
       {
         const methods = service as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
-        // 'search' arrived at 0.2.2-rc.2. It is admitted like every other
-        // read so a shared-authority Host orders it at the owner. It is not
-        // routed (the upstream search is rooted at the Session's cwd and the
-        // plugin offers no additional-root search UI), but its session root
-        // is bounded: a root inside a withheld registration is refused before
-        // ripgrep starts (see the takeover rules in client/styles.ts for the
-        // hidden native bar). `list` and `changes` bound the directory their
-        // path selects in their own wrappers instead.
-        const rootGuarded = new Set(['search'])
-        for (const key of ['list', 'stat', 'read', 'readBytes', 'readAll', 'readRelated', 'search']) {
+        // `search` has its own wrapper below: a routed call names the
+        // additional root as its operation root, so its admission key has to
+        // come from the Session's primary root instead. Every other read is
+        // admitted here, under the root the operation itself names.
+        for (const key of ['list', 'stat', 'read', 'readBytes', 'readAll', 'readRelated']) {
           if (typeof methods[key] !== 'function') continue
           admissionRestores.push(wrapMethod(methods, key, original => async function(this: unknown, ...args: unknown[]) {
             const request = args[0] as WorkspaceFileScope
-            return withRegistryRead(scope, request.workspaceRoot, 'files', async () => {
-              // `search` has no path to select a target: its root IS the
-              // tree. Refuse before upstream launches ripgrep, inside the
-              // same admission as the operation itself.
-              if (rootGuarded.has(key) && rootWithheld(scope, request.workspaceRoot)) {
-                throw await outside(request.workspaceRoot)
-              }
-              return original.apply(this, args)
-            })
+            return withRegistryRead(scope, request.workspaceRoot, 'files', async () => original.apply(this, args))
           }))
         }
       }
+      // `search` arrived at 0.2.2-rc.2. The browser's own call is rooted at the
+      // Session cwd, so it keeps the old bounded behavior: admitted under that
+      // root, refused before ripgrep starts when the root sits inside a
+      // withheld registration. A call routed by the plugin's search endpoint
+      // (`src/files-search.ts`) carries the host-internal `primaryRoot` marker
+      // and names an additional root; it is admitted once, under the primary
+      // root, and authorized against the published scope before and after the
+      // operation. That wrapper, not the endpoint, is the enforcement point.
+      const searchMethods = service as unknown as Record<string, SearchMethod>
+      const restoreSearch = typeof searchMethods.search === 'function'
+        ? wrapMethod(searchMethods, 'search', original => async function(
+            this: unknown, rawScope: WorkspaceFileScope & { readonly primaryRoot?: string }, request: unknown, signal: AbortSignal,
+          ): Promise<unknown> {
+            const primaryRoot = rawScope.primaryRoot ?? rawScope.workspaceRoot
+            const searchRoot = rawScope.workspaceRoot
+            if (rawScope.primaryRoot === undefined) {
+              return withRegistryRead(scope, primaryRoot, 'files', async () => {
+                if (rootWithheld(scope, primaryRoot)) throw await outside(searchRoot)
+                return original.call(this, rawScope, request, signal)
+              })
+            }
+            // The grant is read INSIDE the admission frame: in a shared-authority
+            // Host the scope answers from the current operation, so an
+            // out-of-frame `scopeOf` would be empty and refuse every search.
+            return withRegistryRead(scope, primaryRoot, 'files', async () => {
+              if (!scope.multiRootScope.scopeOf(primaryRoot).includes(searchRoot)) throw await outside(searchRoot)
+              return original.call(this, { sessionId: rawScope.sessionId, workspaceRoot: searchRoot }, request, signal)
+            })
+          })
+        : () => {}
       return () => {
         for (const restore of admissionRestores.reverse()) restore()
+        restoreSearch()
         rowLifetime.abort(new Error('multi-root workspace-files routing unloaded'))
         restoreList()
         restoreStat()
@@ -196,6 +214,14 @@ export function apply(ctx: Context): void {
 
 /** The settled outcome of routing one read-style call: the call arguments, or a refusal. */
 type RoutedRead = { readonly request: WorkspaceFileScope; readonly path: string } | 'deny'
+
+/** The workspace search method's host-side signature; absent before `0.2.2-rc.2`. */
+type SearchMethod = (
+  this: unknown,
+  scope: WorkspaceFileScope & { readonly primaryRoot?: string },
+  request: unknown,
+  signal: AbortSignal,
+) => Promise<unknown>
 
 /** The read surface pre-0.2 releases carried and the current one dropped. */
 type LegacyReads = {

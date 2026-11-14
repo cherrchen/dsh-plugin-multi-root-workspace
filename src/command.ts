@@ -35,6 +35,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import { connectionRpcFor } from './compat/connection-rpc.ts'
+import { searchAdditionalRoot } from './files-search.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { effectiveRootAccess } from './contract.ts'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
@@ -827,6 +828,10 @@ async function dispatchPanelRequest(
         const value: RevealedView = { revealed: target.path }
         return { ok: true, value }
       }
+      case 'search':
+        // The one file operation the upstream wire cannot route: the endpoint
+        // names an additional root by id, and the host resolves/authorizes it.
+        return { ok: true, value: await searchAdditionalRoot(ctx, primaryRoot, request, signal) }
     }
   } catch (error: unknown) {
     if (error instanceof RootValidationError) {

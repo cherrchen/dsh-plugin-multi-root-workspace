@@ -86,10 +86,10 @@ export interface WorkspaceResponseMap extends PanelResponseMap, SkillsResponseMa
 export const PANEL_CHANNEL = '/multi-root-workspace'
 
 /** Endpoint names, relative to {@link PANEL_CHANNEL}. */
-export type PanelEndpoint = 'list' | 'add' | 'remove' | 'alias' | 'move' | 'setAccess' | 'setSkillsEnabled' | 'setAliasId' | 'reveal'
+export type PanelEndpoint = 'list' | 'add' | 'remove' | 'alias' | 'move' | 'setAccess' | 'setSkillsEnabled' | 'setAliasId' | 'reveal' | 'search'
 
 /** Every endpoint name, for exhaustive iteration in tests and callers. */
-export const PANEL_ENDPOINTS: readonly PanelEndpoint[] = ['list', 'add', 'remove', 'alias', 'move', 'setAccess', 'setSkillsEnabled', 'setAliasId', 'reveal']
+export const PANEL_ENDPOINTS: readonly PanelEndpoint[] = ['list', 'add', 'remove', 'alias', 'move', 'setAccess', 'setSkillsEnabled', 'setAliasId', 'reveal', 'search']
 
 /**
  * How one registered root currently stands, as the panel renders it. Kept in
@@ -187,6 +187,33 @@ export interface RevealedView {
   readonly revealed: string
 }
 
+/** One entry a workspace search returned, `/`-joined relative to {@link SearchView.root}. */
+export interface SearchMatchView {
+  readonly path: string
+  /** What the entry resolves to, in the same vocabulary the Host's listings use. */
+  readonly type: 'file' | 'directory' | 'other'
+}
+
+/**
+ * What `search` answers with.
+ *
+ * The Host searched one additional root of the Session's workspace, not the
+ * Session cwd: `root` is that root's canonical path, and `matches` are relative
+ * to it — exactly the vocabulary the Host's own workspace search answers in.
+ * The Client joins the two to key its tree; the whole authorization decision
+ * (which root, whether it is still granted) happened on the Host.
+ */
+export interface SearchView {
+  /** Canonical absolute path of the searched additional root. */
+  readonly root: string
+  /** Matching files and their inferred ancestor directories, relative to `root`. */
+  readonly matches: readonly SearchMatchView[]
+  /** The Host returned only its first matches because more matched. */
+  readonly truncated: boolean
+  /** Part of the root was not searched (the Host's file cap or an unreadable directory). */
+  readonly incomplete: boolean
+}
+
 /** The response type of every endpoint — the mapping the panel is typed against. */
 export interface PanelResponseMap {
   readonly list: RootsView
@@ -198,6 +225,7 @@ export interface PanelResponseMap {
   readonly setAliasId: RootsView
   readonly setAccess: RootsView
   readonly reveal: RevealedView
+  readonly search: SearchView
 }
 
 /**
@@ -225,6 +253,21 @@ export interface PanelRequest {
   readonly beforeEntry?: RootEntryView
   /** Compatibility anchor; accepted only when the id is unique. */
   readonly beforeId?: string
+  /**
+   * The additional root to search (search): the stable `RootView.id`, never a
+   * path. The Host re-resolves it against a refreshed registry, so a root that
+   * moved, was removed, or is no longer granted is refused instead of searched
+   * through a stale client copy.
+   */
+  readonly rootId?: string
+  /** Search text without surrounding whitespace (search); the Host refuses a blank one. */
+  readonly query?: string
+  /** Literal exclusion names, or root-relative paths containing `/` (search). */
+  readonly excludedPaths?: readonly string[]
+  /** Whether hidden entries may match (search). */
+  readonly includeHidden?: boolean
+  /** Whether the search honors the root's ignore files (search). */
+  readonly respectGitignore?: boolean
 }
 
 /** One validated call: the endpoint plus the request fields it may use. */
@@ -273,6 +316,11 @@ const panelRequestSchema = z.object({
     addedAt: z.string(),
   }).strict().optional(),
   beforeId: z.string().optional(),
+  rootId: z.string().min(1).optional(),
+  query: z.string().optional(),
+  excludedPaths: z.array(z.string()).optional(),
+  includeHidden: z.boolean().optional(),
+  respectGitignore: z.boolean().optional(),
 }).strict()
 
 /**
@@ -321,6 +369,21 @@ const rootsViewSchema = z.object({
 })
 
 const revealedViewSchema = z.object({ revealed: z.string() })
+
+/**
+ * One search answer. Deliberately NOT strict, like the roots view: a newer Host
+ * that adds a field must not brick an older panel, and the fields that matter
+ * are the matches and their two completeness flags.
+ */
+const searchViewSchema = z.object({
+  root: z.string(),
+  matches: z.array(z.object({
+    path: z.string(),
+    type: z.enum(['file', 'directory', 'other']),
+  })),
+  truncated: z.boolean(),
+  incomplete: z.boolean(),
+})
 
 /** The cleanup answer; `roots` is re-validated by {@link parseRootsView}. */
 const worktreeCleanupSchema = z.object({
@@ -409,6 +472,17 @@ export function parseRevealedView(value: unknown): Parsed<RevealedView> {
 }
 
 /**
+ * Validate a `SearchView` when it arrives.
+ * @param value - the raw endpoint value.
+ * @returns the view, or the reason it is not one.
+ */
+export function parseSearchView(value: unknown): Parsed<SearchView> {
+  const parsed = searchViewSchema.safeParse(value)
+  if (!parsed.success) return { ok: false, message: `the answer is not a search view: ${firstIssue(parsed.error)}` }
+  return { ok: true, value: parsed.data }
+}
+
+/**
  * Validate the `{ code, message }` envelope of a failed call.
  * @param value - the raw error value.
  * @returns the failure, or `undefined` when the value is not one.
@@ -437,6 +511,11 @@ function narrowCall(endpoint: PanelEndpoint, value: z.infer<typeof panelRequestS
     ...(value.access === undefined ? {} : { access: value.access }),
     ...(value.beforeEntry === undefined ? {} : { beforeEntry: value.beforeEntry }),
     ...(value.beforeId === undefined ? {} : { beforeId: value.beforeId }),
+    ...(value.rootId === undefined ? {} : { rootId: value.rootId }),
+    ...(value.query === undefined ? {} : { query: value.query }),
+    ...(value.excludedPaths === undefined ? {} : { excludedPaths: value.excludedPaths }),
+    ...(value.includeHidden === undefined ? {} : { includeHidden: value.includeHidden }),
+    ...(value.respectGitignore === undefined ? {} : { respectGitignore: value.respectGitignore }),
   }
 }
 

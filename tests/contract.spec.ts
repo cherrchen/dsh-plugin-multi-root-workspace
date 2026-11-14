@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseRootsView } from '../src/contract.ts'
+import { parsePanelCall, parseRootsView, parseSearchView } from '../src/contract.ts'
 
 const legacy = {
   primaryRoot: '/primary',
@@ -50,3 +50,54 @@ describe('roots-view wire compatibility', () => {
     }
   })
 })
+
+describe('search wire contract', () => {
+  const answer = {
+    root: '/repos/payments',
+    matches: [
+      { path: 'src/a.ts', type: 'file' },
+      { path: 'src', type: 'directory' },
+    ],
+    truncated: false,
+    incomplete: true,
+  }
+
+  it('accepts a well-formed answer and keeps future fields ignorable', () => {
+    expect(parseSearchView(answer)).toEqual({ ok: true, value: answer })
+    // A newer host adding a field must not brick an older panel.
+    expect(parseSearchView({ ...answer, generations: 3 })).toEqual({ ok: true, value: answer })
+  })
+
+  it('rejects an answer that is not a search view', () => {
+    expect(parseSearchView(undefined)).toMatchObject({ ok: false })
+    expect(parseSearchView({ ...answer, matches: [{ path: 'a', type: 'blob' }] })).toMatchObject({ ok: false })
+    expect(parseSearchView({ ...answer, truncated: 'yes' })).toMatchObject({ ok: false })
+    expect(parseSearchView({ ...answer, incomplete: undefined })).toMatchObject({ ok: false })
+  })
+
+  it('validates a search request body and rejects fields the host does not know', () => {
+    const parsed = parsePanelCall('search', {
+      sessionId: 'session-1',
+      rootId: 'root-1',
+      query: 'a.ts',
+      excludedPaths: ['dist', 'build'],
+      includeHidden: true,
+      respectGitignore: false,
+    })
+    expect(parsed).toEqual({ ok: true, value: {
+      endpoint: 'search',
+      sessionId: 'session-1',
+      rootId: 'root-1',
+      query: 'a.ts',
+      excludedPaths: ['dist', 'build'],
+      includeHidden: true,
+      respectGitignore: false,
+    } })
+    // A path field would let a client name a directory; the endpoint must take
+    // only the registry id, so the strict schema rejects the attempt.
+    expect(parsePanelCall('search', { sessionId: 'session-1', rootId: 'r', query: 'a', rootPath: '/x' })).toMatchObject({ ok: false })
+    expect(parsePanelCall('search', { sessionId: 'session-1', rootId: '', query: 'a' })).toMatchObject({ ok: false })
+    expect(parsePanelCall('search', {})).toMatchObject({ ok: false })
+  })
+})
+
