@@ -28,11 +28,7 @@ import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-store'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
-import {
-  Button, IconCloseOutlineRegular, IconEyeOffOutlineRegular, IconEyeOutlineRegular, IconInfoOutlineRegular,
-  IconPlusOutlineRegular, IconRefreshOutlineRegular, IconSearchOutlineRegular, IconTrashOutlineRegular,
-  StateDot, Tooltip,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { maybeComponent, maybeIcon } from '../../compat/client-icons.ts'
 import type { NativeTreeRenderer } from '../../compat/files-tree.ts'
 import type { FilesTreeSurface, FilesTreeSearchSeat } from './adapter.tsx'
 import type { FilesTreeProps } from './FilesTree.tsx'
@@ -45,6 +41,78 @@ import { buildSearchTree } from './search-tree.ts'
 import type { SearchFailureInfo, SearchPaneState, SearchPaneStates, SearchResultView } from './search-state.ts'
 import type { FilesTabState } from './store.ts'
 import { TreeView } from './tree-view.tsx'
+
+/**
+ * The host components and glyphs the search surface draws, probed by export
+ * name rather than imported by name.
+ *
+ * The pane only ever mounts behind the `workspaceFiles.search` probe
+ * (`0.2.2-rc.2`), where all of them exist. The probe keeps this module's
+ * import graph — and therefore the type check of older supported pins, where
+ * several names do not exist — clean, without a module augmentation: an
+ * augmentation file next to `open-in-app`'s is not reliably merged by the
+ * older pins' declaration graph, and the paint-time probe is the pattern this
+ * package already uses for every other version-dependent primitive.
+ */
+const IconSearch = maybeIcon(['IconSearchOutlineRegular'])
+const IconEye = maybeIcon(['IconEyeOutlineRegular'])
+const IconEyeOff = maybeIcon(['IconEyeOffOutlineRegular'])
+const IconClose = maybeIcon(['IconCloseOutlineRegular'])
+const IconInfo = maybeIcon(['IconInfoOutlineRegular'])
+const IconPlus = maybeIcon(['IconPlusOutlineRegular'])
+const IconTrash = maybeIcon(['IconTrashOutlineRegular'])
+const IconRefresh = maybeIcon(['IconRefreshOutlineRegular'])
+
+/** The Tooltip props the pane spells; the pane never mounts without a Tooltip. */
+interface TipProps {
+  readonly label: string
+  readonly side?: 'right' | 'bottom' | 'top' | 'left' | undefined
+  readonly delayMs?: number | undefined
+  readonly maxWidth?: number | undefined
+  readonly portal?: boolean | undefined
+  readonly openOnClick?: boolean | undefined
+  readonly children: ReactNode
+}
+
+const HostTip = maybeComponent<(props: TipProps) => ReactNode>(['Tooltip'])
+
+/** A Tooltip where the host has one, and the bare trigger where it does not. */
+function Tip(props: TipProps): ReactNode {
+  if (HostTip === undefined) return props.children
+  return <HostTip {...props} />
+}
+
+/** The host Button props the pane spells, plus the `data-*` hooks its tests read. */
+interface PaneButtonProps {
+  readonly variant?: 'primary' | 'ghost' | 'outline' | 'toolbar' | undefined
+  readonly size?: 'sm' | 'md' | undefined
+  readonly className?: string | undefined
+  readonly 'aria-label'?: string | undefined
+  readonly onClick?: (() => void) | undefined
+  readonly children?: ReactNode
+  readonly [key: `data-${string}`]: string | undefined
+}
+
+const HostButton = maybeComponent<(props: PaneButtonProps) => ReactNode>(['Button'])
+
+/** A host Button where the host has one, and the equivalent native button where it does not. */
+function PaneButton(props: PaneButtonProps): ReactNode {
+  if (HostButton !== undefined) return <HostButton {...props} />
+  return (
+    <button type="button" className={props.className} aria-label={props['aria-label']} onClick={props.onClick}>
+      {props.children}
+    </button>
+  )
+}
+
+/** The in-flight dot props the pane spells. */
+interface PaneStateDotProps {
+  readonly state: 'ongoing'
+  readonly size?: number | undefined
+  readonly className?: string | undefined
+}
+
+const HostStateDot = maybeComponent<(props: PaneStateDotProps) => ReactNode>(['StateDot'])
 
 /** The blank preferences a composition without a preference source reads. */
 const NO_PREFERENCES: WorkspaceSearchPreferences = defaultSearchPreferences()
@@ -173,11 +241,11 @@ function SearchNotes({ result, t }: {
         <p className={clsx('mrfw-ftNote', CLASS.emptyNote)} data-files-row="search-empty">
           <span>{t('search.empty')}</span>
           {hint !== undefined && (
-            <Tooltip label={t(hint)} side="bottom" delayMs={300} maxWidth={300} portal openOnClick>
-              <Button variant="ghost" size="sm" className={CLASS.infoButton} aria-label={t('search.emptyHint.label')} data-files-search-hint>
-                <IconInfoOutlineRegular size={11} aria-hidden="true" />
-              </Button>
-            </Tooltip>
+            <Tip label={t(hint)} side="bottom" delayMs={300} maxWidth={300} portal openOnClick>
+              <PaneButton variant="ghost" size="sm" className={CLASS.infoButton} aria-label={t('search.emptyHint.label')} data-files-search-hint>
+                {IconInfo !== undefined && <IconInfo size={11} aria-hidden="true" />}
+              </PaneButton>
+            </Tip>
           )}
         </p>
       )}
@@ -205,7 +273,7 @@ function SearchFailure({ failure, onRetry, describe, t }: {
   return (
     <div className={CLASS.failure} data-files-row="search-failed">
       <p className="mrfw-ftNote" role="alert">{t('search.failed', { message })}</p>
-      <Button variant="outline" size="sm" className={CLASS.retry} data-files-search-retry onClick={onRetry}>{t('search.retry')}</Button>
+      <PaneButton variant="outline" size="sm" className={CLASS.retry} data-files-search-retry onClick={onRetry}>{t('search.retry')}</PaneButton>
     </div>
   )
 }
@@ -226,11 +294,11 @@ function RuleRow({ rule, enabled, onToggle, onRemove, t }: {
           onChange={(event) => { onToggle(event.target.checked) }} />
         <span className={CLASS.ruleName}>{rule.path}</span>
       </label>
-      <Tooltip label={t('settings.remove', { path: rule.path })} side="bottom" portal>
+      <Tip label={t('settings.remove', { path: rule.path })} side="bottom" portal>
         <button type="button" className={CLASS.toolBtn} aria-label={t('settings.remove', { path: rule.path })} onClick={onRemove}>
-          <IconTrashOutlineRegular />
+          {IconTrash !== undefined && <IconTrash />}
         </button>
-      </Tooltip>
+      </Tip>
     </li>
   )
 }
@@ -274,18 +342,18 @@ function SearchSettings({ rules, respectGitignore, onRules, onRespectGitignore, 
       <div className={CLASS.settingsHeader}>
         <span className={CLASS.settingsTitle}>{t('settings.title')}</span>
         {!isDefaultRules(rules) && (
-          <Tooltip label={t('settings.restore')} side="bottom" portal>
+          <Tip label={t('settings.restore')} side="bottom" portal>
             <button type="button" className={CLASS.toolBtn} aria-label={t('settings.restore')} data-files-settings-restore
               onClick={() => { keepFocus(); onRules(defaultRules()) }}>
-              <IconRefreshOutlineRegular />
+              {IconRefresh !== undefined && <IconRefresh />}
             </button>
-          </Tooltip>
+          </Tip>
         )}
-        <Tooltip label={t('settings.close')} side="bottom" portal>
+        <Tip label={t('settings.close')} side="bottom" portal>
           <button type="button" className={CLASS.toolBtn} aria-label={t('settings.close')} onClick={() => { onClose(true) }}>
-            <IconCloseOutlineRegular />
+            {IconClose !== undefined && <IconClose />}
           </button>
-        </Tooltip>
+        </Tip>
       </div>
       <p className={CLASS.settingsDesc}>{t('settings.description')}</p>
       <div className={clsx(CLASS.rule, CLASS.settingsOption)}>
@@ -296,7 +364,7 @@ function SearchSettings({ rules, respectGitignore, onRules, onRespectGitignore, 
         </label>
       </div>
       <div className={clsx(CLASS.rule, CLASS.addRule)}>
-        <IconPlusOutlineRegular className={CLASS.icon} />
+        {IconPlus !== undefined && <IconPlus className={CLASS.icon} />}
         <input
           ref={add}
           className={CLASS.ruleInput}
@@ -350,14 +418,14 @@ function SearchBar({ query, showHidden, inputRef, onQuery, onShowHidden, onSetti
   return (
     <div className={CLASS.bar}>
       <div className={CLASS.field}>
-        <Tooltip label={t('search.settings')} side="bottom" portal>
+        <Tip label={t('search.settings')} side="bottom" portal>
           <button type="button" className={clsx(CLASS.toolBtn, CLASS.tool)} aria-label={t('search.settings')}
             aria-haspopup="dialog" aria-expanded={settingsOpen} data-files-search-settings-toggle
             onMouseDown={(event) => { if (settingsOpen) event.preventDefault() }}
             onClick={onSettings}>
-            <IconSearchOutlineRegular />
+            {IconSearch !== undefined && <IconSearch />}
           </button>
-        </Tooltip>
+        </Tip>
         <input
           ref={inputRef}
           className={CLASS.input}
@@ -370,20 +438,20 @@ function SearchBar({ query, showHidden, inputRef, onQuery, onShowHidden, onSetti
           data-mrfw-files-search
           onChange={(event) => { onQuery(event.target.value) }}
         />
-        <Tooltip label={t('search.showHidden')} side="bottom" portal>
+        <Tip label={t('search.showHidden')} side="bottom" portal>
           <button type="button" className={clsx(CLASS.toolBtn, CLASS.tool)} aria-pressed={showHidden}
             aria-label={t('search.showHidden')} data-files-show-hidden
             onClick={() => { onShowHidden(!showHidden) }}>
-            {showHidden ? <IconEyeOutlineRegular /> : <IconEyeOffOutlineRegular />}
+            {showHidden ? (IconEye !== undefined && <IconEye />) : (IconEyeOff !== undefined && <IconEyeOff />)}
           </button>
-        </Tooltip>
+        </Tip>
         {query !== '' && (
-          <Tooltip label={t('search.clear')} side="bottom" portal>
+          <Tip label={t('search.clear')} side="bottom" portal>
             <button type="button" className={clsx(CLASS.toolBtn, CLASS.tool)} aria-label={t('search.clear')} data-files-search-clear
               onClick={() => { onQuery('') }}>
-              <IconCloseOutlineRegular />
+              {IconClose !== undefined && <IconClose />}
             </button>
-          </Tooltip>
+          </Tip>
         )}
       </div>
     </div>
@@ -569,7 +637,7 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
       {/* Always mounted, so a screen reader announces each new text; empty, it takes no room. */}
       <p className={clsx(CLASS.status, result === undefined && CLASS.statusIdle)} aria-live="polite" data-files-search-status>
         {result?.kind === 'found' && <span className={CLASS.statusLine}>{filesTree.t('search.results', { count: String(result.count) })}</span>}
-        {pending && <StateDot state="ongoing" size={12} className={CLASS.spinner} />}
+        {pending && HostStateDot !== undefined && <HostStateDot state="ongoing" size={12} className={CLASS.spinner} />}
       </p>
       {trimmed === '' ? (
         <FilesTree
