@@ -278,7 +278,7 @@ A 只在该 primary 的完整快照证明 common 身份、且 `<main>/.git` 仍�
 
 ## 可选 Auto Review 适配
 
-需要 Auto Review 多根上下文时，在插件管理器的主包行列表中启用默认关闭的 [Auto Review 入口](./src/auto-review/README.md)；同一详情页设置卡中的「多根 Auto Review（实验性）」开关与该行开关等价，默认同样关闭。该集成仅面向 DSH `0.2.1-rc.2`；普通安装保持原支持范围且不会启用或选择 Auto。
+需要 Auto Review 多根上下文时，在插件管理器的主包行列表中启用默认关闭的 [Auto Review 入口](./src/auto-review/README.md)；同一详情页设置卡中的「多根 Auto Review（实验性）」开关与该行开关等价，默认同样关闭。该集成面向 DSH `0.2.1-rc.2`、`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5`、`0.2.2-alpha.2`、`0.2.2-alpha.3`、`0.2.2-rc.1`、`0.2.2-rc.2`、`0.2.2-rc.3` 九个精确发布；普通安装保持原支持范围且不会启用或选择 Auto。
 
 ## 项目结构
 

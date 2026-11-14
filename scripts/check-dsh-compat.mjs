@@ -28,6 +28,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { readAutoReviewContract } from './lib/auto-review-development.mjs'
 
 const require = createRequire(import.meta.url)
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -146,11 +147,25 @@ if (releases.length > 1) {
   else notes.push(`installed tree: ${release}`)
 }
 
-// The optional integration's release is narrower than ordinary support.
-const autoReviewContract = readFileSync(join(REPO_ROOT, 'src/compat/auto-review-contract.ts'), 'utf8')
-const autoRelease = /AUTO_REVIEW_RELEASE = '([^']+)'/u.exec(autoReviewContract)?.[1]
-if (autoRelease === undefined || !supported.includes(autoRelease)) fail('Auto Review exact release must belong to the ordinary allowlist')
-else notes.push(`optional Auto Review release: ${autoRelease}`)
+// The optional integration's joint contract is narrower than ordinary support:
+// every release it names must belong to the ordinary allowlist, and the two
+// frozen source baselines must not overlap.
+const autoReviewContract = readFileSync(join(REPO_ROOT, 'src/compat', 'auto-review-contract.ts'), 'utf8')
+let autoReview
+try {
+  autoReview = readAutoReviewContract(autoReviewContract)
+} catch (error) {
+  fail(`the Auto Review joint contract is unreadable: ${error instanceof Error ? error.message : String(error)}`)
+}
+if (autoReview !== undefined) {
+  for (const release of autoReview.releases) {
+    if (!supported.includes(release)) fail(`Auto Review release ${release} must belong to the ordinary allowlist`)
+  }
+  for (const [baseline, pin] of Object.entries(autoReview.compilePins)) {
+    if (pin !== undefined && !autoReview.byBaseline[baseline].includes(pin)) fail(`Auto Review ${baseline} compile pin must be one of its releases`)
+  }
+  notes.push(`optional Auto Review releases: ${autoReview.releases.join(', ')}`)
+}
 
 for (const note of notes) console.log(`[compat] ${note}`)
 

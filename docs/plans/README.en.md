@@ -55,6 +55,8 @@ active:
 
 completed:
 
+- [2026-11-14-auto-review-multi-baseline.md](./completed/2026-11-14-auto-review-multi-baseline.md) (Chinese) — The optional Auto Review joint contract grows from one baseline to two source baselines covering nine exact releases: per-baseline verbatim forks, lane-scoped dynamic loading, compile-pin typechecking, cross-generation tests/smoke/CI gates, and documentation. Completed and accepted on the development pin and the baseline-A lane; decision in [ADR-0040](../decisions/ADR-0040-auto-review-multi-baseline.md).
+
 - [2026-11-08-workspace-folders-hero-entry.md](./completed/2026-11-08-workspace-folders-hero-entry.md) (Chinese) — An incremental Workspace Folders entry on the New Session hero row: a `conversation.hero.options` registration, the adjacent selectors' geometry without a chevron, and a `≤560px` viewport icon-only degrade; the sidebar entry remains. Completed 2026-11-08 and passed the full gate, shipping in `v0.1.17`; decision: [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md).
 
 - [2026-11-05-root-authorization-security-fixes.md](./completed/2026-11-05-root-authorization-security-fixes.md) (Chinese) — Completed bounded root-authorization fixes: BYP-02, MRW-01, protected-directory registration, and required shared mode. Excluded work remains out of scope; evidence and release status live in the [progress ledger](./active/2026-09-12-multi-root-workspace.md#进度总账).

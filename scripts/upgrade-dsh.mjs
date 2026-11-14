@@ -44,7 +44,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { npmOutput } from './lib/npm-cli.mjs'
 import { cordisPin, ecosystemPin } from './lib/cordis-pin.mjs'
-import { AUTO_REVIEW_DEVELOPMENT_PACKAGES, autoReviewRelease } from './lib/auto-review-development.mjs'
+import { AUTO_REVIEW_BASELINES, AUTO_REVIEW_CONTRACT_DATA } from './lib/auto-review-development.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MANIFEST = join(REPO_ROOT, 'package.json')
@@ -152,10 +152,17 @@ function repointManifest(version, cordisVersion, pins) {
   const source = readFileSync(MANIFEST, 'utf8')
   const manifest = JSON.parse(source)
   const changed = []
-  const forkRelease = autoReviewRelease(readFileSync(join(REPO_ROOT, 'src/compat/auto-review-contract.ts'), 'utf8'))
-  for (const name of AUTO_REVIEW_DEVELOPMENT_PACKAGES) {
-    if (version === forkRelease) manifest.devDependencies[name] = version
-    else delete manifest.devDependencies[name]
+  // The optional Auto Review fork keeps one development-package set per frozen
+  // source baseline. A lane installs only its own baseline's set: several of
+  // these packages do not exist in older releases, and one manifest cannot hold
+  // two exact versions of the same package.
+  const forkBaseline = AUTO_REVIEW_CONTRACT_DATA.baselineOf(version)
+  const activePackages = forkBaseline === undefined ? [] : AUTO_REVIEW_BASELINES[forkBaseline].developmentPackages
+  for (const baseline of Object.values(AUTO_REVIEW_BASELINES)) {
+    for (const name of baseline.developmentPackages) {
+      if (activePackages.includes(name)) manifest.devDependencies[name] = version
+      else delete manifest.devDependencies[name]
+    }
   }
   for (const name of Object.keys(manifest.devDependencies ?? {})) {
     if (!isDshPackage(name)) continue

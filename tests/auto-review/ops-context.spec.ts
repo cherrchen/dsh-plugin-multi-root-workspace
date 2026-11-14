@@ -16,6 +16,7 @@ import { mountRegistryStack } from '../support/registry-stack.ts'
 import { MultiRootOpsCompatibility } from '../../src/ops-compatibility.ts'
 import { createFixtureWorkspace } from '../support/temp-workspace.ts'
 import { installOpsSetting } from '../support/ops-settings.ts'
+import { executeTool, installToolExecutor } from '../support/tool-executor.ts'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { vi.restoreAllMocks(); while (cleanup.length) await cleanup.pop()!() })
@@ -48,7 +49,9 @@ async function world(enabled = true) {
   await ctx.plugin(WorkingDirectory)
   await ctx.plugin(Instructions, {})
   await ctx.plugin(ReviewContextService)
-  await ctx.plugin(Tools, { mode: 'native' })
+  await ctx.plugin(Tools, {})
+  // 0.2.2 dispatches through a mounted executor; earlier releases execute natively.
+  await installToolExecutor(ctx)
   const session = ctx.sessions.create(SessionId('ops-review-session'), { meta: { cwd: f.workspace } })
   const agent = { id: session.id, session, ctx, options: {}, inject() {} } as unknown as Agent
   const outside = f.outside
@@ -78,7 +81,7 @@ async function world(enabled = true) {
   const run = async (name: string, args: unknown) => {
     const id = ToolCallId(`call-${++n}`)
     session.append('tool/call', { turn: n, step: 1, callId: id, name, arguments: JSON.stringify(args) })
-    const result = await ctx.tools.execute({ agent, callId: id, name, arguments: args, signal: new AbortController().signal })
+    const result = await executeTool(ctx, { callId: id, name, args, agent, signal: new AbortController().signal })
     session.append('tool/result', { turn: n, step: 1, message: { source: { kind: 'tool', callId: id }, content: [{ type: 'tool-result', toolCallId: id, content: [], isError: result.isError === true }] } }, { surfaceOp: 'append' })
     return result as { isError?: boolean; value?: unknown }
   }

@@ -3,13 +3,17 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { packTarball, readTarGz } from './check-pack.mjs'
 import { autoReviewBattery } from './lib/auto-review-battery.mjs'
+import { AUTO_REVIEW_CONTRACT_DATA } from './lib/auto-review-development.mjs'
 import { bootProfile, composeProfile } from './lib/profile-boot.mjs'
 import { removeBehaviorHome, removeScratchTree } from './lib/smoke-cleanup.mjs'
 import { loadAppBoot, loadRuntimeModule, resolveScratchHome, installPluginProfile, ensureProfileCopyImport, runtimeRequire } from './lib/dsh-runtime.mjs'
-if (JSON.parse(readFileSync(runtimeRequire().resolve('@deepseek-ai/dsh/package.json'),'utf8')).version !== '0.2.1-rc.2') {
-  console.log('[auto-review] skipped: optional integration targets only 0.2.1-rc.2; ordinary gates remain active')
+const installedRelease = JSON.parse(readFileSync(runtimeRequire().resolve('@deepseek-ai/dsh/package.json'),'utf8')).version
+const installedBaseline = AUTO_REVIEW_CONTRACT_DATA.baselineOf(installedRelease)
+if (installedBaseline === undefined) {
+  console.log(`[auto-review] skipped: DSH ${installedRelease} is not a joint Auto Review release; ordinary gates remain active`)
   process.exit(0)
 }
+console.log(`[auto-review] joint baseline ${installedBaseline} on DSH ${installedRelease}`)
 const app = await loadAppBoot()
 const home = resolveScratchHome(`auto-review-${process.pid}`)
 mkdirSync(home, { recursive: true })
@@ -17,7 +21,7 @@ const packed = process.env.DSH_AUTO_REVIEW_PACKED === '1'
 const pack = packed ? packTarball() : undefined
 if (pack) {
   const members = readTarGz(pack.tarball)
-  for (const file of ['package/lib/auto-review.js','package/lib/types/auto-review/entry.d.ts','package/src/auto-review/LICENSE','package/src/auto-review/FORK.md']) assert.ok(members.has(file), `missing ${file}`)
+  for (const file of ['package/lib/auto-review.js','package/lib/auto-review-legacy.js','package/lib/auto-review-current.js','package/lib/types/auto-review/entry.d.ts','package/src/auto-review/LICENSE','package/src/auto-review/FORK.md']) assert.ok(members.has(file), `missing ${file}`)
   assert.ok(!members.has('package/configure.mjs'))
 }
 const official = '@deepseek-ai/dsh-experimental-auto-review'

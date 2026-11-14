@@ -1,16 +1,17 @@
---- upstream.ts
-+++ fork.ts
-@@ -8,6 +8,9 @@
+--- upstream.ts	2026-11-14 12:21:48
++++ fork.ts	2026-11-14 13:01:03
+@@ -8,6 +8,10 @@
   * @module @deepseek-ai/dsh-experimental-auto-review
   */
  
-+import { assertForkPackages } from '../compat/auto-review-packages.ts'
-+import { partitionInstructions } from './context.ts'
-+import type { ReviewContext } from '../review-context.ts'
++import { requireAutoReviewRelease } from '../../compat/auto-review-contract.ts'
++import { assertForkPackages } from '../../compat/auto-review-packages.ts'
++import { partitionInstructions } from '../partition.ts'
++import type { ReviewContext } from '../../review-context.ts'
  import type {} from '@deepseek-ai/dsh-working-directory'
  import type { Context } from '@deepseek-ai/cordis'
  import type { Agent } from '@deepseek-ai/dsh-agent'
-@@ -103,6 +106,7 @@
+@@ -103,6 +107,7 @@
    readonly provider: string
    readonly model: string
    readonly cwd: string
@@ -18,7 +19,7 @@
    readonly projectInstructions: readonly HistoricalUserMessage[]
    readonly history: readonly HistoricalEntry[]
    readonly action: PendingAction
-@@ -122,9 +126,9 @@
+@@ -122,9 +127,9 @@
  }
  
  /** Cordis plugin name used by loader diagnostics. */
@@ -30,7 +31,7 @@
  
  /** Return JSON text for one immutable logged value. */
  function json(value: unknown): string {
-@@ -359,7 +363,7 @@
+@@ -359,7 +364,7 @@
   * @param exec - immutable pending execution.
   * @returns the exact route and four data sections paired with {@link REVIEW_POLICY}.
   */
@@ -39,7 +40,7 @@
    const { session } = agent
    // The reviewer's risk inputs are the whole action history: earlier native calls
    // and PTC starts carry the authorizations and duplicate identities this call is
-@@ -425,12 +429,16 @@
+@@ -425,12 +430,16 @@
        if (isProjectInstruction(event.data.source)) {
          const content = event.data.content
          if (content.length > 0) {
@@ -58,7 +59,7 @@
          }
        } else {
          history.push(...filteredUserEntries(
-@@ -513,6 +521,7 @@
+@@ -513,6 +522,7 @@
      provider: header.config.provider,
      model: header.config.model,
      cwd,
@@ -66,7 +67,7 @@
      projectInstructions,
      history,
      action,
-@@ -521,13 +530,26 @@
+@@ -521,13 +531,26 @@
  
  /** Render the four data sections paired with the fixed policy section. */
  function reviewUserText(snapshot: ReviewSnapshot): string {
@@ -96,7 +97,7 @@
      'PENDING_ACTION',
      json(snapshot.action),
    ].join('\n\n')
-@@ -617,9 +639,13 @@
+@@ -617,9 +640,13 @@
    agent: Agent,
    exec: ToolExecution,
    signal: AbortSignal,
@@ -112,7 +113,7 @@
    // This review prompt is sent only through ctx.llm.stream and never enters a Session log.
    const options: GenerateOptions = deepFreeze({
      provider: snapshot.provider,
-@@ -632,7 +658,9 @@
+@@ -632,7 +659,9 @@
      temperature: 0,
      signal,
    })
@@ -123,11 +124,11 @@
  }
  
  /** Materialize the fixed model-facing final Auto denial plus optional UI detail. */
-@@ -674,11 +702,42 @@
+@@ -674,12 +703,43 @@
  
  /** Install the Auto preset and its prepended per-call review gate. */
  export function apply(ctx: Context): void {
-+  assertForkPackages()
++  assertForkPackages(requireAutoReviewRelease(ctx.multiRootCompat.release))
 +  ctx.multiRootReviewContext.assertCompatible()
 +  const reviewed = new WeakMap<ToolExecution['token'], ReviewContext>()
 +  // Check again after human approval and immediately before body dispatch.
@@ -137,7 +138,7 @@
    let accepting = true
    const active = new Set<Promise<void>>()
    const lifecycle = new AbortController()
-+
+ 
 +  ctx.on('tools/execute', async (exec, next) => {
 +    const context = reviewed.get(exec.token)
 +    if (context !== undefined) {
@@ -163,10 +164,11 @@
 +    }
 +    return next()
 +  }, { prepend: true })
- 
++
    ctx.effect(function* () {
      const stopListener = ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
-@@ -703,13 +762,15 @@
+       const agent = exec.agent
+@@ -703,13 +763,15 @@
          )
          if (isAborted(lifecycle.signal)) return { kind: 'cancel' }
          if (!review.ok) return failed(exec, review.error)

@@ -14,7 +14,11 @@ export async function autoReviewBattery(ctx, label) {
     await ctx.multiRootRegistry.add(primary,{path:ro,access:'read-only'})
     const {LlmAdapter,ToolCallId,createMessage}=await loadRuntimeModule('@deepseek-ai/dsh-llm')
     const {SessionId}=await loadRuntimeModule('@deepseek-ai/dsh-session')
-    const {defineContentToolFixture}=await loadRuntimeModule('@deepseek-ai/dsh-tools')
+    // 0.2.2 moved the fixture helper into the repository's tool testkit; earlier
+    // releases ship it on `dsh-tools` itself. Probe the module surface.
+    const toolsModule=await loadRuntimeModule('@deepseek-ai/dsh-tools')
+    const defineContentToolFixture=toolsModule.defineContentToolFixture
+      ?? (await import('@deepseek-ai/dsh-tool-testkit')).defineContentToolFixture
     const requests=[]
     class Scripted extends LlmAdapter {
       async *stream(options) {
@@ -24,6 +28,10 @@ export async function autoReviewBattery(ctx, label) {
       }
     }
     ctx.llm.registerAdapter(['multi-root-review-smoke'],new Scripted())
+    // 0.2.2 moved dispatch out of `dsh-tools` into executors: the composed
+    // profile already owns one, so this only probes which `execute` shape the
+    // installed `ctx.tools` speaks.
+    const batchTools = typeof ctx.tools.setExecutor === 'function'
     ctx.tools.register(defineContentToolFixture({name:'review_smoke_write',description:'Write a local fixture file',parameters:{file_path:{type:'string'}},async execute(args,exec){
       await ctx.fs.writeText(await ctx.fs.resolve(args.file_path),'new',undefined,exec.signal,ctx.sandboxPolicy.resolve({session:exec.agent.session}))
       return [{type:'text',text:'written'}]
@@ -38,14 +46,19 @@ export async function autoReviewBattery(ctx, label) {
       session.append('step/start',{turn,step:1})
       session.append('assistant/message',{turn,step:1,stream:[],message:createMessage({role:'assistant',source:{kind:'model',provider:'multi-root-review-smoke',model:'scripted'},content:[{type:'tool-call',id,name,arguments:JSON.stringify(args)}]})},{surfaceOp:'append'})
       session.append('tool/call',{turn,step:1,callId:id,name,arguments:JSON.stringify(args)})
-      return ctx.tools.execute({callId:id,name,arguments:args,agent,signal:new AbortController().signal})
+      const signal=new AbortController().signal
+      if (!batchTools) return ctx.tools.execute({callId:id,name,arguments:args,agent,signal})
+      const batch=await ctx.tools.execute({calls:[{type:'tool-call',id,name,arguments:JSON.stringify(args)}],agent,signal})
+      return batch.results[0].result
     }
     assert.equal((await call(join(rw,'ok'))).isError,false)
     writeFileSync(join(ro,'keep'),'unchanged')
     assert.equal((await call(join(ro,'keep'))).isError,true)
     assert.equal(readFileSync(join(ro,'keep'),'utf8'),'unchanged')
     assert.equal(requests.length,2,'one reviewer request per call')
-    const text=requests[0].messages[0].content[0].text
+    // The 0.2.1 generation renders one text block; the 0.2.2 generation renders
+    // one message per retained item. Concatenating every text block covers both.
+    const text=requests[0].messages.flatMap(message=>message.content).flatMap(block=>block.type==='text'?[block.text]:[]).join('\n')
     // Paths reach the reviewer through JSON.stringify: a Windows `D:\…` is
     // escaped `D:\\…` and canonical roots may carry a `\\?\` prefix, so match
     // the escaped spelling (without quotes it stays a substring of both).

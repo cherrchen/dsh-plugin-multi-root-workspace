@@ -55,6 +55,8 @@ active：
 
 completed：
 
+- [2026-11-14-auto-review-multi-baseline.md](./completed/2026-11-14-auto-review-multi-baseline.md) — Auto Review 联合合同从单一 `0.2.1-rc.2` 扩展为两个源码基线的 9 个精确发布：按基线保存逐字节 fork、按车道动态加载、按编译 pin 做实现类型检查、跨代测试/冒烟/CI 门禁与文档收尾；已完成并通过本机与基线 A 车道验收，决策见 [ADR-0040](../decisions/ADR-0040-auto-review-multi-baseline.md)，证据见[路线账本](./active/2026-09-12-multi-root-workspace.md#auto-review-多基线适配2026-11-14)。
+
 - [2026-11-08-workspace-folders-hero-entry.md](./completed/2026-11-08-workspace-folders-hero-entry.md) — 新会话 Hero 行的 Workspace Folders 增量入口：`conversation.hero.options` 注册、与相邻选择器同几何但无 chevron、`≤560px` 视口图标降级；侧栏入口保留。已完成（2026-11-08）并通过完整门禁，随 `v0.1.17` 发版；决策见 [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)。
 
 - [2026-11-05-root-authorization-security-fixes.md](./completed/2026-11-05-root-authorization-security-fixes.md) — 根授权安全修复限定范围完成：BYP-02、MRW-01、受保护目录登记边界与共享模式必填；排除项保留，实施证据和发布状态见[进度总账](./active/2026-09-12-multi-root-workspace.md#进度总账)。
