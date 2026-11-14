@@ -13,6 +13,11 @@ function assertImplementation(value: unknown): asserts value is Plugin.Object {
   if (typeof value !== 'object' || value === null || !('apply' in value) || typeof value.apply !== 'function') {
     throw new Error('multi-root Auto Review: the bundled implementation is incomplete')
   }
+  // Missing `inject` is not a load error: the plugin would start and then fail
+  // on its first host-service read. Validate the declaration here instead.
+  if (!('inject' in value) || !Array.isArray(value.inject)) {
+    throw new Error('multi-root Auto Review: the bundled implementation declares no injected services')
+  }
 }
 
 /**
