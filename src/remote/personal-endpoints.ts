@@ -87,6 +87,32 @@ function findEnvironment(config: PersonalConfig, environmentId: string): Persona
 }
 
 /**
+ * Resolve one ssh-config alias via `ssh -G` (relaxed parse, exactly as the
+ * manager resolves it at connect time) and prove the host key against the
+ * SAME user known_hosts files. Both the scan answer and the save-time check
+ * draw on this single resolution so they can never disagree.
+ */
+async function sshConfigIdentity(
+  exec: ExecFile, alias: string,
+): Promise<{ readonly endpoint: { readonly hostname: string; readonly port: number; readonly user: string }; readonly fingerprint: string }> {
+  const { hostKeyFingerprint, parseSshConfig } = await import('./ssh-environment.ts')
+  const execAdapter = async (file: string, args: readonly string[], input?: string) =>
+    await exec(file, args, { ...(input === undefined ? {} : { input }) })
+  let identity
+  try {
+    identity = parseSshConfig((await execAdapter('ssh', ['-G', alias])).stdout, { relaxed: true })
+  } catch (error) {
+    throw new RemoteAdmissionError('host-identity-unverifiable', error instanceof Error ? error.message : String(error))
+  }
+  const files = [...identity.knownHostsFiles, ...identity.globalKnownHostsFiles]
+  const { keys, fingerprint } = await hostKeyFingerprint(identity.lookupHost, files, execAdapter)
+  if (keys !== 1 || fingerprint === undefined) {
+    throw new RemoteAdmissionError('host-identity-unverifiable', `host "${identity.lookupHost}" resolves ${keys} usable known_hosts keys, exactly one required`)
+  }
+  return { endpoint: { hostname: identity.hostname, port: Number.parseInt(identity.port, 10) || 22, user: identity.user }, fingerprint }
+}
+
+/**
  * Serve one personal endpoint. Callers have already validated the payload.
  * @returns the answer value (`sshState`, scan keys, or a connection test).
  */
@@ -127,7 +153,14 @@ async function runPersonalEndpoint(
       return await after()
     }
     case 'sshHostKeyScan': {
-      const { token, keys } = await activeScans.scan(call.hostname, call.port)
+      if (call.alias !== undefined) {
+        // Alias scan: the fingerprint lives in the user's own known_hosts,
+        // so no network probe and no token — save re-runs the same
+        // resolution and compares the confirmed fingerprint.
+        const resolved = await sshConfigIdentity(exec, call.alias)
+        return { token: '', keys: [{ type: 'known-hosts', fingerprint: resolved.fingerprint }], endpoint: resolved.endpoint }
+      }
+      const { token, keys } = await activeScans.scan(call.hostname!, call.port)
       return { token, keys: keys.map(({ type, fingerprint }) => ({ type, fingerprint })) }
     }
     case 'sshEnvironmentSave': {
@@ -135,22 +168,10 @@ async function runPersonalEndpoint(
       let hostKey: string
       if (draft.credential.kind === 'ssh-config') {
         // R4: never trust the draft's endpoint — resolve the user's own alias
-        // with ssh -G (relaxed parse) exactly as the manager does at connect
-        // time, then check the fingerprint against the SAME known_hosts set.
-        const { hostKeyFingerprint, parseSshConfig } = await import('./ssh-environment.ts')
-        const execAdapter = async (file: string, args: readonly string[], input?: string) =>
-          await exec(file, args, { ...(input === undefined ? {} : { input }) })
-        let identity
-        try {
-          identity = parseSshConfig((await execAdapter('ssh', ['-G', draft.credential.alias])).stdout, { relaxed: true })
-        } catch (error) {
-          throw new RemoteAdmissionError('host-identity-unverifiable', error instanceof Error ? error.message : String(error))
-        }
-        draft.endpoint = { hostname: identity.hostname, port: Number.parseInt(identity.port, 10) || 22, user: identity.user }
-        const files = [...identity.knownHostsFiles, ...identity.globalKnownHostsFiles]
-        const { keys, fingerprint } = await hostKeyFingerprint(identity.lookupHost, files, execAdapter)
-        if (keys !== 1) throw new RemoteAdmissionError('host-identity-unverifiable', `host "${identity.lookupHost}" resolves ${keys} known_hosts keys, exactly one required`)
-        if (fingerprint !== call.fingerprint) {
+        // exactly as the scan did, then compare the confirmed fingerprint.
+        const resolved = await sshConfigIdentity(exec, draft.credential.alias)
+        draft.endpoint = resolved.endpoint
+        if (resolved.fingerprint !== call.fingerprint) {
           throw new RemoteAdmissionError('host-key-mismatch', 'the confirmed fingerprint does not match the user known_hosts')
         }
         hostKey = call.fingerprint

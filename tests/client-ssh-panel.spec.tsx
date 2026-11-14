@@ -100,8 +100,8 @@ function fakeSsh(initial: SshStateView): SshClient & {
       await record('credentialPassword', [sessionId, label, password], state),
     credentialRemove: async (sessionId: string, id: string) =>
       await record('credentialRemove', [sessionId, id], state),
-    hostKeyScan: async (sessionId: string, hostname: string, port: number) =>
-      await record('hostKeyScan', [sessionId, hostname, port], {
+    hostKeyScan: async (sessionId: string, target: { hostname?: string; port?: number; alias?: string }) =>
+      await record('hostKeyScan', [sessionId, target], {
         token: 'scan-token-1',
         keys: [{ type: 'ssh-ed25519', fingerprint: 'SHA256:scanned' }],
       }),
@@ -390,7 +390,7 @@ describe('the SSH management dialog', () => {
     fireEvent.change(within(dialog).getByLabelText('ssh.field.workspace'), { target: { value: '/srv/ci' } })
     fireEvent.click(within(dialog).getByLabelText('ssh.field.allowTransfer'))
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
-    expect(await callsOf(ssh, 'hostKeyScan')).toEqual([['session-1', 'build.internal', 22]])
+    expect(await callsOf(ssh, 'hostKeyScan')).toEqual([['session-1', { port: 22, alias: 'build' }]])
     await within(dialog).findByRole('radio', { name: /SHA256:scanned/ })
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.save' }))
     const saves = await callsOf(ssh, 'environmentSave')
@@ -401,6 +401,26 @@ describe('the SSH management dialog', () => {
       credential: { kind: 'ssh-config', alias: 'build' },
       workspace: '/srv/ci',
     }, 'SHA256:scanned', undefined]])
+  })
+
+  it('fills the resolved endpoint fields from an alias scan', async () => {
+    const ssh = fakeSsh(sshState())
+    ssh.hostKeyScan = async (_sessionId: string, _target: { hostname?: string; port?: number; alias?: string }) => {
+      return {
+        token: '',
+        keys: [{ type: 'known-hosts', fingerprint: 'SHA256:alias-fp' }],
+        endpoint: { hostname: 'prod.internal', port: 2222, user: 'deploy' },
+      }
+    }
+    const dialog = await withDialog({ ssh }, 'add')
+    await within(dialog).findByText('ssh.add.stepTarget')
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'ssh.field.alias' }))
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'ssh.field.alias' }), { target: { value: 'prod' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
+    await within(dialog).findByRole('radio', { name: /SHA256:alias-fp/ })
+    expect((within(dialog).getByLabelText('ssh.field.hostname') as HTMLInputElement).value).toBe('prod.internal')
+    expect((within(dialog).getByLabelText('ssh.field.port') as HTMLInputElement).value).toBe('2222')
+    expect((within(dialog).getByLabelText('ssh.field.user') as HTMLInputElement).value).toBe('deploy')
   })
 
   it('materializes the documented exec and transfer defaults when the toggles are on', async () => {

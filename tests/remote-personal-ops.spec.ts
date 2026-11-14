@@ -111,6 +111,34 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       { exec })).rejects.toMatchObject({ code: 'host-key-mismatch' })
   })
 
+  it('an alias scan returns the known_hosts fingerprint and the resolved endpoint', async () => {
+    const { registry, personalPath } = world()
+    writeConfig(personalPath, CONFIG([]))
+    const exec: ExecFile = async (file, args) => {
+      if (args[0] === '-G') {
+        return { stdout: 'user remoteuser\nhostname real.internal\nport 2222\nuserknownhostsfile /u/.ssh/known_hosts\nglobalknownhostsfile /dev/null\n', stderr: '' }
+      }
+      if (file === 'ssh-keygen' && args[0] === '-F') return { stdout: '[real.internal]:2222 ssh-ed25519 AAAAKEY\n', stderr: '' }
+      if (file === 'ssh-keygen' && args[0] === '-lf') return { stdout: `256 ${FP_OK} (ED25519)\n`, stderr: '' }
+      return { stdout: '', stderr: '' }
+    }
+    const scan = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
+      { endpoint: 'sshHostKeyScan', sessionId: 's', alias: 'devbox', port: 22 }, { exec }) as
+      { token: string; keys: { type: string; fingerprint: string }[]; endpoint: { hostname: string; port: number; user: string } }
+    expect(scan.keys).toEqual([{ type: 'known-hosts', fingerprint: FP_OK }])
+    expect(scan.endpoint).toEqual({ hostname: 'real.internal', port: 2222, user: 'remoteuser' })
+    // A scan whose alias resolves zero usable known_hosts keys is refused.
+    const execNoKey: ExecFile = async (file, args) => {
+      if (args[0] === '-G') {
+        return { stdout: 'user u\nhostname h\nport 22\nuserknownhostsfile /u/.ssh/known_hosts\nglobalknownhostsfile /dev/null\n', stderr: '' }
+      }
+      return { stdout: '', stderr: '' }
+    }
+    await expect(handlePersonalEndpoint(undefined as never as Context, registry, '/w',
+      { endpoint: 'sshHostKeyScan', sessionId: 's', alias: 'devbox', port: 22 }, { exec: execNoKey }))
+      .rejects.toMatchObject({ code: 'host-identity-unverifiable' })
+  })
+
   it('R5: saving over a changed host/account/credential drops the stored helper', async () => {
     const { registry, personalPath } = world()
     writeConfig(personalPath, CONFIG())

@@ -76,7 +76,17 @@ const requestSchemas = {
   sshCredentialImport: z.object({ sessionId, label, privateKey: z.string().min(1).max(32_768), passphrase: z.string().max(1024).optional() }).strict(),
   sshCredentialPassword: z.object({ sessionId, label, password: z.string().min(1).max(4096) }).strict(),
   sshCredentialRemove: z.object({ sessionId, id: z.string().min(1) }).strict(),
-  sshHostKeyScan: z.object({ sessionId, hostname: z.string().min(1).max(253), port: z.number().int().min(1).max(65535) }).strict(),
+  // An alias scan resolves `ssh -G <alias>` on the host instead of touching
+  // the network: the answer carries the user's own known_hosts fingerprint
+  // plus the resolved endpoint, which is exactly what `sshEnvironmentSave`
+  // re-verifies for an ssh-config environment. Hostname may be omitted when
+  // the alias names the target.
+  sshHostKeyScan: z.object({
+    sessionId,
+    hostname: z.string().min(1).max(253).optional(),
+    port: z.number().int().min(1).max(65535),
+    alias: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/).optional(),
+  }).strict().refine(value => value.alias !== undefined || value.hostname !== undefined, { message: 'hostname or alias is required' }),
   sshEnvironmentSave: z.object({
     sessionId, revision, environment: environmentDraftSchema,
     hostKeyToken: z.string().min(1).optional(), fingerprint: z.string().regex(/^SHA256:[A-Za-z0-9+/=]+$/),
@@ -233,7 +243,13 @@ const sshStateSchema = z.object({
 })
 
 const hostKeySchema = z.object({ type: z.string(), fingerprint: z.string() })
-const sshScanResultSchema = z.object({ token: z.string(), keys: z.array(hostKeySchema) })
+const sshScanResultSchema = z.object({
+  token: z.string(),
+  keys: z.array(hostKeySchema),
+  // Set on alias scans: the `ssh -G` resolved endpoint the fingerprint was
+  // proven against, so the form can show the real target.
+  endpoint: z.object({ hostname: z.string(), port: z.number().int(), user: z.string() }).optional(),
+})
 const connectionTestSchema = z.object({
   platform: z.string(), nodePath: z.string().optional(), nodeVersion: z.string().optional(),
 })
