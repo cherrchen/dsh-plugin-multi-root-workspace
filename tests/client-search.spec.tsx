@@ -246,17 +246,26 @@ describe('the additional-root search pane', () => {
   })
 
   it('aborts the previous search when a newer query arrives', async () => {
-    const controllers: AbortSignal[] = []
+    // Record each request's signal state when it STARTS: the effect cleanup
+    // aborts a request that already settled too, so asserting on the signal
+    // after settle would race the 5ms answer.
+    const abortedAtStart: boolean[] = []
     const harness = mount({
-      answer: request => new Promise((resolve) => { setTimeout(() => { resolve({ root: ROOT, matches: matchesFor(request.query), truncated: false, incomplete: false }) }, 5) }),
+      answer: async () => {
+        const signal = harness.run.mock.calls.at(-1)![2] as AbortSignal
+        abortedAtStart.push(signal.aborted)
+        await new Promise<void>((resolve) => { setTimeout(resolve, 5) })
+        return { root: ROOT, matches: [], truncated: false, incomplete: false }
+      },
     })
     const input = await openBar(harness)
     fireEvent.change(input, { target: { value: 'a' } })
     fireEvent.change(input, { target: { value: 'ab' } })
-    await waitFor(() => { expect(harness.runs.length).toBeGreaterThanOrEqual(2) })
-    controllers.push(...harness.runs.map((_, index) => harness.run.mock.calls[index]![2]))
-    expect(controllers[0]?.aborted).toBe(true)
-    expect(controllers.at(-1)?.aborted).toBe(false)
+    await waitFor(() => { expect(harness.runs.length).toBe(2) })
+
+    expect(abortedAtStart).toEqual([false, false])
+    const first = harness.run.mock.calls[0]![2] as AbortSignal
+    expect(first.aborted).toBe(true)
   })
 
   it('draws the listed tree again, hidden entries filtered, when the query is blank', async () => {
