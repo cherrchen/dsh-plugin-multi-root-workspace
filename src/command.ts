@@ -830,6 +830,7 @@ async function dispatchPanelRequest(
         return { ok: false, error: { code: 'panel/bad-request', message: parsedWorktree.message, details: {} } }
       }
       const call = parsedWorktree.value
+      panelSessionId = call.sessionId
       const worktrees = ctx.get('multiRootWorktrees')
       if (worktrees === undefined) {
         throw new WorktreeError('worktree/not-available', 'worktree root suggestions are not mounted in this composition')
@@ -872,6 +873,9 @@ async function dispatchPanelRequest(
       if (!parsedSsh.ok) {
         return { ok: false, error: { code: 'panel/bad-request', message: parsedSsh.message, details: {} } }
       }
+      // Record the session like the roots branch does, so a resume-race
+      // `session-not-found` can reclassify to `session-not-live` below.
+      panelSessionId = parsedSsh.value.sessionId
       const primaryRoot = resolvePanelPrimaryRoot(ctx, parsedSsh.value.sessionId)
       return { ok: true, value: await handlePersonalEndpoint(ctx, ctx.multiRootRegistry, primaryRoot, parsedSsh.value) }
     }
@@ -882,6 +886,7 @@ async function dispatchPanelRequest(
       }
       const registry = ctx.multiRootRegistry
       const { sessionId, environmentId, rootId } = parsedRemote.value
+      panelSessionId = sessionId
       const primaryRoot = resolvePanelPrimaryRoot(ctx, sessionId)
       if (endpoint !== 'remotes') {
         if (environmentId === undefined || rootId === undefined) {
