@@ -546,7 +546,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       setRemoteState({ view })
     } catch (error: unknown) {
       if (!mounted.current || epoch !== remoteEpoch.current) return
-      setRemoteState({ error: asPanelError(error) })
+      // Keep the last good view like `mutateRemote` does: a transient list
+      // failure must not blank the section or drop an open SSH dialog's
+      // status into a permanent "loading" state.
+      setRemoteState(previous => ({ ...previous, error: asPanelError(error) }))
     }
   }, [props.remotes, requestBase, props.sessionId])
 
