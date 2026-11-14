@@ -3,7 +3,7 @@
 > 状态：已完成（2026-11-14）。实现、测试与本地门禁已完成；Draft PR 与 CI 跟踪见 §P6 与 §7。
 >
 > 关联文档：`docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md`、`docs/decisions/ADR-0016-files-tab-native-tree-fork.md`、
-> `docs/decisions/ADR-0040-additional-root-workspace-search.md`、`docs/decisions/ADR-0041-additional-root-row-context-menus.md`、
+> `docs/decisions/ADR-0041-additional-root-workspace-search.md`、`docs/decisions/ADR-0042-additional-root-row-context-menus.md`、
 > `src/client/files-tree/FORK.md`、`docs/reference/dsh-0.2.2-migration.md`。
 
 ## Goal
@@ -232,8 +232,8 @@
 ### P5 文档与 ADR
 
 - 提交：`docs: additional-root files parity (ADR, README, FORK sync)`
-- 产物：`ADR-0040-additional-root-workspace-search.md`（端点/授权/兼容/边界/回滚）、
-  `ADR-0041-additional-root-row-context-menus.md`（转发/canOpen/绝对路径 target）、`docs/decisions/README.md` 索引、
+- 产物：`ADR-0041-additional-root-workspace-search.md`（端点/授权/兼容/边界/回滚）、
+  `ADR-0042-additional-root-row-context-menus.md`（转发/canOpen/绝对路径 target）、`docs/decisions/README.md` 索引、
   `docs/reference/dsh-0.2.2-migration.md` 补充、`README.md`/`README.en.md`（What/Why + Known Limitations + 结构）、
   `docs/architecture/multi-root-workspace.md`、`docs/requirements/multi-root-workspace.md`、
   `src/client/files-tree/FORK.md`（delta 与同步步骤）、`.agent/note/dsh-compat-contract.md`（+.en）结构边界、
@@ -284,7 +284,7 @@
 
 ## Documentation Impact
 
-- 新增 ADR-0040/0041 + 索引；`docs/reference/dsh-0.2.2-migration.md` 补充 alpha.3/rc.2 结构边界；
+- 新增 ADR-0041/0042 + 索引；`docs/reference/dsh-0.2.2-migration.md` 补充 alpha.3/rc.2 结构边界；
   `README.md`/`README.en.md`、`docs/architecture`、`docs/requirements`、`src/client/files-tree/FORK.md`、
   `.agent/note/dsh-compat-contract.md`（+.en）；进度总账与本计划归档。
 - CHANGELOG 留到该版本 release 准备提交。
@@ -306,8 +306,8 @@
 | P1 | 已完成 | `0d865a0 feat(client)` | `vitest run tests/client-files.spec.tsx tests/client-switcher.spec.tsx tests/client-navigator.spec.tsx` → 68 passed（后随 P3 扩到 70）；`pnpm lint` 0；`pnpm typecheck` 0；`pnpm build` 绿；`pnpm compat:check` 绿。新增断言：file/directory target 携带绝对路径与会话、无 seat 时 DOM 不变、kind 无贡献不绑定、Factory 输入透传、预览 retarget target |
 | P2 | 已完成 | `1ca4b8b feat(host)` | `vitest run tests/command.spec.ts tests/workspace-routing.spec.ts tests/contract.spec.ts` → 73+28+9 passed（授权矩阵：未登记/被扣留/redirect/authority-unavailable 拒绝，单次主根准入，内部 primaryRoot 标记不出 wire，旧 host 无 search → search-unavailable）；lint/typecheck/build/compat 绿；`pnpm kernel:probe` 在本沙箱报告无可用内核 runner（预期） |
 | P3 | 已完成 | `6b364e3 feat(client search)` | 客户端套件 255 passed：`client-search.spec.tsx` 12（payload/abort/结果/高亮/笔记/失败重试/偏好/键盘/重挂载/隐藏过滤/绝对地址打开）、`client-search-rules` 97、`client-search-tree` 10、`client-search-preferences` 22、`client-styles` 35、`client-switcher` 31、`client-navigator` 24、`client-files` 17、`client-bundle` 10；lint/typecheck/build/pack:check 绿 |
-| P4 | 已完成 | （并入 P1/P3 提交） | 预览 retarget 的右键 target 已有 spec（`client-navigator.spec.tsx`）；`src/client/styles.ts` 仍隐藏原生搜索条/开关（rules 见 FORK.md）；预览无搜索是文档化边界（ADR-0040 §D4、FORK.md） |
-| P5 | 已完成 | `docs` 提交（PR 分支） | ADR-0040/0041 + decisions 索引；FORK.md（新 delta、搜索同步义务、同步步骤 8–10）；README 双语、architecture、requirements、`docs/reference/dsh-0.2.2-migration.md`、`.agent/note/dsh-compat-contract`（双）+ 进度总账；`pnpm docs:check` 绿 |
+| P4 | 已完成 | （并入 P1/P3 提交） | 预览 retarget 的右键 target 已有 spec（`client-navigator.spec.tsx`）；`src/client/styles.ts` 仍隐藏原生搜索条/开关（rules 见 FORK.md）；预览无搜索是文档化边界（ADR-0041 §D4、FORK.md） |
+| P5 | 已完成 | `docs` 提交（PR 分支） | ADR-0041/0042 + decisions 索引；FORK.md（新 delta、搜索同步义务、同步步骤 8–10）；README 双语、architecture、requirements、`docs/reference/dsh-0.2.2-migration.md`、`.agent/note/dsh-compat-contract`（双）+ 进度总账；`pnpm docs:check` 绿 |
 | P6 | 进行中 | — | 本地：lint ✅ / typecheck ✅ / build ✅ / compat:check ✅ / docs:check ✅ / pack:check ✅ / smoke:compose 56 passed / smoke:behavior 96 passed + 8 env-skip / smoke:journey 85 passed + 2 env-skip；`pnpm test` 1590 passed，17 failed 均为 authority/lease/follower 家族——**同一沙箱内基线提交 `8c09c7b` 逐项复现**（`smoke:behavior` 同一原因：Host 自身在沙箱内，shared Registry native IPC 拒绝 sandboxed peer），与本次改动无关，CI 拥有该信号。Draft PR 打开后跟踪 releases/verify/gate 直至全绿 |
 
 ### 已知本地环境限制

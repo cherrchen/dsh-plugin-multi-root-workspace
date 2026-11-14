@@ -15,9 +15,9 @@ which is always the primary root and cannot be re-pointed.
   this plugin adapts its listing state to that public Factory, so the host owns
   the row rendering and accessories; the legacy rows are its fallback. The
   host's context-menu integration is consumed through the root-provided
-  `useContextMenu` prop rather than forked (ADR-0041). From `0.2.2-rc.2` the
+  `useContextMenu` prop rather than forked (ADR-0042). From `0.2.2-rc.2` the
   fork also carries its own workspace search surface for additional roots
-  (ADR-0040): a toggle in the switcher header plus a bar/results/settings view
+  (ADR-0041): a toggle in the switcher header plus a bar/results/settings view
   that draws results with the same tree code. The alpha.3 preview-side
   navigator (`sidebar.files.navigator` inside the document preview) keeps a
   tree rooted at the session `cwd` only; `navigator.tsx` retargets its body
@@ -188,7 +188,7 @@ upstream binds inside it arrives as a prop instead:
   `menu` seat into the Factory input's `rowTriggerProps` (and spreads the same
   handlers on the legacy rows). The target is `{ kind, value: { sessionId,
   path: <absolute path> } }`: a workspace-relative path would resolve against
-  the primary root in every host contribution (ADR-0041).
+  the primary root in every host contribution (ADR-0042).
 - **Viewer verdicts** (`0.2.2-alpha.3+`): the Factory input's `canOpen` is
   supplied from `ctx.sidebarRightTabs.candidates`, re-read whenever the
   registry notifies; `TreeView` forwards it, the legacy rows keep every file
