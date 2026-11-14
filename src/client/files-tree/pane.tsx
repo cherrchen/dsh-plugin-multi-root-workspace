@@ -38,7 +38,9 @@ import {
   type ExclusionRule, type RuleInvalidReason, type WorkspaceSearchPreferences,
 } from './search-rules.ts'
 import { buildSearchTree } from './search-tree.ts'
-import type { SearchFailureInfo, SearchPaneState, SearchPaneStates, SearchResultView } from './search-state.ts'
+import {
+  searchRequestKey, type SearchFailureInfo, type SearchPaneState, type SearchPaneStates, type SearchResultView,
+} from './search-state.ts'
 import type { FilesTabState } from './store.ts'
 import { TreeView } from './tree-view.tsx'
 
@@ -554,8 +556,27 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
   // and a preference change re-runs the same query with the new filters.
   // A new array per render would retrigger the effect below forever.
   const excludedPaths = useMemo(() => enabledPaths(preferences.rules), [preferences.rules])
+  const attempt = state?.attempt ?? 0
+  // The identity of the request this render would send. A settled answer whose
+  // identity matches is the SAME request, which is what lets a body remount
+  // (opening a file hides the body) reuse it instead of resetting the reader's
+  // expansion and offset with an identical replacement answer.
+  const requestKey = useMemo(() => searchRequestKey({
+    rootId,
+    query: trimmed,
+    excludedPaths,
+    includeHidden: preferences.showHidden,
+    respectGitignore: preferences.respectGitignore,
+    attempt,
+  }), [rootId, trimmed, excludedPaths, preferences.showHidden, preferences.respectGitignore, attempt])
+  const settledKey = state?.settledKey ?? ''
   useEffect(() => {
     if (store === undefined || run === undefined || trimmed === '') return
+    // Reuse the retained answer for an unchanged request: no request, no
+    // `searched` write, so expansion and scrollTop stay where the reader left
+    // them. A failed answer counts too — retrying is the button's explicit
+    // attempt bump, not an automatic loop every time the effect settles.
+    if (settledKey === requestKey) return
     const controller = new AbortController()
     store.searching(stateKey)
     void run(rootId, {
@@ -575,14 +596,14 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
         hiddenLeftOut: !preferences.showHidden,
         excluded: excludedPaths.length > 0,
         ignored: preferences.respectGitignore,
-      })
+      }, requestKey)
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return
-      store.searched(stateKey, { kind: 'failed', query: trimmed, failure: failureOf(error) })
+      store.searched(stateKey, { kind: 'failed', query: trimmed, failure: failureOf(error) }, requestKey)
     })
     return () => { controller.abort() }
-  }, [store, run, stateKey, rootId, trimmed, state?.attempt, preferences.rules, preferences.showHidden,
-    preferences.respectGitignore, excludedPaths])
+  }, [store, run, stateKey, requestKey, settledKey, rootId, trimmed, excludedPaths,
+    preferences.showHidden, preferences.respectGitignore])
   // The result body's offset: restored when the body mounts or a new result
   // lands, mirrored continuously so a remount returns where the reader was.
   useLayoutEffect(() => {
@@ -629,7 +650,14 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
           inputRef={inputRef}
           onQuery={value => { store?.setQuery(stateKey, value) }}
           onShowHidden={(value) => { search.preferences.update(root, { showHidden: value }) }}
-          onSettings={() => { setSettingsDraft(settings === undefined ? preferences.rules : undefined) }}
+          // The toggle is a close path too: while the panel is open the click
+          // must save the draft exactly like Escape or a blur does, otherwise
+          // the exclusion edits vanish (the panel's own mousedown guard keeps
+          // blur from committing them first).
+          onSettings={() => {
+            if (settings === undefined) { setSettingsDraft(preferences.rules); return }
+            closeSettings(settings, true)
+          }}
           settingsOpen={settings !== undefined}
           t={filesTree.t}
         />

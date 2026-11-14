@@ -69,13 +69,55 @@ export interface SearchPaneState {
   scrollTop: number
   /** How many times the same query was asked again after a failure. */
   attempt: number
+  /**
+   * The request identity the settled result answers, from {@link searchRequestKey}.
+   * A body remount reuses a settled answer whose identity matches, so the
+   * reader's expansion and offset are not reset by an identical re-search.
+   */
+  settledKey: string
 }
 
 /** Every `(tab, root)` search record. */
 export type SearchPaneStates = Readonly<Record<string, SearchPaneState>>
 
 /** The record before anything was typed. */
-const EMPTY: SearchPaneState = { barOpen: false, query: '', pending: false, result: undefined, expanded: [], scrollTop: 0, attempt: 0 }
+const EMPTY: SearchPaneState = {
+  barOpen: false, query: '', pending: false, result: undefined, expanded: [], scrollTop: 0, attempt: 0, settledKey: '',
+}
+
+/** Everything that makes one search request distinct from another. */
+export interface SearchRequestKeyInput {
+  /** The selected root's registry id. */
+  readonly rootId: string
+  /** The trimmed query. */
+  readonly query: string
+  /** The enabled exclusion rules, in order. */
+  readonly excludedPaths: readonly string[]
+  /** Whether hidden entries are included. */
+  readonly includeHidden: boolean
+  /** Whether ignore files are respected. */
+  readonly respectGitignore: boolean
+  /** The retry attempt, so asking the same query again is a new request. */
+  readonly attempt: number
+}
+
+/**
+ * One search request's identity: root, trimmed query, filters, and retry
+ * attempt. Two calls with the same identity are the same request, so an answer
+ * already settled for it may be reused instead of re-searched.
+ * @param input - the request fields.
+ * @returns the identity string.
+ */
+export function searchRequestKey(input: SearchRequestKeyInput): string {
+  return [
+    input.rootId,
+    input.query,
+    input.excludedPaths.join('\u0001'),
+    input.includeHidden ? '1' : '0',
+    input.respectGitignore ? '1' : '0',
+    String(input.attempt),
+  ].join('\u0000')
+}
 
 /**
  * The state key of one pane root.
@@ -122,8 +164,9 @@ export interface SearchPaneStore {
    * Record a settled search; a found result starts fully expanded at its top.
    * @param key - the record key.
    * @param result - what the search found, or why it failed.
+   * @param settledKey - the request identity this answer belongs to.
    */
-  searched(key: string, result: SearchResultView): void
+  searched(key: string, result: SearchResultView, settledKey: string): void
   /**
    * Open or collapse one directory of the result tree.
    * @param key - the record key.
@@ -165,17 +208,18 @@ export function createSearchPaneStore(): SearchPaneStore {
     barOpen: (key, open) => { write(key, { barOpen: open }) },
     setQuery: (key, query) => {
       write(key, query.trim() === ''
-        ? { query, pending: false, result: undefined, expanded: [], scrollTop: 0 }
-        : { query, pending: false })
+        ? { query, pending: false, result: undefined, expanded: [], scrollTop: 0, settledKey: '' }
+        : { query, pending: false, settledKey: '' })
     },
     searching: key => {
       const result = read(key).result
       write(key, { pending: true, ...(result?.kind === 'failed' ? { result: undefined } : {}) })
     },
-    searched: (key, result) => {
+    searched: (key, result, settledKey) => {
       write(key, {
         pending: false,
         result,
+        settledKey,
         ...(result.kind === 'found' ? { expanded: result.tree.expanded } : { expanded: [] }),
         scrollTop: 0,
       })
@@ -186,7 +230,7 @@ export function createSearchPaneStore(): SearchPaneStore {
     },
     scrolled: (key, scrollTop) => { write(key, { scrollTop }) },
     retry: key => {
-      write(key, { pending: true, result: undefined, expanded: [], scrollTop: 0, attempt: read(key).attempt + 1 })
+      write(key, { pending: true, result: undefined, expanded: [], scrollTop: 0, settledKey: '', attempt: read(key).attempt + 1 })
     },
     forget: key => {
       const { [key]: _dropped, ...rest } = snapshot.getSnapshot()

@@ -86,6 +86,8 @@ interface Harness {
   readonly store: ReturnType<typeof createSearchPaneStore>
   /** The addresses the surface was asked to open. */
   readonly onOpenFile: ReturnType<typeof vi.fn<(address: string) => void>>
+  /** The workspace preference book this pane reads and writes. */
+  readonly preferences: ReturnType<typeof createSearchPreferenceBook>
   /** The element a fresh mount draws (the same surface and stores). */
   readonly element: () => ReactElement
   readonly unmount: () => void
@@ -179,6 +181,7 @@ function mount(options: {
     pane: () => mounted.container,
     store: searchStore,
     onOpenFile,
+    preferences,
     element,
     unmount: () => { mounted.unmount() },
   }
@@ -338,5 +341,52 @@ describe('the additional-root search pane', () => {
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
     await waitFor(() => { expect(input.value).toBe('') })
     expect(document.querySelector('[data-mrfw-files-results]')).toBeNull()
+  })
+})
+
+
+describe('the additional-root search review regressions', () => {
+  it('saves an exclusion rule added through the settings panel when its toggle closes the panel', async () => {
+    const harness = mount()
+    await type(harness, 'notes')
+    fireEvent.click(document.querySelector<HTMLElement>('[data-files-search-settings-toggle]')!)
+    const addInput = await screen.findByPlaceholderText('settings.add')
+    fireEvent.change(addInput, { target: { value: 'dist' } })
+    fireEvent.keyDown(addInput, { key: 'Enter' })
+    expect(document.querySelector('[data-files-rule="dist"]')).not.toBeNull()
+
+    // The same button that opened the panel closes it; closing must commit the
+    // draft like Escape and a blur do, not silently drop the edit.
+    fireEvent.click(document.querySelector<HTMLElement>('[data-files-search-settings-toggle]')!)
+    await waitFor(() => { expect(document.querySelector('[data-files-search-settings]')).toBeNull() })
+    await waitFor(() => {
+      expect(harness.preferences.source(ROOT).getSnapshot().rules.some(rule => rule.path === 'dist' && rule.enabled)).toBe(true)
+    })
+    await waitFor(() => { expect(harness.runs.at(-1)?.request.excludedPaths).toContain('dist') })
+  })
+
+  it('keeps the result expansion and scroll across a body remount', async () => {
+    const harness = mount()
+    await type(harness, 'src')
+    await waitFor(() => { expect(document.querySelector('[data-files-path="/repos/payments/src"]')).not.toBeNull() })
+
+    // Collapse one result directory and scroll the result body: this is the
+    // position a reader expects to find again after opening a file and coming
+    // back (the Files body unmounts while the file tab is shown).
+    fireEvent.click(screen.getByRole('button', { name: 'src' }))
+    const results = document.querySelector<HTMLElement>('[data-mrfw-files-results]')!
+    fireEvent.scroll(results, { target: { scrollTop: 96 } })
+    await waitFor(() => { expect(harness.store.state(KEY).scrollTop).toBe(96) })
+    expect(harness.store.state(KEY).expanded).not.toContain('/repos/payments/src')
+    const runsBefore = harness.runs.length
+
+    harness.unmount()
+    render(harness.element())
+    await screen.findByRole('searchbox')
+    // The retained settled answer is reused: no replacement request, so the
+    // collapse and the offset survive instead of being reset by `searched`.
+    expect(harness.runs.length).toBe(runsBefore)
+    expect(harness.store.state(KEY).expanded).not.toContain('/repos/payments/src')
+    await waitFor(() => { expect(document.querySelector<HTMLElement>('[data-mrfw-files-results]')?.scrollTop).toBe(96) })
   })
 })
