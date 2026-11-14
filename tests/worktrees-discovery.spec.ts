@@ -396,6 +396,101 @@ describe('fresh check and operator memory', () => {
     // lost/recovery case above).
     expect((await worktrees.wait(SESSION)).status).toBe('lost')
   }, 20_000)
+  it('forgets a persisted reminder delay when reset clears it', async () => {
+    const area = fixture('snooze-reset-restart')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const storeRoot = join(area.base, 'store')
+    const first = await mount(storeRoot, { session: { cwd: main } })
+    const shown = (await first.worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+    await first.worktrees.seen(SESSION, [shown.id])
+    await first.worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: '30d' } })
+    expect((await first.worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+    await first.worktrees.reset(SESSION)
+    expect((await first.worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+    await first.stack.dispose()
+    mounted.splice(mounted.indexOf(first), 1)
+    // The cleared delay is durable: the next Host must not restore it.
+    const second = await mount(storeRoot, { session: { cwd: main } })
+    expect((await second.worktrees.prompt(SESSION, { fresh: true })).prompts).toHaveLength(1)
+  }, 30_000)
+
+  it('runs the automatic fresh check without persistent discovery or sidecar reconciliation', async () => {
+    const area = fixture('fresh-passive')
+    const main = join(area.base, 'main')
+    const registered = join(area.base, 'registered')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', registered, '-b', 'registered'])
+    const storeRoot = join(area.base, 'store')
+    const sidecarRoot = join(storeRoot, 'worktree-prompts')
+    // The first Host registers one checkout, so the sidecar carries a B
+    // mapping bound to an owner epoch the next Host would reconcile.
+    const one = await mount(storeRoot, { session: { cwd: main } })
+    const first = promptOf(await one.worktrees.wait(SESSION))
+    expect(first.path).toBe(realpathSync.native(registered))
+    await one.worktrees.resolve(SESSION, first.id, 'add')
+    await one.stack.dispose()
+    mounted.splice(mounted.indexOf(one), 1)
+    // A second Host starts cold on the same store; its first request is the
+    // automatic fresh check the overlay performs on session activation.
+    const candidate = join(area.base, 'candidate')
+    git(main, ['worktree', 'add', '-q', candidate, '-b', 'candidate'])
+    const two = await mount(storeRoot, { session: { cwd: main } })
+    const spy = vi.spyOn(two.stack.registry, 'worktreeSidecar')
+    try {
+      const sidecarBefore = readSidecarFile(sidecarRoot, primaryKey(main))
+      const fresh = await two.worktrees.prompt(SESSION, { fresh: true })
+      expect(fresh.prompts.map(prompt => prompt.path)).toEqual([realpathSync.native(candidate)])
+      // The fresh check is a read: no watcher set, no owner-side reconcile,
+      // no sidecar revision.
+      expect(two.worktrees.activationOf(main).watching).toBe(false)
+      expect(spy.mock.calls.map(call => (call[1] as { op: string }).op)).toEqual(['read'])
+      expect(readSidecarFile(sidecarRoot, primaryKey(main))).toEqual(sidecarBefore)
+      // Without a watcher a later worktree is not discovered in the
+      // background: only the next explicit check sees it.
+      git(main, ['worktree', 'add', '-q', join(area.base, 'later'), '-b', 'later'])
+      await new Promise(resolve => setTimeout(resolve, 400))
+      expect(two.worktrees.activationOf(main).candidates).toBe(1)
+      expect(spy.mock.calls.some(call => (call[1] as { op: string }).op === 'reconcile')).toBe(false)
+      // Opening the Dialog is the explicit lifecycle that promotes the
+      // workspace to persistent discovery.
+      await two.worktrees.prompt(SESSION)
+      expect(two.worktrees.activationOf(main).watching).toBe(true)
+      await vi.waitFor(() => {
+        expect(spy.mock.calls.some(call => (call[1] as { op: string }).op === 'reconcile')).toBe(true)
+      })
+    } finally {
+      spy.mockRestore()
+    }
+  }, 30_000)
+
+  it('resumes a timed reminder after expiry even though the notice claimed its ids', async () => {
+    const area = fixture('snooze-seen-expiry')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main } })
+      const shown = (await worktrees.prompt(SESSION, { fresh: true })).prompts[0]!
+      // The browser sequence: the notice claims its ids first, then the
+      // operator picks the seven-day delay from the notice dropdown.
+      expect(await worktrees.seen(SESSION, [shown.id])).toEqual({ seen: 1 })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      await worktrees.resolve(SESSION, shown.id, 'snooze', { snooze: { mode: '7d' } })
+      expect((await worktrees.prompt(SESSION, { fresh: true })).prompts).toEqual([])
+      clock.mockReturnValue(now + 7 * 86_400_000 + 1_000)
+      const resumed = await worktrees.prompt(SESSION, { fresh: true })
+      expect(resumed.prompts.map(prompt => prompt.path)).toEqual([realpathSync.native(linked)])
+    } finally {
+      clock.mockRestore()
+    }
+  }, 20_000)
+
 })
 
 describe('experimental default', () => {

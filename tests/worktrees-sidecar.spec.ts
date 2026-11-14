@@ -271,6 +271,28 @@ describe('sidecar snooze', () => {
     expect(file!.snooze).toBeUndefined()
   })
 
+  it('clears a snooze that has no ignores and persists the cleared document', async () => {
+    const fixture = await setup('snooze-reset-only')
+    const stack = await open(fixture)
+    const snoozed = await stack.registry.worktreeSidecar(fixture.main, { op: 'snooze', snooze: record('until') })
+    expect(snoozed.snooze).toBeDefined()
+    const reset = await stack.registry.worktreeSidecar(fixture.main, { op: 'reset' })
+    expect(reset.ignored).toEqual([])
+    expect(reset.snooze).toBeUndefined()
+    expect(reset.revision).toBe(snoozed.revision + 1)
+    // A snooze-only reset must reach the file: a restarted owner reading the
+    // same store must not restore the cleared delay.
+    await stack.dispose()
+    stacks.splice(stacks.indexOf(stack), 1)
+    const second = await open(fixture)
+    const reread = await second.registry.worktreeSidecar(fixture.main, { op: 'read' })
+    expect(reread.snooze).toBeUndefined()
+    expect(reread.revision).toBe(reset.revision)
+    // Nothing left to clear is not a write.
+    const again = await second.registry.worktreeSidecar(fixture.main, { op: 'reset' })
+    expect(again.revision).toBe(reset.revision)
+  })
+
   it('refuses the write while the worktree gate is off, the workspace is inactive, or the authority is unavailable', async () => {
     const fixture = await setup('snooze-refusals')
     const stack = await open(fixture)

@@ -944,12 +944,13 @@ export class MultiRootRegistry extends Service {
         case 'reset': {
           // Nothing to clear is not a write: `reset` on an active workspace
           // with no ignores and no snooze (or on a directory that never
-          // activated) must not manufacture a sidecar revision.
-          const current = document.snooze === undefined ? document : withoutSnooze(document)
-          if (current.ignored.length === 0 && current.snooze === undefined) {
+          // activated) must not manufacture a sidecar revision. The check
+          // reads the ORIGINAL document: testing the copy without the snooze
+          // would always pass and silently keep a snooze-only delay alive.
+          if (document.ignored.length === 0 && document.snooze === undefined) {
             return sidecarViewOf(document, this.operationEpoch, this.operationRevision, true)
           }
-          const next = { ...current, revision: document.revision + 1, ignored: [] }
+          const next = { ...withoutSnooze(document), revision: document.revision + 1, ignored: [] }
           this.saveSidecar(key, next)
           return sidecarViewOf(next, this.operationEpoch, this.operationRevision, true)
         }
