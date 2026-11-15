@@ -1,6 +1,6 @@
 # Files 页被第三方整页接管时的官方 Toast 提示（Issue #47）
 
-> 状态：**已实施并通过本机门禁，Draft PR 待评审与 CI（2026-11-15，分支 `feat/file-slot-error`）**。本文件是 Issue #47 限定范围的实施计划、进入/退出验收机制与证据账本；验收结果见 §12，PR 合并后随计划归档。
+> 状态：**已实施、本机门禁与 CI 全绿，Draft PR 待评审（2026-11-15，分支 `feat/file-slot-error`，PR [#61](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/61)）**。本文件是 Issue #47 限定范围的实施计划、进入/退出验收机制与证据账本；验收结果见 §12，PR 合并后随计划归档。
 >
 > 关联：Issue [#47](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/issues/47)、[ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[故障排查：Files 页签选择器退化](../../troubleshooting/files-switcher-degraded.md)、[Files 页签根浏览计划](../completed/2026-10-12-files-header-root-browsing.md)。
 
@@ -200,7 +200,7 @@ Issue #47 记录：第三方插件（如 dsh-better-sidebar）以 `priority: "ex
 | P1 | 已完成 | `c4d5f13` | `src/compat/files-page.ts` + `tests/compat-files-page.spec.ts`（11 tests）；`pnpm lint`、`pnpm typecheck` 通过 |
 | P2 | 已完成 | `103c10e` | `src/client/files-page-notice.tsx`、`src/client/index.ts` 接线、`src/client/locales.ts` 词条、`tests/client-files-page-notice.spec.tsx`（12 tests）与 stub 的 `data-hold-ms`；focused 29 tests 通过；`pnpm build` 后 `client-bundle` / `client-slot-probe` / `client-panel` 共 95 tests 通过 |
 | P3 | 已完成 | `3fc365e` | ADR-0015 修订、troubleshooting 新症状节、README 中英（功能说明 + 已知限制）、compat 笔记第 20 节（中英）；`pnpm docs:check` 0 errors |
-| P4 | 已完成 | 本提交 | `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm docs:check` / `pnpm compat:check` / `pnpm pack:check`（230 members）全绿；全量 `pnpm test`：**1836 passed / 17 failed / 165 skipped（2018）**，`main` 基线为 1813 passed / 17 failed / 165 skipped（1995），失败集合逐项相同（均为本机沙箱下 Registry authority/lease IPC 用例，`diff` 为空）；新增 23 项测试全部通过；分支推送并创建 Draft PR |
+| P4 | 已完成 | `a5243b1` | `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm docs:check` / `pnpm compat:check` / `pnpm pack:check`（230 members）全绿；全量 `pnpm test`：**1836 passed / 17 failed / 165 skipped（2018）**，`main` 基线为 1813 passed / 17 failed / 165 skipped（1995），失败集合逐项相同（均为本机沙箱下 Registry authority/lease IPC 用例，`diff` 为空）；新增 23 项测试全部通过；分支推送并创建 Draft PR [#61](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/61)，验收 head `a5243b1` 的 CI run [43719733985](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43719733985) **31/31 success**（`releases` + 28 条 `verify` + `gate`） |
 
 ## 12. 验收结果（2026-11-15）
 
@@ -214,5 +214,5 @@ Issue #47 记录：第三方插件（如 dsh-better-sidebar）以 `priority: "ex
 | E6 | 通过 | §11 P4 所列六条门禁（`pack:check` exit 0，230 members） |
 | E7 | 通过 | 全量测试失败集合与 `main` 基线逐项相同（见 §11）；本机既有环境限制，改动未引入新失败 |
 | E8 | 通过 | ADR-0015 修订、troubleshooting、README 中英、compat 笔记中英、两个计划索引；`docs:check` 0 errors |
-| E9 | 通过（CI 待跑） | 分支 `feat/file-slot-error` 推送后创建 Draft PR，描述末尾 `Close #47`；CI run URL 记录在 PR 中 |
+| E9 | 通过 | 分支 `feat/file-slot-error` 推送后创建 Draft PR [#61](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/61)，描述末尾 `Close #47`；验收 head `a5243b1` 的 CI run [43719733985](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43719733985) 31/31 success。本文件回填属 docs-only 提交，按发版流程同工作流另行重跑 |
 | E10 | 已记录 | 本机无法安装 better-sidebar（不改用户宿主组合），GUI 目检按 Issue #47 复现步骤交由评审者完成：装 better-sidebar → 顶部一次 info Toast、切换器不出现；停用 → 切换器恢复、再次接管再提示。自动化证据为 E1–E5 |
