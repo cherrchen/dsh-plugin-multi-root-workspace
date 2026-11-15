@@ -284,14 +284,17 @@ function createSink(limit: number): Sink {
   return {
     get truncated() { return over },
     append: chunk => {
-      if (size + chunk.byteLength > limit) { over = true; return }
-      chunks.push(chunk); size += chunk.byteLength
+      const remaining = Math.max(0, limit - size)
+      if (chunk.byteLength > remaining) over = true
+      const prefix = chunk.subarray(0, remaining)
+      if (prefix.byteLength > 0) { chunks.push(prefix); size += prefix.byteLength }
     },
     text: () => {
       const whole = new Uint8Array(size)
       let offset = 0
       for (const chunk of chunks) { whole.set(chunk, offset); offset += chunk.byteLength }
-      return new TextDecoder().decode(whole)
+      // Do not synthesize a replacement character for a truncated UTF-8 tail.
+      return new TextDecoder().decode(whole, { stream: over })
     },
   }
 }

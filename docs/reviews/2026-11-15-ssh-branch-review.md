@@ -111,3 +111,5 @@ pnpm exec vitest run tests/review-ssh-findings.spec.ts tests/review-ssh-client.s
 - R6 已修复：cwd 验证复用 helper 只读探针，与 transfer 解耦；本机真实文件系统验证 exec-only、嵌套目录、symlink 与越界拒绝，相关套件和类型检查通过。
 
 - R7 已修复：Host 在 CAS 保存中保留同身份访问密钥，目标/凭据/主机指纹变化不继承；六种编辑回归与个人配置套件通过。
+
+- R8 已修复：超限块保留预算内前缀，截断的 UTF-8 尾部不补乱码；真实 adapter 的 stdout/stderr、UTF-8 与多块边界回归通过。

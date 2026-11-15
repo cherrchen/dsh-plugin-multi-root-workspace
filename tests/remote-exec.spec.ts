@@ -8,6 +8,8 @@ import Projections from '@deepseek-ai/dsh-session-projection'
 import Policy from '@deepseek-ai/dsh-sandbox-policy'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
+import { sshExecBackend } from '../src/remote/ssh-exec-backend.ts'
+import { fakeManifest } from './support/fake-remote.ts'
 import { remoteBashTool } from '../src/remote/exec-tool.ts'
 import { RemoteConnectionLost, runRemoteCommand, type RemoteExecutionBackend, type RemoteProcessHandle } from '../src/remote/exec.ts'
 import { executeTool, installToolExecutor } from './support/tool-executor.ts'
@@ -193,6 +195,33 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     lost.state.handles[0]!.lose()
     await expect(hanging).resolves.toMatchObject({ status: 'unknown', reconcileId: expect.any(String) })
     expect(lost.state.spawnCalls).toHaveLength(1)
+  })
+
+  it.each([
+    ['x'.repeat(100), 'x'.repeat(64)],
+    ['é'.repeat(40), 'é'.repeat(32)],
+    ['x'.repeat(63) + 'é', 'x'.repeat(63)],
+  ])('retains the bounded prefix of real-adapter output %j', async (text, expected) => {
+    const stack = await mount()
+    const environment = fakeManifest({ primary: fixture.workspace }).environments[0]!
+    environment.exec = { ...DEPLOYMENT, shell: [...DEPLOYMENT.shell] }
+    const ssh = { generation: 'g', sandbox: { confine: async (argv: readonly string[]) => ({ argv, enforcement: 'full' }) },
+      subprocess: { spawn: () => ({ done: Promise.resolve({ exitCode: 0, signal: null }), waitForExit: async () => true, terminate() {},
+        collected: { stdout: { readFrom: () => ({ text }) }, stderr: { readFrom: () => ({ text }) } } }) } }
+    const backend = sshExecBackend(environment, ssh as never, { generationOf: () => 'g', markStale() {} } as never)!
+    await expect(run(stack, backend)).resolves.toMatchObject({ stdout: expected, stderr: expected, truncated: { stdout: true, stderr: true } })
+  })
+
+  it('fills the remaining output budget across chunks and discards later bytes', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    state.handles[0]!.emit('a'.repeat(60))
+    state.handles[0]!.emit('bcdefgh')
+    state.handles[0]!.emit('later')
+    state.handles[0]!.finish()
+    await expect(pending).resolves.toMatchObject({ stdout: 'a'.repeat(60) + 'bcde', truncated: { stdout: true, stderr: false } })
   })
 
   it('reports unknown with a reconcile id when the start acknowledgement is lost, and never retries', async () => {
