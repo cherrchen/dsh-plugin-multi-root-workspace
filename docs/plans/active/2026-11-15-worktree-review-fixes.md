@@ -1,6 +1,6 @@
 # Worktree 发现建议评审修复（PR #60）：Follower 授权、Files 手动入口与主 checkout 分支刷新
 
-> 状态：**已实施，本机门禁通过，待 PR CI 验收**（2026-11-15，分支 `feat/workspace-toast`，reviewed commit `eebde19`；P0–P4 提交见 §10）。本文件是本轮评审修复的核验账本、实施计划与退出机制。
+> 状态：**已实施并通过 CI 验收**（2026-11-15，分支 `feat/workspace-toast`，reviewed commit `eebde19`，验收 head `ab17638`，run [43702749353](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43702749353) 30/30 checks 全绿；P0–P5 见 §10；待 PR 合并后随计划归档）。本文件是本轮评审修复的核验账本、实施计划与退出机制。
 >
 > 关联：PR [#60](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/60)、[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（第二十二次修订）、[Toast 实施计划](./2026-11-15-workspace-toast-implementation.md)、[Dialog 重构报告](./2026-11-15-worktree-dialog-redesign.md)。
 
@@ -157,7 +157,7 @@ PR #60 的 reviewed commit `eebde19` 收到两个自动评审：
 | P2 | 已完成 | `c107b40` | 红测：Files 管理器经 `RootSwitcher` 打开时缺少 `worktree.panelOpen`；绿测：`tests/client-worktree.spec.tsx` 56 tests（含「关闭时不显示」对照） |
 | P3 | 已完成 | `2f48f9d` | 红测：主 checkout 换到 `release` 后 A 候选仍显示 `main`；绿测：`tests/worktrees-discovery.spec.ts` 29 tests（prompt id 不变、branch 与 viewRevision 更新） |
 | P4 | 已完成 | 本提交 | ADR-0039 第二十三次修订、本文件证据回填、PR 描述更新 |
-| P5 | 待验收 | 推送后 | 新 head 的 CI `releases` / `verify` / `gate`（run URL 见 PR #60） |
+| P5 | 已完成 | `ab17638`（验收 head） | CI run [43702749353](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43702749353)：`releases` + 28 条 `verify` + `gate` 共 30/30 success；本文件 CI 证据回填提交在其后（docs-only，另行重跑） |
 
 ## 11. 验证证据（2026-11-15）
 
@@ -165,4 +165,4 @@ PR #60 的 reviewed commit `eebde19` 收到两个自动评审：
 - **受影响套件**：`pnpm vitest run` 的 8 个文件（worktrees-contract / worktrees-discovery / worktrees-owner / worktrees-common / worktrees-channel / client-worktree / client-switcher / shared-registry）共 `168 passed | 33 skipped`；skip 全部是 native IPC 用例（本机 Host 被沙箱包裹，与既有 31 个 shared Registry 用例相同，CI 非沙箱 runner 执行）。
 - **全量 `pnpm test`**：`1809 passed | 17 failed | 165 skipped`。17 个失败经与基线 `eebde19` 对照（`git stash` 后复跑同一批文件）**失败集合逐项相同**（`diff` 为空），均为本机环境限制：第二个 Host 得到 `contended` 而非 `follower`（shared IPC 拒绝沙箱内 peer）、seatbelt kernel runner `Operation not permitted`。修复未引入新失败。
 - **门禁**：`pnpm lint`（0 warnings/0 errors）、`pnpm typecheck`（Host + Client + Auto Review）、`pnpm build`、`pnpm docs:check`（0 errors）、`pnpm compat:check`、`pnpm pack:check` 均通过。
-- **CI**：P4 提交推送后由 `gh` 跟踪；结论记录在 PR #60 检查与最终答复中（`releases` + 全部 `verify` + `gate`）。
+- **CI**：验收 head `ab17638` 的 run [43702749353](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43702749353)，`releases` + 28 条 `verify`（4 OS × 分组） + `gate` 共 **30/30 success**；本文件证据回填后的 docs-only head 另行重跑同一工作流。
