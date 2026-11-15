@@ -107,10 +107,10 @@ export class CredentialStore {
         const { stdout } = await this.exec('ssh-keygen', ['-y', '-f', keyPath], { timeoutMs: 30_000 })
         writeFileSync(`${keyPath}.pub`, `${stdout.trim()}\n`, { mode: 0o644 })
       }
-    } catch (error) {
+    } catch {
       rmSync(keyPath, { force: true })
       rmSync(`${keyPath}.pub`, { force: true })
-      throw new CredentialError('credential-import-failed', `the private key could not be imported: ${error instanceof Error ? error.message : String(error)}`)
+      throw new CredentialError('credential-import-failed', 'the private key could not be imported: the key material or passphrase was rejected')
     }
     const publicKey = readFileSync(`${keyPath}.pub`, 'utf8').trim()
     const fingerprint = await this.fingerprintOf(keyPath)
@@ -162,7 +162,7 @@ import { execFile } from 'node:child_process'
 
 /** The real command seam: execFile, captured stdio, 30 s default timeout. */
 export const defaultExec: ExecFile = (file, args, options) => new Promise((resolve, reject) => {
-  execFile(file, [...args], {
+  const child = execFile(file, [...args], {
     env: options?.env === undefined ? process.env : { ...process.env, ...options.env },
     timeout: options?.timeoutMs ?? 30_000,
     maxBuffer: 16 * 1024 * 1024,
@@ -170,4 +170,10 @@ export const defaultExec: ExecFile = (file, args, options) => new Promise((resol
     if (error !== null) reject(error instanceof Error ? error : new Error(String(error)))
     else resolve({ stdout, stderr })
   })
+  child.stdin?.on('error', reject)
+  try {
+    child.stdin?.end(options?.input)
+  } catch (error) {
+    reject(error)
+  }
 })

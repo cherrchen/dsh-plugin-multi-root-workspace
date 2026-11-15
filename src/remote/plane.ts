@@ -14,7 +14,7 @@ import type {
 } from './contract.ts'
 import { RemoteAdmissionError } from './contract.ts'
 import { bindingDigest, loadDeploymentManifest, ManifestError, type DeploymentManifest } from './manifest.ts'
-import { loadPersonalManifest, statIdentity, sameIdentity, type PersonalFileIdentity } from './personal/config.ts'
+import { checkPersonalFileProtection, loadPersonalManifest, statIdentity, sameIdentity, type PersonalFileIdentity } from './personal/config.ts'
 import { findBinding, grantState, remoteDomainSpec, REMOTE_TABLE_NAME, type PersistedRemoteGrants } from './records.ts'
 import { RemoteClient, RemoteServer } from './protocol.ts'
 import { readFileSync, statSync } from 'node:fs'
@@ -115,23 +115,30 @@ export class RemoteControlPlane {
    * @returns 'unchanged' | 'reloaded' (digest may or may not differ — the
    *   caller decides whether a re-listen/re-hello is needed) | 'disabled'.
    */
-  refreshPersonal(path?: string): 'unchanged' | 'reloaded' | 'disabled' | 'missing' {
+  refreshPersonal(path?: string): 'unchanged' | 'reloaded' | 'disabled' | 'missing' | 'invalid' {
     if (!this.enabled || this.mode !== 'personal') return 'disabled'
     const target = path ?? this.config?.personalPath
     if (target === undefined) return 'disabled'
     try {
       const identity = statIdentity(statSync(target), readFileSync(target))
-      if (this.personalIdentity !== undefined && sameIdentity(identity, this.personalIdentity)) return 'unchanged'
+      if (this.personalIdentity !== undefined && sameIdentity(identity, this.personalIdentity)) {
+        checkPersonalFileProtection(target, this.manifest?.bindings ?? [])
+        return 'unchanged'
+      }
     } catch {
-      if (this.personalIdentity === undefined || (this.personalIdentity.dev === 0 && this.personalIdentity.size === 0)) return 'unchanged'
+      if (this.personalIdentity !== undefined && this.personalIdentity.dev === 0 && this.personalIdentity.size === 0 && this.state.state === 'ready') return 'unchanged'
       // The file vanished: reload to the empty manifest.
     }
     let loaded: ReturnType<typeof loadPersonalManifest>
     try {
       loaded = loadPersonalManifest(target)
     } catch (error) {
+      this.manifest = undefined
+      this.manifestDigest = undefined
+      this.personalRevision = 0
+      this.personalIdentity = undefined
       this.setState('config-invalid', error instanceof Error ? error.message : String(error))
-      return 'reloaded'
+      return 'invalid'
     }
     const changed = loaded.digest !== this.manifestDigest
     this.manifest = loaded.manifest
@@ -362,6 +369,12 @@ export class RemoteControlPlane {
         this.setState('owner-without-remote-protocol', message, 'owner-without-remote-plane')
       } else this.setState('owner-without-remote-protocol', message)
     }
+  }
+
+  async severForInvalid(reason: string | undefined): Promise<void> {
+    this.dropFollower()
+    await this.closeOwner()
+    this.setState('config-invalid', reason)
   }
 
   /** The v1 client died: the remote channel dies with it; a new epoch needs a new hello. */

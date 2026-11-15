@@ -46,3 +46,17 @@
 这是 Registry 的 follower 连接 owner 的 `remote-1` socket 失败。只有持有 store lease 的 Host 会打开远程域和 `remote-1`；若另一个 DSH 实例持有 lease、但它的 profile 没有挂载 `multi-root-remote-tools`（例如桌面端主插件仍是 mainline），follower 永远无法就绪，重启 follower 也不会改变 owner。
 
 修复：`connectFollower` 把这个具体错误映射为 `status.code = 'owner-without-remote-plane'`，面板显示可操作的双语提示；同时写一条 Host 日志。真正恢复 SSH 需要退出另一个实例，或让启用 SSH 的 profile 成为唯一 Host。
+
+### `exec-requires-helper`
+
+带 exec 勾选保存环境时被服务端拒绝。exec 只能走已安装的远端 helper：helper 未安装，或保存时改动了目标身份（hostname/port/user/凭据类型，helper 随之失效），服务端在消耗扫描令牌和写 `known_hosts` 之前就拒绝。GUI 对不满足条件的草稿直接禁用“允许命令执行”并给出引导文案。
+
+修复：先不勾 exec 保存 → 在该环境行安装 helper → 再编辑勾选 exec。不要直接手改配置文件塞 `exec` 节——`toDeploymentManifest` 会以 `invalid-manifest` 拒绝 helper-less exec。
+
+### `personal-config-conflict`
+
+`savePersonalConfig` 的 CAS 在同目录 `<basename>.lock` 的 Registry 权威租约内执行：磁盘 `revision` 与请求不符、或另一个 Host 进程正持有写锁，都报此错。前端已自动重取 `sshState` 再提示；反复出现说明另一个 DSH 实例在并发写同一个人配置，退出多余实例即可。损坏的配置文件不会进入此路径——加载失败使控制面停在 `config-invalid` 并拒绝远端操作，写回合法文件（哪怕是原文）即恢复 `ready`。
+
+### 模式/team 设置在旧版本上保存报错
+
+旧构建里 `RemoteCustodyModeControl` 把 `form.mutate` 摘出来脱离接收者调用，而上游 `ConfigFormController.mutate` 依赖 `this`——写入在进入 RPC 前就抛错，UI 只显示保存失败；同时 `Config.team` 未标记 volatile，四个 broker 字段写入被 settings 服务以 `not volatile` 拒绝。重试对旧构建无意义。已修复构建把调用改回带接收者的 `.call(form, ...)`，并将 `team` 整对象标记 volatile（兼容层同时解包包装值）。升级后需重载客户端（插件管理页禁用/启用或重启 Host）让新 bundle 生效；若错误文本仍不渲染为红色，再检查注入的样式元素与计算样式 token（`--dsw-alias-state-error-primary`），不要预设 token 错误。

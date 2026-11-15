@@ -52,7 +52,8 @@ const teamDraftOf = (team: unknown): RemoteTeamDraft => {
 }
 
 type RemoteMutate = (ops: readonly { op: 'set'; path: string[]; value: unknown }[], revision?: number) => Promise<boolean>
-const mutateOf = (form: SkillsForm): RemoteMutate => form.mutate as unknown as RemoteMutate
+const mutateOf = (form: SkillsForm): RemoteMutate => (ops, revision) =>
+  (form.mutate as unknown as RemoteMutate).call(form, ops, revision)
 
 /**
  * Render the custody-mode radios, the team block, and the downgrade

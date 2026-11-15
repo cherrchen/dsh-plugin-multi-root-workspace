@@ -42,12 +42,12 @@ export interface Config {
 export const Config = z.object({
   enabled: volatileField(z.boolean().default(false)).description('SSH 远端环境（实验性）：默认关闭。开启后 Agent 可对已注册的远端端点使用 remote_copy / remote_bash，每次调用仍经过 Registry 准入；远端凭据托管取决于部署。'),
   mode: volatileField(z.union([z.const('personal'), z.const('team'), z.const('hardened')]).default('personal')).description('凭据托管档位：personal（用户自己的 SSH）、team（共享 broker）、hardened（部署托管 broker）。'),
-  team: z.object({
+  team: volatileField(z.object({
     manifestPath: z.string(),
     socketPath: z.string(),
     brokerUid: z.natural(),
     credentialRoot: z.string(),
-  }),
+  })),
 })
 
 export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootRegistry', 'tools', 'sandboxPolicy', 'permissionPresets', 'sandbox', 'subprocess', 'sessions']
@@ -55,7 +55,7 @@ export const inject = ['multiRootCompat', 'multiRootProviders', 'multiRootRegist
 export function apply(ctx: Context, config: Config = {}): void {
   const broker = config.broker
   let child: Fiber | undefined
-  let mountedDigest: string | undefined
+  let mountedIdentity: string | undefined
   let closed = false
   let chain: Promise<void> = Promise.resolve()
 
@@ -71,7 +71,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     // unwrapped here; leaking it would make `registry.remoteMode` non-string
     // and the panel's `custodyMode` unreadable.
     const mode = value.mode ?? remoteModeOf(config.mode) ?? (broker === undefined ? 'personal' : 'hardened')
-    return { enabled: value.enabled, mode, ...(value.team === undefined ? { ...(config.team === undefined ? {} : { team: config.team }) } : { team: value.team as TeamConfig }) }
+    const configTeam = configValue(config.team)
+    return { enabled: value.enabled, mode, ...(value.team === undefined ? { ...(configTeam === undefined ? {} : { team: configTeam as TeamConfig }) } : { team: value.team as TeamConfig }) }
   }
 
   /**
@@ -149,14 +150,14 @@ export function apply(ctx: Context, config: Config = {}): void {
         ...(mode === 'team' && team?.manifestPath !== undefined ? { manifestPath: team.manifestPath } : {}),
       })
       if (closed) return
-      const digest = ctx.multiRootRegistry.remoteManifestDigest
-      if (child !== undefined && mountedDigest === digest) return
+      const identity = subtreeIdentity(mode, team, ctx.multiRootRegistry.remoteManifestDigest)
+      if (child !== undefined && mountedIdentity === identity) return
       const stale = child
       child = undefined
       if (stale !== undefined) { await stale.dispose(); await stale.await() }
       try {
         child = ctx.plugin(childScope => mount(childScope, mode, team)).ctx.fiber
-        mountedDigest = digest
+        mountedIdentity = identity
       } catch (error) {
         ctx.logger.warn(`multi-root remote tools: cannot mount the gated subtree: ${error instanceof Error ? error.message : String(error)}`)
       }
@@ -164,13 +165,22 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
     const current = child
     child = undefined
-    mountedDigest = undefined
+    mountedIdentity = undefined
     try {
       if (current !== undefined) { await current.dispose(); await current.await() }
     } finally {
       await ctx.multiRootRegistry.configureRemote({ enabled: false, mode })
     }
   }
+
+  const subtreeIdentity = (mode: RemoteMode, team: TeamConfig | undefined, digest: string | undefined): string =>
+    JSON.stringify({
+      mode, digest,
+      ...(team === undefined ? {} : {
+        manifestPath: team.manifestPath, socketPath: team.socketPath,
+        brokerUid: team.brokerUid, credentialRoot: team.credentialRoot,
+      }),
+    })
 
   const changed = (): void => {
     chain = chain.then(sync).catch(error => {
@@ -186,7 +196,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const settings = installRemoteSettings(ctx, (): RemoteSettingsValue => ({
     enabled: typeof configuredEnabled === 'boolean' ? configuredEnabled : ctx.multiRootRegistry.remoteEnabled,
     mode: remoteModeOf(config.mode) ?? (broker === undefined ? 'personal' : 'hardened'),
-    ...(config.team === undefined ? {} : { team: config.team }),
+    ...(config.team === undefined ? {} : { team: configValue(config.team) }),
   }), changed)
   const read = settings.read
   // A manifest reload (mode switch, personal file change) remounts the
@@ -197,7 +207,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     unsubscribe()
     const current = child
     child = undefined
-    mountedDigest = undefined
+    mountedIdentity = undefined
     void current?.dispose()
     settings.fiber.dispose()
     void ctx.multiRootRegistry.configureRemote({ enabled: false, mode: 'personal' }).catch(() => {})

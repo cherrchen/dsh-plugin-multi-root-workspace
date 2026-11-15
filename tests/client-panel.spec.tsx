@@ -1528,3 +1528,58 @@ describe('the shared dialog across the four entries', () => {
     await expectSharedSections()
   })
 })
+
+describe('the shared stylesheet element', () => {
+  const STYLE_ID = 'multi-root-workspace-styles'
+  const OWNERS = Symbol.for('@dsh-electron/multi-root-workspace/style-owners')
+  type OwnedStyle = HTMLStyleElement & { [OWNERS]?: Set<symbol> }
+  const styleOf = (): OwnedStyle | null => document.getElementById(STYLE_ID) as OwnedStyle | null
+  beforeEach(() => { styleOf()?.remove() })
+  afterEach(() => { styleOf()?.remove() })
+
+  const styleMount = (): { disposeStyles: () => void } => {
+    const disposers = new Map<string, () => void>()
+    client.apply({
+      effect: (callback: () => unknown, label?: string) => {
+        const dispose = callback()
+        if (label !== undefined && typeof dispose === 'function') disposers.set(label + ':' + disposers.size, dispose as () => void)
+        return () => {}
+      },
+      inject: () => () => {},
+      locale: { register: () => () => {}, bind: () => (key: string) => key },
+      slots: { inject: () => () => {}, register: () => () => {} },
+      get: () => undefined,
+    } as never)
+    return {
+      disposeStyles: () => {
+        for (const [key, dispose] of [...disposers]) if (key.startsWith('multi-root-workspace: styles')) dispose()
+      },
+    }
+  }
+
+  it('replaces a stale legacy sheet; the old disposer cannot kill the new one', () => {
+    const legacy = document.createElement('style')
+    legacy.id = STYLE_ID
+    legacy.textContent = '.legacy{}'
+    document.head.append(legacy)
+    styleMount()
+    const current = styleOf()!
+    expect(current).not.toBe(legacy)
+    expect(current[OWNERS]?.size).toBe(1)
+    expect(current.textContent).toContain('.mrfw-alert')
+    legacy.remove()
+    expect(styleOf()).toBe(current)
+  })
+
+  it('shares one sheet across applies and removes it only when the last owner leaves', () => {
+    const first = styleMount()
+    const element = styleOf()!
+    const second = styleMount()
+    expect(styleOf()).toBe(element)
+    expect(element[OWNERS]?.size).toBe(2)
+    first.disposeStyles()
+    expect(styleOf()).toBe(element)
+    second.disposeStyles()
+    expect(styleOf()).toBeNull()
+  })
+})

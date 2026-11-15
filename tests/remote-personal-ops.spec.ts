@@ -5,7 +5,7 @@
  * attestation shape, plane reload, and secrets never leaving RPC answers.
  * Every external command goes through the injected ExecFile seam.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -70,13 +70,13 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     }
   })
 
-  it('R1: a config that fails semantic validation is refused BEFORE the write', () => {
+  it('R1: a config that fails semantic validation is refused BEFORE the write', async () => {
     const { personalPath } = world()
-    savePersonalConfig(personalPath, CONFIG(), 0)
+    await savePersonalConfig(personalPath, CONFIG(), 0)
     const bad = CONFIG()
     bad.bindings = [{ primary: '/w', environmentId: 'dev-box', rootId: 'app', path: 'relative/not-absolute', actions: ['read'] }]
-    expect(() => savePersonalConfig(personalPath, { ...bad, revision: 1 }, 0))
-      .toThrowError(/personal-config-invalid|absolute/)
+    await expect(savePersonalConfig(personalPath, { ...bad, revision: 1 }, 0))
+      .rejects.toThrowError(/personal-config-invalid|absolute/)
     expect(JSON.parse(readFileSync(personalPath, 'utf8'))).toMatchObject({ revision: 0 })
   })
 
@@ -154,6 +154,34 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, environment: draft, fingerprint: FP_OK, hostKeyToken: scan.token },
       { exec }) as { environments: PersonalEnvironment[] }
     expect(state.environments[0]!.helper).toBeNull()
+  })
+
+  it('exec without a surviving helper is refused before the token/known_hosts; a preserved helper allows it', async () => {
+    const { registry, personalPath, credentialRoot } = world()
+    writeConfig(personalPath, CONFIG([]))
+    const exec: ExecFile = async (file) => {
+      if (file === 'ssh-keyscan') return { stdout: 'build.internal ssh-ed25519 AAAAKEY\n', stderr: '' }
+      if (file === 'ssh-keygen') return { stdout: `256 ${FP_OK} (ED25519)\n`, stderr: '' }
+      return { stdout: '', stderr: '' }
+    }
+    const scan = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
+      { endpoint: 'sshHostKeyScan', sessionId: 's', hostname: 'build.internal', port: 22 }, { exec }) as { token: string }
+    const execStanza = {
+      shell: ['/bin/sh', '-c'], env: { PATH: '/usr/local/bin:/usr/bin:/bin' },
+      maxTimeoutMs: 600_000, stdoutLimit: 1_048_576, stderrLimit: 262_144, terminateGraceMs: 2_000,
+    }
+    await expect(handlePersonalEndpoint(undefined as never as Context, registry, '/w',
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0,
+        environment: { ...MANAGED, exec: execStanza }, fingerprint: FP_OK, hostKeyToken: scan.token },
+      { exec })).rejects.toMatchObject({ code: 'exec-requires-helper' })
+    expect(existsSync(join(credentialRoot, 'known_hosts'))).toBe(false)
+    writeConfig(personalPath, CONFIG())
+    const state = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0,
+        environment: { ...MANAGED, exec: execStanza }, fingerprint: FP_OK, hostKeyToken: scan.token },
+      { exec }) as { environments: PersonalEnvironment[] }
+    expect(state.environments[0]!.exec).toMatchObject(execStanza)
+    expect(state.environments[0]!.helper).not.toBeNull()
   })
 
   it('R6: a failed access-key install removes the orphan key; env remove cleans its access key', async () => {
@@ -455,5 +483,172 @@ describe.skipIf(process.platform === 'win32')('the personal plane digest rebind 
     expect(planeOf(follower).manifestDigest).toBe(planeOf(owner).manifestDigest)
     // The reconnected channel really serves remote-1 requests.
     await expect(follower.registry.remoteList(fixture.workspace)).resolves.toMatchObject({ grants: expect.any(Array) })
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('the personal plane fails closed on an invalid refresh', () => {
+  let fixture: FixtureWorkspace
+  let stacks: RegistryStack[]
+  beforeEach(() => { fixture = createFixtureWorkspace('remote-personal-invalid'); stacks = [] })
+  afterEach(async () => {
+    for (const stack of stacks.reverse()) await stack.dispose()
+    fixture.dispose()
+  })
+
+  const planeOf = (stack: RegistryStack): RemoteControlPlane =>
+    (stack.registry as unknown as { remotePlane: RemoteControlPlane }).remotePlane
+
+  it('a corrupted file closes the owner, refuses operations, and a repair remounts', async () => {
+    const personalPath = join(fixture.base, 'remote-personal.json')
+    const credentialRoot = join(fixture.base, 'cred')
+    const config: PersonalConfig = {
+      ...CONFIG(),
+      environments: [{ ...SSH_CONFIG_ENV, helper: null }],
+      bindings: [{
+        primary: fixture.workspace, environmentId: 'dev-box', rootId: 'app', path: '/srv/build',
+        actions: ['read', 'write', 'exec'],
+        transfers: [
+          { direction: 'import', peer: { environmentId: 'local', rootId: 'primary' } },
+          { direction: 'export', peer: { environmentId: 'local', rootId: 'primary' } },
+        ],
+      }],
+    }
+    writeConfig(personalPath, config)
+
+    const stack = await mountRegistryStack(join(fixture.base, 'store'), {
+      remoteEnvironments: { enabled: false, personalPath, credentialRoot },
+    }, {
+      allowUserOwnedRemoteManifestForTesting: true,
+      beforeGate: async ctx => {
+        await ctx.plugin(Projections)
+        await ctx.plugin(Sessions)
+        await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      },
+    })
+    stacks.push(stack)
+    await stack.registry.refresh(fixture.workspace)
+    await stack.registry.configureRemote({ enabled: true, mode: 'personal' })
+    expect(stack.registry.remoteStatus.state).toBe('ready')
+    stack.registry.setRemoteEndpointVerifier({
+      verify: async () => ({ platform: 'linux' as const, target: { kind: 'path' as const, value: '/srv/build' } }),
+    })
+    await stack.registry.addRemote(fixture.workspace, { environmentId: 'dev-box', rootId: 'app' })
+    expect(JSON.stringify(await stack.registry.remoteList(fixture.workspace))).toContain('dev-box')
+    const digestBefore = planeOf(stack).manifestDigest
+
+    writeFileSync(personalPath, '{broken\n', { mode: 0o600 })
+    await stack.registry.refreshRemotePersonal()
+    expect(stack.registry.remoteStatus.state).toBe('config-invalid')
+    expect(planeOf(stack).manifest).toBeUndefined()
+    expect(planeOf(stack).manifestDigest).toBeUndefined()
+    await expect(stack.registry.remoteList(fixture.workspace)).rejects.toMatchObject({ code: 'remote-unavailable' })
+
+    rmSync(personalPath)
+    await stack.registry.refreshRemotePersonal()
+    expect(stack.registry.remoteStatus.state).toBe('ready')
+    expect(planeOf(stack).manifest?.environments).toEqual([])
+    const emptied = await stack.registry.remoteList(fixture.workspace) as { grants: { environmentId: string; state: string }[] }
+    expect(emptied.grants.every(grant => grant.state === 'revoked')).toBe(true)
+
+    writeConfig(personalPath, config)
+    await stack.registry.refreshRemotePersonal()
+    expect(stack.registry.remoteStatus.state).toBe('ready')
+    expect(planeOf(stack).manifestDigest).toBe(digestBefore)
+    expect(JSON.stringify(await stack.registry.remoteList(fixture.workspace))).toContain('dev-box')
+  })
+
+  it('a file deleted while config-invalid reloads to ready with the empty manifest', async () => {
+    const personalPath = join(fixture.base, 'remote-personal.json')
+    const credentialRoot = join(fixture.base, 'cred')
+    writeFileSync(personalPath, '{broken\n', { mode: 0o600 })
+    const stack = await mountRegistryStack(join(fixture.base, 'store'), {
+      remoteEnvironments: { enabled: false, personalPath, credentialRoot },
+    }, {
+      allowUserOwnedRemoteManifestForTesting: true,
+      beforeGate: async ctx => {
+        await ctx.plugin(Projections)
+        await ctx.plugin(Sessions)
+        await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      },
+    })
+    stacks.push(stack)
+    await stack.registry.configureRemote({ enabled: true, mode: 'personal' })
+    expect(stack.registry.remoteStatus.state).toBe('config-invalid')
+    rmSync(personalPath)
+    await stack.registry.refreshRemotePersonal()
+    expect(stack.registry.remoteStatus.state).toBe('ready')
+    expect(planeOf(stack).manifest?.environments).toEqual([])
+  })
+
+  it('a chmod that voids protection is detected as an identity change', async () => {
+    const personalPath = join(fixture.base, 'remote-personal.json')
+    const credentialRoot = join(fixture.base, 'cred')
+    writeConfig(personalPath, { ...CONFIG(), environments: [{ ...SSH_CONFIG_ENV, helper: null }] })
+    const stack = await mountRegistryStack(join(fixture.base, 'store'), {
+      remoteEnvironments: { enabled: false, personalPath, credentialRoot },
+    }, {
+      allowUserOwnedRemoteManifestForTesting: true,
+      beforeGate: async ctx => {
+        await ctx.plugin(Projections)
+        await ctx.plugin(Sessions)
+        await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      },
+    })
+    stacks.push(stack)
+    await stack.registry.configureRemote({ enabled: true, mode: 'personal' })
+    expect(stack.registry.remoteStatus.state).toBe('ready')
+
+    const { chmodSync } = await import('node:fs')
+    chmodSync(personalPath, 0o644)
+    await stack.registry.refreshRemotePersonal()
+    expect(stack.registry.remoteStatus.state).toBe('config-invalid')
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('the personal plane rechecks protection on every refresh', () => {
+  let fixture: FixtureWorkspace
+  let stacks: RegistryStack[]
+  beforeEach(() => { fixture = createFixtureWorkspace('remote-personal-guard'); stacks = [] })
+  afterEach(async () => {
+    for (const stack of stacks.reverse()) await stack.dispose()
+    fixture.dispose()
+  })
+
+  it('unchanged bytes with a widened parent dir or a symlinked path still fail closed', async () => {
+    const { chmodSync, symlinkSync, renameSync, rmSync: rm } = await import('node:fs')
+    const { dirname } = await import('node:path')
+    const personalPath = join(fixture.base, 'remote-personal.json')
+    const credentialRoot = join(fixture.base, 'cred')
+    writeConfig(personalPath, { ...CONFIG(), environments: [{ ...SSH_CONFIG_ENV, helper: null }] })
+    const stack = await mountRegistryStack(join(fixture.base, 'store'), {
+      remoteEnvironments: { enabled: false, personalPath, credentialRoot },
+    }, {
+      allowUserOwnedRemoteManifestForTesting: true,
+      beforeGate: async ctx => {
+        await ctx.plugin(Projections)
+        await ctx.plugin(Sessions)
+        await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: fixture.workspace })
+      },
+    })
+    stacks.push(stack)
+    await stack.registry.configureRemote({ enabled: true, mode: 'personal' })
+    expect(stack.registry.remoteStatus.state).toBe('ready')
+
+    chmodSync(dirname(personalPath), 0o770)
+    await stack.registry.refreshRemotePersonal()
+    expect(stack.registry.remoteStatus.state).toBe('config-invalid')
+    chmodSync(dirname(personalPath), 0o700)
+    await stack.registry.refreshRemotePersonal()
+    expect(stack.registry.remoteStatus.state).toBe('ready')
+
+    const aside = join(fixture.base, 'remote-personal.real.json')
+    renameSync(personalPath, aside)
+    symlinkSync(aside, personalPath)
+    await stack.registry.refreshRemotePersonal()
+    expect(stack.registry.remoteStatus.state).toBe('config-invalid')
+    rm(personalPath)
+    renameSync(aside, personalPath)
+    await stack.registry.refreshRemotePersonal()
+    expect(stack.registry.remoteStatus.state).toBe('ready')
   })
 })

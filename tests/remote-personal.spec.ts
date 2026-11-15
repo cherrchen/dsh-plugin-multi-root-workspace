@@ -4,7 +4,9 @@
  * rendering/linking, relaxed parseSshConfig, and personal-mode RPC refusals.
  * POSIX-only: the file-protection checks require a POSIX uid.
  */
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -12,7 +14,8 @@ import {
   loadPersonalConfig, loadPersonalManifest, savePersonalConfig,
   toDeploymentManifest, type PersonalConfig,
 } from '../src/remote/personal/config.ts'
-import { CredentialStore } from '../src/remote/personal/credentials.ts'
+import { CredentialError, CredentialStore, defaultExec } from '../src/remote/personal/credentials.ts'
+import { HostKeyScans } from '../src/remote/personal/operations.ts'
 import { link, linkStatus, renderHostBlock, renderSshConfig } from '../src/remote/personal/ssh-files.ts'
 import { parseSshConfig } from '../src/remote/ssh-environment.ts'
 import { installRemoteSettings, readRemoteSettingsValue } from '../src/compat/remote-settings.ts'
@@ -72,12 +75,76 @@ describe.skipIf(process.platform === 'win32')('personal config store', () => {
     expect(() => loadPersonalManifest(inside)).toThrowError(/group\/other-writable/)
   })
 
-  it('compare-and-swap refuses a stale expected revision', () => {
+  it('rejects a relative path and a config-inside-bound-primary before any write', async () => {
+    await expect(savePersonalConfig(join('relative', 'remote-personal.json'), CONFIG(), 0))
+      .rejects.toThrowError(/must be absolute/)
+    const dir = tmp()
+    const inside = join(dir, 'remote-personal.json')
+    const bad = CONFIG()
+    bad.bindings = [{ primary: dir, environmentId: 'dev-box', rootId: 'app', path: '/srv/build', actions: ['read'] }]
+    await expect(savePersonalConfig(inside, bad, 0)).rejects.toThrowError(/must not lie inside/)
+    expect(existsSync(inside)).toBe(false)
+  })
+
+  it('refuses to write under a group-writable or symlinked parent before the file exists', async () => {
+    const loose = join(tmp(), 'loose')
+    mkdirSync(loose)
+    chmodSync(loose, 0o770)
+    const inside = join(loose, 'remote-personal.json')
+    await expect(savePersonalConfig(inside, CONFIG(), 0)).rejects.toThrowError(/group\/other-writable/)
+    expect(existsSync(inside)).toBe(false)
+    expect(existsSync(`${inside}.lock`)).toBe(false)
+    const real = join(tmp(), 'real')
+    mkdirSync(real)
+    const link = join(tmp(), 'link')
+    symlinkSync(real, link)
+    await expect(savePersonalConfig(join(link, 'remote-personal.json'), CONFIG(), 0)).rejects.toThrowError(/symlink/)
+    expect(readdirSync(real)).toEqual([])
+  })
+
+  it('an unsafe parent rejects before touching an existing file', async () => {
+    const dir = tmp()
+    const path = join(dir, 'remote-personal.json')
+    writeConfig(path, CONFIG())
+    const before = readFileSync(path, 'utf8')
+    chmodSync(dir, 0o770)
+    await expect(savePersonalConfig(path, CONFIG(1), 0)).rejects.toThrowError(/group\/other-writable/)
+    expect(readFileSync(path, 'utf8')).toBe(before)
+  })
+
+  it('serializes the CAS write under a kernel lease across OS processes', async () => {
+    const dir = tmp()
+    const path = join(dir, 'remote-personal.json')
+    const lock = join(realpathSync(dir), 'remote-personal.json.lock')
+    const childSource = fileURLToPath(new URL('./support/personal-lease-child.ts', import.meta.url))
+    const child = spawn(process.execPath, ['--experimental-transform-types', childSource, lock], { stdio: ['pipe', 'pipe', 'pipe'] })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once('error', reject)
+        child.stdout?.once('data', () => resolve())
+        child.once('exit', (code, signal) => reject(new Error(`lease child exited before ready (code=${String(code)} signal=${String(signal)})`)))
+      })
+      await expect(savePersonalConfig(path, CONFIG(0), 0)).rejects.toMatchObject({ code: 'personal-config-conflict' })
+      expect(existsSync(path)).toBe(false)
+    } finally {
+      child.kill('SIGKILL')
+      await new Promise<void>(resolve => {
+        if (child.exitCode !== null || child.signalCode !== null) { resolve(); return }
+        child.once('exit', () => resolve())
+      })
+    }
+    const saved = await savePersonalConfig(path, CONFIG(0), 0)
+    expect(saved.revision).toBe(0)
+    writeConfig(path, { ...CONFIG(0), revision: 1 })
+    await expect(savePersonalConfig(path, { ...CONFIG(0), revision: 2 }, 0)).rejects.toThrowError(/personal-config-conflict|revision/)
+  })
+
+  it('compare-and-swap refuses a stale expected revision', async () => {
     const path = join(tmp(), 'remote-personal.json')
-    savePersonalConfig(path, CONFIG(0), 0)
+    await savePersonalConfig(path, CONFIG(0), 0)
     writeConfig(path, CONFIG(1))
-    expect(() => savePersonalConfig(path, CONFIG(1), 0)).toThrowError(/personal-config-conflict|revision/)
-    const saved = savePersonalConfig(path, { ...CONFIG(1), revision: 2 }, 1)
+    await expect(savePersonalConfig(path, CONFIG(1), 0)).rejects.toThrowError(/personal-config-conflict|revision/)
+    const saved = await savePersonalConfig(path, { ...CONFIG(1), revision: 2 }, 1)
     expect(saved.revision).toBe(2)
   })
 
@@ -235,4 +302,51 @@ describe.skipIf(process.platform === 'win32')('credential store', () => {
     store.remove(view.id, () => false)
     expect(store.list()).toEqual([])
   })
+
+  it('defaultExec delivers options.input to the child stdin and always closes it', async () => {
+    const echo = 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>process.stdout.write(s))'
+    const { stdout } = await defaultExec(process.execPath, ['-e', echo], { input: 'stdin-bytes\n', timeoutMs: 5_000 })
+    expect(stdout).toBe('stdin-bytes\n')
+    const done = 'process.stdin.on("end",()=>process.stdout.write("done"));process.stdin.resume()'
+    const empty = await defaultExec(process.execPath, ['-e', done], { timeoutMs: 5_000 })
+    expect(empty.stdout).toBe('done')
+  })
+
+  it('defaultExec input reaches `ssh-keygen -lf -` (the host-key scan path)', async () => {
+    const keyPath = join(tmp(), 'scan-key')
+    await defaultExec('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', 'scan', '-f', keyPath], { timeoutMs: 30_000 })
+    const publicKey = readFileSync(`${keyPath}.pub`, 'utf8')
+    const { stdout } = await defaultExec('ssh-keygen', ['-lf', '-'], { input: publicKey, timeoutMs: 10_000 })
+    expect(stdout).toMatch(/SHA256:[A-Za-z0-9+/=]+/)
+  })
+
+  it('HostKeyScans feeds the scanned key line to `ssh-keygen -lf -` via stdin', async () => {
+    const inputs: string[] = []
+    const scans = new HostKeyScans(async (file, args, options) => {
+      if (file === 'ssh-keygen' && args[0] === '-lf' && args[1] === '-') {
+        inputs.push(String(options?.input))
+        return { stdout: `256 ${FP}(ED25519)\n`, stderr: '' }
+      }
+      return { stdout: 'host.example ssh-ed25519 AAAATEST\n', stderr: '' }
+    })
+    const { keys } = await scans.scan('host.example', 22)
+    expect(keys).toHaveLength(1)
+    expect(inputs).toEqual(['host.example ssh-ed25519 AAAATEST\n'])
+  })
+
+  it('a rejected import never copies the supplied passphrase into the error', async () => {
+    const root = join(tmp(), 'cred')
+    const store = new CredentialStore(root)
+    const source = join(tmp(), 'import-source')
+    await defaultExec('ssh-keygen', ['-t', 'ed25519', '-N', 'right-pass', '-C', 'repro', '-f', source], { timeoutMs: 30_000 })
+    const privateKey = readFileSync(source, 'utf8')
+    const passphrase = 'ZZ-SYNTHETIC-PASS-7a21'
+    let thrown: unknown
+    try { await store.importKey('repro', privateKey, passphrase) } catch (error) { thrown = error }
+    expect(thrown).toBeInstanceOf(CredentialError)
+    expect((thrown as CredentialError).code).toBe('credential-import-failed')
+    expect((thrown as Error).message).not.toContain(passphrase)
+  })
 })
+
+const FP = `SHA256:${'B'.repeat(43)}`

@@ -52,6 +52,12 @@ const ENV_A: SshEnvironmentView = {
   workspace: '/srv/app',
 }
 
+const ENV_HELPER: SshEnvironmentView = {
+  ...ENV_A,
+  environmentId: 'env-helper',
+  helper: { nodePath: '/usr/bin/node', helperPath: '/opt/dsh/helper.js', sha256: 'a'.repeat(64), protocol: 1 },
+}
+
 function sshState(overrides: Partial<SshStateView> = {}): SshStateView {
   return {
     mode: 'personal',
@@ -423,20 +429,54 @@ describe('the SSH management dialog', () => {
     expect((within(dialog).getByLabelText('ssh.field.user') as HTMLInputElement).value).toBe('deploy')
   })
 
-  it('materializes the documented exec and transfer defaults when the toggles are on', async () => {
+  it('disables the exec toggle without an installed helper and shows the guidance', async () => {
+    const ssh = fakeSsh(sshState())
+    const dialog = await withDialog({ ssh }, 'manage')
+    await within(dialog).findByText('ssh.environments')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.envEdit' }))
+    const editor = dialog.querySelector('.mrfw-sshForm') as HTMLElement
+    const toggle = within(editor).getByLabelText('ssh.field.allowExec') as HTMLInputElement
+    expect(toggle.disabled).toBe(true)
+    expect(toggle.checked).toBe(false)
+    expect(within(editor).getByText('ssh.field.allowExecHelper')).toBeTruthy()
+  })
+
+  it('disables the exec toggle on a new environment too — there is no helper yet', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'add')
     await within(dialog).findByText('ssh.add.stepTarget')
-    fireEvent.change(within(dialog).getByLabelText('ssh.field.environmentId'), { target: { value: 'env-exec' } })
-    fireEvent.change(within(dialog).getByLabelText('ssh.field.hostname'), { target: { value: 'h.internal' } })
-    fireEvent.change(within(dialog).getByLabelText('ssh.field.user'), { target: { value: 'ci' } })
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'ssh.field.alias' }))
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'ssh.field.alias' }), { target: { value: 'alias' } })
-    fireEvent.change(within(dialog).getByLabelText('ssh.field.workspace'), { target: { value: '/srv/x' } })
-    fireEvent.click(within(dialog).getByLabelText('ssh.field.allowExec'))
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
-    await within(dialog).findByRole('radio', { name: /SHA256:scanned/ })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.save' }))
+    const toggle = within(dialog).getByLabelText('ssh.field.allowExec') as HTMLInputElement
+    expect(toggle.disabled).toBe(true)
+    expect(within(dialog).getByText('ssh.field.allowExecHelper')).toBeTruthy()
+  })
+
+  it('resets the exec toggle when the helper target identity is edited away', async () => {
+    const ssh = fakeSsh(sshState({ environments: [ENV_HELPER] }))
+    const dialog = await withDialog({ ssh }, 'manage')
+    await within(dialog).findByText('ssh.environments')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.envEdit' }))
+    const editor = dialog.querySelector('.mrfw-sshForm') as HTMLElement
+    const toggle = within(editor).getByLabelText('ssh.field.allowExec') as HTMLInputElement
+    expect(toggle.disabled).toBe(false)
+    fireEvent.click(toggle)
+    expect(toggle.checked).toBe(true)
+    fireEvent.change(within(editor).getByLabelText('ssh.field.hostname'), { target: { value: 'other.internal' } })
+    const after = within(editor).getByLabelText('ssh.field.allowExec') as HTMLInputElement
+    expect(after.checked).toBe(false)
+    expect(after.disabled).toBe(true)
+  })
+
+  it('materializes the documented exec and transfer defaults when the toggles are on', async () => {
+    const ssh = fakeSsh(sshState({ environments: [ENV_HELPER] }))
+    const dialog = await withDialog({ ssh }, 'manage')
+    await within(dialog).findByText('ssh.environments')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.envEdit' }))
+    const editor = dialog.querySelector('.mrfw-sshForm') as HTMLElement
+    fireEvent.click(within(editor).getByLabelText('ssh.field.allowExec'))
+    fireEvent.click(within(editor).getByLabelText('ssh.field.allowTransfer'))
+    fireEvent.click(within(editor).getByRole('button', { name: 'ssh.scan' }))
+    await within(editor).findByRole('radio', { name: /SHA256:scanned/ })
+    fireEvent.click(within(editor).getByRole('button', { name: 'ssh.envSave' }))
     const saves = await callsOf(ssh, 'environmentSave')
     const draft = saves[0][2] as { exec: unknown; transfer: unknown }
     expect(draft.exec).toEqual({
