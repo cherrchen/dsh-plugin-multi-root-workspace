@@ -487,6 +487,16 @@ describe('the worktree suggestion notice rules', () => {
     expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\] \.mrfw-noticeSplitToggle\s*\{[^}]*width:\s*32px/s)
   })
 
+  it('parks one circular close badge on the top-right corner', () => {
+    // The two-class selector outranks the primitives' single-class `sm` rules,
+    // so the control stays a circle regardless of stylesheet order.
+    expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose\s*\{[^}]*position:\s*absolute[^}]*top:\s*0[^}]*right:\s*0[^}]*width:\s*20px[^}]*height:\s*20px[^}]*padding:\s*0[^}]*border-radius:\s*50%[^}]*transform:\s*translate\(50%,\s*-50%\)/s)
+    // The badge wears the card surface and the host's ink tokens, never a literal color.
+    expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose\s*\{[^}]*border:\s*0\.5px solid var\(--dsw-alias-border-l3\)[^}]*background:\s*var\(--dsw-alias-bg-layer-2\)[^}]*color:\s*var\(--dsw-alias-label-secondary\)/s)
+    expect(CSS).toMatch(/\.mrfw-notice \.mrfw-noticeClose:hover:not\(:disabled\)\s*\{[^}]*background:\s*var\(--dsw-alias-interactive-bg-hover\)/s)
+    expect(CSS).toMatch(/\.mrfw-notice \.mrfw-noticeClose:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--dsw-alias-brand-primary\)/s)
+  })
+
   it('fades in and honors reduced motion', () => {
     expect(CSS).toMatch(/@keyframes mrfw-notice-fade/)
     expect(CSS).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.mrfw-notice\s*\{\s*animation:\s*none/s)

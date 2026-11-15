@@ -416,7 +416,11 @@ describe('worktree notice: presentation and accessibility', () => {
     expect(screen.getByRole('button', { name: 'worktree.toastView' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'worktree.toastLater' })).toBeDefined()
     expect(screen.getByLabelText('worktree.toastLaterOptions')).toBeDefined()
-    expect(screen.queryByText('worktree.toastClose')).toBeNull()
+    // The close badge is its own control, not a member of the action group:
+    // screen readers must not announce it as one of the suggestion actions.
+    const actions = screen.getByRole('group', { name: 'worktree.toastActions' })
+    const close = screen.getByRole('button', { name: 'worktree.toastClose' })
+    expect(actions.contains(close)).toBe(false)
   })
 
   it('applies the default delay from the split text half', async () => {
@@ -447,6 +451,8 @@ describe('worktree notice: presentation and accessibility', () => {
     renderPrompt(fakeClient({ prompt: async () => answer([PROMPT]) }))
     const region = await screen.findByRole('region', { name: 'worktree.toastLabel' })
     await waitFor(() => expect(region.getAttribute('data-compact')).toBe('true'))
+    // The corner badge is part of the notice in both forms, not of the action row.
+    expect(screen.getByRole('button', { name: 'worktree.toastClose' })).toBeDefined()
   })
 })
 
@@ -540,6 +546,50 @@ describe('worktree notice: the operator closes or delays it', () => {
     })
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(screen.getByText('worktree.toast:2')).toBeDefined()
+  })
+
+  it('closes the notice on × without recording a delay or a dismissal', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    const seen = vi.fn(async () => ({ seen: 1 }))
+    const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    renderPrompt(fakeClient({ prompt, seen, snooze, resolve }))
+    await screen.findByText('worktree.toast')
+    await waitFor(() => expect(seen).toHaveBeenCalledWith('s1', ['p1']))
+    fireEvent.click(screen.getByRole('button', { name: 'worktree.toastClose' }))
+    await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(snooze).not.toHaveBeenCalled()
+    expect(resolve).not.toHaveBeenCalled()
+    // Closing records nothing: the display itself already claimed the candidates.
+    expect(seen).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a ×-closed notice closed when an in-flight reminder completion lands', async () => {
+    let finishSnooze: ((answer: Awaited<ReturnType<WorktreeClient['snooze']>>) => void) | undefined
+    const snooze = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['snooze']>>>((resolve) => {
+      finishSnooze = resolve
+    }))
+    renderPrompt(fakeClient({ prompt: async () => answer([PROMPT]), snooze }))
+    // The request starts from the split text half and stays in flight; the
+    // notice only closes once the host answers.
+    fireEvent.click(await screen.findByRole('button', { name: 'worktree.toastLater' }))
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: 'until-new-worktree' }))
+    fireEvent.click(screen.getByRole('button', { name: 'worktree.toastClose' }))
+    await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
+    // A skipped row would normally keep the notice alive for a retry; the ×
+    // belongs to a lifecycle that ended, so its completion owns nothing.
+    const refreshed: WorktreePromptView = { ...PROMPT, id: 'p2', viewRevision: 'v2' }
+    await act(async () => {
+      finishSnooze?.({
+        viewRevision: 'v2',
+        prompts: [refreshed],
+        resolved: [],
+        skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
+      })
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen.queryByText('worktree.toast')).toBeNull()
   })
 
   it('keeps the notice for a reminder choice the host skipped so it can be retried', async () => {

@@ -1631,6 +1631,45 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   padding: 0;
 }
 
+/* The close badge (ADR-0039 第二十五次修订): one perfect circle parked on the
+   card's top-right corner, half outside it. The two-class selector outranks the
+   primitives' single-class size rules, so the shape stays circular no matter
+   which stylesheet is injected last. */
+.mrfw-notice .mrfw-noticeClose {
+  position: absolute;
+  top: 0;
+  right: 0;
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  min-width: 0;
+  padding: 0;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  transform: translate(50%, -50%);
+}
+
+@media (hover: hover) {
+  .mrfw-notice .mrfw-noticeClose:hover:not(:disabled) {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
+}
+
+.mrfw-notice .mrfw-noticeClose:active:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-active);
+}
+
+/* The badge overhangs the card, so its focus ring may draw outside the surface. */
+.mrfw-notice .mrfw-noticeClose:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
 @keyframes mrfw-notice-fade {
   from { opacity: 0; }
   to { opacity: 1; }
