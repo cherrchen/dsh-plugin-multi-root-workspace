@@ -38,15 +38,17 @@ Host dsh-<environmentId>
   HostName <hostname>
   Port <port>
   User <user>
-  IdentityFile <credentialRoot>/keys/<accessKeyId ?? credentialId>
+  IdentityFile "<credentialRoot>/keys/<accessKeyId ?? credentialId>"
   IdentitiesOnly yes
-  UserKnownHostsFile <credentialRoot>/known_hosts
+  UserKnownHostsFile "<credentialRoot>/known_hosts"
   GlobalKnownHostsFile /dev/null
   StrictHostKeyChecking yes
   BatchMode yes
   ForwardAgent no
   UpdateHostKeys no
 ```
+
+生成的路径按 ssh_config 规则引用和转义，拒绝换行/NUL；支持凭据根含空格。OpenSSH 的 `-G` 会移除引号，因此 Host 仅在完整字段与已知托管 known_hosts 路径一致时将其保留为单个文件，不用预期路径覆盖其他解析结果。
 
 `sshConfigLink` 在 `~/.ssh/config` **首行**写入 `Include "<credentialRoot>/ssh_config"`（先备份为 `config.dsh-backup-<时间戳>`，幂等）。未链接而使用 managed 环境时连接报 `ssh-config-not-linked`。
 

@@ -12,6 +12,12 @@ export function managedHostAlias(environmentId: string): string {
   return `dsh-${environmentId}`
 }
 
+/** OpenSSH config quoting, not shell quoting. Newlines must never add directives. */
+function quotePath(path: string): string {
+  if (/[\r\n\0]/.test(path)) throw new Error('SSH config paths cannot contain line breaks or NUL')
+  return '"' + path.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
+}
+
 /** The ssh_config text for one managed environment. */
 export function renderHostBlock(environment: PersonalEnvironment, credentialRoot: string): string {
   const keyId = environment.credential.kind === 'managed'
@@ -22,9 +28,9 @@ export function renderHostBlock(environment: PersonalEnvironment, credentialRoot
     `  HostName ${environment.endpoint.hostname}`,
     `  Port ${environment.endpoint.port}`,
     `  User ${environment.endpoint.user}`,
-    `  IdentityFile ${join(credentialRoot, 'keys', keyId ?? 'none')}`,
+    `  IdentityFile ${quotePath(join(credentialRoot, 'keys', keyId ?? 'none'))}`,
     '  IdentitiesOnly yes',
-    `  UserKnownHostsFile ${join(credentialRoot, 'known_hosts')}`,
+    `  UserKnownHostsFile ${quotePath(join(credentialRoot, 'known_hosts'))}`,
     '  GlobalKnownHostsFile /dev/null',
     '  StrictHostKeyChecking yes',
     '  BatchMode yes',
@@ -58,7 +64,7 @@ export function recordKnownHost(credentialRoot: string, hostname: string, port: 
   writeFileSync(path, `${[...kept, ...lines].join('\n')}\n`, { mode: 0o600 })
 }
 
-const includeLine = (credentialRoot: string): string => `Include "${join(credentialRoot, 'ssh_config')}"`
+const includeLine = (credentialRoot: string): string => `Include ${quotePath(join(credentialRoot, 'ssh_config'))}`
 
 export interface LinkStatus {
   /** The managed config exists at all. */

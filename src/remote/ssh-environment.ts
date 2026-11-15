@@ -76,6 +76,7 @@ export interface SshEnvironmentManagerOptions {
    */
   readonly custody?: 'broker' | 'personal'
   readonly exec?: (file: string, args: readonly string[], input?: string) => Promise<{ stdout: string; stderr: string }>
+  readonly managedKnownHostsFile?: string | undefined
   readonly readFile?: (path: string) => string
 }
 
@@ -91,7 +92,7 @@ const defaultExec = (file: string, args: readonly string[], input?: string) => n
  * Parse `ssh -G` output into the fields the deployer must prove: the login,
  * the resolved hostname, every user known_hosts file, and the safety flags.
  */
-export function parseSshConfig(stdout: string, options: { relaxed?: boolean } = {}): SshHostIdentity {
+export function parseSshConfig(stdout: string, options: { relaxed?: boolean; managedKnownHostsFile?: string | undefined } = {}): SshHostIdentity {
   const fields: Record<string, string> = {}
   for (const line of stdout.split('\n')) {
     const match = /^(\S+)\s+(.*)$/.exec(line.trim())
@@ -100,7 +101,11 @@ export function parseSshConfig(stdout: string, options: { relaxed?: boolean } = 
   if (fields.user === undefined || fields.hostname === undefined) {
     throw new SshEnvironmentError('host-identity-unverifiable', `ssh -G resolved no user/hostname: ${JSON.stringify(stdout.slice(0, 200))}`)
   }
-  const files = (fields.userknownhostsfile ?? '').split(/\s+/).filter(file => file !== '' && file !== '/dev/null' && file.toLowerCase() !== 'none')
+  // ssh -G removes filename quotes. The generated managed directive names
+  // exactly one known path; preserve it only on a complete field match.
+  const userFiles = fields.userknownhostsfile === options.managedKnownHostsFile && options.managedKnownHostsFile !== undefined
+    ? [options.managedKnownHostsFile] : (fields.userknownhostsfile ?? '').split(/\s+/)
+  const files = userFiles.filter(file => file !== '' && file !== '/dev/null' && file.toLowerCase() !== 'none')
   const globalFiles = (fields.globalknownhostsfile ?? '').split(/\s+/).filter(file => file !== '' && file !== '/dev/null' && file.toLowerCase() !== 'none')
   const strict = (fields.stricthostkeychecking ?? '').toLowerCase()
   const batchMode = (fields.batchmode ?? '').toLowerCase()
@@ -159,6 +164,7 @@ export class SshEnvironmentManager {
   private readonly gate: SshCapability
   private readonly allowUnattested: boolean
   private readonly brokerCustody: boolean
+  private readonly managedKnownHostsFile: string | undefined
   private readonly personalCustody: boolean
   private readonly exec: NonNullable<SshEnvironmentManagerOptions['exec']>
   private readonly readFile: (path: string) => string
@@ -176,6 +182,7 @@ export class SshEnvironmentManager {
     })
     this.allowUnattested = options.allowUnattestedForTesting === true || options.custody === 'personal'
     this.brokerCustody = options.custody === 'broker'
+    this.managedKnownHostsFile = options.managedKnownHostsFile
     this.personalCustody = options.custody === 'personal'
     this.exec = options.exec ?? defaultExec
     this.readFile = options.readFile ?? (path => readFileSync(path, 'utf8'))
@@ -375,7 +382,7 @@ export class SshEnvironmentManager {
     } catch (error) {
       throw new SshEnvironmentError('host-identity-unverifiable', `ssh -G ${host} failed: ${error instanceof Error ? error.message : String(error)}`)
     }
-    const identity = parseSshConfig(stdout, { relaxed: this.personalCustody })
+    const identity = parseSshConfig(stdout, { relaxed: this.personalCustody, managedKnownHostsFile: this.managedKnownHostsFile })
     // A managed `dsh-*` alias that resolves to itself means the Include link
     // is absent (ADR-0041 §2): refuse with the actionable code.
     if (this.personalCustody && host.startsWith('dsh-') && identity.hostname === host) {

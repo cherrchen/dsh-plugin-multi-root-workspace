@@ -8,6 +8,7 @@
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/remote-tools
  */
+import { join } from 'node:path'
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-permission-presets'
@@ -96,7 +97,8 @@ export function apply(ctx: Context, config: Config = {}): void {
       }
       if (mode === 'personal') {
         const { SshEnvironmentManager } = await import('./ssh-environment.ts')
-        const manager = new SshEnvironmentManager({ manifest, logger: scope.logger, custody: 'personal' })
+        const manager = new SshEnvironmentManager({ manifest, logger: scope.logger, custody: 'personal',
+          managedKnownHostsFile: scope.multiRootRegistry.remoteCredentialRoot === undefined ? undefined : join(scope.multiRootRegistry.remoteCredentialRoot, 'known_hosts') })
         yield () => manager.disposeAll()
         mountRemoteTools(scope, manager)
         return
