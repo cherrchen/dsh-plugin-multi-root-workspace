@@ -195,6 +195,11 @@ export async function runRemoteCommand(
   }
   if ('result' in launch) return launch.result
   const { operationId, handle, stdout, stderr } = launch.launched
+  // Transport loss can arrive before the start acknowledgement, while the exit
+  // promise is not part of the current race yet. Keep that early rejection from
+  // surfacing as an unhandled rejection; the later await still observes it.
+  const exited = handle.exited
+  void exited.catch(() => {})
 
   // Observe from spawn, including the asynchronous start acknowledgement.
   // A notification is only a reason to re-admit; it never grants authority.
@@ -236,12 +241,15 @@ export async function runRemoteCommand(
   signal.addEventListener('abort', onAbort, { once: true })
   if (signal.aborted) onAbort()
   void checkGrant() // closes the spawn -> subscribe race
+  // A lost transport must not wait for an acknowledgement that will never
+  // arrive; a normal early exit keeps waiting for the start reply.
+  const lossBeforeStart = exited.then(() => undefined, error => { throw error })
   try {
-    try { await Promise.race([handle.started, deadline.promise]) } catch (error) {
+    try { await Promise.race([handle.started, lossBeforeStart, deadline.promise]) } catch (error) {
       if (error instanceof RemoteConnectionLost) throw error
       return { ...base, operationId, status: 'admitted-may-start', reason: error instanceof Error ? error.message : String(error) }
     }
-    const exit = await Promise.race([handle.exited, deadline.promise])
+    const exit = await Promise.race([exited, deadline.promise])
     const confirmed = await Promise.race([handle.waitForExit(prep.deployment.terminateGraceMs), deadline.promise])
     return {
       ...base, operationId, status: confirmed ? 'scope-exited' : 'exited',

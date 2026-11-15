@@ -241,6 +241,26 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     expect(state.handles[0]!.terminateCalls).toBe(0)
   })
 
+  it('handles transport loss before a delayed start acknowledgement', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const started = Promise.withResolvers<void>()
+    const spawn = backend.spawn
+    backend.spawn = (...args) => {
+      const handle = spawn(...args)
+      Object.defineProperty(handle, 'started', { value: started.promise })
+      return handle
+    }
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    const lostAt = Date.now()
+    state.handles[0]!.lose()
+    // The start acknowledgement never arrives: loss alone must report unknown.
+    await expect(pending).resolves.toMatchObject({ status: 'unknown', reconcileId: expect.any(String), operationId: expect.any(String) })
+    expect(Date.now() - lostAt).toBeLessThan(1_000)
+    expect(state.handles[0]!.terminateCalls).toBe(0)
+  })
+
   it('refuses a cwd the production verifyCwd rejects before any confine or spawn', async () => {
     const stack = await mount()
     const { backend, state } = fakeBackend()

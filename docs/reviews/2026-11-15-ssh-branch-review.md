@@ -94,9 +94,23 @@ pnpm exec vitest run tests/review-ssh-findings.spec.ts tests/review-ssh-client.s
 
 脚本需要 macOS 的 `/usr/libexec/sftp-server` 和 OpenSSH，不连接真实远端、不读取用户凭据。修复后的正式回归测试断言正确行为，不能再用这些历史错误断言判定修复是否通过。
 
+## 修复后全量复验
+
+R1–R10 修复完成后，在分支 HEAD（含收尾修复）以宿主权限重跑：
+
+| 检查 | 修复后结果 |
+| --- | --- |
+| build / compat:check / lint / typecheck / pack:check / docs:check | 全部通过 |
+| 全量 `pnpm test` | 123 个文件通过、8 个跳过；1875 用例通过、132 跳过、0 失败 |
+| `pnpm kernel:probe` | 本机 Seatbelt 真实约束命令通过；bwrap/Landlock 本机未安装，按设计不要求 |
+| `pnpm smoke` | behavior 137、journey 92，全通过 |
+| `pnpm smoke:packed` | packed behavior battery 全通过 |
+
+复验再次确认了 IPC 的沙箱语义：在 Agent sandbox 内运行 follower 相关套件会得到 `registry IPC refuses a different user or sandboxed peer`（本次涉及 11 个文件、21 个用例），这是内核 IPC 对沙箱对端的预期拒绝，不是代码缺陷；宿主权限下同一组测试全部通过。非 IPC 套件在沙箱内同样通过。
+
 ## 修复追踪
 
-用户已授权连续逐项修复、每项验证和独立提交。完成后逐项在此记录结果，最终补充全量复验。
+用户已授权连续逐项修复、每项验证和独立提交。逐项结果如下，全量复验见上一节。
 
 - R1 已修复：SFTP 强制主机验证、禁止 agent 转发与自动更新主机密钥。真实 OpenSSH 配置解析回归和 SFTP 套件通过。
 
@@ -117,3 +131,5 @@ pnpm exec vitest run tests/review-ssh-findings.spec.ts tests/review-ssh-client.s
 - R9 已修复：托管 IdentityFile、UserKnownHostsFile 与 Include 路径正确引用；保留 ssh -G 去引号后的完整托管 known_hosts 路径。真实 OpenSSH Include/解析回归与相关套件通过。
 
 - R10 已修复：按会话/模式/可管理状态/client 绑定异步作用域，状态读写使用请求世代；旧变更返回 false，不能清空新表单。逆序读取、旧错误、跨会话/模式变更回归与客户端套件通过。
+
+- C1 已修复（收尾复验新增）：传输在启动确认前断开时，退出 promise 的拒绝没有被任何观察者接住，Vitest 报 unhandled rejection，且调用要等到超时才结束。现在 spawn 后立即挂接退出拒绝，并让启动阶段与退出竞速；回归断言断线后 1 秒内返回 `unknown`、不等待启动确认、不发送 terminate。
