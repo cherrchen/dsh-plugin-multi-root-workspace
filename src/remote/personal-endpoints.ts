@@ -4,6 +4,7 @@
  * AND the custody mode is `personal`; every mutation answers the refreshed
  * `sshState` and no answer ever carries key or password bytes.
  */
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { MultiRootRegistry } from '../registry.ts'
 import { RemoteAdmissionError } from './contract.ts'
@@ -93,14 +94,14 @@ function findEnvironment(config: PersonalConfig, environmentId: string): Persona
  * draw on this single resolution so they can never disagree.
  */
 async function sshConfigIdentity(
-  exec: ExecFile, alias: string,
+  exec: ExecFile, alias: string, managedKnownHostsFile: string,
 ): Promise<{ readonly endpoint: { readonly hostname: string; readonly port: number; readonly user: string }; readonly fingerprint: string }> {
   const { hostKeyFingerprint, parseSshConfig } = await import('./ssh-environment.ts')
   const execAdapter = async (file: string, args: readonly string[], input?: string) =>
     await exec(file, args, { ...(input === undefined ? {} : { input }) })
   let identity
   try {
-    identity = parseSshConfig((await execAdapter('ssh', ['-G', alias])).stdout, { relaxed: true })
+    identity = parseSshConfig((await execAdapter('ssh', ['-G', alias])).stdout, { relaxed: true, managedKnownHostsFile })
   } catch (error) {
     throw new RemoteAdmissionError('host-identity-unverifiable', error instanceof Error ? error.message : String(error))
   }
@@ -157,7 +158,7 @@ async function runPersonalEndpoint(
         // Alias scan: the fingerprint lives in the user's own known_hosts,
         // so no network probe and no token — save re-runs the same
         // resolution and compares the confirmed fingerprint.
-        const resolved = await sshConfigIdentity(exec, call.alias)
+        const resolved = await sshConfigIdentity(exec, call.alias, join(paths.credentialRoot, 'known_hosts'))
         return { token: '', keys: [{ type: 'known-hosts', fingerprint: resolved.fingerprint }], endpoint: resolved.endpoint }
       }
       const { token, keys } = await activeScans.scan(call.hostname!, call.port)
@@ -178,7 +179,7 @@ async function runPersonalEndpoint(
       if (draft.credential.kind === 'ssh-config') {
         // R4: never trust the draft's endpoint — resolve the user's own alias
         // exactly as the scan did, then compare the confirmed fingerprint.
-        const resolved = await sshConfigIdentity(exec, draft.credential.alias)
+        const resolved = await sshConfigIdentity(exec, draft.credential.alias, join(paths.credentialRoot, 'known_hosts'))
         draft.endpoint = resolved.endpoint
         if (resolved.fingerprint !== call.fingerprint) {
           throw new RemoteAdmissionError('host-key-mismatch', 'the confirmed fingerprint does not match the user known_hosts')

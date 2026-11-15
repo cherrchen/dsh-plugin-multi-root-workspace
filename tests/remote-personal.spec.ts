@@ -5,7 +5,7 @@
  * POSIX-only: the file-protection checks require a POSIX uid.
  */
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -168,13 +168,27 @@ describe.skipIf(process.platform === 'win32')('managed ssh files', () => {
     const managed = { ...ENV, credential: { kind: 'managed' as const, credentialId: 'aa11bb22cc33' } }
     const block = renderHostBlock(managed, root)
     expect(block).toContain('Host dsh-dev-box')
-    expect(block).toContain(`IdentityFile ${join(root, 'keys', 'aa11bb22cc33')}`)
+    expect(block).toContain(`IdentityFile "${join(root, 'keys', 'aa11bb22cc33')}"`)
     expect(block).toContain('IdentitiesOnly yes')
     expect(block).toContain('BatchMode yes')
     renderSshConfig({ schemaVersion: 1, revision: 0, environments: [managed], bindings: [] }, root)
     const rendered = readFileSync(join(root, 'ssh_config'), 'utf8')
     expect(rendered).toContain('Host dsh-dev-box')
     expect(statSync(join(root, 'ssh_config')).mode & 0o077).toBe(0)
+  })
+
+  it('loads generated config and known_hosts paths containing spaces through real OpenSSH', () => {
+    const root = join(tmp(), 'credentials with spaces')
+    const home = tmp()
+    mkdirSync(root, { mode: 0o700 })
+    const managed = { ...ENV, credential: { kind: 'managed' as const, credentialId: 'aa11bb22cc33' } }
+    renderSshConfig({ schemaVersion: 1, revision: 0, environments: [managed], bindings: [] }, root)
+    link(root, home)
+    const output = execFileSync('ssh', ['-G', '-F', join(home, '.ssh', 'config'), 'dsh-dev-box'], { encoding: 'utf8' })
+    expect(output).toContain(`identityfile ${join(root, 'keys', 'aa11bb22cc33')}`)
+    expect(parseSshConfig(output, { managedKnownHostsFile: join(root, 'known_hosts') }).knownHostsFiles).toEqual([join(root, 'known_hosts')])
+    const other = output.replace(join(root, 'known_hosts'), '/other/known_hosts')
+    expect(parseSshConfig(other, { managedKnownHostsFile: join(root, 'known_hosts') }).knownHostsFiles).toEqual(['/other/known_hosts'])
   })
 
   it('link() prepends the Include line once and backs up the original', () => {
