@@ -44,6 +44,8 @@ active：
 
 - [2026-11-15-worktree-dialog-redesign.md](./active/2026-11-15-worktree-dialog-redesign.md) — Worktree 确认 Dialog 加宽、候选连续列表、删除 inherit 说明行、逐行权限选择器（默认 inherit，扩 `accesses` 契约与 Registry grant）、Git 分支展示与 footer primitives 下拉；决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十二次修订2026-11-15)。
 
+- [2026-11-15-worktree-review-fixes.md](./active/2026-11-15-worktree-review-fixes.md) — PR #60 评审修复：follower 的 `addNew` IPC 接受 `read-only`/`read-write`、Files 管理器透传 Worktree 手动入口 props、复用候选记录时刷新主 checkout 分支展示（`mainHead` 仍不参与授权）；含核验账本与退出验收机制。
+
 - [2026-11-14-hero-entry-adaptive-width.md](./active/2026-11-14-hero-entry-adaptive-width.md) — 新会话 Hero 入口按行内可用宽度自适应：探针测量行内剩余空间、`max-width` 夹取到余量、余量 < 88px 退化为 28×28 图标；不改 DSH、探针失败回落到 `v0.1.19` 形态。决策修订见 [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)。
 
 - [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) — P1–P7 实施 worktree 附加根建议、实验性默认关闭的插件开关与手动清理（B），P8–P10 实施 linked worktree 的主 checkout 授权（A）；第十九次修订加入单/多候选提示分流。决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md)，进度见路线账本；随 `v0.1.17` 发版。
