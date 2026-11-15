@@ -89,7 +89,7 @@ export interface RemoteCopyResult {
  */
 export interface RemoteConnectionManager {
   readonly deployment: DeploymentManifest
-  openSftp(environmentId: string): Promise<{ client: SftpClient; generation: string }>
+  openSftp(environmentId: string, signal?: AbortSignal): Promise<{ client: SftpClient; generation: string }>
   sftpGenerationOf(environmentId: string): string
 }
 
@@ -113,6 +113,65 @@ interface Admitted {
 interface CopyBudget {
   readonly maxBytes: number
   readonly timeoutMs: number
+}
+
+/** One total I/O budget, plus a bounded, cancellation-independent cleanup window. */
+class TransferIO {
+  private readonly deadline: number
+  private cleanupDeadline: number | undefined
+  constructor(timeoutMs: number, private readonly signal: AbortSignal) { this.deadline = Date.now() + timeoutMs }
+
+  async run<T>(action: () => Promise<T>, onInterrupt?: () => void, cleanup = false): Promise<T> {
+    if (cleanup) this.cleanupDeadline ??= Date.now() + 1_000
+    const remaining = (cleanup ? this.cleanupDeadline! : this.deadline) - Date.now()
+    const aborted = () => !cleanup && this.signal.aborted
+    const failure = () => new RemoteCopyError(aborted() ? 'cancelled' : 'transfer-timeout', 'transfer I/O interrupted')
+    if (aborted() || remaining <= 0) throw failure()
+    return await new Promise<T>((resolve, reject) => {
+      let settled = false
+      const finish = (body: () => void) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        this.signal.removeEventListener('abort', interrupt)
+        body()
+      }
+      const interrupt = () => finish(() => {
+        try { onInterrupt?.() } catch { /* failure still settles the operation */ }
+        reject(failure())
+      })
+      const timer = setTimeout(interrupt, remaining)
+      if (!cleanup) this.signal.addEventListener('abort', interrupt, { once: true })
+      Promise.resolve().then(() => { if (settled) throw failure(); return action() }).then(value => finish(() => resolve(value)), error => finish(() => reject(error)))
+    })
+  }
+
+  clients(client: SftpClient): { client: SftpClient; cleanupClient: SftpClient } {
+    let broken = false
+    const wrap = (cleanup: boolean) => new Proxy(client, {
+      get: (target, key) => {
+        const value = Reflect.get(target, key, target)
+        if (typeof value !== 'function' || key === 'dispose') return typeof value === 'function' ? value.bind(target) : value
+        return async (...args: unknown[]) => {
+          if (broken) throw new SftpConnectionLost('the interrupted SFTP generation cannot be reused')
+          try {
+            return await this.run(async () => Reflect.apply(value, target, args), () => {
+              broken = true
+              target.dispose?.()
+            }, cleanup)
+          } catch (error) {
+            // CREATE or LINK may already have happened. Never report a clean
+            // refusal, delete an unverified name, or retry publication.
+            if (broken && (key === 'hardlink' || (key === 'open' && (Number(args[1]) & P_CREAT) !== 0))) {
+              throw new SftpConnectionLost('the SFTP mutation acknowledgement was lost')
+            }
+            throw error
+          }
+        }
+      },
+    })
+    return { client: wrap(false), cleanupClient: wrap(true) }
+  }
 }
 
 /** SHA-256 + byte count; the digest is finalized lazily so failures can report it. */
@@ -287,11 +346,13 @@ interface RemoteEndpoint {
   readonly environmentId: string
   readonly root: string
   readonly client: SftpClient
+  readonly cleanupClient: SftpClient
   readonly generation: string
   generationNow(): string
 }
 
-async function openSftpEndpoint(deps: RemoteCopyDeps, environment: RemoteEnvironment, admission: AdmittedRemoteEndpoint): Promise<RemoteEndpoint> {
+async function openSftpEndpoint(ctx: CopyContext, environment: RemoteEnvironment, admission: AdmittedRemoteEndpoint): Promise<RemoteEndpoint> {
+  const { deps, io } = ctx
   let client: SftpClient | undefined
   let generation = 'stale'
   if (deps.sftpFor !== undefined) {
@@ -299,7 +360,13 @@ async function openSftpEndpoint(deps: RemoteCopyDeps, environment: RemoteEnviron
     client = injected?.client
     generation = injected?.generation ?? 'stale'
   } else {
-    const opened = await deps.manager.openSftp(environment.environmentId).catch((error: unknown) => {
+    let interrupted = false
+    const openingSignal = new AbortController()
+    const opened = await io.run(async () => {
+      const session = await deps.manager.openSftp(environment.environmentId, openingSignal.signal)
+      if (interrupted) { session.client.dispose(); throw new RemoteCopyError('transfer-timeout', 'SFTP opened after interruption') }
+      return session
+    }, () => { interrupted = true; openingSignal.abort() }).catch((error: unknown) => {
       throw new RemoteCopyError(codeOf(error), `cannot open the SFTP session for "${environment.environmentId}": ${error instanceof Error ? error.message : String(error)}`)
     })
     client = opened.client
@@ -309,7 +376,7 @@ async function openSftpEndpoint(deps: RemoteCopyDeps, environment: RemoteEnviron
   return {
     environmentId: environment.environmentId,
     root: admission.displayPath,
-    client,
+    ...io.clients(client),
     generation,
     generationNow: () => deps.generationFor?.(environment.environmentId) ?? deps.manager.sftpGenerationOf(environment.environmentId),
   }
@@ -431,7 +498,7 @@ class RemoteSource {
     }
   }
 
-  async close(): Promise<void> { await this.endpoint.client.close(this.handle).catch(() => {}) }
+  async close(): Promise<void> { await this.endpoint.cleanupClient.close(this.handle).catch(() => {}) }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -468,6 +535,7 @@ class RemoteStage {
     const path = posixJoin(parent, `.dsh-staging-${operationId}`)
     let handle: Buffer
     try { handle = await endpoint.client.open(path, P_WRITE | P_CREAT | P_EXCL, 0o600) } catch (error) {
+      if (error instanceof SftpConnectionLost) throw error
       throw new RemoteCopyError('staging-unavailable', `cannot create the remote staging object: ${error instanceof Error ? error.message : String(error)}`)
     }
     return new RemoteStage(endpoint, target, parent, path, handle)
@@ -489,7 +557,7 @@ class RemoteStage {
   private async closeHandle(): Promise<void> {
     const handle = this.handle
     this.handle = undefined
-    if (handle !== undefined) await this.endpoint.client.close(handle).catch(() => {})
+    if (handle !== undefined) await this.endpoint.cleanupClient.close(handle).catch(() => {})
   }
 
   /** Read the staged bytes back from the server; never trusts the sender's hash. */
@@ -510,7 +578,7 @@ class RemoteStage {
       if (bytes === expectedBytes && (await this.endpoint.client.read(handle, expectedBytes, 1)).length !== 0) {
         bytes = -1
       }
-    } finally { await this.endpoint.client.close(handle).catch(() => {}) }
+    } finally { await this.endpoint.cleanupClient.close(handle).catch(() => {}) }
     if (bytes === expectedBytes) {
       await assertRemoteParent(this.endpoint.client, this.endpoint.root, this.parent)
       await assertRemoteStaging(this.endpoint.client, this.path, this.written, expectedBytes)
@@ -556,8 +624,8 @@ class RemoteStage {
   /** Only this operation's exact name, only while the same SFTP generation lives. */
   async cleanup(): Promise<'removed' | 'residual'> {
     if (this.endpoint.generationNow() !== this.endpoint.generation) return 'residual'
-    try { await assertRemoteParent(this.endpoint.client, this.endpoint.root, this.parent) } catch { return 'residual' }
-    try { await this.endpoint.client.remove(this.path); return 'removed' } catch (error) {
+    try { await assertRemoteParent(this.endpoint.cleanupClient, this.endpoint.root, this.parent) } catch { return 'residual' }
+    try { await this.endpoint.cleanupClient.remove(this.path); return 'removed' } catch (error) {
       return error instanceof SftpStatusError && error.code === SSH_FX_NO_SUCH_FILE ? 'removed' : 'residual'
     }
   }
@@ -575,6 +643,7 @@ interface CopyContext {
   readonly request: RemoteCopyRequest
   readonly toolName: string
   readonly signal: AbortSignal
+  readonly io: TransferIO
   readonly prepared: Admitted
   readonly stage: (stage: RemoteCopyStage) => void | Promise<void>
   readonly fail: (code: string, stage: RemoteCopyStage, extra?: Partial<RemoteCopyResult>) => RemoteCopyResult
@@ -589,7 +658,7 @@ async function copyLocalToRemote(ctx: CopyContext, destinationEnvironment: Remot
   try { source = openLocalSource(localRoot(ctx.registry, ctx.request.session, ctx.request.from.rootId), ctx.request.from.relativePath, budget.maxBytes) }
   catch (error) { return ctx.fail(codeOf(error), 'source') }
   let endpoint: RemoteEndpoint | undefined
-  try { endpoint = await openSftpEndpoint(ctx.deps, destinationEnvironment, ctx.prepared.destination) }
+  try { endpoint = await openSftpEndpoint(ctx, destinationEnvironment, ctx.prepared.destination) }
   catch (error) { closeQuietly(source.fd); return ctx.fail(codeOf(error), 'preflight') }
   const digest = new Digest()
   const target = posixJoin(endpoint.root, ctx.request.to.relativePath)
@@ -598,7 +667,7 @@ async function copyLocalToRemote(ctx: CopyContext, destinationEnvironment: Remot
   let committed = false
   try {
     try { staging = await RemoteStage.begin(endpoint, target, ctx.prepared.operationId) }
-    catch (error) { return ctx.fail(codeOf(error), 'preflight') }
+    catch (error) { return ctx.fail(codeOf(error), 'preflight', error instanceof SftpConnectionLost ? { status: 'unknown', staging: 'unknown', reconcileId: ctx.prepared.operationId } : {}) }
     stagingStatus = 'residual'
     await ctx.stage('preflight')
     const deadline = Date.now() + budget.timeoutMs
@@ -624,7 +693,7 @@ async function copyLocalToRemote(ctx: CopyContext, destinationEnvironment: Remot
       return ctx.fail('verify-mismatch', 'verify', { bytes: digest.bytes, sha256: digest.sha256, staging: stagingStatus })
     }
     await ctx.stage('verify')
-    const again = await admit(ctx.registry, ctx.request, ctx.toolName).catch(() => undefined)
+    const again = await ctx.io.run(() => admit(ctx.registry, ctx.request, ctx.toolName)).catch(() => undefined)
     if (ctx.signal.aborted || again === undefined || !sameAdmission(ctx.prepared, again) || endpoint.generationNow() !== endpoint.generation) {
       stagingStatus = await staging.cleanup()
       return result('cancelled', { ...ctx.base, code: ctx.signal.aborted ? 'cancelled' : 'admission-changed', bytes: digest.bytes, sha256: digest.sha256, stage: 'publish', staging: stagingStatus })
@@ -663,7 +732,7 @@ async function copyRemoteToLocal(ctx: CopyContext, sourceEnvironment: RemoteEnvi
     )
   } catch (error) { return ctx.fail(codeOf(error), 'admission') }
   let endpoint: RemoteEndpoint
-  try { endpoint = await openSftpEndpoint(ctx.deps, sourceEnvironment, ctx.prepared.source) }
+  try { endpoint = await openSftpEndpoint(ctx, sourceEnvironment, ctx.prepared.source) }
   catch (error) { return ctx.fail(codeOf(error), 'preflight') }
   const digest = new Digest()
   let source: RemoteSource | undefined
@@ -675,7 +744,7 @@ async function copyRemoteToLocal(ctx: CopyContext, sourceEnvironment: RemoteEnvi
     catch (error) { return ctx.fail(codeOf(error), 'source') }
     await ctx.stage('source')
     try { sink = LocalBinarySink.open(authority, ctx.request.to.relativePath, ctx.prepared.operationId, budget.maxBytes) }
-    catch (error) { return ctx.fail(codeOf(error), 'preflight') }
+    catch (error) { return ctx.fail(codeOf(error), 'preflight', error instanceof SftpConnectionLost ? { status: 'unknown', staging: 'unknown', reconcileId: ctx.prepared.operationId } : {}) }
     stagingStatus = 'residual'
     await ctx.stage('preflight')
     const deadline = Date.now() + budget.timeoutMs
@@ -703,7 +772,7 @@ async function copyRemoteToLocal(ctx: CopyContext, sourceEnvironment: RemoteEnvi
       return ctx.fail('verify-mismatch', 'verify', { bytes: digest.bytes, sha256: digest.sha256, staging: stagingStatus })
     }
     await ctx.stage('verify')
-    const again = await admit(ctx.registry, ctx.request, ctx.toolName).catch(() => undefined)
+    const again = await ctx.io.run(() => admit(ctx.registry, ctx.request, ctx.toolName)).catch(() => undefined)
     let authorityAgain: LocalDestinationAuthority | undefined
     try {
       authorityAgain = ctx.registry.localTransferDestination(
@@ -747,8 +816,8 @@ async function copyRemoteToRemote(ctx: CopyContext): Promise<RemoteCopyResult> {
   let from: RemoteEndpoint
   let to: RemoteEndpoint
   try {
-    from = await openSftpEndpoint(ctx.deps, sourceEnvironment, ctx.prepared.source)
-    to = await openSftpEndpoint(ctx.deps, destinationEnvironment, ctx.prepared.destination)
+    from = await openSftpEndpoint(ctx, sourceEnvironment, ctx.prepared.source)
+    to = await openSftpEndpoint(ctx, destinationEnvironment, ctx.prepared.destination)
   } catch (error) { return ctx.fail(codeOf(error), 'preflight') }
   const digest = new Digest()
   let source: RemoteSource | undefined
@@ -761,7 +830,7 @@ async function copyRemoteToRemote(ctx: CopyContext): Promise<RemoteCopyResult> {
     catch (error) { return ctx.fail(codeOf(error), 'source') }
     await ctx.stage('source')
     try { stage = await RemoteStage.begin(to, target, ctx.prepared.operationId) }
-    catch (error) { return ctx.fail(codeOf(error), 'preflight') }
+    catch (error) { return ctx.fail(codeOf(error), 'preflight', error instanceof SftpConnectionLost ? { status: 'unknown', staging: 'unknown', reconcileId: ctx.prepared.operationId } : {}) }
     stagingStatus = 'residual'
     await ctx.stage('preflight')
     const deadline = Date.now() + budget.timeoutMs
@@ -800,7 +869,7 @@ async function copyRemoteToRemote(ctx: CopyContext): Promise<RemoteCopyResult> {
       return ctx.fail('verify-mismatch', 'verify', { bytes: digest.bytes, sha256: digest.sha256, staging: stagingStatus })
     }
     await ctx.stage('verify')
-    const again = await admit(ctx.registry, ctx.request, ctx.toolName).catch(() => undefined)
+    const again = await ctx.io.run(() => admit(ctx.registry, ctx.request, ctx.toolName)).catch(() => undefined)
     if (ctx.signal.aborted || again === undefined || !sameAdmission(ctx.prepared, again)
       || from.generationNow() !== from.generation || to.generationNow() !== to.generation) {
       stagingStatus = await stage.cleanup()
@@ -841,7 +910,11 @@ const endpointLabel = (endpoint: RemoteCopyEndpoint): string =>
 export async function runRemoteCopy(
   registry: MultiRootRegistry, deps: RemoteCopyDeps, request: RemoteCopyRequest, toolName: string, signal: AbortSignal,
 ): Promise<RemoteCopyResult> {
-  const stage = deps.onStage ?? (() => undefined)
+  const budgets = deps.manager.deployment.environments
+    .filter(env => env.environmentId === request.from.environmentId || env.environmentId === request.to.environmentId)
+    .flatMap(env => env.transfer === undefined ? [] : [env.transfer.timeoutMs])
+  const io = new TransferIO(budgets.length === 0 ? 60_000 : Math.min(...budgets), signal)
+  const stage = async (name: RemoteCopyStage) => { await io.run(async () => { await deps.onStage?.(name) }) }
   let operationId = 'none'
   const base = () => ({ operationId, from: endpointLabel(request.from), to: endpointLabel(request.to) })
   const fail = (code: string, stageName: RemoteCopyStage, extra: Partial<RemoteCopyResult> = {}): RemoteCopyResult =>
@@ -856,13 +929,13 @@ export async function runRemoteCopy(
   if (sourceLocal && destinationLocal) return fail('direction-unsupported', 'admission')
 
   let prepared: Admitted
-  try { prepared = await admit(registry, request, toolName) }
+  try { prepared = await io.run(() => admit(registry, request, toolName)) }
   catch (error) { return fail(codeOf(error), 'admission') }
   operationId = prepared.operationId
-  await stage('admission')
+  try { await stage('admission') } catch (error) { return fail(codeOf(error), 'admission') }
   if (signal.aborted) return fail('cancelled', 'admission')
   const ctx: CopyContext = {
-    registry, deps, request, toolName, signal, prepared, stage, fail,
+    registry, deps, request, toolName, signal, io, prepared, stage, fail,
     base: { operationId, from: endpointLabel(request.from), to: endpointLabel(request.to) },
   }
   if (sourceLocal) {

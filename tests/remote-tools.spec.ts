@@ -78,7 +78,7 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
     await expect(registerRemote(world, 'build', 'app')).rejects.toThrow(/no remote endpoint verifier is configured/)
   })
 
-  it('stops new calls and drains staging before the tools row is removed', async () => {
+  it('stops new calls and reports interrupted staging before the tools row is removed', async () => {
     world = await mountRemoteTools(fixture)
     const mounted = world
     await registerRemote(mounted, 'build', 'app')
@@ -103,7 +103,7 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
     } finally {
       release.resolve()
     }
-    await expect(copying).resolves.toMatchObject({ code: 'cancelled', staging: 'removed' })
+    await expect(copying).resolves.toMatchObject({ code: 'cancelled', staging: 'residual' })
     await unloaded
     expect(remote.read('/srv/root/rollback.txt')).toBeUndefined()
     expect(remote.sftpCalls.some(call => call.startsWith('hardlink '))).toBe(false)
