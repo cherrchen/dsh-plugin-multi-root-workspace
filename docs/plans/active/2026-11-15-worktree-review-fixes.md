@@ -1,6 +1,6 @@
 # Worktree 发现建议评审修复（PR #60）：Follower 授权、Files 手动入口与主 checkout 分支刷新
 
-> 状态：**进行中**（2026-11-15，分支 `feat/workspace-toast`，reviewed commit `eebde19`）。本文件是本轮评审修复的核验账本、实施计划与退出机制。
+> 状态：**已实施，本机门禁通过，待 PR CI 验收**（2026-11-15，分支 `feat/workspace-toast`，reviewed commit `eebde19`；P0–P4 提交见 §10）。本文件是本轮评审修复的核验账本、实施计划与退出机制。
 >
 > 关联：PR [#60](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/60)、[ADR-0039](../../decisions/ADR-0039-worktree-aware-root-suggestions.md)（第二十二次修订）、[Toast 实施计划](./2026-11-15-workspace-toast-implementation.md)、[Dialog 重构报告](./2026-11-15-worktree-dialog-redesign.md)。
 
@@ -152,9 +152,17 @@ PR #60 的 reviewed commit `eebde19` 收到两个自动评审：
 
 | 阶段 | 状态 | 提交 | 证据 |
 | --- | --- | --- | --- |
-| P0 | 进行中 | 待填 | 本文件与索引 |
-| P1 | 待开始 | 待填 | 待填 |
-| P2 | 待开始 | 待填 | 待填 |
-| P3 | 待开始 | 待填 | 待填 |
-| P4 | 待开始 | 待填 | 待填 |
-| P5 | 待开始 | 待填 | 待填 |
+| P0 | 已完成 | `0fc29a6` | 本文件 + `docs/plans/README.md` / `README.en.md` 索引 + Dialog 报告的交叉链接；`pnpm docs:check` 0 errors |
+| P1 | 已完成 | `593dc8b` | 红测：`addNewSchema` 拒绝 `read-only`（owner IPC 契约）；绿测：`tests/worktrees-contract.spec.ts`（18 tests）与 `tests/worktrees-owner.spec.ts`（15 tests，2 个 native 用例在本机沙箱下 skip）；follower 集成测试由 CI 非沙箱 runner 执行 |
+| P2 | 已完成 | `c107b40` | 红测：Files 管理器经 `RootSwitcher` 打开时缺少 `worktree.panelOpen`；绿测：`tests/client-worktree.spec.tsx` 56 tests（含「关闭时不显示」对照） |
+| P3 | 已完成 | `2f48f9d` | 红测：主 checkout 换到 `release` 后 A 候选仍显示 `main`；绿测：`tests/worktrees-discovery.spec.ts` 29 tests（prompt id 不变、branch 与 viewRevision 更新） |
+| P4 | 已完成 | 本提交 | ADR-0039 第二十三次修订、本文件证据回填、PR 描述更新 |
+| P5 | 待验收 | 推送后 | 新 head 的 CI `releases` / `verify` / `gate`（run URL 见 PR #60） |
+
+## 11. 验证证据（2026-11-15）
+
+- **红 → 绿**：三项修复前，新增回归测试分别失败在缺陷点（`read-only` 被 owner IPC schema 拒绝；Files 管理器没有 `worktree.panelOpen`；主 checkout 换分支后仍显示 `main`）；修复后同一测试全绿。
+- **受影响套件**：`pnpm vitest run` 的 8 个文件（worktrees-contract / worktrees-discovery / worktrees-owner / worktrees-common / worktrees-channel / client-worktree / client-switcher / shared-registry）共 `168 passed | 33 skipped`；skip 全部是 native IPC 用例（本机 Host 被沙箱包裹，与既有 31 个 shared Registry 用例相同，CI 非沙箱 runner 执行）。
+- **全量 `pnpm test`**：`1809 passed | 17 failed | 165 skipped`。17 个失败经与基线 `eebde19` 对照（`git stash` 后复跑同一批文件）**失败集合逐项相同**（`diff` 为空），均为本机环境限制：第二个 Host 得到 `contended` 而非 `follower`（shared IPC 拒绝沙箱内 peer）、seatbelt kernel runner `Operation not permitted`。修复未引入新失败。
+- **门禁**：`pnpm lint`（0 warnings/0 errors）、`pnpm typecheck`（Host + Client + Auto Review）、`pnpm build`、`pnpm docs:check`（0 errors）、`pnpm compat:check`、`pnpm pack:check` 均通过。
+- **CI**：P4 提交推送后由 `gh` 跟踪；结论记录在 PR #60 检查与最终答复中（`releases` + 全部 `verify` + `gate`）。

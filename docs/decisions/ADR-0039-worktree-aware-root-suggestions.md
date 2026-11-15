@@ -210,6 +210,15 @@ PR #55 的代码审查复现了十三处实现偏离 §20.3–§20.10 的问题�
 - **安全边界不变**：确认仍是显式动作；host 的 owner 串行队列、primary/candidate 复验、`worktree/prompt-stale`、seen/snooze/resolve 生命周期、RPC 只传 id 不传路径均不变；每行 access 只改变登记 grant，不能绕过 with-held/上限/受保护目录判断。
 - **验收**：契约测试覆盖 access 只属于 add、未知/重复 id、非法值、branch 可选且非空；host 测试覆盖 A/B prompt branch、detached 缺省、read-only/read-write add 的 grant 字段与 effective access、非法 access 拒绝；客户端测试覆盖连续行、分支 chip、默认 inherit、逐行改为 read-only 后请求携带 `accesses`、无旧说明行；样式测试固定加宽、分隔线、分支/选择器/footer 规则。
 
+## 第二十三次修订（2026-11-15）
+
+PR #60 自动评审核验后的实现对齐修复，不改变授权模型与安全边界：
+
+- **Follower 的 `addNew` IPC 与浏览器契约同档**：owner 的 `addNew` 参数 schema（`src/worktrees/protocol.ts`，经 `src/authority/protocol.ts` 的共享参数表）此前仍只接受 `inherit`，第二十二次修订新增的 `read-only` / `read-write` 在共享 Registry 部署中会被 owner 拒绝。现接受三档；缺省仍为 `inherit`，owner 的复验、grant 字段写入（`recordedPath` / `readOnlyRecordedPath` / `readWriteRecordedPath`）与 `skillsEnabled` 规则不变。
+- **Files 管理器的手动入口**：`RootSwitcher` 构造嵌套 `WorkspaceFoldersDialog` 时透传 `worktrees` 与 `worktreePromptEnabled`，使 Files 页签入口与 footer / Hero 入口一样提供「Worktree 建议」按钮；Dialog 归属与生命周期不变（Files 入口仍是本地 Dialog，不接管 footer 的共享 controller）。
+- **展示元数据的刷新**：主 checkout 的分支是展示字段，不属于 `expectedFor` 的授权 expectation，也不参与 owner 复验。`refreshInventory` 在 expectation 相等而复用候选记录时，仍以最新 candidate 刷新展示元数据（当前为 `mainHead`），保留 `promptId`、`discoveryKey` 与 `expected`；`viewRevision` 因而随分支变化，重开 Dialog 或轮询会得到新视图。candidate 未变化时保留原记录对象，避免无关刷新改变记录身份。
+- **验收**：契约测试覆盖 owner IPC 三档与非法值；follower→owner 集成测试覆盖 `read-only` / `read-write` 的 grant 字段与 effective access；组件测试覆盖 Files 入口的入口可见性；host 测试覆盖「只切换主 checkout 分支」时 branch 与 `viewRevision` 更新、prompt id 不变。计划与证据见 [评审修复计划](../plans/active/2026-11-15-worktree-review-fixes.md)。
+
 ## 第十八次修订（2026-11-09）
 
 第十七次修订接受了 B，并因无法证明 main checkout 身份而延后 A。本修订保留 B 的安全与生命周期边界，将 A 的目标收窄到 linked worktree 执行 Git 写操作所需的 common git dir，并新增 A/B 共用的插件设置开关。B 的 P0–P7 保留，A 从 P8 接续。此前复审中的「A 延后」属于历史决定，现行规则见 Decision §1 和 §9。
