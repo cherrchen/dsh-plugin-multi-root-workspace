@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-11-14 第二十次修订；2026-11-10 第十九次修订；2026-11-09 第十八次修订与同日实施审计返工 R1–R6）。A 的目标是主 checkout 根，开关实验性、默认关闭；自动发现收敛为会话激活时一次只读检查 + 非模态 Toast，用户点「查看」后才打开单/多候选确认 Dialog。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
+Accepted（2026-11-15 第二十一次修订；2026-11-14 第二十次修订；2026-11-10 第十九次修订；2026-11-09 第十八次修订与同日实施审计返工 R1–R6）。A 的目标是主 checkout 根，开关实验性、默认关闭；自动发现收敛为会话激活时一次只读检查 + 非模态 Toast，用户点「查看」后才打开单/多候选确认 Dialog。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
 
 ## 复审修正（2026-11-09）
 
@@ -58,7 +58,7 @@ Accepted（2026-11-14 第二十次修订；2026-11-10 第十九次修订；2026-
 
 - Toast 是**非模态**的：无 backdrop、无 focus trap、不阻塞页面和输入框；默认常驻、不自动消失。
 - 文案 A/B 中性：「发现 {count} 个可添加的工作目录」。只有 A、只有 B 或 A/B 同时存在都用同一文案，不暴露候选类型。
-- 操作：「查看」「稍后（下拉：直到出现新 worktree（默认）/ 7 天 / 30 天）」「×」。「×」只关闭 Toast；提醒延迟只来自「稍后」下拉，不打开 Dialog。
+- 操作：「查看」「稍后（下拉：直到出现新 worktree（默认）/ 7 天 / 30 天）」「×」。「×」只关闭 Toast；提醒延迟只来自「稍后」下拉，不打开 Dialog。（第二十一次修订删除「×」并更换落点，现行规则见下文。）
 - 只有「查看」才打开现有 `WorktreePrompt` Dialog。
 - A（主 checkout）与 B 走同一套 Toast + Dialog，不单独自动弹；Dialog 列表仍默认只勾选 `kind='worktree'`，A 保持显式勾选。类型、`effectiveAccess` 与共享元数据披露留在 Dialog 内。
 - Toast/Dialog 的生命周期属于显示它的 session 激活：切换 session、关闭设置或重新打开 Dialog 都会作废旧激活的异步完成；旧的 snooze/resolve 响应不得关闭或改写新生命周期的 UI（§20.11 第 12 条）。
@@ -182,6 +182,20 @@ PR #55 的代码审查复现了十三处实现偏离 §20.3–§20.10 的问题�
 同一轮对 `src/client/WorktreePrompt.tsx` 的广泛审查还收紧了异步完成的归属：`confirmAdd`/`applyLater` 也捕获 `workEpoch`，A→B→A 后旧 Dialog 的 resolve 完成不再关闭或改写第二次激活的 Dialog；`openDialog` 与 Toast 的「×」立即递增 epoch，打开 Dialog 或显式关闭 Toast 之后的旧 snooze 完成不能再改 UI。回归：Dialog 的 add/later 往返两条，以及关闭 Toast 后部分 refused 的 snooze 不重新出现。
 
 十三处都不改变授权语义：`addNew` 仍是唯一写路径，owner 复验与 `prompt-stale` 不变，`offered`/snooze 仍只是 UI 状态。
+
+## 第二十一次修订（2026-11-15）
+
+本轮只调整发现提示的呈现与落点，不改变任何触发、RPC、授权、宿主复验与生命周期语义。与 §20.3 冲突的呈现/操作条目以本节为准：
+
+- **落点**：Hero（新会话/blank）页顶部居中，纵向与官方 Toast 对齐（`40px`）；对话页为会话内容区右上角、Header 下沿 `12px`、内容区右缘内缩 `24px`。不再使用右下角，也不移动输入框。
+- **页面检测**：只读 `[data-phase]`（`0.1.5-rc.2` 起存在）判断 Hero/对话页；Hero 水平中心取 `[data-composer-card]` 中心，回退会话列中心与视口中心；对话页内容顶部优先 `[data-conversation-content]`（`0.2.1-alpha.3+`），缺失时测量会话根第一个子元素（Header）的下沿。任何探针失败都回退 Hero 顶部居中，禁止回右下角。
+- **主题**：提示卡表面随当前主题切换（浅色模式浅色、深色模式深色），与官方 Toast「两种主题都深色」不同；只用 `--dsw-*` token，`border: 0` + `--dsw-elevation-panel` + `--dsw-radius-lg`（R16）。
+- **操作**：`查看` + `稍后提醒`（primitives `Menu`：直到出现新 worktree / 7 天 / 30 天）。**删除「×」关闭按钮**；选择任一 snooze 档位即关闭提示，因此不再存在「只关闭、不写状态」的指针操作。常驻、非模态、无 backdrop、无 focus trap 不变。
+- **控件**：容器自绘；`查看`、`稍后提醒` 与图标使用 `@deepseek-ai/dsh-client-ui-primitives` 的 `Button` / `Menu` 及既有 compat 图标。菜单通过 `portal` 渲染，避免固定浮层裁剪。
+- **形态**：宽屏单行卡片；可用宽度不足或粗指针时改为两行，操作控件高 `32px`；`prefers-reduced-motion` 下取消入场动画。
+- **与官方 Toast 重叠**：默认 Hero `top: 40px`；检测到 `body` 直属 `role="alert"` 的官方瞬时 Toast 时，提示临时下移 `56px`，官方 Toast 消失后恢复。
+- **可访问性**：容器 `section` + `aria-label`；`role="status"` 只包文本；操作组有独立名称；Menu 自带键盘导航与 Escape。
+- **生命周期**：`openDialog`、session 切换、设置关闭仍是旧提示的失效点并递增 `workEpoch`；删掉「×」后，原「显式关闭 Toast 立即递增 epoch」一条不再适用，异步完成仍按既有 `mounted && epoch === workEpoch.current` 归属。
 
 ## 第十八次修订（2026-11-09）
 
