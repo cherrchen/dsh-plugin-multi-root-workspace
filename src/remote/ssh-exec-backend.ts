@@ -8,7 +8,8 @@
 import type { RemoteEnvironment } from './manifest.ts'
 import { RemoteConnectionLost, type RemoteExecutionBackend, type RemoteExecDeployment, type RemoteProcessHandle } from './exec.ts'
 import type { SshEnvironment, SftpEnvironment } from './ssh-environment.ts'
-import { assertRemoteParent } from './transfer.ts'
+import { posix } from 'node:path'
+import { SshEndpointVerifier, EndpointVerifyError } from './ssh-verifier.ts'
 
 /** The manager surface the exec adapters need; the SSH manager implements it. */
 export interface SshExecManager {
@@ -48,8 +49,15 @@ export function lazySshExecBackend(
     currentGeneration() { return manager.generationOf(environment.environmentId) },
     async verifyCwd(cwd, root, signal) {
       if (signal.aborted) throw new Error('cancelled')
-      const session = await manager.openSftp(environment.environmentId)
-      await assertRemoteParent(session.client, root, cwd)
+      const relative = posix.relative(root, cwd)
+      if (!posix.isAbsolute(root) || !posix.isAbsolute(cwd) || relative === '..' || relative.startsWith('../')) {
+        throw new EndpointVerifyError('target-escapes-root', 'the command cwd leaves the granted root')
+      }
+      // Execution has its own read-only helper probe; it does not require
+      // transfer authority or the SFTP hardlink/fsync extensions.
+      const verifier = new SshEndpointVerifier(manager)
+      await verifier.verify(environment, { path: root }, signal)
+      if (cwd !== root) await verifier.verify(environment, { path: cwd }, signal)
     },
     spawn(argv, options, sink) {
       // The preparation admission always runs first; without it there is no
