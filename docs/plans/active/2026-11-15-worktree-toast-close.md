@@ -1,6 +1,6 @@
 # Worktree 提示加回圆形关闭按钮 — 实施计划与退出验收
 
-> 状态：**已实施，待退出验收**（2026-11-15，分支 `feat/worktree-toast-close`）：代码、测试、文档与构建门禁已通过，Draft PR [#62](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/62) 已创建；GUI 视觉复核（E5）待评审者完成。本轮收回 [ADR-0039 第二十一次修订](../../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15) 的 D3「删除 ×」决定，只在常驻提示的呈现层加回一个正圆关闭按钮，不改变触发、RPC、授权、宿主复验与生命周期语义。
+> 状态：**已实施，GUI 验收已通过**（2026-11-15，分支 `feat/worktree-toast-close`）：代码、测试、文档与构建门禁已通过，Draft PR [#62](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/62) 已创建；维护者已完成 GUI 视觉复核（E5）——正圆、18px、`0.5px` 细描边、2px 内收、悬停不变色。本轮收回 [ADR-0039 第二十一次修订](../../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15) 的 D3「删除 ×」决定，只在常驻提示的呈现层加回一个正圆关闭按钮，不改变触发、RPC、授权、宿主复验与生命周期语义。
 
 ## 1. 需求与决定
 
