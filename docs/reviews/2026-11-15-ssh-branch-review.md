@@ -107,3 +107,5 @@ pnpm exec vitest run tests/review-ssh-findings.spec.ts tests/review-ssh-client.s
 - R4 已修复：spawn 起监听撤权并周期性重新准入，跨 Host/只读切换可终止；清理等待有界，超时返回 unknown。真实 Registry 回归覆盖撤权、待决启动、follower 与模式收窄，类型检查通过。
 
 - R5 已修复：总 I/O 预算覆盖待决请求、连接和最终准入；中断废弃连接，清理有界，迟到连接关闭。新增 11 项停滞/取消回归，传输、工具和环境相关 68 项测试与类型检查通过。
+
+- R6 已修复：cwd 验证复用 helper 只读探针，与 transfer 解耦；本机真实文件系统验证 exec-only、嵌套目录、symlink 与越界拒绝，相关套件和类型检查通过。

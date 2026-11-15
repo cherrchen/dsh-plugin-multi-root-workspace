@@ -25,7 +25,7 @@ export class EndpointVerifyError extends Error {
 export class SshEndpointVerifier implements RemoteEndpointVerifier {
   constructor(private readonly manager: SshEndpointManager) {}
 
-  async verify(environment: RemoteEnvironment, binding: RemoteBinding, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
+  async verify(environment: RemoteEnvironment, binding: Pick<RemoteBinding, 'path'>, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
     if (environment.transport === 'sftp') return await this.verifySftp(environment, binding, signal)
     if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
     const env = await this.manager.open(environment.environmentId)
@@ -80,7 +80,7 @@ export class SshEndpointVerifier implements RemoteEndpointVerifier {
    * no inode, so a same-name swap at publish time cannot be detected here; the
    * manifest's declared platform stands in for the absent remote handshake.
    */
-  private async verifySftp(environment: RemoteEnvironment, binding: RemoteBinding, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
+  private async verifySftp(environment: RemoteEnvironment, binding: Pick<RemoteBinding, 'path'>, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
     const env = await this.manager.openSftp(environment.environmentId)
     if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
     const real = await env.client.realpath(binding.path).catch((error: unknown) => {
