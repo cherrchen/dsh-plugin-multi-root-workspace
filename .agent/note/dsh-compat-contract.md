@@ -308,3 +308,12 @@ rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留�
 - **`highlight` / `omitted` 与隐藏项过滤（`0.2.2-rc.2` 起）**：结果树给 Factory 传 `highlight`，旧行路径用 `<mark>`；树态在绘制期过滤隐藏项（`src/client/files-tree/hidden.ts`），隐藏目录下的已列层级丢弃、只含隐藏项的目录用 `omitted: 'hidden'` 画说明，搜索把同一偏好作为 `includeHidden` 上送。偏好与上游同一个 localStorage 键 `dsh.sidebar-files.workspace-search.v1`，只存与默认值的差异；删掉插件代码不影响原生读取。
 - **两条已知边界**：原生 Files 快捷键（Cmd+P）仍聚焦被接管隐藏的原生搜索框，附加根搜索的受支持入口是页头搜索钮；文档预览的 Folder 导航器只获得行右键、不获得搜索（其搜索态由上游 `sidebar.files.navigator` face 与快捷键驱动，接管树不参与该 face）。
 - **升级目检**：更早宿主上附加根树零变化（没有菜单、没有搜索钮）；rc.2+ 上右键 target 命中附加根真实路径、搜索结果与主根原生同构。结构边界与证据见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#附加根-files-视图消费的两个接口面2026-11-14)与 [ADR-0041](../../docs/decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0042](../../docs/decisions/ADR-0042-additional-root-row-context-menus.md)。
+
+
+## 20. Files 页签的实现接管与可见性（2026-11-15）
+
+- **tab 注册表是唯一的接管事实源**：`ctx.sidebarRightTabs`（`0.1.5-rc.2` 起由 `ui-sidebar-right` provide）的 `get(kind)` 返回该 kind 的**生效**定义，`subscribe(listener)` 在注册/移除时通知（`0.2.0-rc.2` 已有）。extension band 接管 builtin 后，内置 Files 页实现（id `@deepseek-ai/dsh-client-ui-sidebar-files`、`priority: 'builtin'`）被降为 shadowed，`FilesBody` 不再挂载。
+- **槽位声明 ≠ 渲染**：`sidebar.right.tab.files.actions` 由 `ui-sidebar-files` 注册 `FilesBody` 时的 `children` 在启动时声明；页面被接管后该槽仍是 declared，`slots.inject`/`spec()` 都正常。不要用它们判断 Files 页是否还在渲染——同类问题先查 tab 注册表。
+- **可见性约定**：检测到接管时，本插件经 `shell.overlay` 弹一次官方 primitives `Toast`（`src/client/files-page-notice.tsx`，词条 `filesPage.notice`），不传 `icon`/`tone`（icon 座席是 warning 色，省略才是 info 级），5 秒淡出；同一接管实现 id 只提示一次，解除后重置。探测在 `src/compat/files-page.ts`，只读结构、不比较版本字符串；`dsh-client-ui-sidebar-right` 不是本插件的 devDependency，也不要为它新增运行时依赖。
+- **升级目检**：装 better-sidebar 等接管 `files` kind 的插件 → 顶部出现一次 info Toast、切换器不出现，footer 与 `/workspace-folders` 仍可用；停用接管插件 → 切换器恢复，再次接管会再次提示。
+

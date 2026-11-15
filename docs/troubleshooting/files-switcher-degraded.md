@@ -34,4 +34,26 @@
 3. 复刻控件自身的漂移（上游 `ui-open-in-app` / `ui-sidebar-files` 改了组件结构/路由/注入面）按 `src/client/open-in-app/FORK.md` 与 `src/client/files-tree/FORK.md` 的同步步骤重拷对照——许可差异分别是 css specifier 的 `.ts` 后缀与外壳函数的根源改写。
 4. 若上游彻底移除了可用钩子（例如 flex 项不再携带任何稳定标识），接受退回槽内菜单形态——选择器仍可用，但树区接管不再可行；此时重新评估方案（上游 seam 出现的可能性见 ADR-0015 备选节），不要为了视觉接管去锚 hash class。
 
+## Files 页被第三方整页接管：根切换器完全不出现（Issue #47）
+
+### 症状
+
+- Files 页签仍能打开，但页面是另一个插件提供的文件页；本插件的根切换器、路径标签接管与附加根树全部不出现，页面上没有任何说明。
+- 其余入口正常：footer 的「工作区目录」、`/workspace-folders`、附加根权限与指令注入均可用。
+
+### 根本原因
+
+- 第三方插件以 `priority: 'extension'` 注册 `kind: 'files'`，宿主内置 Files 页（实现 id `@deepseek-ai/dsh-client-ui-sidebar-files`）被降为 shadowed，`FilesBody` 不再渲染。
+- 根切换器注册在 `FilesBody` 声明的 `sidebar.right.tab.files.actions` 槽上；槽声明在启动时随 `FilesBody` 注册的 `children` 建立，接管时仍是 declared，`slots.inject` 照常触发——但 seat 不挂载，组件永远不渲染。它与本文其余症状属于不同失效模式：不是 selector 失配，而是宿主页面整体缺席。
+
+### 诊断方法
+
+1. 读 `ctx.sidebarRightTabs.get('files')`：返回定义的 `id` 不是 `@deepseek-ai/dsh-client-ui-sidebar-files`（或 `priority !== 'builtin'`）即确认被接管；extension 注销后 `get('files')` 回到内置定义，因此可用它确认恢复。
+2. 不要用 `slots.spec('sidebar.right.tab.files.actions')` 判断：接管时它仍然存在，这正是本失效模式的静默之处。
+
+### 行为与处置
+
+- 插件在检测到接管时弹一次官方 info 级瞬时 Toast（词条 `filesPage.notice`），说明根切换器暂不可用、可继续从侧栏管理；接管解除后自动重新武装，再次接管会再提示。
+- 根管理仍可从 footer 的「工作区目录」与 `/workspace-folders` 完成；要让 Files 页切换器恢复，需要在第三方插件侧关闭对 `files` kind 的接管（如 better-sidebar 的对应开关）或停用它。
+
 升版验收时的目检清单（三态：无附加根原生观感 / 附加根选中接管 / 切回主根还原）记录在 `.agent/note/dsh-compat-contract.md` 第 12 节。
