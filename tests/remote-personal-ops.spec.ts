@@ -139,6 +139,27 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       .rejects.toMatchObject({ code: 'host-identity-unverifiable' })
   })
 
+  it.each(['name', 'host', 'port', 'user', 'credential', 'host-key'] as const)('preserves the installed access key only for the same identity: %s', async change => {
+    const { registry, personalPath, credentialRoot } = world()
+    const original: PersonalEnvironment = { ...MANAGED, hostKey: FP_OK,
+      credential: { kind: 'managed', credentialId: 'aabbccddeeff', accessKeyId: '112233445566' } }
+    writeConfig(personalPath, CONFIG([original]))
+    const fingerprint = change === 'host-key' ? MANAGED.hostKey : FP_OK
+    const exec: ExecFile = async file => ({ stdout: file === 'ssh-keyscan' ? 'build.internal ssh-ed25519 AAAAKEY\n' : `256 ${fingerprint} (ED25519)\n`, stderr: '' })
+    const scan = await handlePersonalEndpoint(undefined as never, registry, '/w',
+      { endpoint: 'sshHostKeyScan', sessionId: 's', hostname: 'build.internal', port: 22 }, { exec }) as { token: string }
+    const state = await handlePersonalEndpoint(undefined as never, registry, '/w', {
+      endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, fingerprint, hostKeyToken: scan.token,
+      environment: { environmentId: original.environmentId, platform: 'linux', workspace: original.workspace, displayName: 'renamed',
+        endpoint: { hostname: change === 'host' ? 'other.internal' : original.endpoint.hostname,
+          port: change === 'port' ? 2222 : 22, user: change === 'user' ? 'other' : original.endpoint.user },
+        credential: { kind: 'managed', credentialId: change === 'credential' ? 'ffeeddccbbaa' : 'aabbccddeeff' } },
+    }, { exec }) as { environments: PersonalEnvironment[] }
+    const credential = state.environments[0]!.credential
+    expect(credential.kind === 'managed' ? credential.accessKeyId : undefined).toBe(change === 'name' ? '112233445566' : undefined)
+    if (change === 'name') expect(readFileSync(join(credentialRoot, 'ssh_config'), 'utf8')).toContain('/keys/112233445566')
+  })
+
   it('R5: saving over a changed host/account/credential drops the stored helper', async () => {
     const { registry, personalPath } = world()
     writeConfig(personalPath, CONFIG())
