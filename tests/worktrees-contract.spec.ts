@@ -7,6 +7,8 @@ import {
   worktreeResolveAnswerSchema,
   worktreeWaitViewSchema,
 } from '../src/contract.ts'
+import { parseArguments } from '../src/authority/protocol.ts'
+import { addNewSchema } from '../src/worktrees/protocol.ts'
 
 const prompt = {
   id: 'p1',
@@ -220,5 +222,53 @@ describe('roots view worktree fields', () => {
   it('rejects a malformed worktree badge without breaking the root view', () => {
     const root = { ordinal: 1, id: 'r1', path: '/wt', addedAt: '2026-11-09', state: 'missing', worktree: { adminId: 'id', path: '/wt', state: 'gone', cleanupEligible: true } }
     expect(parseRootsView({ primaryRoot: '/main', roots: [root] })).toMatchObject({ ok: false })
+  })
+})
+
+/**
+ * The owner parses a follower's `addNew` request with this schema. The browser
+ * contract already accepts the three grants, so the second (owner IPC) contract
+ * must accept exactly the same set or a follower can never confirm any of them.
+ */
+describe('owner addNew wire schema', () => {
+  const expected = {
+    primaryKey: '/primary',
+    primaryRoot: '/primary',
+    primary: {
+      shape: 'linked' as const,
+      canonical: '/linked',
+      common: '/main/.git',
+      adminId: 'wt',
+      adminGitdir: '/main/.git/worktrees/wt',
+      adminHead: 'ref: refs/heads/feature',
+      rootIdentity: { dev: '1', ino: '2' },
+      adminIdentity: { dev: '3', ino: '4' },
+    },
+    candidate: {
+      kind: 'main-checkout' as const,
+      canonical: '/main',
+      common: '/main/.git',
+      adminId: 'wt',
+      adminGitdir: '/main/.git/worktrees/wt',
+      adminHead: 'ref: refs/heads/feature',
+      rootIdentity: { dev: '5', ino: '6' },
+      adminIdentity: { dev: '3', ino: '4' },
+    },
+    promptKey: 'main-checkout\u0000/main/.git',
+  }
+  const args = { path: '/main', expected }
+
+  it('accepts every grant the browser can confirm, with inherit still implicit', () => {
+    expect(addNewSchema.safeParse(args).success).toBe(true)
+    for (const access of ['inherit', 'read-only', 'read-write'] as const) {
+      expect(addNewSchema.safeParse({ ...args, access }).success, access).toBe(true)
+      expect(parseArguments('addNew', ['/primary', { ...args, access }])).toHaveLength(2)
+    }
+  })
+
+  it('still refuses a value the root table does not support', () => {
+    for (const access of ['full-access', 'readonly', 'write', 1, null]) {
+      expect(addNewSchema.safeParse({ ...args, access }).success, String(access)).toBe(false)
+    }
   })
 })

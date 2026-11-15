@@ -9,6 +9,12 @@ import { primaryKey } from '../src/roots.ts'
 import { resolveRepo } from '../src/worktrees/repository.ts'
 import { readSidecarFile } from './support/worktrees-stack.ts'
 import type { FileIdentity, PromptExpected, RepoSnapshot } from '../src/worktrees/types.ts'
+import { nativeHostAvailability } from '../src/authority/native.ts'
+import { effectiveRootAccess } from '../src/contract.ts'
+
+const availability = await nativeHostAvailability()
+if (!availability.available) console.info(`shared Registry native tests unavailable: ${availability.reason}`)
+const nativeTest = it.skipIf(!availability.available)
 
 function git(cwd: string, args: readonly string[]): string {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
@@ -283,4 +289,43 @@ describe('owner snapshot envelope', () => {
     expect(before).toMatchObject({ available: true, revision: 0, worktreeRoots: [] })
     expect(await stack.registry.worktreeSidecar(main, { op: 'reconcile' })).toMatchObject({ available: true })
   })
+})
+
+/** Poll until a second stack's authority reaches the follower role (the channel close is asynchronous). */
+async function waitForFollower(stack: RegistryStack): Promise<void> {
+  for (let i = 0; i < 200 && stack.registry.authority.kind !== 'follower'; i++) await new Promise(resolve => setTimeout(resolve, 10))
+  expect(stack.registry.authority.kind).toBe('follower')
+}
+
+describe('follower addNew grants', () => {
+  // A follower sends the selected per-row access through the owner IPC. Both
+  // non-inherit grants must reach the owner's ordinary registration path.
+  nativeTest.each(['read-only', 'read-write'] as const)(
+    'registers a %s root through the owner IPC and persists its grant fields',
+    async access => {
+      const area = fixture('owner-follower-' + access)
+      const { stack: owner, main, linked } = await mount(area)
+      const follower = await mountRegistryStack(join(area.base, 'store'))
+      stacks.push(follower)
+      await waitForFollower(follower)
+      const expected = expectation(main, linked)
+      const added = await follower.registry.addNew(main, {
+        path: expected.candidate.canonical,
+        access,
+        expected,
+        track: trackOf(linked),
+      })
+      expect(added.path).toBe(realpathSync.native(linked))
+      const rows = owner.registry.list(main)
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({ id: added.id, path: realpathSync.native(linked), access })
+      // The grant is stored under exactly one field, matching the access.
+      expect(rows[0]).toMatchObject(access === 'read-only'
+        ? { readOnlyRecordedPath: realpathSync.native(linked) }
+        : { readWriteRecordedPath: realpathSync.native(linked) })
+      expect(rows[0]).not.toHaveProperty(access === 'read-only' ? 'readWriteRecordedPath' : 'readOnlyRecordedPath')
+      expect(rows[0]).not.toHaveProperty('recordedPath')
+      expect(effectiveRootAccess(rows[0]!.access, 'workspace-write')).toBe(access)
+    },
+  )
 })
