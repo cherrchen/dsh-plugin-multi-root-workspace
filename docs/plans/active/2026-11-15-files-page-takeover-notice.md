@@ -1,6 +1,6 @@
 # Files 页被第三方整页接管时的官方 Toast 提示（Issue #47）
 
-> 状态：**实施计划（2026-11-15，分支 `feat/file-slot-error`）**。本文件是 Issue #47 限定范围的实施计划、进入/退出验收机制与证据账本；实施完成后回填 §11 并随 PR 归档。
+> 状态：**已实施并通过本机门禁，Draft PR 待评审与 CI（2026-11-15，分支 `feat/file-slot-error`）**。本文件是 Issue #47 限定范围的实施计划、进入/退出验收机制与证据账本；验收结果见 §12，PR 合并后随计划归档。
 >
 > 关联：Issue [#47](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/issues/47)、[ADR-0015](../../decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[故障排查：Files 页签选择器退化](../../troubleshooting/files-switcher-degraded.md)、[Files 页签根浏览计划](../completed/2026-10-12-files-header-root-browsing.md)。
 
@@ -146,7 +146,7 @@ Issue #47 记录：第三方插件（如 dsh-better-sidebar）以 `priority: "ex
 | E0-2 | 范围锁定维护者三条决定：只做 #47 接管场景；瞬时官方 Toast；不叠加方案 1、info 级无警告图标 | 本文件 §1/§3 |
 | E0-3 | 检测源与判据已用上游源码核实，不依赖 `slots.inject`/`spec` | §2.1/§2.2（`dsh-v0.2.0-rc.2`、`dsh-v0.2.2-rc.1`、`dsh-v0.2.2-rc.3`） |
 | E0-4 | 呈现面已核实：官方 `Toast` 的 info 形态（无 icon/tone）与 `shell.overlay` 版本面重合 | §2.3 |
-| E0-5 | 计划与索引已提交且 `pnpm docs:check` 通过 | P0 提交 |
+| E0-5 | 计划与索引已提交且 `pnpm docs:check` 通过 | P0 提交 `49eceb0` |
 
 任一条不成立 → 停止并回报，不开始 P1。
 
@@ -196,8 +196,23 @@ Issue #47 记录：第三方插件（如 dsh-better-sidebar）以 `priority: "ex
 
 | 阶段 | 状态 | 提交 | 证据 |
 | --- | --- | --- | --- |
-| P0 | 进行中 | — | 本文件 + 索引 |
-| P1 | 待开始 | — | — |
-| P2 | 待开始 | — | — |
-| P3 | 待开始 | — | — |
-| P4 | 待开始 | — | — |
+| P0 | 已完成 | `49eceb0` | 本文件 + `docs/plans/README.md` / `README.en.md` 索引；`pnpm docs:check` 0 errors |
+| P1 | 已完成 | `c4d5f13` | `src/compat/files-page.ts` + `tests/compat-files-page.spec.ts`（11 tests）；`pnpm lint`、`pnpm typecheck` 通过 |
+| P2 | 已完成 | `103c10e` | `src/client/files-page-notice.tsx`、`src/client/index.ts` 接线、`src/client/locales.ts` 词条、`tests/client-files-page-notice.spec.tsx`（12 tests）与 stub 的 `data-hold-ms`；focused 29 tests 通过；`pnpm build` 后 `client-bundle` / `client-slot-probe` / `client-panel` 共 95 tests 通过 |
+| P3 | 已完成 | `3fc365e` | ADR-0015 修订、troubleshooting 新症状节、README 中英（功能说明 + 已知限制）、compat 笔记第 20 节（中英）；`pnpm docs:check` 0 errors |
+| P4 | 已完成 | 本提交 | `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm docs:check` / `pnpm compat:check` / `pnpm pack:check`（230 members）全绿；全量 `pnpm test`：**1836 passed / 17 failed / 165 skipped（2018）**，`main` 基线为 1813 passed / 17 failed / 165 skipped（1995），失败集合逐项相同（均为本机沙箱下 Registry authority/lease IPC 用例，`diff` 为空）；新增 23 项测试全部通过；分支推送并创建 Draft PR |
+
+## 12. 验收结果（2026-11-15）
+
+| 门 | 结果 | 证据 |
+| --- | --- | --- |
+| E1 | 通过 | `tests/compat-files-page.spec.ts` 11 tests：三态、id/priority 双判据、`get` 抛错降级、订阅缺失 no-op |
+| E2 | 通过 | `tests/client-files-page-notice.spec.tsx`：接管弹 1 次、持续通知不重弹、恢复后再次接管 `seq` 递增、启动时已接管补弹 |
+| E3 | 通过 | 同上：无服务 / 无 Files kind / 无订阅 / `shell.overlay` 缺席均不弹且不抛错 |
+| E4 | 通过 | 同上：`role=status` 文案来自词典、无 `svg`（警告图标）、`data-hold-ms=5000`、点击（stub 的 `onDone`）后消失 |
+| E5 | 通过 | `client-bundle`（require 列表与 `dsh.client` 不变）、`client-slot-probe`、`client-panel`、`locale-parity`、`client-switcher` 全绿（focused 7 files / 142 tests） |
+| E6 | 通过 | §11 P4 所列六条门禁（`pack:check` exit 0，230 members） |
+| E7 | 通过 | 全量测试失败集合与 `main` 基线逐项相同（见 §11）；本机既有环境限制，改动未引入新失败 |
+| E8 | 通过 | ADR-0015 修订、troubleshooting、README 中英、compat 笔记中英、两个计划索引；`docs:check` 0 errors |
+| E9 | 通过（CI 待跑） | 分支 `feat/file-slot-error` 推送后创建 Draft PR，描述末尾 `Close #47`；CI run URL 记录在 PR 中 |
+| E10 | 已记录 | 本机无法安装 better-sidebar（不改用户宿主组合），GUI 目检按 Issue #47 复现步骤交由评审者完成：装 better-sidebar → 顶部一次 info Toast、切换器不出现；停用 → 切换器恢复、再次接管再提示。自动化证据为 E1–E5 |
