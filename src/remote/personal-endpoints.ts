@@ -197,6 +197,21 @@ async function runPersonalEndpoint(
       }
       return await mutate(registry, primary, paths, call.revision, config => {
         const helper = preservedHelper(config.environments)
+        const previous = config.environments.find(environment => environment.environmentId === draft.environmentId)
+        let credential = draft.credential
+        if (credential.kind === 'managed') {
+          // This key was installed on one target by the Host. An edit may
+          // omit it, but cannot transplant it to another identity.
+          const accessKeyId = previous?.credential.kind === 'managed'
+            && previous.credential.credentialId === credential.credentialId
+            && previous.endpoint.hostname === draft.endpoint.hostname
+            && previous.endpoint.port === draft.endpoint.port
+            && previous.endpoint.user === draft.endpoint.user
+            && previous.hostKey === hostKey
+            ? previous.credential.accessKeyId : undefined
+          credential = { kind: 'managed', credentialId: credential.credentialId,
+            ...(accessKeyId === undefined ? {} : { accessKeyId }) }
+        }
         if (draft.exec !== undefined && helper === null) {
           throw new RemoteAdmissionError('exec-requires-helper', 'exec requires an installed remote helper; save without exec, install the helper, then enable it')
         }
@@ -204,7 +219,7 @@ async function runPersonalEndpoint(
           ...config,
           environments: [
             ...config.environments.filter(environment => environment.environmentId !== draft.environmentId),
-            { ...draft, environmentId: draft.environmentId, hostKey, helper } as PersonalEnvironment,
+            { ...draft, credential, environmentId: draft.environmentId, hostKey, helper } as PersonalEnvironment,
           ],
         }
       })
