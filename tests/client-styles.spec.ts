@@ -495,8 +495,8 @@ describe('the worktree suggestion notice rules', () => {
     // The seat is pulled 2px inside the geometric corner on both axes: a corner
     // badge reads as balanced only slightly off the mathematical center.
     expect(notice).toMatch(/transform:\s*translate\(calc\(50%\s*-\s*2px\),\s*calc\(-50%\s*\+\s*2px\)\)/s)
-    // No outline stroke: the circle is delimited by its own fill only.
-    expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose\s*\{[^}]*border:\s*0[^}]*border-radius:\s*50%/s)
+    // One hairline stroke delimits the circle against the card corner.
+    expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose\s*\{[^}]*border:\s*0\.5px solid var\(--dsw-alias-border-l3\)[^}]*border-radius:\s*50%/s)
     // The badge wears the card surface and the host's ink tokens, never a literal color.
     expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose\s*\{[^}]*background:\s*var\(--dsw-alias-bg-layer-2\)[^}]*color:\s*var\(--dsw-alias-label-secondary\)/s)
     // Hovering leaves the surface exactly as it is: no tint and no transparency.

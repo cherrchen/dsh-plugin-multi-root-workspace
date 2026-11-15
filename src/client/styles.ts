@@ -1634,9 +1634,9 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
 /* The close badge (ADR-0039 第二十五次修订): one small perfect circle parked on
    the card's top-right corner, half outside it. It is drawn here rather than
    with a primitive: the compact size rules fix a taller control and a smaller
-   corner radius, so a primitive renders as a rounded rectangle. The badge has no
-   outline stroke and keeps the card's own surface in every pointer state — it
-   never gains a hover tint or becomes transparent. */
+   corner radius, so a primitive renders as a rounded rectangle. The badge keeps
+   the card's own surface in every pointer state — it never gains a hover tint
+   or becomes transparent. */
 .mrfw-notice .mrfw-noticeClose {
   position: absolute;
   top: 0;
@@ -1649,7 +1649,7 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   height: 18px;
   margin: 0;
   padding: 0;
-  border: 0;
+  border: 0.5px solid var(--dsw-alias-border-l3);
   border-radius: 50%;
   background: var(--dsw-alias-bg-layer-2);
   color: var(--dsw-alias-label-secondary);
