@@ -1,6 +1,6 @@
 # Worktree 提示加回圆形关闭按钮 — 实施计划与退出验收
 
-> 状态：**实施中**（2026-11-15，分支 `feat/worktree-toast-close`）。本轮收回 [ADR-0039 第二十一次修订](../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15) 的 D3「删除 ×」决定，只在常驻提示的呈现层加回一个正圆关闭按钮，不改变触发、RPC、授权、宿主复验与生命周期语义。
+> 状态：**实施中**（2026-11-15，分支 `feat/worktree-toast-close`）。本轮收回 [ADR-0039 第二十一次修订](../../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15) 的 D3「删除 ×」决定，只在常驻提示的呈现层加回一个正圆关闭按钮，不改变触发、RPC、授权、宿主复验与生命周期语义。
 
 ## 1. 需求与决定
 

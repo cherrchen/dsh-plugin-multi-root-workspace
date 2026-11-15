@@ -226,6 +226,16 @@ PR #60 自动评审核验后的实现对齐修复，不改变授权模型与安�
 - **勾选与权限**：刷新后的现存行保留勾选和逐行权限。新 worktree 默认勾选，主 checkout 默认待确认；被拒绝的行取消勾选。单行和多行使用同样的勾选及提交规则。
 - **展示与确认并发**：主 checkout 分支从当前仓库快照的 common `HEAD` 派生。展示分支变化更新 `viewRevision`，候选记录及其确认身份随原有 owner expectation 复用。见[第二轮审查报告](../plans/active/2026-11-15-worktree-review-fixes.md#12-第二轮审查报告a18c0ae)。
 
+## 第二十五次修订（2026-11-15）
+
+维护者收回第二十一次修订的操作决定（「删除 ×，稍后提醒本身就是关闭」），在常驻提示右上角加回关闭按钮。触发、RPC、授权、宿主复验与生命周期语义不变，与 §20.3 冲突的呈现/操作条目以本节为准：
+
+- **控件与形态**：在原「查看」+「稍后提醒」拆分按钮之外，新增一个正圆关闭按钮，圆心压在卡片右上角外沿并允许外凸出卡片（宽屏与两行 compact 形态同款落点）。视觉外径 20px、`0.5px` `--dsw-alias-border-l3` 描边、`--dsw-alias-bg-layer-2` 底色（与卡片同色，形成角上开孔观感）、`--dsw-alias-label-secondary` 字形，内容为 12px 的 ×；hover 提到 `--dsw-alias-label-primary` 与 `--dsw-alias-interactive-bg-hover`，`:focus-visible` 使用 `--dsw-alias-brand-primary` 环且允许画到卡片外。控件仍是 primitives `Button`（ghost + sm）：正圆由插件样式的双类选择器压过 `sm` 的尺寸规则，因此不受两张样式表注入顺序影响。
+- **语义：纯关闭**：点击只隐藏本次激活的提示，不调用 `snooze` / `resolve`，不写 sidecar 与 Registry，不打开 Dialog。提示出现时 `seen` 已把候选记入本 Host 的 `offered`，因此关闭后本 Host 生命周期内不再自动提示、Host 重启后候选重新可见；这让「关闭」与写持久延迟的「稍后提醒」和写 ignore 的「永久不再提示」三分。
+- **生命周期**：关闭立即递增 `workEpoch` 并清空下拉开关状态，在飞的提醒完成不能再回写已关闭的提示（与 `openDialogFor` 相同的归属规则）；不新增 Escape 关闭。
+- **可访问性**：关闭按钮使用独立词典键 `worktree.toastClose`（中「关闭提示」/英 "Dismiss"）作为 `aria-label`，位于操作 `role="group"` 之外；Tab 顺序为查看 → 稍后提醒 → 关闭。
+- **验收**：组件测试覆盖「× 存在且不属于操作组」「× 只关闭、不发 snooze/resolve、`seen` 仍只一次」「关闭后在飞提醒完成不复活提示」「compact 形态仍有 ×」；样式测试固化正圆、角上定位、外凸与 token 配色；README 双语同步。实现计划见 [2026-11-15-worktree-toast-close](../plans/active/2026-11-15-worktree-toast-close.md)。
+
 ## 第十八次修订（2026-11-09）
 
 第十七次修订接受了 B，并因无法证明 main checkout 身份而延后 A。本修订保留 B 的安全与生命周期边界，将 A 的目标收窄到 linked worktree 执行 Git 写操作所需的 common git dir，并新增 A/B 共用的插件设置开关。B 的 P0–P7 保留，A 从 P8 接续。此前复审中的「A 延后」属于历史决定，现行规则见 Decision §1 和 §9。
