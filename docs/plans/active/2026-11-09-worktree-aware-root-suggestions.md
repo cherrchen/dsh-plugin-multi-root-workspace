@@ -299,7 +299,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - [x] **提示 UI**：`WorktreePrompt` 提示区改用 primitives `Button`/`Menu` 与既有 compat 图标；删除「×」，「稍后提醒」改为拆分按钮（左半默认档位、右半 Menu 三档）；`openDialog`/session/设置关闭仍递增 `workEpoch`。
 - [x] **样式**：删除右下角 `.mrfw-toast*`；新增随主题自适应的 `.mrfw-notice*`（R16、`border: 0` + `elevation-panel`、两行/粗指针 32px、reduced motion）。
 - [x] **词典**：新增 `toastLabel`/`toastActions`；`toastLater` 改为「稍后提醒」；删除 `toastClose`。
-- [x] **测试**：placement 13 条；client-worktree 48 条（含 a11y/菜单/紧凑/跨会话）；styles 39 条；locale parity 与 bundle 保持。
+- [x] **测试**：placement 13 条；client-worktree 49 条（含 a11y/拆分按钮/紧凑/跨会话）；styles 40 条；locale parity 与 bundle 保持。
 - [x] **文档**：ADR 第二十一次修订、README 双语、本 P11、计划索引。
 - [ ] **退出验收**：质量门与 GUI 证据、Draft PR（见实施计划 §6）。
 
