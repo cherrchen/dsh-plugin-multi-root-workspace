@@ -714,9 +714,9 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
                       : <span className="mrfw-worktreeBranch" title={row.branch}>{row.branch}</span>}
                   </span>
                   <code className="mrfw-rootPath">{row.path}</code>
-                  {isMain ? <p className="mrfw-note">{t('worktree.mainPolicy')}</p> : null}
-                  {isMain ? <p className="mrfw-note">{t('worktree.mainSeparate')}</p> : null}
-                  {isMain && access !== 'read-only' ? <p className="mrfw-note">{t('worktree.mainShared')}</p> : null}
+                  {isMain ? <span className="mrfw-note mrfw-worktreeRowNote">{t('worktree.mainPolicy')}</span> : null}
+                  {isMain ? <span className="mrfw-note mrfw-worktreeRowNote">{t('worktree.mainSeparate')}</span> : null}
+                  {isMain && access !== 'read-only' ? <span className="mrfw-note mrfw-worktreeRowNote">{t('worktree.mainShared')}</span> : null}
                 </span>
               )
               return (

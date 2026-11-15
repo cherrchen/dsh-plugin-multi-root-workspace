@@ -1312,6 +1312,8 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
 
 .mrfw-worktreeRow .mrfw-rootPath { overflow-wrap: anywhere; }
 
+.mrfw-worktreeRowNote { display: block; }
+
 .mrfw-worktreeRowError {
   grid-column: 1 / -1;
   margin: 0;
