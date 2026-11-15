@@ -1,0 +1,198 @@
+diff --git a/tests/review-ssh-findings.spec.ts b/tests/review-ssh-findings.spec.ts
+new file mode 100644
+index 0000000..6667baf
+--- /dev/null
++++ b/tests/review-ssh-findings.spec.ts
+@@ -0,0 +1,164 @@
++import { mkdtempSync, writeFileSync, readFileSync, rmSync, statSync, mkdirSync } from 'node:fs'
++import { join } from 'node:path'
++import { execFileSync } from 'node:child_process'
++import { afterEach, it, expect } from 'vitest'
++import { handlePersonalEndpoint } from '../src/remote/personal-endpoints.ts'
++import { renderHostBlock } from '../src/remote/personal/ssh-files.ts'
++import { SshEnvironmentManager } from '../src/remote/ssh-environment.ts'
++import { lazySshExecBackend, sshExecBackend } from '../src/remote/ssh-exec-backend.ts'
++import { runRemoteCommand } from '../src/remote/exec.ts'
++import { runRemoteCopy } from '../src/remote/transfer.ts'
++import { SftpClient, P_CREAT, P_EXCL, P_WRITE } from '../src/remote/sftp.ts'
++import { BrokerServer } from '../src/remote/broker/server.ts'
++import { BrokerConnection, BrokerEnvironmentManager } from '../src/remote/broker/client.ts'
++import { fakeManifest, FakeManager, FakeRemote } from './support/fake-remote.ts'
++import { mountRegistryStack } from './support/registry-stack.ts'
++import Sessions from '@deepseek-ai/dsh-session'
++import Projections from '@deepseek-ai/dsh-session-projection'
++import Policy from '@deepseek-ai/dsh-sandbox-policy'
++
++const dirs: string[] = []
++const tmp = () => { const p = mkdtempSync('/tmp/ssh-review-'); dirs.push(p); return p }
++afterEach(() => { for (const p of dirs.splice(0)) rmSync(p, { recursive: true, force: true }) })
++const environment = () => fakeManifest({ primary: '/w' }).environments[0]!
++const registry = {
++  async withRemoteOperation(request: any, body: any) {
++    return await body({ identity: { authorityEpoch: 'e', effectiveMode: 'workspace-write', operationId: 'op', sessionId: 's' },
++      endpoints: request.endpoints.map((e: any) => ({ ...e, displayPath: '/srv/root', bindingDigest: 'd', configVersion: 'v', verifiedTarget: { kind: 'object', value: '1:2' } })) })
++  },
++}
++const command = (backend: any) => runRemoteCommand(registry as any, () => backend, {
++  session: { id: 's', header: { cwd: '/w' } }, environmentId: 'build', rootId: 'app', command: 'true', timeoutMs: 1000,
++}, 'remote_bash', new AbortController().signal)
++
++it('review: exec-only configuration is blocked by transfer-unavailable', async () => {
++  const manifest = fakeManifest({ primary: '/w' })
++  delete manifest.environments[0]!.transfer
++  const manager = new SshEnvironmentManager({ manifest, gate: { status: 'eligible', release: '0.2.2-rc.2' }, custody: 'personal', logger: { debug() {}, warn() {} } })
++  const result = await command(lazySshExecBackend(manifest.environments[0]!, manager))
++  expect(result).toMatchObject({ status: 'not-started', code: 'transfer-unavailable' })
++})
++
++it('review: editing a bootstrapped password environment drops the access key', async () => {
++  const base = tmp(), personalPath = join(base, 'personal.json'), credentialRoot = join(base, 'credentials')
++  const env = { environmentId: 'dev-box', platform: 'linux', endpoint: { hostname: 'build.internal', port: 22, user: 'builder' },
++    credential: { kind: 'managed', credentialId: 'aabbccddeeff', accessKeyId: '112233445566' },
++    hostKey: 'SHA256:' + 'B'.repeat(43), helper: null, workspace: '/srv/root' }
++  writeFileSync(personalPath, JSON.stringify({ schemaVersion: 1, revision: 0, environments: [env], bindings: [] }), { mode: 0o600 })
++  const reg = { remoteEnabled: true, remoteMode: 'personal', remotePersonalPath: personalPath, remoteCredentialRoot: credentialRoot, refreshRemotePersonal: async () => {} }
++  const exec = async (file: string) => ({ stdout: file === 'ssh-keyscan' ? 'build.internal ssh-ed25519 AAAAKEY\n' : `256 ${env.hostKey} (ED25519)\n`, stderr: '' })
++  const scan: any = await handlePersonalEndpoint(undefined as any, reg as any, '/w', { endpoint: 'sshHostKeyScan', sessionId: 's', hostname: env.endpoint.hostname, port: 22 }, { exec })
++  const { hostKey: _, helper: __, ...draft } = env
++  const state: any = await handlePersonalEndpoint(undefined as any, reg as any, '/w', { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0,
++    environment: { ...draft, platform: 'linux', displayName: 'renamed', credential: { kind: 'managed', credentialId: 'aabbccddeeff' } }, hostKeyToken: scan.token, fingerprint: env.hostKey }, { exec })
++  expect(state.environments[0].credential.accessKeyId).toBeUndefined()
++  expect(readFileSync(join(credentialRoot, 'ssh_config'), 'utf8')).toContain('/keys/aabbccddeeff')
++})
++
++it('review: over-limit command output is discarded entirely by the real adapter', async () => {
++  const env = environment(); env.exec!.stdoutLimit = 64
++  const ssh = { generation: 'g', sandbox: { confine: async (argv: any) => ({ argv, enforcement: 'full' }) },
++    subprocess: { spawn: () => ({ done: Promise.resolve({ exitCode: 0, signal: null }), waitForExit: async () => true, terminate() {},
++      collected: { stdout: { readFrom: () => ({ text: 'x'.repeat(100) }) } } }) } }
++  const backend = sshExecBackend(env, ssh as any, { generationOf: () => 'g', markStale() {} } as any)
++  expect(await command(backend)).toMatchObject({ status: 'scope-exited', stdout: '', truncated: { stdout: true } })
++})
++
++it('review: real OpenSSH sftp-server creates 0644 despite requesting 0600', async () => {
++  const dir = tmp(), wrapper = join(dir, 'ssh-wrapper')
++  writeFileSync(wrapper, '#!/bin/sh\nexec /usr/libexec/sftp-server -u 022\n', { mode: 0o700 })
++  const client = SftpClient.connect('ignored', { ssh: wrapper })
++  try {
++    await client.init()
++    const path = join(dir, 'staging')
++    const fd = await client.open(path, P_CREAT | P_EXCL | P_WRITE, 0o600)
++    await client.close(fd)
++    expect(statSync(path).mode & 0o777).toBe(0o644)
++  } finally { client.dispose() }
++})
++
++it('review: SFTP inherits disabled host-key checking and enabled agent forwarding', async () => {
++  const dir = tmp(), wrapper = join(dir, 'ssh-wrapper'), config = join(dir, 'config'), effective = join(dir, 'effective')
++  writeFileSync(config, 'Host ignored\n  HostName example.invalid\n  StrictHostKeyChecking no\n  ForwardAgent yes\n')
++  writeFileSync(wrapper, `#!/bin/sh\n/usr/bin/ssh -G -F "${config}" "$@" > "${effective}"\nexec /usr/libexec/sftp-server\n`, { mode: 0o700 })
++  const client = SftpClient.connect('ignored', { ssh: wrapper })
++  try {
++    await client.init()
++    const text = readFileSync(effective, 'utf8')
++    expect(text).toMatch(/^stricthostkeychecking false$/m)
++    expect(text).toMatch(/^forwardagent yes$/m)
++  } finally { client.dispose() }
++})
++
++it('review: generated managed config is rejected by ssh -G for a path with spaces', () => {
++  const dir = tmp(), root = join(dir, 'with spaces'); mkdirSync(root)
++  const config = join(dir, 'config')
++  writeFileSync(config, renderHostBlock({ environmentId: 'dev-box', endpoint: { hostname: 'build.internal', port: 22, user: 'builder' }, credential: { kind: 'managed', credentialId: 'aabbccddeeff' } } as any, root))
++  expect(() => execFileSync('ssh', ['-G', '-F', config, 'dsh-dev-box'], { stdio: 'pipe' })).toThrow(/keyword identityfile extra arguments/i)
++})
++
++it('review: a stalled SFTP write ignores the transfer deadline and cancellation', async () => {
++  const dir = tmp(); writeFileSync(join(dir, 'source'), 'test')
++  const remote = new FakeRemote('device'); remote.directory('/srv/root')
++  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
++  const write = remote.sftp.write
++  remote.sftp.write = async (...args) => { entered.resolve(); await release.promise; return await write(...args) }
++  const manifest = fakeManifest({ primary: dir }); manifest.environments[1]!.transfer!.timeoutMs = 10
++  const manager = new FakeManager(manifest, new Map([['device', remote]]), new Map())
++  const signal = new AbortController()
++  let settled = false
++  const pending = runRemoteCopy(registry as any, { manager }, { session: { id: 's', header: { cwd: dir } },
++    from: { environmentId: 'local', rootId: 'primary', relativePath: 'source' }, to: { environmentId: 'device', rootId: 'out', relativePath: 'output' } }, 'remote_copy', signal.signal).finally(() => { settled = true })
++  await entered.promise; signal.abort()
++  await new Promise(r => setTimeout(r, 60))
++  expect(settled).toBe(false)
++  release.resolve(); await pending
++})
++
++it('review: SSH loss behind a live broker is reported as exited, not unknown', async () => {
++  const dir = tmp(), socketPath = join(dir, 'b.sock'), uid = process.getuid!()
++  const remote = new FakeRemote('build'); remote.directory('/srv/root')
++  const manifest = fakeManifest({ primary: '/w' })
++  const failed = Promise.withResolvers<Record<string, unknown>>()
++  const spawned = Promise.withResolvers<void>()
++  const env = remote.helper()
++  env.subprocess.spawn = () => { spawned.resolve(); return { done: failed.promise, waitForExit: async () => false, terminate() {}, collected: {} } }
++  const manager = new FakeManager(manifest, new Map([['build', remote]]), new Map())
++  manager.open = async () => env
++  const server = new BrokerServer({ socketPath, clientUid: uid, allowSameUidForTesting: true, allowRestrictedForTesting: true, manager: manager as any })
++  await server.start()
++  const connection = await BrokerConnection.connect(socketPath, uid)
++  try {
++    const proxy = new BrokerEnvironmentManager(manifest, connection)
++    const result = command(lazySshExecBackend(manifest.environments[0]!, proxy))
++    await spawned.promise
++    failed.reject(new Error('remote SSH transport lost'))
++    expect(await result).toMatchObject({ status: 'exited', scope: 'unconfirmed', exitCode: null, signal: null })
++  } finally { connection.close(); await server.stop() }
++})
++
++it('review: removing a running command root never requests termination', async () => {
++  const base = tmp(), primary = join(base, 'project'); mkdirSync(primary)
++  const manifest = join(base, 'manifest.json')
++  writeFileSync(manifest, JSON.stringify(fakeManifest({ primary })), { mode: 0o600 })
++  const stack = await mountRegistryStack(join(base, 'store'), { remoteEnvironments: { enabled: true, manifestPath: manifest } }, {
++    allowUserOwnedRemoteManifestForTesting: true,
++    beforeGate: async ctx => { await ctx.plugin(Projections); await ctx.plugin(Sessions); await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: primary }) },
++  })
++  const exit = Promise.withResolvers<any>(), started = Promise.withResolvers<void>()
++  let terminated = 0
++  try {
++    stack.registry.setRemoteEndpointVerifier({ verify: async () => ({ platform: 'linux', target: { kind: 'object', value: '1:2' } }) })
++    await stack.registry.addRemote(primary, { environmentId: 'build', rootId: 'app' })
++    const backend = { deployment: environment().exec!, confine: async (argv: any) => ({ argv, enforcement: 'full', generation: 'g' }), currentGeneration: () => 'g',
++      spawn() { started.resolve(); return { started: Promise.resolve(), exited: exit.promise, terminate() { terminated++ }, waitForExit: async () => true } } }
++    const session = stack.ctx.sessions.create('review' as any, { meta: { cwd: primary } })
++    const task = runRemoteCommand(stack.registry, () => backend as any, { session, environmentId: 'build', rootId: 'app', command: 'sleep 60', timeoutMs: 60000 }, 'remote_bash', new AbortController().signal)
++    await started.promise
++    await stack.registry.removeRemote(primary, { environmentId: 'build', rootId: 'app' })
++    await new Promise(r => setTimeout(r, 50))
++    expect(terminated).toBe(0)
++    exit.resolve({ exitCode: 0, signal: null })
++    expect(await task).toMatchObject({ status: 'scope-exited' })
++  } finally { exit.resolve({ exitCode: 0, signal: null }); await stack.dispose() }
++})
+diff --git a/tests/review-ssh-client.spec.tsx b/tests/review-ssh-client.spec.tsx
+new file mode 100644
+index 0000000..dca2112
+--- /dev/null
++++ b/tests/review-ssh-client.spec.tsx
+@@ -0,0 +1,22 @@
++// @vitest-environment jsdom
++import { createElement } from 'react'
++import { act, cleanup, render, screen } from '@testing-library/react'
++import { afterEach, it, expect } from 'vitest'
++import { SshManagementDialog } from '../src/client/ssh-panel.tsx'
++
++afterEach(cleanup)
++it('review: an old session response replaces the new session bindings', async () => {
++  const a = Promise.withResolvers<any>(), b = Promise.withResolvers<any>()
++  const state = (name: string) => ({ mode: 'personal', enabled: true, linked: true, revision: 1, credentials: [], environments: [],
++    bindings: [{ primary: '/' + name, environmentId: 'env', rootId: name, path: '/remote/' + name, actions: ['read'] }] })
++  const props = { initialTab: 'connections', ssh: { state: (s: string) => s === 'a' ? a.promise : b.promise },
++    sessionId: 'a', custodyMode: 'personal', status: { state: 'ready' }, endpoints: [], roots: undefined,
++    remoteMode: undefined, onClose() {}, onChanged() {}, t: (key: string) => key }
++  const view = render(createElement(SshManagementDialog, props as any))
++  view.rerender(createElement(SshManagementDialog, { ...props, sessionId: 'b' } as any))
++  await act(async () => { b.resolve(state('project-b')); await b.promise })
++  expect(screen.getByText('/remote/project-b')).toBeTruthy()
++  await act(async () => { a.resolve(state('project-a')); await a.promise })
++  expect(screen.getByText('/remote/project-a')).toBeTruthy()
++  expect(screen.queryByText('/remote/project-b')).toBeNull()
++})
