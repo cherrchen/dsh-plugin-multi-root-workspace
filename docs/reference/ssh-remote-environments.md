@@ -114,7 +114,7 @@ exec 与 transfer 独立授权：执行前用 helper 的只读受限 stat/realpa
 
 `remote_bash` 从 spawn 返回 handle 起观察取消、超时与授权变化（包括尚未收到启动确认的阶段）。本 Host 的撤权通知立即触发重新准入；同时每 250ms 向 Registry owner 重新准入，覆盖跨 Host 撤权、会话降为只读和配置失效。复核等待超过 1 秒也按撤权处理。任何准入失败、epoch、策略、连接代次或授权存储 revision 变化均只发送一次 terminate；revision 变化保守终止该存储上的在飞命令，防止两次观察间 remove+re-add 恢复旧操作。
 
-终止原因返回 `termination: revoked | cancelled | timeout`。在 `terminateGraceMs` 内仍无法确认结果则返回 `unknown` 和 reconcileId，不无限等待、不重新执行。通知和轮询只是失效检测，不能代替每次新操作的正式准入；网络和调度延迟下不承诺撤权瞬间远端停止。
+终止原因返回 `termination: revoked | cancelled | timeout`。在 `terminateGraceMs` 内仍无法确认结果则返回 `unknown` 和 reconcileId，不无限等待、不重新执行。启动确认尚未到达时传输断开同样立即返回 `unknown`：不等待一个不会再来的确认，也不发送 terminate，因为启动是否发生本身未知。通知和轮询只是失效检测，不能代替每次新操作的正式准入；网络和调度延迟下不承诺撤权瞬间远端停止。
 
 ## 传输截止时间
 
