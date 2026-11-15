@@ -50,6 +50,8 @@ Host dsh-<environmentId>
 
 `sshConfigLink` 在 `~/.ssh/config` **首行**写入 `Include "<credentialRoot>/ssh_config"`（先备份为 `config.dsh-backup-<时间戳>`，幂等）。未链接而使用 managed 环境时连接报 `ssh-config-not-linked`。
 
+SFTP 使用独立的 SSH 子进程，同样在命令行强制 `StrictHostKeyChecking=yes`、`ForwardAgent=no`、`UpdateHostKeys=no`，并关闭 ControlMaster/ControlPath；用户别名配置不能放宽这些参数。
+
 ## Helper 安装与密码访问密钥引导
 
 - Helper：远端执行 `npm install --prefix ~/.dsh-helper/<ver> @deepseek-ai/dsh-ssh@<Host 同版>`，再比较远端 `helper.js` 的 SHA-256 与 Host 本机文件；一致才写入 `helper` 字段（`protocol` 取上游 `SSH_PROTOCOL_VERSION`）。
