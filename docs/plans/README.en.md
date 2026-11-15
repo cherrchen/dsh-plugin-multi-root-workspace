@@ -38,6 +38,10 @@ Plans with long-term reference value should not be deleted.
 
 active:
 
+- [2026-11-15-workspace-toast-implementation.md](./active/2026-11-15-workspace-toast-implementation.md) (Chinese) — Final implementation plan and exit acceptance for the worktree suggestion notice: Hero top-center and conversation top-right below the Header, a theme-adaptive light/dark card, no close button (the Remind me later menu dismisses it), primitives controls, a two-row coarse-pointer form, and avoidance of the upstream transient Toast; decision in [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15).
+
+- [2026-11-15-workspace-toast-placement.md](./active/2026-11-15-workspace-toast-placement.md) (Chinese) — Requirement sync, current-defect analysis (composer occlusion, mixed control language, a11y, floating-surface recipe), and the initial redesign proposal; reviewed on 2026-11-15.
+
 - [2026-11-14-hero-entry-adaptive-width.md](./active/2026-11-14-hero-entry-adaptive-width.md) (Chinese) — The New Session hero entry now fits the room the row leaves for it: a probe measures that room, `max-width` clamps to it, and under 88px the entry degrades to a 28×28 icon. No DSH change; an unrecognized row structure falls back to the `v0.1.19` form. Decision amendment in [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md).
 
 - [2026-11-09-worktree-aware-root-suggestions.md](./active/2026-11-09-worktree-aware-root-suggestions.md) (Chinese) — P1–P7 cover worktree root suggestions, the plugin toggle, and manual cleanup (B). P8–P10 add explicit access to shared Git metadata for linked worktrees (A). See [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md) for the decision and the roadmap for progress; shipping in `v0.1.17`.
