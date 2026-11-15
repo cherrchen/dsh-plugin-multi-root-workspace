@@ -22,9 +22,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorktreePromptView, WorktreeSnoozeMode } from '../contract.ts'
+import { IconChevronDown, IconWorkspaceTree } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError } from './panel-client.ts'
+import { noticeStyle, useNoticePlacement } from './notice-placement.ts'
 import type { WorktreeClient } from './worktree-client.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 
@@ -117,6 +119,8 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
   const [laterMode, setLaterMode] = useState<DialogLaterMode>('until-new-worktree')
+  const [snoozeOpen, setSnoozeOpen] = useState(false)
+  const placement = useNoticePlacement(notice !== undefined)
 
   const mounted = useRef(true)
   /** The session whose activation already consumed its one automatic check. */
@@ -188,6 +192,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setError(undefined)
     setBusy(false)
     setLaterMode('until-new-worktree')
+    setSnoozeOpen(false)
     // "From empty to a valid session" is a fresh activation later: forget that
     // an earlier visit to the same id consumed its check.
     if (session === undefined || session === '') checkedSession.current = undefined
@@ -245,14 +250,9 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
       setError(undefined)
       setBusy(false)
       setLaterMode('until-new-worktree')
+      setSnoozeOpen(false)
     })
   }, [subscribeEnabled])
-
-  /** Close the notice explicitly; a pending reminder completion must not reopen it. */
-  const closeNotice = useCallback(() => {
-    workEpoch.current += 1
-    setNotice(undefined)
-  }, [])
 
   /** Close the Dialog and abort its long poll immediately (X, Escape, mask). */
   const closeDialog = useCallback(() => {
@@ -268,6 +268,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setError(undefined)
     setBusy(false)
     setLaterMode('until-new-worktree')
+    setSnoozeOpen(false)
   }, [])
 
   // The Dialog's whole lifetime. It starts only after "View" set dialogOpen:
@@ -436,6 +437,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setError(undefined)
     setBusy(false)
     setLaterMode('until-new-worktree')
+    setSnoozeOpen(false)
     setDialogOpen(true)
   }, [client, currentSession, notice])
 
@@ -488,37 +490,50 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   return (
     <>
       {visibleNotice === undefined ? null : (
-        <div className="mrfw-toast" role="status" aria-live="polite">
-          <div className="mrfw-toastText">{t('worktree.toast', { count: visibleNotice.prompts.length })}</div>
-          <div className="mrfw-toastActions">
-            <button type="button" className="mrfw-btn mrfw-btnPrimary" onClick={openDialog}>{t('worktree.toastView')}</button>
-            <select
-              // A retried choice re-arms the dropdown: the notice's prompt ids
-              // change when the host refreshes a skipped row.
-              key={visibleNotice.prompts.map(prompt => prompt.id).join(',')}
-              className="mrfw-select mrfw-toastSelect"
-              aria-label={t('worktree.toastLater')}
-              defaultValue=""
-              onChange={event => {
-                const value = event.currentTarget.value
-                if (value === 'until-new-worktree' || value === '7d' || value === '30d') snoozeNotice(value)
-              }}
-            >
-              <option value="" disabled>{t('worktree.toastLater')}</option>
-              <option value="until-new-worktree">{t('worktree.snooze.until-new-worktree')}</option>
-              <option value="7d">{t('worktree.snooze.7d')}</option>
-              <option value="30d">{t('worktree.snooze.30d')}</option>
-            </select>
-            <button
-              type="button"
-              className="mrfw-btn mrfw-btnGhost mrfw-iconBtn"
-              aria-label={t('worktree.toastClose')}
-              onClick={closeNotice}
-            >
-              <span aria-hidden="true">×</span>
-            </button>
+        <section
+          className="mrfw-notice"
+          data-placement={placement?.placement ?? 'hero'}
+          data-compact={placement?.compact === true ? 'true' : undefined}
+          aria-label={t('worktree.toastLabel')}
+          style={placement === undefined ? { visibility: 'hidden' } : noticeStyle(placement)}
+        >
+          <div className="mrfw-noticeBody">
+            <span className="mrfw-noticeIcon" aria-hidden="true"><IconWorkspaceTree size={16} /></span>
+            <p className="mrfw-noticeText" role="status" aria-live="polite">{t('worktree.toast', { count: visibleNotice.prompts.length })}</p>
           </div>
-        </div>
+          <div className="mrfw-noticeActions" role="group" aria-label={t('worktree.toastActions')}>
+            <Button variant="primary" size="sm" className="mrfw-noticeAction" onClick={openDialog}>{t('worktree.toastView')}</Button>
+            <Menu
+              open={snoozeOpen}
+              anchor={(
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mrfw-noticeAction"
+                  aria-haspopup="menu"
+                  aria-expanded={snoozeOpen}
+                  onClick={() => { setSnoozeOpen(value => !value) }}
+                >
+                  {t('worktree.toastLater')}
+                  <span className="mrfw-noticeChevron" aria-hidden="true"><IconChevronDown size={12} /></span>
+                </Button>
+              )}
+              items={[
+                { id: 'until-new-worktree', label: t('worktree.snooze.until-new-worktree') },
+                { id: '7d', label: t('worktree.snooze.7d') },
+                { id: '30d', label: t('worktree.snooze.30d') },
+              ]}
+              onSelect={id => {
+                setSnoozeOpen(false)
+                if (id === 'until-new-worktree' || id === '7d' || id === '30d') snoozeNotice(id)
+              }}
+              onClose={() => { setSnoozeOpen(false) }}
+              side="bottom"
+              align="end"
+              portal
+            />
+          </div>
+        </section>
       )}
       {dialogRows === undefined ? null : (
         <Modal

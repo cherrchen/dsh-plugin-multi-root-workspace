@@ -1417,42 +1417,102 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   width: 32px;
 }
 
-/* The worktree prompt's non-modal notice (ADR-0039 第二十次修订 §20.3).
-   The shell.overlay container is click-through, so the card re-enables pointer
-   events for itself only: the page and its inputs stay usable behind it. It
-   never fades or times out — only an explicit action or a session/settings
-   change closes it. */
-.mrfw-toast {
+/* The worktree suggestion notice (ADR-0039 第二十一次修订): a persistent,
+   non-modal card. The client computes the fixed seat; this sheet owns only the
+   surface, the compact form, and the entrance fade. The surface follows the
+   active theme on purpose: light mode gets a light card, dark mode a dark one. */
+.mrfw-notice {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
   z-index: 1000;
   box-sizing: border-box;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
   width: max-content;
-  max-width: min(360px, calc(100vw - 48px));
-  padding: 14px 16px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: var(--dsw-radius-md);
+  max-width: var(--mrfw-notice-max-width, 560px);
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--dsw-radius-lg, var(--dsw-radius-md));
   background: var(--dsw-alias-bg-layer-2);
-  box-shadow: var(--dsw-elevation-prominent);
+  box-shadow: var(--dsw-elevation-panel);
   color: var(--dsw-alias-label-primary);
   pointer-events: auto;
+  animation: mrfw-notice-fade 160ms ease-out;
 }
 
-.mrfw-toastText {
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-primary);
+/* Hero seats center on the composer; conversation seats are right-anchored. */
+.mrfw-notice[data-placement='hero'] {
+  transform: translateX(-50%);
 }
 
-.mrfw-toastActions {
-  display: flex;
+.mrfw-notice[data-compact='true'] {
   flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.mrfw-notice[data-compact='true'] .mrfw-noticeBody {
+  flex-basis: 100%;
+}
+
+.mrfw-notice[data-compact='true'] .mrfw-noticeActions {
+  flex-basis: 100%;
+  justify-content: flex-end;
+  margin-left: 0;
+}
+
+.mrfw-noticeBody {
+  display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.mrfw-noticeIcon {
+  display: flex;
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-noticeText {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.mrfw-noticeActions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.mrfw-noticeAction {
+  flex: none;
+}
+
+.mrfw-noticeChevron {
+  display: inline-flex;
+  margin-left: 2px;
+}
+
+.mrfw-notice[data-compact='true'] .mrfw-noticeAction {
+  height: 32px;
+  padding: 0 12px;
+}
+
+@keyframes mrfw-notice-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mrfw-notice {
+    animation: none;
+  }
 }
 
 /* The reminder-delay dropdown: the same border/background/ink recipe as the
@@ -1482,12 +1542,6 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   opacity: 0.4;
 }
 
-.mrfw-toastSelect {
-  flex: none;
-  min-width: 0;
-  max-width: 180px;
-  color: var(--dsw-alias-label-secondary);
-}
 
 /* The Dialog footer's combined "later / do not remind" control row. The
    Modal's own footer is a single justify-end line without wrapping; the

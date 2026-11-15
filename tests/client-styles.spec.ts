@@ -451,3 +451,37 @@ describe('the additional-root search styles (0.2.2-rc.2)', () => {
     }
   })
 })
+
+describe('the worktree suggestion notice rules', () => {
+  /** The sheet with comments stripped; the notice block runs to the next rule family. */
+  const CSS = STYLES.replace(/\/\*[\s\S]*?\*\//g, '')
+  const notice = CSS.slice(CSS.indexOf('.mrfw-notice {'), CSS.indexOf('.mrfw-select {'))
+
+  it('leaves the old bottom-right corner entirely', () => {
+    expect(CSS).not.toContain('.mrfw-toast')
+    expect(notice).not.toMatch(/right:\s*24px/)
+    expect(notice).not.toMatch(/bottom:\s*24px/)
+    expect(notice).toMatch(/position:\s*fixed/)
+  })
+
+  it('draws one borderless, theme-adaptive elevated card', () => {
+    expect(notice).toMatch(/border:\s*0;/)
+    expect(notice).toMatch(/border-radius:\s*var\(--dsw-radius-lg(?:,\s*var\(--dsw-radius-md\))?\)/)
+    expect(notice).toMatch(/background:\s*var\(--dsw-alias-bg-layer-2\)/)
+    expect(notice).toMatch(/box-shadow:\s*var\(--dsw-elevation-panel\)/)
+    // The surface follows the active theme; it is not the always-dark Toast token.
+    expect(notice).not.toContain('--dsw-alias-toast-bg')
+    expect(notice).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/)
+  })
+
+  it('centers the Hero seat and keeps a compact 32px two-row form', () => {
+    expect(CSS).toMatch(/\.mrfw-notice\[data-placement='hero'\]\s*\{[^}]*transform:\s*translateX\(-50%\)/s)
+    expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\]\s*\{[^}]*flex-wrap:\s*wrap/s)
+    expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\] \.mrfw-noticeAction\s*\{[^}]*height:\s*32px[^}]*padding:\s*0 12px/s)
+  })
+
+  it('fades in and honors reduced motion', () => {
+    expect(CSS).toMatch(/@keyframes mrfw-notice-fade/)
+    expect(CSS).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.mrfw-notice\s*\{\s*animation:\s*none/s)
+  })
+})

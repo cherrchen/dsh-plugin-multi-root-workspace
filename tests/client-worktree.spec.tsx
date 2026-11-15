@@ -17,7 +17,7 @@ const t: Translate = key => key
 /** A translator that keeps its parameters, so a test can see the notice count. */
 const tWithParams: Translate = (key, params) =>
   params === undefined ? key : key + ':' + Object.values(params).join(',')
-afterEach(() => { cleanup(); vi.restoreAllMocks() })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 const PROMPT: WorktreePromptView = {
   id: 'p1',
@@ -96,6 +96,12 @@ function renderPrompt(client: WorktreeClient, previewOnly = false) {
     subscribeSession={() => () => {}}
     t={t}
     previewOnly={previewOnly} />)
+}
+
+/** Open the notice's "remind me later" menu and pick one mode. */
+async function chooseSnooze(mode: 'until-new-worktree' | '7d' | '30d'): Promise<void> {
+  fireEvent.click(await screen.findByText('worktree.toastLater'))
+  fireEvent.click(await screen.findByText('worktree.snooze.' + mode))
 }
 
 /** Render the overlay and open the Dialog through the notice's View action. */
@@ -334,14 +340,48 @@ describe('worktree notice: View opens the Dialog', () => {
   })
 })
 
+describe('worktree notice: presentation and accessibility', () => {
+  it('is a labeled region whose live status holds only the copy', async () => {
+    renderPrompt(fakeClient({ prompt: async () => answer([PROMPT]) }))
+    const region = await screen.findByRole('region', { name: 'worktree.toastLabel' })
+    expect(region.getAttribute('data-placement')).toBe('hero')
+    expect(region.getAttribute('role')).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('worktree.toast')
+    expect(screen.getByRole('group', { name: 'worktree.toastActions' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'worktree.toastView' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'worktree.toastLater' })).toBeDefined()
+    expect(screen.queryByText('worktree.toastClose')).toBeNull()
+  })
+
+  it('opens the snooze menu, exposes its state, and closes after a pick', async () => {
+    const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    renderPrompt(fakeClient({ prompt: async () => answer([PROMPT]), snooze }))
+    const trigger = await screen.findByRole('button', { name: 'worktree.toastLater' })
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    expect(await screen.findByText('worktree.snooze.7d')).toBeDefined()
+    fireEvent.click(screen.getByText('worktree.snooze.7d'))
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: '7d' }))
+    await waitFor(() => expect(screen.queryByText('worktree.snooze.7d')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
+  })
+
+  it('takes the compact form for a coarse pointer', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+    renderPrompt(fakeClient({ prompt: async () => answer([PROMPT]) }))
+    const region = await screen.findByRole('region', { name: 'worktree.toastLabel' })
+    await waitFor(() => expect(region.getAttribute('data-compact')).toBe('true'))
+  })
+})
+
 describe('worktree notice: the operator closes or delays it', () => {
   it('snoozes with the default until-new-worktree mode and writes no registration', async () => {
     const prompt = vi.fn(async () => answer([PROMPT]))
     const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
     const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
     renderPrompt(fakeClient({ prompt, snooze, resolve }))
-    const select = await screen.findByLabelText('worktree.toastLater')
-    fireEvent.change(select, { target: { value: 'until-new-worktree' } })
+    await chooseSnooze('until-new-worktree')
     await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: 'until-new-worktree' }))
     await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
     expect(resolve).not.toHaveBeenCalled()
@@ -352,32 +392,16 @@ describe('worktree notice: the operator closes or delays it', () => {
     const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
     const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
     renderPrompt(fakeClient({ prompt, snooze }))
-    const select = await screen.findByLabelText('worktree.toastLater')
-    fireEvent.change(select, { target: { value: mode } })
+    await chooseSnooze(mode)
     await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1', 'm1'], { mode }))
     await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
-  })
-
-  it('the close button only dismisses the notice', async () => {
-    const prompt = vi.fn(async () => answer([PROMPT]))
-    const snooze = vi.fn()
-    const resolve = vi.fn()
-    const wait = vi.fn(async (_sessionId: string, _seen: { seenViewRevision?: string }, signal?: AbortSignal) => pendingWait(signal))
-    renderPrompt(fakeClient({ prompt, snooze, resolve, wait } as Partial<WorktreeClient>))
-    await screen.findByLabelText('worktree.toastClose')
-    fireEvent.click(screen.getByLabelText('worktree.toastClose'))
-    await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
-    expect(snooze).not.toHaveBeenCalled()
-    expect(resolve).not.toHaveBeenCalled()
-    expect(wait).not.toHaveBeenCalled()
   })
 
   it('a failed snooze still closes the notice without retrying', async () => {
     const prompt = vi.fn(async () => answer([PROMPT]))
     const snooze = vi.fn(async () => { throw new PanelError('worktree/not-enabled', 'off') })
     renderPrompt(fakeClient({ prompt, snooze }))
-    const select = await screen.findByLabelText('worktree.toastLater')
-    fireEvent.change(select, { target: { value: '7d' } })
+    await chooseSnooze('7d')
     await waitFor(() => expect(snooze).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
     await new Promise(resolve => setTimeout(resolve, 20))
@@ -393,7 +417,7 @@ describe('worktree notice: the operator closes or delays it', () => {
     const prompt = vi.fn(async (sessionId: string) => answer(sessionId === 's1' ? [PROMPT] : [MAIN, OTHER]))
     render(<WorktreePrompt client={fakeClient({ prompt, snooze })} sessionId={session.read}
       subscribeSession={session.subscribe} t={tWithParams} previewOnly={false} />)
-    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await chooseSnooze('7d')
     await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: '7d' }))
     session.switchTo('s2')
     await screen.findByText('worktree.toast:2')
@@ -414,7 +438,7 @@ describe('worktree notice: the operator closes or delays it', () => {
     const prompt = vi.fn(async (sessionId: string) => answer(sessionId === 's1' ? [PROMPT] : []))
     render(<WorktreePrompt client={fakeClient({ prompt, snooze })} sessionId={session.read}
       subscribeSession={session.subscribe} t={tWithParams} previewOnly={false} />)
-    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await chooseSnooze('7d')
     await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: '7d' }))
     session.switchTo('s2')
     await waitFor(() => expect(prompt).toHaveBeenCalledTimes(2))
@@ -441,7 +465,7 @@ describe('worktree notice: the operator closes or delays it', () => {
       skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
     }))
     renderPrompt(fakeClient({ prompt, snooze }))
-    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await chooseSnooze('7d')
     await waitFor(() => expect(snooze).toHaveBeenCalledTimes(1))
     // Nothing was delayed: the notice must stay for the still-unresolved
     // candidate (with its refreshed id) instead of silently hiding it for the
@@ -586,18 +610,18 @@ describe('worktree overlay: completion ownership', () => {
     expect(screen.getByRole('dialog')).toBeDefined()
   })
 
-  it('keeps a closed notice closed when a pending snooze reports a skipped row', async () => {
+  it('keeps a notice closed by the Dialog when a pending snooze reports a skipped row', async () => {
     let finishSnooze: ((answer: Awaited<ReturnType<WorktreeClient['snooze']>>) => void) | undefined
     const snooze = vi.fn(() => new Promise<Awaited<ReturnType<WorktreeClient['snooze']>>>((done) => {
       finishSnooze = done
     }))
     const prompt = vi.fn(async () => answer([PROMPT, OTHER]))
     renderPrompt(fakeClient({ prompt, snooze }))
-    fireEvent.change(await screen.findByLabelText('worktree.toastLater'), { target: { value: '7d' } })
+    await chooseSnooze('7d')
     await waitFor(() => expect(snooze).toHaveBeenCalledTimes(1))
-    fireEvent.click(screen.getByLabelText('worktree.toastClose'))
-    await waitFor(() => expect(screen.queryByLabelText('worktree.toastLater')).toBeNull())
-    // The operator closed the notice; a partial refusal must not reopen it.
+    // Opening the Dialog owns the notice's epoch from here on.
+    fireEvent.click(screen.getByText('worktree.toastView'))
+    await screen.findByRole('dialog')
     await act(async () => {
       finishSnooze?.({
         viewRevision: 'v2',
@@ -607,7 +631,8 @@ describe('worktree overlay: completion ownership', () => {
       })
     })
     await new Promise(done => setTimeout(done, 20))
-    expect(screen.queryByLabelText('worktree.toastLater')).toBeNull()
+    expect(screen.queryByText('worktree.toastLater')).toBeNull()
+    expect(screen.getByRole('dialog')).toBeDefined()
   })
 })
 
