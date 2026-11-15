@@ -487,6 +487,26 @@ describe('the worktree suggestion notice rules', () => {
     expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\] \.mrfw-noticeSplitToggle\s*\{[^}]*width:\s*32px/s)
   })
 
+  it('parks one small circular close badge on the top-right corner', () => {
+    // Drawn by this sheet rather than by a primitive: the compact control rules
+    // fix a taller height and a smaller corner radius, which would turn the
+    // badge into a rounded rectangle.
+    expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose\s*\{[^}]*position:\s*absolute[^}]*top:\s*0[^}]*right:\s*0[^}]*width:\s*18px[^}]*height:\s*18px[^}]*padding:\s*0[^}]*border-radius:\s*50%/s)
+    // The seat is pulled 2px inside the geometric corner on both axes: a corner
+    // badge reads as balanced only slightly off the mathematical center.
+    expect(notice).toMatch(/transform:\s*translate\(calc\(50%\s*-\s*2px\),\s*calc\(-50%\s*\+\s*2px\)\)/s)
+    // One hairline stroke delimits the circle against the card corner.
+    expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose\s*\{[^}]*border:\s*0\.5px solid var\(--dsw-alias-border-l3\)[^}]*border-radius:\s*50%/s)
+    // The badge wears the card surface and the host's ink tokens, never a literal color.
+    expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose\s*\{[^}]*background:\s*var\(--dsw-alias-bg-layer-2\)[^}]*color:\s*var\(--dsw-alias-label-secondary\)/s)
+    // Hovering leaves the surface exactly as it is: no tint and no transparency.
+    expect(notice).not.toMatch(/mrfw-noticeClose:hover/)
+    expect(notice).not.toMatch(/mrfw-noticeClose:active/)
+    // The 18px circle still offers a 24px pointer target.
+    expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose::after\s*\{[^}]*inset:\s*-3px/s)
+    expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--dsw-alias-brand-primary\)/s)
+  })
+
   it('fades in and honors reduced motion', () => {
     expect(CSS).toMatch(/@keyframes mrfw-notice-fade/)
     expect(CSS).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.mrfw-notice\s*\{\s*animation:\s*none/s)

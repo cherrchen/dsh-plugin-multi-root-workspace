@@ -1631,6 +1631,50 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   padding: 0;
 }
 
+/* The close badge (ADR-0039 第二十五次修订): one small perfect circle parked on
+   the card's top-right corner, half outside it. It is drawn here rather than
+   with a primitive: the compact size rules fix a taller control and a smaller
+   corner radius, so a primitive renders as a rounded rectangle. The badge keeps
+   the card's own surface in every pointer state — it never gains a hover tint
+   or becomes transparent. */
+.mrfw-notice .mrfw-noticeClose {
+  position: absolute;
+  top: 0;
+  right: 0;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  line-height: 0;
+  cursor: pointer;
+  /* Pulled 2px toward the card on both axes: a corner badge reads as balanced
+     only when its optical seat sits slightly inside the geometric corner. */
+  transform: translate(calc(50% - 2px), calc(-50% + 2px));
+}
+
+/* The circle stays 18px; this invisible ring widens the pointer target to 24px. */
+.mrfw-notice .mrfw-noticeClose::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+}
+
+/* The badge overhangs the card, so its focus ring may draw outside the surface. */
+.mrfw-notice .mrfw-noticeClose:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
 @keyframes mrfw-notice-fade {
   from { opacity: 0; }
   to { opacity: 1; }

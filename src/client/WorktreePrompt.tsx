@@ -29,6 +29,7 @@ import {
   IconAccessReadOnly,
   IconAccessReadWrite,
   IconChevronDown,
+  IconClose,
   IconWorkspaceTree,
 } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError } from './panel-client.ts'
@@ -80,6 +81,20 @@ function AccessIcon(props: { readonly access: WorktreeAccess }): ReactNode {
     ? IconAccessReadOnly
     : props.access === 'read-write' ? IconAccessReadWrite : IconAccessInherit
   return Icon === undefined ? null : <Icon size={14} />
+}
+
+/**
+ * The close badge's ×: the host's Regular close glyph when the release exports
+ * one, a local stroke pair otherwise. The badge's circle is styled by the
+ * plugin, so the glyph only has to be an × that inherits `currentColor`.
+ */
+function CloseGlyph(): ReactNode {
+  if (IconClose !== undefined) return <IconClose size={10} />
+  return (
+    <svg width={10} height={10} viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+      <path d="M2.6 2.6l6.8 6.8M9.4 2.6L2.6 9.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+    </svg>
+  )
 }
 
 /** Keep each surviving row's chosen access; new rows start at inherit. */
@@ -564,6 +579,21 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     })()
   }, [client, currentSession, notice])
 
+  /**
+   * Close the notice without recording a reminder decision.
+   *
+   * The candidates were already claimed through `seen` when the notice
+   * appeared, so this Host stays quiet for its lifetime and a restart offers
+   * them again. Nothing is written: closing is neither a delay nor a permanent
+   * dismissal. Bumping the epoch detaches an in-flight reminder request from a
+   * notice that no longer exists.
+   */
+  const closeNotice = useCallback(() => {
+    workEpoch.current += 1
+    setNotice(undefined)
+    setSnoozeOpen(false)
+  }, [])
+
   const visibleNotice = notice !== undefined && notice.session === currentSession ? notice : undefined
   const dialogRows = dialogOpen && rows !== undefined && rows.length > 0
     && dialogSession.current === currentSession ? rows : undefined
@@ -630,6 +660,17 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
               />
             </span>
           </div>
+          {/* Drawn here, not with a primitive: the compact size rules fix a
+              taller control and a smaller corner radius, so a primitive would
+              render as a rounded rectangle instead of this circle. */}
+          <button
+            type="button"
+            className="mrfw-noticeClose"
+            aria-label={t('worktree.toastClose')}
+            onClick={closeNotice}
+          >
+            <CloseGlyph />
+          </button>
         </section>
       )}
       {dialogRows === undefined ? null : (
