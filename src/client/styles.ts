@@ -1399,12 +1399,26 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
 
 .mrfw-actions {
   display: flex;
-  flex-wrap: wrap;
+  /* One row by default: the manual path field below is the only flexible item
+     and will be removed once the picker covers every host. */
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   margin-top: 16px;
   padding-top: 16px;
   border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+/* The manual path field absorbs the row's spare width and gives way first. */
+.mrfw-manualPath {
+  flex: 1 1 120px;
+  min-width: 80px;
+}
+
+@media (max-width: 560px) {
+  .mrfw-actions {
+    flex-wrap: wrap;
+  }
 }
 
 /* One control row, one height: the capsule buttons match the 32px input. */

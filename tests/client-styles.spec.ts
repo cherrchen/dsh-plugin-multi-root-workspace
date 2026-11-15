@@ -492,3 +492,10 @@ describe('the worktree suggestion notice rules', () => {
     expect(CSS).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.mrfw-notice\s*\{\s*animation:\s*none/s)
   })
 })
+
+describe('the workspace folder add row', () => {
+  it('keeps one line by letting the manual path field shrink first', () => {
+    expect(STYLES).toMatch(/\.mrfw-actions\s*\{[^}]*flex-wrap:\s*nowrap/s)
+    expect(STYLES).toMatch(/\.mrfw-manualPath\s*\{[^}]*flex:\s*1 1 120px[^}]*min-width:\s*80px/s)
+  })
+})

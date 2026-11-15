@@ -300,6 +300,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - [x] **样式**：删除右下角 `.mrfw-toast*`；新增随主题自适应的 `.mrfw-notice*`（R16、`border: 0` + `elevation-panel`、两行/粗指针 32px、reduced motion）。
 - [x] **词典**：新增 `toastLabel`/`toastActions`；`toastLater` 改为「稍后提醒」；删除 `toastClose`。
 - [x] **测试**：placement 13 条；client-worktree 52 条（含 a11y、拆分按钮、面板手动入口、紧凑、跨会话）；client-panel 72 条；styles 40 条；locale parity 与 bundle 保持。
+- [x] **面板布局**：Worktree 手动入口加入添加行后保持单行；手动路径输入改为可收缩字段（`flex: 1 1 120px`，未来移除），窄视口才回退换行。
 - [x] **文档**：ADR 第二十一次修订、README 双语、本 P11、计划索引。
 - [ ] **退出验收**：质量门与 GUI 证据、Draft PR（见实施计划 §6）。
 

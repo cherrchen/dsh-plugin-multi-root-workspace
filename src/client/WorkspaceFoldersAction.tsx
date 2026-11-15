@@ -899,7 +899,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             {state.noSession ? null : (
               <>
             <input
-              className="mrfw-input"
+              className="mrfw-input mrfw-manualPath"
               value={manualPath}
               placeholder={t('panel.addManual')}
               disabled={atLimit}
