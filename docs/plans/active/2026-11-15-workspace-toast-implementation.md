@@ -1,6 +1,6 @@
 # Workspace 发现提示位置与形态重构 — 实施计划与退出验收
 
-> 状态：**已实施，待退出验收**（2026-11-15，分支 `feat/workspace-toast`）：代码、单元/组件测试与构建门禁已通过；GUI 视觉复核（E5）与 Draft PR（E7）待完成。需求分析、缺点清单与初始方案见 [需求同步与修改计划报告](./2026-11-15-workspace-toast-placement.md)；本文件是评审后的最终实施计划，冲突处以本文件为准。
+> 状态：**已实施，待退出验收**（2026-11-15，分支 `feat/workspace-toast`）：代码、单元/组件测试与构建门禁已通过，Draft PR [#60](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/60) 已创建；GUI 视觉复核（E5）待评审者完成。需求分析、缺点清单与初始方案见 [需求同步与修改计划报告](./2026-11-15-workspace-toast-placement.md)；本文件是评审后的最终实施计划，冲突处以本文件为准。
 
 ## 1. 评审决定（2026-11-15）
 
