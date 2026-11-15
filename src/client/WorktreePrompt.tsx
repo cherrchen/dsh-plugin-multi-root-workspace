@@ -108,16 +108,15 @@ function pathName(path: string): string {
 
 /** Reconcile the checked keys after the server sent a new visible list. */
 function reconcileSelection(
-  previous: ReadonlySet<string>,
+  previous: ReadonlyMap<string, boolean>,
   prompts: readonly WorktreePromptView[],
   errors: ReadonlyMap<string, string>,
-): Set<string> {
-  const next = new Set<string>()
+): Map<string, boolean> {
+  const next = new Map<string, boolean>()
   for (const prompt of prompts) {
-    if (errors.has(prompt.key)) continue
-    // A worktree checkout is pre-selected; the main checkout grants the source
-    // tree and stays an explicit opt-in.
-    if (previous.has(prompt.key) || prompt.kind === 'worktree') next.add(prompt.key)
+    // Default only new rows. An existing row can be explicitly unchecked.
+    const checked = previous.get(prompt.key) ?? (prompt.kind === 'worktree')
+    next.set(prompt.key, !errors.has(prompt.key) && checked)
   }
   return next
 }
@@ -162,7 +161,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const [notice, setNotice] = useState<NoticeState | undefined>(undefined)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [rows, setRows] = useState<readonly WorktreePromptView[] | undefined>(undefined)
-  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
+  const [selected, setSelected] = useState<ReadonlyMap<string, boolean>>(() => new Map())
   const [rowErrors, setRowErrors] = useState<ReadonlyMap<string, string>>(() => new Map())
   const [skippedCount, setSkippedCount] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -238,7 +237,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setNotice(undefined)
     setDialogOpen(false)
     setRows(undefined)
-    setSelected(new Set())
+    setSelected(new Map())
     setRowErrors(new Map())
     setSkippedCount(0)
     setError(undefined)
@@ -299,7 +298,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
       setNotice(undefined)
       setDialogOpen(false)
       setRows(undefined)
-      setSelected(new Set())
+      setSelected(new Map())
       setRowErrors(new Map())
       setSkippedCount(0)
       setError(undefined)
@@ -320,7 +319,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     dialogSession.current = undefined
     setDialogOpen(false)
     setRows(undefined)
-    setSelected(new Set())
+    setSelected(new Map())
     setRowErrors(new Map())
     setSkippedCount(0)
     setError(undefined)
@@ -419,6 +418,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const confirmAdd = useCallback(async (ids: readonly string[]): Promise<void> => {
     const session = dialogSession.current
     if (client === undefined || session === undefined || !dialogOpen || rows === undefined || ids.length === 0) return
+    if (sessionIdRef.current() !== session) return
     const visible = rows
     const byId = new Map(visible.map(row => [row.id, row]))
     const accesses: WorktreeAccessEntry[] = ids.map(id => ({
@@ -453,6 +453,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const applyLater = useCallback(async (): Promise<void> => {
     const session = dialogSession.current
     if (client === undefined || session === undefined || !dialogOpen || rows === undefined) return
+    if (sessionIdRef.current() !== session) return
     const visible = rows
     const ids = visible.map(row => row.id)
     if (ids.length === 0) return
@@ -497,7 +498,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setNotice(undefined)
     dialogSession.current = session
     setRows(undefined)
-    setSelected(new Set())
+    setSelected(new Map())
     setRowErrors(new Map())
     setSkippedCount(0)
     setError(undefined)
@@ -518,13 +519,12 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     openDialogFor(current.session)
   }, [client, currentSession, notice, openDialogFor])
 
-  /** Open the Dialog from the panel's manual entry for the live session. */
-  const openWorktreePrompt = useCallback(() => {
-    const session = currentSession
-    if (client === undefined || session === undefined || session === '') return
-    if (sessionIdRef.current() !== session) return
-    if (readEnabledRef.current?.() === false) return
+  /** Accept the manager's request only while its session is current. */
+  const openWorktreePrompt = useCallback((session: string): boolean => {
+    if (client === undefined || dialogSession.current !== undefined || session !== currentSession) return false
+    if (sessionIdRef.current() !== session || readEnabledRef.current?.() === false) return false
     openDialogFor(session)
+    return true
   }, [client, currentSession, openDialogFor])
 
   useEffect(() => onWorktreePromptRequest(openWorktreePrompt), [openWorktreePrompt])
@@ -570,9 +570,8 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   if (visibleNotice === undefined && dialogRows === undefined) return null
 
   const singlePrompt = dialogRows !== undefined && dialogRows.length === 1 ? dialogRows[0] : undefined
-  const multi = dialogRows !== undefined && dialogRows.length > 1
   const mainCheckout = singlePrompt?.kind === 'main-checkout'
-  const checked = dialogRows === undefined ? [] : dialogRows.filter(row => selected.has(row.key))
+  const checked = dialogRows?.filter(row => selected.get(row.key) === true) ?? []
   const accessOf = (row: WorktreePromptView): WorktreeAccess => accessByKey.get(row.key) ?? 'inherit'
 
   return (
@@ -683,11 +682,8 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
                 <Button
                   variant="primary"
                   size="sm"
-                  disabled={busy || (singlePrompt === undefined && checked.length === 0)}
-                  onClick={() => {
-                    if (singlePrompt !== undefined) void confirmAdd([singlePrompt.id])
-                    else void confirmAdd(checked.map(row => row.id))
-                  }}
+                  disabled={busy || checked.length === 0}
+                  onClick={() => { void confirmAdd(checked.map(row => row.id)) }}
                 >
                   {singlePrompt !== undefined
                     ? t('worktree.add')
@@ -703,7 +699,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
               const isMain = row.kind === 'main-checkout'
               const access = accessOf(row)
               const accessOpen = accessMenuKey === row.key
-              const checkedNow = selected.has(row.key)
+              const checkedNow = selected.get(row.key) === true
               const text = (
                 <span className="mrfw-worktreeRowText">
                   <span className="mrfw-worktreeRowNameLine">
@@ -720,27 +716,18 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
                 </span>
               )
               return (
-                <div key={row.key} className="mrfw-worktreeRow" data-selected={multi && checkedNow ? 'true' : undefined}>
-                  {multi ? (
-                    <label className="mrfw-worktreeRowMain">
-                      <input
-                        type="checkbox"
-                        checked={checkedNow}
-                        disabled={busy}
-                        onChange={event => {
-                          const next = event.currentTarget.checked
-                          setSelected(previous => {
-                            const copy = new Set(previous)
-                            if (next) copy.add(row.key)
-                            else copy.delete(row.key)
-                            return copy
-                          })
-                        }} />
-                      {text}
-                    </label>
-                  ) : (
-                    <div className="mrfw-worktreeRowMain">{text}</div>
-                  )}
+                <div key={row.key} className="mrfw-worktreeRow" data-selected={checkedNow ? 'true' : undefined}>
+                  <label className="mrfw-worktreeRowMain">
+                    <input
+                      type="checkbox"
+                      checked={checkedNow}
+                      disabled={busy}
+                      onChange={event => {
+                        const next = event.currentTarget.checked
+                        setSelected(previous => new Map(previous).set(row.key, next))
+                      }} />
+                    {text}
+                  </label>
                   <Menu
                     open={accessOpen}
                     onClose={() => { setAccessMenuKey(undefined) }}

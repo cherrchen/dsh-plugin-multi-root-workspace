@@ -24,7 +24,7 @@
 - 对话页：内容区顶部优先 `[data-conversation-content]`（`0.2.1-alpha.3+`），否则测量会话根第一个子元素（Header）的 `bottom`；`top = 内容区顶部 + 12`，水平中心 = 内容区中心；最大宽度 `min(560, 内容区宽度 − 48)`。
 - Hero：`top = 40 + (官方 Toast 可见 ? 56 : 0)`；最大宽度 `min(560, 列宽 − 32)`。
 - 探针失败（无 `[data-phase]`、rect 全 0、元素缺失）→ Hero 顶部居中；禁止回右下角。
-- 重测：`window.resize`、`ResizeObserver`（会话根/输入卡/内容区）、`MutationObserver`（`body` 直属 childList 用于官方 Toast；`data-phase`/`data-content-phase` 属性用于页面切换）；微任务合并，不监听滚动。
+- 重测：`window.resize`、当前会话根/输入卡/内容区/Header 的 `ResizeObserver`，以及兼容探针识别的节点和属性变化。会话节点挂载或替换时重绑观察对象，客户端以微任务合并重测。
 - 页面切换（Hero → 对话页）时提示若仍可见，重测换位。
 
 ### 2.2 形态
@@ -32,7 +32,7 @@
 - 单行（宽屏）：图标 16 + 文本 14/22 + 操作区（查看、稍后提醒）。
 - 卡片：`border: 0`、`border-radius: var(--dsw-radius-lg)`（R16）、`background: var(--dsw-alias-bg-layer-2)`、`box-shadow: var(--dsw-elevation-panel)`、`padding: 10px 12px`、`gap: 12px`；随主题明暗切换。
 - 操作：`Button variant="primary" size="sm"`（查看）；「稍后提醒」为拆分按钮——左半 `Button variant="ghost" size="sm"` 直接应用 `until-new-worktree`，右半 chevron `Button` 作为 primitives `Menu` 的 anchor（三个 snooze 档位复用现有文案；`side="bottom"`、`align="end"`、`portal`）；拆分控件外围与中间分割线使用同一条 `--dsw-alias-border-l3` 细线。
-- 手动入口：Workspace Folders 面板「重试」右侧的「Worktree 建议」按钮经 `worktree-prompt-bus` 请求 shell overlay 打开同一个 Dialog；面板先关闭自身，不复制 Dialog 生命周期。添加行保持单行：手动路径输入是唯一可收缩项（`flex: 1 1 120px`，min 80px），窄视口才回退换行。
+- 手动入口：Workspace Folders 面板「重试」右侧的「Worktree 建议」按钮经 `worktree-prompt-bus` 向 shell overlay 发起带管理器会话的请求，overlay 接受后面板关闭。添加行保持单行：手动路径输入是唯一可收缩项（`flex: 1 1 120px`，min 80px），窄视口才回退换行。
 - 紧凑（窄屏或粗指针）：两行（文本行 + 操作行），控件 32px，卡片宽度取测量后的 `maxWidth`。
 - 动效：160ms `opacity + translateY(-4px)` 入场；`prefers-reduced-motion` 下取消动画。
 - 不覆盖 primitives 视觉；插件样式只做布局与表面。
@@ -49,11 +49,11 @@
 
 | 文件 | 改动 |
 | --- | --- |
-| `src/client/notice-placement.ts`（新增） | 纯解析器 `resolveNoticePlacement` + DOM 探针 `readNoticePlacement` + `useNoticePlacement`（微任务合并、resize/ResizeObserver/MutationObserver） |
+| `src/client/notice-placement.ts`、`src/compat/client-conversation-layout.ts` | 客户端负责纯落点解析和 React 生命周期，兼容层负责上游 DOM 探针、Header 回退及观察 |
 | `src/client/WorktreePrompt.tsx` | 提示区改用 `Button`/`Menu`/compat 图标；删除 × 与 `closeNotice`；新增 `snoozeOpen` 与 placement；其余 RPC/epoch 逻辑不变 |
 | `src/client/styles.ts` | 删除 `.mrfw-toast*`；新增 `.mrfw-notice*`（表面、紧凑、动效、reduced motion） |
-| `src/client/worktree-prompt-bus.ts`（新增） | 面板 → shell overlay 的一次性打开请求；overlay 仍是 Dialog 的唯一 owner |
-| `src/client/WorkspaceFoldersAction.tsx` / `index.ts` / `HeroWorkspaceEntry.tsx` | 面板「重试」右侧的「Worktree 建议」入口、`worktreePromptEnabled` 透传；点击先关面板再请求 overlay |
+| `src/client/worktree-prompt-bus.ts`（新增） | 面板 → shell overlay 的一次性打开请求，携带管理器会话并返回确认 |
+| `src/client/WorkspaceFoldersAction.tsx` / `index.ts` / `HeroWorkspaceEntry.tsx` | 面板「重试」右侧的「Worktree 建议」入口和 `worktreePromptEnabled` 透传 |
 | `src/client/locales.ts` | 新增 `worktree.toastLabel`/`worktree.toastActions`/`worktree.toastLaterOptions`/`worktree.panelOpen`；`worktree.toastLater` 改为「稍后提醒」/「Remind me later」；删除 `worktree.toastClose` |
 | `tests/client-notice-placement.spec.ts`（新增） | 纯解析器 + 合成 DOM 探针 + 官方 Toast 偏移 + 降级 |
 | `tests/client-worktree.spec.tsx` | select → Menu 交互；删除 × 用例；新增 placement/a11y/菜单用例 |

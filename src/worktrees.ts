@@ -920,14 +920,8 @@ export class MultiRootWorktrees extends Service {
       // rebuild; the prompt ID must not be. Reusing the whole record would hand
       // the operator an ID whose owner expectation can never be confirmed.
       const unchanged = previous !== undefined && isDeepStrictEqual(previous.expected, expected)
-      // The expectation deliberately excludes display-only metadata (the main
-      // checkout's own HEAD is shown, never authorized), so an unchanged
-      // expectation must still adopt a refreshed candidate: the displayed branch
-      // follows the live checkout while the prompt id and the owner expectation
-      // stay put. Only a candidate that really moved replaces the record object,
-      // so an unrelated revalidation cannot make a concurrent confirmation stale.
-      const record: CandidateRecord = unchanged && previous !== undefined
-        ? (isDeepStrictEqual(previous.candidate, candidate) ? previous : { ...previous, candidate })
+      const record: CandidateRecord = unchanged
+        ? previous
         : { candidate, expected, promptId: randomUUID(), discoveryKey }
       if (!unchanged) {
         if (previous === undefined) added.push(record)
@@ -1188,7 +1182,7 @@ export class MultiRootWorktrees extends Service {
   /** Build the wire prompt view for one visible record. */
   private promptView(workspace: WorkspaceState, record: CandidateRecord, mode: WorkspaceMode): WorktreePrompt {
     const visible = this.visibleRecords(workspace, mode)
-    const branch = branchFromHead(record.candidate.kind === 'main-checkout' ? record.candidate.mainHead : record.candidate.adminHead)
+    const branch = suggestionBranch(record.candidate, workspace.repo?.commonHead)
     return {
       id: record.promptId,
       key: record.candidate.key,
@@ -1217,7 +1211,7 @@ export class MultiRootWorktrees extends Service {
         id: record.promptId,
         key: record.candidate.key,
         kind: record.candidate.kind,
-        branch: branchFromHead(record.candidate.kind === 'main-checkout' ? record.candidate.mainHead : record.candidate.adminHead) ?? '',
+        branch: suggestionBranch(record.candidate, workspace.repo?.commonHead) ?? '',
       })),
       prompted: [...workspace.prompted].sort(),
       ignored: [...workspace.ignored].sort(),
@@ -1492,15 +1486,16 @@ function codeOf(error: unknown): string {
   return typeof code === 'string' && code !== '' ? code : 'worktree/not-eligible'
 }
 
-/** Build the owner expectation one prompt binds. */
-/** The symbolic branch in a HEAD line, or undefined for a detached HEAD. */
-function branchFromHead(head: string): string | undefined {
+/** Derive the displayed branch without making the common HEAD part of the prompt identity. */
+function suggestionBranch(candidate: SuggestionCandidate, commonHead: string | undefined): string | undefined {
+  const head = candidate.kind === 'main-checkout' ? commonHead : candidate.adminHead
   const prefix = 'ref: refs/heads/'
-  if (!head.startsWith(prefix)) return undefined
+  if (head === undefined || !head.startsWith(prefix)) return undefined
   const name = head.slice(prefix.length)
   return name === '' ? undefined : name
 }
 
+/** Build the owner expectation one prompt binds. */
 function expectedFor(workspace: WorkspaceState, candidate: SuggestionCandidate): PromptExpected {
   const repo = workspace.repo
   if (repo === undefined) throw new Error('cannot build a prompt expectation without a primary snapshot')

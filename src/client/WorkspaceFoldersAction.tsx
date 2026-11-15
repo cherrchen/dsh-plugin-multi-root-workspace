@@ -996,11 +996,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 <Action
                   variant="outline"
                   onClick={() => {
-                    // Close this dialog first: the overlay owns the one
-                    // suggestion surface and a second stacked modal would make
-                    // focus and dismissal ambiguous.
-                    props.onClose()
-                    requestWorktreePrompt()
+                    const base = requestBase()
+                    if (base !== undefined && requestWorktreePrompt(base.sessionId)) props.onClose()
                   }}
                 >
                   {t('worktree.panelOpen')}

@@ -35,8 +35,6 @@ export interface CommonCandidate {
   readonly adminId: string
   readonly adminGitdir: string
   readonly adminHead: string
-  /** The main checkout's own HEAD (the common HEAD), not the linked checkout's. */
-  readonly mainHead: string
   /** Identity of the main checkout root. */
   readonly rootIdentity: FileIdentity
   readonly adminIdentity: FileIdentity
@@ -76,7 +74,6 @@ export function commonCandidate(repo: RepoSnapshot): CommonCandidate | undefined
       adminId: repo.adminId,
       adminGitdir: repo.adminGitdir,
       adminHead: repo.adminHead,
-      mainHead: repo.commonHead ?? repo.head,
       rootIdentity: identity,
       adminIdentity: repo.adminIdentity,
     }

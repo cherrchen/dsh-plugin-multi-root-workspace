@@ -219,6 +219,13 @@ PR #60 自动评审核验后的实现对齐修复，不改变授权模型与安�
 - **展示元数据的刷新**：主 checkout 的分支是展示字段，不属于 `expectedFor` 的授权 expectation，也不参与 owner 复验。`refreshInventory` 在 expectation 相等而复用候选记录时，仍以最新 candidate 刷新展示元数据（当前为 `mainHead`），保留 `promptId`、`discoveryKey` 与 `expected`；`viewRevision` 因而随分支变化，重开 Dialog 或轮询会得到新视图。candidate 未变化时保留原记录对象，避免无关刷新改变记录身份。
 - **验收**：契约测试覆盖 owner IPC 三档与非法值；follower→owner 集成测试覆盖 `read-only` / `read-write` 的 grant 字段与 effective access；组件测试覆盖 Files 入口的入口可见性；host 测试覆盖「只切换主 checkout 分支」时 branch 与 `viewRevision` 更新、prompt id 不变。计划与证据见 [评审修复计划](../plans/active/2026-11-15-worktree-review-fixes.md)。
 
+## 第二十四次修订（2026-11-15）
+
+- **页面兼容探针**：`src/compat/client-conversation-layout.ts` 集中读取上游会话和 Toast DOM，按内容标记或旧版 Header 取得几何数据。会话节点挂载或替换时，探针重新绑定会话根、输入卡、内容区和 Header 的尺寸观察。`src/client/notice-placement.ts` 负责落点计算、重测调度和 React 生命周期。
+- **手动入口归属**：Workspace Folders 管理器请求打开其自身会话的建议。Overlay 核对当前会话与实时设置后才接受请求，管理器收到确认后关闭。仍绑定旧会话的 Files 页签可以继续管理该会话的目录。
+- **勾选与权限**：刷新后的现存行保留勾选和逐行权限。新 worktree 默认勾选，主 checkout 默认待确认；被拒绝的行取消勾选。单行和多行使用同样的勾选及提交规则。
+- **展示与确认并发**：主 checkout 分支从当前仓库快照的 common `HEAD` 派生。展示分支变化更新 `viewRevision`，候选记录及其确认身份随原有 owner expectation 复用。见[第二轮审查报告](../plans/active/2026-11-15-worktree-review-fixes.md#12-第二轮审查报告a18c0ae)。
+
 ## 第十八次修订（2026-11-09）
 
 第十七次修订接受了 B，并因无法证明 main checkout 身份而延后 A。本修订保留 B 的安全与生命周期边界，将 A 的目标收窄到 linked worktree 执行 Git 写操作所需的 common git dir，并新增 A/B 共用的插件设置开关。B 的 P0–P7 保留，A 从 P8 接续。此前复审中的「A 延后」属于历史决定，现行规则见 Decision §1 和 §9。

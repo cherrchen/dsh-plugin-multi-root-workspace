@@ -9,6 +9,8 @@
  * corner.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import type { PlacementRect } from '../src/compat/client-conversation-layout.ts'
 import {
   CONVERSATION_TOP_GAP,
   HERO_TOP,
@@ -17,10 +19,10 @@ import {
   noticeStyle,
   readNoticePlacement,
   resolveNoticePlacement,
-  type PlacementRect,
+  useNoticePlacement,
 } from '../src/client/notice-placement.ts'
 
-afterEach(() => { vi.restoreAllMocks(); document.body.innerHTML = '' })
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = '' })
 
 /** A laid-out rect. */
 function rect(left: number, top: number, width: number, height: number): PlacementRect {
@@ -160,5 +162,45 @@ describe('readNoticePlacement', () => {
     expect(readNoticePlacement(document, viewport)).toMatchObject({
       placement: 'hero', top: HERO_TOP, left: 600, maxWidth: MAX_NOTICE_WIDTH,
     })
+  })
+})
+
+describe('useNoticePlacement', () => {
+  it('observes a late-mounted content area, its resize and the replacement conversation', async () => {
+    const observed = new Set<Element>()
+    let onResize: (() => void) | undefined
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { onResize = callback }
+      observe(element: Element): void { observed.add(element) }
+      unobserve(element: Element): void { observed.delete(element) }
+      disconnect(): void { observed.clear() }
+    })
+    const container = document.createElement('main')
+    document.body.append(container)
+    const { result, unmount } = renderHook(() => useNoticePlacement(true))
+    expect(result.current?.placement).toBe('hero')
+
+    container.innerHTML = '<div data-phase="active"><header></header><section data-conversation-content></section></div>'
+    const root = container.firstElementChild!
+    const content = root.querySelector('[data-conversation-content]')!
+    mockRect(root, rect(200, 0, 800, 900))
+    mockRect(content, rect(200, 76, 800, 824))
+    await waitFor(() => expect(result.current).toMatchObject({ placement: 'conversation', top: 88, left: 600 }))
+    expect(observed.has(content)).toBe(true)
+
+    mockRect(content, rect(200, 96, 600, 804))
+    await act(async () => onResize?.())
+    expect(result.current).toMatchObject({ top: 108, left: 500 })
+
+    container.innerHTML = '<div data-phase="active"><header></header></div>'
+    const replacement = container.firstElementChild!
+    const header = replacement.firstElementChild!
+    mockRect(replacement, rect(300, 0, 700, 900))
+    mockRect(header, rect(300, 0, 700, 64))
+    await waitFor(() => expect(result.current).toMatchObject({ top: 76, left: 650 }))
+    expect(observed.has(header)).toBe(true)
+    expect(observed.has(content)).toBe(false)
+    unmount()
+    expect(observed.size).toBe(0)
   })
 })

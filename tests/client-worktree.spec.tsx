@@ -303,6 +303,36 @@ describe('worktree notice: View opens the Dialog', () => {
     }))
   })
 
+  it('preserves an unchecked worktree across a branch update and a shrink to one row', async () => {
+    const firstUpdate = Promise.withResolvers<Awaited<ReturnType<WorktreeClient['wait']>>>()
+    const secondUpdate = Promise.withResolvers<Awaited<ReturnType<WorktreeClient['wait']>>>()
+    const wait = vi.fn(fakeClient().wait)
+      .mockReturnValueOnce(firstUpdate.promise)
+      .mockReturnValueOnce(secondUpdate.promise)
+    const resolve = vi.fn(fakeClient().resolve)
+    await openDialog(fakeClient({ prompt: () => answer([PROMPT, MAIN]), wait, resolve }))
+    fireEvent.click(screen.getAllByRole('checkbox')[0]!)
+    fireEvent.click(screen.getAllByLabelText('worktree.accessLabel: panel.accessInherit')[0]!)
+    fireEvent.click(await screen.findByText('panel.accessReadOnly'))
+
+    await act(async () => firstUpdate.resolve({
+      status: 'prompts', prompts: [PROMPT, { ...MAIN, branch: 'release' }], viewRevision: 'v2',
+    }))
+    expect(screen.getByText('release')).toBeDefined()
+    expect((screen.getAllByRole('checkbox')[0] as HTMLInputElement).checked).toBe(false)
+
+    await act(async () => secondUpdate.resolve({ status: 'prompt', prompt: PROMPT, viewRevision: 'v3' }))
+    const remaining = screen.getByRole<HTMLInputElement>('checkbox')
+    const add = screen.getByRole<HTMLButtonElement>('button', { name: 'worktree.add' })
+    expect(remaining.checked).toBe(false)
+    expect(add.disabled).toBe(true)
+    fireEvent.click(remaining)
+    fireEvent.click(add)
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['p1'], 'add', {
+      accesses: [{ id: 'p1', access: 'read-only' }],
+    }))
+  })
+
   it('renders the detected branch and drops the old description line', async () => {
     const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
     await openDialog(fakeClient({ prompt }))
@@ -425,7 +455,7 @@ describe('worktree notice: manual entry', () => {
     const prompt = vi.fn(async () => answer([PROMPT]))
     renderPrompt(fakeClient({ prompt }))
     await screen.findByText('worktree.toast')
-    act(() => { requestWorktreePrompt() })
+    act(() => { expect(requestWorktreePrompt('s1')).toBe(true) })
     await screen.findByRole('dialog')
     await waitFor(() => expect(prompt.mock.calls.length).toBeGreaterThanOrEqual(2))
     expect(screen.queryByText('worktree.toast')).toBeNull()
@@ -816,7 +846,7 @@ describe('panel cleanup controls', () => {
     const view: RootsView = { primaryRoot: '/main', roots: [], limit: 16, count: 0 }
     const panel = { call: async () => view } as unknown as PanelClient
     const onClose = vi.fn()
-    const request = vi.fn()
+    const request = vi.fn(() => true)
     const stop = onWorktreePromptRequest(request)
     try {
       render(<WorkspaceFoldersDialog
@@ -830,7 +860,7 @@ describe('panel cleanup controls', () => {
       const entry = await screen.findByRole('button', { name: 'worktree.panelOpen' })
       fireEvent.click(entry)
       expect(onClose).toHaveBeenCalledTimes(1)
-      expect(request).toHaveBeenCalledTimes(1)
+      expect(request).toHaveBeenCalledExactlyOnceWith('s1')
     } finally {
       stop()
     }
@@ -968,10 +998,36 @@ describe('plugin detail switches', () => {
  * must travel through that component instead of only through the footer/Hero.
  */
 describe('Files manager worktree entry', () => {
+  it('keeps the Files manager open until its own session can open suggestions', async () => {
+    const session = sessionHarness('s1')
+    const view: RootsView = { primaryRoot: '/main', roots: [], limit: 16, count: 0 }
+    const panel = { call: async () => view } as unknown as PanelClient
+    const prompt = vi.fn<WorktreeClient['prompt']>(async (_session, options) => answer(options?.fresh ? [] : [PROMPT]))
+    const worktrees = fakeClient({ prompt })
+    render(<>
+      <WorktreePrompt client={worktrees} sessionId={session.read} subscribeSession={session.subscribe} t={t} previewOnly={false} />
+      <RootSwitcher primaryPath="/main" panel={panel} pickDirectory={undefined} sessionId={() => 's1'} t={t} worktrees={worktrees} />
+    </>)
+    fireEvent.click(document.querySelector('.mrfw-rootSwitchBtn')!)
+    fireEvent.click(await screen.findByText('switcher.manage'))
+    const entry = await screen.findByRole('button', { name: 'worktree.panelOpen' })
+
+    session.switchTo('s2')
+    fireEvent.click(entry)
+    expect(screen.queryByRole('button', { name: 'worktree.panelOpen' })).toBe(entry)
+    expect(prompt).not.toHaveBeenCalledWith('s2', undefined, expect.anything())
+
+    session.switchTo('s1')
+    fireEvent.click(entry)
+    await screen.findByRole('dialog', { name: 'worktree.title' })
+    expect(prompt).toHaveBeenCalledWith('s1', undefined, expect.anything())
+    expect(screen.queryByRole('button', { name: 'worktree.panelOpen' })).toBeNull()
+  })
+
   it('forwards the worktree props so the manager offers the manual suggestion entry', async () => {
     const view: RootsView = { primaryRoot: '/main', roots: [], limit: 16, count: 0 }
     const panel = { call: async () => view } as unknown as PanelClient
-    const request = vi.fn()
+    const request = vi.fn(() => true)
     const stop = onWorktreePromptRequest(request)
     try {
       render(<RootSwitcher
@@ -986,7 +1042,7 @@ describe('Files manager worktree entry', () => {
       fireEvent.click(await screen.findByText('switcher.manage'))
       const entry = await screen.findByRole('button', { name: 'worktree.panelOpen' })
       fireEvent.click(entry)
-      expect(request).toHaveBeenCalledTimes(1)
+      expect(request).toHaveBeenCalledExactlyOnceWith('s1')
     } finally {
       stop()
     }

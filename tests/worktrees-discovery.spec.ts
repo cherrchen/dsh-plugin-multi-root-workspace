@@ -822,4 +822,36 @@ describe('main checkout display refresh', () => {
     expect(second?.viewRevision).toBe(secondAnswer.viewRevision)
     expect(secondAnswer.viewRevision).not.toBe(firstAnswer.viewRevision)
   }, 20_000)
+
+  it('keeps an in-flight confirmation valid when only the common HEAD moves', async () => {
+    const area = fixture('confirm-main-branch-refresh')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const { worktrees, stack } = await mount(join(area.base, 'store'), { session: { cwd: linked } })
+    const first = (await worktrees.prompt(SESSION)).prompts[0]!
+    const addNew = stack.registry.addNew.bind(stack.registry)
+    const entered = Promise.withResolvers<void>()
+    const resume = Promise.withResolvers<void>()
+    vi.spyOn(stack.registry, 'addNew').mockImplementationOnce(async (...args) => {
+      entered.resolve()
+      await resume.promise
+      return addNew(...args)
+    })
+
+    const confirmation = worktrees.resolve(SESSION, first.id, 'add')
+    try {
+      await Promise.race([entered.promise, confirmation])
+      git(main, ['checkout', '-q', '-b', 'release'])
+      const updated = await worktrees.prompt(SESSION)
+      expect(updated.prompts[0]).toMatchObject({ id: first.id, branch: 'release' })
+      expect(updated.viewRevision).not.toBe(first.viewRevision)
+    } finally {
+      resume.resolve()
+    }
+    const result = await confirmation
+    expect(result.skipped).toEqual([])
+    expect(result.resolved).toEqual([expect.objectContaining({ id: first.id, path: realpathSync.native(main) })])
+  }, 20_000)
 })

@@ -166,3 +166,19 @@ PR #60 的 reviewed commit `eebde19` 收到两个自动评审：
 - **全量 `pnpm test`**：`1809 passed | 17 failed | 165 skipped`。17 个失败经与基线 `eebde19` 对照（`git stash` 后复跑同一批文件）**失败集合逐项相同**（`diff` 为空），均为本机环境限制：第二个 Host 得到 `contended` 而非 `follower`（shared IPC 拒绝沙箱内 peer）、seatbelt kernel runner `Operation not permitted`。修复未引入新失败。
 - **门禁**：`pnpm lint`（0 warnings/0 errors）、`pnpm typecheck`（Host + Client + Auto Review）、`pnpm build`、`pnpm docs:check`（0 errors）、`pnpm compat:check`、`pnpm pack:check` 均通过。
 - **CI**：验收 head `ab17638` 的 run [43702749353](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43702749353)，`releases` + 28 条 `verify`（4 OS × 分组） + `gate` 共 **30/30 success**；本文件证据回填后的 docs-only head 另行重跑同一工作流。
+
+## 12. 第二轮审查报告（`a18c0ae`）
+
+复审以 PR 对 `main` 的完整差异为范围，核对了客户端入口与 Dialog、Toast 测量、浏览器 RPC、共享 Registry IPC、owner 复验与展示刷新。上一轮三项已有实现和 CI 证据。本轮两条 PR 评论均成立，另有三项独立发现。
+
+| 编号 | 优先级 | 来源与证据 | 修复与回归断言 |
+| --- | --- | --- | --- |
+| R4 | P1 | [PR 评审](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/60#discussion_r4578123948)。`src/client/notice-placement.ts` 持有上游 DOM 结构探针及 legacy Header 回退，违反 `AGENTS.md` 的兼容层约定。 | 上游探针和 DOM 观察移至 `src/compat/`，用新旧 DOM fixture 固定输出，客户端保留布局计算和 React 生命周期。 |
+| R5 | P2 | [PR 评审](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/60#discussion_r4578123953)。`paneSessionId` 绑定 Files 页签，手动事件却不携带会话，overlay 使用全局会话，可能把建议及后续登记指向另一工作区。 | 手动事件携带管理器会话，overlay 只接受与当前会话相符的请求。拒绝时管理器保持打开。组件测试覆盖切走、拒绝、切回后打开。 |
+| R6 | P2 | 本次审查。`ResizeObserver` 仅观察首次获取的会话根和输入卡，内容区独立调整尺寸或会话节点被替换时可能保持旧坐标。 | 观察当前内容区与 Header 回退节点，DOM 结构变化时重新绑定。测试覆盖后挂载、新尺寸和替换节点。 |
+| R7 | P2 | 本次审查。长轮询的 `reconcileSelection` 会重新选中用户已取消的 worktree。列表缩成一项时，单行确认还会绕过勾选状态。 | 为仍存在的项保留选中与未选中状态，始终由勾选项构造提交。回归覆盖展示刷新、列表缩成一行与提交时的 id/权限。 |
+| R8 | P2 | 本次审查。仅主 checkout 的展示分支变化也会替换候选记录，`resolve` 提交前按对象身份检查，等待 Registry 的同一 prompt 可能被错误判为过期。 | 从当前仓库快照派生展示分支。回归在 Registry 提交前刷新分支，断言 revision 更新、同一个 prompt 仍能提交。 |
+
+R5–R8 的新增测试在修复前分别失败于管理器提前关闭、提示未跟随新会话节点、取消勾选被恢复和 Registry 提交被判过期。修复后 `client-notice-placement`、`client-worktree`、`worktrees-discovery` 共 102 项通过。当前设计见 [ADR-0039 第二十四次修订](../../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十四次修订2026-11-15)。
+
+本机 `lint`、`typecheck`、`build`、`docs:check`、`compat:check` 与 `pack:check` 通过。全量测试 1813 通过、165 跳过、17 失败。17 个失败的测试名与上一轮本机记录逐项相同，涉及沙箱内共享 IPC 与 Seatbelt runner。

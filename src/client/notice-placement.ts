@@ -1,37 +1,12 @@
-/**
- * Placement math and DOM probes for the worktree suggestion notice.
- *
- * The notice lives in the shell's overlay slot, outside the conversation tree,
- * so following the page requires read-only probes of upstream markers plus the
- * composer/content rectangles. The resolver stays pure so the arithmetic is
- * testable; the adapter reads the installed DOM and degrades to the Hero
- * top-center seat whenever a probe is missing.
- *
- * Markers read here, never class names:
- * - \[data-phase\] on the main conversation root (hero / active / settling).
- * - \[data-composer-card\] for the Hero horizontal center.
- * - \[data-conversation-content\] for the active content top (0.2.1-alpha.3+);
- *   older releases measure the root's first child (the Header) instead.
- * - Direct role="alert" children of body are the upstream transient Toast;
- *   while one is present the Hero notice moves below it.
- *
- * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/notice-placement
- */
+/** Placement math and React lifecycle for the worktree suggestion notice. */
 
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-
-/** One element rectangle; the subset of DOMRect the placement math reads. */
-export interface PlacementRect {
-  readonly left: number
-  readonly right: number
-  readonly top: number
-  readonly bottom: number
-  readonly width: number
-  readonly height: number
-}
-
-/** The page phase the conversation root publishes. */
-export type ConversationPhase = 'hero' | 'conversation' | 'unknown'
+import {
+  observeConversationLayout,
+  readConversationLayout,
+  type ConversationLayout,
+  type PlacementRect,
+} from '../compat/client-conversation-layout.ts'
 
 /** The notice's fixed seat, in viewport pixels. */
 export type NoticePlacement = {
@@ -43,14 +18,9 @@ export type NoticePlacement = {
 }
 
 /** What the pure resolver needs; every optional rect may have failed its probe. */
-export interface PlacementInput {
-  readonly phase: ConversationPhase
+export interface PlacementInput extends ConversationLayout {
   readonly viewportWidth: number
   readonly viewportHeight: number
-  readonly composer?: PlacementRect | undefined
-  readonly content?: PlacementRect | undefined
-  readonly root?: PlacementRect | undefined
-  readonly upstreamToast: boolean
   readonly coarsePointer: boolean
 }
 
@@ -124,33 +94,6 @@ export function noticeStyle(placement: NoticePlacement): CSSProperties {
   }
 }
 
-function phaseOf(value: string | undefined): ConversationPhase {
-  return value === 'active' ? 'conversation' : value === 'hero' || value === 'settling' ? 'hero' : 'unknown'
-}
-
-function rectOf(element: Element | null | undefined): PlacementRect | undefined {
-  if (element === null || element === undefined) return undefined
-  const rect = element.getBoundingClientRect()
-  if (rect.width < MIN_VISIBLE_SIZE || rect.height < MIN_VISIBLE_SIZE) return undefined
-  return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }
-}
-
-function contentFromHeader(root: Element | null, rootRect: PlacementRect | undefined): PlacementRect | undefined {
-  if (root === null || rootRect === undefined) return undefined
-  const header = rectOf(root.firstElementChild)
-  const top = header === undefined ? rootRect.top : header.bottom
-  return { ...rootRect, top, height: Math.max(0, rootRect.bottom - top) }
-}
-
-function upstreamToastVisible(doc: Document): boolean {
-  const body = doc.body
-  if (body === null) return false
-  for (const child of Array.from(body.children)) {
-    if (child.getAttribute('role') === 'alert') return true
-  }
-  return false
-}
-
 function coarsePointer(): boolean {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
   return window.matchMedia('(pointer: coarse)').matches
@@ -163,20 +106,10 @@ function coarsePointer(): boolean {
  * @returns the resolved seat; missing probes fall back to the Hero form.
  */
 export function readNoticePlacement(doc: Document, viewport: { readonly width: number; readonly height: number }): NoticePlacement {
-  const root = doc.querySelector<HTMLElement>('[data-phase]')
-  const rootRect = rectOf(root)
-  const phase = phaseOf(root?.dataset.phase)
-  const content = phase === 'conversation'
-    ? rectOf(root?.querySelector('[data-conversation-content]')) ?? contentFromHeader(root, rootRect)
-    : undefined
   return resolveNoticePlacement({
-    phase,
+    ...readConversationLayout(doc),
     viewportWidth: viewport.width,
     viewportHeight: viewport.height,
-    composer: rectOf(doc.querySelector('[data-composer-card]')),
-    content,
-    root: rootRect,
-    upstreamToast: upstreamToastVisible(doc),
     coarsePointer: coarsePointer(),
   })
 }
@@ -222,23 +155,12 @@ export function useNoticePlacement(active: boolean): NoticePlacement | undefined
     window.addEventListener('resize', schedule)
     const coarse = typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: coarse)') : undefined
     coarse?.addEventListener('change', schedule)
-    const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : undefined
-    if (resizeObserver !== undefined) {
-      for (const element of [document.querySelector('[data-phase]'), document.querySelector('[data-composer-card]')]) {
-        if (element !== null) resizeObserver.observe(element)
-      }
-    }
-    const attributes = typeof MutationObserver === 'function' ? new MutationObserver(schedule) : undefined
-    attributes?.observe(document.body, { attributes: true, attributeFilter: ['data-phase', 'data-content-phase'], subtree: true })
-    const bodyChildren = typeof MutationObserver === 'function' ? new MutationObserver(schedule) : undefined
-    bodyChildren?.observe(document.body, { childList: true })
+    const stopObserving = observeConversationLayout(document, schedule)
     return () => {
       disposed = true
       window.removeEventListener('resize', schedule)
       coarse?.removeEventListener('change', schedule)
-      resizeObserver?.disconnect()
-      attributes?.disconnect()
-      bodyChildren?.disconnect()
+      stopObserving()
     }
   }, [active])
   return placement
