@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { RootView, RootsView } from '../src/contract.ts'
 import type { RemotesView } from '../src/remote/panel-contract.ts'
 import { PanelError } from '../src/client/panel-client.ts'
+import { SshManagementDialog, type SshManagementDialogProps } from '../src/client/ssh-panel.tsx'
 import { WorkspaceFoldersDialog, type Translate } from '../src/client/WorkspaceFoldersAction.tsx'
 import type { SshClient, SshEnvironmentView, SshStateView } from '../src/client/ssh-client.ts'
 import type { RemoteModeControl } from '../src/compat/skills-client.ts'
@@ -588,5 +589,59 @@ describe('the SSH management dialog', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'panel.close' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.dialog.title' })).toBeNull())
     expect(screen.getByRole('dialog', { name: 'panel.title' })).toBeTruthy()
+  })
+})
+
+
+describe('SSH dialog asynchronous scope isolation', () => {
+  const propsFor = (ssh: SshClient): SshManagementDialogProps => ({
+    initialTab: 'connections', ssh, sessionId: 'a', custodyMode: 'personal', status: { state: 'ready' },
+    endpoints: [], roots: ROOTS, remoteMode: undefined, onClose() {}, onChanged() {}, t,
+  })
+  const named = (name: string) => sshState({ environments: [{ ...ENV_A, displayName: name }] })
+
+  it.each(['resolve', 'reject'] as const)('ignores an old session state %s after the new state arrives', async outcome => {
+    const old = Promise.withResolvers<SshStateView>()
+    const ssh = fakeSsh(named('New session'))
+    ssh.state = async id => id === 'a' ? await old.promise : named('New session')
+    const props = propsFor(ssh)
+    const view = render(createElement(SshManagementDialog, props))
+    view.rerender(createElement(SshManagementDialog, { ...props, sessionId: 'b' }))
+    await screen.findByText('New session')
+    await act(async () => {
+      if (outcome === 'resolve') old.resolve(named('Old session'))
+      else old.reject(new PanelError('personal-config-conflict', 'old failure'))
+      await old.promise.catch(() => {})
+    })
+    expect(screen.getByText('New session')).toBeTruthy()
+    expect(screen.queryByText('Old session')).toBeNull()
+    expect(screen.queryByText('error.personal-config-conflict')).toBeNull()
+  })
+
+  it.each(['session', 'mode', 'status', 'client'] as const)('ignores a stale mutation across a %s transition', async transition => {
+    const saved = Promise.withResolvers<SshStateView>()
+    const ssh = fakeSsh(named('Initial'))
+    ssh.configLink = async () => await saved.promise
+    ssh.setState({ ...named('Initial'), linked: false })
+    let changed = 0
+    const props = { ...propsFor(ssh), onChanged: () => { changed++ } }
+    const view = render(createElement(SshManagementDialog, props))
+    fireEvent.click(await screen.findByRole('button', { name: 'ssh.linkNow' }))
+    ssh.setState(named('Current'))
+    if (transition === 'session') view.rerender(createElement(SshManagementDialog, { ...props, sessionId: 'b' }))
+    else if (transition === 'client') { view.rerender(createElement(SshManagementDialog, { ...props, ssh: fakeSsh(named('Current')) })) }
+    else if (transition === 'status') {
+      view.rerender(createElement(SshManagementDialog, { ...props, status: { state: 'disabled' } }))
+      view.rerender(createElement(SshManagementDialog, props))
+    } else {
+      view.rerender(createElement(SshManagementDialog, { ...props, custodyMode: 'team' }))
+      view.rerender(createElement(SshManagementDialog, props))
+    }
+    await screen.findByText('Current')
+    await act(async () => { saved.resolve(named('Stale mutation')); await saved.promise })
+    expect(screen.getByText('Current')).toBeTruthy()
+    expect(screen.queryByText('Stale mutation')).toBeNull()
+    expect(changed).toBe(0)
+    expect((screen.getAllByRole('button', { name: 'ssh.envTest' })[0] as HTMLButtonElement).disabled).toBe(false)
   })
 })

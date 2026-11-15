@@ -94,7 +94,7 @@ GUI 入口有两处：
 3. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管，GUI 不读取、不创建。
 4. **模式设置**：复用 `src/client/remote-custody.tsx` 的三档单选、team 四个 broker 字段与降级风险确认，写入同一个 `multi-root-remote-tools` form 与 CAS revision，不另建写入路径；同时说明档位如何决定“添加连接”的引导方式（personal 图形化表单、team 部署清单 + broker、hardened 部署 profile + 全量证明）。档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源）。
 
-所有变更请求携带当前 `revision`；`personal-config-conflict` 时前端先重取 `sshState` 再显示本地化冲突文案。服务端错误一律经 `error.*` 本地化渲染；带后缀的错误码（`code:detail`）按前缀取键并附 Host 原文。对话框关闭不影响 Workspace Folders 对话框；打开期间会话切换会清空旧会话的 `sshState` 并重新读取；`sshState` 读取失败显示可重试的错误态；对话框自身不随远端开关或控制面状态卸载，表单草稿保留。
+所有变更请求携带当前 `revision`；`personal-config-conflict` 时前端先重取 `sshState` 再显示本地化冲突文案。服务端错误一律经 `error.*` 本地化渲染；带后缀的错误码（`code:detail`）按前缀取键并附 Host 原文。对话框关闭不影响 Workspace Folders 对话框；打开期间会话切换会清空旧会话的 `sshState` 并重新读取；会话、模式、可管理状态或 SSH client 变化使旧异步响应失效，过期读取、变更、扫描与测试回复不会改写新作用域或触发刷新，状态请求按最新世代接收；`sshState` 读取失败显示可重试的错误态；对话框自身不随远端开关或控制面状态卸载，表单草稿保留。
 
 **开关默认值**（GUI 勾选"允许命令执行"/"允许文件传输"时写入的完整节，见上文文件 schema）：
 

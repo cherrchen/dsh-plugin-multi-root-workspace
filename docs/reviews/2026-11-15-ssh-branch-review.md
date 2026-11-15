@@ -115,3 +115,5 @@ pnpm exec vitest run tests/review-ssh-findings.spec.ts tests/review-ssh-client.s
 - R8 已修复：超限块保留预算内前缀，截断的 UTF-8 尾部不补乱码；真实 adapter 的 stdout/stderr、UTF-8 与多块边界回归通过。
 
 - R9 已修复：托管 IdentityFile、UserKnownHostsFile 与 Include 路径正确引用；保留 ssh -G 去引号后的完整托管 known_hosts 路径。真实 OpenSSH Include/解析回归与相关套件通过。
+
+- R10 已修复：按会话/模式/可管理状态/client 绑定异步作用域，状态读写使用请求世代；旧变更返回 false，不能清空新表单。逆序读取、旧错误、跨会话/模式变更回归与客户端套件通过。
