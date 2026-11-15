@@ -22,7 +22,7 @@
 - **Worktree 附加根建议（实验性，默认关闭）**：primary 是 Git main 或 linked checkout 时，发现同 common 的其他 worktree，经用户确认后把其源码树登记为附加根（默认 `inherit`，可逐行选择权限）；发现只读取插件自己解析的 Git 元数据，不启动 Git 子进程、不自动增删。linked worktree 还可显式授权主 checkout 根，补齐受限 `git add` / `git commit` 的共享元数据写入缺口（[ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
 - **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
-当前发布版本 `v0.1.19`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
+当前发布版本 `v0.1.20`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
 
@@ -73,12 +73,12 @@ DSH Desktop 的插件页和 CLI **不是等价入口**：插件页的「添加�
 1. 完全退出 Desktop，包括托盘图标。
 2. 在命令行中使用 Desktop 安装目录内 `resources/runtime/cli/bin` 随附的 `dsh`（必要时把该目录加入 `PATH`）。新装：
    ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.19
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.20
    ```
 3. 已安装但缺少 bundle 登记：先 `remove` 再 `add`（只重跑 `add` 不会补登记）：
    ```sh
    dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.19
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.20
    ```
 4. 打开 `$DSH_HOME/profiles/desktop/package.json`（未设置 `DSH_HOME` 时通常是 `~/.dsh/profiles/desktop/package.json`），确认 `dsh.profile.bundles` 包含本包。
 5. 重新打开 Desktop（冷启动）。
@@ -118,8 +118,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.19/dsh-electron-dsh-plugin-multi-root-workspace-0.1.19.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.19.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.20/dsh-electron-dsh-plugin-multi-root-workspace-0.1.20.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.20.tgz
 ```
 
 同样是预构建产物，适合内网或离线环境交付；首次安装同样需要添加 `allowBuilds`。
@@ -138,10 +138,10 @@ allowBuilds:
   koffi: true
 ```
 
-建议锁定版本（如 `#v0.1.19`），让后续推送无法悄悄改变实际运行的内容：
+建议锁定版本（如 `#v0.1.20`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.19
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.20
 ```
 
 ### 从本地源码安装

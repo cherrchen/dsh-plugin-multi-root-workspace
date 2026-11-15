@@ -22,7 +22,7 @@ Not every project is a monorepo. A real development project is usually several i
 - **Worktree root suggestions (experimental, off by default)**: when the primary root is a Git main checkout or a linked checkout, the plugin discovers other worktrees sharing the same common Git directory and, after the user confirms, registers their source trees as additional roots (default `inherit`, with a per-row access choice). Discovery reads only Git metadata the plugin parses itself — no Git subprocess, no automatic add or remove. A linked worktree can also explicitly authorize the main checkout root, closing the shared-metadata write gap for confined `git add` / `git commit` ([ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md), Chinese).
 - **Absent when absent**: with no additional root configured, its behavior is item-for-item identical to an uninstalled harness; every misconfiguration fails loudly instead of silently degrading.
 
-Current released version: `v0.1.19`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+Current released version: `v0.1.20`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Quick Start
 
@@ -71,12 +71,12 @@ On DSH Desktop the Plugins page and the CLI are **not equivalent entry points**:
 1. Fully quit Desktop, including the tray icon.
 2. In a terminal, use the `dsh` under `<Desktop install directory>/resources/runtime/cli/bin` (add that directory to `PATH` if needed). Fresh install:
    ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.19
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.20
    ```
 3. Already installed but missing the bundle entry: `remove`, then `add` (re-running only `add` does not register it):
    ```sh
    dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.19
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.20
    ```
 4. Open `$DSH_HOME/profiles/desktop/package.json` (normally `~/.dsh/profiles/desktop/package.json` when `DSH_HOME` is unset) and confirm `dsh.profile.bundles` contains the package.
 5. Start Desktop again (cold start).
@@ -116,8 +116,8 @@ This installs pre-built artifacts; the first install needs the `allowBuilds` add
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # or download the tgz from the GitHub Release assets, e.g.:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.19/dsh-electron-dsh-plugin-multi-root-workspace-0.1.19.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.19.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.20/dsh-electron-dsh-plugin-multi-root-workspace-0.1.20.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.20.tgz
 ```
 
 Also pre-built, handy for air-gapped or offline delivery; the first install needs the same `allowBuilds` addition.
@@ -136,10 +136,10 @@ allowBuilds:
   koffi: true
 ```
 
-Pinning a version (e.g. `#v0.1.19`) is recommended so a later push cannot silently change what actually runs:
+Pinning a version (e.g. `#v0.1.20`) is recommended so a later push cannot silently change what actually runs:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.19
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.20
 ```
 
 ### Install from a local clone

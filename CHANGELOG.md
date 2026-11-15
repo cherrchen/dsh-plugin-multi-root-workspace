@@ -8,6 +8,25 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.20] - 2026-11-15
+
+### Added
+
+- **附加根 Files 对齐主根：行右键菜单与工作区搜索**：附加根文件树补齐主根原生的行级右键菜单——插件只提供 file/directory target 与触发绑定，菜单项来自宿主贡献方，target 传附加根绝对路径，因此宿主经 `workspaceFiles.stat` / `readBytes` 落到附加根——并新增插件自绘的工作区搜索：页头开关、搜索栏（排除规则、隐藏项、`.gitignore` 开关）、命中高亮结果树、空结果/截断/不完整提示与失败重试、↑/↓ 与 Esc 键盘操作，偏好按根写入宿主同名 localStorage 键。搜索走插件通道的 `search` 端点：会话派生主根、刷新 Registry 解析根 id、单次共享准入、帧内复核授权，结果受根边界约束。两个结构门控是 `useContextMenu`（DSH `0.2.2-alpha.3` 起）与 `remote.workspaceFiles.search`（`0.2.2-rc.2` 起）；更早宿主不绑定菜单、不渲染搜索 UI，附加根视图保持原样。评审修复同批交付：关闭设置浮层时提交排除规则草稿、请求身份复用使 body 重挂载不丢展开/滚动、上游 `workspace-file/*` 失败码原样透传、搜索记录按 session 拥有并在所有者死亡时清理、页头 reload 对非空查询重新取结果并保留位置（[ADR-0041](./docs/decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0042](./docs/decisions/ADR-0042-additional-root-row-context-menus.md)）。
+- **可选 Auto Review 联合支持扩至两代共 9 个精确发布**：联合合同从单一 `0.2.1-rc.2` 扩为两个冻结上游源码基线——`0.2.1-rc.2`–`rc.5`（legacy fork）与 `0.2.2-alpha.2`–`rc.3`（current fork）——每个基线各带逐字节上游副本、审阅过的 fork、编译 pin 与执行副本校验。Loader 入口按安装的精确发布动态加载对应基线的实现 bundle，另一代的导入不会进入宿主模块图；`0.2.2-alpha.2` 早于请求目的映射，保留该发布的官方请求形状（不发送 `sessionId` / `purpose`），`alpha.3` 起按上游发送。构建、类型检查、差分门禁、联合冒烟与 CI 车道均按基线运行（[ADR-0040](./docs/decisions/ADR-0040-auto-review-multi-baseline.md)、[接口审查](./docs/reference/auto-review-0.2.2-migration.md)）。
+- **Worktree 确认 Dialog 重构与逐行权限选择**：Dialog 加宽到 `min(860px, calc(100vw - 48px))`，候选由独立卡片改为连续列表（行间细分隔线、无卡片描边、行内 hover），每行显示检测到的 Git 分支与登记访问级别选择器（默认 `inherit`，可逐行选 `read-only` / `read-write`），选择经线协议校验后记录进 Registry 的 grant；删除原有的 inherit 说明段，footer 改用 primitives `Button` / `Menu` 下拉。共享 Registry 部署下 follower 的 `addNew` IPC 现接受三档访问级别；复用候选记录时刷新主 checkout 的分支展示（`mainHead` 仍不参与授权）（[ADR-0039 第二十二次修订](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+
+### Changed
+
+- **Worktree 发现收敛为「会话激活时一次只读检查 + 非模态提示」**：不再常驻长轮询。session 每次从空/其他会话变为有效会话时只调用一次 `worktreePrompt(..., { fresh: true })`——这是一次纯查询：不安装 watcher、不调度 owner reconcile、不写 sidecar；有候选则显示常驻非模态提示，只有点「查看」才打开确认 Dialog（此时才取全量候选并启动 wait），关闭 Dialog 不写任何状态。提示支持「稍后提醒」（直到出现新 worktree / 7 天 / 30 天）；Host 在内存中记录已展示的候选，并在每次自动检查前只读重读 owner 的提醒投影，多个 Host 的期限按 key 合并、只淘汰最旧的记录并释放认领。授权语义不变：不自动添加或删除，`addNew` 仍是唯一写路径，owner 仍完整复验（[ADR-0039 第二十次修订](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+- **Worktree 提示改为页面感知的居中卡片**：提示不再固定在右下角——Hero 页落在输入卡上方居中，对话页落在 Header 下方的内容列居中；表面随主题自适应（浅色模式浅色卡、深色模式深色卡，全部使用宿主 `--dsw-*` token），控件改用 primitives `Button` / `Menu`，删除「×」关闭按钮（「稍后提醒」本身就是关闭操作，拆分为文字按钮 + 下拉两半），粗指针或窄宽时改为两行 32px 形态，并在检测到官方瞬时 Toast 时临时下移避让；探针失败回落到 Hero 顶部居中，不再回到右下角。Workspace Folders 面板新增「Worktree 建议」手动入口，Files 页签打开的管理器也透传该入口，提示被关闭后仍可再次打开 Dialog（[ADR-0039 第二十一次修订](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+- **安装排查文档补充 DSH Desktop 插件页安装恢复路径（issue #57）**：说明插件页安装只写 `dependencies`、`dsh.profile.bundles` 由随后的「立即启用」单独写入，因此可能停在中间态；给出完全退出 Desktop 后用自带 CLI 执行 `remove` + `add` 并确认 `dsh.profile.bundles` 后再冷启动的恢复步骤，并记录「热启用会撞上仍在运行的旧 provider、冷启动不受影响」的结论（[排查](./docs/troubleshooting/desktop-install-missing-bundle.md)）。
+
+### Fixed
+
+- **新会话 Hero 入口不再把工作区行撑出输入卡**：入口此前按 label 全宽是纯加法（上游 `.heroOptions` 是 `flex: none`），列宽不足时越过输入卡右缘，视口媒体查询也不会因列宽变化触发。现在探针测量行内留给该组的余量，减去其他占用、间距与座椅内缩后以 `max-width` 夹取，label 省略号收缩；余量低于 88px 退化为 28×28 图标。探针能识别上游行结构与共享同一 slot outlet 的多个占用者；认不出结构时保持原视口回退形态，不报错、不空白（[ADR-0037 修订](./docs/decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)）。
+- **Worktree 提醒的跨 Host 与生命周期修复**：到期、淘汰、合并与残余记录都按延迟身份精确释放「已展示」认领，避免重复提示或永久隐藏；跨会话迟到的 `snooze` / `resolve` 完成不再覆盖新提示；`seen` / `snooze` / `resolve` 超过 64 个 id 时按批发送，响应列表不再被上限拒绝（[ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+
 ## [0.1.19] - 2026-11-14
 
 ### Added
@@ -287,7 +306,8 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.19...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.20...HEAD
+[0.1.20]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.16...v0.1.17
