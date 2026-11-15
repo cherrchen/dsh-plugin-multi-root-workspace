@@ -18,14 +18,14 @@
 
 - 个人配置：`remoteEnvironments.personalPath`（默认包内为 `$DSH_HOME/storages/multi_root_workspace.remote-personal.json`）。绝对路径、普通文件非 symlink、属当前 uid、`mode & 0o077 == 0`、父目录属当前 uid 且不可被 group/other 写、不得位于任何绑定的本地 primary 内。**文件缺失不是错误**：视为空清单（无环境、无绑定），控制面照常进入 `ready`。
 - 凭据根：`remoteEnvironments.credentialRoot`（默认 `$DSH_HOME/storages/multi_root_workspace.ssh`）。0700、属当前 uid，否则 `credential-root-unsafe`。内部：`credentials.json`（0600 元数据）、`keys/<id>` + `keys/<id>.pub`、`secrets/<id>`（0600）、生成的 `ssh_config` 与 `known_hosts`、`askpass.sh`（0700）。
-- 配置文件字段：`{ schemaVersion: 1, revision, environments[], bindings[] }`；绑定复用部署清单 binding schema。所有写操作以 `savePersonalConfig` 做 CAS：磁盘 `revision` 与请求的 `revision` 不符即 `personal-config-conflict`。
-- 变更检测：每次远端 snapshot/list/admit/add/remove 之前，`refreshPersonal()` 按 stat 身份（dev/ino/size/mtimeMs）比较；变化即重载，摘要变化时 owner 换摘要重听 `remote-1`（域保持打开）、follower 断开重连；既有授权按新清单裁决（摘要变化 → withheld），不迁移。
+- 配置文件字段：`{ schemaVersion: 1, revision, environments[], bindings[] }`；绑定复用部署清单 binding schema。所有写操作以 `savePersonalConfig` 做 CAS：磁盘 `revision` 与请求的 `revision` 不符即 `personal-config-conflict`。整个 revision 校验+写入+rename 在同目录 `<basename>.lock` 的 `RegistryAuthorityLease` 内进行，跨 Host 进程互斥；拿不到锁同样以 `personal-config-conflict` 拒绝（前端重载后重试）。
+- 变更检测：每次远端 snapshot/list/admit/add/remove 之前，`refreshPersonal()` 按 stat 身份（dev/ino/size/mtimeMs/mode/uid/内容 hash）比较——**仅 chmod 放宽权限也算变化**。变化即重载；加载失败（JSON 损坏、语义非法、保护失效）即 `config-invalid`：清单/摘要/身份清空，owner 关闭、follower 断开（不重开），旧授权不再被放行，修复后重载恢复 `ready`。摘要变化时 owner 换摘要重听 `remote-1`（域保持打开）、follower 断开重连；既有授权按新清单裁决（摘要变化 → withheld），不迁移。
 
 ## RPC 端点与拒绝码
 
 面板通道 `PANEL_CHANNEL` 上的 `ssh*` 端点（`src/remote/personal-contract.ts`）：每个请求携带 `sessionId`，Host 由会话解析主根；未知字段即 `panel/bad-request`。所有端点在开关未开或 `mode !== 'personal'` 时拒绝 `remote-personal-unavailable`；所有变更端点返回刷新后的 `sshState`。
 
-`sshState`、`sshCredentialGenerate`、`sshCredentialImport`、`sshCredentialPassword`、`sshCredentialRemove`（`credential-in-use`）、`sshHostKeyScan`（直连 `hostname`/`port` 触网探测，返回 60 秒有界令牌，`host-key-token-expired` / `host-key-mismatch`；`alias` 形式经 `ssh -G` 在 Host 解析并返回用户 known_hosts 指纹与解析出的 endpoint，不触网、无令牌）、`sshEnvironmentSave`（托管凭据需 `hostKeyToken` + `fingerprint`；`ssh-config` 凭据的指纹必须匹配用户 known_hosts）、`sshEnvironmentRemove`、`sshEnvironmentTest`、`sshHelperInstall`（`helper-hash-mismatch`）、`sshAccessKeyInstall`、`sshBindingSave`（主根由 Host 注入）、`sshBindingRemove`、`sshConfigLink`。
+`sshState`、`sshCredentialGenerate`、`sshCredentialImport`、`sshCredentialPassword`、`sshCredentialRemove`（`credential-in-use`）、`sshHostKeyScan`（直连 `hostname`/`port` 触网探测，返回 60 秒有界令牌，`host-key-token-expired` / `host-key-mismatch`；`alias` 形式经 `ssh -G` 在 Host 解析并返回用户 known_hosts 指纹与解析出的 endpoint，不触网、无令牌）、`sshEnvironmentSave`（托管凭据需 `hostKeyToken` + `fingerprint`；`ssh-config` 凭据的指纹必须匹配用户 known_hosts；带 `exec` 的保存只在 helper 已安装且目标身份——hostname/port/user/凭据类型——未变时允许，否则 `exec-requires-helper`，在消耗扫描令牌与写 `known_hosts` 之前拒绝）、`sshEnvironmentRemove`、`sshEnvironmentTest`、`sshHelperInstall`（`helper-hash-mismatch`）、`sshAccessKeyInstall`、`sshBindingSave`（主根由 Host 注入）、`sshBindingRemove`、`sshConfigLink`。
 
 无任何端点返回私钥或密码字节。
 
@@ -57,7 +57,7 @@ Host dsh-<environmentId>
 
 ## 模式切换
 
-切换 `mode` 走 `configureRemote`：远程域与 `remote-1` 监听按旧事实拆除，新模式下重读清单来源（personal → `personalPath`；team/hardened → `manifestPath` 覆盖或行配置），再按当前 authority 重开 owner/重连 follower。摘要变化后既有授权一律 withheld，需重新登记。
+切换 `mode` 走 `configureRemote`：远程域与 `remote-1` 监听按旧事实拆除，新模式下重读清单来源（personal → `personalPath`；team/hardened → `manifestPath` 覆盖或行配置），再按当前 authority 重开 owner/重连 follower。摘要变化后既有授权一律 withheld，需重新登记。工具子树的重挂载键是 `mode` + 全部生效 team broker 事实（manifestPath/socketPath/brokerUid/credentialRoot）+ 清单摘要——即使摘要不变，模式或 broker 事实一变也会拆除旧子树、重新证明并重挂（hardened 的 profile guard 不会带进 team）。
 
 设置写入走 Host 的 `settings` 服务；旧版 `configure` 路径没有 `setSource` 推送，行必须通过 `settings.describe()` 读取实时值，否则只有重启后 loader 重新组合才生效（本页“实时开关”回归覆盖）。
 
@@ -84,7 +84,7 @@ GUI 入口有两处：
 
 四个 Tab：
 
-1. **添加连接**：personal 档位显示分步表单——连接目标（环境 ID、显示名、hostname、port、user、平台）→ 凭据（ssh-config 别名或托管凭据；无托管凭据时可直接跳到 SSH Key Tab）→ 远端目录与能力（workspace、exec/transfer）→ 主机密钥（“扫描主机钥”→ 指纹单选）。保存沿用 `sshEnvironmentSave` 的 revision、`hostKeyToken` + `fingerprint` 语义；保存成功后草稿与扫描状态清空，连接出现在“已有连接”，但远端工作区仍需在 Workspace Folders 列表中显式登记。team/hardened 显示部署清单/broker 引导，不渲染个人表单，并提供“打开模式设置”入口；控制面未 `ready` 时显示不可用原因。
+1. **添加连接**：personal 档位显示分步表单——连接目标（环境 ID、显示名、hostname、port、user、平台）→ 凭据（ssh-config 别名或托管凭据；无托管凭据时可直接跳到 SSH Key Tab）→ 远端目录与能力（workspace、exec/transfer；exec 只在已装 helper 且目标身份未改时可勾选，禁用态附引导文案）→ 主机密钥（“扫描主机钥”→ 指纹单选）。保存沿用 `sshEnvironmentSave` 的 revision、`hostKeyToken` + `fingerprint` 语义；保存成功后草稿与扫描状态清空，连接出现在“已有连接”，但远端工作区仍需在 Workspace Folders 列表中显式登记。team/hardened 显示部署清单/broker 引导，不渲染个人表单，并提供“打开模式设置”入口；控制面未 `ready` 时显示不可用原因。
 2. **已有连接**：personal 显示链接横幅（managed 环境存在且 `linked === false` 时，按钮调 `sshConfigLink`）、已保存环境行（名称/ID、实际平台名、helper、`user@host:port`、workspace、凭据来源、访问密钥）、测试连接/安装 helper/安装访问密钥/编辑/行内删除；编辑复用添加表单。其下是“本项目绑定”：行显示环境、rootId、远端路径、动作与传输，本地传输对端恰为 `primary` 加各可用根的 `aliasId`。team/hardened 显示部署清单中的端点只读列表与登记状态。
 3. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管，GUI 不读取、不创建。
 4. **模式设置**：复用 `src/client/remote-custody.tsx` 的三档单选、team 四个 broker 字段与降级风险确认，写入同一个 `multi-root-remote-tools` form 与 CAS revision，不另建写入路径；同时说明档位如何决定“添加连接”的引导方式（personal 图形化表单、team 部署清单 + broker、hardened 部署 profile + 全量证明）。档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源）。

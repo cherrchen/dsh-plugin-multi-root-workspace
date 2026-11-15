@@ -151,6 +151,17 @@ const editorOf = (environment: SshEnvironmentView): EditorDraft => ({
   allowTransfer: environment.transfer !== undefined,
 })
 
+const execHelperReady = (draft: EditorDraft): boolean => {
+  const existing = draft.existing
+  if (existing === undefined || existing.helper === null) return false
+  const port = Number.parseInt(draft.port, 10)
+  const credentialKind = draft.credentialSource === 'alias' ? 'ssh-config' : 'managed'
+  return existing.endpoint.hostname === draft.hostname.trim()
+    && existing.endpoint.port === (Number.isInteger(port) ? port : 22)
+    && existing.endpoint.user === draft.user.trim()
+    && existing.credential.kind === credentialKind
+}
+
 const blankBinding = (environmentId: string | undefined): BindingDraft => ({
   environmentId: environmentId ?? '', rootId: '', path: '', read: true, write: false, exec: false,
   imports: new Set(), exports: new Set(),
@@ -272,7 +283,11 @@ interface EnvironmentFormProps {
 /** The add/edit environment form, shared by the Add and Connections tabs. */
 function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
   const { draft, t, busy } = props
-  const update = (partial: Partial<EditorDraft>): void => { props.onChange({ ...draft, ...partial }) }
+  const update = (partial: Partial<EditorDraft>): void => {
+    const next = { ...draft, ...partial }
+    if (next.allowExec && !execHelperReady(next)) next.allowExec = false
+    props.onChange(next)
+  }
   const canSave = !busy
     && props.fingerprint !== undefined
     && draft.environmentId.trim() !== ''
@@ -375,8 +390,9 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
           value={draft.workspace} onChange={event => update({ workspace: event.currentTarget.value })} />
       </Field>
       <div className="mrfw-sshCheckRow">
-        <SshCheckbox checked={draft.allowExec} onChange={next => update({ allowExec: next })}
-          label={t('ssh.field.allowExec')} />
+        <SshCheckbox checked={draft.allowExec} disabled={busy || !execHelperReady(draft)}
+          onChange={next => update({ allowExec: next })} label={t('ssh.field.allowExec')} />
+        {execHelperReady(draft) ? null : <span className="mrfw-sshFieldHint">{t('ssh.field.allowExecHelper')}</span>}
         <SshCheckbox checked={draft.allowTransfer} onChange={next => update({ allowTransfer: next })}
           label={t('ssh.field.allowTransfer')} />
       </div>

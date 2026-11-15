@@ -19,7 +19,7 @@ export interface RemoteSettingsValue {
 }
 
 interface Settings {
-  installSection?: (owner: Context, ns: string, schema: unknown, value: { enabled: boolean; mode: string }, hooks: {
+  installSection?: (owner: Context, ns: string, schema: unknown, value: { enabled: boolean; mode: string; team?: unknown }, hooks: {
     setSource(source: () => RemoteSettingsValue): void; onChange(): void; validate(value: RemoteSettingsValue): void
   }) => void
   configure?: (presentation: { auto: boolean }, owner: unknown) => () => void
@@ -101,7 +101,7 @@ export function installRemoteSettings(ctx: Context, initial: () => unknown, chan
           brokerUid: z.natural(),
           credentialRoot: z.string(),
         }),
-      }), { enabled: initialEnabled, mode: initialMode }, {
+      }), { enabled: initialEnabled, mode: initialMode, ...(seed.team === undefined ? {} : { team: seed.team }) }, {
         // Re-sync on bind too: unlike the worktree row (which re-reads lazily
         // on every call), the remote row mounts on CHANGE events, so a
         // persisted override applied while the section binds must still fire.

@@ -1025,7 +1025,7 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
 .mrfw-modeOptionTitle {
   font-size: 13px;
   line-height: 18px;
-  color: var(--dsw-alias-label);
+  color: var(--dsw-alias-label-primary);
 }
 
 .mrfw-teamFields {

@@ -6,6 +6,7 @@
  * together.
  */
 import { writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
@@ -82,7 +83,7 @@ interface SwitchHooks {
 }
 
 /** A minimal Settings host: the persisted value is `live`, flipped by the test. */
-function installSettings(ctx: Context, live: { enabled: boolean }, seeds?: unknown[]): () => SwitchHooks | undefined {
+function installSettings(ctx: Context, live: { enabled: boolean; mode?: string; team?: Record<string, unknown> }, seeds?: unknown[]): () => SwitchHooks | undefined {
   let hooks: SwitchHooks | undefined
   ctx.provide('settings', {
     installSection: (_owner: Context, ns: string, _schema: unknown, value: unknown, callbacks: SwitchHooks) => {
@@ -104,14 +105,18 @@ const localToLocal = {
 const BROKER = { socketPath: '/broker/broker.sock', brokerUid: 999, credentialRoot: '/broker/credentials' }
 
 async function mountRow(
-  options: { remote?: { enabled?: boolean; personalPath?: string; credentialRoot?: string }; config?: { enabled?: boolean; broker?: boolean; mode?: 'personal' | 'team' | 'hardened' }; persisted?: boolean } = {},
-): Promise<{ hooks: () => SwitchHooks | undefined; live: { enabled: boolean } }> {
+  options: { remote?: { enabled?: boolean; personalPath?: string; credentialRoot?: string }; config?: { enabled?: boolean; broker?: boolean; mode?: 'personal' | 'team' | 'hardened' }; persisted?: boolean; persistedMode?: 'personal' | 'team' | 'hardened'; persistedTeam?: Record<string, unknown> } = {},
+): Promise<{ hooks: () => SwitchHooks | undefined; live: { enabled: boolean; mode?: string; team?: Record<string, unknown> } }> {
   world = await mountRemoteTools(fixture, { withTools: false, ...(options.remote === undefined ? {} : { remote: options.remote }) })
   probe.remotes = world.remotes
   probe.backends = new Map([['build', fakeExecBackend(world.remotes.get('build')!, FAKE_EXEC)]])
   // `persisted` is what the bound Settings source reports; an absent override
   // reports the row's own initial value, so dedicated profiles seed it true.
-  const live = { enabled: options.persisted ?? options.config?.enabled ?? false }
+  const live: { enabled: boolean; mode?: string; team?: Record<string, unknown> } = {
+    enabled: options.persisted ?? options.config?.enabled ?? false,
+    ...(options.persistedMode === undefined ? {} : { mode: options.persistedMode }),
+    ...(options.persistedTeam === undefined ? {} : { team: options.persistedTeam }),
+  }
   const hooks = installSettings(world.ctx, live)
   const config = {
     ...(options.config?.enabled === undefined ? {} : { enabled: options.config.enabled }),
@@ -154,6 +159,39 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     await expect.poll(() => world!.stack.registry.remoteMode, { timeout: 2_000 }).toBe('personal')
     // The bound Settings source still says off; the seed only fixes the initial
     // value the Settings UI starts from.
+    expect(world!.stack.registry.remoteStatus.state).toBe('disabled')
+  })
+
+  it('marks the whole editable settings shape volatile so modern forms accept every write', async (ctx) => {
+    let spec: string | undefined
+    try {
+      const anchor = createRequire(require.resolve('@deepseek-ai/dsh-client-locale/package.json'))
+      spec = anchor.resolve('@deepseek-ai/dsh-settings/src/schema.ts')
+    } catch { spec = undefined }
+    if (spec === undefined) return ctx.skip()
+    const { isVolatilePath } = (await import(spec)) as {
+      isVolatilePath(schema: unknown, path: readonly string[]): boolean
+    }
+    for (const path of [
+      ['enabled'], ['mode'], ['team'],
+      ['team', 'manifestPath'], ['team', 'socketPath'], ['team', 'brokerUid'], ['team', 'credentialRoot'],
+    ]) {
+      expect(isVolatilePath(RemoteToolsConfig, path), path.join('.')).toBe(true)
+    }
+  })
+
+  it('seeds the team block unwrapped when a validated row config supplies one', async () => {
+    const seeds: unknown[] = []
+    world = await mountRemoteTools(fixture, { withTools: false, remote: { enabled: false } })
+    installSettings(world.ctx, { enabled: false }, seeds)
+    const team = { manifestPath: '/dsh/remote.json', socketPath: '/run/dsh/broker.sock', brokerUid: 999, credentialRoot: '/var/lib/dsh/ssh' }
+    const validated = (RemoteToolsConfig as unknown as (value: unknown) => Record<string, unknown>)({ enabled: false, mode: 'team', team })
+    await world.ctx.plugin({
+      name: 'remote-tools-volatile-team',
+      inject,
+      apply: (ctx: Context) => applyRemoteTools(ctx, { ...validated, broker: { config: BROKER } } as never),
+    })
+    await expect.poll(() => seeds[0], { timeout: 2_000 }).toMatchObject({ enabled: false, mode: 'team', team })
     expect(world!.stack.registry.remoteStatus.state).toBe('disabled')
   })
 
@@ -266,5 +304,56 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
       to: { environmentId: 'local', rootId: 'primary', relativePath: 'imported.txt' },
     })
     expect(copy, JSON.stringify(copy)).toMatchObject({ status: 'committed' })
+  })
+
+  const spawnOf = () => (world!.stack.ctx.get('subprocess') as { spawn(spec: { argv: readonly string[] }): unknown }).spawn
+
+  gated(`remounts the gated subtree when the custody mode changes under an unchanged manifest${gateSkipped}`, async () => {
+    const { hooks, live } = await mountRow({ remote: {}, config: { enabled: false }, persisted: true, persistedMode: 'team' })
+    await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
+    await expect.poll(() => world!.stack.registry.remoteMode, { timeout: 5_000 }).toBe('team')
+    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(1)
+    const fixtureSpawn = spawnOf()
+    expect(() => fixtureSpawn({ argv: ['/bin/echo', 'x'] })).toThrowError('remote-tools fixture has no subprocess.spawn')
+
+    live.mode = 'hardened'
+    hooks()!.onChange()
+    await expect.poll(() => world!.stack.registry.remoteMode, { timeout: 5_000 }).toBe('hardened')
+    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(2)
+    expect(spawnOf()).not.toBe(fixtureSpawn)
+    expect(() => spawnOf()({ argv: ['/bin/echo', 'x'] })).toThrowError(/remote-profile-unconfined-spawn/)
+
+    live.mode = 'team'
+    hooks()!.onChange()
+    await expect.poll(() => world!.stack.registry.remoteMode, { timeout: 5_000 }).toBe('team')
+    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(3)
+    expect(spawnOf()).toBe(fixtureSpawn)
+    expect(() => spawnOf()({ argv: ['/bin/echo', 'x'] })).toThrowError('remote-tools fixture has no subprocess.spawn')
+  })
+
+  gated(`remounts when a persisted team broker fact changes under an unchanged manifest${gateSkipped}`, async () => {
+    const { hooks, live } = await mountRow({
+      remote: {},
+      config: { enabled: false },
+      persisted: true,
+      persistedMode: 'team',
+      persistedTeam: { socketPath: '/broker/one.sock', brokerUid: 999, credentialRoot: '/broker/credentials' },
+    })
+    await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
+    await expect.poll(() => world!.stack.registry.remoteMode, { timeout: 5_000 }).toBe('team')
+    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(1)
+
+    live.team = { ...live.team, socketPath: '/broker/two.sock' }
+    hooks()!.onChange()
+    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(2)
+
+    live.team = { ...live.team, brokerUid: 1000 }
+    hooks()!.onChange()
+    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(3)
+
+    hooks()!.onChange()
+    await expect.poll(async () => await world!.call('remote_copy', localToLocal), { timeout: 5_000 })
+      .toMatchObject({ status: 'failed', code: 'direction-unsupported' })
+    expect(probe.calls).toBe(3)
   })
 })

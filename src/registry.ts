@@ -1735,6 +1735,11 @@ export class MultiRootRegistry extends Service {
     await this.serializeAuthority(async () => {
       if (this.disposed) return
       const result = this.remotePlane.refreshPersonal()
+      if (result === 'invalid') {
+        reloaded = true
+        await this.remotePlane.severForInvalid(this.remotePlane.status.reason)
+        return
+      }
       if (result !== 'reloaded') return
       reloaded = true
       if (this.authorityState.kind === 'follower') {

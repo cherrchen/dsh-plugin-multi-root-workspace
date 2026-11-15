@@ -74,7 +74,7 @@ async function mutate(
 ): Promise<SshStateView> {
   const config = loadPersonalConfig(paths.personalPath)
   const next = await edit(config)
-  savePersonalConfig(paths.personalPath, { ...next, revision: next.revision + 1 }, expectedRevision)
+  await savePersonalConfig(paths.personalPath, { ...next, revision: next.revision + 1 }, expectedRevision)
   renderSshConfig(loadPersonalConfig(paths.personalPath), paths.credentialRoot)
   await registry.refreshRemotePersonal().catch(() => {})
   return await sshState(registry, paths, primary)
@@ -165,6 +165,15 @@ async function runPersonalEndpoint(
     }
     case 'sshEnvironmentSave': {
       const draft = { ...call.environment, endpoint: { ...call.environment.endpoint } }
+      const preservedHelper = (environments: readonly PersonalEnvironment[]): PersonalEnvironment['helper'] => {
+        const previous = environments.find(environment => environment.environmentId === draft.environmentId)
+        if (previous === undefined) return null
+        const sameTarget = previous.endpoint.hostname === draft.endpoint.hostname
+          && previous.endpoint.port === draft.endpoint.port
+          && previous.endpoint.user === draft.endpoint.user
+          && previous.credential.kind === draft.credential.kind
+        return sameTarget ? previous.helper : null
+      }
       let hostKey: string
       if (draft.credential.kind === 'ssh-config') {
         // R4: never trust the draft's endpoint — resolve the user's own alias
@@ -176,6 +185,9 @@ async function runPersonalEndpoint(
         }
         hostKey = call.fingerprint
       } else {
+        if (draft.exec !== undefined && preservedHelper(loadPersonalConfig(paths.personalPath).environments) === null) {
+          throw new RemoteAdmissionError('exec-requires-helper', 'exec requires an installed remote helper; save without exec, install the helper, then enable it')
+        }
         if (call.hostKeyToken === undefined) {
           throw new RemoteAdmissionError('host-key-token-required', 'a managed environment requires a host key scan token')
         }
@@ -183,21 +195,19 @@ async function runPersonalEndpoint(
         recordKnownHost(paths.credentialRoot, draft.endpoint.hostname, draft.endpoint.port, lines)
         hostKey = call.fingerprint
       }
-      return await mutate(registry, primary, paths, call.revision, config => ({
-        ...config,
-        environments: [
-          ...config.environments.filter(environment => environment.environmentId !== draft.environmentId),
-          { ...draft, environmentId: draft.environmentId, hostKey, helper: (() => {
-              const previous = config.environments.find(environment => environment.environmentId === draft.environmentId)
-              if (previous === undefined) return null
-              const sameTarget = previous.endpoint.hostname === draft.endpoint.hostname
-                && previous.endpoint.port === draft.endpoint.port
-                && previous.endpoint.user === draft.endpoint.user
-                && previous.credential.kind === draft.credential.kind
-              return sameTarget ? previous.helper : null
-            })() } as PersonalEnvironment,
-        ],
-      }))
+      return await mutate(registry, primary, paths, call.revision, config => {
+        const helper = preservedHelper(config.environments)
+        if (draft.exec !== undefined && helper === null) {
+          throw new RemoteAdmissionError('exec-requires-helper', 'exec requires an installed remote helper; save without exec, install the helper, then enable it')
+        }
+        return {
+          ...config,
+          environments: [
+            ...config.environments.filter(environment => environment.environmentId !== draft.environmentId),
+            { ...draft, environmentId: draft.environmentId, hostKey, helper } as PersonalEnvironment,
+          ],
+        }
+      })
     }
     case 'sshEnvironmentRemove': {
       const removed = loadPersonalConfig(paths.personalPath).environments.find(environment => environment.environmentId === call.environmentId)

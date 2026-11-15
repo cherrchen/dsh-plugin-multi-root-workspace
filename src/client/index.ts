@@ -88,6 +88,7 @@ const NAVIGATOR_SLOT_ID = 'multi-root-navigator'
 
 /** The id of the `<style>` element carrying this plugin's sheet. */
 const STYLE_ELEMENT_ID = 'multi-root-workspace-styles'
+const STYLE_OWNERS = Symbol.for('@dsh-electron/multi-root-workspace/style-owners')
 
 /**
  * Phase P3 gate: the prompt renders as a read-only preview until the Registry
@@ -130,14 +131,22 @@ export function apply(ctx: ClientContext): void {
   // The panel's classes resolve against this sheet; removing it on unload keeps
   // a hot-unplugged plugin from leaving dead rules behind.
   ctx.effect(() => {
-    let element = document.getElementById(STYLE_ELEMENT_ID)
-    if (element === null) {
+    const token = Symbol('style-owner')
+    let element = document.getElementById(STYLE_ELEMENT_ID) as (HTMLStyleElement & { [STYLE_OWNERS]?: Set<symbol> }) | null
+    if (!(element instanceof HTMLStyleElement) || !(element?.[STYLE_OWNERS] instanceof Set)) {
+      element?.remove()
       element = document.createElement('style')
       element.id = STYLE_ELEMENT_ID
-      element.textContent = STYLES
+      element[STYLE_OWNERS] = new Set()
       document.head.append(element)
     }
-    return () => { element?.remove() }
+    const owners = element[STYLE_OWNERS]!
+    owners.add(token)
+    element.textContent = STYLES
+    return () => {
+      owners.delete(token)
+      if (owners.size === 0) element.remove()
+    }
   }, 'multi-root-workspace: styles')
 
   // Cordis binds `this.ctx` to the *caller's* fiber for the registry methods, so

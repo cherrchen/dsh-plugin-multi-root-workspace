@@ -5,13 +5,14 @@
  * converts it into the identical DeploymentManifest shape so admission,
  * records and remote-1 never fork. POSIX only.
  */
-import { existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeSync, type Stats, closeSync } from 'node:fs'
+import { existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, writeSync, type Stats, closeSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { dirname, isAbsolute } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import { isCanonicallyUnder } from '../../roots.ts'
 import { bindingSchema, ManifestError, parseDeploymentManifest, type DeploymentManifest } from '../manifest.ts'
+import { RegistryAuthorityLease, RegistryLeaseContendedError } from '../../registry-lease.ts'
 
 const hostName = z.string().min(1).max(253).regex(/^\S+$/).refine(value => !value.startsWith('-'), 'hostname must not start with "-"')
 const hostUser = z.string().min(1).max(64).regex(/^\S+$/).refine(value => !value.startsWith('-'), 'user must not start with "-"')
@@ -78,14 +79,16 @@ export interface PersonalFileIdentity {
    * decides. The file is small; reading it per refresh is cheap.
    */
   readonly hash: string
+  readonly mode: number
+  readonly uid: number
 }
 
 export function statIdentity(info: Stats, content: string | Buffer): PersonalFileIdentity {
-  return { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs, hash: createHash('sha256').update(content).digest('hex') }
+  return { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs, hash: createHash('sha256').update(content).digest('hex'), mode: info.mode, uid: info.uid }
 }
 
 export function sameIdentity(a: PersonalFileIdentity, b: PersonalFileIdentity): boolean {
-  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.hash === b.hash
+  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.hash === b.hash && a.mode === b.mode && a.uid === b.uid
 }
 
 /**
@@ -142,18 +145,22 @@ export function checkPersonalFileProtection(path: string, bindings: readonly { p
   if (info.uid !== uid || (info.mode & 0o077) !== 0) {
     throw new ManifestError('manifest-untrusted', 'the personal config must be owned by the current user and not group/other-accessible')
   }
-  const parent = lstatSync(dirname(path))
-  if (parent.isSymbolicLink() || !parent.isDirectory()) {
-    throw new ManifestError('manifest-untrusted', 'the personal config directory must be a real directory, not a symlink')
-  }
-  if (parent.uid !== uid || (parent.mode & 0o022) !== 0) {
-    throw new ManifestError('manifest-untrusted', 'the personal config directory must be owned by the current user and not group/other-writable')
-  }
+  checkPersonalDirectoryProtection(dirname(path))
   const canonical = canonicalPath(path)
   for (const binding of bindings) {
     if (isCanonicallyUnder(canonical, canonicalPath(binding.primary))) {
       throw new ManifestError('manifest-untrusted', 'the personal config must not lie inside a bound local primary root')
     }
+  }
+}
+
+function checkPersonalDirectoryProtection(dir: string): void {
+  const parent = lstatSync(dir)
+  if (parent.isSymbolicLink() || !parent.isDirectory()) {
+    throw new ManifestError('manifest-untrusted', 'the personal config directory must be a real directory, not a symlink')
+  }
+  if (parent.uid !== process.getuid!() || (parent.mode & 0o022) !== 0) {
+    throw new ManifestError('manifest-untrusted', 'the personal config directory must be owned by the current user and not group/other-writable')
   }
 }
 
@@ -191,7 +198,7 @@ export function loadPersonalConfig(path: string): PersonalConfig {
 export function loadPersonalManifest(path: string): PersonalManifest {
   if (!existsSync(path)) {
     const empty = toDeploymentManifest({ schemaVersion: 1, revision: 0, environments: [], bindings: [] }, path)
-    return { ...empty, revision: 0, identity: { dev: 0, ino: 0, size: 0, mtimeMs: 0, hash: '' } }
+    return { ...empty, revision: 0, identity: { dev: 0, ino: 0, size: 0, mtimeMs: 0, hash: '', mode: 0, uid: -1 } }
   }
   const text = readFileSync(path, 'utf8')
   let data: unknown
@@ -213,21 +220,9 @@ export function loadPersonalManifest(path: string): PersonalManifest {
  * Compare-and-swap write: refuse `personal-config-conflict` when the on-disk
  * revision is not `expectedRevision`, then write temp-0600 → fsync → rename.
  */
-export function savePersonalConfig(path: string, next: PersonalConfig, expectedRevision: number): PersonalManifest {
-  if (existsSync(path)) {
-    let current: unknown
-    try {
-      current = JSON.parse(readFileSync(path, 'utf8'))
-    } catch (error) {
-      throw new ManifestError('personal-config-conflict', `the personal config is unreadable during the write: ${error instanceof Error ? error.message : String(error)}`)
-    }
-    const revision = (current as { revision?: unknown }).revision
-    if (revision !== expectedRevision) {
-      throw new ManifestError('personal-config-conflict', `the personal config revision changed (expected ${expectedRevision}, found ${String(revision)}); reload and retry`)
-    }
-  } else if (expectedRevision !== 0) {
-    throw new ManifestError('personal-config-conflict', `the personal config was created concurrently (expected revision ${expectedRevision}); reload and retry`)
-  }
+export async function savePersonalConfig(path: string, next: PersonalConfig, expectedRevision: number): Promise<PersonalManifest> {
+  if (!isAbsolute(path)) throw new ManifestError('manifest-untrusted', `the personal config path must be absolute: ${JSON.stringify(path)}`)
+  if (typeof process.getuid !== 'function') throw new ManifestError('manifest-untrusted', 'personal config protection checks require a POSIX host')
   // Validate BEFORE writing: a config that fails the schema or the manifest
   // semantics must never land on disk (it would fail the whole plane).
   const checked = personalConfigSchema.safeParse(next)
@@ -241,14 +236,52 @@ export function savePersonalConfig(path: string, next: PersonalConfig, expectedR
   }
   const dir = dirname(path)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
-  const temp = `${path}.tmp-${process.pid}`
-  const fd = openSync(temp, 'w', 0o600)
+  checkPersonalDirectoryProtection(dir)
+  const leasePath = join(realpathSync(dir), `${basename(path)}.lock`)
+  let lease: RegistryAuthorityLease
   try {
-    writeSync(fd, `${JSON.stringify(next, null, 2)}\n`)
-    fsyncSync(fd)
-  } finally {
-    closeSync(fd)
+    lease = await RegistryAuthorityLease.acquire(leasePath)
+  } catch (error) {
+    if (error instanceof RegistryLeaseContendedError) {
+      throw new ManifestError('personal-config-conflict', 'the personal config is being written by another process; reload and retry')
+    }
+    throw error
   }
-  renameSync(temp, path)
-  return loadPersonalManifest(path)
+  try {
+    if (existsSync(path)) {
+      checkPersonalFileProtection(path, checked.data.bindings)
+      let current: unknown
+      try {
+        current = JSON.parse(readFileSync(path, 'utf8'))
+      } catch (error) {
+        throw new ManifestError('personal-config-conflict', `the personal config is unreadable during the write: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      const revision = (current as { revision?: unknown }).revision
+      if (revision !== expectedRevision) {
+        throw new ManifestError('personal-config-conflict', `the personal config revision changed (expected ${expectedRevision}, found ${String(revision)}); reload and retry`)
+      }
+    } else {
+      if (expectedRevision !== 0) {
+        throw new ManifestError('personal-config-conflict', `the personal config was created concurrently (expected revision ${expectedRevision}); reload and retry`)
+      }
+      const canonical = join(realpathSync(dir), basename(path))
+      for (const binding of checked.data.bindings) {
+        if (isCanonicallyUnder(canonical, canonicalPath(binding.primary))) {
+          throw new ManifestError('manifest-untrusted', 'the personal config must not lie inside a bound local primary root')
+        }
+      }
+    }
+    const temp = `${path}.tmp-${process.pid}`
+    const fd = openSync(temp, 'w', 0o600)
+    try {
+      writeSync(fd, `${JSON.stringify(checked.data, null, 2)}\n`)
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    renameSync(temp, path)
+    return loadPersonalManifest(path)
+  } finally {
+    await lease.release()
+  }
 }
