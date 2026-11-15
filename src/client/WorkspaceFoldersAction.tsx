@@ -42,6 +42,7 @@ import {
 } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
+import { requestWorktreePrompt } from './worktree-prompt-bus.ts'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
 import type { WorktreeClient } from './worktree-client.ts'
@@ -84,6 +85,12 @@ export interface WorkspaceFoldersActionProps {
    * manager on compositions that do not mount the feature.
    */
   readonly worktrees?: WorktreeClient | undefined
+  /**
+   * Whether the worktree suggestion feature is enabled. The panel gains a
+   * manual entry only while the overlay would accept it; an unknown setting
+   * (older hosts without the settings form) keeps the entry visible.
+   */
+  readonly worktreePromptEnabled?: (() => boolean) | undefined
 }
 
 /** The visual family of one capsule button, mirroring the host Button kit. */
@@ -892,7 +899,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             {state.noSession ? null : (
               <>
             <input
-              className="mrfw-input"
+              className="mrfw-input mrfw-manualPath"
               value={manualPath}
               placeholder={t('panel.addManual')}
               disabled={atLimit}
@@ -983,6 +990,20 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               </Action>
             ) : null}
             <Action onClick={() => { void refresh() }} pending={state.busy} variant="outline">{t('panel.retry')}</Action>
+            {props.worktrees !== undefined && !state.noSession
+              && (props.worktreePromptEnabled === undefined || props.worktreePromptEnabled())
+              ? (
+                <Action
+                  variant="outline"
+                  onClick={() => {
+                    const base = requestBase()
+                    if (base !== undefined && requestWorktreePrompt(base.sessionId)) props.onClose()
+                  }}
+                >
+                  {t('worktree.panelOpen')}
+                </Action>
+              )
+              : null}
           </div>
         </div>
       </div>

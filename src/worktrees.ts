@@ -28,7 +28,14 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { configValue, volatileField } from './compat/skills.ts'
 import { installWorktreeSettings } from './compat/worktree-settings.ts'
-import { effectiveRootAccess, type WorktreeRootView, type WorktreeSnoozeChoice, type WorkspaceMode } from './contract.ts'
+import {
+  effectiveRootAccess,
+  type WorktreeAccess,
+  type WorktreeAccessEntry,
+  type WorktreeRootView,
+  type WorktreeSnoozeChoice,
+  type WorkspaceMode,
+} from './contract.ts'
 import type {} from './compat.ts'
 import type {} from './providers.ts'
 import type {} from './scope.ts'
@@ -396,7 +403,11 @@ export class MultiRootWorktrees extends Service {
     sessionId: string,
     promptIds: string | readonly string[],
     action: 'add' | 'dismiss' | 'snooze',
-    options: { readonly dontRemind?: boolean; readonly snooze?: WorktreeSnoozeChoice } = {},
+    options: {
+      readonly dontRemind?: boolean
+      readonly snooze?: WorktreeSnoozeChoice
+      readonly accesses?: readonly WorktreeAccessEntry[]
+    } = {},
   ): Promise<{
     readonly viewRevision: string
     readonly prompts: readonly WorktreePrompt[]
@@ -414,6 +425,17 @@ export class MultiRootWorktrees extends Service {
       throw new WorktreeError('worktree/bad-request', 'a reminder mode only belongs to the snooze action')
     }
     const dontRemind = action === 'dismiss' ? options.dontRemind : undefined
+    // Per-row access is an add-only decision; every omitted id keeps inherit.
+    // The wire parser already refuses unknown/duplicate ids, but a direct
+    // service caller must get the same guarantee.
+    const accessById = new Map<string, WorktreeAccess>()
+    for (const entry of options.accesses ?? []) {
+      if (action !== 'add') throw new WorktreeError('worktree/bad-request', 'per-row access only belongs to the add action')
+      if (!ids.includes(entry.id) || accessById.has(entry.id)) {
+        throw new WorktreeError('worktree/bad-request', 'per-row access names an unknown or duplicated prompt id')
+      }
+      accessById.set(entry.id, entry.access)
+    }
     const session = this.sessionView(sessionId)
     const generation = this.generation
     const workspace = await this.ensureWorkspace(session.primaryRoot, 'none')
@@ -468,7 +490,7 @@ export class MultiRootWorktrees extends Service {
         if (action === 'add') {
           const added = await this.ctx.multiRootRegistry.addNew(workspace.primaryRoot, {
             path: record.candidate.path,
-            access: 'inherit',
+            access: accessById.get(id) ?? 'inherit',
             expected: record.expected,
             // A roots carry no cleanup mapping: they are ordinary
             // registrations with the ordinary Remove lifecycle (ADR-0039 §1 / §6).
@@ -1160,6 +1182,7 @@ export class MultiRootWorktrees extends Service {
   /** Build the wire prompt view for one visible record. */
   private promptView(workspace: WorkspaceState, record: CandidateRecord, mode: WorkspaceMode): WorktreePrompt {
     const visible = this.visibleRecords(workspace, mode)
+    const branch = suggestionBranch(record.candidate, workspace.repo?.commonHead)
     return {
       id: record.promptId,
       key: record.candidate.key,
@@ -1168,6 +1191,7 @@ export class MultiRootWorktrees extends Service {
       primaryRoot: workspace.primaryRoot,
       access: 'inherit',
       effectiveAccess: effectiveRootAccess('inherit', mode),
+      ...(branch === undefined ? {} : { branch }),
       remaining: visible.length,
       viewRevision: this.viewRevision(workspace, mode),
     }
@@ -1183,7 +1207,12 @@ export class MultiRootWorktrees extends Service {
       // Every id participates: replacing one candidate's expectation must
       // change the digest even when the key set is unchanged, so the client
       // never keeps an id the owner will refuse.
-      visible: visible.map(record => ({ id: record.promptId, key: record.candidate.key, kind: record.candidate.kind })),
+      visible: visible.map(record => ({
+        id: record.promptId,
+        key: record.candidate.key,
+        kind: record.candidate.kind,
+        branch: suggestionBranch(record.candidate, workspace.repo?.commonHead) ?? '',
+      })),
       prompted: [...workspace.prompted].sort(),
       ignored: [...workspace.ignored].sort(),
     })
@@ -1455,6 +1484,15 @@ function worktreeBadge(mapping: WorktreeMapping, status: { readonly id: string; 
 function codeOf(error: unknown): string {
   const code = (error as { code?: unknown } | undefined)?.code
   return typeof code === 'string' && code !== '' ? code : 'worktree/not-eligible'
+}
+
+/** Derive the displayed branch without making the common HEAD part of the prompt identity. */
+function suggestionBranch(candidate: SuggestionCandidate, commonHead: string | undefined): string | undefined {
+  const head = candidate.kind === 'main-checkout' ? commonHead : candidate.adminHead
+  const prefix = 'ref: refs/heads/'
+  if (head === undefined || !head.startsWith(prefix)) return undefined
+  const name = head.slice(prefix.length)
+  return name === '' ? undefined : name
 }
 
 /** Build the owner expectation one prompt binds. */

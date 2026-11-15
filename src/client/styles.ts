@@ -1209,31 +1209,68 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* The multi-candidate worktree list: a scrollable stack of selectable rows. */
+/* The worktree Dialog: wider than the primitive's default card so a name,
+   path, branch and access selector share one continuous row. */
+.mrfw-worktreeDialog {
+  width: min(860px, 100%);
+  max-height: min(760px, 100%);
+}
+
+/* The candidate list: a continuous list with hairline separators, matching the
+   Workspace Folders panel's additional-root rows. */
 .mrfw-worktreeList {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: min(52vh, 420px);
+  max-height: min(56vh, 460px);
   overflow-y: auto;
-  padding-right: 4px;
 }
 
 .mrfw-worktreeRow {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
 
-.mrfw-worktreeRowHead {
+.mrfw-worktreeRow:last-of-type { border-bottom: none; }
+
+.mrfw-worktreeRowMain {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   cursor: pointer;
+}
+
+.mrfw-worktreeRowMain input { flex: none; }
+
+.mrfw-worktreeRowText {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mrfw-worktreeRowNameLine {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mrfw-worktreeRowName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
 }
 
 .mrfw-worktreeKind {
@@ -1243,7 +1280,53 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   color: var(--dsw-alias-label-secondary);
 }
 
+/* The detected branch is metadata, not an action: a quiet compact chip beside
+   the folder name. */
+.mrfw-worktreeBranch {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font-family: var(--ds-font-family-code);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* The per-row access selector keeps the panel's access vocabulary; its label
+   yields before the name/path column. */
+.mrfw-worktreeAccess {
+  flex: none;
+  max-width: 180px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-worktreeAccessLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mrfw-worktreeRow .mrfw-rootPath { overflow-wrap: anywhere; }
+
+.mrfw-worktreeRowNote { display: block; }
+
+.mrfw-worktreeRowError {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+@media (max-width: 640px) {
+  .mrfw-worktreeRow { grid-template-columns: minmax(0, 1fr); }
+  .mrfw-worktreeAccess { justify-self: start; margin-left: 26px; }
+  .mrfw-worktreeRowError { grid-column: 1; }
+}
 
 .mrfw-stateWarn {
   font-size: 12px;
@@ -1399,12 +1482,26 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
 
 .mrfw-actions {
   display: flex;
-  flex-wrap: wrap;
+  /* One row by default: the manual path field below is the only flexible item
+     and will be removed once the picker covers every host. */
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   margin-top: 16px;
   padding-top: 16px;
   border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+/* The manual path field absorbs the row's spare width and gives way first. */
+.mrfw-manualPath {
+  flex: 1 1 120px;
+  min-width: 80px;
+}
+
+@media (max-width: 560px) {
+  .mrfw-actions {
+    flex-wrap: wrap;
+  }
 }
 
 /* One control row, one height: the capsule buttons match the 32px input. */
@@ -1417,42 +1514,132 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   width: 32px;
 }
 
-/* The worktree prompt's non-modal notice (ADR-0039 第二十次修订 §20.3).
-   The shell.overlay container is click-through, so the card re-enables pointer
-   events for itself only: the page and its inputs stay usable behind it. It
-   never fades or times out — only an explicit action or a session/settings
-   change closes it. */
-.mrfw-toast {
+/* The worktree suggestion notice (ADR-0039 第二十一次修订): a persistent,
+   non-modal card. The client computes the fixed seat; this sheet owns only the
+   surface, the compact form, and the entrance fade. The surface follows the
+   active theme on purpose: light mode gets a light card, dark mode a dark one. */
+.mrfw-notice {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
   z-index: 1000;
   box-sizing: border-box;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
   width: max-content;
-  max-width: min(360px, calc(100vw - 48px));
-  padding: 14px 16px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: var(--dsw-radius-md);
+  max-width: var(--mrfw-notice-max-width, 560px);
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--dsw-radius-lg, var(--dsw-radius-md));
   background: var(--dsw-alias-bg-layer-2);
-  box-shadow: var(--dsw-elevation-prominent);
+  box-shadow: var(--dsw-elevation-panel);
   color: var(--dsw-alias-label-primary);
   pointer-events: auto;
+  animation: mrfw-notice-fade 160ms ease-out;
+  /* Both seats are horizontally centered: Hero on the composer, conversation
+     on its content column. */
+  transform: translateX(-50%);
 }
 
-.mrfw-toastText {
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-primary);
-}
-
-.mrfw-toastActions {
-  display: flex;
+.mrfw-notice[data-compact='true'] {
   flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.mrfw-notice[data-compact='true'] .mrfw-noticeBody {
+  flex-basis: 100%;
+}
+
+.mrfw-notice[data-compact='true'] .mrfw-noticeActions {
+  flex-basis: 100%;
+  justify-content: flex-end;
+  margin-left: 0;
+}
+
+.mrfw-noticeBody {
+  display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.mrfw-noticeIcon {
+  display: flex;
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-noticeText {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.mrfw-noticeActions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.mrfw-noticeAction {
+  flex: none;
+}
+
+/* Remind me later is one split control: the text half applies the default
+   until-new-worktree delay, the chevron half opens the three choices. */
+.mrfw-noticeSplit {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  box-sizing: border-box;
+  height: 28px;
+  border-radius: var(--dsw-radius-sm);
+  /* The hairline frame matches the divider between the two halves. */
+  box-shadow: inset 0 0 0 0.5px var(--dsw-alias-border-l3);
+}
+
+.mrfw-noticeSplit > * {
+  display: inline-flex;
+}
+
+.mrfw-noticeSplitText {
+  border-radius: var(--dsw-radius-sm) 0 0 var(--dsw-radius-sm);
+}
+
+.mrfw-noticeSplitToggle {
+  width: 24px;
+  padding: 0;
+  border-left: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 0 var(--dsw-radius-sm) var(--dsw-radius-sm) 0;
+}
+
+.mrfw-notice[data-compact='true'] .mrfw-noticeAction {
+  height: 32px;
+  padding: 0 12px;
+}
+
+.mrfw-notice[data-compact='true'] .mrfw-noticeSplit {
+  height: 32px;
+}
+
+.mrfw-notice[data-compact='true'] .mrfw-noticeSplitToggle {
+  width: 32px;
+  padding: 0;
+}
+
+@keyframes mrfw-notice-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mrfw-notice {
+    animation: none;
+  }
 }
 
 /* The reminder-delay dropdown: the same border/background/ink recipe as the
@@ -1482,28 +1669,29 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   opacity: 0.4;
 }
 
-.mrfw-toastSelect {
-  flex: none;
-  min-width: 0;
-  max-width: 180px;
-  color: var(--dsw-alias-label-secondary);
-}
 
-/* The Dialog footer's combined "later / do not remind" control row. The
-   Modal's own footer is a single justify-end line without wrapping; the
-   dropdown plus two capsule buttons may need a second line on a narrow card. */
-.mrfw-worktreeActions {
+/* The Dialog footer: the reminder dropdown on the left, the two decisions on
+   the right; both use the host's Button/Menu so heights match. */
+.mrfw-worktreeFooter {
   display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
+  width: 100%;
 }
 
-.mrfw-snoozeSelect {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
+.mrfw-worktreeFooterEnd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.mrfw-worktreeLater {
+  gap: 4px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 `

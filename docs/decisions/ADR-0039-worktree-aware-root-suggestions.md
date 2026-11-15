@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-11-14 第二十次修订；2026-11-10 第十九次修订；2026-11-09 第十八次修订与同日实施审计返工 R1–R6）。A 的目标是主 checkout 根，开关实验性、默认关闭；自动发现收敛为会话激活时一次只读检查 + 非模态 Toast，用户点「查看」后才打开单/多候选确认 Dialog。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
+Accepted（2026-11-15 第二十二次修订；2026-11-15 第二十一次修订；2026-11-14 第二十次修订；2026-11-10 第十九次修订；2026-11-09 第十八次修订与同日实施审计返工 R1–R6）。A 的目标是主 checkout 根，开关实验性、默认关闭；自动发现收敛为会话激活时一次只读检查 + 非模态 Toast，用户点「查看」后才打开单/多候选确认 Dialog。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
 
 ## 复审修正（2026-11-09）
 
@@ -58,7 +58,7 @@ Accepted（2026-11-14 第二十次修订；2026-11-10 第十九次修订；2026-
 
 - Toast 是**非模态**的：无 backdrop、无 focus trap、不阻塞页面和输入框；默认常驻、不自动消失。
 - 文案 A/B 中性：「发现 {count} 个可添加的工作目录」。只有 A、只有 B 或 A/B 同时存在都用同一文案，不暴露候选类型。
-- 操作：「查看」「稍后（下拉：直到出现新 worktree（默认）/ 7 天 / 30 天）」「×」。「×」只关闭 Toast；提醒延迟只来自「稍后」下拉，不打开 Dialog。
+- 操作：「查看」「稍后（下拉：直到出现新 worktree（默认）/ 7 天 / 30 天）」「×」。「×」只关闭 Toast；提醒延迟只来自「稍后」下拉，不打开 Dialog。（第二十一次修订删除「×」并更换落点，现行规则见下文。）
 - 只有「查看」才打开现有 `WorktreePrompt` Dialog。
 - A（主 checkout）与 B 走同一套 Toast + Dialog，不单独自动弹；Dialog 列表仍默认只勾选 `kind='worktree'`，A 保持显式勾选。类型、`effectiveAccess` 与共享元数据披露留在 Dialog 内。
 - Toast/Dialog 的生命周期属于显示它的 session 激活：切换 session、关闭设置或重新打开 Dialog 都会作废旧激活的异步完成；旧的 snooze/resolve 响应不得关闭或改写新生命周期的 UI（§20.11 第 12 条）。
@@ -182,6 +182,49 @@ PR #55 的代码审查复现了十三处实现偏离 §20.3–§20.10 的问题�
 同一轮对 `src/client/WorktreePrompt.tsx` 的广泛审查还收紧了异步完成的归属：`confirmAdd`/`applyLater` 也捕获 `workEpoch`，A→B→A 后旧 Dialog 的 resolve 完成不再关闭或改写第二次激活的 Dialog；`openDialog` 与 Toast 的「×」立即递增 epoch，打开 Dialog 或显式关闭 Toast 之后的旧 snooze 完成不能再改 UI。回归：Dialog 的 add/later 往返两条，以及关闭 Toast 后部分 refused 的 snooze 不重新出现。
 
 十三处都不改变授权语义：`addNew` 仍是唯一写路径，owner 复验与 `prompt-stale` 不变，`offered`/snooze 仍只是 UI 状态。
+
+## 第二十一次修订（2026-11-15）
+
+本轮只调整发现提示的呈现与落点，不改变任何触发、RPC、授权、宿主复验与生命周期语义。与 §20.3 冲突的呈现/操作条目以本节为准：
+
+- **落点**：Hero（新会话/blank）页顶部居中，纵向与官方 Toast 对齐（`40px`）；对话页为 Header 下沿 `12px`、水平居中于会话内容列。两页统一居中，不再使用右下角，也不移动输入框。
+- **页面检测**：只读 `[data-phase]`（`0.1.5-rc.2` 起存在）判断 Hero/对话页；Hero 水平中心取 `[data-composer-card]` 中心，回退会话列中心与视口中心；对话页内容顶部优先 `[data-conversation-content]`（`0.2.1-alpha.3+`），缺失时测量会话根第一个子元素（Header）的下沿。任何探针失败都回退 Hero 顶部居中，禁止回右下角。
+- **主题**：提示卡表面随当前主题切换（浅色模式浅色、深色模式深色），与官方 Toast「两种主题都深色」不同；只用 `--dsw-*` token，`border: 0` + `--dsw-elevation-panel` + `--dsw-radius-lg`（R16）。
+- **操作**：`查看` + `稍后提醒` 拆分按钮——左半文字按钮直接应用默认档位（直到出现新 worktree），右半 chevron 按钮打开 primitives `Menu`（直到出现新 worktree / 7 天 / 30 天）。拆分控件外围与中间分割线使用同一条 `--dsw-alias-border-l3` 细线。**删除「×」关闭按钮**；选择任一 snooze 档位即关闭提示，因此不再存在「只关闭、不写状态」的指针操作。常驻、非模态、无 backdrop、无 focus trap 不变。
+- **控件**：容器自绘；`查看`、`稍后提醒` 与图标使用 `@deepseek-ai/dsh-client-ui-primitives` 的 `Button` / `Menu` 及既有 compat 图标。菜单通过 `portal` 渲染，避免固定浮层裁剪。
+- **形态**：宽屏单行卡片；可用宽度不足或粗指针时改为两行，操作控件高 `32px`；`prefers-reduced-motion` 下取消入场动画。
+- **与官方 Toast 重叠**：默认 Hero `top: 40px`；检测到 `body` 直属 `role="alert"` 的官方瞬时 Toast 时，提示临时下移 `56px`，官方 Toast 消失后恢复。
+- **可访问性**：容器 `section` + `aria-label`；`role="status"` 只包文本；操作组有独立名称；Menu 自带键盘导航与 Escape。
+- **手动入口**：Workspace Folders 面板的「重试」右侧新增「Worktree 建议」按钮；仅在存在当前会话、worktree 客户端可用且功能未显式关闭时显示。点击先关闭面板，再经客户端事件请求 shell overlay 打开同一个建议 Dialog——面板不复制 Dialog 的轮询与生命周期。
+- **生命周期**：`openDialog`、session 切换、设置关闭仍是旧提示的失效点并递增 `workEpoch`；删掉「×」后，原「显式关闭 Toast 立即递增 epoch」一条不再适用，异步完成仍按既有 `mounted && epoch === workEpoch.current` 归属。
+
+## 第二十二次修订（2026-11-15）
+
+确认 Dialog 的形态、权限选择器与分支展示按维护者要求重做，**取代此前「worktree 根固定登记为 inherit」的表述**（第二十一次修订及更早的固定策略仅对 Toast 与旧 Dialog 有效）。
+
+- **宽度与列表**：确认 Dialog 从 primitives `Modal` 的默认 380px 加宽到 `min(860px, 100%)`（窄视口回退 100%），标题与 footer 固定、候选列表内部滚动。多候选从每项一张带描边/圆角的卡片改为连续列表：行间 `0.5px` 分隔线、无卡片背景；每行是 checkbox + 文件夹名（加粗主文本）+ 绝对路径（code/tertiary 第二行）+ 分支 chip + 行尾权限选择器；单候选使用同一行结构，不带 checkbox。
+- **删除说明行**：列表模式不再渲染「勾选要登记为 inherit 附加根…当前有效权限…」；权限由行尾选择器表达。主 checkout 行仍内联披露共享 config/hooks/refs/objects/admin 数据范围，选择非只读权限时额外披露 workspace 级写权限。
+- **逐行权限**：每行可在 `inherit` / `read-only` / `read-write` 间选择，默认 `inherit`。客户端在 `worktreePromptResolve` 的 `action: 'add'` 上传 `accesses: [{ id, access }]`；omitted id 仍默认 `inherit`。网契约只接受 add、id 必须属于本次 `promptIds`、每个 id 至多一次、值必须属于三档；host 的 `resolve` 再校验一次，Registry 的 `addNew` 以 `grantFields` 写入对应 grant（只读登记使用 `readOnlyRecordedPath`，且 `skillsEnabled` 关闭）。**这是授权语义变化**：worktree 根不再被固定为 `inherit`，只读登记不获得写权限、也不是读隔离（ADR-0013 的既有语义）；主 checkout 的 A 根同样适用。
+- **分支展示**：候选的 `branch` 从 admin `HEAD` 的 `ref: refs/heads/<name>` 解析；主 checkout 取 common `HEAD`（即主 checkout 自己的分支），不是 linked checkout 的 HEAD；detached HEAD 不显示。分支只用于展示与 `viewRevision` 摘要，不参与授权或 owner 复验；`WorktreePromptView.branch` 是可选字段，缺失即不渲染。
+- **footer**：原生 `select` 换为 primitives `Button` + `Menu`（snooze 档位仍为直到出现新 worktree / 7 天 / 30 天 / 永久不再提示）；「暂不处理」「添加所选」改用 primitives `Button`，与下拉同高。预览模式仍只显示关闭按钮。
+- **安全边界不变**：确认仍是显式动作；host 的 owner 串行队列、primary/candidate 复验、`worktree/prompt-stale`、seen/snooze/resolve 生命周期、RPC 只传 id 不传路径均不变；每行 access 只改变登记 grant，不能绕过 with-held/上限/受保护目录判断。
+- **验收**：契约测试覆盖 access 只属于 add、未知/重复 id、非法值、branch 可选且非空；host 测试覆盖 A/B prompt branch、detached 缺省、read-only/read-write add 的 grant 字段与 effective access、非法 access 拒绝；客户端测试覆盖连续行、分支 chip、默认 inherit、逐行改为 read-only 后请求携带 `accesses`、无旧说明行；样式测试固定加宽、分隔线、分支/选择器/footer 规则。
+
+## 第二十三次修订（2026-11-15）
+
+PR #60 自动评审核验后的实现对齐修复，不改变授权模型与安全边界：
+
+- **Follower 的 `addNew` IPC 与浏览器契约同档**：owner 的 `addNew` 参数 schema（`src/worktrees/protocol.ts`，经 `src/authority/protocol.ts` 的共享参数表）此前仍只接受 `inherit`，第二十二次修订新增的 `read-only` / `read-write` 在共享 Registry 部署中会被 owner 拒绝。现接受三档；缺省仍为 `inherit`，owner 的复验、grant 字段写入（`recordedPath` / `readOnlyRecordedPath` / `readWriteRecordedPath`）与 `skillsEnabled` 规则不变。
+- **Files 管理器的手动入口**：`RootSwitcher` 构造嵌套 `WorkspaceFoldersDialog` 时透传 `worktrees` 与 `worktreePromptEnabled`，使 Files 页签入口与 footer / Hero 入口一样提供「Worktree 建议」按钮；Dialog 归属与生命周期不变（Files 入口仍是本地 Dialog，不接管 footer 的共享 controller）。
+- **展示元数据的刷新**：主 checkout 的分支是展示字段，不属于 `expectedFor` 的授权 expectation，也不参与 owner 复验。`refreshInventory` 在 expectation 相等而复用候选记录时，仍以最新 candidate 刷新展示元数据（当前为 `mainHead`），保留 `promptId`、`discoveryKey` 与 `expected`；`viewRevision` 因而随分支变化，重开 Dialog 或轮询会得到新视图。candidate 未变化时保留原记录对象，避免无关刷新改变记录身份。
+- **验收**：契约测试覆盖 owner IPC 三档与非法值；follower→owner 集成测试覆盖 `read-only` / `read-write` 的 grant 字段与 effective access；组件测试覆盖 Files 入口的入口可见性；host 测试覆盖「只切换主 checkout 分支」时 branch 与 `viewRevision` 更新、prompt id 不变。计划与证据见 [评审修复计划](../plans/active/2026-11-15-worktree-review-fixes.md)。
+
+## 第二十四次修订（2026-11-15）
+
+- **页面兼容探针**：`src/compat/client-conversation-layout.ts` 集中读取上游会话和 Toast DOM，按内容标记或旧版 Header 取得几何数据。会话节点挂载或替换时，探针重新绑定会话根、输入卡、内容区和 Header 的尺寸观察。`src/client/notice-placement.ts` 负责落点计算、重测调度和 React 生命周期。
+- **手动入口归属**：Workspace Folders 管理器请求打开其自身会话的建议。Overlay 核对当前会话与实时设置后才接受请求，管理器收到确认后关闭。仍绑定旧会话的 Files 页签可以继续管理该会话的目录。
+- **勾选与权限**：刷新后的现存行保留勾选和逐行权限。新 worktree 默认勾选，主 checkout 默认待确认；被拒绝的行取消勾选。单行和多行使用同样的勾选及提交规则。
+- **展示与确认并发**：主 checkout 分支从当前仓库快照的 common `HEAD` 派生。展示分支变化更新 `viewRevision`，候选记录及其确认身份随原有 owner expectation 复用。见[第二轮审查报告](../plans/active/2026-11-15-worktree-review-fixes.md#12-第二轮审查报告a18c0ae)。
 
 ## 第十八次修订（2026-11-09）
 

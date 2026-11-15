@@ -36,6 +36,7 @@ import {
   type WorktreeResetAnswerView,
   type WorktreeResolveAnswerView,
   type WorktreeResolvedView,
+  type WorktreeAccessEntry,
   type WorktreeSeenAnswerView,
   type WorktreeSkippedView,
   type WorktreeSnoozeChoice,
@@ -58,6 +59,8 @@ export interface WorktreeResolveOptions {
   readonly dontRemind?: boolean
   /** `snooze` only: the reminder delay the operator picked. */
   readonly snooze?: WorktreeSnoozeChoice
+  /** `add` only: per-row grants; omitted ids keep `inherit`. */
+  readonly accesses?: readonly WorktreeAccessEntry[]
 }
 
 /** The callable face the prompt overlay receives. */
@@ -162,12 +165,15 @@ async function resolveBatched(
   let viewRevision = ''
   let prompts: readonly WorktreePromptView[] = []
   for (const batch of promptBatches(promptIds)) {
+    const batchIds = new Set(batch)
+    const accesses = options?.accesses?.filter(entry => batchIds.has(entry.id)) ?? []
     const answer = parse(worktreeResolveAnswerSchema, await call(connection, 'worktreePromptResolve', {
       sessionId,
       promptIds: batch,
       action,
       ...(options?.dontRemind === undefined ? {} : { dontRemind: options.dontRemind }),
       ...(options?.snooze === undefined ? {} : { snooze: options.snooze }),
+      ...(accesses.length === 0 ? {} : { accesses }),
     }, signal), 'the worktree resolve answer')
     viewRevision = answer.viewRevision
     prompts = answer.prompts

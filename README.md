@@ -19,7 +19,7 @@
 - **Files 页签浏览附加根**：Files 页签头部可直接在主根与任一已登记附加根之间切换，附加根的目录树以与主根相同的原生 Files 视图呈现，打开文件、在外部应用打开、自动刷新等操作完全一致；文件行与目录行支持与主根相同的右键菜单（Files 页签与文件预览页的 Folder 导航树都生效，target 是附加根内的绝对路径），并可按选中根做工作区搜索——页头搜索钮、搜索栏（设置、输入框、隐藏项眼睛、清除）、`aria-live` 状态行、复用宿主结果树并高亮命中，带空结果/截断/不完整提示与失败重试，↑/↓ 与 Esc 键盘操作，设置浮层（排除规则、是否尊重 ignore 文件）按根持久化在宿主同名 localStorage 键 `dsh.sidebar-files.workspace-search.v1`；从 `0.2.2-rc.2` 起，列出的树与搜索都跟随原生「显示隐藏项」偏好（绘制期过滤、隐藏目录下的已列层级一并丢弃、只有隐藏项的目录给出说明）。文件预览页的 Folder 导航树同样落在被预览文件所在的根，定位、展开与高亮与原生一致。以上能力按宿主暴露的结构门控：行右键需要宿主组合提供的 `useContextMenu`（`0.2.2-alpha.3` 起），搜索需要 `remote.workspaceFiles.search`（`0.2.2-rc.2` 起）；更早的宿主上不绑定行菜单、不渲染搜索钮与搜索栏，附加根视图与今天逐字节一致。
 - **可选 Auto review（默认关闭）**：fork 上游实验性「自动授权审查」，向 Reviewer 补充附加目录的审查上下文——当前工作区拓扑、各根访问级别与实时指令文件；出厂关闭，需在插件管理器的行列表中显式打开 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` 行后生效，启用时接管官方同名 bundle。
 - **附属根 Skills**：发现附属目录的 `.dsh/skills` 与 `.agents/skills`，附属根经 `/alias-id:skill-name` 命名空间调用原生 `skill` 工具；每根独立开关、可编辑 `aliasId`，全局设置默认开启。
-- **Worktree 附加根建议（实验性，默认关闭）**：primary 是 Git main 或 linked checkout 时，发现同 common 的其他 worktree，经用户确认后把其源码树登记为 `inherit` 附加根；发现只读取插件自己解析的 Git 元数据，不启动 Git 子进程、不自动增删。linked worktree 还可显式授权主 checkout 根，补齐受限 `git add` / `git commit` 的共享元数据写入缺口（[ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+- **Worktree 附加根建议（实验性，默认关闭）**：primary 是 Git main 或 linked checkout 时，发现同 common 的其他 worktree，经用户确认后把其源码树登记为附加根（默认 `inherit`，可逐行选择权限）；发现只读取插件自己解析的 Git 元数据，不启动 Git 子进程、不自动增删。linked worktree 还可显式授权主 checkout 根，补齐受限 `git add` / `git commit` 的共享元数据写入缺口（[ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
 - **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
 
 当前发布版本 `v0.1.19`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
@@ -271,11 +271,13 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 
 ### Worktree 附加根建议（实验性，默认关闭）
 
-primary root 本身是 Git main 或 linked checkout 根时，插件会发现与本仓库共享 common git dir 的其他 worktree —— 包括会话开始前就存在、由终端、IDE、forge 或其他 DSH 创建的 —— 并在用户确认后把该 worktree 的源码树登记为 `inherit` 附加根。发现只读取插件自己打开并解析的 Git 元数据（`.git` 指针、admin、common 的 config/HEAD/index 与完整祖先链），**不启动任何 Git 子进程，也不解析 commit 对象**，并且**不会自动添加或删除**。该功能**实验性、默认关闭**，需在插件详情卡显式开启。
+primary root 本身是 Git main 或 linked checkout 根时，插件会发现与本仓库共享 common git dir 的其他 worktree —— 包括会话开始前就存在、由终端、IDE、forge 或其他 DSH 创建的 —— 并在用户确认后把该 worktree 的源码树登记为附加根（默认 `inherit`，可逐行选择权限）。发现只读取插件自己打开并解析的 Git 元数据（`.git` 指针、admin、common 的 config/HEAD/index 与完整祖先链），**不启动任何 Git 子进程，也不解析 commit 对象**，并且**不会自动添加或删除**。该功能**实验性、默认关闭**，需在插件详情卡显式开启。
 
 默认 pool 没有特殊规则：主仓库作为 primary 时 `.agents/worktrees/<id>` 位于 primary 内，按既有包含规则过滤；primary 本身是 pool worktree 时，兄弟 worktree 仍是候选（仍受登记、上限与「不再提示」约束）。submodule（含 linked worktree 本身是 submodule）、bare 派生的 linked worktree、`--separate-git-dir` 主 checkout、`extensions.worktreeConfig`、`core.repositoryformatversion=1` / `--relative-paths` 以及 split/sparse index 一律不提示。
 
-提示按 workspace 共享、按 session 的沙箱模式过滤：读写会话可确认读写，只读会话显示只读但登记策略仍是 `inherit`，Full-access 不提示。**恰好一个可见候选时显示原确认对话框；两个及以上时显示可勾选的列表**（B 默认勾选，A 默认不勾且内联披露），一次确认多个目录。登记是 workspace 级的，**其他读写会话也会获得该目录的写权限**，对话框会明确说明。确认后由 Registry owner 在既有串行队列内再次复验 primary/candidate、primary/common/admin 的 HEAD 语法与目录身份；等待期间任何变化都会让该项失效（`worktree/prompt-stale`），列表中的其余项继续处理，失效项保持未登记。
+提示按 workspace 共享、按 session 的沙箱模式过滤：读写会话可确认读写，只读会话显示只读，Full-access 不提示。确认 Dialog 加宽到适合一行放下名称、路径、分支和权限；候选改为连续列表（不再每个 worktree 一张卡片），每行显示文件夹名、绝对路径、检测到的 Git 分支（detached HEAD 不显示）和登记权限选择器；权限默认 `inherit`，可逐行改为只读或读写。**恰好一个可见候选时仍显示单个确认行；两个及以上时显示可勾选列表**（B 默认勾选，A 默认不勾且内联披露），一次确认多个目录。登记是 workspace 级的，**其他读写会话也会获得所选权限**，主 checkout 行会明确披露影响范围；确认后由 Registry owner 在既有串行队列内再次复验，并按每行选择的权限写入登记；复验覆盖 primary/candidate、primary/common/admin 的 HEAD 语法与目录身份；等待期间任何变化都会让该项失效（`worktree/prompt-stale`），列表中的其余项继续处理，失效项保持未登记。
+
+发现提示本身是非模态常驻卡片：新会话（Hero）页显示在顶部居中，纵向与官方 Toast 对齐，官方瞬时 Toast 出现时临时下移避让；对话页显示在 Header 下方的水平居中位置，不再占用输入框所在的右下角。卡片随主题明暗切换；操作为「查看」和「稍后提醒」拆分按钮（外围与中间分割线同为一条细线）：左半文字按钮直接应用默认档位（直到出现新 worktree），右半 chevron 按钮打开下拉（直到出现新 worktree / 7 天后 / 30 天后）；选择后即关闭提示，没有单独的关闭按钮。提示关闭后，可从 Workspace Folders 面板「重试」右侧的「Worktree 建议」重新打开确认面板。
 
 worktree 被删除或移动后，Workspace Folders 面板会显示徽标；**永不自动清理**。只有登记路径被确认缺失（`ENOENT`/`ENOTDIR`）且 `rootId + path + addedAt` 仍匹配时，面板才提供逐条或批量清理；目录仍存在、无法访问，或旧 admin 消失但 checkout 仍有效时只提供普通 Remove。缺失根会继续占用 `maxAdditionalRoots`，直到清理或手动移除；清理前，同一路径出现的新目录可能继承旧授权，面板会显示该提示。
 
@@ -283,7 +285,7 @@ Settings → Plugins → Multi-root Workspace 同一张设置卡中的 **启用 
 
 ### 主 checkout 授权（A）
 
-当 session 的 workspace 本身是 linked worktree、且当前为 `workspace-write` 时，插件会提示把该仓库的**主 checkout 根 `<main>`（共享 common 的父目录，通常是主 checkout 的源码根）**登记为 `inherit` 附加根。对话框明确显示实际路径与范围：主 checkout 的源码树、共享 config、hooks、refs/objects 以及所有 worktree 的 admin 数据，可能影响同仓库的其他 checkout；登记仍是 workspace 级。
+当 session 的 workspace 本身是 linked worktree、且当前为 `workspace-write` 时，插件会提示把该仓库的**主 checkout 根 `<main>`（共享 common 的父目录，通常是主 checkout 的源码根）**登记为附加根（默认 `inherit`，可在行内更改权限）。对话框明确显示实际路径与范围：主 checkout 的源码树、共享 config、hooks、refs/objects 以及所有 worktree 的 admin 数据，可能影响同仓库的其他 checkout；登记仍是 workspace 级。
 
 A 只在该 primary 的完整快照证明 common 身份、且 `<main>/.git` 仍是该 common 的真实目录时出现。它补上受限 `workspace-write` 会话执行 `git add` / `git commit` 的写入缺口，同时**把主 checkout 的源码树纳入授权**。默认 pool 的 primary 位于 `<main>` 内，`primary-overlap` 会拒绝，因此 pool 没有 A；`--separate-git-dir` 时推导出的路径可能是 store 的父目录而非真正主 checkout，对话框会显示实际路径并提示核对。等待确认期间，primary/admin/common 的文件系统身份、双向指针、admin HEAD、祖先索引、主根身份或 `<main>/.git` 被替换都会让提示失效，不会写入。
 

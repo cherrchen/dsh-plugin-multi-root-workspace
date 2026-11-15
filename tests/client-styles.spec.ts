@@ -451,3 +451,70 @@ describe('the additional-root search styles (0.2.2-rc.2)', () => {
     }
   })
 })
+
+describe('the worktree suggestion notice rules', () => {
+  /** The sheet with comments stripped; the notice block runs to the next rule family. */
+  const CSS = STYLES.replace(/\/\*[\s\S]*?\*\//g, '')
+  const notice = CSS.slice(CSS.indexOf('.mrfw-notice {'), CSS.indexOf('.mrfw-select {'))
+
+  it('leaves the old bottom-right corner entirely', () => {
+    expect(CSS).not.toContain('.mrfw-toast')
+    expect(notice).not.toMatch(/right:\s*24px/)
+    expect(notice).not.toMatch(/bottom:\s*24px/)
+    expect(notice).toMatch(/position:\s*fixed/)
+  })
+
+  it('draws one borderless, theme-adaptive elevated card', () => {
+    expect(notice).toMatch(/border:\s*0;/)
+    expect(notice).toMatch(/border-radius:\s*var\(--dsw-radius-lg(?:,\s*var\(--dsw-radius-md\))?\)/)
+    expect(notice).toMatch(/background:\s*var\(--dsw-alias-bg-layer-2\)/)
+    expect(notice).toMatch(/box-shadow:\s*var\(--dsw-elevation-panel\)/)
+    // The surface follows the active theme; it is not the always-dark Toast token.
+    expect(notice).not.toContain('--dsw-alias-toast-bg')
+    expect(notice).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/)
+  })
+
+  it('centers both seats and keeps a compact 32px two-row form', () => {
+    expect(CSS).toMatch(/\.mrfw-notice\s*\{[^}]*transform:\s*translateX\(-50%\)/s)
+    expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\]\s*\{[^}]*flex-wrap:\s*wrap/s)
+    expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\] \.mrfw-noticeAction\s*\{[^}]*height:\s*32px[^}]*padding:\s*0 12px/s)
+  })
+
+  it('draws remind-me-later as a framed split text and chevron control', () => {
+    expect(CSS).toMatch(/\.mrfw-noticeSplit\s*\{[^}]*display:\s*inline-flex[^}]*box-shadow:\s*inset 0 0 0 0\.5px var\(--dsw-alias-border-l3\)/s)
+    expect(CSS).toMatch(/\.mrfw-noticeSplitToggle\s*\{[^}]*width:\s*24px[^}]*border-left:\s*0\.5px solid var\(--dsw-alias-border-l3\)/s)
+    expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\] \.mrfw-noticeSplit\s*\{[^}]*height:\s*32px/s)
+    expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\] \.mrfw-noticeSplitToggle\s*\{[^}]*width:\s*32px/s)
+  })
+
+  it('fades in and honors reduced motion', () => {
+    expect(CSS).toMatch(/@keyframes mrfw-notice-fade/)
+    expect(CSS).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.mrfw-notice\s*\{\s*animation:\s*none/s)
+  })
+})
+
+describe('the workspace folder add row', () => {
+  it('keeps one line by letting the manual path field shrink first', () => {
+    expect(STYLES).toMatch(/\.mrfw-actions\s*\{[^}]*flex-wrap:\s*nowrap/s)
+    expect(STYLES).toMatch(/\.mrfw-manualPath\s*\{[^}]*flex:\s*1 1 120px[^}]*min-width:\s*80px/s)
+  })
+})
+
+describe('the worktree dialog rules', () => {
+  /** The sheet with comments stripped; the worktree block runs to the next family. */
+  const CSS = STYLES.replace(/\/\*[\s\S]*?\*\//g, '')
+  const worktree = CSS.slice(CSS.indexOf('.mrfw-worktreeDialog {'), CSS.indexOf('.mrfw-stateWarn {'))
+
+  it('widens the card and keeps one continuous list', () => {
+    expect(worktree).toMatch(/\.mrfw-worktreeDialog\s*\{[^}]*width:\s*min\(860px,\s*100%\)/s)
+    expect(worktree).toMatch(/\.mrfw-worktreeRow\s*\{[^}]*border-bottom:\s*0\.5px solid/s)
+    expect(worktree).not.toMatch(/\.mrfw-worktreeRow\s*\{[^}]*border-radius/s)
+    expect(worktree).not.toMatch(/\.mrfw-worktreeRow\s*\{[^}]*border:\s*0\.5px solid/s)
+  })
+
+  it('styles the branch chip, the access selector and the footer', () => {
+    expect(worktree).toMatch(/\.mrfw-worktreeBranch\s*\{[^}]*font-family:\s*var\(--ds-font-family-code\)/s)
+    expect(worktree).toMatch(/\.mrfw-worktreeAccess\s*\{[^}]*max-width:\s*180px/s)
+    expect(STYLES).toMatch(/\.mrfw-worktreeFooter\s*\{[^}]*justify-content:\s*space-between/s)
+  })
+})

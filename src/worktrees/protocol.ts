@@ -37,7 +37,10 @@ export const promptExpectedSchema = z.object({
 /** `addNew` arguments. */
 export const addNewSchema = z.object({
   path: z.string().min(1),
-  access: z.literal('inherit').optional(),
+  // The three grants the browser may confirm. A Registry follower sends the
+  // per-row choice through this owner IPC contract, so it must accept the same
+  // set the panel does; omitted still means inherit.
+  access: z.enum(['inherit', 'read-only', 'read-write']).optional(),
   expected: promptExpectedSchema,
   track: z.object({ adminId: z.string().min(1), common: z.string().min(1) }).strict().optional(),
 }).strict()

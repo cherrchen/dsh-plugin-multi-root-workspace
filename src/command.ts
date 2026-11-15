@@ -750,6 +750,7 @@ async function dispatchPanelRequest(
             value: await worktrees.resolve(call.sessionId, call.promptIds ?? [], call.action ?? 'dismiss', {
               ...(call.dontRemind === undefined ? {} : { dontRemind: call.dontRemind }),
               ...(call.snooze === undefined ? {} : { snooze: call.snooze }),
+              ...(call.accesses === undefined ? {} : { accesses: call.accesses }),
             }),
           }
         case 'worktreePromptReset':

@@ -7,6 +7,8 @@ import {
   worktreeResolveAnswerSchema,
   worktreeWaitViewSchema,
 } from '../src/contract.ts'
+import { parseArguments } from '../src/authority/protocol.ts'
+import { addNewSchema } from '../src/worktrees/protocol.ts'
 
 const prompt = {
   id: 'p1',
@@ -47,6 +49,12 @@ describe('worktree wait union', () => {
             : { status, viewRevision: 'v1', retryAfterMs: 1000 }
       expect(worktreeWaitViewSchema.safeParse(value).success, status).toBe(false)
     }
+  })
+
+  it('carries an optional branch but never an empty one', () => {
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt: { ...prompt, branch: 'feature/x' }, viewRevision: 'v1' }).success).toBe(true)
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt: { ...prompt, branch: '' }, viewRevision: 'v1' }).success).toBe(false)
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt: { ...prompt, branch: 7 }, viewRevision: 'v1' }).success).toBe(false)
   })
 
   it('refuses an unknown status or a malformed prompt', () => {
@@ -99,6 +107,33 @@ describe('worktree requests', () => {
     expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptIds: [], action: 'add' })).toMatchObject({ ok: false })
     const tooMany = Array.from({ length: 65 }, (_, index) => `p${index}`)
     expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptIds: tooMany, action: 'add' })).toMatchObject({ ok: false })
+  })
+
+  it('carries per-row access only on the add action', () => {
+    expect(parseWorktreeCall('worktreePromptResolve', {
+      sessionId: 's', promptIds: ['p', 'q'], action: 'add',
+      accesses: [{ id: 'p', access: 'read-only' }],
+    })).toMatchObject({
+      ok: true,
+      value: { accesses: [{ id: 'p', access: 'read-only' }] },
+    })
+    // Absent entries keep the inherit default; only known prompt ids and the
+    // three grant values are accepted.
+    expect(parseWorktreeCall('worktreePromptResolve', {
+      sessionId: 's', promptIds: ['p'], action: 'add', accesses: [{ id: 'q', access: 'inherit' }],
+    })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptResolve', {
+      sessionId: 's', promptIds: ['p'], action: 'add', accesses: [{ id: 'p', access: 'inherit' }, { id: 'p', access: 'read-only' }],
+    })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptResolve', {
+      sessionId: 's', promptIds: ['p'], action: 'add', accesses: [{ id: 'p', access: 'full-access' }],
+    })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptResolve', {
+      sessionId: 's', promptIds: ['p'], action: 'dismiss', accesses: [{ id: 'p', access: 'inherit' }],
+    })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptSeen', {
+      sessionId: 's', promptIds: ['p'], accesses: [{ id: 'p', access: 'inherit' }],
+    })).toMatchObject({ ok: false })
   })
 
   it('carries the seen cursor and refuses an unknown endpoint', () => {
@@ -187,5 +222,53 @@ describe('roots view worktree fields', () => {
   it('rejects a malformed worktree badge without breaking the root view', () => {
     const root = { ordinal: 1, id: 'r1', path: '/wt', addedAt: '2026-11-09', state: 'missing', worktree: { adminId: 'id', path: '/wt', state: 'gone', cleanupEligible: true } }
     expect(parseRootsView({ primaryRoot: '/main', roots: [root] })).toMatchObject({ ok: false })
+  })
+})
+
+/**
+ * The owner parses a follower's `addNew` request with this schema. The browser
+ * contract already accepts the three grants, so the second (owner IPC) contract
+ * must accept exactly the same set or a follower can never confirm any of them.
+ */
+describe('owner addNew wire schema', () => {
+  const expected = {
+    primaryKey: '/primary',
+    primaryRoot: '/primary',
+    primary: {
+      shape: 'linked' as const,
+      canonical: '/linked',
+      common: '/main/.git',
+      adminId: 'wt',
+      adminGitdir: '/main/.git/worktrees/wt',
+      adminHead: 'ref: refs/heads/feature',
+      rootIdentity: { dev: '1', ino: '2' },
+      adminIdentity: { dev: '3', ino: '4' },
+    },
+    candidate: {
+      kind: 'main-checkout' as const,
+      canonical: '/main',
+      common: '/main/.git',
+      adminId: 'wt',
+      adminGitdir: '/main/.git/worktrees/wt',
+      adminHead: 'ref: refs/heads/feature',
+      rootIdentity: { dev: '5', ino: '6' },
+      adminIdentity: { dev: '3', ino: '4' },
+    },
+    promptKey: 'main-checkout\u0000/main/.git',
+  }
+  const args = { path: '/main', expected }
+
+  it('accepts every grant the browser can confirm, with inherit still implicit', () => {
+    expect(addNewSchema.safeParse(args).success).toBe(true)
+    for (const access of ['inherit', 'read-only', 'read-write'] as const) {
+      expect(addNewSchema.safeParse({ ...args, access }).success, access).toBe(true)
+      expect(parseArguments('addNew', ['/primary', { ...args, access }])).toHaveLength(2)
+    }
+  })
+
+  it('still refuses a value the root table does not support', () => {
+    for (const access of ['full-access', 'readonly', 'write', 1, null]) {
+      expect(addNewSchema.safeParse({ ...args, access }).success, String(access)).toBe(false)
+    }
   })
 })

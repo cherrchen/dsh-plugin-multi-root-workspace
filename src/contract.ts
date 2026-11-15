@@ -61,6 +61,8 @@ export type {
   WorktreeSkippedView,
   WorktreeSnoozeChoice,
   WorktreeSnoozeMode,
+  WorktreeAccess,
+  WorktreeAccessEntry,
 } from './worktrees-contract.ts'
 
 /** One worktree deletion badge on a registered root (ADR-0039 §6.1). */

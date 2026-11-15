@@ -193,12 +193,13 @@ export function Modal(props: {
   readonly closeLabel: string
   readonly footer?: ReactNode
   readonly children?: ReactNode
+  readonly className?: string
 }): ReactNode {
   if (!props.open) return null
   return createPortal(
     createElement(
       'div',
-      { role: 'dialog', 'aria-label': props.title },
+      { role: 'dialog', 'aria-label': props.title, className: props.className },
       createElement('h2', null, props.title),
       props.description === undefined ? null : createElement('p', null, props.description),
       props.children,

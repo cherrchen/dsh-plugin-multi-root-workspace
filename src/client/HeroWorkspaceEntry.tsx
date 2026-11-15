@@ -39,6 +39,8 @@ export interface HeroWorkspaceEntryProps {
   readonly t: Translate
   /** The worktree channel client, when the composition mounts it. */
   readonly worktrees?: WorktreeClient | undefined
+  /** Whether the worktree suggestion feature is enabled, when known. */
+  readonly worktreePromptEnabled?: (() => boolean) | undefined
 }
 
 /**

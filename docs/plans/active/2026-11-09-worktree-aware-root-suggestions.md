@@ -291,6 +291,31 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - **广泛审查：异步完成的归属**：`confirmAdd`/`applyLater` 也捕获 `workEpoch`，A→B→A 后旧 Dialog 的 resolve 完成不再关闭或改写第二次激活的 Dialog；`openDialog` 与 Toast 的「×」立即递增 epoch，打开 Dialog 或显式关闭 Toast 之后的旧 snooze 完成不能再改 UI。回归：Dialog 的 add/later 往返两条，以及关闭 Toast 后部分 refused 的 snooze 不重新出现。
 - **验证**：worktree + client + locale + authority-native + `worktree-client` 专项 15 文件 **204 通过 / 15 环境 skip / 0 失败**；`lint`、双端 `typecheck`、`build`、`docs:check`、`compat:check`、`pack:check` 通过；全量与冒烟结果记[路线账本](./2026-09-12-multi-root-workspace.md#第二十次修订验收2026-11-14)。
 
+### P11 发现提示位置与形态（2026-11-15）
+
+> 决策见 [ADR-0039 第二十一次修订](../../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15)；需求分析与初始方案见 [toast placement 报告](./2026-11-15-workspace-toast-placement.md)，最终实施与退出验收见 [实施计划](./2026-11-15-workspace-toast-implementation.md)。只改客户端呈现，不改宿主/RPC/授权。
+
+- [x] **落点解析器**：新增 `src/client/notice-placement.ts`（纯解析器 + 只读 DOM 探针：`data-phase`/`data-composer-card`/`data-conversation-content`/Header 测量/官方 Toast 检测）；Hero 与对话页都水平居中（对话页 Header 下方、内容列中心），缺失降级 Hero 顶部居中，禁止回右下角。
+- [x] **提示 UI**：`WorktreePrompt` 提示区改用 primitives `Button`/`Menu` 与既有 compat 图标；删除「×」，「稍后提醒」改为带同色细框的拆分按钮（左半默认档位、右半 Menu 三档）；Workspace Folders 面板「重试」右侧新增手动入口，经 `worktree-prompt-bus` 让 overlay 打开同一 Dialog；`openDialog`/session/设置关闭仍递增 `workEpoch`。
+- [x] **样式**：删除右下角 `.mrfw-toast*`；新增随主题自适应的 `.mrfw-notice*`（R16、`border: 0` + `elevation-panel`、两行/粗指针 32px、reduced motion）。
+- [x] **词典**：新增 `toastLabel`/`toastActions`；`toastLater` 改为「稍后提醒」；删除 `toastClose`。
+- [x] **测试**：placement 13 条；client-worktree 52 条（含 a11y、拆分按钮、面板手动入口、紧凑、跨会话）；client-panel 72 条；styles 40 条；locale parity 与 bundle 保持。
+- [x] **面板布局**：Worktree 手动入口加入添加行后保持单行；手动路径输入改为可收缩字段（`flex: 1 1 120px`，未来移除），窄视口才回退换行。
+- [x] **文档**：ADR 第二十一次修订、README 双语、本 P11、计划索引。
+- [ ] **退出验收**：质量门与 GUI 证据、Draft PR（见实施计划 §6）。
+
+### P12 Worktree 确认 Dialog 视觉、权限选择器与分支展示（2026-11-15）
+
+> 决策见 [ADR-0039 第二十二次修订](../../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十二次修订2026-11-15)；需求/契约缺口与实施方案见 [Dialog 重构报告](./2026-11-15-worktree-dialog-redesign.md)。本轮**扩展了宿主契约与授权语义**：worktree 根不再固定 `inherit`。
+
+- [x] **布局**：确认 Dialog 加宽到 `min(860px, 100%)`；候选改为连续列表（行间 0.5px 分隔线、无卡片描边/圆角），行内 checkbox + 文件夹名 + 路径 + 分支 chip + 权限选择器；删除「勾选要登记为 inherit 附加根…」说明行；单候选共用同一行结构。
+- [x] **权限选择器**：每行 `inherit` / `read-only` / `read-write`，默认 `inherit`；`WorktreeRequest.accesses` 只在 `add` 上接受，host 校验 id/重复/取值并传 `addNew`；Registry `addNew` 使用 `grantFields` 写入对应 grant（只读用 `readOnlyRecordedPath`，关闭 Skills）；README/ADR 同步授权语义变化。
+- [x] **分支展示**：从候选 admin HEAD 解析 `ref: refs/heads/<name>`；主 checkout 使用 common HEAD（主 checkout 自己的分支）；detached HEAD 缺省；仅展示，不参与授权/owner 复验。
+- [x] **footer**：snooze 原生 select 换为 primitives `Button` + `Menu`；「暂不处理 / 添加所选」改用 primitives `Button`。
+- [x] **测试**：client-worktree 54 条、styles 43 条、worktrees-contract 16 条、worktrees-discovery 28 条、worktrees-common 14 条；新增 access 只属于 add、未知/重复 id、非法值、branch 可选/非空、A/B 分支、detached 缺省、只读 grant 与 effective access、逐行选择后请求携带 accesses。
+- [x] **文档**：ADR 第二十二次修订、README 双语、本 P11/P12、Dialog 重构报告、计划索引。
+- [ ] **退出验收**：CI matrix、GUI 视觉复核（宽度、连续列表、选择器、分支 chip、footer 下拉）。
+
 ## Dependencies
 
 - ADR-0039 已 Accepted；P8 以 B 的 P1–P7 完成为前置条件。

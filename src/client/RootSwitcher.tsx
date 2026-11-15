@@ -423,6 +423,8 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
           {...(props.sessionId === undefined ? {} : { sessionId: props.sessionId })}
           {...(props.subscribeSession === undefined ? {} : { subscribeSession: props.subscribeSession })}
           t={t}
+          worktrees={props.worktrees}
+          worktreePromptEnabled={props.worktreePromptEnabled}
           onClose={() => {
             setDialogOpen(false)
             // The manager may have removed or invalidated the selected root;
