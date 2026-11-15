@@ -103,3 +103,5 @@ pnpm exec vitest run tests/review-ssh-findings.spec.ts tests/review-ssh-client.s
 - R2 已修复：OPEN 正确编码 ATTRS flags 与 permissions；真实 OpenSSH 服务端验证 0600、0640 和默认 umask 三种创建结果，SFTP 套件通过。
 
 - R3 已修复：broker 的 BROKER-LOST 在即时和缓冲事件路径均映射为 RemoteConnectionLost；真实 IPC 的早到/晚到断线回归与 broker 套件通过。
+
+- R4 已修复：spawn 起监听撤权并周期性重新准入，跨 Host/只读切换可终止；清理等待有界，超时返回 unknown。真实 Registry 回归覆盖撤权、待决启动、follower 与模式收窄，类型检查通过。

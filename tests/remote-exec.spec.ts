@@ -264,14 +264,54 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     expect(state.handles[1]!.terminateCalls).toBe(0)
   })
 
-  it('revocation after spawn lets the in-flight command finish and denies the next', async () => {
+  it('bounds cleanup when a revoked process never acknowledges start or termination', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const spawn = backend.spawn
+    backend.spawn = (...args) => {
+      const handle = spawn(...args)
+      Object.defineProperty(handle, 'started', { value: new Promise<void>(() => {}) })
+      return handle
+    }
+    const pending = run(stack, backend)
+    await waitHandles(state)
+    await stack.registry.removeRemote(fixture.workspace, REF)
+    await expect(pending).resolves.toMatchObject({ status: 'unknown', termination: 'revoked', reconcileId: expect.any(String) })
+    expect(state.handles[0]!.terminateCalls).toBe(1)
+  })
+
+  it('observes owner revocation while the command runs on a follower', async () => {
+    const owner = await mount()
+    const follower = await mount()
+    const { backend, state } = fakeBackend()
+    const pending = run(follower, backend)
+    await waitHandles(state)
+    await owner.registry.removeRemote(fixture.workspace, REF)
+    await expect(pending).resolves.toMatchObject({ status: 'unknown', termination: 'revoked' })
+    expect(state.handles[0]!.terminateCalls).toBe(1)
+  })
+
+  it('observes mode narrowing without a grant notification', async () => {
+    const stack = await mount()
+    const { backend, state } = fakeBackend()
+    const session = sessionOf(stack)
+    const pending = run(stack, backend, { session })
+    await waitHandles(state)
+    session.append('sandbox/mode', { mode: 'read-only' })
+    await expect(pending).resolves.toMatchObject({ status: 'unknown', termination: 'revoked' })
+    expect(state.handles[0]!.terminateCalls).toBe(1)
+  })
+
+  it('revocation after spawn terminates the in-flight command and denies the next', async () => {
     const stack = await mount()
     const { backend, state } = fakeBackend()
     const pending = run(stack, backend)
     await waitHandles(state)
     await stack.registry.removeRemote(fixture.workspace, REF)
+    for (let i = 0; i < 100 && state.handles[0]!.terminateCalls === 0; i++) await new Promise(resolve => setTimeout(resolve, 1))
+    expect(state.handles[0]!.terminateCalls).toBe(1)
     state.handles[0]!.finish(0)
-    await expect(pending).resolves.toMatchObject({ status: 'scope-exited', exitCode: 0 })
+    await expect(pending).resolves.toMatchObject({ status: 'scope-exited', exitCode: 0, termination: 'revoked' })
     await expect(run(stack, backend)).resolves.toMatchObject({ status: 'not-started', code: 'endpoint-not-registered' })
   })
 })
