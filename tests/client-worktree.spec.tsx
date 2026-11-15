@@ -421,6 +421,10 @@ describe('worktree notice: presentation and accessibility', () => {
     const actions = screen.getByRole('group', { name: 'worktree.toastActions' })
     const close = screen.getByRole('button', { name: 'worktree.toastClose' })
     expect(actions.contains(close)).toBe(false)
+    // The badge is self-drawn: no primitive size/variant attributes,
+    // which is what keeps it a circle instead of the compact rounded control.
+    expect(close.getAttribute('data-size')).toBeNull()
+    expect(close.getAttribute('data-variant')).toBeNull()
   })
 
   it('applies the default delay from the split text half', async () => {

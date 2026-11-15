@@ -89,10 +89,10 @@ function AccessIcon(props: { readonly access: WorktreeAccess }): ReactNode {
  * plugin, so the glyph only has to be an × that inherits `currentColor`.
  */
 function CloseGlyph(): ReactNode {
-  if (IconClose !== undefined) return <IconClose size={12} />
+  if (IconClose !== undefined) return <IconClose size={10} />
   return (
-    <svg width={12} height={12} viewBox="0 0 12 12" aria-hidden="true" focusable="false">
-      <path d="M2.6 2.6l6.8 6.8M9.4 2.6L2.6 9.4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" fill="none" />
+    <svg width={10} height={10} viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+      <path d="M2.6 2.6l6.8 6.8M9.4 2.6L2.6 9.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" fill="none" />
     </svg>
   )
 }
@@ -660,15 +660,17 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
               />
             </span>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
+          {/* Drawn here, not with a primitive: the compact size rules fix a
+              taller control and a smaller corner radius, so a primitive would
+              render as a rounded rectangle instead of this circle. */}
+          <button
+            type="button"
             className="mrfw-noticeClose"
             aria-label={t('worktree.toastClose')}
             onClick={closeNotice}
           >
             <CloseGlyph />
-          </Button>
+          </button>
         </section>
       )}
       {dialogRows === undefined ? null : (

@@ -1631,37 +1631,40 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   padding: 0;
 }
 
-/* The close badge (ADR-0039 第二十五次修订): one perfect circle parked on the
-   card's top-right corner, half outside it. The two-class selector outranks the
-   primitives' single-class size rules, so the shape stays circular no matter
-   which stylesheet is injected last. */
+/* The close badge (ADR-0039 第二十五次修订): one small perfect circle parked on
+   the card's top-right corner, half outside it. It is drawn here rather than
+   with a primitive: the compact size rules fix a taller control and a smaller
+   corner radius, so a primitive renders as a rounded rectangle. The badge keeps
+   the card's own surface in every pointer state — it never gains a hover tint
+   or becomes transparent. */
 .mrfw-notice .mrfw-noticeClose {
   position: absolute;
   top: 0;
   right: 0;
   box-sizing: border-box;
   display: inline-flex;
-  flex: none;
-  width: 20px;
-  height: 20px;
-  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0;
   padding: 0;
   border: 0.5px solid var(--dsw-alias-border-l3);
   border-radius: 50%;
   background: var(--dsw-alias-bg-layer-2);
   color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  line-height: 0;
+  cursor: pointer;
   transform: translate(50%, -50%);
 }
 
-@media (hover: hover) {
-  .mrfw-notice .mrfw-noticeClose:hover:not(:disabled) {
-    background: var(--dsw-alias-interactive-bg-hover);
-    color: var(--dsw-alias-label-primary);
-  }
-}
-
-.mrfw-notice .mrfw-noticeClose:active:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-active);
+/* The circle stays 18px; this invisible ring widens the pointer target to 24px. */
+.mrfw-notice .mrfw-noticeClose::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
 }
 
 /* The badge overhangs the card, so its focus ring may draw outside the surface. */
