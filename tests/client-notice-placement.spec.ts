@@ -10,7 +10,6 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  CONVERSATION_RIGHT_INSET,
   CONVERSATION_TOP_GAP,
   HERO_TOP,
   MAX_NOTICE_WIDTH,
@@ -68,7 +67,7 @@ describe('resolveNoticePlacement', () => {
     })).toMatchObject({ top: HERO_TOP + UPSTREAM_TOAST_SHIFT })
   })
 
-  it('places the conversation seat below the content top and inside the right edge', () => {
+  it('places the conversation seat below the content top and centers it', () => {
     const placement = resolveNoticePlacement({
       phase: 'conversation', viewportWidth: viewport.width, viewportHeight: viewport.height,
       content: rect(0, 76, 1200, 800), upstreamToast: false, coarsePointer: false,
@@ -76,7 +75,7 @@ describe('resolveNoticePlacement', () => {
     expect(placement).toEqual({
       placement: 'conversation',
       top: 76 + CONVERSATION_TOP_GAP,
-      right: CONVERSATION_RIGHT_INSET,
+      left: 600,
       maxWidth: MAX_NOTICE_WIDTH,
       compact: false,
     })
@@ -104,7 +103,7 @@ describe('resolveNoticePlacement', () => {
 })
 
 describe('noticeStyle', () => {
-  it('anchors the Hero seat by left and the conversation seat by right', () => {
+  it('anchors both seats by left', () => {
     const hero = resolveNoticePlacement({
       phase: 'hero', viewportWidth: viewport.width, viewportHeight: viewport.height,
       upstreamToast: false, coarsePointer: false,
@@ -115,8 +114,7 @@ describe('noticeStyle', () => {
       phase: 'conversation', viewportWidth: viewport.width, viewportHeight: viewport.height,
       content: rect(0, 76, 1200, 800), upstreamToast: false, coarsePointer: false,
     })
-    expect(noticeStyle(conversation)).toMatchObject({ top: 88, right: 24 })
-    expect(noticeStyle(conversation)).not.toHaveProperty('left')
+    expect(noticeStyle(conversation)).toMatchObject({ top: 88, left: 600 })
   })
 
   it('pins the compact seat to the measured width', () => {
@@ -141,7 +139,7 @@ describe('readNoticePlacement', () => {
     mockRect(document.querySelector('[data-phase]')!, rect(0, 0, 1200, 900))
     mockRect(document.querySelector('[data-conversation-content]')!, rect(0, 76, 1200, 824))
     expect(readNoticePlacement(document, viewport)).toMatchObject({
-      placement: 'conversation', top: 76 + CONVERSATION_TOP_GAP, right: CONVERSATION_RIGHT_INSET,
+      placement: 'conversation', top: 76 + CONVERSATION_TOP_GAP, left: 600,
     })
   })
 

@@ -187,14 +187,15 @@ PR #55 的代码审查复现了十三处实现偏离 §20.3–§20.10 的问题�
 
 本轮只调整发现提示的呈现与落点，不改变任何触发、RPC、授权、宿主复验与生命周期语义。与 §20.3 冲突的呈现/操作条目以本节为准：
 
-- **落点**：Hero（新会话/blank）页顶部居中，纵向与官方 Toast 对齐（`40px`）；对话页为会话内容区右上角、Header 下沿 `12px`、内容区右缘内缩 `24px`。不再使用右下角，也不移动输入框。
+- **落点**：Hero（新会话/blank）页顶部居中，纵向与官方 Toast 对齐（`40px`）；对话页为 Header 下沿 `12px`、水平居中于会话内容列。两页统一居中，不再使用右下角，也不移动输入框。
 - **页面检测**：只读 `[data-phase]`（`0.1.5-rc.2` 起存在）判断 Hero/对话页；Hero 水平中心取 `[data-composer-card]` 中心，回退会话列中心与视口中心；对话页内容顶部优先 `[data-conversation-content]`（`0.2.1-alpha.3+`），缺失时测量会话根第一个子元素（Header）的下沿。任何探针失败都回退 Hero 顶部居中，禁止回右下角。
 - **主题**：提示卡表面随当前主题切换（浅色模式浅色、深色模式深色），与官方 Toast「两种主题都深色」不同；只用 `--dsw-*` token，`border: 0` + `--dsw-elevation-panel` + `--dsw-radius-lg`（R16）。
-- **操作**：`查看` + `稍后提醒` 拆分按钮——左半文字按钮直接应用默认档位（直到出现新 worktree），右半 chevron 按钮打开 primitives `Menu`（直到出现新 worktree / 7 天 / 30 天）。**删除「×」关闭按钮**；选择任一 snooze 档位即关闭提示，因此不再存在「只关闭、不写状态」的指针操作。常驻、非模态、无 backdrop、无 focus trap 不变。
+- **操作**：`查看` + `稍后提醒` 拆分按钮——左半文字按钮直接应用默认档位（直到出现新 worktree），右半 chevron 按钮打开 primitives `Menu`（直到出现新 worktree / 7 天 / 30 天）。拆分控件外围与中间分割线使用同一条 `--dsw-alias-border-l3` 细线。**删除「×」关闭按钮**；选择任一 snooze 档位即关闭提示，因此不再存在「只关闭、不写状态」的指针操作。常驻、非模态、无 backdrop、无 focus trap 不变。
 - **控件**：容器自绘；`查看`、`稍后提醒` 与图标使用 `@deepseek-ai/dsh-client-ui-primitives` 的 `Button` / `Menu` 及既有 compat 图标。菜单通过 `portal` 渲染，避免固定浮层裁剪。
 - **形态**：宽屏单行卡片；可用宽度不足或粗指针时改为两行，操作控件高 `32px`；`prefers-reduced-motion` 下取消入场动画。
 - **与官方 Toast 重叠**：默认 Hero `top: 40px`；检测到 `body` 直属 `role="alert"` 的官方瞬时 Toast 时，提示临时下移 `56px`，官方 Toast 消失后恢复。
 - **可访问性**：容器 `section` + `aria-label`；`role="status"` 只包文本；操作组有独立名称；Menu 自带键盘导航与 Escape。
+- **手动入口**：Workspace Folders 面板的「重试」右侧新增「Worktree 建议」按钮；仅在存在当前会话、worktree 客户端可用且功能未显式关闭时显示。点击先关闭面板，再经客户端事件请求 shell overlay 打开同一个建议 Dialog——面板不复制 Dialog 的轮询与生命周期。
 - **生命周期**：`openDialog`、session 切换、设置关闭仍是旧提示的失效点并递增 `workEpoch`；删掉「×」后，原「显式关闭 Toast 立即递增 epoch」一条不再适用，异步完成仍按既有 `mounted && epoch === workEpoch.current` 归属。
 
 ## 第十八次修订（2026-11-09）

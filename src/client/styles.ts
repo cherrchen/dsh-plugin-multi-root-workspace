@@ -1438,10 +1438,8 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   color: var(--dsw-alias-label-primary);
   pointer-events: auto;
   animation: mrfw-notice-fade 160ms ease-out;
-}
-
-/* Hero seats center on the composer; conversation seats are right-anchored. */
-.mrfw-notice[data-placement='hero'] {
+  /* Both seats are horizontally centered: Hero on the composer, conversation
+     on its content column. */
   transform: translateX(-50%);
 }
 
@@ -1500,6 +1498,11 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   display: inline-flex;
   flex: none;
   align-items: center;
+  box-sizing: border-box;
+  height: 28px;
+  border-radius: var(--dsw-radius-sm);
+  /* The hairline frame matches the divider between the two halves. */
+  box-shadow: inset 0 0 0 0.5px var(--dsw-alias-border-l3);
 }
 
 .mrfw-noticeSplit > * {
@@ -1520,6 +1523,10 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
 .mrfw-notice[data-compact='true'] .mrfw-noticeAction {
   height: 32px;
   padding: 0 12px;
+}
+
+.mrfw-notice[data-compact='true'] .mrfw-noticeSplit {
+  height: 32px;
 }
 
 .mrfw-notice[data-compact='true'] .mrfw-noticeSplitToggle {

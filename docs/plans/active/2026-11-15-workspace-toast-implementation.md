@@ -6,7 +6,7 @@
 
 | 编号 | 决定 |
 | --- | --- |
-| D1 | 采用页面感知的两套落点：Hero 页顶部居中；对话页右上角、Header 下方。 |
+| D1 | 两页统一水平居中：Hero 页顶部居中；对话页 Header 下方、会话内容列居中。 |
 | D2 | Hero `top: 40px`；对话页 Header 下 `12px`。 |
 | D3 | 删除「×」关闭按钮。**「稍后提醒」就是关闭提示的操作**；不再保留「只关闭、不写状态」的指针操作，也不新增 Escape 关闭。 |
 | D4 | 「稍后提醒」由原生 `select` 改为拆分按钮：左半文字按钮应用默认档位（直到出现新 worktree），右半 chevron 按钮打开 primitives `Menu`（三个档位）。 |
@@ -21,7 +21,7 @@
 ### 2.1 落点
 
 - 只读探针：主会话根 `[data-phase]`（`0.1.5-rc.2` 起存在）；Hero 水平中心取 `[data-composer-card]` 中心，回退会话根中心、视口中心。
-- 对话页：内容区顶部优先 `[data-conversation-content]`（`0.2.1-alpha.3+`），否则测量会话根第一个子元素（Header）的 `bottom`；`top = 内容区顶部 + 12`，`right = 内容区右缘 − 24`；最大宽度 `min(560, 内容区宽度 − 48)`。
+- 对话页：内容区顶部优先 `[data-conversation-content]`（`0.2.1-alpha.3+`），否则测量会话根第一个子元素（Header）的 `bottom`；`top = 内容区顶部 + 12`，水平中心 = 内容区中心；最大宽度 `min(560, 内容区宽度 − 48)`。
 - Hero：`top = 40 + (官方 Toast 可见 ? 56 : 0)`；最大宽度 `min(560, 列宽 − 32)`。
 - 探针失败（无 `[data-phase]`、rect 全 0、元素缺失）→ Hero 顶部居中；禁止回右下角。
 - 重测：`window.resize`、`ResizeObserver`（会话根/输入卡/内容区）、`MutationObserver`（`body` 直属 childList 用于官方 Toast；`data-phase`/`data-content-phase` 属性用于页面切换）；微任务合并，不监听滚动。
@@ -31,7 +31,8 @@
 
 - 单行（宽屏）：图标 16 + 文本 14/22 + 操作区（查看、稍后提醒）。
 - 卡片：`border: 0`、`border-radius: var(--dsw-radius-lg)`（R16）、`background: var(--dsw-alias-bg-layer-2)`、`box-shadow: var(--dsw-elevation-panel)`、`padding: 10px 12px`、`gap: 12px`；随主题明暗切换。
-- 操作：`Button variant="primary" size="sm"`（查看）；「稍后提醒」为拆分按钮——左半 `Button variant="ghost" size="sm"` 直接应用 `until-new-worktree`，右半 chevron `Button` 作为 primitives `Menu` 的 anchor（三个 snooze 档位复用现有文案；`side="bottom"`、`align="end"`、`portal`）。
+- 操作：`Button variant="primary" size="sm"`（查看）；「稍后提醒」为拆分按钮——左半 `Button variant="ghost" size="sm"` 直接应用 `until-new-worktree`，右半 chevron `Button` 作为 primitives `Menu` 的 anchor（三个 snooze 档位复用现有文案；`side="bottom"`、`align="end"`、`portal`）；拆分控件外围与中间分割线使用同一条 `--dsw-alias-border-l3` 细线。
+- 手动入口：Workspace Folders 面板「重试」右侧的「Worktree 建议」按钮经 `worktree-prompt-bus` 请求 shell overlay 打开同一个 Dialog；面板先关闭自身，不复制 Dialog 生命周期。
 - 紧凑（窄屏或粗指针）：两行（文本行 + 操作行），控件 32px，卡片宽度取测量后的 `maxWidth`。
 - 动效：160ms `opacity + translateY(-4px)` 入场；`prefers-reduced-motion` 下取消动画。
 - 不覆盖 primitives 视觉；插件样式只做布局与表面。
@@ -51,7 +52,9 @@
 | `src/client/notice-placement.ts`（新增） | 纯解析器 `resolveNoticePlacement` + DOM 探针 `readNoticePlacement` + `useNoticePlacement`（微任务合并、resize/ResizeObserver/MutationObserver） |
 | `src/client/WorktreePrompt.tsx` | 提示区改用 `Button`/`Menu`/compat 图标；删除 × 与 `closeNotice`；新增 `snoozeOpen` 与 placement；其余 RPC/epoch 逻辑不变 |
 | `src/client/styles.ts` | 删除 `.mrfw-toast*`；新增 `.mrfw-notice*`（表面、紧凑、动效、reduced motion） |
-| `src/client/locales.ts` | 新增 `worktree.toastLabel`/`worktree.toastActions`/`worktree.toastLaterOptions`；`worktree.toastLater` 改为「稍后提醒」/「Remind me later」；删除 `worktree.toastClose` |
+| `src/client/worktree-prompt-bus.ts`（新增） | 面板 → shell overlay 的一次性打开请求；overlay 仍是 Dialog 的唯一 owner |
+| `src/client/WorkspaceFoldersAction.tsx` / `index.ts` / `HeroWorkspaceEntry.tsx` | 面板「重试」右侧的「Worktree 建议」入口、`worktreePromptEnabled` 透传；点击先关面板再请求 overlay |
+| `src/client/locales.ts` | 新增 `worktree.toastLabel`/`worktree.toastActions`/`worktree.toastLaterOptions`/`worktree.panelOpen`；`worktree.toastLater` 改为「稍后提醒」/「Remind me later」；删除 `worktree.toastClose` |
 | `tests/client-notice-placement.spec.ts`（新增） | 纯解析器 + 合成 DOM 探针 + 官方 Toast 偏移 + 降级 |
 | `tests/client-worktree.spec.tsx` | select → Menu 交互；删除 × 用例；新增 placement/a11y/菜单用例 |
 | `tests/client-styles.spec.ts` | 新增提示卡规则断言（无右下角、无描边 + elevation、R16、主题 token、紧凑、动画） |
@@ -72,7 +75,7 @@
 
 ## 5. 测试与验证
 
-- `pnpm vitest run tests/client-notice-placement.spec.ts tests/client-worktree.spec.tsx tests/client-styles.spec.ts tests/locale-parity.spec.ts`
+- `pnpm vitest run tests/client-notice-placement.spec.ts tests/client-worktree.spec.tsx tests/client-styles.spec.ts tests/client-panel.spec.tsx tests/locale-parity.spec.ts`
 - `pnpm lint`、`pnpm typecheck`、`pnpm test`（全量）、`pnpm build`、`pnpm docs:check`、`pnpm compat:check`、`pnpm pack:check`
 - `tests/client-bundle.spec.ts` 必须保持通过（不新增 module table external/peer）。
 - 手动 GUI（`pnpm dev:web`）证据：Hero 页、对话页、右侧栏打开、窄窗口、浅色/深色主题、reduced motion；确认不与 Header/输入框相交、与官方 Toast 不重叠（官方 Toast 出现时提示下移）。
@@ -85,10 +88,10 @@
 | 门 | 内容 | 证据 |
 | --- | --- | --- |
 | E1 | 计划、ADR、README、索引同步；`pnpm docs:check` 通过 | 命令输出 |
-| E2 | 新增/更新单测覆盖落点解析、探针降级、官方 Toast 偏移、紧凑形态、菜单交互、a11y；相关测试全绿 | vitest 输出 |
+| E2 | 新增/更新单测覆盖落点解析、探针降级、官方 Toast 偏移、紧凑形态、拆分按钮、a11y、面板手动入口；相关测试全绿 | vitest 输出 |
 | E3 | 既有 worktree 客户端行为（fresh/seen/snooze/resolve/epoch/StrictMode/skipped）无回归 | `tests/client-worktree.spec.tsx` 全绿 |
 | E4 | `lint`、双端 `typecheck`、`build`、`compat:check`、`pack:check` 通过；`client-bundle` 断言不变 | 命令输出 |
-| E5 | GUI 验收：Hero 顶部居中、对话页 Header 下右上、右侧栏/窄屏/两主题正确；与输入框/Header 不相交；官方 Toast 出现时下移避让 | 截图或录屏 |
+| E5 | GUI 验收：Hero 顶部居中、对话页 Header 下居中、右侧栏/窄屏/两主题正确；与输入框/Header 不相交；官方 Toast 出现时下移避让；拆分按钮细框与面板手动入口可用 | 截图或录屏 |
 | E6 | 无新增 module table external、无新增 peer、无宿主/RPC/授权改动 | diff 与 bundle 测试 |
 | E7 | 分支已提交、推送，Draft PR 已创建并写明验收缺口 | PR 链接 |
 

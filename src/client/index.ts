@@ -227,6 +227,7 @@ export function apply(ctx: ClientContext): void {
       subscribeSession,
       t,
       worktrees: worktreeClient,
+      worktreePromptEnabled: worktreeSettings.enabled,
       dialogController,
       dialogOwner: true,
       ...(wide === undefined ? {} : { wide }),
@@ -260,6 +261,7 @@ export function apply(ctx: ClientContext): void {
         sessionId: readSession,
         t,
         worktrees: worktreeClient,
+        worktreePromptEnabled: worktreeSettings.enabled,
       })
     })
   })
@@ -299,8 +301,8 @@ export function apply(ctx: ClientContext): void {
     // never restarts because of it. `undefined` means the fork cannot mount.
     const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeSeats)
     return absolutePath === undefined
-      ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, compact: true })
-      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
+      ? createElement(WorkspaceFoldersAction, { panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, worktreePromptEnabled: worktreeSettings.enabled, compact: true })
+      : createElement(RootSwitcher, { primaryPath: absolutePath, panel, pickDirectory, sessionId: paneSessionId, subscribeSession, t, worktrees: worktreeClient, worktreePromptEnabled: worktreeSettings.enabled, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
   }))
   // Optional: the document preview's navigator seat exists only on runtimes
   // whose `ui-sidebar-files` draws the Folder-toggle tree (0.2.2-alpha.3+);

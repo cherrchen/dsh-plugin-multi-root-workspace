@@ -474,15 +474,16 @@ describe('the worktree suggestion notice rules', () => {
     expect(notice).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/)
   })
 
-  it('centers the Hero seat and keeps a compact 32px two-row form', () => {
-    expect(CSS).toMatch(/\.mrfw-notice\[data-placement='hero'\]\s*\{[^}]*transform:\s*translateX\(-50%\)/s)
+  it('centers both seats and keeps a compact 32px two-row form', () => {
+    expect(CSS).toMatch(/\.mrfw-notice\s*\{[^}]*transform:\s*translateX\(-50%\)/s)
     expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\]\s*\{[^}]*flex-wrap:\s*wrap/s)
     expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\] \.mrfw-noticeAction\s*\{[^}]*height:\s*32px[^}]*padding:\s*0 12px/s)
   })
 
-  it('draws remind-me-later as a split text and chevron control', () => {
-    expect(CSS).toMatch(/\.mrfw-noticeSplit\s*\{[^}]*display:\s*inline-flex/s)
+  it('draws remind-me-later as a framed split text and chevron control', () => {
+    expect(CSS).toMatch(/\.mrfw-noticeSplit\s*\{[^}]*display:\s*inline-flex[^}]*box-shadow:\s*inset 0 0 0 0\.5px var\(--dsw-alias-border-l3\)/s)
     expect(CSS).toMatch(/\.mrfw-noticeSplitToggle\s*\{[^}]*width:\s*24px[^}]*border-left:\s*0\.5px solid var\(--dsw-alias-border-l3\)/s)
+    expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\] \.mrfw-noticeSplit\s*\{[^}]*height:\s*32px/s)
     expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\] \.mrfw-noticeSplitToggle\s*\{[^}]*width:\s*32px/s)
   })
 

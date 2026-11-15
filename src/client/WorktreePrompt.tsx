@@ -27,6 +27,7 @@ import type { WorktreePromptView, WorktreeSnoozeMode } from '../contract.ts'
 import { IconChevronDown, IconWorkspaceTree } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError } from './panel-client.ts'
 import { noticeStyle, useNoticePlacement } from './notice-placement.ts'
+import { onWorktreePromptRequest } from './worktree-prompt-bus.ts'
 import type { WorktreeClient } from './worktree-client.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 
@@ -420,16 +421,13 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     }
   }, [client, closeDialog, dialogOpen, laterMode, rows])
 
-  /** Open the Dialog for the notice's session: only "View" reaches this. */
-  const openDialog = useCallback(() => {
-    const current = notice
-    if (client === undefined || current === undefined) return
-    if (current.session !== currentSession || sessionIdRef.current() !== current.session) return
+  /** Open the Dialog for one live session and end the notice's lifecycle. */
+  const openDialogFor = useCallback((session: string) => {
     // Opening the Dialog ends the notice's lifecycle immediately: a toast
     // completion still in flight must never touch it afterwards.
     workEpoch.current += 1
     setNotice(undefined)
-    dialogSession.current = current.session
+    dialogSession.current = session
     setRows(undefined)
     setSelected(new Set())
     setRowErrors(new Map())
@@ -439,7 +437,26 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setLaterMode('until-new-worktree')
     setSnoozeOpen(false)
     setDialogOpen(true)
-  }, [client, currentSession, notice])
+  }, [])
+
+  /** Open the Dialog for the notice's session: only "View" reaches this. */
+  const openDialog = useCallback(() => {
+    const current = notice
+    if (client === undefined || current === undefined) return
+    if (current.session !== currentSession || sessionIdRef.current() !== current.session) return
+    openDialogFor(current.session)
+  }, [client, currentSession, notice, openDialogFor])
+
+  /** Open the Dialog from the panel's manual entry for the live session. */
+  const openWorktreePrompt = useCallback(() => {
+    const session = currentSession
+    if (client === undefined || session === undefined || session === '') return
+    if (sessionIdRef.current() !== session) return
+    if (readEnabledRef.current?.() === false) return
+    openDialogFor(session)
+  }, [client, currentSession, openDialogFor])
+
+  useEffect(() => onWorktreePromptRequest(openWorktreePrompt), [openWorktreePrompt])
 
   /**
    * Record the notice's reminder delay; only the lifecycle that showed the

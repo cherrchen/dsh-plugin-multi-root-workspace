@@ -9,6 +9,7 @@ import { WorkspaceFoldersDialog } from '../src/client/WorkspaceFoldersAction.tsx
 import { PanelError, type PanelClient } from '../src/client/panel-client.ts'
 import { BundleSettingsCard } from '../src/client/skills-settings.tsx'
 import { createWorktreeClient, type WorktreeClient } from '../src/client/worktree-client.ts'
+import { onWorktreePromptRequest, requestWorktreePrompt } from '../src/client/worktree-prompt-bus.ts'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { SkillsForm } from '../src/compat/skills-client.ts'
 import type { Translate } from '../src/client/WorkspaceFoldersAction.tsx'
@@ -382,6 +383,18 @@ describe('worktree notice: presentation and accessibility', () => {
     renderPrompt(fakeClient({ prompt: async () => answer([PROMPT]) }))
     const region = await screen.findByRole('region', { name: 'worktree.toastLabel' })
     await waitFor(() => expect(region.getAttribute('data-compact')).toBe('true'))
+  })
+})
+
+describe('worktree notice: manual entry', () => {
+  it('opens the suggestion dialog when the panel asks for it', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT]))
+    renderPrompt(fakeClient({ prompt }))
+    await screen.findByText('worktree.toast')
+    act(() => { requestWorktreePrompt() })
+    await screen.findByRole('dialog')
+    await waitFor(() => expect(prompt.mock.calls.length).toBeGreaterThanOrEqual(2))
+    expect(screen.queryByText('worktree.toast')).toBeNull()
   })
 })
 
@@ -765,6 +778,45 @@ describe('worktree overlay: session and settings lifetime', () => {
 })
 
 describe('panel cleanup controls', () => {
+  it('offers a manual worktree entry beside Retry and asks the overlay to open', async () => {
+    const view: RootsView = { primaryRoot: '/main', roots: [], limit: 16, count: 0 }
+    const panel = { call: async () => view } as unknown as PanelClient
+    const onClose = vi.fn()
+    const request = vi.fn()
+    const stop = onWorktreePromptRequest(request)
+    try {
+      render(<WorkspaceFoldersDialog
+        panel={panel}
+        pickDirectory={undefined}
+        t={t}
+        sessionId={() => 's1'}
+        onClose={onClose}
+        worktrees={fakeClient()}
+        worktreePromptEnabled={() => true} />)
+      const entry = await screen.findByRole('button', { name: 'worktree.panelOpen' })
+      fireEvent.click(entry)
+      expect(onClose).toHaveBeenCalledTimes(1)
+      expect(request).toHaveBeenCalledTimes(1)
+    } finally {
+      stop()
+    }
+  })
+
+  it('hides the manual worktree entry when the feature is off', async () => {
+    const view: RootsView = { primaryRoot: '/main', roots: [], limit: 16, count: 0 }
+    const panel = { call: async () => view } as unknown as PanelClient
+    render(<WorkspaceFoldersDialog
+      panel={panel}
+      pickDirectory={undefined}
+      t={t}
+      sessionId={() => 's1'}
+      onClose={() => {}}
+      worktrees={fakeClient()}
+      worktreePromptEnabled={() => false} />)
+    await waitFor(() => expect(screen.getByText('/main')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: 'worktree.panelOpen' })).toBeNull()
+  })
+
   it('asks in place and cleans up the exact eligible ids', async () => {
     const view: RootsView = {
       primaryRoot: '/main',

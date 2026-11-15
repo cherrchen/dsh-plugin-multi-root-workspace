@@ -34,9 +34,13 @@ export interface PlacementRect {
 export type ConversationPhase = 'hero' | 'conversation' | 'unknown'
 
 /** The notice's fixed seat, in viewport pixels. */
-export type NoticePlacement =
-  | { readonly placement: 'hero'; readonly top: number; readonly left: number; readonly maxWidth: number; readonly compact: boolean }
-  | { readonly placement: 'conversation'; readonly top: number; readonly right: number; readonly maxWidth: number; readonly compact: boolean }
+export type NoticePlacement = {
+  readonly placement: 'hero' | 'conversation'
+  readonly top: number
+  readonly left: number
+  readonly maxWidth: number
+  readonly compact: boolean
+}
 
 /** What the pure resolver needs; every optional rect may have failed its probe. */
 export interface PlacementInput {
@@ -56,8 +60,6 @@ export const HERO_TOP = 40
 export const UPSTREAM_TOAST_SHIFT = 56
 /** The gap below the conversation Header. */
 export const CONVERSATION_TOP_GAP = 12
-/** The inset from the conversation column's right edge. */
-export const CONVERSATION_RIGHT_INSET = 24
 /** The widest the notice may grow. */
 export const MAX_NOTICE_WIDTH = 560
 /** The side inset when only the viewport is measurable. */
@@ -85,7 +87,7 @@ export function resolveNoticePlacement(input: PlacementInput): NoticePlacement {
     return {
       placement: 'conversation',
       top: content.top + CONVERSATION_TOP_GAP,
-      right: input.viewportWidth - content.right + CONVERSATION_RIGHT_INSET,
+      left: content.left + content.width / 2,
       maxWidth,
       compact: input.coarsePointer || maxWidth < COMPACT_MAX_WIDTH,
     }
@@ -114,14 +116,12 @@ export function resolveNoticePlacement(input: PlacementInput): NoticePlacement {
  * @returns the style object; compact seats take the measured width.
  */
 export function noticeStyle(placement: NoticePlacement): CSSProperties {
-  const base: CSSProperties = {
+  return {
     top: placement.top,
+    left: placement.left,
     maxWidth: placement.maxWidth,
     ...(placement.compact ? { width: placement.maxWidth } : {}),
   }
-  return placement.placement === 'conversation'
-    ? { ...base, right: placement.right }
-    : { ...base, left: placement.left }
 }
 
 function phaseOf(value: string | undefined): ConversationPhase {
@@ -186,9 +186,7 @@ function samePlacement(left: NoticePlacement, right: NoticePlacement): boolean {
     && Math.abs(left.top - right.top) < 0.5
     && Math.abs(left.maxWidth - right.maxWidth) < 0.5
     && left.compact === right.compact
-    && (left.placement === 'hero'
-      ? right.placement === 'hero' && Math.abs(left.left - right.left) < 0.5
-      : right.placement === 'conversation' && Math.abs(left.right - right.right) < 0.5)
+    && Math.abs(left.left - right.left) < 0.5
 }
 
 /**
