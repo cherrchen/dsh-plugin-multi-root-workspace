@@ -1,5 +1,6 @@
 /** F19: the SFTP frame parser refuses malformed wire data before it reaches a resolve callback. */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -121,5 +122,14 @@ describe.skipIf(process.platform === 'win32')('SFTP wire validation', () => {
     expect(argv).toContain('ControlMaster=no')
     expect(argv).toContain('ControlPath=none')
     expect(argv).toContain('BatchMode=yes')
+    expect(argv).toContain('StrictHostKeyChecking=yes')
+    expect(argv).toContain('ForwardAgent=no')
+    expect(argv).toContain('UpdateHostKeys=no')
+    const config = join(dir, 'ssh_config')
+    writeFileSync(config, 'Host fake-alias\n  StrictHostKeyChecking no\n  ForwardAgent yes\n  UpdateHostKeys yes\n')
+    const effective = execFileSync('ssh', ['-G', '-F', config, ...argv.trim().split('\n')], { encoding: 'utf8' })
+    expect(effective).toMatch(/^stricthostkeychecking true$/m)
+    expect(effective).toMatch(/^forwardagent no$/m)
+    expect(effective).toMatch(/^updatehostkeys false$/m)
   })
 })

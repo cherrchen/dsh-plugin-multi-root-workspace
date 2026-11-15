@@ -147,6 +147,7 @@ export class SftpClient {
     // break the per-session generation isolation the broker relies on.
     this.child = spawn(ssh, [
       '-o', 'BatchMode=yes',
+      '-o', 'StrictHostKeyChecking=yes', '-o', 'ForwardAgent=no', '-o', 'UpdateHostKeys=no',
       '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
       '-s', alias, 'sftp',
     ], { stdio: ['pipe', 'pipe', 'ignore'] })
