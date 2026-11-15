@@ -8,6 +8,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { RemoteConnectionLost } from '../src/remote/exec.ts'
 import { nativeHostAvailability } from '../src/authority/native.ts'
 import { fakeExecBackend, FakeManager, FakeRemote, fakeManifest, FAKE_EXEC } from './support/fake-remote.ts'
 import { attestBroker, type BrokerConfig } from '../src/remote/broker/attest.ts'
@@ -165,6 +166,32 @@ describe.skipIf(!POSIX)('the credential broker boundary', () => {
     expect(handle.collected.stdout.readFrom(0)?.text).toBe('built app\n')
     expect(await handle.waitForExit(10)).toBe(true)
     expect(build.read('/srv/root/dist/app.tar')).toEqual(Buffer.concat([Buffer.from('app\n'), Buffer.from('a'), Buffer.from('--\n'), Buffer.from('b')]))
+  })
+
+  it.each(['early', 'late'])('preserves %s remote loss behind a live broker as unknown', async timing => {
+    const failed = Promise.withResolvers<Record<string, unknown>>()
+    void failed.promise.catch(() => {})
+    const helper = build.helper()
+    helper.subprocess.spawn = () => ({ done: failed.promise, waitForExit: async () => false, terminate() {}, collected: {} })
+    manager.open = async () => helper
+    server = await started()
+    connection = await BrokerConnection.connect(socketPath, uid)
+    if (timing === 'early') {
+      const watch = connection.watchProcess.bind(connection)
+      vi.spyOn(connection, 'watchProcess').mockImplementation((id, listeners) => {
+        const timer = setTimeout(() => watch(id, listeners), 20)
+        return () => clearTimeout(timer)
+      })
+    }
+    const proxy = new BrokerEnvironmentManager(manager.deployment, connection)
+    const environment = await proxy.open('build')
+    const confined = await environment.sandbox.confine(['/bin/sh', '-c', 'true'], { mode: 'workspace-write', workspaceRoot: '/srv/root', sessionId: 'loss-test' })
+    const handle = environment.subprocess.spawn({ argv: confined.argv, cwd: '/srv/root', env: {} }) as { done: Promise<unknown>; started: Promise<void> }
+    const rejected = expect(handle.done).rejects.toBeInstanceOf(RemoteConnectionLost)
+    if (timing === 'late') await handle.started
+    failed.reject(new Error('SSH connection lost'))
+    await rejected
+    expect(() => connection!.assertOpen()).not.toThrow()
   })
 
   it('reports a stale generation instead of spawning', async () => {

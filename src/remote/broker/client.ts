@@ -148,7 +148,10 @@ export class BrokerConnection {
   watchProcess(id: number, listeners: ProcessListeners): () => void {
     this.processes.set(id, listeners)
     for (const event of this.orphans.get(id) ?? []) {
-      if (event.kind === 'exit') listeners.exit(event.exitCode, event.signal, event.scope)
+      if (event.kind === 'exit') {
+        this.processes.delete(id)
+        this.deliverExit(listeners, event)
+      }
       else if (event.kind === 'stdout') listeners.stdout(event.text)
       else listeners.stderr(event.text)
     }
@@ -176,7 +179,7 @@ export class BrokerConnection {
       // its events (bounded) and replay them when the listener registers.
       const orphans = this.orphans.get(event.process) ?? []
       if (event.event === 'exit') {
-        orphans.push({ kind: 'exit', exitCode: event.exitCode, signal: event.signal === 'BROKER-LOST' ? null : event.signal, scope: event.scope })
+        orphans.push({ kind: 'exit', exitCode: event.exitCode, signal: event.signal, scope: event.scope })
       } else if (stdout !== undefined) {
         const bytes = Buffer.byteLength(stdout)
         if (orphans.reduce((sum, entry) => sum + ('text' in entry ? Buffer.byteLength(entry.text) : 0), 0) + bytes > 2 * 1024 * 1024) return
@@ -187,10 +190,15 @@ export class BrokerConnection {
     }
     if (event.event === 'exit') {
       this.processes.delete(event.process)
-      listeners.exit(event.exitCode, event.signal === 'BROKER-LOST' ? null : event.signal, event.scope)
+      this.deliverExit(listeners, event)
       return
     }
     if (stdout !== undefined) listeners[event.event](stdout)
+  }
+
+  private deliverExit(listeners: ProcessListeners, event: { exitCode: number | null; signal: string | null; scope: boolean }): void {
+    if (event.signal === 'BROKER-LOST') listeners.lost(new RemoteConnectionLost('the broker lost the remote process transport'))
+    else listeners.exit(event.exitCode, event.signal, event.scope)
   }
 
   private lose(error: Error): void {
