@@ -38,6 +38,8 @@ completed/
 
 active：
 
+- [2026-11-15-files-page-takeover-notice.md](./active/2026-11-15-files-page-takeover-notice.md) — Issue #47 限定范围：Files 页被第三方插件整页接管时，以官方瞬时 Toast（info 级、无警告图标、数秒消失）弹一次提示；检测经 `sidebarRightTabs.get('files')` 的生效实现（不依赖 `slots.inject`/`spec`），不含对话框/命令文案与 fallback 入口；含进入/退出验收机制。决策见 [ADR-0015](../decisions/ADR-0015-files-tab-plugin-owned-browsing.md#修订files-页被整页接管时的可见提示2026-11-15)。
+
 - [2026-11-15-workspace-toast-implementation.md](./active/2026-11-15-workspace-toast-implementation.md) — Worktree 发现提示位置与形态重构的最终实施计划与退出验收：Hero 顶部居中 / 对话页 Header 下水平居中、主题自适应浅色/深色卡片、删除「×」并以「稍后提醒」Menu 关闭、primitives 控件、两行粗指针形态与官方 Toast 避让；决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15)。
 
 - [2026-11-15-workspace-toast-placement.md](./active/2026-11-15-workspace-toast-placement.md) — 上述重构的需求同步、现状缺点分析（位置遮挡、控件混用、a11y、浮层配方）与初始修改意见，2026-11-15 评审完成。
