@@ -9,7 +9,7 @@
 | D1 | 采用页面感知的两套落点：Hero 页顶部居中；对话页右上角、Header 下方。 |
 | D2 | Hero `top: 40px`；对话页 Header 下 `12px`。 |
 | D3 | 删除「×」关闭按钮。**「稍后提醒」就是关闭提示的操作**；不再保留「只关闭、不写状态」的指针操作，也不新增 Escape 关闭。 |
-| D4 | 「稍后」由原生 `select` 改为 primitives `Menu`（触发按钮 + 三个档位）。 |
+| D4 | 「稍后提醒」由原生 `select` 改为拆分按钮：左半文字按钮应用默认档位（直到出现新 worktree），右半 chevron 按钮打开 primitives `Menu`（三个档位）。 |
 | D5 | 提示卡表面随主题自适应：浅色模式浅色卡、深色模式深色卡（与官方 Toast 的「两套主题都深色」不同）；所有颜色只用 `--dsw-*` token。 |
 | D6 | 窄屏（可用宽度不足）或粗指针（`pointer: coarse`）时改为两行形态，控件高度 32px。 |
 | D7 | 尽量降低与官方瞬时 Toast 的重叠概率：默认 Hero `top: 40px`；检测到 `body` 直属 `role="alert"` 的官方 Toast 时，提示临时下移一个 Toast 高度 + 间距（56px），官方 Toast 消失后恢复。 |
@@ -31,7 +31,7 @@
 
 - 单行（宽屏）：图标 16 + 文本 14/22 + 操作区（查看、稍后提醒）。
 - 卡片：`border: 0`、`border-radius: var(--dsw-radius-lg)`（R16）、`background: var(--dsw-alias-bg-layer-2)`、`box-shadow: var(--dsw-elevation-panel)`、`padding: 10px 12px`、`gap: 12px`；随主题明暗切换。
-- 操作：`Button variant="primary" size="sm"`（查看），`Button variant="ghost" size="sm"` + `Menu`（稍后提醒，菜单项复用现有 snooze 文案），菜单 `side="bottom"`、`align="end"`、`portal`。
+- 操作：`Button variant="primary" size="sm"`（查看）；「稍后提醒」为拆分按钮——左半 `Button variant="ghost" size="sm"` 直接应用 `until-new-worktree`，右半 chevron `Button` 作为 primitives `Menu` 的 anchor（三个 snooze 档位复用现有文案；`side="bottom"`、`align="end"`、`portal`）。
 - 紧凑（窄屏或粗指针）：两行（文本行 + 操作行），控件 32px，卡片宽度取测量后的 `maxWidth`。
 - 动效：160ms `opacity + translateY(-4px)` 入场；`prefers-reduced-motion` 下取消动画。
 - 不覆盖 primitives 视觉；插件样式只做布局与表面。
@@ -51,7 +51,7 @@
 | `src/client/notice-placement.ts`（新增） | 纯解析器 `resolveNoticePlacement` + DOM 探针 `readNoticePlacement` + `useNoticePlacement`（微任务合并、resize/ResizeObserver/MutationObserver） |
 | `src/client/WorktreePrompt.tsx` | 提示区改用 `Button`/`Menu`/compat 图标；删除 × 与 `closeNotice`；新增 `snoozeOpen` 与 placement；其余 RPC/epoch 逻辑不变 |
 | `src/client/styles.ts` | 删除 `.mrfw-toast*`；新增 `.mrfw-notice*`（表面、紧凑、动效、reduced motion） |
-| `src/client/locales.ts` | 新增 `worktree.toastLabel`/`worktree.toastActions`；`worktree.toastLater` 改为「稍后提醒」/「Remind me later」；删除 `worktree.toastClose` |
+| `src/client/locales.ts` | 新增 `worktree.toastLabel`/`worktree.toastActions`/`worktree.toastLaterOptions`；`worktree.toastLater` 改为「稍后提醒」/「Remind me later」；删除 `worktree.toastClose` |
 | `tests/client-notice-placement.spec.ts`（新增） | 纯解析器 + 合成 DOM 探针 + 官方 Toast 偏移 + 降级 |
 | `tests/client-worktree.spec.tsx` | select → Menu 交互；删除 × 用例；新增 placement/a11y/菜单用例 |
 | `tests/client-styles.spec.ts` | 新增提示卡规则断言（无右下角、无描边 + elevation、R16、主题 token、紧凑、动画） |

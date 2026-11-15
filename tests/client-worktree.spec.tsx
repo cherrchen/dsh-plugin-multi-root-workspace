@@ -100,7 +100,7 @@ function renderPrompt(client: WorktreeClient, previewOnly = false) {
 
 /** Open the notice's "remind me later" menu and pick one mode. */
 async function chooseSnooze(mode: 'until-new-worktree' | '7d' | '30d'): Promise<void> {
-  fireEvent.click(await screen.findByText('worktree.toastLater'))
+  fireEvent.click(await screen.findByLabelText('worktree.toastLaterOptions'))
   fireEvent.click(await screen.findByText('worktree.snooze.' + mode))
 }
 
@@ -350,13 +350,23 @@ describe('worktree notice: presentation and accessibility', () => {
     expect(screen.getByRole('group', { name: 'worktree.toastActions' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'worktree.toastView' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'worktree.toastLater' })).toBeDefined()
+    expect(screen.getByLabelText('worktree.toastLaterOptions')).toBeDefined()
     expect(screen.queryByText('worktree.toastClose')).toBeNull()
   })
 
-  it('opens the snooze menu, exposes its state, and closes after a pick', async () => {
+  it('applies the default delay from the split text half', async () => {
     const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
     renderPrompt(fakeClient({ prompt: async () => answer([PROMPT]), snooze }))
-    const trigger = await screen.findByRole('button', { name: 'worktree.toastLater' })
+    fireEvent.click(await screen.findByRole('button', { name: 'worktree.toastLater' }))
+    await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: 'until-new-worktree' }))
+    await waitFor(() => expect(screen.queryByText('worktree.snooze.7d')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('worktree.toast')).toBeNull())
+  })
+
+  it('opens the snooze menu from the chevron half, exposes its state, and closes after a pick', async () => {
+    const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    renderPrompt(fakeClient({ prompt: async () => answer([PROMPT]), snooze }))
+    const trigger = await screen.findByLabelText('worktree.toastLaterOptions')
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(trigger)
     expect(trigger.getAttribute('aria-expanded')).toBe('true')

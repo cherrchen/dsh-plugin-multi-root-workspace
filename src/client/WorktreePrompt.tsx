@@ -503,35 +503,45 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
           </div>
           <div className="mrfw-noticeActions" role="group" aria-label={t('worktree.toastActions')}>
             <Button variant="primary" size="sm" className="mrfw-noticeAction" onClick={openDialog}>{t('worktree.toastView')}</Button>
-            <Menu
-              open={snoozeOpen}
-              anchor={(
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="mrfw-noticeAction"
-                  aria-haspopup="menu"
-                  aria-expanded={snoozeOpen}
-                  onClick={() => { setSnoozeOpen(value => !value) }}
-                >
-                  {t('worktree.toastLater')}
-                  <span className="mrfw-noticeChevron" aria-hidden="true"><IconChevronDown size={12} /></span>
-                </Button>
-              )}
-              items={[
-                { id: 'until-new-worktree', label: t('worktree.snooze.until-new-worktree') },
-                { id: '7d', label: t('worktree.snooze.7d') },
-                { id: '30d', label: t('worktree.snooze.30d') },
-              ]}
-              onSelect={id => {
-                setSnoozeOpen(false)
-                if (id === 'until-new-worktree' || id === '7d' || id === '30d') snoozeNotice(id)
-              }}
-              onClose={() => { setSnoozeOpen(false) }}
-              side="bottom"
-              align="end"
-              portal
-            />
+            <span className="mrfw-noticeSplit">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mrfw-noticeAction mrfw-noticeSplitText"
+                onClick={() => { snoozeNotice('until-new-worktree') }}
+              >
+                {t('worktree.toastLater')}
+              </Button>
+              <Menu
+                open={snoozeOpen}
+                anchor={(
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mrfw-noticeAction mrfw-noticeSplitToggle"
+                    aria-label={t('worktree.toastLaterOptions')}
+                    aria-haspopup="menu"
+                    aria-expanded={snoozeOpen}
+                    onClick={() => { setSnoozeOpen(value => !value) }}
+                  >
+                    <IconChevronDown size={12} />
+                  </Button>
+                )}
+                items={[
+                  { id: 'until-new-worktree', label: t('worktree.snooze.until-new-worktree') },
+                  { id: '7d', label: t('worktree.snooze.7d') },
+                  { id: '30d', label: t('worktree.snooze.30d') },
+                ]}
+                onSelect={id => {
+                  setSnoozeOpen(false)
+                  if (id === 'until-new-worktree' || id === '7d' || id === '30d') snoozeNotice(id)
+                }}
+                onClose={() => { setSnoozeOpen(false) }}
+                side="bottom"
+                align="end"
+                portal
+              />
+            </span>
           </div>
         </section>
       )}

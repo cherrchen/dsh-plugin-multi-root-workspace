@@ -296,7 +296,7 @@ ADR-0039 已经过多轮只读复审，覆盖：
 > 决策见 [ADR-0039 第二十一次修订](../../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15)；需求分析与初始方案见 [toast placement 报告](./2026-11-15-workspace-toast-placement.md)，最终实施与退出验收见 [实施计划](./2026-11-15-workspace-toast-implementation.md)。只改客户端呈现，不改宿主/RPC/授权。
 
 - [x] **落点解析器**：新增 `src/client/notice-placement.ts`（纯解析器 + 只读 DOM 探针：`data-phase`/`data-composer-card`/`data-conversation-content`/Header 测量/官方 Toast 检测）；缺失降级 Hero 顶部居中，禁止回右下角。
-- [x] **提示 UI**：`WorktreePrompt` 提示区改用 primitives `Button`/`Menu` 与既有 compat 图标；删除「×」，「稍后提醒」Menu 三档；`openDialog`/session/设置关闭仍递增 `workEpoch`。
+- [x] **提示 UI**：`WorktreePrompt` 提示区改用 primitives `Button`/`Menu` 与既有 compat 图标；删除「×」，「稍后提醒」改为拆分按钮（左半默认档位、右半 Menu 三档）；`openDialog`/session/设置关闭仍递增 `workEpoch`。
 - [x] **样式**：删除右下角 `.mrfw-toast*`；新增随主题自适应的 `.mrfw-notice*`（R16、`border: 0` + `elevation-panel`、两行/粗指针 32px、reduced motion）。
 - [x] **词典**：新增 `toastLabel`/`toastActions`；`toastLater` 改为「稍后提醒」；删除 `toastClose`。
 - [x] **测试**：placement 13 条；client-worktree 48 条（含 a11y/菜单/紧凑/跨会话）；styles 39 条；locale parity 与 bundle 保持。

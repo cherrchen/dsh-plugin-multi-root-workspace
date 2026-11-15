@@ -1494,14 +1494,37 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   flex: none;
 }
 
-.mrfw-noticeChevron {
+/* Remind me later is one split control: the text half applies the default
+   until-new-worktree delay, the chevron half opens the three choices. */
+.mrfw-noticeSplit {
   display: inline-flex;
-  margin-left: 2px;
+  flex: none;
+  align-items: center;
+}
+
+.mrfw-noticeSplit > * {
+  display: inline-flex;
+}
+
+.mrfw-noticeSplitText {
+  border-radius: var(--dsw-radius-sm) 0 0 var(--dsw-radius-sm);
+}
+
+.mrfw-noticeSplitToggle {
+  width: 24px;
+  padding: 0;
+  border-left: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 0 var(--dsw-radius-sm) var(--dsw-radius-sm) 0;
 }
 
 .mrfw-notice[data-compact='true'] .mrfw-noticeAction {
   height: 32px;
   padding: 0 12px;
+}
+
+.mrfw-notice[data-compact='true'] .mrfw-noticeSplitToggle {
+  width: 32px;
+  padding: 0;
 }
 
 @keyframes mrfw-notice-fade {

@@ -480,6 +480,12 @@ describe('the worktree suggestion notice rules', () => {
     expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\] \.mrfw-noticeAction\s*\{[^}]*height:\s*32px[^}]*padding:\s*0 12px/s)
   })
 
+  it('draws remind-me-later as a split text and chevron control', () => {
+    expect(CSS).toMatch(/\.mrfw-noticeSplit\s*\{[^}]*display:\s*inline-flex/s)
+    expect(CSS).toMatch(/\.mrfw-noticeSplitToggle\s*\{[^}]*width:\s*24px[^}]*border-left:\s*0\.5px solid var\(--dsw-alias-border-l3\)/s)
+    expect(CSS).toMatch(/\.mrfw-notice\[data-compact='true'\] \.mrfw-noticeSplitToggle\s*\{[^}]*width:\s*32px/s)
+  })
+
   it('fades in and honors reduced motion', () => {
     expect(CSS).toMatch(/@keyframes mrfw-notice-fade/)
     expect(CSS).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.mrfw-notice\s*\{\s*animation:\s*none/s)

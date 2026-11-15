@@ -277,7 +277,7 @@ primary root 本身是 Git main 或 linked checkout 根时，插件会发现与�
 
 提示按 workspace 共享、按 session 的沙箱模式过滤：读写会话可确认读写，只读会话显示只读但登记策略仍是 `inherit`，Full-access 不提示。**恰好一个可见候选时显示原确认对话框；两个及以上时显示可勾选的列表**（B 默认勾选，A 默认不勾且内联披露），一次确认多个目录。登记是 workspace 级的，**其他读写会话也会获得该目录的写权限**，对话框会明确说明。确认后由 Registry owner 在既有串行队列内再次复验 primary/candidate、primary/common/admin 的 HEAD 语法与目录身份；等待期间任何变化都会让该项失效（`worktree/prompt-stale`），列表中的其余项继续处理，失效项保持未登记。
 
-发现提示本身是非模态常驻卡片：新会话（Hero）页显示在顶部居中，纵向与官方 Toast 对齐，官方瞬时 Toast 出现时临时下移避让；对话页显示在 Header 下方的右上角，不再占用输入框所在的右下角。卡片随主题明暗切换；操作为「查看」和「稍后提醒」下拉（直到出现新 worktree / 7 天后 / 30 天后），选择后即关闭提示；没有单独的关闭按钮。
+发现提示本身是非模态常驻卡片：新会话（Hero）页显示在顶部居中，纵向与官方 Toast 对齐，官方瞬时 Toast 出现时临时下移避让；对话页显示在 Header 下方的右上角，不再占用输入框所在的右下角。卡片随主题明暗切换；操作为「查看」和「稍后提醒」拆分按钮：左半文字按钮直接应用默认档位（直到出现新 worktree），右半 chevron 按钮打开下拉（直到出现新 worktree / 7 天后 / 30 天后）；选择后即关闭提示，没有单独的关闭按钮。
 
 worktree 被删除或移动后，Workspace Folders 面板会显示徽标；**永不自动清理**。只有登记路径被确认缺失（`ENOENT`/`ENOTDIR`）且 `rootId + path + addedAt` 仍匹配时，面板才提供逐条或批量清理；目录仍存在、无法访问，或旧 admin 消失但 checkout 仍有效时只提供普通 Remove。缺失根会继续占用 `maxAdditionalRoots`，直到清理或手动移除；清理前，同一路径出现的新目录可能继承旧授权，面板会显示该提示。
 
