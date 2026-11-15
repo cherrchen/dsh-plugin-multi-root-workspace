@@ -14,7 +14,7 @@
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/ssh-panel
  */
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Button, Input, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { RootsView } from '../contract.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
@@ -483,6 +483,14 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   useEffect(() => { setTab(props.initialTab) }, [props.initialTab])
 
   const canManage = custodyMode === 'personal' && status?.state === 'ready' && ssh !== undefined && sessionId !== undefined
+  // Change identity during render: an old promise must not win the gap before
+  // the reset effect runs, including personal -> team -> personal transitions.
+  const scope = useMemo(() => ({}), [sessionId, custodyMode, canManage, ssh])
+  const currentScope = useRef(scope)
+  currentScope.current = scope
+  const current = useCallback(() => mounted.current && currentScope.current === scope, [scope])
+  const stateRequest = useRef(0)
+  useEffect(() => { setBusy(false) }, [scope])
 
   // A session or custody change is a different management scope: drop drafts,
   // secret inputs, and per-connection results instead of carrying them across.
@@ -506,14 +514,15 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   }, [sessionId, custodyMode])
 
   const load = useCallback(async (): Promise<void> => {
-    if (ssh === undefined || sessionId === undefined) return
+    if (ssh === undefined || sessionId === undefined || !current()) return
+    const requestId = ++stateRequest.current
     try {
       const state = await ssh.state(sessionId)
-      if (mounted.current) setView(state)
+      if (current() && requestId === stateRequest.current) setView(state)
     } catch (cause: unknown) {
-      if (mounted.current) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
+      if (current() && requestId === stateRequest.current) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
     }
-  }, [ssh, sessionId])
+  }, [ssh, sessionId, current])
 
   useEffect(() => {
     if (!canManage) {
@@ -544,10 +553,13 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
 
   /** Every mutation answers the refreshed state; a CAS conflict reloads first. */
   const submit = useCallback(async (call: () => Promise<SshStateView>): Promise<boolean> => {
+    if (!current()) return false
+    const requestId = ++stateRequest.current
     setBusy(true)
     try {
       const state = await call()
-      if (mounted.current) {
+      if (!current() || requestId !== stateRequest.current) return false
+      if (current()) {
         setView(state)
         setError(undefined)
         setSaved(true)
@@ -556,15 +568,15 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       return true
     } catch (cause: unknown) {
       const failure = cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause))
-      if (mounted.current) {
+      if (current() && requestId === stateRequest.current) {
         setError(failure)
         if (failure.code === 'personal-config-conflict') await load()
       }
       return false
     } finally {
-      if (mounted.current) setBusy(false)
+      if (current()) setBusy(false)
     }
-  }, [load, props.onChanged])
+  }, [load, props.onChanged, current])
 
   const revision = (): number => view?.revision ?? 0
   const userCredentials = (view?.credentials ?? []).filter(credential => credential.purpose !== 'access-key')
@@ -589,16 +601,16 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     setBusy(true)
     try {
       const result = await ssh.environmentTest(sessionId, id)
-      if (mounted.current) {
+      if (current()) {
         setTestResults(previous => ({
           ...previous,
           [id]: `${platformLabel(result.platform, t)}${result.nodeVersion === undefined ? '' : ` · node ${result.nodeVersion}`}`,
         }))
       }
     } catch (cause: unknown) {
-      if (mounted.current) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
+      if (current()) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
     } finally {
-      if (mounted.current) setBusy(false)
+      if (current()) setBusy(false)
     }
   }
 
@@ -612,7 +624,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         port: Number.isInteger(port) ? port : 22,
         ...(alias === undefined ? { hostname: draft.hostname.trim() } : { alias }),
       })
-      if (mounted.current) {
+      if (current()) {
         setScan(result)
         setFingerprint(result.keys[0]?.fingerprint)
         // Alias scans resolve `ssh -G` on the host: copy the proven target
@@ -623,9 +635,9 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         }
       }
     } catch (cause: unknown) {
-      if (mounted.current) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
+      if (current()) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
     } finally {
-      if (mounted.current) setBusy(false)
+      if (current()) setBusy(false)
     }
   }
 
@@ -677,9 +689,9 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const copyPublicKey = async (credential: CredentialPublicView): Promise<void> => {
     try {
       await navigator.clipboard.writeText(credential.publicKey ?? '')
-      if (mounted.current) setCopiedId(credential.id)
+      if (current()) setCopiedId(credential.id)
     } catch {
-      if (mounted.current) setError(new PanelError('copy-failed', 'clipboard write failed'))
+      if (current()) setError(new PanelError('copy-failed', 'clipboard write failed'))
     }
   }
 
