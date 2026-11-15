@@ -32,7 +32,7 @@
 - 单行（宽屏）：图标 16 + 文本 14/22 + 操作区（查看、稍后提醒）。
 - 卡片：`border: 0`、`border-radius: var(--dsw-radius-lg)`（R16）、`background: var(--dsw-alias-bg-layer-2)`、`box-shadow: var(--dsw-elevation-panel)`、`padding: 10px 12px`、`gap: 12px`；随主题明暗切换。
 - 操作：`Button variant="primary" size="sm"`（查看）；「稍后提醒」为拆分按钮——左半 `Button variant="ghost" size="sm"` 直接应用 `until-new-worktree`，右半 chevron `Button` 作为 primitives `Menu` 的 anchor（三个 snooze 档位复用现有文案；`side="bottom"`、`align="end"`、`portal`）；拆分控件外围与中间分割线使用同一条 `--dsw-alias-border-l3` 细线。
-- 手动入口：Workspace Folders 面板「重试」右侧的「Worktree 建议」按钮经 `worktree-prompt-bus` 请求 shell overlay 打开同一个 Dialog；面板先关闭自身，不复制 Dialog 生命周期。
+- 手动入口：Workspace Folders 面板「重试」右侧的「Worktree 建议」按钮经 `worktree-prompt-bus` 请求 shell overlay 打开同一个 Dialog；面板先关闭自身，不复制 Dialog 生命周期。添加行保持单行：手动路径输入是唯一可收缩项（`flex: 1 1 120px`，min 80px），窄视口才回退换行。
 - 紧凑（窄屏或粗指针）：两行（文本行 + 操作行），控件 32px，卡片宽度取测量后的 `maxWidth`。
 - 动效：160ms `opacity + translateY(-4px)` 入场；`prefers-reduced-motion` 下取消动画。
 - 不覆盖 primitives 视觉；插件样式只做布局与表面。
