@@ -263,7 +263,7 @@ export class SftpClient {
   }
 
   async open(path: string, pflags: number, permissions?: number): Promise<Buffer> {
-    const reply = await this.send(3, 'open', sfStr(path), be32(pflags), be32(permissions ?? 0))
+    const reply = await this.send(3, 'open', sfStr(path), be32(pflags), ...(permissions === undefined ? [be32(0)] : [be32(4), be32(permissions)]))
     if (reply.type === 101) await this.status(reply)
     const hl = reply.body.readUInt32BE(0)
     return reply.body.subarray(4, 4 + hl)
