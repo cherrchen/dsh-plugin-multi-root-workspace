@@ -166,7 +166,11 @@ export function Toast(props: {
 }): ReactNode {
   return createElement(
     'div',
-    { role: 'status', onClick: props.onDone },
+    {
+      role: 'status',
+      onClick: props.onDone,
+      'data-hold-ms': props.holdMs === undefined ? undefined : String(props.holdMs),
+    },
     props.icon,
     props.text,
   )

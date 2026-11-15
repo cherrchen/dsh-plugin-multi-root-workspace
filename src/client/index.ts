@@ -40,6 +40,7 @@ import { HeroWorkspaceEntry } from './HeroWorkspaceEntry.tsx'
 import { installSkillsClient } from './skills.tsx'
 import { installSkillsSettingsCard } from './skills-settings.tsx'
 import { createWorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
+import { createFilesPageNoticeSource, installFilesPageNotice } from './files-page-notice.tsx'
 import { installWorkspaceMenu, type UiWorkspaceClient, type WorkspacesClient } from './workspace-menu.ts'
 import { RootSwitcher } from './RootSwitcher.tsx'
 import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction.tsx'
@@ -199,6 +200,13 @@ export function apply(ctx: ClientContext): void {
       inject: () => ({ hooks: toast.hooks, dismiss: toast.dismiss }),
     }, OpenInAppToast))
   }
+  // A third-party page can take the whole `files` tab kind over: the built-in
+  // Files body never renders, so the root switcher registered below is never
+  // shown. Nothing in the slot system reports that, so watch the tab registry
+  // and announce the takeover once with the info-level official Toast; the
+  // footer action keeps managing roots meanwhile.
+  const filesPageNotice = createFilesPageNoticeSource()
+  installFilesPageNotice(ctx, filesPageNotice, t)
   // The files-tree fork's seats: an exclusive store and the verbatim face
   // over a lazily resolved `remote` — the same declaration upstream's own
   // Files registration makes, plus the session-bound open route. The fork

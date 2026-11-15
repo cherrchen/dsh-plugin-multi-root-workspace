@@ -172,6 +172,7 @@ export const zh = {
   'error.worktree/not-eligible': '该 Worktree 根当前不满足清理条件。',
   'error.worktree/registry-unavailable': '根注册表不可用。',
   'error.worktree/inactive': '当前工作区不再处于活动状态。',
+  'filesPage.notice': '检测到第三方插件接管了 Files 页，工作区目录根切换器暂不可用；仍可从侧栏「工作区目录」管理。',
 } satisfies Record<string, string>
 
 /** The canonical key set. */
@@ -337,6 +338,7 @@ export const en = {
   'error.worktree/not-eligible': 'That worktree root is not eligible for cleanup right now.',
   'error.worktree/registry-unavailable': 'The root registry is unavailable.',
   'error.worktree/inactive': 'This workspace is no longer active.',
+  'filesPage.notice': 'Another extension has taken over the Files page, so the workspace folder switcher is unavailable; manage workspace folders from the sidebar instead.',
 } satisfies Record<Key, string>
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
