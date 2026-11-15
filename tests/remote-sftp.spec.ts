@@ -1,10 +1,10 @@
 /** F19: the SFTP frame parser refuses malformed wire data before it reaches a resolve callback. */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync, existsSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { SftpClient, SftpConnectionLost } from '../src/remote/sftp.ts'
+import { SftpClient, SftpConnectionLost, P_CREAT, P_EXCL, P_WRITE } from '../src/remote/sftp.ts'
 
 let dir = ''
 const clients: SftpClient[] = []
@@ -132,4 +132,19 @@ describe.skipIf(process.platform === 'win32')('SFTP wire validation', () => {
     expect(effective).toMatch(/^forwardagent no$/m)
     expect(effective).toMatch(/^updatehostkeys false$/m)
   })
+})
+
+const sftpServer = ['/usr/libexec/sftp-server', '/usr/lib/openssh/sftp-server'].find(path => existsSync(path))
+it.skipIf(process.platform === 'win32' || sftpServer === undefined)('creates private staging files on a real OpenSSH server', async () => {
+  const wrapper = join(dir, 'real-sftp.sh')
+  writeFileSync(wrapper, `#!/bin/sh\nexec "${sftpServer}" -u 022\n`, { mode: 0o700 })
+  const client = SftpClient.connect('unused', { ssh: wrapper })
+  clients.push(client)
+  await client.init()
+  for (const permissions of [0o600, 0o640, undefined]) {
+    const path = join(dir, `created-${permissions}`)
+    const handle = await client.open(path, P_CREAT | P_EXCL | P_WRITE, permissions)
+    await client.close(handle)
+    expect(statSync(path).mode & 0o777).toBe(permissions ?? 0o644)
+  }
 })

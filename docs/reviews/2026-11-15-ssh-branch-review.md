@@ -99,3 +99,5 @@ pnpm exec vitest run tests/review-ssh-findings.spec.ts tests/review-ssh-client.s
 用户已授权连续逐项修复、每项验证和独立提交。完成后逐项在此记录结果，最终补充全量复验。
 
 - R1 已修复：SFTP 强制主机验证、禁止 agent 转发与自动更新主机密钥。真实 OpenSSH 配置解析回归和 SFTP 套件通过。
+
+- R2 已修复：OPEN 正确编码 ATTRS flags 与 permissions；真实 OpenSSH 服务端验证 0600、0640 和默认 umask 三种创建结果，SFTP 套件通过。
