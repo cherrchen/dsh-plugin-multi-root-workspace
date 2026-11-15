@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RootsView, WorktreePromptView } from '../src/contract.ts'
 import { WorktreePrompt } from '../src/client/WorktreePrompt.tsx'
 import { WorkspaceFoldersDialog } from '../src/client/WorkspaceFoldersAction.tsx'
+import { RootSwitcher } from '../src/client/RootSwitcher.tsx'
 import { PanelError, type PanelClient } from '../src/client/panel-client.ts'
 import { BundleSettingsCard } from '../src/client/skills-settings.tsx'
 import { createWorktreeClient, type WorktreeClient } from '../src/client/worktree-client.ts'
@@ -958,5 +959,53 @@ describe('plugin detail switches', () => {
     render(<BundleSettingsCard worktreeForm={fakeForm(async value => { writes.push(value); return true })} t={t} />)
     expect(screen.getAllByRole('switch')).toHaveLength(1)
     expect(screen.getByText('worktree.globalHint')).toBeDefined()
+  })
+})
+
+/**
+ * The Files-tab manager is a second entry to the same dialog: it is the only
+ * path that constructs the dialog through `RootSwitcher`, so the worktree props
+ * must travel through that component instead of only through the footer/Hero.
+ */
+describe('Files manager worktree entry', () => {
+  it('forwards the worktree props so the manager offers the manual suggestion entry', async () => {
+    const view: RootsView = { primaryRoot: '/main', roots: [], limit: 16, count: 0 }
+    const panel = { call: async () => view } as unknown as PanelClient
+    const request = vi.fn()
+    const stop = onWorktreePromptRequest(request)
+    try {
+      render(<RootSwitcher
+        primaryPath="/main"
+        panel={panel}
+        pickDirectory={undefined}
+        sessionId={() => 's1'}
+        t={t}
+        worktrees={fakeClient()}
+        worktreePromptEnabled={() => true} />)
+      fireEvent.click(document.querySelector('.mrfw-rootSwitchBtn')!)
+      fireEvent.click(await screen.findByText('switcher.manage'))
+      const entry = await screen.findByRole('button', { name: 'worktree.panelOpen' })
+      fireEvent.click(entry)
+      expect(request).toHaveBeenCalledTimes(1)
+    } finally {
+      stop()
+    }
+  })
+
+  it('keeps the entry out of the manager when the feature is switched off', async () => {
+    const view: RootsView = { primaryRoot: '/main', roots: [], limit: 16, count: 0 }
+    const panel = { call: async () => view } as unknown as PanelClient
+    render(<RootSwitcher
+      primaryPath="/main"
+      panel={panel}
+      pickDirectory={undefined}
+      sessionId={() => 's1'}
+      t={t}
+      worktrees={fakeClient()}
+      worktreePromptEnabled={() => false} />)
+    fireEvent.click(document.querySelector('.mrfw-rootSwitchBtn')!)
+    fireEvent.click(await screen.findByText('switcher.manage'))
+    await screen.findByRole('dialog')
+    expect(screen.queryByRole('button', { name: 'worktree.panelOpen' })).toBeNull()
   })
 })
