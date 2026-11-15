@@ -796,3 +796,30 @@ describe('settings switch', () => {
     expect(promptOf(await worktrees.wait(SESSION)).id).toBeDefined()
   }, 20_000)
 })
+
+describe('main checkout display refresh', () => {
+  it('refreshes the displayed branch and the view revision when only the common HEAD moves', async () => {
+    const area = fixture('discovery-main-branch')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: linked }, config: { waitTimeoutMs: 20 } })
+
+    const firstAnswer = await worktrees.prompt(SESSION)
+    const first = firstAnswer.prompts[0]
+    expect(first).toMatchObject({ kind: 'main-checkout', branch: 'main' })
+
+    // Only the main checkout's own branch moves. The linked checkout's admin
+    // HEAD — the field the owner expectation binds — stays exactly as captured.
+    git(main, ['checkout', '-q', '-b', 'release'])
+
+    const secondAnswer = await worktrees.prompt(SESSION)
+    const second = secondAnswer.prompts[0]
+    // Authorization identity is preserved: the same prompt id is reused.
+    expect(second?.id).toBe(first?.id)
+    expect(second?.branch).toBe('release')
+    expect(second?.viewRevision).toBe(secondAnswer.viewRevision)
+    expect(secondAnswer.viewRevision).not.toBe(firstAnswer.viewRevision)
+  }, 20_000)
+})

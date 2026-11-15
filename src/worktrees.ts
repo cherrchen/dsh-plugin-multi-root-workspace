@@ -920,8 +920,14 @@ export class MultiRootWorktrees extends Service {
       // rebuild; the prompt ID must not be. Reusing the whole record would hand
       // the operator an ID whose owner expectation can never be confirmed.
       const unchanged = previous !== undefined && isDeepStrictEqual(previous.expected, expected)
-      const record: CandidateRecord = unchanged
-        ? previous
+      // The expectation deliberately excludes display-only metadata (the main
+      // checkout's own HEAD is shown, never authorized), so an unchanged
+      // expectation must still adopt a refreshed candidate: the displayed branch
+      // follows the live checkout while the prompt id and the owner expectation
+      // stay put. Only a candidate that really moved replaces the record object,
+      // so an unrelated revalidation cannot make a concurrent confirmation stale.
+      const record: CandidateRecord = unchanged && previous !== undefined
+        ? (isDeepStrictEqual(previous.candidate, candidate) ? previous : { ...previous, candidate })
         : { candidate, expected, promptId: randomUUID(), discoveryKey }
       if (!unchanged) {
         if (previous === undefined) added.push(record)
