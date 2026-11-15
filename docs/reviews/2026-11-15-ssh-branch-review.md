@@ -101,3 +101,5 @@ pnpm exec vitest run tests/review-ssh-findings.spec.ts tests/review-ssh-client.s
 - R1 已修复：SFTP 强制主机验证、禁止 agent 转发与自动更新主机密钥。真实 OpenSSH 配置解析回归和 SFTP 套件通过。
 
 - R2 已修复：OPEN 正确编码 ATTRS flags 与 permissions；真实 OpenSSH 服务端验证 0600、0640 和默认 umask 三种创建结果，SFTP 套件通过。
+
+- R3 已修复：broker 的 BROKER-LOST 在即时和缓冲事件路径均映射为 RemoteConnectionLost；真实 IPC 的早到/晚到断线回归与 broker 套件通过。
