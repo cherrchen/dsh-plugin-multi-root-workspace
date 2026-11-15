@@ -38,9 +38,11 @@ completed/
 
 active：
 
-- [2026-11-15-workspace-toast-implementation.md](./active/2026-11-15-workspace-toast-implementation.md) — Worktree 发现提示位置与形态重构的最终实施计划与退出验收：Hero 顶部居中 / 对话页 Header 下右上、主题自适应浅色/深色卡片、删除「×」并以「稍后提醒」Menu 关闭、primitives 控件、两行粗指针形态与官方 Toast 避让；决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15)。
+- [2026-11-15-workspace-toast-implementation.md](./active/2026-11-15-workspace-toast-implementation.md) — Worktree 发现提示位置与形态重构的最终实施计划与退出验收：Hero 顶部居中 / 对话页 Header 下水平居中、主题自适应浅色/深色卡片、删除「×」并以「稍后提醒」Menu 关闭、primitives 控件、两行粗指针形态与官方 Toast 避让；决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十一次修订2026-11-15)。
 
 - [2026-11-15-workspace-toast-placement.md](./active/2026-11-15-workspace-toast-placement.md) — 上述重构的需求同步、现状缺点分析（位置遮挡、控件混用、a11y、浮层配方）与初始修改意见，2026-11-15 评审完成。
+
+- [2026-11-15-worktree-dialog-redesign.md](./active/2026-11-15-worktree-dialog-redesign.md) — Worktree 确认 Dialog 加宽、候选连续列表、删除 inherit 说明行、逐行权限选择器（默认 inherit，扩 `accesses` 契约与 Registry grant）、Git 分支展示与 footer primitives 下拉；决策见 [ADR-0039](../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十二次修订2026-11-15)。
 
 - [2026-11-14-hero-entry-adaptive-width.md](./active/2026-11-14-hero-entry-adaptive-width.md) — 新会话 Hero 入口按行内可用宽度自适应：探针测量行内剩余空间、`max-width` 夹取到余量、余量 < 88px 退化为 28×28 图标；不改 DSH、探针失败回落到 `v0.1.19` 形态。决策修订见 [ADR-0037](../decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)。
 

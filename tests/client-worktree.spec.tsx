@@ -28,6 +28,7 @@ const PROMPT: WorktreePromptView = {
   primaryRoot: '/tmp/main',
   access: 'inherit',
   effectiveAccess: 'read-write',
+  branch: 'feature/notice',
   remaining: 2,
   viewRevision: 'v1',
 }
@@ -40,6 +41,7 @@ const MAIN: WorktreePromptView = {
   primaryRoot: '/tmp/main',
   access: 'inherit',
   effectiveAccess: 'read-write',
+  branch: 'main',
   remaining: 2,
   viewRevision: 'v1',
 }
@@ -102,6 +104,12 @@ function renderPrompt(client: WorktreeClient, previewOnly = false) {
 /** Open the notice's "remind me later" menu and pick one mode. */
 async function chooseSnooze(mode: 'until-new-worktree' | '7d' | '30d'): Promise<void> {
   fireEvent.click(await screen.findByLabelText('worktree.toastLaterOptions'))
+  fireEvent.click(await screen.findByText('worktree.snooze.' + mode))
+}
+
+/** Choose a reminder mode from the Dialog's official dropdown. */
+async function chooseDialogSnooze(mode: 'until-new-worktree' | '7d' | '30d' | 'permanent'): Promise<void> {
+  fireEvent.click(await screen.findByLabelText('worktree.snoozeLabel'))
   fireEvent.click(await screen.findByText('worktree.snooze.' + mode))
 }
 
@@ -237,24 +245,25 @@ describe('worktree notice: View opens the Dialog', () => {
     expect(wait.mock.calls[0]![0]).toBe('s1')
   })
 
-  it('opens a single confirmation with the path and effective access copy', async () => {
+  it('opens a single confirmation as one row with its branch and access selector', async () => {
     const prompt = vi.fn(async () => answer([PROMPT]))
     await openDialog(fakeClient({ prompt }))
     expect(screen.getByRole('dialog', { name: 'worktree.title' })).toBeDefined()
     expect(screen.getByText('/tmp/wt')).toBeDefined()
-    expect(screen.getByText('worktree.policy')).toBeDefined()
-    expect(screen.getByText('worktree.shared')).toBeDefined()
+    expect(screen.getByText('wt')).toBeDefined()
+    expect(screen.getByText('feature/notice')).toBeDefined()
+    expect(screen.getByLabelText('worktree.accessLabel: panel.accessInherit')).toBeDefined()
     expect(screen.getByText('worktree.add')).toBeDefined()
   })
 
-  it('uses the main-checkout copy for a single main checkout candidate', async () => {
+  it('keeps the main-checkout disclosure in its single row', async () => {
     const prompt = vi.fn(async () => answer([MAIN]))
     await openDialog(fakeClient({ prompt }))
     expect(screen.getByRole('dialog', { name: 'worktree.mainTitle' })).toBeDefined()
     expect(screen.getByText('/tmp/main')).toBeDefined()
-    expect(screen.getByText('worktree.mainDescription')).toBeDefined()
     expect(screen.getByText('worktree.mainPolicy')).toBeDefined()
     expect(screen.getByText('worktree.mainSeparate')).toBeDefined()
+    expect(screen.getAllByText('main').length).toBeGreaterThan(0)
   })
 
   it('pre-selects worktree rows and leaves the main checkout an explicit opt-in', async () => {
@@ -273,8 +282,32 @@ describe('worktree notice: View opens the Dialog', () => {
     fireEvent.click(boxes[0]!)
     fireEvent.click(boxes[1]!)
     fireEvent.click(screen.getByText('worktree.addSelected'))
-    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['m1'], 'add'))
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['m1'], 'add', {
+      accesses: [{ id: 'm1', access: 'inherit' }],
+    }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('sends the access chosen for each selected row', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
+    const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
+    await openDialog(fakeClient({ prompt, resolve }))
+    const accessButtons = screen.getAllByLabelText('worktree.accessLabel: panel.accessInherit')
+    fireEvent.click(accessButtons[0]!)
+    fireEvent.click(await screen.findByText('panel.accessReadOnly'))
+    expect(screen.getByText('panel.accessReadOnly')).toBeDefined()
+    fireEvent.click(screen.getByText('worktree.addSelected'))
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['p1'], 'add', {
+      accesses: [{ id: 'p1', access: 'read-only' }],
+    }))
+  })
+
+  it('renders the detected branch and drops the old description line', async () => {
+    const prompt = vi.fn(async () => answer([PROMPT, MAIN]))
+    await openDialog(fakeClient({ prompt }))
+    expect(screen.getAllByText('feature/notice').length).toBe(1)
+    expect(screen.queryByText('worktree.listDescription')).toBeNull()
+    expect(screen.getByRole('dialog').className).toContain('mrfw-worktreeDialog')
   })
 
   it('keeps a refused row visible, unchecked, and reports its code', async () => {
@@ -504,7 +537,7 @@ describe('worktree Dialog: later / do not remind', () => {
     const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
     const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
     await openDialog(fakeClient({ prompt, resolve, snooze }))
-    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: 'permanent' } })
+    await chooseDialogSnooze('permanent')
     fireEvent.click(screen.getByText('worktree.notNow'))
     await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['p1', 'm1'], 'dismiss', { dontRemind: true }))
     expect(snooze).not.toHaveBeenCalled()
@@ -516,7 +549,7 @@ describe('worktree Dialog: later / do not remind', () => {
     const resolve = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
     const snooze = vi.fn(async () => ({ viewRevision: 'v2', prompts: [], resolved: [], skipped: [] }))
     await openDialog(fakeClient({ prompt, resolve, snooze }))
-    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: '7d' } })
+    await chooseDialogSnooze('7d')
     fireEvent.click(screen.getByText('worktree.notNow'))
     await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1', 'm1'], { mode: '7d' }))
     expect(resolve).not.toHaveBeenCalled()
@@ -527,7 +560,7 @@ describe('worktree Dialog: later / do not remind', () => {
     const prompt = vi.fn(async () => answer([PROMPT]))
     const resolve = vi.fn(async () => { throw new PanelError('worktree/prompt-stale', 'stale') })
     await openDialog(fakeClient({ prompt, resolve }))
-    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: 'permanent' } })
+    await chooseDialogSnooze('permanent')
     fireEvent.click(screen.getByText('worktree.dismiss'))
     await waitFor(() => expect(screen.getByText('error.worktree/prompt-stale')).toBeDefined())
     expect(screen.getByRole('dialog')).toBeDefined()
@@ -543,7 +576,7 @@ describe('worktree Dialog: later / do not remind', () => {
       skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
     }))
     await openDialog(fakeClient({ prompt, snooze }))
-    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: '7d' } })
+    await chooseDialogSnooze('7d')
     fireEvent.click(screen.getByText('worktree.dismiss'))
     await waitFor(() => expect(snooze).toHaveBeenCalledWith('s1', ['p1'], { mode: '7d' }))
     // The row changed while the Dialog was open and the host applied no delay:
@@ -564,7 +597,7 @@ describe('worktree Dialog: later / do not remind', () => {
       skipped: [{ id: 'p1', key: PROMPT.key, code: 'worktree/prompt-stale' }],
     }))
     await openDialog(fakeClient({ prompt, resolve }))
-    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: 'permanent' } })
+    await chooseDialogSnooze('permanent')
     fireEvent.click(screen.getByText('worktree.notNow'))
     await waitFor(() => expect(resolve).toHaveBeenCalledWith('s1', ['p1', 'm1'], 'dismiss', { dontRemind: true }))
     await waitFor(() => expect(screen.getByText(/worktree.skipped/)).toBeDefined())
@@ -574,7 +607,7 @@ describe('worktree Dialog: later / do not remind', () => {
     const prompt = vi.fn(async () => answer([PROMPT]))
     const resolve = vi.fn(async () => { throw new PanelError('worktree/not-enabled', 'off') })
     await openDialog(fakeClient({ prompt, resolve }))
-    fireEvent.change(screen.getByLabelText('worktree.snoozeLabel'), { target: { value: 'permanent' } })
+    await chooseDialogSnooze('permanent')
     fireEvent.click(screen.getByText('worktree.dismiss'))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })

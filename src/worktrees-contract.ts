@@ -63,6 +63,15 @@ export interface WorktreeSnoozeChoice {
   readonly mode: WorktreeSnoozeMode
 }
 
+/** The access a confirmed row grants; defaults to inherit when omitted. */
+export type WorktreeAccess = 'inherit' | 'read-only' | 'read-write'
+
+/** One row's chosen access; ids, never paths, cross the wire. */
+export interface WorktreeAccessEntry {
+  readonly id: string
+  readonly access: WorktreeAccess
+}
+
 /** One prompt as the panel renders it. */
 export interface WorktreePromptView {
   readonly id: string
@@ -72,6 +81,8 @@ export interface WorktreePromptView {
   readonly primaryRoot: string
   readonly access: 'inherit'
   readonly effectiveAccess: WorktreeEffectiveAccess
+  /** The candidate checkout's branch when its HEAD is a branch ref, never a detached object id. */
+  readonly branch?: string | undefined
   readonly remaining: number
   readonly viewRevision: string
 }
@@ -141,6 +152,8 @@ export interface WorktreeRequest {
   readonly action?: 'add' | 'dismiss' | 'snooze'
   readonly dontRemind?: boolean
   readonly snooze?: WorktreeSnoozeChoice
+  /** Per-row access for an `add`; omitted ids keep the inherit default. */
+  readonly accesses?: readonly WorktreeAccessEntry[]
   readonly rootIds?: readonly string[]
   readonly seenViewRevision?: string
 }
@@ -158,6 +171,12 @@ export const worktreeSnoozeChoiceSchema = z.object({
   mode: z.enum(['until-new-worktree', '7d', '30d']),
 }).strict()
 
+/** One row's access choice; the registry's writable grant vocabulary. */
+const worktreeAccessSchema = z.object({
+  id: z.string().min(1),
+  access: z.enum(['inherit', 'read-only', 'read-write']),
+}).strict()
+
 /** The one request body schema; unknown keys are refused. */
 export const worktreeRequestSchema = z.object({
   sessionId: z.string().min(1),
@@ -166,6 +185,7 @@ export const worktreeRequestSchema = z.object({
   action: z.enum(['add', 'dismiss', 'snooze']).optional(),
   dontRemind: z.boolean().optional(),
   snooze: worktreeSnoozeChoiceSchema.optional(),
+  accesses: z.array(worktreeAccessSchema).min(1).max(64).optional(),
   rootIds: z.array(z.string().min(1)).max(256).optional(),
   seenViewRevision: z.string().min(1).optional(),
 }).strict()
@@ -180,7 +200,7 @@ const ENDPOINT_FIELDS: Record<WorktreeEndpoint, readonly string[]> = {
   worktreePrompt: ['sessionId', 'fresh'],
   worktreePromptSeen: ['sessionId', 'promptIds'],
   worktreePromptWait: ['sessionId', 'seenViewRevision'],
-  worktreePromptResolve: ['sessionId', 'promptIds', 'action', 'dontRemind', 'snooze'],
+  worktreePromptResolve: ['sessionId', 'promptIds', 'action', 'dontRemind', 'snooze', 'accesses'],
   worktreePromptReset: ['sessionId'],
   worktreeRootsCleanup: ['sessionId', 'rootIds'],
 }
@@ -194,6 +214,7 @@ const promptSchema = z.object({
   primaryRoot: z.string(),
   access: z.literal('inherit'),
   effectiveAccess: z.enum(['read-only', 'read-write', 'full-access', 'unavailable']),
+  branch: z.string().min(1).optional(),
   remaining: z.number().int().nonnegative(),
   viewRevision: z.string().min(1),
 }).strict()
@@ -301,6 +322,16 @@ export function parseWorktreeCall(endpoint: string, payload: unknown): ParsedWor
     if (value.dontRemind !== undefined && value.action !== 'dismiss') {
       return { ok: false, message: 'dontRemind only belongs to the dismiss action' }
     }
+    if (value.accesses !== undefined) {
+      if (value.action !== 'add') return { ok: false, message: 'accesses only belongs to the add action' }
+      const ids = new Set(value.promptIds ?? [])
+      const seen = new Set<string>()
+      for (const entry of value.accesses) {
+        if (!ids.has(entry.id)) return { ok: false, message: 'accesses names a prompt id that is not in promptIds' }
+        if (seen.has(entry.id)) return { ok: false, message: 'accesses must name each prompt id at most once' }
+        seen.add(entry.id)
+      }
+    }
   }
   return {
     ok: true,
@@ -312,6 +343,7 @@ export function parseWorktreeCall(endpoint: string, payload: unknown): ParsedWor
       ...(value.action === undefined ? {} : { action: value.action }),
       ...(value.dontRemind === undefined ? {} : { dontRemind: value.dontRemind }),
       ...(value.snooze === undefined ? {} : { snooze: { mode: value.snooze.mode } }),
+      ...(value.accesses === undefined ? {} : { accesses: value.accesses.map(entry => ({ id: entry.id, access: entry.access })) }),
       ...(value.rootIds === undefined ? {} : { rootIds: value.rootIds }),
       ...(value.seenViewRevision === undefined ? {} : { seenViewRevision: value.seenViewRevision }),
     },

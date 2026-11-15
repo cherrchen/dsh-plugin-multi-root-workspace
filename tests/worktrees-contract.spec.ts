@@ -49,6 +49,12 @@ describe('worktree wait union', () => {
     }
   })
 
+  it('carries an optional branch but never an empty one', () => {
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt: { ...prompt, branch: 'feature/x' }, viewRevision: 'v1' }).success).toBe(true)
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt: { ...prompt, branch: '' }, viewRevision: 'v1' }).success).toBe(false)
+    expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt: { ...prompt, branch: 7 }, viewRevision: 'v1' }).success).toBe(false)
+  })
+
   it('refuses an unknown status or a malformed prompt', () => {
     expect(worktreeWaitViewSchema.safeParse({ status: 'waiting', viewRevision: 'v1' }).success).toBe(false)
     expect(worktreeWaitViewSchema.safeParse({ status: 'prompt', prompt: { ...prompt, kind: 'other' }, viewRevision: 'v1' }).success).toBe(false)
@@ -99,6 +105,33 @@ describe('worktree requests', () => {
     expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptIds: [], action: 'add' })).toMatchObject({ ok: false })
     const tooMany = Array.from({ length: 65 }, (_, index) => `p${index}`)
     expect(parseWorktreeCall('worktreePromptResolve', { sessionId: 's', promptIds: tooMany, action: 'add' })).toMatchObject({ ok: false })
+  })
+
+  it('carries per-row access only on the add action', () => {
+    expect(parseWorktreeCall('worktreePromptResolve', {
+      sessionId: 's', promptIds: ['p', 'q'], action: 'add',
+      accesses: [{ id: 'p', access: 'read-only' }],
+    })).toMatchObject({
+      ok: true,
+      value: { accesses: [{ id: 'p', access: 'read-only' }] },
+    })
+    // Absent entries keep the inherit default; only known prompt ids and the
+    // three grant values are accepted.
+    expect(parseWorktreeCall('worktreePromptResolve', {
+      sessionId: 's', promptIds: ['p'], action: 'add', accesses: [{ id: 'q', access: 'inherit' }],
+    })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptResolve', {
+      sessionId: 's', promptIds: ['p'], action: 'add', accesses: [{ id: 'p', access: 'inherit' }, { id: 'p', access: 'read-only' }],
+    })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptResolve', {
+      sessionId: 's', promptIds: ['p'], action: 'add', accesses: [{ id: 'p', access: 'full-access' }],
+    })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptResolve', {
+      sessionId: 's', promptIds: ['p'], action: 'dismiss', accesses: [{ id: 'p', access: 'inherit' }],
+    })).toMatchObject({ ok: false })
+    expect(parseWorktreeCall('worktreePromptSeen', {
+      sessionId: 's', promptIds: ['p'], accesses: [{ id: 'p', access: 'inherit' }],
+    })).toMatchObject({ ok: false })
   })
 
   it('carries the seen cursor and refuses an unknown endpoint', () => {

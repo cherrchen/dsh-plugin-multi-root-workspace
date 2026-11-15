@@ -304,6 +304,18 @@ ADR-0039 已经过多轮只读复审，覆盖：
 - [x] **文档**：ADR 第二十一次修订、README 双语、本 P11、计划索引。
 - [ ] **退出验收**：质量门与 GUI 证据、Draft PR（见实施计划 §6）。
 
+### P12 Worktree 确认 Dialog 视觉、权限选择器与分支展示（2026-11-15）
+
+> 决策见 [ADR-0039 第二十二次修订](../../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十二次修订2026-11-15)；需求/契约缺口与实施方案见 [Dialog 重构报告](./2026-11-15-worktree-dialog-redesign.md)。本轮**扩展了宿主契约与授权语义**：worktree 根不再固定 `inherit`。
+
+- [x] **布局**：确认 Dialog 加宽到 `min(860px, 100%)`；候选改为连续列表（行间 0.5px 分隔线、无卡片描边/圆角），行内 checkbox + 文件夹名 + 路径 + 分支 chip + 权限选择器；删除「勾选要登记为 inherit 附加根…」说明行；单候选共用同一行结构。
+- [x] **权限选择器**：每行 `inherit` / `read-only` / `read-write`，默认 `inherit`；`WorktreeRequest.accesses` 只在 `add` 上接受，host 校验 id/重复/取值并传 `addNew`；Registry `addNew` 使用 `grantFields` 写入对应 grant（只读用 `readOnlyRecordedPath`，关闭 Skills）；README/ADR 同步授权语义变化。
+- [x] **分支展示**：从候选 admin HEAD 解析 `ref: refs/heads/<name>`；主 checkout 使用 common HEAD（主 checkout 自己的分支）；detached HEAD 缺省；仅展示，不参与授权/owner 复验。
+- [x] **footer**：snooze 原生 select 换为 primitives `Button` + `Menu`；「暂不处理 / 添加所选」改用 primitives `Button`。
+- [x] **测试**：client-worktree 54 条、styles 43 条、worktrees-contract 16 条、worktrees-discovery 28 条、worktrees-common 14 条；新增 access 只属于 add、未知/重复 id、非法值、branch 可选/非空、A/B 分支、detached 缺省、只读 grant 与 effective access、逐行选择后请求携带 accesses。
+- [x] **文档**：ADR 第二十二次修订、README 双语、本 P11/P12、Dialog 重构报告、计划索引。
+- [ ] **退出验收**：CI matrix、GUI 视觉复核（宽度、连续列表、选择器、分支 chip、footer 下拉）。
+
 ## Dependencies
 
 - ADR-0039 已 Accepted；P8 以 B 的 P1–P7 完成为前置条件。

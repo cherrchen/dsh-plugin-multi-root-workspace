@@ -352,7 +352,7 @@ export type WorktreeSidecarOperation =
 /** Registration request from a confirmed worktree prompt. */
 export interface AddNewRootOptions {
   readonly path: string
-  /** The ADR fixes this to `inherit`; anything else is refused. */
+  /** The grant to record; defaults to `inherit` (ADR-0039 第二十二次修订). */
   readonly access?: RootAccess
   readonly expected: PromptExpected
   /** B-only tracking facts; A roots never receive a cleanup mapping. */
@@ -838,12 +838,13 @@ export class MultiRootRegistry extends Service {
         throw new WorktreeError('worktree/prompt-stale', 'the candidate resolves to a different directory than the prompt captured')
       }
       const addedAt = new Date().toISOString()
+      const access = options.access ?? 'inherit'
       const record: RootStatus = {
         id: additionalRootId(randomUUID()),
         path: validated,
-        access: 'inherit',
-        recordedPath: validated,
-        skillsEnabled: true,
+        access,
+        ...grantFields(access, validated),
+        skillsEnabled: access !== 'read-only',
         state: 'available',
         addedAt,
       }

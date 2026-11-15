@@ -1209,31 +1209,68 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* The multi-candidate worktree list: a scrollable stack of selectable rows. */
+/* The worktree Dialog: wider than the primitive's default card so a name,
+   path, branch and access selector share one continuous row. */
+.mrfw-worktreeDialog {
+  width: min(860px, 100%);
+  max-height: min(760px, 100%);
+}
+
+/* The candidate list: a continuous list with hairline separators, matching the
+   Workspace Folders panel's additional-root rows. */
 .mrfw-worktreeList {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: min(52vh, 420px);
+  max-height: min(56vh, 460px);
   overflow-y: auto;
-  padding-right: 4px;
 }
 
 .mrfw-worktreeRow {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
 }
 
-.mrfw-worktreeRowHead {
+.mrfw-worktreeRow:last-of-type { border-bottom: none; }
+
+.mrfw-worktreeRowMain {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   cursor: pointer;
+}
+
+.mrfw-worktreeRowMain input { flex: none; }
+
+.mrfw-worktreeRowText {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mrfw-worktreeRowNameLine {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mrfw-worktreeRowName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
 }
 
 .mrfw-worktreeKind {
@@ -1243,7 +1280,51 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   color: var(--dsw-alias-label-secondary);
 }
 
+/* The detected branch is metadata, not an action: a quiet compact chip beside
+   the folder name. */
+.mrfw-worktreeBranch {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font-family: var(--ds-font-family-code);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* The per-row access selector keeps the panel's access vocabulary; its label
+   yields before the name/path column. */
+.mrfw-worktreeAccess {
+  flex: none;
+  max-width: 180px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-worktreeAccessLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mrfw-worktreeRow .mrfw-rootPath { overflow-wrap: anywhere; }
+
+.mrfw-worktreeRowError {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+@media (max-width: 640px) {
+  .mrfw-worktreeRow { grid-template-columns: minmax(0, 1fr); }
+  .mrfw-worktreeAccess { justify-self: start; margin-left: 26px; }
+  .mrfw-worktreeRowError { grid-column: 1; }
+}
 
 .mrfw-stateWarn {
   font-size: 12px;
@@ -1587,21 +1668,28 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
 }
 
 
-/* The Dialog footer's combined "later / do not remind" control row. The
-   Modal's own footer is a single justify-end line without wrapping; the
-   dropdown plus two capsule buttons may need a second line on a narrow card. */
-.mrfw-worktreeActions {
+/* The Dialog footer: the reminder dropdown on the left, the two decisions on
+   the right; both use the host's Button/Menu so heights match. */
+.mrfw-worktreeFooter {
   display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
+  width: 100%;
 }
 
-.mrfw-snoozeSelect {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
+.mrfw-worktreeFooterEnd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.mrfw-worktreeLater {
+  gap: 4px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 `

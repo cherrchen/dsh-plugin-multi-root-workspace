@@ -23,8 +23,14 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { WorktreePromptView, WorktreeSnoozeMode } from '../contract.ts'
-import { IconChevronDown, IconWorkspaceTree } from '../compat/client-icons.ts'
+import type { WorktreeAccess, WorktreeAccessEntry, WorktreePromptView, WorktreeSnoozeMode } from '../contract.ts'
+import {
+  IconAccessInherit,
+  IconAccessReadOnly,
+  IconAccessReadWrite,
+  IconChevronDown,
+  IconWorkspaceTree,
+} from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError } from './panel-client.ts'
 import { noticeStyle, useNoticePlacement } from './notice-placement.ts'
 import { onWorktreePromptRequest } from './worktree-prompt-bus.ts'
@@ -57,6 +63,48 @@ interface NoticeState {
 
 /** The Dialog's own snooze vocabulary: the three wire modes plus "permanent". */
 type DialogLaterMode = WorktreeSnoozeMode | 'permanent'
+
+/** The per-row access choices the selector offers; inherit is the default. */
+const ACCESS_CHOICES: readonly WorktreeAccess[] = ['inherit', 'read-only', 'read-write']
+
+/** The i18n key naming one access choice (the panel's own vocabulary). */
+function accessKeyOf(access: WorktreeAccess): 'panel.accessInherit' | 'panel.accessReadOnly' | 'panel.accessReadWrite' {
+  return access === 'inherit' ? 'panel.accessInherit'
+    : access === 'read-only' ? 'panel.accessReadOnly'
+      : 'panel.accessReadWrite'
+}
+
+/** The access icon for one choice, or undefined on releases that lack the glyph. */
+function AccessIcon(props: { readonly access: WorktreeAccess }): ReactNode {
+  const Icon = props.access === 'read-only'
+    ? IconAccessReadOnly
+    : props.access === 'read-write' ? IconAccessReadWrite : IconAccessInherit
+  return Icon === undefined ? null : <Icon size={14} />
+}
+
+/** Keep each surviving row's chosen access; new rows start at inherit. */
+function reconcileAccesses(
+  previous: ReadonlyMap<string, WorktreeAccess>,
+  prompts: readonly WorktreePromptView[],
+): Map<string, WorktreeAccess> {
+  const next = new Map<string, WorktreeAccess>()
+  for (const prompt of prompts) next.set(prompt.key, previous.get(prompt.key) ?? 'inherit')
+  return next
+}
+
+/** The i18n key naming one Dialog snooze choice. */
+function snoozeKeyOf(mode: DialogLaterMode): 'worktree.snooze.until-new-worktree' | 'worktree.snooze.7d' | 'worktree.snooze.30d' | 'worktree.snooze.permanent' {
+  return mode === 'until-new-worktree' ? 'worktree.snooze.until-new-worktree'
+    : mode === '7d' ? 'worktree.snooze.7d'
+      : mode === '30d' ? 'worktree.snooze.30d' : 'worktree.snooze.permanent'
+}
+
+/** The basename of an absolute path (the row's display name). */
+function pathName(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, '')
+  const index = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+  return index === -1 ? trimmed : trimmed.slice(index + 1)
+}
 
 /** Reconcile the checked keys after the server sent a new visible list. */
 function reconcileSelection(
@@ -120,7 +168,10 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
   const [laterMode, setLaterMode] = useState<DialogLaterMode>('until-new-worktree')
+  const [laterOpen, setLaterOpen] = useState(false)
   const [snoozeOpen, setSnoozeOpen] = useState(false)
+  const [accessByKey, setAccessByKey] = useState<ReadonlyMap<string, WorktreeAccess>>(() => new Map())
+  const [accessMenuKey, setAccessMenuKey] = useState<string | undefined>(undefined)
   const placement = useNoticePlacement(notice !== undefined)
 
   const mounted = useRef(true)
@@ -193,7 +244,10 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setError(undefined)
     setBusy(false)
     setLaterMode('until-new-worktree')
+    setLaterOpen(false)
     setSnoozeOpen(false)
+    setAccessByKey(new Map())
+    setAccessMenuKey(undefined)
     // "From empty to a valid session" is a fresh activation later: forget that
     // an earlier visit to the same id consumed its check.
     if (session === undefined || session === '') checkedSession.current = undefined
@@ -251,7 +305,10 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
       setError(undefined)
       setBusy(false)
       setLaterMode('until-new-worktree')
+      setLaterOpen(false)
       setSnoozeOpen(false)
+      setAccessByKey(new Map())
+      setAccessMenuKey(undefined)
     })
   }, [subscribeEnabled])
 
@@ -269,7 +326,10 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setError(undefined)
     setBusy(false)
     setLaterMode('until-new-worktree')
+    setLaterOpen(false)
     setSnoozeOpen(false)
+    setAccessByKey(new Map())
+    setAccessMenuKey(undefined)
   }, [])
 
   // The Dialog's whole lifetime. It starts only after "View" set dialogOpen:
@@ -290,6 +350,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
       appliedRevision.current = revision
       setRows(prompts)
       setSelected(previous => reconcileSelection(previous, prompts, new Map()))
+      setAccessByKey(previous => reconcileAccesses(previous, prompts))
       setRowErrors(new Map())
       setSkippedCount(0)
       setError(undefined)
@@ -359,11 +420,16 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     const session = dialogSession.current
     if (client === undefined || session === undefined || !dialogOpen || rows === undefined || ids.length === 0) return
     const visible = rows
+    const byId = new Map(visible.map(row => [row.id, row]))
+    const accesses: WorktreeAccessEntry[] = ids.map(id => ({
+      id,
+      access: accessByKey.get(byId.get(id)?.key ?? '') ?? 'inherit',
+    }))
     const epoch = workEpoch.current
     setBusy(true)
     setError(undefined)
     try {
-      const answer = await client.resolve(session, ids, 'add')
+      const answer = await client.resolve(session, ids, 'add', { accesses })
       if (!mounted.current || epoch !== workEpoch.current || sessionIdRef.current() !== session) return
       appliedRevision.current = answer.viewRevision
       seenRevision.current = answer.viewRevision
@@ -373,6 +439,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
       if (answer.prompts.length === 0) { closeDialog(); return }
       setRows(answer.prompts)
       setSelected(previous => reconcileSelection(previous, answer.prompts, errors))
+      setAccessByKey(previous => reconcileAccesses(previous, answer.prompts))
     } catch (failure: unknown) {
       if (!mounted.current || epoch !== workEpoch.current || sessionIdRef.current() !== session) return
       if (failure instanceof PanelError && failure.code === 'worktree/not-enabled') { closeDialog(); return }
@@ -380,7 +447,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     } finally {
       if (mounted.current && epoch === workEpoch.current) setBusy(false)
     }
-  }, [client, closeDialog, dialogOpen, rows])
+  }, [accessByKey, client, closeDialog, dialogOpen, rows])
 
   /** Apply the Dialog's merged "later / do not remind" choice to every row. */
   const applyLater = useCallback(async (): Promise<void> => {
@@ -412,6 +479,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
       if (answer.prompts.length === 0) { closeDialog(); return }
       setRows(answer.prompts)
       setSelected(previous => reconcileSelection(previous, answer.prompts, errors))
+      setAccessByKey(previous => reconcileAccesses(previous, answer.prompts))
     } catch (failure: unknown) {
       if (!mounted.current || epoch !== workEpoch.current || sessionIdRef.current() !== session) return
       if (failure instanceof PanelError && failure.code === 'worktree/not-enabled') { closeDialog(); return }
@@ -435,7 +503,10 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setError(undefined)
     setBusy(false)
     setLaterMode('until-new-worktree')
+    setLaterOpen(false)
     setSnoozeOpen(false)
+    setAccessByKey(new Map())
+    setAccessMenuKey(undefined)
     setDialogOpen(true)
   }, [])
 
@@ -499,10 +570,10 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   if (visibleNotice === undefined && dialogRows === undefined) return null
 
   const singlePrompt = dialogRows !== undefined && dialogRows.length === 1 ? dialogRows[0] : undefined
-  const listRows = dialogRows !== undefined && dialogRows.length > 1 ? dialogRows : []
+  const multi = dialogRows !== undefined && dialogRows.length > 1
   const mainCheckout = singlePrompt?.kind === 'main-checkout'
-  const effective = effectiveLabel((singlePrompt ?? listRows[0])?.effectiveAccess ?? 'unavailable', t)
-  const checked = listRows.filter(row => selected.has(row.key))
+  const checked = dialogRows === undefined ? [] : dialogRows.filter(row => selected.has(row.key))
+  const accessOf = (row: WorktreePromptView): WorktreeAccess => accessByKey.get(row.key) ?? 'inherit'
 
   return (
     <>
@@ -566,76 +637,95 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
         <Modal
           open
           onClose={closeDialog}
+          className="mrfw-worktreeDialog"
           title={singlePrompt !== undefined
             ? t(mainCheckout ? 'worktree.mainTitle' : 'worktree.title')
-            : t('worktree.listTitle', { count: listRows.length })}
-          description={singlePrompt !== undefined
-            ? t(mainCheckout ? 'worktree.mainDescription' : 'worktree.description', {
-                path: singlePrompt.path,
-                effective,
-                remaining: singlePrompt.remaining,
-              })
-            : t('worktree.listDescription', { effective })}
+            : t('worktree.listTitle', { count: dialogRows.length })}
           closeLabel={t('panel.close')}
           footer={previewOnly ? (
-            <button type="button" className="mrfw-btn mrfw-btnOutline" onClick={closeDialog}>{t('worktree.previewClose')}</button>
+            <Button variant="outline" size="sm" onClick={closeDialog}>{t('worktree.previewClose')}</Button>
           ) : (
-            <div className="mrfw-worktreeActions">
-              <select
-                className="mrfw-select mrfw-snoozeSelect"
-                aria-label={t('worktree.snoozeLabel')}
-                value={laterMode}
-                disabled={busy}
-                onChange={event => { setLaterMode(event.currentTarget.value as DialogLaterMode) }}
-              >
-                <option value="until-new-worktree">{t('worktree.snooze.until-new-worktree')}</option>
-                <option value="7d">{t('worktree.snooze.7d')}</option>
-                <option value="30d">{t('worktree.snooze.30d')}</option>
-                <option value="permanent">{t('worktree.snooze.permanent')}</option>
-              </select>
-              <button type="button" className="mrfw-btn mrfw-btnOutline" disabled={busy} onClick={() => { void applyLater() }}>
-                {singlePrompt !== undefined ? t('worktree.dismiss') : t('worktree.notNow')}
-              </button>
-              {singlePrompt !== undefined ? (
-                <button type="button" className="mrfw-btn mrfw-btnPrimary" disabled={busy} onClick={() => { void confirmAdd([singlePrompt.id]) }}>
-                  {t('worktree.add')}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="mrfw-btn mrfw-btnPrimary"
-                  disabled={busy || checked.length === 0}
-                  onClick={() => { void confirmAdd(checked.map(row => row.id)) }}
+            <div className="mrfw-worktreeFooter">
+              <Menu
+                open={laterOpen}
+                onClose={() => { setLaterOpen(false) }}
+                items={(['until-new-worktree', '7d', '30d', 'permanent'] as const).map(mode => ({
+                  id: mode,
+                  label: t(snoozeKeyOf(mode)),
+                }))}
+                onSelect={id => {
+                  setLaterOpen(false)
+                  setLaterMode(id as DialogLaterMode)
+                }}
+                anchor={(
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mrfw-worktreeLater"
+                    disabled={busy}
+                    aria-label={t('worktree.snoozeLabel')}
+                    aria-haspopup="menu"
+                    aria-expanded={laterOpen}
+                    onClick={() => { setLaterOpen(value => !value) }}
+                  >
+                    {t(snoozeKeyOf(laterMode))}
+                    <IconChevronDown size={12} />
+                  </Button>
+                )}
+                side="bottom"
+                align="start"
+                portal
+              />
+              <div className="mrfw-worktreeFooterEnd">
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => { void applyLater() }}>
+                  {singlePrompt !== undefined ? t('worktree.dismiss') : t('worktree.notNow')}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={busy || (singlePrompt === undefined && checked.length === 0)}
+                  onClick={() => {
+                    if (singlePrompt !== undefined) void confirmAdd([singlePrompt.id])
+                    else void confirmAdd(checked.map(row => row.id))
+                  }}
                 >
-                  {t('worktree.addSelected', { count: checked.length })}
-                </button>
-              )}
+                  {singlePrompt !== undefined
+                    ? t('worktree.add')
+                    : t('worktree.addSelected', { count: checked.length })}
+                </Button>
+              </div>
             </div>
           )}
         >
-          {singlePrompt !== undefined ? (
-            <div className="mrfw-worktreePrompt">
-              <code className="mrfw-rootPath">{singlePrompt.path}</code>
-              <p className="mrfw-note">{t(mainCheckout ? 'worktree.mainPolicy' : 'worktree.policy')}</p>
-              <p className="mrfw-note">{t(mainCheckout ? 'worktree.mainShared' : 'worktree.shared')}</p>
-              {mainCheckout ? <p className="mrfw-note">{t('worktree.mainSeparate')}</p> : null}
-              {rowErrors.has(singlePrompt.key)
-                ? <p role="alert" className="mrfw-alert">{t('worktree.rowError')}: {t(errorKeyOf(rowErrors.get(singlePrompt.key)!))}</p>
-                : null}
-              {previewOnly ? <p className="mrfw-note">{t('worktree.previewOnly')}</p> : null}
-              {error === undefined ? null : <p role="alert" className="mrfw-alert">{t(errorKeyOf(error))}</p>}
-            </div>
-          ) : (
-            <div className="mrfw-worktreeList">
-              {skippedCount > 0 ? <p role="alert" className="mrfw-alert">{t('worktree.skipped', { count: skippedCount })}</p> : null}
-              {listRows.map(row => {
-                const isMain = row.kind === 'main-checkout'
-                return (
-                  <div key={row.key} className="mrfw-worktreeRow">
-                    <label className="mrfw-worktreeRowHead">
+          <div className="mrfw-worktreeList">
+            {skippedCount > 0 ? <p role="alert" className="mrfw-alert">{t('worktree.skipped', { count: skippedCount })}</p> : null}
+            {dialogRows.map(row => {
+              const isMain = row.kind === 'main-checkout'
+              const access = accessOf(row)
+              const accessOpen = accessMenuKey === row.key
+              const checkedNow = selected.has(row.key)
+              const text = (
+                <span className="mrfw-worktreeRowText">
+                  <span className="mrfw-worktreeRowNameLine">
+                    <span className="mrfw-worktreeRowName" title={row.path}>{pathName(row.path)}</span>
+                    <span className="mrfw-worktreeKind">{t(isMain ? 'worktree.kind.main-checkout' : 'worktree.kind.worktree')}</span>
+                    {row.branch === undefined
+                      ? null
+                      : <span className="mrfw-worktreeBranch" title={row.branch}>{row.branch}</span>}
+                  </span>
+                  <code className="mrfw-rootPath">{row.path}</code>
+                  {isMain ? <p className="mrfw-note">{t('worktree.mainPolicy')}</p> : null}
+                  {isMain ? <p className="mrfw-note">{t('worktree.mainSeparate')}</p> : null}
+                  {isMain && access !== 'read-only' ? <p className="mrfw-note">{t('worktree.mainShared')}</p> : null}
+                </span>
+              )
+              return (
+                <div key={row.key} className="mrfw-worktreeRow" data-selected={multi && checkedNow ? 'true' : undefined}>
+                  {multi ? (
+                    <label className="mrfw-worktreeRowMain">
                       <input
                         type="checkbox"
-                        checked={selected.has(row.key)}
+                        checked={checkedNow}
                         disabled={busy}
                         onChange={event => {
                           const next = event.currentTarget.checked
@@ -646,29 +736,60 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
                             return copy
                           })
                         }} />
-                      <span className="mrfw-worktreeKind">{t(isMain ? 'worktree.kind.main-checkout' : 'worktree.kind.worktree')}</span>
-                      <code className="mrfw-rootPath">{row.path}</code>
+                      {text}
                     </label>
-                    {isMain ? <p className="mrfw-note">{t('worktree.mainPolicy')}</p> : null}
-                    {isMain ? <p className="mrfw-note">{t('worktree.mainSeparate')}</p> : null}
-                    {rowErrors.has(row.key) ? <p role="alert" className="mrfw-alert">{t('worktree.rowError')}: {t(errorKeyOf(rowErrors.get(row.key)!))}</p> : null}
-                  </div>
-                )
-              })}
-              {previewOnly ? <p className="mrfw-note">{t('worktree.previewOnly')}</p> : null}
-              {error === undefined ? null : <p role="alert" className="mrfw-alert">{t(errorKeyOf(error))}</p>}
-            </div>
-          )}
+                  ) : (
+                    <div className="mrfw-worktreeRowMain">{text}</div>
+                  )}
+                  <Menu
+                    open={accessOpen}
+                    onClose={() => { setAccessMenuKey(undefined) }}
+                    items={ACCESS_CHOICES.map(choice => ({
+                      id: 'access:' + choice,
+                      label: t(accessKeyOf(choice)),
+                      icon: <AccessIcon access={choice} />,
+                      disabled: busy || choice === access,
+                    }))}
+                    onSelect={id => {
+                      setAccessMenuKey(undefined)
+                      const choice = id.slice('access:'.length) as WorktreeAccess
+                      setAccessByKey(previous => {
+                        const next = new Map(previous)
+                        next.set(row.key, choice)
+                        return next
+                      })
+                    }}
+                    anchor={(
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mrfw-worktreeAccess"
+                        disabled={busy}
+                        aria-label={t('worktree.accessLabel') + ': ' + t(accessKeyOf(access))}
+                        aria-haspopup="menu"
+                        aria-expanded={accessOpen}
+                        onClick={() => { setAccessMenuKey(current => current === row.key ? undefined : row.key) }}
+                      >
+                        <AccessIcon access={access} />
+                        <span className="mrfw-worktreeAccessLabel">{t(accessKeyOf(access))}</span>
+                        <IconChevronDown size={12} />
+                      </Button>
+                    )}
+                    side="bottom"
+                    align="end"
+                    portal
+                  />
+                  {rowErrors.has(row.key)
+                    ? <p role="alert" className="mrfw-worktreeRowError">{t('worktree.rowError')}: {t(errorKeyOf(rowErrors.get(row.key)!))}</p>
+                    : null}
+                </div>
+              )
+            })}
+            {previewOnly ? <p className="mrfw-note">{t('worktree.previewOnly')}</p> : null}
+            {error === undefined ? null : <p role="alert" className="mrfw-alert">{t(errorKeyOf(error))}</p>}
+          </div>
         </Modal>
       )}
     </>
   )
-}
-
-/** Localize one effective-access value. */
-function effectiveLabel(access: WorktreePromptView['effectiveAccess'], t: Translate): string {
-  return access === 'read-only' ? t('effective.read-only')
-    : access === 'read-write' ? t('effective.read-write')
-      : access === 'full-access' ? t('effective.full-access')
-        : t('effective.unavailable')
 }

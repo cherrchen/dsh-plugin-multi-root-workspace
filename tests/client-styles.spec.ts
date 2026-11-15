@@ -499,3 +499,22 @@ describe('the workspace folder add row', () => {
     expect(STYLES).toMatch(/\.mrfw-manualPath\s*\{[^}]*flex:\s*1 1 120px[^}]*min-width:\s*80px/s)
   })
 })
+
+describe('the worktree dialog rules', () => {
+  /** The sheet with comments stripped; the worktree block runs to the next family. */
+  const CSS = STYLES.replace(/\/\*[\s\S]*?\*\//g, '')
+  const worktree = CSS.slice(CSS.indexOf('.mrfw-worktreeDialog {'), CSS.indexOf('.mrfw-stateWarn {'))
+
+  it('widens the card and keeps one continuous list', () => {
+    expect(worktree).toMatch(/\.mrfw-worktreeDialog\s*\{[^}]*width:\s*min\(860px,\s*100%\)/s)
+    expect(worktree).toMatch(/\.mrfw-worktreeRow\s*\{[^}]*border-bottom:\s*0\.5px solid/s)
+    expect(worktree).not.toMatch(/\.mrfw-worktreeRow\s*\{[^}]*border-radius/s)
+    expect(worktree).not.toMatch(/\.mrfw-worktreeRow\s*\{[^}]*border:\s*0\.5px solid/s)
+  })
+
+  it('styles the branch chip, the access selector and the footer', () => {
+    expect(worktree).toMatch(/\.mrfw-worktreeBranch\s*\{[^}]*font-family:\s*var\(--ds-font-family-code\)/s)
+    expect(worktree).toMatch(/\.mrfw-worktreeAccess\s*\{[^}]*max-width:\s*180px/s)
+    expect(STYLES).toMatch(/\.mrfw-worktreeFooter\s*\{[^}]*justify-content:\s*space-between/s)
+  })
+})

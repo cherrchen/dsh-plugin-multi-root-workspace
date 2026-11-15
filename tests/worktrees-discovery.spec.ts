@@ -112,6 +112,7 @@ describe('discovery', () => {
     const prompt = promptOf(await worktrees.wait(SESSION))
     expect(prompt.path).toBe(realpathSync.native(linked))
     expect(prompt.kind).toBe('worktree')
+    expect(prompt.branch).toBe('feature')
     expect(prompt.access).toBe('inherit')
     expect(prompt.effectiveAccess).toBe('read-write')
     expect(prompt.remaining).toBe(1)
@@ -124,6 +125,18 @@ describe('discovery', () => {
     mode = 'danger-full-access'
     const none = await worktrees.wait(SESSION)
     expect(none.status).toBe('timeout')
+  }, 20_000)
+
+  it('omits the branch for a detached worktree', async () => {
+    const area = fixture('discovery-detached')
+    const main = join(area.base, 'main')
+    const detached = join(area.base, 'detached')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', detached, '--detach'])
+    const { worktrees } = await mount(join(area.base, 'store'), { session: { cwd: main }, config: { waitTimeoutMs: 100 } })
+    const prompt = promptOf(await worktrees.wait(SESSION))
+    expect(prompt.path).toBe(realpathSync.native(detached))
+    expect(prompt.branch).toBeUndefined()
   }, 20_000)
 
   it('has no pool special case: a pool worktree inside the primary is filtered, a sibling pool worktree is offered', async () => {

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-11-15 第二十一次修订；2026-11-14 第二十次修订；2026-11-10 第十九次修订；2026-11-09 第十八次修订与同日实施审计返工 R1–R6）。A 的目标是主 checkout 根，开关实验性、默认关闭；自动发现收敛为会话激活时一次只读检查 + 非模态 Toast，用户点「查看」后才打开单/多候选确认 Dialog。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
+Accepted（2026-11-15 第二十二次修订；2026-11-15 第二十一次修订；2026-11-14 第二十次修订；2026-11-10 第十九次修订；2026-11-09 第十八次修订与同日实施审计返工 R1–R6）。A 的目标是主 checkout 根，开关实验性、默认关闭；自动发现收敛为会话激活时一次只读检查 + 非模态 Toast，用户点「查看」后才打开单/多候选确认 Dialog。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
 
 ## 复审修正（2026-11-09）
 
@@ -197,6 +197,18 @@ PR #55 的代码审查复现了十三处实现偏离 §20.3–§20.10 的问题�
 - **可访问性**：容器 `section` + `aria-label`；`role="status"` 只包文本；操作组有独立名称；Menu 自带键盘导航与 Escape。
 - **手动入口**：Workspace Folders 面板的「重试」右侧新增「Worktree 建议」按钮；仅在存在当前会话、worktree 客户端可用且功能未显式关闭时显示。点击先关闭面板，再经客户端事件请求 shell overlay 打开同一个建议 Dialog——面板不复制 Dialog 的轮询与生命周期。
 - **生命周期**：`openDialog`、session 切换、设置关闭仍是旧提示的失效点并递增 `workEpoch`；删掉「×」后，原「显式关闭 Toast 立即递增 epoch」一条不再适用，异步完成仍按既有 `mounted && epoch === workEpoch.current` 归属。
+
+## 第二十二次修订（2026-11-15）
+
+确认 Dialog 的形态、权限选择器与分支展示按维护者要求重做，**取代此前「worktree 根固定登记为 inherit」的表述**（第二十一次修订及更早的固定策略仅对 Toast 与旧 Dialog 有效）。
+
+- **宽度与列表**：确认 Dialog 从 primitives `Modal` 的默认 380px 加宽到 `min(860px, 100%)`（窄视口回退 100%），标题与 footer 固定、候选列表内部滚动。多候选从每项一张带描边/圆角的卡片改为连续列表：行间 `0.5px` 分隔线、无卡片背景；每行是 checkbox + 文件夹名（加粗主文本）+ 绝对路径（code/tertiary 第二行）+ 分支 chip + 行尾权限选择器；单候选使用同一行结构，不带 checkbox。
+- **删除说明行**：列表模式不再渲染「勾选要登记为 inherit 附加根…当前有效权限…」；权限由行尾选择器表达。主 checkout 行仍内联披露共享 config/hooks/refs/objects/admin 数据范围，选择非只读权限时额外披露 workspace 级写权限。
+- **逐行权限**：每行可在 `inherit` / `read-only` / `read-write` 间选择，默认 `inherit`。客户端在 `worktreePromptResolve` 的 `action: 'add'` 上传 `accesses: [{ id, access }]`；omitted id 仍默认 `inherit`。网契约只接受 add、id 必须属于本次 `promptIds`、每个 id 至多一次、值必须属于三档；host 的 `resolve` 再校验一次，Registry 的 `addNew` 以 `grantFields` 写入对应 grant（只读登记使用 `readOnlyRecordedPath`，且 `skillsEnabled` 关闭）。**这是授权语义变化**：worktree 根不再被固定为 `inherit`，只读登记不获得写权限、也不是读隔离（ADR-0013 的既有语义）；主 checkout 的 A 根同样适用。
+- **分支展示**：候选的 `branch` 从 admin `HEAD` 的 `ref: refs/heads/<name>` 解析；主 checkout 取 common `HEAD`（即主 checkout 自己的分支），不是 linked checkout 的 HEAD；detached HEAD 不显示。分支只用于展示与 `viewRevision` 摘要，不参与授权或 owner 复验；`WorktreePromptView.branch` 是可选字段，缺失即不渲染。
+- **footer**：原生 `select` 换为 primitives `Button` + `Menu`（snooze 档位仍为直到出现新 worktree / 7 天 / 30 天 / 永久不再提示）；「暂不处理」「添加所选」改用 primitives `Button`，与下拉同高。预览模式仍只显示关闭按钮。
+- **安全边界不变**：确认仍是显式动作；host 的 owner 串行队列、primary/candidate 复验、`worktree/prompt-stale`、seen/snooze/resolve 生命周期、RPC 只传 id 不传路径均不变；每行 access 只改变登记 grant，不能绕过 with-held/上限/受保护目录判断。
+- **验收**：契约测试覆盖 access 只属于 add、未知/重复 id、非法值、branch 可选且非空；host 测试覆盖 A/B prompt branch、detached 缺省、read-only/read-write add 的 grant 字段与 effective access、非法 access 拒绝；客户端测试覆盖连续行、分支 chip、默认 inherit、逐行改为 read-only 后请求携带 `accesses`、无旧说明行；样式测试固定加宽、分隔线、分支/选择器/footer 规则。
 
 ## 第十八次修订（2026-11-09）
 
