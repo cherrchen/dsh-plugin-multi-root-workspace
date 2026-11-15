@@ -77,9 +77,9 @@ export type RemoteCommandResult =
       stdout: string
       stderr: string
       truncated: { stdout: boolean; stderr: boolean }
-      termination?: 'timeout' | 'cancelled'
+      termination?: 'timeout' | 'cancelled' | 'revoked'
     })
-  | (Base & { status: 'unknown'; reconcileId: string; reason: string; termination?: 'timeout' | 'cancelled' })
+  | (Base & { status: 'unknown'; reconcileId: string; reason: string; termination?: 'timeout' | 'cancelled' | 'revoked' })
 
 const notStarted = (base: Base, code: string): RemoteCommandResult =>
   base.operationId === undefined
@@ -161,7 +161,7 @@ export async function runRemoteCommand(
   // Admission B: the FINAL launch admission. The identical request re-enters
   // the owner's ordering point; a revocation since A denies here and spawn is
   // never called. The argv built under A is never cached across calls.
-  interface Launched { operationId: string; handle: RemoteProcessHandle; stdout: Sink; stderr: Sink }
+  interface Launched { revision: number; operationId: string; handle: RemoteProcessHandle; stdout: Sink; stderr: Sink }
   let launch: { result: RemoteCommandResult } | { launched: Launched }
   try {
     launch = await registry.withRemoteOperation(admission(), operation => {
@@ -184,7 +184,7 @@ export async function runRemoteCommand(
         const handle = backend.spawn(prep!.argv, {
           cwd: prep!.remoteCwd, env: prep!.deployment.env, generation: prep!.generation,
         }, { stdout: stdout.append, stderr: stderr.append })
-        return { launched: { operationId: operation.identity.operationId, handle, stdout, stderr } }
+        return { launched: { revision: operation.identity.revision, operationId: operation.identity.operationId, handle, stdout, stderr } }
       } catch (error) {
         return { result: { ...base, operationId: operation.identity.operationId, status: 'admitted-may-start' as const, reason: error instanceof Error ? error.message : String(error) } }
       }
@@ -196,38 +196,53 @@ export async function runRemoteCommand(
   if ('result' in launch) return launch.result
   const { operationId, handle, stdout, stderr } = launch.launched
 
-  try {
-    await handle.started
-  } catch (error) {
-    if (error instanceof RemoteConnectionLost) {
-      return {
-        ...base, operationId, status: 'unknown', reconcileId: operationId,
-        reason: error.message,
-      }
-    }
-    return {
-      ...base, operationId, status: 'admitted-may-start',
-      reason: error instanceof Error ? error.message : String(error),
-    }
-  }
-
-  // From here the command may be running: wait OUTSIDE every queue, bound the
-  // output, and terminate exactly once on timeout or caller cancellation.
-  let terminated = false
-  let termination: 'timeout' | 'cancelled' | undefined
-  const terminateOnce = (why: 'timeout' | 'cancelled') => {
-    if (terminated) return
-    terminated = true
+  // Observe from spawn, including the asynchronous start acknowledgement.
+  // A notification is only a reason to re-admit; it never grants authority.
+  let active = true
+  let checking = false
+  let termination: 'timeout' | 'cancelled' | 'revoked' | undefined
+  let cleanupTimer: ReturnType<typeof setTimeout> | undefined
+  const deadline = Promise.withResolvers<never>()
+  void deadline.promise.catch(() => {})
+  const terminateOnce = (why: 'timeout' | 'cancelled' | 'revoked') => {
+    if (!active || termination !== undefined) return
     termination = why
-    handle.terminate()
+    cleanupTimer = setTimeout(() => deadline.reject(new RemoteConnectionLost('remote termination was not confirmed before the cleanup deadline')), prep.deployment.terminateGraceMs)
+    try { handle.terminate() } catch (error) {
+      deadline.reject(new RemoteConnectionLost(error instanceof Error ? error.message : String(error)))
+    }
   }
+  const checkGrant = async () => {
+    if (!active || checking || termination !== undefined) return
+    checking = true
+    const timer = setTimeout(() => terminateOnce('revoked'), 1_000)
+    try {
+      await registry.withRemoteOperation(admission(), operation => {
+        // Conservatively end the operation on any grant-store revision change:
+        // remove+re-add between observations must not revive a running grant.
+        if (operation.identity.authorityEpoch !== prep.epoch
+          || operation.identity.revision !== launch.launched.revision
+          || operation.identity.effectiveMode !== prep.effectiveMode
+          || operation.endpoints[0]!.bindingDigest !== prep.endpoint.bindingDigest
+          || backendFor(request.environmentId)?.currentGeneration() !== prep.generation) terminateOnce('revoked')
+      })
+    } catch { terminateOnce('revoked') }
+    finally { clearTimeout(timer); checking = false }
+  }
+  const unsubscribe = registry.onRemoteChange(() => { void checkGrant() })
+  const poll = setInterval(() => { void checkGrant() }, 250)
   const timer = setTimeout(() => terminateOnce('timeout'), request.timeoutMs)
   const onAbort = () => terminateOnce('cancelled')
+  signal.addEventListener('abort', onAbort, { once: true })
   if (signal.aborted) onAbort()
-  else signal.addEventListener('abort', onAbort, { once: true })
+  void checkGrant() // closes the spawn -> subscribe race
   try {
-    const exit = await handle.exited
-    const confirmed = await handle.waitForExit(prep.deployment.terminateGraceMs)
+    try { await Promise.race([handle.started, deadline.promise]) } catch (error) {
+      if (error instanceof RemoteConnectionLost) throw error
+      return { ...base, operationId, status: 'admitted-may-start', reason: error instanceof Error ? error.message : String(error) }
+    }
+    const exit = await Promise.race([handle.exited, deadline.promise])
+    const confirmed = await Promise.race([handle.waitForExit(prep.deployment.terminateGraceMs), deadline.promise])
     return {
       ...base, operationId, status: confirmed ? 'scope-exited' : 'exited',
       scope: confirmed ? 'confirmed' : 'unconfirmed',
@@ -246,7 +261,11 @@ export async function runRemoteCommand(
     }
     throw error
   } finally {
+    active = false
+    unsubscribe()
+    clearInterval(poll)
     clearTimeout(timer)
+    clearTimeout(cleanupTimer)
     signal.removeEventListener('abort', onAbort)
   }
 }

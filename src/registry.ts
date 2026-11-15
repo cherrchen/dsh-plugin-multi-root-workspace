@@ -1668,7 +1668,7 @@ export class MultiRootRegistry extends Service {
 
   private readonly remoteListeners = new Set<() => void>()
 
-  /** Subscribe to remote plane rebinds (config, mode, manifest digest). */
+  /** Subscribe to remote plane rebinds and grant removals. */
   onRemoteChange(listener: () => void): () => void {
     this.remoteListeners.add(listener)
     return () => { this.remoteListeners.delete(listener) }
@@ -1811,7 +1811,9 @@ export class MultiRootRegistry extends Service {
     if (this.client) return remoteSnapshotSchema.parse(await this.remotePlane.remoteRequest('remote-remove', [primaryRoot, ref])) as RemoteSnapshotReply
     this.requireActive()
     const key = primaryKey(primaryRoot)
-    return await this.serialize(key, async () => this.remotePlane.remove(key, ref, this.operationEpoch!))
+    const result = await this.serialize(key, async () => this.remotePlane.remove(key, ref, this.operationEpoch!))
+    this.notifyRemoteChange()
+    return result
   }
 
   /**
