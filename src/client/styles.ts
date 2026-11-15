@@ -1656,7 +1656,9 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   font: inherit;
   line-height: 0;
   cursor: pointer;
-  transform: translate(50%, -50%);
+  /* Pulled 4px toward the card on both axes: a corner badge reads as balanced
+     only when its optical seat sits slightly inside the geometric corner. */
+  transform: translate(calc(50% - 4px), calc(-50% + 4px));
 }
 
 /* The circle stays 18px; this invisible ring widens the pointer target to 24px. */

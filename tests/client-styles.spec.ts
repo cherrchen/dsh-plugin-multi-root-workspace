@@ -491,7 +491,10 @@ describe('the worktree suggestion notice rules', () => {
     // Drawn by this sheet rather than by a primitive: the compact control rules
     // fix a taller height and a smaller corner radius, which would turn the
     // badge into a rounded rectangle.
-    expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose\s*\{[^}]*position:\s*absolute[^}]*top:\s*0[^}]*right:\s*0[^}]*width:\s*18px[^}]*height:\s*18px[^}]*padding:\s*0[^}]*border-radius:\s*50%[^}]*transform:\s*translate\(50%,\s*-50%\)/s)
+    expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose\s*\{[^}]*position:\s*absolute[^}]*top:\s*0[^}]*right:\s*0[^}]*width:\s*18px[^}]*height:\s*18px[^}]*padding:\s*0[^}]*border-radius:\s*50%/s)
+    // The seat is pulled 4px inside the geometric corner on both axes: a corner
+    // badge reads as balanced only slightly off the mathematical center.
+    expect(notice).toMatch(/transform:\s*translate\(calc\(50%\s*-\s*4px\),\s*calc\(-50%\s*\+\s*4px\)\)/s)
     // The badge wears the card surface and the host's ink tokens, never a literal color.
     expect(notice).toMatch(/\.mrfw-notice \.mrfw-noticeClose\s*\{[^}]*border:\s*0\.5px solid var\(--dsw-alias-border-l3\)[^}]*background:\s*var\(--dsw-alias-bg-layer-2\)[^}]*color:\s*var\(--dsw-alias-label-secondary\)/s)
     // Hovering leaves the surface exactly as it is: no tint and no transparency.

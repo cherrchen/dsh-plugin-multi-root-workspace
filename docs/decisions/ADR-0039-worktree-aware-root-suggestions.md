@@ -230,7 +230,7 @@ PR #60 自动评审核验后的实现对齐修复，不改变授权模型与安�
 
 维护者收回第二十一次修订的操作决定（「删除 ×，稍后提醒本身就是关闭」），在常驻提示右上角加回关闭按钮。触发、RPC、授权、宿主复验与生命周期语义不变，与 §20.3 冲突的呈现/操作条目以本节为准：
 
-- **控件与形态**：在原「查看」+「稍后提醒」拆分按钮之外，新增一个小号正圆关闭按钮，圆心压在卡片右上角外沿并允许外凸出卡片（宽屏与两行 compact 形态同款落点）。视觉外径 18px、`0.5px` `--dsw-alias-border-l3` 描边、`--dsw-alias-bg-layer-2` 底色（与卡片同色，形成角上开孔观感）、`--dsw-alias-label-secondary` 字形，内容为 10px 的 ×；一个 `inset: -3px` 的不可见环把命中区扩到 24px。**控件自绘**（裸 `button` + 插件样式），不用 primitives `Button`：后者的紧凑尺寸规则把高度固定在 28px、圆角固定在 `--dsw-radius-sm`，实测会渲染成圆角矩形而不是正圆。**不设 hover / active 底色**：悬停时保持与卡片一致的白色表面，不得变灰或透明；只有 `:focus-visible` 使用 `--dsw-alias-brand-primary` 环，且允许画到卡片外。
+- **控件与形态**：在原「查看」+「稍后提醒」拆分按钮之外，新增一个小号正圆关闭按钮，圆心相对卡片右上角**向内收 4px**（视觉重心不等于几何正中：贴在角点上会显得向外飘），并允许外凸出卡片（宽屏与两行 compact 形态同款落点）。视觉外径 18px、`0.5px` `--dsw-alias-border-l3` 描边、`--dsw-alias-bg-layer-2` 底色（与卡片同色，形成角上开孔观感）、`--dsw-alias-label-secondary` 字形，内容为 10px 的 ×；一个 `inset: -3px` 的不可见环把命中区扩到 24px。**控件自绘**（裸 `button` + 插件样式），不用 primitives `Button`：后者的紧凑尺寸规则把高度固定在 28px、圆角固定在 `--dsw-radius-sm`，实测会渲染成圆角矩形而不是正圆。**不设 hover / active 底色**：悬停时保持与卡片一致的白色表面，不得变灰或透明；只有 `:focus-visible` 使用 `--dsw-alias-brand-primary` 环，且允许画到卡片外。
 - **语义：纯关闭**：点击只隐藏本次激活的提示，不调用 `snooze` / `resolve`，不写 sidecar 与 Registry，不打开 Dialog。提示出现时 `seen` 已把候选记入本 Host 的 `offered`，因此关闭后本 Host 生命周期内不再自动提示、Host 重启后候选重新可见；这让「关闭」与写持久延迟的「稍后提醒」和写 ignore 的「永久不再提示」三分。
 - **生命周期**：关闭立即递增 `workEpoch` 并清空下拉开关状态，在飞的提醒完成不能再回写已关闭的提示（与 `openDialogFor` 相同的归属规则）；不新增 Escape 关闭。
 - **可访问性**：关闭按钮使用独立词典键 `worktree.toastClose`（中「关闭提示」/英 "Dismiss"）作为 `aria-label`，位于操作 `role="group"` 之外；Tab 顺序为查看 → 稍后提醒 → 关闭。
