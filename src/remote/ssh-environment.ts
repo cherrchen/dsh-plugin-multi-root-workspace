@@ -246,10 +246,10 @@ export class SshEnvironmentManager {
   }
 
   /** Open (or join the in-flight open of) one environment's SFTP session. */
-  async openSftp(environmentId: string): Promise<SftpEnvironment> {
+  async openSftp(environmentId: string, signal?: AbortSignal): Promise<SftpEnvironment> {
     const existing = this.sftpOpenings.get(environmentId)
     if (existing !== undefined) return await existing
-    const promise = this.openSftpFresh(environmentId)
+    const promise = this.openSftpFresh(environmentId, signal)
     this.sftpOpenings.set(environmentId, promise)
     try {
       const env = await promise
@@ -273,7 +273,7 @@ export class SshEnvironmentManager {
   }
 
   /** Same ordered refusals as open(), then the SFTP handshake + publish extensions. */
-  private async openSftpFresh(environmentId: string): Promise<SftpEnvironment> {
+  private async openSftpFresh(environmentId: string, signal?: AbortSignal): Promise<SftpEnvironment> {
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
     if (this.gate.status !== 'eligible') {
@@ -287,7 +287,10 @@ export class SshEnvironmentManager {
     }
     if (environment.transfer === undefined) throw new SshEnvironmentError('transfer-unavailable', `environment "${environmentId}" declares no transfer block`)
     await this.verifyHostIdentity(environment)
+    signal?.throwIfAborted()
     const client = SftpClient.connect(environment.connection.host, { onLoss: () => this.markSftpStale(environmentId) })
+    const abort = () => client.dispose()
+    signal?.addEventListener('abort', abort, { once: true })
     try {
       const version = await client.init()
       if (version.extensions['hardlink@openssh.com'] === undefined || version.extensions['fsync@openssh.com'] === undefined) {
@@ -299,7 +302,7 @@ export class SshEnvironmentManager {
     } catch (error) {
       client.dispose()
       throw error
-    }
+    } finally { signal?.removeEventListener('abort', abort) }
   }
 
   /** The full ordered admission: gate → transport → isolation → identity → load → mount. */

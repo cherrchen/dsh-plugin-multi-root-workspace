@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runRemoteCopy, type RemoteCopyDeps, type RemoteCopyRequest } from '../src/remote/transfer.ts'
 import { SftpStatusError, SftpConnectionLost, type SftpClient } from '../src/remote/sftp.ts'
 import type { SshEnvironmentManager } from '../src/remote/ssh-environment.ts'
@@ -639,5 +639,54 @@ describe('remote destination path safety', () => {
     expect(result).toMatchObject({ status: 'committed', staging: 'residual' })
     expect(s.mem.hardlinkCalls).toBe(1)
     expect(s.mem.files.has('/import/dest.txt')).toBe(true)
+  })
+})
+
+
+describe('total transfer I/O deadline and cancellation', () => {
+  it.each(['realpath', 'write', 'read', 'fsync', 'hardlink', 'remove', 'close'] as const)('bounds a stalled %s without publishing again', async method => {
+    fixture = createFixtureWorkspace('copy-deadline')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 40 } })
+    const entered = Promise.withResolvers<void>()
+    vi.spyOn(s.mem, method).mockImplementation(() => { entered.resolve(); return new Promise<never>(() => {}) })
+    const pending = run(s, localToRemote())
+    await entered.promise
+    const result = await pending
+    if (method === 'hardlink') expect(result).toMatchObject({ status: 'unknown', stage: 'publish', reconcileId: 'op-1' })
+    else if (method === 'remove') expect(result).toMatchObject({ status: 'committed', staging: 'residual' })
+    else expect(result.status).not.toBe('committed')
+    expect(s.mem.hardlinkCalls).toBeLessThanOrEqual(1)
+  })
+
+  it.each(['upload', 'download', 'relay'] as const)('cancels a stalled %s without waiting for the response', async direction => {
+    fixture = createFixtureWorkspace('copy-cancel')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
+    const s = stack()
+    s.mem.seed('/export/artifact.bin', 'bounded')
+    s.mem.seed('/import/source.txt', 'bounded')
+    const entered = Promise.withResolvers<void>()
+    vi.spyOn(s.mem, direction === 'upload' ? 'write' : 'read').mockImplementation(() => { entered.resolve(); return new Promise<never>(() => {}) })
+    const controller = new AbortController()
+    const req = direction === 'upload' ? localToRemote() : direction === 'download' ? remoteToLocal() : remoteToRemote()
+    const pending = runRemoteCopy(s.registry, s.deps, req, 'remote_copy', controller.signal)
+    await entered.promise
+    controller.abort()
+    expect(await pending).toMatchObject({ code: 'cancelled' })
+    expect(s.mem.hardlinkCalls + s.memB.hardlinkCalls).toBe(0)
+  })
+
+  it('disposes a connection which opens after the total deadline', async () => {
+    fixture = createFixtureWorkspace('copy-open-timeout')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 20 } })
+    const opened = Promise.withResolvers<{ client: SftpClient; generation: string }>()
+    const dispose = vi.fn()
+    s.manager.openSftp = async () => await opened.promise as never
+    const pending = run(s, localToRemote(), { manager: s.manager })
+    expect(await pending).toMatchObject({ code: 'transfer-timeout', stage: 'preflight' })
+    opened.resolve({ client: { dispose } as unknown as SftpClient, generation: 'late' })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(dispose).toHaveBeenCalledOnce()
   })
 })

@@ -110,3 +110,7 @@ GUI 入口有两处：
 `remote_bash` 从 spawn 返回 handle 起观察取消、超时与授权变化（包括尚未收到启动确认的阶段）。本 Host 的撤权通知立即触发重新准入；同时每 250ms 向 Registry owner 重新准入，覆盖跨 Host 撤权、会话降为只读和配置失效。复核等待超过 1 秒也按撤权处理。任何准入失败、epoch、策略、连接代次或授权存储 revision 变化均只发送一次 terminate；revision 变化保守终止该存储上的在飞命令，防止两次观察间 remove+re-add 恢复旧操作。
 
 终止原因返回 `termination: revoked | cancelled | timeout`。在 `terminateGraceMs` 内仍无法确认结果则返回 `unknown` 和 reconcileId，不无限等待、不重新执行。通知和轮询只是失效检测，不能代替每次新操作的正式准入；网络和调度延迟下不承诺撤权瞬间远端停止。
+
+## 传输截止时间
+
+`transfer.timeoutMs` 是一次复制的总 I/O 预算：包含准入、连接/握手、预检、读取/写入、回读校验和发布，不在 staging 开始时重新计时。取消或超时会使待决调用结束，并废弃正在等待应答的 SFTP 通道；迟到连接立即关闭，不继续复制。清理使用独立且共享的 1 秒预算；断开的代次不能按路径删除暂存文件，报告 residual/unknown。CREATE 或 LINK 发出后缺少应答时返回 unknown 和 reconcileId；LINK 已确认、仅清理失败时仍返回 committed 与残留状态。
