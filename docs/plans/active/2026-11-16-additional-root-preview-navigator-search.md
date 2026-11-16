@@ -1,6 +1,6 @@
 # 附加根文件预览导航树的工作区搜索（实施计划）
 
-> 状态：**P1–P4 已实施**（2026-11-16，分支 `feat/additional-file-tree-search`）；P5 门禁与实机目检进行中。
+> 状态：**P1–P4 已实施**；P5 本机门禁已执行（见「进度与证据」），**GUI 实机目检待维护者/PR 验收**。分支 `feat/additional-file-tree-search`。
 > P0 文档已作为 `7959317` 提交，并按 2026-11-16 外部技术评审的 F1–F3 修订（RootSwitcher 过渡帧缺陷纳入、
 > 测试范围编号、危害主次表述）。本文件是实施计划与执行账本，每阶段结束把命令与结果写入「进度与证据」。
 >
@@ -667,11 +667,32 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 | P2 | 已完成 | `881d2ad` | `tests/client-navigator.spec.tsx` 36（24 既有 + 12 新）全绿，seat 缺席路径逐项回归；`pnpm typecheck` / `pnpm lint` 通过；Host 侧 diff 为空 |
 | P3 | 已完成 | `967ef94` | `client-files` 20、`client-styles` 44、`client-navigator` 38 全绿；styles 双向 `matches()`（原生直接子节点匹配、插件嵌套节点不匹配）；焦点交接三形态（preview 有/无 pane 包装、Files 页包装、旧直挂） |
 | P4 | 已完成 | （本提交 `docs: document additional-root preview navigator search`） | ADR-0041 Amendment、ADR-0043 状态、README 双语、architecture §7、requirements、migration reference 第三接口面、FORK.md、compat note 双语、troubleshooting；`node scripts/check-docs.mjs` → 0 errors / 0 warnings |
-| P5 | 进行中 | — | 全量门禁与实机目检见下节 |
+| P5 | 本机门禁完成；交互式 GUI 目检待人工 | — | 见下节「P5 执行记录」：lint/typecheck/build/focused/compat/docs/pack 全绿；`pnpm test` 1871/165/17（17 个基线同因）；三项 smoke 与 packed、auto-review 全绿；`verify:all` 在完整 test 处因基线同因中止；真实 `dsh web` + Chrome headless 已验客户端面，交互目检待 PR/维护者 |
 
 ### P5 执行记录（命令与结果）
 
-（P5 门禁与实机目检完成后回填；本机受限项按既有基线记录，CI 拥有最终信号。）
+2026-11-16 本机（macOS，DSH 会话自身运行在 Seatbelt 内）按计划顺序执行：
+
+| 命令 | 结果 |
+| --- | --- |
+| `pnpm lint` | 0 warnings / 0 errors（347 files） |
+| `pnpm typecheck` | 通过（host + client 双端，含 auto-review 源码生成） |
+| `pnpm build` | 通过（types + bundle；client bundle 2 files / 1.94 MB） |
+| focused vitest（P1–P3 七个套件 + `client-search-preferences`） | 193 passed / 0 failed |
+| `pnpm compat:check` | allowlist、peerDependencies、dev pin、安装树一致（DSH `0.2.2-rc.3`，24 个精确版本） |
+| `pnpm docs:check` | 0 errors / 0 warnings |
+| `pnpm pack:check` | packed artifact 完整 |
+| `pnpm kernel:probe` | exit 0；seatbelt runner-failed（`sandbox_apply: Operation not permitted`）、bwrap/landlock unavailable → 受限执行断言按既有基线 skip |
+| `pnpm test` | **1871 passed / 165 skipped / 17 failed**；17 个失败全部是本机既有基线同因（共享 authority 的内核 IPC / sandboxed-peer 家族：`authority-boundaries` 2、`b9-review-regressions` 1、`registry-lease` 4、`registry-multiprocess.e2e` 3、`registry-operation` 1、`registry.spec` 3、`skills-authority` 2、`skills-registry` 1）；本次改动只触及 client 与文档，未改这些模块 |
+| `pnpm smoke` | compose **56/0/0**；behavior **96/0/8**（skip：受限 bash 与共享 IPC）；journey **88/0/2**（web 腿真实启动 `dsh web` 并注册附加根；skip：本机无内核 runner） |
+| `pnpm smoke:packed` | **95 passed / 0 failed / 8 skipped**；tarball 经真实 `dsh plugin add` 安装后跑完整 behavior battery |
+| `pnpm auto-review:fork` | baselines、上游 hash、显式 delta、策略、身份、角色、协议与 owner teardown 全部验证 |
+| `pnpm smoke:auto-review` | headless/web × 双 bundle order 全部通过（单行开关、重复 reload、owner drain、官方恢复） |
+| `pnpm verify:all` | lint → typecheck → build → kernel:probe 通过；在完整 `pnpm test` 处因上述 17 个基线同因失败中止（与此前发布验收记录同因；CI 非沙箱 runner 是最终信号） |
+
+**Host 侧 diff 为空**：`git diff 53ae34d..HEAD -- src/contract.ts src/files-search.ts src/workspace-files.ts src/command.ts src/registry.ts src/scope.ts src/index.ts src/compat/workspace-files.ts src/compat/fs-patch.ts src/compat/dsh-version.ts package.json cordis.patch.yml` 无输出；`src/compat/files-tree.ts` 的 `currentRef` 条件透传属计划允许的 client 侧改动。
+
+**实机 GUI 目检**：本会话无法写真实的用户 `$DSH_HOME`（`dsh web` 对该 profile 返回 `EPERM`，只在会话可写范围内使用 scratch home），也没有已认证的人工目检通道，因此计划里的**交互目检清单**未能完成。已补两项真实进程级验证：(1) `smoke:journey` 的 web 腿真实启动 `dsh web`（输出 `http://127.0.0.1:<port>/?token=…`）、经面板 HTTP 的 `/workspace-folders add` 注册附加根、断言 `ctx.get('clientModules').graph().entries` 含本包（`clientEntryServed`）并驱动真实 turn；(2) scratch `$DSH_HOME` + 真实 `dsh web` + 本机 Google Chrome headless 载入 token URL，确认页面为 DeepSeek Harness、`#multi-root-workspace-styles` 存在、Hero 工作区入口（`.mrfw-heroEntry*`）与 footer 的「工作区目录」入口在真实浏览器中渲染（插件 client bundle 在真实 Web 组合里执行）。计划里的预览搜索交互目检（主根原生搜索不变；附加根预览常显搜索栏、结果/高亮/计数/eye/设置/失败重试；结果行 `replaceTab`；关开 Folder 与 `replaceTab` 后状态保留；push/overlay/fill、窄屏、浮动形态；Esc 顺序；切回主根恢复原生）仍待维护者在有会话/GUI 的开发树执行或 PR 验收补录；本计划保持在 `active/`。
 
 ### 本次会话的版本与代码事实核对（P0 证据）
 
