@@ -1029,6 +1029,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               <div className="mrfw-sectionTitleRow">
                 <span className="mrfw-sectionTitle">{t('panel.remoteList')}</span>
               </div>
+              {remoteState.view?.custodyMode === 'personal' && remoteState.view.endpoints.some(endpoint => endpoint.state !== 'registered') ? (
+                <p className="mrfw-note">{t('panel.remoteRegisterGuide')}</p>
+              ) : null}
               {remoteState.view === undefined
                 ? (remoteState.error === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null)
                 : remoteState.view.status.state !== 'ready' ? (
@@ -1080,6 +1083,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               custodyMode={remoteState.view?.custodyMode}
               status={remoteState.view?.status}
               endpoints={remoteState.view?.endpoints ?? []}
+              remotes={props.remotes}
               roots={state.view}
               remoteMode={props.remoteMode}
               onClose={() => { setSshDialog(undefined) }}

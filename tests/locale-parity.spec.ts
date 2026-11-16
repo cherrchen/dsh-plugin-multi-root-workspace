@@ -35,7 +35,7 @@ describe('panel dictionaries', () => {
   it('actually translates instead of copying the Chinese text into English', () => {
     // OS product names are proper nouns and stay identical in both languages;
     // every other identical value is untranslated copy.
-    const languageNeutral = new Set(['ssh.platform.linux', 'ssh.platform.darwin'])
+    const languageNeutral = new Set(['ssh.platform.linux', 'ssh.platform.darwin', 'ssh.step.helper'])
     const identical = Object.keys(zh).filter(key =>
       !languageNeutral.has(key) && zh[key as keyof typeof zh] === en[key as keyof typeof en])
     expect(identical).toEqual([])

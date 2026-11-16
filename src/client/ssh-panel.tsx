@@ -14,13 +14,14 @@
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/ssh-panel
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Button, Input, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { RootsView } from '../contract.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
 import { maybeComponent } from '../compat/client-icons.ts'
 import { errorHasDetail, errorKeyOf, PanelError } from './panel-client.ts'
 import type { CredentialPublicView, SshBindingView, SshClient, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
+import type { RemotesClient } from './remotes-client.ts'
 import { SshCustodySection, type RemoteCustodyMode } from './remote-custody.tsx'
 import type { Key } from './locales.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
@@ -443,6 +444,8 @@ export interface SshManagementDialogProps {
   readonly status: RemotesView['status'] | undefined
   /** The deployment endpoints, used as the read-only team/hardened list. */
   readonly endpoints: readonly RemoteEndpointView[]
+  /** The registration client; absent when the host serves no remote contract. */
+  readonly remotes?: RemotesClient | undefined
   /** The roots view, for the binding local-peer choices. */
   readonly roots: RootsView | undefined
   /** The shared remote-tools settings form (same owner as the plugin card). */
@@ -587,6 +590,41 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const accessKeys = (view?.credentials ?? []).filter(credential => credential.purpose === 'access-key')
   const credentialOf = (id: string | undefined): CredentialPublicView | undefined => view?.credentials.find(credential => credential.id === id)
   const environmentOf = (id: string): SshEnvironmentView | undefined => view?.environments.find(environment => environment.environmentId === id)
+  const endpointOf = (environmentId: string, rootId: string): RemoteEndpointView | undefined =>
+    props.endpoints.find(endpoint => endpoint.environmentId === environmentId && endpoint.rootId === rootId)
+
+  /** The first unmet prerequisite of the registration chain for one environment. */
+  const envNextStep = (environment: SshEnvironmentView): 'helper' | 'link' | 'binding' | 'ready' => {
+    if (environment.helper === null) return 'helper'
+    if (environment.credential.kind === 'managed' && view?.linked !== true) return 'link'
+    if (!(view?.bindings ?? []).some(binding => binding.environmentId === environment.environmentId)) return 'binding'
+    return 'ready'
+  }
+
+  /** The ordered readiness steps the chain renders; alias credentials skip the link step. */
+  const envSteps = (environment: SshEnvironmentView): { key: 'helper' | 'link' | 'binding'; done: boolean }[] => [
+    { key: 'helper', done: environment.helper !== null },
+    ...(environment.credential.kind === 'managed' ? [{ key: 'link' as const, done: view?.linked === true }] : []),
+    { key: 'binding', done: (view?.bindings ?? []).some(binding => binding.environmentId === environment.environmentId) },
+  ]
+
+  /** Register/withdraw one binding endpoint; the refreshed view arrives via onChanged. */
+  const mutateRemote = async (action: 'register' | 'remove', binding: { environmentId: string; rootId: string }): Promise<void> => {
+    if (props.remotes === undefined || sessionId === undefined) return
+    setBusy(true)
+    try {
+      if (action === 'register') await props.remotes.add(sessionId, binding.environmentId, binding.rootId)
+      else await props.remotes.remove(sessionId, binding.environmentId, binding.rootId)
+      if (current()) {
+        setError(undefined)
+        props.onChanged()
+      }
+    } catch (cause: unknown) {
+      if (current()) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
+    } finally {
+      if (current()) setBusy(false)
+    }
+  }
 
   const clearSecretInputs = (): void => { setPrivateKey(''); setPassphrase(''); setPassword('') }
 
@@ -667,7 +705,12 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     setScan(undefined)
     setFingerprint(undefined)
     if (existing) setEditDraft(undefined)
-    else setAddDraft(blankEditor())
+    else {
+      setAddDraft(blankEditor())
+      // Land the operator on the new environment's row so the readiness
+      // chain's first pending step is the next thing on screen.
+      changeTab('connections')
+    }
   }
 
   const saveBinding = async (): Promise<void> => {
@@ -831,25 +874,46 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     <div className="mrfw-sectionTitleRow"><span className="mrfw-sectionTitle">{t('ssh.bindings')}</span></div>
     <p className="mrfw-note">{t('ssh.connections.bindingsGuide')}</p>
     {(view?.bindings.length ?? 0) === 0 ? <p className="mrfw-note">{t('ssh.empty.bindings')}</p> : null}
-    {view?.bindings.map((binding: SshBindingView) => (
-      <div key={`${binding.environmentId}/${binding.rootId}`} className="mrfw-row">
-        <div className="mrfw-rootText">
-          <span className="mrfw-rootName">
-            <span className="mrfw-rootNameText">{environmentOf(binding.environmentId)?.displayName ?? binding.environmentId}</span>
-            <Tag tone="outline" className="mrfw-sshTag">{binding.rootId}</Tag>
-          </span>
-          <span className="mrfw-rootPath">{binding.path}</span>
-          <span className="mrfw-note">
-            {binding.actions.join(', ')}
-            {(binding.transfers ?? []).map(transfer => ` · ${transfer.direction === 'import' ? '⇐' : '⇒'} ${transfer.peer.rootId}`).join('')}
-          </span>
+    {view?.bindings.map((binding: SshBindingView) => {
+      const endpoint = endpointOf(binding.environmentId, binding.rootId)
+      return (
+        <div key={`${binding.environmentId}/${binding.rootId}`} className="mrfw-row">
+          <div className="mrfw-rootText">
+            <span className="mrfw-rootName">
+              <span className="mrfw-rootNameText">{environmentOf(binding.environmentId)?.displayName ?? binding.environmentId}</span>
+              <Tag tone="outline" className="mrfw-sshTag">{binding.rootId}</Tag>
+              {endpoint === undefined ? null : (
+                <Tag tone={endpoint.state === 'registered' ? 'success' : endpoint.state === 'unregistered' ? 'outline' : 'warning'} className="mrfw-sshTag">
+                  {t(`remote.state.${endpoint.state}` as Key)}
+                </Tag>
+              )}
+            </span>
+            <span className="mrfw-rootPath">{binding.path}</span>
+            <span className="mrfw-note">
+              {binding.actions.join(', ')}
+              {(binding.transfers ?? []).map(transfer => ` · ${transfer.direction === 'import' ? '⇐' : '⇒'} ${transfer.peer.rootId}`).join('')}
+            </span>
+          </div>
+          <div className="mrfw-sshRowActions">
+            {props.remotes === undefined || endpoint === undefined ? null : endpoint.state === 'registered' ? (
+              <Button variant="ghost" size="sm" disabled={busy}
+                onClick={() => { void mutateRemote('remove', binding) }}>
+                {t('panel.remoteRemove')}
+              </Button>
+            ) : (
+              <Button variant="primary" size="sm" disabled={busy}
+                onClick={() => { void mutateRemote('register', binding) }}>
+                {t('panel.remoteRegister')}
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" disabled={busy}
+              onClick={() => { if (ssh !== undefined && sessionId !== undefined) void submit(async () => await ssh.bindingRemove(sessionId, revision(), binding.environmentId, binding.rootId)) }}>
+              {t('ssh.delete')}
+            </Button>
+          </div>
         </div>
-        <Button variant="ghost" size="sm" disabled={busy}
-          onClick={() => { if (ssh !== undefined && sessionId !== undefined) void submit(async () => await ssh.bindingRemove(sessionId, revision(), binding.environmentId, binding.rootId)) }}>
-          {t('ssh.delete')}
-        </Button>
-      </div>
-    ))}
+      )
+    })}
     <Button variant="outline" size="sm" disabled={busy || bindingDraft !== undefined || (view?.environments.length ?? 0) === 0}
       onClick={() => setBindingDraft(blankBinding(view?.environments[0]?.environmentId))}>
       {t('ssh.bindingAdd')}
@@ -926,6 +990,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       {view?.environments.map(environment => {
         const id = environment.environmentId
         const envAccessKeys = accessKeys.filter(credential => credential.environmentId === id)
+        const next = envNextStep(environment)
         return (
           <div key={id} className="mrfw-row mrfw-sshEnvRow">
             <div className="mrfw-rootText">
@@ -936,12 +1001,39 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
               </span>
               <span className="mrfw-rootPath">{environment.endpoint.user}@{environment.endpoint.hostname}:{environment.endpoint.port} · {environment.workspace}</span>
               <span className="mrfw-note">{credentialLabel(environment.credential)}</span>
+              <span className="mrfw-sshCheckRow">
+                <span className="mrfw-sshFieldHint">{t('ssh.ready.label')}</span>
+                {envSteps(environment).map((step, index) => (
+                  <Fragment key={step.key}>
+                    {index === 0 ? null : <span className="mrfw-sshFieldHint">→</span>}
+                    <Tag tone={step.done ? 'success' : step.key === next ? 'warning' : 'outline'} className="mrfw-sshTag">
+                      {t(`ssh.step.${step.key}` as Key)}
+                    </Tag>
+                  </Fragment>
+                ))}
+                {next === 'ready' ? <Tag tone="success" className="mrfw-sshTag">{t('ssh.ready.done')}</Tag> : null}
+              </span>
               {envAccessKeys.map(credential => (
                 <span key={credential.id} className="mrfw-note">{t('ssh.accessKey')} · {credential.label}{credential.fingerprint === undefined ? '' : ` · ${credential.fingerprint}`}</span>
               ))}
               {testResults[id] === undefined ? null : <span className="mrfw-note">{testResults[id]}</span>}
             </div>
             <div className="mrfw-sshRowActions">
+              {next === 'helper' && helperFor !== id ? (
+                <Button variant="primary" size="sm" disabled={busy} onClick={() => setHelperFor(id)}>{t('ssh.helperInstall')}</Button>
+              ) : null}
+              {next === 'link' ? (
+                <Button variant="primary" size="sm" disabled={busy}
+                  onClick={() => { if (ssh !== undefined && sessionId !== undefined) void submit(async () => await ssh.configLink(sessionId)) }}>
+                  {t('ssh.linkNow')}
+                </Button>
+              ) : null}
+              {next === 'binding' ? (
+                <Button variant="primary" size="sm" disabled={busy || bindingDraft !== undefined}
+                  onClick={() => setBindingDraft(blankBinding(id))}>
+                  {t('ssh.bindingAdd')}
+                </Button>
+              ) : null}
               <Button variant="ghost" size="sm" disabled={busy} onClick={() => { void testEnvironment(id) }}>{t('ssh.envTest')}</Button>
               {helperFor === id ? (
                 <>
@@ -958,7 +1050,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
                     {t('ssh.helperInstall')}
                   </Button>
                 </>
-              ) : (
+              ) : environment.helper === null ? null : (
                 <Button variant="ghost" size="sm" disabled={busy} onClick={() => setHelperFor(id)}>{t('ssh.helperInstall')}</Button>
               )}
               {environment.credential.kind === 'managed' && credentialOf(environment.credential.credentialId)?.kind === 'password' ? (
