@@ -514,6 +514,24 @@ export function sshPackageVersion(packageName: string): string | undefined {
 }
 
 /**
+ * The install root of an SSH package — the directory its resolved
+ * `package.json` sits in, through the same host-anchor-first chain as
+ * {@link sshPackageVersion} so a path derived from it always names the copy
+ * the version read judged. Package files (`lib/helper.js`, `lib/protocol.js`)
+ * are addressed relative to this root, never by a deep specifier: `exports`
+ * whitelists subpaths and publishes none of `lib/*`.
+ * @param packageName - the SSH package to locate.
+ * @returns the package root, or `undefined` when no copy resolves.
+ */
+export function sshPackageRoot(packageName: string): string | undefined {
+  const require = createRequire(import.meta.url)
+  const host = hostAnchorRequire(require)
+  const hostHit = host === undefined ? undefined : resolvePackageJson(host, packageName)
+  const hit = hostHit ?? resolvePackageJson(require, packageName)
+  return hit === undefined ? undefined : dirname(hit)
+}
+
+/**
  * Whether the SSH package's resolved copy is a private one only this package
  * can see: the host anchor cannot reach it AND the only resolvable copy lives
  * inside this package's own root. When the composition itself sits inside

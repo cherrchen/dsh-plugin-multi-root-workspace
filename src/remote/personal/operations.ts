@@ -11,6 +11,7 @@ import type { ExecFile } from './credentials.ts'
 import { managedHostAlias, renderAskpass } from './ssh-files.ts'
 import type { PersonalEnvironment } from './config.ts'
 import { checkRemotePath } from '../manifest.ts'
+import { sshPackageRoot } from '../../compat/dsh-version.ts'
 
 export class RemoteOperationError extends Error {
   constructor(readonly code: string, message: string) {
@@ -105,8 +106,10 @@ export async function testConnection(exec: ExecFile, environment: PersonalEnviro
  */
 export function helperProtocol(): number {
   try {
+    const root = sshPackageRoot('@deepseek-ai/dsh-ssh')
+    if (root === undefined) return 3
     const require = createRequire(import.meta.url)
-    const protocol = require('@deepseek-ai/dsh-ssh/lib/protocol.js') as { SSH_PROTOCOL_VERSION?: unknown }
+    const protocol = require(join(root, 'lib', 'protocol.js')) as { SSH_PROTOCOL_VERSION?: unknown }
     return typeof protocol.SSH_PROTOCOL_VERSION === 'number' ? protocol.SSH_PROTOCOL_VERSION : 3
   } catch {
     return 3

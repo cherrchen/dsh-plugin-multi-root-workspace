@@ -205,6 +205,33 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     expect(state.environments[0]!.helper).not.toBeNull()
   })
 
+  it('sshHelperInstall resolves the host helper.js through the package root — exports never publishes lib/*', async () => {
+    const { registry, personalPath } = world()
+    writeConfig(personalPath, CONFIG())
+    const { createRequire } = await import('node:module')
+    const { createHash } = await import('node:crypto')
+    const { dirname } = await import('node:path')
+    const require = createRequire(import.meta.url)
+    const hostHelper = join(dirname(require.resolve('@deepseek-ai/dsh-ssh/package.json')), 'lib', 'helper.js')
+    const hostHash = createHash('sha256').update(readFileSync(hostHelper)).digest('hex')
+    const commands: string[] = []
+    const exec: ExecFile = async (_file, args) => {
+      const remote = String(args.at(-1))
+      commands.push(remote)
+      if (remote === 'command -v node') return { stdout: '/usr/bin/node\n', stderr: '' }
+      if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder\n', stderr: '' }
+      if (remote.startsWith('sha256sum ')) return { stdout: `${hostHash}  helper.js\n`, stderr: '' }
+      return { stdout: '', stderr: '' }
+    }
+    const state = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
+      { endpoint: 'sshHelperInstall', sessionId: 's', revision: 0, environmentId: 'dev-box' }, { exec }) as { environments: PersonalEnvironment[] }
+    const helper = state.environments[0]!.helper
+    expect(helper?.sha256).toBe(hostHash)
+    expect(helper?.helperPath).toContain('node_modules/@deepseek-ai/dsh-ssh/lib/helper.js')
+    expect(helper?.protocol).toBe(3)
+    expect(commands.some(cmd => cmd.includes('npm install'))).toBe(true)
+  })
+
   it('R6: a failed access-key install removes the orphan key; env remove cleans its access key', async () => {
     const { registry, personalPath, credentialRoot } = world()
     writeConfig(personalPath, CONFIG())
