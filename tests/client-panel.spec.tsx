@@ -301,6 +301,43 @@ describe('the client entry', () => {
     expect((label as () => string)()).toBe(`${NS}.action.label`)
   })
 
+  it('renders the footer row with the workspace-tree glyph and its visible label', () => {
+    // The compat probe prefers IconWorkspaceTreeOutlineRegular; the jsdom stub
+    // does not export it, so the probe falls back to the folder glyph — the
+    // point is that the gear the entry used to carry is gone.
+    const harness = mount()
+    renderPanel(harness)
+    const row = document.querySelector('.mrfw-triggerRow')
+    expect(row).toBeTruthy()
+    expect(document.querySelector('.mrfw-railRow')).toBeNull()
+    const trigger = row!.querySelector('.mrfw-trigger') as HTMLButtonElement
+    expect(trigger.textContent).toBe(`${NS}.action.label`)
+    const icon = trigger.querySelector('svg')
+    expect(icon?.getAttribute('data-icon')).toBe('folder-open')
+    expect(icon?.getAttribute('data-icon')).not.toBe('settings')
+    expect(icon?.getAttribute('width')).toBe('16')
+    expect(icon?.getAttribute('height')).toBe('16')
+    // The label is real text between the icon and the row's edge, not a title.
+    expect(trigger.querySelector('.mrfw-triggerLabel')?.textContent).toBe(`${NS}.action.label`)
+  })
+
+  it('renders the rail form as a 36px icon-only seat with an 18px glyph', () => {
+    const harness = mount()
+    const registration = harness.registrations.find(item => item.options.name === 'sidebar.footer.action')!
+    // The slot owner passes { wide: false } when the sidebar is collapsed.
+    render(createElement(registration.component as never, { wide: false }))
+    expect(document.querySelector('.mrfw-triggerRow.mrfw-railRow')).toBeTruthy()
+    const rail = document.querySelector('.mrfw-triggerRail') as HTMLButtonElement
+    expect(rail).toBeTruthy()
+    // Icon-only: no label span, and the name comes from the title attribute.
+    expect(document.querySelector('.mrfw-triggerLabel')).toBeNull()
+    expect(rail.getAttribute('title')).toBe(`${NS}.action.title`)
+    const icon = rail.querySelector('svg')
+    expect(icon?.getAttribute('data-icon')).toBe('folder-open')
+    expect(icon?.getAttribute('width')).toBe('18')
+    expect(icon?.getAttribute('height')).toBe('18')
+  })
+
   it('registers nothing when no sidebar declares the slot', () => {
     const ctx = {
       effect: () => () => {},

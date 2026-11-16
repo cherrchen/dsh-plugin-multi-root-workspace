@@ -37,8 +37,8 @@ import {
   IconFolderOpen,
   IconPlus,
   IconRefresh,
-  IconSettings,
   IconTrash,
+  IconWorkspaceTree,
 } from '../compat/client-icons.ts'
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
@@ -317,9 +317,12 @@ export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): Reac
   )
   return (
     <>
-      {/* The row wrapper mirrors the host `.triggerRow`: its 2px side overhang
-          (`calc(100% + 4px)` + negative margins) is what puts this row's icon
-          on the same 18px ink line as the Settings gear below it. */}
+      {/* The row wrapper mirrors the host `.triggerRow` of both generations:
+          the legacy 2px-side overhang through the negative margin, and the
+          token-era exact column width through the paint-inset fallbacks
+          (styles.ts, ADR-0044 §D2). The trigger's icon is the workspace-tree
+          glyph this plugin's other entries use, so this row reads as the same
+          action as the Hero entry and the workspace menu item. */}
       <div className={props.compact ? 'mrfw-fileLauncher' : rail ? 'mrfw-triggerRow mrfw-railRow' : 'mrfw-triggerRow'}>
         <button
           type="button"
@@ -335,7 +338,7 @@ export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): Reac
             else openWith(undefined)
           }}
         >
-          <span className="mrfw-triggerIcon" aria-hidden="true"><IconSettings size={rail ? 18 : 16} /></span>
+          <span className="mrfw-triggerIcon" aria-hidden="true"><IconWorkspaceTree size={rail ? 18 : 16} /></span>
           {rail || props.compact === true ? null : <span className="mrfw-triggerLabel">{props.t('action.label')}</span>}
         </button>
       </div>

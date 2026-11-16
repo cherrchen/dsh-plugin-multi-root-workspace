@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-09-13 修订：放开 ui-primitives 展示型组件的直接 import，见决策 6）
+Accepted（2026-09-13 修订：放开 ui-primitives 展示型组件的直接 import，见决策 6；2026-11-16 修订：side-footer 触发器的图标与两代几何配方由 [ADR-0044](./ADR-0044-sidebar-footer-row-alignment-and-coexistence.md) 修订，本文决策 3 的侧栏触发器几何与决策 6 的 `IconFolderClose16` 条款不再作为现状依据）
 
 ## Date
 

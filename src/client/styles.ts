@@ -6,24 +6,39 @@
  * code-font tokens), so this sheet names no color of its own: light and dark
  * theme follow the host automatically. The recipes mirror the native surfaces
  * this UI sits beside — the sidebar footer trigger, the Modal primitive, and
- * the capsule Button (ADR-0006 records the decision).
+ * the capsule Button (ADR-0006 records the decision). The footer trigger is
+ * the host's two trigger generations folded into one token-plus-fallback
+ * recipe, plus the coexistence rule for a second footer action; ADR-0044
+ * records that decision.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/styles
  */
 
 /** The stylesheet text; every class is prefixed `mrfw-` to stay collision-free. */
 export const STYLES = /* css */ `
-/* Sidebar footer row, mirroring the host ui-settings-general trigger: the row
- * wrapper overhangs each side by 2px (width calc(100% + 4px) against the
- * shell's 12px inline padding) so the icon's ink line lands at 18px from the
- * column edge — exactly where the Settings gear below sits. */
+/* Sidebar footer row: the host's two trigger recipes in one declaration set.
+ * Across the 19 releases up to 0.2.1-rc.5 the host row overhangs each side by
+ * 2px against the column's 12px inline padding (width calc(100% + 4px),
+ * margin 4px -2px) and its button pads 0 10px 0 8px with an 8px gap. From
+ * 0.2.2-alpha.2 the host row is exactly column-wide and the button pads by
+ * --dsh-sidebar-row-padding minus --dsh-sidebar-paint-inset (12 - 3 = 9px)
+ * inside a 3px transparent inset border, with a 6px label gap. Legacy hosts
+ * define none of the --dsh-sidebar-* custom properties, so every fallback is
+ * the legacy value and this one recipe is pixel-exact on both generations
+ * (ADR-0044 D2). The right padding's max(0px, 2px - inset) restores the legacy
+ * recipe's asymmetric 10px only where the token is absent; on token hosts it
+ * resolves to 0. */
 .mrfw-triggerRow {
+  /* The host added position: relative in 0.1.6-alpha.2. The two oldest
+     releases lack it, which is inert here: the row has no positioned
+     descendant. */
+  position: relative;
   flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
-  width: calc(100% + 4px);
-  margin: 4px -2px;
+  width: calc(100% + 4px - min(4px, 2 * var(--dsh-sidebar-paint-inset, 0px)));
+  margin: 4px calc(-2px + min(2px, var(--dsh-sidebar-paint-inset, 0px)));
 }
 
 .mrfw-triggerRow.mrfw-railRow {
@@ -37,14 +52,20 @@ export const STYLES = /* css */ `
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--dsh-sidebar-label-gap, 8px);
   width: auto;
   height: 42px;
   margin: 0;
-  padding: 0 10px 0 8px;
+  padding-block: 0;
+  padding-inline:
+    calc(var(--dsh-sidebar-row-padding, 8px) - var(--dsh-sidebar-paint-inset, 0px))
+    calc(var(--dsh-sidebar-row-padding, 8px) - var(--dsh-sidebar-paint-inset, 0px)
+      + max(0px, 2px - var(--dsh-sidebar-paint-inset, 0px)));
   border: none;
-  border-radius: 12px;
+  border-inline: var(--dsh-sidebar-paint-inset, 0px) solid transparent;
+  border-radius: var(--dsw-radius-md, 12px);
   background: transparent;
+  background-clip: padding-box;
   color: var(--dsw-alias-label-primary);
   font-family: inherit;
   font-size: 14px;
@@ -55,8 +76,17 @@ export const STYLES = /* css */ `
   transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
+/* The fill stays outside @media (hover: hover) on purpose: the host added that
+   wrapper only in 0.2.2-alpha.2, so the unwrapped form matches the 19 legacy
+   releases and differs on the 5 token releases only on devices without hover
+   capability (ADR-0044 D2).
+
+   background-color, not the background shorthand: the shorthand resets
+   background-clip to border-box and would paint the fill over the 3px
+   transparent inset border, 6px wider than the host row (whose hover
+   longhand keeps the base rule's padding-box) — ADR-0044 §修订三. */
 .mrfw-trigger:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background-color: var(--dsw-alias-interactive-bg-hover);
 }
 
 .mrfw-triggerIcon {
@@ -69,6 +99,12 @@ export const STYLES = /* css */ `
   white-space: nowrap;
 }
 
+/* Rail rounding has its own, earlier boundary than the row geometry: since
+   0.1.6-alpha.2 the host's rail trigger carries the 12px --dsw-radius-md
+   corner (0.2.2-alpha.2 only added the token padding and the transparent
+   border), and only the two oldest supported releases draw a circle. This
+   formula matches 22 of the 24 releases; the two circles are a documented
+   deviation (ADR-0044 D2). */
 .mrfw-triggerRail {
   flex: none;
   width: 36px;
@@ -76,8 +112,46 @@ export const STYLES = /* css */ `
   margin: 0;
   padding: 0;
   gap: 0;
-  border-radius: 50%;
   justify-content: center;
+  border-inline: 0;
+  background-clip: border-box;
+  border-radius: var(--dsw-radius-md, 12px);
+}
+
+/* The settings row's visible occupant changed with the host: through
+   0.1.7-rc.2 it is the 42px settings trigger, and from 0.2.0-rc.1 it is the
+   account menu launcher, whose trigger is 44px signed in and 32px signed out
+   (AccountMenu.module.css). The button follows that height so the two hover
+   surfaces in the footer are the same size; a host without the launcher keeps
+   the 42px settings-trigger height above, and the rail keeps its own 36px box.
+   Only the height follows: the left inset, gap, radius and hover token are
+   shared with the host recipe, so the icon and label lines stay where the
+   host's rows put them. The marker is the launcher's own data attribute, so a
+   host that renames it falls back to 42px (today's size) rather than
+   mis-sizing. */
+[data-slot='sidebar']:has(button[data-signed-out='true']) .mrfw-trigger:not(.mrfw-triggerRail) {
+  height: 32px;
+}
+
+[data-slot='sidebar']:has(button[data-signed-out='false']) .mrfw-trigger:not(.mrfw-triggerRail) {
+  height: 44px;
+}
+
+/* The footer slot is a list slot with a shipped occupant that usually renders
+   nothing (the official ui-cordis badge), so a second row can really appear.
+   The host .footerActions is a single-line flex and every occupant is a
+   full-width item, which pushes the later one out of the column. While this
+   plugin's row is mounted, the renderer's slot anchor itself becomes a
+   vertical column so each occupant owns one full row. The anchor carries an
+   inline display: contents — only !important overrides it. Scoping the rule
+   with :has(.mrfw-triggerRow) keeps it inert when this plugin is not mounted
+   (host layout unchanged), .mrfw-triggerRow exists only in this slot, and one
+   occupant lays out exactly as display: contents did (ADR-0044 D3). */
+[data-slot='sidebar.footer.action']:has(.mrfw-triggerRow) {
+  display: flex !important;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
 }
 
 /* New Session hero row: the Workspace Folders entry rides

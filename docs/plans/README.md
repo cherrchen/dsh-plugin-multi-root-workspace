@@ -38,6 +38,8 @@ completed/
 
 active：
 
+- [2026-11-16-sidebar-footer-row-alignment-and-coexistence.md](./active/2026-11-16-sidebar-footer-row-alignment-and-coexistence.md) — 侧栏 footer 入口的 workspace tree 图标与跨两代几何对齐（旧 19 版 / 新 5 版，分界 `0.2.2-alpha.2`；rail 圆角按其更早的 `0.1.6-alpha.2` 分界处理，22/24 对齐、最老 2 版已知偏差），以及同槽出现第二行时的纵向共存规则：一份带 fallback 的 CSS 配方、`:has()` 作用域的 slot anchor 纵向列、不隐藏/不读槽账本/不改他人行；含复刻取证、测试与文档清单。决策见 [ADR-0044](../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)。
+
 - [2026-11-15-files-page-takeover-notice.md](./active/2026-11-15-files-page-takeover-notice.md) — Issue #47 限定范围：Files 页被第三方插件整页接管时，以官方瞬时 Toast（info 级、无警告图标、数秒消失）弹一次提示；检测经 `sidebarRightTabs.get('files')` 的生效实现（不依赖 `slots.inject`/`spec`），不含对话框/命令文案与 fallback 入口；含进入/退出验收机制。决策见 [ADR-0015](../decisions/ADR-0015-files-tab-plugin-owned-browsing.md#修订files-页被整页接管时的可见提示2026-11-15)。
 
 - [2026-11-15-worktree-toast-close.md](./active/2026-11-15-worktree-toast-close.md) — 收回「没有单独关闭按钮」：在常驻提示右上角加回正圆「×」，圆心压在卡片角上并允许外凸；语义为纯关闭（不发 snooze/resolve、不写提醒状态，靠 `seen` 认领保证本 Host 不再自动提示）；决策见 [ADR-0039 第二十五次修订](../decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十五次修订2026-11-15)。
