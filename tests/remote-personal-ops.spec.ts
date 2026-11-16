@@ -833,7 +833,11 @@ describe.skipIf(process.platform === 'win32')('the remote tools row remounts a s
       onRemoteChange: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
       setRemoteEndpointVerifier: setVerifier,
     }
-    ctx.provide('multiRootCompat', { report: { verdict: 'supported', release: '0.2.2-rc.2' } } as never)
+    // The report's release must equal the version the SSH packages actually
+    // resolve to here — the SSH dev pin floats inside its floor, so a
+    // hardcoded release flips the gate to `identity-mismatch` on a re-pin.
+    const { sshPackageVersion } = await import('../src/compat/dsh-version.ts')
+    ctx.provide('multiRootCompat', { report: { verdict: 'supported', release: sshPackageVersion('@deepseek-ai/dsh-ssh') } } as never)
     ctx.provide('multiRootProviders', {} as never)
     ctx.provide('multiRootRegistry', registry)
     ctx.provide('tools', { register: registerTool } as never)
