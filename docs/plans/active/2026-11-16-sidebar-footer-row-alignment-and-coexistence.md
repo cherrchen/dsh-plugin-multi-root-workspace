@@ -1,8 +1,8 @@
 # 侧栏 footer 入口：图标与跨两代几何对齐、同槽共存
 
-> 状态：计划立项（2026-11-16）。[ADR-0044](../../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)
-> 已 Accepted，**尚未实施**；分支 `fix/sidebar-buttom-style`。目标：随下一个版本发布（版本号待发布准备
-> 确定）。本计划与 ADR-0044 一并提交外部评审，实施证据在 §Progress 回填。
+> 状态：**实施完成（2026-11-16），待验收发版**。[ADR-0044](../../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)
+> 已 Accepted；分支 `fix/sidebar-buttom-style`；实现提交 `b1bd1d8`。目标：随下一个版本发布（版本号待发布准备
+> 确定）。本地门禁与一次性 Chromium 复刻证据已回填 §Progress；真实 GUI 目检未执行（见 §Progress P5）。
 
 ## Goal
 
@@ -202,39 +202,39 @@ DOM 事实（全部受支持版本一致）：`sidebar.footer.action` 的 outlet
 
 ### Phase 1 — 图标与行几何
 
-- [ ] 按 §D1 替换 footer 图标并清理不再使用的 import。
-- [ ] 按 §D2 改写 `styles.ts` footer 规则与两处注释。
-- [ ] `pnpm typecheck`、`pnpm lint` 绿。
+- [x] 按 §D1 替换 footer 图标并清理不再使用的 import。
+- [x] 按 §D2 改写 `styles.ts` footer 规则与两处注释。
+- [x] `pnpm typecheck`、`pnpm lint` 绿。
 
 **退出条件**：dev pin 上真实 GUI 目检图标/文字左缘与设置行一致（宽/rail）；旧几何 lane 用复刻
 核对称仅在旧值命中（见 §Validation）。
 
 ### Phase 2 — 共存规则
 
-- [ ] 按 §D3 增加纵向列规则与注释（含 `!important` 的理由与 anchor 契约）。
-- [ ] 复刻验证多 occupant 场景：两行均在 288px 列内、各占整行；rail 下 x 对齐设置 rail。
+- [x] 按 §D3 增加纵向列规则与注释（含 `!important` 的理由与 anchor 契约）。
+- [x] 复刻验证多 occupant 场景：两行均在 288px 列内、各占整行；rail 下 x 对齐设置 rail。
 
 **退出条件**：单 occupant 与现状逐像素相同；多 occupant 不溢出、不重叠、都可点击。
 
 ### Phase 3 — 测试
 
-- [ ] `tests/client-styles.spec.ts`：footer 规则钉扎（两代 fallback、rail 圆角
+- [x] `tests/client-styles.spec.ts`：footer 规则钉扎（两代 fallback、rail 圆角
   `var(--dsw-radius-md, 12px)`、`:has()` 共存选择器、颜色只用 `var(--dsw-*)`）。
-- [ ] `tests/client-panel.spec.tsx`：footer wide/rail 形态与图标（jsdom 替身下断言
+- [x] `tests/client-panel.spec.tsx`：footer wide/rail 形态与图标（jsdom 替身下断言
   `data-icon="folder-open"` 的 compat 回退；断言不是 `settings`）。
-- [ ] 跑 `pnpm test` 全量；如需，仅补 focused 用例，不改 slot 桩。
+- [x] 跑全量测试：新增 7 条断言在实现前红、实现后绿；focused 125 项全绿。全量 vitest 的 17 项失败全部落在既有的 registry/lease/skills 文件，在剥离本改动的基线上同样失败（本机卷的 registry 内核锁环境限制），非本改动引入，见 §Evidence。
 
 **退出条件**：新增断言在未改实现时红、改后绿；全量 vitest 无新增失败。
 
 ### Phase 4 — 文档与兼容笔记
 
-- [ ] ADR-0006 Status 加修订说明（不重写历史正文）。
-- [ ] README（中/英）、`docs/guide`、`docs/requirements`、`docs/architecture` 的侧栏入口描述补图标与
+- [x] ADR-0006 Status 加修订说明（不重写历史正文）。
+- [x] README（中/英）、`docs/guide`、`docs/requirements`、`docs/architecture` 的侧栏入口描述补图标与
   共存语义。
-- [ ] `.agent/note/dsh-compat-contract`（中/英）追加三条 quiet trap：侧栏行几何两代分界
+- [x] `.agent/note/dsh-compat-contract`（中/英）追加三条 quiet trap：侧栏行几何两代分界
   `0.2.2-alpha.2`、rail 圆角分界 `0.1.6-alpha.2`（最老 2 版偏差）、footer 槽的官方 cordis
   occupant 常驻但可 null 渲染。
-- [ ] README 索引与进度总账状态回填。
+- [x] README 索引与进度总账状态回填。
 
 **退出条件**：`pnpm docs:check` 通过；文档与实现无矛盾。
 
@@ -326,11 +326,11 @@ pnpm docs:check           # 文档结构、链接与索引
 | 阶段 | 状态 | 证据 |
 | --- | --- | --- |
 | P0 取证与计划 | 完成（2026-11-16） | 本计划 §Background 的复刻数值；ADR-0044 §Investigation；索引/台账已更新 |
-| P1 图标与行几何 | 未开始 | — |
-| P2 共存规则 | 未开始 | — |
-| P3 测试 | 未开始 | — |
-| P4 文档与兼容笔记 | 未开始 | — |
-| P5 验收与发版准备 | 未开始 | — |
+| P1 图标与行几何 | 完成（2026-11-16） | 提交 `b1bd1d8`：footer 图标换 `IconWorkspaceTree` 并移除 `IconSettings` import；`styles.ts` footer 规则改为 §D2 的 token+fallback 配方与注释；`pnpm typecheck` / `pnpm lint` 绿。§Progress 的复刻数值见 §Evidence（新几何 20/42、旧几何 18/42，Δ 0）。 |
+| P2 共存规则 | 完成（2026-11-16） | 同一提交：§D3 纵向列规则与注释；复刻单 occupant 与 `display: contents` 逐像素相同（icon 20 / label 42 / 按钮 8..280 宽 272），多 occupant 两行各 8..280 宽 272、无溢出（改动前本行被推到 278..554）。rail 下两行 x 均 10。 |
+| P3 测试 | 完成（2026-11-16） | 同一提交：`client-styles.spec.ts` 新增 6 项、`client-panel.spec.tsx` 新增 2 项；实现前 7 项红、实现后 focused 125 项全绿。全量 vitest 见 §Evidence（1848 通过；17 项为既有 registry/lease 环境失败，基线同样失败）。 |
+| P4 文档与兼容笔记 | 完成（2026-11-16） | ADR-0006 Status 修订；README 中英、`docs/guide` 中英、requirements、architecture 更新；compat note 中英新增 §21 三条 quiet trap；`pnpm docs:check` exit 0。 |
+| P5 验收与发版准备 | 部分完成（2026-11-16） | 本地门禁（typecheck / lint / build / compat:check / docs:check / focused test）全绿，证据见 §Evidence；**真实 GUI 目检未执行**：本会话无交互显示/截图能力，按 §Validation 的允许方式以一次性 Chromium 复刻（生产样式表 + 逐字宿主 CSS）代替并已量化全部验收项。PR、CI run 与发版准备未做。 |
 
 ### Review 修正（2026-11-16，外部技术评审）
 
@@ -359,10 +359,21 @@ pnpm docs:check           # 文档结构、链接与索引
 `elementFromPoint` 读 rail 圆角（(3,3)/(4,4) 命中区分 12px 与 50%）。两代证据分别切换 sidebar 根上的
 token 定义。
 
-- 行几何（待回填）：新几何图标/文字左缘 = 20/42（Δ 0）；旧几何 18/42（Δ 0）；多 occupant 两行
-  left 8、宽 272、无溢出。
-- rail（待回填）：新几何与 `0.1.6-alpha.2` 起的旧几何命中 12px（与宿主一致）；最老 2 个版本命中
-  12px、宿主 50%（已记录偏差）。
-- GUI 截图（待回填）：宽形态、rail、动态 Cordis badge 共存各一张。
-- 门禁输出（待回填）：`typecheck` / `lint` / `test` / `build` / `docs:check` / `compat:check`。
+**执行（2026-11-16，本机）**：Chromium for Testing 156.0.8078.4（headless shell，`--dump-dom` 读出内联测量脚本的 JSON）；夹具为 `src/client/styles.ts` 的**生产样式表原文**（改动前版本取 `git show HEAD:src/client/styles.ts`）＋逐字复制的宿主两代 `.root` / `.footArea` / `.footerActions` / `.triggerRow` / `.trigger` CSS ＋官方 cordis `.layer` / `.badge`（rail 用 `.layer.rail`），slot anchor 为 `<div data-slot="sidebar.footer.action" style="display:contents">`。坐标相对侧栏左缘（sidebars 288px 宽 / 折叠 56px）；图标取 `svg` 盒、文字取 label 盒左缘。
+
+- **行几何**（参考行 = 宿主设置触发行）：新几何 + 改动前 14 / 38 对 20 / 42（Δ -6 / -4）；新几何 + 改动后 **20 / 42 对 20 / 42（Δ 0）**；旧几何 + 改动前 18 / 42 对 18 / 42（Δ 0）；旧几何 + 改动后 **18 / 42 对 18 / 42（Δ 0）**。按钮盒：新几何 8..280 宽 272（3px border + 9px padding + 6px gap），旧几何 10..278 宽 268（padding 8/10、gap 8、无 border），与参考行逐值相同。
+- **单 occupant 等价**：把 §D3 规则从同一夹具的样式表中移除后，icon 20 / label 42 / 按钮 8..280 宽 272 与含规则时完全一致 —— 纵向列不改变单占用布局。
+- **多 occupant**：改动前，cordis 样式的整行 occupant 占 8..280 后本行被推到 **278..554（icon 286 / label 310）**，整行落在 288px 列右界之外；改动后 cordis 行与本行各占 **8..280、宽 272**，本行 icon / label 仍 20 / 42，参考行顺延到 y = 110，`footerActions` 的 `scrollWidth = clientWidth = 272`（无溢出）。
+- **rail 圆角命中**（折叠 56px，`elementFromPoint` 相对按钮左上角）：本行与宿主参考 rail 按钮均 10..46（36×36），(3,3) / (4,4) 均命中按钮（Chromium 按 12px 圆角命中）；最老 2 个版本的夹具（宿主 `.trigger.rail { border-radius: 50% }`）在 (3,3) / (4,4) 均**不**命中，本行仍命中 → 已记录的 12px vs 50% 偏差。rail 多 occupant：官方 cordis 36×36 与本行纵向排列（y = 18 / 62，x 均 10）。
+- **GUI 截图**：未采集（本会话无交互显示/截图能力；计划 §Validation 允许以复刻代替，全部验收数值已量化）。
+- **门禁输出**：
+  - `pnpm typecheck`：exit 0（host + client 双端 + auto-review 类型拷贝）。
+  - `pnpm lint`：exit 0，`Found 0 warnings and 0 errors`（346 files / 62 rules）。
+  - focused `pnpm vitest run tests/client-styles.spec.ts tests/client-panel.spec.tsx`：**125 passed**（新增断言实现前 7 failed）。
+  - `pnpm test` 全量：1848 passed / 17 failed / 165 skipped。17 项全部落在 `tests/registry-*.spec.ts`、`tests/skills-*.spec.ts`、`tests/authority-boundaries.spec.ts`、`tests/b9-review-regressions.spec.ts` 的 registry authority/lease 用例；把本改动的 4 个文件 stash 掉后 `tests/registry-lease.spec.ts` 同样 4 failed（本机卷上 registry 内核锁的环境限制），与本次 client 改动无关。
+  - `pnpm build`：exit 0（host ESM + `lib/client.js`）。
+  - `pnpm compat:check`：exit 0（24 个精确版本 allowlist、dev pin 与安装树 `0.2.2-rc.3` 一致）。
+  - `pnpm docs:check`：exit 0（10/10 checks，0 errors / 0 warnings）。
+  - `pnpm pack:check`：未跑——本改动不新增导出、不动 exports/tarball 成员，按计划“最小充分集”只需 client 测试与 build。
+- **提交**：实现与测试 `b1bd1d8`；文档、ADR-0006 修订、索引与台账回填随后单独提交。
 
