@@ -197,8 +197,8 @@ export interface TreeViewProps {
   readonly unmatched?: boolean | undefined
   /** Directories holding only hidden entries, so their empty level says why. */
   readonly hiddenOnly?: ReadonlySet<string> | undefined
-  /** The revealed file, marked current and scrolled into view by its ref. */
-  readonly current?: { readonly path: string; readonly ref: (row: unknown) => void } | undefined
+  /** The current row, marked; its ref — when supplied — also scrolls it into view. */
+  readonly current?: { readonly path: string; readonly ref?: ((row: unknown) => void) | undefined } | undefined
   /** A directory row asked to open or close. */
   readonly onToggle: (parent: string, path: string) => void
   /** A file row asked to open. */

@@ -105,9 +105,13 @@ export function nativeTreeInput<F>(
   return {
     root, entries, directories, expanded: state.expanded.map(keyOf),
     // The native FileTree's `current`/`currentRef` inputs: the row whose key
-    // matches is marked `.current` + `aria-current` and gets the ref, which is
-    // how the host's own navigator highlights and grabs the revealed row.
-    ...(current === undefined ? {} : { current: current.path, currentRef: current.ref }),
+    // matches is marked `.current` + `aria-current` and, when a ref is supplied,
+    // gets that ref — the host navigator's way of grabbing the revealed row. A
+    // search result's current mark has no scroll target, so the ref is passed
+    // only when the caller has one.
+    ...(current === undefined
+      ? {}
+      : { current: current.path, ...(current.ref === undefined ? {} : { currentRef: current.ref }) }),
     // Per-row context menus and viewer availability (`0.2.2-alpha.3+`); absent
     // members leave the Factory's own defaults (native browser menu, every file
     // openable).
