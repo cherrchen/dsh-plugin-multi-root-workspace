@@ -90,7 +90,18 @@ interface Harness {
   readonly preferences: ReturnType<typeof createSearchPreferenceBook>
   /** The element a fresh mount draws (the same surface and stores). */
   readonly element: () => ReactElement
+  /** Re-render in place with another root record — the same pane, another stateKey. */
+  readonly update: (patch: Partial<PaneInputs>) => void
   readonly unmount: () => void
+}
+
+/** The root-record props one render uses; a root switch changes these, not the mount. */
+interface PaneInputs {
+  readonly stateKey: string
+  readonly root: string
+  readonly rootId: string
+  readonly mode: 'page' | 'preview'
+  readonly previewPath: string | undefined
 }
 
 /** One mounted pane, over a listing stub that answers `entries`. */
@@ -98,6 +109,8 @@ function mount(options: {
   readonly entries?: readonly { readonly name: string; readonly type: 'file' | 'directory' | 'other' }[]
   readonly answer?: (request: WorkspaceSearchRequest) => Promise<WorkspaceSearchAnswer>
   readonly withSearch?: boolean
+  readonly mode?: 'page' | 'preview' | undefined
+  readonly previewPath?: string | undefined
 } = {}): Harness {
   const calls: TreeCall[] = []
   const runs: Harness['runs'] = []
@@ -161,17 +174,26 @@ function mount(options: {
   }
   const controller = new AbortController()
   const onOpenFile = vi.fn<(address: string) => void>()
+  const inputs: PaneInputs = {
+    stateKey: KEY,
+    root: ROOT,
+    rootId: ROOT_ID,
+    mode: options.mode ?? 'page',
+    previewPath: options.previewPath,
+  }
   const element = (): ReactElement => (
     <FilesPane
       filesTree={surface}
-      stateKey={KEY}
-      rootId={ROOT_ID}
+      stateKey={inputs.stateKey}
+      rootId={inputs.rootId}
       tabId={TAB}
-      root={ROOT}
+      root={inputs.root}
       signal={controller.signal}
       useStore={useStore}
       actions={instance.actions}
       onOpenFile={onOpenFile}
+      mode={inputs.mode}
+      previewPath={inputs.previewPath}
     />
   )
   const mounted = render(element())
@@ -183,6 +205,10 @@ function mount(options: {
     onOpenFile,
     preferences,
     element,
+    update: (patch) => {
+      Object.assign(inputs, patch)
+      mounted.rerender(element())
+    },
     unmount: () => { mounted.unmount() },
   }
 }
@@ -397,5 +423,194 @@ describe('the additional-root search review regressions', () => {
     expect(harness.runs.length).toBe(runsBefore)
     expect(harness.store.state(KEY).expanded).not.toContain('/repos/payments/src')
     await waitFor(() => { expect(document.querySelector<HTMLElement>('[data-mrfw-files-results]')?.scrollTop).toBe(96) })
+  })
+})
+
+/** Type a query in a preview pane, whose bar is drawn without a barOpen write. */
+async function typeInPreview(harness: Harness, query: string): Promise<HTMLInputElement> {
+  const input = await screen.findByRole('searchbox')
+  fireEvent.change(input, { target: { value: query } })
+  await waitFor(() => { expect(harness.runs.length).toBeGreaterThan(0) })
+  return input
+}
+
+describe('the additional-root search pane in preview mode', () => {
+  it('draws the bar from the mode alone and never takes the keyboard or the barOpen record', async () => {
+    const harness = mount({ mode: 'preview' })
+    const input = await screen.findByRole('searchbox')
+    // Upstream's preview navigator draws the bar unconditionally and does not
+    // focus it: opening the Folder must not steal the keyboard.
+    expect(document.activeElement).not.toBe(input)
+    expect(harness.store.state(KEY).barOpen).toBe(false)
+    fireEvent.change(input, { target: { value: 'notes' } })
+    await waitFor(() => { expect(harness.runs.length).toBe(1) })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    await waitFor(() => { expect(input.value).toBe('') })
+    expect(harness.store.state(KEY).barOpen).toBe(false)
+  })
+
+  it('opens a result row through the supplied preview route', async () => {
+    const harness = mount({ mode: 'preview' })
+    await typeInPreview(harness, 'notes')
+    const row = await screen.findByRole('button', { name: 'notes.md' })
+    fireEvent.click(row)
+    // The navigator supplies the replace-tab route; the pane itself only
+    // reports the absolute address it was given.
+    expect(harness.onOpenFile).toHaveBeenCalledWith('dsh-resource://file/session/session-1//repos/payments/notes.md')
+  })
+
+  it('marks the previewed file among the results on the legacy row path', async () => {
+    const harness = mount({ mode: 'preview', previewPath: '/repos/payments/src/inner.ts' })
+    await typeInPreview(harness, 'src')
+    await waitFor(() => {
+      expect(document.querySelector('[data-files-path="/repos/payments/src/inner.ts"]')).not.toBeNull()
+    })
+    const current = document.querySelector<HTMLElement>('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')
+    expect(current).not.toBeNull()
+    expect(current?.getAttribute('aria-current')).toBe('true')
+
+    // A previewed file outside this root, or one the results do not include,
+    // carries no mark.
+    harness.update({ previewPath: '/repos/other/elsewhere.ts' })
+    await waitFor(() => { expect(document.querySelector('[data-files-current]')).toBeNull() })
+    harness.update({ previewPath: '/repos/payments/notes.md' })
+    await waitFor(() => { expect(document.querySelector('[data-files-current]')).toBeNull() })
+  })
+
+  it('leaves the result rows unmarked in page mode', async () => {
+    const harness = mount({ previewPath: '/repos/payments/src/inner.ts' })
+    await type(harness, 'src')
+    await waitFor(() => { expect(document.querySelector('[data-files-path="/repos/payments/src/inner.ts"]')).not.toBeNull() })
+    expect(document.querySelector('[data-files-current]')).toBeNull()
+  })
+
+  it('returns focus to the magnifier when the settings panel closes — page mode', async () => {
+    const harness = mount()
+    await openBar(harness)
+    fireEvent.click(document.querySelector<HTMLElement>('[data-files-search-settings-toggle]')!)
+    const panel = await screen.findByRole('dialog')
+    fireEvent.keyDown(panel, { key: 'Escape' })
+    await waitFor(() => { expect(document.querySelector('[data-files-search-settings]')).toBeNull() })
+    expect(document.activeElement).toBe(document.querySelector('[data-files-search-settings-toggle]'))
+  })
+
+  it('returns focus to the magnifier when the settings panel closes — preview mode', async () => {
+    mount({ mode: 'preview' })
+    await screen.findByRole('searchbox')
+    fireEvent.click(document.querySelector<HTMLElement>('[data-files-search-settings-toggle]')!)
+    const panel = await screen.findByRole('dialog')
+    fireEvent.keyDown(panel, { key: 'Escape' })
+    await waitFor(() => { expect(document.querySelector('[data-files-search-settings]')).toBeNull() })
+    expect(document.activeElement).toBe(document.querySelector('[data-files-search-settings-toggle]'))
+  })
+
+  it('moves the keyboard through the listed tree rows before a query — page mode', async () => {
+    const harness = mount()
+    const input = await openBar(harness)
+    await waitFor(() => { expect(document.querySelector('[data-files-path="/repos/payments/src"]')).not.toBeNull() })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await waitFor(() => {
+      expect(document.activeElement?.closest('[data-files-path]')?.getAttribute('data-files-path')).toBe('/repos/payments/src')
+    })
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' })
+    await waitFor(() => { expect(document.activeElement).toBe(input) })
+  })
+
+  it('moves the keyboard through the listed tree rows before a query — preview mode', async () => {
+    mount({ mode: 'preview' })
+    const input = await screen.findByRole('searchbox')
+    await waitFor(() => { expect(document.querySelector('[data-files-path="/repos/payments/src"]')).not.toBeNull() })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await waitFor(() => {
+      expect(document.activeElement?.closest('[data-files-path]')?.getAttribute('data-files-path')).toBe('/repos/payments/src')
+    })
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' })
+    await waitFor(() => { expect(document.activeElement).toBe(input) })
+  })
+
+  it('drops the settings draft when the same pane switches roots', async () => {
+    const harness = mount({ mode: 'preview' })
+    await screen.findByRole('searchbox')
+    fireEvent.click(document.querySelector<HTMLElement>('[data-files-search-settings-toggle]')!)
+    const addInput = await screen.findByPlaceholderText('settings.add')
+    fireEvent.change(addInput, { target: { value: 'scratch-dir' } })
+    fireEvent.keyDown(addInput, { key: 'Enter' })
+    expect(document.querySelector('[data-files-rule="scratch-dir"]')).not.toBeNull()
+
+    // Same pane mount (component state survives), another root record: the
+    // draft must close uncommitted instead of landing in the new root's
+    // preferences — or leaking back into the old root's.
+    act(() => {
+      harness.update({ stateKey: searchStateKey(TAB, '/repos/docs'), root: '/repos/docs', rootId: 'root-b' })
+    })
+    await waitFor(() => { expect(document.querySelector('[data-files-search-settings]')).toBeNull() })
+    expect(harness.preferences.source('/repos/docs').getSnapshot().rules.some(rule => rule.path === 'scratch-dir')).toBe(false)
+    expect(harness.preferences.source(ROOT).getSnapshot().rules.some(rule => rule.path === 'scratch-dir')).toBe(false)
+  })
+
+  it('keeps Escape from the document while the query is non-blank, and lets it through when blank', async () => {
+    const harness = mount({ mode: 'preview' })
+    const input = await typeInPreview(harness, 'notes')
+    const seen: boolean[] = []
+    const listener = (event: KeyboardEvent): void => { seen.push(event.defaultPrevented) }
+    document.addEventListener('keydown', listener)
+    try {
+      fireEvent.keyDown(input, { key: 'Escape' })
+      await waitFor(() => { expect(input.value).toBe('') })
+      // The blank query is what lets the upstream face's document-level
+      // Escape close the floating navigator. A non-blank one must not reach
+      // the document at all.
+      expect(seen).toEqual([])
+      fireEvent.keyDown(input, { key: 'Escape' })
+      expect(seen).toEqual([false])
+    } finally {
+      document.removeEventListener('keydown', listener)
+    }
+  })
+
+  it('closes the settings panel first on Escape and leaves the query intact', async () => {
+    const harness = mount({ mode: 'preview' })
+    const input = await typeInPreview(harness, 'notes')
+    fireEvent.click(document.querySelector<HTMLElement>('[data-files-search-settings-toggle]')!)
+    const addInput = await screen.findByPlaceholderText('settings.add')
+    const seen: boolean[] = []
+    const listener = (): void => { seen.push(true) }
+    document.addEventListener('keydown', listener)
+    try {
+      fireEvent.keyDown(addInput, { key: 'Escape' })
+      await waitFor(() => { expect(document.querySelector('[data-files-search-settings]')).toBeNull() })
+      expect(input.value).toBe('notes')
+      expect(seen).toEqual([])
+    } finally {
+      document.removeEventListener('keydown', listener)
+    }
+  })
+
+  it('keeps the native accessibility structure', async () => {
+    mount({ mode: 'preview' })
+    await screen.findByRole('searchbox')
+    const status = document.querySelector('[data-files-search-status]')
+    expect(status?.getAttribute('aria-live')).toBe('polite')
+    const eye = document.querySelector<HTMLElement>('[data-files-show-hidden]')!
+    expect(eye.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(eye)
+    await waitFor(() => { expect(eye.getAttribute('aria-pressed')).toBe('true') })
+    const trigger = document.querySelector<HTMLElement>('[data-files-search-settings-toggle]')!
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(trigger)
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.getAttribute('aria-label')).toBe('settings.title')
+    await waitFor(() => { expect(trigger.getAttribute('aria-expanded')).toBe('true') })
+  })
+
+  it('marks its root with the stylesheet guard in both modes', async () => {
+    for (const mode of ['page', 'preview'] as const) {
+      const harness = mount({ mode })
+      await waitFor(() => { expect(harness.pane().querySelector('[data-mrfw-files-pane]')).not.toBeNull() })
+      const marker = harness.pane().querySelector('[data-mrfw-files-pane]')!
+      expect(marker.classList.contains('mrfw-fsPane')).toBe(true)
+      harness.unmount()
+    }
   })
 })

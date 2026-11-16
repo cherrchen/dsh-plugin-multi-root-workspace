@@ -47,11 +47,9 @@ import { createPortal } from 'react-dom'
 import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings, maybeComponent, maybeIcon } from '../compat/client-icons.ts'
-import {
-  searchStateKey, type SearchFailureInfo, type SearchPaneStates,
-} from './files-tree/search-state.ts'
+import { searchStateKey, type SearchPaneStates } from './files-tree/search-state.ts'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-store'
-import { errorKeyOf } from './panel-client.ts'
+import { createSearchFailureDescriber } from './files-tree/describe-failure.ts'
 import type { RootsView, RootView } from '../contract.ts'
 import type { NativeTreeRenderer } from '../compat/files-tree.ts'
 import { type FilesTreeSurface } from './files-tree/adapter.tsx'
@@ -84,7 +82,14 @@ export interface RootSwitcherProps extends Omit<WorkspaceFoldersActionProps, 'co
   readonly nativeTree?: NativeTreeRenderer | undefined
 }
 
-/** The takeover's portal + lifetime, created while an additional root browses. */
+/**
+ * The takeover's portal + lifetime, created while an additional root browses.
+ *
+ * The record carries the root's registry id beside its path, and both land in
+ * one state commit: the pane's search record key and the id its requests name
+ * must never come from different states, or a root switch would send the
+ * outgoing root's query under the incoming root's id.
+ */
 interface Takeover {
   /** Lifetime handed to the tree's face: aborting forgets the store bucket and closes the watches. */
   readonly signal: AbortSignal
@@ -92,6 +97,8 @@ interface Takeover {
   readonly tabId: TabId
   /** The root the tree lists. */
   readonly root: string
+  /** The same root's registry id — what the search endpoint takes. */
+  readonly rootId: string
 }
 
 /**
@@ -244,10 +251,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   const searchKey = takeover === null || searchSeat === undefined ? undefined : searchStateKey(takeover.tabId, takeover.root)
   const searchBarOpen = useSearchState(states => searchKey !== undefined && states[searchKey]?.barOpen === true)
   /** Localize a failed search's panel code; the tree's own codes keep its vocabulary. */
-  const describeSearchFailure = useCallback((failure: SearchFailureInfo): string | undefined => {
-    const key = errorKeyOf(failure.code)
-    return key === 'error.fallback' ? undefined : t(key)
-  }, [t])
+  const describeSearchFailure = useMemo(() => createSearchFailureDescriber(t), [t])
   const takeoverCtl = filesTree?.takeover
   // While an additional root is selected the pane's body area belongs to the
   // forked tree: the takeover keeps one controller per (tab, root) in the
@@ -260,8 +264,13 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   // inject-side observer, which ends it whenever the tabHost section leaves
   // the document — the record's real end, even long after this body is gone.
   useEffect(() => {
-    if (!treeVisible || selectedPath === undefined || tabId === undefined || takeoverCtl === undefined) { setTakeover(null); return }
-    setTakeover({ signal: takeoverCtl.signal(tabId, selectedPath, sectionRef.current ?? undefined), tabId, root: selectedPath })
+    if (!treeVisible || selectedPath === undefined || selectedId === undefined || tabId === undefined || takeoverCtl === undefined) { setTakeover(null); return }
+    setTakeover({
+      signal: takeoverCtl.signal(tabId, selectedPath, sectionRef.current ?? undefined),
+      tabId,
+      root: selectedPath,
+      rootId: selectedId,
+    })
     return () => {
       // The mounted flag settles the branch: a deps change ends the entry
       // now, while an unmount is a hide — upstream's occurrence signal never
@@ -270,7 +279,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
       // anything, so the old abort-on-unmount bound stands there.
       if (mounted.current || sectionRef.current === null) takeoverCtl.end(tabId)
     }
-  }, [treeVisible, selectedPath, tabId, takeoverCtl])
+  }, [treeVisible, selectedPath, selectedId, tabId, takeoverCtl])
 
   const items = useMemo((): MenuEntry[] => [
     { id: 'primary', label: `${primaryLabel} · ${t('panel.primary')}`, icon: <IconFolderOpen /> },
@@ -403,7 +412,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
             <FilesPane
               filesTree={filesTree}
               stateKey={searchKey ?? ''}
-              rootId={selectedId ?? ''}
+              rootId={takeover.rootId}
               tabId={takeover.tabId}
               root={takeover.root}
               signal={takeover.signal}

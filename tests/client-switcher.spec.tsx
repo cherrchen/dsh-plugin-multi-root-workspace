@@ -128,6 +128,7 @@ interface Registration {
 
 const ROOT_A: RootView = { ordinal: 1, id: 'a', path: '/repos/payments', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', access: 'read-write', alias: 'payments' }
 const ROOT_B: RootView = { ordinal: 2, id: 'b', path: '/repos/website', addedAt: '2026-09-12T00:00:00.000Z', state: 'missing', access: 'read-only', detail: 'gone' }
+const ROOT_C: RootView = { ordinal: 3, id: 'c', path: '/repos/docs', addedAt: '2026-09-12T00:00:00.000Z', state: 'available', access: 'read-only', alias: 'docs' }
 
 /** The stub client context, plus what the plugin did with it. */
 interface Harness {
@@ -142,6 +143,10 @@ interface Harness {
   setView: (view: RootsView) => void
   setSession: (sessionId: string | undefined) => void
   setListFails: (fails: boolean) => void
+  /** Hold the next search RPC until the returned release runs. */
+  readonly holdSearch: () => () => void
+  /** Make the search endpoint reject with a panel code, or answer normally when undefined. */
+  setSearchFailure: (code: string | undefined) => void
 }
 
 /** Optional host services a spec can put behind `ctx.get`. */
@@ -163,9 +168,11 @@ function mount(withConnection = true, services: HostServices = {}, options: Moun
   const opens: OpenCall[] = []
   const registrations: Registration[] = []
   const sessionListeners = new Set<() => void>()
-  let view: RootsView = { primaryRoot: '/repos/primary', primaryName: 'Platform', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 }
+  let view: RootsView = { primaryRoot: '/repos/primary', primaryName: 'Platform', roots: [ROOT_A, ROOT_B, ROOT_C], limit: 16, count: 3 }
   let currentSession: string | undefined = 'session-1'
   let listFails = false
+  let searchFailure: string | undefined
+  let searchGate: Promise<void> | undefined
   const connection = {
     rpc: {
       call: async (channel: string, endpoint: string, payload: PanelRequest) => {
@@ -174,7 +181,14 @@ function mount(withConnection = true, services: HostServices = {}, options: Moun
           return { ok: false, error: { code: 'registry-contended', message: 'registry busy' } }
         }
         if (endpoint === 'search') {
-          return { ok: true, value: { root: '/repos/payments', matches: [], truncated: false, incomplete: false } }
+          const gate = searchGate
+          if (gate !== undefined) await gate
+          if (searchFailure !== undefined) {
+            return { ok: false, error: { code: searchFailure, message: searchFailure + ' happened' } }
+          }
+          const requested = (payload as { readonly rootId?: string }).rootId
+          const root = requested === 'c' ? '/repos/docs' : requested === 'a' ? '/repos/payments' : '/repos/primary'
+          return { ok: true, value: { root, matches: [], truncated: false, incomplete: false } }
         }
         return { ok: true, value: view }
       },
@@ -316,7 +330,27 @@ function mount(withConnection = true, services: HostServices = {}, options: Moun
       for (const listener of sessionListeners) listener()
     },
     setListFails: next => { listFails = next },
+    holdSearch: () => {
+      let release: (() => void) | undefined
+      searchGate = new Promise<void>(resolve => { release = resolve })
+      return () => {
+        searchGate = undefined
+        release?.()
+      }
+    },
+    setSearchFailure: next => { searchFailure = next },
   }
+}
+
+/** Every search RPC the harness recorded, in call order. */
+function searchCalls(harness: Harness): Call[] {
+  return harness.calls.filter(call => call.endpoint === 'search')
+}
+
+/** The payload fields of one search call this suite asserts on. */
+interface SearchPayload {
+  readonly rootId?: string
+  readonly query?: string
 }
 
 /** The pane fixtures this suite appended to `document.body`. */
@@ -1066,3 +1100,94 @@ describe('the Files-tab search surface', () => {
   })
 })
 
+
+describe('the Files-tab root switch search handoff', () => {
+  /** A renderer stub that always draws the plugin's legacy fallback. */
+  function factoryStub() {
+    return vi.fn((_name: string, _input: object, options: { fallback: ReactElement }) => options.fallback)
+  }
+
+  /** Select one menu entry by its label. */
+  async function selectRoot(name: string): Promise<void> {
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name }))
+  }
+
+  /** Open the pane's bar and type a query. */
+  async function openBarAndSearch(query: string): Promise<void> {
+    fireEvent.click(document.querySelector<HTMLElement>('[data-mrfw-files-search-toggle]')!)
+    const input = await screen.findByRole('searchbox')
+    fireEvent.change(input, { target: { value: query } })
+  }
+
+  it('never pairs the outgoing query with the incoming root id during a switch', async () => {
+    const harness = mount(true, {}, { workspaceSearch: true })
+    const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factoryStub() }, false, true)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    await selectRoot('payments')
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+    await openBarAndSearch('notes')
+    await waitFor(() => { expect(searchCalls(harness)).toHaveLength(1) })
+    expect(searchCalls(harness)[0]!.payload as SearchPayload).toMatchObject({ rootId: 'a', query: 'notes' })
+
+    // A's answer is settled; hold any further request so a mismatched frame
+    // cannot slip past as an immediate answer.
+    const release = harness.holdSearch()
+    try {
+      await selectRoot('docs')
+      // The click's act flushed effects: the unsynchronised shape would
+      // already have sent A's query under C's root id here.
+      expect(searchCalls(harness).some(call => (call.payload as SearchPayload).rootId === 'c')).toBe(false)
+      await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/docs/inner.ts"]')).not.toBeNull() })
+    } finally {
+      release()
+    }
+
+    // C's own search surface opens on C's record and searches under C's id.
+    await openBarAndSearch('guide')
+    await waitFor(() => {
+      expect(searchCalls(harness).some(call => (call.payload as SearchPayload).rootId === 'c'
+        && (call.payload as SearchPayload).query === 'guide')).toBe(true)
+    })
+    await waitFor(() => { expect(document.querySelector('[data-files-row="search-empty"]')).not.toBeNull() })
+    const callsWithC = searchCalls(harness).length
+
+    // Back to A: its query and its settled answer are still its own, and the
+    // retained request identity means no replacement search runs.
+    await selectRoot('payments')
+    // The retained query draws its result body again (the tree is not listed
+    // while a query is active), and the retained identity means no request.
+    await waitFor(() => { expect(document.querySelector('[data-files-row="search-empty"]')).not.toBeNull() })
+    expect(searchCalls(harness)).toHaveLength(callsWithC)
+  })
+
+  it('keeps the outgoing root failure settled instead of clearing it into pending', async () => {
+    const harness = mount(true, {}, { workspaceSearch: true })
+    const { pane } = renderInPane(harness, { absolutePath: '/repos/primary', renderFactorySlot: factoryStub() }, false, true)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    await selectRoot('payments')
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+    harness.setSearchFailure('root-unavailable')
+    await openBarAndSearch('notes')
+    await waitFor(() => { expect(document.querySelector('[data-files-row="search-failed"]')).not.toBeNull() })
+    expect(searchCalls(harness)).toHaveLength(1)
+
+    // Switching away must not re-request A's failed answer under another
+    // root, and C's surface must never inherit A's failure.
+    await selectRoot('docs')
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/docs/inner.ts"]')).not.toBeNull() })
+    expect(document.querySelector('[data-files-row="search-failed"]')).toBeNull()
+    expect(searchCalls(harness)).toHaveLength(1)
+
+    // Back on A the failure is still settled and retryable — the failure view
+    // survived the switch instead of becoming an unbounded pending spinner.
+    await selectRoot('payments')
+    await waitFor(() => { expect(document.querySelector('[data-files-row="search-failed"]')).not.toBeNull() })
+    harness.setSearchFailure(undefined)
+    fireEvent.click(document.querySelector<HTMLElement>('[data-files-search-retry]')!)
+    await waitFor(() => { expect(searchCalls(harness)).toHaveLength(2) })
+    await waitFor(() => { expect(document.querySelector('[data-files-row="search-failed"]')).toBeNull() })
+  })
+})

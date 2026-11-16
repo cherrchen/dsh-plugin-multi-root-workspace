@@ -156,3 +156,15 @@
 | `FileTreeInput.highlight`、`TreeDirectoryState.omitted`（`'hidden'` / `'unmatched'`）；搜索条/状态行/设置浮层与隐藏项偏好 | `0.2.2-rc.2` | 结果树复用同一 `TreeView` 传 `highlight`；树态在绘制期过滤隐藏项、用 `omitted: 'hidden'` 画“只有隐藏项”；偏好读写宿主同名 localStorage 键 | 不传这两个输入（旧 Factory 忽略未知键）；不改变旧宿主树的绘制 |
 
 **为什么探测都是结构性的**：这些面在旧 release 上不存在，而 `scripts/upgrade-dsh.mjs` 会把每个 `@deepseek-ai/dsh*` devDependency 改写到目标 release——把新包加进依赖会让 `0.2.2-alpha.3` 之前的 20 个 lane 在 `pnpm install` 阶段死亡；因此类型用本地最小声明（`src/client/files-tree/context-menu.ts`、`search-surface.d.ts`、`src/client/open-in-app/upstream-surface.d.ts` 同型），运行时只认 `props.useContextMenu` 可调用、`props.useContextMenu().getTriggerProps` 取得到、`remote.workspaceFiles.search`/`service.search` 是函数。`renderFactorySlot` 自 `0.1.6-alpha.2` 就存在，不能用来判断 Factory 是否存在；插件沿用 `0.2.2-alpha.3` 起才有的 `data-files-page` DOM 钩子做版本分界（与[架构文档 §7](../architecture/multi-root-workspace.md) 的接管判定同一处）。版本字符串比较、新增 npm 依赖与改动上游包都不允许（ADR-0009）。
+
+### 第三个接口面：预览导航搜索（2026-11-16 追加）
+
+本节标题保留 2026-11-14 的“两个接口面”（入站锚点不变）；本小节追加同日决策、次日落地的第三个宿主面，证据与决策见 [ADR-0043](../decisions/ADR-0043-additional-root-preview-navigator-search.md) 与 [实施计划](../plans/active/2026-11-16-additional-root-preview-navigator-search.md)。
+
+| 接口面 | 引入版本 | 插件消费方式 | 缺席时 |
+|---|---|---|---|
+| `ui-sidebar-files` 的 `FileNavigator` 搜索半部：预览（`page: false`）恒显示搜索栏、按 `store.byPane[panel.id]` 记录查询/结果、结果树经 `sidebar.files.tree` Factory（`highlight` / `omitted` / `current`）、设置浮层 `SearchSettings`、`data-files-search*` DOM 钩子 | `0.2.2-rc.2`（rc.2→rc.3 该包 `src/` 与 `locale/` 零差异，语义基线 rc.3） | 插件不复刻第二套状态机：`FilesPane` 增加 `mode="preview"`（栏常显、不写 `barOpen`、挂载不抢焦点、结果命中被预览文件时标当前行），`navigator.tsx` 在 `filesTree.search` seat 存在时把同一 `FilesPane` portal 进 `aside[data-files-navigator]`；搜索根仍是 `rootId`（Host 从刷新后的 Registry 解析），wire 无新字段 | seat 缺席（rc.2 之前、或裁掉 search 服务的组合）→ 仍 portal 复刻 `FilesTree`，DOM 与生命周期逐项不变；无面板通道 → 导航接管本身不建立，全程原生 |
+
+**历史表行豁免**：§“0.2.2-rc.2 后续审查”表格中“接管时原生搜索条隐藏”是 2026-11-11 的当时结论，仍然成立——原生条在接管期继续隐藏（它的根固定为 Session cwd）；本小节追加的是插件在 aside 内绘制**自己的**搜索面，并沿用 `data-files-search-status`/`data-files-search-settings` 等同名钩子（`data-files-search` 精确钩子仍只属于原生输入框）。原生与插件的同名节点靠 `styles.ts` 的 **direct-child** 隐藏规则区分：`aside[data-mrfw-navigator] > div:not([data-mrfw-files-pane]):has([data-files-search])`、`aside[data-mrfw-navigator] > [data-files-search-status]` 与 `aside[data-mrfw-navigator] > [data-files-search-settings]`；插件 pane 的嵌套同名节点不被匹配，pane 根带 `data-mrfw-files-pane` 作为守卫与测试锚点。
+
+**为什么仍不需要新端点**：预览与 Files 页对 `search` 端点的需求完全相同——搜哪个登记根；预览不带来新的授权对象、不需要 pane 身份、不需要额外字段。把 paneId 塞进 wire 只会扩大协议面，因此实现 PR 的 Host 侧 diff 为空。

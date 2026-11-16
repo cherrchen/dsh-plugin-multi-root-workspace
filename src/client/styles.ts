@@ -489,9 +489,17 @@ aside[data-mrfw-navigator] > [data-files-body] {
    would offer a search rooted at the primary root whose result can never
    appear. Hide the bar and its status line with the native body they belong
    to, and the header toggle under the same additional-root condition as the
-   native reload. Primary-root browsing keeps the untouched upstream bar. */
-aside[data-mrfw-navigator] > div:has([data-files-search]),
-aside[data-mrfw-navigator] > [data-files-search-status] {
+   native reload. Primary-root browsing keeps the untouched upstream bar.
+
+   The :not() guard is defensive: the plugin's own search pane is a direct
+   child of the same aside and carries data-files-search* hooks of its own, so
+   a future upstream selector change must never hide the replacement. The
+   settings popover is hidden only as a DIRECT child: that is the native
+   instance a takeover can leave behind for one paint when its draft was open,
+   while the plugin's own panel nested inside the pane stays untouched. */
+aside[data-mrfw-navigator] > div:not([data-mrfw-files-pane]):has([data-files-search]),
+aside[data-mrfw-navigator] > [data-files-search-status],
+aside[data-mrfw-navigator] > [data-files-search-settings] {
   display: none;
 }
 

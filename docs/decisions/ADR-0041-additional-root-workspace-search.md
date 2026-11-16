@@ -125,6 +125,14 @@ DSH 0.2.2-rc.2 给右侧 Files 页签加了工作区搜索：搜索栏、结果�
 - 已知本地环境限制：权威 IPC 不可用的沙箱里，17 个 authority/lease/follower 测试在基线提交上也失败（与本文无关，
   CI 拥有该信号）；见完成计划 §7。
 
+## 修订：预览导航树由 ADR-0043 补齐搜索（2026-11-16，Amendment）
+
+Status 保持 **Accepted**；本 ADR 的端点、授权、记录模型与结构门控不变，只修订 D4 里的**一条**已知边界。
+
+- **D4 的“文档预览的 Folder 导航器不获得搜索”已由 [ADR-0043](./ADR-0043-additional-root-preview-navigator-search.md) 取代**：预览导航树复用同一个 `search` 端点与同一个 `FilesPane`（新增 `preview` 模式），搜索栏常显、结果树/当前行/设置/隐藏项/失败重试与原生预览对齐，结果行以 `replaceTab` 打开。D4 的原文按“已接受决策不重写”的惯例保留，历史计划、CHANGELOG 与修订前的文档中“预览导航器无搜索”的记载仍然合法。
+- **不扩大本 ADR 的授权面**：预览不带来新的 wire 字段、新的端点或新的授权对象；`rootId` 仍由 Host 从刷新后的 Registry 解析，授权仍是单次主根准入加帧内复核。
+- **D4 的另一条边界保留**：原生 Files 快捷键（Cmd+P）仍聚焦被接管隐藏的原生搜索框；预览导航树里的插件搜索框同样不响应这个快捷键，接管期不注册第二个入口（ADR-0043 D5）。
+
 ## Related Documents
 
 - [ADR-0005](./ADR-0005-out-of-tree-client-transport.md)（插件自有 Connection RPC 通道）
@@ -133,5 +141,6 @@ DSH 0.2.2-rc.2 给右侧 Files 页签加了工作区搜索：搜索栏、结果�
 - [ADR-0015](./ADR-0015-files-tab-plugin-owned-browsing.md) / [ADR-0016](./ADR-0016-files-tab-native-tree-fork.md)
 - [ADR-0024](./ADR-0024-registry-operation-admission.md)（操作准入）、[ADR-0025](./ADR-0025-shared-registry-authority.md)（共享权威）
 - [ADR-0042](./ADR-0042-additional-root-row-context-menus.md)（同批的行右键菜单）
+- [ADR-0043](./ADR-0043-additional-root-preview-navigator-search.md)（修订 D4：预览导航树的工作区搜索）
 - [完成计划](../plans/completed/2026-11-14-additional-root-files-parity.md)
 - `src/client/files-tree/FORK.md`、`docs/reference/dsh-0.2.2-migration.md`

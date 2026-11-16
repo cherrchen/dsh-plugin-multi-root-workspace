@@ -42,6 +42,7 @@ import {
   searchRequestKey, type SearchFailureInfo, type SearchPaneState, type SearchPaneStates, type SearchResultView,
 } from './search-state.ts'
 import type { FilesTabState } from './store.ts'
+import { locateFile, relativeUnderRoot } from './locate.ts'
 import { TreeView } from './tree-view.tsx'
 
 /**
@@ -216,8 +217,12 @@ function emptyHint(result: Extract<SearchResultView, { kind: 'found' }>): EmptyH
 function moveAlongRows(event: KeyboardEvent<HTMLElement>): void {
   if (event.defaultPrevented || event.nativeEvent.isComposing) return
   if ((event.key !== 'ArrowDown' && event.key !== 'ArrowUp') || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+  // One stops set for both drawn bodies: the listed tree and the result tree
+  // are never mounted together, and upstream's navigator moves through
+  // whichever one is drawn. Both row render paths are covered: the fork's own
+  // rows ('> button') and the host Factory's rows ('> div > button').
   const stops = [...event.currentTarget.querySelectorAll<HTMLElement>(
-    '[data-mrfw-files-search], [data-mrfw-files-results] li[data-files-entry] > button, [data-mrfw-files-results] li[data-files-entry] > div > button',
+    '[data-mrfw-files-search], li[data-files-entry] > button, li[data-files-entry] > div > button',
   )]
   const at = stops.findIndex(stop => stop === event.target)
   const next = at === -1 ? undefined : stops[at + (event.key === 'ArrowDown' ? 1 : -1)]
@@ -407,10 +412,12 @@ function SearchSettings({ rules, respectGitignore, onRules, onRespectGitignore, 
 }
 
 /** The search bar: settings, field, hidden-entry toggle, and clear. */
-function SearchBar({ query, showHidden, inputRef, onQuery, onShowHidden, onSettings, settingsOpen, t }: {
+function SearchBar({ query, showHidden, inputRef, triggerRef, onQuery, onShowHidden, onSettings, settingsOpen, t }: {
   readonly query: string
   readonly showHidden: boolean
   readonly inputRef: (element: HTMLInputElement | null) => void
+  /** The magnifier's callback ref: closing the settings panel returns focus here. */
+  readonly triggerRef: (element: HTMLButtonElement | null) => void
   readonly onQuery: (query: string) => void
   readonly onShowHidden: (showHidden: boolean) => void
   readonly onSettings: () => void
@@ -421,7 +428,7 @@ function SearchBar({ query, showHidden, inputRef, onQuery, onShowHidden, onSetti
     <div className={CLASS.bar}>
       <div className={CLASS.field}>
         <Tip label={t('search.settings')} side="bottom" portal>
-          <button type="button" className={clsx(CLASS.toolBtn, CLASS.tool)} aria-label={t('search.settings')}
+          <button type="button" ref={triggerRef} className={clsx(CLASS.toolBtn, CLASS.tool)} aria-label={t('search.settings')}
             aria-haspopup="dialog" aria-expanded={settingsOpen} data-files-search-settings-toggle
             onMouseDown={(event) => { if (settingsOpen) event.preventDefault() }}
             onClick={onSettings}>
@@ -461,11 +468,13 @@ function SearchBar({ query, showHidden, inputRef, onQuery, onShowHidden, onSetti
 }
 
 /** The result tree: the same tree drawing, with matches highlighted and its own expansion. */
-function ResultTree({ result, expanded, filesTree, nativeTree, onToggle, onOpen }: {
+function ResultTree({ result, expanded, filesTree, nativeTree, current, onToggle, onOpen }: {
   readonly result: Extract<SearchResultView, { kind: 'found' }>
   readonly expanded: readonly string[]
   readonly filesTree: FilesTreeSurface
   readonly nativeTree: NativeTreeRenderer | undefined
+  /** The previewed file's row when it is one of the matches: marked, never scrolled. */
+  readonly current: string | undefined
   readonly onToggle: (path: string) => void
   /** Open one result row by its absolute path. */
   readonly onOpen: (path: string) => void
@@ -481,6 +490,7 @@ function ResultTree({ result, expanded, filesTree, nativeTree, onToggle, onOpen 
       canOpen={filesTree.canOpen}
       highlight={result.query}
       unmatched
+      current={current === undefined ? undefined : { path: current }}
       onToggle={(_parent, path) => { onToggle(path) }}
       onOpen={onOpen}
     />
@@ -507,6 +517,14 @@ export interface FilesPaneProps {
   readonly onScrollOffset?: ((offset: number) => void) | undefined
   /** The plugin-level localization for a panel failure code (`error.search-unavailable`, …). */
   readonly describeFailure?: ((failure: SearchFailureInfo) => string | undefined) | undefined
+  /**
+   * `'page'` (the default) draws the Files-page form, whose bar follows the
+   * header toggle; `'preview'` draws the document navigator's form, whose bar is
+   * always shown and whose opening must not take the keyboard.
+   */
+  readonly mode?: 'page' | 'preview' | undefined
+  /** preview only: the previewed file's absolute host path — the result tree's current row. */
+  readonly previewPath?: string | undefined
 }
 
 /**
@@ -518,8 +536,13 @@ export interface FilesPaneProps {
 export function FilesPane(props: FilesPaneProps): ReactNode {
   const {
     filesTree, stateKey, rootId, root, tabId, signal, useStore, actions, onOpenFile, nativeTree, reveal, saved,
-    onScrollOffset, describeFailure,
+    onScrollOffset, describeFailure, mode = 'page', previewPath,
   } = props
+  // Preview mode keeps its differences to the listed rows: the bar is always
+  // drawn, the pane never takes the keyboard on mount, and a result row that is
+  // the previewed file is marked current. Everything else — the records, the
+  // requests, the settings — is the Files-page implementation.
+  const preview = mode === 'preview'
   const search: FilesTreeSearchSeat | undefined = filesTree.search
   // Hook order must not depend on the seat: the composition decides once,
   // but the takeover's first render may still be resolving.
@@ -538,20 +561,31 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
   const run = search?.run
   const query = state?.query ?? ''
   const trimmed = query.trim()
-  const barOpen = state?.barOpen === true
+  // The preview's bar is constant, so it neither reads nor writes `barOpen`:
+  // the record's visibility field belongs to the Files header toggle alone.
+  const barOpen = preview || state?.barOpen === true
   const result = state?.result
   const pending = state?.pending === true
   const [settingsDraft, setSettingsDraft] = useState<readonly ExclusionRule[] | undefined>(undefined)
   const input = useRef<HTMLInputElement | null>(null)
+  const settingsTrigger = useRef<HTMLButtonElement | null>(null)
   const resultsRef = useRef<HTMLDivElement | null>(null)
   const wasOpen = useRef(barOpen)
   const inputRef = useCallback((element: HTMLInputElement | null) => { input.current = element }, [])
+  const triggerRef = useCallback((element: HTMLButtonElement | null) => { settingsTrigger.current = element }, [])
   // Opening the bar hands the field the keyboard; the header's toggle is a
-  // plain button, so the focus has to move from here.
+  // plain button, so the focus has to move from here. Preview mode mounts with
+  // its bar already open and must not take the keyboard on open.
   useEffect(() => {
-    if (barOpen && !wasOpen.current) input.current?.focus()
+    if (!preview && barOpen && !wasOpen.current) input.current?.focus()
     wasOpen.current = barOpen
-  }, [barOpen])
+  }, [barOpen, preview])
+  // The settings rules are a draft until the panel closes. They belong to the
+  // record the pane is drawing: a root switch (a new `stateKey`) must drop them
+  // instead of letting the old root's draft land in the new root's preferences.
+  useEffect(() => {
+    setSettingsDraft(undefined)
+  }, [stateKey])
   // One search in flight per pane root: a newer query aborts the older answer,
   // and a preference change re-runs the same query with the new filters.
   // A new array per render would retrigger the effect below forever.
@@ -625,9 +659,20 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
   }
   const closeSettings = (draft: readonly ExclusionRule[], refocus: boolean): void => {
     setSettingsDraft(undefined)
-    if (refocus) input.current?.focus()
+    // Upstream's `closeSettings` returns focus to the bar's magnifier, the
+    // control that owns the popover — not to the field.
+    if (refocus) settingsTrigger.current?.focus()
     if (draft !== preferences.rules) search?.preferences.update(root, { rules: draft })
   }
+  // The preview marks its own file when the search results contain it. The
+  // mark is drawn, not scrolled: the reveal that owns the viewport belongs to
+  // the listed tree this result body replaces (ADR-0043 D4).
+  const resultCurrent = useMemo(() => {
+    if (!preview || previewPath === undefined || result?.kind !== 'found') return undefined
+    const relative = relativeUnderRoot(previewPath, root)
+    if (relative === undefined) return undefined
+    return locateFile(result.tree, relative).current
+  }, [preview, previewPath, result, root])
   if (search === undefined) {
     return (
       <FilesTree
@@ -642,12 +687,13 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
   }
   const settings = settingsDraft
   return (
-    <div className={CLASS.pane} onKeyDown={onKeyDown}>
+    <div className={CLASS.pane} data-mrfw-files-pane="" onKeyDown={onKeyDown}>
       {barOpen && (
         <SearchBar
           query={query}
           showHidden={preferences.showHidden}
           inputRef={inputRef}
+          triggerRef={triggerRef}
           onQuery={value => { store?.setQuery(stateKey, value) }}
           onShowHidden={(value) => { search.preferences.update(root, { showHidden: value }) }}
           // The toggle is a close path too: while the panel is open the click
@@ -697,6 +743,7 @@ export function FilesPane(props: FilesPaneProps): ReactNode {
                 expanded={state?.expanded ?? result.tree.expanded}
                 filesTree={filesTree}
                 nativeTree={nativeTree}
+                current={resultCurrent}
                 onToggle={(path) => { store?.toggled(stateKey, path) }}
                 // A result row's key is the absolute path, exactly like a listed
                 // row's: leaving cwd undefined keeps the address absolute, which
