@@ -1,6 +1,6 @@
 # 附加根文件预览导航树的工作区搜索（实施计划）
 
-> 状态：**P1–P4 已实施**；P5 本机门禁已执行（见「进度与证据」），**GUI 实机目检待维护者/PR 验收**。分支 `feat/additional-file-tree-search`。
+> 状态：**P1–P4 已实施**；P5 本机门禁与**隔离环境交互目检**已完成（见「进度与证据」，截图待维护者目视复核）。分支 `feat/additional-file-tree-search`。
 > P0 文档已作为 `7959317` 提交，并按 2026-11-16 外部技术评审的 F1–F3 修订（RootSwitcher 过渡帧缺陷纳入、
 > 测试范围编号、危害主次表述）。本文件是实施计划与执行账本，每阶段结束把命令与结果写入「进度与证据」。
 >
@@ -667,7 +667,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 | P2 | 已完成 | `881d2ad` | `tests/client-navigator.spec.tsx` 36（24 既有 + 12 新）全绿，seat 缺席路径逐项回归；`pnpm typecheck` / `pnpm lint` 通过；Host 侧 diff 为空 |
 | P3 | 已完成 | `967ef94` | `client-files` 20、`client-styles` 44、`client-navigator` 38 全绿；styles 双向 `matches()`（原生直接子节点匹配、插件嵌套节点不匹配）；焦点交接三形态（preview 有/无 pane 包装、Files 页包装、旧直挂） |
 | P4 | 已完成 | （本提交 `docs: document additional-root preview navigator search`） | ADR-0041 Amendment、ADR-0043 状态、README 双语、architecture §7、requirements、migration reference 第三接口面、FORK.md、compat note 双语、troubleshooting；`node scripts/check-docs.mjs` → 0 errors / 0 warnings |
-| P5 | 本机门禁完成；交互式 GUI 目检待人工 | — | 见下节「P5 执行记录」：lint/typecheck/build/focused/compat/docs/pack 全绿；`pnpm test` 1871/165/17（17 个基线同因）；三项 smoke 与 packed、auto-review 全绿；`verify:all` 在完整 test 处因基线同因中止；真实 `dsh web` + Chrome headless 已验客户端面，交互目检待 PR/维护者 |
+| P5 | 本机门禁 + 隔离环境交互目检完成 | — | 见下节「P5 执行记录」：lint/typecheck/build/focused/compat/docs/pack 全绿；`pnpm test` 1871/165/17（17 个基线同因）；三项 smoke 与 packed、auto-review 全绿；`verify:all` 在完整 test 处因基线同因中止；隔离 scratch `$DSH_HOME` + 真实 `dsh web` + Chrome/CDP 的交互目检覆盖全部检查项并截图 20 张 |
 
 ### P5 执行记录（命令与结果）
 
@@ -692,7 +692,20 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 **Host 侧 diff 为空**：`git diff 53ae34d..HEAD -- src/contract.ts src/files-search.ts src/workspace-files.ts src/command.ts src/registry.ts src/scope.ts src/index.ts src/compat/workspace-files.ts src/compat/fs-patch.ts src/compat/dsh-version.ts package.json cordis.patch.yml` 无输出；`src/compat/files-tree.ts` 的 `currentRef` 条件透传属计划允许的 client 侧改动。
 
-**实机 GUI 目检**：本会话无法写真实的用户 `$DSH_HOME`（`dsh web` 对该 profile 返回 `EPERM`，只在会话可写范围内使用 scratch home），也没有已认证的人工目检通道，因此计划里的**交互目检清单**未能完成。已补两项真实进程级验证：(1) `smoke:journey` 的 web 腿真实启动 `dsh web`（输出 `http://127.0.0.1:<port>/?token=…`）、经面板 HTTP 的 `/workspace-folders add` 注册附加根、断言 `ctx.get('clientModules').graph().entries` 含本包（`clientEntryServed`）并驱动真实 turn；(2) scratch `$DSH_HOME` + 真实 `dsh web` + 本机 Google Chrome headless 载入 token URL，确认页面为 DeepSeek Harness、`#multi-root-workspace-styles` 存在、Hero 工作区入口（`.mrfw-heroEntry*`）与 footer 的「工作区目录」入口在真实浏览器中渲染（插件 client bundle 在真实 Web 组合里执行）。计划里的预览搜索交互目检（主根原生搜索不变；附加根预览常显搜索栏、结果/高亮/计数/eye/设置/失败重试；结果行 `replaceTab`；关开 Folder 与 `replaceTab` 后状态保留；push/overlay/fill、窄屏、浮动形态；Esc 顺序；切回主根恢复原生）仍待维护者在有会话/GUI 的开发树执行或 PR 验收补录；本计划保持在 `active/`。
+**实机交互目检（2026-11-16，隔离环境完成）**：用 scratch `$DSH_HOME`（不触碰真实用户 profile）+ 真实 `dsh web` + 本机 Google Chrome（headless，CDP 驱动）搭起可交互目检装置——脚本化模型端点驱动一轮真实 turn 生成 GUI 可见会话、经 `/workspace-folders add` 注册附加根，然后在真实浏览器里逐项操作并截图 20 张（`.dsh-smoke/gui/shots/`，本机证据，不入库）。逐项结果：
+
+- 附加根预览常显搜索栏（`03`）：aside 内为插件 pane，原生栏仍在 DOM 被隐藏；输入 `alpha` → 1 个结果、命中 `<mark>alpha</mark>`、状态行「1 个结果」、Factory 路径 `aria-current` 标当前文件（`04`）。
+- 设置浮层（`05`）：排除规则、尊重 `.gitignore` 开关、空白添加项齐全；Esc 关闭后焦点回到 magnifier、查询保留（`06`）。
+- Esc 顺序：设置 → 清查询（`07`，树与当前行恢复）→ 关导航树（`08`，aside 消失、原生布局恢复）。
+- `replaceTab`（`09`）：点击结果行 `beta-notes.md` 后预览 tab 原位更替（tab 数量不变），插件 pane 与查询保留。
+- Folder 关闭/重开（`10`）：查询 `beta`、结果、当前行、无 pending 全部保留（`replaceTab` 后同 pane 记录仍命中）。
+- eye（`11`/`19`）：默认隐藏 `.git`；开启后列出的树出现 `.git` 且查询/结果保留；偏好按根保存。
+- 布局：窄屏 900×760（`12`）、全屏（`13`）、浮动 pane（`14`/`15`，拖动预览 tab 生成 `data-dockkit-float`，浮动内 Folder 正常展开且搜索面可用）均正确。
+- 失败与重试（`16`/`17`）：移走附加根目录 → 本地化失败行「该目录当前不可用，只能设为只读；请先恢复目录再调整权限。」+「重试」；恢复目录后点重试 → 「1 个结果」gamma.md。
+- 主根对照（`18`）：主根 README 预览的 aside 不带 `data-mrfw-navigator`、无插件 pane，原生搜索栏可见且布局不变——切回主根恢复原生。
+- 已知偏差复核：移除根后重新登记会得到新 `rootId`，旧 rootId 上的「重试」持续 `not-found`（提示「没有找到对应的登记项」），关闭/重开 Folder 后重新解析并恢复；与需求文档已记录的边界一致。
+
+截图供维护者目视复核；本计划保持在 `active/`。
 
 ### 本次会话的版本与代码事实核对（P0 证据）
 

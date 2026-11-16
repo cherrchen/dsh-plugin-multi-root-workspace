@@ -39,7 +39,7 @@ completed/
 active：
 
 - [2026-11-16-sidebar-footer-row-alignment-and-coexistence.md](./active/2026-11-16-sidebar-footer-row-alignment-and-coexistence.md) — 侧栏 footer 入口的 workspace tree 图标与跨两代几何对齐（旧 19 版 / 新 5 版，分界 `0.2.2-alpha.2`；rail 圆角按其更早的 `0.1.6-alpha.2` 分界处理，22/24 对齐、最老 2 版已知偏差），以及同槽出现第二行时的纵向共存规则：一份带 fallback 的 CSS 配方、`:has()` 作用域的 slot anchor 纵向列、不隐藏/不读槽账本/不改他人行；含复刻取证、测试与文档清单。决策见 [ADR-0044](../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)。
-- [2026-11-16-additional-root-preview-navigator-search.md](./active/2026-11-16-additional-root-preview-navigator-search.md) — 附加根文件预览右侧 Folder 导航树（FileTree）的工作区搜索：复用既有 `search` 端点与 `FilesPane`（新增 preview 模式），补齐结果当前行、隐藏项默认、设置回焦、焦点交接、Escape 顺序与旧宿主降级；DSH `0.2.2-rc.2` 起可用，Host 零改动。决策见 [ADR-0043](../decisions/ADR-0043-additional-root-preview-navigator-search.md)；**实施完成（P1–P4 已提交），P5 本机门禁通过；GUI 实机目检待 PR/维护者**。
+- [2026-11-16-additional-root-preview-navigator-search.md](./active/2026-11-16-additional-root-preview-navigator-search.md) — 附加根文件预览右侧 Folder 导航树（FileTree）的工作区搜索：复用既有 `search` 端点与 `FilesPane`（新增 preview 模式），补齐结果当前行、隐藏项默认、设置回焦、焦点交接、Escape 顺序与旧宿主降级；DSH `0.2.2-rc.2` 起可用，Host 零改动。决策见 [ADR-0043](../decisions/ADR-0043-additional-root-preview-navigator-search.md)；**实施完成（P1–P4 已提交），P5 本机门禁与隔离环境交互目检完成（截图待维护者复核）**。
 
 - [2026-11-15-files-page-takeover-notice.md](./active/2026-11-15-files-page-takeover-notice.md) — Issue #47 限定范围：Files 页被第三方插件整页接管时，以官方瞬时 Toast（info 级、无警告图标、数秒消失）弹一次提示；检测经 `sidebarRightTabs.get('files')` 的生效实现（不依赖 `slots.inject`/`spec`），不含对话框/命令文案与 fallback 入口；含进入/退出验收机制。决策见 [ADR-0015](../decisions/ADR-0015-files-tab-plugin-owned-browsing.md#修订files-页被整页接管时的可见提示2026-11-15)。
 
