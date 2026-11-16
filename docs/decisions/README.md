@@ -51,7 +51,7 @@ ADR-0001-short-title.md
 ADR-0002-short-title.md
 ```
 
-编号递增，标题使用小写中划线。ADR-0030–0034 已分配给 `feat/ssh-workspace` 分支；主线在 ADR-0029 之后直接使用 0035 起跳，跳号属有意保留而非缺失。
+编号递增，标题使用小写中划线。ADR-0030–0034 已分配给 `feat/ssh-workspace` 分支；主线在 ADR-0029 之后直接使用 0035 起跳，跳号属有意保留而非缺失。ADR-0043 由两个在飞分支的提案各自占用（合入前需由各自分支消解重号），本线新增决策从 ADR-0044 起。
 
 - [ADR-0022-auto-review-loader-entry.md](./ADR-0022-auto-review-loader-entry.md) — Auto Review 并入主包：默认关闭的单一 loader 行、运行时接管、并发导入防护、有序 owner 交接与单包构建（取代 ADR-0021 的交付结构）。
 
@@ -84,3 +84,5 @@ ADR-0002-short-title.md
 - [ADR-0041-additional-root-workspace-search.md](./ADR-0041-additional-root-workspace-search.md) — 附加根工作区搜索：上游 wire 无法命名根，故在插件通道上新增 `search` 端点（rootId 由刷新后的 Registry 解析、单次主根准入、帧内复核授予）；客户端按 `workspaceFiles.search` 结构门控，状态按 (tab, root) 存 inject product，偏好沿用上游 localStorage 键；旧宿主零影响（Accepted，实施见计划）。
 
 - [ADR-0042-additional-root-row-context-menus.md](./ADR-0042-additional-root-row-context-menus.md) — 附加根 Files 行右键菜单与 viewer 置灰：结构读取根级 `useContextMenu` 并把 `rowTriggerProps`/`canOpen` 转发进宿主 Factory（旧行同语义），target 用绝对路径；不新增 `ui-context-menu` 依赖（upgrade 矩阵会改写 devDep 致老 lane 安装失败）（Accepted，实施见计划）。
+
+- [ADR-0044-sidebar-footer-row-alignment-and-coexistence.md](./ADR-0044-sidebar-footer-row-alignment-and-coexistence.md) — 侧栏 footer 入口改用 workspace tree 字形；一份「宿主 token + 旧值 fallback」的配方同时对齐 19 个旧几何版本与 5 个新几何版本（分界 `0.2.2-alpha.2`）；rail 圆角按其更早的 `0.1.6-alpha.2` 分界处理（22/24 对齐，最老 2 版已知偏差）；本入口挂载期间把 `sidebar.footer.action` 的 slot anchor 改为纵向列，使同槽第二行各占一整行（不隐藏、不读槽账本、不改他人行；让位方案与原因见 ADR 正文）（Accepted，实施见计划）。

@@ -49,7 +49,7 @@ ADR-0001-short-title.md
 ADR-0002-short-title.md
 ```
 
-Numbers increment; titles use lowercase kebab-case. ADR-0030–0034 are reserved for the `feat/ssh-workspace` branch; mainline continues at 0035 after ADR-0029 — the gap is intentional, not missing entries.
+Numbers increment; titles use lowercase kebab-case. ADR-0030–0034 are reserved for the `feat/ssh-workspace` branch; mainline continues at 0035 after ADR-0029 — the gap is intentional, not missing entries. ADR-0043 is claimed by two in-flight branches (each proposing a different title; the duplicate must be resolved on those branches before merge); this line starts new decisions at ADR-0044.
 
 - [ADR-0021-auto-review-context-companion.md](./ADR-0021-auto-review-context-companion.md) — Optional Auto Review companion, shared tool permission preview, current constraints, native overlap, fail-closed checks and fork synchronization (Accepted).
 
@@ -84,3 +84,5 @@ Numbers increment; titles use lowercase kebab-case. ADR-0030–0034 are reserved
 - [ADR-0041-additional-root-workspace-search.md](./ADR-0041-additional-root-workspace-search.md) (Chinese) — Workspace search for an additional root: because the upstream wire cannot name a root, the plugin channel gains a `search` endpoint (the `rootId` is resolved from a refreshed Registry, authorization takes one primary-root admission and re-checks the grant inside the frame); the client gates on `workspaceFiles.search`, keeps one record per (tab, root) in the inject product, and stores preferences under the upstream localStorage key; older hosts are unaffected (Accepted; implementation in the plan).
 
 - [ADR-0042-additional-root-row-context-menus.md](./ADR-0042-additional-root-row-context-menus.md) (Chinese) — Additional-root Files row context menus and viewer greying: the root-level `useContextMenu` is read structurally and `rowTriggerProps`/`canOpen` are forwarded into the host Factory (the legacy rows behave the same), with absolute paths as targets; no `ui-context-menu` dependency (the upgrade matrix rewrites devDependencies and would break older lanes' installs) (Accepted; implementation in the plan).
+
+- [ADR-0044-sidebar-footer-row-alignment-and-coexistence.md](./ADR-0044-sidebar-footer-row-alignment-and-coexistence.md) (Chinese) — The sidebar footer entry switches to the workspace-tree glyph; one recipe (host tokens with legacy fallbacks) aligns both the 19 legacy-geometry releases and the 5 token-geometry releases (boundary `0.2.2-alpha.2`); rail rounding follows its own earlier boundary `0.1.6-alpha.2` (22 of 24 releases aligned; the two oldest are a documented deviation); while this entry is mounted the `sidebar.footer.action` slot anchor becomes a vertical column so a second footer action gets its own full row (no hiding, no slot-ledger reads, no changes to other entries; the rejected yield design and its rationale are in the ADR) (Accepted; implementation in the plan).
