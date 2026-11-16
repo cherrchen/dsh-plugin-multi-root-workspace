@@ -246,12 +246,11 @@ async function runPersonalEndpoint(
     case 'sshHelperInstall': {
       const config = loadPersonalConfig(paths.personalPath)
       const environment = findEnvironment(config, call.environmentId)
-      const { sshPackageVersion } = await import('../compat/dsh-version.ts')
-      const { createRequire } = await import('node:module')
-      const require = createRequire(import.meta.url)
-      const hostHelperPath = require.resolve('@deepseek-ai/dsh-ssh/lib/helper.js')
+      const { sshPackageRoot, sshPackageVersion } = await import('../compat/dsh-version.ts')
       const version = sshPackageVersion('@deepseek-ai/dsh-ssh')
-      if (version === undefined) throw new RemoteAdmissionError('helper-install-failed', 'the host dsh-ssh version is unknown')
+      const packageRoot = sshPackageRoot('@deepseek-ai/dsh-ssh')
+      if (version === undefined || packageRoot === undefined) throw new RemoteAdmissionError('helper-install-failed', 'the host dsh-ssh package is not resolvable')
+      const hostHelperPath = join(packageRoot, 'lib', 'helper.js')
       const helper = await installHelper(exec, environment, paths.credentialRoot, { sshVersion: version, hostHelperPath, nodePath: call.nodePath })
       return await mutate(registry, primary, paths, call.revision, current => ({
         ...current,
