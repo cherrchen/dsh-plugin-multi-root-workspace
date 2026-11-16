@@ -13,7 +13,7 @@
  *    with the offending versions named.
  */
 
-import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -275,6 +275,26 @@ describe('koffi resolves through the host, never a second native image', () => {
     } finally {
       delete process.env.DSH_KOFFI_PATH
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('treats a DSH_KOFFI_PATH directory as a package, not as a file beside its parent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mrw-koffi-dir-'))
+    const pkg = join(root, 'koffi')
+    mkdirSync(pkg)
+    // A loadable index.js in the PARENT directory must never be picked up for a
+    // directory candidate: the sibling probe belongs inside the package.
+    writeFileSync(join(root, 'index.js'), 'module.exports = { load() { return undefined }, marker: "parent" }\n')
+    writeFileSync(join(pkg, 'index.cjs'), 'module.exports = { load() { return undefined }, marker: "package" }\n')
+    process.env.DSH_KOFFI_PATH = pkg
+    try {
+      const { loadHostKoffi, loadHostKoffiSync } = await import('../src/compat/koffi.ts')
+      const marker = (copy: Koffi): undefined | string => (copy as Koffi & { marker?: string }).marker
+      expect(marker(await loadHostKoffi())).toBe('package')
+      expect(marker(loadHostKoffiSync())).toBe('package')
+    } finally {
+      delete process.env.DSH_KOFFI_PATH
+      rmSync(root, { recursive: true, force: true })
     }
   })
 })

@@ -11,10 +11,10 @@
  * - `DSH_SMOKE_HOME` — a scratch home OUTSIDE the repository, so the battery's
  *   "resolved plugin lives outside the checkout" assertion is meaningful.
  *
- * The first `dsh plugin add <tgz>` must exit 0 with no build-approval stop:
- * koffi is an optional peer supplied by the host, so the tarball installs no
- * package with an install script. The shared installer still verifies that
- * (exit 0 plus no `Ignored build scripts` line) and prints the evidence.
+ * The first `dsh plugin add <tgz>` must exit 0 with no koffi build-approval
+ * stop: koffi is an optional peer supplied by the host, so the tarball asks to
+ * build nothing. The shared installer verifies that (exit 0 plus no koffi
+ * approval line) and prints the evidence.
  *
  * @module scripts/smoke-packed
  */

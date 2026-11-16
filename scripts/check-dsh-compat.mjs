@@ -24,7 +24,7 @@
  * @module scripts/check-dsh-compat
  */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -136,6 +136,31 @@ if (manifest.peerDependenciesMeta?.koffi?.optional !== true) {
 }
 if (!/^3\.\d+\.\d+$/.test(devs.koffi ?? '')) {
   fail(`devDependencies.koffi is "${devs.koffi ?? '(absent)'}"; pin the 3.x release the development host carries`)
+}
+// The development pin must equal the copy the host tree itself resolves. When
+// an upstream release changes its koffi pin, `upgrade-dsh` repoints the harness
+// but not this package; without this check the dev pin could drift silently.
+function packageVersionOf(entry) {
+  let dir = dirname(entry)
+  while (true) {
+    const filename = join(dir, 'package.json')
+    if (existsSync(filename)) return JSON.parse(readFileSync(filename, 'utf8')).version
+    const parent = dirname(dir)
+    if (parent === dir) return undefined
+    dir = parent
+  }
+}
+let hostKoffi
+try {
+  const hostRequire = createRequire(require.resolve('@deepseek-ai/dsh-fs-local/package.json'))
+  hostKoffi = packageVersionOf(hostRequire.resolve('koffi'))
+} catch {
+  hostKoffi = undefined
+}
+if (hostKoffi === undefined) {
+  fail('cannot resolve koffi from @deepseek-ai/dsh-fs-local (run pnpm install)')
+} else if (hostKoffi !== devs.koffi) {
+  fail(`devDependencies.koffi is "${devs.koffi ?? '(absent)'}" but the host tree resolves ${hostKoffi}; repoint the development pin to the host's koffi`)
 }
 
 // 6. What is actually installed here agrees with itself and with the allowlist.

@@ -30,6 +30,7 @@
  * The synchronous variant exists for bounded Git-metadata reads in Worktrees;
  * both variants walk the same candidate list.
  */
+import { statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -39,8 +40,10 @@ export type Koffi = (typeof import('koffi'))['default']
 interface Candidate {
   /** Resolution route, for the failure diagnostic. */
   readonly source: string
-  /** Absolute path of the koffi JavaScript entry. */
+  /** Absolute path of the koffi JavaScript entry, or of a koffi package directory. */
   readonly entry: string
+  /** True when {@link entry} is a package directory rather than a file. */
+  readonly directory: boolean
 }
 
 const ownRequire = createRequire(import.meta.url)
@@ -81,15 +84,16 @@ function resourcesRoots(): string[] {
 function candidates(): Candidate[] {
   const list: Candidate[] = []
   const seen = new Set<string>()
-  const add = (source: string, entry: string | undefined): void => {
+  const add = (source: string, entry: string | undefined, directory = false): void => {
     if (entry === undefined || entry === '' || seen.has(entry)) return
     seen.add(entry)
-    list.push({ source, entry })
+    list.push({ source, entry, directory })
   }
   const override = process.env.DSH_KOFFI_PATH?.trim()
   if (override !== undefined && override !== '') {
     const path = isAbsolute(override) ? override : resolve(override)
-    add('DSH_KOFFI_PATH', path)
+    const directory = statSync(path, { throwIfNoEntry: false })?.isDirectory() === true
+    add('DSH_KOFFI_PATH', path, directory)
     add('DSH_KOFFI_PATH/index.cjs', join(path, 'index.cjs'))
     add('DSH_KOFFI_PATH/index.js', join(path, 'index.js'))
   }
@@ -106,6 +110,14 @@ function candidates(): Candidate[] {
   return list
 }
 
+/** The ESM entry beside a file candidate, or inside a directory candidate. */
+function siblingEntry(candidate: Candidate): string | undefined {
+  const sibling = candidate.directory
+    ? join(candidate.entry, 'index.js')
+    : join(dirname(candidate.entry), 'index.js')
+  return sibling === candidate.entry ? undefined : sibling
+}
+
 /**
  * Load one candidate synchronously, trying the sibling ESM entry when the CJS
  * facade is partial. Node's `require(esm)` handles that entry without a second
@@ -119,8 +131,8 @@ function loadSyncFrom(candidate: Candidate): Koffi | undefined {
   } catch (error) {
     failure = error
   }
-  const esm = join(dirname(candidate.entry), 'index.js')
-  if (esm !== candidate.entry) {
+  const esm = siblingEntry(candidate)
+  if (esm !== undefined) {
     try {
       const loaded = pick(ownRequire(esm))
       if (loaded !== undefined) return loaded
@@ -141,8 +153,8 @@ async function loadAsyncFrom(candidate: Candidate): Promise<Koffi | undefined> {
   } catch (error) {
     failure = error
   }
-  const esm = join(dirname(candidate.entry), 'index.js')
-  if (esm !== candidate.entry) {
+  const esm = siblingEntry(candidate)
+  if (esm !== undefined) {
     try {
       const loaded = pick(await import(pathToFileURL(esm).href))
       if (loaded !== undefined) return loaded
@@ -156,7 +168,9 @@ async function loadAsyncFrom(candidate: Candidate): Promise<Koffi | undefined> {
 
 /** Explain every route that was tried, retaining the last real load failure. */
 function unavailable(tried: readonly Candidate[], lastError: unknown): Error {
-  const routes = tried.length === 0 ? 'no route' : tried.map(candidate => candidate.source).join(', ')
+  const routes = tried.length === 0
+    ? 'no route'
+    : tried.map(candidate => `${candidate.source} (${candidate.entry})`).join(', ')
   const cause = lastError instanceof Error ? `: ${lastError.message}` : ''
   return new Error(`the host's Koffi copy is unavailable (tried ${routes})${cause}. `
     + 'Koffi is an optional peer provided by DSH; reinstall the runtime, or set DSH_KOFFI_PATH to a koffi package directory.')

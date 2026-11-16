@@ -112,6 +112,12 @@ function isEcosystemPackage(name) {
  * prereleases pin their exact base; stable ranges take the latest stable patch
  * in their declared minor line. A newer vendor minor can satisfy semver while
  * changing the Cordis API (loader 1.1.0 requires Cordis 4.1.0).
+ *
+ * `koffi` is not repointed here: it arrives through `dsh-fs-local` rather than
+ * a package this function queries. `compat:check` requires
+ * `devDependencies.koffi` to equal the copy `dsh-fs-local` resolves, so a
+ * release that changes the host's koffi pin fails the gate until a human
+ * updates the development pin.
  * @param version - the exact `@deepseek-ai/dsh` release being pinned.
  * @param cordisVersion - the exact cordis version {@link cordisRequiredBy} returned.
  * @returns package name to exact version, sorted by name.

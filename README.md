@@ -92,16 +92,11 @@ DSH Desktop 的插件页和 CLI **不是等价入口**：插件页的「添加�
 | 来源 | 命令 | 说明 |
 | --- | --- | --- |
 | npm 注册表（推荐） | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | 预构建产物，即装即用 |
-| GitHub | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | 安装时自动从源码构建；`allowBuilds` 需含本包，建议锁定版本 |
+| GitHub | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | 安装时自动从源码构建；`allowBuilds` 需含本包的 exact key，建议锁定版本 |
 | tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | 预构建离线包，适合内网/离线 |
 | 从源码安装 | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` 链接本地 checkout，适合开发调试；无需 `allowBuilds` |
 
-**npm、tarball 与本地路径安装不需要任何 `allowBuilds`**：插件不在生产依赖里携带带构建脚本的包（`koffi` 由宿主提供）。只有 git 来源仍需要为插件自身的 `prepare` 授权：
-
-```yaml
-allowBuilds:
-  '@dsh-electron/dsh-plugin-multi-root-workspace': true
-```
+**npm、tarball 与本地路径安装不需要任何 `allowBuilds`**：插件不在生产依赖里携带带构建脚本的包（`koffi` 由宿主提供）。git 来源仍需为本包自身的 `prepare` 授权，但 pnpm 只接受含来源与 commit 的 exact key——按[从 GitHub 安装](#从-github-安装)里 pnpm 打印的那一行原样写入；只写包名不生效。
 
 若 `add` 退出 0 但插件没有进入 `dsh.profile.bundles`，做一次 `remove` + `add`。更多排查见[故障排查](./docs/troubleshooting/install-stops-at-build-approval.md)。
 

@@ -90,16 +90,11 @@ The first install no longer needs an `allowBuilds` entry for `koffi`: koffi is s
 | Source | Command | Notes |
 | --- | --- | --- |
 | npm registry (recommended) | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | Pre-built artifacts, ready to use |
-| GitHub | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | Builds automatically from source on install; `allowBuilds` must name this package too — pin a version |
+| GitHub | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | Builds automatically from source on install; `allowBuilds` must name this package's exact key — pin a version |
 | tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | Pre-built offline package, handy for air-gapped or offline delivery |
 | From source | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` to a local checkout — best for development; no `allowBuilds` needed |
 
-**npm, tarball, and local-path installs need no `allowBuilds` at all**: the plugin ships no production dependency with a build script (`koffi` is supplied by the host). Only a git source still needs approval for the package's own `prepare`:
-
-```yaml
-allowBuilds:
-  '@dsh-electron/dsh-plugin-multi-root-workspace': true
-```
+**npm, tarball, and local-path installs need no `allowBuilds` at all**: the plugin ships no production dependency with a build script (`koffi` is supplied by the host). A git source still needs approval for the package's own `prepare`, but pnpm accepts only the exact key (source and commit) it prints — copy the line from [Install from GitHub](#install-from-github); a bare package name does not apply.
 
 If the retry `exits 0` but the plugin never lands in `dsh.profile.bundles`, do a `remove` + `add`. Further diagnosis: [troubleshooting](./docs/troubleshooting/install-stops-at-build-approval.md).
 

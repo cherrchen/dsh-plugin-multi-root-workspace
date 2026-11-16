@@ -343,15 +343,23 @@ export async function installPluginProfile(profile, home, source = pluginPackage
   }
   let first = await captureDsh(args, { DSH_HOME: home })
   if (first.code === 0) {
-    // The shipped tarball must install without any build-approval exchange:
-    // koffi is a host-provided optional peer, so no dependency carries an
-    // install script. Exit 0 while pnpm still reports one means a new
-    // build-script dependency slipped into the package.
     const output = `${first.stdout}\n${first.stderr}`
-    if (/Ignored build scripts:/u.test(output) || /set this to true or false/u.test(output)) {
-      console.error('[dsh-runtime] the first `dsh plugin add` exited 0 but pnpm still reported ignored build scripts:')
+    // The shipped tarball must install without asking to approve koffi's build
+    // script: koffi is a host-provided optional peer now. Other ignored build
+    // scripts belong to the runtime or profile template, so they warn rather
+    // than fail this smoke.
+    const ignored = [...output.matchAll(/Ignored build scripts: ([^\n]+)/g)]
+      .flatMap(match => match[1].split(',').map(entry => entry.trim()))
+    const koffiIgnored = ignored.some(entry => /^koffi@/u.test(entry))
+    const koffiPending = /^\s*['"]?koffi['"]?\s*:\s*set this to true or false\s*$/mu.test(output)
+    if (koffiIgnored || koffiPending) {
+      console.error('[dsh-runtime] the first `dsh plugin add` exited 0 but pnpm still asked to approve koffi\'s build script:')
       process.stdout.write(output)
       return 1
+    }
+    if (ignored.length > 0) {
+      console.warn('[dsh-runtime] pnpm reported ignored build scripts for other packages (not koffi); continuing:')
+      for (const entry of ignored) console.warn(`  ${entry}`)
     }
     console.log(`[dsh-runtime] first \`dsh plugin add ${source.endsWith('.tgz') ? '<tgz>' : source}\` exited 0 — no build-approval stop`)
     return 0
