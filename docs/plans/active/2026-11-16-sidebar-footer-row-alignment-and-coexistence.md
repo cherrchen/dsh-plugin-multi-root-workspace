@@ -2,12 +2,14 @@
 
 > 状态：**实施完成（2026-11-16），待验收发版**。[ADR-0044](../../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)
 > 已 Accepted；分支 `fix/sidebar-buttom-style`；实现提交 `b1bd1d8`。目标：随下一个版本发布（版本号待发布准备
-> 确定）。本地门禁、一次性 Chromium 复刻与隔离环境的真实 GUI 目检均已回填 §Progress。
+> 确定）。本地门禁、一次性 Chromium 复刻与隔离环境的真实 GUI 目检均已回填 §Progress；
+> 2026-11-16 追加 A 修订（按钮高度跟随设置行 occupant，hover 药丸同尺寸，见 Phase 6）。
 
 ## Goal
 
 侧栏底部的 Workspace Folders 入口（`sidebar.footer.action` 的 `multi-root-folders` occupant）在两代
-受支持 DSH 上都与设置触发行**逐像素对齐**（新几何下也与账号 launcher 对齐），并使用与本插件其他入口
+受支持 DSH 上都与设置触发行**逐像素对齐**（新几何下也与账号 launcher 对齐），按钮高度与可见设置行
+occupant 同高（hover 药丸同尺寸，A 修订），并使用与本插件其他入口
 一致的 workspace tree 字形；
 当同槽还有其他 footer action 真正渲染时，本入口与该 action **各占一整行、都可点击**（不争抢、不隐藏、
 不改动其他插件）。不修改 DSH、不新增依赖、不引入运行时槽位探测。
@@ -125,8 +127,12 @@ better-sidebar）没有"同槽有人注册就隐藏"的先例，实际做法都�
 `border-radius` / `background-clip` 都改为 token + fallback；rail 规则改为
 `border-inline: 0; background-clip: border-box; border-radius: var(--dsw-radius-md, 12px)`（22/24 与宿主
 一致，最老 2 个版本偏差见 §Background）。行包装补 `position: relative` 与 `0.1.6-alpha.2` 起的宿主一致。
-42px 高、14/22 字号、hover token、transition、16/18 图标尺寸全部保持；`:hover` 保持不包
-`@media (hover: hover)`（19 个旧版本一致，5 个新几何版本仅在触屏上有差异）。
+14/22 字号、hover token、transition、16/18 图标尺寸全部保持；`:hover` 保持不包
+`@media (hover: hover)`（19 个旧版本一致，5 个新几何版本仅在触屏上有差异）。**按钮高度（A 修订，
+2026-11-16）**：初稿的 42px 固定高改为跟随设置行可见 occupant——`0.2.0-rc.1` 起的账号 launcher
+未登录 32px / 已登录 44px，`0.1.7-rc.2` 及以前的 42px 设置触发行继续命中 42px 回退，rail 保持
+36px；只改高度，20/42 icon/label 墨线不变。根因、备选与决策见
+[ADR-0044 §修订二](../../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md#修订二2026-11-16实施期-gui-复核-a按钮高度跟随设置行-occupant)。
 
 **期望计算值（实施后由 §Validation 的复刻核对）：**
 
@@ -231,9 +237,9 @@ DOM 事实（全部受支持版本一致）：`sidebar.footer.action` 的 outlet
 - [x] ADR-0006 Status 加修订说明（不重写历史正文）。
 - [x] README（中/英）、`docs/guide`、`docs/requirements`、`docs/architecture` 的侧栏入口描述补图标与
   共存语义。
-- [x] `.agent/note/dsh-compat-contract`（中/英）追加三条 quiet trap：侧栏行几何两代分界
+- [x] `.agent/note/dsh-compat-contract`（中/英）追加 quiet trap：侧栏行几何两代分界
   `0.2.2-alpha.2`、rail 圆角分界 `0.1.6-alpha.2`（最老 2 版偏差）、footer 槽的官方 cordis
-  occupant 常驻但可 null 渲染。
+  occupant 常驻但可 null 渲染；A 修订再补第四条（设置行高度随登录态 32/44，缺标记回退 42）。
 - [x] README 索引与进度总账状态回填。
 
 **退出条件**：`pnpm docs:check` 通过；文档与实现无矛盾。
@@ -243,12 +249,29 @@ DOM 事实（全部受支持版本一致）：`sidebar.footer.action` 的 outlet
 - [ ] 本地门禁：`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm docs:check`、
   `pnpm compat:check`；涉及打包时加 `pnpm pack:check`（本改动只动 client 样式/JSX 与文档，
   不新增导出，仍以最小充分集为准）。
-- [ ] 真实 GUI 目检：宽/rail 两形态与设置行对齐；用一个临时第二 footer occupant 复刻多占用场景
-  （Chromium 复刻或真实动态 Cordis 插件渲染 badge）确认两行共存。
+- [x] 真实 GUI 目检：宽/rail 两形态与设置行对齐；用一个临时第二 footer occupant 复刻多占用场景
+  （Chromium 复刻或真实动态 Cordis 插件渲染 badge）确认两行共存。（A 修订后的 hover 高度另见 Phase 6。）
 - [ ] 回填 §Progress 与台账（commit、PR、CI run）；随后按发布流程更新 CHANGELOG 与
   `AGENTS.md` 项目状态。
 
 **退出条件**：门禁绿、目检截图入 PR、台账更新。
+
+### Phase 6 — 追加：hover 高度跟随设置行 occupant（A 修订，2026-11-16）
+
+- [x] 复现并量化：隔离 web 组合（`0.2.2-rc.3`、未登录）实测本行 hover 药丸 264×42、下方 More
+  264×32，宽度/x/圆角/颜色相同，仅高度差 10px；根因是 `0.2.0-rc.1` 起设置行 occupant 换成账号
+  launcher（未登录 32 / 登录 44），见 ADR-0044 §Investigation 的高度分界。
+- [x] 实现 A：`[data-slot='sidebar']:has(button[data-signed-out='true'|'false']) .mrfw-trigger:not(.mrfw-triggerRail)`
+  把高度设为 32 / 44；无该标记的宿主保持 42px，rail 保持 36px；只改高度，其余配方与 20/42
+  icon/label 不变。
+- [x] `tests/client-styles.spec.ts` 钉扎两条高度规则、42px / 36px 回退与 rail 排除；实现前红、
+  实现后 focused 126 项全绿。
+- [x] ADR-0044 §修订二、§Investigation 高度分界、D2 高度条款与 CSS、Consequences 同步；
+  README/guide/requirements/architecture/compat note 同步；`pnpm docs:check` 绿。
+- [x] 隔离环境 GUI 复验：重建并重装插件后，未登录下两行 hover 药丸均 264×32；把 launcher
+  标记临时置为已登录后本行 44px（宿主同高）；rail 本行仍 36px；icon/label 仍 20/42。
+
+**退出条件**：hover 药丸与设置行同尺寸（两登录态）、无 42px 回退回归、门禁与 docs:check 绿。
 
 ## Validation
 
@@ -299,7 +322,7 @@ pnpm docs:check           # 文档结构、链接与索引
 
 | 文档 | 改动 |
 | --- | --- |
-| `docs/decisions/ADR-0044-…md` | 新增（已完成） |
+| `docs/decisions/ADR-0044-…md` | 新增 + 修订二（A：hover 高度跟随设置行，已完成） |
 | `docs/decisions/README.md` / `.en.md` | ADR-0044 索引行 |
 | `docs/plans/README.md` / `.en.md` | 本计划行（active） |
 | `docs/plans/active/2026-09-12-multi-root-workspace.md` | 进度总账新行（批次/编号/计划/ADR/commit/状态） |
@@ -308,13 +331,15 @@ pnpm docs:check           # 文档结构、链接与索引
 | `docs/guide/README.md` / `.en.md` | 同上（用户视角） |
 | `docs/requirements/multi-root-workspace.md` | UI 需求/已知限制的入口描述 |
 | `docs/architecture/multi-root-workspace.md` | Client 半部的 footer 入口几何/共存说明 |
-| `.agent/note/dsh-compat-contract.md` / `.en.md` | 三条 quiet trap：行几何分界 `0.2.2-alpha.2`、rail 圆角分界 `0.1.6-alpha.2`（最老 2 版偏差）、cordis occupant 常驻可 null |
+| `.agent/note/dsh-compat-contract.md` / `.en.md` | 四条 quiet trap：行几何分界 `0.2.2-alpha.2`、rail 圆角分界 `0.1.6-alpha.2`（最老 2 版偏差）、cordis occupant 常驻可 null、设置行高度随登录态变化（`0.2.0-rc.1` 起 32/44，缺标记回退 42） |
 | `CHANGELOG.md` / `.en.md`、`AGENTS.md` 项目状态 | 发版准备阶段再改，不在实现 PR 里手改 |
 
 ## Completion Criteria
 
 - 两代宿主上 footer 入口的图标/文字左缘与设置触发行逐像素一致（新几何下账号 launcher 也对齐）；
-  rail 圆角在 22/24 版本与宿主一致，最老 2 个版本的偏差按 ADR 记录；旧几何无 ink/布局回归。
+  按钮高度与可见设置行 occupant 一致（账号 launcher 未登录 32 / 登录 44，旧代 42px），footer 两行
+  hover 药丸同尺寸；rail 圆角在 22/24 版本与宿主一致，最老 2 个版本的偏差按 ADR 记录；旧几何无
+  ink/布局回归。
 - 同槽出现真正渲染的第二 footer action 时，两者各占一整行、均可点击；本插件未挂载时宿主布局不变。
 - 不隐藏入口、不观测他人渲染状态、不调用槽账本 API、不改注册选项。
 - 新增测试在实现前红、实现后绿；全量 vitest、lint、双端 typecheck、build、docs:check、compat:check 绿。
@@ -329,8 +354,9 @@ pnpm docs:check           # 文档结构、链接与索引
 | P1 图标与行几何 | 完成（2026-11-16） | 提交 `b1bd1d8`：footer 图标换 `IconWorkspaceTree` 并移除 `IconSettings` import；`styles.ts` footer 规则改为 §D2 的 token+fallback 配方与注释；`pnpm typecheck` / `pnpm lint` 绿。§Progress 的复刻数值见 §Evidence（新几何 20/42、旧几何 18/42，Δ 0）。 |
 | P2 共存规则 | 完成（2026-11-16） | 同一提交：§D3 纵向列规则与注释；复刻单 occupant 与 `display: contents` 逐像素相同（icon 20 / label 42 / 按钮 8..280 宽 272），多 occupant 两行各 8..280 宽 272、无溢出（改动前本行被推到 278..554）。rail 下两行 x 均 10。 |
 | P3 测试 | 完成（2026-11-16） | 同一提交：`client-styles.spec.ts` 新增 6 项、`client-panel.spec.tsx` 新增 2 项；实现前 7 项红、实现后 focused 125 项全绿。全量 vitest 见 §Evidence（1848 通过；17 项为既有 registry/lease 环境失败，基线同样失败）。 |
-| P4 文档与兼容笔记 | 完成（2026-11-16） | ADR-0006 Status 修订；README 中英、`docs/guide` 中英、requirements、architecture 更新；compat note 中英新增 §21 三条 quiet trap；`pnpm docs:check` exit 0。 |
+| P4 文档与兼容笔记 | 完成（2026-11-16） | ADR-0006 Status 修订；README 中英、`docs/guide` 中英、requirements、architecture 更新；compat note 中英新增 §21 quiet trap（A 修订后为四条）；`pnpm docs:check` exit 0。 |
 | P5 验收与发版准备 | 部分完成（2026-11-16） | 本地门禁（typecheck / lint / build / compat:check / docs:check / focused test）全绿，证据见 §Evidence。**真实 GUI 目检已完成**：隔离 scratch `$DSH_HOME`（临时目录）+ 本仓库构建产物 `dsh plugin add` 进 `web` profile，`dsh web`（host `0.2.2-rc.3`）由 headless Chromium 经 CDP 截图并读取真实 DOM——宽形态本行 icon/label 20/42 与下方宿主行 20/42 一致、rail 两按钮均 36×36 @ x=9.5 且圆角 12px、锚点计算样式 `display:flex/flex-direction:column`、同槽两行各占 264px 整行（第二行是克隆的合成 occupant；官方 cordis occupant 在空 profile 按设计渲染 null）。PR、CI run 与发版准备未做。 |
+| P6 hover 高度跟随设置行（A 修订） | 完成（2026-11-16） | 复现：本行 264×42 vs More 264×32（仅高度差 10px）；实现两条高度规则（32 / 44，rail 排除，42 回退）；`client-styles` 新增 1 项钉扎（实现前红）；ADR-0044 §修订二 + 周边文档；隔离 GUI 复验未登录 32/32、模拟已登录 44/44、rail 36。 |
 
 ### Review 修正（2026-11-16，外部技术评审）
 
@@ -347,6 +373,10 @@ pnpm docs:check           # 文档结构、链接与索引
   前决定，若改名需同步本计划与台账中的引用。
 - **F6**：`docs/decisions/README.md` / `.en.md` 的编号说明已补 ADR-0043 的在飞占用与本线从 0044
   开始；两个在飞分支之间的 0043 重号需由各自分支消解。
+- **A（2026-11-16 追加，用户确认走 A）**：实施后 GUI 复核发现 hover 药丸高度与下方 `⋯ More`
+  不一致（42 vs 32）。根因是 `0.2.0-rc.1` 起设置行 occupant 换成账号 launcher（未登录 32 /
+  登录 44）。按钮高度改为跟随该 occupant（CSS 结构探测，`0.1.7-rc.2` 及以前保持 42、rail 36），
+  ADR-0044 §修订二 与 §Investigation 的高度分界记录决策与证据。
 
 ### Evidence（实施后回填）
 
@@ -375,5 +405,6 @@ token 定义。
   - `pnpm compat:check`：exit 0（24 个精确版本 allowlist、dev pin 与安装树 `0.2.2-rc.3` 一致）。
   - `pnpm docs:check`：exit 0（10/10 checks，0 errors / 0 warnings）。
   - `pnpm pack:check`：未跑——本改动不新增导出、不动 exports/tarball 成员，按计划“最小充分集”只需 client 测试与 build。
-- **提交**：实现与测试 `b1bd1d8`；文档、ADR-0006 修订、索引与台账回填随后单独提交。
+- **A 修订（2026-11-16，hover 高度跟随设置行 occupant）**：复现于隔离 web 组合（`0.2.2-rc.3`、未登录）：本行 hover 药丸 264×42（x 8..272），下方 More 264×32（x 8..272），hover 背景 / 圆角 / x 范围相同，仅高度差 10px。实现后真实 DOM 复验：未登录本行与 More 均 **264×32**；把 launcher 的 `data-signed-out` 临时置为 `false` 后本行 **264×44**（与宿主同高）；rail 下本行仍 **36×36**；icon/label 左缘保持 **20 / 42**。新增钉扎实现前红、实现后 focused 126 项全绿；`typecheck` / `lint` / `build` / `compat:check` / `docs:check` 复跑；全量 vitest 仍为既有 17 项 registry/lease 环境失败（无新增）。
+- **提交**：实现与测试 `b1bd1d8`；文档、ADR-0006 修订、索引与台账回填随后单独提交；A 修订与 PR 见 §Progress。
 
