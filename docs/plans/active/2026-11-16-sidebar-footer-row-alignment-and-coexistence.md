@@ -270,6 +270,9 @@ DOM 事实（全部受支持版本一致）：`sidebar.footer.action` 的 outlet
   README/guide/requirements/architecture/compat note 同步；`pnpm docs:check` 绿。
 - [x] 隔离环境 GUI 复验：重建并重装插件后，未登录下两行 hover 药丸均 264×32；把 launcher
   标记临时置为已登录后本行 44px（宿主同高）；rail 本行仍 36px；icon/label 仍 20/42。
+- [x] hover 宽度（§修订三）：初稿 hover 用 `background` 简写把 `background-clip` 重置为
+  `border-box`，实际填充比宿主宽 6px（264 vs 258，两侧各 3px 透明 border）；改用 `background-color`
+  长写后两侧绘制填充均为 **258px（11..269）**，并加测试钉扎。
 
 **退出条件**：hover 药丸与设置行同尺寸（两登录态）、无 42px 回退回归、门禁与 docs:check 绿。
 
@@ -338,8 +341,8 @@ pnpm docs:check           # 文档结构、链接与索引
 
 - 两代宿主上 footer 入口的图标/文字左缘与设置触发行逐像素一致（新几何下账号 launcher 也对齐）；
   按钮高度与可见设置行 occupant 一致（账号 launcher 未登录 32 / 登录 44，旧代 42px），footer 两行
-  hover 药丸同尺寸；rail 圆角在 22/24 版本与宿主一致，最老 2 个版本的偏差按 ADR 记录；旧几何无
-  ink/布局回归。
+  hover 药丸同尺寸（高与绘制宽度一致：填充用 `background-color` 长写保留 `padding-box`）；rail 圆角
+  在 22/24 版本与宿主一致，最老 2 个版本的偏差按 ADR 记录；旧几何无 ink/布局回归。
 - 同槽出现真正渲染的第二 footer action 时，两者各占一整行、均可点击；本插件未挂载时宿主布局不变。
 - 不隐藏入口、不观测他人渲染状态、不调用槽账本 API、不改注册选项。
 - 新增测试在实现前红、实现后绿；全量 vitest、lint、双端 typecheck、build、docs:check、compat:check 绿。
@@ -356,7 +359,7 @@ pnpm docs:check           # 文档结构、链接与索引
 | P3 测试 | 完成（2026-11-16） | 同一提交：`client-styles.spec.ts` 新增 6 项、`client-panel.spec.tsx` 新增 2 项；实现前 7 项红、实现后 focused 125 项全绿。全量 vitest 见 §Evidence（1848 通过；17 项为既有 registry/lease 环境失败，基线同样失败）。 |
 | P4 文档与兼容笔记 | 完成（2026-11-16） | ADR-0006 Status 修订；README 中英、`docs/guide` 中英、requirements、architecture 更新；compat note 中英新增 §21 quiet trap（A 修订后为四条）；`pnpm docs:check` exit 0。 |
 | P5 验收与发版准备 | 部分完成（2026-11-16） | 本地门禁（typecheck / lint / build / compat:check / docs:check / focused test）全绿，证据见 §Evidence。**真实 GUI 目检已完成**：隔离 scratch `$DSH_HOME`（临时目录）+ 本仓库构建产物 `dsh plugin add` 进 `web` profile，`dsh web`（host `0.2.2-rc.3`）由 headless Chromium 经 CDP 截图并读取真实 DOM——宽形态本行 icon/label 20/42 与下方宿主行 20/42 一致、rail 两按钮均 36×36 @ x=9.5 且圆角 12px、锚点计算样式 `display:flex/flex-direction:column`、同槽两行各占 264px 整行（第二行是克隆的合成 occupant；官方 cordis occupant 在空 profile 按设计渲染 null）。PR、CI run 与发版准备未做。 |
-| P6 hover 高度跟随设置行（A 修订） | 完成（2026-11-16） | 复现：本行 264×42 vs More 264×32（仅高度差 10px）；实现两条高度规则（32 / 44，rail 排除，42 回退）；`client-styles` 新增 1 项钉扎（实现前红）；ADR-0044 §修订二 + 周边文档；隔离 GUI 复验未登录 32/32、模拟已登录 44/44、rail 36。 |
+| P6 hover 高度与宽度跟随设置行（A 修订） | 完成（2026-11-16） | 高度：复现本行 264×42 vs More 264×32（差 10px），两条高度规则（32 / 44，rail 排除，42 回退）后未登录 32/32、模拟已登录 44/44、rail 36。宽度（§修订三）：复现绘制填充本行 264（8..272）vs More 258（11..269），根因是 hover 的 `background` 简写重置了 `background-clip`；改 `background-color` 长写后两侧均 **258（11..269）**。新增测试钉扎（实现前红）；ADR-0044 §修订二/§修订三 + 周边文档。 |
 
 ### Review 修正（2026-11-16，外部技术评审）
 
@@ -405,6 +408,6 @@ token 定义。
   - `pnpm compat:check`：exit 0（24 个精确版本 allowlist、dev pin 与安装树 `0.2.2-rc.3` 一致）。
   - `pnpm docs:check`：exit 0（10/10 checks，0 errors / 0 warnings）。
   - `pnpm pack:check`：未跑——本改动不新增导出、不动 exports/tarball 成员，按计划“最小充分集”只需 client 测试与 build。
-- **A 修订（2026-11-16，hover 高度跟随设置行 occupant）**：复现于隔离 web 组合（`0.2.2-rc.3`、未登录）：本行 hover 药丸 264×42（x 8..272），下方 More 264×32（x 8..272），hover 背景 / 圆角 / x 范围相同，仅高度差 10px。实现后真实 DOM 复验：未登录本行与 More 均 **264×32**；把 launcher 的 `data-signed-out` 临时置为 `false` 后本行 **264×44**（与宿主同高）；rail 下本行仍 **36×36**；icon/label 左缘保持 **20 / 42**。新增钉扎实现前红、实现后 focused 126 项全绿；`typecheck` / `lint` / `build` / `compat:check` / `docs:check` 复跑；全量 vitest 仍为既有 17 项 registry/lease 环境失败（无新增）。
+- **A 修订（2026-11-16，hover 高度跟随设置行 occupant）**：复现于隔离 web 组合（`0.2.2-rc.3`、未登录）：本行 hover 药丸 264×42（x 8..272），下方 More 264×32（x 8..272），hover 背景 / 圆角 / x 范围相同，仅高度差 10px。实现后真实 DOM 复验：未登录本行与 More 均 **264×32**；把 launcher 的 `data-signed-out` 临时置为 `false` 后本行 **264×44**（与宿主同高）；rail 下本行仍 **36×36**；icon/label 左缘保持 **20 / 42**。宽度复核（§修订三）：初稿 hover 的 `background` 简写把 `background-clip` 重置为 `border-box`，绘制填充本行 264（8..272）vs More 258（11..269）；改用 `background-color` 长写后两侧绘制填充均 **258（11..269）**，并新增测试钉扎（实现前红、实现后 focused 126 项全绿）。新增钉扎实现前红、实现后 focused 126 项全绿；`typecheck` / `lint` / `build` / `compat:check` / `docs:check` 复跑；全量 vitest 仍为既有 17 项 registry/lease 环境失败（无新增）。
 - **提交**：实现与测试 `b1bd1d8`；文档、ADR-0006 修订、索引与台账回填随后单独提交；A 修订与 PR 见 §Progress。
 

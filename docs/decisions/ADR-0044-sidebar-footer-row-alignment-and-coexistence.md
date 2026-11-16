@@ -296,7 +296,8 @@ README 的描述都已指向 workspace tree；同列设置行本身用齿轮，�
   规则不匹配，静默回退 42px（即今天的尺寸）。
 - `@media (hover: hover)` 包装只在 5 个新几何版本存在；本配方保持不包装：与 19 个旧版本一致，
   触屏上与 5 个新版本存在"有无 hover 反馈"的差异（桌面指针设备无差异）。刻意取舍：不改变旧版本
-  行为，且差异只在无 hover 能力的设备上可见。
+  行为，且差异只在无 hover 能力的设备上可见。hover 填充用 `background-color` 长写（§修订三），
+  保留基础规则的 `background-clip: padding-box`，绘制宽度与宿主行一致。
 - 按钮高度跟随设置行可见 occupant（见 §Investigation 的高度分界与 §修订二）：账号 launcher 宿主未登录 32px、已登录 44px；`0.1.7-rc.2` 及以前命中上面的 42px 回退；rail 保持 36px。14/22 字号、hover token、transition 不变；宽/rail 两种形态的 icon 尺寸仍为 16 / 18。
 - 不引入 JS 代际探测、不比较版本字符串：CSS fallback 本身就是结构探测（ADR-0009 的原则在这里
   不需要额外机制）。
@@ -419,6 +420,18 @@ README 的描述都已指向 workspace tree；同列设置行本身用齿轮，�
 - D2 的"42px 高不变"改为：账号 launcher 宿主 32 / 44，`0.1.7-rc.2` 及以前的 42px 设置触发行命中 42px 回退，rail 保持 36px。实现只用 CSS 结构探测（`[data-slot='sidebar']:has(button[data-signed-out=…])`），不读槽账本、不引入 JS 代际探测；属性缺失时静默回退 42px。
 - 否决的备选：固定 32px（与已登录 44px 及旧代 42px 都不符）；固定 44px（未登录差 12px）；只在按钮内画一条 32/44 高的伪元素 hover 背景（视觉与可点区域不一致，且同样需要状态探测）；读取槽账本/账号状态（回答不了"渲染了多高"，ADR-0044 §D4 已否决）。
 - 文档面：README / guide / requirements / architecture 说明 hover 高度跟随设置行；compat note §21 增加"设置行高度随登录态变化、缺少标记回退 42px"的 quiet trap；计划追加 P6 与证据。
+
+## 修订三（2026-11-16，hover 药丸宽度：填充必须用 `background-color` 长写）
+
+A 修订后 GUI 复核继续报告两行 hover **宽度**不一致。真实 DOM 复验（隔离 web 组合，`0.2.2-rc.3`，未登录）：两个按钮盒都是 264px（x 8..272），但**实际绘制的填充宽度**不同——本行 264px（8..272）、下方 More 258px（11..269），差 6px（两侧各 3px）。根因：
+
+- §D2 的按钮基础规则有 `border-inline: 3px solid transparent` + `background-clip: padding-box`，填充应止于 padding box（258px）；
+- 初稿的 `.mrfw-trigger:hover` 用 `background:` **简写**，会把 `background-clip` 重置为初始值 `border-box`，于是 hover 填充盖住两侧透明 border，多画 6px；
+- 宿主自己的 hover 是 `background-color:` **长写**（`.trigger:hover { background-color: … }`），保留基础规则的 `padding-box`，所以两边宽度不同。
+
+修复：hover 改 `background-color: var(--dsw-alias-interactive-bg-hover)`，`background-clip: padding-box` 由基础规则继续生效；rail 基础规则显式 `background-clip: border-box`、`border-inline: 0`，不受影响。修复后本行与 More 的绘制填充均为 258px（11..269），高与宽都与下方行一致。
+
+否决的备选：在 hover 里补写 `background-clip: padding-box`（等价但偏离宿主的写法，且以后再引入简写会再次踩到）；收窄按钮宽度（会改变 icon/label 墨线与行宽，越出本次范围）。
 
 ## Related Documents
 
