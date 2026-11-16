@@ -113,6 +113,25 @@ export const STYLES = /* css */ `
   border-radius: var(--dsw-radius-md, 12px);
 }
 
+/* The settings row's visible occupant changed with the host: through
+   0.1.7-rc.2 it is the 42px settings trigger, and from 0.2.0-rc.1 it is the
+   account menu launcher, whose trigger is 44px signed in and 32px signed out
+   (AccountMenu.module.css). The button follows that height so the two hover
+   surfaces in the footer are the same size; a host without the launcher keeps
+   the 42px settings-trigger height above, and the rail keeps its own 36px box.
+   Only the height follows: the left inset, gap, radius and hover token are
+   shared with the host recipe, so the icon and label lines stay where the
+   host's rows put them. The marker is the launcher's own data attribute, so a
+   host that renames it falls back to 42px (today's size) rather than
+   mis-sizing. */
+[data-slot='sidebar']:has(button[data-signed-out='true']) .mrfw-trigger:not(.mrfw-triggerRail) {
+  height: 32px;
+}
+
+[data-slot='sidebar']:has(button[data-signed-out='false']) .mrfw-trigger:not(.mrfw-triggerRail) {
+  height: 44px;
+}
+
 /* The footer slot is a list slot with a shipped occupant that usually renders
    nothing (the official ui-cordis badge), so a second row can really appear.
    The host .footerActions is a single-line flex and every occupant is a

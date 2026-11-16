@@ -254,6 +254,20 @@ describe('the sidebar footer entry rules', () => {
     expect(anchor).toContain('min-width: 0')
   })
 
+  it('sizes the button like the settings row occupant on hosts with the account launcher', () => {
+    // The settings row's visible occupant changed with the host: through
+    // 0.1.7-rc.2 it is the 42px settings trigger, and from 0.2.0-rc.1 it is the
+    // account menu launcher (AccountMenu.module.css), whose trigger is 44px
+    // signed in and 32px signed out. The button follows that height so the two
+    // hover surfaces in the footer match; a host without the launcher keeps the
+    // 42px settings-trigger height, and the rail keeps its own 36px box.
+    expect(declarations("[data-slot='sidebar']:has(button[data-signed-out='true']) .mrfw-trigger:not(.mrfw-triggerRail)")).toContain('height: 32px')
+    expect(declarations("[data-slot='sidebar']:has(button[data-signed-out='false']) .mrfw-trigger:not(.mrfw-triggerRail)")).toContain('height: 44px')
+    // Fallbacks: the base button (older hosts, no launcher) and the rail.
+    expect(declarations('.mrfw-trigger')).toContain('height: 42px')
+    expect(declarations('.mrfw-triggerRail')).toContain('height: 36px')
+  })
+
   it('keeps every footer color on host tokens', () => {
     // The footer block runs from the row wrapper to the next rule family.
     const footer = CSS.slice(CSS.indexOf('.mrfw-triggerRow'), CSS.indexOf('.mrfw-heroEntrySeat'))
