@@ -21,14 +21,23 @@ English: [README.en.md](./README.en.md)
 
 ## allowBuilds 那一步在授权什么
 
-本插件带一个需要构建的原生依赖 `koffi`（Windows 上 Registry Authority 用的 FFI 封装；其他平台装了不用），而 pnpm ≥10 默认不运行任何依赖的生命周期脚本。所以第一次 `dsh plugin add` 会以 `[ERR_PNPM_IGNORED_BUILDS]` 失败，并把待决项写进该 profile 的 `pnpm-workspace.yaml`。把 `koffi: true` 写进 `allowBuilds` 意味着**允许该依赖的安装脚本在你的机器上执行**（不在 agent 运行的任何沙箱之内）——`koffi` 的脚本只做本地预编译。
+npm、tarball 与本地路径安装**不需要** `allowBuilds`。`koffi`（Windows 上 Registry Authority 的 FFI 封装，其他平台按需加载）由宿主提供：插件把它声明为可选 peer，pnpm 不会安装可选 peer，也就没有需要表态的构建脚本。运行时 `loadHostKoffi()` 只解析宿主那份副本，绝不再安装第二份——原因与回退顺序见 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。
 
-两个实测过的坑（DSH `0.2.1-alpha.2`，tarball 来源）：profile 的 `pnpm-workspace.yaml` 可能**没有** `set this to true or false` 占位标记（直接补 `allowBuilds` 即可）；恢复后的 `add` 退出 0 也可能没把插件激活进 `dsh.profile.bundles`——检查该 profile 的 `package.json`，缺的话做一次 `remove` + `add`。诊断步骤见[故障排查](../troubleshooting/install-stops-at-build-approval.md)。
+只有 GitHub 源码来源仍需要一次表态：`add` 会运行本包自身的 `prepare`（直接转译 `src/`，不做类型检查），pnpm 要求 profile 明确允许，并打印一行含来源与 commit 的 exact key。把那一行原样写进 `allowBuilds` 意味着**允许该包的构建脚本在你的机器上执行**（不在 agent 运行的任何沙箱之内）：
+
+```yaml
+allowBuilds:
+  '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
+```
+
+键必须带来源与 commit；只写包名对 git 来源不生效。
+
+两个实测过的坑（DSH `0.2.1-alpha.2` 时代的源码类安装）：profile 的 `pnpm-workspace.yaml` 可能**没有** `set this to true or false` 占位标记（直接补 `allowBuilds` 即可）；恢复后的 `add` 退出 0 也可能没把插件激活进 `dsh.profile.bundles`——检查该 profile 的 `package.json`，缺的话做一次 `remove` + `add`。诊断步骤见[故障排查](../troubleshooting/install-stops-at-build-approval.md)。
 
 ## 各安装来源的差异
 
-- **npm / tarball**：预构建产物，插件本身不参与编译；首次安装需要 `allowBuilds`。
-- **GitHub**：装的是源码，`add` 时由包内 `prepare` 脚本自动构建（直接转译 `src/`，不做类型检查），因此 `allowBuilds` 需要覆盖本包自身和 `koffi` 两项；不带 ref 会跟随 `main` 分支的最新提交，写 `#v0.1.20` 这样的版本 ref 锁住内容，`#semver:*` 这类 semver 范围则始终解析到最新 tag。
+- **npm / tarball**：预构建产物，插件本身不参与编译；无需 `allowBuilds`。
+- **GitHub**：装的是源码，`add` 时由包内 `prepare` 脚本自动构建（直接转译 `src/`，不做类型检查），因此 `allowBuilds` 只需覆盖本包自身；不带 ref 会跟随 `main` 分支的最新提交，写 `#v0.1.20` 这样的版本 ref 锁住内容，`#semver:*` 这类 semver 范围则始终解析到最新 tag。
 - **从源码安装**：pnpm `link:` 链接本地 checkout，依赖在本仓库已装好，无需 `allowBuilds`；需要先 `pnpm build` 生成 `lib/`（未纳入 Git）。
 
 用源码仓库跑 DSH 时 `dsh` 不在 PATH 里，把命令里的 `dsh` 换成 `pnpm dsh`。

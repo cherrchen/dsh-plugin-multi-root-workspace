@@ -174,7 +174,8 @@
     "@deepseek-ai/dsh-session-query": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-alpha.2 || 0.2.2-alpha.3 || 0.2.2-rc.1 || 0.2.2-rc.2 || 0.2.2-rc.3",
     "@deepseek-ai/dsh-storage-json": "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-alpha.2 || 0.2.2-alpha.3 || 0.2.2-rc.1 || 0.2.2-rc.2 || 0.2.2-rc.3",
     "@deepseek-ai/node-addon-system": "^0.1.2",
-    "@deepseek-ai/schemastery": ">=3.18.2 <4.0.0 || 3.18.5-alpha.1 || 3.18.5-alpha.2 || 3.18.6-alpha.1 || 3.18.6-alpha.2"
+    "@deepseek-ai/schemastery": ">=3.18.2 <4.0.0 || 3.18.5-alpha.1 || 3.18.5-alpha.2 || 3.18.6-alpha.1 || 3.18.6-alpha.2",
+    "koffi": ">=3.1.0 <4.0.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-agent": {
@@ -241,6 +242,9 @@
       "optional": true
     },
     "@deepseek-ai/dsh-storage-json": {
+      "optional": true
+    },
+    "koffi": {
       "optional": true
     }
   },
@@ -312,6 +316,7 @@
     "@deepseek-ai/node-addon-system": "0.1.2",
     "@deepseek-ai/schemastery": "3.19.0",
     "fontkit": "2.0.4",
+    "koffi": "3.1.1",
     "@deepseek-ai/dsh-agent-loop": "0.2.2-rc.3",
     "@deepseek-ai/dsh-agent-loop-testkit": "0.2.2-rc.3",
     "@deepseek-ai/dsh-bash-sandbox": "0.2.2-rc.3",
@@ -349,7 +354,6 @@
     }
   },
   "dependencies": {
-    "koffi": "^3.1.0",
     "zod": "^4.6.7"
   }
 }

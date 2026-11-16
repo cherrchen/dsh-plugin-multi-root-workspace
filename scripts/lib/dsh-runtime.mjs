@@ -213,9 +213,11 @@ export function ensureProfileCopyImport(home, profile) {
  * pnpm's supply-chain recovery, confined to the scratch home.
  *
  * pnpm ≥10 refuses a dependency's build scripts unless the profile's
- * `pnpm-workspace.yaml` rules on them, so a first `dsh plugin add` of a source
- * carrying `koffi` can fail with `ERR_PNPM_IGNORED_BUILDS` and leave
- * `koffi: set this to true or false` pending there. The documented recovery —
+ * `pnpm-workspace.yaml` rules on them. Current sources carry no such
+ * dependency — koffi is an optional peer supplied by the host — so the tarball
+ * and path installs this smoke drives never reach this path. It stays as a
+ * safety net for a source that still carries a native build script (plugin
+ * versions ≤ `0.1.20`, or a future dependency); the documented recovery —
  * ruling the pending entries `true` and re-running the same add — is applied
  * ONLY here, inside a verified scratch home; nothing in the repository or the
  * operator's real home is touched. The first add's verbatim output is logged so
@@ -232,7 +234,7 @@ async function recoverBuildApproval(first, args, profile, home) {
   console.log(`[dsh-runtime] first \`dsh plugin add\` stopped at build approval (exit ${first.code}); verbatim output:`)
   process.stdout.write(first.stdout)
   process.stderr.write(first.stderr)
-  // Approve ONLY `koffi` — the dependency the troubleshooting doc names. Any
+  // Approve ONLY `koffi` — the native dependency this repository names. Any
   // other ignored build script is a new finding, not something to approve.
   const unapproved = ignored.filter(entry => !/^koffi@/.test(entry))
   if (unapproved.length > 0) {
@@ -341,8 +343,16 @@ export async function installPluginProfile(profile, home, source = pluginPackage
   }
   let first = await captureDsh(args, { DSH_HOME: home })
   if (first.code === 0) {
-    // What the docs need to know: whether the first add even ASKED for build
-    // approval (koffi's install script, the pending allowBuilds prompt).
+    // The shipped tarball must install without any build-approval exchange:
+    // koffi is a host-provided optional peer, so no dependency carries an
+    // install script. Exit 0 while pnpm still reports one means a new
+    // build-script dependency slipped into the package.
+    const output = `${first.stdout}\n${first.stderr}`
+    if (/Ignored build scripts:/u.test(output) || /set this to true or false/u.test(output)) {
+      console.error('[dsh-runtime] the first `dsh plugin add` exited 0 but pnpm still reported ignored build scripts:')
+      process.stdout.write(output)
+      return 1
+    }
     console.log(`[dsh-runtime] first \`dsh plugin add ${source.endsWith('.tgz') ? '<tgz>' : source}\` exited 0 — no build-approval stop`)
     return 0
   }

@@ -120,7 +120,25 @@ if (pinned.size > 1) {
   else notes.push(`development pin: ${pin}`)
 }
 
-// 5. What is actually installed here agrees with itself and with the allowlist.
+// 5. koffi stays host-provided. As a shipped dependency it stops the first
+//    `dsh plugin add` at pnpm's build approval and installs a second native
+//    image beside the host's (SIGBUS on darwin-arm64); as an optional peer it
+//    is never installed and the runtime resolves the host's copy instead. The
+//    development pin keeps type-checking and tests on the host's release.
+if (manifest.dependencies?.koffi !== undefined || manifest.optionalDependencies?.koffi !== undefined) {
+  fail('package.json installs koffi: declare it as an optional peer (the host supplies it) and pin it in devDependencies')
+}
+if (peers.koffi !== '>=3.1.0 <4.0.0') {
+  fail(`peerDependencies.koffi is "${peers.koffi ?? '(absent)'}" but must be ">=3.1.0 <4.0.0"`)
+}
+if (manifest.peerDependenciesMeta?.koffi?.optional !== true) {
+  fail('peerDependenciesMeta.koffi.optional must be true: pnpm must never install the peer')
+}
+if (!/^3\.\d+\.\d+$/.test(devs.koffi ?? '')) {
+  fail(`devDependencies.koffi is "${devs.koffi ?? '(absent)'}"; pin the 3.x release the development host carries`)
+}
+
+// 6. What is actually installed here agrees with itself and with the allowlist.
 //    This mirrors the runtime gate, so `pnpm compat:check` reproduces a boot
 //    refusal without booting a harness.
 const installed = new Map()

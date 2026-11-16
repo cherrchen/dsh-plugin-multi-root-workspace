@@ -8,6 +8,12 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [Unreleased]
+
+### Changed
+
+- **`koffi` 改由宿主提供（可选 peer），npm / tarball / 本地路径安装不再需要构建授权**：插件不再在 `dependencies` 中携带 `koffi`（Windows Registry Authority 与 Worktree Git 元数据读取的 FFI 封装），改为 optional `peerDependencies` 加 `devDependencies` 开发 pin。pnpm 不会安装可选 peer，因此首次 `dsh plugin add` 不再停在 `[ERR_PNPM_IGNORED_BUILDS]`，profile 的 `pnpm-workspace.yaml` 也不需要 `allowBuilds: koffi`。运行时 `loadHostKoffi()` / `loadHostKoffiSync()` 依次尝试 `DSH_KOFFI_PATH`、`dsh-fs-local` 锚点、宿主入口与 DSH Desktop 的 `app.asar` / `app.asar.unpacked` 运行时目录，只加载宿主那份副本，避免第二个 `koffi.node` 镜像在 darwin-arm64 上触发 SIGBUS；找不到时明确报错，不再回退到包内副本。git 来源仍需为插件自身的 `prepare` 授权（[ADR-0007 修订](./docs/decisions/ADR-0007-registry-authority-lease.md)）。
+
 ## [0.1.20] - 2026-11-15
 
 ### Added

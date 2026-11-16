@@ -21,14 +21,23 @@ This plugin replaces `ctx.fs` and `ctx.sandbox` — the security boundary itself
 
 ## What the allowBuilds step authorizes
 
-The plugin carries a native dependency that must be built, `koffi` (the FFI wrapper behind Registry Authority on Windows; installed but unused elsewhere), and pnpm ≥10 runs no dependency lifecycle script by default. So the first `dsh plugin add` fails with `[ERR_PNPM_IGNORED_BUILDS]` and leaves the pending decision in that profile's `pnpm-workspace.yaml`. Writing `koffi: true` under `allowBuilds` means **letting that dependency's install script run on your machine** (outside any sandbox the agent runs in) — `koffi`'s script only precompiles locally.
+npm, tarball, and local-path installs need **no** `allowBuilds`. `koffi` (the FFI wrapper behind Registry Authority on Windows, loaded on demand elsewhere) is supplied by the host: the plugin declares it as an optional peer, pnpm never installs an optional peer, and no build script needs a decision. At run time `loadHostKoffi()` resolves only the host's copy and never installs a second one — the reasoning and the fallback order are in [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md).
 
-Two observed caveats (DSH `0.2.1-alpha.2`, tarball source): the profile's `pnpm-workspace.yaml` may carry **no** `set this to true or false` marker (just add `allowBuilds` yourself), and the recovered `add` may exit 0 without activating the plugin into `dsh.profile.bundles` — check the profile's `package.json`, and if the bundle is missing run `remove` + `add` once. Diagnosis steps: [troubleshooting](../troubleshooting/install-stops-at-build-approval.md).
+Only a GitHub source install still needs one decision: `add` runs the package's own `prepare` (a direct transpile of `src/`, no type-checking), pnpm requires the profile to allow it, and it prints one exact key that includes the source and commit. Writing that line verbatim under `allowBuilds` means **letting that package's build script run on your machine** (outside any sandbox the agent runs in):
+
+```yaml
+allowBuilds:
+  '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
+```
+
+The key must carry the source and commit; a bare package name does not apply to git sources.
+
+Two observed caveats (source installs in the DSH `0.2.1-alpha.2` era): the profile's `pnpm-workspace.yaml` may carry **no** `set this to true or false` marker (just add `allowBuilds` yourself), and the recovered `add` may exit 0 without activating the plugin into `dsh.profile.bundles` — check the profile's `package.json`, and if the bundle is missing run `remove` + `add` once. Diagnosis steps: [troubleshooting](../troubleshooting/install-stops-at-build-approval.md).
 
 ## Differences between install sources
 
-- **npm / tarball**: pre-built artifacts — the plugin itself is never compiled; the first install needs `allowBuilds`.
-- **GitHub**: delivers source code, built automatically during `add` by the package's own `prepare` script (a direct transpile of `src/`, no type-checking), so `allowBuilds` has to cover two entries, this package itself and `koffi`. With no ref the install tracks the head of `main`; a version ref like `#v0.1.20` pins the content, and a semver range like `#semver:*` always resolves to the latest tag.
+- **npm / tarball**: pre-built artifacts — the plugin itself is never compiled; no `allowBuilds` needed.
+- **GitHub**: delivers source code, built automatically during `add` by the package's own `prepare` script (a direct transpile of `src/`, no type-checking), so `allowBuilds` only has to cover this package itself. With no ref the install tracks the head of `main`; a version ref like `#v0.1.20` pins the content, and a semver range like `#semver:*` always resolves to the latest tag.
 - **From source**: pnpm `link:` to a local checkout whose dependencies are already installed in this repository — no `allowBuilds` needed; run `pnpm build` first to produce `lib/` (not tracked by Git).
 
 When running DSH from a source checkout, `dsh` is not on PATH — use `pnpm dsh` in the commands instead.

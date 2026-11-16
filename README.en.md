@@ -81,7 +81,7 @@ On DSH Desktop the Plugins page and the CLI are **not equivalent entry points**:
 4. Open `$DSH_HOME/profiles/desktop/package.json` (normally `~/.dsh/profiles/desktop/package.json` when `DSH_HOME` is unset) and confirm `dsh.profile.bundles` contains the package.
 5. Start Desktop again (cold start).
 
-If the first install reports `[ERR_PNPM_IGNORED_BUILDS]`, add `allowBuilds` as described in [the build-approval note](./docs/troubleshooting/install-stops-at-build-approval.md), then run `remove` + `add`. The hot-enable cause, reproduction, and the investigation of profile writes are in [troubleshooting](./docs/troubleshooting/desktop-install-missing-bundle.md) (Chinese).
+The first install no longer needs an `allowBuilds` entry for `koffi`: koffi is supplied by the host and this plugin declares it as an optional peer. If the `add` exits 0 but the plugin never lands in `dsh.profile.bundles`, do a `remove` + `add`. The hot-enable cause, reproduction, and the investigation of profile writes are in [troubleshooting](./docs/troubleshooting/desktop-install-missing-bundle.md) (Chinese).
 
 ### Four install sources for CLI profiles
 
@@ -94,11 +94,11 @@ If the first install reports `[ERR_PNPM_IGNORED_BUILDS]`, add `allowBuilds` as d
 | tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | Pre-built offline package, handy for air-gapped or offline delivery |
 | From source | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` to a local checkout — best for development; no `allowBuilds` needed |
 
-**The first `dsh plugin add` fails with `[ERR_PNPM_IGNORED_BUILDS]`**: add the following line to that profile's `pnpm-workspace.yaml`, then run `add` again:
+**npm, tarball, and local-path installs need no `allowBuilds` at all**: the plugin ships no production dependency with a build script (`koffi` is supplied by the host). Only a git source still needs approval for the package's own `prepare`:
 
 ```yaml
 allowBuilds:
-  koffi: true
+  '@dsh-electron/dsh-plugin-multi-root-workspace': true
 ```
 
 If the retry `exits 0` but the plugin never lands in `dsh.profile.bundles`, do a `remove` + `add`. Further diagnosis: [troubleshooting](./docs/troubleshooting/install-stops-at-build-approval.md).
@@ -109,7 +109,7 @@ If the retry `exits 0` but the plugin never lands in `dsh.profile.bundles`, do a
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-This installs pre-built artifacts; the first install needs the `allowBuilds` addition described above.
+This installs pre-built artifacts; no build approval is needed.
 
 ### Install from a tarball
 
@@ -120,7 +120,7 @@ pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.20.tgz
 ```
 
-Also pre-built, handy for air-gapped or offline delivery; the first install needs the same `allowBuilds` addition.
+Also pre-built, handy for air-gapped or offline delivery; no build approval is needed here either.
 
 ### Install from GitHub
 
@@ -128,12 +128,13 @@ Also pre-built, handy for air-gapped or offline delivery; the first install need
 dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace
 ```
 
-A GitHub install fetches source code and builds it automatically during `add` — no manual build needed — but `allowBuilds` has to cover two entries, this package itself and `koffi`:
+A GitHub install fetches source code and builds it automatically during `add` — no manual build needed. pnpm blocks the package's own `prepare` and prints one exact key (including the source and commit); copy that line verbatim under `allowBuilds` and re-run `add`:
 
 ```yaml
 allowBuilds:
-  '@dsh-electron/dsh-plugin-multi-root-workspace': true
-  koffi: true
+  # Key and value come from pnpm's "Add the package to allowBuilds" example;
+  # a bare package name without the source and commit does not apply to git sources.
+  '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
 Pinning a version (e.g. `#v0.1.20`) is recommended so a later push cannot silently change what actually runs:

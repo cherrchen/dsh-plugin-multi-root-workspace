@@ -13,14 +13,16 @@
  *    with the offending versions named.
  */
 
-import { readFileSync, readdirSync, realpathSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { assertSupportedInstallation, DshCompatUnsupportedError } from '../src/compat.ts'
+import type { Koffi } from '../src/compat/koffi.ts'
 import {
   classifyInstallation,
   compatEnforcement,
@@ -227,12 +229,21 @@ describe('shared upstream packages resolve through the host, never a shipped cop
 })
 
 describe('koffi resolves through the host, never a second native image', () => {
-  // koffi is a shipped `dependencies` entry because FFI callers need a
-  // standalone fallback, but a packed install must still dlopen the HOST's
-  // copy: a second koffi.node image in one process SIGBUSes on darwin-arm64
-  // pointer authentication (packed-install smoke, 2026-11-01). Every FFI call
-  // site goes through `loadHostKoffi`, which anchors at `dsh-fs-local` — a
-  // required peer that carries koffi on every supported release.
+  // koffi is an optional peer supplied by the host, not a shipped dependency:
+  // a profile copy is a second koffi.node image in one process, which SIGBUSes
+  // on darwin-arm64 pointer authentication (packed-install smoke, 2026-11-01),
+  // and its install script stops the first `dsh plugin add` at pnpm's build
+  // approval. Every FFI call site goes through `loadHostKoffi`, which anchors at
+  // `dsh-fs-local` — a required peer that carries koffi on every supported
+  // release — and falls back to the host entry and Desktop's packaged runtime.
+  it('declares koffi as an optional peer and a development pin, never a dependency', () => {
+    expect(manifest.dependencies?.koffi).toBeUndefined()
+    expect(manifest.optionalDependencies?.koffi).toBeUndefined()
+    expect(manifest.peerDependencies.koffi).toBe('>=3.1.0 <4.0.0')
+    expect(manifest.peerDependenciesMeta?.koffi?.optional).toBe(true)
+    expect(manifest.devDependencies.koffi).toMatch(/^3\.\d+\.\d+$/u)
+  })
+
   it('keeps the single host-anchored loader as the only koffi import in src/', () => {
     const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry =>
       entry.isDirectory() ? walk(join(dir, entry.name)) : entry.name.endsWith('.ts') ? [join(dir, entry.name)] : [])
@@ -249,6 +260,22 @@ describe('koffi resolves through the host, never a second native image', () => {
     const hostCopy = (await import(pathToFileURL(host.resolve('koffi')).href)).default
     const { loadHostKoffi } = await import('../src/compat/koffi.ts')
     expect(await loadHostKoffi()).toBe(hostCopy)
+  })
+
+  it('honours DSH_KOFFI_PATH before host discovery, synchronously and asynchronously', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mrw-koffi-'))
+    const entry = join(dir, 'index.cjs')
+    writeFileSync(entry, 'module.exports = { load() { return undefined }, marker: "override" }\n')
+    process.env.DSH_KOFFI_PATH = entry
+    try {
+      const { loadHostKoffi, loadHostKoffiSync } = await import('../src/compat/koffi.ts')
+      const marker = (copy: Koffi): undefined | string => (copy as Koffi & { marker?: string }).marker
+      expect(marker(await loadHostKoffi())).toBe('override')
+      expect(marker(loadHostKoffiSync())).toBe('override')
+    } finally {
+      delete process.env.DSH_KOFFI_PATH
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
