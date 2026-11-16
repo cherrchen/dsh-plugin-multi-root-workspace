@@ -79,9 +79,14 @@ export const STYLES = /* css */ `
 /* The fill stays outside @media (hover: hover) on purpose: the host added that
    wrapper only in 0.2.2-alpha.2, so the unwrapped form matches the 19 legacy
    releases and differs on the 5 token releases only on devices without hover
-   capability (ADR-0044 D2). */
+   capability (ADR-0044 D2).
+
+   background-color, not the background shorthand: the shorthand resets
+   background-clip to border-box and would paint the fill over the 3px
+   transparent inset border, 6px wider than the host row (whose hover
+   longhand keeps the base rule's padding-box) — ADR-0044 §修订三. */
 .mrfw-trigger:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background-color: var(--dsw-alias-interactive-bg-hover);
 }
 
 .mrfw-triggerIcon {

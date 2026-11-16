@@ -220,7 +220,13 @@ describe('the sidebar footer entry rules', () => {
     expect(trigger).toContain('font-size: 14px')
     expect(trigger).toContain('line-height: 22px')
     expect(trigger).toContain('background: transparent')
-    expect(STYLES).toMatch(/\.mrfw-trigger:hover\s*\{[^}]*background:\s*var\(--dsw-alias-interactive-bg-hover\)/s)
+    // The hover fill must be a longhand: the `background` shorthand resets
+    // background-clip to border-box and paints the fill 3px wider on each side
+    // than the host row, which keeps the base rule's padding-box.
+    expect(STYLES).toMatch(/\.mrfw-trigger:hover\s*\{[^}]*background-color:\s*var\(--dsw-alias-interactive-bg-hover\)/s)
+    const hoverRule = declarations('.mrfw-trigger:hover')
+    expect(hoverRule).toContain('background-color: var(--dsw-alias-interactive-bg-hover)')
+    expect(hoverRule).not.toMatch(/(?:^|;)\s*background:\s/)
   })
 
   it('rounds the rail like the 22 releases after the 0.1.6-alpha.2 boundary', () => {
