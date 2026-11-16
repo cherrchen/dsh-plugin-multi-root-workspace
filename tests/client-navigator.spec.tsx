@@ -28,13 +28,14 @@
  */
 
 import { createElement, useSyncExternalStore, type ReactElement } from 'react'
-import { act, cleanup, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { absoluteFileAddress, sessionFileAddress } from '@deepseek-ai/dsh-util-workspace-path'
 import type { StoreInstance } from '@deepseek-ai/dsh-client-store'
 import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from '../src/contract.ts'
 import type { FilesState } from '../src/client/files-tree/store.ts'
 import { locateFile, relativeUnderRoot, rootForPath, underRoot, windowsRoot } from '../src/client/files-tree/locate.ts'
+import { searchStateKey } from '../src/client/files-tree/search-state.ts'
 import * as client from '../src/client/index.ts'
 
 /* ── locate mechanics: the ported root/path rules, before any DOM ───────── */
@@ -176,7 +177,7 @@ const ROOT_C: RootView = { ordinal: 3, id: 'c', path: '/repos/docs', addedAt: '2
 
 /** The stub listing's tree: `src` is the reveal path, `other/deep` is the off-path nested memory. */
 const LISTINGS: Record<string, { name: string; type: 'file' | 'directory' }[]> = {
-  '/repos/payments': [{ name: 'src', type: 'directory' }, { name: 'other', type: 'directory' }, { name: 'notes.md', type: 'file' }],
+  '/repos/payments': [{ name: 'src', type: 'directory' }, { name: 'other', type: 'directory' }, { name: 'notes.md', type: 'file' }, { name: '.env', type: 'file' }],
   '/repos/payments/src': [{ name: 'inner.ts', type: 'file' }],
   '/repos/payments/other': [{ name: 'deep', type: 'directory' }, { name: 'loose.md', type: 'file' }],
   '/repos/payments/other/deep': [{ name: 'x.ts', type: 'file' }],
@@ -193,9 +194,19 @@ interface Harness {
   /** Hold the next `workspaceFiles.list` for a path until its release runs. */
   readonly holdList: (path: string) => () => void
   readonly occupant: (owner?: Record<string, unknown>) => unknown
+  /** Every panel `search` call, in order. */
+  readonly searchCalls: () => Call[]
+  /** The session's inject product (the search store and the takeover control). */
+  readonly injected: () => Record<string, unknown>
+  /** Hold the next panel `list` answer until the returned release runs. */
+  readonly holdPanelList: () => () => void
+  /** Make panel `list` answers fail, or answer again when false. */
+  readonly setListFails: (fails: boolean) => void
+  /** Make the search endpoint reject with a panel code, or answer when undefined. */
+  readonly setSearchFailure: (code: string | undefined) => void
 }
 
-function mount(): Harness {
+function mount(options: { readonly search?: boolean } = {}): Harness {
   const calls: Call[] = []
   const treeCalls: TreeCall[] = []
   const opens: OpenCall[] = []
@@ -204,10 +215,29 @@ function mount(): Harness {
   const held = new Map<string, Promise<void>>()
   const view: RootsView = { primaryRoot: '/repos/primary', primaryName: 'Platform', roots: [ROOT_A, ROOT_B, ROOT_C], limit: 16, count: 3 }
   const currentSession = 'session-1'
+  let listFails = false
+  let searchFailure: string | undefined
+  let panelListGate: Promise<void> | undefined
   const connection = {
     rpc: {
       call: async (channel: string, endpoint: string, payload: PanelRequest) => {
         calls.push({ channel, endpoint, payload })
+        if (endpoint === 'search') {
+          if (searchFailure !== undefined) {
+            return { ok: false, error: { code: searchFailure, message: 'search failed' } }
+          }
+          const requested = payload as { readonly rootId?: string; readonly query?: string }
+          const root = requested.rootId === 'c' ? '/repos/docs' : '/repos/payments'
+          return {
+            ok: true,
+            value: { root, matches: searchMatches(root, requested.query ?? ''), truncated: false, incomplete: false },
+          }
+        }
+        const gate = panelListGate
+        if (gate !== undefined) await gate
+        if (endpoint === 'list' && listFails) {
+          return { ok: false, error: { code: 'registry-contended', message: 'registry busy' } }
+        }
         return { ok: true, value: view }
       },
     },
@@ -227,6 +257,13 @@ function mount(): Harness {
         treeCalls.push({ kind: 'changes', sessionId, path })
         return watchStub({ push: () => {}, stop: () => {} })
       },
+      ...(options.search === true
+        ? {
+          // The seat's structural probe only: the pane's real traffic rides the
+          // plugin's Connection channel above.
+          search: async () => ({ ok: true as const, value: { root: '/repos/payments', matches: [], truncated: false, incomplete: false } }),
+        }
+        : {}),
     },
     $stream: streamStub,
   }
@@ -239,7 +276,10 @@ function mount(): Harness {
     inject: () => () => {},
     locale: {
       register: () => () => {},
-      bind: (ns: string) => (key: string) => `${ns}.${key}`,
+      // Parameters reach the string the way the real dictionary interpolates
+      // them: failure views pass their localized reason through a parameter.
+      bind: (ns: string) => (key: string, params?: Record<string, unknown>) =>
+        params === undefined ? `${ns}.${key}` : `${ns}.${key}:${JSON.stringify(params)}`,
     },
     slots: {
       inject: (_name: string, callback: () => unknown) => { callback(); return () => {} },
@@ -322,7 +362,29 @@ function mount(): Harness {
         ...owner,
       },
     ),
+    searchCalls: () => calls.filter(call => call.channel === PANEL_CHANNEL && call.endpoint === 'search'),
+    injected: () => injectedProps(currentSession),
+    holdPanelList: () => {
+      let release: (() => void) | undefined
+      panelListGate = new Promise<void>(resolve => { release = resolve })
+      return () => {
+        panelListGate = undefined
+        release?.()
+      }
+    },
+    setListFails: next => { listFails = next },
+    setSearchFailure: next => { searchFailure = next },
   }
+}
+
+/** The matches a search query answers with, in the shape the Host reports them. */
+function searchMatches(root: string, query: string): readonly { readonly path: string; readonly type: 'file' | 'directory' }[] {
+  const prefix = root === '/repos/docs' ? 'guide/' : 'src/'
+  if (query === 'notes') return [{ path: 'notes.md', type: 'file' }]
+  if (query === 'src') return [{ path: 'src', type: 'directory' }, { path: 'src/inner.ts', type: 'file' }]
+  if (query === 'inner') return [{ path: `${prefix}inner.ts`, type: 'file' }]
+  if (query === 'guide') return [{ path: 'guide/intro.md', type: 'file' }]
+  return []
 }
 
 /** The preview fixtures this suite appended to `document.body`. */
@@ -338,6 +400,9 @@ afterEach(() => {
   cleanup()
   scrolled.length = 0
   for (const element of appended.splice(0)) element.remove()
+  // The search preferences persist in localStorage; a case that opens the eye
+  // must not change what the next case reads.
+  window.localStorage.clear()
 })
 
 /** The file the fixture previews: nested one directory under the additional root. */
@@ -407,16 +472,54 @@ function renderInPreview(
   }
 }
 
-/** Append the native navigator aside to the preview's content row. */
+/**
+ * Append the native navigator aside to the preview's content row.
+ *
+ * The rc.2+ navigator also draws a workspace search bar and its status line;
+ * they stay in the DOM while the plugin's pane is portaled beside them (the
+ * stylesheet, not this fixture, hides them). Every interaction below is scoped
+ * to the plugin pane, so the native names never select the wrong node.
+ */
 function openNavigator(content: HTMLElement, paneId = 'pane-1'): { aside: HTMLElement; body: HTMLElement } {
   const aside = document.createElement('aside')
   aside.setAttribute('data-files-navigator', paneId)
   aside.setAttribute('data-files-root', '/repos/primary')
+  const bar = document.createElement('div')
+  const nativeSearch = document.createElement('input')
+  nativeSearch.setAttribute('data-files-search', '')
+  bar.append(nativeSearch)
+  const nativeStatus = document.createElement('p')
+  nativeStatus.setAttribute('data-files-search-status', '')
   const body = document.createElement('div')
   body.setAttribute('data-files-body', '')
-  aside.append(body)
+  aside.append(bar, nativeStatus, body)
   act(() => { content.append(aside) })
   return { aside, body }
+}
+
+/** The plugin pane inside a retargeted aside. */
+function paneOf(aside: HTMLElement): HTMLElement {
+  const pane = aside.querySelector<HTMLElement>('[data-mrfw-files-pane]')
+  expect(pane).not.toBeNull()
+  return pane!
+}
+
+/** The plugin pane's search field. */
+function paneSearch(aside: HTMLElement): HTMLInputElement {
+  const input = paneOf(aside).querySelector<HTMLInputElement>('input[type="search"]')
+  expect(input).not.toBeNull()
+  return input!
+}
+
+/** Type a query into the plugin pane's field. */
+function typeInPane(aside: HTMLElement, query: string): void {
+  const input = paneSearch(aside)
+  act(() => { fireEvent.change(input, { target: { value: query } }) })
+}
+
+/** The plugin pane's search record key for one root. */
+function paneKey(root: string): string {
+  return searchStateKey('pane-1' as never, root)
 }
 
 /** The forked body the takeover portals into the aside. */
@@ -915,6 +1018,7 @@ describe('the preview navigator retarget', () => {
     const firstBody = forkBody(aside)
     firstBody.scrollTop = 40
     act(() => { firstBody.dispatchEvent(new Event('scroll')) })
+
     await waitFor(() => {
       expect(harness.saves.some(save => (save.snapshot as { root?: string; scrollTop?: number }).root === '/repos/payments'
         && (save.snapshot as { scrollTop?: number }).scrollTop === 40)).toBe(true)
@@ -1000,3 +1104,281 @@ describe('the retargeted tree host-parity wiring', () => {
   })
 })
 
+describe('the preview navigator search surface', () => {
+  /** Render a preview with the search seat present, then open its navigator. */
+  async function mountSearchPreview(options: { file?: string; factory?: unknown } = {}): Promise<{
+    harness: Harness
+    aside: HTMLElement
+    preview: PreviewMount
+  }> {
+    const harness = mount({ search: true })
+    const file = options.file ?? PREVIEWED
+    const preview = renderInPreview(
+      harness,
+      { absolutePath: file, ...(options.factory === undefined ? {} : { renderFactorySlot: options.factory }) },
+      { file },
+    )
+    const { aside } = openNavigator(preview.content)
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => { expect(paneOf(aside)).toBeTruthy() })
+    return { harness, aside, preview }
+  }
+
+  it('portals the plugin pane into the aside and keeps the native bar in the DOM', async () => {
+    const { harness, aside } = await mountSearchPreview()
+    expect(paneOf(aside).classList.contains('mrfw-fsPane')).toBe(true)
+    expect(paneSearch(aside)).toBeTruthy()
+    // The native search bar and status line stay in the DOM; the stylesheet,
+    // not this fixture, hides them while the retarget holds the aside.
+    expect(aside.querySelector('[data-files-search]')).not.toBeNull()
+    expect(aside.querySelector('[data-files-search-status]')).not.toBeNull()
+    // The reveal still walks the listed tree through the pane wrapper.
+    await waitFor(() => {
+      expect(paneOf(aside).querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+    })
+    expect(harness.searchCalls()).toHaveLength(0)
+  })
+
+  it('searches the previewed root through the channel and draws the matches', async () => {
+    const { harness, aside } = await mountSearchPreview()
+    typeInPane(aside, '  notes  ')
+    await waitFor(() => { expect(harness.searchCalls()).toHaveLength(1) })
+    const payload = harness.searchCalls()[0]!.payload as {
+      readonly sessionId?: string
+      readonly rootId?: string
+      readonly query?: string
+      readonly excludedPaths?: readonly string[]
+      readonly includeHidden?: boolean
+      readonly respectGitignore?: boolean
+    }
+    expect(payload.sessionId).toBe('session-1')
+    expect(payload.rootId).toBe('a')
+    expect(payload.query).toBe('notes')
+    expect(payload.includeHidden).toBe(false)
+    expect(payload.respectGitignore).toBe(true)
+    expect((payload.excludedPaths ?? []).length).toBeGreaterThan(0)
+    const pane = paneOf(aside)
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+    expect(pane.querySelector('mark')?.textContent).toBe('notes')
+    expect(pane.querySelector('[data-files-search-status]')?.textContent).toContain('search.results')
+  })
+
+  it('opens a result row by replacing the preview tab', async () => {
+    const { harness, aside } = await mountSearchPreview()
+    typeInPane(aside, 'notes')
+    await waitFor(() => { expect(paneOf(aside).querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+    const row = paneOf(aside).querySelector<HTMLElement>('[data-files-path="/repos/payments/notes.md"] button')!
+    act(() => { row.click() })
+    expect(harness.opens.at(-1)?.sessionId).toBe('session-1')
+    expect(harness.opens.at(-1)?.address).toContain('notes.md')
+    // The preview tab id — never the pane id — is what replaceTab takes.
+    expect(harness.opens.at(-1)?.options).toEqual({ replaceTab: 'tab-preview' })
+  })
+
+  it('clears back to the listed tree and keeps the reveal current', async () => {
+    const { aside } = await mountSearchPreview()
+    typeInPane(aside, 'notes')
+    await waitFor(() => { expect(paneOf(aside).querySelector('[data-mrfw-files-results]')).not.toBeNull() })
+    const input = paneSearch(aside)
+    act(() => { fireEvent.change(input, { target: { value: '' } }) })
+    await waitFor(() => { expect(paneOf(aside).querySelector('[data-mrfw-files-results]')).toBeNull() })
+    await waitFor(() => {
+      expect(paneOf(aside).querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+    })
+  })
+
+  it('marks the previewed file when it is a result — the legacy row path', async () => {
+    const { aside } = await mountSearchPreview()
+    typeInPane(aside, 'inner')
+    await waitFor(() => {
+      const current = paneOf(aside).querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')
+      expect(current).not.toBeNull()
+      expect(current?.getAttribute('aria-current')).toBe('true')
+    })
+    const input = paneSearch(aside)
+    act(() => { fireEvent.change(input, { target: { value: 'notes' } }) })
+    await waitFor(() => { expect(paneOf(aside).querySelector('[data-files-current]')).toBeNull() })
+  })
+
+  it('hands the host Factory the result current row and no ref, and omits it when unmatched', async () => {
+    const captured: { name: string; input: Record<string, unknown> }[] = []
+    const factory = (name: string, input: object): null => {
+      captured.push({ name, input: input as Record<string, unknown> })
+      return null
+    }
+    const { aside } = await mountSearchPreview({ factory })
+    typeInPane(aside, 'inner')
+    await waitFor(() => {
+      const last = captured.at(-1)
+      expect(last?.name).toBe('sidebar.files.tree')
+      expect(last?.input.current).toBe('/repos/payments/src/inner.ts')
+      expect(last?.input.highlight).toBe('inner')
+      // The Factory receives the selection mode per directory, the way its
+      // own input type spells it.
+      const directories = last?.input.directories as Record<string, { readonly omitted?: string }> | undefined
+      expect(Object.values(directories ?? {}).some(status => status.omitted === 'unmatched')).toBe(true)
+      // Only the reveal supplies a scroll target; a result mark does not.
+      expect('currentRef' in (last?.input ?? {})).toBe(false)
+    })
+    const input = paneSearch(aside)
+    act(() => { fireEvent.change(input, { target: { value: 'notes' } }) })
+    await waitFor(() => {
+      const last = captured.at(-1)!
+      expect(last.input.current).toBeUndefined()
+      expect('currentRef' in last.input).toBe(false)
+    })
+  })
+
+  it('follows the eye preference in the listed tree and in the search request', async () => {
+    const { harness, aside } = await mountSearchPreview()
+    const pane = paneOf(aside)
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+    // The rc.2+ preview lists with the eye closed: dotfiles stay out.
+    expect(pane.querySelector('[data-files-path="/repos/payments/.env"]')).toBeNull()
+    const eye = pane.querySelector<HTMLElement>('[data-files-show-hidden]')!
+    act(() => { eye.click() })
+    await waitFor(() => { expect(pane.querySelector('[data-files-path="/repos/payments/.env"]')).not.toBeNull() })
+    expect(eye.getAttribute('aria-pressed')).toBe('true')
+    typeInPane(aside, 'notes')
+    await waitFor(() => { expect(harness.searchCalls().length).toBeGreaterThan(0) })
+    expect((harness.searchCalls().at(-1)!.payload as { includeHidden?: boolean }).includeHidden).toBe(true)
+    // The preference lands under the upstream key, for this root alone.
+    const stored = window.localStorage.getItem('dsh.sidebar-files.workspace-search.v1')
+    expect(stored).toContain('/repos/payments')
+    expect(stored).toContain('"showHidden":true')
+  })
+
+  it('localizes panel failures, falls back to the tree vocabulary, and retries on demand', async () => {
+    const { harness, aside } = await mountSearchPreview()
+    harness.setSearchFailure('root-unavailable')
+    typeInPane(aside, 'notes')
+    await waitFor(() => { expect(paneOf(aside).querySelector('[data-files-row="search-failed"]')).not.toBeNull() })
+    expect(paneOf(aside).querySelector('[data-files-row="search-failed"]')?.textContent)
+      .toContain('multiRootWorkspace.error.root-unavailable')
+    // A code the plugin dictionary does not own keeps the tree's own wording.
+    harness.setSearchFailure('workspace-file/not-found')
+    act(() => { paneOf(aside).querySelector<HTMLElement>('[data-files-search-retry]')!.click() })
+    await waitFor(() => {
+      expect(paneOf(aside).querySelector('[data-files-row="search-failed"]')?.textContent)
+        .toContain('sidebarFiles.error.notFound')
+    })
+    harness.setSearchFailure(undefined)
+    act(() => { paneOf(aside).querySelector<HTMLElement>('[data-files-search-retry]')!.click() })
+    await waitFor(() => { expect(paneOf(aside).querySelector('[data-files-path="/repos/payments/notes.md"]')).not.toBeNull() })
+    expect(harness.searchCalls().map(call => (call.payload as { query?: string }).query))
+      .toEqual(['notes', 'notes', 'notes'])
+  })
+
+  it('keeps the query, result, and position across navigator reopens and replaceTab remounts', async () => {
+    const { harness, aside, preview } = await mountSearchPreview()
+    typeInPane(aside, 'src')
+    await waitFor(() => { expect(paneOf(aside).querySelector('[data-files-path="/repos/payments/src/inner.ts"]')).not.toBeNull() })
+    act(() => { paneOf(aside).querySelector<HTMLElement>('[data-files-path="/repos/payments/src"] button')!.click() })
+    const results = paneOf(aside).querySelector<HTMLElement>('[data-mrfw-files-results]')!
+    act(() => { fireEvent.scroll(results, { target: { scrollTop: 64 } }) })
+    const search = harness.injected().search as {
+      state(key: string): { readonly scrollTop: number; readonly expanded: readonly string[] }
+    }
+    await waitFor(() => { expect(search.state(paneKey('/repos/payments')).scrollTop).toBe(64) })
+    expect(search.state(paneKey('/repos/payments')).expanded).not.toContain('/repos/payments/src')
+    const callsBefore = harness.searchCalls().length
+
+    act(() => { aside.remove() })
+    const second = openNavigator(preview.content)
+    await waitFor(() => { expect(second.aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => { expect(paneOf(second.aside).querySelector('[data-mrfw-files-results]')).not.toBeNull() })
+    expect(paneSearch(second.aside).value).toBe('src')
+    expect(paneOf(second.aside).querySelector('[data-files-path="/repos/payments/src"] button')?.getAttribute('aria-expanded')).toBe('false')
+    expect(search.state(paneKey('/repos/payments')).scrollTop).toBe(64)
+    expect(harness.searchCalls()).toHaveLength(callsBefore)
+
+    // replaceTab closes the preview tab and mints a new one in the same pane.
+    act(() => {
+      preview.unmount()
+      preview.cell.remove()
+    })
+    const next = renderInPreview(harness, { absolutePath: '/repos/payments/notes.md' }, { tabId: 'tab-next', file: '/repos/payments/notes.md' })
+    const third = openNavigator(next.content)
+    await waitFor(() => { expect(third.aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => { expect(paneOf(third.aside).querySelector('[data-mrfw-files-results]')).not.toBeNull() })
+    expect(paneSearch(third.aside).value).toBe('src')
+    expect(harness.searchCalls()).toHaveLength(callsBefore)
+  })
+
+  it('re-keys the record on a same-pane root switch without cross-writing it', async () => {
+    const { harness, aside, preview } = await mountSearchPreview()
+    typeInPane(aside, 'inner')
+    await waitFor(() => {
+      expect(paneOf(aside).querySelector('[data-files-path="/repos/payments/src/inner.ts"] [data-files-current]')).not.toBeNull()
+    })
+    const search = harness.injected().search as {
+      state(key: string): { readonly query: string; readonly pending: boolean; readonly barOpen: boolean }
+    }
+    const keyA = paneKey('/repos/payments')
+    expect(search.state(keyA).query).toBe('inner')
+    // The preview form never writes the Files-page bar visibility record.
+    expect(search.state(keyA).barOpen).toBe(false)
+
+    const release = harness.holdPanelList()
+    try {
+      act(() => { preview.setFile('/repos/docs/guide/intro.md') })
+      // The registry answer is held: the live takeover still belongs to A, so
+      // nothing may search under B and A's record keeps its own settled answer.
+      expect(harness.searchCalls().every(call => (call.payload as { rootId?: string }).rootId !== 'c')).toBe(true)
+      expect(search.state(keyA).query).toBe('inner')
+      expect(search.state(keyA).pending).toBe(false)
+    } finally {
+      release()
+    }
+    await waitFor(() => { expect(paneOf(aside).querySelector('[data-files-path="/repos/docs/guide"]')).not.toBeNull() })
+    expect(harness.searchCalls()).toHaveLength(1)
+    expect(search.state(keyA).query).toBe('inner')
+
+    // A list that cannot answer stands the retarget down instead of throwing.
+    harness.setListFails(true)
+    act(() => { preview.setFile('/repos/payments/src/inner.ts') })
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(false) })
+    harness.setListFails(false)
+  })
+
+  it('drops the pane record when the pane dies', async () => {
+    const { harness, aside, preview } = await mountSearchPreview()
+    typeInPane(aside, 'notes')
+    await waitFor(() => { expect(harness.searchCalls()).toHaveLength(1) })
+    const search = harness.injected().search as { state(key: string): { readonly query: string } }
+    expect(search.state(paneKey('/repos/payments')).query).toBe('notes')
+    act(() => { aside.remove() })
+    act(() => {
+      preview.unmount()
+      preview.cell.remove()
+    })
+    await waitFor(() => { expect(search.state(paneKey('/repos/payments')).query).toBe('') })
+  })
+
+  it('moves the keyboard through Factory-drawn rows and back to the field', async () => {
+    const factory = (name: string, raw: object): ReactElement => {
+      const input = raw as {
+        readonly entries?: readonly { readonly path: string; readonly name: string; readonly meta: { readonly kind: string } }[]
+      }
+      const entries = input.entries ?? []
+      return (
+        <ul data-testid="host-tree">
+          {entries.map(entry => (
+            <li key={entry.path} data-files-entry={entry.meta.kind} data-files-path={entry.path}>
+              <div><button type="button">{entry.name}</button></div>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+    const { aside } = await mountSearchPreview({ factory })
+    const input = paneSearch(aside)
+    await waitFor(() => { expect(paneOf(aside).querySelector('[data-files-entry="directory"] > div > button')).not.toBeNull() })
+    act(() => { fireEvent.keyDown(input, { key: 'ArrowDown' }) })
+    await waitFor(() => {
+      expect(document.activeElement?.closest('[data-files-path]')?.getAttribute('data-files-path')).toBe('/repos/payments/src')
+    })
+    act(() => { fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' }) })
+    await waitFor(() => { expect(document.activeElement).toBe(input) })
+  })
+})

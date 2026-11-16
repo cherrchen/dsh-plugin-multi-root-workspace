@@ -47,6 +47,7 @@ import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction
 import { OPEN_IN_APP_NS, createOpenInAppAdapter } from './open-in-app/adapter.tsx'
 import { OpenInAppToast } from './open-in-app/open-toast.tsx'
 import { FILES_TREE_NS, createFilesTreeSeats, createFilesTreeSurface } from './files-tree/adapter.tsx'
+import { createSearchFailureDescriber } from './files-tree/describe-failure.ts'
 import { createSearchPreferenceBook } from './files-tree/search-preferences.ts'
 import { NavigatorRetarget } from './files-tree/navigator.tsx'
 
@@ -162,6 +163,10 @@ export function apply(ctx: ClientContext): void {
   const sessionId = (): string | undefined => currentSessionIdOf(readService(ctx, 'sessions'))
   const subscribeSession = (listener: () => void): (() => void) => subscribeSessions(readService(ctx, 'sessions'), listener)
   const t = ctx.locale.bind(NS) as unknown as Translate
+  // One describer for every search entry this half composes: the Files page
+  // builds its own over the same binding, the preview navigator receives this
+  // one. Sharing the helper is what keeps the two failure wordings identical.
+  const describeSearchFailure = createSearchFailureDescriber(t)
   installSkillsClient(ctx, t, listener => subscribeCurrentSession(readService(ctx, 'sessions'), listener))
   const worktreeSettings = installSkillsSettingsCard(ctx, t)
   // The worktree confirmation is a shell-level overlay: it must be able to
@@ -338,6 +343,7 @@ export function apply(ctx: ClientContext): void {
       panel,
       filesTree,
       nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot),
+      describeFailure: describeSearchFailure,
     })
   }))
   // The workspace row's `...` / context menu gains "Manage workspace folders…".
