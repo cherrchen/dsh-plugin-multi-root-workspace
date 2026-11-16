@@ -64,10 +64,11 @@ flex 子项（renderer 每槽只发一个 `display: contents` 的 `[data-slot]` 
 互隐/抖动。生态抽样（balance-simple / vt-quote-bar / crypto-ticker / sidebar-organizer / ego-browser /
 better-sidebar）没有"同槽有人注册就隐藏"的先例，实际做法都是 CSS/DOM 布局修补。
 
-**5）编号核对。** `ADR-0043` 已被两个在飞 worktree 的未合入提案占用
+**5）编号核对。** 起草时 `ADR-0043` 被两个在飞 worktree 的未合入提案占用
 （`feat/additional-file-tree-search` 的 `ADR-0043-additional-root-preview-navigator-search.md`、
 `fix/worktree-delete-panel` 的 `ADR-0043-worktree-cleanup-panel-ui.md`），因此本线取 **ADR-0044**；
-本计划文件名同日不重复。
+两条分支先后合入后，前者保留 ADR-0043，后者为消解重号改为 `ADR-0045-worktree-cleanup-panel-ui.md`
+（编号口径见 `docs/decisions/README.md`）。本计划文件名同日不重复。
 
 ## Current State
 

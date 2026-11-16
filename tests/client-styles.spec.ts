@@ -660,9 +660,29 @@ describe('the worktree suggestion notice rules', () => {
 })
 
 describe('the workspace folder add row', () => {
-  it('keeps one line by letting the manual path field shrink first', () => {
-    expect(STYLES).toMatch(/\.mrfw-actions\s*\{[^}]*flex-wrap:\s*nowrap/s)
+  it('keeps the controls on one line by letting the manual path field shrink first', () => {
+    expect(STYLES).toMatch(/\.mrfw-actions\s*\{[^}]*flex-wrap:\s*wrap/s)
     expect(STYLES).toMatch(/\.mrfw-manualPath\s*\{[^}]*flex:\s*1 1 120px[^}]*min-width:\s*80px/s)
+  })
+
+  it('gives the root-limit hint its own line above the controls, under the divider', () => {
+    // Both lines live inside the bordered footer block: the hint claims a full
+    // flex line and the controls wrap onto the line after it.
+    expect(STYLES).toMatch(/\.mrfw-actions\s*\{[^}]*border-top:\s*0\.5px solid var\(--dsw-alias-border-l2\)/s)
+    expect(STYLES).toMatch(/\.mrfw-actionsNote\s*\{[^}]*flex:\s*0 0 100%/s)
+  })
+})
+
+describe('the additional-section batch action', () => {
+  it('right-aligns the action on the title row and wraps instead of overflowing', () => {
+    // The modifier is what lets a narrow dialog put the action on its own line;
+    // the base title row (the primary section) keeps its baseline layout.
+    expect(STYLES).toMatch(/\.mrfw-sectionTitleRowAction\s*\{[^}]*flex-wrap:\s*wrap/s)
+    expect(STYLES).toMatch(/\.mrfw-sectionAction\s*\{[^}]*margin-left:\s*auto[^}]*align-self:\s*center[^}]*display:\s*inline-flex/s)
+    const baseTitleRow = STYLES.slice(STYLES.indexOf('.mrfw-sectionTitleRow {'), STYLES.indexOf('.mrfw-sectionTitle {'))
+    expect(baseTitleRow).toMatch(/display:\s*flex/)
+    expect(baseTitleRow).toMatch(/align-items:\s*baseline/)
+    expect(baseTitleRow).not.toMatch(/flex-wrap/)
   })
 })
 

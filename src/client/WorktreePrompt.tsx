@@ -22,7 +22,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Button, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Menu, Modal, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorktreeAccess, WorktreeAccessEntry, WorktreePromptView, WorktreeSnoozeMode } from '../contract.ts'
 import {
   IconAccessInherit,
@@ -67,6 +67,12 @@ type DialogLaterMode = WorktreeSnoozeMode | 'permanent'
 
 /** The per-row access choices the selector offers; inherit is the default. */
 const ACCESS_CHOICES: readonly WorktreeAccess[] = ['inherit', 'read-only', 'read-write']
+
+/**
+ * How long the empty-discovery notice stays at full opacity before it fades.
+ * Exported so a test can pin the value the overlay hands the primitive.
+ */
+export const WORKTREE_EMPTY_NOTICE_HOLD_MS = 5000
 
 /** The i18n key naming one access choice (the panel's own vocabulary). */
 function accessKeyOf(access: WorktreeAccess): 'panel.accessInherit' | 'panel.accessReadOnly' | 'panel.accessReadWrite' {
@@ -186,6 +192,12 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const [snoozeOpen, setSnoozeOpen] = useState(false)
   const [accessByKey, setAccessByKey] = useState<ReadonlyMap<string, WorktreeAccess>>(() => new Map())
   const [accessMenuKey, setAccessMenuKey] = useState<string | undefined>(undefined)
+  /**
+   * The one-shot "nothing to add" notice: an informational Toast shown only
+   * when a MANUAL open found no candidates on its first `prompt`. The
+   * automatic `fresh` check and the notice's View path stay silent.
+   */
+  const [emptyNotice, setEmptyNotice] = useState<{ readonly seq: number } | undefined>(undefined)
   const placement = useNoticePlacement(notice !== undefined)
 
   const mounted = useRef(true)
@@ -214,6 +226,13 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   /** The live session resolver, read inside async callbacks. */
   const sessionIdRef = useRef(sessionId)
   const readEnabledRef = useRef(readEnabled)
+  /**
+   * Whether the Dialog currently open came from the manual Worktree entry.
+   * Only that path may announce an empty result; every close path clears it.
+   */
+  const manualDialogOpen = useRef(false)
+  /** The Toast's show sequence: remounting on a new value restarts its hold. */
+  const emptyNoticeSeq = useRef(0)
 
   useEffect(() => {
     mounted.current = true
@@ -262,6 +281,8 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setSnoozeOpen(false)
     setAccessByKey(new Map())
     setAccessMenuKey(undefined)
+    manualDialogOpen.current = false
+    setEmptyNotice(undefined)
     // "From empty to a valid session" is a fresh activation later: forget that
     // an earlier visit to the same id consumed its check.
     if (session === undefined || session === '') checkedSession.current = undefined
@@ -323,11 +344,14 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
       setSnoozeOpen(false)
       setAccessByKey(new Map())
       setAccessMenuKey(undefined)
+      manualDialogOpen.current = false
+      setEmptyNotice(undefined)
     })
   }, [subscribeEnabled])
 
   /** Close the Dialog and abort its long poll immediately (X, Escape, mask). */
   const closeDialog = useCallback(() => {
+    manualDialogOpen.current = false
     workEpoch.current += 1
     dialogAbort.current?.abort()
     dialogAbort.current = undefined
@@ -344,6 +368,17 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setSnoozeOpen(false)
     setAccessByKey(new Map())
     setAccessMenuKey(undefined)
+  }, [])
+
+  /** Announce "nothing to add" once, remounting the Toast on every show. */
+  const showEmptyNotice = useCallback(() => {
+    emptyNoticeSeq.current += 1
+    setEmptyNotice({ seq: emptyNoticeSeq.current })
+  }, [])
+
+  /** Clear the empty-discovery Toast only while it is still this show. */
+  const dismissEmptyNotice = useCallback((seq: number) => {
+    setEmptyNotice(current => (current?.seq === seq ? undefined : current))
   }, [])
 
   // The Dialog's whole lifetime. It starts only after "View" set dialogOpen:
@@ -379,9 +414,16 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
       }
       if (cancelled || controller.signal.aborted || epoch !== workEpoch.current) return
       if (sessionIdRef.current() !== session) return
-      // The notice claimed candidates, but the Dialog renders the full visible
-      // list; an empty one means there is nothing to confirm after all.
-      if (answer.prompts.length === 0) { closeDialog(); return }
+      // An empty list ends the Dialog. The manual entry leaves the operator
+      // with nothing at all — the panel already closed when the overlay
+      // accepted the hand-off — so that one path announces the empty result
+      // with the informational Toast. The automatic `fresh` check never opens
+      // this Dialog, and the notice's View race stays silent (ADR-0039 §20.1).
+      if (answer.prompts.length === 0) {
+        if (manualDialogOpen.current) showEmptyNotice()
+        closeDialog()
+        return
+      }
       adopt(answer.prompts, answer.viewRevision)
       void client.seen(session, answer.prompts.map(prompt => prompt.id)).catch(() => {})
       while (!cancelled) {
@@ -505,8 +547,12 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     }
   }, [client, closeDialog, dialogOpen, laterMode, rows])
 
-  /** Open the Dialog for one live session and end the notice's lifecycle. */
-  const openDialogFor = useCallback((session: string) => {
+  /**
+   * Open the Dialog for one live session and end the notice's lifecycle.
+   * @param options.manual whether the operator reached this through the manual
+   *   Worktree entry; only that hand-off announces an empty result.
+   */
+  const openDialogFor = useCallback((session: string, options?: { readonly manual?: boolean }) => {
     // Opening the Dialog ends the notice's lifecycle immediately: a toast
     // completion still in flight must never touch it afterwards.
     workEpoch.current += 1
@@ -523,6 +569,10 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
     setSnoozeOpen(false)
     setAccessByKey(new Map())
     setAccessMenuKey(undefined)
+    // A new manual hand-off owns the screen: an older empty notice must not
+    // overlap it, and only this path arms the "nothing to add" Toast.
+    manualDialogOpen.current = options?.manual === true
+    if (options?.manual === true) setEmptyNotice(undefined)
     setDialogOpen(true)
   }, [])
 
@@ -538,7 +588,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const openWorktreePrompt = useCallback((session: string): boolean => {
     if (client === undefined || dialogSession.current !== undefined || session !== currentSession) return false
     if (sessionIdRef.current() !== session || readEnabledRef.current?.() === false) return false
-    openDialogFor(session)
+    openDialogFor(session, { manual: true })
     return true
   }, [client, currentSession, openDialogFor])
 
@@ -597,7 +647,7 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
   const visibleNotice = notice !== undefined && notice.session === currentSession ? notice : undefined
   const dialogRows = dialogOpen && rows !== undefined && rows.length > 0
     && dialogSession.current === currentSession ? rows : undefined
-  if (visibleNotice === undefined && dialogRows === undefined) return null
+  if (visibleNotice === undefined && dialogRows === undefined && emptyNotice === undefined) return null
 
   const singlePrompt = dialogRows !== undefined && dialogRows.length === 1 ? dialogRows[0] : undefined
   const mainCheckout = singlePrompt?.kind === 'main-checkout'
@@ -817,6 +867,17 @@ export function WorktreePrompt(props: WorktreePromptProps): ReactNode {
             {error === undefined ? null : <p role="alert" className="mrfw-alert">{t(errorKeyOf(error))}</p>}
           </div>
         </Modal>
+      )}
+      {/* The manual entry's empty result, as the primitive's lowest-level
+          form: no icon and no tone, because this is information, not a
+          warning. The Toast owns its hold and fade; nothing is written. */}
+      {emptyNotice === undefined ? null : (
+        <Toast
+          key={`worktree-empty-${String(emptyNotice.seq)}`}
+          text={t('worktree.noCandidates')}
+          holdMs={WORKTREE_EMPTY_NOTICE_HOLD_MS}
+          onDone={() => { dismissEmptyNotice(emptyNotice.seq) }}
+        />
       )}
     </>
   )
