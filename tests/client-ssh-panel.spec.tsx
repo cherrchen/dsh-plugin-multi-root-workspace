@@ -410,6 +410,32 @@ describe('the SSH management dialog', () => {
     }, 'SHA256:scanned', undefined]])
   })
 
+  it('keeps save disabled with the format hint while environmentId violates the slug contract', async () => {
+    const ssh = fakeSsh(sshState())
+    const dialog = await withDialog({ ssh }, 'add')
+    await within(dialog).findByText('ssh.add.stepTarget')
+    const idInput = within(dialog).getByLabelText('ssh.field.environmentId')
+    fireEvent.change(idInput, { target: { value: 'env-build' } })
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.hostname'), { target: { value: 'build.internal' } })
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.user'), { target: { value: 'ci' } })
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'ssh.field.alias' }))
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'ssh.field.alias' }), { target: { value: 'build' } })
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.workspace'), { target: { value: '/srv/ci' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
+    await within(dialog).findByRole('radio', { name: /SHA256:scanned/ })
+    const save = () => within(dialog).getByRole('button', { name: 'ssh.add.save' }) as HTMLButtonElement
+    await waitFor(() => expect(save().disabled).toBe(false))
+    // Two characters or an illegal character keeps the draft inside the editor.
+    fireEvent.change(idInput, { target: { value: 'ab' } })
+    await waitFor(() => expect(save().disabled).toBe(true))
+    expect(within(dialog).getByText('ssh.field.environmentIdHint')).toBeTruthy()
+    fireEvent.change(idInput, { target: { value: 'BAD ID' } })
+    await waitFor(() => expect(save().disabled).toBe(true))
+    fireEvent.change(idInput, { target: { value: 'abc' } })
+    await waitFor(() => expect(save().disabled).toBe(false))
+    expect(within(dialog).queryByText('ssh.field.environmentIdHint')).toBeNull()
+  })
+
   it('fills the resolved endpoint fields from an alias scan', async () => {
     const ssh = fakeSsh(sshState())
     ssh.hostKeyScan = async (_sessionId: string, _target: { hostname?: string; port?: number; alias?: string }) => {
@@ -643,5 +669,23 @@ describe('SSH dialog asynchronous scope isolation', () => {
     expect(screen.queryByText('Stale mutation')).toBeNull()
     expect(changed).toBe(0)
     expect((screen.getAllByRole('button', { name: 'ssh.envTest' })[0] as HTMLButtonElement).disabled).toBe(false)
+  })
+})
+
+describe('error copy detail policy', () => {
+  it('shows the host message for codes whose cause only the message names', async () => {
+    const { errorHasDetail, errorKeyOf } = await import('../src/client/panel-client.ts')
+    // Three unrelated failures share this code; only the message splits them.
+    expect(errorKeyOf('endpoint-unverifiable')).toBe('error.endpoint-unverifiable')
+    expect(errorHasDetail('endpoint-unverifiable')).toBe(true)
+    for (const code of ['ssh-config-not-linked', 'host-identity-unverifiable', 'invalid-manifest', 'workspace-invalid']) {
+      expect(errorHasDetail(code), code).toBe(true)
+    }
+    // Codes whose fixed copy already says everything keep the message hidden.
+    expect(errorHasDetail('helper-node-missing')).toBe(false)
+    expect(errorHasDetail('host-key-mismatch')).toBe(false)
+    // Unknown and transport codes always show whatever the host sent.
+    expect(errorHasDetail('panel/transport')).toBe(true)
+    expect(errorHasDetail('never-heard-of-it')).toBe(true)
   })
 })

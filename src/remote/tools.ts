@@ -152,7 +152,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         ...(mode === 'team' && team?.manifestPath !== undefined ? { manifestPath: team.manifestPath } : {}),
       })
       if (closed) return
-      const identity = subtreeIdentity(mode, team, ctx.multiRootRegistry.remoteManifestDigest)
+      const identity = subtreeIdentity(mode, team, ctx.multiRootRegistry.remoteManifestDigest, ctx.multiRootRegistry.remoteStatus.state)
       if (child !== undefined && mountedIdentity === identity) return
       const stale = child
       child = undefined
@@ -175,9 +175,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
   }
 
-  const subtreeIdentity = (mode: RemoteMode, team: TeamConfig | undefined, digest: string | undefined): string =>
+  // The remote plane state belongs to the key: a mount that early-returned
+  // while the plane was unready is retried when `ready` (or any state change)
+  // lands — otherwise the endpoint verifier stayed unregistered forever.
+  const subtreeIdentity = (mode: RemoteMode, team: TeamConfig | undefined, digest: string | undefined, remoteState: string): string =>
     JSON.stringify({
-      mode, digest,
+      mode, digest, remoteState,
       ...(team === undefined ? {} : {
         manifestPath: team.manifestPath, socketPath: team.socketPath,
         brokerUid: team.brokerUid, credentialRoot: team.credentialRoot,

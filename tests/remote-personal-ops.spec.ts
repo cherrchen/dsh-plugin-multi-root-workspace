@@ -80,6 +80,43 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     expect(JSON.parse(readFileSync(personalPath, 'utf8'))).toMatchObject({ revision: 0 })
   })
 
+  it('sshEnvironmentSave rejects a non-normalized workspace before persisting', async () => {
+    const { registry, personalPath } = world()
+    writeConfig(personalPath, CONFIG([]))
+    for (const workspace of ['/root/', '~/x', '/a//b', 'relative/path', '/a/./b']) {
+      const draft = {
+        environmentId: 'dev-box', platform: 'linux' as const,
+        endpoint: { hostname: 'build.internal', port: 22, user: 'builder' },
+        credential: { kind: 'ssh-config' as const, alias: 'devbox' },
+        workspace,
+      }
+      await expect(handlePersonalEndpoint(undefined as never as Context, registry, '/w',
+        { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, environment: draft, fingerprint: FP_OK }))
+        .rejects.toMatchObject({ code: 'workspace-invalid' })
+    }
+    expect(loadPersonalConfig(personalPath).environments).toEqual([])
+  })
+
+  it('the wire contract refuses an environmentId the store would reject (3–63 chars)', async () => {
+    const { parseSshCall } = await import('../src/remote/personal-contract.ts')
+    const draft = {
+      environmentId: 'ab', platform: 'linux',
+      endpoint: { hostname: 'build.internal', port: 22, user: 'builder' },
+      credential: { kind: 'ssh-config', alias: 'devbox' },
+      workspace: '/srv/build',
+    }
+    const save = (environmentId: string) => parseSshCall('sshEnvironmentSave', {
+      sessionId: 's', revision: 0, fingerprint: FP_OK,
+      environment: { ...draft, environmentId },
+    })
+    for (const id of ['a', 'ab', 'UPPER', 'has space', '-lead', 'x'.repeat(64)]) {
+      expect(save(id).ok, id).toBe(false)
+    }
+    for (const id of ['abc', 'dev-box', '0kay', 'x'.repeat(63)]) {
+      expect(save(id).ok, id).toBe(true)
+    }
+  })
+
   it('R4: an ssh-config save resolves the endpoint through ssh -G, not the draft', async () => {
     const { registry, personalPath } = world()
     writeConfig(personalPath, CONFIG([]))
@@ -218,7 +255,7 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     const exec: ExecFile = async (_file, args) => {
       const remote = String(args.at(-1))
       commands.push(remote)
-      if (remote === 'command -v node') return { stdout: '/usr/bin/node\n', stderr: '' }
+      if (remote === 'command -v node || true') return { stdout: '/usr/bin/node\n', stderr: '' }
       if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder\n', stderr: '' }
       if (remote.startsWith('sha256sum ')) return { stdout: `${hostHash}  helper.js\n`, stderr: '' }
       return { stdout: '', stderr: '' }
@@ -324,7 +361,7 @@ describe.skipIf(process.platform === 'win32')('operations argv/env and hash chec
     const exec: ExecFile = async (_file, args) => {
       const remote = String(args.at(-1))
       commands.push(remote)
-      if (remote === 'command -v node') return { stdout: '/usr/local/bin/node\n', stderr: '' }
+      if (remote === 'command -v node || true') return { stdout: '/usr/local/bin/node\n', stderr: '' }
       if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder', stderr: '' }
       if (remote.startsWith('sha256sum ')) return { stdout: `${hostHash}  helper.js\n`, stderr: '' }
       return { stdout: '', stderr: '' }
@@ -336,19 +373,75 @@ describe.skipIf(process.platform === 'win32')('operations argv/env and hash chec
 
     await expect(installHelper(async (_f, args) => {
       const remote = String(args.at(-1))
-      if (remote === 'command -v node') return { stdout: 'node\n', stderr: '' } // not absolute
+      if (remote === 'command -v node || true') return { stdout: 'node\n', stderr: '' } // not absolute
+      return { stdout: '', stderr: '' }
+    }, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper }))
+      .rejects.toMatchObject({ code: 'helper-node-missing' })
+
+    // A host with no node at all: `|| true` exits 0 with empty output, so the
+    // check — not a bare `Command failed:` — produces `helper-node-missing`.
+    await expect(installHelper(async (_f, args) => {
+      const remote = String(args.at(-1))
+      if (remote === 'command -v node || true') return { stdout: '', stderr: '' }
       return { stdout: '', stderr: '' }
     }, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper }))
       .rejects.toMatchObject({ code: 'helper-node-missing' })
 
     await expect(installHelper(async (_f, args) => {
       const remote = String(args.at(-1))
-      if (remote === 'command -v node') return { stdout: '/usr/bin/node\n', stderr: '' }
+      if (remote === 'command -v node || true') return { stdout: '/usr/bin/node\n', stderr: '' }
       if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder', stderr: '' }
       if (remote.startsWith('sha256sum ')) return { stdout: `${'0'.repeat(64)}  helper.js\n`, stderr: '' }
       return { stdout: '', stderr: '' }
     }, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper }))
       .rejects.toMatchObject({ code: 'helper-hash-mismatch' })
+  })
+
+  it('installHelper retries each second-scale probe once but never retries npm install', async () => {
+    const credentialRoot = join(tmp(), 'cred')
+    const hostHelper = join(tmp(), 'helper.js')
+    writeFileSync(hostHelper, 'HELPER-BYTES')
+    const { createHash } = await import('node:crypto')
+    const hostHash = createHash('sha256').update('HELPER-BYTES').digest('hex')
+    const attempts = new Map<string, number>()
+    const exec: ExecFile = async (_file, args) => {
+      const remote = String(args.at(-1))
+      attempts.set(remote, (attempts.get(remote) ?? 0) + 1)
+      // Every probe flaps once — the observed post-install link flap.
+      if (!remote.includes('npm install') && attempts.get(remote) === 1) {
+        throw new Error('ssh: connect to host build.internal port 22: Connection timed out')
+      }
+      if (remote === 'command -v node || true') return { stdout: '/usr/bin/node\n', stderr: '' }
+      if (remote === 'printf %s "$HOME"') return { stdout: '/home/builder', stderr: '' }
+      if (remote.startsWith('sha256sum ')) return { stdout: `${hostHash}  helper.js\n`, stderr: '' }
+      return { stdout: '', stderr: '' }
+    }
+    const result = await installHelper(exec, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper })
+    expect(result.nodePath).toBe('/usr/bin/node')
+    expect(attempts.get('command -v node || true')).toBe(2)
+    expect(attempts.get('printf %s "$HOME"')).toBe(2)
+    const hashCommand = [...attempts.keys()].find(command => command.startsWith('sha256sum '))!
+    expect(attempts.get(hashCommand)).toBe(2)
+    const npmCommand = [...attempts.keys()].find(command => command.includes('npm install'))!
+    expect(attempts.get(npmCommand)).toBe(1)
+
+    // A persistent probe failure still surfaces after the single retry.
+    let printfAttempts = 0
+    await expect(installHelper(async (_f, args) => {
+      const remote = String(args.at(-1))
+      if (remote === 'command -v node || true') return { stdout: '/usr/bin/node\n', stderr: '' }
+      if (remote === 'printf %s "$HOME"') { printfAttempts++; throw new Error('killed by timeout') }
+      return { stdout: '', stderr: '' }
+    }, SSH_CONFIG_ENV, credentialRoot, { sshVersion: '0.2.2-rc.2', hostHelperPath: hostHelper }))
+      .rejects.toThrowError(/killed by timeout/)
+    expect(printfAttempts).toBe(2)
+  })
+
+  it('defaultExec surfaces the exit status and stderr a bare Command failed hides', async () => {
+    const { defaultExec } = await import('../src/remote/personal/credentials.ts')
+    await expect(defaultExec('sh', ['-c', 'echo host key verification failed >&2; exit 255']))
+      .rejects.toThrowError(/exit 255.*host key verification failed/)
+    await expect(defaultExec('sh', ['-c', 'exit 1'])).rejects.toThrowError(/\(exit 1\)$/)
   })
 })
 
@@ -698,5 +791,80 @@ describe.skipIf(process.platform === 'win32')('the personal plane rechecks prote
     renameSync(aside, personalPath)
     await stack.registry.refreshRemotePersonal()
     expect(stack.registry.remoteStatus.state).toBe('ready')
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('the remote tools row remounts a subtree that landed unready', () => {
+  it('notifies remote listeners when the owner plane turns ready at acquisition', async () => {
+    const fixture = createFixtureWorkspace('remote-tools-ready')
+    const personalPath = join(fixture.base, 'remote-personal.json')
+    const credentialRoot = join(fixture.base, 'cred')
+    writeConfig(personalPath, { ...CONFIG(), environments: [{ ...SSH_CONFIG_ENV, helper: null }] })
+    // A prototype-level spy catches the notify the acquisition's openOwner
+    // emits — the transition used to land with no remote event at all.
+    const { default: RegistryClass } = await import('../src/registry.ts')
+    const notify = vi.spyOn(RegistryClass.prototype as never, 'notifyRemoteChange' as never)
+    const stack = await mountRegistryStack(join(fixture.base, 'store'), {
+      remoteEnvironments: { enabled: true, mode: 'personal', personalPath, credentialRoot },
+    }, { allowUserOwnedRemoteManifestForTesting: true })
+    try {
+      await vi.waitFor(() => expect(stack.registry.remoteStatus.state).toBe('ready'))
+      expect(notify).toHaveBeenCalled()
+    } finally {
+      await stack.dispose()
+      fixture.dispose()
+    }
+  })
+
+  it('a dead same-identity mount retries and registers the verifier on ready', async () => {
+    const { Context: CordisContext } = await import('@deepseek-ai/cordis')
+    const RemoteToolsRow = await import('../src/remote/tools.ts')
+    const { fakeManifest } = await import('./support/fake-remote.ts')
+    const ctx = new CordisContext()
+    const listeners = new Set<() => void>()
+    const setVerifier = vi.fn(() => () => {})
+    const registerTool = vi.fn(() => () => {})
+    const registry = {
+      remoteManifest: fakeManifest({ primary: '/w' }),
+      remoteManifestDigest: 'digest-1',
+      remoteCredentialRoot: undefined as string | undefined,
+      remoteStatus: { state: 'owner-without-remote-protocol' },
+      configureRemote: vi.fn(async () => undefined),
+      onRemoteChange: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+      setRemoteEndpointVerifier: setVerifier,
+    }
+    ctx.provide('multiRootCompat', { report: { verdict: 'supported', release: '0.2.2-rc.2' } } as never)
+    ctx.provide('multiRootProviders', {} as never)
+    ctx.provide('multiRootRegistry', registry)
+    ctx.provide('tools', { register: registerTool } as never)
+    ctx.provide('sandboxPolicy', {} as never)
+    ctx.provide('permissionPresets', {} as never)
+    ctx.provide('sandbox', {} as never)
+    ctx.provide('subprocess', {} as never)
+    ctx.provide('sessions', {} as never)
+    try {
+      await ctx.plugin(RemoteToolsRow as never, { enabled: true, mode: 'personal' })
+      await vi.waitFor(() => expect(registry.configureRemote).toHaveBeenCalled())
+      // The first mount lands while the plane is unready: the subtree exists,
+      // yet neither the verifier nor a tool registers.
+      await new Promise(resolve => setTimeout(resolve, 100))
+      expect(setVerifier).not.toHaveBeenCalled()
+      expect(registerTool).not.toHaveBeenCalled()
+
+      // Ready lands through a remote change with the SAME identity — the dead
+      // mount must be retried, not pinned by `mountedIdentity` forever.
+      registry.remoteStatus = { state: 'ready' }
+      for (const listener of listeners) listener()
+      await vi.waitFor(() => expect(setVerifier).toHaveBeenCalledTimes(1))
+      expect(registerTool).toHaveBeenCalledTimes(2)
+
+      // A later identical notification does not churn live tools.
+      for (const listener of listeners) listener()
+      await new Promise(resolve => setTimeout(resolve, 100))
+      expect(setVerifier).toHaveBeenCalledTimes(1)
+      expect(registerTool).toHaveBeenCalledTimes(2)
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 })

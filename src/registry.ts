@@ -2520,6 +2520,9 @@ export class MultiRootRegistry extends Service {
                 }
                 // The remote-1 channel shares the v1 epoch; it dies with it.
                 await this.remotePlane.connectFollower(this.medium, client.epoch!)
+                // 'ready' just landed: remote listeners (the gated tools
+                // subtree) re-evaluate a mount that early-returned unready.
+                this.notifyRemoteChange()
                 this.recovery.kick()
                 break
               } catch (error) { this.connectionFailure = String(error) /* Never open a follower domain. */ }
@@ -2611,6 +2614,9 @@ export class MultiRootRegistry extends Service {
       // `owner-without-remote-protocol`. Remote failures degrade only remote.
       await this.remotePlane.openOwner(this.authorityStorageContext, this.medium, epoch,
         (method, args) => this.dispatchRemote(method as RemoteMethod, args))
+      // 'ready' just landed: remote listeners (the gated tools subtree)
+      // re-evaluate a mount that early-returned while the plane was unready.
+      this.notifyRemoteChange()
     }
     // One synchronous commit: the domain/table/epoch/authority assignments,
     // the cache swap, the per-key publishes over the OLD ∪ NEW key union

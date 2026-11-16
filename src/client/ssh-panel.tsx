@@ -95,7 +95,7 @@ function SshCheckbox(props: CheckboxControlProps): ReactNode {
 }
 
 /** One labeled form field; the label stays visible after the value is typed. */
-function Field(props: { readonly label: string; readonly wide?: boolean; readonly children: ReactNode; readonly hint?: string }): ReactNode {
+function Field(props: { readonly label: string; readonly wide?: boolean; readonly children: ReactNode; readonly hint?: string | undefined }): ReactNode {
   return <div className={'mrfw-sshField' + (props.wide === true ? ' mrfw-sshFieldWide' : '')}>
     <span className="mrfw-sshFieldLabel">{props.label}</span>
     {props.children}
@@ -134,6 +134,9 @@ const blankEditor = (): EditorDraft => ({
   environmentId: '', displayName: '', hostname: '', port: '22', user: '', platform: 'linux',
   credentialSource: 'managed', alias: '', credentialId: '', workspace: '', allowExec: false, allowTransfer: true,
 })
+
+/** The persisted environmentId rule — checked here so save never reaches the wire with an id the store would refuse. */
+const ENVIRONMENT_ID = /^[a-z0-9][a-z0-9-]{2,62}$/
 
 const editorOf = (environment: SshEnvironmentView): EditorDraft => ({
   existing: environment,
@@ -290,7 +293,7 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
   }
   const canSave = !busy
     && props.fingerprint !== undefined
-    && draft.environmentId.trim() !== ''
+    && ENVIRONMENT_ID.test(draft.environmentId.trim())
     && draft.hostname.trim() !== ''
     && draft.user.trim() !== ''
     && draft.workspace.trim() !== ''
@@ -305,7 +308,8 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
     <section className="mrfw-sshStep">
       <span className="mrfw-sshStepTitle">{t('ssh.add.stepTarget')}</span>
       <div className="mrfw-sshGrid">
-        <Field label={t('ssh.field.environmentId')}>
+        <Field label={t('ssh.field.environmentId')}
+          hint={draft.existing !== undefined || draft.environmentId.trim() === '' || ENVIRONMENT_ID.test(draft.environmentId.trim()) ? undefined : t('ssh.field.environmentIdHint')}>
           <Input className="mrfw-sshInput" aria-label={t('ssh.field.environmentId')} placeholder={t('ssh.field.environmentId')}
             value={draft.environmentId} disabled={draft.existing !== undefined}
             onChange={event => update({ environmentId: event.currentTarget.value })} />
