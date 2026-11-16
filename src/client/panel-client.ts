@@ -79,10 +79,22 @@ export function errorKeyOf(code: string): Key {
  * @param code - the failure code.
  * @returns whether to render `error.message` after the localized key.
  */
+/** Codes whose host message names the actual cause the fixed copy cannot. */
+const DETAIL_CODES = new Set([
+  // `verifiedAddTarget` alone throws it for three unrelated failures (no
+  // verifier, incomplete confinement, probe timeout) — the message splits them.
+  'endpoint-unverifiable',
+  // The message says which ssh -G/known_hosts check failed and names the alias.
+  'ssh-config-not-linked',
+  'host-identity-unverifiable',
+  'invalid-manifest',
+  'workspace-invalid',
+])
+
 export function errorHasDetail(code: string): boolean {
   // A code with no exact key (transport, suffixed, or unknown) means the
   // localized text cannot name the failure; the host message must show.
-  return code === 'unavailable' || code.startsWith('panel/') || !(`error.${code}` in zh)
+  return code === 'unavailable' || code.startsWith('panel/') || DETAIL_CODES.has(code) || !(`error.${code}` in zh)
 }
 
 /** The panel's callable face, injected into its component. */

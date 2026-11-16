@@ -60,3 +60,25 @@
 ### 模式/team 设置在旧版本上保存报错
 
 旧构建里 `RemoteCustodyModeControl` 把 `form.mutate` 摘出来脱离接收者调用，而上游 `ConfigFormController.mutate` 依赖 `this`——写入在进入 RPC 前就抛错，UI 只显示保存失败；同时 `Config.team` 未标记 volatile，四个 broker 字段写入被 settings 服务以 `not volatile` 拒绝。重试对旧构建无意义。已修复构建把调用改回带接收者的 `.call(form, ...)`，并将 `team` 整对象标记 volatile（兼容层同时解包包装值）。升级后需重载客户端（插件管理页禁用/启用或重启 Host）让新 bundle 生效；若错误文本仍不渲染为红色，再检查注入的样式元素与计算样式 token（`--dsw-alias-state-error-primary`），不要预设 token 错误。
+
+### 登记瞬间报「无法验证该远端端点的身份。」（`endpoint-unverifiable`）
+
+秒报、不经网络时，`verifiedAddTarget` 只在一个地方抛出该码：**校验器没有注册**。`SshEndpointVerifier` 由 `multi-root-remote-tools` 行的受门禁子树挂载，挂载效果要求 `remoteStatus.state === 'ready'`；开关在启动即开（`cordis.patch.yml` `enabled: true`）时，首次 sync 会赶在 authority 获取完成之前运行——挂载早退，但 `mountedIdentity` 已记下同一 `(mode, team, digest)` 键，之后同键 sync 一律早退，校验器永久缺席。且 `openOwner`/`connectFollower` 把控制面推入 `ready` 时不发 `onRemoteChange`，没有任何事件能把它救回来；只有碰巧改了清单摘要才重挂。
+
+修复（双半部）：`tools.ts` 用 `toolsLive` 记录子树是否真的走到 `mountRemoteTools`，早退挂载不占重挂载键，下一次 sync 按现状重挂；`registry.ts` 在 `openOwner`/`connectFollower` 建立 `ready` 的两处补发 `notifyRemoteChange()`，ready 翻转即触发重挂。回归：`tests/remote-personal-ops.spec.ts` 的 "a dead same-identity mount retries"（行级）与 "notifies remote listeners when the owner plane turns ready"（栈级）。
+
+校验器挂载后还有第二层瞬发失败：`SshEnvironmentManager.open()` 的 `verifyHostIdentity` 用**裸 `ssh -G <别名>`**（不带 `-F`）解析托管别名，要求托管 `ssh_config` 已 Include 进 `~/.ssh/config`——这是设计：remote_copy/remote_bash 执行时要求用户自己的 `ssh` 能解析别名。未链接时报 `ssh-config-not-linked`，面板文案会引导先点「链接到 ~/.ssh/config」。注意 `installHelper`/`testConnection` 走 `-F` 不需要 Include，所以"装得上 helper、登记不过"是正常的先后顺序。
+
+另：`endpoint-unverifiable`、`ssh-config-not-linked`、`host-identity-unverifiable`、`invalid-manifest`、`workspace-invalid` 的 Host message 现在都透传到面板（`errorHasDetail`），同一文案背后的三种原因（校验器缺失 / 只读 confine 不满 / 探针超时）不再被压平。
+
+### 报错只剩 `Command failed: ssh ...`（括号内无原因）
+
+`execFile` 非零退出时 error.message 只有命令行，真实原因（`Permission denied`、`Connection timed out`、`Host key verification failed`）在 `error.stderr` 上被丢弃；`defaultExec` 现在把退出码/信号与 stderr（截断）附进报错。
+
+其中 `command -v node` 这条还有个可达性缺陷：远端缺 node 时它退出 1，`execFile` 直接 reject，带文案的 `helper-node-missing` 永远不可达（`testConnection` 的探针有 `|| true`，`installHelper` 漏了）。已对齐为 `command -v node || true`：空输出落到 `checkRemotePath`，正常抛 `helper-node-missing`。
+
+同一函数里 `printf %s "$HOME"` / `sha256sum` 这类秒级探测在小规格远端 `npm install` 刚结束的颠簸窗口内会因连接瞬断失败；三者各自动重试一次（`npm install` 本身永不重试），持续性失败仍以原样报错。
+
+### 安装 helper 走到最后一步报「个人配置无效，未写入。」
+
+`workspace` 只在 `helper` transport 下才进 `connection` 校验；sftp transport 保存时 `workspace` 原样落盘从不校验。于是 `/root/`（尾斜杠）、`~/x`、`a//b` 这类非规范化值会在 helper 安装成功后写入 `helper` 字段时被 `toDeploymentManifest` 拒绝，裹成 `personal-config-invalid`。`sshEnvironmentSave` 现在在写入边界先跑 `checkRemotePath`，坏值以 `workspace-invalid` 当场拒绝（面板会显示被拒的具体路径）。

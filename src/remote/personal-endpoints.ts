@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { MultiRootRegistry } from '../registry.ts'
 import { RemoteAdmissionError } from './contract.ts'
+import { checkRemotePath } from './manifest.ts'
 import type { SshCall, SshStateView } from './personal-contract.ts'
 import { loadPersonalConfig, savePersonalConfig, type PersonalConfig, type PersonalEnvironment } from './personal/config.ts'
 import { CredentialStore, defaultExec, type ExecFile } from './personal/credentials.ts'
@@ -166,6 +167,14 @@ async function runPersonalEndpoint(
     }
     case 'sshEnvironmentSave': {
       const draft = { ...call.environment, endpoint: { ...call.environment.endpoint } }
+      // `workspace` enters `connection` — and is therefore checked — only
+      // under the helper transport; under sftp it used to persist unchecked
+      // and explode inside savePersonalConfig on the NEXT helper install.
+      try {
+        checkRemotePath(draft.workspace)
+      } catch {
+        throw new RemoteAdmissionError('workspace-invalid', `the remote workspace is not a normalized absolute POSIX path: ${JSON.stringify(draft.workspace)}`)
+      }
       const preservedHelper = (environments: readonly PersonalEnvironment[]): PersonalEnvironment['helper'] => {
         const previous = environments.find(environment => environment.environmentId === draft.environmentId)
         if (previous === undefined) return null

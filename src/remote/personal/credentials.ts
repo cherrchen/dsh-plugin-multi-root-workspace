@@ -167,8 +167,17 @@ export const defaultExec: ExecFile = (file, args, options) => new Promise((resol
     timeout: options?.timeoutMs ?? 30_000,
     maxBuffer: 16 * 1024 * 1024,
   }, (error, stdout, stderr) => {
-    if (error !== null) reject(error instanceof Error ? error : new Error(String(error)))
-    else resolve({ stdout, stderr })
+    if (error !== null) {
+      const cause = error instanceof Error ? error : new Error(String(error))
+      // execFile reports `Command failed: <argv>` alone; the actionable part
+      // lives in exit status and stderr (Permission denied, timed out, ...).
+      const meta = cause as Error & { code?: unknown; signal?: unknown; killed?: unknown }
+      const status = typeof meta.code === 'number' ? ` (exit ${meta.code})`
+        : typeof meta.signal === 'string' ? ` (${meta.killed === true ? 'killed by ' : ''}signal ${meta.signal})`
+        : ''
+      const detail = stderr.trim() === '' ? '' : ` — ${stderr.trim().slice(0, 400)}`
+      reject(new Error(`${cause.message}${status}${detail}`, { cause }))
+    } else resolve({ stdout, stderr })
   })
   child.stdin?.on('error', reject)
   try {

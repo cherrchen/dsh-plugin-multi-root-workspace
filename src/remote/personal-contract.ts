@@ -31,7 +31,10 @@ export const SSH_ENDPOINTS = [
 export type SshEndpoint = (typeof SSH_ENDPOINTS)[number]
 
 const sessionId = z.string().min(1)
-const environmentId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/)
+// Same rule the personal config, the deployment manifest, and the broker
+// protocol persist: 3–63 chars, lowercase slug — the wire must not accept
+// an id the store would refuse.
+const environmentId = z.string().regex(/^[a-z0-9][a-z0-9-]{2,62}$/)
 const label = z.string().min(1).max(128)
 const revision = z.number().int().min(0)
 

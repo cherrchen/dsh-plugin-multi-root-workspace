@@ -126,6 +126,20 @@ export interface HelperInstallResult {
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`
 
 /**
+ * One bounded retry for the second-scale remote probes: the managed link
+ * commonly flaps right after `npm install` churns a small remote host, and a
+ * bare `printf` failure was observed hiding exactly that. `npm install`
+ * itself is NEVER retried — a real package failure must surface at once.
+ */
+const probe = async (exec: ExecFile, file: string, args: readonly string[], options?: Parameters<ExecFile>[2]): ReturnType<ExecFile> => {
+  try {
+    return await exec(file, args, options)
+  } catch {
+    return await exec(file, args, options)
+  }
+}
+
+/**
  * npm-install the host's exact dsh-ssh version on the remote and verify the
  * remote helper.js hash against the HOST's resolved copy. The recorded
  * nodePath is always an absolute normalized POSIX path — resolved with the
@@ -142,7 +156,9 @@ export async function installHelper(
   const args = sshArgs(environment, credentialRoot, ['-o', 'BatchMode=yes'])
   let nodePath = options.nodePath
   if (nodePath === undefined) {
-    const { stdout } = await exec('ssh', [...args, 'command -v node'], { timeoutMs: 15_000 })
+    // `|| true`: a missing node must reach checkRemotePath so the caller sees
+    // `helper-node-missing`, not a bare `Command failed:` from execFile.
+    const { stdout } = await probe(exec, 'ssh', [...args, 'command -v node || true'], { timeoutMs: 15_000 })
     nodePath = stdout.split('\n')[0]!.trim()
   }
   try {
@@ -152,14 +168,14 @@ export async function installHelper(
   }
   const install = `mkdir -p ~/${shellQuote(dir)} && npm install --prefix ~/${shellQuote(dir)} --no-audit --no-fund --omit=dev ${shellQuote(`@deepseek-ai/dsh-ssh@${version}`)}`
   await exec('ssh', [...args, install], { timeoutMs: 300_000 })
-  const { stdout: home } = await exec('ssh', [...args, 'printf %s "$HOME"'], { timeoutMs: 15_000 })
+  const { stdout: home } = await probe(exec, 'ssh', [...args, 'printf %s "$HOME"'], { timeoutMs: 15_000 })
   const helperAbs = `${home.trim()}/${dir}/node_modules/@deepseek-ai/dsh-ssh/lib/helper.js`
   try {
     checkRemotePath(helperAbs)
   } catch {
     throw new RemoteOperationError('helper-install-failed', 'the remote $HOME did not resolve to an absolute path')
   }
-  const { stdout } = await exec('ssh', [...args, `sha256sum ${shellQuote(helperAbs)} 2>/dev/null || shasum -a 256 ${shellQuote(helperAbs)}`], { timeoutMs: 30_000 })
+  const { stdout } = await probe(exec, 'ssh', [...args, `sha256sum ${shellQuote(helperAbs)} 2>/dev/null || shasum -a 256 ${shellQuote(helperAbs)}`], { timeoutMs: 30_000 })
   const remoteHash = /^[0-9a-f]{64}/.exec(stdout.trim())?.[0]
   if (remoteHash === undefined) throw new RemoteOperationError('helper-install-failed', 'the remote helper hash could not be read')
   const hostHash = createHash('sha256').update(readFileSync(options.hostHelperPath)).digest('hex')

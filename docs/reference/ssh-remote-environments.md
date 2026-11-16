@@ -56,13 +56,13 @@ SFTP 使用独立的 SSH 子进程，同样在命令行强制 `StrictHostKeyChec
 
 ## Helper 安装与密码访问密钥引导
 
-- Helper：远端执行 `npm install --prefix ~/.dsh-helper/<ver> @deepseek-ai/dsh-ssh@<Host 同版>`，再比较远端 `helper.js` 的 SHA-256 与 Host 本机文件；一致才写入 `helper` 字段（`protocol` 取上游 `SSH_PROTOCOL_VERSION`）。
+- Helper：远端执行 `npm install --prefix ~/.dsh-helper/<ver> @deepseek-ai/dsh-ssh@<Host 同版>`，再比较远端 `helper.js` 的 SHA-256 与 Host 本机文件；一致才写入 `helper` 字段（`protocol` 取上游 `SSH_PROTOCOL_VERSION`）。远端 node 探测容忍缺失（`command -v node || true`），缺 node 或路径非绝对时报 `helper-node-missing`；node/`$HOME`/sha256 三个秒级探测在连接瞬断时自动重试一次，`npm install` 不重试；外部命令失败的报错携带退出码/信号与 stderr（截断），不再只剩裸 `Command failed:`。
 - 编辑连接：派生的 `accessKeyId` 由 Host 从已保存记录保留，前端无需回传；仅 environmentId、hostname/port/user、credentialId 与已确认主机指纹均未变化时继承。改变身份后必须重新安装访问密钥，不能通过保存请求移植旧密钥。
 - 密码引导：为该环境生成访问密钥后，以 `SSH_ASKPASS`（凭据根内 0700 脚本，只读取 `DSH_SSH_SECRET_FILE`）+ `SSH_ASKPASS_REQUIRE=force` + `BatchMode=no` 用密码登录一次，把公钥追加到远端 `authorized_keys`；此后连接一律走访问密钥。
 
 ## 模式切换
 
-切换 `mode` 走 `configureRemote`：远程域与 `remote-1` 监听按旧事实拆除，新模式下重读清单来源（personal → `personalPath`；team/hardened → `manifestPath` 覆盖或行配置），再按当前 authority 重开 owner/重连 follower。摘要变化后既有授权一律 withheld，需重新登记。工具子树的重挂载键是 `mode` + 全部生效 team broker 事实（manifestPath/socketPath/brokerUid/credentialRoot）+ 清单摘要——即使摘要不变，模式或 broker 事实一变也会拆除旧子树、重新证明并重挂（hardened 的 profile guard 不会带进 team）。
+切换 `mode` 走 `configureRemote`：远程域与 `remote-1` 监听按旧事实拆除，新模式下重读清单来源（personal → `personalPath`；team/hardened → `manifestPath` 覆盖或行配置），再按当前 authority 重开 owner/重连 follower。摘要变化后既有授权一律 withheld，需重新登记。工具子树的重挂载键是 `mode` + 全部生效 team broker 事实（manifestPath/socketPath/brokerUid/credentialRoot）+ 清单摘要——即使摘要不变，模式或 broker 事实一变也会拆除旧子树、重新证明并重挂（hardened 的 profile guard 不会带进 team）。因控制面未 `ready`（或 broker 不可用）而早退的挂载不算挂载成功：不占用重挂载键，`ready` 翻转或下一次远端变更时按现状重挂，登记用的端点校验器不会永久缺席。
 
 设置写入走 Host 的 `settings` 服务；旧版 `configure` 路径没有 `setSource` 推送，行必须通过 `settings.describe()` 读取实时值，否则只有重启后 loader 重新组合才生效（本页“实时开关”回归覆盖）。
 
@@ -89,7 +89,7 @@ GUI 入口有两处：
 
 四个 Tab：
 
-1. **添加连接**：personal 档位显示分步表单——连接目标（环境 ID、显示名、hostname、port、user、平台）→ 凭据（ssh-config 别名或托管凭据；无托管凭据时可直接跳到 SSH Key Tab）→ 远端目录与能力（workspace、exec/transfer；exec 只在已装 helper 且目标身份未改时可勾选，禁用态附引导文案）→ 主机密钥（“扫描主机钥”→ 指纹单选）。保存沿用 `sshEnvironmentSave` 的 revision、`hostKeyToken` + `fingerprint` 语义；保存成功后草稿与扫描状态清空，连接出现在“已有连接”，但远端工作区仍需在 Workspace Folders 列表中显式登记。team/hardened 显示部署清单/broker 引导，不渲染个人表单，并提供“打开模式设置”入口；控制面未 `ready` 时显示不可用原因。
+1. **添加连接**：personal 档位显示分步表单——连接目标（环境 ID、显示名、hostname、port、user、平台）→ 凭据（ssh-config 别名或托管凭据；无托管凭据时可直接跳到 SSH Key Tab）→ 远端目录与能力（workspace、exec/transfer；exec 只在已装 helper 且目标身份未改时可勾选，禁用态附引导文案）→ 主机密钥（“扫描主机钥”→ 指纹单选）。保存沿用 `sshEnvironmentSave` 的 revision、`hostKeyToken` + `fingerprint` 语义；环境 ID 与 workspace 在保存时即校验（3–63 字符小写 slug `^[a-z0-9][a-z0-9-]{2,62}$`，与持久化/manifest/broker 合约一致；规范化 POSIX 绝对路径），非法 workspace 拒绝 `workspace-invalid`、非法 ID 在 wire 合约即拒绝，不再等到安装 helper 才暴露；保存成功后草稿与扫描状态清空，连接出现在“已有连接”，但远端工作区仍需在 Workspace Folders 列表中显式登记。team/hardened 显示部署清单/broker 引导，不渲染个人表单，并提供“打开模式设置”入口；控制面未 `ready` 时显示不可用原因。
 2. **已有连接**：personal 显示链接横幅（managed 环境存在且 `linked === false` 时，按钮调 `sshConfigLink`）、已保存环境行（名称/ID、实际平台名、helper、`user@host:port`、workspace、凭据来源、访问密钥）、测试连接/安装 helper/安装访问密钥/编辑/行内删除；编辑复用添加表单。其下是“本项目绑定”：行显示环境、rootId、远端路径、动作与传输，本地传输对端恰为 `primary` 加各可用根的 `aliasId`。team/hardened 显示部署清单中的端点只读列表与登记状态。
 3. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管，GUI 不读取、不创建。
 4. **模式设置**：复用 `src/client/remote-custody.tsx` 的三档单选、team 四个 broker 字段与降级风险确认，写入同一个 `multi-root-remote-tools` form 与 CAS revision，不另建写入路径；同时说明档位如何决定“添加连接”的引导方式（personal 图形化表单、team 部署清单 + broker、hardened 部署 profile + 全量证明）。档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源）。
