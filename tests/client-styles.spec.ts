@@ -178,6 +178,108 @@ describe('the open-in-app takeover', () => {
   })
 })
 
+describe('the sidebar footer entry rules', () => {
+  /** The sheet with comments stripped: every match below is a rule. */
+  const CSS = STYLES.replace(/\/\*[\s\S]*?\*\//g, '')
+
+  /** One rule's declarations, whitespace-normalized, for recipe equality. */
+  const declarations = (selector: string): string => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const rule = CSS.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))
+    return rule?.[1]?.replace(/\s+/g, ' ').trim() ?? ''
+  }
+
+  it('overhangs the sidebar column like the host row wrapper on both generations', () => {
+    // The host's .triggerRow overhangs 2px per side on the 19 legacy-geometry
+    // releases and is exactly column-wide on the 5 token-geometry releases.
+    // One declaration carries both: an absent --dsh-sidebar-paint-inset falls
+    // back to the legacy 0, so the min() terms keep the old +4px / -2px.
+    const row = declarations('.mrfw-triggerRow')
+    expect(row).toContain('position: relative')
+    expect(row).toContain('flex: none')
+    expect(row).toContain('width: calc(100% + 4px - min(4px, 2 * var(--dsh-sidebar-paint-inset, 0px)))')
+    expect(row).toContain('margin: 4px calc(-2px + min(2px, var(--dsh-sidebar-paint-inset, 0px)))')
+  })
+
+  it('reproduces the two host button recipes through tokens with legacy fallbacks', () => {
+    const trigger = declarations('.mrfw-trigger')
+    // Legacy hosts define none of the --dsh-sidebar-* tokens: the fallbacks
+    // resolve to the old 8px padding / 8px gap / 0 border recipe, and the
+    // right padding keeps the old asymmetric 10px via max(0px, 2px - 0).
+    // Token hosts get 9px content inset, 3px transparent border, 6px gap.
+    expect(trigger).toContain('gap: var(--dsh-sidebar-label-gap, 8px)')
+    expect(trigger).toContain(
+      'padding-inline: calc(var(--dsh-sidebar-row-padding, 8px) - var(--dsh-sidebar-paint-inset, 0px)) '
+      + 'calc(var(--dsh-sidebar-row-padding, 8px) - var(--dsh-sidebar-paint-inset, 0px) + max(0px, 2px - var(--dsh-sidebar-paint-inset, 0px)))',
+    )
+    expect(trigger).toContain('border-inline: var(--dsh-sidebar-paint-inset, 0px) solid transparent')
+    expect(trigger).toContain('border-radius: var(--dsw-radius-md, 12px)')
+    expect(trigger).toContain('background-clip: padding-box')
+    // Unchanged from the M3 recipe: height, type scale, transition.
+    expect(trigger).toContain('height: 42px')
+    expect(trigger).toContain('font-size: 14px')
+    expect(trigger).toContain('line-height: 22px')
+    expect(trigger).toContain('background: transparent')
+    expect(STYLES).toMatch(/\.mrfw-trigger:hover\s*\{[^}]*background:\s*var\(--dsw-alias-interactive-bg-hover\)/s)
+  })
+
+  it('rounds the rail like the 22 releases after the 0.1.6-alpha.2 boundary', () => {
+    const rail = declarations('.mrfw-triggerRail')
+    // Rail rounding is its own boundary, earlier than the row geometry's: the
+    // host has drawn 12px corners since 0.1.6-alpha.2 and only the two oldest
+    // supported releases drew a circle (a documented deviation).
+    expect(rail).toContain('border-radius: var(--dsw-radius-md, 12px)')
+    expect(rail).toContain('border-inline: 0')
+    expect(rail).toContain('background-clip: border-box')
+    expect(rail).toContain('width: 36px')
+    expect(rail).toContain('height: 36px')
+    expect(rail).not.toContain('border-radius: 50%')
+  })
+
+  it('keeps the rail row a 36px seat inside the column', () => {
+    const railRow = declarations('.mrfw-triggerRow.mrfw-railRow')
+    expect(railRow).toContain('width: 36px')
+    expect(railRow).toContain('margin: 8px 0 10px')
+  })
+
+  it('turns the footer slot anchor into a column while this row is mounted', () => {
+    // The slot anchor is the host renderer's <div data-slot ... style="display:
+    // contents">; an inline style can only be overridden by !important. The
+    // :has() scope keeps the rule inert when this plugin is not mounted, and
+    // one occupant lays out exactly as display:contents did.
+    const anchor = declarations("[data-slot='sidebar.footer.action']:has(.mrfw-triggerRow)")
+    expect(anchor).toContain('display: flex !important')
+    expect(anchor).toContain('flex-direction: column')
+    expect(anchor).toContain('width: 100%')
+    expect(anchor).toContain('min-width: 0')
+  })
+
+  it('keeps every footer color on host tokens', () => {
+    // The footer block runs from the row wrapper to the next rule family.
+    const footer = CSS.slice(CSS.indexOf('.mrfw-triggerRow'), CSS.indexOf('.mrfw-heroEntrySeat'))
+    expect(footer.trim()).not.toBe('')
+    expect(footer).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/)
+    const rules = [...footer.matchAll(/(?:^|[;{])\s*([a-z-]+)\s*:\s*([^;}]+)/g)]
+    for (const rule of rules) {
+      const property = rule[1]
+      const value = rule[2]?.trim() ?? ''
+      if (property === undefined) continue
+      if (property === 'color' || property === 'background' || property === 'background-color') {
+        expect(value).toMatch(/^(?:var\(--dsw-[^)]*\)|transparent)$/)
+      }
+      if (property === 'border-radius') expect(value).toMatch(/^var\(--dsw-/)
+    }
+  })
+
+  it('keeps the hover fill out of a (hover: hover) media query', () => {
+    // Deliberate trade-off: 19 of 24 releases have no media wrapper, so this
+    // sheet keeps the unwrapped form; the 5 token-geometry releases differ
+    // only on devices without hover capability.
+    expect(CSS).toContain('.mrfw-trigger:hover')
+    expect(CSS.indexOf('.mrfw-trigger:hover')).toBeLessThan(CSS.indexOf('@media'))
+  })
+})
+
 describe('the New Session hero entry rules', () => {
   it('mirrors the adjacent selectors’ geometry, minus the chevron', () => {
     expect(STYLES).toMatch(/\.mrfw-heroEntry\s*\{[^}]*min-height:\s*28px/s)
