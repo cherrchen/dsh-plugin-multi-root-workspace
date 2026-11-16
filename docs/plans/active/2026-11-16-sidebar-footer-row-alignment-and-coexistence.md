@@ -2,7 +2,7 @@
 
 > 状态：**实施完成（2026-11-16），待验收发版**。[ADR-0044](../../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)
 > 已 Accepted；分支 `fix/sidebar-buttom-style`；实现提交 `b1bd1d8`。目标：随下一个版本发布（版本号待发布准备
-> 确定）。本地门禁与一次性 Chromium 复刻证据已回填 §Progress；真实 GUI 目检未执行（见 §Progress P5）。
+> 确定）。本地门禁、一次性 Chromium 复刻与隔离环境的真实 GUI 目检均已回填 §Progress。
 
 ## Goal
 
@@ -330,7 +330,7 @@ pnpm docs:check           # 文档结构、链接与索引
 | P2 共存规则 | 完成（2026-11-16） | 同一提交：§D3 纵向列规则与注释；复刻单 occupant 与 `display: contents` 逐像素相同（icon 20 / label 42 / 按钮 8..280 宽 272），多 occupant 两行各 8..280 宽 272、无溢出（改动前本行被推到 278..554）。rail 下两行 x 均 10。 |
 | P3 测试 | 完成（2026-11-16） | 同一提交：`client-styles.spec.ts` 新增 6 项、`client-panel.spec.tsx` 新增 2 项；实现前 7 项红、实现后 focused 125 项全绿。全量 vitest 见 §Evidence（1848 通过；17 项为既有 registry/lease 环境失败，基线同样失败）。 |
 | P4 文档与兼容笔记 | 完成（2026-11-16） | ADR-0006 Status 修订；README 中英、`docs/guide` 中英、requirements、architecture 更新；compat note 中英新增 §21 三条 quiet trap；`pnpm docs:check` exit 0。 |
-| P5 验收与发版准备 | 部分完成（2026-11-16） | 本地门禁（typecheck / lint / build / compat:check / docs:check / focused test）全绿，证据见 §Evidence；**真实 GUI 目检未执行**：本会话无交互显示/截图能力，按 §Validation 的允许方式以一次性 Chromium 复刻（生产样式表 + 逐字宿主 CSS）代替并已量化全部验收项。PR、CI run 与发版准备未做。 |
+| P5 验收与发版准备 | 部分完成（2026-11-16） | 本地门禁（typecheck / lint / build / compat:check / docs:check / focused test）全绿，证据见 §Evidence。**真实 GUI 目检已完成**：隔离 scratch `$DSH_HOME`（临时目录）+ 本仓库构建产物 `dsh plugin add` 进 `web` profile，`dsh web`（host `0.2.2-rc.3`）由 headless Chromium 经 CDP 截图并读取真实 DOM——宽形态本行 icon/label 20/42 与下方宿主行 20/42 一致、rail 两按钮均 36×36 @ x=9.5 且圆角 12px、锚点计算样式 `display:flex/flex-direction:column`、同槽两行各占 264px 整行（第二行是克隆的合成 occupant；官方 cordis occupant 在空 profile 按设计渲染 null）。PR、CI run 与发版准备未做。 |
 
 ### Review 修正（2026-11-16，外部技术评审）
 
@@ -365,7 +365,7 @@ token 定义。
 - **单 occupant 等价**：把 §D3 规则从同一夹具的样式表中移除后，icon 20 / label 42 / 按钮 8..280 宽 272 与含规则时完全一致 —— 纵向列不改变单占用布局。
 - **多 occupant**：改动前，cordis 样式的整行 occupant 占 8..280 后本行被推到 **278..554（icon 286 / label 310）**，整行落在 288px 列右界之外；改动后 cordis 行与本行各占 **8..280、宽 272**，本行 icon / label 仍 20 / 42，参考行顺延到 y = 110，`footerActions` 的 `scrollWidth = clientWidth = 272`（无溢出）。
 - **rail 圆角命中**（折叠 56px，`elementFromPoint` 相对按钮左上角）：本行与宿主参考 rail 按钮均 10..46（36×36），(3,3) / (4,4) 均命中按钮（Chromium 按 12px 圆角命中）；最老 2 个版本的夹具（宿主 `.trigger.rail { border-radius: 50% }`）在 (3,3) / (4,4) 均**不**命中，本行仍命中 → 已记录的 12px vs 50% 偏差。rail 多 occupant：官方 cordis 36×36 与本行纵向排列（y = 18 / 62，x 均 10）。
-- **GUI 截图**：未采集（本会话无交互显示/截图能力；计划 §Validation 允许以复刻代替，全部验收数值已量化）。
+- **真实 GUI（隔离环境，2026-11-16）**：scratch `$DSH_HOME` 下 `dsh plugin add` 本仓库构建产物进 `web` profile，`dsh web`（`0.2.2-rc.3`）在 headless Chromium 中打开（一次性 CDP 截图，非仓库依赖）。真实 DOM 测量：footer slot 锚点内联 `display: contents` 被计算为 `display: flex; flex-direction: column`；本行 icon/label 左缘 **20 / 42**，同一列的宿主设置行（未登录账号 launcher）icon/label 也 **20 / 42**（两行 wrapper 均 8..272、宽 264）；按钮计算样式 `padding-inline 9px`、`gap 6px`、`border-inline 3px`、`border-radius 12px`、`background-clip padding-box`；rail（折叠 56px）本行 36×36 @ x=9.5、`border-radius 12px`、`border-inline 0`，与宿主 rail 按钮同 x 同圆角。同槽第二行演示：锚点内两行各 8..272、宽 264、高 42，icon/label 均 20/42、无溢出（该行为克隆的合成 occupant，仅目视；官方 cordis occupant 在空 profile 渲染 null，真实多占用语义由单元测试与上面的复刻覆盖）。截图与临时 harness 均在 gitignore 的临时目录，未入库。
 - **门禁输出**：
   - `pnpm typecheck`：exit 0（host + client 双端 + auto-review 类型拷贝）。
   - `pnpm lint`：exit 0，`Found 0 warnings and 0 errors`（346 files / 62 rules）。
