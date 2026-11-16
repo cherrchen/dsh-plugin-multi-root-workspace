@@ -11,6 +11,7 @@
  */
 import { useSyncExternalStore, type ReactElement } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
@@ -122,6 +123,10 @@ interface MountOptions {
   readonly canOpen?: ((address: string) => boolean) | undefined
   readonly useCanOpen?: ((selector: (version: number) => number) => number) | undefined
   readonly nativeTree?: NativeTreeRenderer | undefined
+  /** The element the tree renders into — a takeover pane in the focus tests. */
+  readonly container?: HTMLElement | undefined
+  /** Render the tree through a portal into this element, leaving its siblings untracked. */
+  readonly portalInto?: HTMLElement | undefined
 }
 
 /** Mount the fork over a real store and a stub remote. */
@@ -185,11 +190,18 @@ function mount(
       {...(options.nativeTree === undefined ? {} : { nativeTree: options.nativeTree })}
     />
   )
-  render(tree as ReactElement)
+  const mounted = options.portalInto === undefined ? tree : createPortal(tree, options.portalInto)
+  render(mounted as ReactElement, options.container === undefined ? undefined : { container: options.container })
   return { calls, watches, onOpen, face, controller, snapshot: () => instance.getSnapshot() }
 }
 
-afterEach(cleanup)
+/** The page fixtures the focus tests appended; removed after each case. */
+const pages: HTMLElement[] = []
+
+afterEach(() => {
+  cleanup()
+  for (const page of pages.splice(0)) page.remove()
+})
 
 describe('the forked Files tree', () => {
   it('watches, then lists the selected root by absolute path — directories first', async () => {
@@ -423,3 +435,63 @@ describe('the forked tree host-parity inputs (row menus, viewer registry)', () =
   })
 })
 
+
+describe('the forked tree focus handoff', () => {
+  /** A page fixture with a focusable hidden native body and a takeover pane. */
+  function pageFixture(): { page: HTMLElement; nativeBody: HTMLElement; pane: HTMLElement } {
+    const page = document.createElement('div')
+    page.setAttribute('data-files-page', '')
+    const nativeBody = document.createElement('div')
+    nativeBody.setAttribute('data-files-body', '')
+    nativeBody.tabIndex = -1
+    page.append(nativeBody)
+    const pane = document.createElement('div')
+    pane.setAttribute('data-mrfw-files-pane', '')
+    page.append(pane)
+    document.body.append(page)
+    pages.push(page)
+    return { page, nativeBody, pane }
+  }
+
+  it('takes the keyboard from the hidden native body through the page wrapper', async () => {
+    const { nativeBody, pane } = pageFixture()
+    nativeBody.focus()
+    expect(document.activeElement).toBe(nativeBody)
+    mount(undefined, undefined, { container: pane })
+    await waitFor(() => {
+      expect(document.activeElement?.classList.contains('mrfw-ftBody')).toBe(true)
+    })
+  })
+
+  it('keeps the parent lookup for the older direct mount', async () => {
+    // The older Files page has no data-files-page wrapper: the tree's parent
+    // already IS the takeover container, so the fallback path must still find
+    // the native body and hand it the keyboard.
+    const page = document.createElement('div')
+    page.setAttribute('data-files-root', '')
+    const nativeBody = document.createElement('div')
+    nativeBody.setAttribute('data-files-body', '')
+    nativeBody.tabIndex = -1
+    page.append(nativeBody)
+    document.body.append(page)
+    pages.push(page)
+    nativeBody.focus()
+    // The real old shape is a portal into the pane: React owns the forked body
+    // while the native body stays an untracked sibling of it.
+    mount(undefined, undefined, { portalInto: page })
+    await waitFor(() => {
+      expect(document.activeElement?.classList.contains('mrfw-ftBody')).toBe(true)
+    })
+  })
+
+  it('leaves focus alone when the native body was not the focused element', async () => {
+    const { pane } = pageFixture()
+    const other = document.createElement('input')
+    document.body.append(other)
+    other.focus()
+    mount(undefined, undefined, { container: pane })
+    await waitFor(() => { expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull() })
+    expect(document.activeElement).toBe(other)
+    other.remove()
+  })
+})

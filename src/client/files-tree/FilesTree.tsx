@@ -252,8 +252,12 @@ export function FilesTree({
       // The handoff mirrors the native body taking the pane's focus — but
       // only when the takeover's hidden native body was the focused one:
       // the fork's parent can be a whole page (header controls included),
-      // which must never lose focus to the fork.
-      const nativeBody = body.parentElement?.querySelector('[data-files-body]')
+      // which must never lose focus to the fork. The native body lives in the
+      // takeover container (`data-files-page` on the Files page, the navigator
+      // aside in a preview); the parent is the fallback for the older direct
+      // mount, where the body's parent already IS that container.
+      const container = body.closest<HTMLElement>('[data-files-page], aside[data-files-navigator]') ?? body.parentElement
+      const nativeBody = container?.querySelector('[data-files-body]')
       if (nativeBody?.contains(body.ownerDocument.activeElement) === true) body.focus()
     }
   }, [seeded])

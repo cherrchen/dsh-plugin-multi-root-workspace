@@ -492,6 +492,9 @@ function openNavigator(content: HTMLElement, paneId = 'pane-1'): { aside: HTMLEl
   nativeStatus.setAttribute('data-files-search-status', '')
   const body = document.createElement('div')
   body.setAttribute('data-files-body', '')
+  // The native body is reachable by tab (tabIndex -1), so the focus handoff
+  // can move the keyboard off it.
+  body.tabIndex = -1
   aside.append(bar, nativeStatus, body)
   act(() => { content.append(aside) })
   return { aside, body }
@@ -1380,5 +1383,32 @@ describe('the preview navigator search surface', () => {
     })
     act(() => { fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' }) })
     await waitFor(() => { expect(document.activeElement).toBe(input) })
+  })
+})
+
+describe('the retargeted tree focus handoff', () => {
+  it('takes the keyboard from the native body through the search pane wrapper', async () => {
+    const harness = mount({ search: true })
+    const { content } = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const { aside, body } = openNavigator(content)
+    body.focus()
+    expect(document.activeElement).toBe(body)
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    // The pane wrapper moved the forked body one level down; the handoff finds
+    // the hidden native body by its container, not by the body's parent.
+    await waitFor(() => {
+      expect(document.activeElement?.classList.contains('mrfw-ftBody')).toBe(true)
+    })
+  })
+
+  it('keeps the handoff for the direct mount without the search seat', async () => {
+    const harness = mount()
+    const { content } = renderInPreview(harness, { absolutePath: PREVIEWED })
+    const { aside, body } = openNavigator(content)
+    body.focus()
+    await waitFor(() => { expect(aside.hasAttribute('data-mrfw-navigator')).toBe(true) })
+    await waitFor(() => {
+      expect(document.activeElement?.classList.contains('mrfw-ftBody')).toBe(true)
+    })
   })
 })

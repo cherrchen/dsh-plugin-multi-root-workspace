@@ -375,27 +375,51 @@ describe('the New Session hero entry rules', () => {
 })
 
 describe('the navigator search takeover (0.2.2-rc.2)', () => {
-  it('hides the native search bar and status line only while the preview retarget holds the aside', () => {
+  /** The bar selector's guard must stay in the source, not just in this test. */
+  const BAR = 'aside[data-mrfw-navigator] > div:not([data-mrfw-files-pane]):has([data-files-search])'
+  const STATUS = 'aside[data-mrfw-navigator] > [data-files-search-status]'
+  const SETTINGS = 'aside[data-mrfw-navigator] > [data-files-search-settings]'
+
+  it('hides the native search bar, status line, and leftover settings — and nothing of the plugin pane', () => {
     // The rc.2 navigator draws a workspace search above the body; the retarget
     // hides the body it belongs to, so the bar must go with it. The :has()
     // anchor is the input rc.2 marks as data-files-search, and the status line
-    // is a direct sibling. Primary-root browsing carries no marker.
-    expect(STYLES).toMatch(/aside\[data-mrfw-navigator\]\s*>\s*div:has\(\[data-files-search\]\)[\s\S]*?display:\s*none/s)
+    // and settings popover are direct children. Primary-root browsing carries
+    // no marker. The :not() guard is defensive: the plugin's own pane is a
+    // direct child too, and a future upstream selector change must not hide it.
+    expect(STYLES).toMatch(/aside\[data-mrfw-navigator\]\s*>\s*div:not\(\[data-mrfw-files-pane\]\):has\(\[data-files-search\]\)/)
     expect(STYLES).toContain('aside[data-mrfw-navigator] > [data-files-search-status]')
+    expect(STYLES).toContain('aside[data-mrfw-navigator] > [data-files-search-settings]')
     document.body.innerHTML = `
       <aside data-mrfw-navigator>
         <div class="searchBar"><div class="searchField"><input data-files-search></div></div>
         <p data-files-search-status></p>
+        <section data-files-search-settings></section>
+        <div class="mrfw-fsPane" data-mrfw-files-pane>
+          <div class="mrfw-fsBar"><input data-mrfw-files-search></div>
+          <p data-files-search-status></p>
+          <section data-files-search-settings></section>
+          <div class="mrfw-ftBody"></div>
+        </div>
         <div data-files-body></div>
-        <div class="mrfw-ftBody"></div>
       </aside>
       <aside><div class="searchBar"><input data-files-search></div><p data-files-search-status></p></aside>`
     const [held, native] = [...document.querySelectorAll('aside')]
-    expect(held!.querySelector('.searchBar')!.matches('aside[data-mrfw-navigator] > div:has([data-files-search])')).toBe(true)
-    expect(held!.querySelector('[data-files-search-status]')!.matches('aside[data-mrfw-navigator] > [data-files-search-status]')).toBe(true)
-    expect(native!.querySelector('.searchBar')!.matches('aside[data-mrfw-navigator] > div:has([data-files-search])')).toBe(false)
-    // The forked body must never match the search-bar selector.
-    expect(held!.querySelector('.mrfw-ftBody')!.matches('aside[data-mrfw-navigator] > div:has([data-files-search])')).toBe(false)
+    const pane = held!.querySelector<HTMLElement>('.mrfw-fsPane')!
+    const directChildren = [...held!.children]
+    // The native instances, direct children of the held aside, are matched.
+    expect(held!.querySelector('.searchBar')!.matches(BAR)).toBe(true)
+    expect(directChildren.find(element => element.matches('[data-files-search-status]'))!.matches(STATUS)).toBe(true)
+    expect(directChildren.find(element => element.matches('[data-files-search-settings]'))!.matches(SETTINGS)).toBe(true)
+    // The plugin pane is not the native bar, and its own same-named hooks are
+    // nested behind the pane: the direct-child rules never reach them.
+    expect(pane.matches(BAR)).toBe(false)
+    expect(pane.querySelector('[data-files-search-status]')!.matches(STATUS)).toBe(false)
+    expect(pane.querySelector('[data-files-search-settings]')!.matches(SETTINGS)).toBe(false)
+    expect(pane.querySelector('.mrfw-ftBody')!.matches(BAR)).toBe(false)
+    // No marker means no hiding at all — the native preview keeps its bar.
+    expect(native!.querySelector('.searchBar')!.matches(BAR)).toBe(false)
+    expect(native!.querySelector('[data-files-search-status]')!.matches(STATUS)).toBe(false)
   })
 
   it('hides the Files-page search toggle under an additional root only', () => {
