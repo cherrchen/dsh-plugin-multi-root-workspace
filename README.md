@@ -83,7 +83,7 @@ DSH Desktop 的插件页和 CLI **不是等价入口**：插件页的「添加�
 4. 打开 `$DSH_HOME/profiles/desktop/package.json`（未设置 `DSH_HOME` 时通常是 `~/.dsh/profiles/desktop/package.json`），确认 `dsh.profile.bundles` 包含本包。
 5. 重新打开 Desktop（冷启动）。
 
-首次安装若报 `[ERR_PNPM_IGNORED_BUILDS]`，按[安装停在构建授权](./docs/troubleshooting/install-stops-at-build-approval.md)补 `allowBuilds`，再执行 `remove` + `add`。热启用冲突的原因、复现记录和实际写入者调查见[故障排查](./docs/troubleshooting/desktop-install-missing-bundle.md)。
+首次安装不再需要为 `koffi` 补 `allowBuilds`：koffi 由宿主提供，本插件把它声明为可选 peer。若 `add` 退出 0 但插件没有进入 `dsh.profile.bundles`，执行一次 `remove` + `add`。热启用冲突的原因、复现记录和实际写入者调查见[故障排查](./docs/troubleshooting/desktop-install-missing-bundle.md)。
 
 ### CLI profile 的四种安装来源
 
@@ -92,18 +92,13 @@ DSH Desktop 的插件页和 CLI **不是等价入口**：插件页的「添加�
 | 来源 | 命令 | 说明 |
 | --- | --- | --- |
 | npm 注册表（推荐） | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | 预构建产物，即装即用 |
-| GitHub | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | 安装时自动从源码构建；`allowBuilds` 需含本包，建议锁定版本 |
+| GitHub | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | 安装时自动从源码构建；`allowBuilds` 需含本包的 exact key，建议锁定版本 |
 | tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | 预构建离线包，适合内网/离线 |
 | 从源码安装 | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` 链接本地 checkout，适合开发调试；无需 `allowBuilds` |
 
-**首次安装时 `dsh plugin add` 会以 `[ERR_PNPM_IGNORED_BUILDS]` 失败**：在该 profile 的 `pnpm-workspace.yaml` 里补上下面这行，再执行一次 `add` 即可：
+**npm、tarball 与本地路径安装不需要任何 `allowBuilds`**：插件不在生产依赖里携带带构建脚本的包（`koffi` 由宿主提供）。git 来源仍需为本包自身的 `prepare` 授权，但 pnpm 只接受含来源与 commit 的 exact key——按[从 GitHub 安装](#从-github-安装)里 pnpm 打印的那一行原样写入；只写包名不生效。
 
-```yaml
-allowBuilds:
-  koffi: true
-```
-
-如果重跑 `退出 0` 但插件没有进入 `dsh.profile.bundles`，做一次 `remove` + `add`。更多排查见[故障排查](./docs/troubleshooting/install-stops-at-build-approval.md)。
+若 `add` 退出 0 但插件没有进入 `dsh.profile.bundles`，做一次 `remove` + `add`。更多排查见[故障排查](./docs/troubleshooting/install-stops-at-build-approval.md)。
 
 ### 从 npm 安装（推荐）
 
@@ -111,7 +106,7 @@ allowBuilds:
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-安装的是预构建产物，首次安装需要添加 `allowBuilds`。
+安装的是预构建产物，不需要构建授权。
 
 ### 从 tarball 安装
 
@@ -122,7 +117,7 @@ pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.20.tgz
 ```
 
-同样是预构建产物，适合内网或离线环境交付；首次安装同样需要添加 `allowBuilds`。
+同样是预构建产物，适合内网或离线环境交付；同样不需要构建授权。
 
 ### 从 GitHub 安装
 
@@ -130,12 +125,13 @@ dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.
 dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace
 ```
 
-GitHub 来源装的是源码，`add` 时会自动构建，不需要手动编译；但 `allowBuilds` 要写两行——本包自身和 `koffi`：
+GitHub 来源装的是源码，`add` 时会自动构建，不需要手动编译；pnpm 会拦下本包自身的 `prepare`，并打印一行 exact key（含来源与 commit）。把那一行原样写进 `allowBuilds` 后重跑 `add`：
 
 ```yaml
 allowBuilds:
-  '@dsh-electron/dsh-plugin-multi-root-workspace': true
-  koffi: true
+  # 键与值都来自 pnpm 报错中 “Add the package to allowBuilds” 的示例；
+  # 只写包名、不带来源与 commit 的键对 git 来源不生效。
+  '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
 建议锁定版本（如 `#v0.1.20`），让后续推送无法悄悄改变实际运行的内容：

@@ -8,6 +8,12 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [Unreleased]
+
+### Changed
+
+- **`koffi` is now supplied by the host (optional peer), so npm / tarball / local-path installs need no build approval**: the plugin no longer ships `koffi` (the FFI wrapper behind Windows Registry Authority and Worktree Git-metadata reads) in `dependencies`; it becomes an optional `peerDependencies` entry plus a `devDependencies` development pin. pnpm never installs an optional peer, so the first `dsh plugin add` no longer stops at `[ERR_PNPM_IGNORED_BUILDS]` and the profile's `pnpm-workspace.yaml` needs no `allowBuilds: koffi`. At run time `loadHostKoffi()` / `loadHostKoffiSync()` try `DSH_KOFFI_PATH`, the `dsh-fs-local` anchor, the host entry, and DSH Desktop's `app.asar` / `app.asar.unpacked` runtime directories in order, loading only the host's copy so a second `koffi.node` image cannot SIGBUS on darwin-arm64; when no host copy resolves, the loader reports it instead of falling back to a package-local copy. Git sources still need `allowBuilds` for the package's own `prepare` ([ADR-0007 revision](./docs/decisions/ADR-0007-registry-authority-lease.md), Chinese).
+
 ## [0.1.20] - 2026-11-15
 
 ### Added

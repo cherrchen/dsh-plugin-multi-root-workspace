@@ -141,7 +141,7 @@ client 测试分两层：`tests/client-bundle.spec.ts` 断言**制品字节**（
 ### 4.7 打包产物验证（`pack:check` / `smoke:packed`）
 
 - `pnpm pack:check`（`scripts/check-pack.mjs`）：`pnpm pack` 到临时目录后用自带的 tar 解析器（ustar + GNU `L` + pax，不依赖 GNU tar，Windows 可用）列出全部成员，并断言——必备文件（`package.json`、`cordis.patch.yml`、双语 README/CHANGELOG、LICENSE、`lib/index.js` / `client.js` / `windows-runner.js`）、`exports` 声明的每个 `default` / `types` 目标、`cordis.patch.yml` 每行可解析的包内模块、以及 packed `lib/*.js` 相对 `import`/`from`/`import()` 闭包里的每个共享 chunk 都在包内；外加一条 runner 专项——`lib/windows-runner.js` 及其传递 chunk 的每个非相对 specifier 必须是 `node:` 内置（它是独立进程，宿主的插件包解析不适用，见[账本缺陷 #7](../plans/active/2026-09-12-multi-root-workspace.md)）。当前 tarball 为 71 个成员。
-- `pnpm smoke:packed`（`scripts/smoke-packed.mjs`）：先 `pack:check` 同款打包，再让 `smoke:behavior` 在仓库**之外**的 scratch `$DSH_HOME` 里以 `DSH_SMOKE_PLUGIN_SOURCE=<tgz>` 经真实 `dsh plugin --profile <p> add <tgz>` 安装，断言被加载的插件解析在 checkout 之外（`lib/windows-runner.js` 在 Windows 上据此做真实受限 pwsh 写）。tarball 的首次 `add` 会停在 `koffi` 构建授权（`ERR_PNPM_IGNORED_BUILDS`），共享 installer 按[故障排查条目](../troubleshooting/install-stops-at-build-approval.md)恢复——待决标记可能不存在、恢复后可能还需 remove+add 才激活，两种情况都会逐字打印输出。
+- `pnpm smoke:packed`（`scripts/smoke-packed.mjs`）：先 `pack:check` 同款打包，再让 `smoke:behavior` 在仓库**之外**的 scratch `$DSH_HOME` 里以 `DSH_SMOKE_PLUGIN_SOURCE=<tgz>` 经真实 `dsh plugin --profile <p> add <tgz>` 安装，断言被加载的插件解析在 checkout 之外（`lib/windows-runner.js` 在 Windows 上据此做真实受限 pwsh 写）。tarball 的首次 `add` 必须直接退出 0，且输出里不能出现 koffi 的构建授权（`Ignored build scripts: koffi@...` 或待决的 `koffi:` 行）——koffi 已改为宿主提供的可选 peer；运行时或 profile 模板自身的其他 ignored build script 只告警、不判失败。git 来源的恢复路径仍保留，见[故障排查条目](../troubleshooting/install-stops-at-build-approval.md)。
 
 ## 5. 安装到真实运行时
 
@@ -150,7 +150,7 @@ dsh plugin --profile web add <本仓库路径>
 dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 ```
 
-`link:` 来源用的是本仓库已装好的依赖，因此不需要 `allowBuilds` 表态；npm / tarball / git 来源都需要，原因与处置见 [README §安装](../../README.md) 与[故障排查：安装停在构建授权](../troubleshooting/install-stops-at-build-approval.md)。
+`link:` 来源用的是本仓库已装好的依赖，因此不需要 `allowBuilds` 表态；npm / tarball 也不再需要（`koffi` 由宿主提供），只有 git 来源仍需为 `prepare` 授权。原因与处置见 [README §安装](../../README.md) 与[故障排查：安装停在构建授权](../troubleshooting/install-stops-at-build-approval.md)。
 
 `dsh plugin` 是 pnpm 的转发器：它在 profile 目录里执行 pnpm，并把解析到 `dsh.bundle` 声明的依赖回填进 `dsh.profile.bundles`。桌面端（Electron）保留自己的 `$DSH_HOME/profiles/desktop`，安装方式同源。
 
@@ -242,7 +242,7 @@ Windows runner 的 PATH 可能让同名 GNU 命令覆盖 Windows 工具。ACL �
 | bash 断言整体 skipped | 当前进程已被内核沙箱约束，无法嵌套 | 在不被约束的终端或 CI 中运行以覆盖该项 |
 | `pnpm <script>` 报 `EPERM ... /Library/pnpm/.tools` | 仓库 pin 的 pnpm 版本需要写用户级 pnpm 目录 | 在可写该目录的终端（或提权）执行；仅跑门禁时可用 `sh node_modules/.bin/<tool>` 绕过 pnpm |
 | `pnpm <script>` 报 `ERR_PNPM_UNEXPECTED_STORE` 或 `ABORTED_REMOVE_MODULES_DIR_NO_TTY` | checkout 里存在一个陈旧的 `.pnpm-store/`（被 gitignore），而 `node_modules` 是从磁盘级 store（如 `<挂载点>/.pnpm-store/v11`）链接的；pnpm 运行脚本前的依赖自检因此想重装，而在没有 TTY 时无法确认删除 | 最快解除：`CI=true pnpm <script>`（pnpm 只在 CI 下继续而不交互确认）。根治：删掉陈旧的仓库内 `.pnpm-store/`；或 `pnpm config set store-dir <node_modules 实际链接的 store>`；或直接用 `sh node_modules/.bin/<tool>` / `node scripts/<smoke>.mjs` 跑门禁（CI 不受影响，它本来就有 `CI=true`） |
-| `ERR_PNPM_IGNORED_BUILDS` | 有构建脚本的依赖未在 `pnpm-workspace.yaml` 声明 | 把该依赖加入 `allowBuilds`（需要构建）或 `allowBuilds: false`（明确不需要）；当前 `esbuild`（经 vite/vitest 引入）声明为 `false` |
+| `ERR_PNPM_IGNORED_BUILDS` | 有构建脚本的依赖未在 `pnpm-workspace.yaml` 声明（本插件只在 git 来源的 `prepare` 或 `0.1.20` 及更早版本的安装中出现） | 把该依赖加入 `allowBuilds`（需要构建）或 `allowBuilds: false`（明确不需要）；当前 `esbuild`（经 vite/vitest 引入）声明为 `false` |
 | 面板在 Web GUI 里看不到 | 组合里没有声明 `sidebar.footer.action` 的侧栏，或该面没有 host `connection`（headless 组合） | 面板是软注册（`slots.inject` 不触发即不出现）；用 `/workspace-folders list` 确认注册表本身可用 |
 | 面板显示「当前没有活动会话」 | 浏览器当前没有被主视图持有的 Session；或客户端仍在读已删除的 `list.current`（0.1.6-alpha.2 起导航在 `retainedBy.mainView` 上） | 确认主界面已打开会话后点重试。host 不会猜测主根（ADR-0008）。若会话明明开着仍出现这条，检查 `src/compat/client-session.ts` 是否同时认 `current` 与 `retainedBy.mainView`，且没有回退 `ids[0]` |
 | 面板报 "根目录登记的存储不可用" | `$DSH_HOME/storages/multi_root_workspace.json` 损坏或版本不符 | 按提示修复或删除该文件后重启 dsh；插件不会因此拒绝启动（ADR-0004） |

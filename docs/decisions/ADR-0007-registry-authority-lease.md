@@ -46,7 +46,7 @@ M3 把附加根登记进 `dsh-storage-domain` 的 `multi_root_workspace` domain�
    ```
 
    用户自定义 `storage-json.root` 时必须同步覆盖 `leasePath`。长期等上游 storage 暴露 medium identity 后再去掉这层配置耦合。
-7. **`@deepseek-ai/node-addon-system` 与 `koffi` 是依赖，不是 peer。** 它们是 native primitive，不是 cordis 服务身份；Windows 的 koffi 只在 win32 动态加载。
+7. **native primitive 由宿主提供，不作为生产依赖。** `@deepseek-ai/node-addon-system`（POSIX flock）与 `koffi`（Windows semaphore / FFI）都不是 cordis 服务身份；它们是宿主树里已有的单例或原生镜像，插件只声明 peer，运行时加载宿主那份。koffi 自 `0.1.21` 起是 optional peer：pnpm 不安装它，安装期不再停在构建授权；包内绝不携带第二份 `koffi.node`（Windows 的 koffi 只在 win32 动态加载）。
 
 ## Alternatives Considered
 
@@ -63,7 +63,7 @@ M3 把附加根登记进 `dsh-storage-domain` 的 `multi_root_workspace` domain�
 
 - 两个 DSH 进程共用 `$DSH_HOME` 时，只有 authority 授予附加根；另一个进程的沙箱退化为「仅主根」，直到它 refresh 成功。这是安全方向。
 - `chains` 仍然只覆盖进程内、同一主根的 mutation；跨进程由 lease 负责。二者缺一不可。
-- 新增运行时依赖：`@deepseek-ai/node-addon-system`（POSIX flock）、`koffi`（Windows semaphore）。
+- 运行时依赖：`@deepseek-ai/node-addon-system`（POSIX flock）与 `koffi`（Windows semaphore / FFI）由宿主提供，插件以 peer 声明并从宿主副本加载。
 - 测试：`tests/registry-lease.spec.ts`（同进程双 stack 争用 / 接管）与 `tests/registry-multiprocess.e2e.ts`（两 OS 进程、干净退出、SIGKILL、durable 读回）。
 
 ## 返工补充（2026-09-15，PR #1 评审）
@@ -100,3 +100,7 @@ B9（ADR-0017）给 `danger-full-access` 引入 deny 集语义后，「空 scope
 ## 修订：本地操作准入排序（2026-10-29）
 
 [ADR-0024](./ADR-0024-registry-operation-admission.md)将 mutation / refresh 的进程内工作队列从 per-primary 提升为 store-wide，并将 fs write/edit 的 scope 捕获排入同一顺序；文件 I/O 在队列外执行，撤权前已准入的操作可完成。A1 当时保留本 ADR 的单持锁进程授权，尚无共享 IPC；后续 [ADR-0025](./ADR-0025-shared-registry-authority.md)采纳共享服务并替代独占消费限制，domain/lease 生命周期继续有效。不能以缓存的本地 operation 身份代替新远程准入。
+
+## 修订：koffi 改为宿主提供的可选 peer（2026-11-16）
+
+`koffi` 从 `dependencies` 移入 optional `peerDependencies`，`devDependencies` 保留与宿主一致的开发 pin。两个触发点：其一，`dsh plugin add` 首次安装会因 koffi 的安装脚本停在 pnpm 构建授权，npm / tarball / 本地路径来源都要用户额外表态；其二，`dsh-fs-local` 在每个受支持发布上都携带 koffi，profile 里再装一份就是同一进程里的第二个 `koffi.node` 镜像，在 darwin-arm64 指针认证下直接 SIGBUS。可选 peer 不被 pnpm 安装，因此安装期零表态；运行时 `loadHostKoffi()` / `loadHostKoffiSync()` 依次尝试 `DSH_KOFFI_PATH`、`dsh-fs-local` 锚点、宿主入口 `process.argv[1]` 与 DSH Desktop 的 `app.asar` / `app.asar.unpacked` 运行时目录，删除包内回退，找不到即明确报错而不是加载第二份。git 来源仍需为插件自身的 `prepare` 授权；Windows standalone runner 继续从 `@deepseek-ai/dsh-sandbox-windows-acl` 锚点解析，不经过这条链。

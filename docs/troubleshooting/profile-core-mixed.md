@@ -31,10 +31,10 @@ schemastery 这类单例被复制后，宿主自身依赖它的包（如 `dsh-se
 
 ## 已验证的解决方案
 
-升级到携带修复的插件版本：这两个包已移入 `peerDependencies`，由宿主提供唯一副本；`koffi` 与 `zod` 不是 `@deepseek-ai/*` 上游包，保留在 `dependencies` 不受影响——但 `koffi` 是原生镜像单例，FFI 调用一律经 `loadHostKoffi()`（`src/compat/koffi.ts`，以 `dsh-fs-local` 为锚）解析宿主副本；若在日志里看到进程无声退出（darwin-arm64 下 SIGBUS / Bus error: 10）而非 `profile-core-mixed` 报错，检查是否有人在别处又写了裸 `import('koffi')`。
+升级到携带修复的插件版本：这两个包已移入 `peerDependencies`，由宿主提供唯一副本；`zod` 不是 `@deepseek-ai/*` 上游包，保留在 `dependencies` 不受影响；`koffi` 自 `0.1.21` 起是宿主提供的 optional peer（不再是生产依赖），FFI 调用仍一律经 `loadHostKoffi()`（`src/compat/koffi.ts`，以 `dsh-fs-local` 为锚）解析宿主副本；若在日志里看到进程无声退出（darwin-arm64 下 SIGBUS / Bus error: 10）而非 `profile-core-mixed` 报错，检查是否有人在别处又写了裸 `import('koffi')`，或是否装了 `0.1.20` 及更早版本留下的私有副本。
 
 对已经装上旧版的 profile：先 `dsh plugin --profile <name> remove` 再 `add` 新版本，让包管理器重建该 profile 的 `node_modules`；残留的孤立副本一并清除即可。
 
 ## 防回归
 
-`pnpm compat:check`（`scripts/check-dsh-compat.mjs`）与 `tests/compat.spec.ts` 现在硬性拒绝 `dependencies` / `optionalDependencies` 里的任何 `@deepseek-ai/*` 名字，并钉住两个包的 peer 形态：范围必须覆盖每个受支持版本实际携带的版本，alpha 线逐个具名（裸 `^x.y.z` 不匹配 prerelease）；开发树上它们的解析路径必须与 `dsh-sandbox-local` 自己加载的副本是同一个文件。
+`pnpm compat:check`（`scripts/check-dsh-compat.mjs`）与 `tests/compat.spec.ts` 现在硬性拒绝 `dependencies` / `optionalDependencies` 里的任何 `@deepseek-ai/*` 名字，并钉住两个包的 peer 形态：范围必须覆盖每个受支持版本实际携带的版本，alpha 线逐个具名（裸 `^x.y.z` 不匹配 prerelease）；开发树上它们的解析路径必须与 `dsh-sandbox-local` 自己加载的副本是同一个文件。同一门禁还要求 `koffi` 只以 optional peer + 开发 pin 出现，且开发 pin 必须等于 `dsh-fs-local` 当前解析到的 koffi 版本。

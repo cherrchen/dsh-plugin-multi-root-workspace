@@ -57,9 +57,9 @@ dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspac
 dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.20
 ```
 
-确认 `dsh.profile.bundles` 出现本包后再打开 Desktop。完整步骤和构建授权（`allowBuilds: { koffi: true }`）的处理见 [README §安装](../../README.md#安装)的 DSH Desktop 小节。
+确认 `dsh.profile.bundles` 出现本包后再打开 Desktop。完整步骤见 [README §安装](../../README.md#安装)的 DSH Desktop 小节。
 
-隔离验证（临时 `desktop` profile + Desktop 自带 CLI）确认了这个恢复路径：第一次 `add` 因 `koffi` 构建授权失败并留下 `dependencies`；补上 `allowBuilds` 后重跑 `add` 退出 0，但 `dsh.profile.bundles` 仍为空；执行 `remove` + `add` 后才写入本包。
+隔离验证（临时 `desktop` profile + Desktop 自带 CLI）确认了这个恢复路径：安装中断后重跑 `add` 退出 0，但 `dsh.profile.bundles` 仍为空；执行 `remove` + `add` 后才写入本包。当时的首次安装还因 `koffi` 的构建授权失败；`0.1.21` 起 koffi 由宿主提供，这一步不再出现。
 
 ## 复现记录
 
@@ -101,5 +101,5 @@ multi-root-command (@dsh-electron/dsh-plugin-multi-root-workspace/command): pend
 ## 相关
 
 - [README §安装](../../README.md#安装)（Desktop 恢复步骤与 CLI 参数）
-- [安装停在构建授权](./install-stops-at-build-approval.md)（`allowBuilds` 与“重跑 add 不激活”的同一恢复形态）
+- [安装停在构建授权](./install-stops-at-build-approval.md)（“重跑 add 不激活”的同一恢复形态）
 - [ADR-0001：provider replacement scope](../decisions/ADR-0001-provider-replacement-scope.md)
