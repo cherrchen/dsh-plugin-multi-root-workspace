@@ -1182,6 +1182,20 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* A section title that also seats one trailing action (the worktree batch
+   cleanup): the action right-aligns on the title's baseline row, and the row
+   wraps — action onto the next line — instead of overflowing when the dialog
+   is narrow. Only the section that carries an action uses this modifier. */
+.mrfw-sectionTitleRowAction {
+  flex-wrap: wrap;
+}
+
+.mrfw-sectionAction {
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+}
+
 .mrfw-row {
   display: flex;
   flex-wrap: wrap;
@@ -1564,9 +1578,11 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 .mrfw-actions {
   display: flex;
-  /* One row by default: the manual path field below is the only flexible item
-     and will be removed once the picker covers every host. */
-  flex-wrap: nowrap;
+  /* One control row by default: the manual path field is the only flexible
+     item and absorbs the spare width first. Wrapping is kept because the
+     root-limit hint claims a line of its own, and because the ≤560px dialog
+     still needs the controls to reflow instead of overflowing. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-top: 16px;
@@ -1574,16 +1590,16 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   border-top: 0.5px solid var(--dsw-alias-border-l2);
 }
 
+/* The root-limit hint fills one line above the controls row, so the controls
+   start on the line after it — both stay below the divider above. */
+.mrfw-actionsNote {
+  flex: 0 0 100%;
+}
+
 /* The manual path field absorbs the row's spare width and gives way first. */
 .mrfw-manualPath {
   flex: 1 1 120px;
   min-width: 80px;
-}
-
-@media (max-width: 560px) {
-  .mrfw-actions {
-    flex-wrap: wrap;
-  }
 }
 
 /* One control row, one height: the capsule buttons match the 32px input. */

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 /** The worktree notice/Dialog overlay and the two-switch plugin card. */
 import { StrictMode } from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { RootsView, WorktreePromptView } from '../src/contract.ts'
-import { WorktreePrompt } from '../src/client/WorktreePrompt.tsx'
+import type { RootView, RootsView, WorktreePromptView } from '../src/contract.ts'
+import { WORKTREE_EMPTY_NOTICE_HOLD_MS, WorktreePrompt } from '../src/client/WorktreePrompt.tsx'
 import { WorkspaceFoldersDialog } from '../src/client/WorkspaceFoldersAction.tsx'
 import { RootSwitcher } from '../src/client/RootSwitcher.tsx'
 import { PanelError, type PanelClient } from '../src/client/panel-client.ts'
@@ -895,6 +895,79 @@ describe('worktree overlay: session and settings lifetime', () => {
   })
 })
 
+/** One confirmed-missing tracked worktree row the cleanup flow may remove. */
+function deletedRoot(ordinal: number, id: string): RootView {
+  return {
+    ordinal,
+    id,
+    path: `/deleted/${id}`,
+    addedAt: '2026-11-09T00:00:00.000Z',
+    state: 'missing',
+    access: 'inherit',
+    worktree: { adminId: `admin-${id}`, path: `/deleted/${id}`, state: 'directory-missing', cleanupEligible: true },
+  }
+}
+
+/** A plain available additional root: no worktree facts, full action set. */
+const AVAILABLE_ROOT: RootView = {
+  ordinal: 1,
+  id: 'available',
+  path: '/available',
+  addedAt: '2026-09-12T00:00:00.000Z',
+  state: 'available',
+  access: 'inherit',
+}
+
+/** Build a roots view whose cleanup count follows the eligible rows. */
+function cleanableView(roots: readonly RootView[], overrides: Partial<RootsView> = {}): RootsView {
+  const eligible = roots.filter(root => root.worktree?.cleanupEligible === true).length
+  return {
+    primaryRoot: '/main',
+    roots,
+    limit: 16,
+    count: roots.length,
+    ...(eligible > 0 ? { worktreeCleanupCount: eligible } : {}),
+    ...overrides,
+  }
+}
+
+/** Render the panel with one canned view and a scripted worktree client. */
+function renderManager(view: RootsView, worktrees: WorktreeClient, onClose: () => void = () => {}): void {
+  render(<WorkspaceFoldersDialog
+    panel={{ call: async () => view } as unknown as PanelClient}
+    pickDirectory={undefined}
+    t={t}
+    sessionId={() => 's1'}
+    onClose={onClose}
+    worktrees={worktrees} />)
+}
+
+/** The cleanup confirmation's accessible name (the translator is an identity). */
+const CLEANUP_TITLE = 'worktree.cleanupTitle'
+
+/** The cleanup confirmation currently on screen. */
+function cleanupDialog(): HTMLElement {
+  return screen.getByRole('dialog', { name: CLEANUP_TITLE })
+}
+
+interface Deferred<T> {
+  readonly promise: Promise<T>
+  resolve(value: T): void
+  reject(error: unknown): void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail })
+  return { promise, resolve, reject }
+}
+
+/** One cleanup answer carrying the view the host would return afterwards. */
+function cleanupAnswer(roots: RootsView, removed: readonly string[] = []) {
+  return { removed, skipped: [] as { id: string; code: string }[], roots }
+}
+
 describe('panel cleanup controls', () => {
   it('offers a manual worktree entry beside Retry and asks the overlay to open', async () => {
     const view: RootsView = { primaryRoot: '/main', roots: [], limit: 16, count: 0 }
@@ -935,35 +1008,244 @@ describe('panel cleanup controls', () => {
     expect(screen.queryByRole('button', { name: 'worktree.panelOpen' })).toBeNull()
   })
 
-  it('asks in place and cleans up the exact eligible ids', async () => {
-    const view: RootsView = {
-      primaryRoot: '/main',
-      roots: [{
-        ordinal: 1, id: 'r1', path: '/deleted-wt', addedAt: '2026-11-09', state: 'missing', access: 'inherit',
-        worktree: { adminId: 'id', path: '/deleted-wt', state: 'directory-missing', cleanupEligible: true },
-      }],
-      limit: 16,
-      count: 1,
-      worktreeCleanupCount: 1,
-    }
-    const empty: RootsView = { ...view, roots: [], count: 0, worktreeCleanupCount: 0 }
-    const panel = { call: async () => view } as unknown as PanelClient
-    const cleanup = vi.fn(async () => ({ removed: ['r1'], skipped: [], roots: empty }))
-    const worktrees = fakeClient({ cleanup })
-    render(<WorkspaceFoldersDialog
-      panel={panel}
-      pickDirectory={undefined}
-      t={t}
-      sessionId={() => 's1'}
-      onClose={() => {}}
-      worktrees={worktrees} />)
+  it('seats the batch action on the additional section title and out of the footer', async () => {
+    renderManager(cleanableView([deletedRoot(1, 'r1')]), fakeClient())
     const batch = await screen.findByText('worktree.cleanupBatch')
-    fireEvent.click(batch)
-    // The confirmation is inline, not a second overlay dialog.
-    expect(screen.getByText('worktree.cleanupConfirm')).toBeDefined()
-    fireEvent.click(screen.getByText('worktree.cleanupDo'))
+    // The entry belongs to the rows it acts on, not to the footer control row.
+    expect(batch.closest('.mrfw-sectionTitleRow')).not.toBeNull()
+    expect(batch.closest('.mrfw-sectionTitleRowAction')).not.toBeNull()
+    expect(batch.closest('.mrfw-sectionAction')).not.toBeNull()
+    expect(batch.closest('.mrfw-actions')).toBeNull()
+    // Nothing destructive is left in the footer.
+    expect(document.querySelector('.mrfw-actions .mrfw-btnDanger')).toBeNull()
+    expect(screen.getByRole('button', { name: 'panel.retry' })).toBeTruthy()
+  })
+
+  it('renders no batch action while no tracked root is cleanup-eligible', async () => {
+    renderManager(cleanableView([AVAILABLE_ROOT]), fakeClient())
+    await waitFor(() => { expect(screen.getByText('/available')).toBeTruthy() })
+    expect(screen.queryByText('worktree.cleanupBatch')).toBeNull()
+  })
+
+  it('confirms in a host Modal and cleans up the exact eligible ids', async () => {
+    const view = cleanableView([deletedRoot(1, 'r1')])
+    const cleanup = vi.fn(async () => cleanupAnswer(cleanableView([]), ['r1']))
+    renderManager(view, fakeClient({ cleanup }))
+    fireEvent.click(await screen.findByText('worktree.cleanupBatch'))
+    // The confirmation is the host Modal layered over the panel, not an inline note.
+    const dialog = cleanupDialog()
+    expect(within(dialog).getByText('worktree.cleanupConfirm')).toBeTruthy()
+    expect(within(dialog).getByText('worktree.pathReuse')).toBeTruthy()
+    expect(within(dialog).getByText('worktree.cleanupDo')).toBeTruthy()
+    expect(within(dialog).getByText('panel.aliasCancel')).toBeTruthy()
+    expect(document.querySelector('.mrfw-body > .mrfw-note[role="alert"]')).toBeNull()
+    fireEvent.click(within(dialog).getByText('worktree.cleanupDo'))
     await waitFor(() => expect(cleanup).toHaveBeenCalledWith('s1', ['r1']))
-    await waitFor(() => expect(screen.queryByText('/deleted-wt')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('/deleted/r1')).toBeNull())
+    expect(screen.queryByRole('dialog', { name: CLEANUP_TITLE })).toBeNull()
+  })
+
+  it('opens the shared confirmation from a row delete and submits only that id', async () => {
+    const view = cleanableView([deletedRoot(1, 'r1'), deletedRoot(2, 'r2')])
+    const cleanup = vi.fn(async () => cleanupAnswer(cleanableView([]), ['r2']))
+    renderManager(view, fakeClient({ cleanup }))
+    await screen.findByText('worktree.cleanupBatch')
+    const deletes = screen.getAllByRole('button', { name: 'worktree.cleanup' })
+    expect(deletes).toHaveLength(2)
+    // The row's red delete is reachable by name and title.
+    expect(deletes[1]!.getAttribute('title')).toBe('worktree.cleanup')
+    expect(deletes[1]!.getAttribute('aria-label')).toBe('worktree.cleanup')
+    fireEvent.click(deletes[1]!)
+    const dialog = cleanupDialog()
+    // One id discloses the singular path-reuse risk.
+    expect(within(dialog).getByText('worktree.pathReuse')).toBeTruthy()
+    expect(within(dialog).queryByText('worktree.pathReuseMany')).toBeNull()
+    fireEvent.click(within(dialog).getByText('worktree.cleanupDo'))
+    await waitFor(() => expect(cleanup).toHaveBeenCalledWith('s1', ['r2']))
+  })
+
+  it('opens the same confirmation from the row menu cleanup item', async () => {
+    const view = cleanableView([deletedRoot(1, 'r1')])
+    renderManager(view, fakeClient())
+    await screen.findByText('worktree.cleanupBatch')
+    fireEvent.click(screen.getByRole('button', { name: 'panel.more' }))
+    fireEvent.click(screen.getByText('worktree.cleanup'))
+    expect(cleanupDialog()).toBeTruthy()
+  })
+
+  it('collapses a cleanup-eligible row to name, access, path, delete and menu', async () => {
+    const root: RootView = { ...deletedRoot(1, 'r1'), skillsEnabled: true }
+    renderManager(cleanableView([root]), fakeClient())
+    await screen.findByText('worktree.cleanupBatch')
+    // Kept: display name, access badge, copyable path, delete, menu.
+    const row = document.querySelector('.mrfw-row:not(.mrfw-rowBare)') as HTMLElement
+    expect(within(row).getByText('r1')).toBeTruthy()
+    expect(within(row).getByText('access.inherit')).toBeTruthy()
+    expect(within(row).getByText('/deleted/r1')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'worktree.cleanup' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'panel.more' })).toBeTruthy()
+    // Removed: both status lines, the inline risk note, re-register, skills, reveal.
+    expect(screen.queryByText('state.missing')).toBeNull()
+    expect(screen.queryByText('worktree.state.directory-missing')).toBeNull()
+    expect(screen.queryByText('worktree.pathReuse')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'panel.reRegister' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'panel.skills' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'panel.reveal' })).toBeNull()
+  })
+
+  it('leaves non-eligible rows with their status text and ordinary actions', async () => {
+    const changed: RootView = {
+      ordinal: 1,
+      id: 'changed',
+      path: '/changed-wt',
+      addedAt: '2026-11-09T00:00:00.000Z',
+      state: 'missing',
+      access: 'read-only',
+      skillsEnabled: true,
+      worktree: { adminId: 'a', path: '/changed-wt', state: 'changed', cleanupEligible: false },
+    }
+    // A directory-missing worktree that is NOT cleanup-eligible keeps the
+    // ordinary row: only cleanupEligible === true collapses.
+    const missing: RootView = {
+      ...changed,
+      ordinal: 2,
+      id: 'ineligible',
+      path: '/ineligible-missing',
+      worktree: { adminId: 'b', path: '/ineligible-missing', state: 'directory-missing', cleanupEligible: false },
+    }
+    renderManager(cleanableView([changed, missing]), fakeClient())
+    await waitFor(() => { expect(screen.getByText('/changed-wt')).toBeTruthy() })
+    expect(screen.getByText('worktree.state.changed')).toBeTruthy()
+    expect(screen.getByText('worktree.state.directory-missing')).toBeTruthy()
+    expect(screen.getByText('worktree.pathReused')).toBeTruthy()
+    expect(screen.getAllByText('state.missing')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'panel.reRegister' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'panel.skills' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'panel.reveal' })).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: 'worktree.cleanup' })).toBeNull()
+    expect(screen.queryByText('worktree.cleanupBatch')).toBeNull()
+  })
+
+  it('discloses the plural risk when the batch names more than one id', async () => {
+    renderManager(cleanableView([deletedRoot(1, 'r1'), deletedRoot(2, 'r2')]), fakeClient())
+    fireEvent.click(await screen.findByText('worktree.cleanupBatch'))
+    const dialog = cleanupDialog()
+    expect(within(dialog).getByText('worktree.pathReuseMany')).toBeTruthy()
+    expect(within(dialog).queryByText('worktree.pathReuse')).toBeNull()
+  })
+
+  it('keeps the confirmation open and localizes a failed cleanup', async () => {
+    const view = cleanableView([deletedRoot(1, 'r1')])
+    const cleanup = vi.fn(async () => { throw new PanelError('worktree/not-eligible', 'host prose') })
+    renderManager(view, fakeClient({ cleanup }))
+    fireEvent.click(await screen.findByText('worktree.cleanupBatch'))
+    const dialog = cleanupDialog()
+    fireEvent.click(within(dialog).getByText('worktree.cleanupDo'))
+    await waitFor(() => {
+      expect(within(dialog).getByRole('alert').textContent).toBe('error.worktree/not-eligible')
+    })
+    // Still open, row untouched, host prose not shown, panel body alert clean.
+    expect(cleanupDialog()).toBeTruthy()
+    expect(screen.getByText('/deleted/r1')).toBeTruthy()
+    expect(within(dialog).queryByText(/host prose/)).toBeNull()
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+    // Cancelling drops the local error together with the dialog.
+    fireEvent.click(within(dialog).getByText('panel.aliasCancel'))
+    expect(screen.queryByRole('dialog', { name: CLEANUP_TITLE })).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText('/deleted/r1')).toBeTruthy()
+  })
+
+  it('reports a failure in the panel body when the confirmation was dismissed mid-request', async () => {
+    const view = cleanableView([deletedRoot(1, 'r1')])
+    const pending = deferred<ReturnType<typeof cleanupAnswer>>()
+    const cleanup = vi.fn(() => pending.promise)
+    renderManager(view, fakeClient({ cleanup }))
+    fireEvent.click(await screen.findByText('worktree.cleanupBatch'))
+    const dialog = cleanupDialog()
+    fireEvent.click(within(dialog).getByText('worktree.cleanupDo'))
+    await waitFor(() => expect(cleanup).toHaveBeenCalledTimes(1))
+    // The fixed close control cannot cancel a submitted request: it only
+    // dismisses the dialog, and the failure lands on the panel's own alert.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'panel.close' }))
+    expect(screen.queryByRole('dialog', { name: CLEANUP_TITLE })).toBeNull()
+    await act(async () => { pending.reject(new PanelError('unavailable', 'socket closed')) })
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('error.unavailable')
+    expect(alert.textContent).toContain('socket closed')
+    expect(screen.queryByRole('dialog', { name: CLEANUP_TITLE })).toBeNull()
+  })
+
+  it('disables cancel while the request runs and lets a dismiss keep the request alive', async () => {
+    const view = cleanableView([deletedRoot(1, 'r1')])
+    const pending = deferred<ReturnType<typeof cleanupAnswer>>()
+    const cleanup = vi.fn(() => pending.promise)
+    renderManager(view, fakeClient({ cleanup }))
+    fireEvent.click(await screen.findByText('worktree.cleanupBatch'))
+    const dialog = cleanupDialog()
+    fireEvent.click(within(dialog).getByText('worktree.cleanupDo'))
+    await waitFor(() => expect(cleanup).toHaveBeenCalledTimes(1))
+    // The footer's cancel cannot be used while the deletion is submitted.
+    expect((within(dialog).getByRole('button', { name: 'panel.aliasCancel' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'panel.close' }))
+    expect(screen.queryByRole('dialog', { name: CLEANUP_TITLE })).toBeNull()
+    await act(async () => { pending.resolve(cleanupAnswer(cleanableView([]), ['r1'])) })
+    await waitFor(() => expect(screen.queryByText('/deleted/r1')).toBeNull())
+    // Dismissing the dialog did not cancel or duplicate the request.
+    expect(cleanup).toHaveBeenCalledTimes(1)
+  })
+
+  it('adopts an answer that lands after the confirmation was dismissed and does not reopen it', async () => {
+    const view = cleanableView([deletedRoot(1, 'r1')])
+    const pending = deferred<ReturnType<typeof cleanupAnswer>>()
+    const cleanup = vi.fn(() => pending.promise)
+    renderManager(view, fakeClient({ cleanup }))
+    fireEvent.click(await screen.findByText('worktree.cleanupBatch'))
+    fireEvent.click(within(cleanupDialog()).getByText('worktree.cleanupDo'))
+    await waitFor(() => expect(cleanup).toHaveBeenCalledTimes(1))
+    fireEvent.click(within(cleanupDialog()).getByRole('button', { name: 'panel.close' }))
+    await act(async () => { pending.resolve(cleanupAnswer(cleanableView([]), ['r1'])) })
+    await waitFor(() => expect(screen.queryByText('/deleted/r1')).toBeNull())
+    expect(screen.queryByRole('dialog', { name: CLEANUP_TITLE })).toBeNull()
+  })
+
+  it('keeps exactly one confirmation on screen when the other layer opens', async () => {
+    const view = cleanableView([deletedRoot(1, 'r1')])
+    renderManager(view, fakeClient())
+    await screen.findByText('worktree.cleanupBatch')
+    // Open the access-upgrade layer, then the cleanup layer: the upgrade goes.
+    fireEvent.click(screen.getByRole('button', { name: 'panel.more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'panel.accessReadWrite' }))
+    expect(screen.getByRole('dialog', { name: 'panel.accessUpgradeTitle' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'worktree.cleanup' }))
+    expect(screen.queryByRole('dialog', { name: 'panel.accessUpgradeTitle' })).toBeNull()
+    expect(cleanupDialog()).toBeTruthy()
+    // And the reverse: opening the upgrade layer drops the cleanup one.
+    fireEvent.click(screen.getByRole('button', { name: 'panel.more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'panel.accessReadWrite' }))
+    expect(screen.getByRole('dialog', { name: 'panel.accessUpgradeTitle' })).toBeTruthy()
+    expect(screen.queryByRole('dialog', { name: CLEANUP_TITLE })).toBeNull()
+  })
+
+  it('closes an open row menu when the confirmation opens', async () => {
+    renderManager(cleanableView([deletedRoot(1, 'r1')]), fakeClient())
+    await screen.findByText('worktree.cleanupBatch')
+    fireEvent.click(screen.getByRole('button', { name: 'panel.more' }))
+    expect(document.querySelector('[data-menu]')).not.toBeNull()
+    // The menu's cleanup item, not the row's icon-only delete (same name).
+    fireEvent.click(screen.getByText('worktree.cleanup'))
+    expect(document.querySelector('[data-menu]')).toBeNull()
+    expect(cleanupDialog()).toBeTruthy()
+  })
+
+  it('never closes the panel on Escape while the confirmation owns the keyboard', async () => {
+    const onClose = vi.fn()
+    renderManager(cleanableView([deletedRoot(1, 'r1')]), fakeClient(), onClose)
+    fireEvent.click(await screen.findByText('worktree.cleanupBatch'))
+    const panelDialog = document.querySelector('.mrfw-dialog') as HTMLElement
+    fireEvent.keyDown(panelDialog, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+    expect(cleanupDialog()).toBeTruthy()
   })
 
   it('does not run the automatic worktree check when the panel renders', async () => {
@@ -981,6 +1263,92 @@ describe('panel cleanup controls', () => {
     await waitFor(() => expect(listed).toBe(true))
     expect(prompt).not.toHaveBeenCalled()
     expect(screen.queryByText('worktree.toast')).toBeNull()
+  })
+})
+
+describe('manual worktree discovery with no candidates', () => {
+  /** Mount the overlay and let its one automatic check settle. */
+  async function mountIdle(prompt: ReturnType<typeof vi.fn<WorktreeClient['prompt']>>): Promise<void> {
+    renderPrompt(fakeClient({ prompt }))
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1))
+  }
+
+  it('announces an empty manual result with the info Toast and opens no Dialog', async () => {
+    const prompt = vi.fn<WorktreeClient['prompt']>(async () => answer([]))
+    await mountIdle(prompt)
+    act(() => { expect(requestWorktreePrompt('s1')).toBe(true) })
+    const toast = await screen.findByRole('status')
+    expect(toast.textContent).toBe('worktree.noCandidates')
+    expect(toast.getAttribute('data-hold-ms')).toBe(String(WORKTREE_EMPTY_NOTICE_HOLD_MS))
+    // The primitive's lowest-level form: no icon and no tone.
+    expect(toast.querySelector('svg')).toBeNull()
+    expect(toast.getAttribute('data-tone')).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    // The manual entry performs its own non-fresh prompt after the auto check.
+    expect(prompt).toHaveBeenLastCalledWith('s1', undefined, expect.anything())
+  })
+
+  it('stays silent for the automatic fresh check and the notice View race', async () => {
+    const prompt = vi.fn<WorktreeClient['prompt']>(async (_session, options) => answer(options?.fresh === true ? [PROMPT] : []))
+    renderPrompt(fakeClient({ prompt }))
+    // The notice appears; the automatic check never shows the empty Toast.
+    await screen.findByText('worktree.toast')
+    expect(screen.queryByText('worktree.noCandidates')).toBeNull()
+    fireEvent.click(screen.getByText('worktree.toastView'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // The View path raced to an empty list: still silent.
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    expect(screen.queryByText('worktree.noCandidates')).toBeNull()
+  })
+
+  it('stays silent when the manual prompt itself fails', async () => {
+    const prompt = vi.fn<WorktreeClient['prompt']>(async (_session, options) => {
+      if (options?.fresh === true) return answer([])
+      throw new PanelError('unavailable', 'boom')
+    })
+    await mountIdle(prompt)
+    act(() => { expect(requestWorktreePrompt('s1')).toBe(true) })
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(2))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('dismisses the Toast through its onDone and can announce again', async () => {
+    const prompt = vi.fn<WorktreeClient['prompt']>(async () => answer([]))
+    await mountIdle(prompt)
+    act(() => { expect(requestWorktreePrompt('s1')).toBe(true) })
+    fireEvent.click(await screen.findByRole('status'))
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    act(() => { expect(requestWorktreePrompt('s1')).toBe(true) })
+    expect((await screen.findByRole('status')).textContent).toBe('worktree.noCandidates')
+  })
+
+  it('clears a shown Toast when the session changes', async () => {
+    const session = sessionHarness('s1')
+    const prompt = vi.fn<WorktreeClient['prompt']>(async () => answer([]))
+    render(<WorktreePrompt client={fakeClient({ prompt })} sessionId={session.read}
+      subscribeSession={session.subscribe} t={t} previewOnly={false} />)
+    await waitFor(() => expect(prompt).toHaveBeenCalled())
+    act(() => { expect(requestWorktreePrompt('s1')).toBe(true) })
+    await screen.findByRole('status')
+    act(() => { session.switchTo('s2') })
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+  })
+
+  it('clears a shown Toast when the feature is switched off', async () => {
+    let enabled = true
+    let settingsListener: (() => void) | undefined
+    const prompt = vi.fn<WorktreeClient['prompt']>(async () => answer([]))
+    render(<WorktreePrompt client={fakeClient({ prompt })} sessionId={() => 's1'}
+      subscribeSession={() => () => {}} t={t} previewOnly={false}
+      readEnabled={() => enabled}
+      subscribeEnabled={(listener) => { settingsListener = listener; return () => { settingsListener = undefined } }} />)
+    await waitFor(() => expect(prompt).toHaveBeenCalled())
+    act(() => { expect(requestWorktreePrompt('s1')).toBe(true) })
+    await screen.findByRole('status')
+    act(() => { enabled = false; settingsListener?.() })
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
   })
 })
 

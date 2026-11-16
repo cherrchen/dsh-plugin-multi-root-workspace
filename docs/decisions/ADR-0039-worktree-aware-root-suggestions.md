@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-11-15 第二十二次修订；2026-11-15 第二十一次修订；2026-11-14 第二十次修订；2026-11-10 第十九次修订；2026-11-09 第十八次修订与同日实施审计返工 R1–R6）。A 的目标是主 checkout 根，开关实验性、默认关闭；自动发现收敛为会话激活时一次只读检查 + 非模态 Toast，用户点「查看」后才打开单/多候选确认 Dialog。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。
+Accepted（2026-11-16 第二十六次修订；2026-11-15 第二十一至二十五次修订；2026-11-14 第二十次修订；2026-11-10 第十九次修订；2026-11-09 第十八次修订与同日实施审计返工 R1–R6）。A 的目标是主 checkout 根，开关实验性、默认关闭；自动发现收敛为会话激活时一次只读检查 + 非模态 Toast，用户点「查看」后才打开单/多候选确认 Dialog。本文记录设计，实施与验证状态以[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)为准。2026-11-16：面板清理确认、deletion 徽标呈现与路径复用提示位置拟由 [ADR-0045](./ADR-0045-worktree-cleanup-panel-ui.md)（Proposed，待外部评审；接受后生效）取代，授权、分类、清理资格与生命周期结论不变。
 
 ## 复审修正（2026-11-09）
 
@@ -235,6 +235,10 @@ PR #60 自动评审核验后的实现对齐修复，不改变授权模型与安�
 - **生命周期**：关闭立即递增 `workEpoch` 并清空下拉开关状态，在飞的提醒完成不能再回写已关闭的提示（与 `openDialogFor` 相同的归属规则）；不新增 Escape 关闭。
 - **可访问性**：关闭按钮使用独立词典键 `worktree.toastClose`（中「关闭提示」/英 "Dismiss"）作为 `aria-label`，位于操作 `role="group"` 之外；Tab 顺序为查看 → 稍后提醒 → 关闭。
 - **验收**：组件测试覆盖「× 存在且不属于操作组」「× 是自绘控件而非 primitives 尺寸」「× 只关闭、不发 snooze/resolve、`seen` 仍只一次」「关闭后在飞提醒完成不复活提示」「compact 形态仍有 ×」；样式测试固化 18px 正圆、角上定位、外凸、24px 命中环、**没有 hover/active 规则**与 token 配色；README 双语同步。实现计划见 [2026-11-15-worktree-toast-close](../plans/active/2026-11-15-worktree-toast-close.md)。
+
+## 第二十六次修订（2026-11-16）
+
+面板清理入口与失效行呈现拟由 [ADR-0045](./ADR-0045-worktree-cleanup-panel-ui.md)（Proposed，待外部评审；接受后生效）取代，本修订只记录取代范围，不改变授权与生命周期：批量清理入口从 footer 移到「附属工作目录」标题行；确认由 body 顶部内联文字改为覆盖在面板上的 primitives `Modal`；`cleanupEligible` 行的技能 / reveal / 重新登记按钮与行内橙字、路径复用提示被移除，披露移入确认 Dialog；手动发现空结果以官方 info Toast 反馈。取代的呈现条款为 §3.2 的 deletion 状态/徽标映射所对应的徽标呈现（仅 `cleanupEligible` 行）、§6.2 的徽标/副行呈现要求、§6.2 的确认形态与「没有 overlay 清理对话框」、§6.5 的路径复用提示位置、以及 Alternatives 中「清理弹窗/overlay」的否决。§6.1 的清理资格、§6.3–§6.4 的 owner 复验、§6.5 的披露义务本身、§6.8 的映射修剪、§7 的端点形状、§8 的授权边界与 §20.1 的自动空结果静默均不变。
 
 ## 第十八次修订（2026-11-09）
 
@@ -536,7 +540,7 @@ type CandidateKey = string
 | 路径缺失（cleanupEligible） | 同路径新 adminId 重建 | `changed` | 同上；新候选进入 inventory，但 `addNew` duplicate，直到旧根普通 Remove/清理 |
 | 任意 | 无 watcher 时同路径重建 | 不可可靠区分 | 按 active 处理；L4 残余；面板仍提供手动 Remove |
 
-- **删除信号只决定状态/徽标；清理资格只由 §6.1 的 `record.path` 确认缺失 + `addedAt` 决定。** admin 消失但路径仍存在不是 cleanup，只是 `unregistered` 徽标 + 普通 Remove；本表与 §6.1–§6.4 必须一致。
+- **删除信号只决定状态/徽标；清理资格只由 §6.1 的 `record.path` 确认缺失 + `addedAt` 决定。** admin 消失但路径仍存在不是 cleanup，只是 `unregistered` 徽标 + 普通 Remove；本表与 §6.1–§6.4 必须一致。（2026-11-16：`cleanupEligible` 行的徽标呈现拟由 [ADR-0045](./ADR-0045-worktree-cleanup-panel-ui.md)（Proposed）调整；分类与授权不变。）
 
 - 可可靠识别的是：admin 目录增删、根目录删除事件、admin `gitdir` 变更。**不可可靠识别**的是：宿主重启/无 client 期间同路径、同 adminId 的重建；此时 inventory 只看到路径存在，服务无法证明它换过；这是 L4 残余的一部分。
 
@@ -686,10 +690,10 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 
 #### 6.2 面板显示，不弹窗，不自动清理（L2/L3/L7）
 
-- Workspace Folders 对话框对 deletion 状态的 B 根显示徽标/副行：“Worktree deleted” / “Worktree directory missing” / “Worktree moved” / “Worktree unregistered”。
+- Workspace Folders 对话框对 deletion 状态的 B 根显示徽标/副行：“Worktree deleted” / “Worktree directory missing” / “Worktree moved” / “Worktree unregistered”。（2026-11-16：`cleanupEligible` 行不再显示行内状态副行，拟由 [ADR-0045](./ADR-0045-worktree-cleanup-panel-ui.md)（Proposed）取代该呈现要求；不可清理状态保持本行。）
 - 只有 `cleanupEligible`（路径确认缺失）的行显示 `...` → “Clean up additional root”；批量“Clean up deleted worktree roots (N)”也只统计这些行。`cleanupEligible` = 映射存在 + `record.path` 确认缺失 + `rootAddedAt` 与当前 `addedAt` 一致；`unregistered` / `changed` 且路径仍存在、或 addedAt 不一致的行保留普通 Remove，由用户显式确认。
 - 点击后可在面板内做一次**用户主动的**确认（不是自动弹窗），再调用清理端点。
-- **没有 overlay 清理对话框**；“不再提醒” checkbox 只存在于 A/B 发现对话框。
+- **没有 overlay 清理对话框**；“不再提醒” checkbox 只存在于 A/B 发现对话框。（2026-11-16：该确认形态拟由 [ADR-0045](./ADR-0045-worktree-cleanup-panel-ui.md)（Proposed，接受后生效）取代——改为覆盖在面板上的确认 Modal；清理资格、授权与 owner 复验不变。）
 - **永远不自动清理**：服务不会在删除事件上调用 `registry.removeForDeletedWorktree`；只有用户点清理按钮（或显式命令）才删除。
 - 清理只允许删除 mapped、`cleanupEligible` 的 B 根；A 根与用户手动添加/revive 的根永不进入。
 
@@ -785,6 +789,8 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 - 之后同路径再出现 worktree → 重新走 B 提示。
 - **残余**：因为清理永不自动，在用户点清理之前旧 B 根仍在；如果同路径出现新目录/worktree，Registry 的 `recordedPath` 路径级恢复仍可能把它标为 `available` 并授权。面板必须显著提示：
   > “该 worktree 已不存在。清理前，同一路径的新目录可能继承此授权。”
+
+  （2026-11-16：该提示的呈现位置拟由 [ADR-0045](./ADR-0045-worktree-cleanup-panel-ui.md)（Proposed，接受后生效）从列表常驻改为删除确认层；披露义务保留。）
 - 要彻底消除，只能自动清理或给 Registry 增加 worktree 身份字段；两者均不在本次范围。这是本决策显式接受的残余。
 
 #### 6.6 ignore 只关发现（L5）
@@ -921,7 +927,7 @@ $DSH_HOME/storages/multi_root_workspace.worktree-prompts/
 - **把 A 改为授权 common git dir。** 能覆盖默认 pool，且授权最小；但本决策按用户选择 B（主 worktree 根），并显式接受默认 pool 的 gap。若未来要覆盖默认 pool，这是唯一不改 `primary-overlap` 的自动方案。
 - **自动添加。** 违反“用户明确确认”的前提；否决。
 - **删除时自动移除。** 违反 Registry “nothing is deleted on the operator's behalf”；暂时缺失/网络盘会被误删；否决（L2/L3）。
-- **清理弹窗/overlay。** 用户要求面板内处理；且非当前 workspace 的清理弹窗无法正确定位；否决（L7）。
+- **清理弹窗/overlay。** 用户要求面板内处理；且非当前 workspace 的清理弹窗无法正确定位；否决（L7）。（2026-11-16：该否决拟由 [ADR-0045](./ADR-0045-worktree-cleanup-panel-ui.md)（Proposed，接受后生效）取代——面板本身已是 session 派生的模态 Dialog，确认层作用于当前视图列出的 id，不存在跨 workspace 定位问题；仍是面板内处理。）
 - **客户端 localStorage 存“不再提醒”。** 不符合“宿主持久化、以 workspace 为单位”；否决（Q3）。
 - **单个全局 sidecar 文件 + merge-on-write。** 跨 Host 不同 workspace 的写仍会互相覆盖；否决（P1）。改为按 `primaryKey` 分文件。
 - **session 级状态。** 同一 workspace 的两个 session 各建 watcher、各提示一次；否决（P3）。按 `primaryKey` 共享，session 只做 waiter/鉴权。

@@ -188,7 +188,12 @@ export function PathLabel(props: {
   )
 }
 
-/** Minimal `Modal` mirror: closed renders nothing; open portals a labeled dialog. */
+/**
+ * Minimal `Modal` mirror: closed renders nothing; open portals a labeled
+ * dialog with the primitive's fixed close control (the real Modal renders one
+ * that cannot be disabled — a request in flight stays submitted when the
+ * operator dismisses the dialog this way).
+ */
 export function Modal(props: {
   readonly open: boolean
   readonly onClose: () => void
@@ -205,6 +210,7 @@ export function Modal(props: {
       'div',
       { role: 'dialog', 'aria-label': props.title, className: props.className },
       createElement('h2', null, props.title),
+      createElement('button', { type: 'button', 'aria-label': props.closeLabel, onClick: props.onClose }, '×'),
       props.description === undefined ? null : createElement('p', null, props.description),
       props.children,
       props.footer,

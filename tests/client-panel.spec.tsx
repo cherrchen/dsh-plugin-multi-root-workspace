@@ -1024,6 +1024,25 @@ describe('the panel dialog', () => {
     })
   })
 
+  it('stacks the root-limit hint on its own line above the footer controls', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B], limit: 2, count: 2 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
+
+    const footer = document.querySelector('.mrfw-actions') as HTMLElement
+    const hint = footer.firstElementChild as HTMLElement
+    // The hint owns the footer's first line; it is not a control wedged between
+    // the add row and Retry/Worktree suggestions.
+    expect(hint.className).toContain('mrfw-actionsNote')
+    expect(hint.textContent).toBe(`${NS}.panel.limitReached`)
+    const retry = screen.getByRole('button', { name: `${NS}.panel.retry` })
+    expect(hint.contains(retry)).toBe(false)
+    // Everything after the hint is still one of the original controls, in order.
+    expect(Array.from(footer.children).slice(1).every(element => element.tagName === 'BUTTON' || element.tagName === 'INPUT')).toBe(true)
+  })
+
   it('flips a root to read-only without asking, and renders the host answer', async () => {
     const harness = mount()
     const confirm = vi.spyOn(window, 'confirm')

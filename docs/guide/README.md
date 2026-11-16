@@ -70,9 +70,9 @@ Windows Full-access 的局部拒写独立 runner 通过管理员安装的 broker
 
 **发现与身份**：只枚举 `<common>/worktrees/*/gitdir`，不运行 `git worktree list`。候选必须属于同一 common、admin 在 `common/worktrees/<id>` 下、`.git` 文件与 admin 的 `gitdir` 双向一致、admin/common HEAD 通过语法校验且 common 结构有效。候选身份是 `adminId + canonical root + canonical admin gitdir target`；同一 workspace 的多个 session 共享 inventory、去重与 watcher，展示按 session 的 mode 过滤。只读会话可以处理 B（登记策略始终 `inherit`），Full-access 不提示。可见候选恰好一个时返回 `prompt`（原确认对话框），两个及以上返回 `prompts`（可勾选列表）；`seenViewRevision` 是唯一的已展示游标。
 
-**提示与确认**：确认对话框显示实际路径、当前有效权限、`inherit` 与 workspace 级持久性；勾选「不再提示」写入 sidecar，对该 workspace 的所有 session 生效。确认走 Registry owner 的 `addNew`：owner 在串行队列内重跑完整 primary/candidate 判据、HEAD 语法、祖先 gitlink 与目录身份，只有全部一致才写；只新建，不 revive，不存在同路径记录。`duplicate` 视为已登记并停止提示，但不写清理映射。
+**提示与确认**：确认对话框显示实际路径、当前有效权限、`inherit` 与 workspace 级持久性；勾选「不再提示」写入 sidecar，对该 workspace 的所有 session 生效。确认走 Registry owner 的 `addNew`：owner 在串行队列内重跑完整 primary/candidate 判据、HEAD 语法、祖先 gitlink 与目录身份，只有全部一致才写；只新建，不 revive，不存在同路径记录。`duplicate` 视为已登记并停止提示，但不写清理映射。手动「Worktree 建议」入口（面板「重试」右侧）在没有任何可添加候选时，会在关闭面板后以官方 info Toast 提示「当前没有可添加的 Worktree。」；自动会话激活的空结果与提示「查看」的竞态空保持静默。
 
-**删除与清理**：删除信号（admin 消失、路径缺失、admin `gitdir` 指向新路径）只决定徽标。清理资格只看 `record.path` 是否确认缺失，并绑定 `rootId + path + addedAt`；路径存在、不可访问、或 checkout 仍有效时返回 `worktree/not-eligible`，面板只提供普通 Remove。批量清理只接受面板列出并显式确认的精确 id。**永不在删除事件上自动调用清理**。缺失根继续占额度。清理前同路径新目录可能继承旧授权，这是已记录的 L4 残余，面板会提示。
+**删除与清理**：删除信号（admin 消失、路径缺失、admin `gitdir` 指向新路径）只决定徽标。清理资格只看 `record.path` 是否确认缺失，并绑定 `rootId + path + addedAt`；路径存在、不可访问、或 checkout 仍有效时返回 `worktree/not-eligible`，面板只提供普通 Remove。清理入口：批量按钮位于「附属工作目录」标题右侧（有可清理项时才出现），单行入口是可清理行末尾的红色删除按钮；两者打开同一个**覆盖在面板上的确认 Dialog**（标题、数量、不可撤销说明、路径复用风险披露、取消与确认），不再是面板 body 顶部的内联文字。批量清理只接受面板列出并显式确认的精确 id。可清理行只保留 显示名 + 权限徽标 + 路径 + 红色删除 + `…` 菜单，其余状态文字与动作（技能、reveal、重新登记）移除；非 `cleanupEligible` 的失效行保持原样。**永不在删除事件上自动调用清理**。缺失根继续占额度。清理前同路径新目录可能继承旧授权，这是已记录的 L4 残余——该风险在删除确认 Dialog 中披露（单条与批量各有文案）。
 
 **持久化与降级**：`worktreeRoots` 与 `ignored` 保存在 `$DSH_HOME/storages/multi_root_workspace.worktree-prompts/<sha256(primaryKey)>.json`，只有持有 store lease 的 Registry owner 写入，follower 通过认证 IPC 请求。prune 只消费 owner 队列内的完整 `RegistrySnapshotView`：`available=false` 的空列表保留映射，`available=true` 的空快照才允许删除；跨 epoch 按 `rootId + path + rootAddedAt` 重绑或修剪。sidecar 损坏/不可写时 owner 退化为 memory-only 并告警，不影响授权；B 根按手动根处理，专用清理拒绝。
 
