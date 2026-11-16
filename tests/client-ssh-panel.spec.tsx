@@ -141,6 +141,7 @@ function renderDialog(options: {
   t?: Translate
   onList?: () => void
   onClose?: () => void
+  remoteCalls?: { method: string; args: unknown[] }[]
 } = {}): void {
   const remotesView: RemotesView = {
     primaryRoot: '/repos/primary',
@@ -150,7 +151,11 @@ function renderDialog(options: {
     endpoints: options.endpoints ?? [],
   } as RemotesView
   const panel = { call: async () => ROOTS }
-  const remotes = { list: async () => { options.onList?.(); return remotesView } }
+  const remotes = {
+    list: async () => { options.onList?.(); return remotesView },
+    add: async (...args: unknown[]) => { options.remoteCalls?.push({ method: 'add', args }); return remotesView },
+    remove: async (...args: unknown[]) => { options.remoteCalls?.push({ method: 'remove', args }); return remotesView },
+  }
   render(createElement(WorkspaceFoldersDialog, {
     panel: panel as never,
     remotes: remotes as never,
@@ -607,6 +612,110 @@ describe('the SSH management dialog', () => {
     fireEvent.click(sshFormConfirm(dialog))
     await callsOf(ssh, 'credentialGenerate')
     await waitFor(() => expect(lists).toBeGreaterThan(1))
+  })
+
+  it('walks the readiness chain: helper is the first pending step with a single install affordance', async () => {
+    const ssh = fakeSsh(sshState({ linked: false }))
+    const dialog = await withDialog({ ssh }, 'manage')
+    await within(dialog).findByText('ssh.environments')
+    const row = dialog.querySelector('.mrfw-sshEnvRow') as HTMLElement
+    expect(within(row).getByText('ssh.ready.label')).toBeTruthy()
+    expect(within(row).getByText('ssh.step.helper')).toBeTruthy()
+    expect(within(row).getByText('ssh.step.link')).toBeTruthy()
+    expect(within(row).getByText('ssh.step.binding')).toBeTruthy()
+    // One install affordance — the primary next step, not two same-named buttons.
+    expect(within(row).getAllByRole('button', { name: 'ssh.helperInstall' })).toHaveLength(1)
+    // The link step is not this row's primary yet: only the banner offers it.
+    expect(within(row).queryByRole('button', { name: 'ssh.linkNow' })).toBeNull()
+    expect(within(dialog).getByText('ssh.linkBanner')).toBeTruthy()
+  })
+
+  it('makes linking ssh_config the primary step once the helper is installed', async () => {
+    const ssh = fakeSsh(sshState({ linked: false, environments: [ENV_HELPER] }))
+    const dialog = await withDialog({ ssh }, 'manage')
+    await within(dialog).findByText('ssh.environments')
+    const row = dialog.querySelector('.mrfw-sshEnvRow') as HTMLElement
+    const link = within(row).getAllByRole('button', { name: 'ssh.linkNow' })
+    expect(link).toHaveLength(1)
+    fireEvent.click(link[0]!)
+    expect(await callsOf(ssh, 'configLink')).toEqual([['session-1']])
+  })
+
+  it('makes add-binding the primary step for a linked environment and preselects it', async () => {
+    const ssh = fakeSsh(sshState({ environments: [ENV_HELPER] }))
+    const dialog = await withDialog({ ssh }, 'manage')
+    await within(dialog).findByText('ssh.environments')
+    const row = dialog.querySelector('.mrfw-sshEnvRow') as HTMLElement
+    fireEvent.click(within(row).getAllByRole('button', { name: 'ssh.bindingAdd' })[0]!)
+    const select = within(dialog).getByLabelText('ssh.binding.environment') as HTMLSelectElement
+    expect(select.value).toBe('env-helper')
+  })
+
+  it('registers a ready binding endpoint from the dialog', async () => {
+    const remoteCalls: { method: string; args: unknown[] }[] = []
+    const binding = { environmentId: 'env-helper', rootId: 'web', path: '/srv/app', actions: ['read' as const] }
+    const endpoint = {
+      environmentId: 'env-helper', rootId: 'web', path: '/srv/app', platform: 'linux',
+      state: 'unregistered' as const, actions: [], transfers: [],
+      capabilities: { read: true, write: false, exec: false, receive: false, send: false },
+    }
+    const ssh = fakeSsh(sshState({ environments: [ENV_HELPER], bindings: [binding] }))
+    const dialog = await withDialog({ ssh, endpoints: [endpoint], remoteCalls }, 'manage')
+    await within(dialog).findByText('ssh.environments')
+    expect(within(dialog).getByText('ssh.ready.done')).toBeTruthy()
+    const bindingRow = within(dialog).getByText('web').closest('.mrfw-row') as HTMLElement
+    expect(within(bindingRow).getByText('remote.state.unregistered')).toBeTruthy()
+    fireEvent.click(within(bindingRow).getByRole('button', { name: 'panel.remoteRegister' }))
+    await waitFor(() => expect(remoteCalls).toEqual([{ method: 'add', args: ['session-1', 'env-helper', 'web'] }]))
+  })
+
+  it('marks a registered binding and withdraws it from the dialog', async () => {
+    const remoteCalls: { method: string; args: unknown[] }[] = []
+    const binding = { environmentId: 'env-helper', rootId: 'web', path: '/srv/app', actions: ['read' as const] }
+    const endpoint = {
+      environmentId: 'env-helper', rootId: 'web', path: '/srv/app', platform: 'linux',
+      state: 'registered' as const, actions: [], transfers: [],
+      capabilities: { read: true, write: false, exec: false, receive: false, send: false },
+    }
+    const ssh = fakeSsh(sshState({ environments: [ENV_HELPER], bindings: [binding] }))
+    const dialog = await withDialog({ ssh, endpoints: [endpoint], remoteCalls }, 'manage')
+    const bindingRow = (await within(dialog).findByText('web')).closest('.mrfw-row') as HTMLElement
+    expect(within(bindingRow).getByText('remote.state.registered')).toBeTruthy()
+    fireEvent.click(within(bindingRow).getByRole('button', { name: 'panel.remoteRemove' }))
+    await waitFor(() => expect(remoteCalls).toEqual([{ method: 'remove', args: ['session-1', 'env-helper', 'web'] }]))
+  })
+
+  it('lands on the Connections tab after a new environment saves so the next step is on screen', async () => {
+    const ssh = fakeSsh(sshState({ environments: [], credentials: [] }))
+    const dialog = await withDialog({ ssh }, 'add')
+    await within(dialog).findByText('ssh.add.stepTarget')
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.environmentId'), { target: { value: 'env-build' } })
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.hostname'), { target: { value: 'build.internal' } })
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.user'), { target: { value: 'ci' } })
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'ssh.field.alias' }))
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'ssh.field.alias' }), { target: { value: 'build' } })
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.workspace'), { target: { value: '/srv/ci' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
+    await within(dialog).findByRole('radio', { name: /SHA256:scanned/ })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.save' }))
+    await callsOf(ssh, 'environmentSave')
+    // The save lands the operator on the new row's readiness chain, not a blank form.
+    expect(await within(dialog).findByText('ssh.environments')).toBeTruthy()
+    expect(within(dialog).queryByText('ssh.add.stepTarget')).toBeNull()
+  })
+
+  it('points unregistered personal endpoints at the readiness chain and hides the hint once all are registered', async () => {
+    const endpoint = {
+      environmentId: 'env-helper', rootId: 'web', path: '/srv/app', platform: 'linux',
+      state: 'unregistered' as const, actions: [], transfers: [],
+      capabilities: { read: true, write: false, exec: false, receive: false, send: false },
+    }
+    renderDialog({ ssh: fakeSsh(sshState()), endpoints: [endpoint] })
+    expect(await screen.findByText('panel.remoteRegisterGuide')).toBeTruthy()
+    cleanup()
+    renderDialog({ ssh: fakeSsh(sshState()), endpoints: [{ ...endpoint, state: 'registered' as const }] })
+    await screen.findByText('remote.state.registered')
+    expect(screen.queryByText('panel.remoteRegisterGuide')).toBeNull()
   })
 
   it('closes without closing the Workspace Folders dialog underneath', async () => {
