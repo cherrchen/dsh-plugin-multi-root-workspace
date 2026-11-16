@@ -1,8 +1,8 @@
 # 附加根文件预览导航树的工作区搜索（实施计划）
 
-> 状态：**待实施（P1+）**；P0 文档已产出（未提交），并已按 2026-11-16 外部技术评审的 F1–F3 修订
-> （RootSwitcher 过渡帧缺陷纳入、测试范围编号、危害主次表述）。本文件是实施计划与后续执行账本，
-> 每阶段结束把命令与结果写入「进度与证据」。
+> 状态：**P1–P4 已实施**（2026-11-16，分支 `feat/additional-file-tree-search`）；P5 门禁与实机目检进行中。
+> P0 文档已作为 `7959317` 提交，并按 2026-11-16 外部技术评审的 F1–F3 修订（RootSwitcher 过渡帧缺陷纳入、
+> 测试范围编号、危害主次表述）。本文件是实施计划与执行账本，每阶段结束把命令与结果写入「进度与证据」。
 >
 > 分支：`feat/additional-file-tree-search`（`main` @ `53ae34d`）。
 > 关联：[ADR-0043](../../decisions/ADR-0043-additional-root-preview-navigator-search.md)、
@@ -501,8 +501,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 ## Implementation
 
 > 每阶段一个可独立 review 的提交；实现与测试同提交，文档最后一批。阶段门禁全绿才进入下一阶段。
-> **P0 已于本次会话完成（未提交，按用户要求）；P1–P5 待外部技术评审与用户批准后执行。** P0 的 ADR、
-> 本计划与索引在评审通过后作为独立的第一笔 `docs(adr)` 提交入库（不混入 P1 代码提交）。
+> P0 已作为独立的第一笔 `docs(adr)` 提交入库（不混入 P1 代码提交）；P1–P4 已完成，P5 执行中。
 
 ### P0 文档（本次交付）
 
@@ -663,12 +662,16 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 | 阶段 | 状态 | 提交 | 证据（命令/结果） |
 | --- | --- | --- | --- |
-| P0 | 已完成（未提交；外部评审 F1–F3 已并入） | — | ADR-0043 + 本计划 + 四个索引条目 + 进度账本行；`node scripts/check-docs.mjs` → 0 errors / 0 warnings（2026-11-16）；外部技术评审有条件通过，F1–F3 修订记录见文末 |
-| P1 | 待实施 | — | — |
-| P2 | 待实施 | — | — |
-| P3 | 待实施 | — | — |
-| P4 | 待实施 | — | — |
-| P5 | 待实施 | — | — |
+| P0 | 已完成 | `7959317` | ADR-0043 + 本计划 + 四个索引条目 + 进度账本行；`node scripts/check-docs.mjs` → 0 errors / 0 warnings（2026-11-16）；外部技术评审有条件通过，F1–F3 修订记录见文末 |
+| P1 | 已完成 | `39262d5`（F1 换根修复）+ `b3ad81c`（preview 模式） | focused vitest：`client-search` 27、`client-search-state` 7、`client-files` 17、`client-switcher` 32（含新增换根过渡帧用例）全绿；`pnpm lint` 0 warnings / 0 errors、`pnpm typecheck` 通过；Files 页面只含共享对齐清单与 `data-mrfw-files-pane` 标记 |
+| P2 | 已完成 | `881d2ad` | `tests/client-navigator.spec.tsx` 36（24 既有 + 12 新）全绿，seat 缺席路径逐项回归；`pnpm typecheck` / `pnpm lint` 通过；Host 侧 diff 为空 |
+| P3 | 已完成 | `967ef94` | `client-files` 20、`client-styles` 44、`client-navigator` 38 全绿；styles 双向 `matches()`（原生直接子节点匹配、插件嵌套节点不匹配）；焦点交接三形态（preview 有/无 pane 包装、Files 页包装、旧直挂） |
+| P4 | 已完成 | （本提交 `docs: document additional-root preview navigator search`） | ADR-0041 Amendment、ADR-0043 状态、README 双语、architecture §7、requirements、migration reference 第三接口面、FORK.md、compat note 双语、troubleshooting；`node scripts/check-docs.mjs` → 0 errors / 0 warnings |
+| P5 | 进行中 | — | 全量门禁与实机目检见下节 |
+
+### P5 执行记录（命令与结果）
+
+（P5 门禁与实机目检完成后回填；本机受限项按既有基线记录，CI 拥有最终信号。）
 
 ### 本次会话的版本与代码事实核对（P0 证据）
 

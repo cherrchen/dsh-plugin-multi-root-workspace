@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-11-16 外部技术评审有条件通过；评审条件 F1–F3 已并入本 ADR 与本 ADR 的实施计划，P1+ 尚未实施）
+Accepted（2026-11-16 外部技术评审有条件通过；评审条件 F1–F3 已并入本 ADR 与本 ADR 的实施计划。P1–P4 已于 2026-11-16 在分支 `feat/additional-file-tree-search` 实施，P5 门禁与实机目检进行中）
 
 ## Date
 
