@@ -1,7 +1,7 @@
 # 附加根文件预览导航树的工作区搜索（实施计划）
 
-> 状态：**P1–P4 已实施**；P5 本机门禁与**隔离环境交互目检**已完成（见「进度与证据」，截图待维护者目视复核）。分支 `feat/additional-file-tree-search`。
-> P0 文档已作为 `7959317` 提交，并按 2026-11-16 外部技术评审的 F1–F3 修订（RootSwitcher 过渡帧缺陷纳入、
+> 状态：**P1–P4 已实施**；P5 本机门禁与**隔离环境交互目检**已完成（见「进度与证据」，截图待维护者目视复核）。分支 `feat/additional-file-tree-search` 已推送，Draft PR [#65](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/pull/65) 等待 CI。
+> P0 文档已作为 `2265702` 提交，并按 2026-11-16 外部技术评审的 F1–F3 修订（RootSwitcher 过渡帧缺陷纳入、
 > 测试范围编号、危害主次表述）。本文件是实施计划与执行账本，每阶段结束把命令与结果写入「进度与证据」。
 >
 > 分支：`feat/additional-file-tree-search`（`main` @ `53ae34d`）。
@@ -662,10 +662,10 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 | 阶段 | 状态 | 提交 | 证据（命令/结果） |
 | --- | --- | --- | --- |
-| P0 | 已完成 | `7959317` | ADR-0043 + 本计划 + 四个索引条目 + 进度账本行；`node scripts/check-docs.mjs` → 0 errors / 0 warnings（2026-11-16）；外部技术评审有条件通过，F1–F3 修订记录见文末 |
-| P1 | 已完成 | `39262d5`（F1 换根修复）+ `b3ad81c`（preview 模式） | focused vitest：`client-search` 27、`client-search-state` 7、`client-files` 17、`client-switcher` 32（含新增换根过渡帧用例）全绿；`pnpm lint` 0 warnings / 0 errors、`pnpm typecheck` 通过；Files 页面只含共享对齐清单与 `data-mrfw-files-pane` 标记 |
-| P2 | 已完成 | `881d2ad` | `tests/client-navigator.spec.tsx` 36（24 既有 + 12 新）全绿，seat 缺席路径逐项回归；`pnpm typecheck` / `pnpm lint` 通过；Host 侧 diff 为空 |
-| P3 | 已完成 | `967ef94` | `client-files` 20、`client-styles` 44、`client-navigator` 38 全绿；styles 双向 `matches()`（原生直接子节点匹配、插件嵌套节点不匹配）；焦点交接三形态（preview 有/无 pane 包装、Files 页包装、旧直挂） |
+| P0 | 已完成 | `2265702` | ADR-0043 + 本计划 + 四个索引条目 + 进度账本行；`node scripts/check-docs.mjs` → 0 errors / 0 warnings（2026-11-16）；外部技术评审有条件通过，F1–F3 修订记录见文末 |
+| P1 | 已完成 | `324e7c5`（F1 换根修复）+ `d006203`（preview 模式） | focused vitest：`client-search` 27、`client-search-state` 7、`client-files` 17、`client-switcher` 32（含新增换根过渡帧用例）全绿；`pnpm lint` 0 warnings / 0 errors、`pnpm typecheck` 通过；Files 页面只含共享对齐清单与 `data-mrfw-files-pane` 标记 |
+| P2 | 已完成 | `8a5e38d` | `tests/client-navigator.spec.tsx` 36（24 既有 + 12 新）全绿，seat 缺席路径逐项回归；`pnpm typecheck` / `pnpm lint` 通过；Host 侧 diff 为空 |
+| P3 | 已完成 | `d695ba8` | `client-files` 20、`client-styles` 44、`client-navigator` 38 全绿；styles 双向 `matches()`（原生直接子节点匹配、插件嵌套节点不匹配）；焦点交接三形态（preview 有/无 pane 包装、Files 页包装、旧直挂） |
 | P4 | 已完成 | （本提交 `docs: document additional-root preview navigator search`） | ADR-0041 Amendment、ADR-0043 状态、README 双语、architecture §7、requirements、migration reference 第三接口面、FORK.md、compat note 双语、troubleshooting；`node scripts/check-docs.mjs` → 0 errors / 0 warnings |
 | P5 | 本机门禁 + 隔离环境交互目检完成 | — | 见下节「P5 执行记录」：lint/typecheck/build/focused/compat/docs/pack 全绿；`pnpm test` 1871/165/17（17 个基线同因）；三项 smoke 与 packed、auto-review 全绿；`verify:all` 在完整 test 处因基线同因中止；隔离 scratch `$DSH_HOME` + 真实 `dsh web` + Chrome/CDP 的交互目检覆盖全部检查项并截图 20 张 |
 
