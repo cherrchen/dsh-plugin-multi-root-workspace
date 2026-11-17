@@ -1378,6 +1378,66 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   gap: 8px;
 }
 
+.mrfw-sshWizardSteps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mrfw-sshWizardStep {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 4px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.mrfw-sshWizardStep:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-sshWizardStep:disabled {
+  cursor: not-allowed;
+}
+
+.mrfw-sshWizardStepActive {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-sshWizardStepDone {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-sshWizardStep:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.mrfw-sshWizardArrow {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.mrfw-sshWizardNav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .mrfw-field {
   display: flex;
   align-items: center;
