@@ -387,6 +387,7 @@ export const STYLES = /* css */ `
    them over the reload/search controls; upstream's header overflows at that
    width too, but overlapping controls are worse than a clipped glyph. */
 .mrfw-rootSwitchBtn {
+  position: relative;
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -416,11 +417,38 @@ export const STYLES = /* css */ `
   color: var(--dsw-alias-label-secondary);
 }
 
+/* The label text is fitted to the measured width in three tiers (whole name,
+   head and tail, head alone — see root-name-fit.ts); the ellipsis here is only
+   the fallback for a runtime that cannot measure text. */
 .mrfw-rootSwitchLabel {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The off-flow probe a runtime without an offscreen canvas measures candidate
+   strings in. It inherits the label's font from the button and never takes
+   part in the row. */
+.mrfw-rootSwitchProbe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+  font: inherit;
+  line-height: inherit;
+}
+
+/* While the name is truncated the path's own tail would repeat the same root
+   in a second, differently cut form — and only a sliver of it fits next to the
+   shortened name. The ink is hidden but the box stays: it keeps absorbing the
+   leftover width so the reload/search/open-in-app controls stay at their
+   native offsets. */
+.mrfw-rootSwitcher[data-name-form="middle"] .mrfw-switcherPath,
+.mrfw-rootSwitcher[data-name-form="head"] .mrfw-switcherPath {
+  visibility: hidden;
 }
 
 .mrfw-rootSwitchChevron {

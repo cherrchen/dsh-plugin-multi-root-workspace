@@ -71,6 +71,18 @@ describe('the root-switcher rules', () => {
     expect(STYLES).toMatch(/\.mrfw-rootSwitchBtn\s*\{[^}]*overflow:\s*hidden/s)
   })
 
+  it('fits the root name in three tiers and hides the repeated path tail', () => {
+    // The label text is fitted by root-name-fit.ts; this ellipsis is only the
+    // fallback for a runtime that cannot measure text.
+    expect(STYLES).toMatch(/\.mrfw-rootSwitchLabel\s*\{[^}]*text-overflow:\s*ellipsis/s)
+    // The probe is off-flow and invisible, and the button contains it.
+    expect(STYLES).toMatch(/\.mrfw-rootSwitchBtn\s*\{[^}]*position:\s*relative/s)
+    expect(STYLES).toMatch(/\.mrfw-rootSwitchProbe\s*\{[^}]*position:\s*absolute[^}]*visibility:\s*hidden/s)
+    // A truncated name hides the path's ink — its box stays to keep the header
+    // controls at their native offsets.
+    expect(STYLES).toMatch(/\.mrfw-rootSwitcher\[data-name-form="middle"\]\s+\.mrfw-switcherPath,\s*\n?\.mrfw-rootSwitcher\[data-name-form="head"\]\s+\.mrfw-switcherPath\s*\{[^}]*visibility:\s*hidden/s)
+  })
+
   it('reproduces the header item gap inside the switcher so replacements keep native offsets', () => {
     // The upstream .header puts 4px between flex items; the takeover renders
     // the reload and the open-in-app fork inside the switcher instead, so the

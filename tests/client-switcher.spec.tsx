@@ -20,7 +20,7 @@
 
 import { StrictMode, createElement, useSyncExternalStore, type ReactElement } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OPEN_IN_APP_APPS_ROUTE, OPEN_IN_APP_OPEN_ROUTE } from '@deepseek-ai/dsh-host-open-in-app/shared'
 import type { StoreInstance } from '@deepseek-ai/dsh-client-store'
 import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from '../src/contract.ts'
@@ -1206,5 +1206,105 @@ describe('the Files-tab root switch search handoff', () => {
     fireEvent.click(document.querySelector<HTMLElement>('[data-files-search-retry]')!)
     await waitFor(() => { expect(searchCalls(harness)).toHaveLength(2) })
     await waitFor(() => { expect(document.querySelector('[data-files-row="search-failed"]')).toBeNull() })
+  })
+})
+
+describe('the narrow-header root name', () => {
+  /** The observed resize callbacks, one per mounted switcher. */
+  const observers: Array<() => void> = []
+  /** The switcher width the stubbed layout reports. */
+  const layout = { switcherWidth: 400 }
+
+  /** A zero box for every element the fixture does not size. */
+  const ZERO_RECT = {
+    left: 0, right: 0, width: 0, top: 0, bottom: 0, height: 0, x: 0, y: 0, toJSON: () => ({}),
+  } as DOMRect
+
+  beforeEach(() => {
+    observers.length = 0
+    layout.switcherWidth = 400
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { observers.push(callback) }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    })
+    // A deterministic stand-in for the offscreen canvas: 7px per code point.
+    vi.stubGlobal('OffscreenCanvas', class {
+      getContext(): { font: string; measureText: (text: string) => { width: number } } {
+        return { font: '', measureText: text => ({ width: Array.from(text).length * 7 }) }
+      }
+    })
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (!this.classList.contains('mrfw-rootSwitcher')) return ZERO_RECT
+      const width = layout.switcherWidth
+      return { left: 0, right: width, width, top: 0, bottom: 38, height: 38, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+    })
+  })
+
+  afterEach(() => { vi.restoreAllMocks() })
+
+  /** The label text the trigger currently renders. */
+  const labelText = (): string | null => document.querySelector('.mrfw-rootSwitchLabel')?.textContent ?? null
+  /** The tier the switcher reports. */
+  const nameForm = (): string | null => document.querySelector('.mrfw-rootSwitcher')?.getAttribute('data-name-form') ?? null
+  /** The trigger's full accessible name. */
+  const accessibleName = (): string | null =>
+    document.querySelector('.mrfw-rootSwitchBtn')?.getAttribute('aria-label') ?? null
+
+  /** Play one header resize back to the component, as ResizeObserver would. */
+  async function resize(width: number): Promise<void> {
+    layout.switcherWidth = width
+    await act(async () => { for (const callback of observers) callback() })
+  }
+
+  it('keeps the whole name, then both ends, then the head as the header narrows', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'dsh-plugin-multi-root-workspace', roots: [], limit: 16, count: 0 })
+    renderInPane(harness)
+    await waitFor(() => { expect(labelText()).toBe('dsh-plugin-multi-root-workspace') })
+    expect(nameForm()).toBe('full')
+
+    await resize(210)
+    await waitFor(() => { expect(nameForm()).toBe('middle') })
+    const middle = labelText() ?? ''
+    expect(middle).toContain('…')
+    expect(middle.startsWith('dsh')).toBe(true)
+    expect(middle.endsWith('workspace')).toBe(true)
+
+    await resize(70)
+    await waitFor(() => { expect(nameForm()).toBe('head') })
+    expect(labelText()?.startsWith('dsh')).toBe(true)
+    expect(labelText()?.endsWith('…')).toBe(true)
+
+    // The accessible name is the root, never the truncated drawing.
+    expect(accessibleName()).toBe('dsh-plugin-multi-root-workspace')
+  })
+
+  it('restores the whole name when a shorter root is selected', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'dsh-plugin-multi-root-workspace', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 })
+    renderInPane(harness)
+    await waitFor(() => { expect(labelText()).toBe('dsh-plugin-multi-root-workspace') })
+    await resize(210)
+    await waitFor(() => { expect(nameForm()).toBe('middle') })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    await waitFor(() => { expect(labelText()).toBe('payments') })
+    expect(nameForm()).toBe('full')
+    expect(accessibleName()).toBe('payments')
+  })
+
+  it('keeps the whole name when the environment cannot measure text', async () => {
+    // No offscreen canvas: the fallback measures the hidden probe, whose box is
+    // zero in this DOM — nothing is known to be too wide, so nothing is cut.
+    vi.unstubAllGlobals()
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'dsh-plugin-multi-root-workspace', roots: [], limit: 16, count: 0 })
+    renderInPane(harness)
+    await waitFor(() => { expect(labelText()).toBe('dsh-plugin-multi-root-workspace') })
+    expect(nameForm()).toBe('full')
   })
 })
