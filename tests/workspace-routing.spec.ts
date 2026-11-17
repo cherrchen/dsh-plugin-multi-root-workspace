@@ -471,3 +471,99 @@ it('uses the policy fallback for a session without origin metadata instead of au
   const removed = await waterfall('tools/execute', { agent: { session: { header: {} } } }, async () => query('same.ts', fixture.outside))
   expect(removed).toMatchObject({ hover: { contents: expect.stringContaining(`"workspaceRoot":${JSON.stringify(fixture.workspace)}`) } })
 })
+
+describe('routed additional-root search', () => {
+  /** A stub upstream search that records the scope it was handed. */
+  function stubSearch(raw: WorkspaceFiles): { readonly seen: Array<{ readonly scope: unknown; readonly request: unknown }> } {
+    const seen: Array<{ readonly scope: unknown; readonly request: unknown }> = []
+    Object.defineProperty(raw, 'search', {
+      configurable: true,
+      writable: true,
+      value: async (scope: unknown, request: unknown) => {
+        seen.push({ scope, request })
+        return { matches: [{ path: 'x.ts', type: 'file' as const }], truncated: false, incomplete: false }
+      },
+    })
+    return { seen }
+  }
+
+  /** Record the Registry admissions the wrapper takes. */
+  function admissions(): Array<{ readonly kind: string; readonly policy: { readonly workspaceRoot: string } }> {
+    const calls: Array<{ readonly kind: string; readonly policy: { readonly workspaceRoot: string } }> = []
+    ctx.provide('multiRootRegistry', {
+      shared: true,
+      list: () => [],
+      withOperation: async (policy: { readonly workspaceRoot: string }, kind: string, body: () => Promise<unknown>) => {
+        calls.push({ kind, policy })
+        return body()
+      },
+    } as never)
+    return calls
+  }
+
+  it.skipIf(!hasUpstreamSearch)('admits a routed search once, under the primary root, and hands upstream the additional root', async () => {
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    const { seen } = stubSearch(raw)
+    await ctx.plugin(FilesRouting)
+    const calls = admissions()
+    const additional = canonicalPath(fixture.outside)
+    const answer = await ctx.workspaceFiles.search(
+      { sessionId: 's' as never, workspaceRoot: additional, primaryRoot: fixture.workspace } as never,
+      { query: 'x', excludedPaths: ['dist'], includeHidden: true, respectGitignore: false },
+      new AbortController().signal,
+    )
+    expect(answer).toMatchObject({ truncated: false, incomplete: false })
+    // The internal routing marker is stripped before the call reaches upstream:
+    // it names the additional root, exactly as if the browser had been able to.
+    expect(seen).toEqual([{
+      scope: { sessionId: 's', workspaceRoot: additional },
+      request: { query: 'x', excludedPaths: ['dist'], includeHidden: true, respectGitignore: false },
+    }])
+    // One admission, keyed by the Session's primary root — the operation root
+    // is the additional one, so keying on it would order under the wrong root.
+    expect(calls).toEqual([{ kind: 'files', policy: { workspaceRoot: fixture.workspace, mode: 'read-only' } }])
+  })
+
+  it.skipIf(!hasUpstreamSearch)('refuses a routed search for a directory no registration grants', async () => {
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    const { seen } = stubSearch(raw)
+    await ctx.plugin(FilesRouting)
+    admissions()
+    const foreign = join(fixture.base, 'foreign')
+    mkdirSync(foreign)
+    await expect(ctx.workspaceFiles.search(
+      { sessionId: 's' as never, workspaceRoot: canonicalPath(foreign), primaryRoot: fixture.workspace } as never,
+      { query: 'x', excludedPaths: [], includeHidden: false, respectGitignore: false },
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    expect(seen).toHaveLength(0)
+  })
+
+  it.skipIf(!hasUpstreamSearch)('refuses a routed search when the published grant does not cover the root', async () => {
+    const raw = new WorkspaceFiles(ctx, { maxBytes: 1024, maxFileBytes: 1024, maxLines: 5000, maxEntries: 1 })
+    const { seen } = stubSearch(raw)
+    await ctx.plugin(FilesRouting)
+    admissions()
+    const service = ctx.multiRootScope
+    let calls = 0
+    Object.defineProperty(service, 'scopeOf', {
+      configurable: true,
+      value: () => {
+        calls += 1
+        return []
+      },
+    })
+    try {
+      await expect(ctx.workspaceFiles.search(
+        { sessionId: 's' as never, workspaceRoot: canonicalPath(fixture.outside), primaryRoot: fixture.workspace } as never,
+        { query: 'x', excludedPaths: [], includeHidden: false, respectGitignore: false },
+        new AbortController().signal,
+      )).rejects.toMatchObject({ code: 'workspace-file/outside-workspace' })
+    } finally {
+      Reflect.deleteProperty(service, 'scopeOf')
+    }
+    expect(calls).toBe(1)
+    expect(seen).toHaveLength(0)
+  })
+})
+

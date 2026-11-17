@@ -13,6 +13,16 @@
  * delivered as `prompt`; two or more are delivered as `prompts` and rendered
  * as a checkbox list.
  *
+ * The second revision of the trigger model (ADR-0039 §二十次修订) splits the
+ * request into three roles that must not be confused:
+ *
+ * - `worktreePrompt` with `fresh: true` is the ONE read-only automatic check
+ *   (a notice-worthy candidate set, no side effects);
+ * - `worktreePromptSeen` records that the operator was already shown those
+ *   candidates (Host memory only — never authorization);
+ * - `worktreePromptResolve` with `action: 'snooze'` records a reminder delay
+ *   in the sidecar. Only ids and a mode travel; keys stay on the host.
+ *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/worktrees-contract
  */
 
@@ -21,6 +31,7 @@ import { z } from 'zod'
 /** The endpoint names, relative to the panel channel. */
 export type WorktreeEndpoint
   = | 'worktreePrompt'
+    | 'worktreePromptSeen'
     | 'worktreePromptWait'
     | 'worktreePromptResolve'
     | 'worktreePromptReset'
@@ -29,6 +40,7 @@ export type WorktreeEndpoint
 /** Every worktree endpoint, for exhaustive dispatch. */
 export const WORKTREE_ENDPOINTS: readonly WorktreeEndpoint[] = [
   'worktreePrompt',
+  'worktreePromptSeen',
   'worktreePromptWait',
   'worktreePromptResolve',
   'worktreePromptReset',
@@ -40,6 +52,26 @@ export type WorktreePromptKind = 'worktree' | 'main-checkout'
 /** The effective authority the panel shows for one prompt. */
 export type WorktreeEffectiveAccess = 'read-only' | 'read-write' | 'full-access' | 'unavailable'
 
+/**
+ * The three reminder delays the UI offers. The host converts `7d`/`30d` into
+ * an absolute instant with ITS clock; the browser never sends a timestamp.
+ */
+export type WorktreeSnoozeMode = 'until-new-worktree' | '7d' | '30d'
+
+/** The snooze choice a confirmation may carry. */
+export interface WorktreeSnoozeChoice {
+  readonly mode: WorktreeSnoozeMode
+}
+
+/** The access a confirmed row grants; defaults to inherit when omitted. */
+export type WorktreeAccess = 'inherit' | 'read-only' | 'read-write'
+
+/** One row's chosen access; ids, never paths, cross the wire. */
+export interface WorktreeAccessEntry {
+  readonly id: string
+  readonly access: WorktreeAccess
+}
+
 /** One prompt as the panel renders it. */
 export interface WorktreePromptView {
   readonly id: string
@@ -49,6 +81,8 @@ export interface WorktreePromptView {
   readonly primaryRoot: string
   readonly access: 'inherit'
   readonly effectiveAccess: WorktreeEffectiveAccess
+  /** The candidate checkout's branch when its HEAD is a branch ref, never a detached object id. */
+  readonly branch?: string | undefined
   readonly remaining: number
   readonly viewRevision: string
 }
@@ -68,10 +102,15 @@ export type WorktreePromptWaitView
     | { readonly status: 'lost'; readonly viewRevision: string }
     | { readonly status: 'stale'; readonly viewRevision: string; readonly reason: string }
 
-/** `worktreePrompt` answers this (always the full visible list). */
+/** `worktreePrompt` answers this (always a visible list). */
 export interface WorktreePromptAnswerView {
   readonly prompts: readonly WorktreePromptView[]
   readonly viewRevision: string
+}
+
+/** `worktreePromptSeen` answers how many ids it could claim. */
+export interface WorktreeSeenAnswerView {
+  readonly seen: number
 }
 
 /** One id the batch handled. */
@@ -105,12 +144,16 @@ export interface WorktreeResetAnswerView {
   readonly cleared: boolean
 }
 
-/** What a client may send: never a path, only ids and the flags the ADR names. */
+/** What a client may send: never a path, only ids, a mode and the flags the ADR names. */
 export interface WorktreeRequest {
   readonly sessionId: string
+  readonly fresh?: boolean
   readonly promptIds?: readonly string[]
-  readonly action?: 'add' | 'dismiss'
+  readonly action?: 'add' | 'dismiss' | 'snooze'
   readonly dontRemind?: boolean
+  readonly snooze?: WorktreeSnoozeChoice
+  /** Per-row access for an `add`; omitted ids keep the inherit default. */
+  readonly accesses?: readonly WorktreeAccessEntry[]
   readonly rootIds?: readonly string[]
   readonly seenViewRevision?: string
 }
@@ -123,15 +166,44 @@ export interface WorktreeCall extends WorktreeRequest {
 /** A parse verdict, matching the root contract's shape. */
 export type ParsedWorktree<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly message: string }
 
+/** The snooze choice schema; the mode enum is the whole vocabulary. */
+export const worktreeSnoozeChoiceSchema = z.object({
+  mode: z.enum(['until-new-worktree', '7d', '30d']),
+}).strict()
+
+/** One row's access choice; the registry's writable grant vocabulary. */
+const worktreeAccessSchema = z.object({
+  id: z.string().min(1),
+  access: z.enum(['inherit', 'read-only', 'read-write']),
+}).strict()
+
 /** The one request body schema; unknown keys are refused. */
 export const worktreeRequestSchema = z.object({
   sessionId: z.string().min(1),
+  fresh: z.boolean().optional(),
   promptIds: z.array(z.string().min(1)).min(1).max(64).optional(),
-  action: z.enum(['add', 'dismiss']).optional(),
+  action: z.enum(['add', 'dismiss', 'snooze']).optional(),
   dontRemind: z.boolean().optional(),
+  snooze: worktreeSnoozeChoiceSchema.optional(),
+  accesses: z.array(worktreeAccessSchema).min(1).max(64).optional(),
   rootIds: z.array(z.string().min(1)).max(256).optional(),
   seenViewRevision: z.string().min(1).optional(),
 }).strict()
+
+/**
+ * The fields each endpoint acts on. A body that carries another endpoint's
+ * field is refused instead of silently ignored: a `snooze` on `worktreePrompt`
+ * or a `fresh` on `worktreePromptResolve` is a client that disagrees with the
+ * contract, not a harmless extra.
+ */
+const ENDPOINT_FIELDS: Record<WorktreeEndpoint, readonly string[]> = {
+  worktreePrompt: ['sessionId', 'fresh'],
+  worktreePromptSeen: ['sessionId', 'promptIds'],
+  worktreePromptWait: ['sessionId', 'seenViewRevision'],
+  worktreePromptResolve: ['sessionId', 'promptIds', 'action', 'dontRemind', 'snooze', 'accesses'],
+  worktreePromptReset: ['sessionId'],
+  worktreeRootsCleanup: ['sessionId', 'rootIds'],
+}
 
 /** One prompt on the wire. */
 const promptSchema = z.object({
@@ -142,11 +214,19 @@ const promptSchema = z.object({
   primaryRoot: z.string(),
   access: z.literal('inherit'),
   effectiveAccess: z.enum(['read-only', 'read-write', 'full-access', 'unavailable']),
+  branch: z.string().min(1).optional(),
   remaining: z.number().int().nonnegative(),
   viewRevision: z.string().min(1),
 }).strict()
 
-const promptListSchema = z.array(promptSchema).max(64)
+/**
+ * A response carries the FULL visible candidate list, so it is deliberately not
+ * bounded by the 64-id REQUEST cap. Discovery is not capped (a repository may
+ * have hundreds of worktrees); bounding the response would make the client
+ * reject the whole answer and silently hide every candidate. Callers that send
+ * ids back batch them at `worktreeRequestSchema`'s cap instead.
+ */
+const promptListSchema = z.array(promptSchema)
 
 /** One batch outcome. */
 const resolvedSchema = z.object({
@@ -179,6 +259,9 @@ export const worktreePromptAnswerSchema = z.object({
   viewRevision: z.string().min(1),
 }).strict()
 
+/** `worktreePromptSeen` answer schema. */
+export const worktreeSeenAnswerSchema = z.object({ seen: z.number().int().nonnegative() }).strict()
+
 /** `worktreePromptResolve` answer schema. */
 export const worktreeResolveAnswerSchema = z.object({
   viewRevision: z.string().min(1),
@@ -207,26 +290,60 @@ export function parseWorktreeCall(endpoint: string, payload: unknown): ParsedWor
     return { ok: false, message: `the request body is invalid: ${path}${issue?.message ?? 'invalid'}` }
   }
   const value = parsed.data
-  if (value.promptIds === undefined && endpoint === 'worktreePromptResolve') {
-    return { ok: false, message: 'promptIds is required' }
-  }
-  if (value.action === undefined && endpoint === 'worktreePromptResolve') {
-    return { ok: false, message: 'action is required' }
-  }
-  if (value.rootIds === undefined && endpoint === 'worktreeRootsCleanup') {
-    return { ok: false, message: 'rootIds is required' }
-  }
+  const allowed = ENDPOINT_FIELDS[endpoint as WorktreeEndpoint]
+  const present = Object.entries(value).filter(([, field]) => field !== undefined).map(([name]) => name)
+  const extra = present.find(name => !allowed.includes(name))
+  if (extra !== undefined) return { ok: false, message: `"${extra}" does not belong to ${endpoint}` }
   if (value.promptIds !== undefined && new Set(value.promptIds).size !== value.promptIds.length) {
     return { ok: false, message: 'promptIds must be unique' }
+  }
+  switch (endpoint as WorktreeEndpoint) {
+    case 'worktreePromptSeen':
+    case 'worktreePromptResolve':
+      if (value.promptIds === undefined) return { ok: false, message: 'promptIds is required' }
+      break
+    case 'worktreeRootsCleanup':
+      if (value.rootIds === undefined) return { ok: false, message: 'rootIds is required' }
+      break
+    default:
+      break
+  }
+  if (endpoint === 'worktreePromptResolve') {
+    if (value.action === undefined) return { ok: false, message: 'action is required' }
+    // The three flags are not interchangeable: a snooze without its mode cannot
+    // be stored, a mode without the snooze action is a client bug, and a
+    // permanent ignore only exists on `dismiss` (ADR-0039 §6.3).
+    if (value.action === 'snooze' && value.snooze === undefined) {
+      return { ok: false, message: 'a snooze action requires the snooze mode' }
+    }
+    if (value.action !== 'snooze' && value.snooze !== undefined) {
+      return { ok: false, message: 'the snooze mode only belongs to the snooze action' }
+    }
+    if (value.dontRemind !== undefined && value.action !== 'dismiss') {
+      return { ok: false, message: 'dontRemind only belongs to the dismiss action' }
+    }
+    if (value.accesses !== undefined) {
+      if (value.action !== 'add') return { ok: false, message: 'accesses only belongs to the add action' }
+      const ids = new Set(value.promptIds ?? [])
+      const seen = new Set<string>()
+      for (const entry of value.accesses) {
+        if (!ids.has(entry.id)) return { ok: false, message: 'accesses names a prompt id that is not in promptIds' }
+        if (seen.has(entry.id)) return { ok: false, message: 'accesses must name each prompt id at most once' }
+        seen.add(entry.id)
+      }
+    }
   }
   return {
     ok: true,
     value: {
       endpoint: endpoint as WorktreeEndpoint,
       sessionId: value.sessionId,
+      ...(value.fresh === undefined ? {} : { fresh: value.fresh }),
       ...(value.promptIds === undefined ? {} : { promptIds: value.promptIds }),
       ...(value.action === undefined ? {} : { action: value.action }),
       ...(value.dontRemind === undefined ? {} : { dontRemind: value.dontRemind }),
+      ...(value.snooze === undefined ? {} : { snooze: { mode: value.snooze.mode } }),
+      ...(value.accesses === undefined ? {} : { accesses: value.accesses.map(entry => ({ id: entry.id, access: entry.access })) }),
       ...(value.rootIds === undefined ? {} : { rootIds: value.rootIds }),
       ...(value.seenViewRevision === undefined ? {} : { seenViewRevision: value.seenViewRevision }),
     },

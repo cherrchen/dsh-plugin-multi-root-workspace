@@ -1,5 +1,5 @@
 /**
- * Host-side attestation for the credential broker (ADR-0040).
+ * Host-side attestation for the credential broker (ADR-0048).
  *
  * Nothing here trusts the broker's self-description: the socket's owner and
  * mode, the unreadability of the credential root from THIS account, the
@@ -55,7 +55,7 @@ export function assertBrokerDestinations(manifest: DeploymentManifest, options: 
       || destination.transfer?.destinationIsolation !== 'chroot-sftp') {
       refuse(`import binding "${binding.environmentId}/${binding.rootId}" requires an sftp destination declared destinationIsolation chroot-sftp`)
     }
-    // Team mode (ADR-0041 §3) accepts the shared build account also hosting
+    // Team mode (ADR-0049 §3) accepts the shared build account also hosting
     // execution: the independent-writer loop is skipped, chroot-sftp stays.
     if (options.relaxed === true) continue
     for (const other of manifest.environments) {
@@ -87,7 +87,7 @@ export async function attestBroker(config: BrokerConfig, manifest: DeploymentMan
   if (config.brokerUid === uid) {
     return unavailable('broker-same-uid', 'the broker runs under the Host account; custody is not isolated')
   }
-  // ADR-0041 §3: team custody skips the deployment-evidence requirements
+  // ADR-0049 §3: team custody skips the deployment-evidence requirements
   // (confinement probe, full-access exclusion) and the independent-writer
   // loop; the chroot-sftp destination requirement stays. Hardened is §4.
   const team = options.mode === 'team'

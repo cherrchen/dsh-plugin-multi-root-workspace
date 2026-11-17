@@ -27,6 +27,7 @@ Only established, relatively stable factual reference content belongs here.
 - [multi-environment-control-plane.md](./multi-environment-control-plane.md) (Chinese) — G1a remote control plane: deployment manifest format, the remote grant domain, the `remote-1` IPC entry, Host-side admission and denial codes.
 - [multi-root-skills-seams.md](./multi-root-skills-seams.md) (Chinese) — Verified Session, native-ID, effective-cwd, file parsing, Settings and Web seams for additional-root Skills, with a reproducible architecture probe.
 - [auto-review-compatibility.md](./auto-review-compatibility.md) (Chinese) — Review context, source roles, tool scheduling order, and external integration seams in Auto Review `0.2.1-rc.2`.
+- [auto-review-0.2.2-migration.md](./auto-review-0.2.2-migration.md) (Chinese) — Release topology, source-generation deltas, consumed seam changes, and the multi-baseline grouping for Auto Review after `0.2.1-rc.2` through `0.2.2-rc.3`.
 - [multi-root-workspace-research.md](./multi-root-workspace-research.md) — Snapshot research of the upstream repository's Workspace / Sandbox / plugin system (master `c291e7961a`; §8 covers the supplementary research on the no-upstream-changes mechanism).
 
 ## Naming Convention
@@ -38,4 +39,4 @@ Use lowercase kebab-case, for example:
 ```
 
 - [dsh-0.2.1-migration.md](./dsh-0.2.1-migration.md) — Interface and security review of three upstream tags, with Worktree constraints.
-- [dsh-0.2.2-migration.md](./dsh-0.2.2-migration.md) — Interface and security review of DSH 0.2.1-rc.4, 0.2.1-rc.5, and the 0.2.2 releases (sessionProjections injection, the tool-executor split, additionalWritableRoots, and the Node 24 requirement, plus rc.2's SandboxPreparationError, registerWritableRoot, workspaceFiles.search, and the dsh-error shared base).
+- [dsh-0.2.2-migration.md](./dsh-0.2.2-migration.md) — Interface and security review of DSH 0.2.1-rc.4, 0.2.1-rc.5, and the 0.2.2 releases (sessionProjections injection, the tool-executor split, additionalWritableRoots, and the Node 24 requirement, rc.2's SandboxPreparationError, registerWritableRoot, workspaceFiles.search, and the dsh-error shared base, and rc.3's New-session HOC slot, the workspace.picker Factory, and the optional experimental dsh-deepseek-chat-import bundle).

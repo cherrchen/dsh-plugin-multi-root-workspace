@@ -1,6 +1,6 @@
 /**
  * Browser-safe wire shapes for the personal-mode SSH management endpoints
- * (ADR-0041 §2/§6). Separate from the roots and remotes contracts, same
+ * (ADR-0049 §2/§6). Separate from the roots and remotes contracts, same
  * PANEL_CHANNEL. Every request carries `sessionId`; the host derives the
  * primary root from the live session. Unknown keys fail `panel/bad-request`.
  *

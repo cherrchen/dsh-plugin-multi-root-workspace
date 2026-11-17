@@ -1,5 +1,5 @@
 /**
- * The credential broker's local wire contract (ADR-0040).
+ * The credential broker's local wire contract (ADR-0048).
  *
  * One JSON object per line over the kernel-attested Unix socket; the broker
  * sends `hello` first and then answers requests and streams process output as

@@ -26,6 +26,9 @@ jobs:
       - name: Resolve the annotated release tag
         id: tag
         run: |
+          # actions/checkout re-points the pushed tag ref at the commit it
+          # checked out, so restore the annotated tag object before peeling it.
+          git fetch --force --no-tags origin "+${GITHUB_REF}:${GITHUB_REF}"
           tag=$(git rev-parse --verify "${GITHUB_REF}^{tag}")
           commit=$(git rev-parse --verify "${tag}^{commit}")
           test "$commit" = "$(git rev-parse --verify "${GITHUB_SHA}^{commit}")"

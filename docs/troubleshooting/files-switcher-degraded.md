@@ -2,12 +2,13 @@
 
 ## 症状
 
-四种可分别出现的退化（每条对应一类失效的钩子）：
+几种可分别出现的退化（每条对应一类失效的钩子）：
 
 - **路径标签出现两次/位置错乱**：选择器以普通菜单钮的身份停在 actions 区原位，上游路径标签恢复显示，与选择器自带的 `PathLabel`（`.mrfw-switcherPath`）并存——`[data-files-root]:has(.mrfw-rootSwitcher) [data-files-path]:not([data-files-entry])` 或 `.mrfw-rootSwitcher { order: -1 }` 失效（上游把扁平 flex header 换了结构，或属性挪了位置）。
 - **选中附加根但原生树仍在**：菜单状态变了、触发钮显示根名，树区却仍是主根原生树——`[data-root-kind="additional"]` 条件下的 `display:none` 规则失效，`closest('[data-files-root]')` 找不到祖先（portal 目标缺席时组件**主动不渲染**复刻树），或复刻树的 primitives 探针整面缺席（`filesTreeSurfaceSupported()` 为假 → adapter 不建，与 open-in-app 同型降级）。
 - **树接管了但滚动/展开记忆跨接管不保留**：树区换成复刻树、展开/懒加载/失败行均正常，只是切主根再切回后滚动位置与展开态没记住——`data-dockkit-content` 钩子（dockkit tabHost 的 tab id 属性）改名或挪位，store bucket 键退回生成 id。功能层面无碍，属目检级退化。
 - **原生 reload 还留着 / 附加根态出现两个刷新钮**：与上一条同源的 `:has()` 失效——接管态下原生 reload 应隐藏、由 header 内的 `.mrfw-switcherReload` 顶替（点击调复刻 face 的 `refresh(tabId)` 原地重拉，不清屏）；两者同时可见即规则失配。
+- **接管期原生搜索栏或设置浮层重新露出**：预览导航接管或附加根 Files 页接管后仍能看到原生搜索输入框 / `data-files-search-status` 状态行 / 设置浮层，与插件 pane 重叠——rc.2 的搜索 DOM 钩子改名或挪位，`aside[data-mrfw-navigator] > div:not([data-mrfw-files-pane]):has([data-files-search])` 的 bar 选择器或 direct-child 的 `[data-files-search-status]`/`[data-files-search-settings]` 隐藏规则失配。插件自己的 pane 由 `data-mrfw-files-pane` 守卫，不会因此被隐藏；找到新钩子后只改 `src/client/styles.ts` 的选择器（见下节）。
 - **附加根态出现两个「在应用中打开」钮 / 原生钮点回主根**：`data-open-target="directory"` 钩子（`ui-open-in-app` 分离按钮的锚点属性）改名或挪位——隐藏规则失配时原生钮在附加根态重新露出，点击仍打开**主根**（P9 修复前的旧 bug 回归）；复刻钮自身带 `.mrfw-openSplit`、被 `:not()` 保住，仍开选中根。若连复刻钮都不见了，先查 adapter 是否因 `*Regular` 图标族缺席而未建（0.1.x 像素名运行时的预期降级），再查 `GET open-in-app/apps` 是否 404/空数组（上游「无应用即无按钮」同型行为）。
 - **复刻钮与窗口右缘间距像素级偏差（已修，留作诊断参考）**：根因查明——上游 `ui-renderer` 给每个槽位渲染点包 `<div data-slot="<key>" style="display:contents">`，`.header` 的子项是该包装而非 occupant 的 Menu 锚 span；旧的 `> * > *` 隐藏选择器命中包装自身，样式表 `display:none` 敌不过内联 `display:contents` 而惰性，原生 `.split` 只被内层兜底藏住、空的 Menu 锚 span 仍以零宽 flex 项多占一个 header gap。现第一选择器锚定 `[data-slot="sidebar.right.tab.files.actions"] > *:has(...)` 隐藏 occupant 项本身。**若该 `data-slot` 锚点改名或挪位，同一症状回归**：DevTools 中在 `.mrfw-rootSwitcher` 之前的同槽位查找一个无内容的 Menu 锚 span——仍占位即确认（原生 `.split` 被藏而锚壳残留），再对照该版本 `scoped-slots.tsx` 的包装实现找新锚。
 
@@ -33,5 +34,27 @@
 2. 保持 `:has()` 守卫结构：任何命名上游元素的规则都必须以本插件元素在场为前提，失效路径才会继续是"退化"而非"误伤"。
 3. 复刻控件自身的漂移（上游 `ui-open-in-app` / `ui-sidebar-files` 改了组件结构/路由/注入面）按 `src/client/open-in-app/FORK.md` 与 `src/client/files-tree/FORK.md` 的同步步骤重拷对照——许可差异分别是 css specifier 的 `.ts` 后缀与外壳函数的根源改写。
 4. 若上游彻底移除了可用钩子（例如 flex 项不再携带任何稳定标识），接受退回槽内菜单形态——选择器仍可用，但树区接管不再可行；此时重新评估方案（上游 seam 出现的可能性见 ADR-0015 备选节），不要为了视觉接管去锚 hash class。
+
+## Files 页被第三方整页接管：根切换器完全不出现（Issue #47）
+
+### 症状
+
+- Files 页签仍能打开，但页面是另一个插件提供的文件页；本插件的根切换器、路径标签接管与附加根树全部不出现，页面上没有任何说明。
+- 其余入口正常：footer 的「工作区目录」、`/workspace-folders`、附加根权限与指令注入均可用。
+
+### 根本原因
+
+- 第三方插件以 `priority: 'extension'` 注册 `kind: 'files'`，宿主内置 Files 页（实现 id `@deepseek-ai/dsh-client-ui-sidebar-files`）被降为 shadowed，`FilesBody` 不再渲染。
+- 根切换器注册在 `FilesBody` 声明的 `sidebar.right.tab.files.actions` 槽上；槽声明在启动时随 `FilesBody` 注册的 `children` 建立，接管时仍是 declared，`slots.inject` 照常触发——但 seat 不挂载，组件永远不渲染。它与本文其余症状属于不同失效模式：不是 selector 失配，而是宿主页面整体缺席。
+
+### 诊断方法
+
+1. 读 `ctx.sidebarRightTabs.get('files')`：返回定义的 `id` 不是 `@deepseek-ai/dsh-client-ui-sidebar-files`（或 `priority !== 'builtin'`）即确认被接管；extension 注销后 `get('files')` 回到内置定义，因此可用它确认恢复。
+2. 不要用 `slots.spec('sidebar.right.tab.files.actions')` 判断：接管时它仍然存在，这正是本失效模式的静默之处。
+
+### 行为与处置
+
+- 插件在检测到接管时弹一次官方 info 级瞬时 Toast（词条 `filesPage.notice`），说明根切换器暂不可用、可继续从侧栏管理；接管解除后自动重新武装，再次接管会再提示。
+- 根管理仍可从 footer 的「工作区目录」与 `/workspace-folders` 完成；要让 Files 页切换器恢复，需要在第三方插件侧关闭对 `files` kind 的接管（如 better-sidebar 的对应开关）或停用它。
 
 升版验收时的目检清单（三态：无附加根原生观感 / 附加根选中接管 / 切回主根还原）记录在 `.agent/note/dsh-compat-contract.md` 第 12 节。

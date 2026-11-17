@@ -20,6 +20,7 @@ const css = {
   name: 'mrfw-ftName',
   other: 'mrfw-ftOther',
   note: 'mrfw-ftNote',
+  match: 'mrfw-ftMatch',
 } as const
 
 export default css

@@ -1,6 +1,6 @@
 /**
  * The SSH custody-mode control that lives in the Workspace Folders panel
- * (ADR-0041). It writes the SAME `multi-root-remote-tools` settings form the
+ * (ADR-0049). It writes the SAME `multi-root-remote-tools` settings form the
  * plugin card uses, so the mode, team block, and CAS revision have one owner.
  * The enable switch stays on the plugin card; this control owns the mode and
  * its mode-specific configuration.
@@ -14,7 +14,7 @@ import type { RemoteModeControl, SkillsForm } from '../compat/skills-client.ts'
 import type { Key } from './locales.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 
-/** The three SSH custody modes (ADR-0041), ordered by isolation strength. */
+/** The three SSH custody modes (ADR-0049), ordered by isolation strength. */
 export type RemoteCustodyMode = 'personal' | 'team' | 'hardened'
 
 const REMOTE_ISOLATION: Record<RemoteCustodyMode, number> = { personal: 0, team: 1, hardened: 2 }

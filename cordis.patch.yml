@@ -108,7 +108,7 @@
         # and point at its own manifest instead.
         remoteEnvironments:
           manifestPath: /etc/dsh-ssh-broker/manifest.json
-          # Personal custody (ADR-0041 §2, the default mode): the user-owned
+          # Personal custody (ADR-0049 §2, the default mode): the user-owned
           # SSH environment store and its credential root. Team/hardened keep
           # using manifestPath above.
           personalPath: !!js dshHomePath('storages/multi_root_workspace.remote-personal.json')

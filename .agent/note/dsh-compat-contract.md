@@ -21,7 +21,7 @@ export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alp
 ```text
 src/compat/dsh-version.ts   SUPPORTED_DSH_RELEASES   allowlist
 package.json                peerDependencies         "0.1.5-rc.2 || 0.1.6-alpha.1 || 0.1.6-alpha.2 || 0.1.7-alpha.1 || 0.1.7-alpha.2 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-alpha.1 || 0.2.1-alpha.2 || 0.2.1-alpha.3 || 0.2.1-alpha.4 || 0.2.1-alpha.5 || 0.2.1-rc.1 || 0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-alpha.2 || 0.2.2-alpha.3 || 0.2.2-rc.1 || 0.2.2-rc.2"
-package.json                devDependencies          allowlist 中的某一项（当前 0.2.2-rc.2）
+package.json                devDependencies          allowlist 中的某一项（当前 0.2.2-rc.3）
 node_modules                实际解析到的版本          allowlist 中的某一项
 ```
 
@@ -29,7 +29,7 @@ node_modules                实际解析到的版本          allowlist 中的�
 
 非 `dsh-*` 的共享上游包（`cordis`、`schemastery`、`node-addon-system`）同样**只能是 peer**：它们是宿主树自带的单例——`dsh-sandbox-local` 在每个受支持版本上都直接依赖后两者，插件私带一份就是第二份。放进 `dependencies` 的实际后果（issue #30）：profile 里装出 schemastery `3.18.5` 对宿主 `3.18.6-alpha.1`、cosmokit `1.8.6` 对 `1.8.7-alpha.1` 和一份同版本的 node-addon-system，启动器依赖自检报 `profile-core-mixed` / `profile-core-copy`。机制要记牢：`^3.18.2` 这类范围**不匹配** prerelease（`3.18.6-alpha.1` 不满足它），所以 peer 范围必须像 cordis peer 那样"稳定线用范围 + alpha 线逐个具名"（`>=3.18.2 <4.0.0 || 3.18.5-alpha.1 || 3.18.5-alpha.2 || 3.18.6-alpha.1 || 3.18.6-alpha.2`），升版纳入新 alpha 线时同步扩并集；`devDependencies` 钉开发 pin 宿主自带的精确版本，由 `upgrade-dsh.mjs` 随 ecosystemPins 重指。`compat:check` 与 `tests/compat.spec.ts` 硬性检查 `dependencies` / `optionalDependencies` 里没有任何 `@deepseek-ai/*` 名字。
 
-同一单例规则对**原生镜像**也成立：`koffi` 仍是合法 `dependencies`（独立场景的兜底），但安装进 profile 后必须 dlopen 宿主那份——`dsh plugin add` 会在宿主已加载的 koffi 旁再装一份私有副本，两个 `koffi.node` 镜像同进程在 darwin-arm64 指针校验（PAC）下直接 SIGBUS，进程无声退出（2026-11-01 packed smoke 实锤；main 上同样崩，属 F4 既有回归）。全部 FFI 调用点统一走 `src/compat/koffi.ts` 的 `loadHostKoffi()`；需要同步读取 Git 元数据的 Worktree 使用同一模块的 `loadHostKoffiSync()`。两者都以必需 peer `dsh-fs-local`（每个受支持版本都携带 koffi）为锚点解析宿主副本，解析不到才回退包内自带。`tests/compat.spec.ts` 扫描 `src/` 禁止 `compat/koffi.ts` 之外出现裸 `import('koffi')`。
+同一单例规则对**原生镜像**也成立，且 `koffi` 自 `0.1.21` 起**不再是**生产依赖：它是 optional peer，包内不携带副本。pnpm 不安装可选 peer，首次 `dsh plugin add` 因此不再停在 koffi 的构建授权。运行时全部 FFI 调用点统一走 `src/compat/koffi.ts` 的 `loadHostKoffi()`；需要同步读取 Git 元数据的 Worktree 使用同一模块的 `loadHostKoffiSync()`。两者按同一候选链解析宿主副本：`DSH_KOFFI_PATH` → 必需 peer `dsh-fs-local` 锚点（每个受支持版本都携带 koffi）→ 宿主入口 `process.argv[1]` → DSH Desktop 的 `app.asar` / `app.asar.unpacked` 运行时目录；**没有包内回退**，找不到即明确报错。这不是可选项：profile 里再装一份私有 koffi，就是同进程第二个 `koffi.node` 镜像，在 darwin-arm64 指针校验（PAC）下直接 SIGBUS，进程无声退出（2026-11-01 packed smoke 实锤）。`tests/compat.spec.ts` 扫描 `src/` 禁止 `compat/koffi.ts` 之外出现裸 `import('koffi')`，并断言 koffi 只以 optional peer + 开发 pin 出现。git 来源安装仍需为插件自身的 `prepare` 授权。
 
 ## 2. 你写的测试可能因为门禁而失败——这是对的
 
@@ -201,7 +201,7 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 ## 11. DSH 0.2.1 目录语义
 
-当前开发基线为 `0.2.2-rc.2` / Cordis `4.1.0`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
+当前开发基线为 `0.2.2-rc.3` / Cordis `4.1.0`。前述开发 pin 是历史记录。Registry 身份和 grants 始终绑定不可变的 Session 原始项目；effective cwd 使用上游 workingDirectory，不能按共享目录反查会话。LSP 从工具 dispatch 携带 Session，instructions 优先捕获成功 fs observation 的实际路径。精确候选与原生平台执行证据只见[路线账本](../../docs/plans/active/2026-09-12-multi-root-workspace.md)，目录与进程快照设计见 [ADR-0012](../../docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)，上游差异见[接口审查](../../docs/reference/dsh-0.2.1-migration.md)。
 
 升级脚本接受单一 Cordis prerelease 版本，仍输出精确 pin。新的安装期 peer gate 需要在隔离候选 smoke profile 使用精确 allow-version 豁免；warn 模式下豁免在第一次 `add` 前授予（构建审批恢复路径内部的 remove+add 同样有版本 gate），只用于升级车道，正式矩阵和生产仍 enforce。当前 package 为 `0.1.6` 且 `v0.1.6` tag 已存在，本迁移不创建 release。
 
@@ -209,10 +209,11 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 ## 12. 浏览器侧的上游 DOM 钩子（升版目检）
 
-`src/client/` 里有两处**不是槽位契约**的上游结构依赖，结构探测管不到它们，只能靠目检：
+`src/client/` 里有一批**不是槽位契约**的上游结构依赖，结构探测管不到它们，只能靠目检：
 
 | 依赖 | 消费方 | 失效表现 |
 | --- | --- | --- |
+| `Menu` 原语的 anchor 包装 `<span>`（`className` 落在它上面，是 header 槽 occupant 内的 flex item） | `RootSwitcher` 的收缩钩子：`styles.ts` 的 `.mrfw-rootSwitchAnchor`（`flex: 0 1 auto; min-width: 0`）。收缩必须写在参与外层 flex 的包装上，写在内层触发器按钮上无效 | `className` 不再落到这个包装上 → 触发器被内容 min-content（nowrap 根名）钉死，窄栏/双栏/浮动小窗下溢出并压住 reload/搜索/open-in-app（ADR-0046 的旧缺陷回归）；包装不再是 flex item → 收缩语义整体失效 |
 | `FilesBody` 扁平 flex header + flex 项上的 `data-files-root` / `data-files-path` / `data-files-reload` | `styles.ts` 的 `:has()` 规则（`.mrfw-rootSwitcher` 接管路径标签位置、隐藏 `[data-files-path]`——选择器自带 `PathLabel`（`.mrfw-switcherPath`）显示选中根完整路径、自带 `.mrfw-switcherReload` 在附加根态顶替原生 reload；`[data-root-kind="additional"]` 时隐藏 `[data-files-body]` 与 `[data-files-reload]`） | 规则停止匹配：上游路径标签恢复显示、与选择器自带 PathLabel 并存（路径出现两次），选择器退回槽内默认位序，仅剩菜单可用——静默退化，功能不坏 |
 | `closest('[data-files-root]')` 命中本 pane | `RootSwitcher.tsx` 的 portal 目标查找 | 找不到祖先即不渲染复刻树，切附加根只改菜单态；原生布局不受影响 |
 | dockkit tabHost 上的 `data-dockkit-content`（值为 tab id） | `RootSwitcher.tsx` 的复刻树 store bucket 键（scroll/展开态记忆） | 属性缺席时退回生成 id——功能不受影响，只是滚动/展开记忆跨接管不保留；属性若改名或挪位，bucket 键与原生 tab 失配 |
@@ -221,10 +222,13 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 | 预览根上的 `data-textpreview-url`（tab contentId）与内容行上的 `data-textpreview-content` | `navigator.tsx` 的预览定位、跨会话校验（`parseFileAddress` 必须解析出本会话的 session-scope 地址）与 aside 观察范围 | 钩子缺席/改名 → 找不到预览或会话校验不通过，永不接管——原生导航树零影响 |
 | `aside[data-files-navigator]`（值为 dockkit pane id）与其内 `[data-files-body]` | `navigator.tsx` 的接管目标与 pane 记账键；`styles.ts` 的 `aside[data-mrfw-navigator] > [data-files-body]` 隐藏规则 | aside 不出现 → 永不接管（该导航器未开）；属性值不再是 pane id → bucket/快照改键、跨 `replaceTab` 的展开/滚动记忆丢失但功能不坏 |
 | dockkit 的 pane 载体：非空 pane 的 id 骑在其**选中 tab 的 host**（`data-dockkit-pane`）上、空 pane 由 `TabPanel` 携带、浮动 pane 用 `data-dockkit-float`——pane 本体**没有**稳定元素 | `navigator.tsx` 的 pane 死亡观察是查询式的（文档中仍有携带该 id 的元素即存活），death-watch 独立于 takeover 生命周期、cleanup 永远赢不了它的竞速 | 载体属性的拼写/归属改变 → 存活判定失真：误报死会让快照提前丢弃（记忆降级、功能不坏）；误报活则快照留到会话结束 |
+| rc.2 起的导航器搜索节点：原生输入框 `[data-files-search]`、状态行 `[data-files-search-status]`、设置浮层 `[data-files-search-settings]`、页头开关 `[data-files-search-toggle]`；插件 pane 根 `[data-mrfw-files-pane]` 与输入 `[data-mrfw-files-search]` | `styles.ts` 的隐藏规则（预览接管期隐藏原生栏/状态行/遗留设置；附加根 Files 页隐藏原生页头开关）与 `pane.tsx` 的搜索面 | 原生精确钩子改名 → 原生栏在接管期重新露出、与插件 pane 重叠（视觉错乱、功能不坏）；`data-mrfw-files-pane` 丢失 → 守卫与测试锚点失效，重构时可能误伤插件自己的 pane；插件 pane 的同名 `data-files-search-status/settings` 位于 pane 后代，direct-child 规则不会命中 |
+
+**收缩优先级（ADR-0046）**：`RootSwitcher` 占据的这条 header 是扁平 flex 行，窄宽下按固定顺序让位——固定控件（reload / 搜索 / open-in-app，主根态来自 header、附加根态来自 switcher 内部）永不移动、永不收缩；完整路径以零 flex basis 先让到 0（换成 max-content basis 会让根名在路径还有余量时先被省略）；根名随后由 label 的 `text-overflow: ellipsis` 收缩；最后触发器的 `overflow: hidden` 在图标都放不下时裁剪它们。任何一层重排都可能让两个控件重新互相覆盖，三条规则由 `tests/client-styles.spec.ts` 与 `tests/client-switcher.spec.tsx` 钉住。
 
 ⚠️ `data-files-path` 有**双重含义**：表头 `PathLabel` 携带裸值（`"true"`），而**每个树行**（`data-files-entry` 的 `li`）也携带它、值是该行自己的绝对路径。任何想命中表头标签的选择器都必须写 `[data-files-path]:not([data-files-entry])`——不带限定符的 `display:none`/`order` 会作用到整棵原生树（曾真实发生：主根树区全空）。其余三个钩子（`root`/`body`/`reload`）各只出现一次。
 
-提升上游版本时（升级车道跑完、人工验收阶段）必须目检三态：无附加根时 Files 页签是原生观感；选中一个附加根时树区换成逐字节复刻的原生 Files 树（行高/图标/缩进/空态/截断/失败行应与原生逐项一致）、原生 reload 由 header 内的同款 `.mrfw-switcherReload` 顶替、原生 open-in-app 按钮由复刻按钮顶替（点开 chevron 菜单应与原生同款）；切回主根时原生树、reload 与 open-in-app 完整还原。预览侧 Folder 导航器另有四态：预览附加根文件时打开 Folder → 树以该附加根为根、祖先已展开、当前文件高亮在视口内、从树里打开文件替换当前预览 tab 且树仍挂在新 tab 的 pane 上；预览主根文件时原生导航树原样（根=cwd）；折叠再展开 Folder 时展开/滚动位置回到离开时的样子，且直接画出保留的行、不闪 loading；同一预览 pane 从 A 附加根切到 B 再切回 A → A 的折叠与滚动位置各自恢复、B 的地址没有写进 A 的 `revealed`（两端记忆互不串写）。任一项失真先查这五个 `data-*` 属性还在不在对应 flex 项上（`.header` / `.body` 的 class 是 CSS-module hash，不能锚）。退化症状与修法见 [故障排查条目](../../docs/troubleshooting/files-switcher-degraded.md)，决策见 [ADR-0015](../../docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
+提升上游版本时（升级车道跑完、人工验收阶段）必须目检三态：无附加根时 Files 页签是原生观感；选中一个附加根时树区换成逐字节复刻的原生 Files 树（行高/图标/缩进/空态/截断/失败行应与原生逐项一致）、原生 reload 由 header 内的同款 `.mrfw-switcherReload` 顶替、原生 open-in-app 按钮由复刻按钮顶替（点开 chevron 菜单应与原生同款）；切回主根时原生树、reload 与 open-in-app 完整还原。预览侧 Folder 导航器另有四态：预览附加根文件时打开 Folder → 树以该附加根为根、祖先已展开、当前文件高亮在视口内、从树里打开文件替换当前预览 tab 且树仍挂在新 tab 的 pane 上；预览主根文件时原生导航树原样（根=cwd）；折叠再展开 Folder 时展开/滚动位置回到离开时的样子，且直接画出保留的行、不闪 loading；同一预览 pane 从 A 附加根切到 B 再切回 A → A 的折叠与滚动位置各自恢复、B 的地址没有写进 A 的 `revealed`（两端记忆互不串写）。预览导航搜索另有四态（rc.2+）：附加根文件预览 → aside 内出现带 `data-mrfw-files-pane` 的搜索面、原生栏仍在 DOM 但被隐藏，搜索栏常显；输入查询 → 结果树/计数/高亮/当前行/眼睛/设置/失败重试与 Files 页一致，点结果行原位替换预览 tab；关闭/重开 Folder 与 `replaceTab` 后查询与结果保留且不重发请求；切回主根文件 → 插件 pane 消失、原生搜索栏恢复；Esc 顺序为设置 → 清查询 → 关导航树。任一项失真先查这些 `data-*` 属性还在不在对应 flex 项上（`.header` / `.body` 的 class 是 CSS-module hash，不能锚）。退化症状与修法见 [故障排查条目](../../docs/troubleshooting/files-switcher-degraded.md)，决策见 [ADR-0015](../../docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)。
 
 **files-tree 旧版复刻面**：`src/client/files-tree/` 保留旧宿主使用的上游 `ui-sidebar-files` 树体逐字节 fork（基线 `f3803c9697` = `0.2.2-alpha.2`；清单、shim 对照、外壳 delta 与同步步骤见该目录 `FORK.md`）。变更旧版基线时按 FORK.md 重拷并对照——`directory-node.ts`/`store.ts`/`FilesBody.module.css` 与 `FilesBody.tsx` 的行级定义必须字节级一致；`face.ts` 带 hold/release 生命周期 delta（`start`/record-abort 重播或丢弃 bucket，`hold`/`release` 让 Folder 关闭只关节点/watch、保留已列 levels），其余部分保持字节级。许可差异有：外壳函数根源改写、css specifier 的 `.ts` 后缀、文件行的 reveal 标记（`Entry` 按钮上的 `ref`/`data-files-current`/`aria-current` 与 `TreeContext` 的 `current`/`currentRef`）、`reveal`/`saved`/`onScrollOffset` 三个 prop 及其外壳逻辑、body 的 `tabIndex` 与原生 `scroll` 监听（portal 外的事件委托到不了，必须用元素自身监听）；同时检查上游 `locales.ts` 的 `zh` 键集（shim 的 `SidebarFilesKey` 联合须同步）、`workspaceFiles` remote 面与 `data-dockkit-content` 钩子。复刻体类名 `mrfw-ft*`、不携带 `data-files-root`/`data-files-body`（防本插件 `:has()` 隐藏规则误伤）； primitives 探针失败时整棵复刻树不渲染（同型降级，不崩）。**remote 面只能经 `ctx.get` 懒解析**：`remote.workspaceFiles` 是 cordis 嵌套服务，context 代理路径（`remote.workspaceFiles` 或 `ctx['remote.workspaceFiles']`）受 inject 守卫（未声明 fiber 直接抛 `without inject`），而本版 cordis 的 inject 条目全 required（声明会把整行 gate 在可选服务上）——`lazyFilesRemote` 用 `ctx.get('remote')`/`ctx.get('remote.workspaceFiles')` 免守卫直查 store，一切查找失败折叠成 `gateway/internal` 失败行（verbatim `load` 的 `.then` 无 `.catch`，逃逸 rejection 会静默钉死 loading）。**编译面同理钉在 dev-pin**：`0.2.0-rc.2` 之前 `workspaceFiles.changes` 是 2 参（session 级 watch），`tsconfig.client.json` 的 `paths` 把 `@deepseek-ai/dsh-api-remotes/client` 映射到 `client-remote.d.ts`（本地声明拼的是 path-watch 时代的 3 参签名），让 verbatim `face.ts` 在矩阵旧版本上也能过 typecheck——安全前提是 `files.actions` 槽位在旧版不存在、调用永不会执行。
 
@@ -249,7 +253,7 @@ PTY 的 agent/用户判别是 §13 唯一的静默 fail-open 接缝：`DSH_PTY_S
 - **Sandbox 原生第三路可写根**：`SandboxExecutionPolicy.additionalWritableRoots` + `workspaceWritableRoots`（policy service 配置键 `sandboxPolicy.additionalWritableRoots`）由 Seatbelt/bwrap/Landlock/fs-sandbox 原生消费；windows-acl 以 `SandboxUnsupportedPolicyError` 拒绝。本插件不设该字段，宽授权照旧来自自身 scope；两路 grant 的复合由 `tests/upstream-additional-roots.spec.ts` 钉住（旧版本按 `workspaceWritableRoots` 导出存在性结构性跳过）。
 - **Session/store**：store 持有的 Session 在 `session/created` 完成前拒绝 append——插件测试用独立 Session，不受影响。`dsh-storage-domain` 新增 `deleteRecords`/`deleteMany` 与 `unknown-state` 隔离，均为新增面。
 - **Node ≥24.9**：0.2.2 起的 lanes 需要 Node 24；CI verify 按已知旧版前缀走 22.19.0、其余走 24.9.0。
-- **Auto Review 不动**：上游实验性 auto-review 在 0.2.2 有变化（每条历史一条请求消息、AutoReviewFailedError、卸载规则），但可选 fork 仍钉死 `0.2.1-rc.2` 基线，`AUTO_REVIEW_RELEASE` 不随开发 pin 走。
+- **Auto Review 双基线**：上游实验性 auto-review 在 `0.2.2-alpha.2` 重写了输入模型（固定 system + 每条保留项一条请求消息、逐项 schema、前缀复用、`AutoReviewFailedError`、卸载规则），`alpha.3` 又加了 `sessionId`/`purpose` 与 `LlmRequestPurposeMap`。因此联合合同改为两个冻结源码基线（`0.2.1-rc.2`–`rc.5` 用 legacy fork，`0.2.2-alpha.2`–`rc.3` 用 current fork），按车道动态加载、按基线编译 pin 做实现类型检查；`0.2.2-alpha.2` 的 purpose 仍是闭集，不发送该字段（ADR-0040）。
 - **上游 Skills 语义微调**：filesystem provider 把失败根报为 incomplete observation、tool-skill 发布 incomplete catalog；本插件的多根 skills provider 仍把嵌套 observation 当普通候选、忽略 `complete:false`——行为不变，记为已知后续观察点。
 
 
@@ -261,7 +265,7 @@ PTY 的 agent/用户判别是 §13 唯一的静默 fail-open 接缝：`DSH_PTY_S
 
 ## 16. DSH 0.2.2-rc.1 转稳定生态
 
-rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留旧宿主所需的具名 prerelease peer 分支；稳定 peer 范围已覆盖 Cordis 4.1.0 / Schemastery 3.19.0。开发树须整体重指，提交前移除临时 probe overrides。稳定版 vendor 范围只能取声明 minor 线内的最新稳定 patch（prerelease 仍钉精确基线）：旧 loader peer `^1.0.3` 会接纳新发布的 `1.1.0`，却在 Cordis `4.0.2` 的 `fiber.entry` 处崩溃。升级 helper 现在对未发布基线或复合范围拒绝猜测，不跨入新的 vendor minor 或把 prerelease 混入稳定线。详见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#022-rc1-后续审查2026-11-05)；执行证据仍在路线账本，可选 Auto Review 仍钉 0.2.1-rc.2。
+rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留旧宿主所需的具名 prerelease peer 分支；稳定 peer 范围已覆盖 Cordis 4.1.0 / Schemastery 3.19.0。开发树须整体重指，提交前移除临时 probe overrides。稳定版 vendor 范围只能取声明 minor 线内的最新稳定 patch（prerelease 仍钉精确基线）：旧 loader peer `^1.0.3` 会接纳新发布的 `1.1.0`，却在 Cordis `4.0.2` 的 `fiber.entry` 处崩溃。升级 helper 现在对未发布基线或复合范围拒绝猜测，不跨入新的 vendor minor 或把 prerelease 混入稳定线。详见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#022-rc1-后续审查2026-11-05)；执行证据仍在路线账本，可选 Auto Review 的联合合同见 ADR-0040（两个源码基线）。
 
 ## 13. 新会话 Hero 入口（`conversation.hero.options`）
 
@@ -272,7 +276,7 @@ rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留�
 - **依赖形态**：**不依赖** `ui-conversation`（不 import 类型、不加 devDependency、不进 `dsh.client.inject`）。typecheck 矩阵包含 `0.2.1-alpha.3` 之前的版本，它们的 SlotMap 没有该键；注册走窄结构接口（`inject` + `spec` + `register`），`spec` 查不到声明就直接返回空 disposer。只有声明了该槽的版本会注册并显示入口；旧版本不显示，侧栏入口不受影响。
 - **用公开的 `spec` 探测，不要用 `specDynamic`**：`specDynamic` 只存在于 `SlotCore`，`ctx.slots`（`SlotRegistry` 服务）只公开 `spec`、`entries` 等方法。测试替身必须使用真实 `SlotRegistry`，否则会把不存在的服务方法伪装成可用；`tests/client-slot-probe.spec.ts` 通过浏览器模块加载器实例化真实服务并声明槽位。
 - **会话权威**：槽是 `session` scope，composed props 的 `sessionId` 是确定值；不要在 hero occupant 里回退到全局 current-session 解析（侧栏 fallback 是另一条路径）。
-- **形态约束**：与相邻 workspace / 模式选择器同几何，但因打开对话框而非菜单**没有 chevron**；图标优先 `IconWorkspaceTreeOutlineRegular`，旧运行时经 `selectIconOr` 回退 `IconFolderOpen`（不使用像素时代名）；文字在左、icon 在右，以贴合该行右对齐的阅读顺序；trigger 另加 `margin-right: 4px`，因为上游行 padding 是 `0 16px 0 20px`，这样按钮盒与工作区选择器一样内缩 20px。hero 行没有容器祖先，`≤560px` 用视口媒体查询退化为 28×28 图标按钮。上游若改成容器查询，再同步切换。
+- **形态约束**：与相邻 workspace / 模式选择器同几何，但因打开对话框而非菜单**没有 chevron**；图标优先 `IconWorkspaceTreeOutlineRegular`，旧运行时经 `selectIconOr` 回退 `IconFolderOpen`（不使用像素时代名）；文字在左、icon 在右，以贴合该行右对齐的阅读顺序；trigger 另加 `margin-right: 4px`，因为上游行 padding 是 `0 16px 0 20px`，这样按钮盒与工作区选择器一样内缩 20px。**宽度自适应**：`.heroOptions` 是 `flex: none`，条目不会被行挤窄，因此入口用 `measureHeroEntryRoom` 把 seat 临时固定为图标下限（`data-measuring` → 28px、隐藏 label）后读取 options 组预算（前一个控件 + flex gap 到行内容右缘，减去同槽其他条目、组内 gap 与自身外边距），写进 `--mrfw-hero-entry-room` 交给样式夹取；余量 < 88px 时 `data-size="compact"` 只留图标。探针只依赖四条结构事实——options 容器是 flex 子项、slot outlet 为 `display: contents`、同槽条目与入口共享同一个 outlet 包装（探针沿包装下钻计数，不把包装当条目）、options 组是行内最后一项；`0.2.1-alpha.3`–`0.2.2-rc.3` 的已安装源码中一致。任一条不成立时探针返回 `null`，样式回落到 `:not([data-size])` 的内容宽度与 560px 视口兜底。上游若给该行加容器或允许 `.heroOptions` 收缩，重新评估该探针。
 - **无 DOM 钩子**：入口只依赖槽位契约；上游改名或移除该槽时按上面的缺席路径静默退化，不需要目检表更新。
 
 ## 17. DSH 0.2.2-rc.2 支持与发布
@@ -285,3 +289,51 @@ rc.1 相对 alpha.3 的 patch 只改包版本。沿用既有适配器，保留�
 - **安静陷阱 4（fork 基线）**：rc.2 的 `ui-open-in-app` 复刻源只有两处注释变化并新增 `menu.openIn`；本分支已按 FORK.md 重拷 `OpenInAppAction.tsx` / `controller.ts`、把 baseline 移到 `ddac96760b`，并在 `OpenInAppKey` 补 `menu.openIn`。files-tree 旧版复刻仍钉 alpha.2。
 - **契约检查**：`@deepseek-ai/dsh-error` 已加入 `OPTIONAL_CORE_PACKAGES` 与 `HOST_SERVICE_PACKAGES`（只经宿主锚点作证，发现跨包单例混装）；**不要**把它写进 `peerDependencies`——rc.1 没有该包，会让旧宿主安装失败。
 - **验证（已发布包）**：在已发布的 `0.2.2-rc.2` 开发树上，`compat:check`、lint、双端 typecheck、`build`、`docs:check`、`pack:check` 与 `auto-review:fork` 通过；完整 vitest 为 **1368 通过 / 162 跳过 / 17 失败**。17 个失败全部是当前 Seatbelt 会话的 sandboxed-peer registry IPC 用例；rc.1 基线在同一环境同样失败 17 个（1364 / 166），不是 rc.2 回归。本机 `smoke:compose` **56/56**、`smoke:behavior` **96 通过 / 8 跳过**、`smoke:journey` **85 通过 / 2 跳过**、`smoke:packed` **95 通过 / 8 跳过**，均 0 失败（跳过项是 Seatbelt 内无可用内核 runner 与共享 IPC）。三 OS 矩阵与 Windows ACL 原生结果由 PR 的 CI 给出（[run 43227479998](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/43227479998)，94/94 jobs）；浏览器目检不是 CI 项，按路线账本的人工记录。
+
+## 18. DSH 0.2.2-rc.3 支持
+
+- **状态**：上游 tag `dsh-v0.2.2-rc.3` 指向 `38a6a5c965`，npm 已发布（`next` 指向该版本，`latest` 仍为 `0.2.2-rc.1`）。本分支把 `SUPPORTED_DSH_RELEASES`、28 个 DSH peer 与开发 pin 提升到 `0.2.2-rc.3`（24 个精确版本），并用 `scripts/upgrade-dsh.mjs 0.2.2-rc.3` 重指开发树；probe overrides 已移除，唯一新增的传递包 `dsh-deepseek-chat-import` 已补进 `minimumReleaseAgeExclude`。
+- **上游差异**：rc.3 只有 6 个提交、515 个文件；380 个 `package.json` 只改版本号，其余集中在 `ui-sidebar` 的新会话行 HOC 槽、`ui-workspace` 的 `workspace.picker` Factory 与第三个 directory-flow 洞、两个目录选择器包、`ui-primitives` 的上传图标、可选实验 bundle `dsh-deepseek-chat-import`、`session-log-export` 的不可读附件降级，以及桌面安装器与 CI。插件的沙箱、fs、tools、session、storage、skills、lsp、workspace-files 与 Connection 接缝没有任何改动，**未新增 adapter 分支**。
+- **安静陷阱 1（peer-only 副本）**：升级后 `dsh-permission-presets` / `dsh-util-values` 仍可能以 rc.2 副本满足 peer 边（rc.3 各包声明的是精确 peer），`pnpm peers check` 必须为 0；`pnpm dedupe`、`--force`、`--lockfile-only` 都不会改写这类“看似有效”的边。落地前要让它们升到同一精确版本，最终 lockfile 中 `0.2.2-rc.2` 只作为 peer 范围字符串出现。
+
+- **安静陷阱 2（新包不是契约成员）**：`dsh-deepseek-chat-import` 默认不挂载、与插件授权面没有交点，不加入 `OPTIONAL_CORE_PACKAGES`；它自带的 `zod 4.6.6` 与 `dsh-storage-domain` 的 `4.4.3` 是两份独立副本，域 schema 仍只经 `storage-zod` 构建。
+- **安静陷阱 3（目录选择器第三个洞）**：`workspace.picker.directoryFlow` 由 `workspace.picker` Factory 声明；插件没有 occupant，也不要往宿主的新会话/选择器流里挂自己的根 UI。
+- **安静陷阱 4（新会话行 DOM）**：`sidebar.session.action` 用 `display: contents` 锚点夹在 `.newSessionRow` 与按钮之间，`sidebar.footer.action` 在页脚、不受影响；将来若要注册该 HOC 槽，必须原样返回 `children`，不要多套一层盒子。
+- **fork 基线**：rc.3 未改 `ui-open-in-app` / `ui-sidebar-files` 的 `src/client/`，open-in-app 基线保持 `ddac96760b`、files-tree 旧版保持 `f3803c9697`；`FORK.md` 只记录 dev pin 已前移、基线不变。
+- **验证（已发布包）**：`compat:check`（allowlist / peer / 开发 pin / 安装树一致，24 个精确版本；`pnpm peers check` 无问题）、lint、双端 typecheck、`build`、`docs:check`、`pack:check`（210 成员）与 `auto-review:fork` 通过；完整 vitest **1386 通过 / 162 跳过 / 17 失败**，17 个失败仍全部是本会话 Seatbelt 下的 sandboxed-peer registry IPC 用例（与 rc.2 基线的 17 个同形）。本机 `smoke:compose` **56/56**、`smoke:behavior` **96 通过 / 8 跳过**、`smoke:journey` **85 通过 / 2 跳过**、`smoke:packed` **95 通过 / 8 跳过**，0 失败。三 OS 矩阵与 Windows ACL 原生结果由 PR 的 CI 给出。
+
+## 19. 附加根 Files 的行右键与工作区搜索（2026-11-14）
+
+两个宿主面都是 `0.2.2` 线新增，插件按结构门控：**不要**改成版本字符串比较，也**不要**把上游 client 包加进任何依赖——`scripts/upgrade-dsh.mjs` 会把每个 `@deepseek-ai/dsh*` devDependency 改写到目标 release，`0.2.2-alpha.3` 之前不存在的包会让 20 个老版本 lane 在 `pnpm install` 阶段死亡。
+
+- **行右键（`0.2.2-alpha.3` 起）**：renderer 的根级 composed prop `useContextMenu` 提供 `getTriggerProps`，插件从 slot occupant 直接取；seat 由 `src/client/files-tree/context-menu.ts` 取，经 `src/compat/files-tree.ts` 的 `rowTriggerProps`/`canOpen` 转发进 `sidebar.files.tree` Factory，旧行渲染路径 spread 同一组 handlers。target 是 `{ kind: 'file' | 'directory', value: { sessionId, path: 绝对路径 } }`；**必须传绝对路径**——宿主贡献方按 Session cwd 解析相对路径，会把附加根行指向主根同名文件。没有 `useContextMenu`（更早宿主）→ 不绑定、DOM 不变。
+- **`contextMenus.registeredKinds`（`0.2.2-rc.2` 起）**：可选探测。没有该成员时直接绑定（alpha.3 原生已注册 file/directory 贡献），不要把“探不到 kinds”误判成“没有菜单”而丢掉 alpha.3 的右键。
+- **工作区搜索（`0.2.2-rc.2` 起）**：客户端探测 `typeof remote.workspaceFiles.search === 'function'`，宿主探测 `typeof service.search === 'function'`；缺席时不渲染页头搜索钮/搜索栏、不调用端点（端点会答 `search-unavailable`）。搜索根在 wire 上无法命名（request 只有 SessionId），所以走插件通道 `/multi-root-workspace` 的 `search` 端点：`rootId` 解析自**刷新后的** Registry（稳定 id，不是路径），以 host 内部 scope 命名附加根，单次以主根为 key 的 Registry 准入；`scopeOf()` 的授权复核必须在准入帧内——共享权威 Host 的帧外答案是空，帧外检查会把所有搜索拒掉。
+- **`highlight` / `omitted` 与隐藏项过滤（`0.2.2-rc.2` 起）**：结果树给 Factory 传 `highlight`，旧行路径用 `<mark>`；树态在绘制期过滤隐藏项（`src/client/files-tree/hidden.ts`），隐藏目录下的已列层级丢弃、只含隐藏项的目录用 `omitted: 'hidden'` 画说明，搜索把同一偏好作为 `includeHidden` 上送。偏好与上游同一个 localStorage 键 `dsh.sidebar-files.workspace-search.v1`，只存与默认值的差异；删掉插件代码不影响原生读取。
+- **已知边界**：原生 Files 快捷键（Cmd+P）仍聚焦被接管隐藏的原生搜索框，附加根搜索的受支持入口是页头搜索钮；预览导航树的搜索由 ADR-0043 补齐（见 §21），它的搜索面在 aside 内、同样不响应 Cmd+P。
+- **升级目检**：更早宿主上附加根树零变化（没有菜单、没有搜索钮）；rc.2+ 上右键 target 命中附加根真实路径、搜索结果与主根原生同构，预览附加根文件时 aside 内出现插件 pane 的常显搜索栏。结构边界与证据见[接口审查](../../docs/reference/dsh-0.2.2-migration.md#附加根-files-视图消费的两个接口面2026-11-14)与 [ADR-0041](../../docs/decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0042](../../docs/decisions/ADR-0042-additional-root-row-context-menus.md)、[ADR-0043](../../docs/decisions/ADR-0043-additional-root-preview-navigator-search.md)。
+
+
+## 20. Files 页签的实现接管与可见性（2026-11-15）
+
+- **tab 注册表是唯一的接管事实源**：`ctx.sidebarRightTabs`（`0.1.5-rc.2` 起由 `ui-sidebar-right` provide）的 `get(kind)` 返回该 kind 的**生效**定义，`subscribe(listener)` 在注册/移除时通知（`0.2.0-rc.2` 已有）。extension band 接管 builtin 后，内置 Files 页实现（id `@deepseek-ai/dsh-client-ui-sidebar-files`、`priority: 'builtin'`）被降为 shadowed，`FilesBody` 不再挂载。
+- **槽位声明 ≠ 渲染**：`sidebar.right.tab.files.actions` 由 `ui-sidebar-files` 注册 `FilesBody` 时的 `children` 在启动时声明；页面被接管后该槽仍是 declared，`slots.inject`/`spec()` 都正常。不要用它们判断 Files 页是否还在渲染——同类问题先查 tab 注册表。
+- **可见性约定**：检测到接管时，本插件经 `shell.overlay` 弹一次官方 primitives `Toast`（`src/client/files-page-notice.tsx`，词条 `filesPage.notice`），不传 `icon`/`tone`（icon 座席是 warning 色，省略才是 info 级），5 秒淡出；同一接管实现 id 只提示一次，解除后重置。探测在 `src/compat/files-page.ts`，只读结构、不比较版本字符串；`dsh-client-ui-sidebar-right` 不是本插件的 devDependency，也不要为它新增运行时依赖。
+- **升级目检**：装 better-sidebar 等接管 `files` kind 的插件 → 顶部出现一次 info Toast、切换器不出现，footer 与 `/workspace-folders` 仍可用；停用接管插件 → 切换器恢复，再次接管会再次提示。
+
+## 21. 侧栏 footer 入口的图标、两代行几何与同槽共存（2026-11-16）
+
+侧栏底部 `sidebar.footer.action` 的 occupant 行现在有四条“安静”的版本与耦合事实，改样式或往同槽加 occupant 之前必须知道（决策与全部取证见 [ADR-0044](../../docs/decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)）。
+
+- **行几何的分界是 `0.2.2-alpha.2`，旧宿主靠 fallback 命中。** 宿主在 commit `86fb01a613` 把侧栏行从“2px 外扩 + 12px 列内边距”改成 paint-inset token 配方（`--dsh-sidebar-row-padding: 12px`、`--dsh-sidebar-paint-inset: 3px`、`--dsh-sidebar-label-gap: 6px`，列内边距 8px；首个受支持 tag 是 `dsh-v0.2.2-alpha.2`）。因此 19 个旧几何版本（`0.1.5-rc.2` … `0.2.1-rc.5`）根本没有 `--dsh-sidebar-*` 自定义属性，样式表里的 fallback 值就是它们的实际配方；5 个新几何版本（`0.2.2-alpha.2` … `0.2.2-rc.3`）命中 token。一份「token + fallback」声明在两代上都与宿主设置触发行逐像素一致——不要按版本号判断代际，也不要只改 padding：新宿主同时改了列内边距、行内边距与 paint-inset，单改 padding 不可能两代同时命中。
+- **rail 圆角有自己更早的分界 `0.1.6-alpha.2`，最老 2 个版本是已记录偏差。** 宿主从 commit `c6b81a75fd` 起让 rail 触发器继承 `.trigger` 的 12px 圆角（此前是 `border-radius: 50%` + `corner-shape: round`）；24 个受支持版本里只有 `0.1.5-rc.2`、`0.1.6-alpha.1` 是圆。本插件用 `border-radius: var(--dsw-radius-md, 12px)`：与 `0.1.6-alpha.2` 起的 22 个版本一致，最老 2 个版本宿主画圆、插件画 12px 圆角方（无 ink/布局影响）。不存在能区分 `0.1.6-alpha.2` 的 CSS-only 探针，所以这 2 个版本的偏差被接受；不要换回 `50%`，也不要用 `max(12px, 50% - 2 * inset)` 之类的公式——它只在 5 个新几何版本与最老 2 个版本上与宿主一致，其余 17 个旧几何版本会得到 18px（宿主是 12px）。
+- **官方 cordis footer occupant 永远注册但通常不渲染，槽账本不是“有人在渲染”的信号。** 标准 `dsh-web-app` 组合无条件挂载 `ui-cordis`，它永久注册 `cordis-panel` 的 footer occupant，只在存在动态 Cordis 插件时才渲染（inventory 为空时返回 `null`）。`ctx.slots.entries / entriesOfSlot / subscribe / getVersion` 在全部 24 个受支持版本上都是公开 API，但只能回答“谁注册了”：`entriesOfSlot('sidebar.footer.action').length > 1` 在所有标准安装里恒真，拿它做让位判据会让本入口永久消失；`return null` 式让位仍占着 ledger cell，两个插件互相让位会互隐/抖动，“渲染可见”只能靠对宿主 DOM 的观测，而本插件不做这种观测。同槽几何冲突的实际做法是 CSS/DOM 布局修补——本插件在自身挂载期间把 `[data-slot='sidebar.footer.action']` 锚点变成纵向列，让每个真正渲染的 occupant 各占一整行，插件卸载即回到宿主布局。ADR-0044 §D4 是这条的完整否决记录。
+- **设置行 occupant 的高度从 `0.2.0-rc.1` 起随登录状态变化，按钮跟随它而不是写死 42px。** `0.1.7-rc.2` 及更早的 7 个版本里，侧栏设置行 occupant 是 42px 的设置触发器，按钮保持 `height: 42px`；从 `0.2.0-rc.1` 起该行 occupant 是账号菜单 launcher（`AccountMenu.module.css`：已登录 44px、未登录 32px、rail 36px），样式表用 `[data-slot='sidebar']:has(button[data-signed-out='true'])` 与 `[data-slot='sidebar']:has(button[data-signed-out='false'])` 两条例外把 wide 触发器覆盖为 32px / 44px，标记缺席时回退 42px，rail 固定 36px。这是对账号 launcher 结构属性的 CSS 依赖，不是槽位契约：不要写死 32/42/44、不要按版本号切换、也不要把 `data-signed-out` 当成公开 slot 字段；宿主改名时按钮退化为 42px（不会误设尺寸）。只有高度跟随，左侧 inset 与 hover token 仍来自行几何配方。
+
+## 22. 预览导航树的工作区搜索（2026-11-16）
+
+- **复用而非复制**：`FilesPane` 新增 `mode='preview'`，预览导航接管在 `filesTree.search` seat 存在时 portal 同一个 `FilesPane`，而不是第二套搜索状态机（[ADR-0043](../../docs/decisions/ADR-0043-additional-root-preview-navigator-search.md)）。预览形态的差异只有四项：栏常显（不读不写 `barOpen`）、挂载不抢焦点、调用方提供打开路由（`openFileIn` → `replaceTab`）、结果命中被预览文件时标当前行（`TreeView.current.ref` 变可选，只标记不滚动）。搜索记录键是 `(pane, root)`，与 Files 页的 `(tab, root)` 分开；偏好仍写宿主同名 localStorage 键、按根隔离。
+- **接管记录原子化**：预览接管与 Files 页 `RootSwitcher` 的 takeover 都在一次 state 提交里携带 `{ root, rootId }`，搜索 key 与请求的 `rootId` 同源；换根过渡帧不再发出“新根 rootId + 旧根 query”的请求，也不会把旧根记录写成无人结算的 `pending`（v0.1.20 已发布缺陷的修复）。
+- **降级**：有面板通道但无 `workspaceFiles.search`（rc.2 之前或裁掉 search 服务的组合）→ 仍 portal `FilesTree`，DOM、生命周期与隐藏规则逐项不变；无面板通道 → 不建立接管、导航树全程原生；主根文件在任何宿主上都不接管、原生搜索零变化。
+- **结构依赖与目检**：原生搜索节点由 `styles.ts` 的 DIRECT-CHILD 规则隐藏，bar 选择器带 `:not([data-mrfw-files-pane])` 守卫，插件 pane 根携带 `data-mrfw-files-pane`；焦点交接在 `[data-files-page], aside[data-files-navigator]` 容器内查找原生 body（覆盖 pane 包装、直挂与 Files 页新包装三种形态）。升级目检清单见第 12 节；测试面与已接受偏差见[实施计划](../../docs/plans/active/2026-11-16-additional-root-preview-navigator-search.md)。
+

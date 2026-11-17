@@ -60,7 +60,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   let closed = false
   let chain: Promise<void> = Promise.resolve()
 
-  /** The live settings, fail-closed on any unknown value (ADR-0041). */
+  /** The live settings, fail-closed on any unknown value (ADR-0049). */
   const live = (): { enabled: boolean; mode: RemoteMode; team?: TeamConfig | undefined } => {
     const value = readRemoteSettingsValue(
       (configValue(read()) ?? {}) as RemoteSettingsValue,
@@ -77,7 +77,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   }
 
   /**
-   * The gated subtree, mounted per switch-on per mode (ADR-0041 §5): SSH
+   * The gated subtree, mounted per switch-on per mode (ADR-0049 §5): SSH
    * capability gate is shared; personal runs the host-side manager directly,
    * team attests a relaxed broker, hardened is the previous full path.
    */

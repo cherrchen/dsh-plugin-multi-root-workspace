@@ -1,5 +1,5 @@
 /**
- * The panel's personal-mode SSH client (ADR-0041 §6). It speaks the same
+ * The panel's personal-mode SSH client (ADR-0049 §6). It speaks the same
  * Connection RPC channel as the remotes client but over the personal contract
  * (`remote/personal-contract.ts`): a host in another custody mode answers
  * `remote-personal-unavailable`. Every call is session-addressed; no method

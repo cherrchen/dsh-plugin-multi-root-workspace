@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.host.json",
+  "include": [
+    "src/auto-review/entry.ts",
+    "src/auto-review/api.d.ts",
+    "src/auto-review/partition.ts",
+    "src/auto-review/current/**/*.ts"
+  ],
+  "exclude": [
+    "src/auto-review/current/upstream.ts"
+  ]
+}

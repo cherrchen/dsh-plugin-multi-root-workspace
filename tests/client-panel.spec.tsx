@@ -344,6 +344,43 @@ describe('the client entry', () => {
     expect((label as () => string)()).toBe(`${NS}.action.label`)
   })
 
+  it('renders the footer row with the workspace-tree glyph and its visible label', () => {
+    // The compat probe prefers IconWorkspaceTreeOutlineRegular; the jsdom stub
+    // does not export it, so the probe falls back to the folder glyph — the
+    // point is that the gear the entry used to carry is gone.
+    const harness = mount()
+    renderPanel(harness)
+    const row = document.querySelector('.mrfw-triggerRow')
+    expect(row).toBeTruthy()
+    expect(document.querySelector('.mrfw-railRow')).toBeNull()
+    const trigger = row!.querySelector('.mrfw-trigger') as HTMLButtonElement
+    expect(trigger.textContent).toBe(`${NS}.action.label`)
+    const icon = trigger.querySelector('svg')
+    expect(icon?.getAttribute('data-icon')).toBe('folder-open')
+    expect(icon?.getAttribute('data-icon')).not.toBe('settings')
+    expect(icon?.getAttribute('width')).toBe('16')
+    expect(icon?.getAttribute('height')).toBe('16')
+    // The label is real text between the icon and the row's edge, not a title.
+    expect(trigger.querySelector('.mrfw-triggerLabel')?.textContent).toBe(`${NS}.action.label`)
+  })
+
+  it('renders the rail form as a 36px icon-only seat with an 18px glyph', () => {
+    const harness = mount()
+    const registration = harness.registrations.find(item => item.options.name === 'sidebar.footer.action')!
+    // The slot owner passes { wide: false } when the sidebar is collapsed.
+    render(createElement(registration.component as never, { wide: false }))
+    expect(document.querySelector('.mrfw-triggerRow.mrfw-railRow')).toBeTruthy()
+    const rail = document.querySelector('.mrfw-triggerRail') as HTMLButtonElement
+    expect(rail).toBeTruthy()
+    // Icon-only: no label span, and the name comes from the title attribute.
+    expect(document.querySelector('.mrfw-triggerLabel')).toBeNull()
+    expect(rail.getAttribute('title')).toBe(`${NS}.action.title`)
+    const icon = rail.querySelector('svg')
+    expect(icon?.getAttribute('data-icon')).toBe('folder-open')
+    expect(icon?.getAttribute('width')).toBe('18')
+    expect(icon?.getAttribute('height')).toBe('18')
+  })
+
   it('registers nothing when no sidebar declares the slot', () => {
     const ctx = {
       effect: () => () => {},
@@ -1037,6 +1074,30 @@ describe('the panel dialog', () => {
       sessionId: 'session-1',
       path: '/repos/website',
     })
+  })
+
+  it('stacks the root-limit hint on its own line above the footer controls', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', roots: [ROOT_A, ROOT_B], limit: 2, count: 2 })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
+
+    const footer = document.querySelector('.mrfw-actions') as HTMLElement
+    const hint = footer.firstElementChild as HTMLElement
+    // The hint owns the footer's first line; it is not a control wedged between
+    // the add row and Retry/Worktree suggestions.
+    expect(hint.className).toContain('mrfw-actionsNote')
+    expect(hint.textContent).toBe(`${NS}.panel.limitReached`)
+    const retry = screen.getByRole('button', { name: `${NS}.panel.retry` })
+    expect(hint.contains(retry)).toBe(false)
+    // Everything after the hint is still one of the original controls, in order.
+    // The access picker is a Menu: its anchor wrapper span is the control's own
+    // element (the real primitive wraps every anchor in one), so the row counts
+    // it by the button inside rather than by a flattened tag name.
+    expect(Array.from(footer.children).slice(1).every(element => element.tagName === 'BUTTON'
+      || element.tagName === 'INPUT'
+      || (element.tagName === 'SPAN' && element.querySelector('button') !== null))).toBe(true)
   })
 
   it('flips a root to read-only without asking, and renders the host answer', async () => {

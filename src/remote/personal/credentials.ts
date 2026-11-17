@@ -1,5 +1,5 @@
 /**
- * Personal custody credential root (ADR-0041 §2): `<credentialRoot>` 0700,
+ * Personal custody credential root (ADR-0049 §2): `<credentialRoot>` 0700,
  * `credentials.json` metadata 0600, `keys/<id>` 0600 + `keys/<id>.pub` 0644,
  * `secrets/<id>` 0600. No function ever returns private key or password
  * material — `list()` answers metadata only.

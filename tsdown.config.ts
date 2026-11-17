@@ -58,6 +58,8 @@ const hostConfig: UserConfig = {
   name: PACKAGE_NAME,
   entry: {
     'auto-review': 'src/auto-review/entry.ts',
+    'auto-review-legacy': 'src/auto-review/legacy/fork.ts',
+    'auto-review-current': 'src/auto-review/current/fork.ts',
     'index': 'src/index.ts',
     'compat': 'src/compat.ts',
     'fs': 'src/fs.ts',

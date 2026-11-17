@@ -1,5 +1,5 @@
 /**
- * R9 coverage for the personal custody mode (ADR-0041): pre-write validation,
+ * R9 coverage for the personal custody mode (ADR-0049): pre-write validation,
  * ssh -G endpoint resolution, helper drop on identity change, access-key
  * lifecycle, RPC refusals, askpass argv/env, helper hash checks, team
  * attestation shape, plane reload, and secrets never leaving RPC answers.

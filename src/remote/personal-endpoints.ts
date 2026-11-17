@@ -1,5 +1,5 @@
 /**
- * Host handlers for the personal-mode SSH endpoints (ADR-0041 §2/§6). Every
+ * Host handlers for the personal-mode SSH endpoints (ADR-0049 §2/§6). Every
  * handler refuses `remote-personal-unavailable` unless the live switch is on
  * AND the custody mode is `personal`; every mutation answers the refreshed
  * `sshState` and no answer ever carries key or password bytes.

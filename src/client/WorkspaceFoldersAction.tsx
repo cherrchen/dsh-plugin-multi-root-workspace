@@ -2,7 +2,10 @@
  * The Workspace Folders panel: one sidebar footer action that opens a dialog
  * listing this session's workspace root and the additional roots registered for
  * it, with the actions the milestone requires — Add (through the composed
- * directory picker), Remove, Alias, Copy Path, and Reveal.
+ * directory picker), Remove, Alias, Copy Path, and Reveal. A confirmed-missing
+ * worktree root collapses to name/access/path plus a red delete and its menu,
+ * and that delete shares one host-Modal confirmation with the batch action on
+ * the section title (ADR-0043).
  *
  * Why a footer action and its own dialog, instead of a first-class panel: the
  * slots that can host a full panel (`sidebar.panellist` + the keyed `main`
@@ -38,8 +41,8 @@ import {
   IconFolderOpen,
   IconPlus,
   IconRefresh,
-  IconSettings,
   IconTrash,
+  IconWorkspaceTree,
 } from '../compat/client-icons.ts'
 import { errorHasDetail, errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
@@ -47,6 +50,7 @@ import type { RemotesClient } from './remotes-client.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
 import type { SshClient } from './ssh-client.ts'
 import { platformLabel, SshManagementDialog, type SshDialogTab } from './ssh-panel.tsx'
+import { requestWorktreePrompt } from './worktree-prompt-bus.ts'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
 import type { WorktreeClient } from './worktree-client.ts'
@@ -96,6 +100,12 @@ export interface WorkspaceFoldersActionProps {
    * manager on compositions that do not mount the feature.
    */
   readonly worktrees?: WorktreeClient | undefined
+  /**
+   * Whether the worktree suggestion feature is enabled. The panel gains a
+   * manual entry only while the overlay would accept it; an unknown setting
+   * (older hosts without the settings form) keeps the entry visible.
+   */
+  readonly worktreePromptEnabled?: (() => boolean) | undefined
 }
 
 /** The visual family of one capsule button, mirroring the host Button kit. */
@@ -322,9 +332,12 @@ export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): Reac
   )
   return (
     <>
-      {/* The row wrapper mirrors the host `.triggerRow`: its 2px side overhang
-          (`calc(100% + 4px)` + negative margins) is what puts this row's icon
-          on the same 18px ink line as the Settings gear below it. */}
+      {/* The row wrapper mirrors the host `.triggerRow` of both generations:
+          the legacy 2px-side overhang through the negative margin, and the
+          token-era exact column width through the paint-inset fallbacks
+          (styles.ts, ADR-0044 §D2). The trigger's icon is the workspace-tree
+          glyph this plugin's other entries use, so this row reads as the same
+          action as the Hero entry and the workspace menu item. */}
       <div className={props.compact ? 'mrfw-fileLauncher' : rail ? 'mrfw-triggerRow mrfw-railRow' : 'mrfw-triggerRow'}>
         <button
           type="button"
@@ -340,7 +353,7 @@ export function WorkspaceFoldersAction(props: WorkspaceFoldersActionProps): Reac
             else openWith(undefined)
           }}
         >
-          <span className="mrfw-triggerIcon" aria-hidden="true"><IconSettings size={rail ? 18 : 16} /></span>
+          <span className="mrfw-triggerIcon" aria-hidden="true"><IconWorkspaceTree size={rail ? 18 : 16} /></span>
           {rail || props.compact === true ? null : <span className="mrfw-triggerLabel">{props.t('action.label')}</span>}
         </button>
       </div>
@@ -431,12 +444,24 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const [aliasField, setAliasField] = useState<'alias' | 'aliasId'>('alias')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
   const [menuFor, setMenuFor] = useState<string | undefined>(undefined)
-  /** Tracked worktree roots awaiting the operator's inline cleanup confirmation. */
+  /**
+   * Tracked worktree roots awaiting the operator's cleanup confirmation. The
+   * section-title batch action and the per-row red delete share this state and
+   * therefore one confirmation Modal.
+   */
   const [cleanupFor, setCleanupFor] = useState<readonly string[] | undefined>(undefined)
   /** The remote section, read independently of the roots view. */
   const [remoteState, setRemoteState] = useState<{ view?: RemotesView; error?: PanelError }>({})
   /** The standalone SSH management dialog's requested tab; undefined when closed. */
   const [sshDialog, setSshDialog] = useState<SshDialogTab | undefined>(undefined)
+  /** Why the last cleanup request failed; it belongs to the confirmation only. */
+  const [cleanupError, setCleanupError] = useState<PanelError | undefined>(undefined)
+  /**
+   * Mirror of `cleanupFor` for async results: a failure that lands after the
+   * operator closed the confirmation must go to the panel's own alert instead
+   * of reopening it.
+   */
+  const cleanupForRef = useRef<readonly string[] | undefined>(undefined)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const requestEpoch = useRef(0)
   /** Fences remote-section answers independently of roots answers. */
@@ -465,17 +490,17 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       // listener closes just that layer, and this handler must not close the
       // dialog underneath it — the portaled dropdown and Modal bubble their
       // events through this dialog's React tree too.
-      if (menuFor !== undefined || accessMenuOpen || upgradeFor !== undefined || sshDialog !== undefined) return
+      if (menuFor !== undefined || accessMenuOpen || upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined) return
       event.stopPropagation()
       props.onClose()
       return
     }
     if (event.key !== 'Tab') return
-    // While the upgrade confirmation owns the topmost modal, Tab belongs to
-    // its own focus trap. The portaled Modal still bubbles keys through this
-    // dialog's React tree (like Escape above), and trapping here would yank
-    // focus to a control behind the active confirmation.
-    if (upgradeFor !== undefined || sshDialog !== undefined) return
+    // While a confirmation owns the topmost modal, Tab belongs to its own
+    // focus trap. The portaled Modal still bubbles keys through this dialog's
+    // React tree (like Escape above), and trapping here would yank focus to a
+    // control behind the active confirmation.
+    if (upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined) return
     const dialog = dialogRef.current
     if (dialog === null) return
     const focusable = Array.from(
@@ -518,15 +543,14 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       const view = await panel.call('list', base)
       if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
       setState({ view, error: undefined, busy: false, noSession: false })
-      // An explicit list is also the host's explicit re-activation request:
-      // it may have recovered a workspace whose remain prompt is `lost`. The
-      // overlay cannot see that answer, so wake it to mount its wait again.
-      props.worktrees?.notify?.(base.sessionId)
+      // NOTE: an explicit list is also the host's explicit re-activation
+      // request, but it must NOT pop a notice or re-open the Dialog (ADR-0039
+      // 第二十次修订 §3.2). The overlay only checks on a session activation.
     } catch (error: unknown) {
       if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
       setState({ view: undefined, error: asPanelError(error), busy: false, noSession: false })
     }
-  }, [panel, requestBase, props.worktrees])
+  }, [panel, requestBase])
 
   /**
    * Read the remote section. This never opens a remote connection: the host
@@ -593,8 +617,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       setState({ view: undefined, error: undefined, busy: false, noSession: current === undefined })
       setMenuFor(undefined)
       setAliasFor(undefined)
+      cleanupForRef.current = undefined
       setCleanupFor(undefined)
       setRemoteState({})
+      setCleanupError(undefined)
       void refresh()
       void refreshRemotes()
     })
@@ -636,6 +662,38 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   }, [panel, requestBase])
 
   /**
+   * Open the shared cleanup confirmation for exactly these ids. Any other
+   * floating layer closes first, so at most one confirmation is ever visible;
+   * a stale error from an earlier attempt never leaks into the new one.
+   */
+  const openCleanup = useCallback((ids: readonly string[]) => {
+    if (ids.length === 0) return
+    cleanupForRef.current = ids
+    setCleanupError(undefined)
+    setUpgradeFor(undefined)
+    setMenuFor(undefined)
+    setAccessMenuOpen(false)
+    setCleanupFor(ids)
+  }, [])
+
+  /** Dismiss the confirmation without sending anything. */
+  const closeCleanup = useCallback(() => {
+    cleanupForRef.current = undefined
+    setCleanupFor(undefined)
+    setCleanupError(undefined)
+  }, [])
+
+  /**
+   * Drop the confirmation only while it still names this exact id array: a
+   * late answer for an older request must never close a re-opened one, and the
+   * same ids opened again are a new array.
+   */
+  const clearCleanupIfCurrent = useCallback((ids: readonly string[]) => {
+    if (cleanupForRef.current === ids) cleanupForRef.current = undefined
+    setCleanupFor(current => (current === ids ? undefined : current))
+  }, [])
+
+  /**
    * Clean up the exact tracked roots the operator selected. Only the worktree
    * channel can perform this: the ids must be sidecar mappings and the owner
    * re-verifies each path. Nothing is removed automatically.
@@ -654,12 +712,22 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       const answer = await worktrees.cleanup(base.sessionId, ids)
       if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
       setState({ view: answer.roots, error: undefined, busy: false, noSession: false })
-      setCleanupFor(undefined)
+      clearCleanupIfCurrent(ids)
     } catch (error: unknown) {
       if (!mounted.current || epoch !== requestEpoch.current || props.sessionId?.() !== base.sessionId) return
-      setState(previous => ({ ...previous, error: asPanelError(error), busy: false }))
+      const failure = asPanelError(error)
+      if (cleanupForRef.current === ids) {
+        // The confirmation is still on screen: its own body owns the message,
+        // and the panel's alert keeps whatever unrelated error it showed.
+        setState(previous => ({ ...previous, busy: false }))
+        setCleanupError(failure)
+      } else {
+        // Closed while the request was in flight: report through the panel's
+        // alert instead of reopening the confirmation.
+        setState(previous => ({ ...previous, error: failure, busy: false }))
+      }
     }
-  }, [props.worktrees, props.sessionId, requestBase])
+  }, [props.worktrees, props.sessionId, requestBase, clearCleanupIfCurrent])
 
   /**
    * Open the composed picker and add whatever it returns. A picker that is not
@@ -815,16 +883,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           {state.view?.unavailable === undefined ? null : (
             <p role="alert" className="mrfw-alert">{state.view.unavailable}</p>
           )}
-          {cleanupFor === undefined ? null : (
-            <div className="mrfw-note" role="alert">
-              {t('worktree.cleanupConfirm', { count: cleanupFor.length })}
-              <Action variant="danger" pending={state.busy} onClick={() => { void runCleanup(cleanupFor) }}>
-                {t('worktree.cleanupDo')}
-              </Action>
-              <Action onClick={() => { setCleanupFor(undefined) }}>{t('panel.aliasCancel')}</Action>
-            </div>
-          )}
-
           <section className="mrfw-section">
             <div className="mrfw-sectionTitleRow">
               <span className="mrfw-sectionTitle">{t('panel.primary')}</span>
@@ -853,8 +911,25 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           </section>
 
           <section className="mrfw-section">
-            <div className="mrfw-sectionTitleRow">
+            <div className="mrfw-sectionTitleRow mrfw-sectionTitleRowAction">
               <span className="mrfw-sectionTitle">{t('panel.additional')}</span>
+              {/* The batch entry sits on its own section's title: it acts on
+                  the rows right below it, and the footer keeps its width. */}
+              {(state.view?.worktreeCleanupCount ?? 0) > 0 ? (
+                <span className="mrfw-sectionAction">
+                  <Action
+                    variant="danger"
+                    pending={state.busy}
+                    onClick={() => {
+                      openCleanup((state.view?.roots ?? [])
+                        .filter(root => root.worktree?.cleanupEligible === true)
+                        .map(root => root.id))
+                    }}
+                  >
+                    {t('worktree.cleanupBatch', { count: state.view?.worktreeCleanupCount ?? 0 })}
+                  </Action>
+                </span>
+              ) : null}
             </div>
             {state.view === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null}
             {state.view !== undefined && roots.length === 0 ? (
@@ -866,6 +941,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               const key = rowKey(root)
               const IconAccess = root.access === 'read-only' ? IconAccessReadOnly
                 : root.access === 'read-write' ? IconAccessReadWrite : IconAccessInherit
+              // Only a confirmed-missing tracked worktree may be cleaned up;
+              // every other row keeps its full action set and status text.
+              const cleanable = root.worktree?.cleanupEligible === true
               return <div key={key} className="mrfw-row">
                 <div className="mrfw-rootText">
                   <span className="mrfw-rootName">
@@ -888,31 +966,29 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     t={t}
                   />
                 </div>
-                {root.state === 'available' ? null : (
+                {cleanable || root.state === 'available' ? null : (
                   <span title={root.detail} className="mrfw-stateWarn">
                     {t(stateKey(root.state))}
                   </span>
                 )}
-                {root.worktree !== undefined && root.worktree.state !== 'active' ? (
+                {cleanable || root.worktree === undefined || root.worktree.state === 'active' ? null : (
                   <span className="mrfw-stateWarn">{t(worktreeStateKey(root.worktree.state))}</span>
-                ) : null}
-                {root.worktree?.cleanupEligible === true ? (
-                  <span className="mrfw-note">{t('worktree.pathReuse')}</span>
-                ) : root.worktree?.state === 'changed' ? (
+                )}
+                {cleanable || root.worktree?.state !== 'changed' ? null : (
                   <span className="mrfw-note">{t('worktree.pathReused')}</span>
-                ) : null}
-                {root.state === 'missing' ? (
+                )}
+                {cleanable || root.state !== 'missing' ? null : (
                   <IconButton
                     pending={state.busy}
                     onClick={() => { void reRegister(root) }}
                     icon={<IconRefresh />}
                     label={t('panel.reRegister')}
                   />
-                ) : null}
+                )}
                 {root.state === 'redirected' ? (
                   <span className="mrfw-note">{t('panel.redirectedHint')}</span>
                 ) : null}
-                {root.skillsEnabled === undefined ? null : (
+                {cleanable || root.skillsEnabled === undefined ? null : (
                   <IconButton
                     pending={state.busy}
                     pressed={root.skillsEnabled}
@@ -922,12 +998,25 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                     hint={t(root.skillsEnabled ? 'panel.skillsEnabled' : 'panel.skillsDisabled')}
                   />
                 )}
-                <IconButton
-                  pending={state.busy}
-                  onClick={() => { void reveal(root) }}
-                  icon={<IconFolderOpen />}
-                  label={t('panel.reveal')}
-                />
+                {cleanable ? (
+                  // The row's primary action: a red delete that opens the same
+                  // confirmation the batch entry does — the path-reuse warning
+                  // lives there, not in the row.
+                  <IconButton
+                    variant="danger"
+                    pending={state.busy}
+                    onClick={() => { openCleanup([root.id]) }}
+                    icon={<IconTrash />}
+                    label={t('worktree.cleanup')}
+                  />
+                ) : (
+                  <IconButton
+                    pending={state.busy}
+                    onClick={() => { void reveal(root) }}
+                    icon={<IconFolderOpen />}
+                    label={t('panel.reveal')}
+                  />
+                )}
                 <Menu
                   open={menuFor === key}
                   onClose={() => { setMenuFor(undefined) }}
@@ -959,10 +1048,12 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       // Widening what the agent may modify — under ANY session
                       // mode — asks first, through the confirmation layered
                       // over this dialog, not the browser's window.confirm.
-                      if (widensAccess(root.access, access)) { setUpgradeFor({ root, access }); return }
+                      // Only one confirmation may own the screen: opening
+                      // the upgrade layer drops an open cleanup confirmation.
+                      if (widensAccess(root.access, access)) { closeCleanup(); setUpgradeFor({ root, access }); return }
                       void mutate('setAccess', { entry: entryOf(root), access })
                     }
-                    if (id === 'worktree-cleanup') setCleanupFor([root.id])
+                    if (id === 'worktree-cleanup') openCleanup([root.id])
                     if (id === 'remove') void mutate('remove', { entry: entryOf(root) })
                   }}
                   portal
@@ -1095,6 +1186,11 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           )}
 
           <div className="mrfw-actions">
+            {/* A full root store is a state of this add row, not another
+                control squeezed between the buttons: the hint takes the line
+                above the controls, and both lines sit below the sheet's
+                divider (the footer's top border). */}
+            {atLimit ? <p className="mrfw-note mrfw-actionsNote">{t('panel.limitReached')}</p> : null}
             {state.noSession || props.pickDirectory === undefined ? null : (
               <IconButton
                 variant="outline"
@@ -1108,7 +1204,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             {state.noSession ? null : (
               <>
             <input
-              className="mrfw-input"
+              className="mrfw-input mrfw-manualPath"
               value={manualPath}
               placeholder={t('panel.addManual')}
               disabled={atLimit}
@@ -1183,22 +1279,21 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             </Action>
               </>
             )}
-            {atLimit ? <span className="mrfw-note">{t('panel.limitReached')}</span> : null}
-            {(state.view?.worktreeCleanupCount ?? 0) > 0 ? (
-              <Action
-                variant="danger"
-                pending={state.busy}
-                onClick={() => {
-                  const ids = (state.view?.roots ?? [])
-                    .filter(root => root.worktree?.cleanupEligible === true)
-                    .map(root => root.id)
-                  if (ids.length > 0) setCleanupFor(ids)
-                }}
-              >
-                {t('worktree.cleanupBatch', { count: state.view?.worktreeCleanupCount ?? 0 })}
-              </Action>
-            ) : null}
             <Action onClick={() => { void refresh() }} pending={state.busy} variant="outline">{t('panel.retry')}</Action>
+            {props.worktrees !== undefined && !state.noSession
+              && (props.worktreePromptEnabled === undefined || props.worktreePromptEnabled())
+              ? (
+                <Action
+                  variant="outline"
+                  onClick={() => {
+                    const base = requestBase()
+                    if (base !== undefined && requestWorktreePrompt(base.sessionId)) props.onClose()
+                  }}
+                >
+                  {t('worktree.panelOpen')}
+                </Action>
+              )
+              : null}
           </div>
         </div>
       </div>
@@ -1233,6 +1328,47 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
         </>
       )}
     />
+    {/* The one cleanup confirmation, shared by the batch title action, the row
+        delete and the row menu. It deliberately has its own error slot: a
+        cleanup failure belongs to this irreversible action, not to whatever
+        unrelated alert the panel body is showing. While the request is in
+        flight the footer's cancel disables, and the Modal's own close control
+        only dismisses the dialog — the submitted request keeps running and
+        still adopts its answer. */}
+    <Modal
+      open={cleanupFor !== undefined}
+      onClose={closeCleanup}
+      title={t('worktree.cleanupTitle')}
+      description={cleanupFor === undefined ? '' : t('worktree.cleanupConfirm', { count: cleanupFor.length })}
+      closeLabel={t('panel.close')}
+      footer={(
+        <>
+          <Action disabled={state.busy} onClick={closeCleanup}>{t('panel.aliasCancel')}</Action>
+          <Action
+            variant="danger"
+            pending={state.busy}
+            onClick={() => {
+              const ids = cleanupFor
+              if (ids !== undefined) void runCleanup(ids)
+            }}
+          >
+            {t('worktree.cleanupDo')}
+          </Action>
+        </>
+      )}
+    >
+      {cleanupFor === undefined ? null : (
+        <p className="mrfw-note">
+          {t(cleanupFor.length === 1 ? 'worktree.pathReuse' : 'worktree.pathReuseMany')}
+        </p>
+      )}
+      {cleanupError === undefined ? null : (
+        <p role="alert" className="mrfw-alert">
+          {t(errorKeyOf(cleanupError.code))}
+          {(cleanupError.code === 'unavailable' || cleanupError.code === 'panel/internal') ? ` (${cleanupError.message})` : ''}
+        </p>
+      )}
+    </Modal>
     </>
   )
 }

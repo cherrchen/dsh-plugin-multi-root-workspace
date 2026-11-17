@@ -42,14 +42,20 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/RootSwitcher
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
-import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings, maybeComponent } from '../compat/client-icons.ts'
+import { IconChevronDown, IconFolderClose, IconFolderOpen, IconRefresh, IconSettings, maybeComponent, maybeIcon } from '../compat/client-icons.ts'
+import { searchStateKey, type SearchPaneStates } from './files-tree/search-state.ts'
+import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-store'
+import { createSearchFailureDescriber } from './files-tree/describe-failure.ts'
+import { fitRootName, ROOT_NAME_FIT_SLACK_PX, type RootNameForm } from './root-name-fit.ts'
+import { createLabelMeasurer, ROOT_NAME_PROBE_CLASS, rootNameLabelBudget } from './root-name-room.ts'
 import type { RootsView, RootView } from '../contract.ts'
 import type { NativeTreeRenderer } from '../compat/files-tree.ts'
-import { FilesTree, type FilesTreeSurface } from './files-tree/adapter.tsx'
+import { type FilesTreeSurface } from './files-tree/adapter.tsx'
+import { FilesPane } from './files-tree/pane.tsx'
 import { OpenInAppAction, type OpenInAppAdapter } from './open-in-app/adapter.tsx'
 import {
   basename,
@@ -78,7 +84,14 @@ export interface RootSwitcherProps extends Omit<WorkspaceFoldersActionProps, 'co
   readonly nativeTree?: NativeTreeRenderer | undefined
 }
 
-/** The takeover's portal + lifetime, created while an additional root browses. */
+/**
+ * The takeover's portal + lifetime, created while an additional root browses.
+ *
+ * The record carries the root's registry id beside its path, and both land in
+ * one state commit: the pane's search record key and the id its requests name
+ * must never come from different states, or a root switch would send the
+ * outgoing root's query under the incoming root's id.
+ */
 interface Takeover {
   /** Lifetime handed to the tree's face: aborting forgets the store bucket and closes the watches. */
   readonly signal: AbortSignal
@@ -86,6 +99,8 @@ interface Takeover {
   readonly tabId: TabId
   /** The root the tree lists. */
   readonly root: string
+  /** The same root's registry id — what the search endpoint takes. */
+  readonly rootId: string
 }
 
 /**
@@ -96,8 +111,33 @@ interface Takeover {
  */
 const PathLabel = maybeComponent<(props: { path: string; className?: string | undefined }) => ReactNode>(['PathLabel'])
 
+/**
+ * The header search toggle's glyph. It exists from the Regular weight family
+ * on, and the toggle itself renders only where the host has workspace search
+ * (`0.2.2-rc.2+`), so a missing glyph can only mean a composition that would
+ * not draw the button at all.
+ */
+const IconSearch = maybeIcon(['IconSearchOutlineRegular'])
+
+/** The selector hook a composition without the search seat reads: always "nothing". */
+const NO_SEARCH_STATES: SnapshotSelectorHook<SearchPaneStates> = selector => selector({})
+
 /** Selector hook for a composition without the fork: nothing was ever selectable. */
 const noTreeSelection: NonNullable<RootSwitcherProps['filesTree']>['useTreeSelection'] = () => undefined as never
+
+/**
+ * The trigger label as the header width allowed it, tagged with the name it was
+ * fitted for: a selection change must never leave one root's truncated text on
+ * the next root's trigger, not even for the commit before the measurement runs.
+ */
+interface FittedName {
+  /** The display name this fit belongs to. */
+  readonly name: string
+  /** Which tier the measured width allowed. */
+  readonly form: RootNameForm
+  /** The label text for that tier. */
+  readonly text: string
+}
 
 /** The Files-header switcher: root menu, dialog entry, and the portal tree. */
 export function RootSwitcher(props: RootSwitcherProps): ReactNode {
@@ -106,7 +146,12 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [view, setView] = useState<RootsView | undefined>(undefined)
   const [takeover, setTakeover] = useState<Takeover | null>(null)
+  const [fitted, setFitted] = useState<FittedName | null>(null)
   const wrapperRef = useRef<HTMLSpanElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const labelRef = useRef<HTMLSpanElement | null>(null)
+  const probeRef = useRef<HTMLSpanElement | null>(null)
+  const openAnchorRef = useRef<HTMLSpanElement | null>(null)
   const fallbackTabId = useRef<TabId | undefined>(undefined)
   const sectionRef = useRef<HTMLElement | null>(null)
   const [pane, setPane] = useState<HTMLElement | null>(null)
@@ -215,8 +260,62 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   // data-root-kind never hides controls the takeover did not replace.
   const treeVisible = selected !== 'primary' && panel !== undefined && pane !== null && filesTree !== undefined
   const selectedPath = selected === 'primary' ? undefined : selected.path
+  const selectedId = selected === 'primary' ? undefined : selected.id
 
+  // The search bar's open state for this pane root: the header toggle and the
+  // pane read the same record, so the toggle's aria-expanded cannot drift.
+  // The hook is called unconditionally — the seat appears on compositions that
+  // have search at all, but the takeover record lands one render later, and a
+  // conditional call would change the hook order exactly then.
+  const searchSeat = filesTree?.search
+  const useSearchState = searchSeat?.useSearchState ?? NO_SEARCH_STATES
+  const searchKey = takeover === null || searchSeat === undefined ? undefined : searchStateKey(takeover.tabId, takeover.root)
+  const searchBarOpen = useSearchState(states => searchKey !== undefined && states[searchKey]?.barOpen === true)
+  /** Localize a failed search's panel code; the tree's own codes keep its vocabulary. */
+  const describeSearchFailure = useMemo(() => createSearchFailureDescriber(t), [t])
   const takeoverCtl = filesTree?.takeover
+
+  // The trigger label is fitted to the width the header leaves for it: the whole
+  // name when it fits, head and tail when both ends fit, the head alone at the
+  // last. The switcher's own width is the budget input (it does not depend on
+  // the label text, so the chosen form never feeds back into its own budget).
+  // The fit is redone when the name changes, when the selected root's kind adds
+  // or removes the controls inside the row, and whenever the row is resized.
+  const fitTriggerLabel = useCallback((): void => {
+    const switcher = wrapperRef.current
+    const button = triggerRef.current
+    const label = labelRef.current
+    const probe = probeRef.current
+    if (switcher === null || button === null || label === null || probe === null) return
+    const width = rootNameLabelBudget(switcher, button, label)
+    // No measurable room (the pane is hidden, or the test DOM has no layout):
+    // keep the whole name and let the stylesheet's ellipsis handle the visual.
+    if (width <= ROOT_NAME_FIT_SLACK_PX) { setFitted(null); return }
+    const measure = createLabelMeasurer(label, probe)
+    const next = fitRootName(triggerLabel, width - ROOT_NAME_FIT_SLACK_PX, measure)
+    setFitted(previous => previous !== null && previous.name === triggerLabel
+      && previous.form === next.form && previous.text === next.text
+      ? previous
+      : { name: triggerLabel, form: next.form, text: next.text })
+  }, [triggerLabel])
+  useLayoutEffect(() => {
+    fitTriggerLabel()
+  }, [fitTriggerLabel, treeVisible, searchSeat !== undefined, props.openInApp !== undefined])
+  // The row's own width is not the only thing that can shrink the budget: the
+  // open-in-app split button only appears once the application catalog loads,
+  // and it is then inserted into this row without resizing the switcher. The
+  // seat is therefore observed as well — a 0 → measured transition re-fits the
+  // name that the new control just crowded out. (The reload and search buttons
+  // render synchronously with the additional-root takeover; the deps above
+  // already cover that branch.)
+  useLayoutEffect(() => {
+    const targets = [wrapperRef.current, openAnchorRef.current]
+      .filter((element): element is HTMLElement => element !== null)
+    if (targets.length === 0 || typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(() => { fitTriggerLabel() })
+    for (const target of targets) observer.observe(target)
+    return () => { observer.disconnect() }
+  }, [fitTriggerLabel, treeVisible])
   // While an additional root is selected the pane's body area belongs to the
   // forked tree: the takeover keeps one controller per (tab, root) in the
   // inject product, and the dockkit tabHost's data-dockkit-content supplies
@@ -228,8 +327,13 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   // inject-side observer, which ends it whenever the tabHost section leaves
   // the document — the record's real end, even long after this body is gone.
   useEffect(() => {
-    if (!treeVisible || selectedPath === undefined || tabId === undefined || takeoverCtl === undefined) { setTakeover(null); return }
-    setTakeover({ signal: takeoverCtl.signal(tabId, selectedPath, sectionRef.current ?? undefined), tabId, root: selectedPath })
+    if (!treeVisible || selectedPath === undefined || selectedId === undefined || tabId === undefined || takeoverCtl === undefined) { setTakeover(null); return }
+    setTakeover({
+      signal: takeoverCtl.signal(tabId, selectedPath, sectionRef.current ?? undefined),
+      tabId,
+      root: selectedPath,
+      rootId: selectedId,
+    })
     return () => {
       // The mounted flag settles the branch: a deps change ends the entry
       // now, while an unmount is a hide — upstream's occurrence signal never
@@ -238,7 +342,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
       // anything, so the old abort-on-unmount bound stands there.
       if (mounted.current || sectionRef.current === null) takeoverCtl.end(tabId)
     }
-  }, [treeVisible, selectedPath, tabId, takeoverCtl])
+  }, [treeVisible, selectedPath, selectedId, tabId, takeoverCtl])
 
   const items = useMemo((): MenuEntry[] => [
     { id: 'primary', label: `${primaryLabel} · ${t('panel.primary')}`, icon: <IconFolderOpen /> },
@@ -261,14 +365,23 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
     if (root !== undefined) setSelected(root)
   }
 
+  // A name that changed since the last measurement renders whole until the fit
+  // lands; the previous root's truncated text is never shown on the next one.
+  const shownName = fitted !== null && fitted.name === triggerLabel ? fitted : null
+
   return (
     <>
       <span
         ref={wrapperRef}
         className="mrfw-rootSwitcher"
         data-root-kind={treeVisible ? 'additional' : 'primary'}
+        data-name-form={shownName?.form ?? 'full'}
       >
         <Menu
+          // The stylesheet's shrink hook. Menu renders className on the anchor
+          // wrapper span — the flex item the header row actually sizes — so the
+          // trigger can ellipsize instead of overflowing over the next controls.
+          className="mrfw-rootSwitchAnchor"
           open={menuOpen}
           onClose={() => { setMenuOpen(false) }}
           items={items}
@@ -281,9 +394,13 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
           align="start"
           anchor={(
             <button
+              ref={triggerRef}
               type="button"
               className="mrfw-rootSwitchBtn"
               title={triggerPath}
+              // The visible text is truncated on narrow headers; the button keeps
+              // the whole root name as its accessible name either way.
+              aria-label={triggerLabel}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               onClick={() => {
@@ -295,8 +412,10 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
               }}
             >
               <span className="mrfw-triggerIcon" aria-hidden="true"><IconFolderClose size={16} /></span>
-              <span className="mrfw-rootSwitchLabel">{triggerLabel}</span>
+              <span ref={labelRef} className="mrfw-rootSwitchLabel">{shownName?.text ?? triggerLabel}</span>
               <span className="mrfw-triggerIcon mrfw-rootSwitchChevron" aria-hidden="true"><IconChevronDown size={14} /></span>
+              {/* The off-flow text probe the no-canvas measurer renders candidates into. */}
+              <span ref={probeRef} className={ROOT_NAME_PROBE_CLASS} aria-hidden="true" />
             </button>
           )}
         />
@@ -322,9 +441,37 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
             className="mrfw-switcherReload"
             aria-label={filesTree.t('reload')}
             title={filesTree.t('reload')}
-            onClick={() => { if (takeover !== null) filesTree.face.refresh(takeover.tabId) }}
+            onClick={() => {
+              if (takeover === null) return
+              // The drawn tree is refreshed in place first; when search results
+              // replace the tree there is no directory node to relist, so the
+              // active search request is re-run instead — otherwise a settled
+              // answer keeps its identity and stale matches survive the reload.
+              filesTree.face.refresh(takeover.tabId)
+              if (searchKey !== undefined && searchSeat !== undefined) searchSeat.store.refresh(searchKey)
+            }}
           >
             <IconRefresh size={15} />
+          </button>
+        ) : null}
+        {/* The header's search toggle, in the position the native one occupies
+            (after the reload). It toggles THIS pane root's bar, whose query and
+            results live in the inject product; the native toggle stays hidden
+            because its own search is rooted at the Session cwd. */}
+        {treeVisible && searchSeat !== undefined && IconSearch !== undefined ? (
+          <button
+            type="button"
+            className="mrfw-switcherSearch"
+            aria-label={filesTree.t('search.placeholder')}
+            aria-expanded={searchBarOpen}
+            title={filesTree.t('search.placeholder')}
+            data-mrfw-files-search-toggle
+            onClick={() => {
+              if (searchKey === undefined) return
+              searchSeat.store.barOpen(searchKey, !searchBarOpen)
+            }}
+          >
+            <IconSearch size={15} />
           </button>
         ) : null}
         {/* The takeover hides the native open-in-app split button (its slot
@@ -335,24 +482,28 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
             hide rule's condition; undefined adapter means no button, just
             like upstream's own "no apps" absence. */}
         {treeVisible && props.openInApp !== undefined ? (
-          <OpenInAppAction {...props.openInApp} absolutePath={triggerPath} />
+          // The seat keeps the row's child list stable while the fork itself
+          // renders nothing until the catalog resolves; its own box is what the
+          // resize observer watches for the arrival.
+          <span ref={openAnchorRef} className="mrfw-switcherOpen">
+            <OpenInAppAction {...props.openInApp} absolutePath={triggerPath} />
+          </span>
         ) : null}
       </span>
       {treeVisible && takeover !== null && filesTree !== undefined
         ? createPortal(
-            <FilesTree
+            <FilesPane
+              filesTree={filesTree}
+              stateKey={searchKey ?? ''}
+              rootId={takeover.rootId}
               tabId={takeover.tabId}
-              sessionId={filesTree.sessionId}
               root={takeover.root}
               signal={takeover.signal}
               useStore={filesTree.useStore}
               actions={filesTree.actions}
-              hold={filesTree.face.hold}
-              release={filesTree.face.release}
-              toggle={filesTree.face.toggle}
-              onOpen={filesTree.openFile}
-              t={filesTree.t}
+              onOpenFile={filesTree.openFile}
               nativeTree={pane.hasAttribute('data-files-page') ? props.nativeTree : undefined}
+              describeFailure={describeSearchFailure}
             />,
             pane,
           )
@@ -362,11 +513,13 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
           panel={props.panel}
           {...(props.remotes === undefined ? {} : { remotes: props.remotes })}
           {...(props.ssh === undefined ? {} : { ssh: props.ssh })}
+          remoteMode={props.remoteMode}
           pickDirectory={props.pickDirectory}
           {...(props.sessionId === undefined ? {} : { sessionId: props.sessionId })}
           {...(props.subscribeSession === undefined ? {} : { subscribeSession: props.subscribeSession })}
-          {...(props.worktrees === undefined ? {} : { worktrees: props.worktrees })}
           t={t}
+          worktrees={props.worktrees}
+          worktreePromptEnabled={props.worktreePromptEnabled}
           onClose={() => {
             setDialogOpen(false)
             // The manager may have removed or invalidated the selected root;

@@ -96,7 +96,7 @@ describe('confirmed registration', () => {
   it('dismisses with a workspace-wide ignore that reset clears', async () => {
     const { main, linked, stack } = await mountLinked('write-dismiss')
     const first = promptOf(await stack.worktrees.wait(stack.sessionId))
-    await stack.worktrees.resolve(stack.sessionId, first.id, 'dismiss', true)
+    await stack.worktrees.resolve(stack.sessionId, first.id, 'dismiss', { dontRemind: true })
     const sidecar = readSidecarFile(stack.sidecarRoot, primaryKey(main))
     expect(sidecar!.ignored).toMatchObject([{ kind: 'worktree', path: realpathSync.native(linked) }])
     // A shared-queue re-evaluation must not resurrect the ignored candidate.

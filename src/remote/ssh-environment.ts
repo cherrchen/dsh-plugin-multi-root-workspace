@@ -70,7 +70,7 @@ export interface SshEnvironmentManagerOptions {
   readonly allowUnattestedForTesting?: boolean
   /**
    * This process is the credential broker, running under the dedicated
-   * account and owning the keys (ADR-0040). Custody is then the deployment's
+   * account and owning the keys (ADR-0048). Custody is then the deployment's
    * attestation, not this process's manifest flag — the Host's
    * `attestBroker()` decides whether any model-facing tool may use it.
    */
@@ -113,7 +113,7 @@ export function parseSshConfig(stdout: string, options: { relaxed?: boolean; man
   // OpenSSH -G normalizes `UpdateHostKeys no` to `false` (and `yes` to
   // `true`, `ask` stays `ask`); accept both spellings of "never rewrite".
   const updateHostKeys = (fields.updatehostkeys ?? 'no').toLowerCase()
-  // Personal custody (ADR-0041 §2): upstream already forces BatchMode /
+  // Personal custody (ADR-0049 §2): upstream already forces BatchMode /
   // StrictHostKeyChecking / ForwardAgent on its own command line, so the
   // user's config need not prove them. Account and host-key checks stay.
   if (options.relaxed !== true) {
@@ -384,7 +384,7 @@ export class SshEnvironmentManager {
     }
     const identity = parseSshConfig(stdout, { relaxed: this.personalCustody, managedKnownHostsFile: this.managedKnownHostsFile })
     // A managed `dsh-*` alias that resolves to itself means the Include link
-    // is absent (ADR-0041 §2): refuse with the actionable code.
+    // is absent (ADR-0049 §2): refuse with the actionable code.
     if (this.personalCustody && host.startsWith('dsh-') && identity.hostname === host) {
       throw new SshEnvironmentError('ssh-config-not-linked', `managed alias "${host}" is not linked into ~/.ssh/config`)
     }

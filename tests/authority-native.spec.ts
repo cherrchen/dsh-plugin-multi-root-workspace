@@ -362,4 +362,17 @@ it('replies to duplicate worktree requests in the original shape without repeati
     [reset.method, reset.args],
     ['worktreeSidecar', ['/primary', { op: 'read' }]],
   ])
+  // The reminder delay travels as one strict sidecar operation; a duplicate
+  // request replays as a read instead of writing the delay twice.
+  const snooze = { mode: 'until', until: '2030-01-01T00:00:00.000Z', keys: ['worktree\u0000/x'], at: '2026-11-14T00:00:00.000Z' }
+  const delay = request('worktreeSidecar', ['/primary', { op: 'snooze', snooze }], 'epoch')
+  channel.receive(delay)
+  await setImmediate()
+  channel.receive(delay)
+  await setImmediate()
+  expect(channel.sent.slice(-2).map(reply => reply.value)).toEqual([sidecar, sidecar])
+  expect(dispatch.mock.calls.slice(-2)).toEqual([
+    [delay.method, delay.args],
+    ['worktreeSidecar', ['/primary', { op: 'read' }]],
+  ])
 })

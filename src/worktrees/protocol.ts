@@ -37,7 +37,10 @@ export const promptExpectedSchema = z.object({
 /** `addNew` arguments. */
 export const addNewSchema = z.object({
   path: z.string().min(1),
-  access: z.literal('inherit').optional(),
+  // The three grants the browser may confirm. A Registry follower sends the
+  // per-row choice through this owner IPC contract, so it must accept the same
+  // set the panel does; omitted still means inherit.
+  access: z.enum(['inherit', 'read-only', 'read-write']).optional(),
   expected: promptExpectedSchema,
   track: z.object({ adminId: z.string().min(1), common: z.string().min(1) }).strict().optional(),
 }).strict()
@@ -49,10 +52,30 @@ export const deletedWorktreeSchema = z.object({
   expectedAddedAt: z.string().min(1),
 }).strict()
 
+/**
+ * One reminder delay as the Registry owner persists it. The host that derived
+ * the keys has already converted `7d`/`30d` into an absolute instant with its
+ * own clock; `until` is required exactly for the `until` mode.
+ */
+export const snoozeRecordSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('until-new-worktree'),
+    keys: z.array(z.string().min(1)).min(1).max(64),
+    at: z.string().min(1),
+  }).strict(),
+  z.object({
+    mode: z.literal('until'),
+    until: z.string().min(1),
+    keys: z.array(z.string().min(1)).min(1).max(64),
+    at: z.string().min(1),
+  }).strict(),
+])
+
 /** `worktreeSidecar` arguments. */
 export const sidecarOperationSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('read') }).strict(),
   z.object({ op: z.literal('ignore'), key: z.string().min(1), kind: z.enum(['worktree', 'main-checkout']), path: z.string().min(1) }).strict(),
   z.object({ op: z.literal('reset') }).strict(),
   z.object({ op: z.literal('reconcile') }).strict(),
+  z.object({ op: z.literal('snooze'), snooze: snoozeRecordSchema }).strict(),
 ])

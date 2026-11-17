@@ -10,7 +10,7 @@ import type {} from './registry.ts'
 import type {} from './scope.ts'
 import type { CurrentRootInstruction } from './instructions.ts'
 import { nativeInstructionFingerprint } from './compat/review-session.ts'
-import { assertAutoReviewRelease } from './compat/auto-review-contract.ts'
+import { requireAutoReviewRelease } from './compat/auto-review-contract.ts'
 import { effectiveDirectory } from './compat/session-directory.ts'
 import { DEFAULT_MAX_BYTES, touchedPathOfToolCall } from './instructions.ts'
 import { pendingInstructionTargets, stableOpsJson } from './compat/instruction-activity.ts'
@@ -57,7 +57,7 @@ export class MultiRootReviewContext extends Service {
   static inject = ['multiRootCompat', 'multiRootProviders', 'multiRootScope', 'multiRootRegistry', 'multiRootInstructions', 'sandboxPolicy', 'workingDirectory', 'fs']
   constructor(ctx: Context) { super(ctx, 'multiRootReviewContext') }
 
-  assertCompatible(): void { assertAutoReviewRelease(this.ctx.multiRootCompat.release) }
+  assertCompatible(): void { requireAutoReviewRelease(this.ctx.multiRootCompat.release) }
 
   async build(exec: ReviewExecution, signal: AbortSignal): Promise<ReviewContext> {
     signal.throwIfAborted()

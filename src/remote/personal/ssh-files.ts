@@ -1,5 +1,5 @@
 /**
- * Managed SSH files (ADR-0041 §2): `<credentialRoot>/ssh_config` blocks for
+ * Managed SSH files (ADR-0049 §2): `<credentialRoot>/ssh_config` blocks for
  * `managed` environments, the plugin's own `known_hosts`, and the one-line
  * `Include` link into `~/.ssh/config` (with backup). POSIX only.
  */

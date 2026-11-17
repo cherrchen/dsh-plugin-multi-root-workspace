@@ -30,7 +30,7 @@ import type { RemoteEndpointView, RemotesView } from '../remote/panel-contract.t
 /** The four management sections. */
 export type SshDialogTab = 'add' | 'connections' | 'keys' | 'mode'
 
-/** The exec stanza the "allow command execution" toggle materializes (ADR-0041). */
+/** The exec stanza the "allow command execution" toggle materializes (ADR-0049). */
 const EXEC_DEFAULTS = {
   shell: ['/bin/sh', '-c'],
   env: { PATH: '/usr/local/bin:/usr/bin:/bin' },

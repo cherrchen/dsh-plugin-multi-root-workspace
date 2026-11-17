@@ -1,5 +1,5 @@
 /**
- * Personal-mode remote operations (ADR-0041 §2): host-key scan tokens,
+ * Personal-mode remote operations (ADR-0049 §2): host-key scan tokens,
  * connection test, helper install, and the password → access-key bootstrap.
  * Every external command goes through the injectable `ExecFile` seam.
  */

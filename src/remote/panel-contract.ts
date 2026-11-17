@@ -69,7 +69,7 @@ export interface RemoteEndpointView {
 export interface RemotesView {
   readonly primaryRoot: string
   readonly mode: 'read-only' | 'workspace-write' | 'danger-full-access'
-  /** The live credential custody mode (ADR-0041); absent on pre-ADR-0041 hosts. */
+  /** The live credential custody mode (ADR-0049); absent on pre-ADR-0049 hosts. */
   readonly custodyMode?: 'personal' | 'team' | 'hardened' | undefined
   /** The control plane's live state; only `ready` admits remote work. */
   readonly status: { readonly state: string; readonly reason?: string | undefined; readonly code?: string | undefined }
@@ -100,7 +100,7 @@ const endpointViewSchema = z.object({
 const remotesViewSchema = z.object({
   primaryRoot: z.string(),
   mode: z.enum(['read-only', 'workspace-write', 'danger-full-access']),
-  // The custody mode is optional metadata: a host that predates ADR-0041
+  // The custody mode is optional metadata: a host that predates ADR-0049
   // omits it, and a newer host may send a mode this client does not know. One
   // unreadable optional field must not invalidate the whole remote section —
   // treat it as absent and keep the endpoints/list rendering.

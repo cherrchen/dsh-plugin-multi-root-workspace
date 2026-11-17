@@ -6,7 +6,7 @@
 
 用户入口是 live 开关 `multi-root-remote-tools.enabled`：随 `multi-root-remote-tools` 行挂到 Settings 命名空间（插件详情设置卡带"实验性"警示标签，开启需风险确认；持久化值覆盖行配置 `enabled`）。Registry 行配置 `remoteEnvironments: { enabled?: boolean; manifestPath?: string }`：默认组合写 `manifestPath: /etc/dsh-ssh-broker/manifest.json` 但**不写** `enabled`——`enabled` 只是开关的**初值**（供保留旧语义的专用 profile 使用），实际开合由 `registry.configureRemote(live)` 在权威转移队列内重评估：开启要求 live 开关为 true **且** `manifestPath` 已配置，关闭时恢复精确 `disabled`（无 `remote-1` 监听、无远端域打开），本地 v1 注册表不受影响。
 
-**凭据托管档位（ADR-0041）。** live 设置另有 `mode`（`personal`/`team`/`hardened`，默认 `personal`；未知或非法值使该次读取按 `enabled:false` 处理并告警）与可选 `team` 块（`manifestPath`/`socketPath`/`brokerUid`/`credentialRoot` 逐项覆盖行内 `broker.config`，hardened 忽略之）。Registry 行配置扩为 `remoteEnvironments: { enabled?, manifestPath?, personalPath?, credentialRoot? }`：personal 模式从 `personalPath` 读用户配置（文件缺失 = 空清单，照常到 `ready`），team/hardened 仍读 `manifestPath`（live `team.manifestPath` 覆盖行值）。三档对比、个人配置/凭据文件布局、RPC 端点与拒绝码、托管 `ssh_config` 模板、Include 链接、helper 安装与密码引导见 [ssh-remote-environments.md](./ssh-remote-environments.md)；模式切换与文件变更检测均走 `configureRemote`/`refreshRemotePersonal` 串行化。`registry.remoteStatus.state`：
+**凭据托管档位（ADR-0049）。** live 设置另有 `mode`（`personal`/`team`/`hardened`，默认 `personal`；未知或非法值使该次读取按 `enabled:false` 处理并告警）与可选 `team` 块（`manifestPath`/`socketPath`/`brokerUid`/`credentialRoot` 逐项覆盖行内 `broker.config`，hardened 忽略之）。Registry 行配置扩为 `remoteEnvironments: { enabled?, manifestPath?, personalPath?, credentialRoot? }`：personal 模式从 `personalPath` 读用户配置（文件缺失 = 空清单，照常到 `ready`），team/hardened 仍读 `manifestPath`（live `team.manifestPath` 覆盖行值）。三档对比、个人配置/凭据文件布局、RPC 端点与拒绝码、托管 `ssh_config` 模板、Include 链接、helper 安装与密码引导见 [ssh-remote-environments.md](./ssh-remote-environments.md)；模式切换与文件变更检测均走 `configureRemote`/`refreshRemotePersonal` 串行化。`registry.remoteStatus.state`：
 
 | 状态 | 含义 |
 | --- | --- |
@@ -151,16 +151,16 @@ SSH 兼容门禁（`classifySshCapability`、`SUPPORTED_SSH_RELEASES`、宿主�
 
 #### broker 依赖树与 SSH 配置（可复现步骤）
 
-broker 运行**自己的** root 保护依赖树——与 Host/Agent 任何一方都不共享 node_modules。示例（路径/版本由部署者替换为其实际选定值；插件 tarball 是本地未发布的 `0.1.19-ssh.1` 构建，不从 npm 安装，上游包取支持矩阵中的精确版本）：
+broker 运行**自己的** root 保护依赖树——与 Host/Agent 任何一方都不共享 node_modules。示例（路径/版本由部署者替换为其实际选定值；插件 tarball 是本地未发布的 `0.1.22-ssh.1` 构建，不从 npm 安装，上游包取支持矩阵中的精确版本）：
 
 ```sh
 # root 执行；目录随后属 root、不可被 Host/broker 写
 mkdir -p /opt/dsh-broker && cd /opt/dsh-broker
 pnpm init
-pnpm add --save-exact /path/to/dsh-plugin-multi-root-workspace-0.1.19-ssh.1.tgz \
-  @deepseek-ai/dsh@0.2.2-rc.2 @deepseek-ai/cordis@4.1.0 \
-  @deepseek-ai/dsh-ssh@0.2.2-rc.2 @deepseek-ai/dsh-fs-ssh@0.2.2-rc.2 \
-  @deepseek-ai/dsh-subprocess-ssh@0.2.2-rc.2 @deepseek-ai/dsh-sandbox-ssh@0.2.2-rc.2
+pnpm add --save-exact /path/to/dsh-plugin-multi-root-workspace-0.1.22-ssh.1.tgz \
+  @deepseek-ai/dsh@0.2.2-rc.3 @deepseek-ai/cordis@4.1.0 \
+  @deepseek-ai/dsh-ssh@0.2.2-rc.3 @deepseek-ai/dsh-fs-ssh@0.2.2-rc.3 \
+  @deepseek-ai/dsh-subprocess-ssh@0.2.2-rc.3 @deepseek-ai/dsh-sandbox-ssh@0.2.2-rc.3
 chown -R root:root /opt/dsh-broker && chmod -R a-w /opt/dsh-broker
 ```
 
@@ -236,7 +236,7 @@ Host <env-alias>
 2. 若连面板可见性也要移除，删除 Registry 行的 `remoteEnvironments` 配置（连同 broker 块一起），重启原 profile。若该部署不再提供远端操作，停止 broker 服务。保留本地 v1 记录及独立的远端存储域供核对。
 3. 确认原生工具及本地根仍可用、远端工具和能力投影已消失，历史远端引用调用失败。需要重新启用时，重新证明凭据隔离及清单一致性，再按当前授权登记端点。
 
-## 凭据隔离：本机凭据代理（ADR-0040）
+## 凭据隔离：本机凭据代理（ADR-0048）
 
 **边界。** `src/remote/broker/` 是一个独立进程：它以部署方创建的专用账户运行，凭据根（0700）内只持有 SSH 私钥、`config`、`known_hosts`；ControlMaster 与 Helper 暂存位于 broker 账户自己的 `mkdtemp`（`/tmp/dsh-ssh-*`，0700、属 broker），Linux unit 上以 `PrivateTmp=yes` 隔离该目录。helper 连接的 `ControlMaster` 复用仅对 `confine`/`spawn` 生效：每个 SFTP 传输以 `ControlMaster=no`/`ControlPath=none` 独立建连——共享 master 会让一次会话的关闭波及其他在飞会话，破坏逐会话代次隔离。unit 文件本身未被容器内 systemctl stub 真实执行过，真实 `ActiveState`、临时目录属主/模式与 socket 私访探针仍属待补部署证据。Host 账户只通过一个 0750 目录里的 0660 Unix socket 连接。托管进程拒绝以 Host 账户启动（同 UID 不构成隔离），也拒绝清单中任何未声明 `credentialIsolation: "attested"` 的环境（`broker-same-uid` / `manifest-unattested`），除非测试显式放宽。
 

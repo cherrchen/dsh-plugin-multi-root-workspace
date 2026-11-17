@@ -1,5 +1,6 @@
 /* oxlint-disable require-yield -- Upstream malformed-stream fixtures intentionally throw before yielding. */
-import { externalTestParent } from './parent.ts'
+import { readFileSync } from 'node:fs'
+import { externalTestParent } from '../parent.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { Context } from '@deepseek-ai/cordis'
@@ -44,7 +45,12 @@ import ToolRuntime, {
   type ToolExecutionToken,
 } from '@deepseek-ai/dsh-tools'
 import ApprovalService, { setApprovalPolicy, type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
-import * as AutoReview from '../../src/auto-review/fork.ts'
+import * as AutoReview from '../../../src/auto-review/legacy/fork.ts'
+
+// The fork's execution-copy gate compares the host release the compat service
+// reports; this suite mounts the reviewer without the plugin's compat row, so
+// the stub carries the lane's development pin.
+const INSTALLED_RELEASE: string = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).devDependencies['@deepseek-ai/dsh']
 
 const EXPECTED_REVIEW_POLICY = `REVIEW_POLICY
 You are the final authorization reviewer for exactly one pending tool call. Your decision replaces human approval for this call. If you allow it, the call executes immediately with full host access and no later confirmation.
@@ -150,7 +156,7 @@ async function harness(
   await ctx.plugin(PermissionPresetService, permissionConfig)
   const adapter = new RecordingAdapter(script)
   ctx.llm.registerAdapter(['review'], adapter)
-  ctx.provide('multiRootCompat', {})
+  ctx.provide('multiRootCompat', { release: INSTALLED_RELEASE })
   ctx.provide('multiRootProviders', {})
   ctx.provide('multiRootReviewContext', {
     assertCompatible() {},
@@ -1540,7 +1546,7 @@ describe('cancellation and integration teardown', () => {
     })
     invalid.provide('approval', { config: { policy: 'ask' } })
     await invalid.plugin(PermissionPresetService, {})
-    invalid.provide('multiRootCompat', {})
+    invalid.provide('multiRootCompat', { release: INSTALLED_RELEASE })
     invalid.provide('multiRootProviders', {})
     invalid.provide('multiRootReviewContext', {assertCompatible() {}})
     const auto = await invalid.plugin(AutoReview)

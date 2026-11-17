@@ -1,6 +1,6 @@
 # SSH 远端环境（个人/团队/加固三档托管）
 
-> 实验性、默认关闭。本文件是 ADR-0041 的 Host 侧运行参考；控制面语义（准入、状态机、remote-1 协议）见 [multi-environment-control-plane.md](./multi-environment-control-plane.md)。
+> 实验性、默认关闭。本文件是 ADR-0049 的 Host 侧运行参考；控制面语义（准入、状态机、remote-1 协议）见 [multi-environment-control-plane.md](./multi-environment-control-plane.md)。
 
 ## 托管档位
 
@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | `personal`（默认） | 用户 `~/.ssh` 别名或插件凭据根 | 无 | Host 进程内直跑官方 SSH 栈，环境在清单内视为 `credentialIsolation: unattested`；不装 profile guard，不拒绝 `danger-full-access`。 |
 | `team` | 部署 broker | 放宽 | `attestBroker(mode: 'team')`：跳过 `confinement-unproven`、`full-access-unrestricted` 与独立写者检查；`chroot-sftp` 目的隔离保留。 |
-| `hardened` | 部署 broker | 全量 | ADR-0040 原路径，全部证明与 profile guard 保留。 |
+| `hardened` | 部署 broker | 全量 | ADR-0048 原路径，全部证明与 profile guard 保留。 |
 
 未知或非法的 `mode`/`team` 值使该次读取按 `enabled:false` 处理并记一条警告（fail closed）。`team` 字段（`manifestPath`/`socketPath`/`brokerUid`/`credentialRoot`）只对 team 模式生效并逐项覆盖 registry 行的 `broker.config`；hardened 只读行配置。
 

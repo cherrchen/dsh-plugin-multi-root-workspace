@@ -35,6 +35,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import { connectionRpcFor } from './compat/connection-rpc.ts'
+import { searchAdditionalRoot } from './files-search.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { effectiveRootAccess } from './contract.ts'
 import { RemoteAdmissionError } from './remote/contract.ts'
@@ -833,7 +834,9 @@ async function dispatchPanelRequest(
       }
       switch (call.endpoint) {
         case 'worktreePrompt':
-          return { ok: true, value: await worktrees.prompt(call.sessionId) }
+          return { ok: true, value: await worktrees.prompt(call.sessionId, { fresh: call.fresh === true }) }
+        case 'worktreePromptSeen':
+          return { ok: true, value: await worktrees.seen(call.sessionId, call.promptIds ?? []) }
         case 'worktreePromptWait':
           return {
             ok: true,
@@ -844,7 +847,11 @@ async function dispatchPanelRequest(
         case 'worktreePromptResolve':
           return {
             ok: true,
-            value: await worktrees.resolve(call.sessionId, call.promptIds ?? [], call.action ?? 'dismiss', call.dontRemind),
+            value: await worktrees.resolve(call.sessionId, call.promptIds ?? [], call.action ?? 'dismiss', {
+              ...(call.dontRemind === undefined ? {} : { dontRemind: call.dontRemind }),
+              ...(call.snooze === undefined ? {} : { snooze: call.snooze }),
+              ...(call.accesses === undefined ? {} : { accesses: call.accesses }),
+            }),
           }
         case 'worktreePromptReset':
           return { ok: true, value: await worktrees.reset(call.sessionId) }
@@ -957,6 +964,10 @@ async function dispatchPanelRequest(
         const value: RevealedView = { revealed: target.path }
         return { ok: true, value }
       }
+      case 'search':
+        // The one file operation the upstream wire cannot route: the endpoint
+        // names an additional root by id, and the host resolves/authorizes it.
+        return { ok: true, value: await searchAdditionalRoot(ctx, primaryRoot, request, signal) }
     }
   } catch (error: unknown) {
     if (error instanceof RootValidationError) {
@@ -986,11 +997,62 @@ async function dispatchPanelRequest(
       || error instanceof ManifestError || error instanceof CredentialError || error instanceof RemoteOperationError) {
       return { ok: false, error: { code: error.code, message: error.message, details: {} } }
     }
+    const workspaceFile = workspaceFileFailureOf(error)
+    if (workspaceFile !== undefined) {
+      // The panel localizes this vocabulary (`workspace-file/*` rows), so the
+      // refusal keeps its code and message instead of becoming panel/internal.
+      return { ok: false, error: workspaceFile }
+    }
     return {
       ok: false,
       error: { code: 'panel/internal', message: error instanceof Error ? error.message : String(error), details: {} },
     }
   }
+}
+
+/**
+ * The upstream workspace-file failure codes this channel may relay.
+ *
+ * The search endpoint is the one panel operation that runs the upstream
+ * `workspaceFiles` implementation in-process, so its refusals arrive as
+ * `RemoteError`s from that vocabulary — both the plugin's own admission
+ * refusals (`outside-workspace`) and the upstream search's own failures
+ * (`not-found`, `not-directory`, `search-failed`). The browser localizes
+ * those codes, so the channel must not fold them into `panel/internal`.
+ */
+const WORKSPACE_FILE_FAILURE_CODES: ReadonlySet<string> = new Set([
+  'workspace-file/not-found',
+  'workspace-file/not-directory',
+  'workspace-file/not-regular-file',
+  'workspace-file/not-text',
+  'workspace-file/too-large',
+  'workspace-file/outside-workspace',
+  'workspace-file/search-failed',
+  'workspace-file/watch-unsupported',
+])
+
+/** One recognized upstream file failure, read structurally. */
+interface WorkspaceFileFailure {
+  readonly code: string
+  readonly message: string
+  readonly details: Record<string, unknown>
+}
+
+/**
+ * Recognize an upstream `workspaceFiles` failure structurally: a code from the
+ * declared vocabulary and a string message. The code set is deliberately
+ * closed — any other `code` (or a thrown object without one) is not an
+ * upstream file failure and stays normalized by the caller.
+ * @param error - the caught value.
+ * @returns the failure to relay, or `undefined` when this is not one.
+ */
+function workspaceFileFailureOf(error: unknown): WorkspaceFileFailure | undefined {
+  const record = error as { readonly code?: unknown; readonly message?: unknown; readonly details?: unknown } | null | undefined
+  if (typeof record?.code !== 'string' || !WORKSPACE_FILE_FAILURE_CODES.has(record.code)) return undefined
+  const details = typeof record.details === 'object' && record.details !== null
+    ? record.details as Record<string, unknown>
+    : {}
+  return { code: record.code, message: typeof record.message === 'string' ? record.message : '', details }
 }
 
 /** Convert a validated wire snapshot to the registry's exact-entry reference. */

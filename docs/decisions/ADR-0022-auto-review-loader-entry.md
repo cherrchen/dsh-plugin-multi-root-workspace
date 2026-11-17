@@ -6,6 +6,8 @@ Accepted
 
 取代 [ADR-0021](./ADR-0021-auto-review-context-companion.md) 的独立包、bundle 排序与 configure 交付决策；其上下文、权限投影、来源身份、freshness、审查协议与卸载语义继续适用。
 
+联合支持集合已由 [ADR-0040](./ADR-0040-auto-review-multi-baseline.md) 从单一精确发布扩为两个源码基线；本文件“只有 `0.2.1-rc.2` 可启用”的结论仅描述当时的交付。
+
 ## Date
 
 2026-10-20
