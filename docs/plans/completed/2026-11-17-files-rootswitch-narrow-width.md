@@ -235,6 +235,43 @@ pnpm compat:check              # 依赖/精确版本合同未改动
 - ADR-0046、索引、架构、compat note 同步；计划移入 completed 并回填证据。
 - Draft PR 打开，最终提交的 CI run 全绿且仅保留该 run。
 
+### P5 — 三档根名显示（2026-11-17 追加需求）
+
+用户追加需求：宽度不够时除"开头…"外还要把结尾显示清楚，避免同前缀根无法区分。已确认的
+规则与实现：
+
+- 三档：全名 → `前几个…后几个`（自适应最大化可见字符；优先在分隔符处断开；尾部上限
+  10 个字符、前缀 ≥ 3、尾部 ≥ 4）→ `开头…`。
+- 判定输入是 `RootSwitcher` 自身宽度（`flex: 1 1 auto` ⟹ 恒等于 header 留给它的空间，
+  与文字内容无关），文字变短不会反馈进判定、不会抖动。
+- 量测：标签自身字体的 offscreen canvas；无 canvas 时退回触发器内隐藏探针的同步布局
+  读取（jsdom 两者都退化为全名 + CSS 省略号兜底）。
+- 名被截断时隐藏 `PathLabel` 墨迹（盒子保留，reload/搜索/open-in-app 仍在原生位置）；
+  完整名称仍是按钮的 `aria-label`。
+- 决策记入 [ADR-0046](../../decisions/ADR-0046-files-header-rootswitch-shrink-priority.md)
+  §修订（2026-11-17）。
+
+**退出验收**：三档在真实 GUI 逐档出现且无重叠；宽形态仍显示全名与路径；既有门禁全绿。
+
+**真实 GUI（隔离 Web 宿主；宽度为 `[data-files-page]` 的 CSS 宽）**：
+
+| pane 宽 | 形态 | 根名 |
+| --- | --- | --- |
+| 520 | full | `dsh-plugin-multi-root-workspace`（路径 `multi-root-workspace` 同时可见） |
+| 420 | full | 全名（路径余 22px） |
+| 394 | middle | `dsh-plugin-multi-root-…rkspace` |
+| 380 | middle | `dsh-plugin-multi…workspace` |
+| 360 | middle | `dsh-plugin-multi…rkspace` |
+| 344 | middle | `dsh-plugin…workspace` |
+| 320 | middle | `dsh-plu…workspace` |
+| 299 | middle | `dsh…workspace` |
+| 附加根（`…-ssh`）420 / 344 / 299 | middle | `dsh-plugin-multi-root-…kspace-ssh` / `dsh-plugin-multi…e-ssh` / `dsh-…space-ssh` |
+| 双栏 233 | head | `dsh…` |
+| 浮动小窗 220 | head | `d…` |
+
+以上每个状态的两两重叠均为 0；截断状态 PathLabel 墨迹隐藏（`visibility: hidden`），
+带头尾的显示让 `…-workspace` / `…-experiment` / `…-ssh` 这类同前缀根仍可区分。
+
 ## Progress
 
 | 阶段 | 状态 | 证据 |
@@ -244,6 +281,7 @@ pnpm compat:check              # 依赖/精确版本合同未改动
 | P2 构建与 GUI 目检 | 完成（2026-11-17） | 隔离 scratch `$DSH_HOME` + `dsh plugin add` + `dsh web`（DSH `0.2.2-rc.3`）+ headless Chromium CDP；三工况 + 附加根接管态实测（见 §Evidence）；宽形态几何与改动前逐值相同 |
 | P3 文档同步 | 完成（2026-11-17） | 架构段、compat note 中/英 quiet trap、ADR-0046/索引/总账；`pnpm docs:check` 0 errors；本计划移入 `completed/` |
 | P4 Draft PR 与 CI | 完成（2026-11-17） | Draft PR 已开；分支最终提交的 CI 结果见 PR 页面（本仓库只保留最新提交的运行） |
+| P5 三档根名显示（追加需求） | 完成（2026-11-17） | 提交 `eacbc98`：新增 `root-name-fit.ts`（三档纯函数）与 `root-name-room.ts`（宽度预算 + 文字量测），`RootSwitcher` 接线、样式表探针与 PathLabel 隐藏规则；`client-root-name-fit` 11 项、`client-root-name-room` 6 项、switcher 新增 3 项、styles 新增 1 项；真实 GUI 见 §P5 |
 
 ### Evidence（实施后回填）
 
@@ -257,7 +295,7 @@ pnpm compat:check              # 依赖/精确版本合同未改动
 | 工况 | pane 宽 | 改动前 | 改动后 |
 | --- | --- | --- | --- |
 | 宽形态（单栏） | 647 | 无重叠；触发 249、路径 249 | **完全一致**：触发 249@809、路径 249@1062、label 不省略 |
-| 变窄的右侧栏（单栏最小宽） | 299 | 触发 249；与 reload 28、搜索 28、open-in-app 14.59 重叠 | 触发 150、路径 0，**重叠全 0**，`clientW = scrollW = 299`，根名省略号 `dsh-plugin-mul…` |
+| 变窄的右侧栏（单栏最小宽） | 299 | 触发 249；与 reload 28、搜索 28、open-in-app 14.59 重叠 | 触发 150、路径 0，**重叠全 0**，`clientW = scrollW = 299`，根名三档显示（P5 之后为 `dsh…workspace`） |
 | 右侧栏双栏（默认对分） | 323 | 触发 249；与 reload 28、搜索 5.59 重叠 | 触发 174、路径 0，**重叠全 0** |
 | 右侧栏双栏（拖到更窄） | 233 | （低于单栏最小值，改动前同样溢出） | 触发 84、路径 0，**重叠全 0**，三个控件均在页内 |
 | 可拖动的小窗（浮动面板默认） | 380 | 触发 249；与 reload 1.59 重叠 | 触发 231、路径 0，**重叠全 0** |
