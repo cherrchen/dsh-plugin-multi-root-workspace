@@ -51,7 +51,7 @@ ADR-0001-short-title.md
 ADR-0002-short-title.md
 ```
 
-编号递增，标题使用小写中划线。ADR-0030–0034 已分配给 `feat/ssh-workspace` 分支；该分支另有 `ADR-0040-credential-broker` / `ADR-0041-ssh-custody-modes` 的历史编号，与主线 0040/0041 的用途不同，不应作为主线编号依据。主线在 ADR-0029 之后直接使用 0035 起跳，跳号属有意保留而非缺失；新增 ADR 前必须扫描全部分支：0042 为附加根行右键、0043 为预览导航搜索、0044 为 sidebar footer 对齐、**0045** 为 Worktree 清理 UI（该提案原拟 0043，rebase 到主线时为避免重号改为 0045），本线新增决策从 0046 起。
+编号递增，标题使用小写中划线。ADR-0030–0034 已分配给 `feat/ssh-workspace` 分支；该分支另有 `ADR-0040-credential-broker` / `ADR-0041-ssh-custody-modes` 的历史编号，与主线 0040/0041 的用途不同，不应作为主线编号依据。主线在 ADR-0029 之后直接使用 0035 起跳，跳号属有意保留而非缺失；新增 ADR 前必须扫描全部分支：0042 为附加根行右键、0043 为预览导航搜索、0044 为 sidebar footer 对齐、**0045** 为 Worktree 清理 UI（该提案原拟 0043，rebase 到主线时为避免重号改为 0045），本线新增决策从 0046 起；**0046** 为 Files 页头 RootSwitcher 窄宽让位（2026-11-17，本线首个使用该号的决策），下一个可用编号为 0047。
 
 - [ADR-0022-auto-review-loader-entry.md](./ADR-0022-auto-review-loader-entry.md) — Auto Review 并入主包：默认关闭的单一 loader 行、运行时接管、并发导入防护、有序 owner 交接与单包构建（取代 ADR-0021 的交付结构）。
 
@@ -87,5 +87,7 @@ ADR-0002-short-title.md
 
 - [ADR-0043-additional-root-preview-navigator-search.md](./ADR-0043-additional-root-preview-navigator-search.md) — 附加根文件预览导航树的工作区搜索：复用 ADR-0041 的 `search` 端点与 Files 页搜索面（`FilesPane` 新增 preview 模式），接管期由插件面替代原生搜索栏（原生搜索根固定为 Session cwd）；结果当前行、隐藏项默认、设置回焦与焦点交接对齐原生；同批修复 `RootSwitcher` 换根搜索的过渡帧缺陷；旧宿主与主根零变化（Accepted，2026-11-16 外部评审 F1–F3 已并入；实施见计划）。
 - [ADR-0044-sidebar-footer-row-alignment-and-coexistence.md](./ADR-0044-sidebar-footer-row-alignment-and-coexistence.md) — 侧栏 footer 入口改用 workspace tree 字形；一份「宿主 token + 旧值 fallback」的配方同时对齐 19 个旧几何版本与 5 个新几何版本（分界 `0.2.2-alpha.2`）；rail 圆角按其更早的 `0.1.6-alpha.2` 分界处理（22/24 对齐，最老 2 版已知偏差）；本入口挂载期间把 `sidebar.footer.action` 的 slot anchor 改为纵向列，使同槽第二行各占一整行（不隐藏、不读槽账本、不改他人行；让位方案与原因见 ADR 正文）；修订二让按钮高度跟随可见设置行 occupant（`0.2.0-rc.1` 起账号 launcher 未登录 32 / 登录 44，旧代 42 回退，rail 36），使 footer 两行 hover 药丸同尺寸（Accepted，实施见计划）。
+
+- [ADR-0046-files-header-rootswitch-shrink-priority.md](./ADR-0046-files-header-rootswitch-shrink-priority.md) — Files 页头 `RootSwitcher` 的窄宽让位优先级：收缩能力必须写在参与 header 外层 flex 的 `Menu` anchor 包装上（`min-width: 0`）；固定控件不动，完整路径以零 basis 先让到 0，根名随后省略，触发器图标最后裁剪。取代「只给内层按钮写 `min-width: 0`」的无效写法；24 个受支持发布的 `Menu.className` 逐 tag 核对，无版本分支（Accepted，实施见计划）。
 
 - [ADR-0045-worktree-cleanup-panel-ui.md](./ADR-0045-worktree-cleanup-panel-ui.md) — Workspace Folders 面板的 Worktree 清理 UI 与失效行收敛：批量清理入口移到「附属工作目录」标题行、确认改为覆盖在面板上的 primitives `Modal`、`cleanupEligible` 行只留标题/权限/路径 + 红色删除 + `...`（移除技能/reveal/重新登记与行内提示，路径复用披露移入确认层）、手动发现空结果用官方 info Toast；取代 ADR-0039 §3.2 的 deletion 徽标呈现（仅 cleanupEligible 行）、§6.2 的徽标/副行呈现与确认形态、§6.5 的提示位置与 Alternatives 的清理弹窗否决（Proposed；外部技术评审 2026-11-16 通过、无阻断项，转 Accepted 由维护者决定）。
