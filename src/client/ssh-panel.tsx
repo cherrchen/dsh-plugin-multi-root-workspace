@@ -160,9 +160,12 @@ const remotePath = (path: string): boolean =>
   path.startsWith('/') && !path.includes('\0')
   && !path.split('/').slice(1).some(segment => segment === '' || segment === '.' || segment === '..')
 
-/** The wizard's ordered steps; the credential choice shapes the target step. */
-type AddStep = 'credential' | 'target' | 'workspace' | 'hostkey'
-const ADD_STEPS: readonly AddStep[] = ['credential', 'target', 'workspace', 'hostkey']
+/** The wizard's ordered steps: draft fields first, then post-save setup. */
+type AddStep = 'info' | 'key' | 'helper' | 'register'
+const ADD_STEPS: readonly AddStep[] = ['info', 'key', 'helper', 'register']
+
+/** The draft-field sections the shared form can render one at a time. */
+type FormSection = 'info' | 'key'
 
 /** Per-field hint keys the wizard renders once a field is touched or its step was attempted. */
 type WizardField = 'environmentId' | 'hostname' | 'port' | 'user' | 'alias' | 'credentialId' | 'workspace'
@@ -182,10 +185,10 @@ function draftFieldError(draft: EditorDraft, field: WizardField): Key | undefine
 
 /** The fields one wizard step validates, in the order the card renders them. */
 const STEP_FIELDS: Record<AddStep, readonly WizardField[]> = {
-  credential: ['alias', 'credentialId'],
-  target: ['environmentId', 'user', 'hostname', 'port'],
-  workspace: ['workspace'],
-  hostkey: [],
+  info: ['environmentId', 'user', 'hostname', 'port', 'workspace'],
+  key: ['alias', 'credentialId'],
+  helper: [],
+  register: [],
 }
 
 /** The label locale key for one wizard field, used by the summary strip. */
@@ -214,10 +217,12 @@ function stepReady(draft: EditorDraft, step: AddStep): boolean {
   return STEP_FIELDS[step].every(field => draftFieldError(draft, field) === undefined)
 }
 
-/** The first incomplete step — where the stepper lets the operator click to. */
-function firstBlockedStep(draft: EditorDraft): number {
-  const index = ADD_STEPS.findIndex(step => !stepReady(draft, step))
-  return index === -1 ? ADD_STEPS.length : index
+/** The step-indicator chip labels, in wizard order. */
+const STEP_TITLE: Record<AddStep, Key> = {
+  info: 'ssh.add.stepInfo',
+  key: 'ssh.add.stepKey',
+  helper: 'ssh.add.stepHelper',
+  register: 'ssh.add.stepRegister',
 }
 
 const editorOf = (environment: SshEnvironmentView): EditorDraft => ({
@@ -356,7 +361,7 @@ interface EnvironmentFormProps {
   readonly fingerprint: string | undefined
   readonly onScan: () => void
   readonly onFingerprint: (fingerprint: string) => void
-  readonly onSave: () => void
+  readonly onSave: () => Promise<boolean>
   readonly onCancel: () => void
   readonly onOpenKeys: () => void
   readonly saveLabel: string
@@ -364,7 +369,7 @@ interface EnvironmentFormProps {
   readonly busy: boolean
   readonly t: Translate
   /** Wizard mode: render only this step's section and let the wizard own navigation. */
-  readonly step?: AddStep | undefined
+  readonly step?: FormSection | undefined
   /** Per-field validation text, live in the wizard once a field is touched. */
   readonly errorFor?: ((field: WizardField) => string | undefined) | undefined
 }
@@ -400,7 +405,7 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
     { value: 'alias' as const, label: t('ssh.field.alias') },
     { value: 'managed' as const, label: t('ssh.field.managed') },
   ]
-  const show = (section: AddStep): boolean => step === undefined || step === section
+  const show = (section: FormSection): boolean => step === undefined || step === section
   return <div className="mrfw-sshForm">
     {fieldErrors.length === 0 ? null : (
       <div className="mrfw-sshErrors" role="alert">
@@ -412,9 +417,9 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
         ))}
       </div>
     )}
-    {show('credential') ? (
+    {show('info') ? (
       <section className="mrfw-sshStep">
-        <span className="mrfw-sshStepTitle">{t('ssh.add.stepCredential')}</span>
+        <span className="mrfw-sshStepTitle">{t('ssh.add.stepInfo')}</span>
         <Field label={t('ssh.field.credential')} hint={t('ssh.field.credentialHint')}>
           {segmented ? (
             <CredentialSegmented id={credentialId} value={draft.credentialSource} options={credentialOptions}
@@ -431,37 +436,6 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
             </div>
           )}
         </Field>
-        <div id={`${credentialId}-alias-panel`} role={segmented ? 'tabpanel' : undefined}
-          aria-labelledby={segmented ? `${credentialId}-alias` : undefined} hidden={draft.credentialSource !== 'alias'}>
-          <Field label={t('ssh.field.alias')} invalid={invalid('alias')}>
-            <Input className="mrfw-sshInput" aria-label={t('ssh.field.alias')} placeholder={t('ssh.field.alias')}
-              value={draft.alias} onChange={event => update({ alias: event.currentTarget.value })} />
-          </Field>
-        </div>
-        <div id={`${credentialId}-managed-panel`} role={segmented ? 'tabpanel' : undefined}
-          aria-labelledby={segmented ? `${credentialId}-managed` : undefined} hidden={draft.credentialSource !== 'managed'}>
-          <Field label={t('ssh.field.managed')} invalid={invalid('credentialId')}>
-            <span className="mrfw-sshSelect">
-              <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.managed')} value={draft.credentialId}
-                onChange={event => update({ credentialId: event.currentTarget.value })}>
-                <option value="">{t('ssh.field.managed')}</option>
-                {props.credentials.map(credential => <option key={credential.id} value={credential.id}>{credential.label}</option>)}
-              </select>
-            </span>
-          </Field>
-          {props.credentials.length === 0 ? (
-            <div className="mrfw-sshInlineNote">
-              <span className="mrfw-sshFieldHint">{t('ssh.add.noCredentials')}</span>
-              <Button variant="outline" size="sm" disabled={busy} onClick={props.onOpenKeys}>{t('ssh.add.openKeys')}</Button>
-            </div>
-          ) : null}
-        </div>
-      </section>
-    ) : null}
-
-    {show('target') ? (
-      <section className="mrfw-sshStep">
-        <span className="mrfw-sshStepTitle">{t('ssh.add.stepTarget')}</span>
         <div className="mrfw-sshGrid">
           <Field label={t('ssh.field.environmentId')}
             invalid={invalid('environmentId')}
@@ -492,7 +466,7 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
               </Field>
             </div>
           ) : null}
-          <Field label={t('ssh.field.platform')}>
+          <Field label={t('ssh.field.platform')} hint={t('ssh.field.platformHint')}>
             <span className="mrfw-sshSelect">
               <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.platform')} value={draft.platform}
                 onChange={event => update({ platform: event.currentTarget.value as 'linux' | 'darwin' })}>
@@ -502,15 +476,6 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
             </span>
           </Field>
         </div>
-        {draft.credentialSource === 'alias' && step === 'target' ? (
-          <p className="mrfw-note">{t('ssh.add.aliasResolvedNote', { alias: draft.alias.trim() })}</p>
-        ) : null}
-      </section>
-    ) : null}
-
-    {show('workspace') ? (
-      <section className="mrfw-sshStep">
-        <span className="mrfw-sshStepTitle">{t('ssh.add.stepWorkspace')}</span>
         <Field label={t('ssh.field.workspace')} invalid={invalid('workspace')} wide>
           <Input className="mrfw-sshInput" aria-label={t('ssh.field.workspace')} placeholder={t('ssh.field.workspace')}
             value={draft.workspace} onChange={event => update({ workspace: event.currentTarget.value })} />
@@ -525,9 +490,38 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
       </section>
     ) : null}
 
-    {show('hostkey') ? (
+    {show('key') ? (
       <section className="mrfw-sshStep">
-        <span className="mrfw-sshStepTitle">{t('ssh.add.stepHostKey')}</span>
+        <span className="mrfw-sshStepTitle">{t('ssh.add.stepKey')}</span>
+        <div id={`${credentialId}-alias-panel`} role={segmented ? 'tabpanel' : undefined}
+          aria-labelledby={segmented ? `${credentialId}-alias` : undefined} hidden={draft.credentialSource !== 'alias'}>
+          <Field label={t('ssh.field.alias')} invalid={invalid('alias')}>
+            <Input className="mrfw-sshInput" aria-label={t('ssh.field.alias')} placeholder={t('ssh.field.alias')}
+              value={draft.alias} onChange={event => update({ alias: event.currentTarget.value })} />
+          </Field>
+          <p className="mrfw-note">{t('ssh.add.aliasResolvedNote', { alias: draft.alias.trim() })}</p>
+        </div>
+        <div id={`${credentialId}-managed-panel`} role={segmented ? 'tabpanel' : undefined}
+          aria-labelledby={segmented ? `${credentialId}-managed` : undefined} hidden={draft.credentialSource !== 'managed'}>
+          <Field label={t('ssh.field.managed')} invalid={invalid('credentialId')}>
+            <span className="mrfw-sshSelect">
+              <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.managed')} value={draft.credentialId}
+                onChange={event => update({ credentialId: event.currentTarget.value })}>
+                <option value="">{t('ssh.field.managed')}</option>
+                {props.credentials.map(credential => <option key={credential.id} value={credential.id}>{credential.label}</option>)}
+              </select>
+            </span>
+          </Field>
+          {props.credentials.length === 0 ? (
+            <div className="mrfw-sshInlineNote">
+              <span className="mrfw-sshFieldHint">{t('ssh.add.noCredentials')}</span>
+              <Button variant="outline" size="sm" disabled={busy} onClick={props.onOpenKeys}>{t('ssh.add.openKeys')}</Button>
+            </div>
+          ) : null}
+        </div>
+        {draft.credentialSource === 'managed' ? (
+          <span className="mrfw-note">{draft.user.trim()}@{draft.hostname.trim()}:{draft.port.trim()}</span>
+        ) : null}
         <div className="mrfw-sshScanRow">
           <Button variant="outline" size="sm" disabled={busy || !scanReady(draft)} onClick={props.onScan}>
             {t('ssh.scan')}
@@ -552,30 +546,77 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
 
     {step === undefined ? (
       <div className="mrfw-sshRowActions">
-        <Button variant="primary" disabled={!canSave} onClick={props.onSave}>{props.saveLabel}</Button>
+        <Button variant="primary" disabled={!canSave} onClick={() => { void props.onSave() }}>{props.saveLabel}</Button>
         <Button variant="ghost" disabled={busy} onClick={props.onCancel}>{props.cancelLabel}</Button>
       </div>
     ) : null}
   </div>
 }
 
-/** The step-indicator chip labels, in wizard order. */
-const STEP_TITLE: Record<AddStep, Key> = {
-  credential: 'ssh.add.stepCredential',
-  target: 'ssh.add.stepTarget',
-  workspace: 'ssh.add.stepWorkspace',
-  hostkey: 'ssh.add.stepHostKey',
-}
-
 const WIZARD_FIELDS: readonly WizardField[] = ['environmentId', 'hostname', 'port', 'user', 'alias', 'credentialId', 'workspace']
 
-/** The add-connection wizard: a guided card with back/next and per-step validation. */
-function EnvironmentWizard(props: EnvironmentFormProps): ReactNode {
+const togglePeer = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => {
+  const next = new Set(set)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  return next
+}
+
+interface EnvironmentWizardProps extends EnvironmentFormProps {
+  /** The environment row as the store sees it; appears once the key step saves. */
+  readonly savedEnvironment: SshEnvironmentView | undefined
+  /** Whether the managed ssh_config is already linked into ~/.ssh/config. */
+  readonly linked: boolean
+  /** Bindings the saved environment already owns. */
+  readonly envBindings: readonly SshBindingView[]
+  /** Every env binding registered on the remote plane. */
+  readonly registered: boolean
+  /** Whether a remote-plane client exists at all in this session. */
+  readonly remotesReady: boolean
+  /** Local transfer peers for the register step's binding mini-form. */
+  readonly peers: readonly { readonly id: string; readonly label: string }[]
+  /** The first env binding whose endpoint is not registered yet. */
+  readonly pendingRootId: string | undefined
+  readonly onInstallHelper: (environmentId: string, nodePath: string | undefined) => Promise<boolean>
+  readonly onLink: () => Promise<boolean>
+  readonly onSaveBinding: (draft: BindingDraft) => Promise<boolean>
+  readonly onRegister: (environmentId: string, rootId: string) => Promise<void>
+  /** Close the wizard and land on the connections tab. */
+  readonly onFinish: () => void
+}
+
+/**
+ * The add-connection wizard. Steps 1-2 draft and save the environment;
+ * steps 3-4 operate on the saved row (helper install, link, binding,
+ * registration) and are all skippable — anything left undone stays visible
+ * on the connections tab's readiness chain.
+ */
+function EnvironmentWizard(props: EnvironmentWizardProps): ReactNode {
   const { draft, t, busy } = props
-  const [step, setStep] = useState<AddStep>('credential')
+  const [step, setStep] = useState<AddStep>('info')
   const [attempted, setAttempted] = useState<ReadonlySet<WizardField>>(new Set())
+  const [nodePath, setNodePath] = useState('')
+  const [regDraft, setRegDraft] = useState<BindingDraft | undefined>(undefined)
+  /** The environmentId this wizard run actually persisted — typing an existing
+   *  id does not count as "saved". */
+  const [savedId, setSavedId] = useState<string | undefined>(undefined)
+  const savedEnvironment = savedId !== undefined && savedId === draft.environmentId.trim()
+    ? props.savedEnvironment
+    : undefined
   const stepIndex = ADD_STEPS.indexOf(step)
-  const blockedAt = firstBlockedStep(draft)
+
+  /** Step completion: draft validity for info, saved env for key, helper for helper. */
+  const doneAt = (index: number): boolean => {
+    switch (ADD_STEPS[index]) {
+      case 'info': return stepReady(draft, 'info')
+      case 'key': return savedEnvironment !== undefined
+      case 'helper': return savedEnvironment !== undefined && savedEnvironment.helper !== null
+      case 'register': return props.registered
+      default: return false
+    }
+  }
+  const reachable = (index: number): boolean =>
+    index <= stepIndex || ADD_STEPS.slice(0, index).every((_, prior) => doneAt(prior))
 
   /** Mark fields whose value just moved so their hint goes live. */
   const change = (next: EditorDraft): void => {
@@ -594,46 +635,66 @@ function EnvironmentWizard(props: EnvironmentFormProps): ReactNode {
     return key === undefined ? undefined : t(key)
   }
 
-  const advance = (): void => {
-    if (stepReady(draft, step)) {
-      const next = ADD_STEPS[Math.min(stepIndex + 1, ADD_STEPS.length - 1)]!
-      if (next !== step) setStep(next)
-      return
-    }
-    // Reveal every hint on this step so the blocker is visible at a glance.
+  const reveal = (target: AddStep): void => {
     setAttempted(current => {
       const touched = new Set(current)
-      for (const field of STEP_FIELDS[step]) touched.add(field)
+      for (const field of STEP_FIELDS[target]) touched.add(field)
       return touched
     })
   }
 
-  const goTo = (target: AddStep): void => {
-    if (ADD_STEPS.indexOf(target) <= blockedAt) setStep(target)
+  const advance = (): void => {
+    if (!stepReady(draft, step)) { reveal(step); return }
+    const next = ADD_STEPS[Math.min(stepIndex + 1, ADD_STEPS.length - 1)]!
+    if (next !== step) setStep(next)
   }
 
-  const last = stepIndex === ADD_STEPS.length - 1
+  const save = async (): Promise<void> => {
+    // Already persisted (the operator stepped back): just resume forward.
+    if (savedEnvironment !== undefined) { setStep('helper'); return }
+    if (!stepReady(draft, 'key')) { reveal('key'); return }
+    if (await props.onSave()) { setSavedId(draft.environmentId.trim()); setStep('helper') }
+  }
+
+  /** The binding mini-form the register step offers when the env has none. */
+  const bindingDraft: BindingDraft = regDraft ?? {
+    ...blankBinding(savedEnvironment?.environmentId ?? ''),
+    rootId: 'primary',
+    path: draft.workspace.trim(),
+    read: true,
+    imports: new Set(['primary']),
+    exports: new Set(['primary']),
+  }
+  const changeBinding = (partial: Partial<BindingDraft>): void => setRegDraft({ ...bindingDraft, ...partial })
+
+  const needsLink = savedEnvironment !== undefined
+    && savedEnvironment.credential.kind === 'managed'
+    && !props.linked
+  const registerAction: 'link' | 'binding' | 'register' | 'done' = needsLink ? 'link'
+    : props.envBindings.length === 0 ? 'binding'
+    : props.registered ? 'done' : 'register'
+  const pendingRootId = props.pendingRootId
+
+  const infoDone = stepReady(draft, 'info')
   const canSave = !busy
     && props.fingerprint !== undefined
-    && draft.hostname.trim() !== ''
-    && draft.user.trim() !== ''
-    && blockedAt === ADD_STEPS.length
+    && infoDone
+    && (draft.credentialSource === 'alias' ? SSH_ALIAS.test(draft.alias.trim()) : draft.credentialId !== '')
   return <div className="mrfw-sshForm">
     <div className="mrfw-sshWizardSteps" role="list" aria-label={t('ssh.step.listLabel')}>
       {ADD_STEPS.map((entry, index) => {
-        const done = index < blockedAt
+        const done = index < stepIndex || doneAt(index)
         const active = entry === step
-        const reachable = index <= blockedAt
         return (
           <Fragment key={entry}>
             {index === 0 ? null : <span className="mrfw-sshWizardArrow" aria-hidden>→</span>}
             <button
               type="button"
               role="listitem"
-              disabled={!reachable}
+              disabled={!reachable(index)}
               aria-current={active ? 'step' : undefined}
               className={'mrfw-sshWizardStep' + (active ? ' mrfw-sshWizardStepActive' : done ? ' mrfw-sshWizardStepDone' : '')}
-              onClick={() => { goTo(entry) }}
+              onClick={() => { if (reachable(index)) setStep(entry) }}
             >
               {t(STEP_TITLE[entry])}
             </button>
@@ -641,21 +702,125 @@ function EnvironmentWizard(props: EnvironmentFormProps): ReactNode {
         )
       })}
     </div>
-    <EnvironmentForm {...props} step={step} onChange={change} errorFor={errorFor} />
+    {step === 'helper' ? (
+      <section className="mrfw-sshStep">
+        <span className="mrfw-sshStepTitle">{t('ssh.add.stepHelper')}</span>
+        <p className="mrfw-note">{t('ssh.add.helperGuide')}</p>
+        {savedEnvironment !== undefined && savedEnvironment.helper !== null ? (
+          <Tag tone="success" className="mrfw-sshTag">{t('ssh.helperInstalled')}</Tag>
+        ) : (
+          <div className="mrfw-sshHelperRow">
+            <Input className="mrfw-sshHelperInput" aria-label={t('ssh.nodePath')} placeholder={t('ssh.nodePath')}
+              value={nodePath} onChange={event => setNodePath(event.currentTarget.value)} />
+            <Button variant="primary" size="sm" disabled={busy || savedEnvironment === undefined}
+              onClick={() => {
+                const path = nodePath.trim()
+                void props.onInstallHelper(savedEnvironment?.environmentId ?? draft.environmentId.trim(), path === '' ? undefined : path)
+                  .then(ok => { if (ok) setStep('register') })
+              }}>
+              {t('ssh.helperInstall')}
+            </Button>
+          </div>
+        )}
+      </section>
+    ) : step === 'register' ? (
+      <section className="mrfw-sshStep">
+        <span className="mrfw-sshStepTitle">{t('ssh.add.stepRegister')}</span>
+        <p className="mrfw-note">{t('ssh.add.registerGuide')}</p>
+        {registerAction === 'done' ? (
+          <Tag tone="success" className="mrfw-sshTag">{t('remote.state.registered')}</Tag>
+        ) : registerAction === 'link' ? (
+          <div>
+            <Button variant="primary" size="sm" disabled={busy} onClick={() => { void props.onLink() }}>
+              {t('ssh.linkNow')}
+            </Button>
+          </div>
+        ) : registerAction === 'binding' ? (
+          <div className="mrfw-sshStep">
+            <div className="mrfw-sshGrid">
+              <Field label={t('ssh.binding.rootId')}>
+                <span className="mrfw-sshSelect">
+                  <select className="mrfw-sshSelectControl" aria-label={t('ssh.binding.rootId')} value={bindingDraft.rootId}
+                    onChange={event => changeBinding({ rootId: event.currentTarget.value })}>
+                    {props.peers.map(peer => <option key={peer.id} value={peer.id}>{peer.label}</option>)}
+                  </select>
+                </span>
+              </Field>
+              <Field label={t('ssh.binding.path')}>
+                <Input className="mrfw-sshInput" aria-label={t('ssh.binding.path')} placeholder={t('ssh.binding.path')}
+                  value={bindingDraft.path} onChange={event => changeBinding({ path: event.currentTarget.value })} />
+              </Field>
+            </div>
+            <div className="mrfw-sshCheckRow" role="group" aria-label={t('ssh.binding.actions')}>
+              {(['read', 'write', 'exec'] as const).map(action => (
+                <SshCheckbox key={action} checked={bindingDraft[action]}
+                  disabled={action === 'exec' && savedEnvironment?.exec === undefined}
+                  label={t(`remote.capability.${action}` as Key)}
+                  onChange={next => changeBinding({ [action]: next })} />
+              ))}
+            </div>
+            <div className="mrfw-sshTransferRow" role="group" aria-label={t('ssh.binding.transfers')}>
+              {props.peers.map(peer => (
+                <div key={peer.id} className="mrfw-sshTransferPeer">
+                  <SshCheckbox checked={bindingDraft.imports.has(peer.id)}
+                    label={`${t('ssh.binding.import')} ${peer.label}`}
+                    onChange={() => changeBinding({ imports: togglePeer(bindingDraft.imports, peer.id) })} />
+                  <SshCheckbox checked={bindingDraft.exports.has(peer.id)}
+                    label={`${t('ssh.binding.export')} ${peer.label}`}
+                    onChange={() => changeBinding({ exports: togglePeer(bindingDraft.exports, peer.id) })} />
+                </div>
+              ))}
+            </div>
+            <div>
+              <Button variant="primary" size="sm" disabled={busy || bindingDraft.rootId.trim() === '' || bindingDraft.path.trim() === ''
+                || !(bindingDraft.read || bindingDraft.write || bindingDraft.exec)}
+                onClick={() => { void props.onSaveBinding(bindingDraft).then(ok => { if (ok) setRegDraft(undefined) }) }}>
+                {t('ssh.bindingAdd')}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            {!props.remotesReady ? (
+              <span className="mrfw-sshFieldHint">{t('ssh.add.registerUnavailable')}</span>
+            ) : savedEnvironment !== undefined && savedEnvironment.helper === null ? (
+              <span className="mrfw-sshFieldHint">{t('ssh.add.registerNeedsHelper')}</span>
+            ) : null}
+            <Button variant="primary" size="sm"
+              disabled={busy || !props.remotesReady || pendingRootId === undefined
+                || (savedEnvironment !== undefined && savedEnvironment.helper === null)}
+              onClick={() => { if (savedEnvironment !== undefined && pendingRootId !== undefined) void props.onRegister(savedEnvironment.environmentId, pendingRootId) }}>
+              {t('panel.remoteRegister')}
+            </Button>
+          </div>
+        )}
+      </section>
+    ) : (
+      <EnvironmentForm {...props} step={step} onChange={change} errorFor={errorFor} />
+    )}
     <div className="mrfw-sshWizardNav">
-      <Button variant="ghost" size="sm" disabled={busy || stepIndex === 0}
-        onClick={() => { setStep(ADD_STEPS[stepIndex - 1] ?? 'credential') }}>
-        {t('ssh.step.back')}
-      </Button>
-      <div className="mrfw-sshRowActions">
+      {stepIndex === 0 ? (
         <Button variant="ghost" size="sm" disabled={busy}
-          onClick={() => { setStep('credential'); setAttempted(new Set()); props.onCancel() }}>
+          onClick={() => { setStep('info'); setAttempted(new Set()); props.onCancel() }}>
           {props.cancelLabel}
         </Button>
-        {last ? (
-          <Button variant="primary" size="sm" disabled={!canSave} onClick={props.onSave}>{props.saveLabel}</Button>
-        ) : (
+      ) : (
+        <Button variant="ghost" size="sm" disabled={busy}
+          onClick={() => setStep(ADD_STEPS[stepIndex - 1]!)}>
+          {t('ssh.step.back')}
+        </Button>
+      )}
+      <div className="mrfw-sshRowActions">
+        {step === 'info' ? (
           <Button variant="primary" size="sm" disabled={busy} onClick={advance}>{t('ssh.step.next')}</Button>
+        ) : step === 'key' ? (
+          savedEnvironment === undefined
+            ? <Button variant="primary" size="sm" disabled={!canSave} onClick={() => { void save() }}>{props.saveLabel}</Button>
+            : <Button variant="primary" size="sm" disabled={busy} onClick={() => setStep('helper')}>{t('ssh.step.next')}</Button>
+        ) : step === 'helper' ? (
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setStep('register')}>{t('ssh.step.skip')}</Button>
+        ) : (
+          <Button variant="primary" size="sm" disabled={busy} onClick={props.onFinish}>{t('ssh.step.finish')}</Button>
         )}
       </div>
     </div>
@@ -914,9 +1079,9 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     }
   }
 
-  const saveEnvironment = async (draft: EditorDraft): Promise<void> => {
-    if (ssh === undefined || sessionId === undefined || fingerprint === undefined) return
-    if (!sshPort(draft.port) || !remotePath(draft.workspace.trim())) return
+  const saveEnvironment = async (draft: EditorDraft, stay = false): Promise<boolean> => {
+    if (ssh === undefined || sessionId === undefined || fingerprint === undefined) return false
+    if (!sshPort(draft.port) || !remotePath(draft.workspace.trim())) return false
     const environment = {
       environmentId: draft.environmentId.trim(),
       ...(draft.displayName.trim() === '' ? {} : { displayName: draft.displayName.trim() }),
@@ -932,36 +1097,36 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     const token = draft.credentialSource === 'managed' ? scan?.token : undefined
     const existing = draft.existing !== undefined
     const ok = await submit(async () => await ssh.environmentSave(sessionId, revision(), environment, fingerprint, token))
-    if (!ok) return
+    if (!ok) return false
     setScan(undefined)
     setFingerprint(undefined)
     if (existing) setEditDraft(undefined)
-    else {
+    else if (!stay) {
       setAddDraft(blankEditor())
       // Land the operator on the new environment's row so the readiness
       // chain's first pending step is the next thing on screen.
       changeTab('connections')
     }
+    return true
   }
 
-  const saveBinding = async (): Promise<void> => {
-    if (bindingDraft === undefined || ssh === undefined || sessionId === undefined) return
-    const actions = ([bindingDraft.read ? 'read' : undefined, bindingDraft.write ? 'write' : undefined, bindingDraft.exec ? 'exec' : undefined]
+  const saveBinding = async (draft: BindingDraft): Promise<boolean> => {
+    if (ssh === undefined || sessionId === undefined) return false
+    const actions = ([draft.read ? 'read' : undefined, draft.write ? 'write' : undefined, draft.exec ? 'exec' : undefined]
       .filter(action => action !== undefined))
-    if (actions.length === 0) return
+    if (actions.length === 0) return false
     const transfers = [
-      ...[...bindingDraft.imports].map(rootId => ({ direction: 'import' as const, peer: { environmentId: 'local' as const, rootId } })),
-      ...[...bindingDraft.exports].map(rootId => ({ direction: 'export' as const, peer: { environmentId: 'local' as const, rootId } })),
+      ...[...draft.imports].map(rootId => ({ direction: 'import' as const, peer: { environmentId: 'local' as const, rootId } })),
+      ...[...draft.exports].map(rootId => ({ direction: 'export' as const, peer: { environmentId: 'local' as const, rootId } })),
     ]
     const binding = {
-      environmentId: bindingDraft.environmentId,
-      rootId: bindingDraft.rootId.trim(),
-      path: bindingDraft.path.trim(),
+      environmentId: draft.environmentId,
+      rootId: draft.rootId.trim(),
+      path: draft.path.trim(),
       actions,
       ...(transfers.length === 0 ? {} : { transfers }),
     }
-    setBindingDraft(undefined)
-    await submit(async () => await ssh.bindingSave(sessionId, revision(), binding))
+    return await submit(async () => await ssh.bindingSave(sessionId, revision(), binding))
   }
 
   const copyPublicKey = async (credential: CredentialPublicView): Promise<void> => {
@@ -980,13 +1145,6 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       .filter(root => root.state === 'available' && root.aliasId !== undefined)
       .map(root => ({ id: root.aliasId!, label: root.alias ?? root.aliasId! })),
   ]
-
-  const togglePeer = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => {
-    const next = new Set(set)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    return next
-  }
 
   const credentialLabel = (credential: SshEnvironmentView['credential']): string =>
     credential.kind === 'ssh-config'
@@ -1195,7 +1353,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
           <Button variant="primary"
             disabled={busy || bindingDraft.environmentId === '' || bindingDraft.rootId.trim() === '' || bindingDraft.path.trim() === ''
               || !(bindingDraft.read || bindingDraft.write || bindingDraft.exec)}
-            onClick={() => { void saveBinding() }}>
+            onClick={() => { const draft = bindingDraft; setBindingDraft(undefined); void saveBinding(draft) }}>
             {t('ssh.binding.save')}
           </Button>
           <Button variant="ghost" disabled={busy} onClick={() => setBindingDraft(undefined)}>{t('ssh.cancel')}</Button>
@@ -1326,7 +1484,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
             fingerprint={fingerprint}
             onScan={() => { void scanHost(editDraft, patch => { setEditDraft(current => current === undefined ? current : { ...current, ...patch }) }) }}
             onFingerprint={setFingerprint}
-            onSave={() => { void saveEnvironment(editDraft) }}
+            onSave={async () => await saveEnvironment(editDraft)}
             onCancel={() => { setEditDraft(undefined); setScan(undefined); setFingerprint(undefined) }}
             onOpenKeys={() => changeTab('keys')}
             saveLabel={t('ssh.envSave')}
@@ -1391,13 +1549,34 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         fingerprint={fingerprint}
         onScan={() => { void scanHost(addDraft, patch => { setAddDraft(current => ({ ...current, ...patch })) }) }}
         onFingerprint={setFingerprint}
-        onSave={() => { void saveEnvironment(addDraft) }}
+        onSave={async () => await saveEnvironment(addDraft, true)}
         onCancel={() => { setAddDraft(blankEditor()); setScan(undefined); setFingerprint(undefined); setSaved(false) }}
         onOpenKeys={() => changeTab('keys')}
         saveLabel={t('ssh.add.save')}
         cancelLabel={t('ssh.add.reset')}
         busy={busy}
         t={t}
+        savedEnvironment={environmentOf(addDraft.environmentId.trim())}
+        linked={view?.linked === true}
+        envBindings={(view?.bindings ?? []).filter(binding => binding.environmentId === addDraft.environmentId.trim())}
+        registered={(view?.bindings ?? []).filter(binding => binding.environmentId === addDraft.environmentId.trim()).length > 0
+          && (view?.bindings ?? []).filter(binding => binding.environmentId === addDraft.environmentId.trim())
+            .every(binding => endpointOf(binding.environmentId, binding.rootId)?.state === 'registered')}
+        pendingRootId={(view?.bindings ?? []).filter(binding => binding.environmentId === addDraft.environmentId.trim())
+          .find(binding => endpointOf(binding.environmentId, binding.rootId)?.state !== 'registered')?.rootId}
+        remotesReady={props.remotes !== undefined}
+        peers={localPeers}
+        onInstallHelper={async (environmentId, nodePath) => {
+          if (ssh === undefined || sessionId === undefined) return false
+          return await submit(async () => await ssh.helperInstall(sessionId, revision(), environmentId, nodePath))
+        }}
+        onLink={async () => {
+          if (ssh === undefined || sessionId === undefined) return false
+          return await submit(async () => await ssh.configLink(sessionId))
+        }}
+        onSaveBinding={saveBinding}
+        onRegister={async (environmentId, rootId) => { await mutateRemote('register', { environmentId, rootId }) }}
+        onFinish={() => { setAddDraft(blankEditor()); changeTab('connections') }}
       />
     </div>
   }
