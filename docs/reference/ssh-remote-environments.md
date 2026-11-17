@@ -79,7 +79,7 @@ GUI 入口有两处：
   - `panel.remoteAdd`（添加 SSH 远端…）：打开管理对话框的“添加连接”Tab；
   - `panel.remoteManage`（管理 SSH 远端…）：打开管理对话框的“已有连接”Tab。
 
-  远端列表的平台徽标显示实际系统名称（Linux / macOS），不是清单里的 `linux`/`darwin`。personal 档位且仍有端点未登记时，列表标题下方常驻一条引导（`panel.remoteRegisterGuide`）：登记前需先完成每个环境的就绪链路——安装 Helper → 链接 ssh_config（仅托管环境）→ 添加绑定，点「管理」即可跟随。
+  远端列表的平台徽标显示实际系统名称（Linux / macOS），不是清单里的 `linux`/`darwin`。personal 档位且仍有端点未登记时，列表标题下方常驻一条引导（`panel.remoteRegisterGuide`）：登记前需先完成每个环境的就绪链路——安装 Helper → 链接托管 SSH 配置（仅托管环境）→ 添加绑定，点「管理」即可跟随。
 
 ### SSH 远端管理对话框
 
@@ -89,7 +89,7 @@ GUI 入口有两处：
 
 四个 Tab：
 
-1. **添加连接**：personal 档位显示**四步向导卡片**——① 凭据方式（ssh-config 别名或托管凭据；无托管凭据时可直接跳到 SSH Key Tab）→ ② 连接目标（环境 ID、显示名、平台；托管流追加 hostname、port、user；别名流不显示主机字段，注明经 `ssh -G` 解析、扫描时回写）→ ③ 远端目录与能力（workspace、exec/transfer；exec 只在已装 helper 且目标身份未改时可勾选，禁用态附引导文案）→ ④ 主机密钥（“扫描主机钥”→ 指纹单选 → 保存）。步骤指示卡可点击，但只能停在第一个未完成步之内；“上一步”逐段回退，“下一步”在当前步校验通过前不离开。每步的必填字段镜像 wire 合约做前端校验，字段被触碰或该步被尝试提交后即显示红色提示：环境 ID `^[a-z0-9][a-z0-9-]{2,62}$`；hostname 1–253 字符、user 1–64 字符、不含空白且不以 `-` 开头；port 为 1–65535 整数（非法输入不再静默回落 22——扫描与保存两条路径都先经同一校验）；别名 `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`；workspace 为规范化 POSIX 绝对路径（与 `checkRemotePath` 同规则）。保存沿用 `sshEnvironmentSave` 的 revision、`hostKeyToken` + `fingerprint` 语义；指纹未选定即不可保存，非法 workspace 后端仍拒绝 `workspace-invalid`、非法 ID 在 wire 合约即拒绝；保存成功后草稿与扫描状态清空并自动切到“已有连接”，落点正是新环境的就绪链路行，下一步动作直接可见。编辑已保存环境不走分步，仍是平铺表单（修正场景应一次看见全部字段）。team/hardened 显示部署清单/broker 引导，不渲染个人表单，并提供“打开模式设置”入口；控制面未 `ready` 时显示不可用原因。
+1. **添加连接**：personal 档位显示**四步向导卡片**——① 凭据方式（本机 SSH 主机别名或托管凭据，选项下方常驻一行解释：别名指向 `~/.ssh/config` 中已配置的 Host 条目、托管凭据是插件保存的密钥/密码；无托管凭据时可直接跳到 SSH Key Tab）→ ② 连接目标（环境 ID、显示名、平台；托管流追加 hostname、port、user；别名流不显示主机字段，注明按主机别名从本机 SSH 配置解析、扫描时回写）→ ③ 远端目录与能力（workspace、exec/transfer；exec 只在已装 helper 且目标身份未改时可勾选，禁用态附引导文案）→ ④ 主机密钥（“扫描主机钥”→ 指纹单选 → 保存）。步骤指示卡可点击，但只能停在第一个未完成步之内；“上一步”逐段回退，“下一步”在当前步校验通过前不离开。每步的必填字段镜像 wire 合约做前端校验，字段被触碰或该步被尝试提交后即显示红色提示：环境 ID `^[a-z0-9][a-z0-9-]{2,62}$`；hostname 1–253 字符、user 1–64 字符、不含空白且不以 `-` 开头；port 为 1–65535 整数（非法输入不再静默回落 22——扫描与保存两条路径都先经同一校验）；别名 `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`；workspace 为规范化 POSIX 绝对路径（与 `checkRemotePath` 同规则）。保存沿用 `sshEnvironmentSave` 的 revision、`hostKeyToken` + `fingerprint` 语义；指纹未选定即不可保存，非法 workspace 后端仍拒绝 `workspace-invalid`、非法 ID 在 wire 合约即拒绝；保存成功后草稿与扫描状态清空并自动切到“已有连接”，落点正是新环境的就绪链路行，下一步动作直接可见。编辑已保存环境不走分步，仍是平铺表单（修正场景应一次看见全部字段）。team/hardened 显示部署清单/broker 引导，不渲染个人表单，并提供“打开模式设置”入口；控制面未 `ready` 时显示不可用原因。
 2. **已有连接**：personal 显示链接横幅（managed 环境存在且 `linked === false` 时，按钮调 `sshConfigLink`）、已保存环境行（名称/ID、实际平台名、helper、`user@host:port`、workspace、凭据来源、访问密钥）、测试连接/安装 helper/安装访问密钥/编辑/行内删除；编辑复用添加表单的平铺形态（不分步）。每个环境行还带一条**就绪链路**（`就绪链路 Helper → 链接 → 绑定`；alias 凭据环境不含链接步）：已完成步显示成功徽标，第一个未完成步显示警告徽标，剩余为轮廓徽标；行内动作区的第一枚主按钮始终指向该未完成步（`安装 Helper` → `链接到 ~/.ssh/config` → `添加绑定`），全部完成时显示"就绪，可登记"徽标。其下是"本项目绑定"：行显示环境、rootId、远端路径、动作与传输，本地传输对端恰为 `primary` 加各可用根的 `aliasId`；绑定行按部署端点交叉显示登记状态徽标，并在 `remotes` 客户端可用时提供行内"登记/移除"（`remotes.add`/`remove`，与 Workspace Folders 列表同一写入路径）——全流程可在对话框内闭环，但登记仍需远端身份核验等 Host 侧硬前提。team/hardened 显示部署清单中的端点只读列表与登记状态。
 3. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管，GUI 不读取、不创建。
 4. **模式设置**：复用 `src/client/remote-custody.tsx` 的三档单选、team 四个 broker 字段与降级风险确认，写入同一个 `multi-root-remote-tools` form 与 CAS revision，不另建写入路径；同时说明档位如何决定“添加连接”的引导方式（personal 图形化表单、team 部署清单 + broker、hardened 部署 profile + 全量证明）。档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源）。

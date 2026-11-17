@@ -387,7 +387,7 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
     {show('credential') ? (
       <section className="mrfw-sshStep">
         <span className="mrfw-sshStepTitle">{t('ssh.add.stepCredential')}</span>
-        <Field label={t('ssh.field.credential')}>
+        <Field label={t('ssh.field.credential')} hint={t('ssh.field.credentialHint')}>
           {segmented ? (
             <CredentialSegmented id={credentialId} value={draft.credentialSource} options={credentialOptions}
               onChange={next => update({ credentialSource: next })} label={t('ssh.field.credential')} />
