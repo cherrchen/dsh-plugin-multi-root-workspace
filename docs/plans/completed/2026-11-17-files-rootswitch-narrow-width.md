@@ -248,6 +248,9 @@ pnpm compat:check              # 依赖/精确版本合同未改动
   读取（jsdom 两者都退化为全名 + CSS 省略号兜底）。
 - 名被截断时隐藏 `PathLabel` 墨迹（盒子保留，reload/搜索/open-in-app 仍在原生位置）；
   完整名称仍是按钮的 `aria-label`。
+- 行内控件的**异步出现**同样重拟合：open-in-app 分裂按钮只在应用目录加载完成后渲染，
+  插入本行会占宽但不改变 switcher 外宽，因此 fork 外包 `mrfw-switcherOpen` 席位，席位
+  0 → 实测宽度的变化也触发拟合（Codex review P2；回归测试去掉席位观察即先红）。
 - 决策记入 [ADR-0046](../../decisions/ADR-0046-files-header-rootswitch-shrink-priority.md)
   §修订（2026-11-17）。
 
@@ -281,7 +284,7 @@ pnpm compat:check              # 依赖/精确版本合同未改动
 | P2 构建与 GUI 目检 | 完成（2026-11-17） | 隔离 scratch `$DSH_HOME` + `dsh plugin add` + `dsh web`（DSH `0.2.2-rc.3`）+ headless Chromium CDP；三工况 + 附加根接管态实测（见 §Evidence）；宽形态几何与改动前逐值相同 |
 | P3 文档同步 | 完成（2026-11-17） | 架构段、compat note 中/英 quiet trap、ADR-0046/索引/总账；`pnpm docs:check` 0 errors；本计划移入 `completed/` |
 | P4 Draft PR 与 CI | 完成（2026-11-17） | Draft PR 已开；分支最终提交的 CI 结果见 PR 页面（本仓库只保留最新提交的运行） |
-| P5 三档根名显示（追加需求） | 完成（2026-11-17） | 提交 `eacbc98`：新增 `root-name-fit.ts`（三档纯函数）与 `root-name-room.ts`（宽度预算 + 文字量测），`RootSwitcher` 接线、样式表探针与 PathLabel 隐藏规则；`client-root-name-fit` 11 项、`client-root-name-room` 6 项、switcher 新增 3 项、styles 新增 1 项；真实 GUI 见 §P5 |
+| P5 三档根名显示（追加需求） | 完成（2026-11-17） | 提交 `eacbc98`：新增 `root-name-fit.ts`（三档纯函数）与 `root-name-room.ts`（宽度预算 + 文字量测），`RootSwitcher` 接线、样式表探针与 PathLabel 隐藏规则；`client-root-name-fit` 11 项、`client-root-name-room` 6 项、switcher 新增 4 项（含异步席位重拟合，先红后绿）、styles 新增 1 项；真实 GUI 见 §P5 |
 
 ### Evidence（实施后回填）
 

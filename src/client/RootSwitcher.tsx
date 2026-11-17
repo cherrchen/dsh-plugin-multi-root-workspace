@@ -151,6 +151,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const labelRef = useRef<HTMLSpanElement | null>(null)
   const probeRef = useRef<HTMLSpanElement | null>(null)
+  const openAnchorRef = useRef<HTMLSpanElement | null>(null)
   const fallbackTabId = useRef<TabId | undefined>(undefined)
   const sectionRef = useRef<HTMLElement | null>(null)
   const [pane, setPane] = useState<HTMLElement | null>(null)
@@ -300,13 +301,21 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
   useLayoutEffect(() => {
     fitTriggerLabel()
   }, [fitTriggerLabel, treeVisible, searchSeat !== undefined, props.openInApp !== undefined])
+  // The row's own width is not the only thing that can shrink the budget: the
+  // open-in-app split button only appears once the application catalog loads,
+  // and it is then inserted into this row without resizing the switcher. The
+  // seat is therefore observed as well — a 0 → measured transition re-fits the
+  // name that the new control just crowded out. (The reload and search buttons
+  // render synchronously with the additional-root takeover; the deps above
+  // already cover that branch.)
   useLayoutEffect(() => {
-    const switcher = wrapperRef.current
-    if (switcher === null || typeof ResizeObserver === 'undefined') return undefined
+    const targets = [wrapperRef.current, openAnchorRef.current]
+      .filter((element): element is HTMLElement => element !== null)
+    if (targets.length === 0 || typeof ResizeObserver === 'undefined') return undefined
     const observer = new ResizeObserver(() => { fitTriggerLabel() })
-    observer.observe(switcher)
+    for (const target of targets) observer.observe(target)
     return () => { observer.disconnect() }
-  }, [fitTriggerLabel])
+  }, [fitTriggerLabel, treeVisible])
   // While an additional root is selected the pane's body area belongs to the
   // forked tree: the takeover keeps one controller per (tab, root) in the
   // inject product, and the dockkit tabHost's data-dockkit-content supplies
@@ -473,7 +482,12 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
             hide rule's condition; undefined adapter means no button, just
             like upstream's own "no apps" absence. */}
         {treeVisible && props.openInApp !== undefined ? (
-          <OpenInAppAction {...props.openInApp} absolutePath={triggerPath} />
+          // The seat keeps the row's child list stable while the fork itself
+          // renders nothing until the catalog resolves; its own box is what the
+          // resize observer watches for the arrival.
+          <span ref={openAnchorRef} className="mrfw-switcherOpen">
+            <OpenInAppAction {...props.openInApp} absolutePath={triggerPath} />
+          </span>
         ) : null}
       </span>
       {treeVisible && takeover !== null && filesTree !== undefined

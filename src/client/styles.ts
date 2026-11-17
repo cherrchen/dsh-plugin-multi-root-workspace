@@ -441,6 +441,13 @@ export const STYLES = /* css */ `
   line-height: inherit;
 }
 
+/* The open-in-app fork's seat: a flex item that sizes to the split button and
+   stays in the row (at zero width) while the catalog is still loading. */
+.mrfw-switcherOpen {
+  display: inline-flex;
+  min-width: 0;
+}
+
 /* While the name is truncated the path's own tail would repeat the same root
    in a second, differently cut form — and only a sliver of it fits next to the
    shortened name. The ink is hidden but the box stays: it keeps absorbing the

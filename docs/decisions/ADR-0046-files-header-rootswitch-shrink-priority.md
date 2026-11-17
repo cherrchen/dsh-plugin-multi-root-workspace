@@ -68,6 +68,21 @@ header 留给它的空间、与文字内容无关，所以文字变短不会反�
 （盒子保留，reload / 搜索 / open-in-app 仍在原生位置）。完整显示名始终是触发器的
 `aria-label`，视觉上的省略不影响读屏与悬停标题。
 
+**行内控件的异步出现也要触发重拟合。** open-in-app 的分裂按钮只在应用目录加载完成
+后才渲染：它被插入本行时会占掉约 43px，但 `RootSwitcher` 的外宽不变，因此观察
+switcher 自身不会触发重拟合，已拟合的一头一尾会被 CSS 再裁一次、丢掉可辨识的结尾。
+所以拟合观察的是"行宽 + 控件席位"：fork 外面包一层 `mrfw-switcherOpen` 席位 span，
+席位从 0 到实测宽度的变化同样重拟合（reload 与搜索按钮随接管同步渲染，由依赖覆盖）。
+
+**证据边界（测试能否证明上游 DOM）。** 单测里 `@deepseek-ai/dsh-client-ui-primitives`
+被 vitest alias 成本地 stub（宿主发布包带裸 `.module.css` 与宿主侧依赖，jsdom 套件
+无法解析），所以 `client-switcher.spec.tsx` 的 anchor 断言只证明"我们把 `className`
+接到原语文档化的落点上"，看不到上游 DOM 变化。上游侧的保证来自两条独立证据：全部
+24 个受支持发布逐个 tag 核对 `Menu.className` 落到 anchor 包装 span（本 ADR §决策），
+以及隔离 Web 宿主里对真实 DOM 的量测（anchor 包装带 `mrfw-rootSwitchAnchor` 且
+`min-width: 0`）。stub 刻意保持与真实原语同形的嵌套，因此上游若停止转发 `className`
+该断言仍会先红。
+
 ## Alternatives Considered
 
 - **只给按钮加 `min-width: 0`（现状即如此）**：无效。收缩发生在锚点包装这一层，

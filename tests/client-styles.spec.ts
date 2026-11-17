@@ -75,6 +75,9 @@ describe('the root-switcher rules', () => {
     // The label text is fitted by root-name-fit.ts; this ellipsis is only the
     // fallback for a runtime that cannot measure text.
     expect(STYLES).toMatch(/\.mrfw-rootSwitchLabel\s*\{[^}]*text-overflow:\s*ellipsis/s)
+    // The open-in-app fork's seat is a row item at zero width until the
+    // catalog loads; the fit observes it for the arrival.
+    expect(STYLES).toMatch(/\.mrfw-switcherOpen\s*\{[^}]*display:\s*inline-flex/s)
     // The probe is off-flow and invisible, and the button contains it.
     expect(STYLES).toMatch(/\.mrfw-rootSwitchBtn\s*\{[^}]*position:\s*relative/s)
     expect(STYLES).toMatch(/\.mrfw-rootSwitchProbe\s*\{[^}]*position:\s*absolute[^}]*visibility:\s*hidden/s)
