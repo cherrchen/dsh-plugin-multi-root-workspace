@@ -96,11 +96,13 @@ function SshCheckbox(props: CheckboxControlProps): ReactNode {
 }
 
 /** One labeled form field; the label stays visible after the value is typed. */
-function Field(props: { readonly label: string; readonly wide?: boolean; readonly children: ReactNode; readonly hint?: string | undefined }): ReactNode {
+function Field(props: { readonly label: string; readonly wide?: boolean; readonly children: ReactNode; readonly hint?: string | undefined; readonly error?: string | undefined }): ReactNode {
   return <div className={'mrfw-sshField' + (props.wide === true ? ' mrfw-sshFieldWide' : '')}>
     <span className="mrfw-sshFieldLabel">{props.label}</span>
     {props.children}
-    {props.hint === undefined ? null : <span className="mrfw-sshFieldHint">{props.hint}</span>}
+    {props.error !== undefined
+      ? <span className="mrfw-sshFieldHint mrfw-sshDanger">{props.error}</span>
+      : props.hint === undefined ? null : <span className="mrfw-sshFieldHint">{props.hint}</span>}
   </div>
 }
 
@@ -138,6 +140,73 @@ const blankEditor = (): EditorDraft => ({
 
 /** The persisted environmentId rule — checked here so save never reaches the wire with an id the store would refuse. */
 const ENVIRONMENT_ID = /^[a-z0-9][a-z0-9-]{2,62}$/
+
+/** The wire alias rule (`sshHostKeyScan` / `credentialDraft`). */
+const SSH_ALIAS = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
+
+/** The wire hostname/user rule: non-empty, bounded, no whitespace, no leading dash. */
+const sshToken = (value: string, max: number): boolean => {
+  const text = value.trim()
+  return text.length >= 1 && text.length <= max && !/\s/.test(text) && !text.startsWith('-')
+}
+
+/** The wire port rule: an integer from 1 to 65535 — no silent default-22. */
+const sshPort = (value: string): boolean => {
+  if (!/^\d{1,5}$/.test(value.trim())) return false
+  const port = Number.parseInt(value.trim(), 10)
+  return port >= 1 && port <= 65535
+}
+
+/** `checkRemotePath` mirrored: a normalized absolute POSIX path. */
+const remotePath = (path: string): boolean =>
+  path.startsWith('/') && !path.includes('\0')
+  && !path.split('/').slice(1).some(segment => segment === '' || segment === '.' || segment === '..')
+
+/** The wizard's ordered steps; the credential choice shapes the target step. */
+type AddStep = 'credential' | 'target' | 'workspace' | 'hostkey'
+const ADD_STEPS: readonly AddStep[] = ['credential', 'target', 'workspace', 'hostkey']
+
+/** Per-field hint keys the wizard renders once a field is touched or its step was attempted. */
+type WizardField = 'environmentId' | 'hostname' | 'port' | 'user' | 'alias' | 'credentialId' | 'workspace'
+
+/** The localized hint key for one invalid field, or undefined when it passes. */
+function draftFieldError(draft: EditorDraft, field: WizardField): Key | undefined {
+  switch (field) {
+    case 'environmentId': return draft.existing !== undefined || ENVIRONMENT_ID.test(draft.environmentId.trim()) ? undefined : 'ssh.field.environmentIdHint'
+    case 'hostname': return draft.credentialSource === 'managed' && !sshToken(draft.hostname, 253) ? 'ssh.field.hostnameHint' : undefined
+    case 'port': return draft.credentialSource === 'managed' && !sshPort(draft.port) ? 'ssh.field.portHint' : undefined
+    case 'user': return draft.credentialSource === 'managed' && !sshToken(draft.user, 64) ? 'ssh.field.userHint' : undefined
+    case 'alias': return draft.credentialSource === 'alias' && !SSH_ALIAS.test(draft.alias.trim()) ? 'ssh.field.aliasHint' : undefined
+    case 'credentialId': return draft.credentialSource === 'managed' && draft.credentialId === '' ? 'ssh.field.credentialIdHint' : undefined
+    case 'workspace': return remotePath(draft.workspace.trim()) ? undefined : 'ssh.field.workspaceHint'
+  }
+}
+
+/** The fields one wizard step validates. */
+const STEP_FIELDS: Record<AddStep, readonly WizardField[]> = {
+  credential: ['alias', 'credentialId'],
+  target: ['environmentId', 'hostname', 'port', 'user'],
+  workspace: ['workspace'],
+  hostkey: [],
+}
+
+/** The fields a host-key scan consumes: an alias, or a valid hostname+port. */
+function scanReady(draft: EditorDraft): boolean {
+  return draft.credentialSource === 'alias'
+    ? draftFieldError(draft, 'alias') === undefined
+    : draftFieldError(draft, 'hostname') === undefined && draftFieldError(draft, 'port') === undefined
+}
+
+/** Whether a step is complete enough to advance past. */
+function stepReady(draft: EditorDraft, step: AddStep): boolean {
+  return STEP_FIELDS[step].every(field => draftFieldError(draft, field) === undefined)
+}
+
+/** The first incomplete step — where the stepper lets the operator click to. */
+function firstBlockedStep(draft: EditorDraft): number {
+  const index = ADD_STEPS.findIndex(step => !stepReady(draft, step))
+  return index === -1 ? ADD_STEPS.length : index
+}
 
 const editorOf = (environment: SshEnvironmentView): EditorDraft => ({
   existing: environment,
@@ -282,150 +351,283 @@ interface EnvironmentFormProps {
   readonly cancelLabel: string
   readonly busy: boolean
   readonly t: Translate
+  /** Wizard mode: render only this step's section and let the wizard own navigation. */
+  readonly step?: AddStep | undefined
+  /** Per-field validation text, live in the wizard once a field is touched. */
+  readonly errorFor?: ((field: WizardField) => string | undefined) | undefined
 }
 
-/** The add/edit environment form, shared by the Add and Connections tabs. */
+/** The add/edit environment form, shared by the wizard and the Connections-tab editor. */
 function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
-  const { draft, t, busy } = props
+  const { draft, t, busy, step } = props
   const update = (partial: Partial<EditorDraft>): void => {
     const next = { ...draft, ...partial }
     if (next.allowExec && !execHelperReady(next)) next.allowExec = false
     props.onChange(next)
   }
+  const errorFor = (field: WizardField): string | undefined => props.errorFor?.(field)
+  // Flat mode (the Connections-tab editor) shows every field, so it applies
+  // the strict token/port checks even for an alias-sourced endpoint.
   const canSave = !busy
     && props.fingerprint !== undefined
-    && ENVIRONMENT_ID.test(draft.environmentId.trim())
-    && draft.hostname.trim() !== ''
-    && draft.user.trim() !== ''
-    && draft.workspace.trim() !== ''
-    && (draft.credentialSource === 'alias' ? draft.alias.trim() !== '' : draft.credentialId !== '')
+    && (draft.existing !== undefined || ENVIRONMENT_ID.test(draft.environmentId.trim()))
+    && sshToken(draft.hostname, 253)
+    && sshPort(draft.port)
+    && sshToken(draft.user, 64)
+    && remotePath(draft.workspace.trim())
+    && (draft.credentialSource === 'alias' ? SSH_ALIAS.test(draft.alias.trim()) : draft.credentialId !== '')
   const credentialId = 'mrfw-ssh-cred'
   const segmented = CredentialSegmented !== undefined
   const credentialOptions = [
     { value: 'alias' as const, label: t('ssh.field.alias') },
     { value: 'managed' as const, label: t('ssh.field.managed') },
   ]
+  const show = (section: AddStep): boolean => step === undefined || step === section
   return <div className="mrfw-sshForm">
-    <section className="mrfw-sshStep">
-      <span className="mrfw-sshStepTitle">{t('ssh.add.stepTarget')}</span>
-      <div className="mrfw-sshGrid">
-        <Field label={t('ssh.field.environmentId')}
-          hint={draft.existing !== undefined || draft.environmentId.trim() === '' || ENVIRONMENT_ID.test(draft.environmentId.trim()) ? undefined : t('ssh.field.environmentIdHint')}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.environmentId')} placeholder={t('ssh.field.environmentId')}
-            value={draft.environmentId} disabled={draft.existing !== undefined}
-            onChange={event => update({ environmentId: event.currentTarget.value })} />
+    {show('credential') ? (
+      <section className="mrfw-sshStep">
+        <span className="mrfw-sshStepTitle">{t('ssh.add.stepCredential')}</span>
+        <Field label={t('ssh.field.credential')}>
+          {segmented ? (
+            <CredentialSegmented id={credentialId} value={draft.credentialSource} options={credentialOptions}
+              onChange={next => update({ credentialSource: next })} label={t('ssh.field.credential')} />
+          ) : (
+            <div className="mrfw-sshRadioGroup" role="radiogroup" aria-label={t('ssh.field.credential')}>
+              {credentialOptions.map(option => (
+                <label key={option.value} className="mrfw-sshRadioOption">
+                  <input type="radio" name={credentialId} checked={draft.credentialSource === option.value}
+                    onChange={() => update({ credentialSource: option.value })} />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+            </div>
+          )}
         </Field>
-        <Field label={t('ssh.field.displayName')}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.displayName')} placeholder={t('ssh.field.displayName')}
-            value={draft.displayName} onChange={event => update({ displayName: event.currentTarget.value })} />
-        </Field>
-        <Field label={t('ssh.field.hostname')}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.hostname')} placeholder={t('ssh.field.hostname')}
-            value={draft.hostname} onChange={event => update({ hostname: event.currentTarget.value })} />
-        </Field>
-        <Field label={t('ssh.field.port')}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.port')} placeholder={t('ssh.field.port')} type="number"
-            value={draft.port} onChange={event => update({ port: event.currentTarget.value })} />
-        </Field>
-        <Field label={t('ssh.field.user')}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.user')} placeholder={t('ssh.field.user')}
-            value={draft.user} onChange={event => update({ user: event.currentTarget.value })} />
-        </Field>
-        <Field label={t('ssh.field.platform')}>
-          <span className="mrfw-sshSelect">
-            <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.platform')} value={draft.platform}
-              onChange={event => update({ platform: event.currentTarget.value as 'linux' | 'darwin' })}>
-              <option value="linux">{t('ssh.platform.linux')}</option>
-              <option value="darwin">{t('ssh.platform.darwin')}</option>
-            </select>
-          </span>
-        </Field>
-      </div>
-    </section>
+        <div id={`${credentialId}-alias-panel`} role={segmented ? 'tabpanel' : undefined}
+          aria-labelledby={segmented ? `${credentialId}-alias` : undefined} hidden={draft.credentialSource !== 'alias'}>
+          <Field label={t('ssh.field.alias')} error={errorFor('alias')}>
+            <Input className="mrfw-sshInput" aria-label={t('ssh.field.alias')} placeholder={t('ssh.field.alias')}
+              value={draft.alias} onChange={event => update({ alias: event.currentTarget.value })} />
+          </Field>
+        </div>
+        <div id={`${credentialId}-managed-panel`} role={segmented ? 'tabpanel' : undefined}
+          aria-labelledby={segmented ? `${credentialId}-managed` : undefined} hidden={draft.credentialSource !== 'managed'}>
+          <Field label={t('ssh.field.managed')} error={errorFor('credentialId')}>
+            <span className="mrfw-sshSelect">
+              <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.managed')} value={draft.credentialId}
+                onChange={event => update({ credentialId: event.currentTarget.value })}>
+                <option value="">{t('ssh.field.managed')}</option>
+                {props.credentials.map(credential => <option key={credential.id} value={credential.id}>{credential.label}</option>)}
+              </select>
+            </span>
+          </Field>
+          {props.credentials.length === 0 ? (
+            <div className="mrfw-sshInlineNote">
+              <span className="mrfw-sshFieldHint">{t('ssh.add.noCredentials')}</span>
+              <Button variant="outline" size="sm" disabled={busy} onClick={props.onOpenKeys}>{t('ssh.add.openKeys')}</Button>
+            </div>
+          ) : null}
+        </div>
+      </section>
+    ) : null}
 
-    <section className="mrfw-sshStep">
-      <span className="mrfw-sshStepTitle">{t('ssh.add.stepCredential')}</span>
-      <Field label={t('ssh.field.credential')}>
-        {segmented ? (
-          <CredentialSegmented id={credentialId} value={draft.credentialSource} options={credentialOptions}
-            onChange={next => update({ credentialSource: next })} label={t('ssh.field.credential')} />
-        ) : (
-          <div className="mrfw-sshRadioGroup" role="radiogroup" aria-label={t('ssh.field.credential')}>
-            {credentialOptions.map(option => (
-              <label key={option.value} className="mrfw-sshRadioOption">
-                <input type="radio" name={credentialId} checked={draft.credentialSource === option.value}
-                  onChange={() => update({ credentialSource: option.value })} />
-                <span>{option.label}</span>
-              </label>
-            ))}
-          </div>
-        )}
-      </Field>
-      <div id={`${credentialId}-alias-panel`} role={segmented ? 'tabpanel' : undefined}
-        aria-labelledby={segmented ? `${credentialId}-alias` : undefined} hidden={draft.credentialSource !== 'alias'}>
-        <Field label={t('ssh.field.alias')}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.alias')} placeholder={t('ssh.field.alias')}
-            value={draft.alias} onChange={event => update({ alias: event.currentTarget.value })} />
-        </Field>
-      </div>
-      <div id={`${credentialId}-managed-panel`} role={segmented ? 'tabpanel' : undefined}
-        aria-labelledby={segmented ? `${credentialId}-managed` : undefined} hidden={draft.credentialSource !== 'managed'}>
-        <Field label={t('ssh.field.managed')}>
-          <span className="mrfw-sshSelect">
-            <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.managed')} value={draft.credentialId}
-              onChange={event => update({ credentialId: event.currentTarget.value })}>
-              <option value="">{t('ssh.field.managed')}</option>
-              {props.credentials.map(credential => <option key={credential.id} value={credential.id}>{credential.label}</option>)}
-            </select>
-          </span>
-        </Field>
-        {props.credentials.length === 0 ? (
-          <div className="mrfw-sshInlineNote">
-            <span className="mrfw-sshFieldHint">{t('ssh.add.noCredentials')}</span>
-            <Button variant="outline" size="sm" disabled={busy} onClick={props.onOpenKeys}>{t('ssh.add.openKeys')}</Button>
-          </div>
+    {show('target') ? (
+      <section className="mrfw-sshStep">
+        <span className="mrfw-sshStepTitle">{t('ssh.add.stepTarget')}</span>
+        <div className="mrfw-sshGrid">
+          <Field label={t('ssh.field.environmentId')}
+            error={errorFor('environmentId')}
+            hint={draft.existing !== undefined || draft.environmentId.trim() === '' || ENVIRONMENT_ID.test(draft.environmentId.trim()) ? undefined : t('ssh.field.environmentIdHint')}>
+            <Input className="mrfw-sshInput" aria-label={t('ssh.field.environmentId')} placeholder={t('ssh.field.environmentId')}
+              value={draft.environmentId} disabled={draft.existing !== undefined}
+              onChange={event => update({ environmentId: event.currentTarget.value })} />
+          </Field>
+          <Field label={t('ssh.field.displayName')}>
+            <Input className="mrfw-sshInput" aria-label={t('ssh.field.displayName')} placeholder={t('ssh.field.displayName')}
+              value={draft.displayName} onChange={event => update({ displayName: event.currentTarget.value })} />
+          </Field>
+          {draft.credentialSource === 'managed' || step === undefined ? (
+            <>
+              <Field label={t('ssh.field.hostname')} error={errorFor('hostname')}>
+                <Input className="mrfw-sshInput" aria-label={t('ssh.field.hostname')} placeholder={t('ssh.field.hostname')}
+                  value={draft.hostname} onChange={event => update({ hostname: event.currentTarget.value })} />
+              </Field>
+              <Field label={t('ssh.field.port')} error={errorFor('port')}>
+                <Input className="mrfw-sshInput" aria-label={t('ssh.field.port')} placeholder={t('ssh.field.port')} type="number"
+                  value={draft.port} onChange={event => update({ port: event.currentTarget.value })} />
+              </Field>
+              <Field label={t('ssh.field.user')} error={errorFor('user')}>
+                <Input className="mrfw-sshInput" aria-label={t('ssh.field.user')} placeholder={t('ssh.field.user')}
+                  value={draft.user} onChange={event => update({ user: event.currentTarget.value })} />
+              </Field>
+            </>
+          ) : null}
+          <Field label={t('ssh.field.platform')}>
+            <span className="mrfw-sshSelect">
+              <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.platform')} value={draft.platform}
+                onChange={event => update({ platform: event.currentTarget.value as 'linux' | 'darwin' })}>
+                <option value="linux">{t('ssh.platform.linux')}</option>
+                <option value="darwin">{t('ssh.platform.darwin')}</option>
+              </select>
+            </span>
+          </Field>
+        </div>
+        {draft.credentialSource === 'alias' && step === 'target' ? (
+          <p className="mrfw-note">{t('ssh.add.aliasResolvedNote', { alias: draft.alias.trim() })}</p>
         ) : null}
-      </div>
-    </section>
+      </section>
+    ) : null}
 
-    <section className="mrfw-sshStep">
-      <span className="mrfw-sshStepTitle">{t('ssh.add.stepWorkspace')}</span>
-      <Field label={t('ssh.field.workspace')} wide>
-        <Input className="mrfw-sshInput" aria-label={t('ssh.field.workspace')} placeholder={t('ssh.field.workspace')}
-          value={draft.workspace} onChange={event => update({ workspace: event.currentTarget.value })} />
-      </Field>
-      <div className="mrfw-sshCheckRow">
-        <SshCheckbox checked={draft.allowExec} disabled={busy || !execHelperReady(draft)}
-          onChange={next => update({ allowExec: next })} label={t('ssh.field.allowExec')} />
-        {execHelperReady(draft) ? null : <span className="mrfw-sshFieldHint">{t('ssh.field.allowExecHelper')}</span>}
-        <SshCheckbox checked={draft.allowTransfer} onChange={next => update({ allowTransfer: next })}
-          label={t('ssh.field.allowTransfer')} />
-      </div>
-    </section>
+    {show('workspace') ? (
+      <section className="mrfw-sshStep">
+        <span className="mrfw-sshStepTitle">{t('ssh.add.stepWorkspace')}</span>
+        <Field label={t('ssh.field.workspace')} error={errorFor('workspace')} wide>
+          <Input className="mrfw-sshInput" aria-label={t('ssh.field.workspace')} placeholder={t('ssh.field.workspace')}
+            value={draft.workspace} onChange={event => update({ workspace: event.currentTarget.value })} />
+        </Field>
+        <div className="mrfw-sshCheckRow">
+          <SshCheckbox checked={draft.allowExec} disabled={busy || !execHelperReady(draft)}
+            onChange={next => update({ allowExec: next })} label={t('ssh.field.allowExec')} />
+          {execHelperReady(draft) ? null : <span className="mrfw-sshFieldHint">{t('ssh.field.allowExecHelper')}</span>}
+          <SshCheckbox checked={draft.allowTransfer} onChange={next => update({ allowTransfer: next })}
+            label={t('ssh.field.allowTransfer')} />
+        </div>
+      </section>
+    ) : null}
 
-    <section className="mrfw-sshStep">
-      <span className="mrfw-sshStepTitle">{t('ssh.add.stepHostKey')}</span>
-      <div className="mrfw-sshScanRow">
-        <Button variant="outline" size="sm" disabled={busy || (draft.credentialSource === 'alias' ? draft.alias.trim() === '' : draft.hostname.trim() === '')} onClick={props.onScan}>
-          {t('ssh.scan')}
+    {show('hostkey') ? (
+      <section className="mrfw-sshStep">
+        <span className="mrfw-sshStepTitle">{t('ssh.add.stepHostKey')}</span>
+        <div className="mrfw-sshScanRow">
+          <Button variant="outline" size="sm" disabled={busy || !scanReady(draft)} onClick={props.onScan}>
+            {t('ssh.scan')}
+          </Button>
+          {draft.credentialSource === 'alias' && draft.hostname.trim() === '' && props.scan !== undefined ? (
+            <span className="mrfw-sshFieldHint">{t('ssh.add.aliasUnresolved')}</span>
+          ) : null}
+          {props.scan === undefined ? null : (
+            <div className="mrfw-sshRadioGroup" role="radiogroup" aria-label={t('ssh.scanPick')}>
+              {props.scan.keys.map(key => (
+                <label key={key.fingerprint} className="mrfw-sshRadioOption">
+                  <input type="radio" name="mrfw-ssh-fp" checked={props.fingerprint === key.fingerprint}
+                    onChange={() => props.onFingerprint(key.fingerprint)} />
+                  <span>{key.type} {key.fingerprint}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    ) : null}
+
+    {step === undefined ? (
+      <div className="mrfw-sshRowActions">
+        <Button variant="primary" disabled={!canSave} onClick={props.onSave}>{props.saveLabel}</Button>
+        <Button variant="ghost" disabled={busy} onClick={props.onCancel}>{props.cancelLabel}</Button>
+      </div>
+    ) : null}
+  </div>
+}
+
+/** The step-indicator chip labels, in wizard order. */
+const STEP_TITLE: Record<AddStep, Key> = {
+  credential: 'ssh.add.stepCredential',
+  target: 'ssh.add.stepTarget',
+  workspace: 'ssh.add.stepWorkspace',
+  hostkey: 'ssh.add.stepHostKey',
+}
+
+const WIZARD_FIELDS: readonly WizardField[] = ['environmentId', 'hostname', 'port', 'user', 'alias', 'credentialId', 'workspace']
+
+/** The add-connection wizard: a guided card with back/next and per-step validation. */
+function EnvironmentWizard(props: EnvironmentFormProps): ReactNode {
+  const { draft, t, busy } = props
+  const [step, setStep] = useState<AddStep>('credential')
+  const [attempted, setAttempted] = useState<ReadonlySet<WizardField>>(new Set())
+  const stepIndex = ADD_STEPS.indexOf(step)
+  const blockedAt = firstBlockedStep(draft)
+
+  /** Mark fields whose value just moved so their hint goes live. */
+  const change = (next: EditorDraft): void => {
+    setAttempted(current => {
+      const touched = new Set(current)
+      for (const field of WIZARD_FIELDS) if (next[field] !== draft[field]) touched.add(field)
+      if (next.credentialSource !== draft.credentialSource) { touched.add('alias'); touched.add('credentialId') }
+      return touched
+    })
+    props.onChange(next)
+  }
+
+  const errorFor = (field: WizardField): string | undefined => {
+    if (!attempted.has(field)) return undefined
+    const key = draftFieldError(draft, field)
+    return key === undefined ? undefined : t(key)
+  }
+
+  const advance = (): void => {
+    if (stepReady(draft, step)) {
+      const next = ADD_STEPS[Math.min(stepIndex + 1, ADD_STEPS.length - 1)]!
+      if (next !== step) setStep(next)
+      return
+    }
+    // Reveal every hint on this step so the blocker is visible at a glance.
+    setAttempted(current => {
+      const touched = new Set(current)
+      for (const field of STEP_FIELDS[step]) touched.add(field)
+      return touched
+    })
+  }
+
+  const goTo = (target: AddStep): void => {
+    if (ADD_STEPS.indexOf(target) <= blockedAt) setStep(target)
+  }
+
+  const last = stepIndex === ADD_STEPS.length - 1
+  const canSave = !busy
+    && props.fingerprint !== undefined
+    && draft.hostname.trim() !== ''
+    && draft.user.trim() !== ''
+    && blockedAt === ADD_STEPS.length
+  return <div className="mrfw-sshForm">
+    <div className="mrfw-sshWizardSteps" role="list" aria-label={t('ssh.step.listLabel')}>
+      {ADD_STEPS.map((entry, index) => {
+        const done = index < blockedAt
+        const active = entry === step
+        const reachable = index <= blockedAt
+        return (
+          <Fragment key={entry}>
+            {index === 0 ? null : <span className="mrfw-sshWizardArrow" aria-hidden>→</span>}
+            <button
+              type="button"
+              role="listitem"
+              disabled={!reachable}
+              aria-current={active ? 'step' : undefined}
+              className={'mrfw-sshWizardStep' + (active ? ' mrfw-sshWizardStepActive' : done ? ' mrfw-sshWizardStepDone' : '')}
+              onClick={() => { goTo(entry) }}
+            >
+              {t(STEP_TITLE[entry])}
+            </button>
+          </Fragment>
+        )
+      })}
+    </div>
+    <EnvironmentForm {...props} step={step} onChange={change} errorFor={errorFor} />
+    <div className="mrfw-sshWizardNav">
+      <Button variant="ghost" size="sm" disabled={busy || stepIndex === 0}
+        onClick={() => { setStep(ADD_STEPS[stepIndex - 1] ?? 'credential') }}>
+        {t('ssh.step.back')}
+      </Button>
+      <div className="mrfw-sshRowActions">
+        <Button variant="ghost" size="sm" disabled={busy}
+          onClick={() => { setStep('credential'); setAttempted(new Set()); props.onCancel() }}>
+          {props.cancelLabel}
         </Button>
-        {props.scan === undefined ? null : (
-          <div className="mrfw-sshRadioGroup" role="radiogroup" aria-label={t('ssh.scanPick')}>
-            {props.scan.keys.map(key => (
-              <label key={key.fingerprint} className="mrfw-sshRadioOption">
-                <input type="radio" name="mrfw-ssh-fp" checked={props.fingerprint === key.fingerprint}
-                  onChange={() => props.onFingerprint(key.fingerprint)} />
-                <span>{key.type} {key.fingerprint}</span>
-              </label>
-            ))}
-          </div>
+        {last ? (
+          <Button variant="primary" size="sm" disabled={!canSave} onClick={props.onSave}>{props.saveLabel}</Button>
+        ) : (
+          <Button variant="primary" size="sm" disabled={busy} onClick={advance}>{t('ssh.step.next')}</Button>
         )}
       </div>
-    </section>
-
-    <div className="mrfw-sshRowActions">
-      <Button variant="primary" disabled={!canSave} onClick={props.onSave}>{props.saveLabel}</Button>
-      <Button variant="ghost" disabled={busy} onClick={props.onCancel}>{props.cancelLabel}</Button>
     </div>
   </div>
 }
@@ -657,13 +859,12 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   }
 
   const scanHost = async (draft: EditorDraft, applyPatch: (patch: Partial<EditorDraft>) => void): Promise<void> => {
-    if (ssh === undefined || sessionId === undefined) return
-    const port = Number.parseInt(draft.port, 10)
-    const alias = draft.credentialSource === 'alias' && draft.alias.trim() !== '' ? draft.alias.trim() : undefined
+    if (ssh === undefined || sessionId === undefined || !scanReady(draft)) return
+    const alias = draft.credentialSource === 'alias' ? draft.alias.trim() : undefined
     setBusy(true)
     try {
       const result = await ssh.hostKeyScan(sessionId, {
-        port: Number.isInteger(port) ? port : 22,
+        port: Number.parseInt(draft.port, 10),
         ...(alias === undefined ? { hostname: draft.hostname.trim() } : { alias }),
       })
       if (current()) {
@@ -685,12 +886,12 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
 
   const saveEnvironment = async (draft: EditorDraft): Promise<void> => {
     if (ssh === undefined || sessionId === undefined || fingerprint === undefined) return
-    const port = Number.parseInt(draft.port, 10)
+    if (!sshPort(draft.port) || !remotePath(draft.workspace.trim())) return
     const environment = {
       environmentId: draft.environmentId.trim(),
       ...(draft.displayName.trim() === '' ? {} : { displayName: draft.displayName.trim() }),
       platform: draft.platform,
-      endpoint: { hostname: draft.hostname.trim(), port: Number.isInteger(port) ? port : 22, user: draft.user.trim() },
+      endpoint: { hostname: draft.hostname.trim(), port: Number.parseInt(draft.port, 10), user: draft.user.trim() },
       credential: draft.credentialSource === 'alias'
         ? { kind: 'ssh-config' as const, alias: draft.alias.trim() }
         : { kind: 'managed' as const, credentialId: draft.credentialId },
@@ -1147,7 +1348,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     return <div className="mrfw-sshArea">
       <p className="mrfw-note">{t('ssh.add.personalGuide')}</p>
       {saved ? <p className="mrfw-note" role="status">{t('ssh.add.saved')}</p> : null}
-      <EnvironmentForm
+      <EnvironmentWizard
         draft={addDraft}
         onChange={setAddDraft}
         credentials={userCredentials}
