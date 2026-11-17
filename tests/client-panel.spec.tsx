@@ -1040,7 +1040,12 @@ describe('the panel dialog', () => {
     const retry = screen.getByRole('button', { name: `${NS}.panel.retry` })
     expect(hint.contains(retry)).toBe(false)
     // Everything after the hint is still one of the original controls, in order.
-    expect(Array.from(footer.children).slice(1).every(element => element.tagName === 'BUTTON' || element.tagName === 'INPUT')).toBe(true)
+    // The access picker is a Menu: its anchor wrapper span is the control's own
+    // element (the real primitive wraps every anchor in one), so the row counts
+    // it by the button inside rather than by a flattened tag name.
+    expect(Array.from(footer.children).slice(1).every(element => element.tagName === 'BUTTON'
+      || element.tagName === 'INPUT'
+      || (element.tagName === 'SPAN' && element.querySelector('button') !== null))).toBe(true)
   })
 
   it('flips a root to read-only without asking, and renders the host answer', async () => {

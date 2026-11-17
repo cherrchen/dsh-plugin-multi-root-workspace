@@ -495,6 +495,23 @@ describe('the Files-tab root switcher', () => {
     expect(missing.textContent).toContain(`${NS}.state.missing`)
   })
 
+  it('puts the shrink hook on the Menu anchor wrapper the header row sizes', async () => {
+    const harness = mount()
+    renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    // The header row's flex item is Menu's anchor wrapper span, not the button;
+    // the stylesheet's min-width: 0 has to land there, or the trigger keeps its
+    // min-content width and paints over the reload/search controls in a narrow
+    // header. A primitive that stops forwarding className would silently lose
+    // the hook, so pin the nesting the rule depends on.
+    const trigger = document.querySelector('.mrfw-rootSwitchBtn')
+    expect(trigger).not.toBeNull()
+    const anchor = trigger!.parentElement
+    expect(anchor?.classList.contains('mrfw-rootSwitchAnchor')).toBe(true)
+    expect(anchor?.parentElement?.classList.contains('mrfw-rootSwitcher')).toBe(true)
+  })
+
   it('shows the selected root full path between the trigger and the reload', async () => {
     const harness = mount()
     renderInPane(harness)

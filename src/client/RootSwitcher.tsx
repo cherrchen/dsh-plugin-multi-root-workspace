@@ -310,6 +310,10 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
         data-root-kind={treeVisible ? 'additional' : 'primary'}
       >
         <Menu
+          // The stylesheet's shrink hook. Menu renders className on the anchor
+          // wrapper span — the flex item the header row actually sizes — so the
+          // trigger can ellipsize instead of overflowing over the next controls.
+          className="mrfw-rootSwitchAnchor"
           open={menuOpen}
           onClose={() => { setMenuOpen(false) }}
           items={items}
