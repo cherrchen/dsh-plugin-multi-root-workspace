@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted（2026-11-17；实施见 [计划](../plans/active/2026-11-17-files-rootswitch-narrow-width.md)）
+Accepted（2026-11-17；实施见 [计划](../plans/completed/2026-11-17-files-rootswitch-narrow-width.md)）
 
 ## Date
 
@@ -71,7 +71,7 @@ anchor 包装 span 上（逐 tag 核对），所以规则无版本分支、无�
 
 ## Related Documents
 
-- [计划：Files 页头 RootSwitcher 的窄宽布局](../plans/active/2026-11-17-files-rootswitch-narrow-width.md)
+- [计划：Files 页头 RootSwitcher 的窄宽布局](../plans/completed/2026-11-17-files-rootswitch-narrow-width.md)
 - [ADR-0015: Files 页插件自有浏览](./ADR-0015-files-tab-plugin-owned-browsing.md)
 - [ADR-0016: Files 页原生树 fork](./ADR-0016-files-tab-native-tree-fork.md)
 - [ADR-0006: Client UI 使用宿主 token](./ADR-0006-client-ui-host-tokens.md)

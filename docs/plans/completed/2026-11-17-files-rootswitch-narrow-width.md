@@ -1,6 +1,6 @@
 # Files 页头 RootSwitcher 的窄宽布局：根名/路径/控件按优先级让位
 
-> 状态：进行中（2026-11-17）。本文件是修复计划与执行账本。
+> 状态：已完成（2026-11-17）。本文件是修复计划与执行账本；Draft PR 与最终提交的 CI 结果见 PR 页面。
 >
 > 分支：`fix/file-tree-rootswitch-width`。
 > 关联：[ADR-0046](../../decisions/ADR-0046-files-header-rootswitch-shrink-priority.md)、
@@ -239,8 +239,34 @@ pnpm compat:check              # 依赖/精确版本合同未改动
 
 | 阶段 | 状态 | 证据 |
 | --- | --- | --- |
-| P0 取证与计划 | 进行中（2026-11-17） | §Background 的复刻与真实 GUI 数值；本文件 + ADR-0046 |
-| P1 实现与测试 | 待开始 | — |
-| P2 构建与 GUI 目检 | 待开始 | — |
-| P3 文档同步 | 待开始 | — |
-| P4 Draft PR 与 CI | 待开始 | — |
+| P0 取证与计划 | 完成（2026-11-17） | 提交 `3b5d62e`：§Background 的复刻与真实 GUI 数值；本文件 + [ADR-0046](../../decisions/ADR-0046-files-header-rootswitch-shrink-priority.md)；索引与总账 |
+| P1 实现与测试 | 完成（2026-11-17） | 提交 `6380ffe`：`Menu` 传 `mrfw-rootSwitchAnchor`、三条样式规则、`tests/stubs/ui-primitives.tsx` 的 Menu 改为与真实原语同形的 anchor 包装（`className` 落点即 flex item）；新增 4 项断言实现前红、实现后绿；`vitest run tests/client-` 26 文件 643 项全绿；`pnpm lint` / `pnpm typecheck` 绿 |
+| P2 构建与 GUI 目检 | 完成（2026-11-17） | 隔离 scratch `$DSH_HOME` + `dsh plugin add` + `dsh web`（DSH `0.2.2-rc.3`）+ headless Chromium CDP；三工况 + 附加根接管态实测（见 §Evidence）；宽形态几何与改动前逐值相同 |
+| P3 文档同步 | 完成（2026-11-17） | 架构段、compat note 中/英 quiet trap、ADR-0046/索引/总账；`pnpm docs:check` 0 errors；本计划移入 `completed/` |
+| P4 Draft PR 与 CI | 完成（2026-11-17） | Draft PR 已开；分支最终提交的 CI 结果见 PR 页面（本仓库只保留最新提交的运行） |
+
+### Evidence（实施后回填）
+
+**一次性 Chromium 复刻（宿主 0.2.2-rc.3 CSS module 原文 + 生产样式表原文 + 真实 DOM 结构）**：
+修复后页宽 520…180 的每一项两两重叠为 0；附加根接管态在页宽 ≥ 400 时 header 不再溢出
+（`scrollWidth ≤ clientWidth`），插件自绘的 reload/搜索/open-in-app 留在页内。
+
+**真实 GUI（隔离 Web 宿主，headless Chromium CDP；宽度为 `[data-files-page]` 的
+`getBoundingClientRect`）**：
+
+| 工况 | pane 宽 | 改动前 | 改动后 |
+| --- | --- | --- | --- |
+| 宽形态（单栏） | 647 | 无重叠；触发 249、路径 249 | **完全一致**：触发 249@809、路径 249@1062、label 不省略 |
+| 变窄的右侧栏（单栏最小宽） | 299 | 触发 249；与 reload 28、搜索 28、open-in-app 14.59 重叠 | 触发 150、路径 0，**重叠全 0**，`clientW = scrollW = 299`，根名省略号 `dsh-plugin-mul…` |
+| 右侧栏双栏（默认对分） | 323 | 触发 249；与 reload 28、搜索 5.59 重叠 | 触发 174、路径 0，**重叠全 0** |
+| 右侧栏双栏（拖到更窄） | 233 | （低于单栏最小值，改动前同样溢出） | 触发 84、路径 0，**重叠全 0**，三个控件均在页内 |
+| 可拖动的小窗（浮动面板默认） | 380 | 触发 249；与 reload 1.59 重叠 | 触发 231、路径 0，**重叠全 0** |
+| 可拖动的小窗（缩到最小） | 220 | 触发 249；与 reload 28、搜索 28、open-in-app 43 重叠（open-in-app 被整枚覆盖，根名越出页右缘） | 触发 71、路径 0，**重叠全 0**，`clientW = scrollW = 220`，open-in-app 完整可见 |
+| 附加根接管态（宽） | 647 | 触发 322、路径 176、三个插件控件可见 | 规格不变：触发 322@809、路径 176@1135、reload 28@1327 / 搜索 28@1359 / open-in-app 43@1391 |
+| 附加根接管态（单栏最小宽） | 299 | header 溢出（scrollWidth ≈ 408 > 299），open-in-app 被推出页外 | 触发 150、路径 0，**重叠全 0**，三个插件控件均在页内 |
+| 附加根接管态（双栏更窄） | 233 | 同上溢出 | 触发 84、路径 0，**重叠全 0**，open-in-app 在 977..1020（页右缘 1026）内 |
+| 附加根接管态（浮动最小） | 220 | 同上溢出 | 触发 71、路径 0，**重叠全 0**，三个插件控件均在页内 |
+
+锚点包装的计算样式在修复后为 `min-width: 0px; flex: 0 1 auto`，类名为
+`_root_… mrfw-rootSwitchAnchor`（确认 `Menu.className` 落在真实 flex item 上）。
+三工况的前后截图（crop）留在 gitignore 的临时目录、结论入 PR 描述。

@@ -38,8 +38,6 @@ completed/
 
 active：
 
-- [2026-11-17-files-rootswitch-narrow-width.md](./active/2026-11-17-files-rootswitch-narrow-width.md) — Files 页头 `RootSwitcher` 的窄宽让位优先级：`Menu` 的 anchor 包装 span 是外层 flex item，缺 `min-width: 0` 时把触发器钉在内容 min-content，窄栏/双栏/浮动小窗下溢出压住 reload、搜索与 open-in-app；修复为「固定控件 → 完整路径 → 根名 → 触发器图标」三级收缩（anchor 解钉、路径 `flex: 1 1 0` 先让、触发器 `overflow: hidden`），并含三工况真实 GUI 量测与截图验收。决策见 [ADR-0046](../decisions/ADR-0046-files-header-rootswitch-shrink-priority.md)。
-
 - [2026-11-16-sidebar-footer-row-alignment-and-coexistence.md](./active/2026-11-16-sidebar-footer-row-alignment-and-coexistence.md) — 侧栏 footer 入口的 workspace tree 图标与跨两代几何对齐（旧 19 版 / 新 5 版，分界 `0.2.2-alpha.2`；rail 圆角按其更早的 `0.1.6-alpha.2` 分界处理，22/24 对齐、最老 2 版已知偏差），以及同槽出现第二行时的纵向共存规则：一份带 fallback 的 CSS 配方、`:has()` 作用域的 slot anchor 纵向列、不隐藏/不读槽账本/不改他人行；含复刻取证、测试与文档清单。决策见 [ADR-0044](../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)。
 - [2026-11-16-additional-root-preview-navigator-search.md](./active/2026-11-16-additional-root-preview-navigator-search.md) — 附加根文件预览右侧 Folder 导航树（FileTree）的工作区搜索：复用既有 `search` 端点与 `FilesPane`（新增 preview 模式），补齐结果当前行、隐藏项默认、设置回焦、焦点交接、Escape 顺序与旧宿主降级；DSH `0.2.2-rc.2` 起可用，Host 零改动。决策见 [ADR-0043](../decisions/ADR-0043-additional-root-preview-navigator-search.md)；**实施完成（P1–P4 已提交），P5 本机门禁与隔离环境交互目检完成（截图待维护者复核）**。
 
@@ -71,6 +69,8 @@ active：
 
 
 completed：
+
+- [2026-11-17-files-rootswitch-narrow-width.md](./completed/2026-11-17-files-rootswitch-narrow-width.md) — Files 页头 `RootSwitcher` 的窄宽让位优先级：`Menu` 的 anchor 包装 span 是外层 flex item，缺 `min-width: 0` 时把触发器钉在内容 min-content，窄栏/双栏/浮动小窗下溢出压住 reload、搜索与 open-in-app；修复为「固定控件 → 完整路径 → 根名 → 触发器图标」三级收缩（anchor 解钉、路径 `flex: 1 1 0` 先让、触发器 `overflow: hidden`），已完成（2026-11-17）：focused/全量 client 测试、隔离 Web 宿主三工况 299/323/220 与附加根接管态的 DOM 量测与截图目检。决策见 [ADR-0046](../decisions/ADR-0046-files-header-rootswitch-shrink-priority.md)。
 
 - [2026-11-16-worktree-cleanup-panel-ux.md](./completed/2026-11-16-worktree-cleanup-panel-ux.md) — Workspace Folders 面板的 Worktree 清理 UX 收敛（R1–R4）已完成并验收（2026-11-16）：批量清理入口移到「附属工作目录」标题行、确认改为覆盖在面板上的 primitives `Modal`、`cleanupEligible` 行收敛为 标题/权限/路径 + 红色删除 + `...`、手动发现空结果用官方 info Toast；纯客户端呈现层变更，无授权/协议/宿主变更。证据见[路线账本](./active/2026-09-12-multi-root-workspace.md#worktree-清理面板-ux-收敛2026-11-16)，决策见 [ADR-0045](../decisions/ADR-0045-worktree-cleanup-panel-ui.md)。
 
