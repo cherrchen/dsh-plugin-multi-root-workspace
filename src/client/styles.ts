@@ -1186,6 +1186,64 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   grid-column: 1 / -1;
 }
 
+.mrfw-sshFieldInvalid .mrfw-sshInput,
+.mrfw-sshFieldInvalid .mrfw-sshSelectControl {
+  border-color: var(--dsw-alias-state-error-primary);
+}
+
+.mrfw-sshErrors {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-state-error-primary);
+  border-radius: var(--dsw-radius-md);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 5%, transparent);
+}
+
+.mrfw-sshErrorItem {
+  display: flex;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.mrfw-sshErrorField {
+  flex: none;
+}
+
+.mrfw-sshTargetRow {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.mrfw-sshTargetRow .mrfw-sshField {
+  min-width: 0;
+}
+
+.mrfw-sshTargetUser {
+  flex: 0 1 160px;
+}
+
+.mrfw-sshTargetHost {
+  flex: 1 1 auto;
+}
+
+.mrfw-sshTargetPort {
+  flex: 0 0 92px;
+}
+
+.mrfw-sshTargetSep {
+  flex: none;
+  align-self: flex-end;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 32px;
+}
+
 .mrfw-sshTag {
   flex: none;
 }
@@ -1327,11 +1385,20 @@ aside[data-mrfw-navigator] > [data-files-search-status] {
   color: var(--dsw-alias-state-error-primary);
 }
 
+.mrfw-sshHelperRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
 .mrfw-sshHelperInput {
   box-sizing: border-box;
   display: flex;
-  flex: 0 0 220px;
-  width: 220px;
+  flex: 0 1 auto;
+  width: 240px;
+  max-width: 100%;
 }
 
 .mrfw-teamInput {
