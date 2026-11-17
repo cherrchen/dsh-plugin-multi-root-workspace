@@ -96,13 +96,11 @@ function SshCheckbox(props: CheckboxControlProps): ReactNode {
 }
 
 /** One labeled form field; the label stays visible after the value is typed. */
-function Field(props: { readonly label: string; readonly wide?: boolean; readonly children: ReactNode; readonly hint?: string | undefined; readonly error?: string | undefined }): ReactNode {
-  return <div className={'mrfw-sshField' + (props.wide === true ? ' mrfw-sshFieldWide' : '')}>
+function Field(props: { readonly label: string; readonly wide?: boolean; readonly className?: string | undefined; readonly children: ReactNode; readonly hint?: string | undefined; readonly invalid?: boolean | undefined }): ReactNode {
+  return <div className={'mrfw-sshField' + (props.wide === true ? ' mrfw-sshFieldWide' : '') + (props.invalid === true ? ' mrfw-sshFieldInvalid' : '') + (props.className === undefined ? '' : ' ' + props.className)}>
     <span className="mrfw-sshFieldLabel">{props.label}</span>
     {props.children}
-    {props.error !== undefined
-      ? <span className="mrfw-sshFieldHint mrfw-sshDanger">{props.error}</span>
-      : props.hint === undefined ? null : <span className="mrfw-sshFieldHint">{props.hint}</span>}
+    {props.hint === undefined ? null : <span className="mrfw-sshFieldHint">{props.hint}</span>}
   </div>
 }
 
@@ -182,13 +180,27 @@ function draftFieldError(draft: EditorDraft, field: WizardField): Key | undefine
   }
 }
 
-/** The fields one wizard step validates. */
+/** The fields one wizard step validates, in the order the card renders them. */
 const STEP_FIELDS: Record<AddStep, readonly WizardField[]> = {
   credential: ['alias', 'credentialId'],
-  target: ['environmentId', 'hostname', 'port', 'user'],
+  target: ['environmentId', 'user', 'hostname', 'port'],
   workspace: ['workspace'],
   hostkey: [],
 }
+
+/** The label locale key for one wizard field, used by the summary strip. */
+const FIELD_LABELS: Record<WizardField, Key> = {
+  environmentId: 'ssh.field.environmentId',
+  user: 'ssh.field.user',
+  hostname: 'ssh.field.hostname',
+  port: 'ssh.field.port',
+  alias: 'ssh.field.alias',
+  credentialId: 'ssh.field.managed',
+  workspace: 'ssh.field.workspace',
+}
+
+/** Every field the form renders, in visual order (flat editor / summary). */
+const FORM_FIELDS: readonly WizardField[] = ['alias', 'credentialId', 'environmentId', 'user', 'hostname', 'port', 'workspace']
 
 /** The fields a host-key scan consumes: an alias, or a valid hostname+port. */
 function scanReady(draft: EditorDraft): boolean {
@@ -366,6 +378,12 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
     props.onChange(next)
   }
   const errorFor = (field: WizardField): string | undefined => props.errorFor?.(field)
+  const invalid = (field: WizardField): boolean => errorFor(field) !== undefined
+  // Validation text lives in one summary strip at the top of the card; fields
+  // only carry the invalid marker so a hint cannot skew the row layout.
+  const fieldErrors = (step === undefined ? FORM_FIELDS : STEP_FIELDS[step])
+    .map(field => ({ field, message: errorFor(field) }))
+    .filter((entry): entry is { readonly field: WizardField; readonly message: string } => entry.message !== undefined)
   // Flat mode (the Connections-tab editor) shows every field, so it applies
   // the strict token/port checks even for an alias-sourced endpoint.
   const canSave = !busy
@@ -384,6 +402,16 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
   ]
   const show = (section: AddStep): boolean => step === undefined || step === section
   return <div className="mrfw-sshForm">
+    {fieldErrors.length === 0 ? null : (
+      <div className="mrfw-sshErrors" role="alert">
+        {fieldErrors.map(entry => (
+          <span key={entry.field} className="mrfw-sshErrorItem">
+            <span className="mrfw-sshErrorField">{t('ssh.errorField', { field: t(FIELD_LABELS[entry.field]) })}</span>
+            <span>{entry.message}</span>
+          </span>
+        ))}
+      </div>
+    )}
     {show('credential') ? (
       <section className="mrfw-sshStep">
         <span className="mrfw-sshStepTitle">{t('ssh.add.stepCredential')}</span>
@@ -405,14 +433,14 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
         </Field>
         <div id={`${credentialId}-alias-panel`} role={segmented ? 'tabpanel' : undefined}
           aria-labelledby={segmented ? `${credentialId}-alias` : undefined} hidden={draft.credentialSource !== 'alias'}>
-          <Field label={t('ssh.field.alias')} error={errorFor('alias')}>
+          <Field label={t('ssh.field.alias')} invalid={invalid('alias')}>
             <Input className="mrfw-sshInput" aria-label={t('ssh.field.alias')} placeholder={t('ssh.field.alias')}
               value={draft.alias} onChange={event => update({ alias: event.currentTarget.value })} />
           </Field>
         </div>
         <div id={`${credentialId}-managed-panel`} role={segmented ? 'tabpanel' : undefined}
           aria-labelledby={segmented ? `${credentialId}-managed` : undefined} hidden={draft.credentialSource !== 'managed'}>
-          <Field label={t('ssh.field.managed')} error={errorFor('credentialId')}>
+          <Field label={t('ssh.field.managed')} invalid={invalid('credentialId')}>
             <span className="mrfw-sshSelect">
               <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.managed')} value={draft.credentialId}
                 onChange={event => update({ credentialId: event.currentTarget.value })}>
@@ -436,8 +464,8 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
         <span className="mrfw-sshStepTitle">{t('ssh.add.stepTarget')}</span>
         <div className="mrfw-sshGrid">
           <Field label={t('ssh.field.environmentId')}
-            error={errorFor('environmentId')}
-            hint={draft.existing !== undefined || draft.environmentId.trim() === '' || ENVIRONMENT_ID.test(draft.environmentId.trim()) ? undefined : t('ssh.field.environmentIdHint')}>
+            invalid={invalid('environmentId')}
+            hint={invalid('environmentId') || draft.existing !== undefined || draft.environmentId.trim() === '' || ENVIRONMENT_ID.test(draft.environmentId.trim()) ? undefined : t('ssh.field.environmentIdHint')}>
             <Input className="mrfw-sshInput" aria-label={t('ssh.field.environmentId')} placeholder={t('ssh.field.environmentId')}
               value={draft.environmentId} disabled={draft.existing !== undefined}
               onChange={event => update({ environmentId: event.currentTarget.value })} />
@@ -447,20 +475,22 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
               value={draft.displayName} onChange={event => update({ displayName: event.currentTarget.value })} />
           </Field>
           {draft.credentialSource === 'managed' || step === undefined ? (
-            <>
-              <Field label={t('ssh.field.hostname')} error={errorFor('hostname')}>
-                <Input className="mrfw-sshInput" aria-label={t('ssh.field.hostname')} placeholder={t('ssh.field.hostname')}
-                  value={draft.hostname} onChange={event => update({ hostname: event.currentTarget.value })} />
-              </Field>
-              <Field label={t('ssh.field.port')} error={errorFor('port')}>
-                <Input className="mrfw-sshInput" aria-label={t('ssh.field.port')} placeholder={t('ssh.field.port')} type="number"
-                  value={draft.port} onChange={event => update({ port: event.currentTarget.value })} />
-              </Field>
-              <Field label={t('ssh.field.user')} error={errorFor('user')}>
+            <div className="mrfw-sshTargetRow">
+              <Field label={t('ssh.field.user')} invalid={invalid('user')} className="mrfw-sshTargetUser">
                 <Input className="mrfw-sshInput" aria-label={t('ssh.field.user')} placeholder={t('ssh.field.user')}
                   value={draft.user} onChange={event => update({ user: event.currentTarget.value })} />
               </Field>
-            </>
+              <span className="mrfw-sshTargetSep" aria-hidden>@</span>
+              <Field label={t('ssh.field.hostname')} invalid={invalid('hostname')} className="mrfw-sshTargetHost">
+                <Input className="mrfw-sshInput" aria-label={t('ssh.field.hostname')} placeholder={t('ssh.field.hostname')}
+                  value={draft.hostname} onChange={event => update({ hostname: event.currentTarget.value })} />
+              </Field>
+              <span className="mrfw-sshTargetSep" aria-hidden>:</span>
+              <Field label={t('ssh.field.port')} invalid={invalid('port')} className="mrfw-sshTargetPort">
+                <Input className="mrfw-sshInput" aria-label={t('ssh.field.port')} placeholder={t('ssh.field.port')} type="number"
+                  value={draft.port} onChange={event => update({ port: event.currentTarget.value })} />
+              </Field>
+            </div>
           ) : null}
           <Field label={t('ssh.field.platform')}>
             <span className="mrfw-sshSelect">
@@ -481,7 +511,7 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
     {show('workspace') ? (
       <section className="mrfw-sshStep">
         <span className="mrfw-sshStepTitle">{t('ssh.add.stepWorkspace')}</span>
-        <Field label={t('ssh.field.workspace')} error={errorFor('workspace')} wide>
+        <Field label={t('ssh.field.workspace')} invalid={invalid('workspace')} wide>
           <Input className="mrfw-sshInput" aria-label={t('ssh.field.workspace')} placeholder={t('ssh.field.workspace')}
             value={draft.workspace} onChange={event => update({ workspace: event.currentTarget.value })} />
         </Field>
@@ -1218,6 +1248,26 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
                 <span key={credential.id} className="mrfw-note">{t('ssh.accessKey')} · {credential.label}{credential.fingerprint === undefined ? '' : ` · ${credential.fingerprint}`}</span>
               ))}
               {testResults[id] === undefined ? null : <span className="mrfw-note">{testResults[id]}</span>}
+              {helperFor === id ? (
+                <div className="mrfw-sshHelperRow">
+                  <Input className="mrfw-sshHelperInput" aria-label={t('ssh.nodePath')} placeholder={t('ssh.nodePath')}
+                    value={helperNodePath} onChange={event => setHelperNodePath(event.currentTarget.value)} />
+                  <Button variant="primary" size="sm" disabled={busy}
+                    onClick={() => {
+                      if (ssh === undefined || sessionId === undefined) return
+                      const nodePath = helperNodePath.trim()
+                      setHelperFor(undefined)
+                      setHelperNodePath('')
+                      void submit(async () => await ssh.helperInstall(sessionId, revision(), id, nodePath === '' ? undefined : nodePath))
+                    }}>
+                    {t('ssh.helperInstall')}
+                  </Button>
+                  <Button variant="ghost" size="sm" disabled={busy}
+                    onClick={() => { setHelperFor(undefined); setHelperNodePath('') }}>
+                    {t('ssh.cancel')}
+                  </Button>
+                </div>
+              ) : null}
             </div>
             <div className="mrfw-sshRowActions">
               {next === 'helper' && helperFor !== id ? (
@@ -1236,24 +1286,9 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
                 </Button>
               ) : null}
               <Button variant="ghost" size="sm" disabled={busy} onClick={() => { void testEnvironment(id) }}>{t('ssh.envTest')}</Button>
-              {helperFor === id ? (
-                <>
-                  <Input className="mrfw-sshHelperInput" aria-label={t('ssh.nodePath')} placeholder={t('ssh.nodePath')}
-                    value={helperNodePath} onChange={event => setHelperNodePath(event.currentTarget.value)} />
-                  <Button variant="primary" size="sm" disabled={busy}
-                    onClick={() => {
-                      if (ssh === undefined || sessionId === undefined) return
-                      const nodePath = helperNodePath.trim()
-                      setHelperFor(undefined)
-                      setHelperNodePath('')
-                      void submit(async () => await ssh.helperInstall(sessionId, revision(), id, nodePath === '' ? undefined : nodePath))
-                    }}>
-                    {t('ssh.helperInstall')}
-                  </Button>
-                </>
-              ) : environment.helper === null ? null : (
+              {helperFor !== id && environment.helper !== null ? (
                 <Button variant="ghost" size="sm" disabled={busy} onClick={() => setHelperFor(id)}>{t('ssh.helperInstall')}</Button>
-              )}
+              ) : null}
               {environment.credential.kind === 'managed' && credentialOf(environment.credential.credentialId)?.kind === 'password' ? (
                 <Button variant="ghost" size="sm" disabled={busy}
                   onClick={() => { if (ssh !== undefined && sessionId !== undefined) void submit(async () => await ssh.accessKeyInstall(sessionId, revision(), id)) }}>

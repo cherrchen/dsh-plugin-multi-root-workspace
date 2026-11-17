@@ -487,10 +487,16 @@ describe('the SSH management dialog', () => {
     const port = within(dialog).getByLabelText('ssh.field.port')
     for (const bad of ['abc', '0', '65536', '22.5']) {
       fireEvent.change(port, { target: { value: bad } })
-      expect(within(dialog).getByText('ssh.field.portHint')).toBeTruthy()
+      const errors = dialog.querySelector('.mrfw-sshErrors') as HTMLElement
+      expect(errors).toBeTruthy()
+      expect(errors.textContent).toContain('ssh.field.portHint')
+      expect(port.closest('.mrfw-sshField')!.classList.contains('mrfw-sshFieldInvalid')).toBe(true)
       nextStep(dialog)
       expect(within(dialog).queryByLabelText('ssh.field.workspace')).toBeNull()
     }
+    // The error summary is the single place validation text renders: the
+    // target row itself stays a pure field row.
+    expect(dialog.querySelector('.mrfw-sshTargetRow .mrfw-sshDanger')).toBeNull()
     fireEvent.change(port, { target: { value: '2222' } })
     nextStep(dialog)
     const workspace = await within(dialog).findByLabelText('ssh.field.workspace')
@@ -545,6 +551,20 @@ describe('the SSH management dialog', () => {
       workspace: '/srv/app',
       transfer: { maxBytes: 268435456, timeoutMs: 600000 },
     }, 'SHA256:alias-fp', undefined]])
+  })
+
+  it('lays the managed target fields out in user@host:port order', async () => {
+    const ssh = fakeSsh(sshState())
+    const dialog = await withDialog({ ssh }, 'add')
+    await within(dialog).findByRole('combobox', { name: 'ssh.field.managed' })
+    managedCredentialStep(dialog)
+    await within(dialog).findByLabelText('ssh.field.environmentId')
+    const row = dialog.querySelector('.mrfw-sshTargetRow') as HTMLElement
+    expect(row).toBeTruthy()
+    const labels = [...row.querySelectorAll('.mrfw-sshFieldLabel')].map(node => node.textContent)
+    expect(labels).toEqual(['ssh.field.user', 'ssh.field.hostname', 'ssh.field.port'])
+    const separators = [...row.querySelectorAll('.mrfw-sshTargetSep')].map(node => node.textContent)
+    expect(separators).toEqual(['@', ':'])
   })
 
   it('gates the credential step on a valid alias or picked credential', async () => {
