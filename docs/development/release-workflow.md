@@ -62,7 +62,7 @@ node scripts/release-notes.mjs v0.1.1   # 本地预览，输出 markdown
 
 ## `release.yml` 流程
 
-1. **verify** 使用 `contents: read` 与 `actions: read`。解析 annotated tag 得到 commit SHA，通过本仓库的 Actions API 查找由 main 分支 push 触发、`head_sha` 精确匹配的 `ci.yml`。同推 main 和 tag 时，最多等 90 分钟，涵盖 CI 尚未登记和运行中的情况。匹配后在日志及摘要记录 run ID、attempt 和链接。仅当该次尝试的 CI 运行与唯一的最终 `gate` job 都已完成且结论为 `success` 时放行。失败、取消、跳过、缺少 gate、API 查证错误或超时都会阻断发布。若 main CI 需要重跑，先确认它的新尝试和该次 gate 均成功，再重跑 Release 的 verify。PR、手动运行、其他分支或 workflow 的结果不作为发布凭据。
+1. **verify** 使用 `contents: read` 与 `actions: read`。解析 annotated tag 得到 commit SHA（`actions/checkout` 检出 tag 时会把该 ref 重指到被检出的提交，所以先从 origin 取回 annotated tag 对象再剥离），通过本仓库的 Actions API 查找由 main 分支 push 触发、`head_sha` 精确匹配的 `ci.yml`。同推 main 和 tag 时，最多等 90 分钟，涵盖 CI 尚未登记和运行中的情况。匹配后在日志及摘要记录 run ID、attempt 和链接。仅当该次尝试的 CI 运行与唯一的最终 `gate` job 都已完成且结论为 `success` 时放行。失败、取消、跳过、缺少 gate、API 查证错误或超时都会阻断发布。若 main CI 需要重跑，先确认它的新尝试和该次 gate 均成功，再重跑 Release 的 verify。PR、手动运行、其他分支或 workflow 的结果不作为发布凭据。
 2. **publish**（`needs: verify`，ubuntu-latest）：
    - 检出 verify 查证的 commit，校验 tag 与 `package.json` 版本一致；
    - `pnpm install --frozen-lockfile && pnpm build`（`lib/` 不进 git，tarball 必须现构建；client 制品须在 pack 前就绪）；

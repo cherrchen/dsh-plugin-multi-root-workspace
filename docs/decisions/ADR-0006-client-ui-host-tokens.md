@@ -2,11 +2,11 @@
 
 ## Status
 
-Accepted（2026-09-13 修订：放开 ui-primitives 展示型组件的直接 import，见决策 6）
+Accepted（2026-09-13 修订：放开 ui-primitives 展示型组件的直接 import，见决策 6；2026-11-16 修订：side-footer 触发器的图标与两代几何配方由 [ADR-0044](./ADR-0044-sidebar-footer-row-alignment-and-coexistence.md) 修订，本文决策 3 的侧栏触发器几何与决策 6 的 `IconFolderClose16` 条款不再作为现状依据；同日另一修订：确认层 `Modal` 与瞬时 `Toast` 可直接 import，见决策 7）
 
 ## Date
 
-2026-09-12（修订 2026-09-13）
+2026-09-12（修订 2026-09-13；2026-11-16）
 
 ## Context
 
@@ -30,7 +30,9 @@ M3 交付的面板 UI（侧栏 footer 触发器 + 工作区目录对话框）最
    - 文字层级：分区标题 14px/22px/500 `label-primary`，说明/提示 12px/18px `label-tertiary`，路径 `var(--ds-font-family-code)` 13px/20px，错误 `state-error-primary`，不可用徽标 `state-warn-primary`。
 4. **转发 owner prop `wide`**：`register` 的组件参数即框架组合后的 props（含侧栏的 `{ wide }` owner share），插件此前忽略了它。现在转发给触发器，侧栏折叠成图标栏时触发器渲染为原生一致的 36px 圆形图标钮。
 5. **图标用 16px 内联 SVG**（`stroke: currentColor`）替换 emoji，与原生线性图标一致，颜色跟随文字 token。（2026-09-13 起被决策 6 取代；同日触发器图标错位修复后，侧栏触发器也改用宿主组件——自绘 stroke 字形墨量与宿主 fill 图标不一致，即使几何对齐观感仍偏移。）
-6. **（2026-09-13 修订）展示型组件直接 import ui-primitives**：面板行内图标（`IconCopyOutline16`、`IconFolderOpenOutline16`、`IconChevronUpOutline14`、`IconChevronDownOutline14`、`IconEllipsisOutline16`、`IconPlusOutline16`、`IconEditOutline16`、`IconTrashOutline16`）、侧栏触发器图标（`IconFolderClose16`，wide 16px / rail 18px，同宿主"设置"行的尺寸惯例）与行菜单（`Menu`）从 `@deepseek-ai/dsh-client-ui-primitives` import，字形与交互行为跟宿主完全一致。依据：该包本就在 `tsdown.config.ts` 的 `CLIENT_EXTERNALS` 白名单里，且是 web shell 种子模块表的平台词（`packages/client/web/src/platform.ts` 的 `PLATFORM_MODULES`，另见 ui-renderer README 的 Identity 一节）——运行时浏览器解析到的是 shell 打包的单一身份，`require` 不会引入第二份 React 树或样式。**边界**：仅限无状态的展示型组件（图标、Menu 这类局部弹层）；Button/Modal 等结构组件仍按本 ADR 决策 3 自绘（已验证的配方，且避免出树包假设宿主的组件级上下文）。jsdom 测试经 `vitest.config.ts` 的 alias 指到 `tests/stubs/ui-primitives.tsx` 替身（发布包的 barrel 带宿主侧裸依赖，测试环境不可解析），真实组件由 journey smoke 的 web 腿覆盖。
+6. **（2026-09-13 修订）展示型组件直接 import ui-primitives**：面板行内图标（`IconCopyOutline16`、`IconFolderOpenOutline16`、`IconChevronUpOutline14`、`IconChevronDownOutline14`、`IconEllipsisOutline16`、`IconPlusOutline16`、`IconEditOutline16`、`IconTrashOutline16`）、侧栏触发器图标（`IconFolderClose16`，wide 16px / rail 18px，同宿主"设置"行的尺寸惯例）与行菜单（`Menu`）从 `@deepseek-ai/dsh-client-ui-primitives` import，字形与交互行为跟宿主完全一致。依据：该包本就在 `tsdown.config.ts` 的 `CLIENT_EXTERNALS` 白名单里，且是 web shell 种子模块表的平台词（`packages/client/web/src/platform.ts` 的 `PLATFORM_MODULES`，另见 ui-renderer README 的 Identity 一节）——运行时浏览器解析到的是 shell 打包的单一身份，`require` 不会引入第二份 React 树或样式。**边界**：仅限无状态的展示型组件（图标、Menu 这类局部弹层）；Button/Modal 等结构组件仍按本 ADR 决策 3 自绘（已验证的配方，且避免出树包假设宿主的组件级上下文）。（2026-11-16：`Modal`/`Toast` 的既有使用由决策 7 追认，本句对这两种组件的限制相应修订。）jsdom 测试经 `vitest.config.ts` 的 alias 指到 `tests/stubs/ui-primitives.tsx` 替身（发布包的 barrel 带宿主侧裸依赖，测试环境不可解析）；真实组件的渲染由实机目检覆盖——journey smoke 的 web 腿只验证组合、bundle 与通道，不做 UI 渲染。
+
+7. **（2026-11-16 修订，由 [ADR-0045](./ADR-0045-worktree-cleanup-panel-ui.md) 触发）确认层 Dialog 与瞬时 Toast 直接 import ui-primitives**：覆盖在面板上的确认层使用 `Modal`、info 级瞬时提示使用 `Toast`，均从 `@deepseek-ai/dsh-client-ui-primitives` import。这是对既有事实的追认：面板的只读→读写升级确认层自 2026-10-12 的 P8 起已使用 primitives `Modal`，Worktree 建议覆盖层使用 `Modal`/`Button`（ADR-0039 第二十一/二十二次修订），Files 页接管提示使用 `Toast`（ADR-0015 修订）。决策 6 的边界据此修订为：**已由实机目检覆盖的 `Modal`/`Toast` 可继续直接使用（jsdom 使用桩，journey smoke 不做 UI 渲染）；新引入的其他结构组件仍需逐案核实宿主上下文**。`Modal` 负责遮罩、焦点陷阱与 Escape，`Toast` 负责瞬时呈现与 `holdMs` 到期后的 `onDone`；插件不改写它们的内部样式，只通过 `className`、文案与回调使用；面板的胶囊动作按钮仍用本 ADR 决策 3 的自绘 `Action`，本次不扩大 `Button` 的使用面。Worktree 建议覆盖层既有的 primitives `Button` import 属于 ADR-0039 已实施的例外，本修订只追认事实，不把它推广为面板通用控件。
 
 ## Alternatives Considered
 
@@ -39,7 +41,7 @@ M3 交付的面板 UI（侧栏 footer 触发器 + 工作区目录对话框）最
 | 继续内联样式，仅把颜色换成 `var(...)` 字符串 | 表达不了 `:hover` / `:focus` / `backdrop-filter`，原生观感的核心状态全部缺失 |
 | 引入 CSS Modules / Tailwind / 组件库 | 为一张样式表引入构建管线与依赖，破坏出树包的零管线形态；上游文档明确反对 Tailwind |
 | 带 `rgb(...)` fallback 的 `var()` | 复制静态调色板值，违反上游 web-styling 规则，且会在主题演进时悄悄漂移 |
-| 深引 `ui-primitives` 的 Button/Modal 组件 | 组件库身份不是出树包可假设的运行时服务；结构组件的上下文依赖（portal 容器、主题 provider）无法逐值核实。2026-09-13 起收窄为"仅结构组件"——展示型组件（图标、Menu）已由决策 6 放开 |
+| 深引 `ui-primitives` 的 Button/Modal 组件 | 组件库身份不是出树包可假设的运行时服务；结构组件的上下文依赖（portal 容器、主题 provider）无法逐值核实。2026-09-13 起收窄为"仅结构组件"——展示型组件（图标、Menu）已由决策 6 放开。2026-11-16：`Modal`/`Toast` 的既有使用由决策 7 正式追认，新结构组件仍逐案核实 |
 | 自绘下拉菜单与逐个复制图标 SVG path | 与宿主的字形/交互随时间漂移，且 Menu 的定位、pointer grace、键盘导航属可观察行为，复刻成本高于直接 import 一个已 seed 的平台词 |
 
 ## Consequences

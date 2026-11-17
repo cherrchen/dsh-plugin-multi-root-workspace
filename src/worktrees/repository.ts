@@ -152,6 +152,7 @@ interface CheckoutLayout {
   readonly config: ConfigSnapshot
   readonly head: string
   readonly adminHead?: string
+  readonly commonHead?: string
   readonly rootIdentity: FileIdentity
   readonly adminIdentity: FileIdentity
 }
@@ -237,6 +238,7 @@ function resolveLayout(root: string, platform: NodeJS.Platform): CheckoutLayout 
     config,
     head: adminHead.value,
     adminHead: adminHead.value,
+    commonHead: commonHead.value,
     rootIdentity,
     adminIdentity: requireIdentity(admin),
   }
@@ -362,6 +364,7 @@ export function resolveRepo(directory: string, options: { readonly platform?: No
       ...(layout.adminId === undefined ? {} : { adminId: layout.adminId }),
       ...(layout.adminGitdir === undefined ? {} : { adminGitdir: layout.adminGitdir }),
       ...(layout.adminHead === undefined ? {} : { adminHead: layout.adminHead }),
+      ...(layout.commonHead === undefined ? {} : { commonHead: layout.commonHead }),
       head: layout.head,
       config: layout.config,
       rootIdentity: layout.rootIdentity,

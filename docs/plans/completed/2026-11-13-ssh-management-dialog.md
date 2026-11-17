@@ -13,7 +13,7 @@
 
 ## Background
 
-ADR-0041 为 SSH 远端环境增加了三档凭据托管模式，并在 Workspace Folders 面板远端区块内直接渲染个人管理区（`src/client/ssh-panel.tsx`）和托管档位选择器（`src/client/remote-custody.tsx`）。该内联区块同时承担“工作区远端列表”和“全局 SSH 设置/凭据/环境/绑定管理”，在个人模式下体积过大，挤占了工作区面板的主要职责。
+ADR-0049 为 SSH 远端环境增加了三档凭据托管模式，并在 Workspace Folders 面板远端区块内直接渲染个人管理区（`src/client/ssh-panel.tsx`）和托管档位选择器（`src/client/remote-custody.tsx`）。该内联区块同时承担“工作区远端列表”和“全局 SSH 设置/凭据/环境/绑定管理”，在个人模式下体积过大，挤占了工作区面板的主要职责。
 
 ## Current State
 

@@ -14,11 +14,19 @@ which is always the primary root and cannot be re-pointed.
   controlled `sidebar.files.tree` Factory. On its `data-files-page` layout,
   this plugin adapts its listing state to that public Factory, so the host owns
   the row rendering and accessories; the legacy rows are its fallback. The
-  host's context-menu integration is not forked. The alpha.3 preview-side
+  host's context-menu integration is consumed through the root-provided
+  `useContextMenu` prop rather than forked (ADR-0042). From `0.2.2-rc.2` the
+  fork also carries its own workspace search surface for additional roots
+  (ADR-0041): a toggle in the switcher header plus a bar/results/settings view
+  that draws results with the same tree code. The alpha.3 preview-side
   navigator (`sidebar.files.navigator` inside the document preview) keeps a
   tree rooted at the session `cwd` only; `navigator.tsx` retargets its body
   when the previewed file sits under an additional root, reusing this fork —
-  the native aside chrome, toggle, and ownership stay upstream's.
+  the native aside chrome, toggle, and ownership stay upstream's. From
+  `0.2.2-rc.2` on, that retarget mounts the search surface (`FilesPane`'s
+  preview mode) instead of the bare tree whenever the host exposes workspace
+  search (ADR-0043), so a preview beside an additional root carries the same
+  bar, results, settings and hidden-entry behavior as the native preview.
   Between `0.2.1-rc.3` (`1f81c047fc`) and `0.2.2-alpha.2` the upstream
   `src/client/` tree changed only in `FilesBody.module.css` (hover rules
   wrapped in `@media (hover: hover)` — copied below and ported into
@@ -36,6 +44,9 @@ which is always the primary root and cannot be re-pointed.
 | `face.ts` | the hold/record lifecycle delta — `hold`/`release` keep the store bucket while a body is hidden, `start`/record-abort reseed/forget it (see *Intentional deltas*) |
 | `store.ts` | none — byte-identical |
 | `FilesBody.module.css` | none — kept verbatim as the diffable source; its rules are copied into `src/client/styles.ts` renamed to `mrfw-ft*` |
+| `tree-view.tsx` | upstream's row definitions (`Entry`/`Level`/`TreeContext`/`orderEntries`/`failureLine`) moved out of `FilesTree.tsx` so the listed tree and the search results draw with the same code; the documented deltas add `highlight` marks, `hiddenOnly`/`unmatched` lines, and the row context-menu spread (see *Intentional deltas*) |
+| `hidden.ts` | plugin-owned: upstream's draw-time hidden-entry filtering (`workspaceEntries`/`workspaceDirectories` with `showHidden`, hidden-directory subtree rule, "only hidden entries" state) applied to the fork's absolute-path store; no upstream file to copy from, but its semantics are pinned to `ui-sidebar-files` `workspace-tree.ts` at the same pin |
+| `pane.tsx` + `search-rules.ts`/`search-tree.ts`/`search-preferences.ts`/`search-state.ts`/`search-client.ts`/`context-menu.ts`/`describe-failure.ts` | plugin-owned search and menu surface; the first three are semantic copies of upstream's `0.2.2-rc.2` modules (see *Search surface: sync obligations*), the rest are this plugin's own. `pane.tsx`'s `preview` mode is the document navigator's form of the same component: the bar is always drawn without touching `barOpen`, mount never takes the keyboard, the previewed file is marked current among the results, and closing settings refocuses the magnifier. `describe-failure.ts` is the one describer both owners use for panel failure codes, so their wording cannot drift |
 
 `FilesTree.tsx` is **not** verbatim: it is upstream's `FilesBody.tsx` with
 the exported shell function rewritten and the file row's reveal marks
@@ -55,7 +66,7 @@ re-applies the deltas, never hand-edits inside the verbatim definitions.
 | `primitives.ts` | the named primitives imports upstream spells | runtime-probes `IconFolderCloseRegular`/`IconFolderOpenRegular` (with `*16` pixel-era fallbacks), `FileTypeIcon`, and `classifyFileType` through `compat/client-icons`'s `maybeIcon`/`maybeComponent`; the adapter's gate turns a missing export into no tree at all — upstream's own absence shape |
 | `adapter.tsx` | upstream `apply`'s store/inject wiring | our wiring: `lazyFilesRemote` (`remote` and `remote.workspaceFiles` resolved per call through `ctx.get` — the inject-free store lookup, required because `remote.workspaceFiles` is a nested service whose context-proxy path throws "without inject" on undeclared fibers and this cordis treats every inject entry as required; every lookup failure — absent service, absent namespace, synchronous throw, or a rejected call — is folded into a settled `gateway/internal` RemoteResult/stream failure, because the `load` awaits `list` through `.then` with no `.catch` and an escaped rejection would die inside `DirectoryNode.task` pinning the level at `loading` forever), `createFilesTreeSeats` (the `store`/`inject` registration declarations: `filesFace` with the hold/release delta + session-bound `openFile`/`openFileIn` through `sidebarRight.openResourceIn` — the latter spelling the preview navigator's `replaceTab` route — plus the session-scoped `treeSelection` snapshot — exposed through the `hooks` compartment as `useTreeSelection` — and the takeover map that gives a body remount the native tree's occurrence-length lifetime plus the per-owner `(expanded, scrollTop, revealed)` memory — the fork's spelling of upstream's pane record — written CONTINUOUSLY by the owner (bucket mirror, live scroll, settle reports), while ONE shared document observer — armed per owner key and outliving every `end` — drops the record when the owner's survival predicate finally fails (a dockkit pane has no stable element, so the preview navigator's predicate asks whether any connected element still carries its id, `data-dockkit-pane` or `data-dockkit-float`), and `save` refuses writes once hold and watch are both gone so a racing cleanup can never resurrect a dropped record), and `createFilesTreeSurface` (the prop-share assembly + the primitives gate) |
 | `locate.ts` | upstream navigator's `windowsRoot`/`underRoot`/`locateFile` + the `relativeFileOf` path math | path/level helpers the retargeted navigator reveal needs; `relativeUnderRoot`/`rootForPath` are ours — the containment check that picks the longest available additional root containing a previewed absolute path, skipping the primary root so primary files keep the native navigator |
-| `navigator.tsx` | upstream `FileNavigator`'s pane/body half | the preview-side retarget: a `sidebar.right.tab.document.actions` occupant finds the native `aside[data-files-navigator]` inside the preview's `data-dockkit-content` ancestor, marks it `data-mrfw-navigator` (styles.ts hides its `[data-files-body]` only), and portals the forked `FilesTree` in — rooted at the containing additional root, opening rows through `openFileIn` (`replaceTab`), and revealing the previewed file. Store bucket, takeover, and the saved `(expanded, scrollTop, revealed)` memory are all keyed by the dockkit PANE id (`data-files-navigator` on the aside), never by the preview tab — upstream's navigator records live in `store.byPane`, and the pane survives what a `replaceTab` open destroys. The pane id is itself observed: an attributes MutationObserver on the aside re-keys everything when `data-files-navigator` is rewritten in place (a drag to another pane), each pane keeping the record it saved under its own id. The saved `revealed` sits one level finer than upstream — per (pane, root) instead of per pane — so each additional root remembers its own last-completed walk rather than sharing one address |
+| `navigator.tsx` | upstream `FileNavigator`'s pane/body half | the preview-side retarget: a `sidebar.right.tab.document.actions` occupant finds the native `aside[data-files-navigator]` inside the preview's `data-dockkit-content` ancestor, marks it `data-mrfw-navigator` (styles.ts hides its `[data-files-body]` only), and portals the forked tree in — rooted at the containing additional root, opening rows through `openFileIn` (`replaceTab`), and revealing the previewed file. When the search seat exists the portal hosts `FilesPane mode="preview"` instead of `FilesTree` (same `(pane, root)` record key), and the takeover record carries `rootId` beside `root` in one state commit so no transition frame can pair one root's query with another root's id (ADR-0043 D2). Without the seat the portal is the bare `FilesTree`, exactly the pre-rc.2 shape. Store bucket, takeover, and the saved `(expanded, scrollTop, revealed)` memory are all keyed by the dockkit PANE id (`data-files-navigator` on the aside), never by the preview tab — upstream's navigator records live in `store.byPane`, and the pane survives what a `replaceTab` open destroys. The pane id is itself observed: an attributes MutationObserver on the aside re-keys everything when `data-files-navigator` is rewritten in place (a drag to another pane), each pane keeping the record it saved under its own id. The saved `revealed` sits one level finer than upstream — per (pane, root) instead of per pane — so each additional root remembers its own last-completed walk rather than sharing one address |
 | `FORK.md` | — | this file |
 
 ## Intentional deltas (upstream `FilesBody.tsx` → `FilesTree.tsx`)
@@ -177,6 +188,55 @@ upstream binds inside it arrives as a prop instead:
   instead of `./FilesBody.module.css` because this toolchain resolves real
   files, not CSS-module virtual modules (same one-line delta as the
   open-in-app fork).
+- **Row context menus** (`0.2.2-alpha.3+`): `TreeView` forwards the pane's
+  `menu` seat into the Factory input's `rowTriggerProps` (and spreads the same
+  handlers on the legacy rows). The target is `{ kind, value: { sessionId,
+  path: <absolute path> } }`: a workspace-relative path would resolve against
+  the primary root in every host contribution (ADR-0042).
+- **Viewer verdicts** (`0.2.2-alpha.3+`): the Factory input's `canOpen` is
+  supplied from `ctx.sidebarRightTabs.candidates`, re-read whenever the
+  registry notifies; `TreeView` forwards it, the legacy rows keep every file
+  openable (the pre-Factory behavior).
+- **Search marks** (`0.2.2-rc.2+`): `Name` wraps the occurrences of the search
+  text in `<mark class="mrfw-ftMatch">`; `nativeTreeInput` also forwards the
+  Factory's own `highlight`. Names are otherwise upstream's.
+- **Selection lines** (`0.2.2-rc.2+`): a directory whose entries are a search
+  selection draws nothing instead of "empty" (`omitted: 'unmatched'`); a listed
+  directory whose entries were all filtered as hidden draws the "only hidden
+  entries" line (`omitted: 'hidden'`, from `hidden.ts`). Both use upstream's
+  own strings through the live locale namespace.
+- **Preview mode (ADR-0043)**: `FilesPane`'s `mode='preview'` is the document
+  navigator's form of the same surface, not a second state machine — the
+  records, requests, results, settings and notes are the Files-page code. The
+  differences are explicit: the bar is drawn unconditionally (the mode, never
+  `barOpen`, decides visibility, so the record's flag stays false and the
+  Files-page toggle semantics are untouched); mounting never focuses the
+  field; the caller supplies the open route (the navigator passes
+  `openFileIn`, i.e. `replaceTab`); and `previewPath` marks the previewed file
+  in the result tree via `relativeUnderRoot` + `locateFile`. That mark is
+  draw-only: `TreeView.current.ref` became optional so a result current row
+  passes `current` without a scroll target, and `nativeTreeInput` forwards
+  `currentRef` only when a ref exists (the Factory's own field was already
+  optional). Three shared corrections also apply on the Files page: closing
+  the settings popover refocuses the bar's magnifier (upstream's
+  `closeSettings`, previously the field), `moveAlongRows`'s stops cover the
+  listed tree rows as well as the result rows (`li[data-files-entry] > button`
+  and `> div > button`, both render paths), and the settings draft is cleared
+  when `stateKey` changes so one root's draft never lands in another root's
+  preferences. The pane root carries `data-mrfw-files-pane`; the focus handoff
+  finds the hidden native body through
+  `body.closest('[data-files-page], aside[data-files-navigator]') ??
+  body.parentElement`, which covers the pane-wrapped preview, the direct
+  preview mount, and the Files page's newer page wrapper alike.
+- **Known preview deltas** (accepted, ADR-0043 D3/D4): a non-blank query
+  replaces the listed tree with the result body, so the tree unmounts and its
+  hold ends (`release`); clearing the query holds again and re-lists watched
+  directories, but keeps the listed rows and reuses the searched answer (the
+  search request identity is unchanged). The settings draft is component
+  state: switching roots discards it and closing Folder loses it — upstream's
+  `SearchSettings` only returns `null` and keeps its draft. The result current
+  row is marked but never scrolled: the reveal's viewport belongs to the
+  listed tree, whose in-flight state the result view discards.
 
 ## What upstream keeps owning
 
@@ -191,14 +251,66 @@ upstream binds inside it arrives as a prop instead:
   Since `0.2.2-rc.2` the native navigator also draws a workspace search bar
   and status line above that body, and the Files page header a
   `[data-files-search-toggle]` button. Their search root is the Session cwd,
-  so while a takeover shows another root they are hidden together with the
-  native body (`src/client/styles.ts`); primary-root browsing keeps them
-  untouched. Re-check those selectors whenever the upstream navigator gains
+  so while a takeover shows another root the native bar, status line and a
+  leftover native settings popover are hidden with the native body by
+  DIRECT-CHILD rules in `src/client/styles.ts`; the bar selector additionally
+  carries `:not([data-mrfw-files-pane])`, a defensive guard so a future
+  upstream selector change cannot hide the plugin's replacement (which is
+  itself a direct child of the same aside). Primary-root browsing keeps the
+  native controls untouched. The additional root's search lives in
+  `pane.tsx`: the input keeps plugin-only hooks
+  (`[data-mrfw-files-search]`) and the pane root carries
+  `data-mrfw-files-pane`, while the status line, settings popover and its
+  toggle reuse upstream's same-named `data-files-search-status` /
+  `data-files-search-settings` / `data-files-search-settings-toggle` /
+  `data-files-show-hidden` / `data-files-search-clear` hooks — they sit behind
+  the pane, so only the native direct-child instances are hidden. Since
+  `0.2.2-rc.2` the preview aside hosts the same pane in preview mode, so the
+  additional-root preview carries workspace search too (ADR-0043); the native
+  preview's own search state is still upstream's `FileNavigator` face and is
+  not joined. Re-check those selectors whenever the upstream navigator gains
   a new `data-files-search*` hook.
 - The `sidebarFiles` dictionaries — the fork binds, never registers.
 - The session-scope `data-files-*` DOM contract — the fork reads those hooks
   (`closest('[data-files-root]')`, `closest('[data-dockkit-content]')`) but
   never writes `data-files-root`/`data-files-body`.
+
+## Search surface: sync obligations
+
+The additional-root search is plugin-owned UI over upstream semantics, not a
+verbatim copy. Three modules are **semantic** copies of upstream's
+`0.2.2-rc.3` `ui-sidebar-files` sources and must be diffed whenever the pin
+moves (upstream may change rule validation, ignore handling, or the
+relative-path/tree construction):
+
+| Module | Upstream source | Copy delta |
+| --- | --- | --- |
+| `search-rules.ts` | `search-rules.ts` | logic verbatim; JSDoc condensed |
+| `search-tree.ts` | `search-tree.ts` | `buildSearchTree` returns this fork's `FilesTabState` and imports `childPath` from `face.ts` |
+| `search-preferences.ts` | `search-preferences.ts` | plugin-owned Storage seam (same localStorage key and stored format) instead of `@deepseek-ai/dsh-client-store` persist; no upstream runtime import |
+
+Everything else is ours: `search-state.ts` (per-(tab, root) records, plus the
+request identity that lets a body remount reuse a settled answer and
+`forgetTab` for owner death), `search-client.ts` (the channel call's
+request/answer), `pane.tsx` (bar, status, results, notes, settings popover,
+keyboard, and the `preview` mode's always-drawn bar / current-row mark) and
+`context-menu.ts` (the structural `useContextMenu` adapter). The preview mode
+is the document navigator's form of the same surface, so when the pin moves
+diff upstream `FileNavigator.tsx`'s `page: false` branch against `pane.tsx`
+and `navigator.tsx`'s portal branch: always-open bar, no mount focus, the
+`locateFile`-driven result current row, `replaceTab` opens, and the settings
+refocus target.
+One store belongs to one session's inject product — records are not shared
+across sessions — and the adapter's owner-death cleanup calls `forgetTab`
+when a tab really closes; a body-only unmount keeps the record (that is what
+restores expansion and scroll after a file view). Their visual rules are copied from
+upstream's `FilesBody.module.css` search block into `styles.ts` as
+`mrfw-fs*` (and `.match`/`.hidden`/`.inactive` as `mrfw-ft*`), keeping only
+`var(--dsw-*)` tokens. Behavior that must be re-checked against upstream:
+per-keystroke search with abort, blank query ends the search, `pending` keeps
+the last result except a failed one, a new result starts expanded at its top,
+preference changes re-run the query, and the eye toggle filters the listed tree
+as well as the search.
 
 ## Sync procedure (when the dev pin moves)
 
@@ -236,3 +348,23 @@ below. The Factory fallback must keep older or incomplete compositions usable.
 7. Re-probe the glyph names: if upstream's named imports change, update
    `primitives.ts`'s candidate lists (and the gate) rather than the
    component.
+8. Diff upstream `FileTree.tsx` against `tree-view.tsx`: the row bodies,
+   `Name`/`<mark>`, the `omitted` handling, and the input names
+   (`rowTriggerProps`/`canOpen`/`highlight`) must match the new pin; re-copy
+   the row definitions and re-apply the documented deltas, never hand-edit
+   inside them.
+9. Diff upstream `FileNavigator.tsx`'s search half against `pane.tsx`
+   (bar/status/results/notes/keyboard/settings), its `page: false` preview
+   branch against `pane.tsx`'s `mode="preview"` (always-drawn bar, no mount
+   focus, current-row mark, magnifier refocus, Escape order), and upstream
+   `SearchSettings.tsx` against the settings view; update `styles.ts`'s
+   `mrfw-fs*` block from the same pin's `FilesBody.module.css`.
+10. Diff upstream `search-rules.ts`/`search-tree.ts`/`search-preferences.ts`
+    against the local copies; a semantic change means the copies move too.
+    Re-check the `data-mrfw-files-search*` DOM contract and the
+    `data-files-search*` reuse against the hide rules in `styles.ts` — the
+    takeover must keep the native direct-child bar, status line and leftover
+    settings hidden while drawing its own pane, and the
+    `:not([data-mrfw-files-pane])` guard must still exclude the plugin pane.
+    Also re-check the focus handoff container lookup against the current
+    `data-files-page` / aside wrappers.

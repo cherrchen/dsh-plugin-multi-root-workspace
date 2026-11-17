@@ -4,4 +4,5 @@
 * text=auto eol=lf
 
 # Unified patch context lines retain their required leading space.
-src/auto-review/fork.patch whitespace=-blank-at-eol
+src/auto-review/legacy/fork.patch whitespace=-blank-at-eol
+src/auto-review/current/fork.patch whitespace=-blank-at-eol

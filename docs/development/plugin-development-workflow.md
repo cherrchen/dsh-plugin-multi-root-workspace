@@ -7,13 +7,15 @@
 
 | 项 | 值 | 说明 |
 | --- | --- | --- |
-| 开发目标版本（基线） | `0.2.2-rc.2` | 精确 pin 在 `devDependencies`；CI 主车道对每个精确版本覆盖通用和适用的原生验证 |
+| 开发目标版本（基线） | `0.2.2-rc.3` | 精确 pin 在 `devDependencies`；CI 主车道对每个精确版本覆盖通用和适用的原生验证 |
 | 支持矩阵 | [`SUPPORTED_DSH_RELEASES`](../../src/compat/dsh-version.ts) | **精确版本 allowlist**；`peerDependencies` 逐项或，不承诺未来版本 |
 | 实测证据 | [路线图兼容提升记录](../plans/active/2026-09-12-multi-root-workspace.md#dsh-021-rc3-兼容提升2026-10-23)（历次记录同档） | 升级车道跑候选的完整套件，旧版回归覆盖所有受支持版本；`upgrade.yml` 只探测候选，不自动扩大 allowlist |
 | 运行时门禁 | `multi-root-compat` 行 | 版本不在 allowlist 或核心包混装时，四个安全相关行根本不启动（ADR-0009） |
 | cordis | 基线 `4.1.0`；旧版按 `dsh` 声明的范围下限精确 pin | `upgrade-dsh.mjs` 同步重指，并从精确 release-age 条目派生 workspace-only 的 DSH probe overrides 与 cordis 生态 pin（`cordis-plugin-*` / `schemastery` / `cosmokit`，取自目标版本自身 manifest），避免预发布范围导致混装、重复副本导致工具调度 Symbol 不一致或生态版本错代。已有自定义 overrides 时拒绝覆盖；探测后恢复保存的 workspace |
 
 **必须精确 pin**：上游使用多个可变的 npm dist-tag，`latest` / `next` 与 `alpha` 可以指向不同发布线；范围或 tag 不能证明解析到的是已验证版本。`pnpm-workspace.yaml` 里的 `minimumReleaseAgeExclude` 对开发版本的直接与传递 DSH 包、宿主 document tooling 都逐项列出精确版本，供 frozen install 与运行脚本前的依赖自检使用；不使用跨版本通配豁免。它是为此配套的（pnpm 的发布年龄门禁会拦下刚发布的预发布版本）。
+
+`feat/ssh-workspace` 同步主线时，先创建指向当前 HEAD 的本地备份分支，再获取最新的 `origin/main` 并使用 `git merge` 合入，保留两边的提交历史。
 
 ## 2. 工具链
 
@@ -142,7 +144,7 @@ client 测试分两层：`tests/client-bundle.spec.ts` 断言**制品字节**（
 ### 4.7 打包产物验证（`pack:check` / `smoke:packed`）
 
 - `pnpm pack:check`（`scripts/check-pack.mjs`）：`pnpm pack` 到临时目录后用自带的 tar 解析器（ustar + GNU `L` + pax，不依赖 GNU tar，Windows 可用）列出全部成员，并断言——必备文件（`package.json`、`cordis.patch.yml`、双语 README/CHANGELOG、LICENSE、`lib/index.js` / `client.js` / `windows-runner.js`）、`exports` 声明的每个 `default` / `types` 目标、`cordis.patch.yml` 每行可解析的包内模块、以及 packed `lib/*.js` 相对 `import`/`from`/`import()` 闭包里的每个共享 chunk 都在包内；外加一条 runner 专项——`lib/windows-runner.js` 及其传递 chunk 的每个非相对 specifier 必须是 `node:` 内置（它是独立进程，宿主的插件包解析不适用，见[账本缺陷 #7](../plans/active/2026-09-12-multi-root-workspace.md)）。当前 tarball 为 71 个成员。
-- `pnpm smoke:packed`（`scripts/smoke-packed.mjs`）：先 `pack:check` 同款打包，再让 `smoke:behavior` 在仓库**之外**的 scratch `$DSH_HOME` 里以 `DSH_SMOKE_PLUGIN_SOURCE=<tgz>` 经真实 `dsh plugin --profile <p> add <tgz>` 安装，断言被加载的插件解析在 checkout 之外（`lib/windows-runner.js` 在 Windows 上据此做真实受限 pwsh 写）。tarball 的首次 `add` 会停在 `koffi` 构建授权（`ERR_PNPM_IGNORED_BUILDS`），共享 installer 按[故障排查条目](../troubleshooting/install-stops-at-build-approval.md)恢复——待决标记可能不存在、恢复后可能还需 remove+add 才激活，两种情况都会逐字打印输出。
+- `pnpm smoke:packed`（`scripts/smoke-packed.mjs`）：先 `pack:check` 同款打包，再让 `smoke:behavior` 在仓库**之外**的 scratch `$DSH_HOME` 里以 `DSH_SMOKE_PLUGIN_SOURCE=<tgz>` 经真实 `dsh plugin --profile <p> add <tgz>` 安装，断言被加载的插件解析在 checkout 之外（`lib/windows-runner.js` 在 Windows 上据此做真实受限 pwsh 写）。tarball 的首次 `add` 必须直接退出 0，且输出里不能出现 koffi 的构建授权（`Ignored build scripts: koffi@...` 或待决的 `koffi:` 行）——koffi 已改为宿主提供的可选 peer；运行时或 profile 模板自身的其他 ignored build script 只告警、不判失败。git 来源的恢复路径仍保留，见[故障排查条目](../troubleshooting/install-stops-at-build-approval.md)。
 
 ## 5. 安装到真实运行时
 
@@ -151,7 +153,7 @@ dsh plugin --profile web add <本仓库路径>
 dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 ```
 
-`link:` 来源用的是本仓库已装好的依赖，因此不需要 `allowBuilds` 表态；npm / tarball / git 来源都需要，原因与处置见 [README §安装](../../README.md) 与[故障排查：安装停在构建授权](../troubleshooting/install-stops-at-build-approval.md)。
+`link:` 来源用的是本仓库已装好的依赖，因此不需要 `allowBuilds` 表态；npm / tarball 也不再需要（`koffi` 由宿主提供），只有 git 来源仍需为 `prepare` 授权。原因与处置见 [README §安装](../../README.md) 与[故障排查：安装停在构建授权](../troubleshooting/install-stops-at-build-approval.md)。
 
 `dsh plugin` 是 pnpm 的转发器：它在 profile 目录里执行 pnpm，并把解析到 `dsh.bundle` 声明的依赖回填进 `dsh.profile.bundles`。桌面端（Electron）保留自己的 `$DSH_HOME/profiles/desktop`，安装方式同源。
 
@@ -200,9 +202,9 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 
 [CI workflow](../../.github/workflows/ci.yml) 响应 main push、PR 和手动触发，权限为 `contents: read`。在 GitHub Actions 的 CI 页面可选择分支后点 **Run workflow**，也可用 `gh workflow run ci.yml --ref <branch>` 验证分支。
 
-- `releases` 通过 [list-dsh-releases.mjs](../../scripts/list-dsh-releases.mjs) 读取精确契约，按 Node 版本分桶，再把每个桶切成最多四个版本一组。当前 23 个版本在每个启用镜像形成六组（Node 22 五组、Node 24 一组）。该 job 也在 frozen 开发树校验契约，并各跑一次 lint 和 docs:check。
+- `releases` 通过 [list-dsh-releases.mjs](../../scripts/list-dsh-releases.mjs) 读取精确契约，按 Node 版本分桶，再把每个桶切成最多四个版本一组。当前 24 个版本在每个启用镜像形成七组（Node 22 五组、Node 24 两组）。该 job 也在 frozen 开发树校验契约，并各跑一次 lint 和 docs:check。
 - 每组从同一个 Git commit 解包。源码目录与原 checkout 同级，父目录链禁止有 `node_modules`。每个版本独享 manifest、lockfile、依赖树、`lib/`、探针文件、DSH scratch 与日志。依赖下载共享 pnpm 的内容寻址缓存。源码及其中的内核拒绝夹具位于 `/tmp` 和本机 temp grant 之外；DSH scratch 在平台临时区中分配，保留各方言对原生临时目录的语义。开发 pin 走 frozen lockfile，其余复用 `upgrade-dsh.mjs`，仅在该副本内关闭 release-age 等待。
-- `ubuntu-latest` 对每版跑 `compat:check`、双端 typecheck、build、完整 Vitest 和冒烟，保留原生 Landlock。每组并行最多两版，各用最多两个 Vitest worker。其他镜像按版本串行，各用最多四个 worker；每版做精确契约检查、构建和原生套件。Auto Review fork 差分只在 Ubuntu 的 Auto Review 精确基线跑一次，Auto Review 混合套件和真实安装集成仍只在该基线、每个启用镜像上执行。
+- `ubuntu-latest` 对每版跑 `compat:check`、双端 typecheck、build、完整 Vitest 和冒烟，保留原生 Landlock。每组并行最多两版，各用最多两个 Vitest worker。其他镜像按版本串行，各用最多四个 worker；每版做精确契约检查、构建和原生套件。Auto Review 联合合同的每个发布都是独立车道：该版本按自身基线做实现类型检查、完整单测与差分门禁（Ubuntu 完整镜像），并在每个启用镜像上执行联合冒烟；其他版本照常显式跳过并退出 0。
 - [Ubuntu 独占套件清单](../../scripts/ci/ubuntu-only.json) 记录从其他镜像迁移的 Vitest 文件。客户端、RPC 和合同、locale 与快照、纯方言 argv、指令与 OPS 活动归属、恢复调度器、打包元数据及工作流等检查集中在 Ubuntu。含平台断言的混合文件整组保留，包括 Registry/IPC/lease 和跨进程接管、实际内核执行、Windows ACL / PowerShell / ConPTY、LSP、worktree Git 和路径边界。所有镜像继续运行真实安装的 `smoke:compose`、`smoke:behavior`、`smoke:journey`、`pack:check` 与 `smoke:packed`。
 - 每个版本先运行强制 Registry 认证探针和内核探针，再启动测试。Linux 22.04 提供 bwrap，macOS 提供 Seatbelt，Windows 探针用真实上游 ACL runner 验证允许写和兄弟目录拒写。探针把实跑方言写到该版本的私有文件，由该版本后续命令读取为 `DSH_PROBE_VERIFIED_DIALECTS`。探针证明可用的方言必须实跑，其他按原有能力判断和 skip 原因处理。`DSH_REQUIRE_KERNEL_RUNNER=1` 仍可在本地强制要求方言。
 - 一个版本失败后继续本组其余版本。摘要按镜像和精确版本列出耗时、结论和探针方言。每组上传 `ci-group-<image>-<group>`，每版目录内含阶段日志、Vitest 用例状态和 `context.skip(note)` 原因，以及 `result.json`。末尾 `gate` 要求两个上游 job 成功，并逐项核对计划中每个镜像 × 精确版本的同 SHA 成功记录；缺失、重复、失败或取消都阻断。发布查证见[发版流程](./release-workflow.md)。
@@ -243,7 +245,7 @@ Windows runner 的 PATH 可能让同名 GNU 命令覆盖 Windows 工具。ACL �
 | bash 断言整体 skipped | 当前进程已被内核沙箱约束，无法嵌套 | 在不被约束的终端或 CI 中运行以覆盖该项 |
 | `pnpm <script>` 报 `EPERM ... /Library/pnpm/.tools` | 仓库 pin 的 pnpm 版本需要写用户级 pnpm 目录 | 在可写该目录的终端（或提权）执行；仅跑门禁时可用 `sh node_modules/.bin/<tool>` 绕过 pnpm |
 | `pnpm <script>` 报 `ERR_PNPM_UNEXPECTED_STORE` 或 `ABORTED_REMOVE_MODULES_DIR_NO_TTY` | checkout 里存在一个陈旧的 `.pnpm-store/`（被 gitignore），而 `node_modules` 是从磁盘级 store（如 `<挂载点>/.pnpm-store/v11`）链接的；pnpm 运行脚本前的依赖自检因此想重装，而在没有 TTY 时无法确认删除 | 最快解除：`CI=true pnpm <script>`（pnpm 只在 CI 下继续而不交互确认）。根治：删掉陈旧的仓库内 `.pnpm-store/`；或 `pnpm config set store-dir <node_modules 实际链接的 store>`；或直接用 `sh node_modules/.bin/<tool>` / `node scripts/<smoke>.mjs` 跑门禁（CI 不受影响，它本来就有 `CI=true`） |
-| `ERR_PNPM_IGNORED_BUILDS` | 有构建脚本的依赖未在 `pnpm-workspace.yaml` 声明 | 把该依赖加入 `allowBuilds`（需要构建）或 `allowBuilds: false`（明确不需要）；当前 `esbuild`（经 vite/vitest 引入）声明为 `false` |
+| `ERR_PNPM_IGNORED_BUILDS` | 有构建脚本的依赖未在 `pnpm-workspace.yaml` 声明（本插件只在 git 来源的 `prepare` 或 `0.1.20` 及更早版本的安装中出现） | 把该依赖加入 `allowBuilds`（需要构建）或 `allowBuilds: false`（明确不需要）；当前 `esbuild`（经 vite/vitest 引入）声明为 `false` |
 | 面板在 Web GUI 里看不到 | 组合里没有声明 `sidebar.footer.action` 的侧栏，或该面没有 host `connection`（headless 组合） | 面板是软注册（`slots.inject` 不触发即不出现）；用 `/workspace-folders list` 确认注册表本身可用 |
 | 面板显示「当前没有活动会话」 | 浏览器当前没有被主视图持有的 Session；或客户端仍在读已删除的 `list.current`（0.1.6-alpha.2 起导航在 `retainedBy.mainView` 上） | 确认主界面已打开会话后点重试。host 不会猜测主根（ADR-0008）。若会话明明开着仍出现这条，检查 `src/compat/client-session.ts` 是否同时认 `current` 与 `retainedBy.mainView`，且没有回退 `ids[0]` |
 | 面板报 "根目录登记的存储不可用" | `$DSH_HOME/storages/multi_root_workspace.json` 损坏或版本不符 | 按提示修复或删除该文件后重启 dsh；插件不会因此拒绝启动（ADR-0004） |
@@ -260,11 +262,11 @@ B9 的 Linux 原生执行证据分两类：latest 保留实际 Landlock 选择�
 
 装配与生命周期见 [ADR-0022](../decisions/ADR-0022-auto-review-loader-entry.md)，使用与旧 companion 迁移见 [Auto Review README](../../src/auto-review/README.md)。原约束、快照与审查语义继续由 [ADR-0021](../decisions/ADR-0021-auto-review-context-companion.md) 说明。
 
-主包 patch 只增加一条默认 disabled 的 `multi-root-auto-review`。它拥有 context 和 reviewer，不需要第二个 context 开关、独立包或 configure。主包 `bundle` 总是生成 `lib/auto-review.js` 及其共享 chunks；`prepare` 的 git 安装路径也包含它。host 类型检查排除 `src/auto-review/**`，`scripts/build-auto-review.mjs` 在精确联合 pin 上单独检查实现类型，并为全部普通车道保留相同的公开 Loader 声明；原始 `upstream.ts` 不参与编译或构建。
+主包 patch 只增加一条默认 disabled 的 `multi-root-auto-review`。它拥有 context 和 reviewer，不需要第二个 context 开关、独立包或 configure。主包 `bundle` 总是生成 `lib/auto-review.js`、两份基线实现 chunk（`lib/auto-review-legacy.js`、`lib/auto-review-current.js`）及其共享 chunks；`prepare` 的 git 安装路径也包含它们。host 类型检查排除 `src/auto-review/**`，`scripts/build-auto-review.mjs` 在开发 pin 等于当前基线的编译 pin 时用对应 tsconfig 单独检查实现类型，并为全部普通车道保留相同的公开 Loader 声明；入口按已安装发布动态加载自己的实现，两份 `upstream.ts` 不参与编译或构建。
 
-原 companion 的开发/测试依赖并入主开发 manifest。`scripts/lib/auto-review-development.mjs` 记录其归属；普通旧版 probe 删除这些仅供 fork 使用的 dev 条目，避免安装尚未发布的旧版本包，恢复精确 fork pin 时重新补齐。它们不是第二个支持版本列表；精确 release 门禁仍在 `src/compat/auto-review-contract.ts`。回退 probe 文件时仍禁止覆盖未提交修改。
+两代基线的开发/测试依赖并入主开发 manifest。`scripts/lib/auto-review-development.mjs` 按基线记录其归属（`0.2.2` 线的 tool-executor/testkit 包在 `0.2.1` 线不存在）；升级脚本只安装目标发布所属基线的清单、删除其余条目。它们不是第二个支持版本列表；精确 release 门禁仍在 `src/compat/auto-review-contract.ts`。回退 probe 文件时仍禁止覆盖未提交修改。
 
-`pnpm auto-review:fork` 重放显式差异并钉住 policy、身份、角色、协议和 owner teardown。`pnpm smoke:auto-review` 验证 source/link 与单一 tarball、web/headless × 官方前后顺序、默认零挂载、重复 reload 不写配置、真实请求/围栏、live disable/restore/re-enable 和重启。`tests/auto-review/loader.spec.ts` 额外模拟延迟 import 与异步 drain；普通旧版跳过联合集成测试，继续原有门禁。
+`pnpm auto-review:fork` 对每个基线重放显式差异并钉住上游哈希、policy、身份、角色、协议、owner teardown、注入面与渲染结构。`pnpm smoke:auto-review` 在当前车道（发布属于联合合同）验证 source/link 与单一 tarball、web/headless × 官方前后顺序、默认零挂载、重复 reload 不写配置、真实请求/围栏、live disable/restore/re-enable 和重启；冒烟电池跨两代解析 reviewer 消息，并按结构探测 `ctx.tools.execute` 的批量/单发形态。`tests/auto-review/loader.spec.ts` 额外模拟延迟 import 与异步 drain，`ops-context.spec.ts` 与 `overlap.spec.ts` 在两代车道都执行；其余发布显式跳过联合集成，继续原有门禁。
 
 不再维护第二个版本、发布清单或 tarball。平台执行证据与发布状态只记[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#auto-review-内置入口迁移2026-10-20)。
 

@@ -21,14 +21,23 @@ English: [README.en.md](./README.en.md)
 
 ## allowBuilds 那一步在授权什么
 
-本插件带一个需要构建的原生依赖 `koffi`（Windows 上 Registry Authority 用的 FFI 封装；其他平台装了不用），而 pnpm ≥10 默认不运行任何依赖的生命周期脚本。所以第一次 `dsh plugin add` 会以 `[ERR_PNPM_IGNORED_BUILDS]` 失败，并把待决项写进该 profile 的 `pnpm-workspace.yaml`。把 `koffi: true` 写进 `allowBuilds` 意味着**允许该依赖的安装脚本在你的机器上执行**（不在 agent 运行的任何沙箱之内）——`koffi` 的脚本只做本地预编译。
+npm、tarball 与本地路径安装**不需要** `allowBuilds`。`koffi`（Windows 上 Registry Authority 的 FFI 封装，其他平台按需加载）由宿主提供：插件把它声明为可选 peer，pnpm 不会安装可选 peer，也就没有需要表态的构建脚本。运行时 `loadHostKoffi()` 只解析宿主那份副本，绝不再安装第二份——原因与回退顺序见 [ADR-0007](../decisions/ADR-0007-registry-authority-lease.md)。
 
-两个实测过的坑（DSH `0.2.1-alpha.2`，tarball 来源）：profile 的 `pnpm-workspace.yaml` 可能**没有** `set this to true or false` 占位标记（直接补 `allowBuilds` 即可）；恢复后的 `add` 退出 0 也可能没把插件激活进 `dsh.profile.bundles`——检查该 profile 的 `package.json`，缺的话做一次 `remove` + `add`。诊断步骤见[故障排查](../troubleshooting/install-stops-at-build-approval.md)。
+只有 GitHub 源码来源仍需要一次表态：`add` 会运行本包自身的 `prepare`（直接转译 `src/`，不做类型检查），pnpm 要求 profile 明确允许，并打印一行含来源与 commit 的 exact key。把那一行原样写进 `allowBuilds` 意味着**允许该包的构建脚本在你的机器上执行**（不在 agent 运行的任何沙箱之内）：
+
+```yaml
+allowBuilds:
+  '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
+```
+
+键必须带来源与 commit；只写包名对 git 来源不生效。
+
+两个实测过的坑（DSH `0.2.1-alpha.2` 时代的源码类安装）：profile 的 `pnpm-workspace.yaml` 可能**没有** `set this to true or false` 占位标记（直接补 `allowBuilds` 即可）；恢复后的 `add` 退出 0 也可能没把插件激活进 `dsh.profile.bundles`——检查该 profile 的 `package.json`，缺的话做一次 `remove` + `add`。诊断步骤见[故障排查](../troubleshooting/install-stops-at-build-approval.md)。
 
 ## 各安装来源的差异
 
-- **npm / tarball**：预构建产物，插件本身不参与编译；首次安装需要 `allowBuilds`。
-- **GitHub**：装的是源码，`add` 时由包内 `prepare` 脚本自动构建（直接转译 `src/`，不做类型检查），因此 `allowBuilds` 需要覆盖本包自身和 `koffi` 两项；不带 ref 会跟随 `main` 分支的最新提交，写 `#v0.1.18` 这样的版本 ref 锁住内容，`#semver:*` 这类 semver 范围则始终解析到最新 tag。
+- **npm / tarball**：预构建产物，插件本身不参与编译；无需 `allowBuilds`。
+- **GitHub**：装的是源码，`add` 时由包内 `prepare` 脚本自动构建（直接转译 `src/`，不做类型检查），因此 `allowBuilds` 只需覆盖本包自身；不带 ref 会跟随 `main` 分支的最新提交，写 `#v0.1.21` 这样的版本 ref 锁住内容，`#semver:*` 这类 semver 范围则始终解析到最新 tag。
 - **从源码安装**：pnpm `link:` 链接本地 checkout，依赖在本仓库已装好，无需 `allowBuilds`；需要先 `pnpm build` 生成 `lib/`（未纳入 Git）。
 
 用源码仓库跑 DSH 时 `dsh` 不在 PATH 里，把命令里的 `dsh` 换成 `pnpm dsh`。
@@ -70,9 +79,9 @@ Windows Full-access 的局部拒写独立 runner 通过管理员安装的 broker
 
 **发现与身份**：只枚举 `<common>/worktrees/*/gitdir`，不运行 `git worktree list`。候选必须属于同一 common、admin 在 `common/worktrees/<id>` 下、`.git` 文件与 admin 的 `gitdir` 双向一致、admin/common HEAD 通过语法校验且 common 结构有效。候选身份是 `adminId + canonical root + canonical admin gitdir target`；同一 workspace 的多个 session 共享 inventory、去重与 watcher，展示按 session 的 mode 过滤。只读会话可以处理 B（登记策略始终 `inherit`），Full-access 不提示。可见候选恰好一个时返回 `prompt`（原确认对话框），两个及以上返回 `prompts`（可勾选列表）；`seenViewRevision` 是唯一的已展示游标。
 
-**提示与确认**：确认对话框显示实际路径、当前有效权限、`inherit` 与 workspace 级持久性；勾选「不再提示」写入 sidecar，对该 workspace 的所有 session 生效。确认走 Registry owner 的 `addNew`：owner 在串行队列内重跑完整 primary/candidate 判据、HEAD 语法、祖先 gitlink 与目录身份，只有全部一致才写；只新建，不 revive，不存在同路径记录。`duplicate` 视为已登记并停止提示，但不写清理映射。
+**提示与确认**：确认对话框显示实际路径、当前有效权限、`inherit` 与 workspace 级持久性；勾选「不再提示」写入 sidecar，对该 workspace 的所有 session 生效。确认走 Registry owner 的 `addNew`：owner 在串行队列内重跑完整 primary/candidate 判据、HEAD 语法、祖先 gitlink 与目录身份，只有全部一致才写；只新建，不 revive，不存在同路径记录。`duplicate` 视为已登记并停止提示，但不写清理映射。手动「Worktree 建议」入口（面板「重试」右侧）在没有任何可添加候选时，会在关闭面板后以官方 info Toast 提示「当前没有可添加的 Worktree。」；自动会话激活的空结果与提示「查看」的竞态空保持静默。
 
-**删除与清理**：删除信号（admin 消失、路径缺失、admin `gitdir` 指向新路径）只决定徽标。清理资格只看 `record.path` 是否确认缺失，并绑定 `rootId + path + addedAt`；路径存在、不可访问、或 checkout 仍有效时返回 `worktree/not-eligible`，面板只提供普通 Remove。批量清理只接受面板列出并显式确认的精确 id。**永不在删除事件上自动调用清理**。缺失根继续占额度。清理前同路径新目录可能继承旧授权，这是已记录的 L4 残余，面板会提示。
+**删除与清理**：删除信号（admin 消失、路径缺失、admin `gitdir` 指向新路径）只决定徽标。清理资格只看 `record.path` 是否确认缺失，并绑定 `rootId + path + addedAt`；路径存在、不可访问、或 checkout 仍有效时返回 `worktree/not-eligible`，面板只提供普通 Remove。清理入口：批量按钮位于「附属工作目录」标题右侧（有可清理项时才出现），单行入口是可清理行末尾的红色删除按钮；两者打开同一个**覆盖在面板上的确认 Dialog**（标题、数量、不可撤销说明、路径复用风险披露、取消与确认），不再是面板 body 顶部的内联文字。批量清理只接受面板列出并显式确认的精确 id。可清理行只保留 显示名 + 权限徽标 + 路径 + 红色删除 + `…` 菜单，其余状态文字与动作（技能、reveal、重新登记）移除；非 `cleanupEligible` 的失效行保持原样。**永不在删除事件上自动调用清理**。缺失根继续占额度。清理前同路径新目录可能继承旧授权，这是已记录的 L4 残余——该风险在删除确认 Dialog 中披露（单条与批量各有文案）。
 
 **持久化与降级**：`worktreeRoots` 与 `ignored` 保存在 `$DSH_HOME/storages/multi_root_workspace.worktree-prompts/<sha256(primaryKey)>.json`，只有持有 store lease 的 Registry owner 写入，follower 通过认证 IPC 请求。prune 只消费 owner 队列内的完整 `RegistrySnapshotView`：`available=false` 的空列表保留映射，`available=true` 的空快照才允许删除；跨 epoch 按 `rootId + path + rootAddedAt` 重绑或修剪。sidecar 损坏/不可写时 owner 退化为 memory-only 并告警，不影响授权；B 根按手动根处理，专用清理拒绝。
 
@@ -93,6 +102,7 @@ Windows Full-access 的局部拒写独立 runner 通过管理员安装的 broker
 
 - 附加根拓扑经 `systemPrompt.context` 贡献注入系统提示词（授权变化时重渲），同一 Session 原始项目不变、切换执行目录不改变授权；无需新增内省工具。
 - 附加根自身的 `AGENTS.md` / `CLAUDE.md` 也会进入模型上下文：根目录顶层的在会话第一步之前注入，子目录的在本会话成功触碰过该目录之后注入（上游的原生发现从会话 cwd 向上走，永远到不了附加根）。
-- 面板侧：工作区目录面板将主根标为「主要工作目录」，并在当前 Agent 工作目录所属的根别名旁显示「当前Agent工作目录」标签；子目录向上匹配最近的列表根，未命中则不显示标签。权限选项「工作区内修改」「仅可查看」沿用上游权限菜单的图标与文字，分别表示固定读写和固定只读，「跟随会话」仍继承会话权限。插件管理页的附属根 Skills 总开关使用上游 Switch，保留各目录的独立选择。目录行不展示 Skill 命名空间；右侧「文档＋星芒」图标按钮控制该目录的技能启用状态，启用时显示完整图标、停用时加斜线，按钮仅在悬停或按下时显示背景，悬停提示状态与下一步操作。面板保存期间保留按钮外观与焦点，阻止重复操作；技能状态仅在宿主确认保存后更新，保存失败时保留原状态并显示错误。侧栏底部 **Folders** 动作打开对话框；DSH `0.2.1-alpha.3` 起，新会话页工作区行右端（`conversation.hero.options`）也有同一入口——它与相邻的工作区/模式选择器同几何、无 chevron，`≤560px` 视口下只显示图标，旧运行时只有侧栏入口；两处打开同一对话框、走同一套 RPC。工作区行的 `...` 菜单（以及工作区行的右键菜单）也有「管理工作区目录…」：当前会话已属于该工作区时直接打开；否则先打开/复用该工作区的空白页，确认它成为当前会话后再打开并固定到该会话，导航失败或被后续切换取代时不弹窗，所需服务缺失时该项置灰。Files 页签的根选择器可以浏览附加根（选中时树区由原生的复刻视图接管，切回主根恢复原生）。面板文案中英双语跟随界面语言。
+- 面板侧：工作区目录面板将主根标为「主要工作目录」，并在当前 Agent 工作目录所属的根别名旁显示「当前Agent工作目录」标签；子目录向上匹配最近的列表根，未命中则不显示标签。权限选项「工作区内修改」「仅可查看」沿用上游权限菜单的图标与文字，分别表示固定读写和固定只读，「跟随会话」仍继承会话权限。插件管理页的附属根 Skills 总开关使用上游 Switch，保留各目录的独立选择。目录行不展示 Skill 命名空间；右侧「文档＋星芒」图标按钮控制该目录的技能启用状态，启用时显示完整图标、停用时加斜线，按钮仅在悬停或按下时显示背景，悬停提示状态与下一步操作。面板保存期间保留按钮外观与焦点，阻止重复操作；技能状态仅在宿主确认保存后更新，保存失败时保留原状态并显示错误。侧栏底部 **Folders** 动作打开对话框；DSH `0.2.1-alpha.3` 起，新会话页工作区行右端（`conversation.hero.options`）也有同一入口——它与相邻的工作区/模式选择器同几何、无 chevron，随工作区行的可用余量收缩、余量不足 88px 时只显示图标（探针认不出行结构时回落到 560px 视口兜底），旧运行时只有侧栏入口；两处打开同一对话框、走同一套 RPC。工作区行的 `...` 菜单（以及工作区行的右键菜单）也有「管理工作区目录…」：当前会话已属于该工作区时直接打开；否则先打开/复用该工作区的空白页，确认它成为当前会话后再打开并固定到该会话，导航失败或被后续切换取代时不弹窗，所需服务缺失时该项置灰。Files 页签的根选择器可以浏览附加根（选中时树区由原生的复刻视图接管，切回主根恢复原生）。面板文案中英双语跟随界面语言。
+- **侧栏底部入口的图标、行几何与同槽共存**：入口使用 workspace tree 字形（与新会话页 Hero 入口、工作区 `...` 菜单项同族；DSH `0.1.7-alpha.1` 之前没有该 Regular 字形，compat 探针回退 folder 字形）。行几何与宿主设置触发行逐像素对齐，且两代宿主共用一份「宿主 token + 旧值 fallback」配方：分界是 DSH `0.2.2-alpha.2`，19 个旧几何版本（`0.1.5-rc.2` … `0.2.1-rc.5`）与 5 个新几何版本（`0.2.2-alpha.2` … `0.2.2-rc.3`）都命中；精确公式见 [ADR-0044](../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)，实现里不比较版本字符串。rail（折叠态）圆角有自己更早的分界 `0.1.6-alpha.2`：此后 22 个版本与宿主的 12px 圆角方一致，最老 2 个版本（`0.1.5-rc.2`、`0.1.6-alpha.1`）宿主画圆、插件画 12px 圆角方，这是已记录的偏差，不影响布局与可点区域；`@media (hover: hover)` 包装只在 5 个新几何版本存在，插件保持不包装，触屏上与这些版本有 hover 反馈差异。按钮高度跟随同一列设置行的 occupant，使两处 hover 药丸同尺寸：最老 7 个版本（至 `0.1.7-rc.2`）的设置行 occupant 是 42px 设置触发器，本入口沿用 42px；从 `0.2.0-rc.1` 起设置行 occupant 是账号菜单 launcher（`AccountMenu.module.css`：已登录 44px / 未登录 32px / rail 36px），本入口用 launcher 自身的 `data-signed-out` 标记只跟随高度，标记缺席时回退 42px，rail 保持 36px；图标/文字左缘（20 / 42）、gap、圆角与 hover token 都不变。隔离 web 组合（`0.2.2-rc.3`）实测：本入口与账号行 pill 同为 264 宽、x 8..272、12px 圆角、同一 hover 底色，改动前高度是 42 对 32。精确规则与取舍见 ADR-0044。同槽共存：本入口挂载期间 `sidebar.footer.action` 槽锚点被改成纵向列，因此同槽另一个 footer action 真的渲染时两者各占一整行、都可见可点；本插件不隐藏、不让位，注册的 id/order/label 不变，不读取 `ctx.slots` 账本（注册数回答不了“谁渲染”），也不观测其他插件的 DOM；只有本入口时布局与宿主单行布局逐像素相同，浏览器不支持 `:has()` 时该规则被丢弃、退回宿主布局。
 
 B9 Windows Full-access 局部只读需要管理员安装随包提供的特权 broker（[安装与安全边界](../decisions/ADR-0020-windows-normal-deny-groups.md#安装与卸载)）；插件不会自动提权。子进程是 Store/MSIX 版应用（如 WindowsApps 别名下的 `pwsh.exe`）时该组合会拒绝启动并给出诊断——打包进程携带 minted deny token 无法保留的包身份；请安装 MSI/ZIP 版 PowerShell（或使用其他非打包可执行文件）并让它排在 WindowsApps 别名之前。升级插件后需用 `install.ps1` 重装一次 broker，新的调用方规则才会生效。Linux 同组合需要可执行的 bubblewrap，即使普通受限模式选择的是 Landlock：上游选定 Landlock（说明 bwrap 不可用——未安装或禁用非特权 user namespace）的主机上，携带任何拒写边界（显式只读根或受限 Full-access 下受保护的 `$DSH_HOME`）的 Full-access 命令在启动前就失败关闭；要使用该组合请安装并启用 bwrap，或避免在这类主机的 Full-access 下登记显式只读根。依赖缺失会报告 runner 不可用，不能作为允许裸启动的理由。

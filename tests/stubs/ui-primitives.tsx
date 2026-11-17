@@ -44,22 +44,6 @@ export const IconRefreshOutline16 = icon('refresh')
 export const IconSettingsOutline16 = icon('settings')
 export const IconTrashOutline16 = icon('trash')
 
-/** Minimal `Button` mirror: a native button with the host variant metadata. */
-export function Button(props: {
-  readonly variant?: string
-  readonly size?: string
-  readonly icon?: ReactNode
-  readonly className?: string
-  readonly children?: ReactNode
-} & Record<string, unknown>): ReactNode {
-  const { variant, size, icon: _icon, className, children, ...rest } = props
-  return createElement('button', {
-    type: 'button',
-    className: ['mrfw-stub-button', variant, size, className].filter(value => value !== undefined && value !== '').join(' '),
-    ...rest,
-  }, children)
-}
-
 /** Minimal `Input` mirror: a wrapper span around the native input. */
 export function Input(props: { readonly className?: string; readonly icon?: ReactNode } & Record<string, unknown>): ReactNode {
   const { className, icon: _icon, ...rest } = props
@@ -83,6 +67,17 @@ export const IconFolderOpen16 = icon('folder-open')
 export const PermissionIconWorkspaceWriteRegular = icon('workspace-write')
 export const PermissionIconReadOnlyRegular = icon('read-only')
 
+// The Regular glyph family the workspace-search surface spells verbatim
+// (0.2.2-rc.2, where the feature itself arrived).
+export const IconSearchOutlineRegular = icon('search')
+export const IconEyeOutlineRegular = icon('eye')
+export const IconEyeOffOutlineRegular = icon('eye-off')
+export const IconCloseOutlineRegular = icon('close')
+export const IconInfoOutlineRegular = icon('info')
+export const IconPlusOutlineRegular = icon('plus')
+export const IconTrashOutlineRegular = icon('trash')
+export const IconRefreshOutlineRegular = icon('refresh')
+
 /** Controlled host Switch mirror, preserving its accessible button contract. */
 export function Switch(props: {
   checked: boolean
@@ -93,6 +88,35 @@ export function Switch(props: {
   return <button type="button" role="switch" aria-label={props.label}
     aria-checked={props.checked} disabled={props.disabled}
     onClick={() => props.onChange(!props.checked)} />
+}
+
+/** Minimal `Button` mirror: a real button, with every extra prop forwarded (data-*, aria-*). */
+export function Button(props: {
+  readonly variant?: string
+  readonly size?: string
+  readonly icon?: ReactNode
+  readonly className?: string
+  readonly onClick?: () => void
+  readonly children?: ReactNode
+} & Record<string, unknown>): ReactNode {
+  const { variant, size, icon: _icon, className, onClick, children, ...rest } = props
+  return createElement('button', {
+    type: 'button',
+    'data-variant': variant,
+    'data-size': size,
+    className: ['mrfw-stub-button', variant, size, className].filter(value => value !== undefined && value !== '').join(' '),
+    onClick,
+    ...rest,
+  }, children)
+}
+
+/** Minimal `StateDot` mirror: the state rides a data attribute. */
+export function StateDot(props: {
+  readonly state: string
+  readonly size?: number
+  readonly className?: string
+}): ReactNode {
+  return createElement('span', { 'data-state-dot': props.state, className: props.className })
 }
 
 /** Minimal `Tag` mirror: the same `span[data-tone]` shape the host renders. */
@@ -149,7 +173,11 @@ export function Toast(props: {
 }): ReactNode {
   return createElement(
     'div',
-    { role: 'status', onClick: props.onDone },
+    {
+      role: 'status',
+      onClick: props.onDone,
+      'data-hold-ms': props.holdMs === undefined ? undefined : String(props.holdMs),
+    },
     props.icon,
     props.text,
   )
@@ -167,7 +195,12 @@ export function PathLabel(props: {
   )
 }
 
-/** Minimal `Modal` mirror: closed renders nothing; open portals a labeled dialog. */
+/**
+ * Minimal `Modal` mirror: closed renders nothing; open portals a labeled
+ * dialog with the primitive's fixed close control (the real Modal renders one
+ * that cannot be disabled — a request in flight stays submitted when the
+ * operator dismisses the dialog this way).
+ */
 export function Modal(props: {
   readonly open: boolean
   readonly onClose: () => void
@@ -178,6 +211,7 @@ export function Modal(props: {
   readonly contentClassName?: string
   readonly footer?: ReactNode
   readonly children?: ReactNode
+  readonly className?: string
 }): ReactNode {
   if (!props.open) return null
   return createPortal(
@@ -238,6 +272,12 @@ type StubMenuEntry =
 export function Menu(props: {
   open: boolean
   anchor: ReactNode
+  /**
+   * Extra class on the anchor wrapper span, as the real primitive applies it:
+   * the wrapper is the element its parent flex row sizes, so a plugin hook on
+   * it is structural rather than presentational and must exist here too.
+   */
+  className?: string
   items: readonly StubMenuEntry[]
   footer?: readonly StubMenuEntry[]
   selectedId?: string
@@ -267,8 +307,8 @@ export function Menu(props: {
     )
   }
   return createElement(
-    Fragment,
-    null,
+    'span',
+    { className: props.className },
     props.anchor,
     props.open
       ? createPortal(

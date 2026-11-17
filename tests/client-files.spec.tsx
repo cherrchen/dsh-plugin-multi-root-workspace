@@ -11,6 +11,7 @@
  */
 import { useSyncExternalStore, type ReactElement } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
@@ -19,6 +20,8 @@ import { FilesTree } from '../src/client/files-tree/FilesTree.tsx'
 import { createFilesStore, type FilesState } from '../src/client/files-tree/store.ts'
 import { createList, createWatch, filesFace } from '../src/client/files-tree/face.ts'
 import { lazyFilesRemote } from '../src/client/files-tree/adapter.tsx'
+import type { FilesMenuSeat } from '../src/client/files-tree/context-menu.ts'
+import type { NativeTreeRenderer } from '../src/compat/files-tree.ts'
 
 const SESSION = 'session-1' as SessionId
 const TAB = 'tab-1' as TabId
@@ -114,10 +117,23 @@ interface Harness {
   readonly snapshot: () => FilesState
 }
 
+/** The host-parity inputs one mount may exercise. */
+interface MountOptions {
+  readonly menu?: FilesMenuSeat | undefined
+  readonly canOpen?: ((address: string) => boolean) | undefined
+  readonly useCanOpen?: ((selector: (version: number) => number) => number) | undefined
+  readonly nativeTree?: NativeTreeRenderer | undefined
+  /** The element the tree renders into — a takeover pane in the focus tests. */
+  readonly container?: HTMLElement | undefined
+  /** Render the tree through a portal into this element, leaving its siblings untracked. */
+  readonly portalInto?: HTMLElement | undefined
+}
+
 /** Mount the fork over a real store and a stub remote. */
 function mount(
   listImpl?: (path: string) => { ok: boolean; value?: unknown; error?: unknown } | Promise<{ ok: boolean; value?: unknown; error?: unknown }>,
   remoteOverride?: { workspaceFiles: unknown; $stream: unknown },
+  options: MountOptions = {},
 ): Harness {
   const calls: Call[] = []
   const watches = new Map<string, Watch>()
@@ -168,13 +184,24 @@ function mount(
       toggle={face.toggle}
       onOpen={onOpen}
       t={(key: string) => key as never}
+      {...(options.menu === undefined ? {} : { menu: options.menu })}
+      {...(options.canOpen === undefined ? {} : { canOpen: options.canOpen })}
+      {...(options.useCanOpen === undefined ? {} : { useCanOpen: options.useCanOpen })}
+      {...(options.nativeTree === undefined ? {} : { nativeTree: options.nativeTree })}
     />
   )
-  render(tree as ReactElement)
+  const mounted = options.portalInto === undefined ? tree : createPortal(tree, options.portalInto)
+  render(mounted as ReactElement, options.container === undefined ? undefined : { container: options.container })
   return { calls, watches, onOpen, face, controller, snapshot: () => instance.getSnapshot() }
 }
 
-afterEach(cleanup)
+/** The page fixtures the focus tests appended; removed after each case. */
+const pages: HTMLElement[] = []
+
+afterEach(() => {
+  cleanup()
+  for (const page of pages.splice(0)) page.remove()
+})
 
 describe('the forked Files tree', () => {
   it('watches, then lists the selected root by absolute path — directories first', async () => {
@@ -343,5 +370,128 @@ describe('the lazy remote seam', () => {
     const note = await screen.findByText('error.unavailable')
     expect(note.getAttribute('data-files-row')).toBe('failed')
     expect(note.getAttribute('data-files-code')).toBe('gateway/internal')
+  })
+})
+
+describe('the forked tree host-parity inputs (row menus, viewer registry)', () => {
+  /** A seat recording what each row was bound with. */
+  function seat(): { readonly seat: FilesMenuSeat; readonly trigger: ReturnType<typeof vi.fn> } {
+    const trigger = vi.fn((path: string, kind: 'file' | 'directory') => ({ 'data-menu-for': `${kind}:${path}` }))
+    return { seat: { trigger }, trigger }
+  }
+
+  it('binds a file and a directory row menu to the absolute path and the row kind', async () => {
+    const { seat: menu, trigger } = seat()
+    mount(undefined, undefined, { menu })
+    const file = await screen.findByRole('button', { name: 'notes.md' })
+    expect(file.getAttribute('data-menu-for')).toBe('file:/repos/payments/notes.md')
+    const directory = screen.getByRole('button', { name: 'src' })
+    expect(directory.getAttribute('data-menu-for')).toBe('directory:/repos/payments/src')
+    // The absolute path is load-bearing: a workspace-relative one would resolve
+    // against the primary root in every host contribution.
+    expect(trigger).toHaveBeenCalledWith('/repos/payments/notes.md', 'file')
+  })
+
+  it('leaves rows untouched when the host has no context-menu seat', async () => {
+    mount()
+    const file = await screen.findByRole('button', { name: 'notes.md' })
+    expect(file.hasAttribute('data-menu-for')).toBe(false)
+  })
+
+  it('forwards the menu and viewer inputs into the host Factory', async () => {
+    const factory = vi.fn((_name: string, _input: object, options: { fallback: ReactElement }) => options.fallback)
+    const { seat: menu } = seat()
+    mount(undefined, undefined, {
+      menu,
+      canOpen: (address: string) => address.endsWith('/notes.md'),
+      nativeTree: factory as unknown as NativeTreeRenderer,
+    })
+    await waitFor(() => { expect(factory).toHaveBeenCalled() })
+    const input = factory.mock.calls.at(-1)![1] as {
+      rowTriggerProps?: (entry: { path: string }, kind: 'file' | 'directory') => Record<string, unknown> | undefined
+      canOpen?: (entry: { path: string }) => boolean
+    }
+    expect(input.rowTriggerProps?.({ path: '/repos/payments/notes.md' }, 'file'))
+      .toEqual({ 'data-menu-for': 'file:/repos/payments/notes.md' })
+    // The viewer verdict takes the same absolute address the row opens with.
+    expect(input.canOpen?.({ path: '/repos/payments/notes.md' })).toBe(true)
+    expect(input.canOpen?.({ path: '/repos/payments/a.md' })).toBe(false)
+  })
+
+  it('omits the Factory inputs when the host has neither seat', async () => {
+    const factory = vi.fn((_name: string, _input: object, options: { fallback: ReactElement }) => options.fallback)
+    mount(undefined, undefined, { nativeTree: factory as unknown as NativeTreeRenderer })
+    await waitFor(() => { expect(factory).toHaveBeenCalled() })
+    const input = factory.mock.calls.at(-1)![1] as Record<string, unknown>
+    expect('rowTriggerProps' in input).toBe(false)
+    expect('canOpen' in input).toBe(false)
+  })
+
+  it('subscribes to the viewer registry through the supplied hook', async () => {
+    const useCanOpen = vi.fn((selector: (version: number) => number) => selector(0))
+    mount(undefined, undefined, { useCanOpen })
+    await screen.findByRole('button', { name: 'src' })
+    expect(useCanOpen).toHaveBeenCalled()
+  })
+})
+
+
+describe('the forked tree focus handoff', () => {
+  /** A page fixture with a focusable hidden native body and a takeover pane. */
+  function pageFixture(): { page: HTMLElement; nativeBody: HTMLElement; pane: HTMLElement } {
+    const page = document.createElement('div')
+    page.setAttribute('data-files-page', '')
+    const nativeBody = document.createElement('div')
+    nativeBody.setAttribute('data-files-body', '')
+    nativeBody.tabIndex = -1
+    page.append(nativeBody)
+    const pane = document.createElement('div')
+    pane.setAttribute('data-mrfw-files-pane', '')
+    page.append(pane)
+    document.body.append(page)
+    pages.push(page)
+    return { page, nativeBody, pane }
+  }
+
+  it('takes the keyboard from the hidden native body through the page wrapper', async () => {
+    const { nativeBody, pane } = pageFixture()
+    nativeBody.focus()
+    expect(document.activeElement).toBe(nativeBody)
+    mount(undefined, undefined, { container: pane })
+    await waitFor(() => {
+      expect(document.activeElement?.classList.contains('mrfw-ftBody')).toBe(true)
+    })
+  })
+
+  it('keeps the parent lookup for the older direct mount', async () => {
+    // The older Files page has no data-files-page wrapper: the tree's parent
+    // already IS the takeover container, so the fallback path must still find
+    // the native body and hand it the keyboard.
+    const page = document.createElement('div')
+    page.setAttribute('data-files-root', '')
+    const nativeBody = document.createElement('div')
+    nativeBody.setAttribute('data-files-body', '')
+    nativeBody.tabIndex = -1
+    page.append(nativeBody)
+    document.body.append(page)
+    pages.push(page)
+    nativeBody.focus()
+    // The real old shape is a portal into the pane: React owns the forked body
+    // while the native body stays an untracked sibling of it.
+    mount(undefined, undefined, { portalInto: page })
+    await waitFor(() => {
+      expect(document.activeElement?.classList.contains('mrfw-ftBody')).toBe(true)
+    })
+  })
+
+  it('leaves focus alone when the native body was not the focused element', async () => {
+    const { pane } = pageFixture()
+    const other = document.createElement('input')
+    document.body.append(other)
+    other.focus()
+    mount(undefined, undefined, { container: pane })
+    await waitFor(() => { expect(pane.querySelector('.mrfw-ftBody')).not.toBeNull() })
+    expect(document.activeElement).toBe(other)
+    other.remove()
   })
 })

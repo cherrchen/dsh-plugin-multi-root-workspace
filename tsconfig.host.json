@@ -27,6 +27,7 @@
   ],
   "exclude": [
     "src/client/**",
+    "src/compat/client-conversation-layout.ts",
     "src/auto-review/**"
   ]
 }

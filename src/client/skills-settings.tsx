@@ -85,7 +85,7 @@ function WorktreeSwitchRow({ form, t }: { form: SkillsForm; t: Translate }) {
  * so it carries the WARNING-tone tag and asks for a risk confirmation before
  * enabling, exactly like the OPS card. Disabling is immediate. The custody
  * mode, team block, and downgrade confirmation now live in the Workspace
- * Folders panel's SSH area (ADR-0041) and share this form.
+ * Folders panel's SSH area (ADR-0049) and share this form.
  */
 export function RemoteSwitchRow({ form, t }: { form: SkillsForm; t: Translate }) {
   const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())

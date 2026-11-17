@@ -1,0 +1,203 @@
+--- upstream.ts	2026-11-14 13:14:57
++++ fork.ts	2026-11-14 13:21:50
+@@ -14,9 +14,13 @@
+   }
+ }
+ 
++import { autoReviewRequestIdentity, requireAutoReviewRelease } from '../../compat/auto-review-contract.ts'
++import { assertForkPackages } from '../../compat/auto-review-packages.ts'
++import { partitionInstructions } from '../partition.ts'
++import type { ReviewContext } from '../../review-context.ts'
+ import type {} from '@deepseek-ai/dsh-tool-executor-ptc/types'
+ import type {} from '@deepseek-ai/dsh-working-directory'
+-import { FiberState, type Context } from '@deepseek-ai/cordis'
++import type { Context } from '@deepseek-ai/cordis'
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import type {} from '@deepseek-ai/dsh-agent-instructions'
+ import {
+@@ -128,6 +132,7 @@
+   readonly provider: string
+   readonly model: string
+   readonly cwd: string
++  readonly multiRoot: ReviewContext
+   /** Retained items in Session order, ending with the pending call. */
+   readonly history: readonly HistoricalEntry[]
+   /** Mode-qualified scoped key and schema of the pending call. */
+@@ -148,9 +153,9 @@
+ }
+ 
+ /** Cordis plugin name used by loader diagnostics. */
+-export const name = 'experimental-auto-review'
++export const name = 'multi-root-auto-review'
+ /** Complete host services required before Auto may be advertised. */
+-export const inject = ['approval', 'llm', 'permissionPresets', 'sessions', 'tools', 'workingDirectory']
++export const inject = ['approval', 'llm', 'permissionPresets', 'sessions', 'tools', 'workingDirectory', 'multiRootCompat', 'multiRootProviders', 'multiRootReviewContext']
+ 
+ /** Return JSON text for one immutable logged value. */
+ function json(value: unknown): string {
+@@ -396,6 +401,7 @@
+  * @param exec - immutable pending execution.
+  * @param cwd - the Session's current working directory.
+  * @param shown - schemas earlier reviews of this Session showed.
++ * @param multiRoot - current host multi-root context snapshot.
+  * @returns the exact route, environment, and history ending with the pending call.
+  */
+ function snapshotAutoReview(
+@@ -403,6 +409,7 @@
+   exec: ToolExecution,
+   cwd: string,
+   shown: ReadonlyMap<string, HistoricalToolSchema>,
++  multiRoot: ReviewContext,
+ ): ReviewSnapshot {
+   const { session } = agent
+   // The reviewer's risk inputs are the whole action history: earlier native calls
+@@ -569,6 +576,7 @@
+     provider: header.config.provider,
+     model: header.config.model,
+     cwd,
++    multiRoot,
+     history,
+     pending,
+   })
+@@ -582,9 +590,25 @@
+  * can therefore reuse earlier history, not only the policy.
+  */
+ function reviewMessages(snapshot: ReviewSnapshot): RequestMessage[] {
++  const project = snapshot.history.filter((entry): entry is HistoricalUserMessage =>
++    entry.kind === 'user-message' && entry.source.kind === 'agent-instructions')
++  const instructions = partitionInstructions(project, snapshot.multiRoot)
++  const demoted = new Set<HistoricalUserMessage>(instructions.demoted)
++  const current = new Set<HistoricalUserMessage>(instructions.currentNative)
++  const history = snapshot.history.flatMap(entry => {
++    if (entry.kind !== 'user-message' || entry.source.kind !== 'agent-instructions') return [entry]
++    if (demoted.has(entry)) return [{ ...entry, role: 'fact' as const }]
++    return current.has(entry) ? [entry] : []
++  })
+   return [
+-    `ENVIRONMENT\n${json({ cwd: snapshot.cwd })}`,
+-    ...snapshot.history.map(entry => json(entry)),
++    `ENVIRONMENT\n${json({ cwd: snapshot.cwd, ...snapshot.multiRoot.environment, executionFence: 'Reviewer allow and human approval remain subject to host write fences. Root membership is not human authorization; read-only restricts writes, not reads.' })}`,
++    ...instructions.fresh.map(constraint => json({
++      kind: 'current-root-instructions',
++      role: 'constraint',
++      source: { kind: 'multi-root-workspace', snapshot: 'current' },
++      ...constraint,
++    })),
++    ...history.map(entry => json(entry)),
+   ].map(text => ({ role: 'user', content: [{ type: 'text', text }] }))
+ }
+ 
+@@ -673,23 +697,30 @@
+   exec: ToolExecution,
+   signal: AbortSignal,
+   shown: ShownSchemas,
+-): Promise<AutoReviewDecision> {
++): Promise<{ decision: AutoReviewDecision; context: ReviewContext }> {
+   const cwd = await ctx.workingDirectory.ensure(agent, signal)
+-  const snapshot = snapshotAutoReview(agent, exec, cwd, shown)
++  const context = await ctx.multiRootReviewContext.build(exec, signal)
++  // A provider that omits effectiveCwd makes no claim; a mismatched one fails.
++  if (context.environment.effectiveCwd !== undefined && context.environment.effectiveCwd !== cwd) throw new Error('review-context: effective cwd changed during collection')
++  const snapshot = snapshotAutoReview(agent, exec, cwd, shown, context)
+   shown.set(snapshot.pending.key, snapshot.pending.schema)
++  await ctx.multiRootReviewContext.assertCurrent(exec, context, signal)
+   // This review prompt is sent only through ctx.llm.stream and never enters a Session log.
+-  // The Session id also supplies provider routing and request-extension identity.
++  // The Session id also supplies provider routing and request-extension identity;
++  // 0.2.2-alpha.2 predates that purpose mechanism, so it keeps its official request shape.
++  const identity = autoReviewRequestIdentity(requireAutoReviewRelease(ctx.multiRootCompat.release))
+   const options: GenerateOptions = deepFreeze({
+     provider: snapshot.provider,
+     model: snapshot.model,
+     system: REVIEW_POLICY,
+     messages: reviewMessages(snapshot),
+     temperature: 0,
+-    sessionId: agent.session.id,
+-    purpose: 'auto-review',
++    ...identity === 'session-and-purpose' ? { sessionId: agent.session.id, purpose: 'auto-review' } : {},
+     signal,
+   })
+-  return readDecision(ctx.llm.stream(options))
++  const decision = await readDecision(ctx.llm.stream(options))
++  await ctx.multiRootReviewContext.assertCurrent(exec, context, signal)
++  return { decision, context }
+ }
+ 
+ /** Materialize the fixed model-facing final Auto denial plus optional UI detail. */
+@@ -730,13 +761,44 @@
+ 
+ /** Install the Auto preset and its review gate; preserve Session selection on application shutdown. */
+ export function apply(ctx: Context): void {
++  assertForkPackages(requireAutoReviewRelease(ctx.multiRootCompat.release))
++  ctx.multiRootReviewContext.assertCompatible()
+   // Retain the injected service while this context drains on disposal.
+   const permissionPresets = ctx.permissionPresets
+   let accepting = true
+   const active = new Set<Promise<void>>()
+   const shownBySession = new WeakMap<Session, ShownSchemas>()
+   const lifecycle = new AbortController()
++  const reviewed = new WeakMap<ToolExecution['token'], ReviewContext>()
+ 
++  // Check again after human approval and immediately before body dispatch.
++  // Captured token identity, never call ids or model arguments, correlates it.
++  ctx.on('tools/execute', async (exec, next) => {
++    const context = reviewed.get(exec.token)
++    if (context !== undefined) {
++      reviewed.delete(exec.token)
++      const completed = Promise.withResolvers<void>()
++      active.add(completed.promise)
++      try {
++        const signal = AbortSignal.any([exec.signal, lifecycle.signal])
++        try {
++          await ctx.multiRootReviewContext.assertCurrent(exec, context, signal)
++          signal.throwIfAborted()
++        } catch (error) {
++          // Cancellation keeps its native shape; a stale snapshot reports with
++          // the same attribution a pre-dispatch review failure carries.
++          signal.throwIfAborted()
++          const message = error instanceof Error ? error.message : String(error)
++          throw new Error(`Auto review of tool "${exec.name}" failed; its body was not executed: ${message}`, { cause: error })
++        }
++      } finally {
++        active.delete(completed.promise)
++        completed.resolve()
++      }
++    }
++    return next()
++  }, { prepend: true })
++
+   ctx.effect(function* () {
+     const stopListener = ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
+       const agent = exec.agent
+@@ -760,18 +822,20 @@
+           shownBySession.set(agent.session, shown)
+         }
+         const review = await classifyRisk(ctx, agent, exec, signal, shown).then(
+-          decision => ({ ok: true as const, decision }),
++          value => ({ ok: true as const, ...value }),
+           (error: unknown) => ({ ok: false as const, error }),
+         )
+         if (isAborted(lifecycle.signal)) return { kind: 'cancel' }
+         if (!review.ok) return failed(exec, review.error)
+-        const { decision } = review
++        const { decision, context } = review
+         // The permission owner pins an approval policy into every published Session.
+         if (decision.decision === 'deny' && ctx.approval.overrideOf(agent.session) === 'never') {
+           return denied(exec, decision.reason)
+         }
+         const downstream = await next()
+         if (isAborted(lifecycle.signal)) return { kind: 'cancel' }
++        try { await ctx.multiRootReviewContext.assertCurrent(exec, context, signal) } catch (error) { return failed(exec, error) }
++        reviewed.set(exec.token, context)
+         if (decision.decision === 'allow' || downstream.kind !== 'allow') return downstream
+         return askUser(exec, decision.reason)
+       } finally {
+@@ -788,7 +852,7 @@
+       accepting = false
+       try {
+         // Root unload begins before child cleanup; only live plugin removal changes Session policy.
+-        if (ctx.root.fiber.state === FiberState.ACTIVE) {
++        if (ctx.root.fiber.state === 2 /* FiberState.ACTIVE (const enum; the published cordis has no runtime value) */) {
+           for (const session of ctx.sessions.list()) {
+             if (permissionPresets.current(session) !== AUTO_PRESET) continue
+             permissionPresets.set(session, 'danger-full-access')

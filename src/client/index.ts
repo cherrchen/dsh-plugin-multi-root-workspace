@@ -42,12 +42,15 @@ import { HeroWorkspaceEntry } from './HeroWorkspaceEntry.tsx'
 import { installSkillsClient } from './skills.tsx'
 import { installSkillsSettingsCard } from './skills-settings.tsx'
 import { createWorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
+import { createFilesPageNoticeSource, installFilesPageNotice } from './files-page-notice.tsx'
 import { installWorkspaceMenu, type UiWorkspaceClient, type WorkspacesClient } from './workspace-menu.ts'
 import { RootSwitcher } from './RootSwitcher.tsx'
 import { WorkspaceFoldersAction, type Translate } from './WorkspaceFoldersAction.tsx'
 import { OPEN_IN_APP_NS, createOpenInAppAdapter } from './open-in-app/adapter.tsx'
 import { OpenInAppToast } from './open-in-app/open-toast.tsx'
 import { FILES_TREE_NS, createFilesTreeSeats, createFilesTreeSurface } from './files-tree/adapter.tsx'
+import { createSearchFailureDescriber } from './files-tree/describe-failure.ts'
+import { createSearchPreferenceBook } from './files-tree/search-preferences.ts'
 import { NavigatorRetarget } from './files-tree/navigator.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -178,6 +181,10 @@ export function apply(ctx: ClientContext): void {
   const sessionId = (): string | undefined => currentSessionIdOf(readService(ctx, 'sessions'))
   const subscribeSession = (listener: () => void): (() => void) => subscribeSessions(readService(ctx, 'sessions'), listener)
   const t = ctx.locale.bind(NS) as unknown as Translate
+  // One describer for every search entry this half composes: the Files page
+  // builds its own over the same binding, the preview navigator receives this
+  // one. Sharing the helper is what keeps the two failure wordings identical.
+  const describeSearchFailure = createSearchFailureDescriber(t)
   // The settings card owns the same remote-tools form the Workspace panel's
   // SSH area renders; install it first so the dialog dependency bundle can
   // expose that shared form.
@@ -188,6 +195,7 @@ export function apply(ctx: ClientContext): void {
   // it; each entry still supplies its own session identity and look.
   const dialogDeps = {
     panel, remotes, ssh, pickDirectory, subscribeSession, t, worktrees: worktreeClient,
+    worktreePromptEnabled: worktreeSettings.enabled,
     remoteMode: { form: worktreeSettings.remoteForm, subscribe: worktreeSettings.subscribeRemote },
   }
   installSkillsClient(ctx, t, listener => subscribeCurrentSession(readService(ctx, 'sessions'), listener))
@@ -227,12 +235,19 @@ export function apply(ctx: ClientContext): void {
       inject: () => ({ hooks: toast.hooks, dismiss: toast.dismiss }),
     }, OpenInAppToast))
   }
+  // A third-party page can take the whole `files` tab kind over: the built-in
+  // Files body never renders, so the root switcher registered below is never
+  // shown. Nothing in the slot system reports that, so watch the tab registry
+  // and announce the takeover once with the info-level official Toast; the
+  // footer action keeps managing roots meanwhile.
+  const filesPageNotice = createFilesPageNoticeSource()
+  installFilesPageNotice(ctx, filesPageNotice, t)
   // The files-tree fork's seats: an exclusive store and the verbatim face
   // over a lazily resolved `remote` — the same declaration upstream's own
   // Files registration makes, plus the session-bound open route. The fork
   // binds upstream's `sidebarFiles` namespace so its rows say exactly what
   // the native tree says.
-  const filesTreeSeats = createFilesTreeSeats(ctx)
+  const filesTreeSeats = createFilesTreeSeats(ctx, { panel, preferences: createSearchPreferenceBook(readBrowserStorage()) })
   const filesTreeT = ctx.locale.bind(FILES_TREE_NS)
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
@@ -318,7 +333,7 @@ export function apply(ctx: ClientContext): void {
     // framework-stable prop or an apply-level constant, so the switcher's
     // takeover effect — which keys on the selection, not the wrapper —
     // never restarts because of it. `undefined` means the fork cannot mount.
-    const filesTree = createFilesTreeSurface(props, filesTreeT)
+    const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeSeats)
     return absolutePath === undefined
       ? createElement(WorkspaceFoldersAction, { ...dialogDeps, sessionId: paneSessionId, compact: true })
       : createElement(RootSwitcher, { ...dialogDeps, primaryPath: absolutePath, sessionId: paneSessionId, openInApp: openInApp?.adapter, filesTree, nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot) })
@@ -339,7 +354,7 @@ export function apply(ctx: ClientContext): void {
     inject: filesTreeSeats.inject,
   }, function DocumentActionsOccupant(props) {
     const absolutePath = (props as { readonly absolutePath?: string } | undefined)?.absolutePath
-    const filesTree = createFilesTreeSurface(props, filesTreeT)
+    const filesTree = createFilesTreeSurface(props, filesTreeT, filesTreeSeats)
     // No host path or no fork → no marker at all: the native navigator
     // keeps its tree untouched either way.
     if (absolutePath === undefined || filesTree === undefined) return null
@@ -349,6 +364,7 @@ export function apply(ctx: ClientContext): void {
       panel,
       filesTree,
       nativeTree: nativeTreeRenderer((props as { renderFactorySlot?: unknown }).renderFactorySlot),
+      describeFailure: describeSearchFailure,
     })
   }))
   // The workspace row's `...` / context menu gains "Manage workspace folders…".
@@ -366,6 +382,22 @@ export function apply(ctx: ClientContext): void {
     dialog: dialogController,
     t,
   })
+}
+
+/**
+ * The browser storage the search preferences persist in.
+ *
+ * Storage can be denied outright (private browsing, a sandboxed frame); the
+ * preference book then keeps its entries in memory for this page's lifetime
+ * instead of failing the client graph.
+ * @returns the storage, or `undefined` where this window has none.
+ */
+function readBrowserStorage(): Storage | undefined {
+  try {
+    return typeof window === 'undefined' ? undefined : window.localStorage
+  } catch {
+    return undefined
+  }
 }
 
 /**

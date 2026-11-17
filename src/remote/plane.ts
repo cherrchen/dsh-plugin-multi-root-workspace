@@ -19,7 +19,7 @@ import { findBinding, grantState, remoteDomainSpec, REMOTE_TABLE_NAME, type Pers
 import { RemoteClient, RemoteServer } from './protocol.ts'
 import { readFileSync, statSync } from 'node:fs'
 
-/** The three SSH custody modes (ADR-0041). */
+/** The three SSH custody modes (ADR-0049). */
 export type RemoteMode = 'personal' | 'team' | 'hardened'
 
 export interface RemoteConfig {
@@ -33,7 +33,7 @@ export interface RemoteConfig {
   readonly credentialRoot?: string
 }
 
-/** One live re-evaluation of the plane (ADR-0041 §5). */
+/** One live re-evaluation of the plane (ADR-0049 §5). */
 export interface RemoteLiveConfig {
   readonly enabled: boolean
   readonly mode: RemoteMode
@@ -47,7 +47,7 @@ type Medium = ReturnType<typeof storeIdentity>
 export class RemoteControlPlane {
   /** The live switch; `remoteEnvironments.enabled` is only its initial value. */
   enabled: boolean
-  /** The live custody mode (ADR-0041); personal is the default. */
+  /** The live custody mode (ADR-0049); personal is the default. */
   mode: RemoteMode = 'personal'
   /** The validated deployment manifest; undefined unless remote is enabled and valid. */
   manifest: DeploymentManifest | undefined

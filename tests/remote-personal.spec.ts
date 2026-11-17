@@ -1,5 +1,5 @@
 /**
- * Personal custody mode (ADR-0041 §2): config store permission checks and CAS,
+ * Personal custody mode (ADR-0049 §2): config store permission checks and CAS,
  * toDeploymentManifest parity, credential store leak-freedom, managed ssh_config
  * rendering/linking, relaxed parseSshConfig, and personal-mode RPC refusals.
  * POSIX-only: the file-protection checks require a POSIX uid.

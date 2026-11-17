@@ -1,5 +1,5 @@
 /**
- * Personal custody (ADR-0041 §2): the user-owned remote-environment config.
+ * Personal custody (ADR-0049 §2): the user-owned remote-environment config.
  * The file carries the same environments/bindings facts as the deployment
  * manifest but lives under the user's storage root; `toDeploymentManifest`
  * converts it into the identical DeploymentManifest shape so admission,
@@ -67,7 +67,7 @@ export const personalConfigSchema = z.object({
 export type PersonalEnvironment = z.infer<typeof personalEnvironmentSchema>
 export type PersonalConfig = z.infer<typeof personalConfigSchema>
 
-/** File stat identity for cheap change detection (ADR-0041 §2). */
+/** File stat identity for cheap change detection (ADR-0049 §2). */
 export interface PersonalFileIdentity {
   readonly dev: number
   readonly ino: number

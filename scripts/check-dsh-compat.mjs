@@ -24,10 +24,11 @@
  * @module scripts/check-dsh-compat
  */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { readAutoReviewContract } from './lib/auto-review-development.mjs'
 
 const require = createRequire(import.meta.url)
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -162,7 +163,50 @@ if (sshPresent.length === 0) {
   else notes.push(`SSH development pin: ${pin}`)
 }
 
-// 5. What is actually installed here agrees with itself and with the allowlist.
+// 5. koffi stays host-provided. As a shipped dependency it stops the first
+//    `dsh plugin add` at pnpm's build approval and installs a second native
+//    image beside the host's (SIGBUS on darwin-arm64); as an optional peer it
+//    is never installed and the runtime resolves the host's copy instead. The
+//    development pin keeps type-checking and tests on the host's release.
+if (manifest.dependencies?.koffi !== undefined || manifest.optionalDependencies?.koffi !== undefined) {
+  fail('package.json installs koffi: declare it as an optional peer (the host supplies it) and pin it in devDependencies')
+}
+if (peers.koffi !== '>=3.1.0 <4.0.0') {
+  fail(`peerDependencies.koffi is "${peers.koffi ?? '(absent)'}" but must be ">=3.1.0 <4.0.0"`)
+}
+if (manifest.peerDependenciesMeta?.koffi?.optional !== true) {
+  fail('peerDependenciesMeta.koffi.optional must be true: pnpm must never install the peer')
+}
+if (!/^3\.\d+\.\d+$/.test(devs.koffi ?? '')) {
+  fail(`devDependencies.koffi is "${devs.koffi ?? '(absent)'}"; pin the 3.x release the development host carries`)
+}
+// The development pin must equal the copy the host tree itself resolves. When
+// an upstream release changes its koffi pin, `upgrade-dsh` repoints the harness
+// but not this package; without this check the dev pin could drift silently.
+function packageVersionOf(entry) {
+  let dir = dirname(entry)
+  while (true) {
+    const filename = join(dir, 'package.json')
+    if (existsSync(filename)) return JSON.parse(readFileSync(filename, 'utf8')).version
+    const parent = dirname(dir)
+    if (parent === dir) return undefined
+    dir = parent
+  }
+}
+let hostKoffi
+try {
+  const hostRequire = createRequire(require.resolve('@deepseek-ai/dsh-fs-local/package.json'))
+  hostKoffi = packageVersionOf(hostRequire.resolve('koffi'))
+} catch {
+  hostKoffi = undefined
+}
+if (hostKoffi === undefined) {
+  fail('cannot resolve koffi from @deepseek-ai/dsh-fs-local (run pnpm install)')
+} else if (hostKoffi !== devs.koffi) {
+  fail(`devDependencies.koffi is "${devs.koffi ?? '(absent)'}" but the host tree resolves ${hostKoffi}; repoint the development pin to the host's koffi`)
+}
+
+// 6. What is actually installed here agrees with itself and with the allowlist.
 //    This mirrors the runtime gate, so `pnpm compat:check` reproduces a boot
 //    refusal without booting a harness. SSH peers stay OUT of this set —
 //    a missing or deviating SSH copy never produces a local verdict here.
@@ -193,13 +237,28 @@ if (releases.length > 1) {
   else notes.push(`installed tree: ${release}`)
 }
 
-// The optional integration's release is narrower than ordinary support.
+// SSH has its own release floor within the ordinary compatibility contract.
 notes.push(`SSH floor: ${sshSupported.join(', ')}`)
 
-const autoReviewContract = readFileSync(join(REPO_ROOT, 'src/compat/auto-review-contract.ts'), 'utf8')
-const autoRelease = /AUTO_REVIEW_RELEASE = '([^']+)'/u.exec(autoReviewContract)?.[1]
-if (autoRelease === undefined || !supported.includes(autoRelease)) fail('Auto Review exact release must belong to the ordinary allowlist')
-else notes.push(`optional Auto Review release: ${autoRelease}`)
+// The optional integration's joint contract is narrower than ordinary support:
+// every release it names must belong to the ordinary allowlist, and the two
+// frozen source baselines must not overlap.
+const autoReviewContract = readFileSync(join(REPO_ROOT, 'src/compat', 'auto-review-contract.ts'), 'utf8')
+let autoReview
+try {
+  autoReview = readAutoReviewContract(autoReviewContract)
+} catch (error) {
+  fail(`the Auto Review joint contract is unreadable: ${error instanceof Error ? error.message : String(error)}`)
+}
+if (autoReview !== undefined) {
+  for (const release of autoReview.releases) {
+    if (!supported.includes(release)) fail(`Auto Review release ${release} must belong to the ordinary allowlist`)
+  }
+  for (const [baseline, pin] of Object.entries(autoReview.compilePins)) {
+    if (pin !== undefined && !autoReview.byBaseline[baseline].includes(pin)) fail(`Auto Review ${baseline} compile pin must be one of its releases`)
+  }
+  notes.push(`optional Auto Review releases: ${autoReview.releases.join(', ')}`)
+}
 
 for (const note of notes) console.log(`[compat] ${note}`)
 

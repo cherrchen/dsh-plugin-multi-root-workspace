@@ -8,6 +8,50 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.21] - 2026-11-17
+
+### Added
+
+- **附加根文件预览导航树的工作区搜索**：预览文件位于附加根时，右侧 Folder 导航树此前只能浏览、不能搜索（原生搜索根固定为会话 cwd，接管期被插件隐藏）。本轮复用 Files 页唯一的工作区搜索面与同一个 `search` 端点，为 `FilesPane` 增加 preview 模式：搜索栏常显、命中高亮结果树、被预览文件在结果中标为当前行、点击结果以 `replaceTab` 原位替换预览、关闭设置回焦搜索钮、↑/↓ 在输入、树行与结果行之间移动、Escape 依次关闭设置 → 清空查询 → 交给原生关闭导航树；搜索记录按 pane + 根键控，body 重挂载与 `replaceTab` 后保留展开与滚动。宿主零改动（`workspaceFiles.search` 自 `0.2.2-rc.2` 起；更早宿主与主根预览保持原样）（[ADR-0043](./docs/decisions/ADR-0043-additional-root-preview-navigator-search.md)）。
+- **Files 页被第三方整页接管时的可见提示（Issue #47）**：第三方插件以 `priority: "extension"` 注册 `files` kind 时，宿主不再渲染内置 Files 页，根切换器的 seat 永不挂载，此前用户只看到「插件没生效且没有提示」。现在插件读取 `ctx.sidebarRightTabs.get('files')` 的生效定义（声明 band + 实现 id 的结构探测，不比较版本字符串），确认被接管时弹一次官方 info 级瞬时 Toast（无警告图标、约 5 秒淡出），说明根切换器暂不可用、根管理仍可从侧栏「工作区目录」与 `/workspace-folders` 完成；同一接管实现只提示一次，接管解除后重新武装。服务或定义缺失时按「无接管」静默，旧宿主不提示。
+- **Worktree 提示的圆形关闭按钮**：收回第二十一次修订「删除 ×」的决定，常驻提示右上角加回 18px 正圆关闭按钮（自绘控件、0.5px 描边、圆心相对卡片角点内收 2px、24px 命中环、悬停不变色、仅有 `:focus-visible` 品牌环）。语义为纯关闭：不调用 `snooze` / `resolve`、不写 sidecar 与 Registry，本 Host 生命周期内不再自动提示、Host 重启后候选重新可见——与写持久延迟的「稍后提醒」和写 ignore 的「永久不再提示」三分（[ADR-0039 第二十五次修订](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md#第二十五次修订2026-11-15)）。
+
+### Changed
+
+- **`koffi` 改由宿主提供（可选 peer），npm / tarball / 本地路径安装不再需要构建授权**：插件不再在 `dependencies` 中携带 `koffi`（Windows Registry Authority 与 Worktree Git 元数据读取的 FFI 封装），改为 optional `peerDependencies` 加 `devDependencies` 开发 pin。pnpm 不会安装可选 peer，因此首次 `dsh plugin add` 不再停在 `[ERR_PNPM_IGNORED_BUILDS]`，profile 的 `pnpm-workspace.yaml` 也不需要 `allowBuilds: koffi`。运行时 `loadHostKoffi()` / `loadHostKoffiSync()` 依次尝试 `DSH_KOFFI_PATH`、`dsh-fs-local` 锚点、宿主入口与 DSH Desktop 的 `app.asar` / `app.asar.unpacked` 运行时目录，只加载宿主那份副本，避免第二个 `koffi.node` 镜像在 darwin-arm64 上触发 SIGBUS；找不到时明确报错，不再回退到包内副本。git 来源仍需为插件自身的 `prepare` 授权（[ADR-0007 修订](./docs/decisions/ADR-0007-registry-authority-lease.md)）。
+- **Workspace Folders 面板的 Worktree 清理 UX 收敛**：批量清理入口从 footer 移到「附属工作目录」标题行；删除确认由 body 顶部的内联文字改为覆盖面板的宿主 `Modal`（单行与批量共用，单/多分别披露路径复用，独立错误归属，请求中关闭不撤销，成功只清本次 id 数组）；`cleanupEligible` 行收敛为名称 + 权限徽标 + 路径 + 红色删除 + `…` 菜单（两条状态字、技能开关、reveal、重新登记与行内路径复用提示移出，披露移入确认层；其他 missing 行保持原动作）；手动发现无候选时弹官方 info Toast（自动检查与提示「查看」的竞态保持静默）；根上限提示独占 footer 一行，控件行位于其下。授权、清理资格、owner 复验与端点形状不变（[ADR-0045](./docs/decisions/ADR-0045-worktree-cleanup-panel-ui.md)）。
+- **侧栏 footer 入口与宿主设置行逐像素对齐，并支持同槽共存**：footer occupant 的图标由齿轮改为 workspace tree（与 Hero、工作区菜单同族）；行几何改为「宿主 token + 旧值 fallback」的一份声明，在旧 19 个几何版本与新 5 个 token 几何版本上都与宿主设置触发行逐像素一致；按钮高度跟随可见设置行 occupant（`0.1.7-rc.2` 及更早 42px，`0.2.0-rc.1` 起未登录 32px / 已登录 44px，rail 36px，探针缺失回退 42px），hover 填充改用 `background-color` 长写以免 `background-clip` 被重置；rail 圆角按其更早的 `0.1.6-alpha.2` 分界取 12px（最老 2 个版本的宿主圆形是已记录偏差）；本入口挂载期间把 `sidebar.footer.action` 的 slot anchor 变成纵向列，使同槽第二个 occupant 各占一整行。未安装或未挂载时宿主布局原样（[ADR-0044](./docs/decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)）。
+- **README 重写功能概览并重组已知限制**：简介改为面向使用者的能力清单（权限真正生效、Files 页浏览、Skills、Auto Review、Worktree 建议、不登记等于没装），已知限制拆为「插件功能」与「OPS 适配」两节，并补充 Files 页接管提示、footer 行几何与 Worktree 关闭按钮的说明。
+
+### Fixed
+
+- **附加根搜索的两个 v0.1.20 遗留缺陷**：Files 页换根过渡帧会以新根的 `rootId` 发送旧根的查询/筛选，并把旧根记录留在 `pending`（状态行卡死、失败结果被清成无限 pending）；现在 `RootSwitcher` 与预览接管都把 `rootId` 并入按根原子落定的 takeover 记录。键盘焦点序列缺少列出的树行（Down 无法从输入进入首行、Up 无法回到输入），且设置草稿会跨根残留；两项随 preview 模式在同一搜索面修正。
+
+## [0.1.20] - 2026-11-15
+
+### Added
+
+- **附加根 Files 对齐主根：行右键菜单与工作区搜索**：附加根文件树补齐主根原生的行级右键菜单——插件只提供 file/directory target 与触发绑定，菜单项来自宿主贡献方，target 传附加根绝对路径，因此宿主经 `workspaceFiles.stat` / `readBytes` 落到附加根——并新增插件自绘的工作区搜索：页头开关、搜索栏（排除规则、隐藏项、`.gitignore` 开关）、命中高亮结果树、空结果/截断/不完整提示与失败重试、↑/↓ 与 Esc 键盘操作，偏好按根写入宿主同名 localStorage 键。搜索走插件通道的 `search` 端点：会话派生主根、刷新 Registry 解析根 id、单次共享准入、帧内复核授权，结果受根边界约束。两个结构门控是 `useContextMenu`（DSH `0.2.2-alpha.3` 起）与 `remote.workspaceFiles.search`（`0.2.2-rc.2` 起）；更早宿主不绑定菜单、不渲染搜索 UI，附加根视图保持原样。评审修复同批交付：关闭设置浮层时提交排除规则草稿、请求身份复用使 body 重挂载不丢展开/滚动、上游 `workspace-file/*` 失败码原样透传、搜索记录按 session 拥有并在所有者死亡时清理、页头 reload 对非空查询重新取结果并保留位置（[ADR-0041](./docs/decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0042](./docs/decisions/ADR-0042-additional-root-row-context-menus.md)）。
+- **可选 Auto Review 联合支持扩至两代共 9 个精确发布**：联合合同从单一 `0.2.1-rc.2` 扩为两个冻结上游源码基线——`0.2.1-rc.2`–`rc.5`（legacy fork）与 `0.2.2-alpha.2`–`rc.3`（current fork）——每个基线各带逐字节上游副本、审阅过的 fork、编译 pin 与执行副本校验。Loader 入口按安装的精确发布动态加载对应基线的实现 bundle，另一代的导入不会进入宿主模块图；`0.2.2-alpha.2` 早于请求目的映射，保留该发布的官方请求形状（不发送 `sessionId` / `purpose`），`alpha.3` 起按上游发送。构建、类型检查、差分门禁、联合冒烟与 CI 车道均按基线运行（[ADR-0040](./docs/decisions/ADR-0040-auto-review-multi-baseline.md)、[接口审查](./docs/reference/auto-review-0.2.2-migration.md)）。
+- **Worktree 确认 Dialog 重构与逐行权限选择**：Dialog 加宽到 `min(860px, calc(100vw - 48px))`，候选由独立卡片改为连续列表（行间细分隔线、无卡片描边、行内 hover），每行显示检测到的 Git 分支与登记访问级别选择器（默认 `inherit`，可逐行选 `read-only` / `read-write`），选择经线协议校验后记录进 Registry 的 grant；删除原有的 inherit 说明段，footer 改用 primitives `Button` / `Menu` 下拉。共享 Registry 部署下 follower 的 `addNew` IPC 现接受三档访问级别；复用候选记录时刷新主 checkout 的分支展示（`mainHead` 仍不参与授权）（[ADR-0039 第二十二次修订](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+
+### Changed
+
+- **Worktree 发现收敛为「会话激活时一次只读检查 + 非模态提示」**：不再常驻长轮询。session 每次从空/其他会话变为有效会话时只调用一次 `worktreePrompt(..., { fresh: true })`——这是一次纯查询：不安装 watcher、不调度 owner reconcile、不写 sidecar；有候选则显示常驻非模态提示，只有点「查看」才打开确认 Dialog（此时才取全量候选并启动 wait），关闭 Dialog 不写任何状态。提示支持「稍后提醒」（直到出现新 worktree / 7 天 / 30 天）；Host 在内存中记录已展示的候选，并在每次自动检查前只读重读 owner 的提醒投影，多个 Host 的期限按 key 合并、只淘汰最旧的记录并释放认领。授权语义不变：不自动添加或删除，`addNew` 仍是唯一写路径，owner 仍完整复验（[ADR-0039 第二十次修订](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+- **Worktree 提示改为页面感知的居中卡片**：提示不再固定在右下角——Hero 页落在输入卡上方居中，对话页落在 Header 下方的内容列居中；表面随主题自适应（浅色模式浅色卡、深色模式深色卡，全部使用宿主 `--dsw-*` token），控件改用 primitives `Button` / `Menu`，删除「×」关闭按钮（「稍后提醒」本身就是关闭操作，拆分为文字按钮 + 下拉两半），粗指针或窄宽时改为两行 32px 形态，并在检测到官方瞬时 Toast 时临时下移避让；探针失败回落到 Hero 顶部居中，不再回到右下角。Workspace Folders 面板新增「Worktree 建议」手动入口，Files 页签打开的管理器也透传该入口，提示被关闭后仍可再次打开 Dialog（[ADR-0039 第二十一次修订](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+- **安装排查文档补充 DSH Desktop 插件页安装恢复路径（issue #57）**：说明插件页安装只写 `dependencies`、`dsh.profile.bundles` 由随后的「立即启用」单独写入，因此可能停在中间态；给出完全退出 Desktop 后用自带 CLI 执行 `remove` + `add` 并确认 `dsh.profile.bundles` 后再冷启动的恢复步骤，并记录「热启用会撞上仍在运行的旧 provider、冷启动不受影响」的结论（[排查](./docs/troubleshooting/desktop-install-missing-bundle.md)）。
+
+### Fixed
+
+- **新会话 Hero 入口不再把工作区行撑出输入卡**：入口此前按 label 全宽是纯加法（上游 `.heroOptions` 是 `flex: none`），列宽不足时越过输入卡右缘，视口媒体查询也不会因列宽变化触发。现在探针测量行内留给该组的余量，减去其他占用、间距与座椅内缩后以 `max-width` 夹取，label 省略号收缩；余量低于 88px 退化为 28×28 图标。探针能识别上游行结构与共享同一 slot outlet 的多个占用者；认不出结构时保持原视口回退形态，不报错、不空白（[ADR-0037 修订](./docs/decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)）。
+- **Worktree 提醒的跨 Host 与生命周期修复**：到期、淘汰、合并与残余记录都按延迟身份精确释放「已展示」认领，避免重复提示或永久隐藏；跨会话迟到的 `snooze` / `resolve` 完成不再覆盖新提示；`seen` / `snooze` / `resolve` 超过 64 个 id 时按批发送，响应列表不再被上限拒绝（[ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+
+## [0.1.19] - 2026-11-14
+
+### Added
+
+- **精确支持 DSH `0.2.2-rc.3`**：支持矩阵扩至 24 个精确版本，开发 pin 提升到 `0.2.2-rc.3`（cordis `4.1.0` / Schemastery `3.19.0`）。`rc.3` 相对 `rc.2` 的差异全部为新增：新会话行 HOC 槽、`workspace.picker` Factory 与第三个 directory-flow 洞、上传图标、默认不挂载的可选实验 bundle `dsh-deepseek-chat-import`、会话导出的附件缺失降级；插件消费的沙箱、fs、tools、session、storage、Skills、LSP、workspace-files 与 Connection 运行时源码均未变，因此未新增适配分支，open-in-app 与 files-tree 的复刻基线也保持不变（[接口审查](./docs/reference/dsh-0.2.2-migration.md#022-rc3-后续审查2026-11-13)、[ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)）。
+
 ## [0.1.18] - 2026-11-12
 
 ### Added
@@ -30,10 +74,6 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 ### Changed
 
 - **已批准的一次性 Full-access 提权现在按批准语义执行**：当用户在一次工具调用上批准 `sandbox_permissions: 'danger-full-access'` 的升级（上游 `approveEscalation` → `approval.request` 返回 `'allowed-once'`）后，该调用不再被插件的两条负授权否决——显式 `read-only` 附加根（含 standing mode 下只读的 `inherit` 根）与 `toolAccess` per-tool 封顶（含非法配置的 cap-everything）仅对该调用解除。`$DSH_HOME` 恰在无提权时本应被拒的同一条件下保持拒绝，Registry 权威 `unavailable` 的主根钳制照旧，standing Full-access 会话、并发/嵌套/后续调用、已运行进程、持久终端、面板终端与 OPS 派发均不受影响（[ADR-0036](./docs/decisions/ADR-0036-approved-escalation-override.md)）。
-
-### Security
-
-- **实验性 SSH workspace 外部评审整改**（`feat/ssh-workspace`，默认关闭、未发布）：部署清单信任链收紧（文件与每一级祖先属 root、非 symlink、不可 group/other 写；Host 与 broker 均不得 root；凭据根须 broker 属主、恰 0700、非 symlink 真实目录）；模型可见复制目的收窄为声明 `destinationIsolation: "chroot-sftp"` 的独立 sftp 账户，helper/同账号可执行环境不得作复制目的；broker 协议 3（`hello` 自报 SSH 能力、一次性 `confinementToken` 绑定受限 argv/代次/workspaceRoot、spawn 拒绝动态加载器环境键、每条 SFTP 请求复核服务端代次）；专用 profile 运行时守卫拒绝一切 `danger-full-access` 解析/策略/提权，未受票据约束的进程启动 fail-closed；远端路径遍历复核、断线 `unknown`+reconcileId 绝不重试、校验器有界清理、OpenSSH 身份解析收紧。模型入口维持关闭：聚合配额、审计轮转、吊销与 Linux/systemd/GUI 部署证据仍是开放前提（[ADR-0040](./docs/decisions/ADR-0040-credential-broker.md)、[控制面参考](./docs/reference/multi-environment-control-plane.md)）。
 
 ## [0.1.16] - 2026-11-08
 
@@ -285,7 +325,10 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.21...HEAD
+[0.1.21]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.20...v0.1.21
+[0.1.20]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.19...v0.1.20
+[0.1.19]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.15...v0.1.16

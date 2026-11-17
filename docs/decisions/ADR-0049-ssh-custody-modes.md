@@ -1,10 +1,10 @@
-# ADR-0041：SSH 远端环境的三档凭据托管模式
+# ADR-0049：SSH 远端环境的三档凭据托管模式
 
-**状态** Accepted · 2026-11-13（维护者决定）。本文在 [ADR-0040](./ADR-0040-credential-broker.md) 的 broker 托管之外，增加两档更轻的托管方式，并把三档统一到一个用户可见的设置入口。实现与验证状态归[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md)；部署与使用步骤归 [SSH 远端环境使用参考](../reference/ssh-remote-environments.md)。
+**状态** Accepted · 2026-11-13（维护者决定）。本文在 [ADR-0048](./ADR-0048-credential-broker.md) 的 broker 托管之外，增加两档更轻的托管方式，并把三档统一到一个用户可见的设置入口。实现与验证状态归[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md)；部署与使用步骤归 [SSH 远端环境使用参考](../reference/ssh-remote-environments.md)。
 
 ## 背景（Fact）
 
-- 到 2026-11-13，远端工具只能在 ADR-0040 的“硬化”部署下挂载：root 保护的部署清单、独立 broker 账户、内核认证 socket、`fullAccessDisabled` 与 `confinementProbe` 的部署证据、chroot SFTP 复制目的与独立写者。2026-11-11 的外部评审确认这条路径成立，但它要求 root、专用账户与 unit 文件，个人用户无法在 GUI 中完成。
+- 到 2026-11-13，远端工具只能在 ADR-0048 的“硬化”部署下挂载：root 保护的部署清单、独立 broker 账户、内核认证 socket、`fullAccessDisabled` 与 `confinementProbe` 的部署证据、chroot SFTP 复制目的与独立写者。2026-11-11 的外部评审确认这条路径成立，但它要求 root、专用账户与 unit 文件，个人用户无法在 GUI 中完成。
 - 维护者判断：对个人机器、一次性 VM 与可信 Agent，这套隔离的成本远高于收益。真正有价值、且与凭据托管无关的部分是：显式工具、每次 Registry 准入、清单约束（动作与传输配对）、路径校验、不覆盖发布与 `unknown` 语义。
 - 上游 `SshConnection`（`dsh-ssh` 0.2.2-rc.1/rc.2）总是以 `ssh -T -M -S <私有 socket> -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no … <host alias>` 启动 OpenSSH，从 PATH 取 `ssh`，读取用户的 `~/.ssh/config`；它不接受 `-F`、密码或额外选项。Helper（`lib/helper.js`）不是单文件：它依赖 cordis、zod 与 `dsh-fs`，远端须有与 Host 精确同版的 `@deepseek-ai/dsh-ssh` 依赖树。
 
@@ -15,7 +15,7 @@
 | 档位 | Host 凭据 | 目标账户 | 复制目的 | 部署清单来源 | 适用 |
 | --- | --- | --- | --- | --- | --- |
 | **个人**（默认） | Host 进程内直连；用户 `~/.ssh` 别名，或插件面板托管的密钥/密码 | 用户自己的账号 | 不做 chroot；只 pull，或 push 到用户自己拥有的目录 | 插件个人配置文件（用户属主） | 个人、一次性 VM、可信 Agent |
-| **团队** | broker 独立账户（ADR-0040 的 broker 与 socket 认证） | 共享构建账户 + root 只读 Helper | 必须是声明 `destinationIsolation: "chroot-sftp"` 的 SFTP 账户 | root 保护的部署清单 | 共享构建机、多人 |
+| **团队** | broker 独立账户（ADR-0048 的 broker 与 socket 认证） | 共享构建账户 + root 只读 Helper | 必须是声明 `destinationIsolation: "chroot-sftp"` 的 SFTP 账户 | root 保护的部署清单 | 共享构建机、多人 |
 | **硬化** | broker + 配额/审计/吊销 | 专用账户 + chroot + 独立写者 | chroot + 目的隔离（复制目的账户不得兼作执行） | root 保护的部署清单 | 模型开放、生产 |
 
 模式由 `multi-root-remote-tools` 设置的 `mode` 字段选择，默认 `personal`；整个功能仍由同一设置的 `enabled`（默认 `false`）开关，并在插件详情页带黄色“实验性”标签。
@@ -38,7 +38,7 @@
 
 ### 3. 团队模式
 
-沿用 ADR-0040 的 broker、socket 内核认证、凭据根不可读检查、清单摘要一致与 root 保护的部署清单。相对硬化模式放宽三项：不要求 `fullAccessDisabled` 与 `confinementProbe` 的部署记录；不安装 `remote-profile-guard`、不拒绝允许 `danger-full-access` 的 profile；`import` 绑定仍必须指向 `chroot-sftp` SFTP 目的，但不再拒绝“同 namespace + 账户另有 helper/exec 环境”（独立写者）。broker 的 socket、UID、凭据根与清单路径可在 GUI 设置中填写，也可由 profile 行配置提供。
+沿用 ADR-0048 的 broker、socket 内核认证、凭据根不可读检查、清单摘要一致与 root 保护的部署清单。相对硬化模式放宽三项：不要求 `fullAccessDisabled` 与 `confinementProbe` 的部署记录；不安装 `remote-profile-guard`、不拒绝允许 `danger-full-access` 的 profile；`import` 绑定仍必须指向 `chroot-sftp` SFTP 目的，但不再拒绝“同 namespace + 账户另有 helper/exec 环境”（独立写者）。broker 的 socket、UID、凭据根与清单路径可在 GUI 设置中填写，也可由 profile 行配置提供。
 
 接受的风险：同 UID 且拥有完全访问的 Agent 进程可以绕过 Registry 直接连接 broker socket，并把构建账户能写的任何位置作为目标。
 

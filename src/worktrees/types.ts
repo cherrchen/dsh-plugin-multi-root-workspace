@@ -74,6 +74,8 @@ export interface RepoSnapshot {
   readonly adminGitdir?: string
   /** The admin `HEAD` content without its trailing newline, linked only. */
   readonly adminHead?: string
+  /** The common `HEAD` content (the main checkout's branch), linked only. */
+  readonly commonHead?: string
   /** The primary `HEAD` content without its trailing newline. */
   readonly head: string
   /** The parsed common configuration. */
@@ -118,6 +120,8 @@ export interface WorktreePrompt {
   readonly access: 'inherit'
   /** `effectiveRootAccess('inherit', session mode)`. */
   readonly effectiveAccess: WorktreeEffectiveAccess
+  /** The branch this checkout has checked out; absent for a detached HEAD. */
+  readonly branch?: string | undefined
   /** How many candidates this session can still see, including this one. */
   readonly remaining: number
   /** Digest of this session's visible view. */

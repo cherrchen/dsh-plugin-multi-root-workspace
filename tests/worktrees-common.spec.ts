@@ -65,6 +65,7 @@ describe('A candidate', () => {
     const prompt = promptOf(await stack.worktrees.wait(stack.sessionId))
     expect(prompt.kind).toBe('main-checkout')
     expect(prompt.path).toBe(realpathSync.native(main))
+    expect(prompt.branch).toBe('main')
     expect(prompt.effectiveAccess).toBe('read-write')
     const answer = await stack.worktrees.resolve(stack.sessionId, prompt.id, 'add')
     expect(answer.prompts).toEqual([])
@@ -74,6 +75,39 @@ describe('A candidate', () => {
     // A roots never receive a B cleanup mapping.
     expect(readSidecarFile(stack.sidecarRoot, primaryKey(linked))?.worktreeRoots ?? []).toEqual([])
     expect((await stack.worktrees.wait(stack.sessionId)).status).toBe('timeout')
+  })
+
+  it('records the per-row access chosen for the confirmed candidate', async () => {
+    const area = fixture('common-access')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const stack = await mount(area, linked)
+    const prompt = promptOf(await stack.worktrees.wait(stack.sessionId))
+    const answer = await stack.worktrees.resolve(stack.sessionId, prompt.id, 'add', {
+      accesses: [{ id: prompt.id, access: 'read-only' }],
+    })
+    expect(answer.skipped).toEqual([])
+    const rows = stack.stack.registry.list(linked)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ path: realpathSync.native(main), access: 'read-only' })
+  })
+
+  it('refuses per-row access on a non-add action or for an unknown id', async () => {
+    const area = fixture('common-access-invalid')
+    const main = join(area.base, 'main')
+    const linked = join(area.base, 'linked')
+    initRepo(main)
+    git(main, ['worktree', 'add', '-q', linked, '-b', 'feature'])
+    const stack = await mount(area, linked)
+    const prompt = promptOf(await stack.worktrees.wait(stack.sessionId))
+    await expect(stack.worktrees.resolve(stack.sessionId, prompt.id, 'dismiss', {
+      accesses: [{ id: prompt.id, access: 'inherit' }],
+    })).rejects.toMatchObject({ code: 'worktree/bad-request' })
+    await expect(stack.worktrees.resolve(stack.sessionId, prompt.id, 'add', {
+      accesses: [{ id: 'unknown', access: 'inherit' }],
+    })).rejects.toMatchObject({ code: 'worktree/bad-request' })
   })
 
   it('does not offer A when the primary is a default-pool worktree', async () => {

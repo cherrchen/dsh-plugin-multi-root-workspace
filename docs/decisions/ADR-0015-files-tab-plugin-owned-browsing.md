@@ -63,6 +63,15 @@ Status 保持 **Accepted**；portal 接管、`:has()` 守卫、open-in-app 复�
 - **代价**：第二份有同步义务的源码副本（FORK.md 钉住清单、delta 与 diff 步骤）；`dsh-util-workspace-path`、`dsh-api-remotes` 的类型面与 `dsh-typert-protocol` 的 `RemoteError` 进入 client bundle 的 `alwaysBundle` 内联集，bundle 测试随之钉住；新增 devDep `dsh-client-ui-dockkit`（`TabId`）、`dsh-util-workspace-path`、`dsh-api-remotes` 与 `dsh-client-ui-session`（`SessionId` 合并），全部钉在 dev pin。
 - **附带收益**：附加根树获得原生 watch 自动刷新（`ready`/`change` 帧驱动 `DirectoryNode.refresh`，自绘树没有的能力）、scroll/展开态按 tab id 记忆、`loading`/`empty`/`truncated`/失败行与原生一致、目录懒加载语义完全一致。
 
+## 修订：Files 页被整页接管时的可见提示（2026-11-15）
+
+Status 保持 **Accepted**；静默退化模型不变，新增的是它的**唯一可见性例外**：第三方插件以 `priority: 'extension'` 接管整个 `files` tab kind（例如 dsh-better-sidebar）时，宿主 `FilesBody` 不再渲染，本插件的 `RootSwitcher` 虽然照常注册却永远不会挂载——这条失效路径连 `data-*` 钩子的静默退化都走不到（seat 组件根本不渲染），用户看到的是「插件没生效且没有任何提示」（[Issue #47](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/issues/47)）。
+
+- **检测源是 tab 注册表的生效实现，不是槽位声明**：`sidebar.right.tab.files.actions` 由 `ui-sidebar-files` 注册 `FilesBody` 时通过 `children` 在启动时声明；接管发生时该槽仍是 declared，`slots.inject` 与 `spec()` 都不会报错。因此只读 `ctx.sidebarRightTabs.get('files')` 的生效定义，判据是声明 band（`priority === 'builtin'`）与实现 id（`@deepseek-ai/dsh-client-ui-sidebar-files`）双重兜底；服务、方法或定义任一缺失都按「无接管」静默（没有 Files 页的旧版本必须不提示）。探测在 `src/compat/files-page.ts`，结构读取、不做版本字符串比较。
+- **提示是 info 级瞬时 Toast**：经 `shell.overlay` 挂官方 primitives `Toast`，**不传 `icon`、不传 `tone`**——该原语的 icon 座席带 warning 色，省略才是比 warning 更低一级的呈现；`holdMs` 5 秒后自行淡出。文案走本插件词典。只弹一次：同一接管实现 id 只提示一次，接管解除后重置，之后再次接管可再提示。接线与组件在 `src/client/files-page-notice.tsx`。
+- **不改变既定范围**：不做 Issue #47 的方案 1（对话框/命令输出文案）与方案 2/3（footer fallback、自有 tab kind）；不改 `RootSwitcher`、视觉接管、host/RPC/权限与支持矩阵。接管期间 footer 的 Workspace Folders 入口照常管理根。
+- **版本面**：`sidebarRightTabs` 自 `0.1.5-rc.2` 起存在，`get`/`subscribe` 从 `0.2.0-rc.2` 起可用；`files` kind 与 `shell.overlay` 同自 `0.2.0-rc.2` 起存在，因此提示只可能出现在有 Files 页的版本上。服务缺席（裁剪组合）时 `ctx.inject` 永不触发，不报错。
+
 ## Related Documents
 
 - [Files 头部根浏览计划](../plans/completed/2026-10-12-files-header-root-browsing.md)

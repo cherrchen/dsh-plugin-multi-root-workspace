@@ -23,7 +23,7 @@ Architecture Decision Records（ADR），用于记录重要架构与工程决策
 - [ADR-0003-dialect-grant-widening.md](./ADR-0003-dialect-grant-widening.md) — 方言 grant 拼接策略：结构识别 + 观测克隆 + 已授予跳过 + 识别失败即抛错（Accepted）。
 - [ADR-0004-root-registry-persistence-and-validation.md](./ADR-0004-root-registry-persistence-and-validation.md) — Root 注册表：以 canonical 主根为键的 domain KV、校验顺序、嵌套拒绝、missing 不授予、存储损坏降级（Accepted）。
 - [ADR-0005-out-of-tree-client-transport.md](./ADR-0005-out-of-tree-client-transport.md) — 出树 client 半部：Connection RPC 通道 + `sidebar.footer.action` 面板 + 复用上游目录选择能力，不用 Typert 远程命名空间（Accepted）。
-- [ADR-0006-client-ui-host-tokens.md](./ADR-0006-client-ui-host-tokens.md) — 客户端 UI 复刻宿主原生样式：注入样式表消费宿主 `--dsw-*` token，插件零硬编码颜色（Accepted）。
+- [ADR-0006-client-ui-host-tokens.md](./ADR-0006-client-ui-host-tokens.md) — 客户端 UI 复刻宿主原生样式：注入样式表消费宿主 `--dsw-*` token，插件零硬编码颜色（Accepted；2026-11-16 修订：确认层 `Modal`/瞬时 `Toast` 可直接 import primitives，见决策 7）。
 - [ADR-0007-registry-authority-lease.md](./ADR-0007-registry-authority-lease.md) — 跨进程 Registry Authority：store-wide 内核 lease、争用 fail-closed、`refresh()` 接管（Accepted）。
 - [ADR-0008-panel-session-derived-authority.md](./ADR-0008-panel-session-derived-authority.md) — 面板主根由 host session cwd 推导：删除客户端 `primaryRoot`，每个端点要求有效 `sessionId`（Accepted）。
 - [ADR-0009-dsh-compat-contract.md](./ADR-0009-dsh-compat-contract.md) — DSH 兼容性代码契约：精确版本 allowlist、`multi-root-compat` 启动门禁、混装 fail loud、`src/compat/` 适配层、按周升级车道不自动扩大矩阵（Accepted）。
@@ -51,7 +51,7 @@ ADR-0001-short-title.md
 ADR-0002-short-title.md
 ```
 
-编号递增，标题使用小写中划线。ADR-0030–0034 与 ADR-0040–0041 已分配给 `feat/ssh-workspace` 分支；主线在 ADR-0029 之后直接使用 0035 起跳，跳号属有意保留而非缺失。ADR-0040 原在分支上编号为 0039，与主线的 worktree ADR 撞号后在 rebase 时改号。
+编号递增，标题使用小写中划线。ADR-0030–0034 已预留给 Issue #32，因此主线在 ADR-0029 后从 ADR-0035 起编号。合并 main 后，SSH 凭据代理与托管模式分别使用 ADR-0048 和 ADR-0049（分支原编号为 0040 和 0041）。新增 ADR 前扫描全部分支确认编号可用。
 
 - [ADR-0022-auto-review-loader-entry.md](./ADR-0022-auto-review-loader-entry.md) — Auto Review 并入主包：默认关闭的单一 loader 行、运行时接管、并发导入防护、有序 owner 交接与单包构建（取代 ADR-0021 的交付结构）。
 
@@ -73,11 +73,24 @@ ADR-0002-short-title.md
 
 - [ADR-0036-approved-escalation-override.md](./ADR-0036-approved-escalation-override.md) — 用户单次批准的一次性 `danger-full-access` 提权只对该调用解除只读根与 per-tool 封顶拒绝（`$DSH_HOME` 与 authority-unavailable 除外）；standing Full-access、嵌套/后续调用与 OPS 派发不受影响（Accepted）。
 
-- [ADR-0037-conversation-hero-workspace-folders-entry.md](./ADR-0037-conversation-hero-workspace-folders-entry.md) — 新会话 Hero 行的 Workspace Folders 增量入口：`conversation.hero.options`（`0.2.1-alpha.3+`）注册、与相邻选择器同几何但无 chevron、`≤560px` 视口图标降级、会话权威取槽属性；侧栏 `Folders` 入口保留，退役 Deferred（Accepted，已实施并验证）。
+- [ADR-0037-conversation-hero-workspace-folders-entry.md](./ADR-0037-conversation-hero-workspace-folders-entry.md) — 新会话 Hero 行的 Workspace Folders 增量入口：`conversation.hero.options`（`0.2.1-alpha.3+`）注册、与相邻选择器同几何但无 chevron、会话权威取槽属性；侧栏 `Folders` 入口保留，退役 Deferred。**2026-11-14 修订**：`.heroOptions` 是 `flex: none`，入口改为实测行内可用余量并夹取（余量 < 88px 只留图标），视口断点仅作探针失败时的兜底（Accepted，已实施并验证）。
 
 - [ADR-0038-workspace-menu-folders-dialog.md](./ADR-0038-workspace-menu-folders-dialog.md) — 工作区 `...` 菜单的「管理工作区目录…」入口：经 apply 作用域的 dialog controller 复用 footer 对话框，当前 session 属于目标时直接打开、否则先经 `uiWorkspace.openWorkspace` 切换并确认 current；服务缺失置灰，`RootSwitcher` 零改动（Accepted，实施见计划）。
 
-- [ADR-0039-worktree-aware-root-suggestions.md](./ADR-0039-worktree-aware-root-suggestions.md) — 先做 worktree 附加根建议与手动清理（B），再做 linked worktree 的主 checkout 授权（A）。共用实验性、默认关闭的插件设置；提示按可见候选数量分流为单确认或勾选列表。Accepted，2026-11-10 第十九次修订；实施状态见路线账本。
+- [ADR-0039-worktree-aware-root-suggestions.md](./ADR-0039-worktree-aware-root-suggestions.md) — 先做 worktree 附加根建议与手动清理（B），再做 linked worktree 的主 checkout 授权（A）。共用实验性、默认关闭的插件设置；提示按可见候选数量分流为单确认或勾选列表。Accepted，2026-11-16 第二十六次修订；实施状态见路线账本。面板清理确认、`cleanupEligible` 徽标/副行呈现、路径复用提示位置拟由 [ADR-0045](./ADR-0045-worktree-cleanup-panel-ui.md)（Proposed，接受后生效）取代，授权、分类与生命周期结论不变。
+
+- [ADR-0040-auto-review-multi-baseline.md](./ADR-0040-auto-review-multi-baseline.md) — Auto Review 联合合同从单一精确发布扩展为两个源码基线的 9 个精确发布：按基线保存逐字节 fork、按车道动态加载、按编译 pin 做实现类型检查、alpha.2 请求身份例外与约束插入位置（Accepted，修订 ADR-0021/0022 的单基线结论）。
+
+- [ADR-0041-additional-root-workspace-search.md](./ADR-0041-additional-root-workspace-search.md) — 附加根工作区搜索：上游 wire 无法命名根，故在插件通道上新增 `search` 端点（rootId 由刷新后的 Registry 解析、单次主根准入、帧内复核授予）；客户端按 `workspaceFiles.search` 结构门控，状态按 (tab, root) 存 inject product，偏好沿用上游 localStorage 键；旧宿主零影响（Accepted，实施见计划）。
+
+- [ADR-0042-additional-root-row-context-menus.md](./ADR-0042-additional-root-row-context-menus.md) — 附加根 Files 行右键菜单与 viewer 置灰：结构读取根级 `useContextMenu` 并把 `rowTriggerProps`/`canOpen` 转发进宿主 Factory（旧行同语义），target 用绝对路径；不新增 `ui-context-menu` 依赖（upgrade 矩阵会改写 devDep 致老 lane 安装失败）（Accepted，实施见计划）。
+
+- [ADR-0043-additional-root-preview-navigator-search.md](./ADR-0043-additional-root-preview-navigator-search.md) — 附加根文件预览导航树的工作区搜索：复用 ADR-0041 的 `search` 端点与 Files 页搜索面（`FilesPane` 新增 preview 模式），接管期由插件面替代原生搜索栏（原生搜索根固定为 Session cwd）；结果当前行、隐藏项默认、设置回焦与焦点交接对齐原生；同批修复 `RootSwitcher` 换根搜索的过渡帧缺陷；旧宿主与主根零变化（Accepted，2026-11-16 外部评审 F1–F3 已并入；实施见计划）。
+- [ADR-0044-sidebar-footer-row-alignment-and-coexistence.md](./ADR-0044-sidebar-footer-row-alignment-and-coexistence.md) — 侧栏 footer 入口改用 workspace tree 字形；一份「宿主 token + 旧值 fallback」的配方同时对齐 19 个旧几何版本与 5 个新几何版本（分界 `0.2.2-alpha.2`）；rail 圆角按其更早的 `0.1.6-alpha.2` 分界处理（22/24 对齐，最老 2 版已知偏差）；本入口挂载期间把 `sidebar.footer.action` 的 slot anchor 改为纵向列，使同槽第二行各占一整行（不隐藏、不读槽账本、不改他人行；让位方案与原因见 ADR 正文）；修订二让按钮高度跟随可见设置行 occupant（`0.2.0-rc.1` 起账号 launcher 未登录 32 / 登录 44，旧代 42 回退，rail 36），使 footer 两行 hover 药丸同尺寸（Accepted，实施见计划）。
+
+- [ADR-0046-files-header-rootswitch-shrink-priority.md](./ADR-0046-files-header-rootswitch-shrink-priority.md) — Files 页头 `RootSwitcher` 的窄宽让位优先级：收缩能力必须写在参与 header 外层 flex 的 `Menu` anchor 包装上（`min-width: 0`）；固定控件不动，完整路径以零 basis 先让到 0，根名随后省略，触发器图标最后裁剪。取代「只给内层按钮写 `min-width: 0`」的无效写法；24 个受支持发布的 `Menu.className` 逐 tag 核对，无版本分支（Accepted，实施见计划）。
+
+- [ADR-0045-worktree-cleanup-panel-ui.md](./ADR-0045-worktree-cleanup-panel-ui.md) — Workspace Folders 面板的 Worktree 清理 UI 与失效行收敛：批量清理入口移到「附属工作目录」标题行、确认改为覆盖在面板上的 primitives `Modal`、`cleanupEligible` 行只留标题/权限/路径 + 红色删除 + `...`（移除技能/reveal/重新登记与行内提示，路径复用披露移入确认层）、手动发现空结果用官方 info Toast；取代 ADR-0039 §3.2 的 deletion 徽标呈现（仅 cleanupEligible 行）、§6.2 的徽标/副行呈现与确认形态、§6.5 的提示位置与 Alternatives 的清理弹窗否决（Proposed；外部技术评审 2026-11-16 通过、无阻断项，转 Accepted 由维护者决定）。
 
 ## Issue #32 · 多执行环境架构决策
 
@@ -86,5 +99,5 @@ ADR-0002-short-title.md
 - [ADR-0032](./ADR-0032-upstream-ssh-backend.md) — DSH 官方 SSH 后端的公开入口、分发与平台边界 (Accepted).
 - [ADR-0033](./ADR-0033-remote-command-and-sandbox.md) — 显式远端命令、沙箱与取消语义 (Accepted).
 - [ADR-0034](./ADR-0034-binary-transfer.md) — 跨环境二进制复制的授权、发布与失败语义 (Accepted).
-- [ADR-0040](./ADR-0040-credential-broker.md) — 独立 OS 账户托管 SSH 连接的本机凭据代理、认证与证明条件 (Proposed).
-- [ADR-0041](./ADR-0041-ssh-custody-modes.md) — SSH 远端环境的三档凭据托管：personal（Host 进程内直跑官方栈、用户凭据）、team（broker 托管、放宽部署证明）、hardened（ADR-0040 全量证据）(Accepted).
+- [ADR-0048](./ADR-0048-credential-broker.md) — 独立 OS 账户托管 SSH 连接的本机凭据代理、认证与证明条件 (Proposed).
+- [ADR-0049](./ADR-0049-ssh-custody-modes.md) — SSH 远端环境的三档凭据托管：personal（Host 进程内直跑官方栈、用户凭据）、team（broker 托管、放宽部署证明）、hardened（ADR-0048 全量证据）(Accepted).

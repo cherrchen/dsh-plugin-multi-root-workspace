@@ -12,31 +12,33 @@
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 默认把新建工作区所在的目录作为 Agent 的主目录，在默认的工作区读写模式（`workspace-write`）下，沙箱的读写范围也仅覆盖这一个目录。本插件将 DSH 的工作区范围拓展到“一个主目录 + 多个附加目录”。
 
-并非所有项目都是 monorepo。一个开发项目往往由多个独立 Git 仓库组成，跨仓库干活原本得反复换会话。同类工具早已支持在一个工作区添加多个文件夹，本插件把同样的能力带给 DSH：把其他仓库登记为附加根，并按需授予只读、读写或不受限的访问级别，Agent 即可在授权范围内读写。
+并非所有项目都是 monorepo。一个开发项目往往由多个独立 Git 仓库组成，跨仓库干活原本得反复换会话。同类工具早已支持在一个工作区添加多个文件夹，本插件把同样的能力带给 DSH：把其他仓库登记为附加根，并按需设为只读、读写或跟随会话当前的权限，Agent 即可在授权范围内读写。
 
-- **不新增工具**：Agent 照旧使用原生 `read` / `write` / `edit` / `bash`，只是授权的目录变多了。
-- **沙箱约束**：附加根可继承会话（主目录）的权限设置，也可单独固定为只读或读写；在只读与读写下，约束不靠系统提示词，而由进程内文件围栏 + 内核级沙箱（macOS Seatbelt / Linux bwrap / Landlock / Windows ACL）执行，经本插件围栏的原生文件与 bash 共享同一份授权范围；自行启动 Worker 的第三方工具须单独验证，dsh-ops 的现存缺口见下方已知限制。
-- **Files 页签浏览附加根**：Files 页签头部可直接在主根与任一已登记附加根之间切换，附加根的目录树以与主根相同的原生 Files 视图呈现，打开文件、在外部应用打开、自动刷新等操作完全一致；文件预览页的 Folder 导航树同样落在被预览文件所在的根，定位、展开与高亮与原生一致。
-- **可选 Auto review（默认关闭）**：fork 上游实验性「自动授权审查」，向 Reviewer 补充附加目录的审查上下文——当前工作区拓扑、各根访问级别与实时指令文件；出厂关闭，需在插件管理器的行列表中显式打开 `@dsh-electron/dsh-plugin-multi-root-workspace/auto-review` 行后生效，启用时接管官方同名 bundle。
-- **附属根 Skills**：发现附属目录的 `.dsh/skills` 与 `.agents/skills`，附属根经 `/alias-id:skill-name` 命名空间调用原生 `skill` 工具；每根独立开关、可编辑 `aliasId`，全局设置默认开启。
-- **Worktree 附加根建议（实验性，默认关闭）**：primary 是 Git main 或 linked checkout 时，发现同 common 的其他 worktree，经用户确认后把其源码树登记为 `inherit` 附加根；发现只读取插件自己解析的 Git 元数据，不启动 Git 子进程、不自动增删。linked worktree 还可显式授权主 checkout 根，补齐受限 `git add` / `git commit` 的共享元数据写入缺口（[ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)）。
+- **沿用原生工具**：在本地工作区，Agent 照旧使用原生 `read` / `write` / `edit` / `bash`，只是多了几个可访问的目录。
+- **权限真正生效**：每个附加根可以设为只读、读写，或跟随当前会话的权限；限制由系统沙箱实际执行，而不是靠提示词提醒模型。Agent 的文件操作和 bash 命令适用同一套授权；由其他插件自行启动的进程不在这一保证内。
+- **在 Files 页签里浏览附加根**：Files 页签顶部可以在主根和任一附加根之间切换；附加根的目录树、打开文件、在外部应用打开、右键菜单、自动刷新和搜索都与主根一致，文件预览页的目录导航也会定位到文件所在的根。宿主版本较旧时，这些界面操作可能不可用，附加根仍按宿主原本的方式显示。
+- **附加根的 Skills**：自动发现附加根中的 `.dsh/skills` 和 `.agents/skills`，可用 `/别名:技能名` 调用；每个根可单独开关，默认开启。
+- **Auto Review（实验性，默认关闭）**：在插件管理器中手动开启后，自动审查也会看到附加根的目录结构、访问级别和指令文件，把附加根一并纳入审查。
+- **Worktree 建议（实验性，默认关闭）**：主根是 Git worktree 时，插件会提示把同一仓库的其他 worktree 添加为附加根；只有你确认后才会登记，不会自动增删。
 - **SSH 远端环境（实验性，默认关闭，未发布）**：插件详情卡的"SSH 远端环境"开关（实验性警示标签，开启需风险确认）按部署清单打开 Registry 远端控制面；配合部署方提供的 broker 凭据隔离证明后，Agent 获得 `remote_copy` / `remote_bash`；Workspace Folders 面板显示远端工作区列表并提供独立的 SSH 远端管理对话框，每次调用仍经 Registry 准入。开关关闭时无任何模型可见的远端能力。
-- **不配等于没装**：未登记附加根时行为与未装插件逐项一致；配置错误一律明确报错，从不静默降级。
+- **不登记等于没装**：没有附加根时，行为和未安装插件完全一致；配置有误会直接报错，不会悄悄降级。
 
-当前发布版本 `v0.1.18`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
+当前发布版本 `v0.1.21`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
 
-插件已发布到 [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace)。在 DSH 侧栏的**插件**页点**添加插件**、填入包名 `@dsh-electron/dsh-plugin-multi-root-workspace` 即可安装；也可以用命令行两步装完：
+插件已发布到 [npm](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace)。命令行 profile（`web` / `headless` 等）用两步装完：
 
 ```sh
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 dsh --profile web       # --profile 按你的启动方式选择，可选值见 DSH 文档
 ```
 
+**DSH Desktop 用户**：如果插件页显示已安装，但 `dsh.profile.bundles` 里没有本包，或一启用就报 `fs` / `sandbox` 重复注册，请按[安装](#安装)的 DSH Desktop 小节用 Desktop 自带的 `dsh` 恢复并冷启动。
+
 tarball、GitHub、本地源码等其他安装方式见[安装](#安装)。
 
-启动后侧栏底部出现 **Folders**（`🗂`）动作；在 DSH `0.2.1-alpha.3` 及更新的运行时上，新会话页工作区行右端也会出现同一入口（与相邻的工作区/模式选择器同高同字号，无下拉箭头，窄窗口只显示图标）。也可以直接在会话里：
+启动后侧栏底部出现 **Folders** 动作（workspace tree 字形；行几何与宿主设置触发行逐像素对齐，见 [ADR-0044](./docs/decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)）；在 DSH `0.2.1-alpha.3` 及更新的运行时上，新会话页工作区行右端也会出现同一入口（与相邻的工作区/模式选择器同高同字号，无下拉箭头，窄窗口只显示图标）。也可以直接在会话里：
 
 ```text
 /workspace-folders add ~/code/another-repo [--inherit|--read-only|--read-write]
@@ -55,35 +57,49 @@ tarball、GitHub、本地源码等其他安装方式见[安装](#安装)。
 | `0.1.7` | `0.1.7-alpha.1`、`0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2` |
 | `0.2.0` | `0.2.0-rc.1`、`0.2.0-rc.2` |
 | `0.2.1` | `0.2.1-alpha.1`、`0.2.1-alpha.2`、`0.2.1-alpha.3`、`0.2.1-alpha.4`、`0.2.1-alpha.5`、`0.2.1-rc.1`、`0.2.1-rc.2`、`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5` |
-| `0.2.2` | `0.2.2-alpha.2`、`0.2.2-alpha.3`、`0.2.2-rc.1`、`0.2.2-rc.2` |
+| `0.2.2` | `0.2.2-alpha.2`、`0.2.2-alpha.3`、`0.2.2-rc.1`、`0.2.2-rc.2`、`0.2.2-rc.3` |
 
 DSH 版本不在表内、或 `@deepseek-ai/dsh-*` 各包版本不一致时，插件不会启动，行为等同没装。
 
-**从源码构建 / 贡献**：Node.js `^22.19.0 || >=24`，pnpm `11.25.0`（建议经 corepack 启用）；开发 pin 的 DSH 为 `0.2.2-rc.2`（Node ≥24.9）。
+**从源码构建 / 贡献**：Node.js `^22.19.0 || >=24`，pnpm `11.25.0`（建议经 corepack 启用）；开发 pin 的 DSH 为 `0.2.2-rc.3`（Node ≥24.9）。
 
 **运行平台**：macOS（Seatbelt）、Linux（bwrap / Landlock）、Windows（root-set ACL runner）。
 
 ## 安装
 
-不使用命令行时，DSH 侧栏的**插件**页提供同一安装入口：点**添加插件**，填入 npm 包名（或 Git 地址、tarball、本地绝对路径）。
+### DSH Desktop：用自带 CLI 安装或恢复
 
-`dsh plugin` 支持四种安装来源。以下均以 web profile 为例；桌面端（Electron）把 `--profile web` 换成 `--profile desktop`，安装方式同源。
+DSH Desktop 的插件页和 CLI **不是等价入口**：插件页的「添加插件」可能只写 `dependencies`，`dsh.profile.bundles` 由随后的「立即启用」单独写入；在运行中的宿主里热启用本插件还可能撞上旧 provider 的重复注册。
+
+1. 完全退出 Desktop，包括托盘图标。
+2. 在命令行中使用 Desktop 安装目录内 `resources/runtime/cli/bin` 随附的 `dsh`（必要时把该目录加入 `PATH`）。新装：
+   ```sh
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.21
+   ```
+3. 已安装但缺少 bundle 登记：先 `remove` 再 `add`（只重跑 `add` 不会补登记）：
+   ```sh
+   dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.21
+   ```
+4. 打开 `$DSH_HOME/profiles/desktop/package.json`（未设置 `DSH_HOME` 时通常是 `~/.dsh/profiles/desktop/package.json`），确认 `dsh.profile.bundles` 包含本包。
+5. 重新打开 Desktop（冷启动）。
+
+首次安装不再需要为 `koffi` 补 `allowBuilds`：koffi 由宿主提供，本插件把它声明为可选 peer。若 `add` 退出 0 但插件没有进入 `dsh.profile.bundles`，执行一次 `remove` + `add`。热启用冲突的原因、复现记录和实际写入者调查见[故障排查](./docs/troubleshooting/desktop-install-missing-bundle.md)。
+
+### CLI profile 的四种安装来源
+
+`dsh plugin` 支持四种安装来源。以下均以 `web` profile 为例；`headless` 等 CLI profile 同理。DSH Desktop 请使用上一节的 `dsh` 和 `desktop` profile；用 npm 安装的 `dsh` 不能管理 Desktop 的保留 profile。
 
 | 来源 | 命令 | 说明 |
 | --- | --- | --- |
 | npm 注册表（推荐） | `dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace` | 预构建产物，即装即用 |
-| GitHub | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | 安装时自动从源码构建；`allowBuilds` 需含本包，建议锁定版本 |
+| GitHub | `dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace` | 安装时自动从源码构建；`allowBuilds` 需含本包的 exact key，建议锁定版本 |
 | tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | 预构建离线包，适合内网/离线 |
 | 从源码安装 | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` 链接本地 checkout，适合开发调试；无需 `allowBuilds` |
 
-**首次安装时 `dsh plugin add` 会以 `[ERR_PNPM_IGNORED_BUILDS]` 失败**：在该 profile 的 `pnpm-workspace.yaml` 里补上下面这行，再执行一次 `add` 即可：
+**npm、tarball 与本地路径安装不需要任何 `allowBuilds`**：插件不在生产依赖里携带带构建脚本的包（`koffi` 由宿主提供）。git 来源仍需为本包自身的 `prepare` 授权，但 pnpm 只接受含来源与 commit 的 exact key——按[从 GitHub 安装](#从-github-安装)里 pnpm 打印的那一行原样写入；只写包名不生效。
 
-```yaml
-allowBuilds:
-  koffi: true
-```
-
-如果重跑 `退出 0` 但插件没有进入 `dsh.profile.bundles`，做一次 `remove` + `add`。更多排查见[故障排查](./docs/troubleshooting/install-stops-at-build-approval.md)。
+若 `add` 退出 0 但插件没有进入 `dsh.profile.bundles`，做一次 `remove` + `add`。更多排查见[故障排查](./docs/troubleshooting/install-stops-at-build-approval.md)。
 
 ### 从 npm 安装（推荐）
 
@@ -91,18 +107,18 @@ allowBuilds:
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-安装的是预构建产物，首次安装需要添加 `allowBuilds`。
+安装的是预构建产物，不需要构建授权。
 
 ### 从 tarball 安装
 
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.18/dsh-electron-dsh-plugin-multi-root-workspace-0.1.18.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.18.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.21/dsh-electron-dsh-plugin-multi-root-workspace-0.1.21.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.21.tgz
 ```
 
-同样是预构建产物，适合内网或离线环境交付；首次安装同样需要添加 `allowBuilds`。
+同样是预构建产物，适合内网或离线环境交付；同样不需要构建授权。
 
 ### 从 GitHub 安装
 
@@ -110,18 +126,19 @@ dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.
 dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace
 ```
 
-GitHub 来源装的是源码，`add` 时会自动构建，不需要手动编译；但 `allowBuilds` 要写两行——本包自身和 `koffi`：
+GitHub 来源装的是源码，`add` 时会自动构建，不需要手动编译；pnpm 会拦下本包自身的 `prepare`，并打印一行 exact key（含来源与 commit）。把那一行原样写进 `allowBuilds` 后重跑 `add`：
 
 ```yaml
 allowBuilds:
-  '@dsh-electron/dsh-plugin-multi-root-workspace': true
-  koffi: true
+  # 键与值都来自 pnpm 报错中 “Add the package to allowBuilds” 的示例；
+  # 只写包名、不带来源与 commit 的键对 git 来源不生效。
+  '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
-建议锁定版本（如 `#v0.1.18`），让后续推送无法悄悄改变实际运行的内容：
+建议锁定版本（如 `#v0.1.21`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.18
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.21
 ```
 
 ### 从本地源码安装
@@ -203,7 +220,7 @@ dsh --profile web --dump-config | grep -A3 'multi-root'
   name: '@dsh-electron/dsh-plugin-multi-root-workspace'
 ```
 
-即上游 `fs-sandbox` 与 `sandbox` 两行被禁用、由插件同名服务接管，插件自身的 `multi-root-*` 行全部挂载。启动后侧栏底部会出现 **Folders** 动作；DSH `0.2.1-alpha.3` 及更新的运行时还会在新会话页工作区行右端显示同一入口。
+即上游 `fs-sandbox` 与 `sandbox` 两行被禁用、由插件同名服务接管，插件自身的 `multi-root-*` 行全部挂载。启动后侧栏底部会出现 **Folders** 动作（workspace tree 字形）；DSH `0.2.1-alpha.3` 及更新的运行时还会在新会话页工作区行右端显示同一入口。
 
 ## 使用方法
 
@@ -251,19 +268,21 @@ Settings → Plugins → Multi-root Workspace 中的 **启用附属根 Skills** 
 
 ### Worktree 附加根建议（实验性，默认关闭）
 
-primary root 本身是 Git main 或 linked checkout 根时，插件会发现与本仓库共享 common git dir 的其他 worktree —— 包括会话开始前就存在、由终端、IDE、forge 或其他 DSH 创建的 —— 并在用户确认后把该 worktree 的源码树登记为 `inherit` 附加根。发现只读取插件自己打开并解析的 Git 元数据（`.git` 指针、admin、common 的 config/HEAD/index 与完整祖先链），**不启动任何 Git 子进程，也不解析 commit 对象**，并且**不会自动添加或删除**。该功能**实验性、默认关闭**，需在插件详情卡显式开启。
+primary root 本身是 Git main 或 linked checkout 根时，插件会发现与本仓库共享 common git dir 的其他 worktree —— 包括会话开始前就存在、由终端、IDE、forge 或其他 DSH 创建的 —— 并在用户确认后把该 worktree 的源码树登记为附加根（默认 `inherit`，可逐行选择权限）。发现只读取插件自己打开并解析的 Git 元数据（`.git` 指针、admin、common 的 config/HEAD/index 与完整祖先链），**不启动任何 Git 子进程，也不解析 commit 对象**，并且**不会自动添加或删除**。该功能**实验性，默认关闭**，需在插件详情卡显式开启。
 
 默认 pool 没有特殊规则：主仓库作为 primary 时 `.agents/worktrees/<id>` 位于 primary 内，按既有包含规则过滤；primary 本身是 pool worktree 时，兄弟 worktree 仍是候选（仍受登记、上限与「不再提示」约束）。submodule（含 linked worktree 本身是 submodule）、bare 派生的 linked worktree、`--separate-git-dir` 主 checkout、`extensions.worktreeConfig`、`core.repositoryformatversion=1` / `--relative-paths` 以及 split/sparse index 一律不提示。
 
-提示按 workspace 共享、按 session 的沙箱模式过滤：读写会话可确认读写，只读会话显示只读但登记策略仍是 `inherit`，Full-access 不提示。**恰好一个可见候选时显示原确认对话框；两个及以上时显示可勾选的列表**（B 默认勾选，A 默认不勾且内联披露），一次确认多个目录。登记是 workspace 级的，**其他读写会话也会获得该目录的写权限**，对话框会明确说明。确认后由 Registry owner 在既有串行队列内再次复验 primary/candidate、primary/common/admin 的 HEAD 语法与目录身份；等待期间任何变化都会让该项失效（`worktree/prompt-stale`），列表中的其余项继续处理，失效项保持未登记。
+提示按 workspace 共享、按 session 的沙箱模式过滤：读写会话可确认读写，只读会话显示只读，Full-access 不提示。确认 Dialog 加宽到适合一行放下名称、路径、分支和权限；候选改为连续列表（不再每个 worktree 一张卡片），每行显示文件夹名、绝对路径、检测到的 Git 分支（detached HEAD 不显示）和登记权限选择器；权限默认 `inherit`，可逐行改为只读或读写。**恰好一个可见候选时仍显示单个确认行；两个及以上时显示可勾选列表**（B 默认勾选，A 默认不勾且内联披露），一次确认多个目录。登记是 workspace 级的，**其他读写会话也会获得所选权限**，主 checkout 行会明确披露影响范围；确认后由 Registry owner 在既有串行队列内再次复验，并按每行选择的权限写入登记；复验覆盖 primary/candidate、primary/common/admin 的 HEAD 语法与目录身份；等待期间任何变化都会让该项失效（`worktree/prompt-stale`），列表中的其余项继续处理，失效项保持未登记。
 
-worktree 被删除或移动后，Workspace Folders 面板会显示徽标；**永不自动清理**。只有登记路径被确认缺失（`ENOENT`/`ENOTDIR`）且 `rootId + path + addedAt` 仍匹配时，面板才提供逐条或批量清理；目录仍存在、无法访问，或旧 admin 消失但 checkout 仍有效时只提供普通 Remove。缺失根会继续占用 `maxAdditionalRoots`，直到清理或手动移除；清理前，同一路径出现的新目录可能继承旧授权，面板会显示该提示。
+发现提示本身是非模态常驻卡片：新会话（Hero）页显示在顶部居中，纵向与官方 Toast 对齐，官方瞬时 Toast 出现时临时下移避让；对话页显示在 Header 下方的水平居中位置，不再占用输入框所在的右下角。卡片随主题明暗切换；操作为「查看」和「稍后提醒」拆分按钮（外围与中间分割线同为一条细线）：左半文字按钮直接应用默认档位（直到出现新 worktree），右半 chevron 按钮打开下拉（直到出现新 worktree / 7 天后 / 30 天后）；选择后即关闭提示。卡片右上角另有一个正圆关闭按钮：它只关闭本次提示、不写任何提醒状态（本 Host 生命周期内不再自动提示，重启后候选重新可见），与写持久延迟的「稍后提醒」和写 ignore 的「永久不再提示」区分。提示关闭后，可从 Workspace Folders 面板「重试」右侧的「Worktree 建议」重新打开确认面板；手动入口在没有任何可添加候选时，面板关闭后会以官方 info Toast 提示「当前没有可添加的 Worktree。」（自动会话激活的空结果仍静默）。
+
+worktree 被删除或移动后，Workspace Folders 面板会显示徽标；**永不自动清理**。只有登记路径被确认缺失（`ENOENT`/`ENOTDIR`）且 `rootId + path + addedAt` 仍匹配时，面板才提供清理：批量入口在「附属工作目录」标题右侧（仅当存在可清理项时出现），每条可清理行末尾另有红色删除按钮，两者打开同一个覆盖在面板上的确认 Dialog（标题、数量、不可撤销说明、取消与确认）。这类失效行只保留 显示名 + 权限徽标（通常显示「不可用」）+ 路径 + 红色删除 + `…` 菜单；不再显示状态橙字、路径复用提示、技能开关、reveal 与重新登记，目录重新出现后由下一次面板刷新按 Registry 的路径级恢复重新分类。目录仍存在、无法访问，或旧 admin 消失但 checkout 仍有效时只提供普通 Remove，行内容不变。缺失根会继续占用 `maxAdditionalRoots`，直到清理或手动移除；**清理前，同一路径出现的新目录可能继承旧授权**——该风险改为在删除确认 Dialog 中披露（单条与批量各有对应文案），不再常驻列表。
 
 Settings → Plugins → Multi-root Workspace 同一张设置卡中的 **启用 Worktree 附加根建议** 带“实验性”Tag，**默认关闭**，与「启用附属根 Skills」相互独立；只有显式开启后才进行发现、提示与专用清理。关闭后已有登记根仍按普通根管理。决策与验收边界见 [ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md)。
 
 ### 主 checkout 授权（A）
 
-当 session 的 workspace 本身是 linked worktree、且当前为 `workspace-write` 时，插件会提示把该仓库的**主 checkout 根 `<main>`（共享 common 的父目录，通常是主 checkout 的源码根）**登记为 `inherit` 附加根。对话框明确显示实际路径与范围：主 checkout 的源码树、共享 config、hooks、refs/objects 以及所有 worktree 的 admin 数据，可能影响同仓库的其他 checkout；登记仍是 workspace 级。
+当 session 的 workspace 本身是 linked worktree、且当前为 `workspace-write` 时，插件会提示把该仓库的**主 checkout 根 `<main>`（共享 common 的父目录，通常是主 checkout 的源码根）**登记为附加根（默认 `inherit`，可在行内更改权限）。对话框明确显示实际路径与范围：主 checkout 的源码树、共享 config、hooks、refs/objects 以及所有 worktree 的 admin 数据，可能影响同仓库的其他 checkout；登记仍是 workspace 级。
 
 A 只在该 primary 的完整快照证明 common 身份、且 `<main>/.git` 仍是该 common 的真实目录时出现。它补上受限 `workspace-write` 会话执行 `git add` / `git commit` 的写入缺口，同时**把主 checkout 的源码树纳入授权**。默认 pool 的 primary 位于 `<main>` 内，`primary-overlap` 会拒绝，因此 pool 没有 A；`--separate-git-dir` 时推导出的路径可能是 store 的父目录而非真正主 checkout，对话框会显示实际路径并提示核对。等待确认期间，primary/admin/common 的文件系统身份、双向指针、admin HEAD、祖先索引、主根身份或 `<main>/.git` 被替换都会让提示失效，不会写入。
 
@@ -285,15 +304,15 @@ Issue #32 的多执行环境能力以实验性开关形式随默认组合发货�
 
 ### 面板
 
-侧栏底部的 **Folders** 入口，以及 DSH `0.2.1-alpha.3` 及更新运行时新会话页工作区行右端的同一入口，打开的是同一个对话框；它列出主根与附加根，支持添加、移除、别名、切换只读/可写、复制路径与在文件管理器中显示。新会话入口与相邻的工作区/模式选择器同一套几何与交互，但因为打开对话框而不是下拉菜单，**没有 chevron**；窗口宽度 `≤560px` 时只显示图标，名称仍由 `aria-label` / 悬停提示承载。首条消息发出后 hero 行消失，侧栏入口照常可用；旧运行时只有侧栏入口。
+侧栏底部的 **Folders** 入口，以及 DSH `0.2.1-alpha.3` 及更新运行时新会话页工作区行右端的同一入口，打开的是同一个对话框；它列出主根与附加根，支持添加、移除、别名、切换只读/可写、复制路径与在文件管理器中显示。新会话入口与相邻的工作区/模式选择器同一套几何与交互，但因为打开对话框而不是下拉菜单，**没有 chevron**；它随工作区行的可用宽度收缩（label 省略号），余量不足 88px 时只保留 28×28 图标（名称仍由 `aria-label` / 悬停提示承载），任何列宽下都不会越过输入卡右缘。首条消息发出后 hero 行消失，侧栏入口照常可用；旧运行时只有侧栏入口。侧栏入口的图标是 workspace tree 字形，与本插件其他入口同族；行几何在 19 个旧几何版本（`0.1.5-rc.2` … `0.2.1-rc.5`）与 5 个新几何版本（`0.2.2-alpha.2` … `0.2.2-rc.3`）上都与宿主设置触发行逐像素对齐，一份「宿主 token + 旧值 fallback」配方同时命中两代，精确公式见 [ADR-0044](./docs/decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)。按钮高度跟随同一列设置行的 occupant，让两处 hover 药丸同尺寸：DSH `0.1.7-rc.2` 及更早的 7 个版本里那是 42px 的设置触发器，本入口沿用 42px；从 `0.2.0-rc.1` 起设置行是账号菜单 launcher（已登录 44px / 未登录 32px / rail 36px），本入口只用账号 launcher 自己的 `data-signed-out` 标记跟随高度，标记缺席（例如宿主改名）时回退 42px，rail 固定 36px；图标/文字左缘、圆角与 hover token 不变。同槽共存：本入口挂载期间 `sidebar.footer.action` 槽锚点是纵向列，同槽另一个 footer action 真的渲染时两者各占一整行、都可见可点；本入口不隐藏、不让位，注册的 id/order/label 不变，也不读取槽账本或观测其他插件的 DOM；只有本入口时布局与宿主单行布局逐像素相同，浏览器不支持 `:has()` 时规则被丢弃并回到宿主布局。
 
 ### 模型侧
 
 附加根的拓扑信息会注入系统提示词，让模型知道当前有哪些目录可用，授权变化时信息随之更新，不需要向模型提供新的工具。
 
-## 可选 Auto Review 适配
+## Auto Review 适配（实验性，默认关闭）
 
-需要 Auto Review 多根上下文时，在插件管理器的主包行列表中启用默认关闭的 [Auto Review 入口](./src/auto-review/README.md)；同一详情页设置卡中的「多根 Auto Review（实验性）」开关与该行开关等价，默认同样关闭。该集成仅面向 DSH `0.2.1-rc.2`；普通安装保持原支持范围且不会启用或选择 Auto。
+需要 Auto Review 多根上下文时，在插件管理器的主包行列表中启用默认关闭的 [Auto Review 入口](./src/auto-review/README.md)；同一详情页设置卡中的「多根 Auto Review（实验性）」开关与该行开关等价，默认同样关闭。该集成面向 DSH `0.2.1-rc.2`、`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5`、`0.2.2-alpha.2`、`0.2.2-alpha.3`、`0.2.2-rc.1`、`0.2.2-rc.2`、`0.2.2-rc.3` 九个精确发布；普通安装保持原支持范围且不会启用或选择 Auto。
 
 ## 项目结构
 
@@ -338,10 +357,8 @@ Issue #32 的多执行环境能力以实验性开关形式随默认组合发货�
 
 ## 已知限制
 
-- **dsh-ops 只读限制绕过（F01，历史基线）**：审计版本在 Full-access 下，OPS Native `ops_write_file` 实际写入了显式只读附属根，而原生 fs 同次对照被拒。启用 OPS 兼容模式时，本轮有限适配已在 Full-access 下复验 explicit RO/cap deny 对 OPS Native 与真实 PTC 生效（deny 执行复验见[审计§16](./docs/reviews/dsh-ops-compatibility-audit.md#16-适配后复验)），版本、测试范围与原始证据见[兼容性审计](./docs/reviews/dsh-ops-compatibility-audit.md)。
-- **dsh-ops 的合法写入与子目录指令缺口（F04/F05，历史基线）**：WW 下 inherit/固定读写附属根及 RO 下固定读写附属根被 OPS 预检拒写的问题未解决；OPS 读取不触发子目录指令发现（F05）已在启用模式的本轮 live 索引 + 真实 AgentLoop 下复验恢复（Native 与 PTC 成功触碰的子目录指令进入下一模型请求，见[审计§16](./docs/reviews/dsh-ops-compatibility-audit.md#16-适配后复验)）；不影响已验证的根级指令和 Skills 路径。
-- **Linux bwrap 的 WW batch/result 降级（F07）**：审计版本的共享 Registry 下，所有到达启动分支且取得有效 cache 的 `ops_batch` / `ops_result`（含 `page`）都会因 confine 后追加 bind 而失去 argv 归属证明，源码路径将拒绝 Worker 启动并报 `EXECUTOR_UNAVAILABLE`。函数级冲突已复现，Linux 端到端未测；普通 RO、Landlock 和无 cache 对照不在此结论内。需 OPS 提供 confine 前的 cache 声明接口，目前没有已验证的 MR 单侧缓解，见[审计 F07](./docs/reviews/dsh-ops-compatibility-audit.md#131-n1--f07confine-后的-cache-bind-与严格证明冲突)。
-- **其他 OPS 可用性边界**：共享 WW 下，调度外 purge 无有效 admission 时会被拒，结果缓存可能残留并告警；PTC 嵌套调用及后台 Bash 也有证明归属/过期导致的拒绝风险。本轮已完成保守拒绝边界的三平台验证；正常后台与清理能力仍未恢复，且已无限期延后，见 [ADR-0029 最终范围](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#最终范围与无限期延后2026-11-05)。
+### 插件功能
+
 - 附加根的指令文件按需到达模型：根目录顶层的那一份在会话第一步之前注入，子目录里的那一份在本会话**成功**触碰过该目录之后注入；nested 文件只会在其目录被考察到时重新检查（根层每一步，子目录依赖已投递或有新触碰），投递状态是进程内的（resume 后可能再告知一次）；官方识别 `read` / `write` / `edit`，启用 OPS 兼容模式后，OPS 工具经 live 证据同样驱动投递（resume 后 OPS 历史缺 live 证据不参与投递）。主根与 user-global 的指令链仍由上游负责，本插件不重复注入（[ADR-0010](./docs/decisions/ADR-0010-additional-root-instruction-scope.md)）。
 - 多 Host 共享同一登记服务：只有一个 Host 管理存储，各实例逐操作取得授权；断线停止新附加授权，权威退出后按内核锁接管。限同机器、同用户及同锁命名空间；Linux 共享连接需要 SO_PEERPIDFD，Windows 限同登录会话。旧进程/PTY 保留启动快照（[共享架构](./docs/architecture/registry-authority-service.md)）。
 - 支持矩阵是精确版本 allowlist：宿主版本不在清单上、或核心包混装了不同版本时，`fs` / `sandbox` / `registry` / `instructions` / `lsp` / `workspace-files` 六行**不启动**，组合退化为"没装这个插件"（[ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)）。
@@ -350,17 +367,25 @@ Issue #32 的多执行环境能力以实验性开关形式随默认组合发货�
 - **Windows 受限 shell 是 pwsh，不含 Git Bash**：MSYS 在 restricted Low-integrity token 下无法启动（上游 runner 与插件 runner 表现一致，属上游限制）；上游 runner 的 confined 子进程因继承 ignore-Ctrl+C 标志而收不到 Ctrl+C，插件 runner 下子进程能收到并由 runner 镜像其退出码。
 - 附加根访问级别是三态的：新登记默认 `inherit`（跟随会话模式），`--read-only` 在任何模式下都拒写（包括 Full-access；唯一的例外是用户针对单次调用批准的一次性提权，见 [ADR-0036](./docs/decisions/ADR-0036-approved-escalation-override.md)），`--read-write` 固定在只读会话里仍可写（写授权问题，不是读 confinement；[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。已启动的进程与持久终端保留启动时的 deny 集——一个在某根变为只读之前就启动的终端保持不受限，直到重启；cap/access 变化只约束之后的调用与新进程（[ADR-0013](./docs/decisions/ADR-0013-per-root-and-per-tool-access.md)）；提供 workingDirectory 的宿主可以把附加根作为后续工具的执行目录，Session 原始项目与登记身份不变（[ADR-0012](./docs/decisions/ADR-0012-session-origin-and-effective-cwd.md)）。
 - **上游选择 Landlock 的 Linux 主机上，受限 Full-access 需要 bwrap**：Landlock 的 allowlist 表达不了「全部可写、除这些根」，该组合改选 bubblewrap 拼出拒写边界；主机没有可用的 bwrap（未安装或禁用非特权 userns）时，存在任何拒写边界（只读根或受保护的 `$DSH_HOME`）的 Full-access 命令在启动前失败关闭。启用 bwrap，或在该主机上避免在 Full-access 下使用显式只读根（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
-- 附加根文件树由 **Files 页签的根选择器**承载：头部入口列出主根与全部附加根，旁边仍显示选中根的完整路径；选中附加根时逐字节复刻的上游 Files 树体接管树区（懒加载目录、原生行式与图标、watch 自动刷新、文件点击进宿主 viewer、header 原位提供手动刷新），header 右侧「在应用中打开」按钮同时由逐字节复刻的上游控件顶替、对选中根而非主根发起打开；切回主根即恢复原生视图；对话框回归纯管理。该接管依赖上游 `data-*` DOM 钩子，钩子失效时静默退化为原生观感（[ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](./docs/decisions/ADR-0016-files-tab-native-tree-fork.md)）。LSP 按附加文件所在根初始化独立 workspace；需要宿主配置对应语言服务器（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。
+- 附加根文件树由 **Files 页签的根选择器**承载：头部入口列出主根与全部附加根，旁边仍显示选中根的完整路径；选中附加根时逐字节复刻的上游 Files 树体接管树区（懒加载目录、原生行式与图标、watch 自动刷新、文件点击进宿主 viewer、header 原位提供手动刷新），header 右侧「在应用中打开」按钮同时由逐字节复刻的上游控件顶替、对选中根而非主根发起打开；切回主根即恢复原生视图；对话框回归纯管理。附加根行另提供与主根一致的行右键菜单（文件行、目录行；文件预览的 Folder 导航树同样生效），并按选中根提供工作区搜索（页头搜索钮、搜索栏、命中高亮结果树、偏好浮层与隐藏项过滤）；两者只在宿主暴露对应结构时出现——行右键要求 `useContextMenu`（`0.2.2-alpha.3` 起），搜索要求 `workspaceFiles.search`（`0.2.2-rc.2` 起），更早宿主上不绑定行菜单、不渲染搜索入口，视图保持不变。该接管依赖上游 `data-*` DOM 钩子，钩子失效时静默退化为原生观感（[ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](./docs/decisions/ADR-0016-files-tab-native-tree-fork.md)）。LSP 按附加文件所在根初始化独立 workspace；需要宿主配置对应语言服务器（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。已知边界：原生 Files 快捷键 **Cmd+P** 仍聚焦被接管隐藏的原生搜索框，因此不把原生快捷键当作附加根搜索入口——Files 页与预览导航树的搜索面都不响应它（[ADR-0041](./docs/decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0043](./docs/decisions/ADR-0043-additional-root-preview-navigator-search.md)）；预览导航树的搜索记录按 `(pane, root)` 保存，与 Files 页的 `(tab, root)` 分开，因此同一 pane 的 Files 页查询不会带进预览；结果当前行只标记、不自动滚动；关闭 Folder 或同一 pane 换根会丢弃未保存的设置草稿（[ADR-0043](./docs/decisions/ADR-0043-additional-root-preview-navigator-search.md)）。
+- 第三方插件接管整个 Files 页签（以 `priority: "extension"` 注册 `files` kind）时，根切换器与附加根浏览不可用；插件弹一次官方 info 级瞬时提示，接管解除后可再次提示，根管理仍可从侧栏「工作区目录」与 `/workspace-folders` 完成（[Issue #47](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/issues/47)）。
 - 命令的输出文案为英文（host 侧没有活动语言信息），面板文案中英双语跟随界面语言。
-- Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：`sidebar.footer.action` 是所有受支持版本都提供的插槽，而 `sidebar.panellist`/`main` 不是。DSH `0.2.1-alpha.3` 起额外在新会话页的 `conversation.hero.options` 槽挂一个增量入口：它与相邻的工作区/模式选择器同几何、无 chevron，`≤560px` 视口下退化为 28×28 图标按钮；该槽在旧运行时缺席时注册静默不触发，侧栏入口不受影响（[ADR-0037](./docs/decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)）。
+- Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：`sidebar.footer.action` 是所有受支持版本都提供的插槽，而 `sidebar.panellist`/`main` 不是。DSH `0.2.1-alpha.3` 起额外在新会话页的 `conversation.hero.options` 槽挂一个增量入口：它与相邻的工作区/模式选择器同几何、无 chevron，按工作区行内实测的可用余量收缩，余量不足 88px 时退化为 28×28 图标按钮（上游 options 容器是 `flex: none`，插件不改 DSH，只测余量并夹住自己；探针认不出行结构时回落到 560px 视口兜底）；该槽在旧运行时缺席时注册静默不触发，侧栏入口不受影响（[ADR-0037](./docs/decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)）。侧栏入口的 rail（折叠态）圆角有自己更早的分界 `0.1.6-alpha.2`：22 个受支持版本与宿主同为 12px 圆角方，最老 2 个版本（`0.1.5-rc.2`、`0.1.6-alpha.1`）宿主画圆而插件画 12px 圆角方，是已记录的圆角偏差（无 ink/布局影响）；`@media (hover: hover)` 包装只在 5 个新几何版本存在，插件保持不包装，触屏上与这些版本有 hover 反馈差异（[ADR-0044](./docs/decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)）。侧栏入口的高度跟随同一列设置行的 occupant，依赖账号 launcher 的 `data-signed-out` 结构标记（CSS `:has()` 依赖，不是槽位契约）：`0.1.7-rc.2` 及更早的 7 个版本沿用 42px 设置触发器高度；`0.2.0-rc.1` 起未登录 32px / 已登录 44px，rail 固定 36px；标记改名或消失时回退 42px（不会误设尺寸），只影响高度（[ADR-0044](./docs/decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)）。
 
-## dsh-ops 适配现状（受限能力说明）
+### OPS 适配
 
-当前实现作为 **OPS 兼容模式（实验性，可能存在限制）** 开放：在 `Settings → Plugins → Multi-root Workspace` 中设置 `multi-root-ops-compatibility.enabled`，默认 `false`，必须显式开启。该功能仅允许在现有精确支持矩阵内的 DSH `0.2.*` 上启用；`0.1.*` 即使手工配置 `enabled: true` 也保持关闭，不提供旧版 Settings UI（[版本范围决定](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#ops-版本范围修订2026-11-06)）。 从设置界面开启时，须阅读官方风险弹窗、勾选已了解限制并再次确认；确认前保持关闭，取消、关闭弹窗或按 Esc 均不保存开启设置。
+当前实现作为 **OPS 兼容模式（实验性，默认关闭，可能存在限制）** 开放：在 `Settings → Plugins → Multi-root Workspace` 中设置 `multi-root-ops-compatibility.enabled`，默认 `false`，必须显式开启。该功能仅允许在现有精确支持矩阵内的 DSH `0.2.*` 上启用；`0.1.*` 即使手工配置 `enabled: true` 也保持关闭，不提供旧版 Settings UI（[版本范围决定](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#ops-版本范围修订2026-11-06)）。 从设置界面开启时，须阅读官方风险弹窗、勾选已了解限制并再次确认；确认前保持关闭，取消、关闭弹窗或按 Esc 均不保存开启设置。
 
 - **开启**：激活 OPS 执行保护、实时活动与 Review 增强。Full-access（`danger-full-access`）在已验证的 macOS/Linux 车道用内核围栏保护 explicit RO/cap deny；Windows 有 deny 时在 Worker 准备前保守拒绝 OPS 执行（包括读取），尚不支持该组合下的受保护准备与合法写入。WW/RO 一旦存在不可写附加根或工具只读上限，整次 OPS 执行调用（包括读取/page）会在准备与正文前拒绝。所有模式在 Registry 失权时拒绝 OPS 执行调用，纯发现/发布除外。没有执行域或当次有效 profile 证明的 subprocess 启动也会拒绝，防止后台清理绕过边界；这可能连带拒绝第三方后台进程，但不拦截面板中用户自己的终端。
 - **关闭**：OPS 恢复本轮适配前的行为，不提供这些兜底——**显式只读附加根可能被 OPS 写入**。普通多根功能、原生工具围栏和 Auto Review 自身开关不受影响。已投递的指令不会回溯抹除，已进入保护域的调用与已启动进程保留原快照；关闭后开始的新调用不再激活本次适配。
 - **实验限制**：仅提供 Phase A live 活动索引，无持久事件桥。开启时，resume 后 OPS 历史缺 live 证据、动态 pending（replace/batch/result/bash/unknown）会使 Review 技术失败；非白名单诊断如 `ops_status` 也受此保守规则影响。
+
+具体已知缺口：
+
+- **dsh-ops 只读限制绕过（F01，历史基线）**：审计版本在 Full-access 下，OPS Native `ops_write_file` 实际写入了显式只读附属根，而原生 fs 同次对照被拒。启用 OPS 兼容模式时，本轮有限适配已在 Full-access 下复验 explicit RO/cap deny 对 OPS Native 与真实 PTC 生效（deny 执行复验见[审计§16](./docs/reviews/dsh-ops-compatibility-audit.md#16-适配后复验)），版本、测试范围与原始证据见[兼容性审计](./docs/reviews/dsh-ops-compatibility-audit.md)。
+- **dsh-ops 的合法写入与子目录指令缺口（F04/F05，历史基线）**：WW 下 inherit/固定读写附属根及 RO 下固定读写附属根被 OPS 预检拒写的问题未解决；OPS 读取不触发子目录指令发现（F05）已在启用模式的本轮 live 索引 + 真实 AgentLoop 下复验恢复（Native 与 PTC 成功触碰的子目录指令进入下一模型请求，见[审计§16](./docs/reviews/dsh-ops-compatibility-audit.md#16-适配后复验)）；不影响已验证的根级指令和 Skills 路径。
+- **Linux bwrap 的 WW batch/result 降级（F07）**：审计版本的共享 Registry 下，所有到达启动分支且取得有效 cache 的 `ops_batch` / `ops_result`（含 `page`）都会因 confine 后追加 bind 而失去 argv 归属证明，源码路径将拒绝 Worker 启动并报 `EXECUTOR_UNAVAILABLE`。函数级冲突已复现，Linux 端到端未测；普通 RO、Landlock 和无 cache 对照不在此结论内。需 OPS 提供 confine 前的 cache 声明接口，目前没有已验证的 MR 单侧缓解，见[审计 F07](./docs/reviews/dsh-ops-compatibility-audit.md#131-n1--f07confine-后的-cache-bind-与严格证明冲突)。
+- **其他 OPS 可用性边界**：共享 WW 下，调度外 purge 无有效 admission 时会被拒，结果缓存可能残留并告警；PTC 嵌套调用及后台 Bash 也有证明归属/过期导致的拒绝风险。本轮已完成保守拒绝边界的三平台验证；正常后台与清理能力仍未恢复，且已无限期延后，见 [ADR-0029 最终范围](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#最终范围与无限期延后2026-11-05)。
 
 P5 的本仓兜底不修改 OPS：合法附加根写入仍可能被误拒，后台结果缓存可能因拒绝清理而残留；legacy 非共享模式下，WW/RO 的 PTC 也可能在启动代码进程前被拒。持久活动仍关闭：DSH 的 `appendPluginRecord` 明确禁止外部插件调用，不能用普通事件或私写日志代替。P6 已按限定范围完成技术验收；P5 剩余功能及全功能兼容验收**无限期延后**，不构成本次完成条件，未来若恢复也仅以实验性能力开放。延期清单见 [ADR-0029](./docs/decisions/ADR-0029-ops-file-authorization-and-activity-adapter.md#无限期延后清单唯一真源)，验收范围见[已完成计划](./docs/plans/completed/2026-11-01-ops-compatibility-adaptation.md)。
 

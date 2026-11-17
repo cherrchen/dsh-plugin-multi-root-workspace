@@ -29,7 +29,7 @@
 | `dsh-client-ui-primitives` | 新增 `isMobileDevice`；`Toast` 增 `tone`/`actions` | fork 侧 `device.ts` re-export 至 `src/compat/open-in-app-device.ts` 的结构探测 shim；`upstream-surface.d.ts` 增加 `Toast` 重载（0.1.5 像素期无 `tone`） |
 | `packages/bundle/base/cordis.patch.yml` | `fs-sandbox`、`sandbox`、`bash-sandbox` 行 id 不变 | bundle 替换行的锚点 ID 不变，禁用/替换次序照旧 |
 | typert `resolve` 声明、remotes（plugin-manager update state、tool results）、settings `effectiveConfig` | 新增 | 不相关：插件不消费这些面 |
-| `packages/experimental` auto-review | 每条历史一条请求消息、locales、`AutoReviewFailedError` info、卸载规则变化 | 不跟进：可选 fork 钉死 `0.2.1-rc.2` 基线，`AUTO_REVIEW_RELEASE` 不动 |
+| `packages/experimental` auto-review | 每条历史一条请求消息、locales、`AutoReviewFailedError` info、卸载规则变化 | 后续已跟进：`v0.1.20` 起联合合同扩为两个源码基线，本文件记录的上游差异由 [多基线接口审查](./auto-review-0.2.2-migration.md) 与 [ADR-0040](../decisions/ADR-0040-auto-review-multi-baseline.md) 覆盖 |
 
 ## 环境要求变化
 
@@ -110,3 +110,61 @@
 5. 更新 `README` 的支持矩阵、`AGENTS.md` 的兼容契约段与路线账本的执行证据；`CHANGELOG` 条目随实际发版的发布流程写入，本分支不创建版本号或 tag。
 
 执行证据、平台覆盖与发布状态只维护在[路线图账本](../plans/active/2026-09-12-multi-root-workspace.md)。
+
+## 0.2.2-rc.3 后续审查（2026-11-13）
+
+上游 tag `dsh-v0.2.2-rc.3` 指向 `38a6a5c965aa99ab525161efb7cc5cf1fe62fced`，npm 已发布该精确版本（`next` 指向它，`latest` 仍为 `0.2.2-rc.1`）。本分支按 ADR-0009 完成提升：`SUPPORTED_DSH_RELEASES`、全部 DSH peer 与开发 pin 都指向 `0.2.2-rc.3`（24 个精确版本），开发树由 `scripts/upgrade-dsh.mjs 0.2.2-rc.3` 整体重指，候选期的临时 probe overrides 已移除。
+
+对照 `0.2.2-rc.2`（`ddac96760b`），rc.3 只有 6 个提交、515 个文件、10988 行新增 / 669 行删除；其中 380 个 `package.json` 只替换版本号，其余改动集中在下列面。插件实际依赖的 sandbox、fs、tools、session、storage、skills、lsp、workspace-files 与 Connection 运行时源码**全部未变**。
+
+| 接缝 / 上游源码 | 变化 | 分类与插件处理 |
+|---|---|---|
+| `ui-sidebar` | 新增 `sidebar.session.action`（`hoc`）槽包住新会话行内容；`SidebarRoot.module.css` 把该行的边距/动画移到新的 `.newSessionRow` 外层，`data-slot='sidebar.session.action'` 作为无盒锚点；`sidebar.footer.action` 契约未变 | 纯新增。插件只注册 `sidebar.footer.action`，新会话行的 DOM/CSS 变化不触及页脚动作 seat；无适配 |
+| `ui-workspace` | 新增 `workspace.picker` Factory（`SlotFactoryMap`）与第三个 directory-flow 洞 `workspace.picker.directoryFlow`；`WorkspacePicker` 抽出 `surfaceFlow` 供 slot 与 Factory 共用；新增只读类型导出 `WorkspacePickerInput` / `WorkspacePickerFactoryProps`，`WorkspacePickerProps` 与 `WorkspacePickerInjected` 未变 | 纯新增。插件只对 `@deepseek-ai/dsh-client-ui-slots` 做自身槽位的类型合并，不注册也不使用该 Factory；无适配 |
+| `ui-directory-picker-browse` / `ui-directory-picker-native` | 两个 flow 包改为向三个 directory-flow 洞事务性注册（嵌套 `slots.inject`） | 插件不使用目录选择器；无适配 |
+| `ui-primitives` | 新增 `IconUploadOutlineRegular` / `IconUploadOutlineMedium` 与 artwork 条目 | 纯新增导出；插件的图标探测按名字存在性判断，旧宿主照常回退；无适配 |
+| `packages/experimental/deepseek-chat-import`（新包） | 可选实验 bundle：owner-only 上传 Remote `deepseekChatImport.limits`、内存内解压、逐会话导入；新增外部依赖 `fflate` 与 `zod 4.6.6`；`official-bundles` 把它列入 `OPTIONAL_BUNDLES` / `MORE_BUNDLES` / `EXPERIMENTAL_BUNDLES`，`apps/cli` 作为可选依赖携带 | 默认不挂载，与插件的围栏、Registry、范围无任何接缝；**不**加入 `OPTIONAL_CORE_PACKAGES`（该清单只登记会与插件交叉的副本）。新增的 `zod 4.6.6` 是它自己的精确 pin，不影响 `dsh-storage-domain` 的 `4.4.3` 与插件的 `storage-zod` 路径 |
+| `session-log-export` | zip 导出对不可读附件降级：跳过 `ATTACHMENT_NOT_FOUND` / `INVALID_ATTACHMENT_REF` 并写入 `attachments-missing.txt`，其余失败仍整体失败 | 插件不消费会话导出；无适配 |
+| `tool-cordis` `api-catalog` / `cordis-client-runner` `slot-catalog` | 生成目录随新 Remote 与槽位声明更新 | 纯生成物；插件不读取这些目录 |
+| `apps/desktop` restart-status、`scripts/ci-verified-download.sh`、CI workflow | Windows 安装器重启状态目录锁修复；CI 下载校验 | 安装器/CI 面，不在插件运行时接缝 |
+
+环境要求与 rc.1/rc.2 相同：Node `>=24.9`、Cordis `4.1.0`、Schemastery `3.19.0`；可选 Auto Review 仍钉 `0.2.1-rc.2`。open-in-app 与 files-tree 的复刻源在 rc.3 未变，基线保持 `ddac96760b`（open-in-app）与 `f3803c9697`（files-tree 旧版）。
+
+### 提升步骤（本分支已执行）
+
+1. 确认 npm 上 `0.2.2-rc.3` 可解析（`next` 指向它），执行 `node scripts/upgrade-dsh.mjs 0.2.2-rc.3` 重指 devDependencies / release-age / 生态 pin；
+2. 在 `SUPPORTED_DSH_RELEASES` 末尾加入 `0.2.2-rc.3`，同步 28 个 DSH peer 列表与 dev pin；移除 probe overrides，`pnpm install --frozen-lockfile` 后 lockfile 中不再有任何 `0.2.2-rc.2` 包副本；
+3. 把 rc.3 新增的唯一传递包 `@deepseek-ai/dsh-deepseek-chat-import` 补进 `minimumReleaseAgeExclude` 的精确传递包块；
+4. 以 enforce 重跑 `compat:check`、lint、双端类型检查、构建、文档与打包检查；完整矩阵、Host smoke 与三 OS 原生结果由 PR 的 CI 覆盖；
+5. 更新 README 支持矩阵、`AGENTS.md` 兼容契约段、兼容笔记双语 §18 与路线账本；`CHANGELOG` 条目随实际发版的发布流程写入，本分支不创建版本号或 tag。
+
+### 安静陷阱（开发树）
+
+- **peer-only 副本会留在 lockfile**：升级脚本只重指直接依赖与 release-age 条目。rc.2 → rc.3 之后，`@deepseek-ai/dsh-permission-presets` 与 `@deepseek-ai/dsh-util-values` 仍以 rc.2 副本满足 peer 边（rc.3 各包声明的是精确 peer），`pnpm peers check` 因此报 unmet peer；`pnpm dedupe`、`--force` 与 `--lockfile-only` 都不会改写这类仍“看似有效”的边。落地前必须让它们升到同一精确版本，最终 `pnpm peers check` 输出 `No peer dependency issues found`，lockfile 中 `0.2.2-rc.2` 只作为 peer 范围字符串出现。
+- **新包不是契约成员**：`@deepseek-ai/dsh-deepseek-chat-import` 默认不挂载，与插件的授权面没有交点；把它写进 `CORE_PACKAGES` 只会让最小组合误报 `incomplete`。
+- **升级脚本只重指既有条目**：`minimumReleaseAgeExclude` 的新增传递包仍需手工补一行，否则在启用发布年龄门禁的环境里 frozen install 会被拒绝。
+
+## 附加根 Files 视图消费的两个接口面（2026-11-14）
+
+本节记录 `0.2.2` 线里本插件**本轮开始转发/实现**的两个宿主面，并取代 rc.2 小节表格中“不路由 / 没有附加根搜索 UI”的当时结论；上游历史差异本身的记录不变。
+
+| 接口面 | 引入版本 | 插件消费方式 | 缺席时 |
+|---|---|---|---|
+| `sidebar.files.tree` Factory 的 `rowTriggerProps` / `canOpen` 输入；renderer 根级 composed prop `useContextMenu`（`getTriggerProps`） | `0.2.2-alpha.3` | 从 slot occupant 的 composed prop 取 seat，经 `NativeTreeOptions` 转发给 Factory，并在旧行渲染路径 spread 同一组 handlers；target 为 file/directory 与 `{ sessionId, path: 绝对路径 }` | 不绑定菜单、不传 `canOpen`；DOM 与旧宿主一致（旧原生同样没有菜单） |
+| `contextMenus.registeredKinds` | `0.2.2-rc.2` | 可选探测：仅在对 kind 已注册时绑定，避免空菜单 | alpha.3 没有该成员，直接绑定（该版本原生已注册 file/directory 贡献） |
+| `workspaceFiles.search(scope, request, signal)`；wire request 无根字段 | `0.2.2-rc.2` | 插件自有 `search` 端点以 host 内部 scope 命名附加根，复用同一实现与同一限额/错误码；`typeof service.search === 'function'` 探测 | 客户端不渲染搜索钮/栏、不调用端点（端点答 `search-unavailable`） |
+| `FileTreeInput.highlight`、`TreeDirectoryState.omitted`（`'hidden'` / `'unmatched'`）；搜索条/状态行/设置浮层与隐藏项偏好 | `0.2.2-rc.2` | 结果树复用同一 `TreeView` 传 `highlight`；树态在绘制期过滤隐藏项、用 `omitted: 'hidden'` 画“只有隐藏项”；偏好读写宿主同名 localStorage 键 | 不传这两个输入（旧 Factory 忽略未知键）；不改变旧宿主树的绘制 |
+
+**为什么探测都是结构性的**：这些面在旧 release 上不存在，而 `scripts/upgrade-dsh.mjs` 会把每个 `@deepseek-ai/dsh*` devDependency 改写到目标 release——把新包加进依赖会让 `0.2.2-alpha.3` 之前的 20 个 lane 在 `pnpm install` 阶段死亡；因此类型用本地最小声明（`src/client/files-tree/context-menu.ts`、`search-surface.d.ts`、`src/client/open-in-app/upstream-surface.d.ts` 同型），运行时只认 `props.useContextMenu` 可调用、`props.useContextMenu().getTriggerProps` 取得到、`remote.workspaceFiles.search`/`service.search` 是函数。`renderFactorySlot` 自 `0.1.6-alpha.2` 就存在，不能用来判断 Factory 是否存在；插件沿用 `0.2.2-alpha.3` 起才有的 `data-files-page` DOM 钩子做版本分界（与[架构文档 §7](../architecture/multi-root-workspace.md) 的接管判定同一处）。版本字符串比较、新增 npm 依赖与改动上游包都不允许（ADR-0009）。
+
+### 第三个接口面：预览导航搜索（2026-11-16 追加）
+
+本节标题保留 2026-11-14 的“两个接口面”（入站锚点不变）；本小节追加同日决策、次日落地的第三个宿主面，证据与决策见 [ADR-0043](../decisions/ADR-0043-additional-root-preview-navigator-search.md) 与 [实施计划](../plans/active/2026-11-16-additional-root-preview-navigator-search.md)。
+
+| 接口面 | 引入版本 | 插件消费方式 | 缺席时 |
+|---|---|---|---|
+| `ui-sidebar-files` 的 `FileNavigator` 搜索半部：预览（`page: false`）恒显示搜索栏、按 `store.byPane[panel.id]` 记录查询/结果、结果树经 `sidebar.files.tree` Factory（`highlight` / `omitted` / `current`）、设置浮层 `SearchSettings`、`data-files-search*` DOM 钩子 | `0.2.2-rc.2`（rc.2→rc.3 该包 `src/` 与 `locale/` 零差异，语义基线 rc.3） | 插件不复刻第二套状态机：`FilesPane` 增加 `mode="preview"`（栏常显、不写 `barOpen`、挂载不抢焦点、结果命中被预览文件时标当前行），`navigator.tsx` 在 `filesTree.search` seat 存在时把同一 `FilesPane` portal 进 `aside[data-files-navigator]`；搜索根仍是 `rootId`（Host 从刷新后的 Registry 解析），wire 无新字段 | seat 缺席（rc.2 之前、或裁掉 search 服务的组合）→ 仍 portal 复刻 `FilesTree`，DOM 与生命周期逐项不变；无面板通道 → 导航接管本身不建立，全程原生 |
+
+**历史表行豁免**：§“0.2.2-rc.2 后续审查”表格中“接管时原生搜索条隐藏”是 2026-11-11 的当时结论，仍然成立——原生条在接管期继续隐藏（它的根固定为 Session cwd）；本小节追加的是插件在 aside 内绘制**自己的**搜索面，并沿用 `data-files-search-status`/`data-files-search-settings` 等同名钩子（`data-files-search` 精确钩子仍只属于原生输入框）。原生与插件的同名节点靠 `styles.ts` 的 **direct-child** 隐藏规则区分：`aside[data-mrfw-navigator] > div:not([data-mrfw-files-pane]):has([data-files-search])`、`aside[data-mrfw-navigator] > [data-files-search-status]` 与 `aside[data-mrfw-navigator] > [data-files-search-settings]`；插件 pane 的嵌套同名节点不被匹配，pane 根带 `data-mrfw-files-pane` 作为守卫与测试锚点。
+
+**为什么仍不需要新端点**：预览与 Files 页对 `search` 端点的需求完全相同——搜哪个登记根；预览不带来新的授权对象、不需要 pane 身份、不需要额外字段。把 paneId 塞进 wire 只会扩大协议面，因此实现 PR 的 Host 侧 diff 为空。
