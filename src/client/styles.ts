@@ -306,6 +306,20 @@ export const STYLES = /* css */ `
   gap: 4px;
 }
 
+/* The Menu primitive's anchor wrapper is the direct flex item of the row above,
+   and it is a plain inline-flex span with the default min-width: auto. In a
+   narrow header that pins the trigger at its content's min-content width (the
+   trigger label is nowrap, so the whole root name), so the wrapper outgrows the
+   width the switcher was assigned and paints over the reload/search/open-in-app
+   items after it. The shrink has to live HERE rather than on the inner button:
+   min-width: 0 lets the wrapper take only the width the header has for it, and
+   the button and label (both min-width: 0 already) then ellipsize. Menu forwards
+   className to this wrapper on every supported release, so no version gate. */
+.mrfw-rootSwitchAnchor {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 /* While the switcher exists it hides the upstream path label — the
    :has() guard again keeps the upstream-naming rule inert unless this
    plugin is actually in the row. The switcher draws its own PathLabel of
@@ -367,10 +381,16 @@ export const STYLES = /* css */ `
 /* The trigger borrows the path label's look: quiet text with a folder
    glyph, the hover of the neighboring header buttons, and the overflow
    behavior PathLabel itself uses in a narrow header. It may shrink but
-   never grows — the PathLabel after it owns the free header space. */
+   never grows — the PathLabel after it owns the free header space. Its own
+   overflow is hidden so a pane narrower than the trigger's icons (plus the
+   fixed header controls) clips them at the trigger box instead of painting
+   them over the reload/search controls; upstream's header overflows at that
+   width too, but overlapping controls are worse than a clipped glyph. */
 .mrfw-rootSwitchBtn {
+  position: relative;
   flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -397,11 +417,45 @@ export const STYLES = /* css */ `
   color: var(--dsw-alias-label-secondary);
 }
 
+/* The label text is fitted to the measured width in three tiers (whole name,
+   head and tail, head alone — see root-name-fit.ts); the ellipsis here is only
+   the fallback for a runtime that cannot measure text. */
 .mrfw-rootSwitchLabel {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The off-flow probe a runtime without an offscreen canvas measures candidate
+   strings in. It inherits the label's font from the button and never takes
+   part in the row. */
+.mrfw-rootSwitchProbe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+  font: inherit;
+  line-height: inherit;
+}
+
+/* The open-in-app fork's seat: a flex item that sizes to the split button and
+   stays in the row (at zero width) while the catalog is still loading. */
+.mrfw-switcherOpen {
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* While the name is truncated the path's own tail would repeat the same root
+   in a second, differently cut form — and only a sliver of it fits next to the
+   shortened name. The ink is hidden but the box stays: it keeps absorbing the
+   leftover width so the reload/search/open-in-app controls stay at their
+   native offsets. */
+.mrfw-rootSwitcher[data-name-form="middle"] .mrfw-switcherPath,
+.mrfw-rootSwitcher[data-name-form="head"] .mrfw-switcherPath {
+  visibility: hidden;
 }
 
 .mrfw-rootSwitchChevron {
@@ -410,12 +464,31 @@ export const STYLES = /* css */ `
 }
 
 /* The selected root's full path sits between the trigger and the reload —
-   the very PathLabel upstream draws there, so it brings its own grow,
-   left-clip and hover-title behavior; only the gutters are ours. The right
-   margin plus the container gap reproduces upstream's .path margin-right
-   12px + header gap 4px; the left gutter comes from the same container gap. */
-.mrfw-switcherPath {
+   the very PathLabel upstream draws there, so it brings its own left-clip and
+   hover-title behavior; only the gutters and the yield order are ours. The
+   right margin plus the container gap reproduces upstream's .path
+   margin-right 12px + header gap 4px; the left gutter comes from the same
+   container gap.
+
+   A zero flex basis is what makes the path yield before the root name: with
+   flex-grow it still fills every spare pixel, but it owns no base width to
+   give back, so a deficit reaches the trigger only after the path has already
+   collapsed to zero. Upstream's own max-content basis would shrink both items
+   at once and ellipsize the root name while the path still had room.
+   min-width: 0 covers the plain-span fallback used on runtimes without
+   PathLabel, whose text would otherwise keep its min-content width. */
+.mrfw-rootSwitcher .mrfw-switcherPath {
+  flex: 1 1 0;
+  min-width: 0;
   margin: 0 12px 0 0;
+}
+
+/* The PathLabel fallback (a runtime without the primitive) has no clip rule
+   of its own; keep its one line inside the box the same way .path does. */
+.mrfw-switcherPath:not([data-path-label]) {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* The takeover's own reload, standing exactly where the hidden native one

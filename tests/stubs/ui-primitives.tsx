@@ -263,6 +263,12 @@ type StubMenuEntry =
 export function Menu(props: {
   open: boolean
   anchor: ReactNode
+  /**
+   * Extra class on the anchor wrapper span, as the real primitive applies it:
+   * the wrapper is the element its parent flex row sizes, so a plugin hook on
+   * it is structural rather than presentational and must exist here too.
+   */
+  className?: string
   items: readonly StubMenuEntry[]
   footer?: readonly StubMenuEntry[]
   selectedId?: string
@@ -292,8 +298,8 @@ export function Menu(props: {
     )
   }
   return createElement(
-    Fragment,
-    null,
+    'span',
+    { className: props.className },
     props.anchor,
     props.open
       ? createPortal(

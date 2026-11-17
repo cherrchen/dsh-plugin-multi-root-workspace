@@ -70,6 +70,8 @@ active：
 
 completed：
 
+- [2026-11-17-files-rootswitch-narrow-width.md](./completed/2026-11-17-files-rootswitch-narrow-width.md) — Files 页头 `RootSwitcher` 的窄宽让位优先级：`Menu` 的 anchor 包装 span 是外层 flex item，缺 `min-width: 0` 时把触发器钉在内容 min-content，窄栏/双栏/浮动小窗下溢出压住 reload、搜索与 open-in-app；修复为「固定控件 → 完整路径 → 根名 → 触发器图标」三级收缩（anchor 解钉、路径 `flex: 1 1 0` 先让、触发器 `overflow: hidden`），已完成（2026-11-17）：focused/全量 client 测试、隔离 Web 宿主三工况 299/323/220 与附加根接管态的 DOM 量测与截图目检；随后追加 P5 三档根名显示（全名 → 前几个…后几个 → 开头…，自适应并优先按分隔符断开），含 `root-name-fit`/`root-name-room` 与真实 GUI 逐档证据。决策见 [ADR-0046](../decisions/ADR-0046-files-header-rootswitch-shrink-priority.md)。
+
 - [2026-11-16-worktree-cleanup-panel-ux.md](./completed/2026-11-16-worktree-cleanup-panel-ux.md) — Workspace Folders 面板的 Worktree 清理 UX 收敛（R1–R4）已完成并验收（2026-11-16）：批量清理入口移到「附属工作目录」标题行、确认改为覆盖在面板上的 primitives `Modal`、`cleanupEligible` 行收敛为 标题/权限/路径 + 红色删除 + `...`、手动发现空结果用官方 info Toast；纯客户端呈现层变更，无授权/协议/宿主变更。证据见[路线账本](./active/2026-09-12-multi-root-workspace.md#worktree-清理面板-ux-收敛2026-11-16)，决策见 [ADR-0045](../decisions/ADR-0045-worktree-cleanup-panel-ui.md)。
 
 - [2026-11-14-auto-review-multi-baseline.md](./completed/2026-11-14-auto-review-multi-baseline.md) — Auto Review 联合合同从单一 `0.2.1-rc.2` 扩展为两个源码基线的 9 个精确发布：按基线保存逐字节 fork、按车道动态加载、按编译 pin 做实现类型检查、跨代测试/冒烟/CI 门禁与文档收尾；已完成并通过本机与基线 A 车道验收，决策见 [ADR-0040](../decisions/ADR-0040-auto-review-multi-baseline.md)，证据见[路线账本](./active/2026-09-12-multi-root-workspace.md#auto-review-多基线适配2026-11-14)。

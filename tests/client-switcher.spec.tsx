@@ -20,7 +20,7 @@
 
 import { StrictMode, createElement, useSyncExternalStore, type ReactElement } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OPEN_IN_APP_APPS_ROUTE, OPEN_IN_APP_OPEN_ROUTE } from '@deepseek-ai/dsh-host-open-in-app/shared'
 import type { StoreInstance } from '@deepseek-ai/dsh-client-store'
 import { PANEL_CHANNEL, type PanelRequest, type RootView, type RootsView } from '../src/contract.ts'
@@ -493,6 +493,28 @@ describe('the Files-tab root switcher', () => {
     const missing = screen.getByRole('button', { name: /website/ })
     expect(missing).toHaveProperty('disabled', true)
     expect(missing.textContent).toContain(`${NS}.state.missing`)
+  })
+
+  it('wires the shrink hook onto the Menu anchor wrapper the header row sizes', async () => {
+    const harness = mount()
+    renderInPane(harness)
+    await waitFor(() => { expect(document.querySelector('.mrfw-rootSwitchLabel')?.textContent).toBe('Platform') })
+
+    // The header row's flex item is Menu's anchor wrapper span, not the button;
+    // the stylesheet's min-width: 0 has to land there, or the trigger keeps its
+    // min-content width and paints over the reload/search controls in a narrow
+    // header. This suite renders the stubbed primitives barrel (vitest aliases
+    // it to tests/stubs/ui-primitives.tsx, which mirrors the real anchor span),
+    // so the assertion pins OUR wiring against that contract — it cannot see an
+    // upstream DOM change. The upstream side rests on the per-release survey of
+    // Menu.className in ADR-0046 and on the real-GUI measurement there; the stub
+    // deliberately keeps the same nesting so a stop in forwarding className
+    // still turns this red.
+    const trigger = document.querySelector('.mrfw-rootSwitchBtn')
+    expect(trigger).not.toBeNull()
+    const anchor = trigger!.parentElement
+    expect(anchor?.classList.contains('mrfw-rootSwitchAnchor')).toBe(true)
+    expect(anchor?.parentElement?.classList.contains('mrfw-rootSwitcher')).toBe(true)
   })
 
   it('shows the selected root full path between the trigger and the reload', async () => {
@@ -1189,5 +1211,169 @@ describe('the Files-tab root switch search handoff', () => {
     fireEvent.click(document.querySelector<HTMLElement>('[data-files-search-retry]')!)
     await waitFor(() => { expect(searchCalls(harness)).toHaveLength(2) })
     await waitFor(() => { expect(document.querySelector('[data-files-row="search-failed"]')).toBeNull() })
+  })
+})
+
+describe('the narrow-header root name', () => {
+  /** The observed resize callbacks, one per mounted switcher. */
+  const observers: Array<() => void> = []
+  /** Every observed element and the callback its observer registered. */
+  const observed = new Map<Element, () => void>()
+  /** The boxes the stubbed layout reports. */
+  const layout = { switcherWidth: 400, openAnchorWidth: 0 }
+
+  beforeEach(() => {
+    observers.length = 0
+    observed.clear()
+    layout.switcherWidth = 400
+    layout.openAnchorWidth = 0
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { observers.push(callback) }
+      observe(target: Element): void { observed.set(target, observers[observers.length - 1]!) }
+      unobserve(): void {}
+      disconnect(): void {}
+    })
+    // A deterministic stand-in for the offscreen canvas: 7px per code point.
+    vi.stubGlobal('OffscreenCanvas', class {
+      getContext(): { font: string; measureText: (text: string) => { width: number } } {
+        return { font: '', measureText: text => ({ width: Array.from(text).length * 7 }) }
+      }
+    })
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      // Only the row and the open-in-app seat are measured; everything else
+      // keeps the zero box jsdom gives it.
+      const width = this.classList.contains('mrfw-rootSwitcher')
+        ? layout.switcherWidth
+        : this.classList.contains('mrfw-switcherOpen') ? layout.openAnchorWidth : 0
+      return { left: 0, right: width, width, top: 0, bottom: 38, height: 38, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+    })
+  })
+
+  afterEach(() => { vi.restoreAllMocks() })
+
+  /** The label text the trigger currently renders. */
+  const labelText = (): string | null => document.querySelector('.mrfw-rootSwitchLabel')?.textContent ?? null
+  /** The tier the switcher reports. */
+  const nameForm = (): string | null => document.querySelector('.mrfw-rootSwitcher')?.getAttribute('data-name-form') ?? null
+  /** The trigger's full accessible name. */
+  const accessibleName = (): string | null =>
+    document.querySelector('.mrfw-rootSwitchBtn')?.getAttribute('aria-label') ?? null
+
+  /** Play one header resize back to the component, as ResizeObserver would. */
+  async function resize(width: number): Promise<void> {
+    layout.switcherWidth = width
+    await act(async () => { for (const callback of observers) callback() })
+  }
+
+  /**
+   * Play one in-row control resize back to the component: only that element's
+   * observer fires, exactly like a browser whose row width did not change.
+   * @param element - the observed element that resized.
+   */
+  async function resizeElement(element: Element): Promise<void> {
+    const callback = observed.get(element)
+    expect(callback).toBeDefined()
+    await act(async () => { callback?.() })
+  }
+
+  it('keeps the whole name, then both ends, then the head as the header narrows', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'dsh-plugin-multi-root-workspace', roots: [], limit: 16, count: 0 })
+    renderInPane(harness)
+    await waitFor(() => { expect(labelText()).toBe('dsh-plugin-multi-root-workspace') })
+    expect(nameForm()).toBe('full')
+
+    await resize(210)
+    await waitFor(() => { expect(nameForm()).toBe('middle') })
+    const middle = labelText() ?? ''
+    expect(middle).toContain('…')
+    expect(middle.startsWith('dsh')).toBe(true)
+    expect(middle.endsWith('workspace')).toBe(true)
+
+    await resize(70)
+    await waitFor(() => { expect(nameForm()).toBe('head') })
+    expect(labelText()?.startsWith('dsh')).toBe(true)
+    expect(labelText()?.endsWith('…')).toBe(true)
+
+    // The accessible name is the root, never the truncated drawing.
+    expect(accessibleName()).toBe('dsh-plugin-multi-root-workspace')
+  })
+
+  it('restores the whole name when a shorter root is selected', async () => {
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'dsh-plugin-multi-root-workspace', roots: [ROOT_A, ROOT_B], limit: 16, count: 2 })
+    renderInPane(harness)
+    await waitFor(() => { expect(labelText()).toBe('dsh-plugin-multi-root-workspace') })
+    await resize(210)
+    await waitFor(() => { expect(nameForm()).toBe('middle') })
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'payments' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+    await waitFor(() => { expect(labelText()).toBe('payments') })
+    expect(nameForm()).toBe('full')
+    expect(accessibleName()).toBe('payments')
+  })
+
+  it('keeps the whole name when the environment cannot measure text', async () => {
+    // No offscreen canvas: the fallback measures the hidden probe, whose box is
+    // zero in this DOM — nothing is known to be too wide, so nothing is cut.
+    vi.unstubAllGlobals()
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'dsh-plugin-multi-root-workspace', roots: [], limit: 16, count: 0 })
+    renderInPane(harness)
+    await waitFor(() => { expect(labelText()).toBe('dsh-plugin-multi-root-workspace') })
+    expect(nameForm()).toBe('full')
+  })
+
+  it('refits the name when the open-in-app control arrives after the catalog loads', async () => {
+    // The fork draws nothing until its catalog resolves, then inserts the split
+    // button into the row. The row itself does not resize, so the fit only hears
+    // about the arrival through the seat's own resize observer.
+    let releaseCatalog = (): void => {}
+    const catalog = new Promise<void>((resolve) => { releaseCatalog = resolve })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === OPEN_IN_APP_APPS_ROUTE) {
+        await catalog
+        return new Response(JSON.stringify({ apps: ['finder', 'vscode'] }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    }))
+    const longRoot: RootView = {
+      ordinal: 1, id: 'long', path: '/repos/dsh-plugin-multi-root-workspace-ssh',
+      addedAt: '2026-09-12T00:00:00.000Z', state: 'available', access: 'read-write',
+      alias: 'dsh-plugin-multi-root-workspace-ssh',
+    }
+    const harness = mount()
+    harness.setView({ primaryRoot: '/repos/primary', primaryName: 'Platform', roots: [longRoot], limit: 16, count: 1 })
+    renderInPane(harness)
+    await waitFor(() => { expect(labelText()).toBe('Platform') })
+    await resize(220)
+
+    await openMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'dsh-plugin-multi-root-workspace-ssh' }))
+    await waitFor(() => { expect(switcherKind()).toBe('additional') })
+
+    // Catalog in flight: the seat is in the row at zero width and holds nothing.
+    const seat = document.querySelector('.mrfw-switcherOpen')
+    expect(seat).not.toBeNull()
+    expect(seat?.children.length).toBe(0)
+    const before = labelText() ?? ''
+    expect(before).toContain('…')
+
+    releaseCatalog()
+    await waitFor(() => {
+      expect(document.querySelector('[data-open-target="directory"]')).not.toBeNull()
+    })
+    // The control now occupies 43px of the row without the switcher resizing.
+    layout.openAnchorWidth = 43
+    await resizeElement(seat as HTMLElement)
+
+    await waitFor(() => { expect(labelText()).not.toBe(before) })
+    const after = labelText() ?? ''
+    expect(after).toContain('…')
+    expect(after.startsWith('dsh')).toBe(true)
+    expect(after.length).toBeLessThan(before.length)
+    expect(nameForm()).toBe('middle')
   })
 })

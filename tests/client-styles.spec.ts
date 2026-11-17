@@ -39,10 +39,51 @@ describe('the root-switcher rules', () => {
   })
 
   it('lets the path label own the free space while the trigger only shrinks', () => {
-    // The PathLabel brings its own grow/clip styles; the plugin's rules only
-    // keep the trigger from competing for the same space.
     expect(STYLES).toMatch(/\.mrfw-rootSwitchBtn\s*\{[^}]*flex:\s*0\s+1\s+auto/s)
     expect(STYLES).toMatch(/\.mrfw-switcherPath\s*\{/s)
+  })
+
+  it('unpins the Menu anchor wrapper the header row actually sizes', () => {
+    // The button's own min-width: 0 is inert for the row: the row's flex item is
+    // Menu's anchor wrapper span. Without min-width: 0 there the wrapper keeps
+    // its content's min-content width (the whole nowrap root name) and paints
+    // over the reload/search/open-in-app controls that follow it.
+    const anchor = STYLES.match(/\.mrfw-rootSwitchAnchor\s*\{([^}]*)\}/s)?.[1]
+    expect(anchor).toBeDefined()
+    expect(anchor).toMatch(/flex:\s*0\s+1\s+auto/)
+    expect(anchor).toMatch(/min-width:\s*0/)
+  })
+
+  it('makes the full path yield all of its width before the root name shrinks', () => {
+    // A zero flex basis is load-bearing. With upstream's max-content basis both
+    // items shrink together, so the root name ellipsizes while the path still
+    // shows; with basis 0 the path cannot absorb a deficit and empties first.
+    const path = STYLES.match(/\.mrfw-rootSwitcher\s+\.mrfw-switcherPath\s*\{([^}]*)\}/s)?.[1]
+    expect(path).toBeDefined()
+    expect(path).toMatch(/flex:\s*1\s+1\s+0/)
+    expect(path).toMatch(/min-width:\s*0/)
+    // The two-class selector must outweigh upstream PathLabel's own .path rule.
+    expect(STYLES).toMatch(/\.mrfw-rootSwitcher\s+\.mrfw-switcherPath\s*\{/s)
+  })
+
+  it('keeps the trigger box from painting its icons over the next controls', () => {
+    // The last-resort yield: below the icons' own width the button clips them.
+    expect(STYLES).toMatch(/\.mrfw-rootSwitchBtn\s*\{[^}]*overflow:\s*hidden/s)
+  })
+
+  it('fits the root name in three tiers and hides the repeated path tail', () => {
+    // The label text is fitted by root-name-fit.ts; this ellipsis is only the
+    // fallback for a runtime that cannot measure text.
+    expect(STYLES).toMatch(/\.mrfw-rootSwitchLabel\s*\{[^}]*text-overflow:\s*ellipsis/s)
+    // The open-in-app fork's seat is a row item at zero width until the
+    // catalog loads; the fit observes it for the arrival.
+    expect(STYLES).toMatch(/\.mrfw-switcherOpen\s*\{[^}]*display:\s*inline-flex/s)
+    // The probe is off-flow and invisible, and the button contains it.
+    expect(STYLES).toMatch(/\.mrfw-rootSwitchBtn\s*\{[^}]*position:\s*relative/s)
+    expect(STYLES).toMatch(/\.mrfw-rootSwitchProbe\s*\{[^}]*position:\s*absolute[^}]*visibility:\s*hidden/s)
+    // A truncated name hides the path's ink — its box stays to keep the header
+    // controls at their native offsets.
+    expect(STYLES).toMatch(/\.mrfw-rootSwitcher\[data-name-form="middle"\]\s+\.mrfw-switcherPath,\s*\n?\.mrfw-rootSwitcher\[data-name-form="head"\]\s+\.mrfw-switcherPath\s*\{[^}]*visibility:\s*hidden/s)
   })
 
   it('reproduces the header item gap inside the switcher so replacements keep native offsets', () => {

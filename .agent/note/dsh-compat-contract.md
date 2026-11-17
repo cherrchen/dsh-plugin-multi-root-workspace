@@ -213,6 +213,7 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 
 | 依赖 | 消费方 | 失效表现 |
 | --- | --- | --- |
+| `Menu` 原语的 anchor 包装 `<span>`（`className` 落在它上面，是 header 槽 occupant 内的 flex item） | `RootSwitcher` 的收缩钩子：`styles.ts` 的 `.mrfw-rootSwitchAnchor`（`flex: 0 1 auto; min-width: 0`）。收缩必须写在参与外层 flex 的包装上，写在内层触发器按钮上无效 | `className` 不再落到这个包装上 → 触发器被内容 min-content（nowrap 根名）钉死，窄栏/双栏/浮动小窗下溢出并压住 reload/搜索/open-in-app（ADR-0046 的旧缺陷回归）；包装不再是 flex item → 收缩语义整体失效 |
 | `FilesBody` 扁平 flex header + flex 项上的 `data-files-root` / `data-files-path` / `data-files-reload` | `styles.ts` 的 `:has()` 规则（`.mrfw-rootSwitcher` 接管路径标签位置、隐藏 `[data-files-path]`——选择器自带 `PathLabel`（`.mrfw-switcherPath`）显示选中根完整路径、自带 `.mrfw-switcherReload` 在附加根态顶替原生 reload；`[data-root-kind="additional"]` 时隐藏 `[data-files-body]` 与 `[data-files-reload]`） | 规则停止匹配：上游路径标签恢复显示、与选择器自带 PathLabel 并存（路径出现两次），选择器退回槽内默认位序，仅剩菜单可用——静默退化，功能不坏 |
 | `closest('[data-files-root]')` 命中本 pane | `RootSwitcher.tsx` 的 portal 目标查找 | 找不到祖先即不渲染复刻树，切附加根只改菜单态；原生布局不受影响 |
 | dockkit tabHost 上的 `data-dockkit-content`（值为 tab id） | `RootSwitcher.tsx` 的复刻树 store bucket 键（scroll/展开态记忆） | 属性缺席时退回生成 id——功能不受影响，只是滚动/展开记忆跨接管不保留；属性若改名或挪位，bucket 键与原生 tab 失配 |
@@ -222,6 +223,8 @@ LSP / workspace-files 只包装公开方法，卸载必须恢复原属性描述�
 | `aside[data-files-navigator]`（值为 dockkit pane id）与其内 `[data-files-body]` | `navigator.tsx` 的接管目标与 pane 记账键；`styles.ts` 的 `aside[data-mrfw-navigator] > [data-files-body]` 隐藏规则 | aside 不出现 → 永不接管（该导航器未开）；属性值不再是 pane id → bucket/快照改键、跨 `replaceTab` 的展开/滚动记忆丢失但功能不坏 |
 | dockkit 的 pane 载体：非空 pane 的 id 骑在其**选中 tab 的 host**（`data-dockkit-pane`）上、空 pane 由 `TabPanel` 携带、浮动 pane 用 `data-dockkit-float`——pane 本体**没有**稳定元素 | `navigator.tsx` 的 pane 死亡观察是查询式的（文档中仍有携带该 id 的元素即存活），death-watch 独立于 takeover 生命周期、cleanup 永远赢不了它的竞速 | 载体属性的拼写/归属改变 → 存活判定失真：误报死会让快照提前丢弃（记忆降级、功能不坏）；误报活则快照留到会话结束 |
 | rc.2 起的导航器搜索节点：原生输入框 `[data-files-search]`、状态行 `[data-files-search-status]`、设置浮层 `[data-files-search-settings]`、页头开关 `[data-files-search-toggle]`；插件 pane 根 `[data-mrfw-files-pane]` 与输入 `[data-mrfw-files-search]` | `styles.ts` 的隐藏规则（预览接管期隐藏原生栏/状态行/遗留设置；附加根 Files 页隐藏原生页头开关）与 `pane.tsx` 的搜索面 | 原生精确钩子改名 → 原生栏在接管期重新露出、与插件 pane 重叠（视觉错乱、功能不坏）；`data-mrfw-files-pane` 丢失 → 守卫与测试锚点失效，重构时可能误伤插件自己的 pane；插件 pane 的同名 `data-files-search-status/settings` 位于 pane 后代，direct-child 规则不会命中 |
+
+**收缩优先级（ADR-0046）**：`RootSwitcher` 占据的这条 header 是扁平 flex 行，窄宽下按固定顺序让位——固定控件（reload / 搜索 / open-in-app，主根态来自 header、附加根态来自 switcher 内部）永不移动、永不收缩；完整路径以零 flex basis 先让到 0（换成 max-content basis 会让根名在路径还有余量时先被省略）；根名随后由 label 的 `text-overflow: ellipsis` 收缩；最后触发器的 `overflow: hidden` 在图标都放不下时裁剪它们。任何一层重排都可能让两个控件重新互相覆盖，三条规则由 `tests/client-styles.spec.ts` 与 `tests/client-switcher.spec.tsx` 钉住。
 
 ⚠️ `data-files-path` 有**双重含义**：表头 `PathLabel` 携带裸值（`"true"`），而**每个树行**（`data-files-entry` 的 `li`）也携带它、值是该行自己的绝对路径。任何想命中表头标签的选择器都必须写 `[data-files-path]:not([data-files-entry])`——不带限定符的 `display:none`/`order` 会作用到整棵原生树（曾真实发生：主根树区全空）。其余三个钩子（`root`/`body`/`reload`）各只出现一次。
 
