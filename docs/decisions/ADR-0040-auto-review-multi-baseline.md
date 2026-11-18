@@ -25,11 +25,11 @@ Accepted
 `src/compat/auto-review-contract.ts` 是联合合同的唯一机器可读事实源，声明两个基线及其精确发布集合：
 
 - `0.2.1`：`0.2.1-rc.2`、`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5`，fork 基线 `dsh-v0.2.1-rc.2`（`687f282e86`）。
-- `0.2.2`：`0.2.2-alpha.2`、`0.2.2-alpha.3`、`0.2.2-rc.1`、`0.2.2-rc.2`、`0.2.2-rc.3`，fork 基线 `dsh-v0.2.2-alpha.3`（`05b1cae8db`）。
+- `0.2.2`：`0.2.2-alpha.2`、`0.2.2-alpha.3`、`0.2.2-rc.1`、`0.2.2-rc.2`、`0.2.2-rc.3`、`0.2.2-rc.4`，fork 基线 `dsh-v0.2.2-alpha.3`（`05b1cae8db`）。
 
 声明单位仍是精确发布，不是 semver 范围；每一项都要有该发布在 CI 车道上的真实安装树与完整门禁证据。`AUTO_REVIEW_RELEASES` 由两张表扁平化，`autoReviewBaseline(release)` 是运行时与全部脚本共用的唯一映射；`check-dsh-compat.mjs` 校验每个成员都在普通 allowlist 内。
 
-每个基线有唯一的**编译 pin**：0.2.1 线取 `0.2.1-rc.5`（rc.2–rc.5 被消费包的源码与声明未变），0.2.2 线取 `0.2.2-rc.3`。实现类型检查只在开发 pin 等于当前基线的编译 pin 时执行；其余车道只做运行时验证（该发布 .d.ts 与编译 pin 的差异不构成运行时差异，而 `0.2.2-alpha.2` 的闭集 `purpose` 使同一源码无法在该发布下通过类型检查）。
+每个基线有唯一的**编译 pin**：0.2.1 线取 `0.2.1-rc.5`（rc.2–rc.5 被消费包的源码与声明未变），0.2.2 线取 `0.2.2-rc.4`。实现类型检查只在开发 pin 等于当前基线的编译 pin 时执行；其余车道只做运行时验证（该发布 .d.ts 与编译 pin 的差异不构成运行时差异，而 `0.2.2-alpha.2` 的闭集 `purpose` 使同一源码无法在该发布下通过类型检查）。
 
 ### 两份实现、按车道动态加载
 
@@ -71,3 +71,7 @@ Accepted
 - [多基线适配计划](../plans/completed/2026-11-14-auto-review-multi-baseline.md)
 - [多基线接口审查](../reference/auto-review-0.2.2-migration.md)
 - [ADR-0009](./ADR-0009-dsh-compat-contract.md)、[ADR-0021](./ADR-0021-auto-review-context-companion.md)、[ADR-0022](./ADR-0022-auto-review-loader-entry.md)
+
+## 修订（2026-11-18）
+
+DSH `0.2.2-rc.4` 加入联合支持集合（current 基线第 6 个发布，联合集合共 10 个精确发布）：该发布的 `packages/experimental/auto-review/src` 树与 `0.2.2-rc.3` 逐字节相同（tree hash `2c4de92078…`），因此把 current 基线的编译 pin 从 `0.2.2-rc.3` 前移到 `0.2.2-rc.4`，让 rc.4 开发树继续执行实现类型检查；两份实现、允许差异、差分门禁与请求身份分支均不变。证据见[接口审查](../reference/auto-review-0.2.2-migration.md#版本拓扑与基线分组)与[路线账本](../plans/active/2026-09-12-multi-root-workspace.md)。

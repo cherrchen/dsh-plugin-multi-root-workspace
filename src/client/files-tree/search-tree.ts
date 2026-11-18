@@ -7,7 +7,7 @@
  * results pass through, keyed by absolute path as the listed tree keys them.
  *
  * Sync-bearing copy of upstream `ui-sidebar-files`' `search-tree.ts` at pin
- * `0.2.2-rc.3`. Only the result type differs: this fork still draws the legacy
+ * `0.2.2-rc.4` (upstream source unchanged since `0.2.2-rc.3`). Only the result type differs: this fork still draws the legacy
  * `FilesTabState` (`store.ts`), so the built tree carries its `scrollTop`
  * field, and the child-path join comes from the fork's `face.ts`.
  *
