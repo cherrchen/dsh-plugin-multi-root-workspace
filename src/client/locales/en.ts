@@ -13,7 +13,7 @@ export const en = {
   'skills.settingsFailed': 'Could not save settings. Please try again.',
   'autoReview.title': 'Multi-root Auto Review',
   'autoReview.experimental': 'Experimental',
-  'autoReview.hint': 'Preserves multi-root context for Auto review and takes over the reviewer; equivalent to the same Loader row switch in the Plugin Manager. Off by default; adapted to the exact DSH releases from 0.2.1-rc.2 through 0.2.2-rc.4.',
+  'autoReview.hint': 'Preserves multi-root context for Auto review and takes over the reviewer; equivalent to the same Loader row switch in the Plugin Manager. Off by default; adapted to the exact DSH releases from 0.2.1-rc.2 through 0.2.2-rc.5.',
   'autoReview.loadFailed': 'Could not read plugin state.',
   'autoReview.restartRequired': 'The change takes effect after restart.',
   'autoReview.settingsFailed': 'Could not save settings. Please try again.',

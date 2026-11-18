@@ -12,7 +12,7 @@ export const zh = {
   'skills.settingsFailed': '设置保存失败，请重试。',
   'autoReview.title': '多根 Auto Review',
   'autoReview.experimental': '实验性',
-  'autoReview.hint': '为附加根保留审核上下文并接管 Auto 审查；与插件管理页同名 Loader 行开关等价，默认关闭，适配 DSH 0.2.1-rc.2 至 0.2.2-rc.4 的精确发布。',
+  'autoReview.hint': '为附加根保留审核上下文并接管 Auto 审查；与插件管理页同名 Loader 行开关等价，默认关闭，适配 DSH 0.2.1-rc.2 至 0.2.2-rc.5 的精确发布。',
   'autoReview.loadFailed': '无法读取插件状态。',
   'autoReview.restartRequired': '更改将在重启后生效。',
   'autoReview.settingsFailed': '设置保存失败，请重试。',

@@ -13,7 +13,7 @@ export const ja = {
   'skills.settingsFailed': '設定を保存できませんでした。再試行してください。',
   'autoReview.title': 'マルチルート Auto Review',
   'autoReview.experimental': '実験的',
-  'autoReview.hint': 'マルチルートのコンテキストを Auto Review 用に保持し、レビュアーを引き継ぎます。プラグイン管理ページの同名の Loader 行スイッチと同等です。既定ではオフで、DSH 0.2.1-rc.2 から 0.2.2-rc.4 までの特定のリリースに対応しています。',
+  'autoReview.hint': 'マルチルートのコンテキストを Auto Review 用に保持し、レビュアーを引き継ぎます。プラグイン管理ページの同名の Loader 行スイッチと同等です。既定ではオフで、DSH 0.2.1-rc.2 から 0.2.2-rc.5 までの特定のリリースに対応しています。',
   'autoReview.loadFailed': 'プラグインの状態を読み取れませんでした。',
   'autoReview.restartRequired': '変更は再起動後に有効になります。',
   'autoReview.settingsFailed': '設定を保存できませんでした。再試行してください。',

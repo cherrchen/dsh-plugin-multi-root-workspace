@@ -59,11 +59,11 @@ Depois de instalar, adicione uma raiz adicional dentro de uma sessão:
 | `0.1.7` | `0.1.7-alpha.1`, `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2` |
 | `0.2.0` | `0.2.0-rc.1`, `0.2.0-rc.2` |
 | `0.2.1` | `0.2.1-alpha.1`, `0.2.1-alpha.2`, `0.2.1-alpha.3`, `0.2.1-alpha.4`, `0.2.1-alpha.5`, `0.2.1-rc.1`, `0.2.1-rc.2`, `0.2.1-rc.3`, `0.2.1-rc.4`, `0.2.1-rc.5` |
-| `0.2.2` | `0.2.2-alpha.2`, `0.2.2-alpha.3`, `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, `0.2.2-rc.4` |
+| `0.2.2` | `0.2.2-alpha.2`, `0.2.2-alpha.3`, `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, `0.2.2-rc.4`, `0.2.2-rc.5` |
 
 Quando a versão do DSH não está na tabela, ou os pacotes `@deepseek-ai/dsh-*` estão em versões divergentes, o plugin não inicia — o comportamento é o de um plugin não instalado.
 
-**Compilar a partir do código-fonte / contribuir**: Node.js `^22.19.0 || >=24`, pnpm `11.25.0` (recomenda-se habilitar via corepack); o DSH fixado no desenvolvimento é `0.2.2-rc.4` (Node ≥24.9).
+**Compilar a partir do código-fonte / contribuir**: Node.js `^22.19.0 || >=24`, pnpm `11.25.0` (recomenda-se habilitar via corepack); o DSH fixado no desenvolvimento é `0.2.2-rc.5` (Node ≥24.9).
 
 **Plataformas**: macOS (Seatbelt), Linux (bwrap / Landlock), Windows (root-set ACL runner).
 

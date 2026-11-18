@@ -591,7 +591,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 /* ── files-tree fork (verbatim rules, renamed classes) ─────────────────────
    Copied from upstream's FilesBody.module.css and FileTree.module.css
-   (ui-sidebar-files @ 0.2.2-rc.4, unchanged since rc.3) with local names mapped to mrfw-ft* so the
+   (ui-sidebar-files @ 0.2.2-rc.5, unchanged since rc.3) with local names mapped to mrfw-ft* so the
    rules cannot collide with host DOM — and so the fork's own body (which must
    NOT carry data-files-body) stays visible while the rules above hide the
    native one. The header-only rules (root/header/path/tool/status/statusLine/
@@ -713,7 +713,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
    Upstream 0.2.2-rc.2 added workspace search to the Files navigator: a bar
    above the tree, its result status, the results' notes, and a floating
    settings panel for the exclusion rules. Copied from upstream's
-   FilesBody.module.css (ui-sidebar-files @ 0.2.2-rc.4, unchanged since rc.3) with local names
+   FilesBody.module.css (ui-sidebar-files @ 0.2.2-rc.5, unchanged since rc.3) with local names
    mapped to mrfw-fs* so the rules cannot collide with host DOM. The pane
    wrapper is ours — the native navigator that supplied the column and the
    bar-height variable is not forked — and the fork reuses mrfw-ftBody for
