@@ -659,8 +659,11 @@ describe('total transfer I/O deadline and cancellation', () => {
     expect(s.mem.hardlinkCalls).toBeLessThanOrEqual(1)
   })
 
-  it.each(['upload', 'download', 'relay'] as const)('cancels a stalled %s without waiting for the response', async direction => {
+  it.for(['upload', 'download', 'relay'] as const)('cancels a stalled %s without waiting for the response', async (direction, context) => {
     fixture = createFixtureWorkspace('copy-cancel')
+    if (direction === 'download' && process.platform === 'win32') {
+      context.skip('The local transfer sink is POSIX-only (ADR-0030)')
+    }
     writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
     const s = stack()
     s.mem.seed('/export/artifact.bin', 'bounded')
@@ -670,10 +673,23 @@ describe('total transfer I/O deadline and cancellation', () => {
     const controller = new AbortController()
     const req = direction === 'upload' ? localToRemote() : direction === 'download' ? remoteToLocal() : remoteToRemote()
     const pending = runRemoteCopy(s.registry, s.deps, req, 'remote_copy', controller.signal)
-    await entered.promise
+    await Promise.race([
+      entered.promise,
+      pending.then(result => { throw new Error(`Transfer ended before the stalled SFTP call: ${JSON.stringify(result)}`) }),
+    ])
     controller.abort()
     expect(await pending).toMatchObject({ code: 'cancelled' })
     expect(s.mem.hardlinkCalls + s.memB.hardlinkCalls).toBe(0)
+  })
+
+  it.runIf(process.platform === 'win32')('refuses a download before reading from SFTP on Windows', async () => {
+    fixture = createFixtureWorkspace('copy-unsupported-sink')
+    const s = stack()
+    s.mem.seed('/import/source.txt', 'bounded')
+    expect(await run(s, remoteToLocal())).toMatchObject({
+      status: 'failed', code: 'local-platform-unsupported', stage: 'preflight', staging: 'none',
+    })
+    expect(s.mem.readCalls).toBe(0)
   })
 
   it('disposes a connection which opens after the total deadline', async () => {
