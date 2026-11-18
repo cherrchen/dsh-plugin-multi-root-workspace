@@ -1779,6 +1779,11 @@ rc.4 只有 8 个提交、395 个文件；其中 380 个 `package.json`（379 �
 - lint（0 警告 0 错误）、双端 `tsc --noEmit`（含 `tsconfig.auto-review-current.json` 的实现类型检查）、`build`、`docs:check`（0 错误 0 警告）、`pack:check`、`auto-review:fork`、`kernel:probe`：通过；
 - 完整 `vitest`：**1933 通过 / 165 跳过 / 17 失败**（118 个文件，104 通过 / 8 失败 / 6 跳过）。17 个失败全部是共享 Registry 的核内 IPC/租约用例（`registry*` / `authority-boundaries` / `b9-review-regressions` / `skills-authority` / `skills-registry` 共 8 个文件），本会话运行在 DSH 自身的 Seatbelt 内、Peer 凭据被识别为 sandboxed peer；与 rc.3 基线记录的失败集合相同，不是 rc.4 回归；
 - Host smoke 与 packed（0 失败）：compose **56/56**、behavior **96 通过 / 8 跳过**、journey **88 通过 / 2 跳过**、packed **95 通过 / 8 跳过**；`smoke:auto-review` 在 source/link 与 packed 两条车道、官方 bundle 前后两种顺序全部通过。跳过项是 Seatbelt 内无可用内核 runner 与共享 IPC；
-- 三 OS 矩阵、Windows ACL 原生探针与旧版回归由 PR 的 CI 给出（25 个精确版本 × macOS / Ubuntu 22.04 / Ubuntu latest / Windows）；浏览器实机目检不是 CI 项，本轮未执行，保留为合入前的人工项。
+- 实机目检（2026-11-18，隔离 scratch `$DSH_HOME` + 真实 `dsh web`（`0.2.2-rc.4` 开发树）+ 本机 Google Chrome headless/CDP；注册两个附加根 `dsh-plugin-multi-root-workspace-ssh` 与 `/private/tmp/rc4-extra-root`）覆盖[兼容笔记 §12 的目检清单](../../../.agent/note/dsh-compat-contract.md)：
+  - Files 三态：主根态原生 body / reload / open-in-app 可见、无复刻 body；附加根态原生 body 隐藏，复刻 body 645×824 可见，原生 reload 换为 `.mrfw-switcherReload`，原生 open-in-app 隐藏而复刻分离按钮可见；切回主根完整还原。同宽 647px 下原生行与复刻行同为 29.5px 高、13px 字号、16px 图标。
+  - 预览导航器：附加根嵌套文件（`src/index.ts`）打开 Folder 后 aside 带 `data-mrfw-navigator`、插件 pane 与常显搜索栏出现，原生导航 body 与原生搜索栏隐藏，`src` 祖先展开，当前行 `aria-current` 且在 aside 视口内（top 783 ∈ 84..892）；主根文件预览完全原生（无 marker/pane，原生 body 与搜索栏可见）。
+  - 折叠/重开与多根记忆：Folder 关闭/重开后 `scrollTop 240`、2 个展开目录、86 行原样恢复且直接绘制；A→B→A（两个附加根）时各自导航器根与当前文件正确，A 的 `revealed` 未被 B 的地址串写。
+  - 预览搜索：查询 `README` → `Results: 22`、22 处 `<mark>`；点结果行后预览 tab 数量不变（2）且 `data-textpreview-url` 原位换成结果文件；关闭/重开 Folder 与 replaceTab 后查询与结果保留；眼睛默认隐藏 `.git`，开启后树由 27 行增至 37 行并出现 `.git`；设置浮层打开后 Esc 顺序为「关设置 → 清查询（回到树）→ 关导航树」；移除附加根目录后搜索显示本地化失败行与 Retry，恢复目录点 Retry 后回到 settled 状态。
+- 三 OS 矩阵、Windows ACL 原生探针与旧版回归由 PR 的 CI 给出（25 个精确版本 × macOS / Ubuntu 22.04 / Ubuntu latest / Windows）；实机目检截图由本机 scratch 环境保留（gitignored，不入库）。
 
 `CHANGELOG` 条目与版本号由后续发版流程写入，本分支不创建 tag。
