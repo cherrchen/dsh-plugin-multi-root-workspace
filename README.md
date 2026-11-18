@@ -9,7 +9,7 @@
 <img alt="NPM Version" src="https://img.shields.io/npm/v/%40dsh-electron%2Fdsh-plugin-multi-root-workspace">
 <img alt="NPM Downloads" src="https://img.shields.io/npm/d18m/%40dsh-electron%2Fdsh-plugin-multi-root-workspace">
 
-中文 | [English](./README.en.md)
+中文 | [English](./README.en.md) | [日本語](./README.ja.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Deutsch](./README.de.md) | [Русский](./README.ru.md) | [Português](./README.pt.md)
 
 </div>
 
@@ -322,7 +322,7 @@ worktree 被删除或移动后，对话框显示徽标，但**永不自动清理
 │   ├── worktrees/                   受控 Git 元数据快照（config/HEAD/index/祖先链）、inventory、sidecar 与 owner 复验（不启动 Git）
 │   ├── worktrees-contract.ts         Worktree 端点的双端严格契约（判别联合，禁止 retry 字段）
 │   ├── contract.ts                   面板线协议（zod 双端校验，可内联进浏览器 bundle）
-│   └── client/                       浏览器半部：侧栏动作、Folders 对话框、Files 页签根切换器、双语词典
+│   └── client/                       浏览器半部：侧栏动作、Folders 对话框、Files 页签根切换器、8 语言词典
 ├── tests/                            差分 parity、方言真实执行矩阵、契约往返、组件与 locale 门禁、跨进程 lease e2e、指令注入
 ├── scripts/                          冒烟（compose / behavior / journey）、文档与内核 runner 检查、兼容性契约检查、升级流程
 └── docs/                             需求、架构、决策记录（ADR）、计划、开发工作流
@@ -335,7 +335,7 @@ worktree 被删除或移动后，对话框显示徽标，但**永不自动清理
 1. 先读 [`AGENTS.md`](./AGENTS.md)（仓库级规则）与[开发工作流](./docs/development/plugin-development-workflow.md)（环境、命令、运行时支持矩阵、升级流程）。
 2. 从 `main` 拉分支；提交信息遵循 conventional commits（`feat` / `fix` / `perf` / `refactor` + scope），参见现有历史。
 3. PR 前本地必须全部通过：`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm test`、`pnpm docs:check`、`pnpm smoke`（CI 按同序执行，先 build 后 test）。
-4. 影响行为的变更需同批更新 `docs/` 下的对应文档；README 保持中英双语同步；有取舍的工程决策请新增 ADR。
+4. 影响行为的变更需同批更新 `docs/` 下的对应文档；根目录 README 保持 8 种语言同步（以中文版为准）；有取舍的工程决策请新增 ADR。
 5. 硬约束：**不修改上游仓库（deepseek-harness）任何包**；插件只做 out-of-tree 扩展。
 
 ## 已知限制
@@ -352,7 +352,7 @@ worktree 被删除或移动后，对话框显示徽标，但**永不自动清理
 - **上游选择 Landlock 的 Linux 主机上，受限 Full-access 需要 bwrap**：Landlock 的 allowlist 表达不了「全部可写、除这些根」，该组合改选 bubblewrap 拼出拒写边界；主机没有可用的 bwrap（未安装或禁用非特权 userns）时，存在任何拒写边界（只读根或受保护的 `$DSH_HOME`）的 Full-access 命令在启动前失败关闭。启用 bwrap，或在该主机上避免在 Full-access 下使用显式只读根（[ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md)）。
 - 附加根文件树由 **Files 页签的根选择器**承载：头部入口列出主根与全部附加根，旁边仍显示选中根的完整路径；选中附加根时逐字节复刻的上游 Files 树体接管树区（懒加载目录、原生行式与图标、watch 自动刷新、文件点击进宿主 viewer、header 原位提供手动刷新），header 右侧「在应用中打开」按钮同时由逐字节复刻的上游控件顶替、对选中根而非主根发起打开；切回主根即恢复原生视图；对话框回归纯管理。附加根行另提供与主根一致的行右键菜单（文件行、目录行；文件预览的 Folder 导航树同样生效），并按选中根提供工作区搜索（页头搜索钮、搜索栏、命中高亮结果树、偏好浮层与隐藏项过滤）；两者只在宿主暴露对应结构时出现——行右键要求 `useContextMenu`（`0.2.2-alpha.3` 起），搜索要求 `workspaceFiles.search`（`0.2.2-rc.2` 起），更早宿主上不绑定行菜单、不渲染搜索入口，视图保持不变。该接管依赖上游 `data-*` DOM 钩子，钩子失效时静默退化为原生观感（[ADR-0015](./docs/decisions/ADR-0015-files-tab-plugin-owned-browsing.md)、[ADR-0016](./docs/decisions/ADR-0016-files-tab-native-tree-fork.md)）。LSP 按附加文件所在根初始化独立 workspace；需要宿主配置对应语言服务器（[ADR-0011](./docs/decisions/ADR-0011-multi-root-workspace-consumers.md)）。已知边界：原生 Files 快捷键 **Cmd+P** 仍聚焦被接管隐藏的原生搜索框，因此不把原生快捷键当作附加根搜索入口——Files 页与预览导航树的搜索面都不响应它（[ADR-0041](./docs/decisions/ADR-0041-additional-root-workspace-search.md)、[ADR-0043](./docs/decisions/ADR-0043-additional-root-preview-navigator-search.md)）；预览导航树的搜索记录按 `(pane, root)` 保存，与 Files 页的 `(tab, root)` 分开，因此同一 pane 的 Files 页查询不会带进预览；结果当前行只标记、不自动滚动；关闭 Folder 或同一 pane 换根会丢弃未保存的设置草稿（[ADR-0043](./docs/decisions/ADR-0043-additional-root-preview-navigator-search.md)）。
 - 第三方插件接管整个 Files 页签（以 `priority: "extension"` 注册 `files` kind）时，根切换器与附加根浏览不可用；插件弹一次官方 info 级瞬时提示，接管解除后可再次提示，根管理仍可从侧栏「工作区目录」与 `/workspace-folders` 完成（[Issue #47](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/issues/47)）。
-- 命令的输出文案为英文（host 侧没有活动语言信息），面板文案中英双语跟随界面语言。
+- 命令的输出文案为英文（host 侧没有活动语言信息），面板文案跟随界面语言，覆盖 DSH 内置的 8 种语言。
 - Workspace Folders 面板是「侧栏底部动作 + 对话框」，不是独立全屏面板：`sidebar.footer.action` 是所有受支持版本都提供的插槽，而 `sidebar.panellist`/`main` 不是。DSH `0.2.1-alpha.3` 起额外在新会话页的 `conversation.hero.options` 槽挂一个增量入口：它与相邻的工作区/模式选择器同几何、无 chevron，按工作区行内实测的可用余量收缩，余量不足 88px 时退化为 28×28 图标按钮（上游 options 容器是 `flex: none`，插件不改 DSH，只测余量并夹住自己；探针认不出行结构时回落到 560px 视口兜底）；该槽在旧运行时缺席时注册静默不触发，侧栏入口不受影响（[ADR-0037](./docs/decisions/ADR-0037-conversation-hero-workspace-folders-entry.md)）。侧栏入口的 rail（折叠态）圆角有自己更早的分界 `0.1.6-alpha.2`：23 个受支持版本与宿主同为 12px 圆角方，最老 2 个版本（`0.1.5-rc.2`、`0.1.6-alpha.1`）宿主画圆而插件画 12px 圆角方，是已记录的圆角偏差（无 ink/布局影响）；`@media (hover: hover)` 包装只在 6 个新几何版本存在，插件保持不包装，触屏上与这些版本有 hover 反馈差异（[ADR-0044](./docs/decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)）。侧栏入口的高度跟随同一列设置行的 occupant，依赖账号 launcher 的 `data-signed-out` 结构标记（CSS `:has()` 依赖，不是槽位契约）：`0.1.7-rc.2` 及更早的 7 个版本沿用 42px 设置触发器高度；`0.2.0-rc.1` 起未登录 32px / 已登录 44px，rail 固定 36px；标记改名或消失时回退 42px（不会误设尺寸），只影响高度（[ADR-0044](./docs/decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)）。
 
 ### OPS 适配
