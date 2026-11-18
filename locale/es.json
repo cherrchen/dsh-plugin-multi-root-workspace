@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Espacio de trabajo multi-raíz",
+    "description": "Añade directorios de trabajo secundarios a una sesión: registra una carpeta una vez y el Agent la leerá y escribirá junto al directorio principal dentro de un mismo ámbito de sandbox, incluidas las herramientas de archivos, los shells restringidos y las terminales.",
+    "detail": "detail/DETAIL.es.md"
+  }
+}

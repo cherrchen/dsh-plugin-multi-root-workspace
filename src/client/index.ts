@@ -34,7 +34,7 @@ import { nativeTreeRenderer } from '../compat/files-tree.ts'
 import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { createWorktreeClient } from './worktree-client.ts'
 import { WorktreePrompt } from './WorktreePrompt.tsx'
-import { NS, en, zh } from './locales.ts'
+import { DICTIONARIES, NS } from './locales.ts'
 import { STYLES } from './styles.ts'
 import { HeroWorkspaceEntry } from './HeroWorkspaceEntry.tsx'
 import { installSkillsClient } from './skills.tsx'
@@ -126,7 +126,7 @@ interface HeroOptionsSlotService {
  * @param ctx - the client root context.
  */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'multi-root-workspace: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, DICTIONARIES), 'multi-root-workspace: dictionaries')
 
   // The panel's classes resolve against this sheet; removing it on unload keeps
   // a hot-unplugged plugin from leaving dead rules behind.

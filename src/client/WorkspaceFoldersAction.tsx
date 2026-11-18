@@ -211,7 +211,7 @@ function PathCopy(props: {
   )
 }
 
-/** The bilingual badge key for one worktree lifecycle state. */
+/** The panel key for one worktree lifecycle state, in every shipped language. */
 export function worktreeStateKey(state: WorktreeRootView['state']): Key {
   switch (state) {
     case 'directory-missing': return 'worktree.state.directory-missing'
