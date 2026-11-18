@@ -209,6 +209,8 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 - 每个版本先运行强制 Registry 认证探针和内核探针，再启动测试。Linux 22.04 提供 bwrap，macOS 提供 Seatbelt，Windows 探针用真实上游 ACL runner 验证允许写和兄弟目录拒写。探针把实跑方言写到该版本的私有文件，由该版本后续命令读取为 `DSH_PROBE_VERIFIED_DIALECTS`。探针证明可用的方言必须实跑，其他按原有能力判断和 skip 原因处理。`DSH_REQUIRE_KERNEL_RUNNER=1` 仍可在本地强制要求方言。
 - 一个版本失败后继续本组其余版本。摘要按镜像和精确版本列出耗时、结论和探针方言。每组上传 `ci-group-<image>-<group>`，每版目录内含阶段日志、Vitest 用例状态和 `context.skip(note)` 原因，以及 `result.json`。末尾 `gate` 要求两个上游 job 成功，并逐项核对计划中每个镜像 × 精确版本的同 SHA 成功记录；缺失、重复、失败或取消都阻断。发布查证见[发版流程](./release-workflow.md)。
 
+`smoke:auto-review` 在启动脚本中静态导入开发树的 `dsh-app-boot`，使 DSH 热重载把它识别为宿主模块。源码链接安装会把 checkout 纳入热重载范围，其中也包含开发依赖。若引导模块被重新求值，新实例就找不到旧实例记录的根 Include，插件开关会报 `profile reload requires the root Include entry`。
+
 [Upgrade workflow](../../.github/workflows/upgrade.yml) 仍按周或手动验证一个候选版本。它重指并安装候选，运行该车道原有的完整验证，保留 `DSH_MULTI_ROOT_COMPAT=warn`，不运行 `compat:check`。权限为 `contents: read`，成功仅记录提升指引。手动版本输入经 step 环境变量传递，写入输出前验证为单行精确版本。工作流约束由 [workflows.spec.ts](../../tests/workflows.spec.ts) 验证。
 
 ### Windows 验证腿
@@ -228,6 +230,8 @@ Windows 的 foreign-owned ACL 夹具按**先 DACL、后 owner**搭建：用 `who
 原生 piped 子进程探针在 `close` 而非 `exit` 事件拼接输出：Node 的 `exit` 不保证 stdout/stderr 已关闭，过早解析会把完整 verdict 截断；`close` 才能证明输出管道已经结束。见 [Node child_process 文档](https://nodejs.org/api/child_process.html#event-close)。
 
 Windows runner 的 PATH 可能让同名 GNU 命令覆盖 Windows 工具。ACL 夹具的 `whoami.exe` / `icacls.exe` / `takeown.exe` 均按 `%SystemRoot%/System32` 绝对路径执行；不要用裸 `whoami /user`，否则命中 GNU whoami 后参数会被拒绝。
+
+`tests/remote-copy.spec.ts` 在 Windows 上验证下载于读取 SFTP 数据前返回 `local-platform-unsupported`，见 [ADR-0030](../decisions/ADR-0030-environment-and-root-identity.md)。下载中的取消断言由 POSIX 车道执行，上传和中继的取消断言继续在所有镜像执行。
 
 ## 8. 常见失败与处置
 
