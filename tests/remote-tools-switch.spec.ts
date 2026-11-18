@@ -295,6 +295,9 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     hooks()!.onChange()
     await expect.poll(() => world!.stack.registry.remoteStatus.state, { timeout: 5_000 }).toBe('ready')
     expect(world!.stack.registry.remoteMode).toBe('personal')
+    // The plane becomes ready before the personal manager installs the verifier and tools.
+    await expect.poll(() => world!.call('remote_copy', localToLocal), { timeout: 5_000 })
+      .toMatchObject({ status: 'failed', code: 'direction-unsupported' })
     // Personal custody never talks to a broker.
     expect(probe.calls).toBe(0)
 
