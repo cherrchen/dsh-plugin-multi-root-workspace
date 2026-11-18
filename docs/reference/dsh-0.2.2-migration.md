@@ -168,3 +168,36 @@
 **历史表行豁免**：§“0.2.2-rc.2 后续审查”表格中“接管时原生搜索条隐藏”是 2026-11-11 的当时结论，仍然成立——原生条在接管期继续隐藏（它的根固定为 Session cwd）；本小节追加的是插件在 aside 内绘制**自己的**搜索面，并沿用 `data-files-search-status`/`data-files-search-settings` 等同名钩子（`data-files-search` 精确钩子仍只属于原生输入框）。原生与插件的同名节点靠 `styles.ts` 的 **direct-child** 隐藏规则区分：`aside[data-mrfw-navigator] > div:not([data-mrfw-files-pane]):has([data-files-search])`、`aside[data-mrfw-navigator] > [data-files-search-status]` 与 `aside[data-mrfw-navigator] > [data-files-search-settings]`；插件 pane 的嵌套同名节点不被匹配，pane 根带 `data-mrfw-files-pane` 作为守卫与测试锚点。
 
 **为什么仍不需要新端点**：预览与 Files 页对 `search` 端点的需求完全相同——搜哪个登记根；预览不带来新的授权对象、不需要 pane 身份、不需要额外字段。把 paneId 塞进 wire 只会扩大协议面，因此实现 PR 的 Host 侧 diff 为空。
+
+## 0.2.2-rc.4 后续审查（2026-11-18）
+
+上游 tag `dsh-v0.2.2-rc.4` 指向 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`（发布提交 `bc3bddffbd`），npm 已发布该精确版本（`next` 指向它，`latest` 仍为 `0.2.2-rc.1`）。本分支按 ADR-0009 完成提升：`SUPPORTED_DSH_RELEASES`、全部 DSH peer 与开发 pin 都指向 `0.2.2-rc.4`（25 个精确版本），开发树由 `scripts/upgrade-dsh.mjs 0.2.2-rc.4` 整体重指，probe overrides 已移除。
+
+对照 `0.2.2-rc.3`（`38a6a5c965`），rc.4 只有 8 个提交、395 个文件、579 行新增 / 429 行删除；其中 380 个 `package.json`（379 个 workspace 包与根 manifest）只替换版本号，其余 15 个文件的净改动集中在下列面。插件实际依赖的 sandbox、fs、session、storage、skills、lsp、workspace-files、client 与 Auto Review reviewer 源码全部未变。
+
+| 接缝 / 上游源码 | 变化 | 分类与插件处理 |
+|---|---|---|
+| `dsh-llm` `src/error.ts` | `LLM_FAILURE_CODES` 新增 `CONTENT_REFUSED`（内容安全审查拒答） | 纯新增故障码。插件只 type-only 消费 `dsh-llm`（`UserMessage` / `createUserMessage` / Auto Review 的类型面），不按失败码路由；无适配 |
+| `llm-deepseek` `src/translate.ts` | `refusal` stop reason 不再当作普通 finish：先产出 `usage`，再抛带 provider `explanation` 的 `CONTENT_REFUSED` 错误；`safetyCheck` 三次提交（新增开关 → 始终请求审查 → 去掉开关）的正负抵消，最终没有配置项 | 不在插件接缝：插件不包装 LLM 调用、不读 deepseek adapter 配置；宿主继承新语义。无适配 |
+| `packages/experimental/liveshare` `src/host/tunnel-worker.ts` | 实验包 tunnel worker 改在 Host 的 Electron Node 模式启动 | 默认不挂载的实验包，与插件围栏/Registry/范围无交点；无适配 |
+| `docs/upgrade-guide/v0.2.2-rc.3/deepseek-refusal-code/*`、`snapshots/session/deepseek-content-refusal/*` | 新增该拒答码的 npm upgrade guide 与会话快照 | 上游文档与测试夹具；插件不消费；无适配 |
+
+**逐树核对（rc.3 → rc.4，`git rev-parse <tag>:<path>` 相同即逐字节相同）**：`sandbox/src` `01104584d8`、`sandbox-local/src` `df462d3e5e`、`sandbox-policy/src` `ec4a77eb6c`、`sandbox-windows-acl/src` `ceee0b85f1`、`fs/src` `a2ead247d1`、`fs-local/src` `700a6e5ac9`、`fs-sandbox/src` `178f100356`、`session-projection/src` `7935938ee8`、`storage-domain/src` `3f84d317ea`、`skill/src` `2c9c47d5ee`、`skill-filesystem/src` `bbd5a998e7`、`lsp/src` `6edec9f634`、`lsp-stdio/src` `37b51c90c5`、`api/workspace-files/src` `55865100c9`、`experimental/auto-review/src` `2c4de92078`、`client/ui-open-in-app/src/client` `3bed6f40cc`、`client/ui-sidebar-files/src/client` `6cad50b5fd`。在插件消费的运行时源码树里唯一变化的是 `dsh-llm/src`（`a88501275c` → `13c5296093`），即上表的 `CONTENT_REFUSED` 新增成员；`llm-deepseek/src` 与 `liveshare/src/host` 也有改动，但都不在插件消费面（见上表）。
+
+**Auto Review 编译 pin**：current 基线的 reviewer `src` 在两版之间逐字节相同，因此 `AUTO_REVIEW_CURRENT_COMPILE_PIN` 从 `0.2.2-rc.3` 前移到 `0.2.2-rc.4`，联合发布集合从 9 个扩到 10 个（`AUTO_REVIEW_CURRENT_RELEASES` 末尾加入 rc.4）；实现类型检查仍在开发 pin 等于该基线编译 pin 的车道执行。
+
+环境要求与 rc.1–rc.3 相同：Node `>=24.9`、Cordis `4.1.0`、Schemastery `3.19.0`、`node-addon-system 0.1.2`、`koffi 3.1.1`（`dsh-fs-local` 声明）；rc.4 未引入新的传递包，也未改变上述生态 pin。open-in-app 与 files-tree 的复刻源在 rc.4 未变，基线保持 `ddac96760b`（open-in-app）与 `f3803c9697`（files-tree 旧版）。
+
+### 提升步骤（本分支已执行）
+
+1. 确认 npm 上 `0.2.2-rc.4` 可解析（`next` 指向它），执行 `node scripts/upgrade-dsh.mjs 0.2.2-rc.4` 重指 devDependencies / release-age / 生态 pin；
+2. 在 `SUPPORTED_DSH_RELEASES` 末尾加入 `0.2.2-rc.4`，同步 28 个 DSH peer 列表与 dev pin；移除 probe overrides 后 `pnpm install --no-frozen-lockfile --config.minimumReleaseAge=0`，最终 `pnpm-lock.yaml` 中 `0.2.2-rc.3` 为 0，`pnpm peers check` 输出 `No peer dependency issues found`；
+3. 把 `AUTO_REVIEW_CURRENT_RELEASES` 加入 rc.4，并把 current 编译 pin 前移到 rc.4（reviewer `src` 未变，见上）；
+4. 以 enforce 重跑 `compat:check`、lint、双端类型检查、构建、文档与打包检查；完整矩阵、Host smoke 与三 OS 原生结果由 PR 的 CI 覆盖；
+5. 更新 README 支持矩阵、`AGENTS.md` 兼容契约段、兼容笔记双语 §19 与路线账本；`CHANGELOG` 条目随实际发版的发布流程写入，本分支不创建版本号或 tag。
+
+### 安静陷阱（开发树）
+
+- **peer-only 副本**：升级脚本只重指直接依赖与 release-age 条目，仍可能留下以旧 rc 副本满足精确 peer 边的“看似有效”边；`pnpm dedupe` / `--force` / `--lockfile-only` 都不会改写它们。必须以 `pnpm peers check` 与 lockfile 中旧 rc 副本计数为准（本轮均为 0）。
+- **拒答码不是插件面**：`CONTENT_REFUSED` 发生在会话循环的 LLM 调用内，插件既不包装也不分类；不要为它新增版本判断或适配器分支，也不要假设 deepseek adapter 还有 `safetyCheck` 配置项（rc.4 已移除）。
+- **编译 pin 前移的依据是源码树 hash，不是版本号**：只有 reviewer `src` 逐字节相同才允许把编译 pin 移到新发布；上游若改 reviewer 源码，必须重做该基线的 fork 而不是只改 pin。
