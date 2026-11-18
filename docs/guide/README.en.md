@@ -2,7 +2,7 @@
 
 中文：[README.md](./README.md)
 
-The user-facing guide: the top-level README covers the "how"; this guide fills in the "why" and the exact semantics, for the moments the defaults don't cover.
+The user-facing guide fills in the "why" and the exact semantics for the moments the defaults don't cover. Feature-by-feature how-to guides live in [user/](./user/README.en.md).
 
 ## Contents
 

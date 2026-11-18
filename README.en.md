@@ -4,6 +4,11 @@
 
 # dsh-plugin-multi-root-workspace
 
+<img alt="GitHub License" src="https://img.shields.io/github/license/cherrchen/dsh-plugin-multi-root-workspace">
+<img alt="GitHub Release" src="https://img.shields.io/github/v/release/cherrchen/dsh-plugin-multi-root-workspace">
+<img alt="NPM Version" src="https://img.shields.io/npm/v/%40dsh-electron%2Fdsh-plugin-multi-root-workspace">
+<img alt="NPM Downloads" src="https://img.shields.io/npm/d18m/%40dsh-electron%2Fdsh-plugin-multi-root-workspace">
+
 [中文](./README.md) | English
 
 </div>
@@ -33,15 +38,15 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 dsh --profile web       # pick the --profile for how you launch DSH; see its docs for the values
 ```
 
-**DSH Desktop users**: if the Plugins page says the plugin is installed but `dsh.profile.bundles` does not list it, or enabling it fails with duplicate `fs` / `sandbox` registration, follow the DSH Desktop steps under [Installation](#installation) and use Desktop's bundled `dsh` before starting Desktop cold.
+**DSH Desktop users**: enter `@dsh-electron/dsh-plugin-multi-root-workspace` on the Plugins page to install it. If startup reports an error, restart DeepSeek Harness Desktop.
 
-Once it is up, the **Folders** action appears at the sidebar foot with the workspace-tree glyph, lining up pixel for pixel with the host's settings trigger row ([ADR-0044](./docs/decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)); on DSH `0.2.1-alpha.3` and newer, the same entry also appears at the right edge of the New Session hero row (same height and type scale as the adjacent workspace and mode selectors, no dropdown chevron, icon-only in narrow windows) — or, straight in a session:
+Other install options (tarball, GitHub, a local clone) are covered under [Installation](#installation).
+
+To add an additional root, run this in a session:
 
 ```text
 /workspace-folders add ~/code/another-repo [--inherit|--read-only|--read-write]
 ```
-
-The agent can now read, write, and run bash in that directory — the default is `inherit`, so the access level follows the session mode. Other install options (tarball, GitHub, a local clone) are covered under [Installation](#installation).
 
 ## Requirements
 
@@ -64,28 +69,11 @@ The plugin does not start — as if it were not installed — when the DSH relea
 
 ## Installation
 
-### DSH Desktop: install or recover with the bundled CLI
+Install the plugin either from the command line (CLI) or from the GUI plugin manager in Web / Desktop. Either one is enough.
 
-On DSH Desktop the Plugins page and the CLI are **not equivalent entry points**: **Add plugin** may write only `dependencies`, while the separate **Enable now** action writes `dsh.profile.bundles`; enabling the plugin hot in a running Host can also collide with the old providers.
+### Install from the CLI
 
-1. Fully quit Desktop, including the tray icon.
-2. In a terminal, use the `dsh` under `<Desktop install directory>/resources/runtime/cli/bin` (add that directory to `PATH` if needed). Fresh install:
-   ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.22
-   ```
-3. Already installed but missing the bundle entry: `remove`, then `add` (re-running only `add` does not register it):
-   ```sh
-   dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.22
-   ```
-4. Open `$DSH_HOME/profiles/desktop/package.json` (normally `~/.dsh/profiles/desktop/package.json` when `DSH_HOME` is unset) and confirm `dsh.profile.bundles` contains the package.
-5. Start Desktop again (cold start).
-
-The first install no longer needs an `allowBuilds` entry for `koffi`: koffi is supplied by the host and this plugin declares it as an optional peer. If the `add` exits 0 but the plugin never lands in `dsh.profile.bundles`, do a `remove` + `add`. The hot-enable cause, reproduction, and the investigation of profile writes are in [troubleshooting](./docs/troubleshooting/desktop-install-missing-bundle.md) (Chinese).
-
-### Four install sources for CLI profiles
-
-`dsh plugin` supports four install sources. All commands below use the web profile as the example; `headless` and other CLI profiles work the same way. For DSH Desktop use the `dsh` and `desktop` profile from the previous section; a `dsh` installed from npm cannot manage Desktop's reserved profile.
+`dsh plugin` supports four install sources, shown here with the `web` profile; `headless` and other CLI profiles work the same way. **DSH Desktop users**: the `desktop` profile is managed through the `dsh` CLI bundled with DeepSeek Harness Desktop — see the end of this section.
 
 | Source | Command | Notes |
 | --- | --- | --- |
@@ -94,19 +82,15 @@ The first install no longer needs an `allowBuilds` entry for `koffi`: koffi is s
 | tarball | `dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-<version>.tgz` | Pre-built offline package, handy for air-gapped or offline delivery |
 | From source | `dsh plugin --profile web add /path/to/package/dsh-plugin-multi-root-workspace` | pnpm `link:` to a local checkout — best for development; no `allowBuilds` needed |
 
-**npm, tarball, and local-path installs need no `allowBuilds` at all**: the plugin ships no production dependency with a build script (`koffi` is supplied by the host). A git source still needs approval for the package's own `prepare`, but pnpm accepts only the exact key (source and commit) it prints — copy the line from [Install from GitHub](#install-from-github); a bare package name does not apply.
-
-If the retry `exits 0` but the plugin never lands in `dsh.profile.bundles`, do a `remove` + `add`. Further diagnosis: [troubleshooting](./docs/troubleshooting/install-stops-at-build-approval.md).
-
-### Install from npm (recommended)
+#### Install from npm (recommended)
 
 ```sh
 dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```
 
-This installs pre-built artifacts; no build approval is needed.
+This installs pre-built artifacts.
 
-### Install from a tarball
+#### Install from a tarball
 
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
@@ -115,9 +99,9 @@ pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.22.tgz
 ```
 
-Also pre-built, handy for air-gapped or offline delivery; no build approval is needed here either.
+Also pre-built, handy for air-gapped or offline delivery.
 
-### Install from GitHub
+#### Install from GitHub
 
 ```sh
 dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace
@@ -138,7 +122,7 @@ Pinning a version (e.g. `#v0.1.22`) is recommended so a later push cannot silent
 dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.22
 ```
 
-### Install from a local clone
+#### Install from a local clone
 
 ```sh
 git clone https://github.com/cherrchen/dsh-plugin-multi-root-workspace.git
@@ -152,7 +136,8 @@ dsh plugin --profile web add /path/to/repo
 > [!TIP]
 > If `dsh` is not on your PATH (e.g. you run DSH from a source checkout), use `pnpm dsh` instead.
 
-## Running
+<details>
+<summary>Running</summary>
 
 Development gates:
 
@@ -219,83 +204,98 @@ Expected output:
 
 The upstream `fs-sandbox` and `sandbox` rows are disabled and taken over by the plugin's same-named services, and all the plugin's `multi-root-*` rows are mounted. After startup, a **Folders** action (workspace-tree glyph) appears at the sidebar foot; DSH `0.2.1-alpha.3` and newer also show the same entry at the right edge of the New Session hero row.
 
+</details>
+
+#### Install with DeepSeek Harness Desktop's built-in CLI
+
+DeepSeek Harness Desktop can install a global `dsh` command from its application menu (**Manage dsh Command…**); use that command to manage the `desktop` profile.
+
+1. Fully quit Desktop, including the tray icon.
+2. Fresh install:
+   ```sh
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.22
+   ```
+3. Already installed but missing the bundle entry: `remove`, then `add` (re-running only `add` does not register it):
+   ```sh
+   dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.22
+   ```
+4. Open `$DSH_HOME/profiles/desktop/package.json` (normally `~/.dsh/profiles/desktop/package.json` when `DSH_HOME` is unset) and confirm `dsh.profile.bundles` contains the package.
+5. Start Desktop again (cold start).
+
+If the `add` exits 0 but the plugin never lands in `dsh.profile.bundles`, do a `remove` + `add`. The hot-enable cause, reproduction, and the investigation of profile writes are in [troubleshooting](./docs/troubleshooting/desktop-install-missing-bundle.md) (Chinese).
+
+### Install from the Web / Desktop GUI plugin manager
+
+Web and Desktop install from the sidebar's **Plugins** page: choose **Add plugin**, enter `@dsh-electron/dsh-plugin-multi-root-workspace`, and install it. Then choose **Enable now** — installing alone does not enable the plugin. If the Plugins page has no **Add plugin** entry, use the CLI above.
+
+Restart the DeepSeek Harness app after installing or enabling the plugin: quit Desktop fully (including the tray icon) and reopen it, or restart the `dsh web` process. Enabling this plugin in a running app can fail with duplicate `fs` / `sandbox` registration; a restart loads it cleanly.
+
 ## Usage
 
 ### Command
 
 ```text
-/workspace-folders [list]                                                    # list the primary root and the additional roots (access and state included)
-/workspace-folders add <absolute path> [--inherit|--read-only|--read-write]  # no path opens the OS directory picker; new registrations default to inherit
-/add-dirs [absolute path] [--inherit|--read-only|--read-write]               # shortcut for /workspace-folders add
-/workspace-folders access <n|path> inherit|read-only|read-write              # switch access (widening requires the root to be available right now)
-/workspace-folders skills <n|path> on|off                                    # toggle additional-root Skills independently of write access
-/workspace-folders alias-id <n|path> <kebab-case>                             # edit the stable Skill namespace
-/workspace-folders alias <n|path> [name]                                     # omitting the name clears the alias
-/workspace-folders remove <n|path>                                           # n is the number list prints
-/workspace-folders reveal <n|path>                                           # show it in the file manager
-/workspace-folders isolate-profiles [--apply]                                # inspect profile import method and multi-link files under $DSH_HOME; --apply writes copy config
-/workspace-folders help                                                      # show the command help
+/workspace-folders [list]                                                   # list the primary root and the additional roots (access and state included)
+/workspace-folders add <absolute path> [--inherit|--read-only|--read-write] # no path opens the directory picker; new roots default to inherit
+/add-dirs [absolute path] [--inherit|--read-only|--read-write]              # shortcut for /workspace-folders add
+/workspace-folders access <n|path> inherit|read-only|read-write             # switch access (widening requires the root to be available right now)
+/workspace-folders skills <n|path> on|off                                   # toggle this root's Skills without changing write access
+/workspace-folders alias-id <n|path> <kebab-case>                           # edit the stable Skill namespace
+/workspace-folders alias <n|path> [name]                                    # omitting the name clears the alias
+/workspace-folders remove <n|path>                                          # n is the number list prints
+/workspace-folders reveal <n|path>                                          # show it in the file manager
+/workspace-folders isolate-profiles [--apply]                               # inspect (--apply writes) profile import method
+/workspace-folders help                                                     # show the command help
 ```
 
-Paths may be quoted; a path that duplicates an existing root, nests inside one, or is the workspace root itself is rejected.
+- Paths may be quoted and `~` expands; a duplicate, a nested path, the workspace root itself, and protected paths such as `$DSH_HOME` / the Registry storage directory are rejected.
+- `remove` / `access` / `alias` / `reveal` accept `n|path`; `add` without a path opens the directory picker (when the host provides one), and may also be given only the access flag.
+- `list` shows each root's access and state. A temporarily missing directory (`missing`) or one replaced by a link elsewhere (`redirected`) keeps its registration but is not granted; it recovers on the next `list` or Workspace folders refresh.
+- `isolate-profiles` is a Windows restricted Full-access preflight: it checks each profile's `packageImportMethod` under `$DSH_HOME`, and `--apply` writes `copy`; it does not delete `node_modules` or change existing dependencies.
 
-Access is three-state ([ADR-0017](./docs/decisions/ADR-0017-three-state-root-access-and-sandbox-modes.md); the [usage guide](./docs/guide/README.en.md#access-levels-the-root-limit-and-per-tool-caps) has the exact semantics): `inherit` follows the session mode — writable under `workspace-write`, refused under `read-only`, unrestricted under `danger-full-access`; `read-only` refuses writes in every mode, including Full-access; a fixed `read-write` root stays writable even in a read-only session. The single exception: a user-approved one-shot `danger-full-access` escalation lifts the read-only-root and per-tool-cap refusals for that call alone (`$DSH_HOME` and the unavailable-authority downgrade excepted — [ADR-0036](./docs/decisions/ADR-0036-approved-escalation-override.md)). Writable records registered by older plugin versions read back as `inherit`. A primary root accepts at most 16 additional roots (`maxAdditionalRoots` can raise it to 64). A host may also cap a tool for all additional roots via `toolAccess` on the `multi-root-scope` row — e.g. `{ bash: 'read-only' }` keeps bash from ever writing an additional root (it can still write the primary root; the same approved one-shot escalation lifts the cap for that call).
+### Access levels
 
-After an `add`, `list` prints (a `workspace-write` session, with `website` registered read-only):
+| Access level | `workspace-write` session | `read-only` session | `danger-full-access` session |
+| --- | --- | --- | --- |
+| `inherit` (default for new roots) | writable | refused | unrestricted |
+| `read-only` | refused | refused | refused (including Full-access) |
+| `read-write` | writable | writable | writable |
 
-```text
-Workspace root (primary; access follows the current sandbox mode): /home/me/monorepo
-  1 /home/me/payments-service [payments] (inherit)
-  2 /home/me/website (read-only)
-2 of 16 additional roots.
-Writable additional roots under the current mode: 1 of 2.
-```
+- New roots default to `inherit`. An access change constrains only later calls and new processes; running processes and persistent terminals keep the access they started with.
+- A user-approved one-shot `danger-full-access` escalation on a single call lifts that call's read-only-root and per-tool-cap refusals; `$DSH_HOME` and the unavailable-authority downgrade still apply.
+- A primary root accepts at most 16 additional roots (`maxAdditionalRoots` can raise it to 64). A host can permanently cap a tool for all additional roots with `toolAccess` on the `multi-root-scope` row — e.g. `{ bash: 'read-only' }` keeps bash from writing any additional root (it can still write the primary root).
 
 ### Additional-root Skills
 
-Skills are discovered in each additional folder’s `.dsh/skills` and `.agents/skills`. Names and descriptions are available before the first model step; bodies are loaded on invocation. The primary root uses `/skill-name`; additional roots always use `/alias-id:skill-name`, with Slash completion and manual entry. The model uses the native `skill` tool with an internal name. Internal IDs can appear in tool logs; human menus list namespaced references.
-
-New `inherit` and `read-write` registrations enable Skills by default; `read-only` registrations disable them. The Workspace Folders dialog provides an independent Skills toggle and editable `aliasId`. Renaming the display Alias keeps `aliasId` stable. An actual change to registered access resets the toggle; session sandbox mode changes, same-value access updates, and re-registration without an access change preserve the manual choice. Enabling Skills on a read-only root grants no write access.
-
-**Enable additional-root Skills** under Settings → Plugins → Multi-root Workspace controls all additional roots and defaults to on. Disabling it stops new discovery and invocation while preserving each root’s choice. Re-enabling restores discovery according to those choices. Primary-root Skills, instructions, LSP, browsing, and sandbox permissions retain their behavior. Older hosts use the compatible plugin settings page. Namespaced references appear as ordinary user text, without a separate background, highlighting, or click-to-preview action. Native draft highlighting does not yet support colon references.
-
-On upgrade, legacy `inherit` and `read-write` registrations start with Skills enabled. Migration preserves existing grants. An older plugin can strip `aliasId` and manual toggles when it writes the registry; upgrading again applies the defaults. **Lossless downgrade of Skills preferences is not guaranteed.** Back up `$DSH_HOME/storages/multi_root_workspace.json` before downgrading if preferences must survive. Disabling Skills does not remove previously delivered bodies from history or stop processes already started.
-
-See [ADR-0023](./docs/decisions/ADR-0023-multi-root-skill-discovery-and-invocation.md) for the architecture and acceptance boundaries, and the [progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#multi-root-skills-架构验证2026-10-23) for implementation and platform evidence.
+- Skills are discovered in each additional folder's `.dsh/skills` and `.agents/skills`; names and descriptions are available before the first model step, and bodies load on demand.
+- The primary root uses `/skill-name`; additional roots use `/alias-id:skill-name` (Slash completion available). The model calls them through the native `skill` tool, so internal IDs can appear in tool logs.
+- New `inherit` / `read-write` roots enable Skills by default; `read-only` roots disable them. The dialog has a per-root switch and editable `aliasId` (renaming the display Alias does not change `aliasId`). Enabling Skills on a read-only root grants no write access.
+- In the sidebar's **Plugins** page, open the Multi-root Workspace detail page; **Enable additional-root Skills** on its settings card controls all additional roots and defaults to on. Disabling stops new discovery and invocation while keeping each root's choice; primary-root Skills, instructions, LSP, file browsing, and sandbox permissions are unaffected.
 
 ### Worktree root suggestions (experimental, off by default)
 
-When the primary root is itself the root of a Git main or linked checkout, the plugin discovers the other worktrees that share this repository's common git dir — including worktrees that existed before the session, or were created by a terminal, an IDE, a forge, or another DSH instance — and, after confirmation, registers that worktree's source tree as an additional root (default `inherit`, changeable per row). Discovery only reads Git metadata the plugin opens and parses itself (the `.git` pointer, the admin dir, the common config/HEAD/index, and the full ancestor chain). It **starts no Git subprocess, resolves no commit object, and never adds or removes a root on its own.** The feature is **experimental and off by default**; turn it on explicitly in the plugin detail card.
+When the primary root is a Git worktree root, the plugin lists the repository's other worktrees as candidates in one suggestion card — including worktrees created earlier by a terminal, IDE, or forge; when the session is itself a linked worktree under `workspace-write`, the repository's main checkout is a candidate too. Discovery reads Git metadata only and starts no Git subprocess; it **never adds or removes a root on its own**, and a `danger-full-access` session gets no prompt. In the sidebar's **Plugins** page, open the Multi-root Workspace detail page and turn on **Enable worktree root suggestions** on its settings card (off by default).
 
-There is no special rule for the default pool: with the main repository as primary, `.agents/worktrees/<id>` lies inside the primary and is filtered by the ordinary containment rule; with a pool worktree as primary, its sibling worktrees remain candidates (still subject to registration, the root limit, and "do not suggest again"). Submodules (including a linked worktree that is itself a submodule), bare-derived linked worktrees, a `--separate-git-dir` main checkout, `extensions.worktreeConfig`, `core.repositoryformatversion=1` / `--relative-paths`, and split/sparse indexes are never suggested.
+The suggestion is a persistent card: choose **View** or **Remind me later** (until a new worktree appears / in 7 days / in 30 days); the close button only dismisses this notice and it returns after a restart. After it closes, reopen it from **Worktree suggestions** beside Retry in the **Workspace folders** dialog. The confirmation dialog lists each path, branch, and access (default `inherit`, changeable to read-only or read-write), with checkboxes when several candidates exist; the main checkout row additionally states its scope: the main checkout source tree, shared config/hooks/refs/objects, and every worktree's admin data, which may affect other checkouts of the same repository. A registration is workspace-wide, so **other read-write sessions also gain the chosen access**; the dialog re-validates every row on confirm, and any change in the meantime invalidates that row. The dialog also offers **Never remind me again**.
 
-Prompts are workspace-shared and filtered by the session's sandbox mode: read-write sessions may confirm read-write, read-only sessions see read-only, and Full-access gets no prompt. The confirmation dialog is wide enough to keep a name, path, branch, and access selector on one row; candidates form a continuous list instead of one card per worktree. Each row shows the folder name, absolute path, detected Git branch (hidden for a detached HEAD), and a registration-access selector that defaults to `inherit` and can be changed per row to read-only or read-write. **Exactly one visible candidate uses a single confirmation row; two or more use a checkbox list** (worktrees are pre-selected, the main checkout stays an explicit opt-in with its disclosure), and several folders can be confirmed at once. A registration is workspace-wide, so **other read-write sessions also gain the chosen access**; the main-checkout row states the affected scope explicitly. After confirmation the Registry owner re-runs the complete primary/candidate judgment (HEAD syntax and directory identities included) inside its existing serialized queue and records each row's chosen access. Any change while the prompt is open invalidates that row (`worktree/prompt-stale`); the other rows continue, and the refused row stays unregistered.
+When a worktree is deleted or moved, the dialog shows a badge, but **nothing is ever cleaned up automatically**; cleanup is offered only when the directory is confirmed missing and the registration identity matches (batch or per row), behind a confirmation dialog layered over it. Before cleanup, a new directory at the same path can inherit the old grant; the dialog discloses that risk.
 
-The suggestion notice is a persistent, non-modal card: on the New Session (Hero) page it sits top-center on the same line as the app's transient toasts (moving down while one is visible); in a conversation it sits centered below the header instead of the bottom-right corner that the composer occupies. The card follows the active theme. Its actions are View and a split Remind me later control framed by the same hairline as its divider: the text half applies the default delay (until a new worktree appears), while the chevron half opens the menu (until a new worktree appears / in 7 days / in 30 days); picking a delay closes the notice. A circular close button sits on the card's top-right corner: it closes only and records no reminder state (this Host stays quiet until it restarts, when the candidates reappear), unlike the persisted delay of Remind me later or the ignore recorded by Never remind me again. After the notice closes, the Worktree suggestions entry beside Retry in the Workspace Folders panel reopens the confirmation panel; when a manual open finds no candidates at all, the official info Toast says "No worktrees are available to add right now." after the panel closes (the automatic session-activation check stays silent on an empty result).
+### Auto Review integration (experimental, off by default)
 
-When a worktree disappears or moves, the Workspace Folders panel shows a badge; **nothing is ever cleaned up automatically.** Only when the registered path is confirmed missing (`ENOENT`/`ENOTDIR`) and `rootId + path + addedAt` still match does the panel offer cleanup: the batch entry sits on the Secondary working directories title row (visible only while a cleanup-eligible row exists), and every eligible row ends with a red delete button; both open the same confirmation Dialog layered over the panel (title, count, irreversibility, cancel and confirm). Such a row keeps only its display name, access badge (usually "unavailable"), path, red delete and `…` menu — the status lines, path-reuse note, skills switch, reveal and re-register controls are gone, and once the directory reappears the next panel refresh reclassifies the record through the Registry's path-level recovery. An existing or inaccessible path — or a checkout whose old admin vanished but which is still valid — only offers the ordinary Remove and keeps its current row. A missing root keeps consuming `maxAdditionalRoots` until it is cleaned up or removed manually; **until then a new directory at the same path can inherit the old grant** — that risk is now disclosed in the deletion confirmation Dialog (with separate singular and plural copy) instead of on the list.
+For multi-root review context, enable the default-disabled Auto Review row in the component list of the Multi-root Workspace detail page on the **Plugins** page; the experimental **Multi-root Auto Review** switch on the same settings card is equivalent and also off by default. Ordinary installation neither enables nor selects Auto Review; the integration is available only on the DSH exact releases that ship it.
 
-**Enable worktree root suggestions**, on the same Settings → Plugins → Multi-root Workspace card, carries an **Experimental** tag and is **off by default**; it is independent of "Enable additional-root Skills". Only an explicit opt-in starts discovery, prompts, and the dedicated cleanup UI. Turning it off leaves already registered roots under ordinary root management. See [ADR-0039](./docs/decisions/ADR-0039-worktree-aware-root-suggestions.md) for the decision and acceptance boundaries.
+### UI entries
 
-### Main checkout authorization (A)
-
-When the session workspace is itself a linked worktree and the session is `workspace-write`, the plugin offers to register the repository's **main checkout root `<main>` (the parent of the shared common, usually the main checkout's source root)** as an additional root (default `inherit`, changeable per row). The dialog shows the actual path and the scope: the main checkout's source tree, shared config, hooks, refs/objects, and every worktree's admin data, which may affect other checkouts of the same repository; the registration is still workspace-wide.
-
-A only appears when the primary's complete snapshot proves the common's identity and `<main>/.git` is still a real directory that is that common. It closes the write gap for `git add` / `git commit` in a confined `workspace-write` session and **also authorizes the main checkout's source tree**. A default-pool primary lives inside `<main>`, so `primary-overlap` refuses it and the pool gets no A; with `--separate-git-dir`, the derived path can be the store's parent rather than the real main checkout, so the dialog shows the actual path and asks the operator to check it. While the prompt is open, a changed primary/admin/common file-system identity, back-pointer, admin HEAD, ancestor index, main-root identity, or a replaced `<main>/.git` invalidates it and nothing is written.
-
-`read-only` and `danger-full-access` never prompt A; a mode change or turning the switch off invalidates an open prompt. A roots never enter the worktree cleanup mapping and deleting the linked checkout does not clean them up; use the ordinary Remove to revoke one. The real restricted-shell Git journey runs according to the kernel capability probe and skips explicitly with a reason on a host whose outer sandbox refuses nesting.
-
-### Panel
-
-The **Folders** entry at the sidebar foot — and, on DSH `0.2.1-alpha.3` and newer, the same entry at the right edge of the New Session hero row — opens the same dialog, which lists the primary root and the additional roots and offers add, remove, alias, read-only/read-write switching, copy path, and reveal in the file manager. The hero entry shares the adjacent workspace and mode selectors' geometry and interaction, but it opens a dialog rather than a menu and therefore deliberately has **no chevron**; it shrinks with the room the hero row leaves (label ellipsis) and keeps only a 28×28 icon once under 88px — the name stays on `aria-label` / the tooltip — so no column width pushes it past the composer card's right edge. The hero row disappears after the first message, leaving the sidebar entry in place; older runtimes only ever show the sidebar entry. The sidebar entry uses the workspace-tree glyph, the same family as the plugin's other entries; its row geometry matches the host's settings trigger row pixel for pixel on both host generations — the 19 legacy-geometry releases (`0.1.5-rc.2` … `0.2.1-rc.5`) and the six token-geometry releases (`0.2.2-alpha.2` … `0.2.2-rc.4`) share one "host token + legacy fallback" declaration; [ADR-0044](./docs/decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md) holds the exact recipe. The button height follows the settings-row occupant so the two footer hover pills are the same size: on the seven oldest releases (through DSH `0.1.7-rc.2`) that occupant is the 42px settings trigger and the button keeps 42px; from `0.2.0-rc.1` the settings row is the account menu launcher (44px signed in / 32px signed out / 36px in the rail), and the button follows the launcher's own `data-signed-out` marker for height only — a missing marker (for example after a host rename) falls back to 42px, and the rail keeps 36px; the icon/label inset, radius and hover token are unchanged. Same-slot coexistence: while this entry is mounted the `sidebar.footer.action` slot anchor becomes a vertical column, so when another footer action really renders both occupy their own full row and both stay visible and clickable; the entry neither hides nor yields, its registration id/order/label stay unchanged, and the plugin reads no slot ledger and observes no other plugin's DOM. With only this entry the layout is pixel-identical to the host's single-row layout, and a browser without `:has()` drops the rule and keeps the host layout.
+- **Sidebar and New Session page**: the **Folders** action at the sidebar foot opens the **Workspace folders** dialog; from DSH `0.2.1-alpha.3`, the same entry sits at the right edge of the New Session hero row (no chevron; icon-only in narrow windows). The dialog adds/removes roots, edits aliases and access, toggles Skills per root, copies paths, reveals in the file manager, offers Retry plus the Worktree suggestions entry.
+- **Workspace row menu**: the workspace row's `…` menu and context menu include **Manage workspace folders…**. When the current session belongs to that workspace it opens directly; otherwise it first opens or reuses that workspace's blank session and opens after the session becomes current.
+- **Files tab**: the header root switcher switches between the primary root and any additional root; with an additional root selected, the tree, opening files, open-in-app, context menus, auto-refresh, and workspace search all follow that root, and switching back restores the native view.
 
 ### Model side
 
-The additional-root topology is injected into the system prompt so the model knows which directories are available, and the information updates when grants change. No new tool needs to be exposed to the model.
+The additional-root topology is injected into the system prompt and updates when grants change; no new tool is needed. An additional root's own `AGENTS.md` / `CLAUDE.md` also reach the model as they become relevant: the top-level file before the session's first step, and a subdirectory's after this session has successfully worked in it.
 
-## Auto Review integration (experimental, off by default)
-
-For multi-root reviewer context, enable the default-disabled [Auto Review row](./src/auto-review/README.en.md) in the main package’s Plugin Manager row list; the experimental "Multi-root Auto Review" switch in the same detail page's settings card is equivalent to that row switch and is off by default as well. The joint integration targets the ten exact DSH releases `0.2.1-rc.2`, `0.2.1-rc.3`, `0.2.1-rc.4`, `0.2.1-rc.5`, `0.2.2-alpha.2`, `0.2.2-alpha.3`, `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, and `0.2.2-rc.4`; ordinary installation keeps the existing support matrix and does not enable or select Auto.
+For fuller feature-by-feature instructions, see the [user guides](./docs/guide/user/README.en.md).
 
 ## Project Structure
 
