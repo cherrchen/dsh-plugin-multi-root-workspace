@@ -338,6 +338,8 @@ Les Issues et les PR sont bienvenues :
 4. Un changement de comportement met à jour le document correspondant sous `docs/` dans la même contribution ; les huit éditions du README à la racine restent synchronisées, l'édition chinoise faisant foi ; une décision d'ingénierie impliquant un compromis donne lieu à un nouvel ADR.
 5. Contrainte stricte : **ne modifier aucun paquet du dépôt amont (deepseek-harness)** ; le plugin reste une extension out-of-tree.
 
+Consultez le [guide de contribution](./CONTRIBUTING.md) pour les règles complètes.
+
 ## Limites connues
 
 ### Fonctionnalités du plugin
@@ -393,3 +395,5 @@ Les règles de dépôt applicables aux Coding Agents sont définies dans [`AGENT
 ## Licence
 
 [MIT](./LICENSE)
+
+Licences tierces : [THIRD_PARTY_LICENSE](./THIRD_PARTY_LICENSE)

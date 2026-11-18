@@ -338,6 +338,8 @@ Issues and PRs are welcome:
 4. Behavior changes update the matching document under `docs/` in the same change; keep the eight root README editions in sync (Chinese is canonical); record engineering decisions that involve trade-offs as ADRs.
 5. Hard constraint: **never modify any package of the upstream repository (deepseek-harness)**; the plugin stays an out-of-tree extension.
 
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full guide.
+
 ## Known Limitations
 
 ### Plugin features
@@ -393,3 +395,5 @@ Repository-wide rules for Coding Agents are defined in [`AGENTS.md`](./AGENTS.md
 ## License
 
 [MIT](./LICENSE)
+
+Third-party licenses: [THIRD_PARTY_LICENSE](./THIRD_PARTY_LICENSE)

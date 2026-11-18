@@ -29,7 +29,7 @@ The development environment, toolchain, and verification workflow are defined:
 
 - Package manager: pnpm (`11.25.0`).
 - Language and build: TypeScript (strict, standalone host face) + tsdown (per-entry ESM bundles).
-- Gates: oxlint, `tsc --noEmit`, vitest, two smoke scripts, and the documentation check.
+- Gates: oxlint, `tsc --noEmit`, vitest, two smoke scripts, packaging and third-party-license checks, and the documentation check.
 
 ## Documentation Check
 

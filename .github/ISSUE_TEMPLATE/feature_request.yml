@@ -1,0 +1,113 @@
+name: Feature request
+description: Propose a capability or behavior change.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This repository is an out-of-tree DSH plugin and **must not modify upstream
+        `deepseek-harness`**. Explain how the proposal fits that constraint.
+
+        Read the README and the known limitations before filing. Security issues go
+        through [SECURITY.md](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/blob/main/SECURITY.md).
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I read the known limitations and the out-of-tree constraint.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow is blocked or painful today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should the plugin do, and where should it hook in?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds, upstream features, or other designs you considered.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      multiple: true
+      options:
+        - Host / registry / authorization
+        - Sandbox / process fence
+        - Files tab / client UI
+        - Skills
+        - Auto Review
+        - OPS compatibility
+        - DSH compatibility / support matrix
+        - Documentation / tooling / packaging
+    validations:
+      required: true
+
+  - type: dropdown
+    id: authorization-impact
+    attributes:
+      label: Does this widen authorization?
+      description: For example, more writable roots, more tools, more processes, or fewer confirmations.
+      options:
+        - "No"
+        - "Yes"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: authorization-detail
+    attributes:
+      label: Authorization impact details
+      description: If yes or not sure, describe what becomes newly reachable and why that is safe.
+    validations:
+      required: false
+
+  - type: input
+    id: dsh-releases
+    attributes:
+      label: Relevant DSH releases
+      description: Which exact releases must this work on?
+      placeholder: "0.2.2-rc.4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Are you willing to contribute an implementation?
+      options:
+        - "Yes"
+        - "Maybe, with guidance"
+        - "No"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, links, related ADRs, or prior art.
+    validations:
+      required: false

@@ -338,6 +338,8 @@ Issues und PRs sind willkommen:
 4. Änderungen am Verhalten aktualisieren im selben Änderungssatz die passende Dokumentation unter `docs/`; die acht Sprachfassungen des Root-README werden synchron gehalten (maßgeblich ist die chinesische Fassung); technische Entscheidungen mit Abwägungen werden in einer neuen ADR festgehalten.
 5. Harte Vorgabe: **Kein Paket des Upstream-Repositories (deepseek-harness) wird geändert**; das Plugin bleibt eine Out-of-Tree-Erweiterung.
 
+Die vollständigen Regeln stehen im [Beitragsleitfaden](./CONTRIBUTING.md).
+
 ## Bekannte Einschränkungen
 
 ### Plugin-Funktionen
@@ -393,3 +395,5 @@ Die repositoryweiten Regeln für Coding Agents stehen in [`AGENTS.md`](./AGENTS.
 ## Lizenz
 
 [MIT](./LICENSE)
+
+Lizenzen Dritter: [THIRD_PARTY_LICENSE](./THIRD_PARTY_LICENSE)

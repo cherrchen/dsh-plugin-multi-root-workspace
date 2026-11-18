@@ -338,6 +338,8 @@ Issue と Pull Request を歓迎します。
 4. 動作を変える変更では、同じ変更の中で `docs/` 配下の対応するドキュメントも更新してください。ルート README は 8 言語版を同期させてください（中国語版が正です）。トレードオフを伴うエンジニアリング上の決定は ADR として記録してください。
 5. 厳格な制約：**上流リポジトリ（deepseek-harness）のいかなるパッケージも変更しないこと**。プラグインは out-of-tree の拡張に留まります。
 
+詳細なルールは[CONTRIBUTING.md](./CONTRIBUTING.md)を参照してください。
+
 ## 既知の制限
 
 ### プラグイン機能
@@ -393,3 +395,5 @@ Coding Agent 向けのリポジトリ全体のルールは [`AGENTS.md`](./AGENT
 ## ライセンス
 
 [MIT](./LICENSE)
+
+サードパーティライセンス：[THIRD_PARTY_LICENSE](./THIRD_PARTY_LICENSE)

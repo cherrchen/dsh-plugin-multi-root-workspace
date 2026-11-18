@@ -338,6 +338,8 @@ Las Issues y los PR son bienvenidos:
 4. Los cambios que afectan al comportamiento actualizan en el mismo lote el documento correspondiente de `docs/`; las ocho ediciones del README de la raíz se mantienen sincronizadas (la versión china es la canónica); las decisiones de ingeniería con contrapartidas se registran como ADR.
 5. Restricción estricta: **no se modifica ningún paquete del repositorio upstream (deepseek-harness)**; el plugin es solo una extensión out-of-tree.
 
+Consulte la [guía de contribución](./CONTRIBUTING.md) para conocer las reglas completas.
+
 ## Limitaciones conocidas
 
 ### Funciones del plugin
@@ -393,3 +395,5 @@ Las reglas de repositorio para Coding Agents se definen en [`AGENTS.md`](./AGENT
 ## Licencia
 
 [MIT](./LICENSE)
+
+Licencias de terceros: [THIRD_PARTY_LICENSE](./THIRD_PARTY_LICENSE)

@@ -40,6 +40,7 @@ const REQUIRED = [
   'package/CHANGELOG.md',
   'package/CHANGELOG.en.md',
   'package/LICENSE',
+  'package/THIRD_PARTY_LICENSE',
   'package/lib/index.js',
   'package/lib/client.js',
   'package/lib/windows-runner.js',

@@ -338,6 +338,8 @@ worktree 被删除或移动后，对话框显示徽标，但**永不自动清理
 4. 影响行为的变更需同批更新 `docs/` 下的对应文档；根目录 README 保持 8 种语言同步（以中文版为准）；有取舍的工程决策请新增 ADR。
 5. 硬约束：**不修改上游仓库（deepseek-harness）任何包**；插件只做 out-of-tree 扩展。
 
+完整规则与流程见[贡献指南](./CONTRIBUTING.md)。
+
 ## 已知限制
 
 ### 插件功能
@@ -393,3 +395,5 @@ Coding Agent 的仓库级规则定义于 [`AGENTS.md`](./AGENTS.md)。
 ## 许可证
 
 [MIT](./LICENSE)
+
+第三方许可：[THIRD_PARTY_LICENSE](./THIRD_PARTY_LICENSE)
