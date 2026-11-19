@@ -57,6 +57,12 @@ export interface RemoteEndpointView {
   readonly path: string
   readonly platform: string
   readonly displayName?: string | undefined
+  /**
+   * The connection target the row may display beside the path: `user@host:port`
+   * for a personal environment, `user@host` for a deployment manifest (which
+   * carries no port). Absent when the host cannot name one.
+   */
+  readonly target?: string | undefined
   readonly state: 'unregistered' | 'registered' | 'withheld' | 'revoked'
   readonly actions: readonly RemoteAction[]
   readonly transfers: readonly RemoteTransferView[]
@@ -88,6 +94,7 @@ const endpointViewSchema = z.object({
   path: z.string(),
   platform: z.string(),
   displayName: z.string().optional(),
+  target: z.string().optional(),
   state: z.enum(['unregistered', 'registered', 'withheld', 'revoked']),
   actions: z.array(z.enum(['read', 'write', 'exec'])),
   transfers: z.array(transferViewSchema),

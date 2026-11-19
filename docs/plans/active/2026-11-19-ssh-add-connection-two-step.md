@@ -212,6 +212,7 @@ Helper
 ## 11. 2026-11-19 追加：远端工作区行复用 `WorkspaceRow`
 
 - 抽出 `WorkspaceRow`（`src/client/WorkspaceFoldersAction.tsx`）：统一名称行、徽标、可复制路径、可选说明与行尾动作簇。主要工作目录、每个附属工作目录和每个远端工作区都通过它渲染，行几何与 affordance 不再各写一套。
-- 远端行把 `rootId` 从路径行移到名称行徽标，路径改用与根行相同的 `PathCopy`（复制真实远端路径）；能力说明留在文本块第三行，登记/移除外动作不变。
+- 远端行把 `rootId` 从路径行移到名称行徽标；可复制位置改为 `user@host:port/path`（personal，个人配置保存已解析 endpoint）或 `user@host/path`（部署清单没有 port），仍复用同一 `PathCopy`；能力说明留在文本块第三行，登记/移除外动作不变。
+- `RemoteEndpointView` 新增只读 `target`，由 `remoteTargetOf` 从 personal endpoint 或 manifest 的 account/host 生成；`remotesViewOf` 在 personal 档位读取个人配置（读失败回退 manifest），面板把 `target + path` 交给共享行。
 - “远端环境”和“远端工作区”拆成两个相邻 `mrfw-section`，与主要/附属工作目录的“标题 + 行列表”结构一致。
-- `tests/client-panel.spec.tsx` 的远端断言改为路径 `/srv/root` 与共享行结构，并新增远端路径复制用例；88 passed。
+- `tests/client-panel.spec.tsx` 的远端断言改为组合位置与共享行结构，并新增远端位置复制用例（88 passed）；`tests/command.spec.ts` 覆盖 personal 面板投影与 `remoteTargetOf`（79 passed）；`tests/remote-journey.e2e.ts` 断言部署清单的 `builder@build-host` / `deploy@device-host`。

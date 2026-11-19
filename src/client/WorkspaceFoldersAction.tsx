@@ -228,7 +228,7 @@ interface WorkspaceRowProps {
   readonly name: ReactNode
   /** Badges that ride beside the name (cwd tag, access, platform, state, root id). */
   readonly badges?: ReactNode
-  /** The absolute path, or undefined while it is still loading. */
+  /** The copyable location (an absolute path, or a remote target + path). */
   readonly path: string | undefined
   readonly copied?: boolean
   readonly onCopy?: (() => void) | undefined
@@ -1167,6 +1167,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   ) : remoteState.view.endpoints.map(endpoint => {
                     const key = `${endpoint.environmentId}/${endpoint.rootId}`
                     const copyKey = `remote:${key}`
+                    // The panel row shows where the workspace lives, not just
+                    // its POSIX path: personal targets carry the resolved port,
+                    // deployment manifests have no port to show.
+                    const location = endpoint.target === undefined ? endpoint.path : `${endpoint.target}${endpoint.path}`
                     return <WorkspaceRow
                       key={key}
                       t={t}
@@ -1176,9 +1180,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                         <span className="mrfw-accessBadge">{t(remoteStateKey(endpoint.state))}</span>
                         <span className="mrfw-accessBadge">{endpoint.rootId}</span>
                       </>}
-                      path={endpoint.path}
+                      path={location}
                       copied={copiedId === copyKey}
-                      onCopy={() => { void copyPath(copyKey, endpoint.path) }}
+                      onCopy={() => { void copyPath(copyKey, location) }}
                       notes={<span className="mrfw-note">
                         {t('panel.remoteCapabilities', { capabilities: remoteCapabilityList(endpoint.capabilities, t) })}
                       </span>}

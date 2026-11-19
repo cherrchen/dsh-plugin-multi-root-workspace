@@ -631,6 +631,53 @@ describe('the panel channel', () => {
     expect(spoof.error?.code).toBe('panel/bad-request')
   })
 
+  it('projects the personal user@host:port target into the remote panel row', async () => {
+    const personalPath = join(fixture.base, 'remote-personal.json')
+    const credentialRoot = join(fixture.base, 'remote-credentials')
+    mkdirSync(credentialRoot, { recursive: true })
+    writeFileSync(personalPath, JSON.stringify({
+      schemaVersion: 1,
+      revision: 0,
+      environments: [{
+        environmentId: 'dev-box',
+        platform: 'linux',
+        endpoint: { hostname: 'dev.example', port: 2222, user: 'deploy' },
+        credential: { kind: 'ssh-config', alias: 'dev' },
+        hostKey: `SHA256:${'A'.repeat(43)}`,
+        helper: null,
+        workspace: '/srv/app',
+      }],
+      bindings: [{ primary, environmentId: 'dev-box', rootId: 'app', path: '/srv/app', actions: ['read', 'write'] }],
+    }), { mode: 0o600 })
+    await mount({
+      withConnection: true,
+      sessions: { [PANEL_SESSION]: primary },
+      registry: { remoteEnvironments: { enabled: true, mode: 'personal', personalPath, credentialRoot } },
+    })
+    const listed = await callPanel('remotes', { sessionId: PANEL_SESSION })
+    expect(listed.ok).toBe(true)
+    expect(listed.value).toMatchObject({
+      status: { state: 'ready' },
+      custodyMode: 'personal',
+      endpoints: [{
+        environmentId: 'dev-box',
+        target: 'deploy@dev.example:2222',
+        path: '/srv/app',
+      }],
+    })
+  })
+
+  it('formats the row target from the personal endpoint or the deployment manifest', () => {
+    // Deployment manifests carry an account and an SSH host alias, no port.
+    expect(CommandModule.remoteTargetOf({ account: 'builder', connection: { host: 'build-host' } }))
+      .toBe('builder@build-host')
+    // Personal environments resolve the exact user@host:port at scan time.
+    expect(CommandModule.remoteTargetOf(
+      { account: 'deploy', connection: { host: 'dsh-env' } },
+      { endpoint: { user: 'deploy', hostname: 'prod.internal', port: 2222 } },
+    )).toBe('deploy@prod.internal:2222')
+  })
+
   it('rejects a panel call when the session disappears during the request', async () => {
     const table = new Map<string, string>([[PANEL_SESSION, primary]])
     await mount({ withConnection: true, sessions: table })

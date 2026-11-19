@@ -40,8 +40,9 @@ import { searchAdditionalRoot } from './files-search.ts'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { effectiveRootAccess } from './contract.ts'
 import { RemoteAdmissionError } from './remote/contract.ts'
-import { ManifestError } from './remote/manifest.ts'
+import { ManifestError, type RemoteEnvironment } from './remote/manifest.ts'
 import { CredentialError } from './remote/personal/credentials.ts'
+import { loadPersonalConfig, type PersonalEnvironment } from './remote/personal/config.ts'
 import { RemoteOperationError } from './remote/personal/operations.ts'
 import {
   parseRemoteRequest,
@@ -734,6 +735,22 @@ function remoteCapabilitiesOf(
 }
 
 /**
+ * The row's connection target: a personal environment knows its exact
+ * `user@host:port`; a deployment manifest carries an account and an SSH host
+ * alias but no port, so it stays `user@host`.
+ * @param environment - the manifest environment the binding names.
+ * @param personal - the personal environment, when the custody mode is personal.
+ * @returns the display target prefix for the binding path.
+ */
+export function remoteTargetOf(
+  environment: Pick<RemoteEnvironment, 'account' | 'connection'>,
+  personal?: Pick<PersonalEnvironment, 'endpoint'> | undefined,
+): string {
+  if (personal !== undefined) return `${personal.endpoint.user}@${personal.endpoint.hostname}:${personal.endpoint.port}`
+  return `${environment.account}@${environment.connection.host}`
+}
+
+/**
  * Explicit worktree cleanup: each id must be a tracked B mapping, and the
  * Registry owner re-verifies `rootId + path + addedAt` before anything is
  * deleted. The answer carries the refreshed roots view, so the panel never
@@ -775,11 +792,21 @@ async function remotesViewOf(
     if (error instanceof RemoteAdmissionError) throw error
     throw new RemoteAdmissionError('remote-unavailable', error instanceof Error ? error.message : String(error))
   })
+  // Personal environments keep the resolved user@host:port in their own
+  // config; the converted manifest only carries the managed alias. Read it
+  // after remoteList refreshed the file, and fall back to the manifest's
+  // account@host if the environment moved away.
+  const personalPath = registry.remoteMode === 'personal' ? registry.remotePersonalPath : undefined
+  let personal: ReturnType<typeof loadPersonalConfig> | undefined
+  if (personalPath !== undefined) {
+    try { personal = loadPersonalConfig(personalPath) } catch { personal = undefined }
+  }
   const capped = ctx.get('multiRootScope')?.toolCaps() ?? []
   const endpoints = manifest.bindings
     .filter(binding => primaryKey(binding.primary) === key)
     .map((binding): RemoteEndpointView => {
       const environment = manifest.environments.find(entry => entry.environmentId === binding.environmentId)!
+      const personalEnvironment = personal?.environments.find(entry => entry.environmentId === binding.environmentId)
       const grant = snapshot.grants.find(entry => entry.environmentId === binding.environmentId && entry.rootId === binding.rootId)
       const state = grant?.state ?? 'unregistered'
       const transfers: RemoteTransferView[] = (binding.transfers ?? []).map(transfer => ({
@@ -791,6 +818,7 @@ async function remotesViewOf(
         path: binding.path,
         platform: environment.platform,
         ...(environment.displayName === undefined ? {} : { displayName: environment.displayName }),
+        target: remoteTargetOf(environment, personalEnvironment),
         state,
         actions: [...new Set(binding.actions)],
         transfers,
