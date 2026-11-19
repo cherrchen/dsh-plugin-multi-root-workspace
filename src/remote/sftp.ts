@@ -140,12 +140,16 @@ export class SftpClient {
   private readonly child
   private readonly onLoss: (error: SftpConnectionLost) => void
 
-  private constructor(ssh: string, alias: string, onLoss: (error: SftpConnectionLost) => void) {
+  private constructor(ssh: string, alias: string, onLoss: (error: SftpConnectionLost) => void, configFile?: string) {
     this.onLoss = onLoss
     // ControlMaster is explicitly off: a multiplexed session shares fate with
     // the master — another session's close would tear this channel down and
     // break the per-session generation isolation the broker relies on.
+    // `configFile` lets the panel browse a managed environment through the
+    // plugin-generated ssh_config before the user has linked it into
+    // ~/.ssh/config; the enforced options below stay identical either way.
     this.child = spawn(ssh, [
+      ...(configFile === undefined ? [] : ['-F', configFile]),
       '-o', 'BatchMode=yes',
       '-o', 'StrictHostKeyChecking=yes', '-o', 'ForwardAgent=no', '-o', 'UpdateHostKeys=no',
       '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
@@ -161,8 +165,8 @@ export class SftpClient {
     this.child.stdin.on('error', error => lose(`sftp transport write failed: ${error.message}`))
   }
 
-  static connect(alias: string, options: { ssh?: string; onLoss?: (error: SftpConnectionLost) => void } = {}): SftpClient {
-    return new SftpClient(options.ssh ?? 'ssh', alias, options.onLoss ?? (() => {}))
+  static connect(alias: string, options: { ssh?: string; configFile?: string; onLoss?: (error: SftpConnectionLost) => void } = {}): SftpClient {
+    return new SftpClient(options.ssh ?? 'ssh', alias, options.onLoss ?? (() => {}), options.configFile)
   }
 
   get negotiated(): SftpVersion | undefined { return this.version }

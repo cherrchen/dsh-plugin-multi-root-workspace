@@ -17,6 +17,8 @@ export const SSH_ENDPOINTS = [
   'sshCredentialImport',
   'sshCredentialPassword',
   'sshCredentialRemove',
+  'sshConfigAliases',
+  'sshListDirectories',
   'sshHostKeyScan',
   'sshEnvironmentSave',
   'sshEnvironmentRemove',
@@ -75,6 +77,12 @@ export const environmentDraftSchema = z.object({
 
 const requestSchemas = {
   sshState: z.object({ sessionId }).strict(),
+  // Read-only helpers for the two-step add flow: local Host aliases and the
+  // remote directory picker. Neither answer carries file or secret bytes.
+  sshConfigAliases: z.object({ sessionId }).strict(),
+  sshListDirectories: z.object({
+    sessionId, environmentId, path: z.string().max(4096).optional(),
+  }).strict(),
   sshCredentialGenerate: z.object({ sessionId, label }).strict(),
   sshCredentialImport: z.object({ sessionId, label, privateKey: z.string().min(1).max(32_768), passphrase: z.string().max(1024).optional() }).strict(),
   sshCredentialPassword: z.object({ sessionId, label, password: z.string().min(1).max(4096) }).strict(),
@@ -189,6 +197,24 @@ export interface SshBindingView {
   }[] | undefined
 }
 
+/** The Host aliases the Add form may suggest from the user's ~/.ssh/config. */
+export interface SshAliasesView {
+  readonly aliases: readonly string[]
+}
+
+/** One selectable remote directory (names only; never file contents). */
+export interface RemoteDirectoryEntry {
+  readonly name: string
+  readonly path: string
+}
+
+/** One read-only remote directory page. */
+export interface RemoteDirectoryListing {
+  readonly path: string
+  readonly parent: string
+  readonly entries: readonly RemoteDirectoryEntry[]
+}
+
 const environmentViewSchema = z.object({
   environmentId: z.string(),
   displayName: z.string().optional(),
@@ -256,6 +282,12 @@ const sshScanResultSchema = z.object({
 const connectionTestSchema = z.object({
   platform: z.string(), nodePath: z.string().optional(), nodeVersion: z.string().optional(),
 })
+const sshAliasesViewSchema = z.object({ aliases: z.array(z.string()) })
+const remoteDirectoryListingSchema = z.object({
+  path: z.string(),
+  parent: z.string(),
+  entries: z.array(z.object({ name: z.string(), path: z.string() })),
+})
 
 /**
  * Validate one endpoint answer when it arrives.
@@ -266,7 +298,9 @@ const connectionTestSchema = z.object({
 export function parseSshAnswer(endpoint: SshEndpoint, value: unknown): SshParsed<unknown> {
   const schema = endpoint === 'sshHostKeyScan' ? sshScanResultSchema
     : endpoint === 'sshEnvironmentTest' ? connectionTestSchema
-    : sshStateSchema
+      : endpoint === 'sshConfigAliases' ? sshAliasesViewSchema
+        : endpoint === 'sshListDirectories' ? remoteDirectoryListingSchema
+          : sshStateSchema
   const parsed = schema.safeParse(value)
   if (!parsed.success) {
     const issue = parsed.error.issues[0]

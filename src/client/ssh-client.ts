@@ -8,7 +8,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/ssh-client
  */
 import { PANEL_CHANNEL } from '../contract.ts'
-import { parseSshAnswer, type SshEndpoint, type SshStateView, type CredentialPublicView, type SshEnvironmentView, type SshBindingView } from '../remote/personal-contract.ts'
+import { parseSshAnswer, type SshEndpoint, type SshStateView, type CredentialPublicView, type SshEnvironmentView, type SshBindingView, type SshAliasesView, type RemoteDirectoryListing } from '../remote/personal-contract.ts'
 import { PanelError } from './panel-client.ts'
 
 interface Channel {
@@ -29,6 +29,8 @@ export interface SshScanResult {
 
 export interface SshClient {
   state(sessionId: string, signal?: AbortSignal): Promise<SshStateView>
+  aliases(sessionId: string, signal?: AbortSignal): Promise<SshAliasesView>
+  listDirectories(sessionId: string, environmentId: string, path?: string, signal?: AbortSignal): Promise<RemoteDirectoryListing>
   credentialGenerate(sessionId: string, label: string, signal?: AbortSignal): Promise<SshStateView>
   credentialImport(sessionId: string, label: string, privateKey: string, passphrase?: string, signal?: AbortSignal): Promise<SshStateView>
   credentialPassword(sessionId: string, label: string, password: string, signal?: AbortSignal): Promise<SshStateView>
@@ -44,7 +46,7 @@ export interface SshClient {
   configLink(sessionId: string, signal?: AbortSignal): Promise<SshStateView>
 }
 
-export type { CredentialPublicView, SshStateView, SshEnvironmentView, SshBindingView }
+export type { CredentialPublicView, SshStateView, SshEnvironmentView, SshBindingView, SshAliasesView, RemoteDirectoryListing }
 
 /**
  * Build the personal-mode client; every wire failure is a `PanelError`.
@@ -71,6 +73,10 @@ export function createSshClient(connection: Channel): SshClient {
   }
   return {
     state: async (sessionId, signal) => await call('sshState', { sessionId }, signal),
+    aliases: async (sessionId, signal) => await call('sshConfigAliases', { sessionId }, signal),
+    listDirectories: async (sessionId, environmentId, path, signal) => await call('sshListDirectories', {
+      sessionId, environmentId, ...(path === undefined || path === '' ? {} : { path }),
+    }, signal),
     credentialGenerate: async (sessionId, label, signal) => await call('sshCredentialGenerate', { sessionId, label }, signal),
     credentialImport: async (sessionId, label, privateKey, passphrase, signal) => await call('sshCredentialImport', { sessionId, label, privateKey, ...(passphrase === undefined ? {} : { passphrase }) }, signal),
     credentialPassword: async (sessionId, label, password, signal) => await call('sshCredentialPassword', { sessionId, label, password }, signal),

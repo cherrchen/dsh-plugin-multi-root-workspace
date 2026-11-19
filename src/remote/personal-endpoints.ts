@@ -13,7 +13,8 @@ import type { SshCall, SshStateView } from './personal-contract.ts'
 import { loadPersonalConfig, savePersonalConfig, type PersonalConfig, type PersonalEnvironment } from './personal/config.ts'
 import { CredentialStore, defaultExec, type ExecFile } from './personal/credentials.ts'
 import { helperProtocol, HostKeyScans, installAccessKey, installHelper, testConnection } from './personal/operations.ts'
-import { link, linkStatus, recordKnownHost, renderSshConfig } from './personal/ssh-files.ts'
+import { link, linkStatus, listSshConfigAliases, recordKnownHost, renderSshConfig } from './personal/ssh-files.ts'
+import { listRemoteDirectories } from './personal/remote-paths.ts'
 import { primaryKey } from '../roots.ts'
 
 const scans = new HostKeyScans(defaultExec)
@@ -121,7 +122,8 @@ async function sshConfigIdentity(
 export async function handlePersonalEndpoint(
   ctx: Context, registry: MultiRootRegistry, primary: string, call: SshCall, deps: PersonalDeps = {},
 ): Promise<unknown> {
-  if (call.endpoint !== 'sshState' && call.endpoint !== 'sshHostKeyScan' && call.endpoint !== 'sshEnvironmentTest') {
+  if (call.endpoint !== 'sshState' && call.endpoint !== 'sshHostKeyScan' && call.endpoint !== 'sshEnvironmentTest'
+    && call.endpoint !== 'sshConfigAliases' && call.endpoint !== 'sshListDirectories') {
     return await enqueueMutation(async () => await runPersonalEndpoint(ctx, registry, primary, call, deps))
   }
   return await runPersonalEndpoint(ctx, registry, primary, call, deps)
@@ -138,6 +140,16 @@ async function runPersonalEndpoint(
   switch (call.endpoint) {
     case 'sshState':
       return await after()
+    case 'sshConfigAliases':
+      // Local read only; no mutation and no remote connection.
+      return { aliases: listSshConfigAliases() }
+    case 'sshListDirectories': {
+      if (call.path !== undefined && call.path !== '' && (!call.path.startsWith('/') || call.path.includes('\0'))) {
+        throw new RemoteAdmissionError('remote-path-listing-failed', 'the remote path must be an absolute POSIX path')
+      }
+      const config = loadPersonalConfig(paths.personalPath)
+      return await listRemoteDirectories(findEnvironment(config, call.environmentId), paths.credentialRoot, call.path)
+    }
     case 'sshCredentialGenerate':
       await store.generate(call.label)
       return await after()
@@ -175,14 +187,26 @@ async function runPersonalEndpoint(
       } catch {
         throw new RemoteAdmissionError('workspace-invalid', `the remote workspace is not a normalized absolute POSIX path: ${JSON.stringify(draft.workspace)}`)
       }
+      const currentEnvironments = loadPersonalConfig(paths.personalPath).environments
+      const previous = currentEnvironments.find(environment => environment.environmentId === draft.environmentId)
+      // The recorded fingerprint may be reused for an update that changes only
+      // workspace/capabilities: the target identity and the managed credential
+      // must be untouched. A changed target still needs a fresh scan token.
+      const sameIdentity = previous !== undefined
+        && previous.endpoint.hostname === draft.endpoint.hostname
+        && previous.endpoint.port === draft.endpoint.port
+        && previous.endpoint.user === draft.endpoint.user
+        && previous.credential.kind === draft.credential.kind
+        && (draft.credential.kind !== 'managed'
+          || (previous.credential.kind === 'managed' && previous.credential.credentialId === draft.credential.credentialId))
       const preservedHelper = (environments: readonly PersonalEnvironment[]): PersonalEnvironment['helper'] => {
-        const previous = environments.find(environment => environment.environmentId === draft.environmentId)
-        if (previous === undefined) return null
-        const sameTarget = previous.endpoint.hostname === draft.endpoint.hostname
-          && previous.endpoint.port === draft.endpoint.port
-          && previous.endpoint.user === draft.endpoint.user
-          && previous.credential.kind === draft.credential.kind
-        return sameTarget ? previous.helper : null
+        const found = environments.find(environment => environment.environmentId === draft.environmentId)
+        if (found === undefined) return null
+        const sameTarget = found.endpoint.hostname === draft.endpoint.hostname
+          && found.endpoint.port === draft.endpoint.port
+          && found.endpoint.user === draft.endpoint.user
+          && found.credential.kind === draft.credential.kind
+        return sameTarget ? found.helper : null
       }
       let hostKey: string
       if (draft.credential.kind === 'ssh-config') {
@@ -195,15 +219,21 @@ async function runPersonalEndpoint(
         }
         hostKey = call.fingerprint
       } else {
-        if (draft.exec !== undefined && preservedHelper(loadPersonalConfig(paths.personalPath).environments) === null) {
+        if (draft.exec !== undefined && preservedHelper(currentEnvironments) === null) {
           throw new RemoteAdmissionError('exec-requires-helper', 'exec requires an installed remote helper; save without exec, install the helper, then enable it')
         }
         if (call.hostKeyToken === undefined) {
-          throw new RemoteAdmissionError('host-key-token-required', 'a managed environment requires a host key scan token')
+          // Workspace/capability edits reuse the already-recorded key only
+          // while the identity is unchanged; anything else must rescan.
+          if (!sameIdentity || previous === undefined || previous.hostKey !== call.fingerprint) {
+            throw new RemoteAdmissionError('host-key-token-required', 'a managed environment requires a host key scan token')
+          }
+          hostKey = call.fingerprint
+        } else {
+          const lines = activeScans.resolve(call.hostKeyToken, call.fingerprint)
+          recordKnownHost(paths.credentialRoot, draft.endpoint.hostname, draft.endpoint.port, lines)
+          hostKey = call.fingerprint
         }
-        const lines = activeScans.resolve(call.hostKeyToken, call.fingerprint)
-        recordKnownHost(paths.credentialRoot, draft.endpoint.hostname, draft.endpoint.port, lines)
-        hostKey = call.fingerprint
       }
       return await mutate(registry, primary, paths, call.revision, config => {
         const helper = preservedHelper(config.environments)

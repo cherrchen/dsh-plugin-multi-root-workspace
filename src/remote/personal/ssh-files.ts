@@ -12,6 +12,40 @@ export function managedHostAlias(environmentId: string): string {
   return `dsh-${environmentId}`
 }
 
+/**
+ * Host aliases a user could pick for an `ssh-config` environment. Only the
+ * literal `Host` entries of the user's own config are listed: wildcard and
+ * negated patterns are not connect targets, and `Include` expansion stays out
+ * of scope because the alias input still accepts free text.
+ * @param text - the raw `~/.ssh/config` content.
+ * @returns sorted, de-duplicated aliases.
+ */
+export function parseSshConfigAliases(text: string): string[] {
+  const aliases = new Set<string>()
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (line === '' || line.startsWith('#')) continue
+    const match = /^host\s+(.+)$/i.exec(line)
+    if (match === null) continue
+    for (const token of match[1]!.split(/\s+/)) {
+      if (token.startsWith('#')) break
+      if (token === '' || /[*?!]/.test(token)) continue
+      aliases.add(token)
+    }
+  }
+  return [...aliases].sort((left, right) => left.localeCompare(right))
+}
+
+/** Read the aliases from `<home>/.ssh/config`; a missing/unreadable file is an empty list. */
+export function listSshConfigAliases(home: string = homedir()): string[] {
+  const path = join(home, '.ssh', 'config')
+  try {
+    return existsSync(path) ? parseSshConfigAliases(readFileSync(path, 'utf8')) : []
+  } catch {
+    return []
+  }
+}
+
 /** OpenSSH config quoting, not shell quoting. Newlines must never add directives. */
 function quotePath(path: string): string {
   if (/[\r\n\0]/.test(path)) throw new Error('SSH config paths cannot contain line breaks or NUL')
