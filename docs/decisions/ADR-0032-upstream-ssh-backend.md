@@ -26,7 +26,7 @@
 
 **凭据隔离须先于连接。** rc.1 在 `SshConnection` 构造时立即启动 OpenSSH，在系统临时目录创建 ControlMaster socket，并按连接进程的 PATH 查找 ssh。普通 Cordis Context 只隔离服务名；同一 OS 身份的本地 Agent 命令可能借用已认证的 socket，即使拿不到私钥也能发起新命令。加载 fiber 之前先验证远端功能开关、发起平台与部署绑定。共享进程只用于受控测试，生产部署须证明 Agent 无法调用连接管理接口、使用 socket/代理或替换 ssh、配置与 Helper；必要时以独立 OS 主体和经身份认证的本机接口托管官方组合。仅分进程或随机临时目录不能作为隔离证据。未满足条件就不创建连接。此约束也适用于仅传输的部署。[连接的启动与控制命令](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.2-rc.1/packages/ssh/ssh/src/index.ts)
 
-可选包仅从宿主树按需加载（经宿主锚定解析，仿 `loadHostKoffi()`），遵循 [ADR-0009](./ADR-0009-dsh-compat-contract.md) 的精确 peers 和单例检查；结构适配在 `src/compat/`。缺包、mixed、协议或身份不匹配即撤下远端能力。**宿主支持地板为 `SUPPORTED_SSH_RELEASES`**（现 `['0.2.2-rc.1']`，须保持为 `SUPPORTED_DSH_RELEASES` 后缀）：宿主不在集合内时能力静默缺席——compat 行不失败、不报 mixed、不影响本地行为。因上游安装期兼容检查对清单中每一个 `dsh-*` peer（含 optional）都要求宿主版本满足其 range，SSH peers 的 manifest range 与全量 allowlist 一致，收窄只发生在运行时地板与按 pin 探测。使用包的公开类和方法；`SshConnection.request()` 虽然可见，内部 RPC 方法名、帧和流票据仍是私有协议。
+可选包仅从宿主树按需加载（经宿主锚定解析，仿 `loadHostKoffi()`），遵循 [ADR-0009](./ADR-0009-dsh-compat-contract.md) 的精确 peers 和单例检查；结构适配在 `src/compat/`。缺包、mixed、协议或身份不匹配即撤下远端能力。**宿主支持地板为 `SUPPORTED_SSH_RELEASES`**（现 `['0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5']`，随主线 pin 前移，须保持为 `SUPPORTED_DSH_RELEASES` 后缀）：宿主不在集合内时能力静默缺席——compat 行不失败、不报 mixed、不影响本地行为。因上游安装期兼容检查对清单中每一个 `dsh-*` peer（含 optional）都要求宿主版本满足其 range，SSH peers 的 manifest range 与全量 allowlist 一致，收窄只发生在运行时地板与按 pin 探测。使用包的公开类和方法；`SshConnection.request()` 虽然可见，内部 RPC 方法名、帧和流票据仍是私有协议。
 
 ## 无法直接复用的边界
 

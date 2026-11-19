@@ -223,6 +223,8 @@
 
 环境要求与 rc.1–rc.4 相同：Node `>=24.9`、Cordis `4.1.0`、Schemastery `3.19.0`、`node-addon-system 0.1.2`、`koffi 3.1.1`（`dsh-fs-local` 声明）；rc.5 未引入新的传递包，也未改变上述生态 pin。open-in-app 与 files-tree 的复刻源在 rc.5 未变，基线保持 `ddac96760b`（open-in-app）与 `f3803c9697`（files-tree 旧版）。
 
+**SSH 可选包（rc.3 → rc.5）**：SSH 分支额外按需加载四个可选包（`@deepseek-ai/dsh-ssh`、`dsh-fs-ssh`、`dsh-sandbox-ssh`、`dsh-subprocess-ssh`）。对比 npm tarball，`rc.3` ↔ `rc.4`、`rc.4` ↔ `rc.5` 的 `lib/` 树均**逐字节相同**，差异只存在于 `package.json` 的 `version` 与包间精确 pin。因此该分支把 `SUPPORTED_SSH_RELEASES` 扩为 `0.2.2-rc.1`–`0.2.2-rc.5`（仍保持为核心 allowlist 的后缀），四个 SSH 开发包 pin 跟随核心 pin 前移到 `0.2.2-rc.5`；运行的是与 rc.3 相同的实现，无需新增适配分支。tarball 对比与门禁结果见[路线账本](../plans/active/2026-09-12-multi-root-workspace.md#ssh-分支再次合入主线v01232026-11-19)。
+
 ### 提升步骤（本分支已执行）
 
 1. 确认 npm 上 `0.2.2-rc.5` 可解析（`next` 指向它），执行 `node scripts/upgrade-dsh.mjs 0.2.2-rc.5` 重指 devDependencies / release-age / 生态 pin；
