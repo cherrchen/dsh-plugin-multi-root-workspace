@@ -64,6 +64,12 @@
 
 ## 2026-11-19 修订：两步式添加连接与只读浏览端点
 
-- 面板“添加连接”由四步改为两步：第 1 步保存连接（凭据来源、显示名/环境 ID/平台、`user@host:port`、主机钥确认 Dialog），第 2 步安装 Helper、选择远端路径与能力并“绑定到本项目”。四个 Tab 与既有绑定/准入语义不变。
+- 面板“添加连接”由四步改为两步：第 1 步保存连接（凭据来源、显示名/环境 ID/平台、`user@host:port`、主机钥确认 Dialog），第 2 步安装 Helper、选择远端路径与能力并“绑定到本项目”。既有绑定/准入语义不变。
 - 第 1 步先以 `/` 占位 workspace 保存，第 2 步再更新 workspace 与 `exec`/`transfer`。为避免第二次扫描，`sshEnvironmentSave` 在 target 身份（hostname/port/user）与 managed `credentialId` 均未变、且提交的 `fingerprint` 等于已记录 `hostKey` 时允许不带 `hostKeyToken`；其他情况仍要求新的扫描令牌。该例外只复用既有 TOFU 信任，不接受新的指纹。
 - 新增两个只读端点：`sshConfigAliases` 读取本机 `~/.ssh/config` 的字面 Host 别名；`sshListDirectories` 经环境 SFTP 列目录，managed 环境以 `-F <credentialRoot>/ssh_config` 连接，因此未链接 `~/.ssh/config` 也可浏览。两者只返回名称/路径，不返回文件内容或密钥，错误统一为 `remote-path-listing-failed`。
+
+## 2026-11-19 修订（二）：三 Tab 与独立“添加连接”Dialog
+
+- 管理对话框由四个 Tab 收敛为三个（已有连接 / SSH Key / 模式设置）。“添加连接”从 Tab 改为独立 Dialog，由“已有连接”Tab 内的按钮打开，因此管理面板不再承载半填写的表单。
+- Workspace Folders 远端区块只保留“管理 SSH 远端…”入口；模式页的引导按钮改为切到“已有连接”，不直接打开添加 Dialog。
+- 添加 Dialog 关闭时丢弃草稿，但第 1 步已保存的连接保留；主对话框的 Tab、绑定、准入与持久化语义不变。

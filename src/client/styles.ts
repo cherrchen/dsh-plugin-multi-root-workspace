@@ -1745,7 +1745,8 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 /* The standalone SSH management dialog. The card is wider than the primitive's
    380px default; the content column scrolls so the body never clips controls. */
-.mrfw-sshDialog {
+.mrfw-sshDialog,
+.mrfw-sshAddDialog {
   width: min(760px, 100%);
   max-height: calc(100vh - 48px);
 }

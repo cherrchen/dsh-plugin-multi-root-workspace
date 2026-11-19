@@ -249,11 +249,13 @@ async function callsOf(ssh: { calls: { method: string; args: unknown[] }[] }, me
 function withDialog(options: Parameters<typeof renderDialog>[0], via: 'add' | 'manage'): Promise<HTMLElement> {
   renderDialog(options)
   return (async () => {
-    const label = via === 'add' ? 'panel.remoteAdd' : 'panel.remoteManage'
-    const entry = await screen.findByRole('button', { name: label })
+    const entry = await screen.findByRole('button', { name: 'panel.remoteManage' })
     await waitFor(() => { expect((entry as HTMLButtonElement).disabled).toBe(false) })
     fireEvent.click(entry)
-    return await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
+    const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
+    if (via === 'manage') return dialog
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'ssh.tab.add' }))
+    return await screen.findByRole('dialog', { name: 'ssh.tab.add' })
   })()
 }
 
@@ -317,15 +319,14 @@ async function connectAndSave(
 }
 
 describe('the SSH management dialog', () => {
-  it('replaces the inline management area with a remote list and add/manage entries', async () => {
+  it('replaces the inline management area with a remote list and the manage entry', async () => {
     const ssh = fakeSsh(sshState())
     renderDialog({ ssh })
     await screen.findByText('panel.remote')
     // The old inline management surface is gone; the section is a list plus
-    // the two entries.
+    // the single management entry. Adding a connection lives in its dialog.
     expect(screen.queryByText('ssh.credentials')).toBeNull()
     expect(screen.queryByText('ssh.custodyMode')).toBeNull()
-    expect(screen.getByRole('button', { name: 'panel.remoteAdd' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'panel.remoteManage' })).toBeTruthy()
     expect(ssh.calls).toHaveLength(0)
   })
@@ -340,9 +341,15 @@ describe('the SSH management dialog', () => {
     expect(await callsOf(ssh, 'state')).toEqual([['session-1']])
   })
 
-  it('opens the Add tab on the two-step connection card', async () => {
+  it('opens the Add connection dialog from the Connections tab', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'add')
+    const main = screen.getByRole('dialog', { name: 'ssh.dialog.title' })
+    // The management dialog has exactly three tabs; adding is a dialog.
+    expect(within(main).getAllByRole('tab').map(node => node.textContent))
+      .toEqual(['ssh.tab.connections', 'ssh.tab.keys', 'ssh.tab.mode'])
+    expect(within(main).queryByRole('tab', { name: 'ssh.tab.add' })).toBeNull()
+    expect(within(main).getByRole('button', { name: 'ssh.tab.add' })).toBeTruthy()
     // Step one is the connection card: source, credential, display/id, target, platform.
     expect(await within(dialog).findByLabelText('ssh.field.environmentId')).toBeTruthy()
     expect(within(dialog).getByLabelText('ssh.field.credentialSource')).toBeTruthy()
@@ -358,14 +365,32 @@ describe('the SSH management dialog', () => {
     expect(chips[1]!.disabled).toBe(true)
     expect(within(dialog).getByRole('button', { name: 'ssh.scan' })).toBeTruthy()
     expect(within(dialog).queryByRole('button', { name: 'ssh.step.next' })).toBeNull()
-    expect(within(dialog).queryByRole('button', { name: 'ssh.add.save' })).toBeNull()
-    // All four tabs are present and switchable.
-    expect(within(dialog).getByRole('tab', { name: 'ssh.tab.connections' })).toBeTruthy()
-    expect(within(dialog).getByRole('tab', { name: 'ssh.tab.keys' })).toBeTruthy()
-    expect(within(dialog).getByRole('tab', { name: 'ssh.tab.mode' })).toBeTruthy()
+    // The add dialog carries no tabs of its own.
+    expect(within(dialog).queryByRole('tab')).toBeNull()
     // The form uses the primitive Input wrappers and a real field grid; the
     // old row-only .mrfw-input class must not reach a column form again.
     expect(dialog.querySelectorAll('input.mrfw-input, select.mrfw-input, textarea.mrfw-input')).toHaveLength(0)
+  })
+
+  it('closes the Add connection dialog and discards its draft', async () => {
+    const ssh = fakeSsh(sshState())
+    const dialog = await withDialog({ ssh }, 'add')
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.displayName'), { target: { value: 'Discarded' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'panel.close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.tab.add' })).toBeNull())
+    const main = screen.getByRole('dialog', { name: 'ssh.dialog.title' })
+    expect(within(main).getByText('ssh.environments')).toBeTruthy()
+    // Reopening starts from a blank draft instead of the closed one.
+    fireEvent.click(within(main).getByRole('button', { name: 'ssh.tab.add' }))
+    const reopened = await screen.findByRole('dialog', { name: 'ssh.tab.add' })
+    expect((within(reopened).getByLabelText('ssh.field.displayName') as HTMLInputElement).value).toBe('')
+  })
+
+  it('points the mode guide at the Connections tab instead of an Add tab', async () => {
+    const dialog = await withDialog({ ssh: fakeSsh(sshState()) }, 'manage')
+    fireEvent.click(tab(dialog, 'ssh.tab.mode'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.tab.connections' }))
+    expect(await within(dialog).findByText('ssh.environments')).toBeTruthy()
   })
 
   it('keeps the credential controls and the host metadata on one row each', async () => {
@@ -394,17 +419,18 @@ describe('the SSH management dialog', () => {
       return text
     }
     renderDialog({ ssh, t: tZh })
-    const entry = await screen.findByRole('button', { name: '添加 SSH 远端…' })
+    const entry = await screen.findByRole('button', { name: '管理 SSH 远端…' })
     await waitFor(() => { expect((entry as HTMLButtonElement).disabled).toBe(false) })
     fireEvent.click(entry)
-    const dialog = await screen.findByRole('dialog', { name: 'SSH 远端管理' })
+    const main = await screen.findByRole('dialog', { name: 'SSH 远端管理' })
+    // The saved environment's badge uses the same mapping.
+    expect(await within(main).findByText('Linux')).toBeTruthy()
+    fireEvent.click(within(main).getByRole('button', { name: '添加连接' }))
+    const dialog = await screen.findByRole('dialog', { name: '添加连接' })
     const platform = await within(dialog).findByLabelText('平台') as HTMLSelectElement
     expect([...platform.options].map(option => option.textContent)).toEqual(['Linux', 'macOS'])
     // The platform hint spells out that registration and the helper verify it.
     expect(within(dialog).getByText(/登记与 helper 握手/)).toBeTruthy()
-    // The saved environment's badge uses the same mapping.
-    fireEvent.click(within(dialog).getByRole('tab', { name: '已有连接' }))
-    expect(await within(dialog).findByText('Linux')).toBeTruthy()
   })
 
   it('lists SSH keys in the Keys tab and keeps the consequence note', async () => {
@@ -443,17 +469,20 @@ describe('the SSH management dialog', () => {
       const dialog = await withDialog({ ssh, custodyMode }, 'manage')
       expect(await within(dialog).findByText(/ssh\.connections\.deploymentGuide/)).toBeTruthy()
       expect(within(dialog).queryByText('ssh.environments')).toBeNull()
-      fireEvent.click(tab(dialog, 'ssh.tab.add'))
-      expect(await within(dialog).findByText(custodyMode === 'team' ? 'ssh.add.teamGuide' : 'ssh.add.hardenedGuide')).toBeTruthy()
-      expect(within(dialog).queryByRole('button', { name: 'ssh.add.save' })).toBeNull()
+      // The three tabs stay, but there is no Add tab or Add entry in a
+      // deployment-managed custody mode.
+      expect(within(dialog).getAllByRole('tab')).toHaveLength(3)
+      expect(within(dialog).queryByRole('tab', { name: 'ssh.tab.add' })).toBeNull()
+      expect(within(dialog).queryByRole('button', { name: 'ssh.tab.add' })).toBeNull()
       expect(ssh.calls).toHaveLength(0)
       cleanup()
     }
   })
 
-  it('does not open a personal surface without an ssh client', async () => {
-    const dialog = await withDialog({ custodyMode: 'personal' }, 'add')
+  it('shows the no-client note instead of an add entry without an ssh client', async () => {
+    const dialog = await withDialog({ custodyMode: 'personal' }, 'manage')
     expect(await within(dialog).findByText('ssh.add.noClient')).toBeTruthy()
+    expect(within(dialog).queryByRole('button', { name: 'ssh.tab.add' })).toBeNull()
   })
 
   it('keeps the custody control available when the plane is config-invalid', async () => {
@@ -984,9 +1013,11 @@ describe('the SSH management dialog', () => {
       transfer: { maxBytes: 268_435_456, timeoutMs: 600_000 },
     })
     await waitFor(() => expect(remoteCalls).toEqual([{ method: 'add', args: ['session-1', 'env-build', 'primary'] }]))
-    // Binding finishes the wizard on the new environment's row.
-    expect(await within(dialog).findByText('ssh.environments')).toBeTruthy()
-    expect(within(dialog).getAllByText('env-build').length).toBeGreaterThan(0)
+    // Binding closes the add dialog and lands on the new environment's row.
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.tab.add' })).toBeNull())
+    const main = screen.getByRole('dialog', { name: 'ssh.dialog.title' })
+    expect(await within(main).findByText('ssh.environments')).toBeTruthy()
+    expect(within(main).getAllByText('env-build').length).toBeGreaterThan(0)
   })
 
   it('skips step two and leaves the saved connection with its readiness chain', async () => {
@@ -994,12 +1025,14 @@ describe('the SSH management dialog', () => {
     const dialog = await withDialog({ ssh }, 'add')
     await connectAndSave(dialog, ssh, { environmentId: 'env-skip', hostname: 'skip.internal', user: 'ci' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.step.skip' }))
-    expect(await within(dialog).findByText('ssh.environments')).toBeTruthy()
-    const rows = await within(dialog).findAllByText('env-skip')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.tab.add' })).toBeNull())
+    const main = screen.getByRole('dialog', { name: 'ssh.dialog.title' })
+    expect(await within(main).findByText('ssh.environments')).toBeTruthy()
+    const rows = await within(main).findAllByText('env-skip')
     expect(rows[0]!.closest('.mrfw-row')).toBeTruthy()
     // The helper and the binding were skipped, so the row still shows them as
     // pending readiness steps.
-    const row = dialog.querySelector('.mrfw-sshEnvRow') as HTMLElement
+    const row = main.querySelector('.mrfw-sshEnvRow') as HTMLElement
     expect(within(row).getByText('ssh.step.helper')).toBeTruthy()
     expect(within(row).getByText('ssh.step.binding')).toBeTruthy()
     expect(ssh.calls.map(call => call.method)).not.toContain('helperInstall')

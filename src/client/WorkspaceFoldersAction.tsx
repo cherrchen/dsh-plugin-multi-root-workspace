@@ -1104,13 +1104,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               )}
               <div className="mrfw-sshAddRow">
                 <Action
-                  variant="outline"
-                  disabled={remoteState.view === undefined}
-                  onClick={() => { setSshDialog('add') }}
-                >
-                  {t('panel.remoteAdd')}
-                </Action>
-                <Action
                   disabled={remoteState.view === undefined}
                   onClick={() => { setSshDialog('connections') }}
                 >
