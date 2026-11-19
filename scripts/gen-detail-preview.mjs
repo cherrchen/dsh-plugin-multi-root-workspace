@@ -1,12 +1,12 @@
 /**
- * gen-detail-preview — rebuild `detail/preview.svg` and `detail/preview.zh.svg`.
+ * gen-detail-preview — rebuild the localized feature previews under `detail/`.
  *
  * The Plugin Manager's bundle page renders a bundle's `meta.detail` document;
  * ours is a single feature illustration, the upstream convention (640×300
  * self-contained SVG, every glyph outlined — `<text>`, scripts and external
  * resources are forbidden). This script lays the composition out in data and
- * outlines each string through fontkit, so the shipped file holds path data
- * only and renders identically on every platform.
+ * outlines each string through fontkit, so the shipped files hold path data
+ * only and render identically on every platform.
  *
  * The layout mirrors the official previews (e.g. agent-team-profile): a large
  * title plus subtitle on the left above one summary card, and one panel card
@@ -15,31 +15,74 @@
  * `@deepseek-ai/dsh-client-ui-primitives` build (the same glyphs the panel
  * renders) and from `src/client/WorkspaceFoldersAction.tsx`'s inline glyphs.
  *
- * Fonts are read from the macOS system library (SF for Latin, Hiragino Sans GB
- * for Chinese) — run `pnpm preview:gen` on macOS after editing the strings or
- * layout below, and commit the regenerated SVGs.
+ * One variant is emitted per language DSH ships in the box (`preview.<id>.svg`,
+ * English being the bare `preview.svg`). The panel's own copy is wider than
+ * English in several languages, so every run is measured and shrunk until it
+ * fits its slot: the composition adapts instead of overflowing.
+ *
+ * Fonts are read from the macOS system library (SF for Latin and Cyrillic,
+ * Hiragino Sans GB + Songti for Chinese, Yu Gothic + Yu Mincho for Japanese,
+ * the last two from downloadable font assets) — run `pnpm preview:gen` on
+ * macOS after editing the strings or layout below, and commit the regenerated
+ * SVGs.
  *
  * @module scripts/gen-detail-preview
  */
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as fontkit from 'fontkit'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-const FONTS = {
-  en: fontkit.openSync('/System/Library/Fonts/SFNS.ttf'),
-  enMono: fontkit.openSync('/System/Library/Fonts/SFNSMono.ttf'),
-  zh: fontkit.openSync('/System/Library/Fonts/Hiragino Sans GB.ttc', 'HiraginoSansGB-W3'),
-  zhBold: fontkit.openSync('/System/Library/Fonts/Hiragino Sans GB.ttc', 'HiraginoSansGB-W6'),
+/* ---------------------------------------------------------------------------
+ * Fonts.
+ *
+ * SF carries Latin AND Cyrillic, so Russian needs no separate face; Georgia
+ * Bold (the serif the official previews use for the large title) covers
+ * Cyrillic too. Chinese and Japanese need their own faces: the Japanese
+ * family ships as downloadable assets, so it is resolved by name rather than
+ * by a fixed versioned path.
+ * ------------------------------------------------------------------------ */
+const FONT_ASSETS = '/System/Library/AssetsV2/com_apple_MobileAsset_Font7'
+
+/** Open a font by absolute path, failing loudly when the file is absent. */
+function openFont(file, face) {
+  if (!existsSync(file)) throw new Error(`missing font ${file} — the preview generator needs this macOS font`)
+  return face === undefined ? fontkit.openSync(file) : fontkit.openSync(file, face)
 }
-FONTS.enSemi = FONTS.en.getVariation({ wght: 600 })
-FONTS.enBold = FONTS.en.getVariation({ wght: 700 })
-FONTS.enMono = FONTS.enMono.getVariation({ wght: 500 })
-// The official previews set the large title in a serif face.
-FONTS.enSerif = fontkit.openSync('/System/Library/Fonts/Supplemental/Georgia Bold.ttf')
-FONTS.zhSerif = fontkit.openSync('/System/Library/Fonts/Supplemental/Songti.ttc', 'STSongti-SC-Bold')
+
+/** Open a downloadable font asset by file name (faces live in versioned dirs). */
+function openAssetFont(name, face) {
+  const candidates = existsSync(FONT_ASSETS)
+    ? readdirSync(FONT_ASSETS, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => join(FONT_ASSETS, entry.name, 'AssetData', name))
+    : []
+  const file = candidates.find(candidate => existsSync(candidate))
+  if (file === undefined) {
+    throw new Error(`missing font asset ${name} — install the matching font in Font Book (macOS offers Japanese fonts as downloads)`)
+  }
+  return face === undefined ? fontkit.openSync(file) : fontkit.openSync(file, face)
+}
+
+const SF = openFont('/System/Library/Fonts/SFNS.ttf')
+const SF_SEMI = SF.getVariation({ wght: 600 })
+const MONO = openFont('/System/Library/Fonts/SFNSMono.ttf').getVariation({ wght: 500 })
+/** The official previews set the large title in a serif face. */
+const GEORGIA_BOLD = openFont('/System/Library/Fonts/Supplemental/Georgia Bold.ttf')
+
+const ZH_UI = openFont('/System/Library/Fonts/Hiragino Sans GB.ttc', 'HiraginoSansGB-W3')
+const ZH_SEMI = openFont('/System/Library/Fonts/Hiragino Sans GB.ttc', 'HiraginoSansGB-W6')
+const ZH_BOLD = openFont('/System/Library/Fonts/Supplemental/Songti.ttc', 'STSongti-SC-Bold')
+
+const JA_UI = openAssetFont('YuGothic-Medium.otf')
+const JA_SEMI = openAssetFont('YuGothic-Bold.otf')
+const JA_BOLD = openAssetFont('YuMincho.ttc', 'YuMin-Extrabold')
+
+const LATIN_FACES = { ui: SF, semi: SF_SEMI, bold: GEORGIA_BOLD, mono: MONO }
+const ZH_FACES = { ui: ZH_UI, semi: ZH_SEMI, bold: ZH_BOLD, mono: MONO }
+const JA_FACES = { ui: JA_UI, semi: JA_SEMI, bold: JA_BOLD, mono: MONO }
 
 const C = {
   bg: '#F5F6FC',
@@ -120,9 +163,9 @@ function pathGroup(paths, x, y, size, color, strokeWidth = 1) {
 }
 
 /* ---------------------------------------------------------------------------
- * Text outlining.
+ * Text outlining and fitting.
  * ------------------------------------------------------------------------ */
-function text(font, str, x, y, size, fill) {
+function outline(font, str, x, y, size, fill) {
   const scale = size / font.unitsPerEm
   const { glyphs, positions } = font.layout(str)
   let pen = 0
@@ -141,19 +184,47 @@ function text(font, str, x, y, size, fill) {
   }
 }
 
-const FONT = {
-  en: {
-    ui: s => text(FONTS.en, s.str, s.x, s.y, s.size, s.fill),
-    semi: s => text(FONTS.enSemi, s.str, s.x, s.y, s.size, s.fill),
-    bold: s => text(FONTS.enSerif, s.str, s.x, s.y, s.size, s.fill),
-    mono: s => text(FONTS.enMono, s.str, s.x, s.y, s.size, s.fill),
-  },
-  zh: {
-    ui: s => text(FONTS.zh, s.str, s.x, s.y, s.size, s.fill),
-    semi: s => text(FONTS.zhBold, s.str, s.x, s.y, s.size, s.fill),
-    bold: s => text(FONTS.zhSerif, s.str, s.x, s.y, s.size, s.fill),
-    mono: s => text(FONTS.enMono, s.str, s.x, s.y, s.size, s.fill),
-  },
+/** Advance width of `str` at `size`, without emitting anything. */
+function measure(font, str, size) {
+  const scale = size / font.unitsPerEm
+  return font.layout(str).positions.reduce((total, position) => total + position.xAdvance, 0) * scale
+}
+
+/** One language's renderable face set, plus a per-style measure. */
+function fontSet(faces) {
+  return {
+    ui: spec => outline(faces.ui, spec.str, spec.x, spec.y, spec.size, spec.fill),
+    semi: spec => outline(faces.semi, spec.str, spec.x, spec.y, spec.size, spec.fill),
+    bold: spec => outline(faces.bold, spec.str, spec.x, spec.y, spec.size, spec.fill),
+    mono: spec => outline(faces.mono, spec.str, spec.x, spec.y, spec.size, spec.fill),
+    measure: (style, str, size) => measure(faces[style], str, size),
+  }
+}
+
+/**
+ * Shrink `size` until `str` fits `maxWidth`.
+ *
+ * Translated copy is routinely wider than English, so every constrained run
+ * goes through this instead of a hand-tuned size per language. The step is
+ * small enough that the result stays visually even across the variants.
+ * @param L - the language being rendered (carries `font.measure`).
+ * @param style - face to measure with.
+ * @param str - the string.
+ * @param size - the preferred size.
+ * @param maxWidth - the horizontal budget in canvas units.
+ * @param min - the floor; copy that still overflows there is a content bug.
+ * @returns the fitted size.
+ */
+function fit(L, style, str, size, maxWidth, min = 5) {
+  let candidate = size
+  while (candidate > min && L.font.measure(style, str, candidate) > maxWidth) {
+    candidate = Number((candidate - 0.1).toFixed(2))
+  }
+  const width = L.font.measure(style, str, candidate)
+  if (width > maxWidth) {
+    throw new Error(`copy does not fit its slot: ${JSON.stringify(str)} needs ${width.toFixed(1)} > ${maxWidth} at ${candidate}px`)
+  }
+  return candidate
 }
 
 /* A white card with the official previews' offset shadow. */
@@ -168,11 +239,12 @@ const hline = (x1, x2, y) => `<path d="M${x1} ${y}L${x2} ${y}" stroke="${C.divid
 
 /* The neutral cwd chip (`mrfw-cwdTag`): tag bg, secondary ink. */
 function cwdTag(L, x, baseline) {
-  const label = L.font.ui({ str: L.cwdTag, x: 0, y: 0, size: 6.5, fill: C.muted })
+  const size = fit(L, 'ui', L.cwdTag, 6.5, 104, 5)
+  const label = L.font.ui({ str: L.cwdTag, x: 0, y: 0, size, fill: C.muted })
   const w = Math.ceil(label.width + 10)
   return {
     svg: `<rect x="${x}" y="${baseline - 9.5}" width="${w}" height="13" rx="3.5" fill="${C.tag}"/>`
-      + L.font.ui({ str: L.cwdTag, x: x + 5, y: baseline, size: 6.5, fill: C.muted }).svg,
+      + L.font.ui({ str: L.cwdTag, x: x + 5, y: baseline, size, fill: C.muted }).svg,
     width: w,
   }
 }
@@ -184,7 +256,8 @@ function accessBadge(kind, L, label, x, baseline) {
   const glyph = kind === 'inherit'
     ? icon('workspace-tree-outline', x, iconY, iconSize, C.muted)
     : pathGroup(READONLY_PATHS, x, iconY, iconSize, C.muted)
-  const labelText = L.font.ui({ str: label, x: x + iconSize + 4, y: baseline, size: 7.5, fill: C.muted })
+  const size = fit(L, 'ui', label, 7.5, 112, 6)
+  const labelText = L.font.ui({ str: label, x: x + iconSize + 4, y: baseline, size, fill: C.muted })
   return { svg: glyph + labelText.svg, width: iconSize + 4 + labelText.width }
 }
 
@@ -207,26 +280,34 @@ function leftBlock(L) {
   const parts = []
   const push = run => { parts.push(run.svg); return run }
 
-  push(L.font.bold({ str: L.title, x: 34, y: 64, size: L.titleSize, fill: C.ink }))
-  push(L.font.ui({ str: L.subtitle, x: 34, y: 90, size: 11, fill: C.muted }))
+  push(L.font.bold({ str: L.title, x: 34, y: 64, size: fit(L, 'bold', L.title, L.titleSize, 262, 9), fill: C.ink }))
+  push(L.font.ui({ str: L.subtitle, x: 34, y: 90, size: fit(L, 'ui', L.subtitle, 11, 262, 7), fill: C.muted }))
 
   const X = 32, Y = 124, W = 252, H = 144
   parts.push(card(X, Y, W, H))
   const tx = X + 16
   const right = X + W - 12
 
-  // The title's ink (not baseline) shares the header's vertical center with
-  // the badge pill: 12px caps sit ~5px above their midpoint.
-  push(L.font.semi({ str: L.cardTitle, x: tx, y: Y + 28, size: 12, fill: C.ink }))
-
   // The trigger pill — the sidebar action that opens the panel, like the
-  // upstream previews' entry-point badge.
-  const badgeLabel = L.font.ui({ str: L.badge, x: 0, y: 0, size: 9.5, fill: C.accent })
+  // upstream previews' entry-point badge. Measured first because the
+  // right-aligned pill decides how much room the card title keeps.
+  const badgeSize = fit(L, 'ui', L.badge, 9.5, 132, 6.5)
+  const badgeLabel = L.font.ui({ str: L.badge, x: 0, y: 0, size: badgeSize, fill: C.accent })
   const badgeW = Math.ceil(8 + 12 + 5 + badgeLabel.width + 8)
   const badgeX = right - badgeW
+
+  // The title's ink (not baseline) shares the header's vertical center with
+  // the badge pill: 12px caps sit ~5px above their midpoint.
+  push(L.font.semi({
+    str: L.cardTitle,
+    x: tx,
+    y: Y + 28,
+    size: fit(L, 'semi', L.cardTitle, 12, badgeX - 8 - tx - 4, 7),
+    fill: C.ink,
+  }))
   parts.push(`<rect x="${badgeX}" y="${Y + 11}" width="${badgeW}" height="24" rx="6" fill="${C.accentSoft}"/>`)
   parts.push(icon('settings-outline', badgeX + 8, Y + 17, 12, C.accent))
-  parts.push(L.font.ui({ str: L.badge, x: badgeX + 8 + 12 + 5, y: Y + 26.5, size: 9.5, fill: C.accent }).svg)
+  parts.push(L.font.ui({ str: L.badge, x: badgeX + 8 + 12 + 5, y: Y + 26.5, size: badgeSize, fill: C.accent }).svg)
 
   parts.push(hline(X + 1, X + W - 1, Y + 44))
   // The connector from the badge row to the panel, as upstream draws it.
@@ -234,15 +315,17 @@ function leftBlock(L) {
   parts.push(`<circle cx="312" cy="${Y + 23}" r="2.5" fill="${C.faint}"/>`)
 
   // The request, as a right-aligned user bubble (two lines max).
-  const line1 = L.font.ui({ str: L.userLine1, x: 0, y: 0, size: 8.5, fill: C.ink })
-  const line2 = L.font.ui({ str: L.userLine2, x: 0, y: 0, size: 8.5, fill: C.ink })
+  const lineSize1 = fit(L, 'ui', L.userLine1, 8.5, 186, 6.5)
+  const lineSize2 = fit(L, 'ui', L.userLine2, 8.5, 186, 6.5)
+  const line1 = L.font.ui({ str: L.userLine1, x: 0, y: 0, size: lineSize1, fill: C.ink })
+  const line2 = L.font.ui({ str: L.userLine2, x: 0, y: 0, size: lineSize2, fill: C.ink })
   const bubbleW = Math.ceil(Math.max(line1.width, line2.width) + 18)
   const bubbleX = X + W - 14 - bubbleW
   parts.push(`<rect x="${bubbleX}" y="${Y + 56}" width="${bubbleW}" height="44" rx="10" fill="${C.bubble}"/>`)
-  parts.push(L.font.ui({ str: L.userLine1, x: bubbleX + 9, y: Y + 73, size: 8.5, fill: C.ink }).svg)
-  parts.push(L.font.ui({ str: L.userLine2, x: bubbleX + 9, y: Y + 91, size: 8.5, fill: C.ink }).svg)
+  parts.push(L.font.ui({ str: L.userLine1, x: bubbleX + 9, y: Y + 73, size: lineSize1, fill: C.ink }).svg)
+  parts.push(L.font.ui({ str: L.userLine2, x: bubbleX + 9, y: Y + 91, size: lineSize2, fill: C.ink }).svg)
 
-  push(L.font.ui({ str: L.status, x: tx, y: Y + 124, size: 8.5, fill: C.muted }))
+  push(L.font.ui({ str: L.status, x: tx, y: Y + 124, size: fit(L, 'ui', L.status, 8.5, 214, 6.5), fill: C.muted }))
   return parts.join('')
 }
 
@@ -259,11 +342,11 @@ function panelCard(L) {
   const parts = [card(X, Y, W, H)]
   const push = run => { parts.push(run.svg); return run }
 
-  push(L.font.semi({ str: L.panelTitle, x: tx, y: Y + 25, size: 11.5, fill: C.ink }))
+  push(L.font.semi({ str: L.panelTitle, x: tx, y: Y + 25, size: fit(L, 'semi', L.panelTitle, 11.5, 214, 7), fill: C.ink }))
   parts.push(pathGroup([CLOSE_PATH], right - 11, Y + 14, 11, C.muted, 1.2))
 
   // Section: primary working directory.
-  push(L.font.ui({ str: L.primary, x: tx, y: Y + 46, size: 8.5, fill: C.muted }))
+  push(L.font.ui({ str: L.primary, x: tx, y: Y + 46, size: fit(L, 'ui', L.primary, 8.5, 236, 6), fill: C.muted }))
   const primaryRowY = Y + 52
   const primaryName = push(L.font.semi({ str: 'web-app', x: tx, y: primaryRowY + 15, size: 10, fill: C.ink }))
   parts.push(cwdTag(L, tx + primaryName.width + 6, primaryRowY + 15).svg)
@@ -271,7 +354,7 @@ function panelCard(L) {
   parts.push(hline(tx, right, primaryRowY + 38))
 
   // Section: secondary working directories.
-  push(L.font.ui({ str: L.secondary, x: tx, y: primaryRowY + 54, size: 8.5, fill: C.muted }))
+  push(L.font.ui({ str: L.secondary, x: tx, y: primaryRowY + 54, size: fit(L, 'ui', L.secondary, 8.5, 236, 6), fill: C.muted }))
   const rows = [
     { name: 'shared-libs', path: '~/dev/shared-libs', access: 'inherit', label: L.inherit },
     { name: 'design-assets', path: '~/dev/design-assets', access: 'read-only', label: L.readOnly },
@@ -292,11 +375,12 @@ function panelCard(L) {
   const btnH = 20
   const btnY = dividerY + (Y + H - dividerY - btnH) / 2
   const plus = 9
-  const addLabel = L.font.ui({ str: L.add, x: 0, y: 0, size: 8.5, fill: C.body })
+  const addSize = fit(L, 'ui', L.add, 8.5, 128, 6.5)
+  const addLabel = L.font.ui({ str: L.add, x: 0, y: 0, size: addSize, fill: C.body })
   const btnW = Math.ceil(12 + plus + 5 + addLabel.width + 12)
   parts.push(`<rect x="${tx + 0.5}" y="${btnY + 0.5}" width="${btnW - 1}" height="${btnH - 1}" rx="${btnH / 2}" fill="${C.card}" stroke="${C.border}"/>`)
   parts.push(icon('plus-outline', tx + 12, btnY + (btnH - plus) / 2, plus, C.body))
-  parts.push(L.font.ui({ str: L.add, x: tx + 12 + plus + 5, y: btnY + 13.5, size: 8.5, fill: C.body }).svg)
+  parts.push(L.font.ui({ str: L.add, x: tx + 12 + plus + 5, y: btnY + 13.5, size: addSize, fill: C.body }).svg)
   return parts.join('')
 }
 
@@ -304,44 +388,169 @@ function preview(L) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="300" viewBox="0 0 640 300"><rect width="640" height="300" fill="${C.bg}"/>${leftBlock(L)}${panelCard(L)}</svg>\n`
 }
 
-const EN = {
-  font: FONT.en,
-  title: 'Multi-root workspace',
-  titleSize: 19,
-  subtitle: 'One session, many working directories',
-  cardTitle: 'Sync API types',
-  badge: 'Workspace folders',
-  panelTitle: 'Workspace folders',
-  primary: 'Primary working directory',
-  cwdTag: 'Current Agent working directory',
-  secondary: 'Secondary working directories',
-  inherit: 'Inherit',
-  readOnly: 'Read Only',
-  add: 'Add folder',
-  userLine1: 'Mirror the new API types into',
-  userLine2: 'shared-libs and run its tests',
-  status: 'Added shared-libs as a secondary directory.',
+/* ---------------------------------------------------------------------------
+ * Copy, one table per language (the panel's own labels, not a separate
+ * vocabulary). `titleSize` is the preferred large-title size; `fit` shrinks
+ * it when the language needs more room.
+ * ------------------------------------------------------------------------ */
+const COPY = {
+  en: {
+    title: 'Multi-root workspace',
+    titleSize: 19,
+    subtitle: 'One session, many working directories',
+    cardTitle: 'Sync API types',
+    badge: 'Folders',
+    panelTitle: 'Workspace folders',
+    primary: 'Primary working directory',
+    cwdTag: 'Current Agent working directory',
+    secondary: 'Secondary working directories',
+    inherit: 'Inherit',
+    readOnly: 'Read Only',
+    add: 'Add folder',
+    userLine1: 'Mirror the new API types into',
+    userLine2: 'shared-libs and run its tests',
+    status: 'Added shared-libs as a secondary directory.',
+  },
+  zh: {
+    title: '多根工作区',
+    titleSize: 21,
+    subtitle: '一个会话，多个工作目录',
+    cardTitle: '同步 API 类型',
+    badge: '工作区目录',
+    panelTitle: '工作区目录',
+    primary: '主要工作目录',
+    cwdTag: '当前Agent工作目录',
+    secondary: '附属工作目录',
+    inherit: '跟随会话',
+    readOnly: '仅可查看',
+    add: '添加目录',
+    userLine1: '把新的 API 类型同步到',
+    userLine2: 'shared-libs，并跑一遍测试',
+    status: '已将 shared-libs 添加为附属目录。',
+  },
+  ja: {
+    title: 'マルチルートワークスペース',
+    titleSize: 19,
+    subtitle: '1 つのセッション、複数の作業ディレクトリ',
+    cardTitle: 'API 型を同期',
+    badge: 'フォルダー',
+    panelTitle: 'ワークスペースフォルダー',
+    primary: '主要な作業ディレクトリ',
+    cwdTag: 'Agent の現在の作業ディレクトリ',
+    secondary: '追加の作業ディレクトリ',
+    inherit: 'セッションに従う',
+    readOnly: '読み取り専用',
+    add: 'フォルダーを追加',
+    userLine1: '新しい API 型を',
+    userLine2: 'shared-libs に反映してテストを実行',
+    status: 'shared-libs を追加の作業ディレクトリとして登録しました。',
+  },
+  es: {
+    title: 'Espacio de trabajo multi-raíz',
+    titleSize: 17,
+    subtitle: 'Una sesión, varios directorios de trabajo',
+    cardTitle: 'Sincronizar tipos de API',
+    badge: 'Carpetas',
+    panelTitle: 'Carpetas del espacio de trabajo',
+    primary: 'Directorio de trabajo principal',
+    cwdTag: 'Directorio de trabajo actual del Agent',
+    secondary: 'Directorios de trabajo secundarios',
+    inherit: 'Heredar',
+    readOnly: 'Solo lectura',
+    add: 'Añadir carpeta',
+    userLine1: 'Copia los nuevos tipos de API en',
+    userLine2: 'shared-libs y ejecuta sus pruebas',
+    status: 'Se añadió shared-libs como directorio adicional.',
+  },
+  fr: {
+    title: 'Espace de travail multi-racines',
+    titleSize: 17,
+    subtitle: 'Une session, plusieurs répertoires de travail',
+    cardTitle: 'Synchroniser les types d’API',
+    badge: 'Dossiers',
+    panelTitle: 'Dossiers de l’espace de travail',
+    primary: 'Répertoire de travail principal',
+    cwdTag: 'Répertoire de travail actuel de l’Agent',
+    secondary: 'Répertoires de travail secondaires',
+    inherit: 'Hériter de la session',
+    readOnly: 'Lecture seule',
+    add: 'Ajouter un dossier',
+    userLine1: 'Recopie les nouveaux types d’API dans',
+    userLine2: 'shared-libs et lance ses tests',
+    status: 'shared-libs a été ajouté comme répertoire supplémentaire.',
+  },
+  de: {
+    title: 'Multi-Root-Arbeitsbereich',
+    titleSize: 16,
+    subtitle: 'Eine Sitzung, viele Arbeitsverzeichnisse',
+    cardTitle: 'API-Typen synchronisieren',
+    badge: 'Ordner',
+    panelTitle: 'Arbeitsbereichsordner',
+    primary: 'Primäres Arbeitsverzeichnis',
+    cwdTag: 'Aktuelles Arbeitsverzeichnis des Agenten',
+    secondary: 'Sekundäre Arbeitsverzeichnisse',
+    inherit: 'Von Sitzung übernehmen',
+    readOnly: 'Nur lesen',
+    add: 'Ordner hinzufügen',
+    userLine1: 'Spiegele die neuen API-Typen nach',
+    userLine2: 'shared-libs und führe dessen Tests aus',
+    status: 'shared-libs wurde als zusätzlicher Ordner hinzugefügt.',
+  },
+  ru: {
+    title: 'Рабочее пространство с несколькими корнями',
+    titleSize: 15,
+    subtitle: 'Один сеанс, много рабочих каталогов',
+    cardTitle: 'Синхронизировать типы API',
+    badge: 'Папки',
+    panelTitle: 'Папки рабочего пространства',
+    primary: 'Основная рабочая папка',
+    cwdTag: 'Текущий рабочий каталог Agent',
+    secondary: 'Дополнительные рабочие папки',
+    inherit: 'Наследовать',
+    readOnly: 'Только чтение',
+    add: 'Добавить папку',
+    userLine1: 'Скопируй новые типы API в',
+    userLine2: 'shared-libs и запусти его тесты',
+    status: 'shared-libs добавлен как дополнительный каталог.',
+  },
+  pt: {
+    title: 'Espaço de trabalho multi-raiz',
+    titleSize: 17,
+    subtitle: 'Uma sessão, vários diretórios de trabalho',
+    cardTitle: 'Sincronizar tipos de API',
+    badge: 'Pastas',
+    panelTitle: 'Pastas do espaço de trabalho',
+    primary: 'Diretório de trabalho principal',
+    cwdTag: 'Diretório de trabalho atual do Agent',
+    secondary: 'Diretórios de trabalho secundários',
+    inherit: 'Herdar',
+    readOnly: 'Somente leitura',
+    add: 'Adicionar pasta',
+    userLine1: 'Copie os novos tipos de API para',
+    userLine2: 'shared-libs e execute os testes',
+    status: 'shared-libs foi adicionado como diretório adicional.',
+  },
 }
 
-const ZH = {
-  font: FONT.zh,
-  title: '多根工作区',
-  titleSize: 21,
-  subtitle: '一个会话，多个工作目录',
-  cardTitle: '同步 API 类型',
-  badge: '工作区目录',
-  panelTitle: '工作区目录',
-  primary: '主要工作目录',
-  cwdTag: '当前Agent工作目录',
-  secondary: '附属工作目录',
-  inherit: '跟随会话',
-  readOnly: '仅可查看',
-  add: '添加目录',
-  userLine1: '把新的 API 类型同步到',
-  userLine2: 'shared-libs，并跑一遍测试',
-  status: '已将 shared-libs 添加为附属目录。',
-}
+/** Emitted files, in the order DSH's language menu lists them. */
+const VARIANTS = [
+  { id: 'en', file: 'preview.svg', faces: LATIN_FACES },
+  { id: 'zh', file: 'preview.zh.svg', faces: ZH_FACES },
+  { id: 'ja', file: 'preview.ja.svg', faces: JA_FACES },
+  { id: 'es', file: 'preview.es.svg', faces: LATIN_FACES },
+  { id: 'fr', file: 'preview.fr.svg', faces: LATIN_FACES },
+  { id: 'de', file: 'preview.de.svg', faces: LATIN_FACES },
+  { id: 'ru', file: 'preview.ru.svg', faces: LATIN_FACES },
+  { id: 'pt', file: 'preview.pt.svg', faces: LATIN_FACES },
+]
 
-writeFileSync(join(REPO_ROOT, 'detail/preview.svg'), preview(EN))
-writeFileSync(join(REPO_ROOT, 'detail/preview.zh.svg'), preview(ZH))
-console.log('[gen-detail-preview] wrote detail/preview.svg and detail/preview.zh.svg')
+for (const { id, file, faces } of VARIANTS) {
+  const copy = COPY[id]
+  if (copy === undefined) throw new Error(`no preview copy for locale ${id}`)
+  const svg = preview({ ...copy, font: fontSet(faces) })
+  const target = join(REPO_ROOT, 'detail', file)
+  writeFileSync(target, svg)
+  const bytes = statSync(target).size
+  console.log(`[gen-detail-preview] ${file.padEnd(18)} ${(bytes / 1024).toFixed(1)} KiB`)
+  if (bytes > 1024 * 1024) throw new Error(`${file} exceeds the 1 MiB preview budget`)
+}

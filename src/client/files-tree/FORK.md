@@ -46,7 +46,7 @@ which is always the primary root and cannot be re-pointed.
 | `FilesBody.module.css` | none — kept verbatim as the diffable source; its rules are copied into `src/client/styles.ts` renamed to `mrfw-ft*` |
 | `tree-view.tsx` | upstream's row definitions (`Entry`/`Level`/`TreeContext`/`orderEntries`/`failureLine`) moved out of `FilesTree.tsx` so the listed tree and the search results draw with the same code; the documented deltas add `highlight` marks, `hiddenOnly`/`unmatched` lines, and the row context-menu spread (see *Intentional deltas*) |
 | `hidden.ts` | plugin-owned: upstream's draw-time hidden-entry filtering (`workspaceEntries`/`workspaceDirectories` with `showHidden`, hidden-directory subtree rule, "only hidden entries" state) applied to the fork's absolute-path store; no upstream file to copy from, but its semantics are pinned to `ui-sidebar-files` `workspace-tree.ts` at the same pin |
-| `pane.tsx` + `search-rules.ts`/`search-tree.ts`/`search-preferences.ts`/`search-state.ts`/`search-client.ts`/`context-menu.ts`/`describe-failure.ts` | plugin-owned search and menu surface; the first three are semantic copies of upstream's `0.2.2-rc.2` modules (see *Search surface: sync obligations*), the rest are this plugin's own. `pane.tsx`'s `preview` mode is the document navigator's form of the same component: the bar is always drawn without touching `barOpen`, mount never takes the keyboard, the previewed file is marked current among the results, and closing settings refocuses the magnifier. `describe-failure.ts` is the one describer both owners use for panel failure codes, so their wording cannot drift |
+| `pane.tsx` + `search-rules.ts`/`search-tree.ts`/`search-preferences.ts`/`search-state.ts`/`search-client.ts`/`context-menu.ts`/`describe-failure.ts` | plugin-owned search and menu surface; the first three are semantic copies of upstream's `0.2.2-rc.5` modules (their source has not changed since rc.2; see *Search surface: sync obligations*), the rest are this plugin's own. `pane.tsx`'s `preview` mode is the document navigator's form of the same component: the bar is always drawn without touching `barOpen`, mount never takes the keyboard, the previewed file is marked current among the results, and closing settings refocuses the magnifier. `describe-failure.ts` is the one describer both owners use for panel failure codes, so their wording cannot drift |
 
 `FilesTree.tsx` is **not** verbatim: it is upstream's `FilesBody.tsx` with
 the exported shell function rewritten and the file row's reveal marks
@@ -279,9 +279,10 @@ upstream binds inside it arrives as a prop instead:
 
 The additional-root search is plugin-owned UI over upstream semantics, not a
 verbatim copy. Three modules are **semantic** copies of upstream's
-`0.2.2-rc.3` `ui-sidebar-files` sources and must be diffed whenever the pin
+`0.2.2-rc.5` `ui-sidebar-files` sources and must be diffed whenever the pin
 moves (upstream may change rule validation, ignore handling, or the
-relative-path/tree construction):
+relative-path/tree construction); `0.2.2-rc.4` and `0.2.2-rc.5` changed no file under that
+upstream `src/client/` tree, so the copies stay as reviewed at `0.2.2-rc.3`:
 
 | Module | Upstream source | Copy delta |
 | --- | --- | --- |

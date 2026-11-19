@@ -9,8 +9,8 @@ root through its slot props and cannot be re-pointed.
 - **Source**: `deepseek-harness/packages/client/ui-open-in-app/src/client/`
 - **Revision**: `ddac96760b` (release `0.2.2-rc.2`, 2026-11-11). The dev pin
   and the `@deepseek-ai/dsh-host-open-in-app` devDependency have since moved to
-  `0.2.2-rc.3`; that release changed no file under the upstream `src/client/`
-  tree, so the fork base stays at this revision.
+  `0.2.2-rc.5`; `0.2.2-rc.3` through `0.2.2-rc.5` changed no file under the upstream
+  `src/client/` tree, so the fork base stays at this revision.
   Between `0.2.1-rc.3` (`1f81c047fc`) and `0.2.2-alpha.2` the upstream
   `src/client/` tree moved gesture feedback off the control and onto a
   `shell.overlay` seat: `OpenTargetButton` takes a `report` prop

@@ -8,6 +8,32 @@ This file records the user-visible changes of every **released** version.
 - For installation sources, the supported upstream runtimes, and known limitations, see the [README](./README.en.md).
 - The evidence, numbering, and release state of each version live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账). The body of each GitHub Release is generated from the commit history by `scripts/release-notes.mjs` and is the complete raw list behind this file.
 
+## [0.1.23] - 2026-11-19
+
+### Added
+
+- **The panel, plugin detail page, and preview artwork now cover all eight UI languages DSH ships**: panel copy previously existed only in Chinese and English; each of DSH's eight UI languages (`zh`, `en`, `ja`, `es`, `fr`, `de`, `ru`, `pt`) now has its own dictionary. Chinese is canonical; the other seven pin the key set and the `{count}` / `{access}` / `{tools}` placeholders through type constraints, and all eight register in one `ctx.locale.register` call. The detail page gains localized `meta.title` / `meta.description` / `meta.detail` plus `DETAIL.<lang>.md` and `preview.<lang>.svg` for the six new languages; `pnpm preview:gen` renders the previews from one layout, converts text to outlines, picks fonts per script, shrinks each constrained run to its measured slot, and fails when text still overflows at the lower bound. The entry pill uses the sidebar action's short label, so long translations no longer cover the card title. Earlier hosts keep showing only their own built-in languages: the new dictionaries exist as inert resources and do not change their language menu.
+- **The repository root README now exists in eight languages, with new per-feature user guides**: the README matches the eight UI languages DSH ships (Chinese is canonical; the other seven cross-link one another and keep the same heading levels and fenced-code languages), and `docs:check` validates every edition; `docs/guide/user/` adds bilingual guides for the command, access levels, additional-root Skills, worktree suggestions, Auto Review, UI entries, and model context.
+- **Contribution and security governance**: bilingual `CONTRIBUTING` and `SECURITY` documents, a pull-request template, and bug-report and feature-request issue forms; `THIRD_PARTY_LICENSE` is generated from declared dependencies, the built client source map, and the checked-in upstream fork inventory, and is gated by `pack:check`, the development-pin CI lane, `verify:all`, and the release workflow.
+
+### Changed
+
+- **Exact support for DSH `0.2.2-rc.5`**: the support matrix grows to 26 exact releases and the development pin moves to `0.2.2-rc.5` (cordis `4.1.0` / Schemastery `3.19.0`). `rc.5` is five commits over 433 files, 380 of whose manifests only replace version strings; the net change is that DeepSeek's built-in web search selects its provider by the model request route (`dsh-web`, `dsh-tool-web`, `dsh-web-search-deepseek`, and the settings card), plus upstream docs, e2e tests, and session snapshots. Every sandbox, fs, session, storage, client, and reviewer source tree the plugin consumes is byte-identical, so no adapter branch was added and the open-in-app and files-tree fork baselines stay put; the optional Auto Review joint contract includes `rc.5` with the current compile pin moved to it (its reviewer source tree is byte-identical to `rc.4`), growing the joint set to eleven exact releases ([interface review](./docs/reference/dsh-0.2.2-migration.md#022-rc5-后续审查2026-11-18), [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md), Chinese).
+
+## [0.1.22] - 2026-11-18
+
+### Added
+
+- **The Files header root name now renders in three tiers measured against the switcher's own width**: in a narrow column, a two-column right side, or a floating panel, the trigger no longer relies on CSS-only right ellipsis; it shows the full name, then "head…tail", then "head…". The middle tier maximizes the visible characters and prefers breaking at `-`, `_`, `.`, spaces, and `/`, so roots sharing a prefix but differing at the tail (`…-workspace` / `…-experiment` / `…-ssh`) stay distinguishable. The measurement input is the switcher width, which is independent of the text, so shorter text cannot feed back into the tier decision; the `open-in-app` control arriving asynchronously triggers a refit as well. The full display name always stays on `aria-label` ([ADR-0046 revision](./docs/decisions/ADR-0046-files-header-rootswitch-shrink-priority.md), Chinese).
+
+### Changed
+
+- **Exact support for DSH `0.2.2-rc.4`**: the support matrix grows to 25 exact releases and the development pin moves to `0.2.2-rc.4` (cordis `4.1.0` / Schemastery `3.19.0`). `rc.4` is eight commits, 380 of whose manifests only replace version strings; the net change is DeepSeek content-safety refusal handling (the shared `dsh-llm` gains `LLM_FAILURE_CODES.CONTENT_REFUSED`, which the host owns, and the plugin routes on no LLM error code), a liveshare tunnel-worker fix in an experimental package, and upstream docs and session snapshots. Every sandbox, fs, tools, session, storage, client, and reviewer source tree the plugin consumes is byte-identical, so no adapter branch was added and the open-in-app and files-tree fork baselines stay put; the optional Auto Review joint contract includes `rc.4` with the current compile pin moved to it (its reviewer source tree is byte-identical to `rc.3`), growing the joint set to ten exact releases ([interface review](./docs/reference/dsh-0.2.2-migration.md#022-rc4-后续审查2026-11-18), [ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md), Chinese).
+
+### Fixed
+
+- **The Files header `RootSwitcher` no longer covers its neighbours at narrow widths**: at a 299px page width the trigger overlapped reload and search by 28px each and `open-in-app` by 14.59px; in a 220px floating panel it covered all 43px of `open-in-app`. The cause was that the shrink capability sat on the inner button: the outer flex item is the anchor wrapper rendered by `Menu`, whose default `min-width: auto` pins it to the root name's min-content (249.59px measured), and once the path had been compressed to 0 there was no other yielder. The fix applies one priority — fixed controls, then the full path, then the root name, then the trigger icon: reload / search / `open-in-app` keep their native geometry and never move, the path yields to 0 with a zero basis, the unpinned anchor ellipsizes the name, and only then does the trigger clip its own icon. `Menu.className` was checked per tag across the 24 releases supported when the decision was written, so the rule has no version branch ([ADR-0046](./docs/decisions/ADR-0046-files-header-rootswitch-shrink-priority.md), Chinese).
+
 ## [0.1.21] - 2026-11-17
 
 ### Added
@@ -325,7 +351,9 @@ The first release: the three MVP milestones (M1–M3).
 
 - All eight findings of the pre-release external review (three of them release-blocking) are fixed, each with a regression test: a registered directory replaced by a symlink transplanting its authority (which introduced `recordedPath` — **re-resolving a path is not re-authorizing it**), concurrent registry mutations losing a write or reviving a revoked grant (per-primary-root mutations are serialized), a refresh not re-checking directories, a typed path being overwritten by the directory picker, the `reveal` response contract and failure code, duplicate ids not validated, the primary root missing from nesting validation, and CI testing before building.
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.21...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.23...HEAD
+[0.1.23]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.22...v0.1.23
+[0.1.22]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.20...v0.1.21
 [0.1.20]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.18...v0.1.19

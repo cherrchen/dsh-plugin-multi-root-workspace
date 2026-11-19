@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BundleSettingsCard, installSkillsSettingsCard, RemoteSwitchRow } from '../src/client/skills-settings.tsx'
 import { RemoteCustodyModeControl } from '../src/client/remote-custody.tsx'
 import * as Confirmation from '../src/compat/ops-confirmation.ts'
-import { zh, en } from '../src/client/locales.ts'
+import { DICTIONARIES } from '../src/client/locales.ts'
 import { OpsCompatibilitySettingsCard } from '../src/client/ops-settings.tsx'
 import { bindSettingsForm, bindSkillsForm, type SkillsForm } from '../src/compat/skills-client.ts'
 import type { Translate } from '../src/client/WorkspaceFoldersAction.tsx'
@@ -124,7 +124,7 @@ describe('OPS compatibility settings card', () => {
     expect(writes).toEqual([])
   })
 
-  it.each([zh, en])('displays the translated warning and acknowledgement', copy => {
+  it.each(Object.entries(DICTIONARIES))('displays the translated warning and acknowledgement (%s)', (_locale, copy) => {
     render(<OpsCompatibilitySettingsCard form={opsForm({ value: { enabled: false }, status: 'ready', writable: true })} t={key => copy[key as keyof typeof copy]} />)
     fireEvent.click(screen.getByRole('switch'))
     expect(screen.getByText(copy['ops.confirmDescription'])).not.toBeNull()

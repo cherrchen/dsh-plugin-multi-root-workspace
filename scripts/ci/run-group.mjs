@@ -113,6 +113,10 @@ async function verify(version) {
     if (full) await step('typecheck', 'pnpm', ['typecheck'])
     if (full && jointRelease) await step('auto-review-fork', 'pnpm', ['auto-review:fork'])
     await step('build', 'pnpm', ['build'])
+    // The license inventory describes the published tarball, which is built
+    // from the development pin. Other supported releases bundle different DSH
+    // package versions and are not release inputs.
+    if (version === pin) await step('licenses', 'pnpm', ['licenses:check'])
     await step('registry-probe', 'pnpm', ['registry:probe', '--required'])
     const probe = join(temp, 'kernel.env')
     await step('kernel-probe', 'pnpm', ['kernel:probe'], 5, { ...env, GITHUB_ENV: probe })

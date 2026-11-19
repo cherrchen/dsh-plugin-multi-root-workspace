@@ -5,7 +5,7 @@
 | 基线 | 发布 | 上游 | 基线提交 | `index.ts` blob |
 | --- | --- | --- | --- | --- |
 | `0.2.1`（legacy） | `0.2.1-rc.2` – `0.2.1-rc.5` | `dsh-v0.2.1-rc.2` | `687f282e8625c6b8d11ff58211a90524be2e4317` | `d4975b54f5` |
-| `0.2.2`（current） | `0.2.2-alpha.2` – `0.2.2-rc.3` | `dsh-v0.2.2-alpha.3` | `05b1cae8db6e674c5685101494d4eec24652424a` | `29df7771f0` |
+| `0.2.2`（current） | `0.2.2-alpha.2` – `0.2.2-rc.5` | `dsh-v0.2.2-alpha.3` | `05b1cae8db6e674c5685101494d4eec24652424a` | `29df7771f0` |
 
 两代 reviewer 的输入模型不同（`0.2.2-alpha.2` 起为固定 system + 每条保留项一条 user message、逐项 tool-schema、跨审查 schema 复用），因此不能共用一份实现。开发 pin 属于哪个基线，就只类型检查对应实现；运行中的宿主只加载自己的那份 bundle（入口按已安装发布动态加载，见 `entry.ts`）。`0.2.2-alpha.2` 的 `GenerateOptions.purpose` 仍是闭集，因此该发布不发送 `sessionId`/`purpose`，由 `autoReviewRequestIdentity` 决定。
 

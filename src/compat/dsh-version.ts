@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url'
  * the upgrade smoke passed on that exact version — a green CI run on an
  * unlisted release is evidence, not authorization (ADR-0009).
  */
-export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3'] as const
+export const SUPPORTED_DSH_RELEASES = ['0.1.5-rc.2', '0.1.6-alpha.1', '0.1.6-alpha.2', '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.4', '0.2.1-alpha.5', '0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1-rc.5', '0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5'] as const
 
 /** One release this plugin claims to support. */
 export type SupportedDshRelease = typeof SUPPORTED_DSH_RELEASES[number]
@@ -160,8 +160,15 @@ const RUNNER_ANCHOR_PACKAGE = '@deepseek-ai/dsh-sandbox-local'
  * The upstream releases whose SSH packages this plugin may load, as EXACT
  * version strings and always a suffix of {@link SUPPORTED_DSH_RELEASES} —
  * remote capability is a narrower floor than local support, never wider.
+ *
+ * `0.2.2-rc.4` and `0.2.2-rc.5` extend the floor because the four optional
+ * packages ship byte-identical `lib/` trees to `rc.3` (only the version and
+ * the inter-package pins in `package.json` change), and the core delta of
+ * both releases is additive across every seam the experiment consumes. The
+ * shared `rc.3` implementation is what runs; see the roadmap ledger for the
+ * tarball-diff evidence.
  */
-export const SUPPORTED_SSH_RELEASES = ['0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3'] as const
+export const SUPPORTED_SSH_RELEASES = ['0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5'] as const
 
 /**
  * The optional SSH peers the multi-environment experiment loads. NOT part of

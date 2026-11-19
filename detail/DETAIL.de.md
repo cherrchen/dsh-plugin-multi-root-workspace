@@ -1,0 +1,1 @@
+![Der Titel „Multi-Root-Arbeitsbereich“ über einer Sitzungskarte „API-Typen synchronisieren“, deren Einstieg „Ordner“ das Panel rechts öffnet: ein primäres und zwei zusätzliche Arbeitsverzeichnisse](preview.de.svg)
