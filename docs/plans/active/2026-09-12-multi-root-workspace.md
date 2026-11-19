@@ -2229,4 +2229,12 @@ rc.5 只有 5 个提交、433 个文件（917 行新增 / 594 行删除）；其
 
 **验证（2026-11-19，macOS arm64 / Node `24.18.0` / pnpm `11.25.0`，`0.2.2-rc.5` 开发树）：**
 
-（待补：`pnpm verify:all` 结果。）
+**验证（2026-11-19，macOS arm64 / Node `24.18.0` / pnpm `11.25.0`，`0.2.2-rc.5` 开发树）：**
+
+- `compat:check`：allowlist / 28 个 peer / 核心与 SSH 开发 pin / 安装树一致（26 个精确版本；SSH floor `0.2.2-rc.1`–`0.2.2-rc.5`；Auto Review 联合集合 11 个精确发布）；`licenses:check` 报告 `THIRD_PARTY_LICENSE` 与声明一致；`docs:check` 0 错误 0 警告；lint 0 警告 0 错误；双端 typecheck 与 `build` 通过。
+- `kernel:probe`：本会话的 Host 自身运行在沙箱内，`sandbox-exec` 的 `sandbox_apply` 被拒、无 bwrap / Landlock，因此本机无可用受限执行 runner；受限内核断言按设计跳过（与 `v0.1.23` 基线记录一致）。
+- 完整 `vitest`：**2367 通过 / 211 跳过 / 20 失败**（151 个文件：128 通过 / 10 失败 / 13 跳过）。20 个失败全部属于同一宿主环境类：Host 自身被沙箱化、共享 Registry 的本机 IPC 拒绝 sandboxed peer，第二挂载得到 `contended` 而非 `follower`（或派生 `owner-without-remote-protocol`）。这与 `v0.1.23` 基线记录的 17 个失败属于同一集合（`registry`、`registry-operation`、`registry-lease`、`registry-multiprocess`、`authority-boundaries`、`b9-review-regressions`、`skills-authority`、`skills-registry` 八个文件），另加分支自有的同类用例 `remote-exec`（2）与 `remote-personal-ops`（1）；没有本地行为、locale 或 compat 断言失败。首次运行还暴露 `locale-parity` 对新增技术文案的误判（平台名 / `Helper` / 字段占位符 / 单词技术标签被当成未翻译），现按既有 `neutral` 机制显式豁免这些键，并把 pt 的 `Link` 步骤改为 `Ligar`。
+- 冒烟与打包（0 失败）：compose **58/58**、behavior **96 通过 / 0 失败 / 8 跳过**、journey **88 通过 / 0 失败 / 2 跳过**、`pack:check` **310** 个成员、`smoke:packed` 的行为电池 **95 通过 / 0 失败 / 8 跳过**、`auto-review:fork` 通过，联合 Auto Review smoke 在 source / packed 两条车道、web / headless 两种组合与官方 bundle 前后两种顺序全部通过。跳过项均为无可用内核 runner 的受限 bash 与共享 IPC 断言。
+- 因此 `pnpm verify:all` 在本机与发版基线一样于 `pnpm test` 处以环境性失败退出；其余门禁按基线做法逐条运行并全绿。跨平台与旧 pin 矩阵留给 push 后的 CI。
+
+提交结构：合并提交 `d93eb2b`（解冲突 + 兼容合同 + zh/en 键合并 + 版本 `0.1.24-ssh.1`）、`314ad0b`（六语言 locale 与 README 翻译）、`9f152e2`（本节及 `AGENTS.md` / 迁移参考 / ADR / 计划的地板更新）、`0f9918a`（locale parity 的 neutral 集合与 pt 步骤文案）。
