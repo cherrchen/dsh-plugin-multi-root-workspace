@@ -11,7 +11,7 @@
  * trusted.
  *
  * Sync-bearing copy of upstream `ui-sidebar-files`' `search-preferences.ts`
- * at pin `0.2.2-rc.4` (upstream source unchanged since `0.2.2-rc.3`). The persistence seam is plugin-owned: this book takes a
+ * at pin `0.2.2-rc.5` (upstream source unchanged since `0.2.2-rc.3`). The persistence seam is plugin-owned: this book takes a
  * storage object directly instead of upstream's persisted client store, so no
  * upstream runtime module is imported and the same localStorage key and stored
  * format are kept. `undefined` storage keeps the book in memory.

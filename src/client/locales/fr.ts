@@ -13,7 +13,7 @@ export const fr = {
   'skills.settingsFailed': 'Impossible d’enregistrer les paramètres. Veuillez réessayer.',
   'autoReview.title': 'Auto Review multi-racines',
   'autoReview.experimental': 'Expérimental',
-  'autoReview.hint': 'Conserve le contexte multi-racines pour Auto Review et prend en charge la révision ; équivaut au même commutateur de la ligne Loader dans le gestionnaire de plugins. Désactivé par défaut ; adapté aux versions exactes de DSH de 0.2.1-rc.2 à 0.2.2-rc.4.',
+  'autoReview.hint': 'Conserve le contexte multi-racines pour Auto Review et prend en charge la révision ; équivaut au même commutateur de la ligne Loader dans le gestionnaire de plugins. Désactivé par défaut ; adapté aux versions exactes de DSH de 0.2.1-rc.2 à 0.2.2-rc.5.',
   'autoReview.loadFailed': 'Impossible de lire l’état du plugin.',
   'autoReview.restartRequired': 'La modification prendra effet après le redémarrage.',
   'autoReview.settingsFailed': 'Impossible d’enregistrer les paramètres. Veuillez réessayer.',

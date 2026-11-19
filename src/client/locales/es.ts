@@ -13,7 +13,7 @@ export const es = {
   'skills.settingsFailed': 'No se pudieron guardar los ajustes. Vuelva a intentarlo.',
   'autoReview.title': 'Auto Review multi-raíz',
   'autoReview.experimental': 'Experimental',
-  'autoReview.hint': 'Conserva el contexto de raíces adicionales para Auto Review y asume el papel de revisor; equivale al mismo interruptor de la fila Loader del gestor de plugins. Desactivado por defecto; adaptado a las versiones exactas de DSH de la 0.2.1-rc.2 a la 0.2.2-rc.4.',
+  'autoReview.hint': 'Conserva el contexto de raíces adicionales para Auto Review y asume el papel de revisor; equivale al mismo interruptor de la fila Loader del gestor de plugins. Desactivado por defecto; adaptado a las versiones exactas de DSH de la 0.2.1-rc.2 a la 0.2.2-rc.5.',
   'autoReview.loadFailed': 'No se pudo leer el estado del plugin.',
   'autoReview.restartRequired': 'El cambio se aplicará después de reiniciar.',
   'autoReview.settingsFailed': 'No se pudieron guardar los ajustes. Vuelva a intentarlo.',

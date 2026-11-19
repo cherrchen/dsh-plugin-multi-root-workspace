@@ -13,7 +13,7 @@ pnpm licenses:update
 
 ## Redistributed dependencies and bundled code
 
-### @deepseek-ai/dsh-host-open-in-app 0.2.2-rc.4
+### @deepseek-ai/dsh-host-open-in-app 0.2.2-rc.5
 
 - License: MIT
 - Source: https://github.com/deepseek-ai/deepseek-harness
@@ -43,7 +43,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### @deepseek-ai/dsh-typert-protocol 0.2.2-rc.4
+### @deepseek-ai/dsh-typert-protocol 0.2.2-rc.5
 
 - License: MIT
 - Source: https://github.com/deepseek-ai/deepseek-harness
@@ -73,7 +73,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### @deepseek-ai/dsh-util-workspace-path 0.2.2-rc.4
+### @deepseek-ai/dsh-util-workspace-path 0.2.2-rc.5
 
 - License: MIT
 - Source: https://github.com/deepseek-ai/deepseek-harness

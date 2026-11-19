@@ -13,7 +13,7 @@ export const de = {
   'skills.settingsFailed': 'Einstellungen konnten nicht gespeichert werden. Versuchen Sie es erneut.',
   'autoReview.title': 'Multi-Root Auto Review',
   'autoReview.experimental': 'Experimentell',
-  'autoReview.hint': 'Erhält den Multi-Root-Kontext für Auto Review und übernimmt den Reviewer; entspricht dem gleichnamigen Loader-Schalter in der Plugin-Verwaltung. Standardmäßig deaktiviert; angepasst an die exakten DSH-Releases von 0.2.1-rc.2 bis 0.2.2-rc.4.',
+  'autoReview.hint': 'Erhält den Multi-Root-Kontext für Auto Review und übernimmt den Reviewer; entspricht dem gleichnamigen Loader-Schalter in der Plugin-Verwaltung. Standardmäßig deaktiviert; angepasst an die exakten DSH-Releases von 0.2.1-rc.2 bis 0.2.2-rc.5.',
   'autoReview.loadFailed': 'Der Plugin-Status konnte nicht gelesen werden.',
   'autoReview.restartRequired': 'Die Änderung wird nach einem Neustart wirksam.',
   'autoReview.settingsFailed': 'Einstellungen konnten nicht gespeichert werden. Versuchen Sie es erneut.',

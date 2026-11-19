@@ -13,7 +13,7 @@ export const pt = {
   'skills.settingsFailed': 'Não foi possível salvar as configurações. Tente novamente.',
   'autoReview.title': 'Auto Review multiraiz',
   'autoReview.experimental': 'Experimental',
-  'autoReview.hint': 'Preserva o contexto multiraiz para o Auto Review e assume o revisor; equivale ao mesmo interruptor da linha Loader no gerenciador de plugins. Desativado por padrão; adaptado às versões exatas do DSH de 0.2.1-rc.2 a 0.2.2-rc.4.',
+  'autoReview.hint': 'Preserva o contexto multiraiz para o Auto Review e assume o revisor; equivale ao mesmo interruptor da linha Loader no gerenciador de plugins. Desativado por padrão; adaptado às versões exatas do DSH de 0.2.1-rc.2 a 0.2.2-rc.5.',
   'autoReview.loadFailed': 'Não foi possível ler o estado do plugin.',
   'autoReview.restartRequired': 'A alteração entra em vigor após reiniciar.',
   'autoReview.settingsFailed': 'Não foi possível salvar as configurações. Tente novamente.',
