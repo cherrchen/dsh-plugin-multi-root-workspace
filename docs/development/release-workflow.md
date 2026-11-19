@@ -66,7 +66,8 @@ node scripts/release-notes.mjs v0.1.1   # 本地预览，输出 markdown
 2. **publish**（`needs: verify`，ubuntu-latest）：
    - 检出 verify 查证的 commit，校验 tag 与 `package.json` 版本一致；
    - `pnpm install --frozen-lockfile && pnpm build`（`lib/` 不进 git，tarball 必须现构建；client 制品须在 pack 前就绪）；
-   - `node scripts/check-pack.mjs` 校验 tarball：必备文件（含 `lib/windows-runner.js`——缺它 Windows 受限多根就不存在）、每个 `exports` 目标、`cordis.patch.yml` 引用的每个模块、传递依赖的共享 chunk 全部在内（见 [client-bundle-not-in-boot-graph](../troubleshooting/client-bundle-not-in-boot-graph.md)）；
+   - `pnpm licenses:check` 校验 `THIRD_PARTY_LICENSE` 与 `package.json`、构建产物和 vendored 清单一致；
+   - `node scripts/check-pack.mjs` 校验 tarball：必备文件（含 `THIRD_PARTY_LICENSE` 与 `lib/windows-runner.js`——缺后者 Windows 受限多根就不存在）、每个 `exports` 目标、`cordis.patch.yml` 引用的每个模块、传递依赖的共享 chunk 全部在内（见 [client-bundle-not-in-boot-graph](../troubleshooting/client-bundle-not-in-boot-graph.md)）；
    - `pnpm publish --no-git-checks --provenance` 发布（`--no-git-checks` 是因为 Actions 中处于 detached HEAD）；认证走 npm trusted publishing（OIDC），`package.json` 的 `repository` 字段与 job 的 `id-token: write` 权限是它的前提；
    - 用 `gh release create` 创建 GitHub Release：正文来自 release-notes 脚本，tarball 作为 Release 资产。
 
@@ -91,6 +92,6 @@ git push origin main --follow-tags
 
 ## 验证
 
-- 发版前本地跑通与 CI 相同的完整门禁：`pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm smoke`（受本机内核方言影响时见开发流程文档的故障排查），外加 `pnpm compat:check` 与 `pnpm docs:check`。
+- 发版前本地跑通与 CI 相同的完整门禁：`pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm smoke`（受本机内核方言影响时见开发流程文档的故障排查），外加 `pnpm compat:check`、`pnpm docs:check` 与 `pnpm licenses:check`。
 - 打 tag 前确认：`package.json` 的 `version`、CHANGELOG 的新条目（中英两份）与即将打出的 tag 三者指的是同一个版本。
 - 发版完成后到 [npmjs 包页面](https://www.npmjs.com/package/@dsh-electron/dsh-plugin-multi-root-workspace) 与 GitHub Releases 页面确认版本、附件与 Release Note。

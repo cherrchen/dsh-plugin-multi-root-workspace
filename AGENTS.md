@@ -71,20 +71,22 @@ Each important concept should have one canonical location.
 
 Other documents should link to that source instead of copying its contents.
 
-## Bilingual Documentation
+## Bilingual and multilingual documentation
 
 Chinese is the primary documentation language.
 
-For documents that require bilingual maintenance:
+Most documents that require bilingual maintenance follow:
 
 - `<name>.md` is the canonical Chinese version.
 - `<name>.en.md` is the corresponding English version.
 
 The two files are treated as one logical document: when you update one, check whether the other needs to be synchronized, and vice versa. If the two versions ever conflict, the Chinese version wins — fix the English version. Do not produce low-quality machine translation; the English version should read naturally and accurately express the meaning of the Chinese version.
 
-All README documents and formal documents under `.agent/note/` must follow this convention. Do not create empty `.en.md` files for other document types unless bilingual maintenance is actually needed.
+The repository root README is the exception: it is maintained in the eight languages the DSH client ships — Chinese, English, Japanese, Spanish, French, German, Russian, and Brazilian Portuguese. `README.md` stays the canonical Chinese edition, and the other seven are `README.en.md`, `README.ja.md`, `README.es.md`, `README.fr.md`, `README.de.md`, `README.ru.md`, and `README.pt.md`. All eight are one logical document: when one changes, synchronize the other seven, keep the same heading and fenced-code-block structure, and cross-link all eight in the language selector. Chinese remains authoritative; if a translation conflicts, fix the translation. Non-Chinese editions link to English documentation when that language has no translated counterpart.
 
-The changelog is maintained as a bilingual pair too (`CHANGELOG.md` / `CHANGELOG.en.md`): it is a user-facing document that ships inside the npm tarball alongside both READMEs, so an English reader must not hit a Chinese-only release history. Other types — ADRs, plans, reference, and troubleshooting entries — stay Chinese-only unless a real need appears.
+Other README documents and formal documents under `.agent/note/` keep the Chinese/English pair. Do not create empty `.en.md` or other language files for document types unless multilingual maintenance is actually needed.
+
+The changelog is maintained as a bilingual pair too (`CHANGELOG.md` / `CHANGELOG.en.md`): it is a user-facing document that ships inside the npm tarball alongside the READMEs, so an English reader must not hit a Chinese-only release history. Other types — ADRs, plans, reference, and troubleshooting entries — stay Chinese-only unless a real need appears.
 
 ## Current Project State
 

@@ -1,0 +1,30 @@
+{
+  "vendored": [
+    {
+      "name": "DeepSeek Harness",
+      "package": "@deepseek-ai/dsh",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": "MIT",
+      "licenseFile": "src/auto-review/LICENSE",
+      "packages": [
+        "@deepseek-ai/dsh-experimental-auto-review",
+        "@deepseek-ai/dsh-client-ui-sidebar-files",
+        "@deepseek-ai/dsh-client-ui-open-in-app",
+        "@deepseek-ai/dsh-fs-sandbox"
+      ],
+      "releases": "0.2.1-rc.2 through 0.2.1-rc.5, and 0.2.2-alpha.2 through 0.2.2-rc.4",
+      "paths": [
+        "src/auto-review",
+        "src/client/files-tree",
+        "src/client/open-in-app",
+        "src/containment.ts",
+        "src/compat/open-in-app-device.ts"
+      ],
+      "provenance": [
+        "src/auto-review/FORK.md",
+        "src/client/files-tree/FORK.md",
+        "src/client/open-in-app/FORK.md"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Espaço de trabalho multi-raiz",
+    "description": "Adiciona diretórios de trabalho secundários a uma sessão: registre uma pasta uma vez e o Agent passa a lê-la e gravá-la ao lado do diretório principal, dentro de um mesmo escopo de sandbox — incluindo ferramentas de arquivo, shells restritos e terminais.",
+    "detail": "detail/DETAIL.pt.md"
+  }
+}

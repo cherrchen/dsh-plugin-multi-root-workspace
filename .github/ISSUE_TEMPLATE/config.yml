@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/security/advisories/new
+    about: Report vulnerabilities privately. Do not open a public issue.
+  - name: Documentation and troubleshooting
+    url: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/tree/main/docs/troubleshooting
+    about: Check known issues, diagnostics, and verified solutions first.

@@ -1,0 +1,1 @@
+![Le titre « Espace de travail multi-racines » au-dessus d’une carte de session « Synchroniser les types d’API », dont l’entrée « Dossiers » ouvre le panneau de droite : un répertoire de travail principal et deux répertoires secondaires](preview.fr.svg)

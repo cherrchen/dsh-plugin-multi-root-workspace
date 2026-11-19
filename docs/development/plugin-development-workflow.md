@@ -36,6 +36,8 @@ pnpm compat:check       # DSH 兼容性契约：allowlist / peerDependencies / �
 pnpm lint               # oxlint（host 与 client 半部都扫）
 pnpm typecheck          # tsc -p tsconfig.host.json 与 -p tsconfig.client.json 各一次
 pnpm build              # tsc 出两面 lib/types/**/*.d.ts + tsdown 出 lib/*.js（host ESM）与 lib/client.js（浏览器闭包工厂）
+pnpm licenses:check     # 第三方许可清单与 package.json、lib 制品和 vendored 清单一致（需要先 build）
+pnpm licenses:update    # 重新生成 THIRD_PARTY_LICENSE（需要先 build）
 pnpm test               # vitest run：单测 + 校验规则 + 注册表（含并发/替换/恢复/跨进程 lease/reclassify/上限）+ 命令/通道 + 空根差分 parity + 方言 grant 矩阵（含 rw/ro）+ per-tool cap（真实 tools/execute waterfall + 方言实跑）+ provider 冲突 + 提示词快照 + client 制品/面板 + 词典 parity + patch 不变量
 pnpm bench:roots        # 0–64 根的分类耗时与各方言 argv/profile 字节测量（不进 CI 门禁；输出参考 docs/reference/bench-root-scale-darwin.json）
 pnpm kernel:probe       # 本机是否真能受限执行（Windows 上用真实上游 runner 双向验证 windows-acl）；能跑的方言写入 DSH_PROBE_VERIFIED_DIALECTS，使其断言必须真跑
@@ -45,7 +47,7 @@ pnpm smoke:journey      # 跨两个 git repo 的 web/headless 双 profile 旅程
 pnpm smoke              # compose + behavior + journey
 pnpm pack:check         # 打包产物门禁：tarball 成员（含 lib/windows-runner.js）、exports 目标、patch 引用模块与传递 chunk
 pnpm smoke:packed       # tarball 经 dsh plugin add 装进隔离 $DSH_HOME，从安装副本跑完整 behavior battery（需要先 build）
-pnpm verify:all         # lint → typecheck → build → kernel:probe → test → smoke → pack:check → smoke:packed
+pnpm verify:all         # lint → typecheck → build → licenses:check → kernel:probe → test → smoke → pack:check → smoke:packed
 pnpm docs:check         # 文档结构检查
 pnpm soak:tui-registry --help # 真实 TUI / 独立 Host 长期观测；手工验收，不加入普通 CI
 ```
@@ -140,8 +142,26 @@ client 测试分两层：`tests/client-bundle.spec.ts` 断言**制品字节**（
 
 ### 4.7 打包产物验证（`pack:check` / `smoke:packed`）
 
-- `pnpm pack:check`（`scripts/check-pack.mjs`）：`pnpm pack` 到临时目录后用自带的 tar 解析器（ustar + GNU `L` + pax，不依赖 GNU tar，Windows 可用）列出全部成员，并断言——必备文件（`package.json`、`cordis.patch.yml`、双语 README/CHANGELOG、LICENSE、`lib/index.js` / `client.js` / `windows-runner.js`）、`exports` 声明的每个 `default` / `types` 目标、`cordis.patch.yml` 每行可解析的包内模块、以及 packed `lib/*.js` 相对 `import`/`from`/`import()` 闭包里的每个共享 chunk 都在包内；外加一条 runner 专项——`lib/windows-runner.js` 及其传递 chunk 的每个非相对 specifier 必须是 `node:` 内置（它是独立进程，宿主的插件包解析不适用，见[账本缺陷 #7](../plans/active/2026-09-12-multi-root-workspace.md)）。当前 tarball 为 71 个成员。
+- `pnpm pack:check`（`scripts/check-pack.mjs`）：`pnpm pack` 到临时目录后用自带的 tar 解析器（ustar + GNU `L` + pax，不依赖 GNU tar，Windows 可用）列出全部成员，并断言——必备文件（`package.json`、`cordis.patch.yml`、双语 README/CHANGELOG、`LICENSE`、`THIRD_PARTY_LICENSE`、`lib/index.js` / `client.js` / `windows-runner.js`）、`exports` 声明的每个 `default` / `types` 目标、`cordis.patch.yml` 每行可解析的包内模块、以及 packed `lib/*.js` 相对 `import`/`from`/`import()` 闭包里的每个共享 chunk 都在包内；外加一条 runner 专项——`lib/windows-runner.js` 及其传递 chunk 的每个非相对 specifier 必须是 `node:` 内置（它是独立进程，宿主的插件包解析不适用，见[账本缺陷 #7](../plans/active/2026-09-12-multi-root-workspace.md)）。当前 tarball 为 266 个成员。
 - `pnpm smoke:packed`（`scripts/smoke-packed.mjs`）：先 `pack:check` 同款打包，再让 `smoke:behavior` 在仓库**之外**的 scratch `$DSH_HOME` 里以 `DSH_SMOKE_PLUGIN_SOURCE=<tgz>` 经真实 `dsh plugin --profile <p> add <tgz>` 安装，断言被加载的插件解析在 checkout 之外（`lib/windows-runner.js` 在 Windows 上据此做真实受限 pwsh 写）。tarball 的首次 `add` 必须直接退出 0，且输出里不能出现 koffi 的构建授权（`Ignored build scripts: koffi@...` 或待决的 `koffi:` 行）——koffi 已改为宿主提供的可选 peer；运行时或 profile 模板自身的其他 ignored build script 只告警、不判失败。git 来源的恢复路径仍保留，见[故障排查条目](../troubleshooting/install-stops-at-build-approval.md)。
+
+### 4.8 第三方许可清单（`licenses:check` / `licenses:update`）
+
+`THIRD_PARTY_LICENSE` 是发布包的一部分，也是生成文件。`scripts/generate-third-party-licenses.mjs` 从三处生成它，避免清单与产物漂移：
+
+- `package.json` 的 `dependencies`——随包安装的运行时依赖；
+- 构建后的 `lib/*.js.map`（`lib/*.js` 中的 `// node_modules/...` 注释兜底）——真正内联进制品的第三方代码，包括只为构建而声明的 devDependency；
+- `scripts/third-party-sources.json`——没有模块路径可证明的上游源码 fork / 逐字节复刻，当前覆盖 `src/auto-review`、`src/client/files-tree`、`src/client/open-in-app`、`src/containment.ts` 与 `src/compat/open-in-app-device.ts`。
+
+`peerDependencies`（`@deepseek-ai/*`、`koffi`）由宿主安装，不随本包分发，因此不进入清单；生成文件里只保留一条说明。许可证原文从包目录的 `LICENSE` / `LICENSE.md` / `LICENSE.txt` / `COPYING` 读取，缺失时直接失败，不静默跳过。
+
+```sh
+pnpm build
+pnpm licenses:update    # 重新生成 THIRD_PARTY_LICENSE
+pnpm licenses:check     # CI 与发版门禁：文件缺失或过期即失败
+```
+
+`pnpm licenses:check` 需要先 `pnpm build`；CI 只在开发 pin 的车道运行它，因为发布 tarball 只由该车道构建，其他受支持版本的 DSH 包版本不同。新增依赖、内联第三方代码或新增上游 fork 时，同一变更更新 `THIRD_PARTY_LICENSE`，不要手改生成文件。`pack:check` 与 `scripts/check-pack.mjs` 同时要求 tarball 包含该文件。
 
 ## 5. 安装到真实运行时
 
@@ -201,7 +221,7 @@ dsh --profile web --dump-config     # 应看到两行 disabled + 十行 insert
 
 - `releases` 通过 [list-dsh-releases.mjs](../../scripts/list-dsh-releases.mjs) 读取精确契约，按 Node 版本分桶，再把每个桶切成最多四个版本一组。当前 25 个版本在每个启用镜像形成七组（Node 22 五组、Node 24 两组）。该 job 也在 frozen 开发树校验契约，并各跑一次 lint 和 docs:check。
 - 每组从同一个 Git commit 解包。源码目录与原 checkout 同级，父目录链禁止有 `node_modules`。每个版本独享 manifest、lockfile、依赖树、`lib/`、探针文件、DSH scratch 与日志。依赖下载共享 pnpm 的内容寻址缓存。源码及其中的内核拒绝夹具位于 `/tmp` 和本机 temp grant 之外；DSH scratch 在平台临时区中分配，保留各方言对原生临时目录的语义。开发 pin 走 frozen lockfile，其余复用 `upgrade-dsh.mjs`，仅在该副本内关闭 release-age 等待。
-- `ubuntu-latest` 对每版跑 `compat:check`、双端 typecheck、build、完整 Vitest 和冒烟，保留原生 Landlock。每组并行最多两版，各用最多两个 Vitest worker。其他镜像按版本串行，各用最多四个 worker；每版做精确契约检查、构建和原生套件。Auto Review 联合合同的每个发布都是独立车道：该版本按自身基线做实现类型检查、完整单测与差分门禁（Ubuntu 完整镜像），并在每个启用镜像上执行联合冒烟；其他版本照常显式跳过并退出 0。
+- `ubuntu-latest` 对每版跑 `compat:check`、双端 typecheck、build、完整 Vitest 和冒烟，保留原生 Landlock；开发 pin 版另跑 `licenses:check`（发布 tarball 只由它构建）。每组并行最多两版，各用最多两个 Vitest worker。其他镜像按版本串行，各用最多四个 worker；每版做精确契约检查、构建和原生套件。Auto Review 联合合同的每个发布都是独立车道：该版本按自身基线做实现类型检查、完整单测与差分门禁（Ubuntu 完整镜像），并在每个启用镜像上执行联合冒烟；其他版本照常显式跳过并退出 0。
 - [Ubuntu 独占套件清单](../../scripts/ci/ubuntu-only.json) 记录从其他镜像迁移的 Vitest 文件。客户端、RPC 和合同、locale 与快照、纯方言 argv、指令与 OPS 活动归属、恢复调度器、打包元数据及工作流等检查集中在 Ubuntu。含平台断言的混合文件整组保留，包括 Registry/IPC/lease 和跨进程接管、实际内核执行、Windows ACL / PowerShell / ConPTY、LSP、worktree Git 和路径边界。所有镜像继续运行真实安装的 `smoke:compose`、`smoke:behavior`、`smoke:journey`、`pack:check` 与 `smoke:packed`。
 - 每个版本先运行强制 Registry 认证探针和内核探针，再启动测试。Linux 22.04 提供 bwrap，macOS 提供 Seatbelt，Windows 探针用真实上游 ACL runner 验证允许写和兄弟目录拒写。探针把实跑方言写到该版本的私有文件，由该版本后续命令读取为 `DSH_PROBE_VERIFIED_DIALECTS`。探针证明可用的方言必须实跑，其他按原有能力判断和 skip 原因处理。`DSH_REQUIRE_KERNEL_RUNNER=1` 仍可在本地强制要求方言。
 - 一个版本失败后继续本组其余版本。摘要按镜像和精确版本列出耗时、结论和探针方言。每组上传 `ci-group-<image>-<group>`，每版目录内含阶段日志、Vitest 用例状态和 `context.skip(note)` 原因，以及 `result.json`。末尾 `gate` 要求两个上游 job 成功，并逐项核对计划中每个镜像 × 精确版本的同 SHA 成功记录；缺失、重复、失败或取消都阻断。发布查证见[发版流程](./release-workflow.md)。

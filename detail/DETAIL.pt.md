@@ -1,0 +1,1 @@
+![O título «Espaço de trabalho multi-raiz» acima de um cartão de sessão «Sincronizar tipos de API», cuja entrada «Pastas» abre o painel à direita: um diretório de trabalho principal e dois secundários](preview.pt.svg)

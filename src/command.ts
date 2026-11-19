@@ -22,7 +22,8 @@
  * providers.
  *
  * The command's own text is English: a host-side command handler has no active
- * locale to consult (the browser owns locale state). The panel is bilingual.
+ * locale to consult (the browser owns locale state). The panel follows the
+ * interface language.
  * That split is recorded in the M3 plan and the requirements as a known limit.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/command

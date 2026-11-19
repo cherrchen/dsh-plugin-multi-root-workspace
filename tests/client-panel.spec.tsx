@@ -282,11 +282,11 @@ describe('the client entry', () => {
     expect(client.inject).toEqual(['slots', 'locale', 'connection'])
   })
 
-  it('registers its dictionaries for both languages under its own namespace', () => {
+  it('registers its dictionaries for every shipped language under its own namespace', () => {
     const harness = mount()
     expect(NS).toBe('multiRootWorkspace')
     expect(harness.dictionaries[0]?.ns).toBe(NS)
-    expect(Object.keys(harness.dictionaries[0]?.dicts ?? {}).sort()).toEqual(['en', 'zh'])
+    expect(Object.keys(harness.dictionaries[0]?.dicts ?? {}).sort()).toEqual(['de', 'en', 'es', 'fr', 'ja', 'pt', 'ru', 'zh'])
   })
 
   it('registers into the sidebar footer action with a localized label thunk', () => {
@@ -1292,12 +1292,14 @@ describe('the footer-owned dialog and external opens', () => {
 })
 
 describe('the panel copy', () => {
-  it('keeps the shipped Chinese copy in the source of truth for the bundle', () => {
+  it('keeps every shipped copy in the source of truth for the bundle', () => {
     // The dictionaries live in the host-visible source tree so both the spec and
-    // the bundle read one definition.
-    const source = readFileSync(join(REPO_ROOT, 'src/client/locales.ts'), 'utf8')
-    expect(source).toContain(zh['panel.title'])
-    expect(source).toContain(en['panel.title'])
+    // the bundle read one definition; one module per language keeps a
+    // translation reviewable on its own.
+    const zhSource = readFileSync(join(REPO_ROOT, 'src/client/locales/zh.ts'), 'utf8')
+    const enSource = readFileSync(join(REPO_ROOT, 'src/client/locales/en.ts'), 'utf8')
+    expect(zhSource).toContain(zh['panel.title'])
+    expect(enSource).toContain(en['panel.title'])
     expect(Object.keys(zh).length).toBeGreaterThan(20)
   })
 })
