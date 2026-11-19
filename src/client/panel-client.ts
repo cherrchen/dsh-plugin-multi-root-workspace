@@ -90,6 +90,9 @@ const DETAIL_CODES = new Set([
   'host-identity-unverifiable',
   'invalid-manifest',
   'workspace-invalid',
+  // The SFTP picker surfaces the server's/transport's own reason (not found,
+  // permission denied, timeout); the fixed copy cannot name which one.
+  'remote-path-listing-failed',
 ])
 
 export function errorHasDetail(code: string): boolean {

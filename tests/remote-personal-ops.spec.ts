@@ -197,6 +197,34 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     if (change === 'name') expect(readFileSync(join(credentialRoot, 'ssh_config'), 'utf8')).toContain('/keys/112233445566')
   })
 
+  it('reuses the recorded host key for identity-stable updates and still requires a token otherwise', async () => {
+    const { registry, personalPath } = world()
+    const original: PersonalEnvironment = { ...MANAGED, hostKey: FP_OK }
+    writeConfig(personalPath, CONFIG([original]))
+    const draft = {
+      environmentId: original.environmentId,
+      platform: 'linux' as const,
+      endpoint: { ...original.endpoint },
+      credential: { kind: 'managed' as const, credentialId: 'aabbccddeeff' },
+      workspace: '/srv/other',
+    }
+    const updated = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, environment: draft, fingerprint: FP_OK }) as { environments: PersonalEnvironment[] }
+    expect(updated.environments[0]!.workspace).toBe('/srv/other')
+    expect(updated.environments[0]!.helper).not.toBeNull()
+
+    // A changed target still needs a fresh scan token even with the recorded fingerprint.
+    await expect(handlePersonalEndpoint(undefined as never as Context, registry, '/w',
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 1,
+        environment: { ...draft, endpoint: { ...draft.endpoint, hostname: 'other.internal' } }, fingerprint: FP_OK }))
+      .rejects.toMatchObject({ code: 'host-key-token-required' })
+
+    // A fingerprint that is not the recorded one is not a token substitute.
+    await expect(handlePersonalEndpoint(undefined as never as Context, registry, '/w',
+      { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 1, environment: draft, fingerprint: `SHA256:${'C'.repeat(43)}` }))
+      .rejects.toMatchObject({ code: 'host-key-token-required' })
+  })
+
   it('R5: saving over a changed host/account/credential drops the stored helper', async () => {
     const { registry, personalPath } = world()
     writeConfig(personalPath, CONFIG())

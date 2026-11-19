@@ -16,11 +16,12 @@ import {
 } from '../src/remote/personal/config.ts'
 import { CredentialError, CredentialStore, defaultExec } from '../src/remote/personal/credentials.ts'
 import { HostKeyScans } from '../src/remote/personal/operations.ts'
-import { link, linkStatus, renderHostBlock, renderSshConfig } from '../src/remote/personal/ssh-files.ts'
+import { link, linkStatus, parseSshConfigAliases, renderHostBlock, renderSshConfig } from '../src/remote/personal/ssh-files.ts'
+import { directoryListingOf } from '../src/remote/personal/remote-paths.ts'
 import { parseSshConfig } from '../src/remote/ssh-environment.ts'
 import { installRemoteSettings, readRemoteSettingsValue } from '../src/compat/remote-settings.ts'
 import { parseRemotesView } from '../src/remote/panel-contract.ts'
-import { parseSshCall, SSH_ENDPOINTS } from '../src/remote/personal-contract.ts'
+import { parseSshAnswer, parseSshCall, SSH_ENDPOINTS } from '../src/remote/personal-contract.ts'
 
 const fixture = { dirs: [] as string[] }
 const tmp = (): string => {
@@ -360,6 +361,59 @@ describe.skipIf(process.platform === 'win32')('credential store', () => {
     expect(thrown).toBeInstanceOf(CredentialError)
     expect((thrown as CredentialError).code).toBe('credential-import-failed')
     expect((thrown as Error).message).not.toContain(passphrase)
+  })
+})
+
+describe('personal add-flow read helpers', () => {
+  it('lists literal Host aliases and skips wildcard or negated patterns', () => {
+    const aliases = parseSshConfigAliases([
+      '# comment',
+      'Host prod',
+      '  HostName prod.internal',
+      'Host build staging',
+      '  User ci',
+      'Host *.internal !blocked',
+      'Host *',
+      'Host prod',
+    ].join('\n'))
+    expect(aliases).toEqual(['build', 'prod', 'staging'])
+  })
+
+  it('returns only sorted child directories with a canonical parent', () => {
+    const entry = (name: string, longname: string, permissions?: number) => ({
+      name, longname, attrs: { flags: 4, ...(permissions === undefined ? {} : { permissions }) },
+    })
+    const listing = directoryListingOf('/srv', [
+      entry('zeta', 'drwxr-xr-x', 0o040755),
+      entry('alpha', 'drwxr-xr-x', 0o040755),
+      entry('file.txt', '-rw-r--r--', 0o100644),
+      entry('.', 'drwxr-xr-x', 0o040755),
+      entry('..', 'drwxr-xr-x', 0o040755),
+      entry('opaque-dir', 'drwxr-xr-x'),
+    ])
+    expect(listing).toEqual({
+      path: '/srv',
+      parent: '/',
+      entries: [
+        { name: 'alpha', path: '/srv/alpha' },
+        { name: 'opaque-dir', path: '/srv/opaque-dir' },
+        { name: 'zeta', path: '/srv/zeta' },
+      ],
+    })
+    expect(directoryListingOf('/', [])).toEqual({ path: '/', parent: '/', entries: [] })
+  })
+
+  it('accepts the two read-only endpoint request and answer shapes', () => {
+    expect(SSH_ENDPOINTS).toContain('sshConfigAliases')
+    expect(SSH_ENDPOINTS).toContain('sshListDirectories')
+    expect(parseSshCall('sshConfigAliases', { sessionId: 'session-1' })).toMatchObject({ ok: true })
+    expect(parseSshCall('sshListDirectories', { sessionId: 'session-1', environmentId: 'dev-box', path: '/srv' })).toMatchObject({ ok: true })
+    expect(parseSshCall('sshListDirectories', { sessionId: 'session-1', environmentId: 'dev-box', extra: true })).toMatchObject({ ok: false })
+    expect(parseSshAnswer('sshConfigAliases', { aliases: ['prod.host'] })).toEqual({ ok: true, value: { aliases: ['prod.host'] } })
+    expect(parseSshAnswer('sshListDirectories', {
+      path: '/srv', parent: '/', entries: [{ name: 'app', path: '/srv/app' }],
+    })).toMatchObject({ ok: true })
+    expect(parseSshAnswer('sshListDirectories', { path: '/srv' })).toMatchObject({ ok: false })
   })
 })
 
