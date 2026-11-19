@@ -354,7 +354,7 @@ export const pt = {
   'ssh.ready.label': 'Cadeia de prontidão',
   'ssh.ready.done': 'Pronto — registre um vínculo',
   'ssh.step.helper': 'Helper',
-  'ssh.step.link': 'Link',
+  'ssh.step.link': 'Ligar',
   'ssh.step.binding': 'Vínculo',
   'error.remote-unregistered': 'Este endpoint remoto não está registrado.',
   'error.remote-withheld': 'A implantação mudou; registre este endpoint remoto de novo.',

@@ -78,10 +78,13 @@ describe('panel dictionaries', () => {
 
   it('does not leave a language on the English copy', () => {
     // A handful of entries are language-neutral by construction: the access
-    // caption is a pure format string, "Experimental" is the ordinary Spanish
-    // and Portuguese word, and the pinned permission/worktree tokens
-    // (`Full-access`, `Main checkout`) stay verbatim on purpose. Everything
-    // else matching English means the translation never happened.
+    // caption and the field marker are pure format strings, "Experimental" is
+    // the ordinary Spanish and Portuguese word, the pinned permission/worktree
+    // tokens (`Full-access`, `Main checkout`) stay verbatim on purpose, and the
+    // remote/SSH surface contributes platform names (`Linux`, `macOS`), the
+    // `Helper` step, and one-word technical labels that are spelled the same in
+    // the language that chose them (`Team`, `Mode`, `Port`, `Hostname`).
+    // Everything else matching English means the translation never happened.
     const neutral = new Set([
       'panel.accessEffective',
       'autoReview.experimental',
@@ -89,6 +92,15 @@ describe('panel dictionaries', () => {
       'worktree.experimental',
       'effective.full-access',
       'worktree.kind.main-checkout',
+      'remote.experimental',
+      'remote.mode.team',
+      'ssh.errorField',
+      'ssh.field.hostname',
+      'ssh.field.port',
+      'ssh.platform.linux',
+      'ssh.platform.darwin',
+      'ssh.step.helper',
+      'ssh.tab.mode',
     ])
     const keys = Object.keys(en) as (keyof typeof en)[]
     for (const locale of LOCALES.filter((id): id is Exclude<(typeof LOCALES)[number], 'en'> => id !== 'en')) {
