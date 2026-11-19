@@ -7,7 +7,10 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const SCRIPT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// `DSH_DOCS_CHECK_ROOT` is a test seam for `tests/check-docs.spec.ts`; normal
+// runs inspect the checkout this script lives in.
+const REPO_ROOT = path.resolve(process.env.DSH_DOCS_CHECK_ROOT ?? SCRIPT_ROOT);
 
 const IGNORED_DIRECTORIES = new Set([
   ".git",
@@ -27,6 +30,15 @@ const AGENT_NOTE_DIR = path.join(REPO_ROOT, ".agent", "note");
 const PLANS_ACTIVE_DIR = path.join(REPO_ROOT, "docs", "plans", "active");
 const PLANS_COMPLETED_DIR = path.join(REPO_ROOT, "docs", "plans", "completed");
 const DECISIONS_DIR = path.join(REPO_ROOT, "docs", "decisions");
+
+// The root README ships in every language the DSH client offers. `README.md`
+// stays the canonical Chinese edition; every other language is a
+// `README.<locale>.md` sibling named after the client locale id. Other
+// directories keep the usual Chinese/English pair.
+const ROOT_README_LANGUAGES = ["zh", "en", "ja", "es", "fr", "de", "ru", "pt"];
+const ROOT_README_FILES = ROOT_README_LANGUAGES.map((language) =>
+  language === "zh" ? "README.md" : `README.${language}.md`
+);
 
 // CHECK 6: documentation that intentionally discusses path formats (e.g. the
 // Documentation Skill showing what NOT to write) can be exempted here instead
@@ -68,8 +80,16 @@ function issue(level, check, message, file, line) {
 
 // CHECK 1
 function checkReadmePairs() {
-  const result = newResult("README bilingual pairs");
+  const result = newResult("README language sets");
+  for (const name of ROOT_README_FILES) {
+    if (!existsSync(path.join(REPO_ROOT, name))) {
+      result.issues.push(
+        issue("error", result.name, `Missing root README variant: ${name}`, name)
+      );
+    }
+  }
   for (const rel of RELATIVE_MARKDOWN_FILES) {
+    if (path.dirname(rel) === ".") continue;
     const base = path.basename(rel);
     const dir = path.dirname(path.join(REPO_ROOT, rel));
     if (base === "README.md" && !existsSync(path.join(dir, "README.en.md"))) {
@@ -120,6 +140,19 @@ function checkReadmeNavigation() {
   const result = newResult("README language navigation");
   for (const rel of RELATIVE_MARKDOWN_FILES) {
     const base = path.basename(rel);
+    const isRoot = path.dirname(rel) === ".";
+    if (isRoot && ROOT_README_FILES.includes(base)) {
+      const text = readFileSync(path.join(REPO_ROOT, rel), "utf8");
+      for (const counterpart of ROOT_README_FILES) {
+        if (counterpart === base) continue;
+        if (!text.includes(counterpart)) {
+          result.issues.push(
+            issue("error", result.name, `Root README does not link to ${counterpart}`, rel)
+          );
+        }
+      }
+      continue;
+    }
     if (base !== "README.md" && base !== "README.en.md") continue;
     const text = readFileSync(path.join(REPO_ROOT, rel), "utf8");
     if (base === "README.md" && !text.includes("README.en.md")) {
@@ -271,6 +304,64 @@ function checkEmptyDocuments() {
   return result;
 }
 
+// CHECK 11
+function readmeStructure(text) {
+  const headings = [];
+  const fences = [];
+  let openFence = null;
+  for (const line of text.split("\n")) {
+    const fence = /^ {0,3}(```|~~~)\s*([^\s`]*)/.exec(line);
+    if (fence !== null) {
+      if (openFence === null) {
+        openFence = fence[1];
+        fences.push(fence[2] ?? "");
+      } else if (fence[1] === openFence) {
+        openFence = null;
+      }
+      continue;
+    }
+    if (openFence !== null) continue;
+    const heading = /^(#{1,6})\s+\S/.exec(line);
+    if (heading !== null) headings.push(heading[1].length);
+  }
+  return { headings: headings.join(","), fences: fences.join(",") };
+}
+
+function checkRootReadmeStructure() {
+  const result = newResult("Root README structural parity");
+  const canonical = ROOT_README_FILES[0];
+  const canonicalPath = path.join(REPO_ROOT, canonical);
+  if (!existsSync(canonicalPath)) return result;
+  const reference = readmeStructure(readFileSync(canonicalPath, "utf8"));
+  for (const name of ROOT_README_FILES) {
+    if (name === canonical) continue;
+    const candidatePath = path.join(REPO_ROOT, name);
+    if (!existsSync(candidatePath)) continue;
+    const candidate = readmeStructure(readFileSync(candidatePath, "utf8"));
+    if (candidate.headings !== reference.headings) {
+      result.issues.push(
+        issue(
+          "error",
+          result.name,
+          `Heading levels differ from ${canonical}: ${candidate.headings} != ${reference.headings}`,
+          name
+        )
+      );
+    }
+    if (candidate.fences !== reference.fences) {
+      result.issues.push(
+        issue(
+          "error",
+          result.name,
+          `Fenced code-block languages differ from ${canonical}: ${candidate.fences} != ${reference.fences}`,
+          name
+        )
+      );
+    }
+  }
+  return result;
+}
+
 const CHECKS = [
   checkReadmePairs,
   checkAgentNotePairs,
@@ -282,6 +373,7 @@ const CHECKS = [
   checkPlanConflicts,
   checkAdrNames,
   checkEmptyDocuments,
+  checkRootReadmeStructure,
 ];
 
 function main() {

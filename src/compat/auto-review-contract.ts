@@ -25,11 +25,11 @@ export const AUTO_REVIEW_LEGACY_RELEASES = ['0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-r
 /**
  * Releases served by the current fork of the frozen `0.2.2-alpha.3` reviewer
  * source generation. The reviewer input model was rewritten at
- * `0.2.2-alpha.2`; `alpha.3` to `rc.3` share its source, and the one
+ * `0.2.2-alpha.2`; `alpha.3` to `rc.5` share its source, and the one
  * behavioral difference (`alpha.2` predates the request-purpose map) is
  * selected by {@link autoReviewRequestIdentity}.
  */
-export const AUTO_REVIEW_CURRENT_RELEASES = ['0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3'] as const
+export const AUTO_REVIEW_CURRENT_RELEASES = ['0.2.2-alpha.2', '0.2.2-alpha.3', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.4', '0.2.2-rc.5'] as const
 
 /**
  * One frozen upstream reviewer source generation. Each baseline keeps one
@@ -42,7 +42,7 @@ export type AutoReviewBaseline = '0.2.1' | '0.2.2'
 export const AUTO_REVIEW_LEGACY_COMPILE_PIN = '0.2.1-rc.5'
 
 /** The release whose declarations typecheck the `0.2.2` fork implementation. */
-export const AUTO_REVIEW_CURRENT_COMPILE_PIN = '0.2.2-rc.3'
+export const AUTO_REVIEW_CURRENT_COMPILE_PIN = '0.2.2-rc.5'
 
 /** Every release the optional integration is jointly verified against, in order. */
 export const AUTO_REVIEW_RELEASES = [...AUTO_REVIEW_LEGACY_RELEASES, ...AUTO_REVIEW_CURRENT_RELEASES] as const

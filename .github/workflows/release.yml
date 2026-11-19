@@ -76,6 +76,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build the package
         run: pnpm build
+      - name: Verify the third-party license inventory
+        run: pnpm licenses:check
 
       - name: Pack and verify the tarball contents
         run: |

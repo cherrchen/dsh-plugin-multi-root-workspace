@@ -62,9 +62,9 @@
 
 创建新文档前，必须先检查是否已有文档拥有该信息。
 
-## 4. 中英文文档规则
+## 4. 中英文与多语言文档规则
 
-项目采用 **中文主文档 + 英文副文档**：
+项目默认采用 **中文主文档 + 英文副文档**：
 
 ```text
 foo.md       canonical Chinese document
@@ -80,10 +80,31 @@ foo.en.md    English counterpart
 5. 中英文冲突时，以中文版本为准；
 6. 发现冲突时应同步修复英文版本。
 
+**根目录 README 例外**：与 DSH 内置界面语言一致，根目录 README 维护 8 种语言：
+
+```text
+README.md       中文（canonical，主版本）
+README.en.md    English
+README.ja.md    日本語
+README.es.md    Español
+README.fr.md    Français
+README.de.md    Deutsch
+README.ru.md    Русский
+README.pt.md    Português（巴西葡萄牙语）
+```
+
+这 8 份视为同一个逻辑文档：修改任意一份时必须同步其余七份；所有版本保持相同的标题层级与围栏代码块结构；每种语言都必须与其余七种互相导航。中文版本是权威版本，译文冲突时修复译文，不得反向修改中文以迁就译文。非中文版本在没有对应译文时链接到英文文档；中文版本链接中文文档。不要为其他文档类型创建空的或纯占位的语言文件。
+
+当前必须多语言的文档：
+
+```text
+根目录 README（8 种语言）
+```
+
 当前必须双语的文档：
 
 ```text
-所有 README
+其他目录下的所有 README
 .agent/note/ 下的正式 Markdown
 ```
 
@@ -103,6 +124,16 @@ English: [README.en.md](./README.en.md)
 
 ```markdown
 中文：[README.md](./README.md)
+```
+
+根目录 README 不走这条两两配对规则，而是按 §4 的 8 语言规则维护，语言选择器必须列出全部 8 种语言（当前语言显示为纯文本，其余为链接），例如：
+
+```markdown
+中文 | [English](./README.en.md) | [日本語](./README.ja.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Deutsch](./README.de.md) | [Русский](./README.ru.md) | [Português](./README.pt.md)
+```
+
+```markdown
+[中文](./README.md) | English | [日本語](./README.ja.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Deutsch](./README.de.md) | [Русский](./README.ru.md) | [Português](./README.pt.md)
 ```
 
 ## 6. Current State 与 Future State
@@ -142,7 +173,7 @@ plugin-system.md
 release-process.md
 ```
 
-特殊文件遵循自身约定：`README.md`、`README.en.md`、`AGENTS.md`、`ADR-0001-short-title.md`、`SKILL.md`。
+特殊文件遵循自身约定：`README.md`、`README.en.md`、`README.<language>.md`（仅限根目录）、`AGENTS.md`、`ADR-0001-short-title.md`、`SKILL.md`。
 
 长期文档避免 `new.md`、`notes2.md`、`temp.md`、`final.md`、`final-final.md`、`test.md`、`draft2.md` 这类临时命名。
 
@@ -172,8 +203,8 @@ file://...
 1. 判断当前变更影响哪些文档；
 2. 找到 canonical documentation；
 3. 更新文档；
-4. 检查是否需要同步英文版本；
-5. 检查内部链接；
+4. 检查是否需要同步英文版本；根目录 README 还需同步其余七种语言版本；
+5. 检查内部链接与语言导航；
 6. 检查移动或重命名产生的失效链接；
 7. 如果使用了 Plan，检查 Plan Lifecycle；
 8. 运行 Documentation Check：
@@ -188,4 +219,4 @@ pnpm docs:check
 
 本 Skill 负责"应该怎么维护文档，以及为什么"。
 
-`scripts/check-docs.mjs` 负责机器可判定的结构不变量（双语配对、链接有效性、命名规范等）是否被破坏。它不评价文档质量、架构正确性、翻译自然度或 Plan 是否真的完成——这些属于 semantic review，由 Coding Agent 和开发者判断。
+`scripts/check-docs.mjs` 负责机器可判定的结构不变量（双语配对、根 README 的 8 语言齐全与互链、根 README 之间的标题层级/代码块结构一致、链接有效性、命名规范等）是否被破坏。它不评价文档质量、架构正确性、翻译自然度或 Plan 是否真的完成——这些属于 semantic review，由 Coding Agent 和开发者判断。

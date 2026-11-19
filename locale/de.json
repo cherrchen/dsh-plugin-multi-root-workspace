@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Multi-Root-Arbeitsbereich",
+    "description": "Fügt einer Sitzung zusätzliche Arbeitsverzeichnisse hinzu: Ein Ordner wird einmal registriert, danach liest und schreibt der Agent darin neben dem primären Verzeichnis innerhalb eines gemeinsamen Sandbox-Bereichs — Dateiwerkzeuge, eingeschränkte Shells und Terminals eingeschlossen.",
+    "detail": "detail/DETAIL.de.md"
+  }
+}

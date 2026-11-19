@@ -29,7 +29,7 @@ English: [README.en.md](./README.en.md)
 
 - 包管理器：pnpm（`11.25.0`）。
 - 语言与构建：TypeScript（strict，独立 host face）+ tsdown（逐入口 ESM bundle）。
-- 门禁：oxlint、`tsc --noEmit`、vitest、两个冒烟脚本、文档检查。
+- 门禁：oxlint、`tsc --noEmit`、vitest、两个冒烟脚本、打包与第三方许可检查、文档检查。
 
 ## 文档检查
 

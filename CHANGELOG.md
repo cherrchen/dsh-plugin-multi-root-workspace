@@ -8,6 +8,32 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 - 安装方式、受支持的上游运行时与已知限制见 [README](./README.md)。
 - 每个版本的实施证据、编号口径与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)；GitHub Release 的正文由 `scripts/release-notes.mjs` 从 commit 历史生成，是本文件之外的完整原始清单。
 
+## [0.1.23] - 2026-11-19
+
+### Added
+
+- **面板、插件详情页与预览插图覆盖 DSH 内置的全部 8 种界面语言**：面板文案此前只有中英两份，现在 DSH 客户端的 8 种界面语言（`zh`、`en`、`ja`、`es`、`fr`、`de`、`ru`、`pt`）各有一份词典；中文是 canonical，其余 7 份用类型约束钉住键集与 `{count}` / `{access}` / `{tools}` 等占位符，8 份在一次 `ctx.locale.register` 中注册。插件详情页补齐本地化的 `meta.title` / `meta.description` / `meta.detail` 与 6 种新语言的 `DETAIL.<lang>.md`、`preview.<lang>.svg`；预览插图由 `pnpm preview:gen` 从同一份版式生成，文字转曲、按语言选择字体、按槽位实测宽度收缩，缩到下限仍溢出就直接失败；入口药丸改用侧栏动作的短标签，长译文不会再压住卡片标题。更早的宿主只显示它自己内置的语言，新增词典作为惰性资源存在，不改变其语言菜单。
+- **仓库根 README 扩展到 8 种语言，并新增逐功能用户指南**：README 现与 DSH 客户端的 8 种界面语言一一对应（中文 canonical，其余 7 份互链并保持同一标题层级与代码块语言），`docs:check` 会逐份校验；`docs/guide/user/` 新增中英双语的命令、访问级别、附加根 Skills、Worktree 建议、Auto Review、界面入口与模型上下文指南。
+- **贡献与安全治理文档**：新增中英双语 `CONTRIBUTING` / `SECURITY`、PR 模板与 bug / feature issue 表单；`THIRD_PARTY_LICENSE` 从声明的依赖、构建出的 client source map 与入库的上游复刻清单生成，并纳入 `pack:check`、开发 pin CI 车道、`verify:all` 与发布流程的校验。
+
+### Changed
+
+- **精确支持 DSH `0.2.2-rc.5`**：支持矩阵扩至 26 个精确版本，开发 pin 提升到 `0.2.2-rc.5`（cordis `4.1.0` / Schemastery `3.19.0`）。`rc.5` 只有 5 个提交、433 个文件，其中 380 个 manifest 仅替换版本号；净改动是 DeepSeek 内置联网搜索按模型请求的路由选择搜索 provider（`dsh-web`、`dsh-tool-web`、`dsh-web-search-deepseek` 与设置卡片），以及上游文档、e2e 与会话快照。插件消费的沙箱、fs、session、storage、client 与 reviewer 源码逐树未变，因此未新增适配分支，open-in-app 与 files-tree 的复刻基线保持不变；可选 Auto Review 联合合同纳入 `rc.5` 并把 current 编译 pin 前移到它（reviewer 源码树与 `rc.4` 逐字节相同），联合集合扩至 11 个精确发布（[接口审查](./docs/reference/dsh-0.2.2-migration.md#022-rc5-后续审查2026-11-18)、[ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)）。
+
+## [0.1.22] - 2026-11-18
+
+### Added
+
+- **Files 页头的根名按实测宽度分三档显示**：窄栏、右栏双栏与浮动小窗下，触发器不再只靠 CSS 右省略，而是按自身宽度依次显示完整根名、「前几个…后几个」、「开头…」。中间档自适应地最大化可见字符，并优先在 `-`、`_`、`.`、空格、`/` 处断开，让同前缀不同结尾的根（`…-workspace` / `…-experiment` / `…-ssh`）仍可区分。判定输入是与文字内容无关的 switcher 宽度，文字变短不会反向改变判定；`open-in-app` 按钮异步插入后同样重拟合。完整显示名始终在 `aria-label`（[ADR-0046 修订](./docs/decisions/ADR-0046-files-header-rootswitch-shrink-priority.md)）。
+
+### Changed
+
+- **精确支持 DSH `0.2.2-rc.4`**：支持矩阵扩至 25 个精确版本，开发 pin 提升到 `0.2.2-rc.4`（cordis `4.1.0` / Schemastery `3.19.0`）。`rc.4` 只有 8 个提交，其中 380 个 manifest 仅替换版本号；净改动是 DeepSeek 内容安全审查拒答（共享 `dsh-llm` 新增 `LLM_FAILURE_CODES.CONTENT_REFUSED`，由宿主拥有，插件不按 LLM 错误码路由）、实验包 liveshare 的 tunnel worker 修复，以及上游文档与会话快照。插件消费的沙箱、fs、tools、session、storage、client 与 reviewer 源码逐树未变，因此未新增适配分支，open-in-app 与 files-tree 的复刻基线保持不变；可选 Auto Review 联合合同纳入 `rc.4` 并把 current 编译 pin 前移到它（reviewer 源码树与 `rc.3` 逐字节相同），联合集合扩至 10 个精确发布（[接口审查](./docs/reference/dsh-0.2.2-migration.md#022-rc4-后续审查2026-11-18)、[ADR-0009](./docs/decisions/ADR-0009-dsh-compat-contract.md)）。
+
+### Fixed
+
+- **Files 页头 `RootSwitcher` 在窄宽下压住相邻控件**：页宽 299px 时触发器与 reload、搜索各重叠 28px，与 `open-in-app` 重叠 14.59px；浮动面板宽 220px 时 `open-in-app` 被整枚覆盖。根因是收缩能力写在了内层按钮上：真正参与 header 外层 flex 的是 `Menu` 渲染的 anchor 包装，默认 `min-width: auto` 把宽度钉在根名的 min-content（实测 249.59px），路径压到 0 后已无别的让位者。现在按「固定控件 → 完整路径 → 根名 → 触发器图标」的优先级让位：reload / 搜索 / `open-in-app` 保持原生几何永不移动，路径以零 basis 先让到 0，anchor 解钉后根名省略，最后才裁剪触发器图标。ADR 撰写时 24 个受支持发布的 `Menu.className` 逐 tag 核对，规则无版本分支（[ADR-0046](./docs/decisions/ADR-0046-files-header-rootswitch-shrink-priority.md)）。
+
 ## [0.1.21] - 2026-11-17
 
 ### Added
@@ -325,7 +351,9 @@ English: [CHANGELOG.en.md](./CHANGELOG.en.md)
 
 - 发布前外部评审提出的 8 项发现（其中 3 项发布阻断）全部修复，每项各带一个回归测试：登记目录被替换为符号链接后授权转移（引入 `recordedPath`，**重新解析路径不等于重新授权**）、并发修改注册表丢写或复活已撤销的授权（每个主根的变更串行）、刷新不重新检查目录、手输路径被目录选择器覆盖、`reveal` 的应答契约与失败码、重复 id 未校验、主根未纳入嵌套校验、CI 先测后构建。
 
-[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.21...HEAD
+[Unreleased]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.23...HEAD
+[0.1.23]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.22...v0.1.23
+[0.1.22]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.20...v0.1.21
 [0.1.20]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/cherrchen/dsh-plugin-multi-root-workspace/compare/v0.1.18...v0.1.19

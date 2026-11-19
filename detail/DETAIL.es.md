@@ -1,0 +1,1 @@
+![El título «Espacio de trabajo multi-raíz» sobre una tarjeta de sesión «Sincronizar tipos de API», cuya entrada «Carpetas» abre el panel de la derecha: un directorio de trabajo principal y dos secundarios](preview.es.svg)

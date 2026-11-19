@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Espace de travail multi-racines",
+    "description": "Ajoute des répertoires de travail secondaires à une session : enregistrez un dossier une fois et l’Agent y lit et écrit aux côtés du répertoire principal dans un même périmètre de bac à sable, outils de fichiers, shells restreints et terminaux compris.",
+    "detail": "detail/DETAIL.fr.md"
+  }
+}

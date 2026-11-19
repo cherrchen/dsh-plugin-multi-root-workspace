@@ -270,7 +270,7 @@ describe('the sidebar footer entry rules', () => {
     expect(hoverRule).not.toMatch(/(?:^|;)\s*background:\s/)
   })
 
-  it('rounds the rail like the 22 releases after the 0.1.6-alpha.2 boundary', () => {
+  it('rounds the rail like the 24 releases after the 0.1.6-alpha.2 boundary', () => {
     const rail = declarations('.mrfw-triggerRail')
     // Rail rounding is its own boundary, earlier than the row geometry's: the
     // host has drawn 12px corners since 0.1.6-alpha.2 and only the two oldest
@@ -333,8 +333,8 @@ describe('the sidebar footer entry rules', () => {
   })
 
   it('keeps the hover fill out of a (hover: hover) media query', () => {
-    // Deliberate trade-off: 19 of 24 releases have no media wrapper, so this
-    // sheet keeps the unwrapped form; the 5 token-geometry releases differ
+    // Deliberate trade-off: 19 of 26 releases have no media wrapper, so this
+    // sheet keeps the unwrapped form; the 7 token-geometry releases differ
     // only on devices without hover capability.
     expect(CSS).toContain('.mrfw-trigger:hover')
     expect(CSS.indexOf('.mrfw-trigger:hover')).toBeLessThan(CSS.indexOf('@media'))

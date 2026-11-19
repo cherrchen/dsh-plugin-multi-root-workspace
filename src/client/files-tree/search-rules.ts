@@ -10,7 +10,7 @@
  * workspace search applies the rules.
  *
  * Sync-bearing copy of upstream `ui-sidebar-files`' `search-rules.ts` at pin
- * `0.2.2-rc.3`; no upstream runtime module is imported. The list records no
+ * `0.2.2-rc.5` (upstream source unchanged since `0.2.2-rc.3`); no upstream runtime module is imported. The list records no
  * origin: a default path the reader removed and then added again by hand
  * counts as a default that is present.
  *

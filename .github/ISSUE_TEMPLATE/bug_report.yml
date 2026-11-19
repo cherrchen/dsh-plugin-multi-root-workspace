@@ -1,0 +1,147 @@
+name: Bug report
+description: Report a reproducible defect in the plugin, its UI, or its packaging.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+
+        **Do not report security vulnerabilities here.** Follow the private process in
+        [SECURITY.md](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/blob/main/SECURITY.md).
+
+        Search existing issues first, and use the exact plugin and DSH versions.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability; I will report those privately.
+          required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: npm version, tarball release, or the commit SHA for source installs.
+      placeholder: "0.1.23, or a commit SHA"
+    validations:
+      required: true
+
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH release
+      description: Exact release, for example 0.2.2-rc.5. The support matrix is in the README.
+      placeholder: "0.2.2-rc.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options:
+        - npm registry
+        - tarball or GitHub release asset
+        - GitHub repository
+        - Local source checkout
+        - Preinstalled by a bundle
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: sandbox-mode
+    attributes:
+      label: Session sandbox mode
+      options:
+        - read-only
+        - workspace-write
+        - danger-full-access
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: roots
+    attributes:
+      label: Additional roots
+      description: How many, and their access levels (inherit / read-only / read-write). Do not paste private paths if sensitive.
+      placeholder: "1 additional root, read-only"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A concise description of the defect.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Redact tokens, credentials, private paths, and personal data.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics (optional)
+      description: Redacted `dsh --profile <profile> --dump-config` output; for source installs also `node --version` and `pnpm --version`.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed credentials and private data from logs and paths.
+          required: true
