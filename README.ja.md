@@ -27,7 +27,7 @@
 - **Worktree の提案（実験的、既定では無効）**：プライマリルートが Git worktree の場合、同じリポジトリのほかの worktree を追加ルートとして追加するよう提案します。確認するまで登録されず、自動で追加・削除されることもありません。
 - **未登録なら未インストール時と同じ**：追加ルートが 1 つも登録されていなければ、動作はプラグイン未インストール時と完全に同じです。設定に誤りがあればエラーを報告し、黙って機能を落とすことはありません。
 
-現在のリリースバージョンは `v0.1.22` です。各バージョンのユーザーに見える変更は [CHANGELOG](./CHANGELOG.en.md)、進捗とリリース状態は[ロードマップ §進捗台帳](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)を参照してください。
+現在のリリースバージョンは `v0.1.23` です。各バージョンのユーザーに見える変更は [CHANGELOG](./CHANGELOG.en.md)、進捗とリリース状態は[ロードマップ §進捗台帳](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)を参照してください。
 
 ## クイックスタート
 
@@ -95,8 +95,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # または GitHub Release のアセットからダウンロード（例）：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.22/dsh-electron-dsh-plugin-multi-root-workspace-0.1.22.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.22.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.23/dsh-electron-dsh-plugin-multi-root-workspace-0.1.23.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.23.tgz
 ```
 
 こちらもビルド済みで、社内ネットワークやオフライン環境への配布に適しています。
@@ -116,10 +116,10 @@ allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
-バージョンを固定する（例：`#v0.1.22`）ことを推奨します。後からの push によって実際に動作する内容が黙って変わるのを防げます。
+バージョンを固定する（例：`#v0.1.23`）ことを推奨します。後からの push によって実際に動作する内容が黙って変わるのを防げます。
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.22
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.23
 ```
 
 #### ローカルソースからインストール
@@ -213,12 +213,12 @@ DeepSeek Harness Desktop では、アプリケーションメニューの「dsh 
 1. トレイアイコンを含め、Desktop を完全に終了します。
 2. 新規インストール：
    ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.22
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.23
    ```
 3. インストール済みだが bundle 登録がない場合：`remove` してから `add` します（`add` だけを再実行しても登録は補われません）。
    ```sh
    dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.22
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.23
    ```
 4. `$DSH_HOME/profiles/desktop/package.json`（`DSH_HOME` が未設定の場合は通常 `~/.dsh/profiles/desktop/package.json`）を開き、`dsh.profile.bundles` に本パッケージが含まれていることを確認します。
 5. Desktop を再度起動します（コールドスタート）。

@@ -27,7 +27,7 @@
 - **Worktree 建议（实验性，默认关闭）**：主根是 Git worktree 时，插件会提示把同一仓库的其他 worktree 添加为附加根；只有你确认后才会登记，不会自动增删。
 - **不登记等于没装**：没有附加根时，行为和未安装插件完全一致；配置有误会直接报错，不会悄悄降级。
 
-当前发布版本 `v0.1.22`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
+当前发布版本 `v0.1.23`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
 
 ## 快速开始
 
@@ -95,8 +95,8 @@ dsh plugin --profile web add @dsh-electron/dsh-plugin-multi-root-workspace
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # 或从 GitHub Release 资产下载，例如：
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.22/dsh-electron-dsh-plugin-multi-root-workspace-0.1.22.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.22.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.23/dsh-electron-dsh-plugin-multi-root-workspace-0.1.23.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.23.tgz
 ```
 
 同样是预构建产物，适合内网或离线环境交付。
@@ -116,10 +116,10 @@ allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
-建议锁定版本（如 `#v0.1.22`），让后续推送无法悄悄改变实际运行的内容：
+建议锁定版本（如 `#v0.1.23`），让后续推送无法悄悄改变实际运行的内容：
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.22
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.23
 ```
 
 #### 从本地源码安装
@@ -213,12 +213,12 @@ DeepSeek Harness Desktop 可以在应用菜单的「管理 dsh 命令…」中�
 1. 完全退出 Desktop，包括托盘图标。
 2. 新装：
    ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.22
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.23
    ```
 3. 已安装但缺少 bundle 登记：先 `remove` 再 `add`（只重跑 `add` 不会补登记）：
    ```sh
    dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.22
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.23
    ```
 4. 打开 `$DSH_HOME/profiles/desktop/package.json`（未设置 `DSH_HOME` 时通常是 `~/.dsh/profiles/desktop/package.json`），确认 `dsh.profile.bundles` 包含本包。
 5. 重新打开 Desktop（冷启动）。

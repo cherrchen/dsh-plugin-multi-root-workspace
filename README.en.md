@@ -27,7 +27,7 @@ Not every project is a monorepo. A real development project is usually several i
 - **Worktree suggestions (experimental, off by default)**: when the primary root is a Git worktree, the plugin offers to add other worktrees of the same repository as additional roots; nothing is registered until you confirm, and nothing is added or removed automatically.
 - **Absent when absent**: with no additional root registered, behavior is identical to an uninstalled plugin; misconfiguration reports an error instead of silently degrading.
 
-Current released version: `v0.1.22`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
+Current released version: `v0.1.23`. The user-visible changes of each version live in the [CHANGELOG](./CHANGELOG.en.md); progress and release state live in the [roadmap progress ledger](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账).
 
 ## Quick Start
 
@@ -95,8 +95,8 @@ This installs pre-built artifacts.
 ```sh
 pnpm pack @dsh-electron/dsh-plugin-multi-root-workspace
 # or download the tgz from the GitHub Release assets, e.g.:
-# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.22/dsh-electron-dsh-plugin-multi-root-workspace-0.1.22.tgz
-dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.22.tgz
+# https://github.com/cherrchen/dsh-plugin-multi-root-workspace/releases/download/v0.1.23/dsh-electron-dsh-plugin-multi-root-workspace-0.1.23.tgz
+dsh plugin --profile web add ./dsh-electron-dsh-plugin-multi-root-workspace-0.1.23.tgz
 ```
 
 Also pre-built, handy for air-gapped or offline delivery.
@@ -116,10 +116,10 @@ allowBuilds:
   '@dsh-electron/dsh-plugin-multi-root-workspace@github:cherrchen/dsh-plugin-multi-root-workspace#<commit>': true
 ```
 
-Pinning a version (e.g. `#v0.1.22`) is recommended so a later push cannot silently change what actually runs:
+Pinning a version (e.g. `#v0.1.23`) is recommended so a later push cannot silently change what actually runs:
 
 ```sh
-dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.22
+dsh plugin --profile web add github:cherrchen/dsh-plugin-multi-root-workspace#v0.1.23
 ```
 
 #### Install from a local clone
@@ -213,12 +213,12 @@ DeepSeek Harness Desktop can install a global `dsh` command from its application
 1. Fully quit Desktop, including the tray icon.
 2. Fresh install:
    ```sh
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.22
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.23
    ```
 3. Already installed but missing the bundle entry: `remove`, then `add` (re-running only `add` does not register it):
    ```sh
    dsh plugin --profile desktop remove @dsh-electron/dsh-plugin-multi-root-workspace
-   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.22
+   dsh plugin --profile desktop add @dsh-electron/dsh-plugin-multi-root-workspace@0.1.23
    ```
 4. Open `$DSH_HOME/profiles/desktop/package.json` (normally `~/.dsh/profiles/desktop/package.json` when `DSH_HOME` is unset) and confirm `dsh.profile.bundles` contains the package.
 5. Start Desktop again (cold start).

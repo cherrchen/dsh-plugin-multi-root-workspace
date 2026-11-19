@@ -27,7 +27,7 @@ body:
     attributes:
       label: Plugin version
       description: npm version, tarball release, or the commit SHA for source installs.
-      placeholder: "0.1.22, or a commit SHA"
+      placeholder: "0.1.23, or a commit SHA"
     validations:
       required: true
 
@@ -35,8 +35,8 @@ body:
     id: dsh-version
     attributes:
       label: DSH release
-      description: Exact release, for example 0.2.2-rc.4. The support matrix is in the README.
-      placeholder: "0.2.2-rc.4"
+      description: Exact release, for example 0.2.2-rc.5. The support matrix is in the README.
+      placeholder: "0.2.2-rc.5"
     validations:
       required: true
 
