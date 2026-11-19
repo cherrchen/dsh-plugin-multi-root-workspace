@@ -2215,3 +2215,18 @@ rc.5 只有 5 个提交、433 个文件（917 行新增 / 594 行删除）；其
 合入 `main` 的内容提交 CI：#69 的 PR CI [run 44336205469](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/44336205469) 成功，其 main push CI [run 44439036440](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/44439036440) 被随后的 #70 推送取代（cancelled）；#70 的 PR CI [run 44439046316](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/44439046316) 成功，main push CI [run 44443312370](https://github.com/cherrchen/dsh-plugin-multi-root-workspace/actions/runs/44443312370) 在准备时仍在运行。矩阵的最终判定不依赖该次运行：tag 触发的 `release.yml` verify 等待与正式提交同 SHA 的 main push CI 与最终 `gate`，那份运行覆盖同一份代码。
 
 准备提交只改文档与 CHANGELOG；正式提交只改 `package.json` 的 `version`，tag 指向正式提交。本次在本机 macOS arm64 / Node `24.18.0` / pnpm `11.25.0` 对准备提交后的树运行：`docs:check`（0 错误 0 警告）、`compat:check`（allowlist / peerDependencies / 开发 pin / 安装树一致，26 个精确版本；Auto Review 联合合同报告 11 个精确发布）、`licenses:check`（`THIRD_PARTY_LICENSE` 与声明一致）、lint（0 警告 0 错误）、双端 typecheck、`build`、`pack:check`（**266** 个成员）、`auto-review:fork`，均通过；`kernel:probe` 报告本机无可用受限执行 runner（Seatbelt `sandbox_apply` 被拒、无 bwrap / Landlock），受限内核断言按设计跳过。完整 `vitest` 为 **1950 通过 / 165 跳过 / 17 失败**；17 个失败全部是共享 Registry 的核内 IPC/租约用例（`contended` 而非 `follower`），本会话运行在 DSH 自身的 Seatbelt 内、Peer 凭据被识别为 sandboxed peer，失败集合与 `0.2.2-rc.5` 基线记录的八个文件相同，不是本版回归。冒烟 0 失败：compose **56/56**、behavior **96 通过 / 8 跳过**、journey **88 通过 / 2 跳过**、`smoke:packed` 的打包行为电池 **95 通过 / 8 跳过**，joint Auto Review smoke 在 source / packed 两条车道与 web / headless 两种组合全部通过；跳过项是无可用内核 runner 的受限 bash 与共享 IPC。发布矩阵与 GitHub Release 由 tag 触发的 `release.yml` 完成，本机不发布。
+## SSH 分支再次合入主线（v0.1.23）（2026-11-19）
+
+**状态：合并与适配已实施；本节的验证格待完整门禁跑完后回填。SSH 能力仍默认关闭、未发布。** 从 `f9a1f38`（`feat/ssh-workspace`，包 `0.1.22-ssh.1`）以 merge 合入 `main` 的 `8dee97a`（`v0.1.23`，合并基 `f2dd05b`），合并提交为 `d93eb2b`。主线七笔提交：PR #68（`45950f6`，精确支持 DSH `0.2.2-rc.4`）、PR #69（`e5e4417`，面板/详情页 8 语言本地化、8 语言根 README 与逐功能用户指南、贡献与安全治理、生成的第三方许可清单）、PR #70（`ac13ce7`，精确支持 `0.2.2-rc.5`），以及 v0.1.22 / v0.1.23 的发版文档。本次只把分支自己的适配重新贴到主线结构上，不复制主线的实现。
+
+**适配内容：**
+
+- **八语言本地化**：`src/client/locales.ts` 改为主线的每语言模块 barrel；分支新增的 252 个键（`remote.*` / `ssh.*` / `panel.remote*` 与远端错误码）追加进八份字典。`zh` 是规范键集，`en` 是审阅过的英文稿；`ja` / `es` / `fr` / `de` / `ru` / `pt` 的译文随本次合入补齐，由 `tests/locale-parity.spec.ts` 钉住键集合、键序与占位符。八个根 README 同步 SSH 简介条目与「SSH 远端环境（实验性）」章节。
+- **兼容合同**：核心部分直接采用主线的 26 个精确发布、全部 peer range 与 `0.2.2-rc.5` 开发 pin；`SUPPORTED_SSH_RELEASES` 后缀扩为 `0.2.2-rc.1`–`0.2.2-rc.5`，四个 SSH 可选 peer 保持全量 allowlist range 与 `optional: true`，SSH 开发 pin 跟随核心 pin 前移，`pnpm-workspace.yaml` 的 release-age 豁免同步到 rc.5。
+- **SSH 地板证据**：对比 npm tarball，`@deepseek-ai/dsh-ssh`、`dsh-fs-ssh`、`dsh-sandbox-ssh`、`dsh-subprocess-ssh` 的 `lib/` 树在 `rc.3`→`rc.4` 与 `rc.4`→`rc.5` 均逐字节相同，只有 `package.json` 的 `version` 与包间精确 pin 变化；实际运行的是与 rc.3 相同的实现，因此未新增适配分支（审查记录见[迁移参考](../../reference/dsh-0.2.2-migration.md)）。
+- **包版本与文档**：分支包版本改为未发布的 `0.1.24-ssh.1`；`AGENTS.md` 的 SSH 段、兼容门禁计划与 ADR-0032 的当前地板列表、控制面参考里的 broker 安装示例同步到 rc.5。
+- **冲突面**：`package.json`、`pnpm-workspace.yaml`、`pnpm-lock.yaml`（以合并后的 manifest 为准重新生成，未手工合并 lock）、`src/client/index.ts`、`src/client/locales.ts`、`README.md` / `README.en.md`、路线图本节；ADR 编号无冲突（分支停在 0048/0049，主线到 0046）。`pnpm install` 后 `pnpm compat:check` 通过：26 个精确版本、核心与 SSH 开发 pin 均为 `0.2.2-rc.5`、安装树一致、SSH floor 为 `rc.1`–`rc.5`、Auto Review 联合集合 11 个精确发布。
+
+**验证（2026-11-19，macOS arm64 / Node `24.18.0` / pnpm `11.25.0`，`0.2.2-rc.5` 开发树）：**
+
+（待补：`pnpm verify:all` 结果。）
