@@ -2101,7 +2101,7 @@ rebase 的集成处理：
 
 **问题。** ADR-0049 §6 的个人管理区、托管档位选择器与部署端点列表全部内联在 Workspace Folders 面板的“远端环境”区块：列表、全局 SSH 设置、凭据、环境、绑定混在同一滚动区，个人模式下体积过大，工作区面板的主要职责被挤占。上一节记录的“设置卡常驻三档单选”在 `28ece12` 已把档位与 team 字段移入面板，实际形态与文字不再一致。
 
-**决定。** Workspace Folders 远端区块只保留：(a) 远端工作区列表（沿用附属工作目录行样式，平台显示实际系统名称 Linux / macOS，保留登记/移除）；(b) “添加 SSH 远端…”与“管理 SSH 远端…”两枚入口。新增独立 `SshManagementDialog`（`src/client/ssh-panel.tsx`），由 ui-primitives `Modal` 承载，四个 Tab：添加连接、已有连接、SSH Key、模式设置。计划见 [2026-11-13-ssh-management-dialog.md](../completed/2026-11-13-ssh-management-dialog.md)。
+**决定。** Workspace Folders 远端区块只保留：(a) 远端工作区列表（沿用附属工作目录行样式，平台显示实际系统名称 Linux / macOS，保留登记/移除）；(b) “添加 SSH 远端…”与“管理 SSH 远端…”两枚入口。新增独立 `SshManagementDialog`（`src/client/ssh-panel.tsx`），由 ui-primitives `Modal` 承载，四个 Tab：添加连接、已有连接、SSH Key、模式设置。计划见 [2026-11-13-ssh-management-dialog.md](../completed/2026-11-13-ssh-management-dialog.md)。**2026-11-19 修订：** 管理对话框收敛为三个 Tab（已有连接 / SSH Key / 模式设置），添加连接改为从“已有连接”打开的独立 Dialog；远端区块只保留“管理 SSH 远端…”入口。见 [2026-11-19-ssh-add-connection-two-step.md](./2026-11-19-ssh-add-connection-two-step.md)。
 
 - **添加连接。** personal 显示分步引导表单（目标 → 凭据 → 远端目录与能力 → 主机密钥扫描/指纹单选），保存沿用既有 `sshEnvironmentSave` 的 revision/token/fingerprint 语义；team/hardened 显示部署清单/broker 引导，不渲染个人表单，也不调用 `sshState`；模式设置 Tab 的档位选择决定引导分支。
 - **已有连接。** personal 保留链接横幅、环境行（测试连接/helper/访问密钥/编辑/行内删除）与“本项目绑定”（本地传输对端仍为 `primary` + 各可用根 `aliasId`）；team/hardened 显示部署端点只读列表。

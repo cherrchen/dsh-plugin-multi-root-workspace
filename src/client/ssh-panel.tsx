@@ -2,12 +2,13 @@
  * The standalone remote-SSH management dialog.
  *
  * The Workspace Folders panel keeps only the remote-workspace list and this
- * dialog's entry points. Everything connection-shaped — the personal add form,
- * saved connections, SSH keys, bindings, and the custody-mode control — lives
- * here, grouped into four tabs. The dialog is deliberately a client-only
- * reorganization: it speaks the same `ssh*` and remote-settings contracts as
- * the inline area it replaces, and every mutation still answers the refreshed
- * `SshStateView` or `RemotesView`.
+ * dialog's entry point. Everything connection-shaped — saved connections, SSH
+ * keys, bindings, and the custody-mode control — lives here, grouped into three
+ * tabs. Adding a connection is a separate dialog opened from the Connections
+ * tab, so the management surface never carries a half-filled form. The dialog
+ * is deliberately a client-only reorganization: it speaks the same `ssh*` and
+ * remote-settings contracts as the inline area it replaces, and every mutation
+ * still answers the refreshed `SshStateView` or `RemotesView`.
  *
  * Secret material is input-only: credential textareas are cleared immediately
  * after submit — success or failure — and are never prefilled from state.
@@ -27,8 +28,8 @@ import type { Key } from './locales.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 import type { RemoteEndpointView, RemotesView } from '../remote/panel-contract.ts'
 
-/** The four management sections. */
-export type SshDialogTab = 'add' | 'connections' | 'keys' | 'mode'
+/** The three management sections. Adding a connection is a separate dialog. */
+export type SshDialogTab = 'connections' | 'keys' | 'mode'
 
 /** The exec stanza the "allow command execution" toggle materializes (ADR-0049). */
 const EXEC_DEFAULTS = {
@@ -43,7 +44,7 @@ const EXEC_DEFAULTS = {
 /** The transfer stanza the "allow file transfer" toggle materializes. */
 const TRANSFER_DEFAULTS = { maxBytes: 268_435_456, timeoutMs: 600_000 } as const
 
-const SSH_TABS: readonly SshDialogTab[] = ['add', 'connections', 'keys', 'mode']
+const SSH_TABS: readonly SshDialogTab[] = ['connections', 'keys', 'mode']
 
 const tabKey = (tab: SshDialogTab): Key => `ssh.tab.${tab}` as Key
 
@@ -1249,6 +1250,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const [bindingDraft, setBindingDraft] = useState<BindingDraft | undefined>(undefined)
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
   const [credentialManagerOpen, setCredentialManagerOpen] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const [aliases, setAliases] = useState<readonly string[]>([])
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -1274,6 +1276,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     setFingerprint(undefined)
     setConfirm(undefined)
     setCredentialManagerOpen(false)
+    setAddOpen(false)
     setAliases([])
     setSaved(false)
     setError(undefined)
@@ -1326,6 +1329,27 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     setConfirm(undefined)
     setScan(undefined)
     setFingerprint(undefined)
+    setCredentialManagerOpen(false)
+    setAddOpen(false)
+  }
+
+  /** The Add connection dialog always starts from a blank draft. */
+  const openAdd = (): void => {
+    setAddDraft(blankEditor())
+    setScan(undefined)
+    setFingerprint(undefined)
+    setSaved(false)
+    setError(undefined)
+    setAddOpen(true)
+  }
+
+  /** Closing the dialog discards the draft; a step-one save stays saved. */
+  const closeAdd = (): void => {
+    setAddOpen(false)
+    setAddDraft(blankEditor())
+    setScan(undefined)
+    setFingerprint(undefined)
+    setSaved(false)
     setCredentialManagerOpen(false)
   }
 
@@ -1698,6 +1722,14 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       ? <p className="mrfw-note">{t('panel.loading')}</p>
       : <p className="mrfw-note">{t('panel.remoteUnavailable', { reason: statusText(status, t) })}</p>
 
+  /** The current failure; the Add dialog renders its own copy while it is open. */
+  const renderError = (): ReactNode => error === undefined ? null : (
+    <p role="alert" className="mrfw-alert">
+      {t(errorKeyOf(error.code))}
+      {errorHasDetail(error.code) ? ` (${error.message})` : ''}
+    </p>
+  )
+
   /**
    * The first `sshState` read failed: the alert above names the failure, the
    * tab says so and offers a retry — without it the effect would not re-fire
@@ -1934,7 +1966,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         )
       })}
       <p className="mrfw-note">{t('ssh.connections.registerHint')}</p>
-      <Button variant="outline" size="sm" disabled={busy || editDraft !== undefined} onClick={() => changeTab('add')}>{t('ssh.envAdd')}</Button>
+      <Button variant="primary" size="sm" disabled={busy || editDraft !== undefined} onClick={openAdd}>{t('ssh.tab.add')}</Button>
       {editDraft === undefined ? null : (
         <div className="mrfw-sshEdit">
           <span className="mrfw-sshStepTitle">{t('ssh.envEdit')}</span>
@@ -1993,7 +2025,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         <div className="mrfw-sshGuide">
           <span className="mrfw-sshStepTitle">{t('ssh.tab.add')}</span>
           <p className="mrfw-note">{t(addGuideKey(custodyMode))}</p>
-          <Button variant="outline" size="sm" onClick={openMode}>{t('ssh.add.openMode')}</Button>
+          <Button variant="outline" size="sm" onClick={() => { closeAdd(); changeTab('mode') }}>{t('ssh.add.openMode')}</Button>
         </div>
       </div>
     }
@@ -2003,6 +2035,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     const savedEnvironment = addDraft.existing === undefined ? undefined : environmentOf(addDraft.existing.environmentId)
     return <div className="mrfw-sshArea">
       <p className="mrfw-note">{t('ssh.add.personalGuide')}</p>
+      {renderError()}
       {saved ? <p className="mrfw-note" role="status">{t('ssh.add.saved')}</p> : null}
       <AddConnectionWizard
         draft={addDraft}
@@ -2025,7 +2058,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         onBind={bindToProject}
         onSkip={skipDetails}
         onCancel={() => { setAddDraft(blankEditor()); setScan(undefined); setFingerprint(undefined); setSaved(false) }}
-        onFinish={() => { setAddDraft(blankEditor()); changeTab('connections') }}
+        onFinish={() => { closeAdd(); changeTab('connections') }}
       />
     </div>
   }
@@ -2067,14 +2100,13 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     <div className="mrfw-sshGuide">
       <span className="mrfw-sshStepTitle">{t('ssh.tab.add')}</span>
       <p className="mrfw-note">{t(modeAddGuideKey(custodyMode))}</p>
-      <Button variant="outline" size="sm" onClick={() => changeTab('add')}>{t('ssh.mode.openAdd')}</Button>
+      <Button variant="outline" size="sm" onClick={() => changeTab('connections')}>{t('ssh.tab.connections')}</Button>
     </div>
   </div>
 
-  const panel = (): ReactNode => tab === 'add' ? renderAdd()
-    : tab === 'connections' ? renderConnectionsTab()
-      : tab === 'keys' ? renderKeys()
-        : renderMode()
+  const panel = (): ReactNode => tab === 'connections' ? renderConnectionsTab()
+    : tab === 'keys' ? renderKeys()
+      : renderMode()
 
   const panelId = 'mrfw-ssh-panel-' + tab
   const tabId = 'mrfw-ssh-tab-' + tab
@@ -2089,16 +2121,23 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       contentClassName="mrfw-sshDialogContent"
     >
       <SshTabStrip value={tab} onChange={changeTab} t={t} />
-      {error === undefined ? null : (
-        <p role="alert" className="mrfw-alert">
-          {t(errorKeyOf(error.code))}
-          {errorHasDetail(error.code) ? ` (${error.message})` : ''}
-        </p>
-      )}
+      {addOpen ? null : renderError()}
       <div id={panelId} role="tabpanel" aria-labelledby={tabId} className="mrfw-sshDialogPanel">
         {panel()}
       </div>
     </Modal>
+    {addOpen ? (
+      <Modal
+        open
+        onClose={closeAdd}
+        title={t('ssh.tab.add')}
+        closeLabel={t('panel.close')}
+        className="mrfw-sshAddDialog"
+        contentClassName="mrfw-sshDialogContent"
+      >
+        {renderAdd()}
+      </Modal>
+    ) : null}
     {credentialManagerOpen ? (
       <Modal
         open

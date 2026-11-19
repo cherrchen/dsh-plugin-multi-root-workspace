@@ -5,7 +5,7 @@
 
 ## 1. 目标
 
-把 SSH 管理对话框「添加连接」从**四步向导**缩短为**两步向导**，保留现有的四 Tab 对话框与卡片式表单结构：
+把 SSH「添加连接」从**四步向导**缩短为**两步向导**，并把该流程从管理对话框的 Tab 抽成独立 Dialog；管理对话框收敛为三个 Tab（已有连接 / SSH Key / 模式设置），卡片式表单结构保持不变：
 
 1. **连接**：选择凭据来源（本机 SSH 条目 / 插件托管凭据）→ 填写显示名、环境 ID、平台与 `user@host:port` → 点「扫描并测试连接」→ 在确认 Dialog 中确认主机密钥 → 自动保存并进入下一步。
 2. **安装 Helper 并登记远端路径**：顶部保留 `user@host:port` 摘要与 Helper 操作（检测 Node / 安装 Helper / 测试连接 / 当前状态）；选择远端路径（输入器 + UI 路径选择器）；选择路径能力（文件传输 / 命令执行，命令执行在未安装 Helper 时禁用）；底部「跳过」「上一步」「绑定到本项目」。
@@ -19,13 +19,13 @@
 - 凭据来源当前是 radio/segmented，主机别名是自由文本；手绘图要求两个下拉选择器，并在选择“插件托管凭据”时出现「管理凭据」入口与凭据管理 Dialog。
 - 主机钥确认当前是表单内的 radio 列表；手绘图要求扫描后弹出确认 Dialog，确认后自动进入下一步。
 - 第 2 步需要“UI 选择”远端路径。个人模式环境已有 SFTP 连接实现（`src/remote/sftp.ts`）和托管 `ssh_config`，但没有暴露给面板的目录列举端点。
-- 四个 Tab（添加连接 / 已有连接 / SSH Key / 模式设置）与 `Modal` + `SegmentedTabs` + `.mrfw-sshForm` 卡片结构保持不变。
+- 管理对话框保留 `Modal` + `SegmentedTabs` + `.mrfw-sshForm` 卡片结构，但收敛为三个 Tab（已有连接 / SSH Key / 模式设置）；「添加连接」改为从“已有连接”打开的独立 Dialog。
 
 ## 3. 范围
 
 ### 3.1 本轮做
 
-- `SshManagementDialog` 的「添加连接」Tab 改为两步式向导；步骤指示器、校验、取消/重置、异步作用域隔离全部保留。
+- `SshManagementDialog` 收敛为三个 Tab；新增独立 `Modal` 承载 `AddConnectionWizard`，步骤指示器、校验、取消/重置、异步作用域隔离全部保留。
 - 第 1 步改为“凭据来源下拉 + 对应选择器 + 显示名 / 环境 ID / 平台 + 目标行”；环境 ID 可按显示名自动生成，用户手动修改后停止联动。
 - 主机钥扫描后弹出确认 Dialog；确认后保存环境并自动进入第 2 步。
 - 新增「管理凭据」嵌套 Dialog，复用 SSH Key Tab 的凭据 CRUD（生成 / 导入 / 密码 / 删除）。
@@ -155,7 +155,8 @@ Helper
 
 > 手工验收前先 `pnpm build` 并重启/重新加载 DSH Host。仅刷新页面只会更新 client bundle；旧 Host 不认识 `sshConfigAliases` / `sshListDirectories`，且第 2 步的身份未变更新仍会因缺扫描 token 被拒。
 
-- [ ] 打开「添加连接」：只有两个步骤 chip；第 1 步不出现 workspace、文件传输、命令执行字段。
+- [ ] 管理对话框只有“已有连接 / SSH Key / 模式设置”三个 Tab；「添加连接」是独立 Dialog，由“已有连接”Tab 的按钮打开。
+- [ ] 添加 Dialog 只有两个步骤 chip；第 1 步不出现 workspace、文件传输、命令执行字段；关闭后草稿丢弃、已保存连接保留。
 - [ ] 显示名输入后环境 ID 自动生成；手动改 ID 后不再联动；编辑已保存环境时 ID 不可改。
 - [ ] 托管凭据来源显示凭据下拉与「管理凭据」；点击打开凭据管理 Dialog，新建密钥后关闭，凭据选择器可见新条目。
 - [ ] 本机条目来源显示别名输入；输入别名、扫描后确认 Dialog 显示解析后的 `user@host:port`，确认后进入第 2 步。
@@ -193,10 +194,17 @@ Helper
 | 文案/八语言漂移 | 一次改齐 `src/client/locales/*.ts`，跑 parity 测试 |
 | 旧测试大量依赖四步向导 | 只改 Add 流程相关用例；Connections/Keys/Mode/异步隔离用例保持行为断言 |
 
-回滚：本轮只涉及客户端 Add Tab、两个只读 RPC 与文档；回滚时恢复 `ssh-panel.tsx` 的向导与 `personal-contract` 的两个端点即可，不改已有持久化格式。
+回滚：本轮只涉及客户端 Add Dialog、两个只读 RPC 与文档；回滚时恢复 `ssh-panel.tsx` 的向导与 `personal-contract` 的两个端点即可，不改已有持久化格式。
 
 ## 9. 文档影响
 
 - 更新 `docs/reference/ssh-remote-environments.md`：RPC 端点表、GUI 管理面板章节的添加连接流程。
 - 本计划文件在完成后移入 `docs/plans/completed/`。
 - `docs/plans/active/2026-09-12-multi-root-workspace.md` 若有本轮进度条目，按其既有格式登记（仅一条链接，避免复制本文）。
+
+## 10. 2026-11-19 追加：三 Tab 与独立「添加连接」Dialog
+
+- 管理对话框只保留“已有连接 / SSH Key / 模式设置”三个 Tab；`SshDialogTab` 去掉 `add`，Tab 条不再渲染“添加连接”。
+- “添加连接”成为管理对话框之上的独立 `Modal`（`.mrfw-sshAddDialog`），入口是“已有连接”Tab 内的按钮；Workspace Folders 远端区块只保留“管理 SSH 远端…”，模式页的引导按钮改为切到“已有连接”。
+- 关闭添加 Dialog 会丢弃草稿，但第 1 步已保存的连接保留；会话或托管档位切换会同时关闭该 Dialog。
+- 自动化：`tests/client-ssh-panel.spec.tsx` 56 passed（新增三 Tab、入口、关闭丢弃草稿、模式页跳转用例）；`tests/client-styles.spec.ts` 覆盖 `.mrfw-sshAddDialog` 宽度。
