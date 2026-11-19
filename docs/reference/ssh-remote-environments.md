@@ -75,7 +75,7 @@ Registry 的 owner 是唯一打开远程域和 `remote-1` 监听的 Host。若�
 GUI 入口有两处：
 
 - **插件详情设置卡**（`RemoteSwitchRow`）：只保留开关与启用风险确认。开启后 Host 的远程控制面按当前 `mode` 启动；开关关闭立即卸载。
-- **Workspace Folders 面板远端区块**（`src/client/WorkspaceFoldersAction.tsx`）：只保留远端工作区列表与 SSH 管理入口。标题行显示托管档位徽标（`RemotesView.custodyMode`）；列表沿用附属工作目录的行样式（名称、平台徽标、登记状态、`rootId · path`、当前能力），保留登记/移除动作。列表上方只有 `panel.remoteManage`（管理 SSH 远端…），打开管理对话框的“已有连接”Tab；“添加连接”不再占面板入口，而是该 Tab 内的按钮。
+- **Workspace Folders 面板远端区块**（`src/client/WorkspaceFoldersAction.tsx`）：只保留远端工作区列表与 SSH 管理入口。标题行显示托管档位徽标（`RemotesView.custodyMode`）；列表行与主要/附属工作目录共用 `WorkspaceRow`：名称行带平台、登记状态与 `rootId` 徽标，路径是同一套可复制控件，当前能力作为第三行说明；行尾保留登记/移除动作。列表上方只有 `panel.remoteManage`（管理 SSH 远端…），打开管理对话框的“已有连接”Tab；“添加连接”不再占面板入口，而是该 Tab 内的按钮。
 
   远端列表的平台徽标显示实际系统名称（Linux / macOS），不是清单里的 `linux`/`darwin`。personal 档位且仍有端点未登记时，列表标题下方常驻一条引导（`panel.remoteRegisterGuide`）：登记前需先完成每个环境的就绪链路——安装 Helper → 链接托管 SSH 配置（仅托管环境）→ 添加绑定，点「管理」即可跟随。
 

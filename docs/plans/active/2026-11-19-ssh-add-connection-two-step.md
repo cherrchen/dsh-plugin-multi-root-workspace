@@ -208,3 +208,10 @@ Helper
 - “添加连接”成为管理对话框之上的独立 `Modal`（`.mrfw-sshAddDialog`），入口是“已有连接”Tab 内的按钮；Workspace Folders 远端区块只保留“管理 SSH 远端…”，模式页的引导按钮改为切到“已有连接”。
 - 关闭添加 Dialog 会丢弃草稿，但第 1 步已保存的连接保留；会话或托管档位切换会同时关闭该 Dialog。
 - 自动化：`tests/client-ssh-panel.spec.tsx` 56 passed（新增三 Tab、入口、关闭丢弃草稿、模式页跳转用例）；`tests/client-styles.spec.ts` 覆盖 `.mrfw-sshAddDialog` 宽度。
+
+## 11. 2026-11-19 追加：远端工作区行复用 `WorkspaceRow`
+
+- 抽出 `WorkspaceRow`（`src/client/WorkspaceFoldersAction.tsx`）：统一名称行、徽标、可复制路径、可选说明与行尾动作簇。主要工作目录、每个附属工作目录和每个远端工作区都通过它渲染，行几何与 affordance 不再各写一套。
+- 远端行把 `rootId` 从路径行移到名称行徽标，路径改用与根行相同的 `PathCopy`（复制真实远端路径）；能力说明留在文本块第三行，登记/移除外动作不变。
+- “远端环境”和“远端工作区”拆成两个相邻 `mrfw-section`，与主要/附属工作目录的“标题 + 行列表”结构一致。
+- `tests/client-panel.spec.tsx` 的远端断言改为路径 `/srv/root` 与共享行结构，并新增远端路径复制用例；88 passed。
