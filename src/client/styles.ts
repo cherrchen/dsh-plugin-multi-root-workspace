@@ -1864,6 +1864,34 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   gap: 10px 12px;
 }
 
+/* Step one keeps display name / environment ID / platform on one line. */
+.mrfw-sshGridThree {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Step one keeps source / credential / manage on one line; the hint sits
+   below the row so the three controls share the same baseline. */
+.mrfw-sshCredentialRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.mrfw-sshCredentialSource {
+  flex: 0 1 200px;
+  min-width: 160px;
+}
+
+.mrfw-sshCredentialPicker {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.mrfw-sshCredentialManage {
+  flex: none;
+}
+
 .mrfw-sshField {
   display: flex;
   flex-direction: column;
@@ -2104,6 +2132,15 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   .mrfw-sshFieldWide {
     grid-column: auto;
   }
+
+  .mrfw-sshCredentialSource,
+  .mrfw-sshCredentialPicker {
+    flex-basis: 100%;
+  }
+
+  .mrfw-sshCredentialManage {
+    align-self: flex-start;
+  }
 }
 
 .mrfw-sshRowActions {
@@ -2192,6 +2229,119 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.mrfw-sshSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.mrfw-sshSummaryMain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mrfw-sshSummaryName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-sshSummaryTarget {
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
+.mrfw-sshPathBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mrfw-sshPathBar .mrfw-sshInput {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.mrfw-sshDirList {
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.mrfw-sshDirRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mrfw-sshDirRow:last-child {
+  border-bottom: none;
+}
+
+.mrfw-sshDirRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-sshDirRow:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.mrfw-sshDirName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mrfw-sshDirArrow {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.mrfw-sshDialogFooterActions {
+  justify-content: flex-end;
+}
+
+/* Nested decisions are narrower than the management card. */
+.mrfw-sshConfirmDialog,
+.mrfw-sshPathDialog,
+.mrfw-sshCredentialDialog {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 48px);
 }
 
 /* The worktree suggestion notice (ADR-0039 第二十一次修订): a persistent,

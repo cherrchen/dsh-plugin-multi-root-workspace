@@ -61,3 +61,9 @@
 - **为每个连接传 `-F` 或替换 PATH 中的 `ssh`**：上游不暴露这些接缝，改写进程级 PATH 会影响 Host 的其他子进程。
 - **直接用密码驱动上游连接**：上游强制 `BatchMode=yes`，OpenSSH 在批处理模式下不调用 askpass。
 - **把托管 Host 块直接写进 `~/.ssh/config`**：可行，但每次增删环境都要改用户文件；单行 `Include` 只需改一次且容易撤销。
+
+## 2026-11-19 修订：两步式添加连接与只读浏览端点
+
+- 面板“添加连接”由四步改为两步：第 1 步保存连接（凭据来源、显示名/环境 ID/平台、`user@host:port`、主机钥确认 Dialog），第 2 步安装 Helper、选择远端路径与能力并“绑定到本项目”。四个 Tab 与既有绑定/准入语义不变。
+- 第 1 步先以 `/` 占位 workspace 保存，第 2 步再更新 workspace 与 `exec`/`transfer`。为避免第二次扫描，`sshEnvironmentSave` 在 target 身份（hostname/port/user）与 managed `credentialId` 均未变、且提交的 `fingerprint` 等于已记录 `hostKey` 时允许不带 `hostKeyToken`；其他情况仍要求新的扫描令牌。该例外只复用既有 TOFU 信任，不接受新的指纹。
+- 新增两个只读端点：`sshConfigAliases` 读取本机 `~/.ssh/config` 的字面 Host 别名；`sshListDirectories` 经环境 SFTP 列目录，managed 环境以 `-F <credentialRoot>/ssh_config` 连接，因此未链接 `~/.ssh/config` 也可浏览。两者只返回名称/路径，不返回文件内容或密钥，错误统一为 `remote-path-listing-failed`。

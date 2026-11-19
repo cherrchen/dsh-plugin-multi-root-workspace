@@ -99,6 +99,15 @@ function fakeSsh(initial: SshStateView): SshClient & {
     setState: (next: SshStateView) => { state = next },
     fail: (method: string, error: PanelError) => { failures.set(method, error) },
     state: async (sessionId: string) => await record('state', [sessionId], state),
+    aliases: async (sessionId: string) => await record('aliases', [sessionId], { aliases: ['prod.host', 'build.internal'] }),
+    listDirectories: async (sessionId: string, environmentId: string, path?: string) => {
+      const base = path === undefined || path === '' ? '/home/deploy' : path
+      return await record('listDirectories', [sessionId, environmentId, path], {
+        path: base,
+        parent: base === '/' ? '/' : base.slice(0, base.lastIndexOf('/')) || '/',
+        entries: [{ name: 'app', path: base === '/' ? '/app' : base + '/app' }],
+      })
+    },
     credentialGenerate: async (sessionId: string, label: string) =>
       await record('credentialGenerate', [sessionId, label], state),
     credentialImport: async (sessionId: string, label: string, privateKey: string, passphrase?: string) =>
@@ -117,11 +126,17 @@ function fakeSsh(initial: SshStateView): SshClient & {
       }),
     environmentSave: async (sessionId: string, revision: number, environment: unknown, fingerprint: string, hostKeyToken?: string) => {
       const draft = environment as Omit<SshEnvironmentView, 'hostKey' | 'helper'>
+      const previous = state.environments.find(existing => existing.environmentId === draft.environmentId)
+      const sameTarget = previous !== undefined
+        && previous.endpoint.hostname === draft.endpoint.hostname
+        && previous.endpoint.port === draft.endpoint.port
+        && previous.endpoint.user === draft.endpoint.user
+        && previous.credential.kind === draft.credential.kind
       const next: SshStateView = {
         ...state,
         revision: revision + 1,
         environments: [...state.environments.filter(existing => existing.environmentId !== draft.environmentId),
-          { ...draft, hostKey: fingerprint, helper: null }],
+          { ...draft, hostKey: fingerprint, helper: sameTarget ? previous.helper : null }],
       }
       const answer = await record('environmentSave', [sessionId, revision, environment, fingerprint, hostKeyToken], next)
       state = next
@@ -242,35 +257,63 @@ function withDialog(options: Parameters<typeof renderDialog>[0], via: 'add' | 'm
   })()
 }
 
-/** Click the wizard's Next button. */
-function nextStep(dialog: HTMLElement): void {
-  fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.step.next' }))
-}
-
-/** Wizard step 1: fill the environment info fields (managed endpoint) and advance. */
-function infoStep(dialog: HTMLElement, fields: { environmentId: string; hostname?: string; user?: string; workspace?: string }): void {
-  fireEvent.change(within(dialog).getByLabelText('ssh.field.environmentId'), { target: { value: fields.environmentId } })
+/** Fill step one's target fields without submitting. */
+function fillConnectStep(dialog: HTMLElement, fields: {
+  environmentId?: string
+  displayName?: string
+  hostname?: string
+  user?: string
+  port?: string
+}): void {
+  if (fields.displayName !== undefined) {
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.displayName'), { target: { value: fields.displayName } })
+  }
+  if (fields.environmentId !== undefined) {
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.environmentId'), { target: { value: fields.environmentId } })
+  }
   if (fields.hostname !== undefined) {
     fireEvent.change(within(dialog).getByLabelText('ssh.field.hostname'), { target: { value: fields.hostname } })
   }
   if (fields.user !== undefined) {
     fireEvent.change(within(dialog).getByLabelText('ssh.field.user'), { target: { value: fields.user } })
   }
-  fireEvent.change(within(dialog).getByLabelText('ssh.field.workspace'), { target: { value: fields.workspace ?? '/srv/app' } })
-  nextStep(dialog)
+  if (fields.port !== undefined) {
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.port'), { target: { value: fields.port } })
+  }
 }
 
-/** Wizard step 2 for a managed credential: pick the credential, scan, confirm the fingerprint. */
-async function managedKeyStep(dialog: HTMLElement): Promise<void> {
-  fireEvent.change(within(dialog).getByRole('combobox', { name: 'ssh.field.managed' }), { target: { value: 'aabbccddeeff' } })
+/** Pick a managed credential in step one. */
+function selectManagedCredential(dialog: HTMLElement, value = 'aabbccddeeff'): void {
+  fireEvent.change(within(dialog).getByRole('combobox', { name: 'ssh.field.managed' }), { target: { value } })
+}
+
+/** Switch step one's credential source. */
+function selectCredentialSource(dialog: HTMLElement, source: 'alias' | 'managed'): void {
+  fireEvent.change(within(dialog).getByRole('combobox', { name: 'ssh.field.credentialSource' }), { target: { value: source } })
+}
+
+/** Click scan, then confirm one fingerprint in the nested host-key dialog. */
+async function scanAndConfirm(
+  dialog: HTMLElement,
+  ssh: { calls: { method: string; args: unknown[] }[] },
+  fingerprint = 'SHA256:scanned',
+): Promise<void> {
   fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
-  fireEvent.click(await within(dialog).findByRole('radio', { name: 'ssh-ed25519 SHA256:scanned' }))
+  const confirm = await screen.findByRole('dialog', { name: 'ssh.scanConfirmTitle' })
+  fireEvent.click(within(confirm).getByRole('radio', { name: new RegExp(fingerprint) }))
+  fireEvent.click(within(confirm).getByRole('button', { name: 'ssh.scanConfirm' }))
+  await callsOf(ssh, 'environmentSave')
 }
 
-/** Click the wizard save button and wait for the save call to land. */
-async function saveKeyStep(dialog: HTMLElement, ssh: { calls: { method: string; args: unknown[] }[] }): Promise<void> {
-  fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.save' }))
-  await callsOf(ssh, 'environmentSave')
+/** Fill step one (managed source), scan, confirm, and land on step two. */
+async function connectAndSave(
+  dialog: HTMLElement,
+  ssh: { calls: { method: string; args: unknown[] }[] },
+  fields: { environmentId?: string; displayName?: string; hostname?: string; user?: string; port?: string },
+): Promise<void> {
+  fillConnectStep(dialog, fields)
+  selectManagedCredential(dialog)
+  await scanAndConfirm(dialog, ssh)
 }
 
 describe('the SSH management dialog', () => {
@@ -297,22 +340,24 @@ describe('the SSH management dialog', () => {
     expect(await callsOf(ssh, 'state')).toEqual([['session-1']])
   })
 
-  it('opens the Add tab directly on the wizard environment step', async () => {
+  it('opens the Add tab on the two-step connection card', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'add')
-    // Step one is the environment card: id, target row, platform, workspace.
+    // Step one is the connection card: source, credential, display/id, target, platform.
     expect(await within(dialog).findByLabelText('ssh.field.environmentId')).toBeTruthy()
-    expect(within(dialog).getByLabelText('ssh.field.workspace')).toBeTruthy()
+    expect(within(dialog).getByLabelText('ssh.field.credentialSource')).toBeTruthy()
+    expect(within(dialog).getByRole('combobox', { name: 'ssh.field.managed' })).toBeTruthy()
+    expect(within(dialog).queryByLabelText('ssh.field.workspace')).toBeNull()
     expect(within(dialog).getByText('ssh.add.personalGuide')).toBeTruthy()
     // The platform hint explains what the pick does.
     expect(within(dialog).getByText('ssh.field.platformHint')).toBeTruthy()
-    // The credential-source radios live here; the managed select waits for step two.
-    expect(within(dialog).getByRole('radio', { name: 'ssh.field.managed' })).toBeTruthy()
-    expect(within(dialog).queryByRole('combobox', { name: 'ssh.field.managed' })).toBeNull()
-    // The stepper lists all four steps; only the first is reachable until filled.
+    // The stepper lists exactly two steps; step two waits for the scan+save.
     const stepper = within(dialog).getByRole('list', { name: 'ssh.step.listLabel' })
-    expect(within(stepper).getAllByRole('listitem')).toHaveLength(4)
-    expect(within(dialog).getByRole('button', { name: 'ssh.step.next' })).toBeTruthy()
+    const chips = within(stepper).getAllByRole('listitem') as HTMLButtonElement[]
+    expect(chips).toHaveLength(2)
+    expect(chips[1]!.disabled).toBe(true)
+    expect(within(dialog).getByRole('button', { name: 'ssh.scan' })).toBeTruthy()
+    expect(within(dialog).queryByRole('button', { name: 'ssh.step.next' })).toBeNull()
     expect(within(dialog).queryByRole('button', { name: 'ssh.add.save' })).toBeNull()
     // All four tabs are present and switchable.
     expect(within(dialog).getByRole('tab', { name: 'ssh.tab.connections' })).toBeTruthy()
@@ -321,6 +366,24 @@ describe('the SSH management dialog', () => {
     // The form uses the primitive Input wrappers and a real field grid; the
     // old row-only .mrfw-input class must not reach a column form again.
     expect(dialog.querySelectorAll('input.mrfw-input, select.mrfw-input, textarea.mrfw-input')).toHaveLength(0)
+  })
+
+  it('keeps the credential controls and the host metadata on one row each', async () => {
+    const ssh = fakeSsh(sshState())
+    const dialog = await withDialog({ ssh }, 'add')
+    const credentialRow = dialog.querySelector('.mrfw-sshCredentialRow') as HTMLElement
+    expect(credentialRow).toBeTruthy()
+    // source + managed credential are fields; the manage action is the third control.
+    expect(credentialRow.querySelectorAll('.mrfw-sshField')).toHaveLength(2)
+    expect(credentialRow.querySelector('select[aria-label="ssh.field.managed"]')).toBeTruthy()
+    expect(within(credentialRow).getByRole('button', { name: 'ssh.credentialManage' })).toBeTruthy()
+
+    const hostGrid = dialog.querySelector('.mrfw-sshGridThree') as HTMLElement
+    expect(hostGrid).toBeTruthy()
+    expect([...hostGrid.querySelectorAll('.mrfw-sshFieldLabel')].slice(0, 3).map(node => node.textContent))
+      .toEqual(['ssh.field.displayName', 'ssh.field.environmentId', 'ssh.field.platform'])
+    // The target row stays a full-width row below the three metadata fields.
+    expect(hostGrid.querySelectorAll('.mrfw-sshTargetRow')).toHaveLength(1)
   })
 
   it('renders Linux and macOS for the platform options instead of raw codes', async () => {
@@ -477,114 +540,108 @@ describe('the SSH management dialog', () => {
     expect((within(dialog).getByLabelText('ssh.privateKey') as HTMLTextAreaElement).value).toBe('')
   })
 
-  it('walks the managed wizard and saves fingerprint+token with the draft', async () => {
+  it('saves the managed connection with a provisional workspace and opens step two', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'add')
-    await within(dialog).findByLabelText('ssh.field.environmentId')
-    infoStep(dialog, { environmentId: 'env-build', hostname: 'build.internal', user: 'ci', workspace: '/srv/ci' })
-    await within(dialog).findByRole('combobox', { name: 'ssh.field.managed' })
-    await managedKeyStep(dialog)
+    fillConnectStep(dialog, { environmentId: 'env-build', hostname: 'build.internal', user: 'ci' })
+    selectManagedCredential(dialog)
+    await scanAndConfirm(dialog, ssh)
     expect(await callsOf(ssh, 'hostKeyScan')).toEqual([['session-1', { port: 22, hostname: 'build.internal' }]])
-    await saveKeyStep(dialog, ssh)
     const saves = await callsOf(ssh, 'environmentSave')
     expect(saves).toEqual([['session-1', 7, {
       environmentId: 'env-build',
       platform: 'linux',
       endpoint: { hostname: 'build.internal', port: 22, user: 'ci' },
       credential: { kind: 'managed', credentialId: 'aabbccddeeff' },
-      workspace: '/srv/ci',
-      transfer: { maxBytes: 268435456, timeoutMs: 600000 },
+      workspace: '/',
     }, 'SHA256:scanned', 'scan-token-1']])
-    // Saving stays inside the wizard: the helper step is next.
-    await within(dialog).findByText('ssh.add.helperGuide')
+    // Step two is where the helper and the remote path live.
+    expect(await within(dialog).findByText('ssh.step.helper')).toBeTruthy()
+    expect(within(dialog).getByLabelText('ssh.field.workspace')).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'ssh.add.bindToProject' })).toBeTruthy()
     expect(within(dialog).queryByRole('tab', { name: 'ssh.tab.connections', selected: true })).toBeNull()
   })
 
-  it('blocks Next on the environment step until environmentId satisfies the slug contract', async () => {
+  it('keeps step one until the environment id satisfies the slug contract', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'add')
     const idInput = await within(dialog).findByLabelText('ssh.field.environmentId')
     fireEvent.change(within(dialog).getByLabelText('ssh.field.hostname'), { target: { value: 'build.internal' } })
     fireEvent.change(within(dialog).getByLabelText('ssh.field.user'), { target: { value: 'ci' } })
-    fireEvent.change(within(dialog).getByLabelText('ssh.field.workspace'), { target: { value: '/srv/ci' } })
-    // Two characters or an illegal character keeps the wizard on this step.
+    // Two characters or an illegal character keeps the scan on this step.
     fireEvent.change(idInput, { target: { value: 'ab' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
     expect(within(dialog).getByText('ssh.field.environmentIdHint')).toBeTruthy()
-    nextStep(dialog)
-    expect(within(dialog).queryByRole('combobox', { name: 'ssh.field.managed' })).toBeNull()
+    expect(ssh.calls.some(call => call.method === 'hostKeyScan')).toBe(false)
     fireEvent.change(idInput, { target: { value: 'BAD ID' } })
-    nextStep(dialog)
-    expect(within(dialog).queryByRole('combobox', { name: 'ssh.field.managed' })).toBeNull()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
+    expect(ssh.calls.some(call => call.method === 'hostKeyScan')).toBe(false)
     fireEvent.change(idInput, { target: { value: 'env-build' } })
-    nextStep(dialog)
-    await within(dialog).findByRole('combobox', { name: 'ssh.field.managed' })
+    selectManagedCredential(dialog)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
+    const confirm = await screen.findByRole('dialog', { name: 'ssh.scanConfirmTitle' })
+    fireEvent.click(within(confirm).getAllByRole('button', { name: 'ssh.cancel' })[0]!)
     expect(within(dialog).queryByText('ssh.field.environmentIdHint')).toBeNull()
   })
 
-  it('rejects bad ports and non-normalized workspaces instead of defaulting them', async () => {
+  it('rejects bad ports in step one and non-normalized paths in step two', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'add')
-    fireEvent.change(await within(dialog).findByLabelText('ssh.field.environmentId'), { target: { value: 'env-build' } })
-    fireEvent.change(within(dialog).getByLabelText('ssh.field.hostname'), { target: { value: 'build.internal' } })
-    fireEvent.change(within(dialog).getByLabelText('ssh.field.user'), { target: { value: 'ci' } })
+    fillConnectStep(dialog, { environmentId: 'env-build', hostname: 'build.internal', user: 'ci' })
     const port = within(dialog).getByLabelText('ssh.field.port')
     for (const bad of ['abc', '0', '65536', '22.5']) {
       fireEvent.change(port, { target: { value: bad } })
-      nextStep(dialog)
+      fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
       const errors = dialog.querySelector('.mrfw-sshErrors') as HTMLElement
       expect(errors).toBeTruthy()
       expect(errors.textContent).toContain('ssh.field.portHint')
       expect(port.closest('.mrfw-sshField')!.classList.contains('mrfw-sshFieldInvalid')).toBe(true)
-      expect(within(dialog).queryByRole('combobox', { name: 'ssh.field.managed' })).toBeNull()
+      expect(ssh.calls.some(call => call.method === 'hostKeyScan')).toBe(false)
     }
     // The error summary is the single place validation text renders: the
     // target row itself stays a pure field row.
     expect(dialog.querySelector('.mrfw-sshTargetRow .mrfw-sshDanger')).toBeNull()
     fireEvent.change(port, { target: { value: '2222' } })
+    selectManagedCredential(dialog)
+    await scanAndConfirm(dialog, ssh)
     const workspace = within(dialog).getByLabelText('ssh.field.workspace')
     for (const bad of ['srv/ci', '/srv//ci', '/srv/../ci', '/srv/ci/', '/srv/.']) {
       fireEvent.change(workspace, { target: { value: bad } })
-      nextStep(dialog)
+      fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.bindToProject' }))
       expect(within(dialog).getByText('ssh.field.workspaceHint')).toBeTruthy()
-      expect(within(dialog).queryByRole('combobox', { name: 'ssh.field.managed' })).toBeNull()
+      expect(ssh.calls.some(call => call.method === 'bindingSave')).toBe(false)
     }
     fireEvent.change(workspace, { target: { value: '/srv/ci' } })
-    nextStep(dialog)
-    await within(dialog).findByRole('combobox', { name: 'ssh.field.managed' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.bindToProject' }))
+    await callsOf(ssh, 'bindingSave')
   })
 
-  it('hides endpoint fields for an alias draft and saves the ssh -G resolution', async () => {
+  it('hides endpoint fields for an alias source and saves the ssh -G resolution', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'add')
-    // Choosing the alias source on step one drops the host fields; id and
-    // workspace are all the info step still needs.
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'ssh.field.alias' }))
+    // Choosing the alias source drops the target fields; ssh -G resolves them
+    // during the scan.
+    selectCredentialSource(dialog, 'alias')
     const idInput = await within(dialog).findByLabelText('ssh.field.environmentId')
     expect(within(dialog).queryByLabelText('ssh.field.hostname')).toBeNull()
-    fireEvent.change(idInput, { target: { value: 'env-alias' } })
-    fireEvent.change(within(dialog).getByLabelText('ssh.field.workspace'), { target: { value: '/srv/app' } })
-    nextStep(dialog)
-    // Step two types the alias and scans; ssh -G backfills the hidden target.
-    const alias = await within(dialog).findByRole('textbox', { name: 'ssh.field.alias' })
     expect(within(dialog).getByText(/ssh\.add\.aliasResolvedNote/)).toBeTruthy()
+    fireEvent.change(idInput, { target: { value: 'env-alias' } })
+    const alias = within(dialog).getByLabelText('ssh.field.alias')
     fireEvent.change(alias, { target: { value: 'prod' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
     expect(await callsOf(ssh, 'hostKeyScan')).toEqual([['session-1', { port: 22, alias: 'prod' }]])
-    await within(dialog).findByRole('radio', { name: /SHA256:scanned/ })
-    await waitFor(() => {
-      expect((within(dialog).getByRole('button', { name: 'ssh.add.save' }) as HTMLButtonElement).disabled).toBe(false)
-    })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.save' }))
+    const confirm = await screen.findByRole('dialog', { name: 'ssh.scanConfirmTitle' })
+    expect(within(confirm).getByText('root@resolved.internal:22')).toBeTruthy()
+    fireEvent.click(within(confirm).getByRole('button', { name: 'ssh.scanConfirm' }))
     const saves = await callsOf(ssh, 'environmentSave')
     expect(saves).toEqual([['session-1', 7, {
       environmentId: 'env-alias',
       platform: 'linux',
       endpoint: { hostname: 'resolved.internal', port: 22, user: 'root' },
       credential: { kind: 'ssh-config', alias: 'prod' },
-      workspace: '/srv/app',
-      transfer: { maxBytes: 268435456, timeoutMs: 600000 },
+      workspace: '/',
     }, 'SHA256:scanned', undefined]])
-    await within(dialog).findByText('ssh.add.helperGuide')
+    await within(dialog).findByText('ssh.step.helper')
   })
 
   it('lays the managed target fields out in user@host:port order', async () => {
@@ -599,32 +656,28 @@ describe('the SSH management dialog', () => {
     expect(separators).toEqual(['@', ':'])
   })
 
-  it('gates saving on a picked credential, a scan, and a confirmed fingerprint', async () => {
+  it('gates the scan on a picked credential and the save on the confirm dialog', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'add')
-    infoStep(dialog, { environmentId: 'env-build', hostname: 'build.internal', user: 'ci' })
-    const save = (): HTMLButtonElement => within(dialog).getByRole('button', { name: 'ssh.add.save' }) as HTMLButtonElement
-    await within(dialog).findByRole('combobox', { name: 'ssh.field.managed' })
-    // No credential picked yet → save stays disabled.
-    expect(save().disabled).toBe(true)
-    fireEvent.change(within(dialog).getByRole('combobox', { name: 'ssh.field.managed' }), { target: { value: 'aabbccddeeff' } })
-    // Credential without a scanned fingerprint → still disabled.
-    expect(save().disabled).toBe(true)
+    fillConnectStep(dialog, { environmentId: 'env-build', hostname: 'build.internal', user: 'ci' })
+    // No credential picked yet: the scan reveals the field error and never
+    // reaches the host.
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
-    await within(dialog).findByRole('radio', { name: 'ssh-ed25519 SHA256:scanned' })
-    await waitFor(() => { expect(save().disabled).toBe(false) })
-    // Switching to the alias source (the radios live on step one) swaps the
-    // credential field for the alias textbox; a malformed alias keeps both
-    // the scan button and save disabled.
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.step.back' }))
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'ssh.field.alias' }))
-    nextStep(dialog)
-    const alias = await within(dialog).findByRole('textbox', { name: 'ssh.field.alias' })
-    fireEvent.change(alias, { target: { value: 'bad alias!' } })
-    expect((within(dialog).getByRole('button', { name: 'ssh.scan' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(save().disabled).toBe(true)
-    fireEvent.change(alias, { target: { value: 'prod.host' } })
-    expect((within(dialog).getByRole('button', { name: 'ssh.scan' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(within(dialog).getByText('ssh.field.credentialIdHint')).toBeTruthy()
+    expect(ssh.calls.some(call => call.method === 'hostKeyScan')).toBe(false)
+    selectManagedCredential(dialog)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
+    const confirm = await screen.findByRole('dialog', { name: 'ssh.scanConfirmTitle' })
+    expect((within(confirm).getByRole('button', { name: 'ssh.scanConfirm' }) as HTMLButtonElement).disabled).toBe(false)
+    // Cancelling the decision saves nothing and leaves the draft on step one.
+    fireEvent.click(within(confirm).getAllByRole('button', { name: 'ssh.cancel' })[0]!)
+    expect(ssh.calls.some(call => call.method === 'environmentSave')).toBe(false)
+    expect(within(dialog).getByLabelText('ssh.field.environmentId')).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
+    const again = await screen.findByRole('dialog', { name: 'ssh.scanConfirmTitle' })
+    fireEvent.click(within(again).getByRole('button', { name: 'ssh.scanConfirm' }))
+    await callsOf(ssh, 'environmentSave')
+    expect(await within(dialog).findByText('ssh.step.helper')).toBeTruthy()
   })
 
   it('lets the step chips move inside the validated range and Back retrace', async () => {
@@ -633,32 +686,34 @@ describe('the SSH management dialog', () => {
     const stepper = within(dialog).getByRole('list', { name: 'ssh.step.listLabel' })
     const chips = () => within(stepper).getAllByRole('listitem') as HTMLButtonElement[]
     await within(dialog).findByLabelText('ssh.field.environmentId')
-    // Steps past the first incomplete one are disabled.
+    // Step two stays unreachable until step one saves.
+    expect(chips()).toHaveLength(2)
     expect(chips()[1]!.disabled).toBe(true)
-    expect(chips()[2]!.disabled).toBe(true)
-    expect(chips()[3]!.disabled).toBe(true)
-    infoStep(dialog, { environmentId: 'env-build', hostname: 'build.internal', user: 'ci' })
-    await within(dialog).findByRole('combobox', { name: 'ssh.field.managed' })
-    // Helper and register stay out of reach until the key step saves.
-    expect(chips()[2]!.disabled).toBe(true)
-    expect(chips()[3]!.disabled).toBe(true)
+    fillConnectStep(dialog, { environmentId: 'env-build', hostname: 'build.internal', user: 'ci' })
+    selectManagedCredential(dialog)
+    await scanAndConfirm(dialog, ssh)
+    await within(dialog).findByText('ssh.step.helper')
+    expect(chips()[1]!.disabled).toBe(false)
     // A completed step is clickable; Back walks one step at a time.
     fireEvent.click(chips()[0]!)
     await within(dialog).findByLabelText('ssh.field.environmentId')
     fireEvent.click(chips()[1]!)
-    await within(dialog).findByRole('combobox', { name: 'ssh.field.managed' })
+    await within(dialog).findByText('ssh.step.helper')
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.step.back' }))
     await within(dialog).findByLabelText('ssh.field.environmentId')
   })
 
-  it('resets the wizard to step one on cancel', async () => {
+  it('resets the wizard to step one and clears the draft', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'add')
     const idInput = await within(dialog).findByLabelText('ssh.field.environmentId')
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.displayName'), { target: { value: 'Build Box' } })
+    expect((idInput as HTMLInputElement).value).toBe('build-box')
     fireEvent.change(idInput, { target: { value: 'env-build' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.reset' }))
     expect((await within(dialog).findByLabelText('ssh.field.environmentId') as HTMLInputElement).value).toBe('')
-    expect(within(dialog).queryByRole('combobox', { name: 'ssh.field.managed' })).toBeNull()
+    expect(within(dialog).getByRole('combobox', { name: 'ssh.field.credentialSource' })).toBeTruthy()
+    expect(within(dialog).queryByText('ssh.step.helper')).toBeNull()
   })
 
   it('keeps the saved-environment editor flat — one card, all sections', async () => {
@@ -689,11 +744,13 @@ describe('the SSH management dialog', () => {
     expect(within(editor).getByText('ssh.field.allowExecHelper')).toBeTruthy()
   })
 
-  it('disables the exec toggle on a new environment too — there is no helper yet', async () => {
+  it('disables the exec toggle on step two until the helper exists', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'add')
+    await connectAndSave(dialog, ssh, { environmentId: 'env-build', hostname: 'build.internal', user: 'ci' })
     const toggle = await within(dialog).findByLabelText('ssh.field.allowExec') as HTMLInputElement
     expect(toggle.disabled).toBe(true)
+    expect(toggle.checked).toBe(false)
     expect(within(dialog).getByText('ssh.field.allowExecHelper')).toBeTruthy()
   })
 
@@ -900,60 +957,106 @@ describe('the SSH management dialog', () => {
     await waitFor(() => expect(remoteCalls).toEqual([{ method: 'remove', args: ['session-1', 'env-helper', 'web'] }]))
   })
 
-  it('walks helper install, link, binding and registration inside the wizard, then lands on Connections', async () => {
+  it('installs the helper, links the config, binds and registers from step two', async () => {
     const remoteCalls: { method: string; args: unknown[] }[] = []
     const ssh = fakeSsh(sshState({ environments: [], linked: false, bindings: [] }))
     const dialog = await withDialog({ ssh, remoteCalls }, 'add')
-    infoStep(dialog, { environmentId: 'env-build', hostname: 'build.internal', user: 'ci' })
-    await within(dialog).findByRole('combobox', { name: 'ssh.field.managed' })
-    await managedKeyStep(dialog)
-    await saveKeyStep(dialog, ssh)
-    // Step three installs the helper; it moves on by itself once installed.
-    await within(dialog).findByText('ssh.add.helperGuide')
+    await connectAndSave(dialog, ssh, { environmentId: 'env-build', hostname: 'build.internal', user: 'ci' })
+    await within(dialog).findByText('ssh.step.helper')
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.helperInstall' }))
     expect(await callsOf(ssh, 'helperInstall')).toEqual([['session-1', 8, 'env-build', undefined]])
-    // Step four opens on the managed-config link because it is not linked yet.
-    await within(dialog).findByText('ssh.add.registerGuide')
+    // The managed config is still unlinked, so the status row offers the link.
     fireEvent.click(await within(dialog).findByRole('button', { name: 'ssh.linkNow' }))
     await callsOf(ssh, 'configLink')
-    // With no binding yet the step offers an inline binding form.
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'ssh.bindingAdd' }))
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.workspace'), { target: { value: '/srv/app' } })
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'ssh.field.allowTransfer' }))
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'ssh.field.allowExec' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.bindToProject' }))
     const bindings = await callsOf(ssh, 'bindingSave')
-    expect(bindings[0]![2]).toMatchObject({ environmentId: 'env-build', rootId: 'primary' })
-    // Then the endpoint registers through the same remotes path the panel uses.
-    const register = await within(dialog).findByRole('button', { name: 'panel.remoteRegister' })
-    await waitFor(() => { expect((register as HTMLButtonElement).disabled).toBe(false) })
-    fireEvent.click(register)
+    expect(bindings[0]![2]).toMatchObject({
+      environmentId: 'env-build', rootId: 'primary', path: '/srv/app', actions: ['read', 'write', 'exec'],
+    })
+    const saves = await callsOf(ssh, 'environmentSave')
+    expect(saves).toHaveLength(2)
+    expect(saves[1]![2]).toMatchObject({
+      workspace: '/srv/app',
+      exec: { shell: ['/bin/sh', '-c'] },
+      transfer: { maxBytes: 268_435_456, timeoutMs: 600_000 },
+    })
     await waitFor(() => expect(remoteCalls).toEqual([{ method: 'add', args: ['session-1', 'env-build', 'primary'] }]))
-    // Finish closes the wizard on the new environment's row.
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.step.finish' }))
+    // Binding finishes the wizard on the new environment's row.
     expect(await within(dialog).findByText('ssh.environments')).toBeTruthy()
     expect(within(dialog).getAllByText('env-build').length).toBeGreaterThan(0)
   })
 
-  it('lets the helper and register steps be skipped — the connection stays visible with its readiness chain', async () => {
+  it('skips step two and leaves the saved connection with its readiness chain', async () => {
     const ssh = fakeSsh(sshState({ environments: [], bindings: [] }))
     const dialog = await withDialog({ ssh }, 'add')
-    infoStep(dialog, { environmentId: 'env-skip', hostname: 'skip.internal', user: 'ci' })
-    await within(dialog).findByRole('combobox', { name: 'ssh.field.managed' })
-    await managedKeyStep(dialog)
-    await saveKeyStep(dialog, ssh)
-    await within(dialog).findByText('ssh.add.helperGuide')
+    await connectAndSave(dialog, ssh, { environmentId: 'env-skip', hostname: 'skip.internal', user: 'ci' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.step.skip' }))
-    // Skipping the helper still walks the register step: the inline binding
-    // form needs no helper, but the register button itself explains why it
-    // stays disabled.
-    await within(dialog).findByText('ssh.add.registerGuide')
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'ssh.bindingAdd' }))
-    await callsOf(ssh, 'bindingSave')
-    expect(await within(dialog).findByText('ssh.add.registerNeedsHelper')).toBeTruthy()
-    expect((within(dialog).getByRole('button', { name: 'panel.remoteRegister' }) as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.step.finish' }))
     expect(await within(dialog).findByText('ssh.environments')).toBeTruthy()
     const rows = await within(dialog).findAllByText('env-skip')
     expect(rows[0]!.closest('.mrfw-row')).toBeTruthy()
-    // The helper was skipped, so no install ran and no endpoint registered.
+    // The helper and the binding were skipped, so the row still shows them as
+    // pending readiness steps.
+    const row = dialog.querySelector('.mrfw-sshEnvRow') as HTMLElement
+    expect(within(row).getByText('ssh.step.helper')).toBeTruthy()
+    expect(within(row).getByText('ssh.step.binding')).toBeTruthy()
     expect(ssh.calls.map(call => call.method)).not.toContain('helperInstall')
+    expect(ssh.calls.map(call => call.method)).not.toContain('bindingSave')
+  })
+
+  it('derives the environment id from the display name until the id is edited', async () => {
+    const ssh = fakeSsh(sshState())
+    const dialog = await withDialog({ ssh }, 'add')
+    const id = within(dialog).getByLabelText('ssh.field.environmentId') as HTMLInputElement
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.displayName'), { target: { value: 'Prod Build' } })
+    expect(id.value).toBe('prod-build')
+    fireEvent.change(id, { target: { value: 'custom-id' } })
+    fireEvent.change(within(dialog).getByLabelText('ssh.field.displayName'), { target: { value: 'Other Name' } })
+    expect((within(dialog).getByLabelText('ssh.field.environmentId') as HTMLInputElement).value).toBe('custom-id')
+  })
+
+  it('opens the credential manager dialog from the managed source', async () => {
+    const ssh = fakeSsh(sshState())
+    const dialog = await withDialog({ ssh }, 'add')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialManage' }))
+    const manager = await screen.findByRole('dialog', { name: 'ssh.credentials' })
+    fireEvent.click(within(manager).getByRole('button', { name: 'ssh.credentialGenerate' }))
+    fireEvent.change(within(manager).getByLabelText('ssh.label'), { target: { value: 'new key' } })
+    fireEvent.click(within(manager).getByRole('button', { name: 'panel.addConfirm' }))
+    expect(await callsOf(ssh, 'credentialGenerate')).toEqual([['session-1', 'new key']])
+    fireEvent.click(within(manager).getByRole('button', { name: 'panel.close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.credentials' })).toBeNull())
+    expect(within(dialog).getByLabelText('ssh.field.environmentId')).toBeTruthy()
+  })
+
+  it('browses remote directories and fills the remote path', async () => {
+    const ssh = fakeSsh(sshState({ environments: [], bindings: [] }))
+    const dialog = await withDialog({ ssh }, 'add')
+    await connectAndSave(dialog, ssh, { environmentId: 'env-browse', hostname: 'browse.internal', user: 'ci' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.pickPath' }))
+    const picker = await screen.findByRole('dialog', { name: 'ssh.pathPickerTitle' })
+    fireEvent.click(await within(picker).findByRole('button', { name: 'app' }))
+    await waitFor(() => {
+      expect((within(picker).getByLabelText('ssh.binding.path') as HTMLInputElement).value).toBe('/home/deploy/app')
+    })
+    fireEvent.click(within(picker).getByRole('button', { name: 'ssh.pathPickerUse' }))
+    expect((within(dialog).getByLabelText('ssh.field.workspace') as HTMLInputElement).value).toBe('/home/deploy/app')
+    expect(await callsOf(ssh, 'listDirectories')).toHaveLength(2)
+  })
+
+  it('keeps the manual path field usable when the directory listing fails', async () => {
+    const ssh = fakeSsh(sshState({ environments: [], bindings: [] }))
+    ssh.fail('listDirectories', new PanelError('remote-path-listing-failed', 'boom'))
+    const dialog = await withDialog({ ssh }, 'add')
+    await connectAndSave(dialog, ssh, { environmentId: 'env-manual', hostname: 'manual.internal', user: 'ci' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.pickPath' }))
+    const picker = await screen.findByRole('dialog', { name: 'ssh.pathPickerTitle' })
+    expect(await within(picker).findByText('ssh.pathPickerFailed')).toBeTruthy()
+    fireEvent.change(within(picker).getByLabelText('ssh.binding.path'), { target: { value: '/srv/app' } })
+    fireEvent.click(within(picker).getByRole('button', { name: 'ssh.pathPickerUse' }))
+    expect((within(dialog).getByLabelText('ssh.field.workspace') as HTMLInputElement).value).toBe('/srv/app')
   })
 
   it('points unregistered personal endpoints at the readiness chain and hides the hint once all are registered', async () => {
