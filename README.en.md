@@ -300,7 +300,6 @@ Switching to a less isolated mode while the switch is on goes through the risk c
 
 The model-side `remote_copy` / `remote_bash` tools and capability projection additionally require the broker credential-isolation attestation under team/hardened: the broker block is supplied by the deployment in a dedicated profile (hardened) or the Mode-tab fields (team), and any failed step (SSH capability gate, plane not ready, `danger-full-access` session — refused under hardened only, attestation) installs nothing. Every remote call still goes through ordered Registry admission. Turning the switch off unmounts the whole remote subtree and restores the plane to `disabled` (no `remote-1` listener, no remote domain). Per-mode protection boundaries, file layout, and RPC refusal codes live in the [SSH remote environments reference](./docs/reference/ssh-remote-environments.md) (Chinese); deployment steps and rollback for team/hardened live in the [control-plane reference](./docs/reference/multi-environment-control-plane.md) (Chinese).
 
-
 ### UI entries
 
 - **Sidebar and New Session page**: the **Folders** action at the sidebar foot opens the **Workspace folders** dialog; from DSH `0.2.1-alpha.3`, the same entry sits at the right edge of the New Session hero row (no chevron; icon-only in narrow windows). The dialog adds/removes roots, edits aliases and access, toggles Skills per root, copies paths, reveals in the file manager, offers Retry plus the Worktree suggestions entry.

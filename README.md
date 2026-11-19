@@ -300,7 +300,6 @@ Issue #32 的多执行环境能力以实验性开关形式随默认组合发货�
 
 模型侧的 `remote_copy` / `remote_bash` 与能力投影在 team/hardened 下还要通过 broker 凭据隔离证明：broker 块由部署方在专用 profile（hardened）或“模式设置”字段（team）提供，任何一步失败（SSH 兼容门禁、控制面未就绪、`danger-full-access` 会话仅对 hardened 拒绝、证明失败）都不安装工具。每次远端调用仍由 Registry 排序准入。关闭开关即卸载全部远端子树并把控制面恢复为 `disabled`（无 `remote-1` 监听、无远端域）。各档保护边界、文件布局、RPC 拒绝码见 [SSH 远端环境参考](./docs/reference/ssh-remote-environments.md)；team/hardened 的部署步骤与回滚见[控制面参考](./docs/reference/multi-environment-control-plane.md)。
 
-
 ### 界面入口
 
 - **侧栏与新会话页**：侧栏底部的 **工作区目录** 动作打开「工作区目录」对话框；DSH `0.2.1-alpha.3` 起，新会话页工作区行右端也有同一入口（无下拉箭头，窄窗口只显示图标）。对话框可添加/移除根、编辑别名与权限、逐根开关 Skills、复制路径、在文件管理器中显示，以及刷新列表的「重试」和「Worktree 建议」入口。
