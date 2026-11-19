@@ -1476,7 +1476,15 @@ describe('the remote-environment section', () => {
     })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByText('app · /srv/root')).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByText('/srv/root')).toBeTruthy() })
+    // The remote row is the same workspace row the roots use: the root id is
+    // a name-line badge and the path is the shared copy control.
+    const remoteRow = screen.getByText('/srv/root').closest('.mrfw-row') as HTMLElement
+    expect(remoteRow.querySelector('.mrfw-rootText .mrfw-pathCopy')).toBeTruthy()
+    const badges = remoteRow.querySelectorAll('.mrfw-rootName .mrfw-accessBadge')
+    // Platform, registration state, and the binding's root id ride the name line.
+    expect(badges).toHaveLength(3)
+    expect(badges[2]?.textContent).toBe('app')
     expect(screen.getByText(`${NS}.remote.state.unregistered`)).toBeTruthy()
     expect(screen.getByText(`${NS}.panel.remoteCapabilities`)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.remoteRegister` }))
@@ -1488,6 +1496,24 @@ describe('the remote-environment section', () => {
     await waitFor(() => { expect(screen.getByText(`${NS}.remote.state.registered`)).toBeTruthy() })
   })
 
+  it('copies a remote workspace path through the shared row control', async () => {
+    const harness = mount()
+    harness.setRemotes({
+      primaryRoot: '/repos/primary',
+      mode: 'workspace-write',
+      status: { state: 'ready' },
+      endpoints: [ENDPOINT],
+    })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const path = await screen.findByText('/srv/root')
+    const remoteRow = path.closest('.mrfw-row') as HTMLElement
+    fireEvent.click(remoteRow.querySelector('.mrfw-pathCopy') as HTMLElement)
+    await waitFor(() => { expect(navigator.clipboard.writeText).toHaveBeenCalledWith('/srv/root') })
+    // The shared control swaps its accessible name after a successful copy.
+    expect(remoteRow.querySelector('.mrfw-pathCopy')?.getAttribute('aria-label')).toBe(`${NS}.panel.copied`)
+  })
+
   it('drops a remote answer that belongs to the previous session', async () => {
     const harness = mount()
     harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'disabled' }, endpoints: [] })
@@ -1497,12 +1523,12 @@ describe('the remote-environment section', () => {
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remotes')).toBe(true) })
     harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'ready' }, endpoints: [ENDPOINT] })
     act(() => { harness.setSession('session-2') })
-    await waitFor(() => { expect(screen.getByText('app · /srv/root')).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByText('/srv/root')).toBeTruthy() })
     harness.release()
     await new Promise<void>(resolve => { setTimeout(resolve, 20) })
     // The late disabled answer must not replace the new session's view.
     expect(screen.queryByText(/panel.remoteUnavailable/)).toBeNull()
-    expect(screen.getByText('app · /srv/root')).toBeTruthy()
+    expect(screen.getByText('/srv/root')).toBeTruthy()
   })
 
   it('submits one registration per click while the request is in flight', async () => {
