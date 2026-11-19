@@ -199,6 +199,8 @@ describe.skipIf(process.platform === 'win32')('one session: two local roots → 
     expect(listed.status.state).toBe('ready')
     expect(listed.endpoints.map(endpoint => `${endpoint.environmentId}/${endpoint.rootId}:${endpoint.state}`))
       .toEqual(['build/app:registered', 'device/out:unregistered'])
+    // The manifest names an account and an SSH host alias; it carries no port.
+    expect(listed.endpoints.map(endpoint => endpoint.target)).toEqual(['builder@build-host', 'deploy@device-host'])
     expect(listed.endpoints[0]!.capabilities).toMatchObject({ read: true, write: true, exec: true, receive: true, send: true })
     expect(listed.endpoints[1]!.capabilities).toMatchObject({ read: false, write: false, exec: false })
     // Listing is a pure read: no connection opened, no remote call at all.
