@@ -52,7 +52,7 @@ import {
   type RemoteTransferView,
   type RemotesView,
 } from './remote/panel-contract.ts'
-import { parseSshCall, SSH_ENDPOINTS, type SshEndpoint } from './remote/personal-contract.ts'
+import { parseSshCall, parseSshSettingsCall, SSH_SETTINGS_CHANNEL, type SshSettingsView, SSH_ENDPOINTS, type SshEndpoint } from './remote/personal-contract.ts'
 import { handlePersonalEndpoint } from './remote/personal-endpoints.ts'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
@@ -253,9 +253,12 @@ export function apply(ctx: Context, config: CommandConfig = {}): void {
       ctx.logger.warn('multi-root: connection resolved without the service; the panel channel is not mounted')
       return
     }
-    const dispose = connectionRpcFor(connectionCtx, connection).handle(PANEL_CHANNEL, async (endpoint, payload, signal) =>
+    const rpc = connectionRpcFor(connectionCtx, connection)
+    const disposePanel = rpc.handle(PANEL_CHANNEL, async (endpoint, payload, signal) =>
       await dispatchPanelRequest(ctx, endpoint, payload, signal))
-    return () => { void dispose() }
+    const disposeSettings = rpc.handle(SSH_SETTINGS_CHANNEL, async (endpoint, payload) =>
+      await dispatchPanelRequest(ctx, endpoint, payload, undefined, true))
+    return () => { void disposeSettings(); void disposePanel() }
   })
 }
 
@@ -845,9 +848,28 @@ async function dispatchPanelRequest(
   endpoint: string,
   payload: unknown,
   signal?: AbortSignal,
+  sshSettings = false,
 ): Promise<ConnectionRpcResult<unknown>> {
   let panelSessionId: string | undefined
   try {
+    if (sshSettings) {
+      const registry = ctx.multiRootRegistry
+      if (endpoint === 'status' && payload !== null && typeof payload === 'object' && !Array.isArray(payload) && Object.keys(payload).length === 0) {
+        await registry.refreshRemotePersonal()
+        const value: SshSettingsView = {
+          custodyMode: registry.remoteMode,
+          status: registry.remoteStatus,
+          connections: registry.remoteMode === 'personal' ? [] : (registry.remoteManifest?.environments ?? []).map(environment => ({
+            environmentId: environment.environmentId, displayName: environment.displayName,
+            platform: environment.platform, target: remoteTargetOf(environment),
+          })),
+        }
+        return { ok: true, value }
+      }
+      const call = parseSshSettingsCall(endpoint, payload)
+      if (!call.ok) return { ok: false, error: { code: 'panel/bad-request', message: call.message, details: {} } }
+      return { ok: true, value: await handlePersonalEndpoint(ctx, registry, undefined, call.value) }
+    }
     // Worktree endpoints are a separate contract with their own strict schema;
     // they never pass through the roots panel schema (ADR-0039 §7).
     if ((WORKTREE_ENDPOINTS as readonly string[]).includes(endpoint)) {

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { mountRegistryStack } from './support/registry-stack.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import MultiRootWorktrees from '../src/worktrees.ts'
+import { PANEL_CHANNEL } from '../src/contract.ts'
 import * as CommandModule from '../src/command.ts'
 import type { WorktreeWaitView } from '../src/worktrees-contract.ts'
 
@@ -50,7 +51,7 @@ async function mount(config: { enabled?: boolean } = {}): Promise<{ handler: Han
   ctx.provide('webServer', {} as never)
   ctx.provide('connection', {
     rpc: {
-      handle: (channel: string, value: Handler) => { expect(channel).toBe('/multi-root-workspace'); handler = value; return async () => {} },
+      handle: (channel: string, value: Handler) => { if (channel === PANEL_CHANNEL) handler = value; return async () => {} },
     },
   } as never)
   await ctx.plugin(MultiRootWorktrees, { enabled: config.enabled ?? true, waitTimeoutMs: 100 })

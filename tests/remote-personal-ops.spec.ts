@@ -116,6 +116,26 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       .not.toBe(firstId)
   })
 
+  it('retains an existing remote transfer peer on capability edits without adding new remote peers', async () => {
+    const { registry, personalPath } = world()
+    const transfer = { direction: 'export' as const, peer: { environmentId: 'dev-two', rootId: 'logs' } }
+    const binding = { environmentId: 'dev-box', rootId: 'app', path: '/srv/app', actions: ['read'] as const, transfers: [transfer] }
+    await savePersonalConfig(personalPath, {
+      ...CONFIG([MANAGED, { ...SSH_CONFIG_ENV, environmentId: 'dev-two' }]),
+      bindings: [
+        { ...binding, primary: '/one', actions: [...binding.actions] },
+        { primary: '/one', environmentId: 'dev-two', rootId: 'logs', path: '/srv/logs', actions: ['write'] },
+      ],
+    }, 0)
+    const request = { endpoint: 'sshBindingSave' as const, sessionId: 's', revision: 0, binding: { ...binding, actions: ['read', 'write'] as const } }
+    await expect(handlePersonalEndpoint(undefined as never, registry, '/one', {
+      ...request, binding: { ...request.binding, actions: [...request.binding.actions] },
+    })).resolves.toMatchObject({ bindings: expect.arrayContaining([expect.objectContaining({ environmentId: 'dev-box', transfers: [transfer] })]) })
+    await expect(handlePersonalEndpoint(undefined as never, registry, '/one', {
+      ...request, revision: 1, binding: { ...request.binding, actions: ['read'], transfers: [{ ...transfer, direction: 'import' }] },
+    })).rejects.toMatchObject({ code: 'personal-config-invalid' })
+  })
+
   it('the wire contract refuses an environmentId the store would reject (3–63 chars)', async () => {
     const { parseSshCall } = await import('../src/remote/personal-contract.ts')
     const draft = {

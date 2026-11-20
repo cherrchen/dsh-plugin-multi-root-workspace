@@ -10,7 +10,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { MultiRootRegistry } from '../registry.ts'
 import { RemoteAdmissionError } from './contract.ts'
 import { checkRemotePath } from './manifest.ts'
-import type { SshCall, SshStateView } from './personal-contract.ts'
+import type { SshCall, SshSettingsCall, SshStateView } from './personal-contract.ts'
 import { loadPersonalConfig, savePersonalConfig, type PersonalConfig, type PersonalEnvironment } from './personal/config.ts'
 import { CredentialStore, defaultExec, type ExecFile } from './personal/credentials.ts'
 import { helperProtocol, HostKeyScans, installAccessKey, installHelper, testConnection } from './personal/operations.ts'
@@ -57,10 +57,10 @@ function requirePersonal(registry: MultiRootRegistry): PersonalPaths {
   return { personalPath, credentialRoot }
 }
 
-async function sshState(registry: MultiRootRegistry, paths: PersonalPaths, primary: string): Promise<SshStateView> {
+async function sshState(registry: MultiRootRegistry, paths: PersonalPaths, primary: string | undefined): Promise<SshStateView> {
   const config = loadPersonalConfig(paths.personalPath)
   const store = new CredentialStore(paths.credentialRoot)
-  const key = primaryKey(primary)
+  const key = primary === undefined ? undefined : primaryKey(primary)
   return {
     mode: 'personal',
     enabled: registry.remoteEnabled,
@@ -68,13 +68,13 @@ async function sshState(registry: MultiRootRegistry, paths: PersonalPaths, prima
     revision: config.revision,
     environments: config.environments,
     credentials: store.list(),
-    bindings: config.bindings.filter(binding => primaryKey(binding.primary) === key)
+    bindings: key === undefined ? [] : config.bindings.filter(binding => primaryKey(binding.primary) === key)
       .map(({ bindingId: _bindingId, ...binding }) => binding),
   }
 }
 
 async function mutate(
-  registry: MultiRootRegistry, primary: string, paths: PersonalPaths,
+  registry: MultiRootRegistry, primary: string | undefined, paths: PersonalPaths,
   expectedRevision: number, edit: (config: PersonalConfig) => PersonalConfig | Promise<PersonalConfig>,
 ): Promise<SshStateView> {
   const config = loadPersonalConfig(paths.personalPath)
@@ -122,7 +122,7 @@ async function sshConfigIdentity(
  * @returns the answer value (`sshState`, scan keys, or a connection test).
  */
 export async function handlePersonalEndpoint(
-  ctx: Context, registry: MultiRootRegistry, primary: string, call: SshCall, deps: PersonalDeps = {},
+  ctx: Context, registry: MultiRootRegistry, primary: string | undefined, call: SshCall | SshSettingsCall, deps: PersonalDeps = {},
 ): Promise<unknown> {
   if (call.endpoint !== 'sshState' && call.endpoint !== 'sshHostKeyScan' && call.endpoint !== 'sshEnvironmentTest'
     && call.endpoint !== 'sshConfigAliases' && call.endpoint !== 'sshListDirectories') {
@@ -132,7 +132,7 @@ export async function handlePersonalEndpoint(
 }
 
 async function runPersonalEndpoint(
-  ctx: Context, registry: MultiRootRegistry, primary: string, call: SshCall, deps: PersonalDeps,
+  ctx: Context, registry: MultiRootRegistry, primary: string | undefined, call: SshCall | SshSettingsCall, deps: PersonalDeps,
 ): Promise<unknown> {
   const paths = requirePersonal(registry)
   const exec = deps.exec ?? defaultExec
@@ -316,19 +316,34 @@ async function runPersonalEndpoint(
       }))
     }
     case 'sshBindingSave':
+      if (primary === undefined) throw new RemoteAdmissionError('panel/bad-request', 'a Workspace binding requires a live session')
       try {
         checkRemotePath(call.binding.path)
       } catch {
         throw new RemoteAdmissionError('workspace-invalid', 'the remote Root must be a normalized absolute POSIX path')
       }
-      return await mutate(registry, primary, paths, call.revision, config => ({
-        ...config,
-        bindings: [
-          ...config.bindings.filter(binding => !(binding.environmentId === call.binding.environmentId && binding.rootId === call.binding.rootId && primaryKey(binding.primary) === primaryKey(primary))),
-          { ...call.binding, primary, bindingId: randomUUID() },
-        ],
-      }))
+      return await mutate(registry, primary, paths, call.revision, config => {
+        const { binding } = call
+        const key = primaryKey(primary)
+        const sameRoot = (entry: PersonalConfig['bindings'][number]): boolean => entry.environmentId === binding.environmentId
+          && entry.rootId === binding.rootId && primaryKey(entry.primary) === key
+        const previous = config.bindings.find(sameRoot)
+        // Personal UI can keep an existing deployment-style pairing when
+        // editing this directory, but it may only add local transfer peers.
+        for (const transfer of binding.transfers ?? []) {
+          if (transfer.peer.environmentId === 'local') continue
+          if (previous?.path !== binding.path || !previous.transfers?.some(entry => entry.direction === transfer.direction
+            && entry.peer.environmentId === transfer.peer.environmentId && entry.peer.rootId === transfer.peer.rootId)) {
+            throw new RemoteAdmissionError('personal-config-invalid', 'a personal binding can only add local transfer peers')
+          }
+        }
+        return {
+          ...config,
+          bindings: [...config.bindings.filter(entry => !sameRoot(entry)), { ...binding, primary, bindingId: randomUUID() }],
+        }
+      })
     case 'sshBindingRemove':
+      if (primary === undefined) throw new RemoteAdmissionError('panel/bad-request', 'a Workspace binding requires a live session')
       return await mutate(registry, primary, paths, call.revision, config => ({
         ...config,
         bindings: config.bindings.filter(binding => !(binding.environmentId === call.environmentId && binding.rootId === call.rootId && primaryKey(binding.primary) === primaryKey(primary))),

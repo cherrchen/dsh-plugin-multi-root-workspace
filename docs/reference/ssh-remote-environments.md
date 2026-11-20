@@ -4,7 +4,7 @@
 
 ## 托管档位
 
-`multi-root-remote-tools` 设置的 `mode` 字段决定凭据托管方式。UI 入口在 Workspace Folders 面板的“管理 SSH 远端”对话框 →“模式设置”Tab（`src/client/ssh-panel.tsx`，控件见 `src/client/remote-custody.tsx`）；插件设置卡只保留启用开关。
+`multi-root-remote-tools` 设置的 `mode` 字段决定凭据托管方式。UI 入口在「管理 SSH 远端」对话框的「模式设置」Tab（`src/client/ssh-panel.tsx`，控件见 `src/client/remote-custody.tsx`），可从 Workspace Folders 或插件详情打开。
 
 | 档位 | 凭据 | 部署证明 | 说明 |
 | --- | --- | --- | --- |
@@ -29,6 +29,8 @@
 面板通道 `PANEL_CHANNEL` 上的 `ssh*` 端点（`src/remote/personal-contract.ts`）：每个请求携带 `sessionId`，Host 由会话解析主根；未知字段即 `panel/bad-request`。所有端点在开关未开或 `mode !== 'personal'` 时拒绝 `remote-personal-unavailable`；所有变更端点返回刷新后的 `sshState`。
 
 `sshState`、`sshCredentialGenerate`、`sshCredentialImport`、`sshCredentialPassword`、`sshCredentialRemove`（`credential-in-use`）、`sshConfigAliases`（只读：本机 `~/.ssh/config` 的字面 `Host` 别名，跳过通配/否定项，读取失败返回空数组）、`sshListDirectories`（只读：按 `environmentId` 经 SFTP 列目录，返回 `{ path, parent, entries: [{ name, path }] }`，只含目录名与路径、最多 500 条；managed 环境以 `-F <credentialRoot>/ssh_config` 连接，因此未链接 `~/.ssh/config` 也可浏览；错误统一为 `remote-path-listing-failed`，Host 原文随错误显示）、`sshHostKeyScan`（直连 `hostname`/`port` 触网探测，返回 60 秒有界令牌，`host-key-token-expired` / `host-key-mismatch`；`alias` 形式经 `ssh -G` 在 Host 解析并返回用户 known_hosts 指纹与解析出的 endpoint，不触网、无令牌）、`sshEnvironmentSave`（托管凭据需 `hostKeyToken` + `fingerprint`；**例外**：target 身份（hostname/port/user）与 managed `credentialId` 均未变、且提交的 `fingerprint` 等于已记录 `hostKey` 时，环境元数据或能力更新可复用已记录指纹而不带 token；`ssh-config` 凭据的指纹必须匹配用户 known_hosts；带 `exec` 的保存只在 helper 已安装且目标身份未变时允许，否则 `exec-requires-helper`，在消耗扫描令牌与写 `known_hosts` 之前拒绝）、`sshEnvironmentRemove`（仍有绑定时为 `environment-in-use`）、`sshEnvironmentTest`、`sshHelperInstall`（`helper-hash-mismatch`）、`sshAccessKeyInstall`、`sshBindingSave`（主根由 Host 注入，校验远端目录）、`sshBindingRemove`、`sshConfigLink`。
+
+插件详情的「SSH 远端」通过独立的 `/multi-root-workspace-ssh-settings` Connection 通道打开。它使用同一 Host 身份校验，直接读取插件级状态和管理连接、凭据，不要求活动会话。该通道拒绝 Workspace 绑定、目录浏览与登记/移除请求；这些操作继续通过 `PANEL_CHANNEL` 由当前会话派生主根。
 
 无任何端点返回私钥或密码字节。
 
@@ -77,8 +79,8 @@ Registry 的 owner 是唯一打开远程域和 `remote-1` 监听的 Host。若�
 
 GUI 入口有两处：
 
-- **插件详情设置卡**（`RemoteSwitchRow`）：只保留开关与启用风险确认。开启后 Host 的远程控制面按当前 `mode` 启动；开关关闭立即卸载。
-- **Workspace Folders 面板远端区块**（`src/client/WorkspaceFoldersAction.tsx`）提供「管理 SSH 远端…」与个人模式的「管理远端 Root 绑定」两个入口。远端工作区列表与主要/附属工作目录共用 `WorkspaceRow`，显示平台、登记状态、`rootId` 与权限。可复制位置在 personal 模式为 `user@host:port/path`，部署清单为 `user@host/path`。行尾登记或撤回已核验的授权；解除绑定通过绑定对话框完成。
+- **插件详情设置卡**：开启 SSH 远端环境后，第一行显示「SSH 远端」和「管理」按钮，进入与工作区面板共用的管理对话框。实验开关仍负责启用风险确认；开关关闭时隐藏该设置入口。
+- **Workspace Folders 的「远端工作目录」**（`src/client/WorkspaceFoldersAction.tsx`）与「主要工作目录」「附属工作目录」并列，标题行同时提供「管理 SSH 远端…」与个人模式的「管理远端 Root 绑定」。远端目录列表与主要/附属工作目录共用 `WorkspaceRow`。首行依次显示末级文件夹名、SSH 环境名标签、当前会话的有效能力。第二行为可复制地址，personal 模式为 `user@host:port/path`，部署清单为 `user@host/path`。行尾「…」可登记或移除授权。personal 模式可在该菜单中修改读取、写入、执行及本地传输对端，保存沿用绑定的 CAS 校验。对已登记目录修改能力后，通过同一菜单重新登记。解除绑定通过绑定对话框完成。
 
 ### SSH 远端管理对话框
 
@@ -88,7 +90,7 @@ GUI 入口有两处：
 
 三个 Tab，另有一个独立的“添加连接”Dialog：
 
-**添加连接 Dialog** 从「已有连接」打开。选择本机 ssh-config 条目或插件托管凭据，填写显示名、环境 ID、平台与目标。主机钥扫描结果经弹窗确认后，保存连接并返回「已有连接」。本机来源可从 `sshConfigAliases` 选择，托管来源可从嵌套的凭据管理对话框添加凭据。
+**添加连接 Dialog** 从「已有连接」打开。选择本机 ssh-config 条目或插件托管凭据，填写显示名、环境 ID、平台与目标。选择器和操作按钮均为 32px 高，字段保留标签和按需显示的校验反馈。主机钥扫描结果经弹窗确认后，保存连接并返回「已有连接」。本机来源可从 `sshConfigAliases` 选择，托管来源可从嵌套的凭据管理对话框添加凭据。
 
 1. **已有连接** 提供连接测试、Helper 安装、访问密钥安装、SSH 配置链接与连接编辑。连接编辑可设置命令执行和文件传输的可用性，每条绑定再单独选择权限。删除仍被绑定的连接会返回 `environment-in-use`。team/hardened 显示部署清单的只读列表。
 2. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管，GUI 不读取、不创建。
@@ -96,7 +98,7 @@ GUI 入口有两处：
 
 ### Workspace Root 绑定对话框
 
-从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。选择已有连接，填写 Root ID、远端路径和允许的动作。可以通过只读 SFTP 选择目录，也可以手动输入规范化的 POSIX 绝对路径。本地传输对端可选 `primary` 和可用附加根的 `aliasId`。保存后在 Workspace Folders 的对应行登记。绑定对话框可编辑或解除一条绑定，其他绑定和 SSH 连接独立保留。
+从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。选择已有连接，填写 Root ID、远端路径和允许的动作。可以通过只读 SFTP 选择目录，也可以手动输入规范化的 POSIX 绝对路径。本地传输对端可选 `primary` 和可用附加根的 `aliasId`。保存后从 Workspace Folders 对应目录的「…」菜单登记。绑定对话框可编辑或解除一条绑定，其他绑定和 SSH 连接独立保留。
 
 连接和绑定变更携带当前 `revision`。发生 CAS 冲突时刷新 `sshState` 后可重试，表单保留待提交内容。会话切换使旧请求的响应失效。已确认保存的连接无需完成后续 Workspace 操作。
 

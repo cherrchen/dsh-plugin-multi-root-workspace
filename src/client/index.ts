@@ -35,7 +35,7 @@ import { createPanelClient, type PanelClient } from './panel-client.ts'
 import { createWorktreeClient } from './worktree-client.ts'
 import { WorktreePrompt } from './WorktreePrompt.tsx'
 import { createRemotesClient, type RemotesClient } from './remotes-client.ts'
-import { createSshClient, type SshClient } from './ssh-client.ts'
+import { createSshClient, createSshSettingsClient, type SshClient } from './ssh-client.ts'
 import { DICTIONARIES, NS } from './locales.ts'
 import { STYLES } from './styles.ts'
 import { HeroWorkspaceEntry } from './HeroWorkspaceEntry.tsx'
@@ -188,7 +188,7 @@ export function apply(ctx: ClientContext): void {
   // The settings card owns the same remote-tools form the Workspace panel's
   // SSH area renders; install it first so the dialog dependency bundle can
   // expose that shared form.
-  const worktreeSettings = installSkillsSettingsCard(ctx, t)
+  const worktreeSettings = installSkillsSettingsCard(ctx, t, connectionHandle === undefined ? undefined : createSshSettingsClient(connectionHandle))
   // One dependency bundle for the Workspace Folders dialog across all four
   // entries (footer + the menu's shared owner, Files switcher/launcher, hero):
   // the panel must render identical sections no matter which trigger opened

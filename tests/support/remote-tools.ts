@@ -14,6 +14,7 @@ import Projections from '@deepseek-ai/dsh-session-projection'
 import Policy from '@deepseek-ai/dsh-sandbox-policy'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
+import { PANEL_CHANNEL } from '../../src/contract.ts'
 import * as CommandModule from '../../src/command.ts'
 import { mountRemoteTools as registerTools } from '../../src/remote/tools-registration.ts'
 import type { RemoteExecDeployment } from '../../src/remote/exec.ts'
@@ -149,8 +150,8 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
     stack.ctx.provide('webServer', {} as never)
     stack.ctx.provide('connection', {
       rpc: {
-        handle: (_channel: string, registered: NonNullable<typeof panelHandler>) => {
-          panelHandler = registered
+        handle: (channel: string, registered: NonNullable<typeof panelHandler>) => {
+          if (channel === PANEL_CHANNEL) panelHandler = registered
           return async () => {}
         },
       },

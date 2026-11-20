@@ -1621,6 +1621,10 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 .mrfw-cwdTag {
   flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 6px;
   border-radius: 4px;
   background: var(--dsw-alias-interactive-bg-hover);
@@ -1870,8 +1874,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-/* Step one keeps source / credential / manage on one line; the hint sits
-   below the row so the three controls share the same baseline. */
+/* Align the source, credential and manage controls along the bottom of the row. */
 .mrfw-sshCredentialRow {
   display: flex;
   flex-wrap: wrap;
@@ -1990,10 +1993,15 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   width: 100%;
 }
 
+.mrfw-sshSelectControl,
+.mrfw-sshAddDialog .mrfw-sshCredentialManage,
+.mrfw-sshAddDialog .mrfw-sshForm > .mrfw-sshRowActions > button {
+  height: 32px;
+}
+
 .mrfw-sshSelectControl {
   box-sizing: border-box;
   width: 100%;
-  height: 32px;
   padding: 0 8px;
   border: 0.5px solid var(--dsw-alias-border-l4);
   border-radius: var(--dsw-radius-md);

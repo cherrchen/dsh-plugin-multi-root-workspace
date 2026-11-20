@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createRequire } from 'node:module'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BundleSettingsCard, installSkillsSettingsCard, RemoteSwitchRow } from '../src/client/skills-settings.tsx'
 import { RemoteCustodyModeControl } from '../src/client/remote-custody.tsx'
@@ -9,6 +9,8 @@ import { DICTIONARIES } from '../src/client/locales.ts'
 import { OpsCompatibilitySettingsCard } from '../src/client/ops-settings.tsx'
 import { bindSettingsForm, bindSkillsForm, type SkillsForm } from '../src/compat/skills-client.ts'
 import type { Translate } from '../src/client/WorkspaceFoldersAction.tsx'
+import { createSshSettingsClient } from '../src/client/ssh-client.ts'
+import { SSH_SETTINGS_CHANNEL } from '../src/remote/personal-contract.ts'
 const t: Translate = key => key
 const cleanups: (() => void)[] = []
 afterEach(() => { vi.restoreAllMocks(); cleanup(); for (const stop of cleanups.splice(0).reverse()) stop() })
@@ -253,6 +255,34 @@ describe('bundle settings coordinator', () => {
 })
 
 describe('SSH remote-environments settings and custody control', () => {
+  it('shows SSH management first when enabled and opens the dialog without a session', async () => {
+    let snapshot = { value: { enabled: false }, status: 'ready', writable: true, revision: 1 }
+    const { listeners, ...remoteForm } = opsForm(snapshot)
+    remoteForm.getSnapshot = () => snapshot
+    const form = opsForm({ value: { enabled: true }, status: 'ready', writable: true })
+    const call = vi.fn(async (_channel, endpoint) => ({
+      ok: true,
+      value: endpoint === 'status' ? { custodyMode: 'personal', status: { state: 'ready' }, connections: [] }
+        : endpoint === 'sshConfigAliases' ? { aliases: [] }
+          : { mode: 'personal', enabled: true, linked: true, revision: 0, environments: [], credentials: [], bindings: [] },
+    }))
+    render(<BundleSettingsCard form={form} remoteForm={remoteForm} sshSettings={createSshSettingsClient({ rpc: { call } })} t={t} />)
+    expect(screen.queryByRole('button', { name: 'ssh.settings.manage' })).toBeNull()
+    act(() => { snapshot = { ...snapshot, value: { enabled: true }, revision: 2 }; listeners.forEach(listener => listener()) })
+    const title = await screen.findByText('ssh.settings.title')
+    expect(document.querySelector('.mrfw-skillsSettings')).toBe(title.parentElement)
+    fireEvent.click(within(title.parentElement!).getByRole('button', { name: 'ssh.settings.manage' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
+    expect(await within(dialog).findByRole('button', { name: 'ssh.tab.add' })).toBeTruthy()
+    expect(call.mock.calls.map(args => args.slice(0, 3))).toEqual(expect.arrayContaining([
+      [SSH_SETTINGS_CHANNEL, 'status', {}], [SSH_SETTINGS_CHANNEL, 'sshState', {}],
+    ]))
+    act(() => { snapshot = { ...snapshot, value: { enabled: false }, revision: 3 }; listeners.forEach(listener => listener()) })
+    expect(screen.queryByRole('button', { name: 'ssh.settings.manage' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'ssh.dialog.title' })).toBeNull()
+  })
+
   it('carries the warning-tone tag and keeps the setting off until acknowledged and confirmed', async () => {
     const writes: unknown[] = []
     const form = opsForm({ value: { enabled: false }, status: 'ready', writable: true, revision: 3 }, writes)

@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createElement, StrictMode } from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PANEL_CHANNEL, type PanelRequest, type RevealedView, type RootView, type RootsView } from '../src/contract.ts'
 import type { RemoteEndpointView, RemotesView } from '../src/remote/panel-contract.ts'
@@ -1450,7 +1450,7 @@ describe('the remote-environment section', () => {
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remotes')).toBe(true) })
     // `disabled` is the operator's switch being off, not a failure: the whole
     // section is suppressed rather than explained as unavailable.
-    expect(screen.queryByText(`${NS}.panel.remote`)).toBeNull()
+    expect(screen.queryByText(`${NS}.panel.remoteList`)).toBeNull()
     expect(screen.queryByText(/panel.remoteUnavailable/)).toBeNull()
     expect(harness.calls.filter(call => call.endpoint === 'addRemote' || call.endpoint === 'removeRemote')).toHaveLength(0)
     // The listing is session-addressed and carries nothing else.
@@ -1463,7 +1463,7 @@ describe('the remote-environment section', () => {
     harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'config-invalid', reason: 'bad manifest' }, endpoints: [] })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByText(`${NS}.panel.remote`)).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByText(`${NS}.panel.remoteList`)).toBeTruthy() })
     expect(screen.getByText(/panel.remoteUnavailable/)).toBeTruthy()
     expect(harness.calls.filter(call => call.endpoint === 'addRemote' || call.endpoint === 'removeRemote')).toHaveLength(0)
   })
@@ -1479,23 +1479,30 @@ describe('the remote-environment section', () => {
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText(ENDPOINT_LOCATION)).toBeTruthy() })
-    // The remote row is the same workspace row the roots use: the root id is
-    // a name-line badge and the target+path is the shared copy control.
     const remoteRow = screen.getByText(ENDPOINT_LOCATION).closest('.mrfw-row') as HTMLElement
-    expect(remoteRow.querySelector('.mrfw-rootText .mrfw-pathCopy')).toBeTruthy()
-    const badges = remoteRow.querySelectorAll('.mrfw-rootName .mrfw-accessBadge')
-    // Platform, registration state, and the binding's root id ride the name line.
-    expect(badges).toHaveLength(3)
-    expect(badges[2]?.textContent).toBe('app')
-    expect(screen.getByText(`${NS}.remote.state.unregistered`)).toBeTruthy()
-    expect(screen.getByText(`${NS}.panel.remoteCapabilities`)).toBeTruthy()
+    const text = remoteRow.querySelector('.mrfw-rootText')!
+    expect([...text.children].map(element => element.className)).toEqual(['mrfw-rootName', 'mrfw-rootPath mrfw-pathCopy'])
+    expect([...text.children[0]!.children].map(element => [element.className, element.textContent])).toEqual([
+      ['mrfw-rootNameText', 'root'],
+      ['mrfw-cwdTag', 'build'],
+      ['mrfw-accessBadge', `${NS}.panel.remoteNoCapabilities`],
+    ])
+    expect(within(remoteRow).getByTitle(`${NS}.remote.state.unregistered`)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: `${NS}.panel.remoteRegister` })).toBeNull()
+    fireEvent.click(within(remoteRow).getByRole('button', { name: `${NS}.panel.more` }))
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.remoteRegister` }))
     await waitFor(() => {
       expect(harness.calls.some(call => call.endpoint === 'addRemote')).toBe(true)
     })
     expect(harness.calls.find(call => call.endpoint === 'addRemote')?.payload)
       .toEqual({ sessionId: 'session-1', environmentId: 'build', rootId: 'app' })
-    await waitFor(() => { expect(screen.getByText(`${NS}.remote.state.registered`)).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByTitle(`${NS}.remote.state.registered`)).toBeTruthy() })
+    expect(screen.queryByRole('button', { name: `${NS}.panel.remoteRemove` })).toBeNull()
+    fireEvent.click(within(remoteRow).getByRole('button', { name: `${NS}.panel.more` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.remoteRemove` }))
+    await waitFor(() => { expect(screen.getByTitle(`${NS}.remote.state.unregistered`)).toBeTruthy() })
+    expect(harness.calls.find(call => call.endpoint === 'removeRemote')?.payload)
+      .toEqual({ sessionId: 'session-1', environmentId: 'build', rootId: 'app' })
   })
 
   it('copies a remote workspace target through the shared row control', async () => {
@@ -1539,14 +1546,17 @@ describe('the remote-environment section', () => {
     harness.holdEndpoint('addRemote')
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    const row = (await screen.findByText(ENDPOINT_LOCATION)).closest('.mrfw-row') as HTMLElement
+    const more = within(row).getByRole('button', { name: `${NS}.panel.more` })
+    fireEvent.click(more)
     const register = await screen.findByRole('button', { name: `${NS}.panel.remoteRegister` })
     fireEvent.click(register)
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'addRemote')).toBe(true) })
-    const pending = screen.getByRole('button', { name: `${NS}.panel.remoteRegister` })
+    const pending = within(row).getByRole('button', { name: `${NS}.panel.more` })
     expect(pending.getAttribute('aria-busy')).toBe('true')
     fireEvent.click(pending)
     harness.release()
-    await waitFor(() => { expect(screen.getByText(`${NS}.remote.state.registered`)).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByTitle(`${NS}.remote.state.registered`)).toBeTruthy() })
     expect(harness.calls.filter(call => call.endpoint === 'addRemote')).toHaveLength(1)
   })
 })
@@ -1564,7 +1574,7 @@ describe('the shared dialog across the four entries', () => {
   }
   const overlay = (): Element | null => document.body.querySelector(':scope > .mrfw-overlay')
   const expectSharedSections = async (): Promise<void> => {
-    await waitFor(() => { expect(screen.getByText(`${NS}.panel.remote`)).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByText(`${NS}.panel.remoteList`)).toBeTruthy() })
     expect(screen.getByRole('button', { name: `${NS}.worktree.cleanupBatch` })).toBeTruthy()
   }
 

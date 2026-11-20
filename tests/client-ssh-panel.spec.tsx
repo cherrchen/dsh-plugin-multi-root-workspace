@@ -319,13 +319,16 @@ describe('the SSH management dialog', () => {
   it('replaces the inline management area with a remote list and the manage entry', async () => {
     const ssh = fakeSsh(sshState())
     renderDialog({ ssh })
-    await screen.findByText('panel.remote')
+    await screen.findByText('panel.remoteList')
     // The old inline management surface is gone; the section is a list plus
     // the single management entry. Adding a connection lives in its dialog.
     expect(screen.queryByText('ssh.credentials')).toBeNull()
     expect(screen.queryByText('ssh.custodyMode')).toBeNull()
     expect(screen.getByRole('button', { name: 'panel.remoteManage' })).toBeTruthy()
-    expect(await screen.findByRole('button', { name: 'panel.remoteBindings' })).toBeTruthy()
+    const bindings = await screen.findByRole('button', { name: 'panel.remoteBindings' })
+    expect(bindings.parentElement).toBe(screen.getByRole('button', { name: 'panel.remoteManage' }).parentElement)
+    expect(bindings.closest('section')).toBe(screen.getByText('panel.remoteList').closest('section'))
+    expect(screen.queryByText('panel.remote')).toBeNull()
     expect(ssh.calls).toHaveLength(0)
   })
 
@@ -354,8 +357,8 @@ describe('the SSH management dialog', () => {
     expect(within(dialog).getByRole('combobox', { name: 'ssh.field.managed' })).toBeTruthy()
     expect(within(dialog).queryByLabelText('ssh.field.workspace')).toBeNull()
     expect(within(dialog).getByText('ssh.add.personalGuide')).toBeTruthy()
-    // The platform hint explains what the pick does.
-    expect(within(dialog).getByText('ssh.field.platformHint')).toBeTruthy()
+    expect(dialog.querySelector('.mrfw-sshFieldHint')).toBeNull()
+    expect(within(dialog).getByRole('button', { name: 'ssh.credentialManage' }).classList.contains('mrfw-sshCredentialManage')).toBe(true)
     expect(within(dialog).queryByRole('list', { name: 'ssh.step.listLabel' })).toBeNull()
     expect(within(dialog).getByRole('button', { name: 'ssh.scan' })).toBeTruthy()
     // The add dialog carries no tabs of its own.
@@ -422,8 +425,7 @@ describe('the SSH management dialog', () => {
     const dialog = await screen.findByRole('dialog', { name: '添加连接' })
     const platform = await within(dialog).findByLabelText('平台') as HTMLSelectElement
     expect([...platform.options].map(option => option.textContent)).toEqual(['Linux', 'macOS'])
-    // The platform hint spells out that registration and the helper verify it.
-    expect(within(dialog).getByText(/登记与 helper 握手/)).toBeTruthy()
+    expect(within(dialog).queryByText(/登记与 helper 握手/)).toBeNull()
   })
 
   it('lists SSH keys in the Keys tab and keeps the consequence note', async () => {
@@ -505,7 +507,7 @@ describe('the SSH management dialog', () => {
       },
       onList: () => { lists += 1 },
     })
-    await screen.findByText('panel.remote')
+    await screen.findByText('panel.remoteList')
     await waitFor(() => expect(lists).toBe(1))
     act(() => { for (const listener of listeners) listener() })
     await waitFor(() => expect(lists).toBeGreaterThan(1))
@@ -636,7 +638,7 @@ describe('the SSH management dialog', () => {
     selectCredentialSource(dialog, 'alias')
     const idInput = await within(dialog).findByLabelText('ssh.field.environmentId')
     expect(within(dialog).queryByLabelText('ssh.field.hostname')).toBeNull()
-    expect(within(dialog).getByText(/ssh\.add\.aliasResolvedNote/)).toBeTruthy()
+    expect(dialog.querySelector('.mrfw-sshFieldHint')).toBeNull()
     fireEvent.change(idInput, { target: { value: 'env-alias' } })
     const alias = within(dialog).getByLabelText('ssh.field.alias')
     fireEvent.change(alias, { target: { value: 'prod' } })
@@ -977,8 +979,51 @@ describe('the SSH management dialog', () => {
     expect(await screen.findByText('panel.remoteRegisterGuide')).toBeTruthy()
     cleanup()
     renderDialog({ ssh: fakeSsh(sshState()), endpoints: [{ ...endpoint, state: 'registered' as const }] })
-    await screen.findByText('remote.state.registered')
+    await screen.findByTitle('remote.state.registered')
     expect(screen.queryByText('panel.remoteRegisterGuide')).toBeNull()
+  })
+
+  it('edits one remote Root’s actions and local transfer peers inside its menu', async () => {
+    const binding = {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
+      actions: ['read'] as const,
+      transfers: [{ direction: 'export' as const, peer: { environmentId: 'local', rootId: 'payments' } }],
+    }
+    const endpoint = {
+      environmentId: binding.environmentId, rootId: binding.rootId, path: binding.path,
+      displayName: 'Production', platform: 'linux', target: 'deploy@prod.internal:22',
+      state: 'registered' as const, actions: [...binding.actions], transfers: [],
+      capabilities: { read: true, write: false, exec: false, receive: false, send: true },
+    }
+    const ssh = fakeSsh(sshState({
+      environments: [{ ...ENV_A, transfer: { maxBytes: 1024, timeoutMs: 1000 } }],
+      bindings: [binding],
+    }))
+    const remoteCalls: { method: string; args: unknown[] }[] = []
+    let listCalls = 0
+    renderDialog({ ssh, endpoints: [endpoint], remoteCalls, onList: () => { listCalls++ } })
+    const row = (await screen.findByText('deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    expect(within(row).getByText('app')).toBeTruthy()
+    expect(within(row).getByText('Production').className).toBe('mrfw-cwdTag')
+    fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ssh.binding.editCapabilities' }))
+    const write = await screen.findByRole('button', { name: 'remote.capability.write' })
+    const menu = write.closest('[role="menu"], [data-menu]') as HTMLElement
+    expect((within(menu).getByRole('button', { name: 'remote.capability.exec' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((within(menu).getByRole('button', { name: 'ssh.binding.save' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(write)
+    fireEvent.click(within(menu).getAllByRole('button', { name: 'panel.primary' })[0]!)
+    expect(within(menu).getByText('ssh.binding.editCapabilitiesReregister')).toBeTruthy()
+    fireEvent.click(within(menu).getByRole('button', { name: 'ssh.binding.save' }))
+    expect(await callsOf(ssh, 'bindingSave')).toEqual([['session-1', 7, {
+      ...binding, actions: ['read', 'write'], transfers: [...binding.transfers, {
+        direction: 'import', peer: { environmentId: 'local', rootId: 'primary' },
+      }],
+    }]])
+    expect(remoteCalls).toEqual([])
+    await waitFor(() => expect(listCalls).toBeGreaterThan(1))
+    expect(screen.queryByRole('button', { name: 'ssh.binding.save' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'ssh.bindings' })).toBeNull()
   })
 
   it('leaves Workspace Folders open when closing the separate binding dialog', async () => {
