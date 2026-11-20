@@ -107,7 +107,7 @@ interface Prep {
  */
 export async function runRemoteCommand(
   registry: MultiRootRegistry,
-  backendFor: (environmentId: string) => RemoteExecutionBackend | undefined,
+  backendFor: (environmentId: string, workspace: string) => RemoteExecutionBackend | undefined,
   request: RemoteCommandRequest,
   toolName: string,
   signal: AbortSignal,
@@ -124,7 +124,8 @@ export async function runRemoteCommand(
   try {
     prep = await registry.withRemoteOperation(admission(), async operation => {
       const denied = (code: string): RemoteCommandResult => notStarted({ ...base, operationId: operation.identity.operationId }, code)
-      const backend = backendFor(request.environmentId)
+      const admitted = operation.endpoints[0]!
+      const backend = backendFor(request.environmentId, admitted.displayPath)
       if (backend === undefined) return denied('backend-unavailable')
       const cwdRelative = request.cwdRelative ?? ''
       if (!checkCwdRelative(cwdRelative)) return denied('invalid-cwd')
@@ -132,7 +133,6 @@ export async function runRemoteCommand(
       if (!Number.isInteger(request.timeoutMs) || request.timeoutMs < 1 || request.timeoutMs > deployment.maxTimeoutMs) {
         return denied('invalid-timeout')
       }
-      const admitted = operation.endpoints[0]!
       const remoteCwd = cwdRelative === '' ? admitted.displayPath : posix.join(admitted.displayPath, cwdRelative)
       const argv = [...deployment.shell, request.command]
       if (backend.verifyCwd !== undefined) {
@@ -167,9 +167,9 @@ export async function runRemoteCommand(
     launch = await registry.withRemoteOperation(admission(), operation => {
       const denied = (code: string) => ({ result: notStarted({ ...base, operationId: operation.identity.operationId }, code) })
       if (signal.aborted) return denied('cancelled')
-      const backend = backendFor(request.environmentId)
-      if (backend === undefined) return denied('backend-unavailable')
       const admitted = operation.endpoints[0]!
+      const backend = backendFor(request.environmentId, admitted.displayPath)
+      if (backend === undefined) return denied('backend-unavailable')
       const unchanged = operation.identity.authorityEpoch === prep!.epoch
         && operation.identity.effectiveMode === prep!.effectiveMode
         && admitted.environmentId === prep!.endpoint.environmentId && admitted.rootId === prep!.endpoint.rootId
@@ -229,7 +229,7 @@ export async function runRemoteCommand(
           || operation.identity.revision !== launch.launched.revision
           || operation.identity.effectiveMode !== prep.effectiveMode
           || operation.endpoints[0]!.bindingDigest !== prep.endpoint.bindingDigest
-          || backendFor(request.environmentId)?.currentGeneration() !== prep.generation) terminateOnce('revoked')
+          || backendFor(request.environmentId, prep.endpoint.displayPath)?.currentGeneration() !== prep.generation) terminateOnce('revoked')
       })
     } catch { terminateOnce('revoked') }
     finally { clearTimeout(timer); checking = false }

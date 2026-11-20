@@ -10,7 +10,7 @@ import type { SshEnvironment, SftpEnvironment } from './ssh-environment.ts'
 
 /** The two connection openings verification needs; the SSH manager implements it. */
 export interface SshEndpointManager {
-  open(environmentId: string): Promise<SshEnvironment>
+  open(environmentId: string, workspace?: string): Promise<SshEnvironment>
   openSftp(environmentId: string): Promise<SftpEnvironment>
 }
 
@@ -25,12 +25,12 @@ export class EndpointVerifyError extends Error {
 export class SshEndpointVerifier implements RemoteEndpointVerifier {
   constructor(private readonly manager: SshEndpointManager) {}
 
-  async verify(environment: RemoteEnvironment, binding: Pick<RemoteBinding, 'path'>, signal: AbortSignal): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
+  async verify(environment: RemoteEnvironment, binding: Pick<RemoteBinding, 'path'>, signal: AbortSignal, workspace = binding.path): Promise<{ platform: 'linux' | 'darwin'; target: { kind: 'object' | 'path'; value: string } }> {
     if (environment.transport === 'sftp') return await this.verifySftp(environment, binding, signal)
     if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
-    const env = await this.manager.open(environment.environmentId)
+    const env = await this.manager.open(environment.environmentId, workspace)
     if (signal.aborted) throw new EndpointVerifyError('endpoint-unverifiable', 'verification aborted')
-    const policy = { mode: 'read-only' as const, workspaceRoot: binding.path, sessionId: 'endpoint-verification' }
+    const policy = { mode: 'read-only' as const, workspaceRoot: workspace, sessionId: 'endpoint-verification' }
     const confined = await env.sandbox.confine([String(env.hello.executable), '-e',
       `const fs=require('node:fs');const s=fs.statSync(process.argv[1],{bigint:true});process.stdout.write(JSON.stringify({real:fs.realpathSync(process.argv[1]),dev:String(s.dev),ino:String(s.ino),isDirectory:s.isDirectory()}))`,
       binding.path], policy, signal)

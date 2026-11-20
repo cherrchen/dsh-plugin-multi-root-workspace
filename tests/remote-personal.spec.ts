@@ -38,15 +38,14 @@ const ENV = {
   credential: { kind: 'ssh-config' as const, alias: 'devbox' },
   hostKey: 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
   helper: null,
-  workspace: '/srv/build',
 }
 
 const CONFIG = (revision = 0): PersonalConfig => ({
-  schemaVersion: 1, revision, environments: [ENV], bindings: [],
+  schemaVersion: 2, revision, environments: [ENV], bindings: [],
 })
 
 const writeConfig = (path: string, config: PersonalConfig): void => {
-  writeFileSync(path, `${JSON.stringify(config)}\n`, { mode: 0o600 })
+  writeFileSync(path, `${JSON.stringify({ ...config, schemaVersion: 1, environments: config.environments.map(environment => ({ ...environment, workspace: '/' })) })}\n`, { mode: 0o600 })
 }
 
 describe.skipIf(process.platform === 'win32')('personal config store', () => {
@@ -149,6 +148,23 @@ describe.skipIf(process.platform === 'win32')('personal config store', () => {
     expect(saved.revision).toBe(2)
   })
 
+  it('migrates v1 bindings and drops the old workspace field without using it as a Root', async () => {
+    const root = tmp()
+    const path = join(root, 'remote-personal.json')
+    const binding = { primary: '/workspace', environmentId: 'dev-box', rootId: 'data', path: '/actual/data', actions: ['read'] as const }
+    const config = { ...CONFIG(), bindings: [{ ...binding, actions: [...binding.actions] }] }
+    writeConfig(path, config)
+    const migrated = loadPersonalConfig(path)
+    expect(migrated.environments[0]).not.toHaveProperty('workspace')
+    expect(migrated.bindings).toEqual(config.bindings)
+    await savePersonalConfig(path, { ...migrated, revision: 1 }, 0)
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ schemaVersion: 2, environments: [ENV], revision: 1 })
+    expect(JSON.parse(readFileSync(path + '.bindings.json', 'utf8'))).toEqual({ schemaVersion: 1, bindings: config.bindings, revision: 1 })
+    expect(loadPersonalConfig(path)).toMatchObject({ ...config, revision: 1 })
+    chmodSync(path + '.bindings.json', 0o644)
+    expect(() => loadPersonalManifest(path)).toThrowError(/owned by the current user/)
+  })
+
   it('toDeploymentManifest converts to the shared manifest shape', () => {
     const { manifest, digest } = toDeploymentManifest(CONFIG(), '/nowhere.json')
     const environment = manifest.environments[0]!
@@ -172,7 +188,7 @@ describe.skipIf(process.platform === 'win32')('managed ssh files', () => {
     expect(block).toContain(`IdentityFile "${join(root, 'keys', 'aa11bb22cc33')}"`)
     expect(block).toContain('IdentitiesOnly yes')
     expect(block).toContain('BatchMode yes')
-    renderSshConfig({ schemaVersion: 1, revision: 0, environments: [managed], bindings: [] }, root)
+    renderSshConfig({ schemaVersion: 2, revision: 0, environments: [managed], bindings: [] }, root)
     const rendered = readFileSync(join(root, 'ssh_config'), 'utf8')
     expect(rendered).toContain('Host dsh-dev-box')
     expect(statSync(join(root, 'ssh_config')).mode & 0o077).toBe(0)
@@ -183,7 +199,7 @@ describe.skipIf(process.platform === 'win32')('managed ssh files', () => {
     const home = tmp()
     mkdirSync(root, { mode: 0o700 })
     const managed = { ...ENV, credential: { kind: 'managed' as const, credentialId: 'aa11bb22cc33' } }
-    renderSshConfig({ schemaVersion: 1, revision: 0, environments: [managed], bindings: [] }, root)
+    renderSshConfig({ schemaVersion: 2, revision: 0, environments: [managed], bindings: [] }, root)
     link(root, home)
     const output = execFileSync('ssh', ['-G', '-F', join(home, '.ssh', 'config'), 'dsh-dev-box'], { encoding: 'utf8' })
     expect(output).toContain(`identityfile ${join(root, 'keys', 'aa11bb22cc33')}`)
@@ -199,7 +215,7 @@ describe.skipIf(process.platform === 'win32')('managed ssh files', () => {
     writeFileSync(join(ssh, 'config'), 'Host *\n  ServerAliveInterval 30\n', { mode: 0o600 })
     const root = join(tmp(), 'cred')
     mkdirSync(root, { mode: 0o700 })
-    renderSshConfig({ schemaVersion: 1, revision: 0, environments: [], bindings: [] }, root)
+    renderSshConfig({ schemaVersion: 2, revision: 0, environments: [], bindings: [] }, root)
     expect(linkStatus(root, home).linked).toBe(false)
     link(root, home)
     const content = readFileSync(join(ssh, 'config'), 'utf8')

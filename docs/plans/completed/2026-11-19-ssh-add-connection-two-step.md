@@ -1,6 +1,6 @@
 # SSH「添加连接」两步式重构
 
-> 状态：**已实施（2026-11-19）**；自动门禁通过，GUI 手工验收待维护者。共享 Registry follower 相关测试在本机 DSH sandbox 下失败（基线 HEAD 同样失败），见 §7.4。
+> 状态：历史实现。原两步动线已由 [SSH 环境与 Workspace Root 绑定拆分](../completed/2026-11-20-ssh-environments-and-workspace-bindings.md) 取代。原计划的 GUI 手工验收未完成。
 > 本文是本轮 UI 重构的实施计划与退出验收清单；Host 侧运行事实仍以 [SSH 远端环境参考](../../reference/ssh-remote-environments.md) 和 [ADR-0049](../../decisions/ADR-0049-ssh-custody-modes.md) 为准。
 
 ## 1. 目标

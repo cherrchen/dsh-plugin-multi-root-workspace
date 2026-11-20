@@ -58,7 +58,6 @@ export const environmentDraftSchema = z.object({
   platform: z.enum(['linux', 'darwin']),
   endpoint: endpointDraft,
   credential: credentialDraft,
-  workspace: z.string().min(1).max(4096),
   // The draft carries the FULL exec stanza — the client materializes the
   // documented defaults and the host stores them verbatim (the same shape
   // `PersonalEnvironment.exec` validates on write).
@@ -173,7 +172,6 @@ export interface SshEnvironmentView {
     readonly sha256: string
     readonly protocol: number
   } | null
-  readonly workspace: string
   readonly exec?: {
     readonly shell: readonly string[]
     readonly env: Record<string, string>
@@ -226,7 +224,6 @@ const environmentViewSchema = z.object({
   ]),
   hostKey: z.string(),
   helper: z.object({ nodePath: z.string(), helperPath: z.string(), sha256: z.string(), protocol: z.number() }).nullable(),
-  workspace: z.string(),
   exec: z.object({
     shell: z.array(z.string()), env: z.record(z.string(), z.string()),
     maxTimeoutMs: z.number(), stdoutLimit: z.number(), stderrLimit: z.number(), terminateGraceMs: z.number(),

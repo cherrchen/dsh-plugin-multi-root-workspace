@@ -71,6 +71,8 @@ export const bindingSchema = z.object({
   primary: z.string().min(1),
   environmentId: z.string().min(1),
   rootId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
+  /** Personal binding incarnation. Recreating a removed binding cannot revive its old grant. */
+  bindingId: z.uuid().optional(),
   path: z.string().min(1).max(4096),
   actions: z.array(z.enum(['read', 'write', 'exec'])).min(1),
   transfers: z.array(z.object({
@@ -142,7 +144,7 @@ function pathNested(left: string, right: string): boolean {
  * @param manifestPath - used for messages only; protection lives in {@link loadDeploymentManifest}.
  * @returns the manifest plus the digest both Host sides must agree on.
  */
-export function parseDeploymentManifest(text: string, manifestPath: string): { manifest: DeploymentManifest; digest: string } {
+export function parseDeploymentManifest(text: string, manifestPath: string, options?: { personal?: boolean }): { manifest: DeploymentManifest; digest: string } {
   let data: unknown
   try {
     data = JSON.parse(text)
@@ -167,12 +169,12 @@ export function parseDeploymentManifest(text: string, manifestPath: string): { m
     }
     const { nodePath, helperPath, workspace } = environment.connection
     if (environment.transport === 'helper') {
-      if (nodePath === undefined || helperPath === undefined || workspace === undefined) {
+      if (nodePath === undefined || helperPath === undefined || (workspace === undefined && options?.personal !== true)) {
         throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": helper transport requires connection.nodePath, connection.helperPath and connection.workspace`)
       }
       checkRemotePath(nodePath)
       checkRemotePath(helperPath)
-      checkRemotePath(workspace)
+      if (workspace !== undefined) checkRemotePath(workspace)
       if (Object.keys(environment.exec?.env ?? {}).length > 64) {
         throw new ManifestError('invalid-manifest', `environment "${environment.environmentId}": exec.env carries more than 64 keys`)
       }
@@ -198,6 +200,9 @@ export function parseDeploymentManifest(text: string, manifestPath: string): { m
   const seen = new Set<string>()
   const byPrimary = new Map<string, RemoteBinding[]>()
   for (const binding of manifest.bindings) {
+    if (binding.bindingId !== undefined && options?.personal !== true) {
+      throw new ManifestError('invalid-manifest', 'bindingId is reserved for personal Workspace bindings')
+    }
     if (!isAbsolute(binding.primary)) throw new ManifestError('invalid-manifest', `binding primary must be an absolute local path: ${JSON.stringify(binding.primary)}`)
     checkRemotePath(binding.path)
     const environment = byId.get(binding.environmentId)

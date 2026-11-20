@@ -4,6 +4,7 @@
  * AND the custody mode is `personal`; every mutation answers the refreshed
  * `sshState` and no answer ever carries key or password bytes.
  */
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { MultiRootRegistry } from '../registry.ts'
@@ -67,7 +68,8 @@ async function sshState(registry: MultiRootRegistry, paths: PersonalPaths, prima
     revision: config.revision,
     environments: config.environments,
     credentials: store.list(),
-    bindings: config.bindings.filter(binding => primaryKey(binding.primary) === key),
+    bindings: config.bindings.filter(binding => primaryKey(binding.primary) === key)
+      .map(({ bindingId: _bindingId, ...binding }) => binding),
   }
 }
 
@@ -78,7 +80,7 @@ async function mutate(
   const config = loadPersonalConfig(paths.personalPath)
   const next = await edit(config)
   await savePersonalConfig(paths.personalPath, { ...next, revision: next.revision + 1 }, expectedRevision)
-  renderSshConfig(loadPersonalConfig(paths.personalPath), paths.credentialRoot)
+  if (next.environments !== config.environments) renderSshConfig(loadPersonalConfig(paths.personalPath), paths.credentialRoot)
   await registry.refreshRemotePersonal().catch(() => {})
   return await sshState(registry, paths, primary)
 }
@@ -179,18 +181,10 @@ async function runPersonalEndpoint(
     }
     case 'sshEnvironmentSave': {
       const draft = { ...call.environment, endpoint: { ...call.environment.endpoint } }
-      // `workspace` enters `connection` — and is therefore checked — only
-      // under the helper transport; under sftp it used to persist unchecked
-      // and explode inside savePersonalConfig on the NEXT helper install.
-      try {
-        checkRemotePath(draft.workspace)
-      } catch {
-        throw new RemoteAdmissionError('workspace-invalid', `the remote workspace is not a normalized absolute POSIX path: ${JSON.stringify(draft.workspace)}`)
-      }
       const currentEnvironments = loadPersonalConfig(paths.personalPath).environments
       const previous = currentEnvironments.find(environment => environment.environmentId === draft.environmentId)
       // The recorded fingerprint may be reused for an update that changes only
-      // workspace/capabilities: the target identity and the managed credential
+      // connection metadata or capabilities: the target identity and the managed credential
       // must be untouched. A changed target still needs a fresh scan token.
       const sameIdentity = previous !== undefined
         && previous.endpoint.hostname === draft.endpoint.hostname
@@ -266,11 +260,12 @@ async function runPersonalEndpoint(
     }
     case 'sshEnvironmentRemove': {
       const removed = loadPersonalConfig(paths.personalPath).environments.find(environment => environment.environmentId === call.environmentId)
-      const state = await mutate(registry, primary, paths, call.revision, config => ({
-        ...config,
-        environments: config.environments.filter(environment => environment.environmentId !== call.environmentId),
-        bindings: config.bindings.filter(binding => binding.environmentId !== call.environmentId),
-      }))
+      const state = await mutate(registry, primary, paths, call.revision, config => {
+        if (config.bindings.some(binding => binding.environmentId === call.environmentId)) {
+          throw new RemoteAdmissionError('environment-in-use', 'remove the Workspace Root bindings before deleting this SSH environment')
+        }
+        return { ...config, environments: config.environments.filter(environment => environment.environmentId !== call.environmentId) }
+      })
       // R6: the removed environment's access key is best-effort cleanup.
       const accessKeyId = removed?.credential.kind === 'managed' ? removed.credential.accessKeyId : undefined
       if (accessKeyId !== undefined) {
@@ -321,11 +316,16 @@ async function runPersonalEndpoint(
       }))
     }
     case 'sshBindingSave':
+      try {
+        checkRemotePath(call.binding.path)
+      } catch {
+        throw new RemoteAdmissionError('workspace-invalid', 'the remote Root must be a normalized absolute POSIX path')
+      }
       return await mutate(registry, primary, paths, call.revision, config => ({
         ...config,
         bindings: [
           ...config.bindings.filter(binding => !(binding.environmentId === call.binding.environmentId && binding.rootId === call.binding.rootId && primaryKey(binding.primary) === primaryKey(primary))),
-          { ...call.binding, primary },
+          { ...call.binding, primary, bindingId: randomUUID() },
         ],
       }))
     case 'sshBindingRemove':

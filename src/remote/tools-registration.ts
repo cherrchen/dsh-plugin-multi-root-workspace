@@ -19,7 +19,7 @@ export type RemoteToolsManager = RemoteConnectionManager & SshEndpointManager
 export function mountRemoteTools(
   ctx: Context,
   manager: RemoteToolsManager,
-  backends?: (environmentId: string) => RemoteExecutionBackend | undefined,
+  backends?: (environmentId: string, workspace: string) => RemoteExecutionBackend | undefined,
 ): void {
   const registry = ctx.multiRootRegistry
   const shutdown = new AbortController()
@@ -39,8 +39,10 @@ export function mountRemoteTools(
     // lazy adapter binds its connection inside confine, so both admissions
     // must see the SAME instance — a fresh one would spawn with no bound env.
     const cache = new Map<string, RemoteExecutionBackend | undefined>()
-    return (environmentId: string) => {
-      if (cache.has(environmentId)) return cache.get(environmentId)
+    return (environmentId: string, workspace: string) => {
+      const root = registry.remoteMode === 'personal' ? workspace : undefined
+      const key = JSON.stringify([environmentId, root])
+      if (cache.has(key)) return cache.get(key)
       const manifest = registry.remoteManifest
       const environment = manifest?.environments.find(entry => entry.environmentId === environmentId)
       // The SSH adapter needs a connection opening and a live generation. Probe
@@ -49,8 +51,8 @@ export function mountRemoteTools(
       const opening = manager as Partial<SshEnvironmentManager>
       const backend = environment === undefined || typeof opening.open !== 'function' || typeof opening.generationOf !== 'function'
         ? undefined
-        : lazySshExecBackend(environment, opening as SshEnvironmentManager)
-      cache.set(environmentId, backend)
+        : lazySshExecBackend(environment, opening as SshEnvironmentManager, root)
+      cache.set(key, backend)
       return backend
     }
   })()
