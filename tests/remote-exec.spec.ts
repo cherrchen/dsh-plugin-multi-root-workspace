@@ -8,7 +8,7 @@ import Projections from '@deepseek-ai/dsh-session-projection'
 import Policy from '@deepseek-ai/dsh-sandbox-policy'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
-import { sshExecBackend } from '../src/remote/ssh-exec-backend.ts'
+import { lazySshExecBackend, sshExecBackend, type SshExecManager } from '../src/remote/ssh-exec-backend.ts'
 import { fakeManifest } from './support/fake-remote.ts'
 import { remoteBashTool } from '../src/remote/exec-tool.ts'
 import { RemoteConnectionLost, runRemoteCommand, type RemoteExecutionBackend, type RemoteProcessHandle } from '../src/remote/exec.ts'
@@ -195,6 +195,52 @@ describe.skipIf(process.platform === 'win32')('the two-admission remote command 
     lost.state.handles[0]!.lose()
     await expect(hanging).resolves.toMatchObject({ status: 'unknown', reconcileId: expect.any(String) })
     expect(lost.state.spawnCalls).toHaveLength(1)
+  })
+
+  it('opens Helper generations by bound Root and keeps a nested cwd on the same Helper', async () => {
+    const environment = {
+      ...fakeManifest({ primary: fixture.workspace }).environments[0]!,
+      transport: 'helper' as const,
+      exec: { ...DEPLOYMENT, shell: [...DEPLOYMENT.shell] },
+    }
+    const opened: [string, string | undefined][] = []
+    const policies: string[] = []
+    const manager: SshExecManager = {
+      async open(id, root) {
+        opened.push([id, root])
+        return {
+          generation: root,
+          hello: { executable: '/bin/node', platform: 'linux' },
+          sandbox: {
+            confine: async (argv: readonly string[], policy: { workspaceRoot: string }) => {
+              policies.push(policy.workspaceRoot)
+              return { argv, enforcement: 'full' }
+            },
+          },
+          subprocess: {
+            spawn: ({ cwd }: { cwd: string }) => ({
+              done: Promise.resolve({ exitCode: 0 }),
+              terminate() {},
+              waitForExit: async () => true,
+              collected: { stdout: { readFrom: () => ({ text: JSON.stringify({ real: cwd, dev: '1', ino: '2', isDirectory: true }) }) } },
+            }),
+          },
+        } as Awaited<ReturnType<SshExecManager['open']>>
+      },
+      async openSftp() { throw new Error('this operation uses the Helper') },
+      generationOf: (_id, root) => root ?? 'stale',
+      markStale() {},
+    }
+    const signal = AbortSignal.timeout(2_000)
+    for (const root of ['/srv/app', '/srv/logs']) {
+      const backend = lazySshExecBackend(environment, manager, root)!
+      await backend.verifyCwd!(root + '/nested', root, signal)
+      await expect(backend.confine(['probe'], { mode: 'workspace-write', workspaceRoot: root, sessionId: 'session' }, signal))
+        .resolves.toMatchObject({ generation: root })
+      expect(backend.currentGeneration()).toBe(root)
+    }
+    expect(opened).toEqual(['/srv/app', '/srv/logs'].flatMap(root => Array.from({ length: 3 }, () => [environment.environmentId, root])))
+    expect(policies).toEqual(['/srv/app', '/srv/app', '/srv/app', '/srv/logs', '/srv/logs', '/srv/logs'])
   })
 
   it.each([

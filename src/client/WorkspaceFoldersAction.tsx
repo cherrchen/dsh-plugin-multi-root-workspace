@@ -49,7 +49,7 @@ import type { WorkspaceFoldersDialogController } from './workspace-folders-dialo
 import type { RemotesClient } from './remotes-client.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
 import type { SshClient } from './ssh-client.ts'
-import { platformLabel, SshManagementDialog, type SshDialogTab } from './ssh-panel.tsx'
+import { platformLabel, SshManagementDialog, SshWorkspaceBindingsDialog, type SshDialogTab } from './ssh-panel.tsx'
 import { requestWorktreePrompt } from './worktree-prompt-bus.ts'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
@@ -487,6 +487,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const [aliasDraft, setAliasDraft] = useState('')
   const [aliasField, setAliasField] = useState<'alias' | 'aliasId'>('alias')
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
+  const copyFeedbackTimer = useRef<number | undefined>(undefined)
   const [menuFor, setMenuFor] = useState<string | undefined>(undefined)
   /**
    * Tracked worktree roots awaiting the operator's cleanup confirmation. The
@@ -498,6 +499,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const [remoteState, setRemoteState] = useState<{ view?: RemotesView; error?: PanelError }>({})
   /** The standalone SSH management dialog's requested tab; undefined when closed. */
   const [sshDialog, setSshDialog] = useState<SshDialogTab | undefined>(undefined)
+  const [sshBindingsOpen, setSshBindingsOpen] = useState(false)
   /** Why the last cleanup request failed; it belongs to the confirmation only. */
   const [cleanupError, setCleanupError] = useState<PanelError | undefined>(undefined)
   /**
@@ -517,6 +519,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     return () => {
       mounted.current = false
       requestEpoch.current += 1
+      window.clearTimeout(copyFeedbackTimer.current)
     }
   }, [])
 
@@ -534,7 +537,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       // listener closes just that layer, and this handler must not close the
       // dialog underneath it — the portaled dropdown and Modal bubble their
       // events through this dialog's React tree too.
-      if (menuFor !== undefined || accessMenuOpen || upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined) return
+      if (menuFor !== undefined || accessMenuOpen || upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined || sshBindingsOpen) return
       event.stopPropagation()
       props.onClose()
       return
@@ -544,7 +547,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     // focus trap. The portaled Modal still bubbles keys through this dialog's
     // React tree (like Escape above), and trapping here would yank focus to a
     // control behind the active confirmation.
-    if (upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined) return
+    if (upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined || sshBindingsOpen) return
     const dialog = dialogRef.current
     if (dialog === null) return
     const focusable = Array.from(
@@ -664,6 +667,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       cleanupForRef.current = undefined
       setCleanupFor(undefined)
       setRemoteState({})
+      setSshBindingsOpen(false)
       setCleanupError(undefined)
       void refresh()
       void refreshRemotes()
@@ -842,12 +846,16 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   const copyPath = useCallback(async (key: string, path: string) => {
     try {
       await navigator.clipboard.writeText(path)
+      if (!mounted.current) return
+      window.clearTimeout(copyFeedbackTimer.current)
       setCopiedId(key)
       setState(previous => ({ ...previous, error: undefined }))
-      window.setTimeout(() => { setCopiedId(current => (current === key ? undefined : current)) }, 1500)
+      copyFeedbackTimer.current = window.setTimeout(() => { setCopiedId(undefined) }, 1500)
     } catch (error: unknown) {
       // A clipboard refusal is the browser environment's, not the host's, so it
       // is reported here with its own code rather than left silent.
+      if (!mounted.current) return
+      window.clearTimeout(copyFeedbackTimer.current)
       setCopiedId(undefined)
       setState(previous => ({
         ...previous,
@@ -872,6 +880,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   // Captured as consts: narrowing does not reach the onCopy closures below.
   const primaryPath = state.view?.primaryRoot
   const workingRoot = workingRootOf(state.view)
+  const sessionId = requestBase()?.sessionId
   return (
     <>
     {/* The overlay lives under document.body, not beside the trigger: the
@@ -1152,6 +1161,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               <section className="mrfw-section">
                 <div className="mrfw-sectionTitleRow">
                   <span className="mrfw-sectionTitle">{t('panel.remoteList')}</span>
+                  {props.ssh !== undefined && remoteState.view?.custodyMode === 'personal' && remoteState.view.status.state === 'ready' ? (
+                    <Action onClick={() => setSshBindingsOpen(true)}>{t('panel.remoteBindings')}</Action>
+                  ) : null}
                 </div>
                 {remoteState.view?.custodyMode === 'personal' && remoteState.view.endpoints.some(endpoint => endpoint.state !== 'registered') ? (
                   <p className="mrfw-note">{t('panel.remoteRegisterGuide')}</p>
@@ -1214,14 +1226,17 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               custodyMode={remoteState.view?.custodyMode}
               status={remoteState.view?.status}
               endpoints={remoteState.view?.endpoints ?? []}
-              remotes={props.remotes}
-              roots={state.view}
               remoteMode={props.remoteMode}
               onClose={() => { setSshDialog(undefined) }}
               onChanged={refreshRemoteSection}
               t={t}
             />
           )}
+          {sshBindingsOpen && props.ssh !== undefined && sessionId !== undefined
+            && remoteState.view?.custodyMode === 'personal' && remoteState.view.status.state === 'ready' ? (
+              <SshWorkspaceBindingsDialog key={sessionId} ssh={props.ssh} sessionId={sessionId} roots={state.view}
+                onClose={() => setSshBindingsOpen(false)} onChanged={refreshRemoteSection} t={t} />
+            ) : null}
             </>
           )}
 

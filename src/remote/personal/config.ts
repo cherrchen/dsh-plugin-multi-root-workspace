@@ -1,12 +1,10 @@
 /**
- * Personal custody (ADR-0049 §2): the user-owned remote-environment config.
- * The file carries the same environments/bindings facts as the deployment
- * manifest but lives under the user's storage root; `toDeploymentManifest`
- * converts it into the identical DeploymentManifest shape so admission,
- * records and remote-1 never fork. POSIX only.
+ * Personal custody (ADR-0049 §2): global SSH environments and Workspace
+ * bindings have separate protected stores. Their snapshot feeds the shared
+ * remote admission plane. POSIX only.
  */
-import { existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, writeSync, type Stats, closeSync } from 'node:fs'
-import { createHash } from 'node:crypto'
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync, type Stats } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
@@ -42,7 +40,6 @@ export const personalEnvironmentSchema = z.object({
   credential: credentialSchema,
   hostKey: z.string().regex(/^SHA256:[A-Za-z0-9+/]{43}$/),
   helper: helperSchema.nullable(),
-  workspace: z.string().min(1).max(4096),
   exec: z.object({
     shell: z.array(z.string().min(1)).min(1).max(8),
     env: z.record(z.string(), z.string()),
@@ -57,39 +54,24 @@ export const personalEnvironmentSchema = z.object({
   }).strict().optional(),
 }).strict()
 
-export const personalConfigSchema = z.object({
-  schemaVersion: z.literal(1),
-  revision: z.number().int().min(0),
+const revisionSchema = z.number().int().min(0)
+const environmentsSchema = z.object({
+  schemaVersion: z.literal(2),
+  revision: revisionSchema,
   environments: z.array(personalEnvironmentSchema),
+}).strict()
+const workspaceBindingsSchema = z.object({
+  schemaVersion: z.literal(1),
+  revision: revisionSchema,
   bindings: z.array(bindingSchema),
 }).strict()
+const legacyConfigSchema = workspaceBindingsSchema.extend({
+  environments: z.array(personalEnvironmentSchema.extend({ workspace: z.string().min(1).max(4096) })),
+})
+const personalConfigSchema = environmentsSchema.extend({ bindings: z.array(bindingSchema) })
 
 export type PersonalEnvironment = z.infer<typeof personalEnvironmentSchema>
 export type PersonalConfig = z.infer<typeof personalConfigSchema>
-
-/** File stat identity for cheap change detection (ADR-0049 §2). */
-export interface PersonalFileIdentity {
-  readonly dev: number
-  readonly ino: number
-  readonly size: number
-  readonly mtimeMs: number
-  /**
-   * SHA-256 of the bytes: stat alone misses a same-size in-place rewrite
-   * inside one mtime tick (coarse-timestamp filesystems), so the content
-   * decides. The file is small; reading it per refresh is cheap.
-   */
-  readonly hash: string
-  readonly mode: number
-  readonly uid: number
-}
-
-export function statIdentity(info: Stats, content: string | Buffer): PersonalFileIdentity {
-  return { dev: info.dev, ino: info.ino, size: info.size, mtimeMs: info.mtimeMs, hash: createHash('sha256').update(content).digest('hex'), mode: info.mode, uid: info.uid }
-}
-
-export function sameIdentity(a: PersonalFileIdentity, b: PersonalFileIdentity): boolean {
-  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.hash === b.hash && a.mode === b.mode && a.uid === b.uid
-}
 
 /**
  * Convert the personal config into the shared manifest shape, then run the
@@ -106,7 +88,7 @@ export function toDeploymentManifest(config: PersonalConfig, manifestPath: strin
     transport: environment.helper !== null ? 'helper' : 'sftp',
     helper: environment.helper === null ? null : { sha256: environment.helper.sha256, protocol: environment.helper.protocol },
     connection: environment.helper !== null
-      ? { host: managedAlias(environment), nodePath: environment.helper.nodePath, helperPath: environment.helper.helperPath, workspace: environment.workspace }
+      ? { host: managedAlias(environment), nodePath: environment.helper.nodePath, helperPath: environment.helper.helperPath }
       : { host: managedAlias(environment) },
     ...(environment.exec === undefined ? {} : { exec: environment.exec }),
     ...(environment.transfer === undefined ? {} : { transfer: environment.transfer }),
@@ -117,7 +99,7 @@ export function toDeploymentManifest(config: PersonalConfig, manifestPath: strin
     configVersion: `personal-${config.revision}`,
     environments,
     bindings: config.bindings,
-  }), manifestPath)
+  }), manifestPath, { personal: true })
 }
 
 /** The alias the manifest connection carries for this environment. */
@@ -168,67 +150,113 @@ export interface PersonalManifest {
   readonly manifest: DeploymentManifest
   readonly digest: string
   readonly revision: number
-  readonly identity: PersonalFileIdentity
+  readonly identity: string
 }
 
-/**
- * Read the personal config itself (not the converted manifest). A MISSING
- * file is the empty config — the panel starts from a blank slate.
- */
-export function loadPersonalConfig(path: string): PersonalConfig {
-  if (!existsSync(path)) return { schemaVersion: 1, revision: 0, environments: [], bindings: [] }
-  let data: unknown
+const bindingStorePath = (path: string): string => `${path}.bindings.json`
+
+function filePresent(path: string): boolean {
   try {
-    data = JSON.parse(readFileSync(path, 'utf8'))
+    lstatSync(path)
+    return true
   } catch (error) {
-    throw new ManifestError('invalid-manifest', `${path}: not readable JSON: ${error instanceof Error ? error.message : String(error)}`)
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
   }
-  const parsed = personalConfigSchema.safeParse(data)
-  if (!parsed.success) {
-    throw new ManifestError('invalid-manifest', `${path}: ${parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`)
-  }
-  checkPersonalFileProtection(path, parsed.data.bindings)
-  return parsed.data
 }
 
-/**
- * Read the personal config and convert it to the shared manifest. A MISSING
- * file is not an error: it is the empty manifest — the plane proceeds.
- */
-export function loadPersonalManifest(path: string): PersonalManifest {
-  if (!existsSync(path)) {
-    const empty = toDeploymentManifest({ schemaVersion: 1, revision: 0, environments: [], bindings: [] }, path)
-    return { ...empty, revision: 0, identity: { dev: 0, ino: 0, size: 0, mtimeMs: 0, hash: '', mode: 0, uid: -1 } }
-  }
-  const text = readFileSync(path, 'utf8')
+function readProtected(path: string): string {
+  checkPersonalFileProtection(path)
+  return readFileSync(path, 'utf8')
+}
+
+function parseFile<T>(path: string, text: string, schema: z.ZodType<T>): T {
   let data: unknown
   try {
     data = JSON.parse(text)
   } catch (error) {
     throw new ManifestError('invalid-manifest', `${path}: not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
   }
-  const parsed = personalConfigSchema.safeParse(data)
+  const parsed = schema.safeParse(data)
   if (!parsed.success) {
-    throw new ManifestError('invalid-manifest', `${path}: ${parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`)
+    throw new ManifestError('invalid-manifest', `${path}: ${parsed.error.message}`)
   }
-  checkPersonalFileProtection(path, parsed.data.bindings)
-  const { manifest, digest } = toDeploymentManifest(parsed.data, path)
-  return { manifest, digest, revision: parsed.data.revision, identity: statIdentity(statSync(path), text) }
+  return parsed.data
 }
 
-/**
- * Compare-and-swap write: refuse `personal-config-conflict` when the on-disk
- * revision is not `expectedRevision`, then write temp-0600 → fsync → rename.
- */
+interface PersonalSnapshot {
+  readonly config: PersonalConfig
+  readonly identity: string
+  readonly split: boolean
+}
+
+/** The v2 environment file is the migration commit point. A v1 reader ignores the prepared sidecar. */
+function readSnapshot(path: string): PersonalSnapshot {
+  if (!filePresent(path)) {
+    return { config: { schemaVersion: 2, revision: 0, environments: [], bindings: [] }, identity: '', split: false }
+  }
+  const text = readProtected(path)
+  const stored = parseFile(path, text, z.union([environmentsSchema, legacyConfigSchema]))
+  if (stored.schemaVersion === 1) {
+    const { revision, environments, bindings } = stored
+    checkPersonalFileProtection(path, bindings)
+    return {
+      config: { schemaVersion: 2, revision, environments: environments.map(({ workspace: _workspace, ...environment }) => environment), bindings },
+      identity: createHash('sha256').update(text).digest('hex'),
+      split: false,
+    }
+  }
+
+  const bindingsPath = bindingStorePath(path)
+  const bindingsText = readProtected(bindingsPath)
+  const { revision, bindings } = parseFile(bindingsPath, bindingsText, workspaceBindingsSchema)
+  // A writer can change only one store at a time. If the environment file
+  // changed around the binding read, no coherent revision was observed.
+  if (readProtected(path) !== text) {
+    throw new ManifestError('personal-config-conflict', 'the SSH environment store changed during the read; retry')
+  }
+  checkPersonalFileProtection(path, bindings)
+  checkPersonalFileProtection(bindingsPath, bindings)
+  return {
+    config: { ...stored, revision: Math.max(stored.revision, revision), bindings },
+    identity: createHash('sha256').update(JSON.stringify([text, bindingsText])).digest('hex'),
+    split: true,
+  }
+}
+
+export function loadPersonalConfig(path: string): PersonalConfig {
+  return readSnapshot(path).config
+}
+
+/** Reuse the verified manifest when the bytes in both protected stores match. */
+export function loadPersonalManifest(path: string, previous?: PersonalManifest): PersonalManifest {
+  const { config, identity } = readSnapshot(path)
+  if (previous?.identity === identity) return previous
+  return { ...toDeploymentManifest(config, path), revision: config.revision, identity }
+}
+
+function writeProtected(path: string, data: unknown): void {
+  const temp = `${path}.tmp-${randomUUID()}`
+  const fd = openSync(temp, 'wx', 0o600)
+  try {
+    try {
+      writeSync(fd, `${JSON.stringify(data, null, 2)}\n`)
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    renameSync(temp, path)
+  } finally {
+    rmSync(temp, { force: true })
+  }
+}
+
+/** Both stores share the revision check and kernel lease, including during migration. */
 export async function savePersonalConfig(path: string, next: PersonalConfig, expectedRevision: number): Promise<PersonalManifest> {
   if (!isAbsolute(path)) throw new ManifestError('manifest-untrusted', `the personal config path must be absolute: ${JSON.stringify(path)}`)
   if (typeof process.getuid !== 'function') throw new ManifestError('manifest-untrusted', 'personal config protection checks require a POSIX host')
-  // Validate BEFORE writing: a config that fails the schema or the manifest
-  // semantics must never land on disk (it would fail the whole plane).
   const checked = personalConfigSchema.safeParse(next)
-  if (!checked.success) {
-    throw new ManifestError('personal-config-invalid', `${path}: ${checked.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`)
-  }
+  if (!checked.success) throw new ManifestError('personal-config-invalid', `${path}: ${checked.error.message}`)
   try {
     toDeploymentManifest(checked.data, path)
   } catch (error) {
@@ -237,7 +265,8 @@ export async function savePersonalConfig(path: string, next: PersonalConfig, exp
   const dir = dirname(path)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
   checkPersonalDirectoryProtection(dir)
-  const leasePath = join(realpathSync(dir), `${basename(path)}.lock`)
+  const canonicalDir = realpathSync(dir)
+  const leasePath = join(canonicalDir, `${basename(path)}.lock`)
   let lease: RegistryAuthorityLease
   try {
     lease = await RegistryAuthorityLease.acquire(leasePath)
@@ -248,38 +277,30 @@ export async function savePersonalConfig(path: string, next: PersonalConfig, exp
     throw error
   }
   try {
-    if (existsSync(path)) {
-      checkPersonalFileProtection(path, checked.data.bindings)
-      let current: unknown
-      try {
-        current = JSON.parse(readFileSync(path, 'utf8'))
-      } catch (error) {
-        throw new ManifestError('personal-config-conflict', `the personal config is unreadable during the write: ${error instanceof Error ? error.message : String(error)}`)
-      }
-      const revision = (current as { revision?: unknown }).revision
-      if (revision !== expectedRevision) {
-        throw new ManifestError('personal-config-conflict', `the personal config revision changed (expected ${expectedRevision}, found ${String(revision)}); reload and retry`)
-      }
-    } else {
-      if (expectedRevision !== 0) {
-        throw new ManifestError('personal-config-conflict', `the personal config was created concurrently (expected revision ${expectedRevision}); reload and retry`)
-      }
-      const canonical = join(realpathSync(dir), basename(path))
-      for (const binding of checked.data.bindings) {
-        if (isCanonicallyUnder(canonical, canonicalPath(binding.primary))) {
-          throw new ManifestError('manifest-untrusted', 'the personal config must not lie inside a bound local primary root')
-        }
+    const current = readSnapshot(path)
+    if (current.config.revision !== expectedRevision) {
+      throw new ManifestError('personal-config-conflict', `the personal config revision changed (expected ${expectedRevision}, found ${current.config.revision}); reload and retry`)
+    }
+    const { environments, bindings, revision } = checked.data
+    const bindingsPath = bindingStorePath(path)
+    for (const target of [path, bindingsPath]) {
+      if (filePresent(target)) checkPersonalFileProtection(target, bindings)
+      const canonical = join(canonicalDir, basename(target))
+      if (bindings.some(binding => isCanonicallyUnder(canonical, canonicalPath(binding.primary)))) {
+        throw new ManifestError('manifest-untrusted', 'the personal config must not lie inside a bound local primary root')
       }
     }
-    const temp = `${path}.tmp-${process.pid}`
-    const fd = openSync(temp, 'w', 0o600)
-    try {
-      writeSync(fd, `${JSON.stringify(checked.data, null, 2)}\n`)
-      fsyncSync(fd)
-    } finally {
-      closeSync(fd)
+
+    const environmentsChanged = JSON.stringify(environments) !== JSON.stringify(current.config.environments)
+    const bindingsChanged = JSON.stringify(bindings) !== JSON.stringify(current.config.bindings)
+    if (current.split && environmentsChanged && bindingsChanged) {
+      throw new ManifestError('personal-config-invalid', 'save SSH environments and Workspace bindings in separate operations')
     }
-    renameSync(temp, path)
+    if (current.split && (environmentsChanged || bindingsChanged) && revision <= expectedRevision) {
+      throw new ManifestError('personal-config-conflict', 'a changed personal store requires a new revision')
+    }
+    if (!current.split || bindingsChanged) writeProtected(bindingsPath, { schemaVersion: 1, revision, bindings })
+    if (!current.split || !bindingsChanged) writeProtected(path, { schemaVersion: 2, revision, environments })
     return loadPersonalManifest(path)
   } finally {
     await lease.release()

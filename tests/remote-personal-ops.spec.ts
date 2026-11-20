@@ -36,10 +36,9 @@ const MANAGED: PersonalEnvironment = {
   credential: { kind: 'managed', credentialId: 'aabbccddeeff' },
   hostKey: 'SHA256:' + 'A'.repeat(43),
   helper: { nodePath: '/usr/bin/node', helperPath: '/h/lib/helper.js', sha256: 'a'.repeat(64), protocol: 3 },
-  workspace: '/srv/build',
 }
 const SSH_CONFIG_ENV: PersonalEnvironment = { ...MANAGED, credential: { kind: 'ssh-config', alias: 'devbox' } }
-const CONFIG = (envs: PersonalEnvironment[] = [MANAGED]): PersonalConfig => ({ schemaVersion: 1, revision: 0, environments: envs, bindings: [] })
+const CONFIG = (envs: PersonalEnvironment[] = [MANAGED]): PersonalConfig => ({ schemaVersion: 2, revision: 0, environments: envs, bindings: [] })
 
 /** A world: tmp personalPath + credentialRoot, a stub registry in personal mode. */
 const world = (options: { mode?: 'personal' | 'team' | 'hardened'; enabled?: boolean } = {}) => {
@@ -58,7 +57,7 @@ const world = (options: { mode?: 'personal' | 'team' | 'hardened'; enabled?: boo
 
 const FP_OK = 'SHA256:' + 'B'.repeat(43)
 const writeConfig = (path: string, config: PersonalConfig): void => {
-  writeFileSync(path, `${JSON.stringify(config)}\n`, { mode: 0o600 })
+  writeFileSync(path, `${JSON.stringify({ ...config, schemaVersion: 1, environments: config.environments.map(environment => ({ ...environment, workspace: '/' })) })}\n`, { mode: 0o600 })
 }
 
 describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/R4/R5/R6, refusals, secrets)', () => {
@@ -80,21 +79,41 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     expect(JSON.parse(readFileSync(personalPath, 'utf8'))).toMatchObject({ revision: 0 })
   })
 
-  it('sshEnvironmentSave rejects a non-normalized workspace before persisting', async () => {
+  it('rejects non-normalized paths at the Workspace binding endpoint', async () => {
     const { registry, personalPath } = world()
-    writeConfig(personalPath, CONFIG([]))
-    for (const workspace of ['/root/', '~/x', '/a//b', 'relative/path', '/a/./b']) {
-      const draft = {
-        environmentId: 'dev-box', platform: 'linux' as const,
-        endpoint: { hostname: 'build.internal', port: 22, user: 'builder' },
-        credential: { kind: 'ssh-config' as const, alias: 'devbox' },
-        workspace,
-      }
-      await expect(handlePersonalEndpoint(undefined as never as Context, registry, '/w',
-        { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, environment: draft, fingerprint: FP_OK }))
-        .rejects.toMatchObject({ code: 'workspace-invalid' })
+    writeConfig(personalPath, CONFIG())
+    for (const path of ['/root/', '~/x', '/a//b', 'relative/path', '/a/./b']) {
+      await expect(handlePersonalEndpoint(undefined as never, registry, '/w', {
+        endpoint: 'sshBindingSave', sessionId: 's', revision: 0,
+        binding: { environmentId: 'dev-box', rootId: 'app', path, actions: ['read'] },
+      })).rejects.toMatchObject({ code: 'workspace-invalid' })
     }
-    expect(loadPersonalConfig(personalPath).environments).toEqual([])
+    expect(loadPersonalConfig(personalPath).bindings).toEqual([])
+  })
+
+  it('isolates bindings by Workspace, shares the SSH environment, and gives recreated Roots a fresh identity', async () => {
+    const { registry, personalPath } = world()
+    await savePersonalConfig(personalPath, CONFIG(), 0)
+    const call = async (primary: string, payload: import('../src/remote/personal-contract.ts').SshCall) =>
+      await handlePersonalEndpoint(undefined as never, registry, primary, payload) as import('../src/remote/personal-contract.ts').SshStateView
+    const app = { environmentId: 'dev-box', rootId: 'app', path: '/srv/app', actions: ['read'] as const }
+    const logs = { environmentId: 'dev-box', rootId: 'logs', path: '/srv/logs', actions: ['read', 'write'] as const }
+    await call('/one', { endpoint: 'sshBindingSave', sessionId: 's', revision: 0, binding: { ...app, actions: [...app.actions] } })
+    const environmentBytes = readFileSync(personalPath, 'utf8')
+    const firstId = loadPersonalConfig(personalPath).bindings[0]!.bindingId
+    const both = await call('/one', { endpoint: 'sshBindingSave', sessionId: 's', revision: 1, binding: { ...logs, actions: [...logs.actions] } })
+    expect(both.bindings).toMatchObject([app, logs])
+    const another = await call('/two', { endpoint: 'sshBindingSave', sessionId: 't', revision: 2, binding: { ...app, actions: ['read'], path: '/srv/other' } })
+    expect(another.bindings).toMatchObject([{ ...app, path: '/srv/other' }])
+    expect(another.environments).toHaveLength(1)
+    expect(readFileSync(personalPath, 'utf8')).toBe(environmentBytes)
+    await expect(call('/two', { endpoint: 'sshEnvironmentRemove', sessionId: 't', revision: 3, environmentId: 'dev-box' }))
+      .rejects.toMatchObject({ code: 'environment-in-use' })
+    const removed = await call('/one', { endpoint: 'sshBindingRemove', sessionId: 's', revision: 3, environmentId: 'dev-box', rootId: 'app' })
+    expect(removed.bindings).toMatchObject([logs])
+    await call('/one', { endpoint: 'sshBindingSave', sessionId: 's', revision: 4, binding: { ...app, actions: ['read'] } })
+    expect(loadPersonalConfig(personalPath).bindings.find(binding => binding.primary === '/one' && binding.rootId === 'app')?.bindingId)
+      .not.toBe(firstId)
   })
 
   it('the wire contract refuses an environmentId the store would reject (3–63 chars)', async () => {
@@ -103,8 +122,7 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       environmentId: 'ab', platform: 'linux',
       endpoint: { hostname: 'build.internal', port: 22, user: 'builder' },
       credential: { kind: 'ssh-config', alias: 'devbox' },
-      workspace: '/srv/build',
-    }
+        }
     const save = (environmentId: string) => parseSshCall('sshEnvironmentSave', {
       sessionId: 's', revision: 0, fingerprint: FP_OK,
       environment: { ...draft, environmentId },
@@ -134,8 +152,7 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       environmentId: 'dev-box', platform: 'linux' as const,
       endpoint: { hostname: 'lie.example', port: 1, user: 'liar' },
       credential: { kind: 'ssh-config' as const, alias: 'devbox' },
-      workspace: '/srv/build',
-    }
+        }
     const state = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
       { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, environment: draft, fingerprint: FP_OK },
       { exec }) as { environments: PersonalEnvironment[] }
@@ -187,7 +204,7 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       { endpoint: 'sshHostKeyScan', sessionId: 's', hostname: 'build.internal', port: 22 }, { exec }) as { token: string }
     const state = await handlePersonalEndpoint(undefined as never, registry, '/w', {
       endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, fingerprint, hostKeyToken: scan.token,
-      environment: { environmentId: original.environmentId, platform: 'linux', workspace: original.workspace, displayName: 'renamed',
+      environment: { environmentId: original.environmentId, platform: 'linux', displayName: 'renamed',
         endpoint: { hostname: change === 'host' ? 'other.internal' : original.endpoint.hostname,
           port: change === 'port' ? 2222 : 22, user: change === 'user' ? 'other' : original.endpoint.user },
         credential: { kind: 'managed', credentialId: change === 'credential' ? 'ffeeddccbbaa' : 'aabbccddeeff' } },
@@ -206,11 +223,11 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
       platform: 'linux' as const,
       endpoint: { ...original.endpoint },
       credential: { kind: 'managed' as const, credentialId: 'aabbccddeeff' },
-      workspace: '/srv/other',
+      displayName: 'Updated connection',
     }
     const updated = await handlePersonalEndpoint(undefined as never as Context, registry, '/w',
       { endpoint: 'sshEnvironmentSave', sessionId: 's', revision: 0, environment: draft, fingerprint: FP_OK }) as { environments: PersonalEnvironment[] }
-    expect(updated.environments[0]!.workspace).toBe('/srv/other')
+    expect(updated.environments[0]!.displayName).toBe('Updated connection')
     expect(updated.environments[0]!.helper).not.toBeNull()
 
     // A changed target still needs a fresh scan token even with the recorded fingerprint.
@@ -635,7 +652,7 @@ describe.skipIf(process.platform === 'win32')('the personal plane digest rebind 
       ...base, revision: 1,
       environments: [
         { ...MANAGED, helper: null },
-        { ...SSH_CONFIG_ENV, environmentId: 'dev-two', workspace: '/srv/two', helper: null },
+        { ...SSH_CONFIG_ENV, environmentId: 'dev-two', helper: null },
       ],
     })
 

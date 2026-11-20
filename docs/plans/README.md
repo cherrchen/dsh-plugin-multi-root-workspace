@@ -38,8 +38,6 @@ completed/
 
 active：
 
-- [2026-11-19-ssh-add-connection-two-step.md](./active/2026-11-19-ssh-add-connection-two-step.md) — SSH「添加连接」由四步向导缩短为两步：第 1 步连接（凭据来源/目标/主机钥确认 Dialog）→ 第 2 步 Helper、远端路径（SFTP 目录选择器）、能力与「绑定到本项目」；管理对话框收敛为三个 Tab，添加连接抽成从“已有连接”打开的独立 Dialog，远端工作区行复用主要/附属工作目录的 `WorkspaceRow`，新增只读 `sshConfigAliases` / `sshListDirectories`，并允许身份未变的环境更新复用已记录主机钥。自动门禁通过，GUI 手工验收待维护者。
-
 - [2026-11-16-sidebar-footer-row-alignment-and-coexistence.md](./active/2026-11-16-sidebar-footer-row-alignment-and-coexistence.md) — 侧栏 footer 入口的 workspace tree 图标与跨两代几何对齐（旧 19 版 / 新 5 版，分界 `0.2.2-alpha.2`；rail 圆角按其更早的 `0.1.6-alpha.2` 分界处理，22/24 对齐、最老 2 版已知偏差），以及同槽出现第二行时的纵向共存规则：一份带 fallback 的 CSS 配方、`:has()` 作用域的 slot anchor 纵向列、不隐藏/不读槽账本/不改他人行；含复刻取证、测试与文档清单。决策见 [ADR-0044](../decisions/ADR-0044-sidebar-footer-row-alignment-and-coexistence.md)。
 - [2026-11-16-additional-root-preview-navigator-search.md](./active/2026-11-16-additional-root-preview-navigator-search.md) — 附加根文件预览右侧 Folder 导航树（FileTree）的工作区搜索：复用既有 `search` 端点与 `FilesPane`（新增 preview 模式），补齐结果当前行、隐藏项默认、设置回焦、焦点交接、Escape 顺序与旧宿主降级；DSH `0.2.2-rc.2` 起可用，Host 零改动。决策见 [ADR-0043](../decisions/ADR-0043-additional-root-preview-navigator-search.md)；**实施完成（P1–P4 已提交），P5 本机门禁与隔离环境交互目检完成（截图待维护者复核）**。
 
@@ -73,6 +71,10 @@ active：
 
 
 completed：
+
+- [SSH 环境与 Workspace Root 绑定拆分](./completed/2026-11-20-ssh-environments-and-workspace-bindings.md) SSH 环境与 Workspace Root 绑定独立管理，含旧配置迁移与同环境多 Root 验证。
+
+- [2026-11-19-ssh-add-connection-two-step.md](./completed/2026-11-19-ssh-add-connection-two-step.md) 前一版两步向导，已由连接与绑定拆分取代。
 
 - [2026-11-17-files-rootswitch-narrow-width.md](./completed/2026-11-17-files-rootswitch-narrow-width.md) — Files 页头 `RootSwitcher` 的窄宽让位优先级：`Menu` 的 anchor 包装 span 是外层 flex item，缺 `min-width: 0` 时把触发器钉在内容 min-content，窄栏/双栏/浮动小窗下溢出压住 reload、搜索与 open-in-app；修复为「固定控件 → 完整路径 → 根名 → 触发器图标」三级收缩（anchor 解钉、路径 `flex: 1 1 0` 先让、触发器 `overflow: hidden`），已完成（2026-11-17）：focused/全量 client 测试、隔离 Web 宿主三工况 299/323/220 与附加根接管态的 DOM 量测与截图目检；随后追加 P5 三档根名显示（全名 → 前几个…后几个 → 开头…，自适应并优先按分隔符断开），含 `root-name-fit`/`root-name-room` 与真实 GUI 逐档证据。决策见 [ADR-0046](../decisions/ADR-0046-files-header-rootswitch-shrink-priority.md)。
 

@@ -197,53 +197,60 @@ export class SshEnvironmentManager {
       : { eligible: false, reason: this.gate.status === 'absent' ? this.gate.reason : 'unknown' }
   }
 
-  /** The live generation for an environment — a sentinel when none is open. */
-  generationOf(environmentId: string): string {
-    return this.resolved.get(environmentId)?.generation ?? 'stale'
+  private helperKey(environmentId: string, workspace?: string): string {
+    return this.personalCustody ? JSON.stringify([environmentId, workspace]) : environmentId
   }
 
-  /** Open (or join the in-flight open of) one environment's connection. */
-  async open(environmentId: string): Promise<SshEnvironment> {
-    const existing = this.openings.get(environmentId)
+  /** The live generation of a deployment connection or personal Root helper. */
+  generationOf(environmentId: string, workspace?: string): string {
+    return this.resolved.get(this.helperKey(environmentId, workspace))?.generation ?? 'stale'
+  }
+
+  /** Open or reuse the Helper under its deployment or personal Root scope. */
+  async open(environmentId: string, workspace?: string): Promise<SshEnvironment> {
+    const key = this.helperKey(environmentId, workspace)
+    const existing = this.openings.get(key)
     if (existing !== undefined) {
       const env = await existing
-      // A killed ssh leaves a cached corpse behind (upstream only marks its
-      // connection failed; nothing clears our map). Revalidate before reuse —
-      // the next open then builds a genuinely new generation.
       try {
         env.assertAlive()
         return env
       } catch {
-        this.markStale(environmentId)
+        if (this.openings.get(key) !== existing) return await this.open(environmentId, workspace)
+        this.markStale(environmentId, workspace)
       }
     }
-    const promise = this.openFresh(environmentId)
-    this.openings.set(environmentId, promise)
+    const promise = this.openFresh(environmentId, workspace)
+    this.openings.set(key, promise)
     try {
       const env = await promise
-      this.resolved.set(environmentId, env)
+      if (this.openings.get(key) !== promise) throw new SshEnvironmentError('remote-unavailable', 'the Helper opening was superseded')
+      this.resolved.set(key, env)
       return env
-    } catch (error) { this.openings.delete(environmentId); throw error }
+    } catch (error) {
+      if (this.openings.get(key) === promise) this.openings.delete(key)
+      throw error
+    }
   }
 
-  /** Mark an environment's connection as lost; the next open builds anew. */
-  markStale(environmentId: string): void {
-    const opening = this.openings.get(environmentId)
-    this.openings.delete(environmentId)
-    this.resolved.delete(environmentId)
-    void opening?.then(env => env.dispose()).catch(() => {})
+  /** Mark only the affected Helper as lost. */
+  markStale(environmentId: string, workspace?: string): void {
+    void this.disposeHelper(this.helperKey(environmentId, workspace)).catch(() => {})
   }
 
-  async dispose(environmentId: string): Promise<void> {
-    const opening = this.openings.get(environmentId)
-    this.openings.delete(environmentId)
-    this.resolved.delete(environmentId)
+  private async disposeHelper(key: string): Promise<void> {
+    const opening = this.openings.get(key)
+    this.openings.delete(key)
+    this.resolved.delete(key)
     if (opening !== undefined) await opening.then(env => env.dispose(), () => {})
   }
 
+  async dispose(environmentId: string, workspace?: string): Promise<void> {
+    await this.disposeHelper(this.helperKey(environmentId, workspace))
+  }
+
   async disposeAll(): Promise<void> {
-    const ids = [...this.openings.keys()]
-    await Promise.all(ids.map(id => this.dispose(id)))
+    await Promise.all([...this.openings.keys()].map(key => this.disposeHelper(key)))
     for (const id of [...this.sftpOpenings.keys()]) await this.disposeSftp(id)
   }
 
@@ -313,7 +320,7 @@ export class SshEnvironmentManager {
   }
 
   /** The full ordered admission: gate → transport → isolation → identity → load → mount. */
-  private async openFresh(environmentId: string): Promise<SshEnvironment> {
+  private async openFresh(environmentId: string, bindingPath?: string): Promise<SshEnvironment> {
     const environment = this.manifest.environments.find(entry => entry.environmentId === environmentId)
     if (environment === undefined) throw new SshEnvironmentError('unknown-environment', `no manifest environment "${environmentId}"`)
     if (this.gate.status !== 'eligible') {
@@ -323,6 +330,11 @@ export class SshEnvironmentManager {
     if (environment.credentialIsolation !== 'attested' && !this.allowUnattested && !this.brokerCustody) {
       throw new SshEnvironmentError('credential-isolation-unattested', `environment "${environmentId}" is declared unattested; connections require an attested deployment`)
     }
+    const workspace = this.personalCustody ? bindingPath : environment.connection.workspace
+    if (workspace === undefined || (this.personalCustody
+      && !this.manifest.bindings.some(binding => binding.environmentId === environmentId && binding.path === workspace))) {
+      throw new SshEnvironmentError('workspace-invalid', 'the Helper requires a declared remote Root')
+    }
     const identity = await this.verifyHostIdentity(environment)
     const connection = environment.connection
     const modules = await loadHostSshPackages(this.gate) as Record<string, Record<string, unknown> & { default?: Record<string, unknown> }>
@@ -331,12 +343,12 @@ export class SshEnvironmentManager {
     const mount = ctx.plugin.bind(ctx) as (plugin: unknown, config?: unknown) => { dispose(): Promise<void> }
     const fibers = [
       mount(SessionProjectionRegistry),
-      mount(SandboxPolicyService, { mode: 'read-only', workspaceRoot: connection.workspace! }),
+      mount(SandboxPolicyService, { mode: 'read-only', workspaceRoot: workspace }),
       mount(exported('@deepseek-ai/dsh-ssh', 'SshConnection'), {
         host: connection.host,
         launch: { kind: 'node-script', node: connection.nodePath! },
         helper: connection.helperPath!, helperHash: environment.helper!.sha256,
-        workspace: connection.workspace!,
+        workspace,
       }),
       mount(exported('@deepseek-ai/dsh-fs-ssh', 'SshFileSystem')),
       mount(exported('@deepseek-ai/dsh-subprocess-ssh', 'SshSubprocessRuntime')),

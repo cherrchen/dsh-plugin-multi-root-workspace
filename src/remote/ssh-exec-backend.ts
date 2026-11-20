@@ -13,10 +13,10 @@ import { SshEndpointVerifier, EndpointVerifyError } from './ssh-verifier.ts'
 
 /** The manager surface the exec adapters need; the SSH manager implements it. */
 export interface SshExecManager {
-  open(environmentId: string): Promise<SshEnvironment>
+  open(environmentId: string, workspace?: string): Promise<SshEnvironment>
   openSftp(environmentId: string): Promise<SftpEnvironment>
-  generationOf(environmentId: string): string
-  markStale(environmentId: string): void
+  generationOf(environmentId: string, workspace?: string): string
+  markStale(environmentId: string, workspace?: string): void
 }
 
 /** The deployment block the manifest's `exec` stanza becomes. */
@@ -33,20 +33,20 @@ function deploymentOf(environment: RemoteEnvironment): RemoteExecDeployment | un
  * from passing the final launch admission (`markStale` bumps the generation).
  */
 export function lazySshExecBackend(
-  environment: RemoteEnvironment, manager: SshExecManager,
+  environment: RemoteEnvironment, manager: SshExecManager, workspace?: string,
 ): RemoteExecutionBackend | undefined {
   const deployment = deploymentOf(environment)
   if (deployment === undefined) return undefined
   let opened: { env: SshEnvironment; backend: RemoteExecutionBackend } | undefined
   const backend = async (): Promise<RemoteExecutionBackend> => {
-    const env = await manager.open(environment.environmentId)
-    if (opened?.env !== env) opened = { env, backend: sshExecBackend(environment, env, manager)! }
+    const env = await manager.open(environment.environmentId, workspace)
+    if (opened?.env !== env) opened = { env, backend: sshExecBackend(environment, env, manager, workspace)! }
     return opened.backend
   }
   return {
     deployment,
     async confine(argv, policy, signal) { return await (await backend()).confine(argv, policy, signal) },
-    currentGeneration() { return manager.generationOf(environment.environmentId) },
+    currentGeneration() { return manager.generationOf(environment.environmentId, workspace) },
     async verifyCwd(cwd, root, signal) {
       if (signal.aborted) throw new Error('cancelled')
       const relative = posix.relative(root, cwd)
@@ -57,7 +57,7 @@ export function lazySshExecBackend(
       // transfer authority or the SFTP hardlink/fsync extensions.
       const verifier = new SshEndpointVerifier(manager)
       await verifier.verify(environment, { path: root }, signal)
-      if (cwd !== root) await verifier.verify(environment, { path: cwd }, signal)
+      if (cwd !== root) await verifier.verify(environment, { path: cwd }, signal, root)
     },
     spawn(argv, options, sink) {
       // The preparation admission always runs first; without it there is no
@@ -70,7 +70,7 @@ export function lazySshExecBackend(
 
 /** Build the backend for one environment, or `undefined` when it has no exec. */
 export function sshExecBackend(
-  environment: RemoteEnvironment, env: SshEnvironment, manager: SshExecManager,
+  environment: RemoteEnvironment, env: SshEnvironment, manager: SshExecManager, workspace?: string,
 ): RemoteExecutionBackend | undefined {
   const deployment = deploymentOf(environment)
   if (deployment === undefined) return undefined
@@ -82,7 +82,7 @@ export function sshExecBackend(
     collected?: { stdout?: Collected; stderr?: Collected }
   }
   const lost = (error: unknown): RemoteConnectionLost => {
-    manager.markStale(environment.environmentId)
+    manager.markStale(environment.environmentId, workspace)
     return error instanceof RemoteConnectionLost ? error : new RemoteConnectionLost(error instanceof Error ? error.message : String(error))
   }
   return {
@@ -93,7 +93,7 @@ export function sshExecBackend(
         return { argv: confined.argv, enforcement: confined.enforcement as 'full' | 'partial', generation: env.generation }
       } catch (error) { throw lost(error) }
     },
-    currentGeneration() { return manager.generationOf(environment.environmentId) },
+    currentGeneration() { return manager.generationOf(environment.environmentId, workspace) },
     spawn(argv, options, sink) {
       let handle: Handle
       try {

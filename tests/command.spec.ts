@@ -656,6 +656,10 @@ describe('the panel channel', () => {
     })
     const listed = await callPanel('remotes', { sessionId: PANEL_SESSION })
     expect(listed.ok).toBe(true)
+    if (process.platform === 'win32') {
+      expect(listed.value).toMatchObject({ status: { state: 'platform-deferred' }, custodyMode: 'personal', endpoints: [] })
+      return
+    }
     expect(listed.value).toMatchObject({
       status: { state: 'ready' },
       custodyMode: 'personal',
