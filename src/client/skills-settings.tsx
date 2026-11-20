@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { IconWarningOutlineRegular, Switch, Tag, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Button, IconWarningOutlineRegular, Switch, Tag, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '@deepseek-ai/cordis'
 import { bindSettingsForm, bindSkillsForm, clientInject, type SkillsForm } from '../compat/skills-client.ts'
 import { installAutoReviewSettings, type AutoReviewForm } from '../compat/auto-review-client.ts'
@@ -8,6 +8,10 @@ import { AutoReviewSettingsCard } from './auto-review-settings.tsx'
 import { OpsCompatibilitySettingsCard } from './ops-settings.tsx'
 import type { Key } from './locales.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
+import { PanelError } from './panel-client.ts'
+import { SshManagementDialog } from './ssh-panel.tsx'
+import type { SshSettingsClient, SshSettingsView } from './ssh-client.ts'
+
 const BUNDLE_KEY = '@dsh-electron/dsh-plugin-multi-root-workspace'
 
 /** One live boolean settings row; the Skills and worktree switches share it. */
@@ -159,6 +163,57 @@ export function RemoteSwitchRow({ form, t }: { form: SkillsForm; t: Translate })
   </div>
 }
 
+function SshSettingsDialog({ client, form, revision, onClose, t }: {
+  client: SshSettingsClient
+  form: SkillsForm
+  revision: number | undefined
+  onClose: () => void
+  t: Translate
+}) {
+  const [view, setView] = useState<SshSettingsView>()
+  const [error, setError] = useState<PanelError>()
+  const [refresh, setRefresh] = useState(0)
+  const remoteMode = useMemo(() => ({ form: () => form, subscribe: (listener: () => void) => form.subscribe(listener) }), [form])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    client.status(controller.signal).then(next => {
+      if (controller.signal.aborted) return
+      setView(next)
+      setError(undefined)
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
+    })
+    return () => controller.abort()
+  }, [client, revision, refresh])
+
+  return <SshManagementDialog initialTab="connections" fromSettings sessionId={undefined} ssh={client.management}
+    custodyMode={view?.custodyMode} status={view?.status} endpoints={[]} deploymentConnections={view?.connections ?? []}
+    overviewError={error} remoteMode={remoteMode} onClose={onClose} onChanged={() => setRefresh(value => value + 1)} t={t} />
+}
+
+function SshManagementSetting({ form, client, t }: { form: SkillsForm; client: SshSettingsClient; t: Translate }) {
+  const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
+  if (snapshot.status !== 'ready' || snapshot.value?.enabled !== true) return null
+  return <EnabledSshManagementSetting form={form} client={client} revision={snapshot.revision} t={t} />
+}
+
+function EnabledSshManagementSetting({ form, client, revision, t }: {
+  form: SkillsForm
+  client: SshSettingsClient
+  revision: number | undefined
+  t: Translate
+}) {
+  const [open, setOpen] = useState(false)
+  return <>
+    <div className="mrfw-skillsSettings">
+      <div className="mrfw-skillsSettingsTitle">{t('ssh.settings.title')}</div>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>{t('ssh.settings.manage')}</Button>
+    </div>
+    {open ? <SshSettingsDialog client={client} form={form} revision={revision} onClose={() => setOpen(false)} t={t} /> : null}
+  </>
+}
+
 interface SkillsCardProps { form: SkillsForm; worktreeForm?: SkillsForm | undefined; t: Translate }
 
 /** The plugin-detail card: root Skills and worktree suggestions, one cell. */
@@ -176,15 +231,17 @@ export function SkillsSettingsCard({ form, worktreeForm, t }: SkillsCardProps) {
  * its namespace, Auto Review through the Plugin Manager's Loader-row enablement —
  * so one cell never serializes their state.
  */
-export function BundleSettingsCard({ form, worktreeForm, autoReviewForm, opsForm, remoteForm, t }: {
+export function BundleSettingsCard({ form, worktreeForm, autoReviewForm, opsForm, remoteForm, sshSettings, t }: {
   form?: SkillsForm | undefined
   worktreeForm?: SkillsForm | undefined
   autoReviewForm?: AutoReviewForm | undefined
   opsForm?: SkillsForm | undefined
   remoteForm?: SkillsForm | undefined
+  sshSettings?: SshSettingsClient | undefined
   t: Translate
 }) {
   return <>
+    {remoteForm === undefined || sshSettings === undefined ? null : <SshManagementSetting form={remoteForm} client={sshSettings} t={t} />}
     {form === undefined
       ? null
       : <SkillsSettingsCard form={form} worktreeForm={worktreeForm} t={t} />}
@@ -214,7 +271,7 @@ export interface WorktreeSettingsSignal {
   subscribeRemote(listener: () => void): () => void
 }
 
-export function installSkillsSettingsCard(ctx: Context, t: Translate): WorktreeSettingsSignal {
+export function installSkillsSettingsCard(ctx: Context, t: Translate, sshSettings?: SshSettingsClient): WorktreeSettingsSignal {
   // One coordinator prevents duplicate cards if a host temporarily exposes both shapes.
   let currentSkills: SkillsForm | undefined
   let currentWorktree: SkillsForm | undefined
@@ -276,7 +333,7 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate): WorktreeS
     currentSkills = skillsForm; currentWorktree = worktreeForm; currentOps = opsForm; currentRemote = remoteForm; currentAutoReview = autoAvailable
     const disposers = [slots.inject('plugins.bundle.config', () => slots.register({
       name: 'plugins.bundle.config', key: BUNDLE_KEY,
-      inject: () => ({ form: skillsForm, worktreeForm, autoReviewForm: autoForm, opsForm, remoteForm, t }),
+      inject: () => ({ form: skillsForm, worktreeForm, autoReviewForm: autoForm, opsForm, remoteForm, sshSettings, t }),
     }, BundleSettingsCard))]
     // Legacy hosts render one item per namespace: the Skills card carries both
     // switches, so the worktree feature never registers a second package card.

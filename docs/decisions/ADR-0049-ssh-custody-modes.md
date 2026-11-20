@@ -81,3 +81,7 @@
 - personal 存储拆为插件级连接文件与按 Workspace 主根归档的绑定文件。两个文件共用跨进程租约及 CAS，首次写入以 v2 连接文件的原子提交作为迁移切换点。旧路径和权限以已存在的绑定为准；连接记录的旧 `workspace` 不再参与准入。若连接还有引用，先解除绑定才可删除连接。
 - personal Helper 以待核验或已准入的绑定路径启动，按环境与目录隔离连接实例。绑定的新建身份进入 grant 摘要，避免解绑后以同样的参数重新创建时复用旧授权。
 - 新存储格式、迁移和界面动线见 [SSH 远端环境参考](../reference/ssh-remote-environments.md)。本节更新 §2 的文件布局及 2026-11-19 的两步式界面决定。
+
+## 修订：插件详情提供独立的 SSH 管理入口
+
+插件详情的 SSH 管理与 Workspace Folders 共用对话框。插件级操作通过独立的 Host Connection 通道工作，免于依赖一个活动会话。Workspace 的绑定与登记仍由会话确定主根。入口和端点约束见 [SSH 远端环境参考](../reference/ssh-remote-environments.md)。

@@ -19,6 +19,7 @@ import { AuthorityRpcError } from '../src/authority/protocol.ts'
 import * as CommandModule from '../src/command.ts'
 import { parseFoldersCommand, renderRootsReport, revealAccepted, revealArgv } from '../src/command.ts'
 import { PANEL_CHANNEL, type PanelRequest, type RootsView } from '../src/contract.ts'
+import { SSH_SETTINGS_CHANNEL } from '../src/remote/personal-contract.ts'
 import { primaryKey } from '../src/roots.ts'
 import type { RootStatus } from '../src/roots.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
@@ -34,7 +35,7 @@ let contexts: Context[] = []
 const registered = new Map<string, CommandDefinition>()
 /** The channel handler the module handed to the stub Connection. */
 type PanelHandler = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<unknown>
-let handler: PanelHandler | undefined
+const handlers = new Map<string, PanelHandler>()
 /** Every argv the stub subprocess was asked to run. */
 let spawned: string[][] = []
 
@@ -62,7 +63,7 @@ async function mount(options: {
   stacks.push(stack)
   const ctx = stack.ctx
   registered.clear()
-  handler = undefined
+  handlers.clear()
   spawned = []
   ctx.provide('commands', {
     register: (definition: CommandDefinition) => {
@@ -86,8 +87,7 @@ async function mount(options: {
     ctx.provide('connection', {
       rpc: {
         handle: (channel: string, registeredHandler: PanelHandler) => {
-          expect(channel).toBe(PANEL_CHANNEL)
-          handler = registeredHandler
+          handlers.set(channel, registeredHandler)
           return async () => {}
         },
       },
@@ -173,6 +173,7 @@ interface PanelAnswer {
 
 /** Call one panel endpoint through the registered channel handler. */
 async function callPanel(endpoint: string, payload: unknown = {}): Promise<PanelAnswer> {
+  const handler = handlers.get(PANEL_CHANNEL)
   if (handler === undefined) throw new Error('the module registered no panel channel')
   return await handler(endpoint, payload, new AbortController().signal) as PanelAnswer
 }
@@ -551,7 +552,7 @@ describe('the /workspace-folders command', () => {
 describe('the panel channel', () => {
   it('registers nothing when no host Connection is composed', async () => {
     await mount()
-    expect(handler).toBeUndefined()
+    expect(handlers.size).toBe(0)
   })
 
   it('lists, adds, aliases, moves, reveals, and removes through ids', async () => {
@@ -629,6 +630,25 @@ describe('the panel channel', () => {
     // The primary root is host-derived; a client-named path is out of contract.
     const spoof = await callPanel('remotes', { sessionId: PANEL_SESSION, primaryRoot: '/elsewhere' })
     expect(spoof.error?.code).toBe('panel/bad-request')
+  })
+
+  it.skipIf(process.platform === 'win32')('manages SSH connections from settings without a session and rejects workspace operations', async () => {
+    const personalPath = join(fixture.base, 'remote-personal.json')
+    const credentialRoot = join(fixture.base, 'remote-credentials')
+    await mount({ withConnection: true, sessions: false,
+      registry: { remoteEnvironments: { enabled: true, mode: 'personal', personalPath, credentialRoot } },
+    })
+    const handle = handlers.get(SSH_SETTINGS_CHANNEL)!
+    const call = async (endpoint: string, payload: object = {}) => await handle(endpoint, payload, new AbortController().signal)
+    await expect(call('status')).resolves.toMatchObject({ ok: true, value: { custodyMode: 'personal', status: { state: 'ready' } } })
+    await expect(call('sshState')).resolves.toMatchObject({ ok: true, value: { bindings: [], credentials: [] } })
+    await expect(call('sshCredentialPassword', { label: 'setup', password: 'test-secret' }))
+      .resolves.toMatchObject({ ok: true, value: { bindings: [], credentials: [{ label: 'setup', kind: 'password' }] } })
+    for (const endpoint of ['sshBindingSave', 'sshBindingRemove', 'sshListDirectories', 'addRemote', 'removeRemote']) {
+      await expect(call(endpoint)).resolves.toMatchObject({ ok: false, error: { code: 'panel/bad-request' } })
+    }
+    await expect(call('sshState', { sessionId: 'spoofed' })).resolves.toMatchObject({ ok: false, error: { code: 'panel/bad-request' } })
+    await expect(callPanel('sshState')).resolves.toMatchObject({ ok: false, error: { code: 'panel/bad-request' } })
   })
 
   it('projects the personal user@host:port target into the remote panel row', async () => {
@@ -1129,13 +1149,13 @@ describe('the panel channel', () => {
     const notAnObject = await callPanel('list', 'primary' as never)
     expect(notAnObject.error?.code).toBe('panel/bad-request')
 
-    const unknownKey = await handler!('list', { sessionId: PANEL_SESSION, sneaky: true }, new AbortController().signal) as PanelAnswer
+    const unknownKey = await callPanel('list', { sessionId: PANEL_SESSION, sneaky: true })
     expect(unknownKey.error?.code).toBe('panel/bad-request')
 
-    const wrongType = await handler!('list', { sessionId: 7 }, new AbortController().signal) as PanelAnswer
+    const wrongType = await callPanel('list', { sessionId: 7 })
     expect(wrongType.error?.code).toBe('panel/bad-request')
 
-    const namedRoot = await handler!('list', { sessionId: PANEL_SESSION, primaryRoot: primary }, new AbortController().signal) as PanelAnswer
+    const namedRoot = await callPanel('list', { sessionId: PANEL_SESSION, primaryRoot: primary })
     expect(namedRoot.error?.code).toBe('panel/bad-request')
   })
 

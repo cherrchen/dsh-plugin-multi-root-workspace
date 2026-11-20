@@ -22,6 +22,7 @@ import { REMOTE_CONTEXT_NAME } from '../src/remote/capabilities.ts'
 import { loadDeploymentManifest } from '../src/remote/manifest.ts'
 import { apply as applyRemoteTools, inject } from '../src/remote/tools.ts'
 import { attestBroker, type BrokerConfig } from '../src/remote/broker/attest.ts'
+import { PANEL_CHANNEL } from '../src/contract.ts'
 import * as CommandModule from '../src/command.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { executeTool, installToolExecutor } from './support/tool-executor.ts'
@@ -109,7 +110,7 @@ async function mount(withPanel = false) {
     stack.ctx.provide('commands', { register: () => () => {} } as never)
     stack.ctx.provide('webServer', {} as never)
     stack.ctx.provide('connection', {
-      rpc: { handle: (_channel: string, registered: PanelHandler) => { panelHandler = registered; return async () => {} } },
+      rpc: { handle: (channel: string, registered: PanelHandler) => { if (channel === PANEL_CHANNEL) panelHandler = registered; return async () => {} } },
     } as never)
     await stack.ctx.plugin(CommandModule, {})
   }

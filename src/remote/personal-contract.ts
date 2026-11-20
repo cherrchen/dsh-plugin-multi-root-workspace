@@ -2,13 +2,16 @@
  * Browser-safe wire shapes for the personal-mode SSH management endpoints
  * (ADR-0049 §2/§6). Separate from the roots and remotes contracts, same
  * PANEL_CHANNEL. Every request carries `sessionId`; the host derives the
- * primary root from the live session. Unknown keys fail `panel/bad-request`.
+ * primary root from the live session. Plugin settings use a separate channel
+ * that exposes connection management without the workspace operations.
  *
  * No endpoint ever returns secret material: credential answers are metadata
  * views only, and `sshHostKeyScan` hands back a short-lived scan token whose
  * known_hosts line stays server-side.
  */
 import { z } from 'zod'
+
+export const SSH_SETTINGS_CHANNEL = '/multi-root-workspace-ssh-settings'
 
 /** Personal endpoint names, relative to the panel channel. */
 export const SSH_ENDPOINTS = [
@@ -75,38 +78,37 @@ export const environmentDraftSchema = z.object({
 })
 
 const requestSchemas = {
-  sshState: z.object({ sessionId }).strict(),
-  // Read-only helpers for the two-step add flow: local Host aliases and the
+  sshState: z.object({}).strict(),
+  // Read-only helpers for setup: local Host aliases and the
   // remote directory picker. Neither answer carries file or secret bytes.
-  sshConfigAliases: z.object({ sessionId }).strict(),
+  sshConfigAliases: z.object({}).strict(),
   sshListDirectories: z.object({
-    sessionId, environmentId, path: z.string().max(4096).optional(),
+    environmentId, path: z.string().max(4096).optional(),
   }).strict(),
-  sshCredentialGenerate: z.object({ sessionId, label }).strict(),
-  sshCredentialImport: z.object({ sessionId, label, privateKey: z.string().min(1).max(32_768), passphrase: z.string().max(1024).optional() }).strict(),
-  sshCredentialPassword: z.object({ sessionId, label, password: z.string().min(1).max(4096) }).strict(),
-  sshCredentialRemove: z.object({ sessionId, id: z.string().min(1) }).strict(),
+  sshCredentialGenerate: z.object({ label }).strict(),
+  sshCredentialImport: z.object({ label, privateKey: z.string().min(1).max(32_768), passphrase: z.string().max(1024).optional() }).strict(),
+  sshCredentialPassword: z.object({ label, password: z.string().min(1).max(4096) }).strict(),
+  sshCredentialRemove: z.object({ id: z.string().min(1) }).strict(),
   // An alias scan resolves `ssh -G <alias>` on the host instead of touching
   // the network: the answer carries the user's own known_hosts fingerprint
   // plus the resolved endpoint, which is exactly what `sshEnvironmentSave`
   // re-verifies for an ssh-config environment. Hostname may be omitted when
   // the alias names the target.
   sshHostKeyScan: z.object({
-    sessionId,
     hostname: z.string().min(1).max(253).optional(),
     port: z.number().int().min(1).max(65535),
     alias: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/).optional(),
   }).strict().refine(value => value.alias !== undefined || value.hostname !== undefined, { message: 'hostname or alias is required' }),
   sshEnvironmentSave: z.object({
-    sessionId, revision, environment: environmentDraftSchema,
+    revision, environment: environmentDraftSchema,
     hostKeyToken: z.string().min(1).optional(), fingerprint: z.string().regex(/^SHA256:[A-Za-z0-9+/=]+$/),
   }).strict(),
-  sshEnvironmentRemove: z.object({ sessionId, revision, environmentId }).strict(),
-  sshEnvironmentTest: z.object({ sessionId, environmentId }).strict(),
-  sshHelperInstall: z.object({ sessionId, revision, environmentId, nodePath: z.string().min(1).optional() }).strict(),
-  sshAccessKeyInstall: z.object({ sessionId, revision, environmentId }).strict(),
+  sshEnvironmentRemove: z.object({ revision, environmentId }).strict(),
+  sshEnvironmentTest: z.object({ environmentId }).strict(),
+  sshHelperInstall: z.object({ revision, environmentId, nodePath: z.string().min(1).optional() }).strict(),
+  sshAccessKeyInstall: z.object({ revision, environmentId }).strict(),
   sshBindingSave: z.object({
-    sessionId, revision,
+    revision,
     binding: z.object({
       environmentId,
       rootId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
@@ -114,34 +116,69 @@ const requestSchemas = {
       actions: z.array(z.enum(['read', 'write', 'exec'])).min(1),
       transfers: z.array(z.object({
         direction: z.enum(['import', 'export']),
-        peer: z.object({ environmentId: z.literal('local'), rootId: z.string() }),
+        peer: z.object({ environmentId: z.union([z.literal('local'), environmentId]), rootId: z.string() }),
       })).optional(),
     }).strict(),
   }).strict(),
-  sshBindingRemove: z.object({ sessionId, revision, environmentId, rootId: z.string().min(1) }).strict(),
-  sshConfigLink: z.object({ sessionId }).strict(),
+  sshBindingRemove: z.object({ revision, environmentId, rootId: z.string().min(1) }).strict(),
+  sshConfigLink: z.object({}).strict(),
 } as const
 
-export type SshCall = { [E in SshEndpoint]: { endpoint: E } & z.infer<(typeof requestSchemas)[E]> }[SshEndpoint]
+type SshRequest = {
+  [E in SshEndpoint]: E extends 'sshState' | 'sshConfigAliases' | 'sshConfigLink'
+    ? { endpoint: E }
+    : { endpoint: E } & z.infer<(typeof requestSchemas)[E]>
+}[SshEndpoint]
+export type SshCall = SshRequest & { sessionId: string }
+const SSH_SETTINGS_ENDPOINTS = [
+  'sshState', 'sshConfigAliases', 'sshCredentialGenerate', 'sshCredentialImport', 'sshCredentialPassword',
+  'sshCredentialRemove', 'sshHostKeyScan', 'sshEnvironmentSave', 'sshEnvironmentRemove', 'sshEnvironmentTest',
+  'sshHelperInstall', 'sshAccessKeyInstall', 'sshConfigLink',
+] as const satisfies readonly SshEndpoint[]
+export type SshSettingsCall = Extract<SshRequest, { endpoint: typeof SSH_SETTINGS_ENDPOINTS[number] }>
 
 /** One parsed request, mirroring the worktree contract's vocabulary. */
 export type SshParsed<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly message: string }
 
-/**
- * Validate one personal endpoint's payload.
- * @param endpoint - the endpoint name.
- * @param payload - the raw channel payload.
- * @returns the request, or the reason it is not one.
- */
-export function parseSshCall(endpoint: SshEndpoint, payload: unknown): SshParsed<SshCall> {
-  const schema = requestSchemas[endpoint]
-  const parsed = schema.safeParse(payload ?? {})
+function parseRequest(endpoint: SshEndpoint, payload: unknown): SshParsed<SshRequest> {
+  const parsed = requestSchemas[endpoint].safeParse(payload)
   if (!parsed.success) {
     const issue = parsed.error.issues[0]
     return { ok: false, message: `the ${endpoint} request is invalid: ${issue?.path.join('.') ?? ''} ${issue?.message ?? ''}`.trim() }
   }
-  return { ok: true, value: { endpoint, ...(parsed.data as Record<string, unknown>) } as SshCall }
+  return { ok: true, value: { endpoint, ...parsed.data } as SshRequest }
 }
+
+export function parseSshCall(endpoint: SshEndpoint, payload: unknown): SshParsed<SshCall> {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, message: 'an SSH request must be an object' }
+  }
+  const { sessionId: id, ...request } = payload as Record<string, unknown>
+  const parsedSession = sessionId.safeParse(id)
+  if (!parsedSession.success) return { ok: false, message: 'the SSH request requires a sessionId' }
+  const parsed = parseRequest(endpoint, request)
+  return parsed.ok ? { ok: true, value: { ...parsed.value, sessionId: parsedSession.data } } : parsed
+}
+
+/** Settings may only manage the globally stored connection and its credentials. */
+export function parseSshSettingsCall(endpoint: string, payload: unknown): SshParsed<SshSettingsCall> {
+  if (!(SSH_SETTINGS_ENDPOINTS as readonly string[]).includes(endpoint)) {
+    return { ok: false, message: 'unknown SSH settings endpoint' }
+  }
+  return parseRequest(endpoint as SshEndpoint, payload) as SshParsed<SshSettingsCall>
+}
+
+export const sshSettingsViewSchema = z.strictObject({
+  custodyMode: z.enum(['personal', 'team', 'hardened']),
+  status: z.object({ state: z.string(), reason: z.string().optional(), code: z.string().optional() }),
+  connections: z.array(z.strictObject({
+    environmentId: z.string(),
+    platform: z.string(),
+    target: z.string(),
+    displayName: z.string().optional(),
+  })),
+})
+export type SshSettingsView = z.infer<typeof sshSettingsViewSchema>
 
 /** What the panel sees of one credential — never key or password bytes. */
 export interface CredentialPublicView {

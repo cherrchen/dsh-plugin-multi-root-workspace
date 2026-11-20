@@ -49,7 +49,8 @@ import type { WorkspaceFoldersDialogController } from './workspace-folders-dialo
 import type { RemotesClient } from './remotes-client.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
 import type { SshClient } from './ssh-client.ts'
-import { platformLabel, SshManagementDialog, SshWorkspaceBindingsDialog, type SshDialogTab } from './ssh-panel.tsx'
+import { SshManagementDialog, SshWorkspaceBindingsDialog, type SshDialogTab } from './ssh-panel.tsx'
+import { RemoteRootMenu } from './remote-root-menu.tsx'
 import { requestWorktreePrompt } from './worktree-prompt-bus.ts'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
@@ -233,8 +234,6 @@ interface WorkspaceRowProps {
   readonly copied?: boolean
   readonly onCopy?: (() => void) | undefined
   readonly t: Translate
-  /** Optional third line inside the text block (remote capabilities). */
-  readonly notes?: ReactNode
   /** The row's trailing action cluster. */
   readonly trailing?: ReactNode
   /** Content that must wrap below the row (the alias editor). */
@@ -260,7 +259,6 @@ function WorkspaceRow(props: WorkspaceRowProps): ReactNode {
         : props.onCopy === undefined
           ? <span className="mrfw-rootPath">{props.path}</span>
           : <PathCopy path={props.path} copied={props.copied === true} onCopy={props.onCopy} t={props.t} />}
-      {props.notes}
     </div>
     {props.trailing}
     {props.children}
@@ -1134,86 +1132,85 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           </section>
 
           {props.remotes === undefined || remoteState.view?.status.state === 'disabled' ? null : (
-            <>
-              <section className="mrfw-section">
-                <div className="mrfw-sectionTitleRow">
-                  <span className="mrfw-sectionTitle">{t('panel.remote')}</span>
-                  {remoteState.view?.custodyMode === undefined ? null : (
-                    <span className="mrfw-accessBadge">{t('ssh.custody', { mode: t(`remote.mode.${remoteState.view.custodyMode}` as Key) })}</span>
-                  )}
-                  <span className="mrfw-sectionNote">{t('panel.remoteNote')}</span>
-                </div>
-                {remoteState.error === undefined ? null : (
-                  <p role="alert" className="mrfw-alert">
-                    {t(errorKeyOf(remoteState.error.code))}
-                    {errorHasDetail(remoteState.error.code) ? ` (${remoteState.error.message})` : ''}
-                  </p>
+            <section className="mrfw-section">
+              <div className="mrfw-sectionTitleRow mrfw-sectionTitleRowAction">
+                <span className="mrfw-sectionTitle">{t('panel.remoteList')}</span>
+                {remoteState.view?.custodyMode === undefined ? null : (
+                  <span className="mrfw-accessBadge">{t('ssh.custody', { mode: t(`remote.mode.${remoteState.view.custodyMode}` as Key) })}</span>
                 )}
-                <div className="mrfw-sshAddRow">
-                  <Action
-                    disabled={remoteState.view === undefined}
-                    onClick={() => { setSshDialog('connections') }}
-                  >
+                <div className="mrfw-sectionAction mrfw-sshAddRow">
+                  <Action disabled={remoteState.view === undefined} onClick={() => setSshDialog('connections')}>
                     {t('panel.remoteManage')}
                   </Action>
-                </div>
-              </section>
-              <section className="mrfw-section">
-                <div className="mrfw-sectionTitleRow">
-                  <span className="mrfw-sectionTitle">{t('panel.remoteList')}</span>
                   {props.ssh !== undefined && remoteState.view?.custodyMode === 'personal' && remoteState.view.status.state === 'ready' ? (
                     <Action onClick={() => setSshBindingsOpen(true)}>{t('panel.remoteBindings')}</Action>
                   ) : null}
                 </div>
-                {remoteState.view?.custodyMode === 'personal' && remoteState.view.endpoints.some(endpoint => endpoint.state !== 'registered') ? (
-                  <p className="mrfw-note">{t('panel.remoteRegisterGuide')}</p>
-                ) : null}
-                {remoteState.view === undefined
-                  ? (remoteState.error === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null)
-                  : remoteState.view.status.state !== 'ready' ? (
-                    <p className="mrfw-note">
-                      {t('panel.remoteUnavailable', { reason: remoteStatusText(remoteState.view.status, t) })}
-                    </p>
-                  ) : remoteState.view.endpoints.length === 0 ? (
-                    <p className="mrfw-note">{t('panel.remoteEmpty')}</p>
-                  ) : remoteState.view.endpoints.map(endpoint => {
-                    const key = `${endpoint.environmentId}/${endpoint.rootId}`
-                    const copyKey = `remote:${key}`
-                    // The panel row shows where the workspace lives, not just
-                    // its POSIX path: personal targets carry the resolved port,
-                    // deployment manifests have no port to show.
-                    const location = endpoint.target === undefined ? endpoint.path : `${endpoint.target}${endpoint.path}`
-                    return <WorkspaceRow
-                      key={key}
+              </div>
+              {remoteState.error === undefined ? null : (
+                <p role="alert" className="mrfw-alert">
+                  {t(errorKeyOf(remoteState.error.code))}
+                  {errorHasDetail(remoteState.error.code) ? ` (${remoteState.error.message})` : ''}
+                </p>
+              )}
+              {remoteState.view?.custodyMode === 'personal' && remoteState.view.endpoints.some(endpoint => endpoint.state !== 'registered') ? (
+                <p className="mrfw-note">{t('panel.remoteRegisterGuide')}</p>
+              ) : null}
+              {remoteState.view === undefined
+                ? (remoteState.error === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null)
+                : remoteState.view.status.state !== 'ready' ? (
+                  <p className="mrfw-note">
+                    {t('panel.remoteUnavailable', { reason: remoteStatusText(remoteState.view.status, t) })}
+                  </p>
+                ) : remoteState.view.endpoints.length === 0 ? (
+                  <p className="mrfw-note">{t('panel.remoteEmpty')}</p>
+                ) : remoteState.view.endpoints.map(endpoint => {
+                  const key = `${endpoint.environmentId}/${endpoint.rootId}`
+                  const copyKey = `remote:${key}`
+                  const capabilities = remoteCapabilityList(endpoint.capabilities, t)
+                  const folderName = endpoint.path.slice(endpoint.path.lastIndexOf('/') + 1) || endpoint.path
+                  const IconAccess = endpoint.capabilities.write || endpoint.capabilities.exec || endpoint.capabilities.receive
+                    ? IconAccessReadWrite : endpoint.capabilities.read || endpoint.capabilities.send ? IconAccessReadOnly : undefined
+                  // The panel row shows where the workspace lives, not just
+                  // its POSIX path: personal targets carry the resolved port,
+                  // deployment manifests have no port to show.
+                  const location = endpoint.target === undefined ? endpoint.path : `${endpoint.target}${endpoint.path}`
+                  return <WorkspaceRow
+                    key={key}
+                    t={t}
+                    name={<span className="mrfw-rootNameText">{folderName}</span>}
+                    badges={<>
+                      <span className="mrfw-cwdTag" title={endpoint.displayName ?? endpoint.environmentId}>{endpoint.displayName ?? endpoint.environmentId}</span>
+                      <span className="mrfw-accessBadge" title={t(remoteStateKey(endpoint.state))}>
+                        {IconAccess === undefined ? null : <IconAccess size={14} />}
+                        {capabilities}
+                      </span>
+                    </>}
+                    path={location}
+                    copied={copiedId === copyKey}
+                    onCopy={() => { void copyPath(copyKey, location) }}
+                    trailing={<RemoteRootMenu
+                      key={sessionId + '/' + endpoint.path}
+                      endpoint={endpoint}
+                      ssh={remoteState.view?.custodyMode === 'personal' ? props.ssh : undefined}
+                      sessionId={sessionId}
+                      roots={state.view}
                       t={t}
-                      name={<span className="mrfw-rootNameText">{endpoint.displayName ?? endpoint.environmentId}</span>}
-                      badges={<>
-                        <span className="mrfw-accessBadge">{platformLabel(endpoint.platform, t)}</span>
-                        <span className="mrfw-accessBadge">{t(remoteStateKey(endpoint.state))}</span>
-                        <span className="mrfw-accessBadge">{endpoint.rootId}</span>
-                      </>}
-                      path={location}
-                      copied={copiedId === copyKey}
-                      onCopy={() => { void copyPath(copyKey, location) }}
-                      notes={<span className="mrfw-note">
-                        {t('panel.remoteCapabilities', { capabilities: remoteCapabilityList(endpoint.capabilities, t) })}
-                      </span>}
-                      trailing={endpoint.state === 'registered' ? (
-                        <IconButton
-                          pending={state.busy}
-                          onClick={() => { void mutateRemote('remove', endpoint) }}
-                          icon={<IconTrash />}
-                          label={t('panel.remoteRemove')}
-                        />
-                      ) : (
-                        <Action pending={state.busy} onClick={() => { void mutateRemote('register', endpoint) }}>
-                          {t('panel.remoteRegister')}
-                        </Action>
-                      )}
-                    />
-                  })}
-              </section>
-            </>
+                      pending={state.busy}
+                      open={menuFor === copyKey}
+                      onClose={() => setMenuFor(current => current === copyKey ? undefined : current)}
+                      onRegistration={action => {
+                        setMenuFor(undefined)
+                        if (!state.busy) void mutateRemote(action, endpoint)
+                      }}
+                      onChanged={refreshRemoteSection}
+                      anchor={<IconButton pending={state.busy}
+                        onClick={() => setMenuFor(current => current === copyKey ? undefined : copyKey)}
+                        icon={<IconEllipsis />} label={t('panel.more')} />}
+                    />}
+                  />
+                })}
+            </section>
           )}
           {/* The dialog outlives the section's own render gate: a remote
               switch-off must not unmount it mid-form and lose the operator's

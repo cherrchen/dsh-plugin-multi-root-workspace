@@ -462,6 +462,19 @@ async function runWebLeg() {
       observed.channelList = listed.status
       observed.channelView = listed.status === 200 ? (await listed.json())?.result : undefined
 
+      // The plugin settings entry uses its own authenticated route and
+      // cannot address a Workspace binding.
+      const sshSettings = (endpoint, payload, authenticate = true) => fetch(new URL(`/multi-root-workspace-ssh-settings/${endpoint}`, base), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(!authenticate || cookie === undefined ? {} : { cookie }) },
+        body: JSON.stringify({ type: 'client-request', rpcId: `journey-ssh-${endpoint}`, method: endpoint, payload }),
+      })
+      observed.sshSettingsUnauthenticated = (await sshSettings('status', {}, false)).status
+      const sshStatus = await sshSettings('status', {})
+      observed.sshSettingsStatus = sshStatus.ok ? (await sshStatus.json())?.result?.value?.status?.state : undefined
+      const sshBinding = await sshSettings('sshBindingRemove', { sessionId: 'journey-web' })
+      observed.sshSettingsBindingError = sshBinding.ok ? (await sshBinding.json())?.result?.error?.code : undefined
+
       // ---- worktree A/B over the same real HTTP channel ---------------------
       // The audit's P6 gap: settings switch, prompt confirmation and cleanup
       // must be exercised by the browser composition, not by a captured
@@ -665,6 +678,9 @@ try {
     check.ok(web.channelView?.ok === true, 'web: the channel answers with an ok envelope', JSON.stringify(web.channelView)?.slice(0, 400))
     check.contains(JSON.stringify(web.channelView?.value), jsonText(canonical(additionalRepo)), 'web: the channel view lists the registered additional root', JSON.stringify(web.channelView)?.slice(0, 400))
     check.contains(JSON.stringify(web.channelView?.value), jsonText(canonical(primaryRepo)), 'web: the channel view names the primary root', JSON.stringify(web.channelView)?.slice(0, 400))
+    check.equal(web.sshSettingsUnauthenticated, 401, 'web: SSH settings require an authenticated Connection')
+    check.equal(web.sshSettingsStatus, 'disabled', 'web: SSH settings status is readable without a session and defaults to disabled')
+    check.equal(web.sshSettingsBindingError, 'panel/bad-request', 'web: SSH settings cannot remove a Workspace binding')
     check.equal(web.worktreeDefaultOff, 'worktree/not-enabled', 'web: the experimental worktree feature defaults to off')
     check.equal(web.worktreePromptStatus, 200, 'web: the worktree prompt answers over real HTTP', `status ${String(web.worktreePromptStatus)}`)
     check.equal(web.worktreePromptCount, 2, 'web: the automatic fresh check announces the sibling checkout and the main checkout together')

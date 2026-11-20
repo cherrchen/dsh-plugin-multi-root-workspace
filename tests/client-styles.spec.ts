@@ -473,6 +473,7 @@ describe('the navigator search takeover (0.2.2-rc.2)', () => {
     expect(STYLES).toMatch(/\.mrfw-sshAddDialog\s*\{[^}]*width:\s*min\(760px,\s*100%\)/s)
     expect(STYLES).toMatch(/\.mrfw-sshCredentialRow\s*\{[^}]*display:\s*flex/s)
     expect(STYLES).toMatch(/\.mrfw-sshCredentialRow\s*\{[^}]*align-items:\s*flex-end/s)
+    expect(STYLES).toMatch(/\.mrfw-sshSelectControl,\s*\.mrfw-sshAddDialog \.mrfw-sshCredentialManage,\s*\.mrfw-sshAddDialog \.mrfw-sshForm > \.mrfw-sshRowActions > button\s*\{\s*height:\s*32px;/)
     expect(STYLES).toMatch(/\.mrfw-sshInput\s*\{[^}]*width:\s*100%/s)
     expect(STYLES).toMatch(/\.mrfw-sshField\s*\{[^}]*flex-direction:\s*column/s)
   })

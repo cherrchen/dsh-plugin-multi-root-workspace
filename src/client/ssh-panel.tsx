@@ -5,9 +5,10 @@ import type { RootsView } from '../contract.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
 import { maybeComponent } from '../compat/client-icons.ts'
 import { errorHasDetail, errorKeyOf, PanelError } from './panel-client.ts'
-import type { CredentialPublicView, RemoteDirectoryListing, SshBindingView, SshClient, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
+import type { CredentialPublicView, RemoteDirectoryListing, SshBindingView, SshClient, SshManagementClient, SshSettingsView, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
 import { SshCustodySection, type RemoteCustodyMode } from './remote-custody.tsx'
 import type { Key } from './locales.ts'
+import { localBindingPeers } from './remote-root-menu.tsx'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 import type { RemoteEndpointView, RemotesView } from '../remote/panel-contract.ts'
 
@@ -475,7 +476,7 @@ const environmentIdFrom = (value: string): string => {
   return /^[a-z0-9]/.test(slug) ? slug : ''
 }
 
-/** Step one: credential source, display metadata, and the remote target. */
+/** Credential source, connection name, and remote target. */
 function ConnectStepForm(props: ConnectStepFormProps): ReactNode {
   const { draft, t, busy } = props
   const update = (partial: Partial<EditorDraft>): void => { props.onChange({ ...draft, ...partial }) }
@@ -533,12 +534,6 @@ function ConnectStepForm(props: ConnectStepFormProps): ReactNode {
           </>
         )}
       </div>
-      <span className="mrfw-sshFieldHint">
-        {draft.credentialSource === 'alias' ? t('ssh.field.aliasHint') : t('ssh.field.credentialHint')}
-      </span>
-      {draft.credentialSource === 'managed' && props.credentials.length === 0
-        ? <span className="mrfw-sshFieldHint">{t('ssh.add.noCredentials')}</span>
-        : null}
     </section>
     <section className="mrfw-sshStep">
       <span className="mrfw-sshStepTitle">{t('ssh.add.hostInfo')}</span>
@@ -547,13 +542,12 @@ function ConnectStepForm(props: ConnectStepFormProps): ReactNode {
           <Input className="mrfw-sshInput" aria-label={t('ssh.field.displayName')} placeholder={t('ssh.field.displayName')}
             value={draft.displayName} onChange={event => update({ displayName: event.currentTarget.value })} />
         </Field>
-        <Field label={t('ssh.field.environmentId')} invalid={invalid('environmentId')}
-          hint={draft.existing === undefined ? t('ssh.add.environmentIdAuto') : undefined}>
+        <Field label={t('ssh.field.environmentId')} invalid={invalid('environmentId')}>
           <Input className="mrfw-sshInput" aria-label={t('ssh.field.environmentId')} placeholder={t('ssh.field.environmentId')}
             value={draft.environmentId} disabled={draft.existing !== undefined}
             onChange={event => update({ environmentId: event.currentTarget.value })} />
         </Field>
-        <Field label={t('ssh.field.platform')} hint={t('ssh.field.platformHint')}>
+        <Field label={t('ssh.field.platform')}>
           <span className="mrfw-sshSelect">
             <select className="mrfw-sshSelectControl" aria-label={t('ssh.field.platform')} value={draft.platform}
               onChange={event => update({ platform: event.currentTarget.value as 'linux' | 'darwin' })}>
@@ -581,7 +575,6 @@ function ConnectStepForm(props: ConnectStepFormProps): ReactNode {
           </div>
         ) : null}
       </div>
-      {draft.credentialSource === 'alias' ? <p className="mrfw-note">{t('ssh.add.aliasResolvedNote', { alias: draft.alias.trim() })}</p> : null}
     </section>
   </>
 }
@@ -918,7 +911,11 @@ export interface SshManagementDialogProps {
   /** Which tab the entry point asked for. */
   readonly initialTab: SshDialogTab
   /** Personal-mode client; absent when the host exposes no personal contract. */
-  readonly ssh: SshClient | undefined
+  readonly ssh: SshManagementClient | undefined
+  /** Plugin settings owns the global connection inventory and requires no session. */
+  readonly fromSettings?: boolean
+  readonly deploymentConnections?: SshSettingsView['connections']
+  readonly overviewError?: PanelError | undefined
   /** The live session; the host derives the primary root from it. */
   readonly sessionId: string | undefined
   /** The control plane's live custody mode. */
@@ -965,7 +962,8 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => { setTab(props.initialTab) }, [props.initialTab])
 
-  const canManage = custodyMode === 'personal' && status?.state === 'ready' && ssh !== undefined && sessionId !== undefined
+  const canRequest = sessionId !== undefined || props.fromSettings === true
+  const canManage = custodyMode === 'personal' && status?.state === 'ready' && ssh !== undefined && canRequest
   // Change identity during render: an old promise must not win the gap before
   // the reset effect runs, including personal -> team -> personal transitions.
   const scope = useMemo(() => ({}), [sessionId, custodyMode, canManage, ssh])
@@ -994,7 +992,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   }, [sessionId, custodyMode])
 
   const load = useCallback(async (): Promise<void> => {
-    if (ssh === undefined || sessionId === undefined || !current()) return
+    if (ssh === undefined || !canRequest || !current()) return
     const requestId = ++stateRequest.current
     try {
       const state = await ssh.state(sessionId)
@@ -1002,7 +1000,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     } catch (cause: unknown) {
       if (current() && requestId === stateRequest.current) setError(cause instanceof PanelError ? cause : new PanelError('unavailable', String(cause)))
     }
-  }, [ssh, sessionId, current])
+  }, [ssh, sessionId, canRequest, current])
 
   useEffect(() => {
     if (!canManage) {
@@ -1018,7 +1016,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   // The alias picker is a convenience only: a failed read leaves the free-text
   // field usable, so the add flow never depends on this answer.
   useEffect(() => {
-    if (!canManage || ssh === undefined || sessionId === undefined) {
+    if (!canManage || ssh === undefined || !canRequest) {
       setAliases([])
       return
     }
@@ -1027,7 +1025,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       .then(answer => { if (active && current()) setAliases(answer.aliases) })
       .catch(() => { if (active && current()) setAliases([]) })
     return () => { active = false }
-  }, [canManage, ssh, sessionId, current])
+  }, [canManage, ssh, sessionId, canRequest, current])
 
   /** Clear the form-owned transient state when the operator switches tabs. */
   const changeTab = (next: SshDialogTab): void => {
@@ -1109,14 +1107,14 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   ]
 
   const deleteCredential = async (id: string): Promise<boolean> => {
-    if (ssh === undefined || sessionId === undefined) return false
+    if (ssh === undefined || !canRequest) return false
     return await submit(async () => await ssh.credentialRemove(sessionId, id))
   }
 
   const createCredential = async (
     kind: 'generate' | 'import' | 'password', label: string, secret: string, passphrase?: string,
   ): Promise<boolean> => {
-    if (ssh === undefined || sessionId === undefined) return false
+    if (ssh === undefined || !canRequest) return false
     const known = new Set((view?.credentials ?? []).map(credential => credential.id))
     const state = await submitState(async () => kind === 'generate'
       ? await ssh.credentialGenerate(sessionId, label)
@@ -1133,12 +1131,12 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     return true
   }
   const deleteEnvironment = async (id: string): Promise<void> => {
-    if (ssh === undefined || sessionId === undefined) return
+    if (ssh === undefined || !canRequest) return
     setConfirm(undefined)
     await submit(async () => await ssh.environmentRemove(sessionId, revision(), id))
   }
   const testEnvironment = async (id: string): Promise<void> => {
-    if (ssh === undefined || sessionId === undefined) return
+    if (ssh === undefined || !canRequest) return
     setBusy(true)
     try {
       const result = await ssh.environmentTest(sessionId, id)
@@ -1156,7 +1154,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   }
 
   const scanHost = async (draft: EditorDraft, applyPatch: (patch: Partial<EditorDraft>) => void): Promise<void> => {
-    if (ssh === undefined || sessionId === undefined || !scanReady(draft)) return
+    if (ssh === undefined || !canRequest || !scanReady(draft)) return
     const alias = draft.credentialSource === 'alias' ? draft.alias.trim() : undefined
     setBusy(true)
     try {
@@ -1182,7 +1180,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   }
 
   const scanAddHost = async (draft: EditorDraft): Promise<SshScanResult | undefined> => {
-    if (ssh === undefined || sessionId === undefined || !scanReady(draft)) return undefined
+    if (ssh === undefined || !canRequest || !scanReady(draft)) return undefined
     const alias = draft.credentialSource === 'alias' ? draft.alias.trim() : undefined
     setBusy(true)
     try {
@@ -1200,7 +1198,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   }
 
   const saveEnvironment = async (draft: EditorDraft, hostKey: string | undefined, scanToken?: string): Promise<boolean> => {
-    if (ssh === undefined || sessionId === undefined || hostKey === undefined || !sshPort(draft.port)) return false
+    if (ssh === undefined || !canRequest || hostKey === undefined || !sshPort(draft.port)) return false
     const environment = {
       environmentId: draft.environmentId.trim(),
       ...(draft.displayName.trim() === '' ? {} : { displayName: draft.displayName.trim() }),
@@ -1284,7 +1282,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       <div className="mrfw-alert" role="note">
         <p className="mrfw-note">{t('ssh.linkBanner')}</p>
         <Button variant="outline" size="sm" disabled={busy}
-          onClick={() => { if (ssh !== undefined && sessionId !== undefined) void submit(async () => await ssh.configLink(sessionId)) }}>
+          onClick={() => { if (ssh !== undefined && canRequest) void submit(async () => await ssh.configLink(sessionId)) }}>
           {t('ssh.linkNow')}
         </Button>
       </div>
@@ -1328,7 +1326,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
                     value={helperNodePath} onChange={event => setHelperNodePath(event.currentTarget.value)} />
                   <Button variant="primary" size="sm" disabled={busy}
                     onClick={() => {
-                      if (ssh === undefined || sessionId === undefined) return
+                      if (ssh === undefined || !canRequest) return
                       const nodePath = helperNodePath.trim()
                       setHelperFor(undefined)
                       setHelperNodePath('')
@@ -1349,7 +1347,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
               ) : null}
               {next === 'link' ? (
                 <Button variant="primary" size="sm" disabled={busy}
-                  onClick={() => { if (ssh !== undefined && sessionId !== undefined) void submit(async () => await ssh.configLink(sessionId)) }}>
+                  onClick={() => { if (ssh !== undefined && canRequest) void submit(async () => await ssh.configLink(sessionId)) }}>
                   {t('ssh.linkNow')}
                 </Button>
               ) : null}
@@ -1359,7 +1357,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
               ) : null}
               {environment.credential.kind === 'managed' && credentialOf(environment.credential.credentialId)?.kind === 'password' ? (
                 <Button variant="ghost" size="sm" disabled={busy}
-                  onClick={() => { if (ssh !== undefined && sessionId !== undefined) void submit(async () => await ssh.accessKeyInstall(sessionId, revision(), id)) }}>
+                  onClick={() => { if (ssh !== undefined && canRequest) void submit(async () => await ssh.accessKeyInstall(sessionId, revision(), id)) }}>
                   {t('ssh.accessKeyInstall')}
                 </Button>
               ) : null}
@@ -1416,7 +1414,18 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     <Button variant="outline" size="sm" onClick={openMode}>{t('ssh.add.openMode')}</Button>
     <section className="mrfw-subsection">
       <div className="mrfw-sectionTitleRow"><span className="mrfw-sectionTitle">{t('ssh.connections.deploymentList')}</span></div>
-      {endpoints.length === 0 ? <p className="mrfw-note">{t('ssh.connections.emptyDeployment')}</p> : null}
+      {endpoints.length === 0 && (props.deploymentConnections?.length ?? 0) === 0 ? <p className="mrfw-note">{t('ssh.connections.emptyDeployment')}</p> : null}
+      {props.deploymentConnections?.map(connection => (
+        <div key={connection.environmentId} className="mrfw-row">
+          <div className="mrfw-rootText">
+            <span className="mrfw-rootName">
+              <span className="mrfw-rootNameText">{connection.displayName ?? connection.environmentId}</span>
+              <Tag tone="neutral" className="mrfw-sshTag">{platformLabel(connection.platform, t)}</Tag>
+            </span>
+            <span className="mrfw-rootPath">{connection.target}</span>
+          </div>
+        </div>
+      ))}
       {endpoints.map(endpoint => (
         <div key={`${endpoint.environmentId}/${endpoint.rootId}`} className="mrfw-row">
           <div className="mrfw-rootText">
@@ -1433,6 +1442,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   </div>
 
   const renderAdd = (): ReactNode => {
+    if (props.overviewError !== undefined) return <p role="alert" className="mrfw-alert">{t(errorKeyOf(props.overviewError.code))}</p>
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
     if (custodyMode !== 'personal') {
@@ -1445,7 +1455,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       </div>
     }
     if (ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
-    if (sessionId === undefined) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
+    if (!canRequest) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
     if (view === undefined) return renderLoadState()
     return <div className="mrfw-sshArea">
       <p className="mrfw-note">{t('ssh.add.personalGuide')}</p>
@@ -1466,6 +1476,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   }
 
   const renderKeys = (): ReactNode => {
+    if (props.overviewError !== undefined) return <p role="alert" className="mrfw-alert">{t(errorKeyOf(props.overviewError.code))}</p>
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
     if (custodyMode !== 'personal') {
@@ -1479,17 +1490,18 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       </div>
     }
     if (ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
-    if (sessionId === undefined) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
+    if (!canRequest) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
     if (view === undefined) return renderLoadState()
     return <div className="mrfw-sshArea">{renderCredentials()}</div>
   }
 
   const renderConnectionsTab = (): ReactNode => {
+    if (props.overviewError !== undefined) return <p role="alert" className="mrfw-alert">{t(errorKeyOf(props.overviewError.code))}</p>
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
     if (custodyMode !== 'personal') return renderDeploymentConnections()
     if (ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
-    if (sessionId === undefined) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
+    if (!canRequest) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
     if (view === undefined) return renderLoadState()
     return renderConnections()
   }
@@ -1623,12 +1635,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
     }
   }
 
-  const localPeers = [
-    { id: 'primary', label: t('panel.primary') },
-    ...(roots?.roots ?? [])
-      .filter(root => root.state === 'available' && root.aliasId !== undefined)
-      .map(root => ({ id: root.aliasId!, label: root.alias ?? root.aliasId! })),
-  ]
+  const localPeers = localBindingPeers(roots, t)
   const environment = view?.environments.find(entry => entry.environmentId === draft?.environmentId)
   const edit = (binding: SshBindingView): void => {
     setEditing(true)
