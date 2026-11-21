@@ -469,11 +469,10 @@ describe('the navigator search takeover (0.2.2-rc.2)', () => {
     // fields themselves must sit in a real grid.
     expect(STYLES).toMatch(/\.mrfw-sshForm \.mrfw-input\s*\{[^}]*flex:\s*0 0 auto/s)
     expect(STYLES).toMatch(/\.mrfw-sshGrid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s)
-    expect(STYLES).toMatch(/\.mrfw-sshGridThree\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s)
     expect(STYLES).toMatch(/\.mrfw-sshAddDialog\s*\{[^}]*width:\s*min\(760px,\s*100%\)/s)
     expect(STYLES).toMatch(/\.mrfw-sshCredentialRow\s*\{[^}]*display:\s*flex/s)
     expect(STYLES).toMatch(/\.mrfw-sshCredentialRow\s*\{[^}]*align-items:\s*flex-end/s)
-    expect(STYLES).toMatch(/\.mrfw-sshInput,\s*\.mrfw-sshHelperInput,\s*\.mrfw-teamInput,\s*\.mrfw-sshSelectControl,\s*button\.mrfw-sshButton\s*\{[^}]*height:\s*32px;/)
+    expect(STYLES).toMatch(/\.mrfw-sshInput,\s*\.mrfw-sshHelperInput,\s*\.mrfw-teamInput,\s*button\.mrfw-sshButton\s*\{[^}]*height:\s*32px;/)
     expect(STYLES).toMatch(/\.mrfw-sshInput\s*\{[^}]*width:\s*100%/s)
     expect(STYLES).toMatch(/\.mrfw-sshField\s*\{[^}]*flex-direction:\s*column/s)
   })
