@@ -46,7 +46,7 @@ describe('OPS compatibility settings card', () => {
     fireEvent.click(confirm)
     await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['enabled'], value: true }], 3]]))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
   })
 
   it.each([{ status: 'loading', writable: true }, { status: 'ready', writable: false }])('disables the switch while unavailable', async (state) => {
@@ -72,7 +72,7 @@ describe('OPS compatibility settings card', () => {
       fireEvent.click(screen.getByRole('switch', { name: 'ops.compatibilityEnable' }))
       fireEvent.click(screen.getByRole('checkbox', { name: 'ops.confirmAcknowledge' }))
       fireEvent.click(screen.getByRole('button', { name: 'ops.confirmEnable' }))
-      await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('ops.settingsFailed'))
+      await waitFor(() => expect(screen.getByRole('status').textContent).toBe('ops.settingsFailed'))
     }
   })
 
@@ -426,7 +426,7 @@ describe('SSH remote-environments settings and custody control', () => {
     render(<RemoteCustodyModeControl form={form as never} t={t} />)
     fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.hardened/ }))
     await waitFor(() => expect(calls).toEqual([[ns, [{ op: 'set', path: ['mode'], value: 'hardened' }], 5]]))
-    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
     await form.dispose()
   })
 
@@ -449,7 +449,7 @@ describe('SSH remote-environments settings and custody control', () => {
     fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.hardened/ }))
     await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'hardened' }], 4]]))
     expect(form.generation).toBe(1)
-    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
   })
 
   it('applies a mode upgrade and any mode change while disabled without confirmation', async () => {

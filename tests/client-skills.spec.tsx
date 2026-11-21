@@ -83,7 +83,7 @@ describe('namespaced Web Skills', () => {
     render(<SkillsSettingsCard form={form} t={t} />)
     fireEvent.click(screen.getByRole('switch', { name: 'skills.globalEnable' }))
     await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['enabled'], value: false }], 7]]))
-    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
   })
 })
 

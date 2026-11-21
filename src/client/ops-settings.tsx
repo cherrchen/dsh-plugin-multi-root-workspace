@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SkillsForm } from '../compat/skills-client.ts'
 import { opsRiskConfirmation } from '../compat/ops-confirmation.ts'
+import { ErrorToast } from './error-toast.tsx'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 export function OpsCompatibilitySettingsCard({ form, t }: { form: SkillsForm; t: Translate }) {
   const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
@@ -43,7 +44,7 @@ export function OpsCompatibilitySettingsCard({ form, t }: { form: SkillsForm; t:
         <Tag tone="info">{t('ops.experimental')}</Tag>
       </div>
       <div className="mrfw-skillsSettingsDescription">{t('ops.compatibilityHint')}</div>
-      {error ? <div role="alert" className="mrfw-alert">{error}</div> : null}
+      <ErrorToast error={error} format={message => message} />
     </div>
     <Switch label={t('ops.compatibilityEnable')} checked={snapshot.value?.enabled === true} disabled={busy || confirmation !== undefined || snapshot.status !== 'ready' || !snapshot.writable || (snapshot.value?.enabled !== true && RiskConfirmation === undefined)}
         onChange={enabled => {

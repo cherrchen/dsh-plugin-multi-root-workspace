@@ -12,6 +12,7 @@ import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import { SshButton as Button } from './panel-buttons.tsx'
 import { remoteRiskConfirmation } from '../compat/ops-confirmation.ts'
 import type { RemoteModeControl, SkillsForm } from '../compat/skills-client.ts'
+import { ErrorToast } from './error-toast.tsx'
 import type { Key } from './locales.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 
@@ -178,7 +179,7 @@ export function RemoteCustodyModeControl(props: {
       </div>
     ) : null}
     {mode === 'hardened' ? <div className="mrfw-skillsSettingsDescription">{t('remote.mode.hardenedNote')}</div> : null}
-    {error ? <div role="alert" className="mrfw-alert">{error}</div> : null}
+    <ErrorToast error={error} format={message => message} />
     {RiskConfirmation === undefined ? null : <RiskConfirmation
       open={canConfirm}
       title={t('remote.downgradeTitle')}

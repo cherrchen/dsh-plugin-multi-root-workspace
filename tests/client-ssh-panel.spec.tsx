@@ -392,11 +392,12 @@ describe('the SSH management dialog', () => {
     expect((within(reopened).getByLabelText('ssh.field.displayName') as HTMLInputElement).value).toBe('')
   })
 
-  it('points the mode guide at the Connections tab instead of an Add tab', async () => {
+  it('shows no Add connection guide under the mode tab', async () => {
     const dialog = await withDialog({ ssh: fakeSsh(sshState()) }, 'manage')
     fireEvent.click(tab(dialog, 'ssh.tab.mode'))
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.tab.connections' }))
-    expect(await within(dialog).findByText('ssh.environments')).toBeTruthy()
+    expect(within(dialog).getByText('ssh.mode.guide')).toBeTruthy()
+    expect(dialog.querySelector('.mrfw-sshGuide')).toBeNull()
+    expect(within(dialog).queryByText('ssh.mode.addGuide.personal')).toBeNull()
   })
 
   it('keeps the credential controls and the host metadata on one row each', async () => {
@@ -568,7 +569,7 @@ describe('the SSH management dialog', () => {
     fireEvent.change(within(dialog).getByLabelText('ssh.label'), { target: { value: 'imported' } })
     fireEvent.change(material, { target: { value: 'PRIVATE-KEY-BYTES' } })
     fireEvent.click(sshFormConfirm(dialog))
-    await waitFor(() => expect(within(dialog).getByText('error.credential-import-failed')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('error.credential-import-failed')).toBeTruthy())
     expect(dialog.innerHTML).not.toContain('PRIVATE-KEY-BYTES')
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialImport' }))
     expect((within(dialog).getByLabelText('ssh.privateKey') as HTMLTextAreaElement).value).toBe('')
@@ -876,7 +877,7 @@ describe('the SSH management dialog', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialGenerate' }))
     fireEvent.change(within(dialog).getByLabelText('ssh.label'), { target: { value: 'new key' } })
     fireEvent.click(sshFormConfirm(dialog))
-    await waitFor(() => expect(within(dialog).getByText('error.personal-config-conflict')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('error.personal-config-conflict')).toBeTruthy())
     expect(ssh.calls.filter(call => call.method === 'state').length).toBeGreaterThanOrEqual(2)
   })
 
