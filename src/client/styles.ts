@@ -2162,24 +2162,41 @@ button.mrfw-choice:hover:not(:disabled) {
   white-space: nowrap;
 }
 
+/* The browse dialog's own column: path bar, status line, then the floating
+   directory rows — spaced like the host directory browser so nothing glues. */
+.mrfw-wizBrowse {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* The directory column floats on the card (no boxed list): 2px row gaps, a
+   scrollbar lane on the right — the host browser's row form. */
 .mrfw-wizDirList {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   max-height: 280px;
   overflow-y: auto;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: var(--dsw-radius-md);
+  padding-right: 8px;
 }
 
 .mrfw-wizDirRow {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
+  gap: 4px;
+  flex: none;
+  height: 28px;
+  padding: 4px;
   border: none;
-  background: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
   color: var(--dsw-alias-label-primary);
   text-align: start;
   cursor: pointer;
@@ -2187,6 +2204,26 @@ button.mrfw-choice:hover:not(:disabled) {
 
 .mrfw-wizDirRow:hover {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-wizDirIcon {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-wizDirName {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mrfw-wizDirArrow {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .mrfw-wizSummary {

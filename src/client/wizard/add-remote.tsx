@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Input, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { RootsView } from '../../contract.ts'
 import { sshLocation, sshTarget } from '../../remote/ssh-location.ts'
-import { IconCheck, IconFolderOpen, IconLink, IconPlus } from '../../compat/client-icons.ts'
+import { IconCheck, IconChevronRight, IconFolderClose, IconLink, IconPlus } from '../../compat/client-icons.ts'
 import { SshButton as Button } from '../panel-buttons.tsx'
 import { localBindingPeers } from '../remote-root-menu.tsx'
 import { CredentialsPanel, platformLabel, type CredentialCreateKind } from '../ssh-panel.tsx'
@@ -117,31 +117,38 @@ function WizardPathBrowser(props: {
         <Button variant="primary" disabled={path.trim() === '' && listing === undefined} onClick={pick}>{t('ssh.pathPickerUse')}</Button>
       </WizardActions>}>
       <PendingBar active={loading} />
-      <div className="mrfw-sshPathBar">
-        <Input className="mrfw-sshInput" aria-label={t('ssh.binding.path')} placeholder="/" value={path}
-          onChange={event => setPath(event.currentTarget.value)} />
-        <div className="mrfw-sshRowActions">
-          <Button variant="outline" size="sm" disabled={loading}
-            onClick={() => { void load(path.trim() === '' ? undefined : path.trim()) }}>{t('ssh.pathPickerGo')}</Button>
-          <Button variant="outline" size="sm" disabled={loading || listing === undefined}
-            onClick={() => { void load(listing?.parent) }}>{t('ssh.pathPickerParent')}</Button>
+      {/* The browse column keeps its own rhythm: path bar, status, then the
+          floating row list — same spacing family the host directory browser
+          uses, so nothing reads glued together. */}
+      <div className="mrfw-wizBrowse">
+        <div className="mrfw-sshPathBar">
+          <Input className="mrfw-sshInput" aria-label={t('ssh.binding.path')} placeholder="/" value={path}
+            onChange={event => setPath(event.currentTarget.value)} />
+          <div className="mrfw-sshRowActions">
+            <Button variant="outline" size="sm" disabled={loading}
+              onClick={() => { void load(path.trim() === '' ? undefined : path.trim()) }}>{t('ssh.pathPickerGo')}</Button>
+            <Button variant="outline" size="sm" disabled={loading || listing === undefined}
+              onClick={() => { void load(listing?.parent) }}>{t('ssh.pathPickerParent')}</Button>
+          </div>
         </div>
+        <ErrorToast error={error} format={message => t('ssh.pathPickerFailed', { message })} />
+        {loading ? <StatusLine state="ongoing">{t('ssh.pending.list')}</StatusLine> : null}
+        {listing === undefined ? null : listing.entries.length === 0 ? (
+          loading ? null : <p className="mrfw-note">{t('ssh.pathPickerEmpty')}</p>
+        ) : (
+          <div className="mrfw-wizDirList" role="list" aria-busy={loading ? 'true' : undefined}>
+            {listing.entries.map(entry => (
+              <button key={entry.path} type="button" className="mrfw-wizDirRow" onClick={() => { void load(entry.path) }}>
+                <IconFolderClose size={16} className="mrfw-wizDirIcon" />
+                <span className="mrfw-wizDirName">{entry.name}</span>
+                {IconChevronRight === undefined
+                  ? <span className="mrfw-wizDirArrow" aria-hidden>›</span>
+                  : <IconChevronRight size={12} className="mrfw-wizDirArrow" />}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      <ErrorToast error={error} format={message => t('ssh.pathPickerFailed', { message })} />
-      {loading ? <StatusLine state="ongoing">{t('ssh.pending.list')}</StatusLine> : null}
-      {listing === undefined ? null : listing.entries.length === 0 ? (
-        loading ? null : <p className="mrfw-note">{t('ssh.pathPickerEmpty')}</p>
-      ) : (
-        <div className="mrfw-wizDirList" aria-busy={loading ? 'true' : undefined}>
-          {listing.entries.map(entry => (
-            <button key={entry.path} type="button" className="mrfw-wizDirRow" onClick={() => { void load(entry.path) }}>
-              <IconFolderOpen size={14} />
-              <span className="mrfw-sshDirName">{entry.name}</span>
-              <span className="mrfw-sshDirArrow" aria-hidden>›</span>
-            </button>
-          ))}
-        </div>
-      )}
     </Modal>
   )
 }
