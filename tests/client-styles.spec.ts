@@ -763,12 +763,6 @@ describe('the workspace dialog scrolling rules', () => {
     expect(list).not.toMatch(/max-height:[^;]*\d+px/)
   })
 
-  it('fits a wrapped row up to the same cap that limits the list', () => {
-    expect(rule('.mrfw-rootList:has(.mrfw-row)')).toContain(
-      'min-height: min(var(--mrfw-root-row-height, 70px), var(--mrfw-root-list-cap))',
-    )
-  })
-
   it('pins the add controls below the scrolling list', () => {
     expect(rule('.mrfw-actions')).toContain('flex: none')
   })

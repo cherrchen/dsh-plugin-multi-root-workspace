@@ -76,12 +76,12 @@ describe('CI workflow gates', () => {
     expect(script).toContain("name.startsWith('@deepseek-ai/dsh-')")
   })
 
-  it('checks exact installations before building and runs shared static checks once', () => {
+  it('checks exact installations before building and runs shared static and browser checks once', () => {
     const ci = parse(read('.github/workflows/ci.yml'))
     const commands = ci.jobs.releases.steps.flatMap((step: { run?: string }) => step.run ? [step.run] : [])
     expect(commands).toEqual([
       'node scripts/ci/plan.mjs', 'pnpm install --frozen-lockfile', 'pnpm compat:check', 'pnpm lint',
-      'pnpm docs:check',
+      'pnpm docs:check', 'pnpm exec playwright install --with-deps chromium', 'pnpm test:panel-browser',
     ])
     const runner = read('scripts/ci/run-group.mjs')
     expect(runner).toContain("version === pin ? '--frozen-lockfile' : '--no-frozen-lockfile'")
