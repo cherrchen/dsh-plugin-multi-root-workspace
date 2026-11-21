@@ -2,7 +2,7 @@
  * The wizard design kit: the shared visual language for the workspace panel's
  * guided flows. `WizardShell` owns the rail + stepper + content + footer
  * layout, `ChoiceCard` the big selectable rows, `WizardField`/`WizardCheckbox`/
- * `WizardSegment` the form controls, and `ChecklistRow` the readiness items.
+ * `WizardPicker` the form controls, and `ChecklistRow` the readiness items.
  * These are the pieces the legacy SSH management dialogs migrate onto later —
  * they wrap the host primitives wherever a primitive exists and fall back to
  * the same markup the support matrix's older releases can render.
@@ -28,23 +28,6 @@ interface CheckboxProps {
   readonly className?: string | undefined
 }
 const HostCheckbox = maybeComponent<(props: CheckboxProps) => ReactNode>(['Checkbox'])
-
-interface SegmentOption {
-  readonly value: string
-  readonly label: string
-  readonly disabled?: boolean | undefined
-  readonly title?: string | undefined
-}
-interface SegmentedProps {
-  readonly id: string
-  readonly value: string
-  readonly options: readonly SegmentOption[]
-  readonly onChange: (next: string) => void
-  readonly label: string
-  readonly disabled?: boolean | undefined
-  readonly className?: string | undefined
-}
-const HostSegmented = maybeComponent<(props: SegmentedProps) => ReactNode>(['SegmentedControl'])
 
 interface StateDotProps {
   readonly state: 'done' | 'warning' | 'ongoing' | 'error' | 'idle'
@@ -251,48 +234,6 @@ export function WizardCheckbox(props: {
         )}
       {props.hint === undefined ? null : <span className="mrfw-wizCheckHint">{props.hint}</span>}
     </div>
-  )
-}
-
-/** A segmented mode switch on the host `SegmentedControl`. */
-export function WizardSegment<Value extends string>(props: {
-  readonly id: string
-  readonly label: string
-  readonly value: Value
-  readonly options: readonly { readonly value: Value; readonly label: string; readonly disabled?: boolean | undefined; readonly title?: string | undefined }[]
-  readonly onChange: (next: Value) => void
-  readonly disabled?: boolean | undefined
-}): ReactNode {
-  if (HostSegmented === undefined) {
-    return (
-      <div className="mrfw-wizSeg" role="radiogroup" aria-label={props.label}>
-        {props.options.map(option => (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={option.value === props.value}
-            disabled={props.disabled === true || option.disabled === true}
-            title={option.title}
-            onClick={() => { props.onChange(option.value) }}
-            className="mrfw-wizSegBtn"
-            data-selected={option.value === props.value ? 'true' : undefined}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-    )
-  }
-  return (
-    <HostSegmented
-      id={props.id}
-      label={props.label}
-      value={props.value}
-      disabled={props.disabled}
-      options={props.options.map(option => ({ value: option.value, label: option.label, disabled: option.disabled, title: option.title }))}
-      onChange={next => { props.onChange(next as Value) }}
-    />
   )
 }
 

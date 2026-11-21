@@ -20,7 +20,7 @@ import { CredentialsPanel, platformLabel, type CredentialCreateKind } from '../s
 import { PanelError } from '../panel-client.ts'
 import { ErrorToast, PanelErrorToast } from '../error-toast.tsx'
 import { PendingBar, StatusLine } from '../pending.tsx'
-import { ChecklistRow, ChoiceCard, WizardActions, WizardCheckbox, WizardField, WizardPicker, WizardSegment, WizardShell } from './kit.tsx'
+import { ChecklistRow, ChoiceCard, WizardActions, WizardCheckbox, WizardField, WizardPicker, WizardShell } from './kit.tsx'
 import {
   blankEditor, connectionReady, draftFieldError, editorOf, environmentDraftOf,
   newEnvironmentId, remotePath, togglePeer,
@@ -737,14 +737,10 @@ function ConnectForm(props: {
           onChange={event => update({ displayName: event.currentTarget.value })} />
       </WizardField>
       <WizardField label={t('ssh.field.credentialSource')} hint={t('ssh.field.credentialHint')}>
-        <WizardSegment
-          id="mrfw-wiz-cred"
-          label={t('ssh.field.credentialSource')}
-          value={draft.credentialSource}
-          disabled={busy}
-          options={[
-            { value: 'managed', label: t('ssh.field.managed') },
-            { value: 'alias', label: t('ssh.field.alias') },
+        <WizardPicker label={t('ssh.field.credentialSource')} value={draft.credentialSource} disabled={busy}
+          items={[
+            { id: 'managed', label: t('ssh.field.managed') },
+            { id: 'alias', label: t('ssh.field.alias') },
           ]}
           onChange={credentialSource => update({ credentialSource })} />
       </WizardField>
@@ -788,14 +784,10 @@ function ConnectForm(props: {
         </WizardField>
       </div>
       <WizardField label={t('ssh.field.platform')} hint={t('ssh.field.platformHint')}>
-        <WizardSegment
-          id="mrfw-wiz-platform"
-          label={t('ssh.field.platform')}
-          value={draft.platform}
-          disabled={busy}
-          options={[
-            { value: 'linux', label: t('ssh.platform.linux') },
-            { value: 'darwin', label: t('ssh.platform.darwin') },
+        <WizardPicker label={t('ssh.field.platform')} value={draft.platform} disabled={busy}
+          items={[
+            { id: 'linux', label: t('ssh.platform.linux') },
+            { id: 'darwin', label: t('ssh.platform.darwin') },
           ]}
           onChange={platform => update({ platform })} />
       </WizardField>

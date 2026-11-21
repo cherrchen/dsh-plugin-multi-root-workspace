@@ -1930,30 +1930,6 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   color: var(--dsw-alias-label-primary);
 }
 
-.mrfw-wizSeg {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.mrfw-wizSegBtn {
-  border: none;
-  background: none;
-  padding: 4px 12px;
-  border-radius: calc(var(--dsw-radius-md) - 2px);
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
-}
-
-.mrfw-wizSegBtn[data-selected='true'] {
-  background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base));
-  color: var(--dsw-alias-label-primary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-}
-
 /* The selectable row: icon, a title/subtitle stack, and a trailing status. */
 .mrfw-choice {
   display: flex;
