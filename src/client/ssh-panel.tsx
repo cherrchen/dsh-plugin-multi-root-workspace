@@ -11,6 +11,12 @@ import { RemoteRootConfirm } from './remote-root-confirm.tsx'
 import { PanelError } from './panel-client.ts'
 import { ErrorToast, PanelErrorToast } from './error-toast.tsx'
 import type { CredentialPublicView, RemoteDirectoryListing, SshBindingDraft, SshBindingView, SshClient, SshManagementClient, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
+import {
+  blankEditor, connectionReady, draftFieldError, editorIdentity, editorOf, environmentDraftOf, execHelperReady,
+  newEnvironmentId, recordedFingerprint, remotePath, scanReady, scanTargetOf, sshPort, sshToken, togglePeer,
+  CONNECT_FIELDS, FIELD_LABELS, SSH_ALIAS,
+  type ConnectField as WizardField, type EditorDraft,
+} from './ssh-draft.ts'
 import type { Key } from './locales.ts'
 import { localBindingPeers } from './remote-root-menu.tsx'
 import { WorkspaceRow } from './workspace-row.tsx'
@@ -19,19 +25,6 @@ import type { RemotesView } from '../remote/panel-contract.ts'
 
 /** The two management sections. Adding a connection is a separate dialog. */
 export type SshDialogTab = 'connections' | 'keys'
-
-/** The exec stanza the "allow command execution" toggle materializes (ADR-0049). */
-const EXEC_DEFAULTS = {
-  shell: ['/bin/sh', '-c'],
-  env: { PATH: '/usr/local/bin:/usr/bin:/bin' },
-  maxTimeoutMs: 600_000,
-  stdoutLimit: 1_048_576,
-  stderrLimit: 262_144,
-  terminateGraceMs: 2_000,
-} as const
-
-/** The transfer stanza the "allow file transfer" toggle materializes. */
-const TRANSFER_DEFAULTS = { maxBytes: 268_435_456, timeoutMs: 600_000 } as const
 
 const SSH_TABS: readonly SshDialogTab[] = ['connections', 'keys']
 
@@ -72,13 +65,6 @@ function pendingRowKind(op: ManageOp | undefined, id: string): 'remove' | 'helpe
     default:
       return undefined
   }
-}
-
-/** The scan target label: the alias for ssh-config sources, host:port otherwise. */
-function scanTargetOf(draft: EditorDraft): string {
-  return draft.credentialSource === 'alias'
-    ? draft.alias.trim()
-    : `${draft.hostname.trim()}:${draft.port.trim()}`
 }
 
 interface CheckboxControlProps {
@@ -192,20 +178,6 @@ const managedCredentials = (credentials: readonly CredentialPublicView[], t: Tra
     ...credentials.map(credential => ({ id: credential.id, label: credential.label })),
   ]
 
-interface EditorDraft {
-  readonly existing?: SshEnvironmentView | undefined
-  displayName: string
-  hostname: string
-  port: string
-  user: string
-  platform: 'linux' | 'darwin'
-  credentialSource: 'alias' | 'managed'
-  alias: string
-  credentialId: string
-  allowExec: boolean
-  allowTransfer: boolean
-}
-
 interface BindingDraft {
   environmentId: string
   readonly rootId?: string
@@ -215,107 +187,6 @@ interface BindingDraft {
   exec: boolean
   imports: ReadonlySet<string>
   exports: ReadonlySet<string>
-}
-
-const blankEditor = (): EditorDraft => ({
-  displayName: '', hostname: '', port: '22', user: '', platform: 'linux',
-  credentialSource: 'managed', alias: '', credentialId: '', allowExec: false, allowTransfer: false,
-})
-
-/** The persisted environmentId rule — checked here so save never reaches the wire with an id the store would refuse. */
-const ENVIRONMENT_ID = /^[a-z0-9][a-z0-9-]{2,62}$/
-
-/** The wire alias rule (`sshHostKeyScan` / `credentialDraft`). */
-const SSH_ALIAS = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
-
-/** The wire hostname/user rule: non-empty, bounded, no whitespace, no leading dash. */
-const sshToken = (value: string, max: number): boolean => {
-  const text = value.trim()
-  return text.length >= 1 && text.length <= max && !/\s/.test(text) && !text.startsWith('-')
-}
-
-/** The wire port rule: an integer from 1 to 65535 — no silent default-22. */
-const sshPort = (value: string): boolean => {
-  if (!/^\d{1,5}$/.test(value.trim())) return false
-  const port = Number.parseInt(value.trim(), 10)
-  return port >= 1 && port <= 65535
-}
-
-/** `checkRemotePath` mirrored: a normalized absolute POSIX path. */
-const remotePath = (path: string): boolean =>
-  path.startsWith('/') && !path.includes('\0')
-  && !path.split('/').slice(1).some(segment => segment === '' || segment === '.' || segment === '..')
-
-/** Fields validated when adding a connection. */
-type WizardField = 'hostname' | 'port' | 'user' | 'alias' | 'credentialId'
-
-/** The localized hint key for one invalid field, or undefined when it passes. */
-function draftFieldError(draft: EditorDraft, field: WizardField): Key | undefined {
-  switch (field) {
-    case 'hostname': return draft.credentialSource === 'managed' && !sshToken(draft.hostname, 253) ? 'ssh.field.hostnameHint' : undefined
-    case 'port': return draft.credentialSource === 'managed' && !sshPort(draft.port) ? 'ssh.field.portHint' : undefined
-    case 'user': return draft.credentialSource === 'managed' && !sshToken(draft.user, 64) ? 'ssh.field.userHint' : undefined
-    case 'alias': return draft.credentialSource === 'alias' && !SSH_ALIAS.test(draft.alias.trim()) ? 'ssh.field.aliasHint' : undefined
-    case 'credentialId': return draft.credentialSource === 'managed' && draft.credentialId === '' ? 'ssh.field.credentialIdHint' : undefined
-  }
-}
-
-const CONNECT_FIELDS: readonly WizardField[] = ['user', 'hostname', 'port', 'alias', 'credentialId']
-
-/** The label locale key for one wizard field, used by the summary strip. */
-const FIELD_LABELS: Record<WizardField, Key> = {
-  user: 'ssh.field.user',
-  hostname: 'ssh.field.hostname',
-  port: 'ssh.field.port',
-  alias: 'ssh.field.alias',
-  credentialId: 'ssh.field.managed',
-}
-
-/** The fields a host-key scan consumes: an alias, or a valid hostname+port. */
-function scanReady(draft: EditorDraft): boolean {
-  return draft.credentialSource === 'alias'
-    ? draftFieldError(draft, 'alias') === undefined
-    : draftFieldError(draft, 'hostname') === undefined && draftFieldError(draft, 'port') === undefined
-}
-
-/** Whether the connection form is ready to scan. */
-function connectionReady(draft: EditorDraft): boolean {
-  return CONNECT_FIELDS.every(field => draftFieldError(draft, field) === undefined)
-}
-
-const editorOf = (environment: SshEnvironmentView): EditorDraft => ({
-  existing: environment,
-  displayName: environment.displayName ?? '',
-  hostname: environment.endpoint.hostname,
-  port: String(environment.endpoint.port),
-  user: environment.endpoint.user,
-  platform: environment.platform,
-  credentialSource: environment.credential.kind === 'ssh-config' ? 'alias' : 'managed',
-  alias: environment.credential.kind === 'ssh-config' ? environment.credential.alias : '',
-  credentialId: environment.credential.kind === 'managed' ? environment.credential.credentialId : '',
-  allowExec: environment.exec !== undefined,
-  allowTransfer: environment.transfer !== undefined,
-})
-
-const editorIdentity = (draft: EditorDraft): string => JSON.stringify([
-  draft.hostname.trim(), Number(draft.port), draft.user.trim(), draft.platform, draft.credentialSource,
-  draft.credentialSource === 'alias' ? draft.alias.trim() : draft.credentialId,
-])
-
-function recordedFingerprint(draft: EditorDraft): string | undefined {
-  const existing = draft.existing
-  return existing !== undefined && editorIdentity(draft) === editorIdentity(editorOf(existing)) ? existing.hostKey : undefined
-}
-
-const execHelperReady = (draft: EditorDraft): boolean => {
-  const existing = draft.existing
-  if (existing === undefined || existing.helper === null) return false
-  const port = Number.parseInt(draft.port, 10)
-  const credentialKind = draft.credentialSource === 'alias' ? 'ssh-config' : 'managed'
-  return existing.endpoint.hostname === draft.hostname.trim()
-    && existing.endpoint.port === (Number.isInteger(port) ? port : 22)
-    && existing.endpoint.user === draft.user.trim()
-    && existing.credential.kind === credentialKind
 }
 
 const blankBinding = (environmentId: string | undefined): BindingDraft => ({
@@ -578,13 +449,6 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
   </div>
 }
 
-const togglePeer = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => {
-  const next = new Set(set)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  return next
-}
-
 interface ConnectStepFormProps {
   readonly draft: EditorDraft
   readonly credentials: readonly CredentialPublicView[]
@@ -594,23 +458,6 @@ interface ConnectStepFormProps {
   readonly errorFor: (field: WizardField) => string | undefined
   readonly onChange: (draft: EditorDraft) => void
   readonly onManageCredentials: () => void
-}
-
-/** Allocate a new ID against the current connection inventory. */
-function newEnvironmentId(displayName: string, environments: readonly SshEnvironmentView[]): string {
-  const used = new Set(environments.map(environment => environment.environmentId))
-  const slug = displayName.toLowerCase().normalize('NFKD')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 63)
-  if (ENVIRONMENT_ID.test(slug) && !used.has(slug)) return slug
-  // The first group of a v4 UUID is four random bytes. getRandomValues also works on HTTP.
-  let id: string
-  do {
-    const bytes = crypto.getRandomValues(new Uint8Array(4))
-    id = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
-  } while (used.has(id))
-  return id
 }
 
 /** Credential source, connection name, and remote target. */
@@ -732,9 +579,9 @@ function HostKeyConfirmDialog(props: HostKeyConfirmDialogProps): ReactNode {
   </Modal>
 }
 
-type CredentialCreateKind = 'generate' | 'import' | 'password'
+export type CredentialCreateKind = 'generate' | 'import' | 'password'
 
-interface CredentialsPanelProps {
+export interface CredentialsPanelProps {
   readonly credentials: readonly CredentialPublicView[]
   readonly busy: boolean
   /** A credential request (generate/import/password/remove) is in flight. */
@@ -747,7 +594,7 @@ interface CredentialsPanelProps {
 }
 
 /** Credential cards and their add form, shared with the connection wizard. */
-function CredentialsPanel(props: CredentialsPanelProps): ReactNode {
+export function CredentialsPanel(props: CredentialsPanelProps): ReactNode {
   const { t, busy } = props
   const [confirmId, setConfirmId] = useState<string | undefined>(undefined)
   const [create, setCreate] = useState<CredentialCreateKind | 'choose' | undefined>(undefined)
@@ -1402,17 +1249,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const saveEnvironment = async (draft: EditorDraft, hostKey: string | undefined, scanToken?: string): Promise<SshEnvironmentView | undefined> => {
     if (ssh === undefined || !canRequest || view === undefined || hostKey === undefined || !sshPort(draft.port)) return undefined
     const environmentId = draft.existing?.environmentId ?? newEnvironmentId(draft.displayName, view.environments)
-    const environment = {
-      environmentId,
-      ...(draft.displayName.trim() === '' ? {} : { displayName: draft.displayName.trim() }),
-      platform: draft.platform,
-      endpoint: { hostname: draft.hostname.trim(), port: Number.parseInt(draft.port, 10), user: draft.user.trim() },
-      credential: draft.credentialSource === 'alias'
-        ? { kind: 'ssh-config' as const, alias: draft.alias.trim() }
-        : { kind: 'managed' as const, credentialId: draft.credentialId },
-      ...(draft.allowExec ? { exec: draft.existing?.exec ?? { ...EXEC_DEFAULTS, env: { ...EXEC_DEFAULTS.env }, shell: [...EXEC_DEFAULTS.shell] } } : {}),
-      ...(draft.allowTransfer ? { transfer: draft.existing?.transfer ?? { ...TRANSFER_DEFAULTS } } : {}),
-    }
+    const environment = environmentDraftOf(draft, environmentId)
     const intent = draft.existing === undefined ? 'create' : 'update'
     const state = await submitState({ kind: 'save' }, async () => await ssh.environmentSave(sessionId, view.revision, environment, hostKey, scanToken, intent))
     return state?.environments.find(entry => entry.environmentId === environmentId)

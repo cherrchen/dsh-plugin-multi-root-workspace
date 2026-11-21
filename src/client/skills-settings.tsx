@@ -268,6 +268,11 @@ export interface WorktreeSettingsSignal {
   remoteForm(): SkillsForm | undefined
   /** Subscribe to remote-tools form attach/detach and value changes. */
   subscribeRemote(listener: () => void): () => void
+  /**
+   * Whether the remote-tools switch reads enabled on the watched form — `true`
+   * only for a definite `enabled: true`, a missing or unread form is `false`.
+   */
+  remoteEnabled(): boolean
 }
 
 export function installSkillsSettingsCard(ctx: Context, t: Translate, sshSettings?: SshSettingsClient): WorktreeSettingsSignal {
@@ -393,6 +398,7 @@ export function installSkillsSettingsCard(ctx: Context, t: Translate, sshSetting
       return () => { listeners.delete(listener) }
     },
     remoteForm: () => currentRemote,
+    remoteEnabled: () => watchedRemote?.getSnapshot().value?.enabled === true,
     subscribeRemote(listener) {
       remoteListeners.add(listener)
       return () => { remoteListeners.delete(listener) }

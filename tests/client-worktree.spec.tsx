@@ -1017,8 +1017,8 @@ describe('panel cleanup controls', () => {
     expect(batch.closest('.mrfw-sectionAction')).not.toBeNull()
     expect(batch.closest('.mrfw-actions')).toBeNull()
     // Nothing destructive is left in the footer.
+    expect(document.querySelector('.mrfw-actions')).not.toBeNull()
     expect(document.querySelector('.mrfw-actions .mrfw-btnDanger')).toBeNull()
-    expect(screen.getByRole('button', { name: 'panel.retry' })).toBeTruthy()
   })
 
   it('renders no batch action while no tracked root is cleanup-eligible', async () => {

@@ -721,9 +721,9 @@ describe('the worktree suggestion notice rules', () => {
 })
 
 describe('the workspace folder add row', () => {
-  it('keeps the controls on one line by letting the manual path field shrink first', () => {
+  it('keeps the controls on one line by letting the add button stretch', () => {
     expect(STYLES).toMatch(/\.mrfw-actions\s*\{[^}]*flex-wrap:\s*wrap/s)
-    expect(STYLES).toMatch(/\.mrfw-manualPath\s*\{[^}]*flex:\s*1 1 120px[^}]*min-width:\s*80px/s)
+    expect(STYLES).toMatch(/\.mrfw-addBtn\s*\{[^}]*flex:\s*1 1 auto/s)
   })
 
   it('gives the root-limit hint its own line above the controls, under the divider', () => {

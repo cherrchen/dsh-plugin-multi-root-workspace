@@ -195,6 +195,7 @@ export function apply(ctx: ClientContext): void {
     panel, remotes, ssh, pickDirectory, subscribeSession, t, worktrees: worktreeClient,
     worktreePromptEnabled: worktreeSettings.enabled,
     subscribeRemoteSettings: worktreeSettings.subscribeRemote,
+    remoteEnabled: worktreeSettings.remoteEnabled,
   }
   installSkillsClient(ctx, t, listener => subscribeCurrentSession(readService(ctx, 'sessions'), listener))
   // The worktree confirmation is a shell-level overlay: it must be able to

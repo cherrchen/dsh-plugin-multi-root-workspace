@@ -58,6 +58,8 @@ interface Harness {
   setRevealed: (value: unknown) => void
   /** What the remote section reads (and re-reads after add/remove). */
   setRemotes: (view: RemotesView) => void
+  /** Flip the remote-tools switch on the composed config form. */
+  setRemoteEnabled: (enabled: boolean) => void
   /** Make the NEXT channel call hang until `release` is called. */
   holdNextCall: () => void
   /** Make the next call to ONE endpoint hang until `release` is called. */
@@ -107,6 +109,8 @@ interface MountOptions {
   readonly filesActions?: boolean
   /** The New Session hero options slot exists (0.2.1-alpha.3+). */
   readonly heroOptions?: boolean
+  /** A `multi-root-remote-tools` config form exists, so the panel reads the switch. */
+  readonly remoteForm?: boolean
   /**
    * Make `slots.inject` fire the callback even when the hero slot was not
    * declared. Proves the explicit `spec` guard, not just inject's own
@@ -132,6 +136,13 @@ function mount(options: MountOptions = {}): Harness {
   let releaseGate: (() => void) | undefined
   let holdFor: string | undefined
   const picked: string | null = '/repos/picked'
+  let remoteEnabledFlag = false
+  const remoteListeners = new Set<() => void>()
+  const remoteForm = {
+    getSnapshot: () => ({ status: 'ready', writable: true, revision: 0, value: { enabled: remoteEnabledFlag } }),
+    subscribe: (listener: () => void) => { remoteListeners.add(listener); return () => { remoteListeners.delete(listener) } },
+    mutate: async () => true,
+  }
 
   const connection = {
     rpc: {
@@ -199,8 +210,15 @@ function mount(options: MountOptions = {}): Harness {
     },
     // This harness exercises the panel, not the workspace menu; a no-op inject
     // keeps the optional context-menu contribution out of it. The menu has its
-    // own spec (`client-workspace-menu.spec.ts`).
-    inject: () => () => {},
+    // own spec (`client-workspace-menu.spec.ts`). The configForms injection
+    // resolves immediately when the option composes the remote form.
+    inject: (services: readonly string[], callback: (scope: unknown) => unknown) => {
+      if (options.remoteForm === true && services.includes('configForms')) {
+        const out = callback(ctx)
+        return typeof out === 'function' ? out : () => {}
+      }
+      return () => {}
+    },
     locale: {
       register: (ns: string, dicts: Record<string, unknown>) => {
         dictionaries.push({ ns, dicts })
@@ -222,7 +240,7 @@ function mount(options: MountOptions = {}): Harness {
           if (options.permissiveHeroInject === true) callback()
           return () => {}
         }
-        expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions', 'sidebar.right.tab.document.actions', 'shell.overlay', 'conversation.hero.options']).toContain(name)
+        expect(['sidebar.footer.action', 'sidebar.right.tab.files.actions', 'sidebar.right.tab.document.actions', 'shell.overlay', 'conversation.hero.options', 'plugins.bundle.config', 'settings.plugin.item']).toContain(name)
         callback()
         return () => {}
       },
@@ -234,6 +252,9 @@ function mount(options: MountOptions = {}): Harness {
     get: (name: string) => {
       if (name === 'connection') return connection
       if (name === 'uiWorkspace') return { pickDirectory: async () => picked }
+      if (name === 'configForms') return options.remoteForm === true
+        ? { get: (entryId: string) => entryId === 'multi-root-remote-tools' ? remoteForm : undefined }
+        : undefined
       if (name === 'sessions') {
         return {
           list: {
@@ -259,10 +280,17 @@ function mount(options: MountOptions = {}): Harness {
       catalog = undefined
       for (const listener of sessionListeners) listener()
     },
-    setCatalog: rows => { catalog = rows },
+    setCatalog: rows => {
+      catalog = rows
+      for (const listener of sessionListeners) listener()
+    },
     setFailure: next => { failure = next },
     setRevealed: next => { revealed = next },
     setRemotes: next => { remoteView = next },
+    setRemoteEnabled: next => {
+      remoteEnabledFlag = next
+      for (const listener of remoteListeners) listener()
+    },
     holdNextCall: () => { holdFor = undefined; gate = new Promise<void>(resolve => { releaseGate = resolve }) },
     holdEndpoint: endpoint => { holdFor = endpoint; gate = new Promise<void>(resolve => { releaseGate = resolve }) },
     release: () => { releaseGate?.(); releaseGate = undefined },
@@ -616,9 +644,10 @@ describe('the panel dialog', () => {
     await waitFor(() => { expect(screen.getByText('legacy-16')).toBeTruthy() })
     expect(screen.queryByRole('status')).toBeNull()
     expect(screen.getByRole('button', { name: `${NS}.panel.add` })).toHaveProperty('disabled', false)
-    fireEvent.change(screen.getByPlaceholderText(`${NS}.panel.addManual`), { target: { value: '/repos/new' } })
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.addConfirm` }))
-    await waitFor(() => { expect(harness.calls.at(-1)).toMatchObject({ endpoint: 'add', payload: { path: '/repos/new' } }) })
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    const dialog = await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.addConfirm` }))
+    await waitFor(() => { expect(harness.calls.at(-1)).toMatchObject({ endpoint: 'add', payload: { path: '/repos/picked' } }) })
   })
 
   it('shows No active session and does not call the host when there is no current session', async () => {
@@ -629,8 +658,9 @@ describe('the panel dialog', () => {
 
     await waitFor(() => { expect(screen.getByText(`${NS}.panel.noSession`)).toBeTruthy() })
     expect(harness.calls).toHaveLength(0)
-    expect(screen.queryByPlaceholderText(`${NS}.panel.addManual`)).toBeNull()
-    expect(screen.getByRole('button', { name: `${NS}.panel.retry` })).toBeTruthy()
+    // The add row sits out entirely: with no session there is nothing it could
+    // name, and the session listener owns the reload once one appears.
+    expect(screen.queryByRole('button', { name: `${NS}.panel.add` })).toBeNull()
   })
 
   it('calls the host after a session appears', async () => {
@@ -641,7 +671,6 @@ describe('the panel dialog', () => {
     await waitFor(() => { expect(screen.getByText(`${NS}.panel.noSession`)).toBeTruthy() })
 
     act(() => { harness.setSession('session-1') })
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
 
     await waitFor(() => { expect(harness.calls.length).toBeGreaterThanOrEqual(1) })
     expect(harness.calls[0]?.payload).toEqual({ sessionId: 'session-1' })
@@ -673,18 +702,19 @@ describe('the panel dialog', () => {
     expect(harness.calls).toHaveLength(0)
   })
 
-  it('follows a main-view change on retry', async () => {
+  it('follows a main-view change on the catalog notification', async () => {
     const harness = mount()
     harness.setCatalog([{ id: 'session-main', mainView: 1 }])
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(rootsListing(harness)).toHaveLength(1) })
 
-    harness.setCatalog([
-      { id: 'session-main' },
-      { id: 'session-next', mainView: 1 },
-    ])
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
+    act(() => {
+      harness.setCatalog([
+        { id: 'session-main' },
+        { id: 'session-next', mainView: 1 },
+      ])
+    })
 
     await waitFor(() => { expect(rootsListing(harness)).toHaveLength(2) })
     expect(rootsListing(harness)[1]?.payload).toEqual({ sessionId: 'session-next' })
@@ -697,7 +727,6 @@ describe('the panel dialog', () => {
     await waitFor(() => { expect(rootsListing(harness)).toHaveLength(1) })
 
     act(() => { harness.setSession('session-2') })
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.retry` }))
 
     await waitFor(() => { expect(rootsListing(harness)).toHaveLength(2) })
     expect(rootsListing(harness)[1]?.payload).toEqual({ sessionId: 'session-2' })
@@ -744,13 +773,20 @@ describe('the panel dialog', () => {
     })
   })
 
-  it('adds through the composed picker, then through the manual path field', async () => {
+  it('adds through the composed picker only after the trust confirmation', async () => {
     const harness = mount()
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    // The picked path is staged, never submitted on its own: the trust dialog
+    // is the only writer.
+    await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    expect(harness.calls.some(call => call.endpoint === 'add')).toBe(false)
+
+    const dialog = screen.getByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.addConfirm` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
     // The access picker is untouched, so no level travels: a chosen level is
     // the only one a request may carry — a displayed default is not a choice.
@@ -758,69 +794,85 @@ describe('the panel dialog', () => {
       sessionId: 'session-1',
       path: '/repos/picked',
     })
-
-    const manual = screen.getByPlaceholderText(`${NS}.panel.addManual`)
-    fireEvent.change(manual, { target: { value: '/repos/typed' } })
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.addConfirm` }))
-    await waitFor(() => { expect(harness.calls.filter(call => call.endpoint === 'add')).toHaveLength(2) })
-    // The confirm button submits the TYPED path. It used to submit whatever the
-    // picker had returned, because both entry points shared one function.
-    expect(harness.calls.filter(call => call.endpoint === 'add')[1]?.payload).toEqual({
-      sessionId: 'session-1',
-      path: '/repos/typed',
-    })
-    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('value', '')
+    await waitFor(() => { expect(screen.queryByRole('dialog', { name: `${NS}.panel.addTrustTitle` })).toBeNull() })
   })
 
-  it('keeps a rejected manual path in the field', async () => {
-    const harness = mount()
-    harness.setFailure({ code: 'missing', message: 'host prose' })
-    renderPanel(harness)
-    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByRole('status').textContent).toBe(`${NS}.error.missing`) })
-
-    const manual = screen.getByPlaceholderText(`${NS}.panel.addManual`)
-    fireEvent.change(manual, { target: { value: '/repos/typo' } })
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.addConfirm` }))
-
-    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
-    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('value', '/repos/typo')
-  })
-
-  it('submits the typed path from the Enter key too', async () => {
+  it('keeps the trust dialog open when the host rejects the add', async () => {
     const harness = mount()
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
 
-    const manual = screen.getByPlaceholderText(`${NS}.panel.addManual`)
-    fireEvent.change(manual, { target: { value: '/repos/entered' } })
-    fireEvent.keyDown(manual, { key: 'Enter' })
-
-    await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
-    expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
-      sessionId: 'session-1',
-      path: '/repos/entered',
-    })
-  })
-
-  it('leaves the manual field alone when the operator opens the picker', async () => {
-    const harness = mount()
-    renderPanel(harness)
-    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
-
-    fireEvent.change(screen.getByPlaceholderText(`${NS}.panel.addManual`), { target: { value: '/repos/typed' } })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    const dialog = await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+
+    harness.setFailure({ code: 'missing', message: 'host prose' })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.addConfirm` }))
 
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
-    expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
-      sessionId: 'session-1',
-      path: '/repos/picked',
+    expect(screen.getByRole('dialog', { name: `${NS}.panel.addTrustTitle` })).toBeTruthy()
+  })
+
+  it('sends nothing when the trust dialog is cancelled', async () => {
+    const harness = mount()
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    const dialog = await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.aliasCancel` }))
+
+    await waitFor(() => { expect(screen.queryByRole('dialog', { name: `${NS}.panel.addTrustTitle` })).toBeNull() })
+    expect(harness.calls.some(call => call.endpoint === 'add')).toBe(false)
+  })
+
+  it('opens the hover dropdown only while the remote switch is on', async () => {
+    const harness = mount({ remoteForm: true })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+
+    // The switch reads ON: `+` is a menu opener inside its hover wrapper, not
+    // the action itself — a plain click submits nothing.
+    act(() => { harness.setRemoteEnabled(true) })
+    const wrap = await waitFor(() => {
+      const element = document.querySelector('.mrfw-addWrap') as HTMLElement | null
+      expect(element).not.toBeNull()
+      return element as HTMLElement
     })
-    // The picker path and the typed path are two different actions; the typed
-    // text is neither submitted nor cleared by the picker.
-    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('value', '/repos/typed')
+    fireEvent.pointerEnter(wrap)
+    await screen.findByText(`${NS}.panel.addLocal`)
+    expect(screen.getByText(`${NS}.panel.addRemote`)).toBeTruthy()
+    expect(harness.calls.some(call => call.endpoint === 'add')).toBe(false)
+
+    // The local entry runs the same staged flow the OFF-shape button runs.
+    fireEvent.click(screen.getByText(`${NS}.panel.addLocal`))
+    const dialog = await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.addConfirm` }))
+    await waitFor(() => {
+      expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
+        sessionId: 'session-1',
+        path: '/repos/picked',
+      })
+    })
+  })
+
+  it('drops the dropdown for a direct add button once the switch turns off', async () => {
+    const harness = mount({ remoteForm: true })
+    renderPanel(harness)
+    fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+    await waitFor(() => { expect(screen.getByText('/repos/payments')).toBeTruthy() })
+    expect(document.querySelector('.mrfw-addWrap')).toBeNull()
+
+    act(() => { harness.setRemoteEnabled(true) })
+    await waitFor(() => { expect(document.querySelector('.mrfw-addWrap')).not.toBeNull() })
+    act(() => { harness.setRemoteEnabled(false) })
+    await waitFor(() => { expect(document.querySelector('.mrfw-addWrap')).toBeNull() })
+
+    // OFF: `+` IS the action — a click stages the picked path directly.
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
   })
 
   it('reveals and copies a path from the row actions', async () => {
@@ -1021,12 +1073,14 @@ describe('the panel dialog', () => {
     expect(pathCopies[1]?.textContent).toContain('/repos/payments')
     expect(pathCopies[1]?.querySelector('.mrfw-pathCopyIcon')).toBeTruthy()
 
-    // The Add row selector defaults to read-write; choosing read-only goes into
-    // the same `add` request the path does. The picker is the host's anchored
-    // Menu — a trigger named by its aria-label, rows named by their text.
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessLabel` }))
-    fireEvent.click(screen.getByRole('button', { name: `${NS}.access.readOnly` }))
+    // The trust dialog's selector defaults to inherit; choosing read-only goes
+    // into the same `add` request the path does. The picker is the host's
+    // anchored Menu — a trigger named by its current label, rows by their text.
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.add` }))
+    const dialog = await screen.findByRole('dialog', { name: `${NS}.panel.addTrustTitle` })
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.accessInherit` }))
+    fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadOnly` }))
+    fireEvent.click(within(dialog).getByRole('button', { name: `${NS}.panel.addConfirm` }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'add')).toBe(true) })
     expect(harness.calls.find(call => call.endpoint === 'add')?.payload).toEqual({
       sessionId: 'session-1',
@@ -1056,11 +1110,9 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('/repos/website')).toBeTruthy() })
 
-    // Every NEW-add control stays refused at the limit (the picker button even
-    // relabels itself to explain the refusal)…
+    // The NEW-add control stays refused at the limit (the button even relabels
+    // itself to explain the refusal)…
     expect(screen.getByRole('button', { name: `${NS}.panel.limitReached` })).toHaveProperty('disabled', true)
-    expect(screen.getByPlaceholderText(`${NS}.panel.addManual`)).toHaveProperty('disabled', true)
-    expect(screen.getByRole('button', { name: `${NS}.panel.addConfirm` })).toHaveProperty('disabled', true)
 
     // …but a withheld row keeps its re-register action: a revive consumes no
     // slot and the host accepts it at or above the limit. The request names
@@ -1086,15 +1138,15 @@ describe('the panel dialog', () => {
     const footer = document.querySelector('.mrfw-actions') as HTMLElement
     const hint = footer.firstElementChild as HTMLElement
     // The hint owns the footer's first line; it is not a control wedged between
-    // the add row and Retry/Worktree suggestions.
+    // the add button and the worktree satellite.
     expect(hint.className).toContain('mrfw-actionsNote')
     expect(hint.textContent).toBe(`${NS}.panel.limitReached`)
-    const retry = screen.getByRole('button', { name: `${NS}.panel.retry` })
-    expect(hint.contains(retry)).toBe(false)
+    const add = screen.getByRole('button', { name: `${NS}.panel.limitReached` })
+    expect(hint.contains(add)).toBe(false)
     // Everything after the hint is still one of the original controls, in order.
-    // The access picker is a Menu: its anchor wrapper span is the control's own
-    // element (the real primitive wraps every anchor in one), so the row counts
-    // it by the button inside rather than by a flattened tag name.
+    // The add menu wraps its anchor in a span (the real primitive wraps every
+    // anchor in one), so the row counts it by the button inside rather than by
+    // a flattened tag name.
     expect(Array.from(footer.children).slice(1).every(element => element.tagName === 'BUTTON'
       || element.tagName === 'INPUT'
       || (element.tagName === 'SPAN' && element.querySelector('button') !== null))).toBe(true)

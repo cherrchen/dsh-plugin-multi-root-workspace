@@ -26,7 +26,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/WorkspaceFoldersAction
  */
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { sshLocation } from '../remote/ssh-location.ts'
 import { Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -34,11 +34,10 @@ import {
   IconAccessInherit,
   IconAccessReadOnly,
   IconAccessReadWrite,
-  IconChevronDown,
-  IconChevronUp,
   IconEdit,
   IconEllipsis,
   IconFolderOpen,
+  IconLink,
   IconPlus,
   IconRefresh,
   IconTrash,
@@ -49,6 +48,8 @@ import type { WorkspaceFoldersDialogController } from './workspace-folders-dialo
 import type { RemotesClient } from './remotes-client.ts'
 import type { SshClient } from './ssh-client.ts'
 import { SshManagementDialog, SshWorkspaceBindingsDialog, type SshDialogTab } from './ssh-panel.tsx'
+import { RemoteWizard } from './wizard/add-remote.tsx'
+import { AddRootConfirm } from './add-root-confirm.tsx'
 import { RemoteRootMenu } from './remote-root-menu.tsx'
 import { Action, IconButton } from './panel-buttons.tsx'
 import { StatusLine } from './pending.tsx'
@@ -73,6 +74,8 @@ export interface WorkspaceFoldersActionProps {
   readonly ssh?: SshClient | undefined
   /** The shared remote-tools settings form; absent when the host exposes no config form. */
   readonly subscribeRemoteSettings?: ((listener: () => void) => () => void) | undefined
+  /** Whether the remote-tools settings switch is on — the `+` control's two forms ride on it. */
+  readonly remoteEnabled?: (() => boolean) | undefined
   /** Opens the composed directory picker, when one is composed. */
   readonly pickDirectory: (() => Promise<string | null>) | undefined
   /** Bound translator for this plugin's namespace. */
@@ -152,6 +155,9 @@ export function stateKey(state: RootState): Key {
     case 'invalid': return 'state.invalid'
   }
 }
+
+/** The `useSyncExternalStore` no-op for compositions without the settings signal. */
+const noRemoteSettings = (): (() => void) => () => {}
 
 /** The locale key for one registration's access level. */
 export function accessKey(access: RootAccess): Key {
@@ -335,17 +341,12 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     busy: false,
     noSession: false,
   })
-  const [manualPath, setManualPath] = useState('')
-  /** The access the Add controls register new roots with; `inherit` is the default. */
-  const [addAccess, setAddAccess] = useState<RootAccess>('inherit')
-  /**
-   * Whether the operator actually picked a level. The select shows its default
-   * before they do, and sending that default would be an explicit value the
-   * operator never named: on a revive the registry upgrades a read-only record
-   * to it. Only a chosen level may travel in the request.
-   */
-  const [accessChosen, setAccessChosen] = useState(false)
-  const [accessMenuOpen, setAccessMenuOpen] = useState(false)
+  /** The picked path waiting on the trust dialog's confirmation. */
+  const [addCandidate, setAddCandidate] = useState<string | undefined>(undefined)
+  /** The `+` control's dropdown, only ever opened while the remote feature is on. */
+  const [addMenuOpen, setAddMenuOpen] = useState(false)
+  /** The add-remote guided flow's open state. */
+  const [remoteWizard, setRemoteWizard] = useState(false)
   /** The widening access change waiting on the confirmation's red button. */
   const [upgradeFor, setUpgradeFor] = useState<{ root: RootView; access: RootAccess } | undefined>(undefined)
   const [aliasFor, setAliasFor] = useState<string | undefined>(undefined)
@@ -404,7 +405,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       // listener closes just that layer, and this handler must not close the
       // dialog underneath it — the portaled dropdown and Modal bubble their
       // events through this dialog's React tree too.
-      if (menuFor !== undefined || accessMenuOpen || upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined || sshBindingsOpen) return
+      if (menuFor !== undefined || addMenuOpen || addCandidate !== undefined || remoteWizard
+        || upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined || sshBindingsOpen) return
       event.stopPropagation()
       props.onClose()
       return
@@ -414,7 +416,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     // focus trap. The portaled Modal still bubbles keys through this dialog's
     // React tree (like Escape above), and trapping here would yank focus to a
     // control behind the active confirmation.
-    if (upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined || sshBindingsOpen) return
+    if (upgradeFor !== undefined || cleanupFor !== undefined || sshDialog !== undefined || sshBindingsOpen
+      || addCandidate !== undefined || remoteWizard) return
     const dialog = dialogRef.current
     if (dialog === null) return
     const focusable = Array.from(
@@ -590,7 +593,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     setCleanupError(undefined)
     setUpgradeFor(undefined)
     setMenuFor(undefined)
-    setAccessMenuOpen(false)
     setCleanupFor(ids)
   }, [])
 
@@ -648,10 +650,9 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   }, [props.worktrees, props.sessionId, requestBase, clearCleanupIfCurrent])
 
   /**
-   * Open the composed picker and add whatever it returns. A picker that is not
-   * composed, or a dialog the operator dismissed, adds nothing — it never falls
-   * back to the manual field, because the operator who clicked "Add folder…"
-   * asked for the picker, not for the text they may have typed earlier.
+   * Open the composed picker and stage whatever it returns for the trust
+   * dialog — the grant is named there, together with the access level, so a
+   * dismissed picker or an uncomposed one stages nothing.
    */
   const addViaPicker = useCallback(async () => {
     if (props.pickDirectory === undefined) return
@@ -663,21 +664,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
       return
     }
     if (picked === null || picked.trim() === '') return
-    await mutate('add', { path: picked, ...(accessChosen ? { access: addAccess } : {}) })
-  }, [mutate, props, addAccess, accessChosen])
-
-  /**
-   * Add the path in the manual field — the one the operator typed. The picker
-   * plays no part here: this is the entry point the confirm button and the
-   * Enter key use.
-   */
-  const addManualPath = useCallback(async () => {
-    const path = manualPath.trim()
-    if (path === '') return
-    // Cleared only on success: a rejected path stays in the field so the operator
-    // can fix it instead of retyping it.
-    if (await mutate('add', { path, ...(accessChosen ? { access: addAccess } : {}) })) setManualPath('')
-  }, [manualPath, mutate, addAccess, accessChosen])
+    setAddCandidate(picked)
+  }, [props])
 
   /**
    * Re-register one MISSING root in place. The request carries the stored
@@ -745,8 +733,14 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   // The host refuses the add as `root-limit-reached` anyway; disabling here is
   // what makes the refusal explain itself before the operator clicks.
   const atLimit = state.view !== undefined && state.view.count >= state.view.limit
-  const IconAccessTrigger = addAccess === 'read-only' ? IconAccessReadOnly
-    : addAccess === 'read-write' ? IconAccessReadWrite : IconAccessInherit
+  // The settings switch alone picks the `+` control's form — a missing form
+  // reads as off, and the remote item additionally needs both clients to run.
+  const remoteFeatureOn = useSyncExternalStore(
+    props.subscribeRemoteSettings ?? noRemoteSettings,
+    () => props.remoteEnabled?.() === true,
+    () => false,
+  )
+  const remoteAddPossible = props.remotes !== undefined && props.ssh !== undefined
   // Captured as consts: narrowing does not reach the onCopy closures below.
   const primaryPath = state.view?.primaryRoot
   const workingRoot = workingRootOf(state.view)
@@ -1104,95 +1098,67 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 above the controls, and both lines sit below the sheet's
                 divider (the footer's top border). */}
             {atLimit ? <p className="mrfw-note mrfw-actionsNote">{t('panel.limitReached')}</p> : null}
-            {state.noSession || props.pickDirectory === undefined ? null : (
-              <IconButton
-                variant="outline"
-                pending={state.busy}
-                disabled={atLimit}
+            {/* With the remote feature ON, `+` carries a hover-open dropdown —
+                local addition and the remote guided flow — so the trigger is
+                an opener, not the action itself. With it OFF, `+` IS the
+                action: a click runs the whole local-add flow (picker, then the
+                trust dialog). */}
+            {state.noSession || (props.pickDirectory === undefined && !remoteAddPossible) ? null : remoteFeatureOn ? (
+              <span className="mrfw-addWrap" onPointerEnter={() => { if (!state.busy) setAddMenuOpen(true) }}>
+                <Menu
+                  open={addMenuOpen}
+                  onClose={() => setAddMenuOpen(false)}
+                  portal
+                  side="top"
+                  align="start"
+                  closeOnPointerLeave
+                  className="mrfw-addMenu"
+                  items={[
+                    {
+                      id: 'local',
+                      label: t('panel.addLocal'),
+                      icon: <IconFolderOpen />,
+                      disabled: state.busy || atLimit || props.pickDirectory === undefined,
+                    },
+                    {
+                      id: 'remote',
+                      label: t('panel.addRemote'),
+                      icon: <IconLink />,
+                      disabled: state.busy || !remoteAddPossible,
+                    },
+                  ]}
+                  onSelect={id => {
+                    setAddMenuOpen(false)
+                    if (id === 'local') void addViaPicker()
+                    else if (id === 'remote') setRemoteWizard(true)
+                  }}
+                  anchor={(
+                    <button
+                      type="button"
+                      className="mrfw-btn mrfw-btnOutline mrfw-addBtn"
+                      aria-label={t('panel.add')}
+                      aria-haspopup="menu"
+                      aria-expanded={addMenuOpen}
+                      aria-busy={state.busy || undefined}
+                      onClick={() => { if (!state.busy) setAddMenuOpen(open => !open) }}
+                    >
+                      <IconPlus />
+                    </button>
+                  )}
+                />
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="mrfw-btn mrfw-btnOutline mrfw-addBtn"
+                aria-label={atLimit ? t('panel.limitReached') : t('panel.add')}
+                aria-busy={state.busy || undefined}
+                disabled={state.busy || atLimit || props.pickDirectory === undefined}
                 onClick={() => { void addViaPicker() }}
-                icon={<IconPlus />}
-                label={atLimit ? t('panel.limitReached') : t('panel.add')}
-              />
+              >
+                <IconPlus />
+              </button>
             )}
-            {state.noSession ? null : (
-              <>
-            <input
-              className="mrfw-input mrfw-manualPath"
-              value={manualPath}
-              placeholder={t('panel.addManual')}
-              disabled={atLimit}
-              onChange={event => { setManualPath(event.target.value) }}
-              onKeyDown={event => { if (event.key === 'Enter') void addManualPath() }}
-            />
-            {/* The access picker is the host's own anchored menu — the same
-                dropdown kit the root switcher and the row menus use — not a
-                native select. Only an explicit selection marks the level
-                chosen, so the displayed default still travels in no request
-                (accessChosen keeps its meaning). Opens upward: the row sits
-                at the dialog's bottom edge. */}
-            <Menu
-              open={accessMenuOpen}
-              onClose={() => { setAccessMenuOpen(false) }}
-              className="mrfw-accessSelect"
-              items={[
-                {
-                  id: 'inherit',
-                  label: t('access.inherit'),
-                  icon: IconAccessInherit === undefined ? undefined : <IconAccessInherit />,
-                },
-                {
-                  id: 'read-write',
-                  label: t('access.readWrite'),
-                  icon: IconAccessReadWrite === undefined ? undefined : <IconAccessReadWrite />,
-                },
-                {
-                  id: 'read-only',
-                  label: t('access.readOnly'),
-                  icon: IconAccessReadOnly === undefined ? undefined : <IconAccessReadOnly />,
-                },
-              ]}
-              selectedId={addAccess}
-              onSelect={(id) => {
-                setAccessMenuOpen(false)
-                if (id === 'inherit' || id === 'read-write' || id === 'read-only') {
-                  setAccessChosen(true)
-                  setAddAccess(id)
-                }
-              }}
-              portal
-              side="top"
-              align="end"
-              closeOnPointerLeave
-              anchor={(
-                <button
-                  type="button"
-                  className="mrfw-btn mrfw-btnOutline mrfw-accessTrigger"
-                  title={t('panel.accessLabel')}
-                  aria-label={t('panel.accessLabel')}
-                  aria-haspopup="menu"
-                  aria-expanded={accessMenuOpen}
-                  disabled={atLimit}
-                  aria-disabled={state.busy || atLimit || undefined}
-                  aria-busy={state.busy || undefined}
-                  onClick={() => { if (!state.busy) setAccessMenuOpen(open => !open) }}
-                >
-                  {IconAccessTrigger === undefined ? null : <IconAccessTrigger />}
-                  {t(accessKey(addAccess))}
-                  {accessMenuOpen ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
-                </button>
-              )}
-            />
-            <Action
-              onClick={() => { void addManualPath() }}
-              pending={state.busy}
-              disabled={atLimit || manualPath.trim() === ''}
-              variant="primary"
-            >
-              {t('panel.addConfirm')}
-            </Action>
-              </>
-            )}
-            <Action onClick={() => { void refresh() }} pending={state.busy} variant="outline">{t('panel.retry')}</Action>
             {props.worktrees !== undefined && !state.noSession
               && (props.worktreePromptEnabled === undefined || props.worktreePromptEnabled())
               ? (
@@ -1213,6 +1179,33 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
     </div>,
     document.body,
     )}
+    {/* The picked path's trust step: the grant is named here together with
+        its access level, so only an explicit selection travels in the add. */}
+    {addCandidate === undefined ? null : (
+      <AddRootConfirm
+        path={addCandidate}
+        pending={state.busy}
+        t={t}
+        onCancel={() => setAddCandidate(undefined)}
+        onConfirm={access => {
+          const path = addCandidate
+          void mutate('add', { path, ...(access === undefined ? {} : { access }) })
+            .then(ok => { if (ok) setAddCandidate(undefined) })
+        }}
+      />
+    )}
+    {/* The add-remote guided flow: environment → binding → registration. */}
+    {remoteWizard ? (
+      <RemoteWizard
+        ssh={props.ssh}
+        remotes={props.remotes}
+        sessionId={sessionId}
+        roots={state.view}
+        onClose={() => setRemoteWizard(false)}
+        onChanged={refreshRemoteSection}
+        t={t}
+      />
+    ) : null}
     {/* A widening access change asks first: a host-modal confirmation layered
         over this dialog — cancel or a mask click dismisses, the red button
         commits the setAccess mutation. Narrowing changes skip it entirely. */}
