@@ -119,6 +119,15 @@ export function StateDot(props: {
   return createElement('span', { 'data-state-dot': props.state, className: props.className })
 }
 
+/** Minimal `TextShimmer` mirror: the active flag rides a data attribute. */
+export function TextShimmer(props: {
+  readonly children?: ReactNode
+  readonly active?: boolean
+  readonly className?: string
+}): ReactNode {
+  return createElement('span', { 'data-shimmer': props.active ? 'true' : undefined, className: props.className }, props.children)
+}
+
 /** Minimal `Tag` mirror: the same `span[data-tone]` shape the host renders. */
 export function Tag(props: {
   readonly tone?: string

@@ -204,6 +204,7 @@ function renderDialog(options: {
   onList?: () => void
   onClose?: () => void
   remoteCalls?: { method: string; args: unknown[] }[]
+  remoteAddGate?: Promise<void>
 } = {}): void {
   const remotesView: RemotesView = {
     primaryRoot: '/repos/primary',
@@ -215,7 +216,11 @@ function renderDialog(options: {
   const panel = { call: async () => ROOTS }
   const remotes = {
     list: async () => { options.onList?.(); return remotesView },
-    add: async (...args: unknown[]) => { options.remoteCalls?.push({ method: 'add', args }); return remotesView },
+    add: async (...args: unknown[]) => {
+      options.remoteCalls?.push({ method: 'add', args })
+      if (options.remoteAddGate !== undefined) await options.remoteAddGate
+      return remotesView
+    },
     remove: async (...args: unknown[]) => { options.remoteCalls?.push({ method: 'remove', args }); return remotesView },
   }
   render(createElement(WorkspaceFoldersDialog, {
@@ -1103,6 +1108,225 @@ describe('the SSH management dialog', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'panel.close' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.dialog.title' })).toBeNull())
     expect(screen.getByRole('dialog', { name: 'panel.title' })).toBeTruthy()
+  })
+})
+
+
+describe('pending feedback on network-bound requests', () => {
+  it('marks a running connection test without blocking the row or the dialog', async () => {
+    const gate = Promise.withResolvers<{ platform: string; nodePath?: string; nodeVersion?: string }>()
+    const ssh = fakeSsh(sshState())
+    ssh.environmentTest = async (...args: unknown[]) => {
+      ssh.calls.push({ method: 'environmentTest', args })
+      return await gate.promise
+    }
+    const dialog = await withDialog({ ssh }, 'manage')
+    await within(dialog).findByText('ssh.environments')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.envTest' }))
+    await waitFor(() => expect(ssh.calls.some(call => call.method === 'environmentTest')).toBe(true))
+    const test = within(dialog).getByRole('button', { name: 'ssh.envTest' })
+    await within(dialog).findByText('ssh.pending.test')
+    expect(test.getAttribute('aria-busy')).toBe('true')
+    expect((test as HTMLButtonElement).disabled).toBe(false)
+    // Testing never takes the management lock: edit stays available.
+    expect((within(dialog).getByRole('button', { name: 'ssh.envEdit' }) as HTMLButtonElement).disabled).toBe(false)
+    await act(async () => {
+      gate.resolve({ platform: 'linux', nodeVersion: 'v22.0.0' })
+      await gate.promise
+    })
+    await waitFor(() => expect(within(dialog).queryByText('ssh.pending.test')).toBeNull())
+    expect(await within(dialog).findByText('ssh.platform.linux · node v22.0.0')).toBeTruthy()
+  })
+
+  it('marks a running Helper install on the row, its button, and the dialog bar', async () => {
+    const gate = Promise.withResolvers<SshStateView>()
+    const ssh = fakeSsh(sshState())
+    ssh.helperInstall = async () => await gate.promise
+    const dialog = await withDialog({ ssh }, 'manage')
+    await within(dialog).findByText('ssh.environments')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.helperInstall' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.helperInstall' }))
+    await within(dialog).findByText('ssh.pending.helper')
+    expect(dialog.querySelector('.mrfw-pendingBar[data-active="true"]')).toBeTruthy()
+    expect((within(dialog).getByRole('button', { name: 'ssh.envEdit' }) as HTMLButtonElement).disabled).toBe(true)
+    // The inline form closed on submit; the row's install button carries the spinner.
+    const install = within(dialog).getByRole('button', { name: 'ssh.helperInstall' })
+    expect(install.getAttribute('aria-busy')).toBe('true')
+    expect((install as HTMLButtonElement).disabled).toBe(false)
+    await act(async () => {
+      gate.resolve(sshState({
+        environments: [{ ...ENV_A, helper: { nodePath: '/usr/bin/node', helperPath: '/opt/dsh/helper.js', sha256: 'a'.repeat(64), protocol: 1 } }],
+      }))
+      await gate.promise
+    })
+    await waitFor(() => expect(within(dialog).queryByText('ssh.pending.helper')).toBeNull())
+    expect(await within(dialog).findByText('ssh.helperInstalled')).toBeTruthy()
+  })
+
+  it('marks the host-key scan inside the Add connection dialog', async () => {
+    const gate = Promise.withResolvers<Awaited<ReturnType<SshClient['hostKeyScan']>>>()
+    const ssh = fakeSsh(sshState())
+    ssh.hostKeyScan = async (...args: unknown[]) => {
+      ssh.calls.push({ method: 'hostKeyScan', args })
+      return await gate.promise
+    }
+    const dialog = await withDialog({ ssh }, 'add')
+    fillConnectStep(dialog, { environmentId: 'env-build', hostname: 'build.internal', user: 'ci' })
+    selectManagedCredential(dialog)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.scan' }))
+    await waitFor(() => expect(ssh.calls.some(call => call.method === 'hostKeyScan')).toBe(true))
+    const scan = within(dialog).getByRole('button', { name: 'ssh.scan' })
+    await within(dialog).findByText('ssh.pending.scan')
+    expect(scan.getAttribute('aria-busy')).toBe('true')
+    await act(async () => {
+      gate.resolve({ token: 'scan-token-1', keys: [{ type: 'ssh-ed25519', fingerprint: 'SHA256:scanned' }] })
+      await gate.promise
+    })
+    const confirm = await screen.findByRole('dialog', { name: 'ssh.scanConfirmTitle' })
+    expect(within(confirm).getByRole('radio', { name: /SHA256:scanned/ })).toBeTruthy()
+    await waitFor(() => expect(within(dialog).queryByText('ssh.pending.scan')).toBeNull())
+  })
+
+  it('marks binding save and remove requests inside the bindings dialog', async () => {
+    const saved = Promise.withResolvers<SshStateView>()
+    const removed = Promise.withResolvers<SshStateView>()
+    const ssh = fakeSsh(sshState())
+    ssh.bindingSave = async (...args: unknown[]) => {
+      ssh.calls.push({ method: 'bindingSave', args })
+      return await saved.promise
+    }
+    ssh.bindingRemove = async (...args: unknown[]) => {
+      ssh.calls.push({ method: 'bindingRemove', args })
+      return await removed.promise
+    }
+    const dialog = await openBindings(ssh)
+    fireEvent.change(within(dialog).getByLabelText('ssh.binding.path'), { target: { value: '/srv/app' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.binding.save' }))
+    await waitFor(() => expect(ssh.calls.some(call => call.method === 'bindingSave')).toBe(true))
+    const save = within(dialog).getByRole('button', { name: 'ssh.binding.save' })
+    await within(dialog).findByText('ssh.pending.bindingSave')
+    expect(save.getAttribute('aria-busy')).toBe('true')
+    expect(dialog.querySelector('.mrfw-pendingBar[data-active="true"]')).toBeTruthy()
+    await act(async () => {
+      saved.resolve(sshState({
+        bindings: [{ environmentId: 'env-prod', rootId: 'app', path: '/srv/app', actions: ['read'] }],
+      }))
+      await saved.promise
+    })
+    const row = (await within(dialog).findByText('deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'ssh.binding.remove' }))
+    await waitFor(() => expect(ssh.calls.some(call => call.method === 'bindingRemove')).toBe(true))
+    const remove = within(row).getByRole('button', { name: 'ssh.binding.remove' })
+    await within(row).findByText('ssh.pending.bindingRemove')
+    expect(remove.getAttribute('aria-busy')).toBe('true')
+    await act(async () => {
+      removed.resolve(sshState())
+      await removed.promise
+    })
+    await waitFor(() => expect(within(dialog).queryByText('ssh.pending.bindingRemove')).toBeNull())
+  })
+
+  it('keeps the previous remote listing rendered while the next one loads', async () => {
+    const gate = Promise.withResolvers<Awaited<ReturnType<SshClient['listDirectories']>>>()
+    const ssh = fakeSsh(sshState())
+    let listings = 0
+    ssh.listDirectories = async (sessionId, environmentId, path) => {
+      listings += 1
+      ssh.calls.push({ method: 'listDirectories', args: [sessionId, environmentId, path] })
+      if (listings === 2) return await gate.promise
+      const base = path === undefined || path === '' ? '/home/deploy' : path
+      return {
+        path: base,
+        parent: base === '/' ? '/' : base.slice(0, base.lastIndexOf('/')) || '/',
+        entries: [{ name: 'app', path: base === '/' ? '/app' : base + '/app' }],
+      }
+    }
+    const dialog = await openBindings(ssh)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.add.pickPath' }))
+    const picker = await screen.findByRole('dialog', { name: 'ssh.pathPickerTitle' })
+    fireEvent.click(await within(picker).findByRole('button', { name: 'app' }))
+    await waitFor(() => expect(ssh.calls.filter(call => call.method === 'listDirectories')).toHaveLength(2))
+    await within(picker).findByText('ssh.pending.list')
+    const list = picker.querySelector('.mrfw-sshDirList') as HTMLElement
+    expect(list.getAttribute('aria-busy')).toBe('true')
+    expect(within(list).getByRole('button', { name: 'app' })).toBeTruthy()
+    await act(async () => {
+      gate.resolve({
+        path: '/home/deploy/app',
+        parent: '/home/deploy',
+        entries: [{ name: 'src', path: '/home/deploy/app/src' }],
+      })
+      await gate.promise
+    })
+    await waitFor(() => expect(within(picker).queryByText('ssh.pending.list')).toBeNull())
+    expect(await within(picker).findByRole('button', { name: 'src' })).toBeTruthy()
+  })
+
+  it('marks the remote row while its registration verifies on the host', async () => {
+    const gate = Promise.withResolvers<void>()
+    const endpoint = {
+      environmentId: 'env-prod',
+      rootId: 'web',
+      path: '/srv/app',
+      platform: 'linux',
+      target: 'deploy@prod.internal:22',
+      state: 'unregistered' as const,
+      actions: ['read'],
+      transfers: [],
+      capabilities: { read: false, write: false, exec: false, receive: false, send: false },
+    }
+    const remoteCalls: { method: string; args: unknown[] }[] = []
+    renderDialog({ ssh: fakeSsh(sshState()), endpoints: [endpoint], remoteCalls, remoteAddGate: gate.promise })
+    const row = (await screen.findByText('deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'panel.remoteRegister' }))
+    await waitFor(() => expect(remoteCalls.some(call => call.method === 'add')).toBe(true))
+    await within(row).findByText('panel.remoteRegistering')
+    expect(within(row).getByRole('button', { name: 'panel.more' }).getAttribute('aria-busy')).toBe('true')
+    await act(async () => {
+      gate.resolve()
+      await gate.promise
+    })
+    await waitFor(() => expect(within(row).queryByText('panel.remoteRegistering')).toBeNull())
+  })
+
+  it('spins the capabilities save item while the binding write runs', async () => {
+    const binding = {
+      environmentId: 'env-prod', rootId: 'web', path: '/srv/app',
+      actions: ['read'] as const,
+      transfers: [{ direction: 'export' as const, peer: { environmentId: 'local', rootId: 'payments' } }],
+    }
+    const endpoint = {
+      environmentId: binding.environmentId, rootId: binding.rootId, path: binding.path,
+      displayName: 'Production', platform: 'linux', target: 'deploy@prod.internal:22',
+      state: 'registered' as const, actions: [...binding.actions], transfers: [],
+      capabilities: { read: true, write: false, exec: false, receive: false, send: true },
+    }
+    const saved = Promise.withResolvers<SshStateView>()
+    const ssh = fakeSsh(sshState({
+      environments: [{ ...ENV_A, transfer: { maxBytes: 1024, timeoutMs: 1000 } }],
+      bindings: [binding],
+    }))
+    ssh.bindingSave = async (...args: unknown[]) => {
+      ssh.calls.push({ method: 'bindingSave', args })
+      return await saved.promise
+    }
+    renderDialog({ ssh, endpoints: [endpoint] })
+    const row = (await screen.findByText('deploy@prod.internal:22/srv/app')).closest('.mrfw-row') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'panel.more' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'ssh.binding.editCapabilities' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'remote.capability.write' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'ssh.binding.save' }))
+    await waitFor(() => expect(ssh.calls.some(call => call.method === 'bindingSave')).toBe(true))
+    const save = await screen.findByRole('button', { name: 'ssh.binding.save' })
+    await waitFor(() => expect(save.querySelector('[data-state-dot="ongoing"]')).toBeTruthy())
+    await act(async () => {
+      saved.resolve(sshState({
+        environments: [{ ...ENV_A, transfer: { maxBytes: 1024, timeoutMs: 1000 } }],
+        bindings: [{ ...binding, actions: ['read', 'write'] }],
+      }))
+      await saved.promise
+    })
   })
 })
 
