@@ -744,16 +744,15 @@ describe('the workspace dialog scrolling rules', () => {
     expect(body).toContain('overscroll-behavior: contain')
   })
 
-  it('gives the secondary-root rows a window-relative scroll region', () => {
-    const additional = rule('.mrfw-sectionAdditional')
-    expect(additional).toContain('flex: 1 1 auto')
-    // A floor of one title row plus one root row, applied only while rows
-    // exist: without it the section can shrink to zero on a short viewport and
-    // clip the rows inside its own overflow instead of letting the body
-    // fallback scroll reach them. An empty section stays compact; a wrapped
-    // batch action heading gets its extra 36px so the row window survives.
-    expect(rule('.mrfw-sectionAdditional:has(.mrfw-rootList .mrfw-row)')).toContain('min-height: 104px')
-    expect(rule('.mrfw-sectionAdditional:has(.mrfw-rootList .mrfw-row):has(.mrfw-sectionAction)')).toContain('min-height: 140px')
+  it('flattens the secondary section so its rendered heading sets the floor', () => {
+    // A fixed section floor cannot track a wrapped heading (one line at wide
+    // widths, two at narrow ones, per locale). Flattening the section into the
+    // body flex column makes the rendered heading height and the list floor
+    // bound the shrink together; the title stays fixed and the list scrolls.
+    expect(rule('.mrfw-sectionAdditional')).toContain('display: contents')
+    const title = rule('.mrfw-sectionAdditional > .mrfw-sectionTitleRow')
+    expect(title).toContain('flex: none')
+    expect(title).toContain('margin-top: 8px')
     const list = rule('.mrfw-rootList')
     expect(list).toContain('flex: 1 1 auto')
     expect(list).toContain('min-height: 0')
@@ -761,6 +760,9 @@ describe('the workspace dialog scrolling rules', () => {
     expect(list).toContain('overflow-y: auto')
     expect(list).not.toContain('overscroll-behavior')
     expect(list).not.toMatch(/max-height:[^;]*\d+px/)
+    // One root row stays visible while rows exist; an empty list stays at zero
+    // so the panel keeps its compact height.
+    expect(rule('.mrfw-rootList:has(.mrfw-row)')).toContain('min-height: 70px')
   })
 
   it('pins the add controls below the scrolling list', () => {

@@ -1248,35 +1248,18 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   flex: none;
 }
 
-.mrfw-section + .mrfw-section {
-  margin-top: 8px;
-}
-
-/* The additional-root section yields height first when the dialog reaches its
-   cap; its title row and batch action stay outside the scrolling row list. The
-   128px floor is one wrapped title row (the batch action wraps on narrow
-   dialogs) plus one root row, so a short viewport keeps a usable list scrollport;
-   below that the body fallback scroll takes over instead of collapsing the
-   section and clipping its rows behind overflow: hidden. */
+/* The additional-root section's box is flattened into the body's flex column:
+   the rendered heading height (one or two lines depending on locale and width)
+   and the row list's floor then bound the shrink together. A fixed section floor
+   cannot follow a wrapped heading — 104px leaves a partial row, while 140px
+   clips the add controls on a wide dialog whose heading did not wrap. */
 .mrfw-sectionAdditional {
-  flex: 1 1 auto;
-  overflow: hidden;
+  display: contents;
 }
 
-/* The floor applies only while there are rows to reach: on a short viewport
-   the section then keeps one title row (40px once the batch action wraps) plus
-   one 64px root row instead of collapsing and clipping them, and the body
-   fallback scroll takes over below that. An empty section stays compact. */
-.mrfw-sectionAdditional:has(.mrfw-rootList .mrfw-row) {
-  min-height: 104px;
-}
-
-/* A wrapped batch action raises the heading to 70px on a narrow dialog; with
-   the base floor the list would keep only 34px. Add the wrapped heading's
-   extra 36px so the list still keeps its 70px row window (70 + 70 = 140). The
-   row :has() is repeated to outrank the 104px rule's higher specificity. */
-.mrfw-sectionAdditional:has(.mrfw-rootList .mrfw-row):has(.mrfw-sectionAction) {
-  min-height: 140px;
+.mrfw-sectionAdditional > .mrfw-sectionTitleRow {
+  flex: none;
+  margin-top: 8px;
 }
 
 /* The panel's only normal scroll region. The rows are the variable part, so
@@ -1290,6 +1273,12 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   max-height: 60vh;
   overflow-y: auto;
   scrollbar-gutter: stable;
+}
+
+/* Keep one root row visible while rows exist; an empty list stays at zero and
+   the panel keeps its compact height. */
+.mrfw-rootList:has(.mrfw-row) {
+  min-height: 70px;
 }
 
 .mrfw-sectionTitleRow {
