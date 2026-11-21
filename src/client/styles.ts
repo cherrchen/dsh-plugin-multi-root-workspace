@@ -1699,15 +1699,22 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   width: 32px;
 }
 
-/* The add button is the row's primary control: it stretches to the worktree
-   button so the row reads as one add affordance plus its satellite. */
+/* The add button is the row's primary control: the wrap stretches to the
+   worktree button so the row reads as one add affordance plus its satellite.
+   With the remote menu ON the trigger inside stays button-sized and
+   left-aligned — the wrap's filler space is inert because the hover-open
+   handler lives on the trigger, not the wrap. */
 .mrfw-addWrap,
 .mrfw-addBtn {
-  flex: 1 1 auto;
   display: flex;
 }
 
+.mrfw-addWrap {
+  flex: 1 1 auto;
+}
+
 .mrfw-addBtn {
+  flex: 1 1 auto;
   align-items: center;
   justify-content: center;
   min-width: 64px;

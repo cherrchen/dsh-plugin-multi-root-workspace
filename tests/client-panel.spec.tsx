@@ -841,7 +841,7 @@ describe('the panel dialog', () => {
       expect(element).not.toBeNull()
       return element as HTMLElement
     })
-    fireEvent.pointerEnter(wrap)
+    fireEvent.pointerEnter(within(wrap).getByRole('button', { name: `${NS}.panel.add` }))
     await screen.findByText(`${NS}.panel.addLocal`)
     expect(screen.getByText(`${NS}.panel.addRemote`)).toBeTruthy()
     expect(harness.calls.some(call => call.endpoint === 'add')).toBe(false)

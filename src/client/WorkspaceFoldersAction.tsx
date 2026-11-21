@@ -1102,9 +1102,12 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                 local addition and the remote guided flow — so the trigger is
                 an opener, not the action itself. With it OFF, `+` IS the
                 action: a click runs the whole local-add flow (picker, then the
-                trust dialog). */}
+                trust dialog). The wrap stretches so the worktree satellite
+                pins right, but the hover-open zone is the trigger alone: the
+                wrap's dead space neither opens the menu nor sits outside the
+                close region the Menu watches. */}
             {state.noSession || (props.pickDirectory === undefined && !remoteAddPossible) ? null : remoteFeatureOn ? (
-              <span className="mrfw-addWrap" onPointerEnter={() => { if (!state.busy) setAddMenuOpen(true) }}>
+              <span className="mrfw-addWrap">
                 <Menu
                   open={addMenuOpen}
                   onClose={() => setAddMenuOpen(false)}
@@ -1140,6 +1143,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                       aria-haspopup="menu"
                       aria-expanded={addMenuOpen}
                       aria-busy={state.busy || undefined}
+                      onPointerEnter={() => { if (!state.busy) setAddMenuOpen(true) }}
                       onClick={() => { if (!state.busy) setAddMenuOpen(open => !open) }}
                     >
                       <IconPlus />
