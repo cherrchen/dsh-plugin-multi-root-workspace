@@ -57,15 +57,15 @@
 
 `savePersonalConfig` 的 CAS 在同目录 `<basename>.lock` 的 Registry 权威租约内执行：磁盘 `revision` 与请求不符、或另一个 Host 进程正持有写锁，都报此错。前端已自动重取 `sshState` 再提示；反复出现说明另一个 DSH 实例在并发写同一个人配置，退出多余实例即可。损坏的配置文件不会进入此路径——加载失败使控制面停在 `config-invalid` 并拒绝远端操作，写回合法文件（哪怕是原文）即恢复 `ready`。
 
-### 模式/team 设置在旧版本上保存报错
+### 旧 SSH 配置升级后保持停用
 
-旧构建里 `RemoteCustodyModeControl` 把 `form.mutate` 摘出来脱离接收者调用，而上游 `ConfigFormController.mutate` 依赖 `this`——写入在进入 RPC 前就抛错，UI 只显示保存失败；同时 `Config.team` 未标记 volatile，四个 broker 字段写入被 settings 服务以 `not volatile` 拒绝。重试对旧构建无意义。已修复构建把调用改回带接收者的 `.call(form, ...)`，并将 `team` 整对象标记 volatile（兼容层同时解包包装值）。升级后需重载客户端（插件管理页禁用/启用或重启 Host）让新 bundle 生效；若错误文本仍不渲染为红色，再检查注入的样式元素与计算样式 token（`--dsw-alias-state-error-primary`），不要预设 token 错误。
+当前构建只开放个人 SSH。旧版团队和硬化配置的识别与迁移方式见 [SSH 远端环境参考](../reference/ssh-remote-environments.md#停用的旧配置)。
 
 ### 登记瞬间报「无法验证该远端端点的身份。」（`endpoint-unverifiable`）
 
 秒报、不经网络时，`verifiedAddTarget` 只在一个地方抛出该码：**校验器没有注册**。`SshEndpointVerifier` 由 `multi-root-remote-tools` 行的受门禁子树挂载，挂载效果要求 `remoteStatus.state === 'ready'`；开关在启动即开（`cordis.patch.yml` `enabled: true`）时，首次 sync 会赶在 authority 获取完成之前运行——挂载早退，但 `mountedIdentity` 已记下同一 `(mode, team, digest)` 键，之后同键 sync 一律早退，校验器永久缺席。且 `openOwner`/`connectFollower` 把控制面推入 `ready` 时不发 `onRemoteChange`，没有任何事件能把它救回来；只有碰巧改了清单摘要才重挂。
 
-修复（双半部）：`tools.ts` 用 `toolsLive` 记录子树是否真的走到 `mountRemoteTools`，早退挂载不占重挂载键，下一次 sync 按现状重挂；`registry.ts` 在 `openOwner`/`connectFollower` 建立 `ready` 的两处补发 `notifyRemoteChange()`，ready 翻转即触发重挂。回归：`tests/remote-personal-ops.spec.ts` 的 "a dead same-identity mount retries"（行级）与 "notifies remote listeners when the owner plane turns ready"（栈级）。
+目前 `tools.ts` 等待控制面进入 `ready` 后首次挂载个人 SSH 工具；`registry.ts` 在 `openOwner` 和 `connectFollower` 建立 `ready` 时发送 `notifyRemoteChange()`，触发重新同步。行级与栈级回归均见 `tests/remote-personal-ops.spec.ts`。
 
 校验器挂载后还有第二层瞬发失败：`SshEnvironmentManager.open()` 的 `verifyHostIdentity` 用**裸 `ssh -G <别名>`**（不带 `-F`）解析托管别名，要求托管 `ssh_config` 已 Include 进 `~/.ssh/config`——这是设计：remote_copy/remote_bash 执行时要求用户自己的 `ssh` 能解析别名。未链接时报 `ssh-config-not-linked`，面板文案会引导先点「链接到 ~/.ssh/config」。注意 `installHelper`/`testConnection` 走 `-F` 不需要 Include，所以"装得上 helper、登记不过"是正常的先后顺序。
 

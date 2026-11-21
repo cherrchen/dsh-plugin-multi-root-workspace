@@ -85,7 +85,7 @@ describe('panel dictionaries', () => {
       zh: shared,
       ja: shared,
       es: [...shared, ...experimental, ...workspace],
-      fr: [...shared, 'panel.accessEffective', 'ssh.field.port', 'ssh.tab.mode'],
+      fr: [...shared, 'panel.accessEffective', 'ssh.field.port', 'ssh.tab.keys'],
       de: [...shared, ...workspace, ...checkout, 'remote.mode.team', 'ssh.field.hostname', 'ssh.field.port'],
       ru: [...shared, ...workspace],
       pt: [...shared, ...experimental, ...workspace, ...checkout],

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { WarningOutlineIcon } from '../compat/client-icons.ts'
 import { Button, Switch, Tag, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '@deepseek-ai/cordis'
@@ -165,9 +165,8 @@ export function RemoteSwitchRow({ form, t }: { form: SkillsForm; t: Translate })
   </div>
 }
 
-function SshSettingsDialog({ client, form, revision, onClose, t }: {
+function SshSettingsDialog({ client, revision, onClose, t }: {
   client: SshSettingsClient
-  form: SkillsForm
   revision: number | undefined
   onClose: () => void
   t: Translate
@@ -175,7 +174,6 @@ function SshSettingsDialog({ client, form, revision, onClose, t }: {
   const [view, setView] = useState<SshSettingsView>()
   const [error, setError] = useState<PanelError>()
   const [refresh, setRefresh] = useState(0)
-  const remoteMode = useMemo(() => ({ form: () => form, subscribe: (listener: () => void) => form.subscribe(listener) }), [form])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -190,18 +188,17 @@ function SshSettingsDialog({ client, form, revision, onClose, t }: {
   }, [client, revision, refresh])
 
   return <SshManagementDialog initialTab="connections" fromSettings sessionId={undefined} ssh={client.management}
-    custodyMode={view?.custodyMode} status={view?.status} endpoints={[]} deploymentConnections={view?.connections ?? []}
-    overviewError={error} remoteMode={remoteMode} onClose={onClose} onChanged={() => setRefresh(value => value + 1)} t={t} />
+    custodyMode={view?.custodyMode} status={view?.status}
+    overviewError={error} onClose={onClose} onChanged={() => setRefresh(value => value + 1)} t={t} />
 }
 
 function SshManagementSetting({ form, client, t }: { form: SkillsForm; client: SshSettingsClient; t: Translate }) {
   const snapshot = useSyncExternalStore(listener => form.subscribe(listener), () => form.getSnapshot())
   if (snapshot.status !== 'ready' || snapshot.value?.enabled !== true) return null
-  return <EnabledSshManagementSetting form={form} client={client} revision={snapshot.revision} t={t} />
+  return <EnabledSshManagementSetting client={client} revision={snapshot.revision} t={t} />
 }
 
-function EnabledSshManagementSetting({ form, client, revision, t }: {
-  form: SkillsForm
+function EnabledSshManagementSetting({ client, revision, t }: {
   client: SshSettingsClient
   revision: number | undefined
   t: Translate
@@ -212,7 +209,7 @@ function EnabledSshManagementSetting({ form, client, revision, t }: {
       <div className="mrfw-skillsSettingsTitle">{t('ssh.settings.title')}</div>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>{t('ssh.settings.manage')}</Button>
     </div>
-    {open ? <SshSettingsDialog client={client} form={form} revision={revision} onClose={() => setOpen(false)} t={t} /> : null}
+    {open ? <SshSettingsDialog client={client} revision={revision} onClose={() => setOpen(false)} t={t} /> : null}
   </>
 }
 

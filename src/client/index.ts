@@ -185,9 +185,7 @@ export function apply(ctx: ClientContext): void {
   // builds its own over the same binding, the preview navigator receives this
   // one. Sharing the helper is what keeps the two failure wordings identical.
   const describeSearchFailure = createSearchFailureDescriber(t)
-  // The settings card owns the same remote-tools form the Workspace panel's
-  // SSH area renders; install it first so the dialog dependency bundle can
-  // expose that shared form.
+  // Share switch change notifications so an open Workspace panel refreshes.
   const worktreeSettings = installSkillsSettingsCard(ctx, t, connectionHandle === undefined ? undefined : createSshSettingsClient(connectionHandle))
   // One dependency bundle for the Workspace Folders dialog across all four
   // entries (footer + the menu's shared owner, Files switcher/launcher, hero):
@@ -196,7 +194,7 @@ export function apply(ctx: ClientContext): void {
   const dialogDeps = {
     panel, remotes, ssh, pickDirectory, subscribeSession, t, worktrees: worktreeClient,
     worktreePromptEnabled: worktreeSettings.enabled,
-    remoteMode: { form: worktreeSettings.remoteForm, subscribe: worktreeSettings.subscribeRemote },
+    subscribeRemoteSettings: worktreeSettings.subscribeRemote,
   }
   installSkillsClient(ctx, t, listener => subscribeCurrentSession(readService(ctx, 'sessions'), listener))
   // The worktree confirmation is a shell-level overlay: it must be able to

@@ -1444,7 +1444,7 @@ describe('the remote-environment section', () => {
 
   it('hides the section entirely while the control plane is disabled and issues no remote action', async () => {
     const harness = mount()
-    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'disabled' }, endpoints: [] })
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal', status: { state: 'disabled' }, endpoints: [] })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remotes')).toBe(true) })
@@ -1460,7 +1460,7 @@ describe('the remote-environment section', () => {
 
   it('still explains a degraded control plane that is not disabled', async () => {
     const harness = mount()
-    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'config-invalid', reason: 'bad manifest' }, endpoints: [] })
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal', status: { state: 'config-invalid', reason: 'bad personal configuration' }, endpoints: [] })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText(`${NS}.panel.remoteList`)).toBeTruthy() })
@@ -1468,11 +1468,12 @@ describe('the remote-environment section', () => {
     expect(harness.calls.filter(call => call.endpoint === 'addRemote' || call.endpoint === 'removeRemote')).toHaveLength(0)
   })
 
-  it('registers a deployment endpoint and renders its new state', async () => {
+  it('registers a personal SSH endpoint and renders its new state', async () => {
     const harness = mount()
     harness.setRemotes({
       primaryRoot: '/repos/primary',
       mode: 'workspace-write',
+      custodyMode: 'personal',
       status: { state: 'ready' },
       endpoints: [ENDPOINT],
     })
@@ -1513,6 +1514,7 @@ describe('the remote-environment section', () => {
     harness.setRemotes({
       primaryRoot: '/repos/primary',
       mode: 'workspace-write',
+      custodyMode: 'personal',
       status: { state: 'ready' },
       endpoints: [ENDPOINT],
     })
@@ -1528,12 +1530,12 @@ describe('the remote-environment section', () => {
 
   it('drops a remote answer that belongs to the previous session', async () => {
     const harness = mount()
-    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'disabled' }, endpoints: [] })
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal', status: { state: 'disabled' }, endpoints: [] })
     harness.holdEndpoint('remotes')
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'remotes')).toBe(true) })
-    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'ready' }, endpoints: [ENDPOINT] })
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal', status: { state: 'ready' }, endpoints: [ENDPOINT] })
     act(() => { harness.setSession('session-2') })
     await waitFor(() => { expect(screen.getByText(ENDPOINT_LOCATION)).toBeTruthy() })
     harness.release()
@@ -1545,7 +1547,7 @@ describe('the remote-environment section', () => {
 
   it('submits one registration per click while the request is in flight', async () => {
     const harness = mount()
-    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', status: { state: 'ready' }, endpoints: [ENDPOINT] })
+    harness.setRemotes({ primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal', status: { state: 'ready' }, endpoints: [ENDPOINT] })
     harness.holdEndpoint('addRemote')
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
@@ -1572,7 +1574,7 @@ describe('the shared dialog across the four entries', () => {
   // forwards the same dependency bundle, so the remote section and the
   // worktree cleanup affordance appear from each trigger.
   const READY: RemotesView = {
-    primaryRoot: '/repos/primary', mode: 'workspace-write',
+    primaryRoot: '/repos/primary', mode: 'workspace-write', custodyMode: 'personal',
     status: { state: 'ready' }, endpoints: [],
   }
   const overlay = (): Element | null => document.body.querySelector(':scope > .mrfw-overlay')

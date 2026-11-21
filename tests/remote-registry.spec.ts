@@ -66,6 +66,20 @@ const op = (stack: RegistryStack, over: Partial<RemoteOperationRequest> = {}): R
 })
 
 describe('remote control plane', () => {
+  it.each(['team', 'hardened'] as const)('refuses legacy %s custody at Registry startup and live reconfiguration', async mode => {
+    const stack = await mountRegistryStack(join(fixture.base, 'store'), {
+      remoteEnvironments: { enabled: true, mode, manifestPath: manifestFile(), personalPath: join(fixture.base, 'personal.json') },
+    })
+    stacks.push(stack)
+    await stack.registry.refresh(fixture.workspace)
+
+    expect(stack.registry.remoteStatus.state).toBe('disabled')
+    await stack.registry.configureRemote({ enabled: true, mode })
+    expect(stack.registry.remoteEnabled).toBe(false)
+    await expect(stack.registry.remoteList(fixture.workspace)).rejects.toMatchObject({ code: 'remote-unavailable' })
+    expect(stack.registry.list(fixture.workspace)).toEqual([])
+  })
+
   it('stays byte-identical while disabled', async () => {
     const stack = await mount()
     expect(stack.registry.remoteStatus.state).toBe('disabled')

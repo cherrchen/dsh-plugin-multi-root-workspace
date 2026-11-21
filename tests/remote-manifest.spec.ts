@@ -163,10 +163,24 @@ describe('deployment manifest', () => {
     } finally { fakeStats.clear() }
   })
 
-  it.skipIf(process.platform === 'win32')('offers no config bypass for the strict production checks', () => {
+  it.each(['team', 'hardened', undefined] as const)('disables the deployment manifest path in production (%s)', mode => {
     const d = dir(), path = join(d, 'deploy.json')
     writeFileSync(path, text())
-    const plane = new RemoteControlPlane({ enabled: true, manifestPath: path }, { warn: () => {} })
-    expect(plane.status.state).toBe('config-invalid')
+    const plane = new RemoteControlPlane({
+      enabled: true, ...(mode === undefined ? {} : { mode }), manifestPath: path, personalPath: join(d, 'personal.json'),
+    }, { warn: () => {} })
+    expect(plane.status.state).toBe('disabled')
+    expect(plane.enabled).toBe(false)
+    expect(plane.manifest).toBeUndefined()
+    plane.configure({ enabled: true, mode: 'personal' })
+    expect(plane.status.state).toBe('disabled')
+  })
+
+  it.each(['team', 'hardened'] as const)('rejects a live request to activate %s custody', mode => {
+    const plane = new RemoteControlPlane({ personalPath: join(dir(), 'personal.json') }, { warn: () => {} })
+    plane.configure({ enabled: true, mode })
+    expect(plane.status.state).toBe('disabled')
+    expect(plane.enabled).toBe(false)
+    expect(plane.manifest).toBeUndefined()
   })
 })

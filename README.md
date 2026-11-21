@@ -25,7 +25,7 @@
 - **附加根的 Skills**：自动发现附加根中的 `.dsh/skills` 和 `.agents/skills`，可用 `/别名:技能名` 调用；每个根可单独开关，默认开启。
 - **Auto Review（实验性，默认关闭）**：在插件管理器中手动开启后，自动审查也会看到附加根的目录结构、访问级别和指令文件，把附加根一并纳入审查。
 - **Worktree 建议（实验性，默认关闭）**：主根是 Git worktree 时，插件会提示把同一仓库的其他 worktree 添加为附加根；只有你确认后才会登记，不会自动增删。
-- **SSH 远端环境（实验性，默认关闭，未发布）**：插件详情卡的"SSH 远端环境"开关（实验性警示标签，开启需风险确认）按部署清单打开 Registry 远端控制面；配合部署方提供的 broker 凭据隔离证明后，Agent 获得 `remote_copy` / `remote_bash`；Workspace Folders 面板显示远端工作区列表并提供独立的 SSH 远端管理对话框，每次调用仍经 Registry 准入。开关关闭时无任何模型可见的远端能力。
+- **SSH 远端环境（实验性，默认关闭，未发布）**：在插件详情页开启个人 SSH 后，Agent 可对已登记的远端目录调用 `remote_copy` 和 `remote_bash`。连接和工作区目录绑定分别管理，每次调用经过 Registry 准入。
 - **不登记等于没装**：没有附加根时，行为和未安装插件完全一致；配置有误会直接报错，不会悄悄降级。
 
 当前发布版本 `v0.1.23`。各版本的用户可见变更见 [CHANGELOG](./CHANGELOG.md)；进度与发布状态见[路线图 §进度总账](./docs/plans/active/2026-09-12-multi-root-workspace.md#进度总账)。
@@ -288,17 +288,11 @@ worktree 被删除或移动后，对话框显示徽标，但**永不自动清理
 
 ### SSH 远端环境（实验性，默认关闭，未发布）
 
-Issue #32 的多执行环境能力以实验性开关形式随默认组合发货：插件详情设置卡的 **SSH 远端环境** 带"实验性"警示标签并**默认关闭**，开启前须阅读风险确认（Agent 可在配置的远端主机执行命令与复制文件，凭据的持有方由托管档位决定），取消或关闭弹窗不保存。设置卡只保留启用开关；**凭据托管档位**在 Workspace Folders 面板的“管理 SSH 远端”对话框 →“模式设置”中切换，三档互斥：
-
-- **个人（默认）**：凭据由本机 Host 进程直接持有，**不承诺 Agent 拿不到密钥**；适合个人机器、一次性 VM 或可信 Agent。
-- **团队**：独立 broker 账户托管凭据，复制目的须为 chroot SFTP；显示四个 broker 字段（manifestPath / socketPath / brokerUid / credentialRoot）可就地保存。适合共享构建机。
-- **硬化**：broker + 配额/审计/吊销 + 专用账户与独立写者，由部署 profile 配置，“模式设置”只显示只读说明。
-
-开关开启时向更低隔离档位切换会再次经过风险确认。Registry 按档位读取配置（personal → `remoteEnvironments.personalPath`；team/hardened → `remoteEnvironments.manifestPath`，默认 `/etc/dsh-ssh-broker/manifest.json`）并建立远端控制面。Workspace Folders 提供「管理 SSH 远端」和「管理远端 Root 绑定」两个入口。也可在插件详情设置卡首行点「SSH 远端 → 管理」。
+Issue #32 目前仅开放个人 SSH。插件详情设置卡里的 **SSH 远端环境** 默认关闭，开启时需要确认风险。本机 DSH Host 持有 SSH 凭据，同一操作系统账号下的进程可能访问它们。通过「SSH 远端 → 管理」或「工作区目录 → 管理 SSH 远端」打开连接管理。
 
 **个人模式**。先打开「管理 SSH 远端」→「添加连接」，填写主机和凭据，确认主机密钥后保存。第二步可检测 Node、安装 Helper，勾选「允许命令执行」后点「完成」保存。回到 Workspace Folders，打开「管理远端 Root 绑定」，选一个已有连接，选择远端目录并设置权限，再从「远端工作目录」中该行的「…」菜单登记。同一个连接可以绑定多个目录。
 
-模型侧的 `remote_copy` / `remote_bash` 与能力投影在 team/hardened 下还要通过 broker 凭据隔离证明：broker 块由部署方在专用 profile（hardened）或“模式设置”字段（team）提供，任何一步失败（SSH 兼容门禁、控制面未就绪、`danger-full-access` 会话仅对 hardened 拒绝、证明失败）都不安装工具。每次远端调用仍由 Registry 排序准入。关闭开关即卸载全部远端子树并把控制面恢复为 `disabled`（无 `remote-1` 监听、无远端域）。各档保护边界、文件布局、RPC 拒绝码见 [SSH 远端环境参考](./docs/reference/ssh-remote-environments.md)；team/hardened 的部署步骤与回滚见[控制面参考](./docs/reference/multi-environment-control-plane.md)。
+启用后，模型工具仍须通过 SSH 兼容门禁，并对当前工作区已登记的目录逐次进行 Registry 准入。关闭开关会卸载远端工具并关闭远端控制面。完整步骤见 [SSH 远端环境用户指南](./docs/guide/user/ssh-remote-environments.md)。
 
 ### 界面入口
 

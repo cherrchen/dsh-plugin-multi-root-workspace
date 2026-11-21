@@ -12,7 +12,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { Context } from '@deepseek-ai/cordis'
 import Sessions, { SessionId } from '@deepseek-ai/dsh-session'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Policy from '@deepseek-ai/dsh-sandbox-policy'
@@ -20,7 +19,8 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import Tools from '@deepseek-ai/dsh-tools'
 import { REMOTE_CONTEXT_NAME } from '../src/remote/capabilities.ts'
 import { loadDeploymentManifest } from '../src/remote/manifest.ts'
-import { apply as applyRemoteTools, inject } from '../src/remote/tools.ts'
+import { installRemoteProfileGuard } from '../src/remote/profile-guard.ts'
+import { mountRemoteTools } from '../src/remote/tools-registration.ts'
 import { attestBroker, type BrokerConfig } from '../src/remote/broker/attest.ts'
 import { PANEL_CHANNEL } from '../src/contract.ts'
 import * as CommandModule from '../src/command.ts'
@@ -77,6 +77,7 @@ async function mount(withPanel = false) {
   const stack = await mountRegistryStack(join(base, 'store'), {
     remoteEnvironments: { enabled: true, manifestPath: live.manifestPath },
   }, {
+    useDeploymentManifestForTesting: true,
     beforeGate: async ctx => {
       await ctx.plugin(Projections); await ctx.plugin(Sessions)
       await ctx.plugin(Policy, { mode: 'workspace-write', workspaceRoot: live.primary })
@@ -98,12 +99,14 @@ async function mount(withPanel = false) {
     } as never)
   }
   await installToolExecutor(stack.ctx)
-  // The production wiring: attest first, then mount both tools, the endpoint
-  // verifier and the capability projection — nothing in-process holds a key.
-  await stack.ctx.plugin({
-    name: 'g5-live-remote-tools',
-    inject,
-    apply: (ctx: Context) => applyRemoteTools(ctx, { broker: { config: brokerConfig } }),
+  // Exercise the historical broker path directly in this source-only fixture.
+  const attestation = await attestBroker(brokerConfig, loadDeploymentManifest(live.manifestPath).manifest)
+  if (attestation.status !== 'attested') throw new Error(`attestation failed: ${attestation.code} ${attestation.reason}`)
+  await stack.ctx.plugin(scope => {
+    const restore = installRemoteProfileGuard(scope)
+    scope.effect(() => restore)
+    scope.effect(() => () => attestation.manager.disposeAll())
+    mountRemoteTools(scope, attestation.manager)
   })
   let panelHandler: PanelHandler | undefined
   if (withPanel) {

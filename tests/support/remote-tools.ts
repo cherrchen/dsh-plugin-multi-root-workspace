@@ -114,7 +114,9 @@ export async function mountRemoteTools(fixture: FixtureWorkspace, options: Remot
   if (options.deviceExec === true) backends.set('device', fakeExecBackend(remotes.get('device')!, FAKE_EXEC))
 
   const stack = await mountRegistryStack(join(fixture.base, 'store'), {
-    remoteEnvironments: { ...(options.remote ?? { enabled: true }), manifestPath },
+    remoteEnvironments: options.remote?.personalPath === undefined
+      ? { ...(options.remote ?? { enabled: true }), manifestPath }
+      : options.remote,
   }, {
     allowUserOwnedRemoteManifestForTesting: true,
     beforeGate: async ctx => {

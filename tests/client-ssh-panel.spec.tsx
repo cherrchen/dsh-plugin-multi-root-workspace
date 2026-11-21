@@ -18,7 +18,6 @@ import { PanelError } from '../src/client/panel-client.ts'
 import { SshManagementDialog, type SshManagementDialogProps } from '../src/client/ssh-panel.tsx'
 import { WorkspaceFoldersDialog, type Translate } from '../src/client/WorkspaceFoldersAction.tsx'
 import type { SshBindingDraft, SshClient, SshEnvironmentView, SshStateView } from '../src/client/ssh-client.ts'
-import type { RemoteModeControl } from '../src/compat/skills-client.ts'
 import { zh } from '../src/client/locales.ts'
 
 const t: Translate = key => key
@@ -199,7 +198,7 @@ function renderDialog(options: {
   state?: RemotesView['status']['state']
   status?: RemotesView['status']
   endpoints?: RemotesView['endpoints']
-  remoteMode?: RemoteModeControl
+  subscribeRemoteSettings?: (listener: () => void) => () => void
   t?: Translate
   onList?: () => void
   onClose?: () => void
@@ -227,7 +226,7 @@ function renderDialog(options: {
     panel: panel as never,
     remotes: remotes as never,
     ssh: options.ssh,
-    remoteMode: options.remoteMode,
+    subscribeRemoteSettings: options.subscribeRemoteSettings,
     pickDirectory: undefined,
     sessionId: () => 'session-1',
     t: options.t ?? t,
@@ -363,7 +362,7 @@ describe('the SSH management dialog', () => {
     const main = screen.getByRole('dialog', { name: 'ssh.dialog.title' })
     // The management dialog has exactly three tabs; adding is a dialog.
     expect(within(main).getAllByRole('tab').map(node => node.textContent))
-      .toEqual(['ssh.tab.connections', 'ssh.tab.keys', 'ssh.tab.mode'])
+      .toEqual(['ssh.tab.connections', 'ssh.tab.keys'])
     expect(within(main).queryByRole('tab', { name: 'ssh.tab.add' })).toBeNull()
     expect(within(main).getByRole('button', { name: 'ssh.tab.add' })).toBeTruthy()
     // Step one collects credentials, name, target and platform.
@@ -399,14 +398,6 @@ describe('the SSH management dialog', () => {
     fireEvent.click(within(main).getByRole('button', { name: 'ssh.tab.add' }))
     const reopened = await screen.findByRole('dialog', { name: 'ssh.tab.add' })
     expect((within(reopened).getByLabelText('ssh.field.displayName') as HTMLInputElement).value).toBe('')
-  })
-
-  it('shows no Add connection guide under the mode tab', async () => {
-    const dialog = await withDialog({ ssh: fakeSsh(sshState()) }, 'manage')
-    fireEvent.click(tab(dialog, 'ssh.tab.mode'))
-    expect(within(dialog).getByText('ssh.mode.guide')).toBeTruthy()
-    expect(dialog.querySelector('.mrfw-sshGuide')).toBeNull()
-    expect(within(dialog).queryByText('ssh.mode.addGuide.personal')).toBeNull()
   })
 
   it('keeps the credential controls and the host metadata on one row each', async () => {
@@ -460,39 +451,14 @@ describe('the SSH management dialog', () => {
     expect(within(dialog).getByText('ssh.keys.personalGuide')).toBeTruthy()
   })
 
-  it('renders the shared custody-mode control in the Mode tab and writes the form', async () => {
-    const writes: unknown[] = []
-    const snapshot = { value: { enabled: true, mode: 'personal' }, status: 'ready', writable: true, revision: 2 }
-    const form = {
-      getSnapshot: () => snapshot,
-      subscribe: () => () => {},
-      mutate: async (...args: unknown[]) => { writes.push(args); return true },
-    }
+  it.each(['team', 'hardened'] as const)('hides remote endpoints and actions reported by a legacy %s host', async custodyMode => {
     const ssh = fakeSsh(sshState())
-    const dialog = await withDialog({
-      ssh,
-      remoteMode: { form: () => form, subscribe: () => () => {} },
-    }, 'manage')
-    fireEvent.click(tab(dialog, 'ssh.tab.mode'))
-    expect(await within(dialog).findByText('ssh.custodyMode')).toBeTruthy()
-    fireEvent.click(within(dialog).getByRole('radio', { name: /remote\.mode\.team/ }))
-    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'team' }], 2]]))
-  })
-
-  it('shows deployment guidance and never calls sshState in team/hardened custody', async () => {
-    for (const custodyMode of ['team', 'hardened'] as const) {
-      const ssh = fakeSsh(sshState())
-      const dialog = await withDialog({ ssh, custodyMode }, 'manage')
-      expect(await within(dialog).findByText(/ssh\.connections\.deploymentGuide/)).toBeTruthy()
-      expect(within(dialog).queryByText('ssh.environments')).toBeNull()
-      // The three tabs stay, but there is no Add tab or Add entry in a
-      // deployment-managed custody mode.
-      expect(within(dialog).getAllByRole('tab')).toHaveLength(3)
-      expect(within(dialog).queryByRole('tab', { name: 'ssh.tab.add' })).toBeNull()
-      expect(within(dialog).queryByRole('button', { name: 'ssh.tab.add' })).toBeNull()
-      expect(ssh.calls).toHaveLength(0)
-      cleanup()
-    }
+    const listed = vi.fn()
+    renderDialog({ ssh, custodyMode, onList: listed })
+    await waitFor(() => expect(listed).toHaveBeenCalled())
+    expect(screen.queryByText('panel.remoteList')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'panel.remoteManage' })).toBeNull()
+    expect(ssh.calls).toHaveLength(0)
   })
 
   it('shows the no-client note instead of an add entry without an ssh client', async () => {
@@ -501,31 +467,12 @@ describe('the SSH management dialog', () => {
     expect(within(dialog).queryByRole('button', { name: 'ssh.tab.add' })).toBeNull()
   })
 
-  it('keeps the custody control available when the plane is config-invalid', async () => {
-    const snapshot = { value: { enabled: true, mode: 'team' }, status: 'ready', writable: true, revision: 1 }
-    const form = { getSnapshot: () => snapshot, subscribe: () => () => {}, mutate: async () => true }
-    const dialog = await withDialog({
-      ssh: fakeSsh(sshState()),
-      status: { state: 'config-invalid', reason: 'missing manifest' },
-      remoteMode: { form: () => form, subscribe: () => () => {} },
-    }, 'manage')
-    expect(await within(dialog).findByText(/ssh\.add\.loading|panel\.remoteUnavailable/)).toBeTruthy()
-    fireEvent.click(tab(dialog, 'ssh.tab.mode'))
-    expect(await within(dialog).findByText('ssh.custodyMode')).toBeTruthy()
-    expect(within(dialog).getByRole('radio', { name: /remote\.mode\.personal/ })).toBeTruthy()
-  })
-
   it('refreshes the remote section when the shared settings form changes', async () => {
     const listeners: (() => void)[] = []
-    const snapshot = { value: { enabled: true, mode: 'personal' }, status: 'ready', writable: true, revision: 1 }
-    const form = { getSnapshot: () => snapshot, subscribe: () => () => {}, mutate: async () => true }
     let lists = 0
     renderDialog({
       ssh: fakeSsh(sshState()),
-      remoteMode: {
-        form: () => form,
-        subscribe: listener => { listeners.push(listener); return () => {} },
-      },
+      subscribeRemoteSettings: listener => { listeners.push(listener); return () => {} },
       onList: () => { lists += 1 },
     })
     await screen.findByText('panel.remoteList')
@@ -615,7 +562,7 @@ describe('the SSH management dialog', () => {
   it('detects Node, installs the Helper and saves execution from settings without a session or a new scan', async () => {
     const ssh = fakeSsh(sshState())
     render(<SshManagementDialog initialTab="connections" ssh={ssh} fromSettings sessionId={undefined}
-      custodyMode="personal" status={{ state: 'ready' }} endpoints={[]} remoteMode={undefined}
+      custodyMode="personal" status={{ state: 'ready' }}
       onClose={() => {}} onChanged={() => {}} t={t} />)
     fireEvent.click(await screen.findByRole('button', { name: 'ssh.tab.add' }))
     const dialog = await screen.findByRole('dialog', { name: 'ssh.tab.add' })
@@ -1446,7 +1393,7 @@ describe('pending feedback on network-bound requests', () => {
 describe('SSH dialog asynchronous scope isolation', () => {
   const propsFor = (ssh: SshClient): SshManagementDialogProps => ({
     initialTab: 'connections', ssh, sessionId: 'a', custodyMode: 'personal', status: { state: 'ready' },
-    endpoints: [], remoteMode: undefined, onClose() {}, onChanged() {}, t,
+    onClose() {}, onChanged() {}, t,
   })
   const named = (name: string) => sshState({ environments: [{ ...ENV_A, displayName: name }] })
 

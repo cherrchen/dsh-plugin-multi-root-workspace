@@ -18,7 +18,6 @@
 
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { IconWorkspaceTree } from '../compat/client-icons.ts'
-import type { RemoteModeControl } from '../compat/skills-client.ts'
 import { heroEntryForm, heroRowOf, heroRowWidthTargets, measureHeroEntryRoom } from './hero-entry-room.ts'
 import type { PanelClient } from './panel-client.ts'
 import type { RemotesClient } from './remotes-client.ts'
@@ -44,7 +43,7 @@ export interface HeroWorkspaceEntryProps {
   readonly remotes?: RemotesClient | undefined
   /** The personal-custody management client, when the composition mounts it. */
   readonly ssh?: SshClient | undefined
-  readonly remoteMode?: RemoteModeControl | undefined
+  readonly subscribeRemoteSettings?: ((listener: () => void) => () => void) | undefined
   /** Session-change subscription, forwarded to the dialog like the footer's. */
   readonly subscribeSession?: (listener: () => void) => () => void
   /** The worktree channel client, when the composition mounts it. */

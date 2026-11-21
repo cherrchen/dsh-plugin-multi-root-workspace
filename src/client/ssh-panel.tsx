@@ -2,7 +2,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Button as PrimitiveButton, Input, Menu, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { RootsView } from '../contract.ts'
-import type { RemoteModeControl } from '../compat/skills-client.ts'
 import { IconAccessReadOnly, IconAccessReadWrite, IconChevronDown, IconCopy, IconDownload, IconEdit, IconLink, IconPlay, IconShield, IconTrash, maybeComponent } from '../compat/client-icons.ts'
 import { IconButton, SshButton as Button } from './panel-buttons.tsx'
 import { PendingBar, StatusLine } from './pending.tsx'
@@ -10,16 +9,15 @@ import { sshLocation, sshTarget } from '../remote/ssh-location.ts'
 import { RemoteRootConfirm } from './remote-root-confirm.tsx'
 import { PanelError } from './panel-client.ts'
 import { ErrorToast, PanelErrorToast } from './error-toast.tsx'
-import type { CredentialPublicView, RemoteDirectoryListing, SshBindingDraft, SshBindingView, SshClient, SshManagementClient, SshSettingsView, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
-import { SshCustodySection, type RemoteCustodyMode } from './remote-custody.tsx'
+import type { CredentialPublicView, RemoteDirectoryListing, SshBindingDraft, SshBindingView, SshClient, SshManagementClient, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
 import type { Key } from './locales.ts'
 import { localBindingPeers } from './remote-root-menu.tsx'
 import { WorkspaceRow } from './workspace-row.tsx'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
-import type { RemoteEndpointView, RemotesView } from '../remote/panel-contract.ts'
+import type { RemotesView } from '../remote/panel-contract.ts'
 
-/** The three management sections. Adding a connection is a separate dialog. */
-export type SshDialogTab = 'connections' | 'keys' | 'mode'
+/** The two management sections. Adding a connection is a separate dialog. */
+export type SshDialogTab = 'connections' | 'keys'
 
 /** The exec stanza the "allow command execution" toggle materializes (ADR-0049). */
 const EXEC_DEFAULTS = {
@@ -34,7 +32,7 @@ const EXEC_DEFAULTS = {
 /** The transfer stanza the "allow file transfer" toggle materializes. */
 const TRANSFER_DEFAULTS = { maxBytes: 268_435_456, timeoutMs: 600_000 } as const
 
-const SSH_TABS: readonly SshDialogTab[] = ['connections', 'keys', 'mode']
+const SSH_TABS: readonly SshDialogTab[] = ['connections', 'keys']
 
 const tabKey = (tab: SshDialogTab): Key => `ssh.tab.${tab}` as Key
 
@@ -324,28 +322,10 @@ const blankBinding = (environmentId: string | undefined): BindingDraft => ({
   imports: new Set(), exports: new Set(),
 })
 
-/** The panel's localized remote-state label. */
-function remoteStateKey(state: RemoteEndpointView['state']): Key {
-  switch (state) {
-    case 'unregistered': return 'remote.state.unregistered'
-    case 'registered': return 'remote.state.registered'
-    case 'withheld': return 'remote.state.withheld'
-    case 'revoked': return 'remote.state.revoked'
-  }
-}
-
 /** The operator-facing reason for one remote control-plane state. */
 function statusText(status: RemotesView['status'], t: Translate): string {
   if (status.code === 'owner-without-remote-plane') return t('remote.status.ownerWithoutRemotePlane')
   return status.reason ?? status.state
-}
-
-/** The add-tab guidance key for a custody mode. */
-function addGuideKey(mode: RemoteCustodyMode | undefined): Key {
-  if (mode === 'team') return 'ssh.add.teamGuide'
-  if (mode === 'hardened') return 'ssh.add.hardenedGuide'
-  if (mode === 'personal') return 'ssh.add.personalGuide'
-  return 'ssh.add.unknownGuide'
 }
 
 interface SegmentedTabsProps {
@@ -1081,18 +1061,13 @@ export interface SshManagementDialogProps {
   readonly ssh: SshManagementClient | undefined
   /** Plugin settings owns the global connection inventory and requires no session. */
   readonly fromSettings?: boolean
-  readonly deploymentConnections?: SshSettingsView['connections']
   readonly overviewError?: PanelError | undefined
   /** The live session; the host derives the primary root from it. */
   readonly sessionId: string | undefined
   /** The control plane's live custody mode. */
-  readonly custodyMode: RemoteCustodyMode | undefined
+  readonly custodyMode: RemotesView['custodyMode']
   /** The control plane's live state. */
   readonly status: RemotesView['status'] | undefined
-  /** The deployment endpoints, used as the read-only team/hardened list. */
-  readonly endpoints: readonly RemoteEndpointView[]
-  /** The shared remote-tools settings form (same owner as the plugin card). */
-  readonly remoteMode: RemoteModeControl | undefined
   readonly onClose: () => void
   /** Ask the Workspace Folders panel to re-read its remote section. */
   readonly onChanged: () => void
@@ -1100,12 +1075,12 @@ export interface SshManagementDialogProps {
 }
 
 /**
- * The SSH connection, credential and mode dialog.
+ * The SSH connection and credential dialog.
  * @param props - the dialog inputs.
  * @returns the modal, portaled by the shared primitive.
  */
 export function SshManagementDialog(props: SshManagementDialogProps): ReactNode {
-  const { t, ssh, sessionId, custodyMode, status, endpoints, remoteMode } = props
+  const { t, ssh, sessionId, custodyMode, status } = props
   const [tab, setTab] = useState<SshDialogTab>(props.initialTab)
   const [view, setView] = useState<SshStateView | undefined>(undefined)
   const [error, setError] = useState<PanelError | undefined>(undefined)
@@ -1136,7 +1111,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const canRequest = sessionId !== undefined || props.fromSettings === true
   const canManage = custodyMode === 'personal' && status?.state === 'ready' && ssh !== undefined && canRequest
   // Change identity during render: an old promise must not win the gap before
-  // the reset effect runs, including personal -> team -> personal transitions.
+  // the reset effect runs, including when SSH becomes unavailable.
   const scope = useMemo(() => ({}), [sessionId, custodyMode, canManage, ssh])
   const currentScope = useRef(scope)
   currentScope.current = scope
@@ -1418,8 +1393,6 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       ? t('ssh.credential.sshConfig', { alias: credential.alias })
       : t(credentialOf(credential.credentialId)?.kind === 'password' ? 'ssh.credential.managedPassword' : 'ssh.credential.managedKey')
 
-  const openMode = (): void => { changeTab('mode') }
-
   const renderUnavailable = (): ReactNode =>
     status === undefined
       ? <p className="mrfw-note">{t('panel.loading')}</p>
@@ -1600,56 +1573,11 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     {saved ? <p className="mrfw-note" role="status">{t('ssh.add.saved')}</p> : null}
   </div>
 
-  const renderDeploymentConnections = (): ReactNode => <div className="mrfw-sshArea">
-    <p className="mrfw-note">
-      {custodyMode === undefined
-        ? t('ssh.add.unknownGuide')
-        : t('ssh.connections.deploymentGuide', { mode: t(`remote.mode.${custodyMode}` as Key) })}
-    </p>
-    <Button variant="outline" size="sm" onClick={openMode}>{t('ssh.add.openMode')}</Button>
-    <section className="mrfw-subsection">
-      <div className="mrfw-sectionTitleRow"><span className="mrfw-sectionTitle">{t('ssh.connections.deploymentList')}</span></div>
-      {endpoints.length === 0 && (props.deploymentConnections?.length ?? 0) === 0 ? <p className="mrfw-note">{t('ssh.connections.emptyDeployment')}</p> : null}
-      {props.deploymentConnections?.map(connection => (
-        <div key={connection.environmentId} className="mrfw-row">
-          <div className="mrfw-rootText">
-            <span className="mrfw-rootName">
-              <span className="mrfw-rootNameText">{connection.displayName ?? connection.environmentId}</span>
-              <Tag tone="neutral" className="mrfw-sshTag">{platformLabel(connection.platform, t)}</Tag>
-            </span>
-            <span className="mrfw-rootPath">{connection.target}</span>
-          </div>
-        </div>
-      ))}
-      {endpoints.map(endpoint => (
-        <div key={`${endpoint.environmentId}/${endpoint.rootId}`} className="mrfw-row">
-          <div className="mrfw-rootText">
-            <span className="mrfw-rootName">
-              <span className="mrfw-rootNameText">{endpoint.displayName ?? endpoint.environmentId}</span>
-              <Tag tone="neutral" className="mrfw-sshTag">{platformLabel(endpoint.platform, t)}</Tag>
-              <Tag tone={endpoint.state === 'registered' ? 'success' : endpoint.state === 'withheld' ? 'warning' : 'outline'} className="mrfw-sshTag">{t(remoteStateKey(endpoint.state))}</Tag>
-            </span>
-            <span className="mrfw-rootPath" title={endpoint.path}>{endpoint.rootId} · {endpoint.path}</span>
-          </div>
-        </div>
-      ))}
-    </section>
-  </div>
-
   const renderAdd = (step: 'connect' | SshEnvironmentView): ReactNode => {
     if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} /><p className="mrfw-note">{t('ssh.loadFailed')}</p></>
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
-    if (custodyMode !== 'personal') {
-      return <div className="mrfw-sshArea">
-        <div className="mrfw-sshGuide">
-          <span className="mrfw-sshStepTitle">{t('ssh.tab.add')}</span>
-          <p className="mrfw-note">{t(addGuideKey(custodyMode))}</p>
-          <Button variant="outline" size="sm" onClick={() => { closeAdd(); changeTab('mode') }}>{t('ssh.add.openMode')}</Button>
-        </div>
-      </div>
-    }
-    if (ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
+    if (custodyMode !== 'personal' || ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
     if (!canRequest) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
     if (view === undefined) return renderLoadState()
     const renderSetup = (created: SshEnvironmentView): ReactNode => {
@@ -1717,17 +1645,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} /><p className="mrfw-note">{t('ssh.loadFailed')}</p></>
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
-    if (custodyMode !== 'personal') {
-      return <div className="mrfw-sshArea">
-        <p className="mrfw-note">
-          {custodyMode === undefined
-            ? t('ssh.add.unknownGuide')
-            : t('ssh.keys.teamGuide', { mode: t(`remote.mode.${custodyMode}` as Key) })}
-        </p>
-        <Button variant="outline" size="sm" onClick={openMode}>{t('ssh.add.openMode')}</Button>
-      </div>
-    }
-    if (ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
+    if (custodyMode !== 'personal' || ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
     if (!canRequest) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
     if (view === undefined) return renderLoadState()
     return <div className="mrfw-sshArea">{renderCredentials()}</div>
@@ -1737,23 +1655,11 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} /><p className="mrfw-note">{t('ssh.loadFailed')}</p></>
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
-    if (custodyMode !== 'personal') return renderDeploymentConnections()
-    if (ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
+    if (custodyMode !== 'personal' || ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
     if (!canRequest) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
     if (view === undefined) return renderLoadState()
     return renderConnections()
   }
-
-  const renderMode = (): ReactNode => <div className="mrfw-sshArea">
-    <p className="mrfw-note">{t('ssh.mode.guide')}</p>
-    {remoteMode === undefined
-      ? <p className="mrfw-note">{t('ssh.mode.unavailable')}</p>
-      : <SshCustodySection control={remoteMode} currentMode={custodyMode} onChanged={props.onChanged} t={t} />}
-  </div>
-
-  const panel = (): ReactNode => tab === 'connections' ? renderConnectionsTab()
-    : tab === 'keys' ? renderKeys()
-      : renderMode()
 
   const panelId = 'mrfw-ssh-panel-' + tab
   const tabId = 'mrfw-ssh-tab-' + tab
@@ -1771,7 +1677,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       <PendingBar active={busy || testing.size > 0} />
       <SshTabStrip value={tab} onChange={changeTab} t={t} />
       <div id={panelId} role="tabpanel" aria-labelledby={tabId} className="mrfw-sshDialogPanel">
-        {panel()}
+        {tab === 'connections' ? renderConnectionsTab() : renderKeys()}
       </div>
     </Modal>
     {addStep !== undefined ? (

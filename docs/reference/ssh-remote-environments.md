@@ -1,18 +1,16 @@
-# SSH 远端环境（个人/团队/加固三档托管）
+# SSH 远端环境（个人模式）
 
 > 实验性、默认关闭。本文件是 ADR-0049 的 Host 侧运行参考；控制面语义（准入、状态机、remote-1 协议）见 [multi-environment-control-plane.md](./multi-environment-control-plane.md)。
 
-## 托管档位
+## 启用条件
 
-`multi-root-remote-tools` 设置的 `mode` 字段决定凭据托管方式。UI 入口在「管理 SSH 远端」对话框的「模式设置」Tab（`src/client/ssh-panel.tsx`，控件见 `src/client/remote-custody.tsx`），可从 Workspace Folders 或插件详情打开。
+当前公开构建只提供个人 SSH。默认组合通过 `multi-root-remote-tools.enabled` 开关启用，默认关闭。启用后，Host 从 `remoteEnvironments.personalPath` 读取连接，从 `remoteEnvironments.credentialRoot` 读取插件托管的凭据；也可引用本机 `~/.ssh/config` 中的别名。个人模式下，本机 DSH Host 持有凭据，同一操作系统账号下的进程可能访问这些凭据。
 
-| 档位 | 凭据 | 部署证明 | 说明 |
-| --- | --- | --- | --- |
-| `personal`（默认） | 用户 `~/.ssh` 别名或插件凭据根 | 无 | Host 进程内直跑官方 SSH 栈，环境在清单内视为 `credentialIsolation: unattested`；不装 profile guard，不拒绝 `danger-full-access`。 |
-| `team` | 部署 broker | 放宽 | `attestBroker(mode: 'team')`：跳过 `confinement-unproven`、`full-access-unrestricted` 与独立写者检查；`chroot-sftp` 目的隔离保留。 |
-| `hardened` | 部署 broker | 全量 | ADR-0048 原路径，全部证明与 profile guard 保留。 |
+### 停用的旧配置
 
-未知或非法的 `mode`/`team` 值使该次读取按 `enabled:false` 处理并记一条警告（fail closed）。`team` 字段（`manifestPath`/`socketPath`/`brokerUid`/`credentialRoot`）只对 team 模式生效并逐项覆盖 registry 行的 `broker.config`；hardened 只读行配置。
+Host 将显式的 `team`、`hardened` 或其他不支持的模式视为停用。旧版配置了部署清单且未显式指定个人模式的 Registry 行、以及仅配置 broker 或 team 参数而未指定模式的工具行，同样保持停用。发布包移除了 SSH broker 入口和安装脚本。Broker 设计留作研发记录，见 [ADR-0049](../decisions/ADR-0049-ssh-custody-modes.md) 和[控制面参考](./multi-environment-control-plane.md)。
+
+如果要沿用早期实验的自定义 profile，请先从该 profile 的 `multi-root-registry` 与 `multi-root-remote-tools` 行中移除旧档位及部署字段（`mode`、`manifestPath`、`team`、`broker`），保留个人连接和凭据路径。重新加载 profile 后，在插件设置中开启个人 SSH，并按[个人 SSH 指南](../guide/user/ssh-remote-environments.md)配置和登记目录。
 
 ## 文件布局与权限
 
@@ -23,7 +21,7 @@
 - 凭据根由 `remoteEnvironments.credentialRoot` 指定，默认 `$DSH_HOME/storages/multi_root_workspace.ssh`。目录必须为当前 uid 所有且权限为 0700，否则返回 `credential-root-unsafe`。内部有 `credentials.json`、`keys/<id>` 与公钥、`secrets/<id>`、生成的 `ssh_config` 与 `known_hosts` 以及 `askpass.sh`。
 - 每次远端 snapshot/list/admit/add/remove 前，`refreshPersonal()` 检查两个文件的保护和内容。有效配置原位发布，保留 owner 的授权域与现有 `remote-1` 连接。后续请求各自携带并校验当期清单摘要。配置损坏、语义非法或保护失效时，控制面进入 `config-invalid`，清空清单和摘要并拒绝远端准入，修复后可重新加载。
 - personal 环境授权身份包含主机名、端口、账号、平台、主机钥、凭据引用（含已安装访问密钥）、Helper 与执行/传输策略。连接新建或身份变化生成新的身份 ID。显示名只影响展示。尚未包含目标和凭据身份的旧 personal 登记升级后变为 `withheld`，须重新登记一次。
-- personal Helper 在目录核验或获准执行时取该绑定的远端目录作为工作区；连接按环境和目录分别缓存。旧 Helper 绑定首次升级会因其清单内容变化而需要重新登记。team/hardened 继续使用部署清单的 Helper 启动路径。
+- personal Helper 在目录核验或获准执行时取该绑定的远端目录作为工作区；连接按环境和目录分别缓存。旧 Helper 绑定首次升级会因其清单内容变化而需要重新登记。
 
 ## RPC 端点与拒绝码
 
@@ -72,9 +70,9 @@ SFTP 使用独立的 SSH 子进程，同样在命令行强制 `StrictHostKeyChec
 - 编辑连接：派生的 `accessKeyId` 由 Host 从已保存记录保留，前端无需回传；仅 environmentId、hostname/port/user、credentialId 与已确认主机指纹均未变化时继承。改变身份后必须重新安装访问密钥，不能通过保存请求移植旧密钥。
 - 密码引导：为该环境生成访问密钥后，以 `SSH_ASKPASS`（凭据根内 0700 脚本，只读取 `DSH_SSH_SECRET_FILE`）+ `SSH_ASKPASS_REQUIRE=force` + `BatchMode=no` 用密码登录一次，把公钥追加到远端 `authorized_keys`；此后连接一律走访问密钥。
 
-## 模式切换
+## 实时开关
 
-切换 `mode` 走 `configureRemote`，按新档位重建清单来源、控制面和工具子树。停用时先卸载子树并以取消信号收束在飞操作，再关闭远端域与 IPC。team/hardened 根据控制面状态、清单摘要和生效的 broker 配置重新证明和挂载。
+启用通过 `configureRemote` 加载个人连接和工作区目录绑定。停用时先卸载工具子树并以取消信号收束在飞操作，再关闭远端域与 IPC。
 
 personal 子树首次等到控制面就绪再挂载，常规配置保存更新现有管理器。环境授权身份改变时只废弃该环境的 SFTP 与 Helper 代次。绑定编辑交由准入指纹失效，已无绑定引用的目录 Helper 在撤权复核后回收。其他环境和仍有效的目录可继续使用已有连接。
 
@@ -89,7 +87,7 @@ Registry 的 owner 是唯一打开远程域和 `remote-1` 监听的 Host。若�
 GUI 入口有两处：
 
 - **插件详情设置卡**：开启 SSH 远端环境后，第一行显示「SSH 远端」和「管理」按钮，进入与工作区面板共用的管理对话框。实验开关仍负责启用风险确认；开关关闭时隐藏该设置入口。
-- **Workspace Folders 的「远端工作目录」**（`src/client/WorkspaceFoldersAction.tsx`）与「主要工作目录」「附属工作目录」并列，标题行同时提供「管理 SSH 远端…」与个人模式的「管理远端 Root 绑定」。远端目录列表与主要/附属工作目录共用 `WorkspaceRow`。首行依次显示末级文件夹名、SSH 环境名标签、当前会话的有效能力。第二行为可复制地址，personal 模式为 `ssh://user@host:port/path`，部署清单为 `ssh://user@host/path`。IPv6 主机加方括号，路径按 URI 规则转义。行尾「…」可登记或经确认移除授权。personal 模式可在该菜单中修改读取、写入、执行及本地传输对端，保存沿用绑定的 CAS 校验。对已登记目录修改能力后，通过同一菜单重新登记。解除绑定通过绑定对话框完成。
+- **Workspace Folders 的「远端工作目录」**（`src/client/WorkspaceFoldersAction.tsx`）与「主要工作目录」「附属工作目录」并列，标题行同时提供「管理 SSH 远端…」与个人模式的「管理远端 Root 绑定」。远端目录列表与主要/附属工作目录共用 `WorkspaceRow`。首行依次显示末级文件夹名、SSH 环境名标签、当前会话的有效能力。第二行为可复制地址，使用 `ssh://user@host:port/path`。IPv6 主机加方括号，路径按 URI 规则转义。行尾「…」可登记或经确认移除授权。personal 模式可在该菜单中修改读取、写入、执行及本地传输对端，保存沿用绑定的 CAS 校验。对已登记目录修改能力后，通过同一菜单重新登记。解除绑定通过绑定对话框完成。
 
 ### SSH 远端管理对话框
 
@@ -104,11 +102,10 @@ GUI 入口有两处：
 1. **连接**。选择本机 ssh-config 条目或插件托管凭据，填写显示名、平台与目标。本机来源可从 `sshConfigAliases` 选择，托管来源可从嵌套的凭据管理对话框添加凭据。确认主机密钥后，面板按显示名生成环境 ID。显示名为空、生成的 ID 不符合命名规则或已被占用时，使用未被占用的 8 位十六进制短 UUID。保存连接后进入第二步。编辑连接时保留原 ID。
 2. **连接设置**。可以检测远端 Node、安装 Helper，并设置连接级的命令执行及文件传输能力。托管密码先安装访问密钥。托管连接若尚未链接 `~/.ssh/config`，此处提供链接入口。Helper 安装成功后即可勾选「允许命令执行」，点「完成」保存能力设置并回到「已有连接」。跳过此步或关闭对话框时，已保存的连接和已安装的 Helper 保留。工作区目录仍通过 Workspace Folders 的绑定对话框选择，执行权限需要在对应 Root 上单独勾选并登记。
 
-SSH 管理对话框包含三个页签。
+SSH 管理对话框包含两个页签。
 
-1. **已有连接** 的个人模式环境列表复用工作区目录行。环境名称、平台、地址和就绪状态在左侧，测试连接、编辑、删除和当前可用的设置操作在右侧横排为带悬停提示的图标。窄窗口中整组图标移到下一行并右对齐。安装 Helper 后，该环境的安装入口随即隐藏。连接行使用同一 SSH URI 的目标部分。连接编辑可设置命令执行和文件传输的可用性，每条绑定再单独选择权限。仅修改显示名等元数据可直接保存，修改连接身份需重新扫描。删除仍被绑定的连接会返回 `environment-in-use`。team/hardened 显示部署清单的只读列表。
-2. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管，GUI 不读取、不创建。
-3. **模式设置**：复用 `src/client/remote-custody.tsx` 的三档单选、team 四个 broker 字段与降级风险确认，写入同一个 `multi-root-remote-tools` form 与 CAS revision。档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源）。
+1. **已有连接** 的个人模式环境列表复用工作区目录行。环境名称、平台、地址和就绪状态在左侧，测试连接、编辑、删除和当前可用的设置操作在右侧横排为带悬停提示的图标。窄窗口中整组图标移到下一行并右对齐。安装 Helper 后，该环境的安装入口随即隐藏。连接行使用同一 SSH URI 的目标部分。连接编辑可设置命令执行和文件传输的可用性，每条绑定再单独选择权限。仅修改显示名等元数据可直接保存，修改连接身份需重新扫描。删除仍被绑定的连接会返回 `environment-in-use`。
+2. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。
 
 ### Workspace Root 绑定对话框
 

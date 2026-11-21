@@ -77,7 +77,6 @@ const hostConfig: UserConfig = {
     'workspace-files': 'src/workspace-files.ts',
     'process-fence': 'src/process-fence.ts',
     'windows-runner': 'src/windows-runner.ts',
-    'remote-broker': 'src/remote/broker/main.ts',
     'remote-tools': 'src/remote/tools.ts',
   },
   tsconfig: 'tsconfig.host.json',

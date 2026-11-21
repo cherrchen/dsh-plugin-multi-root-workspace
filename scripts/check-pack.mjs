@@ -45,8 +45,6 @@ const REQUIRED = [
   'package/lib/index.js',
   'package/lib/client.js',
   'package/lib/windows-runner.js',
-  'package/lib/remote-broker.js',
-  'package/scripts/ssh-broker/install.sh',
   'package/scripts/windows-broker/install.ps1',
   'package/scripts/windows-broker/service.cs',
   'package/scripts/windows-broker/rights.cs',
@@ -176,6 +174,10 @@ function main() {
     for (const name of names) console.log(`  ${name}`)
 
     for (const required of REQUIRED) assert(members.has(required), `missing required member ${required}`)
+    for (const name of names) {
+      assert(!name.startsWith('package/lib/remote-broker.js') && !name.startsWith('package/scripts/ssh-broker/')
+        && !name.startsWith('package/lib/types/remote/broker/'), `SSH broker artifact must stay out of the personal-only bundle: ${name}`)
+    }
 
     const manifestEntry = members.get('package/package.json')
     if (manifestEntry === undefined) {
