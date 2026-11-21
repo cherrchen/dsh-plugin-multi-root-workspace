@@ -75,18 +75,22 @@ export function IconButton(props: {
   pending?: boolean
   loading?: boolean
   pressed?: boolean
+  expanded?: boolean
+  className?: string
   hint?: string
   variant?: ActionVariant
 }): ReactNode {
   const variant = props.variant ?? 'ghost'
   const loading = props.loading === true
+  const classes = ['mrfw-btn mrfw-iconBtn', VARIANT_CLASS[variant], props.className].filter(Boolean).join(' ')
   return (
     <button
       type="button"
-      className={`mrfw-btn mrfw-iconBtn ${VARIANT_CLASS[variant]}`}
+      className={classes}
       title={props.hint ?? props.label}
       aria-label={props.label}
       aria-pressed={props.pressed}
+      aria-expanded={props.expanded}
       onClick={props.pending === true || loading ? undefined : props.onClick}
       disabled={loading ? false : props.disabled === true}
       aria-disabled={props.disabled === true || props.pending === true || loading || undefined}

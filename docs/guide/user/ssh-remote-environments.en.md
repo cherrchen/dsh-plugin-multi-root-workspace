@@ -34,15 +34,15 @@ Personal mode is configured entirely in the GUI and requires no root privileges,
 - **Option A: Use an existing `~/.ssh/config` host alias**
   - Ensure your `~/.ssh/config` has a `Host <alias>` block (`HostName`, `User`, `IdentityFile`, etc.) and that your `~/.ssh/known_hosts` contains **exactly one** matching host key entry.
 - **Option B: Use plugin-managed credentials**
-  1. In **SSH remotes**, open the **SSH keys** tab (or click **Manage credentials** while adding a connection).
-  2. Create a credential using one of three forms:
-     - **Generate key**: enter a label; the plugin generates an ed25519 keypair. Click the copy-public-key icon on the row and append it to `~/.ssh/authorized_keys` on the remote host.
+  1. In **SSH settings**, select **SSH keys** in the sidebar (or click **Manage credentials** while adding a connection).
+  2. Click **Add credential** and choose a method:
+     - **Generate key**: enter a label; the plugin generates an ed25519 keypair. Click the **Copy public key** icon on the credential card and append it to `~/.ssh/authorized_keys` on the remote host.
      - **Import private key**: enter a label and paste the private key (provide the passphrase if encrypted; it is stripped on import and stored mode `0600` inside the credential root). Ensure the corresponding public key is authorized on the remote host.
      - **Save password**: enter a label and password. In the next step, the plugin logs in once with the password to append a per-environment access key to the remote `authorized_keys`, after which all connections use key auth.
 
 ### Step 2: Add a connection
 
-1. Open the **Connections** tab and click **Add connection**.
+1. Select **Remote connections** in the sidebar and click **Add connection** below the list.
 2. **Step 1 (Connection and host key)**:
    - Choose **SSH host alias** or **Managed credential**, fill in display name, remote platform (`Linux` / `macOS`), and `user@hostname:port` (when using an alias, host/port/user are resolved automatically by `ssh -G` during scanning).
    - Click **Scan and test connection**, inspect the fingerprint in the confirmation modal, and click **Confirm and save**.
@@ -77,7 +77,7 @@ Turn off **SSH remote environments** in the plugin settings to shut down the rem
 
 - **`owner-without-remote-protocol`**: another DSH instance without the SSH remote plane enabled (for example, an unpatched Desktop instance) holds the `$DSH_HOME` storage lease. Quit that instance and refresh.
 - **`endpoint-unverifiable`** — Check that the Host uses a supported DSH release and has all four matching SSH packages installed.
-- **`ssh-config-not-linked`** (Personal mode): a managed credential environment exists, but the generated config is not yet linked into `~/.ssh/config`. Click **Link ~/.ssh/config** in the **Connections** tab.
+- **`ssh-config-not-linked`** (Personal mode): a managed credential environment exists, but the generated config is not yet linked into `~/.ssh/config`. Click **Link ~/.ssh/config** under **Remote connections**.
 - **`unknown` result with `reconcileId`**: connection dropped after a remote command started or after sending a file publish request. Tools never auto-retry to avoid duplicate execution or overwrites; reconcile on the remote host or in the Broker audit log using `reconcileId`.
 
 For protocol schemas, full refusal codes, and architectural invariants, see the [SSH remote environments reference](../../reference/ssh-remote-environments.md) and the [control plane reference](../../reference/multi-environment-control-plane.md).

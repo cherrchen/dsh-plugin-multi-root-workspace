@@ -273,7 +273,8 @@ describe('personal SSH remote-environments settings', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
     expect(await within(dialog).findByRole('button', { name: 'ssh.tab.add' })).toBeTruthy()
-    expect(within(dialog).queryByRole('tab', { name: 'ssh.tab.mode' })).toBeNull()
+    const navigation = within(dialog).getByRole('navigation', { name: 'ssh.tab.listLabel' })
+    expect(within(navigation).getAllByRole('button').map(node => node.textContent)).toEqual(['ssh.tab.connections', 'ssh.tab.keys'])
     expect(call.mock.calls.map(args => args.slice(0, 3))).toEqual(expect.arrayContaining([
       [SSH_SETTINGS_CHANNEL, 'status', {}], [SSH_SETTINGS_CHANNEL, 'sshState', {}],
     ]))

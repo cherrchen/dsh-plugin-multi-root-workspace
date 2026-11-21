@@ -34,15 +34,15 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
 - **方式 A：使用本机 `~/.ssh/config` 主机别名**
   - 确保本机 `~/.ssh/config` 中已配置好 `Host <别名>`（包含 `HostName`、`User`、`IdentityFile` 等），且目标主机钥已在你的 `~/.ssh/known_hosts` 中存在**唯一**匹配条目。
 - **方式 B：使用插件托管凭据**
-  1. 在「SSH 远端管理」对话框切到 **SSH Key** 页签（或在添加连接时点「管理凭据」）。
-  2. 选择以下三种方式之一创建凭据：
-     - **生成密钥**：输入名称，插件生成 ed25519 密钥对。创建后点击列表右侧的复制公钥图标，将其追加到远端主机的 `~/.ssh/authorized_keys`。
+  1. 在「SSH 设置」左侧选择 **SSH Key**（或在添加连接时点「管理凭据」）。
+  2. 点击 **添加凭据**，选择一种方式：
+     - **生成密钥**：输入名称，插件生成 ed25519 密钥对。创建后点击凭据卡片右侧的 **复制公钥** 图标，将其追加到远端主机的 `~/.ssh/authorized_keys`。
      - **导入私钥**：输入名称并粘贴私钥（加密私钥需同时提供口令，导入时会自动剥离口令并以 0600 权限保存在本机凭据根），同样确保公钥已授权给远端主机。
      - **保存密码**：输入名称和密码。保存后会在后续步骤中用密码登录一次，自动在远端安装专用访问密钥（`authorized_keys`），之后连接全部改为密钥认证。
 
 ### 第 2 步：添加连接
 
-1. 切到 **已有连接** 页签，点击 **添加连接**。
+1. 在左侧选择 **远端连接**，点击列表底部的 **添加连接**。
 2. **第 1 步（连接与主机密钥）**：
    - 凭据来源选择「本机 SSH 主机别名」或「托管凭据」，填写显示名、远端平台（Linux / macOS）及 `用户名@主机名:端口`（使用别名时端口和目标会在扫描时从 `ssh -G` 自动解析）。
    - 点击 **扫描并测试连接**，在弹出的主机密钥确认框中核对指纹后点击 **确认并保存**。
@@ -77,7 +77,7 @@ English: [ssh-remote-environments.en.md](./ssh-remote-environments.en.md)
 
 - **`owner-without-remote-protocol` / 面板提示另一实例持有存储**：另一个未开启 SSH 远端功能的 DSH 实例（例如未启用该插件的 Desktop 端）正持有 `$DSH_HOME` 的存储锁。退出那个实例后再刷新。
 - **`endpoint-unverifiable`** — 确认 Host 使用受支持的 DSH 版本，并已安装四个版本匹配的 SSH 可选包。
-- **`ssh-config-not-linked`**（个人模式）：存在托管凭据的环境但尚未把插件生成的配置链接进 `~/.ssh/config`，在「已有连接」页签点击 **链接到 ~/.ssh/config**。
+- **`ssh-config-not-linked`**（个人模式）：存在托管凭据的环境但尚未把插件生成的配置链接进 `~/.ssh/config`，在「远端连接」中点击 **链接到 ~/.ssh/config**。
 - **`unknown` 返回与 `reconcileId`**：远端命令启动后连接断开或文件发布应答丢失时，工具不会自动重试（避免重复执行或覆盖文件），请凭返回的 `reconcileId` 到远端对账后再决定后续操作。
 
 关于协议字段、全部错误码与架构细节，参见技术参考 [SSH 远端环境参考](../../reference/ssh-remote-environments.md) 与 [多执行环境控制面参考](../../reference/multi-environment-control-plane.md)。
