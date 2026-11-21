@@ -327,6 +327,8 @@ export const fr = {
   'ssh.add.noClient': 'Ce Host n’expose aucune interface de gestion SSH personnelle ; les connexions ne peuvent pas être enregistrées depuis l’interface graphique.',
   'ssh.add.reset': 'Réinitialiser',
   'ssh.add.saved': 'Enregistré.',
+  'ssh.add.done': 'Connexion ajoutée',
+  'ssh.add.doneHint': 'La connexion est enregistrée et disponible dans l’onglet Connexions et dans l’assistant d’ajout de répertoire distant pour la liaison.',
   'ssh.connections.personalGuide': "Gérez les connexions enregistrées, testez SSH et installez l’assistant distant.",
   'ssh.connections.registerHint': 'Une fois toutes les étapes terminées, enregistrez ci-dessous ou dans la liste des environnements distants du panneau « Dossiers de l’espace de travail ».',
   'ssh.connections.bindingsGuide': 'Les liaisons associent un répertoire distant à une racine de l’espace de travail de ce projet ; l’autre extrémité d’un transfert local doit être la racine principale ou l’aliasId d’une racine disponible.',

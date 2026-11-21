@@ -327,6 +327,8 @@ export const de = {
   'ssh.add.noClient': 'Dieser Host bietet keine Schnittstelle zur persönlichen SSH-Verwaltung; Verbindungen lassen sich daher nicht in der GUI speichern.',
   'ssh.add.reset': 'Leeren',
   'ssh.add.saved': 'Gespeichert.',
+  'ssh.add.done': 'Verbindung hinzugefügt',
+  'ssh.add.doneHint': 'Die Verbindung ist gespeichert und steht im Verbindungen-Tab sowie im Assistenten „Remote-Verzeichnis hinzufügen“ zum Binden bereit.',
   'ssh.connections.personalGuide': "Verwalte gespeicherte Verbindungen, teste SSH und installiere den Helfer.",
   'ssh.connections.registerHint': 'Nachdem alle Schritte der Bereitschaftskette abgeschlossen sind, lässt sich die Bindung unten oder im Panel „Arbeitsbereichsordner“ registrieren.',
   'ssh.connections.bindingsGuide': 'Bindungen ordnen ein Remote-Verzeichnis einer Arbeitsbereichs-Wurzel dieses Projekts zu; die Gegenseite einer lokalen Übertragung darf nur die primäre Wurzel oder eine verfügbare aliasId einer zusätzlichen Wurzel sein.',

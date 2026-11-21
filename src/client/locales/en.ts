@@ -327,6 +327,8 @@ export const en = {
   'ssh.add.noClient': 'This host exposes no personal SSH management API, so connections cannot be saved from the GUI.',
   'ssh.add.reset': 'Reset',
   'ssh.add.saved': 'Saved.',
+  'ssh.add.done': 'Connection added',
+  'ssh.add.doneHint': 'The connection is saved and is available in the connections tab and the add remote directory wizard for binding remote directories.',
   'ssh.connections.personalGuide': "Manage saved connections, test SSH, and install the Helper.",
   'ssh.connections.registerHint': 'Once every step is done, register below or in the Workspace Folders remote list.',
   'ssh.connections.bindingsGuide': 'Bindings map a remote directory to a workspace root of this project; a local transfer peer must be primary or an available root aliasId.',

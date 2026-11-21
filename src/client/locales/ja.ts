@@ -327,6 +327,8 @@ export const ja = {
   'ssh.add.noClient': 'この Host は個人 SSH 管理 API を提供していないため、GUI から接続を保存できません。',
   'ssh.add.reset': 'クリア',
   'ssh.add.saved': '保存しました。',
+  'ssh.add.done': '接続を追加しました',
+  'ssh.add.doneHint': '接続は保存され、接続タブと「リモートディレクトリを追加」ウィザードでバインドに使用できます。',
   'ssh.connections.personalGuide': "保存済みの接続の管理、SSH のテスト、Helper のインストールができます。",
   'ssh.connections.registerHint': '準備手順がすべて完了したら、下のバインディング行またはワークスペースパネルで登録できます。',
   'ssh.connections.bindingsGuide': 'バインディングはリモートディレクトリをこのプロジェクトのワークスペースルートにマッピングします。ローカル転送の相手はプライマリまたは利用可能な追加ルートの aliasId に限られます。',

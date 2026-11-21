@@ -326,6 +326,8 @@ export const zh = {
   'ssh.add.noClient': '此宿主没有提供个人 SSH 管理接口，无法在 GUI 中保存连接。',
   'ssh.add.reset': '清空',
   'ssh.add.saved': '已保存。',
+  'ssh.add.done': '连接已添加',
+  'ssh.add.doneHint': '连接已保存，现在可在“连接”标签页与“添加远程工作目录”向导中用于绑定远程目录。',
   'ssh.connections.personalGuide': "在这里管理连接、测试 SSH 和安装 Helper。",
   'ssh.connections.registerHint': '就绪链路全部完成后，可在下方绑定行或工作区面板中登记。',
   'ssh.connections.bindingsGuide': '绑定把远端目录映射到本项目的工作区根；本地传输对端只能是 primary 或可用附加根的 aliasId。',

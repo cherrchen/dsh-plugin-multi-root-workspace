@@ -327,6 +327,8 @@ export const pt = {
   'ssh.add.noClient': 'Este host não expõe uma API de gerenciamento SSH pessoal, então as conexões não podem ser salvas pela GUI.',
   'ssh.add.reset': 'Limpar',
   'ssh.add.saved': 'Salvo.',
+  'ssh.add.done': 'Conexão adicionada',
+  'ssh.add.doneHint': 'A conexão foi salva e está disponível na aba de conexões e no assistente de adicionar diretório remoto para vinculação.',
   'ssh.connections.personalGuide': "Gerencie as conexões salvas, teste o SSH e instale o auxiliar remoto.",
   'ssh.connections.registerHint': 'Depois de concluir todas as etapas, registre abaixo ou na lista de espaços de trabalho remotos do painel Pastas do espaço de trabalho.',
   'ssh.connections.bindingsGuide': 'Os vínculos mapeiam um diretório remoto para uma raiz do espaço de trabalho deste projeto; a outra ponta de uma transferência local precisa ser primary ou o aliasId de uma raiz adicional disponível.',

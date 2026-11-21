@@ -20,7 +20,8 @@ import { CredentialsPanel, platformLabel, type CredentialCreateKind } from '../s
 import { PanelError } from '../panel-client.ts'
 import { ErrorToast, PanelErrorToast } from '../error-toast.tsx'
 import { PendingBar, StatusLine } from '../pending.tsx'
-import { ChecklistRow, ChoiceCard, WizardActions, WizardCheckbox, WizardField, WizardPicker, WizardShell } from './kit.tsx'
+import { ChoiceCard, WizardActions, WizardCheckbox, WizardField, WizardShell } from './kit.tsx'
+import { ConnectForm, EnvironmentSetup, HostKeyPick, nodeCheckOf, type NodeCheck } from './env-parts.tsx'
 import {
   blankEditor, connectionReady, draftFieldError, editorOf, environmentDraftOf,
   newEnvironmentId, remotePath, togglePeer,
@@ -164,9 +165,6 @@ export interface RemoteWizardProps {
   readonly t: Translate
 }
 
-/** The remote node major helper install needs — v20 already fails it in practice. */
-const REMOTE_NODE_MIN_MAJOR = 24
-
 /** The three-step add-remote flow. */
 export function RemoteWizard(props: RemoteWizardProps): ReactNode {
   const { ssh, remotes, sessionId, t } = props
@@ -185,7 +183,7 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
   const [fingerprint, setFingerprint] = useState<string | undefined>(undefined)
   const [capExec, setCapExec] = useState(false)
   const [capTransfer, setCapTransfer] = useState(false)
-  const [nodeCheck, setNodeCheck] = useState<{ kind: 'ok' | 'missing' | 'old', version: string | undefined } | undefined>(undefined)
+  const [nodeCheck, setNodeCheck] = useState<NodeCheck | undefined>(undefined)
   const [testResult, setTestResult] = useState<string | undefined>(undefined)
   const [credsOpen, setCredsOpen] = useState(false)
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
@@ -343,15 +341,9 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
       const result = await ssh.environmentTest(sessionId, selected.environmentId, signal)
       if (signal.aborted) return
       setTestResult(result.nodePath ?? 'ok')
-      // An unparsable version still counts as "node found".
-      const major = Number.parseInt(result.nodeVersion?.replace(/^v/, '').split('.')[0] ?? '', 10)
-      const tooOld = result.nodePath !== undefined && !Number.isNaN(major) && major < REMOTE_NODE_MIN_MAJOR
-      setNodeCheck(result.nodePath === undefined
-        ? { kind: 'missing', version: undefined }
-        : tooOld
-          ? { kind: 'old', version: result.nodeVersion }
-          : { kind: 'ok', version: result.nodeVersion })
-      if (tooOld) setError(new PanelError('node-too-old', result.nodeVersion ?? ''))
+      const check = nodeCheckOf(result)
+      setNodeCheck(check)
+      if (check.kind === 'old') setError(new PanelError('node-too-old', check.version ?? ''))
     } catch (cause) {
       if (!signal.aborted) {
         setTestResult(undefined)
@@ -503,18 +495,8 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
             onChange={next => setDraft(next)}
             onManageCredentials={() => setCredsOpen(true)} />
           {envPane === 'keys' && scan !== undefined ? (
-            <div className="mrfw-wizKeys" role="radiogroup" aria-label={t('ssh.scanConfirmTitle')}>
-              <span className="mrfw-wizFieldLabel">{t('ssh.scanPick')}</span>
-              {scan.keys.length === 0 ? <p className="mrfw-note">{t('ssh.scanNoKeys')}</p> : scan.keys.map(key => (
-                <ChoiceCard key={key.fingerprint}
-                  title={key.type}
-                  subtitle={<span className="mrfw-wizFingerprint">{key.fingerprint}</span>}
-                  trailing={fingerprint === key.fingerprint ? <CheckMark /> : null}
-                  selected={fingerprint === key.fingerprint}
-                  disabled={busy}
-                  onSelect={() => setFingerprint(key.fingerprint)} />
-              ))}
-            </div>
+            <HostKeyPick keys={scan.keys} fingerprint={fingerprint} busy={busy} t={t}
+              onPick={setFingerprint} />
           ) : null}
         </div>
       )
@@ -549,52 +531,24 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
           disabled={busy}
           onSelect={() => { setEnvPane('create'); setAttempted(new Set()) }} />
         {selected !== undefined ? (
-          <section className="mrfw-wizSection" aria-label={t('wizard.readiness')}>
-            <span className="mrfw-wizFieldLabel">{t('wizard.readiness')}</span>
-            <ChecklistRow
-              state={pending === 'helper' ? 'ongoing' : selected.helper !== null ? 'done' : 'warning'}
-              label={selected.helper !== null ? t('ssh.helperInstalled') : t('ssh.helperMissing')}
-              detail={nodeCheck === undefined || nodeCheck.kind === 'old' ? undefined
-                : nodeCheck.kind === 'missing' ? t('ssh.node.missing')
-                  : t('ssh.node.ok', { version: nodeCheck.version ?? '?' })}
-              action={selected.helper === null ? (
-                <span className="mrfw-sshRowActions">
-                  <Button variant="outline" size="sm" disabled={busy} loading={pending === 'test'}
-                    onClick={() => { void testConnection() }}>{t('ssh.add.detectNode')}</Button>
-                  <Button variant="primary" size="sm" disabled={busy} loading={pending === 'helper'}
-                    onClick={() => { void installHelper() }}>{t('ssh.helperInstall')}</Button>
-                </span>
-              ) : undefined} />
-            {needsAccessKey === true ? (
-              <ChecklistRow
-                state={pending === 'accessKey' ? 'ongoing' : 'warning'}
-                label={t('ssh.accessKey')}
-                action={<Button variant="outline" size="sm" disabled={busy} loading={pending === 'accessKey'}
-                  onClick={() => { void installAccessKey() }}>{t('ssh.accessKeyInstall')}</Button>} />
-            ) : null}
-            {needsLink === true ? (
-              <ChecklistRow
-                state={pending === 'link' ? 'ongoing' : 'warning'}
-                label={t('ssh.linkNow')}
-                detail={t('ssh.linkBanner')}
-                action={<Button variant="outline" size="sm" disabled={busy} loading={pending === 'link'}
-                  onClick={() => { void linkConfig() }}>{t('ssh.linkNow')}</Button>} />
-            ) : null}
-            <ChecklistRow
-              state={pending === 'test' ? 'ongoing' : testResult === undefined ? 'idle' : 'done'}
-              label={t('ssh.envTest')}
-              detail={testResult === undefined ? undefined : testResult}
-              action={<Button variant="outline" size="sm" disabled={busy} loading={pending === 'test'}
-                onClick={() => { void testConnection() }}>{t('ssh.envTest')}</Button>} />
-            <span className="mrfw-wizFieldLabel">{t('wizard.capabilities')}</span>
-            <WizardCheckbox checked={capExec}
-              disabled={busy || (selected.helper === null && !capExec)}
-              hint={selected.helper === null && !capExec ? t('ssh.field.allowExecHelper') : undefined}
-              label={t('ssh.field.allowExec')}
-              onChange={setCapExec} />
-            <WizardCheckbox checked={capTransfer} disabled={busy} label={t('ssh.field.allowTransfer')}
-              onChange={setCapTransfer} />
-          </section>
+          <EnvironmentSetup
+            environment={selected}
+            needsAccessKey={needsAccessKey === true}
+            needsLink={needsLink === true}
+            pending={pending === 'helper' || pending === 'accessKey' || pending === 'link' ? pending : undefined}
+            detecting={pending === 'test'}
+            busy={busy}
+            nodeCheck={nodeCheck}
+            testResult={testResult}
+            allowExec={capExec}
+            allowTransfer={capTransfer}
+            t={t}
+            onDetect={() => { void testConnection() }}
+            onInstallHelper={() => { void installHelper() }}
+            onInstallAccessKey={() => { void installAccessKey() }}
+            onLink={() => { void linkConfig() }}
+            onExec={setCapExec}
+            onTransfer={setCapTransfer} />
         ) : null}
       </div>
     )
@@ -728,115 +682,4 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
       </Modal>
     ) : null}
   </>
-}
-
-/** The create-connection form rendered inside the environment step. */
-function ConnectForm(props: {
-  readonly draft: EditorDraft
-  readonly credentials: readonly CredentialPublicView[]
-  readonly aliases: readonly string[]
-  readonly busy: boolean
-  readonly t: Translate
-  readonly errorFor: (field: ConnectField) => string | undefined
-  readonly onChange: (draft: EditorDraft) => void
-  readonly onManageCredentials: () => void
-}): ReactNode {
-  const { draft, t, busy } = props
-  const update = (partial: Partial<EditorDraft>): void => { props.onChange({ ...draft, ...partial }) }
-  const invalid = (field: ConnectField): boolean => props.errorFor(field) !== undefined
-  const credentials = props.credentials.filter(credential => credential.purpose !== 'access-key')
-  return (
-    <div className="mrfw-wizStack">
-      <WizardField label={t('ssh.field.displayName')}>
-        <Input className="mrfw-sshInput" aria-label={t('ssh.field.displayName')} placeholder={t('ssh.field.displayName')}
-          value={draft.displayName} disabled={busy}
-          onChange={event => update({ displayName: event.currentTarget.value })} />
-      </WizardField>
-      <WizardField label={t('ssh.field.credentialSource')} hint={t('ssh.field.credentialHint')}>
-        <WizardPicker label={t('ssh.field.credentialSource')} value={draft.credentialSource} disabled={busy}
-          items={[
-            { id: 'managed', label: t('ssh.field.managed') },
-            { id: 'alias', label: t('ssh.field.alias') },
-          ]}
-          onChange={credentialSource => update({ credentialSource })} />
-      </WizardField>
-      {draft.credentialSource === 'alias' ? (
-        <WizardField label={t('ssh.field.alias')} invalid={invalid('alias')}
-          hint={invalid('alias') ? props.errorFor('alias') : t('ssh.field.aliasHint')}>
-          <AliasInput value={draft.alias} aliases={props.aliases} busy={busy} t={t}
-            onChange={alias => update({ alias })} />
-        </WizardField>
-      ) : (
-        <WizardField label={t('ssh.field.managed')} invalid={invalid('credentialId')}
-          hint={invalid('credentialId') ? props.errorFor('credentialId')
-            : credentials.length === 0 ? t('ssh.add.noCredentials') : t('ssh.field.credentialIdHint')}>
-          <div className="mrfw-sshPathBar">
-            <WizardPicker label={t('ssh.field.managed')} value={draft.credentialId} disabled={busy}
-              invalid={invalid('credentialId')}
-              items={credentials.map(credential => ({ id: credential.id, label: credential.label }))}
-              onChange={credentialId => update({ credentialId })} />
-            <Button variant="outline" size="sm" disabled={busy} onClick={props.onManageCredentials}>{t('ssh.credentialManage')}</Button>
-          </div>
-        </WizardField>
-      )}
-      {/* The endpoint in its own ssh-target shape: user @ host : port on one
-          line, each input keeping its own label and validation. */}
-      <div className="mrfw-wizTargetRow">
-        <WizardField label={t('ssh.field.user')} className="mrfw-wizTargetUser"
-          invalid={invalid('user')} hint={invalid('user') ? props.errorFor('user') : undefined}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.user')} placeholder="deploy"
-            value={draft.user} disabled={busy || draft.credentialSource === 'alias'}
-            onChange={event => update({ user: event.currentTarget.value })} />
-        </WizardField>
-        <span className="mrfw-wizTargetSep" aria-hidden>@</span>
-        <WizardField label={t('ssh.field.hostname')} className="mrfw-wizTargetHost"
-          invalid={invalid('hostname')} hint={invalid('hostname') ? props.errorFor('hostname') : undefined}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.hostname')} placeholder="host.example.com"
-            value={draft.hostname} disabled={busy || draft.credentialSource === 'alias'}
-            onChange={event => update({ hostname: event.currentTarget.value })} />
-        </WizardField>
-        <span className="mrfw-wizTargetSep" aria-hidden>:</span>
-        <WizardField label={t('ssh.field.port')} className="mrfw-wizTargetPort"
-          invalid={invalid('port')} hint={invalid('port') ? props.errorFor('port') : undefined}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.field.port')} placeholder="22"
-            value={draft.port} disabled={busy || draft.credentialSource === 'alias'}
-            onChange={event => update({ port: event.currentTarget.value })} />
-        </WizardField>
-      </div>
-      <WizardField label={t('ssh.field.platform')} hint={t('ssh.field.platformHint')}>
-        <WizardPicker label={t('ssh.field.platform')} value={draft.platform} disabled={busy}
-          items={[
-            { id: 'linux', label: t('ssh.platform.linux') },
-            { id: 'darwin', label: t('ssh.platform.darwin') },
-          ]}
-          onChange={platform => update({ platform })} />
-      </WizardField>
-      {draft.credentialSource === 'alias' ? (
-        <p className="mrfw-note">{t('ssh.add.aliasResolvedNote', { alias: draft.alias.trim() || '…' })}</p>
-      ) : null}
-    </div>
-  )
-}
-
-/** The alias field with a suggestion menu of local Host entries. */
-function AliasInput(props: {
-  readonly value: string
-  readonly aliases: readonly string[]
-  readonly busy: boolean
-  readonly t: Translate
-  readonly onChange: (alias: string) => void
-}): ReactNode {
-  const { t } = props
-  return (
-    <div className="mrfw-sshPathBar">
-      <Input className="mrfw-sshInput" aria-label={t('ssh.field.alias')} placeholder={t('ssh.field.alias')}
-        value={props.value} disabled={props.busy}
-        onChange={event => props.onChange(event.currentTarget.value)} />
-      {props.aliases.length === 0 ? null : (
-        <WizardPicker iconOnly label={t('ssh.field.pickAlias')} value={props.value} disabled={props.busy}
-          items={props.aliases.map(alias => ({ id: alias, label: alias }))}
-          onChange={props.onChange} />
-      )}
-    </div>
-  )
 }

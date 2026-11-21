@@ -2300,8 +2300,7 @@ button.mrfw-choice:hover:not(:disabled) {
   gap: 10px;
 }
 
-.mrfw-sshDialog,
-.mrfw-sshAddDialog {
+.mrfw-sshDialog {
   width: min(760px, 100%);
   max-height: calc(100vh - 48px);
 }
@@ -2717,15 +2716,6 @@ button.mrfw-choice:hover:not(:disabled) {
   border-radius: 8px;
 }
 
-.mrfw-sshWizardSteps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .mrfw-sshEdit {
   display: flex;
   flex-direction: column;
@@ -2746,28 +2736,6 @@ button.mrfw-choice:hover:not(:disabled) {
   gap: 10px 12px;
 }
 
-/* Align the source, credential and manage controls along the bottom of the row. */
-.mrfw-sshCredentialRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.mrfw-sshCredentialSource {
-  flex: 0 1 200px;
-  min-width: 160px;
-}
-
-.mrfw-sshCredentialPicker {
-  flex: 1 1 260px;
-  min-width: 0;
-}
-
-.mrfw-sshCredentialManage {
-  flex: none;
-}
-
 .mrfw-sshField {
   display: flex;
   flex-direction: column;
@@ -2785,28 +2753,6 @@ button.mrfw-choice:hover:not(:disabled) {
 
 .mrfw-sshFieldInvalid .mrfw-sshPickerTrigger {
   --dsh-button-outline-color: var(--dsw-alias-state-error-primary);
-}
-
-.mrfw-sshErrors {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  border: 0.5px solid var(--dsw-alias-state-error-primary);
-  border-radius: var(--dsw-radius-md);
-  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 5%, transparent);
-}
-
-.mrfw-sshErrorItem {
-  display: flex;
-  gap: 2px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.mrfw-sshErrorField {
-  flex: none;
 }
 
 .mrfw-sshTargetRow {
@@ -3023,15 +2969,6 @@ button.mrfw-sshPickerTrigger {
   .mrfw-sshFieldWide {
     grid-column: auto;
   }
-
-  .mrfw-sshCredentialSource,
-  .mrfw-sshCredentialPicker {
-    flex-basis: 100%;
-  }
-
-  .mrfw-sshCredentialManage {
-    align-self: flex-start;
-  }
 }
 
 .mrfw-sshRowActions {
@@ -3150,9 +3087,7 @@ button.mrfw-sshPickerTrigger {
 }
 
 /* Nested decisions are narrower than the management card. */
-.mrfw-sshConfirmDialog,
-.mrfw-sshPathDialog,
-.mrfw-sshCredentialDialog {
+.mrfw-sshPathDialog {
   width: min(620px, 100%);
   max-height: calc(100vh - 48px);
 }

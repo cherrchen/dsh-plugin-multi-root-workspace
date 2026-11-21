@@ -327,6 +327,8 @@ export const es = {
   'ssh.add.noClient': 'Este host no ofrece ninguna interfaz de gestión SSH personal, así que las conexiones no se pueden guardar desde la GUI.',
   'ssh.add.reset': 'Limpiar',
   'ssh.add.saved': 'Guardado.',
+  'ssh.add.done': 'Conexión añadida',
+  'ssh.add.doneHint': 'La conexión está guardada y disponible en la pestaña de conexiones y en el asistente para añadir directorios remotos.',
   'ssh.connections.personalGuide': "Gestiona las conexiones guardadas, prueba SSH e instala el asistente remoto.",
   'ssh.connections.registerHint': 'Cuando se hayan completado todos los pasos de la cadena de preparación, podrá registrar desde la fila de vinculación de abajo o desde el panel del espacio de trabajo.',
   'ssh.connections.bindingsGuide': 'Las vinculaciones asignan un directorio remoto a una raíz del espacio de trabajo de este proyecto; el extremo local de una transferencia debe ser primary o el aliasId de una raíz adicional disponible.',
