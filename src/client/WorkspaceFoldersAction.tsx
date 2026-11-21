@@ -52,6 +52,7 @@ import { SshManagementDialog, SshWorkspaceBindingsDialog, type SshDialogTab } fr
 import { RemoteRootMenu } from './remote-root-menu.tsx'
 import { Action, IconButton } from './panel-buttons.tsx'
 import { StatusLine } from './pending.tsx'
+import { ErrorToast, PanelErrorToast } from './error-toast.tsx'
 import { WorkspaceRow } from './workspace-row.tsx'
 import { requestWorktreePrompt } from './worktree-prompt-bus.ts'
 import type { Key } from './locales.ts'
@@ -797,15 +798,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               {t('panel.toolCaps', { tools: state.view!.cappedTools!.join(', ') })}
             </p> : null}
 
-          {state.error === undefined ? null : (
-            <p role="alert" className="mrfw-alert">
-              {t(errorKeyOf(state.error.code))}
-              {errorHasDetail(state.error.code) ? ` (${state.error.message})` : ''}
-            </p>
-          )}
-          {state.view?.unavailable === undefined ? null : (
-            <p role="alert" className="mrfw-alert">{state.view.unavailable}</p>
-          )}
+          <PanelErrorToast error={state.error} t={t} />
+          <ErrorToast error={state.view?.unavailable} format={message => message} />
           <section className="mrfw-section">
             <div className="mrfw-sectionTitleRow">
               <span className="mrfw-sectionTitle">{t('panel.primary')}</span>
@@ -1019,12 +1013,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
                   ) : null}
                 </div>
               </div>
-              {remoteState.error === undefined ? null : (
-                <p role="alert" className="mrfw-alert">
-                  {t(errorKeyOf(remoteState.error.code))}
-                  {errorHasDetail(remoteState.error.code) ? ` (${remoteState.error.message})` : ''}
-                </p>
-              )}
+              <PanelErrorToast error={remoteState.error} t={t} />
               {remoteState.view?.custodyMode === 'personal' && remoteState.view.endpoints.some(endpoint => endpoint.state !== 'registered') ? (
                 <p className="mrfw-note">{t('panel.remoteRegisterGuide')}</p>
               ) : null}
@@ -1292,12 +1281,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
           {t(cleanupFor.length === 1 ? 'worktree.pathReuse' : 'worktree.pathReuseMany')}
         </p>
       )}
-      {cleanupError === undefined ? null : (
-        <p role="alert" className="mrfw-alert">
-          {t(errorKeyOf(cleanupError.code))}
-          {(cleanupError.code === 'unavailable' || cleanupError.code === 'panel/internal') ? ` (${cleanupError.message})` : ''}
-        </p>
-      )}
+      <PanelErrorToast error={cleanupError} t={t} />
     </Modal>
     </>
   )

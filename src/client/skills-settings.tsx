@@ -6,6 +6,7 @@ import { installAutoReviewSettings, type AutoReviewForm } from '../compat/auto-r
 import { remoteRiskConfirmation } from '../compat/ops-confirmation.ts'
 import { AutoReviewSettingsCard } from './auto-review-settings.tsx'
 import { OpsCompatibilitySettingsCard } from './ops-settings.tsx'
+import { ErrorToast } from './error-toast.tsx'
 import type { Key } from './locales.ts'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 import { PanelError } from './panel-client.ts'
@@ -133,7 +134,7 @@ export function RemoteSwitchRow({ form, t }: { form: SkillsForm; t: Translate })
         <Tag tone="warning">{t('remote.experimental')}</Tag>
       </div>
       <div className="mrfw-skillsSettingsDescription">{t('remote.settingsHint')}</div>
-      {error ? <div role="alert" className="mrfw-alert">{error}</div> : null}
+      <ErrorToast error={error} format={message => message} />
     </div>
     <Switch label={t('remote.settingsEnable')} checked={enabled} disabled={busy || confirmation !== undefined || snapshot.status !== 'ready' || !snapshot.writable || (!enabled && RiskConfirmation === undefined)}
         onChange={next => {

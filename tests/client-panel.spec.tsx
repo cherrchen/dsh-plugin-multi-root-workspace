@@ -564,7 +564,7 @@ describe('the panel dialog', () => {
     expect(toggle.getAttribute('aria-pressed')).toBe(String(failure))
     expect(document.activeElement).toBe(toggle)
     expect([opacity(toggle), opacity(reveal)]).toEqual(before)
-    expect(screen.queryByRole('alert') !== null).toBe(failure)
+    expect(screen.queryByRole('status') !== null).toBe(failure)
   })
 
   it('accepts list and mutation results after StrictMode replays mount effects', async () => {
@@ -614,7 +614,7 @@ describe('the panel dialog', () => {
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
     await waitFor(() => { expect(screen.getByText('legacy-16')).toBeTruthy() })
-    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
     expect(screen.getByRole('button', { name: `${NS}.panel.add` })).toHaveProperty('disabled', false)
     fireEvent.change(screen.getByPlaceholderText(`${NS}.panel.addManual`), { target: { value: '/repos/new' } })
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.addConfirm` }))
@@ -777,7 +777,7 @@ describe('the panel dialog', () => {
     harness.setFailure({ code: 'missing', message: 'host prose' })
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.missing`) })
+    await waitFor(() => { expect(screen.getByRole('status').textContent).toBe(`${NS}.error.missing`) })
 
     const manual = screen.getByPlaceholderText(`${NS}.panel.addManual`)
     fireEvent.change(manual, { target: { value: '/repos/typo' } })
@@ -855,7 +855,7 @@ describe('the panel dialog', () => {
 
     await waitFor(() => { expect(harness.calls.some(call => call.endpoint === 'reveal')).toBe(true) })
     // No failure is painted, and the list survives a reveal untouched.
-    await waitFor(() => { expect(screen.queryByRole('alert')).toBeNull() })
+    await waitFor(() => { expect(screen.queryByRole('status')).toBeNull() })
     expect(screen.getByText('/repos/payments')).toBeTruthy()
     expect(harness.calls.filter(call => call.endpoint === 'list')).toHaveLength(1)
   })
@@ -869,7 +869,7 @@ describe('the panel dialog', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: `${NS}.panel.reveal` })[0]!)
 
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toContain(`${NS}.error.panel/bad-response`) })
+    await waitFor(() => { expect(screen.getByRole('status').textContent).toContain(`${NS}.error.panel/bad-response`) })
   })
 
   it('reports a clipboard that refuses the copy', async () => {
@@ -881,7 +881,7 @@ describe('the panel dialog', () => {
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'))
     fireEvent.click(screen.getByTitle('/repos/payments'))
 
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.copy-failed`) })
+    await waitFor(() => { expect(screen.getByRole('status').textContent).toBe(`${NS}.error.copy-failed`) })
   })
 
   it('disables the row actions while a mutation is in flight', async () => {
@@ -958,7 +958,7 @@ describe('the panel dialog', () => {
     renderPanel(harness)
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.nested`) })
+    await waitFor(() => { expect(screen.getByRole('status').textContent).toBe(`${NS}.error.nested`) })
     expect(screen.queryByText(/host prose/)).toBeNull()
   })
 
@@ -969,7 +969,7 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole('alert').textContent).toContain('cannot get property "sessions" without inject')
+      expect(screen.getByRole('status').textContent).toContain('cannot get property "sessions" without inject')
     })
   })
 
@@ -982,7 +982,7 @@ describe('the panel dialog', () => {
     // The unknown code still earns its host detail: the generic key alone
     // would say nothing about what actually failed.
     await waitFor(() => {
-      expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.fallback (unexpected)`)
+      expect(screen.getByRole('status').textContent).toBe(`${NS}.error.fallback (unexpected)`)
     })
   })
 
@@ -1183,7 +1183,7 @@ describe('the panel dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessReadWrite` }))
     fireEvent.click(screen.getByRole('button', { name: `${NS}.panel.accessUpgradeDo` }))
 
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(`${NS}.error.root-unavailable`) })
+    await waitFor(() => { expect(screen.getByRole('status').textContent).toBe(`${NS}.error.root-unavailable`) })
     // The badge still says what the last host view said.
     expect(document.querySelectorAll('.mrfw-accessBadge')[1]?.textContent).toBe(`${NS}.access.readOnly`)
   })
@@ -1208,7 +1208,7 @@ describe('the panel dialog', () => {
     render(createElement(footer.component as never))
 
     fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
-    await waitFor(() => { expect(screen.getByRole('alert')).toBeTruthy() })
+    await waitFor(() => { expect(screen.getByRole('status')).toBeTruthy() })
   })
 })
 

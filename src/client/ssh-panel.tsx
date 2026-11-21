@@ -6,7 +6,8 @@ import type { RemoteModeControl } from '../compat/skills-client.ts'
 import { IconAccessReadOnly, IconAccessReadWrite, IconDownload, IconEdit, IconLink, IconPlay, IconShield, IconTrash, maybeComponent } from '../compat/client-icons.ts'
 import { IconButton, SshButton as Button } from './panel-buttons.tsx'
 import { PendingBar, StatusLine } from './pending.tsx'
-import { errorHasDetail, errorKeyOf, PanelError } from './panel-client.ts'
+import { errorKeyOf, PanelError } from './panel-client.ts'
+import { ErrorToast, PanelErrorToast } from './error-toast.tsx'
 import type { CredentialPublicView, RemoteDirectoryListing, SshBindingDraft, SshBindingView, SshClient, SshManagementClient, SshSettingsView, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
 import { SshCustodySection, type RemoteCustodyMode } from './remote-custody.tsx'
 import type { Key } from './locales.ts'
@@ -259,13 +260,6 @@ function addGuideKey(mode: RemoteCustodyMode | undefined): Key {
   if (mode === 'hardened') return 'ssh.add.hardenedGuide'
   if (mode === 'personal') return 'ssh.add.personalGuide'
   return 'ssh.add.unknownGuide'
-}
-
-/** The mode-specific add guidance shown under Mode. */
-function modeAddGuideKey(mode: RemoteCustodyMode | undefined): Key {
-  if (mode === 'team') return 'ssh.mode.addGuide.team'
-  if (mode === 'hardened') return 'ssh.mode.addGuide.hardened'
-  return 'ssh.mode.addGuide.personal'
 }
 
 interface SegmentedTabsProps {
@@ -846,7 +840,7 @@ function RemotePathDialog(props: RemotePathDialogProps): ReactNode {
             onClick={() => { void load(listing?.parent) }}>{t('ssh.pathPickerParent')}</Button>
         </div>
       </div>
-      {error === undefined ? null : <p className="mrfw-note" role="alert">{t('ssh.pathPickerFailed', { message: error })}</p>}
+      <ErrorToast error={error} format={message => t('ssh.pathPickerFailed', { message })} />
       {loading ? <StatusLine state="ongoing">{t('ssh.pending.list')}</StatusLine> : null}
       {listing === undefined ? null : listing.entries.length === 0 ? (
         loading ? null : <p className="mrfw-note">{t('ssh.pathPickerEmpty')}</p>
@@ -1307,16 +1301,8 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       ? <p className="mrfw-note">{t('panel.loading')}</p>
       : <p className="mrfw-note">{t('panel.remoteUnavailable', { reason: statusText(status, t) })}</p>
 
-  /** The current failure; the Add dialog renders its own copy while it is open. */
-  const renderError = (): ReactNode => error === undefined ? null : (
-    <p role="alert" className="mrfw-alert">
-      {t(errorKeyOf(error.code))}
-      {errorHasDetail(error.code) ? ` (${error.message})` : ''}
-    </p>
-  )
-
   /**
-   * The first `sshState` read failed: the alert above names the failure, the
+   * The first `sshState` read failed: the toast names the failure, the
    * tab says so and offers a retry — without it the effect would not re-fire
    * and the tab would keep showing "loading" until the dialog reopened.
    */
@@ -1515,7 +1501,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   </div>
 
   const renderAdd = (): ReactNode => {
-    if (props.overviewError !== undefined) return <p role="alert" className="mrfw-alert">{t(errorKeyOf(props.overviewError.code))}</p>
+    if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} /><p className="mrfw-note">{t('ssh.loadFailed')}</p></>
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
     if (custodyMode !== 'personal') {
@@ -1532,7 +1518,6 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     if (view === undefined) return renderLoadState()
     return <div className="mrfw-sshArea">
       <p className="mrfw-note">{t('ssh.add.personalGuide')}</p>
-      {renderError()}
       <AddConnectionForm
         draft={addDraft}
         onChange={setAddDraft}
@@ -1550,7 +1535,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   }
 
   const renderKeys = (): ReactNode => {
-    if (props.overviewError !== undefined) return <p role="alert" className="mrfw-alert">{t(errorKeyOf(props.overviewError.code))}</p>
+    if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} /><p className="mrfw-note">{t('ssh.loadFailed')}</p></>
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
     if (custodyMode !== 'personal') {
@@ -1570,7 +1555,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   }
 
   const renderConnectionsTab = (): ReactNode => {
-    if (props.overviewError !== undefined) return <p role="alert" className="mrfw-alert">{t(errorKeyOf(props.overviewError.code))}</p>
+    if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} /><p className="mrfw-note">{t('ssh.loadFailed')}</p></>
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
     if (custodyMode !== 'personal') return renderDeploymentConnections()
@@ -1585,11 +1570,6 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     {remoteMode === undefined
       ? <p className="mrfw-note">{t('ssh.mode.unavailable')}</p>
       : <SshCustodySection control={remoteMode} currentMode={custodyMode} onChanged={props.onChanged} t={t} />}
-    <div className="mrfw-sshGuide">
-      <span className="mrfw-sshStepTitle">{t('ssh.tab.add')}</span>
-      <p className="mrfw-note">{t(modeAddGuideKey(custodyMode))}</p>
-      <Button variant="outline" size="sm" onClick={() => changeTab('connections')}>{t('ssh.tab.connections')}</Button>
-    </div>
   </div>
 
   const panel = (): ReactNode => tab === 'connections' ? renderConnectionsTab()
@@ -1599,6 +1579,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const panelId = 'mrfw-ssh-panel-' + tab
   const tabId = 'mrfw-ssh-tab-' + tab
   return <>
+    <PanelErrorToast error={error} t={t} />
     <Modal
       open
       onClose={props.onClose}
@@ -1610,7 +1591,6 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     >
       <PendingBar active={busy || testing.size > 0} />
       <SshTabStrip value={tab} onChange={changeTab} t={t} />
-      {addOpen ? null : renderError()}
       <div id={panelId} role="tabpanel" aria-labelledby={tabId} className="mrfw-sshDialogPanel">
         {panel()}
       </div>
@@ -1764,9 +1744,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
     className="mrfw-sshDialog" contentClassName="mrfw-sshDialogContent">
     <PendingBar active={busy} />
     <div className="mrfw-sshArea">
-      {error === undefined ? null : <p role="alert" className="mrfw-alert">
-        {t(errorKeyOf(error.code))}{errorHasDetail(error.code) ? ` (${error.message})` : ''}
-      </p>}
+      <PanelErrorToast error={error} t={t} />
       {view === undefined ? error === undefined ? <StatusLine state="ongoing">{t('panel.loading')}</StatusLine> : (
         <Button variant="outline" size="sm" onClick={() => {
           const signal = lifetime.current?.signal
