@@ -738,22 +738,28 @@ describe('the workspace dialog scrolling rules', () => {
     const body = rule('.mrfw-body')
     expect(body).toContain('min-height: 0')
     expect(body).toContain('overflow-y: auto')
+    // The fallback scroll contains its own overscroll; the row list must not,
+    // or a wheel at the end of the rows can never reveal the add controls on a
+    // short dialog.
+    expect(body).toContain('overscroll-behavior: contain')
   })
 
   it('gives the secondary-root rows a window-relative scroll region', () => {
     const additional = rule('.mrfw-sectionAdditional')
     expect(additional).toContain('flex: 1 1 auto')
-    // A floor of one wrapped title row plus one root row, applied only while
-    // rows exist: without it the section can shrink to zero on a short viewport
-    // and clip the rows inside its own overflow instead of letting the body
-    // fallback scroll reach them. An empty section stays compact.
+    // A floor of one title row plus one root row, applied only while rows
+    // exist: without it the section can shrink to zero on a short viewport and
+    // clip the rows inside its own overflow instead of letting the body
+    // fallback scroll reach them. An empty section stays compact; a wrapped
+    // batch action heading gets its extra 36px so the row window survives.
     expect(rule('.mrfw-sectionAdditional:has(.mrfw-rootList .mrfw-row)')).toContain('min-height: 104px')
+    expect(rule('.mrfw-sectionAdditional:has(.mrfw-rootList .mrfw-row):has(.mrfw-sectionAction)')).toContain('min-height: 140px')
     const list = rule('.mrfw-rootList')
     expect(list).toContain('flex: 1 1 auto')
     expect(list).toContain('min-height: 0')
     expect(list).toContain('max-height: 60vh')
     expect(list).toContain('overflow-y: auto')
-    expect(list).toContain('overscroll-behavior: contain')
+    expect(list).not.toContain('overscroll-behavior')
     expect(list).not.toMatch(/max-height:[^;]*\d+px/)
   })
 

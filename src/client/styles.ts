@@ -1227,6 +1227,11 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   flex-direction: column;
   min-height: 0;
   overflow-y: auto;
+  /* The fallback scroll contains its own overscroll: a wheel that reaches the
+     end of the body must not move the app frame behind the dialog. The row
+     list deliberately does not contain, so on a short dialog its end hands the
+     gesture over to this body scroll and the add controls stay reachable. */
+  overscroll-behavior: contain;
   padding: 0 24px 24px;
 }
 
@@ -1266,16 +1271,24 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   min-height: 104px;
 }
 
+/* A wrapped batch action raises the heading to 70px on a narrow dialog; with
+   the base floor the list would keep only 34px. Add the wrapped heading's
+   extra 36px so the list still keeps its 70px row window (70 + 70 = 140). The
+   row :has() is repeated to outrank the 104px rule's higher specificity. */
+.mrfw-sectionAdditional:has(.mrfw-rootList .mrfw-row):has(.mrfw-sectionAction) {
+  min-height: 140px;
+}
+
 /* The panel's only normal scroll region. The rows are the variable part, so
    they take the space left below the fixed sections, capped relative to the
-   window (never a pixel height), and scroll in place. Contain keeps a wheel
-   gesture at either end from moving the page behind the dialog. */
+   window (never a pixel height), and scroll in place. It does NOT contain
+   overscroll: on a short dialog the body is the fallback scroll, and a wheel at
+   the end of the rows has to hand off to it to reveal the add controls. */
 .mrfw-rootList {
   flex: 1 1 auto;
   min-height: 0;
   max-height: 60vh;
   overflow-y: auto;
-  overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
 
