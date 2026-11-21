@@ -18,6 +18,7 @@ import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-wo
 import { mountRemoteTools, type RemoteToolsWorld } from './support/remote-tools.ts'
 import { mountRegistryStack, type RegistryStack } from './support/registry-stack.ts'
 import { handlePersonalEndpoint } from '../src/remote/personal-endpoints.ts'
+import { parseSshCall, type SshCall, type SshStateView } from '../src/remote/personal-contract.ts'
 import { loadPersonalConfig, savePersonalConfig, type PersonalConfig, type PersonalEnvironment } from '../src/remote/personal/config.ts'
 import type { ExecFile } from '../src/remote/personal/credentials.ts'
 import { installAccessKey, installHelper } from '../src/remote/personal/operations.ts'
@@ -85,7 +86,7 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
     for (const path of ['/root/', '~/x', '/a//b', 'relative/path', '/a/./b']) {
       await expect(handlePersonalEndpoint(undefined as never, registry, '/w', {
         endpoint: 'sshBindingSave', sessionId: 's', revision: 0,
-        binding: { environmentId: 'dev-box', rootId: 'app', path, actions: ['read'] },
+        binding: { environmentId: 'dev-box', path, actions: ['read'] },
       })).rejects.toMatchObject({ code: 'workspace-invalid' })
     }
     expect(loadPersonalConfig(personalPath).bindings).toEqual([])
@@ -94,26 +95,57 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
   it('isolates bindings by Workspace, shares the SSH environment, and gives recreated Roots a fresh identity', async () => {
     const { registry, personalPath } = world()
     await savePersonalConfig(personalPath, CONFIG(), 0)
-    const call = async (primary: string, payload: import('../src/remote/personal-contract.ts').SshCall) =>
-      await handlePersonalEndpoint(undefined as never, registry, primary, payload) as import('../src/remote/personal-contract.ts').SshStateView
-    const app = { environmentId: 'dev-box', rootId: 'app', path: '/srv/app', actions: ['read'] as const }
-    const logs = { environmentId: 'dev-box', rootId: 'logs', path: '/srv/logs', actions: ['read', 'write'] as const }
+    const call = async (primary: string, payload: SshCall) =>
+      await handlePersonalEndpoint(undefined as never, registry, primary, payload) as SshStateView
+    const app = { environmentId: 'dev-box', path: '/srv/app', actions: ['read'] as const }
+    const logs = { environmentId: 'dev-box', path: '/srv/logs', actions: ['read', 'write'] as const }
     await call('/one', { endpoint: 'sshBindingSave', sessionId: 's', revision: 0, binding: { ...app, actions: [...app.actions] } })
     const environmentBytes = readFileSync(personalPath, 'utf8')
     const firstId = loadPersonalConfig(personalPath).bindings[0]!.bindingId
     const both = await call('/one', { endpoint: 'sshBindingSave', sessionId: 's', revision: 1, binding: { ...logs, actions: [...logs.actions] } })
-    expect(both.bindings).toMatchObject([app, logs])
-    const another = await call('/two', { endpoint: 'sshBindingSave', sessionId: 't', revision: 2, binding: { ...app, actions: ['read'], path: '/srv/other' } })
-    expect(another.bindings).toMatchObject([{ ...app, path: '/srv/other' }])
+    expect(both.bindings).toMatchObject([{ ...app, rootId: 'app' }, { ...logs, rootId: 'logs' }])
+    const another = await call('/two', { endpoint: 'sshBindingSave', sessionId: 't', revision: 2, binding: { ...app, actions: ['read'], path: '/opt/app' } })
+    expect(another.bindings).toMatchObject([{ ...app, rootId: 'app', path: '/opt/app' }])
     expect(another.environments).toHaveLength(1)
     expect(readFileSync(personalPath, 'utf8')).toBe(environmentBytes)
     await expect(call('/two', { endpoint: 'sshEnvironmentRemove', sessionId: 't', revision: 3, environmentId: 'dev-box' }))
       .rejects.toMatchObject({ code: 'environment-in-use' })
     const removed = await call('/one', { endpoint: 'sshBindingRemove', sessionId: 's', revision: 3, environmentId: 'dev-box', rootId: 'app' })
-    expect(removed.bindings).toMatchObject([logs])
+    expect(removed.bindings).toMatchObject([{ ...logs, rootId: 'logs' }])
     await call('/one', { endpoint: 'sshBindingSave', sessionId: 's', revision: 4, binding: { ...app, actions: ['read'] } })
     expect(loadPersonalConfig(personalPath).bindings.find(binding => binding.primary === '/one' && binding.rootId === 'app')?.bindingId)
       .not.toBe(firstId)
+  })
+
+  it('generates a Root ID from the directory, falls back on collisions, and keeps the ID on edits', async () => {
+    const { registry, personalPath } = world()
+    await savePersonalConfig(personalPath, CONFIG(), 0)
+    const save = async (revision: number, path: string, rootId?: string): Promise<SshStateView> => {
+      const parsed = parseSshCall('sshBindingSave', {
+        sessionId: 's', revision,
+        binding: { environmentId: 'dev-box', path, actions: ['read'], ...(rootId === undefined ? {} : { rootId }) },
+      })
+      if (!parsed.ok) throw new Error(parsed.message)
+      return await handlePersonalEndpoint(undefined as never, registry, '/one', parsed.value) as SshStateView
+    }
+
+    await expect(save(0, '/srv/Release_Café')).resolves.toMatchObject({ bindings: [{ rootId: 'release-cafe' }] })
+    const collision = await save(1, '/opt/release-cafe')
+    const fallback = collision.bindings[1]!.rootId
+    expect(fallback).toMatch(/^[a-f0-9]{8}$/)
+    const unicode = await save(2, '/srv/构建')
+    expect(unicode.bindings[2]!.rootId).toMatch(/^[a-f0-9]{8}$/)
+    expect(unicode.bindings[2]!.rootId).not.toBe(fallback)
+    const longName = 'x'.repeat(70)
+    await expect(save(3, `/srv/${longName}`)).resolves.toMatchObject({
+      bindings: expect.arrayContaining([expect.objectContaining({ rootId: longName.slice(0, 63) })]),
+    })
+    await expect(save(4, '/opt/renamed', fallback)).resolves.toMatchObject({
+      bindings: expect.arrayContaining([expect.objectContaining({ path: '/opt/renamed', rootId: fallback })]),
+    })
+    await expect(save(5, '/tmp/unknown', 'chosen-id')).rejects.toMatchObject({ code: 'personal-config-conflict' })
+    await expect(save(5, '/srv/Release_Café')).rejects.toMatchObject({ code: 'personal-config-invalid' })
+    expect(loadPersonalConfig(personalPath)).toMatchObject({ revision: 5 })
   })
 
   it('retains an existing remote transfer peer on capability edits without adding new remote peers', async () => {
@@ -137,7 +169,6 @@ describe.skipIf(process.platform === 'win32')('personal endpoint behaviours (R1/
   })
 
   it('the wire contract refuses an environmentId the store would reject (3–63 chars)', async () => {
-    const { parseSshCall } = await import('../src/remote/personal-contract.ts')
     const draft = {
       environmentId: 'ab', platform: 'linux',
       endpoint: { hostname: 'build.internal', port: 22, user: 'builder' },

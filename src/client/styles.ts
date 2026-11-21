@@ -1981,8 +1981,16 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   color: var(--dsw-alias-label-tertiary);
 }
 
-.mrfw-sshInput {
+.mrfw-sshInput,
+.mrfw-sshHelperInput,
+.mrfw-teamInput,
+.mrfw-sshSelectControl,
+button.mrfw-sshButton {
   box-sizing: border-box;
+  height: 32px;
+}
+
+.mrfw-sshInput {
   display: flex;
   width: 100%;
 }
@@ -1993,14 +2001,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   width: 100%;
 }
 
-.mrfw-sshSelectControl,
-.mrfw-sshAddDialog .mrfw-sshCredentialManage,
-.mrfw-sshAddDialog .mrfw-sshForm > .mrfw-sshRowActions > button {
-  height: 32px;
-}
-
 .mrfw-sshSelectControl {
-  box-sizing: border-box;
   width: 100%;
   padding: 0 8px;
   border: 0.5px solid var(--dsw-alias-border-l4);
@@ -2120,7 +2121,6 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 .mrfw-sshHelperInput {
-  box-sizing: border-box;
   display: flex;
   flex: 0 1 auto;
   width: 240px;
@@ -2128,7 +2128,6 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 .mrfw-teamInput {
-  box-sizing: border-box;
   display: flex;
   width: 100%;
 }
@@ -2159,19 +2158,53 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   gap: 6px;
 }
 
+.mrfw-sshBindingList > .mrfw-row,
+.mrfw-sshEnvRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.mrfw-sshBindingList .mrfw-sshRowActions,
+.mrfw-sshEnvActions {
+  flex-wrap: nowrap;
+}
+
+.mrfw-sshBindingList .mrfw-accessBadge {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mrfw-sshBindingList .mrfw-accessBadge svg {
+  flex: none;
+}
+
+.mrfw-sshBindingList .mrfw-note,
+.mrfw-sshEnvRow .mrfw-note {
+  overflow-wrap: anywhere;
+}
+
 .mrfw-sshAddRow {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.mrfw-sshEnvRow {
-  align-items: flex-start;
+.mrfw-sshEnvRow .mrfw-sshCheckRow {
+  gap: 4px 6px;
 }
 
-.mrfw-sshEnvRow .mrfw-sshRowActions {
-  flex-direction: column;
-  align-items: flex-end;
+.mrfw-sshEnvExtra {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 520px) {
+  .mrfw-sshEnvRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mrfw-sshEnvActions {
+    justify-self: end;
+  }
 }
 
 .mrfw-sshScanRow {
@@ -2188,8 +2221,12 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 .mrfw-sshPathBar .mrfw-sshInput {
-  flex: 1 1 240px;
+  flex: 1 1 8rem;
   min-width: 0;
+}
+
+.mrfw-sshPathBar > :is(.mrfw-sshRowActions, .mrfw-sshButton) {
+  margin-inline-start: auto;
 }
 
 .mrfw-sshDirList {
@@ -2202,12 +2239,14 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 .mrfw-sshDirRow {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 8px 10px;
+  min-height: 36px;
+  padding: 0 10px;
   border: 0;
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
   background: transparent;
@@ -2220,7 +2259,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 .mrfw-sshDirRow:last-child {
-  border-bottom: none;
+  border-bottom-color: transparent;
 }
 
 .mrfw-sshDirRow:hover {

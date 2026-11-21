@@ -28,7 +28,7 @@
 
 面板通道 `PANEL_CHANNEL` 上的 `ssh*` 端点（`src/remote/personal-contract.ts`）：每个请求携带 `sessionId`，Host 由会话解析主根；未知字段即 `panel/bad-request`。所有端点在开关未开或 `mode !== 'personal'` 时拒绝 `remote-personal-unavailable`；所有变更端点返回刷新后的 `sshState`。
 
-`sshState`、`sshCredentialGenerate`、`sshCredentialImport`、`sshCredentialPassword`、`sshCredentialRemove`（`credential-in-use`）、`sshConfigAliases`（只读：本机 `~/.ssh/config` 的字面 `Host` 别名，跳过通配/否定项，读取失败返回空数组）、`sshListDirectories`（只读：按 `environmentId` 经 SFTP 列目录，返回 `{ path, parent, entries: [{ name, path }] }`，只含目录名与路径、最多 500 条；managed 环境以 `-F <credentialRoot>/ssh_config` 连接，因此未链接 `~/.ssh/config` 也可浏览；错误统一为 `remote-path-listing-failed`，Host 原文随错误显示）、`sshHostKeyScan`（直连 `hostname`/`port` 触网探测，返回 60 秒有界令牌，`host-key-token-expired` / `host-key-mismatch`；`alias` 形式经 `ssh -G` 在 Host 解析并返回用户 known_hosts 指纹与解析出的 endpoint，不触网、无令牌）、`sshEnvironmentSave`（托管凭据需 `hostKeyToken` + `fingerprint`；**例外**：target 身份（hostname/port/user）与 managed `credentialId` 均未变、且提交的 `fingerprint` 等于已记录 `hostKey` 时，环境元数据或能力更新可复用已记录指纹而不带 token；`ssh-config` 凭据的指纹必须匹配用户 known_hosts；带 `exec` 的保存只在 helper 已安装且目标身份未变时允许，否则 `exec-requires-helper`，在消耗扫描令牌与写 `known_hosts` 之前拒绝）、`sshEnvironmentRemove`（仍有绑定时为 `environment-in-use`）、`sshEnvironmentTest`、`sshHelperInstall`（`helper-hash-mismatch`）、`sshAccessKeyInstall`、`sshBindingSave`（主根由 Host 注入，校验远端目录）、`sshBindingRemove`、`sshConfigLink`。
+`sshState`、`sshCredentialGenerate`、`sshCredentialImport`、`sshCredentialPassword`、`sshCredentialRemove`（`credential-in-use`）、`sshConfigAliases`（只读：本机 `~/.ssh/config` 的字面 `Host` 别名，跳过通配/否定项，读取失败返回空数组）、`sshListDirectories`（只读：按 `environmentId` 经 SFTP 列目录，返回 `{ path, parent, entries: [{ name, path }] }`，只含目录名与路径、最多 500 条；managed 环境以 `-F <credentialRoot>/ssh_config` 连接，因此未链接 `~/.ssh/config` 也可浏览；错误统一为 `remote-path-listing-failed`，Host 原文随错误显示）、`sshHostKeyScan`（直连 `hostname`/`port` 触网探测，返回 60 秒有界令牌，`host-key-token-expired` / `host-key-mismatch`；`alias` 形式经 `ssh -G` 在 Host 解析并返回用户 known_hosts 指纹与解析出的 endpoint，不触网、无令牌）、`sshEnvironmentSave`（托管凭据需 `hostKeyToken` + `fingerprint`；**例外**：target 身份（hostname/port/user）与 managed `credentialId` 均未变、且提交的 `fingerprint` 等于已记录 `hostKey` 时，环境元数据或能力更新可复用已记录指纹而不带 token；`ssh-config` 凭据的指纹必须匹配用户 known_hosts；带 `exec` 的保存只在 helper 已安装且目标身份未变时允许，否则 `exec-requires-helper`，在消耗扫描令牌与写 `known_hosts` 之前拒绝）、`sshEnvironmentRemove`（仍有绑定时为 `environment-in-use`）、`sshEnvironmentTest`、`sshHelperInstall`（`helper-hash-mismatch`）、`sshAccessKeyInstall`、`sshBindingSave`（主根由 Host 注入，校验远端路径格式；新建省略 `rootId`，编辑传入该项目和环境下的现有 `rootId`）、`sshBindingRemove`、`sshConfigLink`。
 
 插件详情的「SSH 远端」通过独立的 `/multi-root-workspace-ssh-settings` Connection 通道打开。它使用同一 Host 身份校验，直接读取插件级状态和管理连接、凭据，不要求活动会话。该通道拒绝 Workspace 绑定、目录浏览与登记/移除请求；这些操作继续通过 `PANEL_CHANNEL` 由当前会话派生主根。
 
@@ -86,19 +86,23 @@ GUI 入口有两处：
 
 独立对话框 `SshManagementDialog`（`src/client/ssh-panel.tsx`）由 ui-primitives `Modal` 承载，经 `src/client/ssh-client.ts` 调 `ssh*` 端点；Tab 条优先使用 `SegmentedTabs`，旧运行时降级为同 DOM 契约的本地 tablist。
 
-**控件与布局。** 表单文本输入使用 primitives `Input`，动作按钮使用 `Button`，平台/helper/状态徽标使用 `Tag`（三者从 0.1.5 起可用）。`Checkbox` 与 `SegmentedControl` 自 `0.1.7-alpha.1` 起使用 primitives，旧版本回退为同语义的本地自绘控件（`.mrfw-sshCheckbox` / `.mrfw-sshRadioOption`）。宿主没有 Select primitive，原生 `<select>` 使用固定 32px 高的 `.mrfw-sshSelectControl`。字段采用两列 grid + 持久 label；对话框内不再使用为横向行设计的 `.mrfw-input`——其 `flex: 1 1 220px` 在纵向容器里会变成 220px 高度基准，曾把输入框拉成巨块。
+**控件与布局。** 表单文本输入使用 primitives `Input`，动作按钮使用 `Button`，平台/helper/状态徽标使用 `Tag`（三者从 0.1.5 起可用）。SSH 管理、Root 绑定及其子对话框的单行输入框、原生下拉框和常规操作按钮统一为 32px 高。私钥文本区可调整高度；页签和关闭按钮沿用宿主尺寸，绑定行尾两个图标按钮均为 28px。`Checkbox` 与 `SegmentedControl` 自 `0.1.7-alpha.1` 起使用 primitives，旧版本回退为同语义的本地自绘控件（`.mrfw-sshCheckbox` / `.mrfw-sshRadioOption`）。字段使用 grid 和持续可见的标签。远端目录选择器空间不足时，「转到」和「上一级」一起换行。
 
 三个 Tab，另有一个独立的“添加连接”Dialog：
 
 **添加连接 Dialog** 从「已有连接」打开。选择本机 ssh-config 条目或插件托管凭据，填写显示名、环境 ID、平台与目标。选择器和操作按钮均为 32px 高，字段保留标签和按需显示的校验反馈。主机钥扫描结果经弹窗确认后，保存连接并返回「已有连接」。本机来源可从 `sshConfigAliases` 选择，托管来源可从嵌套的凭据管理对话框添加凭据。
 
-1. **已有连接** 提供连接测试、Helper 安装、访问密钥安装、SSH 配置链接与连接编辑。连接编辑可设置命令执行和文件传输的可用性，每条绑定再单独选择权限。删除仍被绑定的连接会返回 `environment-in-use`。team/hardened 显示部署清单的只读列表。
+1. **已有连接** 的个人模式环境列表复用工作区目录行。环境名称、平台、地址和就绪状态在左侧，测试连接、编辑、删除和当前可用的设置操作在右侧横排为带悬停提示的图标。窄窗口中整组图标移到下一行并右对齐。安装 Helper 后，该环境的安装入口随即隐藏。连接编辑可设置命令执行和文件传输的可用性，每条绑定再单独选择权限。删除仍被绑定的连接会返回 `environment-in-use`。team/hardened 显示部署清单的只读列表。
 2. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管，GUI 不读取、不创建。
 3. **模式设置**：复用 `src/client/remote-custody.tsx` 的三档单选、team 四个 broker 字段与降级风险确认，写入同一个 `multi-root-remote-tools` form 与 CAS revision，不另建写入路径；同时说明档位如何决定“添加连接”的引导方式（personal 图形化表单、team 部署清单 + broker、hardened 部署 profile + 全量证明），并提供切到“已有连接”的按钮——添加连接的入口在该 Tab，不在模式页。档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源）。
 
 ### Workspace Root 绑定对话框
 
-从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。选择已有连接，填写 Root ID、远端路径和允许的动作。可以通过只读 SFTP 选择目录，也可以手动输入规范化的 POSIX 绝对路径。本地传输对端可选 `primary` 和可用附加根的 `aliasId`。保存后从 Workspace Folders 对应目录的「…」菜单登记。绑定对话框可编辑或解除一条绑定，其他绑定和 SSH 连接独立保留。
+从 Workspace Folders 打开 `SshWorkspaceBindingsDialog`。选择已有连接，指定远端路径和允许的动作。可以通过只读 SFTP 选择目录，也可以手动输入规范化的 POSIX 绝对路径。本地传输对端可选 `primary` 和可用附加根的 `aliasId`。保存后从 Workspace Folders 对应目录的「…」菜单登记。绑定对话框可编辑或解除一条绑定，其他绑定和 SSH 连接独立保留。
+
+新建绑定时，Host 将路径的末级目录名转换为最多 63 字符的小写标识。转换结果为空，或同一项目和 SSH 环境已有同名标识时，改用 UUID 的前 8 位，并保证该标识在当前范围内唯一。编辑已有绑定时沿用原标识。
+
+「本项目绑定」与「远端工作目录」共用目录行。首行显示目录名、SSH 环境和已配置的权限，第二行显示可复制的远端地址；已配置的本地传输对端按导入和导出方向列在下方。行尾用铅笔和垃圾桶图标编辑或解除绑定。
 
 连接和绑定变更携带当前 `revision`。发生 CAS 冲突时刷新 `sshState` 后可重试，表单保留待提交内容。会话切换使旧请求的响应失效。已确认保存的连接无需完成后续 Workspace 操作。
 

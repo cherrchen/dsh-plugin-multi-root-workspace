@@ -35,7 +35,6 @@ import {
   IconAccessReadWrite,
   IconChevronDown,
   IconChevronUp,
-  IconCopy,
   IconEdit,
   IconEllipsis,
   IconFolderOpen,
@@ -51,6 +50,8 @@ import type { RemoteModeControl } from '../compat/skills-client.ts'
 import type { SshClient } from './ssh-client.ts'
 import { SshManagementDialog, SshWorkspaceBindingsDialog, type SshDialogTab } from './ssh-panel.tsx'
 import { RemoteRootMenu } from './remote-root-menu.tsx'
+import { Action, IconButton } from './panel-buttons.tsx'
+import { WorkspaceRow } from './workspace-row.tsx'
 import { requestWorktreePrompt } from './worktree-prompt-bus.ts'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
@@ -109,74 +110,6 @@ export interface WorkspaceFoldersActionProps {
   readonly worktreePromptEnabled?: (() => boolean) | undefined
 }
 
-/** The visual family of one capsule button, mirroring the host Button kit. */
-type ActionVariant = 'ghost' | 'outline' | 'primary' | 'danger'
-
-const VARIANT_CLASS: Record<ActionVariant, string> = {
-  ghost: 'mrfw-btnGhost',
-  outline: 'mrfw-btnOutline',
-  primary: 'mrfw-btnPrimary',
-  danger: 'mrfw-btnDanger',
-}
-
-/** One small capsule button matching the panel's own styling.
- * Pending requests block activation through aria-disabled without changing
- * opacity, hover or keyboard focus. Native disabled is for unavailable actions.
- */
-function Action(props: {
-  onClick: () => void
-  children: ReactNode
-  disabled?: boolean
-  pending?: boolean
-  variant?: ActionVariant
-}): ReactNode {
-  const variant = props.variant ?? 'ghost'
-  return (
-    <button
-      type="button"
-      className={`mrfw-btn ${VARIANT_CLASS[variant]}`}
-      onClick={props.pending === true ? undefined : props.onClick}
-      disabled={props.disabled === true}
-      aria-disabled={props.disabled === true || props.pending === true || undefined}
-      aria-busy={props.pending === true || undefined}
-    >
-      {props.children}
-    </button>
-  )
-}
-
-/**
- * One icon-only button (a host "iconButton"): a fixed square of the capsule
- * family whose meaning travels in `title`/`aria-label` instead of text.
- */
-function IconButton(props: {
-  onClick: () => void
-  icon: ReactNode
-  label: string
-  disabled?: boolean
-  pending?: boolean
-  pressed?: boolean
-  hint?: string
-  variant?: ActionVariant
-}): ReactNode {
-  const variant = props.variant ?? 'ghost'
-  return (
-    <button
-      type="button"
-      className={`mrfw-btn mrfw-iconBtn ${VARIANT_CLASS[variant]}`}
-      title={props.hint ?? props.label}
-      aria-label={props.label}
-      aria-pressed={props.pressed}
-      onClick={props.pending === true ? undefined : props.onClick}
-      disabled={props.disabled === true}
-      aria-disabled={props.disabled === true || props.pending === true || undefined}
-      aria-busy={props.pending === true || undefined}
-    >
-      {props.icon}
-    </button>
-  )
-}
-
 /** A skill is a reusable instruction document; the star denotes its capability. */
 function SkillsIcon({ enabled }: { enabled: boolean }): ReactNode {
   return (
@@ -195,74 +128,6 @@ function CloseIcon(): ReactNode {
       <path d="M4 4l8 8M12 4l-8 8" />
     </svg>
   )
-}
-
-/**
- * One path that copies itself: text that paints like the surrounding copy
- * and reveals a trailing icon on hover — clicking the text or the icon
- * copies the same canonical path. The accessible name swaps to "copied"
- * for the feedback window, the icon button's old recipe. Shared by the
- * primary row and every additional root.
- */
-function PathCopy(props: {
-  readonly path: string
-  readonly copied: boolean
-  readonly onCopy: () => void
-  readonly t: Translate
-}): ReactNode {
-  return (
-    <button
-      type="button"
-      className="mrfw-rootPath mrfw-pathCopy"
-      title={props.path}
-      aria-label={props.copied ? props.t('panel.copied') : props.t('panel.copyPath')}
-      onClick={props.onCopy}
-    >
-      {props.path}
-      <span className="mrfw-pathCopyIcon" aria-hidden="true"><IconCopy size={14} /></span>
-    </button>
-  )
-}
-
-interface WorkspaceRowProps {
-  /** The display name; callers wrap it in `mrfw-rootNameText` for ellipsis. */
-  readonly name: ReactNode
-  /** Badges that ride beside the name (cwd tag, access, platform, state, root id). */
-  readonly badges?: ReactNode
-  /** The copyable location (an absolute path, or a remote target + path). */
-  readonly path: string | undefined
-  readonly copied?: boolean
-  readonly onCopy?: (() => void) | undefined
-  readonly t: Translate
-  /** The row's trailing action cluster. */
-  readonly trailing?: ReactNode
-  /** Content that must wrap below the row (the alias editor). */
-  readonly children?: ReactNode
-  /** The primary row has no bottom rule. */
-  readonly bare?: boolean
-}
-
-/**
- * The one workspace-directory row. The primary root, every additional root,
- * and every remote workspace render through it, so the name line, badge
- * geometry, copyable path, and trailing action cluster stay identical.
- */
-function WorkspaceRow(props: WorkspaceRowProps): ReactNode {
-  return <div className={'mrfw-row' + (props.bare === true ? ' mrfw-rowBare' : '')}>
-    <div className="mrfw-rootText">
-      <span className="mrfw-rootName">
-        {props.name}
-        {props.badges}
-      </span>
-      {props.path === undefined
-        ? <span className="mrfw-rootPath">…</span>
-        : props.onCopy === undefined
-          ? <span className="mrfw-rootPath">{props.path}</span>
-          : <PathCopy path={props.path} copied={props.copied === true} onCopy={props.onCopy} t={props.t} />}
-    </div>
-    {props.trailing}
-    {props.children}
-  </div>
 }
 
 /** The panel key for one worktree lifecycle state, in every shipped language. */
