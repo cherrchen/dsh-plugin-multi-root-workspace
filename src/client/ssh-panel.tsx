@@ -18,6 +18,7 @@ import {
   type EditorDraft,
 } from './ssh-draft.ts'
 import { AddConnectionWizard } from './wizard/add-connection.tsx'
+import { ChoiceCard, WizardActions, WizardField } from './wizard/kit.tsx'
 import type { Key } from './locales.ts'
 import { localBindingPeers } from './remote-root-menu.tsx'
 import { WorkspaceRow } from './workspace-row.tsx'
@@ -452,6 +453,104 @@ function EnvironmentForm(props: EnvironmentFormProps): ReactNode {
 
 export type CredentialCreateKind = 'generate' | 'import' | 'password'
 
+/** The three credential kinds as selectable cards with a one-line hint each. */
+const CREDENTIAL_KINDS: readonly { kind: CredentialCreateKind; title: Key; hint: Key; icon: ReactNode }[] = [
+  { kind: 'generate', title: 'ssh.credentialGenerate', hint: 'ssh.credentialGenerateHint', icon: <IconPlus aria-hidden="true" /> },
+  { kind: 'import', title: 'ssh.credentialImport', hint: 'ssh.credentialImportHint', icon: <IconDownload aria-hidden="true" /> },
+  { kind: 'password', title: 'ssh.credentialPassword', hint: 'ssh.credentialPasswordHint', icon: <IconShield aria-hidden="true" /> },
+]
+
+/**
+ * The add-credential mini-flow in a nested modal: pick a kind on the choice
+ * cards, then fill its secret fields. Secrets are cleared before the request
+ * leaves; the dialog closes on either outcome so the parent's error toast
+ * stays visible.
+ */
+function AddCredentialDialog(props: {
+  readonly busy: boolean
+  readonly pending: boolean
+  readonly t: Translate
+  readonly onClose: () => void
+  readonly onCreate: (kind: CredentialCreateKind, label: string, secret: string, passphrase?: string) => Promise<boolean>
+}): ReactNode {
+  const { t, busy } = props
+  const [kind, setKind] = useState<CredentialCreateKind | undefined>(undefined)
+  const [label, setLabel] = useState('')
+  const [privateKey, setPrivateKey] = useState('')
+  const [passphrase, setPassphrase] = useState('')
+  const [password, setPassword] = useState('')
+  const disabled = busy || props.pending
+  const valid = label.trim() !== ''
+    && (kind === 'generate' || (kind === 'import' ? privateKey !== '' : password !== ''))
+  const submit = (): void => {
+    if (kind === undefined || !valid) return
+    const name = label.trim()
+    const secret = kind === 'password' ? password : privateKey
+    const phrase = passphrase === '' ? undefined : passphrase
+    setPrivateKey('')
+    setPassphrase('')
+    setPassword('')
+    void props.onCreate(kind, name, secret, phrase).then(() => props.onClose())
+  }
+  const footer = kind === undefined ? (
+    <WizardActions>
+      <Button variant="ghost" disabled={disabled} onClick={props.onClose}>{t('ssh.cancel')}</Button>
+    </WizardActions>
+  ) : (
+    <WizardActions>
+      <Button variant="ghost" disabled={disabled} onClick={() => setKind(undefined)}>{t('ssh.step.back')}</Button>
+      <Button variant="primary" disabled={disabled || !valid} loading={props.pending}
+        onClick={submit}>{t('panel.addConfirm')}</Button>
+    </WizardActions>
+  )
+  return (
+    <Modal open onClose={props.onClose} title={t('ssh.credentialAdd')}
+      description={t('ssh.keys.personalGuide')} closeLabel={t('panel.close')}
+      className="mrfw-sshCredentialDialog" contentClassName="mrfw-sshDialogContent" footer={footer}>
+      {kind === undefined ? (
+        <div className="mrfw-wizStack" role="radiogroup" aria-label={t('ssh.credentialAdd')}>
+          {CREDENTIAL_KINDS.map(entry => (
+            <ChoiceCard key={entry.kind}
+              title={t(entry.title)}
+              subtitle={t(entry.hint)}
+              icon={entry.icon}
+              disabled={disabled}
+              onSelect={() => setKind(entry.kind)} />
+          ))}
+        </div>
+      ) : (
+        <div className="mrfw-wizStack">
+          <WizardField label={t('ssh.label')} hint={t(`ssh.credential${kind === 'generate' ? 'Generate' : kind === 'import' ? 'Import' : 'Password'}Hint` as Key)}>
+            <Input className="mrfw-sshInput" aria-label={t('ssh.label')} placeholder={t('ssh.label')}
+              value={label} disabled={disabled} autoFocus
+              onChange={event => setLabel(event.currentTarget.value)} />
+          </WizardField>
+          {kind === 'import' ? (
+            <>
+              <WizardField label={t('ssh.privateKey')}>
+                <textarea className="mrfw-sshTextarea" aria-label={t('ssh.privateKey')} placeholder={t('ssh.privateKey')}
+                  value={privateKey} disabled={disabled} onChange={event => setPrivateKey(event.currentTarget.value)} />
+              </WizardField>
+              <WizardField label={t('ssh.passphrase')}>
+                <Input className="mrfw-sshInput" type="password" aria-label={t('ssh.passphrase')}
+                  placeholder={t('ssh.passphrase')} value={passphrase} disabled={disabled}
+                  onChange={event => setPassphrase(event.currentTarget.value)} />
+              </WizardField>
+            </>
+          ) : null}
+          {kind === 'password' ? (
+            <WizardField label={t('ssh.password')}>
+              <Input className="mrfw-sshInput" type="password" aria-label={t('ssh.password')}
+                placeholder={t('ssh.password')} value={password} disabled={disabled}
+                onChange={event => setPassword(event.currentTarget.value)} />
+            </WizardField>
+          ) : null}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 export interface CredentialsPanelProps {
   readonly credentials: readonly CredentialPublicView[]
   readonly busy: boolean
@@ -468,26 +567,7 @@ export interface CredentialsPanelProps {
 export function CredentialsPanel(props: CredentialsPanelProps): ReactNode {
   const { t, busy } = props
   const [confirmId, setConfirmId] = useState<string | undefined>(undefined)
-  const [create, setCreate] = useState<CredentialCreateKind | 'choose' | undefined>(undefined)
-  const addKind = create === 'choose' ? undefined : create
-  const [label, setLabel] = useState('')
-  const [privateKey, setPrivateKey] = useState('')
-  const [passphrase, setPassphrase] = useState('')
-  const [password, setPassword] = useState('')
-  const clearSecrets = (): void => { setPrivateKey(''); setPassphrase(''); setPassword('') }
-  const changeCreate = (next: typeof create): void => {
-    clearSecrets()
-    setLabel('')
-    setCreate(next)
-  }
-  const submit = (kind: CredentialCreateKind): void => {
-    const name = label.trim()
-    const key = privateKey
-    const phrase = passphrase === '' ? undefined : passphrase
-    const secret = password
-    changeCreate('choose')
-    void props.onCreate(kind, name, kind === 'password' ? secret : key, phrase)
-  }
+  const [addOpen, setAddOpen] = useState(false)
   const confirmDelete = (id: string): void => {
     setConfirmId(undefined)
     void props.onDelete(id)
@@ -520,50 +600,13 @@ export function CredentialsPanel(props: CredentialsPanelProps): ReactNode {
         ))}
       </ul>
     )}
-    <SshSettingsAdd label={t('ssh.credentialAdd')} disabled={busy} expanded={create !== undefined}
-      onClick={() => changeCreate(create === undefined ? 'choose' : undefined)} />
-    {create === undefined ? null : (
-      <div className="mrfw-sshRowActions" role="group" aria-label={t('ssh.credentialAdd')}>
-        <Button variant="outline" disabled={busy} aria-pressed={addKind === 'generate'}
-          onClick={() => changeCreate(addKind === 'generate' ? 'choose' : 'generate')}>{t('ssh.credentialGenerate')}</Button>
-        <Button variant="outline" disabled={busy} aria-pressed={addKind === 'import'}
-          onClick={() => changeCreate(addKind === 'import' ? 'choose' : 'import')}>{t('ssh.credentialImport')}</Button>
-        <Button variant="outline" disabled={busy} aria-pressed={addKind === 'password'}
-          onClick={() => changeCreate(addKind === 'password' ? 'choose' : 'password')}>{t('ssh.credentialPassword')}</Button>
-      </div>
-    )}
+    <SshSettingsAdd label={t('ssh.credentialAdd')} disabled={busy} expanded={addOpen}
+      onClick={() => setAddOpen(open => !open)} />
     {props.pending ? <StatusLine state="ongoing">{t('ssh.pending.credential')}</StatusLine> : null}
-    {addKind === undefined ? null : (
-      <div className="mrfw-sshForm">
-        <Field label={t('ssh.label')}>
-          <Input className="mrfw-sshInput" aria-label={t('ssh.label')} placeholder={t('ssh.label')}
-            value={label} onChange={event => setLabel(event.currentTarget.value)} />
-        </Field>
-        {addKind === 'import' ? (
-          <>
-            <Field label={t('ssh.privateKey')}>
-              <textarea className="mrfw-sshTextarea" aria-label={t('ssh.privateKey')} placeholder={t('ssh.privateKey')}
-                value={privateKey} onChange={event => setPrivateKey(event.currentTarget.value)} />
-            </Field>
-            <Field label={t('ssh.passphrase')}>
-              <Input className="mrfw-sshInput" type="password" aria-label={t('ssh.passphrase')}
-                placeholder={t('ssh.passphrase')} value={passphrase} onChange={event => setPassphrase(event.currentTarget.value)} />
-            </Field>
-          </>
-        ) : null}
-        {addKind === 'password' ? (
-          <Field label={t('ssh.password')}>
-            <Input className="mrfw-sshInput" type="password" aria-label={t('ssh.password')}
-              placeholder={t('ssh.password')} value={password} onChange={event => setPassword(event.currentTarget.value)} />
-          </Field>
-        ) : null}
-        <Button variant="primary"
-          disabled={busy || label.trim() === '' || (addKind === 'import' && privateKey === '') || (addKind === 'password' && password === '')}
-          onClick={() => submit(addKind)}>
-          {t('panel.addConfirm')}
-        </Button>
-      </div>
-    )}
+    {addOpen ? (
+      <AddCredentialDialog busy={busy} pending={props.pending} t={t}
+        onClose={() => setAddOpen(false)} onCreate={props.onCreate} />
+    ) : null}
   </section>
 }
 

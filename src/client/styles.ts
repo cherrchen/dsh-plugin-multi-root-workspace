@@ -3087,7 +3087,8 @@ button.mrfw-sshPickerTrigger {
 }
 
 /* Nested decisions are narrower than the management card. */
-.mrfw-sshPathDialog {
+.mrfw-sshPathDialog,
+.mrfw-sshCredentialDialog {
   width: min(620px, 100%);
   max-height: calc(100vh - 48px);
 }

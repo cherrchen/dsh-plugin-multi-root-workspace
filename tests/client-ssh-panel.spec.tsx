@@ -240,18 +240,19 @@ function settingsNavItem(dialog: HTMLElement, name: string): HTMLElement {
   return within(navigation).getByRole('button', { name })
 }
 
-/** The credential form's confirm button (the dialog has its own add-root one). */
-function chooseCredentialForm(dialog: HTMLElement, kind: 'Generate' | 'Import' | 'Password'): void {
-  const panel = within(dialog)
-  const name = `ssh.credential${kind}`
-  if (panel.queryByRole('button', { name }) === null) {
-    fireEvent.click(panel.getByRole('button', { name: 'ssh.credentialAdd' }))
+/** Open the add-credential modal and pick a kind; returns the modal element. */
+async function chooseCredentialForm(dialog: HTMLElement, kind: 'Generate' | 'Import' | 'Password'): Promise<HTMLElement> {
+  if (screen.queryByRole('dialog', { name: 'ssh.credentialAdd' }) !== null) {
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.credentialAdd' })).toBeNull())
   }
-  fireEvent.click(panel.getByRole('button', { name }))
+  fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialAdd' }))
+  const modal = await screen.findByRole('dialog', { name: 'ssh.credentialAdd' })
+  fireEvent.click(within(modal).getByRole('radio', { name: new RegExp(`ssh.credential${kind}`) }))
+  return modal
 }
 
 function sshFormConfirm(dialog: HTMLElement): HTMLElement {
-  return within(dialog.querySelector('.mrfw-sshForm') as HTMLElement).getByRole('button', { name: 'panel.addConfirm' })
+  return within(dialog).getByRole('button', { name: 'panel.addConfirm' })
 }
 
 async function callsOf(ssh: { calls: { method: string; args: unknown[] }[] }, method: string): Promise<unknown[][]> {
@@ -543,15 +544,15 @@ describe('the SSH management dialog', () => {
     const dialog = await withDialog({ ssh }, 'manage')
     fireEvent.click(settingsNavItem(dialog, 'ssh.tab.keys'))
     await within(dialog).findByText('ssh.credentials')
-    chooseCredentialForm(dialog, 'Password')
-    fireEvent.change(within(dialog).getByLabelText('ssh.label'), { target: { value: 'bot password' } })
-    const secret = within(dialog).getByLabelText('ssh.password') as HTMLInputElement
+    const add = await chooseCredentialForm(dialog, 'Password')
+    fireEvent.change(within(add).getByLabelText('ssh.label'), { target: { value: 'bot password' } })
+    const secret = within(add).getByLabelText('ssh.password') as HTMLInputElement
     fireEvent.change(secret, { target: { value: 's3cr3t-value' } })
-    fireEvent.click(sshFormConfirm(dialog))
+    fireEvent.click(sshFormConfirm(add))
     expect(await callsOf(ssh, 'credentialPassword')).toEqual([['session-1', 'bot password', 's3cr3t-value']])
     expect(dialog.innerHTML).not.toContain('s3cr3t-value')
-    chooseCredentialForm(dialog, 'Password')
-    expect((within(dialog).getByLabelText('ssh.password') as HTMLInputElement).value).toBe('')
+    const reopen = await chooseCredentialForm(dialog, 'Password')
+    expect((within(reopen).getByLabelText('ssh.password') as HTMLInputElement).value).toBe('')
   })
 
   it('clears the imported private key after submit even when the host refuses', async () => {
@@ -560,15 +561,15 @@ describe('the SSH management dialog', () => {
     const dialog = await withDialog({ ssh }, 'manage')
     fireEvent.click(settingsNavItem(dialog, 'ssh.tab.keys'))
     await within(dialog).findByText('ssh.credentials')
-    chooseCredentialForm(dialog, 'Import')
-    const material = within(dialog).getByLabelText('ssh.privateKey') as HTMLTextAreaElement
-    fireEvent.change(within(dialog).getByLabelText('ssh.label'), { target: { value: 'imported' } })
+    const add = await chooseCredentialForm(dialog, 'Import')
+    const material = within(add).getByLabelText('ssh.privateKey') as HTMLTextAreaElement
+    fireEvent.change(within(add).getByLabelText('ssh.label'), { target: { value: 'imported' } })
     fireEvent.change(material, { target: { value: 'PRIVATE-KEY-BYTES' } })
-    fireEvent.click(sshFormConfirm(dialog))
+    fireEvent.click(sshFormConfirm(add))
     await waitFor(() => expect(screen.getByText('error.credential-import-failed')).toBeTruthy())
     expect(dialog.innerHTML).not.toContain('PRIVATE-KEY-BYTES')
-    chooseCredentialForm(dialog, 'Import')
-    expect((within(dialog).getByLabelText('ssh.privateKey') as HTMLTextAreaElement).value).toBe('')
+    const reopen = await chooseCredentialForm(dialog, 'Import')
+    expect((within(reopen).getByLabelText('ssh.privateKey') as HTMLTextAreaElement).value).toBe('')
   })
 
   it('opens setup after the connection is saved and allows finishing without a binding', async () => {
@@ -951,9 +952,9 @@ describe('the SSH management dialog', () => {
     const dialog = await withDialog({ ssh }, 'manage')
     fireEvent.click(settingsNavItem(dialog, 'ssh.tab.keys'))
     await within(dialog).findByText('ssh.credentials')
-    chooseCredentialForm(dialog, 'Generate')
-    fireEvent.change(within(dialog).getByLabelText('ssh.label'), { target: { value: 'new key' } })
-    fireEvent.click(sshFormConfirm(dialog))
+    const add = await chooseCredentialForm(dialog, 'Generate')
+    fireEvent.change(within(add).getByLabelText('ssh.label'), { target: { value: 'new key' } })
+    fireEvent.click(sshFormConfirm(add))
     await waitFor(() => expect(screen.getByText('error.personal-config-conflict')).toBeTruthy())
     expect(ssh.calls.filter(call => call.method === 'state').length).toBeGreaterThanOrEqual(2)
   })
@@ -977,9 +978,9 @@ describe('the SSH management dialog', () => {
     const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
     fireEvent.click(settingsNavItem(dialog, 'ssh.tab.keys'))
     await within(dialog).findByText('ssh.credentials')
-    chooseCredentialForm(dialog, 'Generate')
-    fireEvent.change(within(dialog).getByLabelText('ssh.label'), { target: { value: 'new key' } })
-    fireEvent.click(sshFormConfirm(dialog))
+    const add = await chooseCredentialForm(dialog, 'Generate')
+    fireEvent.change(within(add).getByLabelText('ssh.label'), { target: { value: 'new key' } })
+    fireEvent.click(sshFormConfirm(add))
     await callsOf(ssh, 'credentialGenerate')
     await waitFor(() => expect(lists).toBeGreaterThan(1))
   })
@@ -1084,9 +1085,9 @@ describe('the SSH management dialog', () => {
     const dialog = await withDialog({ ssh }, 'add')
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialManage' }))
     const manager = await screen.findByRole('dialog', { name: 'ssh.credentials' })
-    chooseCredentialForm(manager, 'Generate')
-    fireEvent.change(within(manager).getByLabelText('ssh.label'), { target: { value: 'new key' } })
-    fireEvent.click(within(manager).getByRole('button', { name: 'panel.addConfirm' }))
+    const add = await chooseCredentialForm(manager, 'Generate')
+    fireEvent.change(within(add).getByLabelText('ssh.label'), { target: { value: 'new key' } })
+    fireEvent.click(sshFormConfirm(add))
     expect(await callsOf(ssh, 'credentialGenerate')).toEqual([['session-1', 'new key']])
     fireEvent.click(within(manager).getByRole('button', { name: 'panel.close' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'ssh.credentials' })).toBeNull())

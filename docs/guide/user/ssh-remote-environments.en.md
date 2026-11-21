@@ -35,7 +35,7 @@ Personal mode is configured entirely in the GUI and requires no root privileges,
   - Ensure your `~/.ssh/config` has a `Host <alias>` block (`HostName`, `User`, `IdentityFile`, etc.) and that your `~/.ssh/known_hosts` contains **exactly one** matching host key entry.
 - **Option B: Use plugin-managed credentials**
   1. In **SSH settings**, select **SSH keys** in the sidebar (or click **Manage credentials** while adding a connection).
-  2. Click **Add credential** and choose a method:
+  2. Click **Add credential** and, in the dialog that opens, pick a method first, then fill in its fields:
      - **Generate key**: enter a label; the plugin generates an ed25519 keypair. Click the **Copy public key** icon on the credential card and append it to `~/.ssh/authorized_keys` on the remote host.
      - **Import private key**: enter a label and paste the private key (provide the passphrase if encrypted; it is stripped on import and stored mode `0600` inside the credential root). Ensure the corresponding public key is authorized on the remote host.
      - **Save password**: enter a label and password. In the next step, the plugin logs in once with the password to append a per-environment access key to the remote `authorized_keys`, after which all connections use key auth.
@@ -45,7 +45,7 @@ Personal mode is configured entirely in the GUI and requires no root privileges,
 1. Select **Remote connections** in the sidebar and click **Add connection** below the list.
 2. **Step 1 (Connection and host key)**:
    - Choose **SSH host alias** or **Managed credential**, fill in display name, remote platform (`Linux` / `macOS`), and `user@hostname:port` (when using an alias, host/port/user are resolved automatically by `ssh -G` during scanning).
-   - Click **Scan and test connection**, inspect the fingerprint in the confirmation modal, and click **Confirm and save**.
+   - Click **Scan and test connection**, pick one of the scanned host-key fingerprints in the same step, then click **Confirm and save**; click **Back** to return to the form.
 3. **Step 2 (Connection setup)**:
    - **Password credentials**: click **Install access key** first so the plugin logs in once with the saved password and installs the access key.
    - **Linking managed config**: if prompted that the config is not linked, click **Link ~/.ssh/config**. The plugin backs up your existing `~/.ssh/config` and prepends a single `Include` line so the managed host alias resolves (required before connecting).
