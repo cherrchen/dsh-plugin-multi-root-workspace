@@ -489,12 +489,7 @@ describe('the navigator search takeover (0.2.2-rc.2)', () => {
   })
 })
 
-describe('the custody-mode and alert rules', () => {
-  it('keeps the mode option title on a defined label token', () => {
-    expect(STYLES).toMatch(/\.mrfw-modeOptionTitle\s*\{[^}]*color:\s*var\(--dsw-alias-label-primary\)/s)
-    expect(STYLES).not.toMatch(/\.mrfw-modeOptionTitle\s*\{[^}]*--dsw-alias-label\)/s)
-  })
-
+describe('the alert rules', () => {
   it('keeps the SSH dialog alert on the error-primary token', () => {
     expect(STYLES).toMatch(/\.mrfw-alert\s*\{[^}]*color:\s*var\(--dsw-alias-state-error-primary\)/s)
   })

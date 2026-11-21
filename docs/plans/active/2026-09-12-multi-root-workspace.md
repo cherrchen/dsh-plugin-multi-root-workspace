@@ -2243,3 +2243,9 @@ rc.5 只有 5 个提交、433 个文件（917 行新增 / 594 行删除）；其
 ## SSH 环境与 Workspace Root 绑定拆分（2026-11-20）
 
 personal 模式的连接和 Workspace Root 已分别管理。同一个 Workspace 可通过同一条连接绑定多个远端目录。旧文件迁移、核验范围和 CI 修复见 [拆分计划](../completed/2026-11-20-ssh-environments-and-workspace-bindings.md)。
+
+## SSH 开放范围收窄为个人模式（2026-11-21）
+
+未发布的 SSH 分支仅向用户开放默认关闭的个人模式。界面、设置和 Host 控制面同步限制开放范围，npm 包移除 SSH Broker 入口与安装脚本。旧档位的停用和迁移办法见 [SSH 远端环境参考](../../reference/ssh-remote-environments.md#停用的旧配置)。
+
+macOS arm64、DSH `0.2.2-rc.5` 验证：全量测试 2509 通过、133 跳过。默认组合冒烟 58 通过。兼容性、构建、lint、文档和 npm 打包检查通过。真实远端主机与 Broker 的实机用例未运行。

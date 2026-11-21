@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
-import { createRequire } from 'node:module'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BundleSettingsCard, installSkillsSettingsCard, RemoteSwitchRow } from '../src/client/skills-settings.tsx'
-import { RemoteCustodyModeControl } from '../src/client/remote-custody.tsx'
 import * as Confirmation from '../src/compat/ops-confirmation.ts'
 import { DICTIONARIES } from '../src/client/locales.ts'
 import { OpsCompatibilitySettingsCard } from '../src/client/ops-settings.tsx'
@@ -254,7 +252,7 @@ describe('bundle settings coordinator', () => {
   })
 })
 
-describe('SSH remote-environments settings and custody control', () => {
+describe('personal SSH remote-environments settings', () => {
   it('shows SSH management first when enabled and opens the dialog without a session', async () => {
     let snapshot = { value: { enabled: false }, status: 'ready', writable: true, revision: 1 }
     const { listeners, ...remoteForm } = opsForm(snapshot)
@@ -275,6 +273,7 @@ describe('SSH remote-environments settings and custody control', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
     expect(await within(dialog).findByRole('button', { name: 'ssh.tab.add' })).toBeTruthy()
+    expect(within(dialog).queryByRole('tab', { name: 'ssh.tab.mode' })).toBeNull()
     expect(call.mock.calls.map(args => args.slice(0, 3))).toEqual(expect.arrayContaining([
       [SSH_SETTINGS_CHANNEL, 'status', {}], [SSH_SETTINGS_CHANNEL, 'sshState', {}],
     ]))
@@ -338,126 +337,4 @@ describe('SSH remote-environments settings and custody control', () => {
     expect(screen.getByRole('switch', { name: 'ops.compatibilityEnable' })).not.toBeNull()
   })
 
-  it('writes a custody-mode change directly while the switch is off', async () => {
-    const writes: unknown[] = []
-    const form = opsForm({ value: { enabled: false }, status: 'ready', writable: true, revision: 3 }, writes)
-    render(<RemoteCustodyModeControl form={form} t={t} />)
-    fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.team/ }))
-    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'team' }], 3]]))
-    expect(screen.queryByRole('dialog')).toBeNull()
-  })
-
-  it('shows the four team broker fields only in team mode and saves them with the form revision', async () => {
-    const writes: unknown[] = []
-    const form = opsForm({ value: { enabled: false, mode: 'team' } as never, status: 'ready', writable: true, revision: 5 }, writes)
-    render(<RemoteCustodyModeControl form={form} t={t} />)
-    fireEvent.change(screen.getByLabelText('remote.team.manifestPath'), { target: { value: '/etc/dsh/remote.json' } })
-    fireEvent.change(screen.getByLabelText('remote.team.socketPath'), { target: { value: '/run/dsh/broker.sock' } })
-    fireEvent.change(screen.getByLabelText('remote.team.brokerUid'), { target: { value: '1001' } })
-    fireEvent.change(screen.getByLabelText('remote.team.credentialRoot'), { target: { value: '/var/lib/dsh/ssh' } })
-    fireEvent.click(screen.getByRole('button', { name: 'remote.team.save' }))
-    await waitFor(() => expect(writes).toEqual([[[
-      { op: 'set', path: ['team', 'manifestPath'], value: '/etc/dsh/remote.json' },
-      { op: 'set', path: ['team', 'socketPath'], value: '/run/dsh/broker.sock' },
-      { op: 'set', path: ['team', 'brokerUid'], value: 1001 },
-      { op: 'set', path: ['team', 'credentialRoot'], value: '/var/lib/dsh/ssh' },
-    ], 5]]))
-    cleanup()
-    render(<RemoteCustodyModeControl form={opsForm({ value: { enabled: false }, status: 'ready', writable: true })} t={t} />)
-    expect(screen.queryByLabelText('remote.team.manifestPath')).toBeNull()
-  })
-
-  it('shows the read-only deployment note in hardened mode and no team fields', () => {
-    const form = opsForm({ value: { enabled: false, mode: 'hardened' } as never, status: 'ready', writable: true })
-    render(<RemoteCustodyModeControl form={form} t={t} />)
-    expect(screen.getByText('remote.mode.hardenedNote')).not.toBeNull()
-    expect(screen.queryByLabelText('remote.team.manifestPath')).toBeNull()
-  })
-
-  it('routes a less isolated switch while enabled through the risk confirmation with mode-specific copy', async () => {
-    const writes: unknown[] = []
-    const form = opsForm({ value: { enabled: true, mode: 'hardened' } as never, status: 'ready', writable: true, revision: 6 }, writes)
-    const tParams: Translate = (key, params) => params === undefined ? key : `${key}(${JSON.stringify(params)})`
-    render(<RemoteCustodyModeControl form={form} t={tParams} />)
-    fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.personal/ }))
-    expect(writes).toEqual([])
-    await screen.findByRole('dialog', { name: 'remote.downgradeTitle' })
-    expect(screen.getByText(/remote\.downgrade\.personal/)).not.toBeNull()
-    const confirm = screen.getByRole('button', { name: 'remote.downgradeConfirm' }) as HTMLButtonElement
-    fireEvent.click(confirm)
-    expect(writes).toEqual([])
-    fireEvent.click(screen.getByRole('checkbox', { name: 'remote.downgradeAcknowledge' }))
-    fireEvent.click(confirm)
-    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'personal' }], 6]]))
-    expect(screen.queryByRole('dialog')).toBeNull()
-  })
-
-  it('writes through the real upstream ConfigFormController with its receiver intact', async (ctx) => {
-    let spec: string | undefined
-    try {
-      const anchor = createRequire(require.resolve('@deepseek-ai/dsh-client-locale/package.json'))
-      spec = anchor.resolve('@deepseek-ai/dsh-client-ui-settings/src/client/config-form.ts')
-    } catch { spec = undefined }
-    if (spec === undefined) return ctx.skip()
-    const { ConfigFormController } = (await import(spec)) as {
-      ConfigFormController: new (ctx: unknown, spec: unknown, mirror: unknown, schema: unknown) => {
-        getSnapshot(): unknown; mutate(...args: unknown[]): Promise<boolean>; dispose(): Promise<void>
-      }
-    }
-    const ns = 'multi-root-remote-tools'
-    const calls: unknown[][] = []
-    const view = {
-      writable: true,
-      namespaces: [{ ns, revision: 5, schema: {}, value: { enabled: false, mode: 'personal' }, base: undefined, user: undefined }],
-    }
-    const mirror = {
-      getSnapshot: () => ({ status: 'ready', view, error: null }),
-      subscribe: () => () => {},
-      ensure: async () => {},
-      acceptView: () => {},
-      load: async () => {},
-    }
-    const form = new ConfigFormController(
-      { remote: { settings: { mutate: async (...args: unknown[]) => { calls.push(args); return { ok: true, value: { ns, revision: 6 } } } } } },
-      { namespace: ns, decode: (value: unknown) => value },
-      mirror,
-      { rehydrate: (value: unknown) => value, validate: () => undefined },
-    )
-    render(<RemoteCustodyModeControl form={form as never} t={t} />)
-    fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.hardened/ }))
-    await waitFor(() => expect(calls).toEqual([[ns, [{ op: 'set', path: ['mode'], value: 'hardened' }], 5]]))
-    expect(screen.queryByRole('status')).toBeNull()
-    await form.dispose()
-  })
-
-  it('writes through a receiver-dependent (prototype-method) form', async () => {
-    const writes: unknown[] = []
-    class ClassForm {
-      generation = 0
-      listeners: (() => void)[] = []
-      snapshot = { value: { enabled: false, mode: 'personal' }, status: 'ready', writable: true, revision: 4 }
-      getSnapshot(): unknown { return this.snapshot }
-      subscribe(listener: () => void): () => void { this.listeners.push(listener); return () => {} }
-      async mutate(ops: unknown, revision?: number): Promise<boolean> {
-        this.generation += 1
-        writes.push([ops, revision])
-        return true
-      }
-    }
-    const form = new ClassForm()
-    render(<RemoteCustodyModeControl form={form as never} t={t} />)
-    fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.hardened/ }))
-    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'hardened' }], 4]]))
-    expect(form.generation).toBe(1)
-    expect(screen.queryByRole('status')).toBeNull()
-  })
-
-  it('applies a mode upgrade and any mode change while disabled without confirmation', async () => {
-    const writes: unknown[] = []
-    const form = opsForm({ value: { enabled: true, mode: 'personal' } as never, status: 'ready', writable: true, revision: 8 }, writes)
-    render(<RemoteCustodyModeControl form={form} t={t} />)
-    fireEvent.click(screen.getByRole('radio', { name: /remote\.mode\.hardened/ }))
-    await waitFor(() => expect(writes).toEqual([[[{ op: 'set', path: ['mode'], value: 'hardened' }], 8]]))
-    expect(screen.queryByRole('dialog')).toBeNull()
-  })
 })

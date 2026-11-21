@@ -940,7 +940,7 @@ describe.skipIf(process.platform === 'win32')('the personal plane rechecks prote
   })
 })
 
-describe.skipIf(process.platform === 'win32')('the remote tools row remounts a subtree that landed unready', () => {
+describe.skipIf(process.platform === 'win32')('the remote tools row waits for the plane to become ready', () => {
   it('notifies remote listeners when the owner plane turns ready at acquisition', async () => {
     const fixture = createFixtureWorkspace('remote-tools-ready')
     const personalPath = join(fixture.base, 'remote-personal.json')
@@ -962,7 +962,7 @@ describe.skipIf(process.platform === 'win32')('the remote tools row remounts a s
     }
   })
 
-  it('a dead same-identity mount retries and registers the verifier on ready', async () => {
+  it('registers the verifier and tools when the plane becomes ready', async () => {
     const { Context: CordisContext } = await import('@deepseek-ai/cordis')
     const RemoteToolsRow = await import('../src/remote/tools.ts')
     const { fakeManifest } = await import('./support/fake-remote.ts')
@@ -971,6 +971,7 @@ describe.skipIf(process.platform === 'win32')('the remote tools row remounts a s
     const setVerifier = vi.fn(() => () => {})
     const registerTool = vi.fn(() => () => {})
     const registry = {
+      remoteEnabled: true,
       remoteManifest: fakeManifest({ primary: '/w' }),
       remoteManifestDigest: 'digest-1',
       remoteCredentialRoot: undefined as string | undefined,
@@ -995,14 +996,12 @@ describe.skipIf(process.platform === 'win32')('the remote tools row remounts a s
     try {
       await ctx.plugin(RemoteToolsRow as never, { enabled: true, mode: 'personal' })
       await vi.waitFor(() => expect(registry.configureRemote).toHaveBeenCalled())
-      // The first mount lands while the plane is unready: the subtree exists,
-      // yet neither the verifier nor a tool registers.
+      // Wait for the ready notification before mounting the tools.
       await new Promise(resolve => setTimeout(resolve, 100))
       expect(setVerifier).not.toHaveBeenCalled()
       expect(registerTool).not.toHaveBeenCalled()
 
-      // Ready lands through a remote change with the SAME identity — the dead
-      // mount must be retried, not pinned by `mountedIdentity` forever.
+      // A ready notification causes the first mount.
       registry.remoteStatus = { state: 'ready' }
       for (const listener of listeners) listener()
       await vi.waitFor(() => expect(setVerifier).toHaveBeenCalledTimes(1))

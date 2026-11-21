@@ -1,18 +1,20 @@
 # 多执行环境 G1a：远端控制面参考
 
-本文是 [G1a](../plans/active/2026-11-06-multi-environment-gates.md) 已实现控制面的稳定技术参考：部署清单格式、远端记录域、`remote-1` 协议入口、Host 侧准入接口及拒绝码。架构合同归 [ADR-0030](../decisions/ADR-0030-environment-and-root-identity.md)；验证结果与关卡状态只归[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md#多执行环境-g1a-控制面2026-11-07)。`remote-tools` 行随默认组合发货，但只在实验性开关 `multi-root-remote-tools.enabled` 打开且 broker 证明通过后才安装端点校验器、`remote_copy`/`remote_bash` 与能力投影；默认组合不暴露任何模型可见的远端能力。2026-11-11 外部评审通过后，2026-11-13 维护者批准以"默认关闭的实验性开关"形式开放模型入口；是否为具体部署开启由部署方决定。
+> **当前开放范围（2026-11-21）**：公开构建仅提供个人 SSH。下文的团队与硬化模式及 Broker 部署步骤是历史设计和内部验证记录。当前启用与旧配置处理见 [SSH 远端环境参考](./ssh-remote-environments.md)。
+
+本文记录 [G1a](../plans/active/2026-11-06-multi-environment-gates.md) 的控制面合同与实验部署，覆盖部署清单、远端记录域、`remote-1` 协议及 Host 准入接口。架构合同见 [ADR-0030](../decisions/ADR-0030-environment-and-root-identity.md)，关卡状态和验证结果见[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md#多执行环境-g1a-控制面2026-11-07)。
 
 ## 开关与状态
 
-用户入口是 live 开关 `multi-root-remote-tools.enabled`：随 `multi-root-remote-tools` 行挂到 Settings 命名空间（插件详情设置卡带"实验性"警示标签，开启需风险确认；持久化值覆盖行配置 `enabled`）。Registry 行配置 `remoteEnvironments: { enabled?: boolean; manifestPath?: string }`：默认组合写 `manifestPath: /etc/dsh-ssh-broker/manifest.json` 但**不写** `enabled`——`enabled` 只是开关的**初值**（供保留旧语义的专用 profile 使用），实际开合由 `registry.configureRemote(live)` 在权威转移队列内重评估：开启要求 live 开关为 true **且** `manifestPath` 已配置，关闭时恢复精确 `disabled`（无 `remote-1` 监听、无远端域打开），本地 v1 注册表不受影响。
+公开构建的开关是 `multi-root-remote-tools.enabled`。它控制个人 SSH 工具与控制面，配置方式见 [SSH 远端环境参考](./ssh-remote-environments.md)。下文的部署清单配置用于记录归档的 Broker 实验。
 
-**凭据托管档位（ADR-0049）。** live 设置另有 `mode`（`personal`/`team`/`hardened`，默认 `personal`；未知或非法值使该次读取按 `enabled:false` 处理并告警）与可选 `team` 块（`manifestPath`/`socketPath`/`brokerUid`/`credentialRoot` 逐项覆盖行内 `broker.config`，hardened 忽略之）。Registry 行配置扩为 `remoteEnvironments: { enabled?, manifestPath?, personalPath?, credentialRoot? }`：personal 模式从 `personalPath` 读用户配置（文件缺失 = 空清单，照常到 `ready`），team/hardened 仍读 `manifestPath`（live `team.manifestPath` 覆盖行值）。三档对比、个人配置/凭据文件布局、RPC 端点与拒绝码、托管 `ssh_config` 模板、Include 链接、helper 安装与密码引导见 [ssh-remote-environments.md](./ssh-remote-environments.md)；模式切换与文件变更检测均走 `configureRemote`/`refreshRemotePersonal` 串行化。`registry.remoteStatus.state`：
+**历史 Broker 配置（ADR-0049）。** 团队模式的 `team` 块可覆盖行内 `broker.config` 的端点参数，硬化模式从专用 profile 读取参数。两者都使用部署清单。个人 SSH 从用户配置生成清单，并通过 `refreshRemotePersonal` 重载。控制面状态如下。
 
 | 状态 | 含义 |
 | --- | --- |
 | `disabled` | 未开启；v1 协议、v1 域、scope、prompt 与不装实验时逐字节相同。 |
 | `platform-deferred` | 原生 Windows 发起端（ADR-0030 无限期延后），不读清单。 |
-| `config-invalid` | 缺 `manifestPath` 或清单解析/保护检查失败；本地 Registry 不受影响。 |
+| `config-invalid` | 缺少模式所需的配置路径，或清单解析与文件保护检查失败。 |
 | `storage-failed` | owner 打开或写入远端域失败，或 v1 存储失败。 |
 | `owner-without-remote-protocol` | follower 连不上 `remote-1`（旧 owner 或 owner 未开启实验），或通道已关闭。 |
 | `epoch-mismatch` / `config-digest-mismatch` | `remote-1` 与 v1 不属同一 epoch，或两个 Host 的清单摘要不同。 |

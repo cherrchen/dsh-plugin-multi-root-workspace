@@ -1722,7 +1722,8 @@ export class MultiRootRegistry extends Service {
    * shape. Disabling restores the exact `disabled` state — no remote-1
    * listener and no remote domain stays open — while v1 keeps working.
    */
-  async configureRemote(next: import('./remote/plane.ts').RemoteLiveConfig): Promise<void> {
+  async configureRemote(request: import('./remote/plane.ts').RemoteLiveConfig): Promise<void> {
+    const next = this.remotePlane.effectiveConfig(request)
     let rebound = false
     await this.serializeAuthority(async () => {
       if (this.disposed) return
@@ -2537,8 +2538,7 @@ export class MultiRootRegistry extends Service {
                 }
                 // The remote-1 channel shares the v1 epoch; it dies with it.
                 await this.remotePlane.connectFollower(this.medium, client.epoch!)
-                // 'ready' just landed: remote listeners (the gated tools
-                // subtree) re-evaluate a mount that early-returned unready.
+                // Remote tools can mount when the follower plane becomes ready.
                 this.notifyRemoteChange()
                 this.recovery.kick()
                 break
@@ -2631,8 +2631,7 @@ export class MultiRootRegistry extends Service {
       // `owner-without-remote-protocol`. Remote failures degrade only remote.
       await this.remotePlane.openOwner(this.authorityStorageContext, this.medium, epoch,
         (method, args, digest) => this.dispatchRemote(method as RemoteMethod, args, digest))
-      // 'ready' just landed: remote listeners (the gated tools subtree)
-      // re-evaluate a mount that early-returned while the plane was unready.
+      // Remote tools can mount when the owner plane becomes ready.
       this.notifyRemoteChange()
     }
     // One synchronous commit: the domain/table/epoch/authority assignments,

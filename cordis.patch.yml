@@ -100,17 +100,9 @@
         # follower reconnect, retryable storage failure); on by default.
         # Set false for on-demand recovery only (refresh still works).
         backgroundRecovery: true
-        # The SSH remote control plane (ADR-0030). `manifestPath` alone does
-        # NOT open it: `remoteEnvironments.enabled` — deliberately absent here —
-        # is only the INITIAL value of the `multi-root-remote-tools.enabled`
-        # live switch, so the plane stays `disabled` until the operator turns
-        # that switch on. A dedicated broker profile may set `enabled: true`
-        # and point at its own manifest instead.
+        # Personal SSH stores. The live remote-tools switch opens the plane;
+        # this row leaves it disabled at boot.
         remoteEnvironments:
-          manifestPath: /etc/dsh-ssh-broker/manifest.json
-          # Personal custody (ADR-0049 §2, the default mode): the user-owned
-          # SSH environment store and its credential root. Team/hardened keep
-          # using manifestPath above.
           personalPath: !!js dshHomePath('storages/multi_root_workspace.remote-personal.json')
           credentialRoot: !!js dshHomePath('storages/multi_root_workspace.ssh')
     # Upstream `agent-instructions` only discovers instruction files from the
@@ -144,9 +136,8 @@
     # projection, or profile guard is registered, and the registry's remote
     # control plane stays `disabled` — nothing is model-visible until the
     # operator turns the plugin-detail switch on (the settings card asks for a
-    # risk confirmation first). The credential-broker block stays
-    # deployment-supplied: even with the switch on, `broker.config` absent
-    # still means no tools, and every call goes through Registry admission.
+    # risk confirmation first). The tools use personal SSH custody and every
+    # call goes through Registry admission.
     - id: multi-root-remote-tools
       name: '@dsh-electron/dsh-plugin-multi-root-workspace/remote-tools'
       config:

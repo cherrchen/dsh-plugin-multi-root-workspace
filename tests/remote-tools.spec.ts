@@ -108,19 +108,19 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
     await unloaded
     expect(remote.read('/srv/root/rollback.txt')).toBeUndefined()
     expect(remote.sftpCalls.some(call => call.startsWith('hardlink '))).toBe(false)
-    await expect(registerRemote(mounted, 'build', 'app')).rejects.toThrow(/no remote endpoint verifier/)
+    await expect(registerRemote(mounted, 'build', 'app')).rejects.toMatchObject({ code: 'endpoint-unverifiable' })
     expect(await mounted.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
   })
 
-  it('refuses a declarative enabled switch without broker custody', async () => {
+  it('refuses an enabled hardened profile before opening the plane', async () => {
     world = await mountRemoteTools(fixture, { withTools: false })
     const directConfig = { enabled: true, mode: 'hardened' as const, broker: undefined }
     await world.ctx.plugin({ name: 'g5-direct-refused', inject, apply: ctx => applyRemoteTools(ctx, directConfig) })
     expect(await world.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
-    await expect(registerRemote(world, 'build', 'app')).rejects.toThrow(/no remote endpoint verifier/)
+    await expect(registerRemote(world, 'build', 'app')).rejects.toMatchObject({ code: 'remote-unavailable' })
   })
 
-  it('does not mount when the credential broker fails attestation', async () => {
+  it('refuses an implicit broker profile even when the registry fixture was enabled', async () => {
     world = await mountRemoteTools(fixture, { withTools: false })
     const uid = process.getuid?.() ?? -1
     await world.ctx.plugin({
@@ -134,7 +134,7 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
     expect(missing.isError).toBe(true)
   })
 
-  it('stays disabled without an explicit broker configuration', async () => {
+  it('stays disabled in a deployment-manifest fixture', async () => {
     world = await mountRemoteTools(fixture, { withTools: false })
     await world.ctx.plugin({ name: 'g5-remote-tools-off', inject, apply: (ctx: typeof world.ctx) => applyRemoteTools(ctx, {}) })
     // The switch is off: the row loads and registers nothing.
@@ -185,11 +185,9 @@ describe('the model-facing capability projection', () => {
   it('ships in the default patch behind the default-off live switch', () => {
     const patch = readFileSync(join(import.meta.dirname, '..', 'cordis.patch.yml'), 'utf8')
     // The row is mounted so the plugin-detail switch exists, but the shipped
-    // config keeps it inert; the broker block stays deployment-supplied.
+    // config keeps it inert.
     expect(patch).toMatch(/id: multi-root-remote-tools\n\s+name: '@dsh-electron\/dsh-plugin-multi-root-workspace\/remote-tools'\n\s+config:\n(?:\s+#.*\n)*\s+enabled: false/)
-    // The registry row carries manifestPath but no enabled flag: the switch
-    // — not the row — opens the remote plane.
-    expect(patch).toMatch(/remoteEnvironments:\n\s+manifestPath: \/etc\/dsh-ssh-broker\/manifest\.json/)
+    expect(patch).toMatch(/remoteEnvironments:\n\s+personalPath:/)
     expect(patch).not.toMatch(/remoteEnvironments:\n(?:\s+#.*\n)*\s+.*enabled/)
   })
 })

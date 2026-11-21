@@ -1,5 +1,7 @@
 # ADR-0049：SSH 远端环境的三档凭据托管模式
 
+> **当前开放范围（2026-11-21）**：公开构建仅提供个人 SSH。下文的团队与硬化模式及 Broker 部署步骤是历史设计和内部验证记录。当前启用与旧配置处理见 [SSH 远端环境参考](../reference/ssh-remote-environments.md)。
+
 **状态** Accepted · 2026-11-13（维护者决定）。本文在 [ADR-0048](./ADR-0048-credential-broker.md) 的 broker 托管之外，增加两档更轻的托管方式，并把三档统一到一个用户可见的设置入口。实现与验证状态归[路线图总账](../plans/active/2026-09-12-multi-root-workspace.md)；部署与使用步骤归 [SSH 远端环境使用参考](../reference/ssh-remote-environments.md)。
 
 ## 背景（Fact）

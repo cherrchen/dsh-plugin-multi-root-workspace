@@ -47,7 +47,6 @@ import {
 import { PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
 import type { RemotesClient } from './remotes-client.ts'
-import type { RemoteModeControl } from '../compat/skills-client.ts'
 import type { SshClient } from './ssh-client.ts'
 import { SshManagementDialog, SshWorkspaceBindingsDialog, type SshDialogTab } from './ssh-panel.tsx'
 import { RemoteRootMenu } from './remote-root-menu.tsx'
@@ -73,7 +72,7 @@ export interface WorkspaceFoldersActionProps {
   /** The personal-custody management client; absent when this host cannot serve it. */
   readonly ssh?: SshClient | undefined
   /** The shared remote-tools settings form; absent when the host exposes no config form. */
-  readonly remoteMode?: RemoteModeControl | undefined
+  readonly subscribeRemoteSettings?: ((listener: () => void) => () => void) | undefined
   /** Opens the composed directory picker, when one is composed. */
   readonly pickDirectory: (() => Promise<string | null>) | undefined
   /** Bound translator for this plugin's namespace. */
@@ -551,9 +550,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   // form so an open dialog reflects an enable/disable or custody-mode write
   // immediately, instead of waiting for a remount or a DSH restart.
   useEffect(() => {
-    if (props.remoteMode === undefined) return
-    return props.remoteMode.subscribe(() => { void refreshRemotes() })
-  }, [props.remoteMode, refreshRemotes])
+    return props.subscribeRemoteSettings?.(() => { void refreshRemotes() })
+  }, [props.subscribeRemoteSettings, refreshRemotes])
 
   /**
    * Submit one change to the host and adopt the view it answers with.
@@ -998,13 +996,10 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             })}
           </section>
 
-          {props.remotes === undefined || remoteState.view?.status.state === 'disabled' ? null : (
+          {props.remotes === undefined || (remoteState.view !== undefined && (remoteState.view.status.state === 'disabled' || remoteState.view.custodyMode !== 'personal')) ? null : (
             <section className="mrfw-section">
               <div className="mrfw-sectionTitleRow mrfw-sectionTitleRowAction">
                 <span className="mrfw-sectionTitle">{t('panel.remoteList')}</span>
-                {remoteState.view?.custodyMode === undefined ? null : (
-                  <span className="mrfw-accessBadge">{t('ssh.custody', { mode: t(`remote.mode.${remoteState.view.custodyMode}` as Key) })}</span>
-                )}
                 <div className="mrfw-sectionAction mrfw-sshAddRow">
                   <Action disabled={remoteState.view === undefined} onClick={() => setSshDialog('connections')}>
                     {t('panel.remoteManage')}
@@ -1090,8 +1085,6 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
               sessionId={requestBase()?.sessionId}
               custodyMode={remoteState.view?.custodyMode}
               status={remoteState.view?.status}
-              endpoints={remoteState.view?.endpoints ?? []}
-              remoteMode={props.remoteMode}
               onClose={() => { setSshDialog(undefined) }}
               onChanged={refreshRemoteSection}
               t={t}

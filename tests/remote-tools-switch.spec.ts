@@ -1,10 +1,4 @@
-/**
- * The live `multi-root-remote-tools.enabled` switch. The row ships in the
- * default bundle but is inert while off — nothing registers and the remote
- * control plane stays `disabled` — and flipping it drives the plane and the
- * gated tool subtree (guard, attestation, tools, verifier, projection)
- * together.
- */
+/** The personal-only SSH row and its live, default-off switch. */
 import { writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -18,27 +12,14 @@ import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-wo
 import { mountRemoteTools, registerRemote, type RemoteToolsWorld } from './support/remote-tools.ts'
 import { fakeExecBackend, FAKE_EXEC, type FakeRemote } from './support/fake-remote.ts'
 
-/** The broker answer this spec controls; the wire itself is faked out. */
 const probe = vi.hoisted(() => ({
-  calls: 0,
+  attest: vi.fn(),
   personalMounts: 0,
-  fail: false,
   remotes: undefined as ReadonlyMap<string, FakeRemote> | undefined,
   backends: undefined as ReadonlyMap<string, RemoteExecutionBackend> | undefined,
 }))
 
-vi.mock('../src/remote/broker/attest.ts', async () => {
-  const { FakeManager } = await import('./support/fake-remote.ts')
-  return {
-    attestBroker: async (_config: unknown, manifest: never) => {
-      probe.calls += 1
-      if (probe.fail || probe.remotes === undefined || probe.backends === undefined) {
-        return { status: 'unavailable', code: 'broker-failed', reason: 'the test broker refused' }
-      }
-      return { status: 'attested', connection: {}, manager: new FakeManager(manifest, probe.remotes, probe.backends) }
-    },
-  }
-})
+vi.mock('../src/remote/broker/attest.ts', () => ({ attestBroker: probe.attest }))
 
 // Personal custody builds its manager directly (no broker); the fake manager
 // stands in so admission runs end-to-end without touching ssh(1).
@@ -58,13 +39,7 @@ vi.mock('../src/remote/ssh-environment.ts', async (importOriginal) => {
   return { ...original, SshEnvironmentManager: TestManager }
 })
 
-/**
- * The gate tools.ts evaluates with the REAL installation report: on a lane
- * below the SSH floor the gated subtree never mounts, so the specs asserting
- * attestation/tools skip with the gate's reason instead of failing. The two
- * "mounts nothing" specs below keep running on every lane — the plane opens
- * and nothing model-visible exists on either side of the floor.
- */
+// Tool-mount assertions require an installation eligible for personal SSH.
 const realGate = classifySshCapability({
   platform: process.platform,
   local: classifyInstallation(),
@@ -79,13 +54,13 @@ let world: RemoteToolsWorld | undefined
 beforeEach(() => { fixture = createFixtureWorkspace('remote-tools-switch') })
 afterEach(async () => {
   await world?.dispose(); world = undefined; fixture.dispose()
-  probe.calls = 0; probe.personalMounts = 0; probe.fail = false; probe.remotes = undefined; probe.backends = undefined
+  probe.attest.mockClear(); probe.personalMounts = 0; probe.remotes = undefined; probe.backends = undefined
 })
 
 interface SwitchHooks {
   setSource(source: () => { enabled?: unknown }): void
   onChange(): void
-  validate(value: { enabled?: unknown }): void
+  validate(value: { enabled?: unknown; mode?: unknown; team?: unknown }): void
 }
 
 /** A minimal Settings host: the persisted value is `live`, flipped by the test. */
@@ -111,23 +86,25 @@ const localToLocal = {
 const BROKER = { socketPath: '/broker/broker.sock', brokerUid: 999, credentialRoot: '/broker/credentials' }
 
 async function mountRow(
-  options: { remote?: { enabled?: boolean; personalPath?: string; credentialRoot?: string }; config?: { enabled?: boolean; broker?: boolean; mode?: 'personal' | 'team' | 'hardened' }; persisted?: boolean; persistedMode?: 'personal' | 'team' | 'hardened'; persistedTeam?: Record<string, unknown> } = {},
+  options: {
+    remote?: { enabled?: boolean; personalPath?: string; credentialRoot?: string }
+    config?: { enabled?: boolean; broker?: boolean; mode?: 'personal' | 'team' | 'hardened' }
+  } = {},
 ): Promise<{ hooks: () => SwitchHooks | undefined; live: { enabled: boolean; mode?: string; team?: Record<string, unknown> } }> {
-  world = await mountRemoteTools(fixture, { withTools: false, ...(options.remote === undefined ? {} : { remote: options.remote }) })
+  world = await mountRemoteTools(fixture, {
+    withTools: false,
+    remote: { personalPath: join(fixture.base, 'personal.json'), credentialRoot: join(fixture.base, 'cred'), ...options.remote },
+  })
   probe.remotes = world.remotes
   probe.backends = new Map([['build', fakeExecBackend(world.remotes.get('build')!, FAKE_EXEC)]])
-  // `persisted` is what the bound Settings source reports; an absent override
-  // reports the row's own initial value, so dedicated profiles seed it true.
   const live: { enabled: boolean; mode?: string; team?: Record<string, unknown> } = {
-    enabled: options.persisted ?? options.config?.enabled ?? false,
-    ...(options.persistedMode === undefined ? {} : { mode: options.persistedMode }),
-    ...(options.persistedTeam === undefined ? {} : { team: options.persistedTeam }),
+    enabled: options.config?.enabled ?? options.remote?.enabled ?? false,
   }
   const hooks = installSettings(world.ctx, live)
   const config = {
     ...(options.config?.enabled === undefined ? {} : { enabled: options.config.enabled }),
     ...(options.config?.mode === undefined ? {} : { mode: options.config.mode }),
-    ...(options.config?.broker === false ? {} : { broker: { config: BROKER } }),
+    ...(options.config?.broker === true ? { broker: { config: BROKER } } : {}),
   }
   await world.ctx.plugin({ name: 'remote-tools-switch', inject, apply: (ctx: Context) => applyRemoteTools(ctx, config) })
   return { hooks, live }
@@ -139,7 +116,7 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
     expect(world!.stack.registry.remoteEnabled).toBe(false)
     expect(world!.stack.registry.remoteStatus.state).toBe('disabled')
-    expect(probe.calls).toBe(0)
+    expect(probe.attest).not.toHaveBeenCalled()
     expect(await world!.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
     await expect(registerRemote(world!, 'build', 'app')).rejects.toMatchObject({ code: 'remote-unavailable' })
   })
@@ -161,14 +138,14 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
       inject,
       apply: (ctx: Context) => applyRemoteTools(ctx, { ...validated, broker: { config: BROKER } } as never),
     })
-    await expect.poll(() => seeds[0], { timeout: 2_000 }).toMatchObject({ enabled: true, mode: 'personal' })
+    await expect.poll(() => seeds[0], { timeout: 2_000 }).toEqual({ enabled: true })
     await expect.poll(() => world!.stack.registry.remoteMode, { timeout: 2_000 }).toBe('personal')
     // The bound Settings source still says off; the seed only fixes the initial
     // value the Settings UI starts from.
     expect(world!.stack.registry.remoteStatus.state).toBe('disabled')
   })
 
-  it('marks the whole editable settings shape volatile so modern forms accept every write', async (ctx) => {
+  it('exposes only the enable switch as a volatile setting', async (ctx) => {
     let spec: string | undefined
     try {
       const anchor = createRequire(require.resolve('@deepseek-ai/dsh-client-locale/package.json'))
@@ -178,43 +155,29 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     const { isVolatilePath } = (await import(spec)) as {
       isVolatilePath(schema: unknown, path: readonly string[]): boolean
     }
-    for (const path of [
-      ['enabled'], ['mode'], ['team'],
-      ['team', 'manifestPath'], ['team', 'socketPath'], ['team', 'brokerUid'], ['team', 'credentialRoot'],
-    ]) {
-      expect(isVolatilePath(RemoteToolsConfig, path), path.join('.')).toBe(true)
+    expect(isVolatilePath(RemoteToolsConfig, ['enabled'])).toBe(true)
+    for (const path of [['mode'], ['team'], ['team', 'socketPath'], ['broker']]) {
+      expect(isVolatilePath(RemoteToolsConfig, path), path.join('.')).toBe(false)
     }
   })
 
-  it('seeds the team block unwrapped when a validated row config supplies one', async () => {
-    const seeds: unknown[] = []
-    world = await mountRemoteTools(fixture, { withTools: false, remote: { enabled: false } })
-    installSettings(world.ctx, { enabled: false }, seeds)
-    const team = { manifestPath: '/dsh/remote.json', socketPath: '/run/dsh/broker.sock', brokerUid: 999, credentialRoot: '/var/lib/dsh/ssh' }
-    const validated = (RemoteToolsConfig as unknown as (value: unknown) => Record<string, unknown>)({ enabled: false, mode: 'team', team })
-    await world.ctx.plugin({
-      name: 'remote-tools-volatile-team',
-      inject,
-      apply: (ctx: Context) => applyRemoteTools(ctx, { ...validated, broker: { config: BROKER } } as never),
-    })
-    await expect.poll(() => seeds[0], { timeout: 2_000 }).toMatchObject({ enabled: false, mode: 'team', team })
+  it.each(['team', 'hardened'] as const)('refuses a loader profile requesting %s custody', async mode => {
+    const { hooks } = await mountRow({ config: { enabled: true, broker: true, mode } })
+    await expect.poll(() => hooks()).not.toBeUndefined()
+    // An old host may still deliver a non-personal Settings document.
+    expect(() => hooks()!.validate({ enabled: true, mode })).toThrow(/fixed to personal/)
     expect(world!.stack.registry.remoteStatus.state).toBe('disabled')
+    expect(await world!.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
+    expect(probe.attest).not.toHaveBeenCalled()
+    expect(probe.personalMounts).toBe(0)
   })
 
-  gated(`drives configureRemote and mounts the gated subtree when the switch turns on${gateSkipped}`, async () => {
-    const { hooks, live } = await mountRow({ remote: {}, config: { enabled: false } })
-    await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
+  it('refuses an implicit legacy broker profile', async () => {
+    const { hooks } = await mountRow({ config: { enabled: true, broker: true } })
+    await expect.poll(() => hooks()).not.toBeUndefined()
     expect(world!.stack.registry.remoteStatus.state).toBe('disabled')
-
-    live.enabled = true
-    hooks()!.onChange()
-    await expect.poll(() => world!.stack.registry.remoteStatus.state, { timeout: 5_000 }).toBe('ready')
-    expect(world!.stack.registry.remoteEnabled).toBe(true)
-    await expect.poll(async () => await world!.call('remote_copy', localToLocal), { timeout: 5_000 })
-      .toMatchObject({ status: 'failed', code: 'direction-unsupported' })
-    expect(probe.calls).toBe(1)
-    // The verifier mounted with the tools: the real registration path works.
-    await registerRemote(world!, 'build', 'app')
+    expect(probe.attest).not.toHaveBeenCalled()
+    expect(probe.personalMounts).toBe(0)
   })
 
   gated(`unmounts the subtree and restores the exact disabled state when the switch turns off${gateSkipped}`, async () => {
@@ -236,36 +199,12 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     expect(world!.stack.registry.list(world!.session.header.cwd!)).toEqual([])
   })
 
-  gated(`opens the plane but mounts nothing when the broker fails attestation${gateSkipped}`, async () => {
-    const { hooks, live } = await mountRow({ remote: {}, config: { enabled: false } })
-    await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
-    probe.fail = true
-    live.enabled = true
-    hooks()!.onChange()
-    await expect.poll(() => world!.stack.registry.remoteStatus.state, { timeout: 5_000 }).toBe('ready')
-    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(1)
-    expect(await world!.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
-  })
-
-  gated(`adopts the registry remoteEnabled as the initial switch for dedicated profiles${gateSkipped}`, async () => {
-    // remoteEnvironments.enabled: true is the registry row's INITIAL live
-    // value; a tools row without its own `enabled` inherits it, and a source
-    // with no persisted override reports that same initial.
-    await mountRow({ remote: { enabled: true }, config: { broker: true }, persisted: true })
+  gated(`adopts the registry remoteEnabled as the initial personal switch${gateSkipped}`, async () => {
+    await mountRow({ remote: { enabled: true } })
     expect(world!.stack.registry.remoteStatus.state).toBe('ready')
-    await expect.poll(async () => await world!.call('remote_copy', localToLocal), { timeout: 5_000 })
+    await expect.poll(() => world!.call('remote_copy', localToLocal))
       .toMatchObject({ status: 'failed', code: 'direction-unsupported' })
-    expect(probe.calls).toBe(1)
-  })
-
-  it('still mounts nothing without a broker block even while the plane opens', async () => {
-    const { hooks, live } = await mountRow({ remote: {}, config: { enabled: false, broker: false, mode: 'hardened' } })
-    await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
-    live.enabled = true
-    hooks()!.onChange()
-    await expect.poll(() => world!.stack.registry.remoteStatus.state, { timeout: 5_000 }).toBe('ready')
-    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(0)
-    expect(await world!.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
+    expect(probe.personalMounts).toBe(1)
   })
 
   gated(`keeps a running personal copy through unrelated binding and connection saves${gateSkipped}`, async () => {
@@ -305,7 +244,7 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     await expect.poll(() => world!.call('remote_copy', localToLocal), { timeout: 5_000 })
       .toMatchObject({ status: 'failed', code: 'direction-unsupported' })
     // Personal custody never talks to a broker.
-    expect(probe.calls).toBe(0)
+    expect(probe.attest).not.toHaveBeenCalled()
 
     await registerRemote(world!, 'build', 'app')
     const remote = world!.remotes.get('build')!
@@ -342,54 +281,19 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     expect(probe.personalMounts).toBe(1)
   })
 
-  const spawnOf = () => (world!.stack.ctx.get('subprocess') as { spawn(spec: { argv: readonly string[] }): unknown }).spawn
+  for (const mode of ['team', 'hardened'] as const) {
+    gated(`tears down personal tools on a legacy ${mode} settings write${gateSkipped}`, async () => {
+      const { hooks, live } = await mountRow({ config: { enabled: true } })
+      await expect.poll(() => world!.call('remote_copy', localToLocal))
+        .toMatchObject({ status: 'failed', code: 'direction-unsupported' })
 
-  gated(`remounts the gated subtree when the custody mode changes under an unchanged manifest${gateSkipped}`, async () => {
-    const { hooks, live } = await mountRow({ remote: {}, config: { enabled: false }, persisted: true, persistedMode: 'team' })
-    await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
-    await expect.poll(() => world!.stack.registry.remoteMode, { timeout: 5_000 }).toBe('team')
-    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(1)
-    const fixtureSpawn = spawnOf()
-    expect(() => fixtureSpawn({ argv: ['/bin/echo', 'x'] })).toThrowError('remote-tools fixture has no subprocess.spawn')
-
-    live.mode = 'hardened'
-    hooks()!.onChange()
-    await expect.poll(() => world!.stack.registry.remoteMode, { timeout: 5_000 }).toBe('hardened')
-    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(2)
-    expect(spawnOf()).not.toBe(fixtureSpawn)
-    expect(() => spawnOf()({ argv: ['/bin/echo', 'x'] })).toThrowError(/remote-profile-unconfined-spawn/)
-
-    live.mode = 'team'
-    hooks()!.onChange()
-    await expect.poll(() => world!.stack.registry.remoteMode, { timeout: 5_000 }).toBe('team')
-    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(3)
-    expect(spawnOf()).toBe(fixtureSpawn)
-    expect(() => spawnOf()({ argv: ['/bin/echo', 'x'] })).toThrowError('remote-tools fixture has no subprocess.spawn')
-  })
-
-  gated(`remounts when a persisted team broker fact changes under an unchanged manifest${gateSkipped}`, async () => {
-    const { hooks, live } = await mountRow({
-      remote: {},
-      config: { enabled: false },
-      persisted: true,
-      persistedMode: 'team',
-      persistedTeam: { socketPath: '/broker/one.sock', brokerUid: 999, credentialRoot: '/broker/credentials' },
+      live.mode = mode
+      hooks()!.onChange()
+      await expect.poll(() => world!.stack.registry.remoteStatus.state).toBe('disabled')
+      expect(await world!.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
+      await expect(registerRemote(world!, 'build', 'app')).rejects.toMatchObject({ code: 'remote-unavailable' })
+      expect(probe.attest).not.toHaveBeenCalled()
+      expect(probe.personalMounts).toBe(1)
     })
-    await expect.poll(() => hooks(), { timeout: 2_000 }).not.toBeUndefined()
-    await expect.poll(() => world!.stack.registry.remoteMode, { timeout: 5_000 }).toBe('team')
-    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(1)
-
-    live.team = { ...live.team, socketPath: '/broker/two.sock' }
-    hooks()!.onChange()
-    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(2)
-
-    live.team = { ...live.team, brokerUid: 1000 }
-    hooks()!.onChange()
-    await expect.poll(() => probe.calls, { timeout: 5_000 }).toBe(3)
-
-    hooks()!.onChange()
-    await expect.poll(async () => await world!.call('remote_copy', localToLocal), { timeout: 5_000 })
-      .toMatchObject({ status: 'failed', code: 'direction-unsupported' })
-    expect(probe.calls).toBe(3)
-  })
+  }
 })

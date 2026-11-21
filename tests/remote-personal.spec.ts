@@ -9,7 +9,7 @@ import { spawn, execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   loadPersonalConfig, loadPersonalManifest, savePersonalConfig,
   toDeploymentManifest, type PersonalConfig,
@@ -239,12 +239,10 @@ describe('relaxed ssh -G parsing and fail-closed settings', () => {
     expect(() => parseSshConfig('hostname build.internal\n', { relaxed: true })).toThrowError(/no user\/hostname/)
   })
 
-  it('an unknown settings mode fails closed to disabled', () => {
-    const warnings: string[] = []
-    const read = readRemoteSettingsValue({ enabled: true, mode: 'mystery' }, message => warnings.push(message))
-    expect(read.enabled).toBe(false)
-    expect(warnings.length).toBe(1)
-    expect(readRemoteSettingsValue({ enabled: true, mode: 'team' }, () => {}).enabled).toBe(true)
+  it.each(['team', 'hardened', 'mystery', null])('fails closed on an unavailable settings mode %s', mode => {
+    const warn = vi.fn()
+    expect(readRemoteSettingsValue({ enabled: true, mode }, undefined, warn)).toBe(false)
+    expect(warn).toHaveBeenCalledOnce()
   })
 
   it('unwraps Schemastery volatile settings fields', () => {
@@ -252,13 +250,10 @@ describe('relaxed ssh -G parsing and fail-closed settings', () => {
       get: () => value,
       [Symbol.for('cosmokit.volatile.write')]: () => value,
     })
-    const read = readRemoteSettingsValue({ enabled: volatile(true), mode: volatile('team') }, () => {})
-    expect(read).toEqual({ enabled: true, mode: 'team' })
-    // The wrapper is not a mode; an enabled document with one still fails closed.
-    const warnings: string[] = []
-    expect(readRemoteSettingsValue({ enabled: true, mode: volatile({}) }, message => warnings.push(message)))
-      .toEqual({ enabled: false })
-    expect(warnings.length).toBe(1)
+    const warn = vi.fn()
+    expect(readRemoteSettingsValue({ enabled: volatile(true), mode: volatile('personal') }, undefined, warn)).toBe(true)
+    expect(readRemoteSettingsValue({ enabled: true, mode: volatile({}) }, undefined, warn)).toBe(false)
+    expect(warn).toHaveBeenCalledOnce()
   })
 
   it('reads the live namespace on the legacy configure path', async () => {
@@ -270,7 +265,7 @@ describe('relaxed ssh -G parsing and fail-closed settings', () => {
       configure: () => () => {},
       describe: () => [{ ns: 'multi-root-remote-tools', value: live }],
     } as never)
-    const settings = installRemoteSettings(ctx, () => ({ enabled: false }), () => { changes += 1 })
+    const settings = installRemoteSettings(ctx, () => false, () => { changes += 1 })
     try {
       await new Promise(resolve => setTimeout(resolve, 0))
       expect(settings.read()).toEqual({ enabled: false, mode: 'personal' })

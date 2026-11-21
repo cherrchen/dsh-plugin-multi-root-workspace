@@ -183,12 +183,16 @@ describe('inserted rows', () => {
       leasePath: "dshHomePath('storages/multi_root_workspace.lock')",
       maxAdditionalRoots: 16,
       backgroundRecovery: true,
-      remoteEnvironments: { manifestPath: '/etc/dsh-ssh-broker/manifest.json' },
+      remoteEnvironments: {
+        personalPath: "dshHomePath('storages/multi_root_workspace.remote-personal.json')",
+        credentialRoot: "dshHomePath('storages/multi_root_workspace.ssh')",
+      },
     })
     // `enabled` stays absent: the plane is opened by the live switch, not by
     // the row, so the default composition boots `disabled` (ADR-0030).
     const remoteConfig = (registry?.config as { remoteEnvironments?: Record<string, unknown> } | undefined)?.remoteEnvironments
     expect(remoteConfig).not.toHaveProperty('enabled')
+    expect(remoteConfig).not.toHaveProperty('manifestPath')
   })
 
   it('ships the remote-tools row inert behind the default-off live switch', () => {
@@ -196,7 +200,6 @@ describe('inserted rows', () => {
     expect(remote?.name).toBe('@dsh-electron/dsh-plugin-multi-root-workspace/remote-tools')
     expect(remote?.disabled).not.toBe(true)
     expect(remote?.config).toMatchObject({ enabled: false })
-    // The broker block is deployment-supplied; the default row must not carry one.
     expect(remote?.config).not.toHaveProperty('broker')
   })
 

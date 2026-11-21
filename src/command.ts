@@ -860,10 +860,9 @@ async function dispatchPanelRequest(
         const value: SshSettingsView = {
           custodyMode: registry.remoteMode,
           status: registry.remoteStatus,
-          connections: registry.remoteMode === 'personal' ? [] : (registry.remoteManifest?.environments ?? []).map(environment => ({
-            environmentId: environment.environmentId, displayName: environment.displayName,
-            platform: environment.platform, target: remoteTargetOf(environment),
-          })),
+          // The legacy wire field remains for older clients. Personal
+          // connections are returned by sshState.
+          connections: [],
         }
         return { ok: true, value }
       }

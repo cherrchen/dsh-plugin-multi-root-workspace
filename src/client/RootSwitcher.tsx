@@ -513,7 +513,7 @@ export function RootSwitcher(props: RootSwitcherProps): ReactNode {
           panel={props.panel}
           {...(props.remotes === undefined ? {} : { remotes: props.remotes })}
           {...(props.ssh === undefined ? {} : { ssh: props.ssh })}
-          remoteMode={props.remoteMode}
+          subscribeRemoteSettings={props.subscribeRemoteSettings}
           pickDirectory={props.pickDirectory}
           {...(props.sessionId === undefined ? {} : { sessionId: props.sessionId })}
           {...(props.subscribeSession === undefined ? {} : { subscribeSession: props.subscribeSession })}

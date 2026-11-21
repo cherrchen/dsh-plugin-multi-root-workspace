@@ -14,7 +14,7 @@ import type {
   RemoteGrant, RemotePurpose, RemoteSnapshotReply, RemoteStatus,
 } from './contract.ts'
 import { RemoteAdmissionError } from './contract.ts'
-import { bindingDigest, environmentDigest, loadDeploymentManifest, ManifestError, type DeploymentManifest } from './manifest.ts'
+import { bindingDigest, environmentDigest, type loadDeploymentManifest, ManifestError, type DeploymentManifest } from './manifest.ts'
 import { loadPersonalManifest, type PersonalManifest } from './personal/config.ts'
 import { findBinding, grantState, remoteDomainSpec, REMOTE_TABLE_NAME, type PersistedRemoteGrants } from './records.ts'
 import { RemoteClient, RemoteServer } from './protocol.ts'
@@ -65,10 +65,24 @@ export class RemoteControlPlane {
   private revision = 0
   verifier: RemoteEndpointVerifier | undefined
 
-  constructor(private readonly config: RemoteConfig | undefined, private readonly logger: { warn(message: string): unknown }, private readonly load: typeof loadDeploymentManifest = loadDeploymentManifest) {
+  constructor(private readonly config: RemoteConfig | undefined, private readonly logger: { warn(message: string): unknown }, private readonly loadDeploymentForTesting?: typeof loadDeploymentManifest) {
     this.state = { state: 'disabled' }
     this.enabled = false
-    this.configure({ enabled: config?.enabled === true, mode: config?.mode ?? 'hardened', manifestPath: config?.manifestPath })
+    this.configure({ enabled: config?.enabled === true, mode: this.profileMode() })
+  }
+
+  private profileMode(): RemoteMode {
+    const mode = this.config?.mode
+    if (mode !== undefined) return mode
+    return this.config?.manifestPath === undefined ? 'personal' : 'hardened'
+  }
+
+  /** Resolve legacy profile configuration before comparing or opening the plane. */
+  effectiveConfig(next: RemoteLiveConfig): RemoteLiveConfig {
+    // Deployment fixtures inject their own loader in source tests. No profile
+    // configuration or Settings value can supply that constructor dependency.
+    if (this.loadDeploymentForTesting !== undefined) return next
+    return { enabled: next.enabled === true && next.mode === 'personal' && this.profileMode() === 'personal', mode: 'personal' }
   }
 
   /**
@@ -76,7 +90,8 @@ export class RemoteControlPlane {
    * reparsed (or dropped) and the state is recomputed. The caller owns the
    * remote teardown and re-open — this method only rebinds the static facts.
    */
-  configure(next: RemoteLiveConfig): void {
+  configure(request: RemoteLiveConfig): void {
+    const next = this.effectiveConfig(request)
     this.enabled = next.enabled
     this.mode = next.mode
     this.liveManifestPath = next.manifestPath
@@ -99,7 +114,9 @@ export class RemoteControlPlane {
       } else {
         const path = next.manifestPath ?? this.config?.manifestPath
         if (path === undefined || path.trim() === '') throw new ManifestError('manifest-untrusted', 'remoteEnvironments.manifestPath is required when the remote experiment is enabled')
-        const loaded = this.load(path)
+        const load = this.loadDeploymentForTesting
+        if (load === undefined) throw new ManifestError('manifest-untrusted', 'deployment manifests are unavailable in personal SSH')
+        const loaded = load(path)
         this.manifest = loaded.manifest
         this.manifestDigest = loaded.digest
       }

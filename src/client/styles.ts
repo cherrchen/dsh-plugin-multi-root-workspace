@@ -1689,51 +1689,6 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   width: 32px;
 }
 
-/* The custody-mode radio group (settings card) and the personal SSH forms. */
-.mrfw-modeGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.mrfw-modeOption {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 13px;
-  line-height: 18px;
-}
-
-.mrfw-modeOption input {
-  margin-top: 2px;
-}
-
-.mrfw-modeOptionText {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.mrfw-modeOptionTitle {
-  font-size: 13px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-primary);
-}
-
-.mrfw-teamFields {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.mrfw-teamField {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .mrfw-subsection {
   display: flex;
   flex-direction: column;
@@ -1809,15 +1764,6 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 .mrfw-sshTab:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: -2px;
-}
-
-.mrfw-sshGuide {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
 }
 
 .mrfw-sshStep {
