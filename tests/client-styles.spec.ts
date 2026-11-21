@@ -760,9 +760,11 @@ describe('the workspace dialog scrolling rules', () => {
     expect(list).toContain('overflow-y: auto')
     expect(list).not.toContain('overscroll-behavior')
     expect(list).not.toMatch(/max-height:[^;]*\d+px/)
-    // One root row stays visible while rows exist; an empty list stays at zero
-    // so the panel keeps its compact height.
-    expect(rule('.mrfw-rootList:has(.mrfw-row)')).toContain('min-height: 70px')
+    // One complete root row stays visible while rows exist; the dialog measures
+    // the tallest rendered row into the custom property because rows wrap on
+    // narrow dialogs, and an empty list stays at zero so the panel keeps its
+    // compact height.
+    expect(rule('.mrfw-rootList:has(.mrfw-row)')).toContain('min-height: var(--mrfw-root-row-height, 70px)')
   })
 
   it('pins the add controls below the scrolling list', () => {

@@ -1275,10 +1275,12 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   scrollbar-gutter: stable;
 }
 
-/* Keep one root row visible while rows exist; an empty list stays at zero and
-   the panel keeps its compact height. */
+/* Keep one complete root row visible while rows exist; an empty list stays at
+   zero and the panel keeps its compact height. The dialog measures the tallest
+   rendered row into the custom property (rows wrap their actions below the
+   text on narrow dialogs); a runtime that cannot measure keeps one 70px row. */
 .mrfw-rootList:has(.mrfw-row) {
-  min-height: 70px;
+  min-height: var(--mrfw-root-row-height, 70px);
 }
 
 .mrfw-sectionTitleRow {

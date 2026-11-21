@@ -445,6 +445,46 @@ describe('the New Session hero entry', () => {
 })
 
 describe('the panel dialog', () => {
+  it('publishes the tallest rendered row as the root list floor', async () => {
+    const harness = mount()
+    harness.setView({
+      primaryRoot: '/repos/primary',
+      roots: Array.from({ length: 3 }, (_, index) => ({
+        ...ROOT_A,
+        ordinal: index + 1,
+        id: `wrapped-${index + 1}`,
+        path: `/repos/wrapped-${index + 1}`,
+        alias: `wrapped-${index + 1}`,
+      })),
+      limit: 16,
+      count: 3,
+    })
+    /** A DOMRect carrying the height the measurement reads. */
+    const rect = (height: number): DOMRect => ({ x: 0, y: 0, width: 0, height, top: 0, right: 0, bottom: height, left: 0, toJSON: () => ({}) })
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const height = this.classList.contains('mrfw-rowBare')
+        ? 60
+        : this.classList.contains('mrfw-row') ? 132 : 0
+      return rect(height)
+    })
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void {}
+      disconnect(): void {}
+    })
+    try {
+      renderPanel(harness)
+      fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
+      await waitFor(() => { expect(screen.getByText('/repos/wrapped-3')).toBeTruthy() })
+      const list = document.querySelector('.mrfw-rootList') as HTMLElement
+      await waitFor(() => {
+        expect(list.style.getPropertyValue('--mrfw-root-row-height')).toBe('132px')
+      })
+    } finally {
+      spy.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('keeps the primary row and add controls out of the scrolling row list', async () => {
     const harness = mount()
     const roots = Array.from({ length: 16 }, (_, index) => ({

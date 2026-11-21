@@ -26,7 +26,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/WorkspaceFoldersAction
  */
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   IconAccessInherit,
@@ -46,6 +46,7 @@ import {
 import { errorKeyOf, PanelError, type PanelClient } from './panel-client.ts'
 import type { WorkspaceFoldersDialogController } from './workspace-folders-dialog.ts'
 import { requestWorktreePrompt } from './worktree-prompt-bus.ts'
+import { measureRootRowHeight } from './root-row-room.ts'
 import type { Key } from './locales.ts'
 import type { RootAccess, RootEntryView, RootState, RootView, RootsView, WorktreeRootView } from '../contract.ts'
 import type { WorktreeClient } from './worktree-client.ts'
@@ -417,6 +418,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
    * of reopening it.
    */
   const cleanupForRef = useRef<readonly string[] | undefined>(undefined)
+  const rootListRef = useRef<HTMLDivElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const requestEpoch = useRef(0)
   const mounted = useRef(true)
@@ -437,6 +439,29 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   // The dialog is modal: it takes focus when it opens, Escape closes it, and
   // Tab cycles within it instead of escaping into the sidebar behind it.
   useEffect(() => { dialogRef.current?.focus() }, [])
+
+  // The row list keeps one complete row visible, even when a narrow dialog
+  // wraps a row's actions below its text. The tallest rendered row is measured
+  // into --mrfw-root-row-height after every roots commit and whenever a row
+  // resizes; jsdom reports zero-size rects and has no ResizeObserver, so the
+  // stylesheet's compact one-row fallback stays in force there.
+  useLayoutEffect(() => {
+    const list = rootListRef.current
+    if (list === null) return undefined
+    const apply = (): void => {
+      const height = measureRootRowHeight(list)
+      if (height > 0) list.style.setProperty('--mrfw-root-row-height', `${height}px`)
+      else list.style.removeProperty('--mrfw-root-row-height')
+    }
+    apply()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(apply)
+    list.querySelectorAll<HTMLElement>('.mrfw-row').forEach(row => observer.observe(row))
+    return () => {
+      observer.disconnect()
+      list.style.removeProperty('--mrfw-root-row-height')
+    }
+  }, [state.view?.roots])
   const onDialogKeyDown = (event: ReactKeyboardEvent): void => {
     if (event.key === 'Escape') {
       // An open menu or the upgrade confirmation owns Escape: its own
@@ -814,7 +839,7 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
             </div>
             {/* The rows are the panel's only scroll region; the section title
                 and its batch action stay fixed above them. */}
-            <div className="mrfw-rootList">
+            <div className="mrfw-rootList" ref={rootListRef}>
               {state.view === undefined ? <p className="mrfw-note">{t('panel.loading')}</p> : null}
               {state.view !== undefined && roots.length === 0 ? (
                 <p className="mrfw-note">
