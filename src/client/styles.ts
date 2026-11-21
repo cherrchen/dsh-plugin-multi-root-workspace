@@ -1981,6 +1981,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 /* The selectable row: icon, a title/subtitle stack, and a trailing status. */
 .mrfw-choice {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 12px;
