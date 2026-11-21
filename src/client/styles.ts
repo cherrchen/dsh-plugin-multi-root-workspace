@@ -2124,9 +2124,18 @@ button.mrfw-choice:hover:not(:disabled) {
   font-family: var(--dsw-font-mono, monospace);
 }
 
+/* The optional node-path bar: an input plus its detect button, indented to
+   the checklist label column (16px dot + 8px gap) under the helper row. */
 .mrfw-wizNodeBar {
   display: flex;
-  max-width: 320px;
+  align-items: center;
+  gap: 6px;
+  margin-left: 24px;
+}
+
+.mrfw-wizNodeBar .mrfw-sshInput {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .mrfw-wizPicker,

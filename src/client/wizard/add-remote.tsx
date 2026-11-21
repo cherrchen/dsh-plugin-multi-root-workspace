@@ -536,19 +536,21 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
             <ChecklistRow
               state={pending === 'helper' ? 'ongoing' : selected.helper !== null ? 'done' : 'warning'}
               label={selected.helper !== null ? t('ssh.helperInstalled') : t('ssh.helperMissing')}
-              detail={selected.helper === null ? (
-                <span className="mrfw-wizNodeBar">
-                  <Input className="mrfw-sshInput" aria-label={t('ssh.nodePath')} placeholder={t('ssh.nodePath')}
-                    value={nodePath} disabled={busy} onChange={event => setNodePath(event.currentTarget.value)} />
-                </span>
-              ) : undefined}
               action={selected.helper === null ? (
-                <span className="mrfw-sshRowActions">
-                  <Button variant="outline" size="sm" disabled={busy} onClick={() => { void testConnection() }}>{t('ssh.add.detectNode')}</Button>
-                  <Button variant="primary" size="sm" disabled={busy} loading={pending === 'helper'}
-                    onClick={() => { void installHelper() }}>{t('ssh.helperInstall')}</Button>
-                </span>
+                <Button variant="primary" size="sm" disabled={busy} loading={pending === 'helper'}
+                  onClick={() => { void installHelper() }}>{t('ssh.helperInstall')}</Button>
               ) : undefined} />
+            {/* The optional node path is a helper prerequisite, so it sits as
+                its own input bar under the helper row — next to the detect
+                action that fills it in — instead of crowding the checklist. */}
+            {selected.helper === null ? (
+              <div className="mrfw-wizNodeBar">
+                <Input className="mrfw-sshInput" aria-label={t('ssh.nodePath')} placeholder={t('ssh.nodePath')}
+                  value={nodePath} disabled={busy} onChange={event => setNodePath(event.currentTarget.value)} />
+                <Button variant="outline" size="sm" disabled={busy}
+                  onClick={() => { void testConnection() }}>{t('ssh.add.detectNode')}</Button>
+              </div>
+            ) : null}
             {needsAccessKey === true ? (
               <ChecklistRow
                 state={pending === 'accessKey' ? 'ongoing' : 'warning'}
