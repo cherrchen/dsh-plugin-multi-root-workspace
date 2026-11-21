@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runRemoteCopy, type RemoteCopyDeps, type RemoteCopyRequest } from '../src/remote/transfer.ts'
 import { SftpStatusError, SftpConnectionLost, type SftpClient } from '../src/remote/sftp.ts'
 import type { SshEnvironmentManager } from '../src/remote/ssh-environment.ts'
-import type { DeploymentManifest } from '../src/remote/manifest.ts'
+import { environmentDigest, type DeploymentManifest } from '../src/remote/manifest.ts'
 import type { MultiRootRegistry } from '../src/registry.ts'
 import type { LocalDestinationAuthority } from '../src/remote/local-sink.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
@@ -99,6 +99,7 @@ const DISPLAY: Record<string, string> = {
 const displayPathOf = (environmentId: string, rootId: string) => DISPLAY[`${environmentId}/${rootId}`] ?? `/${rootId}`
 
 interface StackOptions {
+  uniqueOperationIds?: boolean
   epoch?: string
   deny?: string
   transfer?: { maxBytes: number; timeoutMs: number } | undefined
@@ -124,11 +125,12 @@ function stack(opts: StackOptions = {}) {
   } as unknown as DeploymentManifest
   const generations: Record<string, string> = { 'vps-a': 'g1', 'vps-b': 'g1' }
   const admittedEndpoint = (ref: { environmentId: string; rootId: string }) => ref.environmentId === 'local'
-    ? { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, configVersion: null }
+    ? { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, environmentDigest: null, configVersion: null }
     : {
         environmentId: ref.environmentId, rootId: ref.rootId, displayPath: displayPathOf(ref.environmentId, ref.rootId),
         verifiedTarget: { kind: 'path', value: displayPathOf(ref.environmentId, ref.rootId) },
         bindingDigest: 'd'.repeat(64), configVersion: 'c',
+        environmentDigest: environmentDigest(manifest.environments.find(entry => entry.environmentId === ref.environmentId)!),
       }
   let admitCount = 0
   let authorityCount = 0
@@ -137,7 +139,7 @@ function stack(opts: StackOptions = {}) {
       admitCount++
       if (opts.deny !== undefined) { const e = new Error('denied'); (e as { code?: string }).code = opts.deny; throw e }
       return await body({
-        identity: { authorityEpoch: opts.epoch ?? 'e1', effectiveMode: 'workspace-write', operationId: 'op-1', sessionId: 's1' },
+        identity: { authorityEpoch: opts.epoch ?? 'e1', effectiveMode: 'workspace-write', operationId: opts.uniqueOperationIds ? crypto.randomUUID() : 'op-1', sessionId: 's1' },
         endpoints: request.endpoints.map(admittedEndpoint),
       })
     },
@@ -248,7 +250,7 @@ describe('runRemoteCopy local → remote(sftp)', () => {
       return await b({
         identity: { authorityEpoch: calls >= 2 ? 'e2' : 'e1', effectiveMode: 'workspace-write', operationId: 'op-1', sessionId: 's1' },
         endpoints: req.endpoints.map(ref => ref.environmentId === 'local'
-          ? { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, configVersion: null }
+          ? { environmentId: 'local', rootId: ref.rootId, displayPath: ref.rootId, verifiedTarget: null, bindingDigest: null, environmentDigest: null, configVersion: null }
           : { environmentId: ref.environmentId, rootId: ref.rootId, displayPath: displayPathOf(ref.environmentId, ref.rootId), verifiedTarget: { kind: 'path', value: displayPathOf(ref.environmentId, ref.rootId) }, bindingDigest: 'd'.repeat(64), configVersion: 'c' }),
       })
     }
@@ -692,17 +694,44 @@ describe('total transfer I/O deadline and cancellation', () => {
     expect(s.mem.readCalls).toBe(0)
   })
 
-  it('disposes a connection which opens after the total deadline', async () => {
+  it('abandons a timed-out opening without closing a shared session returned later', async () => {
     fixture = createFixtureWorkspace('copy-open-timeout')
     writeFileSync(join(fixture.workspace, 'source.txt'), 'bounded')
-    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 20 } })
+    const s = stack({ transfer: { maxBytes: 1024, timeoutMs: 30 } })
     const opened = Promise.withResolvers<{ client: SftpClient; generation: string }>()
     const dispose = vi.fn()
-    s.manager.openSftp = async () => await opened.promise as never
+    let waiter: AbortSignal | undefined
+    s.manager.openSftp = async (_id, signal) => { waiter = signal; return await opened.promise as never }
     const pending = run(s, localToRemote(), { manager: s.manager })
     expect(await pending).toMatchObject({ code: 'transfer-timeout', stage: 'preflight' })
+    expect(waiter?.aborted).toBe(true)
     opened.resolve({ client: { dispose } as unknown as SftpClient, generation: 'late' })
-    await new Promise(resolve => setTimeout(resolve, 0))
-    expect(dispose).toHaveBeenCalledOnce()
+    await Promise.resolve()
+    expect(dispose).not.toHaveBeenCalled()
+  })
+
+  it('cancels one upload with a pending write while another upload shares its SFTP channel', async () => {
+    fixture = createFixtureWorkspace('copy-shared-cancel')
+    writeFileSync(join(fixture.workspace, 'source.txt'), 'shared bytes')
+    const s = stack({ uniqueOperationIds: true })
+    const dispose = vi.fn()
+    Object.assign(s.mem, { dispose })
+    const entered = Promise.withResolvers<void>()
+    const writing = Promise.withResolvers<void>()
+    vi.spyOn(s.mem, 'write').mockImplementationOnce(async () => {
+      entered.resolve()
+      await writing.promise
+    })
+    const controller = new AbortController()
+    const first = runRemoteCopy(s.registry, { manager: s.manager }, localToRemote(), 'remote_copy', controller.signal)
+    await entered.promise
+    const second = run(s, localToRemote({ to: { ...localToRemote().to, relativePath: 'peer.txt' } }), { manager: s.manager })
+    controller.abort()
+    await expect(first).resolves.toMatchObject({ code: 'cancelled' })
+    await expect(second).resolves.toMatchObject({ status: 'committed' })
+    writing.resolve()
+    expect(dispose).not.toHaveBeenCalled()
+    expect(s.mem.files.get('/import/peer.txt')?.data.toString()).toBe('shared bytes')
+    expect(s.mem.files.has('/import/dest.txt')).toBe(false)
   })
 })

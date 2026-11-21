@@ -6,7 +6,9 @@ import type { RemoteModeControl } from '../compat/skills-client.ts'
 import { IconAccessReadOnly, IconAccessReadWrite, IconCopy, IconDownload, IconEdit, IconLink, IconPlay, IconShield, IconTrash, maybeComponent } from '../compat/client-icons.ts'
 import { IconButton, SshButton as Button } from './panel-buttons.tsx'
 import { PendingBar, StatusLine } from './pending.tsx'
-import { errorKeyOf, PanelError } from './panel-client.ts'
+import { sshLocation, sshTarget } from '../remote/ssh-location.ts'
+import { RemoteRootConfirm } from './remote-root-confirm.tsx'
+import { PanelError } from './panel-client.ts'
 import { ErrorToast, PanelErrorToast } from './error-toast.tsx'
 import type { CredentialPublicView, RemoteDirectoryListing, SshBindingDraft, SshBindingView, SshClient, SshManagementClient, SshSettingsView, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
 import { SshCustodySection, type RemoteCustodyMode } from './remote-custody.tsx'
@@ -221,6 +223,16 @@ const editorOf = (environment: SshEnvironmentView): EditorDraft => ({
   allowExec: environment.exec !== undefined,
   allowTransfer: environment.transfer !== undefined,
 })
+
+const editorIdentity = (draft: EditorDraft): string => JSON.stringify([
+  draft.hostname.trim(), Number(draft.port), draft.user.trim(), draft.platform, draft.credentialSource,
+  draft.credentialSource === 'alias' ? draft.alias.trim() : draft.credentialId,
+])
+
+function recordedFingerprint(draft: EditorDraft): string | undefined {
+  const existing = draft.existing
+  return existing !== undefined && editorIdentity(draft) === editorIdentity(editorOf(existing)) ? existing.hostKey : undefined
+}
 
 const execHelperReady = (draft: EditorDraft): boolean => {
   const existing = draft.existing
@@ -858,6 +870,7 @@ function RemotePathDialog(props: RemotePathDialogProps): ReactNode {
 }
 
 interface AddConnectionFormProps {
+  readonly environmentIds: readonly string[]
   readonly draft: EditorDraft
   readonly onChange: (draft: EditorDraft) => void
   readonly credentials: readonly CredentialPublicView[]
@@ -879,6 +892,9 @@ function AddConnectionForm(props: AddConnectionFormProps): ReactNode {
   const [scanDialog, setScanDialog] = useState<{ result: SshScanResult; draft: EditorDraft; fingerprint: string | undefined } | undefined>(undefined)
 
   const errorFor = (field: WizardField): string | undefined => {
+    if (field === 'environmentId' && props.environmentIds.includes(draft.environmentId.trim())) {
+      return t('error.environment-id-conflict')
+    }
     if (!attempted.has(field)) return undefined
     const key = draftFieldError(draft, field)
     return key === undefined ? undefined : t(key)
@@ -912,7 +928,10 @@ function AddConnectionForm(props: AddConnectionFormProps): ReactNode {
   }
 
   const scan = async (): Promise<void> => {
-    if (!connectionReady(draft)) { reveal(CONNECT_FIELDS); return }
+    if (!connectionReady(draft) || props.environmentIds.includes(draft.environmentId.trim())) {
+      reveal(CONNECT_FIELDS)
+      return
+    }
     const result = await props.onScanHost(draft)
     if (result === undefined) return
     const resolved = result.endpoint === undefined ? draft : {
@@ -1265,8 +1284,8 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       ...(draft.allowExec ? { exec: draft.existing?.exec ?? { ...EXEC_DEFAULTS, env: { ...EXEC_DEFAULTS.env }, shell: [...EXEC_DEFAULTS.shell] } } : {}),
       ...(draft.allowTransfer ? { transfer: draft.existing?.transfer ?? { ...TRANSFER_DEFAULTS } } : {}),
     }
-    const token = draft.credentialSource === 'managed' ? scanToken : undefined
-    const ok = await submit({ kind: 'save' }, async () => await ssh.environmentSave(sessionId, revision(), environment, hostKey, token))
+    const intent = draft.existing === undefined ? 'create' : 'update'
+    const ok = await submit({ kind: 'save' }, async () => await ssh.environmentSave(sessionId, revision(), environment, hostKey, scanToken, intent))
     if (!ok) return false
     if (draft.existing === undefined) {
       closeAdd()
@@ -1358,7 +1377,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
               <Tag tone="neutral" className="mrfw-sshTag">{platformLabel(environment.platform, t)}</Tag>
               <Tag tone={environment.helper === null ? 'warning' : 'success'} className="mrfw-sshTag">{environment.helper === null ? t('ssh.helperMissing') : t('ssh.helperInstalled')}</Tag>
             </>}
-            path={`${environment.endpoint.user}@${environment.endpoint.hostname}:${environment.endpoint.port}`}
+            path={sshTarget(environment.endpoint.user, environment.endpoint.hostname, environment.endpoint.port)}
             t={t}
             details={<>
               <span className="mrfw-note">{credentialLabel(environment.credential)}</span>
@@ -1442,13 +1461,19 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
           <span className="mrfw-sshStepTitle">{t('ssh.envEdit')}</span>
           <EnvironmentForm
             draft={editDraft}
-            onChange={setEditDraft}
+            onChange={next => {
+              if (editorIdentity(next) !== editorIdentity(editDraft)) {
+                setScan(undefined)
+                setFingerprint(undefined)
+              }
+              setEditDraft(next)
+            }}
             credentials={userCredentials}
             scan={scan}
-            fingerprint={fingerprint}
+            fingerprint={fingerprint ?? recordedFingerprint(editDraft)}
             onScan={() => { void scanHost(editDraft, patch => { setEditDraft(current => current === undefined ? current : { ...current, ...patch }) }) }}
             onFingerprint={setFingerprint}
-            onSave={async () => await saveEnvironment(editDraft, fingerprint, scan?.token)}
+            onSave={async () => await saveEnvironment(editDraft, fingerprint ?? recordedFingerprint(editDraft), scan?.token)}
             onCancel={() => { setEditDraft(undefined); setScan(undefined); setFingerprint(undefined) }}
             onOpenKeys={() => changeTab('keys')}
             saveLabel={t('ssh.envSave')}
@@ -1519,6 +1544,7 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       <p className="mrfw-note">{t('ssh.add.personalGuide')}</p>
       <AddConnectionForm
         draft={addDraft}
+        environmentIds={view.environments.map(environment => environment.environmentId)}
         onChange={setAddDraft}
         credentials={userCredentials}
         aliases={aliases}
@@ -1648,6 +1674,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
   const { ssh, sessionId, roots, t } = props
   const [view, setView] = useState<SshStateView | undefined>()
   const [draft, setDraft] = useState<BindingDraft>()
+  const [confirmUnbind, setConfirmUnbind] = useState<SshBindingView>()
   const [pathOpen, setPathOpen] = useState(false)
   const [pending, setPending] = useState<{ kind: 'save' } | { kind: 'remove'; key: string } | undefined>(undefined)
   const busy = pending !== undefined
@@ -1739,7 +1766,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
     if (await mutate({ kind: 'save' }, async (revision, signal) => await ssh.bindingSave(sessionId, revision, binding, signal))) setDraft(undefined)
   }
   const validPath = draft !== undefined && remotePath(draft.path.trim())
-  return <Modal open title={t('ssh.bindings')} closeLabel={t('panel.close')} onClose={props.onClose}
+  return <><Modal open title={t('ssh.bindings')} closeLabel={t('panel.close')} onClose={props.onClose}
     className="mrfw-sshDialog" contentClassName="mrfw-sshDialogContent">
     <PendingBar active={busy} />
     <div className="mrfw-sshArea">
@@ -1759,7 +1786,8 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
               const connection = view.environments.find(entry => entry.environmentId === environmentId)
               const environmentName = connection?.displayName ?? environmentId
               const endpoint = connection?.endpoint
-              const location = endpoint === undefined ? path : `${endpoint.user}@${endpoint.hostname}:${endpoint.port}${path}`
+              const target = endpoint === undefined ? undefined : sshTarget(endpoint.user, endpoint.hostname, endpoint.port)
+              const location = sshLocation(target, path)
               const name = path.slice(path.lastIndexOf('/') + 1) || path
               const IconAccess = actions.includes('write') || actions.includes('exec')
                 ? IconAccessReadWrite : actions.includes('read') ? IconAccessReadOnly : undefined
@@ -1795,9 +1823,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                     icon={<IconEdit />} label={t('ssh.binding.edit')} />
                   <IconButton disabled={busy || draft !== undefined}
                     loading={pending?.kind === 'remove' && pending.key === key}
-                    onClick={() => {
-                      void mutate({ kind: 'remove', key }, async (revision, signal) => await ssh.bindingRemove(sessionId, revision, environmentId, rootId, signal))
-                    }} icon={<IconTrash />} label={t('ssh.binding.remove')} />
+                    onClick={() => setConfirmUnbind(binding)} icon={<IconTrash />} label={t('ssh.binding.remove')} />
                 </div>}
               />
             })}
@@ -1857,4 +1883,15 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
       </>}
     </div>
   </Modal>
+    {confirmUnbind === undefined ? null : (
+      <RemoteRootConfirm kind="binding" path={confirmUnbind.path} t={t}
+        onClose={() => setConfirmUnbind(undefined)}
+        onConfirm={() => {
+          const { environmentId, rootId } = confirmUnbind
+          setConfirmUnbind(undefined)
+          void mutate({ kind: 'remove', key: `${environmentId}/${rootId}` },
+            async (revision, signal) => await ssh.bindingRemove(sessionId, revision, environmentId, rootId, signal))
+        }} />
+    )}
+  </>
 }

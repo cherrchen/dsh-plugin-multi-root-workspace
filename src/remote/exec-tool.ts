@@ -14,7 +14,7 @@ const NAME = 'remote_bash'
 /** Build the `remote_bash` tool registration for `ctx.tools.register`. */
 export function remoteBashTool(options: {
   registry: MultiRootRegistry
-  backendFor: (environmentId: string, workspace: string) => RemoteExecutionBackend | undefined
+  backendFor: (environmentId: string, workspace: string, environmentDigest?: string) => RemoteExecutionBackend | undefined
 }) {
   return {
     name: NAME,

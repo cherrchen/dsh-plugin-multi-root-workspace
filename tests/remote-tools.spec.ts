@@ -103,7 +103,8 @@ describe.skipIf(process.platform === 'win32')('the explicit remote tools row', (
     } finally {
       release.resolve()
     }
-    await expect(copying).resolves.toMatchObject({ code: 'cancelled', staging: 'residual' })
+    await expect(copying).resolves.toMatchObject({ code: 'cancelled', staging: 'removed' })
+    expect([...remote.files.keys()].some(path => path.includes('.dsh-staging-'))).toBe(false)
     await unloaded
     expect(remote.read('/srv/root/rollback.txt')).toBeUndefined()
     expect(remote.sftpCalls.some(call => call.startsWith('hardlink '))).toBe(false)

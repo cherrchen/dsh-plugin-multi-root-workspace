@@ -58,9 +58,8 @@ export interface RemoteEndpointView {
   readonly platform: string
   readonly displayName?: string | undefined
   /**
-   * The connection target the row may display beside the path: `user@host:port`
-   * for a personal environment, `user@host` for a deployment manifest (which
-   * carries no port). Absent when the host cannot name one.
+   * SSH URI authority: `ssh://user@host:port` in personal mode and
+   * `ssh://user@host` for deployment manifests. Absent when no target is known.
    */
   readonly target?: string | undefined
   readonly state: 'unregistered' | 'registered' | 'withheld' | 'revoked'

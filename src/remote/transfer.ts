@@ -31,7 +31,7 @@ import {
   SSH_FX_NO_SUCH_FILE,
   SSH_FX_FAILURE,
 } from './sftp.ts'
-import type { RemoteEnvironment, DeploymentManifest } from './manifest.ts'
+import { environmentDigest, type RemoteEnvironment, type DeploymentManifest } from './manifest.ts'
 import type { MultiRootRegistry } from '../registry.ts'
 import type { AdmittedRemoteEndpoint, RemoteOperationRequest, RemoteOperationSession } from './contract.ts'
 import {
@@ -104,6 +104,7 @@ export interface RemoteCopyDeps {
 
 interface Admitted {
   readonly epoch: string
+  readonly authorizationFingerprint: string
   readonly effectiveMode: 'read-only' | 'workspace-write'
   readonly operationId: string
   readonly source: AdmittedRemoteEndpoint
@@ -121,7 +122,7 @@ class TransferIO {
   private cleanupDeadline: number | undefined
   constructor(timeoutMs: number, private readonly signal: AbortSignal) { this.deadline = Date.now() + timeoutMs }
 
-  async run<T>(action: () => Promise<T>, onInterrupt?: () => void, cleanup = false): Promise<T> {
+  async run<T>(action: () => Promise<T>, onInterrupt?: (reason: 'cancelled' | 'transfer-timeout') => void, cleanup = false): Promise<T> {
     if (cleanup) this.cleanupDeadline ??= Date.now() + 1_000
     const remaining = (cleanup ? this.cleanupDeadline! : this.deadline) - Date.now()
     const aborted = () => !cleanup && this.signal.aborted
@@ -137,7 +138,7 @@ class TransferIO {
         body()
       }
       const interrupt = () => finish(() => {
-        try { onInterrupt?.() } catch { /* failure still settles the operation */ }
+        try { onInterrupt?.(aborted() ? 'cancelled' : 'transfer-timeout') } catch { /* failure still settles the operation */ }
         reject(failure())
       })
       const timer = setTimeout(interrupt, remaining)
@@ -154,15 +155,37 @@ class TransferIO {
         if (typeof value !== 'function' || key === 'dispose') return typeof value === 'function' ? value.bind(target) : value
         return async (...args: unknown[]) => {
           if (broken) throw new SftpConnectionLost('the interrupted SFTP generation cannot be reused')
+          let cancelled = false
+          let started = false
+          let pendingTimeout: ReturnType<typeof setTimeout> | undefined
+          const invalidate = () => {
+            broken = true
+            try { target.dispose?.() } catch { /* the stale generation still cannot be reused */ }
+          }
           try {
-            return await this.run(async () => Reflect.apply(value, target, args), () => {
-              broken = true
-              target.dispose?.()
+            return await this.run(async () => {
+              started = true
+              try {
+                const answer: unknown = await Reflect.apply(value, target, args)
+                if (cancelled && key === 'open' && Buffer.isBuffer(answer)) {
+                  void this.run(() => target.close(answer), invalidate, true).catch(() => {})
+                }
+                return answer
+              } finally { clearTimeout(pendingTimeout) }
+            }, reason => {
+              cancelled = reason === 'cancelled'
+              if (!cancelled) invalidate()
+              else if (started) {
+                // Abandon only this waiter. An unanswered wire request still
+                // has a deadline so a stalled channel cannot collect requests.
+                pendingTimeout = setTimeout(invalidate, Math.max(0, this.deadline - Date.now()))
+                pendingTimeout.unref()
+              }
             }, cleanup)
           } catch (error) {
             // CREATE or LINK may already have happened. Never report a clean
             // refusal, delete an unverified name, or retry publication.
-            if (broken && (key === 'hardlink' || (key === 'open' && (Number(args[1]) & P_CREAT) !== 0))) {
+            if (started && (broken || cancelled) && (key === 'hardlink' || (key === 'open' && (Number(args[1]) & P_CREAT) !== 0))) {
               throw new SftpConnectionLost('the SFTP mutation acknowledgement was lost')
             }
             throw error
@@ -277,6 +300,7 @@ function snapshotEndpoint(endpoint: AdmittedRemoteEndpoint): AdmittedRemoteEndpo
     rootId: endpoint.rootId,
     displayPath: endpoint.displayPath,
     bindingDigest: endpoint.bindingDigest,
+    environmentDigest: endpoint.environmentDigest,
     verifiedTarget: endpoint.verifiedTarget === null ? null : { ...endpoint.verifiedTarget },
     configVersion: endpoint.configVersion,
   }
@@ -294,6 +318,7 @@ function sameEndpoint(left: AdmittedRemoteEndpoint, right: AdmittedRemoteEndpoin
 
 function sameAdmission(left: Admitted, right: Admitted): boolean {
   return right.epoch === left.epoch
+    && right.authorizationFingerprint === left.authorizationFingerprint
     && right.effectiveMode === left.effectiveMode
     && sameEndpoint(left.source, right.source)
     && sameEndpoint(left.destination, right.destination)
@@ -311,6 +336,7 @@ async function admit(registry: MultiRootRegistry, request: RemoteCopyRequest, to
     }
     return {
       epoch: operation.identity.authorityEpoch ?? 'none',
+      authorizationFingerprint: operation.identity.authorizationFingerprint,
       effectiveMode: operation.identity.effectiveMode,
       operationId: operation.identity.operationId ?? randomUUID(),
       source: snapshotEndpoint(source),
@@ -360,13 +386,17 @@ async function openSftpEndpoint(ctx: CopyContext, environment: RemoteEnvironment
     client = injected?.client
     generation = injected?.generation ?? 'stale'
   } else {
-    let interrupted = false
     const openingSignal = new AbortController()
-    const opened = await io.run(async () => {
-      const session = await deps.manager.openSftp(environment.environmentId, openingSignal.signal)
-      if (interrupted) { session.client.dispose(); throw new RemoteCopyError('transfer-timeout', 'SFTP opened after interruption') }
-      return session
-    }, () => { interrupted = true; openingSignal.abort() }).catch((error: unknown) => {
+    const opened = await io.run(
+      () => {
+        const live = environmentOf(deps.manager, environment.environmentId)
+        if (environmentDigest(live) !== admission.environmentDigest) {
+          throw new RemoteCopyError('admission-changed', 'the transfer environment changed before opening SFTP')
+        }
+        return deps.manager.openSftp(environment.environmentId, openingSignal.signal)
+      },
+      () => openingSignal.abort(),
+    ).catch((error: unknown) => {
       throw new RemoteCopyError(codeOf(error), `cannot open the SFTP session for "${environment.environmentId}": ${error instanceof Error ? error.message : String(error)}`)
     })
     client = opened.client
@@ -470,7 +500,7 @@ class RemoteSource {
       }
       return new RemoteSource(endpoint, target, handle, size, before.mtime)
     } catch (error) {
-      await endpoint.client.close(handle).catch(() => {})
+      await endpoint.cleanupClient.close(handle).catch(() => {})
       throw error
     }
   }

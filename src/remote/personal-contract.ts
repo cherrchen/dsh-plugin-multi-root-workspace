@@ -100,7 +100,7 @@ const requestSchemas = {
     alias: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/).optional(),
   }).strict().refine(value => value.alias !== undefined || value.hostname !== undefined, { message: 'hostname or alias is required' }),
   sshEnvironmentSave: z.object({
-    revision, environment: environmentDraftSchema,
+    revision, intent: z.enum(['create', 'update']), environment: environmentDraftSchema,
     hostKeyToken: z.string().min(1).optional(), fingerprint: z.string().regex(/^SHA256:[A-Za-z0-9+/=]+$/),
   }).strict(),
   sshEnvironmentRemove: z.object({ revision, environmentId }).strict(),
@@ -175,6 +175,7 @@ export const sshSettingsViewSchema = z.strictObject({
   connections: z.array(z.strictObject({
     environmentId: z.string(),
     platform: z.string(),
+    // SSH URI authority, without a trailing slash or path.
     target: z.string(),
     displayName: z.string().optional(),
   })),

@@ -1,3 +1,4 @@
+import { RemoteRootConfirm } from './remote-root-confirm.tsx'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import { IconEdit, IconTrash } from '../compat/client-icons.ts'
@@ -46,6 +47,7 @@ interface RemoteRootMenuProps {
 
 export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
   const { endpoint, ssh, sessionId, roots, open, pending, t } = props
+  const [confirmRemove, setConfirmRemove] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<CapabilityDraft>()
   const [error, setError] = useState<PanelError>()
@@ -170,9 +172,10 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
     }
   }
 
-  return <Menu open={open} anchor={props.anchor} items={items} selectedIds={editing ? [...checked] : []}
+  return <><Menu open={open} anchor={props.anchor} items={items} selectedIds={editing ? [...checked] : []}
     portal align="end" closeOnPointerLeave={!editing} autoFocus onClose={props.onClose} onSelect={id => {
-      if (id === 'register' || id === 'remove') props.onRegistration(id)
+      if (id === 'register') props.onRegistration(id)
+      else if (id === 'remove') { props.onClose(); setConfirmRemove(true) }
       else if (id === 'edit') { setError(undefined); setEditing(true) }
       else if (id === 'cancel') {
         setEditing(false)
@@ -186,4 +189,9 @@ export function RemoteRootMenu(props: RemoteRootMenuProps): ReactNode {
       } else if (id === 'save') void save()
       else update.get(id)?.()
     }} />
+    {confirmRemove && endpoint.state === 'registered' ? (
+      <RemoteRootConfirm kind="registration" path={path} t={t} onClose={() => setConfirmRemove(false)}
+        onConfirm={() => { setConfirmRemove(false); props.onRegistration('remove') }} />
+    ) : null}
+  </>
 }

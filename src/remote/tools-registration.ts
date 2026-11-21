@@ -3,6 +3,7 @@ import { primaryKey } from '../roots.ts'
 import { REMOTE_CONTEXT_NAME, renderRemoteCapabilities } from './capabilities.ts'
 import { remoteBashTool } from './exec-tool.ts'
 import type { RemoteExecutionBackend } from './exec.ts'
+import { environmentDigest } from './manifest.ts'
 import { lazySshExecBackend } from './ssh-exec-backend.ts'
 import type { SshEnvironmentManager } from './ssh-environment.ts'
 import { SshEndpointVerifier, type SshEndpointManager } from './ssh-verifier.ts'
@@ -38,21 +39,32 @@ export function mountRemoteTools(
     // Admission A (confine) and admission B (spawn) each call backendFor: the
     // lazy adapter binds its connection inside confine, so both admissions
     // must see the SAME instance — a fresh one would spawn with no bound env.
-    const cache = new Map<string, RemoteExecutionBackend | undefined>()
-    return (environmentId: string, workspace: string) => {
+    const cache = new Map<string, { digest: string; backend: RemoteExecutionBackend | undefined }>()
+    ctx.effect(() => registry.onRemoteChange(() => {
+      const live = new Map(registry.remoteManifest?.environments.map(environment => [environment.environmentId, environmentDigest(environment)]))
+      const scopes = new Set(registry.remoteManifest?.bindings.map(binding => JSON.stringify([binding.environmentId, binding.path])))
+      for (const [key, entry] of cache) {
+        const [id, root] = JSON.parse(key) as [string, string | null]
+        if (entry.digest !== live.get(id) || (root !== null && !scopes.has(key))) cache.delete(key)
+      }
+    }))
+    return (environmentId: string, workspace: string, expectedDigest?: string) => {
       const root = registry.remoteMode === 'personal' ? workspace : undefined
       const key = JSON.stringify([environmentId, root])
-      if (cache.has(key)) return cache.get(key)
-      const manifest = registry.remoteManifest
-      const environment = manifest?.environments.find(entry => entry.environmentId === environmentId)
+      const environment = registry.remoteManifest?.environments.find(entry => entry.environmentId === environmentId)
+      if (environment === undefined) return undefined
+      const digest = environmentDigest(environment)
+      if (expectedDigest !== undefined && expectedDigest !== digest) return undefined
+      const cached = cache.get(key)
+      if (cached?.digest === digest) return cached.backend
       // The SSH adapter needs a connection opening and a live generation. Probe
       // the structure, never the class: an injected manager that cannot open a
       // connection simply has no execution backend.
       const opening = manager as Partial<SshEnvironmentManager>
-      const backend = environment === undefined || typeof opening.open !== 'function' || typeof opening.generationOf !== 'function'
+      const backend = typeof opening.open !== 'function' || typeof opening.generationOf !== 'function'
         ? undefined
         : lazySshExecBackend(environment, opening as SshEnvironmentManager, root)
-      cache.set(key, backend)
+      cache.set(key, { digest, backend })
       return backend
     }
   })()

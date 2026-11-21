@@ -27,6 +27,10 @@ export interface ScannedHostKey {
 }
 
 interface ScanToken {
+  readonly hostname: string
+  readonly port: number
+  readonly alias?: string
+  readonly user?: string
   readonly keys: readonly ScannedHostKey[]
   readonly expiresAt: number
 }
@@ -48,24 +52,32 @@ export class HostKeyScans {
       keys.push({ type: line.split(/\s+/)[1] ?? 'unknown', fingerprint: match[1]!, line })
     }
     if (keys.length === 0) throw new RemoteOperationError('host-key-scan-failed', `no usable host key fingerprints for ${hostname}:${port}`)
+    return { token: this.remember({ hostname, port, keys }), keys }
+  }
+
+  rememberAlias(alias: string, endpoint: { hostname: string; port: number; user: string }, fingerprint: string): string {
+    return this.remember({ ...endpoint, alias, keys: [{ type: 'known-hosts', fingerprint, line: '' }] })
+  }
+
+  private remember(entry: Omit<ScanToken, 'expiresAt'>): string {
     if (this.tokens.size >= this.limit) {
       for (const [id, entry] of this.tokens) { if (entry.expiresAt <= Date.now()) this.tokens.delete(id) }
       if (this.tokens.size >= this.limit) throw new RemoteOperationError('host-key-scan-failed', 'too many outstanding host key scans')
     }
     const token = randomBytes(8).toString('hex')
-    this.tokens.set(token, { keys, expiresAt: Date.now() + this.ttlMs })
-    return { token, keys }
+    this.tokens.set(token, { ...entry, expiresAt: Date.now() + this.ttlMs })
+    return token
   }
 
   /** Resolve a token + confirmed fingerprint into the recorded known_hosts line(s). */
-  resolve(token: string, fingerprint: string): readonly string[] {
+  resolve(token: string, fingerprint: string, hostname: string, port: number, alias?: string, user?: string): readonly string[] {
     const entry = this.tokens.get(token)
     if (entry === undefined || entry.expiresAt <= Date.now()) {
       throw new RemoteOperationError('host-key-token-expired', 'the host key scan expired; rescan the host')
     }
     const matching = entry.keys.filter(key => key.fingerprint === fingerprint)
-    if (matching.length === 0) {
-      throw new RemoteOperationError('host-key-mismatch', 'the confirmed fingerprint does not belong to this scan')
+    if (entry.hostname !== hostname || entry.port !== port || entry.alias !== alias || entry.user !== user || matching.length === 0) {
+      throw new RemoteOperationError('host-key-mismatch', 'the confirmed target or fingerprint does not belong to this scan')
     }
     this.tokens.delete(token)
     return matching.map(key => key.line)

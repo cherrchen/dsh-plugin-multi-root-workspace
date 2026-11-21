@@ -17,18 +17,25 @@
 ## 文件布局与权限
 
 - 插件级连接文件由 `remoteEnvironments.personalPath` 指定，默认为 `$DSH_HOME/storages/multi_root_workspace.remote-personal.json`。格式为 `{ schemaVersion: 2, revision, environments[] }`。环境保存目标、主机指纹、凭据引用、Helper 与传输/执行能力上限，远端目录由绑定单独保存。
-- Workspace Root 绑定由 Host 写到 `<personalPath>.bindings.json`，格式为 `{ schemaVersion: 1, revision, bindings[] }`。绑定按本地 `primary`、`environmentId`、`rootId` 唯一标识，包含远端路径、动作与传输对端。一个 Workspace 可在同一环境绑定多个互不重叠的目录。新建或更新的绑定带 Host 生成的 `bindingId`，解除后重新添加同名绑定需要重新登记。
+- Workspace Root 绑定由 Host 写到 `<personalPath>.bindings.json`，格式为 `{ schemaVersion: 1, revision, bindings[] }`。绑定按本地 `primary`、`environmentId`、`rootId` 唯一标识，包含远端路径、动作与传输对端。一个 Workspace 可在同一环境绑定多个互不重叠的目录。新建或实际修改授权的绑定带 Host 生成的 `bindingId`。路径、动作集合与传输配对集合相同时，保存保留原记录、摘要和配置 revision。解除后重新添加同名绑定需要重新登记。
 - 两个文件都必须是当前 uid 拥有的普通文件，非符号链接，权限至多 0600，父目录不得由 group/other 写，位置须在所有绑定的本地主根之外。连接文件缺失时，整个 personal 配置视为空；v2 连接文件存在时，绑定文件必须可读并通过保护检查。
 - 两个文件共用 `<basename>.lock` 的内核租约与 CAS，当前 revision 取两份文件的最大值。读取 v1 合并文件时剥离环境里的 `workspace`，保留已保存的绑定路径与权限。首次写入先准备绑定文件，再原子替换为 v2 连接文件。在这之后，每个变更只原子替换它所属的文件。
 - 凭据根由 `remoteEnvironments.credentialRoot` 指定，默认 `$DSH_HOME/storages/multi_root_workspace.ssh`。目录必须为当前 uid 所有且权限为 0700，否则返回 `credential-root-unsafe`。内部有 `credentials.json`、`keys/<id>` 与公钥、`secrets/<id>`、生成的 `ssh_config` 与 `known_hosts` 以及 `askpass.sh`。
-- 每次远端 snapshot/list/admit/add/remove 前，`refreshPersonal()` 检查两个文件的保护和内容。配置损坏、语义非法或保护失效会使控制面进入 `config-invalid`，清空清单和摘要、断开 owner/follower 的远端信道。修复后可重载。清单摘要改变时 owner 换摘要重听 `remote-1`，follower 断开重连；受变更影响的已登记授权须重新核验。
+- 每次远端 snapshot/list/admit/add/remove 前，`refreshPersonal()` 检查两个文件的保护和内容。有效配置原位发布，保留 owner 的授权域与现有 `remote-1` 连接。后续请求各自携带并校验当期清单摘要。配置损坏、语义非法或保护失效时，控制面进入 `config-invalid`，清空清单和摘要并拒绝远端准入，修复后可重新加载。
+- personal 环境授权身份包含主机名、端口、账号、平台、主机钥、凭据引用（含已安装访问密钥）、Helper 与执行/传输策略。连接新建或身份变化生成新的身份 ID。显示名只影响展示。尚未包含目标和凭据身份的旧 personal 登记升级后变为 `withheld`，须重新登记一次。
 - personal Helper 在目录核验或获准执行时取该绑定的远端目录作为工作区；连接按环境和目录分别缓存。旧 Helper 绑定首次升级会因其清单内容变化而需要重新登记。team/hardened 继续使用部署清单的 Helper 启动路径。
 
 ## RPC 端点与拒绝码
 
 面板通道 `PANEL_CHANNEL` 上的 `ssh*` 端点（`src/remote/personal-contract.ts`）：每个请求携带 `sessionId`，Host 由会话解析主根；未知字段即 `panel/bad-request`。所有端点在开关未开或 `mode !== 'personal'` 时拒绝 `remote-personal-unavailable`；所有变更端点返回刷新后的 `sshState`。
 
-`sshState`、`sshCredentialGenerate`、`sshCredentialImport`、`sshCredentialPassword`、`sshCredentialRemove`（`credential-in-use`）、`sshConfigAliases`（只读：本机 `~/.ssh/config` 的字面 `Host` 别名，跳过通配/否定项，读取失败返回空数组）、`sshListDirectories`（只读：按 `environmentId` 经 SFTP 列目录，返回 `{ path, parent, entries: [{ name, path }] }`，只含目录名与路径、最多 500 条；managed 环境以 `-F <credentialRoot>/ssh_config` 连接，因此未链接 `~/.ssh/config` 也可浏览；错误统一为 `remote-path-listing-failed`，Host 原文随错误显示）、`sshHostKeyScan`（直连 `hostname`/`port` 触网探测，返回 60 秒有界令牌，`host-key-token-expired` / `host-key-mismatch`；`alias` 形式经 `ssh -G` 在 Host 解析并返回用户 known_hosts 指纹与解析出的 endpoint，不触网、无令牌）、`sshEnvironmentSave`（托管凭据需 `hostKeyToken` + `fingerprint`；**例外**：target 身份（hostname/port/user）与 managed `credentialId` 均未变、且提交的 `fingerprint` 等于已记录 `hostKey` 时，环境元数据或能力更新可复用已记录指纹而不带 token；`ssh-config` 凭据的指纹必须匹配用户 known_hosts；带 `exec` 的保存只在 helper 已安装且目标身份未变时允许，否则 `exec-requires-helper`，在消耗扫描令牌与写 `known_hosts` 之前拒绝）、`sshEnvironmentRemove`（仍有绑定时为 `environment-in-use`）、`sshEnvironmentTest`、`sshHelperInstall`（`helper-hash-mismatch`）、`sshAccessKeyInstall`、`sshBindingSave`（主根由 Host 注入，校验远端路径格式；新建省略 `rootId`，编辑传入该项目和环境下的现有 `rootId`）、`sshBindingRemove`、`sshConfigLink`。
+- `sshState`、`sshCredentialGenerate`、`sshCredentialImport`、`sshCredentialPassword`、`sshCredentialRemove`（`credential-in-use`）、`sshConfigLink`（写入 Include）。
+- `sshConfigAliases` 只返回本机 `~/.ssh/config` 中的字面 `Host` 别名。跳过通配和否定项，读取失败返回空数组。
+- `sshListDirectories` 按连接经只读 SFTP 返回 `{ path, parent, entries: [{ name, path }] }`，最多 500 条。ssh-config 来源在打开 SFTP 前使用 `ssh -G` 和用户 known_hosts 核对已保存的主机、端口、账号与指纹。漂移会拒绝浏览。managed 来源使用 `-F <credentialRoot>/ssh_config`，可在链接 `~/.ssh/config` 前浏览。SFTP 错误为 `remote-path-listing-failed`。
+- `sshHostKeyScan` 返回有效期 60 秒的确认令牌。直连形式用 `ssh-keyscan`，令牌绑定目标主机、端口和候选指纹。别名形式通过 `ssh -G` 和本机 known_hosts 取得目标和唯一指纹，令牌还绑定别名与账号。
+- `sshEnvironmentSave` 携带 `intent: create | update`。创建时 ID 已存在返回 `environment-id-conflict`，更新目标不存在返回 `environment-not-found`。连接身份及记录的指纹相同时可复用已有指纹。主机、端口、账号、平台、凭据来源或材料改变时需要重新确认扫描结果。别名保存时会重新核对解析结果。允许启用 exec 的条件是 Helper 已安装且可沿用。
+- `sshEnvironmentRemove` 拒绝移除仍被 Workspace 引用的环境（`environment-in-use`）。`sshEnvironmentTest`、`sshHelperInstall`、`sshAccessKeyInstall` 负责连接检查与远端设置。
+- `sshBindingSave` 用显式 `rootId` 编辑已有绑定，省略时创建。绑定归请求会话的 Workspace。`sshBindingRemove` 解除当前 Workspace 的绑定。
 
 插件详情的「SSH 远端」通过独立的 `/multi-root-workspace-ssh-settings` Connection 通道打开。它使用同一 Host 身份校验，直接读取插件级状态和管理连接、凭据，不要求活动会话。该通道拒绝 Workspace 绑定、目录浏览与登记/移除请求；这些操作继续通过 `PANEL_CHANNEL` 由当前会话派生主根。
 
@@ -67,7 +74,9 @@ SFTP 使用独立的 SSH 子进程，同样在命令行强制 `StrictHostKeyChec
 
 ## 模式切换
 
-切换 `mode` 走 `configureRemote`：远程域与 `remote-1` 监听按旧事实拆除，新模式下重读清单来源（personal → `personalPath`；team/hardened → `manifestPath` 覆盖或行配置），再按当前 authority 重开 owner/重连 follower。摘要变化后既有授权一律 withheld，需重新登记。工具子树的重挂载键是 `mode` + 全部生效 team broker 事实（manifestPath/socketPath/brokerUid/credentialRoot）+ 清单摘要——即使摘要不变，模式或 broker 事实一变也会拆除旧子树、重新证明并重挂（hardened 的 profile guard 不会带进 team）。因控制面未 `ready`（或 broker 不可用）而早退的挂载不算挂载成功：不占用重挂载键，`ready` 翻转或下一次远端变更时按现状重挂，登记用的端点校验器不会永久缺席。
+切换 `mode` 走 `configureRemote`，按新档位重建清单来源、控制面和工具子树。停用时先卸载子树并以取消信号收束在飞操作，再关闭远端域与 IPC。team/hardened 根据控制面状态、清单摘要和生效的 broker 配置重新证明和挂载。
+
+personal 子树首次等到控制面就绪再挂载，常规配置保存更新现有管理器。环境授权身份改变时只废弃该环境的 SFTP 与 Helper 代次。绑定编辑交由准入指纹失效，已无绑定引用的目录 Helper 在撤权复核后回收。其他环境和仍有效的目录可继续使用已有连接。
 
 设置写入走 Host 的 `settings` 服务；旧版 `configure` 路径没有 `setSource` 推送，行必须通过 `settings.describe()` 读取实时值，否则只有重启后 loader 重新组合才生效（本页“实时开关”回归覆盖）。
 
@@ -80,7 +89,7 @@ Registry 的 owner 是唯一打开远程域和 `remote-1` 监听的 Host。若�
 GUI 入口有两处：
 
 - **插件详情设置卡**：开启 SSH 远端环境后，第一行显示「SSH 远端」和「管理」按钮，进入与工作区面板共用的管理对话框。实验开关仍负责启用风险确认；开关关闭时隐藏该设置入口。
-- **Workspace Folders 的「远端工作目录」**（`src/client/WorkspaceFoldersAction.tsx`）与「主要工作目录」「附属工作目录」并列，标题行同时提供「管理 SSH 远端…」与个人模式的「管理远端 Root 绑定」。远端目录列表与主要/附属工作目录共用 `WorkspaceRow`。首行依次显示末级文件夹名、SSH 环境名标签、当前会话的有效能力。第二行为可复制地址，personal 模式为 `user@host:port/path`，部署清单为 `user@host/path`。行尾「…」可登记或移除授权。personal 模式可在该菜单中修改读取、写入、执行及本地传输对端，保存沿用绑定的 CAS 校验。对已登记目录修改能力后，通过同一菜单重新登记。解除绑定通过绑定对话框完成。
+- **Workspace Folders 的「远端工作目录」**（`src/client/WorkspaceFoldersAction.tsx`）与「主要工作目录」「附属工作目录」并列，标题行同时提供「管理 SSH 远端…」与个人模式的「管理远端 Root 绑定」。远端目录列表与主要/附属工作目录共用 `WorkspaceRow`。首行依次显示末级文件夹名、SSH 环境名标签、当前会话的有效能力。第二行为可复制地址，personal 模式为 `ssh://user@host:port/path`，部署清单为 `ssh://user@host/path`。IPv6 主机加方括号，路径按 URI 规则转义。行尾「…」可登记或经确认移除授权。personal 模式可在该菜单中修改读取、写入、执行及本地传输对端，保存沿用绑定的 CAS 校验。对已登记目录修改能力后，通过同一菜单重新登记。解除绑定通过绑定对话框完成。
 
 ### SSH 远端管理对话框
 
@@ -92,9 +101,9 @@ GUI 入口有两处：
 
 三个 Tab，另有一个独立的“添加连接”Dialog：
 
-**添加连接 Dialog** 从「已有连接」打开。选择本机 ssh-config 条目或插件托管凭据，填写显示名、环境 ID、平台与目标。选择器和操作按钮均为 32px 高，字段保留标签和按需显示的校验反馈。主机钥扫描结果经弹窗确认后，保存连接并返回「已有连接」。本机来源可从 `sshConfigAliases` 选择，托管来源可从嵌套的凭据管理对话框添加凭据。
+**添加连接 Dialog** 从「已有连接」打开。选择本机 ssh-config 条目或插件托管凭据，填写显示名、环境 ID、平台与目标。选择器和操作按钮均为 32px 高，字段保留标签和按需显示的校验反馈。已存在的环境 ID 在表单就地提示。主机钥扫描结果经弹窗确认后，保存连接并返回「已有连接」。本机来源可从 `sshConfigAliases` 选择，托管来源可从嵌套的凭据管理对话框添加凭据。
 
-1. **已有连接** 的个人模式环境列表复用工作区目录行。环境名称、平台、地址和就绪状态在左侧，测试连接、编辑、删除和当前可用的设置操作在右侧横排为带悬停提示的图标。窄窗口中整组图标移到下一行并右对齐。安装 Helper 后，该环境的安装入口随即隐藏。连接编辑可设置命令执行和文件传输的可用性，每条绑定再单独选择权限。删除仍被绑定的连接会返回 `environment-in-use`。team/hardened 显示部署清单的只读列表。
+1. **已有连接** 的个人模式环境列表复用工作区目录行。环境名称、平台、地址和就绪状态在左侧，测试连接、编辑、删除和当前可用的设置操作在右侧横排为带悬停提示的图标。窄窗口中整组图标移到下一行并右对齐。安装 Helper 后，该环境的安装入口随即隐藏。连接行使用同一 SSH URI 的目标部分。连接编辑可设置命令执行和文件传输的可用性，每条绑定再单独选择权限。仅修改显示名等元数据可直接保存，修改连接身份需重新扫描。删除仍被绑定的连接会返回 `environment-in-use`。team/hardened 显示部署清单的只读列表。
 2. **SSH Key**：personal 显示凭据行（标签、类型、指纹、复制公钥、行内删除）和三个添加表单（生成密钥 / 导入私钥+可选口令 / 保存密码）。秘密输入**提交后立即清空**（无论成败），永不由状态回填；访问密钥（`purpose: 'access-key'`）不在 Key 列表重复出现，而显示在其所属环境下。team/hardened 说明凭据由部署 broker 托管，GUI 不读取、不创建。
 3. **模式设置**：复用 `src/client/remote-custody.tsx` 的三档单选、team 四个 broker 字段与降级风险确认，写入同一个 `multi-root-remote-tools` form 与 CAS revision，不另建写入路径；同时说明档位如何决定“添加连接”的引导方式（personal 图形化表单、team 部署清单 + broker、hardened 部署 profile + 全量证明），并提供切到“已有连接”的按钮——添加连接的入口在该 Tab，不在模式页。档位是 **Host 级**（决定凭据由谁持有与 remote-1 的来源）。
 
@@ -104,7 +113,7 @@ GUI 入口有两处：
 
 新建绑定时，Host 将路径的末级目录名转换为最多 63 字符的小写标识。转换结果为空，或同一项目和 SSH 环境已有同名标识时，改用 UUID 的前 8 位，并保证该标识在当前范围内唯一。编辑已有绑定时沿用原标识。
 
-「本项目绑定」与「远端工作目录」共用目录行。首行显示目录名、SSH 环境和已配置的权限，第二行显示可复制的远端地址；已配置的本地传输对端按导入和导出方向列在下方。行尾用铅笔和垃圾桶图标编辑或解除绑定。
+「本项目绑定」与「远端工作目录」共用目录行。首行显示目录名、SSH 环境和已配置的权限，第二行显示可复制的远端地址；已配置的本地传输对端按导入和导出方向列在下方。行尾用铅笔编辑，垃圾桶打开解绑确认。确认解绑会撤销已有登记。
 
 连接和绑定变更携带当前 `revision`。发生 CAS 冲突时刷新 `sshState` 后可重试，表单保留待提交内容。会话切换使旧请求的响应失效。已确认保存的连接无需完成后续 Workspace 操作。
 
@@ -124,10 +133,10 @@ exec 与 transfer 独立授权：执行前用 helper 的只读受限 stat/realpa
 
 ## 在飞命令撤权与清理
 
-`remote_bash` 从 spawn 返回 handle 起观察取消、超时与授权变化（包括尚未收到启动确认的阶段）。本 Host 的撤权通知立即触发重新准入；同时每 250ms 向 Registry owner 重新准入，覆盖跨 Host 撤权、会话降为只读和配置失效。复核等待超过 1 秒也按撤权处理。任何准入失败、epoch、策略、连接代次或授权存储 revision 变化均只发送一次 terminate；revision 变化保守终止该存储上的在飞命令，防止两次观察间 remove+re-add 恢复旧操作。
+`remote_bash` 从 spawn 返回 handle 起观察取消、超时与授权变化，包括启动确认阶段。本 Host 的撤权通知立即触发重新准入，并每 250ms 向 Registry owner 轮询。启动前后都比较 epoch、有效模式、实际用到的登记指纹和连接代次。同一授权移除后重加会产生新的登记 ID，无关登记写入保留当前指纹。明确拒绝立即终止。临时不可用、摘要不一致和 IPC 中断在一次复核的 1 秒预算内重试，到期仍无法确认则以撤权终止。
 
 终止原因返回 `termination: revoked | cancelled | timeout`。在 `terminateGraceMs` 内仍无法确认结果则返回 `unknown` 和 reconcileId，不无限等待、不重新执行。启动确认尚未到达时传输断开同样立即返回 `unknown`：不等待一个不会再来的确认，也不发送 terminate，因为启动是否发生本身未知。通知和轮询只是失效检测，不能代替每次新操作的正式准入；网络和调度延迟下不承诺撤权瞬间远端停止。
 
 ## 传输截止时间
 
-`transfer.timeoutMs` 是一次复制的总 I/O 预算：包含准入、连接/握手、预检、读取/写入、回读校验和发布，不在 staging 开始时重新计时。取消或超时会使待决调用结束，并废弃正在等待应答的 SFTP 通道；迟到连接立即关闭，不继续复制。清理使用独立且共享的 1 秒预算；断开的代次不能按路径删除暂存文件，报告 residual/unknown。CREATE 或 LINK 发出后缺少应答时返回 unknown 和 reconcileId；LINK 已确认、仅清理失败时仍返回 committed 与残留状态。
+`transfer.timeoutMs` 是一次复制的总 I/O 预算，包含准入、连接/握手、预检、读取/写入、回读校验和发布。并发调用可共享环境的 SFTP 通道与 opening。取消只结束当前调用的等待，其他调用可继续使用通道。待应答的请求超时会废弃通道代次，迟到的 opening 由管理器统一处理。清理使用独立且共享的 1 秒预算。失效代次按 residual/unknown 报告，避免按路径清理。CREATE 或 LINK 发出后缺少应答时返回 unknown 和 reconcileId。LINK 已确认时，清理失败仍返回 committed 与残留状态。

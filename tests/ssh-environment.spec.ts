@@ -1,6 +1,7 @@
 /** SshEnvironmentManager refusal ordering — injected exec/readFile, no network. */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { hostKeyFingerprint, parseSshConfig, SshEnvironmentManager } from '../src/remote/ssh-environment.ts'
+import { SftpClient } from '../src/remote/sftp.ts'
 import type { DeploymentManifest } from '../src/remote/manifest.ts'
 
 const SSH_G = [
@@ -15,7 +16,7 @@ const environment = (over: object = {}) => ({
   connection: { host: 'dsh-vps-build', nodePath: '/opt/node-v24/bin/node', helperPath: '/opt/dsh-helper/node_modules/@deepseek-ai/dsh-ssh/lib/helper.js', workspace: '/srv/dsh/work/app' },
   credentialIsolation: 'unattested' as const, ...over,
 })
-const manifest = (envs = [environment()]): DeploymentManifest => ({ schemaVersion: 1, configVersion: 'c', environments: envs as never, bindings: [] })
+const manifest = (envs: readonly object[] = [environment()]): DeploymentManifest => ({ schemaVersion: 1, configVersion: 'c', environments: envs as never, bindings: [] })
 const calls: string[] = []
 const exec = async (file: string, args: readonly string[], _input?: string) => {
   calls.push(`${file} ${args.join(' ')}`)
@@ -136,5 +137,42 @@ describe('SshEnvironmentManager refusal ordering', () => {
       return !code.startsWith('host-key') && !code.startsWith('host-identity') && !code.startsWith('account-')
     })
     expect(lookups).toEqual(['[64.118.149.252]:2222'])
+  })
+})
+
+
+describe('shared SFTP openings', () => {
+  it('cancels only the waiting caller and retains the live generation on an unrelated rebind', async () => {
+    const connection = environment({ transfer: { maxBytes: 1024, timeoutMs: 10_000 } })
+    const manager = new SshEnvironmentManager({
+      manifest: manifest([connection]), logger, gate: eligible, custody: 'personal', exec, readFile: () => KEY_LINE,
+    })
+    const entered = Promise.withResolvers<void>()
+    const handshake = Promise.withResolvers<{ version: number; extensions: Record<string, string> }>()
+    const client = { init: () => { entered.resolve(); return handshake.promise }, dispose: vi.fn() }
+    const connect = vi.spyOn(SftpClient, 'connect').mockReturnValue(client as never)
+    const controller = new AbortController()
+    try {
+      const first = manager.openSftp('vps-app', controller.signal)
+      const second = manager.openSftp('vps-app')
+      await entered.promise
+      controller.abort()
+      await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+      handshake.resolve({ version: 3, extensions: { 'hardlink@openssh.com': '1', 'fsync@openssh.com': '1' } })
+      const opened = await second
+      expect(connect).toHaveBeenCalledTimes(1)
+      expect(client.dispose).not.toHaveBeenCalled()
+
+      manager.rebind(manifest([{ ...connection, displayName: 'Renamed' }, environment({ environmentId: 'vps-other' })]))
+      expect(await manager.openSftp('vps-app')).toBe(opened)
+      expect(manager.sftpGenerationOf('vps-app')).toBe(opened.generation)
+
+      manager.rebind(manifest([{ ...connection, hostKey: `SHA256:${'B'.repeat(43)}` }]))
+      expect(manager.sftpGenerationOf('vps-app')).toBe('stale')
+      await expect.poll(() => client.dispose.mock.calls.length).toBe(1)
+    } finally {
+      await manager.disposeAll()
+      connect.mockRestore()
+    }
   })
 })

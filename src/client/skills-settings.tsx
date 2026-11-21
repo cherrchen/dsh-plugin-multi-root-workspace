@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { Button, IconWarningOutlineRegular, Switch, Tag, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
+import { WarningOutlineIcon } from '../compat/client-icons.ts'
+import { Button, Switch, Tag, Toast } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '@deepseek-ai/cordis'
 import { bindSettingsForm, bindSkillsForm, clientInject, type SkillsForm } from '../compat/skills-client.ts'
 import { installAutoReviewSettings, type AutoReviewForm } from '../compat/auto-review-client.ts'
@@ -61,7 +62,7 @@ function SettingSwitchRow({ form, title, hint, failureText, t, tag, defaultCheck
       <Toast
         key={toast.seq}
         text={toast.text}
-        icon={<IconWarningOutlineRegular />}
+        icon={WarningOutlineIcon === undefined ? undefined : <WarningOutlineIcon />}
         holdMs={8000}
         onDone={() => { setToast(null) }}
       />

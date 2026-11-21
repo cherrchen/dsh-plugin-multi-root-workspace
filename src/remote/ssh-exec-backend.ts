@@ -5,7 +5,7 @@
  * `RemoteConnectionLost`, never re-spawns, and reports the manager's live
  * generation so a stale connection can never pass the B-admission check.
  */
-import type { RemoteEnvironment } from './manifest.ts'
+import { environmentDigest, type RemoteEnvironment } from './manifest.ts'
 import { RemoteConnectionLost, type RemoteExecutionBackend, type RemoteExecDeployment, type RemoteProcessHandle } from './exec.ts'
 import type { SshEnvironment, SftpEnvironment } from './ssh-environment.ts'
 import { posix } from 'node:path'
@@ -13,10 +13,10 @@ import { SshEndpointVerifier, EndpointVerifyError } from './ssh-verifier.ts'
 
 /** The manager surface the exec adapters need; the SSH manager implements it. */
 export interface SshExecManager {
-  open(environmentId: string, workspace?: string): Promise<SshEnvironment>
+  open(environmentId: string, workspace?: string, expectedDigest?: string): Promise<SshEnvironment>
   openSftp(environmentId: string): Promise<SftpEnvironment>
   generationOf(environmentId: string, workspace?: string): string
-  markStale(environmentId: string, workspace?: string): void
+  markStale(environmentId: string, workspace?: string, generation?: string): void
 }
 
 /** The deployment block the manifest's `exec` stanza becomes. */
@@ -39,7 +39,7 @@ export function lazySshExecBackend(
   if (deployment === undefined) return undefined
   let opened: { env: SshEnvironment; backend: RemoteExecutionBackend } | undefined
   const backend = async (): Promise<RemoteExecutionBackend> => {
-    const env = await manager.open(environment.environmentId, workspace)
+    const env = await manager.open(environment.environmentId, workspace, environmentDigest(environment))
     if (opened?.env !== env) opened = { env, backend: sshExecBackend(environment, env, manager, workspace)! }
     return opened.backend
   }
@@ -82,7 +82,7 @@ export function sshExecBackend(
     collected?: { stdout?: Collected; stderr?: Collected }
   }
   const lost = (error: unknown): RemoteConnectionLost => {
-    manager.markStale(environment.environmentId, workspace)
+    manager.markStale(environment.environmentId, workspace, env.generation)
     return error instanceof RemoteConnectionLost ? error : new RemoteConnectionLost(error instanceof Error ? error.message : String(error))
   }
   return {

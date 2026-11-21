@@ -17,7 +17,7 @@ export const remoteMethods = ['hello', 'remote-snapshot', 'remote-add', 'remote-
 export type RemoteMethod = typeof remoteMethods[number]
 const requestSchema = z.object({
   protocol: z.literal('remote-1'), domain: z.string(), store: z.string(),
-  id: z.string().uuid(), epoch: z.string().nullable(), method: z.enum(remoteMethods), args: z.array(z.unknown()).max(4),
+  id: z.string().uuid(), epoch: z.string().nullable(), manifestDigest: z.string().optional(), method: z.enum(remoteMethods), args: z.array(z.unknown()).max(4),
 }).strict()
 const replySchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('reply'), id: z.string().uuid(), value: z.unknown() }).strict(),
@@ -63,13 +63,13 @@ export class RemoteClient {
       return client
     } catch (error) { client.close(); throw error }
   }
-  request(method: RemoteMethod, args: readonly unknown[]): Promise<unknown> {
+  request(method: RemoteMethod, args: readonly unknown[], manifestDigest?: string): Promise<unknown> {
     if (this.closed || this.pending.size >= MAX_PENDING) return Promise.reject(new AuthorityRpcError('authority-unavailable', 'remote connection is unavailable or busy'))
     const id = randomUUID()
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.channel.destroy() }, 5000)
       this.pending.set(id, { method, resolve, reject, timer })
-      send(this.channel, { protocol: 'remote-1', domain: 'remote', store: this.store, epoch: this.epoch ?? null, id, method, args })
+      send(this.channel, { protocol: 'remote-1', domain: 'remote', store: this.store, epoch: this.epoch ?? null, id, method, args, manifestDigest })
     })
   }
   close() { this.channel.destroy() }
@@ -82,10 +82,10 @@ export class RemoteServer {
   private closed = false
   private inFlight = 0
   private constructor(
-    private readonly store: string, private readonly epoch: string, private readonly manifestDigest: string,
-    private readonly dispatch: (method: RemoteMethod, args: unknown[]) => Promise<unknown>,
+    private readonly store: string, private readonly epoch: string, private readonly manifestDigest: string | (() => string | undefined),
+    private readonly dispatch: (method: RemoteMethod, args: unknown[], manifestDigest?: string) => Promise<unknown>,
   ) {}
-  static async listen(endpoint: string, options: { store: string; epoch: string; manifestDigest: string }, dispatch: (method: RemoteMethod, args: unknown[]) => Promise<unknown>) {
+  static async listen(endpoint: string, options: { store: string; epoch: string; manifestDigest: string | (() => string | undefined) }, dispatch: (method: RemoteMethod, args: unknown[], manifestDigest?: string) => Promise<unknown>) {
     const server = new RemoteServer(options.store, options.epoch, options.manifestDigest, dispatch)
     server.listener = await listenNative(endpoint, channel => server.accept(channel))
     return server
@@ -107,11 +107,12 @@ export class RemoteServer {
       if (request.store !== this.store || pending >= MAX_PENDING) throw new Error('remote peer violated protocol')
       if (request.method === 'hello') {
         if (ready || request.epoch !== null) throw new Error('remote handshake mismatch')
-        if (request.args[0] !== this.manifestDigest) {
+        const digest = typeof this.manifestDigest === 'function' ? this.manifestDigest() : this.manifestDigest
+        if (digest === undefined || request.args[0] !== digest) {
           send(channel, { type: 'error', id: request.id, code: 'config-digest-mismatch', message: 'remote manifest digest mismatch' }); return
         }
         ready = true; this.readyPeers.add(channel); clearTimeout(timer)
-        send(channel, { type: 'reply', id: request.id, value: { protocol: 'remote-1', domain: 'remote', store: this.store, epoch: this.epoch, manifestDigest: this.manifestDigest } }); return
+        send(channel, { type: 'reply', id: request.id, value: { protocol: 'remote-1', domain: 'remote', store: this.store, epoch: this.epoch, manifestDigest: digest } }); return
       }
       if (!ready || request.epoch !== this.epoch) throw new Error('remote epoch mismatch')
       if (this.inFlight >= MAX_PENDING) {
@@ -119,16 +120,16 @@ export class RemoteServer {
       }
       const mutation = request.method === 'remote-add' || request.method === 'remote-remove'
       if (mutation && !seen.has(request.id) && seen.size >= 2048) { channel.destroy(); return }
-      const fingerprint = createHash('sha256').update(JSON.stringify([request.method, request.args])).digest('hex')
+      const fingerprint = createHash('sha256').update(JSON.stringify([request.method, request.manifestDigest, request.args])).digest('hex')
       const entry = seen.get(request.id)
       if (entry && entry.fingerprint !== fingerprint) throw new Error('remote request ID reused with different arguments')
       pending++; this.inFlight++
       const run = entry
         ? entry.outcome.then(outcome => {
             if (!outcome.ok) throw new AuthorityRpcError(outcome.code, outcome.message)
-            return this.dispatch('remote-snapshot', [request.args[0]])
+            return this.dispatch('remote-snapshot', [request.args[0]], request.manifestDigest)
           })
-        : this.dispatch(request.method, request.args)
+        : this.dispatch(request.method, request.args, request.manifestDigest)
       if (mutation && !entry) seen.set(request.id, { fingerprint, outcome: run.then(
         () => ({ ok: true as const }),
         error => ({ ok: false as const, code: String(error?.code ?? 'remote-error').slice(0, 120), message: String(error?.message ?? error).slice(0, 4096) }),
@@ -149,18 +150,18 @@ export class RemoteServer {
 const grantSchema = z.object({
   environmentId: z.string(), rootId: z.string(), displayPath: z.string(),
   verifiedTarget: z.object({ kind: z.enum(['object', 'path']), value: z.string() }).strict(),
-  configVersion: z.string(), bindingDigest: z.string(), addedAt: z.string(),
+  configVersion: z.string(), bindingDigest: z.string(), addedAt: z.string(), grantId: z.uuid().optional(),
 }).strict()
 export const remoteSnapshotSchema = z.object({
   epoch: z.string(), revision: z.number().int().nonnegative().safe(), primary: z.string(), manifestDigest: z.string(),
   grants: z.array(grantSchema.extend({ state: z.enum(['registered', 'withheld', 'revoked']) }).strict()),
 }).strict()
 export const remoteAdmitSchema = z.object({
-  decision: z.literal('admit'), epoch: z.string(), revision: z.number().int().nonnegative().safe(), primary: z.string(),
+  decision: z.literal('admit'), epoch: z.string(), authorizationFingerprint: z.string().regex(/^[0-9a-f]{64}$/), primary: z.string(),
   endpoints: z.array(z.object({
     environmentId: z.string(), rootId: z.string(), displayPath: z.string(),
     verifiedTarget: z.object({ kind: z.enum(['object', 'path']), value: z.string() }).strict().nullable(),
-    bindingDigest: z.string().nullable(), configVersion: z.string().nullable(),
+    bindingDigest: z.string().nullable(), environmentDigest: z.string().regex(/^[0-9a-f]{64}$/).nullable(), configVersion: z.string().nullable(),
   }).strict()),
 }).strict()
 

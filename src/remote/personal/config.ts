@@ -31,6 +31,7 @@ const helperSchema = z.object({
 export const personalEnvironmentSchema = z.object({
   environmentId: z.string().regex(/^[a-z0-9][a-z0-9-]{2,62}$/),
   displayName: z.string().max(120).optional(),
+  identityId: z.string().uuid().optional(),
   platform: z.enum(['linux', 'darwin']),
   endpoint: z.object({
     hostname: hostName,
@@ -83,6 +84,11 @@ export function toDeploymentManifest(config: PersonalConfig, manifestPath: strin
     ...(environment.displayName === undefined ? {} : { displayName: environment.displayName }),
     platform: environment.platform,
     account: environment.endpoint.user,
+    personalIdentity: {
+      hostname: environment.endpoint.hostname,
+      port: environment.endpoint.port,
+      credentialDigest: createHash('sha256').update(JSON.stringify([environment.identityId, environment.credential])).digest('hex'),
+    },
     hostKey: environment.hostKey,
     namespace: environment.environmentId,
     transport: environment.helper !== null ? 'helper' : 'sftp',
@@ -252,7 +258,7 @@ function writeProtected(path: string, data: unknown): void {
 }
 
 /** Both stores share the revision check and kernel lease, including during migration. */
-export async function savePersonalConfig(path: string, next: PersonalConfig, expectedRevision: number): Promise<PersonalManifest> {
+export async function savePersonalConfig(path: string, next: PersonalConfig, expectedRevision: number, beforeCommit?: () => void): Promise<PersonalManifest> {
   if (!isAbsolute(path)) throw new ManifestError('manifest-untrusted', `the personal config path must be absolute: ${JSON.stringify(path)}`)
   if (typeof process.getuid !== 'function') throw new ManifestError('manifest-untrusted', 'personal config protection checks require a POSIX host')
   const checked = personalConfigSchema.safeParse(next)
@@ -299,6 +305,7 @@ export async function savePersonalConfig(path: string, next: PersonalConfig, exp
     if (current.split && (environmentsChanged || bindingsChanged) && revision <= expectedRevision) {
       throw new ManifestError('personal-config-conflict', 'a changed personal store requires a new revision')
     }
+    beforeCommit?.()
     if (!current.split || bindingsChanged) writeProtected(bindingsPath, { schemaVersion: 1, revision, bindings })
     if (!current.split || !bindingsChanged) writeProtected(path, { schemaVersion: 2, revision, environments })
     return loadPersonalManifest(path)

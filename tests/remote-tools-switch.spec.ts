@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { apply as applyRemoteTools, Config as RemoteToolsConfig, inject } from '../src/remote/tools.ts'
 import { classifyInstallation, classifySshCapability, sshPackageVersion, sshPrivateCopy } from '../src/compat/dsh-version.ts'
+import { loadPersonalConfig, savePersonalConfig } from '../src/remote/personal/config.ts'
 import type { RemoteExecutionBackend } from '../src/remote/exec.ts'
 import { createFixtureWorkspace, type FixtureWorkspace } from './support/temp-workspace.ts'
 import { mountRemoteTools, registerRemote, type RemoteToolsWorld } from './support/remote-tools.ts'
@@ -20,6 +21,7 @@ import { fakeExecBackend, FAKE_EXEC, type FakeRemote } from './support/fake-remo
 /** The broker answer this spec controls; the wire itself is faked out. */
 const probe = vi.hoisted(() => ({
   calls: 0,
+  personalMounts: 0,
   fail: false,
   remotes: undefined as ReadonlyMap<string, FakeRemote> | undefined,
   backends: undefined as ReadonlyMap<string, RemoteExecutionBackend> | undefined,
@@ -43,10 +45,14 @@ vi.mock('../src/remote/broker/attest.ts', async () => {
 vi.mock('../src/remote/ssh-environment.ts', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/remote/ssh-environment.ts')>()
   const { FakeManager } = await import('./support/fake-remote.ts')
-  class TestManager {
+  class TestManager extends FakeManager {
     constructor(options: { manifest: never }) {
       if (probe.remotes === undefined || probe.backends === undefined) throw new Error('test fake remotes not installed')
-      return new FakeManager(options.manifest, probe.remotes, probe.backends) as never
+      super(options.manifest, probe.remotes, probe.backends)
+      probe.personalMounts++
+    }
+    rebind(manifest: unknown) {
+      Object.assign(this, { deployment: manifest })
     }
   }
   return { ...original, SshEnvironmentManager: TestManager }
@@ -73,7 +79,7 @@ let world: RemoteToolsWorld | undefined
 beforeEach(() => { fixture = createFixtureWorkspace('remote-tools-switch') })
 afterEach(async () => {
   await world?.dispose(); world = undefined; fixture.dispose()
-  probe.calls = 0; probe.fail = false; probe.remotes = undefined; probe.backends = undefined
+  probe.calls = 0; probe.personalMounts = 0; probe.fail = false; probe.remotes = undefined; probe.backends = undefined
 })
 
 interface SwitchHooks {
@@ -262,7 +268,7 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     expect(await world!.call('remote_copy', localToLocal)).toMatchObject({ isError: true })
   })
 
-  gated(`mounts the personal host manager and admits remote_copy end-to-end${gateSkipped}`, async () => {
+  gated(`keeps a running personal copy through unrelated binding and connection saves${gateSkipped}`, async () => {
     const personalPath = join(fixture.base, 'remote-personal.json')
     const credentialRoot = join(fixture.base, 'cred')
     writeFileSync(personalPath, JSON.stringify({
@@ -302,11 +308,38 @@ describe.skipIf(process.platform === 'win32')('the remote-tools live switch', ()
     expect(probe.calls).toBe(0)
 
     await registerRemote(world!, 'build', 'app')
-    const copy = await world!.call('remote_copy', {
+    const remote = world!.remotes.get('build')!
+    const entered = Promise.withResolvers<void>()
+    const resume = Promise.withResolvers<void>()
+    const read = remote.sftp.read
+    vi.spyOn(remote.sftp, 'read').mockImplementationOnce(async (...args) => {
+      entered.resolve()
+      await resume.promise
+      return await read(...args)
+    })
+    const pending = world!.call('remote_copy', {
       from: { environmentId: 'build', rootId: 'app', relativePath: 'src/a.txt' },
       to: { environmentId: 'local', rootId: 'primary', relativePath: 'imported.txt' },
     })
+    try {
+      await Promise.race([entered.promise, pending.then(result => { throw new Error(JSON.stringify(result)) })])
+      const registry = world!.stack.registry
+      const config = loadPersonalConfig(personalPath)
+      await savePersonalConfig(personalPath, { ...config, revision: 1, bindings: [
+        ...config.bindings, { primary: fixture.outside, environmentId: 'build', rootId: 'logs', path: '/srv/logs', actions: ['read'] },
+      ] }, 0)
+      await registry.refreshRemotePersonal()
+      const bound = loadPersonalConfig(personalPath)
+      await savePersonalConfig(personalPath, { ...bound, revision: 2, environments: [
+        ...bound.environments,
+        { ...config.environments[0]!, environmentId: 'different', endpoint: { hostname: 'different.internal', port: 22, user: 'ci' } },
+      ] }, 1)
+      await registry.refreshRemotePersonal()
+      expect(probe.personalMounts).toBe(1)
+    } finally { resume.resolve() }
+    const copy = await pending
     expect(copy, JSON.stringify(copy)).toMatchObject({ status: 'committed' })
+    expect(probe.personalMounts).toBe(1)
   })
 
   const spawnOf = () => (world!.stack.ctx.get('subprocess') as { spawn(spec: { argv: readonly string[] }): unknown }).spawn
