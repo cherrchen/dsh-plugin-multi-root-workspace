@@ -1159,12 +1159,20 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 .mrfw-dialog {
+  /* The dialog caps against the window, not only against the padded overlay:
+     a long additional-root list must stop at 80% of the viewport, while the
+     100% floor keeps the overlay's 24px air on a viewport shorter than the
+     fixed header, primary row and add row. An elevated surface rebinds the
+     host scrollbar skin to its l2 tokens (host Modal/Menu recipe). */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
   width: min(640px, 100%);
   max-height: 100%;
+  max-height: min(80vh, 100%);
   overflow: hidden;
   border: none;
   border-radius: 24px;
@@ -1211,11 +1219,19 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/* The scroll region is the additional-root list; this body scroll is only the
+   fallback for a viewport too short to hold the header, the primary row and
+   the add row, so those controls are never clipped. */
 .mrfw-body {
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow-y: auto;
+  /* The fallback scroll contains its own overscroll: a wheel that reaches the
+     end of the body must not move the app frame behind the dialog. The row
+     list deliberately does not contain, so on a short dialog its end hands the
+     gesture over to this body scroll and the add controls stay reachable. */
+  overscroll-behavior: contain;
   padding: 0 24px 24px;
 }
 
@@ -1229,10 +1245,42 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 .mrfw-section {
   display: flex;
   flex-direction: column;
+  flex: none;
 }
 
-.mrfw-section + .mrfw-section {
+/* The additional-root section's box is flattened into the body's flex column:
+   the rendered heading height (one or two lines depending on locale and width)
+   and the row list's floor then bound the shrink together. A fixed section floor
+   cannot follow a wrapped heading — 104px leaves a partial row, while 140px
+   clips the add controls on a wide dialog whose heading did not wrap. */
+.mrfw-sectionAdditional {
+  display: contents;
+}
+
+.mrfw-sectionAdditional > .mrfw-sectionTitleRow {
+  flex: none;
   margin-top: 8px;
+}
+
+/* The panel's only normal scroll region. The rows are the variable part, so
+   they take the space left below the fixed sections, capped relative to the
+   window (never a pixel height), and scroll in place. It does NOT contain
+   overscroll: on a short dialog the body is the fallback scroll, and a wheel at
+   the end of the rows has to hand off to it to reveal the add controls. */
+.mrfw-rootList {
+  --mrfw-root-list-cap: 60vh;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: var(--mrfw-root-list-cap);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* A wrapped row can take its full height up to the list cap. Taller rows
+   scroll within the list so they cannot push the add controls farther down.
+   Use 70px until a row can be measured, and apply no floor to an empty list. */
+.mrfw-rootList:has(.mrfw-row) {
+  min-height: min(var(--mrfw-root-row-height, 70px), var(--mrfw-root-list-cap));
 }
 
 .mrfw-sectionTitleRow {
@@ -1651,6 +1699,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 
 .mrfw-actions {
   display: flex;
+  flex: none;
   /* One control row by default: the manual path field is the only flexible
      item and absorbs the spare width first. Wrapping is kept because the
      root-limit hint claims a line of its own, and because the ≤560px dialog
