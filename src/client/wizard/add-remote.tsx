@@ -157,6 +157,9 @@ export interface RemoteWizardProps {
   readonly t: Translate
 }
 
+/** The remote node major helper install needs — v20 already fails it in practice. */
+const REMOTE_NODE_MIN_MAJOR = 24
+
 /** The three-step add-remote flow. */
 export function RemoteWizard(props: RemoteWizardProps): ReactNode {
   const { ssh, remotes, sessionId, t } = props
@@ -175,6 +178,7 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
   const [fingerprint, setFingerprint] = useState<string | undefined>(undefined)
   const [capExec, setCapExec] = useState(false)
   const [capTransfer, setCapTransfer] = useState(false)
+  const [nodeCheck, setNodeCheck] = useState<{ kind: 'ok' | 'missing' | 'old', version: string | undefined } | undefined>(undefined)
   const [testResult, setTestResult] = useState<string | undefined>(undefined)
   const [credsOpen, setCredsOpen] = useState(false)
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined)
@@ -247,6 +251,7 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
   const select = (id: string): void => {
     setSelectedId(id)
     setTestResult(undefined)
+    setNodeCheck(undefined)
     const environment = view?.environments.find(entry => entry.environmentId === id)
     setCapExec(environment?.exec !== undefined)
     setCapTransfer(environment?.transfer !== undefined)
@@ -331,6 +336,15 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
       const result = await ssh.environmentTest(sessionId, selected.environmentId, signal)
       if (signal.aborted) return
       setTestResult(result.nodePath ?? 'ok')
+      // An unparsable version still counts as "node found".
+      const major = Number.parseInt(result.nodeVersion?.replace(/^v/, '').split('.')[0] ?? '', 10)
+      const tooOld = result.nodePath !== undefined && !Number.isNaN(major) && major < REMOTE_NODE_MIN_MAJOR
+      setNodeCheck(result.nodePath === undefined
+        ? { kind: 'missing', version: undefined }
+        : tooOld
+          ? { kind: 'old', version: result.nodeVersion }
+          : { kind: 'ok', version: result.nodeVersion })
+      if (tooOld) setError(new PanelError('node-too-old', result.nodeVersion ?? ''))
     } catch (cause) {
       if (!signal.aborted) {
         setTestResult(undefined)
@@ -533,9 +547,16 @@ export function RemoteWizard(props: RemoteWizardProps): ReactNode {
             <ChecklistRow
               state={pending === 'helper' ? 'ongoing' : selected.helper !== null ? 'done' : 'warning'}
               label={selected.helper !== null ? t('ssh.helperInstalled') : t('ssh.helperMissing')}
+              detail={nodeCheck === undefined || nodeCheck.kind === 'old' ? undefined
+                : nodeCheck.kind === 'missing' ? t('ssh.node.missing')
+                  : t('ssh.node.ok', { version: nodeCheck.version ?? '?' })}
               action={selected.helper === null ? (
-                <Button variant="primary" size="sm" disabled={busy} loading={pending === 'helper'}
-                  onClick={() => { void installHelper() }}>{t('ssh.helperInstall')}</Button>
+                <span className="mrfw-sshRowActions">
+                  <Button variant="outline" size="sm" disabled={busy} loading={pending === 'test'}
+                    onClick={() => { void testConnection() }}>{t('ssh.add.detectNode')}</Button>
+                  <Button variant="primary" size="sm" disabled={busy} loading={pending === 'helper'}
+                    onClick={() => { void installHelper() }}>{t('ssh.helperInstall')}</Button>
+                </span>
               ) : undefined} />
             {needsAccessKey === true ? (
               <ChecklistRow
