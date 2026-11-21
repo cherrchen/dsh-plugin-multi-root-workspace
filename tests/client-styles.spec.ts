@@ -756,15 +756,17 @@ describe('the workspace dialog scrolling rules', () => {
     const list = rule('.mrfw-rootList')
     expect(list).toContain('flex: 1 1 auto')
     expect(list).toContain('min-height: 0')
-    expect(list).toContain('max-height: 60vh')
+    expect(list).toContain('--mrfw-root-list-cap: 60vh')
+    expect(list).toContain('max-height: var(--mrfw-root-list-cap)')
     expect(list).toContain('overflow-y: auto')
     expect(list).not.toContain('overscroll-behavior')
     expect(list).not.toMatch(/max-height:[^;]*\d+px/)
-    // One complete root row stays visible while rows exist; the dialog measures
-    // the tallest rendered row into the custom property because rows wrap on
-    // narrow dialogs, and an empty list stays at zero so the panel keeps its
-    // compact height.
-    expect(rule('.mrfw-rootList:has(.mrfw-row)')).toContain('min-height: var(--mrfw-root-row-height, 70px)')
+  })
+
+  it('fits a wrapped row up to the same cap that limits the list', () => {
+    expect(rule('.mrfw-rootList:has(.mrfw-row)')).toContain(
+      'min-height: min(var(--mrfw-root-row-height, 70px), var(--mrfw-root-list-cap))',
+    )
   })
 
   it('pins the add controls below the scrolling list', () => {

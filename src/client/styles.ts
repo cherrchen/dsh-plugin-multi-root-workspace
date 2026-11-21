@@ -1268,19 +1268,19 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
    overscroll: on a short dialog the body is the fallback scroll, and a wheel at
    the end of the rows has to hand off to it to reveal the add controls. */
 .mrfw-rootList {
+  --mrfw-root-list-cap: 60vh;
   flex: 1 1 auto;
   min-height: 0;
-  max-height: 60vh;
+  max-height: var(--mrfw-root-list-cap);
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
 
-/* Keep one complete root row visible while rows exist; an empty list stays at
-   zero and the panel keeps its compact height. The dialog measures the tallest
-   rendered row into the custom property (rows wrap their actions below the
-   text on narrow dialogs); a runtime that cannot measure keeps one 70px row. */
+/* A wrapped row can take its full height up to the list cap. Taller rows
+   scroll within the list so they cannot push the add controls farther down.
+   Use 70px until a row can be measured, and apply no floor to an empty list. */
 .mrfw-rootList:has(.mrfw-row) {
-  min-height: var(--mrfw-root-row-height, 70px);
+  min-height: min(var(--mrfw-root-row-height, 70px), var(--mrfw-root-list-cap));
 }
 
 .mrfw-sectionTitleRow {

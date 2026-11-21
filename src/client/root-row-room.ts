@@ -1,12 +1,9 @@
 /**
  * One-row room measurement for the workspace dialog's root list.
  *
- * The list is a scroll region that keeps one secondary-root row visible. On a
- * narrow dialog the row layout wraps its actions below the text, so the row is
- * taller than the compact one-row fallback and a fixed floor can show only
- * part of it. The dialog measures the tallest rendered row and publishes it
- * through `--mrfw-root-row-height`; the list can then keep a complete row in
- * view without reserving a fixed wrapped-row height on wide dialogs.
+ * On a narrow dialog a row can wrap its actions below the text. The dialog
+ * publishes the tallest rendered row through `--mrfw-root-row-height` so the
+ * list can fit a complete row whenever it fits within the viewport cap.
  *
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/root-row-room
  */

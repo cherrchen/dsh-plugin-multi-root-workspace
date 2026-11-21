@@ -440,11 +440,8 @@ export function WorkspaceFoldersDialog(props: WorkspaceFoldersActionProps & { on
   // Tab cycles within it instead of escaping into the sidebar behind it.
   useEffect(() => { dialogRef.current?.focus() }, [])
 
-  // The row list keeps one complete row visible, even when a narrow dialog
-  // wraps a row's actions below its text. The tallest rendered row is measured
-  // into --mrfw-root-row-height after every roots commit and whenever a row
-  // resizes; jsdom reports zero-size rects and has no ResizeObserver, so the
-  // stylesheet's compact one-row fallback stays in force there.
+  // Measure the tallest row after roots change and when rows wrap or unwrap.
+  // CSS uses this as the list floor, bounded by the viewport cap.
   useLayoutEffect(() => {
     const list = rootListRef.current
     if (list === null) return undefined

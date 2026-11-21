@@ -445,7 +445,7 @@ describe('the New Session hero entry', () => {
 })
 
 describe('the panel dialog', () => {
-  it('publishes the tallest rendered row as the root list floor', async () => {
+  it('updates the root list floor when existing rows wrap and unwrap', async () => {
     const harness = mount()
     harness.setView({
       primaryRoot: '/repos/primary',
@@ -459,16 +459,19 @@ describe('the panel dialog', () => {
       limit: 16,
       count: 3,
     })
-    /** A DOMRect carrying the height the measurement reads. */
-    const rect = (height: number): DOMRect => ({ x: 0, y: 0, width: 0, height, top: 0, right: 0, bottom: height, left: 0, toJSON: () => ({}) })
+    const heights = new Map<HTMLElement, number>()
     const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const height = this.classList.contains('mrfw-rowBare')
-        ? 60
-        : this.classList.contains('mrfw-row') ? 132 : 0
-      return rect(height)
+      const height = heights.get(this) ?? 70
+      return new DOMRect(0, 0, 0, height)
     })
+    const observe = vi.fn()
+    let notifyResize: (() => void) | undefined
     vi.stubGlobal('ResizeObserver', class {
-      observe(): void {}
+      constructor(callback: () => void) {
+        notifyResize = callback
+      }
+
+      observe = observe
       disconnect(): void {}
     })
     try {
@@ -476,9 +479,23 @@ describe('the panel dialog', () => {
       fireEvent.click(screen.getByRole('button', { name: /action.label/ }))
       await waitFor(() => { expect(screen.getByText('/repos/wrapped-3')).toBeTruthy() })
       const list = document.querySelector('.mrfw-rootList') as HTMLElement
-      await waitFor(() => {
-        expect(list.style.getPropertyValue('--mrfw-root-row-height')).toBe('132px')
-      })
+      const rows = Array.from(list.querySelectorAll<HTMLElement>('.mrfw-row'))
+      expect(observe.mock.calls.map(([row]) => row)).toEqual(rows)
+      const publishedHeight = (): string => list.style.getPropertyValue('--mrfw-root-row-height')
+      expect(publishedHeight()).toBe('70px')
+
+      heights.set(rows[0]!, 104)
+      heights.set(rows[1]!, 132)
+      act(() => { notifyResize!() })
+      expect(publishedHeight()).toBe('132px')
+
+      heights.set(rows[1]!, 70)
+      act(() => { notifyResize!() })
+      expect(publishedHeight()).toBe('104px')
+
+      heights.clear()
+      act(() => { notifyResize!() })
+      expect(publishedHeight()).toBe('70px')
     } finally {
       spy.mockRestore()
       vi.unstubAllGlobals()
