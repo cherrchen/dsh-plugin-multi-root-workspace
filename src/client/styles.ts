@@ -1891,7 +1891,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 .mrfw-wizTargetUser {
-  flex: 0 1 150px;
+  flex: 0 1 104px;
 }
 
 .mrfw-wizTargetHost {
@@ -1899,7 +1899,7 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 .mrfw-wizTargetPort {
-  flex: 0 0 92px;
+  flex: 0 0 68px;
 }
 
 .mrfw-wizTargetSep {
