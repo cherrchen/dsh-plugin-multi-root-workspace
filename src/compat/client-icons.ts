@@ -103,6 +103,7 @@ function icon(pixelName: string, regularName: string): PanelIcon {
 export const IconChevronDown = icon('IconChevronDownOutline14', 'IconChevronDownOutlineRegular')
 export const IconChevronUp = icon('IconChevronUpOutline14', 'IconChevronUpOutlineRegular')
 export const IconCopy = icon('IconCopyOutline16', 'IconCopyOutlineRegular')
+export const IconCheck = maybeIcon(['IconCheckOutlineRegular'])
 export const IconEdit = icon('IconEditOutline16', 'IconEditOutlineRegular')
 export const IconEllipsis = icon('IconEllipsisOutline16', 'IconEllipsisOutlineRegular')
 export const IconFolderClose = icon('IconFolderClose16', 'IconFolderCloseRegular')

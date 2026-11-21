@@ -50,7 +50,7 @@ interface WorkspaceRowProps {
 }
 
 /**
- * Shared row for workspace directories, SSH bindings, and SSH connections.
+ * Shared row for workspace directories and SSH bindings.
  */
 export function WorkspaceRow(props: WorkspaceRowProps): ReactNode {
   return <div className={['mrfw-row', props.bare === true ? 'mrfw-rowBare' : undefined, props.className].filter(Boolean).join(' ')}>

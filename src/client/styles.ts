@@ -1702,8 +1702,6 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   gap: 10px;
 }
 
-/* The standalone SSH management dialog. The card is wider than the primitive's
-   380px default; the content column scrolls so the body never clips controls. */
 .mrfw-sshDialog,
 .mrfw-sshAddDialog {
   width: min(760px, 100%);
@@ -1717,53 +1715,379 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
   overscroll-behavior: contain;
 }
 
-.mrfw-sshDialogPanel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 12px;
+/* Follow the host SettingsRoot grid and ModelsSection surface tokens. */
+.mrfw-sshSettingsOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
 }
 
-.mrfw-sshTabs {
-  margin-top: 4px;
+.mrfw-sshSettingsMask {
+  position: absolute;
+  inset: var(--dsh-frame-chrome-top, 0px) 0 0;
+  background: var(--dsw-alias-bg-mask-1);
+  backdrop-filter: var(--dsw-mask-blur);
 }
 
-/* Fallback for runtimes whose ui-primitives predates SegmentedTabs. The DOM
-   contract matches the primitive's tablist, including keyboard navigation. */
-.mrfw-sshTabsFallback {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: var(--dsw-radius-sm);
+.mrfw-sshSettingsDialog {
+  position: relative;
+  box-sizing: border-box;
+  width: min(800px, calc(100vw - 48px));
+  height: min(800px, calc(100dvh - 2 * max(24px, var(--dsh-frame-overlay-top, 24px))));
+  overflow: hidden;
+  border-radius: var(--dsw-radius-panel);
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: var(--dsw-elevation-prominent);
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
-.mrfw-sshTab {
-  flex: 1 1 0;
+.mrfw-sshSettingsDialog:focus {
+  outline: none;
+}
+
+.mrfw-sshSettingsGrid {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "title header" "nav pane";
+  min-height: 0;
+}
+
+.mrfw-sshSettingsDialog > .mrfw-pendingBar,
+.mrfw-sshSettingsFallback .mrfw-pendingBar {
+  position: absolute;
+  inset-inline: 0;
+}
+
+.mrfw-sshSettingsTitle {
+  grid-area: title;
   min-width: 0;
-  padding: 7px 8px;
+  margin: 0;
+  padding: 22px 12px 8px 24px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.mrfw-sshSettingsHeader {
+  grid-area: header;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 20px 14px 6px;
+}
+
+.mrfw-sshSettingsClose {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
   border: 0;
-  border-radius: var(--dsw-radius-xs);
+  border-radius: var(--dsw-radius-sm);
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font: inherit;
-  font-size: 13px;
-  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
   cursor: pointer;
 }
 
-.mrfw-sshTab:hover {
-  color: var(--dsw-alias-label-primary);
+.mrfw-sshSettingsNav {
+  grid-area: nav;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  padding: 10px 12px 0;
+  overflow-y: auto;
 }
 
-.mrfw-sshTabActive {
-  background: var(--dsw-alias-bg-layer-1);
+.mrfw-sshSettingsNavItem {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  min-width: 0;
+  padding: 0 16px 0 12px;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
   color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  text-align: start;
+  cursor: pointer;
 }
 
-.mrfw-sshTab:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
+.mrfw-sshSettingsNavItem svg {
+  flex: none;
+}
+
+.mrfw-sshSettingsNavItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mrfw-sshSettingsClose:hover,
+.mrfw-sshSettingsNavItem:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-sshSettingsNavItem[aria-current='true'] {
+  background: var(--dsw-specific-sidebar-nav-item-active, var(--dsw-alias-interactive-bg-hover));
+}
+
+.mrfw-sshSettingsClose:focus-visible,
+.mrfw-sshSettingsNavItem:focus-visible,
+.mrfw-sshSettingsAdd:focus-visible,
+.mrfw-sshSettingsCard .mrfw-iconBtn:focus-visible {
+  outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: -2px;
+}
+
+.mrfw-sshSettingsPane {
+  grid-area: pane;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 24px 24px;
+}
+
+.mrfw-sshSettingsHeading {
+  display: grid;
+  gap: 12px;
+  margin-block-end: 24px;
+}
+
+.mrfw-sshSettingsHeading h3 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-sshSettingsHeading p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Older hosts provide Modal without the layer hook. Keep its built-in chrome. */
+.mrfw-sshSettingsFallback,
+.mrfw-sshSettingsFallback > :has(> .mrfw-sshSettingsGrid) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.mrfw-sshSettingsFallback > :has(> .mrfw-sshSettingsGrid) {
+  margin: 0;
+  padding: 0;
+}
+
+.mrfw-sshSettingsFallback .mrfw-sshSettingsGrid {
+  flex: 1 1 auto;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "nav pane";
+}
+
+.mrfw-sshSettingsInventory,
+.mrfw-sshSettingsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mrfw-sshSettingsList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.mrfw-sshSettingsCard {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 0.5px solid var(--dsw-alias-settings-card-stroke, var(--dsw-alias-border-l4));
+  border-radius: var(--dsw-radius-xl, 20px);
+  background: var(--dsw-alias-settings-card-fill, var(--dsw-alias-bg-layer-2));
+}
+
+.mrfw-sshSettingsCardMain,
+.mrfw-sshSettingsCardActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.mrfw-sshSettingsCardMain {
+  gap: 10px 16px;
+}
+
+.mrfw-sshSettingsCardText {
+  display: flex;
+  flex: 1 1 14rem;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mrfw-sshSettingsCardTitle,
+.mrfw-sshSettingsFacts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.mrfw-sshSettingsCardTitle {
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mrfw-sshSettingsCardActions {
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 100%;
+  margin-inline-start: auto;
+}
+
+.mrfw-sshSettingsIdentifier,
+.mrfw-sshSettingsFacts {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mrfw-sshSettingsIdentifier {
+  font-family: var(--ds-font-family-code, ui-monospace, monospace);
+}
+
+.mrfw-sshConnectionStatus {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.mrfw-sshConnectionStatus[data-ready='true'] {
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.mrfw-sshSettingsAdd.mrfw-sshButton {
+  width: 100%;
+  min-height: 44px;
+  height: auto;
+  padding: 8px 12px;
+  border: 1px dashed var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-lg, 16px);
+  background: transparent;
+  box-shadow: none;
+}
+
+.mrfw-sshSettingsAdd .mrfw-btnLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: normal;
+}
+
+.mrfw-sshSettingsAdd:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-sshSettingsInventory button[aria-pressed='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mrfw-sshSettingsCard .mrfw-iconBtn {
+  border-radius: var(--dsw-radius-sm);
+}
+
+.mrfw-sshSettingsCard .mrfw-sshDanger:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+}
+
+.mrfw-sshSettingsCard > .mrfw-sshEnvExtra {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.mrfw-sshSettingsCard > .mrfw-sshEdit {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.mrfw-sshSettingsCard .mrfw-sshEdit > .mrfw-sshForm {
+  border: 0;
+  padding: 0;
+}
+
+@media (max-width: 767px) {
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsOverlay {
+    background: var(--dsw-alias-bg-layer-2);
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsOverlay > .mrfw-sshSettingsDialog {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsGrid {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas: "title header" "nav nav" "pane pane";
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsFallback .mrfw-sshSettingsGrid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: "nav" "pane";
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsTitle {
+    padding: 22px 0 0 16px;
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsHeader {
+    padding: 20px 16px 0 10px;
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsNav {
+    flex-direction: row;
+    padding: 12px 16px 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsNavItem {
+    flex: 1 0 auto;
+    justify-content: center;
+    min-width: 108px;
+    padding: 0 14px;
+  }
+
+  html:not([data-windows-titlebar]):not([data-platform='darwin']) .mrfw-sshSettingsPane {
+    padding: 0 16px 24px;
+  }
 }
 
 .mrfw-sshStep {
@@ -2069,7 +2393,7 @@ button.mrfw-sshPickerTrigger {
   gap: 6px 12px;
 }
 
-.mrfw-sshDanger {
+.mrfw-sshDanger:is(.mrfw-sshButton, .mrfw-iconBtn) {
   color: var(--dsw-alias-state-error-primary);
 }
 
@@ -2119,14 +2443,12 @@ button.mrfw-sshPickerTrigger {
   gap: 6px;
 }
 
-.mrfw-sshBindingList > .mrfw-row,
-.mrfw-sshEnvRow {
+.mrfw-sshBindingList > .mrfw-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.mrfw-sshBindingList .mrfw-sshRowActions,
-.mrfw-sshEnvActions {
+.mrfw-sshBindingList .mrfw-sshRowActions {
   flex-wrap: nowrap;
 }
 
@@ -2139,8 +2461,7 @@ button.mrfw-sshPickerTrigger {
   flex: none;
 }
 
-.mrfw-sshBindingList .mrfw-note,
-.mrfw-sshEnvRow .mrfw-note {
+.mrfw-sshBindingList .mrfw-note {
   overflow-wrap: anywhere;
 }
 
@@ -2148,24 +2469,6 @@ button.mrfw-sshPickerTrigger {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-
-.mrfw-sshEnvRow .mrfw-sshCheckRow {
-  gap: 4px 6px;
-}
-
-.mrfw-sshEnvExtra {
-  grid-column: 1 / -1;
-}
-
-@media (max-width: 520px) {
-  .mrfw-sshEnvRow {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .mrfw-sshEnvActions {
-    justify-self: end;
-  }
 }
 
 .mrfw-sshScanRow {

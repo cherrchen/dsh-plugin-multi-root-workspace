@@ -235,11 +235,21 @@ function renderDialog(options: {
 }
 
 /** The tab strip inside the management dialog. */
-function tab(dialog: HTMLElement, name: string): HTMLElement {
-  return within(dialog).getByRole('tab', { name })
+function settingsNavItem(dialog: HTMLElement, name: string): HTMLElement {
+  const navigation = within(dialog).getByRole('navigation', { name: 'ssh.tab.listLabel' })
+  return within(navigation).getByRole('button', { name })
 }
 
 /** The credential form's confirm button (the dialog has its own add-root one). */
+function chooseCredentialForm(dialog: HTMLElement, kind: 'Generate' | 'Import' | 'Password'): void {
+  const panel = within(dialog)
+  const name = `ssh.credential${kind}`
+  if (panel.queryByRole('button', { name }) === null) {
+    fireEvent.click(panel.getByRole('button', { name: 'ssh.credentialAdd' }))
+  }
+  fireEvent.click(panel.getByRole('button', { name }))
+}
+
 function sshFormConfirm(dialog: HTMLElement): HTMLElement {
   return within(dialog.querySelector('.mrfw-sshForm') as HTMLElement).getByRole('button', { name: 'panel.addConfirm' })
 }
@@ -360,10 +370,11 @@ describe('the SSH management dialog', () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'add')
     const main = screen.getByRole('dialog', { name: 'ssh.dialog.title' })
-    // The management dialog has exactly three tabs; adding is a dialog.
-    expect(within(main).getAllByRole('tab').map(node => node.textContent))
+    // The settings navigation contains two sections. Adding opens its own dialog.
+    const navigation = within(main).getByRole('navigation', { name: 'ssh.tab.listLabel' })
+    expect(within(navigation).getAllByRole('button').map(node => node.textContent))
       .toEqual(['ssh.tab.connections', 'ssh.tab.keys'])
-    expect(within(main).queryByRole('tab', { name: 'ssh.tab.add' })).toBeNull()
+    expect(settingsNavItem(main, 'ssh.tab.connections').getAttribute('aria-current')).toBe('true')
     expect(within(main).getByRole('button', { name: 'ssh.tab.add' })).toBeTruthy()
     // Step one collects credentials, name, target and platform.
     expect(await within(dialog).findByLabelText('ssh.field.displayName')).toBeTruthy()
@@ -429,7 +440,7 @@ describe('the SSH management dialog', () => {
     const entry = await screen.findByRole('button', { name: '管理 SSH 远端…' })
     await waitFor(() => { expect((entry as HTMLButtonElement).disabled).toBe(false) })
     fireEvent.click(entry)
-    const main = await screen.findByRole('dialog', { name: 'SSH 远端管理' })
+    const main = await screen.findByRole('dialog', { name: 'SSH 设置' })
     // The saved environment's badge uses the same mapping.
     expect(await within(main).findByText('Linux')).toBeTruthy()
     fireEvent.click(within(main).getByRole('button', { name: '添加连接' }))
@@ -443,11 +454,31 @@ describe('the SSH management dialog', () => {
   it('lists SSH keys in the Keys tab and keeps the consequence note', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'manage')
-    fireEvent.click(tab(dialog, 'ssh.tab.keys'))
-    expect(await within(dialog).findByText('ssh.credentials')).toBeTruthy()
-    expect(within(dialog).getByText('deploy key')).toBeTruthy()
+    const keys = settingsNavItem(dialog, 'ssh.tab.keys')
+    fireEvent.click(keys)
+    expect(keys.getAttribute('aria-current')).toBe('true')
+    expect(settingsNavItem(dialog, 'ssh.tab.connections').hasAttribute('aria-current')).toBe(false)
+    const pane = within(dialog).getByRole('region', { name: 'ssh.credentials' })
+    expect(await within(pane).findByRole('heading', { name: 'ssh.credentials' })).toBeTruthy()
+    expect(within(pane).getByRole('listitem').textContent).toContain('deploy key')
+    expect(within(pane).queryByRole('button', { name: 'ssh.credentialGenerate' })).toBeNull()
+    expect(within(pane).getByRole('button', { name: 'ssh.credentialAdd' })).toBeTruthy()
     expect(within(dialog).getByText('SHA256:cred-fingerprint')).toBeTruthy()
-    expect(within(dialog).getByRole('button', { name: 'ssh.copyPublicKey' })).toBeTruthy()
+    const actions = within(pane).getByRole('group', { name: 'deploy key' })
+    for (const [label, glyph] of [['ssh.copyPublicKey', 'copy'], ['ssh.delete', 'trash']]) {
+      const action = within(actions).getByRole('button', { name: label })
+      expect(action.textContent).toBe('')
+      expect(action.classList.contains('mrfw-btnGhost')).toBe(true)
+      expect(action.getAttribute('title')).toBe(label)
+      expect(action.querySelector(`[data-icon="${glyph}"]`)).toBeTruthy()
+    }
+    fireEvent.click(within(actions).getByRole('button', { name: 'ssh.delete' }))
+    const confirm = within(actions).getByRole('button', { name: 'ssh.confirmDelete' })
+    expect(confirm.textContent).toBe('ssh.confirmDelete')
+    const cancel = within(actions).getByRole('button', { name: 'ssh.cancel' })
+    expect(cancel.textContent).toBe('ssh.cancel')
+    fireEvent.click(cancel)
+    expect(ssh.calls.some(call => call.method === 'credentialRemove')).toBe(false)
     expect(within(dialog).getByText('ssh.keys.personalGuide')).toBeTruthy()
   })
 
@@ -502,16 +533,16 @@ describe('the SSH management dialog', () => {
   it('clears the password input after submit and never renders the secret', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await withDialog({ ssh }, 'manage')
-    fireEvent.click(tab(dialog, 'ssh.tab.keys'))
+    fireEvent.click(settingsNavItem(dialog, 'ssh.tab.keys'))
     await within(dialog).findByText('ssh.credentials')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialPassword' }))
+    chooseCredentialForm(dialog, 'Password')
     fireEvent.change(within(dialog).getByLabelText('ssh.label'), { target: { value: 'bot password' } })
     const secret = within(dialog).getByLabelText('ssh.password') as HTMLInputElement
     fireEvent.change(secret, { target: { value: 's3cr3t-value' } })
     fireEvent.click(sshFormConfirm(dialog))
     expect(await callsOf(ssh, 'credentialPassword')).toEqual([['session-1', 'bot password', 's3cr3t-value']])
     expect(dialog.innerHTML).not.toContain('s3cr3t-value')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialPassword' }))
+    chooseCredentialForm(dialog, 'Password')
     expect((within(dialog).getByLabelText('ssh.password') as HTMLInputElement).value).toBe('')
   })
 
@@ -519,16 +550,16 @@ describe('the SSH management dialog', () => {
     const ssh = fakeSsh(sshState())
     ssh.fail('credentialImport', new PanelError('credential-import-failed', 'bad key'))
     const dialog = await withDialog({ ssh }, 'manage')
-    fireEvent.click(tab(dialog, 'ssh.tab.keys'))
+    fireEvent.click(settingsNavItem(dialog, 'ssh.tab.keys'))
     await within(dialog).findByText('ssh.credentials')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialImport' }))
+    chooseCredentialForm(dialog, 'Import')
     const material = within(dialog).getByLabelText('ssh.privateKey') as HTMLTextAreaElement
     fireEvent.change(within(dialog).getByLabelText('ssh.label'), { target: { value: 'imported' } })
     fireEvent.change(material, { target: { value: 'PRIVATE-KEY-BYTES' } })
     fireEvent.click(sshFormConfirm(dialog))
     await waitFor(() => expect(screen.getByText('error.credential-import-failed')).toBeTruthy())
     expect(dialog.innerHTML).not.toContain('PRIVATE-KEY-BYTES')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialImport' }))
+    chooseCredentialForm(dialog, 'Import')
     expect((within(dialog).getByLabelText('ssh.privateKey') as HTMLTextAreaElement).value).toBe('')
   })
 
@@ -758,7 +789,8 @@ describe('the SSH management dialog', () => {
     const dialog = await withDialog({ ssh }, 'manage')
     await within(dialog).findByText('ssh.environments')
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.envEdit' }))
-    const editor = dialog.querySelector('.mrfw-sshEdit') as HTMLElement
+    const card = within(dialog).getByText('Production').closest('li')!
+    const editor = card.querySelector('.mrfw-sshEdit') as HTMLElement
     // No stepper, no Next button; every section stays visible.
     expect(within(editor).queryByRole('list', { name: 'ssh.step.listLabel' })).toBeNull()
     expect(within(editor).queryByRole('button', { name: 'ssh.step.next' })).toBeNull()
@@ -840,7 +872,10 @@ describe('the SSH management dialog', () => {
     const dialog = await withDialog({ ssh }, 'manage')
     await within(dialog).findByText('ssh.environments')
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.envDelete' }))
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.confirmDelete' }))
+    const confirm = within(dialog).getByRole('button', { name: 'ssh.confirmDelete' })
+    expect(confirm.textContent).toBe('ssh.confirmDelete')
+    expect(within(dialog).getByRole('button', { name: 'ssh.cancel' }).textContent).toBe('ssh.cancel')
+    fireEvent.click(confirm)
     expect(await callsOf(ssh, 'environmentRemove')).toEqual([['session-1', 7, 'env-prod']])
   })
 
@@ -921,9 +956,9 @@ describe('the SSH management dialog', () => {
     const ssh = fakeSsh(sshState())
     ssh.fail('credentialGenerate', new PanelError('personal-config-conflict', 'revision moved'))
     const dialog = await withDialog({ ssh }, 'manage')
-    fireEvent.click(tab(dialog, 'ssh.tab.keys'))
+    fireEvent.click(settingsNavItem(dialog, 'ssh.tab.keys'))
     await within(dialog).findByText('ssh.credentials')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialGenerate' }))
+    chooseCredentialForm(dialog, 'Generate')
     fireEvent.change(within(dialog).getByLabelText('ssh.label'), { target: { value: 'new key' } })
     fireEvent.click(sshFormConfirm(dialog))
     await waitFor(() => expect(screen.getByText('error.personal-config-conflict')).toBeTruthy())
@@ -947,33 +982,35 @@ describe('the SSH management dialog', () => {
     await waitFor(() => { expect((entry as HTMLButtonElement).disabled).toBe(false) })
     fireEvent.click(entry)
     const dialog = await screen.findByRole('dialog', { name: 'ssh.dialog.title' })
-    fireEvent.click(tab(dialog, 'ssh.tab.keys'))
+    fireEvent.click(settingsNavItem(dialog, 'ssh.tab.keys'))
     await within(dialog).findByText('ssh.credentials')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialGenerate' }))
+    chooseCredentialForm(dialog, 'Generate')
     fireEvent.change(within(dialog).getByLabelText('ssh.label'), { target: { value: 'new key' } })
     fireEvent.click(sshFormConfirm(dialog))
     await callsOf(ssh, 'credentialGenerate')
     await waitFor(() => expect(lists).toBeGreaterThan(1))
   })
 
-  it('walks the readiness chain: helper is the first pending step with a single install affordance', async () => {
+  it('shows the first setup task and exposes one Helper install action', async () => {
     const ssh = fakeSsh(sshState({ linked: false }))
     const dialog = await withDialog({ ssh }, 'manage')
     await within(dialog).findByText('ssh.environments')
-    const row = dialog.querySelector('.mrfw-sshEnvRow') as HTMLElement
-    expect(within(row).getByText('ssh.ready.label')).toBeTruthy()
-    expect(within(row).getByText('ssh.step.helper')).toBeTruthy()
-    expect(within(row).getByText('ssh.step.link')).toBeTruthy()
-    expect(within(row).queryByText('ssh.step.binding')).toBeNull()
+    const row = within(dialog).getByRole('listitem')
+    expect(within(row).getByRole('img', { name: 'ssh.helperMissing' })).toBeTruthy()
+    expect(within(row).getByText('ssh.helperMissing')).toBeTruthy()
     // One install affordance — the primary next step, not two same-named buttons.
     expect(within(row).getAllByRole('button', { name: 'ssh.helperInstall' })).toHaveLength(1)
     const actions = within(row).getByRole('group', { name: 'Production' })
-    for (const label of ['ssh.envTest', 'ssh.helperInstall', 'ssh.envEdit', 'ssh.envDelete']) {
-      const button = within(actions).getByRole('button', { name: label })
-      expect(button.textContent).toBe('')
-      expect(button.querySelector('svg')).toBeTruthy()
-      expect(button.getAttribute('title')).toBe(label)
+    for (const [label, glyph] of [['ssh.envTest', 'play'], ['ssh.envEdit', 'edit'], ['ssh.envDelete', 'trash']]) {
+      const action = within(actions).getByRole('button', { name: label })
+      expect(action.textContent).toBe('')
+      expect(action.classList.contains('mrfw-btnGhost')).toBe(true)
+      expect(action.getAttribute('title')).toBe(label)
+      expect(action.querySelector(`[data-icon="${glyph}"]`)).toBeTruthy()
     }
+    const install = within(actions).getByRole('button', { name: 'ssh.helperInstall' })
+    expect(install.classList.contains('mrfw-btnGhost')).toBe(true)
+    expect(install.getAttribute('title')).toBe('ssh.helperInstall')
     // The link step is not this row's primary yet: only the banner offers it.
     expect(within(row).queryByRole('button', { name: 'ssh.linkNow' })).toBeNull()
     expect(within(dialog).getByText('ssh.linkBanner')).toBeTruthy()
@@ -983,7 +1020,7 @@ describe('the SSH management dialog', () => {
     const ssh = fakeSsh(sshState({ linked: false, environments: [ENV_HELPER] }))
     const dialog = await withDialog({ ssh }, 'manage')
     await within(dialog).findByText('ssh.environments')
-    const row = dialog.querySelector('.mrfw-sshEnvRow') as HTMLElement
+    const row = within(dialog).getByRole('listitem')
     expect(within(row).queryByRole('button', { name: 'ssh.helperInstall' })).toBeNull()
     const link = within(row).getAllByRole('button', { name: 'ssh.linkNow' })
     expect(link).toHaveLength(1)
@@ -1054,7 +1091,7 @@ describe('the SSH management dialog', () => {
     const dialog = await withDialog({ ssh }, 'add')
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.credentialManage' }))
     const manager = await screen.findByRole('dialog', { name: 'ssh.credentials' })
-    fireEvent.click(within(manager).getByRole('button', { name: 'ssh.credentialGenerate' }))
+    chooseCredentialForm(manager, 'Generate')
     fireEvent.change(within(manager).getByLabelText('ssh.label'), { target: { value: 'new key' } })
     fireEvent.click(within(manager).getByRole('button', { name: 'panel.addConfirm' }))
     expect(await callsOf(ssh, 'credentialGenerate')).toEqual([['session-1', 'new key']])

@@ -1,8 +1,9 @@
 /** SSH connection management and the Workspace's separate Root binding dialog. */
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { Button as PrimitiveButton, Input, Menu, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { RootsView } from '../contract.ts'
-import { IconAccessReadOnly, IconAccessReadWrite, IconChevronDown, IconCopy, IconDownload, IconEdit, IconLink, IconPlay, IconShield, IconTrash, maybeComponent } from '../compat/client-icons.ts'
+import { IconAccessReadOnly, IconAccessReadWrite, IconCheck, IconChevronDown, IconClose, IconCopy, IconDownload, IconEdit, IconLink, IconPlay, IconPlus, IconShield, IconTrash, maybeComponent } from '../compat/client-icons.ts'
 import { IconButton, SshButton as Button } from './panel-buttons.tsx'
 import { PendingBar, StatusLine } from './pending.tsx'
 import { sshLocation, sshTarget } from '../remote/ssh-location.ts'
@@ -328,69 +329,119 @@ function statusText(status: RemotesView['status'], t: Translate): string {
   return status.reason ?? status.state
 }
 
-interface SegmentedTabsProps {
-  readonly items: readonly [SegmentedTab, ...SegmentedTab[]]
+function SshSettingsNavigation({ value, onChange, t }: {
   readonly value: SshDialogTab
   readonly onChange: (value: SshDialogTab) => void
-  readonly label: string
-  readonly className?: string | undefined
-}
-
-interface SegmentedTab {
-  readonly value: SshDialogTab
-  readonly label: ReactNode
-  readonly id: string
-  readonly panelId: string
-}
-
-// `SegmentedTabs` arrived with the 0.1.7-alpha.1 UI-primitives line. Older
-// supported runtimes keep the same DOM contract through the local fallback,
-// so the client graph never hard-imports a missing export.
-const SegmentedTabs = maybeComponent<(props: SegmentedTabsProps) => ReactNode>(['SegmentedTabs'])
-
-/** The tab strip: the shared primitive where present, a local tablist otherwise. */
-function SshTabStrip(props: { readonly value: SshDialogTab; readonly onChange: (value: SshDialogTab) => void; readonly t: Translate }): ReactNode {
-  const items = SSH_TABS.map(tab => ({
-    value: tab,
-    label: props.t(tabKey(tab)),
-    id: 'mrfw-ssh-tab-' + tab,
-    panelId: 'mrfw-ssh-panel-' + tab,
-  })) as unknown as readonly [SegmentedTab, ...SegmentedTab[]]
-  const label = props.t('ssh.tab.listLabel')
-  if (SegmentedTabs !== undefined) {
-    return <SegmentedTabs items={items} value={props.value} onChange={props.onChange} label={label} className="mrfw-sshTabs" />
-  }
-  const move = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number): void => {
-    const offset = event.key === 'ArrowRight' ? 1
-      : event.key === 'ArrowLeft' ? -1
-        : event.key === 'Home' ? -index
-          : event.key === 'End' ? items.length - 1 - index
-            : 0
-    if (offset === 0) return
-    event.preventDefault()
-    event.stopPropagation()
-    const next = items[(index + offset + items.length) % items.length]!
-    props.onChange(next.value)
-    document.getElementById(next.id)?.focus()
-  }
-  return <div role="tablist" aria-label={label} className="mrfw-sshTabs mrfw-sshTabsFallback">
-    {items.map((item, index) => (
-      <button
-        key={item.value}
-        type="button"
-        role="tab"
-        id={item.id}
-        aria-selected={props.value === item.value}
-        aria-controls={item.panelId}
-        tabIndex={props.value === item.value ? 0 : -1}
-        className={'mrfw-sshTab' + (props.value === item.value ? ' mrfw-sshTabActive' : '')}
-        onClick={() => { props.onChange(item.value) }}
-        onKeyDown={event => { move(event, index) }}
-      >
-        {item.label}
+  readonly t: Translate
+}): ReactNode {
+  return <nav aria-label={t('ssh.tab.listLabel')} className="mrfw-sshSettingsNav">
+    {SSH_TABS.map(tab => (
+      <button key={tab} type="button" aria-current={value === tab || undefined}
+        data-modal-autofocus={value === tab || undefined}
+        className="mrfw-sshSettingsNavItem"
+        onFocus={event => event.currentTarget.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })}
+        onClick={() => { if (value !== tab) onChange(tab) }}>
+        {tab === 'connections' ? <IconLink size={16} aria-hidden="true" /> : <IconShield size={16} aria-hidden="true" />}
+        <span>{t(tabKey(tab))}</span>
       </button>
     ))}
-  </div>
+  </nav>
+}
+
+interface SshSettingsShellProps {
+  readonly title: string
+  readonly closeLabel: string
+  readonly onClose: () => void
+  readonly busy: boolean
+  readonly navigation: ReactNode
+  readonly children: ReactNode
+}
+
+type SettingsModalLayer = (dialog: RefObject<HTMLDivElement>, open: boolean, onClose: () => void) => void
+const hostSettingsModalLayer = maybeComponent<SettingsModalLayer>(['useModalLayer'])
+const useSettingsModalLayer = hostSettingsModalLayer ?? (() => {})
+
+/** Match SettingsRoot's title, close, navigation, and content grid. */
+function SshSettingsShell({ title, closeLabel, onClose, busy, navigation, children }: SshSettingsShellProps): ReactNode {
+  const dialog = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useSettingsModalLayer(dialog, true, onClose)
+  if (hostSettingsModalLayer === undefined) {
+    return <Modal open title={title} closeLabel={closeLabel} onClose={onClose}
+      className="mrfw-sshSettingsDialog" contentClassName="mrfw-sshSettingsFallback">
+      <PendingBar active={busy} />
+      <div className="mrfw-sshSettingsGrid">{navigation}{children}</div>
+    </Modal>
+  }
+  return createPortal(
+    <div className="mrfw-sshSettingsOverlay" role="presentation">
+      <div className="mrfw-sshSettingsMask" aria-hidden="true" onClick={onClose} />
+      <div ref={dialog} tabIndex={-1} className="mrfw-sshSettingsDialog mrfw-sshSettingsGrid"
+        role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <h2 id={titleId} className="mrfw-sshSettingsTitle">{title}</h2>
+        <div className="mrfw-sshSettingsHeader">
+          <button type="button" aria-label={closeLabel} className="mrfw-sshSettingsClose" onClick={onClose}>
+            <CloseGlyph size={14} />
+          </button>
+        </div>
+        {navigation}
+        {children}
+        <PendingBar active={busy} />
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+interface SshSettingsCardProps {
+  readonly name: ReactNode
+  readonly metadata?: ReactNode
+  readonly actions: ReactNode
+  readonly children?: ReactNode
+}
+
+function SshSettingsCard({ name, metadata, actions, children }: SshSettingsCardProps): ReactNode {
+  return <li className="mrfw-sshSettingsCard">
+    <div className="mrfw-sshSettingsCardMain">
+      <div className="mrfw-sshSettingsCardText">
+        <div className="mrfw-sshSettingsCardTitle">{name}</div>
+        {metadata}
+      </div>
+      {actions}
+    </div>
+    {children}
+  </li>
+}
+
+function SshSettingsAdd({ disabled, label, expanded, onClick }: {
+  readonly disabled: boolean
+  readonly label: string
+  readonly expanded?: boolean
+  readonly onClick: () => void
+}): ReactNode {
+  return <Button variant="outline" className="mrfw-sshSettingsAdd" disabled={disabled} aria-expanded={expanded} onClick={onClick}>
+    <IconPlus size={16} aria-hidden="true" />{label}
+  </Button>
+}
+
+function CheckGlyph(): ReactNode {
+  return IconCheck === undefined ? <span aria-hidden="true">✓</span> : <IconCheck size={16} aria-hidden="true" />
+}
+
+function CloseGlyph({ size = 16 }: { readonly size?: number }): ReactNode {
+  return IconClose === undefined ? <span aria-hidden="true">×</span> : <IconClose size={size} aria-hidden="true" />
+}
+
+function SshDeleteConfirmation({ busy, t, onConfirm, onCancel }: {
+  readonly busy: boolean
+  readonly t: Translate
+  readonly onConfirm: () => void
+  readonly onCancel: () => void
+}): ReactNode {
+  return <>
+    <Button variant="ghost" size="sm" className="mrfw-sshDanger" disabled={busy} onClick={onConfirm}>{t('ssh.confirmDelete')}</Button>
+    <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>{t('ssh.cancel')}</Button>
+  </>
 }
 
 interface EnvironmentFormProps {
@@ -690,76 +741,79 @@ interface CredentialsPanelProps {
   readonly pending: boolean
   readonly t: Translate
   readonly copiedId: string | undefined
-  readonly showTitle?: boolean | undefined
   readonly onCopy: (credential: CredentialPublicView) => Promise<void>
   readonly onDelete: (id: string) => Promise<boolean>
   readonly onCreate: (kind: CredentialCreateKind, label: string, secret: string, passphrase?: string) => Promise<boolean>
 }
 
-/** The credential list plus its three add forms, shared by the Keys tab and the add dialog. */
+/** Credential cards and their add form, shared with the connection wizard. */
 function CredentialsPanel(props: CredentialsPanelProps): ReactNode {
   const { t, busy } = props
   const [confirmId, setConfirmId] = useState<string | undefined>(undefined)
-  const [addKind, setAddKind] = useState<CredentialCreateKind | undefined>(undefined)
+  const [create, setCreate] = useState<CredentialCreateKind | 'choose' | undefined>(undefined)
+  const addKind = create === 'choose' ? undefined : create
   const [label, setLabel] = useState('')
   const [privateKey, setPrivateKey] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [password, setPassword] = useState('')
   const clearSecrets = (): void => { setPrivateKey(''); setPassphrase(''); setPassword('') }
+  const changeCreate = (next: typeof create): void => {
+    clearSecrets()
+    setLabel('')
+    setCreate(next)
+  }
   const submit = (kind: CredentialCreateKind): void => {
     const name = label.trim()
     const key = privateKey
     const phrase = passphrase === '' ? undefined : passphrase
     const secret = password
-    clearSecrets()
-    setLabel('')
-    setAddKind(undefined)
+    changeCreate('choose')
     void props.onCreate(kind, name, kind === 'password' ? secret : key, phrase)
   }
   const confirmDelete = (id: string): void => {
     setConfirmId(undefined)
     void props.onDelete(id)
   }
-  return <section className="mrfw-subsection">
-    {props.showTitle === false ? null : (
-      <div className="mrfw-sectionTitleRow"><span className="mrfw-sectionTitle">{t('ssh.credentials')}</span></div>
+  return <section className="mrfw-sshSettingsInventory">
+    {props.credentials.length === 0 ? <p className="mrfw-note">{t('ssh.empty.credentials')}</p> : (
+      <ul className="mrfw-sshSettingsList">
+        {props.credentials.map(credential => (
+          <SshSettingsCard key={credential.id}
+            name={<>
+              <span>{credential.label}</span>
+              <Tag tone="info" className="mrfw-sshTag">{t(credential.kind === 'key' ? 'ssh.kind.key' : 'ssh.kind.password')}</Tag>
+            </>}
+            metadata={credential.fingerprint === undefined ? null : <span className="mrfw-sshSettingsIdentifier">{credential.fingerprint}</span>}
+            actions={<div className="mrfw-sshSettingsCardActions" role="group" aria-label={credential.label}>
+              {credential.kind === 'key' && credential.publicKey !== undefined ? (
+                <IconButton disabled={busy}
+                  icon={props.copiedId === credential.id ? <CheckGlyph /> : <IconCopy aria-hidden="true" />}
+                  label={props.copiedId === credential.id ? t('ssh.copied') : t('ssh.copyPublicKey')}
+                  onClick={() => { void props.onCopy(credential) }} />
+              ) : null}
+              {confirmId === credential.id ? (
+                <SshDeleteConfirmation busy={busy} t={t}
+                  onConfirm={() => confirmDelete(credential.id)} onCancel={() => setConfirmId(undefined)} />
+              ) : (
+                <IconButton className="mrfw-sshDanger" disabled={busy} icon={<IconTrash aria-hidden="true" />}
+                  label={t('ssh.delete')} onClick={() => setConfirmId(credential.id)} />
+              )}
+            </div>} />
+        ))}
+      </ul>
     )}
-    <p className="mrfw-note">{t('ssh.keys.personalGuide')}</p>
-    {props.credentials.length === 0 ? <p className="mrfw-note">{t('ssh.empty.credentials')}</p> : null}
-    {props.credentials.map(credential => (
-      <div key={credential.id} className="mrfw-row">
-        <div className="mrfw-rootText">
-          <span className="mrfw-rootName">
-            <span className="mrfw-rootNameText">{credential.label}</span>
-            <Tag tone="info" className="mrfw-sshTag">{t(credential.kind === 'key' ? 'ssh.kind.key' : 'ssh.kind.password')}</Tag>
-          </span>
-          {credential.fingerprint === undefined ? null : <span className="mrfw-rootPath">{credential.fingerprint}</span>}
-        </div>
-        {credential.kind === 'key' && credential.publicKey !== undefined ? (
-          <IconButton disabled={busy} icon={<IconCopy />}
-            label={props.copiedId === credential.id ? t('ssh.copied') : t('ssh.copyPublicKey')}
-            onClick={() => { void props.onCopy(credential) }} />
-        ) : null}
-        {confirmId === credential.id ? (
-          <>
-            <Button variant="ghost" size="sm" className="mrfw-sshDanger" disabled={busy}
-              onClick={() => { confirmDelete(credential.id) }}>{t('ssh.confirmDelete')}</Button>
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmId(undefined)}>{t('ssh.cancel')}</Button>
-          </>
-        ) : (
-          <IconButton disabled={busy} icon={<IconTrash />} label={t('ssh.delete')}
-            onClick={() => setConfirmId(credential.id)} />
-        )}
+    <SshSettingsAdd label={t('ssh.credentialAdd')} disabled={busy} expanded={create !== undefined}
+      onClick={() => changeCreate(create === undefined ? 'choose' : undefined)} />
+    {create === undefined ? null : (
+      <div className="mrfw-sshRowActions" role="group" aria-label={t('ssh.credentialAdd')}>
+        <Button variant="outline" disabled={busy} aria-pressed={addKind === 'generate'}
+          onClick={() => changeCreate(addKind === 'generate' ? 'choose' : 'generate')}>{t('ssh.credentialGenerate')}</Button>
+        <Button variant="outline" disabled={busy} aria-pressed={addKind === 'import'}
+          onClick={() => changeCreate(addKind === 'import' ? 'choose' : 'import')}>{t('ssh.credentialImport')}</Button>
+        <Button variant="outline" disabled={busy} aria-pressed={addKind === 'password'}
+          onClick={() => changeCreate(addKind === 'password' ? 'choose' : 'password')}>{t('ssh.credentialPassword')}</Button>
       </div>
-    ))}
-    <div className="mrfw-row mrfw-sshAddRow">
-      <Button variant="outline" size="sm" disabled={busy}
-        onClick={() => setAddKind(addKind === 'generate' ? undefined : 'generate')}>{t('ssh.credentialGenerate')}</Button>
-      <Button variant="outline" size="sm" disabled={busy}
-        onClick={() => setAddKind(addKind === 'import' ? undefined : 'import')}>{t('ssh.credentialImport')}</Button>
-      <Button variant="outline" size="sm" disabled={busy}
-        onClick={() => setAddKind(addKind === 'password' ? undefined : 'password')}>{t('ssh.credentialPassword')}</Button>
-    </div>
+    )}
     {props.pending ? <StatusLine state="ongoing">{t('ssh.pending.credential')}</StatusLine> : null}
     {addKind === undefined ? null : (
       <div className="mrfw-sshForm">
@@ -792,7 +846,6 @@ function CredentialsPanel(props: CredentialsPanelProps): ReactNode {
         </Button>
       </div>
     )}
-    <p className="mrfw-note">{t('ssh.keys.accessKeyNote')}</p>
   </section>
 }
 
@@ -1081,6 +1134,7 @@ export interface SshManagementDialogProps {
  */
 export function SshManagementDialog(props: SshManagementDialogProps): ReactNode {
   const { t, ssh, sessionId, custodyMode, status } = props
+  const headingId = useId()
   const [tab, setTab] = useState<SshDialogTab>(props.initialTab)
   const [view, setView] = useState<SshStateView | undefined>(undefined)
   const [error, setError] = useState<PanelError | undefined>(undefined)
@@ -1246,11 +1300,6 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     return 'ready'
   }
 
-  const envSteps = (environment: SshEnvironmentView): { key: 'helper' | 'link'; done: boolean }[] => [
-    { key: 'helper', done: environment.helper !== null },
-    ...(environment.credential.kind === 'managed' ? [{ key: 'link' as const, done: view?.linked === true }] : []),
-  ]
-
   const deleteCredential = async (id: string): Promise<boolean> => {
     if (ssh === undefined || !canRequest) return false
     return await submit({ kind: 'credential' }, async () => await ssh.credentialRemove(sessionId, id))
@@ -1278,7 +1327,9 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
   const deleteEnvironment = async (id: string): Promise<void> => {
     if (ssh === undefined || !canRequest) return
     setConfirm(undefined)
-    await submit({ kind: 'remove', id }, async () => await ssh.environmentRemove(sessionId, revision(), id))
+    if (await submit({ kind: 'remove', id }, async () => await ssh.environmentRemove(sessionId, revision(), id))) {
+      setEditDraft(draft => draft?.existing?.environmentId === id ? undefined : draft)
+    }
   }
   const testEnvironment = async (id: string): Promise<string | undefined> => {
     if (ssh === undefined || !canRequest) return undefined
@@ -1422,9 +1473,8 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     onCreate={createCredential}
   />
 
-  const renderConnections = (): ReactNode => <div className="mrfw-sshArea">
-    <p className="mrfw-note">{t('ssh.connections.personalGuide')}</p>
-    {view !== undefined && !view.linked && view.environments.some(environment => environment.credential.kind === 'managed') ? (
+  const renderConnections = (state: SshStateView): ReactNode => <section className="mrfw-sshSettingsInventory">
+    {!state.linked && state.environments.some(environment => environment.credential.kind === 'managed') ? (
       <div className="mrfw-alert" role="note">
         <p className="mrfw-note">{t('ssh.linkBanner')}</p>
         {pending !== undefined && pending.kind === 'link' && pending.id === undefined
@@ -1436,142 +1486,138 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
         </Button>
       </div>
     ) : null}
-    <section className="mrfw-subsection">
-      <div className="mrfw-sectionTitleRow"><span className="mrfw-sectionTitle">{t('ssh.environments')}</span></div>
-      {(view?.environments.length ?? 0) === 0 ? <p className="mrfw-note">{t('ssh.empty.environments')}</p> : null}
-      {view?.environments.map(environment => {
-        const id = environment.environmentId
-        const name = environment.displayName ?? id
-        const envAccessKeys = accessKeys.filter(credential => credential.environmentId === id)
-        const next = envNextStep(environment)
-        const installingHelper = next === 'helper' && helperFor === id
-        const confirmingDelete = confirm?.kind === 'environment' && confirm.id === id
-        const rowOp = pendingRowKind(pending, id)
-        return (
-          <WorkspaceRow
-            key={id}
-            className="mrfw-sshEnvRow"
-            name={<span className="mrfw-rootNameText" title={name}>{name}</span>}
-            badges={<>
-              <Tag tone="neutral" className="mrfw-sshTag">{platformLabel(environment.platform, t)}</Tag>
-              <Tag tone={environment.helper === null ? 'warning' : 'success'} className="mrfw-sshTag">{environment.helper === null ? t('ssh.helperMissing') : t('ssh.helperInstalled')}</Tag>
-            </>}
-            path={sshTarget(environment.endpoint.user, environment.endpoint.hostname, environment.endpoint.port)}
-            t={t}
-            details={<>
-              <span className="mrfw-note">{credentialLabel(environment.credential)}</span>
-              <span className="mrfw-sshCheckRow">
-                <span className="mrfw-sshFieldHint">{t('ssh.ready.label')}</span>
-                {envSteps(environment).map((step, index) => (
-                  <Fragment key={step.key}>
-                    {index === 0 ? null : <span className="mrfw-sshFieldHint">→</span>}
-                    <Tag tone={step.done ? 'success' : step.key === next ? 'warning' : 'outline'} className="mrfw-sshTag">
-                      {t(`ssh.step.${step.key}` as Key)}
-                    </Tag>
-                  </Fragment>
-                ))}
-                {next === 'ready' ? <Tag tone="success" className="mrfw-sshTag">{t('ssh.ready.done')}</Tag> : null}
-              </span>
-              {envAccessKeys.map(credential => (
-                <span key={credential.id} className="mrfw-note">{t('ssh.accessKey')} · {credential.label}{credential.fingerprint === undefined ? '' : ` · ${credential.fingerprint}`}</span>
-              ))}
-              {testing.has(id) ? (
-                <StatusLine state="ongoing">{t('ssh.pending.test')}</StatusLine>
-              ) : testResults[id] === undefined ? null : (
-                <StatusLine state="done">{testResults[id]}</StatusLine>
-              )}
-              {rowOp === undefined ? null : (
-                <StatusLine state="ongoing">{t(`ssh.pending.${rowOp}` as Key)}</StatusLine>
-              )}
-            </>}
-            trailing={<div className="mrfw-sshRowActions mrfw-sshEnvActions" role="group" aria-label={name}>
-              <IconButton disabled={rowOp !== undefined} loading={testing.has(id)} icon={<IconPlay />} label={t('ssh.envTest')}
-                onClick={() => { void testEnvironment(id) }} />
-              {next === 'helper' && !installingHelper ? (
-                <IconButton variant="outline" disabled={busy} loading={rowOp === 'helper'} icon={<IconDownload />} label={t('ssh.helperInstall')}
-                  onClick={() => { setHelperNodePath(''); setHelperFor(id) }} />
-              ) : null}
-              {next === 'link' ? (
-                <IconButton variant="outline" disabled={busy} loading={rowOp === 'link'} icon={<IconLink />} label={t('ssh.linkNow')}
-                  onClick={() => { if (ssh !== undefined && canRequest) void submit({ kind: 'link', id }, async () => await ssh.configLink(sessionId)) }} />
-              ) : null}
-              {environment.credential.kind === 'managed' && credentialOf(environment.credential.credentialId)?.kind === 'password' ? (
-                <IconButton disabled={busy} loading={rowOp === 'accessKey'} icon={<IconShield />} label={t('ssh.accessKeyInstall')}
-                  onClick={() => { if (ssh !== undefined && canRequest) void submit({ kind: 'accessKey', id }, async () => await ssh.accessKeyInstall(sessionId, revision(), id)) }} />
-              ) : null}
-              <IconButton disabled={busy} icon={<IconEdit />} label={t('ssh.envEdit')}
-                onClick={() => { setEditDraft(editorOf(environment)); setScan(undefined); setFingerprint(undefined) }} />
-              <IconButton disabled={busy || confirmingDelete} loading={rowOp === 'remove'} icon={<IconTrash />} label={t('ssh.envDelete')}
-                onClick={() => setConfirm({ kind: 'environment', id })} />
-            </div>}
-          >
-            {installingHelper ? (
-              <div className="mrfw-sshEnvExtra mrfw-sshHelperRow">
-                <Input className="mrfw-sshHelperInput" aria-label={t('ssh.nodePath')} placeholder={t('ssh.nodePath')}
-                  value={helperNodePath} onChange={event => setHelperNodePath(event.currentTarget.value)} />
-                <div className="mrfw-sshRowActions">
-                  <Button variant="primary" size="sm" disabled={busy} loading={rowOp === 'helper'}
-                    onClick={() => {
-                      const nodePath = helperNodePath.trim()
-                      setHelperFor(undefined)
-                      setHelperNodePath('')
-                      void installEnvironmentHelper(id, nodePath || undefined)
-                    }}>{t('ssh.helperInstall')}</Button>
-                  <Button variant="ghost" size="sm" disabled={busy}
-                    onClick={() => { setHelperFor(undefined); setHelperNodePath('') }}>{t('ssh.cancel')}</Button>
+    {state.environments.length === 0 ? <p className="mrfw-note">{t('ssh.empty.environments')}</p> : (
+      <ul className="mrfw-sshSettingsList">
+        {state.environments.map(environment => {
+          const id = environment.environmentId
+          const name = environment.displayName ?? id
+          const envAccessKeys = accessKeys.filter(credential => credential.environmentId === id)
+          const next = envNextStep(environment)
+          const installingHelper = next === 'helper' && helperFor === id
+          const confirmingDelete = confirm?.kind === 'environment' && confirm.id === id
+          const rowOp = pendingRowKind(pending, id)
+          const edit = editDraft?.existing?.environmentId === id ? editDraft : undefined
+          const readiness = t(next === 'ready' ? 'ssh.ready.done' : next === 'helper' ? 'ssh.helperMissing' : 'ssh.step.link')
+          return (
+            <SshSettingsCard
+              key={id}
+              name={<>
+                <span>{name}</span>
+                <span className="mrfw-sshConnectionStatus" data-ready={next === 'ready'} role="img" aria-label={readiness} title={readiness} />
+                <Tag tone="neutral" className="mrfw-sshTag">{platformLabel(environment.platform, t)}</Tag>
+              </>}
+              metadata={<>
+                <span className="mrfw-sshSettingsIdentifier">{sshTarget(environment.endpoint.user, environment.endpoint.hostname, environment.endpoint.port)}</span>
+                <div className="mrfw-sshSettingsFacts">
+                  <span>{credentialLabel(environment.credential)}</span>
+                  <Tag tone={environment.helper === null ? 'warning' : 'neutral'} className="mrfw-sshTag">
+                    {t(environment.helper === null ? 'ssh.helperMissing' : 'ssh.helperInstalled')}
+                  </Tag>
+                  {next === 'link' ? <Tag tone="warning" className="mrfw-sshTag">{t('ssh.step.link')}</Tag> : null}
                 </div>
-              </div>
-            ) : null}
-            {confirmingDelete ? (
-              <div className="mrfw-sshEnvExtra mrfw-sshRowActions">
-                <span className="mrfw-note">{t('ssh.envDeleteHint')}</span>
-                <Button variant="ghost" size="sm" className="mrfw-sshDanger" disabled={busy}
-                  onClick={() => { void deleteEnvironment(id) }}>{t('ssh.confirmDelete')}</Button>
-                <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirm(undefined)}>{t('ssh.cancel')}</Button>
-              </div>
-            ) : null}
-          </WorkspaceRow>
-        )
-      })}
-      <Button variant="primary" size="sm" disabled={busy || editDraft !== undefined} onClick={openAdd}>{t('ssh.tab.add')}</Button>
-      {editDraft === undefined ? null : (
-        <div className="mrfw-sshEdit">
-          <span className="mrfw-sshStepTitle">{t('ssh.envEdit')}</span>
-          <EnvironmentForm
-            draft={editDraft}
-            onChange={next => {
-              if (editorIdentity(next) !== editorIdentity(editDraft)) {
-                setScan(undefined)
-                setFingerprint(undefined)
-              }
-              setEditDraft(next)
-            }}
-            credentials={userCredentials}
-            aliases={aliases}
-            scan={scan}
-            fingerprint={fingerprint ?? recordedFingerprint(editDraft)}
-            onScan={() => { void scanHost(editDraft, patch => { setEditDraft(current => current === undefined ? current : { ...current, ...patch }) }) }}
-            onFingerprint={setFingerprint}
-            onSave={async () => {
-              if (await saveEnvironment(editDraft, fingerprint ?? recordedFingerprint(editDraft), scan?.token) === undefined) return false
-              setScan(undefined)
-              setFingerprint(undefined)
-              setEditDraft(undefined)
-              return true
-            }}
-            onCancel={() => { setEditDraft(undefined); setScan(undefined); setFingerprint(undefined) }}
-            onOpenKeys={() => changeTab('keys')}
-            saveLabel={t('ssh.envSave')}
-            cancelLabel={t('ssh.cancel')}
-            busy={busy}
-            pending={formPending}
-            t={t}
-          />
-        </div>
-      )}
-    </section>
+                {envAccessKeys.map(credential => (
+                  <span key={credential.id} className="mrfw-note">{t('ssh.accessKey')} · {credential.label}{credential.fingerprint === undefined ? '' : ` · ${credential.fingerprint}`}</span>
+                ))}
+                {testing.has(id) ? (
+                  <StatusLine state="ongoing">{t('ssh.pending.test')}</StatusLine>
+                ) : testResults[id] === undefined ? null : (
+                  <StatusLine state="done">{testResults[id]}</StatusLine>
+                )}
+                {rowOp === undefined ? null : (
+                  <StatusLine state="ongoing">{t(`ssh.pending.${rowOp}` as Key)}</StatusLine>
+                )}
+              </>}
+              actions={<div className="mrfw-sshSettingsCardActions" role="group" aria-label={name}>
+                <IconButton disabled={rowOp !== undefined} loading={testing.has(id)}
+                  icon={<IconPlay aria-hidden="true" />} label={t('ssh.envTest')}
+                  onClick={() => { void testEnvironment(id) }} />
+                {next === 'helper' && !installingHelper ? (
+                  <IconButton disabled={busy} loading={rowOp === 'helper'} icon={<IconDownload />} label={t('ssh.helperInstall')}
+                    onClick={() => { setHelperNodePath(''); setHelperFor(id) }} />
+                ) : null}
+                {next === 'link' ? (
+                  <IconButton disabled={busy} loading={rowOp === 'link'} icon={<IconLink />} label={t('ssh.linkNow')}
+                    onClick={() => { if (ssh !== undefined && canRequest) void submit({ kind: 'link', id }, async () => await ssh.configLink(sessionId)) }} />
+                ) : null}
+                {environment.credential.kind === 'managed' && credentialOf(environment.credential.credentialId)?.kind === 'password' ? (
+                  <IconButton disabled={busy} loading={rowOp === 'accessKey'} icon={<IconShield />} label={t('ssh.accessKeyInstall')}
+                    onClick={() => { if (ssh !== undefined && canRequest) void submit({ kind: 'accessKey', id }, async () => await ssh.accessKeyInstall(sessionId, revision(), id)) }} />
+                ) : null}
+                <IconButton disabled={busy} expanded={edit !== undefined}
+                  icon={<IconEdit aria-hidden="true" />} label={t('ssh.envEdit')}
+                  onClick={() => { setEditDraft(edit === undefined ? editorOf(environment) : undefined); setScan(undefined); setFingerprint(undefined) }} />
+                <IconButton className="mrfw-sshDanger" disabled={busy || confirmingDelete} loading={rowOp === 'remove'}
+                  icon={<IconTrash aria-hidden="true" />} label={t('ssh.envDelete')}
+                  onClick={() => setConfirm({ kind: 'environment', id })} />
+              </div>}
+            >
+              {installingHelper ? (
+                <div className="mrfw-sshEnvExtra mrfw-sshHelperRow">
+                  <Input className="mrfw-sshHelperInput" aria-label={t('ssh.nodePath')} placeholder={t('ssh.nodePath')}
+                    value={helperNodePath} onChange={event => setHelperNodePath(event.currentTarget.value)} />
+                  <div className="mrfw-sshRowActions">
+                    <Button variant="primary" size="sm" disabled={busy} loading={rowOp === 'helper'}
+                      onClick={() => {
+                        const nodePath = helperNodePath.trim()
+                        setHelperFor(undefined)
+                        setHelperNodePath('')
+                        void installEnvironmentHelper(id, nodePath || undefined)
+                      }}>{t('ssh.helperInstall')}</Button>
+                    <Button variant="ghost" size="sm" disabled={busy}
+                      onClick={() => { setHelperFor(undefined); setHelperNodePath('') }}>{t('ssh.cancel')}</Button>
+                  </div>
+                </div>
+              ) : null}
+              {confirmingDelete ? (
+                <div className="mrfw-sshEnvExtra mrfw-sshRowActions">
+                  <span className="mrfw-note">{t('ssh.envDeleteHint')}</span>
+                  <SshDeleteConfirmation busy={busy} t={t}
+                    onConfirm={() => { void deleteEnvironment(id) }} onCancel={() => setConfirm(undefined)} />
+                </div>
+              ) : null}
+              {edit === undefined ? null : (
+                <div className="mrfw-sshEdit">
+                  <span className="mrfw-sshStepTitle">{t('ssh.envEdit')}</span>
+                  <EnvironmentForm
+                    draft={edit}
+                    onChange={next => {
+                      if (editorIdentity(next) !== editorIdentity(edit)) {
+                        setScan(undefined)
+                        setFingerprint(undefined)
+                      }
+                      setEditDraft(next)
+                    }}
+                    credentials={userCredentials}
+                    aliases={aliases}
+                    scan={scan}
+                    fingerprint={fingerprint ?? recordedFingerprint(edit)}
+                    onScan={() => { void scanHost(edit, patch => { setEditDraft(current => current === undefined ? current : { ...current, ...patch }) }) }}
+                    onFingerprint={setFingerprint}
+                    onSave={async () => {
+                      if (await saveEnvironment(edit, fingerprint ?? recordedFingerprint(edit), scan?.token) === undefined) return false
+                      setScan(undefined)
+                      setFingerprint(undefined)
+                      setEditDraft(undefined)
+                      return true
+                    }}
+                    onCancel={() => { setEditDraft(undefined); setScan(undefined); setFingerprint(undefined) }}
+                    onOpenKeys={() => changeTab('keys')}
+                    saveLabel={t('ssh.envSave')}
+                    cancelLabel={t('ssh.cancel')}
+                    busy={busy}
+                    pending={formPending}
+                    t={t}
+                  />
+                </div>
+              )}
+            </SshSettingsCard>
+          )
+        })}
+      </ul>
+    )}
+    <SshSettingsAdd disabled={busy || editDraft !== undefined} onClick={openAdd} label={t('ssh.tab.add')} />
     {saved ? <p className="mrfw-note" role="status">{t('ssh.add.saved')}</p> : null}
-  </div>
+  </section>
 
   const renderAdd = (step: 'connect' | SshEnvironmentView): ReactNode => {
     if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} /><p className="mrfw-note">{t('ssh.loadFailed')}</p></>
@@ -1641,45 +1687,33 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
     </div>
   }
 
-  const renderKeys = (): ReactNode => {
+  const renderManagement = (): ReactNode => {
     if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} /><p className="mrfw-note">{t('ssh.loadFailed')}</p></>
     if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
     if (status.state !== 'ready') return renderUnavailable()
     if (custodyMode !== 'personal' || ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
     if (!canRequest) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
     if (view === undefined) return renderLoadState()
-    return <div className="mrfw-sshArea">{renderCredentials()}</div>
+    return tab === 'connections' ? renderConnections(view) : renderCredentials()
   }
 
-  const renderConnectionsTab = (): ReactNode => {
-    if (props.overviewError !== undefined) return <><PanelErrorToast error={props.overviewError} t={t} /><p className="mrfw-note">{t('ssh.loadFailed')}</p></>
-    if (status === undefined) return <p className="mrfw-note">{t('ssh.add.loading')}</p>
-    if (status.state !== 'ready') return renderUnavailable()
-    if (custodyMode !== 'personal' || ssh === undefined) return <p className="mrfw-note">{t('ssh.add.noClient')}</p>
-    if (!canRequest) return <p className="mrfw-note">{t('ssh.dialog.noSession')}</p>
-    if (view === undefined) return renderLoadState()
-    return renderConnections()
-  }
-
-  const panelId = 'mrfw-ssh-panel-' + tab
-  const tabId = 'mrfw-ssh-tab-' + tab
   return <>
     <PanelErrorToast error={error} t={t} />
-    <Modal
-      open
-      onClose={props.onClose}
+    <SshSettingsShell
       title={t('ssh.dialog.title')}
-      description={t('ssh.dialog.description')}
       closeLabel={t('panel.close')}
-      className="mrfw-sshDialog"
-      contentClassName="mrfw-sshDialogContent"
+      onClose={props.onClose}
+      busy={busy || testing.size > 0}
+      navigation={<SshSettingsNavigation value={tab} onChange={changeTab} t={t} />}
     >
-      <PendingBar active={busy || testing.size > 0} />
-      <SshTabStrip value={tab} onChange={changeTab} t={t} />
-      <div id={panelId} role="tabpanel" aria-labelledby={tabId} className="mrfw-sshDialogPanel">
-        {tab === 'connections' ? renderConnectionsTab() : renderKeys()}
-      </div>
-    </Modal>
+      <section aria-labelledby={headingId} className="mrfw-sshSettingsPane" key={tab}>
+        <div className="mrfw-sshSettingsHeading">
+          <h3 id={headingId}>{t(tab === 'connections' ? 'ssh.environments' : 'ssh.credentials')}</h3>
+          <p>{t(tab === 'connections' ? 'ssh.connections.personalGuide' : 'ssh.keys.personalGuide')}</p>
+        </div>
+        {renderManagement()}
+      </section>
+    </SshSettingsShell>
     {addStep !== undefined ? (
       <Modal
         open
@@ -1710,7 +1744,6 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
           pending={credentialPending}
           t={t}
           copiedId={copiedId}
-          showTitle={false}
           onCopy={copyPublicKey}
           onDelete={deleteCredential}
           onCreate={createCredential}
