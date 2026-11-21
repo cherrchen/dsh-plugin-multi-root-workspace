@@ -1248,11 +1248,22 @@ aside[data-mrfw-navigator] > [data-files-search-settings] {
 }
 
 /* The additional-root section yields height first when the dialog reaches its
-   cap; its title row and batch action stay outside the scrolling row list. */
+   cap; its title row and batch action stay outside the scrolling row list. The
+   128px floor is one wrapped title row (the batch action wraps on narrow
+   dialogs) plus one root row, so a short viewport keeps a usable list scrollport;
+   below that the body fallback scroll takes over instead of collapsing the
+   section and clipping its rows behind overflow: hidden. */
 .mrfw-sectionAdditional {
   flex: 1 1 auto;
-  min-height: 0;
   overflow: hidden;
+}
+
+/* The floor applies only while there are rows to reach: on a short viewport
+   the section then keeps one title row (40px once the batch action wraps) plus
+   one 64px root row instead of collapsing and clipping them, and the body
+   fallback scroll takes over below that. An empty section stays compact. */
+.mrfw-sectionAdditional:has(.mrfw-rootList .mrfw-row) {
+  min-height: 104px;
 }
 
 /* The panel's only normal scroll region. The rows are the variable part, so

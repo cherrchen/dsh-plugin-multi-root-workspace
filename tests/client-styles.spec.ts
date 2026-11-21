@@ -743,7 +743,11 @@ describe('the workspace dialog scrolling rules', () => {
   it('gives the secondary-root rows a window-relative scroll region', () => {
     const additional = rule('.mrfw-sectionAdditional')
     expect(additional).toContain('flex: 1 1 auto')
-    expect(additional).toContain('min-height: 0')
+    // A floor of one wrapped title row plus one root row, applied only while
+    // rows exist: without it the section can shrink to zero on a short viewport
+    // and clip the rows inside its own overflow instead of letting the body
+    // fallback scroll reach them. An empty section stays compact.
+    expect(rule('.mrfw-sectionAdditional:has(.mrfw-rootList .mrfw-row)')).toContain('min-height: 104px')
     const list = rule('.mrfw-rootList')
     expect(list).toContain('flex: 1 1 auto')
     expect(list).toContain('min-height: 0')
