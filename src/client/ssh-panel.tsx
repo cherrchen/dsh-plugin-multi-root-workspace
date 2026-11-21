@@ -1,14 +1,16 @@
 /** SSH connection management and the Workspace's separate Root binding dialog. */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
-import { Button, Input, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Input, Modal, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { RootsView } from '../contract.ts'
 import type { RemoteModeControl } from '../compat/skills-client.ts'
-import { maybeComponent } from '../compat/client-icons.ts'
+import { IconAccessReadOnly, IconAccessReadWrite, IconDownload, IconEdit, IconLink, IconPlay, IconShield, IconTrash, maybeComponent } from '../compat/client-icons.ts'
+import { IconButton, SshButton as Button } from './panel-buttons.tsx'
 import { errorHasDetail, errorKeyOf, PanelError } from './panel-client.ts'
-import type { CredentialPublicView, RemoteDirectoryListing, SshBindingView, SshClient, SshManagementClient, SshSettingsView, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
+import type { CredentialPublicView, RemoteDirectoryListing, SshBindingDraft, SshBindingView, SshClient, SshManagementClient, SshSettingsView, SshEnvironmentView, SshScanResult, SshStateView } from './ssh-client.ts'
 import { SshCustodySection, type RemoteCustodyMode } from './remote-custody.tsx'
 import type { Key } from './locales.ts'
 import { localBindingPeers } from './remote-root-menu.tsx'
+import { WorkspaceRow } from './workspace-row.tsx'
 import type { Translate } from './WorkspaceFoldersAction.tsx'
 import type { RemoteEndpointView, RemotesView } from '../remote/panel-contract.ts'
 
@@ -96,7 +98,7 @@ interface EditorDraft {
 
 interface BindingDraft {
   environmentId: string
-  rootId: string
+  readonly rootId?: string
   path: string
   read: boolean
   write: boolean
@@ -200,7 +202,7 @@ const execHelperReady = (draft: EditorDraft): boolean => {
 }
 
 const blankBinding = (environmentId: string | undefined): BindingDraft => ({
-  environmentId: environmentId ?? '', rootId: '', path: '', read: true, write: false, exec: false,
+  environmentId: environmentId ?? '', path: '', read: true, write: false, exec: false,
   imports: new Set(), exports: new Set(),
 })
 
@@ -795,10 +797,12 @@ function RemotePathDialog(props: RemotePathDialogProps): ReactNode {
       <div className="mrfw-sshPathBar">
         <Input className="mrfw-sshInput" aria-label={t('ssh.binding.path')} placeholder="/" value={path}
           onChange={event => setPath(event.currentTarget.value)} />
-        <Button variant="outline" size="sm" disabled={loading}
-          onClick={() => { void load(path.trim() === '' ? undefined : path.trim()) }}>{t('ssh.pathPickerGo')}</Button>
-        <Button variant="outline" size="sm" disabled={loading || listing === undefined}
-          onClick={() => { void load(listing?.parent) }}>{t('ssh.pathPickerParent')}</Button>
+        <div className="mrfw-sshRowActions">
+          <Button variant="outline" size="sm" disabled={loading}
+            onClick={() => { void load(path.trim() === '' ? undefined : path.trim()) }}>{t('ssh.pathPickerGo')}</Button>
+          <Button variant="outline" size="sm" disabled={loading || listing === undefined}
+            onClick={() => { void load(listing?.parent) }}>{t('ssh.pathPickerParent')}</Button>
+        </div>
       </div>
       {error === undefined ? null : <p className="mrfw-note" role="alert">{t('ssh.pathPickerFailed', { message: error })}</p>}
       {loading ? <p className="mrfw-note">{t('panel.loading')}</p> : listing === undefined ? null : listing.entries.length === 0 ? (
@@ -1292,17 +1296,23 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
       {(view?.environments.length ?? 0) === 0 ? <p className="mrfw-note">{t('ssh.empty.environments')}</p> : null}
       {view?.environments.map(environment => {
         const id = environment.environmentId
+        const name = environment.displayName ?? id
         const envAccessKeys = accessKeys.filter(credential => credential.environmentId === id)
         const next = envNextStep(environment)
+        const installingHelper = next === 'helper' && helperFor === id
+        const confirmingDelete = confirm?.kind === 'environment' && confirm.id === id
         return (
-          <div key={id} className="mrfw-row mrfw-sshEnvRow">
-            <div className="mrfw-rootText">
-              <span className="mrfw-rootName">
-                <span className="mrfw-rootNameText">{environment.displayName ?? id}</span>
-                <Tag tone="neutral" className="mrfw-sshTag">{platformLabel(environment.platform, t)}</Tag>
-                <Tag tone={environment.helper === null ? 'warning' : 'success'} className="mrfw-sshTag">{environment.helper === null ? t('ssh.helperMissing') : t('ssh.helperInstalled')}</Tag>
-              </span>
-              <span className="mrfw-rootPath">{environment.endpoint.user}@{environment.endpoint.hostname}:{environment.endpoint.port}</span>
+          <WorkspaceRow
+            key={id}
+            className="mrfw-sshEnvRow"
+            name={<span className="mrfw-rootNameText" title={name}>{name}</span>}
+            badges={<>
+              <Tag tone="neutral" className="mrfw-sshTag">{platformLabel(environment.platform, t)}</Tag>
+              <Tag tone={environment.helper === null ? 'warning' : 'success'} className="mrfw-sshTag">{environment.helper === null ? t('ssh.helperMissing') : t('ssh.helperInstalled')}</Tag>
+            </>}
+            path={`${environment.endpoint.user}@${environment.endpoint.hostname}:${environment.endpoint.port}`}
+            t={t}
+            details={<>
               <span className="mrfw-note">{credentialLabel(environment.credential)}</span>
               <span className="mrfw-sshCheckRow">
                 <span className="mrfw-sshFieldHint">{t('ssh.ready.label')}</span>
@@ -1319,11 +1329,34 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
               {envAccessKeys.map(credential => (
                 <span key={credential.id} className="mrfw-note">{t('ssh.accessKey')} · {credential.label}{credential.fingerprint === undefined ? '' : ` · ${credential.fingerprint}`}</span>
               ))}
-              {testResults[id] === undefined ? null : <span className="mrfw-note">{testResults[id]}</span>}
-              {helperFor === id ? (
-                <div className="mrfw-sshHelperRow">
-                  <Input className="mrfw-sshHelperInput" aria-label={t('ssh.nodePath')} placeholder={t('ssh.nodePath')}
-                    value={helperNodePath} onChange={event => setHelperNodePath(event.currentTarget.value)} />
+              {testResults[id] === undefined ? null : <span className="mrfw-note" role="status">{testResults[id]}</span>}
+            </>}
+            trailing={<div className="mrfw-sshRowActions mrfw-sshEnvActions" role="group" aria-label={name}>
+              <IconButton disabled={busy} icon={<IconPlay />} label={t('ssh.envTest')}
+                onClick={() => { void testEnvironment(id) }} />
+              {next === 'helper' && !installingHelper ? (
+                <IconButton variant="outline" disabled={busy} icon={<IconDownload />} label={t('ssh.helperInstall')}
+                  onClick={() => { setHelperNodePath(''); setHelperFor(id) }} />
+              ) : null}
+              {next === 'link' ? (
+                <IconButton variant="outline" disabled={busy} icon={<IconLink />} label={t('ssh.linkNow')}
+                  onClick={() => { if (ssh !== undefined && canRequest) void submit(async () => await ssh.configLink(sessionId)) }} />
+              ) : null}
+              {environment.credential.kind === 'managed' && credentialOf(environment.credential.credentialId)?.kind === 'password' ? (
+                <IconButton disabled={busy} icon={<IconShield />} label={t('ssh.accessKeyInstall')}
+                  onClick={() => { if (ssh !== undefined && canRequest) void submit(async () => await ssh.accessKeyInstall(sessionId, revision(), id)) }} />
+              ) : null}
+              <IconButton disabled={busy} icon={<IconEdit />} label={t('ssh.envEdit')}
+                onClick={() => { setEditDraft(editorOf(environment)); setScan(undefined); setFingerprint(undefined) }} />
+              <IconButton disabled={busy || confirmingDelete} icon={<IconTrash />} label={t('ssh.envDelete')}
+                onClick={() => setConfirm({ kind: 'environment', id })} />
+            </div>}
+          >
+            {installingHelper ? (
+              <div className="mrfw-sshEnvExtra mrfw-sshHelperRow">
+                <Input className="mrfw-sshHelperInput" aria-label={t('ssh.nodePath')} placeholder={t('ssh.nodePath')}
+                  value={helperNodePath} onChange={event => setHelperNodePath(event.currentTarget.value)} />
+                <div className="mrfw-sshRowActions">
                   <Button variant="primary" size="sm" disabled={busy}
                     onClick={() => {
                       if (ssh === undefined || !canRequest) return
@@ -1331,52 +1364,21 @@ export function SshManagementDialog(props: SshManagementDialogProps): ReactNode 
                       setHelperFor(undefined)
                       setHelperNodePath('')
                       void submit(async () => await ssh.helperInstall(sessionId, revision(), id, nodePath === '' ? undefined : nodePath))
-                    }}>
-                    {t('ssh.helperInstall')}
-                  </Button>
+                    }}>{t('ssh.helperInstall')}</Button>
                   <Button variant="ghost" size="sm" disabled={busy}
-                    onClick={() => { setHelperFor(undefined); setHelperNodePath('') }}>
-                    {t('ssh.cancel')}
-                  </Button>
+                    onClick={() => { setHelperFor(undefined); setHelperNodePath('') }}>{t('ssh.cancel')}</Button>
                 </div>
-              ) : null}
-            </div>
-            <div className="mrfw-sshRowActions">
-              {next === 'helper' && helperFor !== id ? (
-                <Button variant="primary" size="sm" disabled={busy} onClick={() => setHelperFor(id)}>{t('ssh.helperInstall')}</Button>
-              ) : null}
-              {next === 'link' ? (
-                <Button variant="primary" size="sm" disabled={busy}
-                  onClick={() => { if (ssh !== undefined && canRequest) void submit(async () => await ssh.configLink(sessionId)) }}>
-                  {t('ssh.linkNow')}
-                </Button>
-              ) : null}
-              <Button variant="ghost" size="sm" disabled={busy} onClick={() => { void testEnvironment(id) }}>{t('ssh.envTest')}</Button>
-              {helperFor !== id && environment.helper !== null ? (
-                <Button variant="ghost" size="sm" disabled={busy} onClick={() => setHelperFor(id)}>{t('ssh.helperInstall')}</Button>
-              ) : null}
-              {environment.credential.kind === 'managed' && credentialOf(environment.credential.credentialId)?.kind === 'password' ? (
-                <Button variant="ghost" size="sm" disabled={busy}
-                  onClick={() => { if (ssh !== undefined && canRequest) void submit(async () => await ssh.accessKeyInstall(sessionId, revision(), id)) }}>
-                  {t('ssh.accessKeyInstall')}
-                </Button>
-              ) : null}
-              <Button variant="ghost" size="sm" disabled={busy}
-                onClick={() => { setEditDraft(editorOf(environment)); setScan(undefined); setFingerprint(undefined) }}>
-                {t('ssh.envEdit')}
-              </Button>
-              {confirm?.kind === 'environment' && confirm.id === id ? (
-                <>
-                  <Button variant="ghost" size="sm" className="mrfw-sshDanger" disabled={busy}
-                    title={t('ssh.envDeleteHint')} onClick={() => { void deleteEnvironment(id) }}>{t('ssh.confirmDelete')}</Button>
-                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirm(undefined)}>{t('ssh.cancel')}</Button>
-                </>
-              ) : (
-                <Button variant="ghost" size="sm" disabled={busy} title={t('ssh.envDeleteHint')}
-                  onClick={() => setConfirm({ kind: 'environment', id })}>{t('ssh.envDelete')}</Button>
-              )}
-            </div>
-          </div>
+              </div>
+            ) : null}
+            {confirmingDelete ? (
+              <div className="mrfw-sshEnvExtra mrfw-sshRowActions">
+                <span className="mrfw-note">{t('ssh.envDeleteHint')}</span>
+                <Button variant="ghost" size="sm" className="mrfw-sshDanger" disabled={busy}
+                  onClick={() => { void deleteEnvironment(id) }}>{t('ssh.confirmDelete')}</Button>
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirm(undefined)}>{t('ssh.cancel')}</Button>
+              </div>
+            ) : null}
+          </WorkspaceRow>
         )
       })}
       <Button variant="primary" size="sm" disabled={busy || editDraft !== undefined} onClick={openAdd}>{t('ssh.tab.add')}</Button>
@@ -1591,11 +1593,12 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
   const { ssh, sessionId, roots, t } = props
   const [view, setView] = useState<SshStateView | undefined>()
   const [draft, setDraft] = useState<BindingDraft>()
-  const [editing, setEditing] = useState(false)
   const [pathOpen, setPathOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<PanelError>()
+  const [copiedId, setCopiedId] = useState<string>()
   const lifetime = useRef<AbortController | undefined>(undefined)
+  const copyTimer = useRef<number>(undefined)
   const load = useCallback(async (signal: AbortSignal): Promise<void> => {
     try {
       const next = await ssh.state(sessionId, signal)
@@ -1609,8 +1612,28 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
     const controller = new AbortController()
     lifetime.current = controller
     void load(controller.signal)
-    return () => controller.abort()
+    return () => {
+      controller.abort()
+      window.clearTimeout(copyTimer.current)
+    }
   }, [load])
+
+  const copyLocation = async (key: string, location: string): Promise<void> => {
+    const signal = lifetime.current?.signal
+    try {
+      await navigator.clipboard.writeText(location)
+      if (signal?.aborted) return
+      window.clearTimeout(copyTimer.current)
+      setCopiedId(key)
+      setError(previous => previous?.code === 'copy-failed' ? undefined : previous)
+      copyTimer.current = window.setTimeout(() => setCopiedId(undefined), 1500)
+    } catch (cause) {
+      if (signal?.aborted) return
+      window.clearTimeout(copyTimer.current)
+      setCopiedId(undefined)
+      setError(new PanelError('copy-failed', cause instanceof Error ? cause.message : String(cause)))
+    }
+  }
 
   const mutate = async (call: (revision: number, signal: AbortSignal) => Promise<SshStateView>): Promise<boolean> => {
     const signal = lifetime.current?.signal
@@ -1637,8 +1660,8 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
 
   const localPeers = localBindingPeers(roots, t)
   const environment = view?.environments.find(entry => entry.environmentId === draft?.environmentId)
+  const editing = draft?.rootId !== undefined
   const edit = (binding: SshBindingView): void => {
-    setEditing(true)
     setDraft({
       environmentId: binding.environmentId, rootId: binding.rootId, path: binding.path,
       read: binding.actions.includes('read'), write: binding.actions.includes('write'), exec: binding.actions.includes('exec'),
@@ -1649,17 +1672,16 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
   const save = async (value: BindingDraft): Promise<void> => {
     const actions = (['read', 'write', 'exec'] as const).filter(action => value[action])
     const transfers = [
-      ...[...value.imports].map(rootId => ({ direction: 'import', peer: { environmentId: 'local', rootId } })),
-      ...[...value.exports].map(rootId => ({ direction: 'export', peer: { environmentId: 'local', rootId } })),
+      ...[...value.imports].map(rootId => ({ direction: 'import' as const, peer: { environmentId: 'local', rootId } })),
+      ...[...value.exports].map(rootId => ({ direction: 'export' as const, peer: { environmentId: 'local', rootId } })),
     ]
-    const binding = {
-      environmentId: value.environmentId, rootId: value.rootId.trim(), path: value.path.trim(), actions,
+    const binding: SshBindingDraft = {
+      environmentId: value.environmentId, path: value.path.trim(), actions,
+      ...(value.rootId === undefined ? {} : { rootId: value.rootId }),
       ...(transfers.length === 0 ? {} : { transfers }),
     }
     if (await mutate(async (revision, signal) => await ssh.bindingSave(sessionId, revision, binding, signal))) setDraft(undefined)
   }
-  const validRootId = draft !== undefined && /^[a-z0-9][a-z0-9-]{0,62}$/.test(draft.rootId.trim())
-  const duplicate = !editing && view?.bindings.some(binding => binding.environmentId === draft?.environmentId && binding.rootId === draft?.rootId.trim())
   const validPath = draft !== undefined && remotePath(draft.path.trim())
   return <Modal open title={t('ssh.bindings')} closeLabel={t('panel.close')} onClose={props.onClose}
     className="mrfw-sshDialog" contentClassName="mrfw-sshDialogContent">
@@ -1674,28 +1696,56 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
         }}>{t('panel.retry')}</Button>
       ) : <>
         {view.bindings.length === 0 ? <p className="mrfw-note">{t('ssh.empty.bindings')}</p> : null}
-        {view.bindings.map(binding => (
-          <div key={`${binding.environmentId}/${binding.rootId}`} className="mrfw-row">
-            <div className="mrfw-rootText">
-              <span className="mrfw-rootName">
-                <span className="mrfw-rootNameText">{view.environments.find(entry => entry.environmentId === binding.environmentId)?.displayName ?? binding.environmentId}</span>
-                <Tag tone="outline" className="mrfw-sshTag">{binding.rootId}</Tag>
-              </span>
-              <span className="mrfw-rootPath">{binding.path}</span>
-              <span className="mrfw-note">{binding.actions.map(action => t(`remote.capability.${action}`)).join(', ')}</span>
-            </div>
-            <div className="mrfw-sshRowActions">
-              <Button variant="ghost" size="sm" disabled={busy || draft !== undefined} onClick={() => edit(binding)}>{t('ssh.binding.edit')}</Button>
-              <Button variant="ghost" size="sm" disabled={busy || draft !== undefined} onClick={() => {
-                void mutate(async (revision, signal) => await ssh.bindingRemove(sessionId, revision, binding.environmentId, binding.rootId, signal))
-              }}>{t('ssh.binding.remove')}</Button>
-            </div>
+        {view.bindings.length > 0 ? (
+          <div className="mrfw-sshBindingList">
+            {view.bindings.map(binding => {
+              const { environmentId, rootId, path, actions, transfers } = binding
+              const key = `${environmentId}/${rootId}`
+              const connection = view.environments.find(entry => entry.environmentId === environmentId)
+              const environmentName = connection?.displayName ?? environmentId
+              const endpoint = connection?.endpoint
+              const location = endpoint === undefined ? path : `${endpoint.user}@${endpoint.hostname}:${endpoint.port}${path}`
+              const name = path.slice(path.lastIndexOf('/') + 1) || path
+              const IconAccess = actions.includes('write') || actions.includes('exec')
+                ? IconAccessReadWrite : actions.includes('read') ? IconAccessReadOnly : undefined
+              const capabilities = actions.length === 0
+                ? t('panel.remoteNoCapabilities')
+                : actions.map(action => t(`remote.capability.${action}`)).join(', ')
+              return <WorkspaceRow
+                key={key}
+                t={t}
+                name={<span className="mrfw-rootNameText" title={name}>{name}</span>}
+                badges={<>
+                  <span className="mrfw-cwdTag" title={environmentName}>{environmentName}</span>
+                  <span className="mrfw-accessBadge">
+                    {IconAccess === undefined ? null : <IconAccess size={14} />}
+                    <span>{capabilities}</span>
+                  </span>
+                </>}
+                path={location}
+                copied={copiedId === key}
+                onCopy={() => { void copyLocation(key, location) }}
+                details={(['import', 'export'] as const).map(direction => {
+                  const peers = transfers?.filter(transfer => transfer.direction === direction).map(({ peer }) =>
+                    localPeers.find(entry => entry.id === peer.rootId)?.label ?? peer.rootId)
+                  if (peers === undefined || peers.length === 0) return null
+                  return <span key={direction} className="mrfw-note">{t(`ssh.binding.${direction}`)} {peers.join(', ')}</span>
+                })}
+                trailing={<div className="mrfw-sshRowActions">
+                  <IconButton disabled={busy || draft !== undefined} onClick={() => edit(binding)}
+                    icon={<IconEdit />} label={t('ssh.binding.edit')} />
+                  <IconButton disabled={busy || draft !== undefined} onClick={() => {
+                    void mutate(async (revision, signal) => await ssh.bindingRemove(sessionId, revision, environmentId, rootId, signal))
+                  }} icon={<IconTrash />} label={t('ssh.binding.remove')} />
+                </div>}
+              />
+            })}
           </div>
-        ))}
+        ) : null}
         {view.environments.length === 0 ? <p className="mrfw-note">{t('ssh.binding.noEnvironments')}</p> : null}
         {draft === undefined ? (
           <Button variant="primary" size="sm" disabled={busy || view.environments.length === 0}
-            onClick={() => { setEditing(false); setDraft(blankBinding(view.environments[0]?.environmentId)) }}>{t('ssh.bindingAdd')}</Button>
+            onClick={() => setDraft(blankBinding(view.environments[0]?.environmentId))}>{t('ssh.bindingAdd')}</Button>
         ) : (
           <div className="mrfw-sshForm">
             <Field label={t('ssh.binding.environment')}>
@@ -1705,11 +1755,6 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
                   {view.environments.map(entry => <option key={entry.environmentId} value={entry.environmentId}>{entry.displayName ?? entry.environmentId}</option>)}
                 </select>
               </span>
-            </Field>
-            <Field label={t('ssh.binding.rootId')} invalid={duplicate || (draft.rootId !== '' && !validRootId)}
-              hint={duplicate ? t('ssh.binding.duplicate') : undefined}>
-              <Input aria-label={t('ssh.binding.rootId')} disabled={busy || editing} value={draft.rootId}
-                onChange={event => setDraft({ ...draft, rootId: event.currentTarget.value })} />
             </Field>
             <Field label={t('ssh.binding.path')} invalid={draft.path !== '' && !validPath}
               hint={draft.path !== '' && !validPath ? t('error.workspace-invalid') : undefined}>
@@ -1738,7 +1783,7 @@ export function SshWorkspaceBindingsDialog(props: SshWorkspaceBindingsDialogProp
               ))}
             </div>
             <div className="mrfw-sshRowActions">
-              <Button variant="primary" disabled={busy || environment === undefined || !validRootId || duplicate || !validPath || !(draft.read || draft.write || draft.exec)}
+              <Button variant="primary" disabled={busy || environment === undefined || !validPath || !(draft.read || draft.write || draft.exec)}
                 onClick={() => { void save(draft) }}>{t('ssh.binding.save')}</Button>
               <Button variant="ghost" disabled={busy} onClick={() => setDraft(undefined)}>{t('ssh.cancel')}</Button>
             </div>

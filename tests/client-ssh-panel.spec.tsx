@@ -17,7 +17,7 @@ import type { RemotesView } from '../src/remote/panel-contract.ts'
 import { PanelError } from '../src/client/panel-client.ts'
 import { SshManagementDialog, type SshManagementDialogProps } from '../src/client/ssh-panel.tsx'
 import { WorkspaceFoldersDialog, type Translate } from '../src/client/WorkspaceFoldersAction.tsx'
-import type { SshClient, SshEnvironmentView, SshStateView } from '../src/client/ssh-client.ts'
+import type { SshBindingDraft, SshClient, SshEnvironmentView, SshStateView } from '../src/client/ssh-client.ts'
 import type { RemoteModeControl } from '../src/compat/skills-client.ts'
 import { zh } from '../src/client/locales.ts'
 
@@ -162,8 +162,13 @@ function fakeSsh(initial: SshStateView): SshClient & {
     },
     accessKeyInstall: async (sessionId: string, revision: number, environmentId: string) =>
       await record('accessKeyInstall', [sessionId, revision, environmentId], state),
-    bindingSave: async (sessionId: string, revision: number, binding: unknown) => {
-      const next: SshStateView = { ...state, revision: revision + 1, bindings: [...state.bindings, binding as SshStateView['bindings'][number]] }
+    bindingSave: async (sessionId: string, revision: number, binding: SshBindingDraft) => {
+      const rootId = binding.rootId ?? binding.path.slice(binding.path.lastIndexOf('/') + 1)
+      const next: SshStateView = {
+        ...state,
+        revision: revision + 1,
+        bindings: [...state.bindings.filter(entry => entry.environmentId !== binding.environmentId || entry.rootId !== rootId), { ...binding, rootId }],
+      }
       const answer = await record('bindingSave', [sessionId, revision, binding], next)
       state = next
       return answer
@@ -800,17 +805,61 @@ describe('the SSH management dialog', () => {
       'ssh.binding.import payments',
     ])
     expect(exports).toHaveLength(2)
-    fireEvent.change(within(dialog).getByLabelText('ssh.binding.rootId'), { target: { value: 'a' } })
+    expect(within(dialog).getAllByRole('textbox')).toEqual([within(dialog).getByLabelText('ssh.binding.path')])
     fireEvent.change(within(dialog).getByLabelText('ssh.binding.path'), { target: { value: '/srv/data' } })
     fireEvent.click(imports[1]!)
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.binding.save' }))
-    expect(await callsOf(ssh, 'bindingSave')).toMatchObject([['session-1', 7, {
+    expect(await callsOf(ssh, 'bindingSave')).toEqual([['session-1', 7, {
       environmentId: 'env-prod',
-      rootId: 'a',
       path: '/srv/data',
       actions: ['read'],
       transfers: [{ direction: 'import', peer: { environmentId: 'local', rootId: 'payments' } }],
     }]])
+  })
+
+  it('shows a directory row without its internal ID and edits the binding by that ID', async () => {
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const ssh = fakeSsh(sshState({
+      environments: [{ ...ENV_A, endpoint: { ...ENV_A.endpoint, port: 2222 } }],
+      bindings: [{
+        environmentId: ENV_A.environmentId,
+        rootId: 'project-root',
+        path: '/srv/app',
+        actions: ['read', 'write', 'exec'],
+        transfers: [
+          { direction: 'import', peer: { environmentId: 'local', rootId: 'primary' } },
+          { direction: 'export', peer: { environmentId: 'local', rootId: 'archived' } },
+        ],
+      }],
+    }))
+    const dialog = await openBindings(ssh, { add: false })
+    const row = within(within(dialog).getByText('app').closest<HTMLElement>('.mrfw-row')!)
+    expect(row.getByText('Production')).toBeTruthy()
+    expect(row.queryByText('project-root')).toBeNull()
+    expect(row.getByText('remote.capability.read, remote.capability.write, remote.capability.exec')).toBeTruthy()
+    expect(row.getByText('ssh.binding.import panel.primary')).toBeTruthy()
+    expect(row.getByText('ssh.binding.export archived')).toBeTruthy()
+
+    const copy = row.getByRole('button', { name: 'panel.copyPath' })
+    expect(copy.textContent).toBe('deploy@prod.internal:2222/srv/app')
+    fireEvent.click(copy)
+    await row.findByRole('button', { name: 'panel.copied' })
+    expect(writeText).toHaveBeenCalledWith('deploy@prod.internal:2222/srv/app')
+
+    const edit = row.getByRole('button', { name: 'ssh.binding.edit' })
+    const remove = row.getByRole('button', { name: 'ssh.binding.remove' })
+    expect(edit.textContent).toBe('')
+    expect(edit.querySelector('[data-icon="edit"]')).toBeTruthy()
+    expect(remove.textContent).toBe('')
+    expect(remove.querySelector('[data-icon="trash"]')).toBeTruthy()
+    fireEvent.click(edit)
+    const path = within(dialog).getByLabelText<HTMLInputElement>('ssh.binding.path')
+    expect(within(dialog).getAllByRole('textbox')).toEqual([path])
+    expect(path.value).toBe('/srv/app')
+    fireEvent.change(path, { target: { value: '/srv/renamed' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.binding.save' }))
+    expect(await callsOf(ssh, 'bindingSave')).toMatchObject([['session-1', 7, { rootId: 'project-root', path: '/srv/renamed' }]])
   })
 
   it('reloads the state and shows the localized conflict on personal-config-conflict', async () => {
@@ -863,6 +912,13 @@ describe('the SSH management dialog', () => {
     expect(within(row).queryByText('ssh.step.binding')).toBeNull()
     // One install affordance — the primary next step, not two same-named buttons.
     expect(within(row).getAllByRole('button', { name: 'ssh.helperInstall' })).toHaveLength(1)
+    const actions = within(row).getByRole('group', { name: 'Production' })
+    for (const label of ['ssh.envTest', 'ssh.helperInstall', 'ssh.envEdit', 'ssh.envDelete']) {
+      const button = within(actions).getByRole('button', { name: label })
+      expect(button.textContent).toBe('')
+      expect(button.querySelector('svg')).toBeTruthy()
+      expect(button.getAttribute('title')).toBe(label)
+    }
     // The link step is not this row's primary yet: only the banner offers it.
     expect(within(row).queryByRole('button', { name: 'ssh.linkNow' })).toBeNull()
     expect(within(dialog).getByText('ssh.linkBanner')).toBeTruthy()
@@ -873,6 +929,7 @@ describe('the SSH management dialog', () => {
     const dialog = await withDialog({ ssh }, 'manage')
     await within(dialog).findByText('ssh.environments')
     const row = dialog.querySelector('.mrfw-sshEnvRow') as HTMLElement
+    expect(within(row).queryByRole('button', { name: 'ssh.helperInstall' })).toBeNull()
     const link = within(row).getAllByRole('button', { name: 'ssh.linkNow' })
     expect(link).toHaveLength(1)
     fireEvent.click(link[0]!)
@@ -888,33 +945,35 @@ describe('the SSH management dialog', () => {
     fireEvent.change(within(dialog).getByLabelText('ssh.nodePath'), { target: { value: '/opt/bin/node' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'ssh.helperInstall' }))
     expect(await callsOf(ssh, 'helperInstall')).toEqual([['session-1', 7, 'env-prod', '/opt/bin/node']])
+    await within(dialog).findByText('ssh.helperInstalled')
+    expect(within(dialog).queryByRole('button', { name: 'ssh.helperInstall' })).toBeNull()
     expect(ssh.calls.some(call => call.method === 'bindingSave')).toBe(false)
   })
 
   it('binds two Roots to one connection and unbinds only the selected Root', async () => {
     const ssh = fakeSsh(sshState())
     const dialog = await openBindings(ssh)
-    for (const [root, path] of [['source', '/srv/app'], ['logs', '/srv/logs']]) {
+    for (const path of ['/srv/app', '/srv/logs']) {
       const bindingPath = within(dialog).getByLabelText('ssh.binding.path')
       const save = within(dialog).getByRole('button', { name: 'ssh.binding.save' }) as HTMLButtonElement
-      fireEvent.change(within(dialog).getByLabelText('ssh.binding.rootId'), { target: { value: root } })
       fireEvent.change(bindingPath, { target: { value: '/srv//bad' } })
       expect(save.disabled).toBe(true)
       expect(within(dialog).getByText('error.workspace-invalid')).toBeTruthy()
       fireEvent.change(bindingPath, { target: { value: path } })
       fireEvent.click(save)
-      await within(dialog).findByText(path!)
-      if (root === 'source') fireEvent.click(await within(dialog).findByRole('button', { name: 'ssh.bindingAdd' }))
+      await within(dialog).findByText(`deploy@prod.internal:22${path}`)
+      if (path === '/srv/app') fireEvent.click(await within(dialog).findByRole('button', { name: 'ssh.bindingAdd' }))
     }
     const calls = await callsOf(ssh, 'bindingSave')
-    expect(calls.map(args => args[2])).toMatchObject([
-      { environmentId: 'env-prod', rootId: 'source' }, { environmentId: 'env-prod', rootId: 'logs' },
+    expect(calls.map(args => args[2])).toEqual([
+      { environmentId: 'env-prod', path: '/srv/app', actions: ['read'] },
+      { environmentId: 'env-prod', path: '/srv/logs', actions: ['read'] },
     ])
-    const row = within(dialog).getByText('/srv/app').closest('.mrfw-row') as HTMLElement
+    const row = within(dialog).getByText('deploy@prod.internal:22/srv/app').closest('.mrfw-row') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: 'ssh.binding.remove' }))
-    expect((await callsOf(ssh, 'bindingRemove'))[0]?.slice(0, 4)).toEqual(['session-1', 9, 'env-prod', 'source'])
-    await waitFor(() => expect(within(dialog).queryByText('/srv/app')).toBeNull())
-    expect(within(dialog).getByText('/srv/logs')).toBeTruthy()
+    expect((await callsOf(ssh, 'bindingRemove'))[0]?.slice(0, 4)).toEqual(['session-1', 9, 'env-prod', 'app'])
+    await waitFor(() => expect(within(dialog).queryByText('deploy@prod.internal:22/srv/app')).toBeNull())
+    expect(within(dialog).getByText('deploy@prod.internal:22/srv/logs')).toBeTruthy()
     expect(ssh.calls.some(call => call.method === 'environmentSave' || call.method === 'environmentRemove')).toBe(false)
   })
 

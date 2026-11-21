@@ -115,6 +115,10 @@ export const IconPlus = icon('IconPlusOutline16', 'IconPlusOutlineRegular')
 export const IconRefresh = icon('IconRefreshOutline16', 'IconRefreshOutlineRegular')
 export const IconSettings = icon('IconSettingsOutline16', 'IconSettingsOutlineRegular')
 export const IconTrash = icon('IconTrashOutline16', 'IconTrashOutlineRegular')
+export const IconPlay = selectIconOr(installed, ['IconPlayOutline16', 'IconPlayOutlineRegular'], IconRefresh)
+export const IconDownload = selectIconOr(installed, ['IconDownloadOutline16', 'IconDownloadOutlineRegular'], IconPlus)
+export const IconLink = selectIconOr(installed, ['IconLinkOutline16', 'IconLinkOutlineRegular'], IconFolderOpen)
+export const IconShield = selectIconOr(installed, ['IconShieldOutline16', 'IconShieldOutlineRegular'], IconSettings)
 // The notice's close badge. The Regular close artwork is the family the host's
 // own surfaces use from 0.1.7-alpha.1 on; a release that exports none leaves
 // the badge to its local stroke fallback instead of failing the client graph.

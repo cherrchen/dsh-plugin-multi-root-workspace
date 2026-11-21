@@ -8,7 +8,7 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/ssh-client
  */
 import { PANEL_CHANNEL } from '../contract.ts'
-import { SSH_SETTINGS_CHANNEL, sshSettingsViewSchema, parseSshAnswer, type SshSettingsView, type SshEndpoint, type SshStateView, type CredentialPublicView, type SshEnvironmentView, type SshBindingView, type SshAliasesView, type RemoteDirectoryListing } from '../remote/personal-contract.ts'
+import { SSH_SETTINGS_CHANNEL, sshSettingsViewSchema, parseSshAnswer, type SshSettingsView, type SshEndpoint, type SshStateView, type CredentialPublicView, type SshEnvironmentView, type SshBindingDraft, type SshBindingView, type SshAliasesView, type RemoteDirectoryListing } from '../remote/personal-contract.ts'
 import { PanelError } from './panel-client.ts'
 
 interface Channel {
@@ -41,7 +41,7 @@ export interface SshClient {
   environmentTest(sessionId: string | undefined, environmentId: string, signal?: AbortSignal): Promise<{ platform: string; nodePath?: string; nodeVersion?: string }>
   helperInstall(sessionId: string | undefined, revision: number, environmentId: string, nodePath?: string, signal?: AbortSignal): Promise<SshStateView>
   accessKeyInstall(sessionId: string | undefined, revision: number, environmentId: string, signal?: AbortSignal): Promise<SshStateView>
-  bindingSave(sessionId: string, revision: number, binding: unknown, signal?: AbortSignal): Promise<SshStateView>
+  bindingSave(sessionId: string, revision: number, binding: SshBindingDraft, signal?: AbortSignal): Promise<SshStateView>
   bindingRemove(sessionId: string, revision: number, environmentId: string, rootId: string, signal?: AbortSignal): Promise<SshStateView>
   configLink(sessionId: string | undefined, signal?: AbortSignal): Promise<SshStateView>
 }
@@ -54,7 +54,7 @@ export interface SshSettingsClient {
   status(signal?: AbortSignal): Promise<SshSettingsView>
 }
 
-export type { CredentialPublicView, SshStateView, SshEnvironmentView, SshBindingView, SshAliasesView, RemoteDirectoryListing }
+export type { CredentialPublicView, SshStateView, SshEnvironmentView, SshBindingDraft, SshBindingView, SshAliasesView, RemoteDirectoryListing }
 
 /**
  * Build the personal-mode client; every wire failure is a `PanelError`.

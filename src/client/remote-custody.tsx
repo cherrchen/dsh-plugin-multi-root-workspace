@@ -8,7 +8,8 @@
  * @module @dsh-electron/dsh-plugin-multi-root-workspace/client/remote-custody
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { SshButton as Button } from './panel-buttons.tsx'
 import { remoteRiskConfirmation } from '../compat/ops-confirmation.ts'
 import type { RemoteModeControl, SkillsForm } from '../compat/skills-client.ts'
 import type { Key } from './locales.ts'

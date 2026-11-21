@@ -5,7 +5,7 @@
  * `sshState` and no answer ever carries key or password bytes.
  */
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { join, posix } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { MultiRootRegistry } from '../registry.ts'
 import { RemoteAdmissionError } from './contract.ts'
@@ -89,6 +89,23 @@ function findEnvironment(config: PersonalConfig, environmentId: string): Persona
   const environment = config.environments.find(entry => entry.environmentId === environmentId)
   if (environment === undefined) throw new RemoteAdmissionError('environment-not-found', `unknown environment "${environmentId}"`)
   return environment
+}
+
+/** Allocate within the same workspace and environment as the new binding. */
+function newBindingRootId(path: string, used: ReadonlySet<string>): string {
+  const slug = posix.basename(path).normalize('NFKD').toLowerCase()
+    .replace(/\p{M}+/gu, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-/, '')
+    .slice(0, 63)
+    .replace(/-$/, '')
+  if (slug !== '' && !used.has(slug)) return slug
+
+  let id: string
+  do {
+    id = randomUUID().slice(0, 8)
+  } while (used.has(id))
+  return id
 }
 
 /**
@@ -325,9 +342,12 @@ async function runPersonalEndpoint(
       return await mutate(registry, primary, paths, call.revision, config => {
         const { binding } = call
         const key = primaryKey(primary)
-        const sameRoot = (entry: PersonalConfig['bindings'][number]): boolean => entry.environmentId === binding.environmentId
-          && entry.rootId === binding.rootId && primaryKey(entry.primary) === key
-        const previous = config.bindings.find(sameRoot)
+        const siblings = config.bindings.filter(entry => entry.environmentId === binding.environmentId
+          && primaryKey(entry.primary) === key)
+        const previous = siblings.find(entry => entry.rootId === binding.rootId)
+        if (binding.rootId !== undefined && previous === undefined) {
+          throw new RemoteAdmissionError('personal-config-conflict', 'the Workspace binding to edit no longer exists; reload and retry')
+        }
         // Personal UI can keep an existing deployment-style pairing when
         // editing this directory, but it may only add local transfer peers.
         for (const transfer of binding.transfers ?? []) {
@@ -337,9 +357,10 @@ async function runPersonalEndpoint(
             throw new RemoteAdmissionError('personal-config-invalid', 'a personal binding can only add local transfer peers')
           }
         }
+        const rootId = binding.rootId ?? newBindingRootId(binding.path, new Set(siblings.map(entry => entry.rootId)))
         return {
           ...config,
-          bindings: [...config.bindings.filter(entry => !sameRoot(entry)), { ...binding, primary, bindingId: randomUUID() }],
+          bindings: [...config.bindings.filter(entry => entry !== previous), { ...binding, rootId, primary, bindingId: randomUUID() }],
         }
       })
     case 'sshBindingRemove':

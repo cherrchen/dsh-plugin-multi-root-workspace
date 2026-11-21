@@ -111,7 +111,8 @@ const requestSchemas = {
     revision,
     binding: z.object({
       environmentId,
-      rootId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
+      // Omit for creation. An explicit ID identifies an existing binding to edit.
+      rootId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/).optional(),
       path: z.string().min(1).max(4096),
       actions: z.array(z.enum(['read', 'write', 'exec'])).min(1),
       transfers: z.array(z.object({
@@ -231,6 +232,8 @@ export interface SshBindingView {
     readonly peer: { readonly environmentId: string; readonly rootId: string }
   }[] | undefined
 }
+
+export type SshBindingDraft = Omit<SshBindingView, 'rootId'> & { readonly rootId?: string }
 
 /** The Host aliases the Add form may suggest from the user's ~/.ssh/config. */
 export interface SshAliasesView {
